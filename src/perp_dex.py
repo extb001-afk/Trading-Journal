@@ -85,10 +85,46 @@ def validate_address(dex: str, addr: str):
     return norm, note
 
 
+_ROW_WARNED = set()
+_ROW_WARN_LOCK = threading.Lock()
+
+
+def _warn_once(key, msg, *args):
+    with _ROW_WARN_LOCK:
+        if key in _ROW_WARNED:
+            return
+        _ROW_WARNED.add(key)
+    log.warning(msg, *args)
+
+
+def _rows(cfg):
+    raw = cfg.get("perp_wallets") if isinstance(cfg, dict) else None
+    if not raw:
+        return [], 0
+    if not isinstance(raw, list):
+        _warn_once(("list", type(raw).__name__), "config perp_wallets 가 목록이 아니에요(%s) — 퍼프 덱스 수집을 건너뛰고 누적 기록 파일은 지우지 않아요",
+                   type(raw).__name__)
+        return [], 1
+    good, bad = [], 0
+    for i, w in enumerate(raw):
+        if isinstance(w, dict) and isinstance(w.get("dex"), str):
+            good.append(w)
+            continue
+        bad += 1
+        t9 = type(w.get("dex")).__name__ if isinstance(w, dict) else type(w).__name__
+        _warn_once(("row", i, t9), "config perp_wallets %d번째 행 형식 오류(%s) — 이 행은 건너뛰고, 누적 기록 파일은 지우지 않아요",
+                   i + 1, ("dex=" + t9) if isinstance(w, dict) else ("행=" + t9))
+    return good, bad
+
+
 def configured(cfg: dict) -> dict:
     out = {}
-    for w in (cfg or {}).get("perp_wallets") or []:
-        if not isinstance(w, dict) or w.get("dex") not in DEXES:
+    for w in _rows(cfg)[0]:
+        if w["dex"] not in DEXES:
+            continue
+        if not isinstance(w.get("address"), str):
+            _warn_once(("addr", w["dex"], type(w.get("address")).__name__), "config perp_wallets %s 행의 address 가 문자열이 아니에요(%s) — 건너뜀",
+                       w["dex"], type(w.get("address")).__name__)
             continue
         try:
             a, _ = validate_address(w["dex"], w.get("address"))
@@ -1037,12 +1073,15 @@ def snapshot_all(cfg=None, now=None):
     if cfg is None:
         return {}
     conf = configured(cfg)
-    rows9 = {w.get("dex") for w in ((cfg or {}).get("perp_wallets") or []) if isinstance(w, dict)}
+    rows9, bad9 = _rows(cfg)
+    names9 = {w["dex"] for w in rows9}
     for dex in DEXES:
         if dex not in conf:
-            if dex in rows9:
+            if dex in names9:
                 if os.path.exists(fut_path(dex)):
                     log.warning("%s 퍼프 주소 형식 오류 — 수집은 건너뛰고 누적 기록 파일은 지우지 않아요(config perp_wallets 확인)", dex)
+                continue
+            if bad9:
                 continue
             try:
                 os.remove(fut_path(dex))

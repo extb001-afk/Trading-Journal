@@ -1,6 +1,7 @@
 """Catalog of supported EVM chains and their data sources."""
 import json
 import os
+import re
 
 _POLL = 120
 CATALOG = {
@@ -18,7 +19,8 @@ CATALOG = {
         "discovery": "rpc", "chain_id": 9745, "rpcs": ["https://rpc.plasma.to"], "getlogs_span": 10000,
         "conf_depth": 20, "blocks_per_day": 86400, "poll_sec": _POLL},
     "xlayer": {
-        "_note": "X Layer(chainId 196, 1s). RPC 전용: 공식 노드 getLogs 100 블록 상한 · 무료 대체 노드는 최근 1만 블록만이라 과거 창 백필 불가 → start_block 부터 추적, 그 이전 보유는 기초 잔고(opening)로 대사",
+        "_note": "X Layer(chainId 196, 1s). RPC 전용: 공식 노드 getLogs 100 블록 상한 · 무료 대체 노드는 최근 1만 블록만이라 과거 창 백필 불가 → start_block 부터 추적, 그 이전 보유는 기초"
+                 " 잔고(opening)로 대사",
         "discovery": "rpc", "chain_id": 196, "rpcs": ["https://xlayerrpc.okx.com", "https://rpc.xlayer.tech"],
         "getlogs_span": 100, "start_block": 71790000, "conf_depth": 20, "blocks_per_day": 86400, "poll_sec": _POLL},
     "kaia": {
@@ -46,11 +48,14 @@ CATALOG = {
         "discovery": "rpc", "chain_id": 43114, "rpcs": ["https://api.avax.network/ext/bc/C/rpc"], "getlogs_span": 100000,
         "conf_depth": 10, "blocks_per_day": 76000, "poll_sec": _POLL},
     "stable": {
-        "_note": "Stable(chainId 988, 약 0.7s, 즉시 완결 · 가스 = USDT0). 네이티브(18자리)와 ERC-20 거울(6자리)이 같은 잔고 — 수집기는 거울 Transfer 를 네이티브 이동으로 환산(common.NATIVE_MIRROR, 이중 기장 차단). 공식 RPC 비아카이브(상태는 헤드 근처만 · getLogs 1,024 블록 상한)라 과거 창 백필 불가 → start_block 부터 추적, 그 이전 보유는 기초 잔고(opening)로 대사",
+        "_note": "Stable(chainId 988, 약 0.7s, 즉시 완결 · 가스 = USDT0). 네이티브(18자리)와 ERC-20 거울(6자리)이 같은 잔고 — 수집기는 거울 Transfer 를 네이티브 이동으로"
+                 " 환산(common.NATIVE_MIRROR, 이중 기장 차단). 공식 RPC 비아카이브(상태는 헤드 근처만 · getLogs 1,024 블록 상한)라 과거 창 백필 불가 → start_block 부터 추적, 그 이전 보유는 기초"
+                 " 잔고(opening)로 대사",
         "discovery": "rpc", "chain_id": 988, "rpcs": ["https://rpc.stable.xyz"], "getlogs_span": 1000, "start_block": 41000000,
         "conf_depth": 10, "blocks_per_day": 122000, "poll_sec": _POLL},
     "abstract": {
-        "_note": "Abstract(chainId 2741, ZK Stack L2, 가스 = ETH). RPC 전용(공식 아카이브, 지갑 토픽 getLogs 큰 구간 가능 · 결과 1만 건 상한이면 구간 반감). 네이티브 ETH 이동 = L2BaseToken Transfer 로그 · 가스 = 부트로더 레그(evm_watch.NATIVE_EMITTER + NATIVE_FEE_SINK)",
+        "_note": "Abstract(chainId 2741, ZK Stack L2, 가스 = ETH). RPC 전용(공식 아카이브, 지갑 토픽 getLogs 큰 구간 가능 · 결과 1만 건 상한이면 구간 반감). 네이티브 ETH 이동 ="
+                 " L2BaseToken Transfer 로그 · 가스 = 부트로더 레그(evm_watch.NATIVE_EMITTER + NATIVE_FEE_SINK)",
         "discovery": "rpc", "chain_id": 2741, "rpcs": ["https://api.mainnet.abs.xyz"], "getlogs_span": 5000000,
         "conf_depth": 20, "blocks_per_day": 140000, "poll_sec": _POLL},
 }
@@ -59,6 +64,21 @@ CATALOG = {
 AUTO_WINDOW_CALLS = 3000
 
 AUTO_RPS = 20
+
+
+_RECON_CA = re.compile(r"0x[0-9a-f]{40}")
+
+
+def recon_tokens_for(cfg: dict, chain: str) -> dict:
+    raw = (cfg or {}).get("recon_tokens") if isinstance((cfg or {}).get("recon_tokens"), dict) else {}
+    ent = raw.get(chain) if isinstance(raw.get(chain), dict) else {}
+    out = {}
+    for ca, meta in ent.items():
+        ca9 = str(ca).strip().lower()
+        if (_RECON_CA.fullmatch(ca9) and isinstance(meta, (list, tuple)) and len(meta) == 2 and isinstance(meta[0], str)
+                and 0 < len(meta[0].strip()) <= 20 and type(meta[1]) is int and 0 <= meta[1] <= 36):
+            out[ca9] = [meta[0].strip(), meta[1]]
+    return out
 
 
 def block_for(chain: str, since_known: bool, speed: dict = None):

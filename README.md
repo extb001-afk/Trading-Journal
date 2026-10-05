@@ -25,6 +25,11 @@
 
 먼저 구경만 하려면 `bash tools/setup.sh --demo` — 합성 데이터로 화면만 띄우고 아무것도 저장하지 않습니다.
 
+> **업데이트 안내 — 이미 쓰던 설치라면:** 이번 판부터 `config.json` 에 `web.login` 이 **없어도 로그인이 켜집니다.**
+> 업데이트 뒤 `pm2 restart tj-web` 하고 **이 컴퓨터에서** http://127.0.0.1:8023/ 을 열어 비밀번호부터 만드세요
+> (그 전까지 다른 기기·프록시에서는 401 — 첫 비밀번호는 이 컴퓨터에서만 만들 수 있습니다). 같은 컴퓨터의 tj-review 는 내부 토큰으로 그대로 동작합니다.
+> 계속 끄려면 `"web": {"login": {"enabled": false}}` 를 적고 재시작하세요(끄면 리버스 프록시·터널로 온 요청은 전부 거부됩니다).
+
 ---
 
 ## 화면 미리보기
@@ -159,9 +164,14 @@ RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐
 | `wallets` | 비어 있음 | 추적할 지갑 — 비워 두고 웹 화면에서 추가하면 됩니다 |
 | `backfill_months` / `backfill_since` | 5개월 / 없음 | 처음 불러올 과거 기간 / 시작일(YYYY-MM-DD)로 앞당기기 |
 | `web.port` · `web.bind` | 8023 · `loopback` | 화면 포트 / `loopback`(이 컴퓨터만, 권장) 또는 `tailscale`(테일넷 IP 추가) |
-| `web.login.enabled` · `session_days` · `idle_days` | 켜짐 · 30 · 7 | 웹 비밀번호 로그인. 키가 없으면 꺼짐. 바꾸면 `pm2 restart tj-web` |
+| `web.login.enabled` · `session_days` · `idle_days` | 켜짐 · 30 · 7 | 웹 비밀번호 로그인. **키가 없어도 켜짐** — 끄기는 `false` 를 적을 때만. 바꾸면 `pm2 restart tj-web` |
+| `web.login.secure_cookie` | false | true 면 로그인 쿠키에 항상 `Secure`(HTTPS 로만 열 때). HTTPS 리버스 프록시가 `X-Forwarded-Proto: https` 를 붙이면 꺼 둬도 자동으로 붙음 |
+| `web.allowed_hosts` · `web.public_url` | 비어 있음 | 리버스 프록시·터널 도메인(Host 허용) / 텔레그램 알림 '보기' 링크 주소(`https://도메인`만, 비우면 링크 없음) — [아래](#6-화면-열기--다른-기기에서-보기) |
 | `web.setup_allow_lan` | 없음(false) | true 면 일반 사설망(192.168.x 등)에서도 설정 API 허용 — 기본은 루프백·테일넷만 |
 | `review.sell_eval_daily_max` · `buy_eval_daily_max` | 0(끔) | AI 매도·매수 평가 하루 상한. 켜려면 예: 20 (`claude` CLI 필요) |
+| `review.coach_role` · `review.known_patterns` | 없음 | AI 일간·주간 리뷰 맞춤 — 첫 줄 트레이더 설명(예: "단타 위주 트레이더") / 지적하지 않을 내 운용 패턴 문장 목록(10개·각 200자) |
+| `recon_tokens` | 없음 | 잔고 대사에 늘 넣을 토큰 `{"체인": {"0x토큰 CA": ["심볼", 소수 자리]}}` — 자동으로 켜진 추가 체인에 합쳐짐 |
+| `health.tunnel` | 없음(꺼짐) | 터널 유닛 감시 `{"unit": "pm2 이름", "ready_url": "http://127.0.0.1:<메트릭 포트>/ready"}` — 터널 연결 0 이 5분 이어지면 알림(클라우드플레어 터널 메트릭의 `/ready` 등) |
 | `other_assets` · `brokers` | 증권사 전부 꺼짐 | 기타 자산 탭의 공개 시세 갱신 주기 / 증권사 보유 동기화(**미검증**, 아래 '기타 자산' 참고) |
 | `chains.<체인>.enabled` | 체인마다 | 쓰지 않는 체인을 통째로 끄기 |
 | `price_overrides` | 없음 | 비상용 수동 가격 고정 |
@@ -214,15 +224,23 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
     `python3 tools/reset_password.py --set`(터미널에서 바로 입력). 실행 중인 tj-web 이 바로 알아챕니다.
   - 끄기 = `config.json` 의 `"web": {"login": {"enabled": false}}` → `pm2 restart tj-web`(켜기·끄기·기간 변경은 재시작 때 반영).
     끄면 이 주소에 닿는 누구나 화면을 볼 수 있습니다.
-  - 같은 컴퓨터의 유닛(tj-review)은 자동 통과합니다. 직접 조회할 땐
-    `curl -H "X-TJ-Internal: $(cat state/auth_internal_token)" http://127.0.0.1:8023/api/state`.
-- **원격 접속 기능은 없습니다(기본값).** 로그인이 있어도 포트 포워딩·공개 터널로 인터넷에 직접 열지 마세요.
-  HTTPS 리버스 프록시 뒤에 둘 땐 `Host` 를 그대로 넘기고 `X-Forwarded-Proto: https` 를 붙이고, 도메인을 `web.allowed_hosts` 에 넣으세요
-  (쿠키에 Secure 가 붙습니다). 첫 비밀번호는 프록시 너머에선 만들 수 없습니다.
+  - 같은 컴퓨터의 유닛(tj-review)은 내부 토큰(`state/auth_internal_token`, tj-web 이 켜질 때마다 새로 만듦)으로 자동 통과합니다.
+    직접 조회할 땐 토큰이 명령줄(프로세스 목록)에 남지 않게 헤더를 파일 꼴로 넘기세요:
+    `curl -H @<(printf 'X-TJ-Internal: %s\n' "$(cat state/auth_internal_token)") http://127.0.0.1:8023/api/state`
+    (루프백 직접 GET 에서만 통하고, 프록시 헤더가 붙으면 거부됩니다).
+- **HTTPS 리버스 프록시·터널(예: 클라우드플레어 터널)로 밖에서 열 때** — 로그인이 켜져 있어야 합니다(꺼져 있으면 프록시 헤더가 붙은 요청은 전부 403).
+  - 프록시는 `http://127.0.0.1:8023` 으로 보내고 `Host` 를 그대로 넘기며 `X-Forwarded-For`(실제 접속 IP를 끝에)·`X-Forwarded-Proto: https` 를 붙여야 합니다
+    (클라우드플레어 터널은 기본으로 그렇게 합니다). 그 도메인을 `web.allowed_hosts` 에, 알림 링크를 원하면 `"public_url": "https://도메인"` 을 넣으세요.
+  - 프록시를 거친 요청은: 로그인 필수 · 첫 비밀번호 만들기 불가 · 내부 토큰 불가 · 전체 로그인 시도 상한 적용 · 쿠키 `Secure` · HSTS ·
+    캐시 금지(`Cache-Control: private, no-store` · `Cloudflare-CDN-Cache-Control: no-store`). 로그인 시도 제한은 `X-Forwarded-For` 마지막 값(실제 접속 IP) 기준입니다.
+  - **`ssh -R`·`socat`·`tailscale serve --tcp`·`ngrok tcp` 같은 순수 TCP 중계로 열지 마세요.** 헤더를 붙이지 않아 이 컴퓨터에서 직접 연 것처럼
+    보입니다(첫 비밀번호 만들기·내부 토큰·시도 상한 예외가 밖에 열림). HTTP 를 이해하는 프록시(헤더를 붙이는 것)만 쓰세요.
+  - 로그인 화면은 `http://` 로 열렸는데 이 컴퓨터·테일넷 주소가 아니면 '암호화되지 않은 주소' 경고를 띄웁니다(비밀번호·쿠키가 그대로 오감).
 - 휴대폰 등 내 다른 기기에서 보려면 [Tailscale](https://tailscale.com) 을 켜고 `config.json` 에 `"web": {"bind": "tailscale"}` →
-  `pm2 restart tj-web`. 테일넷 안의 내 기기에서만 열립니다. 공인 IP·0.0.0.0 바인딩은 코드에서 거부합니다.
-  사설 IP(192.168.x 등)를 직접 적으면 같은 와이파이의 누구나 화면을 볼 수 있으니 주의하세요.
-- 키 입력·지갑·텔레그램 같은 **설정 API(설정 › 연결·키)는 이 컴퓨터(루프백)와 테일넷에서만** 열립니다. 사설 IP 로 바인딩해도
+  `pm2 restart tj-web`. 테일넷 안의 내 기기에서만 열립니다(테일스케일이 암호화). 공인 IP·0.0.0.0 바인딩은 코드에서 거부합니다.
+  사설 IP(192.168.x 등)를 직접 적으면 같은 와이파이에서 HTTP(암호화 없음)로 비밀번호·쿠키가 오가니 권하지 않습니다(tj-web 이 시작할 때 경고).
+- 키 입력·지갑·텔레그램 같은 **설정 API(설정 › 연결·키)는 이 컴퓨터(루프백)와 테일넷에서만** 열립니다(같은 컴퓨터의 리버스 프록시·터널을 거친 요청은
+  로그인한 뒤에만 여기 닿으므로 설정도 열립니다). 사설 IP 로 바인딩해도
   같은 와이파이의 다른 기기는 설정을 바꿀 수 없습니다. 꼭 필요할 때만 `config.json` 의 `"web": {"setup_allow_lan": true}` 로 풀 수 있습니다(권장하지 않음).
 
 ### 7) 문제 해결 — 자주 묻는 5가지
@@ -399,13 +417,18 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **조회만 합니다.** 개인 키·시드 문구를 요구하지 않고, 거래소·증권사 키로는 잔고·내역 조회 API 만 부릅니다(주문·출금 코드 없음).
 - **웹은 127.0.0.1 바인딩이 기본**이고 비밀번호 로그인(기본 켜짐 — PBKDF2-SHA256 해시, HttpOnly·SameSite=Strict 세션 쿠키, 시도 제한)으로
   잠겨 있습니다. 모든 응답에 프레임 차단·nosniff 헤더가 붙고, 서버 오류 화면에 내부 경로·값을 싣지 않습니다. 모든 쓰기 요청(POST)은 같은 출처(Origin) + CSRF 토큰을 확인하고,
-  키 입력 API 는 로컬/테일넷 접속만 받습니다. 모든 요청의 Host 를 검사합니다(DNS 리바인딩 방지).
+  키 입력 API 는 로컬/테일넷 접속(또는 로그인된 리버스 프록시 경유)만 받습니다. 모든 요청의 Host 를 검사합니다(DNS 리바인딩 방지).
+  로그인이 꺼져 있으면 리버스 프록시·터널 헤더가 붙은 요청을 전부 거부합니다.
 - 비밀값은 `.env`(600)에만 저장되고 화면에는 •••• 로만 보입니다(거래소 공개 API 키만 끝 4자리). `.env`·`config.json`·`state/` 는 `.gitignore` 에 들어 있습니다 — 절대 커밋하지 마세요.
 - 밖으로 나가는 요청은 조회뿐입니다: 블록 탐색기·RPC(내 주소), 거래소 API, 가격(GeckoTerminal·DexScreener·거래소 공개 시세·주식/금 공개 시세),
   스캠 판정(GoPlus — 후보 토큰 주소만), 지갑 포트폴리오 보강(Rabby 공개 API — 내 EVM 주소, `rabby.enabled: false` 로 끔),
   브릿지 탐색기(도착 확인), 환율, 텔레그램 발송, NFT 바닥가(코인게코·매직에덴·오픈시 — 컬렉션 주소만), Hyperliquid 공개 조회(내 주소).
   원장 내용 자체는 보내지 않습니다.
   예외: AI 기능(기본 꺼짐)을 켜면 그날 요약·영수증 요약을 내 컴퓨터의 `claude` CLI 로 보냅니다.
+- AI 리뷰·평가는 내 컴퓨터의 `claude` CLI 를 쓰며, 넘기는 환경변수는 허용 목록뿐입니다(PATH·HOME·로케일, 프록시 `HTTP(S)_PROXY`·`NO_PROXY`·`ALL_PROXY`,
+  사내 인증서 `NODE_EXTRA_CA_CERTS`·`SSL_CERT_FILE`·`SSL_CERT_DIR`, Claude 로그인·게이트웨이·Bedrock·Vertex 변수). 거래소 키와 `.env` 값은 넘기지 않습니다.
+  AI 매도·매수 평가는 기본 꺼짐 — `config.json` 의 `review.sell_eval_daily_max`·`review.buy_eval_daily_max` 를 1 이상(하루 최대 호출 수)으로 켭니다.
+- 로그인 화면이 뜨면(로그아웃·만료·다른 기기에서 모두 로그아웃) 그 브라우저에 남은 화면 저장본(IndexedDB·버전 키)을 지웁니다.
 
 ## 알아 둘 것
 
@@ -454,8 +477,22 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Login (on by default):** on first run, open http://127.0.0.1:8023/ on the machine itself to create a password (10+ characters);
   every device then needs it. Sessions last 30 days (7 days idle). Passwords are stored as PBKDF2-SHA256 hashes; 5 wrong tries in
   10 minutes lock that IP for 15 minutes (doubling on repeat). Change it or log out everywhere in Settings › 로그인; forgot it →
-  `python3 tools/reset_password.py` (or `--set`) on the machine. Disable with `"web": {"login": {"enabled": false}}` + restart tj-web.
+  `python3 tools/reset_password.py` (or `--set`) on the machine. Disable only with `"web": {"login": {"enabled": false}}` + restart tj-web.
+  **Upgrading:** login is now on even when `web.login` is missing from `config.json` — after updating, restart tj-web and create the
+  password on the machine first (other devices get 401 until then).
+- **Reverse proxy / tunnel:** put an HTTP-aware HTTPS proxy (e.g. a Cloudflare tunnel) in front of `http://127.0.0.1:8023`, keep the `Host`
+  header, add `X-Forwarded-For` and `X-Forwarded-Proto: https`, and list the domain in `web.allowed_hosts` (`web.public_url` = optional
+  `https://` link for Telegram alerts). With login off, every request carrying proxy headers is refused (403). Proxied requests always need a
+  session, can't create the first password or use the internal token, count toward the global login limit, and get `Secure` cookies, HSTS
+  and `private, no-store` caching. Never use raw TCP forwarders (`ssh -R`, `socat`, `tailscale serve --tcp`, `ngrok tcp`) — they look like
+  direct local access. `web.login.secure_cookie: true` forces the `Secure` flag; the login page warns on plain `http://` outside loopback/Tailscale.
+  The internal token (`state/auth_internal_token`, regenerated on every tj-web start) is for same-machine units only — pass it as a header file,
+  e.g. `curl -H @<(printf 'X-TJ-Internal: %s\n' "$(cat state/auth_internal_token)") http://127.0.0.1:8023/api/state`.
 - **Security:** binds to 127.0.0.1 by default (optional Tailscale IP; public IPs and 0.0.0.0 are refused); password login is on
   by default, but still never expose the port directly to the internet; every POST needs a same-origin `Origin` header and a CSRF token; secrets stay in `.env`.
-- **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled.
+- **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled. Only an
+  allow-list of environment variables is passed to it (PATH, HOME, locale, `HTTP(S)_PROXY`/`NO_PROXY`/`ALL_PROXY`, corporate CA variables
+  `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`/`SSL_CERT_DIR`, and Claude login/gateway/Bedrock/Vertex variables) — never exchange keys or `.env` values.
+  Receipt buy/sell evaluation is off by default; enable it by setting `review.sell_eval_daily_max` / `review.buy_eval_daily_max` to 1 or more
+  (max calls per day). `review.coach_role` and `review.known_patterns` tailor the daily/weekly review to your style.
 - **License:** not decided yet (all rights reserved until then). Provided as is; PnL and tax figures are an aid, not advice.

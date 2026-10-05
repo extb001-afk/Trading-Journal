@@ -85,7 +85,8 @@ _FILL_OVERRIDE = {}
 def claude_bin():
     for b in CLAUDE_BINS:
         try:
-            subprocess.run([b, "--version"], capture_output=True, timeout=20)
+            subprocess.run([b, "--version"], capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
+            _cli_probe(b)
             return b
         except (OSError, subprocess.SubprocessError):
             continue
@@ -1931,7 +1932,7 @@ def normalize(rv: dict, data: dict) -> dict:
         s = data["grade"]
     elif data.get("no_fills") and abs(data.get("realized_total") or 0) < REALIZED_MIN_USD and not data.get("risk_sends"):
         s = "관망"
-    rv = _delink(_scrub(rv, data))
+    rv = _scrub(_delink(rv), data)
     pr = rp.len_preset("daily", data.get("_len"))
     obs = [clip_sentence(screen_terms(x), OBS_HARD) for x in (rv.get("obs") or []) if str(x or "").strip()][:pr["obs"]]
     sm = screen_terms(rv.get("sum") or "")
@@ -1952,14 +1953,37 @@ def normalize(rv: dict, data: dict) -> dict:
     return out
 
 
-CLI_ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR")
-CLI_ENV_AUTH = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR")
+CLI_ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR",
+                "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+                "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_CONFIG_HOME")
+CLI_ENV_AUTH = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
+                "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+                "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS")
 
 
 def _cli_env(src=None) -> dict:
     src = os.environ if src is None else src
     return {k: v for k, v in src.items()
             if k in CLI_ENV_KEEP or k in CLI_ENV_AUTH or k == "LC_ALL" or k.startswith("LC_")}
+
+
+_CLI_FLAGS = {}
+
+
+def _cli_probe(b) -> list:
+    if b not in _CLI_FLAGS:
+        try:
+            h = subprocess.run([b, "--help"], capture_output=True, text=True, timeout=20, env=_cli_env(), stdin=subprocess.DEVNULL).stdout or ""
+        except Exception:
+            h = ""
+        _CLI_FLAGS[b] = ["--no-session-persistence"] if "--no-session-persistence" in h else []
+    return _CLI_FLAGS[b]
+
+
+def _cli_extra(b) -> list:
+    return list(_CLI_FLAGS.get(b) or [])
 
 
 def _cli_cwd():
@@ -1993,9 +2017,9 @@ def _run_cli(b, prompt, data, label, body=None):
     cwd9, rm9 = _cli_cwd()
     try:
         out = subprocess.run(
-            [b, "-p", "--strict-mcp-config", "--model", REVIEW_MODEL, "--tools", ""],
+            [b, "-p", "--strict-mcp-config", "--model", REVIEW_MODEL, "--tools", ""] + _cli_extra(b),
             input=prompt + body,
-            capture_output=True, text=True, timeout=600, cwd=cwd9, env=_cli_env())
+            capture_output=True, text=True, timeout=600, cwd=cwd9, env=dict(_cli_env(), CLAUDE_CODE_SAFE_MODE="1"))
     finally:
         if rm9:
             import shutil
@@ -2359,7 +2383,7 @@ def eval_one(cfg, date, sym, side, get=None, sleep=time.sleep, runner=None, binf
     if rec:
         return "made"
     e9 = str(err or "")
-    if "한도" in e9:
+    if "한도" in e9 or "꺼져 있어요" in e9:
         return "budget"
     if "진행 중" in e9:
         return "busy"
@@ -2367,16 +2391,34 @@ def eval_one(cfg, date, sym, side, get=None, sleep=time.sleep, runner=None, binf
     return "fail"
 
 
+EVAL_SIDES = ("sell", "buy")
+
+
+def eval_sides_on(cfg) -> list:
+    import sellchart
+    return [s9 for s9 in EVAL_SIDES if sellchart.daily_max(cfg, s9) > 0]
+
+
 def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.sleep, runner=None, binfn=None, stores=None, stop_check=None):
     pace_s = EVAL_PACE_S if pace_s is None else pace_s
     lock = threading.Lock()
     it = iter(list(items))
-    cnt = {"items": len(items), "made": 0, "fresh": 0, "nochart": 0, "budget": 0, "busy": 0, "fail": 0, "stopped": None}
+    cnt = {"items": len(items), "made": 0, "fresh": 0, "nochart": 0, "budget": 0, "busy": 0, "fail": 0, "skip": 0, "stopped": None,
+           "stopped_sides": {}}
+    on9 = eval_sides_on(cfg)
+    for side in EVAL_SIDES:
+        if side not in on9:
+            cnt["stopped_sides"][side] = "꺼짐"
+
+    def all_stopped():
+        if len(cnt["stopped_sides"]) >= len(EVAL_SIDES) and not cnt["stopped"]:
+            cnt["stopped"] = "·".join(sorted(set(cnt["stopped_sides"].values())))
+        return bool(cnt["stopped"])
 
     def worker():
         while True:
             with lock:
-                if cnt["stopped"]:
+                if all_stopped():
                     return
                 w9 = stop_check() if stop_check else None
                 if w9:
@@ -2386,7 +2428,11 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
             if nxt is None:
                 return
             d9, s9 = nxt
-            for side in ("sell", "buy"):
+            for side in EVAL_SIDES:
+                with lock:
+                    if side in cnt["stopped_sides"]:
+                        cnt["skip"] += 1
+                        continue
                 try:
                     res = eval_one(cfg, d9, s9, side, get=get, sleep=sleep, runner=runner, binfn=binfn, stores=stores)
                 except Exception as e:
@@ -2395,12 +2441,15 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
                 with lock:
                     cnt[res] = cnt.get(res, 0) + 1
                     if res == "budget":
-                        cnt["stopped"] = "하루 상한"
-                if res == "budget":
-                    return
+                        cnt["stopped_sides"].setdefault(side, "하루 상한")
                 if res == "made" and pace_s:
                     sleep(pace_s)
 
+    with lock:
+        stop0 = all_stopped()
+    if stop0:
+        log.info("AI 매도·매수 평가 꺼짐(config review.sell_eval_daily_max·buy_eval_daily_max = 0) — 영수증 %d 건너뜀", cnt["items"])
+        return cnt
     n = max(1, min(int(parallel or 1), EVAL_PARALLEL_MAX, len(items) or 1))
     if n == 1:
         worker()
@@ -2410,12 +2459,19 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
             t9.start()
         for t9 in ths:
             t9.join()
-    log.info("AI 매도·매수 평가: 영수증 %d · 새로 %d · 최신 %d · 봉 없음 %d · 실패 %d%s", cnt["items"], cnt["made"], cnt["fresh"], cnt["nochart"],
-             cnt["fail"], f" · 멈춤({cnt['stopped']})" if cnt["stopped"] else "")
+    with lock:
+        all_stopped()
+    side_ko = {"sell": "매도", "buy": "매수"}
+    part9 = "" if cnt["stopped"] else "".join(f" · {side_ko[k9]} 멈춤({v9})" for k9, v9 in sorted(cnt["stopped_sides"].items()))
+    log.info("AI 매도·매수 평가: 영수증 %d · 새로 %d · 최신 %d · 봉 없음 %d · 실패 %d%s%s", cnt["items"], cnt["made"], cnt["fresh"], cnt["nochart"],
+             cnt["fail"], f" · 멈춤({cnt['stopped']})" if cnt["stopped"] else "", part9)
     return cnt
 
 
 def receipt_evals_recent(cfg, today_iso=None, days=None, get=None, **kw):
+    if not eval_sides_on(cfg):
+        log.info("AI 매도·매수 평가 꺼짐(config review.sell_eval_daily_max·buy_eval_daily_max = 0) — 자동 생성 건너뜀")
+        return None
     if _manual_lock_live():
         log.info("AI 평가 자동 생성 건너뜀 — 수동 보충 진행 중")
         return None
@@ -2968,7 +3024,7 @@ def _stale_week(rv, fp) -> bool:
 
 def normalize_week(rv: dict, data: dict) -> dict:
     pr = rp.len_preset("weekly", data.get("_len"))
-    rv = _delink(_scrub(rv, data, data["week"]))
+    rv = _scrub(_delink(rv), data, data["week"])
     sm = screen_terms(rv.get("sum") or "")
     note = clip_sentence(screen_terms(rv.get("note")), NOTE_MAX)
     if not note or len(note) > NOTE_MAX or note.endswith("…"):
@@ -3238,6 +3294,9 @@ def main():
         print(json.dumps(sell_evals_plan(cfg, sys.argv[2]), ensure_ascii=False))
         return
     if len(sys.argv) > 2 and sys.argv[1] == "--sell-evals-since":
+        if not eval_sides_on(cfg):
+            log.warning("AI 매도·매수 평가가 꺼져 있어요 — 켜려면 config.json 의 review.sell_eval_daily_max · buy_eval_daily_max 를 1 이상으로")
+            return
         with _ManualLock():
             items = receipt_items(cfg, sys.argv[2], datetime.now(KST).strftime("%Y-%m-%d"))
             receipt_evals(cfg, items, parallel=min(EVAL_PARALLEL_MAX, int(_FILL_OVERRIDE.get("parallel") or 1)))

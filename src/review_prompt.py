@@ -46,6 +46,25 @@ WEEKLY_PATTERNS_MAX = LEN_PRESETS["weekly"]["normal"]["pat_max"]
 
 DEFAULT_KNOWN_PATTERNS = []
 
+DEFAULT_COACH_ROLE = "암호화폐 트레이더"
+
+
+def coach_role(cfg=None) -> str:
+    try:
+        if cfg is None:
+            import json
+            import common
+            with open(common.CONFIG_PATH, encoding="utf-8") as f:
+                cfg = json.load(f)
+        v = ((cfg or {}).get("review") or {}).get("coach_role") if isinstance(cfg, dict) else None
+    except Exception:
+        return DEFAULT_COACH_ROLE
+    if isinstance(v, str):
+        v = " ".join(v.split())
+        if 0 < len(v) <= 60 and not any(c in v for c in "{}<>\""):
+            return v
+    return DEFAULT_COACH_ROLE
+
 GLOSSARY = {
     "realized_total": "실현손익", "realized_spot": "현물 실현손익", "realized_futures": "선물 정산",
     "realized_by_coin": "코인별 실현", "realized_by_lp": "LP 실현", "realized": "실현손익",
@@ -109,7 +128,7 @@ _DAILY_ONLY = {"slip_pct", "px_first", "px_last", "vwap_1m", "first2m_pct", "spl
 _GLOSSARY_TXT = "용어표: " + ", ".join(f"{k}={v}" for k, v in GLOSSARY.items() if k not in _WEEKLY_ONLY and k not in _TXT_SKIP)
 _GLOSSARY_WK = "용어표: " + ", ".join(f"{k}={v}" for k, v in GLOSSARY.items() if k not in _DAILY_ONLY and k not in _TXT_SKIP)
 
-_DAILY_TPL = f"""너는 암호화폐 트레이더의 복기 코치다. 아래 JSON 은 하루 매매 기록을 Python 이 집계·대조한 것이다.
+_DAILY_TPL = f"""너는 {{coach_role}}의 복기 코치다. 아래 JSON 은 하루 매매 기록을 Python 이 집계·대조한 것이다.
 답은 JSON 하나만(다른 텍스트 금지):
 {{"s":"양호|주의|경고|관망","note":"60자 이내 한 문장","sum":"{{sum}}","obs":["[실행] …","[기회·리스크] …"],"next":"{{next}} 또는 '없음.'","dq":"데이터 품질 1문장 또는 빈 문자열"}}
 - {{head}}: note·sum·obs·next 합계 {{target}}(최대 {{max_s}}자). 같은 숫자·같은 말 두 번 금지.
@@ -126,7 +145,7 @@ _DAILY_TPL = f"""너는 암호화폐 트레이더의 복기 코치다. 아래 JS
 데이터:
 """
 
-_WEEKLY_TPL = f"""너는 암호화폐 트레이더의 복기 코치다. 아래 JSON 은 한 주(ISO 주 월~일 — 달이 바뀌면 그 달 몫만 잘라 며칠일 수 있다:
+_WEEKLY_TPL = f"""너는 {{coach_role}}의 복기 코치다. 아래 JSON 은 한 주(ISO 주 월~일 — 달이 바뀌면 그 달 몫만 잘라 며칠일 수 있다:
 partial=true)의 거래 사이클 표·일별 실현·LP 를 Python 이 계산한 것이다. 이 기간(from~to)만 말하고, 반복되는 행동 패턴과 다음 규칙을 찾아라.
 답은 JSON 하나만(다른 텍스트 금지):
 {{"s":"양호|주의|경고|관망","note":"60자 이내 한 문장","sum":"{{sum}}","patterns":["반복 패턴 — 사이클·일별 수치 근거, {{pat_chars}}자 이내", "…"],"rule":"다음 규칙 제안 {{rule}}(조건 → 행동)","next":"{{next}} 또는 '없음.'"}}
@@ -154,16 +173,16 @@ def _fill(tpl: str, pr: dict) -> str:
     return out
 
 
-def daily_prompt(v=None) -> str:
-    return _fill(_DAILY_TPL, len_preset("daily", v))
+def daily_prompt(v=None, role=None) -> str:
+    return _fill(_DAILY_TPL, dict(len_preset("daily", v), coach_role=role or coach_role()))
 
 
-def weekly_prompt(v=None) -> str:
-    return _fill(_WEEKLY_TPL, len_preset("weekly", v))
+def weekly_prompt(v=None, role=None) -> str:
+    return _fill(_WEEKLY_TPL, dict(len_preset("weekly", v), coach_role=role or coach_role()))
 
 
-DAILY_PROMPT = daily_prompt()
-WEEKLY_PROMPT = weekly_prompt()
+DAILY_PROMPT = daily_prompt(role=DEFAULT_COACH_ROLE)
+WEEKLY_PROMPT = weekly_prompt(role=DEFAULT_COACH_ROLE)
 
 SELL_EVAL_VERSION = "2026-10-03.s2"
 SELL_EVAL_PROMPT = """너는 한국 거래소 상장 차익 트레이더의 매도 코치다. 아래 JSON 은 한 코인 하루 매도를 실제 시세 봉 위에 놓고 Python 이 계산한 숫자다.

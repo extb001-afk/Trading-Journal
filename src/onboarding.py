@@ -217,7 +217,7 @@ PERM_NOT_CHECKABLE = ("이 거래소(업비트·빗썸·쿠코인·게이트)는
                       "발급 화면에서 '조회' 권한만 켰는지 직접 확인하세요")
 PERM_RETRY = "키 권한을 자동으로 확인하지 못해 저장하지 않았습니다 — 잠시 뒤 다시 저장하세요(이 거래소는 '조회 권한만 켰음' 체크로 대신할 수 없습니다)"
 
-_BN_ALLOW_TRUE = frozenset(("enableReading", "ipRestrict"))
+_BN_ALLOW_TRUE = frozenset(("enableReading", "ipRestrict", "enableFixReadOnly"))
 _BN_LABELS = (
     ("enableWithdrawals", "withdraw", "출금 (Enable Withdrawals)"),
     ("enableSpotAndMarginTrading", "trade", "현물·마진 거래 (Enable Spot & Margin Trading)"),
@@ -330,6 +330,10 @@ def perm_gate(group: str, vals: dict, ack: bool):
                     "error": info["title"] + " — 저장하지 않았습니다. 조회 전용 키로 다시 만들어 넣어 주세요"}, None
         if p.get("checked"):
             return None, {"how": "api", "at": int(time.time())}
+        if not r.get("ok") and r.get("detail"):
+            why = scrub(r.get("detail"), vals.values())
+            return {"ok": False, "permRetry": True, "reason": why,
+                    "error": "연결 테스트 실패 — " + why + " · 키 권한을 확인할 수 없어 저장하지 않았습니다(원인을 고친 뒤 다시 저장하세요)"}, None
         why = scrub(p.get("note") or r.get("detail") or "권한 확인 실패", vals.values())
         return {"ok": False, "permRetry": True, "reason": why, "error": PERM_RETRY + " (" + why + ")"}, None
     if not ack:

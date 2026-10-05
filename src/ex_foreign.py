@@ -60,6 +60,29 @@ def _xm(v) -> str:
     return common.redact_secret_text("" if v is None else str(v))
 
 
+HTTP_MAX_BYTES = 32 * 1024 * 1024
+HTTP_MAX_BYTES_PATH = {"/api/v3/exchangeInfo": 64 * 1024 * 1024}
+ERR_BODY_MAX = 64 * 1024
+
+
+class ResponseTooLarge(RuntimeError):
+    pass
+
+
+def _read_capped(r, cap: int, what: str = "") -> bytes:
+    raw = r.read(cap + 1)
+    if len(raw) > cap:
+        raise ResponseTooLarge(f"{what} 응답 크기 초과(>{cap // 1048576}MB) — 이 요청 실패")
+    return raw
+
+
+def _err_body(e, n: int = ERR_BODY_MAX) -> str:
+    try:
+        return e.read(n).decode("utf-8", "replace") if getattr(e, "fp", None) else ""
+    except Exception:
+        return ""
+
+
 class RateLimited(RuntimeError):
 
     def __init__(self, msg, code=429):
@@ -229,7 +252,7 @@ def http_json(url: str, headers: dict | None = None, data: bytes | None = None,
                 _gov_headers(host, path, r.headers)
             except Exception:
                 pass
-            return json.loads(r.read().decode("utf-8"))
+            return json.loads(_read_capped(r, HTTP_MAX_BYTES_PATH.get(path, HTTP_MAX_BYTES), host + path).decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code in (429, 418):
             ra = _rl_hit(host, e)
@@ -862,7 +885,7 @@ def fills_binance_replay(env, fst: dict, rp: dict, deadline: float, emit, save) 
                     rows = call("/sapi/v1/margin/myTrades", {"symbol": pair, "isIsolated": "TRUE" if kind == "i" else "FALSE",
                                                              "fromId": from_id, "limit": page})
             except urllib.error.HTTPError as e:
-                body9 = e.read().decode()[:120] if e.fp else ""
+                body9 = _err_body(e)[:120]
                 if e.code == 400 and ("-1121" in body9 or (not spot and "-11001" in body9)):
                     log.warning("binance 재조회 %s: 무효 페어(%s) — 조회 불가로 건너뜀", k9, body9[:60])
                     unav.add(k9)
@@ -1093,7 +1116,7 @@ def fills_binance(env, st, t0: int, t1: int):
                 n_calls[0] += 1
                 rows = call("/api/v3/myTrades", {"symbol": pair, "fromId": from_id, "limit": 1000})
             except urllib.error.HTTPError as e:
-                body = e.read().decode()[:120] if e.fp else ""
+                body = _err_body(e)[:120]
                 if e.code == 400 and "-1121" in body:
                     inv[pair] = float(now9)
                     break
@@ -1236,7 +1259,7 @@ def fills_binance(env, st, t0: int, t1: int):
                                     {"symbol": pair, "isIsolated": iso_flag,
                                      "fromId": from_id, "limit": 500})
                     except urllib.error.HTTPError as e:
-                        body = e.read().decode()[:120] if e.fp else ""
+                        body = _err_body(e)[:120]
                         if e.code == 400 and ("-1121" in body or "-11001" in body):
                             m_inv[ck] = float(now9)
                             break
@@ -2322,7 +2345,7 @@ def _http_json_err(url, headers=None, data=None, method=None, timeout=20):
         return http_json(url, headers, data, method, timeout)
     except urllib.error.HTTPError as e:
         try:
-            body = e.read().decode("utf-8", "ignore")
+            body = e.read(ERR_BODY_MAX).decode("utf-8", "ignore")
             try:
                 body = json.dumps(json.loads(body), separators=(",", ":"))
             except ValueError:

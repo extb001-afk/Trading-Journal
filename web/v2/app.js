@@ -1349,11 +1349,11 @@
     try { const h = window.TJHealth; if (h && typeof h.lock === 'function') h.lock(); } catch (e) {  }
   }
   async function reopenLocked() {
-    let st = 0;
-    try { const r = await fetch('/auth/session', { cache: 'no-store', credentials: 'same-origin' }); st = r.status; } catch (e) { st = 0; }
-    if (st === 401) { location.replace('/'); return; }
-    if (st === 404) { location.reload(); return; }
-    toast(st === 200 ? '아직 로그아웃되지 않았어요 — 화면은 잠근 채로 둘게요' + (S.lockWhy === 'logoutFail' ? ' · 로그아웃을 다시 시도해 주세요' : ' · 로그아웃이 끝나면 넘어가요') : '로그인 상태를 확인하지 못했어요 — 잠시 뒤 다시 눌러 주세요', true);
+    let j = null;
+    try { const r = await fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' }); j = r.ok ? await r.json() : null; } catch (e) { j = null; }
+    if (j && j.ok && !j.enabled) { location.reload(); return; }
+    if (j && j.ok && !j.authed) { location.replace('/login'); return; }
+    toast(j && j.ok ? '아직 로그아웃되지 않았어요 — 화면은 잠근 채로 둘게요' + (S.lockWhy === 'logoutFail' ? ' · 로그아웃을 다시 시도해 주세요' : ' · 로그아웃이 끝나면 넘어가요') : '로그인 상태를 확인하지 못했어요 — 잠시 뒤 다시 눌러 주세요', true);
   }
   function renderLocked() {
     try { const ae = document.activeElement; if (ae && ae !== document.body && typeof ae.blur === 'function') ae.blur(); } catch (e) {  }
@@ -5238,6 +5238,7 @@
     if (x && x.st === 200 && x.d.ok) {
       AU_KEYS.forEach(k => { delete S.drafts[k]; });
       S.authPw = false; S.authErr = '';
+      if (x.d.csrf && S.auth && S.auth.d) S.auth.d.csrf = x.d.csrf;
       toast('비밀번호를 바꿨어요' + (x.d.revoked ? ' · 다른 기기 ' + num(x.d.revoked) + '개는 로그아웃됐어요' : ''));
       authLoad(true); renderView();
       return;
@@ -6099,7 +6100,9 @@
     const ev = E.ev !== undefined && E.st !== 'load' ? E.ev : (E.ev || x.eval || null);
     const run = E.st === 'running' || E.st === 'post' || (!E.st || E.st === 'load' ? x.evalStatus === 'running' : false);
     const bd = E.budget, left = bd && bd.left != null ? num(bd.left) : null, out = left != null && left <= 0;
-    const budTxt = bd && bd.max != null ? '<span class="cap pvx">오늘 남은 한도 <b class="num">' + Math.max(0, num(bd.left)) + '/' + num(bd.max) + '</b></span>' : '';
+    const budTxt = bd && bd.max != null ? (num(bd.max) === 0
+      ? '<span class="cap pvx">AI 평가 꺼짐 — config review.' + (side === 'buy' ? 'buy' : 'sell') + '_eval_daily_max</span>'
+      : '<span class="cap pvx">오늘 남은 한도 <b class="num">' + Math.max(0, num(bd.left)) + '/' + num(bd.max) + '</b></span>') : '';
     const msg = E.msg && E.msg.t ? '<div class="rkem ' + (E.msg.c === 'e' ? 'e' : E.msg.c === 'w' ? 'w' : '') + '" role="' + (E.msg.c === 'e' ? 'alert' : 'status') + '">' + esc(E.msg.c === 'e' ? errTxt(E.msg.t) : E.msg.t) + '</div>' : '';
     const dis = loading || run || out ? ' disabled' : '';
     const old = E.st === 'old';
@@ -6592,7 +6595,7 @@
     reload: () => refresh(true),
     reloadPage: () => location.reload(),
     reopenLocked: () => reopenLocked(),
-    logoutRetry: () => { try { if (window.TJRemote && typeof window.TJRemote.retry === 'function') { window.TJRemote.retry(); return; } } catch (e) {  } authLogout(false); },
+    logoutRetry: () => authLogout(false),
     authPw: () => { S.authPw = !S.authPw; ['au:cur', 'au:new', 'au:new2'].forEach(k => { delete S.drafts[k]; }); renderView(); if (S.authPw) setTimeout(() => { const n = $('#auCur'); if (n) n.focus(); }, 0); },
     authPwSave: () => authPwSave(),
     authLogout: () => authLogout(false),
@@ -7810,7 +7813,7 @@
   if (S.hide || S.rand) pvFix(document.body);
   bootLoad();
   setInterval(() => { if (!document.hidden) refresh(false, null, true); }, POLL_MS);
-  window.TJ = { clearCache: clearCache, onUnauthorized: onUnauthorized, lockOut: lockOut, isLocked: () => !!S.locked };
+  window.TJ = { clearCache: clearCache, onUnauthorized: onUnauthorized, isLocked: () => !!S.locked };
   window.__tjBooted = true;
   window.__tj = { S, A, refresh, applyPatch, derive, clearCache, px, px4, hs, moneyTxt, pxC,
     m, oaTot, oaV,

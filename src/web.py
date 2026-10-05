@@ -207,7 +207,7 @@ def _ui_route(path: str):
         return os.path.join(V2_DIR, "index.html"), _V2_FILES["index.html"]
     if path.startswith("/v2/") and path[4:] in _V2_FILES:
         return os.path.join(V2_DIR, path[4:]), _V2_FILES[path[4:]]
-    if path == "/classic" and os.path.exists(os.path.join(WEB_DIR, "index.html")):
+    if path == "/classic" and os.path.isfile(os.path.join(WEB_DIR, "index.html")):
         return os.path.join(WEB_DIR, "index.html"), "text/html; charset=utf-8"
     return None
 
@@ -13212,6 +13212,9 @@ def memo_driven(date, sym, inp, side):
 
 
 ALIAS_MAX = 2000
+PLANS_MAX = 5000
+IGNORED_MAX = 20000
+SRC_WL_MAX = 2000
 _ALIAS_ADDR_RE = re.compile(r"0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}")
 
 
@@ -13227,6 +13230,24 @@ def _registered_wallet_keys(cfg) -> set:
 
 BASE_SEC_HEADERS = (("X-Frame-Options", "DENY"), ("Content-Security-Policy", "frame-ancestors 'none'"),
                     ("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"))
+PROXY_SEC_HEADERS = (("Cloudflare-CDN-Cache-Control", "no-store"), ("Vary", "Cookie"),
+                     ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
+                     ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()"))
+HSTS = ("Strict-Transport-Security", "max-age=31536000")
+
+
+def _private_cache(cache: str, proxied: bool, ctype: str = "") -> str:
+    c = (cache or "no-store").strip()
+    if "public" in c:
+        c = c.replace("public", "private")
+    elif "private" not in c:
+        c = "private, " + c
+    if proxied:
+        t = (ctype or "").lower()
+        asset = "max-age" in c and "no-store" not in c and not ("text/html" in t or "json" in t)
+        if not asset:
+            c = "private, no-store"
+    return c
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -13277,11 +13298,28 @@ class Handler(BaseHTTPRequestHandler):
                 return q.replace(" ", "") not in ("q=0", "q=0.0", "q=0.00", "q=0.000")
         return False
 
+    def _proxy_headers(self):
+        try:
+            px = login_auth.proxied(self)
+        except Exception:
+            px = True
+        if not px:
+            return False, ()
+        return True, PROXY_SEC_HEADERS + ((HSTS,) if login_auth.proxied_https(self) else ())
+
     def _send_bytes(self, code, raw, gzb=None, ctype="application/json; charset=utf-8", etag=None,
                     cache="no-store", extra=()):
-        sec = ()
-        have = {k.lower() for k, _ in sec}
-        extra = tuple(extra) + sec + tuple((k, v) for k, v in BASE_SEC_HEADERS if k.lower() not in have)
+        px, pxh = self._proxy_headers()
+        cache = _private_cache(cache, px, ctype)
+        out = []
+        have = set()
+        for k, v in tuple(extra) + pxh + BASE_SEC_HEADERS:
+            kl = k.lower()
+            if kl in have and kl != "set-cookie":
+                continue
+            have.add(kl)
+            out.append((k, v))
+        extra = tuple(out)
         if etag and code == 200:
             inm = self.headers.get("If-None-Match")
             if inm and (inm.strip() == "*" or etag in [x.strip() for x in inm.split(",")]):
@@ -13331,18 +13369,8 @@ class Handler(BaseHTTPRequestHandler):
         return cls.EX_KEYS.get(s) or cls.EX_KEYS.get(k) or s
 
     def _wd_dest_register(self, body: dict):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
+        if not self._write_guard(need_json=False):
+            return
         a = xfer_match.norm_addr(body.get("address"))
         cands = getattr(BUILDER, "_wd_dest_unknown", None)
         if cands is None:
@@ -13371,20 +13399,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, {"ok": True, "address": a, "chains": reg.get("chains") or chains, "restartNeeded": not apply9.get("runner")})
 
     def _flow_register(self, body: dict):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
+        if not self._write_guard():
+            return
         a = xchain_match.norm(str(body.get("address") or "").strip())
         cands = getattr(BUILDER, "_flow_recips", None)
         if cands is None:
@@ -13417,20 +13433,8 @@ class Handler(BaseHTTPRequestHandler):
                                 "note": reg.get("note") or ""})
 
     def _outflow_resolve(self, body: dict):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
+        if not self._write_guard():
+            return
         a = str(body.get("address") or "").strip()
         a = a.lower() if a.startswith("0x") else a
         if body.get("op") == "salealert":
@@ -13713,20 +13717,8 @@ class Handler(BaseHTTPRequestHandler):
                          "cands": shown})
 
     def _backfill_request(self, body: dict):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
+        if not self._write_guard(origin_err="출처(Origin) 확인 실패"):
+            return
         path = StateBuilder.BF_REQ_PATH
         cur = common.read_json(path, {}) if os.path.exists(path) else {}
         if not isinstance(cur, dict):
@@ -13777,7 +13769,7 @@ class Handler(BaseHTTPRequestHandler):
         if os.path.normpath(fpath) == os.path.normpath(os.path.join(V2_DIR, "index.html")):
             return self._send_v2_index(a)
         v = urllib.parse.parse_qs(query).get("v", [""])[0]
-        cache = "public, max-age=31536000, immutable" if (v and v == a["hash"]) else "no-cache"
+        cache = "private, max-age=31536000, immutable" if (v and v == a["hash"]) else "private, no-cache"
         self._send_bytes(200, a["raw"], a["gz"], ctype, etag=a["etag"], cache=cache)
 
     def _send_v2_index(self, a):
@@ -13785,11 +13777,11 @@ class Handler(BaseHTTPRequestHandler):
         snap = getattr(getattr(b, "snaps", None), "cur", None) if b is not None else None
         hero = getattr(snap, "hero", None) if snap is not None else None
         if not hero or time.time() - snap.at > 120 or b"<!--HERO-->" not in a["raw"]:
-            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="no-cache")
+            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="private, no-cache")
         js = json.dumps(hero, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").encode()
         raw = a["raw"].replace(b"<!--HERO-->", b'<script id="tjHero" type="application/json">' + js + b"</script>", 1)
         etag = f'W/"{a["hash"]}-{snap.ver[:8]}"'
-        self._send_bytes(200, raw, websnap.gz(raw), "text/html; charset=utf-8", etag=etag, cache="no-cache")
+        self._send_bytes(200, raw, websnap.gz(raw), "text/html; charset=utf-8", etag=etag, cache="private, no-cache")
 
     def _send_state_v2(self, query):
         qs9 = urllib.parse.parse_qs(query)
@@ -13834,8 +13826,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(410, {"ok": False, "stale": 1, "error": "그 버전 조각이 없어요 — 상태를 다시 받으세요"})
         etag = f'W/"{ver}-{name}"'
         if self._gzip_ok():
-            return self._send_bytes(200, b"", g9, etag=etag, cache="private, max-age=86400", extra=(("X-TJ-Ver", ver),))
-        return self._send_bytes(200, gzip.decompress(g9), None, etag=etag, cache="private, max-age=86400", extra=(("X-TJ-Ver", ver),))
+            return self._send_bytes(200, b"", g9, etag=etag, cache="private, no-store", extra=(("X-TJ-Ver", ver),))
+        return self._send_bytes(200, gzip.decompress(g9), None, etag=etag, cache="private, no-store", extra=(("X-TJ-Ver", ver),))
 
     _DAY_RE = re.compile(r"20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])")
 
@@ -13995,22 +13987,20 @@ class Handler(BaseHTTPRequestHandler):
             body["error"] = st.errors[k9].get("error")
         self._send(200, body)
 
-    def _write_guard(self) -> bool:
-        remote = False
+    def _write_guard(self, need_json: bool = True, origin_err: str = "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다") -> bool:
         if not onboarding.origin_ok(self, required=True):
-            self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
+            self._send(403, {"ok": False, "error": origin_err})
             return False
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-                return False
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
+        tok = self.headers.get("X-TJ-CSRF") or ""
+        try:
+            import settings_store
+            good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
+        except Exception:
+            good = False
+        if not good:
+            self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
+            return False
+        if need_json and "application/json" not in (self.headers.get("Content-Type") or ""):
             self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
             return False
         return True
@@ -14113,20 +14103,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "id": it9["id"]})
 
     def _receipt_eval_post(self, body):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
+        if not self._write_guard():
+            return
         a9, err = self._chart_args(body)
         if err:
             return self._send(400, err)
@@ -14143,7 +14121,7 @@ class Handler(BaseHTTPRequestHandler):
         if busy9:
             return self._send(409, {"ok": False, "status": "running", "error": f"다른 {side_ko} 평가가 진행 중이에요 — 끝나면 다시 눌러 주세요"})
         if bud9.get("_bad") or bud9["used"] >= cap9:
-            return self._send(429, {"ok": False, "error": f"오늘 AI {side_ko} 평가 한도({cap9}회)를 다 썼어요"})
+            return self._send(429, {"ok": False, "error": _eval_budget_msg(cap9, a9["side"], side_ko)})
         BUILDER.snapshot()
         ch, st9 = BUILDER.chart_request(a9["date"], a9["sym"], a9["iv"], a9["after"], a9["venue"], side=a9["side"], bvenue=a9["bvenue"])
         if st9 != "ok":
@@ -14176,7 +14154,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(409, {"ok": False, "status": "running", "error": f"다른 {side_ko} 평가가 진행 중이에요 — 끝나면 다시 눌러 주세요"})
             bud9 = ST._budget_read(day9)
             if bud9.get("_bad") or bud9["used"] >= cap9:
-                return self._send(429, {"ok": False, "error": f"오늘 AI {side_ko} 평가 한도({cap9}회)를 다 썼어요"})
+                return self._send(429, {"ok": False, "error": _eval_budget_msg(cap9, a9["side"], side_ko)})
             ST.running[k9] = {"since": int(time.time()), "fp": fp9}
             ST.errors.pop(k9, None)
         cfg9 = BUILDER.cfg
@@ -14214,20 +14192,8 @@ class Handler(BaseHTTPRequestHandler):
         return any(day_memo.norm_sym(canon.get(x, x)) == s9 or day_memo.norm_sym(x) == s9 for x in syms)
 
     def _day_memo_post(self, body):
-        remote = False
-        if not onboarding.origin_ok(self, required=True):
-            return self._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
-        if not remote:
-            tok = self.headers.get("X-TJ-CSRF") or ""
-            try:
-                import settings_store
-                good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-            except Exception:
-                good = False
-            if not good:
-                return self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
-        if "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
+        if not self._write_guard():
+            return
         extra9 = set(body) - {"date", "sym", "memo"}
         if extra9:
             return self._send(400, {"ok": False, "error": "모르는 필드: " + ", ".join(sorted(str(x)[:20] for x in extra9))[:120]})
@@ -14276,8 +14242,19 @@ class Handler(BaseHTTPRequestHandler):
 
     DAY_MEMO_RL_N = 30
 
+    def _body_on_bodyless(self) -> bool:
+        cl = (self.headers.get("Content-Length") or "").strip()
+        if self.headers.get("Transfer-Encoding") is None and cl in ("", "0"):
+            return False
+        self.close_connection = True
+        self._send(400, {"error": "GET 요청에 본문을 실을 수 없습니다"})
+        return True
+
     def do_GET(self):
         path, _, query = self.path.partition("?")
+        login_auth.mark_conn(self)
+        if self._body_on_bodyless():
+            return
         try:
             if login_auth.handle(self, "GET", path, query):
                 return
@@ -14363,11 +14340,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, f.read(), ctype)
 
     def _err500_body(self, e):
-        if False:
-            return {"error": "internal error"}
         return {"error": f"처리 중 오류({type(e).__name__}) — tj-web 로그를 확인하세요"}
 
     def _method_not_allowed(self):
+        login_auth.mark_conn(self)
         self.close_connection = True
         self._send_bytes(405, b'{"error": "method not allowed"}', extra=(("Allow", "GET, POST"),))
 
@@ -14375,6 +14351,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        login_auth.mark_conn(self)
         self.close_connection = True
         locked = False
         try:
@@ -14472,6 +14449,8 @@ class Handler(BaseHTTPRequestHandler):
                         or any(not isinstance(t9, str) or len(t9) > 40 for t9 in body["tags"])):
                     return self._send(400, {"error": "tags 는 40자 이하 문자열 배열(≤20)"})
                 plans = prefs.setdefault("plans", {})
+                if key not in plans and len(plans) >= PLANS_MAX:
+                    return self._send(413, {"error": f"계획(목표가·메모)은 {PLANS_MAX:,}개까지예요 — 안 쓰는 계획을 지운 뒤 다시"})
                 ent = plans.setdefault(key, {})
                 for f in ("target", "stop", "memo", "src", "venue", "tags"):
                     if f in body:
@@ -14487,6 +14466,9 @@ class Handler(BaseHTTPRequestHandler):
                 if any((not isinstance(k, str)) or len(k) > 120 for k in keys):
                     return self._send(400, {"error": "key 는 120자 이하 문자열"})
                 ig = prefs.setdefault("ignored", [])
+                new9 = {k for k in keys if k} - set(ig)
+                if len(ig) + len(new9) > IGNORED_MAX:
+                    return self._send(413, {"error": f"무시 목록은 {IGNORED_MAX:,}개까지예요(지금 {len(ig):,}개) — 저장하지 않았어요"})
                 added = 0
                 for k in keys:
                     if k and k not in ig:
@@ -14673,10 +14655,15 @@ class Handler(BaseHTTPRequestHandler):
                     addr = raw15
                 else:
                     return self._send(400, {"error": "address 형식 오류 (0x40hex/base58)"})
+                rm9 = body.get("remove", False)
+                if not isinstance(rm9, bool):
+                    return self._send(400, {"error": "remove 는 true/false"})
                 wl = prefs.setdefault("src_whitelist", [])
-                if body.get("remove"):
+                if rm9:
                     prefs["src_whitelist"] = [a for a in wl if a != addr]
                 elif addr not in wl:
+                    if len(wl) >= SRC_WL_MAX:
+                        return self._send(413, {"error": f"발신 화이트리스트는 {SRC_WL_MAX:,}개까지예요 — 안 쓰는 주소를 지운 뒤 다시"})
                     wl.append(addr)
                 common.atomic_write_json(PREFS_PATH, prefs)
                 with BUILDER.lock:
@@ -14781,12 +14768,32 @@ def _alert_view(prefs) -> dict:
     return alert_prefs.view(prefs, tg_connected=_tg_connected(), extra=extra)
 
 
+_PUBLIC_URL_RE = re.compile(r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::\d{1,5})?")
+
+
+def _eval_budget_msg(cap, side, side_ko) -> str:
+    fn = getattr(sellchart, "budget_msg", None)
+    if callable(fn):
+        try:
+            return str(fn(cap, side))
+        except Exception:
+            pass
+    return f"오늘 AI {side_ko} 평가 한도({cap}회)를 다 썼어요"
+
+
+def public_url(cfg) -> str:
+    try:
+        u = str(((cfg or {}).get("web") or {}).get("public_url") or "").strip().rstrip("/")
+    except AttributeError:
+        return ""
+    return u if u and len(u) <= 300 and _PUBLIC_URL_RE.fullmatch(u) else ""
+
+
 def _alert_link_daily() -> str:
     try:
-        ra9 = (getattr(BUILDER, "cfg", None) or {}).get("remote_access") or {}
-        host9 = str(ra9.get("public_host") or "").strip().lower()
-        if ra9.get("enabled") is True and re.fullmatch(r"[a-z0-9.-]{3,253}", host9):
-            return f"보기: https://{host9}/v2/#daily"
+        u9 = public_url(getattr(BUILDER, "cfg", None))
+        if u9:
+            return f"보기: {u9}/v2/#daily"
     except Exception:
         pass
     return "보기: 일별 기록 탭"
@@ -15288,6 +15295,26 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def _login_startup_warnings(cfg):
+    try:
+        web9 = (cfg or {}).get("web") or {}
+        mode9 = web9.get("bind", "loopback")
+        ext9, _why = extra_host(cfg)
+        tail9 = isinstance(ext9, str) and ext9.startswith("100.") and 64 <= int(ext9.split(".")[1]) <= 127
+        if not login_auth.S.enabled:
+            if ext9:
+                log.error("★웹 로그인이 꺼져 있어요 — %s(%s)에 닿는 누구나 대시보드를 보고 바꿀 수 있어요★ config.json web.login.enabled 를 "
+                          "true 로(또는 키 삭제) 바꾸고 tj-web 을 다시 시작하세요", ext9, "테일넷" if tail9 else "사설망")
+            else:
+                log.error("웹 로그인이 꺼져 있어요(web.login.enabled=false) — 이 컴퓨터의 다른 프로그램·사용자도 대시보드를 열 수 있어요. "
+                          "리버스 프록시·터널 요청은 거부합니다(403). 켜려면 enabled 를 true 로(또는 키 삭제)")
+        elif ext9 and not tail9 and not ((web9.get("login") or {}).get("secure_cookie") is True if isinstance(web9.get("login"), dict) else False):
+            log.warning("웹 로그인 켜짐 · 사설 IP(%s) 바인딩은 HTTP 라 비밀번호·로그인 쿠키가 같은 네트워크에 암호화 없이 오가요 — "
+                        "테일넷(bind \"tailscale\")이나 HTTPS 리버스 프록시를 쓰세요(bind=%s)", ext9, mode9)
+    except Exception as e:
+        log.warning("로그인 상태 안내 실패: %s", type(e).__name__)
+
+
 def main():
     global BUILDER
     if onboarding.demo_main(sys.modules[__name__]):
@@ -15324,6 +15351,7 @@ def main():
     lo_t = threading.Thread(target=lo.serve_forever, daemon=True, name="http-lo")
     lo_t.start()
     log.info("가동: http://127.0.0.1:%d (루프백)", port)
+    _login_startup_warnings(cfg)
     ext = {"srv": None, "host": None, "thread": None, "why": None, "bind_err": None}
     while True:
         if not lo_t.is_alive():

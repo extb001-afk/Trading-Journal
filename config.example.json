@@ -125,10 +125,14 @@
     "port": 8023,
     "bind": "loopback",
     "login": {
+      "_note": "웹 로그인(비밀번호 하나) — 기본 켜짐(키가 없어도 켜짐). 처음엔 이 컴퓨터에서 http://127.0.0.1:8023/login 으로 비밀번호를 만든다. 끄기 = enabled false 후 tj-web 재시작. secure_cookie = true 면 쿠키에 항상 Secure(HTTPS 로만 열 때). 비밀번호 잊음 = python3 tools/reset_password.py",
       "enabled": true,
       "session_days": 30,
       "idle_days": 7
     },
+    "allowed_hosts": [],
+    "public_url": "",
+    "_proxy_note": "리버스 프록시·터널(예: 클라우드플레어 터널 → http://127.0.0.1:8023) 뒤에 둘 때: allowed_hosts 에 그 도메인, public_url 에 'https://도메인'(텔레그램 알림 '보기' 링크 — 비우면 링크 없음). 프록시는 Host 를 그대로 넘기고 X-Forwarded-For·X-Forwarded-Proto: https 를 붙여야 한다. 로그인이 꺼져 있으면 프록시 헤더가 붙은 요청은 전부 거부(403). ssh -R·socat·ngrok tcp 같은 TCP 중계는 이 컴퓨터 직접 접속처럼 보이므로 쓰지 말 것",
     "_note": "loopback = 이 컴퓨터에서만(기본·권장). tailscale = 테일넷 IP 에도 추가 바인딩(휴대폰 등). 사설 IP(192.168.x 등)를 적으면 같은 네트워크 누구나 접속 가능하니 주의. 공인 IP·0.0.0.0 은 거부된다."
   },
   "price_guard": {
@@ -221,7 +225,7 @@
   },
   "review": {
     "sell_eval_daily_max": 0,
-    "buy_eval_daily_max": 0
-  },
-  "review_note": "AI 매도·매수 평가(영수증) 하루 상한 — 0 = 끔(공개판 기본). 켜려면 예: 20. 내 컴퓨터의 claude CLI 로 영수증 요약을 보낸다 (일간·주간 AI 리뷰는 별도: TJ_ENABLE_REVIEW=1 로 tj-review 유닛을 켤 때만). 바꾼 뒤 tj-web 재시작"
+    "buy_eval_daily_max": 0,
+    "_note": "AI 매도·매수 평가 하루 최대 호출 수 — 0 = 꺼짐(기본). 켜려면 예: 20(내 컴퓨터의 claude CLI). 일간·주간 AI 리뷰는 별도(TJ_ENABLE_REVIEW=1 로 tj-review 유닛을 켤 때만) — coach_role(리뷰 첫 줄 트레이더 설명)·known_patterns(지적하지 않을 내 운용 패턴 목록)로 내 방식에 맞춘다. 바꾼 뒤 tj-web 재시작"
+  }
 }

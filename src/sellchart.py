@@ -523,6 +523,18 @@ def daily_max(cfg, kind="sell") -> int:
     return max(0, min(EVAL_DAILY_CAP, v))
 
 
+def budget_msg(cap, kind="sell") -> str:
+    side_ko = "매수" if kind == "buy" else "매도"
+    try:
+        n = int(cap or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        key = "buy_eval_daily_max" if kind == "buy" else "sell_eval_daily_max"
+        return f"AI {side_ko} 평가가 꺼져 있어요 — 켜려면 config.json 의 review.{key} 를 1 이상(하루 최대 횟수)으로"
+    return f"오늘 AI {side_ko} 평가 한도({n}회)를 다 썼어요"
+
+
 def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, slots=(0,), model=None, skip_if_fresh=True):
     rd = None
     if runner is None or binfn is None or model is None:
@@ -543,10 +555,12 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
             old9 = store.find(date, sym, fp)
             if old9 and old9.get("pv") == (rp.BUY_EVAL_VERSION if kind == "buy" else rp.SELL_EVAL_VERSION):
                 return old9, None
+        cap = daily_max(cfg, kind)
+        if cap <= 0:
+            return None, budget_msg(0, kind)
         b = (binfn or rd.claude_bin)()
         if not b:
             return None, "claude CLI 를 찾지 못했어요"
-        cap = daily_max(cfg, kind)
         day = datetime.fromtimestamp(now or time.time(), KST).strftime("%Y-%m-%d")
         nonce = secrets.token_hex(8)
         prompt = rp.buy_eval_prompt(nonce) if kind == "buy" else rp.sell_eval_prompt(nonce)
@@ -563,7 +577,7 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
             if not store.budget_take(day, cap, f"{key}|{fp}"):
                 if calls:
                     break
-                return None, f"오늘 AI {side_ko} 평가 한도({cap}회)를 다 썼어요"
+                return None, budget_msg(cap, kind)
             calls += 1
             rv = run(b, prompt if attempt == 0 else prompt.replace("\n데이터:\n", rp.SELL_EVAL_RETRY.format(probs="·".join(probs or ["json"])) + "데이터:\n"), body)
             res, probs = normalize_eval(rv, inp.get("cur") or "USD", kind, score=fixed9)

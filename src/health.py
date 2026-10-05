@@ -23,6 +23,7 @@ STATUS_PATH = os.path.join(common.STATE_DIR, "health_status.json")
 HB_DIR = os.path.join(common.STATE_DIR, "health")
 UNITS = ["tj-evm", "tj-sol", "tj-bsc", "tj-core", "tj-web", "tj-alert", "tj-review", "tj-ex", "tj-exf"]
 OPTIONAL_UNITS = []
+_UNIT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 LEVELS = {"ok": 0, "warn": 1, "crit": 2}
 BUCKET = 300
 
@@ -32,7 +33,7 @@ DEFAULTS = {
     "units": UNITS,
     "ignore_units": [],
     "optional_units": OPTIONAL_UNITS,
-    "tunnel_ready_url": "http://127.0.0.1:20241/ready",
+    "tunnel": {},
     "rss_warn_mb": {"tj-web": 2200, "*": 600},
     "checks_off": [],
     "telegram_min_level": "crit",
@@ -146,6 +147,17 @@ def settings(cfg: dict) -> dict:
             out["t"][k9] = v9
     if os.environ.get("TJ_HEALTH") == "0":
         out["enabled"] = False
+    tn = out.get("tunnel") if isinstance(out.get("tunnel"), dict) else {}
+    unit = str(tn.get("unit") or "").strip()
+    url = str(tn.get("ready_url") or "").strip()
+    if unit and _UNIT_RE.fullmatch(unit) and url.startswith(("http://127.0.0.1", "http://localhost")):
+        out["tunnel"] = {"unit": unit, "ready_url": url}
+        if unit not in out["units"]:
+            out["units"] = list(out["units"]) + [unit]
+        if unit not in (out.get("optional_units") or []):
+            out["optional_units"] = list(out.get("optional_units") or []) + [unit]
+    else:
+        out["tunnel"] = {}
     out["bf_stall_sec"] = float(((cfg or {}).get("backfill") or {}).get("stall_sec") or 3600)
     return out
 
@@ -1188,9 +1200,11 @@ def collect_dm(st: dict, now: float, tg_configured: bool):
 def collect_tunnel(h: dict, pm2):
     if os.environ.get("TJ_HEALTH_NO_NET") == "1":
         return None
-    if pm2 is not None and "tj-tunnel" not in pm2:
+    tn = h.get("tunnel") if isinstance(h.get("tunnel"), dict) else {}
+    unit = tn.get("unit") or ""
+    if not unit or (pm2 is not None and unit not in pm2):
         return None
-    url = h.get("tunnel_ready_url") or ""
+    url = tn.get("ready_url") or ""
     if not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
         return None
     import urllib.request
@@ -1546,13 +1560,14 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "설정 › '과거 데이터 더 가져오기' 카드의 오류 확인 — 디스크·게이트 사유면 원인 해소 후 기다리면 재시도",
             persist=0, resolve=600, remind=False, kind="rebuild")
     tn = obs.get("tunnel")
-    if tn is not None and "tj-tunnel" in units:
+    tu = ((h.get("tunnel") or {}) if isinstance(h.get("tunnel"), dict) else {}).get("unit")
+    if tn is not None and tu and tu in units:
         bad = not tn.get("ok") or int(tn.get("n") or 0) < 1
-        add("tunnel:ready", "tj-tunnel", "원격 터널 연결 끊김" if bad else "원격 터널", "crit" if bad else "ok",
+        add("tunnel:ready", tu, "터널 연결 끊김" if bad else "터널", "crit" if bad else "ok",
             (f"연결 {int(tn.get('n') or 0)}개" + (f" · {tn['err']}" if tn.get("err") else "")) if bad else f"연결 {int(tn.get('n') or 0)}개",
-            "pm2 logs tj-tunnel --lines 50 — 반복되면 pm2 restart tj-tunnel (로컬 대시보드는 영향 없음)",
+            f"pm2 logs {tu} --lines 50 — 반복되면 pm2 restart {tu} (로컬 대시보드는 영향 없음)",
             persist=t.get("tunnel_persist", 300), kind="tunnel")
-        chip("원격 터널" + (" 끊김" if bad else ""))
+        chip("터널" + (" 끊김" if bad else ""))
     rw = h.get("rss_warn_mb") or {}
     rss_b = obs.get("rss") or {}
     for u in units:

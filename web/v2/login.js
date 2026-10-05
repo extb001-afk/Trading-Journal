@@ -16,6 +16,33 @@
   function mins(s) { s = Math.max(0, Math.round(+s || 0)); var m = Math.floor(s / 60), r = s % 60; return m >= 60 ? Math.floor(m / 60) + '시간 ' + (m % 60) + '분' : m ? m + '분 ' + (r < 10 ? '0' : '') + r + '초' : r + '초'; }
   function port() { return location.port || (location.protocol === 'https:' ? '443' : '80'); }
 
+  function plainHttp() {
+    if (location.protocol !== 'http:') return false;
+    var h = String(location.hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h === '::1' || /^127\./.test(h) || /\.ts\.net$/.test(h)) return false;
+    var m = /^100\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(h);
+    if (m && +m[1] >= 64 && +m[1] <= 127) return false;
+    return true;
+  }
+  function plainWarn() {
+    var w = $('plain');
+    if (!w || !plainHttp()) return;
+    w.textContent = '주의: 암호화되지 않은 주소(http)예요 — 비밀번호와 로그인 쿠키가 이 네트워크에 그대로 오가요. 테일넷(테일스케일)이나 HTTPS 주소로 여는 걸 권해요.';
+    show(w, true);
+  }
+  var WIPE_LS = ['tj_v2_ver', 'tj_v2_full', 'tj_logo_fail'], wiped = false;
+  function wipeCache() {
+    if (wiped) return;
+    wiped = true;
+    WIPE_LS.forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {  } });
+    try {
+      var ks = [];
+      for (var i = 0; i < sessionStorage.length; i++) { var k = sessionStorage.key(i); if (k && k.indexOf('tj_') === 0) ks.push(k); }
+      ks.forEach(function (k) { try { sessionStorage.removeItem(k); } catch (e) {  } });
+    } catch (e) {  }
+    try { indexedDB.deleteDatabase('tj_v2'); } catch (e) {  }
+  }
+
   var lockT = null, lockUntil = 0, busy = false, ST = null;
   function lockFor(sec) {
     lockUntil = Date.now() + Math.max(1, +sec || 1) * 1000;
@@ -38,6 +65,7 @@
   }
 
   function modeLogin() {
+    wipeCache(); plainWarn();
     $('ttl').textContent = '로그인';
     $('desc').textContent = '비밀번호를 넣으면 이 기기에서 ' + ((ST && ST.sessionDays) || 30) + '일 동안 로그인이 유지돼요 (' + ((ST && ST.idleDays) || 7) + '일 동안 쓰지 않으면 다시 물어요).';
     show($('fLogin'), true); show($('fSetup'), false); show($('step'), false);
@@ -46,6 +74,7 @@
     else { var p = $('pw'); if (p) p.focus(); }
   }
   function modeSetup() {
+    wipeCache();
     $('ttl').textContent = '비밀번호 만들기';
     $('desc').textContent = '이 대시보드를 여는 비밀번호예요. 다른 기기(같은 와이파이·테일넷·휴대폰)에서 열 때도 이 비밀번호를 물어요. 계정은 하나라 아이디는 없어요.';
     show($('step'), true); show($('fSetup'), true); show($('fLogin'), false);
@@ -53,6 +82,7 @@
     rules(); var n = $('np'); if (n) n.focus();
   }
   function modeSetupElsewhere() {
+    wipeCache();
     $('ttl').textContent = '아직 비밀번호가 없어요';
     $('desc').textContent = '보안을 위해 첫 비밀번호는 tj-bot 이 도는 그 컴퓨터에서만 만들 수 있어요.';
     show($('fLogin'), false); show($('fSetup'), false); show($('step'), true);
@@ -60,6 +90,7 @@
     $('foot').textContent = '';
   }
   function modeDamaged() {
+    wipeCache();
     $('ttl').textContent = '로그인할 수 없어요';
     $('desc').textContent = '';
     show($('fLogin'), false); show($('fSetup'), false); show($('step'), false);

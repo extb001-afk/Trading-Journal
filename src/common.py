@@ -394,6 +394,13 @@ def apply_activity_gate(cfg: dict) -> list:
             chains[c] = d["block"]
             try:
                 import chaincatalog
+                rt9 = chaincatalog.recon_tokens_for(cfg, c)
+            except ImportError:
+                rt9 = {}
+            if rt9:
+                chains[c]["recon_tokens"] = dict(chains[c].get("recon_tokens") or {}, **rt9)
+            try:
+                import chaincatalog
                 sym, wr = chaincatalog.native_of(c)
             except ImportError:
                 sym, wr = None, None
@@ -605,7 +612,13 @@ def read_json(path: str, default):
 
 
 _LINK_RES = None
-LINK_KEEP = frozenset(("gate.io", "crypto.com"))
+LINK_KEEP = frozenset((
+    "gate.io", "crypto.com", "xt.com",
+    "pump.fun", "letsbonk.fun", "bonk.fun", "four.meme", "bags.fm",
+    "jup.ag", "li.fi", "gas.zip", "ether.fi", "friend.tech", "io.net",
+    "gmgn.ai", "axiom.trade",
+    "opensea.io", "magiceden.io", "blur.io",
+))
 
 
 def strip_links(text):
@@ -616,16 +629,18 @@ def strip_links(text):
         import re as _re9
         _LINK_RES = (
             _re9.compile(r"(?i)(?:https?|wss?|ftp|tg)://\S+"),
-            _re9.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}"),
-            _re9.compile(r"(?<![A-Za-z0-9._%+@-])((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[a-z]{2,24})(?![A-Za-z0-9-])(/\S*)?"),
-            _re9.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z0-9_]{2,32}"),
+            _re9.compile(r"([A-Za-z0-9._%+-]+)@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}"),
+            _re9.compile(r"(?<![A-Za-z0-9._%+@-])((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[a-z]{2,24}|(?i:com|net|org|xyz|info)))"
+                         r"(?![A-Za-z0-9-])([/?#]\S*|:\d+\S*)?"),
+            _re9.compile(r"(?<![A-Za-z0-9_.@])@[A-Za-z][A-Za-z0-9_]+"),
             _re9.compile(r"\(\s*\)|\[\s*\]"),
             _re9.compile(r"[ \t]{2,}"),
-            _re9.compile(r"\s+([.,;:!?)])"),
+            _re9.compile(r"\s+([.,;:!?)])(?!\d)"),
+            _re9.compile(r"\d[\d.]*"),
         )
-    url, mail, dom, handle, empty, spaces, before_p = _LINK_RES
+    url, mail, dom, handle, empty, spaces, before_p, num = _LINK_RES
     s = url.sub("", text)
-    s = mail.sub("", s)
+    s = mail.sub(lambda m: m.group(1) if num.fullmatch(m.group(1)) else "", s)
     s = dom.sub(lambda m: m.group(0) if m.group(1).lower() in LINK_KEEP and not m.group(2) else "", s)
     s = handle.sub("", s)
     if s == text:

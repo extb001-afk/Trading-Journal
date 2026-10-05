@@ -52,9 +52,10 @@ def main(argv):
             return 1
         login_auth.set_password(pw)
         _rm(login_auth.SESS_PATH)
+        _rm(login_auth.INTERNAL_PATH)
         print("새 비밀번호를 저장했어요 · 모든 기기 로그아웃 — 브라우저에서 다시 로그인하세요")
         return 0
-    have = [p for p in (login_auth.AUTH_PATH, login_auth.SESS_PATH) if os.path.exists(p)]
+    have = [p for p in (login_auth.AUTH_PATH, login_auth.SESS_PATH, login_auth.INTERNAL_PATH) if os.path.exists(p)]
     if not have:
         print("지울 것이 없어요(비밀번호·세션 파일 없음)")
         return 0

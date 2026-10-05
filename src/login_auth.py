@@ -38,8 +38,11 @@ LOCK_DECAY = 86400
 GLOBAL_FAILS, GLOBAL_WINDOW = 50, 600
 RL_MAX_KEYS = 10000
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_\-]{43}")
-_PROXY_HDRS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "X-Real-Ip",
-               "Cf-Connecting-Ip", "Cf-Ray", "Cf-Visitor")
+PROXY_HDRS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwarded", "X-Real-Ip", "Via", "Cdn-Loop",
+              "Cf-Connecting-Ip", "Cf-Ray", "Cf-Visitor", "Cf-Warp-Tag-Id", "True-Client-Ip")
+_PROXY_PREFIX = ("cf-", "x-forwarded-")
+_PROXY_HDRS = PROXY_HDRS
+LOGIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 _COMMON_WEAK = {"password12", "password123", "password1234", "password12345", "passw0rd12", "qwertyuiop", "qwerty1234",
                 "qwerty12345", "1q2w3e4r5t", "1q2w3e4r5t6y", "1qaz2wsx3edc", "asdfghjkl;", "asdfghjkl1", "zxcvbnm123",
                 "iloveyou12", "admin12345", "admin123456", "letmein123", "welcome123", "abc1234567", "abcd123456",
@@ -60,13 +63,13 @@ def _int(v, dflt, lo, hi):
 class Settings:
     def __init__(self, raw):
         r = raw if isinstance(raw, dict) else {}
-        self.enabled = r.get("enabled") is True
+        self.enabled = raw is not False and r.get("enabled") is not False
         self.session_days = _int(r.get("session_days"), 30, 1, 365)
         self.idle_days = min(_int(r.get("idle_days"), 7, 1, 365), self.session_days)
         self.secure = r.get("secure_cookie") is True
 
 
-S = Settings(None)
+S = Settings({"enabled": False})
 _LOCK = threading.RLock()
 _AUTH = {"sig": False, "rec": None, "err": None}
 _SESS = {"sig": False, "d": {}, "saved": 0.0}
@@ -75,13 +78,19 @@ _HASH_SEM = threading.BoundedSemaphore(2)
 
 def init(cfg: dict) -> Settings:
     global S
-    S = Settings(((cfg or {}).get("web") or {}).get("login"))
+    w = (cfg or {}).get("web") if isinstance((cfg or {}).get("web"), dict) else {}
+    S = Settings(w.get("login", None))
     if S.enabled:
         common.ensure_dirs()
-        internal_token(create=True)
+        rotate_internal_token()
         st = password_state()[0]
         log.info("웹 로그인 켜짐 — 세션 %d일 · 미사용 %d일 · 비밀번호 %s", S.session_days, S.idle_days,
                  {"set": "설정됨", "none": "없음(이 컴퓨터에서 /login 으로 만드세요)", "damaged": "파일 손상(tools/reset_password.py)"}[st])
+    else:
+        try:
+            os.unlink(INTERNAL_PATH)
+        except OSError:
+            pass
     return S
 
 
@@ -265,7 +274,7 @@ def check_session(tok):
         if ent is None:
             return None
         st, rec = password_state()
-        if st == "none" or (st == "set" and not hmac.compare_digest(str(ent.get("pg") or ""), _pg(rec))):
+        if st != "set" or not hmac.compare_digest(str(ent.get("pg") or ""), _pg(rec)):
             return None
         if not _alive(ent, now):
             d.pop(tid, None)
@@ -292,8 +301,10 @@ def session_count() -> int:
     now = _now()
     with _LOCK:
         st, rec = password_state()
-        pg = _pg(rec) if st == "set" else None
-        return sum(1 for v in _sessions_locked().values() if _alive(v, now) and (st == "damaged" or v.get("pg") == pg))
+        if st != "set":
+            return 0
+        pg = _pg(rec)
+        return sum(1 for v in _sessions_locked().values() if _alive(v, now) and v.get("pg") == pg)
 
 
 def _sess_csrf(tok: str) -> str:
@@ -322,6 +333,12 @@ def internal_token(create=False) -> str:
     return t
 
 
+def rotate_internal_token() -> str:
+    t = secrets.token_urlsafe(32)
+    ss._atomic_write_text(INTERNAL_PATH, t + "\n", 0o600)
+    return t
+
+
 def internal_headers() -> dict:
     t = internal_token(False)
     return {INTERNAL_HDR: t} if t else {}
@@ -339,8 +356,27 @@ def _peer(h):
     return _ip(h.client_address[0] if h.client_address else "")
 
 
+def _proxy_marked(hd) -> bool:
+    if any(hd.get(k) is not None for k in PROXY_HDRS):
+        return True
+    try:
+        return any(str(k).lower().startswith(_PROXY_PREFIX) for k in hd.keys())
+    except Exception:
+        return False
+
+
+def mark_conn(h) -> None:
+    try:
+        if not getattr(h, "tj_conn_proxied", False) and _proxy_marked(h.headers):
+            h.tj_conn_proxied = True
+    except Exception:
+        pass
+
+
 def proxied(h) -> bool:
-    return any(h.headers.get(k) is not None for k in _PROXY_HDRS)
+    if getattr(h, "tj_conn_proxied", False):
+        return True
+    return _proxy_marked(h.headers)
 
 
 def direct_loopback(h) -> bool:
@@ -367,12 +403,14 @@ def _bucket(ip: str) -> str:
     return str(a)
 
 
-def is_https(h) -> bool:
-    if S.secure:
-        return True
+def proxied_https(h) -> bool:
     p = _peer(h)
     xfp = (h.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
     return bool(p is not None and p.is_loopback and xfp == "https")
+
+
+def is_https(h) -> bool:
+    return bool(S.secure or proxied_https(h))
 
 
 def _hostname(h) -> str:
@@ -504,7 +542,10 @@ def _json(h, code, obj, extra=()):
 def _file(h, name, ctype):
     with open(os.path.join(V2_DIR, name), "rb") as f:
         raw = f.read()
-    h._send_bytes(200, raw, None, ctype, extra=(("Referrer-Policy", "no-referrer"),))
+    extra = (("Referrer-Policy", "no-referrer"),)
+    if ctype.startswith("text/html"):
+        extra += (("Content-Security-Policy", LOGIN_CSP),)
+    h._send_bytes(200, raw, None, ctype, extra=extra)
     return True
 
 
@@ -714,13 +755,11 @@ def _session_post(h, onboarding, path, sess, tok):
             nrec = set_password(new, expected=rec)
         except AuthChanged:
             return _json(h, 409, {"ok": False, "error": "비밀번호가 방금 바뀌었어요 — 새로고침 후 다시 해 주세요"})
-        n = revoke(None, keep=sess["tid"])
-        d = _sessions_locked()
-        if sess["tid"] in d:
-            d[sess["tid"]]["pg"] = _pg(nrec)
-            _save_sessions_locked()
-    log.info("웹 로그인 비밀번호 변경 — 다른 세션 %d개 로그아웃", n)
-    return _json(h, 200, {"ok": True, "revoked": n})
+        n = revoke(None)
+        ntok = new_session(nrec)
+    log.info("웹 로그인 비밀번호 변경 — 다른 세션 %d개 로그아웃 · 이 기기 새 세션", max(0, n - 1))
+    return _json(h, 200, {"ok": True, "revoked": max(0, n - 1), "csrf": _sess_csrf(ntok)},
+                 (_set_cookie(h, ntok, S.session_days * 86400),))
 
 
 def _deny(h, method, path, query, had_cookie):
@@ -760,10 +799,21 @@ def _off(h, method, path, query) -> bool:
     return False
 
 
+def _refuse_proxied(h) -> bool:
+    body = {"ok": False, "error": "proxy requires login",
+            "hint": "리버스 프록시·터널로 열려면 config.json 의 web.login 을 켜고(enabled true 또는 키 삭제) tj-web 을 다시 시작하세요"}
+    h.close_connection = True
+    _json(h, 403, body)
+    return True
+
+
 def handle(h, method: str, path: str, query: str = "") -> bool:
-    if getattr(h, "tj_remote_ok", False):
-        return False
     import onboarding
+    if not S.enabled and not onboarding.DEMO and proxied(h):
+        try:
+            return _refuse_proxied(h)
+        except Exception:
+            return True
     if not S.enabled or onboarding.DEMO:
         try:
             return _off(h, method, path, query)
@@ -784,6 +834,8 @@ def handle(h, method: str, path: str, query: str = "") -> bool:
 def _handle(h, onboarding, method, path, query):
     if not onboarding.guard(h, method):
         return True
+    if not os.path.exists(INTERNAL_PATH):
+        internal_token(create=True)
     if method == "GET":
         if path == "/login":
             sess, _t, _h = session_of(h)
