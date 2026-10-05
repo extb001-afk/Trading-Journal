@@ -1,0 +1,227 @@
+{
+  "evm_poll_sec": 45,
+  "backfill_full_history": false,
+  "chains": {
+    "eth": {
+      "blockscout": "https://eth.blockscout.com",
+      "conf_depth": 12,
+      "blocks_per_day": 7200,
+      "etherscan_chainid": 1
+    },
+    "base": {
+      "blockscout": "https://base.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 43200
+    },
+    "arbitrum": {
+      "blockscout": "https://arbitrum.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 340000,
+      "etherscan_chainid": 42161
+    },
+    "optimism": {
+      "blockscout": "https://optimism.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 43200
+    },
+    "polygon": {
+      "blockscout": "https://polygon.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 40000,
+      "etherscan_chainid": 137
+    },
+    "scroll": {
+      "blockscout": "https://scroll.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 28800
+    },
+    "zksync": {
+      "blockscout": "https://zksync.blockscout.com",
+      "conf_depth": 30,
+      "blocks_per_day": 80000
+    },
+    "gnosis": {
+      "blockscout": "https://gnosis.blockscout.com",
+      "conf_depth": 20,
+      "blocks_per_day": 17000
+    },
+    "robinhood": {
+      "_note": "기본 비활성 — 블록스카웃이 일반 요청을 막는 경우가 있다. 켜려면 enabled=true + browser_ua",
+      "discovery": "rpc",
+      "rpcs": [
+        "https://rpc.mainnet.chain.robinhood.com"
+      ],
+      "blockscout": "https://robinhoodchain.blockscout.com",
+      "conf_depth": 600,
+      "blocks_per_day": 860000,
+      "chain_id": 4663
+    },
+    "arc": {
+      "_note": "Circle Arc L1(chainId 5042, 네이티브 가스 = USDC 18자리, 2026-09-16 공개 메인넷). RPC 전용(discovery=rpc — explorer.arc.io 는 Cloudflare 챌린지 403). 네이티브 이동은 시스템 이벤트(EIP-7708, 0xffff…fffe)로 수집, USDC ERC-20 거울(0x3600…0000)은 같은 잔고라 토큰으로 안 받는다. getLogs 1만 블록 상한. start_block 20,900,000 = 2026-09-14 23:56 UTC(공개 출시 전)",
+      "discovery": "rpc",
+      "rpcs": [
+        "https://rpc.mainnet.arc.io",
+        "https://rpc.quicknode.mainnet.arc.io"
+      ],
+      "conf_depth": 20,
+      "blocks_per_day": 167000,
+      "chain_id": 5042,
+      "getlogs_span": 10000,
+      "start_block": 20900000
+    }
+  },
+  "wrapped_native": {
+    "eth": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+    "base": "0x4200000000000000000000000000000000000006",
+    "optimism": "0x4200000000000000000000000000000000000006",
+    "arbitrum": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+    "polygon": "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
+    "scroll": "0x5300000000000000000000000000000000000004",
+    "zksync": "0x5aea5775959fbc2557cc8789bc1bf90a239d9a91",
+    "gnosis": "0xe91d153e0b41518a2ce8dd3d7944fa863463a97d",
+    "bsc": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+  },
+  "native_symbol": {
+    "arc": "USDC",
+    "eth": "ETH",
+    "base": "ETH",
+    "arbitrum": "ETH",
+    "optimism": "ETH",
+    "polygon": "POL",
+    "scroll": "ETH",
+    "zksync": "ETH",
+    "gnosis": "XDAI",
+    "bsc": "BNB",
+    "sol": "SOL"
+  },
+  "wallets": [],
+  "exchange_addresses": [],
+  "sol": {
+    "rpc": "helius",
+    "rpc_fallback": "https://solana-rpc.publicnode.com",
+    "poll_sec": 60,
+    "ata_every_cycles": 5,
+    "addr_pace_sec": 0.25
+  },
+  "bsc": {
+    "logs_rpcs": [
+      "https://bsc.rpc.blxrbdn.com",
+      "https://rpc-bsc.48.club",
+      "https://bsc.drpc.org"
+    ],
+    "logs_sleep_sec": 1.2,
+    "detail_rpcs": [
+      "https://bsc-dataseed.bnbchain.org",
+      "https://bsc-dataseed1.bnbchain.org",
+      "https://bsc-dataseed2.bnbchain.org",
+      "https://bsc-dataseed3.bnbchain.org"
+    ],
+    "poll_sec": 90,
+    "getlogs_span": 5000,
+    "backfill_days": 150,
+    "conf_depth": 20
+  },
+  "web": {
+    "port": 8023,
+    "bind": "loopback",
+    "login": {
+      "enabled": true,
+      "session_days": 30,
+      "idle_days": 7
+    },
+    "_note": "loopback = 이 컴퓨터에서만(기본·권장). tailscale = 테일넷 IP 에도 추가 바인딩(휴대폰 등). 사설 IP(192.168.x 등)를 적으면 같은 네트워크 누구나 접속 가능하니 주의. 공인 IP·0.0.0.0 은 거부된다."
+  },
+  "price_guard": {
+    "min_reserve_usd": 10000,
+    "dex_max_age_sec": 21600,
+    "_note": "DEX 가격 유동성 가드 — 풀 유동성 합이 이보다 얇거나 보유 평가액이 풀 유동성보다 크면 그 토큰은 평가불가 0 (얇은 풀의 비정상 가격이 총자산을 부풀리는 것 방지)"
+  },
+  "balance_check": {
+    "enabled": true,
+    "interval_sec": 3600,
+    "min_usd": 1000,
+    "diff_abs_usd": 500,
+    "diff_pct": 0.02,
+    "max_calls": 400,
+    "_note": "온체인 잔고 상시 대조(알람 전용, 원장 무변경) — tj-web 스레드. 결과 state/onchain_check.json, 확정 불일치는 하루 1회 텔레그램 알림"
+  },
+  "chain_sweep": {
+    "enabled": true,
+    "auto_enable": false,
+    "interval_sec": 86400,
+    "min_usd": 1.0,
+    "ignore": [],
+    "_note": "미추적 체인 점검(src/chainsweep.py, tj-web 하루 1회 — 등록 EVM 주소 × 66체인 nonce·잔고) + (체인, 지갑) 활동 게이트(state/chain_activity.json). auto_enable=true 면 활동이 확인된 쌍만 자동 추적(src/chaincatalog.py). ignore: ['<체인>', '<체인>:<0x지갑>']"
+  },
+  "price_overrides": {},
+  "price_overrides_note": "수동 가격 고정용 비상 스위치. 'chain:CA소문자': USD고정가(0=평가불가). 평시엔 CA·체인 DEX 실가가 1차 소스라 불필요. 수정 후 tj-web 재시작",
+  "backfill_months": 5,
+  "other_assets": {
+    "quotes": true,
+    "quote_every_sec": 900,
+    "broker_every_sec": 3600
+  },
+  "brokers_note": "기타 자산 탭 증권사 보유 동기화(읽기 전용) — 미검증: 공개 문서만 보고 작성, 실제 계정으로 시험 안 함(완벽하지 않음). 필드 설명 = src/brokers/README.md. 켜면 pm2 restart tj-web",
+  "brokers": {
+    "kis": {
+      "enabled": false,
+      "app_key": "",
+      "app_secret": "",
+      "account": "",
+      "paper": false,
+      "overseas": true
+    },
+    "kiwoom": {
+      "enabled": false,
+      "app_key": "",
+      "secret_key": "",
+      "mock": false,
+      "us": false
+    },
+    "ls": {
+      "enabled": false,
+      "app_key": "",
+      "app_secret": "",
+      "overseas": false
+    },
+    "dbsec": {
+      "enabled": false,
+      "app_key": "",
+      "app_secret": "",
+      "overseas": false
+    },
+    "toss": {
+      "enabled": false,
+      "client_id": "",
+      "client_secret": "",
+      "account_seq": "",
+      "cash": false
+    },
+    "alpaca": {
+      "enabled": false,
+      "key_id": "",
+      "secret_key": "",
+      "paper": false
+    },
+    "ibkr": {
+      "enabled": false,
+      "gateway_url": "https://localhost:5000/v1/api",
+      "account_id": ""
+    },
+    "schwab": {
+      "enabled": false,
+      "app_key": "",
+      "app_secret": "",
+      "refresh_token": ""
+    }
+  },
+  "hyperliquid": {
+    "spot": false,
+    "_note": "true = Hyperliquid(HyperCore) 현물 체결·입출금과 현물·무기한 현금·스테이킹 HYPE 잔고를 거래소 'hyperliquid' 처럼 원장·잔고 대사에 넣음. 주소 = perp_wallets 의 dex 'hyperliquid' 주소(설정 › 연결·키 › 퍼프 덱스에서 추가) · 빼려면 \"spot_exclude\": [\"0x…\"]. 바꾼 뒤 tj-exf·tj-web 재시작"
+  },
+  "review": {
+    "sell_eval_daily_max": 0,
+    "buy_eval_daily_max": 0
+  },
+  "review_note": "AI 매도·매수 평가(영수증) 하루 상한 — 0 = 끔(공개판 기본). 켜려면 예: 20. 내 컴퓨터의 claude CLI 로 영수증 요약을 보낸다 (일간·주간 AI 리뷰는 별도: TJ_ENABLE_REVIEW=1 로 tj-review 유닛을 켤 때만). 바꾼 뒤 tj-web 재시작"
+}

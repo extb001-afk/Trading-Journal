@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B0D11">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>로그인 · 온체인 매매일지</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%238AA8FF%22/%3E%3Cpath d=%22M10 8v16M16 6v20M22 10v12%22 stroke=%22%230E1014%22 stroke-width=%222%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<script src="/v2/login.js"></script>
+<style>
+:root{
+  --bg:#0B0D11; --surface:#13161C; --surface2:#171A21; --line:#1E222B; --line2:#2A303B;
+  --text:#E9ECF2; --text2:#C9CED8; --muted:#8B93A4;
+  --accent:#7C9CFF; --accentBg:rgba(124,156,255,.13); --onAccent:#0B0D11;
+  --warn:#F2C661; --warnBg:rgba(242,198,97,.12); --ok:#4FC3A1; --okBg:rgba(79,195,161,.13);
+  --danger:#F26B6B; --dangerBg:rgba(242,107,107,.13);
+  --shadow:none; --r:20px;
+  --sans:"IBM Plex Sans KR","Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,system-ui,"Apple SD Gothic Neo",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+html[data-theme="light"]{
+  --bg:#F3F4F7; --surface:#FFFFFF; --surface2:#F5F6F8; --line:#E5E8ED; --line2:#D7DCE3;
+  --text:#191F28; --text2:#4E5968; --muted:#616C7A;
+  --accent:#1B64DA; --accentBg:#EAF2FE; --onAccent:#FFFFFF;
+  --warn:#A65F00; --warnBg:#FFF4DE; --ok:#067647; --okBg:#E3F6EC;
+  --danger:#C62828; --dangerBg:#FDECEC;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.01em;min-height:100vh;min-height:100dvh;word-break:keep-all;overflow-wrap:break-word;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;letter-spacing:inherit}
+input{font:inherit;color:var(--text);letter-spacing:inherit}
+code{font-family:var(--mono);font-size:12.5px;background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:1px 5px;word-break:break-all}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.hidden{display:none!important}
+.box{width:100%;max-width:400px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:750;font-size:18px;letter-spacing:-.03em;margin:0 0 18px 4px}
+.lmark{width:28px;height:28px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none;color:var(--onAccent)}
+.lmark svg{width:18px;height:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:26px 24px}
+.step{display:inline-block;font-size:12px;font-weight:700;color:var(--accent);background:var(--accentBg);padding:2px 9px;border-radius:99px;margin-bottom:10px}
+h1{font-size:20px;font-weight:750;letter-spacing:-.02em}
+.desc{font-size:13.5px;color:var(--muted);margin:6px 0 18px;line-height:1.6}
+.lab{display:block;font-size:12px;color:var(--muted);font-weight:650;margin:0 0 5px}
+.fieldw{position:relative;margin-bottom:12px}
+.field{width:100%;height:44px;padding:0 64px 0 13px;border-radius:11px;border:1px solid var(--line);background:var(--surface2);font-size:15px;outline:none}
+.field:focus{border-color:var(--accent)}
+.field[disabled]{opacity:.55}
+.eye{position:absolute;right:6px;top:6px;height:32px;padding:0 10px;border-radius:8px;font-size:12.5px;font-weight:650;color:var(--muted)}
+.eye:hover{color:var(--text)}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;height:44px;margin-top:6px;border-radius:11px;font-size:15px;font-weight:700;background:var(--accent);color:var(--onAccent);transition:filter .15s}
+.btn:hover{filter:brightness(1.07)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;filter:none}
+.msg{font-size:13.5px;border-radius:11px;padding:10px 12px;margin:0 0 14px;line-height:1.55}
+.msg.e{background:var(--dangerBg);color:var(--danger)}
+.msg.w{background:var(--warnBg);color:var(--warn)}
+.msg.i{background:var(--surface2);color:var(--text2);border:1px solid var(--line)}
+.rules{list-style:none;font-size:12.5px;color:var(--muted);margin:2px 0 14px;display:grid;gap:3px}
+.rules li:before{content:"·";margin-right:6px}
+.rules li.ok{color:var(--ok)}
+.foot{font-size:12.5px;color:var(--muted);margin:14px 4px 0;line-height:1.6}
+.sp{height:4px}
+</style>
+</head>
+<body>
+<main class="box">
+  <div class="brand"><span class="lmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 4v16M12 2v20M18 6v12"/></svg></span>온체인 매매일지</div>
+  <section class="card" aria-labelledby="ttl">
+    <div id="step" class="step hidden">시작하기 1단계</div>
+    <h1 id="ttl">로그인</h1>
+    <p class="desc" id="desc">확인하는 중…</p>
+    <div id="msg" class="msg hidden" role="alert" aria-live="assertive"></div>
+
+    <form id="fLogin" class="hidden" autocomplete="on" novalidate>
+      <input type="text" name="username" value="tj-bot" autocomplete="username" class="hidden" aria-hidden="true" tabindex="-1" readonly>
+      <label class="lab" for="pw">비밀번호</label>
+      <div class="fieldw"><input class="field" id="pw" name="password" type="password" autocomplete="current-password" required maxlength="256" spellcheck="false" autocapitalize="off"><button type="button" class="eye" data-eye="pw" aria-controls="pw" aria-pressed="false">보기</button></div>
+      <button class="btn" id="bLogin" type="submit">로그인</button>
+    </form>
+
+    <form id="fSetup" class="hidden" autocomplete="on" novalidate>
+      <input type="text" name="username" value="tj-bot" autocomplete="username" class="hidden" aria-hidden="true" tabindex="-1" readonly>
+      <label class="lab" for="np">새 비밀번호</label>
+      <div class="fieldw"><input class="field" id="np" name="new-password" type="password" autocomplete="new-password" required maxlength="256" spellcheck="false" autocapitalize="off" aria-describedby="rules"><button type="button" class="eye" data-eye="np" aria-controls="np" aria-pressed="false">보기</button></div>
+      <label class="lab" for="np2">한 번 더</label>
+      <div class="fieldw"><input class="field" id="np2" name="new-password2" type="password" autocomplete="new-password" required maxlength="256" spellcheck="false" autocapitalize="off"><button type="button" class="eye" data-eye="np2" aria-controls="np2" aria-pressed="false">보기</button></div>
+      <ul class="rules" id="rules">
+        <li data-r="len">10자 이상</li>
+        <li data-r="same">같은 글자·숫자만 이어 쓰지 않기(숫자만이면 12자 이상)</li>
+        <li data-r="match">두 칸이 같게</li>
+      </ul>
+      <button class="btn" id="bSetup" type="submit">비밀번호 만들고 시작하기</button>
+    </form>
+  </section>
+  <p class="foot" id="foot"></p>
+</main>
+</body>
+</html>

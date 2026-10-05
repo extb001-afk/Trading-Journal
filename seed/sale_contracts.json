@@ -1,0 +1,19 @@
+{
+ "_note": "토큰 세일(경매) 참여 원가 연결 — src/sale_match.py. 원장 분류에는 쓰지 않는다(웹 원가 연결 전용). 주소는 소문자.",
+ "_cca": "Uniswap Continuous Clearing Auction 팩토리(CREATE2 — 체인 공통 주소). v1.0.0 / v1.1.0 / v2.0.0 / v2.1.0. 출처 github.com/Uniswap/continuous-clearing-auction · developers.uniswap.org Liquidity Launchpad Deployments.",
+ "cca_factories": [
+  "0x0000ccadf55c911a2fbc0bb9d2942aa77c6faa1d",
+  "0xcccccccae7503cac057829bf2811de42e16e0bd5",
+  "0x00cca200bf124dbfa848937c553864f4b4ce0632",
+  "0x000000001f26a0044baa66024e7b6599c61963f8"
+ ],
+ "chains": [
+  "eth",
+  "base",
+  "arbitrum"
+ ],
+ "_auctions": "이미 확인된 경매(팩토리 조회 없이 인정) — {chain:auction: {label}}",
+ "auctions": {},
+ "_redeem": "경매가 영수증 토큰을 나눠 주고 TGE 에 본 토큰으로 바꿔 주는 경우 {\"chain:영수증 토큰\": {\"to\": 본 토큰, \"sym\", \"decimals\", \"ratio\"}}. 수집기가 소각→수령 tx 로 자동 탐지도 한다(이 표는 폴백).",
+ "redeem": {}
+}

@@ -1,0 +1,524 @@
+{
+ "_note": "교차체인 브릿지 식별표(xchain_match) — 원장 분류(bridge_contracts.json)와 별개, 도착 tx 판정·출처 역추적·라벨 전용. 공개 프로토콜(Wormhole·CCTP·CCIP·deBridge·Across·LayerZero·Mayan·Allbridge·Relay)의 범용 컨트랙트만. conf: high = 공식 문서, med = 공개 탐색기 라벨.",
+ "sol_programs": {
+  "offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP OffRamp (Solana)",
+   "conf": "high"
+  },
+  "Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router (Solana)",
+   "conf": "high"
+  },
+  "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "conf": "high"
+  },
+  "wormDTUJ6AWPNvk59vGQbDvGJmqbDTdgWgAqcLBCgUb": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "conf": "high"
+  },
+  "CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd": {
+   "proto": "cctp",
+   "name": "Circle CCTP MessageTransmitter",
+   "conf": "high"
+  },
+  "CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessengerMinter",
+   "conf": "high"
+  },
+  "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC": {
+   "proto": "cctp",
+   "name": "Circle CCTP v2 MessageTransmitter",
+   "conf": "high"
+  },
+  "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe": {
+   "proto": "cctp",
+   "name": "Circle CCTP v2 TokenMessengerMinter",
+   "conf": "high"
+  },
+  "src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4": {
+   "proto": "debridge",
+   "name": "deBridge DLN Source",
+   "conf": "high"
+  },
+  "dst5MGcFPoBeREFAA5E3tU5ij8m5uVYwkzkSAbsLbNo": {
+   "proto": "debridge",
+   "name": "deBridge DLN Destination",
+   "conf": "high"
+  },
+  "BLZRi6frs4X4DNLw56V4EXai1b6QVESN1BhHBTYM9VcY": {
+   "proto": "mayan",
+   "name": "Mayan Swift",
+   "conf": "med"
+  },
+  "FC4eXxkyrMPTjiYUpp4EAnkmwMbQyZCBgf6b6MRSNWGu": {
+   "proto": "mayan",
+   "name": "Mayan Swap (WH)",
+   "conf": "med"
+  },
+  "BrdgN2RPzEMWF96ZbnnJaUtQDQx7VRXYaHHbYCBvceWB": {
+   "proto": "allbridge",
+   "name": "Allbridge Core",
+   "conf": "med"
+  },
+  "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6": {
+   "proto": "layerzero",
+   "name": "LayerZero V2 Endpoint",
+   "conf": "high"
+  },
+  "DLv3NggMiSaef97YCkew5xKUHDh13tVGZ7tydt3ZeAru": {
+   "proto": "across",
+   "name": "Across SVM SpokePool",
+   "conf": "med"
+  },
+  "tbr7Qje6qBzPwfM52csL5KFi8ps5c5vDyiVVBLYVdRf": {
+   "proto": "wormhole",
+   "name": "Wormhole Token Bridge Relayer",
+   "conf": "high"
+  },
+  "execXUrAsMnqMmTHj5m7N1YQgsDz3cwGLYCYyuDRciV": {
+   "proto": "wormhole",
+   "name": "Wormhole Executor",
+   "conf": "high"
+  }
+ },
+ "sol_log_markers": {
+  "Instruction: ReceiveWormholeMessage": "wormhole_ntt",
+  "Instruction: ReleaseInboundUnlock": "wormhole_ntt",
+  "Instruction: ReleaseInboundMint": "wormhole_ntt",
+  "Instruction: CompleteWrapped": "wormhole",
+  "Instruction: CompleteNative": "wormhole",
+  "Instruction: ReceiveMessage": "cctp",
+  "Instruction: FulfillOrder": "debridge",
+  "Instruction: LzReceive": "layerzero",
+  "Instruction: FillRelay": "across"
+ },
+ "sol_lp_programs": {
+  "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo": "Meteora DLMM",
+  "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB": "Meteora DAMM",
+  "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG": "Meteora DAMM v2",
+  "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK": "Raydium CLMM",
+  "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc": "Orca Whirlpool"
+ },
+ "sol_lp_markers": [
+  "Instruction: AddLiquidity",
+  "Instruction: RemoveLiquidity",
+  "Instruction: IncreaseLiquidity",
+  "Instruction: DecreaseLiquidity",
+  "Instruction: InitializePosition",
+  "Instruction: ClosePosition"
+ ],
+ "evm_contracts": {
+  "0x80226fc0ee2b096224eeac085bb9a8cba1146f7d": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "eth"
+   ],
+   "conf": "high"
+  },
+  "0x881e3a65b4d4a04dd529061dd0071cf975f58bcd": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0x141fa059441e0ca23ce184b6a78bafd2a517dde8": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "arbitrum"
+   ],
+   "conf": "high"
+  },
+  "0x3206695cae29952f4b0c22a169725a865bc8ce0f": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "optimism"
+   ],
+   "conf": "high"
+  },
+  "0x849c5ed5a80f5b408dd4969b78c2c8fdf0565bfe": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "polygon"
+   ],
+   "conf": "high"
+  },
+  "0x34b03cb9086d7d758ac55af71584f81a598759fe": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP Router",
+   "chains": [
+    "bsc"
+   ],
+   "conf": "high"
+  },
+  "0xf09afe78d3c7d359b334d7cb88995751f7ec5e13": {
+   "proto": "ccip",
+   "name": "Chainlink CCIP OnRamp (BSC → Solana)",
+   "chains": [
+    "bsc"
+   ],
+   "conf": "high"
+  },
+  "0x98f3c9e6e3face36baad05fe09d375ef1464288b": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "chains": [
+    "eth",
+    "bsc"
+   ],
+   "conf": "high"
+  },
+  "0xbebdb6c8ddc678ffa9f8748f85c815c556dd8ac6": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "chains": [
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0xa5f208e072434bc67592e4c49c1b991ba79bca46": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "chains": [
+    "arbitrum"
+   ],
+   "conf": "high"
+  },
+  "0xee91c335eab126df5fdb3797ea9d6ad93aec9722": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "chains": [
+    "optimism"
+   ],
+   "conf": "high"
+  },
+  "0x7a4b5a56256163f07b2c80a7ca55abe66c4ec4d7": {
+   "proto": "wormhole",
+   "name": "Wormhole Core",
+   "chains": [
+    "polygon"
+   ],
+   "conf": "high"
+  },
+  "0x3ee18b2214aff97000d974cf647e7c347e8fa585": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "eth"
+   ],
+   "conf": "high"
+  },
+  "0xb6f6d86a8f9879a9c87f643768d9efc38c1da6e7": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "bsc"
+   ],
+   "conf": "high"
+  },
+  "0x8d2de8d2f73f1f4cab472ac9a881c9b123c79627": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0x0b2402144bb366a632d14b83f244d2e0e21bd39c": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "arbitrum"
+   ],
+   "conf": "high"
+  },
+  "0x1d68124e65fafc907325e3edbf8c4d84499daa8b": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "optimism"
+   ],
+   "conf": "high"
+  },
+  "0x5a58505a96d1dbf8df91cb21b54419fc36e93fde": {
+   "proto": "wormhole",
+   "name": "Wormhole Portal Token Bridge",
+   "chains": [
+    "polygon"
+   ],
+   "conf": "high"
+  },
+  "0xef4fb24ad0916217251f553c0596f8edc630eb66": {
+   "proto": "debridge",
+   "name": "deBridge DlnSource",
+   "chains": [
+    "*"
+   ],
+   "conf": "high"
+  },
+  "0xe7351fd770a37282b91d153ee690b63579d6dd7f": {
+   "proto": "debridge",
+   "name": "deBridge DlnDestination",
+   "chains": [
+    "*"
+   ],
+   "conf": "high"
+  },
+  "0xbd3fa81b58ba92a82136038b25adec7066af3155": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessenger",
+   "chains": [
+    "eth"
+   ],
+   "conf": "high"
+  },
+  "0x19330d10d9cc8751218eaf51e8885d058642e08a": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessenger",
+   "chains": [
+    "arbitrum"
+   ],
+   "conf": "high"
+  },
+  "0x1682ae6375c4e4a97e4b583bc394c861a46d8962": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessenger",
+   "chains": [
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0xb3fa262d0fb521cc93be83d87b322b8a23daf3f0": {
+   "proto": "cctp",
+   "name": "Circle Bridge Kit (CCTP V2 래퍼)",
+   "chains": [
+    "base"
+   ],
+   "conf": "med"
+  },
+  "0x2b4069517957735be00cee0fadae88a26365528f": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessenger",
+   "chains": [
+    "optimism"
+   ],
+   "conf": "high"
+  },
+  "0x9daf8c91aefae50b9c0e69629d3f6ca40ca3b3fe": {
+   "proto": "cctp",
+   "name": "Circle CCTP TokenMessenger",
+   "chains": [
+    "polygon"
+   ],
+   "conf": "high"
+  },
+  "0x28b5a0e9c621a5badaa536219b3a228c8168cf5d": {
+   "proto": "cctp",
+   "name": "Circle CCTP v2 TokenMessenger",
+   "chains": [
+    "*"
+   ],
+   "conf": "high"
+  },
+  "0x81d40f21f12a8f0e3252bccb954d722d4c464b64": {
+   "proto": "cctp",
+   "name": "Circle CCTP v2 MessageTransmitter",
+   "chains": [
+    "*"
+   ],
+   "conf": "high"
+  },
+  "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "eth"
+   ],
+   "conf": "high"
+  },
+  "0x09aea4b2242abc8bb4bb78d537a67a245a7bec64": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0xe35e9842fceaca96570b734083f4a58e8f7c5f2a": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "arbitrum"
+   ],
+   "conf": "high"
+  },
+  "0x6f26bf09b1c792e3228e5467807a900a503c0281": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "optimism"
+   ],
+   "conf": "high"
+  },
+  "0x9295ee1d8c5b022be115a2ad3c30c72e34e7f096": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "polygon"
+   ],
+   "conf": "high"
+  },
+  "0x4e8e101924ede233c13e2d8622dc8aed2872d505": {
+   "proto": "across",
+   "name": "Across SpokePool",
+   "chains": [
+    "bsc"
+   ],
+   "conf": "high"
+  },
+  "0xa5f565650890fba1824ee0f21ebbbf660a179934": {
+   "proto": "relay",
+   "name": "Relay Receiver",
+   "chains": [
+    "*"
+   ],
+   "conf": "med"
+  },
+  "0xc38e4e6a15593f908255214653d3d947ca1c2338": {
+   "proto": "mayan",
+   "name": "Mayan Swift",
+   "chains": [
+    "*"
+   ],
+   "conf": "med"
+  },
+  "0x0654874eb7f59c6f5b39931fc45dc45337c967c3": {
+   "proto": "mayan",
+   "name": "Mayan Forwarder",
+   "chains": [
+    "*"
+   ],
+   "conf": "med"
+  },
+  "0x609c690e8f7d68a59885c9132e812eebdaaf0c9e": {
+   "proto": "allbridge",
+   "name": "Allbridge Core",
+   "chains": [
+    "eth"
+   ],
+   "conf": "med"
+  },
+  "0xa8969f3f8d97b3ed89d4e2ec19b6b0cfd504b212": {
+   "proto": "wormhole",
+   "name": "Wormhole TokenBridgeRelayer",
+   "chains": [
+    "eth"
+   ],
+   "conf": "high"
+  },
+  "0xee05c2e6075e2c86d1f5db4716ff2a6c18889b20": {
+   "proto": "wormhole",
+   "name": "Wormhole TokenBridgeRelayerWithReferrer",
+   "chains": [
+    "eth",
+    "base"
+   ],
+   "conf": "high"
+  },
+  "0x13b62003c8b126ec0748376e7ab22f79fb8bbdf2": {
+   "proto": "wormhole",
+   "name": "Wormhole Executor (VAAv1ReceiveWithGasDropOff)",
+   "chains": [
+    "eth",
+    "base"
+   ],
+   "conf": "high"
+  }
+ },
+ "solvers": {
+  "0xf70da97812cb96acdf810712aa562db8dfa3dbef": {
+   "proto": "relay",
+   "name": "Relay Solver",
+   "conf": "med"
+  },
+  "F7p3dFrjRTbtRp8FRF6qHLomXbKRBzpvBLjtQcfcgmNe": {
+   "proto": "relay",
+   "name": "Relay Solver (Solana)",
+   "conf": "med"
+  }
+ },
+ "wormhole_chain_ids": {
+  "1": "sol",
+  "2": "eth",
+  "4": "bsc",
+  "5": "polygon",
+  "23": "arbitrum",
+  "24": "optimism",
+  "30": "base",
+  "34": "scroll"
+ },
+ "debridge_chain_ids": {
+  "1": "eth",
+  "56": "bsc",
+  "137": "polygon",
+  "42161": "arbitrum",
+  "10": "optimism",
+  "8453": "base",
+  "7565164": "sol"
+ },
+ "evm_chain_ids": {
+  "1": "eth",
+  "56": "bsc",
+  "137": "polygon",
+  "42161": "arbitrum",
+  "10": "optimism",
+  "8453": "base",
+  "534352": "scroll",
+  "324": "zksync",
+  "100": "gnosis",
+  "792703809": "sol",
+  "5042": "arc"
+ },
+ "proto_names": {
+  "wormhole": "Wormhole",
+  "wormhole_ntt": "Wormhole NTT",
+  "cctp": "CCTP",
+  "debridge": "deBridge",
+  "mayan": "Mayan",
+  "allbridge": "Allbridge",
+  "layerzero": "LayerZero",
+  "across": "Across",
+  "relay": "Relay",
+  "ccip": "Chainlink CCIP"
+ },
+ "ccip_chain_selectors": {
+  "5009297550715157269": "eth",
+  "15971525489660198786": "base",
+  "4949039107694359620": "arbitrum",
+  "3734403246176062136": "optimism",
+  "4051577828743386545": "polygon",
+  "11344663589394136015": "bsc",
+  "124615329519749607": "sol"
+ },
+ "ccip_networks": {
+  "ethereum-mainnet": "eth",
+  "ethereum-mainnet-base-1": "base",
+  "ethereum-mainnet-arbitrum-1": "arbitrum",
+  "ethereum-mainnet-optimism-1": "optimism",
+  "matic-mainnet": "polygon",
+  "polygon-mainnet": "polygon",
+  "binance_smart_chain-mainnet": "bsc",
+  "solana-mainnet": "sol"
+ }
+}

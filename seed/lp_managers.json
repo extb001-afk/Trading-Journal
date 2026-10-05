@@ -1,0 +1,275 @@
+{
+ "_note": "LP 포지션 관리자(NFT 포지션형) 주소표 — core 분류·web 온체인 평가 공용. 주소 소문자. verified = 온체인 poolManager()/name()/factory() 확인. proto 'stake' = 스테이킹 래퍼(PancakeSwap MasterChefV3 등).",
+ "eth": {
+  "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0x7ffe42c4a5deea5b0fec41c94c136cf115597227",
+   "pool_manager": "0x000000000004444c5dc75cb358380d2e3de08a90",
+   "verified": true
+  },
+  "0xc36442b4a4522e871399cd717abdd847ab11fe88": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+   "verified": true
+  },
+  "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364": {
+   "proto": "uni_v3",
+   "name": "PancakeSwap V3",
+   "factory": "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
+   "verified": true
+  },
+  "0x2214a42d8e2a1d20635c2cb0664422c528b6a432": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0xbaceb8ec6b9355dfc0269c18bac9d6e2bdc29c4f",
+   "verified": true
+  },
+  "0x556b9306565093c855aea9ae92a594704c2cd59e": {
+   "proto": "stake",
+   "name": "PancakeSwap MasterChef v3",
+   "npm": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+   "reward": "0x152649ea73beab28c5b49b26eb48f7ead6d4c898",
+   "verified": true
+  },
+  "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": {
+   "proto": "v2_router",
+   "name": "Uniswap v2",
+   "factory": "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f",
+   "verified": true
+  },
+  "0xeff92a263d31888d860bd50809a8d171709b7b1c": {
+   "proto": "v2_router",
+   "name": "PancakeSwap v2",
+   "factory": "0x1097053fd2ea711dad45caccc45eff7548fcb362",
+   "verified": true
+  },
+  "0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f": {
+   "proto": "v2_router",
+   "name": "SushiSwap v2",
+   "factory": "0xc0aee478e3658e2610c5f7a4a2e1777ce9e4f2ac",
+   "verified": true
+  }
+ },
+ "base": {
+  "0x7c5f5a4bbd8fd63184577525326123b519429bdc": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71",
+   "pool_manager": "0x498581ff718922c3f8e6a244956af099b2652b2b",
+   "verified": true
+  },
+  "0x03a520b32c04bf3beef7beb72e919cf822ed34f1": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x33128a8fc17869897dce68ed026d694621f6fdfd",
+   "verified": true
+  },
+  "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364": {
+   "proto": "uni_v3",
+   "name": "PancakeSwap V3",
+   "factory": "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
+   "verified": true
+  },
+  "0x827922686190790b37229fd06084350e74485b72": {
+   "proto": "slipstream",
+   "name": "Aerodrome Slipstream",
+   "factory": "0x5e7bb104d84c7cb9b682aac2f3d509f5f406809a",
+   "verified": true
+  },
+  "0xa990c6a764b73bf43cee5bb40339c3322fb9d55f": {
+   "proto": "slipstream",
+   "name": "Aerodrome Slipstream",
+   "factory": "0xade65c38cd4849adba595a4323a8c7ddfe89716a",
+   "verified": true
+  },
+  "0x80c7dd17b01855a6d2347444a0fcc36136a314de": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0xc35dadb65012ec5796536bd9864ed8773abc74c4",
+   "verified": true
+  },
+  "0xc6a2db661d5a5690172d8eb0a7dea2d3008665a3": {
+   "proto": "stake",
+   "name": "PancakeSwap MasterChef v3",
+   "npm": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+   "reward": "0x3055913c90fcc1a6ce9a358911721eeb942013a1",
+   "verified": true
+  },
+  "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": {
+   "proto": "v2_router",
+   "name": "Aerodrome v2",
+   "factory": "0x420dd381b31aef6683db6b902084cb0ffece40da",
+   "verified": true
+  },
+  "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24": {
+   "proto": "v2_router",
+   "name": "Uniswap v2",
+   "factory": "0x8909dc15e40173ff4699343b6eb8132c65e18ec6",
+   "verified": true
+  },
+  "0x8cfe327cec66d1c090dd72bd0ff11d690c33a2eb": {
+   "proto": "v2_router",
+   "name": "PancakeSwap v2",
+   "factory": "0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e",
+   "verified": true
+  }
+ },
+ "arbitrum": {
+  "0xd88f38f930b7952f2db2432cb002e7abbf3dd869": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0x76fd297e2d437cd7f76d50f01afe6160f86e9990",
+   "pool_manager": "0x360e68faccca8ca495c1b759fd9eee466db9fb32",
+   "verified": true
+  },
+  "0xc36442b4a4522e871399cd717abdd847ab11fe88": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+   "verified": true
+  },
+  "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364": {
+   "proto": "uni_v3",
+   "name": "PancakeSwap V3",
+   "factory": "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
+   "verified": true
+  },
+  "0xf0cbce1942a68beb3d1b73f0dd86c8dcc363ef49": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0x1af415a1eba07a4986a52b6f2e7de7003d82231e",
+   "verified": true
+  },
+  "0x5e09acf80c0296740ec5d6f643005a4ef8daa694": {
+   "proto": "stake",
+   "name": "PancakeSwap MasterChef v3",
+   "npm": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+   "reward": "0x1b896893dfc86bb67cf57767298b9073d2c1ba2c",
+   "verified": true
+  },
+  "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506": {
+   "proto": "v2_router",
+   "name": "SushiSwap v2",
+   "factory": "0xc35dadb65012ec5796536bd9864ed8773abc74c4",
+   "verified": true
+  }
+ },
+ "optimism": {
+  "0x3c3ea4b57a46241e54610e5f022e5c45859a1017": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0xc18a3169788f4f75a170290584eca6395c75ecdb",
+   "pool_manager": "0x9a13f98cb987694c9f086b1f5eb990eea8264ec3",
+   "verified": true
+  },
+  "0xc36442b4a4522e871399cd717abdd847ab11fe88": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+   "verified": true
+  },
+  "0x416b433906b1b72fa758e166e239c43d68dc6f29": {
+   "proto": "slipstream",
+   "name": "Velodrome Slipstream",
+   "factory": "0xcc0bddb707055e04e497ab22a59c2af4391cd12f",
+   "verified": true
+  },
+  "0xbb5dfe1380333cee4c2eebd7202c80de2256adf4": {
+   "proto": "slipstream",
+   "name": "Velodrome Slipstream",
+   "factory": "0x548118c7e0b865c2cfa94d15ec86b666468ac758",
+   "verified": true
+  },
+  "0x1af415a1eba07a4986a52b6f2e7de7003d82231e": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0x9c6522117e2ed1fe5bdb72bb0ed5e3f2bde7dbe0",
+   "verified": true
+  },
+  "0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858": {
+   "proto": "v2_router",
+   "name": "Velodrome v2",
+   "factory": "0xf1046053aa5682b4f9a81b5481394da16be5ff5a",
+   "verified": true
+  }
+ },
+ "polygon": {
+  "0x1ec2ebf4f37e7363fdfe3551602425af0b3ceef9": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0x5ea1bd7974c8a611cbab0bdcafcb1d9cc9b3ba5a",
+   "pool_manager": "0x67366782805870060151383f4bbff9dab53e5cd6",
+   "verified": true
+  },
+  "0xc36442b4a4522e871399cd717abdd847ab11fe88": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+   "verified": true
+  },
+  "0xb7402ee99f0a008e461098ac3a27f4957df89a40": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0x917933899c6a5f8e37f31e19f92cdbff7e8ff0e2",
+   "verified": true
+  }
+ },
+ "bsc": {
+  "0x7a4a5c919ae2541aed11041a1aeee68f1287f95b": {
+   "proto": "uni_v4",
+   "name": "Uniswap V4",
+   "stateview": "0xd13dd3d6e93f276fafc9db9e6bb47c1180aee0c4",
+   "pool_manager": "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df",
+   "verified": true
+  },
+  "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364": {
+   "proto": "uni_v3",
+   "name": "PancakeSwap V3",
+   "factory": "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865",
+   "verified": true
+  },
+  "0x7b8a01b39d58278b5de7e48c8449c9f4f5170613": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0xdb1d10011ad0ff90774d0c6bb92e5c5c8b4461f7",
+   "verified": true
+  },
+  "0xf70c086618dcf2b1a461311275e00d6b722ef914": {
+   "proto": "uni_v3",
+   "name": "SushiSwap V3",
+   "factory": "0x126555dd55a39328f69400d6ae4f782bd4c34abb",
+   "verified": true
+  },
+  "0x556b9306565093c855aea9ae92a594704c2cd59e": {
+   "proto": "stake",
+   "name": "PancakeSwap MasterChef v3",
+   "npm": "0x46a15b0b27311cedf172ab29e4f4766fbe7f4364",
+   "reward": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+   "verified": true
+  },
+  "0x10ed43c718714eb63d5aa57b78b54704e256024e": {
+   "proto": "v2_router",
+   "name": "PancakeSwap v2",
+   "factory": "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+   "verified": true
+  }
+ },
+ "megaeth": {
+  "0x2b781c57e6358f64864ff8ec464a03fdaf9974ba": {
+   "proto": "uni_v3",
+   "name": "Uniswap V3",
+   "factory": "0x68b34591f662508076927803c567cc8006988a09",
+   "verified": true
+  }
+ },
+ "sol": {
+  "dlmm": {
+   "proto": "meteora_dlmm",
+   "name": "Meteora DLMM",
+   "program": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+   "verified": true
+  }
+ }
+}

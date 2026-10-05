@@ -1,0 +1,633 @@
+{
+ "measured_at": "2026-09-28",
+ "units": "sec",
+ "chains": {
+  "eth": {
+   "track": "etherscan_v2",
+   "model_ko": "호출 수 ≈ 2 + 목록4×조각4×⌈행/1만⌉ — 기간이 길어도 1만 행 넘기 전엔 그대로(지갑당 수 초~수십 초)",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 108,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 108,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    }
+   }
+  },
+  "arbitrum": {
+   "track": "etherscan_v2",
+   "model_ko": "호출 수 ≈ 2 + 목록4×조각4×⌈행/1만⌉ — 기간이 길어도 1만 행 넘기 전엔 그대로(지갑당 수 초~수십 초)",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    }
+   }
+  },
+  "polygon": {
+   "track": "etherscan_v2",
+   "model_ko": "호출 수 ≈ 2 + 목록4×조각4×⌈행/1만⌉ — 기간이 길어도 1만 행 넘기 전엔 그대로(지갑당 수 초~수십 초)",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 60,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 75,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     },
+     "high": {
+      "months_effective": 75,
+      "calls": 18,
+      "sec_at_3rps": 6.0,
+      "sec_at_0_7rps_shared": 25.7
+     }
+    }
+   }
+  },
+  "base": {
+   "track": "blockscout_v2",
+   "model_ko": "페이지 ≈ 3 + 행/52, 페이지당 ≈5.3초(무키 한도 10/초·느린 페이지), 방출·상세 ≈0.14초/tx",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 4,
+      "rows": 6,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 27,
+      "rows": 1203,
+      "sec": 246
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 4,
+      "rows": 12,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 50,
+      "rows": 2406,
+      "sec": 470
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 39,
+      "calls": 4,
+      "rows": 19,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 39,
+      "calls": 79,
+      "rows": 3910,
+      "sec": 752
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 39,
+      "calls": 4,
+      "rows": 19,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 39,
+      "calls": 79,
+      "rows": 3910,
+      "sec": 752
+     }
+    }
+   }
+  },
+  "optimism": {
+   "track": "blockscout_v2",
+   "model_ko": "페이지 ≈ 3 + 행/52, 페이지당 ≈5.3초(무키 한도 10/초·느린 페이지), 방출·상세 ≈0.14초/tx",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 4,
+      "rows": 6,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 27,
+      "rows": 1200,
+      "sec": 245
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 4,
+      "rows": 12,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 50,
+      "rows": 2400,
+      "sec": 469
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 58,
+      "calls": 4,
+      "rows": 29,
+      "sec": 24
+     },
+     "high": {
+      "months_effective": 58,
+      "calls": 116,
+      "rows": 5800,
+      "sec": 1109
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 58,
+      "calls": 4,
+      "rows": 29,
+      "sec": 24
+     },
+     "high": {
+      "months_effective": 58,
+      "calls": 116,
+      "rows": 5800,
+      "sec": 1109
+     }
+    }
+   }
+  },
+  "gnosis": {
+   "track": "blockscout_v2",
+   "model_ko": "페이지 ≈ 3 + 행/52, 페이지당 ≈5.3초(무키 한도 10/초·느린 페이지), 방출·상세 ≈0.14초/tx",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 4,
+      "rows": 6,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 27,
+      "rows": 1200,
+      "sec": 245
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 4,
+      "rows": 12,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 50,
+      "rows": 2400,
+      "sec": 469
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "calls": 4,
+      "rows": 30,
+      "sec": 24
+     },
+     "high": {
+      "months_effective": 60,
+      "calls": 120,
+      "rows": 6000,
+      "sec": 1147
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 95,
+      "calls": 4,
+      "rows": 47,
+      "sec": 25
+     },
+     "high": {
+      "months_effective": 95,
+      "calls": 188,
+      "rows": 9500,
+      "sec": 1805
+     }
+    }
+   }
+  },
+  "scroll": {
+   "track": "blockscout_v2",
+   "model_ko": "페이지 ≈ 3 + 행/52, 페이지당 ≈5.3초(무키 한도 10/초·느린 페이지), 방출·상세 ≈0.14초/tx",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 4,
+      "rows": 6,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 27,
+      "rows": 1200,
+      "sec": 245
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 4,
+      "rows": 12,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 50,
+      "rows": 2400,
+      "sec": 469
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 35,
+      "calls": 4,
+      "rows": 17,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 35,
+      "calls": 71,
+      "rows": 3500,
+      "sec": 674
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 35,
+      "calls": 4,
+      "rows": 17,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 35,
+      "calls": 71,
+      "rows": 3500,
+      "sec": 674
+     }
+    }
+   }
+  },
+  "zksync": {
+   "track": "blockscout_v2",
+   "model_ko": "페이지 ≈ 3 + 행/52, 페이지당 ≈5.3초(무키 한도 10/초·느린 페이지), 방출·상세 ≈0.14초/tx",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "calls": 4,
+      "rows": 6,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 12,
+      "calls": 27,
+      "rows": 1200,
+      "sec": 245
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "calls": 4,
+      "rows": 12,
+      "sec": 22
+     },
+     "high": {
+      "months_effective": 24,
+      "calls": 50,
+      "rows": 2400,
+      "sec": 469
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 42,
+      "calls": 4,
+      "rows": 21,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 42,
+      "calls": 85,
+      "rows": 4200,
+      "sec": 808
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 42,
+      "calls": 4,
+      "rows": 21,
+      "sec": 23
+     },
+     "high": {
+      "months_effective": 42,
+      "calls": 85,
+      "rows": 4200,
+      "sec": 808
+     }
+    }
+   }
+  },
+  "bsc": {
+   "track": "rpc_getlogs_archive(NodeReal)",
+   "model_ko": "스캔 시간 = 블록 수 ÷ 13612블록/초(지갑 수와 무관 — 한 번의 getLogs 가 전 지갑 토픽을 덮음) + 상세 0.25초/tx. 아카이브(유료) 없으면 불가",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "blocks": 42048000,
+      "calls_getlogs": 1051,
+      "sec": 3092
+     },
+     "high": {
+      "months_effective": 12,
+      "blocks": 42048000,
+      "calls_getlogs": 1051,
+      "sec": 3689
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "blocks": 61915680,
+      "calls_getlogs": 1547,
+      "sec": 4554
+     },
+     "high": {
+      "months_effective": 24,
+      "blocks": 61915680,
+      "calls_getlogs": 1547,
+      "sec": 5748
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "blocks": 93451680,
+      "calls_getlogs": 2336,
+      "sec": 6880
+     },
+     "high": {
+      "months_effective": 60,
+      "blocks": 93451680,
+      "calls_getlogs": 2336,
+      "sec": 9865
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 72,
+      "blocks": 103963680,
+      "calls_getlogs": 2599,
+      "sec": 7655
+     },
+     "high": {
+      "months_effective": 72,
+      "blocks": 103963680,
+      "calls_getlogs": 2599,
+      "sec": 11237
+     }
+    }
+   }
+  },
+  "sol": {
+   "track": "sol_signatures+getTransaction(helius)",
+   "model_ko": "서명 N건/콜 + 거래당 getTransaction 1콜(헬리우스 2rps 게이트 실측 0.39초/tx) — 거래 수에 정비례",
+   "extrapolate": {
+    "1y": {
+     "low": {
+      "months_effective": 12,
+      "txs": 12,
+      "calls": 13,
+      "sec": 5
+     },
+     "high": {
+      "months_effective": 12,
+      "txs": 2400,
+      "calls": 2403,
+      "sec": 938
+     }
+    },
+    "2y": {
+     "low": {
+      "months_effective": 24,
+      "txs": 24,
+      "calls": 25,
+      "sec": 10
+     },
+     "high": {
+      "months_effective": 24,
+      "txs": 4800,
+      "calls": 4805,
+      "sec": 1875
+     }
+    },
+    "5y": {
+     "low": {
+      "months_effective": 60,
+      "txs": 60,
+      "calls": 61,
+      "sec": 24
+     },
+     "high": {
+      "months_effective": 60,
+      "txs": 12000,
+      "calls": 12012,
+      "sec": 4687
+     }
+    },
+    "9y": {
+     "low": {
+      "months_effective": 78,
+      "txs": 78,
+      "calls": 79,
+      "sec": 31
+     },
+     "high": {
+      "months_effective": 78,
+      "txs": 15600,
+      "calls": 15616,
+      "sec": 6094
+     }
+    }
+   }
+  }
+ },
+ "nine_year": {
+  "onchain_ko": "온체인 과거 조회 범위는 체인 시작 시점과 탐색기·RPC 보관 범위에 따라 달라진다. 이더스캔 계열은 지갑·목록·페이지 수, Blockscout 은 페이지 수, BSC 는 스캔 블록 수, Solana 는 조회 거래 수에 비례한다. 오래된 구간·상태 조회에는 아카이브 RPC 가 필요할 수 있다.",
+  "cex_ko": "거래소 과거 조회는 API 보존 기간·조회 창·페이지 한도의 영향을 받는다. 가능한 범위와 못 받는 내역은 seed/coverage/api_limits.json 과 docs/COLLECTION_LIMITS.md 를 참고한다.",
+  "fx_ko": "원화 환산: 업비트 KRW-USDT 는 2024-06-07 부터 — 그 이전은 교차 환율(업비트 KRW-BTC ÷ 바이낸스 BTCUSDT).",
+  "verdict_ko": "아주 긴 과거(수년)는 온체인(아카이브 포함)·거래소 입출금은 대체로 가능하지만, 거래소 체결은 API 보존 한도(바이비트 2년·OKX 약 4개월·쿠코인 2019 이전 불가 등) 밖이면 받을 수 없다. 그 이전에 산 코인은 원가 미확인으로 남는다."
+ },
+ "measured_at_5y": "2026-09-28"
+}

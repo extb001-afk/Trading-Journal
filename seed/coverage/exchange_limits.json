@@ -1,0 +1,503 @@
+{
+ "note": "거래소 API 수집 한계 표(엔드포인트·문서 한도·거부 경계). rejected_before = API 가 거부/조용히 절단한 경계(조사 당시 날짜 기준). 생성기(src/coverage_limits.py)가 봇 상태와 합쳐 state/coverage_limits.json 을 만든다.",
+ "exchanges": {
+  "upbit": {
+   "deposits": {
+    "endpoint": "GET /v1/deposits (page, order_by)",
+    "bot_uses": true,
+    "bot_ref": "upbit_link.py:_paged(max_pages=60 → 최대 N건)",
+    "doc_limit": "보존 한도 명시 없음(페이지 방식)",
+    "doc_url": "https://docs.upbit.com/kr/reference/입금-리스트-조회",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능(페이지 방식). 봇은 1분마다 최신순으로 수집 창 시작까지 다시 넘김"
+   },
+   "withdrawals": {
+    "endpoint": "GET /v1/withdraws",
+    "bot_uses": true,
+    "bot_ref": "upbit_link.py:_paged",
+    "doc_limit": "보존 한도 명시 없음",
+    "doc_url": "https://docs.upbit.com/kr/reference/전체-출금-조회",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능. 봇 상한 6,000건"
+   },
+   "krw_fills": {
+    "endpoint": "GET /v1/orders/closed (start_time~end_time ≤7일)",
+    "bot_uses": true,
+    "bot_ref": "upbit_link.py:_sweep / extend_orders(7일 창, 1000 포화 시 반감)",
+    "doc_limit": "조회 창 7일(doc) · 보존 한도 명시 없음",
+    "doc_url": "https://docs.upbit.com/kr/reference/종료-주문-조회",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능. 봇 확장은 30일 조각 1개/분(업비트 주기 60초)"
+   }
+  },
+  "bithumb": {
+   "deposits": {
+    "endpoint": "GET /v1/deposits (page desc)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_bithumb(최신순 ≤200페이지)",
+    "doc_limit": "doc 명시 없음(unverified)",
+    "doc_url": "https://apidocs.bithumb.com/",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능. 봇은 30일 조각마다 최신순 200페이지(2만 건) 상한"
+   },
+   "withdrawals": {
+    "endpoint": "GET /v1/withdraws",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_bithumb",
+    "doc_limit": "doc 명시 없음(unverified)",
+    "doc_url": "https://apidocs.bithumb.com/",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능"
+   },
+   "krw_fills": {
+    "endpoint": "GET /v1/orders (state=done, page)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:_bithumb_orders_state(최근 창: 최신순) · _bithumb_ext_fills(과거 창 확장: 오름차순 페이지 재개형 — 조각·상태별 커서를 ext.bt_scan 에 저장, 거래소별 확장 예산 240초/주기, jan1)",
+    "doc_limit": "doc 명시 없음(unverified)",
+    "doc_url": "https://apidocs.bithumb.com/",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "API 는 오래된 체결까지 반환. 주문 목록이 시간 조건 없는 페이지 방식이라 주문·취소가 몰린 구간은 오래 걸려요 — 봇은 10분마다 4분씩 페이지 단위로 이어 받아 끝까지 가져와요(누락 없음)"
+   }
+  },
+  "binance": {
+   "deposits": {
+    "endpoint": "GET /sapi/v1/capital/deposit/hisrec (창 ≤90일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_binance(89일 슬라이스·offset)",
+    "doc_limit": "조회 창 90일 · 보존 한도 명시 없음",
+    "doc_url": "https://developers.binance.com/docs/wallet/capital/deposite-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "오래된 기록까지 반환 — 창 90일 단위로 반복 조회"
+   },
+   "withdrawals": {
+    "endpoint": "GET /sapi/v1/capital/withdraw/history (창 ≤90일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_binance",
+    "doc_limit": "조회 창 90일 · 보존 한도 명시 없음",
+    "doc_url": "https://developers.binance.com/docs/wallet/capital/withdraw-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "오래된 기록까지 반환 — 창 90일 단위로 반복 조회"
+   },
+   "spot_fills": {
+    "endpoint": "GET /api/v3/myTrades (페어별 fromId / 시간창 24h)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_binance(페어별 fromId) · fills_binance_replay(확장)",
+    "doc_limit": "시간창 24h · fromId 는 전 이력(doc)",
+    "doc_url": "https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "페어별 전 이력 가능. 단 API 가 페어 이름을 요구해서, 봇이 모르는 페어(잔고·입출금·과거 체결에 한 번도 안 나온 코인, 또는 USDT·USDC·BTC·BNB·FDUSD 외 쿼트)는 못 찾아요"
+   },
+   "convert": {
+    "endpoint": "GET /sapi/v1/convert/tradeFlow (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:convert_binance(30일 창)",
+    "doc_limit": "조회 창 30일 · 보존 한도 명시 없음(unverified)",
+    "doc_url": "https://developers.binance.com/docs/convert/trade/Get-Convert-Trade-History",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "최근 기록 반환 확인. 오래된 기록의 한도는 미확인"
+   },
+   "earn": {
+    "endpoint": "GET /sapi/v1/simple-earn/flexible/history/subscriptionRecord (창 ≤30일)",
+    "bot_uses": false,
+    "bot_ref": "ex_foreign.py:_bal_binance(잔고만, 이력 미수집)",
+    "doc_limit": "창 30일 초과 시 -6021 · 보존 '최근 6개월'(doc, unverified)",
+    "doc_url": "https://developers.binance.com/docs/simple_earn/history/Get-Flexible-Subscription-Record",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "약 1년 전 예치 기록까지 반환. 봇은 예치 이력 미수집(잔고만)"
+   },
+   "futures_income": {
+    "endpoint": "GET fapi /fapi/v1/income",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:_fut_binance(커서)",
+    "doc_limit": "doc: 창 ≤200일·보존 약 1년(unverified)",
+    "doc_url": "https://developers.binance.com/docs/derivatives/usds-margined-futures/account/rest-api/Get-Income-History",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "선물 손익(income)은 기록 시작부터 반환. 너무 옛 startTime 은 무시되어 최근분이 섞여 옴 — 창 검증 필요"
+   },
+   "futures_fills": {
+    "endpoint": "GET fapi /fapi/v1/userTrades (창 ≤7일)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "최근 6개월만(doc)",
+    "doc_url": "https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "선물 체결(가격·수량) 내역은 최근 6개월만 API 가 줘요(doc). 봇은 선물을 손익 내역(income: 실현손익·수수료·펀딩비)으로 기록해서 손익 합계엔 영향 없어요"
+   },
+   "margin_fills": {
+    "endpoint": "GET /sapi/v1/margin/myTrades (fromId)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_binance(margin_cursor)",
+    "doc_limit": "doc 명시 없음(unverified)",
+    "doc_url": "https://developers.binance.com/docs/margin_trading/trade/Query-Margin-Account-Trade-List",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "페어별 fromId 로 과거 체결 반환"
+   },
+   "loans": {
+    "endpoint": "GET /sapi/v1/margin/borrow-repay (창 ≤30일)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "doc 명시 없음(unverified)",
+    "doc_url": "https://developers.binance.com/docs/margin_trading/borrow-and-repay/Query-Borrow-Repay",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "차입 기록 조회 — 오래된 창도 오류 없이 허용"
+   }
+  },
+  "bybit": {
+   "deposits": {
+    "endpoint": "GET /v5/asset/deposit/query-record (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_bybit(29일 창)",
+    "doc_limit": "창 30일 · 보존 명시 없음(unverified)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/asset/deposit/deposit-record",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "입출금은 2년 넘게도 반환 — 2년 한도는 체결·손익·거래내역만"
+   },
+   "withdrawals": {
+    "endpoint": "GET /v5/asset/withdraw/query-record (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_bybit",
+    "doc_limit": "창 30일 · 보존 명시 없음(unverified)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/asset/withdraw/withdraw-record",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "입출금은 2년 넘게도 반환"
+   },
+   "spot_fills": {
+    "endpoint": "GET /v5/execution/list category=spot (창 ≤7일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_bybit(6일 창)",
+    "doc_limit": "최근 2년(doc)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/order/execution",
+    "rejected_before": "2024-09-28",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "★2년(730일) 이전 체결은 API 가 거부 — 영구 불가★"
+   },
+   "futures_fills": {
+    "endpoint": "GET /v5/execution/list category=linear",
+    "bot_uses": false,
+    "bot_ref": "-(손익은 closed-pnl)",
+    "doc_limit": "최근 2년(doc)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/order/execution",
+    "rejected_before": "2024-09-28",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "2년 이전 거부"
+   },
+   "futures_pnl": {
+    "endpoint": "GET /v5/position/closed-pnl (창 ≤7일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:_fut_bybit(커서 이어받기, 2년 한도 주석)",
+    "doc_limit": "최근 2년(doc)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/position/close-pnl",
+    "rejected_before": "2024-09-28",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "2년 이전 청산손익 거부"
+   },
+   "convert": {
+    "endpoint": "GET /v5/asset/exchange/query-convert-history",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:convert_bybit",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/asset/convert/get-convert-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "API 키에 전환 조회 권한이 없으면 불가 — 키 권한 추가 필요"
+   },
+   "earn": {
+    "endpoint": "GET /v5/earn/order",
+    "bot_uses": false,
+    "bot_ref": "ex_foreign.py:_bal_bybit(잔고만)",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/earn/order-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "API 키에 Earn 권한이 없으면 불가"
+   },
+   "loans": {
+    "endpoint": "GET /v5/account/borrow-history (창 ≤30일)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "최근 2년(doc)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/account/borrow-history",
+    "rejected_before": "2024-09-28",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "2년 이전 거부"
+   },
+   "transaction_log": {
+    "endpoint": "GET /v5/account/transaction-log (창 ≤7일)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "최근 2년(doc)",
+    "doc_url": "https://bybit-exchange.github.io/docs/v5/account/transaction-log",
+    "rejected_before": "2024-09-28",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "2년 이전 거부"
+   }
+  },
+  "okx": {
+   "deposits": {
+    "endpoint": "GET /api/v5/asset/deposit-history (after 페이징)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_okx",
+    "doc_limit": "보존 명시 없음",
+    "doc_url": "https://www.okx.com/docs-v5/en/#funding-account-rest-api-get-deposit-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능"
+   },
+   "withdrawals": {
+    "endpoint": "GET /api/v5/asset/withdrawal-history",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_okx",
+    "doc_limit": "보존 명시 없음",
+    "doc_url": "https://www.okx.com/docs-v5/en/#funding-account-rest-api-get-withdrawal-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "전 이력 조회 가능"
+   },
+   "spot_fills": {
+    "endpoint": "GET /api/v5/trade/fills-history (begin/end)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_okx (EXT_HARD_LIMIT 90일)",
+    "doc_limit": "최근 3개월(doc) — 그 이전은 bills-history-archive(분기 신청·CSV, 2021-Q1~)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-transaction-details-last-3-months",
+    "rejected_before": "2026-05-31",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "약 4개월(3개월 전 달 1일) 이전 체결은 OKX API(fills-history)가 오류 없이 빈 결과로 돌려줘요 — 봇이 받을 수 없어요(옛 체결은 OKX 웹·분기별 정산 아카이브 CSV 로만 있고, 봇은 이를 가져오지 않아요). 그때 산 코인은 원가 미확인 → 원가 미확인 목록에서 그 코인의 '원가 적용'(개당 원가 입력) 또는 '당시 시세로 추정'을 눌러 주세요"
+   },
+   "futures_fills": {
+    "endpoint": "GET /api/v5/trade/fills-history instType=SWAP",
+    "bot_uses": false,
+    "bot_ref": "ex_foreign.py:_fut_okx(bills 사용)",
+    "doc_limit": "최근 3개월(doc)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-transaction-details-last-3-months",
+    "rejected_before": "2026-05-31",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "약 4개월(3개월 전 달 1일) 이전 선물 체결은 API 가 주지 않아요 — 봇은 선물을 정산 내역(bills)으로 기록"
+   },
+   "bills": {
+    "endpoint": "GET /api/v5/account/bills-archive",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:_fut_okx(bills 7일 + bills-archive)",
+    "doc_limit": "최근 3개월(doc) — 그 이전은 bills-history-archive 신청형(unverified)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-bills-details-last-3-months",
+    "rejected_before": "2026-05-31",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "약 4개월(3개월 전 달 1일) 이전 정산 내역(선물 손익·수수료)은 API 가 주지 않아요 — 그 기간 OKX 선물 손익은 빠져요"
+   },
+   "convert": {
+    "endpoint": "GET /api/v5/asset/convert/history",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:convert_okx",
+    "doc_limit": "doc: 최근 1년(unverified)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#funding-account-rest-api-get-convert-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "한도 미확인"
+   },
+   "earn": {
+    "endpoint": "GET /api/v5/finance/savings/lending-history",
+    "bot_uses": false,
+    "bot_ref": "ex_foreign.py:_bal_okx(잔고만)",
+    "doc_limit": "doc: 최근 1개월(unverified)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#financial-product-simple-earn-flexible-get-lending-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "대출 이자 이력은 짧은 보존. 봇은 예치 잔고만"
+   },
+   "loans": {
+    "endpoint": "GET /api/v5/account/interest-accrued",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "doc: 최근 1년(unverified)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-interest-accrued-data",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "한도 미확인"
+   },
+   "bills_archive": {
+    "endpoint": "POST·GET /api/v5/account/bills-history-archive (year·quarter 신청 → 수 분 뒤 CSV 링크)",
+    "bot_uses": false,
+    "bot_ref": "미지원(API 한도는 우회하지 않고 수집 한계로 안내)",
+    "doc_limit": "2021년 1분기 이후(doc·실측 51610)",
+    "doc_url": "https://www.okx.com/docs-v5/en/#trading-account-rest-api-apply-bill-details-since-2021",
+    "rejected_before": "2021-01-01",
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "OKX 분기별 정산 아카이브(신청 → CSV 다운로드)는 2021-01 이후만 신청돼요(그 이전은 거래소가 거부). 봇은 이 아카이브를 가져오지 않아요(의도적으로 지원 안 함) — 옛 OKX 매수 원가는 원가 미확인 목록에서 그 코인의 '원가 적용'(개당 원가 입력) 또는 '당시 시세로 추정'을 눌러 주세요"
+   }
+  },
+  "kucoin": {
+   "deposits": {
+    "endpoint": "GET /api/v1/deposits (창 ≤7일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_kucoin(7일 창)",
+    "doc_limit": "창 7일 · 2019-02 이전은 /api/v1/hist-deposits(doc)",
+    "doc_url": "https://www.kucoin.com/docs/rest/funding/deposit/get-deposit-list",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "현행 API 는 최근 기록 반환. 2019 이전은 hist-deposits 로 가능(봇 미사용)"
+   },
+   "hist_deposits": {
+    "endpoint": "GET /api/v1/hist-deposits (2019-02 이전)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "이전 입금 전용(doc)",
+    "doc_url": "https://www.kucoin.com/docs/rest/funding/deposit/get-v1-historical-deposits-list",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "2017~2018 입금 조회 가능 — 봇 미구현"
+   },
+   "withdrawals": {
+    "endpoint": "GET /api/v1/withdrawals (창 ≤7일) + /api/v1/hist-withdrawals",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_kucoin",
+    "doc_limit": "창 7일 · 2019 이전은 hist-withdrawals(doc)",
+    "doc_url": "https://www.kucoin.com/docs/rest/funding/withdrawals/get-withdrawals-list",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "현행 API 로 수년 전 출금까지 반환, 2019 이전은 hist 엔드포인트(봇 미사용)"
+   },
+   "spot_fills": {
+    "endpoint": "GET /api/v1/fills (창 ≤7일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_kucoin(6일 창)",
+    "doc_limit": "창 7일 · 보존 '최근 1년'(doc, unverified)",
+    "doc_url": "https://www.kucoin.com/docs/rest/spot-trading/fills/get-filled-list",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "★2019 이전(구 v1) 체결은 엔드포인트 폐지로 영구 불가★ · 그 뒤 옛 체결은 오류 없이 빈 결과 — 1년 한도 여부 미확정"
+   }
+  },
+  "gate": {
+   "deposits": {
+    "endpoint": "GET /api/v4/wallet/deposits (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_gate(29일 창)",
+    "doc_limit": "창 30일 · 보존 명시 없음(unverified)",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#retrieve-deposit-records",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "수년 전 입금까지 반환 확인"
+   },
+   "withdrawals": {
+    "endpoint": "GET /api/v4/wallet/withdrawals (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fetch_gate",
+    "doc_limit": "창 30일 · 보존 명시 없음(unverified)",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#retrieve-withdrawal-records",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "수년 전 출금까지 반환 확인"
+   },
+   "spot_fills": {
+    "endpoint": "GET /api/v4/spot/my_trades (창 ≤30일)",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:fills_gate(29일 창)",
+    "doc_limit": "창 30일 · 보존 명시 없음(unverified)",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#list-personal-trading-history",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "수년 전 체결까지 반환 확인(30일 창)"
+   },
+   "futures_fills": {
+    "endpoint": "GET /api/v4/futures/usdt/my_trades_timerange",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#list-personal-trading-history-2",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "API 키에 선물 권한이 없으면 불가"
+   },
+   "earn": {
+    "endpoint": "GET /api/v4/earn/uni/lend_records",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#list-interest-records",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "한도 미확인"
+   },
+   "loans": {
+    "endpoint": "GET /api/v4/margin/uni/loan_records",
+    "bot_uses": false,
+    "bot_ref": "ex_foreign.py:_bal_gate(margin 잔고만)",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#get-load-records",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "한도 미확인"
+   },
+   "account_book": {
+    "endpoint": "GET /api/v4/spot/account_book (창 ≤30일)",
+    "bot_uses": false,
+    "bot_ref": "",
+    "doc_limit": "doc 명시 없음",
+    "doc_url": "https://www.gate.io/docs/developers/apiv4/#query-account-book",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "잔고 변동 원장 — 봇 미사용"
+   }
+  }
+ }
+}
