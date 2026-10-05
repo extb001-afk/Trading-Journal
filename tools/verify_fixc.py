@@ -60,21 +60,26 @@ def cmd_same(a, b):
     return 0 if ok else 1
 
 
-def _has_lp(db):
+def _lp_kinds(db):
     c = _ro(db)
     try:
-        return bool(c.execute("SELECT 1 FROM tx_class WHERE event IN ('LP_ADD', 'LP_REMOVE') LIMIT 1").fetchone())
+        return {r[0] for r in c.execute("SELECT DISTINCT event FROM tx_class WHERE event IN ('LP_ADD', 'LP_REMOVE')")}
     except sqlite3.Error:
-        return False
+        return set()
     finally:
         c.close()
+
+
+def _has_lp(db):
+    return bool(_lp_kinds(db))
 
 
 def cmd_gates(db, bal_path=None, live=None):
     import os
     c = _ro(db)
     ok = True
-    want_lp = _has_lp(live) if live else True
+    want_kinds = _lp_kinds(live) if live else {"LP_ADD", "LP_REMOVE"}
+    want_lp = bool(want_kinds)
 
     def chk(cond, msg):
         nonlocal ok
@@ -83,7 +88,7 @@ def cmd_gates(db, bal_path=None, live=None):
     try:
         ev = dict(c.execute("SELECT event, count(*) FROM tx_class WHERE event LIKE 'LP%' GROUP BY event").fetchall())
         if want_lp:
-            chk(ev.get("LP_ADD", 0) > 0 and ev.get("LP_REMOVE", 0) > 0, f"b1 LP 분류 존재 {ev}")
+            chk(all(ev.get(k, 0) > 0 for k in want_kinds), f"b1 LP 분류 존재(기존 원장 종류 {sorted(want_kinds)} 보존) {ev}")
         else:
             print(f"  info b1 기존 원장에 LP 기록 없음 — LP 분류 존재 검사 건너뜀 {ev}")
         dec = {r[0]: (r[1] if r[1] is not None else 18) for r in c.execute("SELECT asset_id, decimals FROM assets")}
@@ -117,8 +122,23 @@ def cmd_gates(db, bal_path=None, live=None):
                                       " ON a.asset_id=p.asset_id WHERE p.location='exchange:upbit'"):
                 led[s] = led.get(s, Decimal(0)) + Decimal(int(qb)) / (Decimal(10) ** int(d if d is not None else 8))
             locked = {str(a.get("currency") or "").upper() for a in bal.get("accounts") or [] if float(a.get("locked") or 0) > 0}
-            bad = sorted((s, str(v), str(actual.get(s, 0))) for s, v in led.items()
-                         if abs(v - actual.get(s, Decimal(0))) > Decimal("0.000001"))
+            led_live = set()
+            if live and os.path.exists(live):
+                try:
+                    c9 = sqlite3.connect(f"file:{live}?mode=ro", uri=True)
+                    try:
+                        led_live = {r[0] for r in c9.execute("SELECT DISTINCT upper(a.symbol) FROM postings p JOIN assets a ON a.asset_id=p.asset_id"
+                                                             " WHERE p.location='exchange:upbit'")}
+                    finally:
+                        c9.close()
+                except sqlite3.Error:
+                    led_live = set()
+            syms9 = set(led) | led_live
+            bad = sorted((s, str(led.get(s, Decimal(0))), str(actual.get(s, 0))) for s in syms9
+                         if abs(led.get(s, Decimal(0)) - actual.get(s, Decimal(0))) > Decimal("0.000001"))
+            outside9 = sorted(s for s in set(actual) - syms9 if actual.get(s))
+            if outside9:
+                print(f"  info c 두 원장 모두에 없는 업비트 잔고 {len(outside9)}종(재구축 전후 같음 — 막지 않음): {outside9[:10]}")
             unl = [b for b in bad if b[0] not in locked]
             chk(not unl, f"c 업비트 전 통화 원장=잔고(미체결 locked 통화 제외) — 불일치 {unl[:8]}")
             if bad:

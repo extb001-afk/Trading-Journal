@@ -27,7 +27,7 @@ BAL_PATH = os.path.join(common.STATE_DIR, "upbit_balances.json")
 def _env():
     out = {}
     try:
-        with open(os.path.join(common.BASE_DIR, ".env"), "r", encoding="utf-8") as f:
+        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
@@ -57,10 +57,24 @@ def _jwt(access: str, secret: str, query: dict | None) -> str:
     return f"{header}.{body}.{sig}"
 
 
+_BACKOFF_CODES = (401, 403, 429)
+
+
+def _note_backoff(up, e) -> bool:
+    if getattr(e, "code", None) in _BACKOFF_CODES:
+        try:
+            up._backoff_err = e
+        except Exception:
+            pass
+        return True
+    return False
+
+
 class Upbit:
     def __init__(self, access: str, secret: str):
         self.access, self.secret = access, secret
         self.remaining_min = 999
+        self._backoff_err = None
 
     def get(self, path: str, query: dict | None = None):
         url = API + path + (("?" + urllib.parse.urlencode(query, doseq=True)) if query else "")
@@ -135,7 +149,8 @@ def _sweep(up: "Upbit", start: float, stop: float, seen: set):
                 if not isinstance(rows, list):
                     raise ValueError(f"orders/closed 응답 형식 오류({type(rows).__name__}) — 창 진행 보류")
             except Exception as e:
-                log.warning("orders %s %s 실패(다음 사이클 재시도): %s", state, _iso(cur)[:10], e)
+                if not _note_backoff(up, e):
+                    log.warning("orders %s %s 실패(다음 사이클 재시도): %s", state, _iso(cur)[:10], e)
                 window_ok = False
                 sweep_ok = False
                 break
@@ -232,6 +247,8 @@ def _resolve_tracked(up: "Upbit", track: dict, seen: set, rows: dict) -> list:
         try:
             o = up.get("/v1/order", {"uuid": u})
         except urllib.error.HTTPError as e:
+            if _note_backoff(up, e):
+                break
             if e.code == 404:
                 ent["nf"] = int(ent.get("nf") or 0) + 1
                 if ent["nf"] >= NOTFOUND_DROP:
@@ -358,7 +375,8 @@ def _open_orders(up: "Upbit", max_pages: int = 20):
                 return out
             time.sleep(0.15)
     except Exception as e:
-        log.warning("미체결 주문 조회 실패(이번 잔고 스냅샷엔 생략): %s", e)
+        if not _note_backoff(up, e):
+            log.warning("미체결 주문 조회 실패(이번 잔고 스냅샷엔 생략): %s", e)
         return None
     return None
 
@@ -396,6 +414,73 @@ def extend_orders(up: "Upbit", months: float, target: float, next_state: dict, s
     return out
 
 
+class _RowFilter:
+    FULL_SEC = 6 * 3600
+
+    def __init__(self):
+        self.fp = {}
+        self.full_at = 0.0
+
+    @staticmethod
+    def _h(r) -> str:
+        return hashlib.sha1(json.dumps(r, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+
+    def pick(self, deposits, withdraws, now=None):
+        now = time.time() if now is None else now
+        full = not self.fp or now - self.full_at >= self.FULL_SEC
+        out = []
+        nfp = {}
+        for kind, rows in (("d", deposits or []), ("w", withdraws or [])):
+            keep = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    keep.append(r)
+                    continue
+                k = kind + ":" + str(r.get("uuid") or "")
+                h = self._h(r)
+                nfp[k] = h
+                if full or self.fp.get(k) != h:
+                    keep.append(r)
+            out.append(keep)
+        return out[0], out[1], nfp, full
+
+    def commit(self, nfp: dict, full: bool, now=None):
+        self.fp.update(nfp)
+        if full:
+            self.full_at = time.time() if now is None else now
+
+
+class _Backoff:
+    CAP = {401: 1800, 403: 1800, 429: 600}
+
+    def __init__(self):
+        self.n = 0
+        self.last_wait = None
+
+    def reset(self):
+        self.n = 0
+        self.last_wait = None
+
+    def ok(self, poll: int) -> int:
+        self.reset()
+        return int(poll)
+
+    def fail(self, err, poll: int):
+        code = getattr(err, "code", None)
+        cap = self.CAP.get(code)
+        if cap is None:
+            self.n = 0
+            return int(poll), True
+        wait = min(cap, int(poll) * (2 ** self.n))
+        self.n += 1
+        loud = wait != self.last_wait
+        self.last_wait = wait
+        return wait, loud
+
+
+_ROWS = _RowFilter()
+
+
 def cycle(up: Upbit, writer: SegmentWriter, months: float):
     if up.remaining_min < 5:
         log.warning("레이트리밋 잔여 %d — 이번 사이클 건너뜀(계정 공유 보호)", up.remaining_min)
@@ -423,9 +508,12 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
     deposits = _paged(up, "/v1/deposits", m_eff, pages)
     time.sleep(0.2)
     withdraws = _paged(up, "/v1/withdraws", m_eff, pages)
-    writer.append({"v": 1, "kind": "ex_snapshot", "exchange": "upbit",
-                   "ts": int(time.time()),
-                   "deposits": deposits, "withdraws": withdraws})
+    nd9, nw9, nfp9, full9 = _ROWS.pick(deposits, withdraws)
+    if nd9 or nw9 or full9:
+        writer.append({"v": 1, "kind": "ex_snapshot", "exchange": "upbit",
+                       "ts": int(time.time()),
+                       "deposits": nd9, "withdraws": nw9})
+    _ROWS.commit(nfp9, full9)
     orders, sweep_ok, next_state = fetch_orders(up, months, oo2 if oo2 is not None else oo1)
     if target and target < time.time() - months * 30 * 86400:
         orders = orders + extend_orders(up, months, target, next_state, {o["uuid"] for o in orders})
@@ -493,11 +581,27 @@ def _ensure_client(up, a, s):
     return up
 
 
+def _cycle_once(up, writer, months: float, bo: "_Backoff", poll: int) -> int:
+    up._backoff_err = None
+    try:
+        cycle(up, writer, months)
+        if up._backoff_err is not None:
+            raise up._backoff_err
+        return bo.ok(poll)
+    except Exception as e:
+        wait9, loud9 = bo.fail(e, poll)
+        if loud9:
+            log.warning("동기화 실패(%s초 뒤 재시도): %s", wait9, e)
+        _sync_note(ok=False, err=f"동기화 실패: {common.safe_err(e)[:160]}")
+        return wait9
+
+
 def main():
     common.ensure_dirs()
     writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
     warned = False
     up = None
+    bo = _Backoff()
     while True:
         env = _env()
         a, s = env.get("UPBIT_ACCESS"), env.get("UPBIT_SECRET")
@@ -508,17 +612,31 @@ def main():
             time.sleep(60)
             continue
         warned = False
-        up = _ensure_client(up, a, s)
+        up9 = _ensure_client(up, a, s)
+        if up9 is not up:
+            bo.reset()
+        up = up9
         poll9 = POLL_SEC
+        months = 5
         try:
             cfg = common.load_config()
             poll9 = common.upbit_poll_sec(cfg)
-            months = 0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 5)
-            cycle(up, writer, months or 5)
+            months = (0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 5)) or 5
+            wait9 = _cycle_once(up, writer, months, bo, poll9)
         except Exception as e:
+            wait9, _l9 = bo.fail(e, poll9)
             log.warning("동기화 실패(다음 주기 재시도): %s", e)
             _sync_note(ok=False, err=f"동기화 실패: {common.safe_err(e)[:160]}")
-        time.sleep(poll9)
+        end9 = time.time() + (wait9 if wait9 is not None else poll9)
+        while True:
+            left9 = end9 - time.time()
+            if left9 <= 0:
+                break
+            time.sleep(min(60.0, left9))
+            if left9 > 60:
+                e9 = _env()
+                if (e9.get("UPBIT_ACCESS"), e9.get("UPBIT_SECRET")) != (a, s):
+                    break
 
 
 if __name__ == "__main__":

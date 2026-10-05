@@ -124,7 +124,9 @@ def classify_exc(e: BaseException, host: str = None) -> NetError:
             if e9.kind in ("range", "pruned", "timeout"):
                 e9.host = host
                 return e9
-        return NetError(msg, "http4xx", code=code, host=host)
+        e4 = NetError(msg, "http4xx", code=code, host=host)
+        e4.body = common.redact_secret_text(body, generic=False) if body else ""
+        return e4
     s = str(e)
     if isinstance(e, (socket.timeout, TimeoutError)) or "timed out" in s:
         return NetError(f"timeout: {s[:120]}", "timeout", host=host)
@@ -150,7 +152,7 @@ HOST_POLICIES = {
     "rpc.gobob.xyz": {"rate": 2.0, "burst": 2, "conc": 1},
     "www.storyscan.io": {"rate": 1.0, "burst": 5, "conc": 2, "reserve": 30, "reset_unit": "ms"},
     "explorer.somnia.network": {"rate": 1.0, "burst": 5, "conc": 2, "reserve": 30, "reset_unit": "ms"},
-    "api.etherscan.io": {"rate": 3.0, "burst": 3, "conc": 2},
+    "api.etherscan.io": {"rate": 2.0, "burst": 1, "conc": 2},
     "base.blockscout.com": {"rate": 1.0, "burst": 5, "conc": 2, "reserve": 30, "reset_unit": "ms", "breaker_fails": 8},
     "optimism.blockscout.com": {"rate": 1.0, "burst": 5, "conc": 2, "reserve": 30, "reset_unit": "ms"},
     "explorer.optimism.io": {"rate": 1.0, "burst": 5, "conc": 2, "reserve": 30, "reset_unit": "ms"},
@@ -341,8 +343,146 @@ _GATES_LOCK = threading.Lock()
 _POLICY_OVERRIDES = {}
 
 
+ES_DAILY_BUDGET = 80000
+ESB_FLUSH_EVERY = 20
+_ESB = {"day": None, "n": 0, "flushed": 0, "others": 0, "others_at": 0.0}
+_ESB_LOCK = threading.Lock()
+
+
+def _esb_dir() -> str:
+    return os.path.join(common.quota_dir(), "es_budget")
+
+
+def _esb_sync(proc: str, now: float):
+    d = _esb_dir()
+    me = f"{proc}.{os.getpid()}.json"
+    try:
+        os.makedirs(d, exist_ok=True)
+        common.atomic_write_json(os.path.join(d, me), {"day": _ESB["day"], "n": _ESB["n"], "proc": proc, "pid": os.getpid(), "at": int(now)})
+        _ESB["flushed"] = _ESB["n"]
+        tot = 0
+        for f in os.listdir(d):
+            if not f.endswith(".json") or f == me:
+                continue
+            try:
+                j = common.read_json(os.path.join(d, f), {})
+            except (Exception, SystemExit):
+                continue
+            if not isinstance(j, dict):
+                continue
+            if j.get("day") == _ESB["day"]:
+                tot += int(j.get("n") or 0)
+            elif isinstance(j.get("day"), int) and j["day"] < _ESB["day"]:
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
+        _ESB["others"] = tot
+    except OSError:
+        pass
+    _ESB["others_at"] = now
+
+
+def es_budget_take(proc: str, now: float = None) -> bool:
+    now = time.time() if now is None else now
+    day = int(now // 86400)
+    with _ESB_LOCK:
+        if _ESB["day"] != day:
+            _ESB.update(day=day, n=0, flushed=0, others=0, others_at=0.0)
+        if now - _ESB["others_at"] > 30 or _ESB["n"] - _ESB["flushed"] >= ESB_FLUSH_EVERY:
+            _esb_sync(proc, now)
+        if _ESB["n"] + _ESB["others"] >= ES_DAILY_BUDGET:
+            if _ESB["n"] != _ESB["flushed"]:
+                _esb_sync(proc, now)
+            return False
+        _ESB["n"] += 1
+        return True
+
+
+ES_DISPATCH_GAP = 0.5
+ES_DISPATCH_FALLBACK = 1.0
+_es_log = __import__("logging").getLogger("tj-bf")
+ES_DISPATCH_LOCK_WAIT = 30.0
+_ES_DISPATCH_LOCAL = threading.Lock()
+_ES_DISPATCH_WARNED = [False]
+
+
+def es_dispatch_wait(deadline: float = None):
+    with _ES_DISPATCH_LOCAL:
+        try:
+            d = _esb_dir()
+            os.makedirs(d, exist_ok=True)
+            fd = os.open(os.path.join(d, "dispatch.slot"), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as e:
+            if not _ES_DISPATCH_WARNED[0]:
+                _ES_DISPATCH_WARNED[0] = True
+                _es_log.warning("이더스캔 공유 간격 파일 사용 불가 — 보수 간격 %.1f초로 대기: %s", ES_DISPATCH_FALLBACK, str(e)[:120])
+            _es_fallback_sleep(deadline)
+            return
+        try:
+            t_lock = time.time()
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.time() - t_lock > ES_DISPATCH_LOCK_WAIT or (deadline is not None and time.time() >= deadline):
+                        raise NetError("budget: 이더스캔 공유 간격 잠금 대기 초과", "budget", host="api.etherscan.io")
+                    time.sleep(0.02)
+                except OSError as e:
+                    if not _ES_DISPATCH_WARNED[0]:
+                        _ES_DISPATCH_WARNED[0] = True
+                        _es_log.warning("이더스캔 공유 간격 잠금 실패 — 보수 간격 %.1f초: %s", ES_DISPATCH_FALLBACK, str(e)[:120])
+                    _es_fallback_sleep(deadline)
+                    return
+            try:
+                raw = os.pread(fd, 64, 0).decode("ascii", "replace").strip()
+                try:
+                    last = float(raw) if raw else 0.0
+                except ValueError:
+                    last = time.time()
+                now = time.time()
+                if last > now + 5:
+                    last = now
+                wait = last + ES_DISPATCH_GAP - now
+                if wait > 0:
+                    if deadline is not None and now + wait > deadline:
+                        raise NetError("budget: 이더스캔 공유 간격 대기가 마감을 넘음", "budget", host="api.etherscan.io")
+                    time.sleep(wait)
+                b = ("%.6f" % time.time()).encode()
+                os.ftruncate(fd, 0)
+                os.pwrite(fd, b, 0)
+            except OSError as e:
+                if not _ES_DISPATCH_WARNED[0]:
+                    _ES_DISPATCH_WARNED[0] = True
+                    _es_log.warning("이더스캔 공유 간격 기록 실패 — 보수 간격 %.1f초: %s", ES_DISPATCH_FALLBACK, str(e)[:120])
+                _es_fallback_sleep(deadline)
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+        finally:
+            os.close(fd)
+
+
+def _es_fallback_sleep(deadline):
+    if deadline is not None and time.time() + ES_DISPATCH_FALLBACK > deadline:
+        raise NetError("budget: 이더스캔 보수 간격 대기가 마감을 넘음", "budget", host="api.etherscan.io")
+    time.sleep(ES_DISPATCH_FALLBACK)
+
+
+def es_budget_used() -> tuple:
+    with _ESB_LOCK:
+        return _ESB["n"] + _ESB["others"], ES_DAILY_BUDGET
+
+
 def configure(cfg: dict):
-    global QUOTA_OPEN
+    global QUOTA_OPEN, ES_DAILY_BUDGET
+    try:
+        ES_DAILY_BUDGET = int(((cfg or {}).get("etherscan") or {}).get("daily_budget") or 80000)
+    except (TypeError, ValueError):
+        ES_DAILY_BUDGET = 80000
     bf = (cfg or {}).get("backfill") or {}
     for h, p in (bf.get("hosts") or {}).items():
         if isinstance(p, dict):
@@ -367,6 +507,19 @@ def _policy_for(host: str) -> dict:
     out.update(pick(HOST_POLICIES))
     out.update(pick(_POLICY_OVERRIDES))
     return out
+
+
+def gate_wait(url_or_host: str, prio: str = "bg") -> float:
+    host = urllib.parse.urlsplit(url_or_host).hostname if "://" in url_or_host else url_or_host
+    with _GATES_LOCK:
+        g = _GATES.get((host or "?").lower())
+    if g is None:
+        return 0.0
+    with g.lock:
+        now = time.time()
+        if g.open_until > now:
+            return g.open_until - now
+        return max(0.0, g._wait_needed(prio, 1))
 
 
 def gate(url_or_host: str) -> HostGate:
@@ -457,6 +610,8 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
                 h["Content-Type"] = "application/json"
             h.update(headers or {})
             req = urllib.request.Request(url, data=data, headers=h)
+            if host == "api.etherscan.io":
+                es_dispatch_wait(deadline)
             _stat(host, "calls")
             with _open(req, to9) as r:
                 g.observe(r.headers)

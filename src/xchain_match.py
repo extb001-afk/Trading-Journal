@@ -73,14 +73,10 @@ def short(a) -> str:
 
 
 def load_seed(base_dir):
-    p = os.path.join(base_dir, "seed", "xchain_bridges.json")
-    if not os.path.exists(p):
-        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "xchain_bridges.json")
-    try:
-        with open(p, encoding="utf-8") as f:
-            s = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        s = {}
+    import common as _cm8
+    bd = base_dir if os.path.exists(os.path.join(base_dir, "seed", "xchain_bridges.json")) else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    s = _cm8.seed_json("xchain_bridges.json", {}, base_dir=bd)
+    s = s if isinstance(s, dict) else {}
     s["evm_contracts"] = {norm(k): v for k, v in (s.get("evm_contracts") or {}).items()}
     s["solvers"] = {norm(k): v for k, v in (s.get("solvers") or {}).items()}
     return s

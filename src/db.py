@@ -109,6 +109,8 @@ DDL = [
         lbn INTEGER NOT NULL, sym TEXT, ts INTEGER, amt TEXT, at INTEGER NOT NULL, lc TEXT)""",
     """CREATE TABLE IF NOT EXISTS exf_adj_tomb (
         ex TEXT NOT NULL, sym TEXT NOT NULL, bts INTEGER NOT NULL, PRIMARY KEY (ex, sym, bts))""",
+    "CREATE INDEX IF NOT EXISTS postings_asset_leg ON postings(asset_id, leg_kind)",
+    "CREATE INDEX IF NOT EXISTS postings_loc_ts ON postings(location, event_ts)",
 ]
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import logging
@@ -15,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import alert_watch
 import bf_engine
+import cgplan
 import common
 import spamguard
 
@@ -31,7 +34,7 @@ SCAN_EVERY = 86400
 FP_EVERY = 3600
 CAND_FP_EVERY = 86400
 NEG_TTL = 7 * 86400
-UNSUP_TTL = 7 * 86400
+UNSUP_TTL = 86400
 ACQ_RETRY = 86400
 ACQ_TRIES = 3
 FIRST_DELAY = 600
@@ -53,6 +56,8 @@ LABEL_MAX = 60
 CG_KEY_ENV = "TJ_COINGECKO_KEY"
 CG_KEY_HDR = "x-cg-demo-api-key"
 CG_KEY_HOST = "api.coingecko.com#key"
+CG_PRO_HOST = "pro-api.coingecko.com"
+CG_PRO_HDR = cgplan.HDR["pro"]
 KEY_BAD_RETRY = 6 * 3600
 NOTICE_BACKLOG = 20
 NOTIFY_EVERY = 86400
@@ -66,6 +71,7 @@ NOTICE_KEY_BAD = "코인게코 키가 맞지 않아요 — 설정 › 연결·�
 BUDGET = {
     "coingecko": (30, 3600),
     "coingecko_key": ((24, 60), (260, 86400)),
+    "coingecko_info": (cgplan.INFO_PER_DAY, 86400),
     "magiceden": (60, 3600),
     "opensea": (600, 3600),
     "blockscout": (800, 86400),
@@ -73,10 +79,19 @@ BUDGET = {
     "helius": (120, 86400),
     "pairs": (60, 3600),
 }
+CG_LANES = ("live", "past", "nft")
+CG_FLOOR = {"live": 0.5, "nft": 0.3, "past": 0.2}
+CG_LIVE_MIN = 0.25
+CG_ACTIVE_S = 7200
+CG_G = "coingecko_key"
+CG_L = {ln: "cgk_" + ln for ln in CG_LANES}
+for _ln in CG_LANES:
+    BUDGET[CG_L[_ln]] = ((130 if _ln == "live" else 78 if _ln == "nft" else 52, 86400),)
 HOST_GAP = {"blockscout": 4.5, "coingecko_key": 2.5}
 HOST_POLICY = {
     "api.coingecko.com": {"rate": 0.1, "burst": 1, "conc": 1},
     CG_KEY_HOST: {"rate": 0.4, "burst": 1, "conc": 1},
+    CG_PRO_HOST: {"rate": 1.0, "burst": 1, "conc": 1},
     "api-mainnet.magiceden.dev": {"rate": 0.5, "burst": 1, "conc": 1},
     "api.opensea.io": {"rate": 1.0, "burst": 1, "conc": 1},
 }
@@ -727,6 +742,8 @@ def default_http(url: str, data=None, headers=None, timeout: float = 20.0):
         code = e.code if isinstance(e.code, int) else 0
         if not code and e.kind in ("http429", "quota"):
             code = 429
+        if "coingecko.com" in url and cgplan.wrong_root(getattr(e, "body", "") or ""):
+            return WRONGROOT, None
         return code, None
     except Exception:
         return 0, None
@@ -737,48 +754,228 @@ def _wins(key) -> tuple:
     return tuple(v) if isinstance(v[0], (tuple, list)) else (v,)
 
 
+class _NoLock(Exception):
+    pass
+
+
 class _Budget:
 
     def __init__(self, now, path=None):
         self.now = now
         self.path = path
         self.t = {}
+        self.dyn = {}
+        self.mc = {}
+        self.act = {}
         self.lock = threading.Lock()
+        self._sig = None
         if path:
+            self._load(force=True)
+
+    def _load(self, force=False) -> None:
+        if not self.path:
+            return
+        try:
+            st = os.stat(self.path)
+            sig = (st.st_mtime_ns, st.st_size, st.st_ino)
+        except OSError:
+            sig = None
+        if not force and sig == self._sig:
+            return
+        self._sig = sig
+        t, mc, act = {}, {}, {}
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            n0 = self.now()
+            for k, q in ((d or {}).get("t") or {}).items():
+                if k in BUDGET and isinstance(q, list):
+                    win = max(w for _c, w in self._w(k))
+                    t[k] = [float(x) for x in q if _fin(x) and n0 - win < x <= n0 + 60]
+            m = (d or {}).get("m") if isinstance(d, dict) else None
+            for k in MONTH_KEYS:
+                v = m.get(k) if isinstance(m, dict) else None
+                if (isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and re.fullmatch(r"\d{4}-\d{2}", v[0])
+                        and type(v[1]) is int and 0 <= v[1] < 10 ** 9):
+                    mc[k] = [v[0], v[1]]
+            a = (d or {}).get("a") if isinstance(d, dict) else None
+            for k in CG_LANES:
+                v = a.get(k) if isinstance(a, dict) else None
+                if _fin(v) and v <= n0 + 60:
+                    act[k] = float(v)
+        except (OSError, ValueError, TypeError, AttributeError):
+            t, mc, act = {}, {}, {}
+        self.t, self.mc, self.act = t, mc, act
+
+    @contextlib.contextmanager
+    def _xlock(self):
+        with self.lock:
+            if not self.path:
+                yield
+                return
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                n0 = now()
-                for k, q in ((d or {}).get("t") or {}).items():
-                    if k in BUDGET and isinstance(q, list):
-                        win = max(w for _c, w in _wins(k))
-                        self.t[k] = [float(x) for x in q if _fin(x) and n0 - win < x <= n0 + 60]
-            except (OSError, ValueError, TypeError):
-                self.t = {}
+                os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+                fd = os.open(self.path + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+            except OSError as e:
+                raise _NoLock() from e
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                except OSError as e:
+                    raise _NoLock() from e
+                self._load()
+                yield
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                os.close(fd)
+
+    def month_count(self, key, now=None) -> int:
+        with self.lock:
+            self._load()
+            c = self.mc.get(key)
+            return c[1] if c and c[0] == _ym_utc(self.now() if now is None else now) else 0
+
+    def _w(self, key) -> tuple:
+        v = self.dyn.get(key)
+        return tuple(v) if v else _wins(key)
 
     def _persist(self) -> bool:
         if not self.path:
             return True
         try:
-            atomic_write(self.path, {"v": SCHEMA, "t": self.t})
+            atomic_write(self.path, {"v": SCHEMA, "t": self.t, "m": self.mc, "a": self.act})
+            try:
+                st = os.stat(self.path)
+                self._sig = (st.st_mtime_ns, st.st_size, st.st_ino)
+            except OSError:
+                self._sig = None
             return True
         except (OSError, ValueError):
             return False
 
-    def take(self, key) -> bool:
-        wins = _wins(key)
-        with self.lock:
-            n0 = self.now()
-            q = [x for x in self.t.get(key, ()) if x > n0 - max(w for _c, w in wins)]
+    def take(self, key, wins=None) -> bool:
+        return self.take_all([(key, wins)])
+
+    def take_all(self, reqs) -> bool:
+        try:
+            with self._xlock():
+                return self._take_all(reqs)
+        except _NoLock:
+            return False
+
+    def _take_all(self, reqs) -> bool:
+        n0 = self.now()
+        got = {}
+        for key, wins in reqs:
+            wins = tuple(wins) if wins else self._w(key)
+            keep = max([w for _c, w in wins] + [w for _c, w in self._w(key)])
+            q = [x for x in self.t.get(key, ()) if x > n0 - keep]
             if any(sum(1 for x in q if x > n0 - win) >= cap for cap, win in wins):
                 self.t[key] = q
                 return False
+            got[key] = q
+        prev_mc = {k: (list(v) if v else None) for k, v in ((k, self.mc.get(k)) for k in got if k in MONTH_KEYS)}
+        ym = _ym_utc(n0)
+        for key, q in got.items():
             q.append(n0)
             self.t[key] = q
-            if not self._persist():
+            if key in MONTH_KEYS:
+                c = self.mc.get(key)
+                self.mc[key] = [ym, (c[1] if c and c[0] == ym else 0) + 1]
+        if not self._persist():
+            for q in got.values():
                 q.pop()
-                return False
-            return True
+            for k, v in prev_mc.items():
+                if v is None:
+                    self.mc.pop(k, None)
+                else:
+                    self.mc[k] = v
+            return False
+        return True
+
+    def _cg_why(self, lane, pol, n0) -> str:
+        def cnt(k9, win):
+            return sum(1 for x in self.t.get(k9, ()) if x > n0 - win)
+        others = {ln for ln in CG_LANES if ln != lane and n0 - float(self.act.get(ln) or 0.0) < CG_ACTIVE_S}
+        mcap = pol["per_min"] - (pol["min_reserve"] if lane != "live" and "live" in others else 0)
+        if cnt(CG_G, 60) >= mcap:
+            return "minute"
+        if cnt(CG_G, 86400) >= pol["per_day"]:
+            return "day"
+        hc = pol["hour"].get(lane)
+        if hc is not None and cnt(CG_L[lane], 3600) >= hc:
+            return "hour"
+        used = {ln: cnt(CG_L[ln], 86400) for ln in CG_LANES}
+        if used[lane] >= pol["floor"][lane]:
+            left = pol["per_day"] - cnt(CG_G, 86400)
+            resv = sum(max(0, pol["floor"][m] - used[m]) for m in others)
+            if left - 1 < resv:
+                return "share"
+        return ""
+
+    def take_cg(self, lane, per_min, per_day) -> str:
+        if lane not in CG_LANES:
+            return "lane"
+        pol = cg_policy(per_min, per_day)
+        try:
+            with self._xlock():
+                n0 = self.now()
+                touch = n0 - float(self.act.get(lane) or 0.0) >= 60
+                if touch:
+                    self.act[lane] = n0
+                fl = pol["floor"][lane]
+                self.dyn[CG_L[lane]] = (((pol["hour"][lane], 3600),) if lane in pol["hour"] else ()) + ((max(0, fl), 86400),)
+                why = self._cg_why(lane, pol, n0)
+                if why:
+                    if touch:
+                        self._persist()
+                    return why
+                keep = max([86400] + [w for _c, w in self._w(CG_G)])
+                qg = [x for x in self.t.get(CG_G, ()) if x > n0 - keep]
+                ql = [x for x in self.t.get(CG_L[lane], ()) if x > n0 - 86400]
+                prev_mc = list(self.mc[CG_G]) if self.mc.get(CG_G) else None
+                qg.append(n0)
+                ql.append(n0)
+                self.t[CG_G], self.t[CG_L[lane]] = qg, ql
+                ym = _ym_utc(n0)
+                c = self.mc.get(CG_G)
+                self.mc[CG_G] = [ym, (c[1] if c and c[0] == ym else 0) + 1]
+                if not self._persist():
+                    qg.pop()
+                    ql.pop()
+                    if prev_mc is None:
+                        self.mc.pop(CG_G, None)
+                    else:
+                        self.mc[CG_G] = prev_mc
+                    return "store"
+                return ""
+        except _NoLock:
+            return "store"
+
+    def cg_wait(self, lane, per_min, per_day) -> float:
+        pol = cg_policy(per_min, per_day)
+        with self.lock:
+            self._load()
+            n0 = self.now()
+            if self._cg_why(lane, pol, n0) != "minute":
+                return 0.0
+            others = {ln for ln in CG_LANES if ln != lane and n0 - float(self.act.get(ln) or 0.0) < CG_ACTIVE_S}
+            mcap = pol["per_min"] - (pol["min_reserve"] if lane != "live" and "live" in others else 0)
+            q = sorted(x for x in self.t.get(CG_G, ()) if x > n0 - 60)
+            if mcap <= 0:
+                return 60.0
+            return max(0.0, q[len(q) - mcap] + 60 - n0 + 0.01) if len(q) >= mcap else 0.0
+
+    def cg_usage(self) -> dict:
+        with self.lock:
+            self._load()
+            n0 = self.now()
+            out = {ln: sum(1 for x in self.t.get(CG_L[ln], ()) if x > n0 - 86400) for ln in CG_LANES}
+            out["total"] = sum(1 for x in self.t.get(CG_G, ()) if x > n0 - 86400)
+            return out
 
     def _left_w(self, key, cap, win) -> int:
         n0 = self.now()
@@ -786,33 +983,99 @@ class _Budget:
 
     def left(self, key) -> int:
         with self.lock:
-            return min(self._left_w(key, cap, win) for cap, win in _wins(key))
+            self._load()
+            return min(self._left_w(key, cap, win) for cap, win in self._w(key))
 
-    def free_in(self, key) -> float:
+    def free_in(self, key, wins=None) -> float:
         with self.lock:
+            self._load()
             n0, w = self.now(), 0.0
-            for cap, win in _wins(key):
+            for cap, win in (tuple(wins) if wins else self._w(key)):
                 q = sorted(x for x in self.t.get(key, ()) if x > n0 - win)
-                if len(q) >= cap:
+                if cap <= 0:
+                    w = max(w, float(win))
+                elif len(q) >= cap:
                     w = max(w, q[len(q) - cap] + win - n0 + 0.01)
             return w
 
     def snap(self) -> dict:
         out = {}
         with self.lock:
+            self._load()
             for k in BUDGET:
-                ws = [{"used": cap - self._left_w(k, cap, win), "cap": cap, "window": win} for cap, win in _wins(k)]
+                ws = [{"used": cap - self._left_w(k, cap, win), "cap": cap, "window": win} for cap, win in self._w(k)]
                 out[k] = ws[0] if len(ws) == 1 else dict(max(ws, key=lambda x: x["window"]), windows=ws)
         return out
 
 
+MONTH_KEYS = ("coingecko_key",)
+
+
+def cg_policy(per_min, per_day) -> dict:
+    pm, pd = max(0, int(per_min or 0)), max(0, int(per_day or 0))
+    fl = {ln: int(pd * CG_FLOOR[ln]) for ln in CG_LANES}
+    fl["live"] += pd - sum(fl.values())
+    return {"per_min": pm, "per_day": pd, "floor": fl, "min_reserve": int(pm * CG_LIVE_MIN),
+            "hour": {"live": (-(-pd // 24)) if pd > 0 else 0}}
+
+
+def cg_key_windows(rec, budget=None, share=None) -> tuple:
+    b = budget or shared_budget()
+    if isinstance(rec, dict) and rec.get("plan") == "pro":
+        bb = cgplan.budget(rec, b.now(), share, b.month_count(CG_G))
+        if bb["basis"] == "pro":
+            return int(bb["per_min"]), int(bb["per_day"])
+    w = {win: cap for cap, win in _wins(CG_G)}
+    return int(w.get(60, cgplan.DEMO_BUDGET[0])), int(w.get(86400, cgplan.DEMO_BUDGET[1]))
+
+
+def _ym_utc(t) -> str:
+    return datetime.fromtimestamp(float(t), timezone.utc).strftime("%Y-%m")
+
+
+_SHARED = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared_budget() -> "_Budget":
+    with _SHARED_LOCK:
+        b = _SHARED.get(BUDGET_PATH)
+        if b is None:
+            b = _SHARED[BUDGET_PATH] = _Budget(_now, BUDGET_PATH)
+        return b
+
+
+def cg_reserve(key: str, wait_max: float = 5.0, sleep=None, budget=None) -> str:
+    b = budget or shared_budget()
+    st = cgplan.Store()
+    try:
+        rec = st.load(key)
+    except Exception:
+        rec = None
+    bb = cgplan.budget(rec, b.now(), st.share(), b.month_count("coingecko_key"))
+    wins = ((int(bb["per_min"]), 60), (int(bb["per_day"]), 86400))
+    if b.take("coingecko_key", wins=wins):
+        return ""
+    w = b.free_in("coingecko_key", wins=wins)
+    if 0 < w <= wait_max:
+        (sleep or time.sleep)(w)
+        if b.take("coingecko_key", wins=wins):
+            return ""
+        w = b.free_in("coingecko_key", wins=wins)
+    if w <= 0:
+        return "store"
+    return "minute" if b.free_in("coingecko_key", wins=wins[1:]) <= 0 else "day"
+
+
 BLOCKED, NOBUDGET = -429, -1
+WRONGROOT = -10010
 
 
 class Tracker:
 
     def __init__(self, cfg_fn=None, px_fn=None, rate_fn=None, http=None, sleep=None, now=None, env_fn=None,
-                 hold_path=None, fp_path=None, prefs_path=None, gate_fn=None, budget_path=None, alert_fn=None):
+                 hold_path=None, fp_path=None, prefs_path=None, gate_fn=None, budget_path=None, alert_fn=None, cg_store=None):
+        self.cg_store = cg_store or cgplan.Store()
         self.alert_fn = alert_fn
         self.cfg_fn = cfg_fn or (lambda: {})
         self.px_fn = px_fn or (lambda sym: None)
@@ -830,12 +1093,16 @@ class Tracker:
         self.run_lock = threading.Lock()
         self.hold = _load_cache(self.hold_path, empty_hold)
         self.fp = _load_cache(self.fp_path, empty_fp)
-        self.budget = _Budget(self.now, budget_path or (os.path.join(os.path.dirname(self.hold_path), "nft_budget.json")
-                                                          if hold_path else BUDGET_PATH))
+        if budget_path is None and hold_path is None and now is None:
+            self.budget = shared_budget()
+        else:
+            self.budget = _Budget(self.now, budget_path or (os.path.join(os.path.dirname(self.hold_path), "nft_budget.json")
+                                                              if hold_path else BUDGET_PATH))
         self.wake = threading.Event()
         self.calls = {}
         self._last_call = 0.0
         self._host_last = {}
+        self._gap_dyn = {}
         self._last_st = None
         self.urgent = set()
 
@@ -857,16 +1124,19 @@ class Tracker:
     def _blocked(self, host) -> bool:
         return self.now() < float(((self.fp.get("hosts") or {}).get(host) or {}).get("until") or 0)
 
-    def _call(self, bkey, url, data=None, headers=None, hkey=None):
+    def _call(self, bkey, url, data=None, headers=None, hkey=None, take=None):
         host = hkey or (urllib.parse.urlsplit(url).hostname or "?").lower()
         if self._blocked(host):
             self._last_st = BLOCKED
             return BLOCKED, None
-        if not self.budget.take(bkey):
+        if not (take() if take else self.budget.take(bkey)):
+            self._last_st = NOBUDGET
+            return NOBUDGET, None
+        if bkey == "etherscan" and not bf_engine.es_budget_take("web"):
             self._last_st = NOBUDGET
             return NOBUDGET, None
         gap = MIN_GAP - (self.now() - self._last_call)
-        hg = HOST_GAP.get(bkey)
+        hg = self._gap_dyn.get(bkey, HOST_GAP.get(bkey))
         if hg:
             gap = max(gap, hg - (self.now() - self._host_last.get(host, -1e18)))
         if gap > 0:
@@ -894,31 +1164,138 @@ class Tracker:
 
     def _key_bad(self, k: str) -> bool:
         kb = self.fp.get("cgkey")
-        return bool(k) and isinstance(kb, dict) and bool(kb.get("bad")) and kb.get("fp") == _kfp(k)
+        if not (bool(k) and isinstance(kb, dict) and bool(kb.get("bad")) and kb.get("fp") == _kfp(k)):
+            return False
+        try:
+            rec = self.cg_store.load(k)
+        except Exception:
+            rec = None
+        at = _num((rec or {}).get("at")) if isinstance(rec, dict) else None
+        return not (at and at > (_num(kb.get("at")) or 0))
+
+    def _cg_mode(self, k: str):
+        try:
+            rec = self.cg_store.load(k)
+        except Exception as e:
+            _warn("코인게코 키 등급 기록 읽기 실패: %s", type(e).__name__)
+            rec = None
+        plan = rec.get("plan") if isinstance(rec, dict) and rec.get("plan") in cgplan.PLANS else "demo"
+        b = cgplan.budget(rec if plan == "pro" else None, self.now(), self._cg_share(), self.budget.month_count("coingecko_key"))
+        if plan == "pro" and b["basis"] == "pro":
+            self.budget.dyn["coingecko_key"] = ((int(b["per_min"]), 60), (int(b["per_day"]), 86400))
+            self._gap_dyn["coingecko_key"] = 60.0 / max(1, int(b["per_min"]))
+        else:
+            self.budget.dyn.pop("coingecko_key", None)
+            self._gap_dyn.pop("coingecko_key", None)
+        return plan, rec
+
+    def _cg_share(self) -> int:
+        try:
+            return cgplan.norm_share(self.cg_store.share())
+        except Exception:
+            return cgplan.DEFAULT_SHARE
+
+    def _cg_key_call(self, plan: str, path: str, k: str):
+        root, hdr = cgplan.endpoint(plan)
+        hkey = CG_PRO_HOST if plan == "pro" else CG_KEY_HOST
+        wd = {win: cap for cap, win in self.budget._w(CG_G)}
+        pm, pd = int(wd.get(60, cgplan.DEMO_BUDGET[0])), int(wd.get(86400, cgplan.DEMO_BUDGET[1]))
+
+        def take():
+            return not self.budget.take_cg("nft", pm, pd)
+        st, d = self._call("coingecko_key", root + path, headers={hdr: k}, hkey=hkey, take=take)
+        if st == NOBUDGET:
+            w = self.budget.cg_wait("nft", pm, pd)
+            if 0 < w <= 61:
+                self.sleep(w)
+                st, d = self._call("coingecko_key", root + path, headers={hdr: k}, hkey=hkey, take=take)
+        return st, d
+
+    @staticmethod
+    def _wrong_root(st, d) -> bool:
+        return st == WRONGROOT or (st != 200 and isinstance(d, (dict, str)) and cgplan.wrong_root(d)) or (
+            st == 200 and isinstance(d, dict) and "status" in d and cgplan.wrong_root(d))
+
+    def _cg_remember(self, k: str, **fields):
+        try:
+            return self.cg_store.save(k, **fields)
+        except Exception as e:
+            _warn("코인게코 키 등급 기록 실패: %s", type(e).__name__)
+            return None
+
+    def _cg_info_refresh(self, k: str, rec) -> None:
+        if not isinstance(rec, dict) or rec.get("plan") != "pro":
+            return
+        now = self.now()
+        ist = cgplan.info_state(rec, now)
+        ia, ta = _num(rec.get("info_at")) or 0.0, _num(rec.get("info_try_at")) or 0.0
+        if ist == "ok" and now - ia < cgplan.INFO_EVERY:
+            return
+        if ist != "ok" and ta and ta <= now + 3600 and now - ta < cgplan.INFO_RETRY:
+            return
+        root, hdr = cgplan.endpoint("pro")
+        mins = tuple(w for w in self.budget._w("coingecko_key") if w[1] <= 60) or ((cgplan.DEMO_BUDGET[0], 60),)
+        st, d = self._call("coingecko_key", root + "/key", headers={hdr: k}, hkey=CG_PRO_HOST,
+                           take=lambda: self.budget.take_all([("coingecko_info", None), ("coingecko_key", mins)]))
+        if st in (NOBUDGET, BLOCKED):
+            return
+        info = cgplan.parse_key_info(d) if st == 200 else None
+        if info:
+            self._cg_remember(k, info=info, info_at=now, info_try_at=now)
+        else:
+            self._cg_remember(k, info=None, info_at=None, info_try_at=now)
+            _warn("코인게코 프로 사용량(/key) 읽기 실패(HTTP %s) — 데모 수준 예산으로", st)
+        self._cg_mode(k)
+
+    def cg_info_tick(self) -> None:
+        k = self._cg_key()
+        if not k:
+            return
+        with self.lock:
+            if self._key_bad(k):
+                return
+        plan, rec = self._cg_mode(k)
+        if plan == "pro":
+            self._cg_info_refresh(k, rec)
 
     def _cg_get(self, url):
+        root0 = cgplan.ROOT["demo"]
+        path = url[len(root0):] if url.startswith(root0) else url
         k = self._cg_key()
         if k:
             with self.lock:
                 kb = self.fp.get("cgkey") if self._key_bad(k) else None
             if not kb or self.now() - float(kb.get("at") or 0) >= KEY_BAD_RETRY:
-                st, d = self._call("coingecko_key", url, headers={CG_KEY_HDR: k}, hkey=CG_KEY_HOST)
-                if st == NOBUDGET:
-                    w = self.budget.free_in("coingecko_key")
-                    if 0 < w <= 61:
-                        self.sleep(w)
-                        st, d = self._call("coingecko_key", url, headers={CG_KEY_HDR: k}, hkey=CG_KEY_HOST)
+                plan, rec = self._cg_mode(k)
+                if plan == "pro":
+                    self._cg_info_refresh(k, rec)
+                st, d = self._cg_key_call(plan, path, k)
+                if self._wrong_root(st, d):
+                    alt = cgplan.other(plan)
+                    st2, d2 = self._cg_key_call(alt, path, k)
+                    if st2 in (200, 404) and not self._wrong_root(st2, d2):
+                        _warn("코인게코 키 등급 자동 전환: %s → %s (루트 URL 오류)", cgplan.PLAN_KO[plan], cgplan.PLAN_KO[alt])
+                        self._cg_remember(k, plan=alt, at=self.now(), how="runtime")
+                        plan, st, d = alt, st2, d2
+                        if alt == "pro":
+                            self._cg_info_refresh(k, self._cg_mode(k)[1])
+                        else:
+                            self._cg_mode(k)
+                    elif st2 in (401, 403) or self._wrong_root(st2, d2):
+                        st, d = (st2 if st2 in (401, 403) else 401), None
+                    else:
+                        st, d = st2, d2
                 if st in (401, 403):
                     with self.lock:
                         self.fp["cgkey"] = {"bad": True, "fp": _kfp(k), "at": self.now(), "st": st}
-                    _warn("코인게코 데모 키 거부(HTTP %s) — 무키로 계속 · 설정 › 연결·키에서 다시 넣어야 해요", st)
-                elif st not in (NOBUDGET, BLOCKED):
+                    _warn("코인게코 %s 키 거부(HTTP %s) — 무키로 계속 · 설정 › 연결·키에서 다시 넣어야 해요", cgplan.PLAN_KO[plan], st)
+                elif st not in (NOBUDGET, BLOCKED, WRONGROOT) and not self._wrong_root(st, d):
                     if st in (200, 404):
                         with self.lock:
                             if self.fp.get("cgkey"):
                                 self.fp["cgkey"] = {}
                     return st, d
-        return self._call("coingecko", url)
+        return self._call("coingecko", root0 + path)
 
     def cg_waiting(self, prefs=None) -> int:
         with self.lock:
@@ -1096,8 +1473,11 @@ class Tracker:
         cfg = self._cfg()
         tg = self.targets(cfg)
         now = self.now()
-        unsup = dict((self.hold.get("scan") or {}).get("unsupported") or {})
-        es_key = bool(self.env_fn("TJ_ETHERSCAN_KEY"))
+        es_kv = str(self.env_fn("TJ_ETHERSCAN_KEY") or "")
+        es_key = bool(es_kv)
+        ekf = _kfp(es_kv) if es_kv else ""
+        unsup = {c: v for c, v in ((self.hold.get("scan") or {}).get("unsupported") or {}).items()
+                 if isinstance(v, dict) and ekf and v.get("kfp") == ekf}
         helius = bool(self.env_fn("TJ_HELIUS_KEY"))
         due = []
         with self.lock:
@@ -1139,7 +1519,7 @@ class Tracker:
                     got, err2 = self._scan_es(chain, es, addr)
                     src = "etherscan"
                     if err2 == "unsupported":
-                        unsup[chain] = {"why": "etherscan_free", "until": now + UNSUP_TTL}
+                        unsup[chain] = {"why": "etherscan_free", "until": now + UNSUP_TTL, "kfp": ekf}
                     err = err2 if (err2 == "unsupported" or not err) else err
                 if got is not None and LEGACY_NFT.get(chain):
                     leg, lerr = self._scan_legacy(bs, chain, addr) if bs else (None, "no_blockscout")
@@ -1678,6 +2058,10 @@ class Tracker:
         self.sleep(FIRST_DELAY)
         while True:
             try:
+                self.cg_info_tick()
+            except Exception as e:
+                _warn("코인게코 프로 한도(/key) 확인 실패: %s", type(e).__name__)
+            try:
                 self.run_once()
             except Exception as e:
                 _warn("NFT 바퀴 실패: %s", type(e).__name__)
@@ -1797,6 +2181,12 @@ class Tracker:
         cgk = self._cg_key()
         with self.lock:
             cg_bad = self._key_bad(cgk)
+        cg_rec = None
+        if cgk:
+            try:
+                cg_rec = self.cg_store.load(cgk)
+            except Exception:
+                cg_rec = None
         try:
             ntc = self.notice(prefs)
         except Exception as e:
@@ -1813,7 +2203,10 @@ class Tracker:
                      "unsupported": [{"chain": c9, "why": v9.get("why"), "until": v9.get("until")} for c9, v9 in sorted((scan.get("unsupported") or {}).items())]},
             "notice": ntc,
             "sources": {"coingecko": {"key": bool(cgk), "key_bad": cg_bad, "blocked_until": (hosts.get("api.coingecko.com") or {}).get("until"),
-                                      "key_blocked_until": (hosts.get(CG_KEY_HOST) or {}).get("until")},
+                                      "key_blocked_until": (hosts.get(CG_PRO_HOST if (cg_rec or {}).get("plan") == "pro" else CG_KEY_HOST) or {}).get("until"),
+                                      "plan": (cg_rec or {}).get("plan") if cgk else None,
+                                      "plan_text": cgplan.plan_text(cg_rec, now, self._cg_share(), self.budget.month_count("coingecko_key", now)) if cgk else None,
+                                      "share": self._cg_share() if (cg_rec or {}).get("plan") == "pro" else None},
                         "magiceden": {"key": False, "blocked_until": (hosts.get("api-mainnet.magiceden.dev") or {}).get("until")},
                         "opensea": {"key": osk, "verified": False},
                         "tensor": {"key": bool(self.env_fn("TJ_TENSOR_KEY")), "impl": False}},

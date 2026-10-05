@@ -30,7 +30,7 @@
     w.textContent = '주의: 암호화되지 않은 주소(http)예요 — 비밀번호와 로그인 쿠키가 이 네트워크에 그대로 오가요. 테일넷(테일스케일)이나 HTTPS 주소로 여는 걸 권해요.';
     show(w, true);
   }
-  var WIPE_LS = ['tj_v2_ver', 'tj_v2_full', 'tj_logo_fail'], wiped = false;
+  var WIPE_LS = ['tj_v2_ver', 'tj_v2_full', 'tj_logo_fail', 'tj_v2_todo_hist', 'tj_v2_srch_recent', 'tj_v2_srch_saved'], wiped = false;
   function wipeCache() {
     if (wiped) return;
     wiped = true;

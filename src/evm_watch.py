@@ -1,4 +1,5 @@
 """EVM wallet watcher (RPC and explorer based)."""
+import hashlib
 import json
 import os
 import random
@@ -2009,7 +2010,8 @@ class EtherscanDailyLimit(EtherscanKeyError):
 class EtherscanWatcher(RpcSynthMixin):
 
     ES_API = "https://api.etherscan.io/v2/api"
-    PAGE = 10000
+    PAGE = 1000
+    ES_ROW_FLOOR = 1000
 
     def __init__(self, cfg: dict, chain: str, wallets: list, writer, chainid: int, key: str):
         self.chain = chain
@@ -2023,6 +2025,10 @@ class EtherscanWatcher(RpcSynthMixin):
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.bpd = int(cfg["chains"][chain].get("blocks_per_day", 7200))
+        try:
+            self.page = max(100, int(((cfg.get("etherscan") or {}).get("page_rows")) or self.PAGE))
+        except (TypeError, ValueError):
+            self.page = self.PAGE
         self.wallets = [w.lower() for w in wallets]
         self.wallet_since = bf_engine.wallet_since_map(cfg, chain)
         self.writer = writer
@@ -2038,13 +2044,19 @@ class EtherscanWatcher(RpcSynthMixin):
         self.progress = bf_engine.progress("evm")
 
     ES_RETRY = 4
+    INT_LAG_SEC = 1800
 
     def _es_get(self, params: dict):
         left = es_daily_left()
         if left > 0:
             raise EtherscanDailyLimit(f"etherscan 하루 한도 쉼 창 — {left / 60:.0f}분 뒤 재시도")
+        if not bf_engine.es_budget_take("evm"):
+            used9, cap9 = bf_engine.es_budget_used()
+            msg9 = f"로컬 하루 예산 도달 {used9}/{cap9} (공표 한도 80% 규칙) — day/limit"
+            es_daily_trip(msg9)
+            raise EtherscanDailyLimit(f"etherscan {msg9}")
         try:
-            d = http_json(self.ES_API + "?" + urllib.parse.urlencode(params))
+            d = http_json(self.ES_API + "?" + urllib.parse.urlencode(params), retries=1)
         except bf_engine.NetError as e:
             if es_is_daily_limit(e):
                 es_daily_trip(str(e))
@@ -2058,11 +2070,24 @@ class EtherscanWatcher(RpcSynthMixin):
                 raise EtherscanDailyLimit(f"etherscan 하루 한도: {str(res9)[:120]}")
         return d
 
+    ES_NET_RETRY = 2
+
+    def _es_get_retry(self, params: dict):
+        for i in range(self.ES_NET_RETRY):
+            try:
+                return self._es_get(params)
+            except bf_engine.NetError as e:
+                if isinstance(e, bf_engine.CircuitOpen) or e.kind not in bf_engine.RETRYABLE or e.kind == "quota" \
+                        or i + 1 >= self.ES_NET_RETRY:
+                    raise
+                wait = e.retry_after if (e.kind == "http429" and e.retry_after is not None) else bf_engine._backoff(i)
+                time.sleep(min(float(wait), 20.0))
+
     def _es(self, params: dict):
         params = dict(params, chainid=self.cid, apikey=self.key)
         last = None
         for i in range(self.ES_RETRY):
-            d = self._es_get(params)
+            d = self._es_get_retry(params)
             if not isinstance(d, dict):
                 raise RuntimeError("etherscan 응답 형식 오류")
             if d.get("status") == "0" and d.get("message") not in ("No transactions found",
@@ -2082,8 +2107,8 @@ class EtherscanWatcher(RpcSynthMixin):
         raise last if last else RuntimeError("etherscan 재시도 소진")
 
     def head_block(self) -> int:
-        d = self._es_get({"chainid": self.cid, "module": "proxy", "action": "eth_blockNumber",
-                          "apikey": self.key})
+        d = self._es_get_retry({"chainid": self.cid, "module": "proxy", "action": "eth_blockNumber",
+                                "apikey": self.key})
         if not isinstance(d, dict) or not isinstance(d.get("result"), str) or not d["result"].startswith("0x"):
             res9 = (d or {}).get("result") if isinstance(d, dict) else d
             if "api key" in str(res9).lower():
@@ -2214,9 +2239,10 @@ class EtherscanWatcher(RpcSynthMixin):
         seen = {}
         start = frm
         while True:
+            page9 = int(getattr(self, "page", self.PAGE) or self.PAGE)
             rows = self._es({"module": "account", "action": action, "address": wallet,
                              "startblock": start, "endblock": to, "page": 1,
-                             "offset": self.PAGE, "sort": "asc"})
+                             "offset": page9, "sort": "asc"})
             if not isinstance(rows, list):
                 raise RuntimeError(f"{action} 형식 오류")
             page_counts = {}
@@ -2227,11 +2253,11 @@ class EtherscanWatcher(RpcSynthMixin):
                     continue
                 seen[key] = page_counts[key]
                 out.append(row)
-            if len(rows) < self.PAGE:
+            if len(rows) < min(page9, self.ES_ROW_FLOOR):
                 return out
             last_blk = int(rows[-1].get("blockNumber") or 0)
             if last_blk <= start:
-                raise RuntimeError(f"{action} 페이지 전진 불가 (단일 블록 {self.PAGE}건 초과)")
+                raise RuntimeError(f"{action} 페이지 전진 불가 (단일 블록 {len(rows)}건 이상)")
             start = last_blk
 
     @staticmethod
@@ -2279,6 +2305,39 @@ class EtherscanWatcher(RpcSynthMixin):
                 e[kind] = [row for n, row in e[kind].values() for _ in range(n)]
         return out
 
+    @classmethod
+    def _leg_marks(cls, ent: dict) -> dict:
+        out = {}
+        for kind in ("tt", "it"):
+            for row in ent.get(kind) or []:
+                k = kind + ":" + hashlib.sha1(cls._row_key(row).encode()).hexdigest()[:16]
+                out[k] = out.get(k, 0) + 1
+        return out
+
+    @staticmethod
+    def _marks_new(prev, cur: dict) -> bool:
+        if not isinstance(prev, dict):
+            return bool(cur)
+        return any(n > int(prev.get(k, 0) or 0) for k, n in cur.items())
+
+    @staticmethod
+    def _marks_merge(prev, cur: dict) -> dict:
+        out = dict(prev) if isinstance(prev, dict) else {}
+        for k, n in cur.items():
+            out[k] = max(int(out.get(k, 0) or 0), n)
+        return out
+
+    def _lag_blocks(self) -> int:
+        bpd9 = int(getattr(self, "bpd", 0) or 7200)
+        return max(int(getattr(self, "conf_depth", 12) or 12), -(-bpd9 * self.INT_LAG_SEC // 86400))
+
+    def _lag_from(self, w: str, since: int) -> int:
+        floor9 = self.cursor.get("_cov:" + w)
+        if not isinstance(floor9, int):
+            floor9 = ((self.cursor.get("_es_int") or {}).get("floor") or {}).get(w)
+        floor9 = int(floor9) if isinstance(floor9, int) else 0
+        return max(floor9 + 1, since + 1 - self._lag_blocks(), 1)
+
     def cycle(self):
         head = self.head_block()
         safe = head - self.conf_depth
@@ -2287,6 +2346,9 @@ class EtherscanWatcher(RpcSynthMixin):
         tried_w = 0
         per_wallet = {}
         since_of = {}
+        from_of = {}
+        int_rec = self.cursor.get("_es_int") if isinstance(self.cursor.get("_es_int"), dict) else {}
+        int_seen = int_rec.get("seen") if isinstance(int_rec.get("seen"), dict) else {}
         fail_since = {}
         for w in self.wallets:
             first = w not in self.cursor
@@ -2309,17 +2371,20 @@ class EtherscanWatcher(RpcSynthMixin):
                              w[:10], int(self.backfill_months), since, safe)
                 else:
                     self.cursor[w] = safe
+                    int_rec.setdefault("floor", {})[w] = safe
+                    self.cursor["_es_int"] = int_rec
                     continue
             if since >= safe:
                 continue
             tried_w += 1
+            frm = since + 1 if first else self._lag_from(w, since)
             try:
-                txs = self._list_all("txlist", w, since + 1, safe)
-                tts = self._list_all("tokentx", w, since + 1, safe)
-                its = self._list_all("txlistinternal", w, since + 1, safe)
+                txs = self._list_all("txlist", w, frm, safe)
+                tts = self._list_all("tokentx", w, frm, safe)
+                its = self._list_all("txlistinternal", w, frm, safe)
                 _mg9 = lpdec.lp_managers(common.BASE_DIR).get(self.chain) or {}
                 if _mg9:
-                    tts = tts + [r9 for r9 in self._list_all("tokennfttx", w, since + 1, safe)
+                    tts = tts + [r9 for r9 in self._list_all("tokennfttx", w, frm, safe)
                                  if str(r9.get("contractAddress") or "").lower() in _mg9]
             except EtherscanKeyError:
                 raise
@@ -2332,20 +2397,27 @@ class EtherscanWatcher(RpcSynthMixin):
                 continue
             per_wallet[w] = (txs, tts, its)
             since_of[w] = since
+            from_of[w] = frm
         merged = self.merge_wallet_rows(per_wallet)
         eff_safe = min([safe] + [int(v) for v in fail_since.values()])
         bad_w = set()
         n_emit = 0
+        relist = []
         for h in sorted(merged, key=lambda x: (self._ent_block(merged[x]) or 0, x)):
             ent = merged[h]
             if h in self.emitted:
+                blk9 = self._ent_block(ent)
+                if blk9 and (ent["it"] or ent["tt"]) and any(from_of[w] <= blk9 <= eff_safe for w in ent["ws"]):
+                    prev9 = int_seen.get(h)
+                    if self._marks_new(prev9[1] if isinstance(prev9, list) and len(prev9) == 2 else None, self._leg_marks(ent)):
+                        relist.append(h)
                 continue
             blk = self._ent_block(ent)
             if not blk:
                 log.warning("etherscan %s 블록 번호 파싱 불능 — 관련 지갑 커서 유지", h[:12])
                 bad_w |= ent["ws"]
                 continue
-            if not any(since_of[w] < blk <= eff_safe for w in ent["ws"]):
+            if not any(from_of[w] <= blk <= eff_safe for w in ent["ws"]):
                 continue
             snap = self._snapshot(ent)
             if snap is None:
@@ -2359,12 +2431,41 @@ class EtherscanWatcher(RpcSynthMixin):
                 self.writer.append(rec)
                 self.emitted.add(h)
                 n_emit += 1
+                int_seen[h] = [blk, self._leg_marks(ent)]
             except Exception as e:
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 bad_w |= set(per_wallet)
                 cycle_ok = False
                 _revoke_stamp_disk(self.cursor_path)
                 break
+        for h in relist:
+            ent = merged[h]
+            blk = self._ent_block(ent)
+            if not any(w not in bad_w and from_of[w] <= blk <= eff_safe for w in ent["ws"]):
+                continue
+            snap = self._snapshot(ent)
+            if snap is None:
+                log.warning("etherscan %s internal 늦은 색인 재방출 — 상세 수치 파싱 불능, 관련 지갑 커서 유지", h[:12])
+                bad_w |= ent["ws"]
+                continue
+            try:
+                self.writer.append({"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap, "wallets": self.wallets,
+                                    "observed_head": head, "ts": int(time.time()), "repair": "leg_union"})
+            except Exception as e:
+                log.error("inbox append 실패(internal 늦은 색인 재방출) — 커서 미전진: %s", e)
+                bad_w |= set(per_wallet)
+                cycle_ok = False
+                _revoke_stamp_disk(self.cursor_path)
+                break
+            prev9 = int_seen.get(h)
+            int_seen[h] = [blk, self._marks_merge(prev9[1] if isinstance(prev9, list) and len(prev9) == 2 else None, self._leg_marks(ent))]
+            log.info("%s %s 늦은 색인 레그 — leg 합집합 재방출(토큰 %d · internal %d행)", self.chain, h[:12], len(ent["tt"]), len(ent["it"]))
+        if int_seen or int_rec.get("floor"):
+            lo9 = min(from_of.values()) if from_of else None
+            if lo9 is not None:
+                int_seen = {h9: v9 for h9, v9 in int_seen.items() if isinstance(v9, list) and len(v9) == 2 and int(v9[0]) >= lo9}
+            int_rec["seen"] = int_seen
+            self.cursor["_es_int"] = int_rec
         if bad_w:
             cycle_ok = False
             failed_w += len(bad_w & set(per_wallet))
@@ -3815,7 +3916,7 @@ def main():
     shared_writer = SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
     es_key = ""
     try:
-        with open(os.path.join(common.BASE_DIR, ".env"), "r", encoding="utf-8") as f:
+        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("TJ_ETHERSCAN_KEY="):
                     es_key = line.strip().split("=", 1)[1]

@@ -47,11 +47,9 @@ def load_seed(base_dir=None) -> dict:
     if _SEED is not None and base_dir is None:
         return _SEED
     bd = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    try:
-        with open(os.path.join(bd, "seed", "sale_contracts.json"), encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except (OSError, ValueError):
-        raw = {}
+    import common
+    raw = common.seed_json("sale_contracts.json", {}, base_dir=bd)
+    raw = raw if isinstance(raw, dict) else {}
     seed = {"factories": {_addr(a) for a in (raw.get("cca_factories") or []) if _addr(a)},
             "chains": [str(c) for c in (raw.get("chains") or ["eth", "base", "arbitrum"])],
             "auctions": {str(k).lower(): v for k, v in (raw.get("auctions") or {}).items() if isinstance(v, dict)},

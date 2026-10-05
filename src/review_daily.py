@@ -326,6 +326,17 @@ def _unknown_of(e):
     return 0.0, 0.0
 
 
+DCA_NOTE = "같은 몇 분 안 여러 곳 소액 매수 묶음"
+_DCA_NOTE_HASH = "정기 소액 분산 매수(known_patterns) — 지적 대상 아님"
+
+
+def _hash_core_dca(core: dict) -> dict:
+    d9 = core.get("small_dca")
+    if isinstance(d9, dict) and "note" in d9:
+        core["small_dca"] = dict(d9, note=_DCA_NOTE_HASH)
+    return core
+
+
 def _mark_dca(norm) -> dict:
     small = [o for o in norm if o["side"] and o["usd"] is not None and o["usd"] <= DCA_MAX_USD]
     clusters, cur = [], []
@@ -365,7 +376,7 @@ def _mark_dca(norm) -> dict:
         return {}
     return {"n": int(n), "bursts": bursts, "buy_usd": _r(usd_b), "fee_sell_usd": _r(usd_s), "venues": len(venues),
             "by_sym": {k: _r(v) for k, v in sorted(syms.items(), key=lambda kv: -kv[1])[:8]},
-            "note": "같은 몇 분 안 여러 곳 소액 매수 묶음"}
+            "note": DCA_NOTE}
 
 
 def _agg(fl):
@@ -1395,7 +1406,7 @@ _HASH_SKIP = ("prior_next", "prior_obs", "total_usd", "open_positions", "pending
 
 
 def _input_hash(data) -> str:
-    core = {k: v for k, v in data.items() if not k.startswith("_") and k not in _HASH_SKIP}
+    core = _hash_core_dca({k: v for k, v in data.items() if not k.startswith("_") and k not in _HASH_SKIP})
     lp = core.get("lp")
     if isinstance(lp, dict):
         rows = [{k: v for k, v in r.items() if r.get("closed") or k not in ("mins", "fees", "per_hour")} for r in lp.get("rows") or []]
@@ -1438,7 +1449,7 @@ def _qhash(core) -> str:
 
 
 def _input_hash_q(data) -> str:
-    core = {k: v for k, v in data.items() if not k.startswith("_") and k not in _HASH_SKIP and k != "hidden_summary"}
+    core = _hash_core_dca({k: v for k, v in data.items() if not k.startswith("_") and k not in _HASH_SKIP and k != "hidden_summary"})
     lp = core.get("lp")
     if isinstance(lp, dict):
         rows = [{k: v for k, v in r.items() if r.get("closed") or k not in ("mins", "fees", "per_hour")} for r in lp.get("rows") or []]
@@ -1760,6 +1771,29 @@ def review_len_pref(kind: str) -> str:
     except (OSError, ValueError, AttributeError):
         v = None
     return rp.len_key(kind, v if isinstance(v, str) else None)
+
+
+def review_paused() -> bool:
+    try:
+        with open(PREFS_PATH, "r", encoding="utf-8") as f9:
+            p = json.load(f9)
+        v = (p if isinstance(p, dict) else {}).get("review_pause")
+        return isinstance(v, dict) and v.get("on") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+_PAUSE_LOGGED = {"on": False}
+
+
+def _paused_skip(what: str) -> bool:
+    p = review_paused()
+    if p and not _PAUSE_LOGGED["on"]:
+        log.info("AI 리뷰 자동 생성 멈춤(설정 › AI 리뷰) — %s 등 모델 호출 작업을 건너뜀(풀면 다음 회차부터 이어서)", what)
+    elif not p and _PAUSE_LOGGED["on"]:
+        log.info("AI 리뷰 자동 생성 멈춤 풀림 — 이어서")
+    _PAUSE_LOGGED["on"] = p
+    return p
 
 
 def review_fill_pref() -> dict:
@@ -2260,6 +2294,8 @@ def _run_items(run, items, work, parallel=1, pace_s=None, stop_check=None):
                 if stop["why"]:
                     return
                 w9 = stop_check() if stop_check else None
+                if not w9 and str(getattr(run, "mode", "")).startswith("daemon") and review_paused():
+                    w9 = "자동 생성 멈춤(설정)"
                 if w9:
                     stop["why"] = w9
                     return
@@ -2307,6 +2343,8 @@ def _new_run(mode, queue, fill):
 
 
 def run_today(cfg):
+    if _paused_skip("오늘 일간 리뷰"):
+        return
     b = claude_bin()
     if not b:
         log.info("claude CLI 없음 — 자동요약 폴백 유지")
@@ -2399,7 +2437,7 @@ def eval_sides_on(cfg) -> list:
     return [s9 for s9 in EVAL_SIDES if sellchart.daily_max(cfg, s9) > 0]
 
 
-def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.sleep, runner=None, binfn=None, stores=None, stop_check=None):
+def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.sleep, runner=None, binfn=None, stores=None, stop_check=None, side_check=None):
     pace_s = EVAL_PACE_S if pace_s is None else pace_s
     lock = threading.Lock()
     it = iter(list(items))
@@ -2433,6 +2471,10 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
                     if side in cnt["stopped_sides"]:
                         cnt["skip"] += 1
                         continue
+                    w8 = side_check() if side_check else None
+                    if w8:
+                        cnt["stopped"] = w8
+                        return
                 try:
                     res = eval_one(cfg, d9, s9, side, get=get, sleep=sleep, runner=runner, binfn=binfn, stores=stores)
                 except Exception as e:
@@ -2475,7 +2517,8 @@ def receipt_evals_recent(cfg, today_iso=None, days=None, get=None, **kw):
     if _manual_lock_live():
         log.info("AI 평가 자동 생성 건너뜀 — 수동 보충 진행 중")
         return None
-    kw.setdefault("stop_check", lambda: "수동 보충 시작" if _manual_lock_live() else None)
+    kw.setdefault("stop_check", lambda: "수동 보충 시작" if _manual_lock_live() else ("자동 생성 멈춤(설정)" if review_paused() else None))
+    kw.setdefault("side_check", lambda: "자동 생성 멈춤(설정)" if review_paused() else None)
     t9 = today_iso or datetime.now(KST).strftime("%Y-%m-%d")
     f9 = (datetime.strptime(t9, "%Y-%m-%d") - timedelta(days=(CATCHUP_DAYS if days is None else days) - 1)).strftime("%Y-%m-%d")
     items = receipt_items(cfg, f9, t9, get=get)
@@ -2491,6 +2534,8 @@ def sell_evals_plan(cfg, since_iso, today_iso=None, get=None) -> dict:
 
 
 def _receipt_evals_safe(cfg):
+    if _paused_skip("영수증 AI 평가"):
+        return
     try:
         receipt_evals_recent(cfg)
     except Exception as e:
@@ -2604,6 +2649,8 @@ def catch_up(cfg, since_iso=None, dry=False):
         if not b:
             return
     auto = not since_iso
+    if auto and not dry and _paused_skip("일간 리뷰 보충"):
+        return
     if auto and _manual_lock_live():
         log.info("리뷰 보충 건너뜀 — 수동 보충 진행 중(%s)", MANUAL_LOCK)
         return
@@ -3083,14 +3130,14 @@ def _gather_seg(st, cfg, seg, weekly=None, day_ev=None):
     return gather_week(st, seg[1], day_ev, cfg, weekly if weekly is not None else _read_reviews(WEEKLY_PATH))
 
 
-def run_week(cfg, day_iso=None):
+def run_week(cfg, day_iso=None, mode="daemon-week"):
     b = claude_bin()
     if not b:
         log.info("claude CLI 없음 — 주간 리뷰 생략")
         return
     st = fetch_state(cfg)
     seg = week_segment(day_iso or _today_iso(st))
-    run = _new_run("daemon-week", {"weekly": [seg[0]]}, {"order": "recent", "parallel": 1})
+    run = _new_run(mode, {"weekly": [seg[0]]}, {"order": "recent", "parallel": 1})
     why = None
     try:
         why = _run_items(run, [("weekly", seg[0], _seg_label(seg))], lambda k9, key9: generate_week(b, _gather_seg(st, cfg, seg)), 1, pace_s=0)
@@ -3132,6 +3179,8 @@ def weekly_plan(st, cfg, today_iso, since_iso=None, weekly=None, day_ev=None) ->
 
 
 def weekly_refresh(cfg):
+    if _paused_skip("주간 리뷰 보충"):
+        return
     b = claude_bin()
     if not b:
         return
@@ -3271,7 +3320,7 @@ def main():
         print(json.dumps(refresh_templates(cfg, dry=sys.argv[1].endswith("-plan")), ensure_ascii=False))
         return
     if len(sys.argv) > 1 and sys.argv[1] == "--weekly":
-        run_week(cfg, sys.argv[2] if len(sys.argv) > 2 else None)
+        run_week(cfg, sys.argv[2] if len(sys.argv) > 2 else None, mode="manual-week")
         return
     if len(sys.argv) > 2 and sys.argv[1] == "--days":
         b = claude_bin()
@@ -3348,7 +3397,8 @@ def main():
             if wait > 0:
                 time.sleep(wait)
             try:
-                run_week(cfg, target.strftime("%Y-%m-%d"))
+                if not _paused_skip("주간 리뷰"):
+                    run_week(cfg, target.strftime("%Y-%m-%d"))
             except Exception as e:
                 log.warning("주간 리뷰 생성 실패(기동 시·다음 회차 재시도 · 수동 --weekly): %s", e)
         try:

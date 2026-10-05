@@ -21,51 +21,69 @@ STATS_KEEP_DAYS = 9
 HOLD_TEXT_MAX = 40
 
 CATS = [
-    {"key": "health", "n": 1, "grp": "base", "crit": True, "label": "봇 이상 경보",
-     "desc": "수집기·원장·서버에 확실한 문제가 생기면 사건마다 알려요(발생 → 6시간마다 → 복구). 조용한 시간에도 바로 와요."},
-    {"key": "digest", "n": 2, "grp": "base", "label": "09:00 일간 점검 요약",
-     "desc": "아침 9시에 아직 열린 문제가 있을 때만 한 통으로 정리해요."},
-    {"key": "price", "n": 3, "grp": "base", "label": "목표가·손절 도달",
-     "desc": "매매일지에 저장한 목표가·손절선에 닿으면 알려요(1분 간격 감시 · 하루 한 번). 손절 도달은 조용한 시간에도 바로 와요."},
-    {"key": "recon", "n": 4, "grp": "base", "first7": True, "label": "잔고 대사",
-     "desc": "거래소·지갑 잔고 맞추기(대사) 결과와 온체인 잔고 불일치예요. 처음 연결해 동기화할 때 많이 와요."},
-    {"key": "sync", "n": 5, "grp": "base", "first7": True, "label": "거래 분류·동기화",
-     "desc": "새 스왑·전송·프로그램 수령·입금 확인·분류 바뀜·체결 보류·수집 경로 전환 소식이에요."},
-    {"key": "backfill", "n": 6, "grp": "base", "first7": True, "label": "백필·재계산",
-     "desc": "과거 데이터 가져오기 완료·재분류·새 체인 자동 추적 소식이에요."},
-    {"key": "scam", "n": 7, "grp": "base", "label": "의심 토큰·분류 못 한 유입",
-     "desc": "분류하지 못한 유입(검토 필요)을 알려요. 가짜 전송·주소 오염 같은 확실한 스캠은 이 설정과 상관없이 항상 걸러요."},
-    {"key": "pnl", "n": 8, "grp": "new", "th": ["pnl_time"], "label": "일간 손익 요약",
-     "desc": "하루 한 번 정한 시각에 오늘 실현 손익 · 총자산 변동(시세·입출금·환율) · 많이 움직인 코인 3개를 보내요."},
-    {"key": "review", "n": 9, "grp": "new", "label": "AI 일간 복기 도착",
-     "desc": "어제(또는 오늘) 일간 복기가 써지면 등급과 첫 두 줄을 보내요."},
-    {"key": "weekly", "n": 10, "grp": "new", "label": "주간 복기 도착",
-     "desc": "이번 주(또는 지난주) 주간 복기가 써지면 등급과 첫 두 줄을 보내요."},
-    {"key": "move", "n": 11, "grp": "new", "th": ["move_1h", "move_24h", "move_min"], "label": "보유 코인 급등락",
-     "desc": "들고 있는 코인이 1시간·24시간 안에 크게 움직이면 알려요 · 코인마다 6시간에 한 번 · 화면이 받는 시세로만 판정해요."},
-    {"key": "bigflow", "n": 12, "grp": "new", "th": ["flow_min"], "label": "큰 입출금 감지",
-     "desc": "외부로 보내거나 받은 금액(입출금 분해와 같은 기준)이 기준 이상이면 알려요."},
-    {"key": "lprange", "n": 13, "grp": "new", "label": "LP 범위 이탈",
-     "desc": "LP 포지션이 가격 범위를 벗어나거나 다시 들어오면 알려요."},
-    {"key": "depeg", "n": 14, "grp": "new", "th": ["depeg_pct"], "label": "스테이블 디페그",
-     "desc": "USDC·USD1·FDUSD 같은 스테이블이 1달러에서 기준 이상 벗어나면 알려요(해외 거래소 시세 · USDT 는 다른 스테이블과 비교해 판단)."},
-    {"key": "liq", "n": 15, "grp": "new", "th": ["liq_pct"], "label": "선물 청산가 근접",
-     "desc": "선물 포지션 현재가가 청산가에 기준 이내로 다가오면 알려요 · 청산가 정보가 있는 포지션만(없으면 조용히 건너뜀) · 조용한 시간에도 바로 와요."},
-    {"key": "oa", "n": 16, "grp": "new", "label": "기타 자산·증권사",
-     "desc": "증권사 동기화 실패와 주식·금 시세가 오래 멈춘 것, NFT 바닥가 조회가 무료 호출 제한에 걸려 늦어지는 것을 알려요(기타 자산 탭 기준)."},
-    {"key": "other", "n": 17, "grp": "etc", "label": "기타",
-     "desc": "위 분류에 없는 새 종류의 알림이에요."},
+    {"key": "health", "n": 1, "tier": "now", "crit": True, "label": "봇이 멈춤(몇 분 이상)",
+     "desc": "수집·계산·서버가 몇 분 넘게 멈추면 알려요 — 생겼을 때 한 번, 풀렸을 때 한 번(더 나빠지면 한 번 더). 봇이 멈춘 걸 알려야 해서 끌 수 없어요."},
+    {"key": "price", "n": 3, "tier": "now", "label": "목표가·손절 도달",
+     "desc": "매매일지에 걸어 둔 목표가·손절선에 닿으면 바로 알려요(1분 간격 감시 · 코인마다 하루 한 번)."},
+    {"key": "bigflow", "n": 12, "tier": "now", "th": ["flow_min"], "label": "내가 안 한 큰 출금",
+     "desc": "밖으로 나간 금액이 기준 이상이면 바로 알려요 — 내 지갑·내 거래소끼리 옮긴 건 빼요. 내가 한 게 아니면 바로 확인하세요. 큰 입금은 급하지 않아서 하루 요약에 넣어요."},
+    {"key": "depeg", "n": 14, "tier": "now", "th": ["depeg_pct"], "label": "스테이블 가격 이탈",
+     "desc": "USDC·USDT 같은 스테이블이 1달러에서 기준 이상 벗어나면 알려요(해외 거래소 시세). 벗어날 때 한 번, 돌아올 때 한 번."},
+    {"key": "liq", "n": 15, "tier": "now", "th": ["liq_pct"], "label": "선물 청산가 근접",
+     "desc": "선물 포지션이 청산가에 기준 이내로 다가오면 알려요 — 처음 한 번, 거리가 절반으로 줄면 한 번 더, 벗어나면 한 번. 청산가 정보가 있는 포지션만."},
+    {"key": "move", "n": 11, "tier": "now", "th": ["move_1h", "move_24h", "move_weight", "move_min"], "label": "보유 코인 급등락",
+     "desc": "총자산에서 비중이 큰 코인이 1시간·24시간 안에 크게 움직이면 알려요 — 코인마다 하루 한 번 · 조용한 시간(밤)엔 모았다가. 기본은 꺼져 있어요."},
+    {"key": "pnl", "n": 8, "tier": "daily", "th": ["pnl_time"], "label": "오늘 손익",
+     "desc": "그날 실현 손익과 총자산이 왜 움직였는지(시세·입출금·환율), 많이 움직인 코인 3개를 요약에 넣어요. 총자산 30일 곡선 그림도 같이."},
+    {"key": "recon", "n": 4, "tier": "daily", "label": "잔고 맞추기 결과",
+     "desc": "거래소·지갑 잔고를 기록과 맞춘 결과예요. 기록과 실제 잔고가 크게 다른 곳이 있으면 요약 맨 위에 '할 일'로 올려요."},
+    {"key": "scam", "n": 7, "tier": "daily", "label": "처음 보는 토큰",
+     "desc": "어디서 왔는지 모르는 입금·토큰 수를 요약에 넣어요. 가짜 전송·주소 오염 같은 확실한 스캠은 늘 걸러서 보내지 않아요."},
+    {"key": "lprange", "n": 13, "tier": "daily", "label": "LP 범위 이탈",
+     "desc": "LP 포지션이 가격 범위를 벗어났거나 다시 들어온 것을 요약에 넣어요."},
+    {"key": "review", "n": 9, "tier": "daily", "label": "AI 복기 도착",
+     "desc": "일간 복기가 써지면 등급과 첫 줄을 요약에 넣어요."},
+    {"key": "weekly", "n": 10, "tier": "daily", "label": "AI 주간 복기 도착",
+     "desc": "주간 복기가 써지면 등급과 첫 줄을 요약에 넣어요."},
+    {"key": "oa", "n": 16, "tier": "daily", "label": "기타 자산·증권사",
+     "desc": "증권사 연결 실패, 주식·금 시세가 오래 멈춘 것, NFT 바닥가가 늦어지는 것을 요약에 넣어요."},
+    {"key": "digest", "n": 2, "tier": "daily", "th": ["digest_time", "digest_chart", "digest_axis"], "label": "안 풀린 봇 문제",
+     "desc": "요약을 보낼 때 아직 안 풀린 봇 문제가 있으면 한 줄로 넣어요(이미 '봇이 멈췄을 때'로 받은 건 제목만)."},
+    {"key": "other", "n": 17, "tier": "daily", "label": "그 밖의 소식",
+     "desc": "위 분류에 없는 새 종류의 소식이에요 — 놓치지 않게 요약에 건수와 최근 것만."},
+    {"key": "sync", "n": 5, "tier": "web", "label": "거래 분류·동기화",
+     "desc": "새 스왑·전송 분류, 분류 바뀜, 수집 경로 전환 같은 봇 내부 소식이에요. 할 일이 없어서 텔레그램으로 보내지 않고 상태 패널에만 남겨요."},
+    {"key": "backfill", "n": 6, "tier": "web", "label": "과거 기록 가져오기·다시 계산",
+     "desc": "과거 데이터 가져오기·다시 계산·새 체인 자동 추적 소식이에요. 텔레그램으로는 처음 다 가져왔을 때 한 통만 보내요."},
 ]
+for _c in CATS:
+    _c["grp"] = _c["tier"]
 CAT_KEYS = [c["key"] for c in CATS]
 CAT = {c["key"]: c for c in CATS}
-FIRST7 = frozenset(c["key"] for c in CATS if c.get("first7"))
+TIER = {c["key"]: c["tier"] for c in CATS}
+TIERS = ("now", "daily", "web")
+TIER_LABEL = {"now": "즉시", "daily": "하루 요약", "web": "시스템"}
+TIER_SUB = {"now": "지금 폰을 보고 해야 할 일 · 소리", "daily": "소리 없이 한 통",
+            "web": "분류·동기화·과거 기록 가져오기·재계산 — 텔레그램 안 보내고 상태 패널에만"}
+FIRST7 = frozenset()
 CRIT = frozenset(c["key"] for c in CATS if c.get("crit"))
-MODES = ("on", "off", "auto")
+MODES = ("on", "off")
+LEGACY_MODES = ("on", "off", "auto")
+SCHEMA = 2
+
+
+def tier(key) -> str:
+    return TIER.get(key, "daily")
+
 
 TH = {
-    "pnl_time": {"cat": "pnl", "kind": "time", "rec": "23:55", "label": "보내는 시각"},
+    "pnl_time": {"cat": "pnl", "kind": "time", "rec": "23:55", "label": "손익 기준 시각"},
+    "digest_time": {"cat": "digest", "kind": "time", "rec": "09:00", "label": "하루 요약 보내는 시각"},
+    "digest_chart": {"cat": "digest", "kind": "bool", "rec": True, "label": "총자산 곡선 그림 붙이기"},
+    "digest_axis": {"cat": "digest", "kind": "bool", "rec": True, "label": "그림에 금액 눈금"},
     "move_1h": {"cat": "move", "kind": "pct", "rec": 10, "lo": 1, "hi": 100, "label": "1시간 변동"},
     "move_24h": {"cat": "move", "kind": "pct", "rec": 20, "lo": 1, "hi": 100, "label": "24시간 변동"},
+    "move_weight": {"cat": "move", "kind": "pct", "rec": 3, "lo": 0, "hi": 100, "label": "총자산 대비 비중 이상만"},
     "move_min": {"cat": "move", "kind": "usd", "rec": 1000, "lo": 0, "hi": 1e9, "label": "보유 금액 이상만"},
     "flow_min": {"cat": "bigflow", "kind": "usd", "rec": 10000, "lo": 1, "hi": 1e10, "label": "금액 이상"},
     "depeg_pct": {"cat": "depeg", "kind": "pct", "rec": 1, "lo": 0.1, "hi": 20, "label": "1달러에서 벗어난 정도"},
@@ -73,6 +91,9 @@ TH = {
 }
 REC_TH = {k: v["rec"] for k, v in TH.items()}
 QUIET_REC = {"on": True, "from": "01:00", "to": "08:00"}
+_V1_REC_CATS = {"health": "on", "digest": "on", "price": "on", "recon": "auto", "sync": "auto", "backfill": "auto", "scam": "on", "pnl": "on",
+                "review": "off", "weekly": "off", "move": "on", "bigflow": "on", "lprange": "on", "depeg": "on", "liq": "on", "oa": "on", "other": "on"}
+_V1_REC_TH = {"pnl_time": "23:55", "move_1h": 10, "move_24h": 20, "move_min": 1000, "flow_min": 10000, "depeg_pct": 1, "liq_pct": 10}
 
 KIND_CAT = {
     "open": "health", "group": "health", "remind": "health", "resolve": "health", "flap": "health",
@@ -91,6 +112,32 @@ KIND_CAT = {
     "NFT_CG_SLOW": "oa",
 }
 TEST_KIND = "ALERT_TEST"
+FIRST_BACKFILL_KIND = "BACKFILL_DONE"
+KIND_TIER = {"BIG_INFLOW": "daily"}
+KIND_CAT["BIG_INFLOW"] = "bigflow"
+
+JARGON = ("대사", "백필", "미매칭", "원가 미확인", "원가 미상", "정산", "rederive", "REDERIVE", "커서", "폴백", "블록스카웃", "blockscout", "보정")
+SAMPLES = {
+    "health": "🔴 Base 수집이 52분째 멈췄어요\n대부분 저절로 풀려요 — 1시간 넘으면 상태 패널에서 원인을 보세요.\n마지막 수집 52분 전",
+    "digest": "안 풀린 봇 문제 1건 — Base 수집 지연(1시간 12분째)",
+    "price": "🔴 ETH 목표가에 닿았어요\n팔 계획이었다면 지금이에요.\n지금 $4,512 · 목표 $4,500",
+    "recon": "잔고는 모두 맞아요 (3곳 확인)",
+    "sync": "(텔레그램으로 보내지 않아요 — 상태 패널에만)",
+    "backfill": "📋 과거 기록을 다 가져왔어요\n할 일은 없어요 — 이제 손익·보유가 전체 기간 기준이에요.",
+    "scam": "처음 보는 토큰 4",
+    "pnl": "오늘 실현 +₩12만 · 매도 4건",
+    "review": "AI 복기가 도착했어요 · 10-05(일) 양호",
+    "weekly": "주간 복기가 도착했어요 · 09-29~10-05 양호",
+    "move": "🔴 SOL 1시간 만에 11% 올랐어요\n급하지 않아요 — 목표가를 걸어 두면 거기서 알려 드려요.\n보유 ₩120만 · 총자산의 4%",
+    "bigflow": "🔴 밖으로 −₩500만 나갔어요\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\n외부 전송 USDC · 오늘 나간 돈 합계 −₩500만",
+    "lprange": "LP 범위 벗어남 1",
+    "depeg": "🔴 USDC 가격이 1달러에서 1.3% 벗어났어요\n많이 들고 있다면 다른 스테이블로 옮길지 살펴보세요.\n지금 $0.987 · 기준 ±1%",
+    "liq": "🔴 ETH 선물 청산가까지 8% 남았어요\n증거금을 넣거나 포지션을 줄이세요.\n현재 2,410 · 청산 2,217 · 바이낸스",
+    "oa": "기타 자산: 키움증권 연결이 끊겼어요",
+    "other": "그 밖의 소식 1건",
+}
+DIGEST_SAMPLE = ("📋 하루 요약 · 10월 6일(화)\n어제 실현 +₩12만 · 매도 4건 · 총자산 +₩80만\n많이 움직인 코인 SOL +9% · ETH −3%\n"
+                 "잔고는 모두 맞아요 · AI 복기가 도착했어요(양호)\n살펴볼 것 2가지 — 처음 보는 토큰 1 · LP 범위 벗어남 1")
 
 
 def cat_of(kind, hint=None) -> str:
@@ -107,27 +154,24 @@ def cat_of(kind, hint=None) -> str:
 
 def _preset_cats(name: str) -> dict:
     if name == "rec":
-        off = {"review", "weekly"}
-        return {k: ("auto" if k in FIRST7 else "off" if k in off else "on") for k in CAT_KEYS}
+        return {k: ("off" if TIER[k] == "web" or k == "move" else "on") for k in CAT_KEYS}
     if name == "min":
-        keep = {"health", "price", "scam", "liq"}
-        return {k: ("on" if k in keep else "off") for k in CAT_KEYS}
+        return {k: ("on" if TIER[k] == "now" and k != "move" else "off") for k in CAT_KEYS}
     if name == "all":
-        return {k: "on" for k in CAT_KEYS}
+        return {k: ("off" if TIER[k] == "web" else "on") for k in CAT_KEYS}
     raise KeyError(name)
 
 
 PRESETS = {
-    "rec": {"label": "추천", "desc": "처음 7일은 동기화·대사·백필까지, 그 뒤엔 꼭 필요한 것만 · 밤 1시~8시는 모아서"},
-    "min": {"label": "최소", "desc": "봇 이상·목표가·의심 토큰·청산 근접만 · 밤 1시~8시는 모아서"},
-    "all": {"label": "전부", "desc": "모든 알림을 추천 기준값으로 · 조용한 시간 없음"},
+    "rec": {"label": "추천", "desc": "급한 것 5가지는 바로(소리) + 나머지는 하루 한 통 요약(무음) · 봇 내부 소식은 안 보냄"},
+    "min": {"label": "최소", "desc": "급한 것 5가지만 바로 — 하루 요약도 안 받음"},
+    "all": {"label": "전부", "desc": "추천 + 보유 코인 급등락까지(밤엔 모아서)"},
 }
 PRESET_ORDER = ("rec", "min", "all")
 
 
 def preset_doc(name: str) -> dict:
-    return {"v": 1, "cats": _preset_cats(name), "th": dict(REC_TH),
-            "quiet": dict(QUIET_REC, on=(name != "all"))}
+    return {"v": SCHEMA, "cats": _preset_cats(name), "th": dict(REC_TH), "quiet": dict(QUIET_REC)}
 
 
 def default_doc() -> dict:
@@ -153,6 +197,8 @@ def _th_clean(key, v):
     spec = TH[key]
     if spec["kind"] == "time":
         return v if isinstance(v, str) and _HM.match(v) else None
+    if spec["kind"] == "bool":
+        return v if isinstance(v, bool) else None
     if not _num_ok(v):
         return None
     v = float(v)
@@ -161,15 +207,37 @@ def _th_clean(key, v):
     return int(v) if v == int(v) else round(v, 4)
 
 
+def _v1_was_rec(raw: dict) -> bool:
+    cats = raw.get("cats") if isinstance(raw.get("cats"), dict) else {}
+    if any((cats.get(k) if cats.get(k) in LEGACY_MODES else _V1_REC_CATS[k]) != _V1_REC_CATS[k] for k in _V1_REC_CATS):
+        return False
+    th = raw.get("th") if isinstance(raw.get("th"), dict) else {}
+    if any(k in th and th[k] != v for k, v in _V1_REC_TH.items()):
+        return False
+    q = raw.get("quiet") if isinstance(raw.get("quiet"), dict) else {}
+    return (q.get("on", True) is True and q.get("from", "01:00") == "01:00" and q.get("to", "08:00") == "08:00")
+
+
 def normalize(raw) -> dict:
     d = default_doc()
     if not isinstance(raw, dict):
+        return d
+    legacy = raw.get("v") != SCHEMA
+    if legacy and _v1_was_rec(raw):
+        u = raw.get("updated")
+        if _num_ok(u) and 0 <= u < TS_MAX:
+            d["updated"] = int(u)
+        d["migrated"] = "v1-rec"
         return d
     cats = raw.get("cats") if isinstance(raw.get("cats"), dict) else {}
     for k in CAT_KEYS:
         try:
             m = cats.get(k)
-            if k not in CRIT and isinstance(m, str) and m in MODES and (m != "auto" or k in FIRST7):
+            if k in CRIT or TIER[k] == "web":
+                continue
+            if legacy and m == "auto":
+                m = "on"
+            if isinstance(m, str) and m in MODES:
                 d["cats"][k] = m
         except Exception:
             pass
@@ -193,6 +261,8 @@ def normalize(raw) -> dict:
     u = raw.get("updated")
     if _num_ok(u) and 0 <= u < TS_MAX:
         d["updated"] = int(u)
+    if legacy:
+        d["migrated"] = "v1-custom"
     return d
 
 
@@ -209,22 +279,26 @@ def apply_post(cur_raw, body):
         if body["preset"] not in PRESETS:
             return None, "preset 은 rec|min|all"
         d = preset_doc(body["preset"])
+        cur9 = normalize(cur_raw)
+        for k9 in ("digest_time", "digest_chart", "digest_axis", "pnl_time"):
+            d["th"][k9] = cur9["th"][k9]
         d["updated"] = int(time.time())
         return d, None
     d = normalize(cur_raw)
+    d.pop("migrated", None)
     if "cats" in body:
         c = body["cats"]
         if not isinstance(c, dict) or not c:
-            return None, "cats 는 {카테고리: on|off|auto}"
+            return None, "cats 는 {카테고리: on|off}"
         for k, m in c.items():
             if k not in CAT:
                 return None, f"모르는 카테고리: {str(k)[:40]}"
             if not isinstance(m, str) or m not in MODES:
-                return None, f"{k}: on|off|auto 중 하나"
+                return None, f"{k}: on|off 중 하나"
             if k in CRIT and m != "on":
-                return None, "봇 이상 경보는 끌 수 없어요 — 봇이 멈춘 걸 알려야 해서 늘 켜 둬요"
-            if m == "auto" and k not in FIRST7:
-                return None, f"{k}: '연결 후 7일만'은 잔고 대사·거래 분류·백필에만 있어요"
+                return None, "'봇이 멈췄을 때'는 끌 수 없어요 — 봇이 멈춘 걸 알려야 해서 늘 켜 둬요"
+            if TIER[k] == "web" and m != "off":
+                return None, f"{CAT[k]['label']}: 봇 내부 소식이라 텔레그램으로 보내지 않아요(상태 패널에서 봐요)"
             d["cats"][k] = m
     if "th" in body:
         t = body["th"]
@@ -236,7 +310,7 @@ def apply_post(cur_raw, body):
             cv = _th_clean(k, v)
             if cv is None:
                 spec = TH[k]
-                return None, (f"{k}: HH:MM 형식" if spec["kind"] == "time"
+                return None, (f"{k}: HH:MM 형식" if spec["kind"] == "time" else f"{k}: true|false" if spec["kind"] == "bool"
                               else f"{k}: {spec['lo']:g}~{spec['hi']:g} 사이 숫자")
             d["th"][k] = cv
     if "quiet" in body:
@@ -260,15 +334,17 @@ def apply_post(cur_raw, body):
 
 def match_preset(doc) -> str:
     d = normalize(doc)
+    SKIP = ("digest_time", "digest_chart", "digest_axis", "pnl_time")
     for name in PRESET_ORDER:
         p = preset_doc(name)
-        if d["cats"] != p["cats"]:
+        if any(d["cats"][k] != p["cats"][k] for k in CAT_KEYS if TIER[k] != "web"):
             continue
-        if d["quiet"]["on"] != p["quiet"]["on"]:
-            continue
-        if p["quiet"]["on"] and (d["quiet"]["from"], d["quiet"]["to"]) != (p["quiet"]["from"], p["quiet"]["to"]):
-            continue
-        if any(d["th"][k] != p["th"][k] for k, spec in TH.items() if p["cats"].get(spec["cat"]) != "off"):
+        if p["cats"].get("move") == "on" or d["cats"].get("move") == "on":
+            if d["quiet"]["on"] != p["quiet"]["on"]:
+                continue
+            if p["quiet"]["on"] and (d["quiet"]["from"], d["quiet"]["to"]) != (p["quiet"]["from"], p["quiet"]["to"]):
+                continue
+        if any(d["th"][k] != p["th"][k] for k, spec in TH.items() if k not in SKIP and p["cats"].get(spec["cat"]) != "off"):
             continue
         return name
     return "custom"
@@ -321,12 +397,12 @@ def first_week(conn, now=None) -> dict:
 def effective(doc, key, now=None, conn=None) -> bool:
     if key in CRIT:
         return True
-    m = doc["cats"].get(key, "on")
-    if m == "on":
-        return True
-    if m == "off":
+    if TIER.get(key) == "web":
         return False
-    return first_week(conn, now)["active"]
+    m = doc["cats"].get(key, "on")
+    if m == "auto":
+        return True
+    return m != "off"
 
 
 def _mins(hm: str) -> int:
@@ -358,14 +434,50 @@ def quiet_until(doc, now=None):
 
 
 URGENT_KINDS = frozenset({"LIQ_NEAR", "STOP_HIT"})
+QUIET_CATS = frozenset({"move"})
+
+
+def digest_on(doc, now=None, conn=None) -> bool:
+    return any(effective(doc, k, now, conn) for k in CAT_KEYS if TIER.get(k) == "daily")
 
 
 def decide(doc, key, now=None, conn=None, kind=None) -> str:
+    t = KIND_TIER.get(kind) or TIER.get(key, "daily")
+    if t == "web" and key not in CRIT:
+        return "web"
     if not effective(doc, key, now, conn):
         return "skip"
-    if key not in CRIT and kind not in URGENT_KINDS and in_quiet(doc, now):
+    if t == "daily":
+        return "daily" if TIER.get(key) == "daily" or digest_on(doc, now, conn) else "skip"
+    if key in QUIET_CATS and kind not in URGENT_KINDS and in_quiet(doc, now):
         return "hold"
     return "send"
+
+
+def digest_due(doc, last_day, now=None):
+    now = time.time() if now is None else now
+    t = datetime.fromtimestamp(now, KST)
+    hm = str((doc.get("th") or {}).get("digest_time") or REC_TH["digest_time"])
+    if not _HM.match(hm):
+        hm = REC_TH["digest_time"]
+    if t.hour * 60 + t.minute < _mins(hm):
+        return None
+    dk = t.strftime("%Y-%m-%d")
+    return None if last_day == dk else dk
+
+
+_PUB_RE = re.compile(r"https://[a-z0-9.-]+(?::\d{1,5})?")
+
+
+def public_link(tab: str = "dash", cfg: dict = None) -> str:
+    try:
+        c = cfg if cfg is not None else (common.read_json(common.CONFIG_PATH, {}) or {})
+        u = str(((c or {}).get("web") or {}).get("public_url") or "").strip().rstrip("/")
+    except (Exception, SystemExit):
+        return ""
+    if not u or len(u) > 300 or not _PUB_RE.fullmatch(u):
+        return ""
+    return f"{u}/v2/#{re.sub(r'[^a-z0-9/_-]', '', str(tab))[:40]}"
 
 
 def day_key(now=None) -> str:
@@ -377,13 +489,13 @@ def counts7(stats=None, now=None) -> dict:
     s = stats if stats is not None else (_read(STATS_PATH, {}) or {})
     days = (s or {}).get("days") if isinstance(s, dict) else None
     keep = {day_key(now - i * 86400) for i in range(7)}
-    out = {k: {"sent": 0, "skip": 0, "held": 0} for k in CAT_KEYS}
+    out = {k: {"sent": 0, "skip": 0, "held": 0, "daily": 0, "web": 0} for k in CAT_KEYS}
     for dk, row in (days.items() if isinstance(days, dict) else ()):
         if dk not in keep or not isinstance(row, dict):
             continue
         for k, c in row.items():
             if k in out and isinstance(c, dict):
-                for f in ("sent", "skip", "held"):
+                for f in ("sent", "skip", "held", "daily", "web"):
                     v = c.get(f)
                     if isinstance(v, int) and not isinstance(v, bool) and v > 0:
                         out[k][f] += v
@@ -402,8 +514,9 @@ def view(prefs=None, now=None, tg_connected=None, extra=None) -> dict:
     hn = sum(v for v in (hn.values() if isinstance(hn, dict) else ()) if isinstance(v, int) and not isinstance(v, bool) and 0 < v < 10 ** 9)
     out = {"ok": True, "v": 1, "prefs": {k: doc[k] for k in ("cats", "th", "quiet")}, "preset": match_preset(doc),
            "presets": [{"key": k, **PRESETS[k], "doc": {kk: vv for kk, vv in preset_doc(k).items() if kk != "v"}} for k in PRESET_ORDER],
-           "cats": [{k: c[k] for k in ("key", "n", "grp", "label", "desc") if k in c} | {"first7": bool(c.get("first7")), "crit": bool(c.get("crit")),
-                                                                                       "th": list(c.get("th") or [])} for c in CATS],
+           "cats": [{k: c[k] for k in ("key", "n", "grp", "tier", "label", "desc") if k in c} | {"first7": False, "crit": bool(c.get("crit")),
+                                                                                               "th": list(c.get("th") or []), "sample": SAMPLES.get(c["key"], "")} for c in CATS],
+           "tiers": [{"key": t, "label": TIER_LABEL[t], "sub": TIER_SUB[t]} for t in TIERS], "digestSample": DIGEST_SAMPLE, "schema": SCHEMA, "migrated": doc.get("migrated"),
            "th": {k: {f: v for f, v in spec.items()} for k, spec in TH.items()},
            "effective": eff, "firstWeek": fw, "quietNow": in_quiet(doc, now), "held": hn,
            "counts7": counts7(stats, now), "tg": {"connected": bool(tg_connected)} if tg_connected is not None else None,

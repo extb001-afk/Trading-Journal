@@ -69,6 +69,7 @@ class Settings:
         self.secure = r.get("secure_cookie") is True
 
 
+BEHIND_PROXY = False
 S = Settings({"enabled": False})
 _LOCK = threading.RLock()
 _AUTH = {"sig": False, "rec": None, "err": None}
@@ -77,9 +78,12 @@ _HASH_SEM = threading.BoundedSemaphore(2)
 
 
 def init(cfg: dict) -> Settings:
-    global S
+    global S, BEHIND_PROXY
     w = (cfg or {}).get("web") if isinstance((cfg or {}).get("web"), dict) else {}
     S = Settings(w.get("login", None))
+    BEHIND_PROXY = w.get("behind_proxy") is True
+    if BEHIND_PROXY:
+        log.info("web.behind_proxy = true — 모든 요청을 리버스 프록시 경유로 취급(첫 비밀번호는 tools/reset_password.py)")
     if S.enabled:
         common.ensure_dirs()
         rotate_internal_token()
@@ -374,7 +378,7 @@ def mark_conn(h) -> None:
 
 
 def proxied(h) -> bool:
-    if getattr(h, "tj_conn_proxied", False):
+    if BEHIND_PROXY or getattr(h, "tj_conn_proxied", False):
         return True
     return _proxy_marked(h.headers)
 
@@ -450,8 +454,12 @@ def _set_cookie(h, tok, max_age):
 
 def _internal_ok(h) -> bool:
     v = h.headers.get(INTERNAL_HDR)
-    if not v or not direct_loopback(h):
+    if not v:
         return False
+    if not direct_loopback(h):
+        p9 = _peer(h)
+        if not (BEHIND_PROXY and p9 is not None and p9.is_loopback and not getattr(h, "tj_conn_proxied", False) and not _proxy_marked(h.headers)):
+            return False
     t = internal_token(False)
     return bool(t) and hmac.compare_digest(v.encode("utf-8", "replace"), t.encode("ascii"))
 

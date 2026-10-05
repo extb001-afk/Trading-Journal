@@ -3,7 +3,10 @@
   const POLL_MS = 30000;
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = v => (window.__tj && typeof window.__tj.moneyTxt === 'function') ? window.__tj.moneyTxt(v) : String(v == null ? '' : v);
-  const H = { data: null, err: null, at: 0, open: false, pop: false, inflight: false, showAllResolved: false, knownOpen: false };
+  const H = { data: null, err: null, at: 0, open: false, pop: false, inflight: false, showAllResolved: false, knownOpen: false, incOpen: new Set(), unitsAll: false };
+  const bfInfo = () => { try { const f = window.TJ && window.TJ.bfInfo; return typeof f === 'function' ? f() : null; } catch (e) { return null; } };
+  const bfRing = b => { const r = 5.5, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, b.pct)) / 100;
+    return '<svg class="tjh-ring' + (b.stalled ? ' st' : '') + '" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="' + r + '" fill="none" stroke-width="2" class="bg"/><circle cx="7" cy="7" r="' + r + '" fill="none" stroke-width="2" class="fg" stroke-dasharray="' + (c * Math.max(p, 0.04)).toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 7 7)"/></svg>'; };
   const isKnown = x => !!(x && x.known && x.level !== 'crit');
   const openNew = () => ((H.data && H.data.open) || []).filter(x => !isKnown(x));
   const openKnown = () => ((H.data && H.data.open) || []).filter(isKnown);
@@ -60,6 +63,8 @@
 .tjh-dot.unknown,.tjh-dot.off{background:var(--faint);box-shadow:0 0 0 3px var(--surface3)}
 .tjh-dot.sm{width:7px;height:7px;box-shadow:none}
 .m-top .tjh-btn{height:32px;padding:0 9px;gap:6px}
+.tjh-long{display:inline-flex;align-items:center;gap:8px}.tjh-short{display:none;align-items:center;gap:6px}
+.top .tjh-btn .tjh-long{display:none}.top .tjh-btn .tjh-short{display:inline-flex}   /* search1006: 머리 줄(최대 1320px)에 '검색' 칸 자리 — 데스크톱도 '● 4·2'(누르면 펼침) */
 .tjh-bg{position:fixed;inset:0;background:var(--dim);z-index:70}
 .tjh-panel{position:fixed;top:0;right:0;bottom:0;width:500px;max-width:100%;background:var(--bg);border-left:1px solid var(--line);z-index:71;overflow-y:auto;padding:22px 24px 40px;box-shadow:var(--pop)}
 .tjh-hd{display:flex;align-items:center;gap:10px;margin-bottom:6px}
@@ -95,10 +100,38 @@
 .tjh-res:last-child{border-bottom:0}
 .tjh-res .w{margin-left:auto;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .tjh-tg{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:12px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
-.tjh-card .tjh-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.tjh-card .tjh-inc{margin-bottom:8px}
 .tjh-pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap}
 .tjh-pill.ok{background:var(--okBg);color:var(--ok)} .tjh-pill.warn{background:var(--warnBg);color:var(--warn)} .tjh-pill.crit{background:var(--dangerBg);color:var(--danger)} .tjh-pill.unknown,.tjh-pill.g{background:var(--surface2);color:var(--muted)}
+/* ★screens1005★ 문제 = 한 줄(수준 점 · 제목 · 배지 하나) + 누르면 상세 · 정상 유닛 접기 · 과거 거래 불러오기(칩 고리 · 펼침 줄 · 패널 칸) */
+.tjh-inc{padding:0;border-left-width:4px;overflow:hidden}
+.tjh-ih{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:10px 14px;text-align:left;font-size:14px;color:var(--text)}
+.tjh-ih b{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tjh-ih .sp{flex:1}
+.tjh-ih .tjh-pill{flex:none}
+.tjh-lv{width:8px;height:8px;border-radius:50%;flex:none;background:var(--warn)}
+.tjh-inc.crit .tjh-lv{background:var(--danger)} .tjh-inc.kn .tjh-lv{background:var(--faint)}
+.tjh-cv{flex:none;color:var(--faint);transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+.tjh-inc.open .tjh-cv{transform:rotate(180deg)}
+.tjh-ib{padding:0 14px 14px 32px;animation:tjhin .18s cubic-bezier(.2,.8,.2,1)}
+.tjh-ib .d{margin-top:0}
+.tjh-pill.ext{background:var(--extBg);color:var(--ext)} .tjh-pill.own{background:var(--accentBg);color:var(--accent)}
+.tjh-okall{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);text-align:left;font-size:13.5px;color:var(--text2)}
+.tjh-okall:hover{border-color:var(--line2)}
+.tjh-okall .cap{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--muted)}
+.tjh-okall .sp{flex:1}
+.tjh-ring{flex:none;display:inline-block;vertical-align:-2px}
+.tjh-ring .bg{stroke:var(--line2)} .tjh-ring .fg{stroke:var(--warn)} .tjh-ring.st .fg{stroke:var(--muted)}
+.tjh-part.bf{color:var(--text2);font-weight:650} .tjh-part.bf.st{color:var(--muted)}
+@media (max-width:1499px){ .tjh-part.bf .bfw{display:none} }   /* 좁은 머리 줄 = 고리 + % (전체 문장은 칩 title·펼침) */
+.tjh-okall b{white-space:nowrap}
+.tjh-bfl{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;margin:0 0 4px;border-radius:10px;background:var(--surface2);font-size:13px;color:var(--text2);text-align:left}
+.tjh-bfl:hover{color:var(--text)} .tjh-bfl .sp{flex:1}
+.tjh-bf .tt{gap:6px}
+.tjh-bfb{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:13px;color:var(--text2);line-height:1.55}
+.tjh-bfb .bar{height:6px;border-radius:99px;background:var(--surface3);overflow:hidden;margin:2px 0 8px}
+.tjh-bfb .bar i{display:block;height:100%;border-radius:99px;background:var(--warn)}
+.tjh-bfb .bar.st i{background:var(--muted)}
+.tjh-bfb .j b{color:var(--text)}
 @media (max-width:640px){
   .tjh-pop{left:0!important;right:0!important;top:auto!important;bottom:0;width:100%;max-width:none;max-height:80vh;overflow:auto;border-radius:20px 20px 0 0;border-width:1px 0 0;padding:14px 10px calc(14px + env(safe-area-inset-bottom))}
   .tjh-pbg{position:fixed;inset:0;background:var(--dim);z-index:71}
@@ -180,17 +213,20 @@
     return op.length && op.every(x => extOf(x)) ? 'ext' : lv;
   }
   function btnHTML(mobile) {
+    const b9 = bfInfo(), bfP = b9 ? (mobile ? bfRing(b9) : '<span class="tjh-sep" aria-hidden="true"> · </span><span class="tjh-part bf' + (b9.stalled ? ' st' : '') + '">' + bfRing(b9) + '<span class="tjh-n"><span class="bfw">과거 </span>' + b9.pct + '%' + (b9.stalled ? '<span class="bfw"> 멈춤</span>' : '') + '</span></span>') : '';
+    return btnCore(mobile) + bfP;
+  }
+  function btnCore(mobile) {
     const o = overall(), c = counts();
     const n = c.crit + c.warn;
     const col = k => 'var(--' + ({ crit: 'danger', warn: 'warn', ext: 'ext' }[partTone(k)]) + ')';
     const dotC = n ? o : 'off';
-    if (mobile && o !== 'unknown' && (n || c.known)) {
-      const part = (k, v) => '<span style="color:' + col(k) + '">' + v + '</span>';
-      return '<span class="tjh-dot ' + dotC + '"></span><span class="tjh-n">' + [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span style="color:var(--muted)" title="알려진 사항">' + c.known + '</span>' : ''].filter(Boolean).join('<span style="color:var(--muted);margin:0 2px">·</span>') + '</span>';
-    }
+    const shortH = () => { const part = (k, v) => '<span style="color:' + col(k) + '">' + v + '</span>';
+      return '<span class="tjh-dot ' + dotC + '"></span><span class="tjh-n">' + [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span style="color:var(--muted)" title="알려진 사항">' + c.known + '</span>' : ''].filter(Boolean).join('<span style="color:var(--muted);margin:0 2px">·</span>') + '</span>'; };
+    if (mobile && o !== 'unknown' && (n || c.known)) return shortH();
     if (o !== 'unknown' && (n || c.known)) {
       const part = (k, v) => '<span class="tjh-part ' + partTone(k) + '"><i></i><span class="tjh-n">' + LBL[k] + ' ' + v + '</span></span>';
-      return [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span class="tjh-part known"><i></i><span class="tjh-n">알려진 사항 ' + c.known + '</span></span>' : ''].filter(Boolean).join('<span class="tjh-sep" aria-hidden="true"> · </span>');
+      return '<span class="tjh-long">' + [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span class="tjh-part known"><i></i><span class="tjh-n">알려진 사항 ' + c.known + '</span></span>' : ''].filter(Boolean).join('<span class="tjh-sep" aria-hidden="true"> · </span>') + '</span><span class="tjh-short" aria-hidden="true">' + shortH() + '</span>';
     }
     const label = o === 'unknown' ? (mobile ? '' : '확인 불가') : (mobile ? '' : '정상');
     return '<span class="tjh-dot ' + o + '"></span>' + (label ? '<span class="tjh-n">' + esc(label) + '</span>' : '');
@@ -198,7 +234,9 @@
   function btnTitle() {
     const o = overall(), c = counts();
     const ex = lv => partTone(lv) === 'ext' ? '(외부 원인)' : '';
-    return '시스템 상태: ' + (c.crit + c.warn ? LBL[o] : c.known ? '새 문제 없음' : LBL[o]) + (c.crit ? ' · 오류 ' + c.crit + '건' + ex('crit') : '') + (c.warn ? ' · 주의 ' + c.warn + '건' + ex('warn') : '') + (c.known ? ' · 알려진 사항 ' + c.known + '건(오래 지속 · 판정은 그대로)' : '');
+    const b9 = bfInfo();
+    return '시스템 상태: ' + (c.crit + c.warn ? LBL[o] : c.known ? '새 문제 없음' : LBL[o]) + (c.crit ? ' · 오류 ' + c.crit + '건' + ex('crit') : '') + (c.warn ? ' · 주의 ' + c.warn + '건' + ex('warn') : '') + (c.known ? ' · 알려진 사항 ' + c.known + '건(오래 지속 · 판정은 그대로)' : '')
+      + (b9 ? ' · 과거 거래 불러오는 중 ' + b9.pct + '%' + (b9.stalled ? '(멈춤)' : '') : '');
   }
   function popHTML() {
     const d = H.data;
@@ -220,42 +258,57 @@
     }).join('');
     const knH = kn.length ? '<button class="tjh-kn" data-h="known" aria-expanded="' + H.knownOpen + '"><span class="pvx">알려진 사항 ' + kn.length + '</span><span class="sp"></span><span>' + (H.knownOpen ? '접기' : '오래 지속 · 판정은 그대로 ›') + '</span></button>'
       + (H.knownOpen ? kn.map(x => '<div class="tjh-row kn"><i></i><div class="rb"><div class="r1"><b>' + esc(money(x.title)) + '</b><span>' + esc(x.known) + '</span></div><span class="r2" title="' + esc(money(x.detail)) + '">' + esc(money(x.detail)) + '</span></div></div>').join('') : '') : '';
-    return head + (rows || '<div class="ok"><span class="tjh-dot"></span>' + (kn.length ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>') + knH + tgNote() + popFoot();
+    const b9 = bfInfo();
+    const bfH = b9 ? '<button class="tjh-bfl" data-h="full" title="과거 거래 불러오기 — 작업별 진행은 전체 상태에서">' + bfRing(b9) + '<span>과거 거래 불러오는 중 <b class="pvx">' + b9.pct + '%' + (b9.stalled ? ' · 멈춤' : '') + '</b></span><span class="sp"></span><span class="pvx">' + (b9.n ? '작업 ' + b9.n + '개 ›' : '자세히 ›') + '</span></button>' : '';
+    return head + bfH + (rows || '<div class="ok"><span class="tjh-dot"></span>' + (kn.length ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>') + knH + tgNote() + popFoot();
   }
   function tgNote() {
     const t = (H.data && H.data.telegram) || null;
     return t && !t.configured ? '<div class="tjh-tgn"><span>알림 봇 미연결 — 오류가 떠도 알림이 안 가요</span><button data-h="tg">설정에서 연결 ›</button></div>' : '';
   }
   function popFoot() { return '<div class="pf"><button data-h="full">유닛별 상태 · 최근 복구 · 알림 ›</button></div>'; }
-  function incHTML(x, compact) {
+  function incHTML(x, compact, known) {
     const lv = x.level === 'crit' ? 'crit' : 'warn';
+    const id = String(x.id || x.check || x.title || ''), open = (lv === 'crit' && !known) !== H.incOpen.has(id);
     const since = x.since || x.opened;
     const tgOn = !!(H.data && H.data.telegram && H.data.telegram.configured);
     const tg = x.telegram === false ? '대시보드 표시만' : x.notified ? '텔레그램 알림 보냄' : (lv === 'crit' && tgOn ? '텔레그램 대기' : '대시보드 표시만');
-    return '<div class="tjh-inc ' + lv + '"><div class="t1"><span class="tjh-pill ' + lv + '">' + LBL[lv] + '</span><span class="tjh-pill g">' + esc(x.unit) + '</span><b>' + esc(money(x.title)) + '</b></div>'
-      + '<div class="d">' + esc(money(x.detail)) + '</div>'
-      + '<div class="m"><span>시작 ' + esc(hm(since)) + ' · ' + esc(ago(nowS() - since)) + '째</span><span>' + esc(tg) + '</span></div>'
-      + (compact ? '' : (x.action ? '<div class="act" title="' + esc(x.action) + '"><b>조치</b> · ' + esc(actTxt(x.action)) + '</div>' : '')) + '</div>';
+    const e = extOf(x), own = /^debt:/.test(String(x.check || ''));
+    const badge = known ? '<span class="tjh-pill g">' + esc(x.known || '알려진 사항') + '</span>' : e ? '<span class="tjh-pill ext">외부' + (e.src ? ' · ' + esc(e.src) : '') + '</span>' : own ? '<span class="tjh-pill own">내 계정</span>' : '<span class="tjh-pill g" title="' + esc(x.unit) + '">' + esc(UNIT_KO[x.unit] || x.unit || '') + '</span>';
+    const chev = '<svg class="tjh-cv" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+    return '<div class="tjh-inc ' + lv + (known ? ' kn' : '') + (open ? ' open' : '') + '"><button class="tjh-ih" data-h="inc" data-v="' + esc(id) + '" aria-expanded="' + open + '"><i class="tjh-lv"></i><b>' + (known ? '' : LBL[lv] + ' · ') + esc(money(x.title)) + '</b><span class="sp"></span>' + badge + chev + '</button>'
+      + (open ? '<div class="tjh-ib"><div class="d">' + esc(money(x.detail)) + '</div>'
+        + '<div class="m"><span>' + esc(x.unit) + '</span><span>시작 ' + esc(hm(since)) + ' · ' + esc(ago(nowS() - since)) + '째</span><span>' + esc(tg) + '</span></div>'
+        + (compact ? '' : (x.action ? '<div class="act" title="' + esc(x.action) + '"><b>조치</b> · ' + esc(actTxt(x.action)) + '</div>' : '')) + '</div>' : '') + '</div>';
   }
   function unitsHTML() {
     const us = (H.data && H.data.units) || [];
     if (!us.length) return '<div class="tjh-bnr g">유닛 정보 없음</div>';
-    const rows = us.map(u => {
+    const pvc = t => /[$₩]/.test(String(t || '')) ? '' : ' class="pvx"';
+    const srcLv = s0 => s0.level === 'crit' ? 'crit' : s0.level === 'warn' ? 'warn' : s0.level == null ? 'off' : '';
+    const othLv = o => o.level === 'off' || o.level == null ? 'off' : o.level === 'ok' ? '' : LVW(o.level, 'off');
+    const bad = u => { const lvl = u.ignored ? 'off' : LVW(u.level || 'ok', 'off'); return (lvl !== 'ok' && lvl !== 'off') || (u.sources || []).some(x => srcLv(x) === 'crit' || srcLv(x) === 'warn') || (u.other || []).some(o => othLv(o) === 'crit' || othLv(o) === 'warn'); };
+    const row = (u, all) => {
       const p = u.proc;
       const ps = !p ? '—' : (p.status === 'online' ? '실행 중' : (p.status || '—'));
-      const pvc = t => /[$₩]/.test(String(t || '')) ? '' : ' class="pvx"';
       const sub = [p && p.restarts ? '재시작 ' + p.restarts : '', u.lastLog ? '로그 ' + ago(nowS() - u.lastLog) + ' 전' : '', u.errors60 ? '오류 ' + u.errors60 + '/시' : ''].filter(Boolean).join(' · ');
       const lvl = u.ignored ? 'off' : LVW(u.level || 'ok', 'off');
-      const srcs = (u.sources || []).map(s => {
-        const l = s.level === 'crit' ? 'crit' : s.level === 'warn' ? 'warn' : s.level == null ? 'off' : '';
-        const st9 = s.label + ' ' + (s.age != null ? ago(s.age) : String(s.id || '').indexOf('inbox:') === 0 ? (s.level === 'ok' ? '밀림 없음' : '밀림') : '—');
-        return '<span class="tjh-src ' + l + '" title="' + esc(money(s.detail)) + '"><span class="tjh-dot sm ' + (l || 'ok') + '"></span><span' + pvc(st9) + '>' + esc(st9) + '</span></span>';
-      }).join('') + (u.other || []).map(o => { const l = o.level === 'off' || o.level == null ? 'off' : o.level === 'ok' ? '' : LVW(o.level, 'off'); const ct9 = money(o.chip || o.title); return '<span class="tjh-src ' + l + '" title="' + esc(money(o.detail)) + '"><span class="tjh-dot sm ' + (l || 'ok') + '"></span><span' + pvc(ct9) + '>' + esc(ct9) + '</span></span>'; }).join('');
-      return '<tr><td style="width:118px"><div class="tjh-u"><span class="tjh-dot sm ' + lvl + '"></span><b>' + esc(u.unit) + '</b></div><div class="tjh-k">' + esc(UNIT_KO[u.unit] || '') + '</div></td>'
+      let okN = 0;
+      const srcs = (u.sources || []).map(s0 => {
+        const l = srcLv(s0);
+        if (!all && !l) { okN++; return ''; }
+        const st9 = s0.label + ' ' + (s0.age != null ? ago(s0.age) : String(s0.id || '').indexOf('inbox:') === 0 ? (s0.level === 'ok' ? '밀림 없음' : '밀림') : '—');
+        return '<span class="tjh-src ' + l + '" title="' + esc(money(s0.detail)) + '"><span class="tjh-dot sm ' + (l || 'ok') + '"></span><span' + pvc(st9) + '>' + esc(st9) + '</span></span>';
+      }).join('') + (u.other || []).map(o => { const l = othLv(o); if (!all && !l) { okN++; return ''; } const ct9 = money(o.chip || o.title); return '<span class="tjh-src ' + l + '" title="' + esc(money(o.detail)) + '"><span class="tjh-dot sm ' + (l || 'ok') + '"></span><span' + pvc(ct9) + '>' + esc(ct9) + '</span></span>'; }).join('')
+        + (okN ? '<span class="tjh-src pvx"><span class="tjh-dot sm ok"></span>정상 ' + okN + '</span>' : '');
+      return '<tr data-anc="unit:' + esc(u.unit) + '"><td style="width:118px"><div class="tjh-u"><span class="tjh-dot sm ' + lvl + '"></span><b>' + esc(u.unit) + '</b></div><div class="tjh-k">' + esc(UNIT_KO[u.unit] || '') + '</div></td>'
         + '<td class="lg pvx" style="width:112px">' + esc(ps) + (sub ? '<div class="cap" style="font-size:12px">' + esc(sub) + '</div>' : '') + '</td>'
         + '<td><div class="tjh-srcs">' + (srcs || '<span class="tjh-src off">추적 소스 없음</span>') + '</div></td></tr>';
-    }).join('');
-    return '<table class="tjh-tbl"><thead><tr><th>유닛</th><th>프로세스</th><th>데이터 신선도</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    };
+    const badU = us.filter(bad), okU = us.filter(u => !bad(u));
+    const list = H.unitsAll ? us.map(u => row(u, true)) : badU.map(u => row(u, false));
+    const okBtn = okU.length ? '<button class="tjh-okall" data-h="units" aria-expanded="' + H.unitsAll + '"><span class="tjh-dot sm ok"></span><b class="pvx">' + (H.unitsAll ? '정상만 접기' : '정상 ' + okU.length + '개') + '</b><span class="cap ell">' + (H.unitsAll ? '문제 있는 유닛만 보기' : esc(okU.map(u => UNIT_KO[u.unit] || u.unit).join(' · '))) + '</span><span class="sp"></span><span class="pvx">' + (H.unitsAll ? '‹' : '›') + '</span></button>' : '';
+    return (list.length ? '<table class="tjh-tbl"><thead><tr><th>유닛</th><th>프로세스</th><th>데이터 신선도</th></tr></thead><tbody>' + list.join('') + '</tbody></table>' : '') + okBtn;
   }
   function tgHTML() {
     const t = (H.data && H.data.telegram) || {};
@@ -284,10 +337,12 @@
     if (d.note) h += '<div class="tjh-bnr g">' + esc(d.note) + '</div>';
     const op = openNew(), kn = openKnown();
     const crit = op.filter(x => x.level === 'crit'), warn = op.filter(x => x.level !== 'crit');
-    h += '<div class="tjh-sec"><div class="tt">열린 문제 <span class="n pvx">' + op.length + '</span></div>'
+    h += '<div class="tjh-sec"><div class="tt">열린 문제 <span class="n pvx">' + op.length + '</span>' + (op.length ? '<span class="n">· 누르면 설명·조치</span>' : '') + '</div>'
       + (op.length ? crit.concat(warn).map(x => incHTML(x, false)).join('') : '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn.length ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>') + '</div>';
     if (kn.length) h += '<div class="tjh-sec"><button class="tt tjh-kn" style="padding:0;margin-bottom:10px" data-h="known" aria-expanded="' + H.knownOpen + '">알려진 사항 <span class="n pvx">' + kn.length + ' · 오래 지속 · 판정은 그대로</span><span class="sp"></span><span class="n pvx">' + (H.knownOpen ? '접기' : '펼치기') + '</span></button>'
-      + (H.knownOpen ? kn.map(x => incHTML(x, false).replace('class="tjh-inc warn"', 'class="tjh-inc warn kn"').replace('<span class="tjh-pill warn">주의</span>', '<span class="tjh-pill g">알려진 사항</span>')).join('') : '') + '</div>';
+      + (H.knownOpen ? kn.map(x => incHTML(x, false, true)).join('') : '') + '</div>';
+    const b9 = bfInfo();
+    if (b9) h += '<div class="tjh-sec tjh-bf"><div class="tt">' + bfRing(b9) + '과거 거래 불러오기 <span class="n pvx">' + b9.pct + '%' + (b9.stalled ? ' · 멈춤' : '') + '</span></div>' + b9.html + '</div>';
     const wt = (d.watching || []).filter(x => !x.suppressed);
     const sup = (d.watching || []).filter(x => x.suppressed);
     if (wt.length || sup.length) {
@@ -307,12 +362,10 @@
       + '<button class="iconbtn" data-h="close" id="tjhClose" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
       + '<div class="tjh-sub">' + headerLine() + '</div>' + bodyHTML(false) + '</div>';
   }
-  function settingsCardHTML() {
-    const o = overall(), c = counts();
-    const d = H.data;
-    return '<div class="card scard full tjh-card" id="tjhCard"><div class="tjh-top"><div class="h2">상태</div><span class="tjh-pill ' + (c.crit + c.warn ? o : c.known ? 'g' : o) + '">' + (c.crit + c.warn ? splitLabel(c) : c.known ? '알려진 사항 ' + c.known : LBL[o]) + '</span><span class="sp" style="flex:1"></span><button class="btn sm" data-h="open">상태 패널 열기</button></div>'
-      + '<div class="desc">수집기·원장·시세·리뷰·알림이 제대로 도는지 60초마다 점검합니다. 잠깐 튀는 오류는 무시하고, 지속되는 문제만 표시합니다. 빨강 = 텔레그램 알림, 주황 = 이 화면에만. · ' + headerLine().replace(' · 60초마다 점검', '') + '</div>'
-      + (d ? bodyHTML(true) : '<div class="tjh-bnr g">' + (H.err ? '상태를 불러오지 못했습니다 — ' + esc(H.err) : '불러오는 중…') + '</div>') + '</div>';
+  function summary() {
+    const c = counts(), o = overall();
+    return { loaded: !!H.data, err: H.err || '', overall: o, crit: c.crit, warn: c.warn, known: c.known, label: c.crit + c.warn ? splitLabel(c) : c.known ? '알려진 사항 ' + c.known : LBL[o],
+      ext: (c.crit + c.warn) > 0 && openNew().every(x => extOf(x)), tg: !!(H.data && H.data.telegram && H.data.telegram.configured) };
   }
 
   function ensureStyle() {
@@ -346,21 +399,10 @@
     const mt = document.getElementById('mtop');
     if (mt) ensureBtn(mt, mt.querySelector('.curb') || mt.querySelector('.iconbtn[data-a="theme"]'), true);
   }
-  let lastView = null;
-  function view(tab, el) {
-    lastView = { tab: tab, el: el };
-    if (tab !== 'settings' || !el) return;
-    const grid = el.querySelector('.sgrid');
-    if (!grid) return;
-    const old = grid.querySelector('#tjhCard');
-    const wrap = document.createElement('div');
-    wrap.innerHTML = settingsCardHTML();
-    const card = wrap.firstChild;
-    if (old) grid.replaceChild(card, old); else grid.insertBefore(card, grid.firstChild);
-  }
+  function view(tab, el) { void tab; void el; }
   function paint() {
     chrome();
-    if (lastView && lastView.tab === 'settings' && lastView.el && document.body.contains(lastView.el)) view('settings', lastView.el);
+    try { window.dispatchEvent(new Event('tj:health')); } catch (e) {  }
     const ov = document.getElementById('tjhOverlay');
     if (H.open) {
       const scrollTop = ov && ov.querySelector('.tjh-panel') ? ov.querySelector('.tjh-panel').scrollTop : 0;
@@ -417,13 +459,14 @@
     else if (a === 'refresh') load();
     else if (a === 'moreRes') { H.showAllResolved = true; paint(); }
     else if (a === 'known') { ev.preventDefault(); H.knownOpen = !H.knownOpen; paint(); }
+    else if (a === 'inc') { ev.preventDefault(); const v = el.getAttribute('data-v') || ''; if (H.incOpen.has(v)) H.incOpen.delete(v); else H.incOpen.add(v); paint(); refocus('[data-h="inc"]', v); }
+    else if (a === 'units') { ev.preventDefault(); H.unitsAll = !H.unitsAll; paint(); refocus('[data-h="units"]', null); }
     else if (a === 'tg') {
       ev.preventDefault(); H.pop = false; H.open = false; paint();
       try {
-        if (window.__tj && window.__tj.A && window.__tj.A.go) window.__tj.A.go({ dataset: { v: 'settings' } });
         const su = window.__tjSetup;
-        if (su && su.U) { su.U.panelOpen = true; su.U.where = 'telegram'; if (su.render) su.render(); }
-        setTimeout(() => { const pn = document.querySelector('.su-panel'); if (pn) pn.scrollIntoView({ block: 'start' }); }, 60);
+        if (su && su.U) { su.U.panelOpen = true; su.U.where = 'telegram'; }
+        location.hash = 'settings/keys/telegram';
       } catch (e) {  }
     }
   });
@@ -437,7 +480,8 @@
   setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
   setInterval(() => { const s = document.querySelector('#tjhOverlay .tjh-sub'); if (s && !document.hidden) s.innerHTML = headerLine(); }, 15000);
 
-  window.TJHealth = { chrome: chrome, view: view, open: openPanel, close: closePanel, pop: togglePop, reload: load, lock: lock, _state: H };
+  function refocus(sel, v) { const b = Array.from(document.querySelectorAll('#tjhOverlay ' + sel + ', #tjhCard ' + sel + ', #tjhPop ' + sel)).find(x => v == null || x.getAttribute('data-v') === v); if (b) { try { b.focus({ preventScroll: true }); } catch (e) {  } } }
+  window.TJHealth = { chrome: chrome, view: view, summary: summary, open: openPanel, close: closePanel, pop: togglePop, reload: load, lock: lock, _state: H };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { chrome(); load(); });
   else { chrome(); load(); }
 })();

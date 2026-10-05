@@ -29,7 +29,10 @@ DEFAULTS = {
     "sol": True,
     "sol_rpcs": None,
     "sol_max_calls": 80,
+    "upbit": True,
 }
+UPBIT_KEY = ("upbit", "exchange:upbit")
+_EX_TERMINAL = ("ACCEPTED", "DONE", "CANCELLED", "CANCELED", "REJECTED", "FAILED", "REFUNDED")
 
 
 def settings(cfg: dict) -> dict:
@@ -215,6 +218,128 @@ def _anchored_pairs(conn) -> set:
         log.warning("잔고 대조: 기초잔고 표식 읽기 실패(전부 대조): %s", e)
         return None
     return out
+
+
+def _upbit_partial(o: dict):
+    from decimal import InvalidOperation
+    market = str(o.get("market") or "")
+    if "-" not in market:
+        return None
+    quote, base = (s.upper() for s in market.split("-", 1))
+    try:
+        vol = Decimal(str(o.get("executed_volume") or "0"))
+        funds = Decimal(str(o.get("executed_funds") if o.get("executed_funds") not in (None, "") else "0"))
+        fee = Decimal(str(o.get("paid_fee") if o.get("paid_fee") not in (None, "") else "0"))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    side = str(o.get("side") or "").lower()
+    if side not in ("bid", "ask") or not (vol.is_finite() and funds.is_finite() and fee.is_finite()) or vol < 0:
+        return None
+    if vol == 0:
+        return {}
+    return {base: vol, quote: -(funds + fee)} if side == "bid" else {base: -vol, quote: funds - fee}
+
+
+def _upbit_found(cfg: dict, conn, live_px: dict, st: dict, errors: list):
+    try:
+        if not conn.execute("SELECT 1 FROM meta WHERE k='recon_done_upbit'").fetchone():
+            return None
+    except Exception:
+        return None
+    bal = common.read_json(os.path.join(common.STATE_DIR, "upbit_balances.json"), {}) or {}
+    if not isinstance(bal, dict) or time.time() - float(bal.get("ts") or 0) > common.upbit_fresh_sec(cfg):
+        return None
+    try:
+        sync = common.read_json(os.path.join(common.STATE_DIR, "upbit_sync.json"), {})
+        ost = common.read_json(os.path.join(common.STATE_DIR, "upbit_orders_state.json"), {})
+        snap_ts = float(bal.get("ts") or 0)
+        if not isinstance(sync, dict) or not isinstance(ost, dict) or not ost.get("complete"):
+            return None
+        if float(sync.get("last_ok") or 0) < snap_ts:
+            return None
+        le9 = sync.get("last_err")
+        if isinstance(le9, dict) and float(le9.get("ts") or 0) >= snap_ts:
+            return None
+    except (Exception, SystemExit):
+        return None
+    oo = bal.get("open_orders")
+    if not isinstance(oo, list) or not isinstance(bal.get("accounts"), list):
+        return None
+    bts = int(bal.get("ts") or 0)
+    actual = {}
+    for a in bal.get("accounts") or []:
+        if not isinstance(a, dict):
+            errors.append("upbit: 잔고 행 형식 오류")
+            return None
+        cur = str(a.get("currency") or "").strip().upper()
+        if not cur or cur == "KRW":
+            continue
+        try:
+            actual[cur] = Decimal(str(a["balance"])) + Decimal(str(a["locked"]))
+        except Exception:
+            errors.append(f"upbit: {cur} 잔고 파싱 실패")
+            return None
+    oo_uuids = set()
+    for o9 in oo:
+        p9 = _upbit_partial(o9) if isinstance(o9, dict) else None
+        if p9 is None or not o9.get("uuid"):
+            errors.append("upbit: 미체결 주문 형식 오류")
+            return None
+        oo_uuids.add(str(o9["uuid"]))
+        for s9, dq in p9.items():
+            if s9 in actual:
+                actual[s9] -= dq
+    skip = set()
+    try:
+        for kind9, pl9, at9 in conn.execute(
+                "SELECT r.kind, r.payload, r.observed_at FROM raw_ex r JOIN (SELECT exchange, kind, uuid, max(revision) AS revision FROM raw_ex"
+                " WHERE exchange='upbit' AND kind IN ('deposit','withdraw') GROUP BY exchange, kind, uuid) x"
+                " ON x.exchange=r.exchange AND x.kind=r.kind AND x.uuid=r.uuid AND x.revision=r.revision"):
+            try:
+                p9 = json.loads(pl9)
+            except (TypeError, ValueError):
+                continue
+            s9 = str(p9.get("state") or "").upper()
+            if (s9 and s9 not in _EX_TERMINAL) or int(at9 or 0) >= bts - 5:
+                skip.add(str(p9.get("currency") or "").upper())
+        in9 = (" OR uuid IN (%s)" % ",".join("?" * len(oo_uuids))) if oo_uuids else ""
+        for (pl9,) in conn.execute("SELECT payload FROM raw_ex WHERE exchange='upbit' AND kind='order' AND (observed_at >= ?" + in9 + ")",
+                                   (bts - 5, *sorted(oo_uuids))):
+            try:
+                mk9 = str(json.loads(pl9).get("market") or "")
+            except (TypeError, ValueError):
+                mk9 = ""
+            for s9 in (mk9.split("-", 1) if "-" in mk9 else []):
+                skip.add(s9.upper())
+    except Exception as e:
+        errors.append(f"upbit: 진행 중 입출금·주문 확인 실패 {common.safe_err(e)[:60]}")
+        return None
+    ledger = {}
+    for r in conn.execute("SELECT a.symbol, a.decimals, a.group_id, p.qty_base FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
+                          " WHERE p.location = 'exchange:upbit'"):
+        sym = str(r["symbol"] or "").upper()
+        if not sym or sym == "KRW":
+            continue
+        ent = ledger.setdefault(sym, [Decimal(0), None])
+        ent[0] += Decimal(int(r["qty_base"])) / (Decimal(10) ** int(8 if r["decimals"] is None else r["decimals"]))
+        if ent[1] is None and r["group_id"] is not None:
+            ent[1] = r["group_id"]
+    found, n = [], 0
+    for sym, (lq, gid) in ledger.items():
+        if sym in skip:
+            continue
+        n += 1
+        px = float(live_px.get(gid) or 0) if gid is not None else 0.0
+        if px <= 0:
+            continue
+        oq = actual.get(sym, Decimal(0))
+        pxd = Decimal(str(px))
+        diff_usd = abs(oq - lq) * pxd
+        thr = max(Decimal(str(st["diff_abs_usd"])), Decimal(str(st["diff_pct"])) * max(abs(lq), abs(oq)) * pxd)
+        if diff_usd >= thr:
+            found.append({"key": f"upbit:exchange:upbit:{sym}", "wallet": UPBIT_KEY[1], "chain": UPBIT_KEY[0], "sym": sym, "ca": None,
+                          "ledger": float(lq), "onchain": float(oq), "diffUsd": round(float(diff_usd), 2)})
+    return found, n
 
 
 def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict:
@@ -413,6 +538,14 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             if diff_usd >= thr:
                 found.append({"key": f"sol:{s9}:stake", "wallet": s9, "chain": "sol", "sym": "SOL(스테이킹)",
                               "ca": None, "ledger": float(lq), "onchain": float(oq), "diffUsd": round(float(diff_usd), 2)})
+    up_n = 0
+    if st.get("upbit"):
+        r9 = _upbit_found(cfg, conn, live_px, st, errors)
+        if r9 is not None:
+            found += r9[0]
+            up_n = r9[1]
+            checked += r9[1]
+            done_pairs.add(UPBIT_KEY)
     now = int(time.time())
     prev_pending = dict((prev or {}).get("pending") or {})
     pending = {}
@@ -421,6 +554,10 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
         pending[m["key"]] = fs
         m["firstSeen"] = fs
         m["confirmed"] = (now - fs) >= int(st["confirm_sec"])
+    if UPBIT_KEY not in done_pairs:
+        for k, v in prev_pending.items():
+            if str(k).startswith("upbit:") and now - int(v) < 3 * 86400:
+                pending.setdefault(k, v)
     if capped or errors:
         done_keys = {m["key"] for m in found}
         for k, v in prev_pending.items():
@@ -445,6 +582,7 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
         pending = {k: v for k, v in pending.items()
                    if (str(k).split(":", 2)[0], str(k).split(":", 2)[1].lower() if k.count(":") >= 2 else "") not in fr9}
     unchecked = len([p9 for p9 in pairs if p9 not in done_pairs]) + len([w9 for w9 in sol_ws if ("sol", w9) not in done_pairs])
+    stake_n += up_n
     return {"checkedAt": now, "durationSec": round(time.time() - t0, 1), "calls": caller.calls + sol_caller.calls if sol_ws else caller.calls,
             "capped": capped, "checked": checked, "pairs": len(pairs) + len(sol_ws) + stake_n, "errors": errors,
             "mismatches": found, "pending": pending, "rrNext": rr_next, "unchecked": unchecked,
@@ -497,6 +635,10 @@ def _recheck_carried(m: dict, led, st: dict) -> None:
 def alert_text(new_alerts: list) -> str:
     lines = [f"⚠️ 온체인 잔고 불일치 {len(new_alerts)}건 (원장 vs 온체인 — 원장은 안 고침, 확인 필요)"]
     for m in new_alerts[:10]:
+        if m.get("chain") == UPBIT_KEY[0]:
+            lines.append(f"- 업비트 {m['sym']}: 원장 {m['ledger']:,.4f} / 업비트 잔고 {m['onchain']:,.4f} (차이 ${m['diffUsd']:,.0f})"
+                         + (" · 지난 실측값(재대조 지연)" if m.get("carried") else ""))
+            continue
         lines.append(f"- {m['chain']} {m['wallet'][:6]}…{m['wallet'][-4:]} {m['sym']}: 원장 {m['ledger']:,.4f}"
                      f" / 온체인 {m['onchain']:,.4f} (차이 ${m['diffUsd']:,.0f})"
                      + (" · 지난 실측값(재대조 지연)" if m.get("carried") else ""))

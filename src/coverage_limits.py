@@ -182,7 +182,7 @@ API_LIMITS_NAME = "api_limits.json"
 
 
 def api_limits_table(base=None, active_ex=None, active_chains=None, active_perps=None):
-    d = _rj(os.path.join(base or common.BASE_DIR, "seed", "coverage", API_LIMITS_NAME), None)
+    d = common.seed_json("coverage/" + API_LIMITS_NAME, None, base_dir=base or common.BASE_DIR)
     if not isinstance(d, dict) or not isinstance(d.get("exchanges"), list):
         return None
     out = {k: d.get(k) for k in ("schema", "updated", "columns", "actions", "window_note")}
@@ -250,9 +250,9 @@ def api_limits_markdown(t=None) -> str:
 
 
 def build(base=None, exl_path=None, speed_path=None, now=None):
+    st = os.path.join(base, "state") if base else common.STATE_DIR
+    cfg = _rj(os.path.join(base, "config.json") if base else common.CONFIG_PATH, {}) or {}
     base = base or common.BASE_DIR
-    st = os.path.join(base, "state")
-    cfg = _rj(os.path.join(base, "config.json"), {}) or {}
     since = cfg.get("backfill_since")
     months = float(cfg.get("backfill_months") or 5)
     now = int(now or time.time())
@@ -260,8 +260,8 @@ def build(base=None, exl_path=None, speed_path=None, now=None):
     ts_since = _ts(since)
     tgt = min(win0, ts_since) if ts_since else win0
     status = _rj(os.path.join(st, "backfill_status.json"), {}) or {}
-    exl = _rj(exl_path or os.path.join(base, "seed", "coverage", "exchange_limits.json"), {}) or {}
-    speed = _rj(speed_path or os.path.join(base, "seed", "coverage", "speed_model.json"), {}) or {}
+    exl = (_rj(exl_path, {}) if exl_path else common.seed_json("coverage/exchange_limits.json", {}, base_dir=base)) or {}
+    speed = (_rj(speed_path, {}) if speed_path else common.seed_json("coverage/speed_model.json", {}, base_dir=base)) or {}
     other_speed = _rj(os.path.join(st, "chain_backfill_speed.json"), None)
     db = sqlite3.connect(f"file:{os.path.join(st, 'ledger.db')}?mode=ro", uri=True, timeout=10)
     try:
@@ -449,9 +449,8 @@ def build(base=None, exl_path=None, speed_path=None, now=None):
 
 
 def write(base=None, out=None) -> dict:
-    base = base or common.BASE_DIR
     d = build(base)
-    common.atomic_write_json(out or os.path.join(base, "state", OUT_NAME), d)
+    common.atomic_write_json(out or (os.path.join(base, "state", OUT_NAME) if base else os.path.join(common.STATE_DIR, OUT_NAME)), d)
     return d
 
 

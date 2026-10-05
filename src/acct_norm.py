@@ -26,8 +26,8 @@ def _aliases() -> dict:
     global _ALIAS
     if _ALIAS is None:
         try:
-            with open(_SEED, encoding="utf-8") as f:
-                ex = (json.load(f) or {}).get("exchange") or {}
+            import common
+            ex = (common.seed_json("ticker_aliases.json", {}, base_dir=os.path.dirname(os.path.dirname(_SEED))) or {}).get("exchange") or {}
             _ALIAS = {str(k).lower(): {norm_ticker(a): norm_ticker(b) for a, b in (v or {}).items()}
                       for k, v in ex.items() if isinstance(v, dict)}
         except (OSError, ValueError, AttributeError):
@@ -145,27 +145,37 @@ class FxBook:
         d = datetime.fromtimestamp(int(ts), KST).replace(hour=23, minute=59, second=0, microsecond=0)
         return self.fx.get(int(d.timestamp()) * 1000)
 
-    def rate_at(self, ts, row=None) -> float:
+    RATE_SRC_KO = {"leg": "체결 원화(그 체결)", "minute": "그 분(직전 60분)", "close": "그날 마감", "near36h": "가까운 시각(±36시간)",
+                   "near7d": "가까운 시각(±7일)", "spot": "현재 환율(그 시각 기록 없음)", "default": "기본값(환율 기록 없음)"}
+
+    def rate_src(self, ts, row=None):
         if row is not None:
             try:
                 ck, cu = row["cost_krw"], row["cost_usd"]
                 if ck is not None and cu is not None and float(cu) > 0 and float(ck) > 0:
-                    return float(ck) / float(cu)
+                    return float(ck) / float(cu), "leg"
             except (KeyError, IndexError, TypeError, ValueError):
                 pass
         m = (int(ts) * 1000 // 60_000) * 60_000
         j = bisect.bisect_right(self.keys, m) - 1
         if j >= 0 and m - self.keys[j] <= 3_600_000:
-            return self.fx[self.keys[j]]
+            return self.fx[self.keys[j]], "minute"
         dc = self.day_close(ts)
         if dc:
-            return dc
-        nr = self._near(m, 36 * 3_600_000) or self._near(m, 7 * 86_400_000)
+            return dc, "close"
+        nr = self._near(m, 36 * 3_600_000)
         if nr:
-            return nr
+            return nr, "near36h"
+        nr = self._near(m, 7 * 86_400_000)
+        if nr:
+            return nr, "near7d"
         if self.spot_default:
             _warn_default("그 시각 캐시·현재 환율 모두 없음")
-        return self.spot
+            return self.spot, "default"
+        return self.spot, "spot"
+
+    def rate_at(self, ts, row=None) -> float:
+        return self.rate_src(ts, row)[0]
 
     def candle(self, sym, ts):
         s = str(sym or "").upper()

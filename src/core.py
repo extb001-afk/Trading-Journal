@@ -24,6 +24,10 @@ from inbox import SegmentReader
 
 log = common.setup_logging("tj-core")
 
+
+class MissingTs(ValueError):
+    pass
+
 CLASSIFIER_VER = 5
 DM_PATH = os.path.join(common.STATE_DIR, "pending_dm.jsonl")
 DM_RECENT_SEC = 6 * 3600
@@ -116,6 +120,7 @@ class Core:
         self.bridges = self._load_seed("bridge_contracts.json")
         self.lp_mgrs = lpdec.lp_managers(common.BASE_DIR)
         self._load_exchange_addrs(cfg)
+        self._dec_startup()
         self.conn.commit()
         self.reader = SegmentReader(os.path.join(common.INBOX_DIR, "evm"))
         self.sol_reader = SegmentReader(os.path.join(common.INBOX_DIR, "sol"))
@@ -138,8 +143,7 @@ class Core:
         return int(min([t] + vals))
 
     def _load_seed(self, name: str) -> set:
-        path = os.path.join(common.BASE_DIR, "seed", name)
-        data = common.read_json(path, [])
+        data = common.seed_json(name, [], base_dir=common.BASE_DIR, strict=True)
         return {a.lower() for a in data}
 
     def _load_exchange_addrs(self, cfg: dict):
@@ -155,15 +159,139 @@ class Core:
             "SELECT address FROM exchange_addresses WHERE chain=?", (chain,)).fetchall()
         return {r["address"] for r in rows}
 
+    DEC_ISSUES_PATH = os.path.join(common.STATE_DIR, "asset_decimals_issues.json")
+
+    def _meta_dec(self, chain, ca):
+        if not chain or not ca:
+            return None
+        name = "bsc_token_meta.json" if chain == "bsc" else f"rpc_token_meta_{chain}.json"
+        p = os.path.join(common.STATE_DIR, name)
+        cache = self.__dict__.setdefault("_meta_dec_cache", {})
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            return None
+        ent = cache.get(name)
+        if not ent or ent[0] != mt:
+            raw = common.read_json(p, {}) or {}
+            m9 = {}
+            if isinstance(raw, dict):
+                for k, v in raw.items():
+                    v = v[1] if isinstance(v, (list, tuple)) and len(v) >= 2 else v
+                    if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 77:
+                        m9[str(k).lower()] = v
+            ent = cache[name] = (mt, m9)
+        return ent[1].get(str(ca).lower())
+
+    def _dec_issue(self, aid: int, kind: str, stored, seen) -> None:
+        seen_k = (int(aid), kind, seen)
+        logged = self.__dict__.setdefault("_dec_issue_seen", set())
+        if kind == "pending":
+            self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_prewindow:decimals_fix', '1')")
+        if seen_k in logged:
+            return
+        logged.add(seen_k)
+        r = self.conn.execute("SELECT chain, address, symbol FROM assets WHERE asset_id=?", (aid,)).fetchone()
+        log.warning("자산 decimals %s: #%s %s %s 저장=%s 관측=%s%s", kind, aid, (r["chain"] if r else "?"), (r["symbol"] if r else "?"), stored, seen,
+                    " — 이미 기장된 자산이라 다음 재구축에서 채움" if kind == "pending" else " — 덮지 않음(확인 필요)")
+        try:
+            d = common.read_json(self.DEC_ISSUES_PATH, {}) or {}
+            it = d.setdefault("items", {})
+            it[str(aid)] = {"kind": kind, "chain": r["chain"] if r else None, "address": r["address"] if r else None,
+                            "symbol": r["symbol"] if r else None, "stored": stored, "seen": seen, "ts": int(time.time())}
+            d["ts"] = int(time.time())
+            common.atomic_write_json(self.DEC_ISSUES_PATH, d)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def _dec_startup(self) -> None:
+        self._dec_issues_prune()
+        try:
+            rows = self.conn.execute("SELECT asset_id, chain, address, decimals FROM assets WHERE kind='token' AND address IS NOT NULL").fetchall()
+        except sqlite3.Error:
+            return
+        cand = {}
+        for r in rows:
+            m9 = self._meta_dec(r["chain"], r["address"])
+            if m9 is None:
+                continue
+            if r["decimals"] is None:
+                cand[int(r["asset_id"])] = m9
+            elif int(r["decimals"]) != m9:
+                self._dec_issue(int(r["asset_id"]), "conflict", int(r["decimals"]), m9)
+        if not cand:
+            return
+        posted = set()
+        ids = list(cand)
+        for i in range(0, len(ids), 500):
+            ch = ids[i:i + 500]
+            posted |= {int(x[0]) for x in self.conn.execute(
+                "SELECT DISTINCT asset_id FROM postings WHERE asset_id IN (%s)" % ",".join("?" * len(ch)), ch).fetchall()}
+        for aid, m9 in sorted(cand.items()):
+            if aid in posted and m9 != 18:
+                self._dec_issue(aid, "pending", None, m9)
+            else:
+                self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (m9, aid))
+
+    def _dec_issues_prune(self) -> None:
+        try:
+            d = common.read_json(self.DEC_ISSUES_PATH, None)
+            if not isinstance(d, dict) or not isinstance(d.get("items"), dict):
+                return
+            keep = {}
+            for k, it in d["items"].items():
+                r = self.conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (int(k),)).fetchone()
+                if r is None or (r["decimals"] is not None and it.get("seen") is not None and int(r["decimals"]) == int(it["seen"])):
+                    continue
+                keep[k] = it
+            if len(keep) != len(d["items"]):
+                d["items"], d["ts"] = keep, int(time.time())
+                common.atomic_write_json(self.DEC_ISSUES_PATH, d)
+            if not any((it or {}).get("kind") == "pending" for it in keep.values()):
+                self.conn.execute("DELETE FROM meta WHERE k='ext_prewindow:decimals_fix'")
+            else:
+                self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_prewindow:decimals_fix', '1')")
+        except (OSError, ValueError, TypeError, sqlite3.Error):
+            pass
+
+    def _dec_pending_pairs(self) -> set:
+        out = set()
+        d = common.read_json(self.DEC_ISSUES_PATH, None)
+        if not isinstance(d, dict):
+            return out
+        for k, it in (d.get("items") or {}).items():
+            if (it or {}).get("kind") != "pending":
+                continue
+            try:
+                for g, loc in self.conn.execute("SELECT DISTINCT a.group_id, p.location FROM postings p JOIN assets a ON a.asset_id=p.asset_id"
+                                                " WHERE p.asset_id=?", (int(k),)).fetchall():
+                    if g is not None:
+                        out.add((int(g), loc))
+            except (sqlite3.Error, ValueError):
+                continue
+        return out
+
+    def _asset_has_postings(self, aid: int) -> bool:
+        return bool(self.conn.execute("SELECT 1 FROM postings WHERE asset_id=? LIMIT 1", (aid,)).fetchone())
+
     def asset_id(self, kind: str, chain, address, symbol=None, decimals=None) -> int:
         addr = (address.lower() if chain != "sol" else address) if address else None
         row = self.conn.execute(
-            "SELECT asset_id, symbol FROM assets WHERE kind=? AND chain IS ? AND address IS ?",
+            "SELECT asset_id, symbol, decimals FROM assets WHERE kind=? AND chain IS ? AND address IS ?",
             (kind, chain, addr)).fetchone()
         if row:
             if symbol and not row["symbol"]:
                 self.conn.execute("UPDATE assets SET symbol=? WHERE asset_id=?",
                                   (symbol, row["asset_id"]))
+            if decimals is not None and kind == "token":
+                st9 = row["decimals"]
+                if st9 is None:
+                    if int(decimals) != 18 and self._asset_has_postings(row["asset_id"]):
+                        self._dec_issue(row["asset_id"], "pending", None, int(decimals))
+                    else:
+                        self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (int(decimals), row["asset_id"]))
+                elif int(st9) != int(decimals):
+                    self._dec_issue(row["asset_id"], "conflict", int(st9), int(decimals))
             return row["asset_id"]
         cur = self.conn.execute(
             "INSERT INTO assets (kind, chain, address, symbol, decimals, confirmed) VALUES (?,?,?,?,?,?)",
@@ -265,9 +393,11 @@ class Core:
                 if not v3 or (f3 not in mine and t3 not in mine):
                     continue
                 try:
-                    dec = 18 if tok.get("decimals") is None else int(tok.get("decimals"))
+                    dec = None if tok.get("decimals") is None else int(tok.get("decimals"))
                 except (TypeError, ValueError):
-                    dec = 18
+                    dec = None
+                if dec is None:
+                    dec = self._meta_dec(chain, ca)
                 aid = self.asset_id("token", chain, ca,
                                     symbol=tok.get("symbol"), decimals=dec)
                 if f3 in mine:
@@ -285,9 +415,10 @@ class Core:
             try:
                 ts = int(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
             except ValueError:
-                ts = int(time.time())
-        elif ts is None:
-            ts = int(time.time())
+                ts = None
+        if ts is None or (isinstance(ts, (int, float)) and ts <= 0):
+            log.warning("시각 없는 tx 거부: %s %s timestamp=%r", chain, (tx.get("hash") or "?")[:14], tx.get("timestamp"))
+            raise MissingTs(f"{chain} tx 시각 없음: {tx.get('timestamp')!r}")
         counterparties.discard("")
         external_cps = counterparties - mine
         only_mine = bool(counterparties) and not external_cps
@@ -617,7 +748,12 @@ class Core:
                 v = int((tt.get("total") or {}).get("value") or 0)
             except (TypeError, ValueError):
                 continue
-            aid = self.asset_id("token", chain, ca)
+            try:
+                dec9 = None if tok.get("decimals") is None else int(tok.get("decimals"))
+            except (TypeError, ValueError):
+                dec9 = None
+            aid = self.asset_id("token", chain, ca, symbol=tok.get("symbol"),
+                                decimals=dec9 if dec9 is not None else self._meta_dec(chain, ca))
             add(addr(tt.get("from")), aid, addr(tt.get("to")), v)
         return {f"{w}|{aid}": max(d.items(), key=lambda kv: (kv[1], kv[0]))[0] for (w, aid), d in acc.items()}
 
@@ -1305,7 +1441,13 @@ class Core:
 
     def apply_sol(self, rec: dict, rederive=None):
         txhash = rec["txhash"]
-        ts = int(rec.get("ts") or time.time())
+        try:
+            ts = int(rec.get("ts") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if ts <= 0:
+            log.warning("시각 없는 sol tx 거부: %s ts=%r", str(rec.get("txhash") or "?")[:14], rec.get("ts"))
+            raise MissingTs(f"sol tx 시각 없음: {rec.get('ts')!r}")
         if rec.get("stake_open"):
             return self._post_stake_open(rec, ts)
         perw = {}
@@ -2112,6 +2254,8 @@ class Core:
             st_if = str(p_if.get("state") or "").upper()
             if st_if and st_if not in self.EX_TERMINAL_STATES:
                 inflight.add(str(p_if.get("currency") or "").upper())
+            elif st_if in ("DONE", "ACCEPTED") and not self._iso_ts(p_if.get("created_at") or p_if.get("done_at")):
+                inflight.add(str(p_if.get("currency") or "").upper())
         if last_obs - int(bal.get("ts") or 0) > 120:
             log.info("거래소 잔고 대사 보류 — 잔고 스냅샷(%d)이 마지막 원본 동기화(%d)보다 오래됨", int(bal.get("ts") or 0), last_obs)
             return
@@ -2237,7 +2381,7 @@ class Core:
         key = os.environ.get("TJ_HELIUS_KEY", "")
         if not key:
             try:
-                with open(os.path.join(common.BASE_DIR, ".env"), "r", encoding="utf-8") as f:
+                with open(common.ENV_PATH, "r", encoding="utf-8") as f:
                     for line in f:
                         if line.startswith("TJ_HELIUS_KEY="):
                             key = line.strip().split("=", 1)[1]
@@ -2372,7 +2516,7 @@ class Core:
                     "SELECT address, symbol, decimals FROM assets"
                     " WHERE chain='bsc' AND kind='token'").fetchall():
                 if r["address"]:
-                    cas[r["address"]] = (r["symbol"], r["decimals"] or 18)
+                    cas[r["address"]] = (r["symbol"], 18 if r["decimals"] is None else r["decimals"])
             rpcs8 = list(self.cfg["bsc"]["detail_rpcs"])
             return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
         if common.chain_discovery(chain, self.cfg["chains"][chain]) == "rpc":
@@ -3103,7 +3247,13 @@ class Core:
                         last_state = str(last_payload.get("state") or "")
                     except (json.JSONDecodeError, TypeError):
                         last_payload, last_state = {}, ""
-                    if kind == "withdraw" and last_state == state and d.get("address"):
+                    time_fix9 = (last_state == state and not self._iso_ts(last_payload.get("created_at") or last_payload.get("done_at"))
+                                 and bool(self._iso_ts(d.get("created_at") or d.get("done_at"))))
+                    if time_fix9:
+                        d = dict(last_payload, **{k9: v9 for k9, v9 in d.items() if v9 not in (None, "")})
+                        if ex != "upbit":
+                            d["late"] = 1
+                    if kind == "withdraw" and last_state == state and d.get("address") and not time_fix9:
                         dest9 = {k9: str(d[k9]) for k9 in ("address", "tag", "network") if d.get(k9) not in (None, "")}
                         if any(str(last_payload.get(k9) or "") != v9 for k9, v9 in dest9.items()):
                             merged9 = dict(last_payload, **dest9)
@@ -3115,7 +3265,7 @@ class Core:
                                 (ex, kind, uid, last["revision"] + 1, json.dumps(merged9, ensure_ascii=False), now))
                             n_new += 1
                             continue
-                    if last_state == state and (last_payload.get("txid") or not d.get("txid")):
+                    if last_state == state and (last_payload.get("txid") or not d.get("txid")) and not time_fix9:
                         continue
                     if last_state.upper() in self.EX_TERMINAL_STATES and state.upper() != last_state.upper():
                         log.info("[ex] %s %s %s 종결(%s) 뒤 옛 상태(%s) 스냅샷 무시", ex, kind, uid[:12], last_state, state)
@@ -3133,11 +3283,17 @@ class Core:
                     if txid:
                         n_matched += self._link_transfers(uid, txid, d.get("currency"), now)
                     if ex == "upbit":
-                        dep_ts = self._iso_ts(d.get("done_at") or d.get("created_at")) or now
-                        self._post_ex_deposit(uid, d, dep_ts)
+                        dep_ts = self._iso_ts(d.get("done_at") or d.get("created_at"))
+                        if dep_ts:
+                            self._post_ex_deposit(uid, d, dep_ts)
+                        else:
+                            self._ex_skip_once("EX_DEPOSIT_SKIP", uid, f"업비트 입금 시각 없음 보류: {d.get('currency')} {uid}")
                 if kind == "withdraw" and ex != "upbit" and state.upper() == "DONE":
                     if self._post_exf_withdraw(ex, uid, d) and d.get("late"):
                         self._late_wd_note(late_wd, d, -1, d.get("created_at") or d.get("done_at"))
+                        if ex in self.EXF_WD_FEE_SEPARATE:
+                            self._late_wd_note(late_wd, {"amount": d.get("fee"), "currency": d.get("fee_ccy") or d.get("currency")}, -1,
+                                               d.get("created_at") or d.get("done_at"))
                 if kind == "withdraw" and ex == "upbit" and state.upper() == "DONE":
                     self._post_ex_withdraw(uid, d)
                 if kind == "deposit" and ex != "upbit" and state.upper() == "ACCEPTED":
@@ -3201,6 +3357,9 @@ class Core:
 
     def _post_ex_deposit(self, uid: str, payload: dict, dep_ts: int,
                          force_comp: bool = False) -> bool:
+        if not self._iso_ts((payload or {}).get("done_at") or (payload or {}).get("created_at")):
+            self._ex_skip_once("EX_DEPOSIT_SKIP", uid, f"업비트 입금 시각 없음 보류: {(payload or {}).get('currency')} {uid}")
+            return False
         if str(payload.get("state") or "").upper() != "ACCEPTED":
             return False
         sym = str(payload.get("currency") or "").upper()
@@ -3235,7 +3394,10 @@ class Core:
         sym = str(d.get("currency") or "").upper()
         if not sym or sym == "KRW":
             return False
-        wts0 = self._iso_ts(d.get("created_at") or d.get("done_at")) or int(time.time())
+        wts0 = self._iso_ts(d.get("created_at") or d.get("done_at"))
+        if not wts0:
+            self._ex_skip_once("EX_WITHDRAW_SKIP", uid, f"업비트 출금 시각 없음 보류: {sym} {uid}")
+            return False
         if wts0 < self._upbit_window_t0():
             return False
         q8 = self._upbit_q8(d.get("amount"))
@@ -4208,7 +4370,7 @@ class Core:
         if self._meta_get("exf_debt_redate_t"):
             return
         try:
-            seed = common.read_json(self.EXF_DEBT_FIRST_SEEN, {})
+            seed = common.seed_json("debt_first_seen_t.json", {}, base_dir=common.BASE_DIR, strict=True)
         except (Exception, SystemExit):
             seed = {}
         if not isinstance(seed, dict) or not any(isinstance(v9, dict) and v9 for v9 in seed.values()):
@@ -4499,7 +4661,10 @@ class Core:
             return False
         if ccy9 == "KRW":
             return False
-        dts = self._iso_ts(d.get("done_at") or d.get("created_at")) or int(time.time())
+        dts = self._iso_ts(d.get("done_at") or d.get("created_at"))
+        if not dts:
+            self._ex_skip_once("EX_DEPOSIT_SKIP", f"{ex}:{uid}", f"{ex} 입금 시각 없음 보류: {ccy9} {uid}")
+            return False
         aid9 = self._exf_asset(ex, ccy9)
         qb9 = int(amt9 * (Decimal(10) ** 8))
         c9 = self.conn.execute(
@@ -4515,6 +4680,8 @@ class Core:
             return True
         return False
 
+    EXF_WD_FEE_SEPARATE = frozenset(("binance", "bybit", "kucoin", "okx"))
+
     def _post_exf_withdraw(self, ex: str, uid: str, d: dict) -> bool:
         try:
             amt9 = Decimal(str(d.get("amount") or "0"))
@@ -4525,7 +4692,10 @@ class Core:
             return False
         if ccy9 == "KRW":
             return False
-        wts = self._iso_ts(d.get("created_at") or d.get("done_at")) or int(time.time())
+        wts = self._iso_ts(d.get("created_at") or d.get("done_at"))
+        if not wts:
+            self._ex_skip_once("EX_WITHDRAW_SKIP", f"{ex}:{uid}", f"{ex} 출금 시각 없음 보류: {ccy9} {uid}")
+            return False
         aid9 = self._exf_asset(ex, ccy9)
         qb9 = int(amt9 * (Decimal(10) ** 8))
         c9 = self.conn.execute(
@@ -4538,6 +4708,25 @@ class Core:
              str(-qb9), CLASSIFIER_VER))
         if c9.rowcount:
             self._bump_position(aid9, -qb9, f"exchange:{ex}")
+            if ex in self.EXF_WD_FEE_SEPARATE:
+                try:
+                    fee9 = Decimal(str(d.get("fee") or "0"))
+                except ArithmeticError:
+                    fee9 = Decimal(0)
+                fccy9 = str(d.get("fee_ccy") or ccy9).upper()
+                if fee9.is_finite() and fee9 > 0 and fccy9 and fccy9 != "KRW":
+                    faid9 = self._exf_asset(ex, fccy9)
+                    fqb9 = int(fee9 * (Decimal(10) ** 8))
+                    if fqb9 > 0:
+                        cf9 = self.conn.execute(
+                            "INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id,"
+                            " leg_seq, event_ts, asset_id, location, qty_base, cost_usd,"
+                            " cost_krw, leg_kind, event, classifier_ver) VALUES"
+                            " ('exchange', ?, ?, 1, ?, ?, ?, ?, NULL, NULL, 'gas',"
+                            " 'EXF_WD_FEE', ?)",
+                            (f"{ex}:withdraw", uid, wts, faid9, f"exchange:{ex}", str(-fqb9), CLASSIFIER_VER))
+                        if cf9.rowcount:
+                            self._bump_position(faid9, -fqb9, f"exchange:{ex}")
             return True
         return False
 
@@ -4648,7 +4837,10 @@ class Core:
             if side not in ("bid", "ask"):
                 self._ex_skip_once("EX_FILL_SKIP", str(o["uuid"]), f"주문 side 미상 보류: {market} {o.get('uuid')} side={side!r}")
                 continue
-            ts = acct_norm.fill_ts(o) or self._iso_ts(o.get("created_at")) or int(time.time())
+            ts = acct_norm.fill_ts(o) or self._iso_ts(o.get("created_at"))
+            if not ts:
+                self._ex_skip_once("EX_FILL_SKIP", str(o["uuid"]), f"주문 시각 없음 보류: {market} {o.get('uuid')}")
+                continue
             try:
                 fee_krw = Decimal(str(o.get("paid_fee") if o.get("paid_fee") not in (None, "") else "0"))
                 funds = o.get("executed_funds")
@@ -4737,7 +4929,9 @@ class Core:
         qv = vol * (Decimal(10) ** 8)
         if qv != qv.to_integral_value():
             return None
-        ts = acct_norm.fill_ts(o) or self._iso_ts(o.get("created_at")) or int(time.time())
+        ts = acct_norm.fill_ts(o) or self._iso_ts(o.get("created_at"))
+        if not ts:
+            return None
         if side == "ask":
             return base, quote, -int(qv), self._q8(funds - fee, up=False), ts, side
         return base, quote, int(qv), -self._q8(funds + fee, up=True), ts, side
@@ -4786,6 +4980,10 @@ class Core:
             return False
         return all(isinstance(r, dict) and set(r) <= cls._ES_TT_KEYS for r in snap.get("token_transfers") or []) \
             and all(isinstance(r, dict) and set(r) <= cls._ES_IT_KEYS for r in snap.get("internal") or [])
+
+    @classmethod
+    def _es_list(cls, snap: dict) -> bool:
+        return cls._es_shape(snap) and not isinstance((snap.get("tx") or {}).get("from"), dict)
 
     @staticmethod
     def _leg_row_key(kind: str, r) -> str:
@@ -4962,7 +5160,14 @@ class Core:
         new_w = {str(w).lower() for w in (rec.get("wallets") or [])}
         add_w = (new_w - old_w) & self.my_wallets.get(chain, set())
         q_old, q_new = self._snap_quality(old_snap), self._snap_quality(new_snap)
-        promote = (q_new == "blockscout_full" and q_old == "rpc_basic")
+        es_list_new = self._es_list(new_snap)
+        new_u = new_snap
+        if common.ZK_STACK.get(chain) and old_snap.get("internal_note") == "zk_base_token" \
+                and new_snap.get("internal_note") != "zk_base_token" and new_snap.get("tx"):
+            ctx9 = (old_snap.get("tx") or new_snap.get("tx")) if es_list_new else new_snap.get("tx")
+            new_u = dict(self._zk_norm(chain, dict(new_snap, tx=ctx9)), tx=new_snap.get("tx"))
+        rpc_es_union = (q_old == "rpc_basic" and es_list_new)
+        promote = (q_new == "blockscout_full" and q_old == "rpc_basic" and not rpc_es_union)
         merge_list = False
         if add_w and not promote and q_new == "blockscout_full" and not self._es_shape(new_snap) \
                 and (q_old == "bs_list" or self._es_shape(old_snap)):
@@ -4970,17 +5175,20 @@ class Core:
         elif add_w and ((self._es_shape(old_snap) and self._es_shape(new_snap)) or (q_old == q_new == "bs_list")
                         or (q_old == q_new == "rpc_basic")):
             merge_list = True
-        elif rec.get("repair") == "leg_union" and not promote and ((self._es_shape(old_snap) and self._es_shape(new_snap))
-                                                                  or (q_old == q_new == "rpc_basic")):
-            if self._merge_list_snaps(old_snap, new_snap) == old_snap:
+        elif (rec.get("repair") == "leg_union" or rpc_es_union) and not promote and ((self._es_shape(old_snap) and self._es_shape(new_snap))
+                                                                                    or (q_old == q_new == "rpc_basic") or rpc_es_union):
+            if not add_w and self._merge_list_snaps(old_snap, new_u) == old_snap:
                 return None
             merge_list = True
         if (not promote and not merge_list and q_new == "blockscout_full" and q_old != "rpc_basic"
-                and (old_snap.get("internal") or []) and self._internal_grows(old_snap, new_snap)):
+                and (old_snap.get("internal") or []) and self._internal_grows(old_snap, new_u)):
             merge_list = True
         if (rec.get("repair") == "int_fill" and not promote and not merge_list and q_new == "blockscout_full"
                 and not (old_snap.get("internal") or []) and (new_snap.get("internal") or [])):
-            promote = True
+            if es_list_new:
+                merge_list = True
+            else:
+                promote = True
         if not promote and not add_w and not merge_list:
             return None
         oe = self.conn.execute("SELECT event FROM tx_class WHERE chain=? AND txhash=?",
@@ -5016,7 +5224,7 @@ class Core:
                  merged_w, int(time.time()), chain, txhash))
             snap_use = new_snap
         elif merge_list:
-            snap_use = self._merge_list_snaps(old_snap, new_snap)
+            snap_use = self._merge_list_snaps(old_snap, new_u)
             self.conn.execute("UPDATE raw_txs SET snapshot=?, wallets=?, ingested_at=? WHERE chain=? AND txhash=?",
                               (json.dumps(snap_use, ensure_ascii=False), merged_w, int(time.time()), chain, txhash))
         else:
@@ -5128,6 +5336,64 @@ class Core:
                 {"ts": int(time.time()), "err": "_corrupt_inbox_line", "rec": rec})
             log.error("inbox 손상 레코드 격리(poison.jsonl): %s", (rec.get("raw") or "")[:120])
 
+    POISON_PATH = os.path.join(common.STATE_DIR, "poison.jsonl")
+    POISON_REQ_PATH = os.path.join(common.STATE_DIR, "poison_replay_request.json")
+    POISON_DONE_PATH = os.path.join(common.STATE_DIR, "poison_replayed.json")
+
+    @staticmethod
+    def poison_id(entry: dict) -> str:
+        import hashlib
+        return hashlib.sha256(json.dumps(entry.get("rec"), ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+    def poison_replay_pass(self) -> int:
+        req = common.read_json(self.POISON_REQ_PATH, None)
+        if not isinstance(req, dict):
+            return 0
+        try:
+            os.remove(self.POISON_REQ_PATH)
+        except OSError:
+            pass
+        want = set(str(x) for x in (req.get("ids") or []))
+        all9 = bool(req.get("all"))
+        done9 = common.read_json(self.POISON_DONE_PATH, {}) or {}
+        ok_n = fail_n = 0
+        try:
+            lines = open(self.POISON_PATH, encoding="utf-8").read().splitlines()
+        except OSError:
+            lines = []
+        if self.conn.in_transaction:
+            self.conn.commit()
+        for ln in lines:
+            try:
+                ent = json.loads(ln)
+            except ValueError:
+                continue
+            rec = ent.get("rec") if isinstance(ent, dict) else None
+            if not isinstance(rec, dict) or rec.get("kind") == "_corrupt":
+                continue
+            pid = self.poison_id(ent)
+            if (not all9 and pid not in want) or (done9.get(pid) or {}).get("ok"):
+                continue
+            try:
+                self.conn.execute("BEGIN")
+                self._consume_record(rec)
+                self.conn.commit()
+                done9[pid] = {"ok": True, "ts": int(time.time())}
+                ok_n += 1
+            except (sqlite3.OperationalError, OSError):
+                self.conn.rollback()
+                raise
+            except Exception as e:
+                self.conn.rollback()
+                done9[pid] = {"ok": False, "ts": int(time.time()), "err": common.safe_err(repr(e))[:300]}
+                fail_n += 1
+        try:
+            common.atomic_write_json(self.POISON_DONE_PATH, done9)
+        except OSError:
+            pass
+        log.warning("격리 레코드 재처리: 성공 %d · 여전히 실패 %d (poison_replayed.json)", ok_n, fail_n)
+        return ok_n
+
     def _drain_stream(self, stream: str, reader: SegmentReader, seg: int, off: int):
         batch, nseg, noff = reader.read_batch(seg, off)
         for rec, rseg, roff in batch:
@@ -5143,7 +5409,8 @@ class Core:
                     os.path.join(common.STATE_DIR, "poison.jsonl"),
                     {"ts": int(time.time()), "err": common.safe_err(repr(e)), "rec": rec})
                 try:
-                    dm("POISON", f"처리 불가 레코드 격리(poison.jsonl): {e!r} — 원본 보존됨",
+                    dm("POISON", "🔴 거래 기록 1건을 처리하지 못해 따로 보관했어요\n원본은 그대로 있어요 — 같은 일이 계속되면 상태 패널에서 원인을 보세요.\n"
+                       + common.safe_err(repr(e))[:140],
                        {"txhash": rec.get("txhash") if isinstance(rec, dict) else None})
                 except Exception as dm_err:
                     log.error("포이즌 DM 적재 실패(격리는 완료, offset 전진 계속): %s", dm_err)
@@ -5313,6 +5580,7 @@ class Core:
                 if g is None:
                     continue
                 pairs.add((int(g), loc))
+        pairs |= self._dec_pending_pairs()
         prefixes = set()
         for name in ex_done:
             unit, key = name.split("/", 1)
@@ -5388,7 +5656,7 @@ class Core:
         root = common.BASE_DIR
         live = common.DB_PATH
         tmp = live + f".extnew_{ts}"
-        why = ", ".join([f"{c} 창 밖 {n}건" for c, n in sorted(need.items())] + ex_done) or "?"
+        why = ", ".join([("토큰 자리수(decimals) 채움" if c == "decimals_fix" else f"{c} 창 밖 {n}건") for c, n in sorted(need.items())] + ex_done) or "?"
         if self.conn.in_transaction:
             self.conn.commit()
         t_start = int(time.time())
@@ -5399,6 +5667,7 @@ class Core:
         def fail(msg):
             n9 = self._ext_record_fail(msg)
             log.error("★과거 창 확장 재구축 실패 %d회째(원장 무변, 백오프 뒤 재시도): %s★", n9, msg)
+            self._ext_merge_px(os.path.join(shadow, "px_cache_core.json"))
             shutil.rmtree(shadow, ignore_errors=True)
             for p9 in (shadow + ".report.json", tmp):
                 try:
@@ -5422,7 +5691,8 @@ class Core:
             self._ext_wait_upbit_complete()
             py = sys.executable or "/usr/bin/python3"
             args = [py, os.path.join(root, "tools", "rebuild2.py"), "--shadow-dir", shadow, "--report", shadow + ".report.json",
-                    "--price-online-lp"] + ([] if bcfg.get("rebuild_allow_locked") is False else ["--allow-locked"])
+                    "--price-online-lp"] + ([] if bcfg.get("rebuild_allow_locked") is False else ["--allow-locked"]) \
+                + ([] if bcfg.get("rebuild_pnl_gate") is False else ["--web-compare"])
             try:
                 r = subprocess.run(args, env=dict(os.environ, TJ_BASE=root), cwd=root, capture_output=True, text=True,
                                    timeout=float(bcfg.get("rebuild_timeout_sec") or 5400))
@@ -5450,6 +5720,10 @@ class Core:
             bad = self._ext_position_gate(new_db, pairs, prefixes, locked=locked)
             if bad:
                 return fail(f"포지션 게이트 {len(bad)}칸: " + " · ".join(bad[:5]))
+            if bcfg.get("rebuild_pnl_gate") is not False:
+                pg9 = self._ext_pnl_gate(shadow + ".report.json", bcfg, why)
+                if not pg9["ok"] and not pg9.get("approved"):
+                    return fail("손익 게이트: " + pg9["reason"])
             c2 = sqlite3.connect(new_db)
             try:
                 if c2.execute("PRAGMA quick_check").fetchone()[0] != "ok" or \
@@ -5462,6 +5736,7 @@ class Core:
                 c2.commit()
             finally:
                 c2.close()
+            self._ext_merge_px(os.path.join(shadow, "px_cache_core.json"))
             shutil.copyfile(new_db, tmp)
             c3 = sqlite3.connect(f"file:{tmp}?mode=ro&immutable=1", uri=True)
             try:
@@ -5485,6 +5760,10 @@ class Core:
             raise SystemExit(1)
         shutil.rmtree(shadow, ignore_errors=True)
         self._ext_prune_reports(home)
+        try:
+            os.remove(self.PNL_APPROVE_PATH)
+        except OSError:
+            pass
         log.warning("★과거 창 확장 반영 완료 — 원장 교체(이전 원장 %s), core 재기동★", os.path.basename(live) + f".pre_extrebuild_{ts}")
         self._ext_status(rebuilt_at=t_start)
         try:
@@ -5500,6 +5779,98 @@ class Core:
             pass
         logging.shutdown()
         os._exit(0)
+
+    def _ext_merge_px(self, path: str) -> int:
+        d9 = common.read_json(path, None)
+        if not isinstance(d9, dict):
+            return 0
+        n = 0
+        try:
+            with self.px.lock:
+                for sect in ("candle", "fx", "cven", "cgday"):
+                    src9 = d9.get(sect)
+                    if not isinstance(src9, dict):
+                        continue
+                    dst9 = self.px.d.setdefault(sect, {})
+                    for k9, v9 in src9.items():
+                        if k9 not in dst9 and v9 not in (None, 0, 0.0, "", [], {}):
+                            dst9[k9] = v9
+                            n += 1
+                if n:
+                    self.px._dirty = int(getattr(self.px, "_dirty", 0) or 0) + n
+            if n:
+                self.px.flush()
+                log.info("재구축 shadow 시세 %d개를 라이브 원가 캐시에 합침(px_cache_core.json)", n)
+        except Exception as e:
+            log.warning("재구축 shadow 시세 합치기 실패: %s", common.safe_err(e))
+        return n
+
+    PNL_GATE_PATH = os.path.join(common.STATE_DIR, "rebuild_pnl_gate.json")
+    PNL_APPROVE_PATH = os.path.join(common.STATE_DIR, "rebuild_pnl_approve.json")
+
+    def _ext_pnl_gate(self, report_path: str, bcfg: dict, why: str) -> dict:
+        try:
+            tol_usd = float(bcfg.get("rebuild_pnl_tol_usd") if bcfg.get("rebuild_pnl_tol_usd") is not None else 50)
+            tol_pct = float(bcfg.get("rebuild_pnl_tol_pct") if bcfg.get("rebuild_pnl_tol_pct") is not None else 0.01)
+        except (TypeError, ValueError):
+            tol_usd, tol_pct = 50.0, 0.01
+        out = {"ok": True, "approved": False, "reason": "", "months": [], "unv": None, "why": why[:200], "ts": int(time.time())}
+        try:
+            rep9 = json.load(open(report_path, encoding="utf-8"))
+        except (OSError, ValueError):
+            rep9 = {}
+        g4 = rep9.get("G4_vs_baseline") or {}
+        mb, ms = g4.get("realized_by_month_baseline"), g4.get("realized_by_month_shadow")
+        if not isinstance(mb, dict) or not isinstance(ms, dict):
+            out.update(ok=False, reason="리포트에 월별 실현 없음(web 비교 실패) — fail-closed")
+        else:
+            diffs = []
+            for m9 in sorted(set(mb) | set(ms)):
+                a9, b9 = float(mb.get(m9) or 0), float(ms.get(m9) or 0)
+                if abs(b9 - a9) > max(tol_usd, tol_pct * max(abs(a9), abs(b9))):
+                    diffs.append({"month": m9, "before": round(a9, 2), "after": round(b9, 2), "diff": round(b9 - a9, 2)})
+            diffs.sort(key=lambda x: -abs(x["diff"]))
+            ub, us = (g4.get("unverified_baseline") or {}), (g4.get("unverified_shadow") or {})
+            ua, ub9 = float(ub.get("sum") or 0), float(us.get("sum") or 0)
+            unv_up = ub9 - ua > max(tol_usd, tol_pct * max(abs(ua), abs(ub9)))
+            cl9 = rep9.get("cost_lost") if isinstance(rep9.get("cost_lost"), dict) else None
+            out["cost_lost"] = cl9 or {"n": None}
+            dun9 = rep9.get("decimals_unresolved")
+            out["decimals_unresolved"] = dun9
+            out["months"], out["unv"] = diffs[:5], {"before": round(ua, 2), "after": round(ub9, 2), "rows_before": ub.get("rows"), "rows_after": us.get("rows")}
+            out["n_months"] = len(diffs)
+            lost_n = int((cl9 or {}).get("n") or 0) if cl9 is not None else -1
+            dun_n = len(dun9) if isinstance(dun9, list) else 0
+            if diffs or unv_up or lost_n != 0 or dun_n:
+                out["ok"] = False
+                parts9 = []
+                if diffs:
+                    parts9.append("월별 실현 차이 %d달: " % len(diffs) + " · ".join(f"{x['month']} {x['diff']:+,.2f}" for x in diffs[:3]))
+                if unv_up:
+                    parts9.append(f"원가미상 매도 ${ua:,.0f} → ${ub9:,.0f}")
+                if lost_n > 0:
+                    parts9.append(f"원가 사라진 칸 {lost_n}개(${float(cl9.get('usd') or 0):,.0f}): "
+                                  + " · ".join(f"{x.get('sym')} {x.get('event')} ${float(x.get('cost_baseline') or 0):,.0f}" for x in (cl9.get("top") or [])[:3]))
+                elif lost_n < 0:
+                    parts9.append("리포트에 원가 소실 집계 없음 — fail-closed")
+                if dun_n:
+                    parts9.append(f"토큰 자리수 채움 대기 {dun_n}개가 재구축 뒤에도 비어 있음(#{', #'.join(str(x) for x in dun9[:5])})")
+                out["reason"] = " · ".join(parts9)
+        if not out["ok"]:
+            ap9 = common.read_json(self.PNL_APPROVE_PATH, None)
+            try:
+                if isinstance(ap9, dict) and float(ap9.get("until") or 0) > time.time():
+                    out["approved"] = True
+                    log.warning("재구축 손익 게이트: 차이 있음(%s) — 오너 승인으로 통과", out["reason"])
+            except (TypeError, ValueError):
+                pass
+        elif out["months"] == [] and not out["reason"]:
+            log.info("재구축 손익 게이트 통과 — 월별 실현·원가미상 차이 임계 이내")
+        try:
+            common.atomic_write_json(self.PNL_GATE_PATH, out)
+        except OSError:
+            pass
+        return out
 
     EXT_VERIFY_TIMEOUT_SEC = 1800
     EXT_UPBIT_WAIT_SEC = 120
@@ -5644,7 +6015,7 @@ class Core:
                              " 세대 2 라면 컷오버가 미완(rollback_c.sh 또는 재실행)★" % _mk)
         if _mk:
             raise SystemExit("★rebuild_incomplete 마커 감지 — 재파생이 완료되지 않은 원장."
-                             " tools/rebuild.py 를 다시 완주시킨 뒤 기동하라★")
+                             " 백업(state/backups/ledger_YYYYMMDD.db)으로 되돌리거나 tools/rebuild2.py 로 다시 계산해 교체한 뒤 기동하라★")
         streams = (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader),
                    ("ex", self.ex_reader))
         offs = {}
@@ -5720,6 +6091,11 @@ class Core:
             except Exception as e:
                 self.conn.rollback()
                 log.error("보낸 내역 판정 반영 실패(다음 주기): %s", e)
+            try:
+                self.poison_replay_pass()
+            except Exception as e:
+                self.conn.rollback()
+                log.error("격리 레코드 재처리 실패(다음 주기): %s", e)
             try:
                 self.ext_rebuild_pass(drained)
             except SystemExit:

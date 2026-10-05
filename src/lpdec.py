@@ -60,12 +60,8 @@ def lp_managers(base_dir=None) -> dict:
     if _MGR_CACHE is not None:
         return _MGR_CACHE
     base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(base_dir, "seed", "lp_managers.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        raw = {}
+    import common
+    raw = common.seed_json("lp_managers.json", {}, base_dir=base_dir) or {}
     out = {}
     for chain, m in raw.items():
         if chain.startswith("_") or not isinstance(m, dict):

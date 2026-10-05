@@ -11,6 +11,15 @@ STATE_DIR = os.path.join(BASE_DIR, "state")
 INBOX_DIR = os.path.join(STATE_DIR, "inbox")
 CONFIG_PATH = os.environ.get("TJ_CONFIG", os.path.join(BASE_DIR, "config.json"))
 DB_PATH = os.path.join(STATE_DIR, "ledger.db")
+DEMO_ISOLATED = False
+if os.environ.get("TJ_DEMO") == "1":
+    STATE_DIR = os.environ.get("TJ_DEMO_STATE") or tempfile.mkdtemp(prefix="tj_demo_state_")
+    INBOX_DIR = os.path.join(STATE_DIR, "inbox")
+    DB_PATH = os.path.join(STATE_DIR, "ledger.db")
+    DEMO_ISOLATED = True
+    if not os.environ.get("TJ_CONFIG"):
+        CONFIG_PATH = os.path.join(STATE_DIR, "config.json")
+ENV_PATH = os.path.join(STATE_DIR if DEMO_ISOLATED else BASE_DIR, ".env")
 
 
 def setup_logging(name: str) -> logging.Logger:
@@ -118,7 +127,7 @@ def _secret_name(name) -> bool:
 def _secret_values() -> list:
     import re as _re9
     vals = []
-    envp = os.path.join(BASE_DIR, ".env")
+    envp = ENV_PATH
     try:
         with open(envp, "r", encoding="utf-8") as f:
             for line in f:
@@ -174,7 +183,7 @@ def _secret_grams() -> frozenset:
     if c["sig"] is not None and now - c["checked"] < 5:
         return c["grams"]
     sig = []
-    for p in (os.path.join(BASE_DIR, ".env"), CONFIG_PATH):
+    for p in (ENV_PATH, CONFIG_PATH):
         try:
             st = os.stat(p)
             sig.append((p, st.st_mtime_ns, st.st_size))
@@ -330,6 +339,22 @@ def fill_chain_table(tbl: dict, col: int = 0) -> dict:
 
 ACTIVITY_GATE_PATH = os.path.join(STATE_DIR, "chain_activity.json")
 BACKFILL_SPEED_PATH = os.path.join(STATE_DIR, "chain_backfill_speed.json")
+
+
+QUOTA_STATE_DIR = None
+
+
+def quota_dir() -> str:
+    return QUOTA_STATE_DIR or STATE_DIR
+
+
+def rebase_state(state_dir: str, db_path: str = None) -> None:
+    global STATE_DIR, INBOX_DIR, DB_PATH, ACTIVITY_GATE_PATH, BACKFILL_SPEED_PATH
+    STATE_DIR = state_dir
+    INBOX_DIR = os.path.join(state_dir, "inbox")
+    DB_PATH = db_path or os.path.join(state_dir, "ledger.db")
+    ACTIVITY_GATE_PATH = os.path.join(state_dir, "chain_activity.json")
+    BACKFILL_SPEED_PATH = os.path.join(state_dir, "chain_backfill_speed.json")
 
 
 def _registered_evm(cfg: dict):
@@ -599,6 +624,38 @@ def append_durable_jsonl(path: str, obj) -> None:
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
+
+
+def seed_merge(base, over):
+    if isinstance(base, dict) and isinstance(over, dict):
+        out = dict(base)
+        for k, v in over.items():
+            out[k] = seed_merge(base[k], v) if k in base else v
+        return out
+    return over
+
+
+def seed_json(rel: str, default=None, base_dir: str = None, strict: bool = False):
+    def _one(p, strict9):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return True, json.load(f)
+        except FileNotFoundError:
+            return False, None
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            if strict9:
+                raise SystemExit(f"seed 파일 손상: {p}: {e}")
+            return False, None
+    root = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hb, b = _one(os.path.join(root, "seed", rel), strict)
+    ho, o = _one(os.path.join(STATE_DIR, "seed_local", rel), True)
+    if not hb and not ho:
+        return default
+    if not ho:
+        return b
+    if not hb:
+        return o
+    return seed_merge(b, o)
 
 
 def read_json(path: str, default):

@@ -170,11 +170,8 @@ def bridge_dests() -> frozenset:
             import json
             import os
             import common
-            base = os.path.join(common.BASE_DIR, "seed")
-            with open(os.path.join(base, "bridge_contracts.json"), encoding="utf-8") as f:
-                out |= {str(a).lower() for a in (json.load(f) or []) if isinstance(a, str)}
-            with open(os.path.join(base, "bridge_labels.json"), encoding="utf-8") as f:
-                out |= {str(a).lower() for a in (json.load(f) or {}) if isinstance(a, str) and not a.startswith("_")}
+            out |= {str(a).lower() for a in (common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR) or []) if isinstance(a, str)}
+            out |= {str(a).lower() for a in (common.seed_json("bridge_labels.json", {}, base_dir=common.BASE_DIR) or {}) if isinstance(a, str) and not a.startswith("_")}
         except Exception:
             pass
         _BRIDGE_DESTS = frozenset(out)

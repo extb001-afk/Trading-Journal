@@ -34,7 +34,7 @@ HOLD_IDS_WARN = 4 * READ_LINES_MAX
 def _env():
     out = {}
     try:
-        with open(os.path.join(common.BASE_DIR, ".env"), "r", encoding="utf-8") as f:
+        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
@@ -92,12 +92,18 @@ def _retry_after(body) -> float:
         return 0.0
 
 
-def send_message(token: str, chat: str, text: str, reply_to=None):
+def _silent_text(text: str) -> bool:
+    return str(text or "").lstrip().startswith(("📋", "✅", "🌙"))
+
+
+def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
     now = time.time()
     if now < _TG_WAIT_UNTIL[0]:
         return False, None, f"텔레그램 속도 제한 대기 {int(_TG_WAIT_UNTIL[0] - now) + 1}초"
     text = common.redact_secret_text(text, generic=False)
     params = {"chat_id": chat, "text": text[:3900]}
+    if silent or (silent is None and _silent_text(text)):
+        params["disable_notification"] = "true"
     if reply_to:
         params["reply_to_message_id"] = str(reply_to)
         params["allow_sending_without_reply"] = "true"
@@ -132,6 +138,48 @@ def send_message(token: str, chat: str, text: str, reply_to=None):
 
 def send(token: str, chat: str, text: str) -> bool:
     return send_message(token, chat, text)[0]
+
+
+def send_photo(token: str, chat: str, png: bytes, caption: str = "", silent: bool = True):
+    now = time.time()
+    if now < _TG_WAIT_UNTIL[0]:
+        return False, None, f"텔레그램 속도 제한 대기 {int(_TG_WAIT_UNTIL[0] - now) + 1}초"
+    caption = common.redact_secret_text(caption or "", generic=False)[:1024]
+    bnd = "tjb" + os.urandom(12).hex()
+    parts = []
+    fields = {"chat_id": str(chat), "caption": caption}
+    if silent:
+        fields["disable_notification"] = "true"
+    for k, v in fields.items():
+        parts.append(f"--{bnd}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8"))
+    parts.append(f"--{bnd}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"summary.png\"\r\nContent-Type: image/png\r\n\r\n".encode())
+    body = b"".join(parts) + png + f"\r\n--{bnd}--\r\n".encode()
+    req = urllib.request.Request(f"{TG_API}/bot{token}/sendPhoto", data=body, headers={"Content-Type": f"multipart/form-data; boundary={bnd}"})
+    ra = 0.0
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read().decode())
+        ok = d.get("ok") is True
+        err = None if ok else str(d.get("description") or "ok=false")[:160]
+        mid = ((d.get("result") or {}).get("message_id")) if ok else None
+        if not ok and int(d.get("error_code") or 0) == 429:
+            ra = _retry_after(d) or 30.0
+    except urllib.error.HTTPError as e:
+        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+        if e.code == 429:
+            try:
+                ra = _retry_after(e.read()) or 30.0
+            except Exception:
+                ra = 30.0
+        log.warning("그림 발송 실패: %s", err)
+    except Exception as e:
+        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+        log.warning("그림 발송 실패: %s", err)
+    if ra > 0:
+        _TG_WAIT_UNTIL[0] = time.time() + min(ra, TG_RETRY_MAX)
+        return False, None, f"텔레그램 속도 제한(429) — {int(min(ra, TG_RETRY_MAX))}초 대기"
+    health.note_send(ok, err)
+    return ok, mid, err
 
 
 def _tail_end(path: str) -> int:
@@ -208,8 +256,14 @@ def coalesce_k(rows) -> list:
         if k in done_kinds:
             continue
         done_kinds.add(k)
-        last3 = [str(x.get("text") or "")[:200] for _o, x in grp[-3:]]
-        msgs.append((i, f"[{k}] {len(grp)}건 묶음 — 최근 {len(last3)}건:\n- " + "\n- ".join(last3), k, [o9 for o9, _x in grp]))
+        last3 = [str(x.get("text") or "").split("\n", 1)[0][:160] for _o, x in grp[-3:]]
+        c9 = AP.CAT.get(AP.cat_of(k, d.get("cat"))) or {}
+        heads = {str(x.get("text") or "").lstrip()[:1] for _o, x in grp}
+        head = "✅" if heads == {"✅"} else "🔴" if AP.tier(c9.get("key")) == "now" else "📋"
+        act = {"🔴": "앱에서 하나씩 확인하세요", "✅": "할 일은 없어요"}.get(head, "급한 건 아니에요")
+        msgs.append((i, f"{head} {c9.get('label') or '알림'} {len(grp)}건이 한꺼번에 왔어요\n"
+                     + act + f" — 최근 {len(last3)}건:\n- " + "\n- ".join(x.lstrip('🔴📋✅ ') for x in last3), k,
+                     [o9 for o9, _x in grp]))
     chunk_end = rows[-1][0] if rows else 0
     out = []
     for j, (_i, text, k, cov) in enumerate(msgs):
@@ -237,6 +291,9 @@ def load_stats() -> dict:
     fs = raw.get("first_seen")
     if AP._num_ok(fs) and 0 < fs < AP.TS_MAX:
         st["first_seen"] = int(fs)
+    bf = raw.get("bf_first")
+    if AP._num_ok(bf) and 0 < bf < AP.TS_MAX:
+        st["bf_first"] = int(bf)
     days = raw.get("days")
     for dk, row in (days.items() if isinstance(days, dict) else ()):
         if not (isinstance(dk, str) and len(dk) == 10 and dk[4] == "-" and dk[7] == "-") or not isinstance(row, dict):
@@ -244,7 +301,7 @@ def load_stats() -> dict:
         r2 = {}
         for cat, c in row.items():
             if cat in AP.CAT and isinstance(c, dict):
-                c2 = {f: _cnt(c.get(f)) for f in ("sent", "skip", "held") if _cnt(c.get(f))}
+                c2 = {f: _cnt(c.get(f)) for f in ("sent", "skip", "held", "daily", "web") if _cnt(c.get(f))}
                 if c2:
                     r2[cat] = c2
         if r2:
@@ -314,14 +371,38 @@ def load_hold() -> dict:
             h["ids"][fn] = sorted(set(h["ids"][fn]))
     if _cnt(raw.get("since")) and h["n"]:
         h["since"] = _cnt(raw["since"])
+    dg = raw.get("dg") if isinstance(raw.get("dg"), dict) else {}
+    h["dg"] = {"items": [], "n": {}}
+    for k, v in ((dg.get("n") or {}).items() if isinstance(dg.get("n"), dict) else ()):
+        if k in AP.CAT and _cnt(v):
+            h["dg"]["n"][k] = _cnt(v)
+    for k, v in list((dg.get("k") or {}).items() if isinstance(dg.get("k"), dict) else ())[:200]:
+        if isinstance(k, str) and 0 < len(k) <= 48 and _cnt(v):
+            h["dg"].setdefault("k", {})[k] = _cnt(v)
+    for x in (dg.get("items") if isinstance(dg.get("items"), list) else [])[-DG_ITEMS_MAX:]:
+        if isinstance(x, dict) and x.get("cat") in AP.CAT:
+            h["dg"]["items"].append({"cat": x["cat"], "kind": str(x.get("kind") or "")[:40], "text": str(x.get("text") or "")[:300],
+                                     "ts": _cnt(x.get("ts")), "d": x.get("d") if isinstance(x.get("d"), dict) else None})
+    if isinstance(raw.get("dg_day"), str) and len(raw["dg_day"]) == 10:
+        h["dg_day"] = raw["dg_day"]
     return h
 
 
-def save_hold(h: dict) -> None:
+def save_hold(h: dict) -> bool:
+    pend = h.pop("_pend", None)
     try:
         common.atomic_write_json(AP.HOLD_PATH, h)
+        return True
     except Exception as e:
-        log.warning("조용한 시간 보류 저장 실패: %s", e)
+        if pend:
+            h["_pend"] = pend
+        log.warning("보류·하루 요약 재료 저장 실패(커서는 그 줄 앞에 둠): %s", e)
+        return False
+
+
+def _pend_add(h: dict, src, off) -> None:
+    if src is not None and off is not None:
+        h.setdefault("_pend", {}).setdefault(src, []).append(off)
 
 
 def held(h: dict, src: str, off: int) -> bool:
@@ -341,9 +422,43 @@ def hold_add(h: dict, src, off, cat: str, kind: str, text: str, now: float) -> b
         if off in lst:
             return False
         lst.append(off)
+        _pend_add(h, src, off)
     h["n"][cat] = _cnt(h["n"].get(cat)) + 1
     h["items"] = (h["items"] + [{"cat": cat, "kind": kind, "text": str(text or "")[:300], "ts": int(now)}])[-AP.HOLD_TEXT_MAX:]
     h.setdefault("since", int(now))
+    return True
+
+
+DG_ITEMS_MAX = 120
+
+
+def _dg_key(kind, d=None) -> str:
+    k = str(kind or "?")[:40]
+    if k == "LP_RANGE" and isinstance(d, dict) and isinstance(d.get("out"), bool):
+        k += ":out" if d["out"] else ":in"
+    return k
+
+
+def dg_add(h: dict, src, off, cat: str, kind: str, text: str, now: float, d=None) -> bool:
+    if src is not None:
+        lst = h["ids"].setdefault(src, [])
+        if off in lst:
+            return False
+        lst.append(off)
+        _pend_add(h, src, off)
+    g = h.setdefault("dg", {"items": [], "n": {}})
+    g["n"][cat] = _cnt(g["n"].get(cat)) + 1
+    kk = _dg_key(kind, d)
+    gk = g.setdefault("k", {})
+    if kk in gk or len(gk) < 200:
+        gk[kk] = _cnt(gk.get(kk)) + 1
+    it = {"cat": cat, "kind": kind, "text": str(text or "")[:300], "ts": int(now), "d": d if isinstance(d, dict) else None}
+    items = g["items"] + [it]
+    if len(items) > DG_ITEMS_MAX:
+        keep_pnl = [x for x in items if x.get("kind") == "PNL_DAILY"][-1:]
+        rest = [x for x in items if x.get("kind") != "PNL_DAILY"][-(DG_ITEMS_MAX - len(keep_pnl)):]
+        items = keep_pnl + rest
+    g["items"] = items
     return True
 
 
@@ -367,6 +482,7 @@ BAL_KIND = "BALANCE_MISMATCH"
 def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict, hst: dict = None):
     counted = int(st["counted"].get(fn) or 0)
     out, changed = [], False
+    bf_once = False
     tleft = _test_budget(now)
     for off, d in rows:
         if not isinstance(d, dict):
@@ -397,13 +513,19 @@ def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict
                 continue
         cat = AP.cat_of(kind, d.get("cat"))
         how = AP.decide(doc, cat, now, conn, kind)
+        if how == "web" and kind == AP.FIRST_BACKFILL_KIND and not st.get("bf_first") and not bf_once:
+            bf_once = True
+            out.append((off, dict(d, text="📋 과거 기록을 다 가져왔어요\n할 일은 없어요 — 이제 손익·보유가 전체 기간 기준이에요.")))
+            continue
         if how == "send":
             out.append((off, d))
             continue
         if how == "hold" and hold_add(hold, fn, off, cat, kind, d.get("text") or f"[{kind}]", now):
             changed = True
+        if how == "daily" and dg_add(hold, fn, off, cat, kind, d.get("text") or f"[{kind}]", now, d.get("d")):
+            changed = True
         if off > counted:
-            stat_add(st, cat, "held" if how == "hold" else "skip", 1, now)
+            stat_add(st, cat, {"hold": "held", "daily": "daily", "web": "web"}.get(how, "skip"), 1, now)
         out.append((off, None))
     if rows and rows[-1][0] > counted:
         st["counted"][fn] = rows[-1][0]
@@ -414,7 +536,8 @@ def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict
 def hold_text(hold: dict, doc: dict, early: bool = False) -> str:
     q = doc.get("quiet") or {}
     n = sum(_cnt(v) for v in hold["n"].values())
-    lines = [f"🌙 조용한 시간({q.get('from', '?')}~{q.get('to', '?')}) 동안 모인 알림 {n}건" + (" — 너무 많이 쌓여 미리 보내요" if early else "")]
+    lines = [f"📋 밤({q.get('from', '?')}~{q.get('to', '?')}) 동안 모인 알림 {n}건" + (" — 너무 많이 쌓여 미리 보내요" if early else ""),
+             "급한 건 아니에요 — 훑어보고 필요하면 앱에서 확인하세요."]
     for c in AP.CATS:
         k = c["key"]
         if hold["n"].get(k):
@@ -422,7 +545,7 @@ def hold_text(hold: dict, doc: dict, early: bool = False) -> str:
     items = hold["items"][-8:]
     if items:
         lines.append("최근:")
-        lines += ["- " + str(x.get("text") or "")[:160].replace("\n", " ") for x in items]
+        lines += ["- " + str(x.get("text") or "").split("\n", 1)[0].lstrip("🔴📋✅ ")[:160] for x in items]
     if n > len(items):
         lines.append(f"… 외 {n - len(items)}건(원문 생략 — 위 카테고리별 수에 포함)")
     return "\n".join(lines)
@@ -453,6 +576,170 @@ def flush_hold(token, chat, doc: dict, conn, now: float, st: dict, hold: dict, f
     return True
 
 
+_DOW = "월화수목금토일"
+
+
+def _kday(now):
+    from datetime import datetime as _dt
+    return _dt.fromtimestamp(now, AP.KST)
+
+
+def _md_ko(iso: str) -> str:
+    try:
+        from datetime import datetime as _dt
+        d = _dt.strptime(iso, "%Y-%m-%d")
+        return f"{d.month}월 {d.day}일({_DOW[d.weekday()]})"
+    except (TypeError, ValueError):
+        return str(iso)
+
+
+def _open_problems(hst) -> list:
+    out = []
+    try:
+        for i in ((hst or {}).get("incidents") or {}).values():
+            if not isinstance(i, dict) or i.get("resolved") or str(i.get("id") or "").startswith(("quota:", "bfstall:", "gaps:")):
+                continue
+            out.append((0 if i.get("level") == "crit" else 1, str(i.get("title") or "")[:40]))
+    except Exception:
+        return []
+    return [t for _l, t in sorted(out)]
+
+
+def _open_bal_keys(hst) -> int:
+    try:
+        n = 0
+        for i in ((hst or {}).get("incidents") or {}).values():
+            if isinstance(i, dict) and i.get("check") == "balcheck:mismatch" and not i.get("resolved"):
+                n += len(i.get("keys") or ()) or 1
+        return n
+    except Exception:
+        return 0
+
+
+def compose_digest(dg: dict, doc: dict, now: float, hst=None, cfg=None):
+    if not AP.digest_on(doc, now):
+        return None, None, "KRW"
+    live = lambda kind: AP.effective(doc, AP.cat_of(str(kind or "").split(":", 1)[0]), now)
+    items = [x for x in list((dg or {}).get("items") or []) if isinstance(x, dict) and live(x.get("kind"))]
+    kc = (dg or {}).get("k")
+    if not isinstance(kc, dict):
+        kc = {}
+        for x in items:
+            kk = _dg_key(x.get("kind"), x.get("d"))
+            kc[kk] = kc.get(kk, 0) + 1
+    kc = {k: _cnt(v) for k, v in kc.items() if _cnt(v) and live(k)}
+    today = _kday(now).strftime("%Y-%m-%d")
+    by = {}
+    for x in items:
+        by.setdefault(x.get("kind"), []).append(x)
+    lines = [f"📋 하루 요약 · {_md_ko(today)}"]
+    curve, cur = None, "KRW"
+    pnl = [x for x in by.get("PNL_DAILY", []) if isinstance(x.get("d"), dict)]
+    if pnl:
+        d = pnl[-1]["d"]
+        cur = d.get("cur") or "KRW"
+        import alert_watch as _aw
+        m = (lambda v: _aw.money(v, "KRW", 1.0, True)) if cur == "KRW" else (lambda v: _aw.money(v, "USD", None, True))
+        when = "오늘" if d.get("iso") == today else ("어제" if d.get("iso") and d["iso"] < today else str(d.get("iso")))
+        bits = [f"{when} 실현 {m(d.get('realized') or 0)}"]
+        if int(d.get("sells") or 0):
+            bits.append(f"매도 {int(d['sells'])}건")
+        if d.get("delta") is not None:
+            bits.append(f"총자산 {m(d['delta'])}")
+        lines.append(" · ".join(bits))
+        top = [t for t in (d.get("top") or []) if isinstance(t, list) and len(t) >= 2]
+        if top:
+            lines.append("많이 움직인 코인 " + " · ".join(f"{t[0]} {'+' if float(t[1]) >= 0 else '−'}{abs(float(t[1])):.0f}%" for t in top[:3]))
+        cv = [c for c in (d.get("curve") or []) if isinstance(c, list) and len(c) == 2]
+        if len(cv) >= 2:
+            curve = [float(c[1]) for c in cv]
+    elif by.get("PNL_DAILY"):
+        t9 = by["PNL_DAILY"][-1]["text"]
+        lines.append(t9.split("\n", 2)[1] if "\n" in t9 else "손익 요약 도착")
+    good, check = [], []
+    rec_n = sum(kc.get(k, 0) for k in ("EXF_RECON", "RECON", "EX_RECON"))
+    mism = kc.get("BALANCE_MISMATCH", 0)
+    told = _open_bal_keys(hst)
+    if mism or told:
+        check.append(f"잔고가 기록과 다른 곳 {max(mism, told)}" + ("(이미 알림)" if told and not mism else ""))
+    elif rec_n:
+        good.append("잔고는 모두 맞아요")
+    rv = by.get("REVIEW_DAILY", []) + by.get("REVIEW_WEEKLY", [])
+    if rv or kc.get("REVIEW_DAILY") or kc.get("REVIEW_WEEKLY"):
+        g = (((rv[-1].get("d") or {}).get("grade") if rv else "") or "").strip()
+        good.append("AI 복기가 도착했어요" + (f"({g})" if g and g != "—" else ""))
+    inflow = by.get("BIG_INFLOW", [])
+    for x in inflow[-2:]:
+        good.append(f"큰 입금 {(x.get('d') or {}).get('amt') or ''}".strip())
+    if kc.get("BIG_INFLOW") and not inflow:
+        good.append(f"큰 입금 {kc['BIG_INFLOW']}건")
+    lp_out, lp_in = kc.get("LP_RANGE:out", 0), kc.get("LP_RANGE:in", 0)
+    if lp_out:
+        check.append(f"LP 범위 벗어남 {lp_out}")
+    if lp_in and not lp_out:
+        good.append(f"LP 범위로 돌아옴 {lp_in}")
+    unk = kc.get("UNKNOWN", 0)
+    if unk:
+        check.append(f"처음 보는 토큰 {unk}")
+    oa_items = by.get("OA_ALERT", []) + by.get("NFT_CG_SLOW", [])
+    for x in oa_items[-2:]:
+        msg = (x.get("d") or {}).get("msg") or x.get("text", "").split("\n", 1)[0].lstrip("📋⏳🏦✅ ")[:40]
+        (good if "다시 연결" in msg else check).append(msg)
+    oa_n = kc.get("OA_ALERT", 0) + kc.get("NFT_CG_SLOW", 0)
+    if oa_n and not oa_items:
+        check.append(f"기타 자산 소식 {oa_n}")
+    probs = _open_problems(hst)
+    if probs and AP.effective(doc, "digest", now):
+        check.append(f"안 풀린 봇 문제 {len(probs)}(" + ", ".join(probs[:2]) + ")")
+    known = {"PNL_DAILY", "EXF_RECON", "RECON", "EX_RECON", "BALANCE_MISMATCH", "REVIEW_DAILY", "REVIEW_WEEKLY", "BIG_INFLOW", "LP_RANGE", "UNKNOWN",
+             "OA_ALERT", "NFT_CG_SLOW", "digest"}
+    etc = sum(v for k, v in kc.items() if k.split(":", 1)[0] not in known)
+    if etc:
+        check.append(f"그 밖의 소식 {etc}")
+    if not pnl and not by.get("PNL_DAILY") and not good and not check:
+        return None, None, cur
+    if good:
+        lines.append(" · ".join(good[:4]))
+    lines.append(f"살펴볼 것 {len(check)}가지 — " + " · ".join(check[:5]) if check else "살펴볼 것은 없어요")
+    link = AP.public_link("daily", cfg)
+    if link:
+        lines.append(f"[오늘 카드 열기] {link}")
+    return "\n".join(lines), curve, cur
+
+
+def flush_digest(token, chat, doc: dict, now: float, st: dict, hold: dict, hst=None, cfg=None) -> bool:
+    day = AP.digest_due(doc, hold.get("dg_day"), now)
+    if not day:
+        return False
+    dg = hold.get("dg") or {"items": [], "n": {}}
+    text, curve, cur = compose_digest(dg, doc, now, hst, cfg)
+    if text:
+        th = doc.get("th") or {}
+        png = None
+        if curve and th.get("digest_chart", True):
+            try:
+                import tinychart
+                png = tinychart.render(curve, axis=bool(th.get("digest_axis", True)), cur=cur)
+            except Exception as e:
+                log.warning("하루 요약 그림 실패(글자만 보냄): %s", e)
+        ok = bool(png) and len(text) <= 1024 and send_photo(token, chat, png, text, silent=True)[0]
+        if not ok:
+            ok = send(token, chat, text)
+            if ok and png and len(text) > 1024:
+                send_photo(token, chat, png, "", silent=True)
+        if not ok:
+            return False
+        _SENT_TIMES.append(time.time())
+        try:
+            stat_add(st, "digest", "sent", 1, now)
+        except Exception as e:
+            log.warning("발송 기록 실패(무시): %s", e)
+    hold["dg"] = {"items": [], "n": {}}
+    hold["dg_day"] = day
+    save_hold(hold)
+    return True
+
+
 def health_gate(st: dict, hold: dict, now_fn=time.time):
     def gate(kind, text):
         now = now_fn()
@@ -473,8 +760,12 @@ def health_gate(st: dict, hold: dict, now_fn=time.time):
                 if hold_add(hold, None, None, cat, kind, text, now):
                     save_hold(hold)
                 stat_add(st, cat, "held", 1, now)
+            elif how == "daily":
+                if dg_add(hold, None, None, cat, kind, text, now):
+                    save_hold(hold)
+                stat_add(st, cat, "daily", 1, now)
             else:
-                stat_add(st, cat, "skip", 1, now)
+                stat_add(st, cat, "web" if how == "web" else "skip", 1, now)
             save_stats(st, now)
         except Exception as e:
             log.warning("헬스 알림 보류·기록 실패(무시): %s", e)
@@ -532,7 +823,7 @@ def health_tick(mon, token, chat, gate=None):
 _CRIT_KINDS = tuple(k for k, c in AP.KIND_CAT.items() if c in AP.CRIT)
 
 
-def scan_crit(path: str, fn: str, start: int, hold: dict, limit: int = CRIT_SCAN_BYTES) -> list:
+def scan_crit(path: str, fn: str, start: int, hold: dict, limit: int = CRIT_SCAN_BYTES, doc: dict = None, conn=None, now=None) -> list:
     out = []
     try:
         with open(path, "rb") as f:
@@ -543,13 +834,17 @@ def scan_crit(path: str, fn: str, start: int, hold: dict, limit: int = CRIT_SCAN
                 if not line or not line.endswith(b"\n"):
                     break
                 pos += len(line)
-                if not any(('"' + k + '"').encode() in line for k in _CRIT_KINDS):
+                if doc is None and not any(('"' + k + '"').encode() in line for k in _CRIT_KINDS):
                     continue
                 try:
                     d = json.loads(line.decode("utf-8"))
                 except (ValueError, UnicodeDecodeError):
                     continue
-                if isinstance(d, dict) and AP.cat_of(d.get("kind"), d.get("cat")) in AP.CRIT and not held(hold, fn, pos):
+                if not isinstance(d, dict) or held(hold, fn, pos):
+                    continue
+                cat = AP.cat_of(d.get("kind"), d.get("cat"))
+                if cat in AP.CRIT or (doc is not None and str(d.get("kind")) != AP.TEST_KIND
+                                      and AP.decide(doc, cat, now, conn, d.get("kind")) == "send"):
                     out.append((pos, d))
     except OSError:
         return []
@@ -586,21 +881,35 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         rows = drop_scam(rows)
     try:
         rows, hch = filter_rows(rows, fn, doc, conn, time.time(), st, hold, hst)
-        if hch:
-            save_hold(hold)
     except Exception as e:
         log.warning("알림 설정 필터 실패(이번 청크는 전부 발송): %s", e)
+    ceil9 = None
+    if hold.get("_pend") and not save_hold(hold):
+        p9 = [o for o in (hold.get("_pend") or {}).get(fn) or () if o > off]
+        if p9:
+            lim9 = min(p9)
+            ceil9 = max([o for o, _d in rows if o < lim9] or [off])
     bal_keys = {o: d.get("keys") for o, d in rows if isinstance(d, dict) and d.get("kind") == BAL_KIND and d.get("keys")}
     msgs = coalesce_k(rows)
     if not msgs:
-        off = chunk_end
+        off = chunk_end if ceil9 is None else max(off, min(chunk_end, ceil9))
     sent_n = 0
     if chunk_end < size:
         try:
-            for _e, text, kind, cov in coalesce_k(scan_crit(path, fn, chunk_end, hold)):
+            far = scan_crit(path, fn, chunk_end, hold) if ceil9 is None else \
+                scan_crit(path, fn, chunk_end, hold, doc=doc, conn=conn, now=time.time())
+            if ceil9 is not None and fn == "pending_dm.jsonl":
+                far = [r for r in drop_scam(far) if isinstance(r[1], dict)]
+            for _e, text, kind, cov in coalesce_k(far):
+                crit9 = AP.cat_of(kind) in AP.CRIT
+                _SENT_TIMES[:] = [t for t in _SENT_TIMES if time.time() - t < 3600]
+                if not crit9 and len(_SENT_TIMES) >= HOURLY_CAP:
+                    continue
                 if sent_n >= MAX_PER_CYCLE or not send(token, chat, text):
                     break
                 sent_n += 1
+                if not crit9:
+                    _SENT_TIMES.append(time.time())
                 if mark_done(hold, fn, cov, off):
                     save_hold(hold)
                 try:
@@ -632,11 +941,15 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                 health.note_bal_dm(hst, [k for o in cov for k in (bal_keys.get(o) or ())], time.time())
             except Exception as e:
                 log.warning("잔고 불일치 발송 키 기록 실패(무시): %s", e)
-        if mark_done(hold, fn, cov if blocked else [o for o in cov if o > end_off], off if blocked else end_off):
+        hc9 = blocked or (ceil9 is not None and end_off > ceil9)
+        if mark_done(hold, fn, cov if hc9 else [o for o in cov if o > end_off], off if hc9 else end_off):
             save_hold(hold)
-        if not blocked:
+        if not hc9:
             off = end_off
             _save_cursor(cursor, fn, off)
+        if kind == AP.FIRST_BACKFILL_KIND and not st.get("bf_first"):
+            st["bf_first"] = int(now)
+            st["_dirty"] = True
         if is_test:
             _TEST_TIMES.append(time.time())
         elif not free:
@@ -674,6 +987,11 @@ def main():
         if not st.get("first_seen"):
             st["first_seen"] = int(now0)
             save_stats(st, now0)
+        if not st.get("bf_first"):
+            c9 = AP.connect_ts(st)
+            if c9 and now0 - c9 > AP.FIRST_DAYS * 86400:
+                st["bf_first"] = int(now0)
+                save_stats(st, now0)
         try:
             doc = AP.load()
         except Exception as e:
@@ -699,6 +1017,11 @@ def main():
                 run_source(fn, token, chat, cursor, doc, conn, st, hold, cap_state, mon.st)
             except Exception as e:
                 log.warning("%s 처리 실패(다음 사이클): %s", fn, e)
+        try:
+            if flush_digest(token, chat, doc, time.time(), st, hold, mon.st):
+                save_stats(st)
+        except Exception as e:
+            log.warning("하루 요약 발송 실패(다음 사이클): %s", e)
         if st.get("_dirty"):
             save_stats(st)
         time.sleep(POLL_SEC)
@@ -709,7 +1032,7 @@ def cli_test() -> int:
     if not token:
         print("텔레그램 미연결 — .env 에 TJ_TG_TOKEN / TJ_TG_CHAT 을 넣은 뒤 다시 실행하세요")
         return 2
-    ok, mid, err = send_message(token, chat, f"✅ tj-bot 알림 테스트 — 이 메시지가 보이면 연결 정상 "
+    ok, mid, err = send_message(token, chat, f"🔔 tj-bot 알림 테스트 — 이 메시지가 보이면 연결 정상 "
                                              f"({time.strftime('%m-%d %H:%M')})")
     print("발송 성공 (message_id=%s)" % mid if ok else f"발송 실패: {err}")
     return 0 if ok else 1

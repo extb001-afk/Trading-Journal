@@ -11,7 +11,7 @@ import time
 
 import common
 
-ENV_PATH = os.path.join(common.BASE_DIR, ".env")
+ENV_PATH = common.ENV_PATH
 SETTINGS_PATH = os.path.join(common.STATE_DIR, "settings.json")
 TOKEN_PATH = os.path.join(common.STATE_DIR, "setup_token")
 LOCK = threading.RLock()
@@ -20,7 +20,7 @@ EXPLORERS = {
     "helius": {"name": "Helius (Solana)", "fields": [("TJ_HELIUS_KEY", "API Key")]},
     "etherscan": {"name": "Etherscan (EVM 가속)", "fields": [("TJ_ETHERSCAN_KEY", "API Key")]},
     "opensea": {"name": "OpenSea (NFT 바닥가 — 넣으면 최우선)", "fields": [("TJ_OPENSEA_KEY", "API Key")]},
-    "coingecko": {"name": "CoinGecko (NFT 바닥가 — 무료 데모 키)", "fields": [("TJ_COINGECKO_KEY", "Demo API Key")]},
+    "coingecko": {"name": "CoinGecko (시세·DEX·차트·NFT 바닥가 — 무료 데모 또는 유료 프로 키, 자동 판별)", "fields": [("TJ_COINGECKO_KEY", "API Key (Demo · Pro)")]},
 }
 EXCHANGES = {
     "upbit": {"name": "업비트", "fields": [("UPBIT_ACCESS", "Access Key"), ("UPBIT_SECRET", "Secret Key")]},

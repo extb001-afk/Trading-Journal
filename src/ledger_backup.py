@@ -140,6 +140,18 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
                 _put(n, f.read())
         except OSError as e:
             out[n] = f"err: {common.safe_err(e)}"[:200]
+    sl9 = os.path.join(state_dir, "seed_local")
+    if os.path.isdir(sl9):
+        for root9, _d9, fs9 in os.walk(sl9):
+            for f9 in sorted(fs9):
+                if not f9.endswith(".json"):
+                    continue
+                rel9 = os.path.relpath(os.path.join(root9, f9), sl9).replace(os.sep, "__")
+                try:
+                    with open(os.path.join(root9, f9), "rb") as fh9:
+                        _put("seed_local__" + rel9, fh9.read())
+                except OSError as e:
+                    out["seed_local__" + rel9] = f"err: {common.safe_err(e)}"[:200]
     cp = config_path or common.CONFIG_PATH
     if os.path.exists(cp):
         try:

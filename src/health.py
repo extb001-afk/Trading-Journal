@@ -37,7 +37,8 @@ DEFAULTS = {
     "rss_warn_mb": {"tj-web": 2200, "*": 600},
     "checks_off": [],
     "telegram_min_level": "crit",
-    "remind_hours": 6,
+    "remind_hours": 0,
+    "tg_min_age_sec": 180,
     "digest_hour": 9,
     "hourly_cap": 12,
     "group_min": 4,
@@ -109,6 +110,7 @@ def loc_ko(loc) -> str:
     return str(loc or "")
 
 LINE_RX = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[,.]\d+ (DEBUG|INFO|WARNING|ERROR|CRITICAL) (?:\[[^\]]*\] )?(.*)")
+PM2_TS_RX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?: ")
 BENIGN_DEFAULT = [
     r"429|Too Many Requests|rate.?limit|max usage",
     r"indexing[-_ ]status|색인",
@@ -312,7 +314,7 @@ class LogWatch:
     def feed(self, unit: str, line: str, ts_hint: float = None, fstate: dict = None):
         u = self._u(unit)
         fs = fstate if fstate is not None else {}
-        line = line.rstrip("\n")
+        line = PM2_TS_RX.sub("", line.rstrip("\n"), count=1)
         m = LINE_RX.match(line)
         if m:
             self._flush_tb(unit, fs)
@@ -1559,6 +1561,28 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
              else ("재계산 중" if xr.get("running") and now - float(xr.get("started_at") or 0) < 6000 else "정상")),
             "설정 › '과거 데이터 더 가져오기' 카드의 오류 확인 — 디스크·게이트 사유면 원인 해소 후 기다리면 재시도",
             persist=0, resolve=600, remind=False, kind="rebuild")
+    pg = obs.get("pnlgate")
+    if isinstance(pg, dict) and "tj-core" in units:
+        rb9 = float((xr or {}).get("rebuilt_at") or 0) if isinstance(xr, dict) else 0.0
+        if not pg.get("ok") and not pg.get("approved") and float(pg.get("ts") or 0) > rb9:
+            add("rebuild:pnl", "tj-core", "재계산이 과거 손익을 바꿔 보류", "warn", str(pg.get("reason") or "")[:300],
+                "변경 내용 확인: python3 tools/rebuild_approve.py — 맞으면 --yes 로 승인(다음 재계산 1회 통과)",
+                persist=0, resolve=600, remind=False, kind="rebuild")
+        elif float(pg.get("ts") or 0) > now - 86400:
+            add("rebuild:pnl", "tj-core", "재계산 손익 게이트", "ok",
+                ("승인으로 통과 · " + str(pg.get("reason") or "")[:200]) if pg.get("approved") else "과거 손익 차이 임계 이내",
+                persist=0, resolve=600, notify=False, remind=False, kind="rebuild")
+    di = obs.get("decis")
+    if isinstance(di, dict) and isinstance(di.get("items"), dict) and "tj-core" in units:
+        its = [x for x in di["items"].values() if isinstance(x, dict)]
+        cf = [x for x in its if x.get("kind") == "conflict"]
+        pd = [x for x in its if x.get("kind") == "pending"]
+        if cf or pd:
+            det = " · ".join(f"{x.get('symbol') or '?'}({x.get('chain')}) 저장 {x.get('stored')} → 관측 {x.get('seen')}" for x in (cf or pd)[:4])
+            add("ledger:decimals", "tj-core", f"토큰 자리수 다름 {len(cf)}개" if cf else f"토큰 자리수 채움 대기 {len(pd)}개",
+                "warn" if cf else "ok", det[:300],
+                "다른 값은 덮지 않았어요 — python3 tools/fill_decimals.py 로 확인" if cf else "다음 자동 재구축에서 채워져요(수량 표시가 맞춰짐)",
+                persist=0, resolve=600, remind=False, kind="ledger")
     tn = obs.get("tunnel")
     tu = ((h.get("tunnel") or {}) if isinstance(h.get("tunnel"), dict) else {}).get("unit")
     if tn is not None and tu and tu in units:
@@ -2093,23 +2117,52 @@ def _min_level(h) -> int:
     return LEVELS.get(h.get("telegram_min_level") or "crit", 2)
 
 
+UNIT_KO = {"tj-evm": "이더리움 계열 수집", "tj-sol": "솔라나 수집", "tj-bsc": "BSC 수집", "tj-ex": "업비트 수집", "tj-exf": "해외 거래소 수집",
+           "tj-core": "장부 계산", "tj-web": "화면 서버", "tj-alert": "알림", "tj-review": "AI 복기"}
+_ACT_ROUTINE = "대부분 저절로 풀려요 — 한 시간 넘게 이어지면 상태 패널에서 원인과 조치를 보세요."
+
+
+def _u(i) -> str:
+    u = str(i.get("unit") or "")
+    return UNIT_KO.get(u) or ("원격 접속" if u.endswith("-tunnel") else u)
+
+
+_PLAIN = (("대시보드 미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("잔고 대사", "잔고 맞추기"),
+          ("원가 미상", "원가 모름"), ("원가 미확인", "원가 모름"), ("블록스카웃", "외부 탐색기"), ("blockscout", "외부 탐색기"),
+          ("백필", "과거 기록 가져오기"), ("미매칭", "짝 못 찾은 거래"), ("대사", "잔고 맞추기"), ("커서·하트비트", "진행 기록"),
+          ("커서", "진행 위치"), ("폴백", "대체 경로"), ("REDERIVE", "다시 계산"), ("rederive", "다시 계산"), ("자동 보정하지", "자동으로 고치지"), ("보정하지", "고치지"),
+          ("보정했", "고쳤"), ("보정", "고침"), ("정산", "마감"))
+
+
+def plain_text(s) -> str:
+    s = str(s or "")
+    for a, b in _PLAIN:
+        s = s.replace(a, b)
+    return s
+
+
 def msg_open(i, now) -> str:
-    icon = "🔴" if i["peak"] == "crit" else "🟠"
-    return (f"{icon} {i['unit']} · {i['title']}\n{i['detail']}\n"
-            f"시작: {fmt_ts(i['since'])} ({fmt_ago(now - i['since'])} 전)\n조치: {i['action']}")
+    icon = "🔴" if i["peak"] == "crit" else "📋"
+    det = str(i.get("detail") or "").replace("\n", " ")
+    if i.get("check") == "balcheck:mismatch":
+        n9 = len(i.get("keys") or ()) or 1
+        return (f"🔴 잔고가 기록과 다른 곳이 {n9}곳 있어요\n앱 › 잔고 맞추기에서 어느 지갑·코인인지 확인하세요(기록은 자동으로 고치지 않아요).\n"
+                f"{fmt_ago(now - i['since'])}째 · {det[:140]}")
+    return (f"{icon} {i['title']} · {_u(i)}\n{_ACT_ROUTINE}\n"
+            f"{fmt_ago(now - i['since'])}째 · {det[:140]}")
 
 
 def msg_remind(i, now) -> str:
-    return f"⏰ 계속 발생 중 ({fmt_ago(now - i['since'])}째) · {i['unit']} {i['title']}\n{i['detail']}"
+    return f"🔴 아직 안 풀렸어요 · {i['title']} ({fmt_ago(now - i['since'])}째)\n{_ACT_ROUTINE}"
 
 
 def msg_resolve(i, now) -> str:
-    return f"✅ 복구됨 · {i['unit']} {i['title']} (지속 {fmt_ago(i['resolved'] - i['since'])})"
+    return f"✅ 풀렸어요 · {i['title']}\n할 일은 없어요.\n{fmt_ago(i['resolved'] - i['since'])} 동안 이어졌어요 · {_u(i)}"
 
 
 def msg_flap(i, now) -> str:
-    return (f"🟡 {i['unit']} · {i['title']} — {fmt_ts(i['since'])}~{fmt_ts(i['resolved'])} "
-            f"({fmt_ago(i['resolved'] - i['since'])}) 발생 후 복구됨\n{i['detail']}")
+    return (f"✅ 잠깐 멈췄다 풀렸어요 · {i['title']}\n할 일은 없어요.\n"
+            f"{fmt_ts(i['since'])}~{fmt_ts(i['resolved'])} ({fmt_ago(i['resolved'] - i['since'])}) · {_u(i)}")
 
 
 def _quiet_until(now: float):
@@ -2175,7 +2228,7 @@ def plan(st: dict, events: list, now: float, h: dict, tg_configured: bool):
     r = _plan_raw(st, events, now, h, tg_configured)
     for o in st.get("outbox") or []:
         if isinstance(o, dict) and isinstance(o.get("text"), str):
-            o["text"] = common.redact_secret_text(o["text"], generic=False)
+            o["text"] = plain_text(common.redact_secret_text(o["text"], generic=False))
     return r
 
 
@@ -2189,7 +2242,11 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
     minl = _min_level(h)
     inc = st.get("incidents", {})
 
+    tg_min = float(h.get("tg_min_age_sec") or 0)
+
     def eligible(i):
+        if tg_min and now - float(i.get("since") or now) < tg_min:
+            return False
         return i.get("notify", True) and (LEVELS.get(i.get("peak"), 0) >= minl or bool(i.get("tg_force")))
 
     def soft(i):
@@ -2238,8 +2295,8 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         put({"kind": "resolve", "text": msg_resolve(i, now), "reply": i.get("msg_id"),
              "incs": [i["id"]], "created": now}, soft(i))
     elif resolved:
-        lines = [f"✅ 복구됨 {len(resolved)}건"] + [f"- {i['unit']} · {i['title']} (지속 {fmt_ago(i['resolved'] - i['since'])})"
-                                                 for i in resolved[:12]]
+        lines = [f"✅ 봇 문제 {len(resolved)}건이 풀렸어요", "할 일은 없어요."] + [f"- {i['title']} ({fmt_ago(i['resolved'] - i['since'])})"
+                                                                    for i in resolved[:12]]
         put({"kind": "resolve", "text": "\n".join(lines), "reply": resolved[0].get("msg_id"),
              "incs": [i["id"] for i in resolved], "created": now}, all(soft(i) for i in resolved))
     for i in inc.values():
@@ -2254,10 +2311,9 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         if i.get("keys"):
             i["keys_told"] = sorted(set(i.get("keys_told") or ()) | set(i["keys"]))
     if len(opens) >= h["group_min"]:
-        lines = [f"🔴 문제 {len(opens)}건 동시 발생"]
+        lines = [f"{'📋' if all(soft(i) for i in opens) else '🔴'} 봇 문제 {len(opens)}건이 한꺼번에 생겼어요", _ACT_ROUTINE]
         for i in opens[:12]:
-            lines.append(f"- {i['unit']} · {i['title']} ({fmt_ago(now - i['since'])})")
-        lines.append("조치: 대시보드 설정 › 상태 에서 항목별 안내 확인")
+            lines.append(f"- {i['title']} · {_u(i)} ({fmt_ago(now - i['since'])}째)")
         put({"kind": "group", "text": "\n".join(lines), "reply": None, "incs": [i["id"] for i in opens],
              "created": now}, all(soft(i) for i in opens))
         for i in opens:
@@ -2278,13 +2334,13 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         new9 = cur9 - told9 - recent_dm
         upd9 = told9 | (cur9 & recent_dm)
         if new9 and not any(i["id"] in o["incs"] and o["kind"] in ("open", "group", "remind") for o in ob):
-            ob.append({"kind": "remind", "text": f"🔴 {i['unit']} · {i['title']} — 새로 확정된 불일치 {len(new9)}건\n{i['detail']}",
+            ob.append({"kind": "remind", "text": f"🔴 잔고가 기록과 다른 곳이 {len(new9)}곳 더 늘었어요\n앱에서 어느 지갑·코인인지 확인하세요.\n{str(i['detail'])[:140]}",
                        "reply": i.get("msg_id"), "incs": [i["id"]], "created": now})
             upd9 |= new9
         if upd9 != told9:
             i["keys_told"] = sorted(upd9)
-    rh = float(h["remind_hours"]) * 3600
-    cand = [i for i in inc.values() if i.get("announced") and i.get("remind", True) and eligible(i)
+    rh = float(h.get("remind_hours") or 0) * 3600
+    cand = [i for i in inc.values() if rh > 0 and i.get("announced") and i.get("remind", True) and eligible(i)
             and i.get("level") == "crit" and not any(o["kind"] == "remind" and i["id"] in o["incs"] for o in ob)]
     age = lambda i: now - float(i.get("last_notified") or i["announced"])
     if any(age(i) >= rh for i in cand):
@@ -2296,9 +2352,9 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
             ob.append({"kind": "remind", "text": msg_remind(due[0], now), "reply": due[0].get("msg_id"),
                        "incs": [due[0]["id"]], "created": now})
         else:
-            lines = [f"⏰ 계속 발생 중 {len(due)}건"]
+            lines = [f"🔴 아직 안 풀린 봇 문제 {len(due)}건", _ACT_ROUTINE]
             for i in due[:12]:
-                lines.append(f"- {i['unit']} · {i['title']} ({fmt_ago(now - i['since'])}째)")
+                lines.append(f"- {i['title']} ({fmt_ago(now - i['since'])}째)")
             ob.append({"kind": "remind", "text": "\n".join(lines), "reply": due[0].get("msg_id"),
                        "incs": [i["id"] for i in due], "created": now})
     today = nk.strftime("%Y-%m-%d")
@@ -2309,7 +2365,7 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         if opn:
             crit = [i for i in opn if i["level"] == "crit"]
             warn = [i for i in opn if i["level"] != "crit"]
-            head = f"📋 {nk.strftime('%H:%M')} 상태 · 열린 문제 {len(opn)}건"
+            head = f"📋 {nk.strftime('%H:%M')} 상태 · 아직 안 풀린 문제 {len(opn)}건"
             body = "; ".join(f"{i['unit']} {i['title']}({fmt_ago(now - i['since'])})" for i in (crit or warn)[:6])
             tail = f" · 주의 {len(warn)}건은 대시보드" if crit and warn else ""
             ob.append({"kind": "digest", "text": f"{head}: {body}{tail}", "reply": None, "incs": [], "created": now})
@@ -2609,6 +2665,8 @@ class Monitor:
                 "sources": collect_sources(cfg, st, now),
                 "bf": _read(os.path.join(common.STATE_DIR, "backfill_status.json"), {}) or {},
                 "extrb": _read(os.path.join(common.STATE_DIR, "ext_rebuild_status.json"), None),
+                "decis": _read(os.path.join(common.STATE_DIR, "asset_decimals_issues.json"), None),
+                "pnlgate": _read(os.path.join(common.STATE_DIR, "rebuild_pnl_gate.json"), None),
                 "hb": read_heartbeats(),
                 "daily": daily, "review": review,
                 "webdiag": _read(os.path.join(common.STATE_DIR, "web_diag.json"), None),

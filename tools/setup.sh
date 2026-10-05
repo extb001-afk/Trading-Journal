@@ -46,7 +46,7 @@ fi
 mkdir -p state && chmod 700 state
 ok "state/ 준비 (원장·캐시가 여기 쌓입니다)"
 
-"$PY" -m py_compile src/*.py src/brokers/*.py && ok "파이썬 소스 컴파일 확인"
+"$PY" -m py_compile src/*.py && ok "파이썬 소스 컴파일 확인"
 
 echo
 if command -v pm2 >/dev/null 2>&1; then

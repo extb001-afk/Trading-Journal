@@ -46,7 +46,7 @@ DAY = 86400
 
 def _env() -> dict:
     env = {}
-    p = os.path.join(common.BASE_DIR, ".env")
+    p = common.ENV_PATH
     if os.path.exists(p):
         for line in open(p):
             line = line.strip()
@@ -622,9 +622,50 @@ def fetch_kucoin(env, t0: int, t1: int):
     return out_w, out_d
 
 
-def fetch_gate(env, t0: int, t1: int):
+_DEP_DENIED = set()
+
+
+def _wd_window(st: dict, now: int, window: int) -> tuple:
+    t0 = max(now - window, min(now - 7 * DAY, int(st.get("backfilled_until") or now - window)))
+    hold = st.get("dep_hold")
+    floor = now - window
+    ew = (st.get("ext") or {}).get("wd_from") if isinstance(st.get("ext"), dict) else None
+    if isinstance(ew, int) and ew < floor:
+        floor = ew
+    dt0 = max(floor, min(t0, int(hold))) if isinstance(hold, int) else t0
+    return t0, dt0
+
+
+DEP_HOLD_V = 1
+
+
+def _dep_hold_migrate(ex: str, st: dict, now: int, window: int) -> bool:
+    if ex != "gate" or st.get("dep_hold_v") == DEP_HOLD_V:
+        return False
+    floor = int(now - window)
+    ew = (st.get("ext") or {}).get("wd_from") if isinstance(st.get("ext"), dict) else None
+    if isinstance(ew, int) and ew < floor:
+        floor = ew
+    h = st.get("dep_hold")
+    st["dep_hold"] = min(int(h), floor) if isinstance(h, int) else floor
+    st["dep_hold_v"] = DEP_HOLD_V
+    log.info("gate 입금 보류 표식 1회 이관 — 입금을 %s 부터 다시 확인(배포 전 권한 거부로 빠졌을 수 있는 입금 · late 흡수)",
+             time.strftime("%Y-%m-%d", time.gmtime(st["dep_hold"])))
+    return True
+
+
+def _dep_hold_update(ex: str, st: dict, dep_t0: int):
+    if ex in _DEP_DENIED:
+        h = st.get("dep_hold")
+        st["dep_hold"] = min(int(h), int(dep_t0)) if isinstance(h, int) else int(dep_t0)
+    else:
+        st.pop("dep_hold", None)
+
+
+def fetch_gate(env, t0: int, t1: int, dep_t0: int = None):
     key, sec = env["TJ_GATE_KEY"], env["TJ_GATE_SECRET"]
     out_w, out_d = [], []
+    _DEP_DENIED.discard("gate")
 
     def call(path, params):
         _gov_prepare("api.gateio.ws", path)
@@ -637,22 +678,29 @@ def fetch_gate(env, t0: int, t1: int):
                          {"KEY": key, "Timestamp": ts, "SIGN": sig})
 
     dep_denied = False
-    s = t0
+    d0 = t0 if dep_t0 is None else min(int(dep_t0), int(t0))
+    s = d0
     while s < t1:
         e = min(s + 29 * DAY, t1)
         for path, bucket in (("/api/v4/wallet/withdrawals", "w"),
                              ("/api/v4/wallet/deposits", "d")):
             if bucket == "d" and dep_denied:
                 continue
+            if bucket == "w" and e <= t0:
+                continue
             try:
-                _gate_range(call, path, bucket, s, e, out_w, out_d)
+                _gate_range(call, path, bucket, max(s, t0) if bucket == "w" else s, e, out_w, out_d)
             except urllib.error.HTTPError as ge:
                 if bucket == "d" and ge.code == 403:
                     dep_denied = True
-                    log.warning("gate 입금 조회 권한 없음 — 출금만 수집 (Wallet 읽기 켜면 완성)")
+                    _DEP_DENIED.add("gate")
+                    log.warning("gate 입금 조회 권한 없음 — 출금만 수집 (Wallet 읽기 켜면 완성 · 입금은 그때 이 구간부터 다시)")
                     continue
                 raise
         s = e
+    if dep_t0 is not None and int(dep_t0) < int(t0) and not dep_denied:
+        for r in out_d:
+            r["late"] = 1
     return out_w, out_d
 
 
@@ -3085,9 +3133,34 @@ FILL_FETCHERS = {
 FILL_REPLAY = {"binance": fills_binance_replay}
 
 
+SEEN_NOTIME = "#notime"
+
+
+def _has_time(r) -> bool:
+    return bool(_iso_epoch(r.get("created_at")) or _iso_epoch(r.get("done_at")))
+
+
+def _is_time_fix(r, seen) -> bool:
+    return isinstance(r, dict) and seen.get(r.get("uuid")) == str(r.get("state")) + SEEN_NOTIME and _has_time(r)
+
+
+def _seen_state(v) -> str:
+    return str(v or "").split("#", 1)[0]
+
+
 def _rows_to_emit(rows, seen, seen_txids, seen_dest=None):
+    def changed(r):
+        s9 = seen.get(r["uuid"])
+        if s9 == r["state"]:
+            return False
+        if s9 == str(r["state"]) + SEEN_NOTIME:
+            if not _is_time_fix(r, seen):
+                return False
+            r["late"] = 1
+            return True
+        return True
     return [r for r in rows
-            if seen.get(r["uuid"]) != r["state"]
+            if changed(r)
             or (r.get("txid") and not seen_txids.get(r["uuid"]))
             or (seen_dest is not None and r.get("address") and not seen_dest.get(r["uuid"]))]
 
@@ -3108,6 +3181,28 @@ def _late_tag(rec: dict, ex: str, force: bool = False) -> dict:
     return rec
 
 
+class _CycleWriter:
+
+    def __init__(self, writer, state: dict):
+        self.w, self.state = writer, state
+
+    def append(self, rec):
+        if isinstance(rec, dict) and rec.get("kind") in ("ex_snapshot", "exf_fills") and not rec.get("lc"):
+            ex = str(rec.get("exchange") or "")
+            st = self.state.get(ex) if isinstance(self.state, dict) else None
+            seen = st.get("seen") if isinstance(st, dict) and isinstance(st.get("seen"), dict) else {}
+            fix = 0
+            for r in (rec.get("deposits") or []) + (rec.get("withdraws") or []):
+                if _is_time_fix(r, seen):
+                    if not r.get("late"):
+                        fix += 1
+                    r["late"] = 1
+            if fix:
+                _invalidate_balance_snapshot(ex)
+            _late_tag(rec, ex)
+        return self.w.append(rec)
+
+
 def _iso_epoch(s):
     try:
         import datetime as _dt
@@ -3121,7 +3216,7 @@ def _iso_epoch(s):
 
 def _mark_seen(rows, seen, seen_txids, seen_dest, pend=None):
     for r in rows:
-        seen[r["uuid"]] = r["state"]
+        seen[r["uuid"]] = r["state"] if _has_time(r) else str(r["state"]) + SEEN_NOTIME
         if r.get("txid"):
             seen_txids[r["uuid"]] = True
         if r.get("address"):
@@ -3172,9 +3267,9 @@ def pending_recheck_pass(env: dict, state: dict, writer, now: int, window: int, 
             wins.append((min(lo9, reg_lo), now))
         else:
             for u in [u for u, v in pend.items() if not isinstance(v, list) or len(v) < 2
-                      or str(seen.get(u, "")).upper() in PEND_FINAL or _pend_nq(v) >= PEND_MAX_QUERIES]:
+                      or _seen_state(seen.get(u)).upper() in PEND_FINAL or _pend_nq(v) >= PEND_MAX_QUERIES]:
                 v9 = pend.pop(u)
-                if str(seen.get(u, "")).upper() not in PEND_FINAL and isinstance(v9, list) and len(v9) >= 2:
+                if _seen_state(seen.get(u)).upper() not in PEND_FINAL and isinstance(v9, list) and len(v9) >= 2:
                     log.info("%s 비종결 입출금 %s 상태 재확인 %d회 — 거래소가 그대로라 추적 종료(%s)", ex, u, _pend_nq(v9), seen.get(u))
             olds = sorted((int(v[0]), _pend_nq(v)) for v in pend.values() if int(v[0]) < reg_lo)
             allw = []
@@ -3245,7 +3340,7 @@ def pending_recheck_pass(env: dict, state: dict, writer, now: int, window: int, 
                     c9 = _iso_epoch(r.get("created_at"))
                     if c9:
                         pend[r["uuid"]] = [c9, int(now)]
-            miss9 = sum(1 for u in legacy if u not in pend and str(seen.get(u, "")).upper() not in PEND_FINAL)
+            miss9 = sum(1 for u in legacy if u not in pend and _seen_state(seen.get(u)).upper() not in PEND_FINAL)
             st["pend_scan"] = int(now)
             log.info("%s 입출금 저장 창 재조회(1회): 행 %d · 상태 변경·신규 방출 %d · 비종결 추적 %d%s", ex, len(rows_w) + len(rows_d),
                      len(new_w) + len(new_d), len(pend), f" · 거래소가 더는 안 주는 비종결 {miss9}건" if miss9 else "")
@@ -3765,6 +3860,9 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                 ext["wd_err"] = _xm(repr(e))[:160]
                 break
             seen, seen_txids, seen_dest = st["seen"], st.setdefault("seen_txids", {}), st.setdefault("seen_dest", {})
+            if ex in _DEP_DENIED:
+                h9 = st.get("dep_hold")
+                st["dep_hold"] = min(int(h9), int(a)) if isinstance(h9, int) else int(a)
             new_w = _rows_to_emit(w_rows, seen, seen_txids, seen_dest)
             new_d = _rows_to_emit(d_rows, seen, seen_txids)
             if new_w or new_d:
@@ -3957,16 +4055,18 @@ def main():
         except Exception as e:
             log.warning("연결 거래소 목록 기록 실패(무시): %s", repr(e)[:120])
         _LATE_CYC["id"], _LATE_CYC["ex"] = f"c{now}:{uuidlib.uuid4().hex[:10]}", set()
+        cw = _CycleWriter(writer, state)
         for ex, (fn, need) in FETCHERS.items():
             if not all(env.get(k) for k in need):
                 continue
             st = state.setdefault(ex, {"seen": {}, "backfilled_until": 0})
             _quiet_n[ex] = _quiet_n.get(ex, 0) + 1
             loud9 = _quiet_n[ex] % 10 == 1
-            t0 = max(now - window, min(now - 7 * DAY, int(st["backfilled_until"] or now - window)))
+            _dep_hold_migrate(ex, st, now, window)
+            t0, dep_t0 = _wd_window(st, now, window)
             wd_ok = True
             try:
-                w_rows, d_rows = fn(env, t0, now)
+                w_rows, d_rows = fn(env, t0, now, dep_t0=dep_t0) if ex == "gate" else fn(env, t0, now)
             except Exception as e:
                 log.warning("%s 입출금 수집 실패(다음 주기 재시도): %s", ex, repr(e)[:140])
                 w_rows, d_rows = [], []
@@ -3979,13 +4079,14 @@ def main():
             new_d = _rows_to_emit(d_rows, seen, seen_txids)
             if new_w or new_d:
                 _invalidate_balance_snapshot(ex)
-                writer.append(_late_tag({"v": 1, "kind": "ex_snapshot", "exchange": ex,
-                                         "ts": now, "deposits": new_d, "withdraws": new_w}, ex))
+                cw.append(_late_tag({"v": 1, "kind": "ex_snapshot", "exchange": ex,
+                                     "ts": now, "deposits": new_d, "withdraws": new_w}, ex))
                 if new_d:
                     depaddr.notify(ex)
                 _mark_seen(new_w + new_d, seen, seen_txids, seen_dest, st.setdefault("pend_ts", {}))
             if wd_ok:
                 st["backfilled_until"] = now
+                _dep_hold_update(ex, st, dep_t0)
             state[ex] = st
             common.atomic_write_json(STATE_PATH, state)
             if new_w or new_d or loud9:
@@ -4016,7 +4117,7 @@ def main():
                     rec9 = {"v": 1, "kind": "exf_fills", "exchange": ex, "ts": now, "fills": new_f[i:i + 500]}
                     if lb9:
                         rec9.update(lb=lb9, lbi=k9, lbn=nch9)
-                    writer.append(_late_tag(rec9, ex, force=bool(lb9)))
+                    cw.append(_late_tag(rec9, ex, force=bool(lb9)))
                 cutoff = (now - 14 * DAY) * 1000
                 for f in new_f:
                     fseen[f["id"]] = f["ts"]
@@ -4092,24 +4193,24 @@ def main():
         if hl_on9:
             try:
                 import hl_spot
-                msg9 = hl_spot.run_pass(state, writer, cfg, now=now, save=lambda: common.atomic_write_json(STATE_PATH, state))
+                msg9 = hl_spot.run_pass(state, cw, cfg, now=now, save=lambda: common.atomic_write_json(STATE_PATH, state))
                 (log.info if msg9.startswith(("ok", "off", "대기")) else log.warning)("hyperliquid 현물: %s", msg9)
             except Exception as e:
                 log.warning("hyperliquid 현물 수집 실패(다음 주기): %s", repr(e)[:160])
         try:
-            dest_backfill_pass(env, state, writer, now, window)
+            dest_backfill_pass(env, state, cw, now, window)
         except Exception as e:
             log.warning("출금 목적지 소급 실패(다음 주기): %s", repr(e)[:160])
         try:
-            krw_backfill_pass(env, state, writer, now, window)
+            krw_backfill_pass(env, state, cw, now, window)
         except Exception as e:
             log.warning("빗썸 원화 입출금 소급 실패(다음 주기): %s", repr(e)[:160])
         try:
-            bybit_internal_pass(env, state, writer, now, window)
+            bybit_internal_pass(env, state, cw, now, window)
         except Exception as e:
             log.warning("바이비트 내부 입금 패스 실패(다음 주기): %s", repr(e)[:160])
         try:
-            pending_recheck_pass(env, state, writer, now, window)
+            pending_recheck_pass(env, state, cw, now, window)
         except Exception as e:
             log.warning("비종결 입출금 재확인 실패(다음 주기): %s", repr(e)[:160])
         for ex9 in sorted(_LATE_CYC["ex"]):

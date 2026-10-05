@@ -36,6 +36,19 @@
 
 > 모든 금액은 금액 랜덤값 모드(실제와 다른 배수)로 찍었고, 주소·별칭·포지션 번호는 가짜로 바꿨어요.
 
+### 새로 생긴 것 — 내 매매를 다르게 보는 화면
+
+| | |
+|---|---|
+| ![타임머신 — 곡선을 끌면 그날의 내 지갑(코인·보관처별 비중)과 '지금 그대로였다면'](docs/screenshots/30_wow_timemachine.png) | ![자금 흐름 지도 — 넣은 돈 → 거래소 → 지갑 → 지금 있는 곳(띠를 누르면 그 길로 간 전송 목록)](docs/screenshots/31_wow_flows.png) |
+| ![팔기 전 미리보기 — 팔 양을 움직이면 예상 실현손익·올해 누적 양도차익(주문은 넣지 않아요)](docs/screenshots/34_wow_sell_preview.png) | ![올해 결산 카드 — 실현·가장 많이 거래한 코인·오래 버틴 코인·수익 난 날, 비율만 보기·이미지 저장](docs/screenshots/32_wow_yearend.png) |
+| ![계획 지키기 점수 — 목표가·손절선(없으면 기본 규칙) 대비 판 매도를 판정, 월별 준수율](docs/screenshots/33_wow_planscore.png) | ![매매 습관 — 요일×시간대별 이익 난 매도 비율·보유 기간별 수익률·판 다음 날 더 오른 비율](docs/screenshots/37_journal_habits.png) |
+| ![지난 1년 하루 실현손익 잔디 — 가장 길게 이긴 흐름·조심할 요일](docs/screenshots/36_daily_heatmap.png) | ![전체 검색(⌘K · /) — 코인·주소·해시·날짜·금액, 필터 문법, '9월에 Base 에서 손해 본 거래' 같은 문장도](docs/screenshots/35_search_palette.png) |
+
+- 대시보드 총자산 곡선에 **'BTC 만 들고 있었다면' · '안 팔았다면'** 비교선을 겹쳐 볼 수 있어요(입출금은 빼고 같은 날 같은 돈으로 계산).
+- 문장 검색은 기본으로 **규칙 변환만** 씁니다(외부 호출 없음). `config.json` 의 `"wow": {"ask_llm": true}` 를 켜면 내 컴퓨터의 `claude` CLI 로도 바꿔 봅니다.
+- 가리기·랜덤값 모드에서는 이 화면들도 금액을 가리고, 검색어 속 금액은 서버로 보내지 않아요.
+
 ### 대시보드
 
 ![대시보드 아래쪽 — 보유 코인 표(오늘 변동·7일 추이)](docs/screenshots/02_dashboard_below.png)
@@ -74,7 +87,7 @@
 
 ![미매칭 — 원가 미확인 유입·스팸 의심](docs/screenshots/11_unmatched.png)
 
-![기타 자산 — 부동산·주식·금·현금·부채(증권사 연결은 미검증)](docs/screenshots/12_other_assets.png)
+![기타 자산 — 부동산·주식·금·현금·부채(증권사 연결은 미검증 · 이 캡처는 자산 이름을 '종류 A' 로 바꿈)](docs/screenshots/12_other_assets.png)
 
 ![기타 자산 › NFT — 추적 중·후보·스팸 접힘 (이 캡처는 컬렉션 이름·바닥가도 가림)](docs/screenshots/12b_other_assets_nft.png)
 
@@ -88,7 +101,7 @@
 |---|---|---|
 | ![지갑 — 주소 여러 개 한 번에 추가](docs/screenshots/14_settings_keys_wallets.png) | ![탐색기 키 — Helius·Etherscan·코인게코 데모·오픈시(값은 가림)](docs/screenshots/14_settings_keys_explorers.png) | ![텔레그램 연결](docs/screenshots/14_settings_keys_telegram.png) |
 
-![텔레그램 알림 — 종류별 켜기·끄기, 추천값, 조용한 시간](docs/screenshots/17_settings_alerts.png)
+![텔레그램 알림 — 즉시 · 하루 요약 · 시스템 3단, 추천값, 조용한 시간](docs/screenshots/17_settings_alerts.png)
 
 ### 모바일
 
@@ -138,7 +151,7 @@ bash tools/setup.sh
 |---|---|---|---|
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | https://dashboard.helius.dev (무료) | Solana 지갑 수집 |
 | `TJ_ETHERSCAN_KEY` | 선택 | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 과거 거래 백필이 수십 배 빨라짐. 없어도 동작 |
-| `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) | NFT 바닥가가 금방 채워짐. 없으면 무키 공용 한도라 처음 몇 시간 걸릴 수 있음 |
+| `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) 또는 유료 **Pro** 키 — 자동 판별 | 키 하나를 코인게코 시세(거래소 값이 없는 코인)·DEX 토큰 시세·원가·차트·NFT 바닥가가 같이 써서 빨라짐. 몫이 모자라거나 실패하면 그 콜만 무키로. 없으면 전부 무키 공용 한도라 느리고 NFT 바닥가는 처음 몇 시간 걸릴 수 있음. 프로 키는 플랜 한도의 10%(기본 · 25·50·80% 선택)만 씀 |
 | `TJ_OPENSEA_KEY` | 선택 | https://docs.opensea.io/reference/api-keys (무료 신청) | 넣으면 EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 원활하게 추적(없거나 실패하면 코인게코) |
 | `UPBIT_ACCESS` · `UPBIT_SECRET` | 선택 | 업비트 › 마이페이지 › Open API 관리 | 업비트 입출금·체결·잔고 |
 | `TJ_BITHUMB_KEY` · `TJ_BITHUMB_SECRET` | 선택 | 빗썸 › 마이페이지 › API 관리 | 빗썸 |
@@ -148,6 +161,8 @@ bash tools/setup.sh
 | `TJ_KUCOIN_KEY` · `TJ_KUCOIN_SECRET` · `TJ_KUCOIN_PASSPHRASE` | 선택 | 쿠코인 › API Management | 쿠코인 |
 | `TJ_GATE_KEY` · `TJ_GATE_SECRET` | 선택 | 게이트 › API Keys | 게이트 |
 | `TJ_TG_TOKEN` · `TJ_TG_CHAT` | 선택 | 텔레그램 @BotFather 로 봇 만들기(마법사가 채팅 ID 를 자동으로 채움) | 텔레그램 알림 |
+
+키마다 받는 법·어디에 쓰는지·없으면 어떻게 되는지는 [docs/API_KEYS.md](docs/API_KEYS.md) 에 정리돼 있습니다.
 
 > **거래소 키는 반드시 '조회(읽기)' 권한만 켜고, IP 화이트리스트를 거세요.**
 > 거래·출금·이체 권한은 절대 켜지 마세요. 바이낸스·바이빗·OKX 는 저장할 때 권한을 확인해 거래·출금·이체가 켜진 키를 거부하고,
@@ -167,6 +182,7 @@ RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐
 | `web.login.enabled` · `session_days` · `idle_days` | 켜짐 · 30 · 7 | 웹 비밀번호 로그인. **키가 없어도 켜짐** — 끄기는 `false` 를 적을 때만. 바꾸면 `pm2 restart tj-web` |
 | `web.login.secure_cookie` | false | true 면 로그인 쿠키에 항상 `Secure`(HTTPS 로만 열 때). HTTPS 리버스 프록시가 `X-Forwarded-Proto: https` 를 붙이면 꺼 둬도 자동으로 붙음 |
 | `web.allowed_hosts` · `web.public_url` | 비어 있음 | 리버스 프록시·터널 도메인(Host 허용) / 텔레그램 알림 '보기' 링크 주소(`https://도메인`만, 비우면 링크 없음) — [아래](#6-화면-열기--다른-기기에서-보기) |
+| `web.behind_proxy` | 없음(false) | true 면 모든 요청을 리버스 프록시 경유로 취급(헤더를 안 붙이는 프록시 뒤 · 첫 비밀번호는 `tools/reset_password.py`) |
 | `web.setup_allow_lan` | 없음(false) | true 면 일반 사설망(192.168.x 등)에서도 설정 API 허용 — 기본은 루프백·테일넷만 |
 | `review.sell_eval_daily_max` · `buy_eval_daily_max` | 0(끔) | AI 매도·매수 평가 하루 상한. 켜려면 예: 20 (`claude` CLI 필요) |
 | `review.coach_role` · `review.known_patterns` | 없음 | AI 일간·주간 리뷰 맞춤 — 첫 줄 트레이더 설명(예: "단타 위주 트레이더") / 지적하지 않을 내 운용 패턴 문장 목록(10개·각 200자) |
@@ -233,6 +249,17 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
     (클라우드플레어 터널은 기본으로 그렇게 합니다). 그 도메인을 `web.allowed_hosts` 에, 알림 링크를 원하면 `"public_url": "https://도메인"` 을 넣으세요.
   - 프록시를 거친 요청은: 로그인 필수 · 첫 비밀번호 만들기 불가 · 내부 토큰 불가 · 전체 로그인 시도 상한 적용 · 쿠키 `Secure` · HSTS ·
     캐시 금지(`Cache-Control: private, no-store` · `Cloudflare-CDN-Cache-Control: no-store`). 로그인 시도 제한은 `X-Forwarded-For` 마지막 값(실제 접속 IP) 기준입니다.
+  - **nginx 예시**(기본 `proxy_pass` 만으로는 헤더가 안 붙습니다 — 아래 네 줄을 꼭 넣으세요):
+    ```nginx
+    location / {
+      proxy_pass http://127.0.0.1:8023;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    ```
+    헤더를 붙일 수 없는 프록시를 쓰거나 확실히 하고 싶으면 `config.json` 에 `"web": {"behind_proxy": true}` — 모든 요청을 프록시 경유로 봅니다
+    (그때 첫 비밀번호는 이 컴퓨터에서 `python3 tools/reset_password.py` 로 만듭니다 · 내부 토큰 조회는 안 됩니다).
   - **`ssh -R`·`socat`·`tailscale serve --tcp`·`ngrok tcp` 같은 순수 TCP 중계로 열지 마세요.** 헤더를 붙이지 않아 이 컴퓨터에서 직접 연 것처럼
     보입니다(첫 비밀번호 만들기·내부 토큰·시도 상한 예외가 밖에 열림). HTTP 를 이해하는 프록시(헤더를 붙이는 것)만 쓰세요.
   - 로그인 화면은 `http://` 로 열렸는데 이 컴퓨터·테일넷 주소가 아니면 '암호화되지 않은 주소' 경고를 띄웁니다(비밀번호·쿠키가 그대로 오감).
@@ -267,25 +294,22 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 ## 텔레그램 알림 설정
 
-텔레그램을 연결하면(설정 마법사 › 텔레그램) **설정 › 알림 (텔레그램)** 에서 알림을 **17가지 종류**별로 고를 수 있습니다.
+텔레그램을 연결하면(설정 마법사 › 텔레그램) **설정 › 알림** 에서 알림을 **세 등급**으로 나눠 받습니다. 꼭 필요한 것만 소리가 나요.
 
-| 종류 | 추천값 |
-|---|---|
-| 봇 이상 경보 — 수집기·원장·서버 문제(발생 → 6시간마다 → 복구) | **항상 켜짐(끌 수 없음)** · 조용한 시간에도 바로 |
-| 09:00 일간 점검 요약 · 목표가·손절 도달 · 의심 토큰·분류 못 한 유입 | 켬 |
-| 잔고 대사 · 거래 분류·동기화 · 백필·재계산 | **연결 후 7일만**(처음 동기화 때만 의미 있음) |
-| 일간 손익 요약(보내는 시각 23:55) · 보유 코인 급등락(1시간 10%·24시간 20%·보유 $1,000 이상) · 큰 입출금($10,000 이상) · LP 범위 이탈 · 스테이블 디페그(±1%) · 선물 청산가 근접(10% 이내) · 기타 자산·증권사 · 기타 | 켬 |
-| AI 일간 복기 도착 · 주간 복기 도착 | 끔(AI 리뷰를 켠 경우에만 의미 있음) |
+| 등급 | 어떻게 오나 | 종류 |
+|---|---|---|
+| 🔴 **즉시** | 지금 폰을 보고 해야 할 일 · 소리 · 조용한 시간에도 바로 | 봇이 멈춤(몇 분 이상 · 끌 수 없음) · 목표가·손절 도달 · 내가 안 한 큰 출금 · 스테이블 가격 이탈 · 선물 청산가 근접 · 보유 코인 급등락(켜도 밤엔 모았다가) |
+| 📋 **하루 요약** | 정한 시각(추천 09:00)에 소리 없이 한 통 · 작은 차트 | 오늘 손익 · 잔고 맞추기 결과 · 처음 보는 토큰 · LP 범위 이탈 · AI 복기 도착 · 기타 자산·증권사 · 안 풀린 봇 문제 · 그 밖의 소식 |
+| **시스템** | 텔레그램으로 보내지 않음(상태 패널·설정의 '지난 7일'에만) | 거래 분류·동기화 · 과거 기록 가져오기·다시 계산 |
 
-- **추천값 3종** — 버튼 하나로 스위치·기준값·조용한 시간을 채웁니다. 손으로 바꾸면 '직접 설정'으로 표시됩니다.
-  - **추천**(새 설치 기본): 위 표대로, 밤 1시~8시는 모아서
-  - **최소**: 봇 이상·목표가·의심 토큰·청산 근접만, 밤 1시~8시는 모아서
-  - **전부**: 모든 알림을 추천 기준값으로, 조용한 시간 없음
-- **조용한 시간** — 정한 시간(추천 01:00~08:00) 동안 온 알림은 모았다가 끝날 때 한 통으로 보냅니다. 봇 이상 경보만 바로 옵니다.
-- 종류마다 켬 · 끔 · 연결 후 7일만 중에서 고르고, 급등락·큰 입출금·디페그·청산 근접·일간 손익은 기준값을 바꿀 수 있습니다.
-- **테스트** 버튼 — 그 종류의 예시 한 통을 20초 안에 보냅니다(예시 값은 가짜, 시간당 6통). 화면에 지난 7일 종류별 보냄·끔·보류 수가 나옵니다.
-- 알림은 시간당 최대 30통, 같은 종류가 몰리면 묶어서 보냅니다. 가짜 전송·주소 오염 같은 확실한 스캠은 설정과 상관없이 항상 걸러 냅니다.
-- 끈 동안 생긴 알림은 보내지 않을 뿐 기록은 남고, 다시 켜면 그 뒤에 들어온 것부터 보냅니다.
+- **추천값 3종** — 버튼 하나로 채웁니다. 손으로 바꾸면 '직접 설정'으로 표시됩니다.
+  - **추천**(새 설치 기본): 즉시 5가지(급등락 제외) + 하루 요약 한 통, 밤 1시~8시는 모아서
+  - **최소**: 즉시 5가지만(요약 없음)
+  - **전부**: 급등락까지 모두
+- 같은 문제는 **두 번만** 알립니다 — 생겼을 때와 풀렸을 때(심해지면 한 번 더). 풀림은 ✅ 로 시작하고 소리가 나지 않아요.
+- **조용한 시간** — 정한 시간 동안 온 알림은 모았다가 끝날 때 한 통으로 보냅니다(즉시 등급은 그대로).
+- 급등락·큰 출금·디페그·청산 근접·손익 기준 시각·요약 시각은 기준값을 바꿀 수 있어요. **테스트** 버튼으로 그 종류의 예시를 받아 볼 수 있습니다(예시 값은 가짜).
+- 가짜 전송·주소 오염 같은 확실한 스캠은 설정과 상관없이 항상 걸러 냅니다. 끈 동안 생긴 알림은 보내지 않을 뿐 기록은 남습니다.
 
 ## 금액 랜덤값 모드
 
@@ -328,7 +352,13 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **총자산에 포함** 스위치(기본 꺼짐) — 켜면 대시보드·기타 자산의 '전체 순자산'에 NFT 줄이 더해집니다(코인 총자산 숫자는 그대로).
 - **바닥가 출처** — Solana = 매직에덴(1시간마다). EVM = `TJ_OPENSEA_KEY` 가 있으면 **오픈시 최우선**(작은 컬렉션까지), 없거나 실패하면 코인게코 NFT.
   코인게코는 키 없이도 되지만 공용 무료 한도라 처음엔 몇 시간 걸릴 수 있어요 — 그동안 화면 위 안내(하루 1회 텔레그램 안내 포함)가 뜨고,
-  무료 **Demo 키**(`TJ_COINGECKO_KEY`)를 **설정 › 연결·키 › 탐색기 키** 에 넣으면 금방 채워집니다. 오픈시 연결은 공개 문서 기준(키 없이 실호출 시험은 못 함).
+  무료 **Demo 키**(`TJ_COINGECKO_KEY`)를 **설정 › 연결·키 › 탐색기 키** 에 넣으면 금방 채워집니다. 유료 **Pro 키**도 같은 칸에 넣으면 됩니다 —
+  저장·연결 테스트 때 데모/프로를 자동으로 판별하고(프로는 주소가 `pro-api.coingecko.com` 으로 다름), 프로 키는 보통 다른 곳에서도 쓰는 키라
+  코인게코가 알려 주는 플랜 한도(분당·월)의 **10%** 만 씁니다(같은 화면의 **사용 비율** 버튼으로 25·50·80% 까지 — 80% 가 상한). 한 달 몫은 남은 날에
+  고르게 나누고, 같은 키를 쓰는 다른 곳의 이번 달 사용량이 많으면 그만큼 더 줄여 계정 전체가 80% 를 넘지 않게 합니다.
+  등급·비율·지금 쓰는 몫은 같은 화면에 표시됩니다(키 값은 표시하지 않음).
+  이 키는 NFT 만이 아니라 코인게코 시세·DEX 토큰 시세·원가·차트도 같이 씁니다(하루 몫을 기능별로 나눔 — [docs/API_KEYS.md](docs/API_KEYS.md)).
+  오픈시 연결은 공개 문서 기준(키 없이 실호출 시험은 못 함).
 - 무료 탐색기 API 가 NFT 목록을 주지 않는 체인은 제외되고, NFT 이미지는 외부 주소라 불러오지 않습니다(머리글자 표시). 호출은 무료 한도의 절반 이하로 천천히 합니다.
 
 ## Hyperliquid — 현물 · 무기한 · 스테이킹
@@ -348,6 +378,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **업비트·빗썸의 USDT·BTC 마켓 시세는 쓰지 않습니다**(거래가 얇아 튀는 일이 잦음). 원화 마켓 시세와 원화 환산용 업비트 KRW-USDT 는 그대로 씁니다.
 - **동명 코인 거르기** — 같은 티커라도 다른 코인일 수 있어, 코인게코 매핑이 다른 코인이라고 하거나 기준가와 0.5~2배 넘게 어긋나면 그 거래소 시세를 버리고 사유를 남깁니다.
 - 온체인 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외)로 평가하고, 원가가 필요한데 거래소 1분봉이 같은 코인으로 확인되지 않으면 코인게코(컨트랙트 주소)를 씁니다.
+- **코인게코 키**(`TJ_COINGECKO_KEY`, 선택)가 있으면 코인게코·GeckoTerminal 조회를 키로 먼저 부르고, 키 몫이 모자라거나 실패하면 그 콜만 예전처럼 무키로 부릅니다.
+  순서는 그대로 — 거래소 값이 있는 코인은 코인게코를 부르지 않고, 그 코인의 확인용 조회(동명 거르기 기준가)는 키 몫을 아끼려고 무키로 둡니다.
 
 ## 일별 기록 — 그날 카드 · 'M월 한눈에'
 
@@ -384,7 +416,9 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **LP** — Uniswap v3/v4·PancakeSwap·SushiSwap·Aerodrome/Velodrome Slipstream·Meteora DLMM 등 포지션 원금·수수료 평가.
 - **손익** — 사이클별 투입·실현·미실현, 차익 영수증(매수·매도 한 차트·점수), 월/일 실현손익 달력과 매매 근거 메모,
   전일 대비 분해(시세 몫은 코인별 표), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(CSV).
-- **상태 패널·알림** — 수집기·외부 API 지연, 온체인 잔고 상시 대조(불일치 알림), 원장 정기 백업 상태, 텔레그램 알림 17종(종류별 설정).
+- **내 매매 돌아보기** — 타임머신 · 자금 흐름 지도 · 팔기 전 미리보기 · 올해 결산 · 계획 지키기 점수 · 매매 습관 · 하루 실현 잔디 · BTC 비교선.
+- **전체 검색** — ⌘K(또는 /)로 코인·주소·해시·날짜·금액·메모·리뷰를 한 번에(필터 문법 `coin:` `chain:` `type:` `after:` `pnl:` `amt:` …, 문장 검색).
+- **상태 패널·알림** — 수집기·외부 API 지연, 온체인 잔고 상시 대조(불일치 알림), 원장 정기 백업 상태, 텔레그램 알림 3등급(즉시 · 하루 요약 · 시스템).
 - **가격** — 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외), 거래소 보유분은 그 거래소 원화 시세, 달러 시세는 바이낸스 → 바이빗 → 코인게코
   (업비트·빗썸 USDT·BTC 마켓은 쓰지 않음 · 동명 코인 거르기), 원화 환산은 업비트 KRW-USDT. 금액 랜덤값·가리기 모드로 화면 공유도 안전하게.
 - **AI(선택, 기본 꺼짐)** — 일간·주간 리뷰(`TJ_ENABLE_REVIEW=1 pm2 start ecosystem.config.js` 로 `tj-review` 유닛 추가)와
@@ -456,7 +490,7 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Start:** `bash tools/setup.sh` (creates `config.json`, `.env` (mode 600) and `state/`; installs nothing), then
   `pm2 start ecosystem.config.js` and open http://127.0.0.1:8023/ — a setup wizard handles wallets (paste many at once), keys and Telegram.
   `bash tools/setup.sh --demo` shows synthetic data without saving anything.
-- **Keys:** a free Helius key is required only for Solana wallets; Etherscan, CoinGecko demo and OpenSea keys are optional; exchange keys must be **read-only**
+- **Keys:** a free Helius key is required only for Solana wallets; Etherscan, CoinGecko (demo or pro — detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
   with an IP whitelist (keys with trade/withdraw/transfer permissions are refused where the exchange lets us check).
 - **First run:** the default backfill is the last 5 months; expect minutes to a few hours depending on wallets and trades.
   Progress is shown in the status panel and in Settings > collection limits.
@@ -464,16 +498,27 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   opt in with `"hyperliquid": {"spot": true}`); NFT holdings with floor prices (auto-tracks collections with a floor and recent volume,
   candidate list, spam filtering with reasons, watch-only collections, an "include in total" switch that is off by default, CryptoPunks and
   other pre-ERC-721 NFTs detected automatically; display only, never in the ledger). EVM floors come from OpenSea first when the optional
-  `TJ_OPENSEA_KEY` is set (covers smaller collections), otherwise CoinGecko; an optional free CoinGecko **demo** key (`TJ_COINGECKO_KEY`)
-  fills floors much faster. USD prices follow Binance → Bybit → CoinGecko, Upbit/Bithumb USDT and BTC markets are never used, and same-ticker
+  `TJ_OPENSEA_KEY` is set (covers smaller collections), otherwise CoinGecko; an optional CoinGecko key (`TJ_COINGECKO_KEY` — a free **demo**
+  key or a paid **pro** key; the plan is detected automatically when you save or test it, pro keys use `pro-api.coingecko.com` and, since a pro
+  key is usually shared with other tools, only 10% of the plan's per-minute and monthly limits by default — a "usage share" switch in the same
+  row offers 10/25/50/80%, 80% being the hard cap; the monthly part is spread evenly over the rest of the month and shrinks further when other
+  tools already used most of the month) fills floors much faster. The same key is also used for CoinGecko USD prices of coins no exchange
+  priced, DEX token prices, historical prices for cost basis and charts, and DEX pool candles; when its share runs out or it fails, that call
+  falls back to the old keyless request (see `docs/API_KEYS.md`). USD prices follow Binance → Bybit → CoinGecko, Upbit/Bithumb USDT and BTC markets are never used, and same-ticker
   different coins are filtered out. The daily card breaks the price move down per coin, and a "month at a glance" card sits under the calendar.
-- **Telegram alerts:** 17 categories with per-category on/off/first-7-days, presets (recommended/minimal/all), thresholds and
-  quiet hours; the bot-health alert is always on.
+- **Telegram alerts:** three tiers — **now** (sound, even in quiet hours: bot stopped, target/stop hit, a large withdrawal you did not make,
+  stablecoin depeg, near liquidation, optional big moves), a **daily digest** (one silent message at a set time) and **system** (never sent,
+  status panel only). Presets (recommended/minimal/all), thresholds and quiet hours; the same problem is sent at most twice (raised and ✅ resolved).
+- **Look back at your trading (new):** a time machine (drag the curve to see that day's holdings vs. "if you had held"), a money-flow map
+  (deposits → exchanges → wallets → where it is now), a sell preview (expected realized PnL and this year's taxable gain), a year-end card set,
+  a plan-keeping score, trading habits by weekday/hour and holding time, a one-year realized-PnL heatmap and BTC / "never sold" comparison lines.
+- **Search (new):** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
+  (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested
   against a real account; all are disabled by default.
 - **Privacy:** random-amount mode multiplies amounts by a per-page random factor (never stored) with a "랜덤값" (random) watermark;
   hide mode (Shift+H) blurs amounts. Both are display-only. All screenshots above were taken in random-amount mode with fake addresses
-  and position numbers (NFT collection names and floors are also hidden in the NFT shots).
+  and position numbers (NFT collection names and floors are also hidden in the NFT shots, and other-asset names are replaced with "<type> A").
 - **Login (on by default):** on first run, open http://127.0.0.1:8023/ on the machine itself to create a password (10+ characters);
   every device then needs it. Sessions last 30 days (7 days idle). Passwords are stored as PBKDF2-SHA256 hashes; 5 wrong tries in
   10 minutes lock that IP for 15 minutes (doubling on repeat). Change it or log out everywhere in Settings › 로그인; forgot it →
@@ -482,7 +527,9 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   password on the machine first (other devices get 401 until then).
 - **Reverse proxy / tunnel:** put an HTTP-aware HTTPS proxy (e.g. a Cloudflare tunnel) in front of `http://127.0.0.1:8023`, keep the `Host`
   header, add `X-Forwarded-For` and `X-Forwarded-Proto: https`, and list the domain in `web.allowed_hosts` (`web.public_url` = optional
-  `https://` link for Telegram alerts). With login off, every request carrying proxy headers is refused (403). Proxied requests always need a
+  `https://` link for Telegram alerts). nginx: `proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;` — or set `"web": {"behind_proxy": true}` to treat every request as proxied (create the first
+  password with `python3 tools/reset_password.py`). With login off, every request carrying proxy headers is refused (403). Proxied requests always need a
   session, can't create the first password or use the internal token, count toward the global login limit, and get `Secure` cookies, HSTS
   and `private, no-store` caching. Never use raw TCP forwarders (`ssh -R`, `socat`, `tailscale serve --tcp`, `ngrok tcp`) — they look like
   direct local access. `web.login.secure_cookie: true` forces the `Secure` flag; the login page warns on plain `http://` outside loopback/Tailscale.

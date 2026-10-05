@@ -80,7 +80,7 @@ class Rpc:
     def __init__(self, cfg: dict):
         key = os.environ.get("TJ_HELIUS_KEY", "")
         if not key:
-            envp = os.path.join(common.BASE_DIR, ".env")
+            envp = common.ENV_PATH
             try:
                 with open(envp, "r", encoding="utf-8") as f:
                     for line in f:
@@ -104,6 +104,8 @@ class Rpc:
         self.rl_streak = 0
         self.rl_seen = 0
         self.rl_last = False
+        self.last_src = None
+        self.last_url = None
         self.primary_open_until = 0.0
         self.primary_open_n = 0
         self.quota_open = float(sol.get("quota_open_sec", PRIMARY_QUOTA_OPEN))
@@ -126,11 +128,19 @@ class Rpc:
 
     def call(self, method: str, params, timeout=25):
         self.rl_last = False
+        self.last_src = None
+        self.last_url = None
+        r = self._call_any(method, params, timeout)
+        return r
+
+    def _call_any(self, method: str, params, timeout=25):
         if self.primary_open():
             first = RuntimeError(f"주 RPC 차단 중(쿼터/429) — {self.primary_open_until - time.time():.0f}s 남음")
         else:
             try:
-                return self._call(self.url, method, params, timeout)
+                r = self._call(self.url, method, params, timeout)
+                self.last_src, self.last_url = "primary", self.url
+                return r
             except RateLimited as e:
                 self.rl_streak += 1
                 if e.quota or self.rl_streak >= PRIMARY_TRIP_STREAK:
@@ -139,7 +149,9 @@ class Rpc:
                 else:
                     time.sleep(self._rl_wait(e))
                     try:
-                        return self._call(self.url, method, params, timeout)
+                        r = self._call(self.url, method, params, timeout)
+                        self.last_src, self.last_url = "primary", self.url
+                        return r
                     except RateLimited as e2:
                         self.rl_streak += 1
                         if e2.quota or self.rl_streak >= PRIMARY_TRIP_STREAK:
@@ -154,7 +166,9 @@ class Rpc:
         last = first
         for u in self.fallbacks:
             try:
-                return self._call(u, method, params, timeout)
+                r = self._call(u, method, params, timeout)
+                self.last_src, self.last_url = "fallback", u
+                return r
             except Exception as e:
                 last = e
         raise last
@@ -406,16 +420,20 @@ class SolWatcher:
             if res is None:
                 raise RuntimeError(f"getSignaturesForAddress None ({addr[:8]})")
             rows = res
-            stop = len(rows) < SIG_PAGE
+            short = len(rows) < SIG_PAGE
+            cut_stop = False
             if cutoff:
                 kept = [r for r in rows
                         if not isinstance(r.get("blockTime"), int) or r["blockTime"] >= cutoff]
-                stop = stop or len(kept) < len(rows)
+                cut_stop = len(kept) < len(rows)
                 rows = kept
             if rows:
                 _append(rows)
-            if stop:
+            if cut_stop or (short and self._end_ok(res)):
                 ck["done"] = True
+            elif short:
+                common.atomic_write_json(self.cursor_path, self.cursor)
+                raise self.SpoolPending(f"{addr[:8]} 서명 {ck['n']}건 — 폴백 RPC 의 짧은 페이지(이력 끝 미확인) · 주 RPC 로 끝 확인 대기")
             common.atomic_write_json(self.cursor_path, self.cursor)
             pages += 1
             self.progress.update(f"sol:{addr[:8]}", phase="sigs", unit="sigs", done=int(ck["n"]),
@@ -431,6 +449,33 @@ class SolWatcher:
                 if line.strip():
                     out.append(json.loads(line.decode()))
         return out
+
+    def _end_ok(self, rows=None) -> bool:
+        return getattr(self.rpc, "last_src", "primary") != "fallback"
+
+    FB_MIN_SLOT_TTL = 600
+
+    def _fb_min_slot(self, url):
+        if not url:
+            return None
+        memo = self.__dict__.setdefault("_fb_min_memo", {})
+        ent = memo.get(url)
+        if ent and time.time() - ent[1] < self.FB_MIN_SLOT_TTL:
+            return ent[0]
+        fn = getattr(self.rpc, "_call", None)
+        try:
+            v = fn(url, "minimumLedgerSlot", []) if fn else None
+            v = int(v) if isinstance(v, int) and not isinstance(v, bool) else None
+        except Exception:
+            v = None
+        memo[url] = (v, time.time())
+        return v
+
+    def _cursor_set(self, addr: str, rows: list):
+        self.cursor[addr] = rows[0]["signature"]
+        sl = rows[0].get("slot")
+        if isinstance(sl, int) and not isinstance(sl, bool):
+            self.cursor["_slot:" + addr] = sl
 
     def new_sigs(self, addr: str, cutoff: int = None):
         cut = self.cutoff_ts if cutoff is None else cutoff
@@ -460,6 +505,14 @@ class SolWatcher:
             else:
                 sigs.extend(rows)
             if len(rows) < SIG_PAGE:
+                if not until and not self._end_ok(rows):
+                    raise RuntimeError(f"{addr[:8]} 신규 주소 서명 — 폴백 RPC 의 짧은 페이지(이력 끝 미확인) · 주 RPC 로 다시")
+                if until and not self._end_ok(rows):
+                    us9 = self.cursor.get("_slot:" + addr)
+                    ms9 = self._fb_min_slot(getattr(self.rpc, "last_url", None))
+                    if not (isinstance(us9, int) and isinstance(ms9, int) and ms9 <= us9):
+                        raise RuntimeError(f"{addr[:8]} 서명 — 폴백 RPC 의 짧은 페이지(커서까지 이력 보유 미확인 · 노드 최저 슬롯 {ms9} · 커서 슬롯 {us9})"
+                                           " · 주 RPC 로 다시")
                 break
             if not until and pages == 0:
                 ck = self.cursor["_sigbf:" + addr] = {"n": 0, "off": 0, "before": None, "done": False,
@@ -830,7 +883,11 @@ class SolWatcher:
                     break
                 if int(bt) < hi and not r.get("err"):
                     out.append(r["signature"])
-            if stop or len(res) < 1000:
+            if stop:
+                return list(reversed(out))
+            if len(res) < 1000:
+                if not self._end_ok(res):
+                    raise RuntimeError(f"스테이크 {s[:8]} 서명 — 폴백 RPC 의 짧은 페이지(이력 끝 미확인) · 다음 주기")
                 return list(reversed(out))
             before = res[-1]["signature"]
         raise RuntimeError(f"스테이크 서명 50쪽 상한({s[:8]})")
@@ -1071,13 +1128,14 @@ class SolWatcher:
                     self.progress.finish(f"sol:{a[:8]}", note=f"서명 {len(rows)}건 처리")
                 if a not in active_addrs:
                     self.cursor.pop(a, None)
+                    self.cursor.pop("_slot:" + a, None)
                     continue
                 if not self.cursor.get(a) and "_cov_ts:" + a not in self.cursor:
                     self.cursor["_cov_ts:" + a] = int(self.cutoff_ts or 0)
                     if rows:
                         self.cursor["_cov_sig:" + a] = rows[-1]["signature"]
                 if rows:
-                    self.cursor[a] = rows[0]["signature"]
+                    self._cursor_set(a, rows)
                 else:
                     self.cursor.setdefault(a, "")
             if full and len(addr_sigs) == len(dict.fromkeys(addrs)):

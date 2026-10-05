@@ -142,7 +142,7 @@ def budget_left():
     return None if b is None else _bud_left(b)
 
 
-def _get(url, headers=None, timeout=20.0, deadline=None, inline_wait=10.0):
+def _get(url, headers=None, timeout=20.0, deadline=None, inline_wait=10.0, gate_host=None, single=False):
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     dl = getattr(_TL, "dl", None)
     if dl is not None:
@@ -152,7 +152,8 @@ def _get(url, headers=None, timeout=20.0, deadline=None, inline_wait=10.0):
         deadline = dl if deadline is None else min(deadline, dl)
         timeout = max(0.05, min(float(timeout), left))
         inline_wait = min(inline_wait, left)
-    tries = 3 if inline_wait > 10 else 2
+    tries = 1 if single else (3 if inline_wait > 10 else 2)
+    gk9 = {"gate_host": gate_host} if gate_host else {}
     bud = getattr(_TL, "bud", None)
     for i in range(tries if bud is not None else 1):
         sem_to = max(0.05, (deadline - time.time())) if deadline is not None else float(timeout)
@@ -167,10 +168,10 @@ def _get(url, headers=None, timeout=20.0, deadline=None, inline_wait=10.0):
             CALLS["by_host"][host] = CALLS["by_host"].get(host, 0) + 1
         if bud is None:
             return bf_engine.http_json(url, headers=headers, timeout=timeout, retries=tries, retry_5xx=True,
-                                       deadline=deadline, max_inline_wait=inline_wait, breaker_5xx=True, sem_timeout=sem_to)
+                                       deadline=deadline, max_inline_wait=inline_wait, breaker_5xx=True, sem_timeout=sem_to, **gk9)
         try:
             return bf_engine.http_json(url, headers=headers, timeout=timeout, retries=1, retry_5xx=True,
-                                       deadline=deadline, max_inline_wait=inline_wait, breaker_5xx=True, sem_timeout=sem_to)
+                                       deadline=deadline, max_inline_wait=inline_wait, breaker_5xx=True, sem_timeout=sem_to, **gk9)
         except bf_engine.NetError as e:
             if e.kind not in bf_engine.RETRYABLE or e.kind == "quota" or i + 1 >= tries or _bud_left(bud) <= 0:
                 raise
@@ -179,6 +180,30 @@ def _get(url, headers=None, timeout=20.0, deadline=None, inline_wait=10.0):
                 raise
             time.sleep(wait)
     raise bf_engine.NetError("요청 실패", "other", host=host)
+
+
+def _keyed(url, lane, allow, valid, deadline):
+    if not allow:
+        return "skip", "allow"
+    try:
+        import cgkey
+    except Exception:
+        return "skip", "import"
+    if not cgkey.key():
+        return "skip", "nokey"
+    if url.startswith("https://api.coingecko.com/api/v3"):
+        path = url[len("https://api.coingecko.com/api/v3"):]
+    elif url.startswith(cgkey.GT_ROOT):
+        path = cgkey.onchain(url)
+    else:
+        return "skip", "url"
+
+    def via(u, h, g):
+        return _get(u, headers=h, gate_host=g, single=True, deadline=deadline, inline_wait=10.0)
+    kind, v = cgkey.request(path, lane, via, valid=valid)
+    if kind == "fail":
+        cgkey.mark_fallback(lane)
+    return kind, v
 
 
 def _f(x):
@@ -639,7 +664,7 @@ def find_pool(chain, token, tx_addrs=(), now=None):
     return best, None, calls
 
 
-def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute"):
+def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True):
     now = now or time.time()
     net = GT_NETWORK.get(chain)
     if not net or not pool:
@@ -682,7 +707,13 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute"):
             calls += 1
             pages += 1
             try:
-                d = _get(url, headers={"Accept": "application/json;version=20230302"}, deadline=deadline, inline_wait=30.0)
+                kind9, kv9 = _keyed(url, "past", keyed, lambda d9: parse_gt(d9) is not None, deadline)
+                if kind9 == "ok":
+                    d = kv9
+                elif kind9 == "err":
+                    raise kv9
+                else:
+                    d = _get(url, headers={"Accept": "application/json;version=20230302"}, deadline=deadline, inline_wait=30.0)
             except bf_engine.NetError as e:
                 if getattr(e, "kind", "") == "budget":
                     return Result(why="time", note="GeckoTerminal 조회 시간 초과(요청 마감)", calls=calls)
@@ -975,7 +1006,7 @@ def parse_cg_range(d):
     return out
 
 
-def fetch_cg(chain, token, t0, t1, now=None):
+def fetch_cg(chain, token, t0, t1, now=None, keyed=True):
     now = now or time.time()
     plat = CG_PLATFORM.get(chain)
     if not plat or not token:
@@ -999,7 +1030,14 @@ def fetch_cg(chain, token, t0, t1, now=None):
     url = (f"https://api.coingecko.com/api/v3/coins/{plat}/contract/{urllib.parse.quote(tk, safe='')}/market_chart/range"
            f"?vs_currency=usd&from={t0d}&to={t1d}")
     try:
-        d = _get(url, deadline=time.time() + DEADLINE_S + 60, inline_wait=60.0)
+        dl9 = time.time() + DEADLINE_S + 60
+        kind9, kv9 = _keyed(url, "past", keyed, lambda d9: parse_cg_range(d9) is not None, dl9)
+        if kind9 == "ok":
+            d = kv9
+        elif kind9 == "err":
+            raise kv9
+        else:
+            d = _get(url, deadline=dl9, inline_wait=60.0)
     except BudgetExceeded as e:
         return Result(why="budget", note=common.safe_err(e))
     except bf_engine.NetError as e:
@@ -1143,7 +1181,7 @@ def holder_cg_id(holder, base, now=None, fetch=True):
     return next(iter(h)) if h and len(h) == 1 else None
 
 
-def fetch_cg_id(cid, t0, t1, now=None):
+def fetch_cg_id(cid, t0, t1, now=None, keyed=True):
     now = now or time.time()
     if not cid or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,99}", str(cid)):
         return Result(why="unsupported", note="코인게코 id 없음")
@@ -1163,7 +1201,14 @@ def fetch_cg_id(cid, t0, t1, now=None):
             return Result(candles=c["candles"] or None, why=None if c["candles"] else (c.get("why") or "no_data"), note=c.get("note"), cached=True)
     url = f"https://api.coingecko.com/api/v3/coins/{cid}/market_chart/range?vs_currency=usd&from={t0d}&to={t1d}"
     try:
-        d = _get(url, deadline=time.time() + DEADLINE_S + 60, inline_wait=60.0)
+        dl9 = time.time() + DEADLINE_S + 60
+        kind9, kv9 = _keyed(url, "past", keyed, lambda d9: parse_cg_range(d9) is not None, dl9)
+        if kind9 == "ok":
+            d = kv9
+        elif kind9 == "err":
+            raise kv9
+        else:
+            d = _get(url, deadline=dl9, inline_wait=60.0)
     except BudgetExceeded as e:
         return Result(why="budget", note=common.safe_err(e))
     except bf_engine.NetError as e:
@@ -1195,14 +1240,22 @@ def _cg_error_body(d) -> bool:
     return er9 is not None and not (isinstance(er9, dict) and "usd" in er9)
 
 
-def cg_simple_usd(ids, now=None, ttl=600, fail=None):
+def cg_simple_usd(ids, now=None, ttl=600, fail=None, keyed=False, key_only=False):
     now = now or time.time()
     ids = sorted({str(i) for i in ids or () if i and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,99}", str(i))})
     want = [i for i in ids if not (i in _CG_SIMPLE and now - _CG_SIMPLE[i][0] < ttl)]
     if want:
+        u9 = "https://api.coingecko.com/api/v3/simple/price?ids=" + urllib.parse.quote(",".join(want[:100])) + "&vs_currencies=usd"
         try:
-            d = _get("https://api.coingecko.com/api/v3/simple/price?ids=" + urllib.parse.quote(",".join(want[:100])) + "&vs_currencies=usd",
-                     deadline=time.time() + 30, inline_wait=10.0)
+            kind9, kv9 = _keyed(u9, "live", keyed or key_only, lambda d9: not _cg_error_body(d9), time.time() + 30)
+            if kind9 == "ok":
+                d = kv9
+            elif kind9 == "err":
+                d = None
+            elif key_only:
+                return {i: _CG_SIMPLE[i][1] for i in ids if i in _CG_SIMPLE and _CG_SIMPLE[i][1]}
+            else:
+                d = _get(u9, deadline=time.time() + 30, inline_wait=10.0)
         except (BudgetExceeded, bf_engine.NetError):
             d = None
         if d is None or _cg_error_body(d):

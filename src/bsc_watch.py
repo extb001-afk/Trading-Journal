@@ -22,6 +22,30 @@ BLOCKS_PER_DAY = 28800
 CALL_SLEEP = 0.25
 
 
+_now = time.time
+NONCE_EVERY = 3600
+NONCE_MAX_FIND = 3
+NONCE_CALL_CAP = 80
+
+
+class _SentTap:
+
+    def __init__(self, inner, owner):
+        self.inner = inner
+        self._owner = owner
+
+    def append(self, rec):
+        r = self.inner.append(rec)
+        try:
+            self._owner._nonce_note(rec)
+        except Exception as e:
+            log.debug("nonce 색인 기록 실패: %s", e)
+        return r
+
+    def __getattr__(self, k):
+        return getattr(self.inner, k)
+
+
 def _pad_topic(addr: str) -> str:
     return "0x" + addr.lower().replace("0x", "").rjust(64, "0")
 
@@ -103,7 +127,7 @@ class BscWatcher:
         self.discover_wrap = bc.get("discover_wrap") is not False and bool(self.wrapped_ca)
         self.wallet_since = bf_engine.wallet_since_map(cfg, "bsc")
         self.topics = [_pad_topic(w) for w in self.wallets]
-        self.writer = writer
+        self.writer = _SentTap(writer, self)
         self.cursor_path = os.path.join(common.STATE_DIR, "cursor_bsc.json")
         self.cursor = common.read_json(self.cursor_path, {})
         self.meta_path = os.path.join(common.STATE_DIR, "bsc_token_meta.json")
@@ -662,6 +686,206 @@ class BscWatcher:
         common.atomic_write_json(self.cursor_path, self.cursor)
         return n
 
+    def _nonce_path(self) -> str:
+        return os.path.join(common.STATE_DIR, "bsc_nonce.json")
+
+    def _nonce_load(self) -> dict:
+        d = getattr(self, "_nonce_st", None)
+        if d is None:
+            d = common.read_json(self._nonce_path(), {})
+            if not isinstance(d, dict) or not isinstance(d.get("w"), dict):
+                d = {"w": {}}
+            self._nonce_st = d
+        return d
+
+    def _nonce_note(self, rec: dict):
+        st = self._nonce_load()
+        if not st.get("boot"):
+            return
+        tx = ((rec or {}).get("snapshot") or {}).get("tx") or {}
+        fr = str(tx.get("from") or "").lower()
+        if fr not in self.wallets:
+            return
+        try:
+            b = int(tx.get("block_number"))
+        except (TypeError, ValueError):
+            return
+        ws = st["w"].setdefault(fr, {})
+        hs = ws.setdefault("hashes", {})
+        h = str(rec.get("txhash") or tx.get("hash") or "").lower()
+        if h and h not in hs:
+            hs[h] = b
+            ws["blocks"] = sorted(hs.values())
+            common.atomic_write_json(self._nonce_path(), st)
+
+    def _nonce_boot(self, st: dict) -> bool:
+        if st.get("boot"):
+            return True
+        if not os.path.exists(common.DB_PATH):
+            return False
+        import sqlite3
+        try:
+            con = sqlite3.connect("file:" + common.DB_PATH + "?mode=ro", uri=True, timeout=10)
+            try:
+                rows = con.execute("SELECT txhash, block, json_extract(snapshot, '$.tx.from') FROM raw_txs WHERE chain='bsc'").fetchall()
+            finally:
+                con.close()
+        except Exception as e:
+            log.info("BSC nonce 색인 부트스트랩 실패(다음 기회): %s", str(e)[:120])
+            return False
+        mine = set(self.wallets)
+        for h, b, fr in rows:
+            fr = str(fr or "").lower()
+            if fr in mine and b is not None:
+                st["w"].setdefault(fr, {}).setdefault("hashes", {})[str(h).lower()] = int(b)
+        for w, ws in st["w"].items():
+            ws["blocks"] = sorted((ws.get("hashes") or {}).values())
+        st["boot"] = int(_now())
+        common.atomic_write_json(self._nonce_path(), st)
+        log.info("BSC nonce 색인 부트스트랩: 원장 발신 tx %d건", sum(len(ws.get("hashes") or {}) for ws in st["w"].values()))
+        return True
+
+    def _nonce_pass(self, head: int) -> int:
+        st = self._nonce_load()
+        if _now() - float(st.get("at") or 0) < NONCE_EVERY:
+            return 0
+        st["at"] = int(_now())
+        lo_blk = self.cursor.get("_cov") if isinstance(self.cursor.get("_cov"), int) else self.cursor.get("_bf_start")
+        if not isinstance(lo_blk, int) or lo_blk <= 0:
+            return 0
+        safe = int(head) - self.conf_depth
+        if safe <= lo_blk:
+            return 0
+        if not self._nonce_boot(st):
+            return 0
+        busy = set((self.cursor.get("_neww") or {}).get("wallets") or []) if isinstance(self.cursor.get("_neww"), dict) else set()
+        known_set = self.cursor.get("_wallets")
+        calls = [0]
+        n_emit = 0
+        n_found = 0
+        base_rpc = self.rpc
+
+        def charge(n):
+            if calls[0] + n > NONCE_CALL_CAP:
+                raise RuntimeError("nonce 확인 호출 상한")
+            calls[0] += n
+
+        class _Metered:
+
+            def call(self, m, p, *a, **kw):
+                charge(1)
+                return base_rpc.call(m, p, *a, **kw)
+
+            def batch(self, items, *a, **kw):
+                charge(len(items))
+                return base_rpc.batch(items, *a, **kw)
+
+            def __getattr__(self, k):
+                return getattr(base_rpc, k)
+
+        def rpc(m, p):
+            return self.rpc.call(m, p)
+
+        nmemo = {}
+
+        def nonce_at(w9, b9):
+            k9 = (w9, int(b9))
+            if k9 not in nmemo:
+                nmemo[k9] = int(rpc("eth_getTransactionCount", [w9, hex(int(b9))]), 16)
+            return nmemo[k9]
+
+        wl = list(self.wallets)
+        rr = int(st.get("rr") or 0) % len(wl) if wl else 0
+        order = wl[rr:] + wl[:rr]
+        self.rpc = _Metered()
+        try:
+            for wi, w in enumerate(order):
+                if n_found >= NONCE_MAX_FIND:
+                    break
+                st["rr"] = (rr + wi + 1) % len(wl)
+                if w in busy or (isinstance(known_set, list) and w not in known_set):
+                    continue
+                ws = st["w"].setdefault(w, {})
+                if ws.get("kind") is None:
+                    code = str(rpc("eth_getCode", [w, "latest"]) or "0x").lower()
+                    ws["kind"] = "eoa" if code in ("0x", "0x0", "") or code.startswith("0xef0100") else "contract"
+                if ws["kind"] != "eoa":
+                    continue
+                lo = ws.get("lo")
+                if not (isinstance(lo, list) and len(lo) == 2 and lo[0] == lo_blk):
+                    lo = ws["lo"] = [lo_blk, nonce_at(w, lo_blk)]
+                nmemo[(w, lo_blk)] = lo[1]
+                hs = ws.setdefault("hashes", {})
+                extras = ws.setdefault("nonce_extra", {})
+
+                def known_le(b9, blocks9, ex9=extras):
+                    return sum(1 for b in blocks9 if b <= b9) + sum(int(n9) for k9, n9 in ex9.items() if lo_blk < int(k9) <= b9)
+
+                blocks = sorted(b for b in hs.values() if lo_blk < b <= safe)
+                missing = nonce_at(w, safe) - lo[1] - known_le(safe, blocks)
+                ws["missing"] = missing
+                if missing < 0:
+                    log.info("BSC nonce 확인 %s: 색인 발신 %d > nonce 차 — 건너뜀(원장·색인 불일치)", w[:10], len(blocks))
+                    continue
+                lo_b = lo_blk
+                while missing > 0 and n_found < NONCE_MAX_FIND:
+                    a, z = lo_b, safe
+                    while z - a > 1:
+                        mid = (a + z) // 2
+                        d = nonce_at(w, mid) - lo[1] - known_le(mid, blocks)
+                        if d >= 1:
+                            z = mid
+                        else:
+                            a = mid
+                    blk = rpc("eth_getBlockByNumber", [hex(z), True]) or {}
+                    txs9 = blk.get("transactions")
+                    try:
+                        num9 = int(str(blk.get("number") or "0x0"), 16)
+                    except ValueError:
+                        num9 = -1
+                    if num9 != z or not isinstance(txs9, list) or any(not isinstance(t, dict) or not t.get("from") or not t.get("hash") for t in txs9):
+                        raise RuntimeError(f"블록 {z} 전체 응답 불완전")
+                    mine = [t for t in txs9 if str(t.get("from") or "").lower() == w]
+                    n_found += 1
+                    extra9 = nonce_at(w, z) - nonce_at(w, z - 1) - len(mine)
+                    if extra9 < 0:
+                        raise RuntimeError(f"블록 {z} nonce 증가량({nonce_at(w, z) - nonce_at(w, z - 1)}) < 내 발신 tx {len(mine)}")
+                    if extra9 > 0:
+                        extras[str(z)] = extra9
+                        log.info("BSC nonce 확인 %s: 블록 %d nonce +%d 은 발신 tx 아님(7702 위임 등) — 기록하고 다음으로", w[:10], z, extra9)
+                    if not mine and not extra9:
+                        log.info("BSC nonce 확인 %s: 블록 %d 에 내 발신 tx 없음 — 이번엔 멈춤", w[:10], z)
+                        break
+                    todo = [str(t.get("hash") or "").lower() for t in mine]
+                    new = [h for h in todo if h and h not in self.emitted]
+                    dets = self.fetch_details(new) if new else {}
+                    for h in todo:
+                        if h in new:
+                            snap = dets.get(h)
+                            if not isinstance(snap, dict):
+                                raise RuntimeError(f"상세 실패 {h[:12]}")
+                            self.writer.append({"v": 1, "kind": "evm_tx", "chain": "bsc", "txhash": h, "snapshot": snap,
+                                                "wallets": self.wallets, "observed_head": head, "ts": int(time.time()), "via": "nonce"})
+                            self.emitted.add(h)
+                            n_emit += 1
+                            log.info("★BSC 로그 없는 발신 tx 회수(nonce) %s 블록 %d★", h[:14], z)
+                        hs[h] = z
+                    blocks = sorted(b for b in hs.values() if lo_blk < b <= safe)
+                    missing = nonce_at(w, safe) - lo[1] - known_le(safe, blocks)
+                    ws["missing"] = missing
+                    lo_b = z
+        except Exception as e:
+            log.info("BSC nonce 확인 중단(다음 기회): %s", str(e)[:120])
+        finally:
+            self.rpc = base_rpc
+        for ws in st["w"].values():
+            ws["blocks"] = sorted((ws.get("hashes") or {}).values())
+        common.atomic_write_json(self._nonce_path(), st)
+        if n_emit:
+            common.atomic_write_json(self.meta_path, self.token_meta)
+            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        return n_emit
+
     def _report(self, head: int, since: int, phase: str, note: str = None, flush: bool = False):
         start = self.cursor.get("_bf_start")
         if isinstance(start, int) and head > start:
@@ -699,6 +923,7 @@ class BscWatcher:
             self._health(head, since, True)
             self._extend(head)
             self._new_wallet_pass(head)
+            self._nonce_pass(head)
             return
         safe0 = safe
         t_cycle = time.time()
@@ -771,6 +996,7 @@ class BscWatcher:
             if complete:
                 self._extend(head)
                 self._new_wallet_pass(head)
+                self._nonce_pass(head)
         else:
             sc9 = self.cursor.get("_scan")
             if isinstance(sc9, dict):

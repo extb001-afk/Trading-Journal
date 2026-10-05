@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+import cgplan
 import common
 import demo_data
 import settings_store as ss
@@ -141,6 +142,86 @@ def scrub(msg, extra=()) -> str:
 def _base(name: str, default: str) -> str:
     v = os.environ.get("TJ_TEST_BASE_" + name.upper(), "")
     return v.rstrip("/") if v.startswith("http://127.0.0.1:") else default
+
+
+def _cg_base(plan: str) -> str:
+    real = cgplan.ROOT["pro" if plan == "pro" else "demo"]
+    if plan == "pro":
+        v = os.environ.get("TJ_TEST_BASE_COINGECKO_PRO", "")
+        if not v.startswith("http://127.0.0.1:"):
+            v = os.environ.get("TJ_TEST_BASE_COINGECKO", "")
+        return (v.rstrip("/") + "/api/v3") if v.startswith("http://127.0.0.1:") else real
+    v = _base("coingecko", "")
+    return (v + "/api/v3") if v else real
+
+
+_CG_BUDGET_MSG = {
+    "minute": "코인게코 호출 몫(공표 한도의 80%)이 지금 꽉 찼어요(시세·NFT 조회 중) — 잠시 뒤(1분쯤) 다시 시험하세요",
+    "day": "오늘(이번 달) 쓸 수 있는 코인게코 호출 몫(공표 한도의 80%)을 다 써서 확인하지 않았어요 — 몫이 생기면(하루 뒤·다음 달) 다시 시험하세요",
+    "store": "호출 예산 기록을 확인하지 못해 코인게코를 부르지 않았어요 — 잠시 뒤 다시 시험하세요",
+}
+_CG_PROBE = {}
+_CG_PROBE_TTL = 600
+
+
+def _cg_probe(key: str, cached: bool = False) -> dict:
+    fp = cgplan.kfp(key)
+    now = time.time()
+    c = _CG_PROBE.get(fp)
+    if cached and c and now - c[0] < _CG_PROBE_TTL:
+        return c[1]
+    try:
+        prefer = (cgplan.Store().load(key) or {}).get("plan")
+    except Exception:
+        prefer = None
+
+    def reserve():
+        try:
+            import nft
+            return nft.cg_reserve(key)
+        except Exception as e:
+            log.warning("코인게코 확인 예산 확인 실패: %s", type(e).__name__)
+            return "store"
+    r = cgplan.probe(key, lambda u, h: _http(u, h), base=_cg_base, prefer=prefer, reserve=reserve)
+    if r.get("ok"):
+        if len(_CG_PROBE) > 8:
+            _CG_PROBE.clear()
+        _CG_PROBE[fp] = (now, r)
+    return r
+
+
+def _cg_ours() -> int:
+    try:
+        import nft
+        return nft.shared_budget().month_count("coingecko_key")
+    except Exception:
+        return 0
+
+
+def _cg_status(key: str) -> dict:
+    st = cgplan.Store()
+    try:
+        rec = st.load(key) if key else None
+    except Exception:
+        rec = None
+    return cgplan.status(rec, None, st.share(), _cg_ours())
+
+
+def _cg_record(key: str, r: dict, how: str) -> None:
+    if not r.get("ok"):
+        return
+    now = int(time.time())
+    f = {"plan": r["plan"], "at": now, "how": how}
+    if r["plan"] == "pro" and "info" in r:
+        f["info_try_at"] = now
+        if r.get("info"):
+            f.update(info=r["info"], info_at=now)
+        else:
+            f.update(info=None, info_at=None)
+    try:
+        cgplan.Store().save(key, **f)
+    except Exception as e:
+        log.warning("코인게코 키 등급 기록 실패: %s", type(e).__name__)
 
 
 def _http(url: str, headers=None, data=None, method=None, timeout=12):
@@ -366,7 +447,13 @@ def _test_group(group: str, v: list) -> dict:
             return {"ok": ok, "detail": "Helius 응답 정상 (getHealth)" if ok else _err_text(code, d)}
         if group == "etherscan":
             q = urllib.parse.urlencode({"chainid": 1, "module": "stats", "action": "ethprice", "apikey": v[0]})
-            code, d = _http(_base("etherscan", "https://api.etherscan.io") + "/v2/api?" + q)
+            import bf_engine
+            u9 = _base("etherscan", "https://api.etherscan.io") + "/v2/api?" + q
+            if (urllib.parse.urlsplit(u9).hostname or "").lower() == "api.etherscan.io":
+                if not bf_engine.es_budget_take("web"):
+                    return {"ok": False, "detail": "이더스캔 하루 예산(공표 한도 80% · 수집기와 합산) 소진 — UTC 자정 뒤 다시 확인"}
+                bf_engine.es_dispatch_wait(time.time() + 15)
+            code, d = _http(u9)
             ok = isinstance(d, dict) and str(d.get("status")) == "1"
             return {"ok": ok, "detail": "Etherscan 키 정상" if ok else str((d or {}).get("result") or _err_text(code, d))
                     if isinstance(d, dict) else _err_text(code, d)}
@@ -375,10 +462,20 @@ def _test_group(group: str, v: list) -> dict:
             ok = code == 200 and isinstance(d, dict) and isinstance(d.get("total"), dict)
             return {"ok": ok, "detail": "OpenSea 키 정상 (컬렉션 통계)" if ok else _err_text(code, d)}
         if group == "coingecko":
-            code, d = _http(_base("coingecko", "https://api.coingecko.com") + "/api/v3/ping", {"x-cg-demo-api-key": v[0]})
-            ok = code == 200 and isinstance(d, dict) and "gecko_says" in d
-            st9 = (d.get("status") or {}) if isinstance(d, dict) and isinstance(d.get("status"), dict) else {}
-            return {"ok": ok, "detail": "CoinGecko 데모 키 정상 (ping)" if ok else (str(st9.get("error_message") or "")[:160] or _err_text(code, d))}
+            r = _cg_probe(v[0])
+            if r.get("ok"):
+                t9 = time.time()
+                rec = {"plan": r["plan"], "info": r.get("info"), "info_at": t9 if r.get("info") else None, "info_try_at": t9 if "info" in r else None}
+                tx9 = cgplan.plan_text(rec, t9, cgplan.Store().share(), _cg_ours())
+                det = f"CoinGecko {cgplan.PLAN_KO[r['plan']]} 키 정상 — {tx9}"
+                if r["plan"] == "pro" and not r.get("info_ok"):
+                    det += " (사용량 /key 를 못 읽었어요 — 확인될 때까지 데모 수준으로만 써요)"
+                return {"ok": True, "detail": det, "cg": {"plan": r["plan"], "text": tx9}, "_cg": r}
+            if r.get("budget"):
+                return {"ok": False, "detail": _CG_BUDGET_MSG.get(r["budget"], _CG_BUDGET_MSG["store"])}
+            if r.get("rejected"):
+                return {"ok": False, "detail": r.get("detail") or "CoinGecko 가 키를 거부했습니다"}
+            return {"ok": False, "detail": "CoinGecko 연결 실패 — " + str(r.get("detail") or "응답 없음") + " · 잠시 뒤 다시 시험하세요"}
         if group in ("upbit", "bithumb"):
             base = _base(group, "https://api.upbit.com" if group == "upbit" else "https://api.bithumb.com")
             pl = {"access_key": v[0], "nonce": str(uuid.uuid4())}
@@ -712,7 +809,7 @@ def status() -> dict:
         "needsSetup": not DEMO and not wl and not st.get("onboarded"), "onboarded": bool(st.get("onboarded")),
         "wallets": wl, "chains": [{"key": k, "name": n} for k, n in ss.evm_chains(raw)],
         "solNeedsHelius": (raw.get("sol") or {}).get("rpc") == "helius",
-        "explorers": {k: grp(g) for k, g in ss.EXPLORERS.items()},
+        "explorers": _explorers_status(grp),
         "exchanges": exs,
         "telegram": {"connected": tg_set, "bot": tgs.get("bot") if tg_set else None,
                      "chatName": tgs.get("chat_name") if tg_set else None,
@@ -726,6 +823,19 @@ def status() -> dict:
         "depaddr": dep,
         "perp": _perp_status(raw),
     }
+
+
+def _explorers_status(grp) -> dict:
+    out = {k: grp(g) for k, g in ss.EXPLORERS.items()}
+    cg = out.get("coingecko")
+    if cg is not None:
+        cg["plan"] = None
+        if cg.get("set"):
+            try:
+                cg["plan"] = _cg_status(ss.env_value(cgplan.ENV_KEY))
+            except Exception:
+                cg["plan"] = cgplan.status(None)
+    return out
 
 
 def _perp_status(raw) -> dict:
@@ -899,6 +1009,12 @@ def _dispatch(act: str, b: dict) -> dict:
     if act == "wallets/label":
         n = ss.rename_wallet(b.get("address"), b.get("label"))
         return {"ok": bool(n), **({} if n else {"error": "없는 주소입니다"})}
+    if act == "keys/cgshare":
+        v = b.get("share")
+        if not cgplan.valid_share(v):
+            return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
+        cgplan.Store().set_share(v)
+        return {"ok": True, "share": v, "cg": _cg_status(ss.env_value(cgplan.ENV_KEY))}
     if act in ("keys/save", "keys/test", "keys/delete"):
         g = str(b.get("group") or "")
         if g not in ss.GROUPS:
@@ -908,6 +1024,12 @@ def _dispatch(act: str, b: dict) -> dict:
             ss.write_env({k: None for k in fields})
             if g in ss.EXCHANGES:
                 _perm_record(g, None)
+            if g == "coingecko":
+                _CG_PROBE.clear()
+                try:
+                    cgplan.Store().clear()
+                except Exception:
+                    pass
             return {"ok": True}
         vals_in = b.get("values") if isinstance(b.get("values"), dict) else {}
         vals = {}
@@ -918,6 +1040,35 @@ def _dispatch(act: str, b: dict) -> dict:
             if not all(vals.values()):
                 return {"ok": False, "error": "모든 칸을 채우세요"}
             rec = None
+            if g == "coingecko":
+                lim = _limited("save:" + g, 8, 60)
+                if lim:
+                    lim["error"] = "저장을 너무 자주 눌렀습니다 — 1분 뒤 다시"
+                    return lim
+                key9 = vals[fields[0]]
+                r9 = _cg_probe(key9, cached=True)
+                if not r9.get("ok") and r9.get("rejected"):
+                    return {"ok": False, "error": "CoinGecko 가 이 키를 받지 않았어요 — 저장하지 않았습니다 (" + scrub(r9.get("detail") or "거부", [key9]) + ")"}
+                ss.write_env(vals)
+                if r9.get("ok"):
+                    _cg_record(key9, r9, "save")
+                else:
+                    try:
+                        if cgplan.Store().load(key9) is None:
+                            cgplan.Store().clear()
+                    except Exception:
+                        pass
+                try:
+                    st9 = _cg_status(key9)
+                except Exception:
+                    st9 = cgplan.status(None)
+                if r9.get("ok"):
+                    note9 = {}
+                elif r9.get("budget"):
+                    note9 = {"note": "지금은 코인게코 호출 몫(공표 한도의 80%)이 없어 확인을 미뤘어요 — 등급(데모·프로)은 몫이 생기면 자동으로 판별해요"}
+                else:
+                    note9 = {"note": "코인게코 연결을 확인하지 못해 등급(데모·프로)은 첫 조회 때 자동으로 판별해요 — " + scrub(r9.get("detail") or "", [key9])}
+                return {"ok": True, "cg": st9, **note9}
             if g in ss.EXCHANGES:
                 lim = _limited("save:" + g, 8, 60) if g in PERM_VERIFIABLE else None
                 if lim:
@@ -942,6 +1093,9 @@ def _dispatch(act: str, b: dict) -> dict:
         stored = ss.read_env()
         vals = {k: (vals[k] or stored.get(k, "")) for k in fields}
         r = test_group(g, vals)
+        cg9 = r.pop("_cg", None)
+        if g == "coingecko" and cg9 and cg9.get("ok") and vals.get(fields[0]) and vals[fields[0]] == ss.env_value(fields[0]):
+            _cg_record(vals[fields[0]], cg9, "test")
         r["detail"] = scrub(r.get("detail") or "", vals.values())
         r["warn"] = [scrub(w, vals.values()) for w in r.get("warn") or []]
         p9 = r.get("perm")

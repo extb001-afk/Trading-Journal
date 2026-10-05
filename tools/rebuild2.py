@@ -87,7 +87,17 @@ def snapshot_from(baseline_dir: str, shadow_dir: str) -> tuple:
     for f in os.listdir(baseline_dir):
         if (f.endswith(".json") or f.endswith(".jsonl") or f == "backfill_done") and f != "rebuild2_report.json":
             shutil.copy2(os.path.join(baseline_dir, f), os.path.join(shadow_dir, f))
+    _copy_seed_local(baseline_dir, shadow_dir)
     return dst, baseline
+
+
+def _copy_seed_local(src_state: str, shadow_dir: str) -> None:
+    dst9 = os.path.join(shadow_dir, "seed_local")
+    if os.path.isdir(dst9):
+        shutil.rmtree(dst9)
+    src9 = os.path.join(src_state, "seed_local")
+    if os.path.isdir(src9):
+        shutil.copytree(src9, dst9)
 
 
 def snapshot_live(shadow_dir: str) -> tuple:
@@ -124,6 +134,7 @@ def snapshot_live(shadow_dir: str) -> tuple:
         p = os.path.join(LIVE_STATE, f)
         if os.path.exists(p):
             shutil.copy2(p, os.path.join(shadow_dir, f))
+    _copy_seed_local(LIVE_STATE, shadow_dir)
     return dst, baseline
 
 
@@ -404,6 +415,8 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
             continue
         sym9 = sh_idx.sym_of.get(aid, "")
         key = ("aid", aid, loc) if sk == "opening" else ("sym", sym9, loc)
+        ldec9 = live_idx.meta_dec.get(aid, 18) if key[0] == "aid" else dec
+        rescale9 = (Decimal(10) ** int(ldec9)) / (Decimal(10) ** int(dec)) if ldec9 != dec else None
         tgt_aid, tgt_dec = aid, dec
         if loc == "exchange:upbit":
             tgt_aid, tgt_dec = core._upbit_asset(sym9), 8
@@ -414,7 +427,10 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         seen_leg.add((key, T, sid))
         with localcontext() as ctx:
             ctx.prec = DECIMAL_PREC
-            actual = live_then + q_live
+            if rescale9 is not None:
+                actual = (live_then + _qty_norm(qb, ldec9)) * rescale9
+            else:
+                actual = live_then + q_live
             new_q = q_live if dup_leg else actual - sh_then
             scaled = new_q * (Decimal(10) ** tgt_dec)
             new_qb = int(scaled.to_integral_value())
@@ -503,6 +519,9 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         dts = _ts(p, ("done_at", "created_at"))
         if t0 and dts is not None and dts < t0:
             _before_window.add(r[0])
+            continue
+        if dts is None and iso:
+            g.setdefault("_held_no_time", []).append(r[0])
             continue
         total += 1
         try:
@@ -637,6 +656,8 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         if t0 and wts is not None and wts < t0:
             wd_before += 1
             continue
+        if wts is None and iso:
+            continue
         wd_total += 1
         got = wd_post.get(r[0])
         if got is None:
@@ -660,6 +681,8 @@ def gates(b, t0: int = 0, iso=None) -> dict:
             continue
         wts = _ts(p, ("created_at", "done_at"))
         if t0 and wts is not None and wts < t0:
+            continue
+        if wts is None and iso:
             continue
         wd_elig.add(r[0])
     wd_extra = sorted(set(wd_post) - wd_elig)
@@ -763,6 +786,119 @@ def gates(b, t0: int = 0, iso=None) -> dict:
     return g
 
 
+def cost_lost(a, b, top: int = 10) -> dict:
+    lost = {}
+    nul = {(r[0], r[1], r[2], int(r[3])): (r[4], r[5]) for r in b.execute(
+        "SELECT source_kind, source_ns, source_id, leg_seq, leg_kind, event FROM postings WHERE cost_usd IS NULL")}
+    if nul:
+        for r in a.execute("SELECT source_kind, source_ns, source_id, leg_seq, cost_usd, asset_id FROM postings WHERE cost_usd IS NOT NULL"):
+            k = (r[0], r[1], r[2], int(r[3]))
+            if k in nul:
+                try:
+                    cu = float(r[4])
+                except (TypeError, ValueError):
+                    cu = 0.0
+                lost[k] = (cu, r[5], nul[k])
+    rows = sorted(lost.items(), key=lambda kv: -abs(kv[1][0]))
+    syms = {}
+    for k, (cu, aid, lk) in rows[:top]:
+        if aid not in syms:
+            s9 = a.execute("SELECT symbol FROM assets WHERE asset_id=?", (aid,)).fetchone()
+            syms[aid] = (s9[0] if s9 else None) or f"#{aid}"
+    return {"n": len(lost), "usd": round(sum(abs(v[0]) for v in lost.values()), 2),
+            "top": [{"key": list(k), "sym": syms.get(aid), "leg": lk[0], "event": lk[1], "cost_baseline": round(cu, 2)} for k, (cu, aid, lk) in rows[:top]]}
+
+
+def carry_costs(baseline_db: str, conn) -> dict:
+    base = _ro(baseline_db, immutable=True)
+    try:
+        bdec = {int(r[0]): r[1] for r in base.execute("SELECT asset_id, decimals FROM assets")}
+        bmap = {(r[0], r[1], r[2], int(r[3])): r[4:] for r in base.execute(
+            "SELECT source_kind, source_ns, source_id, leg_seq, asset_id, qty_base, leg_kind, event, cost_usd, cost_krw"
+            " FROM postings WHERE cost_usd IS NOT NULL AND leg_kind != 'opening'")}
+    finally:
+        base.close()
+    sdec = {int(r[0]): r[1] for r in conn.execute("SELECT asset_id, decimals FROM assets")}
+    n = skip_dec = 0
+    usd = 0.0
+    for r in conn.execute("SELECT posting_id, source_kind, source_ns, source_id, leg_seq, asset_id, qty_base, leg_kind, event FROM postings"
+                          " WHERE cost_usd IS NULL AND leg_kind != 'opening'").fetchall():
+        b9 = bmap.get((r[1], r[2], r[3], int(r[4])))
+        if not b9 or int(b9[0]) != int(r[5]) or str(b9[1]) != str(r[6]) or b9[2] != r[7] or b9[3] != r[8]:
+            continue
+        if bdec.get(int(r[5])) != sdec.get(int(r[5])):
+            skip_dec += 1
+            continue
+        conn.execute("UPDATE postings SET cost_usd=?, cost_krw=? WHERE posting_id=?", (b9[4], b9[5], r[0]))
+        n += 1
+        try:
+            usd += abs(float(b9[4]))
+        except (TypeError, ValueError):
+            pass
+    conn.commit()
+    return {"n": n, "usd": round(usd, 2), "skipped_decimals_changed": skip_dec}
+
+
+def apply_dec_pending(conn, state_dir: str) -> dict:
+    dec_pend = {}
+    for k9, it9 in ((common.read_json(os.path.join(state_dir, "asset_decimals_issues.json"), {}) or {}).get("items") or {}).items():
+        if isinstance(it9, dict) and it9.get("kind") == "pending" and isinstance(it9.get("seen"), int) and not isinstance(it9.get("seen"), bool):
+            try:
+                dec_pend[int(k9)] = int(it9["seen"])
+            except (TypeError, ValueError):
+                continue
+    for aid9, dv9 in sorted(dec_pend.items()):
+        conn.execute("UPDATE assets SET decimals=? WHERE asset_id=? AND decimals IS NULL", (dv9, aid9))
+    conn.commit()
+    return dec_pend
+
+
+def dec_unresolved(conn, dec_pend: dict) -> list:
+    return sorted(a9 for a9 in dec_pend
+                  if (conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (a9,)).fetchone() or [0])[0] is None)
+
+
+def _unv_all(fields: dict, rows: list, money) -> dict:
+    u9 = ((fields or {}).get("_diag") or {}).get("unv_all")
+    if isinstance(u9, dict) and u9.get("proceeds") is not None:
+        return {"rows": int(u9.get("rows") or 0), "sum": round(float(u9["proceeds"]), 2), "src": "diag"}
+    return {"rows": len(rows), "sum": round(sum(money(p.get("onchain")) for p in rows), 2), "src": "pendings"}
+
+
+def keep_upbit_anchor_names(baseline_db: str, conn) -> int:
+    base = _ro(baseline_db, immutable=True)
+    try:
+        bl = {}
+        for r in base.execute("SELECT source_id, event_ts, asset_id, qty_base, leg_kind, event FROM postings"
+                              " WHERE source_kind='exchange' AND source_ns='upbit:recon' AND location='exchange:upbit'"):
+            sym9 = str(r[0]).split(":")[1] if str(r[0]).count(":") >= 2 else ""
+            bl.setdefault((sym9, int(r[2])), []).append(r)
+    finally:
+        base.close()
+    new = {}
+    for r in conn.execute("SELECT posting_id, source_id, asset_id, qty_base, classifier_ver FROM postings"
+                          " WHERE source_kind='exchange' AND source_ns='upbit:recon' AND location='exchange:upbit'").fetchall():
+        sym9 = str(r[1]).split(":")[1] if str(r[1]).count(":") >= 2 else ""
+        new.setdefault((sym9, int(r[2])), []).append(r)
+    kept = 0
+    for k, rows in new.items():
+        old = bl.get(k)
+        if not old or sum(int(x[3]) for x in rows) != sum(int(x[3]) for x in old):
+            continue
+        if sorted(str(x[1]) for x in rows) == sorted(str(x[0]) for x in old):
+            continue
+        cv9 = rows[0][4]
+        for x in rows:
+            conn.execute("DELETE FROM postings WHERE posting_id=?", (x[0],))
+        for o in old:
+            conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd,"
+                         " cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange', 'upbit:recon', ?, 0, ?, ?, 'exchange:upbit', ?, NULL, NULL,"
+                         " ?, ?, ?)", (o[0], o[1], o[2], o[3], o[4], o[5], cv9))
+        kept += 1
+    conn.commit()
+    return kept
+
+
 def compare(live_db: str, shadow_db: str, t0: int = 0, iso=None) -> dict:
     a, b = _ro(live_db, immutable=True), _ro(shadow_db)
     try:
@@ -821,6 +957,7 @@ def compare(live_db: str, shadow_db: str, t0: int = 0, iso=None) -> dict:
             rep["cost_null"][name] = c.execute(
                 "SELECT count(*) FROM postings WHERE cost_usd IS NULL"
                 " AND leg_kind IN ('acq','disp','gas')").fetchone()[0]
+        rep["cost_lost"] = cost_lost(a, b)
         tr_a = dict(a.execute("SELECT state, count(*) FROM transfers GROUP BY state").fetchall())
         tr_b = dict(b.execute("SELECT state, count(*) FROM transfers GROUP BY state").fetchall())
         rep["transfers"] = {"live": tr_a, "shadow": tr_b}
@@ -1083,9 +1220,12 @@ def main():
         shadow_db, baseline_db = snapshot_live(shadow_dir)
     print(f"[0] 스냅샷 완료 → 작업 {shadow_db} / 기준선 {baseline_db} ({time.time() - t0:.1f}s)")
 
-    common.STATE_DIR = shadow_dir
-    common.DB_PATH = shadow_db
-    common.INBOX_DIR = os.path.join(shadow_dir, "inbox")
+    _live_state = common.STATE_DIR
+    common.rebase_state(shadow_dir, shadow_db)
+    assert common.ACTIVITY_GATE_PATH.startswith(shadow_dir), "활동 게이트 경로가 shadow 밖"
+    common.QUOTA_STATE_DIR = _live_state
+    import nft as _nft9
+    _nft9.BUDGET_PATH = os.path.join(_live_state, "nft_budget.json")
     import pricing
     _px_orig = {k: getattr(pricing.PxCache, k) for k in ("candle_usd", "fx_at", "maybe_save", "flush")}
     _px_mod_orig = {k: getattr(pricing, k) for k in ("_gj", "upbit_krw_markets", "upbit_spot_krw", "_fx_candle_krw_per_usdt")
@@ -1106,6 +1246,8 @@ def main():
     core_mod.time.sleep = lambda *_a, **_k: None
     GEN_NOW = float(bal_ts + 1) if bal_ts else real_time()
     core_mod.time.time = lambda: GEN_NOW
+    _nft9._now = real_time
+    _nft9._SHARED.clear()
     _cb = _ro(baseline_db, immutable=True)
     _bv = _cb.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone(); _cb.close()
     _bv = int(_bv[0]) if _bv else 0
@@ -1116,6 +1258,8 @@ def main():
     _c0.commit(); _c0.close()
     c = core_mod.Core(cfg)
     conn = c.conn
+    if not c.lp_mgrs:
+        raise SystemExit("★LP 관리자 목록 비어 있음(seed/lp_managers.json + state/seed_local) — 재구축 중단★")
     GEN_T0 = c._upbit_window_t0()
     _cb0 = _ro(baseline_db, immutable=True)
     _t0_live = _cb0.execute("SELECT min(event_ts) FROM postings WHERE source_ns IN ('upbit:deposit', 'upbit:withdraw')").fetchone()[0]
@@ -1135,6 +1279,9 @@ def main():
         conn.execute(f"DELETE FROM {t}")
     conn.commit()
     print("[2] 파생 삭제")
+    dec_pend = apply_dec_pending(conn, common.STATE_DIR)
+    if dec_pend:
+        print(f"[2c] decimals 채움 대기 {len(dec_pend)}개 자산에 먼저 반영")
 
     _oc9 = c.outflow_sync_exchange_rows()
     conn.commit()
@@ -1273,6 +1420,9 @@ def main():
     print(f"[5] 가격패스 {passes}회 → 미산정 잔여 {prev} (캐시 hit {px_stats['candle_hit']}"
           f"/miss {px_stats['candle_miss']}, fx hit {px_stats['fx_hit']}/miss {px_stats['fx_miss']})")
     if args.price_online_lp:
+        fixed_time9, fixed_sleep9 = core_mod.time.time, core_mod.time.sleep
+        core_mod.time.time = real_time
+        core_mod.time.sleep = real_sleep
         for k9, f9 in _px_orig.items():
             setattr(pricing.PxCache, k9, f9)
         for k9, f9 in _px_mod_orig.items():
@@ -1299,6 +1449,8 @@ def main():
                 st9 = c.px.prefetch_fx(ms9, max_calls=fx_calls9, deadline=time.time() + 1800)
                 print(f"[5b] 환율 선조회: 분 {len(ms9)} → {st9['calls']}콜 · {st9['filled']}분 채움 ({time.time() - t9:.0f}s)")
         c.px.flush()
+        core_mod.time.time = fixed_time9
+        core_mod.time.sleep = fixed_sleep9
         offline_patch(pricing)
         c.px.fx_at = _offline_fx_scan
         left9 = conn.execute("SELECT count(*) FROM postings WHERE cost_usd IS NULL AND event LIKE 'LP\\_%' ESCAPE '\\'"
@@ -1324,6 +1476,9 @@ def main():
         conn.commit()
         print(f"[5b] 오프라인 재수렴 → 미산정 {prev9} · cost_krw 캐시 보충 {n_krw9}행")
 
+    carry9 = carry_costs(baseline_db, conn)
+    print(f"[5c] 기준선 원가 이월 {carry9['n']}칸 (${carry9['usd']:,.2f}) · 자리수 바뀐 자산이라 건너뜀 {carry9['skipped_decimals_changed']}")
+
     obs = {r[0]: r[1] for r in conn.execute("SELECT obs_id, observed_at FROM raw_observations")}
     meta = {r[0]: int(r[1]) for r in conn.execute("SELECT k, v FROM meta WHERE k LIKE 'recon_done_%'")}
     if args.anchors == "verbatim":
@@ -1346,6 +1501,7 @@ def main():
     c.exchange_recon_pass(drained={"ex"})
     core_mod.time.time = real_time
     core_mod.time.sleep = real_sleep
+    kept6 = keep_upbit_anchor_names(baseline_db, conn)
     after6 = conn.execute("SELECT count(*) FROM postings WHERE source_ns='upbit:recon'").fetchone()[0]
     done6 = conn.execute("SELECT v FROM meta WHERE k='recon_done_upbit'").fetchone()
     try:
@@ -1371,7 +1527,7 @@ def main():
         reason6 = "locked"
     else:
         reason6 = "unknown"
-    anc["upbit_reanchor"] = {"anchors": after6 - before6, "marker": bool(done6), "reason": reason6,
+    anc["upbit_reanchor"] = {"anchors": after6 - before6, "marker": bool(done6), "reason": reason6, "kept_original": kept6,
                              "locked": locked9, "gen_now": GEN_NOW, "gen_t0": GEN_T0}
     diagnostic_only = args.anchors == "verbatim"
     locked_ok = bool(args.allow_locked and not done6 and reason6 == "locked")
@@ -1386,6 +1542,11 @@ def main():
           + f" ({time.time() - t0:.1f}s)")
 
     rep = compare(baseline_db, shadow_db, GEN_T0, core_mod.Core._iso_ts)
+    _cu = _ro(shadow_db)
+    try:
+        rep["decimals_unresolved"] = dec_unresolved(_cu, dec_pend)
+    finally:
+        _cu.close()
     rep["anchors"] = anc
     try:
         rep["G_obs_replay"] = obs_replay_gate(baseline_db, shadow_db, os.path.join(shadow_dir, "spot.json"))
@@ -1462,14 +1623,23 @@ def main():
             risk_b, risk_s = _qset(bb, fb), _qset(b, f)
             rep["G4_vs_baseline"] = {
                 "realized_baseline": round(sum(fb["realizedByDate"].values()), 2),
-                "unverified_baseline": {"rows": len(unv_b), "sum": round(sum(_money(p.get("onchain")) for p in unv_b), 2)},
-                "unverified_shadow": {"rows": len(unv), "sum": round(sum(_money(p.get("onchain")) for p in unv), 2)},
+                "unverified_baseline": _unv_all(fb, unv_b, _money),
+                "unverified_shadow": _unv_all(f, unv, _money),
                 "coins_baseline": len(fb.get("coins") or []), "stables_value_baseline": round(sum((c9.get("qty") or 0) * (c9.get("price") or 0) for c9 in fb.get("stables") or []), 2),
                 "stables_value_shadow": round(sum((c9.get("qty") or 0) * (c9.get("price") or 0) for c9 in f.get("stables") or []), 2),
                 "value_diffs_n": len(vdiff), "value_diffs": vdiff[:20],
                 "value_diff_max_abs": max([abs(x[1] - x[2]) for x in vdiff] or [0]),
                 "risk_set_equal": risk_b == risk_s, "risk_only_baseline": sorted(risk_b - risk_s)[:10],
                 "risk_only_shadow": sorted(risk_s - risk_b)[:10]}
+
+            def _by_month(rbd):
+                o = {}
+                for k9, v9 in (rbd or {}).items():
+                    m9 = str(k9)[:7] if len(str(k9)) >= 10 else "?"
+                    o[m9] = round(o.get(m9, 0.0) + float(v9 or 0), 2)
+                return o
+            rep["G4_vs_baseline"]["realized_by_month_baseline"] = _by_month(fb.get("realizedByDate"))
+            rep["G4_vs_baseline"]["realized_by_month_shadow"] = _by_month(f.get("realizedByDate"))
         except Exception as e:
             web_error = True
             rep["web_shadow"] = {"error": repr(e)[:300]}

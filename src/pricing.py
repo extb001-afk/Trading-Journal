@@ -236,18 +236,45 @@ def cg_body_ok(d) -> bool:
     return not (isinstance(st9, dict) and ("error_code" in st9 or "error_message" in st9)) and d.get("error") is None
 
 
-def cg_points_day(key, url_base, day0, store=None):
+def _cg_keyed(url, lane, allow, valid, timeout=15.0):
+    if not allow:
+        return "skip", "allow"
+    try:
+        import cgkey
+    except Exception:
+        return "skip", "import"
+    if not cgkey.key():
+        return "skip", "nokey"
+    if url.startswith("https://api.coingecko.com/api/v3"):
+        path = url[len("https://api.coingecko.com/api/v3"):]
+    elif url.startswith(cgkey.GT_ROOT):
+        path = cgkey.onchain(url)
+    else:
+        return "skip", "url"
+    kind, v = cgkey.request(path, lane, cgkey.bf_via(timeout), allow=True, valid=valid)
+    if kind == "fail":
+        cgkey.mark_fallback(lane)
+    return kind, v
+
+
+def cg_points_day(key, url_base, day0, store=None, keyed=False):
     dk = f"{key}:{int(day0)}"
     if store is not None and dk in store:
         return store[dk]
     m = _CG_MEM.get(dk)
     if m and time.time() - m[0] < 600:
         return m[1]
-    if not _cg_take():
-        return None
     url = f"{url_base}/market_chart/range?vs_currency=usd&from={int(day0) - 3600}&to={int(day0) + 86400 + 3600}"
+    kind, kv = _cg_keyed(url, "past", keyed, cg_body_ok)
     try:
-        d = _gj(url, timeout=15)
+        if kind == "ok":
+            d = kv
+        elif kind == "err":
+            raise kv
+        else:
+            if not _cg_take():
+                return None
+            d = _gj(url, timeout=15)
         if not cg_body_ok(d):
             return None
         pts = [[int(float(r[0])), float(r[1])] for r in d["prices"] if isinstance(r, list) and len(r) >= 2 and r[1]]
@@ -255,8 +282,11 @@ def cg_points_day(key, url_base, day0, store=None):
         if e.code != 404:
             return None
         pts = []
-    except Exception:
-        return None
+    except Exception as e:
+        if getattr(e, "code", None) == 404 and getattr(e, "kind", "") == "http4xx":
+            pts = []
+        else:
+            return None
     if store is not None and int(day0) + 86400 + 7200 < time.time():
         store[dk] = pts
     else:
@@ -270,7 +300,7 @@ def _c_coingecko(sym, ms):
         return None
     store = _CG_STORE[0]
     pts = cg_points_day(f"id:{cid}", f"https://api.coingecko.com/api/v3/coins/{urllib.parse.quote(cid, safe='')}",
-                        (int(ms) // 1000) // 86400 * 86400, store)
+                        (int(ms) // 1000) // 86400 * 86400, store, keyed=True)
     v = _cg_pts_at(pts, int(ms)) if pts else None
     if v:
         import logging
@@ -703,7 +733,7 @@ class PxCache:
                 return v
             return "legacy" if (self._legacy and key in self.d["candle"] and _key_h(key) in self._legacy) else None
 
-    def cg_usd_at(self, ts_ms: int, chain: str = None, ca: str = None) -> float | None:
+    def cg_usd_at(self, ts_ms: int, chain: str = None, ca: str = None, keyed: bool = False) -> float | None:
         try:
             import candles as _cd
         except Exception:
@@ -719,7 +749,7 @@ class PxCache:
                     store.pop(k9, None)
         n0 = len(store)
         pts = cg_points_day(f"ca:{chain}:{tk}", f"https://api.coingecko.com/api/v3/coins/{plat}/contract/{urllib.parse.quote(tk, safe='')}",
-                            (int(ts_ms) // 1000) // 86400 * 86400, store)
+                            (int(ts_ms) // 1000) // 86400 * 86400, store, keyed=keyed)
         if len(store) != n0:
             with self.lock:
                 self._dirty += 1
@@ -727,7 +757,7 @@ class PxCache:
         return _cg_pts_at(pts, int(ts_ms)) if pts else None
 
     def token_usd_checked(self, sym: str, ts_ms: int, chain: str, ca: str, cex_px: float | None) -> float | None:
-        ref = self.cg_usd_at(ts_ms, chain, ca)
+        ref = self.cg_usd_at(ts_ms, chain, ca, keyed=not cex_px)
         if not ref:
             return None
         if cex_px:
@@ -1157,11 +1187,31 @@ def gt_take_error():
     return e
 
 
+_GT_UNRESOLVED = set()
+
+
+def gt_take_unresolved() -> set:
+    global _GT_UNRESOLVED
+    u, _GT_UNRESOLVED = _GT_UNRESOLVED, set()
+    return u
+
+
 def gt_token_prices(chain: str, cas: list) -> dict:
     return gt_token_prices_ex(chain, cas)[0]
 
 
-def gt_token_prices_ex(chain: str, cas: list):
+def _gt_ok(d):
+    if not isinstance(d, dict) or not isinstance(d.get("data"), dict):
+        return False
+    a = d["data"].get("attributes")
+    if not isinstance(a, dict):
+        return False
+    if isinstance(a.get("total_reserve_in_usd"), dict) or not a.get("token_prices"):
+        return True
+    return "family"
+
+
+def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
     global _GT_ERR
     net = GT_NETWORK.get(chain)
     if not net or not cas:
@@ -1172,8 +1222,16 @@ def gt_token_prices_ex(chain: str, cas: list):
         batch = cas[i:i + 30]
         url = (f"https://api.geckoterminal.com/api/v2/simple/networks/{net}"
                f"/token_price/{','.join(batch)}?include_total_reserve_in_usd=true")
+        keyed9 = False
         try:
-            d = _gj(url, timeout=15)
+            kind9, kv9 = _cg_keyed(url, "live", keyed, _gt_ok)
+            if kind9 == "ok":
+                d = kv9
+                keyed9 = True
+            elif kind9 == "err":
+                raise urllib.error.HTTPError(url.split("?", 1)[0], 404, "Not Found", None, None)
+            else:
+                d = _gj(url, timeout=15)
         except urllib.error.HTTPError as e:
             ra = None
             try:
@@ -1192,35 +1250,67 @@ def gt_token_prices_ex(chain: str, cas: list):
         if not isinstance(d, dict):
             _GT_ERR = ("net", None, "응답 형식 이상")
             continue
-        attrs = ((d.get("data") or {}).get("attributes") or {})
-        prices = attrs.get("token_prices") or {}
-        reserves = attrs.get("total_reserve_in_usd") or {}
-        exact = set(batch)
-        low_map = {}
-        for c in batch:
-            lc = c.lower()
-            low_map[lc] = c if low_map.get(lc, c) == c else None
-        for k, v in prices.items():
+        b_px, b_res = _gt_parse(d, batch)
+        if keyed9:
+            miss9 = [c for c in batch if c in b_px and b_px[c] > 0 and c not in b_res]
+            for c in miss9:
+                b_px.pop(c, None)
+            if miss9:
+                u2 = (f"https://api.geckoterminal.com/api/v2/simple/networks/{net}"
+                      f"/token_price/{','.join(miss9)}?include_total_reserve_in_usd=true")
+                try:
+                    d2 = _gj(u2, timeout=15)
+                    if isinstance(d2, dict):
+                        p2, r2 = _gt_parse(d2, miss9)
+                        b_px.update(p2)
+                        b_res.update(r2)
+                    else:
+                        _GT_UNRESOLVED.update(miss9)
+                except urllib.error.HTTPError as e:
+                    _GT_ERR = ("rate" if e.code == 429 else "http", e.code, "")
+                    if e.code != 404:
+                        _GT_UNRESOLVED.update(miss9)
+                except Exception as e:
+                    _GT_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
+                    _GT_UNRESOLVED.update(miss9)
+                finally:
+                    time.sleep(2.1)
+        out.update(b_px)
+        res_out.update(b_res)
+    return out, res_out
+
+
+def _gt_parse(d, batch):
+    out, res_out = {}, {}
+    attrs = ((d.get("data") or {}).get("attributes") or {})
+    prices = attrs.get("token_prices") or {}
+    reserves = attrs.get("total_reserve_in_usd") or {}
+    exact = set(batch)
+    low_map = {}
+    for c in batch:
+        lc = c.lower()
+        low_map[lc] = c if low_map.get(lc, c) == c else None
+    for k, v in prices.items():
+        try:
+            px = float(v)
+        except (TypeError, ValueError):
+            continue
+        if _fin(px) or (isinstance(px, float) and px == 0.0):
+            orig = k if k in exact else low_map.get(k.lower())
+            if orig is None:
+                continue
+            out[orig] = px
+    if isinstance(reserves, dict):
+        for k, v in reserves.items():
             try:
-                px = float(v)
+                rv = float(v)
             except (TypeError, ValueError):
                 continue
-            if _fin(px) or (isinstance(px, float) and px == 0.0):
-                orig = k if k in exact else low_map.get(k.lower())
-                if orig is None:
-                    continue
-                out[orig] = px
-        if isinstance(reserves, dict):
-            for k, v in reserves.items():
-                try:
-                    rv = float(v)
-                except (TypeError, ValueError):
-                    continue
-                if not (math.isfinite(rv) and rv >= 0):
-                    continue
-                orig = k if k in exact else low_map.get(k.lower())
-                if orig is not None:
-                    res_out[orig] = rv
+            if not (math.isfinite(rv) and rv >= 0):
+                continue
+            orig = k if k in exact else low_map.get(k.lower())
+            if orig is not None:
+                res_out[orig] = rv
     return out, res_out
 
 

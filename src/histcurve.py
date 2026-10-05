@@ -447,9 +447,9 @@ def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, bl
     prevp = {d9: float(v9) for d9, v9 in ((prev or {}).get("p") or {}).items() if v9} if isinstance(prev, dict) else {}
     cgr = {}
 
-    def cg_rows(cid):
+    def cg_rows(cid, keyed=False):
         if cid not in cgr:
-            cgr[cid] = candles.fetch_cg_id(cid, t0, t1, now=now)
+            cgr[cid] = candles.fetch_cg_id(cid, t0, t1, now=now, keyed=keyed)
         return cgr[cid]
 
     own9 = {}
@@ -568,7 +568,7 @@ def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, bl
     def cg_venue(cid):
         if not cid:
             return
-        r = cg_rows(cid)
+        r = cg_rows(cid, keyed=True)
         if r.ok:
             take(r.candles, is_pts=True, label=f"coingecko:{cid}")
         else:
@@ -821,6 +821,11 @@ class HistCurve:
 
     def offer(self, today_iso, kit_fn, now=None) -> bool:
         if not self.need(today_iso, now):
+            if self.kit is None:
+                kit = kit_fn()
+                with self.lock:
+                    if self.kit is None:
+                        self.kit = kit
             return False
         self.last_offer = time.time() if now is None else now
         t9 = time.time()

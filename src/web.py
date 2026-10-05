@@ -1,9 +1,11 @@
 """tj-web: dashboard HTTP server and state builder."""
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import bisect
+import copy
 import hmac
 import json
 import math
@@ -41,6 +43,9 @@ import xfer_match
 import sale_match
 import flow_trace
 import xchain_match
+import search_index
+import wow
+import wow2
 import other_assets
 import nft
 import candles
@@ -183,6 +188,11 @@ def futures_api_payload():
     return out9
 
 
+def review_pause_eff(prefs) -> dict:
+    v = (prefs or {}).get("review_pause")
+    return {"on": bool(isinstance(v, dict) and v.get("on") is True), "at": (v or {}).get("at") if isinstance(v, dict) else None}
+
+
 def review_len_eff(prefs) -> dict:
     if not review_len_key:
         return {}
@@ -199,7 +209,9 @@ UI_DEFAULT = "v2"
 V2_DIR = os.path.join(WEB_DIR, "v2")
 _V2_FILES = {"index.html": "text/html; charset=utf-8",
              "app.js": "application/javascript; charset=utf-8",
-             "health.js": "application/javascript; charset=utf-8"}
+             "health.js": "application/javascript; charset=utf-8",
+             "search.js": "application/javascript; charset=utf-8",
+             "wow.js": "application/javascript; charset=utf-8"}
 
 
 def _ui_route(path: str):
@@ -215,7 +227,7 @@ def _ui_route(path: str):
 _ASSETS = {}
 _ASSETS_LOCK = threading.Lock()
 _V2_JS_RE = re.compile(rb'<script src="/v2/app\.js"></script>')
-_V2_VER_JS = ("health.js",)
+_V2_VER_JS = ("health.js", "search.js")
 
 
 def _asset(fpath: str) -> dict:
@@ -1030,6 +1042,14 @@ def _px1004_spot_filter(ex_usd, ex_ts, d) -> dict:
     return keep9
 
 
+def _cg_key_set() -> bool:
+    try:
+        import cgkey
+        return bool(cgkey.key())
+    except Exception:
+        return False
+
+
 class Spot:
 
     STALE_SEC = 3600
@@ -1165,7 +1185,7 @@ class Spot:
     def _okx_creds():
         creds = {}
         try:
-            with open(os.path.join(common.BASE_DIR, ".env"), "r", encoding="utf-8") as f:
+            with open(common.ENV_PATH, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith("TJ_OKX_KEY="):
@@ -1402,6 +1422,7 @@ class Spot:
         calls = ok = fail = 0
         rate_err = None
         pricing.gt_take_error()
+        pricing.gt_take_unresolved()
         t_start = time.time()
         for ch, batch in plan:
             sched = max(time.time(), self._gt_next_at)
@@ -1412,8 +1433,9 @@ class Spot:
                 time.sleep(wait)
             self._gt_next_at = sched + self._gt_gap
             calls += 1
-            got, res = pricing.gt_token_prices_ex(ch, batch)
+            got, res = pricing.gt_token_prices_ex(ch, batch, keyed=any((ch, ca9) not in skip for ca9 in batch))
             err = pricing.gt_take_error()
+            unres9 = pricing.gt_take_unresolved()
             t_got = int(now)
             for ca, px in got.items():
                 self.dex_usd[f"{ch}:{ca}"] = px
@@ -1432,7 +1454,13 @@ class Spot:
                     self._gt_polled[f"{ch}:{ca}"] = now
             with self.lock:
                 if got or res or not pricing.GT_NETWORK.get(ch):
-                    self._gt_done |= {(ch, ca) for ca in batch}
+                    self._gt_done |= {(ch, ca) for ca in batch if ca not in unres9}
+                    for ca in unres9:
+                        if ca in batch:
+                            k = (ch, ca)
+                            self._gt_tries[k] = self._gt_tries.get(k, 0) + 1
+                            if self._gt_tries[k] >= self.GT_PENDING_MAX_TRIES:
+                                self._gt_done.add(k)
                 else:
                     for ca in batch:
                         k = (ch, ca)
@@ -1535,7 +1563,18 @@ class Spot:
         notes9 = {}
         out9 = pricing.pick_global_usd(syms, book, ident=ident, ref=ref, notes=notes9,
                                        failed=lambda ex: ex in failed9 or (ex == "binance" and not bn))
-        for s9 in [x for x in syms if x not in out9 and ids9.get(x)]:
+        miss9 = [x for x in syms if x not in out9 and ids9.get(x)]
+        if miss9 and "_done" not in cgp9:
+            cgp9["_done"] = True
+            cf9 = []
+            cgp9.update(candles.cg_simple_usd([i9 for i9 in ids9.values() if i9], now=now, fail=cf9, keyed=True))
+            if cf9:
+                failed9.add("coingecko")
+        elif miss9 and "coingecko" in failed9 and _cg_key_set():
+            need9 = sorted({ids9[s9] for s9 in miss9 if not cgp9.get(ids9[s9])})
+            if need9:
+                cgp9.update(candles.cg_simple_usd(need9, now=now, keyed=True, key_only=True))
+        for s9 in miss9:
             v9 = cg_px().get(ids9[s9])
             if v9:
                 out9[s9] = (float(v9), f"coingecko {ids9[s9]}")
@@ -1595,7 +1634,7 @@ class Spot:
 
         def cg(_ids):
             if "_d" not in cg9:
-                cg9["_d"] = candles.cg_simple_usd([m9[1] for m9 in hl_spot.SAME_COIN.values() if m9[1]], now=now)
+                cg9["_d"] = candles.cg_simple_usd([m9[1] for m9 in hl_spot.SAME_COIN.values() if m9[1]], now=now, keyed=True)
             return cg9["_d"]
         notes9 = {}
         out9 = hl_spot.venue_prices(hl9, book, cg, notes9)
@@ -1824,6 +1863,7 @@ class StateBuilder:
     _SIG_SKIP = frozenset(("web_diag.json", "daily_cache.json", "daily_px.json", "px_cache_web.json", "backfill_status.json",
                            "upbit_orders_state.json", "ledger.db-shm", "pending_dm.jsonl.1",
                            "curve_hist.json", "curve_hist_px.json",
+                           "search.db", "search.db-wal", "search.db-shm",
                            rawtx_cache.FILE)
                           + nft.STATE_FILES)
     _SIG_SKIP_RX = re.compile(r"^(cursor_|emitted_|enrich_|pending_detail_|health_|alerts_)|(token_meta|mint_meta)[\w.-]*\.json$"
@@ -2643,6 +2683,7 @@ class StateBuilder:
         ub_wd_shown = set()
         swap_dep = {}
         unverified = {}
+        noproc = {}
         unv_fb9 = {}
         bridge_outs = []
         fx_wd = {}
@@ -3268,7 +3309,7 @@ class StateBuilder:
                 credited_txh.add(r0["chain_txhash"])
             gid0 = r0["group_id"]
             if gid0 is not None:
-                qn0 = Decimal(int(r0["qty_base"])) / (Decimal(10) ** int(r0["decimals"] or 18))
+                qn0 = Decimal(int(r0["qty_base"])) / (Decimal(10) ** int(18 if r0["decimals"] is None else r0["decimals"]))
                 credited_gid[gid0] = credited_gid.get(gid0, Decimal(0)) + qn0
 
         bridge_dep_ts = {}
@@ -3551,7 +3592,7 @@ class StateBuilder:
                 if qi > 0:
                     pnl9 = pi - ci
                     st_real9 += pnl9
-                    rate9 = fxb.rate_at(ts9)
+                    rate9, rsrc9 = fxb.rate_src(ts9)
                     gx["realized"] += pnl9
                     fl9["realized"] += pnl9
                     fl9["rbd"][dkey9] = fl9["rbd"].get(dkey9, Decimal(0)) + pnl9
@@ -3560,7 +3601,7 @@ class StateBuilder:
                     realized_by_date[dkey9] = realized_by_date.get(dkey9, 0) + float(pnl9)
                     realized_krw_by_date[dkey9] = realized_krw_by_date.get(dkey9, 0) + float(pnl9) * rate9
                     tax9 = {"sold": dkey9, "sym": gx["sym"], "ticker": gx["sym"], "ex": "유동성(DEX LP) · 스테이블 전환",
-                            "qty": _f(qi, 4), "acq": _f(ci, 2), "disp": _f(pi, 2), "fee": 0, "rate": round(rate9, 4),
+                            "qty": _f(qi, 4), "acq": _f(ci, 2), "disp": _f(pi, 2), "fee": 0, "rate": round(rate9, 4), "rateSrc": rsrc9,
                             "_acq": float(ci), "_disp": float(pi)}
                     tax_krw_acq(tax9, gx, fl9, ci, ki, rate9, dkey9)
                     tax_rows.append(tax9)
@@ -3633,7 +3674,7 @@ class StateBuilder:
             if abs(gain9) >= Decimal("0.005"):
                 realized_by_date[dkey9] = realized_by_date.get(dkey9, 0) + float(gain9)
                 b9["rbd"][dkey9] = b9["rbd"].get(dkey9, Decimal(0)) + gain9
-                rt9x = fxb.rate_at(ts9)
+                rt9x, rsrc9x = fxb.rate_src(ts9)
                 realized_krw_by_date[dkey9] = realized_krw_by_date.get(dkey9, 0) + float(gain9) * rt9x
                 b9["rbdk"][dkey9] = b9["rbdk"].get(dkey9, 0.0) + float(gain9) * rt9x
                 b9["realized"] += realized9
@@ -3642,7 +3683,7 @@ class StateBuilder:
                                  "ex": "유동성(DEX LP)" if disp9 else ("유동성 리워드" if lpi9.get("via") else "유동성 수수료"),
                                  "qty": _f(float(sum((-self._norm(x) for x in disp9), Decimal(0))), 4) if disp9 else 0,
                                  "acq": _f(float(B), 2) if disp9 else _f(float(B_rent), 2),
-                                 "disp": _f(float(k9 * M if disp9 else income9), 2), "fee": 0, "rate": round(rt9x, 4),
+                                 "disp": _f(float(k9 * M if disp9 else income9), 2), "fee": 0, "rate": round(rt9x, 4), "rateSrc": rsrc9x,
                                  "_acq": float(B) if disp9 else float(B_rent), "_disp": float(k9 * M if disp9 else income9)})
             if disp9 and B >= Decimal("0.005"):
                 lp_event(b9, ts9, "LP 전환", f"{CHAIN_NAME.get(chain9, chain9)} · {lp_label(b9)} · 원금 전환 "
@@ -4351,6 +4392,36 @@ class StateBuilder:
                     lp_tx(r)
                 continue
 
+            if lk == "gas" and evk == "EXF_WD_FEE":
+                fq9w = -q
+                unit9w = Decimal(1) if g["is_stable"] else None
+                if unit9w is None and not g.get("is_fiat"):
+                    cp9w = fxb.candle(g["sym"], ts)
+                    if cp9w:
+                        unit9w = Decimal(str(cp9w))
+                if unit9w is None and g["qty_known"] > EPS:
+                    unit9w = g["cost"] / g["qty_known"]
+                if unit9w is None and (g["sym"] or "").upper() in pricing.MAJOR_CANDLE_SYMS:
+                    sp9w = self.spot.price(g["sym"])
+                    if sp9w:
+                        unit9w = Decimal(str(sp9w))
+                usd9w = fq9w * unit9w if (unit9w is not None and fq9w > 0) else Decimal(0)
+                if gas_on and usd9w > 0:
+                    rt9w = fxb.rate_at(ts)
+                    realized_by_date[dkey] = realized_by_date.get(dkey, 0) - float(usd9w)
+                    realized_krw_by_date[dkey] = realized_krw_by_date.get(dkey, 0) - float(usd9w) * rt9w
+                    ge9w = gas_expense.setdefault(dkey, [Decimal(0), 0, 0.0, {}])
+                    ge9w[0] += usd9w
+                    ge9w[1] += 1
+                    ge9w[2] += float(usd9w) * rt9w
+                    kd9w = ge9w[3].setdefault("EXF_WD_FEE", [Decimal(0), 0, Decimal(0), 0, ""])
+                    kd9w[0] += usd9w
+                    kd9w[1] += 1
+                    if usd9w > kd9w[2]:
+                        kd9w[2], kd9w[3], kd9w[4] = usd9w, int(ts or 0), (r["location"] or "").split(":")[-1]
+                consume(g, -q)
+                g["qty_timeline"].append((ts, q))
+                continue
             if lk == "gas" and evk == "EXF_FEE":
                 fq9 = -q
                 k9f = (r["source_ns"], txh)
@@ -5349,7 +5420,7 @@ class StateBuilder:
                     if evk == "EXF_SELL":
                         ex9s = (r["location"] or "").split(":")[-1]
                         ex_label = fx_name.get(ex9s, ex9s)
-                    rate_s = fxb.rate_at(ts, r)
+                    rate_s, rsrc_s = fxb.rate_src(ts, r)
                     tax9 = u = ud = fu9 = None
                     be_sale9 = False
                     if from_known > 0:
@@ -5368,8 +5439,9 @@ class StateBuilder:
                                 "ex": ex_label if is_ex else "온체인(DEX)",
                                 "qty": _f(from_known, 4),
                                 "acq": _f(consumed_cost, 2),
-                                "disp": _f(proceeds_known, 2), "fee": 0, "rate": round(rate_s, 4),
-                                "_acq": float(consumed_cost), "_disp": float(proceeds_known)}
+                                "disp": _f(proceeds_known, 2), "fee": 0, "rate": round(rate_s, 4), "rateSrc": rsrc_s,
+                                "_acq": float(consumed_cost), "_disp": float(proceeds_known),
+                                "_qty": float(from_known)}
                         if oa9 > EPS:
                             tax9["oa"] = _f(oa9, 4)
                             flow["oa_sold"] = flow.get("oa_sold", Decimal(0)) + oa9
@@ -5394,7 +5466,8 @@ class StateBuilder:
                         fu9 = [0, Decimal(0)]
                         be_tax.append((ud, {"sold": dkey, "sym": g["sym"], "ticker": g["sym"],
                                             "ex": (ex_label if is_ex else "온체인(DEX)") + " · 매수가=매도가",
-                                            "qty": _f(from_unknown, 4), "acq": 0, "disp": 0, "fee": 0, "rate": round(rate_s, 4), "be": 1}))
+                                            "qty": _f(from_unknown, 4), "acq": 0, "disp": 0, "fee": 0, "rate": round(rate_s, 4), "rateSrc": rsrc_s, "be": 1,
+                                            "_qty": float(from_unknown)}))
                         tax_rows.append(be_tax[-1][1])
                     elif from_unknown > 0:
                         proceeds_unk = cost * from_unknown / qty if qty > 0 else Decimal(0)
@@ -5478,6 +5551,23 @@ class StateBuilder:
                     ev(flow, ts, "온체인 매도", f"{CHAIN_NAME.get(chain, chain)} · 정산액 산정 중"
                        + (" · 매수 대금 지불(스왑 지불 레그)" if is_pay9 else ""),
                        f"{qty:,.4f}".rstrip("0").rstrip("."), "—", txh)
+                    np9 = noproc.setdefault(g["gid"], {"sym": g["sym"], "n": 0, "qty": Decimal(0), "cost": Decimal(0), "unk": Decimal(0),
+                                                       "first": dkey, "last": dkey, "where": set(), "tx": [], "old": False})
+                    np9["old"] = np9["old"] or (time.time() - float(ts or 0) > 3600)
+                    np9["n"] += 1
+                    np9["qty"] += qty
+                    np9["cost"] += consumed_cost
+                    np9["unk"] += from_unknown
+                    np9["last"] = max(np9["last"], dkey)
+                    if evk == "EXF_SELL":
+                        exn9 = (r["location"] or "").split(":")[-1]
+                        np9["where"].add(fx_name.get(exn9, exn9))
+                    elif evk == "EX_SELL":
+                        np9["where"].add("업비트")
+                    else:
+                        np9["where"].add(CHAIN_NAME.get(chain, chain))
+                    if len(np9["tx"]) < 5:
+                        np9["tx"].append(str(txh or ""))
                     if cmp9s is not None:
                         flow["events"][-1]["_cmp"] = cmp9s
                     if is_pay9:
@@ -6343,7 +6433,7 @@ class StateBuilder:
                 if u_fb and fbr9:
                     for dk_f, ud_f in sorted((u_fb.get("by_date") or {}).items()):
                         pnl_f = float(ud_f["proceeds"]) - float(ud_f["qty"]) * fbr9
-                        rt_f = fxb.rate_at(int(datetime.strptime(dk_f + " 23:59", "%Y-%m-%d %H:%M").replace(tzinfo=KST).timestamp()))
+                        rt_f, rsrc_f = fxb.rate_src(int(datetime.strptime(dk_f + " 23:59", "%Y-%m-%d %H:%M").replace(tzinfo=KST).timestamp()))
                         realized_by_date[dk_f] = realized_by_date.get(dk_f, 0) + pnl_f
                         realized_krw_by_date[dk_f] = realized_krw_by_date.get(dk_f, 0) + pnl_f * rt_f
                         uf9 = unv_fb9.setdefault(dk_f, {}).setdefault(gid, [Decimal(0), Decimal(0)])
@@ -6353,8 +6443,8 @@ class StateBuilder:
                         rbdk_c[dk_f] = rbdk_c.get(dk_f, 0.0) + pnl_f * rt_f
                         tax_rows.append({"sold": dk_f, "sym": g["sym"], "ticker": g["sym"], "ex": "평균가 폴백",
                                          "qty": _f(float(ud_f["qty"]), 4), "acq": _f(float(ud_f["qty"]) * fbr9, 2),
-                                         "disp": _f(float(ud_f["proceeds"]), 2), "fee": 0, "rate": round(rt_f, 4),
-                                         "_acq": float(ud_f["qty"]) * fbr9, "_disp": float(ud_f["proceeds"])})
+                                         "disp": _f(float(ud_f["proceeds"]), 2), "fee": 0, "rate": round(rt_f, 4), "rateSrc": rsrc_f,
+                                         "_acq": float(ud_f["qty"]) * fbr9, "_disp": float(ud_f["proceeds"]), "_qty": float(ud_f["qty"])})
                 sold_q = float(fl["sold"]); proceeds_f = float(fl.get("proceeds", Decimal(0)))
                 act_c = {}
                 src_c = {}
@@ -6607,6 +6697,24 @@ class StateBuilder:
                 "fbAvg": 0, "fbCost": 0, "gkey": "", "ckey": c9["key"], "costOv": None, "cands": [], "candsHint": "",
                 "qty": _f(float(c9["qty"]), 6) or 0, "usd": _f(float(c9["qty"]) * float(c9.get("price") or 0), 2) or 0,
             })
+        for gid_n, np9 in sorted(noproc.items(), key=lambda kv: -float(kv[1]["cost"])):
+            key_n = f"noproc:{gid_n}"
+            if key_n in ignored_u or not np9["old"] or (np9["cost"] < 1 and np9["unk"] <= 0):
+                continue
+            wh9 = " · ".join(sorted(np9["where"])) or "—"
+            pendings.insert(0, {
+                "key": key_n, "t": acct_norm.mmdd(np9["last"]),
+                "kind": "대금 미상 매도 (정산액 산정 전)",
+                "sym": np9["sym"], "chain": "—",
+                "onchain": f"{float(np9['qty']):,.4f} {np9['sym']} 매도 {np9['n']}건 · 정산액 없음"
+                           + (f" · 소진한 원가 ${float(np9['cost']):,.2f}" if np9["cost"] > 0 else ""),
+                "ex": wh9,
+                "gap": f"{np9['n']}건 · {np9['first'][5:] if len(np9['first']) >= 10 else np9['first']}"
+                       + (f"~{np9['last'][5:] if len(np9['last']) >= 10 else np9['last']}" if np9["last"] != np9["first"] else "")
+                       + " · 그 시각 시세(받은 쪽 코인·마켓 쿼트)를 못 받아 정산액이 비어 있음",
+                "why": "판 대금을 몰라 이 매도의 원가가 실현손익에도 원가미상 매도에도 들어가지 않았어요. 시세를 받으면(가격 채움·재구축) 자동으로 실현에 들어갑니다.",
+                "gkey": f"g{gid_n}", "costOv": None, "cands": [], "candsHint": "", "tx": np9["tx"],
+                "qty": _f(float(np9["qty"]), 6) or 0, "usd": _f(float(np9["cost"]), 2) or 0})
         for gid_u, u in sorted(unverified.items(), key=lambda kv: float(kv[1]["proceeds"])):
             key_u = f"unv:{gid_u}"
             if key_u in ignored_u:
@@ -7648,6 +7756,7 @@ class StateBuilder:
         self._sale_lot_ids = {l9["id"] for l9 in sale_lots}
         self._sale_prio = {str(u9.get("sym") or "").upper() for u9 in unverified.values() if u9.get("sym")}
         diag_out["open_cancel_pairs"] = getattr(self, "_open_cancel_n", 0)
+        diag_out["unv_all"] = {"rows": len(unverified), "proceeds": round(float(sum((u9["proceeds"] for u9 in unverified.values()), Decimal(0))), 2)}
         diag_out["sale_lots"] = len(sale_lots)
         diag_out["sale_links"] = len(sale_links)
         diag_out["sale_cost_usd"] = round(float(sum((u9["cost"] for u9 in sale_used.values()), Decimal(0))), 2)
@@ -7785,6 +7894,8 @@ class StateBuilder:
             "reviewLen": review_len_eff(prefs),
             "reviewProgress": review_prog,
             "reviewFill": review_progress.fill_eff(prefs.get("review_fill")) if review_progress is not None else None,
+            "reviewPause": review_pause_eff(prefs),
+            "legacyPages": {"classic": os.path.isfile(os.path.join(WEB_DIR, "index.html")), "futures": os.path.isfile(os.path.join(WEB_DIR, "futures.html"))},
             "originPending": len(origin_pending),
             "costOverrides": cost_ov,
             "costBreakeven": cost_be,
@@ -8101,7 +8212,7 @@ class StateBuilder:
                     put(a9, "exchange_deposit", lab9)
         except Exception:
             pass
-        for a9 in common.read_json(os.path.join(common.BASE_DIR, "seed", "bridge_contracts.json"), []) or []:
+        for a9 in common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR, strict=True) or []:
             put(a9, "bridge", "브릿지 컨트랙트")
         for ch9, mg9 in lpdec.lp_managers(common.BASE_DIR).items():
             for a9, m9 in mg9.items():
@@ -8115,10 +8226,10 @@ class StateBuilder:
     def _bridge_labels(self) -> dict:
         out = {}
         try:
-            for a9 in common.read_json(os.path.join(common.BASE_DIR, "seed", "bridge_contracts.json"), []) or []:
+            for a9 in common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR, strict=True) or []:
                 if isinstance(a9, str):
                     out[a9.lower()] = {"name": "브릿지 컨트랙트", "chain": None}
-            d9 = common.read_json(os.path.join(common.BASE_DIR, "seed", "bridge_labels.json"), {}) or {}
+            d9 = common.seed_json("bridge_labels.json", {}, base_dir=common.BASE_DIR, strict=True) or {}
             for a9, v9 in d9.items():
                 if isinstance(v9, dict) and v9.get("name") and not a9.startswith("_"):
                     out[a9.lower() if a9.startswith("0x") else a9] = {"name": str(v9["name"])[:80], "chain": v9.get("chain")}
@@ -13044,6 +13155,7 @@ class DayMemoReeval:
         self.mu = threading.Lock()
         self.q = {}
         self.last = {}
+        self.manual = {}
         self.force = {}
         self.cur = None
         self.hour = []
@@ -13052,11 +13164,13 @@ class DayMemoReeval:
         self.sleep = time.sleep
         self.now = time.time
 
-    def schedule(self, date, sym, reset=True, force=False, side=None) -> bool:
+    def schedule(self, date, sym, reset=True, force=False, side=None, manual=False) -> bool:
         k = f"{date}|{sym}"
         with self.mu:
             if force:
                 self.force.setdefault(k, set()).update((side,) if side in ("sell", "buy") else ("sell", "buy"))
+            if manual:
+                self.manual.setdefault(k, set()).update((side,) if side in ("sell", "buy") else ("sell", "buy"))
             if not reset and k in self.q:
                 return True
             if k not in self.q and len(self.q) >= self.QUEUE_MAX:
@@ -13121,6 +13235,7 @@ class DayMemoReeval:
             finally:
                 with self.mu:
                     self.cur = None
+                    self.manual.pop(k, None)
 
     def _note(self, k, side, res):
         self.log.append((k, side, res))
@@ -13145,6 +13260,10 @@ class DayMemoReeval:
 
     def _one(self, k, date, sym, side, force=False):
         ST = BUY_EVALS if side == "buy" else SELL_EVALS
+        with self.mu:
+            man9 = side in (self.manual.get(k) or set())
+        if not man9 and review_pause_eff(BUILDER.prefs() if BUILDER is not None else {}).get("on"):
+            return self._note(k, side, "paused")
         ch = None
         for _ in range(self.CHART_TRIES):
             ch, st9 = BUILDER.chart_request(date, sym, "5m", "1h", None, side=side)
@@ -13234,6 +13353,106 @@ PROXY_SEC_HEADERS = (("Cloudflare-CDN-Cache-Control", "no-store"), ("Vary", "Coo
                      ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
                      ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()"))
 HSTS = ("Strict-Transport-Security", "max-age=31536000")
+_V2_CSP = {}
+
+
+def _v2_csp(raw: bytes, key: str) -> str:
+    c = _V2_CSP.get(key)
+    if c:
+        return c
+    hs = []
+    for m9 in re.finditer(rb"<script(?P<a>[^>]*)>(?P<b>.*?)</script>", raw, re.S):
+        a9 = m9.group("a")
+        if re.search(rb"\bsrc\s*=", a9) or re.search(rb"type\s*=\s*[\"']application/json", a9):
+            continue
+        hs.append("'sha256-" + base64.b64encode(hashlib.sha256(m9.group("b")).digest()).decode() + "'")
+    c = ("default-src 'self'; script-src 'self' " + " ".join(dict.fromkeys(hs)) + "; "
+         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; "
+         "img-src 'self' data: blob: https:; connect-src 'self' https://cdn.jsdelivr.net; "
+         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+    _V2_CSP.clear()
+    _V2_CSP[key] = c
+    return c
+
+
+_BENCH = {"sig": None, "at": 0.0, "body": None}
+_BENCH_LOCK = threading.Lock()
+
+
+def _bench_btc_ids() -> set:
+    import sqlite3
+    try:
+        c9 = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=5)
+        try:
+            return {str(r[0]) for r in c9.execute("SELECT asset_id FROM assets WHERE upper(symbol)='BTC'")}
+        finally:
+            c9.close()
+    except Exception:
+        return set()
+
+
+def bench_series() -> dict:
+    hp = os.path.join(common.STATE_DIR, "curve_hist_px.json")
+    sig = []
+    for p9 in (hp, DAILY_PX_PATH):
+        try:
+            st9 = os.stat(p9)
+            sig.append((p9, st9.st_mtime_ns, st9.st_size))
+        except OSError:
+            sig.append((p9, None, None))
+    now9 = time.time()
+    with _BENCH_LOCK:
+        if _BENCH["body"] is not None and _BENCH["sig"] == sig and now9 - _BENCH["at"] < 600:
+            body = dict(_BENCH["body"])
+            body["now"] = _bench_now()
+            return body
+    px, n_hist, n_day = {}, 0, 0
+    try:
+        h9 = common.read_json(hp, {}) if os.path.exists(hp) else {}
+        sp9 = ((h9.get("specs") or {}).get("sym:BTC") or {}).get("p") or {}
+        for d9, v9 in sp9.items():
+            try:
+                f9 = float(v9)
+            except (TypeError, ValueError):
+                continue
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(d9)) and math.isfinite(f9) and f9 > 0:
+                px[d9] = f9
+                n_hist += 1
+    except (SystemExit, Exception):
+        pass
+    ids = _bench_btc_ids()
+    if ids:
+        try:
+            dp9 = common.read_json(DAILY_PX_PATH, {}) if os.path.exists(DAILY_PX_PATH) else {}
+            for d9, row9 in dp9.items():
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(d9)) or not isinstance(row9, dict):
+                    continue
+                vs = sorted(float(v) for k, v in (row9.get("p") or {}).items()
+                            if str(k) in ids and isinstance(v, (int, float)) and math.isfinite(v) and v > 1000)
+                if vs:
+                    px[d9] = vs[len(vs) // 2]
+                    n_day += 1
+        except (SystemExit, Exception):
+            pass
+    body = {"ok": True, "sym": "BTC", "px": dict(sorted(px.items())), "src": {"hist": n_hist, "daily": n_day}}
+    with _BENCH_LOCK:
+        _BENCH.update(sig=sig, at=now9, body=body)
+    out = dict(body)
+    out["now"] = _bench_now()
+    return out
+
+
+def _bench_now():
+    try:
+        sp9 = BUILDER.spot if BUILDER is not None else None
+        ex9 = getattr(sp9, "ex_usd", None) or {}
+        for k9 in ("binance:BTC", "bybit:BTC", "upbit:BTC"):
+            v9 = ex9.get(k9)
+            if isinstance(v9, (int, float)) and math.isfinite(v9) and v9 > 1000:
+                return float(v9)
+    except Exception:
+        pass
+    return None
 
 
 def _private_cache(cache: str, proxied: bool, ctype: str = "") -> str:
@@ -13776,12 +13995,13 @@ class Handler(BaseHTTPRequestHandler):
         b = BUILDER
         snap = getattr(getattr(b, "snaps", None), "cur", None) if b is not None else None
         hero = getattr(snap, "hero", None) if snap is not None else None
+        csp = (("Content-Security-Policy", _v2_csp(a["raw"], a["hash"])),)
         if not hero or time.time() - snap.at > 120 or b"<!--HERO-->" not in a["raw"]:
-            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="private, no-cache")
+            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="private, no-cache", extra=csp)
         js = json.dumps(hero, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").encode()
         raw = a["raw"].replace(b"<!--HERO-->", b'<script id="tjHero" type="application/json">' + js + b"</script>", 1)
         etag = f'W/"{a["hash"]}-{snap.ver[:8]}"'
-        self._send_bytes(200, raw, websnap.gz(raw), "text/html; charset=utf-8", etag=etag, cache="private, no-cache")
+        self._send_bytes(200, raw, websnap.gz(raw), "text/html; charset=utf-8", etag=etag, cache="private, no-cache", extra=csp)
 
     def _send_state_v2(self, query):
         qs9 = urllib.parse.parse_qs(query)
@@ -14008,9 +14228,12 @@ class Handler(BaseHTTPRequestHandler):
     def _alert_prefs_post(self, prefs, body):
         if not self._write_guard():
             return
-        doc9, err9 = alert_prefs.apply_post(prefs.get(alert_prefs.PREF_KEY), body)
+        old9 = prefs.get(alert_prefs.PREF_KEY)
+        doc9, err9 = alert_prefs.apply_post(old9, body)
         if err9:
             return self._send(400, {"ok": False, "error": err9})
+        if isinstance(old9, dict) and old9.get("v") != alert_prefs.SCHEMA and "alert_prefs_v1" not in prefs:
+            prefs["alert_prefs_v1"] = old9
         prefs[alert_prefs.PREF_KEY] = doc9
         common.atomic_write_json(PREFS_PATH, prefs)
         log.info("알림 설정 저장: %s", alert_prefs.match_preset(doc9))
@@ -14045,6 +14268,58 @@ class Handler(BaseHTTPRequestHandler):
             return {"ok": False, "error": common.safe_err(e9)}
         bc9 = (getattr(BUILDER, "cfg", None) or {}).get("brokers")
         return other_assets.view(d9, q9, _oa_rate(), bc9 if isinstance(bc9, dict) else {})
+
+    def _send_wow(self, path, query):
+        if not onboarding.origin_ok(self, required=False):
+            return self._send(403, {"ok": False, "error": "다른 출처(사이트)에서 온 요청은 거부합니다"})
+        qs9 = urllib.parse.parse_qs(query or "")
+        g9 = lambda k: (qs9.get(k) or [""])[0]
+        last9 = getattr(BUILDER, "_last_out", None) or {}
+        f9 = last9.get("fields") if isinstance(last9, dict) else None
+        if not isinstance(f9, dict) and onboarding.DEMO:
+            try:
+                f9 = (BUILDER.build() or {}).get("fields")
+            except Exception:
+                f9 = None
+        f9 = f9 if isinstance(f9, dict) else {}
+        conn9 = None
+        try:
+            if path == "/api/search/ask":
+                cfg9 = (getattr(BUILDER, "cfg", None) or {}).get("wow") or {}
+                coins9 = sorted({str(c.get("sym") or "").upper() for c in (f9.get("coins") or ()) if isinstance(c, dict) and c.get("sym")})[:800]
+                body = wow2.ask(g9("q"), coins=coins9, chains=sorted(CHAIN_NAME), rate=float(f9.get("rate") or 1384),
+                               llm_on=(cfg9.get("ask_llm") is True) and not onboarding.DEMO, llm_cap=int(cfg9.get("ask_llm_daily_max") or 40))
+                return self._send(200 if body.get("ok") else 400, body)
+            conn9 = None if onboarding.DEMO else wow2._ro()
+            if path == "/api/wow/tm":
+                kit9 = getattr(histcurve.HIST, "kit", None) or {}
+                now9 = {str(k): float(g.get("lp") or 0) for k, g in (kit9.get("groups") or {}).items()}
+                body = wow2.tm(g9("date"), hist=histcurve.HIST, daily=getattr(BUILDER, "daily", None), dpx=getattr(BUILDER, "daily_px", None), fields=f9, conn=conn9,
+                              chain_names=CHAIN_NAME, now_px=now9)
+            else:
+                body = wow2.flows(f9, conn=conn9, chain_names=CHAIN_NAME, since=g9("since") or None, hist=histcurve.HIST)
+            self._send(200 if body.get("ok") else 400, body)
+        except Exception as e9:
+            log.warning("감탄 기능 %s 실패: %s", path, type(e9).__name__, exc_info=True)
+            self._send(503, {"ok": False, "error": "지금은 만들지 못했어요 — 잠시 뒤 다시"})
+        finally:
+            if conn9 is not None:
+                try:
+                    conn9.close()
+                except Exception:
+                    pass
+
+    def _send_search(self, query):
+        qs9 = urllib.parse.parse_qs(query or "")
+        g9 = lambda k: (qs9.get(k) or [""])[0]
+        kinds9 = [k for k in g9("kinds").split(",") if k] or None
+        try:
+            body = search_index.search(g9("q")[:search_index.Q_MAX], kinds=kinds9, limit=g9("limit") or None,
+                                       after=g9("after") or None, before=g9("before") or None)
+        except Exception as e9:
+            log.warning("검색 실패: %s", type(e9).__name__)
+            return self._send(503, {"ok": False, "error": "검색하지 못했어요 — 잠시 뒤 다시"})
+        self._send(200, body)
 
     def _send_nft(self, query):
         try:
@@ -14143,7 +14418,7 @@ class Handler(BaseHTTPRequestHandler):
         msym9 = memo_driven(a9["date"], sym9, inp, a9["side"])
         if msym9:
             if a9["iv"] == "5m" and a9["after"] == "1h" and not a9["venue"] and not a9["bvenue"]:
-                if not DAY_MEMO_REEVAL.schedule(a9["date"], msym9, reset=False, force=force, side=a9["side"]):
+                if not DAY_MEMO_REEVAL.schedule(a9["date"], msym9, reset=False, force=force, side=a9["side"], manual=body.get("auto") is not True):
                     return self._send(429, {"ok": False, "error": "근거 메모 평가 대기 줄이 가득 찼어요 — 잠시 뒤 다시"})
                 return self._send(202, {"ok": True, "status": "running", "queued": True, "fp": fp9})
             if DAY_MEMO_REEVAL.hour_left() <= 0:
@@ -14236,7 +14511,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(409, {"ok": False, "error": common.safe_err(e)})
         BUILDER.purge_memo_charts(d9, s9)
         BUILDER.soft_invalidate()
-        q9 = DAY_MEMO_REEVAL.schedule(d9, s9)
+        q9 = False if review_pause_eff(BUILDER.prefs() if BUILDER is not None else {}).get("on") else DAY_MEMO_REEVAL.schedule(d9, s9)
         self._send(200, {"ok": True, "date": d9, "sym": s9, "memo": m9, "at": rec9["at"] if rec9 else int(time.time()),
                          "deleted": not m9, "changed": True, "reeval": bool(q9)})
 
@@ -14283,6 +14558,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_day_events(query)
             elif path == "/api/tax_rows":
                 self._send_tax_rows(query)
+            elif path == "/api/bench":
+                b9 = bench_series()
+                try:
+                    b9.update(wow.bench(getattr(BUILDER, "_day_idx", None)))
+                except Exception as e9:
+                    log.warning("비교선(안 팔았다면) 계산 실패: %s", common.safe_err(e9)[:120])
+                self._send(200, b9)
+            elif path == "/api/habits":
+                self._send(200, wow.habits(getattr(BUILDER, "_day_idx", None)))
             elif path == "/api/curve_hist":
                 self._send_curve_hist(query)
             elif path == "/api/receipt":
@@ -14297,6 +14581,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_other_assets(query)
             elif path == "/api/other_assets/quote":
                 self._send_oa_quote(query)
+            elif path in ("/api/wow/tm", "/api/wow/flows", "/api/search/ask"):
+                self._send_wow(path, query)
+            elif path == "/api/search":
+                self._send_search(query)
             elif path == "/api/nft":
                 self._send_nft(query)
             elif path == "/api/alert_prefs":
@@ -14326,7 +14614,7 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
         except (Exception, SystemExit) as e:
-            log.warning("GET %s 실패: %s", path, e)
+            log.warning("GET %s 실패: %s", path, e, exc_info=True)
             try:
                 self._send(500, self._err500_body(e))
             except Exception:
@@ -14379,6 +14667,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/nft/prefs":
                 return self._nft_post(body)
             if path == "/api/receipt_eval":
+                if body.get("auto") is True and review_pause_eff(BUILDER.prefs() if BUILDER is not None else {}).get("on"):
+                    return self._send(409, {"ok": False, "paused": True, "error": "AI 자동 생성 멈춤 중 — 버튼으로 직접 만들 수 있어요"})
                 return self._receipt_eval_post(body)
             if path == "/api/day_memo":
                 return self._day_memo_post(body)
@@ -14611,6 +14901,14 @@ class Handler(BaseHTTPRequestHandler):
                 with BUILDER.lock:
                     BUILDER.cache = None
                 self._send(200, {"ok": True, "kind": kind9, "len": len9, "reviewLen": review_len_eff(prefs)})
+            elif path == "/api/review_pause":
+                if not isinstance(body.get("on"), bool):
+                    return self._send(400, {"ok": False, "error": "on 은 true/false"})
+                prefs["review_pause"] = {"on": body["on"], "at": int(time.time())}
+                common.atomic_write_json(PREFS_PATH, prefs)
+                with BUILDER.lock:
+                    BUILDER.cache = None
+                self._send(200, {"ok": True, "reviewPause": review_pause_eff(prefs)})
             elif path == "/api/review_fill":
                 ord9, par9 = body.get("order"), body.get("parallel")
                 if review_progress is None or ord9 not in review_progress.FILL_ORDERS or isinstance(par9, bool) \
@@ -14672,7 +14970,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, {"error": "not found"})
         except (Exception, SystemExit) as e:
-            log.warning("POST %s 실패: %s", path, e)
+            log.warning("POST %s 실패: %s", path, e, exc_info=True)
             try:
                 self._send(500, self._err500_body(e))
             except Exception:
@@ -14827,7 +15125,11 @@ def _alert_watch_inputs(doc, conn, now):
         cur9 = "USD" if (settings_store.read_settings() or {}).get("currency") == "USD" else "KRW"
     except Exception:
         cur9 = "KRW"
-    return {"out": out9, "spot": spot9, "futures": fut9, "oa": oa9, "cur": cur9, "link_daily": _alert_link_daily()}
+    try:
+        pub9 = public_url(getattr(b9, "cfg", None))
+    except Exception:
+        pub9 = ""
+    return {"out": out9, "spot": spot9, "futures": fut9, "oa": oa9, "cur": cur9, "link_daily": _alert_link_daily(), "pub": pub9}
 
 
 def alert_watch_once(st: dict, now: float = None) -> list:
@@ -14839,9 +15141,15 @@ def alert_watch_once(st: dict, now: float = None) -> list:
     conn = alert_prefs.connect_ts()
     if not any(alert_prefs.effective(doc, k, now, conn) for k, _fn in alert_watch.PRODUCERS):
         return []
+    snap9 = copy.deepcopy(st)
     alerts = alert_watch.step(_alert_watch_inputs(doc, conn, now), doc, st, now, conn, log)
-    for a9 in alerts:
-        _append_alert(a9)
+    try:
+        for a9 in alerts:
+            _append_alert(a9)
+    except Exception:
+        st.clear()
+        st.update(snap9)
+        raise
     if alerts:
         log.info("새 알림 %d건 적재: %s", len(alerts), ", ".join(sorted({a9["kind"] for a9 in alerts})))
     return alerts
@@ -15238,10 +15546,13 @@ def plan_monitor_loop():
                     continue
                 px = c["price"]
                 hits = []
+                lk9 = alert_watch._link({"pub": public_url(getattr(BUILDER, "cfg", None))}, "journal")
                 if px >= pl["target"]:
-                    hits.append(("TARGET_HIT", f"🎯 {c['sym']} 목표가 도달 — 현재 ${px:,.4f} ≥ 목표 ${pl['target']:,.4f}"))
+                    hits.append(("TARGET_HIT", f"🔴 {c['sym']} 목표가에 닿았어요\n팔 계획이었다면 지금이에요.\n"
+                                               f"지금 {alert_watch.px_txt(px)} · 목표 {alert_watch.px_txt(pl['target'])}" + lk9))
                 if px <= pl["stop"]:
-                    hits.append(("STOP_HIT", f"⛔ {c['sym']} 손절선 이탈 — 현재 ${px:,.4f} ≤ 손절 ${pl['stop']:,.4f}"))
+                    hits.append(("STOP_HIT", f"🔴 {c['sym']} 손절선 아래로 내려왔어요\n계획대로라면 지금 정리할 때예요.\n"
+                                             f"지금 {alert_watch.px_txt(px)} · 손절 {alert_watch.px_txt(pl['stop'])}" + lk9))
                 for kind, text in hits:
                     dk = f"{key}:{kind}"
                     if sent.get(dk) == today:
@@ -15345,6 +15656,8 @@ def main():
     threading.Thread(target=histcurve.DAYCLOSE.worker, daemon=True, name="day-close").start()
     threading.Thread(target=_oa_quoter().loop, daemon=True, name="other-assets").start()
     threading.Thread(target=_nft_tracker().loop, daemon=True, name="nft").start()
+    search_index.start(lambda: (getattr(BUILDER, "_last_out", None), getattr(BUILDER, "_day_idx", None)),
+                       nft_fn=lambda: _nft_tracker().view(), chain_names=CHAIN_NAME)
     threading.Thread(target=alert_watch_loop, daemon=True, name="alert-watch").start()
     port = int((cfg.get("web") or {}).get("port", 8023))
     lo = QuietHTTPServer(("127.0.0.1", port), Handler)

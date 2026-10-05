@@ -323,7 +323,7 @@
     helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요합니다 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
     etherscan: { url: 'https://etherscan.io/myapikey', why: '선택 — Ethereum·Arbitrum·Polygon 과거 거래 백필이 수십 배 빨라집니다. 없어도 전 체인 동작합니다.', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
     opensea: { url: 'https://docs.opensea.io/reference/api-keys', why: '선택 · 추천 — 넣으면 기타 자산 › NFT 의 EVM 바닥가를 오픈시에서 먼저 받아(최우선) 작은 컬렉션까지 NFT 추적이 더 원활해요. 없으면 코인게코(무료 데모 키 권장). 미검증(키 없이 공개 문서만 보고 연결).', steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
-    coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 기타 자산 › NFT 의 EVM 바닥가가 빨라져요(키 없으면 무료 호출 제한에 걸려 몇 시간 걸릴 수 있어요). 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료)', '받은 키(CG-…) 붙여넣기'] }
+    coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
   const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate'];
   const STEPS = [{ k: 'wallets', t: '지갑' }, { k: 'keys', t: '탐색기 키' }, { k: 'exchanges', t: '거래소' }, { k: 'telegram', t: '텔레그램' }, { k: 'finish', t: '표시·완료' }];
@@ -354,6 +354,7 @@
       if (d.telegram && d.telegram.connected && U.tg.phase !== 'wait') U.tg.phase = 'done';
       if (!U.chains && d.chains) U.chains = new Set(d.chains.filter(c => ['eth', 'base', 'arbitrum', 'bsc'].indexOf(c.key) >= 0).map(c => c.key));
     } catch (e) { U.err = (e && e.message) || String(e); }
+    try { window.dispatchEvent(new Event('tj:setup')); } catch (e) {  }
   }
   async function api(action, body) {
     if (isLocked()) return { ok: false, error: '잠겼어요 — 다시 로그인해 주세요' };
@@ -397,12 +398,12 @@
         + (!U.open && document.getElementById('walCard') ? ' <button class="link" data-su="wgo">추적 지갑으로 가기</button>' : '') + '</div>' : '')
       + '</div>';
   }
-  function walletsHTML() {
+  function walletsHTML(noList) {
     const st = U.st, ws = st.wallets || [];
     const an = wAnalyze(draft('w_addr')), wb = wBtn(an), nw = newW();
     const chips = (st.chains || []).filter(c => c && c.key && String(c.key)[0] !== '_').map(c => '<button class="su-chip' + (U.chains.has(c.key) ? ' on' : '') + '" data-su="chain" data-v="' + esc(c.key) + '" aria-pressed="' + U.chains.has(c.key) + '">' + esc(c.name) + '</button>').join('');
     let list = '';
-    if (ws.length) {
+    if (ws.length && !noList) {
       list = '<div class="su-list">' + ws.map(w => '<div class="su-row' + (nw.has(w.address) ? ' new' : '') + '"><div style="min-width:0;flex:1"><b>' + esc(w.label || '(이름 없음)') + '</b> ' + pill(w.kind === 'sol' ? 'ok' : 'a', w.kind === 'sol' ? 'Solana' : 'EVM')
         + (nw.has(w.address) ? ' <span class="pill w sm" title="이름은 설정 › 추적 지갑에서 이름을 누르면 바로 바꿀 수 있어요">새로 추가</span>' : '')
         + '<div class="su-addr num">' + esc(w.address) + '</div><div class="cap">' + w.chains.map(chainName).map(esc).join(' · ') + '</div>'
@@ -426,7 +427,7 @@
       + '<input class="field" type="password" autocomplete="off" spellcheck="false" data-su-in="k_' + esc(f.key) + '" placeholder="' + (f.set ? '바꾸려면 새 값 입력 (비우면 저장된 값 유지)' : esc(f.label) + ' 붙여넣기') + '" aria-label="' + esc(g.name + ' ' + f.label) + '"></label>').join('') + '</div>'
       + permHTML(gk, g)
       + '<div class="su-actions"><button class="btn" data-su="ktest" data-v="' + gk + '"' + (U.busy['t' + gk] ? ' disabled' : '') + '>' + (U.busy['t' + gk] ? '확인 중…' : '연결 테스트') + '</button>'
-      + '<button class="btn pri" data-su="ksave" data-v="' + gk + '"' + (U.busy['s' + gk] ? ' disabled' : needAck(gk) && !U.ack[gk] ? ' disabled title="\'조회 권한만 켰음\'을 먼저 체크하세요"' : '') + '>' + (U.busy['s' + gk] ? '권한 확인 중…' : '저장') + '</button>' + (g.partial ? '<button class="btn danger" data-su="kdel" data-v="' + gk + '">삭제</button>' : '') + '</div>' + tr;
+      + '<button class="btn pri" data-su="ksave" data-v="' + gk + '"' + (U.busy['s' + gk] ? ' disabled' : needAck(gk) && !U.ack[gk] ? ' disabled title="\'조회 권한만 켰음\'을 먼저 체크하세요"' : '') + '>' + (U.busy['s' + gk] ? (U.st.exchanges && U.st.exchanges[gk] ? '권한 확인 중…' : '확인 중…') : '저장') + '</button>' + (g.partial ? '<button class="btn danger" data-su="kdel" data-v="' + gk + '">삭제</button>' : '') + '</div>' + tr;
   }
   const needAck = gk => { const ex = U.st && U.st.exchanges && U.st.exchanges[gk]; return !!ex && !ex.permCheck; };
   function permHTML(gk, g) {
@@ -456,6 +457,16 @@
       + '<div class="su-foot"><span class="sp"></span><button class="btn pri" data-su="permClose">알겠어요 — 조회 전용 키로 다시 넣을게요</button></div>'
       + '</div></div>';
   }
+  function cgPlanHTML(g) {
+    const p = g && g.set && g.plan;
+    if (!p || !p.text) return '';
+    const sh = p.plan === 'pro' && Array.isArray(p.shares) && p.shares.length
+      ? '<div class="su-chiprow su-cgshare" role="group" aria-label="코인게코 프로 키 사용 비율" style="align-items:center;margin-top:6px"><span class="cap">사용 비율</span>'
+        + p.shares.map(v => { const on = Number(v) === Number(p.share); return '<button class="su-chip' + (on ? ' on' : '') + '" data-su="cgshare" data-v="' + esc(v) + '" aria-pressed="' + on + '"' + (U.busy.cgshare ? ' disabled' : '') + '>' + esc(v) + '%</button>'; }).join('')
+        + '</div><div class="cap" style="margin-top:4px">다른 곳에서 쓰던 유료 키인 경우가 많아 기본은 플랜 한도의 10% 만 써요(최대 80%) — 이번 달 몫을 남은 날에 고르게 나누고, 다른 곳 사용량이 많으면 더 줄여요</div>'
+      : '';
+    return '<div class="cap su-p su-cgplan">등급: <b>' + esc(p.text) + '</b>' + (p.budgetText ? '<br>' + esc(p.budgetText) : '') + sh + '</div>';
+  }
   function keysHTML() {
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보입니다(값은 다시 표시하지 않음).</div>'
@@ -463,8 +474,8 @@
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius');
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>'
           + (k === 'helius' && st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? ' ' + pill('w', 'Solana 필수') : ' ' + pill('g', k === 'helius' ? 'Solana 지갑이 있으면 필수' : k === 'coingecko' ? '선택 · 무료' : '선택'))
-          + '<span class="sp"></span>' + pill(g.set ? 'ok' : 'g', g.set ? '저장됨' : '미설정') + '</button>'
-          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
+          + '<span class="sp"></span>' + pill(g.set ? 'ok' : 'g', g.set ? '저장됨' + (g.plan && g.plan.plan ? ' · ' + (g.plan.plan === 'pro' ? '프로' : '데모') : '') : '미설정') + '</button>'
+          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, cgPlanHTML(g) + '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }
   function ago(ts) {
@@ -591,24 +602,22 @@
       + (needW ? '<div class="su-skip"><button class="link" data-su="later">나중에 할게요 (설정 탭에서 언제든 가능)</button></div>' : '')
       + '</div></div>';
   }
-  function panelHTML() {
-    const st = U.st;
-    const tabs = [['wallets', '지갑'], ['perp', '퍼프 덱스'], ['keys', '탐색기 키'], ['exchanges', '거래소'], ['telegram', '텔레그램']];
-    const cur = U.where || 'wallets';
-    const nW = (st.wallets || []).length, tg = st.telegram && st.telegram.connected, nP = ((st.perp || {}).wallets || []).length;
-    const head = '<div class="row gap12" style="flex-wrap:wrap"><div class="h2">연결 · 키</div>' + (st.demo ? pill('w', '데모 모드') : '') + '<span class="cap">지갑 ' + nW + '개' + (nP ? ' · 퍼프 덱스 ' + nP + '개' : '') + ' · 텔레그램 ' + (tg ? '연결됨' : '미연결') + '</span><span class="sp"></span>'
-      + (U.panelOpen ? '<button class="btn sm" data-su="wizard">설정 마법사 열기</button>' : '') + '<button class="btn sm" data-su="ptoggle" aria-expanded="' + !!U.panelOpen + '">' + (U.panelOpen ? '접기' : '관리하기') + '</button></div>';
-    if (!U.panelOpen) return '<div class="card scard su-panel">' + head + '</div>';
-    return '<div class="card scard su-panel">' + head
-      + '<div class="desc">지갑·탐색기 키·거래소 조회 키·텔레그램을 여기서 관리합니다. 비밀값은 서버 <code>.env</code>(600)에만 있고 다시 표시되지 않습니다.</div>'
-      + '<div class="subtabs" role="tablist">' + tabs.map(t => '<button role="tab" data-su="ptab" data-v="' + t[0] + '" class="' + (cur === t[0] ? 'on' : '') + '" aria-selected="' + (cur === t[0]) + '">' + t[1] + '</button>').join('') + '</div>'
-      + SEC[cur]() + applyHTML() + '</div>';
+  const ipHTML = () => (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>');
+  const SLOTS = { keys: keysHTML, exchanges: exchangesHTML, telegram: tgHTML, wadd: () => walletsHTML(true), perp: perpHTML, apply: applyHTML, ip: ipHTML };
+  let wizEl = null, permEl = null;
+  function onSettings() { return /^settings(\/|$)/.test((location.hash || '').replace('#', '')); }
+  function slotErrHTML() { return '<div class="su-bad" style="padding:8px 0">연결·키 상태를 불러오지 못했어요' + (U.err ? ' · ' + esc(U.err) : '') + ' <button class="link" data-su="retry">다시 시도</button></div>'; }
+  function fill() {
+    if (isLocked()) return;
+    const els = document.querySelectorAll('[data-su-slot]');
+    if (!els.length) return;
+    if (!U.st) { if (U.err) els.forEach(el => { el.innerHTML = slotErrHTML(); }); return; }
+    els.forEach(el => { const f = SLOTS[el.getAttribute('data-su-slot')]; if (f) el.innerHTML = U.open ? '' : f(); });
+    document.querySelectorAll('[data-su-slot] [data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
+    document.querySelectorAll('[data-su-slot] textarea[data-su-in]').forEach(autoGrow);
   }
-
-  let wizEl = null, panelEl = null, permEl = null;
-  function onSettings() { return (location.hash || '').replace('#', '') === 'settings'; }
   function render() {
-    if (!U.st || isLocked()) return;
+    if (!U.st || isLocked()) { if (!isLocked()) fill(); return; }
     const keepFocus = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-su-in');
     const pos = keepFocus && document.activeElement.selectionStart;
     if (U.open) {
@@ -616,9 +625,7 @@
       wizEl.innerHTML = wizardHTML();
       document.documentElement.classList.add('su-lock');
     } else if (wizEl) { wizEl.remove(); wizEl = null; document.documentElement.classList.remove('su-lock'); }
-    if (!panelEl) { panelEl = document.createElement('section'); panelEl.id = 'suPanel'; panelEl.className = 'page su-pagetop'; const v = $('#view'); if (v) v.parentNode.insertBefore(panelEl, v); }
-    panelEl.classList.toggle('hidden', !onSettings() || U.open);
-    if (onSettings() && !U.open) panelEl.innerHTML = panelHTML();
+    fill();
     document.querySelectorAll('[data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
     document.querySelectorAll('textarea[data-su-in]').forEach(autoGrow);
     if (keepFocus) { const el = $('[data-su-in="' + keepFocus + '"]'); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {  } } }
@@ -639,7 +646,7 @@
     Object.assign(U.tg, { phase: 'idle', err: '', bot: null, link: '', start: '', left: 0, tok: '' });
     if (wizEl) { wizEl.remove(); wizEl = null; }
     if (permEl) { permEl.remove(); permEl = null; }
-    const pn = panelEl || $('#suPanel'); if (pn) { pn.innerHTML = ''; pn.classList.add('hidden'); }
+    document.querySelectorAll('[data-su-slot]').forEach(el => { el.innerHTML = ''; });
     document.documentElement.classList.remove('su-lock');
   }
 
@@ -686,7 +693,7 @@
     toast(added.length ? added.length + '개 추가됨 — 이름은 목록에서 붙여요' + (keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : '') : '추가된 주소가 없어요' + (keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : ''), !added.length);
     await refreshStatus();
     if (added.length) {
-      const r0 = document.querySelector('#suWizard .su-row.new, #suPanel .su-row.new');
+      const r0 = document.querySelector('#suWizard .su-row.new, #walCard .newrow');
       if (r0) r0.scrollIntoView({ block: 'nearest' });
       if (window.__tj && window.__tj.refresh) window.__tj.refresh();
     }
@@ -771,13 +778,23 @@
         else toast(r.error || '저장 실패', true);
         render(); return;
       }
-      clearVals(g); delete U.ack[g]; delete U.needAck[g]; toast(grp.name + ' 저장됨 · 값은 다시 표시되지 않습니다'); await refreshStatus();
+      clearVals(g); delete U.ack[g]; delete U.needAck[g];
+      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않습니다')); await refreshStatus();
     },
     async kdel(el) {
       const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g];
       if (!window.confirm(grp.name + ' 키를 이 서버에서 지울까요?')) return;
       const r = await api('keys/delete', { group: g });
       delete U.test[g]; delete U.ack[g]; delete U.needAck[g]; toast(r.ok ? '삭제했습니다' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
+    },
+    async cgshare(el) {
+      const v = Number(el.getAttribute('data-v'));
+      if (U.busy.cgshare) return;
+      U.busy.cgshare = true; render();
+      const r = await api('keys/cgshare', { share: v });
+      U.busy.cgshare = false;
+      toast(r.ok ? '코인게코 프로 키 사용 비율 ' + v + '% 로 바꿨어요' : (r.error || '저장 실패'), !r.ok);
+      await refreshStatus();
     },
     kack(el) { const g = el.getAttribute('data-v'); U.ack[g] = !U.ack[g]; render(); },
     permClose() { const g = U.perm && U.perm.group; U.perm = null; render(); const b = g && $('[data-su="ex"][data-v="' + g + '"]'); if (b) b.focus(); },
@@ -835,12 +852,11 @@
     goto(el) { U.step = +el.getAttribute('data-v'); render(); },
     prev() { U.step = Math.max(0, U.step - 1); render(); },
     next() { U.step = Math.min(STEPS.length - 1, U.step + 1); refreshStatus(); },
-    ptoggle() { U.panelOpen = !U.panelOpen; SS.set('tj_su_open', U.panelOpen ? '1' : ''); render(); },
     async finish() { const r = await api('finish', {}); if (!r.ok) { toast(r.error || '저장 실패', true); return; } U.open = false; stopPollIfIdle(); toast('설정 완료 — 첫 수집이 끝나면 대시보드가 채워집니다'); await refreshStatus(); if (window.__tj) window.__tj.refresh(); },
     later() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
     close() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
     wizard() { U.open = true; U.step = 0; render(); },
-    ptab(el) { U.where = el.getAttribute('data-v'); render(); }
+    async retry() { U.err = null; await refreshStatus(); },
   };
   function dpPoll() {
     if (U.dpPoll) return;
@@ -862,7 +878,7 @@
 
   document.addEventListener('click', ev => {
     const t = ev.target.closest && ev.target.closest('[data-su]');
-    if (!t || !(t.closest('#suWizard') || t.closest('#suPanel') || t.closest('#suPerm'))) return;
+    if (!t || !(t.closest('#suWizard') || t.closest('[data-su-scope]') || t.closest('#suPerm'))) return;
     if (U.perm && !t.closest('#suPerm')) return;
     if (t.tagName === 'A') return;
     ev.preventDefault();
@@ -915,7 +931,6 @@
     '.su-step.done i{background:var(--okBg);color:var(--ok);border-color:transparent}',
     '.su-body{display:flex;flex-direction:column;gap:14px}',
     '.su-sec{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;min-width:0}',
-    '.su-panel .su-sec{background:transparent;border:0;padding:4px 0 0;border-radius:0}',
     '.su-h{font-size:16px;font-weight:700}',
     '.su-p{margin:4px 0 12px;line-height:1.6}',
     '.su-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
@@ -1004,10 +1019,8 @@
     'code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}',
     '.su-foot{display:flex;gap:8px;align-items:center;margin-top:18px}',
     '.su-skip{text-align:center;margin-top:12px}',
-    '.su-pagetop{padding-bottom:0}',
-    '.su-panel .subtabs{margin-top:4px}',
     '.su-demo{position:relative;z-index:31;text-align:center;font-size:12.5px;font-weight:700;padding:5px 12px;background:var(--warnBg);color:var(--warn)}',
-    '@media (max-width:640px){.su-perm{border-radius:0;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom));border-width:0 0 0 4px}.su-perm h3{font-size:19px}.su-bg{padding:0}.su-wiz{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom));border:0}.su-step span{display:none}.su-step.on span{display:inline}.su-tgwait{flex-direction:column;align-items:center}.su-sec{padding:16px}.su-grow{min-width:0;flex-basis:100%}.su-form .field[style]{width:100%!important}.su-pagetop{padding-top:6px}.su-kbd{display:none}}'
+    '@media (max-width:640px){.su-perm{border-radius:0;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom));border-width:0 0 0 4px}.su-perm h3{font-size:19px}.su-bg{padding:0}.su-wiz{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom));border:0}.su-step span{display:none}.su-step.on span{display:inline}.su-tgwait{flex-direction:column;align-items:center}.su-sec{padding:16px}.su-grow{min-width:0;flex-basis:100%}.su-form .field[style]{width:100%!important}.su-kbd{display:none}}'
   ].join('\n');
   document.head.appendChild(css);
 
@@ -1017,5 +1030,5 @@
     if (U.st.needsSetup && SS.get('tj_setup_later') !== '1') U.open = true;
     render();
   })();
-  window.__tjSetup = { U, A, render, lock, qrEncode, toChecksum, checkAddr, keccak256, splitAddrs, wAnalyze, wSecret };
+  window.__tjSetup = { U, A, render, fill, lock, qrEncode, toChecksum, checkAddr, keccak256, splitAddrs, wAnalyze, wSecret };
 })();

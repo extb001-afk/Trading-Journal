@@ -93,6 +93,11 @@ def _alert(kind, text, **kw):
     return d
 
 
+def _link(inp, tab) -> str:
+    pub = str((inp or {}).get("pub") or "").rstrip("/")
+    return f"\n[보기] {pub}/v2/#{tab}" if pub.startswith("https://") else ""
+
+
 def load_state() -> dict:
     try:
         st = common.read_json(STATE_PATH, {}) or {}
@@ -140,7 +145,7 @@ def pnl_text(out, cur="KRW") -> str | None:
     rz_k = rz * rate if krw else rz
     fut_k = fut * rate if krw else fut
     bt = _f(out.get("builtAt"))
-    lines = [f"📊 {_md(iso)} 일간 손익" + (f" ({_kst(bt).strftime('%H:%M')} 기준)" if bt else "")]
+    lines = [f"📋 {_md(iso)} 오늘 손익" + (f" ({_kst(bt).strftime('%H:%M')} 기준)" if bt else "")]
     lines.append(f"실현 {to_txt(rz_k + fut_k)}" + (f" (현물 {to_txt(rz_k)} · 선물 {to_txt(fut_k)})" if abs(fut) >= 0.005 else ""))
     seg = [f"{n} {to_txt(v)}" for n, v in parts if abs(v) >= (1 if not krw else 1000)]
     if abs(etc) >= (1 if not krw else 1000):
@@ -193,7 +198,44 @@ def prod_pnl(inp, doc, st, now, conn, on):
     txt = pnl_text(out, inp.get("cur") or "KRW")
     p["sent"] = iso
     p.pop("wait", None)
-    return [_alert("PNL_DAILY", txt, day=iso)] if txt else []
+    return [_alert("PNL_DAILY", txt, day=iso, d=pnl_data(out, inp.get("cur") or "KRW"))] if txt else []
+
+
+def pnl_data(out, cur="KRW") -> dict | None:
+    try:
+        f = (out or {}).get("fields") or {}
+        iso, key = out.get("todayIso"), out.get("todayKey")
+        ds = [r for r in (f.get("dailySeries") or []) if isinstance(r, dict) and _f(r.get("val")) is not None]
+        rate = _f(f.get("rate"))
+        krw = cur != "USD" and rate
+        k = rate if krw else 1.0
+        idx = next((i for i, r in enumerate(ds) if r.get("date") == key), None)
+        if not iso or idx is None:
+            return None
+        row = ds[idx]
+        prev = ds[idx - 1] if idx > 0 else None
+        val = _f(row.get("val"))
+        if krw:
+            pk = _f((prev or {}).get("valKrw"))
+            delta = (val * rate - (pk if pk is not None else _f(prev.get("val")) * rate)) if prev else None
+        else:
+            delta = (val - _f(prev.get("val"))) if prev else None
+        rz = (_f((f.get("realizedByDate") or {}).get(iso)) or 0.0) + (_f(((f.get("futures") or {}).get("realizedByDate") or {}).get(iso)) or 0.0)
+        curve = []
+        for r in ds[max(0, idx - 30):idx + 1]:
+            v = _f(r.get("valKrw")) if krw and r is not row and _f(r.get("valKrw")) is not None else (_f(r.get("val")) or 0.0) * k
+            curve.append([str(r.get("date") or ""), round(v, 2)])
+        att = row.get("att") if isinstance(row.get("att"), dict) else {}
+        top = [[str(t[0]), round(_f(t[1]), 1)] for t in (att.get("top") or []) if isinstance(t, (list, tuple)) and len(t) >= 2 and _f(t[1]) is not None][:3]
+        sells = 0
+        try:
+            sells = int(((f.get("dayActs") or {}).get(iso) or {}).get("s") or 0)
+        except (TypeError, ValueError, AttributeError):
+            sells = 0
+        return {"iso": iso, "cur": "KRW" if krw else "USD", "realized": round(rz * k, 2), "delta": round(delta, 2) if delta is not None else None,
+                "sells": sells, "top": top, "curve": curve}
+    except Exception:
+        return None
 
 
 def _rev_lines(r, cur):
@@ -227,7 +269,8 @@ def prod_review(inp, doc, st, now, conn, on):
         if first or not on or (at and now - at > 86400):
             continue
         g, two = _rev_lines(r, inp.get("cur") or "KRW")
-        res.append(_alert("REVIEW_DAILY", "\n".join([f"📝 AI 일간 복기 도착 · {_md(iso)} · {g}"] + two + [inp.get("link_daily") or "보기: 일별 기록 탭"]), day=iso))
+        res.append(_alert("REVIEW_DAILY", "\n".join([f"📋 AI 복기가 도착했어요 · {_md(iso)} {g}"] + two[:1]) + _link(inp, "daily"), day=iso,
+                          d={"iso": iso, "grade": g, "first": (two[0] if two else "")[:120]}))
     r9["seen"] = seen[-20:]
     r9["init"] = 1
     return res
@@ -256,7 +299,8 @@ def prod_weekly(inp, doc, st, now, conn, on):
             continue
         g, two = _rev_lines(r, inp.get("cur") or "KRW")
         rng = f"{_md(r.get('from'))}~{_md(r.get('to'))}" if r.get("from") and r.get("to") else k
-        res.append(_alert("REVIEW_WEEKLY", "\n".join([f"📘 주간 복기 도착 · {rng} · {g}"] + two + [inp.get("link_daily") or "보기: 일별 기록 탭"]), week=k))
+        res.append(_alert("REVIEW_WEEKLY", "\n".join([f"📋 주간 복기가 도착했어요 · {rng} {g}"] + two[:1]) + _link(inp, "daily"), week=k,
+                          d={"rng": rng, "grade": g, "first": (two[0] if two else "")[:120]}))
     w9["seen"] = seen[-20:]
     w9["init"] = 1
     return res
@@ -300,6 +344,21 @@ def _near(samples, t, tol):
     return best[1] if best else None
 
 
+def _total_usd(f) -> float:
+    try:
+        ds = [r for r in (f.get("dailySeries") or []) if isinstance(r, dict)]
+        if ds and _f(ds[-1].get("val")):
+            return float(ds[-1]["val"])
+    except Exception:
+        pass
+    t = 0.0
+    for k9 in ("coins", "stables"):
+        for c in f.get(k9) or []:
+            if isinstance(c, dict):
+                t += (_f(c.get("qty")) or 0.0) * (_f(c.get("price")) or 0.0)
+    return t
+
+
 def prod_move(inp, doc, st, now, conn, on):
     out = inp.get("out") or {}
     f = out.get("fields") or {}
@@ -307,11 +366,15 @@ def prod_move(inp, doc, st, now, conn, on):
         return []
     th = doc["th"]
     t1, t24, vmin = float(th["move_1h"]), float(th["move_24h"]), float(th["move_min"])
+    wmin = float(th.get("move_weight", 3) or 0)
+    tot = _total_usd(f)
     mv = st.setdefault("move", {})
     hist = mv.setdefault("px", {})
-    last = mv.setdefault("last", {})
+    last = mv.setdefault("day", {})
+    mv.pop("last", None)
     spot = inp.get("spot") or {}
     build_fresh = now - float(out.get("builtAt") or 0) <= LIVE_PX_AGE
+    today = _kst(now).strftime("%Y-%m-%d")
     res, alive = [], set()
     for c in f.get("coins") or []:
         if not isinstance(c, dict) or not c.get("key"):
@@ -331,29 +394,33 @@ def prod_move(inp, doc, st, now, conn, on):
             continue
         k = c["key"]
         alive.add(k)
-        s = [x for x in (hist.get(k) or []) if isinstance(x, list) and len(x) == 2 and now - x[0] <= PX_KEEP]
-        if not s or now - s[-1][0] >= PX_EVERY:
-            s.append([int(now), p])
-        hist[k] = _thin(s, now)
-        if not on or val < vmin:
+        s9 = [x for x in (hist.get(k) or []) if isinstance(x, list) and len(x) == 2 and now - x[0] <= PX_KEEP]
+        if not s9 or now - s9[-1][0] >= PX_EVERY:
+            s9.append([int(now), p])
+        hist[k] = _thin(s9, now)
+        w = (val / tot * 100) if tot > 0 else 0.0
+        if not on or val < vmin or w < wmin:
             continue
-        p1, p24 = _near(s, now - 3600, 900), _near(s, now - 86400, 2700)
+        p1, p24 = _near(s9, now - 3600, 900), _near(s9, now - 86400, 2700)
         c1 = (p / p1 - 1) * 100 if p1 else None
         c24 = (p / p24 - 1) * 100 if p24 else None
-        hit = (c1 is not None and abs(c1) >= t1) or (c24 is not None and abs(c24) >= t24)
-        if not hit or now - float(last.get(k) or 0) < COOL:
+        hit1 = c1 is not None and abs(c1) >= t1
+        hit24 = c24 is not None and abs(c24) >= t24
+        if not (hit1 or hit24) or last.get(k) == today:
             continue
-        last[k] = int(now)
-        up = (c1 if c1 is not None and abs(c1) >= t1 else c24) > 0
-        bits = ([f"1시간 {pct_txt(c1)}"] if c1 is not None else []) + ([f"24시간 {pct_txt(c24)}"] if c24 is not None else [])
+        last[k] = today
+        ch, span = (c1, "1시간") if hit1 else (c24, "24시간")
+        up = ch > 0
         cur, rate = inp.get("cur") or "KRW", _f(f.get("rate"))
-        res.append(_alert("PRICE_MOVE", f"{'📈' if up else '📉'} {c.get('sym')} {' · '.join(bits)} — 지금 {px_txt(p)} · 보유 {money(val, cur, rate)}",
+        res.append(_alert("PRICE_MOVE", f"🔴 {c.get('sym')} {span} 만에 {abs(ch):.0f}% {'올랐어요' if up else '떨어졌어요'}\n"
+                                        + ("급하지 않아요 — 목표가를 걸어 두면 거기서 알려 드려요." if up else "손절선을 걸어 두지 않았다면 지금 정해 두세요.")
+                                        + f"\n지금 {px_txt(p)} · 보유 {money(val, cur, rate)} · 총자산의 {w:.0f}%" + _link(inp, "dash"),
                           sym=c.get("sym"), key=k))
     for k in list(hist):
         if k not in alive:
             del hist[k]
     for k in list(last):
-        if now - float(last[k] or 0) > PX_KEEP:
+        if last[k] != today and str(last[k]) < (_kst(now - 2 * 86400).strftime("%Y-%m-%d")):
             del last[k]
     return res
 
@@ -375,6 +442,7 @@ def prod_bigflow(inp, doc, st, now, conn, on):
         return []
     nmin = float(doc["th"]["flow_min"])
     cur, rate = inp.get("cur") or "KRW", _f(f.get("rate"))
+    outs = sum(_f(it[1]) for it in (row.get("flowTop") or []) if isinstance(it, (list, tuple)) and len(it) >= 2 and (_f(it[1]) or 0) < 0)
     res = []
     for it in row.get("flowTop") or []:
         if not isinstance(it, (list, tuple)) or len(it) < 2 or _f(it[1]) is None:
@@ -387,8 +455,12 @@ def prod_bigflow(inp, doc, st, now, conn, on):
         seen[k] = usd
         if first or not on:
             continue
-        res.append(_alert("BIG_FLOW", f"{'💰 큰 입금' if usd > 0 else '💸 큰 출금'} 감지 · {desc} {money(usd, cur, rate, True)}"
-                                      f" (오늘 입출금 합계 {money(_f(row.get('flow')) or 0, cur, rate, True)})", day=iso))
+        if usd < 0:
+            res.append(_alert("BIG_FLOW", f"🔴 밖으로 {money(usd, cur, rate, True)} 나갔어요\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\n"
+                                          f"{desc} · 오늘 나간 돈 합계 {money(outs, cur, rate, True)}" + _link(inp, "outflows"), day=iso))
+        else:
+            res.append(_alert("BIG_INFLOW", f"📋 큰 입금 {money(usd, cur, rate, True)} · {desc}", day=iso,
+                              d={"desc": desc[:60], "amt": money(usd, cur, rate, True)}))
     return res
 
 
@@ -435,9 +507,9 @@ def prod_lprange(inp, doc, st, now, conn, on):
         mem[k], x["at"] = s, int(now)
         name = f"{lp.get('dex') or 'LP'} {lp.get('pool') or ''} ({lp.get('chain') or ''} #{lp.get('id') or ''})".replace("  ", " ")
         val = _f(lp.get("value"))
-        res.append(_alert("LP_RANGE", (f"⚠️ LP 범위 이탈 · {name}" if s == "범위 이탈" else f"✅ LP 범위 복귀 · {name}")
+        res.append(_alert("LP_RANGE", (f"📋 LP 범위를 벗어났어요 · {name}" if s == "범위 이탈" else f"📋 LP 범위로 돌아왔어요 · {name}")
                           + (f" — 범위 {lp.get('range')}" if lp.get("range") else "") + (f" · 평가 {money(val, cur, rate)}" if val is not None else ""),
-                          key=k, status=s))
+                          key=k, status=s, d={"name": name[:80], "out": s == "범위 이탈"}))
     for k in list(mem):
         if k not in alive:
             del mem[k]
@@ -475,28 +547,33 @@ def prod_depeg(inp, doc, st, now, conn, on):
         if abs(m - 1) * 100 >= th:
             devs["USDT"] = 1 / m
     if "USDT" not in devs:
-        for s, p in q.items():
+        for s9, p in q.items():
             if abs(p - 1) * 100 >= th:
-                devs[s] = p
+                devs[s9] = p
     mem = st.setdefault("depeg", {})
     res = []
-    for s, p in devs.items():
-        e = mem.get(s) or {}
-        if now - float(e.get("at") or 0) >= COOL:
-            mem[s] = {"at": int(now), "px": p}
-            if on:
-                note = " (다른 스테이블들이 함께 벗어나 USDT 쪽으로 판단)" if s == "USDT" else ""
-                res.append(_alert("DEPEG", f"🟠 스테이블 디페그 · {s} {px_txt(p)} ({pct_txt((p - 1) * 100, 2)} · 기준 ±{th:g}%){note}"
-                                           + (" · 보유 중" if s in held or s == "USDT" else ""), sym=s))
-    for s in list(mem):
-        if s in devs:
+    for s9, p in devs.items():
+        e = mem.get(s9) if isinstance(mem.get(s9), dict) else {}
+        dev = abs(p - 1) * 100
+        told = _f(e.get("dev"))
+        if told is not None and dev < told * 2:
             continue
-        p = q.get(s) if s != "USDT" else None
-        rec = (p is not None and abs(p - 1) * 100 < th / 2) or (s == "USDT" and len(q) >= 3)
+        mem[s9] = {"at": int(now), "px": p, "dev": round(dev, 3)}
+        if on:
+            worse = told is not None
+            res.append(_alert("DEPEG", (f"🔴 {s9} 이탈이 더 커졌어요 — 1달러에서 {dev:.1f}%\n" if worse else f"🔴 {s9} 가격이 1달러에서 {dev:.1f}% 벗어났어요\n")
+                                       + "많이 들고 있다면 다른 스테이블로 옮길지 살펴보세요.\n"
+                                       + f"지금 {px_txt(p)} · 기준 ±{th:g}%" + (" · 들고 있음" if s9 in held or s9 == "USDT" else "")
+                                       + (" · 다른 스테이블들이 함께 벗어나 USDT 쪽으로 판단" if s9 == "USDT" else ""), sym=s9))
+    for s9 in list(mem):
+        if s9 in devs:
+            continue
+        p = q.get(s9) if s9 != "USDT" else None
+        rec = (p is not None and abs(p - 1) * 100 < th / 2) or (s9 == "USDT" and len(q) >= 3 and abs(1 / statistics.median(q.values()) - 1) * 100 < th / 2)
         if rec:
-            del mem[s]
+            del mem[s9]
             if on:
-                res.append(_alert("DEPEG", f"✅ 스테이블 회복 · {s}" + (f" {px_txt(p)}" if p else ""), sym=s))
+                res.append(_alert("DEPEG", f"✅ {s9} 1달러로 돌아왔어요\n할 일은 없어요." + (f"\n지금 {px_txt(p)}" if p else ""), sym=s9, resolved=True))
     return res
 
 
@@ -515,6 +592,9 @@ def prod_liq(inp, doc, st, now, conn, on):
         if ts > 1e11:
             ts /= 1000
         if now - ts > 1800:
+            for p in d.get("positions") or []:
+                if isinstance(p, dict):
+                    alive.add(f"{ex}:{p.get('symbol')}:{p.get('side')}:{p.get('acct') or ''}")
             continue
         for p in d.get("positions") or []:
             if not isinstance(p, dict):
@@ -525,19 +605,27 @@ def prod_liq(inp, doc, st, now, conn, on):
             dist = abs(liq - mark) / mark * 100
             k = f"{ex}:{p.get('symbol')}:{p.get('side')}:{p.get('acct') or ''}"
             alive.add(k)
-            if dist > th or now - float(mem.get(k) or 0) < COOL:
-                continue
-            mem[k] = int(now)
-            if not on:
-                continue
+            e = mem.get(k) if isinstance(mem.get(k), dict) else ({} if not mem.get(k) else {"dist": th})
+            told = _f(e.get("dist"))
             side = {"long": "롱", "short": "숏", "LONG": "롱", "SHORT": "숏", "Buy": "롱", "Sell": "숏"}.get(str(p.get("side")), str(p.get("side") or ""))
-            upnl = _f(p.get("upnl"))
-            res.append(_alert("LIQ_NEAR", f"🚨 선물 청산가 근접 · {EX_KO.get(ex, ex)} {p.get('symbol')} {side}"
-                                          f" — 현재 {px_txt(mark)} · 청산가 {px_txt(liq)} ({dist:.1f}% 남음 · 기준 {th:g}%)"
-                                          + (f" · 레버리지 {p.get('leverage')}x" if p.get("leverage") else "")
-                                          + (f" · 미실현 {money(upnl, cur, rate, True)}" if upnl is not None else ""), key=k))
+            name = f"{p.get('symbol')} {side}".strip()
+            nums = f"현재 {px_txt(mark)} · 청산 {px_txt(liq)} · {EX_KO.get(ex, ex)}" + (f" · 레버리지 {p.get('leverage')}x" if p.get("leverage") else "")
+            if told is None:
+                if dist <= th:
+                    mem[k] = {"dist": round(dist, 2), "at": int(now)}
+                    if on:
+                        res.append(_alert("LIQ_NEAR", f"🔴 {name} 선물 청산가까지 {dist:.0f}% 남았어요\n증거금을 넣거나 포지션을 줄이세요.\n{nums}" + _link(inp, "dash"), key=k))
+                continue
+            if dist <= told / 2:
+                mem[k] = {"dist": round(dist, 2), "at": int(now)}
+                if on:
+                    res.append(_alert("LIQ_NEAR", f"🔴 {name} 청산가까지 {dist:.0f}%로 더 가까워졌어요\n지금 증거금을 넣거나 포지션을 줄이세요.\n{nums}" + _link(inp, "dash"), key=k))
+            elif dist > th * 1.5:
+                del mem[k]
+                if on:
+                    res.append(_alert("LIQ_NEAR", f"✅ {name} 청산 위험에서 벗어났어요\n할 일은 없어요.\n청산가까지 {dist:.0f}% · {EX_KO.get(ex, ex)}", key=k, resolved=True))
     for k in list(mem):
-        if k not in alive and now - float(mem[k] or 0) > COOL:
+        if k not in alive:
             del mem[k]
     return res
 
@@ -560,12 +648,13 @@ def prod_oa(inp, doc, st, now, conn, on):
             if not e.get("fail") or now - float(e.get("at") or 0) >= 86400:
                 brk[k] = {"fail": 1, "at": int(now)}
                 if on:
-                    res.append(_alert("OA_ALERT", f"🏦 증권사 동기화 실패 · {b.get('name') or k}"
-                                                  + (f" — {str(s.get('err'))[:120]}" if s.get("err") else "") + " (기타 자산 탭에서 확인)", key=k))
+                    res.append(_alert("OA_ALERT", f"📋 {b.get('name') or k} 연결이 끊겼어요 — 기타 자산 탭에서 다시 연결해 주세요"
+                                                  + (f" ({str(s.get('err'))[:80]})" if s.get("err") else ""), key=k,
+                                      d={"msg": f"{b.get('name') or k} 연결 끊김"}))
         elif s.get("ok") is True and e.get("fail"):
             brk[k] = {"fail": 0, "at": int(now)}
             if on:
-                res.append(_alert("OA_ALERT", f"✅ 증권사 동기화 복구 · {b.get('name') or k}", key=k))
+                res.append(_alert("OA_ALERT", f"📋 {b.get('name') or k} 다시 연결됐어요", key=k, d={"msg": f"{b.get('name') or k} 다시 연결됨"}))
     alive = set()
     for it in v.get("items") or []:
         if not isinstance(it, dict) or it.get("auto") not in ("stock", "gold"):
@@ -581,9 +670,9 @@ def prod_oa(inp, doc, st, now, conn, on):
             continue
         e["sent"] = int(now)
         if on:
-            res.append(_alert("OA_ALERT", f"⏳ 시세 오래됨 · {it.get('name') or it.get('ticker') or k}"
-                                          + (f" ({it.get('ticker')})" if it.get("ticker") else "")
-                                          + (f" — {str(q.get('err'))[:100]}" if q.get("err") else "") + " · 평가액은 마지막 시세 그대로예요", key=k))
+            res.append(_alert("OA_ALERT", f"📋 {it.get('name') or it.get('ticker') or k} 시세가 한 시간 넘게 멈췄어요 — 평가액은 마지막 시세 그대로예요"
+                                          + (f" ({str(q.get('err'))[:80]})" if q.get("err") else ""), key=k,
+                              d={"msg": f"{it.get('name') or it.get('ticker') or k} 시세 멈춤"}))
     for k in list(stl):
         if k not in alive:
             del stl[k]
@@ -606,28 +695,10 @@ def step(inp: dict, doc: dict, st: dict, now: float = None, conn=None, log=None)
     return out
 
 
-SAMPLES = {
-    "health": "🔴 tj-evm · 수집 멈춤\nBase 지갑 0xAbC0…0dEf 마지막 동기화 52분 전\n조치: 대시보드 설정 › 상태 에서 확인",
-    "digest": "📋 09:00 상태 · 열린 문제 1건: tj-exf 바이낸스 이력 수집 지연(1시간 12분)",
-    "price": "🎯 ETH 목표가 도달 — 현재 $4,512.3000 ≥ 목표 $4,500.0000",
-    "recon": "바이낸스 잔고 대사 완료 — 2개 통화 보정",
-    "sync": "[base] 스왑 감지 tx 0xabc…123",
-    "backfill": "전 체인 백필+기초잔고 대사 완료 — 일별 스냅샷 동결 시작",
-    "scam": "[base] UNKNOWN — 검토 필요 tx 0xdef…456",
-    "pnl": "📊 01-15(수) 일간 손익 (23:50 기준)\n실현 +₩12만\n총자산 +₩34만 — 시세 +₩30만 · 입출금 +₩0 · 환율 +₩1만 · 그 밖 +₩3만\n많이 움직인 코인: ETH +3.1% (+₩15만) · SOL +2.4% (+₩9만) · LINK +1.2% (+₩4만)",
-    "review": "📝 AI 일간 복기 도착 · 01-14(화) · 양호\n매수 타이밍은 좋았지만 매도가 일렀다.\n총자산 변동 +₩12만은 시세 +₩10만 …\n보기: 일별 기록 탭",
-    "weekly": "📘 주간 복기 도착 · 01-06(월)~01-12(일) · 양호\nETH 한 사이클이 주간 수익 대부분을 만들었다.\n…\n보기: 일별 기록 탭",
-    "move": "📈 SOL 1시간 +11.2% · 24시간 +14.0% — 지금 $134.50 · 보유 ₩120만",
-    "bigflow": "💸 큰 출금 감지 · 외부 전송 USDC −₩500만 (오늘 입출금 합계 −₩500만)",
-    "lprange": "⚠️ LP 범위 이탈 · Uniswap V3 WETH / USDC (Arbitrum #123456) — 범위 2,400 – 2,900 (USDC/WETH)",
-    "depeg": "🟠 스테이블 디페그 · USDC $0.9870 (−1.30% · 기준 ±1%) · 보유 중",
-    "liq": "🚨 선물 청산가 근접 · 바이낸스 BTCUSDT 롱 — 현재 $60,000.00 · 청산가 $55,000.00 (8.3% 남음 · 기준 10%)",
-    "oa": "🏦 증권사 동기화 실패 · 키움증권 — 인증 만료 (기타 자산 탭에서 확인)",
-    "other": "[NEW_KIND] 새 종류의 알림 예시",
-}
+SAMPLES = AP.SAMPLES
 
 
 def test_line(cat: str) -> dict:
     c = AP.CAT[cat]
     return {"ts": int(time.time()), "kind": AP.TEST_KIND, "cat": cat, "test": True,
-            "text": f"🔔 [테스트 · {c['label']}] 이런 모양으로 와요 — 예시(실제 값 아님):\n{SAMPLES.get(cat, '')}"}
+            "text": f"🔔 테스트 · {'하루 요약' if cat == 'digest' else c['label']} — 이런 모양으로 와요(예시 · 실제 값 아님)\n{AP.DIGEST_SAMPLE if cat == 'digest' else SAMPLES.get(cat, '')}"}
