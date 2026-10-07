@@ -97,11 +97,15 @@ class SignatureExpired(RuntimeError):
 _BN_W_API = {"/api/v3/myTrades": 20, "/api/v3/account": 20, "/api/v3/exchangeInfo": 20, "/api/v3/openOrders": 80}
 _BN_W_SAPI = {"/sapi/v1/margin/myTrades": 10, "/sapi/v1/margin/account": 10, "/sapi/v1/margin/isolated/account": 10,
               "/sapi/v1/capital/withdraw/history": 10, "/sapi/v1/simple-earn/flexible/position": 150,
-              "/sapi/v1/simple-earn/locked/position": 150, "/sapi/v2/loan/flexible/ongoing/orders": 300}
+              "/sapi/v1/simple-earn/locked/position": 150, "/sapi/v2/loan/flexible/ongoing/orders": 300,
+              "/sapi/v1/margin/tradeCoeff": 10, "/sapi/v1/margin/crossMarginData": 1,
+              "/sapi/v2/loan/flexible/collateral/data": 400, "/sapi/v2/loan/flexible/loanable/data": 400}
 _BN_W_UID = {"/sapi/v1/capital/withdraw/history": 18000, "/sapi/v1/convert/tradeFlow": 3000}
 _BN_W_FAPI = {"/fapi/v1/income": 30, "/fapi/v2/account": 5, "/fapi/v2/positionRisk": 5, "/fapi/v2/balance": 5}
 _KC_W = {"/api/v1/accounts": 5, "/api/v1/withdrawals": 20, "/api/v1/deposits": 5, "/api/v1/fills": 10,
-         "/api/v3/margin/accounts": 15, "/api/v1/convert/order/history": 5}
+         "/api/v3/margin/accounts": 15, "/api/v1/convert/order/history": 5,
+         "/api/v3/isolated/accounts": 15, "/api/v1/margin/config": 25, "/api/v1/isolated/symbols": 3,
+         "/api/v3/margin/borrowRate": 5}
 _KC_MGMT = ("/api/v1/accounts", "/api/v1/withdrawals", "/api/v1/deposits")
 GOV_BUCKETS = (
     ("bn_api", "api.binance.com", lambda p: p.startswith("/api/"), 60, 3000, lambda p: _BN_W_API.get(p, 20)),
@@ -115,8 +119,10 @@ GOV_BUCKETS = (
     ("kc_spot", "api.kucoin.com", lambda p: p not in _KC_MGMT, 30, 2000, lambda p: _KC_W.get(p, 10)),
     ("gate", "api.gateio.ws", lambda p: True, 10, 100, lambda p: 1),
     ("bithumb", "api.bithumb.com", lambda p: True, 1, 5, lambda p: 1),
+    ("bn_dapi", "dapi.binance.com", lambda p: True, 60, 1200, lambda p: {"/dapi/v1/positionRisk": 1}.get(p, 5)),
+    ("kc_fut", "api-futures.kucoin.com", lambda p: True, 30, 1000, lambda p: {"/api/v1/positions": 2}.get(p, 5)),
 )
-GOV_BN_HDR = {"bn_api": ("x-mbx-used-weight-1m", 3000), "bn_sapi": ("x-sapi-used-ip-weight-1m", 6000),
+GOV_BN_HDR = {"bn_api": ("x-mbx-used-weight-1m", 3000), "bn_sapi": ("x-sapi-used-ip-weight-1m", 6000), "bn_dapi": ("x-mbx-used-weight-1m", 1200),
               "bn_uid": ("x-sapi-used-uid-weight-1m", 90000), "bn_fapi": ("x-mbx-used-weight-1m", 1200)}
 GOV_MAX_WAIT = 65.0
 _GOV_LOCK = threading.Lock()
@@ -2872,7 +2878,9 @@ def _okx_get(env, path, params=None):
     if d.get("code") != "0":
         raise RuntimeError(f"okx {d.get('code')} {_xm(d.get('msg'))}")
     if path in ("/api/v5/account/balance", "/api/v5/asset/balances", "/api/v5/finance/savings/balance",
-                "/api/v5/finance/staking-defi/orders-active", "/api/v5/finance/flexible-loan/loan-info"):
+                "/api/v5/finance/staking-defi/orders-active", "/api/v5/finance/flexible-loan/loan-info",
+                "/api/v5/account/positions",
+                "/api/v5/account/bills", "/api/v5/account/bills-archive"):
         return _balance_rows(d.get("data"))
     return d.get("data") or []
 
@@ -3457,6 +3465,24 @@ def _fut_write(ex, wallet, positions, events, cursor):
         "events": events, "cursor": cursor})
 
 
+def _fut_req(v, what):
+    try:
+        x9 = float(v) if v is not None and not isinstance(v, bool) and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        x9 = None
+    if x9 is None or x9 != x9 or abs(x9) == float("inf"):
+        raise RuntimeError(f"선물 포지션 {what} 모름 — 스냅숏 보류")
+    return x9
+
+
+def _fut_opt(v):
+    try:
+        x9 = float(v) if v is not None and not isinstance(v, bool) and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
+    return x9 if x9 is not None and x9 == x9 and abs(x9) != float("inf") else None
+
+
 def _fut_binance(env):
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
 
@@ -3473,16 +3499,21 @@ def _fut_binance(env):
     st = common.read_json(_fut_path("binance"), {})
     acct = fcall("/fapi/v2/account")
     poss = []
-    for p in fcall("/fapi/v2/positionRisk") or []:
-        amt = float(p.get("positionAmt") or 0)
+    rows9 = fcall("/fapi/v2/positionRisk")
+    if not isinstance(rows9, list) or any(not isinstance(p, dict) for p in rows9):
+        raise RuntimeError("binance positionRisk 형식 오류 — 스냅숏 보류")
+    for p in rows9:
+        amt = _fut_req(p.get("positionAmt"), "수량(positionAmt)")
         if amt == 0:
             continue
         poss.append({"symbol": p.get("symbol"), "side": "LONG" if amt > 0 else "SHORT",
                      "qty": abs(amt), "entry": float(p.get("entryPrice") or 0),
                      "mark": float(p.get("markPrice") or 0),
-                     "upnl": float(p.get("unRealizedProfit") or 0),
+                     "upnl": _fut_opt(p.get("unRealizedProfit")),
                      "leverage": p.get("leverage"),
+                     "margin_mode": (str(p.get("marginType")).lower() if str(p.get("marginType") or "").lower() in ("cross", "isolated") else None),
                      "liq": float(p.get("liquidationPrice") or 0)})
+    cross_syms9 = {str(p9.get("symbol") or "") for p9 in poss if p9.get("margin_mode") != "isolated"}
     cur = int((st.get("cursor") or {}).get("income")
               or (int(time.time()) - 150 * 86400) * 1000)
     ev = list(st.get("events") or [])
@@ -3511,12 +3542,23 @@ def _fut_binance(env):
         if len(rows) < 1000:
             break
         pages += 1
+    _fnum9 = _fut_opt
+    ap9, cmm9 = acct.get("positions"), None
+    if (isinstance(ap9, list) and all(isinstance(a9, dict) and isinstance(a9.get("isolated"), bool) for a9 in ap9)
+            and cross_syms9 <= {str(a9.get("symbol") or "") for a9 in ap9 if a9["isolated"] is False}):
+        vals9 = [_fnum9(a9.get("maintMargin")) for a9 in ap9 if a9["isolated"] is False]
+        if all(v9 is not None and v9 >= 0 for v9 in vals9):
+            cmm9 = sum(vals9)
+    cwb9, cup9 = _fnum9(acct.get("totalCrossWalletBalance")), _fnum9(acct.get("totalCrossUnPnl"))
+    cmb9 = (cwb9 + cup9) if cwb9 is not None and cup9 is not None else None
+    cross_ok9 = cmm9 is not None and cmb9 is not None
     _fut_write("binance",
                {"balance": float(acct.get("totalWalletBalance") or 0),
                 "note": f"가용 증거금 {float(acct.get('availableBalance') or 0):,.2f} USDT",
-                "maint_margin": float(acct.get("totalMaintMargin") or 0),
-                "margin_balance": float(acct.get("totalMarginBalance") or 0),
-                "init_margin": float(acct.get("totalInitialMargin") or 0)},
+                "maint_margin": cmm9 if cross_ok9 else None,
+                "margin_balance": cmb9 if cross_ok9 else None,
+                "init_margin": float(acct.get("totalInitialMargin") or 0),
+                "mm_scope": "cross" if cross_ok9 else None},
                poss, ev, {"income": cur})
 
 
@@ -3541,7 +3583,9 @@ def _fut_bybit(env):
         cursors = set()
         while True:
             result = bcall(path, params)
-            rows = result.get("list") or []
+            rows = result.get("list")
+            if not isinstance(rows, list) or any(not isinstance(r9, dict) for r9 in rows):
+                raise RuntimeError(f"bybit {path} 목록 결손·형식 오류 — 스냅숏 보류")
             yield from rows
             cursor = result.get("nextPageCursor") or ""
             if not cursor:
@@ -3555,14 +3599,18 @@ def _fut_bybit(env):
     st = common.read_json(_fut_path("bybit"), {})
     poss = []
     for p in bpages("/v5/position/list", {"category": "linear", "settleCoin": "USDT"}):
-        sz = float(p.get("size") or 0)
+        if not isinstance(p, dict):
+            raise RuntimeError("bybit position 행 형식 오류 — 스냅숏 보류")
+        sz = _fut_req(p.get("size"), "수량(size)")
         if sz == 0:
             continue
+        if p.get("side") not in ("Buy", "Sell"):
+            raise RuntimeError("bybit position 방향(side) 모름 — 스냅숏 보류")
         poss.append({"symbol": p.get("symbol"),
                      "side": "LONG" if p.get("side") == "Buy" else "SHORT",
                      "qty": sz, "entry": float(p.get("avgPrice") or 0),
                      "mark": float(p.get("markPrice") or 0),
-                     "upnl": float(p.get("unrealisedPnl") or 0),
+                     "upnl": _fut_opt(p.get("unrealisedPnl")),
                      "leverage": p.get("leverage"),
                      "liq": float(p.get("liqPrice") or 0)})
     ev = list(st.get("events") or [])
@@ -3620,15 +3668,19 @@ def _fut_bybit(env):
 def _fut_okx(env):
     poss = []
     for p in _okx_get(env, "/api/v5/account/positions"):
-        pos = float(p.get("pos") or 0)
+        if not isinstance(p, dict):
+            raise RuntimeError("okx position 행 형식 오류 — 스냅숏 보류")
+        pos = _fut_req(p.get("pos"), "수량(pos)")
         if pos == 0:
             continue
+        if p.get("posSide") not in ("long", "short", "net"):
+            raise RuntimeError("okx position 방향(posSide) 모름 — 스냅숏 보류")
         poss.append({"symbol": p.get("instId"),
                      "side": (str(p.get("posSide")).upper() if p.get("posSide") in ("long", "short")
                               else ("LONG" if pos > 0 else "SHORT")),
                      "qty": abs(pos), "entry": float(p.get("avgPx") or 0),
                      "mark": float(p.get("markPx") or 0),
-                     "upnl": float(p.get("upl") or 0), "leverage": p.get("lever"),
+                     "upnl": _fut_opt(p.get("upl")), "leverage": p.get("lever"),
                      "liq": float(p.get("liqPx") or 0)})
     st = common.read_json(_fut_path("okx"), {})
     ev = list(st.get("events") or [])
@@ -3744,6 +3796,83 @@ def futures_snapshot_all(env):
                 log.warning("%s 선물 스냅샷 실패(다음 주기): %s", ex, msg[:140])
 
 
+def _bn_deriv_get(env, host, path, params=None):
+    _gov_prepare(host, path)
+    key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
+    q = dict(params or {})
+    q["timestamp"] = int(time.time() * 1000)
+    q["recvWindow"] = 10000
+    qs = urllib.parse.urlencode(q)
+    sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    return _http_json_err(f"https://{host}{path}?{qs}&signature={sig}", {"X-MBX-APIKEY": key})
+
+
+def _kucoin_fut_get(env, path_with_qs):
+    _gov_prepare("api-futures.kucoin.com", path_with_qs.split("?", 1)[0])
+    key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
+    ts = str(int(time.time() * 1000))
+    sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(), hashlib.sha256).digest()).decode()
+    pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(), hashlib.sha256).digest()).decode()
+    d = http_json("https://api-futures.kucoin.com" + path_with_qs,
+                  {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
+                   "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})
+    if not isinstance(d, dict) or d.get("code") != "200000":
+        raise RuntimeError(f"kucoin futures {_xm((d or {}).get('code') if isinstance(d, dict) else '')} {_xm((d or {}).get('msg') if isinstance(d, dict) else str(d)[:80])}")
+    return d.get("data")
+
+
+def _kucoin_pub_get(path_with_qs):
+    d = http_json("https://api.kucoin.com" + path_with_qs)
+    if not isinstance(d, dict) or d.get("code") != "200000":
+        raise RuntimeError(f"kucoin public {_xm((d or {}).get('msg') if isinstance(d, dict) else str(d)[:80])}")
+    return d.get("data")
+
+
+def _lev_body(fn, rl_host=None):
+    def f(*a, **k):
+        try:
+            return fn(*a, **k)
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read(ERR_BODY_MAX).decode("utf-8", "ignore")[:300]
+            except Exception:
+                body = ""
+            if rl_host and e.code == 403 and "too frequent" in body.lower():
+                k9 = _rl_key(rl_host)
+                _RL_OFF[k9] = max(float(_RL_OFF.get(k9, 0) or 0), time.time() + 600.0)
+                log.warning("%s HTTP 403(IP 한도 — access too frequent) — 600초 동안 이 호스트 호출 중단", rl_host)
+                raise RateLimited(f"{rl_host} HTTP 403 — access too frequent · 600초 백오프", 403) from None
+            raise RuntimeError(f"HTTP {e.code}: {_xm(body)}") from None
+    return f
+
+
+def leverage_getters(env):
+    return {
+        "binance": {"sapi": lambda p, q=None: _binance_signed(env, p, q),
+                    "fapi": lambda p, q=None: _bn_deriv_get(env, "fapi.binance.com", p, q),
+                    "dapi": lambda p, q=None: _bn_deriv_get(env, "dapi.binance.com", p, q)},
+        "bybit": {"get": _lev_body(lambda p, q=None: _bybit_get(env, p, q), rl_host="api.bybit.com")},
+        "okx": {"get": _lev_body(lambda p, q=None: _okx_get(env, p, q))},
+        "kucoin": {"get": _lev_body(lambda p: _kucoin_get(env, p)), "fut": _lev_body(lambda p: _kucoin_fut_get(env, p)), "pub": _lev_body(_kucoin_pub_get)},
+        "gate": {"get": _lev_body(lambda p, q=None: _gate_get(env, p, q))},
+    }
+
+
+def leverage_pass(env, cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    xc9 = cfg.get("exf")
+    if isinstance(xc9, dict) and xc9.get("leverage") is False:
+        return None
+    import leverage
+    doc = leverage.collect(env, leverage_getters(env), now=int(time.time()), cycle_sec=common.exf_poll_sec(cfg),
+                           fresh_sec=common.exf_fresh_sec(cfg), pace=lambda: time.sleep(PACE), log=log, cfg=cfg)
+    leverage.write(doc)
+    bad = [f"{p['ex']}:{p['product']}={p['status']}" for p in doc["products"] if p["status"] in ("error", "rate_limited")]
+    if bad:
+        log.info("레버리지·대출 스냅숏: 조회 실패 %d줄(%s) — 직전 값은 '낡음' 표시로 유지", len(bad), ", ".join(bad)[:200])
+    return doc
+
+
 EXT_CHUNK = 30 * DAY
 EXT_BUDGET = 240
 EXT_HARD_LIMIT = {("okx", "fills"): 90 * DAY}
@@ -3825,7 +3954,14 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
 
     def _save():
         with wlock:
-            common.atomic_write_json(STATE_PATH, state)
+            for i9 in range(3):
+                try:
+                    snap9 = json.loads(json.dumps(state, ensure_ascii=False))
+                    break
+                except RuntimeError:
+                    if i9 == 2:
+                        raise
+            common.atomic_write_json(STATE_PATH, snap9)
 
     def one(ex, target=target):
         target = min(int(target), int(bf_engine.SINCE.target(ex) or target))
@@ -4039,6 +4175,11 @@ def main():
         perp_dex.start_background()
     except Exception as e:
         log.warning("퍼프 덱스 수집 스레드 시작 실패(거래소 수집은 계속): %s", repr(e)[:160])
+    try:
+        import liq_watch
+        liq_watch.start_background(_env, _RL_OFF)
+    except Exception as e:
+        log.warning("청산 빠른 감시 스레드 시작 실패(거래소 수집은 계속): %s", repr(e)[:160])
     while True:
         env = _env()
         cfg = common.load_config()
@@ -4229,6 +4370,10 @@ def main():
                 log.warning("과거 창 확장 실패(다음 주기): %s", repr(e)[:160])
             ext_sec = time.time() - t_ext
         futures_snapshot_all(env)
+        try:
+            leverage_pass(env, cfg)
+        except Exception as e:
+            log.warning("레버리지·대출 스냅숏 실패(다음 주기): %s", common.safe_err(repr(e))[:160])
         active = any(all(env.get(k) for k in need) for _, need in FETCHERS.values()) or hl_on9
         time.sleep(max(60.0, poll9 - ext_sec) if active else 60)
 

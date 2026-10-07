@@ -1,5 +1,6 @@
 """Shadow ledger rebuild with verification gates."""
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -138,8 +139,12 @@ def snapshot_live(shadow_dir: str) -> tuple:
     return dst, baseline
 
 
-def offline_patch(pricing):
-    stats = {"candle_hit": 0, "candle_miss": 0, "fx_hit": 0, "fx_miss": 0}
+def offline_patch(pricing, stats=None):
+    stats = stats if stats is not None else {"candle_hit": 0, "candle_miss": 0, "fx_hit": 0, "fx_miss": 0}
+    if not _PX_ORIG:
+        _PX_ORIG.update({k: getattr(pricing.PxCache, k) for k in ("candle_usd", "fx_at", "maybe_save", "flush")})
+        _PX_MOD_ORIG.update({k: getattr(pricing, k) for k in ("_gj", "upbit_krw_markets", "upbit_spot_krw", "_fx_candle_krw_per_usdt")
+                             if hasattr(pricing, k)})
 
     def candle_usd(self, sym, ts_ms):
         sym = sym.upper()
@@ -177,7 +182,86 @@ def offline_patch(pricing):
     for name in ("_gj", "upbit_krw_markets", "upbit_spot_krw", "_fx_candle_krw_per_usdt"):
         if hasattr(pricing, name):
             setattr(pricing, name, _deny)
+    _net_block(stats)
     return stats
+
+
+_NET_ORIG = {}
+
+
+def _net_block(stats):
+    import socket
+    import cgkey
+    if "sock_connect" not in _NET_ORIG:
+        _NET_ORIG["sock_connect"] = socket.socket.connect
+        _NET_ORIG["sock_connect_ex"] = socket.socket.connect_ex
+        _NET_ORIG["getaddrinfo"] = socket.getaddrinfo
+        _NET_ORIG["cg_request"] = cgkey.request
+    stats.setdefault("net_denied", 0)
+    stats.setdefault("cg_key_skipped", 0)
+    hosts = stats.setdefault("net_denied_hosts", {})
+
+    callers = stats.setdefault("net_denied_callers", {})
+
+    def _deny_host(h):
+        stats["net_denied"] += 1
+        h = str(h)[:80]
+        if h in hosts or len(hosts) < 50:
+            hosts[h] = hosts.get(h, 0) + 1
+        try:
+            fr, who = sys._getframe(2), "?"
+            while fr is not None:
+                fn9 = fr.f_code.co_filename
+                b9 = os.path.basename(fn9)
+                if (os.sep + "src" + os.sep in fn9 or os.sep + "tools" + os.sep in fn9) and b9 not in ("bf_engine.py", "netpace.py", "rebuild2.py"):
+                    who = f"{b9[:-3]}:{fr.f_code.co_name}"
+                    break
+                fr = fr.f_back
+            if who in callers or len(callers) < 50:
+                callers[who] = callers.get(who, 0) + 1
+        except Exception:
+            pass
+
+    def _cg_offline(path, lane, via, allow=True, valid=None):
+        stats["cg_key_skipped"] += 1
+        return "skip", "offline"
+
+    def _guard(fn):
+        def connect(self, addr, *a, **k):
+            if getattr(self, "family", None) in (socket.AF_INET, socket.AF_INET6):
+                _deny_host(addr[0] if isinstance(addr, tuple) and addr else "?")
+                raise OSError("offline rebuild: 네트워크 연결 금지")
+            return fn(self, addr, *a, **k)
+        return connect
+
+    def _gai(host, *a, **k):
+        h9 = host.decode("utf-8", "replace") if isinstance(host, (bytes, bytearray)) else host
+        if h9 not in (None, "", "localhost", "127.0.0.1", "::1"):
+            _deny_host(h9)
+            raise socket.gaierror(socket.EAI_NONAME, "offline rebuild: 네트워크 금지")
+        return _NET_ORIG["getaddrinfo"](host, *a, **k)
+    cgkey.request = _cg_offline
+    socket.socket.connect = _guard(_NET_ORIG["sock_connect"])
+    socket.socket.connect_ex = _guard(_NET_ORIG["sock_connect_ex"])
+    socket.getaddrinfo = _gai
+
+
+def online_unpatch(pricing):
+    import socket
+    import cgkey
+    for k9, f9 in _PX_ORIG.items():
+        setattr(pricing.PxCache, k9, f9)
+    for k9, f9 in _PX_MOD_ORIG.items():
+        setattr(pricing, k9, f9)
+    if _NET_ORIG:
+        socket.socket.connect = _NET_ORIG["sock_connect"]
+        socket.socket.connect_ex = _NET_ORIG["sock_connect_ex"]
+        socket.getaddrinfo = _NET_ORIG["getaddrinfo"]
+        cgkey.request = _NET_ORIG["cg_request"]
+    return True
+
+
+_PX_ORIG, _PX_MOD_ORIG = {}, {}
 
 
 def sums_by_asset_loc(conn):
@@ -805,7 +889,9 @@ def cost_lost(a, b, top: int = 10) -> dict:
         if aid not in syms:
             s9 = a.execute("SELECT symbol FROM assets WHERE asset_id=?", (aid,)).fetchone()
             syms[aid] = (s9[0] if s9 else None) or f"#{aid}"
-    return {"n": len(lost), "usd": round(sum(abs(v[0]) for v in lost.values()), 2),
+    ks9 = hashlib.sha256("\n".join(sorted(json.dumps(list(k), ensure_ascii=False) for k in lost)).encode()).hexdigest() if lost else None
+    cs9 = hashlib.sha256("\n".join(sorted(json.dumps([list(k), round(abs(v[0]), 2)], ensure_ascii=False) for k, v in lost.items())).encode()).hexdigest() if lost else None
+    return {"n": len(lost), "usd": round(sum(abs(v[0]) for v in lost.values()), 2), "keys_sha": ks9, "costs_sha": cs9,
             "top": [{"key": list(k), "sym": syms.get(aid), "leg": lk[0], "event": lk[1], "cost_baseline": round(cu, 2)} for k, (cu, aid, lk) in rows[:top]]}
 
 
@@ -839,29 +925,95 @@ def carry_costs(baseline_db: str, conn) -> dict:
     return {"n": n, "usd": round(usd, 2), "skipped_decimals_changed": skip_dec}
 
 
+DEC_RESOLVE = {}
+
+
 def apply_dec_pending(conn, state_dir: str) -> dict:
     dec_pend = {}
+    DEC_RESOLVE.clear()
     for k9, it9 in ((common.read_json(os.path.join(state_dir, "asset_decimals_issues.json"), {}) or {}).get("items") or {}).items():
-        if isinstance(it9, dict) and it9.get("kind") == "pending" and isinstance(it9.get("seen"), int) and not isinstance(it9.get("seen"), bool):
-            try:
-                dec_pend[int(k9)] = int(it9["seen"])
-            except (TypeError, ValueError):
-                continue
+        if not isinstance(it9, dict) or not isinstance(it9.get("seen"), int) or isinstance(it9.get("seen"), bool):
+            continue
+        try:
+            aid9, sv9 = int(k9), int(it9["seen"])
+        except (TypeError, ValueError):
+            continue
+        if it9.get("kind") == "pending":
+            dec_pend[aid9] = sv9
+        elif it9.get("kind") == "resolve" and isinstance(it9.get("stored"), int) and not isinstance(it9.get("stored"), bool):
+            dec_pend[aid9] = sv9
+            DEC_RESOLVE[aid9] = (int(it9["stored"]), sv9)
     for aid9, dv9 in sorted(dec_pend.items()):
-        conn.execute("UPDATE assets SET decimals=? WHERE asset_id=? AND decimals IS NULL", (dv9, aid9))
+        if aid9 in DEC_RESOLVE:
+            conn.execute("UPDATE assets SET decimals=? WHERE asset_id=? AND decimals=?", (dv9, aid9, DEC_RESOLVE[aid9][0]))
+        else:
+            conn.execute("UPDATE assets SET decimals=? WHERE asset_id=? AND decimals IS NULL", (dv9, aid9))
     conn.commit()
     return dec_pend
 
 
 def dec_unresolved(conn, dec_pend: dict) -> list:
-    return sorted(a9 for a9 in dec_pend
-                  if (conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (a9,)).fetchone() or [0])[0] is None)
+    out = []
+    for a9 in dec_pend:
+        v9 = (conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (a9,)).fetchone() or [0])[0]
+        if v9 is None or (a9 in DEC_RESOLVE and int(v9) != DEC_RESOLVE[a9][1]):
+            out.append(a9)
+    return sorted(out)
+
+
+_OC_EPS = 1e-9
+
+
+def open_cost_of(ff: dict) -> tuple:
+    import math as _m9
+    import re as _re9
+    ff = ff or {}
+    o9, sy9, n9, held9g = {}, {}, 0, set()
+    for p9 in ff.get("_positionsAll") or ff.get("positions") or []:
+        try:
+            held9 = float(p9.get("held") or 0)
+        except (TypeError, ValueError):
+            held9 = float("nan")
+        if not _m9.isfinite(held9):
+            n9 += 1
+            held9g.add("?")
+            continue
+        if held9 <= _OC_EPS or p9.get("kind") in ("stable", "quarantined", "gas", "stake"):
+            continue
+        n9 += 1
+        gid9 = p9.get("_gid")
+        if gid9 is None:
+            mk9 = _re9.fullmatch(r"g(\d+)", str(p9.get("key") or ""))
+            gid9 = int(mk9.group(1)) if mk9 else None
+        held9g.add(str(gid9) if gid9 is not None else "?")
+    bad9 = 0
+    for c9 in ff.get("coins") or []:
+        mk9 = _re9.fullmatch(r"g(\d+)", str((c9 or {}).get("key") or ""))
+        if not mk9:
+            continue
+        try:
+            q9, a9, k9q = float(c9.get("qty") or 0), float(c9.get("avg") or 0), float(c9.get("kqty") or 0)
+        except (TypeError, ValueError):
+            bad9 += 1
+            continue
+        if not all(_m9.isfinite(x) for x in (q9, a9, k9q)):
+            bad9 += 1
+            continue
+        if q9 <= 0:
+            continue
+        k9 = str(int(mk9.group(1)))
+        o9[k9] = round(o9.get(k9, 0.0) + a9 * k9q, 2)
+        sy9.setdefault(k9, str(c9.get("sym") or "")[:24])
+    return o9, sy9, n9, len(held9g - set(o9)) + bad9
 
 
 def _unv_all(fields: dict, rows: list, money) -> dict:
     u9 = ((fields or {}).get("_diag") or {}).get("unv_all")
     if isinstance(u9, dict) and u9.get("proceeds") is not None:
-        return {"rows": int(u9.get("rows") or 0), "sum": round(float(u9["proceeds"]), 2), "src": "diag"}
+        o9 = {"rows": int(u9.get("rows") or 0), "sum": round(float(u9["proceeds"]), 2), "src": "diag"}
+        if isinstance(u9.get("by"), dict):
+            o9["by"] = u9["by"]
+        return o9
     return {"rows": len(rows), "sum": round(sum(money(p.get("onchain")) for p in rows), 2), "src": "pendings"}
 
 
@@ -1184,7 +1336,7 @@ def main():
                     help="LP 레그·업비트 비KRW 체결만 네트워크로 캔들 조회(나머지는 오프라인 캐시) — fix-c 컷오버용")
     ap.add_argument("--allow-locked", action="store_true",
                     help="업비트 재대사 미완 사유가 정확히 'locked'(미체결 주문 통화)이고 미대사 심볼 ⊆ locked 집합이면 완료로 인정 —"
-                         " recon_done_upbit 은 비워 두고 라이브 core 가 미체결 주문 동봉 스냅샷으로 완성(cutover_c --allow-locked 와 같은 규약)")
+                         " recon_done_upbit 은 비워 두고 라이브 core 가 미체결 주문 동봉 스냅샷으로 완성(운영자 컷오버 도구의 --allow-locked 와 같은 규약)")
     ap.add_argument("--web-compare", action="store_true",
                     help="shadow DB 위에서 web.StateBuilder 를 돌려 실현·미확인 총계를 라이브와 대조")
     args = ap.parse_args()
@@ -1204,7 +1356,7 @@ def main():
         print("--dry-run: 종료 (아무것도 안 씀)")
         return
 
-    t0 = time.time()
+    t0 = time.monotonic()
     shadow_dir = os.path.abspath(args.shadow_dir)
     if args.report and args.from_baseline and _paths_overlap(args.report, args.from_baseline):
         raise SystemExit("--report 가 입력 기준선 디렉터리와 겹친다 — 중단")
@@ -1218,7 +1370,7 @@ def main():
         shadow_db, baseline_db = snapshot_from(os.path.abspath(args.from_baseline), shadow_dir)
     else:
         shadow_db, baseline_db = snapshot_live(shadow_dir)
-    print(f"[0] 스냅샷 완료 → 작업 {shadow_db} / 기준선 {baseline_db} ({time.time() - t0:.1f}s)")
+    print(f"[0] 스냅샷 완료 → 작업 {shadow_db} / 기준선 {baseline_db} ({time.monotonic() - t0:.1f}s)")
 
     _live_state = common.STATE_DIR
     common.rebase_state(shadow_dir, shadow_db)
@@ -1227,9 +1379,6 @@ def main():
     import nft as _nft9
     _nft9.BUDGET_PATH = os.path.join(_live_state, "nft_budget.json")
     import pricing
-    _px_orig = {k: getattr(pricing.PxCache, k) for k in ("candle_usd", "fx_at", "maybe_save", "flush")}
-    _px_mod_orig = {k: getattr(pricing, k) for k in ("_gj", "upbit_krw_markets", "upbit_spot_krw", "_fx_candle_krw_per_usdt")
-                    if hasattr(pricing, k)}
     px_stats = offline_patch(pricing)
     import core as core_mod
     import db as dbm
@@ -1306,7 +1455,7 @@ def main():
             conn.rollback()
             err += 1
             errs.append((r["chain"], r["txhash"], repr(e)[:120]))
-    print(f"[3] 온체인 재파생 {ok} 성공 / {err} 실패 ({time.time() - t0:.1f}s)")
+    print(f"[3] 온체인 재파생 {ok} 성공 / {err} 실패 ({time.monotonic() - t0:.1f}s)")
 
     now = int(time.time())
     m = 0
@@ -1388,7 +1537,7 @@ def main():
     if orders:
         c._consume_fills({"orders": orders})
         conn.commit()
-    print(f"[4] 업비트 입금 대사 {m} / 해외 체결 {nf} / 업비트 주문 {len(orders)} ({time.time() - t0:.1f}s)")
+    print(f"[4] 업비트 입금 대사 {m} / 해외 체결 {nf} / 업비트 주문 {len(orders)} ({time.monotonic() - t0:.1f}s)")
     if err:
         conn.commit()
         conn.close()
@@ -1423,10 +1572,7 @@ def main():
         fixed_time9, fixed_sleep9 = core_mod.time.time, core_mod.time.sleep
         core_mod.time.time = real_time
         core_mod.time.sleep = real_sleep
-        for k9, f9 in _px_orig.items():
-            setattr(pricing.PxCache, k9, f9)
-        for k9, f9 in _px_mod_orig.items():
-            setattr(pricing, k9, f9)
+        online_unpatch(pricing)
         if "fx_at" in c.px.__dict__:
             del c.px.__dict__["fx_at"]
         n_lp9 = 0
@@ -1451,7 +1597,7 @@ def main():
         c.px.flush()
         core_mod.time.time = fixed_time9
         core_mod.time.sleep = fixed_sleep9
-        offline_patch(pricing)
+        offline_patch(pricing, px_stats)
         c.px.fx_at = _offline_fx_scan
         left9 = conn.execute("SELECT count(*) FROM postings WHERE cost_usd IS NULL AND event LIKE 'LP\\_%' ESCAPE '\\'"
                              " AND leg_kind IN ('disp','acq')").fetchone()[0]
@@ -1539,7 +1685,7 @@ def main():
     c.px.flush = lambda: None
     conn.close()
     print(f"[6] 앵커 {anc['mode']}: " + ", ".join(f"{k}={v}" for k, v in anc.items() if k != "rows")
-          + f" ({time.time() - t0:.1f}s)")
+          + f" ({time.monotonic() - t0:.1f}s)")
 
     rep = compare(baseline_db, shadow_db, GEN_T0, core_mod.Core._iso_ts)
     _cu = _ro(shadow_db)
@@ -1565,7 +1711,7 @@ def main():
         else:
             print(f"[6b] --allow-locked: 미대사 {sorted(un9)} ⊆ locked — recon_done_upbit 미설정으로 완료 처리(라이브 core 가 완성)")
     rep["meta"] = {"incomplete": incomplete,
-                   "took_s": round(time.time() - t0, 1), "apply_ok": ok, "apply_err": err,
+                   "took_s": round(time.monotonic() - t0, 1), "apply_ok": ok, "apply_err": err,
                    "apply_errors": errs[:50], "price_passes": passes, "price_left": prev,
                    "px": px_stats, "anchors": len(anchors), "shadow_db": shadow_db,
                    "baseline_db": baseline_db}
@@ -1640,6 +1786,14 @@ def main():
                 return o
             rep["G4_vs_baseline"]["realized_by_month_baseline"] = _by_month(fb.get("realizedByDate"))
             rep["G4_vs_baseline"]["realized_by_month_shadow"] = _by_month(f.get("realizedByDate"))
+
+            ocb9, syb9, nb9, mb9 = open_cost_of(fb)
+            ocs9, sys9, ns9, ms9 = open_cost_of(f)
+            rep["G4_vs_baseline"]["open_cost_baseline"] = ocb9
+            rep["G4_vs_baseline"]["open_cost_shadow"] = ocs9
+            rep["G4_vs_baseline"]["open_cost_held_cards"] = [nb9, ns9]
+            rep["G4_vs_baseline"]["open_cost_missing_groups"] = [mb9, ms9]
+            rep["G4_vs_baseline"]["open_cost_sym"] = dict(syb9, **sys9)
         except Exception as e:
             web_error = True
             rep["web_shadow"] = {"error": repr(e)[:300]}

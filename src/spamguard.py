@@ -367,10 +367,19 @@ def tx_scam_reason(conn, chain, txh, my):
     return why
 
 
+_CS_MEMO = {}
+_CS_MEMO_MAX = 200000
+
+
 def _clean_str(v: str) -> str:
     if v.isascii():
         return v
-    return clean(v) if any(_drop(ch) for ch in v) else v
+    r = _CS_MEMO.get(v, _CS_MEMO)
+    if r is _CS_MEMO:
+        r = clean(v) if any(_drop(ch) for ch in v) else None
+        if len(_CS_MEMO) < _CS_MEMO_MAX:
+            _CS_MEMO[v] = r
+    return v if r is None else r
 
 
 def annotate(obj, _depth: int = 0):

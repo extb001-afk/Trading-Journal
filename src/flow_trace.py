@@ -1,12 +1,14 @@
 """Traces funds sent to unknown addresses."""
 import json
 import os
+import re
 import time
 from decimal import Decimal, InvalidOperation
 
 import netpace
 import common
 import xchain_match as xm
+import spamguard
 
 CACHE_NAME = "flow_trace_cache.json"
 CACHE_V = 1
@@ -25,6 +27,7 @@ BSC_WINDOWS = 8
 BSC_SENDS = 8
 SOL_SPEND_MIN = Decimal("0.02")
 DUST_USD = 1.0
+HID_KEEP = 30
 TOKEN_PROGS = ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
 WSOL = xm.WSOL
 TR = xm.TR
@@ -108,7 +111,7 @@ def candidates(rows, cache, now=None, min_usd=MIN_USD):
     out = []
     for r in rows or []:
         a = r.get("address") or ""
-        if r.get("status") not in ELIGIBLE or a in ("multi", "?") or r.get("dust"):
+        if r.get("status") not in ELIGIBLE or a in ("multi", "?") or r.get("dust") or is_burn(a):
             continue
         val = max(float(r.get("usdAtSend") or 0), float(r.get("usdNow") or 0))
         if val < min_usd:
@@ -455,7 +458,7 @@ class Scanner:
             if s["ntx"] >= SOL_TX_MAX:
                 s["capped"] = "tx"
                 break
-            t = self.t._sol("getTransaction", [x["sig"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+            t = self.t._sol("getTransaction", [x["sig"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
             s["ntx"] += 1
             ct = xm.compact_sol_tx(t)
             evs = sol_events(A, x["sig"], ct, lambda m: self.sym_of("sol", m))
@@ -644,8 +647,13 @@ class Scanner:
 def run_once(cfg, state_dir, cands, budget=40, log=None, px=None, sleep=0.35, sym_of=None, limit=1):
     cache = load_cache(state_dir)
     done = []
+    off9 = set((cfg or {}).get("_disabled_chains") or ())
+    off9.update(c9 for c9, cc9 in ((cfg or {}).get("chains") or {}).items() if isinstance(cc9, dict) and not common.chain_enabled(c9, cc9))
     for cand in cands[:limit]:
         a = cand["dest"]
+        if off9 and off9.intersection(cand.get("chains") or ()):
+            done.append((a, "off", 0))
+            continue
         ent = cache["dest"].get(a) or {}
         if ent.get("fp") != cand["fp"] or ent.get("status") in ("ok", "partial"):
             keep = {"sol": ent.get("sol")} if ent.get("sol") else {}
@@ -712,11 +720,31 @@ PROTO_KO = {"relay": "Relay", "debridge": "deBridge", "wormhole": "Wormhole", "w
             "mayan": "Mayan", "ccip": "Chainlink CCIP", "across": "Across", "stargate": "Stargate", "?": "브릿지"}
 
 
-def spoof(e, u, look):
+_GSFX = re.compile(r"#\d+$")
+
+
+def disp_sym(sym) -> str:
+    return _GSFX.sub("", str(sym or ""))
+
+
+def spam_token(e, spam_tok=frozenset()) -> bool:
+    tok = e.get("token")
+    if not tok or tok == "native":
+        return False
+    ch = e.get("chain")
+    if spamguard.is_genuine(ch, tok):
+        return False
+    if spam_tok and (ch, norm(tok)) in spam_tok:
+        return True
+    s = disp_sym(e.get("sym"))
+    return bool(s and (spamguard.impostor_of(s) or spamguard.odd_symbol(s)))
+
+
+def spoof(e, u, look, spam_tok=frozenset()):
     if u is not None:
         return False
     sym = str(e.get("sym") or "")
-    return (not sym.isascii()) or bool(look(e.get("cp") or ""))
+    return (not sym.isascii()) or bool(look(e.get("cp") or "")) or spam_token(e, spam_tok)
 
 
 def mine_score(ev):
@@ -828,25 +856,47 @@ def account(row, ent, ctx, px_now=None, max_recips=12):
     direct_full = int(row.get("returnedN") or 0) <= len(row.get("returned") or [])
     mine, exch, bridges = ctx.get("mine") or set(), ctx.get("exch") or {}, ctx.get("bridges") or {}
     look = ctx.get("lookalike") or (lambda x: False)
+    spam_tok = ctx.get("spam_tok") or frozenset()
     out = {"status": (ent or {}).get("status") or "queued", "sent": round(sent, 2), "scannedAt": (ent or {}).get("t"),
            "notes": [], "recips": [], "swaps": {"n": 0, "sold": [], "bought": []}}
     ev = all_events(ent or {})
+    hid_n, hid = 0, []
+
+    def _hide(e9, u9, token_only=False):
+        nonlocal hid_n
+        if not ((u9 is None and spam_token(e9, spam_tok)) if token_only else spoof(e9, u9, look, spam_tok)):
+            return False
+        hid_n += 1
+        hid.append({"ts": int(e9.get("ts") or 0), "tx": e9.get("tx"), "chain": e9.get("chain"), "sym": disp_sym(e9.get("sym")) or "?",
+                    "qty": float(D(e9.get("qty"))), "dir": e9.get("kind"), "cp": e9.get("cp") or "?"})
+        if len(hid) > 2 * HID_KEEP:
+            hid.sort(key=lambda x: -x["ts"])
+            del hid[HID_KEEP:]
+        return True
     rec = {}
     swaps_sold, swaps_bought = {}, {}
     mixed, mixed_n, unpriced = 0.0, 0, 0
     exch_usd, extra_direct, bridged_back = 0.0, 0.0, 0.0
     for e in ev:
         if e["kind"] == "swap":
+            legs9 = {"sold": [], "bought": []}
+            for side in ("sold", "bought"):
+                for lg in e.get(side) or []:
+                    hl9 = dict(lg, kind="out" if side == "sold" else "in", ts=e.get("ts"), tx=e.get("tx"), chain=lg.get("chain") or e.get("chain"), cp=None)
+                    if not _hide(hl9, _usd(lg, px_now)[0], token_only=True):
+                        legs9[side].append(lg)
+            if not (legs9["sold"] or legs9["bought"]):
+                continue
             out["swaps"]["n"] += 1
             for side, acc in (("sold", swaps_sold), ("bought", swaps_bought)):
-                for lg in e.get(side) or []:
+                for lg in legs9[side]:
                     u, _ap = _usd(lg, px_now)
                     k = (lg.get("sym") or "?")
                     s9 = acc.setdefault(k, {"sym": k, "qty": 0.0, "usd": 0.0, "n": 0})
                     s9["qty"] += float(D(lg.get("qty"))); s9["usd"] += u or 0.0; s9["n"] += 1
             continue
         u, approx = _usd(e, px_now)
-        if spoof(e, u, look):
+        if _hide(e, u):
             continue
         if e["kind"] == "in":
             cp = e.get("cp") or "?"
@@ -997,6 +1047,7 @@ def account(row, ent, ctx, px_now=None, max_recips=12):
         "unpriced": unpriced,
         "recips": [r for r in recips if r["base"] != "mine"][:max_recips],
         "mineN": sum(1 for r in recips if r["base"] == "mine"),
+        "spoofHidden": {"n": hid_n, "items": sorted(hid, key=lambda x: -x["ts"])[:HID_KEEP]},
     })
     out["swaps"]["sold"] = sorted(({**v, "qty": round(v["qty"], 8), "usd": round(v["usd"], 2)} for v in swaps_sold.values()), key=lambda x: -x["usd"])[:6]
     out["swaps"]["bought"] = sorted(({**v, "qty": round(v["qty"], 8), "usd": round(v["usd"], 2)} for v in swaps_bought.values()), key=lambda x: -x["usd"])[:6]

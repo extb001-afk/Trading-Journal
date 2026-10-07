@@ -122,6 +122,15 @@ def ex_label(ex, fam):
 EX_WINDOW_DAYS = {"upbit": 7, "bybit": 7, "kucoin": 7, "gate": 30, "binance": 90, "okx": 90, "bithumb": None}
 
 
+def _sweep_name(ch):
+    try:
+        import chainsweep
+        ent = chainsweep.SWEEP_CHAINS.get(ch)
+        return str(ent[0]) if ent else str(ch)
+    except Exception:
+        return str(ch)
+
+
 def _d(ts):
     return time.strftime("%Y-%m-%d", time.gmtime(int(ts))) if ts else None
 
@@ -372,6 +381,36 @@ def build(base=None, exl_path=None, speed_path=None, now=None):
         elif limit_kind in ("archive_only", "explorer_index"):
             unavailable.append({"source_id": src["id"], "label": meta["label"], "before": None,
                                 "severity": "partial", "reason_ko": reason})
+    for ch in sorted(wallets):
+        if ch in ("bsc", "sol"):
+            continue
+        g9 = [x for x in ((_rj(os.path.join(st, f"cursor_evm_{ch}.json"), {}) or {}).get("_retention_gaps") or []) if isinstance(x, dict)]
+        if not g9:
+            continue
+        a9 = min(g9, key=lambda x: int(x.get("from") or 0))
+        b9 = max(g9, key=lambda x: int(x.get("to") or 0))
+        lab9 = (CHAIN_TRACKS.get(ch) or {}).get("label") or _sweep_name(ch)
+        fd9, td9 = _d(a9.get("from_ts")), _d(b9.get("floor_ts"))
+        unavailable.append({"source_id": f"chain:{ch}", "label": lab9, "before": td9, "severity": "hard",
+                            "uncollected": {"from_block": int(a9.get("from") or 0), "to_block": int(b9.get("to") or 0),
+                                            "from": fd9, "until": td9},
+                            "reason_ko": (f"{lab9} 공개 노드가 옛 로그를 보관하지 않아 블록 {int(a9.get('from') or 0):,}~{int(b9.get('to') or 0):,}"
+                                          + (f"({fd9 or '?'}~{td9} 전)" if td9 else "") + " 기록을 못 받았어요(미수집 범위) — 그 앞 보유는 "
+                                          "기초 잔고(원가 미확인)로 둬요. " + FIX_HINT)})
+        src9 = next((s9 for s9 in sources if s9.get("id") == f"chain:{ch}"), None)
+        if src9:
+            src9["limit_kind"] = "archive_only"
+            src9["reason_ko"] = unavailable[-1]["reason_ko"]
+            for w9 in src9.get("wallets") or []:
+                wl9 = str(w9.get("wallet") or "").lower()
+                fl9 = [int(g["floor_ts"]) for g in g9 if isinstance(g.get("floor_ts"), (int, float)) and not isinstance(g.get("floor_ts"), bool)
+                       and (not g.get("ws") or any(wl9.startswith(str(p9).lower()) for p9 in g["ws"]))]
+                if not fl9:
+                    continue
+                d9 = _d(max(fl9))
+                if d9 and (not w9.get("achieved_start") or d9 > str(w9["achieved_start"])):
+                    w9["achieved_start"] = d9
+                w9["records_reach_start"] = False
     exf = _rj(os.path.join(st, "exf_state.json"), {}) or {}
     upo = _rj(os.path.join(st, "upbit_orders_state.json"), {}) or {}
     for ex, fams in sorted((exl.get("exchanges") or {}).items()):

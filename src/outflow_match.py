@@ -53,6 +53,14 @@ def qty_fits(sent: Decimal, credited: Decimal, sym: str) -> bool:
 
 def match(sends, deposits, mine_txids=frozenset(), deposit_exchange=None, no_auto=frozenset()):
     matches, sugg, proven = {}, {}, {}
+    dcs = {id(d): canon_sym(d["cur"], d.get("ex")) for d in deposits}
+    scs = {}
+
+    def _scs(s0):
+        k0 = id(s0)
+        if k0 not in scs:
+            scs[k0] = canon_sym(s0["sym"])
+        return scs[k0]
     dep_by_txn = {}
     for d in deposits:
         if d.get("txn"):
@@ -64,7 +72,8 @@ def match(sends, deposits, mine_txids=frozenset(), deposit_exchange=None, no_aut
         ds = dep_by_txn.get(s["txn"]) or []
         if not ds:
             continue
-        same = [d for d in ds if canon_sym(d["cur"], d.get("ex")) == canon_sym(s["sym"])]
+        cs0 = _scs(s)
+        same = [d for d in ds if dcs[id(d)] == cs0]
         if not same and len(ds) == 1 and qty_fits(s["qty"], ds[0]["amt"], s["sym"]):
             same = ds
         d = same[0] if same else ds[0]
@@ -85,15 +94,18 @@ def match(sends, deposits, mine_txids=frozenset(), deposit_exchange=None, no_aut
         elif len(exs) > 1:
             proven[s["dest"]] = (None, "conflict")
     pool = [d for d in deposits if (d["ex"], d["uuid"]) not in used and not (d.get("txn") and d["txn"] in mine_txids)]
+    pool_by = {}
+    for d in pool:
+        pool_by.setdefault(dcs[id(d)], []).append(d)
     cand_s, cand_d = {}, {}
     live_ids = {s["pid"] for s in live}
     for s in sends:
         if s["pid"] in matches or not s.get("ok") or s["dest"] in SPECIAL_DESTS:
             continue
-        cs = canon_sym(s["sym"])
+        cs = _scs(s)
         pex = proven.get(s["dest"], (None, ""))[0]
-        for d in pool:
-            if canon_sym(d["cur"], d.get("ex")) != cs or not d.get("ts"):
+        for d in pool_by.get(cs, ()):
+            if not d.get("ts"):
                 continue
             dt = d["ts"] - s["ts"]
             if dt < -WIN_BEFORE or dt > WIN_AFTER or not qty_fits(s["qty"], d["amt"], cs):
@@ -124,17 +136,17 @@ def match(sends, deposits, mine_txids=frozenset(), deposit_exchange=None, no_aut
     for s in live:
         if s["pid"] in matches or not s.get("ok") or s["dest"] in SPECIAL_DESTS or proven.get(s["dest"], (None, ""))[0]:
             continue
-        cs = canon_sym(s["sym"])
+        cs = _scs(s)
         h0 = str(s["dest"]).lower() if str(s["dest"]).startswith("0x") else s["dest"]
-        ds = [d for d in pool if (d["ex"], d["uuid"]) not in used and d.get("ts") and d.get("origin_from") == h0
-              and canon_sym(d["cur"], d.get("ex")) == cs and -WIN_BEFORE <= d["ts"] - s["ts"] <= WIN_AFTER
+        ds = [d for d in pool_by.get(cs, ()) if (d["ex"], d["uuid"]) not in used and d.get("ts") and d.get("origin_from") == h0
+              and -WIN_BEFORE <= d["ts"] - s["ts"] <= WIN_AFTER
               and Decimal(0) < d["amt"] <= s["qty"] * (Decimal(1) + Decimal("1e-9"))]
         if len(ds) < 2 or len({d["ex"] for d in ds}) != 1:
             continue
         tot = sum((d["amt"] for d in ds), Decimal(0))
         if not qty_fits(s["qty"], tot, cs):
             continue
-        rival = [s2 for s2 in sends if s2["pid"] != s["pid"] and s2["dest"] == s["dest"] and canon_sym(s2["sym"]) == cs
+        rival = [s2 for s2 in sends if s2["pid"] != s["pid"] and s2["dest"] == s["dest"] and _scs(s2) == cs
                  and any(-WIN_BEFORE <= d["ts"] - s2["ts"] <= WIN_AFTER for d in ds)]
         if rival:
             continue

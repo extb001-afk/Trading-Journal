@@ -93,7 +93,7 @@ class Upbit:
             return json.loads(r.read().decode())
 
 
-def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60) -> list:
+def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60, stop=None) -> list:
     from datetime import datetime
     cutoff = time.time() - months * 30 * 86400
     out = []
@@ -109,6 +109,8 @@ def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60) -> li
         prev_ids = ids
         out.extend(rows)
         if len(rows) < 100:
+            break
+        if stop is not None and stop(rows):
             break
         try:
             oldest = min(datetime.fromisoformat(str((r or {}).get("created_at")).replace("Z", "+00:00")).timestamp()
@@ -414,22 +416,52 @@ def extend_orders(up: "Upbit", months: float, target: float, next_state: dict, s
     return out
 
 
+_TERMINAL = ("ACCEPTED", "DONE", "CANCELLED", "CANCELED", "REJECTED", "FAILED", "REFUNDED")
+
+
 class _RowFilter:
     FULL_SEC = 6 * 3600
 
     def __init__(self):
         self.fp = {}
         self.full_at = 0.0
+        self.open = {}
+        self._nopen = {}
 
     @staticmethod
     def _h(r) -> str:
         return hashlib.sha1(json.dumps(r, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
-    def pick(self, deposits, withdraws, now=None):
+    def need_full(self, now=None) -> bool:
         now = time.time() if now is None else now
-        full = not self.fp or now - self.full_at >= self.FULL_SEC
+        return not self.fp or now - self.full_at >= self.FULL_SEC
+
+    def stopper(self, kind: str):
+        def stop(rows) -> bool:
+            oldest = None
+            for r in rows:
+                if not isinstance(r, dict) or not r.get("uuid"):
+                    return False
+                k = kind + ":" + str(r["uuid"])
+                if self.fp.get(k) != self._h(r) or str(r.get("state") or "").upper() not in _TERMINAL:
+                    return False
+                t = _iso_ts(r.get("created_at"))
+                if t is None:
+                    return False
+                oldest = t if oldest is None else min(oldest, t)
+            for k, t in self.open.items():
+                if k.startswith(kind + ":") and (t is None or oldest is None or t <= oldest):
+                    return False
+            return oldest is not None
+        return stop
+
+    def pick(self, deposits, withdraws, now=None, full=None):
+        now = time.time() if now is None else now
+        if full is None:
+            full = self.need_full(now)
         out = []
         nfp = {}
+        self._nopen = {}
         for kind, rows in (("d", deposits or []), ("w", withdraws or [])):
             keep = []
             for r in rows:
@@ -439,6 +471,7 @@ class _RowFilter:
                 k = kind + ":" + str(r.get("uuid") or "")
                 h = self._h(r)
                 nfp[k] = h
+                self._nopen[k] = None if str(r.get("state") or "").upper() in _TERMINAL else (_iso_ts(r.get("created_at")) or 0.0)
                 if full or self.fp.get(k) != h:
                     keep.append(r)
             out.append(keep)
@@ -446,8 +479,16 @@ class _RowFilter:
 
     def commit(self, nfp: dict, full: bool, now=None):
         self.fp.update(nfp)
+        for k, t in (self._nopen or {}).items():
+            if k not in nfp:
+                continue
+            if t is None:
+                self.open.pop(k, None)
+            else:
+                self.open[k] = t or None
         if full:
             self.full_at = time.time() if now is None else now
+            self.open = {k: t for k, t in self.open.items() if k in nfp}
 
 
 class _Backoff:
@@ -505,10 +546,11 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
     target = bf_engine.SINCE.target("upbit")
     m_eff = max(months, (time.time() - target) / (30 * 86400)) if target else months
     pages = int(60 * max(1.0, m_eff / 5.0))
-    deposits = _paged(up, "/v1/deposits", m_eff, pages)
+    full0 = _ROWS.need_full()
+    deposits = _paged(up, "/v1/deposits", m_eff, pages, stop=None if full0 else _ROWS.stopper("d"))
     time.sleep(0.2)
-    withdraws = _paged(up, "/v1/withdraws", m_eff, pages)
-    nd9, nw9, nfp9, full9 = _ROWS.pick(deposits, withdraws)
+    withdraws = _paged(up, "/v1/withdraws", m_eff, pages, stop=None if full0 else _ROWS.stopper("w"))
+    nd9, nw9, nfp9, full9 = _ROWS.pick(deposits, withdraws, full=full0)
     if nd9 or nw9 or full9:
         writer.append({"v": 1, "kind": "ex_snapshot", "exchange": "upbit",
                        "ts": int(time.time()),

@@ -102,10 +102,16 @@ _COINS = [
 _LP_VALUE, _LP_FEES = 11986.4, 88.3
 
 
+def _day_built(now=None) -> int:
+    n = now or datetime.now(KST)
+    return int(n.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
 def build() -> dict:
     rnd = random.Random(20260926)
     now = datetime.now(KST)
     d = _base()
+    d["builtAt"] = _day_built(now)
     f = d["fields"]
     wallets = [("메인", demo_evm(1), ["eth", "base", "arbitrum", "optimism", "bsc"]),
                ("트레이딩", demo_evm(2), ["base", "arbitrum", "polygon"]),
@@ -151,6 +157,11 @@ def build() -> dict:
                   {"w": "솔라나 지갑", "ch": "Solana", "sub": "Solana · " + _short(demo_sol(1)), "qty": 6000.0}]},
         {"key": "g201", "sym": "USDT", "name": "USDT", "qty": 9400.0, "price": 1, "avg": 1,
          "locs": [{"w": "업비트", "sub": "거래소 잔고 (입금·체결 원장)", "qty": 9400.0}]}]
+    f["venueFlows30"] = {"days": 30, "flowOk": True, "by": {
+        "메인 지갑": {"in": 4200.0, "out": 1850.0, "realized": 612.4, "realizedKrw": 846000},
+        "트레이딩 지갑": {"in": 900.0, "out": 300.0, "realized": -84.2, "realizedKrw": -116500},
+        "업비트": {"in": 2500.0, "out": 1200.0, "realized": 233.0, "realizedKrw": 322000}}}
+    f["exBalTs"] = {"업비트": round(time.time()) - 180}
     f["coinDexUsd"] = round(sum(c["qty"] * c["price"] for c in coins) * 0.8, 2)
     f["coinCexUsd"] = round(sum(c["qty"] * c["price"] for c in coins) * 0.2, 2)
 
@@ -236,7 +247,8 @@ def build() -> dict:
         val = vals[29 - k]
         usdt = 1360 + rnd.randint(0, 40)
         kimp = round(rnd.uniform(0.2, 2.6), 2)
-        series.append({"date": _mmdd(day), "dow": DOW[day.weekday()], "val": round(val, 2), "usdt": usdt, "kimp": kimp})
+        series.append({"date": _mmdd(day), "dow": DOW[day.weekday()], "val": round(val, 2), "usdt": usdt, "kimp": kimp,
+                       "flow": round(-total_now * 0.05, 2) if k == 20 else 0.0})
         f["usdtByDate"][_mmdd(day)] = {"usdt": usdt, "kimp": kimp}
     f["dailySeries"] = series
     f["realizedMonth"] = 0.0
@@ -274,10 +286,18 @@ def build() -> dict:
     f["lpEvents"] = [{"t": (now - timedelta(days=30)).strftime("%m-%d %H:%M"), "_ts": int((now - timedelta(days=30)).timestamp()),
                       "lp": "lp:base:demo:1", "sym": "WETH / USDC", "k": "유동성 예치", "d": "Base · Uniswap v3 0.05% · 범위 3,500–4,400",
                       "q": "1.5 WETH + 6,100 USDC", "a": "$12,000", "tx": _tx("lp1"), "src": None}]
+    krw0 = total_now * f["rate"]
+    f["krwFlows"] = {"rows": [{"dir": "in", "ex": "업비트", "st": "done", "amt": round(krw0 * w9, -4), "t": int((now - timedelta(days=d9)).timestamp())}
+                              for w9, d9 in ((0.42, 330), (0.21, 210), (0.12, 120), (0.08, 45))]
+                     + [{"dir": "out", "ex": "업비트", "st": "done", "amt": round(krw0 * 0.05, -4), "t": int((now - timedelta(days=20)).timestamp())}]}
     fut = f["futures"]
     fut.update({"realizedRows": [{"t": (now - timedelta(days=k)).strftime("%m-%d %H:%M"), "_ts": int((now - timedelta(days=k)).timestamp() * 1000),
                                   "sym": "ETHUSDT", "ex": "바이낸스", "pnl": round(rnd.uniform(-120, 260), 2)} for k in (1, 4, 9)]})
     fut["realizedTotal"] = round(sum(r["pnl"] for r in fut["realizedRows"]), 2)
+    w9 = sum(1 for r in fut["realizedRows"] if r["pnl"] > 0)
+    l9 = sum(1 for r in fut["realizedRows"] if r["pnl"] < 0)
+    fut["pnlBreak"] = {"realized": fut["realizedTotal"], "funding": 0.0, "fee": 0.0, "net": fut["realizedTotal"], "wins": w9, "losses": l9,
+                       "winRate": round(w9 / (w9 + l9) * 100, 1) if (w9 + l9) else None}
     for r in fut["realizedRows"]:
         fut["realizedByDate"][r["t"][:5]] = round(fut["realizedByDate"].get(r["t"][:5], 0) + r["pnl"], 2)
     return d
@@ -293,3 +313,131 @@ def depaddr_status() -> dict:
                    "fromHistory": n // 4, "lastRefresh": now - ago, "lastFull": now - ago, "lastError": None,
                    "lastAttempt": now - ago, "running": False, "requested": False, "nextTry": None}
     return out
+
+
+_EXTRA = {"day": None, "idx": None, "daily": None}
+
+
+def _extra_key():
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+
+def day_idx() -> dict:
+    k = _extra_key()
+    if _EXTRA["day"] == k and _EXTRA["idx"] is not None:
+        return _EXTRA["idx"]
+    rnd = random.Random(1006)
+    now = datetime.now(KST)
+    pos, tax, ix = [], [], {}
+    for i, (sym, ch, px, _q, avg) in enumerate(_COINS):
+        for j in range(rnd.randint(2, 4)):
+            start = now - timedelta(days=rnd.randint(20, 360), hours=rnd.randint(0, 23))
+            key = f"g{100 + i}f{j + 1}"
+            rbd = {}
+            for _s in range(rnd.randint(1, 5)):
+                hold_h = rnd.choice([3, 10, 30, 46, 80, 200, 500, 1500, 3000])
+                t = start + timedelta(hours=hold_h + rnd.randint(0, 48))
+                if t >= now - timedelta(hours=1):
+                    continue
+                hr = t.hour
+                edge = -0.25 if hr >= 20 or hr < 2 else 0.12 if 9 <= hr < 13 else 0.0
+                r = rnd.uniform(-0.18, 0.32) + edge
+                qty = round(rnd.uniform(200, 4000) / max(px, 0.01), 6)
+                cost = qty * avg
+                disp = cost * (1 + r)
+                iso = t.strftime("%Y-%m-%d")
+                rbd[iso] = round(rbd.get(iso, 0.0) + (disp - cost), 2)
+                tax.append({"sold": iso, "sym": sym, "ticker": sym, "ex": "업비트", "qty": qty, "acq": round(cost, 2), "disp": round(disp, 2), "fee": 0})
+                ix.setdefault(iso, []).append((int(t.timestamp()), "pos", {"k": "거래소 매도", "a": f"${disp:,.2f}", "sym": sym}, (key, sym, CHAIN_NAME[ch])))
+            if rbd:
+                pos.append({"key": key, "sym": sym, "_ots": int(start.timestamp()), "realizedByDay": rbd, "kind": None})
+    t9 = now - timedelta(days=12)
+    pos.append({"key": "s1", "sym": "USDT", "kind": "stable", "_ots": int((t9 - timedelta(days=30)).timestamp()), "realizedByDay": {t9.strftime("%Y-%m-%d"): 4.2}})
+    _EXTRA.update(day=k, idx={"builtAt": _day_built(), "pos": pos, "tax": tax, "ix": ix})
+    return _EXTRA["idx"]
+
+
+def daily_freeze() -> dict:
+    k = _extra_key()
+    if _EXTRA.get("dday") == k and _EXTRA["daily"] is not None:
+        return _EXTRA["daily"]
+    d = build()
+    f = d["fields"]
+    now = datetime.now(KST)
+    coins = [c for c in f["coins"] if c.get("price")]
+    cash = f["fiats"][0]["krw"] / f["rate"]
+    base = sum(c["qty"] * c["price"] for c in coins) + sum(s9["qty"] for s9 in f["stables"]) + cash + _LP_VALUE + _LP_FEES
+    out = {}
+    ser = f["dailySeries"]
+    for i, r in enumerate(ser):
+        day = now - timedelta(days=len(ser) - 1 - i)
+        iso = day.strftime("%Y-%m-%d")
+        if iso >= now.strftime("%Y-%m-%d"):
+            continue
+        sc = float(r["val"]) / base if base else 1.0
+        g = {c["key"][1:]: round(c["qty"] * c["price"] * sc, 2) for c in coins}
+        for s9 in f["stables"]:
+            g[s9["key"][1:]] = round(s9["qty"], 2)
+        out[iso] = {"g": g, "val": float(r["val"]), "x": round(float(r["val"]) - sum(g.values()), 2), "usdt": r.get("usdt"),
+                    "px": {"p": {c["key"][1:]: round(c["price"] * sc, 10) for c in coins}},
+                    "sym": dict({c["key"][1:]: c["sym"] for c in coins}, **{s9["key"][1:]: s9["sym"] for s9 in f["stables"]})}
+    _EXTRA.update(dday=k, daily=out)
+    return out
+
+
+class DemoHist:
+
+    def __init__(self):
+        f = build()["fields"]
+        g = {c["key"][1:]: {"sym": c["sym"], "ov": c["price"]} for c in f["coins"] if c.get("price")}
+        g.update({s9["key"][1:]: {"sym": s9["sym"], "st": True} for s9 in f["stables"]})
+        self.kit = {"groups": g}
+        self.st = {"d": {}, "f": {}, "meta": {}}
+        self.px = {"specs": {}}
+
+    def _clean(self, sp, specs):
+        return sp
+
+
+def ledger():
+    import sqlite3
+    f = build()["fields"]
+    now = datetime.now(KST)
+    c = sqlite3.connect(":memory:", check_same_thread=False)
+    c.row_factory = sqlite3.Row
+    c.executescript("""
+    CREATE TABLE asset_groups (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, norm_decimals INTEGER NOT NULL DEFAULT 18);
+    CREATE TABLE assets (asset_id INTEGER PRIMARY KEY, kind TEXT, chain TEXT, address TEXT, symbol TEXT, decimals INTEGER, confirmed INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, group_id INTEGER);
+    CREATE TABLE postings (posting_id INTEGER PRIMARY KEY AUTOINCREMENT, source_kind TEXT, source_ns TEXT, source_id TEXT, leg_seq INTEGER, event_ts INTEGER NOT NULL,
+      asset_id INTEGER NOT NULL, location TEXT NOT NULL, qty_base TEXT NOT NULL, cost_usd TEXT, cost_krw TEXT, leg_kind TEXT NOT NULL, event TEXT NOT NULL, classifier_ver INTEGER);
+    """)
+    rows, P = [], []
+    for c9 in f["coins"]:
+        gid = int(c9["key"][1:])
+        rows.append((gid, c9["sym"]))
+    rows += [(int(s9["key"][1:]), s9["sym"]) for s9 in f["stables"]]
+    c.executemany("INSERT INTO asset_groups(group_id, name) VALUES (?, ?)", rows)
+    c.executemany("INSERT INTO assets(asset_id, kind, chain, symbol, decimals, group_id) VALUES (?,?,?,?,?,?)", [(g9, "token", None, n9, 8, g9) for g9, n9 in rows])
+    W1, W2 = demo_evm(1), demo_evm(2)
+
+    def post(days, gid, loc, qty, leg, ev, tx):
+        P.append((int((now - timedelta(days=days)).timestamp()), gid, loc, str(int(round(qty * 1e8))), leg, ev, tx))
+    rnd = random.Random(7)
+    for i, (sym, ch, px, qty, _avg) in enumerate(_COINS[:10]):
+        gid = 100 + i
+        q = qty * 0.75
+        d0 = rnd.randint(60, 300)
+        post(d0, gid, "exchange:upbit", q, "acq", "EX_BUY", f"b{i}")
+        wloc = f"wallet:{ch}:{W2 if ch in ('base', 'polygon') else W1}"
+        post(d0 - 1, gid, "exchange:upbit", -q, "move_out", "EX_WITHDRAW", f"w{i}")
+        post(d0 - 1 - 0.02, gid, wloc, q * 0.999, "acq", "TRANSFER_IN", f"a{i}")
+        if i in (1, 3):
+            post(d0 - 20, gid, wloc, -q * 0.2, "move_out", "TRANSFER_OUT_EX", f"o{i}")
+            post(d0 - 20 - 0.01, gid, "exchange:upbit", q * 0.2, "move_in", "EX_DEPOSIT", f"o{i}")
+    post(90, 200, f"wallet:eth:{W1}", 5000, "acq", "TRANSFER_IN", "u1")
+    post(80, 200, f"wallet:eth:{W1}", -5000, "move_out", "BRIDGE", "br1")
+    post(80 - 0.01, 200, f"wallet:base:{W1}", 4995, "acq", "TRANSFER_IN", "br1a")
+    c.executemany("INSERT INTO postings(event_ts, asset_id, location, qty_base, leg_kind, event, source_id, source_kind, source_ns, leg_seq, classifier_ver)"
+                  " VALUES (?,?,?,?,?,?,?, 'demo', 'demo', 0, 1)", P)
+    c.commit()
+    return c

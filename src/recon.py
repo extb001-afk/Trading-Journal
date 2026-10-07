@@ -7,6 +7,7 @@ import random
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import common
@@ -48,12 +49,33 @@ def _gj(url: str, timeout: float = 30.0, tries: int = None, sleep=time.sleep):
             sleep(_gj_wait(i, e))
 
 
-def _rpc(url: str, method: str, params, timeout: float = 25.0):
+def _rpc(url: str, method: str, params, timeout: float = 25.0, gap: bool = True):
+    if "_" in str(method):
+        import bf_engine as _bfe8
+        d = _bfe8.rpc_post(url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=timeout, ua="tj-bot/0.1")
+        if not isinstance(d, dict):
+            raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
+        if "error" in d:
+            ce9 = _bfe8.classify_rpc_error(d["error"])
+            raise _bfe8.NetError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}", ce9.kind, code=ce9.code)
+        if d.get("result") is None:
+            raise RuntimeError(f"rpc {method}: result 누락")
+        return d["result"]
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json",
                                           "User-Agent": common.ua_for(url, "tj-bot/0.1")})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    h9 = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if h9 == "helius-rpc.com" or h9.endswith(".helius-rpc.com"):
+        import bf_engine
+        try:
+            bf_engine.helius_configure(common.load_config())
+        except (Exception, SystemExit):
+            pass
+        if not bf_engine.HELIUS.take("tj-core", 10 if method in ("getProgramAccounts", "getAsset") else 1, kind="must"):
+            raise RuntimeError(f"rpc {method}: 헬리우스 하루 예산 보류({bf_engine.HELIUS.last_why()}) — 다음 대사 때 다시")
+    import bf_engine as _bfe9
+    with (_bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) if gap else urllib.request.urlopen(req, timeout=timeout)) as r:
         d = json.loads(r.read().decode())
     if "error" in d:
         raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}")
@@ -170,10 +192,6 @@ RPC_BLOCK_LAG = 2
 _SEL_AGG3 = "82ad56cb"
 _SEL_BAL = "70a08231"
 _SEL_DEC = "313ce567"
-_EXEC_HINTS = ("revert", "out of gas", "gas", "invalid opcode", "execution", "stack")
-_XPORT_HINTS = ("rate limit", "ratelimit", "429", "too many", "timeout", "timed out", "header not found", "unknown block",
-                "block not found", "missing trie", "busy", "unavailable", "capacity", "-32005", "-32016", "internal error",
-                "pruned", "historical state", "not available")
 
 
 class RpcExecFail(RuntimeError):
@@ -181,12 +199,8 @@ class RpcExecFail(RuntimeError):
 
 
 def _is_exec_err(e) -> bool:
-    if isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError, socket.timeout, ValueError)):
-        return False
-    m = str(e).lower()
-    if any(x in m for x in _XPORT_HINTS):
-        return False
-    return any(x in m for x in _EXEC_HINTS) or "'code': 3," in m or "'code': 3}" in m
+    import bf_engine
+    return bf_engine.rpc_fail_class(e) == "exec"
 
 
 def _rpc_any(urls: list, method: str, params, check=None, tries: int = None, sleep=time.sleep, timeout: float = 25.0):

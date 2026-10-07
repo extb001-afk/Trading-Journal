@@ -266,6 +266,31 @@ def _f(v, d=0.0):
     return x if math.isfinite(x) and abs(x) <= 1e15 else d
 
 
+class Unknown(ValueError):
+    pass
+
+
+def _req_obj(obj, what):
+    if not isinstance(obj, dict):
+        raise Unknown(f"{what}: 응답 형식 오류")
+    return obj
+
+
+def _req_rows(obj, field, what):
+    rows = obj.get(field) if isinstance(obj, dict) else None
+    if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+        raise Unknown(f"{what}: {field} 목록 누락·행 형식 오류")
+    return rows
+
+
+def _req_num(row, field, what):
+    v = row.get(field) if isinstance(row, dict) else None
+    x = None if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()) else _f(v, None)
+    if x is None:
+        raise Unknown(f"{what}: {field} 누락·숫자 형식 오류")
+    return x
+
+
 def _big(v, d=0.0):
     try:
         x = float(v)
@@ -454,17 +479,19 @@ def _hl_perp(coin) -> bool:
 
 
 def fetch_hyperliquid(ctx, addr, st, add):
-    ch = ctx.call(HL_URL, {"type": "clearinghouseState", "user": addr}) or {}
+    ch = _req_obj(ctx.call(HL_URL, {"type": "clearinghouseState", "user": addr}), "hyperliquid clearinghouseState")
     poss = []
-    for ap in ch.get("assetPositions") or []:
-        p = (ap or {}).get("position") or {}
-        szi = _f(p.get("szi"))
+    for ap in _req_rows(ch, "assetPositions", "hyperliquid clearinghouseState"):
+        p = ap.get("position")
+        if not isinstance(p, dict) or not str(p.get("coin") or "").strip():
+            raise Unknown("hyperliquid assetPositions: position·coin 누락")
+        szi = _req_num(p, "szi", "hyperliquid position")
         if szi == 0:
             continue
         pv = _f(p.get("positionValue"))
         poss.append({"symbol": _usd(p.get("coin")), "side": "LONG" if szi > 0 else "SHORT", "qty": abs(szi),
                      "entry": _f(p.get("entryPx")), "mark": abs(pv / szi) if szi else 0.0,
-                     "upnl": _f(p.get("unrealizedPnl")), "leverage": _lev((p.get("leverage") or {}).get("value")),
+                     "upnl": _f(p.get("unrealizedPnl"), None), "leverage": _lev((p.get("leverage") or {}).get("value")),
                      "liq": _f(p.get("liquidationPx"))})
     ms = ch.get("marginSummary") or {}
     info = {"equity": _f(ms.get("accountValue")), "maint": _f(ch.get("crossMaintenanceMarginUsed"))}
@@ -508,30 +535,86 @@ def _iso_ms(s) -> int:
         return 0
 
 
+def _acct_mmr(pairs):
+    worst = 0.0
+    for mm9, eq9 in pairs:
+        if mm9 is None or mm9 < 0:
+            return None
+        if mm9 <= 1e-12:
+            continue
+        if eq9 is None:
+            return None
+        worst = max(worst, (mm9 / eq9) if eq9 > 1e-12 else 10.0)
+    return round(min(worst, 10.0), 6)
+
+
+def _dydx_mmr(ctx, sub_pos):
+    if not any(sp for _e, sp in sub_pos):
+        return 0.0
+    if "dydx_mk" not in ctx.cache:
+        ctx.cache["dydx_mk"] = None
+        mk = (_req_obj(ctx.call(f"{DYDX_IDX}/perpetualMarkets"), "dydx perpetualMarkets")).get("markets")
+        ctx.cache["dydx_mk"] = mk if isinstance(mk, dict) else None
+    mk = ctx.cache["dydx_mk"]
+    if not isinstance(mk, dict):
+        return None
+    pairs = []
+    for eq9, sp in sub_pos:
+        mm9 = 0.0
+        for m9, sz in sp:
+            r = mk.get(m9)
+            px, f9 = (_f(r.get("oraclePrice"), None), _f(r.get("maintenanceMarginFraction"), None)) if isinstance(r, dict) else (None, None)
+            if px is None or f9 is None or px <= 0 or f9 <= 0:
+                return None
+            mm9 += sz * px * f9
+        pairs.append((mm9, eq9))
+    return _acct_mmr(pairs)
+
+
 def fetch_dydx(ctx, addr, st, add):
     q = urllib.parse.quote(addr)
     try:
         a = ctx.call(f"{DYDX_IDX}/addresses/{q}") or {}
     except PerpHTTPError as e:
         if e.code == 404:
-            return [], {"equity": 0.0}
+            return [], {"equity": 0.0, "mmr": 0.0}
         raise
     poss, eq = [], 0.0
-    subs = sorted({int(s.get("subaccountNumber") or 0) for s in a.get("subaccounts") or []})
+    sas = _req_rows(_req_obj(a, "dydx addresses"), "subaccounts", "dydx addresses")
+    subs = sorted({int(s.get("subaccountNumber") or 0) for s in sas})
     open_h = {}
-    for s in a.get("subaccounts") or []:
+    sub_pos = []
+    for s in sas:
         n = int(s.get("subaccountNumber") or 0)
         eq += _f(s.get("equity"))
-        for mk, p in (s.get("openPerpetualPositions") or {}).items():
-            sz = _f(p.get("size"))
+        op9 = s.get("openPerpetualPositions")
+        if not isinstance(op9, dict) or any(not isinstance(p, dict) for p in op9.values()):
+            raise Unknown("dydx subaccount: openPerpetualPositions 누락·형식 오류")
+        sp9 = []
+        for mk, p in op9.items():
+            sz = _req_num(p, "size", "dydx position")
             if sz == 0:
                 continue
-            ent, up = _f(p.get("entryPrice")), _f(p.get("unrealizedPnl"))
+            ent, up = _f(p.get("entryPrice"), None), _f(p.get("unrealizedPnl"), None)
             poss.append({"symbol": _usd(p.get("market") or mk), "side": "LONG" if sz > 0 else "SHORT", "qty": abs(sz),
-                         "entry": ent, "mark": ent + up / sz if sz else 0.0, "upnl": up, "leverage": None, "liq": 0.0})
+                         "entry": ent or 0.0, "mark": (ent + up / sz) if (sz and ent is not None and up is not None) else 0.0, "upnl": up,
+                         "leverage": None, "liq": 0.0})
+            sp9.append((str(p.get("market") or mk), abs(sz)))
             h = int(_f(p.get("createdAtHeight"), 0))
             open_h[str(n)] = min(open_h.get(str(n), h), h)
-    ctx.pos(addr, poss, {"equity": eq})
+        sub_pos.append((_f(s.get("equity"), None), sp9))
+    info9 = {"equity": eq}
+    ctx.pos(addr, poss, info9)
+    try:
+        info9["mmr"] = _dydx_mmr(ctx, sub_pos)
+    except Budget:
+        raise
+    except PerpHTTPError as e:
+        if e.code in (401, 403, 429):
+            raise
+        info9["mmr"] = None
+    except Exception:
+        info9["mmr"] = None
     prev_h = st.get("open_h") or {}
     for n in subs:
         base = f"address={q}&subaccountNumber={n}&limit=1000"
@@ -545,8 +628,11 @@ def fetch_dydx(ctx, addr, st, add):
         def on_pos(p, n=n):
             if str(p.get("status")) not in ("CLOSED", "LIQUIDATED"):
                 return
+            if str(p.get("side")) not in ("LONG", "SHORT"):
+                raise Unknown("dydx closed position: side 모름")
             sgn = 1 if str(p.get("side")) == "LONG" else -1
-            pnl = (_f(p.get("exitPrice")) - _f(p.get("entryPrice"))) * _f(p.get("sumClose")) * sgn
+            pnl = (_req_num(p, "exitPrice", "dydx closed position") - _req_num(p, "entryPrice", "dydx closed position")) \
+                * _req_num(p, "sumClose", "dydx closed position") * sgn
             _ev(add, _iso_ms(p.get("closedAt")), _usd(p.get("market")), "REALIZED", pnl,
                 f"dy:{addr}:{n}:{p.get('market')}:{p.get('createdAtHeight')}", str(p.get("status")) == "LIQUIDATED")
 
@@ -569,7 +655,7 @@ def fetch_dydx(ctx, addr, st, add):
                    lambda pg, base=base: (ctx.call(f"{DYDX_IDX}/fundingPayments?{base}&page={int(pg)}") or {}).get("fundingPayments") or [],
                    h_of, lambda x: _iso_ms(x.get("createdAt")), on_fund, 1000)
     st["open_h"] = open_h
-    return poss, {"equity": eq}
+    return poss, info9
 
 
 LT_URL = "https://mainnet.zklighter.elliot.ai/api/v1"
@@ -606,30 +692,36 @@ def lighter_infer(trade, me, after):
 
 
 def fetch_lighter(ctx, addr, st, add):
-    d = ctx.call(f"{LT_URL}/account?by=l1_address&value={addr}") or {}
+    d = ctx.call(f"{LT_URL}/account?by=l1_address&value={addr}")
     poss, eq, mm, unk = [], 0.0, 0.0, 0
     accs = []
-    for a in d.get("accounts") or []:
-        if not isinstance(a, dict):
-            continue
+    mpairs = []
+    for a in _req_rows(d, "accounts", "lighter account"):
         idx = int(a.get("index") or a.get("account_index") or 0)
         eq += _f(a.get("total_asset_value"))
         mm += _f(a.get("cross_maintenance_margin_requirement"))
+        mpairs.append((_f(a.get("cross_maintenance_margin_requirement"), None), _f(a.get("cross_asset_value"), None)))
         cur, syms = {}, {}
-        for p in a.get("positions") or []:
+        for p in _req_rows(a, "positions", "lighter account"):
             mid = int(p.get("market_id") or 0)
             syms[mid] = p.get("symbol") or f"M{mid}"
-            z, sg = _f(p.get("position")), (-1 if int(_f(p.get("sign"), 1)) < 0 else 1)
+            z = _req_num(p, "position", "lighter position")
+            sg = 1
+            if z != 0:
+                s9 = _req_num(p, "sign", "lighter position")
+                if s9 not in (1, -1):
+                    raise Unknown("lighter position: sign 형식 오류(±1 아님)")
+                sg = int(s9)
             cur[mid] = (sg if z != 0 else 0, abs(z))
             if z == 0:
                 continue
             imf = _f(p.get("initial_margin_fraction"))
             poss.append({"symbol": _usd(syms[mid]), "side": "LONG" if sg > 0 else "SHORT", "qty": abs(z),
                          "entry": _f(p.get("avg_entry_price")), "mark": abs(_f(p.get("position_value")) / z),
-                         "upnl": _f(p.get("unrealized_pnl")), "leverage": round(100 / imf, 1) if imf > 0 else None,
+                         "upnl": _f(p.get("unrealized_pnl"), None), "leverage": round(100 / imf, 1) if imf > 0 else None,
                          "liq": max(0.0, _f(p.get("liquidation_price")))})
         accs.append((idx, cur, syms))
-    info = {"equity": eq, "maint": mm}
+    info = {"equity": eq, "maint": mm, "mmr": _acct_mmr(mpairs)}
     ctx.pos(addr, poss, info)
     ts_of = lambda t: int(t.get("timestamp") or 0)
 
@@ -721,17 +813,20 @@ JUP_PAGE = 50
 
 
 def fetch_jupiter(ctx, addr, st, add):
-    j = ctx.call(f"{JUP_URL}/positions?walletAddress={addr}") or {}
+    j = ctx.call(f"{JUP_URL}/positions?walletAddress={addr}")
     poss, eq = [], 0.0
-    for p in j.get("dataList") or []:
-        size, ent = _f(p.get("size")), _f(p.get("entryPrice"))
+    for p in _req_rows(j, "dataList", "jupiter positions"):
+        size = _req_num(p, "size", "jupiter position")
         if size <= 0:
             continue
+        ent = _req_num(p, "entryPrice", "jupiter position")
+        if ent <= 0 or str(p.get("side")) not in ("long", "short"):
+            raise Unknown("jupiter position: entryPrice·side 형식 오류")
         eq += _f(p.get("value"))
         sym = JUP_MINTS.get(p.get("marketMint")) or str(p.get("marketMint") or "?")[:4]
         poss.append({"symbol": _usd(sym), "side": "LONG" if str(p.get("side")) == "long" else "SHORT",
                      "qty": size / ent if ent else 0.0, "entry": ent, "mark": _f(p.get("markPrice")),
-                     "upnl": _f(p.get("pnlBeforeFeesUsd")), "leverage": _lev(p.get("leverage")), "liq": _f(p.get("liquidationPrice"))})
+                     "upnl": _f(p.get("pnlBeforeFeesUsd"), None), "leverage": _lev(p.get("leverage")), "liq": _f(p.get("liquidationPrice"))})
     ctx.pos(addr, poss, {"equity": eq})
 
     def fetch(before):
@@ -821,20 +916,25 @@ def fetch_gmx(ctx, addr, st, add):
         mkts, toks, pxs = metas[ch] = _gmx_meta(ctx, ch)
         q = ('{ positions(limit: 100, where: {account_eq: "%s", isSnapshot_eq: false, sizeInUsd_gt: 0}) '
              '{ market isLong sizeInTokens sizeInUsd entryPrice leverage } }') % acc
-        for p in ((ctx.call(sq, {"query": q}) or {}).get("data") or {}).get("positions") or []:
+        r9 = _req_obj(ctx.call(sq, {"query": q}), "gmx positions")
+        if r9.get("errors"):
+            raise Unknown("gmx positions: GraphQL errors")
+        for p in _req_rows(_req_obj(r9.get("data"), "gmx positions data"), "positions", "gmx positions"):
             idx = mkts.get(str(p.get("market") or "").lower(), "")
             t = toks.get(idx) or {}
             dec = _dec(t.get("decimals"))
             if dec is None:
-                log.warning("GMX %s 토큰 decimals 이상(%r) — 포지션 제외", _sym(t.get("symbol")), str(t.get("decimals"))[:20])
-                continue
-            qty = _big(p.get("sizeInTokens")) / 10 ** dec
+                raise Unknown(f"gmx: {_sym(t.get('symbol'))} 마켓·토큰 decimals 모름 — 포지션 수량 모름")
+            tok9 = _big(p.get("sizeInTokens"), None)
+            if tok9 is None or tok9 <= 0:
+                raise Unknown("gmx position: sizeInTokens 누락·형식 오류")
+            qty = tok9 / 10 ** dec
             size = _big(p.get("sizeInUsd")) / E30
             mark = pxs.get(idx, 0.0) / 10 ** (30 - dec)
             lg = bool(p.get("isLong"))
             upnl = (qty * mark - size) if lg else (size - qty * mark)
             poss.append({"symbol": _usd(t.get("symbol") or "?"), "side": "LONG" if lg else "SHORT", "qty": qty,
-                         "entry": _big(p.get("entryPrice")) / 10 ** (30 - dec), "mark": mark, "upnl": upnl if mark else 0.0,
+                         "entry": _big(p.get("entryPrice")) / 10 ** (30 - dec), "mark": mark, "upnl": upnl if mark else None,
                          "leverage": round(_big(p.get("leverage")) / 1e4, 2) or None, "liq": 0.0})
     ctx.pos(addr, poss, {})
     for ch, (sq, _rest) in GMX_CHAINS.items():
@@ -876,17 +976,34 @@ def fetch_pacifica(ctx, addr, st, add):
                            if isinstance(p, dict)}
     pxs = ctx.cache["px"]
     poss = []
-    for p in (ctx.call(f"{PAC_URL}/positions?account={addr}") or {}).get("data") or []:
-        z = _f(p.get("amount"))
+    pr9 = _req_obj(ctx.call(f"{PAC_URL}/positions?account={addr}"), "pacifica positions")
+    if pr9.get("success") is False:
+        raise Unknown("pacifica positions: success=false")
+    for p in _req_rows(pr9, "data", "pacifica positions"):
+        z = _req_num(p, "amount", "pacifica position")
         if z <= 0:
             continue
+        if str(p.get("side")) not in ("bid", "ask"):
+            raise Unknown("pacifica position: side 형식 오류")
         lg, ent, mk = str(p.get("side")) == "bid", _f(p.get("entry_price")), pxs.get(str(p.get("symbol")), 0.0)
         poss.append({"symbol": _usd(p.get("symbol")), "side": "LONG" if lg else "SHORT", "qty": z, "entry": ent, "mark": mk,
-                     "upnl": ((mk - ent) * z if lg else (ent - mk) * z) if mk else 0.0, "leverage": None,
+                     "upnl": ((mk - ent) * z if lg else (ent - mk) * z) if mk else None, "leverage": None,
                      "liq": max(0.0, _f(p.get("liquidation_price")))})
-    acc = (ctx.call(f"{PAC_URL}/account?account={addr}") or {}).get("data") or {}
-    info = {"equity": _f(acc.get("account_equity")), "maint": _f(acc.get("cross_mmr"))}
+    info = {}
     ctx.pos(addr, poss, info)
+    try:
+        acc = (ctx.call(f"{PAC_URL}/account?account={addr}") or {}).get("data") or {}
+    except Budget:
+        raise
+    except PerpHTTPError as e:
+        if e.code in (401, 403, 429):
+            raise
+        acc = None
+    except Exception:
+        acc = None
+    if isinstance(acc, dict):
+        info.update({"equity": _f(acc.get("account_equity")), "maint": _f(acc.get("cross_mmr")),
+                     "mmr": _acct_mmr([(_f(acc.get("cross_mmr"), None), _f(acc.get("cross_account_equity"), None))])})
 
     def cur_pager(path, key):
         s = st.setdefault(key, {})
@@ -958,8 +1075,27 @@ FETCHERS = {"hyperliquid": fetch_hyperliquid, "dydx": fetch_dydx, "lighter": fet
 
 def _clean_pos(p, addr):
     return {"symbol": _sym(p.get("symbol")), "side": "SHORT" if p.get("side") == "SHORT" else "LONG",
-            "qty": _f(p.get("qty")), "entry": _f(p.get("entry")), "mark": _f(p.get("mark")), "upnl": _f(p.get("upnl")),
+            "qty": _f(p.get("qty")), "entry": _f(p.get("entry")), "mark": _f(p.get("mark")), "upnl": _f(p.get("upnl"), None),
             "leverage": _lev(p.get("leverage")), "liq": max(0.0, _f(p.get("liq"))), "acct": addr}
+
+
+def _put_mmr(m, info):
+    v = info.get("mmr") if isinstance(info, dict) else None
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0:
+        m["mmr"] = round(float(v), 6)
+    else:
+        m.pop("mmr", None)
+
+
+def _keep_got(ctx, addr, m, poss, now, e):
+    if addr not in ctx.got_pos:
+        return False
+    p9, info = ctx.got_pos[addr]
+    poss += [_clean_pos(p, addr) for p in p9]
+    m.update({"ts": now, "equity": round(_f(info.get("equity")), 2) if info.get("equity") is not None else m.get("equity")})
+    _put_mmr(m, info)
+    m["err"] = "포지션은 받음 · 과거 기록 조회 실패 — 다음 주기에 다시: " + _txt(m.get("err") or e, 120)
+    return True
 
 
 def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
@@ -1010,12 +1146,14 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
                     m[k9] = round(_f(info[k9]), 4) if k9 == "maint" else int(info[k9])
                 else:
                     m.pop(k9, None)
+            _put_mmr(m, info)
             ok_any = True
         except Budget:
             if addr in ctx.got_pos:
                 p9, info = ctx.got_pos[addr]
                 poss += [_clean_pos(p, addr) for p in p9]
                 m.update({"ts": now, "equity": round(_f(info.get("equity")), 2) if info.get("equity") is not None else m.get("equity")})
+                _put_mmr(m, info)
                 ok_any = True
                 m["err"] = "과거 기록 이어 받는 중(주기당 시간 예산) — 다음 주기에 계속"
             else:
@@ -1023,15 +1161,21 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
                 poss += [p for p in pos_old if p.get("acct") == addr]
         except PerpHTTPError as e:
             m["err"] = _txt(e, 160)
-            poss += [p for p in pos_old if p.get("acct") == addr]
+            if not _keep_got(ctx, addr, m, poss, now, e):
+                poss += [p for p in pos_old if p.get("acct") == addr]
+                last_err = e
+            else:
+                ok_any = True
             if e.code in (401, 403, 429):
                 http_err = e
-            last_err = e
             new_ev, st = [], cursor.get(addr) or {}
         except Exception as e:
             m["err"] = _txt(type(e).__name__ + ": " + common.safe_err(e), 160)
-            poss += [p for p in pos_old if p.get("acct") == addr]
-            last_err = e
+            if not _keep_got(ctx, addr, m, poss, now, e):
+                poss += [p for p in pos_old if p.get("acct") == addr]
+                last_err = e
+            else:
+                ok_any = True
             new_ev, st = [], cursor.get(addr) or {}
         ev += new_ev
         cursor[addr] = st

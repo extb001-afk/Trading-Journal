@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 import review_prompt as rp
 import review_progress as rprog
+import salelink as _salelink
 import day_memo
 
 log = common.setup_logging("tj-review")
@@ -1357,6 +1358,9 @@ def gather(st, day_iso=None, day_ev=None, cfg=None, reviews=None) -> dict:
     pl = _plans_for(f, {c["sym"] for c in coins})
     if pl:
         data["plans"] = pl
+    tn = _salelink.review_notes(raw)
+    if tn:
+        data["transfer_notes"] = tn
     dm = _day_memos_for(day_iso)
     if dm:
         data["day_memos"] = dm
@@ -1402,6 +1406,7 @@ def gather(st, day_iso=None, day_ev=None, cfg=None, reviews=None) -> dict:
 _HASH_SKIP = ("prior_next", "prior_obs", "total_usd", "open_positions", "pending_review", "past_day",
               "asset_moves",
               "krw_px",
+              "transfer_notes",
               "day_memos")
 
 

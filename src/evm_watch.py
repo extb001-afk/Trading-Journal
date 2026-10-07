@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 import lpdec
 import bf_engine
+import tsfix
+import addr_tier
 from inbox import SegmentWriter
 
 _HTTP5XX_RE = re.compile(r"HTTP(?: Error)? ?5\d\d\b")
@@ -86,7 +88,15 @@ def _dm(kind: str, text: str):
 ES_FALLBACK_STREAK = 3
 
 
-def es_fallback_watcher(cfg: dict, wt, writer, daily: bool = False):
+def es_fallback_watcher(cfg: dict, wt, writer, daily: bool = False, why: str = None):
+    why9 = "day" if daily else (why or "es_fail")
+    dead9 = rpcfb_bs_dead(cfg, wt.chain)
+    if dead9:
+        nw9 = rpcfb_enter(cfg, wt.chain, wt.wallets, writer, "etherscan", why9, err=f"이더스캔 {RPCFB_WHY.get(why9, why9)}", bs=dead9)
+        if nw9 is not None:
+            return nw9
+    elif not daily:
+        rpcfb_note_es_bad(wt.chain, why9)
     if not cfg["chains"].get(wt.chain, {}).get("blockscout"):
         if daily:
             return wt
@@ -134,10 +144,10 @@ def es_daily_trip(text: str, now: float = None) -> float:
         if send_dm:
             _ES_DAILY["dm_at"] = now
     kst = time.strftime("%m-%d %H:%M", time.localtime(until))
-    log.error("★이더스캔 하루 한도 소진 — %s 까지 이더스캔 0콜(해당 체인 blockscout 임시 폴백), 그 뒤 자동 재시도★ (%s)",
+    log.error("★이더스캔 하루 한도 소진 — %s 까지 이더스캔 0콜(해당 체인 blockscout 임시 폴백 · 블록스카웃이 막힌 체인은 RPC 전용), 그 뒤 자동 재시도★ (%s)",
               kst, str(text)[:100])
     if send_dm:
-        _dm("ES_DAILY_LIMIT", f"이더스캔 무료 키 하루 한도 소진 — {kst} 까지 blockscout 로 수집, 그 뒤 자동 복귀(재시작 불필요)")
+        _dm("ES_DAILY_LIMIT", f"이더스캔 무료 키 하루 한도 소진 — {kst} 까지 blockscout(막힌 체인은 공개 RPC)로 수집, 그 뒤 자동 복귀(재시작 불필요)")
     return until
 
 
@@ -148,7 +158,7 @@ def es_on_cycle_error(cfg: dict, wt, e: BaseException, es_fail: int, writer):
     es_fail = ES_FALLBACK_STREAK if isinstance(e, EtherscanKeyError) else es_fail + 1
     if es_fail < ES_FALLBACK_STREAK:
         return wt, es_fail, False
-    nw = es_fallback_watcher(cfg, wt, writer, daily=daily)
+    nw = es_fallback_watcher(cfg, wt, writer, daily=daily, why="key" if isinstance(e, EtherscanKeyError) else "es_fail")
     return nw, 0, daily and nw is not wt
 
 
@@ -190,6 +200,578 @@ def es_daily_return(cfg: dict, wt, make):
     return nw, False
 
 
+def es_daily_restore(until: float):
+    with _ES_DAILY_LOCK:
+        if float(until) > _ES_DAILY["until"]:
+            _ES_DAILY["until"] = float(until)
+            _ES_DAILY["dm_at"] = max(float(_ES_DAILY.get("dm_at") or 0.0), time.time())
+
+
+RPCFB_FILE = "rpc_fallback.json"
+RPCFB_MIN_STAY = 1800
+RPCFB_STAY_MAX = 6 * 3600
+RPCFB_FLAP_WIN = 6 * 3600
+RPCFB_PROBE_SEC = 900
+RPCFB_ES_PROBE_SEC = 3600
+RPCFB_BS_403_N = 2
+RPCFB_BS_FAIL_N = 5
+RPCFB_BS_DEAD_TTL = 24 * 3600
+RPCFB_PACE_SEC = 1200
+RPCFB_PACE_ROOM = 0.02
+RPCFB_DM_GAP = 12 * 3600
+RPCFB_WHY = {"day": "하루 한도 쉼", "pace": "하루 예산 페이싱으로 새 거래 확인이 막힘", "key": "이더스캔 키 거부", "es_fail": "이더스캔 연속 실패",
+             "queue": "블록스카웃 미완 큐를 RPC 가 이어받음", "bs403": "블록스카웃 403(Cloudflare)", "bs_fail": "블록스카웃 연속 실패",
+             "bs_frozen": "블록스카웃 색인 정지", "bs_none": "블록스카웃 미구성"}
+_RPCFB_LOCK = threading.RLock()
+_RPCFB_MEM = {}
+_RPCFB_RESUMED = set()
+_RPCFB_RETURNING = set()
+RPCFB_ON = {}
+CUR_WATCHER = {}
+
+
+def _rpcfb_path() -> str:
+    return os.path.join(common.STATE_DIR, RPCFB_FILE)
+
+
+def _rpcfb_all() -> dict:
+    d = common.read_json(_rpcfb_path(), {})
+    return d if isinstance(d, dict) else {}
+
+
+def rpcfb_get(chain: str) -> dict:
+    r = _rpcfb_all().get(chain)
+    return dict(r) if isinstance(r, dict) else {}
+
+
+def _rpcfb_put(chain: str, rec):
+    with _RPCFB_LOCK:
+        d = _rpcfb_all()
+        if rec:
+            d[chain] = rec
+        else:
+            d.pop(chain, None)
+        common.atomic_write_json(_rpcfb_path(), d)
+
+
+def _rpcfb_text(rec: dict) -> str:
+    prim = "이더스캔" if rec.get("src") == "etherscan" else "블록스카웃"
+    why = str(rec.get("why") or "")
+    t9 = RPCFB_WHY.get(why, why)
+    if why == "day" and rec.get("until"):
+        t9 += f" — {time.strftime('%H:%M', time.localtime(float(rec['until'])))} 저절로 복귀"
+    elif why == "pace":
+        t9 += " — 몫이 차면 복귀"
+    elif why in ("key", "es_fail"):
+        t9 += f" — {RPCFB_ES_PROBE_SEC // 60}분마다 다시 시험"
+    elif prim == "블록스카웃" and why != "bs_none":
+        t9 += f" — {RPCFB_PROBE_SEC // 60}분마다 다시 시험"
+    bs9 = rec.get("bs")
+    if bs9 and bs9 != why and rec.get("src") == "etherscan":
+        t9 += " · " + RPCFB_WHY.get(bs9, bs9)
+    if rec.get("nokey"):
+        t9 += " · 이더스캔 키 없음"
+    out = f"{prim} 대신 RPC 로 확인 중({t9})"
+    if rec.get("limited"):
+        out += f" · 제한된 백업({rec['limited']})"
+    return out
+
+
+def _rpcfb_info(rec: dict) -> dict:
+    return {k: rec.get(k) for k in ("src", "why", "bs", "since", "until", "limited", "text", "nokey")}
+
+
+def _rpcfb_swap(chain: str):
+    try:
+        bf_engine.health("evm").reset_facts(chain)
+    except Exception:
+        pass
+
+
+def rpcfb_bs_dead(cfg: dict, chain: str):
+    cc = (cfg.get("chains") or {}).get(chain) or {}
+    if not cc.get("blockscout"):
+        return "bs_none"
+    bd = rpcfb_get(chain).get("bs_dead")
+    if isinstance(bd, dict) and time.time() - float(bd.get("at") or 0) < RPCFB_BS_DEAD_TTL:
+        return str(bd.get("why") or "bs_fail")
+    return None
+
+
+def rpcfb_note_es_bad(chain: str, why: str):
+    with _RPCFB_LOCK:
+        rec = rpcfb_get(chain)
+        rec["es_bad"] = {"at": int(time.time()), "why": why}
+        _rpcfb_put(chain, rec)
+
+
+def rpcfb_allowed(cfg: dict, chain: str) -> bool:
+    if (cfg or {}).get("rpc_fallback") is False:
+        return False
+    return (((cfg or {}).get("chains") or {}).get(chain) or {}).get("rpc_fallback") is not False
+
+
+def rpcfb_enter(cfg: dict, chain: str, wallets: list, writer, src: str, why: str, err: str = None, bs: str = None,
+                bs_seen: bool = False, nokey: bool = False):
+    if (_RPCFB_MEM.get(chain) or {}).get("broken") or not rpcfb_allowed(cfg, chain):
+        return None
+    try:
+        nw = RpcChainWatcher(cfg, chain, wallets, writer)
+    except (Exception, SystemExit) as e:
+        log.error("%s RPC 대체 수집기 생성 실패(종전 경로 유지): %s", chain, common.redact_urls(common.safe_err(e))[:160])
+        return None
+    now = time.time()
+    with _RPCFB_LOCK:
+        rec = rpcfb_get(chain)
+        stay = RPCFB_MIN_STAY
+        if rec.get("exit_at") and now - float(rec["exit_at"]) < RPCFB_FLAP_WIN:
+            stay = min(RPCFB_STAY_MAX, max(RPCFB_MIN_STAY, int(rec.get("stay") or RPCFB_MIN_STAY)) * 2)
+        ent9 = [t for t in (rec.get("entries") or []) if isinstance(t, (int, float)) and now - t < 86400][-9:] + [int(now)]
+        dm9 = why != "day" and now - float(rec.get("dm_at") or 0) > RPCFB_DM_GAP
+        rec.update(active=True, src=src, why=why, bs=bs, nokey=bool(nokey) or None,
+                   err=common.redact_urls(common.redact_secret_text(str(err or ""), generic=False))[:160] or None,
+                   since=int(now), stay=int(stay), next_probe=int(now + stay), entries=ent9,
+                   until=int(_ES_DAILY["until"]) if why == "day" and _ES_DAILY["until"] > now else None,
+                   limited=getattr(nw, "nodes_limited", None))
+        if bs and bs_seen:
+            rec["bs_dead"] = {"at": int(now), "why": bs}
+        if why in ("key", "es_fail"):
+            rec["es_bad"] = {"at": int(now), "why": why}
+        if dm9:
+            rec["dm_at"] = int(now)
+        rec["text"] = _rpcfb_text(rec)
+        _rpcfb_put(chain, rec)
+    nw.fb_info = _rpcfb_info(rec)
+    RPCFB_ON[chain] = nw.fb_info
+    _rpcfb_swap(chain)
+    log.warning("★%s %s — 같은 커서 파일을 RPC 전용 수집기가 이어받음(최소 %d분 · 살아나면 자동 복귀)★ %s", chain, rec["text"], stay // 60,
+                rec.get("err") or "")
+    if dm9:
+        _dm("RPC_FALLBACK", f"[{chain}] {rec['text']} — 새 거래는 공개 RPC 로 계속 받아요(살아나면 자동 복귀 · 재시작 불필요)")
+    return nw
+
+
+def rpcfb_resume(cfg: dict, chain: str, wallets: list, writer, es_key: str):
+    rec = rpcfb_get(chain)
+    if not rec.get("active") or (_RPCFB_MEM.get(chain) or {}).get("broken"):
+        return None
+    cc = cfg["chains"].get(chain) or {}
+    now = time.time()
+    if not rpcfb_allowed(cfg, chain):
+        with _RPCFB_LOCK:
+            rec.update(active=False, exit_at=int(now))
+            _rpcfb_put(chain, rec)
+        log.warning("%s RPC 대체 해제 — 설정 rpc_fallback:false", chain)
+        return None
+    if chain not in _RPCFB_RESUMED:
+        _RPCFB_RESUMED.add(chain)
+        if rec.get("nokey") and es_key and cc.get("etherscan_chainid"):
+            with _RPCFB_LOCK:
+                rec.update(active=False, exit_at=int(now))
+                _rpcfb_put(chain, rec)
+            log.warning("%s RPC 대체 해제 — 이더스캔 키가 생김(이더스캔 경로로)", chain)
+            return None
+        if rec.get("why") == "day" and float(rec.get("until") or 0) > now:
+            es_daily_restore(float(rec["until"]))
+        if rec.get("why") in ("key", "es_fail") or rec.get("src") == "blockscout":
+            with _RPCFB_LOCK:
+                rec["next_probe"] = int(min(float(rec.get("next_probe") or now), now))
+                _rpcfb_put(chain, rec)
+    try:
+        nw = RpcChainWatcher(cfg, chain, wallets, writer)
+    except (Exception, SystemExit) as e:
+        log.error("%s RPC 대체 수집기 재생성 실패(주 경로로): %s", chain, common.redact_urls(common.safe_err(e))[:160])
+        with _RPCFB_LOCK:
+            rec.update(active=False, exit_at=int(now))
+            _rpcfb_put(chain, rec)
+        return None
+    rec["limited"] = getattr(nw, "nodes_limited", None)
+    rec["text"] = _rpcfb_text(rec)
+    nw.fb_info = _rpcfb_info(rec)
+    RPCFB_ON[chain] = nw.fb_info
+    log.info("%s %s(대체 이어감 — %s 부터)", chain, rec["text"], time.strftime("%m-%d %H:%M", time.localtime(float(rec.get("since") or now))))
+    return nw
+
+
+def _bs_err_kind(e) -> str:
+    s = str(e)
+    low = s.lower()
+    if getattr(e, "code", None) in (401, 403) or "http error 403" in low or "cloudflare" in low or "just a moment" in low:
+        return "bs403"
+    if getattr(e, "kind", None) == "stale_head" and "색인 정지" in s:
+        return "bs_frozen"
+    return "bs_fail"
+
+
+def rpcfb_bs_error(cfg: dict, wt, e, writer, es_key: str):
+    if not isinstance(wt, ChainWatcher):
+        return wt
+    chain = wt.chain
+    k9 = _bs_err_kind(e)
+    m = _RPCFB_MEM.setdefault(chain, {})
+    m["bs_n"] = int(m.get("bs_n") or 0) + 1
+    m["bs_403"] = (int(m.get("bs_403") or 0) + 1) if k9 == "bs403" else 0
+    if not (k9 == "bs_frozen" or (k9 == "bs403" and m["bs_403"] >= RPCFB_BS_403_N) or m["bs_n"] >= RPCFB_BS_FAIL_N):
+        return wt
+    cc = cfg["chains"].get(chain) or {}
+    if cc.get("etherscan_chainid") and es_key:
+        eb9 = rpcfb_get(chain).get("es_bad")
+        why9 = "day" if es_daily_left() > 0 else (str(eb9.get("why")) if isinstance(eb9, dict) and eb9.get("why") else "queue")
+        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "etherscan", why9, err=common.safe_err(e), bs=k9, bs_seen=True)
+    else:
+        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "blockscout", k9, err=common.safe_err(e), bs=k9, bs_seen=True,
+                         nokey=bool(cc.get("etherscan_chainid")))
+    if nw is None:
+        return wt
+    m["bs_n"] = m["bs_403"] = 0
+    return nw
+
+
+def rpcfb_paced(cfg: dict, wt, writer, err=None):
+    if not isinstance(wt, EtherscanWatcher):
+        return wt
+    m = _RPCFB_MEM.setdefault(wt.chain, {})
+    now = time.time()
+    ps = m.get("paced_since") or now
+    m["paced_since"] = ps
+    if now - ps < RPCFB_PACE_SEC:
+        return wt
+    nw = rpcfb_enter(cfg, wt.chain, wt.wallets, writer, "etherscan", "pace", err=common.safe_err(err) if err else None)
+    if nw is None:
+        return wt
+    m["paced_since"] = None
+    return nw
+
+
+def rpcfb_ok(wt):
+    m = _RPCFB_MEM.setdefault(wt.chain, {})
+    m["bs_n"] = m["bs_403"] = 0
+    if isinstance(wt, EtherscanWatcher):
+        m["paced_since"] = None
+    key9 = "bs_dead" if isinstance(wt, ChainWatcher) else ("es_bad" if isinstance(wt, EtherscanWatcher) else None)
+    if key9 and getattr(wt, "_max_head", 0):
+        with _RPCFB_LOCK:
+            rec = rpcfb_get(wt.chain)
+            if rec.get(key9) and not rec.get("active"):
+                rec.pop(key9, None)
+                _rpcfb_put(wt.chain, rec)
+
+
+def _es_probe(chain: str, cid: int, key: str):
+    p = object.__new__(EtherscanWatcher)
+    p.chain, p.cid, p.key, p.conf_depth, p._es_kind = chain, int(cid), key, 12, "head"
+    try:
+        p.head_block()
+        return True, None
+    except Exception as e:
+        return False, e
+
+
+def _bs_probe(cfg: dict, chain: str, wallet: str = None):
+    base = str(((cfg.get("chains") or {}).get(chain) or {}).get("blockscout") or "").rstrip("/")
+    if not base:
+        return False, "블록스카웃 미구성"
+    try:
+        d = http_json(f"{base}/api/v2/blocks?type=block", retries=1)
+    except Exception as e:
+        return False, common.redact_urls(common.safe_err(e))[:120]
+    items = d.get("items") if isinstance(d, dict) else None
+    if not items or not isinstance(items[0], dict) or items[0].get("height") is None:
+        return False, "blocks 응답 비어있음"
+    ts9 = items[0].get("timestamp")
+    if isinstance(ts9, str):
+        try:
+            import datetime as _dt
+            t9 = _dt.datetime.fromisoformat(ts9.replace("Z", "+00:00")).timestamp()
+            if time.time() - t9 > EXPLORER_FROZEN_SEC:
+                return False, f"색인 정지(최신 블록 {(time.time() - t9) / 3600:.0f}시간 전)"
+        except ValueError:
+            pass
+    if wallet:
+        try:
+            d2 = http_json(f"{base}/api/v2/addresses/{wallet}/transactions", retries=1)
+        except Exception as e:
+            return False, "주소 목록 " + common.redact_urls(common.safe_err(e))[:110]
+        if not isinstance(d2, dict) or not isinstance(d2.get("items"), list):
+            return False, "주소 목록 응답 형식 오류"
+    return True, None
+
+
+def _primary_kind(cfg: dict, chain: str, es_key: str) -> str:
+    cc = cfg["chains"].get(chain) or {}
+    if common.chain_discovery(chain, cc) == "rpc":
+        return "rpc"
+    if cc.get("etherscan_chainid") and es_key and not es_bs_busy(chain) and es_daily_left() <= 0:
+        return "etherscan"
+    return "blockscout"
+
+
+def rpcfb_try_return(cfg: dict, wt, make, es_key: str):
+    if not getattr(wt, "fb_info", None):
+        return wt
+    chain = wt.chain
+    now = time.time()
+    rec = rpcfb_get(chain)
+    cc = cfg["chains"].get(chain) or {}
+    if rec.get("active") and rpcfb_allowed(cfg, chain):
+        st9 = rec.get("stay")
+        if now < float(rec.get("since") or 0) + float(st9 if isinstance(st9, (int, float)) and not isinstance(st9, bool) else RPCFB_MIN_STAY):
+            return wt
+        if rec.get("src") == "etherscan" and cc.get("etherscan_chainid") and es_key:
+            target = "etherscan"
+            if es_daily_left() > 0:
+                return wt
+            if rec.get("why") == "pace" and bf_engine.es_pace_room("head") < RPCFB_PACE_ROOM * bf_engine.ES_DAILY_BUDGET:
+                return wt
+            if _primary_kind(cfg, chain, es_key) != "etherscan":
+                return wt
+            if rec.get("es_bad"):
+                if now < float(rec.get("next_probe") or 0):
+                    return wt
+                ok9, e9 = _es_probe(chain, int(cc["etherscan_chainid"]), es_key)
+                if not ok9:
+                    with _RPCFB_LOCK:
+                        rec["next_probe"] = int(now + RPCFB_ES_PROBE_SEC)
+                        rec["probe_err"] = common.redact_urls(common.redact_secret_text(str(e9), generic=False))[:120]
+                        _rpcfb_put(chain, rec)
+                    log.info("%s 이더스캔 복귀 시험 실패 — RPC 대체 유지(%d분 뒤 다시): %s", chain, RPCFB_ES_PROBE_SEC // 60, rec["probe_err"])
+                    return wt
+        else:
+            target = "blockscout"
+            if not cc.get("blockscout") or now < float(rec.get("next_probe") or 0):
+                return wt
+            if _primary_kind(cfg, chain, es_key) != "blockscout":
+                return wt
+            ok9, why9 = _bs_probe(cfg, chain, (wt.wallets or [None])[0])
+            if not ok9:
+                with _RPCFB_LOCK:
+                    rec["next_probe"] = int(now + RPCFB_PROBE_SEC)
+                    rec["probe_err"] = why9
+                    _rpcfb_put(chain, rec)
+                log.info("%s 블록스카웃 복귀 시험 실패 — RPC 대체 유지(%d분 뒤 다시): %s", chain, RPCFB_PROBE_SEC // 60, why9)
+                return wt
+    else:
+        target = "manual"
+    with _RPCFB_LOCK:
+        rec0 = dict(rec)
+        rec.update(active=False, exit_at=int(now))
+        if target == "blockscout":
+            rec.pop("bs_dead", None)
+        elif target == "etherscan":
+            rec.pop("es_bad", None)
+        _rpcfb_put(chain, rec)
+    _RPCFB_RETURNING.add(chain)
+    try:
+        nw = make(cfg, chain, wt.wallets)
+    except (Exception, SystemExit) as e:
+        nw = None
+        log.warning("%s 주 경로 워처 생성 실패(RPC 대체 유지 · 다음 시험): %s", chain, common.safe_err(e)[:120])
+    finally:
+        _RPCFB_RETURNING.discard(chain)
+    if nw is None:
+        with _RPCFB_LOCK:
+            if rec0.get("active"):
+                rec0["next_probe"] = int(now + RPCFB_PROBE_SEC)
+                _rpcfb_put(chain, rec0)
+        return wt
+    if isinstance(nw, RpcChainWatcher):
+        RPCFB_ON.pop(chain, None)
+        return nw
+    if not wt._bk_jobs():
+        wt.progress.finish(f"{chain}:rpc", note="탐색기 경로 복귀")
+    RPCFB_ON.pop(chain, None)
+    _RPCFB_MEM.setdefault(chain, {}).update(bs_n=0, bs_403=0, paced_since=None)
+    _rpcfb_swap(chain)
+    log.warning("★%s RPC 대체 끝 — %s 경로 복귀(대체 %.0f분 · 같은 커서 파일 되돌림)★", chain,
+                "이더스캔" if isinstance(nw, EtherscanWatcher) else "블록스카웃", (now - float(rec0.get("since") or now)) / 60)
+    return nw
+
+
+def build_watcher(cfg: dict, chain: str, addrs: list, shared_writer, es_key: str):
+    if chain not in cfg["chains"]:
+        raise SystemExit(f"config.chains 에 없는 체인: {chain}")
+    if common.chain_discovery(chain, cfg["chains"][chain]) == "rpc":
+        log.info("%s: RPC 전용 발견 경로 사용 (getLogs + nonce·잔고 정합)", chain)
+        RPCFB_ON.pop(chain, None)
+        if rpcfb_get(chain).get("active"):
+            with _RPCFB_LOCK:
+                r9 = rpcfb_get(chain)
+                r9.update(active=False, exit_at=int(time.time()))
+                _rpcfb_put(chain, r9)
+        return RpcChainWatcher(cfg, chain, addrs, shared_writer)
+    returning9 = chain in _RPCFB_RETURNING
+    if not returning9:
+        nw9 = rpcfb_resume(cfg, chain, addrs, shared_writer, es_key)
+        if nw9 is not None:
+            return nw9
+    es_cid = cfg["chains"][chain].get("etherscan_chainid")
+    why9 = None
+    if es_cid and es_key and es_bs_busy(chain):
+        log.warning("%s: 미완 blockscout 큐·백필·internal 재수집 잔존 — 회수 위해 blockscout 경로 유지(끝나면 etherscan 복귀)",
+                    chain)
+        es_cid, why9 = None, "queue"
+    if es_cid and es_key and es_daily_left() > 0:
+        log.info("%s: 이더스캔 하루 한도 쉼 창(%.0f분 남음) — blockscout 경로", chain, es_daily_left() / 60)
+        es_cid, why9 = None, "day"
+    if es_cid and es_key:
+        log.info("%s: etherscan 고속 경로 사용 (chainid %s)", chain, es_cid)
+        return EtherscanWatcher(cfg, chain, addrs, shared_writer, int(es_cid), es_key)
+    dead9 = None if returning9 else rpcfb_bs_dead(cfg, chain)
+    if dead9:
+        es9 = bool(cfg["chains"][chain].get("etherscan_chainid"))
+        nw9 = rpcfb_enter(cfg, chain, addrs, shared_writer, "etherscan" if (es9 and es_key) else "blockscout",
+                          why9 if (es9 and es_key and why9) else dead9, err=f"블록스카웃 {RPCFB_WHY.get(dead9, dead9)}", bs=dead9,
+                          nokey=bool(es9 and not es_key))
+        if nw9 is not None:
+            return nw9
+    return ChainWatcher(cfg, chain, addrs, shared_writer)
+
+
+class ChainLoop:
+
+    def __init__(self, cfg: dict, wt, make, es_key: str, writer):
+        self.cfg, self.wt, self.make, self.es_key, self.writer = cfg, wt, make, es_key, writer
+        self.es_fail = 0
+        self.es_daily_fb = bool(es_key and es_daily_left() > 0 and not isinstance(wt, EtherscanWatcher) and not getattr(wt, "fb_info", None)
+                                and (cfg["chains"].get(wt.chain) or {}).get("etherscan_chainid"))
+        CUR_WATCHER[wt.chain] = wt
+
+    @staticmethod
+    def _ho_deterministic(wt, e) -> bool:
+        m = re.search(r"블록 (\d+)·(\d+)", str(e))
+        if not m or not getattr(wt, "wallets", None):
+            return False
+        det = False
+        memo9 = getattr(wt, "_st_memo", None)
+        for b9 in dict.fromkeys((int(m.group(1)), int(m.group(2)))):
+            if isinstance(memo9, dict):
+                memo9.pop((wt.wallets[0], b9), None)
+            try:
+                wt._states([(wt.wallets[0], b9)], strict=True)
+            except StateUnavailable:
+                det = True
+            except Exception:
+                return False
+        return det
+
+    @staticmethod
+    def _disc_fail(wt, e) -> bool:
+        if _bs_err_kind(e) == "bs403":
+            return True
+        tb9 = getattr(wt, "_tier", None)
+        seen9 = [w for w in wt.wallets if isinstance(wt.cursor.get(w), int) and not (tb9 is not None and tb9.is_resting(w))]
+        bad9 = {w for w, n in (getattr(wt, "fail_streak", None) or {}).items() if n}
+        return bool(seen9) and set(seen9) <= bad9
+
+    def step(self) -> bool:
+        cfg, make = self.cfg, self.make
+        wt = self.wt
+        nw9 = take_rebuild(wt, make)
+        if nw9 is not wt and isinstance(wt, EtherscanWatcher) and not isinstance(nw9, EtherscanWatcher) \
+                and es_daily_left() > 0 and not getattr(nw9, "fb_info", None):
+            self.es_daily_fb = True
+        wt = nw9
+        if getattr(wt, "fb_info", None):
+            nw9 = rpcfb_try_return(cfg, wt, make, self.es_key)
+            if nw9 is not wt:
+                wt, self.es_fail = nw9, 0
+                self.es_daily_fb = bool(self.es_key and isinstance(nw9, ChainWatcher) and es_daily_left() > 0
+                                        and (cfg["chains"].get(nw9.chain) or {}).get("etherscan_chainid"))
+        elif self.es_daily_fb:
+            wt, self.es_daily_fb = es_daily_return(cfg, wt, make)
+        self.wt = wt
+        CUR_WATCHER[wt.chain] = wt
+        if isinstance(wt, ChainWatcher):
+            wt._rpcfb_disc_error = None
+        try:
+            wt.cycle()
+            self.es_fail = 0
+            e9 = getattr(wt, "_rpcfb_disc_error", None) if isinstance(wt, ChainWatcher) else None
+            if e9 is not None:
+                if self._disc_fail(wt, e9):
+                    nw9 = rpcfb_bs_error(cfg, wt, e9, self.writer, self.es_key)
+                    if nw9 is not wt:
+                        self.wt, self.es_fail, self.es_daily_fb = nw9, 0, False
+                        wt = nw9
+            else:
+                rpcfb_ok(wt)
+            tsfix.repair(wt.chain, lambda b, wt=wt: tsfix.block_ts(wt, b), self.writer)
+        except EtherscanPaced as e:
+            bf_engine.health("evm").facts(wt.chain, paced_at=int(time.time()))
+            bf_engine.health("evm").flush()
+            if time.time() - getattr(wt, "_paced_log", 0) >= 600:
+                wt._paced_log = time.time()
+                log.info("%s 이더스캔 하루 예산 페이싱 — 이번 주기 쉼(기록은 그대로, 다음 주기에 이어 받음): %s", wt.chain, e)
+            nw9 = rpcfb_paced(cfg, wt, self.writer, e)
+            if nw9 is not wt:
+                self.wt, self.es_fail = nw9, 0
+                wt = nw9
+        except ChainDisabled as e:
+            if getattr(wt, "fb_info", None):
+                _RPCFB_MEM.setdefault(wt.chain, {})["broken"] = True
+                with _RPCFB_LOCK:
+                    rec9 = rpcfb_get(wt.chain)
+                    rec9.update(active=False, exit_at=int(time.time()), broken=common.redact_urls(str(e))[:120])
+                    _rpcfb_put(wt.chain, rec9)
+                RPCFB_ON.pop(wt.chain, None)
+                log.error("★%s RPC 대체 수집기 설정 오류 — 대체 끄고 주 경로로: %s★", wt.chain, common.redact_urls(str(e)))
+                _RPCFB_RETURNING.add(wt.chain)
+                try:
+                    self.wt = make(cfg, wt.chain, wt.wallets)
+                except (Exception, SystemExit) as e9:
+                    log.error("%s 주 경로 워처 생성 실패(다음 주기 재시도): %s", wt.chain, e9)
+                finally:
+                    _RPCFB_RETURNING.discard(wt.chain)
+                return True
+            bf_engine.health("evm").fail(wt.chain, e, "rpc")
+            bf_engine.health("evm").flush()
+            log.error("★%s 체인 추적 중지(설정 오류): %s — 다른 체인은 계속, 고친 뒤 pm2 restart tj-evm★", wt.chain, common.redact_urls(str(e)))
+            DISABLED_CHAINS.add(wt.chain)
+            return False
+        except Exception as e:
+            n9 = bf_engine.health("evm").fail(wt.chain, e, "etherscan" if isinstance(wt, EtherscanWatcher)
+                                              else "rpc" if isinstance(wt, RpcChainWatcher) else "blockscout")
+            bf_engine.health("evm").flush()
+            lv = bf_engine.LogDebounce.level(n9)
+            if lv:
+                getattr(log, lv)("%s cycle 실패 %d회 연속(다음 주기 재시도): %s", wt.chain, n9, common.redact_urls(str(e)))
+            if getattr(wt, "fb_info", None) and isinstance(e, StateUnavailable) and "인계 기준점" in str(e):
+                m9 = _RPCFB_MEM.setdefault(wt.chain, {})
+                m9["ho_fail"] = (int(m9.get("ho_fail") or 0) + 1) if self._ho_deterministic(wt, e) else 0
+                if m9["ho_fail"] >= 2 and getattr(wt, "handover", None) != "rescan":
+                    wt.handover = "rescan"
+                    log.warning("★%s RPC 대체 노드 비아카이브(인계 기준점 없음 %d회) — 창 처음부터 다시 훑기(rescan)로 · 로그 없는 이동은 최근 구간만 정합★",
+                                wt.chain, m9["ho_fail"])
+            wt0 = wt
+            wt, self.es_fail, d9 = es_on_cycle_error(cfg, wt, e, self.es_fail, self.writer)
+            self.es_daily_fb = self.es_daily_fb or d9
+            if wt is wt0:
+                wt = rpcfb_bs_error(cfg, wt, e, self.writer, self.es_key)
+            if wt is not wt0 and getattr(wt, "fb_info", None):
+                self.es_daily_fb = False
+            self.wt = wt
+            try:
+                cur9 = common.read_json(wt.cursor_path, {})
+                a9 = cur9.pop("_synced_at", None) is not None
+                b9 = cur9.pop("_synced_tok_at", None) is not None
+                if a9 or b9:
+                    common.atomic_write_json(wt.cursor_path, cur9)
+                wt.cursor = cur9
+            except Exception:
+                pass
+        wt = self.wt
+        CUR_WATCHER[wt.chain] = wt
+        try:
+            fb9 = getattr(wt, "fb_info", None)
+            bf_engine.health("evm").facts(
+                wt.chain, es_daily_until=int(_ES_DAILY["until"]) if self.es_daily_fb and es_daily_left() > 0 else None,
+                rpc_fb=dict(fb9) if fb9 else None,
+                rpc_limited=getattr(wt, "nodes_limited", None) if (isinstance(wt, RpcChainWatcher) and not fb9) else None)
+        except Exception:
+            pass
+        return True
+
+
 def _revoke_stamp_disk(cursor_path: str, tok: bool = True):
     try:
         cur9 = common.read_json(cursor_path, {})
@@ -213,12 +795,11 @@ class RpcSynthMixin:
     WETH_WITHDRAWAL = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
     ZERO_ADDR = "0x0000000000000000000000000000000000000000"
     RPC_DEFAULT = {
-        "base": ["https://mainnet.base.org", "https://base.drpc.org"],
+        "base": ["https://mainnet.base.org", "https://base.drpc.org", "https://gateway.tenderly.co/public/base"],
         "optimism": ["https://mainnet.optimism.io", "https://optimism.drpc.org"],
         "eth": ["https://eth.drpc.org", "https://ethereum-rpc.publicnode.com"],
         "arbitrum": ["https://arb1.arbitrum.io/rpc"],
-        "polygon": ["https://polygon.drpc.org", "https://polygon-bor-rpc.publicnode.com",
-                    "https://1rpc.io/matic"],
+        "polygon": ["https://polygon.drpc.org", "https://polygon-bor-rpc.publicnode.com", "https://gateway.tenderly.co/public/polygon"],
         "gnosis": ["https://rpc.gnosischain.com"],
         "scroll": ["https://rpc.scroll.io"],
         "zksync": ["https://mainnet.era.zksync.io"],
@@ -242,8 +823,25 @@ class RpcSynthMixin:
             eps = self._synth_eps = {}
         return eps.setdefault(url, {"fail_until": 0.0, "streak": 0})
 
+    @staticmethod
+    def rpc_deferred(e) -> bool:
+        seen = set()
+        while isinstance(e, BaseException) and id(e) not in seen:
+            seen.add(id(e))
+            if isinstance(e, bf_engine.NetError) and getattr(e, "kind", None) in ("quota", "budget", "circuit"):
+                return True
+            e = e.__cause__
+        return False
+
+    def synth_fail_count(self, counts: dict, h: str, err):
+        if self.rpc_deferred(err):
+            return None
+        counts[h] = int(counts.get(h, 0)) + 1
+        return counts[h]
+
     def _synth_trip(self, url: str, e: Exception):
         st = self._synth_ep(url)
+        st["deferred"] = e if self.rpc_deferred(e) else None
         msg = str(e)
         ratelike = ("429" in msg or "Too Many" in msg or "rate limit" in msg.lower()
                     or "-32016" in msg or "403" in msg)
@@ -262,22 +860,26 @@ class RpcSynthMixin:
         last = None
         for url in order:
             try:
-                req = urllib.request.Request(
-                    url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
-                                          "params": params}).encode(),
-                    headers={"Content-Type": "application/json", "User-Agent": common.ua_for(url, UA)})
-                d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+                d = bf_engine.http_json(
+                    url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                    headers={"User-Agent": common.ua_for(url, UA)}, timeout=15, retries=1, rpc_methods=(method,))
                 if not isinstance(d, dict):
                     raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
                 if d.get("error"):
                     raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))[:160]}")
                 self._synth_ep(url)["streak"] = 0
+                self._synth_ep(url)["deferred"] = None
                 if d.get("result") is not None:
                     return d["result"]
                 last = RuntimeError("result null")
             except Exception as e:
                 last = e
                 self._synth_trip(url, e)
+        for url in rpcs:
+            d9 = self._synth_ep(url).get("deferred")
+            if d9 is not None:
+                raise bf_engine.NetError(f"보류(게이트·장부): {common.redact_urls(str(d9))[:160]}", getattr(d9, "kind", None) or "circuit",
+                                         host=getattr(d9, "host", None))
         raise last if last else RuntimeError("rpc 미구성")
 
     def _ref_head(self):
@@ -301,10 +903,12 @@ class RpcSynthMixin:
 
     def _health_cycle(self, kind: str, head: int, safe: int, ok: bool, err=None, **extra):
         hb = bf_engine.health("evm")
-        curs = [v for k, v in self.cursor.items() if not k.startswith("_") and isinstance(v, int)]
+        tb9 = getattr(self, "_tier", None)
+        curs = [v for k, v in self.cursor.items() if not k.startswith("_") and isinstance(v, int)
+                and not (tb9 is not None and tb9.is_resting(k))]
         cmin = min(curs) if curs else None
         bsec = self._block_sec_est(head) if head else None
-        ref = self._ref_head()
+        ref = None if extra.get("tier_idle") else self._ref_head()
         facts = dict(head=head, head_ts=getattr(self, "_head_ts", None), ref_head=ref,
                      ref_gap_blocks=(ref - head) if (ref is not None and head) else None,
                      head_unchanged_sec=int(time.time() - getattr(self, "_hb_head_changed", time.time())),
@@ -314,6 +918,7 @@ class RpcSynthMixin:
                      synced_at=self.cursor.get("_synced_at"), wallets=len(self.wallets),
                      wallets_backfilling=sum(1 for w in self.wallets if not isinstance(self.cursor.get(w), int)),
                      backfilling_ids=[w[:6] for w in self.wallets if not isinstance(self.cursor.get(w), int)][:3],
+                     wallets_resting=sum(1 for w in self.wallets if tb9 is not None and tb9.is_resting(w)),
                      **extra)
         if ok:
             hb.ok(self.chain, kind, **facts)
@@ -376,6 +981,15 @@ class RpcSynthMixin:
                 int(typ_raw) if typ_raw is not None else None)
         except (TypeError, ValueError):
             typ = None
+        if typ == 3:
+            if rc.get("blobGasUsed") is None or rc.get("blobGasPrice") is None:
+                raise ValueError("blob tx(type 3) 영수증에 blobGasUsed·blobGasPrice 없음 — 수수료 추정 안 함(결정적 상세 실패 규약)")
+            fee += int(rc["blobGasUsed"], 16) * int(rc["blobGasPrice"], 16)
+        if rc.get("operatorFee") is not None:
+            fee += int(rc["operatorFee"], 16)
+        elif rc.get("operatorFeeScalar") is not None or rc.get("operatorFeeConstant") is not None:
+            g9 = int(rc["gasUsed"], 16) * int(rc.get("operatorFeeScalar") or "0x0", 16)
+            fee += (g9 * 100 if rc.get("daFootprintGasScalar") is not None else g9 // 1_000_000) + int(rc.get("operatorFeeConstant") or "0x0", 16)
         mint = None
         if typ == 126:
             try:
@@ -546,6 +1160,75 @@ class RpcSynthMixin:
         return {"tx": snap_tx, "token_transfers": tts, "internal": []}
 
 
+def rpc_handback(wt, target: str):
+    cur = wt.cursor
+    ts9 = time.strftime("%Y%m%d_%H%M%S")
+    common.atomic_write_json(wt.cursor_path + f".rpc_handback_{ts9}", cur)
+    jobs = {k[4:]: v for k, v in cur.items() if k.startswith("_bk:") and isinstance(v, dict)}
+    new = {k: v for k, v in cur.items() if k.startswith("_cov:") or (not k.startswith("_") and isinstance(v, int)
+                                                                    and not isinstance(v, bool))}
+    rs, drop = [], []
+    for w, j in jobs.items():
+        try:
+            d9, t9 = int(j.get("done") or 0), int(j.get("to") or 0)
+        except (TypeError, ValueError):
+            continue
+        if d9 >= t9:
+            continue
+        if j.get("why") == "new" or (target == "etherscan" and j.get("why") == "internal"):
+            new.pop(w, None)
+            drop.append(w)
+        elif j.get("why") == "extend":
+            new["_cov:" + w] = t9
+        else:
+            rs.append({"wallet": w, "from_block": d9, "to_block": t9, "kind": "readd", "since": None, "job": None,
+                       "npp": None, "done": False, "pages": 0})
+    ll9 = {k: v for k, v in (cur.get("_leaf_later") or {}).items()
+           if isinstance(v, dict) and isinstance(v.get("w"), str) and type(v.get("blk")) is int and v["blk"] > 0}
+    for e9 in ll9.values():
+        w9, y9 = e9["w"].lower(), int(e9["blk"])
+        if target == "etherscan":
+            new.pop(w9, None)
+            if w9 not in drop:
+                drop.append(w9)
+        else:
+            rs.append({"wallet": w9, "from_block": y9 - 1, "to_block": y9, "kind": "leaf", "since": None, "job": None,
+                       "npp": None, "done": False, "pages": 0})
+    if ll9:
+        new["_leaf_later_left"] = ll9
+    if rs:
+        new["_ext_internal_pending"] = {"v": 1, "ranges": rs, "hashes": [], "emit_i": 0, "created": int(time.time())}
+    qd = cur.get("_quarantine") if isinstance(cur.get("_quarantine"), dict) else {}
+    if qd and target == "etherscan":
+        new["_quarantine_left"] = qd
+    elif qd:
+        pp = os.path.join(common.STATE_DIR, f"pending_detail_{wt.chain}.json")
+        pend9 = common.read_json(pp, {}) or {}
+        for h in qd:
+            pend9.setdefault(str(h).lower(), 0)
+        common.atomic_write_json(pp, pend9)
+    hq = cur.get("_hq") if isinstance(cur.get("_hq"), dict) else {}
+    if hq and target == "etherscan":
+        hp = os.path.join(common.STATE_DIR, f"hq_left_{wt.chain}.json")
+        old9 = common.read_json(hp, {}) or {}
+        for h in hq:
+            old9.setdefault(str(h).lower(), 0)
+        common.atomic_write_json(hp, old9)
+    elif hq:
+        ep = os.path.join(common.STATE_DIR, f"enrich_{wt.chain}.json")
+        enr = common.read_json(ep, {}) or {}
+        for h in hq:
+            enr.setdefault(str(h).lower(), 0)
+        common.atomic_write_json(ep, enr)
+    new["_handback"] = {"at": int(time.time()), "from": "rpc", "first_backfill": len(drop), "internal_ranges": len(rs), "enrich": len(hq),
+                        "leaf_later": len(ll9),
+                        "backup": os.path.basename(wt.cursor_path + f".rpc_handback_{ts9}")}
+    wt.cursor = new
+    common.atomic_write_json(wt.cursor_path, new)
+    log.warning("★%s RPC 전용 → " + ("이더스캔" if target == "etherscan" else "블록스카웃") + " 되돌림: 지갑 커서 %d개 이어받음 · 첫 백필로 되돌린 지갑 %d · internal 재훑기 구간 %d · enrich %d건 (원본 .rpc_handback_%s)★",
+                wt.chain, sum(1 for k in new if not k.startswith("_")), len(drop), len(rs), len(hq), ts9)
+
+
 class ChainWatcher(RpcSynthMixin):
     def __init__(self, cfg: dict, chain: str, wallets: list, writer: SegmentWriter):
         self.chain = chain
@@ -560,6 +1243,8 @@ class ChainWatcher(RpcSynthMixin):
         self.writer = writer
         self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
         self.cursor = common.read_json(self.cursor_path, {})
+        if self.cursor.get("_rpc_v") is not None:
+            self._rpc_handback()
         self.pending_detail = common.read_json(
             os.path.join(common.STATE_DIR, f"pending_detail_{chain}.json"), {})
         self.fail_streak = {}
@@ -583,6 +1268,10 @@ class ChainWatcher(RpcSynthMixin):
         self.bf2_budget = float(bfc.get("evm_cycle_budget_sec") or self.BF2_TIME_BUDGET)
         self.progress = bf_engine.progress("evm")
         self._prev_emitted = set(common.read_json(self.emitted_path, []))
+        self._tier = addr_tier.evm_book(self, cfg, "blockscout")
+
+    def _rpc_handback(self):
+        rpc_handback(self, "blockscout")
 
     def _idx_note(self, idx_ok: bool, state: str = None, head_ok: bool = None):
         now9 = time.time()
@@ -755,7 +1444,20 @@ class ChainWatcher(RpcSynthMixin):
         if mx and head < mx - max(64, self.conf_depth):
             raise bf_engine.NetError(f"blockscout 헤드 역행 {head} < 관측 최대 {mx} (뒤처진 복제본)", "stale_head")
         self._max_head = max(mx, head)
+        self._explorer_frozen_check(head)
         return head
+
+    def _explorer_frozen_check(self, head: int):
+        hts = getattr(self, "_head_ts", None)
+        if not isinstance(hts, int) or time.time() - hts <= EXPLORER_FROZEN_SEC:
+            return
+        ref = self._ref_head()
+        if ref is None or ref - int(head) <= max(EXPLORER_FROZEN_GAP, 10 * int(self.conf_depth)):
+            return
+        hrs = (time.time() - hts) / 3600.0
+        raise bf_engine.NetError(
+            f"blockscout 색인 정지 — 최신 블록 {int(head)} 이 {hrs:.0f}시간째 그대로(노드 헤드 {ref} · {ref - int(head)}블록 뒤) — "
+            "그 뒤 새 거래를 받지 못함", "stale_head")
 
     def _page_json(self, url: str, tries: int = 5):
         for i in range(tries):
@@ -796,6 +1498,7 @@ class ChainWatcher(RpcSynthMixin):
                     d = self._page_json(url)
                 except Exception as e:
                     self._disc_err = f"{ep}: {common.safe_err(e)[:160]}"
+                    self._rpcfb_disc_error = e
                     return None
                 if not isinstance(d, dict) or not isinstance(d.get("items"), list):
                     log.warning("%s %s 응답 형식 오류 — 커서 유지", wallet[:10], ep)
@@ -912,6 +1615,7 @@ class ChainWatcher(RpcSynthMixin):
                         oldest = blk if oldest is None else min(oldest, blk)
                         if not (since0 < blk <= safe0):
                             continue
+                    addr_tier.tier_mark_if_live(self, h, [w])
                     if h.lower() in self.emitted or h.lower() in seen_pg:
                         continue
                     seen_pg.add(h.lower())
@@ -940,6 +1644,7 @@ class ChainWatcher(RpcSynthMixin):
                                         w[:10], h[:12], snap)
                             return False
                         log.warning("%s 백필 detail %s 실패 → pending 큐: %s", w[:10], h[:12], snap)
+                        addr_tier.tier_mark(self, h, [w])
                         self.pending_detail[h] = 0
                         continue
                     try:
@@ -947,6 +1652,7 @@ class ChainWatcher(RpcSynthMixin):
                     except (KeyError, TypeError, ValueError):
                         if blk is None:
                             return False
+                        addr_tier.tier_mark(self, h, [w])
                         self.pending_detail[h] = 0
                         continue
                     if not (since0 < detail_blk <= safe0):
@@ -1065,6 +1771,21 @@ class ChainWatcher(RpcSynthMixin):
     def window_start_block_ts(self, ts: int) -> int:
         safe = getattr(self, "_max_head", 0) or self.head_block()
         return bf_engine.block_at_ts(self._block_ts, int(ts), 0, int(safe))
+
+    def _bs_has_rows(self, w: str, blk: int):
+        if self.idx_guard:
+            seen9 = getattr(self, "_idx_seen", None)
+            if not seen9 or seen9[0] not in ("ok", "internal") or getattr(self, "_idx_unknown", None):
+                return None
+        d = http_json(f"{self.base}/api/v2/addresses/{w}/token-transfers", prio="bg", retries=1)
+        if not isinstance(d, dict) or not isinstance(d.get("items"), list):
+            return None
+        return bool(d["items"])
+
+    def _ext_maybe_needed(self) -> bool:
+        if str(getattr(self, "bf_mode", "v2")) == "legacy" or not bf_engine.SINCE.target(self.chain):
+            return False
+        return any(isinstance(self.cursor.get(w), int) and addr_tier._evm_ext_need(self, "blockscout", w) for w in self.wallets)
 
     def _maybe_extend(self, head: int, safe: int):
         target = bf_engine.SINCE.target(self.chain)
@@ -1223,7 +1944,8 @@ class ChainWatcher(RpcSynthMixin):
             int(fee["value"])
         except (KeyError, TypeError, ValueError):
             return False
-        return tx.get("status") in ("ok", "error") and tx.get("is_pending_update") is not True
+        return tx.get("status") in ("ok", "error") and tx.get("is_pending_update") is not True \
+            and tsfix.ts_valid(tx.get("timestamp"))
 
     def _bf2_groups(self, job: dict):
         groups = {}
@@ -1238,6 +1960,7 @@ class ChainWatcher(RpcSynthMixin):
             r = json.loads(line.decode("utf-8"))
             h, it, ep = r["h"], r["it"], r["k"].split("|", 1)[1]
             g = groups.setdefault(h, {"tx": None, "tt": {}, "it": {}, "b": None, "nob": False})
+            g.setdefault("ws", set()).add(str(r["k"]).split("|", 1)[0].lower())
             if r.get("b") is None:
                 g["nob"] = True
             elif g["b"] is None:
@@ -1271,6 +1994,8 @@ class ChainWatcher(RpcSynthMixin):
             if not tts:
                 return None
             src = tts[0]
+            if not tsfix.ts_valid(src.get("timestamp")):
+                return None
             tx = {"hash": src.get("transaction_hash") or h, "from": src.get("from"), "to": src.get("to"),
                   "value": "0", "fee": {"value": "0"}, "status": "ok",
                   "raw_input": "0x01",
@@ -1293,11 +2018,16 @@ class ChainWatcher(RpcSynthMixin):
                     return False
                 h = order[i]
                 g = groups[h]
+                ws9 = sorted(g.get("ws") or ()) or list(job["wallets"])
+                addr_tier.tier_mark_if_live(self, h, ws9)
                 if h in self.emitted or h in self.pending_detail:
                     i += 1
                     continue
                 snap = None
-                need_detail = g["nob"] or (h in self._prev_emitted) or other_pending
+                b9 = g["b"] if g["b"] is not None else int(job.get("safe") or 0)
+                behind_pending = any(w not in job["wallets"] and isinstance(self.cursor.get(w), int) and int(self.cursor[w]) < b9
+                                     for w in self.wallets)
+                need_detail = g["nob"] or (h in self._prev_emitted) or other_pending or behind_pending
                 if not need_detail:
                     snap = self._bf2_snapshot(h, g)
                     need_detail = snap is None
@@ -1318,6 +2048,7 @@ class ChainWatcher(RpcSynthMixin):
                             job["emit_i"] = i
                             continue
                         log.warning("%s v2 detail %s 실패 → pending 큐: %s", self.chain, h[:12], str(e)[:100])
+                        addr_tier.tier_mark(self, h, ws9)
                         self.pending_detail[h] = 0
                         i += 1
                         job["emit_i"] = i
@@ -1327,11 +2058,12 @@ class ChainWatcher(RpcSynthMixin):
                 try:
                     blk = int(snap["tx"]["block_number"])
                 except (KeyError, TypeError, ValueError):
+                    addr_tier.tier_mark(self, h, ws9)
                     self.pending_detail[h] = 0
                     i += 1
                     continue
                 part_int = (not need_detail and job.get("kind") != "extend")
-                if job.get("int_lag") and (not (snap.get("internal") or []) or part_int) and not (h in self._prev_emitted or other_pending):
+                if job.get("int_lag") and (not (snap.get("internal") or []) or part_int) and not (h in self._prev_emitted or other_pending or behind_pending):
                     snap = self._int_mark(snap)
                 if since0 < blk <= safe0:
                     self.emit(h, snap, head)
@@ -1599,6 +2331,25 @@ class ChainWatcher(RpcSynthMixin):
         log.info("★%s internal 늦은 채움 완료 — tx %d건 재확인, 표식 제거★", self.chain, len(hashes))
         return True
 
+    def _pending_fail(self, h: str, err, snap=None) -> bool:
+        snap = err if snap is None else snap
+        n9 = self.synth_fail_count(self.pending_detail, h, err)
+        if n9 is None:
+            log.debug("pending %s 보류(게이트·장부 거절 — 횟수 안 셈): %s", h[:12], str(err)[:120])
+            return False
+        if n9 > 200:
+            common.append_durable_jsonl(
+                os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+                {"ts": int(time.time()), "chain": self.chain,
+                 "txhash": h, "err": str(snap)[:200]})
+            del self.pending_detail[h]
+            log.error("★pending %s %d회 초과 — 포이즌 격리(pending_poison.jsonl)★",
+                      h[:12], 200)
+            return True
+        log.warning("pending detail %s 재시도 실패(%d회): %s",
+                    h[:12], n9, snap)
+        return False
+
     def _int_emit_one(self, h: str, m: dict, span: list, head: int) -> str:
         rows9 = list(((m.get("items") or {}).get(h) or {}).values())
 
@@ -1681,6 +2432,11 @@ class ChainWatcher(RpcSynthMixin):
             raise RuntimeError(f"tx status 미확정: {txhash}")
         if tx.get("is_pending_update") is True and not accept_pending:
             raise RuntimeError(f"tx 상세가 아직 갱신 중: {txhash}")
+        if not tsfix.ts_valid(tx.get("timestamp")):
+            try:
+                tx["timestamp"] = tsfix.block_ts(self, int(tx["block_number"]))
+            except Exception as e:
+                raise RuntimeError(f"tx 상세 시각 없음 · 블록 시각 조회 실패: {txhash}") from e
         tt = self._fetch_all_items(f"/api/v2/transactions/{txhash}/token-transfers")
         it = self._fetch_all_items(f"/api/v2/transactions/{txhash}/internal-transactions")
         return {"tx": tx, "token_transfers": tt, "internal": it}
@@ -1695,6 +2451,9 @@ class ChainWatcher(RpcSynthMixin):
         if repair:
             rec["repair"] = repair
         self.writer.append(rec)
+        tb9 = getattr(self, "_tier", None)
+        if tb9 is not None and not repair:
+            tb9.note_sent(addr_tier.sent_from(snapshot), addr_tier.snap_ts(snapshot))
 
     def _detail_probe_ok(self) -> bool:
         cand = [h for h in self.emitted if h not in self.enrich]
@@ -1762,6 +2521,17 @@ class ChainWatcher(RpcSynthMixin):
                 log.warning("enrich %s emit 실패(카운트 유지, 재시도): %s", h[:12], e)
 
     def cycle(self):
+        tb = getattr(self, "_tier", None)
+        rest_set = set()
+        if tb is not None:
+            addr_tier.tier_prune(self)
+            addr_tier.evm_activity(self, tb)
+            due9, rest9 = tb.due_list(self.wallets)
+            rest_set = set(rest9)
+            if not due9 and not self.pending_detail and not self.enrich and not isinstance(self.cursor.get("_bfjob"), dict) \
+                    and not isinstance(self.cursor.get("_ext_internal_pending"), dict) and not self._ext_maybe_needed():
+                addr_tier.idle_cycle(self, tb, "blockscout", urllib.parse.urlsplit(self.base).hostname)
+                return
         head = self.head_block()
         safe = head - self.conf_depth
         all_ok = True
@@ -1797,6 +2567,7 @@ class ChainWatcher(RpcSynthMixin):
             for h, _ in batch:
                 snap = res_p.get(h)
                 if isinstance(snap, Exception) or snap is None:
+                    fail9 = snap
                     if h not in direct8:
                         emitted_ok = False
                         try:
@@ -1814,18 +2585,8 @@ class ChainWatcher(RpcSynthMixin):
                                             h[:12], e9r)
                                 continue
                             log.debug("rpc 합성 실패 %s: %s", h[:12], e9r)
-                    self.pending_detail[h] = self.pending_detail.get(h, 0) + 1
-                    if self.pending_detail[h] > 200:
-                        common.append_durable_jsonl(
-                            os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
-                            {"ts": int(time.time()), "chain": self.chain,
-                             "txhash": h, "err": str(snap)[:200]})
-                        del self.pending_detail[h]
-                        log.error("★pending %s %d회 초과 — 포이즌 격리(pending_poison.jsonl)★",
-                                  h[:12], 200)
-                        continue
-                    log.warning("pending detail %s 재시도 실패(%d회): %s",
-                                h[:12], self.pending_detail[h], snap)
+                            fail9 = e9r
+                    self._pending_fail(h, fail9, snap)
                     continue
                 if accepts[h]:
                     log.warning("pending %s 120회 초과 — is_pending_update 수용 확정", h[:12])
@@ -1839,16 +2600,20 @@ class ChainWatcher(RpcSynthMixin):
                     log.warning("pending %s emit 실패(카운트 유지 %d): %s",
                                 h[:12], self.pending_detail.get(h, 0), e)
         idx_state = self._indexing_state() if self.idx_guard else "ok"
+        idx_known9 = idx_state
+        if self.idx_guard and getattr(self, "_idx_unknown", None):
+            idx_known9 = None
+            idx_state = "blocks"
         idx_ok = idx_state == "ok"
         ext_idx_ok = idx_ok or (idx_state == "internal" and self.idx_guard_scope != "all")
         head_idx_ok = ext_idx_ok
         int_lag_now = self._int_lag_now = (not idx_ok) or not self._idx_stable()
         self._idx_note(idx_ok, idx_state, head_idx_ok)
-        if idx_state == "internal":
+        if idx_known9 == "internal":
             self.cursor["_ext_internal_lag"] = {"ts": int(time.time()), "ratio": getattr(self, "_idx_ratio", None)}
         elif idx_ok:
             self.cursor.pop("_ext_internal_lag", None)
-        self._int_lag_track(idx_state)
+        self._int_lag_track(idx_known9)
         ipm = self.cursor.get("_ext_internal_pending")
         if isinstance(ipm, dict):
             ipm["ratio"] = getattr(self, "_idx_ratio", None) if idx_state != "ok" else None
@@ -1878,7 +2643,11 @@ class ChainWatcher(RpcSynthMixin):
                 else:
                     first_ws.append(w)
                 continue
+            if w in rest_set:
+                continue
             found = self.discover(w, eff_since, safe, skip_internal=int_lag_now)
+            if found and tb is not None:
+                tb.clear_empty(w, "rows")
             if found is None:
                 all_ok = tok_ok = False
                 _revoke_stamp_disk(self.cursor_path)
@@ -1899,6 +2668,7 @@ class ChainWatcher(RpcSynthMixin):
             if ck_next:
                 _revoke_stamp_disk(self.cursor_path)
             for h in sorted(found):
+                addr_tier.tier_mark_if_live(self, h, [w])
                 if h.lower() in self.emitted:
                     continue
                 hinted_blk = found[h]
@@ -1913,6 +2683,7 @@ class ChainWatcher(RpcSynthMixin):
                         break
                     log.warning("detail %s 실패 → pending 큐: %s", h[:12], e)
                     _revoke_stamp_disk(self.cursor_path)
+                    addr_tier.tier_mark(self, h, [w])
                     self.pending_detail[h] = 0
                     continue
                 if not (eff_since < detail_blk <= safe_w):
@@ -1934,11 +2705,18 @@ class ChainWatcher(RpcSynthMixin):
                     self._int_head_pending(w, since, safe_w)
                 self.cursor[w] = max(int(self.cursor.get(w, 0)), safe_w)
                 self.cursor.pop("_disc:" + w, None)
+                if tb is not None:
+                    addr_tier.tier_partial(self, w, int(self.cursor[w]) < safe)
+                    if (int(self.cursor[w]) >= safe and not getattr(self, "_idx_unknown", None)
+                            and not addr_tier.tier_pending(self, w, enrich=False)):
+                        tb.note_full(w, int(self.cursor[w]))
                 if safe_w < safe:
                     all_ok = tok_ok = False
                     _revoke_stamp_disk(self.cursor_path)
             else:
                 all_ok = tok_ok = False
+                if tb is not None:
+                    addr_tier.tier_partial(self, w, True)
         if not all_ok or self.pending_detail or self.enrich:
             self.cursor.pop("_synced_at", None)
         if not tok_ok or self.pending_detail:
@@ -1979,6 +2757,11 @@ class ChainWatcher(RpcSynthMixin):
         else:
             self.cursor.pop("_synced_tok_at", None)
         common.atomic_write_json(self.cursor_path, self.cursor)
+        if tb is not None:
+            addr_tier.evm_baselines(self, tb, [w for w in self.wallets if w not in rest_set])
+            if head_idx_ok and not getattr(self, "_idx_unknown", None):
+                addr_tier.evm_empty_probe(self, tb, self._bs_has_rows)
+            tb.save()
         failed_ws = [w[:10] for w, n9 in self.fail_streak.items() if n9]
         job = self.cursor.get("_bfjob")
         ipm9 = self.cursor.get("_ext_internal_pending") if isinstance(self.cursor.get("_ext_internal_pending"), dict) else None
@@ -1988,7 +2771,8 @@ class ChainWatcher(RpcSynthMixin):
                          "ranges": len(ipm9["ranges"]), "from_ts": ipm9.get("from_ts"), "to_ts": ipm9.get("to_ts"),
                          "wallets": sorted({str(r.get("wallet")) for r in ipm9["ranges"] if isinstance(r, dict) and r.get("wallet")})}
         self._health_cycle("blockscout", head, safe, ok=head_idx_ok and not failed_ws,
-                           err=RuntimeError("indexing-status 미완(발견 보류)") if not head_idx_ok else
+                           err=RuntimeError("indexing-status 조회 실패(색인 상태 모름 — 발견 보류 · 커서 유지)" if getattr(self, "_idx_unknown", None)
+                                            else "indexing-status 미완(발견 보류)") if not head_idx_ok else
                            RuntimeError(f"discovery 실패 지갑 {failed_ws}: {getattr(self, '_disc_err', '')}"),
                            current_source=urllib.parse.urlsplit(self.base).hostname, indexing_ok=idx_ok,
                            indexing_state=idx_state, internal_ratio=getattr(self, "_idx_ratio", None),
@@ -2003,8 +2787,18 @@ class EtherscanKeyError(RuntimeError):
     pass
 
 
+class EtherscanPaced(RuntimeError):
+    pass
+
+
 class EtherscanDailyLimit(EtherscanKeyError):
     pass
+
+
+_ES_Q = {}
+_ES_Q_LOCK = threading.Lock()
+ES_Q_TTL = 900
+_ES_WMEM = {}
 
 
 class EtherscanWatcher(RpcSynthMixin):
@@ -2029,11 +2823,17 @@ class EtherscanWatcher(RpcSynthMixin):
             self.page = max(100, int(((cfg.get("etherscan") or {}).get("page_rows")) or self.PAGE))
         except (TypeError, ValueError):
             self.page = self.PAGE
+        try:
+            self.INT_LAG_SEC = max(60, int(((cfg.get("etherscan") or {}).get("int_lag_sec")) or EtherscanWatcher.INT_LAG_SEC))
+        except (TypeError, ValueError):
+            pass
         self.wallets = [w.lower() for w in wallets]
         self.wallet_since = bf_engine.wallet_since_map(cfg, chain)
         self.writer = writer
         self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
         self.cursor = common.read_json(self.cursor_path, {})
+        if self.cursor.get("_rpc_v") is not None:
+            rpc_handback(self, "etherscan")
         self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_evm_{chain}.json")
         self.emitted = set(common.read_json(self.emitted_path, []))
         _prev_w = {k for k in self.cursor if not k.startswith("_")}
@@ -2042,19 +2842,25 @@ class EtherscanWatcher(RpcSynthMixin):
             self.emitted.clear()
         self.pending_detail = {}
         self.progress = bf_engine.progress("evm")
+        self._tier = addr_tier.evm_book(self, cfg, "etherscan")
 
     ES_RETRY = 4
-    INT_LAG_SEC = 1800
+    INT_LAG_SEC = 21600
 
     def _es_get(self, params: dict):
         left = es_daily_left()
         if left > 0:
             raise EtherscanDailyLimit(f"etherscan 하루 한도 쉼 창 — {left / 60:.0f}분 뒤 재시도")
-        if not bf_engine.es_budget_take("evm"):
+        k9 = getattr(self, "_es_kind", "head")
+        if not bf_engine.es_budget_take("evm", kind=k9):
+            if bf_engine.es_budget_why() == "pace":
+                raise EtherscanPaced(f"이더스캔 하루 예산 페이싱({getattr(self, '_es_kind', 'head')}) — 잠시 쉬고 다음 주기에 이어 받음")
             used9, cap9 = bf_engine.es_budget_used()
             msg9 = f"로컬 하루 예산 도달 {used9}/{cap9} (공표 한도 80% 규칙) — day/limit"
             es_daily_trip(msg9)
             raise EtherscanDailyLimit(f"etherscan {msg9}")
+        if k9 == "head":
+            self._es_hspent = getattr(self, "_es_hspent", 0) + 1
         try:
             d = http_json(self.ES_API + "?" + urllib.parse.urlencode(params), retries=1)
         except bf_engine.NetError as e:
@@ -2090,6 +2896,8 @@ class EtherscanWatcher(RpcSynthMixin):
             d = self._es_get_retry(params)
             if not isinstance(d, dict):
                 raise RuntimeError("etherscan 응답 형식 오류")
+            if str(d.get("status")) not in ("0", "1"):
+                raise RuntimeError("etherscan 응답 상태 오류")
             if d.get("status") == "0" and d.get("message") not in ("No transactions found",
                                                                   "No records found"):
                 res = d.get("result")
@@ -2103,7 +2911,9 @@ class EtherscanWatcher(RpcSynthMixin):
                     time.sleep(bf_engine._backoff(i, base=1.5, cap=12.0) + 0.5)
                     continue
                 raise RuntimeError(f"etherscan 오류: {res}")
-            return d.get("result") or []
+            if str(d.get("status")) == "0":
+                return []
+            return d.get("result")
         raise last if last else RuntimeError("etherscan 재시도 소진")
 
     def head_block(self) -> int:
@@ -2131,7 +2941,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 log.info("%s 백필 창 시작 = 블록 %d (이더스캔 getblocknobytime, bpd 가정치 대비 %+d블록)", self.chain,
                          b, b - max(0, safe_now - int(months * 30 * bpd)))
                 return b
-        except EtherscanKeyError:
+        except (EtherscanKeyError, EtherscanPaced):
             raise
         except Exception as e:
             log.warning("%s getblocknobytime 실패 → RPC 탐색: %s", self.chain, str(e)[:100])
@@ -2142,11 +2952,21 @@ class EtherscanWatcher(RpcSynthMixin):
             b = int(self._es({"module": "block", "action": "getblocknobytime", "timestamp": int(ts), "closest": "before"}))
             if b >= 0:
                 return b
-        except EtherscanKeyError:
+        except (EtherscanKeyError, EtherscanPaced):
             raise
         except Exception:
             pass
         return bf_engine.block_at_ts(self._block_ts, int(ts), 0, int(getattr(self, "_max_head", 0) or self.head_block()))
+
+    def _ext_block_at(self, ts: int, head: int) -> int:
+        try:
+            return self._block_by_ts(ts)
+        except EtherscanPaced as e:
+            try:
+                return bf_engine.block_at_ts(self._block_ts, int(ts), 0, int(head))
+            except Exception as e9:
+                bf_engine.es_pace_room("fill")
+                raise EtherscanPaced(f"확장 목표 블록 — 이더스캔 몫 막힘 · RPC 탐색 실패({str(e9)[:80]}) — 옛 기록 수요만 등록") from e
 
     ES_EXT_SLICES = 4
     ES_EXT_WORKERS = 3
@@ -2155,13 +2975,18 @@ class EtherscanWatcher(RpcSynthMixin):
         target = bf_engine.SINCE.target(self.chain)
         if not target:
             return
+        self._es_kind = "aux"
         tb = getattr(self, "_ext_tb", None)
         if not tb or tb[0] != target:
-            tb = self._ext_tb = (target, self._block_by_ts(target))
+            b9 = addr_tier._ext_tb_of(self, "etherscan", target)
+            tb = self._ext_tb = (target, b9 if b9 is not None else self._ext_block_at(target, head))
         tblk = tb[1]
         need = {}
         hint = bf_engine.SINCE.covered_hint(self.chain)
-        hint_blk = self._block_by_ts(hint) if hint else None
+        hb9 = getattr(self, "_ext_hint", None)
+        if hint and (not hb9 or hb9[0] != hint):
+            hb9 = self._ext_hint = (hint, self._ext_block_at(hint, head))
+        hint_blk = hb9[1] if hint else None
         for w in self.wallets:
             if not isinstance(self.cursor.get(w), int):
                 continue
@@ -2182,6 +3007,16 @@ class EtherscanWatcher(RpcSynthMixin):
             for a in range(lo, hi + 1, step):
                 for act in acts9:
                     tasks.append((w, act, a, min(hi, a + step - 1)))
+        room9 = bf_engine.es_pace_room("fill")
+        if room9 < len(tasks) * 2:
+            if time.time() - getattr(self, "_ext_room_log", 0) >= 1800:
+                self._ext_room_log = time.time()
+                log.info("%s 과거 창 확장 대기 — 하루 예산 페이싱(채우기 몫 %d < 필요 %d) · 몫이 차면 이어서", self.chain, max(0, room9), len(tasks) * 2)
+            self.progress.update(f"{self.chain}:extend", phase="extend", unit="tasks", done=0, total=len(tasks),
+                                 target=time.strftime("%Y-%m-%d", time.gmtime(target)), since_block=tblk, wallets=len(need), paced=True,
+                                 paced_at=int(time.time()))
+            return
+        self._es_kind = "fill"
         res = {}
         self.progress.update(f"{self.chain}:extend", phase="extend", unit="tasks", done=0, total=len(tasks),
                              target=time.strftime("%Y-%m-%d", time.gmtime(target)), since_block=tblk, wallets=len(need), flush=True)
@@ -2193,6 +3028,8 @@ class EtherscanWatcher(RpcSynthMixin):
                     res[key] = fu.result()
                 except EtherscanKeyError:
                     raise
+                except EtherscanPaced as e:
+                    res[key] = e
                 except Exception as e:
                     res[key] = e
         errs = [k for k, v in res.items() if isinstance(v, Exception)]
@@ -2214,16 +3051,17 @@ class EtherscanWatcher(RpcSynthMixin):
         merged = self.merge_wallet_rows(per_wallet)
         n_emit = 0
         for h in sorted(merged, key=lambda x: (self._ent_block(merged[x]) or 0, x)):
-            if h in self.emitted:
-                continue
             ent = merged[h]
             snap = self._snapshot(ent)
             if snap is None or not self._ent_block(ent):
                 log.warning("%s 확장 %s 파싱 불능 — 커버 하한 보류", self.chain, h[:12])
                 common.atomic_write_json(self.emitted_path, sorted(self.emitted))
                 return
-            self.writer.append({"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap,
-                                "wallets": self.wallets, "observed_head": head, "ts": int(time.time())})
+            rec9 = {"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap,
+                    "wallets": self.wallets, "observed_head": head, "ts": int(time.time())}
+            if h in self.emitted:
+                rec9["repair"] = "leg_union"
+            self.writer.append(rec9)
             self.emitted.add(h)
             n_emit += 1
         common.atomic_write_json(self.emitted_path, sorted(self.emitted))
@@ -2308,6 +3146,8 @@ class EtherscanWatcher(RpcSynthMixin):
     @classmethod
     def _leg_marks(cls, ent: dict) -> dict:
         out = {}
+        if ent.get("tx"):
+            out["tx"] = 1
         for kind in ("tt", "it"):
             for row in ent.get(kind) or []:
                 k = kind + ":" + hashlib.sha1(cls._row_key(row).encode()).hexdigest()[:16]
@@ -2338,7 +3178,116 @@ class EtherscanWatcher(RpcSynthMixin):
         floor9 = int(floor9) if isinstance(floor9, int) else 0
         return max(floor9 + 1, since + 1 - self._lag_blocks(), 1)
 
+    def _es_mem(self) -> dict:
+        return _ES_WMEM.setdefault(self.chain, {"cost": {}, "next": None})
+
+    def _es_wneed(self, w) -> int:
+        n9 = int(addr_tier.per_check_calls("etherscan", bool(lpdec.lp_managers(common.BASE_DIR).get(self.chain))))
+        return max(n9, int(self._es_mem()["cost"].get(w, 0)))
+
+    def _es_q_room(self, own: int, start: bool) -> bool:
+        if bf_engine.ES_PACE_BURST_FRAC >= 1.0 or es_daily_left() > 0:
+            return True
+        used9, cap9 = bf_engine.es_budget_used()
+        if used9 >= cap9:
+            return True
+        now = time.time()
+        keep9 = max(1, int(cap9 * max(bf_engine.ES_FILL_KEEP_FRAC, bf_engine.ES_FILL_KEEP_MIN)))
+        with _ES_Q_LOCK:
+            me = _ES_Q.setdefault(self.chain, {"went": 0.0})
+            if start:
+                me.update(need=int(own), seen=now)
+            k0 = (float(me.get("went") or 0), self.chain)
+            ahead = 0
+            for c9, v9 in _ES_Q.items():
+                if c9 == self.chain or not (v9.get("busy") or now - float(v9.get("seen") or 0) <= ES_Q_TTL):
+                    continue
+                if not start or v9.get("busy") or (float(v9.get("went") or 0), c9) < k0:
+                    ahead += int(v9.get("need") or 0)
+            ok9 = bf_engine.es_pace_room("head", now) >= min(ahead + int(own), keep9)
+            if ok9 and start:
+                me["busy"] = True
+                self._es_q_go = True
+        return ok9
+
+    def _es_q_done(self):
+        if getattr(self, "_es_q_go", False):
+            self._es_q_go = False
+            with _ES_Q_LOCK:
+                me = _ES_Q.get(self.chain)
+                if me is not None:
+                    me.update(went=time.time(), busy=False)
+
+    def _legacy_pending(self, pend9: dict, safe: int, tb=None):
+        for h9 in list(pend9.keys())[:30]:
+            try:
+                if h9 not in self.emitted and h9.lower() not in self.emitted:
+                    snap9 = self._rpc_synth_detail(h9)
+                    rec9 = {"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h9,
+                            "snapshot": snap9, "wallets": self.wallets,
+                            "observed_head": safe + self.conf_depth,
+                            "ts": int(time.time())}
+                    self.writer.append(rec9)
+                    self.emitted.add(h9.lower())
+                    if tb is not None:
+                        tb.note_sent(addr_tier.sent_from(snap9), addr_tier.snap_ts(snap9))
+                del pend9[h9]
+                log.info("%s 구 pending %s RPC 합성 해소", self.chain, h9[:12])
+            except Exception as e9:
+                failures9 = self.synth_fail_count(pend9, h9, e9)
+                if failures9 is None:
+                    log.debug("%s 구 pending %s 보류(게이트·장부 거절 — 횟수 안 셈): %s", self.chain, h9[:12], str(e9)[:120])
+                    continue
+                if failures9 > 200:
+                    common.append_durable_jsonl(
+                        os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+                        {"ts": int(time.time()), "chain": self.chain,
+                         "txhash": h9, "err": common.safe_err(e9)[:200]})
+                    del pend9[h9]
+                    log.error("★%s 구 pending %s 200회 초과 — 포이즌 격리★",
+                              self.chain, h9[:12])
+                else:
+                    log.warning("%s 구 pending %s 합성 실패(%d회): %s",
+                                self.chain, h9[:12], failures9, e9)
+
     def cycle(self):
+        try:
+            self._es_cycle()
+        finally:
+            self._es_q_done()
+
+    def _es_cycle(self):
+        self._es_kind = "head"
+        tb = getattr(self, "_tier", None)
+        rest_set = set()
+        if tb is not None:
+            lp9 = common.read_json(os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"), {})
+            self._tier_legacy_pend = lp9 if isinstance(lp9, dict) else {}
+            addr_tier.tier_prune(self)
+            addr_tier.evm_activity(self, tb)
+            due9, rest9 = tb.due_list(self.wallets)
+            rest_set = set(rest9)
+            if not due9 and not self._tier_legacy_pend:
+                if self._ext_maybe_needed():
+                    try:
+                        hd9 = int(getattr(self, "_max_head", 0) or 0) or self.head_block()
+                    except EtherscanPaced:
+                        hd9 = 0
+                    if hd9:
+                        self._es_extend_safe(hd9)
+                addr_tier.evm_empty_probe(self, tb, self._es_has_rows)
+                addr_tier.idle_cycle(self, tb, "etherscan", "api.etherscan.io")
+                return
+        mem9 = self._es_mem()
+        order9 = list(self.wallets)
+        nx9 = mem9.get("next")
+        if nx9 in order9:
+            i9 = order9.index(nx9)
+            order9 = order9[i9:] + order9[:i9]
+        w09 = next((w for w in order9 if w in self.cursor and w not in rest_set), None)
+        own9 = 1 + (self._es_wneed(w09) if w09 else 0)
+        if not self._es_q_room(own9, True):
+            raise EtherscanPaced(f"이더스캔 지갑 목록 묶음({own9}콜)이 실시간 몫에 쌓일 때까지 대기 — 다음 주기에 이어 받음")
         head = self.head_block()
         safe = head - self.conf_depth
         cycle_ok = True
@@ -2350,9 +3299,16 @@ class EtherscanWatcher(RpcSynthMixin):
         int_rec = self.cursor.get("_es_int") if isinstance(self.cursor.get("_es_int"), dict) else {}
         int_seen = int_rec.get("seen") if isinstance(int_rec.get("seen"), dict) else {}
         fail_since = {}
-        for w in self.wallets:
+        paced_w = 0
+        self._es_paced_next = mem9["next"] = None
+        hw9 = 0
+        wcost9 = mem9["cost"]
+        for w9 in [w9 for w9 in wcost9 if w9 not in self.wallets]:
+            wcost9.pop(w9, None)
+        for w in order9:
             first = w not in self.cursor
             since = int(self.cursor.get(w, 0))
+            self._es_kind = "fill" if first else "head"
             if first:
                 if self.backfill:
                     since = 0
@@ -2361,10 +3317,14 @@ class EtherscanWatcher(RpcSynthMixin):
                     if isinstance(ck, dict) and "since" in ck:
                         since = int(ck["since"])
                     else:
-                        since = self.window_start_block(safe, self.backfill_months, self.bpd)
-                        ws9 = self.wallet_since.get(w)
-                        if ws9:
-                            since = min(since, self._block_by_ts(ws9))
+                        try:
+                            since = self.window_start_block(safe, self.backfill_months, self.bpd)
+                            ws9 = self.wallet_since.get(w)
+                            if ws9:
+                                since = min(since, self._block_by_ts(ws9))
+                        except EtherscanPaced:
+                            paced_w += 1
+                            continue
                         self.cursor["_bfes:" + w] = {"since": since, "t0": int(time.time())}
                         common.atomic_write_json(self.cursor_path, self.cursor)
                     log.info("%s %d개월 한도 백필 시작 [etherscan] (%d → %d)",
@@ -2374,8 +3334,21 @@ class EtherscanWatcher(RpcSynthMixin):
                     int_rec.setdefault("floor", {})[w] = safe
                     self.cursor["_es_int"] = int_rec
                     continue
-            if since >= safe:
+            if w in rest_set:
                 continue
+            if since >= safe:
+                if tb is not None:
+                    addr_tier.tier_partial(self, w, False)
+                if tb is not None and not addr_tier.tier_pending(self, w, enrich=False):
+                    tb.note_full(w, since)
+                continue
+            if self._es_kind == "head":
+                if hw9 and not self._es_q_room(self._es_wneed(w), False):
+                    paced_w += 1
+                    self._es_paced_next = mem9["next"] = w
+                    break
+                hw9 += 1
+            hs9 = getattr(self, "_es_hspent", 0)
             tried_w += 1
             frm = since + 1 if first else self._lag_from(w, since)
             try:
@@ -2386,6 +3359,15 @@ class EtherscanWatcher(RpcSynthMixin):
                 if _mg9:
                     tts = tts + [r9 for r9 in self._list_all("tokennfttx", w, frm, safe)
                                  if str(r9.get("contractAddress") or "").lower() in _mg9]
+            except EtherscanPaced:
+                tried_w -= 1
+                paced_w += 1
+                if self._es_kind == "head":
+                    self._es_paced_next = mem9["next"] = w
+                    sp9 = getattr(self, "_es_hspent", 0) - hs9
+                    wcost9[w] = max(int(wcost9.get(w, 0)), sp9 + 1, 2 * sp9)
+                    break
+                continue
             except EtherscanKeyError:
                 raise
             except Exception as e:
@@ -2398,6 +3380,11 @@ class EtherscanWatcher(RpcSynthMixin):
             per_wallet[w] = (txs, tts, its)
             since_of[w] = since
             from_of[w] = frm
+            if self._es_kind == "head":
+                wcost9[w] = getattr(self, "_es_hspent", 0) - hs9
+            if tb is not None and (txs or tts or its):
+                tb.clear_empty(w, "rows")
+        self._es_kind = "head"
         merged = self.merge_wallet_rows(per_wallet)
         eff_safe = min([safe] + [int(v) for v in fail_since.values()])
         bad_w = set()
@@ -2407,7 +3394,7 @@ class EtherscanWatcher(RpcSynthMixin):
             ent = merged[h]
             if h in self.emitted:
                 blk9 = self._ent_block(ent)
-                if blk9 and (ent["it"] or ent["tt"]) and any(from_of[w] <= blk9 <= eff_safe for w in ent["ws"]):
+                if blk9 and (ent["tx"] or ent["it"] or ent["tt"]) and any(from_of[w] <= blk9 <= eff_safe for w in ent["ws"]):
                     prev9 = int_seen.get(h)
                     if self._marks_new(prev9[1] if isinstance(prev9, list) and len(prev9) == 2 else None, self._leg_marks(ent)):
                         relist.append(h)
@@ -2432,6 +3419,8 @@ class EtherscanWatcher(RpcSynthMixin):
                 self.emitted.add(h)
                 n_emit += 1
                 int_seen[h] = [blk, self._leg_marks(ent)]
+                if tb is not None and ent["tx"]:
+                    tb.note_sent(str(ent["tx"].get("from") or "").lower(), snap["tx"].get("timestamp"))
             except Exception as e:
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 bad_w |= set(per_wallet)
@@ -2451,6 +3440,8 @@ class EtherscanWatcher(RpcSynthMixin):
             try:
                 self.writer.append({"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap, "wallets": self.wallets,
                                     "observed_head": head, "ts": int(time.time()), "repair": "leg_union"})
+                if tb is not None and ent["tx"]:
+                    tb.note_sent(str(ent["tx"].get("from") or "").lower(), snap["tx"].get("timestamp"))
             except Exception as e:
                 log.error("inbox append 실패(internal 늦은 색인 재방출) — 커서 미전진: %s", e)
                 bad_w |= set(per_wallet)
@@ -2461,7 +3452,8 @@ class EtherscanWatcher(RpcSynthMixin):
             int_seen[h] = [blk, self._marks_merge(prev9[1] if isinstance(prev9, list) and len(prev9) == 2 else None, self._leg_marks(ent))]
             log.info("%s %s 늦은 색인 레그 — leg 합집합 재방출(토큰 %d · internal %d행)", self.chain, h[:12], len(ent["tt"]), len(ent["it"]))
         if int_seen or int_rec.get("floor"):
-            lo9 = min(from_of.values()) if from_of else None
+            lo_all9 = list(from_of.values()) + [self._lag_from(w, int(self.cursor[w])) for w in rest_set if isinstance(self.cursor.get(w), int)]
+            lo9 = min(lo_all9) if lo_all9 else None
             if lo9 is not None:
                 int_seen = {h9: v9 for h9, v9 in int_seen.items() if isinstance(v9, list) and len(v9) == 2 and int(v9[0]) >= lo9}
             int_rec["seen"] = int_seen
@@ -2480,58 +3472,105 @@ class EtherscanWatcher(RpcSynthMixin):
                         log.info("★%s 백필 완주 [etherscan] %d tx 방출, %.0f초★", w[:10], n_emit,
                                  time.time() - float(ck.get("t0") or time.time()))
                 self.cursor[w] = max(int(self.cursor.get(w, 0)), eff_safe)
+                if tb is not None:
+                    addr_tier.tier_partial(self, w, int(self.cursor[w]) < safe)
+                    if int(self.cursor[w]) >= safe and not addr_tier.tier_pending(self, w, enrich=False):
+                        tb.note_full(w, int(self.cursor[w]))
+        if tb is not None:
+            self._tier_fail = (getattr(self, "_tier_fail", set()) - (set(per_wallet) - bad_w)) | set(fail_since) | (bad_w & set(per_wallet))
         common.atomic_write_json(self.emitted_path, sorted(self.emitted))
         pp9 = os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json")
         pend9 = common.read_json(pp9, {})
         if pend9:
-            for h9 in list(pend9.keys())[:30]:
-                try:
-                    if h9 not in self.emitted and h9.lower() not in self.emitted:
-                        snap9 = self._rpc_synth_detail(h9)
-                        rec9 = {"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h9,
-                                "snapshot": snap9, "wallets": self.wallets,
-                                "observed_head": safe + self.conf_depth,
-                                "ts": int(time.time())}
-                        self.writer.append(rec9)
-                        self.emitted.add(h9.lower())
-                    del pend9[h9]
-                    log.info("%s 구 pending %s RPC 합성 해소", self.chain, h9[:12])
-                except Exception as e9:
-                    failures9 = int(pend9.get(h9, 0)) + 1
-                    pend9[h9] = failures9
-                    if failures9 > 200:
-                        common.append_durable_jsonl(
-                            os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
-                            {"ts": int(time.time()), "chain": self.chain,
-                             "txhash": h9, "err": common.safe_err(e9)[:200]})
-                        del pend9[h9]
-                        log.error("★%s 구 pending %s 200회 초과 — 포이즌 격리★",
-                                  self.chain, h9[:12])
-                    else:
-                        log.warning("%s 구 pending %s 합성 실패(%d회): %s",
-                                    self.chain, h9[:12], failures9, e9)
+            self._legacy_pending(pend9, safe, tb)
             common.atomic_write_json(pp9, pend9)
+            if tb is not None:
+                self._tier_legacy_pend = dict(pend9)
         if tried_w and failed_w == tried_w:
             raise RuntimeError(f"etherscan 수집 전 지갑 실패 ({failed_w}/{tried_w})")
         if cycle_ok and not pend9 and \
-                all(int(self.cursor.get(w, 0)) >= safe for w in self.wallets):
+                all(int(self.cursor.get(w, 0)) >= safe for w in self.wallets if w not in rest_set):
             self.cursor["_synced_at"] = int(time.time())
         else:
             self.cursor.pop("_synced_at", None)
         common.atomic_write_json(self.cursor_path, self.cursor)
+        if tb is not None:
+            addr_tier.evm_baselines(self, tb, list(per_wallet))
+            if cycle_ok:
+                addr_tier.evm_empty_probe(self, tb, self._es_has_rows)
+            tb.save()
         if cycle_ok:
-            try:
-                self._es_extend(head)
-            except EtherscanKeyError:
-                raise
-            except Exception as e:
-                log.info("%s 과거 창 확장 예외(다음 사이클): %s", self.chain, e)
+            self._es_extend_safe(head)
+        if self._es_paced_next is not None and not per_wallet:
+            raise EtherscanPaced("이더스캔 지갑 조회 페이싱 — 이번 주기 목록 조회를 끝낸 지갑 없음")
         self._health_cycle("etherscan", head, safe, ok=cycle_ok,
                            err=RuntimeError(f"지갑 실패 {failed_w}/{tried_w}"), current_source="api.etherscan.io",
-                           wallets_failing=failed_w, pending_detail=len(pend9))
+                           wallets_failing=failed_w, pending_detail=len(pend9), wallets_paced=paced_w)
+
+    def _es_has_rows(self, w: str, blk: int):
+        self._es_kind = "aux"
+        try:
+            acts = ["tokentx"] + (["tokennfttx"] if lpdec.lp_managers(common.BASE_DIR).get(self.chain) else [])
+            for act in acts:
+                rows = self._es({"module": "account", "action": act, "address": w, "startblock": 0, "endblock": int(blk),
+                                 "page": 1, "offset": 1, "sort": "asc"})
+                if not isinstance(rows, list):
+                    return None
+                if rows:
+                    return True
+            return False
+        finally:
+            self._es_kind = "head"
+
+    def _es_extend_safe(self, head: int):
+        try:
+            self._es_extend(head)
+        except EtherscanKeyError:
+            raise
+        except EtherscanPaced as e:
+            log.debug("%s 과거 창 확장 — 페이싱으로 다음 주기: %s", self.chain, e)
+        except Exception as e:
+            log.info("%s 과거 창 확장 예외(다음 사이클): %s", self.chain, e)
+        finally:
+            self._es_kind = "head"
+
+    def _ext_maybe_needed(self) -> bool:
+        if not bf_engine.SINCE.target(self.chain):
+            return False
+        return any(isinstance(self.cursor.get(w), int) and addr_tier._evm_ext_need(self, "etherscan", w) for w in self.wallets)
+
+    def _ent_ts(self, ent: dict):
+        for r in ([ent["tx"]] if ent.get("tx") else []) + list(ent.get("tt") or []) + list(ent.get("it") or []):
+            try:
+                v = int(r.get("timeStamp") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if v > 0:
+                return v
+        if self is None:
+            return None
+        src9 = ent.get("tx") or next(iter(list(ent.get("tt") or []) + list(ent.get("it") or [])), None) or {}
+        h9 = str(src9.get("hash") or "")
+        hold = getattr(self, "_ts_hold", None)
+        if hold is None:
+            hold = self._ts_hold = tsfix.TsHold()
+        try:
+            v = tsfix.block_ts(self, self._ent_block(ent) or 0)
+            hold.clear(h9)
+            return v
+        except Exception as e:
+            if hold.hold(h9):
+                log.warning("etherscan %s 시각 없음 · 블록 시각 조회 실패 — 보류(커서 유지 · 다음 사이클): %s", h9[:12], str(e)[:100])
+                return None
+            log.error("★etherscan %s 시각 없음 %d회 연속 — 내보냄(core 격리 → 블록 시각 구하는 대로 자동 재방출 · 상태 패널 '격리된 거래 기록')★",
+                      h9[:12], hold.limit)
+            return 0
 
     def _snapshot(self, ent: dict):
         t = ent["tx"]
+        ts9 = EtherscanWatcher._ent_ts(self, ent)
+        if ts9 is None:
+            return None
         if t:
             try:
                 fee = int(t.get("gasUsed") or 0) * int(t.get("gasPrice") or 0)
@@ -2540,7 +3579,7 @@ class EtherscanWatcher(RpcSynthMixin):
                       "value": str(int(t.get("value") or 0)),
                       "fee": {"value": str(fee)}, "status": status,
                       "raw_input": t.get("input") or "0x",
-                      "timestamp": int(t.get("timeStamp") or 0),
+                      "timestamp": ts9,
                       "block_number": int(t.get("blockNumber") or 0),
                       "block_hash": t.get("blockHash")}
             except (TypeError, ValueError, KeyError):
@@ -2551,7 +3590,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 tx = {"hash": src["hash"], "from": src.get("from"), "to": src.get("to"),
                       "value": "0", "fee": {"value": "0"}, "status": "ok",
                       "raw_input": "0x01",
-                      "timestamp": int(src.get("timeStamp") or 0),
+                      "timestamp": ts9,
                       "block_number": int(src.get("blockNumber") or 0),
                       "block_hash": src.get("blockHash")}
             except (TypeError, ValueError, KeyError):
@@ -2648,11 +3687,11 @@ class RpcLogDiscovery(RpcSynthMixin):
                                         "fail_until": 0.0, "streak": 0})
 
     def _one(self, url: str, method: str, params: list, timeout: int = 25):
-        req = urllib.request.Request(
-            url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
-                                  "params": params}).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": common.ua_for(url, UA)})
-        d = json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
+        d = bf_engine.http_json(
+            url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+            headers={"User-Agent": common.ua_for(url, UA)}, timeout=timeout, retries=1, rpc_methods=(method,))
+        if not isinstance(d, dict):
+            raise RuntimeError(f"rpc-error None: 응답 형식 오류 ({type(d).__name__})")
         if "error" in d:
             err = d["error"] if isinstance(d["error"], dict) else {}
             raise RuntimeError(f"rpc-error {err.get('code')}: {str(err.get('message'))[:120]}")
@@ -2889,7 +3928,9 @@ class RpcLogDiscovery(RpcSynthMixin):
             try:
                 snap = self._rpc_synth_detail(h)
             except Exception as e:
-                self.emit_fail[h] = self.emit_fail.get(h, 0) + 1
+                if self.synth_fail_count(self.emit_fail, h, e) is None:
+                    log.debug("%s rpclog %s 합성 보류(게이트·장부 거절): %s", self.chain, h[:12], str(e)[:120])
+                    continue
                 if self.emit_fail[h] > self.EMIT_FAIL_MAX:
                     common.append_durable_jsonl(
                         os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
@@ -2987,7 +4028,7 @@ class RpcLogDiscovery(RpcSynthMixin):
         self.st["mode"] = self.mode
         self.st["span"] = self.span
         bs_min = self._bs_min_cursor()
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         common.atomic_write_json(self.state_path, self.st)
         eps9 = {urllib.parse.urlsplit(u).hostname: {"head": st9.get("head"), "open": st9.get("fail_until", 0) > time.time()}
                 for u, st9 in self.ep.items()}
@@ -3019,6 +4060,21 @@ class ChainDisabled(Exception):
 
 
 DISABLED_CHAINS = set()
+RETENTION_CONFIRM_N = 3
+RETENTION_CONFIRM_SEC = 1800
+RETENTION_MIN_AGE_SEC = 2 * 86400
+EXPLORER_FROZEN_SEC = 3 * 3600
+EXPLORER_FROZEN_GAP = 2000
+
+
+def retention_summary(cur: dict):
+    g = [x for x in ((cur or {}).get("_retention_gaps") or []) if isinstance(x, dict)]
+    if not g:
+        return None
+    a = min(g, key=lambda x: int(x.get("from") or 0))
+    b = max(g, key=lambda x: int(x.get("to") or 0))
+    return {"from": int(a.get("from") or 0), "to": int(b.get("to") or 0), "from_ts": a.get("from_ts"), "floor_ts": b.get("floor_ts"),
+            "n": len(g)}
 REBUILD = {}
 GATE_RELOAD_SEC = 600
 REBUILD_FAILS = {}
@@ -3042,6 +4098,128 @@ def take_rebuild(wt, make):
     return new
 
 
+_TDLY = "https://gateway.tenderly.co/public/"
+RPC_NODES = {
+    "eth": {"logs": ["https://rpc.mevblocker.io", _TDLY + "mainnet", "https://eth.drpc.org"],
+            "state": ["https://eth.drpc.org", "https://rpc.mevblocker.io", _TDLY + "mainnet"],
+            "trace": ["https://eth.drpc.org"], "detail": ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
+            "caps": {"https://rpc.mevblocker.io": 10_000, "https://eth.drpc.org": 100}},
+    "arbitrum": {"logs": ["https://arb1.arbitrum.io/rpc", _TDLY + "arbitrum", "https://arbitrum.drpc.org"],
+                 "state": ["https://arb1.arbitrum.io/rpc", _TDLY + "arbitrum"],
+                 "trace": ["https://arbitrum.drpc.org"], "caps": {"https://arb1.arbitrum.io/rpc": 30_000, "https://arbitrum.drpc.org": 100},
+                 "mc_l1_block": True},
+    "polygon": {"logs": [_TDLY + "polygon", "https://polygon.drpc.org"],
+                "state": ["https://polygon.drpc.org", _TDLY + "polygon"], "trace": ["https://polygon.drpc.org"],
+                "detail": ["https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org"], "caps": {"https://polygon.drpc.org": 100}},
+    "optimism": {"logs": ["https://mainnet.optimism.io", _TDLY + "optimism", "https://optimism.drpc.org"],
+                 "state": ["https://mainnet.optimism.io", "https://optimism.drpc.org", _TDLY + "optimism"], "trace": ["https://optimism.drpc.org"],
+                 "caps": {"https://mainnet.optimism.io": 10_000, "https://optimism.drpc.org": 100}},
+    "scroll": {"logs": ["https://rpc.scroll.io", "https://scroll.drpc.org"],
+               "state": ["https://rpc.scroll.io", "https://scroll-rpc.publicnode.com", "https://scroll.drpc.org"], "trace": [],
+               "detail": ["https://rpc.scroll.io", "https://scroll-rpc.publicnode.com"], "caps": {"https://scroll.drpc.org": 100}},
+    "zksync": {"logs": ["https://mainnet.era.zksync.io", "https://zksync.drpc.org"],
+               "state": ["https://mainnet.era.zksync.io"], "trace": [],
+               "caps": {"https://mainnet.era.zksync.io": 100_000, "https://zksync.drpc.org": 100},
+               "multicall3": "0xf9cda624fbc7e059355ce98a31693d299facd963"},
+    "gnosis": {"logs": ["https://rpc.gnosischain.com", "https://rpc.gnosis.gateway.fm", "https://gnosis.drpc.org"],
+               "state": ["https://rpc.gnosischain.com", "https://rpc.gnosis.gateway.fm"],
+               "trace": ["https://rpc.gnosischain.com", "https://rpc.gnosis.gateway.fm", "https://gnosis.drpc.org"], "caps": {"https://gnosis.drpc.org": 100}},
+    "megaeth": {"logs": ["https://mainnet.megaeth.com/rpc", "https://megaeth.drpc.org"],
+                "state": ["https://mainnet.megaeth.com/rpc", "https://megaeth.drpc.org"],
+                "trace": ["https://mainnet.megaeth.com/rpc", "https://megaeth.drpc.org"], "caps": {"https://megaeth.drpc.org": 100}},
+    "story": {"logs": ["https://mainnet.storyrpc.io"], "state": ["https://mainnet.storyrpc.io"], "trace": [],
+              "caps": {"https://mainnet.storyrpc.io": 100_000}, "limited": "노드 1개·비아카이브 — 로그 없는 이동 정합은 최근 구간만",
+              "handover": "rescan"},
+    "base": {"logs": ["https://mainnet.base.org", _TDLY + "base", "https://base.drpc.org"],
+             "state": ["https://mainnet.base.org", "https://base.drpc.org", _TDLY + "base"],
+             "caps": {"https://mainnet.base.org": 500, _TDLY + "base": 1000, "https://base.drpc.org": 10}},
+    "robinhood": {"logs": ["https://rpc.mainnet.chain.robinhood.com", "https://robinhood.drpc.org"],
+                  "caps": {"https://rpc.mainnet.chain.robinhood.com": 30_000, "https://robinhood.drpc.org": 100},
+                  "mc_l1_block": True},
+    "arc": {"logs": ["https://rpc.mainnet.arc.io", "https://rpc.quicknode.mainnet.arc.io", "https://arc.drpc.org"],
+            "state": ["https://rpc.mainnet.arc.io", "https://rpc.quicknode.mainnet.arc.io", "https://arc.drpc.org"], "caps": {"https://arc.drpc.org": 100}},
+    "monad": {"logs": ["https://rpc1.monad.xyz", "https://rpc2.monad.xyz", "https://rpc.monad.xyz"], "state": ["https://rpc2.monad.xyz", "https://rpc1.monad.xyz"],
+              "caps": {"https://rpc2.monad.xyz": 10_000, "https://rpc.monad.xyz": 100}, "fallback": {"https://rpc2.monad.xyz": 10_000}},
+    "xlayer": {"logs": ["https://xlayerrpc.okx.com", "https://rpc.xlayer.tech", "https://xlayer.drpc.org"],
+               "state": ["https://xlayerrpc.okx.com", "https://rpc.xlayer.tech", "https://xlayer.drpc.org"], "caps": {"https://xlayer.drpc.org": 100}},
+    "kaia": {"logs": ["https://public-en.node.kaia.io", "https://kaia.drpc.org"], "state": ["https://public-en.node.kaia.io", "https://kaia.drpc.org"],
+             "caps": {"https://public-en.node.kaia.io": 1_000_000, "https://kaia.drpc.org": 100}},
+    "fraxtal": {"logs": ["https://rpc.frax.com", "https://fraxtal.drpc.org"], "state": ["https://rpc.frax.com", "https://fraxtal.drpc.org"], "caps": {"https://fraxtal.drpc.org": 100}},
+    "bob": {"logs": ["https://rpc.gobob.xyz", "https://bob.drpc.org"], "state": ["https://rpc.gobob.xyz", "https://bob.drpc.org"], "caps": {"https://bob.drpc.org": 100}},
+    "avalanche": {"logs": ["https://api.avax.network/ext/bc/C/rpc", "https://avalanche.drpc.org"],
+                  "caps": {"https://api.avax.network/ext/bc/C/rpc": 100_000, "https://avalanche.drpc.org": 100}},
+    "blast": {"logs": ["https://rpc.blast.io", "https://blast.drpc.org"], "caps": {"https://rpc.blast.io": 10_000, "https://blast.drpc.org": 100}},
+    "linea": {"logs": ["https://rpc.linea.build", "https://linea.drpc.org"], "state": ["https://rpc.linea.build", "https://linea.drpc.org"],
+              "caps": {"https://rpc.linea.build": 10_000, "https://linea.drpc.org": 100}},
+    "berachain": {"logs": ["https://rpc.berachain.com", "https://berachain.drpc.org"], "state": ["https://rpc.berachain.com", "https://berachain.drpc.org"],
+                  "caps": {"https://rpc.berachain.com": 10_000, "https://berachain.drpc.org": 100}},
+    "zerog": {"logs": ["https://evmrpc.0g.ai", "https://0g.drpc.org"], "state": ["https://evmrpc.0g.ai", "https://0g.drpc.org"],
+              "caps": {"https://evmrpc.0g.ai": 10_000, "https://0g.drpc.org": 100}, "addr_max": 32},
+    "plasma": {"limited": "노드 1개(무키 백업 없음)"},
+    "stable": {"limited": "노드 1개·비아카이브 — 로그 없는 이동 정합은 최근 구간만"},
+    "abstract": {"limited": "노드 1개(무키 백업 없음)"},
+}
+
+
+def _cap_num(x):
+    return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and int(x) > 0 else None
+
+
+def logs_cap_host(url: str):
+    sp = urllib.parse.urlsplit(str(url))
+    h9 = (sp.hostname or "").lower()
+    p9 = h9 + (sp.path or "").rstrip("/")
+    tbl = RpcChainWatcher.LOGS_CAP_HOSTS
+    return _cap_num(tbl.get(p9)) if p9 in tbl else _cap_num(tbl.get(h9))
+
+
+def rpc_nodes(cfg: dict, chain: str) -> dict:
+    cc = ((cfg or {}).get("chains") or {}).get(chain) or {}
+    t = (RPC_NODES.get(chain) or {}) if cc.get("rpc_node_table", True) is not False else {}
+    R = RpcChainWatcher
+    cfgcaps = cc.get("rpc_log_span_caps") if isinstance(cc.get("rpc_log_span_caps"), dict) else {}
+    tcaps = t.get("caps") or {}
+
+    def cap_of(u):
+        c9 = [x for x in (_cap_num(cfgcaps.get(u)), _cap_num(tcaps.get(u)), logs_cap_host(u)) if x]
+        return min(c9) if c9 else None
+    detail = list(cc.get("rpcs") or t.get("detail") or R.RPC_DEFAULT.get(chain) or [])
+    if common.chain_discovery(chain, cc) == "rpc":
+        logs = list(cc.get("rpc_logs") or detail)
+        state = list(dict.fromkeys(list(cc.get("archive_rpcs") or []) + detail))
+    else:
+        logs = list(dict.fromkeys(list(cc.get("rpc_logs") or []) + list(t.get("logs") or []))) or list(detail)
+        state = list(dict.fromkeys(list(cc.get("archive_rpcs") or []) + list(t.get("state") or []) + detail))
+    if "trace_rpcs" in cc:
+        trace = list(cc.get("trace_rpcs") or [])
+    else:
+        trace = list(t["trace"] if "trace" in t else (R.TRACE_DEFAULT.get(chain) or []))
+    caps = {}
+    for u in logs:
+        c9 = cap_of(u)
+        if c9:
+            caps[u] = c9
+    fb9 = cc.get("rpc_logs_fallback")
+    if isinstance(fb9, dict):
+        fallback = {u: int(c) for u, c in fb9.items() if _cap_num(c)}
+    else:
+        fallback = {u: c for u, c in caps.items() if c <= R.LOGS_FALLBACK_MAX_CAP}
+        for u, c in (t.get("fallback") or {}).items():
+            if u in logs and _cap_num(c):
+                fallback.setdefault(u, int(caps.get(u) or c))
+        if len(fallback) >= len(logs):
+            fallback = {}
+    mc9 = cc["multicall3"] if "multicall3" in cc else (t.get("multicall3") or R.MULTICALL3)
+    try:
+        amax = max(0, int(cc.get("getlogs_max_addrs") or t.get("addr_max") or 0))
+    except (TypeError, ValueError):
+        amax = 0
+    hosts9 = {(urllib.parse.urlsplit(u).hostname or "").lower() for u in detail + logs + state}
+    return {"detail": detail, "logs": logs, "state": state, "trace": trace, "caps": caps, "fallback": fallback, "addr_max": amax,
+            "multicall3": mc9, "limited": t.get("limited") if len(hosts9) <= 1 else None, "handover": t.get("handover"),
+            "mc_l1_block": bool(cc["multicall3_l1_block"] if "multicall3_l1_block" in cc else t.get("mc_l1_block"))}
+
+
 class RpcChainWatcher(RpcSynthMixin):
 
     TRANSFER = RpcSynthMixin.TRANSFER_TOPIC
@@ -3050,7 +4228,69 @@ class RpcChainWatcher(RpcSynthMixin):
     WETH_WITHDRAWAL = RpcSynthMixin.WETH_WITHDRAWAL
     VERSION = 1
     NATIVE_LOG_MAX = 50
-    TRACE_DEFAULT = {"robinhood": ["https://robinhood.drpc.org"]}
+    TRACE_DEFAULT = {"robinhood": ["https://robinhood.drpc.org"], "base": ["https://base.drpc.org"]}
+    HANDOVER_DEFAULT = {"robinhood": "rescan", "arc": "rescan"}
+    LOGS_CAP_HOSTS = {"mainnet.base.org": 500, "gateway.tenderly.co/public/base": 1000, "base.drpc.org": 10}
+    LOGS_FALLBACK_MAX_CAP = 100
+    MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
+    TRACE_SKIP_SELECTORS = ("0xa9059cbb", "0x095ea7b3", "0x23b872dd", "0x39509351", "0xa457c2d7", "0xd505accf")
+    handover = "rescan"
+    lanes_cfg = None
+    addr_max = 0
+    multicall = None
+    bk_budget = None
+    poll_sec = 45.0
+    trace_mode = None
+    bk_span = 200_000
+    block_trace = True
+
+    @classmethod
+    def day_calls(cls, cfg: dict, chain: str, n_wallets: int, tx_per_day: float = 0, backfill_blocks: int = 0,
+                  backfill_txs: int = 0, logless: int = 0, own_calls: int = 0) -> dict:
+        cc = (cfg.get("chains") or {}).get(chain) or {}
+        import math
+
+        def host(u):
+            return (urllib.parse.urlsplit(u).hostname or "?").lower()
+        nd = rpc_nodes(cfg, chain)
+        rpcs, logs, state = nd["detail"], nd["logs"], nd["state"]
+        trace = [] if cls.NATIVE_EMITTER.get(chain) else nd["trace"]
+        caps = {u: int(nd["caps"].get(u) or cc.get("getlogs_span", 5_000_000)) for u in logs}
+        prim = [u for u in logs if u not in nd["fallback"]] or logs
+        try:
+            poll = min(max(float(cc.get("poll_sec") or cfg.get("evm_poll_sec") or 45), 5.0), 300.0)
+        except (TypeError, ValueError):
+            poll = 45.0
+        cyc = 86400.0 / poll
+        bpd = float(cc.get("blocks_per_day") or 43200)
+        mx = nd["addr_max"] or max(1, n_wallets)
+        bundles = max(1, math.ceil(max(1, n_wallets) / mx))
+        mc = nd["multicall3"]
+        st, bk = {}, {}
+
+        def add(d, h, n):
+            d[h] = d.get(h, 0) + n
+        h0 = host(rpcs[0]) if rpcs else "?"
+        hs = host(state[0]) if state else h0
+        add(st, h0, 2 * cyc)
+        nw9 = max(1, n_wallets)
+        st_cost = (nw9 + math.ceil(nw9 / 150)) if mc else 2 * nw9
+        add(st, hs, st_cost * cyc)
+        per_cyc_blocks = bpd * poll / 86400.0
+        for u in prim:
+            add(st, host(u), 2 * bundles * math.ceil(per_cyc_blocks / max(1, caps[u])) * cyc / len(prim))
+        add(st, hs, 3 * tx_per_day)
+        if trace:
+            add(st, host(trace[0]), 0.5 * tx_per_day)
+        if backfill_blocks:
+            avg = sum(caps[u] for u in prim) / len(prim)
+            for u in prim:
+                add(bk, host(u), 2 * bundles * backfill_blocks / avg / len(prim))
+            add(bk, hs, 2.7 * backfill_txs + logless * (2 * math.log2(max(2, backfill_blocks / 60)) + 1)
+                + (backfill_blocks / 200_000.0) * st_cost)
+            if trace:
+                add(bk, host(trace[0]), own_calls + logless * 0.2)
+        return {"steady": {h: int(round(v)) for h, v in st.items()}, "backfill": {h: int(round(v)) for h, v in bk.items()}}
 
     def __init__(self, cfg: dict, chain: str, wallets: list, writer):
         cc = cfg["chains"][chain]
@@ -3064,18 +4304,20 @@ class RpcChainWatcher(RpcSynthMixin):
         self.bpd = int(cc.get("blocks_per_day", 43200))
         self.wallets = [w.lower() for w in wallets]
         self.writer = writer
-        self.cfg_rpcs = list(cc.get("rpcs") or self.RPC_DEFAULT.get(chain) or [])
+        nd9 = rpc_nodes(cfg, chain)
+        self.cfg_rpcs = nd9["detail"]
         if not self.cfg_rpcs:
             raise SystemExit(f"{chain}: discovery=rpc 인데 rpcs 미구성")
-        self.logs_rpcs = list(cc.get("rpc_logs") or self.cfg_rpcs)
-        self.state_rpcs = list(dict.fromkeys(list(cc.get("archive_rpcs") or []) + self.cfg_rpcs))
+        self.logs_rpcs = nd9["logs"]
+        self.state_rpcs = nd9["state"]
+        self.nodes_limited = nd9.get("limited")
         self.span = int(cc.get("getlogs_span", 5_000_000))
         self.min_span = int(cc.get("getlogs_min_span", 1))
         self.cycle_budget = float(cc.get("cycle_budget_sec", 240))
         self.detail_batch = max(1, int(cc.get("detail_batch", 10)))
         self.block_batch = max(1, int(cc.get("block_scan_batch", 50)))
         self.gap_scan_max = int(cc.get("gap_scan_max_blocks", 10_000))
-        self.trace_rpcs = list(cc["trace_rpcs"] if "trace_rpcs" in cc else self.TRACE_DEFAULT.get(chain) or [])
+        self.trace_rpcs = nd9["trace"]
         if self.NATIVE_EMITTER.get(chain) and self.trace_rpcs:
             log.warning("%s: 네이티브 시스템 이벤트 체인 — trace_rpcs 무시", chain)
             self.trace_rpcs = []
@@ -3085,6 +4327,25 @@ class RpcChainWatcher(RpcSynthMixin):
                 bf_engine.set_call_rate(u9, cc.get("rps"))
         self._trace_fail = {}
         self.gap_budget = float(cc.get("gap_scan_budget_sec", 1800))
+        self.handover = str(cc.get("rpc_handover") or self.HANDOVER_DEFAULT.get(chain) or nd9.get("handover") or "adopt").lower()
+        self.lanes_cfg = cc.get("rpc_lanes")
+        caps9 = dict(nd9["caps"])
+        self.logs_fallback = dict(nd9["fallback"])
+        self.logs_primary = [u for u in self.logs_rpcs if u not in self.logs_fallback]
+        self._log_caps = dict(caps9)
+        self.addr_max = nd9["addr_max"]
+        mc9 = nd9["multicall3"]
+        self.mc_l1_block = bool(nd9.get("mc_l1_block"))
+        self.multicall = str(mc9).lower() if (mc9 and str(mc9).lower().startswith("0x") and len(str(mc9)) == 42) else None
+        bb9 = cc.get("rpc_backfill_budget_sec")
+        self.bk_budget = float(bb9) if isinstance(bb9, (int, float)) and not isinstance(bb9, bool) else None
+        try:
+            self.poll_sec = min(max(float(cc.get("poll_sec") or cfg.get("evm_poll_sec") or 45), 5.0), 300.0)
+        except (TypeError, ValueError):
+            self.poll_sec = 45.0
+        self.trace_mode = str(cc.get("rpc_trace") or "").lower() or None
+        self.bk_span = max(1000, int(cc.get("rpc_backfill_span", 200_000)))
+        self.block_trace = bool(cc.get("rpc_block_trace", True))
         self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
         self.cursor = common.read_json(self.cursor_path, {})
         self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_evm_{chain}.json")
@@ -3112,11 +4373,14 @@ class RpcChainWatcher(RpcSynthMixin):
         self._pref = None
         self._txmeta = {}
         self._st_memo = {}
+        self._bal_memo = {}
+        self._snap_memo = {}
         self.last_scan_metrics = {}
 
     def _order(self, urls):
-        ready = [u for u in urls if not bf_engine.gate(u).is_open()]
-        return ready or list(urls)
+        ok = [u for u in urls if not bf_engine.gate(u).is_open()]
+        ready = [u for u in ok if not bf_engine.gate(u).resting()]
+        return (ready + [u for u in ok if u not in ready]) if ok else list(urls)
 
     def _rpc_call(self, method: str, params: list):
         if self._pref is not None:
@@ -3157,7 +4421,7 @@ class RpcChainWatcher(RpcSynthMixin):
             self._cid_ok = True
         return h
 
-    def _states(self, pairs) -> dict:
+    def _states(self, pairs, strict: bool = False) -> dict:
         need = [p for p in dict.fromkeys(pairs) if p not in self._st_memo]
         if need:
             calls = []
@@ -3165,7 +4429,9 @@ class RpcChainWatcher(RpcSynthMixin):
                 calls += [("eth_getTransactionCount", [w, hex(b)]), ("eth_getBalance", [w, hex(b)])]
             got = {}
             last = None
-            for url in self._order(self.state_rpcs):
+            order9 = self._order(self.state_rpcs)
+            transient9 = {}
+            for url in order9:
                 todo = [p for p in need if p not in got]
                 if not todo:
                     break
@@ -3179,18 +4445,35 @@ class RpcChainWatcher(RpcSynthMixin):
                         res += bf_engine.rpc_batch(url, cl[i:i + cap], timeout=30, retries=1)
                 except Exception as e:
                     last = e
+                    if strict and getattr(e, "kind", None) != "pruned":
+                        for p in todo:
+                            transient9.setdefault(p, e)
                     continue
                 for j, p in enumerate(todo):
                     n9, b9 = res[2 * j], res[2 * j + 1]
                     if isinstance(n9, Exception) or isinstance(b9, Exception):
                         last = n9 if isinstance(n9, Exception) else b9
+                        if strict:
+                            for err9 in (n9, b9):
+                                if isinstance(err9, Exception) and getattr(err9, "kind", None) != "pruned":
+                                    transient9.setdefault(p, err9)
+                                    break
                         continue
                     got[p] = (int(n9, 16), int(b9, 16))
+            if strict:
+                unchecked9 = [u for u in self.state_rpcs if u not in order9]
+                for p in need:
+                    if p not in got and p in transient9:
+                        raise transient9[p]
+                    if p not in got and unchecked9:
+                        raise bf_engine.NetError(f"{self.chain} 블록 {p[1]} 상태 — 노드 {len(unchecked9)}곳 서킷으로 미확인(다음 사이클)", "circuit")
             for p in need:
                 if p not in got:
                     kind = getattr(last, "kind", None)
                     if kind == "pruned" or last is None:
-                        raise StateUnavailable(f"{self.chain} 블록 {p[1]} 상태 없음(비아카이브): {str(last)[:120]}")
+                        e9 = StateUnavailable(f"{self.chain} 블록 {p[1]} 상태 없음(비아카이브): {str(last)[:120]}")
+                        e9.blk = int(p[1])
+                        raise e9
                     raise last
             self._st_memo.update(got)
             if len(self._st_memo) > 20000:
@@ -3198,7 +4481,23 @@ class RpcChainWatcher(RpcSynthMixin):
                 self._st_memo.update(got)
         return {p: self._st_memo[p] for p in pairs}
 
-    def _details(self, hashes, deadline: float = None) -> dict:
+    @property
+    def bk_mode(self) -> bool:
+        return isinstance(self.cursor.get("_handover"), dict) and self.lanes_cfg is not False
+
+    def _trace_want(self, h: str, snap: dict) -> bool:
+        mode9 = self.trace_mode or ("own" if self.bk_mode else "all")
+        if mode9 != "own":
+            return True
+        if h in (self.cursor.get("_hq") or {}):
+            return True
+        tx = snap.get("tx") or {}
+        if tx.get("status") != "ok" or (tx.get("from") or "").lower() not in set(self.wallets):
+            return False
+        inp = str(tx.get("raw_input") or "0x").lower()
+        return len(inp) >= 10 and inp[:10] not in self.TRACE_SKIP_SELECTORS
+
+    def _details(self, hashes, deadline: float = None, trace: bool = True) -> dict:
         out = {}
         hs = [h for h in dict.fromkeys(hashes) if h]
         myset = set(self.wallets)
@@ -3257,9 +4556,9 @@ class RpcChainWatcher(RpcSynthMixin):
                         out[h] = e
             finally:
                 self._pref = None
-        if self.trace_rpcs:
+        if self.trace_rpcs and trace:
             for h, snap in list(out.items()):
-                if isinstance(snap, dict):
+                if isinstance(snap, dict) and self._trace_want(h, snap):
                     try:
                         self._trace_internal(h, snap)
                     except Exception as e:
@@ -3294,8 +4593,14 @@ class RpcChainWatcher(RpcSynthMixin):
                 break
             except Exception as e:
                 last = e
-        if not isinstance(tr, dict):
-            raise last if last else RuntimeError("trace 응답 형식 오류")
+        if not isinstance(tr, dict) or not tr.get("type"):
+            rows9 = self._trace_parity(h)
+            if rows9 is None:
+                raise last if last else RuntimeError("trace 응답 형식 오류")
+            snap["internal"] = rows9
+            snap["internal_note"] = "trace"
+            self._trace_fail.pop(h, None)
+            return
         myset = set(self.wallets)
         out = []
 
@@ -3314,6 +4619,47 @@ class RpcChainWatcher(RpcSynthMixin):
         snap["internal"] = out
         snap["internal_note"] = "trace"
         self._trace_fail.pop(h, None)
+
+    def _trace_parity(self, h: str):
+        res = None
+        for url in self._order(self.trace_rpcs):
+            try:
+                res = bf_engine.rpc_call(url, "trace_transaction", [h], timeout=30, retries=1)
+                break
+            except Exception:
+                continue
+        if not isinstance(res, list):
+            return None
+        myset = set(self.wallets)
+        bad = [tuple(t.get("traceAddress") or []) for t in res if isinstance(t, dict) and t.get("error")]
+        out = []
+        for t in res:
+            if not isinstance(t, dict):
+                return None
+            ta = tuple(t.get("traceAddress") or [])
+            if not ta:
+                continue
+            ac = t.get("action") or {}
+            typ = str(t.get("type") or "").lower()
+            if typ == "call":
+                if str(ac.get("callType") or "call").lower() != "call":
+                    continue
+                f9, t9, v9 = ac.get("from"), ac.get("to"), ac.get("value")
+            elif typ == "create":
+                f9, t9, v9 = ac.get("from"), (t.get("result") or {}).get("address"), ac.get("value")
+            elif typ in ("suicide", "selfdestruct"):
+                f9, t9, v9 = ac.get("address"), ac.get("refundAddress"), ac.get("balance")
+            else:
+                continue
+            try:
+                v = int(v9 or "0x0", 16)
+            except (TypeError, ValueError):
+                return None
+            f9, t9 = str(f9 or "").lower(), str(t9 or "").lower()
+            if v and (f9 in myset or t9 in myset):
+                failed = any(ta[:len(b9)] == b9 for b9 in bad)
+                out.append({"from": f9, "to": t9, "value": str(v), "success": not failed})
+        return out
 
     @staticmethod
     def _dec_symbol(r):
@@ -3355,6 +4701,11 @@ class RpcChainWatcher(RpcSynthMixin):
             if fr == w:
                 own += 1
                 nat -= int((tx.get("fee") or {}).get("value") or 0)
+                if tx.get("type") == 126:
+                    try:
+                        nat += int(tx.get("op_mint") if tx.get("op_mint") is not None else (tx.get("value") or 0))
+                    except (TypeError, ValueError):
+                        pass
             if tx.get("status") != "ok":
                 continue
             v = int(tx.get("value") or 0)
@@ -3454,14 +4805,350 @@ class RpcChainWatcher(RpcSynthMixin):
             level = nxt
         return leaves
 
-    def _native(self, w: str, c: int, last: int, pool: list, deadline: float) -> dict:
-        ns = (self.cursor.get("_ns") or {}).get(w)
+    def _state_call(self, method: str, params: list):
+        last = None
+        for url in self._order(self.state_rpcs):
+            try:
+                return bf_engine.rpc_call(url, method, params, timeout=30, retries=1)
+            except Exception as e:
+                last = e
+        raise last if last else RuntimeError("rpc 미구성")
+
+    @staticmethod
+    def _mc_encode(ws, target: str = None) -> str:
+        tgt = int(target or RpcChainWatcher.MULTICALL3, 16)
+        n = len(ws)
+        out = ["252dba42", "%064x" % 32, "%064x" % n]
+        out += ["%064x" % (32 * n + 160 * k) for k in range(n)]
+        for w in ws:
+            out += ["%064x" % tgt, "%064x" % 64, "%064x" % 36,
+                    ("4d2301cc" + w[2:].lower().rjust(64, "0")).ljust(128, "0")]
+        return "0x" + "".join(out)
+
+    @staticmethod
+    def _mc_decode(r: str, n: int, blk: int) -> list:
+        b = bytes.fromhex(str(r or "0x")[2:])
+
+        def word(o):
+            if o + 32 > len(b):
+                raise ValueError("multicall 응답 길이 부족")
+            return int.from_bytes(b[o:o + 32], "big")
+        if blk is not None and word(0) != int(blk):
+            raise ValueError(f"multicall 블록 {word(0)} ≠ 요청 {blk}")
+        arr = word(32)
+        if word(arr) != n:
+            raise ValueError("multicall 개수 불일치")
+        base, out = arr + 32, []
+        for k in range(n):
+            o = base + word(base + 32 * k)
+            if word(o) != 32:
+                raise ValueError("multicall 항목 길이 ≠ 32")
+            out.append(word(o + 32))
+        return out
+
+    @staticmethod
+    def _rate_err(e) -> bool:
+        return isinstance(e, bf_engine.NetError) and getattr(e, "kind", None) in ("http429", "quota", "budget", "circuit")
+
+    def _mc_balances(self, ws, blk: int) -> int:
+        bm9 = self.__dict__.setdefault("_bal_memo", {})
+        sm9 = self.__dict__.setdefault("_st_memo", {})
+        ws = [w for w in dict.fromkeys(ws) if (w, blk) not in sm9]
+        if not self.multicall or not ws:
+            return 0
+        n9 = 0
+        for i in range(0, len(ws), 150):
+            part = ws[i:i + 150]
+            try:
+                r = self._state_call("eth_call", [{"to": self.multicall, "data": self._mc_encode(part, self.multicall)}, hex(int(blk))])
+                bals = self._mc_decode(r, len(part), None if getattr(self, "mc_l1_block", False) else blk)
+            except Exception as e:
+                if (isinstance(e, ValueError) and "multicall 블록" not in str(e)) or bf_engine.revert_like(e):
+                    log.warning("%s Multicall3 묶음 안 됨(%s) — 지갑별 nonce·잔고 조회로(config chains.%s.multicall3 로 주소 지정 가능)", self.chain,
+                                common.safe_err(e)[:80], self.chain)
+                    self.multicall = None
+                elif self._rate_err(e):
+                    self._mc_rate = e
+                    log.info("%s Multicall3 잔고 묶음 한도 거절(다음 사이클): %s", self.chain, common.safe_err(e)[:100])
+                else:
+                    log.info("%s Multicall3 잔고 묶음 일시 실패(지갑별 조회로): %s", self.chain, common.safe_err(e)[:100])
+                return n9
+            try:
+                nres = self._batch([("eth_getTransactionCount", [w, hex(int(blk))]) for w in part], self.state_rpcs)
+            except Exception as e:
+                nres = [e] * len(part)
+            rl9 = next((x for x in nres if self._rate_err(x)), None)
+            if rl9 is not None:
+                self._mc_rate = rl9
+            for w, v, nn in zip(part, bals, nres):
+                bm9[(w, int(blk))] = int(v)
+                if isinstance(nn, str):
+                    try:
+                        sm9[(w, int(blk))] = (int(nn, 16), int(v))
+                        n9 += 1
+                    except ValueError:
+                        pass
+        if len(bm9) > 50000:
+            bm9.clear()
+        return n9
+
+    def _trace_block(self, blk: int) -> tuple:
+        last = None
+        res = None
+        for url in self._order(self.trace_rpcs):
+            try:
+                res = bf_engine.rpc_call(url, "debug_traceBlockByNumber", [hex(int(blk)), {"tracer": "callTracer"}], timeout=60, retries=1)
+                break
+            except Exception as e:
+                last = e
+        if not isinstance(res, list):
+            raise last if last else RuntimeError("블록 trace 응답 형식 오류")
+        myset = set(self.wallets)
+        out, unres, nfb9 = {}, [], 0
+        hs9 = None
+        if not res or any(not (isinstance(it, dict) and it.get("txHash")) for it in res):
+            try:
+                hs9 = [str(x if isinstance(x, str) else (x or {}).get("hash") or "").lower()
+                       for x in (self._rpc_call("eth_getBlockByNumber", [hex(int(blk)), False]) or {}).get("transactions") or []]
+            except Exception as e:
+                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 블록 tx 목록 실패: {common.safe_err(e)[:80]}")
+            if len(hs9) != len(res) or not all(hs9):
+                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 개수 불일치 {len(res)} ≠ {len(hs9)}")
+        for k9, it in enumerate(res):
+            h9 = str((it.get("txHash") if isinstance(it, dict) else None) or (hs9[k9] if hs9 else "")).lower()
+            r9 = it.get("result") if isinstance(it, dict) else None
+            if (isinstance(it, dict) and it.get("error")) or not isinstance(r9, dict) or not r9.get("type"):
+                tmp9 = {}
+                if nfb9 >= self.BTRACE_ITEM_FALLBACK:
+                    unres.append(h9)
+                    continue
+                nfb9 += 1
+                try:
+                    self._trace_internal(h9, tmp9)
+                    if tmp9.get("internal"):
+                        out[h9] = tmp9["internal"]
+                except Exception as e:
+                    unres.append(h9)
+                    log.info("%s 블록 %d trace 항목 %s 실패(단건도 실패 — 재시도): %s", self.chain, blk, h9[:12], common.safe_err(e)[:80])
+                continue
+            rows = []
+
+            def walk(fr, failed):
+                for ch in fr.get("calls") or []:
+                    bad = failed or bool(ch.get("error"))
+                    try:
+                        v = int(ch.get("value") or "0x0", 16)
+                    except (TypeError, ValueError):
+                        v = 0
+                    f9, t9 = (ch.get("from") or "").lower(), (ch.get("to") or "").lower()
+                    if v and str(ch.get("type") or "").upper() in self._VALUE_OPS and (f9 in myset or t9 in myset):
+                        rows.append({"from": f9, "to": t9, "value": str(v), "success": not bad})
+                    walk(ch, bad)
+            walk(r9, bool(r9.get("error")))
+            if rows:
+                out[h9] = rows
+        return out, unres
+
+    BTRACE_ITEM_FALLBACK = 5
+    LEAF_RETRY_N = 10
+    LEAF_RETRY_SEC = 1800
+
+    def _leaf_trace(self, w: str, y: int, pool: list, got) -> tuple:
+        n_tr, added, failed = 0, [], False
+        fail_h = set()
+        for s9 in [s for s in pool if s["tx"]["block_number"] == y]:
+            if s9["tx"].get("status") == "ok" and s9.get("internal_note") not in ("trace", "balance_delta"):
+                try:
+                    self._trace_internal(s9["tx"]["hash"].lower(), s9)
+                    n_tr += 1
+                    if s9["tx"]["hash"].lower() in self.emitted and s9.get("internal"):
+                        self.__dict__.setdefault("_reemit", set()).add(s9["tx"]["hash"].lower())
+                except Exception as e:
+                    if not self._unsupported(e):
+                        fail_h.add(s9["tx"]["hash"].lower())
+                    log.info("%s 잎 블록 %d trace 실패: %s", self.chain, y, common.safe_err(e)[:80])
+        if self.block_trace:
+            unres9 = []
+            try:
+                frames, unres9 = self._trace_block(y)
+                if unres9:
+                    failed = True
+                for s9 in [s for s in pool if s["tx"]["block_number"] == y and s["tx"]["hash"].lower() in fail_h]:
+                    h9 = s9["tx"]["hash"].lower()
+                    if h9 in unres9:
+                        continue
+                    s9["internal"] = list(frames.get(h9) or [])
+                    s9["internal_note"] = "trace"
+                    fail_h.discard(h9)
+                    n_tr += 1
+                    if h9 in self.emitted and s9["internal"]:
+                        self.__dict__.setdefault("_reemit", set()).add(h9)
+            except Exception as e:
+                frames = {}
+                failed = failed or not self._unsupported(e)
+                log.info("%s 잎 블록 %d 블록 trace 실패: %s", self.chain, y, common.safe_err(e)[:80])
+            pool_h = {s["tx"]["hash"].lower() for s in pool}
+            q9 = bf_engine.quarantine_map(self.cursor)
+            cand = [h for h, rows in frames.items() if h not in pool_h and h not in q9 and h not in got
+                    and any((r.get("to") or "").lower() == w and r.get("success") is not False for r in rows)]
+            if cand:
+                dets = self._details(cand, trace=False)
+                bad9 = [h for h in cand if not isinstance(dets.get(h), dict)]
+                self._detail_fail_clear([h for h in cand if isinstance(dets.get(h), dict)])
+                if bad9 and self._detail_fail_note(bad9, dets, blocks={h: y for h in bad9}):
+                    failed = True
+                for h in cand:
+                    s9 = dets.get(h)
+                    if isinstance(s9, dict) and int(s9["tx"]["block_number"]) == int(y):
+                        s9["internal"] = frames[h]
+                        s9["internal_note"] = "trace"
+                        pool.append(s9)
+                        added.append(h)
+                        if h in self.emitted:
+                            self.__dict__.setdefault("_reemit", set()).add(h)
+        failed = failed or bool(fail_h)
+        rec = {"kind": "internal_traced", "w": w[:10], "blk": y, "traced": n_tr, "added": [h[:14] for h in added]} if (n_tr or added) else None
+        return rec, failed
+
+    @staticmethod
+    def _unsupported(e) -> bool:
+        m = str(e).lower()
+        return "-32601" in m or "does not exist" in m or "method not found" in m or "not supported" in m \
+            or ("not available" in m and "method" in m)
+
+    def _leaf_retry(self, w: str, y: int, ok: bool):
+        lf = self.cursor.setdefault("_leaf_fail", {})
+        k = f"{w[:12]}:{int(y)}"
+        if ok:
+            lf.pop(k, None)
+            return False
+        now = int(time.time())
+        for k9 in [k9 for k9, v9 in lf.items() if now - int((v9 or [0, 0])[1]) > 86400]:
+            lf.pop(k9, None)
+        n9, t9 = (lf.get(k) or [0, now])[:2]
+        n9 += 1
+        lf[k] = [n9, t9]
+        if n9 < self.LEAF_RETRY_N or now - int(t9) < self.LEAF_RETRY_SEC:
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            raise RuntimeError(f"잎 블록 {y} trace·상세 일시 실패 {n9}회 — 커서 유지(다음 사이클)")
+        lf.pop(k, None)
+        self._note("_native_notes", {"kind": "leaf_giveup", "w": w[:10], "blk": int(y), "n": n9})
+        ll = self.cursor.setdefault("_leaf_later", {})
+        ll[k] = {"w": w, "blk": int(y), "at": now, "n": 0, "next": now + self.LEAF_LATER_SEC}
+        for k9 in sorted(ll, key=lambda x: ll[x].get("at") or 0)[:-self.LEAF_LATER_MAX]:
+            ll.pop(k9, None)
+        return False
+
+    LEAF_LATER_SEC = 600
+    LEAF_LATER_MAX = 500
+    LEAF_LATER_PER_CYCLE = 3
+
+    def _leaf_later_step(self, head: int) -> int:
+        ll = self.cursor.get("_leaf_later")
+        if not isinstance(ll, dict) or not ll or not self.trace_rpcs:
+            return 0
+        now = int(time.time())
+        n_emit, done = 0, 0
+        for k in sorted(ll, key=lambda x: ll[x].get("next") or 0):
+            e = ll.get(k) or {}
+            if done >= self.LEAF_LATER_PER_CYCLE or int(e.get("next") or 0) > now:
+                break
+            done += 1
+            w, y = str(e.get("w") or "").lower(), int(e.get("blk") or 0)
+            try:
+                frames, unres9 = self._trace_block(y)
+                cand = [h for h, rows in frames.items() if any((r.get("to") or "").lower() == w and r.get("success") is not False for r in rows)]
+                q9 = bf_engine.quarantine_map(self.cursor)
+                cand = [h for h in cand if h not in q9]
+                dets = self._details(cand, trace=False) if cand else {}
+                bad = [h for h in cand if not isinstance(dets.get(h), dict)]
+                if bad:
+                    raise RuntimeError(f"상세 실패 {bad[0][:12]}: {common.safe_err(dets.get(bad[0]))[:80]}")
+            except Exception as ex:
+                if self._unsupported(ex):
+                    ll.pop(k, None)
+                    self._note("_native_notes", {"kind": "leaf_later_unsupported", "w": w[:10], "blk": y})
+                else:
+                    e["n"] = int(e.get("n") or 0) + 1
+                    e["next"] = now + min(7200, self.LEAF_LATER_SEC * (2 ** min(e["n"], 4)))
+                    e["err"] = common.safe_err(ex)[:80]
+                continue
+            for h in cand:
+                s9 = dets[h]
+                s9["internal"] = frames[h]
+                s9["internal_note"] = "trace"
+                if any(self._touches(s9, w9) for w9 in self.wallets):
+                    self._emit(h, s9, head)
+                    n_emit += 1
+            if unres9:
+                e["n"] = int(e.get("n") or 0) + 1
+                e["next"] = now + min(7200, self.LEAF_LATER_SEC * (2 ** min(e["n"], 4)))
+                e["err"] = f"블록 trace 항목 {len(unres9)}개 미해결"
+                continue
+            ll.pop(k, None)
+            self._note("_native_notes", {"kind": "leaf_later_done", "w": w[:10], "blk": y, "found": len(cand)})
+        if done:
+            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            common.atomic_write_json(self.cursor_path, self.cursor)
+        if n_emit:
+            log.info("%s 나중에 다시 잎 블록 — internal 입금 tx %d건 방출", self.chain, n_emit)
+        return n_emit
+
+    STATE_LAG_NEAR = 10
+    STATE_LAG_N = 10
+    STATE_LAG_SEC = 1800
+    STATE_LAG_OFF_SEC = 21600
+
+    @staticmethod
+    def _st_lag_map(v) -> dict:
+        return dict(v) if isinstance(v, dict) and all(isinstance(x, dict) for x in v.values()) else {}
+
+    def _state_lag_hold(self, nk: str, blk: int, head, last: int = None, c: int = None) -> None:
+        sl = self._st_lag_map(self.cursor.get("_st_lag"))
+        now = int(time.time())
+        if int((sl.get("*") or {}).get("off") or 0) > now:
+            return
+        k9 = str(c)
+        g = sl.get(k9) or {}
+        held9 = bool(g)
+        if nk != "_ns" or head is None or (not held9 and int(head) - int(blk) > max(64, self.STATE_LAG_NEAR * max(1, int(self.conf_depth or 0)))):
+            return
+        n9, t9 = int(g.get("n") or 0) + 1, int(g.get("t") or now)
+        if n9 < self.STATE_LAG_N or now - t9 < self.STATE_LAG_SEC:
+            sl[k9] = {"n": n9, "t": t9, "blk": int(blk), "to": None if last is None else int(last)}
+            self.cursor["_st_lag"] = sl
+            cur9 = common.read_json(self.cursor_path, {})
+            cur9["_st_lag"] = dict(self._st_lag_map(cur9.get("_st_lag")), **{k9: sl[k9]})
+            common.atomic_write_json(self.cursor_path, cur9)
+            raise RuntimeError(f"블록 {blk} 상태 없음 — 헤드 {head} 근처라 노드 뒤처짐으로 봄({n9}회) · 커서 유지(다음 사이클 재시도)")
+        sl.pop(k9, None)
+        sl["*"] = {"off": now + self.STATE_LAG_OFF_SEC, "n": n9}
+        self.cursor["_st_lag"] = sl
+        self._note("_native_notes", {"kind": "state_lag_giveup", "blk": int(blk), "n": n9})
+        log.warning("%s 라이브 꼬리 상태 없음 %d회·%d분 — 종전 누적으로 넘김(%d시간 쉼 · 남는 차이는 _native_gaps → 대사 흡수)", self.chain, n9,
+                    (now - t9) // 60, self.STATE_LAG_OFF_SEC // 3600)
+
+    def _explorer_era(self, w: str, blk: int, nk: str) -> bool:
+        ho = self.cursor.get("_handover")
+        if isinstance(ho, dict) and ho.get("from") == "explorer":
+            if nk == "_bkns":
+                return True
+            cs = ho.get("curs")
+            cv = cs.get(w) if isinstance(cs, dict) else ho.get("src_max")
+        else:
+            cs = self.cursor.get("_xcurs")
+            cv = cs.get(w) if isinstance(cs, dict) else None
+        return isinstance(cv, int) and int(blk) <= cv
+
+    def _native(self, w: str, c: int, last: int, pool: list, deadline: float, nk: str = "_ns", head: int = None) -> dict:
+        ns = (self.cursor.get(nk) or {}).get(w)
         own_i, nat_i = self._implied([s for s in pool if self._touches(s, w)], w)
         try:
             sl = self._states([(w, last)])[(w, last)]
-        except StateUnavailable:
+        except StateUnavailable as e:
             if ns is None:
                 return {"ns": None}
+            self._state_lag_hold(nk, getattr(e, "blk", last), head, last, c)
             return {"ns": [ns[0], ns[1], ns[2], int(ns[3]) + own_i, str(int(ns[4]) + nat_i)]}
         if ns is None:
             self._note("_native_notes", {"w": w[:10], "kind": "baseline", "blk": last})
@@ -3475,7 +5162,8 @@ class RpcChainWatcher(RpcSynthMixin):
         if int(ns[0]) == c:
             try:
                 leaves = self._bisect(w, c, last, (n0, b0), sl, pool, deadline)
-            except StateUnavailable:
+            except StateUnavailable as e:
+                self._state_lag_hold(nk, getattr(e, "blk", last), head, last, c)
                 leaves = None
             if leaves is not None:
                 for (x, y, s1, s2) in leaves:
@@ -3483,35 +5171,56 @@ class RpcChainWatcher(RpcSynthMixin):
                     if not done9:
                         raise RuntimeError(f"잎 블록 {y} 스캔 미완 — 다음 사이클 재시도")
                     q9 = bf_engine.quarantine_map(self.cursor)
-                    new = [h for h in got if h not in {s["tx"]["hash"].lower() for s in pool} and h not in self.emitted and h not in q9]
+                    new = [h for h in got if h not in {s["tx"]["hash"].lower() for s in pool} and h not in q9]
                     if new:
                         dets = self._details(new)
-                        bad = [h for h in new if not isinstance(dets.get(h), dict)]
+                        bad = [h for h in new if not isinstance(dets.get(h), dict) and not (h in self.emitted and dets.get(h) is None)]
                         self._detail_fail_clear([h for h in new if isinstance(dets.get(h), dict)])
                         left9 = self._detail_fail_note(bad, dets, blocks={h: y for h in bad}) if bad else []
                         if left9:
                             raise RuntimeError(f"잎 블록 {y} tx 상세 실패 {left9[0][:12]}: {dets.get(left9[0])}")
                         pool.extend(dets[h] for h in new if isinstance(dets.get(h), dict))
+                        for h9 in new:
+                            s8 = dets.get(h9)
+                            if h9 in self.emitted and isinstance(s8, dict) and s8.get("internal_note") == "trace" and s8.get("internal"):
+                                self.__dict__.setdefault("_reemit", set()).add(h9)
                     here = [s for s in pool if s["tx"]["block_number"] == y and self._touches(s, w)]
                     o9, n9 = self._implied(here, w)
                     rn, rb = (s2[0] - s1[0]) - o9, (s2[1] - s1[1]) - n9
+                    if rn == 0 and rb > 0 and self.trace_rpcs:
+                        rec9, fail9 = self._leaf_trace(w, y, pool, got)
+                        if rec9:
+                            recs.append(rec9)
+                        here = [s for s in pool if s["tx"]["block_number"] == y and self._touches(s, w)]
+                        o9, n9 = self._implied(here, w)
+                        rn, rb = (s2[0] - s1[0]) - o9, (s2[1] - s1[1]) - n9
+                        if rn == 0 and rb == 0:
+                            self._leaf_retry(w, y, True)
+                            continue
+                        if fail9:
+                            self._leaf_retry(w, y, False)
+                            recs.append({"kind": "leaf_deferred", "w": w[:10], "blk": y, "native": str(rb)})
+                            continue
                     held9 = self._held_block(y, {s["tx"]["hash"].lower() for s in pool}, got) if (rn == 0 and rb > 0) else []
                     if held9:
                         recs.append({"kind": "held", "w": w[:10], "blk": y, "native": str(rb), "txs": [h[:14] for h in held9[:5]]})
                         continue
-                    if rn == 0 and rb > 0:
+                    if rn == 0 and rb > 0 and not self._explorer_era(w, y, nk):
                         cands = [s for s in here if s["tx"].get("status") == "ok"]
                         if len(cands) == 1:
                             s9 = cands[0]
                             s9.setdefault("internal", []).append(
                                 {"from": (s9["tx"].get("to") or s9["tx"].get("from") or "").lower(), "to": w,
-                                 "value": str(rb), "success": True})
+                                 "value": str(rb), "success": True, "attr": "balance_delta"})
                             s9["internal_note"] = "balance_delta"
+                            if s9["tx"]["hash"].lower() in self.emitted:
+                                self.__dict__.setdefault("_reemit", set()).add(s9["tx"]["hash"].lower())
                             recs.append({"kind": "internal_attributed", "w": w[:10], "blk": y, "value": str(rb),
                                          "tx": s9["tx"]["hash"][:14]})
                             continue
                     if rn or rb:
-                        recs.append({"kind": "unexplained", "w": w[:10], "blk": y, "nonce": rn, "native": str(rb)})
+                        recs.append(dict({"kind": "unexplained", "w": w[:10], "blk": y, "nonce": rn, "native": str(rb)},
+                                         **({"era": "explorer"} if rn == 0 and rb > 0 and self._explorer_era(w, y, nk) else {})))
                 for r in recs:
                     self._note("_native_notes", r)
                     getattr(log, "warning" if r["kind"] in ("unexplained", "held") else "info")(
@@ -3613,6 +5322,9 @@ class RpcChainWatcher(RpcSynthMixin):
         s9 = bf_engine.SINCE.target(self.chain)
         if not s9 or self.cursor.get("_since_seen") == int(s9):
             return
+        if self.bk_mode:
+            self._since_reinit_bk(safe, int(s9))
+            return
         old = int(self.cursor.get("_start") or 0)
         new = self._window_start(safe) if old > max(0, self.start_block) else old
         ws = [w for w in self.wallets if isinstance(self.cursor.get(w), int)]
@@ -3654,6 +5366,40 @@ class RpcChainWatcher(RpcSynthMixin):
         log.warning("★%s 과거 창 확장(backfill_since %s): 앞 구간 블록 %d → %d 만 훑음(지갑 %d · 보존본 .pre_since_%s)★",
                     self.chain, time.strftime("%Y-%m-%d", time.gmtime(s9)), new, old, len(ws), ts9)
 
+    def _since_reinit_bk(self, safe: int, s9: int):
+        if self._bk_jobs():
+            return
+        old = int(self.cursor.get("_start") or 0)
+        new = self._window_start(safe) if old > max(0, self.start_block) else old
+        ws = [w for w in self.wallets if isinstance(self.cursor.get(w), int)]
+        if new >= old or not ws:
+            self.cursor["_since_seen"] = int(s9)
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            return
+        sk9 = self.cursor.get("_since_skip")
+        if isinstance(sk9, dict) and sk9.get("target") == int(s9) and time.time() - float(sk9.get("at") or 0) < 6 * 3600:
+            return
+        try:
+            b0 = self._baselines(ws, new)
+            err9 = None if all(w in b0 for w in ws) else "일부 지갑 상태 누락"
+        except StateUnavailable as e:
+            b0, err9 = {}, common.safe_err(e)[:120]
+        if err9:
+            self.cursor["_since_skip"] = {"target": int(s9), "at": int(time.time()), "err": err9}
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            log.warning("%s 과거 창 확장 보류(시작 블록 %d 상태 조회 불가, 6시간 뒤 재시도): %s", self.chain, new, err9)
+            return
+        self.cursor.pop("_since_skip", None)
+        bkns = self.cursor.setdefault("_bkns", {})
+        for w in ws:
+            self.cursor["_bk:" + w] = {"from": int(new), "to": int(old), "done": int(new), "why": "extend"}
+            bkns[w] = b0[w]
+        self.cursor["_start"] = int(new)
+        self.cursor["_since_seen"] = int(s9)
+        common.atomic_write_json(self.cursor_path, self.cursor)
+        log.warning("★%s 과거 창 확장(backfill_since %s): 앞 구간 블록 %d → %d 를 뒤 차선으로(지갑 %d · 라이브 꼬리는 계속)★",
+                    self.chain, time.strftime("%Y-%m-%d", time.gmtime(s9)), new, old, len(ws))
+
     def _since_ext_done(self):
         ext9 = self.cursor.get("_since_ext")
         ns = self.cursor.setdefault("_ns", {})
@@ -3669,19 +5415,155 @@ class RpcChainWatcher(RpcSynthMixin):
         common.atomic_write_json(self.cursor_path, self.cursor)
         log.info("%s 과거 창 확장(앞 구간 %d → %d) 완주 — 지갑 커서 복원", self.chain, int(ext9.get("from") or 0), int(ext9.get("to") or 0))
 
+    def _baselines(self, ws, blk: int) -> dict:
+        out = {}
+        if int(blk) == 0:
+            return {w: [0, 0, "0", 0, "0"] for w in ws}
+        for i in range(0, len(ws), 20):
+            part = ws[i:i + 20]
+            try:
+                st = self._states([(w, int(blk)) for w in part])
+            except StateUnavailable:
+                st = {}
+                for w in part:
+                    try:
+                        st.update(self._states([(w, int(blk))]))
+                    except StateUnavailable:
+                        pass
+            for w in part:
+                if (w, int(blk)) in st:
+                    n9, b9 = st[(w, int(blk))]
+                    out[w] = [int(blk), n9, str(b9), 0, "0"]
+        return out
+
+    def _es_late_overlap(self, cc: dict) -> int:
+        if not cc.get("etherscan_chainid"):
+            return 0
+        try:
+            sec = max(60, int(((self.cfg.get("etherscan") or {}).get("int_lag_sec")) or EtherscanWatcher.INT_LAG_SEC))
+        except (TypeError, ValueError):
+            sec = EtherscanWatcher.INT_LAG_SEC
+        return max(int(self.conf_depth or 12), -(-int(self.bpd or 7200) * sec // 86400))
+
+    def _adopt_explorer(self, safe: int):
+        old = dict(self.cursor)
+        cc = self.cfg["chains"][self.chain]
+        start = self._window_start(safe)
+        ov = max(0, min(int(cc.get("rescan_overlap_blocks") or 0), 5000))
+        ov = max(ov, self._es_late_overlap(cc))
+        curs = {w: int(old[w]) for w in self.wallets if isinstance(old.get(w), int) and not isinstance(old.get(w), bool)}
+        live = max(int(start), min(min(curs.values()) - ov, int(safe))) if curs else int(safe)
+        ipm = old.get("_ext_internal_pending") if isinstance(old.get("_ext_internal_pending"), dict) else {}
+        rr0 = [r for r in (ipm.get("ranges") or []) if isinstance(r, dict) and not r.get("done")]
+        leaf9 = [r for r in rr0 if r.get("kind") == "leaf" and isinstance(r.get("wallet"), str) and type(r.get("to_block")) is int]
+        rr = [r for r in rr0 if r.get("kind") != "leaf"]
+        any_w = any(not isinstance(r.get("wallet"), str) or not r.get("wallet") for r in rr)
+        int_ws = {w for w in curs if any_w or any(str(r.get("wallet") or "").lower() == w for r in rr)}
+        fr9 = [int(r["from_block"]) for r in rr if isinstance(r.get("from_block"), int)]
+        bk_from = min([int(start)] + fr9)
+        if bk_from >= live:
+            int_ws = set()
+        jobs = {}
+        for w in self.wallets:
+            bj9 = old.get("_bfjob") if isinstance(old.get("_bfjob"), dict) else {}
+            first9 = (w not in curs or ("_bfes:" + w) in old or ("_bf:" + w) in old
+                      or (bj9.get("kind") != "extend" and w in [str(x).lower() for x in (bj9.get("wallets") or [])]))
+            why = "new" if first9 else ("internal" if w in int_ws else None)
+            to9 = live
+            if why is None:
+                cv9 = old.get("_cov:" + w)
+                if isinstance(cv9, int) and not isinstance(cv9, bool) and cv9 > bk_from + 1:
+                    why, to9 = "extend", min(int(cv9), live)
+            if why and bk_from < to9:
+                jobs[w] = {"from": bk_from, "to": int(to9), "done": bk_from, "why": why}
+        hq = {}
+        hqp9 = os.path.join(common.STATE_DIR, f"hq_left_{self.chain}.json")
+        for k9 in list((common.read_json(hqp9, {}) or {}).keys()) \
+                + list((common.read_json(os.path.join(common.STATE_DIR, f"enrich_{self.chain}.json"), {}) or {}).keys()) \
+                + list((common.read_json(os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"), {}) or {}).keys()) \
+                + [h for h in (ipm.get("hashes") or []) if isinstance(h, str)] + list((ipm.get("items") or {}).keys()):
+            if isinstance(k9, str) and k9.startswith("0x"):
+                hq[k9.lower()] = 0
+        ns = self._baselines(list(self.wallets), live)
+        bkns = self._baselines(sorted(jobs), bk_from) if jobs else {}
+        if set(ns) != set(self.wallets) or set(bkns) != set(jobs):
+            miss9 = len(set(self.wallets) - set(ns)) + len(set(jobs) - set(bkns))
+            raise StateUnavailable(f"{self.chain} 인계 기준점 {miss9}건 없음(블록 {live}·{bk_from} 상태) — 탐색기 커서 유지, 아카이브 상태 노드 필요")
+        bp = self.cursor_path + ".explorer_legacy"
+        if os.path.exists(bp):
+            bp += time.strftime("_%Y%m%d_%H%M%S")
+        common.atomic_write_json(bp, old)
+        if self.emitted:
+            self.emitted.clear()
+            common.atomic_write_json(self.emitted_path, [])
+        cur = {"_rpc_v": self.VERSION, "_start": int(start), "_ns": ns, "_bkns": bkns,
+               "_handover": {"from": "explorer" if curs else "fresh", "at": int(time.time()), "live": int(live), "start": int(start),
+                             "bk_from": int(bk_from), "overlap": ov, "adopted": len(curs), "new": sum(1 for j in jobs.values() if j["why"] == "new"),
+                             "internal": sum(1 for j in jobs.values() if j["why"] == "internal"),
+                             "extend": sum(1 for j in jobs.values() if j["why"] == "extend"), "hq": len(hq),
+                             "src_min": min(curs.values()) if curs else None, "src_max": max(curs.values()) if curs else None,
+                             "curs": dict(curs),
+                             "backup": os.path.basename(bp)}}
+        for k9, v9 in old.items():
+            if str(k9).startswith("_cov:") or k9 in ("_quarantine", "_detail_fail", "_q_released"):
+                cur[k9] = v9
+        if isinstance(old.get("_quarantine_left"), dict):
+            q9 = cur["_quarantine"] if isinstance(cur.get("_quarantine"), dict) else cur.setdefault("_quarantine", {})
+            for h9, v9 in old["_quarantine_left"].items():
+                q9.setdefault(h9, v9)
+        for w in self.wallets:
+            cur[w] = int(live)
+        for w, j in jobs.items():
+            cur["_bk:" + w] = j
+        if hq:
+            cur["_hq"] = hq
+        lln9 = {}
+        for k9, v9 in (old.get("_leaf_later_left") or {}).items():
+            if isinstance(v9, dict) and isinstance(v9.get("w"), str) and type(v9.get("blk")) is int and v9["w"].lower() in self.wallets:
+                lln9[k9] = dict(v9, next=0)
+        for r9 in leaf9:
+            w9 = r9["wallet"].lower()
+            if w9 in self.wallets:
+                lln9.setdefault(f"{w9[:12]}:{int(r9['to_block'])}", {"w": w9, "blk": int(r9["to_block"]), "at": int(time.time()), "n": 0, "next": 0})
+        if lln9:
+            cur["_leaf_later"] = lln9
+        if bf_engine.SINCE.target(self.chain):
+            cur["_since_seen"] = int(bf_engine.SINCE.target(self.chain))
+        self.cursor = cur
+        common.atomic_write_json(self.cursor_path, self.cursor)
+        if hq:
+            common.atomic_write_json(os.path.join(common.STATE_DIR, f"enrich_{self.chain}.json"), {})
+            if os.path.exists(hqp9):
+                common.atomic_write_json(hqp9, {})
+        log.warning("★%s 탐색기 → RPC 전용 인계: 지갑 커서 %d개 이어받음(%s~%s → 라이브 %d, 겹침 %d) · 새 지갑 첫 백필 %d · internal 재훑기 %d"
+                    "(블록 %d → %d, 뒤 차선) · 인계 큐 %d건 · 원본 %s★", self.chain, len(curs), cur["_handover"]["src_min"],
+                    cur["_handover"]["src_max"], live, ov, cur["_handover"]["new"], cur["_handover"]["internal"], bk_from, live, len(hq),
+                    os.path.basename(bp))
+
     def _init(self, safe: int):
         self._since_reinit(safe)
         if self.cursor.get("_rpc_v") != self.VERSION:
-            old = {k: v for k, v in self.cursor.items()}
-            if old:
-                common.atomic_write_json(self.cursor_path + ".explorer_legacy", old)
-            start = self._window_start(safe)
-            self.cursor = {"_rpc_v": self.VERSION, "_start": int(start)}
-            if bf_engine.SINCE.target(self.chain):
-                self.cursor["_since_seen"] = int(bf_engine.SINCE.target(self.chain))
-            common.atomic_write_json(self.cursor_path, self.cursor)
-            log.info("★%s RPC 전용 추적 초기화 — 창 시작 블록 %d (safe %d, 종전 커서는 .explorer_legacy)★",
-                     self.chain, start, safe)
+            has9 = any(not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool) for k, v in self.cursor.items())
+            back9 = isinstance(self.cursor.get("_handback"), dict) and self.cursor["_handback"].get("from") == "rpc"
+            if (self.handover == "adopt" and (has9 or back9) and self.lanes_cfg is not False) or (not has9 and self.lanes_cfg is True):
+                self._adopt_explorer(safe)
+            else:
+                old = {k: v for k, v in self.cursor.items()}
+                if old:
+                    common.atomic_write_json(self.cursor_path + ".explorer_legacy", old)
+                start = self._window_start(safe)
+                self.cursor = {"_rpc_v": self.VERSION, "_start": int(start)}
+                xc9 = {k: v for k, v in old.items() if not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool)}
+                self.cursor["_xcurs"] = xc9
+                if bf_engine.SINCE.target(self.chain):
+                    self.cursor["_since_seen"] = int(bf_engine.SINCE.target(self.chain))
+                common.atomic_write_json(self.cursor_path, self.cursor)
+                log.info("★%s RPC 전용 추적 초기화 — 창 시작 블록 %d (safe %d, 종전 커서는 .explorer_legacy)★",
+                         self.chain, start, safe)
+        if "_xcurs" not in self.cursor and not isinstance(self.cursor.get("_handover"), dict):
+            lg9 = common.read_json(self.cursor_path + ".explorer_legacy", {})
+            self.cursor["_xcurs"] = {k: v for k, v in (lg9.items() if isinstance(lg9, dict) else ())
+                                     if not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool)}
         start = int(self.cursor["_start"])
         ns = self.cursor.setdefault("_ns", {})
         new_ws = []
@@ -3693,12 +5575,32 @@ class RpcChainWatcher(RpcSynthMixin):
                     ns[w] = [sb[0], sb[1], sb[2], 0, "0"]
                     continue
                 new_ws.append(w)
+        if new_ws and self.bk_mode:
+            lv = [int(self.cursor[w]) for w in self.wallets if isinstance(self.cursor.get(w), int)]
+            live = min(lv) if lv else int(safe)
+            b0 = self._baselines(new_ws, live)
+            bb = self._baselines(new_ws, start) if start < live else {}
+            if set(b0) != set(new_ws) or (start < live and set(bb) != set(new_ws)):
+                raise StateUnavailable(f"{self.chain} 새 지갑 기준점 없음 — 합류 보류(커서 유지 · 다음 사이클), 아카이브 상태 노드 필요")
+            bkns = self.cursor.setdefault("_bkns", {})
+            for w in new_ws:
+                self.cursor[w] = live
+                if w in b0:
+                    ns[w] = b0[w]
+                if start < live:
+                    self.cursor["_bk:" + w] = {"from": start, "to": live, "done": start, "why": "new"}
+                    if w in bb:
+                        bkns[w] = bb[w]
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            log.warning("★%s 새 지갑 %d개 합류 — 라이브 %d 부터 · 옛 구간 %d → %d 는 뒤 차선★", self.chain, len(new_ws), live, start, live)
+            new_ws = []
         st0 = {}
         if new_ws and start > 0:
-            try:
-                st0 = self._states([(w, start) for w in new_ws])
-            except StateUnavailable:
-                st0 = {}
+            for w9 in new_ws:
+                try:
+                    st0.update(self._states([(w9, start)]))
+                except StateUnavailable:
+                    pass
         for w in new_ws:
             self.cursor[w] = start
             if start == 0:
@@ -3719,15 +5621,22 @@ class RpcChainWatcher(RpcSynthMixin):
                     self._emit(h, dets[h], 0)
             left = {h: v for h, v in pend.items() if not isinstance(dets.get(h.lower()), dict)}
             common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            if self.bk_mode:
+                common.atomic_write_json(self.cursor_path, self.cursor)
             common.atomic_write_json(pp, left)
-        if common.read_json(ep, {}):
-            log.warning("%s 탐색기 enrich 큐 잔존 — RPC 경로는 네이티브 정합으로 대체, 큐 비움", self.chain)
+        enr = common.read_json(ep, {})
+        if enr:
+            if self.bk_mode:
+                hq = self.cursor.setdefault("_hq", {})
+                for h in enr:
+                    if isinstance(h, str) and h.startswith("0x"):
+                        hq.setdefault(h.lower(), 0)
+                common.atomic_write_json(self.cursor_path, self.cursor)
+                log.warning("%s 탐색기 enrich 큐 %d건 → 인계 큐(_hq — RPC trace 로 internal 채움)로 옮기고 비움", self.chain, len(enr))
+            else:
+                log.warning("%s 탐색기 enrich 큐 잔존 — RPC 경로는 네이티브 정합으로 대체, 큐 비움", self.chain)
             common.atomic_write_json(ep, {})
 
-    def _emit(self, h: str, snap: dict, head: int):
-        self.writer.append({"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap,
-                            "wallets": self.wallets, "observed_head": head, "ts": int(time.time())})
-        self.emitted.add(h)
 
     def _detail_fail_note(self, bad: list, dets: dict, blocks: dict = None) -> list:
         return bf_engine.detail_fail_note(self.cursor, bad, dets, self.chain, "rpc_detail", log, self.__dict__.setdefault("_df_seen", set()),
@@ -3765,28 +5674,156 @@ class RpcChainWatcher(RpcSynthMixin):
         common.atomic_write_json(self.cursor_path, self.cursor)
         return n
 
-    def _advance(self, ws: list, c: int, target: int, head: int, deadline: float) -> int:
-        pads = ["0x" + w[2:].rjust(64, "0") for w in ws]
-        sc = self.cursor.get("_scan")
+    def _retention_check(self, ws: list, c: int, target: int, f9: int) -> int:
+        now = time.time()
+        cands = self.cursor.get("_retention_cand") if isinstance(self.cursor.get("_retention_cand"), dict) else {}
+        cands = {k: v for k, v in cands.items() if isinstance(v, dict) and now - float(v.get("last") or 0) < 86400}
+        k = str(int(c) + 1)
+        cd = cands.get(k) if isinstance(cands.get(k), dict) else {"n": 0, "first": int(now)}
+        cd["floor"] = min(int(cd.get("floor") or f9), int(f9))
+        cd["n"] = int(cd.get("n") or 0) + 1
+        cd["last"] = int(now)
+        cands[k] = cd
+        self.cursor["_retention_cand"] = cands
+        why = None
+        ts9 = None
+        if cd["n"] < RETENTION_CONFIRM_N or now - float(cd.get("first") or now) < RETENTION_CONFIRM_SEC:
+            why = f"확인 중 {cd['n']}/{RETENTION_CONFIRM_N}회"
+        else:
+            try:
+                ts9 = int(self._block_ts(int(cd["floor"])))
+            except Exception as e:
+                why = f"보관 시작 블록 시각 조회 실패({common.safe_err(e)[:60]}) — 다음 사이클"
+            if ts9 is not None and now - ts9 < RETENTION_MIN_AGE_SEC:
+                why = (f"보관 시작이 {time.strftime('%Y-%m-%d %H:%M', time.localtime(ts9))}로 너무 최근 — 노드 이상일 수 있어 자동으로 "
+                       "건너뛰지 않음(사람 확인)")
+        if why:
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            msg9 = f"노드 보관 범위 밖(블록 {int(c) + 1}~{int(cd['floor']) - 1}, 첫 보관 블록 {cd['floor']}) — {why}"
+            if isinstance(self.last_scan_metrics, dict):
+                self.last_scan_metrics["stop"] = msg9
+            log.warning("%s %s", self.chain, msg9)
+            return c
+        to9 = min(int(cd["floor"]) - 1, int(target))
+        return self._retention_skip(ws, c, to9, ts9 if to9 == int(cd["floor"]) - 1 else None, int(cd["n"]), cand_key=k)
+
+    def _retention_skip(self, ws: list, c: int, to: int, floor_ts=None, n_obs: int = 0, cand_key=None) -> int:
+        def _ts(b):
+            try:
+                return int(self._block_ts(int(b)))
+            except Exception:
+                return None
+        if floor_ts is None:
+            floor_ts = _ts(to + 1)
+        from_ts = _ts(c + 1)
+        st0 = {}
+        for w in ws:
+            try:
+                st0.update(self._states([(w, int(to))], strict=True))
+            except StateUnavailable:
+                pass
+        if cand_key is not None:
+            cands9 = self.cursor.get("_retention_cand") if isinstance(self.cursor.get("_retention_cand"), dict) else {}
+            cands9.pop(str(cand_key), None)
+            if not cands9:
+                self.cursor.pop("_retention_cand", None)
+        gaps = self.cursor.setdefault("_retention_gaps", [])
+        gaps.append({"kind": "node_retention", "from": int(c) + 1, "to": int(to), "from_ts": from_ts, "floor_ts": floor_ts,
+                     "ws": [w[:10] for w in ws], "at": int(time.time()), "n_obs": int(n_obs),
+                     "host": urllib.parse.urlsplit(self.logs_rpcs[0]).hostname if self.logs_rpcs else None})
+        del gaps[:-20]
+        ns = self.cursor.setdefault("_ns", {})
+        nb = 0
+        for w in ws:
+            self.cursor[w] = int(to)
+            if (w, int(to)) in st0:
+                n9, b9 = st0[(w, int(to))]
+                ns[w] = [int(to), n9, str(b9), 0, "0"]
+                nb += 1
+            else:
+                ns.pop(w, None)
+        self.cursor.pop("_scan", None)
+        common.atomic_write_json(self.cursor_path, self.cursor)
+        log.warning("★%s 로그 노드 보관 밖 옛 구간 = 미수집 범위로 기록하고 넘어감: 블록 %d~%d%s · 지갑 %d(네이티브 새 기준점 %d) — "
+                    "그 앞 보유는 잔고 대조(기초 잔고)로 맞춤★", self.chain, c + 1, to,
+                    f"(~{time.strftime('%Y-%m-%d', time.localtime(floor_ts))} 이전)" if floor_ts else "", len(ws), nb)
+        return int(to)
+
+    def _scan_logs(self, ws: list, c: int, target: int, deadline: float) -> tuple:
+        mx = self.addr_max or max(1, len(ws))
+        found, last, floor9, stop9, mets = {}, int(target), None, None, {}
+        caps0 = self.__dict__.setdefault("_log_caps", {})
+        fb0 = getattr(self, "logs_fallback", None) or {}
+        prim0 = getattr(self, "logs_primary", None) or self.logs_rpcs
+        for i in range(0, len(ws), mx):
+            pads = ["0x" + w[2:].rjust(64, "0") for w in ws[i:i + mx]]
+            scanner = bf_engine.LogScanner(
+                prim0, self.TRANSFER, pads, span=self.span, min_span=self.min_span, timeout=25, log=_SCAN_LOG,
+                caps=dict(caps0), fallback={u: int(caps0.get(u) or cap9) for u, cap9 in fb0.items()},
+                name=f"{self.chain} getLogs",
+                positions={1: [self.TRANSFER, self.APPROVAL, self.WETH_DEPOSIT, self.WETH_WITHDRAWAL], 2: self.TRANSFER},
+                head_guard=(self.cfg["chains"][self.chain].get("logs_head_guard") is not False),
+                soft=self.__dict__.setdefault("_log_soft", {}))
+            f9, l9 = scanner.scan(c + 1, last, deadline=deadline)
+            for u9, cap9 in (getattr(scanner, "caps", None) or {}).items():
+                if isinstance(cap9, int) and cap9 > 0:
+                    caps0[u9] = min(int(caps0.get(u9) or cap9), cap9)
+            for k9, v9 in (getattr(scanner, "metrics", None) or {}).items():
+                if isinstance(v9, (int, float)):
+                    mets[k9] = mets.get(k9, 0) + v9
+            stop9 = getattr(scanner, "last_stop", None) or stop9
+            found.update(f9)
+            if l9 < last:
+                last = l9
+            if l9 <= c:
+                fl9 = getattr(scanner, "retention_floor", None)
+                floor9 = fl9 if (isinstance(fl9, int) and not isinstance(fl9, bool)) else None
+                break
+        self.last_scan_metrics = dict(mets, stop=stop9)
+        return {h: b for h, b in found.items() if b <= last}, last, floor9
+
+    def _emit(self, h: str, snap: dict, head: int):
+        rec = {"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap,
+               "wallets": self.wallets, "observed_head": head, "ts": int(time.time())}
+        if self.bk_mode:
+            rec["wallets"] = [w for w in self.wallets if self._touches(snap, w)] or self.wallets
+            if snap.get("internal_note") in ("trace", "balance_delta") and snap.get("internal"):
+                rec["repair"] = "int_fill"
+        self.writer.append(rec)
+        self.emitted.add(h)
+        hq = self.cursor.get("_hq")
+        if isinstance(hq, dict) and snap.get("internal_note") == "trace":
+            hq.pop(h, None)
+
+    def _advance(self, ws: list, c: int, target: int, head: int, deadline: float, bk: bool = False) -> int:
+        sk, nk = ("_bkscan", "_bkns") if bk else ("_scan", "_ns")
+        self._reemit = set()
+        sc = self.cursor.get(sk)
         if isinstance(sc, dict) and sc.get("frm") == c + 1 and sorted(sc.get("ws") or []) == sorted(ws) \
                 and int(sc.get("to") or 0) > c:
             found, last = dict(sc.get("found") or {}), int(sc["to"])
         else:
-            scanner = bf_engine.LogScanner(
-                self.logs_rpcs, self.TRANSFER, pads, span=self.span, min_span=self.min_span, timeout=25, log=_SCAN_LOG,
-                name=f"{self.chain} getLogs",
-                positions={1: [self.TRANSFER, self.APPROVAL, self.WETH_DEPOSIT, self.WETH_WITHDRAWAL], 2: self.TRANSFER},
-                head_guard=(self.cfg["chains"][self.chain].get("logs_head_guard") is not False))
-            found, last = scanner.scan(c + 1, target, deadline=deadline)
-            self.last_scan_metrics = dict(scanner.metrics, stop=scanner.last_stop)
+            found, last, f9 = self._scan_logs(ws, c, target, deadline)
             if last <= c:
+                if not bk and isinstance(f9, int) and f9 > c + 1:
+                    return self._retention_check(ws, c, target, f9)
                 return c
-            self.cursor["_scan"] = {"frm": c + 1, "to": last, "ws": sorted(ws),
-                                    "found": {h: b for h, b in found.items() if h not in self.emitted}}
+            self.cursor[sk] = {"frm": c + 1, "to": last, "ws": sorted(ws),
+                               "found": {h: b for h, b in found.items() if h not in self.emitted}}
             common.atomic_write_json(self.cursor_path, self.cursor)
         qset = bf_engine.quarantine_map(self.cursor)
         todo = [h for h in found if h not in self.emitted and h not in qset]
-        dets = self._details(todo, deadline=deadline + 120) if todo else {}
+        memo9 = self.__dict__.setdefault("_snap_memo", {})
+        need = [h for h in todo if h not in memo9]
+        dets = self._details(need, deadline=deadline + 120) if need else {}
+        for h in need:
+            if isinstance(dets.get(h), dict):
+                memo9[h] = json.loads(json.dumps(dets[h]))
+        for h in todo:
+            if h not in dets and h in memo9:
+                dets[h] = json.loads(json.dumps(memo9[h]))
+        if len(memo9) > 20000:
+            memo9.clear()
         bad = [h for h in todo if not isinstance(dets.get(h), dict)]
         self._detail_fail_clear([h for h in todo if isinstance(dets.get(h), dict)])
         if bad:
@@ -3797,19 +5834,34 @@ class RpcChainWatcher(RpcSynthMixin):
                 return c
             todo = [h for h in todo if isinstance(dets.get(h), dict)]
         pool = [dets[h] for h in todo]
-        try:
-            self._states([(w, last) for w in ws])
-        except StateUnavailable:
-            pass
+        self._mc_rate = None
+        n_mc = self._mc_balances(ws, last) if self.multicall else 0
+        if n_mc < len(ws) and self._mc_rate is not None:
+            raise self._mc_rate
+        if n_mc < len(ws):
+            try:
+                self._states([(w, last) for w in ws if (w, last) not in self.__dict__.setdefault("_st_memo", {})])
+            except StateUnavailable:
+                pass
         new_ns = {}
         for w in ws:
-            new_ns[w] = self._native(w, c, last, pool, deadline + 120)["ns"]
+            new_ns[w] = (self._native(w, c, last, pool, deadline + 120, nk) if bk else self._native(w, c, last, pool, deadline + 120, head=head))["ns"]
+        if not bk and all(isinstance(new_ns.get(w), list) and int(new_ns[w][0]) == int(last) for w in ws):
+            sl9 = self._st_lag_map(self.cursor.get("_st_lag"))
+            sl9.pop(str(c), None)
+            sl9.pop("*", None)
+            if sl9:
+                self.cursor["_st_lag"] = sl9
+            else:
+                self.cursor.pop("_st_lag", None)
         n_emit = 0
         for s in sorted(pool, key=lambda s: (s["tx"]["block_number"], s["tx"]["hash"])):
             h = s["tx"]["hash"].lower()
-            if h in self.emitted or not any(self._touches(s, w) for w in self.wallets):
+            re9 = self.__dict__.get("_reemit") or set()
+            if (h in self.emitted and h not in re9) or not any(self._touches(s, w) for w in self.wallets):
                 continue
             self._emit(h, s, head)
+            re9.discard(h)
             n_emit += 1
         common.atomic_write_json(self.emitted_path, sorted(self.emitted))
         nm = self.cursor.setdefault("_nonces", {})
@@ -3820,21 +5872,128 @@ class RpcChainWatcher(RpcSynthMixin):
                 fo = self.cursor.setdefault("_first_own", {}).get(m9["from"])
                 if not fo or m9["block"] < int(fo[0]):
                     self.cursor["_first_own"][m9["from"]] = [m9["block"], s["tx"]["hash"]]
-        ns = self.cursor.setdefault("_ns", {})
+        ns = self.cursor.setdefault(nk, {})
+        fin = []
         for w in ws:
-            self.cursor[w] = last
+            if bk:
+                job = self.cursor.get("_bk:" + w)
+                if isinstance(job, dict):
+                    job["done"] = int(last)
+                    if int(last) >= int(job.get("to") or 0):
+                        fin.append(w)
+            else:
+                self.cursor[w] = last
             if new_ns.get(w) is not None:
                 ns[w] = new_ns[w]
-        self.cursor.pop("_scan", None)
+        for w in fin:
+            j9 = self.cursor.pop("_bk:" + w, None) or {}
+            ns.pop(w, None)
+            log.info("★%s 뒤 차선 완주 %s(%s) — 블록 %s → %s★", self.chain, w[:10], j9.get("why"), j9.get("from"), j9.get("to"))
+        self.cursor.pop(sk, None)
+        for h in todo:
+            memo9.pop(h, None)
         common.atomic_write_json(self.cursor_path, self.cursor)
         if n_emit:
-            log.info("%s rpc 발견 %d tx 방출 (블록 %d→%d, 지갑 %d)", self.chain, n_emit, c, last, len(ws))
+            log.info("%s rpc 발견 %d tx 방출 (%s블록 %d→%d, 지갑 %d)", self.chain, n_emit, "옛 구간 " if bk else "", c, last, len(ws))
         return last
 
+    def _bk_jobs(self) -> dict:
+        return {w: self.cursor["_bk:" + w] for w in self.wallets if isinstance(self.cursor.get("_bk:" + w), dict)}
+
+    def _bk_step(self, head: int, deadline: float) -> tuple:
+        adv, stalled = 0, False
+        bud9 = max(1.0, deadline - time.time())
+        span = max(2000, min(self.bk_span, int(self.cursor.get("_bkspan") or self.bk_span)))
+        while time.time() < deadline:
+            jobs = self._bk_jobs()
+            if not jobs:
+                break
+            groups = {}
+            for w, j in jobs.items():
+                groups.setdefault(int(j.get("done") or 0), []).append(w)
+            d = min(groups)
+            ws = groups[d]
+            to = min(int(jobs[w].get("to") or 0) for w in ws)
+            tgt = min(to, d + span)
+            if tgt <= d:
+                break
+            t0 = time.time()
+            try:
+                got = self._advance(ws, d, tgt, head, deadline, bk=True)
+            except StateUnavailable as e:
+                got = d
+                log.info("%s 뒤 차선 상태 조회 불가(다음 사이클): %s", self.chain, e)
+            el = time.time() - t0
+            if got <= d:
+                stalled = True
+                span = max(2000, span // 2)
+                self.cursor["_bkspan"] = int(span)
+                break
+            adv += got - d
+            if got >= tgt and el < bud9 / 3:
+                span = min(self.bk_span, span * 2)
+            self.cursor["_bkspan"] = int(span)
+        if not self._bk_jobs() and self.cursor.get("_hq") and time.time() < deadline:
+            self._hq_step(head, deadline)
+        return adv, stalled
+
+    HQ_BATCH = 20
+    HQ_FAIL_MAX = 5
+
+    def _hq_step(self, head: int, deadline: float) -> int:
+        hq = self.cursor.get("_hq")
+        if not isinstance(hq, dict) or not hq:
+            return 0
+        n = 0
+        keys = sorted(hq)
+        for i in range(0, len(keys), self.HQ_BATCH):
+            if time.time() >= deadline:
+                break
+            part = [h for h in keys[i:i + self.HQ_BATCH] if h in hq]
+            if not part:
+                continue
+            dets = self._details(part, deadline=deadline + 60, trace=False)
+            for h in part:
+                s9 = dets.get(h)
+                err9 = None
+                if isinstance(s9, dict):
+                    try:
+                        self._trace_internal(h, s9)
+                    except Exception as e:
+                        err9 = e
+                        if self._unsupported(e):
+                            hq.pop(h, None)
+                            self._note("_native_notes", {"kind": "hq_untraced", "tx": h[:14]})
+                            continue
+                    if err9 is None:
+                        if s9.get("internal") and any(self._touches(s9, w) for w in self.wallets):
+                            self._emit(h, s9, head)
+                            n += 1
+                        else:
+                            hq.pop(h, None)
+                        continue
+                else:
+                    err9 = s9
+                if "예산 소진" in str(err9) or not bf_engine.detail_err_deterministic(err9):
+                    continue
+                hq[h] = int(hq.get(h) or 0) + 1
+                if hq[h] >= self.HQ_FAIL_MAX:
+                    hq.pop(h, None)
+                    self._note("_native_notes", {"kind": "hq_fail", "tx": h[:14], "err": common.safe_err(err9)[:80]})
+                    log.warning("%s 인계 큐 %s 결정적 실패 %d회 — 뺌(internal 미확인 · 대사 흡수): %s", self.chain, h[:12], self.HQ_FAIL_MAX,
+                                common.safe_err(err9)[:100])
+            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            common.atomic_write_json(self.cursor_path, self.cursor)
+        if n:
+            log.info("%s 인계 큐 internal 채움 %d건 방출(남은 %d)", self.chain, n, len(hq))
+        return n
+
     def cycle(self):
+        tc0 = time.time()
         if self.cursor.pop("_synced_at", None) is not None:
             common.atomic_write_json(self.cursor_path, self.cursor)
         self._st_memo = {}
+        self._bal_memo = {}
         self._df_seen = set()
         head = self._head()
         safe = head - self.conf_depth
@@ -3852,7 +6011,7 @@ class RpcChainWatcher(RpcSynthMixin):
         advanced, stalled = 0, False
         ext9 = self.cursor.get("_since_ext") if isinstance(self.cursor.get("_since_ext"), dict) else None
         tgt = min(safe, int(ext9["to"])) if ext9 else safe
-        for c in sorted(groups):
+        for c in sorted(groups, reverse=self.bk_mode):
             if c >= tgt:
                 continue
             if time.time() >= deadline:
@@ -3873,18 +6032,62 @@ class RpcChainWatcher(RpcSynthMixin):
             complete = False
             if tgt == int(ext9["to"]) and all(int(self.cursor[w]) >= tgt for w in self.wallets if isinstance(self.cursor.get(w), int)):
                 self._since_ext_done()
+        if self.cursor.get("_leaf_later"):
+            try:
+                self._leaf_later_step(head)
+            except Exception as e:
+                log.info("%s 나중에 다시 잎 블록 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
+        bk9 = None
+        if self.bk_mode and (self._bk_jobs() or self.cursor.get("_hq")):
+            bud9 = self.bk_budget if self.bk_budget is not None else max(10.0, self.poll_sec - (time.time() - tc0) - 5.0)
+            bk_dl = min(deadline, time.time() + bud9)
+            bk_adv, bk_stall = 0, False
+            if time.time() < bk_dl:
+                try:
+                    bk_adv, bk_stall = self._bk_step(head, bk_dl)
+                except Exception as e:
+                    bk_stall = True
+                    log.warning("%s 뒤 차선 실패(다음 사이클 이어서): %s", self.chain, common.redact_urls(common.safe_err(e))[:160])
+                    try:
+                        cur9 = common.read_json(self.cursor_path, {})
+                        for k9 in [k for k in self.cursor if k.startswith("_bk:") or k in ("_bkns", "_bkscan", "_hq", "_bkspan")]:
+                            if k9 in cur9:
+                                self.cursor[k9] = cur9[k9]
+                            else:
+                                self.cursor.pop(k9, None)
+                    except Exception:
+                        pass
+            jobs9 = self._bk_jobs()
+            if jobs9 or self.cursor.get("_hq"):
+                tot9 = sum(max(0, int(j["to"]) - int(j["from"])) for j in jobs9.values())
+                left9 = sum(max(0, int(j["to"]) - int(j["done"])) for j in jobs9.values())
+                bk9 = {"wallets": len(jobs9), "new": sum(1 for j in jobs9.values() if j.get("why") == "new"),
+                       "internal": sum(1 for j in jobs9.values() if j.get("why") == "internal"),
+                       "extend": sum(1 for j in jobs9.values() if j.get("why") == "extend"),
+                       "done_min": min((int(j["done"]) for j in jobs9.values()), default=None),
+                       "to": max((int(j["to"]) for j in jobs9.values()), default=None),
+                       "pct": round(100.0 * (tot9 - left9) / tot9, 1) if tot9 else 100.0, "advanced": bk_adv, "stalled": bk_stall,
+                       "hq": len(self.cursor.get("_hq") or {}),
+                       "ids": sorted(w[:6] for w, j in jobs9.items() if j.get("why") == "new")[:3]}
         start = int(self.cursor.get("_start") or 0)
         cmin = min(int(self.cursor[w]) for w in self.wallets) if self.wallets else safe
-        if complete and cmin >= safe:
+        new_left = bool(bk9 and bk9["new"])
+        if complete and cmin >= safe and not new_left:
             self.cursor["_synced_at"] = int(time.time())
         if len(self._txmeta) > 50000:
             self._txmeta.clear()
         common.atomic_write_json(self.cursor_path, self.cursor)
         common.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
-        self.progress.update(f"{self.chain}:rpc", phase="live" if complete else ("extend" if self.cursor.get("_since_ext") else "scan"),
-                             unit="blocks",
-                             done=max(0, cmin - start), total=max(1, safe - start),
-                             note=(self.last_scan_metrics or {}).get("stop"))
+        if bk9 is not None:
+            self.progress.update(f"{self.chain}:rpc", phase="extend", unit="blocks",
+                                 done=sum(max(0, int(j["done"]) - int(j["from"])) for j in self._bk_jobs().values()),
+                                 total=max(1, sum(max(0, int(j["to"]) - int(j["from"])) for j in self._bk_jobs().values())),
+                                 note=(self.last_scan_metrics or {}).get("stop"))
+        else:
+            self.progress.update(f"{self.chain}:rpc", phase="live" if complete else ("extend" if self.cursor.get("_since_ext") else "scan"),
+                                 unit="blocks",
+                                 done=max(0, cmin - start), total=max(1, safe - start),
+                                 note=(self.last_scan_metrics or {}).get("stop"))
         gaps = self.cursor.get("_native_gaps") or []
         progressing = (not complete) and advanced > 0 and not stalled
         self._health_cycle("rpc", head, safe, ok=complete or progressing,
@@ -3897,8 +6100,10 @@ class RpcChainWatcher(RpcSynthMixin):
                            native_verified=sorted(w[:10] for w, v in (self.cursor.get("_ns") or {}).items()
                                                   if v and int(v[0]) >= cmin),
                            native_gaps=gaps[-5:] or None,
+                           retention=retention_summary(self.cursor),
                            native_unexplained=[r for r in (self.cursor.get("_native_notes") or [])
-                                               if r.get("kind") == "unexplained"][-5:] or None)
+                                               if r.get("kind") == "unexplained"][-5:] or None,
+                           rpc_bk=bk9)
         if not complete:
             log.info("%s rpc 사이클 부분 진행: 커서 %d / safe %d (%.0fs)", self.chain, cmin, safe, time.time() - t0)
 
@@ -3907,6 +6112,8 @@ def main():
     common.ensure_dirs()
     cfg = common.load_config()
     bf_engine.configure(cfg)
+    bf_engine.es_budget_install_sigterm()
+    addr_tier.ACTIVE_PROC = True
     poll = int(cfg.get("evm_poll_sec", 45))
     watchers = []
     by_chain = {}
@@ -3925,24 +6132,9 @@ def main():
     chain_poll_cfg = {}
 
     def make_watcher(cfg, chain, addrs):
-        if chain not in cfg["chains"]:
-            raise SystemExit(f"config.chains 에 없는 체인: {chain}")
-        chain_poll_cfg[chain] = (cfg["chains"][chain] or {}).get("poll_sec")
-        if common.chain_discovery(chain, cfg["chains"][chain]) == "rpc":
-            log.info("%s: RPC 전용 발견 경로 사용 (getLogs + nonce·잔고 정합)", chain)
-            return RpcChainWatcher(cfg, chain, addrs, shared_writer)
-        es_cid = cfg["chains"][chain].get("etherscan_chainid")
-        if es_cid and es_key and es_bs_busy(chain):
-            log.warning("%s: 미완 blockscout 큐·백필·internal 재수집 잔존 — 회수 위해 blockscout 경로 유지(끝나면 etherscan 복귀)",
-                        chain)
-            es_cid = None
-        if es_cid and es_key and es_daily_left() > 0:
-            log.info("%s: 이더스캔 하루 한도 쉼 창(%.0f분 남음) — blockscout 경로", chain, es_daily_left() / 60)
-            es_cid = None
-        if es_cid and es_key:
-            log.info("%s: etherscan 고속 경로 사용 (chainid %s)", chain, es_cid)
-            return EtherscanWatcher(cfg, chain, addrs, shared_writer, int(es_cid), es_key)
-        return ChainWatcher(cfg, chain, addrs, shared_writer)
+        if chain in cfg["chains"]:
+            chain_poll_cfg[chain] = (cfg["chains"][chain] or {}).get("poll_sec")
+        return build_watcher(cfg, chain, addrs, shared_writer, es_key)
 
     for chain, addrs in by_chain.items():
         watchers.append(make_watcher(cfg, chain, addrs))
@@ -3954,8 +6146,8 @@ def main():
         if not flag:
             continue
         if not isinstance(wt, ChainWatcher):
-            log.warning("%s: rpc_log_discovery 는 blockscout(ChainWatcher) 체인 전용 — 무시",
-                        wt.chain)
+            (log.info if isinstance(wt, RpcChainWatcher) else log.warning)(
+                "%s: rpc_log_discovery 는 blockscout(ChainWatcher) 체인 전용 — 무시(RPC 전용 경로가 getLogs 를 직접)", wt.chain)
             continue
         rd = RpcLogDiscovery(cfg, wt.chain, wt.wallets, shared_writer, wt)
         rpclogs.append(rd)
@@ -3980,50 +6172,22 @@ def main():
     shared_writer.append = locked_append
 
     def chain_loop(wt):
-        es_fail = 0
-        es_daily_fb = bool(es_key and es_daily_left() > 0 and not isinstance(wt, EtherscanWatcher)
-                           and (cfg["chains"].get(wt.chain) or {}).get("etherscan_chainid"))
+        lp = ChainLoop(cfg, wt, make_watcher, es_key, shared_writer)
         while True:
             t0 = time.time()
-            nw9 = take_rebuild(wt, make_watcher)
-            if nw9 is not wt and isinstance(wt, EtherscanWatcher) and not isinstance(nw9, EtherscanWatcher) \
-                    and es_daily_left() > 0:
-                es_daily_fb = True
-            wt = nw9
-            if es_daily_fb:
-                wt, es_daily_fb = es_daily_return(cfg, wt, make_watcher)
-            try:
-                wt.cycle()
-                es_fail = 0
-            except ChainDisabled as e:
-                bf_engine.health("evm").fail(wt.chain, e, "rpc")
-                bf_engine.health("evm").flush()
-                log.error("★%s 체인 추적 중지(설정 오류): %s — 다른 체인은 계속, 고친 뒤 pm2 restart tj-evm★", wt.chain, common.redact_urls(str(e)))
-                DISABLED_CHAINS.add(wt.chain)
+            if not lp.step():
                 return
-            except Exception as e:
-                n9 = bf_engine.health("evm").fail(wt.chain, e, "etherscan" if isinstance(wt, EtherscanWatcher)
-                                                  else "rpc" if isinstance(wt, RpcChainWatcher) else "blockscout")
-                bf_engine.health("evm").flush()
-                lv = bf_engine.LogDebounce.level(n9)
-                if lv:
-                    getattr(log, lv)("%s cycle 실패 %d회 연속(다음 주기 재시도): %s", wt.chain, n9, common.redact_urls(str(e)))
-                wt, es_fail, d9 = es_on_cycle_error(cfg, wt, e, es_fail, shared_writer)
-                es_daily_fb = es_daily_fb or d9
-                try:
-                    cur9 = common.read_json(wt.cursor_path, {})
-                    a9 = cur9.pop("_synced_at", None) is not None
-                    b9 = cur9.pop("_synced_tok_at", None) is not None
-                    if a9 or b9:
-                        common.atomic_write_json(wt.cursor_path, cur9)
-                    wt.cursor = cur9
-                except Exception:
-                    pass
-            time.sleep(max(5.0, chain_poll(wt.chain) - (time.time() - t0)))
+            time.sleep(max(5.0, chain_poll(lp.wt.chain) - (time.time() - t0)))
 
     def rpclog_loop(rd):
         while True:
             t0 = time.time()
+            cw9 = CUR_WATCHER.get(rd.chain)
+            if RPCFB_ON.get(rd.chain) or (cw9 is not None and not isinstance(cw9, ChainWatcher)):
+                time.sleep(max(5.0, poll))
+                continue
+            if isinstance(cw9, ChainWatcher) and cw9 is not rd.bs:
+                rd.bs = cw9
             try:
                 rd.cycle()
             except Exception as e:
@@ -4062,6 +6226,12 @@ def main():
         except (Exception, SystemExit) as e:
             log.warning("활동 게이트 반영용 설정 재적재 실패(다음 주기): %s", e)
             continue
+        try:
+            for b9 in list(addr_tier.BOOKS.values()):
+                b9.reload_cfg(cfg2)
+            addr_tier.plan_stretch(list(addr_tier.BOOKS.values()), cfg2)
+        except Exception as e:
+            log.warning("계단식 주기 설정·예산 반영 실패(다음 주기): %s", e)
         by2 = {}
         for w in cfg2["wallets"]:
             if w.get("type", "evm") == "evm":

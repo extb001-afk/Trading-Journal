@@ -10,6 +10,64 @@ import settings_store as ss
 
 MANUAL = "pm2 restart tj-evm tj-sol tj-bsc tj-core tj-web"
 RELOAD_PATH = os.path.join(common.STATE_DIR, "wallet_reload.json")
+RELOAD_DONE_PATH = os.path.join(common.STATE_DIR, "wallet_reload_done.json")
+RELOAD_UNITS = ("tj-evm", "tj-sol", "tj-bsc", "tj-core", "tj-web")
+
+
+def req_fp(entry: dict) -> str:
+    import hashlib
+    return hashlib.sha1(json.dumps(entry, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:16]
+
+
+def _read_json(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def pending_requests() -> list:
+    cur = _read_json(RELOAD_PATH, {})
+    done = _read_json(RELOAD_DONE_PATH, {})
+    seen = set(x for x in (done.get("fps") or []) if isinstance(x, str))
+    floor = float(done.get("floor") or 0) if isinstance(done.get("floor"), (int, float)) else 0.0
+    out = []
+    for e in cur.get("requests") or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            ts = float(e.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        fp = req_fp(e)
+        if fp in seen or ts < floor:
+            continue
+        out.append((fp, e))
+    out.sort(key=lambda x: float(x[1].get("ts") or 0))
+    return out
+
+
+def _addr_norm(a) -> str:
+    a = str(a or "")
+    return a.lower() if a.startswith("0x") else a
+
+
+def pending_addrs() -> set:
+    out = set()
+    for _fp, e in pending_requests():
+        for a in [e.get("address")] + list(e.get("addresses") or []):
+            if a:
+                out.add(_addr_norm(a))
+    return out
+
+
+def auto_reload_alive() -> bool:
+    try:
+        return any(isinstance(h, dict) and h.get("by") == "reload" for h in ss.runner_status().values())
+    except Exception:
+        return False
 
 
 def _units_for(kind: str, chains: list) -> list:
@@ -23,22 +81,25 @@ def _units_for(kind: str, chains: list) -> list:
 
 def apply_info(units=None) -> dict:
     try:
-        runner = bool(ss.runner_status())
+        rs = ss.runner_status()
+        runner = bool(rs)
+        mode = "reload" if rs and all(isinstance(h, dict) and h.get("by") == "reload" for h in rs.values()) else ("runner" if rs else "")
     except Exception:
-        runner = False
-    return {"runner": runner, "manual": MANUAL, "units": list(units or [])}
+        runner, mode = False, ""
+    return {"runner": runner, "mode": mode, "manual": MANUAL, "units": list(units or [])}
 
 
 def _record_reload(entry: dict) -> None:
     try:
-        try:
-            with open(RELOAD_PATH, "r", encoding="utf-8") as f:
-                cur = json.load(f)
-        except (OSError, ValueError):
-            cur = {}
-        reqs = [x for x in (cur.get("requests") or []) if isinstance(x, dict)][-19:] if isinstance(cur, dict) else []
-        reqs.append(entry)
-        common.atomic_write_json(RELOAD_PATH, {"version": 1, "requests": reqs})
+        with ss.LOCK:
+            try:
+                with open(RELOAD_PATH, "r", encoding="utf-8") as f:
+                    cur = json.load(f)
+            except (OSError, ValueError):
+                cur = {}
+            reqs = [x for x in (cur.get("requests") or []) if isinstance(x, dict)][-19:] if isinstance(cur, dict) else []
+            reqs.append(entry)
+            common.atomic_write_json(RELOAD_PATH, {"version": 1, "requests": reqs})
     except Exception:
         pass
 

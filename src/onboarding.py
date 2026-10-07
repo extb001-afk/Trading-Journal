@@ -224,12 +224,13 @@ def _cg_record(key: str, r: dict, how: str) -> None:
         log.warning("코인게코 키 등급 기록 실패: %s", type(e).__name__)
 
 
-def _http(url: str, headers=None, data=None, method=None, timeout=12):
+def _http(url: str, headers=None, data=None, method=None, timeout=12, sol=False):
     h = {"User-Agent": UA, "Accept": "application/json"}
     h.update(headers or {})
     req = urllib.request.Request(url, headers=h, data=data, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        import bf_engine as _bfe9
+        with _bfe9.sol_open(req, timeout, sol=sol) as r:
             raw = r.read(1 << 20)
             code = r.status
     except urllib.error.HTTPError as e:
@@ -440,9 +441,16 @@ def _test_group(group: str, v: list) -> dict:
     warn = []
     try:
         if group == "helius":
+            import bf_engine as _bfe9
+            try:
+                _bfe9.helius_configure(common.load_config())
+            except (Exception, SystemExit):
+                pass
+            if not _bfe9.HELIUS.take("web", 1, kind="must"):
+                return {"ok": False, "detail": "Helius 오늘 호출 예산을 다 써서 지금은 확인을 미뤄요(" + str(_bfe9.HELIUS.last_why()) + ") — UTC 0시(한국 오전 9시) 뒤 다시"}
             code, d = _http(_base("helius", "https://mainnet.helius-rpc.com") + "/?api-key=" + urllib.parse.quote(v[0]),
                             {"Content-Type": "application/json"},
-                            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getHealth"}).encode(), "POST")
+                            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getHealth"}).encode(), "POST", sol=True)
             ok = code == 200 and isinstance(d, dict) and d.get("result") == "ok"
             return {"ok": ok, "detail": "Helius 응답 정상 (getHealth)" if ok else _err_text(code, d)}
         if group == "etherscan":
@@ -451,6 +459,8 @@ def _test_group(group: str, v: list) -> dict:
             u9 = _base("etherscan", "https://api.etherscan.io") + "/v2/api?" + q
             if (urllib.parse.urlsplit(u9).hostname or "").lower() == "api.etherscan.io":
                 if not bf_engine.es_budget_take("web"):
+                    if bf_engine.es_budget_why() == "pace":
+                        return {"ok": False, "detail": "이더스캔 실시간 확인 몫을 하루에 나눠 쓰느라 잠시 대기 중(옛 기록을 먼저 채우는 중) — 잠시 뒤 다시 확인"}
                     return {"ok": False, "detail": "이더스캔 하루 예산(공표 한도 80% · 수집기와 합산) 소진 — UTC 자정 뒤 다시 확인"}
                 bf_engine.es_dispatch_wait(time.time() + 15)
             code, d = _http(u9)
@@ -767,8 +777,16 @@ def status() -> dict:
     st = ss.read_settings()
     wl = ss.wallet_list(raw)
     done = set(_recon_done())
+    try:
+        import wallet_register as _wr
+        wait9 = _wr.pending_addrs() if _wr.auto_reload_alive() else set()
+    except Exception:
+        wait9 = set()
     for w in wl:
         w["reconDone"] = sorted(c for c in w["chains"] if c in done)
+        a9 = str(w.get("address") or "")
+        if (a9.lower() if a9.startswith("0x") else a9) in wait9:
+            w["applyWait"] = True
 
     def grp(g):
         fields = [{"key": k, "label": lab, "masked": ss.mask(env.get(k, ""), public=k in ss.PUBLIC_KEY_FIELDS), "set": bool(env.get(k))}
@@ -788,6 +806,10 @@ def status() -> dict:
                 units[u] = {"state": "unknown"}
             elif not ready:
                 units[u] = {"state": "waiting", "why": why}
+            elif hb.get("by") == "reload" and hb.get("state") == "pending":
+                units[u] = {"state": "pending", "why": ""}
+            elif hb.get("by") == "reload" and hb.get("fp") != fp:
+                units[u] = {"state": "manual", "why": ""}
             else:
                 units[u] = {"state": "applied" if hb.get("fp") == fp else "pending", "why": hb.get("why") or ""}
     exs = {k: grp(g) for k, g in ss.EXCHANGES.items()}
@@ -809,6 +831,7 @@ def status() -> dict:
         "needsSetup": not DEMO and not wl and not st.get("onboarded"), "onboarded": bool(st.get("onboarded")),
         "wallets": wl, "chains": [{"key": k, "name": n} for k, n in ss.evm_chains(raw)],
         "solNeedsHelius": (raw.get("sol") or {}).get("rpc") == "helius",
+        "evmNeedsKeys": _evm_needs_keys(raw),
         "explorers": _explorers_status(grp),
         "exchanges": exs,
         "telegram": {"connected": tg_set, "bot": tgs.get("bot") if tg_set else None,
@@ -818,11 +841,42 @@ def status() -> dict:
                                   "start": f"/start {p['nonce']}"} if p else None)},
         "prefs": {"currency": st.get("currency") or "KRW"},
         "apply": {"runner": bool(runners), "units": units,
+                  "mode": ("reload" if runners and all(h9.get("by") == "reload" for h9 in runners.values()) else ("runner" if runners else "")),
                   "manual": "pm2 restart tj-evm tj-sol tj-bsc tj-core tj-web"},
         "backfillMonths": raw.get("backfill_months", 5),
+        "walletCap": {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH},
         "depaddr": dep,
         "perp": _perp_status(raw),
     }
+
+
+def _evm_needs_keys(raw) -> bool:
+    try:
+        return ss.needs_etherscan(raw)
+    except Exception:
+        return False
+
+
+def _tier_view(raw_path: str) -> dict:
+    import urllib.parse as _up
+    try:
+        import addr_tier
+        q = _up.parse_qs(raw_path.partition("?")[2])
+        try:
+            add_n = max(0, min(ss.MAX_ADDRESSES, int((q.get("add") or ["0"])[0])))
+        except ValueError:
+            add_n = 0
+        chains = [c for c in ((q.get("chains") or [""])[0]).split(",") if re.fullmatch(r"[a-z0-9_]{1,24}", c or "")][:40]
+        try:
+            cfg = ss.load_config_quiet()
+        except Exception:
+            cfg = {}
+        out = addr_tier.web_view(cfg, add_n=add_n, add_chains=chains)
+        raw = ss.read_config_raw()
+        out["cap"] = {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len({ss._addr_key(w) for w in raw.get("wallets") or []})}
+        return out
+    except Exception as e:
+        return {"ok": False, "error": "확인 주기 정보를 읽지 못했어요: " + scrub(type(e).__name__)}
 
 
 def _explorers_status(grp) -> dict:
@@ -859,6 +913,10 @@ def handle_get(h, path: str) -> bool:
     if not guard(h, "GET"):
         return True
     if path == "/v2/setup.js":
+        sa9 = getattr(h, "_send_asset", None)
+        if callable(sa9):
+            sa9(SETUP_JS, "application/javascript; charset=utf-8", str(getattr(h, "path", "") or "").partition("?")[2])
+            return True
         with open(SETUP_JS, "rb") as f:
             h._send(200, f.read(), "application/javascript; charset=utf-8")
         return True
@@ -867,6 +925,22 @@ def handle_get(h, path: str) -> bool:
             h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
             return True
         h._send(200, status())
+        return True
+    if path == "/api/setup/tier":
+        if not client_allowed(h.client_address[0]):
+            h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
+            return True
+        h._send(200, _tier_view(getattr(h, "path", "") or ""))
+        return True
+    if path == "/api/setup/chains":
+        if not client_allowed(h.client_address[0]):
+            h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
+            return True
+        try:
+            import chainoff
+            h._send(200, chainoff.summary())
+        except Exception as e:
+            h._send(200, {"ok": False, "error": "체인 목록을 읽지 못했어요: " + scrub(type(e).__name__)})
         return True
     if DEMO and path in ("/api/state", "/api/v2/state"):
         h._send(200, demo_data.build())
@@ -997,6 +1071,21 @@ def _dispatch(act: str, b: dict) -> dict:
         late = sorted({c for x in r["results"] if x.get("status") == "added" for c in x.get("chains") or [] if c in done})
         return {"ok": True, "results": r["results"], "added": r["added"], "apply": r["apply"], "reconDone": late,
                 "max": ss.MAX_BATCH}
+    if act == "wallets/check_now":
+        import addr_tier
+        a = b.get("address")
+        if a is not None:
+            if not isinstance(a, str) or not a.strip():
+                return {"ok": False, "error": "주소 형식이 아닙니다"}
+            _k, a, _n = ss.validate_address(a)
+        if not RL.hit("check_now", 30, 60):
+            return {"ok": False, "rate": True, "error": "너무 자주 눌렀어요 — 1분 뒤 다시"}
+        return addr_tier.request_check(a)
+    if act == "chains/set":
+        import chainoff
+        if not RL.hit("chains_set", 20, 60):
+            return {"ok": False, "rate": True, "error": "너무 자주 눌렀어요 — 1분 뒤 다시"}
+        return chainoff.set_enabled(b.get("chain"), b.get("on"))
     if act == "wallets/remove":
         n = ss.remove_wallet(b.get("address"))
         return {"ok": bool(n), "removed": n, **({} if n else {"error": "없는 주소입니다"})}
@@ -1159,9 +1248,18 @@ class _DemoSpot:
 
 class DemoBuilder:
     spot = _DemoSpot()
+    daily_px = None
 
     def build(self):
         return demo_data.build()
+
+    @property
+    def _day_idx(self):
+        return demo_data.day_idx()
+
+    @property
+    def daily(self):
+        return demo_data.daily_freeze()
 
     def prefs(self):
         return {}
@@ -1181,7 +1279,10 @@ def demo_main(webmod) -> bool:
         cport = None
     port = int(os.environ.get("TJ_PORT") or cport or 8023)
     webmod.BUILDER = DemoBuilder()
-    srv = ThreadingHTTPServer(("127.0.0.1", port), webmod.Handler)
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", port), webmod.Handler)
+    except OSError as e:
+        webmod.port_busy_exit(port, e, demo=True)
     log.info("★데모 모드★ http://127.0.0.1:%d/v2/ — 합성 데이터(실지갑 아님), 저장 POST 거부", port)
     srv.serve_forever()
     return True

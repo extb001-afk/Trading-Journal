@@ -25,6 +25,7 @@ HOP_MAX_NONCE = 5000
 ACCT_TTL = 30 * 86400
 REV_HOPX = "hopx_1004"
 REV_HOPSCAN = "hopscan_v1"
+REV_HOPOPEN = "hopopen_1007"
 BUDGET_RETRY_SEC = 3600
 MAX_PAGES = int(os.environ.get("XCHAIN_MAX_PAGES", "60"))
 MAX_WINDOWS = int(os.environ.get("XCHAIN_MAX_WINDOWS", "400"))
@@ -419,6 +420,7 @@ def load_cache(state_dir):
     _rev_hopfifo(c)
     _rev_hopscan(c)
     _rev_hopx(c)
+    _rev_hopopen(c)
     return c
 
 
@@ -496,10 +498,33 @@ def _rev_hopx(c):
     return len(mark)
 
 
+def _hop_evm(k, e) -> bool:
+    if not _hop_derived(e):
+        return False
+    if (k.split("|")[0] if "|" in k else "") != "sol":
+        return True
+    return any(isinstance(lt, dict) and (lt.get("chain") or lt.get("src") or "sol") != "sol" for lt in e.get("lots") or [])
+
+
+def _rev_hopopen(c):
+    rev = c.setdefault("rev", {})
+    if not isinstance(rev, dict):
+        rev = c["rev"] = {}
+    if REV_HOPOPEN in rev:
+        return 0
+    mark = [k for k, e in (c.get("arr") or {}).items() if _hop_evm(k, e)]
+    for k in mark:
+        c["arr"][k]["reverify"] = REV_HOPOPEN
+    rev[REV_HOPOPEN] = {"t": int(time.time()), "marked": len(mark), "keys": mark[:200]}
+    return len(mark)
+
+
 def transit_for(rows, cache, off=frozenset(), external=frozenset()):
     ents = {}
     for k, e in (cache.get("arr") or {}).items():
         if not isinstance(e, dict) or e.get("status") != "ok" or D(e.get("cost")) <= 0:
+            continue
+        if e.get("reverify"):
             continue
         if norm(k.split("|")[1]) in off or any(norm(h) in external for h in e.get("hops") or ()):
             continue
@@ -516,7 +541,8 @@ def transit_for(rows, cache, off=frozenset(), external=frozenset()):
         e = ents.get(arr_key(r["source_ns"], r["source_id"], loc.split(":", 2)[2], r["address"]))
         if e:
             out[r["posting_id"]] = {"qty": D(e["qty"]), "cost": D(e["cost"]), "cov": D(e["cov"]), "label": e.get("label") or "",
-                                    "via": e.get("via") or "", "proto": e.get("proto")}
+                                    "via": e.get("via") or "", "proto": e.get("proto"),
+                                    "lots": e.get("lots") if isinstance(e.get("lots"), list) else None}
     return out
 
 
@@ -563,10 +589,10 @@ def candidates(rows, cache, explained=frozenset(), stable_gids=frozenset(), now=
         wallet = loc.split(":", 2)[2]
         k = arr_key(r["source_ns"], txh, wallet, r["address"])
         e = (cache.get("arr") or {}).get(k)
-        if e and e.get("stale") and e.get("rt"):
+        if e and (e.get("stale") or e.get("reverify")) and e.get("rt"):
             if now - float(e.get("rt") or 0) < (BUDGET_RETRY_SEC if e.get("rst") in ("budget", "paused", "wait") else RETRY_SEC):
                 continue
-        if e and not e.get("stale"):
+        if e and not (e.get("stale") or e.get("reverify")):
             st = e.get("status")
             age = now - float(e.get("t") or 0)
             if st in ("paused", "wait"):
@@ -663,6 +689,11 @@ def send_candidates(rows, cache, seed, now=None):
     return out
 
 
+def _fail_class(e, block=None, head=None) -> str:
+    import bf_engine
+    return bf_engine.rpc_fail_class(e, block=block, head=head)
+
+
 def _definitive(e) -> bool:
     return isinstance(e, urllib.error.HTTPError) and 400 <= int(getattr(e, "code", 0) or 0) < 500 \
         and int(e.code) not in (408, 425, 429)
@@ -691,7 +722,7 @@ class Tracer:
         self.budget, self.sleep, self.log = budget, sleep, log or (lambda *a: None)
         self.calls = 0
         self.skip_gids = frozenset(skip_gids or ())
-        self.mine = {norm(w.get("address")) for w in cfg.get("wallets") or [] if w.get("address")}
+        self.mine = {norm(w.get("address")) for w in _cm9.history_wallets(cfg) if w.get("address")}
         self.anchors = {norm(a): v for a, v in (anchors or {}).items() if a and norm(a) not in self.mine}
         self.cex = {norm(a) for a in (cex or ()) if a} - self.mine
         sol = cfg.get("sol") or {}
@@ -708,7 +739,22 @@ class Tracer:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"})
         netpace.wait(url)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            import bf_engine as _bfe9
+            if "_" in str(method):
+                try:
+                    d = _bfe9.rpc_post(url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=timeout,
+                                       ua="tj-bot/0.1 (personal trade journal)")
+                except (_bfe9.NetError, getattr(_bfe9, "RpcTransportError", OSError)) as e8:
+                    if getattr(e8, "code", None) is not None or getattr(e8, "kind", None) == "http429":
+                        netpace.note_error(url, e8)
+                    raise
+                if not isinstance(d, dict):
+                    raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
+                if "error" in d:
+                    ce9 = _bfe9.classify_rpc_error(d["error"])
+                    raise _bfe9.NetError(str(d["error"])[:200], ce9.kind, code=ce9.code)
+                return d.get("result")
+            with _bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) as r:
                 d = json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             netpace.note_error(url, e)
@@ -760,23 +806,28 @@ class Tracer:
 
     def _evm(self, chain, method, params, logs=False):
         err = None
+        errs = []
         for u in self._evm_urls(chain, logs):
             try:
                 r = self._post(u, method, params)
                 if r is None and method != "eth_getLogs":
                     err = "null(가지치기 노드)"
+                    errs.append(err)
                     continue
                 return r
             except Budget:
                 raise
             except Exception as e:
                 err = e
-        raise RuntimeError(f"{chain} {method}: {err}")
+                errs.append(e)
+        ex = RuntimeError(f"{chain} {method}: {err}")
+        ex.errs = errs or ["엔드포인트 없음"]
+        raise ex
 
     def sol_tx(self, sig):
         m = self.c["stx"]
         if not m.get(sig):
-            ct = compact_sol_tx(self._sol("getTransaction", [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]))
+            ct = compact_sol_tx(self._sol("getTransaction", [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}]))
             if ct is None:
                 raise RuntimeError("tx 없음")
             m[sig] = ct
@@ -890,6 +941,9 @@ class Tracer:
         if down:
             raise ApiDown(f"브릿지 API 일시 실패: {','.join(down)} ({short(txh)})")
         return []
+
+    def _head(self, chain):
+        return int(self._evm(chain, "eth_blockNumber", []) or "0x0", 16)
 
     def receipt(self, chain, h):
         k = f"{chain}|{norm(h)}"
@@ -1141,7 +1195,9 @@ class Tracer:
                                                     hex(int(before_block) - 1)])
             except Budget:
                 raise
-            except Exception:
+            except Exception as e9:
+                if _fail_class(e9, block=int(before_block) - 1, head=lambda: self._head(chain)) == "transient":
+                    raise Paused(f"창 앞 잔고 조회 일시 실패 — 다음에 다시({chain} {short(H)}): {str(e9)[:120]}") from e9
                 return None
             if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) != 66:
                 return None
@@ -1307,6 +1363,8 @@ class Tracer:
             raise
         except Exception as ex:
             self.log(f"acct {chain} {short(a)}: {ex}")
+            if _fail_class(ex) == "transient":
+                raise Paused(f"계정 조회 일시 실패 — 다음에 다시({chain} {short(a)}): {str(ex)[:120]}") from ex
             return False
         e = {"t": int(time.time()), "n": n, "busy": n >= HOP_MAX_NONCE,
              "code": code not in ("0x", "0x0", "") and not code.startswith("0xef0100")}
@@ -1653,7 +1711,7 @@ class Tracer:
             e["err"] = _cm9.safe_err(ex)[:200]
         e["path"] = path[:12]
         prev = self.c["arr"].get(k)
-        if (isinstance(prev, dict) and prev.get("status") == "ok" and prev.get("stale")
+        if (isinstance(prev, dict) and prev.get("status") == "ok" and (prev.get("stale") or prev.get("reverify"))
                 and e.get("status") not in ("ok", "link", "none", "gate")):
             prev["rt"], prev["rst"] = e["t"], e.get("status")
             if e.get("err"):

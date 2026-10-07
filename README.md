@@ -17,13 +17,13 @@
 |---|---|---|
 | 1 | **Python 3.9+** 가 있는 macOS/Linux 준비 (pm2 는 선택) | `python3 --version` |
 | 2 | 받고 설치 점검 — 아무것도 설치하지 않습니다 | `git clone <이 저장소 주소> tj-bot` → `cd tj-bot` → `bash tools/setup.sh` |
-| 3 | 키 준비 — Solana 지갑이 있으면 Helius 무료 키만 필수, 나머지는 선택 | [키 표](#3-키-준비--env-와-configjson) · 거래소 키는 **조회 권한만** |
+| 3 | 키 준비 — Solana 지갑이 있으면 Helius, EVM 지갑이 있으면 Etherscan 무료 키가 필수, 나머지는 선택 | [키 표](#3-키-준비--env-와-configjson) · 거래소 키는 **조회 권한만** |
 | 4 | 실행 | `pm2 start ecosystem.config.js` (pm2 없이: [아래](#4-실행--설정-마법사)) |
 | 5 | 화면 열기 → 설정 마법사에서 지갑·키·거래소·텔레그램 | **http://127.0.0.1:8023/** |
-| 6 | 첫 백필 기다리기 — 보통 수십 분, 많으면 몇 시간 | 화면 위 **상태 패널** |
+| 6 | 첫 백필 기다리기 — 보통 수십 분, 많으면 몇 시간(첫날은 옛 기록부터 채워서 새 거래 확인이 늦을 수 있음) | 화면 위 **상태 패널** |
 | 7 | 남은 '원가 미확인'만 정리 | **미매칭** 탭 |
 
-먼저 구경만 하려면 `bash tools/setup.sh --demo` — 합성 데이터로 화면만 띄우고 아무것도 저장하지 않습니다.
+먼저 구경만 하려면 `bash tools/setup.sh --demo` — 합성 데이터로 화면만 띄우고 아무것도 저장하지 않습니다(포트를 바꾸려면 `TJ_PORT=8024 bash tools/setup.sh --demo`).
 
 > **업데이트 안내 — 이미 쓰던 설치라면:** 이번 판부터 `config.json` 에 `web.login` 이 **없어도 로그인이 켜집니다.**
 > 업데이트 뒤 `pm2 restart tj-web` 하고 **이 컴퓨터에서** http://127.0.0.1:8023/ 을 열어 비밀번호부터 만드세요
@@ -49,6 +49,66 @@
 - 문장 검색은 기본으로 **규칙 변환만** 씁니다(외부 호출 없음). `config.json` 의 `"wow": {"ask_llm": true}` 를 켜면 내 컴퓨터의 `claude` CLI 로도 바꿔 봅니다.
 - 가리기·랜덤값 모드에서는 이 화면들도 금액을 가리고, 검색어 속 금액은 서버로 보내지 않아요.
 
+### 이번 판에 더해진 것
+
+| | |
+|---|---|
+| ![보관처 상세 — 보관처 줄을 누르면 열리는 서랍: 총자산 중 몇 %·코인 구성 링·최근 30일 들어옴/나감/이곳 매매 실현·체인별 비중·들어 있는 코인](docs/screenshots/42_venue_drawer.png) | ![차익 영수증 매수 차트 — 다른 지갑·체인을 거쳐 들어온 코인도 처음 산 곳(DEX 체결)까지 거슬러 매수 점을 찍어요](docs/screenshots/40_receipt_buy_chart.png) |
+| ![보낸 내역 한 주소 펼침 — 보낸 토큰·전송 목록(최근 200건 · 50건씩 더 보기)](docs/screenshots/43_outflow_expanded.png) | ![설정 › 표시 › 금액 랜덤값 — 배수 고정(이 기기에만 저장 · 켜진 동안 값은 안 보여요)](docs/screenshots/44_settings_display_rand.png) |
+| ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
+| ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
+
+- **보관처 상세** — 대시보드 '보관처별' 줄을 누르면 오른쪽에서 서랍이 열려요(폰은 아래에서 올라오는 시트). 체인별 비중을 누르면 탐색기, 주소는 바로 복사,
+  코인을 누르면 보유표로 가요. 거래소는 체인 대신 '잔고 기준 N분 전'을 보여 주고, 계산이 안 된 칸은 '—' 로 둡니다.
+- **매수 점 거슬러 찾기** — 경유 지갑·브릿지를 거쳐 거래소로 들어가 판 코인도 원가를 처음 산 매수(스왑)까지 따라가 영수증 차트에 점을 찍어요.
+  매수 시각을 알 수 없는 몫은 시각을 지어내지 않고, 들어온 시각에 **입금 마름모**(원가 단가·원가 규칙)로 따로 표시합니다.
+- **보낸 내역 전송 목록** — 한 주소의 전송은 최근 200건을 최신순으로 보여 주고(앞 8줄 + 50건씩 더 보기), 그보다 오래된 것은
+  '그 전 N건은 목록에서 생략'으로 알려요. 합계·건수는 늘 전 건 기준입니다.
+- **지갑을 넣으면 알아서 수집** — `pm2 start ecosystem.config.js` 로 띄운 설치는 설정에서 지갑을 추가하면 수집기가 스스로 다시 시작해요
+  (손으로 `pm2 restart` 할 필요 없음). 다시 시작하기 전까지는 지갑 줄·보낸 내역에 **'곧 자동으로 수집 시작'** 이 보입니다.
+- **확인 주기(계단)** — 오래 안 쓴 주소는 덜 자주 확인해요(지금 주기 → 조금 느리게 → 1시간마다 → 6시간마다 → 6개월 넘게 쉬면 하루 1회).
+  쉬는 주소는 탐색기를 부르지 않고 공개 RPC 로 잔고·nonce 만 보다가, 바뀌거나 내가 보내면 바로 지금 주기로 돌아와요.
+  기록이 하나도 없는 **빈 지갑**은 하루 한 번만 봅니다. 주소별 칩과 '지금 확인' 단추는 **설정 › 지갑 · 주소**에서.
+- **옛 기록 먼저, 새 거래 확인은 남겨 둔 몫으로** — 이더스캔 키의 하루 몫(공표 한도의 80%)에서 새 거래 확인 몫(하루의 약 10~70% — 실제 사용량으로 정함)을
+  먼저 떼어 두고, 나머지는 옛 기록 채우기가 UTC 0시(한국 오전 9시)부터 바로 몰아서 써요. 그래서 **처음 넣은 지갑은 옛 기록부터 채우고,
+  첫날은 새 거래 확인이 평소보다 늦을 수 있어요**(그동안 새 거래 확인은 하루 몫의 약 10% 안에서 고르게). 옛 기록이 다 채워지면 새 거래 확인이 하루 몫을 그대로 씁니다.
+  하루 총량은 그대로라 한도를 넘지 않고, 오늘 옛 기록 몫을 다 쓴 뒤 넣은 지갑은 주로 다음 오전 9시부터 채워요.
+- **체인 끄기** — **설정 › 지갑 · 주소 › 체인별 조회**에서 안 쓰는 체인의 스위치를 끄면 그 체인의 조회·입출금 알림이 멈춰 컴퓨터와 API 한도를 아껴요.
+  지금까지 기록은 그대로 남고(잔고는 끈 때 값에서 멈춤), 다시 켜면 끈 날부터 빠진 기간을 이어 받아요.
+  그 체인에서 보낸 거래가 지갑마다 10번 이하면 **'끄는 걸 추천해요'** 로 강조하고 끄면 줄어드는 하루 호출 수를 보여 줘요. 다만 모르는 지갑(확인 전·점검 실패)이
+  하나라도 있거나, 최근 30일 안에 보낸 거래가 있거나, 옛 기록을 채우는 중이면 추천하지 않아요. 잔고가 $100 넘게 남아 있으면 추천 옆에 같이 적어 둡니다.
+  BSC·Solana(따로 도는 수집기)와 일부 체인은 아직 이 스위치로 못 꺼요(줄에 이유 표시).
+- **확인 주기가 지갑 수에 맞춰 늘어나요** — 지갑이 많아 이더스캔 하루 몫(공표 한도의 80% — 같은 키를 쓰는 체인 합산)을 넘을 것 같으면 기본 확인 주기를 지갑 수에 맞춰 늘려요(최대 15분 —
+  그래도 넘치면 종전처럼 간격을 더 벌려요). 지갑 칩의 **'M분마다'** 와 'Solana 지갑 N개라 M분마다 확인해요' 같은 줄로 보여 주고, 체인별 조회 카드에도 같은 주기가 나와요.
+- **Solana 도 하루 몫** — 헬리우스 무료 월 한도(100만 크레딧)의 80% 를 30일로 나눈 하루 몫(약 2만 6천) 안에 들도록 Solana 기본 주기를 맞춰요.
+  이더스캔과 같이 새 거래 확인 몫을 먼저 떼어 두고(옛 기록을 채우는 동안은 하루 몫의 10% — `sol.helius_head_min_pct` 로 1~70 사이 조절) 나머지는 UTC 0시부터 옛 기록에 먼저 써요.
+  오늘 옛 기록 몫을 다 쓴 뒤 넣은 Solana 지갑은 '옛 기록 차례 대기'로 보이다가 다음 오전 9시에 시작합니다. 옛 기록이 다 채워지면 새 거래 확인이 하루 몫을 그대로 써요.
+  유료 플랜이면 `config.json` 의 `sol.helius_monthly_credits` 에 월 크레딧을 적으세요.
+- **Solana 새 거래는 공개 노드 먼저** — Solana 새 거래 확인은 무료 공개 노드(publicnode)를 먼저 쓰고, 응답이 없거나 이상하면 같은 요청을 헬리우스로 다시 보내요
+  (헬리우스는 옛 기록 채우기와 백업에 씀). 공개 노드는 최근 약 18시간만 보관해서, 마지막 확인이 12시간보다 오래된 주소(수집기를 오래 껐다 켠 경우 등)와
+  처음 넣은 지갑은 헬리우스로 확인하고, 헬리우스가 주기적으로 공개 노드 결과를 대조해 빠진 거래가 있으면 다시 받아요.
+  헬리우스 하루 몫을 다 쓴 날은 그날 끝(UTC 자정 = 한국 오전 9시)까지 헬리우스를 쉬고 공개 노드로 이어 받아요(새 거래 = publicnode · 옛 기록 = Solana 공식 공개 노드,
+  공표 한도의 80% 안 · 새 지갑 첫 백필은 다음 날). 끄려면 `sol.head_rpc`·`sol.archive_rpc` 를 `""` 로 — 그러면 종전처럼 헬리우스만 쓰고, 하루 몫이 다 차면 그날 끝까지 쉬어요.
+- **옛 기록 채우는 동안** — 첫 백필·옛 기록 채우기가 남은 주소도 새 거래 확인은 계단 규칙을 따라요. 최근 거래가 보이는 주소는 지금 주기로 계속 확인하고,
+  오래 쉰 주소는 새 거래 확인은 쉬면서 옛 기록만 마저 채워요(하루 몫 안에서).
+- **빈 지갑은 먼저 가볍게** — nonce·잔고가 0 인 EVM 지갑은 긴 옛 기록 채우기 전에 토큰 이동이 하나라도 있었는지 한 번만 가볍게 물어봐요.
+  하나도 없으면 **빈 지갑**으로 두고 활동은 하루 한 번만 확인합니다(토큰 입금만 오면 주 1회 확인 때 기록 — 시각·수량은 그대로).
+- **EVM 지갑이면 Etherscan 키 필수** — EVM 지갑을 등록했는데 Etherscan 키가 없으면 설정 마법사(지갑·키·마지막 요약)·키 카드('EVM 필수')·상태 패널에
+  '이더스캔 키가 필요해요(무료)'가 떠요. 경고만 하고 막지는 않아요 — 키가 없어도 공개 탐색기·RPC 로 계속 받지만 느리거나, 공개 탐색기가 막힌 체인
+  (Arbitrum·Polygon 등)은 늦게 기록될 수 있어요(기록이 사라지지는 않아요). 이 안내는 텔레그램으로 보내지 않습니다.
+- **Base 는 공개 RPC 로 직접** — Base 블록스카웃 API 가 막혀 있어(2026-10 기준 403 · 무료 이더스캔 키도 Base 는 지원하지 않음) Base 는 탐색기 없이
+  공개 RPC 노드에서 직접 읽어요. 이미 쓰던 설치는 재시작하면 지금까지 받은 위치를 그대로 이어받아 새 거래는 바로 보이고, 아직 못 받은 옛 구간과
+  내부 ETH 이동(스왑으로 받은 ETH·브리지 입금 등)은 뒤에서 채워요(지갑·기간에 따라 몇 시간까지). 지갑의 잔고·nonce 를 대조해 로그가 남지 않는 ETH 이동도 찾고,
+  옛 구간을 다 채우기 전까지는 새로 넣은 Base 지갑의 기초 잔고 확인이 늦어질 수 있어요. 블록스카웃으로 되돌리려면 `config.json` 의 `chains.base.discovery` 를 `"explorer"` 로.
+- **탐색기가 막히면 공개 RPC 로 자동 대체** — 이더스캔·블록스카웃이 막히면(하루 한도를 다 씀·키 거부·연속 실패·403·색인 정지, 또는 하루 몫 때문에
+  새 거래 확인이 20분 넘게 밀림) 그 체인만 받던 위치에서 이어 공개 RPC 로 받아요(하루 한도·키 문제일 때 그 체인 블록스카웃이 살아 있으면 종전처럼 블록스카웃 먼저).
+  설정은 필요 없어요 — 체인마다 키 없는 공개 노드 목록이 들어 있어요. 탐색기가 살아나면 알아서 돌아가요(블록스카웃은 15분마다·이더스캔은 1시간마다 한 번 시험,
+  하루 한도는 쉼이 끝나면 · 깜빡이지 않게 최소 30분은 머묾). 상태 패널과 확인 주기 카드에 '이더스캔 대신 RPC 로 확인 중(이유)'이 한 줄 보이고,
+  텔레그램으로는 보내지 않아요. 하루·월 한도가 있는 무료 노드는 공표 한도의 80% 까지만 세어 쓰고, 넘으면 그 노드는 UTC 자정까지 쉬고 다음 노드로 넘어가요.
+  끄려면 `config.json` 에 `"rpc_fallback": false`(전체) 또는 `chains.<체인>.rpc_fallback: false`(그 체인만).
+- **빗썸 원화 입출금도 일별 기록에** — 은행 ↔ 빗썸 원화 입출금이 그날 기록·그날 카드 '입출금'(순유입)·자산 변동 분해에 들어가요(전에는 업비트만). [아래](#일별-기록--그날-카드--m월-한눈에)
+- **미매칭엔 할 일만** — '기초 잔고 대사 완료' 같은 알림이 미매칭 › 기타 보류에 빈 '—' 줄로 쌓이던 것을 뺐어요(미매칭 배지 수도 그만큼 줄어요).
+
 ### 대시보드
 
 ![대시보드 아래쪽 — 보유 코인 표(오늘 변동·7일 추이)](docs/screenshots/02_dashboard_below.png)
@@ -59,15 +119,24 @@
 |---|---|
 | ![총자산 곡선 — 1년](docs/screenshots/15_long_curve_1y.png) | ![총자산 곡선 — 전체 기간](docs/screenshots/15_long_curve_all.png) |
 
+![BTC 비교선 — 같은 날 같은 돈으로 BTC 만 샀다면 대비 내 실제 매매(입출금 뺀 수익률)](docs/screenshots/38_dash_bench.png)
+
+
 ### 매매일지 · 차익 영수증
 
 ![매매일지 — 코인별 사이클(투입 → 매도)](docs/screenshots/04_journal_cycles.png)
 
 ![차익 영수증 — 매수·매도 한 차트, 코드 점수, AI 평가 상자](docs/screenshots/05_receipt_drawer.png)
 
+| 매수·매도 타점 — NMR | 매수·매도 타점 — JPYC |
+|---|---|
+| ![차익 영수증 타점 차트 — NMR: 산 곳·판 곳을 시세 위에 점으로](docs/screenshots/50_receipt_chart_nmr.png) | ![차익 영수증 타점 차트 — JPYC: 산 곳·판 곳을 시세 위에 점으로](docs/screenshots/51_receipt_chart_jpyc.png) |
+
 ![선물 상세 — 포지션·펀딩·수수료](docs/screenshots/16_futures_drawer.png)
 
 ### 일별 기록 · 명세
+
+![일별 기록 — 6월 달력(날마다 실현손익)](docs/screenshots/52_daily_calendar_june.png)
 
 ![일별 기록 — 달력과 그날 카드(무엇이 움직였나·시세 코인별 분해·30분 체결 막대·매매 근거 메모)](docs/screenshots/06_daily_day_card.png)
 
@@ -113,9 +182,13 @@
 |---|---|---|
 | ![모바일 기타 자산](docs/screenshots/24_mobile_other_assets.png) | ![모바일 매매일지와 아래 탭 막대](docs/screenshots/25_mobile_tabbar_journal.png) | ![모바일 알림 설정](docs/screenshots/26_mobile_settings_alerts.png) |
 
-| 일별 — M월 한눈에 | 기타 자산 › NFT |
-|---|---|
-| ![모바일 'M월 한눈에'](docs/screenshots/27_mobile_month_glance.png) | ![모바일 NFT(컬렉션 이름·바닥가 가림)](docs/screenshots/28_mobile_nft.png) |
+| 일별 — M월 한눈에 | 기타 자산 › NFT | 보관처 상세 |
+|---|---|---|
+| ![모바일 'M월 한눈에'](docs/screenshots/27_mobile_month_glance.png) | ![모바일 NFT(컬렉션 이름·바닥가 가림)](docs/screenshots/28_mobile_nft.png) | ![모바일 보관처 상세(아래에서 올라오는 시트)](docs/screenshots/47_mobile_venue_sheet.png) |
+
+| 체인별 조회 | | |
+|---|---|---|
+| ![모바일 체인별 조회(설정 › 지갑 · 주소)](docs/screenshots/49_mobile_settings_chains.png) | | |
 
 ---
 
@@ -150,7 +223,7 @@ bash tools/setup.sh
 | 키(`.env` 이름) | 필수? | 어디서 받나 | 언제 필요한가 |
 |---|---|---|---|
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | https://dashboard.helius.dev (무료) | Solana 지갑 수집 |
-| `TJ_ETHERSCAN_KEY` | 선택 | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 과거 거래 백필이 수십 배 빨라짐. 없어도 동작 |
+| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받음(키 하나로 여러 체인 · 하루 무료 한도의 80% 만). 없으면 공개 탐색기·RPC 로 받아 느리거나 늦게 기록될 수 있음 |
 | `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) 또는 유료 **Pro** 키 — 자동 판별 | 키 하나를 코인게코 시세(거래소 값이 없는 코인)·DEX 토큰 시세·원가·차트·NFT 바닥가가 같이 써서 빨라짐. 몫이 모자라거나 실패하면 그 콜만 무키로. 없으면 전부 무키 공용 한도라 느리고 NFT 바닥가는 처음 몇 시간 걸릴 수 있음. 프로 키는 플랜 한도의 10%(기본 · 25·50·80% 선택)만 씀 |
 | `TJ_OPENSEA_KEY` | 선택 | https://docs.opensea.io/reference/api-keys (무료 신청) | 넣으면 EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 원활하게 추적(없거나 실패하면 코인게코) |
 | `UPBIT_ACCESS` · `UPBIT_SECRET` | 선택 | 업비트 › 마이페이지 › Open API 관리 | 업비트 입출금·체결·잔고 |
@@ -169,7 +242,9 @@ bash tools/setup.sh
 > 권한을 API 로 확인할 수 없는 업비트·빗썸·쿠코인·게이트는 '조회 권한만 켰음' 확인을 눌러야 저장됩니다.
 > 개인 키·시드 문구는 어디에도 필요 없습니다 — 이 봇은 조회만 합니다.
 
-RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐색기만 씁니다(무료 한도를 지키도록 천천히 받습니다).
+RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐색기만 씁니다 — 기본 설정은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있고,
+유료 키·노드는 넣으면 더 빨라지거나 BNB Chain 처럼 더 옛 기록까지 받게 해 줄 뿐입니다. 외부 API 는 **공표 한도의 80%** 를 기준으로 하루 몫을 정해 천천히 부르고,
+한도를 공표하지 않은 공개 노드는 초당 요청 수를 스스로 낮게 묶습니다. 탐색기가 막혀도 공개 RPC 로 이어 받습니다([위](#이번-판에-더해진-것)).
 더 빠른 유료 RPC 가 있으면 `config.json` 의 `chains.<체인>`·`bsc`·`sol` RPC 목록에 넣을 수 있습니다(키 박힌 URL 은 남에게 보여 주지 마세요).
 
 `config.json` 에서 알아 두면 좋은 키:
@@ -187,9 +262,15 @@ RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐
 | `review.sell_eval_daily_max` · `buy_eval_daily_max` | 0(끔) | AI 매도·매수 평가 하루 상한. 켜려면 예: 20 (`claude` CLI 필요) |
 | `review.coach_role` · `review.known_patterns` | 없음 | AI 일간·주간 리뷰 맞춤 — 첫 줄 트레이더 설명(예: "단타 위주 트레이더") / 지적하지 않을 내 운용 패턴 문장 목록(10개·각 200자) |
 | `recon_tokens` | 없음 | 잔고 대사에 늘 넣을 토큰 `{"체인": {"0x토큰 CA": ["심볼", 소수 자리]}}` — 자동으로 켜진 추가 체인에 합쳐짐 |
+| `health.heartbeat_url` · `heartbeat_sec` | 없음(꺼짐) · 300 | 감시기(tj-alert)를 밖에서 감시 — healthchecks.io 같은 서비스의 핑 주소를 넣으면 상태 점검이 한 바퀴 돌 때마다(최소 60초 간격) GET 한 번. tj-alert 가 죽거나 멈추면 핑이 끊겨 그 서비스가 알려 줍니다(실패는 조용히 다음 주기에) |
 | `health.tunnel` | 없음(꺼짐) | 터널 유닛 감시 `{"unit": "pm2 이름", "ready_url": "http://127.0.0.1:<메트릭 포트>/ready"}` — 터널 연결 0 이 5분 이어지면 알림(클라우드플레어 터널 메트릭의 `/ready` 등) |
 | `other_assets` · `brokers` | 증권사 전부 꺼짐 | 기타 자산 탭의 공개 시세 갱신 주기 / 증권사 보유 동기화(**미검증**, 아래 '기타 자산' 참고) |
-| `chains.<체인>.enabled` | 체인마다 | 쓰지 않는 체인을 통째로 끄기 |
+| `chains.<체인>.enabled` | 체인마다 | 쓰지 않는 체인을 통째로 끄기 — 화면 **설정 › 지갑 · 주소 › 체인별 조회** 스위치가 이 값을 바꿔요 |
+| `rpc_fallback` · `chains.<체인>.rpc_fallback` | 켜짐 | 이더스캔·블록스카웃이 막히면 그 체인을 공개 RPC 로 대체 — `false` 면 끔(전체 / 그 체인만) |
+| `chains.base.discovery` | `rpc` | Base 수집 방식 — 공개 RPC 로 직접. `"explorer"` 면 블록스카웃(되돌리기) |
+| `sol.helius_monthly_credits` | 없음(100만) | 헬리우스 월 크레딧(무료 플랜 100만). 유료 플랜이면 그 값을 적으세요 — 하루 몫 = 이 값의 80% ÷ 30 |
+| `sol.helius_head_min_pct` | 10 | 옛 기록을 채우는 동안 새 거래 확인에 떼어 두는 헬리우스 하루 몫(%) · 1~70 |
+| `sol.head_rpc` · `sol.archive_rpc` | publicnode · Solana 공식 공개 노드 | Solana 새 거래 확인용 / 헬리우스 몫이 없을 때 옛 기록용 공개 노드. `""` 면 끔(헬리우스만) |
 | `price_overrides` | 없음 | 비상용 수동 가격 고정 |
 
 텔레그램 알림 종류·조용한 시간은 `config.json` 이 아니라 화면 **설정 › 알림 (텔레그램)** 에서 정합니다(`state/ui_prefs.json` 에 저장).
@@ -218,24 +299,27 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 - 처음엔 지갑마다 **최근 5개월**을 거슬러 받습니다(백필). 그동안 화면 숫자는 계속 바뀝니다.
 - 걸리는 시간(이 저장소의 실측 모델 `seed/coverage/speed_model.json` 기준, 무료 한도):
-  - 이더스캔 계열 체인: 지갑당 수 초~수십 초 · Base·Optimism 등 블록스카웃 계열: 지갑당 수십 초~4분
+  - 이더스캔 계열 체인: 지갑당 수 초~수십 초 · Optimism 등 블록스카웃 계열: 지갑당 수십 초~4분 · Base(공개 RPC): 새 거래는 바로, 옛 기록은 뒤에서 채움(지갑·기간에 따라 몇 시간까지)
   - BNB Chain: 지갑 수와 무관하게 5개월 ≈ 20~25분 · Solana: 거래 1건 ≈ 0.4초(1,000건 ≈ 7분)
   - 거래소: 업비트 과거 체결은 1분에 7일 창씩 이어 받아 몇 달이면 수십 분 — 해외 거래소도 비슷
   - 지갑·거래가 많으면 **몇 시간** 걸릴 수 있습니다. 그 뒤로는 증분만 받아 1~몇 분 안에 따라갑니다.
+  - 이더스캔·헬리우스 하루 몫은 옛 기록 채우기가 먼저 쓰므로, **첫날은 새 거래 확인이 평소보다 늦을 수 있어요.** 옛 기록이 다 채워지면 평소 속도로 돌아옵니다.
 - 어디서 보나:
   - 화면 위의 **상태 표시줄 → 상태 패널 열기** — 수집기별 '과거 기록 수집 중'·지연·오류
   - **설정 › 수집 한계** — 거래소·체인별로 어디까지 받았고 무엇을 못 받는지([docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) 와 같은 내용)
   - 로그: `pm2 logs tj-core` · `pm2 logs tj-evm` 등
 - 백필이 끝나기 전에는 '원가 미확인'·잔고 차이가 많이 보이는 게 정상입니다. 끝난 뒤에도 남는 것만 **미매칭** 탭에서 처리하세요.
-- 텔레그램을 연결했다면 처음 7일은 동기화·대사·백필 알림이 많이 옵니다(추천값 기준 — 7일 뒤 자동으로 줄어듦).
+- 텔레그램을 연결해도 동기화·과거 기록 가져오기 같은 봇 내부 소식은 텔레그램으로 보내지 않습니다(상태 패널에만 — 처음 다 가져왔을 때 한 통만). 자세한 건 [텔레그램 알림 설정](#텔레그램-알림-설정).
 
 ### 6) 화면 열기 · 다른 기기에서 보기
 
 - 이 컴퓨터에서: **http://127.0.0.1:8023/** (포트는 `config.json` 의 `web.port`)
 - **로그인(기본 켜짐)** — 처음 한 번 **이 컴퓨터에서** http://127.0.0.1:8023/ 을 열면 **비밀번호 만들기**(10자 이상)부터 나옵니다.
+  이때 **설정 코드**를 묻습니다 — 설치 폴더의 `state/auth_setup_code` 파일 내용(`cat state/auth_setup_code` · 이 컴퓨터에서만 읽히는 0600 파일 ·
+  쓰고 나면 지워짐). 헤더를 안 붙이는 프록시 뒤에서 밖의 누군가가 첫 비밀번호를 먼저 만드는 것을 막습니다.
   그 뒤로는 어느 기기에서 열든 비밀번호를 묻습니다. 한 번 로그인하면 그 기기에서 30일 유지되고, 7일 동안 안 쓰면 다시 묻습니다
   (`web.login.session_days` · `idle_days`).
-  - 비밀번호 바꾸기 · 모든 기기에서 로그아웃 · 로그아웃 = 화면 **설정 › 로그인**. 10분에 5번 틀리면 15분 잠깁니다(반복되면 두 배, 최대 24시간).
+  - 비밀번호 바꾸기 · 모든 기기에서 로그아웃 · 로그아웃 = 화면 **설정 › 로그인**. 10분에 5번 틀리면 15분 잠깁니다(반복되면 두 배, 최대 24시간) — 프록시·터널을 거친 시도(프록시가 X-Forwarded-* 등 헤더를 붙일 때)는 이 컴퓨터 직접 접속과 따로 세어, 밖에서 틀려도 이 컴퓨터에선 로그인됩니다(`reset_password.py --set` 으로 바꾸면 잠금도 풀림).
   - 비밀번호를 잊었으면 이 컴퓨터에서 `python3 tools/reset_password.py`(지운 뒤 /login 에서 새로 만들기) 또는
     `python3 tools/reset_password.py --set`(터미널에서 바로 입력). 실행 중인 tj-web 이 바로 알아챕니다.
   - 끄기 = `config.json` 의 `"web": {"login": {"enabled": false}}` → `pm2 restart tj-web`(켜기·끄기·기간 변경은 재시작 때 반영).
@@ -270,10 +354,35 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   로그인한 뒤에만 여기 닿으므로 설정도 열립니다). 사설 IP 로 바인딩해도
   같은 와이파이의 다른 기기는 설정을 바꿀 수 없습니다. 꼭 필요할 때만 `config.json` 의 `"web": {"setup_allow_lan": true}` 로 풀 수 있습니다(권장하지 않음).
 
+### 6-1) 서버(리눅스)에서 늘 켜 두기
+
+노트북에서 돌리면 들고 나갈 때 공인 IP 가 바뀌어 **거래소 조회가 막히고**(IP 화이트리스트), 덮개를 닫으면 수집이 멈춥니다.
+늘 켜 둘 거라면 고정 IP 서버 하나에 올리는 게 편합니다.
+
+| 항목 | 권장 |
+|---|---|
+| 사양 | 최소 2코어 · 램 4GB · SSD 40GB(지갑 수십 개) / 넉넉히 4코어 · 램 8GB · SSD 80GB 이상(지갑 수백 개·체인 여럿) |
+| 실제 쓰는 양(참고) | 평소 유닛 전체 램 약 1.3~2.5GB(가장 큰 건 화면 서버 tj-web) · CPU 는 코어 1개의 10~20% · 첫 백필·재구축 때만 코어 1개를 몇 시간 씀 |
+| 운영체제 | Ubuntu 24.04 LTS(22.04 이상이면 기본 python3 로 동작) — 파이썬 패키지 설치 없음 |
+| 램 4GB 서버 | 스왑 4GB 를 만들어 두세요(화면 계산이 몰릴 때 대비) |
+| IP | **고정 공인 IP** — 그 IP 를 거래소 API 키의 화이트리스트에 넣습니다 |
+| 시간대 | `Asia/Seoul` 로 맞춰 두면 로그 시각이 화면과 같아요 |
+| 디스크 | 원장(`state/ledger.db`)과 정기 백업이 자라므로 여유 20GB 이상 유지 |
+
+순서:
+1. 서버에 `git`·`python3`(·선택 `nodejs`/`npm` → `npm install -g pm2`)을 준비하고, 서비스용 일반 사용자로 위 [2)~4)](#2-받기--설치-점검) 를 그대로 합니다.
+2. `pm2 start ecosystem.config.js` → 확인 뒤 `pm2 save` → `pm2 startup` 이 알려 주는 명령을 실행하면 재부팅 뒤에도 자동으로 켜집니다.
+3. **화면은 기본 그대로 127.0.0.1 에만 엽니다.** 포트를 인터넷에 직접 열지 마세요(방화벽은 SSH 만).
+   - 나 혼자 잠깐 볼 때: 내 컴퓨터에서 `ssh -L 8023:127.0.0.1:8023 사용자@서버` → 내 컴퓨터 브라우저로 http://127.0.0.1:8023/ (첫 비밀번호도 이렇게 만듭니다).
+   - 휴대폰 등 어디서나: 위 6) 의 **HTTPS 리버스 프록시·터널**(클라우드플레어 터널 등 — 로그인 필수) 또는 Tailscale.
+4. 거래소 키를 서버 IP 로 화이트리스트한 키로 바꿔 넣었는지, 상태 패널에서 거래소 동기화가 초록인지 확인합니다.
+5. 백업: `state/`·`.env`·`config.json` 을 가끔 서버 밖으로 복사해 두세요(원장 정기 백업은 같은 서버 디스크에 남습니다).
+
 ### 7) 문제 해결 — 자주 묻는 5가지
 
 1. **화면이 안 열려요** — `pm2 ls` 로 `tj-web` 이 online 인지, `pm2 logs tj-web --lines 50` 에 오류가 있는지 보세요.
-   8023 포트를 다른 프로그램이 쓰고 있으면 `config.json` 의 `web.port` 를 바꾸고 `pm2 restart tj-web`.
+   8023 포트를 다른 프로그램이 쓰고 있으면 `config.json` 의 `web.port` 를 바꾸고 `pm2 restart tj-web`(로그에 '포트 … 을(를) 다른 프로그램이 쓰고 있어요' 한 줄).
+   `TJ_PORT` 환경변수는 데모(`--demo`) 전용입니다 — 일반 실행 포트는 `web.port` 하나로, 하루 리뷰·상태 점검·비밀번호 재설정 도구가 같은 값을 읽습니다.
 2. **거래소 키 저장이 거부돼요 / 동기화가 멈췄어요** — 키에 거래·출금·이체 권한이 켜져 있으면 저장을 거부합니다(조회만 켜서 새로 발급).
    IP 화이트리스트에 지금 컴퓨터의 공인 IP 가 들어 있는지 확인하세요(노트북을 들고 나가면 IP 가 바뀌어 거부됩니다).
 3. **Solana 지갑이 안 잡혀요** — `TJ_HELIUS_KEY` 가 비어 있으면 Solana 수집기는 기다리기만 합니다. 설정 › 연결·키에서 넣으세요.
@@ -298,18 +407,23 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 | 등급 | 어떻게 오나 | 종류 |
 |---|---|---|
-| 🔴 **즉시** | 지금 폰을 보고 해야 할 일 · 소리 · 조용한 시간에도 바로 | 봇이 멈춤(몇 분 이상 · 끌 수 없음) · 목표가·손절 도달 · 내가 안 한 큰 출금 · 스테이블 가격 이탈 · 선물 청산가 근접 · 보유 코인 급등락(켜도 밤엔 모았다가) |
+| 🔴 **즉시** | 지금 폰을 보고 해야 할 일 · 소리 · 조용한 시간에도 바로 | 봇이 멈춤(몇 분 이상 · 끌 수 없음 — 프로그램·장부 계산·서버·디스크·거래소·시세 수집, 한 수집기의 체인이 모두 함께 멈춤) · 체인 수집 지연(체인 하나가 늦거나 멈춤 — 대부분 저절로 풀려서 기본은 꺼짐 · 상태 패널에서 봄) · 잔고 불일치(하루 넘게 — 수집·재계산 같은 진행 중인 일이 다 끝난 뒤에도 장부와 실제 잔고가 24시간 넘게 다르면 한 번 · 어느 지갑·코인 · 장부와 실제 · 짐작 · 할 일) · 목표가·손절 도달 · 내가 안 한 큰 출금(모르는 주소로 나감 · 내가 옮긴 돈이 제때 안 들어오거나 수수료보다 많이 줄어 들어옴) · 스테이블 가격 이탈(들고 있는 것만) · 청산 근접(선물·대출·마진) · 보유 코인 급등락(켜도 밤엔 모았다가) · 내 이체 도착 확인(소리 없이 — 따로 끌 수 있음) |
 | 📋 **하루 요약** | 정한 시각(추천 09:00)에 소리 없이 한 통 · 작은 차트 | 오늘 손익 · 잔고 맞추기 결과 · 처음 보는 토큰 · LP 범위 이탈 · AI 복기 도착 · 기타 자산·증권사 · 안 풀린 봇 문제 · 그 밖의 소식 |
 | **시스템** | 텔레그램으로 보내지 않음(상태 패널·설정의 '지난 7일'에만) | 거래 분류·동기화 · 과거 기록 가져오기·다시 계산 |
 
 - **추천값 3종** — 버튼 하나로 채웁니다. 손으로 바꾸면 '직접 설정'으로 표시됩니다.
-  - **추천**(새 설치 기본): 즉시 5가지(급등락 제외) + 하루 요약 한 통, 밤 1시~8시는 모아서
-  - **최소**: 즉시 5가지만(요약 없음)
-  - **전부**: 급등락까지 모두
-- 같은 문제는 **두 번만** 알립니다 — 생겼을 때와 풀렸을 때(심해지면 한 번 더). 풀림은 ✅ 로 시작하고 소리가 나지 않아요.
-- **조용한 시간** — 정한 시간 동안 온 알림은 모았다가 끝날 때 한 통으로 보냅니다(즉시 등급은 그대로).
+  - **추천**(새 설치 기본): 즉시 6가지(급등락·체인 수집 지연 제외) + 내 이체 도착 확인(소리 없이) + 하루 요약 한 통, 밤 1시~8시엔 급등락만 모아서
+  - **최소**: 즉시 6가지만(요약·도착 확인 없음)
+  - **전부**: 급등락·체인 수집 지연까지 모두
+- 같은 문제는 **두 번** 알립니다 — 생겼을 때와 풀렸을 때(심해지면 한 번 더). 봇 멈춤이 1시간 넘게 이어지면 한 번 더 알리고, 풀린 뒤 15분 안에 다시 나빠지면 같은 문제로 이어 갑니다(깜빡일 때 여러 통 안 옴). 풀림은 ✅ 로 시작하고 소리가 나지 않아요.
+- **큰 출금** — 서버가 이동마다 '모르는 곳으로 나감 / 내 지갑·거래소·브릿지끼리 옮김 / 장부 보정(거래소 잔고 맞춤·차입 반영)'을 나눠서, 모르는 곳으로 나간 것만 바로 알립니다(한 건이 기준 이상이거나 24시간 합계가 기준을 넘을 때 · 여러 건이면 코인·목적지를 전부 한 통에). 내가 옮긴 돈은 보낼 때는 조용하고, 도착하면 걸린 시간·받은 수량·수수료로 줄어든 양을 소리 없이 알려 줍니다(일반 30분·브릿지 2시간 안에 안 들어오면 소리).
+- **조용한 시간** — 급등락만 모았다가 끝날 때 한 통으로 보냅니다(나머지 즉시 등급은 밤에도 바로).
 - 급등락·큰 출금·디페그·청산 근접·손익 기준 시각·요약 시각은 기준값을 바꿀 수 있어요. **테스트** 버튼으로 그 종류의 예시를 받아 볼 수 있습니다(예시 값은 가짜).
 - 가짜 전송·주소 오염 같은 확실한 스캠은 설정과 상관없이 항상 걸러 냅니다. 끈 동안 생긴 알림은 보내지 않을 뿐 기록은 남습니다.
+- **체인 수집 지연은 기본으로 안 보내요** — 체인 하나가 늦거나 멈춘 것(탐색기 403·색인 정지·하루 한도 쉼 등)은 대부분 저절로 풀리고 할 일이 없어서,
+  추천·최소와 새 설치에서는 꺼져 있어요(이미 쓰던 설치도 이 칸은 꺼진 채로 시작 — '전부'를 누르거나 그 줄 스위치를 켜면 받음).
+  꺼 둬도 상태 패널·대시보드 상태 카드에는 그대로 보이고, 한 수집기의 체인이 모두 함께 멈추면 '봇이 멈춤'으로 꼭 알려요.
+  이더스캔 키 안내·공개 RPC 대체 소식도 텔레그램이 아니라 상태 패널에만 떠요.
 
 ## 금액 랜덤값 모드
 
@@ -317,17 +431,23 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 - 켜기: 화면 위 **주사위 버튼** 또는 **설정 › 표시 › 금액 랜덤값**.
 - 금액·수량에 **페이지를 열 때마다 새로 정해지는 같은 배수**를 곱해 보여 줍니다. 합계·차트 모양은 서로 맞고, 퍼센트·단가·날짜·건수는 그대로라 예시 화면처럼 자연스럽습니다.
-- 화면 전체에 **'랜덤값' 워터마크**가 깔려 실제 숫자로 오해할 일이 없습니다. CSV 도 같은 배수로 나갑니다.
-- **실제 금액은 저장소에 닿지 않습니다.** 배수는 어디에도 저장하지 않고(새로고침하면 바뀜), 원장·설정은 그대로이며,
+- 화면 전체에 **'랜덤값' 워터마크**가 깔려 실제 숫자로 오해할 일이 없습니다.
+- **실제 금액은 저장소에 닿지 않습니다.** 배수는 기본으로 어디에도 저장하지 않고(새로고침하면 바뀜), 원장·설정은 그대로이며,
   켜 있는 동안 금액·메모 입력 칸은 비우고 잠가 랜덤 숫자가 저장될 일이 없습니다. 이 기기의 브라우저 저장본도 쓰지 않습니다.
   AI 설명 글처럼 배수를 맞출 수 없는 글은 통째로 가립니다.
+- **배수 고정(선택)** — 캡처 여러 장의 숫자를 서로 맞추고 싶으면 **설정 › 표시 › 금액 랜덤값**에서 배수를 고정할 수 있어요(0.2~5, 실제와 비슷한 0.8~1.25 는 안 됨).
+  이 기기 브라우저에만 저장되고, 랜덤값이 켜진 동안에는 고정한 값을 화면에 내지 않습니다. 배수를 아는 사람은 실제 값을 계산할 수 있으니 값은 혼자만 아세요.
+- 켜 두면 탐색기 링크를 빼고(주소·해시로 실제 지갑을 찾아갈 수 없게), 서버도 첫 화면 HTML 에 실제 총자산 요약을 넣지 않습니다.
+- **내가 쓴 이름·메모도 가려요** — 지갑 이름·별명·보낸 곳 별명·메모·텔레그램 봇과 채팅 이름처럼 내가 직접 붙인 글은 **'지갑 A'·'메모'** 같은 표식으로 바꿔 보여 줘요
+  (같은 이름 = 같은 표식 · 페이지를 연 동안 고정 · 주소는 종전처럼 앞뒤만). 그 글이 든 입력 칸·검색 결과·문장 속 이름도 같은 표식으로 바뀌고, 금액 가리기(숨김)에서도 똑같이 동작합니다.
+- **텔레그램 연결 QR·코드는 숨겨요** — 가림 중에는 연결 QR·연결 링크·/start 코드를 보이지 않아요(남이 캡처해 내 봇에 연결하지 못하게 · 끄면 다시 보여요).
+- **지난 검색어는 지워요** — 가림을 켜면 검색창의 최근 검색어를 이 기기에서 지우고 새로 남기지 않아요. 저장해 둔 검색 조건은 가림 중에만 숨깁니다.
 - 금액 가리기와 둘 중 하나만 켜집니다.
 
 ## 금액 가리기(숨김 모드)
 
 - 화면 위 **눈 버튼** 또는 **Shift+H**(설정 › 표시에서도). 금액·수량·단가를 흐린 가짜 글자로 바꿉니다.
 - 퍼센트·건수·날짜는 그대로 보이고, AI 설명 글은 숫자가 섞여 있어 통째로 가립니다.
-- 숨김 중 CSV 를 내려받으면 '실제 금액이 그대로 담긴다'고 한 번 더 묻습니다.
 
 ## 기타 자산 — 증권사 연결은 미검증
 
@@ -386,6 +506,9 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **그날 카드** — 그날 총자산 변동을 시세·실현·입출금·환율로 나누고, **시세(평가) 몫은 코인별 표**(전일 수량 × 가격 변화 — 전일 마감가 → 그날 마감가(오늘은 지금 시세) · 변동률 · 기여 금액)로 펼쳐 보여 줍니다.
   30분 체결 막대, 그날 실현 기여, 매매 근거 메모(코인별 한 줄)도 같은 카드에 있습니다.
 - **'M월 한눈에'** — 달력 아래에 그 달 자산 변동 분해(시세·실현·LP 수수료·입출금·환율·나머지)와 실현 상위·하위 5를 한 장으로 보여 줍니다.
+- **원화 입출금** — 업비트·빗썸의 은행 원화 입출금(거래소가 주는 예치금 이용료 같은 내부 지급 포함)이 그날 기록에 한 줄씩 나와요.
+  최근 30일은 빗썸 원화 입출금도 그날 카드 '입출금'(순유입)·보관처별 들어옴/나감·자산 변동 분해에 들어가고, 빗썸 원화로 산 코인은 매매로 나눠 보여 줘요
+  (장기 곡선의 입출금은 종전대로 업비트만).
 
 ## 백필 · 재구축 · 재백필
 
@@ -394,6 +517,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   분류·원가·손익을 다시 계산하고 검증을 통과한 경우에만 원장을 바꾼 뒤 스스로 다시 켭니다. 손으로 유닛을 멈출 일이 없습니다.
   실패하면 원장은 그대로 두고 6시간 → 12시간 → 24시간 뒤 다시 시도합니다. 진행은 **상태 패널**과 `pm2 logs tj-core` 에서 봅니다
   (끄려면 `config.json` 의 `"backfill": {"auto_rebuild": false}`).
+  지갑을 나중에 등록해 그 전에 받아 둔 옛 거래의 해석만 바뀐 칸(예: 예전에 내게 토큰을 보낸 주소를 내 지갑으로 등록)은 다시 계산한 쪽을 맞는 값으로 받아들이고,
+  그 밖에 설명되지 않는 수량 차이나 새로 생기는 마이너스 수량이 있으면 종전처럼 원장을 바꾸지 않습니다.
 - **재구축 점검(읽기만)**: `python3 tools/rebuild2.py --dry-run` 은 아무것도 쓰지 않고 원본 건수만 보여 줍니다.
   `python3 tools/rebuild2.py --shadow-dir /tmp/tj_shadow` 는 원장을 복사본에서 다시 계산해 지금 원장과 비교만 합니다(교체하지 않음 · 유닛을 멈출 필요 없음).
 - `tools/rebuild.py` 는 옛 원장 형식용이라 지금 원장에서는 **실행을 거부합니다** — 쓰지 마세요.
@@ -409,13 +534,15 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **지갑 수집** — EVM(Ethereum·Base·Arbitrum·Optimism·Polygon·Scroll·zkSync·Gnosis) + BNB Chain + Solana.
   추가 EVM 체인(Monad·MegaETH·Plasma·X Layer·Kaia·Fraxtal·BOB·Story·Somnia·Avalanche·Stable·Abstract·Arc·Robinhood 등)은
   등록 주소에 활동이 확인되면 켤 수 있습니다(`chain_sweep` — 기본은 알림만, `auto_enable` 로 자동 추적).
+  안 쓰는 체인은 설정에서 스위치 하나로 끄고(끄기 추천 표시), 확인 주기는 지갑 수와 탐색기·헬리우스 하루 몫(80%)에 맞춰 스스로 조절합니다.
+  하루 몫은 옛 기록 채우기가 먼저 쓰고, 탐색기가 막히면 그 체인을 공개 RPC 로 이어 받습니다(Base 는 공개 RPC 전용 · Solana 새 거래는 공개 노드 먼저).
 - **거래소 연결(선택)** — 업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트. 입금·출금·체결·잔고(마진·Earn·선물 손익 포함)를 읽어
   "지갑 → 거래소 입금 → 매도" 흐름을 한 사이클로 묶고 원가를 이어 줍니다. 원화 입출금도 따로 보여 줍니다.
 - **퍼프 덱스(선택)** — 주소만으로 공개 조회되는 곳(Hyperliquid·GMX 등)의 포지션·정산. **Hyperliquid** 는 현물·무기한 현금·스테이킹까지 원장·대사(선택).
 - **NFT(표시 전용)** — 보유 자동 발견(크립토펑크 등 표준 이전 NFT 포함), 바닥가·거래량 확인된 컬렉션 자동 추적, 후보·스팸 거르기·지켜보기, 총자산 포함 스위치.
 - **LP** — Uniswap v3/v4·PancakeSwap·SushiSwap·Aerodrome/Velodrome Slipstream·Meteora DLMM 등 포지션 원금·수수료 평가.
 - **손익** — 사이클별 투입·실현·미실현, 차익 영수증(매수·매도 한 차트·점수), 월/일 실현손익 달력과 매매 근거 메모,
-  전일 대비 분해(시세 몫은 코인별 표), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(CSV).
+  전일 대비 분해(시세 몫은 코인별 표), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(참고용 표).
 - **내 매매 돌아보기** — 타임머신 · 자금 흐름 지도 · 팔기 전 미리보기 · 올해 결산 · 계획 지키기 점수 · 매매 습관 · 하루 실현 잔디 · BTC 비교선.
 - **전체 검색** — ⌘K(또는 /)로 코인·주소·해시·날짜·금액·메모·리뷰를 한 번에(필터 문법 `coin:` `chain:` `type:` `after:` `pnl:` `amt:` …, 문장 검색).
 - **상태 패널·알림** — 수집기·외부 API 지연, 온체인 잔고 상시 대조(불일치 알림), 원장 정기 백업 상태, 텔레그램 알림 3등급(즉시 · 하루 요약 · 시스템).
@@ -470,6 +597,14 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - 거래소·체인 API 가 주지 않는 옛 기록은 가져오지 않습니다 — [docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md)·화면 **설정 › 수집 한계**.
 - 신고용 명세는 계산 보조 자료입니다. 세무 판단은 전문가와 확인하세요.
 
+## 시험 실행
+
+```
+python3 tests/run_all.py
+```
+
+설치·키·네트워크 없이 표준 라이브러리만으로 돕니다(합성 데이터 · 임시 폴더 · 바깥 연결 차단). 검색 해석·악의적 입력, 알림 분류·묶음·문구, 분석 계산 예제(안 팔았다면·습관·흐름 지도·하루 요약 그림·문장 검색·격리 자산 분리), 수집→원장(시각 보강·WAL 정리), NFT 시세, 레버리지·청산 감시, 재계산 승인을 확인합니다 — 특히 확인하지 못한 것을 '없음·해소·도착'으로 확정하지 않는지 봅니다. 하나라도 실패하면 종료 코드 1입니다. GitHub 에 올리면 `.github/workflows/tests.yml` 이 같은 명령을 돌립니다.
+
 ## 라이선스
 
 라이선스 미정 — 정해지기 전까지는 저작권자 허락 없이 재배포·수정 배포를 할 수 없습니다.
@@ -483,17 +618,21 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 optional extra EVM chains) and, optionally, **read-only** API keys for Upbit, Bithumb, Binance, Bybit, OKX, KuCoin and Gate.
 It merges on-chain swaps, transfers and LP positions with exchange deposits, withdrawals and fills into one local SQLite ledger and
 shows cost basis, realized/unrealized PnL, a daily PnL calendar with per-day trade notes, trade "receipts" with buy/sell charts,
-a long-range net-worth curve, an "other assets" tab (real estate, stocks, gold, cash, debt), a tax-report CSV, bridge/transfer
+a long-range net-worth curve, an "other assets" tab (real estate, stocks, gold, cash, debt), a capital-gains statement (reference only), bridge/transfer
 tracking and a review queue for unknown-cost inflows and spam tokens. The UI is Korean and times are KST.
 
 - **Requirements:** macOS or Linux, Python 3.9+ (standard library only). Node.js + pm2 optional (recommended for auto-restart).
+- **Always-on server:** use a fixed-IP Linux box (Ubuntu 24.04; 2–4 cores, 4–8 GB RAM — add 4 GB swap on 4 GB, 40–80 GB SSD) and whitelist that IP on your exchange API keys. Keep the web UI bound to 127.0.0.1; open it with `ssh -L 8023:127.0.0.1:8023 user@server` or an HTTPS tunnel/reverse proxy with login on — never expose the port directly.
 - **Start:** `bash tools/setup.sh` (creates `config.json`, `.env` (mode 600) and `state/`; installs nothing), then
   `pm2 start ecosystem.config.js` and open http://127.0.0.1:8023/ — a setup wizard handles wallets (paste many at once), keys and Telegram.
   `bash tools/setup.sh --demo` shows synthetic data without saving anything.
-- **Keys:** a free Helius key is required only for Solana wallets; Etherscan, CoinGecko (demo or pro — detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
+- **Keys:** a free Helius key is required for Solana wallets and a free Etherscan key for EVM wallets (for Etherscan this is a warning only —
+  without it collection still runs on public explorers/RPC, just slower or later); CoinGecko (demo or pro — detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
   with an IP whitelist (keys with trade/withdraw/transfer permissions are refused where the exchange lets us check).
+  Defaults run on free keys and public nodes only; external APIs are paced to 80% of their published limits.
 - **First run:** the default backfill is the last 5 months; expect minutes to a few hours depending on wallets and trades.
-  Progress is shown in the status panel and in Settings > collection limits.
+  Progress is shown in the status panel and in Settings > collection limits. The Etherscan and Helius daily shares go to old history first,
+  so new-transaction checks can be slower on the first day.
 - **New in this release:** Hyperliquid (HyperCore spot fills/transfers, perps cash and staked HYPE booked like an exchange and reconciled —
   opt in with `"hyperliquid": {"spot": true}`); NFT holdings with floor prices (auto-tracks collections with a floor and recent volume,
   candidate list, spam filtering with reasons, watch-only collections, an "include in total" switch that is off by default, CryptoPunks and
@@ -509,20 +648,42 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Telegram alerts:** three tiers — **now** (sound, even in quiet hours: bot stopped, target/stop hit, a large withdrawal you did not make,
   stablecoin depeg, near liquidation, optional big moves), a **daily digest** (one silent message at a set time) and **system** (never sent,
   status panel only). Presets (recommended/minimal/all), thresholds and quiet hours; the same problem is sent at most twice (raised and ✅ resolved).
+  A single chain running late is off by default (status panel only; on with the "all" preset), while a whole collector stopping is always sent.
 - **Look back at your trading (new):** a time machine (drag the curve to see that day's holdings vs. "if you had held"), a money-flow map
   (deposits → exchanges → wallets → where it is now), a sell preview (expected realized PnL and this year's taxable gain), a year-end card set,
   a plan-keeping score, trading habits by weekday/hour and holding time, a one-year realized-PnL heatmap and BTC / "never sold" comparison lines.
+- **New in this release:** a holding-place drawer (share of total, coin ring, 30-day in/out, chains, coins), buy dots traced back through
+  hop wallets and bridges to the original swap (unknown buy times shown as a separate "deposit" diamond, never invented), outflow
+  transfer lists of the latest 200 with "show more", automatic collector restart after adding a wallet ("곧 자동으로 수집 시작"),
+  tiered per-address check intervals (idle addresses checked less, empty wallets once a day) and an Etherscan daily budget (80% cap) that
+  keeps a share for new-transaction checks and spends the rest on old history from 00:00 UTC.
+  Also new: per-chain on/off switches in Settings › 지갑 · 주소 (a chain is suggested for switching off when every wallet sent 10 or fewer
+  transactions there and nothing is unknown, recent or still backfilling; switching it back on resumes from the day it was turned off),
+  base check intervals that grow with the number of wallets so the daily budget holds, a Helius daily budget for Solana (80% of the free
+  monthly credits spread over 30 days, old history first as well — `sol.helius_head_min_pct`; set `sol.helius_monthly_credits` for paid plans),
+  new-transaction checks that keep following the tiers while old history is still being filled, and a one-call probe for empty wallets.
+  Solana new transactions are checked on a free public node (publicnode) first, with Helius as backup and periodic cross-check; when the
+  Helius daily share is used up, public nodes carry on until the UTC day ends (`sol.head_rpc` / `sol.archive_rpc` = `""` to disable).
+  Base is now read directly from public RPC nodes (its Blockscout API is blocked; existing installs keep their position and fill older
+  history in the background), and any EVM chain whose Etherscan/Blockscout is blocked or out of quota switches to public RPC automatically
+  and back when the explorer recovers (`rpc_fallback: false` to disable). Bithumb KRW bank deposits/withdrawals now show up in the daily
+  records, net flow and breakdown, and "baseline reconciled" notices no longer fill the unmatched list.
 - **Search (new):** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
   (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested
   against a real account; all are disabled by default.
-- **Privacy:** random-amount mode multiplies amounts by a per-page random factor (never stored) with a "랜덤값" (random) watermark;
-  hide mode (Shift+H) blurs amounts. Both are display-only. All screenshots above were taken in random-amount mode with fake addresses
+- **Privacy:** random-amount mode multiplies amounts by a per-page random factor (not stored by default — it can be pinned per browser in
+  Settings › 표시 for consistent screenshots, never shown while the mode is on) with a "랜덤값" (random) watermark; explorer links are removed;
+  hide mode (Shift+H) blurs amounts. Both are display-only. In either mode, names and notes you wrote yourself (wallet names, aliases,
+  notes, Telegram bot/chat names) are shown as generic labels such as "지갑 A" / "메모", the Telegram link QR and code are hidden, and
+  recent searches are cleared. All screenshots above were taken in random-amount mode with fake addresses
   and position numbers (NFT collection names and floors are also hidden in the NFT shots, and other-asset names are replaced with "<type> A").
 - **Login (on by default):** on first run, open http://127.0.0.1:8023/ on the machine itself to create a password (10+ characters);
   every device then needs it. Sessions last 30 days (7 days idle). Passwords are stored as PBKDF2-SHA256 hashes; 5 wrong tries in
   10 minutes lock that IP for 15 minutes (doubling on repeat). Change it or log out everywhere in Settings › 로그인; forgot it →
   `python3 tools/reset_password.py` (or `--set`) on the machine. Disable only with `"web": {"login": {"enabled": false}}` + restart tj-web.
+  The first-password form also asks for a one-time **setup code** — the contents of `state/auth_setup_code` (0600, `cat state/auth_setup_code`
+  on the machine; deleted once used), so nobody behind a header-less proxy can claim the first password.
   **Upgrading:** login is now on even when `web.login` is missing from `config.json` — after updating, restart tj-web and create the
   password on the machine first (other devices get 401 until then).
 - **Reverse proxy / tunnel:** put an HTTP-aware HTTPS proxy (e.g. a Cloudflare tunnel) in front of `http://127.0.0.1:8023`, keep the `Host`
@@ -542,4 +703,5 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`/`SSL_CERT_DIR`, and Claude login/gateway/Bedrock/Vertex variables) — never exchange keys or `.env` values.
   Receipt buy/sell evaluation is off by default; enable it by setting `review.sell_eval_daily_max` / `review.buy_eval_daily_max` to 1 or more
   (max calls per day). `review.coach_role` and `review.known_patterns` tailor the daily/weekly review to your style.
+- **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network (the same command runs in `.github/workflows/tests.yml`).
 - **License:** not decided yet (all rights reserved until then). Provided as is; PnL and tax figures are an aid, not advice.

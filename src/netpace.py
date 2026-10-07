@@ -53,7 +53,7 @@ def interval_for(host: str) -> float:
     return EXPLORER_SEC if any(m in host for m in _EXPLORER_MARKS) else OTHER_SEC
 
 
-def wait(url: str, now=time.time, sleep=time.sleep):
+def wait(url: str, now=time.time, sleep=time.sleep, method: str = None):
     h, ck = host_of(url), cool_key(url)
     with _lock:
         t = now()

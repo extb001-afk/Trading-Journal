@@ -14,6 +14,7 @@ DB_PATH = os.path.join(STATE_DIR, "ledger.db")
 DEMO_ISOLATED = False
 if os.environ.get("TJ_DEMO") == "1":
     STATE_DIR = os.environ.get("TJ_DEMO_STATE") or tempfile.mkdtemp(prefix="tj_demo_state_")
+    os.environ["TJ_DEMO_STATE"] = STATE_DIR
     INBOX_DIR = os.path.join(STATE_DIR, "inbox")
     DB_PATH = os.path.join(STATE_DIR, "ledger.db")
     DEMO_ISOLATED = True
@@ -47,7 +48,8 @@ def ua_for(url: str, default: str) -> str:
 
 DEFAULT_DISABLED_CHAINS = set()
 
-DEFAULT_DISCOVERY = {"robinhood": "rpc", "arc": "rpc"}
+DEFAULT_DISCOVERY = {"robinhood": "rpc", "arc": "rpc",
+                     "base": "rpc"}
 
 DEFAULT_NATIVE_SYMBOL = {"arc": "USDC"}
 
@@ -444,7 +446,52 @@ def apply_activity_gate(cfg: dict) -> list:
         added.append((c, d["addr"]))
     if added:
         cfg["_auto_pairs"] = sorted(f"{c}:{a}" for c, a in added)
+    off9 = {n for n, cc in chains.items() if isinstance(cc, dict) and not chain_enabled(n, cc)}
+    if off9:
+        for d in gate_decisions(_as_enabled(cfg)):
+            if d["ok"] and d["chain"] in off9:
+                _keep_disabled_pair(cfg, d)
     return added
+
+
+def _as_enabled(cfg: dict) -> dict:
+    c2 = dict(cfg)
+    ch = dict(cfg.get("chains") or {})
+    for n, cc in list(ch.items()):
+        if isinstance(cc, dict) and not chain_enabled(n, cc):
+            if auto_off_block(cc):
+                ch.pop(n)
+            else:
+                ch[n] = {k: v for k, v in cc.items() if k not in ("enabled", "_chainoff")}
+    c2["chains"] = ch
+    return c2
+
+
+def auto_off_block(cc) -> bool:
+    if not isinstance(cc, dict):
+        return False
+    mk = cc.get("_chainoff") if isinstance(cc.get("_chainoff"), dict) else {}
+    if mk.get("created"):
+        return True
+    return not mk and {k for k in cc if not str(k).startswith("_")} == {"enabled"}
+
+
+def history_wallets(cfg: dict) -> list:
+    return list((cfg or {}).get("wallets") or []) + [w for w in ((cfg or {}).get("_disabled_wallets") or []) if isinstance(w, dict)]
+
+
+def _keep_disabled_pair(cfg: dict, d: dict) -> None:
+    c = d["chain"]
+    cfg.setdefault("_disabled_wallets", []).append({"type": "evm", "chain": c, "address": d["addr"], "label": d.get("label") or "", "_auto": "activity"})
+    try:
+        import chaincatalog
+        sym, wr = chaincatalog.native_of(c)
+    except ImportError:
+        sym, wr = None, None
+    if sym:
+        cfg.setdefault("native_symbol", {}).setdefault(c, sym)
+    if wr:
+        cfg.setdefault("wrapped_native", {}).setdefault(c, wr)
 
 
 def _drop_disabled_chains(cfg: dict) -> None:
@@ -454,18 +501,47 @@ def _drop_disabled_chains(cfg: dict) -> None:
         return
     for n in off:
         chains.pop(n, None)
-    cfg["wallets"] = [w for w in (cfg.get("wallets") or [])
-                      if not (w.get("type", "evm") == "evm" and w.get("chain") in off)]
+    keep = []
+    for w in (cfg.get("wallets") or []):
+        if w.get("type", "evm") == "evm" and w.get("chain") in off:
+            cfg.setdefault("_disabled_wallets", []).append(dict(w))
+        else:
+            keep.append(w)
+    cfg["wallets"] = keep
     cfg["_disabled_chains"] = off
     logging.getLogger("tj").info("비활성 체인(설정 제외): %s — 켜려면 chains.<name>.enabled=true", ", ".join(off))
 
 
+_CFG_LOADED = [False]
+
+
+def _config_fail(msg: str, exc=None):
+    if _CFG_LOADED[0]:
+        if exc is not None:
+            raise exc
+        raise SystemExit(msg)
+    logging.getLogger("tj").critical("★%s — 고친 뒤 저절로 다시 떠요(pm2)★", msg)
+    if os.environ.get("pm_id") is not None:
+        try:
+            wait = float(os.environ.get("TJ_CONFIG_FAIL_WAIT") or 45)
+        except ValueError:
+            wait = 45.0
+        import time as _t
+        _t.sleep(max(0.0, min(wait, 600.0)))
+    raise SystemExit(msg)
+
+
 def load_config() -> dict:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except json.JSONDecodeError as e:
+        _config_fail(f"설정 파일 형식 오류: {os.path.basename(CONFIG_PATH)} {e.lineno}줄 {e.colno}칸 — {e.msg}", e)
+    if not isinstance(cfg, dict):
+        _config_fail(f"설정 파일이 JSON 객체가 아님: {os.path.basename(CONFIG_PATH)}")
     for key in ("chains", "wallets"):
         if key not in cfg:
-            raise SystemExit(f"config.json 에 필수 키 없음: {key}")
+            _config_fail(f"config.json 에 필수 키 없음: {key}")
     try:
         apply_activity_gate(cfg)
     except (Exception, SystemExit) as e:
@@ -474,8 +550,9 @@ def load_config() -> dict:
     ns9 = cfg.get("native_symbol")
     if not isinstance(ns9, dict):
         ns9 = cfg["native_symbol"] = {}
+    _book9 = set(cfg.get("chains") or {}) | set(cfg.get("_disabled_chains") or [])
     for _name, _sym in DEFAULT_NATIVE_SYMBOL.items():
-        if _name in (cfg.get("chains") or {}):
+        if _name in _book9:
             ns9.setdefault(_name, _sym)
     BROWSER_UA_HOSTS.clear()
     for _name, _cc in (cfg.get("chains") or {}).items():
@@ -484,7 +561,7 @@ def load_config() -> dict:
             if _h:
                 BROWSER_UA_HOSTS.add(_h.lower())
     for _name, _meta in EXTRA_CHAINS.items():
-        if _name in (cfg.get("chains") or {}):
+        if _name in _book9:
             if not isinstance(cfg.get("native_symbol"), dict):
                 cfg["native_symbol"] = {}
             if not isinstance(cfg.get("wrapped_native"), dict):
@@ -492,6 +569,7 @@ def load_config() -> dict:
             cfg["native_symbol"].setdefault(_name, _meta[1])
             if _meta[3]:
                 cfg["wrapped_native"].setdefault(_name, _meta[3])
+    _CFG_LOADED[0] = True
     return cfg
 
 
@@ -554,6 +632,30 @@ def atomic_write_json(path: str, obj) -> None:
         raise
 
 
+_JSON_LAST = {}
+
+
+def write_json_if_changed(path: str, obj) -> bool:
+    import hashlib as _hl
+    data = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=isinstance(obj, dict))
+    dg = _hl.sha1(data.encode("utf-8")).hexdigest()
+    last = _JSON_LAST.get(path)
+    if last and last[0] == dg:
+        try:
+            st = os.stat(path)
+            if (st.st_mtime_ns, st.st_size) == last[1:]:
+                return False
+        except OSError:
+            pass
+    atomic_write_json(path, obj)
+    try:
+        st = os.stat(path)
+        _JSON_LAST[path] = (dg, st.st_mtime_ns, st.st_size)
+    except OSError:
+        _JSON_LAST.pop(path, None)
+    return True
+
+
 HIST_DIRTY = "hist_dirty.json"
 HIST_DIRTY_KEEP = 200
 
@@ -605,6 +707,18 @@ def hist_dirty_update(fn, state_dir: str = None):
         return new
 
 
+EXF_LATE_PFX = "exflate:"
+
+
+def exf_is_debt_int(event, leg_seq, source_ns, source_id) -> bool:
+    try:
+        seq9 = int(leg_seq or 0)
+    except (TypeError, ValueError):
+        return False
+    return (event == "EXF_ADJUST" and seq9 == 2 and str(source_ns or "").endswith(":recon")
+            and not str(source_id or "").startswith(EXF_LATE_PFX))
+
+
 def append_durable_jsonl(path: str, obj) -> None:
     existed = os.path.exists(path)
     with open(path, "a+b") as f:
@@ -626,13 +740,65 @@ def append_durable_jsonl(path: str, obj) -> None:
             os.close(dir_fd)
 
 
-def seed_merge(base, over):
+SEED_SET_LISTS = {
+    "bridge_contracts.json": ((),),
+    "sale_contracts.json": (("cca_factories",), ("chains",)),
+    "xchain_bridges.json": (("sol_lp_markers",), ("evm_contracts", "*", "chains")),
+}
+SEED_ID_LISTS = {"coverage/api_limits.json": (("exchanges",), ("chains",), ("perps",))}
+
+
+def _seed_path_in(path: tuple, pats) -> bool:
+    return any(len(p) == len(path) and all(a == "*" or a == b for a, b in zip(p, path)) for p in pats)
+
+
+def seed_set_key(v):
+    if isinstance(v, str):
+        s = v.strip()
+        return s.lower() if s[:2].lower() == "0x" else s
+    return json.dumps(v, sort_keys=True, ensure_ascii=False)
+
+
+def seed_list_kind(rel, path: tuple) -> str:
+    r9 = str(rel or "").replace(os.sep, "/")
+    if _seed_path_in(path, SEED_SET_LISTS.get(r9, ())):
+        return "set"
+    if _seed_path_in(path, SEED_ID_LISTS.get(r9, ())):
+        return "id"
+    return ""
+
+
+def seed_merge(base, over, rel=None, _path=()):
     if isinstance(base, dict) and isinstance(over, dict):
         out = dict(base)
         for k, v in over.items():
-            out[k] = seed_merge(base[k], v) if k in base else v
+            out[k] = seed_merge(base[k], v, rel, _path + (str(k),)) if k in base else v
         return out
+    if rel and isinstance(base, list) and isinstance(over, list):
+        kind = seed_list_kind(rel, _path)
+        if kind == "set":
+            out, seen = [], set()
+            for v in list(base) + list(over):
+                k9 = seed_set_key(v)
+                if k9 in seen:
+                    continue
+                seen.add(k9)
+                out.append(k9 if isinstance(v, str) else v)
+            return out
+        if kind == "id" and all(isinstance(x, dict) and isinstance(x.get("id"), str) for x in list(base) + list(over)):
+            ids = {x["id"] for x in over}
+            return list(over) + [x for x in base if x["id"] not in ids]
     return over
+
+
+def seed_canon(o, rel=None, _path=()):
+    if isinstance(o, dict):
+        return {k: seed_canon(v, rel, _path + (str(k),)) for k, v in o.items()}
+    if isinstance(o, list):
+        if rel and seed_list_kind(rel, _path) == "set":
+            return sorted({seed_set_key(v) for v in o})
+        return [seed_canon(v, rel, _path) for v in o]
+    return o
 
 
 def seed_json(rel: str, default=None, base_dir: str = None, strict: bool = False):
@@ -655,7 +821,7 @@ def seed_json(rel: str, default=None, base_dir: str = None, strict: bool = False
         return b
     if not hb:
         return o
-    return seed_merge(b, o)
+    return seed_merge(b, o, rel)
 
 
 def read_json(path: str, default):
@@ -666,6 +832,46 @@ def read_json(path: str, default):
         return default
     except (json.JSONDecodeError, OSError) as e:
         raise SystemExit(f"상태 파일 손상: {path}: {e}")
+
+
+def read_control_json(path: str, default=None):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except (ValueError, OSError) as e:
+        import time as _t
+        dst = path + ".bad"
+        if os.path.exists(dst):
+            dst = f"{path}.bad.{int(_t.time())}_{os.getpid()}"
+        try:
+            os.replace(path, dst)
+        except OSError:
+            dst = "(옮기지 못함)"
+        logging.getLogger("tj").warning("제어 파일 형식 오류 — 요청 없음으로 보고 계속(원본 → %s): %s: %s",
+                                        os.path.basename(dst), os.path.basename(path), str(e)[:160])
+        return default
+
+
+def iso_epoch(s):
+    if s is None or s == "":
+        return None
+    try:
+        import datetime as _dt
+        t = str(s).strip()
+        if t.endswith(("Z", "z")):
+            t = t[:-1] + "+00:00"
+        d = _dt.datetime.fromisoformat(t)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_dt.timezone.utc)
+        return int(d.timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def tool_ref(name: str, alt: str) -> str:
+    return f"tools/{name}" if os.path.isfile(os.path.join(BASE_DIR, "tools", name)) else alt
 
 
 _LINK_RES = None

@@ -1,6 +1,7 @@
 """Producers for optional Telegram alerts (daily PnL, price moves, big flows, LP range, depeg, liquidation)."""
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import statistics
@@ -224,7 +225,11 @@ def pnl_data(out, cur="KRW") -> dict | None:
         curve = []
         for r in ds[max(0, idx - 30):idx + 1]:
             v = _f(r.get("valKrw")) if krw and r is not row and _f(r.get("valKrw")) is not None else (_f(r.get("val")) or 0.0) * k
-            curve.append([str(r.get("date") or ""), round(v, 2)])
+            fl9 = _f(r.get("flow"))
+            if fl9 is not None and krw:
+                u9 = _f(r.get("usdt"))
+                fl9 *= u9 if (r is not row and u9 and u9 > 0 and _f(r.get("valKrw")) is not None) else rate
+            curve.append([str(r.get("date") or ""), round(v, 2), round(fl9, 2) if fl9 is not None else None])
         att = row.get("att") if isinstance(row.get("att"), dict) else {}
         top = [[str(t[0]), round(_f(t[1]), 1)] for t in (att.get("top") or []) if isinstance(t, (list, tuple)) and len(t) >= 2 and _f(t[1]) is not None][:3]
         sells = 0
@@ -425,42 +430,220 @@ def prod_move(inp, doc, st, now, conn, on):
     return res
 
 
+FLOW_KEEP = 3 * 86400
+FLOW_LIST_MAX = 20
+DAY = 86400
+
+
+def q_txt(q) -> str:
+    v = _f(q)
+    if v is None:
+        return "?"
+    a = abs(v)
+    if a >= 1000:
+        return f"{v:,.2f}".rstrip("0").rstrip(".")
+    if a >= 1:
+        return f"{v:,.4f}".rstrip("0").rstrip(".")
+    return f"{v:.6g}"
+
+
+def dur_txt(sec) -> str:
+    s = max(0, int(sec or 0))
+    if s < 3600:
+        return f"{max(1, s // 60)}분"
+    h, m = s // 3600, (s % 3600) // 60
+    return f"{h}시간" + (f" {m}분" if m else "")
+
+
+def _hm(ts, now) -> str:
+    t = _kst(ts)
+    return t.strftime("%H:%M") if t.date() == _kst(now).date() else t.strftime("%m-%d %H:%M")
+
+
+def _flow_item(e, cur, rate, now) -> str:
+    usd = _f(e.get("usd"))
+    amt = money(-usd, cur, rate, True) if usd is not None else "금액 모름"
+    src = str(e.get("src") or "")
+    return f"{e.get('sym')} {q_txt(e.get('qty'))}개 {amt} → {e.get('dst') or '?'} ({(src + ' · ') if src else ''}{_hm(e['ts'], now)})"
+
+
 def prod_bigflow(inp, doc, st, now, conn, on):
-    out = inp.get("out") or {}
-    f = out.get("fields") or {}
-    if not out or now - float(out.get("builtAt") or 0) > BUILD_MAX_AGE:
+    mem = st.get("flow2")
+    if not isinstance(mem, dict) or not isinstance(mem.get("seen", {}), dict):
+        st["flow2"] = {}
+    snap = copy.deepcopy(st.get("flow2"))
+    try:
+        return _prod_bigflow(inp, doc, st, now, conn, on)
+    except Exception:
+        st["flow2"] = snap
+        raise
+
+
+def _prod_bigflow(inp, doc, st, now, conn, on):
+    mem = st.setdefault("flow2", {})
+    if not on:
+        mem["boff"] = 1
+    elif mem.pop("boff", None):
+        mem["on_at"] = int(now)
+    on_arr = AP.effective(doc, "arrive", now, conn)
+    if not on_arr:
+        mem["aoff"] = 1
+    elif mem.pop("aoff", None):
+        mem["a_on_at"] = int(now)
+    fl = inp.get("flows")
+    if not isinstance(fl, dict) or now - float(fl.get("builtAt") or 0) > BUILD_MAX_AGE:
         return []
-    key, iso = out.get("todayKey"), out.get("todayIso")
-    row = next((r for r in (f.get("dailySeries") or []) if isinstance(r, dict) and r.get("date") == key), None)
-    bf = st.setdefault("bigflow", {})
-    first = not bf.get("init")
-    bf["init"] = 1
-    seen = bf.setdefault("seen", {})
-    for k9 in [k9 for k9 in seen if not str(k9).startswith(str(iso) + "|")]:
-        del seen[k9]
-    if not row:
-        return []
-    nmin = float(doc["th"]["flow_min"])
+    import flowev
+    f = ((inp.get("out") or {}).get("fields")) or {}
     cur, rate = inp.get("cur") or "KRW", _f(f.get("rate"))
-    outs = sum(_f(it[1]) for it in (row.get("flowTop") or []) if isinstance(it, (list, tuple)) and len(it) >= 2 and (_f(it[1]) or 0) < 0)
-    res = []
-    for it in row.get("flowTop") or []:
-        if not isinstance(it, (list, tuple)) or len(it) < 2 or _f(it[1]) is None:
+    nmin = float(doc["th"]["flow_min"])
+    first = not mem.get("init")
+    mem["init"] = 1
+    st.pop("bigflow", None)
+    seen = mem.setdefault("seen", {})
+    on_at = _f(mem.get("on_at")) or 0
+    a_on_at = _f(mem.get("a_on_at")) or 0
+    win = float(fl.get("window") or flowev.WINDOW)
+    res, new_ext, alive, carry = [], [], set(), []
+    ext_24 = 0.0
+    for e in fl.get("ev") or []:
+        if not isinstance(e, dict) or not e.get("id") or not isinstance(e.get("ts"), (int, float)) or now - e["ts"] > win:
             continue
-        desc, usd = str(it[0]), _f(it[1])
-        k = f"{iso}|{desc}"
-        prev = _f(seen.get(k))
-        if abs(usd) < nmin or (prev is not None and abs(usd - prev) < nmin):
+        eid = str(e["id"])
+        alive.add(eid)
+        m = seen.get(eid)
+        new = not isinstance(m, dict)
+        if new:
+            m = seen[eid] = {"t": int(now), "x": 0, "n": 0}
+        usd = _f(e.get("usd"))
+        cls, dr = e.get("cls"), e.get("dir")
+        if cls == "external" and dr == "out":
+            if e["ts"] < on_at:
+                m["x"] = m["n"] = 1
+                continue
+            if usd and now - e["ts"] <= DAY:
+                ext_24 += usd
+            if first or not on:
+                m["x"] = m["n"] = 1
+                continue
+            if not m.get("x", 1):
+                m["x"] = 1
+                new_ext.append(e)
+            elif m.get("p") and not m.get("n", 1):
+                carry.append(e)
             continue
-        seen[k] = usd
-        if first or not on:
+        if cls == "external" and dr == "in":
+            if new and not first and on and usd is not None and usd >= nmin and e["ts"] >= on_at:
+                desc = f"{e.get('sym')} {q_txt(e.get('qty'))}개 → {e.get('dst') or '?'}"
+                res.append(_alert("BIG_INFLOW", f"📋 큰 입금 {money(usd, cur, rate, True)} · {desc}", key=eid,
+                                  d={"desc": desc[:60], "amt": money(usd, cur, rate, True)}))
             continue
-        if usd < 0:
-            res.append(_alert("BIG_FLOW", f"🔴 밖으로 {money(usd, cur, rate, True)} 나갔어요\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\n"
-                                          f"{desc} · 오늘 나간 돈 합계 {money(outs, cur, rate, True)}" + _link(inp, "outflows"), day=iso))
-        else:
-            res.append(_alert("BIG_INFLOW", f"📋 큰 입금 {money(usd, cur, rate, True)} · {desc}", day=iso,
-                              d={"desc": desc[:60], "amt": money(usd, cur, rate, True)}))
+        arr = e.get("arr")
+        if cls != "internal" or dr != "out" or not isinstance(arr, dict) or arr.get("st") not in ("pending", "arrived"):
+            continue
+        exp = float(arr.get("exp") or flowev.EXP_NORMAL)
+        t_from = float(arr.get("from") or e["ts"])
+        if first:
+            if arr["st"] == "arrived":
+                m["a"] = 1
+            elif now - t_from >= exp:
+                m["l"] = 1
+            continue
+        big = usd is not None and usd >= nmin
+        where = arr.get("where") or e.get("dst") or "내 지갑"
+        if arr["st"] == "arrived" and not m.get("a"):
+            m["a"] = 1
+            if not big:
+                continue
+            at9 = float(arr["ts"]) if isinstance(arr.get("ts"), (int, float)) and arr["ts"] > 0 else float(e["ts"])
+            aq = _f(arr.get("qty"))
+            same = aq is not None and (not arr.get("sym") or flowev.OM.family(arr.get("sym")) == flowev.OM.family(e.get("sym")))
+            lack = flowev.short_of(e.get("qty"), aq, arr.get("fee"), e.get("sym"), bridge=e.get("kind") == "bridge") if same else None
+            took = (f"보낸 지 {dur_txt(arr['ts'] - e['ts'])}" if arr.get("ts") and arr["ts"] >= e["ts"] else "")
+            if lack is not None and on and at9 >= on_at:
+                lu = usd * float(lack) / float(e["qty"]) if e.get("qty") else None
+                res.append(_alert("MOVE_SHORT", f"🔴 보낸 것보다 적게 들어왔어요 — {e.get('sym')} {q_txt(e.get('qty'))}개 보냄 · {q_txt(aq)}개 받음\n"
+                                                f"수수료보다 {q_txt(lack)}개 더 줄었어요 — {e.get('src') or '보낸 곳'} → {where} 내역을 확인하세요.\n"
+                                                + " · ".join(x for x in (took, money(-lu, cur, rate, True) if lu else "") if x) + _link(inp, "outflows"),
+                                  key=eid))
+            elif on_arr and at9 >= a_on_at and not (lack is not None and on):
+                lost = (_f(e.get("qty")) or 0) - aq if same else None
+                lost_t = f" · 수수료로 {q_txt(lost)}개 줄었어요" if lost is not None and lost > abs(_f(e.get("qty")) or 0) * 1e-6 else ""
+                if lack is not None:
+                    lost_t = f" · {q_txt(lost)}개 줄었어요(수수료보다 {q_txt(lack)}개 더)"
+                fr = e.get("src") or ""
+                act9 = ("보낸 것보다 적게 들어왔어요 — 내역을 확인하세요." if lack is not None else "받은 수량은 앱에서 확인하세요." if not same
+                        else "할 일은 없어요.")
+                res.append(_alert("MOVE_ARRIVED", (f"✅ 늦었지만 {e.get('sym')} {q_txt(aq if same else e.get('qty'))}개가 {where}에 들어왔어요\n" if m.get("l")
+                                                   else f"✅ {e.get('sym')} {q_txt(aq if same else e.get('qty'))}개가 {where}에 들어왔어요\n")
+                                  + act9 + "\n" + (f"{fr}에서 " if fr else "") + (took or "도착 확인") + lost_t,
+                                  key=eid))
+            continue
+        if arr["st"] == "pending" and not m.get("l") and now - t_from >= exp:
+            m["l"] = 1
+            if not (big and on) or t_from + exp < on_at:
+                continue
+            ago, sym, qt, src, dst = dur_txt(now - e["ts"]), e.get("sym"), q_txt(e.get("qty")), e.get("src") or "", e.get("dst") or "내 지갑"
+            k = e.get("kind")
+            if k == "bridge":
+                txt = (f"🔴 {ago} 전 브릿지로 보낸 {sym} {qt}개가 아직 내 지갑에 안 들어왔어요\n브릿지 상태를 확인하세요"
+                       + (" — 추적하지 않는 체인으로 보냈다면 괜찮아요" if arr.get("untracked") else "") + ".")
+            elif k == "exchange":
+                txt = f"🔴 {ago} 전 {dst} 입금 주소로 보낸 {sym} {qt}개가 아직 {dst}에 안 들어왔어요\n{dst} 입금 내역을 확인하세요(네트워크가 붐비면 늦을 수 있어요)."
+            elif k == "exchange_wd_noaddr":
+                txt = (f"🔴 {ago} 전 {src}에서 출금한 {sym} {qt}개가 아직 내 지갑·거래소에 안 들어왔어요\n"
+                       f"추적하지 않는 곳으로 보낸 게 아니면 바로 {src} 출금 내역과 보안을 확인하세요.")
+            else:
+                txt = f"🔴 {ago} 전 {src}에서 출금한 {sym} {qt}개가 아직 {dst}에 안 들어왔어요\n{src} 출금 상태를 확인하세요(거래소가 처리 중일 수 있어요)."
+            res.append(_alert("MOVE_LATE", txt + f"\n{src + ' → ' if src else ''}{dst} · {money(-usd, cur, rate, True)}" + _link(inp, "outflows"), key=eid))
+    k24 = int(ext_24 // nmin) if nmin > 0 else 0
+    told = int(_f(mem.get("k24")) or 0)
+    old24 = ext_24 - sum(_f(e.get("usd")) for e in new_ext if _f(e.get("usd")) and now - e["ts"] <= DAY)
+    told_n = min(told, int(max(0.0, old24) // nmin)) if nmin > 0 else told
+    if first or not on:
+        mem["k24"] = k24
+    elif new_ext or carry:
+        hit = [e for e in new_ext if (_f(e.get("usd")) or 0) >= nmin]
+        if hit or k24 > told_n or carry:
+            pool = new_ext if hit else [e for e in fl.get("ev") or [] if isinstance(e, dict) and e.get("cls") == "external" and e.get("dir") == "out"
+                                        and isinstance(e.get("ts"), (int, float)) and now - e["ts"] <= DAY and e["ts"] >= on_at
+                                        and not (seen.get(str(e.get("id"))) or {}).get("n", 1)] if (hit or k24 > told_n) else []
+            ids9 = {str(e["id"]) for e in pool}
+            pool = pool + [e for e in carry if str(e["id"]) not in ids9]
+            lst = sorted(pool, key=lambda e: -(_f(e.get("usd")) or 0))
+            shown = lst[:FLOW_LIST_MAX]
+            rest = len(lst) - len(shown)
+            tot = sum(_f(e.get("usd")) or 0 for e in lst)
+            link = _link(inp, "outflows")
+            act = "내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요."
+            tail = f"24시간 동안 밖으로 나간 돈 {money(-ext_24, cur, rate, True)}"
+            if hit and len(shown) == 1 and not rest:
+                e = shown[0]
+                usd = _f(e.get("usd"))
+                txt = (f"🔴 {e.get('sym')} {q_txt(e.get('qty'))}개" + (f"({money(-usd, cur, rate, True)})" if usd is not None else "")
+                       + f"가 밖으로 나갔어요 → {e.get('dst') or '?'}\n{act}\n{(e.get('src') or '') + ' · ' if e.get('src') else ''}{_hm(e['ts'], now)}"
+                       + (f" · {tail}" if ext_24 > (usd or 0) + 1 else ""))
+            else:
+                head = (f"🔴 밖으로 {len(lst)}건 {money(-tot, cur, rate, True)}이 나갔어요" if hit
+                        else f"🔴 작은 출금이 모여 24시간 동안 {money(-ext_24, cur, rate, True)}이 나갔어요" if k24 > told_n
+                        else f"🔴 앞 알림에 다 못 실은 출금 {len(lst)}건 {money(-tot, cur, rate, True)}이에요")
+                txt = (head + f"\n{act}\n" + "\n".join("- " + _flow_item(e, cur, rate, now) for e in shown)
+                       + (f"\n- 외 {rest}건(줄 수 제한 — 다음 알림·앱 보낸 내역)" if rest else "") + f"\n{tail}")
+            res.append(_alert("BIG_FLOW", txt + link, n=len(lst), ids=[str(e["id"]) for e in lst][:50]))
+            for e in lst:
+                m9 = seen.get(str(e["id"]))
+                if isinstance(m9, dict):
+                    if any(e is x for x in shown):
+                        m9["n"] = 1
+                        m9.pop("p", None)
+                    else:
+                        m9["p"] = 1
+            mem["k24"] = max(k24, told_n)
+    if k24 < told:
+        mem["k24"] = k24
+    for k9, v9 in list(seen.items()):
+        if k9 not in alive and (not isinstance(v9, dict) or now - (_f(v9.get("t")) or 0) > FLOW_KEEP):
+            del seen[k9]
     return res
 
 
@@ -519,13 +702,18 @@ def prod_lprange(inp, doc, st, now, conn, on):
     return res
 
 
-def stable_quotes(spot, syms, now, max_age=1800) -> dict:
+DEPEG_FRESH = 600
+DEPEG_MIN_EX = 2
+DEPEG_HELD_USD = 100
+
+
+def stable_quotes(spot, syms, now, max_age=DEPEG_FRESH, min_n=1) -> dict:
     ex, ts = (spot or {}).get("ex_usd") or {}, (spot or {}).get("ex_ts") or {}
     out = {}
     for s in syms:
         v = [_f(ex.get(f"{e}:{s}")) for e in GLOBAL_EX if now - (_f(ts.get(f"{e}:{s}")) or 0) <= max_age]
         v = [x for x in v if x and 0.5 < x < 1.5]
-        if v:
+        if len(v) >= max(1, min_n):
             out[s] = statistics.median(v)
     return out
 
@@ -537,20 +725,25 @@ def prod_depeg(inp, doc, st, now, conn, on):
     if not spot:
         return []
     th = float(doc["th"]["depeg_pct"])
+    if not isinstance(f.get("stables"), list):
+        return []
     held = {str(c.get("sym") or "").upper() for c in (f.get("stables") or []) if isinstance(c, dict)
-            and (_f(c.get("qty")) or 0) * (_f(c.get("price")) or 1) >= 100}
+            and (_f(c.get("qty")) or 0) * (_f(c.get("price")) or 1) >= DEPEG_HELD_USD}
     syms = (held | {"USDC", "USD1", "FDUSD", "USDE", "PYUSD"}) - {"USDT", ""}
-    q = stable_quotes(spot, sorted(syms), now)
+    q = stable_quotes(spot, sorted(syms), now, DEPEG_FRESH, DEPEG_MIN_EX)
+    qh = stable_quotes(spot, sorted(held - {"USDT"}), now, DEPEG_FRESH, DEPEG_MIN_EX)
     devs = {}
-    if len(q) >= 3:
+    if len(q) >= 3 and "USDT" in held:
         m = statistics.median(q.values())
         if abs(m - 1) * 100 >= th:
             devs["USDT"] = 1 / m
-    if "USDT" not in devs:
-        for s9, p in q.items():
+    if not (len(q) >= 3 and abs(statistics.median(q.values()) - 1) * 100 >= th):
+        for s9, p in qh.items():
             if abs(p - 1) * 100 >= th:
                 devs[s9] = p
     mem = st.setdefault("depeg", {})
+    for s9 in [s9 for s9 in mem if s9 not in held]:
+        del mem[s9]
     res = []
     for s9, p in devs.items():
         e = mem.get(s9) if isinstance(mem.get(s9), dict) else {}
@@ -563,12 +756,12 @@ def prod_depeg(inp, doc, st, now, conn, on):
             worse = told is not None
             res.append(_alert("DEPEG", (f"🔴 {s9} 이탈이 더 커졌어요 — 1달러에서 {dev:.1f}%\n" if worse else f"🔴 {s9} 가격이 1달러에서 {dev:.1f}% 벗어났어요\n")
                                        + "많이 들고 있다면 다른 스테이블로 옮길지 살펴보세요.\n"
-                                       + f"지금 {px_txt(p)} · 기준 ±{th:g}%" + (" · 들고 있음" if s9 in held or s9 == "USDT" else "")
+                                       + f"지금 {px_txt(p)} · 기준 ±{th:g}% · 들고 있음"
                                        + (" · 다른 스테이블들이 함께 벗어나 USDT 쪽으로 판단" if s9 == "USDT" else ""), sym=s9))
     for s9 in list(mem):
         if s9 in devs:
             continue
-        p = q.get(s9) if s9 != "USDT" else None
+        p = qh.get(s9) if s9 != "USDT" else None
         rec = (p is not None and abs(p - 1) * 100 < th / 2) or (s9 == "USDT" and len(q) >= 3 and abs(1 / statistics.median(q.values()) - 1) * 100 < th / 2)
         if rec:
             del mem[s9]
@@ -578,56 +771,7 @@ def prod_depeg(inp, doc, st, now, conn, on):
 
 
 def prod_liq(inp, doc, st, now, conn, on):
-    fu = inp.get("futures")
-    if not isinstance(fu, dict):
-        return []
-    th = float(doc["th"]["liq_pct"])
-    mem = st.setdefault("liq", {})
-    cur, rate = inp.get("cur") or "KRW", _f(((inp.get("out") or {}).get("fields") or {}).get("rate"))
-    res, alive = [], set()
-    for ex, d in fu.items():
-        if not isinstance(d, dict):
-            continue
-        ts = _f(d.get("ts")) or 0
-        if ts > 1e11:
-            ts /= 1000
-        if now - ts > 1800:
-            for p in d.get("positions") or []:
-                if isinstance(p, dict):
-                    alive.add(f"{ex}:{p.get('symbol')}:{p.get('side')}:{p.get('acct') or ''}")
-            continue
-        for p in d.get("positions") or []:
-            if not isinstance(p, dict):
-                continue
-            liq, mark = _f(p.get("liq")), _f(p.get("mark"))
-            if not liq or not mark or liq <= 0 or mark <= 0:
-                continue
-            dist = abs(liq - mark) / mark * 100
-            k = f"{ex}:{p.get('symbol')}:{p.get('side')}:{p.get('acct') or ''}"
-            alive.add(k)
-            e = mem.get(k) if isinstance(mem.get(k), dict) else ({} if not mem.get(k) else {"dist": th})
-            told = _f(e.get("dist"))
-            side = {"long": "롱", "short": "숏", "LONG": "롱", "SHORT": "숏", "Buy": "롱", "Sell": "숏"}.get(str(p.get("side")), str(p.get("side") or ""))
-            name = f"{p.get('symbol')} {side}".strip()
-            nums = f"현재 {px_txt(mark)} · 청산 {px_txt(liq)} · {EX_KO.get(ex, ex)}" + (f" · 레버리지 {p.get('leverage')}x" if p.get("leverage") else "")
-            if told is None:
-                if dist <= th:
-                    mem[k] = {"dist": round(dist, 2), "at": int(now)}
-                    if on:
-                        res.append(_alert("LIQ_NEAR", f"🔴 {name} 선물 청산가까지 {dist:.0f}% 남았어요\n증거금을 넣거나 포지션을 줄이세요.\n{nums}" + _link(inp, "dash"), key=k))
-                continue
-            if dist <= told / 2:
-                mem[k] = {"dist": round(dist, 2), "at": int(now)}
-                if on:
-                    res.append(_alert("LIQ_NEAR", f"🔴 {name} 청산가까지 {dist:.0f}%로 더 가까워졌어요\n지금 증거금을 넣거나 포지션을 줄이세요.\n{nums}" + _link(inp, "dash"), key=k))
-            elif dist > th * 1.5:
-                del mem[k]
-                if on:
-                    res.append(_alert("LIQ_NEAR", f"✅ {name} 청산 위험에서 벗어났어요\n할 일은 없어요.\n청산가까지 {dist:.0f}% · {EX_KO.get(ex, ex)}", key=k, resolved=True))
-    for k in list(mem):
-        if k not in alive:
-            del mem[k]
-    return res
+    return []
 
 
 def prod_oa(inp, doc, st, now, conn, on):
@@ -681,6 +825,7 @@ def prod_oa(inp, doc, st, now, conn, on):
 
 PRODUCERS = [("pnl", prod_pnl), ("review", prod_review), ("weekly", prod_weekly), ("move", prod_move), ("bigflow", prod_bigflow),
              ("lprange", prod_lprange), ("depeg", prod_depeg), ("liq", prod_liq), ("oa", prod_oa)]
+WATCH_CATS = tuple(k for k, _fn in PRODUCERS) + ("arrive",)
 
 
 def step(inp: dict, doc: dict, st: dict, now: float = None, conn=None, log=None) -> list:

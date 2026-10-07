@@ -110,7 +110,7 @@
     taxOpen: null, taxCoinOpen: new Set(),
     day: '', calYM: '', dayEvLimit: 20,
     u: { open: null, item: new Set(), limit: {}, q: '', showHidden: false },
-    of: { view: 'pending', open: new Set(), form: {}, period: 'all', coin: '', reason: '', limit: 30, fr: new Set(), fa: new Set(),
+    of: { view: 'pending', open: new Set(), form: {}, period: 'all', coin: '', reason: '', limit: 30, fr: new Set(), fa: new Set(), fsp: new Set(),
       memoEd: null, lk: null, lkc: {}, lkOpt: {}, lkGen: {}, lkT: null },
     aliasEdit: null,
     set: { sec: '', sub: '', open: new Set(), walAll: false, walQ: '', walOpen: '', q: '', qi: 0, qr: [], qOpen: false, hl: '', focus: '', anim: '', sig: '', y: {}, prev: '', restoreY: null, from: '', fromSub: false },
@@ -197,6 +197,7 @@
     return '<div class="popw udate">' + btn + uiPopBox(o.label || '날짜', inner, 'rp udp') + '</div>';
   }
   const UI_SHEETS = {};
+  window.__tjSheets = { reg: (k, fn) => { UI_SHEETS[k] = fn; }, open: (k, v, t, el) => uiSheetOpen(k, v, t, el), close: noBack => uiSheetClose(noBack), redraw: () => renderOverlay() };
   function uiSheetOpen(k, v, t, el) {
     if (!UI_SHEETS[k]) return;
     const first = !S.sheet;
@@ -211,7 +212,7 @@
     if (!S.sheet) return;
     S.sheet = null; S.pop = null; renderOverlay();
     if (history.state && history.state.tjDr) { try { if (noBack) history.replaceState(null, '', location.href); else history.back(); } catch (e) {  } }
-    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v && x.getAttribute('data-k') === bk.k));
+    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll(['#view', '#mtop', 'header.top'].map(r => r + ' [data-a="' + bk.a + '"]').join(','))].find(x => x.getAttribute('data-v') === bk.v && x.getAttribute('data-k') === bk.k));
     if (el && el.focus) { try { el.focus({ preventScroll: true }); } catch (e) {  } }
   }
   function uiSheetHTML() {
@@ -245,7 +246,7 @@
         const red = uiReduce();
         try { el.scrollIntoView({ block: 'center', behavior: red ? 'auto' : 'smooth' }); } catch (e) { el.scrollIntoView(); }
         el.classList.remove('uhl'); void el.offsetWidth; el.classList.add('uhl');
-        const f = el.matches('button,[tabindex],a[href]') ? el : el.querySelector('button,[tabindex="0"],a[href]');
+        const f = rowFocusEl(el);
         if (f) { try { f.focus({ preventScroll: true }); } catch (e) {  } }
         setTimeout(() => el.classList.remove('uhl'), 2200);
         res(true);
@@ -385,9 +386,10 @@
     const D = S.D; if (!D || !D.dayActs) return null;
     const a = D.dayActs[isoDay(k)], o = { n: 0, b: 0, s: 0, dep: 0, pay: 0 };
     if (!a) return o;
-    if (all || S.src.mode === 'all') return { n: num(a.n) + num(a.cv), b: num(a.b), s: Math.max(0, num(a.s) - num(a.pay)), dep: num(a.dep), pay: num(a.pay) };
+    if (all || S.src.mode === 'all') return { n: num(a.n) + num(a.cv) + num(a.kw), b: num(a.b), s: Math.max(0, num(a.s) - num(a.pay)), dep: num(a.dep), pay: num(a.pay) };
     Object.keys(a.src || {}).forEach(sk => { if (!srcPass({ src: sk })) return; const x = arr(a.src[sk]), py = num((a.srcPay || {})[sk]); o.n += num(x[0]); o.b += num(x[1]); o.s += Math.max(0, num(x[2]) - py); o.dep += num(x[3]); o.pay += py; });
     Object.keys(a.cvSrc || {}).forEach(sk => { if (srcPass({ src: sk })) o.n += num(a.cvSrc[sk]); });
+    Object.keys(a.kwSrc || {}).forEach(sk => { if (srcPass({ src: sk })) o.n += num(a.kwSrc[sk]); });
     return o;
   }
   function srcAgg(p) {
@@ -398,7 +400,7 @@
     return o;
   }
   const evKind = (k, d) => (k === '전송' && /· 스테이킹 보상 \(/.test(String(d || '')) ? '스테이킹 보상' : k);
-  const normDayEv = list => arr(list).filter(e => e && e.k !== '평단 갱신').map(e => ({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, hide: e.hide, hideKind: e.hideKind,
+  const normDayEv = list => arr(list).filter(e => e && e.k !== '평단 갱신').map(e => ({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, hide: e.hide, hideKind: e.hideKind, of: e.of, ofc: e.ofc,
     pkey: e.kind === 'pos' ? e.pkey : undefined, lp: e.lp, iso: (e.iso ? String(e.iso).slice(0, 10) + ' ' + String(e.t || '').slice(6) : isoOf(e.t)), day: String(e.t || '').slice(0, 5) }));
   async function fetchDayEvents(q) {
     try {
@@ -407,29 +409,12 @@
       if (!r.ok) return null;
       const j = await r.json();
       if (!j || !j.ok) return null;
-      const cv = arr(j.conv), ev0 = cv.length ? arr(j.events).concat(cv).sort((x, y) => num(y.ts) - num(x.ts)) : j.events;
+      const cv = arr(j.conv).concat(arr(j.krw)), ev0 = cv.length ? arr(j.events).concat(cv).sort((x, y) => num(y.ts) - num(x.ts)) : j.events;
       return { events: normDayEv(ev0), hidden: normDayEv(j.hidden), builtAt: j.builtAt, n: num(j.n) - num((j.counts || {})['평단 갱신']) + cv.length, more: !!j.more, nextOffset: num(j.offset) + arr(j.events).length, nHidden: j.nHidden != null ? num(j.nHidden) : null };
     } catch (e) { return null; }
   }
   const FEED_PAGE = 5000, WIDE_DAYS = 120;
   const isoSpanDays = (lo, hi) => (lo && hi) ? Math.round((new Date(hi + 'T00:00:00') - new Date(lo + 'T00:00:00')) / 86400000) : Infinity;
-  function firstActIso() { const D = S.D; if (!D || !D.dayActs) return null; let m = null; Object.keys(D.dayActs).forEach(k => { const i = isoDay(k) || k; if (/^\d{4}-\d{2}-\d{2}$/.test(i) && (!m || i < m)) m = i; }); return m; }
-  async function fetchDayEventsChunked(lo, hi, retries = 1) {
-    lo = lo || firstActIso(); hi = hi || todayISO();
-    if (!lo || isoSpanDays(lo, hi) <= 190) return fetchDayEvents(lo ? 'from=' + encodeURIComponent(lo) + '&to=' + encodeURIComponent(hi) : '');
-    const cuts = []; let b = hi;
-    while (b >= lo) { const d = new Date(b + 'T00:00:00'); d.setMonth(d.getMonth() - 6); d.setDate(d.getDate() + 1);
-      let a = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); if (a < lo) a = lo; cuts.push([a, b]);
-      const p = new Date(a + 'T00:00:00'); p.setDate(p.getDate() - 1); b = p.getFullYear() + '-' + pad2(p.getMonth() + 1) + '-' + pad2(p.getDate()); }
-    const out = { events: [], hidden: [], builtAt: null };
-    for (const [a, z] of cuts) {
-      const x = await fetchDayEvents('from=' + a + '&to=' + z);
-      if (!x) return null;
-      if (out.builtAt && x.builtAt && x.builtAt !== out.builtAt) return retries > 0 ? fetchDayEventsChunked(lo, hi, retries - 1) : null;
-      out.builtAt = out.builtAt || x.builtAt; out.events.push(...x.events); out.hidden.push(...x.hidden);
-    }
-    return out;
-  }
   function dayFull(k) {
     const D = S.D, iso = isoDay(k);
     if (!D || !D.dayActs || !iso) return null;
@@ -444,6 +429,15 @@
     });
     return c && c.evs || null;
   }
+  function dayWait(k) { const D = S.D, iso = isoDay(k), c = iso && (S.dayFull || {})[iso]; return !!(D && D.dayActs && c && c.st === 'load' && !c.evs); }
+  function evSkel(rows, heads) {
+    const bar = w => '<i class="skl" style="width:' + w + '%"></i>';
+    let h = '';
+    for (let i = 0; i < rows; i++) h += '<div class="evsk">' + bar(24 + (i * 23) % 40) + bar(44 + (i * 31) % 44) + '</div>';
+    for (let i = 0; i < heads; i++) h += '<div class="evsk h">' + bar(30 + (i * 17) % 30) + '</div>';
+    return '<div class="evskw" aria-hidden="true">' + h + '</div>';
+  }
+  const rfrTag = () => '<span class="rfr" aria-hidden="true">새로 받는 중</span>';
   function feedFull() {
     const D = S.D; if (!D || !D.dayActs) return null;
     const b = gBounds(), key = b ? (b.lo || '') + '~' + (b.hi || '') : 'all', c = S.feedFull;
@@ -456,7 +450,7 @@
       if (S.feedFull !== nc) return;
       if (x) { nc.st = 'ok'; nc.evs = x.events; nc.hid = x.hidden.slice().reverse(); nc.more = paged && x.more; nc.n = x.n; nc.nHid = x.nHidden; nc.bat = x.builtAt; nc.nextOffset = x.nextOffset; } else nc.st = 'err';
       nc.t = Date.now();
-      if (x && S.tab === 'journal' && S.j.view === 'feed') render();
+      if (S.tab === 'journal' && S.j.view === 'feed') render();
     });
     return keep && keep.evs ? keep : null;
   }
@@ -506,17 +500,22 @@
   const KRW_BASIS = '원화 환산 = 업비트 USDT 원화 시세(김프 포함)';
   const KV = (usd, krw) => (S.cur !== 'USD' && krw != null && isFinite(krw)) ? num(krw) / rate() : usd;
   const dayV = x => x ? KV(num(x.val), x.valKrw) : null;
+  const retPct = (first, last, flowSum) => (num(first) ? (num(last) - num(first) - num(flowSum)) / num(first) * 100 : null);
   const dayFlowV = x => (x && x.flow != null) ? KV(num(x.flow), x.valKrw != null && num(x.usdt) > 0 ? num(x.flow) * num(x.usdt) : null) : null;
   const PV_A = '\uE000', PV_Z = '\uE001', PV_RE = /\uE000([^\uE001]*)\uE001/g;
   const pvW = s => PV_A + s + PV_Z;
   const PVM = { krw: '8,888,888', krwC: '8,888만', usd: '88,888', usdC: '88.8K', q: '8,888.88', px: '8.8888', cal: '888만', calM: '88만', calU: '8.8K', n: '8,888' };
   const pvMoney = (sg, compact) => sg + (S.cur === 'USD' ? '$' + pvW(compact ? PVM.usdC : PVM.usd) : '₩' + pvW(compact ? PVM.krwC : PVM.krw));
-  const RK = (() => {
+  const pvm = h => '<span class="pvm">' + String(h).replace(PV_RE, '<span class="pv">$1</span>') + '</span>';
+  const RK_OK = v => typeof v === 'number' && isFinite(v) && v >= 0.2 && v <= 5 && !(v > 0.8 && v < 1.25);
+  const rkFix = () => { const v = parseFloat(LS.get('tj_v2_rk') || ''); return RK_OK(v) ? v : null; };
+  const RK_DRAW = (() => {
     let u = 0.5;
     try { const b = new Uint32Array(1); window.crypto.getRandomValues(b); u = b[0] / 4294967296; } catch (e) { u = Math.random(); }
     const L4 = Math.log(4);
     return Math.exp(u < 0.5 ? Math.log(0.2) + u * 2 * L4 : Math.log(1.25) + (u - 0.5) * 2 * L4);
   })();
+  let RK = rkFix() || RK_DRAW;
   const RS_A = '\uE004', RS_Z = '\uE005', RS_RE = /\uE004([^\uE005]*)\uE005/g;
   const MK_RE = /(\uE000[^\uE001]*\uE001|\uE004[^\uE005]*\uE005)/;
   function KS(v) { return S.rand ? v * RK : v; }
@@ -532,9 +531,12 @@
   const PV_PROT = /\d{4}-\d{2}(?:-\d{2})?(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?|\b\d{2}-\d{2}(?: \d{1,2}:\d{2}(?::\d{2})?)?|\b\d{1,2}:\d{2}(?::\d{2})?|\b\d{1,2}\/\d{1,2}\b|(?:USDT|매매기준율|환율)\s?₩\s?[\d,]+(?:\.\d+)?|#\d+|[×x]\s?\d+(?:\.\d+)?/g;
   function pvNet(t) {
     t = String(t == null ? '' : t);
-    if (!/\d/.test(t)) return t;
+    if (typeof ownScrub === 'function') { t = ownScrub(t); if (!/\d/.test(t)) return t; }
+    else if (!/\d/.test(t)) return t;
     const prot = [];
     const keep = a => { prot.push(a); return '\uE002' + (prot.length - 1) + '\uE003'; };
+    const nre = typeof ownScrub !== 'function' && typeof pvNameRe === 'function' ? pvNameRe() : null;
+    if (nre) t = t.replace(nre, (a, pre, nm, suf) => pre + keep(locMask(nm)) + (suf || ''));
     t = t.replace(/\b(?:0x[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?|[A-Za-z0-9]{3,8}…[A-Za-z0-9]{3,6}|[A-Za-z0-9]{12}…[A-Za-z0-9]{10}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/g, (a, off, all) =>
       /^\d+(?:[eE][+\-]?\d+)?(?:[A-Za-z][A-Za-z0-9]{0,9})?$/.test(a) || /[₩$]\s*$/.test(all.slice(0, off)) ? a : keep(a));
     t = t.replace(PV_PROT, (a, off, all) => {
@@ -618,6 +620,7 @@
   }
   function moneyTxt(t) {
     t = String(t == null ? '' : t);
+    if (pvOn() && typeof ownScrubM === 'function') t = ownScrubM(t);
     if (S.rand) return pvNetM(t);
     if (S.cur === 'USD') return t;
     return t.replace(/([+\-−]?)\$([\d,]+(?:\.\d+)?(?:[eE][+\-]?\d+)?)(?![\d])/g, (a, sg, v) => {
@@ -643,15 +646,17 @@
   const clsV = v => cls(v == null || !isFinite(v) || isZ(v) ? 0 : v);
   const parseMoney = s => { const n = parseFloat(String(s || '').replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; };
   const term = s => String(s == null ? '' : s).replace(/원가\s?미상/g, '원가 미확인').replace(/평균가 폴백|폴백/g, '평균가 대체').replace(/스팟/g, '현물').replace(/잔고 대사/g, '잔고 대조');
-  function hs(s, money) {
+  function hs(s, money, plain) {
     let t = term(s);
+    if (!plain && pvOn() && typeof ownScrubM === 'function') t = ownScrubM(t);
     t = t.replace(/\(POST [^)]*\)/g, '').replace(/\(\/api\/[^)]*\)/g, '').replace(/\/api\/[\w_/]+/g, '').replace(/config\.json[^.·]*[.·]?\s*/g, '')
       .replace(/\s*·?\s*검토 후 \/confirm 처리 예정/g, '').replace(/★/g, '').replace(/\s{2,}/g, ' ');
-    if (money && !(S.rand && !(money === 2 && /^[+\-−]?\$[\d,]+(?:\.\d+)?$/.test(t.trim())))) {
+    if (money && !plain && !(S.rand && !(money === 2 && /^[+\-−]?\$[\d,]+(?:\.\d+)?$/.test(t.trim())))) {
       t = t.replace(/([+\-−]?)\$([\d,]+(?:\.\d+)?)(?![\d])/g, (a, sg, v) => { const n = parseFloat(v.replace(/,/g, '')); return (n >= 1 || money === 2) ? m((sg === '-' || sg === '−' ? -1 : 1) * n, { sign: !!sg }) : a; })
         .replace(/([+\-]?)([\d,]+(?:\.\d+)?)\$/g, (a, sg, v) => m((sg === '-' ? -1 : 1) * parseFloat(v.replace(/,/g, '')), { sign: !!sg }));
     }
     t = t.replace(/(\d{1,3}(?:,\d{3})+|\d+)\.(\d+)/g, (a, i, d) => { const iv = +i.replace(/,/g, ''); if (iv >= 1000) { const r = Math.round(parseFloat(iv + '.' + d)); return i.indexOf(',') >= 0 ? nf('ko-KR', 0, 0).format(r) : String(r); } const td = d.replace(/0+$/, ''); return td ? i + '.' + td : i; });
+    if (plain) return t.trim();
     if (S.hide) t = t.split(PV_RE).map((x, i) => i % 2 ? pvW(x) : pvNet(x)).join('');
     else if (S.rand) t = pvNetM(t);
     return t.trim();
@@ -667,6 +672,8 @@
   const evXf = e => !!(S.rand && e && /^(?:전송|외부 전송|입금 확인)$/.test(String(e.k || '')));
   const qXf = v => (S.rand ? pvW(PVM.q) : q(v));
   const evQ = e => (evXf(e) && /\d/.test(String(e.q == null ? '' : e.q)) ? (/^\s*[-−]/.test(String(e.q)) ? '−' : '') + pvW(PVM.q) : hq(e && e.q));
+  const evDH = e => { const x = window.TJSale && e && (e.of || e.ofc) ? window.TJSale.rowHTML(e) : null; return x != null ? x : esc(hs(e.d)); };
+  const evDT = e => { const x = window.TJSale && e && e.of ? window.TJSale.rowText(e) : null; return x != null ? x : hs(e.d); };
   function evA(e) {
     const a = String((e && e.a) == null ? '' : e.a).trim();
     if (evXf(e) && /\d/.test(a)) return esc(pvMoney(/^[-−]/.test(a) ? '−' : '', false));
@@ -686,8 +693,9 @@
   const taxNmHTML = nm => { const t = String(nm == null ? '' : nm), mm = t.match(/^(.*\S)\s+(#\d+)$/);
     if (!mm) return '<b class="tnm" title="' + esc(t) + '">' + esc(t) + '</b>';
     return '<b class="tnm lpn" title="' + esc(t) + '"><span class="nm">' + esc(S.mobile ? mm[1].replace(/\s*\/\s*/g, '/') : mm[1]) + '</span> <span class="id">' + esc(mm[2]) + '</span></b>'; };
-  const revTxt = s => { let t = term(s).replace(/★/g, '').replace(/\s{2,}/g, ' ').trim();
-    if (pvOn()) t = pvNet(t);
+  const AI_HIDE = 'AI 설명 — 가림 모드에서는 숨겨요';
+  const revTxt = (s, plain) => { let t = term(s).replace(/★/g, '').replace(/\s{2,}/g, ' ').trim();
+    if (pvOn() && !plain) return AI_HIDE;
     return t; };
   const evTxt = s => {
     let t = revTxt(String(s == null ? '' : s).normalize('NFKC'));
@@ -824,7 +832,7 @@
   }
   function symMerge(positions, keyOf) {
     const by = new Map();
-    positions.forEach(p => { const k = p.symSrc ? '#' + String(p.key || '').replace(/f\d+$/, '') : ((keyOf && keyOf(p)) || String(p.sym || '').toUpperCase()); if (!by.has(k)) by.set(k, []); by.get(k).push(p); });
+    positions.forEach(p => { const k = p.kind === 'quarantined' ? '!q:' + String(p.key || '') : p.symSrc ? '#' + String(p.key || '').replace(/f\d+$/, '') : ((keyOf && keyOf(p)) || String(p.sym || '').toUpperCase()); if (!by.has(k)) by.set(k, []); by.get(k).push(p); });
     const out = [];
     const eff = p => {
       const b = num(p.bought);
@@ -888,8 +896,8 @@
 
   function deriveOF(D, f) {
     D.hasOF = Array.isArray(f.outflows);
-    D.of = arr(f.outflows).map(normOF).filter(Boolean);
-    D.ofPend = D.of.filter(r => r.status === 'pending' && !r.dustPoison);
+    D.of = arr(f.outflows).map(r => { const p = r && r.address && optHas('of') ? optOf('of', String(r.address)) : null; if (!p) return normOF(r); const x = normOF(Object.assign({}, r, p)); if (x) x._opt = true; return x; }).filter(Boolean);
+    D.ofPend = D.of.filter(r => (r.status === 'pending' || r.applyWait) && !r.dustPoison);
     D.ofBrU = D.of.filter(r => r.brU);
     D.ofHidden = D.of.filter(r => r.bucket === 'spam' || r.dustPoison);
     D.ofPendN = D.ofPend.length + D.ofBrU.length;
@@ -912,8 +920,8 @@
   }
   function buildEventsRaw(D, f, day) {
     const evs = [];
-    arr(f.extraEvents).forEach(e => evs.push({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, _ts: e._ts }));
-    D.eventsHid = arr(f.extraEventsHidden).map(e => ({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, hide: e.hide, hideKind: e.hideKind, iso: isoOf(e.t) }));
+    arr(f.extraEvents).forEach(e => evs.push({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, _ts: e._ts, of: e.of, ofc: e.ofc }));
+    D.eventsHid = arr(f.extraEventsHidden).map(e => ({ t: e.t, sym: e.sym, k: evKind(e.k, e.d), d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, imp: e.imp, hide: e.hide, hideKind: e.hideKind, iso: isoOf(e.t), of: e.of, ofc: e.ofc }));
     arr(f.lpEvents).forEach(e => evs.push({ t: e.t, sym: e.sym, k: e.k, d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, lp: e.lp, _ts: e._ts }));
     evs.forEach(e => { e.iso = isoOf(e.t); e.day = String(e.t || '').slice(0, 5); });
     D.positions.forEach(p => {
@@ -923,7 +931,7 @@
         const list = [];
         arr(ea).forEach(e => {
           if (e.k === '평단 갱신') return;
-          const o = { t: e.t, sym: p.sym, k: e.k, d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, pkey: p.key };
+          const o = { t: e.t, sym: p.sym, k: e.k, d: e.d, q: e.q, a: e.a, aK: e.aK, tx: e.tx, src: e.src, pkey: p.key, of: e.of, ofc: e.ofc };
           o.iso = isoOf(o.t); o.day = String(o.t || '').slice(0, 5);
           list.push(o);
         });
@@ -986,6 +994,7 @@
       unexplained: num(f.unexplained), net: f.held == null && f.capped ? num(f.sent) - num(o(f.returned).usd) : num(f.net), mixedIn: { usd: num(o(f.mixedIn).usd), n: num(o(f.mixedIn).n) },
       swaps: { n: num(o(f.swaps).n), sold: arr(o(f.swaps).sold).map(coin), bought: arr(o(f.swaps).bought).map(coin) },
       notes: arr(f.notes).map(String), score: sc(f.score), mineN: num(f.mineN),
+      spoofHidden: { n: num(o(f.spoofHidden).n), items: arr(o(f.spoofHidden).items).map(t => ({ ts: num(o(t).ts), tx: String(o(t).tx || ''), chain: String(o(t).chain || ''), sym: String(o(t).sym || '?'), qty: num(o(t).qty), dir: o(t).dir === 'in' ? 'in' : 'out', cp: String(o(t).cp || '') })) },
       recips: arr(f.recips).filter(x => x && x.addr).map(x => ({ addr: String(x.addr), kind: String(x.kind || 'eoa'), base: String(x.base || x.kind || 'eoa'), label: String(x.label || ''),
         chains: arr(x.chains).map(String), usd: num(x.usd), n: num(x.n), first: num(x.first), last: num(x.last), approx: !!x.approx,
         coins: arr(x.coins).map(coin), via: num(x.via), viaN: num(x.viaN), score: sc(x.score), registerable: !!x.registerable,
@@ -994,10 +1003,39 @@
   }
   const ofTraced = r => !!(r && r.flow && ['ok', 'partial'].indexOf(r.flow.status) >= 0);
   const ofNetV = r => ofTraced(r) ? Math.max(0, r.flow.net - num(r.linkTokenUsd)) : ((r.returnedUsd || r.matchedUsd || r.linkTokenUsd) && r.netUsd != null ? Math.max(0, r.netUsd) : ((r.sendKnown ? r.usdAtSend : 0) || r.usdNow));
+  const RLW = Object.assign(new Set(), { known: false, auto: false, at: 0, stateAt: 0, pin: new Map() });
+  let rlBusy = false, rlAgain = false, rlAt = 0;
+  async function rlFetch(force) {
+    if (S.locked) return;
+    if (rlBusy) { if (force) rlAgain = true; return; }
+    if (!force && Date.now() - rlAt < 5000) return;
+    rlBusy = true; const t0 = rlAt = Date.now();
+    try {
+      const r = await fetch('/api/wallet_reload', { cache: 'no-store', credentials: 'same-origin' });
+      const j = r.ok ? await r.json() : null;
+      if (!j || !j.ok || !Array.isArray(j.addrs) || S.locked) return;
+      const nx = new Set(j.addrs.map(String));
+      RLW.pin.forEach((at, a) => { if (at >= t0) nx.add(a); else RLW.pin.delete(a); });
+      const same = nx.size === RLW.size && [...nx].every(a => RLW.has(a));
+      const stale = S.D && arr(S.D.of).some(x => x.applyWait ? !nx.has(x.address) : nx.has(x.address) && (x.status === 'pending' || x.status === 'own_restart_needed'));
+      const chg = !same || !RLW.known || RLW.auto !== !!j.auto || stale;
+      RLW.clear(); nx.forEach(a => RLW.add(a));
+      RLW.known = true; RLW.auto = !!j.auto; RLW.at = t0;
+      if (chg && S.data && S.D) { S.D = derive(S.data); render(); }
+    } catch (e) {  } finally { rlBusy = false; if (rlAgain) { rlAgain = false; rlFetch(true); } }
+  }
+  function rlWait(r, st) {
+    const a = String(r.address);
+    if (RLW.has(a) && (st === 'pending' || st === 'own_restart_needed')) return true;
+    if (st !== 'own_restart_needed') return false;
+    if (r._rlOpt) return true;
+    return !!r.applyWait && !(RLW.known && RLW.at >= RLW.stateAt);
+  }
   function normOF(r) {
     if (!r || typeof r !== 'object' || !r.address) return null;
     const st = String(r.status || (r.verdict ? r.verdict : 'pending'));
-    const bucket = st === 'pending' || st === 'bridge_untracked' ? 'pending' : st === 'spam' ? 'spam' : st === 'system' ? 'system' : st === 'returned' ? 'returned' : st === 'bridge_matched' ? 'bridge' : (st.indexOf('own') === 0 ? 'own' : st.indexOf('exchange') === 0 ? 'exchange' : st === 'external' ? 'external' : 'other');
+    const aw = rlWait(r, st);
+    const bucket = aw || st === 'pending' || st === 'bridge_untracked' ? 'pending' : st === 'spam' ? 'spam' : st === 'system' ? 'system' : st === 'returned' ? 'returned' : st === 'bridge_matched' ? 'bridge' : (st.indexOf('own') === 0 ? 'own' : st.indexOf('exchange') === 0 ? 'exchange' : st === 'external' ? 'external' : 'other');
     const toks0 = arr(r.tokens).map(t => ({ sym: String(t.sym || '?'), qty: num(t.qty), usdAtSend: t.usdAtSend == null ? null : num(t.usdAtSend), usdNow: num(t.usdNow), phantom: !!t.phantom, airdrop: t.quar === 'airdrop' }));
     const realT = toks0.filter(t => !t.phantom || t.airdrop), toks = bucket !== 'spam' && realT.length && realT.length < toks0.length ? realT : toks0;
     const txN = r.txs ? arr(r.txs).length : num(r._txn);
@@ -1006,6 +1044,7 @@
     const chains = arr(r.chains).map(String), names = arr(r.chainNames).length ? arr(r.chainNames).map(String) : chains.map(c => CHAIN_KO[c] || c);
     return { address: String(r.address), chains, chainNames: names, count: num(r.count) || txN, tokens: toks, phantomN: toks0.length - toks.length,
       txsV, phTxN: fold ? num(r.phantomTxN) : 0,
+      txsCut: Math.max(0, num(r.txsCut)),
       usdAtSend: num(r.usdAtSend), usdNow: num(r.usdNow), costUsd: num(r.costUsd), status: st, bucket, verdict: r.verdict || null,
       category: r.category || '', memo: r.memo || '', alias: r.alias || '', exchange: r.exchange || '',
       links: arr(r.links).filter(l => l && l.key).map(l => ({ kind: l.kind === 'refund' ? 'refund' : 'tokens', key: String(l.key), sym: String(l.sym || '?'), qty: num(l.qty), ts: num(l.ts),
@@ -1013,9 +1052,10 @@
       linkRefundUsd: num(r.linkRefundUsd), linkTokenUsd: num(r.linkTokenUsd), saleWait: num(r.saleWait),
       linkPaidUsd: r.linkPaidUsd == null ? null : num(r.linkPaidUsd),
       excludeLegs: arr(r.excludeLegs).map(String), candN: num(r.candN),
+      candTop: arr(r.candTop).filter(c => c && c.key).map(c => ({ key: String(c.key), sym: String(c.sym || '?'), qty: num(c.qty), ts: num(c.ts), stable: !!c.stable, where: String(c.where || ''), fromSender: !!c.fromSender, kind: c.kind === 'refund' ? 'refund' : 'tokens' })),
       firstTs: num(r.firstTs), lastTs: num(r.lastTs), first: r.first || '', last: r.last || '', decidedTs: num(r.decidedTs),
       hints: arr(r.hints), flags: arr(r.flags), txs: arr(r.txs),
-      applying: st === 'own_restart_needed' || st === 'exchange_applying', matched: st === 'exchange_matched' || st === 'bridge_matched',
+      applying: st === 'own_restart_needed' || st === 'exchange_applying', applyWait: aw, matched: st === 'exchange_matched' || st === 'bridge_matched',
       brU: st === 'bridge_untracked', bridge: r.bridge && typeof r.bridge === 'object' ? r.bridge : null, arrivals: arr(r.arrivals),
       arrivalsN: r.arrivalsN != null ? num(r.arrivalsN) : arr(r.arrivals).length, returnedN: r.returnedN != null ? num(r.returnedN) : arr(r.returned).length,
       sendKnown: r.usdAtSendKnown !== false && r.usdAtSend != null, special: r.address === 'multi' || r.address === '?',
@@ -1025,6 +1065,7 @@
       netUsd: r.netUsd == null ? null : num(r.netUsd),
       retOk: !!r.retOk, retSugg: !!r.retSugg,
       flow: normFlow(r.flow),
+      aiOp: r.aiOp && typeof r.aiOp === 'object' ? r.aiOp : null,
       exwd: arr(r.exwd).map(x0 => { const x = x0 && typeof x0 === 'object' ? x0 : {};
         return { exName: String(x.exName || x.ex || ''), sym: String(x.sym || ''), qty: num(x.qty), net: String(x.net || ''),
           txid: String(x.txid || ''), addr: String(x.addr || ''), ts: num(x.ts), cls: x.cls || null, dst: x.dst || null, why: x.why || null, offc: !!x.offc }; }),
@@ -1158,8 +1199,9 @@
     const V = new Map();
     const addV = (name, kind, sub, sym, qtyLabel, usd, ch) => {
       let v = V.get(name); if (!v) { v = { name, kind, sub, total: 0, items: [] }; V.set(name, v); }
-      v.total += usd; v.items.push({ sym, qty: qtyLabel, usd, ch: ch || '' });
+      v.total += usd; v.items.push({ sym, qty: qtyLabel, usd, ch: ch || '', sub: sub || '' });
     };
+    D.stableSyms = new Set(stables.map(s => String(s.sym || '').toUpperCase()));
     stables.concat(coins).forEach(a => arr(a.locs).forEach(l => {
       const wallet = String(l.w || '').indexOf('지갑') >= 0;
       addV(l.w || '?', wallet ? 'wallet' : 'cex', wallet ? l.sub : '거래소 계정', a.sym, num(l.qty), num(l.qty) * num(a.price), l.ch || chainOf(a.name));
@@ -1173,6 +1215,7 @@
     D.plans = (f.plans && typeof f.plans === 'object') ? f.plans : {};
     D.plansMemoOk = !!(f.planMemos && typeof f.planMemos === 'object');
     D.memos = D.plansMemoOk ? f.planMemos : {};
+    if (optHas('plan')) optPlans(D);
     D.dmOk = f.dayMemosOk === true;
     D.dayMemos = D.dmOk && f.dayMemos && typeof f.dayMemos === 'object' ? f.dayMemos : {};
     D.dmErr = D.dmOk && f.dayMemosErr ? String(f.dayMemosErr) : '';
@@ -1295,7 +1338,7 @@
     D.usdt = f.usdtByDate || {};
     D.reviews = (f.reviews && typeof f.reviews === 'object') ? f.reviews : {};
 
-    D.pendings = arr(f.pendings);
+    D.pendings = optHas('ign') ? arr(f.pendings).filter(p => !(p && optOf('ign', String(p.key)))) : arr(f.pendings);
     D.pendings.forEach(p => { p._cat = pcat(p); });
     D.pendVis = D.pendings.filter(p => !p.hide);
     D.pendHid = D.pendings.filter(p => !!p.hide);
@@ -1311,11 +1354,11 @@
     const unkRest = D.unkInst.filter(x => !unkListed.has(x.key));
     D.unkRestUsd = sum(unkRest, x => x.usd); D.unkRestN = new Set(unkRest.filter(x => x.usd >= 0.005).map(x => x.sym.toUpperCase())).size;
 
-    D.xferLinks = arr(f.xferLinks); D.saleLinks = arr(f.saleLinks); D.wdDest = arr(f.wdDestUnknown); D.wdDestN = f.wdDestUnknownTotal != null ? num(f.wdDestUnknownTotal) : D.wdDest.length; D.wdDestStats = (f.wdDestStats && typeof f.wdDestStats === 'object') ? f.wdDestStats : {};
+    D.xferLinks = optLinks(arr(f.xferLinks), 'xfer', 'dep'); D.saleLinks = optLinks(arr(f.saleLinks), 'sale', 'lot'); D.wdDest = arr(f.wdDestUnknown); D.wdDestN = f.wdDestUnknownTotal != null ? num(f.wdDestUnknownTotal) : D.wdDest.length; D.wdDestStats = (f.wdDestStats && typeof f.wdDestStats === 'object') ? f.wdDestStats : {};
     deriveOF(D, f);
     D.saleAlert = f.saleCandAlert !== false;
 
-    D.wallets = arr(f.walletRows); D.deposits = arr(f.depositRows); D.aliases = arr(f.aliasRows); D.srcChips = arr(f.srcChips);
+    D.wallets = optHas('alias') ? arr(f.walletRows).map(w => { const p = w && optOf('alias', String(w.key || w.addr || '')); return p ? Object.assign({}, w, p, { _opt: true }) : w; }) : arr(f.walletRows); D.deposits = arr(f.depositRows); D.aliases = arr(f.aliasRows); D.srcChips = arr(f.srcChips);
     D.walletAlias = (f.walletAlias && typeof f.walletAlias === 'object') ? f.walletAlias : {};
     D.costOv = arr(f.costOverrideRows);
     D.costDecided = arr(f.costDecidedRows);
@@ -1347,6 +1390,8 @@
     D.reviewFill = (f.reviewFill && typeof f.reviewFill === 'object' && f.reviewFill.order) ? f.reviewFill : null;
     D.reviewPause = (f.reviewPause && typeof f.reviewPause === 'object') ? { on: f.reviewPause.on === true, at: num(f.reviewPause.at) || null } : null;
     D.lastScan = f.lastScan || '';
+    D.vflows = f.venueFlows30 && typeof f.venueFlows30 === 'object' ? f.venueFlows30 : null;
+    D.exBalTs = f.exBalTs && typeof f.exBalTs === 'object' ? f.exBalTs : {};
     D.upbit = !!f.upbitConnected;
     D.backfill = f.backfillProgress || null;
     const bc = f.balanceCheck;
@@ -1488,6 +1533,7 @@
     try { const h = window.TJHealth; if (h && typeof h.lock === 'function') h.lock(); } catch (e) {  }
     try { const q9 = window.TJSearch; if (q9 && typeof q9.lock === 'function') q9.lock(); } catch (e) {  }
     try { const w9 = window.TJWow; if (w9 && typeof w9.lock === 'function') w9.lock(); } catch (e) {  }
+    try { const sl9 = window.TJSale; if (sl9 && typeof sl9.lock === 'function') sl9.lock(); } catch (e) {  }
   }
   async function reopenLocked() {
     let j = null;
@@ -1598,10 +1644,6 @@
         P.retryAt = performance.now() + dl + 50; P.timer = setTimeout(() => partsPump(true), dl); }
     }
   }
-  function partsWaitFor(name) {
-    partsNeed([name], 'wait');
-    return new Promise(ok => { const t0 = Date.now(); const tick = () => { if (partHave(name) || Date.now() - t0 > 60000) ok(); else setTimeout(tick, 150); }; tick(); });
-  }
   function partCheck(name, part, f) {
     const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
     const objs = a => Array.isArray(a) && a.every(e => e && typeof e === 'object');
@@ -1660,6 +1702,7 @@
     S.data = d; S.ver = ver || S.ver;
     S.D = derive(d);
     S.perf = { kind, parse: t1 - t0, derive: performance.now() - t1 };
+    if (kind !== 'cache') { RLW.stateAt = Date.now(); if (RLW.size || arr(S.D && S.D.of).some(x => x.applyWait) || arr(d && d.fields && d.fields.outflows).some(x => x && x.applyWait)) rlFetch(true); else rlFetch(false); }
     if (!S.inited) initFromData();
     else if (kind !== 'cache' && S.bootDay) {
       if (S.day === S.bootDay && S.D.todayKey !== S.bootDay) { S.day = S.D.todayKey; S.calYM = ymOf(S.day) || ymShift(0); }
@@ -1739,7 +1782,9 @@
       if (seq < S.applied || S.locked) return;
       S.applied = seq; S.err = null; S.lastOk = Date.now(); S.pulse = true;
       const wasCached = S.cached; S.cached = false;
+      const optGone = optSettle(seq);
       if (x.kind === 'same') {
+        if (optGone && S.D && S.data) { try { S.D = derive(S.data); } catch (e) { rescue(e, 'derive'); return; } render(); return; }
         if (!S.D) { try { adopt(S.data, S.ver, performance.now(), 'same'); } catch (e) { rescue(e, 'derive'); return; } render(); }
         else { S.perf = { kind: 'same' }; if (wasCached) render(); else renderChrome(); }
         if (S.parts && !S.parts.done) setTimeout(() => partsPump(), 0);
@@ -1771,6 +1816,7 @@
   }
   async function bootLoad() {
     const B = window.__tjBoot || {};
+    rlFetch(true);
     if (!S.rand && B.idb && B.since) {
       let rec = null;
       try { rec = await B.idb; } catch (e) { rec = null; }
@@ -1812,22 +1858,125 @@
     return S.csrf || '';
   }
   async function post(path, body, okMsg) {
+    const oe = optFor(path, body);
     try {
       const tok = await csrf();
       const hd = { 'Content-Type': 'application/json' };
       if (tok) hd['X-TJ-CSRF'] = tok;
       const r = await fetch(path, { method: 'POST', headers: hd, body: JSON.stringify(body) });
-      if (r.status === 401) { onUnauthorized(); return null; }
+      if (r.status === 401) { optFail(oe); onUnauthorized(); return null; }
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+      optOk(oe, d);
       if (okMsg) toast(typeof okMsg === 'function' ? okMsg(d) : okMsg);
       refresh();
       return d;
     } catch (e) {
+      optFail(oe);
       toast('저장하지 못했어요 · ' + ((e && e.message) || e), true);
       return null;
     }
+  }
+  const OPT = { n: 0, list: [] };
+  const OPT_ANY = new Set(['/api/cost_override', '/api/risk_override', '/api/fallback_avg', '/api/gas_in_cost', '/api/offchain_self', '/api/dust_threshold',
+    '/api/src_whitelist', '/api/wd_dest_register', '/api/flow_register', '/api/review_len', '/api/review_pause', '/api/review_fill']);
+  const ofRaw = a => { const f = S.data && S.data.fields; return f ? arr(f.outflows).find(r => r && r.address === a) || null : null; };
+  const ofAuto = () => { if (RLW.known) return RLW.auto; const f = S.data && S.data.fields; if (f && f.walletAuto) return true; try { const st = suSt(); return !!(st && st.apply && st.apply.runner); } catch (e) { return false; } };
+  function ofPatchOf(r0, dec) {
+    const v = dec && dec.verdict && dec.verdict !== 'clear' ? dec.verdict : null, cur = String((r0 && r0.status) || '');
+    const p = { verdict: v, category: (dec && dec.category) || null, memo: (dec && dec.memo) || null, alias: (dec && dec.alias) || null, decidedTs: (dec && dec.ts) || null,
+      noAuto: !!(dec && dec.noAuto), excludeLegs: arr(dec && dec.excludeLegs).map(x => String(x && typeof x === 'object' ? x.key : x)) };
+    if (v === 'external') p.status = 'external';
+    else if (v === 'exchange') p.status = cur === 'exchange' ? 'exchange' : 'exchange_applying';
+    else if (v === 'own') { p.status = cur === 'own' ? 'own' : 'own_restart_needed'; p.applyWait = p.status === 'own_restart_needed' && ofAuto() && String((r0 && r0.address) || '').indexOf('wd:') !== 0; if (p.applyWait) p._rlOpt = true; }
+    if (dec && dec.exchange) p.exchange = dec.exchange;
+    const have = new Map(arr(r0 && r0.links).filter(l => l && l.key).map(l => [String(l.key), l]));
+    p.links = arr(dec && dec.links).filter(l => l && l.key).map(l => have.get(String(l.key)) || { kind: l.kind, key: String(l.key), sym: l.sym, qty: l.qty, ts: l.ts, where: l.where, tx: l.tx, st: '', usd: null });
+    if (v || (dec && dec.ret === false)) p.retOk = false;
+    return p;
+  }
+  function optFor(path, body) {
+    try {
+      const b = body || {}, out = [];
+      if (path === '/api/outflow_resolve' && typeof b.address === 'string' && b.op !== 'salealert') {
+        const a = b.address.indexOf('0x') === 0 ? b.address.toLowerCase() : b.address, r0 = ofRaw(a);
+        if (r0) {
+          const cur = { verdict: r0.verdict || null, category: r0.category || null, memo: r0.memo || null, alias: r0.alias || null, exchange: r0.exchange || null, ts: r0.decidedTs || null,
+            noAuto: !!r0.noAuto, links: arr(r0.links), excludeLegs: arr(r0.excludeLegs), ret: !!r0.retOk };
+          let dec = Object.assign({}, cur);
+          if (b.op === 'memo') dec.memo = String(b.memo || '').trim() || null;
+          else if (b.op === 'unlink') dec.links = cur.links.filter(l => String(l.key) !== String(b.key));
+          else if (b.op === 'link') { const ks = new Set(cur.links.map(l => String(l.key))); dec.links = cur.links.concat(arr(b.links).filter(x => x && !ks.has(String(x.key))).map(x => ({ kind: x.kind, key: String(x.key) }))); }
+          else if (b.op === 'exclude') dec.excludeLegs = cur.excludeLegs.filter(k => k !== String(b.key)).concat([String(b.key)]);
+          else if (b.op === 'include') dec.excludeLegs = cur.excludeLegs.filter(k => k !== String(b.key));
+          else if (b.op === 'ret') { dec = Object.assign(dec, { verdict: 'clear', ret: !!b.on }); }
+          else if (b.verdict) {
+            dec = { verdict: b.verdict, category: b.verdict === 'external' ? b.category || null : null, exchange: b.verdict === 'exchange' ? b.exchange || null : null,
+              alias: b.verdict === 'own' ? (b.alias || null) : null, memo: 'memo' in b ? (String(b.memo || '').trim() || null) : cur.memo, ts: cur.ts,
+              links: b.verdict === 'external' && cur.verdict === 'external' ? cur.links : [], excludeLegs: b.verdict === 'external' && cur.verdict === 'external' ? cur.excludeLegs : [] };
+          }
+          const p = ofPatchOf(r0, dec);
+          if (b.op === 'ret' || b.verdict === 'clear') delete p.status;
+          out.push(optAdd('of', a, p));
+        }
+      } else if (path === '/api/plan' && typeof b.key === 'string') {
+        const p = {}; ['target', 'stop', 'memo', 'tags'].forEach(k => { if (k in b) p[k] = b[k]; });
+        out.push(optAdd('plan', b.key, p));
+      } else if (path === '/api/wallet_alias' && typeof b.address === 'string' && String(b.alias || '').trim()) {
+        out.push(optAdd('alias', b.address.indexOf('0x') === 0 ? b.address.toLowerCase() : b.address, { alias: String(b.alias).trim().slice(0, 40) }));
+      } else if ((path === '/api/ignore' || path === '/api/ignore_bulk')) {
+        arr(path === '/api/ignore' ? [b.key] : b.keys).filter(k => typeof k === 'string' && k).forEach(k => out.push(optAdd('ign', k, {})));
+      } else if ((path === '/api/sale_link' || path === '/api/xfer_link') && typeof b.off === 'boolean') {
+        out.push(optAdd(path === '/api/sale_link' ? 'sale' : 'xfer', String(path === '/api/sale_link' ? b.lot : b.dep), { off: b.off }));
+      } else if (OPT_ANY.has(path)) out.push(optAdd('any', path, {}));
+      if (out.length) optRedo(out);
+      return out;
+    } catch (e) { logError('[tj] 즉시 반영 준비 실패(저장은 계속)', e); return []; }
+  }
+  function optAdd(kind, key, patch) { const e = { id: ++OPT.n, kind, key: String(key), patch, st: 'send', seq: 0, at: Date.now() }; OPT.list.push(e); return e; }
+  function optOk(es, d) {
+    if (!es || !es.length) return;
+    es.forEach(e => {
+      if (e.kind === 'of' && d && typeof d === 'object') {
+        if (d.row && d.row.applyWait) { RLW.add(String(e.key)); RLW.pin.set(String(e.key), Date.now()); }
+        const r0 = ofRaw(e.key);
+        if (d.row && typeof d.row === 'object') { const p = Object.assign({}, d.row); if (p.status == null) delete p.status; if (r0) { const lp = ofPatchOf(r0, d.decision || null); p.links = lp.links; } e.patch = p; }
+        else if ('decision' in d && r0) { const keepSt = !('status' in e.patch); e.patch = ofPatchOf(r0, d.decision || null); if (keepSt) delete e.patch.status; }
+      }
+      e.st = 'ok'; e.seq = S.seq;
+    });
+    optRedo(es);
+  }
+  function optFail(es) { if (!es || !es.length) return; const ids = new Set(es.map(e => e.id)); OPT.list = OPT.list.filter(e => !ids.has(e.id)); optRedo(es); }
+  function optSettle(seq) {
+    const n0 = OPT.list.length;
+    OPT.list = OPT.list.filter(e => !(e.st === 'ok' && seq > e.seq));
+    return OPT.list.length !== n0;
+  }
+  const optWaiting = () => OPT.list.length > 0;
+  function optRedo(es) {
+    if (!S.D || !S.data) return;
+    try {
+      if (es.every(e => e.kind === 'of' || e.kind === 'any')) { if (es.some(e => e.kind === 'of')) deriveOF(S.D, S.data.fields || {}); }
+      else { const t0 = performance.now(); S.D = derive(S.data); S.perf = { kind: 'opt', parse: 0, derive: performance.now() - t0 }; }
+      render();
+    } catch (e) { logError('[tj] 즉시 반영 그리기 실패', e); }
+  }
+  const optOf = (kind, key) => { let p = null; for (const e of OPT.list) if (e.kind === kind && e.key === key) p = Object.assign(p || {}, e.patch); return p; };
+  const optHas = kind => OPT.list.some(e => e.kind === kind);
+  const optLinks = (list, kind, idk) => optHas(kind) ? list.map(x => { const p = x && optOf(kind, String(x[idk])); return p ? Object.assign({}, x, p, { _opt: true }) : x; }) : list;
+  function optPlans(D) {
+    const P = Object.assign({}, D.plans), M = Object.assign({}, D.memos);
+    OPT.list.filter(e => e.kind === 'plan').forEach(e => {
+      const k = e.key, p = e.patch, cur = P[k] || {};
+      const t = 'target' in p ? (p.target == null || p.target === '' ? 0 : +p.target) : num(cur.target), s = 'stop' in p ? (p.stop == null || p.stop === '' ? 0 : +p.stop) : num(cur.stop);
+      const memo = 'memo' in p ? String(p.memo == null ? '' : p.memo) : (M[k] || cur.memo || '');
+      if ('memo' in p) { if (memo.trim()) M[k] = memo; else delete M[k]; }
+      if (0 < s && s < t && isFinite(t)) P[k] = Object.assign({ src: 'CEX', venue: '감시 중', tags: [] }, cur, { target: t, stop: s, memo, _opt: true }, 'tags' in p ? { tags: arr(p.tags) } : {});
+      else if (P[k]) delete P[k];
+    });
+    D.plans = P; D.memos = M;
   }
 
   function render() {
@@ -2046,8 +2195,9 @@
     const age = S.lastOk ? (Date.now() - S.lastOk) / 1000 : 1e9;
     const dc = S.err ? 'e' : (age > POLL_MS * 3 / 1000 ? 'w' : '');
     const scan = S.err ? (S.cached && S.D ? '저장된 화면' + (S.savedAt ? ' · ' + (new Date(S.savedAt).toDateString() === new Date().toDateString() ? fmtTs(S.savedAt / 1000).slice(6) : fmtTs(S.savedAt / 1000)) + ' 기준' : '') + ' · 서버 연결 끊김' : '연결 끊김') : S.cached ? '저장된 화면 · 갱신 중' : (D ? scanText(D.lastScan) + ' 수집' : '불러오는 중');
-    if (short) return '<span class="dot ' + dc + '" title="' + esc(scan) + '"></span>';
-    return '<span class="dot ' + dc + '"' + (D ? ' title="' + esc(scan) + '"' : '') + '></span><span class="scan">' + esc(scan) + '</span>'
+    const opt = optWaiting() ? '<span class="pill w sm optp" style="margin-left:6px" title="저장했어요 · 서버가 다시 계산하면 총자산·손익도 새 값으로 바뀌어요">반영 중</span>' : '';
+    if (short) return '<span class="dot ' + dc + '" title="' + esc(scan) + '"></span>' + opt;
+    return '<span class="dot ' + dc + '"' + (D ? ' title="' + esc(scan) + '"' : '') + '></span><span class="scan">' + esc(scan) + '</span>' + opt
       + (D ? '<span class="scanmeta pvx">· 지갑 ' + D.wallets.length + ' · 거래소 ' + D.exN + '</span>'
         + '<span class="fx num" title="업비트 USDT 매도호가 · 김프">USDT ₩' + nf('ko-KR').format(D.rate) + ' · 김프 <b style="color:' + kimpCol(D.kimp) + '">' + pctS(D.kimp, 2) + '</b>' + kimpChip(D.kimp) + '</span>' : '');
   }
@@ -2403,6 +2553,44 @@
     let top = '', tv = 0; by.forEach((v, nm) => { if (Math.abs(v) > Math.abs(tv)) { tv = v; top = nm; } });
     return { k: bk, iso, usd: num(D.realized[bk]), v: bv, sym: top, more: by.size > 1 };
   }
+  function dayRealISO() {
+    const D = S.D, f = D.f || {}, out = {};
+    const add = (mp, mk) => Object.keys(mp || {}).forEach(k => { const iso = isYMD(k) ? String(k).slice(0, 10) : isoDay(k); if (!iso || !isYMD(iso)) return; const e = out[iso] || (out[iso] = [0, 0]); e[0] += num(mp[k]); e[1] += mk && mk[k] != null ? num(mk[k]) : num(mp[k]) * rate(); });
+    add(f.realizedByDate, f.realizedKrwByDate); add(D.fut.realizedByDate, D.fut.realizedKrwByDate);
+    return out;
+  }
+  function bestOf(iso, v, usd) {
+    const D = S.D, by = new Map();
+    const pick = mp => { let x = 0; Object.keys(mp || {}).forEach(k => { if (isoDay(k) === iso) x += num(mp[k]); }); return x; };
+    D.merged.concat(D.lpCycles).forEach(p => { const x = pick(p.realizedByDay); if (Math.abs(x) < 0.005) return;
+      const nm = p._lp ? String(p.sym).replace(/\s*\/\s*/g, '/') + ' LP' : String(p.sym); by.set(nm, num(by.get(nm)) + x); });
+    const rf = pick(D.fut.realizedByDate); if (Math.abs(rf) >= 0.005) by.set('선물', num(by.get('선물')) + rf);
+    let top = '', tv = 0; by.forEach((x, nm) => { if (Math.abs(x) > Math.abs(tv)) { tv = x; top = nm; } });
+    return { k: iso, iso, usd, v, sym: top, more: by.size > 1 };
+  }
+  function bestRange(from, to, R) {
+    R = R || dayRealISO();
+    let bk = null, bv = 0, bu = 0;
+    Object.keys(R).sort().forEach(k => { if (k < from || k > to) return; const v = KV(R[k][0], S.D.hasKrw ? R[k][1] : null); if (v > bv + 1e-12) { bv = v; bk = k; bu = R[k][0]; } });
+    return bk ? bestOf(bk, bv, bu) : null;
+  }
+  const addMonISO = (iso, k) => { const y = +iso.slice(0, 4), mo = +iso.slice(5, 7) - 1 + k, d = +iso.slice(8, 10), yy = y + Math.floor(mo / 12), mm = ((mo % 12) + 12) % 12, dim = new Date(yy, mm + 1, 0).getDate(); return yy + '-' + pad2(mm + 1) + '-' + pad2(Math.min(d, dim)); };
+  function bestSpan() {
+    const td = todayISO(), cd = S.chartDays || 30, R = dayRealISO(), ks = Object.keys(R).sort();
+    const ck = cd >= 9999 ? arr(S.hist && S.hist.days).map(r => String(r[0])).concat(arr(S.D.daily).map(r => isoDay(r.date) || String(r.date))).filter(k => isYMD(k) && k <= td).sort() : [];
+    const from = cd >= 9999 ? ([ck[0], ks[0]].filter(Boolean).sort()[0] || td) : isoAdd(td, -(cd - 1));
+    let nWin = cd <= 30 ? 1 : cd >= 9999 ? 1 : Math.round(cd / 30.4);
+    if (cd >= 9999) while (addMonISO(td, -nWin) >= from) nWin++;
+    return { from, to: td, nWin, R, cd };
+  }
+  function bestWindows() {
+    const sp = bestSpan(), out = [];
+    for (let i = 0; i < sp.nWin; i++) {
+      const to = i ? isoAdd(addMonISO(sp.to, -i), 0) : sp.to, from = i === sp.nWin - 1 ? sp.from : isoAdd(addMonISO(sp.to, -(i + 1)), 1);
+      out.push({ from, to, best: bestRange(from, to, sp.R) });
+    }
+    return out;
+  }
   function monthDays(ym) {
     const xs = realDays(ym || ymShift(0));
     return { n: xs.length, w: xs.filter(x => x.v > 0).length, l: xs.filter(x => x.v < 0).length };
@@ -2418,15 +2606,17 @@
     const tr = KV(num(D.realized[tk]), D.hasKrw ? D.realizedK[tk] : null);
     const tcn = dayCnt(tk, true), tSells = tcn ? tcn.s : D.events.filter(e => /매도/.test(e.k) && e.iso.slice(0, 10) === isoDay(tk)).length;
     const trZero = Math.abs(num(D.realized[tk])) < 0.005;
-    const md = monthDays(ym0), best = bestDay(ym0);
+    const md = monthDays(ym0), bsp = bestSpan(), best = bestRange(bsp.from, bsp.to, bsp.R);
     const fut = D.fut, futOk = !!fut.ts;
     const cmp = S.mobile;
     const vks = Object.keys(fut.snapshotTs || {}), ndex = vks.filter(isDex).length, exs = (vks.length - ndex) || (ndex ? 0 : 3);
     const stale = arr(fut.staleExchanges);
     const rangeSeg = D.daily.length > 7 ? '<div class="seg rng pvx" role="group" aria-label="차트 기간">' + CH_RANGES.filter(r => r[0] <= 30 || S.hist.st !== 'none').map(r => '<button data-a="chartDays" data-v="' + r[0] + '" class="' + (S.chartDays === r[0] ? 'on' : '') + '" aria-pressed="' + (S.chartDays === r[0]) + '">' + r[1] + '</button>').join('') + '</div>' : '';
     const bestR = best ? topRcptSym(best.iso) : null;
-    const bestChip = best ? '<button class="bestd" data-a="receiptTop" data-v="' + esc(best.iso) + '" title="' + esc(heroDayLbl(best.k) + ' 실현 ' + m(best.v, { sign: true }) + (best.sym ? ' · 기여 1위 ' + best.sym : '') + (bestR ? ' — 누르면 ' + bestR + ' 차익 영수증' : ' — 누르면 그날 기록')) + '"><span class="k">최고의 날</span><span class="num">' + esc(heroDayLbl(best.k).replace(/ \(.\)$/, '')) + (best.sym ? '<span class="bsym"> · ' + esc(best.sym) + (best.more ? ' 등' : '') + '</span>' : '') + ' ' + m(best.v, { sign: true, compact: true }) + '</span>' + IC.right + '</button>' : '';
-    const chart = h.pts && h.pts.length > 1 ? chartSVG(h.pts, h, best, bestChip) : '<div class="cap" style="margin-top:8px">일별 마감이 쌓이면 추이 차트가 표시됩니다.</div>' + (bestChip ? '<div class="chart-foot">' + bestChip + '</div>' : '');
+    const bestChip = best ? '<button class="bestd" data-a="bestMonths" data-v="' + esc(best.iso) + '" aria-haspopup="dialog" title="' + esc(heroDayLbl(best.k) + ' 실현 ' + m(best.v, { sign: true }) + (best.sym ? ' · 기여 1위 ' + best.sym : '') + ' — 누르면 ' + (bsp.nWin > 1 ? '달마다 최고의 날' : '이 기간 최고의 날') + '을 고를 수 있어요' + (bestR ? '(' + bestR + ' 차익 영수증)' : '')) + '"><span class="k">최고의 날</span><span class="num">' + esc(heroDayLbl(best.k).replace(/ \(.\)$/, '')) + (best.sym ? '<span class="bsym"> · ' + esc(best.sym) + (best.more ? ' 등' : '') + '</span>' : '') + ' ' + m(best.v, { sign: true, compact: true }) + '</span>' + IC.right + '</button>' : '';
+    const hw = S.chartDays > 30 && S.hist.st === 'loading' && !h.hist, hwL = (CH_RANGES.find(r => r[0] === S.chartDays) || [0, ''])[1];
+    const chart = hw ? '<div aria-busy="true"><div class="chart chsk" aria-hidden="true"><i></i></div><div class="chart-x num">&nbsp;</div><div class="chart-foot"><span class="cap pvx" role="status" aria-live="polite">' + esc(hwL) + ' 곡선 받는 중…</span></div></div>'
+      : h.pts && h.pts.length > 1 ? chartSVG(h.pts, h, best, bestChip) : '<div class="cap" style="margin-top:8px">일별 마감이 쌓이면 추이 차트가 표시됩니다.</div>' + (bestChip ? '<div class="chart-foot">' + bestChip + '</div>' : '');
     const ap = h.ap ? '≈ ' : '';
     const at0 = h.today != null ? attOf(D.todayKey) : null;
     const todayChg = h.today == null ? '<span class="mut">전일 마감 없음</span>'
@@ -2434,20 +2624,20 @@
     const lbl = '<span class="pvx">' + (S.chartDays === 7 ? '1주' : h.hist ? (CH_RANGES.find(r => r[0] === S.chartDays) || [0, ''])[1] : (h.pts ? h.pts.length : 30) + '일') + '</span>';
     const exH = h.hist && h.histFlowMiss ? '<span class="nw" title="최근 30일의 입출금(원화 입출금·외부 전송·잔고 정정)만 기간 변화에서 뺐어요 — 그보다 앞의 날은 입출금을 ' + (S.hist.flowBuilding ? '계산하는 중이라' : '따로 세지 않아') + ' 그대로 들어 있어요"> · 입출금은 최근 30일만 제외</span>' : '';
     const hp = S.hist.prog || {};
-    const hcap = S.chartDays <= 30 ? '' : S.hist.st === 'loading' && !h.hist ? '과거 곡선 불러오는 중…'
+    const hcap = S.chartDays <= 30 || hw ? '' : S.hist.st === 'loading' && !h.hist ? '과거 곡선 불러오는 중…'
       : S.hist.st === 'err' ? '과거 곡선을 못 불러왔어요 — 다음 갱신 때 다시 받아요'
       : S.hist.building ? '과거 시세 모으는 중' + (num(hp.specs) ? ' (' + Math.min(100, Math.round(num(hp.done) / num(hp.specs) * 100)) + '%)' : '') + ' — 다 모으기 전 날은 점선(근사)'
       : (S.hist.st === 'ok' && !h.hist ? '30일보다 앞의 기록이 아직 없어요' : h.hist && h.histFlowMiss && S.hist.flowBuilding ? '과거 입출금 계산 중 — 끝나면 기간 변화에서 입출금을 모두 빼요' : '');
     const flTxt = h.rng != null && D.hasFlow ? '입출금 ' + m(h.flowSum, { sign: true }) + ' 제외 · 입출금 포함 변화 ' + m(h.rng, { sign: true }) : '';
     const exF = '<span class="nw" title="' + esc((flTxt ? flTxt + ' — ' : '') + '원화 입출금(은행 ↔ 거래소 — 쓰려고 뺀 돈·새로 넣은 돈)·외부 전송·거래소 잔고 정정은 매매 손익이 아니라서 기간 변화에서 뺐어요') + '"> · 입출금 제외</span>';
     const exX = h.hist && !h.histFlowMiss && h.nofxN ? '<span class="nw" title="' + esc(h.nofxN + '일은 그날 마감 환율 기록이 없어 원화 입출금 ' + krw(h.nofxK) + ' 를 기간 변화에서 빼지 못했어요(오늘 환율로 바꾸지 않음)') + '"> · 원화 입출금 ' + h.nofxN + '일 미반영</span>' : '';
-    const rngTxt = h.rng != null && h.pts && h.pts.length > 2 ? '<b class="' + cls(h.adj) + '" title="' + esc(m(h.adj, { sign: true }) + (flTxt && Math.abs(h.rng - h.adj) >= 0.5 ? ' · ' + flTxt : '')) + '">' + m(h.adj, { sign: true, compact: true }) + '</b> <span class="pp ' + cls(h.adj) + '">' + pctS(h.first.val ? h.adj / h.first.val * 100 : null, 2) + '</span> <span class="mut">' + lbl + (h.hist && h.histFlowMiss ? exH : (D.hasFlow ? (Math.abs(h.rng - h.adj) >= 0.5 ? exF : '') : (h.steps.length ? exF : ''))) + exX + '</span>' : '';
+    const rngTxt = h.rng != null && h.pts && h.pts.length > 2 ? '<b class="' + cls(h.adj) + '" title="' + esc(m(h.adj, { sign: true }) + (flTxt && Math.abs(h.rng - h.adj) >= 0.5 ? ' · ' + flTxt : '')) + '">' + m(h.adj, { sign: true, compact: true }) + '</b> <span class="pp ' + cls(h.adj) + '">' + pctS(h.first.val ? retPct(h.first.val, h.first.val + h.rng, h.flowSum) : null, 2) + '</span> <span class="mut">' + lbl + (h.hist && h.histFlowMiss ? exH : (D.hasFlow ? (Math.abs(h.rng - h.adj) >= 0.5 ? exF : '') : (h.steps.length ? exF : ''))) + exX + '</span>' : '';
     const dex = D.debts.map(x => x.ex).filter((v, i, a0) => a0.indexOf(v) === i), dsym = D.debts.map(x => x.sym).filter((v, i, a0) => a0.indexOf(v) === i);
     const debt = D.debts.length ? '<span class="hs num debtln" title="' + esc(D.debtTip()) + '">' + esc(D.debtLbl) + ' <b class="dn">' + m(D.debtUsd, { sign: true, compact: cmp }) + '</b> <span class="mut">' + nbDot(esc(dex.join(' · ') + ' ' + dsym.join(' · '))) + ' · 상환 전 · 총자산에 이미 차감</span></span>' : '';
-    const tsub = debt + rbLine();
+    const tsub = rbLine();
     const totalCard = '<section class="card total" aria-label="자산 요약"><div class="thd"><div class="tleft">'
-      + '<span class="tlab">총자산 <i id="heroWhen"></i></span><span class="tv num" id="heroBig"' + (cmp ? ' title="' + esc(m(D.total)) + '"' : '') + '>' + N('total', D.total, cmp ? 'mc' : 'm') + '</span>'
-      + '<span class="tchg num" id="heroChg">' + (rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + wowSlot('dash.total') + '</section>';
+      + '<div class="trow"><span class="tlab">총자산 <i id="heroWhen"></i></span>' + wowSlot('dash.total') + '</div><span class="tv num" id="heroBig"' + (cmp ? ' title="' + esc(m(D.total)) + '"' : '') + '>' + N('total', D.total, cmp ? 'mc' : 'm') + '</span>'
+      + '<span class="tchg num" id="heroChg">' + (hw ? '<span class="skl chskl" aria-hidden="true"></span>' : rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + '</section>';
     const futNet = num((fut.pnlBreak || {}).net != null ? fut.pnlBreak.net : fut.realizedTotal);
     const futOpen = futOk && num(fut.posCount) > 0;
     const futV = !futOk ? '<span class="mut">수집 대기</span>' : futOpen ? '<span class="' + cls(num(fut.upnl)) + '">' + m(num(fut.upnl), { sign: true, compact: true }) + '</span>' : '<span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>';
@@ -2465,7 +2655,7 @@
       + '<button class="card kq kpi fut" data-a="openFut"' + (futTip ? ' title="' + esc(futTip) + '"' : '') + '><span class="ql">' + (futOpen ? '선물 포지션' : '선물 누적') + (stale.length ? ' <span class="pill w sm">수집 지연</span>' : '') + '</span><span class="qv num">' + futV + '</span><span class="qs num">' + futS + '</span></button></div>';
     const why = '<section class="card why" aria-label="오늘 무엇이 움직였나"><div class="wh"><h2>오늘 무엇이 움직였나</h2><span class="num whv" id="heroToday">' + todayChg + '</span></div>'
       + (at0 ? attBars(at0, D.todayKey, true) : '<div class="cap">' + (h.today == null ? '전일 마감이 쌓이면 오늘 변동을 시세·입출금·환율로 나눠 보여요' : '오늘은 분해 기록이 아직 없어요 — 다음 수집 때 시세·입출금·환율로 나눠 보여요') + '</div>') + '</section>';
-    return '<div class="hero">' + totalCard + kq + '<div class="dmid">' + why + todoHTML() + '</div></div>';
+    return '<div class="hero">' + totalCard + kq + levHTML() + '<div class="dmid">' + why + todoHTML() + '</div></div>';
   }
   function attQ(n) {
     if (n == null || !isFinite(n)) return '—';
@@ -2550,19 +2740,19 @@
     const mv = tbl ? tbl + '<div class="axtg">' + tog + '</div>' : shown.length ? '<div class="amv"><span class="cap">많이 움직인 코인</span>' + shown.map(t => '<span class="mchip" title="' + esc(t.sym + ' 시세 기여 ' + m(t.v, { sign: true })) + '">' + icon(t.sym, 'xs', S.D.symLogo[t.sym.toUpperCase()] || {}) + esc(t.sym) + ' <span class="num ' + cls(t.pct != null ? t.pct : t.v) + '">' + (t.pct != null ? pctS(t.pct, 1) : m(t.v, { sign: true, compact: true })) + '</span></span>').join('') + '<span class="sp"></span>' + tog + '</div>' : '<div class="amv"><span class="sp"></span>' + tog + '</div>';
     return '<div class="attl ' + (dash ? 'hatt ' : '') + 'abox"' + ' title="' + esc(attLine(a, 5, false)) + '">' + (a.ap ? '<div class="cap">≈ 근사 — 시세 기록 없는 자산은 추정가라 시세 기여가 0</div>' : '') + bars + mv + '</div>' + (open ? attDetail(a, k, !!tbl) : '');
   }
-  function rbLine() {
-    const D = S.D;
-    if (!(D.rbValue > 0 || D.rbDebt < 0)) return '';
-    const at = D.rabby && D.rabby.at;
-    return '<span class="hs num rbln" title="봇이 추적하지 않는 체인·프로토콜 포지션·토큰을 Rabby(DeBank 데이터) 값으로 더했어요 — 보유 코인의 \'Rabby 기준\' 행 · 설정 › Rabby 대조">Rabby 기준 <b>' + m(D.rbValue + D.rbDebt, { sign: true, compact: true }) + '</b> 포함'
-      + (D.rbDebt < 0 ? ' (차입 ' + m(D.rbDebt, { sign: true, compact: true }) + ' 차감)' : '') + (at ? ' · ' + ago(at) : '') + '</span>';
-  }
+  function rbLine() { return ''; }
   function habLoad(force) {
     const H = S.hab || (S.hab = { st: '', d: null, at: 0 });
-    if (H.st === 'loading' || (!force && H.st && Date.now() - H.at < 300000)) return;
+    if (H.st === 'loading' || (!force && H.st && Date.now() - H.at < (H.st === 'building' ? 15000 : 300000))) return;
+    if (H.tm) { clearTimeout(H.tm); H.tm = 0; }
     H.st = 'loading';
+    H.t0 = Date.now();
+    setTimeout(() => { if (H.st === 'loading' && S.tab === 'journal' && S.j.view === 'habits') renderView(); }, 6500);
     fetch('/api/habits', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => { H.d = j && j.ok ? j : null; H.st = H.d ? 'ok' : (j && j.why === 'building' ? 'building' : 'err'); H.at = Date.now(); })
-      .catch(() => { H.st = 'err'; H.at = Date.now(); }).then(() => { if (S.tab === 'journal' && S.j.view === 'habits') renderView(); });
+      .catch(() => { H.st = 'err'; H.at = Date.now(); }).then(() => {
+        if (H.st === 'building') H.tm = setTimeout(() => { H.tm = 0; if (H.st === 'building' && S.tab === 'journal' && S.j.view === 'habits') habLoad(true); }, 15000);
+        if (S.tab === 'journal' && S.j.view === 'habits') renderView();
+      });
   }
   const HB_SLOT = ['0~2시', '2~4시', '4~6시', '6~8시', '8~10시', '10~12시', '12~14시', '14~16시', '16~18시', '18~20시', '20~22시', '22~24시'];
   const HB_WD = ['월', '화', '수', '목', '금', '토', '일'];
@@ -2571,34 +2761,36 @@
     if (!H.d) {
       habLoad();
       return '<div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>' + (H.st === 'err' ? '습관 리포트를 불러오지 못했어요' : H.st === 'building' ? '기록 색인을 만드는 중이에요' : '습관을 모으는 중…') + '</b>'
+        + (H.st === 'building' || (H.st === 'loading' && Date.now() - (H.t0 || Date.now()) > 6000) ? '<div class="cap" style="margin-top:6px">봇이 막 다시 켜지면 기록 색인을 새로 만드느라 1~3분 걸려요 — 다 되면 저절로 보여요</div>' : '')
         + (H.st === 'err' || H.st === 'building' ? '<button class="btn sm" data-a="habRetry" style="margin-top:10px">' + IC.undo + ' 다시 시도</button>' : '') + '</div>';
     }
     if (Date.now() - H.at > 300000) habLoad();
     const d = H.d, avg = d.n ? d.win / d.n * 100 : null;
     if (!d.n) return '<div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>아직 습관을 볼 만큼 매도 기록이 없어요</b>지난 12개월 매도가 쌓이면 시간대·요일·보유 기간별로 보여 드려요</div>';
     const cells = [];
-    d.grid.forEach((row, wd) => row.forEach((c, h) => { if (c[0] >= 3) cells.push({ wd, h, n: c[0], w: c[1], r: c[1] / c[0] * 100 }); }));
-    const minN = Math.max(4, Math.round(d.n * 0.02));
+    d.grid.forEach((row, wd) => row.forEach((c, h) => { if (c[0] >= 1) cells.push({ wd, h, n: c[0], w: c[1], r: c[1] / c[0] * 100, pnl: c.length > 2 ? num(c[2]) : null }); }));
+    const minN = Math.max(5, Math.round(d.n * 0.02));
     const pool = cells.filter(c => c.n >= minN);
     const worst = pool.slice().sort((a, b) => a.r - b.r || b.n - a.n)[0], bestC = pool.slice().sort((a, b) => b.r - a.r || b.n - a.n)[0];
     const pick = worst && bestC ? (avg - worst.r >= bestC.r - avg ? ['w', worst] : ['b', bestC]) : worst ? ['w', worst] : null;
     const slotTxt = c => (c.h < 3 ? '새벽 ' : c.h < 6 ? '오전 ' : c.h < 9 ? '오후 ' : '밤 ') + HB_SLOT[c.h];
     const head = pick
       ? '<div class="hbh1">' + HB_WD[pick[1].wd] + '요일 ' + esc(slotTxt(pick[1])) + '에 판 것의 이익 비율은 <span class="' + (pick[0] === 'w' ? 'down' : 'up') + '">' + Math.round(pick[1].r) + '%</span>' + (pick[0] === 'w' ? '예요' : '였어요') + '</div>'
-        + '<div class="hbh2">전체 평균 ' + Math.round(avg) + '% · 이 시간대 매도 ' + pick[1].n + '묶음 중 ' + (pick[0] === 'w' ? (pick[1].n - pick[1].w) + '묶음이 손실' : pick[1].w + '묶음이 이익') + '으로 끝났어요</div>'
+        + '<div class="hbh2">전체 평균 ' + Math.round(avg) + '% · 이 시간대 매도 ' + pick[1].n + '묶음 중 ' + (pick[0] === 'w' ? (pick[1].n - pick[1].w) + '묶음이 손실' : pick[1].w + '묶음이 이익') + '으로 끝났어요' + (pick[1].pnl != null ? ' · 손익 <span class="' + cls(pick[1].pnl) + '">' + pvm(m(pick[1].pnl, { sign: true, compact: true })) + '</span>' : '') + '</div>'
       : '<div class="hbh1">이익 난 매도 비율 <span class="' + cls(avg - 50) + '">' + Math.round(avg) + '%</span></div>';
     const cell = (c) => {
       if (!c) return '<span class="hbc z"></span>';
       const dv = c.r - avg, a = Math.min(1, Math.abs(dv) / 35);
-      return '<span class="hbc ' + (dv >= 0 ? 'u' : 'd') + '" style="--a:' + (0.18 + a * 0.82).toFixed(2) + '" title="' + esc(HB_WD[c.wd] + '요일 ' + HB_SLOT[c.h] + ' · 이익 ' + Math.round(c.r) + '% (' + c.w + '/' + c.n + '묶음)') + '"></span>';
+      return '<span class="hbc ' + (dv >= 0 ? 'u' : 'd') + (c.n < 5 ? ' lo' : '') + '" style="--a:' + (0.18 + a * 0.82).toFixed(2) + '" title="' + esc(HB_WD[c.wd] + '요일 ' + HB_SLOT[c.h] + ' · 이익 ' + Math.round(c.r) + '% (' + c.w + '/' + c.n + '묶음)' + (c.n < 5 ? ' · 표본 적음' : '')) + '">' + c.n + '</span>';
     };
     const byK = {}; cells.forEach(c => { byK[c.wd + ':' + c.h] = c; });
     let grid = '<div class="hbg"><span></span>' + [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map(x => '<span class="hbx">' + x + '</span>').join('');
     for (let wd = 0; wd < 7; wd++) { grid += '<span class="hby">' + HB_WD[wd] + '</span>'; for (let h = 0; h < 12; h++) grid += cell(byK[wd + ':' + h]); }
     grid += '</div>';
-    const best2 = bestC ? '가장 잘 맞는 때 <b class="up">' + HB_WD[bestC.wd] + ' · ' + HB_SLOT[bestC.h] + ' ' + Math.round(bestC.r) + '%</b>' : '';
-    const worst2 = worst ? '가장 안 맞는 때 <b class="down">' + HB_WD[worst.wd] + ' · ' + HB_SLOT[worst.h] + ' ' + Math.round(worst.r) + '%</b>' : '';
-    const left = '<section class="card hbcard"><div class="row"><b class="hbt">시간대 × 요일 · 이익 난 매도 비율</b><span class="sp"></span><span class="cap">진할수록 평균에서 멀어요</span></div>' + grid
+    const amt9 = c => (c.pnl != null ? ' <span class="' + cls(c.pnl) + '">' + pvm(m(c.pnl, { sign: true, compact: true })) + '</span>' : '');
+    const best2 = bestC ? '가장 잘 맞는 때 <b class="up">' + HB_WD[bestC.wd] + ' · ' + HB_SLOT[bestC.h] + ' ' + Math.round(bestC.r) + '%</b> · ' + bestC.n + '묶음' + amt9(bestC) : '';
+    const worst2 = worst ? '가장 안 맞는 때 <b class="down">' + HB_WD[worst.wd] + ' · ' + HB_SLOT[worst.h] + ' ' + Math.round(worst.r) + '%</b> · ' + worst.n + '묶음' + amt9(worst) : '';
+    const left = '<section class="card hbcard"><div class="row"><b class="hbt">시간대 × 요일 · 이익 난 매도 비율</b><span class="sp"></span><span class="cap">칸 숫자 = 매도 묶음 수 · 진할수록 평균에서 멀어요 · 5묶음 미만은 흐리게</span></div>' + grid
       + '<div class="hbf">' + [best2, worst2].filter(Boolean).map(x => '<span>' + x + '</span>').join('') + '</div></section>';
     const hs = arr(d.hold).filter(x => num(x.n) > 0 && num(x.cost) > 0).map(x => ({ k: x.k, n: num(x.n), r: num(x.pnl) / num(x.cost) * 100 }));
     const mx = Math.max.apply(null, hs.map(x => Math.abs(x.r)).concat([1]));
@@ -2609,24 +2801,34 @@
       + '<div class="rt"><b class="hbt">판 다음 날 더 오른 비율</b><span>10번 중 ' + Math.round(pu / 10) + '번은 다음 날 마감가가 판 값보다 1% 넘게 높았어요</span><span class="cap">시세 기록 있는 ' + nx[1] + '묶음 · 다음 날 평균 ' + pctS(num(d.nextAvg), 1) + '</span></div></section>';
     return '<div class="habs pvx"><div class="hbhd"><div class="cap">나의 매매 습관 · 지난 12개월 · 매도 ' + d.n + '묶음</div>' + head + '</div>'
       + '<div class="hbgrid">' + left + '<div class="hbside">' + hold + ring + '</div></div>'
-      + '<div class="cap hbnote">묶음 = 그날 그 코인 매도(차익 영수증과 같은 단위) · 시각 = 그날 그 코인 가장 큰 매도 · 3묶음 미만 칸은 비워요</div></div>';
+      + '<div class="cap hbnote">묶음 = 그날 그 코인 매도(차익 영수증과 같은 단위) · 시각 = 그날 그 코인 가장 큰 매도 · 보유 기간 = 첫 매수부터 실제 매도 시각까지'
+      + (d.excl && (num(d.excl.stable) || num(d.excl.quar)) ? ' · 스테이블 환전 ' + num(d.excl.stable) + '묶음' + (num(d.excl.quar) ? ' · 격리 ' + num(d.excl.quar) + '묶음' : '') + '은 뺐어요' : '')
+      + (d.cov && d.cov.next != null ? ' · 다음 날 시세 확인 ' + Math.round(num(d.cov.next) * 100) + '%' + (d.cov.pxAt ? ' · 시세 기준 ' + esc(String(d.cov.pxAt).slice(5).replace('-', '/')) : '') : '') + '</div></div>';
   }
   const BENCH_K = ['btc', 'hold'];
   const benchSet = () => new Set(String(LS.get('tj_v2_bench') || '').split(',').filter(k => BENCH_K.indexOf(k) >= 0));
   const benchOn = k => (k ? benchSet().has(k) : benchSet().size > 0);
-  function benchLoad(force) {
-    const B = S.bench || (S.bench = { st: '', d: null, at: 0 });
-    if (B.st === 'loading' || (!force && B.st && Date.now() - B.at < 600000)) return;
-    B.st = 'loading';
-    fetch('/api/bench', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => { const nd = j && j.ok && j.px && typeof j.px === 'object' ? j : null; if (nd) B.d = nd; B.st = B.d ? 'ok' : 'err'; B.at = Date.now(); })
-      .catch(() => { B.st = B.d ? 'ok' : 'err'; B.at = Date.now(); }).then(() => { if (S.D && S.tab === 'dash') renderView(); });
+  const benchAt = (B, sk) => (B.hAt && B.hAt[sk] != null ? B.hAt[sk] : num(B.at));
+  function benchLoad(force, since) {
+    const B = S.bench || (S.bench = { st: '', d: null, at: 0, h: {}, hs: {}, hAt: {} });
+    B.h = B.h || {}; B.hs = B.hs || {}; B.hAt = B.hAt || {};
+    const sk = /^\d{4}-\d{2}-\d{2}$/.test(since || '') ? since : '', at = benchAt(B, sk);
+    if (B.st === 'loading' || (B.hs[sk] === 'loading') || (!force && B.hs[sk] !== 'err' && B.st && Date.now() - at < 600000 && (!sk || B.h[sk]))) return;
+    if (!force && B.hs[sk] === 'err' && Date.now() - at < 60000) return;
+    B.st = 'loading'; B.hs[sk] = 'loading';
+    fetch('/api/bench' + (sk ? '?since=' + sk : ''), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => { const nd = j && j.ok && j.px && typeof j.px === 'object' ? j : null;
+      if (nd) { B.d = nd; B.h[sk] = { hold: nd.hold || {}, holdCov: nd.holdCov, rows: arr(nd.rows), nRows: num(nd.nRows), pxAt: nd.pxAt || null, since: nd.since || sk }; const ks = Object.keys(B.h); if (ks.length > 8) { delete B.h[ks[0]]; delete B.hAt[ks[0]]; } }
+      B.st = B.d ? 'ok' : 'err'; B.hs[sk] = nd ? 'ok' : 'err'; B.at = B.hAt[sk] = Date.now(); })
+      .catch(() => { B.st = B.d ? 'ok' : 'err'; B.hs[sk] = 'err'; B.at = B.hAt[sk] = Date.now(); }).then(() => { if (S.D && S.tab === 'dash') renderView(); });
   }
   function benchVals(pts) {
-    const B = S.bench;
-    if (!B || !B.d) { benchLoad(); return null; }
-    if (Date.now() - B.at >= 600000) benchLoad();
-    const D = S.D, px = B.d.px || {}, hd = B.d.hold || {}, keys = Object.keys(px).sort(), tk = D.todayKey;
-    let ki = 0, lastPx = null, u = null;
+    const B = S.bench, since0 = pts && pts.length ? (isoDay(pts[0].date) || String(pts[0].date)) : '';
+    if (!B || !B.d) { benchLoad(false, since0); return null; }
+    const exp9 = Date.now() - benchAt(B, since0) >= 600000;
+    if (exp9 || (B.hs && B.hs[since0] === 'err') || (B.d.since && !(B.h && B.h[since0]))) benchLoad(exp9, since0);
+    const hb = (B.h && B.h[since0]) || (B.d.hold && !B.d.since ? { hold: B.d.hold, holdCov: B.d.holdCov, rows: arr(B.d.rows), nRows: num(B.d.nRows), pxAt: B.d.pxAt || null, since: '' } : null);
+    const D = S.D, px = B.d.px || {}, hd = hb ? hb.hold || {} : {}, keys = Object.keys(px).sort(), tk = D.todayKey;
+    let ki = 0, lastPx = null, u = null, neg = 0;
     const priceAt = iso => { while (ki < keys.length && keys[ki] <= iso) { lastPx = num(px[keys[ki]]); ki++; } return lastPx; };
     const btc = [], hold = [];
     const flowOk = !pts.some((p, i) => i > 0 && p.row && p.row._hist && (p.row.flow == null || num(p.row.nofx)));
@@ -2636,28 +2838,53 @@
       const pr = isT ? (num(B.d.now) > 0 ? num(B.d.now) : priceAt(iso)) : priceAt(iso);
       if (flowOk && pr > 0 && f != null) {
         const flow = isT ? num(D._todayFlow) : (p.row && p.row.flow != null ? num(p.row.flow) : 0);
-        u = u == null ? usd / pr : Math.max(0, u + flow / pr);
+        u = u == null ? usd / pr : u + flow / pr;
+        if (u < 0) neg++;
         btc.push(u * pr * f);
       } else btc.push(null);
-      hold.push(f != null && hd[iso] != null ? p.val + num(hd[iso]) * f : (f != null && Object.keys(hd).length ? p.val : null));
+      hold.push(hb && f != null && hd[iso] != null ? p.val + num(hd[iso]) * f : (hb && f != null && Object.keys(hd).length ? p.val : null));
     });
-    return { btc: btc.some(v => v != null) ? btc : null, hold: Object.keys(hd).length && hold.some(v => v != null) ? hold : null };
+    return { btc: btc.some(v => v != null) ? btc : null, hold: hb && Object.keys(hd).length && hold.some(v => v != null) ? hold : null, btcNeg: neg, hb, since: since0 };
   }
-  const benchPct = (arr9, h) => { if (arr9.length < 2 || arr9.some(v => v == null)) return null; const f0 = arr9[0]; return f0 ? (arr9[arr9.length - 1] - f0 - num(h.flowSum)) / f0 * 100 : null; };
+  const benchPct = (arr9, h) => { if (arr9.length < 2 || arr9.some(v => v == null)) return null; return retPct(arr9[0], arr9[arr9.length - 1], h.flowSum); };
   function benchCards(pts, h, bv) {
     if (!bv || !benchOn()) return '';
     if (h.histFlowMiss || h.nofxN) return '<div class="cap bnote">' + (h.histFlowMiss ? '과거 입출금 계산이 끝나면 비교 결과를 보여 드려요' : '그날 환율 기록이 없는 원화 입출금이 있어 이 기간 비교 결과는 생략했어요') + '</div>';
-    const act = h.first && h.first.val ? num(h.adj) / h.first.val * 100 : null;
+    const act = h.first && h.first.val ? retPct(h.first.val, h.first.val + num(h.adj) + num(h.flowSum), h.flowSum) : null;
     const pb = benchOn('btc') && bv.btc ? benchPct(bv.btc, h) : null, ph = benchOn('hold') && bv.hold ? benchPct(bv.hold, h) : null;
     const main = pb != null ? ['btc', pb, 'BTC 만 들고 있었다면', '같은 날 같은 돈으로 BTC 매수 가정'] : ph != null ? ['hold', ph, '판 코인을 계속 들고 있었다면', '판 날의 수량을 그대로 들고 있었다면'] : null;
     if (act == null || !main) return '';
     const dp = act - main[1], other = pb != null && ph != null ? ' · 안 팔았다면 대비 ' + pctS(act - ph, 1).replace('%', '%p') : '';
     const card = (cl, lab, v, sub, sw) => '<div class="bcard ' + cl + '"><div class="bl">' + sw + esc(lab) + '</div><div class="bv num">' + pctS(v, 1) + '</div><div class="bs">' + esc(sub) + '</div></div>';
-    const covT = ph != null && S.bench.d.holdCov != null && S.bench.d.holdCov < 0.9 ? ' · 판 대금 ' + Math.round(S.bench.d.holdCov * 100) + '%만 시세 기록' : '';
+    const hb9 = bv.hb, covT = ph != null && hb9 && hb9.holdCov != null ? ' · 판 대금 시세 확인 ' + Math.round(num(hb9.holdCov) * 100) + '%' + (hb9.pxAt ? ' · 시세 ' + String(hb9.pxAt).slice(5).replace('-', '/') + ' 기준' : '') : '';
+    const nb = hb9 && ph != null ? num(hb9.nRows) || arr(hb9.rows).length : 0;
+    const foot = (pb != null && bv.btcNeg ? 'BTC 비교: 출금이 비교 잔고보다 컸던 ' + bv.btcNeg + '일은 음수(빌린 셈)로 계산했어요(0 에서 멈추지 않게)' : '')
+      + (nb ? (pb != null && bv.btcNeg ? ' · ' : '') + '<button type="button" class="link" data-a="benchRows" data-v="' + esc(bv.since || '') + '">안 팔았다면 · 판 것 ' + nb + '건 하나씩 보기</button>' : '');
     return '<div class="bcards pvx">' + card('act', '내 실제 매매', act, '입출금 뺀 순수익률', '<i class="bsw act"></i>')
-      + card(main[0], main[2], main[1], main[3] + covT, '<i class="bsw ' + main[0] + '"></i>')
-      + '<div class="bcard win ' + (dp >= 0 ? 'w' : 'l') + '"><div class="bl">' + (dp >= 0 ? '내 매매가 이겼어요' : '들고만 있는 게 나았어요') + '</div><div class="bv num">' + pctS(dp, 1).replace('%', '%p') + '</div><div class="bs">' + esc((main[0] === 'btc' ? 'BTC 보유 대비' : '판 코인 보유 대비') + other) + '</div></div></div>';
+      + card(main[0], main[2], main[1], main[3] + (main[0] === 'hold' ? covT : ''), '<i class="bsw ' + main[0] + '"></i>')
+      + '<div class="bcard win ' + (dp >= 0 ? 'w' : 'l') + '"><div class="bl">' + (dp >= 0 ? '내 매매가 이겼어요' : '들고만 있는 게 나았어요') + '</div><div class="bv num">' + pctS(dp, 1).replace('%', '%p') + '</div><div class="bs">' + esc((main[0] === 'btc' ? 'BTC 보유 대비' : '판 코인 보유 대비') + other + (main[0] === 'btc' ? covT : '')) + '</div></div></div>'
+      + (foot ? '<div class="cap bnote pvx">' + foot + '</div>' : '');
   }
+  UI_SHEETS.bestm = () => {
+    const ws = bestWindows(), md9 = iso => (+iso.slice(5, 7)) + '/' + (+iso.slice(8, 10)), open = !!S.bestMore;
+    const row = w => '<div class="bmr">' + '<span class="w num pvx">' + esc(md9(w.from)) + '~' + esc(md9(w.to)) + '</span>'
+      + (w.best ? '<button type="button" class="bmb' + (S.bestPick === w.best.iso ? ' on' : '') + '" data-a="bestPick" data-v="' + esc(w.best.iso) + '"><b class="num pvx">' + esc(heroDayLbl(w.best.iso)) + '</b><span class="s">' + esc(w.best.sym || '') + (w.best.more ? ' 등' : '') + '</span><span class="num up">' + m(w.best.v, { sign: true, compact: true }) + '</span>' + IC.right + '</button>'
+        : '<span class="bmn mut">거래 없음</span>') + '</div>';
+    const head = '<div class="cap" style="margin-bottom:8px">' + (ws.length > 1 ? '오늘부터 거꾸로 한 달씩 <span class="pvx">' + ws.length + '칸</span> · ' : '') + '그날 실현(현물 + 선물) 가장 큰 날 · 고르면 차트에 표시하고 그날로 가요</div>';
+    const main = ws.slice(0, 12).map(row).join(''), rest = ws.slice(12);
+    return head + '<div class="bml">' + main + (rest.length ? '<button type="button" class="link" data-a="bestMore" aria-expanded="' + open + '" style="margin:8px 0">' + (open ? '이전 칸 접기' : '이전 <span class="pvx">' + rest.length + '개</span> 더 보기') + '</button>' + (open ? rest.map(row).join('') : '') : '') + '</div>';
+  };
+  UI_SHEETS.benchRows = since => {
+    const hb = S.bench && S.bench.h && S.bench.h[since];
+    if (!hb) return '<div class="cap">불러오는 중…</div>';
+    const rows = arr(hb.rows), n = num(hb.nRows) || rows.length;
+    const md9 = iso => String(iso || '').slice(2).replace(/-/g, '.');
+    const head = '<div class="cap" style="margin-bottom:8px">' + esc(md9(hb.since)) + '부터 판 것 · 지금 가격 = 같은 자산 묶음의 마지막 시세(' + (hb.pxAt ? esc(md9(hb.pxAt)) + ' 기준' : '없음') + ') · 판 대금 시세 확인 ' + Math.round(num(hb.holdCov) * 100) + '%</div>';
+    const body = rows.map(r => '<div class="bkr"><span class="d num pvx">' + esc(md9(r.d)) + '</span><b>' + esc(r.sym) + '</b><span class="num">' + px(num(r.sp)) + '</span><span class="num">' + (r.now != null ? px(num(r.now)) : '<span class="mut pvx">' + (r.st === 'nogrp' ? '묶음 모름' : '시세 없음' + (r.lastPx ? ' · ' + esc(md9(r.lastPx)) + '까지' : '')) + '</span>') + '</span>'
+      + '<span class="num ' + (r.diff != null ? cls(r.diff) : 'mut') + '">' + (r.diff != null ? m(num(r.diff), { sign: true, compact: true }) : '—') + '</span></div>').join('');
+    return head + '<div class="bkt"><div class="bkr h"><span>판 날</span><span>코인</span><span>판 가격</span><span>지금 가격</span><span>안 팔았다면</span></div>' + (body || '<div class="cap">이 기간엔 판 것이 없어요</div>') + '</div>'
+      + (n > rows.length ? '<div class="cap" style="margin-top:8px">최근 <span class="pvx">' + rows.length + '건</span>만 · 전체 <span class="pvx">' + n + '건</span></div>' : '');
+  };
   function benchLeg() {
     const B = S.bench || {}, chip = (k, lab, ic) => '<button type="button" class="bchip ' + k + (benchOn(k) ? ' on' : '') + '" data-a="benchTog" data-v="' + k + '" aria-pressed="' + benchOn(k) + '">' + ic + esc(lab) + '</button>';
     const st = benchOn() && !B.d && (B.st === 'loading' || !B.st) ? '<span class="cap">시세 불러오는 중…</span>' : benchOn() && B.st === 'err' ? '<span class="cap">비교 시세를 불러오지 못했어요</span>' : '';
@@ -2706,7 +2933,8 @@
     cand9.sort((a0, b0) => Math.abs(b0[1]) - Math.abs(a0[1]));
     let mv9 = cand9.filter(c9 => Math.abs(c9[1]) >= thr9).slice(0, 6);
     if (mv9.length < 3) mv9 = mv9.concat(cand9.filter(c9 => Math.abs(c9[1]) < thr9 && Math.abs(c9[1]) >= flo9).slice(0, 3 - mv9.length));
-    const bi = best ? pts.findIndex(p => p.date === best.k) : -1;
+    const bi = best ? pts.findIndex(p => (isoDay(p.date) || p.date) === best.iso) : -1;
+    const pki = S.bestPick ? pts.findIndex(p => (isoDay(p.date) || p.date) === S.bestPick) : -1;
     const mvTip = (i, d) => {
       const k = pts[i].date, a = attOf(k), dv = a ? a.delta : d;
       const rz = KV(num(D.realized[k]), D.hasKrw ? D.realizedK[k] : null);
@@ -2729,6 +2957,7 @@
     const mvSet = new Set(mv9.map(c9 => c9[0]));
     const bx = bi >= 0 ? X(bi) / W * 100 : 0, by = bi >= 0 ? Y(pts[bi].val) / H * 100 : 0;
     const bmark = bi >= 0 ? (mvSet.has(bi) ? '' : '<span class="bdot" style="left:' + bx.toFixed(2) + '%;top:' + by.toFixed(2) + '%;background:var(--up)"></span>')
+      + (pki >= 0 && pki !== bi ? '<span class="bdot pick" style="left:' + (X(pki) / W * 100).toFixed(2) + '%;top:' + (Y(pts[pki].val) / H * 100).toFixed(2) + '%"></span>' : '')
       + (bi < n - 4 ? '<span class="blab num" style="left:' + Math.min(88, Math.max(10, bx)).toFixed(2) + '%;top:' + by.toFixed(2) + '%">' + esc(heroDayLbl(best.k).replace(/ \(.\)$/, '')) + ' · 최고의 날' + (best.sym ? ' ' + esc(best.sym) : '') + ' <span class="up">' + m(best.v, { sign: true, compact: true }) + '</span></span>' : '') : '';
     const isT = h && h.today != null && pts[n - 1].date === D.todayKey;
     const tcol = isT ? (h.disc || h.split ? 'mut' : cls(h.today)) : '';
@@ -2951,8 +3180,7 @@
     const dustLink = S.dust > 0 && (hidden.length || S.hold.showDust) ? '<button class="link" data-a="toggleDust" style="font-weight:600;color:var(--muted)">' + (S.hold.showDust ? '소액 숨기기' : '소액 ' + hidden.length + '종 숨김 · 보기') + '</button>' : '';
     const dense = S.hold.dense && !S.mobile;
     const dseg = S.mobile ? '' : '<div class="seg dseg" role="group" aria-label="행 밀도">' + [['0', '기본'], ['1', '촘촘히']].map(x => '<button data-a="holdDense" data-v="' + x[0] + '" class="' + ((dense ? '1' : '0') === x[0] ? 'on' : '') + '" aria-pressed="' + ((dense ? '1' : '0') === x[0]) + '">' + (x[0] === '1' ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>' : '') + x[1] + '</button>').join('') + '</div>';
-    const head = '<div class="tblhead"><div class="h2">보유 코인</div><span class="cap num">' + rows.length + '종 · ' + ({ value: '평가금액', roi: '수익률', pnl: '평가손익' })[S.hold.sort] + ' 순</span>' + dustLink + '<div class="sp"></div>' + seg + dseg
-      + '<button class="btn sm" data-a="csvHold" title="보유자산·LP·30일 자산변동 CSV">' + IC.down + '<span class="hide-md">CSV</span></button></div>';
+    const head = '<div class="tblhead"><div class="h2">보유 코인</div><span class="cap num">' + rows.length + '종 · ' + ({ value: '평가금액', roi: '수익률', pnl: '평가손익' })[S.hold.sort] + ' 순</span>' + dustLink + '<div class="sp"></div>' + seg + dseg + '</div>';
     if (!rows.length) {
       return '<div class="card">' + head + '<div class="empty"><div class="eic">' + IC.coin + '</div><b>' + (D.groups.length ? '표시할 코인이 없어요' : '보유 코인이 없어요') + '</b>'
         + (hidden.length ? '소액 기준($' + S.dust + ') 미만 ' + hidden.length + '종이 숨겨져 있어요. <button class="link" data-a="toggleDust">모두 보기</button>' : '지갑 스캔·거래소 동기화 후 여기에 나타납니다.') + '</div>' + zeroFoldHTML() + '</div>';
@@ -2996,7 +3224,7 @@
     if (!z.length || S.hold.mode !== 'all') return '';
     const nG = z.filter(x => x.guard).length, nU = z.length - nG, open = S.hold.showZero;
     const why = (nG ? '가격 이상 ' + nG : '') + (nG && nU ? ' · ' : '') + (nU ? '시세 없음 ' + nU : '');
-    const it = x => '<div class="zi" data-anc="zcoin:' + esc(String(x.sym || '').toUpperCase()) + '"><b class="ell">' + esc(x.sym) + '</b><span class="ell mut">' + esc(x.chain || x.where.slice(0, 2).join(' · ') || '거래소') + '</span><span class="num">' + q(x.qty) + '</span>'
+    const it = x => '<div class="zi" data-anc="zcoin:' + esc(String(x.sym || '').toUpperCase()) + '"><b class="ell">' + esc(x.sym) + '</b><span class="ell mut">' + (x.chain ? esc(x.chain) : x.where.length ? x.where.slice(0, 2).map(locH).join(' · ') : '거래소') + '</span><span class="num">' + q(x.qty) + '</span>'
       + (x.guard ? '<span class="pill w sm">가격 이상</span>' : x.cost >= 1 ? '<span class="pill g sm" title="원가 ' + esc(m(x.cost)) + ' — 시세가 없어 평가 0">원가 있음</span>' : '<span></span>') + '</div>';
     return '<div class="foot zfold"><span class="pvx">값 없는 토큰 <b class="num">' + z.length + '</b>개 <span class="mut">· ' + why + ' — 평가 0 · 총자산 밖</span></span>'
       + '<button class="link" data-a="holdZero" aria-expanded="' + open + '">' + (open ? '접기' : '보기') + (open ? '' : IC.right) + '</button></div>'
@@ -3037,8 +3265,8 @@
       if (S.hold.mode === 'wallet' && !L.wallet) return;
       if (S.hold.mode === 'cex' && L.wallet) return;
       const sub = (s.ch && String(s.sub).indexOf(s.ch) === 0) ? s.sub : [s.ch, s.sub].filter(Boolean).join(' · ');
-      locRows.push(S.mobile ? '<div class="kv"><span class="ell">' + (i === 0 ? '<b style="color:var(--text)">' + esc(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell">' + esc(sub) + '</div></span><b class="num">' + m(s.value) + '<div class="sub">' + q(s.qty) + '</div></b></div>'
-        : '<tr><td>' + (i === 0 ? '<b>' + esc(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell" style="max-width:260px">' + esc(sub) + '</div></td><td class="num">' + q(s.qty) + '</td><td class="num">' + m(s.value) + '</td></tr>');
+      locRows.push(S.mobile ? '<div class="kv"><span class="ell">' + (i === 0 ? '<b style="color:var(--text)">' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell">' + esc(sub) + '</div></span><b class="num">' + m(s.value) + '<div class="sub">' + q(s.qty) + '</div></b></div>'
+        : '<tr><td>' + (i === 0 ? '<b>' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell" style="max-width:260px">' + esc(sub) + '</div></td><td class="num">' + q(s.qty) + '</td><td class="num">' + m(s.value) + '</td></tr>');
     }));
     const inst = g.insts.filter(i => !i.zero).sort((a, b) => b.value - a.value).slice(0, 12).map(i => {
       const note = !i.hasCost ? (i.price > 0 ? '<span class="pill w sm">원가 미확인</span>' : '<span class="pill w sm">시세 없음</span>')
@@ -3168,16 +3396,115 @@
     const lim = S.venueAll ? vis.length : 8;
     return '<div class="card box"><div class="row"><div class="h2">보관처별</div><div class="sp"></div><span class="cap">현금 포함 · ' + vis.length + '곳' + (all.length > vis.length ? ' · 소액 ' + (all.length - vis.length) + '곳 숨김' : '') + '</span></div>'
       + '<div class="cust">' + (vis.slice(0, lim).map(v => {
-        const open = S.venueOpen.has(v.name);
-        const items = v.items.slice().sort((a, b) => b.usd - a.usd);
-        const shown = items.filter(it => S.dust <= 0 || it.usd >= S.dust), hid = items.length - shown.length;
+        const vk = nmKey(v.name);
         const lg = v.kind === 'lp' ? '<span class="exl w" aria-hidden="true">' + IC.layers + '</span>' : venueLogo(v.name);
-        return '<div class="it"><button data-a="venueTog" data-k="' + esc(v.name) + '" aria-expanded="' + open + '"><div class="top2">' + lg + '<span class="ell">' + esc(v.name) + '</span><b class="num" data-fl="v:' + esc(v.name) + '" data-v="' + (S.hide || S.rand ? 0 : v.total.toFixed(2)) + '">' + m(v.total, { compact: true }) + '</b></div>'
-          + '<div class="mini"><i style="width:' + Math.max(1, v.total / mx * 100).toFixed(1) + '%;background:' + (v.kind === 'wallet' ? 'var(--c4)' : v.kind === 'lp' ? 'var(--c3)' : 'var(--accent)') + '"></i></div></button>'
-          + (open ? clps('v:' + v.name, '<div class="items">' + shown.slice(0, 12).map(it => '<div><span><b style="color:var(--text)">' + esc(it.sym) + '</b> <span class="mut">' + esc(it.ch) + '</span></span><span class="num">' + esc(typeof it.qty === 'number' ? q(it.qty) : it.qty && it.qty.krw != null ? krw(it.qty.krw) : it.qty) + '</span><span class="num">' + m(it.usd) + '</span></div>').join('')
-            + (shown.length > 12 ? '<div class="mut"><span>외 ' + (shown.length - 12) + '종</span></div>' : '') + (hid ? '<div class="mut"><span>소액 ' + hid + '종 숨김 · $' + S.dust + ' 미만</span><span class="num">' + m(sum(items.filter(it => it.usd < S.dust), it => it.usd)) + '</span></div>' : '') + '</div>') : '') + '</div>';
+        return '<div class="it"><button data-a="venueOpen" data-k="' + esc(vk) + '" aria-haspopup="dialog"><div class="top2">' + lg + '<span class="ell pvl">' + esc(locName(v.name)) + '</span><b class="num" data-fl="v:' + esc(vk) + '" data-v="' + (S.hide || S.rand ? 0 : v.total.toFixed(2)) + '">' + m(v.total, { compact: true }) + '</b></div>'
+          + '<div class="mini"><i style="width:' + Math.max(1, v.total / mx * 100).toFixed(1) + '%;background:' + (v.kind === 'wallet' ? 'var(--c4)' : v.kind === 'lp' ? 'var(--c3)' : 'var(--accent)') + '"></i></div></button></div>';
       }).join('') || '<div class="mut" style="font-size:14px;padding:10px 0">보관처가 없어요</div>') + '</div>'
       + (vis.length > 8 ? '<div class="row" style="margin-top:8px"><span class="cap num">' + (S.venueAll ? '' : '외 ' + (vis.length - 8) + '곳 · ' + m(sum(vis.slice(8), v => v.total), { compact: true })) + '</span><span class="sp"></span><button class="link" data-a="venueAll">' + (S.venueAll ? '접기' : '모두 보기') + '</button></div>' : '') + '</div>';
+  }
+  const VN_COL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)'], VN_REST = 'var(--c5)', VN_TOP = 6;
+  const vnCash = sym => { const s = String(sym || '').toUpperCase(); return s === 'KRW' || !!(S.D && S.D.stableSyms && S.D.stableSyms.has(s)); };
+  function vnModel(v) {
+    const D = S.D, tot = num(v.total);
+    const cm = new Map();
+    v.items.forEach(it => { const k = String(it.sym || '?'); let c = cm.get(k); if (!c) { c = { sym: k, usd: 0, qty: 0, qn: true, lbl: null }; cm.set(k, c); }
+      c.usd += num(it.usd); if (typeof it.qty === 'number') c.qty += it.qty; else { c.qn = false; c.lbl = it.qty; } });
+    const coins = Array.from(cm.values()).sort((a, b) => b.usd - a.usd || (a.sym < b.sym ? -1 : 1));
+    coins.forEach(c => { c.pct = tot > 0 ? Math.max(0, c.usd) / tot * 100 : 0; });
+    const head = coins.slice(0, 4).filter(c => c.usd > 0), restUsd = tot - sum(head, c => c.usd);
+    const slices = head.map((c, i) => ({ sym: c.sym, pct: c.pct, col: VN_COL[i] }));
+    if (restUsd > tot * 1e-6 && tot > 0) slices.push({ sym: '', pct: restUsd / tot * 100, col: VN_REST });
+    const sp = sum(slices, x => x.pct); if (slices.length && sp > 0) slices.forEach(x => { x.pct = x.pct / sp * 100; });
+    const colOf = sym => { const i = head.findIndex(c => c.sym === sym); return i >= 0 ? VN_COL[i] : VN_REST; };
+    const chm = new Map();
+    v.items.forEach(it => { const ch = String(it.ch || ''); if (!ch) return; chm.set(ch, (chm.get(ch) || 0) + num(it.usd)); });
+    const chains = Array.from(chm.entries()).map(([ch, usd]) => ({ ch, usd, pct: tot > 0 ? Math.max(0, usd) / tot * 100 : 0 })).sort((a, b) => b.usd - a.usd);
+    const addrs = [], chAddr = {};
+    if (v.kind === 'wallet') {
+      const W = arr(D.wallets);
+      v.items.forEach(it => { const p9 = String(it.sub || '').split(' · '), ch9 = String(it.ch || p9[0] || ''); if (!p9.some(t => t.indexOf('…') > 0)) return;
+        const w = W.find(x => { const a = String(x.addr || ''), s9 = short(a); return !!a && p9.some(t => /^0x/i.test(a) ? s9.toLowerCase() === t.toLowerCase() : s9 === t); }); if (!w) return;
+        if (addrs.indexOf(w.addr) < 0) addrs.push(w.addr);
+        if (ch9 && !chAddr[ch9]) chAddr[ch9] = w.addr; });
+    }
+    const allCash = v.kind !== 'lp' && v.items.length > 0 && v.items.every(it => vnCash(it.sym));
+    const sol = v.kind === 'wallet' && chains.length > 0 && chains.every(c => c.ch === 'Solana');
+    const evm = v.kind === 'wallet' && chains.some(c => c.ch !== 'Solana');
+    const kindTxt = v.kind === 'wallet' ? '지갑 · ' + (sol ? 'SOL' : evm && chains.some(c => c.ch === 'Solana') ? 'EVM · SOL' : 'EVM') : v.kind === 'lp' ? 'LP' : allCash ? '현금' : '거래소';
+    const share = num(D.total) > 0 ? tot / num(D.total) * 100 : 0;
+    return { v, tot, coins, slices, colOf, chains, addrs, chAddr, kindTxt, share };
+  }
+  function vnExpl(ch, addr) { const k = CHAIN_KEY[ch]; return k && EXPL[k] && addr && !S.rand ? EXPL[k][1] + encodeURIComponent(addr) : null; }
+  function vnRing(M) {
+    const C = 2 * Math.PI * 58;
+    let off = 0;
+    const segs = M.slices.map(x => { const len = x.pct / 100 * C, gap = M.slices.length > 1 ? Math.min(3, len / 2) : 0;
+      const h = '<circle cx="75" cy="75" r="58" fill="none" stroke="' + x.col + '" stroke-width="16" stroke-dasharray="' + Math.max(0, len - gap).toFixed(2) + ' ' + C.toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 75 75)" data-pct="' + x.pct.toFixed(4) + '"></circle>';
+      off += len; return h; }).join('');
+    return '<div class="vnring"><svg width="150" height="150" viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="58" fill="none" stroke="var(--surface3)" stroke-width="16"></circle>' + segs + '</svg>'
+      + '<div class="vnrc"><span>총자산의</span><b class="num">' + (M.share < 0 ? '−' : '') + (Math.abs(M.share) >= 0.5 || M.share === 0 ? Math.round(Math.abs(M.share)) : '<1') + '%</b></div></div>';
+  }
+  function vnFlows(M) {
+    const F = S.D.vflows, v = M.v, by = F && F.by ? F.by[v.name] : null, Z = { in: 0, out: 0, realized: 0, realizedKrw: 0 };
+    const okF = !!(F && F.flowOk && v.kind !== 'lp'), okR = !!(F && v.kind !== 'lp'), x = by || Z;
+    const cell = (k, h) => '<div class="vnfc"><span>' + k + '</span>' + h + '</div>';
+    const rec = vnSrc(M);
+    const rzV = KV(num(x.realized), x.realizedKrw != null ? num(x.realizedKrw) : null);
+    return '<section class="vnc vnfl"><div class="vnh"><b>드나든 돈 · 최근 30일</b>' + (rec ? '<button class="link" data-a="venueRec">이곳 기록 보기 ›</button>' : '') + '</div><div class="vnf3">'
+      + cell('들어옴', okF ? '<b class="num' + (num(x.in) > 0 ? ' up' : '') + '">' + (num(x.in) > 0 ? '+' : '') + m(num(x.in), { compact: true }) + '</b>' : '<b class="mut">—</b>')
+      + cell('나감', okF ? '<b class="num' + (num(x.out) > 0 ? ' down' : '') + '">' + (num(x.out) > 0 ? '−' : '') + m(num(x.out), { compact: true }) + '</b>' : '<b class="mut">—</b>')
+      + cell('이곳 매매 실현', okR ? '<b class="num ' + clsV(rzV) + '">' + m(rzV, { sign: true, compact: true }) + '</b>' : '<b class="mut">—</b>')
+      + '</div></section>';
+  }
+  function vnSrc(M) {
+    const v = M.v;
+    if (v.kind === 'wallet') { const k = M.addrs.length === 1 ? (S.D.walletAlias && Object.keys(S.D.walletAlias).find(a => a.toLowerCase() === M.addrs[0].toLowerCase())) || M.addrs[0] : ''; return k ? { mode: 'dex', key: k } : null; }
+    if (v.kind === 'cex') { const k = EX_BY_KO[v.name] || EX_BY_KO[String(v.name).replace(/ .*$/, '')]; return k ? { mode: 'cex', key: k } : null; }
+    return null;
+  }
+  function vnChains(M) {
+    const v = M.v;
+    if (v.kind === 'cex') { const ts = (S.D.exBalTs || {})[v.name]; return '<section class="vnc"><div class="vnh"><b>잔고</b><span class="cap">' + (ts ? '잔고 기준 ' + ago(ts) : '잔고 시각 모름') + '</span></div></section>'; }
+    if (v.kind !== 'wallet' || !M.chains.length) return '';
+    const bar = '<div class="vnbar" aria-hidden="true">' + M.chains.filter(c => c.usd > 0).map((c, i) => '<span style="flex:' + Math.max(0.5, c.pct).toFixed(2) + ';background:' + (i < 4 ? VN_COL[i] : VN_REST) + '"></span>').join('') + '</div>';
+    const anyL = M.chains.some(c => vnExpl(c.ch, M.chAddr[c.ch]));
+    const list = '<div class="vnchl">' + M.chains.map((c, i) => { const u = vnExpl(c.ch, M.chAddr[c.ch]), inner = '<i style="background:' + (i < 4 ? VN_COL[i] : VN_REST) + '"></i><span class="ell">' + esc(c.ch) + '</span><span class="num mut">' + Math.round(c.pct) + '%</span>';
+      return u ? '<a class="vnch" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + inner + '</a>' : '<span class="vnch">' + inner + '</span>'; }).join('') + '</div>';
+    const ad = M.addrs.map(a => '<div class="vnad"><span class="mono">' + esc(short(a)) + '</span><span class="sp"></span>' + copyBtn(a) + '</div>').join('');
+    return '<section class="vnc"><div class="vnh"><b>체인별</b>' + (anyL ? '<span class="cap">눌러서 탐색기</span>' : '') + '</div>' + bar + list + (ad ? '<div class="vnads">' + ad + '</div>' : '') + '</section>';
+  }
+  function vnCoins(M) {
+    const all = M.coins, open = !!S.venueCoinAll, shown = open ? all : all.slice(0, VN_TOP), rest = all.slice(VN_TOP);
+    const row = c => { const col = M.colOf(c.sym), lg = S.D.symLogo && S.D.symLogo[c.sym];
+      const qt = c.qn ? q(c.qty) : c.lbl && c.lbl.krw != null ? krw(c.lbl.krw) : esc(String(c.lbl == null ? '' : c.lbl));
+      const go = c.sym !== 'KRW' && M.v.kind !== 'lp';
+      return '<' + (go ? 'button data-a="venueCoin" data-v="' + esc(c.sym) + '"' : 'div') + ' class="vnco">' + icon(c.sym, '', lg ? { ck: lg.ck, ca: lg.ca } : {})
+        + '<span class="vncm"><span class="vncn"><b>' + esc(c.sym) + '</b><span class="num mut">' + qt + '</span></span><span class="vnpb"><i style="width:' + Math.min(100, Math.max(0, c.pct)).toFixed(1) + '%;background:' + col + '"></i></span></span>'
+        + '<span class="vncv"><b class="num">' + m(c.usd, { compact: true }) + '</b><span class="num mut">' + Math.round(c.pct) + '%</span></span></' + (go ? 'button' : 'div') + '>'; };
+    return '<section class="vnc vncs"><div class="vnh"><b>들어 있는 코인</b>' + (M.v.kind !== 'lp' ? '<span class="cap">눌러서 보유표로</span>' : '') + '</div>' + shown.map(row).join('')
+      + (rest.length ? '<button class="vnmore" data-a="venueCoinAll" aria-expanded="' + open + '"><span class="pvx">' + (open ? '접기' : '그 밖 ' + rest.length + '종') + '</span><span class="num">' + (open ? '▴' : m(sum(rest, c => c.usd), { compact: true }) + ' ▾') + '</span></button>' : '') + '</section>';
+  }
+  function venueDrawer() {
+    const D = S.D, v = arr(D.venues).find(x => nmKey(x.name) === S.venueK);
+    const close = '<button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button>';
+    if (!v) return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세"><div class="dh"><div class="h2">보관처 상세</div><span class="sp"></span>' + close + '</div><div class="cap" role="status">이 보관처는 지금 목록에 없어요(잔고 0 · 이름 바뀜)</div></aside>';
+    const M = vnModel(v);
+    const meta = v.kind === 'wallet' ? '코인 ' + M.coins.length + '종 · 체인 ' + M.chains.length + '개 · ' + scanText(D.lastScan) + ' 수집'
+      : v.kind === 'cex' ? '코인 ' + M.coins.length + '종' + ((D.exBalTs || {})[v.name] ? ' · ' + ago(D.exBalTs[v.name]) + ' 잔고' : '') : '포지션 ' + M.coins.length + '개';
+    return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세">'
+      + '<div class="dh"><span class="pill">' + esc(M.kindTxt) + '</span><span class="vnt ell pvl">' + esc(locName(v.name)) + '</span><span class="sp"></span>' + close + '</div>'
+      + '<section class="vnc vnhero">' + vnRing(M) + '<div class="vnhv"><span class="cap">이곳에 있는 돈</span><b class="num vnbig">' + m(M.tot, { compact: true }) + '</b><span class="num mut">' + mAlt(M.tot) + '</span><span class="cap pvx">' + esc(meta) + '</span></div></section>'
+      + vnFlows(M) + vnChains(M) + vnCoins(M) + '</aside>';
+  }
+  function venueOpen(el) {
+    const ae = el || document.activeElement;
+    S.venueBack = ae && ae.getAttribute && ae.getAttribute('data-a') ? { el: ae, a: ae.getAttribute('data-a'), v: ae.getAttribute('data-v'), k: ae.getAttribute('data-k') } : null;
+    S.venueK = String((el && el.dataset && el.dataset.k) || ''); S.venueCoinAll = false;
+    S.drawer = 'venue'; S.pop = null;
+    drawerHist();
+    renderOverlay();
+    { const b = $('#overlay .drawer [data-a="drawerClose"]'); if (b) b.focus(); }
   }
   const CASH_LOC_MIN = 0.01;
   function cashHTML() {
@@ -3188,8 +3515,8 @@
     const liveL = g => g.locs.filter(l => !(num(l.value) < CASH_LOC_MIN));
     const fiV = x => S.hide ? (S.cur === 'USD' ? '$' + pvW(PVM.usdC) : '₩' + pvW(PVM.krwC)) : S.cur === 'USD' ? m(num(x.krw) / D.rate, { compact: true }) : '₩' + rw(eok(KS(num(x.krw))));
     return '<div class="card box"><div class="row"><div class="h2">현금성</div><div class="sp"></div><b class="num">' + m(D.cashTotal, { compact: true }) + '</b></div><div class="cust">'
-      + st.map(g => { const open = S.stOpen.has(g.sym); return '<div class="it"><button data-a="stTog" data-k="' + esc(g.sym) + '" aria-expanded="' + open + '"><div class="top2">' + icon(g.sym, 'xs', { noSym: false }) + '<span>' + esc(g.sym) + trChip(g.tr, '', true) + '</span><span class="sub"' + (g.locs.length > liveL(g).length ? ' title="' + esc('잔고 1센트 미만 ' + (g.locs.length - liveL(g).length) + '곳 제외') + '"' : '') + '>' + liveL(g).length + '곳</span><b class="num" title="' + esc(m(g.value)) + '">' + m(g.value, { compact: true }) + '</b></div></button>'
-        + (open ? clps('st:' + g.sym, '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(l => '<div><span class="ell">' + esc(l.w) + trChip(l.tr, l.w) + ' <span class="mut">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>').join('') + '</div>') : '') + '</div>'; }).join('')
+      + st.map(g => { const open = S.stOpen.has(g.sym); return '<div class="it" data-anc="cash:' + esc(g.sym) + '"><button data-a="stTog" data-k="' + esc(g.sym) + '" aria-expanded="' + open + '"><div class="top2">' + icon(g.sym, 'xs', { noSym: false }) + '<span>' + esc(g.sym) + trChip(g.tr, '', true) + '</span><span class="sub"' + (g.locs.length > liveL(g).length ? ' title="' + esc('잔고 1센트 미만 ' + (g.locs.length - liveL(g).length) + '곳 제외') + '"' : '') + '>' + liveL(g).length + '곳</span><b class="num" title="' + esc(m(g.value)) + '">' + m(g.value, { compact: true }) + '</b></div></button>'
+        + (open ? clps('st:' + g.sym, '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(l => '<div><span class="ell">' + locH(l.w) + trChip(l.tr, l.w) + ' <span class="mut">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>').join('') + '</div>') : '') + '</div>'; }).join('')
       + fi.map(x => '<div class="it"><div class="top2">' + venueLogo(x.ex) + '<span>' + esc(x.ex) + ' 원화</span><span class="sub">' + esc(x.note || '') + '</span><b class="num" title="' + esc(krw(num(x.krw)) + (S.cur === 'USD' ? ' · ' + m(num(x.krw) / D.rate) : '')) + '">' + fiV(x) + '</b></div></div>').join('')
       + '</div></div>';
   }
@@ -3291,7 +3618,8 @@
   }
   function srcBtn() {
     const lbl = S.src.mode === 'all' ? '' : (S.src.mode === 'dex' ? '지갑' : '거래소') + (S.src.key ? ' · ' + srcKeyLabel() : '');
-    return '<div class="popw"><button class="fbtn' + (S.src.mode !== 'all' ? ' act' : '') + '" data-a="pop" data-v="src" aria-haspopup="dialog" aria-expanded="' + (S.pop === 'src') + '"' + (lbl ? ' title="' + esc(lbl) + '"' : ' aria-label="전체 소스"') + '>' + (lbl ? '<span class="fbl">' + esc(lbl) + '</span>' : '<span class="hide-sm">전체 </span>소스') + IC.chev.replace('<svg', '<svg class="cv"') + '</button>' + (S.pop === 'src' ? srcPop() : '') + '</div>';
+    const nmS = S.src.mode === 'dex' && !!S.src.key, lblH = nmS ? '지갑 · ' + ownH(srcKeyLabel()) : esc(lbl);
+    return '<div class="popw"><button class="fbtn' + (S.src.mode !== 'all' ? ' act' : '') + '" data-a="pop" data-v="src" aria-haspopup="dialog" aria-expanded="' + (S.pop === 'src') + '"' + (lbl ? (nmS ? ' data-pvl="w"' : '') + ' title="' + esc(nmS ? '지갑 · ' + ownNm(srcKeyLabel()) : lbl) + '"' : ' aria-label="전체 소스"') + '>' + (lbl ? '<span class="fbl">' + lblH + '</span>' : '<span class="hide-sm">전체 </span>소스') + IC.chev.replace('<svg', '<svg class="cv"') + '</button>' + (S.pop === 'src' ? srcPop() : '') + '</div>';
   }
   const ownV = (o, k) => (o && Object.prototype.hasOwnProperty.call(o, k) && typeof o[k] === 'string' ? o[k] : '');
   function srcKeyLabel() {
@@ -3305,7 +3633,11 @@
     return keys.map(k => ({ key: k, label: dup[wa[k]] > 1 ? wa[k] + ' ' + String(k).slice(0, 6) : wa[k] })).sort((a, b) => a.label < b.label ? -1 : 1);
   }
   function srcPop() {
-    const o = (mode, key, label, lg) => '<button class="opt' + (S.src.mode === mode && S.src.key === key ? ' on' : '') + '" data-a="setSrc" data-m="' + mode + '" data-k="' + esc(key) + '">' + (lg || '') + esc(label) + optCk + '</button>';
+    const o = (mode, key, label, lg) => {
+      const raw = mode === 'dex' && key ? ownV(S.D.walletAlias, key) : '';
+      const name = mode === 'dex' && key ? ownH(raw || label) + (raw && label !== raw ? ' ' + esc(String(key).slice(0, 6)) : '') : esc(label);
+      return '<button class="opt' + (S.src.mode === mode && S.src.key === key ? ' on' : '') + '" data-a="setSrc" data-m="' + mode + '" data-k="' + esc(key) + '">' + (lg || '') + name + optCk + '</button>';
+    };
     return popBox('소스', '<div class="scroll">' + o('all', '', '전체 소스')
       + '<div class="grp">온체인 지갑</div>' + o('dex', '', '지갑 전체') + walletChips().map(c => o('dex', c.key, c.label)).join('')
       + '<div class="grp">거래소</div>' + o('cex', '', '거래소 전체') + EX_ORDER.map(k => o('cex', k, EX_NAMES[k], exLogo(k))).join('') + '</div>'
@@ -3399,7 +3731,7 @@
     })();
     const gas = gasList(), gasT = sum(gas, g => g.spot + g.lp);
     S.jLast.sum = { realized, realizedV, unreal, pmkt, openN: openU.length, gasT, gasN: gas.filter(g => g.kind !== 'exfee').length, unvN: D.unvN, closedN, win, lose, even, unkC, lpC, sellsN };
-    const bar = filterBar('journal', counts) + '<div class="popw"><button class="fbtn jcsv" data-a="pop" data-v="csv" aria-haspopup="dialog" aria-label="CSV 내보내기">' + IC.down + '<span class="jcsvt"> CSV</span>' + IC.chev.replace('<svg', '<svg class="cv"') + '</button>' + (S.pop === 'csv' ? popBox('내보내기', '<button class="opt" data-a="csvJournal">매매일지 (사이클 + 전체 이벤트)</button><button class="opt" data-a="csvTax">양도차익 명세 (참고용)</button>' + (D.krw ? '<button class="opt" data-a="csvKrw">원화 입출금 (은행 ↔ 거래소)</button>' : '')) : '') + '</div></div>';
+    const bar = filterBar('journal', counts) + '</div>';
     const wr = (win + lose) ? Math.round(win / (win + lose) * 100) : null;
     const sgc = v => m(v, { sign: true, compact: true });
     const capMain = (narrowed ? '보이는 카드 기간 실현 합 · 선물 제외' : '현물 ' + sgc(KV(rSpot, rSpotK)) + ' · 선물 ' + sgc(KV(rFut, rFutK)))
@@ -3561,7 +3893,7 @@
     const unkTip = unkTxt ? ' title="' + esc('남은 ' + q(num(p.held)) + ' ' + p.sym + ' 중 ' + q(unkQ) + '개는 원가를 몰라 투입·미실현에서 빠졌어요 — 지금 가치는 남은 수량 전부') + '"' : '';
     const costCell = p.kind === 'gas' || p.kind === 'stake' ? '<div class="n num mut">—</div>' : p._noCost && !p._lp ? '<div class="n w">원가 미확인</div>' : '<div class="n num"' + covTip + '>' + m(KV(num(p.cost), cKrw(p, 'costKrw'))) + '</div>'
       + (covTxt ? '<div class="cov"' + covTip + '><b><i style="width:' + Math.max(covP, 2).toFixed(0) + '%"></i></b>' + covTxt + '</div>' : '');
-    const oaChip = p.offcA ? '<span class="kchip pvx" title="' + esc('이 카드 매도 중 ' + q(num(p.offcA.qty)) + '개의 원가는 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 이어받음 · 가정</span>' : '';
+    const oaChip = p.offcA ? '<span class="kchip pvx" data-pvt="1" title="' + esc('이 카드 매도 중 ' + q(num(p.offcA.qty)) + '개의 원가는 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 이어받음 · 가정</span>' : '';
     const realCell = real ? '<div class="n num ' + clsV(realV) + '">' + m(realV, { sign: true }) + (oaChip ? '<div>' + oaChip + '</div>' : '') + '</div>' : (unvOnly ? '<div class="n w" title="원가를 모르는 수량의 매도 — 실현손익에서 빠짐 (정산 ' + esc(m(perOn ? ag.inUP : (ag.has ? ag.allUP : num(p.unvProceeds)))) + ')">원가 미확인 매도 ' + (unvN ? nf('ko-KR').format(unvN) + '회' : m(num(p.unvProceeds), { compact: true })) + '<br><span class="mut" style="font-weight:500">실현 제외</span></div>' : '<div class="n num mut">—</div>');
     const roiCell = (() => {
       if (p.kind === 'gas' || p.kind === 'stake' || p.kind === 'stable' || p.kind === 'quarantined') return '<div class="n num mut">—</div>';
@@ -3618,7 +3950,7 @@
   }
   function cycDetail(p) {
     const D = S.D;
-    const evsAll = arr(p.events).filter(e => srcPass(e) && gPass(e.t));
+    const evsAll = arr(p.events).filter(e => srcPass(e) && gPass(e.t)).map(e => e.sym ? e : Object.assign({}, e, { sym: p.sym }));
     const more = S.j.evMore.has(p.key);
     const evs = (more ? evsAll : evsAll.slice(-5)).slice().reverse();
     const rbK = p.kind ? Object.keys(p.realizedByDay || {}).filter(k => gPass(k)).sort((x, y) => isoDay(x) < isoDay(y) ? 1 : -1) : [];
@@ -3631,9 +3963,9 @@
       : evHead
         + (more && num(p.evN) > arr(p.events).length ? '<div class="cap" style="margin:4px 0 8px">카드에는 최근 ' + arr(p.events).length + '건만 실려요 · 전체 ' + num(p.evN) + '건은 일별 기록에서 날짜별로</div>' : '')
         + (S.mobile ? '<div class="erows cyev">' + evs.map(e => '<div class="erow cr"><span class="ek">' + evPill(e.k) + '</span><span class="et num">' + esc(e.t) + '</span><span class="ea num">' + evA(e) + '</span>'
-            + '<span class="ed ell">' + esc(hs(e.d)) + ' · ' + esc(unitPx(e)) + '</span><span class="eq num">' + esc(evQ(e)) + '</span></div>').join('') + '</div>'
+            + '<span class="ed ell">' + evDH(e) + ' · ' + esc(unitPx(e)) + '</span><span class="eq num">' + esc(evQ(e)) + '</span></div>').join('') + '</div>'
           : '<table class="ev"><thead><tr><th class="l">시각</th><th class="l">종류</th><th class="l">내용</th><th>수량</th><th>단가</th><th>금액</th><th>참조</th></tr></thead><tbody>'
-          + evs.map(e => '<tr><td class="l mut num nowrap">' + esc(e.t) + '</td><td class="l">' + evPill(e.k) + '</td><td class="l"><div class="ell" style="max-width:300px" title="' + esc(hs(e.d)) + '">' + esc(hs(e.d)) + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap t2">' + esc(unitPx(e)) + unitKrw(e) + '</td><td class="num nowrap">' + evA(e) + '</td><td class="tx num nowrap">' + (e.tx && e.tx !== '—' ? '<button data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '—') + '</td></tr>').join('') + '</tbody></table>')
+          + evs.map(e => '<tr><td class="l mut num nowrap">' + esc(e.t) + '</td><td class="l">' + evPill(e.k) + '</td><td class="l"><div class="ell" style="max-width:300px" title="' + esc(evDT(e)) + '">' + evDH(e) + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap t2">' + esc(unitPx(e)) + unitKrw(e) + '</td><td class="num nowrap">' + evA(e) + '</td><td class="tx num nowrap">' + (e.tx && e.tx !== '—' ? '<button data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '—') + '</td></tr>').join('') + '</tbody></table>')
         + evMoreBtn;
     const real = num(p.realized) + num(p.realizedFb);
     const fb = (num(p.unknownQty) > 0 ? '보유 중 원가 미확인 ' + q(num(p.unknownQty)) + ' ' + p.sym + (num(p.fbAvg) > 0 ? ' → 평균 매수가 ' + px(num(p.fbAvg)) + ' 적용 (원가 ' + m(num(p.fbCost)) + ')' : ' (평균가 없음 · 미확인 유지)') : '')
@@ -3657,7 +3989,7 @@
       + (S.cur !== 'USD' ? '<div class="cap" style="margin-top:6px">원화 = 체결 시각 환율(원화 마켓은 실제 체결 원화) · 단가는 달러</div>' : '');
     const extraF = uiFold('cyx:' + p.key, { mem: false, cls: 'plain cyx', head: '<span class="cap">세부 숫자 · 총 매수' + (sold ? '·매도' : '') + (num(p.paidQty) > 0 ? '·스왑 지불' : '') + (fb ? '·원가 미확인' : '') + '</span>', body: () => '<div class="cyxb">' + extra + '</div>' });
     const g = held && !p._lp ? D.groups.find(x => gMatch(x, p.sym, p.key)) : null;
-    const cust = g && g.locList.length ? '<button type="button" class="cyst" data-a="uiGo" data-v="coin:' + esc(g.key) + '" title="대시보드 보유 목록에서 이 코인 보기"><span class="mut">보관</span> <span class="ell num">' + g.locList.slice(0, 3).map(L => esc(L.w.replace(/ 지갑$/, '')) + ' ' + q(L.qty)).join(' · ') + (g.locList.length > 3 ? ' 외 ' + (g.locList.length - 3) + '곳' : '') + '</span>' + IC.right + '</button>' : '';
+    const cust = g && g.locList.length ? '<button type="button" class="cyst" data-a="uiGo" data-v="coin:' + esc(g.key) + '" title="대시보드 보유 목록에서 이 코인 보기"><span class="mut">보관</span> <span class="ell num">' + g.locList.slice(0, 3).map(L => locH(L.w.replace(/ 지갑$/, '')) + ' ' + q(L.qty)).join(' · ') + (g.locList.length > 3 ? ' 외 ' + (g.locList.length - 3) + '곳' : '') + '</span>' + IC.right + '</button>' : '';
     const pl = D.plans[p.key], price = p._price, memo = (D.memos && D.memos[p.key]) || (pl && pl.memo) || '';
     const plTxt = pl ? '목표 ' + px(pl.target) + (price > 0 ? ' <span class="' + clsP((pl.target - price) / price * 100) + '">' + pctS((pl.target - price) / price * 100, 1) + '</span>' : '') + ' · 손절 ' + px(pl.stop) + (price > 0 ? ' <span class="' + clsP((pl.stop - price) / price * 100) + '">' + pctS((pl.stop - price) / price * 100, 1) + '</span>' : '') + (memo ? ' · 메모 있음' : '')
       : memo ? '메모 · ' + prTxt(memo) : '비어 있음 — 눌러서 적기';
@@ -3744,7 +4076,6 @@
     });
     return nc;
   }
-  const taxSel = () => S.D.tax.filter(r => gPass(r.sold));
   function taxUnv() {
     let n = 0, p = 0;
     arr(S.D.merged).forEach(c => { if (c._lp) return; const a = pAgg(c); n += S.g.period === 'all' ? a.allU : a.inU; p += S.g.period === 'all' ? a.allUP : a.inUP; });
@@ -3774,7 +4105,7 @@
     if (!groups.length) return head + '<div class="card empty"><b>' + esc(periodName()) + ' 확정된 실현손익이 없어요</b>기간을 넓히면 이전 매도 건이 보여요</div>';
     const tc = o => '<svg class="tc' + (o ? ' o' : '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
     const r6 = (a, b, c, d, e, f2, extra, attrs) => '<div class="tax-r ' + extra + '"' + (attrs || '') + '><span class="ell">' + a + '</span><span class="hm">' + b + '</span><span class="hm">' + c + '</span><span class="hm">' + d + '</span><span>' + e + '</span><span>' + f2 + '</span></div>';
-    return head + '<div class="card"><div class="tblhead"><div class="h2">양도차익 명세</div><span class="cap">월 → 종목 → 체결' + (D.taxFull && num(D.fut.realizedRowsTotal) > arr(D.fut.realizedRows).length ? ' · 선물 체결 상세는 최근 ' + arr(D.fut.realizedRows).length + '건' : '') + ' · 선물 정산 포함</span><div class="sp"></div><button class="btn sm" data-a="csvTax">' + IC.down + ' 명세 CSV</button></div>'
+    return head + '<div class="card"><div class="tblhead"><div class="h2">양도차익 명세</div><span class="cap">월 → 종목 → 체결' + (D.taxFull && num(D.fut.realizedRowsTotal) > arr(D.fut.realizedRows).length ? ' · 선물 체결 상세는 최근 ' + arr(D.fut.realizedRows).length + '건' : '') + ' · 선물 정산 포함</span></div>'
       + r6('월 · 종목', '명세 행', '수량', '취득가액', '양도가액', '손익(수수료 차감)', 'h')
       + groups.map(g => {
         const open = S.taxOpen.has(g.ym);
@@ -3795,7 +4126,7 @@
               : lz.st === 'ok' && lz.total > arr(lz.rows).length ? '<div class="tax-r d"><span class="mut num">최근 ' + nf('ko-KR').format(arr(lz.rows).length) + ' / ' + nf('ko-KR').format(lz.total) + '건만 표시 — 나머지는 합계에 포함</span></div>'
               : lz.st === 'ok' && !arr(lz.rows).filter(r => gPass(r.sold)).length && !c.rows.length ? '<div class="tax-r d"><span class="mut">이 달 체결 상세를 찾지 못했어요 — 합계에는 포함돼 있어요</span></div>' : '';
             return r6(tc(co) + (c.gas ? '<b>가스 비용</b>' : taxNmHTML(lpNm(c.sym))) + ' ' + (c.gas ? '<span class="pill g sm" title="매매 외 가스(실패·승인·전송·브릿지·LP) — 그날 실현에서 뺀 비용(수수료 열)">기타 비용</span>' : c.exs.slice(0, 3).map(x => '<span class="pill ' + (String(x).indexOf('온체인') >= 0 ? 'a' : 'g') + ' sm">' + esc(term(x)) + '</span>').join(' ')), c.gas && c.tx > 0 ? nf('ko-KR').format(c.tx) + '건' : c.n ? nf('ko-KR').format(c.n) + '행' : '—', c.qty ? q(c.qty) : '—', c.gas ? '—' : m(c.acqV), c.gas ? '—' : m(c.dispV), '<span class="' + cls(c.pnlV) + '">' + m(c.pnlV, { sign: true }) + '</span>', 'c', ' role="button" tabindex="0" aria-expanded="' + co + '" data-a="taxCoin" data-v="' + esc(c.ck) + '"')
-              + (co ? lzNote + (dRows.length ? dRows.map(r => { const v9 = taxDetailValues(r, c), pp = v9.pnl; const gr = isGasTax(r); const ff = !!r.futFee; return r6(esc((isoDay(r.sold) || r.sold) + (r.t ? ' ' + r.t : '') + ' · ' + (gr ? '가스 비용' : term(r.ex)) + (r.fut && r.ticker ? ' · ' + String(r.ticker).replace(/ · 선물$/, '') : '')) + (r.oa != null && !gr ? ' <span class="pill g sm pvx" title="' + esc('이 매도의 취득원가 중 ' + q(num(r.oa)) + '개 몫은 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 · 가정</span>' : ''), '', num(r.qty) ? q(num(r.qty)) : '—', gr || ff ? '—' : m(v9.acq), gr || ff ? '—' : m(v9.disp), '<span class="' + cls(pp) + '"' + (num(r.fee) > 0 && !gr ? ' title="수수료 ' + esc(m(v9.fee)) + ' 차감"' : '') + '>' + m(pp, { sign: true }) + '</span>', 'd'); }).join('')
+              + (co ? lzNote + (dRows.length ? dRows.map(r => { const v9 = taxDetailValues(r, c), pp = v9.pnl; const gr = isGasTax(r); const ff = !!r.futFee; return r6(esc((isoDay(r.sold) || r.sold) + (r.t ? ' ' + r.t : '') + ' · ' + (gr ? '가스 비용' : term(r.ex)) + (r.fut && r.ticker ? ' · ' + String(r.ticker).replace(/ · 선물$/, '') : '')) + (r.oa != null && !gr ? ' <span class="pill g sm pvx" data-pvt="1" title="' + esc('이 매도의 취득원가 중 ' + q(num(r.oa)) + '개 몫은 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 · 가정</span>' : ''), '', num(r.qty) ? q(num(r.qty)) : '—', gr || ff ? '—' : m(v9.acq), gr || ff ? '—' : m(v9.disp), '<span class="' + cls(pp) + '"' + (num(r.fee) > 0 && !gr ? ' title="수수료 ' + esc(m(v9.fee)) + ' 차감"' : '') + '>' + m(pp, { sign: true }) + '</span>', 'd'); }).join('')
                 : (lz && lz.st !== 'none' ? '' : '<div class="tax-r d"><span class="mut">체결 상세는 최근 100건만 받아요 — 이 종목의 이 달 체결은 합계에만 포함돼 있어요</span></div>')) : '');
           }).join('')) : '') + '</div>';
       }).join('') + '</div>';
@@ -3867,7 +4198,7 @@
       return '<div class="krw-d' + (off ? ' x' : '') + '"><span class="t num">' + esc(String(r.d).slice(5)) + '</span><span class="k"><span>' + esc(krwDir(r)) + '</span>' + pill
         + (num(r.fee) && !off ? '<span class="mut num">수수료 ' + kwFee(r.fee) + '</span>' : '') + '</span><span class="a num">' + kw(sg * num(r.amt), { sign: true }) + '</span></div>';
     };
-    return '<div class="krwv">' + head + '<div class="card"><div class="tblhead"><div class="h2">원화 입출금 · 은행 ↔ 거래소</div><span class="cap">월 → 건별 · 업비트·빗썸 · ' + esc(periodName()) + '</span><div class="sp"></div><button class="btn sm" data-a="csvKrw">' + IC.down + ' CSV</button></div>'
+    return '<div class="krwv">' + head + '<div class="card"><div class="tblhead"><div class="h2">원화 입출금 · 은행 ↔ 거래소</div><span class="cap">월 → 건별 · 업비트·빗썸 · ' + esc(periodName()) + '</span></div>'
       + r5('월', '건수', '넣은 원화', '뺀 원화', '순투입', 'h')
       + yms.map(ym => {
         const g = krwAgg(gm[ym]), open = S.krwOpen.has(ym), lbl = (S.mobile ? ym.slice(2, 4) : ym.slice(0, 4)) + '년 ' + (+ym.slice(5)) + '월';
@@ -3893,6 +4224,9 @@
   }
   function feedHTML() {
     const ff = feedFull();
+    const fq = S.feedFull;
+    if (!ff && S.D.dayActs && fq && fq.st === 'load' && !fq.evs) return '<div class="eghd" aria-busy="true"><span class="cap num pvx" role="status" aria-live="polite">' + esc(periodName()) + ' 기록 받는 중…</span><span class="sp"></span></div><div class="card egl">' + evSkel(8, 4) + '</div>';
+    const ffRe = !!(ff && fq && fq.st === 'load');
     const list = feedPayMerge((ff ? ff.evs : S.D.events).filter(e => srcPass(e) && gPass(e.iso || e.t)));
     const hidEv = arr(ff ? ff.hid : S.D.eventsHid).filter(e => srcPass(e) && gPass(e.iso || e.t));
     const hidAir = hidEv.filter(e => e.hideKind !== 'dust' && isAirQ(e.hide)).length;
@@ -3903,7 +4237,7 @@
     const hidChip = hidEv.length ? uiHidChip(hidN, 'evHidden', !!S.j.evHid, '자동으로 숨긴 이벤트 ' + nf('ko-KR').format(hidN) + '건' + (hidPart ? ' (최근 ' + nf('ko-KR').format(hidEv.length) + '건 불러옴)' : '') + ' — 스캠·에어드랍 의심·소액 입출금') : '';
     const hidTbl = S.j.evHid && hidEv.length ? '<div class="card hidlist"><div class="tblhead"><div class="h2">숨긴 이벤트 <span class="cnt num pvx">' + nf('ko-KR').format(hidN) + '</span></div><span class="cnts hidk">' + hidKinds + '</span><span class="cap">목록에서만 뺀 기록 — 스팸 격리 토큰은 원래 총자산·손익 밖, 소액 입출금은 잔고·손익에 그대로 · 실제 자산이면 미매칭 › 숨긴 항목에서 복원' + (hidPart ? ' · 최근 ' + nf('ko-KR').format(hidEv.length) + '건 불러옴(칩 건수는 그 기준)' : '') + '</span></div>' + evTable(groupRecon(hidEv.slice().reverse()).slice(0, 200), true) + (hidEv.length > 200 ? '<div class="foot"><span class="num">최근 200 / ' + nf('ko-KR').format(hidEv.length) + '건</span></div>' : '') + '</div>' : '';
     const pgMore = !!(ff && ff.paged && ff.more), unf = S.src.mode === 'all' && S.g.period === 'all';
-    const head = n => '<div class="eghd"><span class="cap num pvx">' + esc(periodName()) + ' ' + n + ' · 날짜별</span><span class="sp"></span>' + hidChip + '</div>';
+    const head = n => '<div class="eghd"><span class="cap num pvx">' + esc(periodName()) + ' ' + n + ' · 날짜별</span>' + (ffRe ? rfrTag() : '') + '<span class="sp"></span>' + hidChip + '</div>';
     if (!list.length && !pgMore) return head('0건') + hidTbl + '<div class="card empty"><b>이벤트가 없어요</b>기간·소스 필터를 넓혀 보세요</div>';
     const evc = x => 1 + arr(x._payc).length;
     const tot = pgMore ? (unf && ff.n ? nf('ko-KR').format(ff.n) : nf('ko-KR').format(sum(list, evc)) + '+') : nf('ko-KR').format(sum(list, evc));
@@ -3937,7 +4271,7 @@
   function feedRow(e) {
     const tm = String(e.iso || '').length > 11 ? String(e.iso).slice(11, 16) : String(e.t || '').slice(6);
     return '<div class="erow"><span class="et num">' + esc(tm) + '</span><span class="ek">' + evPill(e.k) + '</span><b class="es ell">' + esc(evNm(e)) + impChip(e) + '</b>'
-      + '<span class="ed ell" title="' + esc(hs(e.d)) + '">' + esc(hs(e.d)) + (e._payc ? payChip(e._payc) : '') + '</span><span class="eq num">' + esc(evQ(e)) + '</span><span class="ea num">' + evA(e) + '</span>'
+      + '<span class="ed ell" title="' + esc(evDT(e)) + '">' + evDH(e) + (e._payc ? payChip(e._payc) : '') + '</span><span class="eq num">' + esc(evQ(e)) + '</span><span class="ea num">' + evA(e) + '</span>'
       + '<span class="ex num">' + (e.tx && e.tx !== '—' ? '<button type="button" data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '') + '</span></div>';
   }
   function groupRecon(list) {
@@ -3966,9 +4300,9 @@
     return rest.map(e => pays.has(e) ? Object.assign({}, e, { _payc: pays.get(e) }) : e);
   }
   function evTable(list, withDate) {
-    if (S.mobile) return '<div style="padding:4px 16px">' + list.map(e => '<div style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px"><div class="row gap8">' + evPill(e.k) + '<b>' + esc(evNm(e)) + '</b>' + impChip(e) + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(withDate ? e.t : String(e.t).slice(6)) + '</span></div><div class="t2" style="margin-top:3px;font-size:13.5px">' + esc(hs(e.d)) + (e._payc ? payChip(e._payc) : '') + '</div><div class="row sub num"><span>' + esc(evQ(e)) + '</span><span class="sp"></span><span>' + evA(e) + '</span></div></div>').join('') + '</div>';
+    if (S.mobile) return '<div style="padding:4px 16px">' + list.map(e => '<div style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px"><div class="row gap8">' + evPill(e.k) + '<b>' + esc(evNm(e)) + '</b>' + impChip(e) + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(withDate ? e.t : String(e.t).slice(6)) + '</span></div><div class="t2" style="margin-top:3px;font-size:13.5px">' + evDH(e) + (e._payc ? payChip(e._payc) : '') + '</div><div class="row sub num"><span>' + esc(evQ(e)) + '</span><span class="sp"></span><span>' + evA(e) + '</span></div></div>').join('') + '</div>';
     return '<div style="overflow-x:auto"><table class="ev" style="margin:0 24px;width:calc(100% - 48px)"><thead><tr><th class="l">시각</th><th class="l">종류</th><th class="l">자산</th><th class="l">내용</th><th>수량</th><th>금액</th><th>참조</th></tr></thead><tbody>'
-      + list.map(e => '<tr><td class="l mut num nowrap">' + esc(withDate ? e.t : String(e.t).slice(6)) + '</td><td class="l">' + evPill(e.k) + '</td><td class="l"><b>' + esc(evNm(e)) + '</b>' + impChip(e) + '</td><td class="l"><div class="ell" style="max-width:340px" title="' + esc(hs(e.d)) + '">' + esc(hs(e.d)) + (e._payc ? payChip(e._payc) : '') + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap">' + evA(e) + '</td><td class="tx num nowrap">' + (e.tx && e.tx !== '—' ? '<button data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '—') + '</td></tr>').join('') + '</tbody></table></div>';
+      + list.map(e => '<tr><td class="l mut num nowrap">' + esc(withDate ? e.t : String(e.t).slice(6)) + '</td><td class="l">' + evPill(e.k) + '</td><td class="l"><b>' + esc(evNm(e)) + '</b>' + impChip(e) + '</td><td class="l"><div class="ell" style="max-width:340px" title="' + esc(evDT(e)) + '">' + evDH(e) + (e._payc ? payChip(e._payc) : '') + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap">' + evA(e) + '</td><td class="tx num nowrap">' + (e.tx && e.tx !== '—' ? '<button data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '—') + '</td></tr>').join('') + '</tbody></table></div>';
   }
 
   const SENT = { '양호': 'ok', '주의': 'w', '경고': 'e', '관망': 'g' };
@@ -3993,7 +4327,28 @@
     for (let d = 1; d <= dim; d++) { const v = calDayV(mmP + pad2(d), ym); if (v != null && Math.abs(num(v)) >= 0.005) out.push({ k: mmP + pad2(d), d, v: num(v) }); }
     return out;
   }
-  const isoAdd = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+  function pnlTier(vals, u) {
+    const q = v => Math.round(Math.abs(v) * u), P = [], N = [];
+    vals.forEach(v => { v = num(v); if (v) (v > 0 ? P : N).push(q(v)); });
+    P.sort((a, b) => b - a); N.sort((a, b) => b - a);
+    return v => {
+      v = num(v); if (!v) return 0;
+      const A = v > 0 ? P : N, x = q(v), n = A.length;
+      let lo = 0, hi = n;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (A[mid] > x) lo = mid + 1; else hi = mid; }
+      return lo * 10 < n || !n ? 4 : lo * 10 < 4 * n ? 3 : lo * 10 < 7 * n ? 2 : 1;
+    };
+  }
+  const tierUnit = () => (S.cur === 'USD' ? 100 : rate());
+  const TIER_P = ['', '70%~100%', '40%~70%', '10%~40%', '10%'];
+  const tierTxt = (v, t) => (t ? (v > 0 ? '수익 상위 ' : '손실 하위 ') + TIER_P[t] : '');
+  const tierLeg = (k, scope, cl) => {
+    const tip = '색 진하기 = ' + scope + '(수익·손실 따로) — 가장 진한 칸 = 수익 상위·손실 하위 ' + TIER_P[4] + ' · 그다음 ' + TIER_P[3] + ' · ' + TIER_P[2] + ' · 나머지';
+    const sq = (c, t) => '<i class="' + k + ' ' + (k === 'hm' ? c : 'lv' + c) + ' lv' + t + '" title="' + tierTxt(c === 'u' ? 1 : -1, t) + '"></i>';
+    return '<' + (k === 'hm' ? 'div' : 'span') + ' class="' + cl + ' pvx" title="' + tip + '" data-a="rkBrk" data-tip="' + tip + '"><span>손실</span>' + [4, 3, 2, 1].map(t => sq('d', t)).join('')
+      + '<b class="hsep" aria-hidden="true">·</b>' + [1, 2, 3, 4].map(t => sq('u', t)).join('') + '<span>수익</span></' + (k === 'hm' ? 'div' : 'span') + '>';
+  };
+  const isoAdd =(iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
   const wkRvOk = rv => !!rv && !!(rv.sum || rv.note);
   const wkClamp = (mon, ym) => { const a = ym + '-01', b = ym + '-' + pad2(new Date(+ym.slice(0, 4), +ym.slice(5), 0).getDate()), e = isoAdd(mon, 6); return [mon > a ? mon : a, e < b ? e : b]; };
   const wkSegKey = (mon, f, t) => { const wk = isoWeekKey(mon), x = mon < f || isoAdd(mon, 6) > t; return x ? wk + (f === mon ? 'a' : 'b') : wk; };
@@ -4091,9 +4446,8 @@
     const mob = S.mobile, dotMax = mob ? 1 : 4;
     const wsel0 = wkSelNow(), wsel = wsel0 && (!wsel0.f || wsel0.f.slice(0, 7) === ym) ? wsel0 : null;
     let cells = DOWS_MON.map((d, i) => '<div class="dw' + (i === 6 ? ' sun' : i === 5 ? ' sat' : '') + '">' + d + '</div>').join('') + '<div class="dw wkc">주간 실현</div>';
-    const vals = [], mdays = realDays(ym);
-    for (let d = 1; d <= dim; d++) { const v = calDayV(mmP + pad2(d), ym); if (v != null) vals.push(Math.abs(num(v))); }
-    const vmax = Math.max.apply(null, vals.concat([1]));
+    const mdays = realDays(ym);
+    const mTier = pnlTier(mdays.map(x => x.v), tierUnit());
     const nRow = Math.ceil((first + dim) / 7);
     for (let r = 0; r < nRow; r++) {
       let wSum = 0, wAny = false, dFrom = 0, dTo = 0;
@@ -4112,9 +4466,8 @@
         const dots = ns > 0 ? '<span class="sdots num" aria-hidden="true">' + (ns > dotMax ? (mob ? '<b></b><b></b>' : '<b></b>' + ns) : '<b></b>'.repeat(ns)) + '</span>' : '';
         const at9 = !fut && D.dayMap.has(k) ? attOf(k) : null;
         const tint = has && calTint(num(v));
-        const inten = tint ? Math.min(38, 8 + Math.log10(1 + Math.abs(num(v))) / Math.log10(1 + vmax) * 30) : 0;
-        const bg = tint ? 'background:color-mix(in srgb,' + (num(v) > 0 ? 'var(--up)' : 'var(--down)') + ' ' + inten.toFixed(0) + '%,var(--surface2))' : '';
-        cells += '<button class="d' + (S.day === k ? ' sel' : '') + (iso === tISO ? ' today' : '') + (fut ? ' fut' : '') + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : '') + '" style="' + bg + '" data-a="pickDay" data-v="' + k + '"' + (at9 ? ' title="' + esc((mo + 1) + '월 ' + d + '일 총자산 ' + m(at9.delta, { sign: true, compact: true }) + ' — ' + attLine(at9, 3, false)) + '"' : '') + ' aria-label="' + (mo + 1) + '월 ' + d + '일' + (has ? ' 실현 ' + m(num(v), { sign: true }) : '') + (ns ? ' · 매도 ' + ns + '건' : '') + (dotOn ? ' · AI 리뷰' : '') + '"' + (fut ? ' tabindex="-1"' : '') + '><span class="dn">' + d + (dotOn ? '<i title="AI 리뷰">AI</i>' : '') + (iso === tISO ? '<span class="tdy">오늘</span>' : '') + dots + '</span>' + (has ? '<span class="dv num ' + (tint ? cls(num(v)) : 'mut') + '">' + mcal(num(v)) + '</span>' : '') + '</button>';
+        const lv = tint ? mTier(num(v)) : 0;
+        cells += '<button class="d' + (S.day === k ? ' sel' : '') + (iso === tISO ? ' today' : '') + (fut ? ' fut' : '') + (wd === 0 ? ' sun' : wd === 6 ? ' sat' : '') + (lv ? ' lv' + (num(v) > 0 ? 'u' : 'd') + ' lv' + lv : '') + '" data-a="pickDay" data-v="' + k + '"' + (at9 ? ' title="' + esc((mo + 1) + '월 ' + d + '일 총자산 ' + m(at9.delta, { sign: true, compact: true }) + ' — ' + attLine(at9, 3, false)) + '"' : '') + ' aria-label="' + (mo + 1) + '월 ' + d + '일' + (has ? ' 실현 ' + m(num(v), { sign: true }) : '') + (lv ? ' · 이 달 ' + tierTxt(num(v), lv) : '') + (ns ? ' · 매도 ' + ns + '건' : '') + (dotOn ? ' · AI 리뷰' : '') + '"' + (fut ? ' tabindex="-1"' : '') + '><span class="dn">' + d + (dotOn ? '<i title="AI 리뷰">AI</i>' : '') + (iso === tISO ? '<span class="tdy">오늘</span>' : '') + dots + '</span>' + (has ? '<span class="dv num ' + (tint ? cls(num(v)) : 'mut') + '">' + mcal(num(v)) + '</span>' : '') + '</button>';
       }
       const isoMon = isoAdd(ym + '-' + pad2(dFrom), -((first + dFrom - 1) % 7)), wk = isoWeekKey(isoMon);
       const isoFrom = ym + '-' + pad2(dFrom), isoTo = ym + '-' + pad2(dTo);
@@ -4145,7 +4498,8 @@
     const cal = '<div class="card cal"><div class="row calhd"><div class="h2">' + y + '년 ' + (mo + 1) + '월</div><div class="sp"></div>' + vSeg + '<div class="seg"><button data-a="calMonth" data-v="-1"' + (canPrev ? '' : ' disabled') + ' aria-label="이전 달">' + IC.left.replace('<svg', '<svg width="16" height="16"') + '</button><button data-a="calToday" class="on">오늘</button><button data-a="calMonth" data-v="1"' + (canNext ? '' : ' disabled') + ' aria-label="다음 달">' + IC.right.replace('<svg', '<svg width="16" height="16"') + '</button></div></div>'
       + '<div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap"><span class="cap">월 실현</span><b class="num ' + cls(mSum) + '">' + m(mSum, { sign: true }) + '</b><span class="cap">' + (ym === ymShift(0) ? '마감 ' + closed + '일 · 오늘은 23:59 마감' : '마감 기록 ' + closed + '일') + '</span></div>'
       + chips
-      + '<div class="wk">' + cells + '</div><div class="cap calleg">칸 색 = 그날 실현손익(현물+선물) · <b class="num">·</b> = <span class="pvx">' + (S.cur === 'USD' ? '$' + CAL_DOT_USD + ' 미만' : '1만 원 미만') + '</span> · <span class="sdots"><b></b></span> = 매도 1건' + (mob ? ' · <span class="sdots"><b></b><b></b></span> = 2건 이상' : '(5건 이상은 숫자)') + ' · <span class="tag-ai">AI</span> = AI 리뷰 · 주간 칸 → 주간 리뷰</div></div>';
+      + '<div class="wk">' + cells + '</div><div class="cap calleg">칸 색 = 그날 실현손익(현물+선물) ' + tierLeg('lvs', '이 달 안에서 순위', 'calhl') + ' · <b class="num">·</b> = <span class="pvx">' + (S.cur === 'USD' ? '$' + CAL_DOT_USD + ' 미만' : '1만 원 미만') + '</span> · <span class="sdots"><b></b></span> = 매도 1건' + (mob ? ' · <span class="sdots"><b></b><b></b></span> = 2건 이상' : '(5건 이상은 숫자)') + ' · <span class="tag-ai">AI</span> = AI 리뷰 · 주간 칸 → 주간 리뷰</div>'
+      + '</div>';
     return dailyLayout(cal, monthGlanceHTML(ym));
   }
   const calView = () => (LS.get('tj_v2_dcal') === 'list' ? 'list' : 'cal');
@@ -4164,7 +4518,7 @@
     const D = S.D; if (!D) return '';
     const days = heatData(), tr = days.filter(x => x.v != null);
     if (!tr.length) return '';
-    const med = (a9 => a9.length ? a9[Math.floor(a9.length / 2)] : 0)(tr.map(x => Math.abs(x.v)).sort((a, b) => a - b));
+    const tierOf = pnlTier(tr.map(x => x.v), tierUnit());
     const w = tr.filter(x => x.v > 0).length, l = tr.length - w;
     let run = 0, r0 = null, best = { n: 0, a: null, b: null };
     tr.forEach(x => { if (x.v > 0) { if (!run) r0 = x.iso; run++; if (run > best.n) best = { n: run, a: r0, b: x.iso }; } else run = 0; });
@@ -4179,15 +4533,15 @@
       const col = Math.floor(i / 7) + 1, row = x.wd + 1, pos = 'grid-column:' + col + ';grid-row:' + row;
       if (row === 1 && +x.iso.slice(8) <= 7 && +x.iso.slice(5, 7) !== lastMo) { lastMo = +x.iso.slice(5, 7); mos += '<span style="grid-column:' + col + '">' + lastMo + '월</span>'; }
       if (x.v == null) { cells += '<span class="hm' + (x.out ? ' out' : '') + '" style="' + pos + '"></span>'; return; }
-      const lab = mdTxt(x.iso) + ' (' + WD[x.wd] + ') 실현 ' + m(x.v, { sign: true, compact: true });
-      cells += '<button type="button" class="hm ' + (x.v > 0 ? 'u' : 'd') + (Math.abs(x.v) > med ? ' l2' : ' l1') + '" style="' + pos + '" data-a="pickDay" data-v="' + x.iso.slice(5) + '" title="' + esc(lab) + '" aria-label="' + esc(lab) + '"></button>';
+      const t = tierOf(x.v), lab = mdTxt(x.iso) + ' (' + WD[x.wd] + ') 실현 ' + m(x.v, { sign: true, compact: true }) + ' · 1년 중 ' + tierTxt(x.v, t);
+      cells += '<button type="button" class="hm ' + (x.v > 0 ? 'u' : 'd') + ' lv' + t + '" style="' + pos + '" data-a="pickDay" data-v="' + x.iso.slice(5) + '" title="' + esc(lab) + '" aria-label="' + esc(lab) + '"></button>';
     });
     const stat = (k, v, sub, cl) => '<div class="hst"><span class="k">' + k + '</span><b class="v num' + (cl ? ' ' + cl : '') + '">' + v + '</b>' + (sub ? '<span class="s">' + sub + '</span>' : '') + '</div>';
     const stats = '<div class="hsts pvx">' + stat('수익 난 날', w + '일 <small>/ 매매 ' + tr.length + '일</small>', '')
       + stat('가장 길게 이긴 흐름', best.n ? best.n + '일 연속' : '—', best.n ? mdTxt(best.a) + ' ~ ' + mdTxt(best.b) : '', 'up')
       + stat('가장 좋았던 달', bm ? (+bm.slice(5)) + '월' : '—', bm ? '수익 난 날 ' + Math.round(byM[bm][1] / byM[bm][0] * 100) + '%' : '매매 5일 이상인 달 없음')
       + stat('조심할 요일', bw ? WD[bw] + '요일' : '—', bw ? '손실일 비율 ' + Math.round(byW[bw][1] / byW[bw][0] * 100) + '%' : '', bw ? 'down' : '') + '</div>';
-    const leg = '<div class="hleg pvx"><span>손실</span><i class="hm d l2"></i><i class="hm d l1"></i><i class="hm"></i><i class="hm u l1"></i><i class="hm u l2"></i><span>수익</span></div>';
+    const leg = tierLeg('hm', '지난 1년 전체 날 중 순위', 'hleg');
     const grid = '<div class="hmw" data-ks="heat"><div class="hmm pvx">' + mos + '</div><div class="hmb"><div class="hmd pvx"><span>월</span><span></span><span>수</span><span></span><span>금</span><span></span><span>일</span></div><div class="hmg">' + cells + '</div></div></div>';
     const sumLine = '<span class="cap pvx num">수익 ' + w + '일 · 손실 ' + l + '일' + (best.n > 1 ? ' · 최장 연속 ' + best.n + '일' : '') + '</span>';
     return '<section class="card heat" aria-label="지난 1년 하루 실현손익"><div class="hmh"><div><div class="cap">지난 1년 · 하루 실현손익</div><div class="hmt">언제 잘했고, 언제 망했나</div></div><span class="sp"></span>' + leg + '</div>'
@@ -4218,9 +4572,9 @@
     if (st.win_rate_pct != null) tiles.push(['승률', num(st.win_rate_pct) + '%', st.wins != null ? '승 ' + num(st.wins) + ' · 패 ' + num(st.losses) + (num(st.cost_unknown) ? ' · 원가 미확인 ' + num(st.cost_unknown) : '') : '']);
     if (st.buys != null || st.sells != null) tiles.push(['매수 · 매도', nf('ko-KR').format(num(st.buys)) + ' · ' + nf('ko-KR').format(num(st.sells)) + '건', st.dep_to_sell_min_median != null ? '입금→매도 중앙 ' + num(st.dep_to_sell_min_median) + '분' : '']);
     const head = ok ? revTxt(rv.note || rv.sum) : '';
-    const smT = ok && rv.note && rv.sum ? revTxt(rv.sum) : '';
+    const smT = ok && rv.note && rv.sum && !pvOn() ? revTxt(rv.sum) : '';
     const pN = ok ? arr(rv.patterns).length : 0, hasRule = ok && !!rv.rule, hasNx = ok && !!rv.next && rv.next !== '없음.' && rv.next !== '—';
-    const full = ok ? (pN ? '<ul>' + arr(rv.patterns).map(x => '<li>' + esc(revTxt(x)) + '</li>').join('') + '</ul>' : '')
+    const full = ok && !pvOn() ? (pN ? '<ul>' + arr(rv.patterns).map(x => '<li>' + esc(revTxt(x)) + '</li>').join('') + '</ul>' : '')
       + (hasRule ? '<div class="nx"><b>규칙</b> · ' + esc(revTxt(rv.rule)) + '</div>' : '') + (hasNx ? '<div class="nx"><b>다음</b> · ' + esc(revTxt(rv.next)) + '</div>' : '') : '';
     const wkTog = [pN ? '패턴 ' + pN + '개' : '', hasRule ? '규칙' : '', hasNx ? '다음 액션' : ''].filter(Boolean).join(' · ');
     const monK = isos.find(iso => iso >= rollMinISO() && iso <= tISO);
@@ -4234,9 +4588,9 @@
       + '<div class="wksum"><span class="cap">주간 실현' + (cross ? ' · ' + (+f.slice(5, 7)) + '월 몫' : '') + (cur ? ' · 진행 중' : '') + '</span><b class="num ' + cls(tot) + '">' + m(tot, { sign: true }) + '</b>' + (nW + nL ? '<span class="cap num pvx">실현 있는 날 ' + (nW + nL) + '일 · 수익 ' + nW + ' · 손실 ' + nL + '</span>' : '') + '</div>'
       + (tiles.length ? '<div class="wktiles">' + tiles.map(t => '<div><div class="l">' + t[0] + '</div><div class="v num">' + esc(t[1]) + '</div>' + (t[2] ? '<div class="s num">' + esc(t[2]) + '</div>' : '') + '</div>').join('') + '</div>' : '')
       + aiSub
-      + (ok ? '<p class="wkhl' + (open ? ' o' : '') + (rv.stale ? ' mut' : '') + '">' + esc(head) + '</p>'
-        + (smT ? '<p class="wksm' + (open ? '' : ' clamp3') + (rv.stale ? ' mut' : '') + '">' + esc(smT) + '</p>' : '')
-        + (full || smT ? (open && full ? '<div class="wkb">' + full + '</div>' : '') + '<button class="link wktog" data-a="wkMore" data-v="' + esc(mk) + '" aria-expanded="' + open + '">' + (open ? '접기' : '펼치기' + (wkTog ? ' — ' + wkTog : '')) + '</button>' : '')
+      + (ok ? '<p class="wkhl aib' + (open ? ' o' : '') + (rv.stale ? ' mut' : '') + '">' + esc(head) + '</p>'
+        + (smT ? '<p class="wksm aib' + (open ? '' : ' clamp3') + (rv.stale ? ' mut' : '') + '">' + esc(smT) + '</p>' : '')
+        + (full || smT ? (open && full ? '<div class="wkb aib">' + full + '</div>' : '') + '<button class="link wktog" data-a="wkMore" data-v="' + esc(mk) + '" aria-expanded="' + open + '">' + (open ? '접기' : '펼치기' + (wkTog ? ' — ' + wkTog : '')) + '</button>' : '')
         : '<div class="noai">' + IC.info.replace('<svg', '<svg width="18" height="18"') + (cur ? (t === wkE ? '이번 주 AI 주간 리뷰는 일요일 23:55 에 만들어져요' : '이 구간(' + mdN(f) + '~' + mdN(t) + ') AI 주간 리뷰는 ' + mdN(t) + ' 23:55 에 만들어져요') : t !== wkE || f !== sel.from ? mdN(f) + '~' + mdN(t) + ' 구간의 AI 주간 리뷰가 없어요' : '이 주는 AI 주간 리뷰가 없어요') + '</div>')
       + (monK ? '<div class="wkgo"><button class="link" data-a="wkDay" data-v="' + monK.slice(5) + '">이 주 일별 보기 ›</button></div>' : '') + '</div>';
   }
@@ -4307,6 +4661,7 @@
     const D = S.D, iso = isoDay(k);
     if (!D.dmOk || !iso) return '';
     const cs = dmCoins(k);
+    if (dayWait(k)) { const cn = dayCnt(k); return cn && cn.b + cn.s > 0 ? '<div class="dsec dmemo" aria-hidden="true"><div class="cypl dmsr dmsk"><i class="skl"></i></div></div>' : ''; }
     if (!cs.length) return '';
     const withM = cs.filter(c => !!dmGet(iso, c.sym)), nMemo = withM.length;
     const names = cs.slice(0, 4).map(c => c.sym).join(' · ') + (cs.length > 4 ? ' 외 ' + (cs.length - 4) + '개' : '');
@@ -4380,7 +4735,7 @@
       return off || (da && fp.n != null && num(fp.n) !== num(da.n)); })() : false);
     const why = srvStale && rv.staleWhy ? String(rv.staleWhy) : '';
     const staleTag = stale ? '<div class="stalebadge" title="리뷰를 만든 뒤 그날 기록이나 리뷰 방식이 바뀌었어요' + (why ? '(' + esc(why) + ')' : '') + '. 위 숫자가 최신이고, 리뷰는 다음 보충 때 다시 만들어져요">' + IC.info.replace('<svg', '<svg width="14" height="14"') + (/^리뷰 방식 변경$/.test(why) ? '리뷰 방식이 바뀌었어요' : '리뷰 이후 기록이 바뀌었어요') + (why && !/^리뷰 방식 변경$/.test(why) ? ' · ' + esc(why) : '') + ' · 다시 만들기 대기</div>' : '';
-    const dqTag = ai && rv.dq ? '<div class="dqnote">' + IC.alert.replace('<svg', '<svg width="14" height="14"') + '<span><b>데이터 품질</b> · ' + esc(revTxt(rv.dq)) + '</span></div>' : '';
+    const dqTag = ai && rv.dq && !pvOn() ? '<div class="dqnote aib">' + IC.alert.replace('<svg', '<svg width="14" height="14"') + '<span><b>데이터 품질</b> · ' + esc(revTxt(rv.dq)) + '</span></div>' : '';
     const rs0 = iso ? num((D.f.realizedByDate || {})[iso]) : 0, rf0 = iso ? num((D.fut.realizedByDate || {})[iso]) : 0;
     const futOnly = Math.abs(rs0) < 0.005 && Math.abs(rf0) >= 0.005;
     const cntBits = [];
@@ -4417,14 +4772,14 @@
     const attA = tpl && !preRaw ? attOf(k) : null, coreT = attA ? attCore(attA) : '';
     const lead = ai ? (tpl ? [tplNote, preRaw ? '' : (coreT || sumT)].filter(Boolean).join(' ') + (preT ? ' (자산 변동은 위 줄이 마감 값 — 이 요약은 마감 뒤 다시 써요)' : '') : (rv.note || sumT || '')) : '';
     const obsN = ai ? arr(rv.obs).length : 0, hasNx = ai && rv.next && rv.next !== '—' && rv.next !== '없음.';
-    const more = ai && (obsN || hasNx || rv.dq || (!tpl && rv.note && rv.sum));
-    const full = ai ? (!tpl && rv.note && rv.sum ? '<p class="rvsum">' + esc(revTxt(sumT)) + '</p>' : '') + (obsN ? '<ul>' + arr(rv.obs).map(o => '<li>' + esc(revTxt(o)) + '</li>').join('') + '</ul>' : '')
-      + (hasNx ? '<div class="nx"><b>다음 액션</b> · ' + esc(revTxt(rv.next)) + '</div>' : '') + dqTag : '';
+    const more = ai && !pvOn() && (obsN || hasNx || rv.dq || (!tpl && rv.note && rv.sum));
+    const full = ai && !pvOn() ? (!tpl && rv.note && rv.sum ? '<p class="rvsum aib">' + esc(revTxt(sumT)) + '</p>' : '') + (obsN ? '<ul class="aib">' + arr(rv.obs).map(o => '<li>' + esc(revTxt(o)) + '</li>').join('') + '</ul>' : '')
+      + (hasNx ? '<div class="nx aib"><b>다음 액션</b> · ' + esc(revTxt(rv.next)) + '</div>' : '') + dqTag : '';
     const togBits = [obsN ? '관찰 ' + obsN : '', hasNx ? '다음 액션' : ''].filter(Boolean).join(' · ');
     const tog = more ? '<button class="link rvtog" data-a="revTog" data-v="' + esc(k) + '" aria-expanded="' + rvOpen + '">' + (rvOpen ? '접기' : (S.mobile ? '전체' : '펼치기') + (togBits && !S.mobile ? ' · ' + togBits : '')) + (rv.dq && !rvOpen ? ' <span class="rvdq">' + IC.alert.replace('<svg', '<svg width="13" height="13"') + '데이터 품질</span>' : '') + IC.chev.replace('<svg', '<svg class="cv' + (rvOpen ? ' o' : '') + '" width="14" height="14"') + '</button>' : '';
     const aiBox = ai ? (S.mobile
-      ? '<div class="rvbox' + (stale ? ' st' : '') + '"><div class="rvh">' + aiLbl + '<span class="sp"></span>' + tog + '</div>' + staleTag + '<p class="rvlead' + (rvOpen || tpl ? '' : ' clamp3') + (stale ? ' mut' : '') + '">' + esc(revTxt(lead)) + '</p>' + (rvOpen ? full : '') + '</div>'
-      : staleTag + '<p class="rvlead' + (rvOpen || tpl ? '' : ' clamp2') + (stale ? ' mut' : '') + '">' + esc(revTxt(lead)) + '</p>' + (rvOpen ? full : '') + (tog ? '<div class="rvtogw">' + tog + '</div>' : ''))
+      ? '<div class="rvbox' + (stale ? ' st' : '') + '"><div class="rvh">' + aiLbl + '<span class="sp"></span>' + tog + '</div>' + staleTag + '<p class="rvlead' + (tpl ? '' : ' aib') + (rvOpen || tpl ? '' : ' clamp3') + (stale ? ' mut' : '') + '">' + esc(tpl && pvOn() ? hs(lead, true) : revTxt(lead)) + '</p>' + (rvOpen ? full : '') + '</div>'
+      : staleTag + '<p class="rvlead' + (tpl ? '' : ' aib') + (rvOpen || tpl ? '' : ' clamp2') + (stale ? ' mut' : '') + '">' + esc(tpl && pvOn() ? hs(lead, true) : revTxt(lead)) + '</p>' + (rvOpen ? full : '') + (tog ? '<div class="rvtogw">' + tog + '</div>' : ''))
       : '<div class="noai">' + IC.info.replace('<svg', '<svg width="18" height="18"') + (isToday ? '오늘의 AI 리뷰는 23:50 에 만들어져요' : noTrade ? noTradeTxt : '이 날은 AI 리뷰가 아직 없어요') + '</div>';
     const fx = (u.usdt ? 'USDT ₩' + nf('ko-KR').format(num(u.usdt)) : '') + (kp != null ? (u.usdt ? ' · ' : '') + '김프 ' + pctS(kp, 2) + kimpChip(kp) : '');
     const stPill = '<span class="pill ' + (isToday ? 'w' : 'g') + ' sm"' + (!isToday && !snap ? ' title="최근 30일 밖이라 그날 총자산 마감 기록이 없어요 — 전일 대비·자산 변동 분해도 없어요"' : '') + '>' + (isToday ? (S.mobile ? '실시간' : '실시간 · 23:59 마감') : (snap ? (S.mobile ? '마감' : '마감 기록') : '마감 기록 없음')) + '</span>';
@@ -4448,6 +4803,7 @@
   function dayFillsHTML(k) {
     const D = S.D;
     const evs = (dayFull(k) || D.evByDay.get(k) || []).filter(srcPass).filter(e => /매수|매도/.test(String(e.k)) && !/평단/.test(String(e.k)));
+    if (dayWait(k)) { const cn = dayCnt(k); return cn && cn.b + cn.s + cn.pay > 0 ? '<div class="dsec dfills" aria-busy="true"><div class="dst row"><span>그날 체결</span><span class="sp"></span><span class="cap" role="status">받는 중…</span></div><div class="fbars fbsk" aria-hidden="true"></div><div class="fx5 num" aria-hidden="true"><span>&nbsp;</span></div></div>' : ''; }
     if (!evs.length) return '';
     const payKey = e => (e.src || '') + '|' + (e.tx || '');
     const pb = new Set(evs.filter(e => e.k === '온체인 매수' && e.tx && /지불/.test(String(e.d || ''))).map(payKey));
@@ -4524,19 +4880,20 @@
     const by = Object.create(null), bl = Object.create(null); ps.forEach(x => { const k0 = String(x.sym || '?'); by[k0] = (by[k0] || 0) + (isFinite(evNum(x.a)) ? evNum(x.a) : 0); (bl[k0] || (bl[k0] = [])).push(x); });
     return ' <span class="paychip" title="스왑 지불 레그 — 매수 대금으로 함께 나간 코인(원장에선 그 코인 매도로 기록)">지불 ' + Object.keys(by).map(k0 => esc(k0) + (by[k0] ? ' ' + m(KV(by[k0], evAK(bl[k0]))) : '')).join(' · ') + '</span>';
   }
-  function dayRowsHTML(items) {
+  function dayRowsHTML(items, fl) {
+    const fpre = md => arr(fl).map(x => futDayHTML(x, md)).join('');
     const cell = (e, extra) => '<td class="l mut num nowrap">' + esc(String(e.t).slice(6)) + '</td><td class="l">' + evPill(e.k) + '</td><td class="l"><b>' + esc(evNm(e)) + '</b>' + impChip(e) + '</td>' + extra;
     const txc = e => '<td class="tx num nowrap">' + (e.tx && e.tx !== '—' ? '<button data-a="copy" data-v="' + esc(e.tx) + '" title="복사 · ' + esc(e.tx) + '">' + esc(short(e.tx)) + '</button>' : '—') + '</td>';
-    if (S.mobile || S.narrow) return '<div style="padding:4px 16px">' + items.map(it => {
+    if (S.mobile || S.narrow) return '<div style="padding:4px 16px">' + fpre('div') + items.map(it => {
       const e = it.e, g = it.grp, open = g && S.dayGrpOpen && S.dayGrpOpen.has(it.gk);
       const head = '<div data-n="' + it.n + '" style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px"><div class="row gap8">' + evPill(e.k) + '<b>' + esc(evNm(e)) + '</b>' + impChip(e) + (g ? ' <button class="link gtog" data-a="dayGrp" data-v="' + esc(it.gk) + '" aria-expanded="' + !!open + '">' + g.length + '건 체결 ' + (open ? '접기' : '펼치기') + '</button>' : '') + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(String(e.t).slice(6)) + '</span></div>'
-        + '<div class="t2" style="margin-top:3px;font-size:13.5px">' + esc(hs(e.d)) + (it.pay ? payChip(it.pay) : '') + '</div><div class="row sub num"><span>' + (g ? (it.q != null ? (evXf(e) ? pvW(PVM.q) : q(it.q)) : '—') : esc(evQ(e))) + '</span><span class="sp"></span><span>' + (g ? (it.a != null ? (evXf(e) ? esc(pvMoney('', false)) : m(KV(it.a, it.aK))) : '—') : evA(e)) + '</span></div></div>';
+        + '<div class="t2" style="margin-top:3px;font-size:13.5px">' + evDH(e) + (it.pay ? payChip(it.pay) : '') + '</div><div class="row sub num"><span>' + (g ? (it.q != null ? (evXf(e) ? pvW(PVM.q) : q(it.q)) : '—') : esc(evQ(e))) + '</span><span class="sp"></span><span>' + (g ? (it.a != null ? (evXf(e) ? esc(pvMoney('', false)) : m(KV(it.a, it.aK))) : '—') : evA(e)) + '</span></div></div>';
       return head + (open ? g.map(x => '<div data-n="0" style="padding:7px 0 7px 14px;border-bottom:1px dashed var(--line);font-size:13px" class="row sub num"><span>' + esc(evQ(x)) + '</span><span class="sp"></span><span>' + evA(x) + '</span></div>').join('') : '');
     }).join('') + '</div>';
     return '<div style="overflow-x:auto"><table class="ev" style="margin:0 24px;width:calc(100% - 48px)"><thead><tr><th class="l">시각</th><th class="l">종류</th><th class="l">자산</th><th class="l">내용</th><th>수량</th><th>금액</th><th>참조</th></tr></thead><tbody>'
-      + items.map(it => {
+      + fpre('tr') + items.map(it => {
         const e = it.e, g = it.grp;
-        if (!g) return '<tr data-n="' + it.n + '">' + cell(e, '<td class="l"><div class="ell" style="max-width:420px" title="' + esc(hs(e.d)) + '">' + esc(hs(e.d)) + (it.pay ? payChip(it.pay) : '') + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap">' + evA(e) + '</td>' + txc(e)) + '</tr>';
+        if (!g) return '<tr data-n="' + it.n + '">' + cell(e, '<td class="l"><div class="ell" style="max-width:420px" title="' + esc(evDT(e)) + '">' + evDH(e) + (it.pay ? payChip(it.pay) : '') + '</div></td><td class="num nowrap">' + esc(evQ(e)) + '</td><td class="num nowrap">' + evA(e) + '</td>' + txc(e)) + '</tr>';
         const open = S.dayGrpOpen && S.dayGrpOpen.has(it.gk);
         return '<tr class="evgrp" data-n="' + it.n + '">' + cell(e, '<td class="l"><button class="link gtog" data-a="dayGrp" data-v="' + esc(it.gk) + '" aria-expanded="' + !!open + '">' + g.length + '건 체결 · ' + (open ? '접기' : '펼치기') + '</button> <span class="t2">' + esc(hs(e.d)) + '</span></td><td class="num nowrap"><b>' + (it.q != null ? (evXf(e) ? pvW(PVM.q) : q(it.q)) : '—') + '</b></td><td class="num nowrap"><b>' + (it.a != null ? (evXf(e) ? esc(pvMoney('', false)) : m(KV(it.a, it.aK))) : '—') + '</b></td><td class="tx num nowrap mut">' + g.length + '건</td>') + '</tr>'
           + (open ? g.map(x => '<tr class="evsub" data-n="0"><td class="l mut num nowrap">' + esc(String(x.t).slice(6)) + '</td><td class="l"></td><td class="l"></td><td class="l"><div class="ell" style="max-width:420px">' + esc(hs(x.d)) + '</div></td><td class="num nowrap">' + esc(evQ(x)) + '</td><td class="num nowrap">' + evA(x) + '</td>' + txc(x) + '</tr>').join('') : '');
@@ -4574,7 +4931,7 @@
     return out;
   }
   function bundleHTML(b, iso, realBy, ux) {
-    const open = S.dayBOpen && S.dayBOpen.has(b.key), each = open && S.dayBEach && S.dayBEach.has(b.key);
+    const open = S.dayBOpen && S.dayBOpen.has(b.key), each = open && ((S.dayBEach && S.dayBEach.has(b.key)) || b.evs.some(e => e.of || e.ofc));
     const nv = b.venues.filter(v => v.v).length;
     const ct = b.evs.length + '건' + (nv > 1 ? ' · ' + nv + (/거래소/.test(b.k) ? '거래소' : /온체인/.test(b.k) ? '체인' : '곳') : '');
     const vtxt = b.pay ? '매수할 때 낸 코인 · 손익 영향 작음' : b.venues.filter(v => v.v).slice(0, 3).map(v => v.v).join(' · ') + (nv > 3 ? ' 외 ' + (nv - 3) + '곳' : '');
@@ -4730,11 +5087,36 @@
   }
   const dpFade = row => { if (!row) return; const x = row.scrollLeft, mx = row.scrollWidth - row.clientWidth;
     row.classList.toggle('fl', x > 2); row.classList.toggle('fr', mx - x > 2); };
+  function futDayLines(iso) {
+    const fu = (S.D && S.D.fut) || {};
+    if (!iso) return [];
+    const ex = fu.realizedByDateEx;
+    if (ex && typeof ex === 'object' && !Array.isArray(ex)) return arr(ex[iso]).filter(x => x && isFinite(+x.usd) && Math.abs(+x.usd) >= 0.005 && srcPass({ src: 'ex:' + String(x.exKey || '') }))
+      .map(x => ({ ex: String(x.ex || x.exKey || ''), usd: +x.usd, krw: x.krw != null && isFinite(+x.krw) ? +x.krw : null, n: Math.max(0, Math.floor(num(x.n))), t: /^\d\d:\d\d$/.test(String(x.t || '')) ? String(x.t) : '' }));
+    const u = num((fu.realizedByDate || {})[iso]), k = (fu.realizedKrwByDate || {})[iso];
+    if (Math.abs(u) < 0.005 || S.src.mode !== 'all') return [];
+    return [{ ex: '', usd: u, krw: k != null && isFinite(+k) ? +k : null, n: 0, t: '' }];
+  }
+  function futDayHTML(x, mode) {
+    const v = KV(x.usd, x.krw), alt = S.cur === 'USD' ? mAlt(x.krw != null ? x.krw / rate() : x.usd, { sign: true, compact: mode === 'bn' }) : mAlt(x.usd, { sign: true, compact: mode === 'bn' });
+    const nm = esc(x.ex || '선물'), ct = x.n ? '<span class="pvx">' + x.n + '건</span>' : '', tip = ' title="' + esc('선물 정산' + (x.ex ? ' · ' + x.ex : '') + ' — 정산 + 수수료 + 펀딩 · 누르면 선물 화면') + '"';
+    const amt = '<b class="num ' + clsV(v) + '">' + m(v, { sign: true, compact: mode === 'bn' }) + '</b>';
+    const FUT_CV = IC.right.replace('<svg', '<svg class="cv" width="14" height="14"');
+    if (mode === 'bn') return '<div class="bn futd" data-n="0"><button class="bh" data-a="openFut"' + tip + '><span class="l1">' + evPill('선물 정산') + '<b class="sy ell">' + nm + '</b>' + (ct ? '<span class="ct num">' + ct + '</span>' : '') + '<b class="am num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</b></span>'
+      + '<span class="l2 num"><span class="ell">' + esc(x.t) + '</span><span>' + alt + '</span>' + FUT_CV + '</span></button></div>';
+    if (mode === 'div') return '<div class="futd" data-n="0" data-a="openFut" role="button" tabindex="0"' + tip + ' style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer"><div class="row gap8">' + evPill('선물 정산') + '<b>' + nm + '</b>' + (ct ? ' <span class="mut num">' + ct + '</span>' : '') + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(x.t) + '</span></div>'
+      + '<div class="row sub num"><span class="sp"></span><span style="text-align:right">' + amt + '<div class="mut" style="font-size:12px">' + alt + '</div></span></div></div>';
+    return '<tr class="clk futd" data-n="0" data-a="openFut" role="button" tabindex="0"' + tip + '><td class="l mut num nowrap">' + esc(x.t) + '</td><td class="l">' + evPill('선물 정산') + '</td><td class="l"><b>' + nm + '</b></td><td class="l"><span class="t2">' + ct + '</span></td><td class="num nowrap">—</td>'
+      + '<td class="num nowrap">' + amt + '<div class="sub num">' + alt + '</div></td><td class="tx num nowrap mut">' + FUT_CV + '</td></tr>';
+  }
   function dayEventsHTML() {
     const D = S.D, k = S.day || D.todayKey;
     const evs0 = (dayFull(k) || D.evByDay.get(k) || []).filter(srcPass);
     let evs = evs0;
     const full = dayFull(k), cn = dayCnt(k);
+    if (dayWait(k) && (!cn || cn.n > 0)) return '<div class="card' + (S.mobile || S.narrow ? ' dayev m' : '') + '" id="dayEv"' + (S.mobile || S.narrow ? '' : ' style="margin-top:20px"') + ' aria-busy="true"><div class="tblhead"><div class="h2">그날의 기록</div><span class="sp"></span><span class="cap num" role="status" aria-live="polite">'
+      + esc((+k.slice(0, 2)) + '/' + (+k.slice(3, 5))) + (cn ? ' · ' + cn.n + '건' : '') + ' · 전체 기록 받는 중</span></div>' + evSkel(Math.min(8, Math.max(3, cn ? cn.n : 5)), 0) + '</div>';
+    const fRe = !!(full && ((S.dayFull || {})[isoDay(k)] || {}).st === 'load');
     const C = dayCoins(evs0, isoDay(k));
     let fs = S.daySym && S.daySym.keys && S.daySym.keys.size ? S.daySym : null;
     if (fs && (full || fs.k === k)) {
@@ -4746,6 +5128,7 @@
     const keys = fs ? fs.keys : null;
     if (keys) evs = evs0.filter(e => keys.has(C.kOf.get(e)));
     const mob = S.mobile, PK = C.list.length ? dayPickHTML(C, keys, dayPickSum(evs0, C, keys, k), mob) : null;
+    const fl = keys ? [] : futDayLines(isoDay(k));
     const nAll = keys ? evs.length : (cn ? Math.max(cn.n, evs.length) : evs.length), part = !full && (keys ? false : nAll > evs.length);
     const fc = S.dayFull && S.dayFull[isoDay(k)], err = !full && !!fc && fc.st === 'err';
     const partTxt = part ? (err ? '전체 기록을 못 불러왔어요 · 최근 ' + evs.length + '건만 표시' : '전체 기록 불러오는 중') : (err ? '전체 기록을 못 불러왔어요 · 요약 데이터로 표시 중' : '');
@@ -4756,17 +5139,17 @@
       const bs = dayBundles(evs), bk = 'dayb:' + k + (keys ? ':' + [...keys].join(',') : '');
       const iso = isoDay(k), realBy = new Map(), ux = k !== D.todayKey && num((D.usdt[k] || {}).usdt) > 0 ? num(D.usdt[k].usdt) : null;
       dayContrib(iso).filter(rcptable).forEach(x => { const u0 = String(x.sym).toUpperCase(); if (!realBy.has(u0)) realBy.set(u0, { sym: x.sym, v: x.v, vk: x.vk }); });
-      return '<div class="card dayev m" id="dayEv"><div class="tblhead"><div class="h2">그날의 기록</div><span class="sp"></span><span class="cap num' + (err ? ' wtxt' : '') + '">' + esc((+k.slice(0, 2)) + '/' + (+k.slice(3, 5))) + ' · ' + nAll + '건' + (bs.length && evs.length ? ' → ' + bs.length + '묶음' : '') + (partTxt ? ' · ' + partTxt : '') + '</span></div>'
-        + (PK ? PK.row + PK.sum : '') + '<div class="dvbar">' + srcBtn() + '<div class="seg" role="group" aria-label="보기 방식"><button data-a="dayView" data-v="grp" class="on" aria-pressed="true">묶음</button><button data-a="dayView" data-v="each" aria-pressed="false">낱개</button></div>' + retry + '<div class="sp"></div><button class="iconbtn" data-a="csvDaily" aria-label="일별 CSV 내려받기">' + IC.down.replace('<svg', '<svg width="16" height="16"') + '</button></div>'
-        + (evs.length ? '<div class="bns">' + uiMore(bk, bs, 5, b => bundleHTML(b, iso, realBy, ux), { label: (r9, t9) => t9 + '묶음 모두 보기 <span class="mut num pvx">· 낱개 ' + evs.length + '건</span>', less: true }) + '</div>' : empty) + '</div>';
+      return '<div class="card dayev m" id="dayEv"><div class="tblhead"><div class="h2">그날의 기록</div><span class="sp"></span><span class="cap num' + (err ? ' wtxt' : '') + '">' + esc((+k.slice(0, 2)) + '/' + (+k.slice(3, 5))) + ' · ' + nAll + '건' + (bs.length && evs.length ? ' → ' + bs.length + '묶음' : '') + (partTxt ? ' · ' + partTxt : '') + '</span>' + (fRe ? rfrTag() : '') + '</div>'
+        + (PK ? PK.row + PK.sum : '') + '<div class="dvbar">' + srcBtn() + '<div class="seg" role="group" aria-label="보기 방식"><button data-a="dayView" data-v="grp" class="on" aria-pressed="true">묶음</button><button data-a="dayView" data-v="each" aria-pressed="false">낱개</button></div>' + retry + '</div>'
+        + (evs.length || fl.length ? '<div class="bns">' + fl.map(x => futDayHTML(x, 'bn')).join('') + (evs.length ? uiMore(bk, bs, 5, b => bundleHTML(b, iso, realBy, ux), { label: (r9, t9) => t9 + '묶음 모두 보기 <span class="mut num pvx">· 낱개 ' + evs.length + '건</span>', less: true }) : '') + '</div>' : empty) + '</div>';
     }
     const items = groupDayEvs(evs), rk = 'dayr:' + k + (keys ? ':' + [...keys].join(',') : ''), rows = items.slice(0, uiLim(rk, 8)), nShown = sum(rows, it => it.n);
     const items0 = keys ? groupDayEvs(evs0) : items, nHead = keys ? (cn ? Math.max(cn.n, evs0.length) : evs0.length) : nAll;
     const packed = items0.length < (keys ? evs0 : evs).length ? ' · ' + items0.length + '줄로 묶음' : '';
     const viewSeg = S.mobile || S.narrow ? '<div class="seg" role="group" aria-label="보기 방식"><button data-a="dayView" data-v="grp" aria-pressed="false">묶음</button><button data-a="dayView" data-v="each" class="on" aria-pressed="true">낱개</button></div>' : '';
-    return '<div class="card" id="dayEv" style="margin-top:20px"><div class="tblhead"><div class="h2">그날의 기록</div><span class="cap num' + (err ? ' wtxt' : '') + '">' + (mob ? nAll : nHead) + '건 · ' + esc(isoDay(k) || k) + (partTxt ? ' · ' + partTxt : packed) + '</span>' + (PK && !mob ? PK.row : '') + retry + '<div class="sp"></div>' + viewSeg + srcBtn() + '<button class="btn sm" data-a="csvDaily">' + IC.down + '<span class="hide-sm"> 일별 CSV</span></button></div>'
+    return '<div class="card" id="dayEv" style="margin-top:20px"><div class="tblhead"><div class="h2">그날의 기록</div><span class="cap num' + (err ? ' wtxt' : '') + '">' + (mob ? nAll : nHead) + '건 · ' + esc(isoDay(k) || k) + (partTxt ? ' · ' + partTxt : packed) + '</span>' + (fRe ? rfrTag() : '') + (PK && !mob ? PK.row : '') + retry + '<div class="sp"></div>' + viewSeg + srcBtn() + '</div>'
       + (PK ? (mob ? PK.row : '') + PK.sum : '')
-      + (evs.length ? dayRowsHTML(rows) + (items.length > rows.length ? uiMoreBtn(rk, items.length - rows.length, items.length, rows.length, { label: (r9, t9) => nf('ko-KR').format(evs.length) + '건 모두 보기 <span class="mut num pvx">· ' + nShown + '건 보는 중</span>' }) : (rows.length > 8 ? uiWrapBtn('<button type="button" class="ubtn" data-a="uiLess" data-v="' + esc(rk) + '">접기<span class="uchev up" aria-hidden="true">' + IC.chev + '</span></button>', {}) : ''))
+      + (evs.length || fl.length ? dayRowsHTML(rows, fl) + (items.length > rows.length ? uiMoreBtn(rk, items.length - rows.length, items.length, rows.length, { label: (r9, t9) => nf('ko-KR').format(evs.length) + '건 모두 보기 <span class="mut num pvx">· ' + nShown + '건 보는 중</span>' }) : (rows.length > 8 ? uiWrapBtn('<button type="button" class="ubtn" data-a="uiLess" data-v="' + esc(rk) + '">접기<span class="uchev up" aria-hidden="true">' + IC.chev + '</span></button>', {}) : ''))
         : empty) + '</div>';
   }
   const apOf = d => !!d && d.date !== S.D.todayKey && num(d.ap) > 0;
@@ -4820,7 +5203,7 @@
     const split = D.unkhSymN && D.pendN !== D.unkhSymN ? '<span class="pvx">' + esc(pendSplitTxt()) + '</span> · ' : '';
     const top = '<div class="filters uhead"><div style="min-width:0"><div class="h2">확인이 필요한 ' + D.pendN + '건</div><div class="cap ucap1" title="원가를 지정하거나 무시로 정리하면 목록에서 빠져요 · 원가가 붙으면 평단·실현손익이 다시 계산됩니다">' + split + '원가를 정하거나 숨기면 목록에서 빠져요</div></div><div class="sp"></div>'
       + '<div class="row gap8 srchrow">' + searchBox('uq', '코인·유형 검색', S.u.q) + hidChip
-      + '<button class="btn" data-a="csvPend" aria-label="미매칭 CSV">' + IC.down + '<span class="hide-sm"> CSV</span></button></div></div>';
+      + '</div></div>';
     const bal = balGroupHTML();
     const hidGrp = S.u.showHidden && hid.length ? '<div class="card ugrp" id="uHidGrp"><div class="gh" style="cursor:default"><span class="h3">숨긴 항목</span><span class="badge g">' + hid.length + '</span>' + (hcTxt ? '<span class="cap pvx">' + esc(hcTxt) + '</span>' : '') + '<span class="sp"></span>' + (hid.some(p => p._cat === 'spam') ? '<button class="btn sm warn" data-a="bulkSpam">스팸 ' + hid.filter(p => p._cat === 'spam').length + '건 목록에서 지우기</button>' : '') + '<div class="gd gd1" title="소액·확실한 스캠·표시용 보정이라 기본으로 숨겼어요. 실제 자산이면 [정상으로 복원]을 누르세요.">소액·스캠·표시용 보정 — 실제 자산이면 펼쳐서 [정상으로 복원]</div></div>'
       + uiMore('ug:hid', hid, U_FIRST, (p, i) => pItem(p, i, hid), { step: U_STEP, unit: '건', less: true }) + '</div>' : '';
@@ -4951,6 +5334,7 @@
     const hidNote = p.hide ? '<div class="fbnote" style="margin:12px 0 0;background:var(--surface);color:var(--text2);border:1px solid var(--line)">자동 숨김 · <b>' + esc(p.hideReason || HIDE_LBL[p.hide]) + '</b></div>' : '';
     const onch = p._cat === 'xfer' || p._cat === 'prog' ? '<div class="row gap6"><span class="mono ell">' + esc(short(p.tx || p.onchain)) + '</span>' + (p.tx || p.onchain ? '<button class="cpy" data-a="copy" data-v="' + esc(p.tx || p.onchain) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>' : '<div class="val2 num">' + (S.cur !== 'USD' && !S.hide && /\$\s?\d/.test(String(p.onchain || '')) ? '<span class="aprx" title="체결 시각 환율이 아니라 오늘 환율로 환산했어요">≈ </span>' : '') + esc(hs(p.onchain || '—', true)) + '</div>';
     return '<div class="ib">' + hidNote + '<div class="two" style="margin-top:12px"><div><div class="lab">온체인 기록' + (p.chain && p.chain !== '—' ? ' · ' + esc(p.chain) : '') + '</div>' + onch + '</div><div><div class="lab">' + (p._cat === 'xfer' ? '목적지' : '거래소 기록') + '</div><div class="val2">' + (p._cat === 'xfer' && p.to ? '<span class="mono">' + esc(short(p.to)) + '</span> <button class="cpy" data-a="copy" data-v="' + esc(p.to) + '" aria-label="주소 복사">' + IC.copy + '</button> <span class="cap">' + esc(hs(p.ex)) + '</span>' : esc(hs(p.ex || '—'))) + '</div><div class="lab" style="margin-top:8px">왜 보류됐나</div><div class="val2 t2" style="font-size:13.5px">' + esc(hs(p.gap || '—', true)) + '</div></div></div>'
+      + (p._cat === 'xfer' ? aiOpBox(p.aiOp) : '')
       + '<div class="why">' + esc(hs(p.why || '', true)) + '</div>' + (p.candsHint ? '<div class="hint">' + esc(hs(p.candsHint)) + '</div>' : '') + fbInfo + beInfo + path
       + '<div class="acts">' + acts.join('') + '</div></div>';
   }
@@ -5013,7 +5397,7 @@
     const val = r => (r.sendKnown ? r.usdAtSend : 0) || r.usdNow;
     const pendAll = D.of.filter(r => r.bucket === 'pending'), pend = (sh ? pendAll : D.ofPend.concat(D.ofBrU)).slice().sort((a, b) => val(b) - val(a) || b.lastTs - a.lastTs);
     const resAll = D.of.filter(r => r.bucket !== 'pending'), res = sh ? resAll : resAll.filter(r => r.bucket !== 'spam');
-    const ext = resAll.filter(r => r.bucket === 'external'), mine = resAll.filter(r => r.bucket === 'own' || r.bucket === 'exchange'), spam = resAll.filter(r => r.bucket === 'spam');
+    const ext = resAll.filter(r => r.bucket === 'external' && !ofIsSale(r)), mine = resAll.filter(r => r.bucket === 'own' || r.bucket === 'exchange'), spam = resAll.filter(r => r.bucket === 'spam');
     const sendV = r => (r.sendKnown ? r.usdAtSend : 0);
     const capPend = (D.ofPend.length ? (D.ofBrU.length ? '미확인 ' + D.ofPend.length + '곳 ' : '') + (D.ofPendTr ? '<span title="돈 흐름 추적이 끝난 ' + D.ofPendTr + '곳은 추적 뒤 순유출(행 머리와 같은 값), 나머지는 보낸 값 − 되돌려 받음">순유출(추적 반영) ' : '순유출 ') + m(D.ofPendUsd, { compact: true }) + (D.ofPendTr ? '</span>' : '') : (D.ofPendN ? '' : '모두 정리됐어요')) + (D.ofBrU.length ? (D.ofPend.length ? ' · ' : '') + '브릿지 미추적 ' + D.ofBrU.length + '곳 포함' : '') + (D.ofRet.length ? ' · 되돌려 받음 ' + D.ofRet.length + '곳 별도' : '');
     const capExt = !ext.length && D.ofPendN ? '아직 확정한 곳 없음 · 확인 필요에서 정하면 여기로' : ext.length + '곳' + (ext.some(r => r.returnedUsd || r.linkTokenUsd) ? ' · 순유출 ' + m(sum(ext, ofNetV), { compact: true }) : '') + ' · 지금 가치 ' + m(sum(ext, r => r.usdNow), { compact: true });
@@ -5031,26 +5415,33 @@
       + '<button class="lnk mut" data-a="ofSaleAlert" aria-pressed="' + D.saleAlert + '" title="연결할 후보가 생기면 텔레그램으로 알려요">' + (D.saleAlert ? '후보 알림 켬' : '후보 알림 꺼짐') + '</button></div>' : '';
     const nHid = D.ofHidden.length, nDust = D.of.filter(r => r.dustPoison).length;
     const hidChip = nHid ? uiHidChip(nHid, 'ofHidden', sh, '자동으로 숨긴 전송 ' + nHid + '곳' + (spam.length ? ' · 사칭 토큰 로그 ' + spam.length : '') + (nDust ? ' · 소액·주소 오염 ' + nDust : '') + (sh ? ' — 누르면 다시 숨겨요' : ' — 누르면 목록에 함께 보여요')) : '';
-    const seg = '<div class="stw"><div class="subtabs" role="tablist">' + [['pending', '확인 필요', pend.length], ['history', '정리됨', res.length]].concat(D.wdDest.length ? [['wdest', '출금 받은 주소', D.wdDestN]] : []).map(t => '<button role="tab" aria-selected="' + (S.of.view === t[0]) + '" class="' + (S.of.view === t[0] ? 'on' : '') + '" data-a="ofView" data-v="' + t[0] + '"' + (t[0] === 'history' ? ' title="정리된 내역"' : t[0] === 'wdest' ? ' title="거래소 출금 받은 주소"' : '') + '>' + t[1] + '<span class="n">' + t[2] + '</span></button>').join('') + '</div>' + hidChip + '</div>';
+    const seg = '<div class="stw"><div class="subtabs" role="tablist">' + [['pending', '확인 필요', pend.length], ['history', '정리됨', res.length]].concat(D.wdDest.length ? [['wdest', '출금 받은 주소', D.wdDestN]] : []).map(t => '<button role="tab" aria-selected="' + (S.of.view === t[0]) + '" class="' + (S.of.view === t[0] ? 'on' : '') + '" data-a="ofView" data-v="' + t[0] + '"' + (t[0] === 'history' ? ' title="정리된 내역"' : t[0] === 'wdest' ? ' title="거래소 출금 받은 주소"' : '') + '>' + t[1] + '<span class="n">' + t[2] + '</span></button>').join('') + '</div>'
+      + (D.of.some(ofIsSale) ? '' : '<button class="pill g sm ofsl0" data-a="ofWaitGo" title="세일에 넣은 전송을 외부 → 세일 참가금으로 고르면 여기 모여요">세일 참가금 0</button>') + hidChip + '</div>';
     const head = '<div class="ofhd"><div class="h2">보낸 내역</div><div class="cap">어디로 보냈는지 정하면 총자산·손익이 정확해져요</div></div>';
     let body;
     const ocb = offcAsk() + offcGroup();
     if (S.of.view === 'history') body = ofHistory(res);
     else if (S.of.view === 'wdest') body = wdDestHTML();
-    else body = pend.length ? uiMore('ofp', pend, 10, r => ofCard(r), { step: 10, unit: '곳' })
+    else body = pend.length ? uiMore('ofp', pend, 20, r => ofCard(r), { step: 20, unit: '곳' })
       : '<div class="card empty"><div class="eic">' + IC.check + '</div><b>확인할 전송이 없어요</b>외부로 나간 전송은 모두 정리됐어요</div>';
     return head + waitBar + sums + ocb + seg + body + ofSheet();
 
   }
 
   const ofIsSale = r => r.bucket === 'external' && r.category === '세일 참가금';
+  const ofNm = r => { const t = String((r && (r.alias || r.memo)) || '').trim().slice(0, 40); if (!t || t === short(r.address)) return '';
+    return ownH(t, r.alias ? 'w' : 'm'); };
+  function mAlt(usd, o) { const c = S.cur; S.cur = c === 'USD' ? 'KRW' : 'USD'; try { return m(usd, o); } finally { S.cur = c; } }
   function ofChips(r, hist) {
     const look = r.flags.find(f => f.kind === 'lookalike'), v = OF_VERDICT[r.bucket];
     const chips = [];
-    if (hist && v) chips.push([v[1], v[0], (r.matched ? (r.bucket === 'bridge' ? '브릿지 → 내 지갑 · ' : '거래소 입금 · ') + plainT(ofAutoTxt(r)) : r.retOk ? '되돌려 받음 · 흐름 추적으로 확인' : v[0]) + (r.category ? ' · ' + r.category : '') + (r.alias ? ' · ' + r.alias : '') + (r.exchange ? ' · ' + (EX_NAMES[r.exchange] || r.exchange) : '')]);
+    if (r._opt) chips.push(['w', '반영 중', '저장했어요 · 서버가 다시 계산하면 금액·상태가 그 값으로 바뀌어요']);
+    const saleAuto = r.bucket === 'exchange' && r.autoMatch && arr(r.autoMatch.basis).indexOf('sale') >= 0;
+    if (hist && v) chips.push(saleAuto ? ['a', '토큰 세일 입찰', '토큰 세일(경매) 입찰 자동 인식 · 받은 토큰이 입찰액을 원가로 이어받아요'] : [v[1], v[0], (r.matched ? (r.bucket === 'bridge' ? '브릿지 → 내 지갑 · ' : '거래소 입금 · ') + plainT(ofAutoTxt(r)) : r.retOk ? '되돌려 받음 · 흐름 추적으로 확인' : v[0]) + (r.category ? ' · ' + r.category : '') + (r.alias ? ' · ' + r.alias : '') + (r.exchange ? ' · ' + (EX_NAMES[r.exchange] || r.exchange) : '')]);
     if (!hist) {
       if (look) chips.push(['e', '사칭 의심', '주소 오염(사칭) 의심 — 펼쳐서 확인']);
-      if (r.applying) chips.push(['w', '적용 중', '판정을 반영하는 중']);
+      if (r.applyWait) chips.push(['a', '곧 자동으로 수집 시작', '내 지갑으로 등록했어요 · 약 30초 안에 수집기가 자동으로 다시 시작하면 내 지갑 간 이동으로 바뀌어요']);
+      else if (r.applying) chips.push(['w', '적용 중', '판정을 반영하는 중']);
       if (r.saleWait > 0) chips.push(['w', '회수 대기', '세일 참가 · 받은 것과 연결 전']);
       if (r.suggest && r.suggest.label) chips.push(['w', String(r.suggest.label), '제안 — 펼쳐서 확인']);
       if (r.flow && r.flow.score.level === 'high') chips.push(['ok', '내 지갑일 듯', '돈 흐름: 이 주소가 내 지갑일 가능성 높음 · 근거 ' + r.flow.score.n]);
@@ -5058,7 +5449,7 @@
       if (!r.verdict && !r.hints.length && !chips.length && !r.exwd.length) chips.push(['g', '모르는 주소', '아직 어떤 주소인지 정하지 않았어요']);
     }
     if (r.exwd && r.exwd.length) { const ex = r.exwd.map(x => x.exName).filter((x, i, a) => x && a.indexOf(x) === i); chips.push(['a', ex.join('·') + ' 출금' + (r.exwdN > 1 ? ' ' + r.exwdN + '건' : ''), r.exwdOffc ? '오프체인 ' + r.exwdOffc.n + '건 포함 — 거래소 사용자끼리 체인 밖 이체' : '거래소 출금']); }
-    if (!chips.length && r.hints.length) chips.push(['ok', String(hs(r.hints[0].label)), '알려진 주소']);
+    if (!chips.length && r.hints.length) chips.push(r.hints[0].kind === 'burn' ? ['g', '발행·소각 주소', String(hs(r.hints[0].label))] : ['ok', String(hs(r.hints[0].label)), '알려진 주소']);
     return chips;
   }
   function ofCard(r, hist) {
@@ -5068,30 +5459,38 @@
     const fs = r.flow && ['queued', 'scanning', 'timeout', 'error'].indexOf(r.flow.status) >= 0 ? flowWait(r.flow) : '';
     const chips = ofChips(r, hist);
     const c0 = chips[0], chipTip = chips.map(c => c[1] + (c[2] && c[2] !== c[1] ? ' — ' + c[2] : '')).join('\n');
-    const chip = c0 ? '<span class="pill ' + c0[0] + ' sm" title="' + esc(chipTip) + '">' + esc(c0[1]) + (chips.length > 1 ? ' <span class="pvx">+' + (chips.length - 1) + '</span>' : '') + '</span>' : '';
+    const myH = r.hints.length && r.hints[0].kind === 'my_wallet' ? String(hs(r.hints[0].label)) : null, c0nm = !!(c0 && myH && c0[1] === myH);
+    const chipNm = (hist && !!r.alias) || chips.some(c => myH && c[1] === myH);
+    const chip = c0 ? '<span class="pill ' + c0[0] + ' sm"' + (chipNm ? ' data-pvl="w"' : '') + ' title="' + esc(chipNm ? locNameM(ownScrubM(chipTip, true)) : chipTip) + '">' + (c0nm ? ownH(String(hs(r.hints[0].label, 0, 1))) : esc(c0[1])) + (chips.length > 1 ? ' <span class="pvx">+' + (chips.length - 1) + '</span>' : '') + '</span>' : '';
     const dates = r.first === r.last ? r.last : (r.first + ' ~ ' + r.last);
     const nm = r.special ? (r.address === 'multi' ? '여러 주소' : '주소 특정 불가') : r.noAddr ? '받는 주소 미상' : (look ? shortL(r.address) : short(r.address));
+    const nmU = !r.special && !r.noAddr && !look ? ofNm(r) : '';
     const netTxt = ofTraced(r) ? '순유출 ' + m(ofNetV(r), { compact: true })
       : (r.returnedUsd || r.linkTokenUsd) && (!r.linkTokenUsd || num(r.netUsd) >= 0.5) ? '순유출 ' + m(Math.max(0, num(r.netUsd)), { compact: true })
       : r.sendKnown && r.usdAtSend ? '지금 ' + m(r.usdNow, { compact: true }) : '지금 가치 · 보낼 때 —';
-    const amtTip = (r.sendKnown && r.usdAtSend ? '보낼 때 ' + m(r.usdAtSend) + ' · 지금 ' + m(r.usdNow) : '지금 가치 ' + m(r.usdNow) + ' · 보낼 때 값 모름')
+    const amtTip = (fs ? fs.replace(/ · 마지막 시도.*$/, '') + ' · ' : '') + (r.sendKnown && r.usdAtSend ? '보낼 때 ' + m(r.usdAtSend) + ' · 지금 ' + m(r.usdNow) : '지금 가치 ' + m(r.usdNow) + ' · 보낼 때 값 모름')
       + (ofTraced(r) ? ' · 추적 뒤 순유출 ' + m(ofNetV(r)) + ' = ' + (r.flow.held ? '보냄 − 돌려받음(직접·경유·거래소) · 남의 돈이 섞인 주소라 받은 곳 보유는 빼지 않았어요' : '보냄 − 돌려받음(직접·경유·거래소) − 거기 남음') + ' · 확인 필요 합계도 이 값' : '')
       + (r.returnedUsd ? ' · 되돌려 받음 ' + m(r.returnedUsd) : '') + (r.linkTokenUsd ? ' · 토큰으로 받음 ' + m(r.linkTokenUsd) : '');
     return '<div class="card of' + (open ? ' open' : '') + '" data-anc="outflow:' + esc(r.address) + '"><div class="oh" role="button" tabindex="0" data-a="ofTog" data-k="' + esc(r.address) + '" aria-expanded="' + open + '">'
-      + '<div class="who">' + ofIcon(r) + '<div class="w2"><div class="l1"><span class="addr"' + (r.special || r.noAddr ? ' style="font-family:inherit"' : '') + ' title="' + esc(r.noAddr ? '받는 주소 미상 — 거래소 출금 기록에 주소가 없어요' : r.address) + '">' + esc(nm) + '</span></div>'
-      + '<div class="sub l2">' + chip + '<span class="ell">' + esc(r.chainNames.join(' · ')) + ' <span class="num">· ' + r.count + '건 · ' + esc(dates) + '</span>' + (r.memo ? ' · ' + prTxt(r.memo, 'ofmm') : '') + '</span></div></div></div>'
+      + '<div class="who">' + ofIcon(r) + '<div class="w2"><div class="l1">' + (nmU ? '<b class="ofnm ell" title="' + esc(r.address) + '">' + nmU + '</b>' : '<span class="addr"' + (r.special || r.noAddr ? ' style="font-family:inherit"' : '') + ' title="' + esc(r.noAddr ? '받는 주소 미상 — 거래소 출금 기록에 주소가 없어요' : r.address) + '">' + esc(nm) + '</span>') + '</div>'
+      + '<div class="sub l2">' + chip + '<span class="ell">' + (nmU ? '<span class="mono">' + esc(nm) + '</span> · ' : '') + esc(r.chainNames.join(' · ')) + ' <span class="num">· ' + r.count + '건 · ' + esc(dates) + '</span>' + (r.memo && !(nmU && !r.alias) ? ' · ' + prTxt(r.memo, 'ofmm') : '') + '</span></div></div></div>'
       + '<div class="toks">' + ofToks(r) + '</div>'
-      + '<div class="amt" title="' + esc(amtTip) + '"><b class="num">' + m(r.sendKnown && r.usdAtSend ? r.usdAtSend : r.usdNow, { compact: true }) + '</b><span class="cap num">' + (fs ? '<span class="' + (/안 끝|실패/.test(fs) ? 'wtxt' : 'mut') + '">' + esc(fs.replace(/ · 마지막 시도.*$/, '')) + '</span>' : netTxt) + '</span></div>'
+      + '<div class="amt" title="' + esc(amtTip + (netTxt ? ' · ' + plainT(netTxt) : '')) + '"><b class="num">' + m(r.sendKnown && r.usdAtSend ? r.usdAtSend : r.usdNow, { compact: true }) + '</b><span class="cap num">' + ofAmtSub(r) + (fs && /안 끝|실패/.test(fs) ? ' <span class="wtxt">· ' + esc(fs.replace(/ · 마지막 시도.*$/, '')) + '</span>' : '') + '</span></div>'
       + '<span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span></div>'
       + (open ? clps('of:' + r.address, ofBody(r, hist)) : '') + '</div>';
+  }
+  function ofAmtSub(r) {
+    if (!(r.sendKnown && r.usdAtSend)) return '지금 가치 · 보낼 때 —';
+    const a = mAlt(r.usdAtSend, { compact: true }), now = num(r.usdNow), sd = num(r.usdAtSend);
+    return a + (sd > 0 && Math.abs(now - sd) > sd * 0.1 ? ' <span class="mut">· 지금 ' + m(now, { compact: true }) + '</span>' : '');
   }
   const EXPL = { sol: ['https://solscan.io/tx/', 'https://solscan.io/account/'], eth: ['https://etherscan.io/tx/', 'https://etherscan.io/address/'],
     base: ['https://basescan.org/tx/', 'https://basescan.org/address/'], bsc: ['https://bscscan.com/tx/', 'https://bscscan.com/address/'],
     arbitrum: ['https://arbiscan.io/tx/', 'https://arbiscan.io/address/'], optimism: ['https://optimistic.etherscan.io/tx/', 'https://optimistic.etherscan.io/address/'],
     polygon: ['https://polygonscan.com/tx/', 'https://polygonscan.com/address/'], zksync: ['https://era.zksync.network/tx/', 'https://era.zksync.network/address/'],
     scroll: ['https://scrollscan.com/tx/', 'https://scrollscan.com/address/'], gnosis: ['https://gnosisscan.io/tx/', 'https://gnosisscan.io/address/'] };
-  const exUrl = (chain, id, addr) => { const e = EXPL[chain] || (String(id).indexOf('0x') === 0 ? EXPL.eth : EXPL.sol); return e[addr ? 1 : 0] + encodeURIComponent(id); };
-  const exLink = (chain, id, addr, txt) => '<a class="fx-l" href="' + esc(exUrl(chain, id, addr)) + '" target="_blank" rel="noopener noreferrer" title="' + esc((addr ? '주소' : 'tx') + ' 탐색기에서 보기') + '">' + (txt || esc(short(id))) + '</a>';
+  const exUrl = (chain, id, addr) => { if (S.rand) return ''; const e = EXPL[chain] || (String(id).indexOf('0x') === 0 ? EXPL.eth : EXPL.sol); return e[addr ? 1 : 0] + encodeURIComponent(id); };
+  const exLink = (chain, id, addr, txt) => { const u = exUrl(chain, id, addr); return u ? '<a class="fx-l" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc((addr ? '주소' : 'tx') + ' 탐색기에서 보기') + '">' + (txt || esc(short(id))) + '</a>' : '<span class="fx-l">' + (txt || esc(short(id))) + '</span>'; };
   const FL_KIND = { lookmine: ['ok', '내 지갑일 가능성 높음'], mine: ['ok', '내 지갑'], exchange: ['a', '거래소 입금주소'], bridge: ['a', '브릿지'], contract: ['g', '컨트랙트'],
     eoa: ['w', '모르는 주소'], unknown: ['g', '주소 특정 불가'], self: ['g', '같은 주소 · 다른 체인'], burn: ['g', '발행·소각 주소'] };
   const coinsTxt = (cs, n) => cs.slice(0, n || 3).map(c => '<span class="num">' + q(c.qty) + '</span> ' + esc(c.sym)).join(' · ') + (cs.length > (n || 3) ? ' 외 ' + (cs.length - (n || 3)) + '종' : '');
@@ -5149,15 +5548,37 @@
       : '<div class="fl-s"><div class="ttl">차액이 간 곳</div><div class="cap">이 주소에서 다른 곳으로 나간 전송이 없어요' + (f.mineN ? ' — 나간 돈은 모두 내 지갑으로 왔어요' : '') + '</div></div>';
     const sw = f.swaps.n ? '<div class="fl-s fl-sw"><div class="ttl">이 주소가 한 스왑 <span class="mut" style="font-weight:500">' + f.swaps.n + '건</span></div><div class="fl-swr"><span class="lab">판 것</span><span>' + coinsTxt(f.swaps.sold, 4) + '</span></div><div class="fl-swr"><span class="lab">산 것</span><span>' + coinsTxt(f.swaps.bought, 4) + '</span></div></div>' : '';
     const notes = f.notes.length ? '<div class="fl-n">' + f.notes.map(n => '<div>· ' + esc(hs(n, 1)) + '</div>').join('') + '</div>' : '';
-    return '<section class="flw" aria-label="돈 흐름">' + head + tiles + bar + list + sw + notes + '</section>';
+    return '<section class="flw" aria-label="돈 흐름">' + head + tiles + bar + list + sw + notes + (pend ? '' : flowSpoof(r)) + '</section>';
+  }
+  function flowSpoof(r) {
+    const h = r.flow && r.flow.spoofHidden, n = h ? num(h.n) : 0;
+    if (!n) return '';
+    const open = S.of.fsp.has(r.address), it = arr(h.items);
+    const rows = open ? it.map(t => '<div class="kv fr-tx"><span class="num">' + esc(fmtTs(t.ts)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + (t.dir === 'in' ? '받음' : '보냄') + ' <span class="num">' + q(t.qty) + '</span> ' + esc(t.sym) + (t.cp && t.cp !== '?' ? ' · ' + (t.dir === 'in' ? '보낸 곳 ' : '받는 곳 ') + '<span class="mono">' + esc(short(t.cp)) + '</span>' : '') + '</span>' + (t.tx ? exLink(t.chain, t.tx, false, IC.ext || '↗') : '') + '</div>').join('')
+      + (n > it.length ? '<div class="cap">최근 ' + it.length + '건만 보여요</div>' : '') : '';
+    return '<div class="fl-s"><button class="ttl fl-fa" data-a="flowSpoof" data-k="' + esc(r.address) + '" aria-expanded="' + open + '">숨긴 낚시 토큰 이동 ' + n + '건 <span class="mut" style="font-weight:500">사칭·격리 토큰의 가짜 전송 기록 · 금액·받은 곳에 안 넣어요</span><span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span></button>' + rows + '</div>';
+  }
+  const AIOP_V = { exchange: 'a', personal: 'g', contract: 'g', burn: 'g', poison: 'e', unknown: 'g' };
+  const AIOP_KO = { exchange: '거래소 주소', personal: '개인 지갑', contract: '컨트랙트', burn: '소각 주소', poison: '사칭 의심', unknown: '모름' };
+  function aiOpBox(o) {
+    if (!o || typeof o !== 'object' || !o.st) return '';
+    const head = t => '<div class="aiop-h">' + SXI.spark + '<b>AI 의견</b>' + t + '<span class="aiop-t pvx">참고용 · ' + esc(o.by || 'AI') + '</span></div>';
+    if (o.st === 'ok') {
+      const pv9 = typeof pvOn === 'function' && pvOn();
+      const why = pv9 ? '<li>' + esc(AI_HIDE) + '</li>' : arr(o.why).map(w => '<li>' + esc(hs(String(w == null ? '' : w))) + '</li>').join('');
+      return '<div class="aiop">' + head('<span class="pill ' + (AIOP_V[o.v] || 'g') + ' sm aib-l">' + esc(pv9 ? (AIOP_KO[o.v] || '모름') : (o.label || '모름')) + '</span>') + (why ? '<ul class="aib">' + why + '</ul>' : '')
+        + '<div class="aiop-m pvx">확신 ' + esc(o.conf || '낮음') + (num(o.at) > 0 ? ' · ' + esc(fmtTs(num(o.at))) : '') + (o.old ? ' · 그 뒤 기록이 바뀌어 곧 다시 만들어요' : '') + ' · 판정·장부는 바꾸지 않아요</div></div>';
+    }
+    const msg = o.st === 'limit' ? '오늘 만들 수 있는 만큼 다 만들었어요 — 내일 이어서 만들어요' : o.st === 'fail' ? 'AI 의견을 못 만들었어요 — 기록이 바뀌면 다시 시도해요' : '만드는 중 — 백그라운드에서 한 곳씩 천천히 만들어요';
+    return '<div class="aiop wait">' + head('') + '<div class="aiop-m pvx">' + msg + '</div></div>';
   }
   function ofBody(r, hist) {
     const warn = r.flags.map(f => {
-      if (f.kind === 'lookalike') return '<div class="warnbox">' + IC.alert + '<div><b>주소 오염(사칭) 의심</b> — ' + esc(f.label || '내 주소') + ' <span class="mono">' + esc(shortL(f.similarTo)) + '</span> 와 앞 4자리·끝 4자리가 같은 다른 주소예요(이 주소 <span class="mono">' + esc(shortL(r.address)) + '</span>). 주소를 복사해 붙여 넣다 바뀌었다면 사기일 수 있어요.</div></div>';
+      if (f.kind === 'lookalike') return '<div class="warnbox">' + IC.alert + '<div><b>주소 오염(사칭) 의심</b> — ' + (f.label ? ownH(f.label) : '내 주소') + ' <span class="mono">' + esc(shortL(f.similarTo)) + '</span> 와 앞 4자리·끝 4자리가 같은 다른 주소예요(이 주소 <span class="mono">' + esc(shortL(r.address)) + '</span>). 주소를 복사해 붙여 넣다 바뀌었다면 사기일 수 있어요.</div></div>';
       if (f.kind === 'spoof_token') return '<div class="hintbox">' + esc(hs(f.note)) + '</div>';
       return f.note ? '<div class="hintbox">' + esc(hs(f.note)) + '</div>' : '';
     }).join('');
-    const hints = r.hints.length ? '<div class="hintbox"><b>알려진 주소</b> · ' + [...new Set(r.hints.map(h => String(hs(h.label))))].map(esc).join(' · ') + '</div>' : '';
+    const hints = r.hints.length ? '<div class="hintbox"><b>알려진 주소</b> · ' + [...new Set(r.hints.map(h => (h.kind === 'my_wallet' ? ownH(String(hs(h.label, 0, 1))) : esc(String(hs(h.label))))))].join(' · ') + '</div>' : '';
     const sugs = (!hist || r.bucket === 'returned') && r.suggestions.length ? '<div class="hintbox"><b>이렇게 보여요 — 확인해 주세요</b>' + r.suggestions.map(x => '<div style="margin-top:4px">· <b>' + esc(x.label || '') + '</b>' + (x.exchange ? ' (' + esc(EX_NAMES[x.exchange] || x.exchange) + ')' : '') + (x.evidence ? ' — ' + esc(x.evidence) : '') + (x.action === 'register_own' && !r.verdict ? ' <button class="btn sm" data-a="ofOwnQuick" data-k="' + esc(r.address) + '">' + IC.wallet + ' 내 지갑으로 등록</button>' : '') + (x.action === 'mark_returned' && !hist ? ' <button class="btn sm pri" data-a="ofRetQuick" data-k="' + esc(r.address) + '">' + IC.undo + ' 되돌려 받음으로 정리</button>' : '') + '</div>').join('') + '</div>' : '';
     const arrs = r.arrivals.length ? '<div class="blk" style="margin-top:12px"><div class="ttl">브릿지 도착 · 내 지갑 ' + r.arrivalsN + '건</div>' + r.arrivals.slice(0, 8).map(t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(fmtTs(t.ts).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + esc(short(t.wallet || '')) + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + ' · ' + Math.max(0, Math.round(num(t.dt) / 60)) + '분 뒤</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>').join('') + '</div>' : '';
     const flowRet = r.flow && r.flow.returned ? num(r.flow.returned.usd) : 0, dirRet = num(r.returnedUsd);
@@ -5170,17 +5591,36 @@
     const mT = v => S.mobile ? m(v, { compact: true }) : m(v);
     const toks = '<div class="mini-tw"><table class="mini-t" style="margin-top:4px"><thead><tr><th>토큰</th><th>수량</th><th>보낼 때</th><th>지금</th></tr></thead><tbody>' + r.tokens.map(t => '<tr><td><span class="row gap8">' + icon(t.sym, 'xs', D0().symLogo[t.sym.toUpperCase()] || {}) + '<b>' + esc(t.sym) + '</b>' + impChip(t) + (t.airdrop ? '<span class="pill g sm" title="실매수 이력 없이 들어온 토큰이라 격리했어요(스캠 확증은 없음) — 총자산·손익에 넣지 않아요. 실제 자산이면 미매칭 › 숨긴 항목에서 복원">' + (S.mobile ? '에어드랍 의심' : '에어드랍 의심(격리)') + '</span>' : t.phantom ? '<span class="pill g sm">사칭 토큰</span>' : '') + '</span></td><td class="num">' + q(t.qty) + '</td><td class="num">' + (t.usdAtSend == null || !r.sendKnown ? '<span class="mut">—</span>' : mT(t.usdAtSend)) + '</td><td class="num">' + mT(t.usdNow) + '</td></tr>').join('') + '</tbody></table></div>';
     const tvs = r.txsV || r.txs, nTx = Math.max(0, r.count - num(r.phTxN));
-    const txs = tvs.length ? '<div class="blk" style="margin-top:12px"><div class="ttl">전송 ' + nTx + '건' + (tvs.length < nTx ? ' <span class="mut" style="font-weight:500">최근 ' + tvs.length + '건</span>' : '') + (r.phTxN ? ' <span class="cap pvx" style="font-weight:500" title="보유한 적 없는 토큰의 전송 로그(주소 오염) — 가치 0 · 실제 유출 아님">사칭 토큰 전송 ' + r.phTxN + '건 접음</span>' : '') + '</div>' + tvs.slice(0, 8).map(t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(String(t.t || fmtTs(t.ts)).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + (t.quar === 'airdrop' ? ' <span class="pill g sm">에어드랍 의심(격리)</span>' : '') + '</span><span class="num">' + (t.usdAtSend != null ? m(num(t.usdAtSend)) : '') + '</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>').join('') + '</div>' : '';
+    const txRow = t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(String(t.t || fmtTs(t.ts)).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + (t.quar === 'airdrop' ? ' <span class="pill g sm">에어드랍 의심(격리)</span>' : t.phantom ? ' <span class="pill g sm" title="보유한 적 없는 토큰의 전송 로그(주소 오염) — 가치 0 · 실제 유출 아님">사칭 토큰</span>' : '') + ofTxMatch(r, t) + '</span><span class="num">' + (t.usdAtSend != null ? m(num(t.usdAtSend)) : '') + '</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>';
+    const txOmit = num(r.txsCut) > 0 ? Math.max(0, nTx - new Set(tvs.map((t, i) => (t && (t.tx || t.key)) || '#' + i)).size) : 0;
+    const txCutNote = txOmit > 0 ? '<div class="cap" style="margin-top:6px">' + (tvs.length ? '그 전 ' : '최근 목록(사칭 토큰 전송)보다 전 ') + '<span class="num pvx">' + nf('ko-KR').format(txOmit) + '</span>건은 목록에서 생략 — 검색에서 날짜로 그날 기록 보기 · 합계·건수는 전 건 기준</div>' : '';
+    const txs = tvs.length || txCutNote ? '<div class="blk" style="margin-top:12px"><div class="ttl">전송 ' + nTx + '건' + (tvs.length && tvs.length < nTx ? ' <span class="mut" style="font-weight:500">최근 ' + tvs.length + '건</span>' : '') + (r.phTxN ? ' <span class="cap pvx" style="font-weight:500" title="보유한 적 없는 토큰의 전송 로그(주소 오염) — 가치 0 · 실제 유출 아님">사칭 토큰 전송 ' + r.phTxN + '건 접음</span>' : '') + '</div>' + uiMore('oftx:' + r.address, tvs, 8, txRow, { step: 50, unit: '건', less: true }) + txCutNote + '</div>' : '';
     const addrRow = r.noAddr ? ''
       : '<div class="row gap8" style="margin-bottom:12px"><span class="mono" style="font-size:13px;word-break:break-all">' + esc(r.address) + '</span><button class="cpy" data-a="copy" data-v="' + esc(r.address) + '" aria-label="주소 복사">' + IC.copy + '</button></div>';
-    const part = !hist && r.autoMatch && !r.verdict ? '<div class="hintbox"><b>일부 ' + ofAutoTxt(r) + '</b> · ' + num(r.autoMatch.matched) + '/' + num(r.autoMatch.of) + '건 · ' + esc(r.autoMatch.exchange || '') + ' <button class="btn sm" data-a="ofUndo" data-k="' + esc(r.address) + '">' + IC.undo + ' 자동 매칭 끄기</button></div>' : '';
-    const left = '<div style="min-width:0">' + warn + part + sugs + hints + addrRow + exwdBox(r) + '<div class="blk"><div class="ttl">보낸 토큰</div>' + toks + '</div>' + (r.exwdOnly ? '' : txs) + arrs + rets + '</div>';
+    const part = !hist && r.autoMatch && !r.verdict ? '<div class="hintbox"><b>일부 ' + ofAutoTxt(r) + '</b> · ' + num(r.autoMatch.matched) + '/' + num(r.autoMatch.of) + '건 · ' + esc(r.autoMatch.exchange || '') + ' <button class="btn sm" data-a="ofUndo" data-k="' + esc(r.address) + '">' + IC.undo + ' 자동 매칭 끄기</button>' + ofMatchedList(r) + '</div>' : '';
+    const left = '<div style="min-width:0">' + warn + (hist ? '' : aiOpBox(r.aiOp)) + part + sugs + hints + addrRow + exwdBox(r) + '<div class="blk"><div class="ttl">보낸 토큰</div>' + toks + '</div>' + (r.exwdOnly ? '' : txs) + arrs + rets + '</div>';
     return '<div class="ob">' + (r.flow ? '<div class="ob-flow">' + flowPanel(r) + '</div>' : '') + left + '<div>' + (hist ? ofResolved(r) : ofActions(r)) + '</div></div>';
+  }
+  const OF_MATCH_SHORT = { txid: 'txid', amount_time: '수량·시간', address: '입금주소', bridge: '브릿지 도착', hop_split: '경유 분할', roundtrip: '예치 왕복', sale: '세일 입찰' };
+  function ofTxMatchTip(t) {
+    const mt = t.match || {}, b = String(mt.basis || '');
+    if (b === 'bridge') return '브릿지 → 내 지갑 도착' + (mt.chain ? ' · ' + (CHAIN_KO[mt.chain] || mt.chain) : '') + (mt.sym ? ' ' + mt.sym : '') + (num(mt.dt) > 0 ? ' · ' + (num(mt.dt) >= 3600 ? Math.round(num(mt.dt) / 360) / 10 + '시간' : Math.max(1, Math.round(num(mt.dt) / 60)) + '분') + ' 뒤' : '');
+    return (OF_BASIS[b] || b || '자동 매칭') + (mt.exchange ? ' · ' + mt.exchange : '');
+  }
+  function ofTxMatch(r, t) {
+    if (!r.autoMatch || !t || t.phantom || t.ex) return '';
+    if (t.match && t.match.basis) return ' <span class="pill ok sm" title="' + esc(ofTxMatchTip(t)) + '">자동 매칭 · ' + esc(OF_MATCH_SHORT[t.match.basis] || '근거 있음') + '</span>';
+    return ' <span class="pill g sm" title="이 전송은 짝(거래소 입금·브릿지 도착)을 못 찾았어요 — 확인 필요">매칭 안 됨</span>';
+  }
+  function ofMatchedList(r) {
+    const mx = arr(r.txs).filter(t => t && t.match && t.match.basis && !t.phantom);
+    if (!mx.length) return '';
+    return '<div class="cap" style="margin-top:4px">매칭된 전송: ' + mx.slice(0, 3).map(t => esc(String(t.t || fmtTs(t.ts)).slice(5)) + ' ' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · <span class="num">' + q(num(t.qty)) + '</span> ' + esc(t.sym || '') + ' → ' + esc(ofTxMatchTip(t))).join(' / ') + (mx.length > 3 ? ' 외 ' + (mx.length - 3) + '건' : '') + ' · 나머지는 아래 목록의 \'매칭 안 됨\'</div>';
   }
   function ofResolved(r) {
     const v = OF_VERDICT[r.bucket] || ['정리됨', 'g', IC.check];
-    return '<div class="done"><span class="aic ' + v[1] + '" style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center">' + v[2].replace('<svg', '<svg width="17" height="17"') + '</span><div style="min-width:0"><b>' + v[0] + '</b><div class="cap">' + [r.alias, r.exchange ? (EX_NAMES[r.exchange] || r.exchange) : '', r.category].filter(Boolean).map(esc).join(' · ') + (r.decidedTs ? ' · ' + esc(fmtTs(r.decidedTs)) : '') + '</div>'
-      + (r.applying ? '<div class="cap wtxt" style="margin-top:4px">' + (r.bucket === 'own' ? '수집기 재시작 뒤 내 지갑 이동으로 다시 분류돼요' : '1분 안에 거래소 입금으로 다시 분류돼요') + '</div>' : '') + '</div></div>'
+    return '<div class="done"><span class="aic ' + v[1] + '" style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center">' + v[2].replace('<svg', '<svg width="17" height="17"') + '</span><div style="min-width:0"><b>' + v[0] + '</b><div class="cap">' + [r.alias ? ownH(r.alias) : '', r.exchange ? esc(EX_NAMES[r.exchange] || r.exchange) : '', r.category ? esc(r.category) : ''].filter(Boolean).join(' · ') + (r.decidedTs ? ' · ' + esc(fmtTs(r.decidedTs)) : '') + '</div>'
+      + (r.applying ? '<div class="cap wtxt" style="margin-top:4px">' + (r.bucket === 'own' ? (ofAuto() ? '자동으로 다시 시작해 과거 내역을 채우는 중 · 끝나면 내 지갑 이동으로 다시 분류돼요' : '수집기 재시작 뒤 내 지갑 이동으로 다시 분류돼요') : '1분 안에 거래소 입금으로 다시 분류돼요') + '</div>' : '') + '</div></div>'
       + (r.bucket !== 'spam' && r.bucket !== 'system' ? '<div class="acts"><button class="btn sm" data-a="ofUndo" data-k="' + esc(r.address) + '">' + IC.undo + ' 되돌리기</button></div>' : '')
       + (r.bucket !== 'spam' && r.bucket !== 'system' ? ofMemo(r) : '') + ofLinks(r);
   }
@@ -5198,19 +5638,22 @@
   function ofSaleCard(r) {
     const a = r.address, open = S.of.open.has(a), n = ofSaleNums(r), tx0 = r.txs[0] || {};
     const pct = n.sent > 0 ? Math.max(1, Math.round(n.wait / n.sent * 100)) : 100;
-    const chip = '<span class="pill ' + (n.done ? 'ok' : 'w') + ' sm">세일 참가금 · ' + (n.done ? '회수 끝' : '회수 대기') + '</span>';
+    const chip = '<span class="pill ' + (n.done ? 'ok' : 'w') + ' sm">세일 참가금 · ' + (n.done ? '회수 끝' : '회수 대기') + '</span>'
+      + (r._opt ? ' <span class="pill w sm" title="저장했어요 · 서버가 다시 계산하면 금액이 그 값으로 바뀌어요">반영 중</span>' : '');
     const cbadge = r.candN > 0 ? ' <span class="pill a sm cbadge" title="보낸 뒤 들어온 원가 미확인 유입·환불 후보 — 펼쳐서 연결하세요">연결할 후보 ' + r.candN + '</span>' : '';
-    const sub = esc([r.chainNames.join('·'), tx0.ts ? fmtTs(tx0.ts) : r.last, r.tokens.slice(0, 2).map(t => q(t.qty) + ' ' + t.sym).join(' · ')].filter(Boolean).join(' · '))
-      + (r.memo ? ' · ' + prTxt(r.memo, 'ofmm') : '');
-    const amt = '<div class="samt"><b class="num">' + m(n.sent, { compact: true }) + '</b><span class="num ' + (n.done ? 'oktxt' : 'wtxt') + '">'
-      + (n.done ? '순유출 ' + m(Math.max(0, num(r.netUsd)), { compact: true }) : '회수 대기 ' + pct + '%') + '</span></div>';
+    const sub = esc([ofNm(r) ? short(a) : '', r.chainNames.join('·'), tx0.ts ? fmtTs(tx0.ts) : r.last, r.tokens.slice(0, 2).map(t => q(t.qty) + ' ' + t.sym).join(' · ')].filter(Boolean).join(' · '))
+      + (r.memo && (r.alias || !ofNm(r)) ? ' · ' + prTxt(r.memo, 'ofmm') : '');
+    const amt = '<div class="samt" title="' + esc(n.done ? '순유출 ' + plainT(m(Math.max(0, num(r.netUsd)))) : '회수 대기 ' + pct + '%') + '"><b class="num">' + m(n.sent, { compact: true }) + '</b><span class="num mut">'
+      + mAlt(n.sent, { compact: true }) + '</span></div>';
+    const nmU = ofNm(r);
     const tot = Math.max(n.sent, n.ret + n.tok + n.wait) || 1, seg = (c, v) => v > 0 ? '<i class="' + c + '" style="width:' + Math.max(1, v / tot * 100).toFixed(2) + '%"></i>' : '';
     const bar = '<div class="sbar" aria-hidden="true">' + seg('r', n.ret) + seg('t', n.tok) + seg('w', n.wait) + '</div>';
     const lg = (c, l, v) => '<span class="' + (v > 0 ? '' : 'z') + '"><i class="sd ' + c + '"></i>' + l + ' <b class="num">' + m(v, { compact: true }) + '</b></span>';
     const legend = '<div class="slg">' + lg('r', '돌려받음', n.ret) + lg('t', '토큰으로 받음', n.tok) + lg('w', '회수 대기', n.wait) + '</div>';
-    return '<div class="card of sale' + (open ? ' open' : '') + '"><div class="shd" role="button" tabindex="0" data-a="ofTog" data-k="' + esc(a) + '" aria-expanded="' + open + '">'
+    const strip = window.TJSale && window.TJSale.candStrip ? window.TJSale.candStrip(r) : '';
+    return '<div class="card of sale' + (open ? ' open' : '') + '" data-anc="outflow:' + esc(a) + '">' + strip + '<div class="shd" role="button" tabindex="0" data-a="ofTog" data-k="' + esc(a) + '" aria-expanded="' + open + '">'
       + '<span class="aic ' + (n.done ? 'ok' : 'w') + '">' + (n.done ? IC.check : IC.down) + '</span>'
-      + '<div class="swho"><div class="row gap8 st"><span class="addr" title="' + esc(a) + '">' + esc(short(a)) + '</span><span class="chip-d">' + chip + cbadge + '</span></div><div class="sub ell sub-d">' + sub + '</div></div>'
+      + '<div class="swho"><div class="row gap8 st">' + (nmU ? '<b class="ofnm ell" title="' + esc(a) + '">' + nmU + '</b>' : '<span class="addr" title="' + esc(a) + '">' + esc(short(a)) + '</span>') + '<span class="chip-d">' + chip + cbadge + '</span></div><div class="sub ell sub-d">' + sub + '</div></div>'
       + amt + '<span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span>'
       + '<span class="chip-m">' + chip + cbadge + '</span></div>'
       + '<div class="sprog">' + bar + legend + '<div class="sub ell sub-m">' + sub + '</div></div>'
@@ -5222,7 +5665,9 @@
     let left;
     if (L.length) {
       const kv = (l, v, c, b) => '<div class="' + (b ? 'tt' : '') + '"><span>' + l + '</span><span class="num' + (c ? ' ' + c : '') + '">' + v + '</span></div>';
-      left = memo + '<div class="sbox">' + kv('보냄', m(n.sent)) + kv('− 돌려받음 (환불)', m(n.ret), 'oktxt') + kv('− 토큰으로 받음 (원가)', m(n.tok), 'atxt') + kv('<b>회수 대기</b>', '<b>' + m(n.wait) + '</b>', '', true) + '</div>'
+      const pl = window.TJSale && window.TJSale.salePnl ? window.TJSale.salePnl(r) : null;
+      left = memo + '<div class="sbox">' + kv('보냄', m(n.sent)) + kv('− 돌려받음 (환불)', m(n.ret), 'oktxt') + kv('− 토큰으로 받음 (원가)', m(n.tok), 'atxt') + kv('<b>회수 대기</b>', '<b>' + m(n.wait) + '</b>', '', true)
+        + (pl && pl.coinN ? kv('받은 코인 지금 가치', pl.nowOk ? m(pl.now) : '시세 없음') + (pl.nowOk ? kv('세일 손익(지금 기준)', '<b>' + m(pl.pnl, { sign: true }) + '</b>', cls(pl.pnl)) : '') : '') + '</div>'
         + ofPaidNote(r, n.sent) + (L.some(l => l.st === 'mixed') || r.excludeLegs.length || r.txs.length > 1 ? ofLegs(r) : '');
     } else {
       const cats = '<div class="sf"><div class="lab">분류</div><div class="scat">' + OF_CATS.map(c => '<button class="' + (c === r.category ? 'on' : '') + '" data-a="ofCatSet" data-k="' + esc(a) + '" data-v="' + esc(c) + '" aria-pressed="' + (c === r.category) + '">' + esc(c) + '</button>').join('') + '</div></div>';
@@ -5235,7 +5680,7 @@
     let right;
     if (!L.length || (pickOpen && !S.mobile)) right = S.mobile ? '<button class="btn pri sbig" data-a="ofLkOpen" data-k="' + esc(a) + '">받은 것과 연결</button>' : ofSalePick(r, n, false);
     else {
-      const rows = L.map(l => { const k = OF_LK[l.kind], bad = OF_LK_ST[l.st], per = l.kind === 'tokens' && l.costUsd != null && l.qty > 0 ? ' · 원가 ' + m(l.costUsd / l.qty) + '/개' : (l.where ? ' · ' + esc(l.where) : '');
+      const rows = L.map(l => { const k = OF_LK[l.kind], bad = OF_LK_ST[l.st], per = l.kind === 'tokens' && l.costUsd != null && l.qty > 0 ? ' · 원가 ' + m(l.costUsd / l.qty) + '/개' : (l.where ? ' · ' + locH(l.where) : '');
         return '<div class="slk"><span class="pill ' + k[1] + ' sm">' + k[0] + '</span><span class="m"><b><span class="num">' + q(l.qty) + '</span> ' + esc(l.sym) + '</b><span class="cap">' + esc(fmtTs(l.ts)) + per + (bad ? ' · <span class="wtxt">' + esc(bad) + '</span>' : '') + '</span></span>'
           + '<span class="v num">' + (l.kind === 'refund' ? (l.usd != null ? m(l.usd, { compact: true }) : '') : (l.costUsd != null ? '원가 ' + m(l.costUsd, { compact: true }) : '')) + '</span>'
           + '<button class="x" data-a="ofLkUn" data-k="' + esc(a) + '" data-v="' + esc(l.key) + '" aria-label="연결 해제" title="연결 해제">' + IC.close + '</button></div>'; }).join('');
@@ -5263,15 +5708,18 @@
     const o = ofLkOpt(a), win = c && c.win;
     const head = '<div class="sh"><b>받은 것과 연결</b>' + (close || '<span class="cap">' + esc(fmtTs(r.firstTs).slice(0, 5)) + (o.all || (win && win.to == null) ? ' 이후 전체' : ' ~ ' + esc(fmtTs((win && win.to) || (r.firstTs + 60 * 86400)).slice(0, 5)) + ' 들어온 것') + '</span>') + '</div>';
     let body;
-    if (!c || (c.st === 'load' && !c.rows)) body = '<div class="cap">받은 내역을 불러오는 중…</div>';
+    if (!c || (c.st === 'load' && !c.rows)) body = '<label class="search">' + IC.search + '<input class="field" type="search" placeholder="코인 · 지갑 · tx" data-draft="oflq" data-input="oflq" aria-label="받은 내역 찾기" autocomplete="off" spellcheck="false"></label>'
+      + '<div class="lkmeta" aria-busy="true"><span class="cap" role="status" aria-live="polite">받은 내역 찾는 중…</span>'
+      + '<button class="lnk" data-a="ofLkAll" data-k="' + esc(a) + '" aria-pressed="' + o.all + '">' + (o.all ? '보낸 뒤 60일만' : '기간 넓히기(전체)') + '</button>'
+      + '<button class="lnk mut" data-a="ofLkSpam" data-k="' + esc(a) + '" aria-pressed="' + o.spam + '">' + (o.spam ? '스팸 의심 빼기' : '스팸 의심 포함') + '</button></div>' + evSkel(4, 0);
     else if (c.st === 'err') body = '<div class="cap etxt">불러오지 못했어요 · ' + esc(errTxt(c.err || '')) + '</div><button class="btn sm" data-a="ofLkOpen" data-k="' + esc(a) + '">다시 시도</button>';
     else {
       const rows = c.rows.filter(x => !x.linked), tk = rows.filter(x => !x.stable), st = rows.filter(x => x.stable);
       const tab = S.of.lkTab === 'ref' && st.length ? 'ref' : (tk.length ? 'tok' : 'ref'), list = tab === 'ref' ? st : tk;
       const qv = String(S.drafts.oflq || '').trim().toLowerCase();
       const it = x => { const on = sel.has(x.key), sq = lkSq(x);
-        return '<button class="lkc' + (on ? ' on' : '') + '" data-a="ofLkTog" data-k="' + esc(x.key) + '" data-v="' + esc(a) + '" data-q="' + esc(sq) + '" aria-pressed="' + on + '"' + (qv && sq.indexOf(qv) < 0 ? ' hidden' : '') + '><span class="ck">' + (on ? IC.check : '') + '</span><span class="m"><b><span class="num">' + q(x.qty) + '</span> ' + esc(x.sym) + '</b>'
-          + '<span class="cap">' + esc(String(x.t).slice(5, 16)) + ' · ' + esc(x.where) + (x.stable ? '' : ' · 원가 미확인') + (x.fromDest ? ' · 이 주소에서 옴' : '') + (x.sale ? ' · 세일 자동 연결됨' : '') + '</span></span>' + (x.quar ? '<span class="tg">스팸 의심</span>' : '') + '</button>'; };
+        return '<button class="lkc' + (on ? ' on' : '') + '" data-a="ofLkTog" data-k="' + esc(x.key) + '" data-v="' + esc(a) + '" data-q="' + esc(sq) + '" aria-pressed="' + on + '"' + (qv && lkHay(x).indexOf(qv) < 0 ? ' hidden' : '') + '><span class="ck">' + (on ? IC.check : '') + '</span><span class="m"><b><span class="num">' + q(x.qty) + '</span> ' + esc(x.sym) + '</b>'
+          + '<span class="cap">' + esc(String(x.t).slice(5, 16)) + ' · ' + locH(x.where) + (x.stable ? '' : ' · 원가 미확인') + (x.fromSender ? ' · 보낸 지갑으로 들어옴' : '') + (x.dismissed ? ' · 아님으로 뺀 제안' : '') + (x.fromDest ? ' · 이 주소에서 옴' : '') + (x.sale ? ' · 세일 자동 연결됨' : '') + '</span></span>' + (x.quar ? '<span class="tg">스팸 의심</span>' : '') + '</button>'; };
       const nT = c.totalTok != null ? Math.max(c.totalTok, tk.length) : tk.length, nS = c.totalStable != null ? Math.max(c.totalStable, st.length) : st.length;
       const tabs = '<div class="stab"><button class="' + (tab === 'tok' ? 'on' : '') + '" data-a="ofLkTab" data-v="tok"' + (tk.length ? '' : ' disabled') + '>세일 토큰 ' + nT + '</button><button class="' + (tab === 'ref' ? 'on' : '') + '" data-a="ofLkTab" data-v="ref"' + (st.length ? '' : ' disabled') + '>환불' + (sheet ? '' : '(스테이블)') + ' ' + nS + '</button></div>'
         + '<div class="lkmeta"><span class="cap num">' + (c.total != null && c.total > c.rows.length ? '전체 ' + c.total + '건 중 ' + c.rows.length + '건' : c.rows.length + '건') + (c.st === 'load' ? ' · 찾는 중…' : '') + '</span>'
@@ -5280,7 +5728,7 @@
       const refSel = sum([...sel.values()].filter(x => x.stable), x => x.qty);
       const cost = Math.max(0, n.sent - n.ret - refSel);
       body = '<label class="search">' + IC.search + '<input class="field" type="search" placeholder="코인 · 지갑 · tx" data-draft="oflq" data-input="oflq" aria-label="받은 내역 찾기" autocomplete="off" spellcheck="false"></label>' + tabs
-        + (rows.length ? '<div class="lkl">' + list.map(it).join('') + '<div class="cap lke"' + (!qv || list.some(x => (x.sym + ' ' + x.where + ' ' + x.tx + ' ' + x.t).toLowerCase().indexOf(qv) >= 0) ? ' hidden' : '') + '>찾는 내역이 없어요</div></div>'
+        + (rows.length ? '<div class="lkl">' + list.map(it).join('') + '<div class="cap lke"' + (!qv || list.some(x => lkHay(x).indexOf(qv) >= 0) ? ' hidden' : '') + '>찾는 내역이 없어요</div></div>'
           : '<div class="cap">보낸 뒤 내 지갑·거래소로 받은 연결할 내역이 없어요</div>')
         + '<div class="sft"><span class="cap">토큰 원가 = 참가금 − 환불 = <b class="num">' + m(cost, { compact: true }) + '</b></span><button class="btn pri" data-a="ofLkSave" data-k="' + esc(a) + '"' + (sel.size ? '' : ' disabled') + '>' + (sel.size ? sel.size + '건 연결' : '연결') + '</button></div>';
     }
@@ -5299,7 +5747,7 @@
     const tok = L.filter(l => l.kind === 'tokens' && l.st === 'applied'), cost = sum(tok, l => num(l.costUsd));
     const rows = L.map(l => { const k = OF_LK[l.kind], bad = OF_LK_ST[l.st];
       return '<div class="lkr"><span class="pill ' + k[1] + ' sm">' + k[0] + '</span><span class="m"><span class="q"><span class="num">' + q(l.qty) + '</span> ' + esc(l.sym) + '</span>'
-        + '<span class="cap">' + esc(fmtTs(l.ts)) + (l.where ? ' · ' + esc(l.where) : '') + (bad ? ' · <span class="wtxt">' + esc(bad) + '</span>' : '') + '</span></span>'
+        + '<span class="cap">' + esc(fmtTs(l.ts)) + (l.where ? ' · ' + locH(l.where) : '') + (bad ? ' · <span class="wtxt">' + esc(bad) + '</span>' : '') + '</span></span>'
         + '<span class="v num">' + (l.kind === 'refund' ? (l.usd != null ? m(l.usd) : '') : (l.costUsd != null ? '원가 ' + m(l.costUsd) : '')) + '</span>'
         + '<button class="cpy" data-a="ofLkUn" data-k="' + esc(a) + '" data-v="' + esc(l.key) + '" aria-label="연결 해제" title="연결 해제">' + IC.close + '</button></div>'; }).join('');
     const sent = r.sendKnown ? r.usdAtSend : 0;
@@ -5311,19 +5759,20 @@
       + (note ? '<div class="cap"' + (rows ? ' style="margin-top:6px"' : '') + '>' + note + '</div>' : '') + ofPaidNote(r, sent) + retHint
       + (pick ? ofLkPick(r) : '<div class="frm"><button class="btn sm" data-a="ofLkOpen" data-k="' + esc(a) + '">받은 것과 연결</button></div>') + '</div>';
   }
-  const lkSq = x => (x.sym + ' ' + (S.rand ? String(pvNet(String(x.where))).replace(PV_RE, '•••') : x.where) + ' ' + x.tx + ' ' + x.t).toLowerCase();
+  const lkSq = x => (x.sym + ' ' + x.tx + ' ' + x.t).toLowerCase();
+  const lkHay = x => (x.sym + ' ' + x.where + ' ' + x.tx + ' ' + x.t).toLowerCase();
   function ofLkPick(r) {
     const a = r.address, c = S.of.lkc[a], sel = S.of.lk.sel;
     if (!c || c.st === 'load') return '<div class="lkpick" data-addr="' + esc(a) + '"><div class="cap">받은 내역을 불러오는 중…</div></div>';
     if (c.st === 'err') return '<div class="lkpick" data-addr="' + esc(a) + '"><div class="cap etxt">불러오지 못했어요 · ' + esc(errTxt(c.err || '')) + '</div><div class="frm"><button class="btn sm" data-a="ofLkOpen" data-k="' + esc(a) + '">다시 시도</button><button class="btn sm" data-a="ofLkClose">닫기</button></div></div>';
     const qv = String(S.drafts.oflq || '').trim().toLowerCase();
     const it = x => { const on = sel.has(x.key), sq = lkSq(x);
-      return '<button class="lkc' + (on ? ' on' : '') + '" data-a="ofLkTog" data-k="' + esc(x.key) + '" data-q="' + esc(sq) + '" aria-pressed="' + on + '"' + (qv && sq.indexOf(qv) < 0 ? ' hidden' : '') + '><span class="ck">' + (on ? IC.check : '') + '</span><span class="m"><span class="num">' + q(x.qty) + '</span> <b>' + esc(x.sym) + '</b>'
-        + '<span class="cap">' + esc(String(x.t).slice(0, 16)) + ' · ' + esc(x.where) + (x.fromDest ? ' · 이 주소에서 옴' : '') + (x.sale ? ' · 세일 자동 연결됨' : '') + (x.quar ? ' · 스팸 의심(숨김)' : '') + '</span></span></button>'; };
+      return '<button class="lkc' + (on ? ' on' : '') + '" data-a="ofLkTog" data-k="' + esc(x.key) + '" data-q="' + esc(sq) + '" aria-pressed="' + on + '"' + (qv && lkHay(x).indexOf(qv) < 0 ? ' hidden' : '') + '><span class="ck">' + (on ? IC.check : '') + '</span><span class="m"><span class="num">' + q(x.qty) + '</span> <b>' + esc(x.sym) + '</b>'
+        + '<span class="cap">' + esc(String(x.t).slice(0, 16)) + ' · ' + locH(x.where) + (x.fromSender ? ' · 보낸 지갑으로 들어옴' : '') + (x.dismissed ? ' · 아님으로 뺀 제안' : '') + (x.fromDest ? ' · 이 주소에서 옴' : '') + (x.sale ? ' · 세일 자동 연결됨' : '') + (x.quar ? ' · 스팸 의심(숨김)' : '') + '</span></span></button>'; };
     const rows = c.rows.filter(x => !x.linked), tk = rows.filter(x => !x.stable), st = rows.filter(x => x.stable);
     const list = (tk.length ? '<div class="lab">세일 토큰 후보 · 원가 미확인</div>' + tk.map(it).join('') : '') + (st.length ? '<div class="lab">스테이블 · 환불 후보</div>' + st.map(it).join('') : '');
     return '<div class="lkpick" data-addr="' + esc(a) + '"><label class="search">' + IC.search + '<input class="field" type="search" placeholder="코인 · 지갑 · tx 찾기" data-draft="oflq" data-input="oflq" aria-label="받은 내역 찾기" autocomplete="off" spellcheck="false"></label>'
-      + (list ? '<div class="lkl">' + list + '<div class="cap lke"' + (qv && rows.some(x => (x.sym + ' ' + x.where + ' ' + x.tx + ' ' + x.t).toLowerCase().indexOf(qv) >= 0) || !qv ? ' hidden' : '') + '>찾는 내역이 없어요</div></div>'
+      + (list ? '<div class="lkl">' + list + '<div class="cap lke"' + (qv && rows.some(x => lkHay(x).indexOf(qv) >= 0) || !qv ? ' hidden' : '') + '>찾는 내역이 없어요</div></div>'
         : '<div class="cap" style="margin-top:8px">보낸 뒤 내 지갑·거래소로 받은 연결할 내역이 없어요</div>')
       + '<div class="frm"><button class="btn sm pri" data-a="ofLkSave" data-k="' + esc(a) + '"' + (sel.size ? '' : ' disabled') + '>연결' + (sel.size ? ' ' + sel.size + '건' : '') + '</button><button class="btn sm" data-a="ofLkClose">닫기</button></div>'
       + '<div class="cap" style="margin-top:6px">스테이블은 환불(손익 0), 그 밖은 세일 토큰으로 연결돼요 — 원가 = 보낸 값 − 환불</div></div>';
@@ -5331,7 +5780,9 @@
   function ofLkFilter(v, box0) {
     const q0 = String(v || '').trim().toLowerCase(), box = box0 || document.querySelector('.lkpick, .spick'); if (!box) return;
     let any = false;
-    box.querySelectorAll('.lkc').forEach(o => { const ok = !q0 || String(o.getAttribute('data-q') || '').indexOf(q0) >= 0; o.hidden = !ok; if (ok) any = true; });
+    const c9 = S.of.lkc[box.getAttribute('data-addr') || ''], by9 = new Map(arr(c9 && c9.rows).map(x => [x.key, x]));
+    box.querySelectorAll('.lkc').forEach(o => { const x9 = by9.get(o.getAttribute('data-k')), hay = x9 ? lkHay(x9) : String(o.getAttribute('data-q') || '');
+      const ok = !q0 || hay.indexOf(q0) >= 0; o.hidden = !ok; if (ok) any = true; });
     const e = box.querySelector('.lke'); if (e) e.hidden = any;
   }
   function ofLkInput(t) {
@@ -5343,18 +5794,19 @@
   }
   const ofLkOpt = a => S.of.lkOpt[a] || (S.of.lkOpt[a] = { all: false, spam: false, q: '' });
   function ofLkLoad(a) {
-    const o = ofLkOpt(a), prev = S.of.lkc[a];
+    const o = ofLkOpt(a), vk = (o.all ? 'a' : '') + (o.spam ? 's' : '');
+    const prev = S.of.lkc[a] && S.of.lkc[a].vk === vk ? S.of.lkc[a] : null;
     const g = S.of.lkGen[a] = (S.of.lkGen[a] || 0) + 1;
-    S.of.lkc[a] = { st: 'load', rows: prev && prev.rows, total: prev && prev.total, totalTok: prev && prev.totalTok, totalStable: prev && prev.totalStable, quarN: prev && prev.quarN, win: prev && prev.win };
+    S.of.lkc[a] = { st: 'load', vk, rows: prev && prev.rows, total: prev && prev.total, totalTok: prev && prev.totalTok, totalStable: prev && prev.totalStable, quarN: prev && prev.quarN, win: prev && prev.win };
     fetch('/api/outflow_candidates?address=' + encodeURIComponent(a) + (o.all ? '&all=1' : '') + (o.spam ? '&spam=1' : '') + (o.q ? '&q=' + encodeURIComponent(o.q) : ''), { cache: 'no-store' }).then(r => {
       if (r.status === 401) { onUnauthorized(); return null; }
       return r.json().catch(() => null).then(j => (r.ok && j && j.ok) ? j : Promise.reject(new Error((j && j.error) || ('HTTP ' + r.status))));
     }).then(j => {
       if (!j || S.of.lkGen[a] !== g) return;
-      S.of.lkc[a] = { st: 'ok', total: num(j.total), shown: num(j.shown), totalTok: num(j.totalTok), totalStable: num(j.totalStable), quarN: num(j.quarN),
+      S.of.lkc[a] = { st: 'ok', vk, total: num(j.total), shown: num(j.shown), totalTok: num(j.totalTok), totalStable: num(j.totalStable), quarN: num(j.quarN),
         win: j.window && typeof j.window === 'object' ? { from: num(j.window.from), to: j.window.to == null ? null : num(j.window.to) } : null, rows: arr(j.cands).filter(x => x && x.key).map(x => ({ key: String(x.key), sym: String(x.sym || '?'), qty: num(x.qty), ts: num(x.ts), t: String(x.t || ''),
-        where: String(x.where || ''), tx: String(x.tx || ''), stable: !!x.stable, sale: !!x.sale, fromDest: !!x.fromDest, quar: !!x.quar, linked: x.linked || null })) };
-    }).catch(e => { if (S.of.lkGen[a] === g) S.of.lkc[a] = { st: 'err', err: (e && e.message) || '' }; }).then(() => {
+        where: String(x.where || ''), tx: String(x.tx || ''), stable: !!x.stable, sale: !!x.sale, fromDest: !!x.fromDest, fromSender: !!x.fromSender, dismissed: !!x.dismissed, quar: !!x.quar, linked: x.linked || null })) };
+    }).catch(e => { if (S.of.lkGen[a] === g) S.of.lkc[a] = { st: 'err', vk, err: (e && e.message) || '' }; }).then(() => {
       if (S.tab !== 'outflows' || S.of.lkGen[a] !== g) return;
       const ae = document.activeElement, foc = !!(ae && ae.getAttribute && ae.getAttribute('data-input') === 'oflq'), pos = foc ? ae.selectionStart : 0;
       renderView();
@@ -5374,7 +5826,7 @@
       const chs = S.drafts[dk('chains')] != null ? String(S.drafts[dk('chains')]).split(',').filter(Boolean) : r.chains.slice();
       form = '<div class="vform"><div class="lab">지갑 이름</div><input class="field" style="width:100%" placeholder="예: 콜드 3" data-draft="' + esc(dk('alias')) + '" aria-label="지갑 이름"><div class="lab" style="margin-top:10px">추적할 체인</div><div class="optline">'
         + (r.chains.length ? r.chains : ['eth']).map(c => '<button class="fbtn' + (chs.indexOf(c) >= 0 ? ' on' : '') + '" data-a="ofChain" data-k="' + esc(a) + '" data-v="' + esc(c) + '" aria-pressed="' + (chs.indexOf(c) >= 0) + '">' + esc(CHAIN_KO[c] || c) + '</button>').join('') + '</div>'
-        + '<div class="frm"><button class="btn pri" data-a="ofSave" data-k="' + esc(a) + '" data-v="own">내 지갑으로 등록</button><span class="cap">등록 뒤 수집기가 다시 시작되면 과거 내역도 채워져요</span></div></div>';
+        + '<div class="frm"><button class="btn pri" data-a="ofSave" data-k="' + esc(a) + '" data-v="own">내 지갑으로 등록</button><span class="cap">' + (ofAuto() ? '등록하면 곧 자동으로 수집을 시작해 과거 내역도 채워요' : '등록 뒤 수집기가 다시 시작되면 과거 내역도 채워져요') + '</span></div></div>';
     } else if (sel === 'exchange') {
       const ex = S.drafts[dk('ex')] || '';
       form = '<div class="vform"><div class="lab">어느 거래소 입금주소인가요?</div><div class="optline">' + EX_ORDER.map(k => '<button class="fbtn' + (ex === k ? ' on' : '') + '" data-a="ofEx" data-k="' + esc(a) + '" data-v="' + k + '" aria-pressed="' + (ex === k) + '">' + exLogo(k) + EX_NAMES[k] + '</button>').join('') + '</div>'
@@ -5422,7 +5874,7 @@
         + '<span class="cap" style="display:block;overflow-wrap:anywhere">참여 ' + esc(m(num(x.paidUsd))) + ' · 환불 ' + esc(m(num(x.refundUsd))) + ' · 단가 ' + (S.hide ? '$' + pvW(PVM.px) : '$' + esc(rw(String(Number(num(x.unit).toPrecision(6))))))
         + ' · 받은 ' + esc(q(num(x.qty))) + (x.receiptSym ? ' (' + esc(x.receiptSym) + ' 교환)' : '')
         + '<br>연결 ' + esc(q(num(x.usedQty))) + ' · 원가 ' + esc(m(num(x.usedCost))) + ' · 입찰 지갑 ' + esc(short(x.bidder)) + (x.bidderMine ? '' : ' (미등록)')
-        + (x.off ? ' · <span class="wtxt">끊음 — 원가 미확인으로 계산 중</span>' : '') + '</span></span>'
+        + (x.off ? ' · <span class="wtxt">끊음 — 원가 미확인으로 계산 중</span>' : '') + (x._opt ? ' · <span class="wtxt">반영 중</span>' : '') + '</span></span>'
         + '<button class="btn sm' + (x.off ? ' pri' : '') + '" data-a="saleTog" data-v="' + esc(x.lot) + '" data-off="' + (x.off ? '0' : '1') + '">' + (x.off ? '다시 연결' : '연결 끊기') + '</button></div>').join('')
       + '</div>';
   }
@@ -5432,7 +5884,7 @@
     const EXN = k => EX_NAMES[k] || k;
     return '<div class="pbox"><div class="ttl">거래소 간 연결 <span class="cap">txid 가 달라 금액·시간·주소로 이었어요</span></div>'
       + ls.map(x => '<div class="kv" style="align-items:center;gap:8px"><span style="min-width:0;overflow-wrap:anywhere">' + esc(EXN(x.wdEx)) + ' → ' + esc(EXN(x.depEx)) + ' <b class="num">' + esc(q(num(x.qty))) + '</b>'
-        + '<span class="cap" style="display:block;overflow-wrap:anywhere">' + esc(String(x.label || '').replace(/^연결: /, '')) + (x.off ? ' · <span class="wtxt">끊음 — 원가 미확인으로 계산 중</span>' : '') + '</span></span>'
+        + '<span class="cap" style="display:block;overflow-wrap:anywhere">' + esc(String(x.label || '').replace(/^연결: /, '')) + (x.off ? ' · <span class="wtxt">끊음 — 원가 미확인으로 계산 중</span>' : '') + (x._opt ? ' · <span class="wtxt">반영 중</span>' : '') + '</span></span>'
         + '<button class="btn sm' + (x.off ? ' pri' : '') + '" data-a="xferTog" data-v="' + esc(x.dep) + '" data-off="' + (x.off ? '0' : '1') + '">' + (x.off ? '다시 연결' : '연결 끊기') + '</button></div>').join('')
       + '</div>';
   }
@@ -5449,6 +5901,7 @@
       + uiPick('ofReason', [['', '모든 사유']].concat(OF_CATS.map(c => [c, '외부 · ' + c])).concat([['own', '내 지갑'], ['exchange', '거래소 입금주소'], ['returned', '되돌려 받음'], ['bridge', '브릿지 → 내 지갑'], ['spam', '사칭·스팸 로그']]), f.reason, '사유', { act: true })
       + '<div class="sp"></div><span class="cap num">' + list.length + '곳 · 보낼 때 <b style="color:var(--text)">' + m(sum(list, r => (r.sendKnown ? r.usdAtSend : 0))) + '</b>' + (list.some(r => !r.sendKnown) ? '<span title="보낸 시점 값을 모르는 항목 제외">*</span>' : '') + ' · 지금 ' + m(sum(list, r => r.usdNow)) + '</span></div>';
     return bar + (list.length ? uiMore('ofh', list, 10, r => ofCard(r, true), { step: 10, unit: '곳' })
+      : f.reason === '세일 참가금' ? '<div class="card empty"><b>아직 세일 참가금으로 고른 전송이 없어요</b>확인 필요에서 그 전송을 펼쳐 외부 → 세일 참가금을 고르거나, 일별 기록에서 그 줄을 눌러 고르면 여기 모여요</div>'
       : '<div class="card empty"><b>조건에 맞는 정리 내역이 없어요</b>필터를 넓혀 보세요</div>');
   }
 
@@ -5509,7 +5962,7 @@
   const SX_META = {
     keys: { t: '연결 · 키', ic: 'key', c: 'w' }, wallets: { t: '지갑 · 주소', ic: 'wallet', c: 'v' }, alerts: { t: '알림', ic: 'bell', c: 'a' },
     display: { t: '화면 · 표시', ic: 'eye', c: 'ok' }, cost: { t: '원가 계산', ic: 'scale', c: 'g' }, ai: { t: 'AI 리뷰', ic: 'spark', c: 'v' },
-    data: { t: '데이터 · 수집', ic: 'db', c: 'g' }, account: { t: '계정 · 로그인', ic: 'lock', c: 'g' }, advanced: { t: '고급 · 내보내기', ic: 'sliders', c: 'g' } };
+    data: { t: '데이터 · 수집', ic: 'db', c: 'g' }, account: { t: '계정 · 로그인', ic: 'lock', c: 'g' }, advanced: { t: '고급', ic: 'sliders', c: 'g' } };
   const SX_GROUPS = [['연결', ['keys', 'wallets', 'alerts']], ['보기 · 계산', ['display', 'cost', 'ai']], ['데이터 · 계정', ['data', 'account', 'advanced']]];
   const SX_SUBS = {
     keys: { exchanges: '거래소 조회 키', telegram: '텔레그램 알림 봇' },
@@ -5552,7 +6005,7 @@
   const alTier = c => (c && (c.tier === 'now' || c.tier === 'daily' || c.tier === 'web') ? c.tier : c && c.crit ? 'now' : 'daily');
   const alOn = (d, k) => (((d && d.prefs && d.prefs.cats) || {})[k] || 'on') !== 'off';
   const sxAlCount = d => { const cs = arr(d && d.cats).filter(c => alTier(c) !== 'web');
-    return { on: cs.filter(c => alOn(d, c.key)).length, n: cs.length, now: cs.filter(c => alTier(c) === 'now' && alOn(d, c.key)).length, daily: cs.some(c => alTier(c) === 'daily' && alOn(d, c.key)) }; };
+    return { on: cs.filter(c => alOn(d, c.key)).length, n: cs.length, now: cs.filter(c => alTier(c) === 'now' && c.key !== 'arrive' && alOn(d, c.key)).length, daily: cs.some(c => alTier(c) === 'daily' && alOn(d, c.key)) }; };
   function sxWalRows() {
     const st = suSt(), by = new Map(), out = [];
     S.D.wallets.forEach(w => { const r = { k: String(w.key || w.addr || ''), w, s: null, alias: String(w.alias || '') }; by.set(r.k, r); out.push(r); });
@@ -5567,6 +6020,14 @@
   const sxSlotWait = () => '<div class="sx-wait" aria-hidden="true"><i></i><i></i><i></i></div>';
   const sxSeg = (a, opts, label, full) => '<span class="seg sx-seg' + (full ? ' full' : '') + '" role="group" aria-label="' + esc(label) + '">'
     + opts.map(o => '<button data-a="' + a + '" data-v="' + esc(o[0]) + '" class="' + (o[2] ? 'on' : '') + '" aria-pressed="' + !!o[2] + '">' + o[1] + '</button>').join('') + '</span>';
+  const rkCtl = () => {
+    const f = rkFix();
+    if (S.rand) return '<div class="cap" style="margin-top:8px">배수: ' + (f ? '고정됨 — 값은 랜덤값을 끄면 보여요' : '열 때마다 무작위') + '</div>'
+      + (f ? '<div class="frm"><button class="btn sm" data-a="rkClear">고정 풀기</button></div>' : '');
+    return '<div class="frm" style="margin-top:8px"><input class="field num" inputmode="decimal" placeholder="배수 고정 (예: 2.4)" data-draft="rk" data-enter="rkSet" aria-label="랜덤값 배수 고정" style="max-width:170px" value="' + (f ? esc(String(f)) : '') + '">'
+      + '<button class="btn sm" data-a="rkSet">고정</button>' + (f ? '<button class="btn sm" data-a="rkClear">풀기</button>' : '') + '</div>'
+      + '<div class="cap">비우면 열 때마다 무작위 · 고정하면 캡처 여러 장의 숫자가 서로 맞아요(배수를 아는 사람은 실제 값을 계산할 수 있어요) · 0.2~5 (0.8~1.25 제외)</div>';
+  };
   const sxSw = (a, on, label, attrs) => '<button class="sw2' + (on ? ' on' : '') + '" data-a="' + a + '" role="switch" aria-checked="' + !!on + '" aria-label="' + esc(label) + '"' + (attrs || '') + '></button>';
   const sxGrp = (t, cap) => '<div class="sx-grp pvx">' + t + (cap ? '<span class="cap">' + cap + '</span>' : '') + '</div>';
   function sxIt(id, t, cap, right, o) {
@@ -5609,7 +6070,7 @@
       if (!d) return c && (c.st === 'none' || c.st === 'err') ? '이 서버는 로그인 없음' : wait;
       return d.enabled ? (d.authed ? esc(fmtTs(d.exp).slice(0, 5)) + '까지 · 기기 ' + num(d.sessions) : '로그인 필요') : (d.demo ? '데모 모드' : '꺼짐 · 누구나 볼 수 있음');
     }
-    if (k === 'advanced') return 'CSV 6종 · 선물 · 증권사(실험) · 적용 방식';
+    if (k === 'advanced') return '선물 · 증권사(실험) · 적용 방식';
     return '';
   }
   function sxBadge(k) {
@@ -5658,7 +6119,7 @@
           K ? sxPill(K.es ? 'ok' : 'g', K.es + '/' + K.en + ' 연결') : '', { href: '#settings/keys/exchanges' });
         const ip = '<div class="sx-it" id="sx-keys-ip"><div class="sx-itx"><span class="tx"><b>이 서버 공인 IP</b><span class="cap">거래소 키 IP 허용 목록에 넣을 값</span></span></div><span class="sx-r" data-su-slot="ip"></span></div>';
         const tgRow = '<div class="sx-it sx-lk2" id="sx-keys-tg"><a class="sx-itx sx-stretch" href="#settings/keys/telegram"><span class="tx"><b>알림 봇</b><span class="cap">'
-          + (K ? (tg ? (K.tgBot ? '@' + esc(K.tgBot) + (K.tgChat ? ' → ' + esc(K.tgChat) : '') : '연결됨') + ' · 알림 종류는 ‘알림’에서' : '연결 안 됨 · BotFather 토큰으로 연결해요') : '불러오는 중…') + '</span></span></a>'
+          + (K ? (tg ? (K.tgBot ? '@' + ownH(K.tgBot) + (K.tgChat ? ' → ' + ownH(K.tgChat) : '') : '연결됨') + ' · 알림 종류는 ‘알림’에서' : '연결 안 됨 · BotFather 토큰으로 연결해요') : '불러오는 중…') + '</span></span></a>'
           + (K ? sxPill(tg ? 'ok' : 'g', tg ? '연결됨' : '미연결') : '') + (tg ? '<button class="btn sm sx-up" data-su="tgtest">테스트</button>' : '') + '<span class="sx-ch">' + IC.right + '</span></div>';
         return '<div class="sx-card sx-cols"><div>' + sxGrp('탐색기 키') + '<div class="sx-slot sx-keyslot" data-su-slot="keys">' + sxSlotWait() + '</div></div>'
           + '<div>' + sxGrp('거래소 조회 키') + exRow + ip + sxGrp('텔레그램') + tgRow + '</div></div>'
@@ -5675,7 +6136,7 @@
       subs: {
         perp: { cap: '주소만으로 포지션·거래·펀딩·청산 · 담보는 총자산에 더하지 않아요(표시 전용)', body: () => '<div class="sx-card"><div class="sx-slot sx-perpslot" data-su-slot="perp">' + sxSlotWait() + '</div></div>' },
         deposits: { cap: '온체인 전송의 목적지가 이 주소면 거래소 입금으로 봐요', body: sxDepBody },
-        rabby: { cap: 'Rabby(DeBank) 합과 봇 합 · 봇이 모르는 몫(추적 안 하는 체인·프로토콜·놓친 토큰)은 총자산에 ‘Rabby 기준’으로 · 스캠 제외 · 지갑마다 하루 1회', body: () => '<div class="sx-card">' + rabbyBody() + '</div>' },
+        rabby: { cap: 'Rabby(DeBank) 합과 봇 합 · 봇이 모르는 몫(추적 안 하는 체인·프로토콜·놓친 토큰)은 총자산에 ‘Rabby 기준’으로 · 스캠 제외 · 지갑마다 하루 1회', body: wide => rbAddedHTML(wide) + '<div class="sx-card">' + rabbyBody() + '</div>' },
         whitelist: { cap: '믿을 수 있는 발신 주소(추적 안 하는 내 지갑 등)는 스팸·에어드랍 판정에서 빠져요', body: sxWlBody },
         names: { cap: '화면에 보일 이름만 붙여요 — 추적은 하지 않아요', body: sxNamesBody },
         tokens: { cap: '심볼은 위조가 가능해 컨트랙트 주소(CA)로 매칭해요 · 읽기 전용', body: sxTokBody }
@@ -5689,7 +6150,7 @@
       subs: { history: { cap: '더 이른 날짜를 고르면 그 구간만 더 가져오고, 끝나면 원장을 자동으로 다시 계산해요', body: sxHistBody },
         limits: { cap: '과거 기록을 어디까지 주는지 · 봇이 실제로 어디부터 가져왔는지(하루 한 번 갱신)', body: () => '<div class="sx-card">' + coverageBody() + '</div>' } } },
     account: { cap: '로컬 웹 로그인(비밀번호 하나) · 켜기·끄기는 config.json web.login', body: () => '<div class="sx-card">' + loginBody() + '</div>' },
-    advanced: { cap: '파일로 내보내기 · 실험 기능 · 설정을 바꾼 뒤 적용되는 방식', body: sxAdvBody,
+    advanced: { cap: '실험 기능 · 설정을 바꾼 뒤 적용되는 방식', body: sxAdvBody,
       subs: { brokers: { cap: '보유 종목·예수금을 읽기만 · 미검증(실험 안 함) · 켜기 = 서버 config.json brokers', body: () => '<div class="sx-card">' + brokersBody() + '</div>' } } }
   };
 
@@ -5718,7 +6179,9 @@
       + sxIt('sx-wallets-wl', '발신 주소 화이트리스트', '내 다른 지갑 → 스팸 판정 제외', '<span class="sx-val num">' + (wl ? wl.length : '—') + '</span>', { href: '#settings/wallets/whitelist' })
       + sxIt('sx-wallets-names', '추적 안 하는 주소에 이름', '화면 표시용 이름만', '', { href: '#settings/wallets/names' })
       + sxIt('sx-wallets-tok', '토큰 매핑', '컨트랙트 ↔ 거래소 티커 · 읽기 전용', '<span class="sx-val num">' + D.aliases.length + '</span>', { href: '#settings/wallets/tokens' }) + '</div>';
-    return big + acts + add + listCard + mg;
+    const tierCard = '<div class="sx-card" id="sx-wallets-tier">' + sxGrp('확인 주기 · 예상 사용량', '오래 안 쓴 주소는 덜 확인해요 · 내가 보내면 바로 지금 주기') + '<div class="sx-slot sx-tierslot" data-su-slot="tier">' + sxSlotWait() + '</div></div>';
+    const chainCard = '<div class="sx-card" id="sx-wallets-chains"><div class="sx-slot sx-chainslot" data-su-slot="chains">' + sxSlotWait() + '</div></div>';
+    return big + acts + add + listCard + chainCard + tierCard + mg;
   }
   const sxWalHay = r => { const w = r.w, s = r.s, a = w ? w.addr : s && s.address; return (r.alias + ' ' + (a || '') + ' ' + (w ? w.chains : arr(s && s.chains).join(' '))).toLowerCase(); };
   const sxWalHit = (r, q) => !!q && sxWalHay(r).indexOf(String(q).toLowerCase().trim()) < 0;
@@ -5728,20 +6191,21 @@
     const isNew = nw.has(r.k) || !!(s && nw.has(s.address)) || !!(w && nw.has(w.addr));
     const recon = !!(s && arr(s.reconDone).length), open = S.set.walOpen === r.k, ed = w && S.aliasEdit === (w.key || w.addr);
     const tag = r.wait ? sxPill('g', '수집 대기') : isNew ? sxPill('w', '새로 추가') : recon ? sxPill('w', '재구축 필요') : dup[r.alias] > 1 ? sxPill('a', sol ? 'Solana' : 'EVM') : '';
-    const cap = (sol ? 'Solana' : 'EVM ' + chains.length + '체인') + ' · ' + (w ? esc(scanText(w.last)) : '웹이 다시 시작되면 수집해요');
+    const cap = (sol ? 'Solana' : 'EVM ' + chains.length + '체인') + ' · ' + (w ? esc(scanText(w.last)) : (s && s.applyWait) || ofAuto() ? '곧 자동으로 수집 시작' : '수집기를 다시 시작하면 수집해요');
     const det = !open ? '' : '<div class="sx-wd" id="sxwd' + i + '"><div class="sx-wa"><span class="mono">' + esc(addr) + '</span>' + copyBtn(addr) + '</div>'
       + '<div class="chn">' + chains.map(c => '<span class="pill g sm">' + esc(c) + '</span>').join(' ') + '</div>'
       + (recon ? '<div class="cap wtxt">기초잔고 대조 뒤 추가된 체인(' + esc(arr(s.reconDone).map(c => CHAIN_KO[c] || c).join(', ')) + ') — 백필이 끝난 뒤 재구축하면 과거 보유분까지 맞춰져요</div>' : '')
+      + '<div data-su-slot="tierw" data-w="' + esc(addr) + '"></div>'
       + '<div class="sx-acts">' + (w ? '<button class="btn sm" data-a="aliasEdit" data-k="' + esc(w.key || w.addr) + '">이름 바꾸기</button>' : '')
       + (s ? '<button class="btn sm danger" data-su="wdel" data-v="' + esc(s.address) + '">추적에서 빼기</button>' : '<span class="cap">추적에서 빼기는 연결 정보를 불러온 뒤에 할 수 있어요</span>') + '</div></div>';
     return '<div class="sx-wr' + (more ? ' more' : '') + (isNew ? ' newrow' : '') + (open ? ' open' : '') + '" data-wq="' + esc(r.k) + '"' + (sxWalHit(r, q) ? ' hidden' : '') + '>'
-      + '<div class="sx-wm"><div class="sx-wt"><b>' + (w ? aliasCell(w) : esc(r.alias || '(이름 없음)')) + '</b><span class="mono sx-wad">' + esc(short(addr)) + '</span>' + tag + '</div><div class="cap pvx">' + cap + '</div></div>'
+      + '<div class="sx-wm"><div class="sx-wt"><b>' + (w ? aliasCell(w) : r.alias ? ownH(r.alias) : '(이름 없음)') + '</b><span class="mono sx-wad">' + esc(short(addr)) + '</span>' + tag + '</div><div class="cap pvx">' + cap + '</div></div>'
       + (w && !ed ? '<button class="sx-wbtn" data-a="aliasEdit" data-k="' + esc(w.key || w.addr) + '" tabindex="-1" aria-hidden="true">이름 바꾸기</button>' : '')
-      + '<button class="sx-wx' + (open ? ' o' : '') + '" data-a="sxWal" data-v="' + esc(r.k) + '" aria-expanded="' + open + '" aria-label="' + esc((r.alias || short(addr)) + ' 자세히') + '">' + IC.chev + '</button>' + det + '</div>';
+      + '<button class="sx-wx' + (open ? ' o' : '') + '" data-a="sxWal" data-v="' + esc(r.k) + '" aria-expanded="' + open + '" data-pvl="w" aria-label="' + esc(ownNm(r.alias || short(addr)) + ' 자세히') + '">' + IC.chev + '</button>' + det + '</div>';
   }
   function sxDepBody() {
     const D = S.D;
-    return '<div class="sx-card">' + (D.deposits.length ? sFold(D.deposits.map(d => '<div class="srow">' + venueLogo(d.ex) + '<div style="min-width:0;flex:1"><b>' + esc(d.ex) + '</b> <span class="pill ' + (d.net === 'EVM' ? 'a' : 'g') + ' sm">' + esc(d.net) + '</span><div class="addr" title="' + esc(d.addr) + '">' + esc(short(d.addr)) + (d.memo && d.memo !== '—' ? ' · 메모 ' + esc(d.memo) : '') + '</div></div><span class="pill ' + (d.ok ? 'ok' : 'g') + ' sm">' + (d.ok ? '등록됨' : '미등록') + '</span>' + copyBtn(d.addr) + '</div>'), 8, '개 더 보기', 'deps')
+    return '<div class="sx-card">' + (D.deposits.length ? sFold(D.deposits.map(d => '<div class="srow">' + venueLogo(d.ex) + '<div style="min-width:0;flex:1"><b>' + esc(d.ex) + '</b> <span class="pill ' + (d.net === 'EVM' ? 'a' : 'g') + ' sm">' + esc(d.net) + '</span><div class="addr" title="' + esc(d.addr) + '">' + esc(short(d.addr)) + (d.memo && d.memo !== '—' ? ' · 메모 ' + prTxt(d.memo) : '') + '</div></div><span class="pill ' + (d.ok ? 'ok' : 'g') + ' sm">' + (d.ok ? '등록됨' : '미등록') + '</span>' + copyBtn(d.addr) + '</div>'), 8, '개 더 보기', 'deps')
       : '<div class="sx-empty">등록된 입금 주소가 없어요 · 거래소 조회 키를 넣으면 자동으로 모아요</div>') + '</div>';
   }
   function sxWlBody() {
@@ -5774,7 +6238,7 @@
       + sxIt('sx-display-scheme', '손익 색', glob ? '상승 <span style="color:var(--upc)">초록</span> · 하락 <span style="color:var(--downc)">빨강</span>' : '상승 <span style="color:var(--upc)">빨강</span> · 하락 <span style="color:var(--downc)">파랑</span>', sxSeg('scheme', [['kr', '국내식', !glob], ['global', '글로벌', glob]], '손익 색'))
       + sxIt('sx-display-hide', '금액 가리기', '밖에서 보여 줄 때 · 상단 눈 버튼 · Shift+H', sxSw('hideToggle', S.hide, '금액 가리기'))
       + sxIt('sx-display-logo', '토큰 로고', logosOff() ? '꺼짐 — 글자 아이콘만(외부 요청 없음)' : '외부(jsDelivr)에서 받음 — 끄면 로고 요청을 안 보내요', sxSw('logoToggle', !logosOff(), '토큰 로고'))
-      + sxIt('sx-display-rand', '금액 랜덤값', '예시 화면용 · 가리기와 둘 중 하나', sxSw('randToggle', S.rand, '금액 랜덤값'), { exp: () => '<div class="cap">금액·수량에 열 때마다 바뀌는 같은 배수를 곱해 실제와 다른 숫자로 보여요(합계·차트는 서로 맞고 %·단가는 그대로) · 화면에 ‘랜덤값’ 표시</div>' })
+      + sxIt('sx-display-rand', '금액 랜덤값', '예시 화면용 · 가리기와 둘 중 하나', sxSw('randToggle', S.rand, '금액 랜덤값'), { exp: () => '<div class="cap">금액·수량에 열 때마다 바뀌는 같은 배수를 곱해 실제와 다른 숫자로 보여요(합계·차트는 서로 맞고 %·단가는 그대로) · 화면에 ‘랜덤값’ 표시 · 탐색기 링크 없음</div>' + rkCtl() })
       + dust
       + (legacyOn("classic") ? '<a class="sx-it sx-lk" id="sx-display-classic" href="/classic"><span class="tx"><b>클래식 화면</b><span class="cap">이전 디자인 · 같은 데이터</span></span><span class="sx-ch">' + IC.ext + '</span></a>' : '')
       + '</div>';
@@ -5879,13 +6343,11 @@
 
   function sxAdvBody() {
     const K = sxKeys(), bl = arr(S.oa.d && S.oa.d.brokers), bOn = bl.filter(b => b.enabled).length;
-    const csv = [['csvSettings', '추적 설정'], ['csvHold', '보유자산'], ['csvJournal', '매매일지'], ['csvTax', '명세'], ['csvDaily', '일별'], ['csvPend', '미매칭']];
     oaNeed(300000);
-    return '<div class="sx-card" id="sx-adv-csv">' + sxGrp('CSV 내보내기', '지금 화면 기준 · 이 기기로 내려받기') + '<div class="chiprow sx-csv">' + csv.map(c => '<button class="fbtn" data-a="' + c[0] + '">' + IC.down + c[1] + '</button>').join('') + '</div></div>'
-      + '<div class="sx-card">' + sxGrp('그 밖')
+    return '<div class="sx-card">' + sxGrp('그 밖')
       + (legacyOn("futures") ? '<a class="sx-it sx-lk" id="sx-adv-fut" href="/futures"><span class="tx"><b>선물 페이지</b><span class="cap">거래소·퍼프 덱스 선물 손익 · 별도 화면</span></span><span class="sx-ch">' + IC.ext + '</span></a>' : '')
       + sxIt('sx-adv-brokers', '증권사 연결', (bl.length ? bl.length + '곳 · ' + (bOn ? bOn + '곳 켜짐' : '모두 꺼짐') : '읽기 전용 보유 동기화') + ' · config.json 에서 켬', sxPill('w', '실험'), { href: '#settings/advanced/brokers' })
-      + sxIt('sx-adv-apply', '설정 적용 방식', K ? (K.apply.runner ? '유닛 러너 · 바꾸면 약 30초 안에 스스로 다시 시작' : '러너 없음 · 지갑·탐색기 키를 바꾸면 재시작 1번') : '불러오는 중…',
+      + sxIt('sx-adv-apply', '설정 적용 방식', K ? (K.apply.runner ? (K.apply.mode === 'reload' ? '자동 재시작 · 지갑을 넣으면 약 30초 안에 수집기가 다시 시작 · 탐색기 키는 재시작 1번' : '유닛 러너 · 바꾸면 약 30초 안에 스스로 다시 시작') : '러너 없음 · 지갑·탐색기 키를 바꾸면 재시작 1번') : '불러오는 중…',
         K && !K.apply.runner && K.apply.manual ? '<button class="btn sm" data-su="copy" data-v="' + esc(K.apply.manual) + '">명령 복사</button>' : '',
         { exp: () => '<div class="sx-slot sx-applyslot" data-su-slot="apply">' + sxSlotWait() + '</div>' })
       + '</div>';
@@ -5958,7 +6420,7 @@
     const openIt = id => () => S.set.open.add(id);
     const xpOpen = k => () => { const u = suU(); if (u) u.xp = k; };
     const exOpen = k => () => { const u = suU(); if (u) u.ex = k; };
-    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
+    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
       .forEach(x => add('keys', '', x[1] + ' 키', x[2], '[data-su="xp"][data-v="' + x[0] + '"]', xpOpen(x[0])));
     add('keys', 'exchanges', '거래소 조회 키', '거래소 api 키 key 업비트 바이낸스 조회 전용 read only', '.sx-exslot');
     [['upbit', '업비트'], ['bithumb', '빗썸'], ['binance', '바이낸스 Binance'], ['bybit', '바이빗 Bybit'], ['okx', 'OKX'], ['kucoin', '쿠코인 KuCoin'], ['gate', '게이트 Gate']]
@@ -6006,7 +6468,6 @@
     add('data', 'limits', '수집 한계', '수집 한계 api 한도 누락 coverage', '');
     add('account', '', '로그인 · 비밀번호', '비밀번호 바꾸기 password 로그인 login', '#sx-acc-state');
     add('account', '', '로그아웃', '로그아웃 logout 모든 기기', '#sx-acc-btns');
-    add('advanced', '', 'CSV 내보내기', 'csv 내보내기 export 엑셀 다운로드 명세 세금', '#sx-adv-csv');
     if (legacyOn("futures")) add('advanced', '', '선물 페이지', '선물 futures', '#sx-adv-fut');
     add('advanced', 'brokers', '증권사 연결', '증권사 broker 주식 키움 한국투자 토스', '');
     add('advanced', '', '설정 적용 방식', '재시작 restart 적용 러너 pm2', '#sx-adv-apply');
@@ -6282,7 +6743,7 @@
     const chainH = srcs.filter(x => x.kind === 'chain').map(x => {
       const ws = arr(x.wallets);
       const rows = ws.map(w => { const st9 = COV_ST[w.status] || ['g', w.status || '—'];
-        return '<div class="kv"><span>' + esc(w.label || short(w.wallet)) + ' <span class="pill ' + st9[0] + ' sm">' + esc(st9[1]) + '</span></span><span class="num">' + esc(w.achieved_start || '—') + (w.first_record ? ' <span class="mut">· 첫 기록 ' + esc(w.first_record) + '</span>' : '') + '</span></div>'; }).join('');
+        return '<div class="kv"><span>' + ownH(w.label || short(w.wallet)) + ' <span class="pill ' + st9[0] + ' sm">' + esc(st9[1]) + '</span></span><span class="num">' + esc(w.achieved_start || '—') + (w.first_record ? ' <span class="mut">· 첫 기록 ' + esc(w.first_record) + '</span>' : '') + '</span></div>'; }).join('');
       return '<details class="covd"><summary><b>' + esc(x.label || x.chain) + '</b> <span class="cap num">가장 이른 날 ' + esc(x.earliest_retrievable || '—') + ' · 지갑 ' + ws.length + '개</span></summary>'
         + '<div class="cap" style="margin:6px 0 4px">' + esc(hs(x.reason_ko || '')) + '</div>' + rows + '</details>'; }).join('');
     const exS = srcs.filter(x => x.kind === 'exchange' && x.bot_uses !== false);
@@ -6321,6 +6782,216 @@
       + (acts ? '<details class="covd"><summary><b>이용자가 할 수 있는 일</b> <span class="cap num">' + Object.keys(act).length + '가지</span></summary>' + acts + '</details>' : '')
       + (t.updated ? '<div class="cap" style="margin-top:8px">정리 기준일 <span class="num">' + esc(t.updated) + '</span></div>' : '') + '</details>';
   }
+  function locName(s0) {
+    let t = String(s0 == null ? '' : s0);
+    if (pvOn() && typeof ownIn === 'function') t = ownIn(t);
+    if (!pvOn() || !/\d/.test(t)) return t;
+    return t.split(/(0x[0-9a-fA-F]{6,40}|[A-Za-z0-9]{3,10}…[A-Za-z0-9]{3,6}|[1-9A-HJ-NP-Za-km-z]{32,44})/).map((x, i) => (i % 2 ? x : x.replace(/\d[\d,.]*/g, () => pvW(PVM.n)))).join('');
+  }
+  function pvNameRe() {
+    if (!(S.hide || S.rand)) return null;
+    const D = S.D, su = typeof window !== 'undefined' ? window.__tjSetup : null, st = su && su.U && su.U.st, oa = S.oa && S.oa.d ? S.oa.d : null;
+    const cov9 = S.cov && S.cov.d, lkc9 = (S.of && S.of.lkc) || {};
+    const k = [D && D.walletAlias, D && D.wallets, D && D.rabby && D.rabby.wallets, st && st.wallets, st && st.perp && st.perp.wallets, D && D.of,
+      D && D.venues, D && D.rbDebts, D && D.deposits, D && D.memos, D && D.plans, D && D.dayMemos, S.dm && S.dm.local, oa, D && D.f && D.f.coins, cov9,
+      st && st.telegram, su && su.U && su.U.tg && su.U.tg.bot];
+    Object.keys(lkc9).sort().forEach(a9 => k.push(lkc9[a9] && lkc9[a9].rows));
+    const C = pvNameRe;
+    if (C.k && C.k.length === k.length && k.every((x, i) => x === C.k[i])) return C.re;
+    const forms = t => { const o = [t]; try { if (typeof hs === 'function') o.push(hs(t, 0, 1)); if (typeof revTxt === 'function') o.push(revTxt(t, 1)); } catch (e) {  } return o; };
+    const cl = x => String(x == null ? '' : x).replace(/\s+/g, ' ').trim();
+    const gen = x => /^(?:지갑|메모)(?: [A-Z]{1,3})?$/i.test(x) || (typeof ownGen === 'function' && ownGen(x));
+    if (!C.letter) { try { C.letter = new RegExp('\\p{L}', 'u'); } catch (e) { C.letter = /[A-Za-z\u00C0-\uFFFF]/; } }
+    const hasL = x => C.letter.test(x);
+    const set = new Set(), setB = new Set(), groups = [], mset = new Set(), A9 = v => (Array.isArray(v) ? v : []), adr = x => /^(?:0x[0-9a-fA-F]{6,64}|[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10})$/.test(x);
+    const base = x => typeof ownBase === 'function' && ownBase(x);
+    const add = v => { const g = []; forms(cl(v)).forEach(x => { x = cl(x); if (x && (x.length >= 2 || hasL(x)) && g.indexOf(x) < 0 && !gen(x) && !adr(x)) { g.push(x); (base(x) ? setB : set).add(x); } }); if (g.length) groups.push(g); };
+    const addM = v => { const t0 = cl(v && typeof v === 'object' ? v.memo : v); if (!t0 || t0 === '—') return;
+      [t0, t0.slice(0, 40).trim()].forEach(t1 => forms(t1).forEach(x => { x = cl(x); if (x.length >= 3 && hasL(x) && !gen(x) && !base(x)) mset.add(x); })); };
+    if (k[0] && typeof k[0] === 'object') Object.keys(k[0]).forEach(a => add(k[0][a]));
+    [k[1], k[2], k[3], k[4], k[5]].forEach((A, i) => { if (Array.isArray(A)) A.forEach(w => add(w && (i === 0 || i === 4 ? w.alias : w.label))); });
+    A9(k[6]).forEach(v => { if (v && v.kind === 'wallet' && v.name) add(String(v.name).replace(/ · 스테이킹$/, '').replace(/ ?지갑$/, '')); });
+    A9(k[7]).forEach(x => add(x && x.wallet));
+    const isEx9 = t9 => typeof EX_NAMES !== 'undefined' && Object.keys(EX_NAMES).some(e9 => EX_NAMES[e9] === t9 || e9 === String(t9).toLowerCase());
+    const addW = v => { const t9 = cl(v).replace(/ · 스테이킹$/, ''); if (t9 && !isEx9(t9)) add(t9); };
+    A9(k[5]).forEach(r => { if (!r) return; addM(r.memo);
+      A9(r.hints).forEach(h9 => { if (h9 && h9.kind === 'my_wallet') add(h9.label); });
+      A9(r.flags).forEach(f9 => { if (f9 && f9.kind === 'lookalike') add(f9.label); });
+      ['links', 'candTop', 'returned'].forEach(f9 => A9(r[f9]).forEach(x9 => addW(x9 && x9.where))); });
+    A9(cov9 && cov9.sources).forEach(s9 => A9(s9 && s9.wallets).forEach(w9 => add(w9 && w9.label)));
+    Object.keys(lkc9).forEach(a9 => A9(lkc9[a9] && lkc9[a9].rows).forEach(x9 => addW(x9 && x9.where)));
+    A9(k[8]).forEach(d => addM(d && d.memo));
+    [k[9], k[11], k[12]].forEach(O => { if (O && typeof O === 'object') Object.keys(O).forEach(q9 => addM(O[q9])); });
+    if (k[10] && typeof k[10] === 'object') Object.keys(k[10]).forEach(q9 => addM(k[10][q9] && k[10][q9].memo));
+    if (oa) A9(oa.items).forEach(o => addM(o && o.memo));
+    { const tg9 = k[16] || {}; [tg9.bot, tg9.chatName, tg9.pending && tg9.pending.bot, k[17] && k[17].username].forEach(v9 => { if (v9) add(v9); }); }
+    const lo = new Set(Array.from(set).map(x => x.toLowerCase()));
+    C.memo = new Set(Array.from(mset).map(x => x.toLowerCase()).filter(x => !lo.has(x)));
+    C.tick = new Set(A9(k[14]).filter(c => c && +c.price > 0 && c.sym).map(c => String(c.sym).toUpperCase()));
+    C.pub = new Set(); const pub9 = v => { const t9 = cl(v); if (t9) C.pub.add(t9.toUpperCase()); };
+    if (typeof CHAIN_KO !== 'undefined' && CHAIN_KO) Object.keys(CHAIN_KO).forEach(c9 => { pub9(c9); pub9(CHAIN_KO[c9]); });
+    A9(k[14]).forEach(c => A9(c && c.locs).forEach(l9 => { if (l9) { pub9(l9.ch); pub9(l9.pname); pub9(l9.iname); if (l9.pname && l9.iname) pub9(l9.pname + ' ' + l9.iname); } }));
+    A9(k[7]).forEach(d9 => { if (d9) { pub9(d9.where); pub9(d9.chain); } });
+    const reL = A => Array.from(new Set(A)).sort((a, b) => b.length - a.length).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+'));
+    const L = reL(Array.from(set).concat(Array.from(mset)));
+    const mkRe = L9 => (L9.length ? new RegExp('(^|[^\\d,.]|[,.](?!\\d))(' + L9.join('|') + ')(?!\\d|[,.]\\d)( ?지갑(?![가-힣A-Za-z0-9]))?', 'gi') : null);
+    C.k = k; C.re = mkRe(L);
+    C.reN = setB.size ? mkRe(reL(Array.from(set).concat(Array.from(setB), Array.from(mset)))) : C.re;
+    if (typeof ownSeed === 'function') ownSeed(groups);
+    return C.re;
+  }
+  function locMask(t) {
+    return String(t).split(/(0x[0-9a-fA-F]{6,40}|[A-Za-z0-9]{3,10}…[A-Za-z0-9]{3,6}|[1-9A-HJ-NP-Za-km-z]{32,44})/).map((x, i) => (i % 2 ? x : x.replace(/\d[\d,.]*/g, () => pvW(PVM.n)))).join('');
+  }
+  function nmKey(s0) { let h = 5381; const t = String(s0 == null ? '' : s0); for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0; return 'n' + h.toString(36) + '_' + t.length; }
+  function locH(s0) { return '<span class="pvl">' + esc(locNameM(s0)) + '</span>'; }
+  const locNameM = t => String(t == null ? '' : t).split(MK_RE).map((x, i) => (i % 2 ? x : locName(x))).join('');
+  const OWN_MEMO = '메모';
+  const ownNorm = t => String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+  const ownKey = t => ownNorm(t).replace(/ ?지갑$/, '').toLowerCase() || ownNorm(t).toLowerCase();
+  const ownGen = t => { const n = ownNorm(t); return /^(?:지갑|메모)(?: [A-Z]{1,3})?$/i.test(n) || /^(?:지갑|메모)(?: [A-Z]{1,3})?$/i.test(n.replace(/ ?지갑$/, '')); };
+  const ownBase = t => { const n = ownNorm(t); return /^(?:지갑|wallet|월렛|account|계정)\s?#?\s?\d{1,3}(?:\s?번)?$/i.test(n) || /^\d{1,3}\s?(?:번\s?)?(?:지갑|wallet|월렛)$/i.test(n); };
+  const ownAddr = t => /^(?:0x[0-9a-fA-F]{6,64}|[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(t);
+  function ownLet(i) { let o = ''; for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) o = String.fromCharCode(65 + (n - 1) % 26) + o; return o; }
+  function ownSt() { const C = ownTok; if (!C.map) { C.map = new Map(); C.out = new Set(); C.n = 0; } return C; }
+  function ownNew() {
+    const C = ownSt(), R = pvNameRe, re = R.reN || R.re;
+    for (let g = 0; g < 2000; g++) {
+      const v = '지갑 ' + ownLet(C.n++);
+      if (re) { re.lastIndex = 0; let hit = false; v.replace(re, (a, pre, nm, suf, off, all) => { if (ownEdge(nm, pre, all.slice(off + pre.length + nm.length))) hit = true; return a; }); re.lastIndex = 0; if (hit) continue; }
+      C.out.add(v); return v;
+    }
+    const v = '지갑 ' + ownLet(C.n++); C.out.add(v); return v;
+  }
+  function ownSeed(groups) {
+    const C = ownSt();
+    (groups || []).map(g => g.map(ownNorm).filter(x => x && !ownGen(x))).filter(g => g.length).sort((a, b) => (nmKey(a[0]) < nmKey(b[0]) ? -1 : nmKey(a[0]) > nmKey(b[0]) ? 1 : 0)).forEach(g => {
+      const hit = g.map(x => C.map.get(ownKey(x))).find(Boolean), v = hit || ownNew();
+      g.forEach(x => { const k9 = ownKey(x); if (!C.map.has(k9) && !C.out.has(ownNorm(x))) C.map.set(k9, v); });
+    });
+  }
+  function ownTok(t0) {
+    const C = ownSt(), t = ownNorm(t0);
+    if (!t || C.out.has(t) || ownGen(t)) return t;
+    const k9 = ownKey(t);
+    if (!C.map.has(k9) && typeof pvNameRe === 'function') pvNameRe();
+    let v = C.map.get(k9);
+    if (!v && ownAddr(t)) return t;
+    if (!v) { v = ownNew(); C.map.set(k9, v); }
+    return v;
+  }
+  const ownEdge = (nm, pre, nx) => /\d/.test(nm) || (!/[A-Za-z0-9가-힣]$/.test(String(pre || '')) && !(nm.length === 1 ? /^[A-Za-z0-9가-힣]/ : /^[A-Za-z0-9]/).test(String(nx || '')));
+  const ownCommon = t => { const R = pvNameRe, u = ownNorm(t).toUpperCase(); return !!(R.tick && R.tick.has(u)) || !!(R.pub && R.pub.has(u)) || (typeof EX_NAMES !== 'undefined' && Object.keys(EX_NAMES).some(k => EX_NAMES[k] === t || k === String(t).toLowerCase())); };
+  function ownProt(x) {
+    const C = ownProt; if (!C.re) C.re = new RegExp('0x[0-9a-fA-F]{6,64}|[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10}|\\b[1-9A-HJ-NP-Za-km-z]{32,44}\\b' + (typeof PV_PROT !== 'undefined' ? '|' + PV_PROT.source : ''), 'g');
+    const R9 = []; C.re.lastIndex = 0; let m9; while ((m9 = C.re.exec(x))) { R9.push([m9.index, m9.index + m9[0].length]); if (!m9[0].length) C.re.lastIndex++; }
+    return R9;
+  }
+  function ownRep(x, re, T9, names) {
+    const R = pvNameRe, P9 = /\d/.test(x) || /…/.test(x) ? ownProt(x) : [];
+    const inside = (L9, a9, b9) => L9.some(r9 => a9 >= r9[0] && b9 <= r9[1]);
+    return x.replace(re, (a, pre, nm, suf, off, all) => {
+      const st9 = off + pre.length, en9 = st9 + nm.length;
+      if (inside(T9 || [], st9, en9) || P9.some(r9 => st9 >= r9[0] && en9 <= r9[1] && r9[1] - r9[0] > en9 - st9)) return a;
+      if (!ownEdge(nm, pre, all.slice(off + pre.length + nm.length))) return a;
+      if (!suf && typeof ownBase === 'function' && ownBase(nm) && /^\s?(?:개(?!월)|곳|건|군데|종(?![가료목합]))/.test(all.slice(off + a.length))) return a;
+      const lo = ownNorm(nm).toLowerCase();
+      if (!names && ownCommon(nm)) return a;
+      if (R.memo && R.memo.has(lo)) return pre + OWN_MEMO + (suf || '');
+      return pre + ownTok(nm);
+    });
+  }
+  function ownScrub(t, names) {
+    const s = String(t == null ? '' : t);
+    if (!s || !(S.hide || S.rand)) return s;
+    const re0 = typeof pvNameRe === 'function' ? pvNameRe() : null, C = ownSt(), n = ownNorm(s);
+    const re = names && pvNameRe.reN !== undefined ? pvNameRe.reN : re0, strict = names === true;
+    if (n && !C.out.has(n)) {
+      const R = pvNameRe, lo = n.toLowerCase(), nk = C.map.get(ownKey(n));
+      const whole = nk || (R.memo && R.memo.has(lo) ? OWN_MEMO : '');
+      const pubW = () => !strict && typeof ownCommon === 'function' && ownCommon(n);
+      if (whole && !pubW()) return s.replace(/^(\s*)[^]*?(\s*)$/, (a, l, r) => l + whole + r);
+    }
+    if (!re) return s;
+    const T9 = [], tr = /지갑 [A-Z]{1,3}(?![A-Za-z0-9])/g; let m9;
+    while ((m9 = tr.exec(s))) if (C.out.has(m9[0])) T9.push([m9.index, m9.index + m9[0].length]);
+    return ownRep(s, re, T9, strict).replace(/(지갑 [A-Z]{1,3}) ?지갑(?![가-힣A-Za-z0-9])/g, '$1');
+  }
+  const ownScrubM = (t, names) => String(t == null ? '' : t).split(MK_RE).map((x, i) => (i % 2 ? x : ownScrub(x, names))).join('');
+  function ownIn(t) {
+    const re = typeof pvNameRe === 'function' ? pvNameRe() : null, C = ownSt(), n = ownNorm(t);
+    if (!n || C.out.has(n)) return t;
+    const whole = C.map.get(ownKey(n));
+    if (whole) return whole;
+    if (re && pvNameRe.memo && pvNameRe.memo.has(n.toLowerCase())) return OWN_MEMO;
+    return re || pvNameRe.reN ? ownScrub(t, 'in') : t;
+  }
+  function ownNm(s0, kind) {
+    const t = String(s0 == null ? '' : s0);
+    if (!pvOn() || !t.trim()) return t;
+    if (kind === 'm') return OWN_MEMO;
+    const R = typeof pvNameRe === 'function' ? (pvNameRe(), pvNameRe) : null, C = ownSt(), n = ownNorm(t);
+    if (R && R.memo && R.memo.has(n.toLowerCase()) && !C.map.has(ownKey(n))) return OWN_MEMO;
+    const stk9 = n.match(/^(.+) · 스테이킹$/);
+    if (stk9 && !C.map.has(ownKey(n))) return ownNm(stk9[1], kind) + ' · 스테이킹';
+    return ownTok(t);
+  }
+  const ownH = (s0, kind) => '<span class="pvl" data-pk="' + (kind === 'm' ? 'm' : 'w') + '">' + esc(ownNm(s0, kind)) + '</span>';
+  const ownSeg = (x, pk) => String(x).replace(/^(\s*)([^]*?)(\s*)$/, (a, l, c, r) => l + (c ? (pk ? ownNm(c, pk) : locName(c)) : '') + r);
+  const NET_W = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function netOk(key, sub, v, w) {
+    if (!NET_W || !key || typeof key !== 'object') return true;
+    const m9 = NET_W.get(key) || {}, r9 = m9[sub], re9 = !!(r9 && r9.outs.has(v)), n9 = re9 ? r9.n : 0;
+    if (n9 >= 8) return false;
+    m9[sub] = { outs: re9 ? r9.outs.add(w) : new Set([w]), n: n9 + 1 }; NET_W.set(key, m9);
+    return true;
+  }
+  const OWN_ATTRS = ['title', 'aria-label', 'placeholder', 'data-l'];
+  const OWN_AC = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function ownAttrs(el) {
+    if (!(S.hide || S.rand) || !el || !el.getAttribute) return;
+    for (const a of OWN_ATTRS) {
+      const v = el.getAttribute(a); if (!v) continue;
+      const w = ownScrubM(v, el.getAttribute('data-pvl') === 'w'); if (w === v) continue;
+      if (!netOk(el, a, v, w)) continue;
+      el.setAttribute(a, w);
+    }
+  }
+  function rbAddedHTML(wide) {
+    const D = S.D; if (!D || !D.f) return '';
+    const rows = [];
+    let at = 0;
+    arr(D.f.coins).forEach(c => {
+      if (!c || !c.rabby || typeof c.rabby !== 'object') return;
+      const px9 = num(c.price);
+      if (num(c.rabby.at) > 0) at = at ? Math.min(at, num(c.rabby.at)) : num(c.rabby.at);
+      arr(c.locs).forEach(l => {
+        const q9 = num(l.qty), parts = String(l.sub || '').split(' · ');
+        const pn = l.pname != null ? (String(l.pname || '') + (l.iname ? ' ' + l.iname : '')).trim() : (parts.length >= 4 ? parts[1].replace(/ #\d+$/, '') : '');
+        const kd = l.rbKind != null ? String(l.rbKind || '') : (/봇 미추적 토큰/.test(String(l.sub || '')) ? '미추적 토큰' : pn ? '예치' : '');
+        const w9 = String(l.w || ''), w0 = w9.replace(/ 지갑$/, '');
+        rows.push({ ch: String(l.ch || ''), pn, kd: kd || '지갑 보유', sym: String(c.sym || ''), qty: q9, usd: l.usd != null ? num(l.usd) : q9 * px9, w: w0.indexOf('지갑') >= 0 ? w0 : w9 });
+      });
+    });
+    arr(D.rbDebts).forEach(x => { if (num(x.at) > 0) at = at ? Math.min(at, num(x.at)) : num(x.at);
+      rows.push({ ch: String(x.chain || ''), pn: String(x.where || ''), kd: '차입', sym: String(x.sym || ''), qty: -Math.abs(num(x.qty)), usd: -Math.abs(num(x.usd)), w: String(x.wallet || ''), debt: true }); });
+    if (!rows.length) return '';
+    rows.sort((a, b) => Math.abs(b.usd) - Math.abs(a.usd));
+    const tot = sum(rows, r => r.usd), dTot = sum(rows.filter(r => r.debt), r => r.usd);
+    const kdP = r => '<span class="pill ' + (r.debt ? 'down' : 'g') + ' sm pvx">' + esc(r.kd) + '</span>';
+    const pnSafe = t => !/\d{4,}|\d[,.]\d/.test(t);
+    const pnS = r => r.pn ? (pnSafe(r.pn) ? '<span class="pvx">' + esc(r.pn) + '</span>' : locH(r.pn)) : '';
+    const head = '<div class="sx-rbh"><b>Rabby로 더한 자산</b> <span class="cap pvx">' + rows.length + '건</span></div>'
+      + '<div class="cap sx-rbn">봇이 직접 못 읽는 프로토콜 안 자산이라 Rabby(DeBank) 값으로 총자산에 더해요' + (at ? ' · 마지막 갱신 ' + esc(ago(at)) : '') + '</div>';
+    const body = wide
+      ? '<div class="sx-rbw"><table class="mini-t sx-rbt"><thead><tr><th>체인</th><th>프로토콜 · 성격</th><th>토큰</th><th class="r">수량</th><th class="r">금액</th><th>지갑</th></tr></thead><tbody>'
+        + rows.map(r => '<tr><td' + (pnSafe(r.ch) ? ' class="pvx">' + esc(r.ch) : '>' + locH(r.ch)) + '</td><td>' + (r.pn ? pnS(r) + ' ' : '') + kdP(r) + '</td><td><b>' + esc(r.sym) + '</b></td><td class="r num">' + q(r.qty) + '</td><td class="r num ' + (r.debt ? 'down' : '') + '">' + m(r.usd, { sign: r.debt }) + '</td><td class="cap">' + ownH(r.w) + '</td></tr>').join('')
+        + '</tbody><tfoot><tr><td colspan="4"><b>합계</b>' + (dTot ? ' <span class="cap">(차입 ' + m(dTot, { sign: true }) + ' 포함)</span>' : '') + '</td><td class="r num"><b>' + m(tot) + '</b></td><td></td></tr></tfoot></table></div>'
+      : '<div class="sx-rbl">' + rows.map(r => '<div class="sx-rbr"><div class="l1"><b>' + esc(r.sym) + '</b>' + (r.pn ? '<span class="pn' + (pnSafe(r.pn) ? ' pvx">' + esc(r.pn) : ' pvl">' + esc(locName(r.pn))) + '</span>' : '') + kdP(r) + '<span class="sp"></span><b class="num ' + (r.debt ? 'down' : '') + '">' + m(r.usd, { sign: r.debt }) + '</b></div>'
+        + '<div class="cap"><span' + (pnSafe(r.ch) ? ' class="pvx">' + esc(r.ch) : ' class="pvl">' + esc(locName(r.ch))) + ' · </span>' + ownH(r.w) + ' · <span class="num">' + q(r.qty) + '</span></div></div>').join('')
+        + '<div class="sx-rbr tot"><div class="l1"><b>합계</b>' + (dTot ? '<span class="cap">차입 ' + m(dTot, { sign: true }) + ' 포함</span>' : '') + '<span class="sp"></span><b class="num">' + m(tot) + '</b></div></div></div>';
+    return '<div class="sx-card sx-rbadd" id="sx-rbadd">' + head + body + '</div>';
+  }
   const RB_STALE_H = 30;
   function rabbyBody() {
     const rb = S.D.rabby;
@@ -6335,7 +7006,7 @@
       const old = stale && (over || botOver || gap > lim);
       const miss = arr(w.top).slice(0, 3).map(x => esc(x.sym) + ' ' + esc(x.chain) + ' ' + m(num(x.usd), { compact: true })).join(', ');
       const gapTxt = over || gap > lim ? 'Rabby 쪽이 ' + m(gap, { compact: true }) + ' 많음' : botOver ? '봇 쪽이 ' + m(-gap, { compact: true }) + ' 많음' : '차이 ' + m(gap, { sign: true, compact: true });
-      return '<div class="srow"><span class="dot' + (over ? ' w' : botOver ? ' i' : '') + '"></span><div style="min-width:0;flex:1"><b>' + esc(w.label || short(w.addr)) + '</b> <span class="addr" title="' + esc(w.addr) + '">' + esc(short(w.addr)) + '</span>'
+      return '<div class="srow"><span class="dot' + (over ? ' w' : botOver ? ' i' : '') + '"></span><div style="min-width:0;flex:1"><b>' + ownH(w.label || short(w.addr)) + '</b> <span class="addr" title="' + esc(w.addr) + '">' + esc(short(w.addr)) + '</span>'
         + (old ? ' <span class="pill w sm" title="Rabby 자료가 ' + RB_STALE_H + '시간 넘게 새로 안 왔어요 — 그 뒤 들어오거나 나간 돈은 대조에 안 보여요">대조 자료 낡음</span>' : '')
         + '<div class="cap num">봇 ' + m(B, { compact: true }) + ' · Rabby ' + m(Rb, { compact: true }) + ' · ' + gapTxt
         + (miss ? ' <span class="mut">(빠진 것: ' + miss + ')</span>' : '') + '</div>'
@@ -6348,15 +7019,23 @@
   function aliasCell(w) {
     const k = w.key || w.addr || '';
     if (S.aliasEdit === k) return '<input class="field" style="height:34px;width:100%" data-alias="' + esc(k) + '" data-cur="' + esc(w.alias) + '" value="' + esc(w.alias) + '" aria-label="표시 이름" autofocus>';
-    return '<span class="editable" role="button" tabindex="0" data-a="aliasEdit" data-k="' + esc(k) + '" title="눌러서 이름 바꾸기">' + esc(w.alias || '(이름 없음)') + '</span>';
+    return '<span class="editable pvl"' + (w.alias ? ' data-pk="w"' : '') + ' role="button" tabindex="0" data-a="aliasEdit" data-k="' + esc(k) + '" title="눌러서 이름 바꾸기">' + esc(w.alias ? ownNm(w.alias) : '(이름 없음)') + '</span>';
   }
   function newWallets() { try { const v = JSON.parse(sessionStorage.getItem('tj_new_wallets') || 'null'); if (v && Array.isArray(v.keys) && Date.now() - v.ts < 7200000) return new Set(v.keys); } catch (e) {  } return new Set(); }
   function unmarkNewWallet(k) { try { const v = JSON.parse(sessionStorage.getItem('tj_new_wallets') || 'null'); if (v && Array.isArray(v.keys) && v.keys.indexOf(k) >= 0) { v.keys = v.keys.filter(x => x !== k); sessionStorage.setItem('tj_new_wallets', JSON.stringify(v)); } } catch (e) {  } }
 
+  let ovIme = null, ovIdle = false;
+  document.addEventListener('compositionstart', ev => { const o = $('#overlay'); ovIme = o && ev.target && o.contains(ev.target) ? ev.target : null; }, true);
+  document.addEventListener('compositionend', () => { if (!ovIme) return; ovIme = null; if (ovIdle) { ovIdle = false; renderOverlay(); } }, true);
   function renderOverlay() {
+    { const o = $('#overlay'), a = document.activeElement;
+      if (ovIme && a === ovIme && a.isConnected && o && o.contains(a) && o.getAttribute('data-k') === (S.drawer || '') + '|' + (S.modal ? 'm' : '') + '|' + (S.sheet ? 's:' + S.sheet.k + ':' + S.sheet.v : '')) { ovIdle = true; return; }
+      ovIdle = false; }
     let h = '';
     if (S.drawer === 'fut' && S.D) h += futDrawer();
     if (S.drawer === 'rcpt' && S.D) h += rcptDrawer();
+    if (S.drawer === 'lev' && S.D) h += levDrawer();
+    if (S.drawer === 'venue' && S.D) h += venueDrawer();
     if (S.sheet && S.D) h += uiSheetHTML();
     if (S.modal) {
       const md = S.modal;
@@ -6381,6 +7060,7 @@
     if (fa && had === key) { const fs = [...ov.querySelectorAll(ae.tagName.toLowerCase() + '[data-a="' + fa + '"]')], same = x => x.getAttribute('data-k') === fk, f = fk != null ? fs.find(x => same(x) && (fv == null || x.getAttribute('data-v') === fv)) : (fv != null && fs.find(x => x.getAttribute('data-v') === fv)) || fs[0]; if (f) f.focus(); }
     hydrateLogos();
     { const on = !!h; ['header.top', '#mtop', '#banners', '#view', '#tabbar', '#bf'].forEach(sel => { const x = $(sel); if (x && x.inert !== on) x.inert = on; }); }
+    document.documentElement.classList.toggle('ov-lock', !!h);
     { const on = !!S.modal; ov.querySelectorAll('.usheet,.usheet-bg,.drawer,.drawer-bg').forEach(x => { if (x.inert !== on) x.inert = on; }); }
     const ok = $('#overlay [data-a="modalOk"]') || $('#overlay [data-a="modalCancel"]');
     if (S.modal && ok && !S.modal._focused) { S.modal._focused = true; ok.focus(); }
@@ -6433,12 +7113,13 @@
     const tiles = ps.length ? '<div class="futtiles"><div><div class="l">포지션 규모</div><div class="v num">' + (f.ts ? m(num(f.notional), { compact: true }) : '—') + '</div></div><div><div class="l">롱 / 숏</div><div class="v num" style="font-size:14px">' + m(num(f.longNotional), { compact: true }) + ' / ' + m(num(f.shortNotional), { compact: true }) + '</div></div><div><div class="l">미실현</div><div class="v num ' + cls(num(f.upnl)) + '">' + (f.ts ? m(num(f.upnl), { sign: true, compact: true }) : '—') + '</div></div></div>'
       : '<div class="futnone">' + IC.info.replace('<svg', '<svg width="18" height="18"') + '<span>오픈 포지션 없음 · 누적 순손익 <b class="num ' + cls(net) + '">' + m(net, { sign: true }) + '</b></span></div>';
     const hasDex = Object.keys(f.venues || {}).length > 0;
+    const bReal = num(b.realized != null ? b.realized : f.realizedTotal);
     const brk = '<div class="blk" style="margin-top:14px"><div class="ttl">누적 정산 (' + (hasDex ? '거래소·덱스' : '거래소') + ' 합산)</div>'
-      + '<div class="kv"><span>실현</span><b class="num ' + cls(num(b.realized)) + '">' + m(num(b.realized), { sign: true }) + '</b></div>'
+      + '<div class="kv"><span>실현</span><b class="num ' + cls(bReal) + '">' + m(bReal, { sign: true }) + '</b></div>'
       + (Math.abs(num(b.funding)) >= 0.005 ? '<div class="kv"><span>펀딩</span><b class="num ' + cls(num(b.funding)) + '">' + m(num(b.funding), { sign: true }) + '</b></div>' : '')
       + (Math.abs(num(b.fee)) >= 0.005 ? '<div class="kv"><span>수수료</span><b class="num ' + cls(num(b.fee)) + '">' + m(num(b.fee), { sign: true }) + '</b></div>' : '')
-      + '<div class="kv"><span>순손익</span><b class="num ' + cls(num(b.net)) + '">' + m(num(b.net), { sign: true }) + '</b></div>'
-      + (futFxNote(b.net) ? '<div class="cap" style="margin:-2px 0 6px">' + esc(futFxNote(b.net)) + '</div>' : '')
+      + '<div class="kv"><span>순손익</span><b class="num ' + cls(net) + '">' + m(net, { sign: true }) + '</b></div>'
+      + (futFxNote(net) ? '<div class="cap" style="margin:-2px 0 6px">' + esc(futFxNote(net)) + '</div>' : '')
       + (b.winRate != null ? '<div class="kv"><span>승률</span><b class="num">' + num(b.winRate).toFixed(1) + '% · ' + (num(b.wins) + num(b.losses)) + '건 중 ' + num(b.wins) + '승</b></div>' : '')
       + Object.keys(mm).filter(x => num((mm[x] || {}).maint) > 0).map(x => '<div class="kv"><span>' + esc(EX_NAMES[x] || x) + ' 유지증거금률</span><b class="num">' + num(mm[x].ratio).toFixed(2) + '%</b></div>').join('')
       + (arr(f.staleExchanges).length ? '<div class="fbnote">수집 지연 · 합산에서 제외: ' + esc(arr(f.staleExchanges).map(x => EX_NAMES[x] || x).join(', ')) + '</div>' : '') + '</div>';
@@ -6532,13 +7213,29 @@
   function rcLoad(force) {
     const R = S.rcpt; if (!R || !S.D) return;
     const k = rcK(R), C = S.rcptX || (S.rcptX = {}), c = C[k];
-    if (!force && c && (c.st === 'load' || c.st === 'prep' || c.st === 'old' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') { rcEvalLoad(R); if (c.d && c.d.buySide) rcbLoad(); } return; }
+    if (!force && c && (c.st === 'load' || c.st === 'prep' || c.st === 'old' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') { rcEvalLoad(R); if (c.d && c.d.buySide) rcbLoad(); rcPrefetch(R); } return; }
     const gen = (S.rcGen = (S.rcGen || 0) + 1);
     C[k] = { st: 'load', gen, at: S.D.builtAt, n: 0, d: c && c.d };
     rcFetch(R, k, Object.assign({}, rcV(R)), gen, 0);
   }
+  function rcPrefetch(R) {
+    if (!R || !rcOn(R) || R.preOff || !S.D) return;
+    const v = rcV(R); if (v.iv !== '5m' || v.after !== '1h') return;
+    const X = S.rcptX || (S.rcptX = {}), Bc = S.rcptB || (S.rcptB = {}), x = X[rcK(R)] || {}, b = Bc[rcBK(R)] || {};
+    if (x.st !== 'ok' || !x.d || (x.d.buySide && b.st !== 'ok' && b.st !== 'err' && b.st !== 'old')) return;
+    const P = S.rcPre, pc = P && (P.side === 'buy' ? Bc : X)[P.k];
+    if (pc && pc.gen === P.gen && (pc.st === 'load' || pc.st === 'prep')) return;
+    const cands = [];
+    arr(x.d.venues).slice(0, 3).forEach((o, i) => { const vv = i ? String((o && o.key) || '') : ''; const k = R.key + '|5m|1h|' + vv; if (vv !== v.venue && (!i || vv) && !X[k]) cands.push({ side: 'sell', k, cv: { iv: '5m', after: '1h', venue: vv, bvenue: '' } }); });
+    if (b.st === 'ok' && b.d) arr(b.d.venues).slice(0, 3).forEach((o, i) => { const bv = i ? String((o && o.key) || '') : ''; const k = R.key + '|5m|' + v.venue + '|' + bv; if (bv !== (v.bvenue || '') && (!i || bv) && !Bc[k]) cands.push({ side: 'buy', k, cv: { iv: '5m', after: '1h', venue: v.venue, bvenue: bv } }); });
+    const c = cands[0]; if (!c) return;
+    const buy = c.side === 'buy', C = buy ? Bc : X, gen = buy ? (S.rcbGen = (S.rcbGen || 0) + 1) : (S.rcGen = (S.rcGen || 0) + 1);
+    C[c.k] = { st: 'load', gen, at: S.D.builtAt, n: 0, pre: true };
+    S.rcPre = { side: c.side, k: c.k, gen };
+    (buy ? rcbFetch : rcFetch)(R, c.k, c.cv, gen, 0);
+  }
   function rcFetch(R, k, v, gen, n) {
-    const C = S.rcptX, live = () => !!C[k] && C[k].gen === gen;
+    const C = S.rcptX, live = () => !!C[k] && C[k].gen === gen, pre = !!(C[k] && C[k].pre);
     const url = '/api/receipt_chart?date=' + R.iso + '&sym=' + encodeURIComponent(R.csym || R.sym) + '&iv=' + v.iv + '&after=' + v.after + (v.venue ? '&venue=' + encodeURIComponent(v.venue) : '');
     fetch(url, { cache: 'no-store' })
       .then(r => {
@@ -6553,6 +7250,7 @@
       .then(x => {
         if (!live()) return;
         if (x.prep) {
+          if (pre && x.prep.status === 'busy' && !(S.rcpt && rcK(S.rcpt) === k)) { delete C[k]; R.preOff = true; return; }
           if (n + 1 >= RC_TRIES) { C[k] = { st: 'err', gen, at: 0, msg: '시세를 1분 넘게 받는 중이에요 — 잠시 뒤 다시 눌러 주세요', d: C[k].d }; return; }
           C[k] = Object.assign({}, C[k], { st: 'prep', n: n + 1, busy: x.prep.status === 'busy', idx: !!x.idx });
           const wait = Math.min(10, Math.max(1, num(x.prep.retryAfter) || 3)) * 1000;
@@ -6568,25 +7266,27 @@
         if (rcOn(R)) {
           if (x.d.sym) Rn.csym = x.d.sym;
           if (x.d.evalFp) (S.rcFp || (S.rcFp = {}))[x.d.evalFp] = { iv: x.d.iv, after: x.d.after, venue: x.d.venue };
-          Rn.lastK = k;
-          rcEvalLoad(Rn);
-          rcAuto(Rn);
-          if (x.d.buySide) rcbLoad();
+          if (rcK(Rn) === k) {
+            Rn.lastK = k;
+            rcEvalLoad(Rn);
+            rcAuto(Rn);
+            if (x.d.buySide) rcbLoad();
+          }
         }
       })
       .catch(e => { if (live()) C[k] = { st: e && e.old ? 'old' : 'err', gen, at: 0, msg: e && e.old ? '' : String((e && e.message) || e), d: C[k].d }; })
-      .then(() => { if (S.drawer === 'rcpt' && S.rcpt && rcK(S.rcpt) === k) renderOverlay(); });
+      .then(() => { if (S.drawer === 'rcpt' && S.rcpt && rcK(S.rcpt) === k) renderOverlay(); if (pre || (S.rcpt && rcK(S.rcpt) === k)) rcPrefetch(S.rcpt); });
   }
   function rcbLoad(force) {
     const R = S.rcpt; if (!R || !S.D) return;
     const k = rcBK(R), C = S.rcptB || (S.rcptB = {}), c = C[k];
-    if (!force && c && (c.st === 'load' || c.st === 'prep' || c.st === 'old' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') rcEvalLoad(R, false, 'buy'); return; }
+    if (!force && c && (c.st === 'load' || c.st === 'prep' || c.st === 'old' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') { rcEvalLoad(R, false, 'buy'); rcPrefetch(R); } return; }
     const gen = (S.rcbGen = (S.rcbGen || 0) + 1);
     C[k] = { st: 'load', gen, at: S.D.builtAt, n: 0, d: c && c.d };
     rcbFetch(R, k, Object.assign({}, rcV(R)), gen, 0);
   }
   function rcbFetch(R, k, v, gen, n) {
-    const C = S.rcptB, live = () => !!C[k] && C[k].gen === gen;
+    const C = S.rcptB, live = () => !!C[k] && C[k].gen === gen, pre = !!(C[k] && C[k].pre);
     const url = '/api/receipt_chart?side=buy&date=' + R.iso + '&sym=' + encodeURIComponent(R.csym || R.sym) + '&iv=' + v.iv + (v.venue ? '&venue=' + encodeURIComponent(v.venue) : '') + (v.bvenue ? '&bvenue=' + encodeURIComponent(v.bvenue) : '');
     fetch(url, { cache: 'no-store' })
       .then(r => {
@@ -6602,6 +7302,7 @@
       .then(x => {
         if (!live()) return;
         if (x.prep) {
+          if (pre && x.prep.status === 'busy' && !(S.rcpt && rcBK(S.rcpt) === k)) { delete C[k]; R.preOff = true; return; }
           if (n + 1 >= RC_TRIES) { C[k] = { st: 'err', gen, at: 0, msg: '매수 쪽 시세를 1분 넘게 받는 중이에요', d: C[k].d }; return; }
           C[k] = Object.assign({}, C[k], { st: 'prep', n: n + 1 });
           setTimeout(() => {
@@ -6614,13 +7315,15 @@
         C[k] = { st: 'ok', gen, at: C[k].at, d: x.d };
         if (rcOn(R)) {
           if (x.d.evalFp) (S.rcFpB || (S.rcFpB = {}))[x.d.evalFp] = { iv: x.d.iv };
-          S.rcpt.lastBK = k;
-          rcEvalLoad(S.rcpt, false, 'buy');
-          rcAuto(S.rcpt, 'buy');
+          if (rcBK(S.rcpt) === k) {
+            S.rcpt.lastBK = k;
+            rcEvalLoad(S.rcpt, false, 'buy');
+            rcAuto(S.rcpt, 'buy');
+          }
         }
       })
       .catch(e => { if (live()) C[k] = { st: e && e.old ? 'old' : 'err', gen, at: 0, msg: e && e.old ? '' : String((e && e.message) || e), d: C[k].d }; })
-      .then(() => { if (S.drawer === 'rcpt' && S.rcpt && rcBK(S.rcpt) === k) renderOverlay(); });
+      .then(() => { if (S.drawer === 'rcpt' && S.rcpt && rcBK(S.rcpt) === k) renderOverlay(); if (pre || (S.rcpt && rcBK(S.rcpt) === k)) rcPrefetch(S.rcpt); });
   }
   function rcEvalLoad(R, force, side) {
     const k = rcSK(R, side), E = S.rcptE || (S.rcptE = {}), e = E[k];
@@ -6721,35 +7424,58 @@
   }
   const rkHiSvg = (c, hx, hy, full) => '<g class="him">' + (c ? '<rect x="' + c.x.toFixed(1) + '" y="' + c.y.toFixed(1) + '" width="' + c.w.toFixed(1) + '" height="19" rx="6"/><text x="' + (c.x + 7).toFixed(1) + '" y="' + (c.y + 13.5).toFixed(1) + '">' + esc(c.lab) + '</text>' : '')
     + '<circle cx="' + hx.toFixed(1) + '" cy="' + hy.toFixed(1) + '" r="2.6">' + (c && c.lab === full ? '' : '<title>' + esc(full) + '</title>') + '</circle></g>';
+  function rkWhat(R, side) {
+    const v = rcV(R), buy = side === 'buy', c0 = ((buy ? S.rcptB : S.rcptX) || {})[buy ? R.lastBK : R.lastK], vs = c0 && c0.d ? arr(c0.d.venues) : [];
+    const cur = buy ? v.bvenue : v.venue, o = vs.find(z => z && z.key === cur) || (!cur && vs[0]) || null;
+    return (buy ? '매수 ' : '') + (o && o.label ? o.label + ' ' : '') + (RC_IVK[v.iv] || '') + (!buy && v.after !== '1h' ? ' · 판 뒤 ' + (RC_AFK[v.after] || '') : '');
+  }
+  const rkRe = t => '<div class="rkre" aria-hidden="true"><i class="spin"></i>' + t + '</div>';
+  function rkSkel(R, msg) {
+    const v = rcV(R), X = (S.rcptX || {})[R.lastK] || {}, Bq = (S.rcptB || {})[R.lastBK] || {};
+    const xs = X.d ? arr(X.d.venues) : [], bs = Bq.d ? arr(Bq.d.venues) : [], combo = !!(X.d && X.d.buySide);
+    const segB = (a, list, cur0, lab) => '<div class="seg rkseg" role="group" aria-label="' + lab + '">' + list.map(o => '<button data-a="' + a + '" data-v="' + o[0] + '" class="' + (cur0 === o[0] ? 'on' : '') + '" aria-pressed="' + (cur0 === o[0]) + '">' + (a === 'rcAfter' && !S.mobile && o[0] === '1h' ? '판 뒤 ' : '') + o[1] + '</button>').join('') + '</div>';
+    const chips = (list, cur0, act, lab) => list.length > 1 ? '<div class="rkvn" role="group" aria-label="' + lab + '"><span class="cap rkvl">' + lab.split(' —')[0] + '</span>' + list.map(o => { const on = o.key === (cur0 || list[0].key); return '<button class="chip' + (on ? ' on' : '') + '" data-a="' + act + '" data-v="' + esc(o.key) + '" aria-pressed="' + on + '">' + esc(o.label) + ' <span class="mut num">' + (o.sharePct != null ? nf('ko-KR', 0, 0).format(num(o.sharePct)) + '% · ' : '') + num(o.n) + '회</span></button>'; }).join('') + '</div>' : '';
+    const H = 30 + (S.mobile ? 210 : 270) + 8 + (S.mobile ? 40 : 52) + 22;
+    const head = '<div class="row rtth rkh"><span class="rtt">실제 시세 위 내 ' + (combo ? '매수·매도' : '매도') + ' — 점 크기 = 금액</span><span class="sp"></span>' + segB('rcIv', RC_IVS, v.iv, '봉 간격') + segB('rcAfter', RC_AFTERS, v.after, '판 뒤 구간') + '</div>';
+    const tile = '<div class="rkt rkskt" aria-hidden="true" style="min-height:' + (S.mobile ? 105 : 112) + 'px"><span class="l"><i></i></span><b class="num"><i></i></b><span class="s"><i></i><i></i></span></div>';
+    const bars = n => Array.from({ length: n }, () => '<i></i>').join('');
+    const aiH = uiOpen('rk:ai', true) ? (combo ? (S.mobile ? 660 : 433) : (S.mobile ? 330 : 220)) : 0;
+    return '<section class="rsec rkc rksks" aria-busy="true">' + head + chips(xs, v.venue, 'rcVenue', '매도 장소 — 장소마다 그 시장 봉') + chips(bs, v.bvenue, 'rcBVenue', '매수 장소 — 매수 구간 봉 출처')
+      + '<div class="rkleg cap rkskl" aria-hidden="true">' + bars(combo ? (S.mobile ? 5 : 3) : 1) + '</div><div class="rscw rkw rksk"><div class="rkskb" style="height:' + H + 'px" aria-hidden="true"><i></i></div>'
+      + '<div class="rkov"><span class="rkwait" role="status" aria-live="polite"><i class="spin" aria-hidden="true"></i>' + msg + '</span></div></div><div class="rksrc cap rkskl" aria-hidden="true">' + bars(combo ? (S.mobile ? 5 : 3) : 1) + '</div></section>'
+      + '<div class="rk4' + (combo ? ' rk4m' : '') + ' rkskq" aria-hidden="true">' + tile + tile + tile + tile + '</div><div class="rkskf" aria-hidden="true">' + (combo ? '<i class="a"></i>' : '') + (aiH ? '<i style="height:' + aiH + 'px"></i>' : '<i></i>') + '</div>';
+  }
   function rkSection(R, d, cx) {
     const v = rcV(R), C = S.rcptX || {}, c = C[rcK(R)] || {};
     const loading = c.st === 'load' || c.st === 'prep';
-    const prev = loading && R.lastK && C[R.lastK] && C[R.lastK].st === 'ok' ? C[R.lastK].d : null;
-    const x = c.st === 'ok' ? c.d : prev;
-    const waitTxt = c.idx ? '기록 색인을 만드는 중 — 잠시 뒤 다시 확인해요' : c.busy ? '다른 차트를 먼저 받는 중 — 차례를 기다려요' : '시세 받는 중…';
-    const prog = loading ? '<span class="rkwait" role="status" aria-live="polite"><i class="spin" aria-hidden="true"></i>' + waitTxt + (c.n ? ' <span class="mut">(' + c.n + '번째 확인)</span>' : '') + '</span>' : '';
+    const x = c.st === 'ok' ? c.d : loading && c.d ? c.d : null;
+    const tries = c.n ? ' <span class="mut">(' + c.n + '번째 확인)</span>' : '';
+    const waitTxt = c.idx ? '기록 색인을 만드는 중 — 잠시 뒤 다시 확인해요' : c.busy ? '다른 차트를 먼저 받는 중 — 차례를 기다려요' : esc(rkWhat(R)) + ' 시세 받는 중…';
+    const prog = loading ? rkRe('새로 받는 중' + tries) : '';
     if (!x) {
-      if (loading) return { ok: true, html: '<section class="rsec rkc" aria-busy="true"><div class="row rtth"><span class="rtt">실제 시세 위 내 매도</span><span class="sp"></span>' + prog + '</div><div class="rkskel" aria-hidden="true"><i></i><i></i><i></i><i></i></div></section>' };
+      if (loading) return { ok: true, html: rkSkel(R, waitTxt + tries) };
       if (c.st === 'old') return { ok: false, html: '' };
       if (c.st === 'err') return { ok: false, html: '<div class="rkwhy cap" role="status">실제 시세를 받지 못해 체결 점만 보여 줘요 · ' + esc(errTxt(c.msg || '오류')) + ' <button class="link" data-a="rcRetry">다시 받기</button></div>' };
       return { ok: false, html: '' };
     }
     const ch = x.chart || {}, cs0 = arr(ch.candles).filter(r => Array.isArray(r) && r.length >= 6 && isFinite(r[2]) && isFinite(r[3]));
     const fills = arr(x.fills).filter(f => f && f.ts && num(f.px) > 0);
-    if (x.empty || !ch.ok || !cs0.length || !fills.length) {
-      const why = x.why || ch.why || (x.empty ? '그날 매도 기록이 없어요' : '봉을 받지 못했어요');
-      return { ok: false, html: '<div class="rkwhy cap" role="status" title="' + esc(arr(ch.tried).map(t => t.label + ': ' + (t.note || t.why)).join('\n')) + '">실제 시세를 받지 못해 체결 점만 보여 줘요 · ' + esc(why) + ' <button class="link" data-a="rcRetry">다시 받기</button></div>' };
-    }
+    const sNo = x.empty || !ch.ok || !cs0.length || !fills.length;
     const bc = (S.rcptB || {})[rcBK(R)] || {}, bLoad = bc.st === 'load' || bc.st === 'prep';
-    const bPrev = bLoad && R.lastBK && S.rcptB[R.lastBK] && S.rcptB[R.lastBK].st === 'ok' ? S.rcptB[R.lastBK].d : null;
-    const bx = bc.st === 'ok' ? bc.d : bPrev;
-    if (bx && rkComboOk(bx, x)) return rkCombo(R, d, cx, x, bx, loading || bLoad, prog || (bLoad ? '<span class="rkwait" role="status" aria-live="polite"><i class="spin" aria-hidden="true"></i>매수 타점 받는 중…</span>' : ''));
+    const bx = bc.st === 'ok' ? bc.d : bLoad && bc.d ? bc.d : null;
+    const Rk = d.tax && d.tax.dispKrw != null && num(d.tax.disp) > 0 ? d.tax.dispKrw / d.tax.disp : rate();
     const bNote = !x.buySide ? '' : bLoad ? '<div class="rkbw cap" role="status"><i class="spin" aria-hidden="true"></i> 매수 타점 받는 중…</div>'
       : bc.st === 'err' ? '<div class="rkbw cap" role="status">매수 타점을 받지 못했어요 · ' + esc(errTxt(bc.msg || '오류')) + ' <button class="link" data-a="rcRetryB">다시 받기</button></div>'
-      : bc.st === 'ok' && bx && !rkComboOk(bx, x) ? '<div class="rkbw cap" role="status">매수 타점을 차트에 올리지 못했어요 · ' + esc(bx.why || (bx.chart || {}).why || (bx.cur !== x.cur ? '통화가 달라요' : '매수 봉 없음')) + '</div>' : '';
+      : bc.st === 'ok' && bx && (sNo || !rkComboOk(bx, x)) ? '<div class="rkbw cap" role="status">매수 타점을 차트에 올리지 못했어요 · ' + esc(bx.why || (bx.chart || {}).why || (sNo ? '매도 시세를 받지 못했어요' : bx.cur !== x.cur ? '통화가 달라요' : '매수 봉 없음'))
+        + (arr(bx.inflows).length ? '<br>' + arr(bx.inflows).slice(0, 6).map(f => esc(kstHM(f.ts) + ' 입금 ' + (f.chain ? f.chain + ' ' : '') + q(num(f.q)) + '개' + (num(f.px) > 0 ? ' · 원가 단가 ' + cx.P(num(f.px) * ((bx.cur === 'KRW') === (S.cur !== 'USD') ? 1 : bx.cur === 'KRW' ? 1 / Rk : Rk)) : '') + (f.rule ? ' · ' + f.rule : ''))).join('<br>') : '') + '</div>' : '';
+    if (sNo) {
+      const why = x.why || ch.why || (x.empty ? '그날 매도 기록이 없어요' : '봉을 받지 못했어요');
+      return { ok: false, html: '<div class="rkwhy cap" role="status" title="' + esc(arr(ch.tried).map(t => t.label + ': ' + (t.note || t.why)).join('\n')) + '">실제 시세를 받지 못해 체결 점만 보여 줘요 · ' + esc(why) + ' <button class="link" data-a="rcRetry">다시 받기</button></div>' + bNote };
+    }
+    if (x.buySide && !bx && (bLoad || !bc.st)) return { ok: true, html: rkSkel(R, esc(rkWhat(R, 'buy')) + ' 시세 받는 중…' + (bc.n ? ' <span class="mut">(' + bc.n + '번째 확인)</span>' : '')) };
+    if (bx && rkComboOk(bx, x)) return rkCombo(R, d, cx, x, bx, loading || bLoad, prog || (bLoad ? rkRe('매수 새로 받는 중') : ''));
     const { P, M, uc, sym, dt } = cx;
     const dc = S.cur === 'USD' ? 'USD' : 'KRW', xc = x.cur === 'KRW' ? 'KRW' : x.cur === 'USD' ? 'USD' : dc;
-    const Rk = d.tax && d.tax.dispKrw != null && num(d.tax.disp) > 0 ? d.tax.dispKrw / d.tax.disp : rate();
     const fk = xc === dc ? 1 : xc === 'KRW' ? 1 / Rk : Rk;
     const sm = x.summary || {}, src = ch.src || {}, w = x.window || {};
     const ivS = { '1m': 60, '5m': 300, '1h': 3600 }[src.iv] || 300;
@@ -6844,8 +7570,8 @@
       : tile('거래량 급증 때 매도', '—', '뚜렷한 급증 구간 없음');
     const tiles = '<div class="rk4">' + t1x + t2x + t3x + t4x + '</div>';
     const busy = loading ? ' aria-busy="true"' : '';
-    const html = '<section class="rsec rkc' + (loading ? ' ld' : '') + '"' + busy + '>' + head + vchips + leg + (prog ? '<div class="rkov">' + prog + '</div>' : '')
-      + '<div class="rscw rkw">' + svg + '</div>' + srcLine + bNote + '</section>' + tiles + rkAiFold(R, [{ side: 'sell', x, box: rkEvalBox(R, x, cx, loading) }]);
+    const html = '<section class="rsec rkc"' + busy + '>' + head + vchips + leg
+      + '<div class="rscw rkw">' + prog + svg + '</div>' + srcLine + bNote + '</section>' + tiles + rkAiFold(R, [{ side: 'sell', x, box: rkEvalBox(R, x, cx, loading) }]);
     return { ok: true, html };
   }
   function rkComboOk(b, x) {
@@ -6891,13 +7617,14 @@
     const inR = t => ranges.some(r => t >= r.from && t <= r.to);
     const X = t => { for (const r of ranges) { if (t <= r.to) return t < r.from ? r.x0 : r.x0 + (t - r.from) / (r.to - r.from) * r.w; } const r = ranges[ranges.length - 1]; return r.x0 + r.w; };
     const bF = arr(b.fills).filter(f => f && f.ts && num(f.px) > 0 && inR(f.ts)), sF = arr(x.fills).filter(f => f && f.ts && num(f.px) > 0);
+    const iF = arr(b.inflows).filter(f => f && f.ts && num(f.px) > 0 && inR(f.ts));
     const avgB = num(bsm.avgPx) * fk, avgS = num(sm.avgPx) * fk, hi = num(sm.hi) * fk, lo = num(sm.lo) * fk;
     parts.forEach(p0 => { const r = ranges.find(r0 => r0.parts.indexOf(p0) >= 0); p0.px = Math.max(8, (p0.to - p0.from) / Math.max(1, r.to - r.from) * r.w);
       const bn = rcBin(p0.cs, Math.max(4, Math.floor(p0.px / 2.5))); p0.bn = bn; p0.bS = p0.iv * bn.k; p0.bw = Math.max(1, Math.min(9, 0.68 * p0.px * p0.bS / Math.max(1, p0.to - p0.from)));
       p0.vmax = Math.max.apply(null, bn.cs.map(c => num(c[5])).concat([0])) || 1; });
     const ys = [];
     parts.forEach(p0 => p0.bn.cs.forEach(c => ys.push(c[2] * fk, c[3] * fk)));
-    bF.concat(sF).forEach(f => ys.push(num(f.px) * fk));
+    bF.concat(sF, iF).forEach(f => ys.push(num(f.px) * fk));
     if (avgB > 0) ys.push(avgB); if (avgS > 0) ys.push(avgS);
     let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
     const rng0 = (y1 - y0) || y1 * 0.05 || 1;
@@ -6995,6 +7722,10 @@
       const tt = k0 === 'b' ? tLab(f.ts) + ' 매수 · ' + (f.kind || '') + (f.from ? '(원래 ' + f.from + ')' : '') + (f.venue ? ' · ' + f.venue : '') + ' · ' + P(p0) + ' · ' + q(num(f.q)) + ' ' + sym + ' · ' + M(a0)
         : kstHM(f.ts) + ' 매도 · ' + P(p0) + ' · ' + q(num(f.q)) + ' ' + sym + ' · ' + M(a0);
       return '<circle cx="' + X(f.ts).toFixed(1) + '" cy="' + Y(p0).toFixed(1) + '" r="' + r0.toFixed(1) + '" class="' + (k0 === 'b' ? 'bd' : 'sd') + '"><title>' + esc(tt) + '</title></circle>';
+    }).join('') + iF.map(f => {
+      const p0 = num(f.px) * fk, cx9 = X(f.ts), cy9 = Y(p0), r0 = S.mobile ? 6 : 7;
+      const tt = tLab(f.ts) + ' 입금' + (f.chain ? ' · ' + f.chain : '') + ' · 원가 단가 ' + P(p0) + ' · ' + q(num(f.q)) + ' ' + sym + (f.rule ? ' · 원가 규칙: ' + f.rule : '');
+      return '<path class="idm" d="M' + cx9.toFixed(1) + ' ' + (cy9 - r0).toFixed(1) + ' L' + (cx9 + r0).toFixed(1) + ' ' + cy9.toFixed(1) + ' L' + cx9.toFixed(1) + ' ' + (cy9 + r0).toFixed(1) + ' L' + (cx9 - r0).toFixed(1) + ' ' + cy9.toFixed(1) + ' Z"><title>' + esc(tt) + '</title></path>';
     }).join('');
     const exR = X(sTo) - 6, occ = [[exR - afW - 2, T - 20, exR + 1, T - 4]];
     const dbx = bF.concat(sF).map(f => { const r0 = 3.5 + (S.mobile ? 10 : 14) * Math.sqrt(num(f.amt) / amx), cx9 = X(f.ts), cy9 = Y(num(f.px) * fk); return [cx9 - r0, cy9 - r0, cx9 + r0, cy9 + r0]; });
@@ -7049,7 +7780,7 @@
     const vchips = chips(arr(x.venues), x.venue, 'rcVenue', '매도 장소 — 장소마다 그 시장 봉') + chips(arr(b.venues), b.venue, 'rcBVenue', '매수 장소 — 매수 구간 봉 출처');
     const lpq = num(((b.legs || {}).lpFee || {}).qty), cpx = num((b.sell || {}).costPx) * fk;
     const lpNote = lpq > 0 && cpx > 0 ? 'LP 수수료로 받은 <b class="num">' + q(lpq) + '</b>개(받은 때 시가 원가) 포함 평단 <b class="num">' + P(cpx) + '</b>' : '';
-    const leg = '<div class="rkleg cap"><span><i class="lg bd" aria-hidden="true"></i>내 매수</span>' + (avgB > 0 ? '<span><i class="lg abl" aria-hidden="true"></i>평균 매수 <b class="num">' + P(avgB) + '</b></span>' : '')
+    const leg = '<div class="rkleg cap"><span><i class="lg bd" aria-hidden="true"></i>내 매수</span>' + (iF.length ? '<span><i class="lg idm" aria-hidden="true"></i>입금(원가가 매수 아닌 입금)</span>' : '') + (avgB > 0 ? '<span><i class="lg abl" aria-hidden="true"></i>평균 매수 <b class="num">' + P(avgB) + '</b></span>' : '')
       + (lpNote ? '<span class="rklp">' + lpNote + '</span>' : '')
       + '<span><i class="lg sdr" aria-hidden="true"></i>내 매도</span>' + (avgS > 0 ? '<span><i class="lg avlr" aria-hidden="true"></i>평균 매도 <b class="num">' + P(avgS) + '</b></span>' : '')
       + (ucShow ? '<span><i class="lg ucl" aria-hidden="true"></i>평단 <b class="num">' + P(uc) + '</b></span>' : '') + '<span><i class="lg aft" aria-hidden="true"></i>판 뒤 ' + (RC_AFK[x.after] || '') + '</span>'
@@ -7069,7 +7800,8 @@
     const lg = b.legs || {}, lpf = lg.lpFee || {};
     const legTxt = [num(lpf.n) > 0 ? 'LP 수수료로 받은 ' + num(lpf.n) + '건은 매수가 아니라 점 없음' : '', num((lg.trimmed || {}).n) > 0 ? '오래된 매수 ' + num(lg.trimmed.n) + '회는 이번 매도 물량 밖' : '', num(lg.unmatched) > 0 ? '원가 승계 ' + num(lg.unmatched) + '건은 출발 기록을 못 찾음' : '', num(lg.fallback) > 0 ? '원가 승계 ' + num(lg.fallback) + '건은 엔진 연결이 없어 수량·시각으로 추정' : '',
       lg.source === 'sim' ? '원가 구성은 기록으로 다시 계산(엔진 구성 없음)' : '', lg.source === 'mixed' ? '매도 ' + num(lg.simSells) + '건의 원가 구성은 기록으로 다시 계산(엔진 구성 없음)' : '', lg.other && num(lg.other.qty) > 0 ? '출처를 모르는 원가 몫 ' + q(num(lg.other.qty)) + '개(점 없음)' : '',
-      num(lg.unknownQty) > 0 ? '원가 미상 ' + q(num(lg.unknownQty)) + '개(점 없음)' : ''].filter(Boolean).join(' · ');
+      num(lg.unknownQty) > 0 ? '원가 미상 ' + q(num(lg.unknownQty)) + '개(점 없음)' : '',
+      num(lg.inflows) > 0 ? '입금으로 원가가 잡힌 몫 ' + q(num(lg.inflowQty)) + '개 ' + num(lg.inflows) + '건(마름모 · 원가 규칙: ' + Array.from(new Set(arr(b.inflows).map(f => f && f.rule).filter(Boolean))).join(' / ') + ')' : ''].filter(Boolean).join(' · ');
     const srcLine = '<div class="rksrc cap"><span title="' + esc(btr.concat(tr).map(t => t.label + ' — ' + (t.note || t.why)).join('\n')) + '">' + esc(bTxt) + '</span><span>' + esc(sTxt) + '</span>' + (brTxt ? '<span class="rkbrs">' + esc(brTxt + ' — 표시만(점수·AI 평가 밖)') + '</span>' : '') + (outTxt ? '<span>' + esc(outTxt) + '</span>' : '') + (legTxt ? '<span>' + esc(legTxt) + '</span>' : '') + '</div>';
     const head = '<div class="row rtth rkh"><span class="rtt">실제 시세 위 내 매수·매도 — 점 크기 = 금액</span><span class="sp"></span>' + segB('rcIv', RC_IVS, v.iv, '봉 간격') + segB('rcAfter', RC_AFTERS, v.after, '판 뒤 구간') + '</div>';
     const pc = (vv, dd) => vv == null || !isFinite(vv) ? '—' : pctS(vv, dd == null ? 1 : dd);
@@ -7092,8 +7824,8 @@
       + uiFold('rk:more', { cls: 'plain rkmore', head: '<span class="cap">숫자 4개 더 — 추격 매수 · 첫 매도까지 최고 · 고점 대비 · 거래량 급증</span>', body: () => '<div class="rk4 rk4m">' + sd(b3, 'b') + sd(b4, 'b') + sd(s2, 's') + sd(s4, 's') + '</div>', label: '숫자 4개 더 보기' });
     const ai = rkAiFold(R, [{ side: 'buy', x: b, box: rkEvalBox(R, b, cx, loading, 'buy') }, { side: 'sell', x, box: rkEvalBox(R, x, cx, loading) }]);
     const busy = loading ? ' aria-busy="true"' : '';
-    const html = '<section class="rsec rkc' + (loading ? ' ld' : '') + '"' + busy + '>' + head + vchips + leg + (prog ? '<div class="rkov">' + prog + '</div>' : '')
-      + '<div class="rscw rkw">' + svg + '</div>' + srcLine + '</section>' + tiles + ai;
+    const html = '<section class="rsec rkc"' + busy + '>' + head + vchips + leg
+      + '<div class="rscw rkw">' + prog + svg + '</div>' + srcLine + '</section>' + tiles + ai;
     return { ok: true, html };
   }
   const rkVc = vd => vd === '잘 팔았음' || vd === '잘 샀음' ? 'ok' : vd === '아쉬움' ? 'e' : 'w';
@@ -7112,7 +7844,7 @@
     const pill = a => '<span class="pill sm rkap pvx ' + (a.side === 'buy' ? 'b' : 's') + '">' + (a.side === 'buy' ? '매수' : '매도') + (a.sc != null ? ' <b class="num">' + a.sc + '</b>' : '') + (a.vd ? '<i class="rkv ' + rkVc(a.vd) + '">' + esc(a.vd) + '</i>' : '') + '</span>';
     const st = sm.some(a => a.run) ? '<span class="pill a sm">진행 중</span>' : sm.some(a => a.err) ? '<span class="pill e sm">오류</span>' : '<span class="cap rkac pvx">' + (sm.every(a => a.ev) ? '설명 ' + sm.length + '개' : sm.some(a => a.ev) ? '설명 일부' : '구성·설명') + '</span>';
     const lab = 'AI 평가 — ' + sm.map(a => (a.side === 'buy' ? '매수' : '매도') + (a.sc != null ? ' ' + a.sc + '점' : '') + (a.vd ? ' ' + a.vd : '')).join(' · ');
-    return '<section class="rkes rkfold" aria-label="AI 평가">' + uiFold('rk:ai', { cls: 'plain rkaif', head: '<b class="rkat">AI 평가</b>' + sm.map(pill).join(''), side: st, label: lab,
+    return '<section class="rkes rkfold" aria-label="AI 평가">' + uiFold('rk:ai', { def: true, cls: 'plain rkaif', head: '<b class="rkat">AI 평가</b>' + sm.map(pill).join(''), side: st, label: lab,
       body: () => '<div class="rkab">' + (P0.length > 1 ? '<div class="cap rkacap">점수는 차트 숫자로 계산(구성 아래) · AI는 왜 그런지 설명만</div>' : '') + P0.map(p => p.box).join('') + '</div>' }) + '</section>';
   }
   const RK_CK = { pos: '위치', vwap: '시장 평균', mkt: '그때 시세', after: '', spike: '급증', chase: '추격' };
@@ -7171,7 +7903,7 @@
     const memoChip = ev.memoUsed ? '<span class="pill g sm" title="그날 매매 근거 메모를 함께 보고 쓴 평가예요(점수는 계산식 그대로)">근거 반영</span>' : '';
     const meta = memoChip + '<span class="cap">' + esc([ev.src ? ev.src + (ev.iv ? ' ' + (RC_IVK[ev.iv] || ev.iv) : '') : '', ev.nFills ? '체결 ' + ev.nFills + '회 기준' : '', ev.at ? fmtTs(num(ev.at)) + ' 생성' : ''].filter(Boolean).join(' · ')) + cvn + '</span>';
     const lines = pvOn() ? '<li class="cap rkhid">' + (S.rand ? '랜덤값' : '숨김') + ' 모드에서는 AI 설명을 가려요 — 점수와 항목 점수만 보여요</li>'
-      : arr(ev.lines).map(t => '<li>' + esc(evTxt(t)) + '</li>').join('') + (ev.next ? '<li class="nx"><b>다음엔</b> ' + esc(evTxt(ev.next)) + '</li>' : '');
+      : arr(ev.lines).map(t => '<li class="aib">' + esc(evTxt(t)) + '</li>').join('') + (ev.next ? '<li class="nx aib"><b>다음엔</b> ' + esc(evTxt(ev.next)) + '</li>' : '');
     const warn = arr(ev.warn).indexOf('unit') >= 0 ? '<div class="cap">일부 숫자에 통화 기호가 빠졌을 수 있어요 — 가격은 위 차트·칸이 기준</div>' : '';
     const brk = arr(ev.components).length ? rkBreak({ components: ev.components, scaled: ev.scaled }, side) : '';
     return '<section class="rke done' + sideCls + '">' + ring + '<div class="rkeb"><div class="rkeh">' + ttl + '<span class="pill ' + vc + ' sm">' + esc(vd) + '</span>' + meta + '</div>' + brk + '<ul class="rkel">' + lines + '</ul>' + warn + stale + msg + '</div>'
@@ -7295,12 +8027,12 @@
       const mt = String(t).match(/^\s*\[([^\]]{1,12})\]\s*/), tag = mt ? mt[1] : '';
       if (mt) t = String(t).slice(mt[0].length);
       const long = String(t).length > (S.mobile ? 60 : 140);
-      return '<div class="rai"><b>AI 복기</b>' + (tag ? '<span class="pill g sm">' + esc(tag) + '</span>' : '') + (rv.stale ? '<span class="pill w sm">다시 만들기 대기</span>' : '')
-        + '<span class="rat' + (long && !R.aiOpen ? ' clamp2' : '') + (rv.stale ? ' mut' : '') + '">' + esc(revTxt(t)) + '</span>' + (long ? '<button class="link" data-a="rcptAi" aria-expanded="' + !!R.aiOpen + '">' + (R.aiOpen ? '접기' : '펼치기') + '</button>' : '') + '</div>';
+      return '<div class="rai"><b>AI 복기</b>' + (tag ? '<span class="pill g sm aib-l">' + esc(pvOn() ? '가림' : tag) + '</span>' : '') + (rv.stale ? '<span class="pill w sm">다시 만들기 대기</span>' : '')
+        + '<span class="rat aib' + (long && !R.aiOpen ? ' clamp2' : '') + (rv.stale ? ' mut' : '') + '">' + esc(revTxt(t)) + '</span>' + (long ? '<button class="link" data-a="rcptAi" aria-expanded="' + !!R.aiOpen + '">' + (R.aiOpen ? '접기' : '펼치기') + '</button>' : '') + '</div>';
     })();
     const lp = dayContrib(R.iso).filter(x => x.lp && String(x.lpN ? x.pool : (x.p && x.p.sym) || x.sym).toUpperCase().split(/[\s/]+/).indexOf(String(sym).toUpperCase()) >= 0);
     const lpTxt = lp.length ? '<span class="cap">같은 날 <b class="t1">' + esc(lp.map(x => x.lpN ? x.sym + ' ' + x.lpN + '개' : String(x.sym)).join(' · ')) + '</b> 실현 <b class="num ' + clsV(sum(lp, x => KV(x.v, x.vk))) + '">' + m(sum(lp, x => KV(x.v, x.vk)), { sign: true }) + '</b> 은 따로</span>' : '';
-    const foot = '<div class="rft">' + lpTxt + '<span class="sp"></span><button class="btn sm" data-a="rcptDay">그날 ' + esc(sym) + ' 기록 보기</button><button class="btn sm" data-a="rcptCsv">' + IC.down + ' CSV</button></div>';
+    const foot = '<div class="rft">' + lpTxt + '<span class="sp"></span><button class="btn sm" data-a="rcptDay">그날 ' + esc(sym) + ' 기록 보기</button></div>';
     const rk = rkSection(R, d, { P, M, uc, sym, dt });
     return head + dmRcptHTML(R, d) + (rk.ok ? rk.html : rk.html + sc) + flow + ai1 + foot;
   }
@@ -7318,180 +8050,6 @@
     const rsum = rz9 != null ? '<span class="rsum num"><b>' + esc(R.sym) + '</b> <span class="' + cls(rz9) + '">' + m(rz9, { sign: true, compact: true }) + '</span></span>' : '';
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer rcpt" role="dialog" aria-modal="true" aria-label="' + esc(R.sym + ' 차익 영수증') + '"><div class="dh"><span class="cap rtop">' + esc(ttl) + '</span>' + rsum + '<span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>' + body + '</aside>';
   }
-
-  function download(name, rows, ok) {
-    if (S.hide && !ok) { confirmAsk({ title: '금액 숨김 중이에요', body: 'CSV 에는 실제 금액·수량이 그대로 담겨요. 그래도 내려받을까요?', ok: '내려받기', run: () => download(name, rows, true) }); return; }
-    if (S.rand) name = String(name).replace(/\.csv$/, '') + '_random.csv';
-    rows = rows.map(r => r.map(c => (c == null ? '' : String(c))));
-    rows = rows.map(r => r.map(c => (typeof c === 'string' && (/^[\t\r]/.test(c) || (/^[=+@-]/.test(c.trim()) && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(c.trim())))) ? "'" + c : c));
-    const csv = rows.map(r => r.map(c => '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"').join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = name; a.style.display = 'none';
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 800);
-    toast(name + ' 저장');
-  }
-  const stamp = () => todayISO();
-  function cN(v) {
-    if (!S.rand || v == null || v === '') return v;
-    const t = String(v).trim(), n = typeof v === 'number' ? v : (/^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+\-]?\d+)?$/.test(t) ? +t : NaN);
-    if (!isFinite(n)) return cT(v);
-    const x = n * RK, dm = typeof v === 'string' ? t.match(/\.(\d+)$/) : null;
-    return dm ? x.toFixed(dm[1].length) : (Number.isInteger(n) && Math.abs(n) >= 1e4 ? Math.round(x) : +x.toPrecision(10));
-  }
-  const cT = v => (S.rand && v != null && /\d/.test(String(v)) ? pvNet(String(v)).replace(PV_RE, '•••') : v);
-  const cEv = (e, v) => (evXf(e) && v != null && /\d/.test(String(v)) ? '•••' : cQ(v));
-  const cKw = v => (S.rand && num(v) !== 0 ? '•••' : v);
-  function cQ(v) {
-    if (!S.rand || v == null || v === '') return v;
-    const mm = String(v).trim().match(/^([+\-−]?)([$₩]?)(\d[\d,]*(?:\.\d+)?)$/);
-    if (!mm) return cT(v);
-    const n = parseFloat(mm[3].replace(/,/g, '')) * RK, dm = mm[3].match(/\.(\d+)$/), dd = dm ? dm[1].length : 0;
-    const out = mm[3].indexOf(',') >= 0 ? nf('en-US', dd, dd).format(n) : n.toFixed(dd);
-    return mm[1] + mm[2] + out;
-  }
-  const CSV = {
-    hold() {
-      const D = S.D;
-      const rows = [['자산', '체인', '그룹키', '보유수량', '원가있는수량(kqty)', '매수평균가(USD)', '현재가(USD)', '평가금액(USD)', '평가손익(USD)', '수익률(%)', '원가미확인수량']];
-      D.stables.forEach(a => rows.push([a.sym, chainOf(a.name).replace(/ · /g, '/'), a.key || '', cN(num(a.qty)), cN(num(a.qty)), num(a.avg), num(a.price), cN((num(a.qty) * num(a.price)).toFixed(2)), '0.00', '', 0]));
-      D.groups.forEach(g => g.insts.forEach(i => rows.push([i.sym, i.chain, i.key || '', cN(i.qty), cN(i.kq), i.avg, i.price, cN(i.value.toFixed(2)), cN(i.pnl.toFixed(2)), i.cost > 0 && i.price > 0 ? (i.pnl / i.cost * 100).toFixed(2) : '', cN(i.fbQty)])));
-      rows.push([]); rows.push(['LP 풀', 'DEX', '체인', '범위', '상태', '예치가치(USD)', '현재가치(USD)', '미청구수수료(USD)', '리워드(USD)', '무상손실(USD)', 'APR', '평가손익(USD)']);
-      D.lps.forEach(l => rows.push([l.pool, l.protocol, l.chain, l.lo > 0 ? pxrRaw(l.lo) + '~' + pxrRaw(l.hi) : l.rangeText, l.stateLabel, l.principal == null ? '' : cN(l.principal), l.value == null ? '' : cN(l.value), l.fees == null ? '' : cN(l.fees), cN(l.rewards), l.il == null ? '' : cN(l.il), l.apr, l.pnl == null ? '' : cN(l.pnl.toFixed(2))]));
-      rows.push([]); rows.push(['날짜', '총자산(USD)', '전일대비(USD)', 'USDT 종가(KRW)', '김프(%)', '요약', '리뷰 평가']);
-      D.daily.slice().reverse().forEach(d => { const r = D.reviews[d.date] || {}, s = D.usdt[d.date] || {};
-        rows.push([isoDay(d.date) || d.date, cN(d.val.toFixed(2)), d.delta == null ? '' : cN(d.delta.toFixed(2)), isFinite(s.usdt) && s.usdt != null ? s.usdt : '', isFinite(s.kimp) && s.kimp != null ? num(s.kimp).toFixed(2) : '', cT(r.note || ''), isAI(r) ? r.s || '' : '']); });
-      download('보유자산_자산변동_' + stamp() + '.csv', rows);
-    },
-    async journal() {
-      const D = S.D;
-      const full = await fetchDayEventsChunked();
-      if (!full && !partHave('ev')) await partsWaitFor('ev');
-      const rows = [['자산', '체인', '상태', '시작일', '보유수량', '총매수수량', '평단(USD)', '총매수액(USD)', '실현손익(USD)', '미실현손익(USD)', '가스수수료']];
-      D.positions.forEach(p => rows.push([p.sym, p.chain, p.status, isoDay(p.opened) || p.opened, cN(p.held), cN(p.bought), p.avg, cN(p.cost), cN(p.realized), p.held === 0 ? 0 : cN(p.unreal), cN(p.fee)]));
-      rows.push([]); rows.push(['시각', '자산', '유형', '내용', '수량', '금액', '참조']);
-      (full ? full.events : D.events).forEach(e => rows.push([e.iso || e.t, e.sym, e.k, cT(e.d), cEv(e, e.q), cEv(e, e.a), e.tx]));
-      if (!full) rows.push(['(일부) 전체 기록을 받지 못해 화면에 실린 최근 기록만 담았어요']);
-      download('매매일지_' + stamp() + '.csv', rows);
-      if (!full) toast('전체 기록을 받지 못해 최근 기록만 내보냈어요', true);
-    },
-    async taxAll() {
-      const D = S.D;
-      if (!D.taxFull) return null;
-      let yms = Array.from(new Set(D.taxSum.filter(r => ymPass(r.ym) && /^\d{4}-\d{2}$/.test(String(r.ym)) && !/ 무기한$|선물/.test(String(r.sym))).map(r => r.ym))).sort();
-      if (!yms.length) yms = [ymShift(0)];
-      for (let whole = 0; whole < 3; whole++) {
-        const out = []; let bt0 = null, redo = false;
-        for (const ym of yms) {
-          const rows = await this._taxMonth(ym, bt0);
-          if (rows === false) { redo = true; break; }
-          if (!rows) return null;
-          bt0 = rows.bt;
-          const add9 = (rows.yms || []).filter(m9 => ymPass(m9) && /^\d{4}-\d{2}$/.test(String(m9)) && !yms.includes(m9));
-          if (add9.length) { yms = yms.concat(add9).sort(); redo = true; break; }
-          rows.rows.forEach(x => { if (gPass(x.sold)) out.push(x); });
-        }
-        if (redo) continue;
-        out.sort((x, y) => (isoDay(x.sold) || String(x.sold)) < (isoDay(y.sold) || String(y.sold)) ? -1 : 1);
-        out.builtAt = bt0;
-        return out;
-      }
-      return null;
-    },
-    async _taxMonth(ym, bt0) {
-        let rows = null, btOk = null, ymsOk = null, ymsSeen = null;
-        for (let tries = 0; tries < 3 && !rows; tries++) {
-          const acc = []; let bt = null, torn = false;
-          for (let off = 0, guard = 0; guard < 200; guard++) {
-            let j = null;
-            try {
-              const r = await fetch('/api/tax_rows?ym=' + encodeURIComponent(ym) + '&offset=' + off, { cache: 'no-store' });
-              if (r.status === 401) { onUnauthorized(); return null; }
-              j = r.ok ? await r.json() : null;
-            } catch (e) { j = null; }
-            if (!j || !j.ok || j.sym) return null;
-            if (bt == null) { bt = j.builtAt; ymsSeen = Array.isArray(j.yms) ? j.yms : null; if (bt0 != null && bt !== bt0) return false; } else if (j.builtAt !== bt) { torn = true; break; }
-            const got = arr(j.rows);
-            got.forEach(x => acc.push(x));
-            off += got.length;
-            if (!got.length || off >= num(j.total)) break;
-          }
-          if (!torn) { rows = acc; btOk = bt; ymsOk = ymsSeen; }
-          else if (bt0 != null) return false;
-        }
-        return rows ? { rows, bt: btOk, yms: ymsOk } : null;
-    },
-    async tax() {
-      const D = S.D;
-      if (D.taxFull) toast('명세 전체를 받는 중…');
-      const full = await CSV.taxAll();
-      const fut = taxSel().filter(r => r.fut);
-      const rs = (full || taxSel().filter(r => !r.fut)).concat(fut);
-      const kOf = r => {
-        const k = num(r.rate) > 0 ? num(r.rate) : null;
-        if (!k) return null;
-        const ak = r.akr != null ? num(r.akr) : num(r.acq) * k, dk = num(r.disp) * k, fk = num(r.fee) * k;
-        return { k, ak, dk, fk, pk: dk - fk - ak };
-      };
-      const W = v => v == null ? '' : Math.round(v);
-      const note = r => [r.be ? '매수가=매도가 처리(직접 정함)' : '', r.oa != null ? '오프체인 원가 가정' : '', num(r.rate) > 0 && r.akr == null && num(r.acq) ? '원화 취득 = 매도 시각 환율(취득 원화 기록 없음)' : '', r.fut ? '선물' : ''].filter(Boolean).join(' · ') || '참고용';
-      const rows = [['매도일', '티커', '거래처', '수량', '취득가액(USD)', '양도가액(USD)', '수수료(USD)', '실현손익(USD)', '환율(매도 시각)', '환율 출처', '취득가액(KRW·취득 시점)', '양도가액(KRW)', '수수료(KRW)', '손익(KRW)', '비고']];
-      const RSRC = { leg: '체결 원화', minute: '그 분', close: '그날 마감', near36h: '가까운 시각(±36시간)', near7d: '가까운 시각(±7일)', spot: '현재 환율(기록 없음)', default: '기본값(기록 없음)' };
-      rs.forEach(r => { const x = kOf(r); rows.push([isoDay(r.sold) || r.sold, r.ticker, r.ex, cN(r.qty), cN(r.acq), cN(r.disp), cN(r.fee), cN((num(r.disp) - num(r.acq) - num(r.fee)).toFixed(2)), x ? x.k : '', x ? (RSRC[r.rateSrc] || (r.fut ? '' : '—')) : '', cN(W(x && x.ak)), cN(W(x && x.dk)), cN(W(x && x.fk)), cN(W(x && x.pk)), note(r)]); });
-      const pnlX = r => (r.xd != null ? num(r.xd) : num(r.disp)) - (r.xa != null ? num(r.xa) : num(r.acq)) - (r.xf != null ? num(r.xf) : num(r.fee));
-      rows.push(['체결 합계(위 ' + rs.length + '행)', '', '', '', '', '', '', cN(sum(rs, pnlX).toFixed(2)), '', '', '', '', '', cN(W(sum(rs, r => { const x = kOf(r); return x ? x.pk : 0; }))), '']);
-      if (!full) rows.push(['(일부) 전체 체결을 받지 못해 화면에 실린 최근 ' + rs.length + '행만 담았어요 — 월 요약(아래)은 전 건']);
-      if (D.taxFull) {
-        rows.push([]);
-        if (full && full.builtAt != null && full.builtAt !== D.builtAt) rows.push(['(참고) 월 요약은 화면에 떠 있던 빌드 기준이라, 위 체결 상세(더 최근 빌드)와 최근 정정분만큼 다를 수 있어요 — 새로고침 뒤 다시 받으면 같아져요']);
-        rows.push(['월', '종목', '거래처', '건수', '수량', '취득가액(USD)', '양도가액(USD)', '수수료(USD)', '실현손익(USD)', '취득가액(KRW·취득 시점)', '양도가액(KRW)', '손익(KRW)']);
-        D.taxSum.filter(r => ymPass(r.ym)).forEach(r => { const ak = r.ak2 != null ? r.ak2 : r.ak, pk = r.pk2 != null ? r.pk2 : r.pk;
-          rows.push([r.ym, r.sym, r.ex, r.n, cN(r.qty), cN(r.acq.toFixed(2)), cN(r.disp.toFixed(2)), cN(r.fee.toFixed(2)), cN((r.disp - r.acq - r.fee).toFixed(2)), cN(W(ak)), cN(W(r.dk)), cN(W(pk))]); });
-      }
-      const u = taxUnv();
-      if (u.n) rows.push(['원가 미확인 매도 ' + u.n + '건 $' + cN(u.p.toFixed(2)) + ' 은 명세 제외(원가를 확인하면 들어가요)']);
-      rows.push(['원화 손익(KRW) = 취득 시점 환율 기준(세금 명세) — 화면 머리의 원화 실현은 매도 시각 환율이라 서로 다를 수 있어요']);
-      download('양도차익_명세_참고용_' + stamp() + '.csv', rows);
-      if (D.taxFull && !full) toast('전체 체결을 받지 못해 최근 체결만 내보냈어요', true);
-    },
-    krw() {
-      const rs = krwSel(), a = krwAgg(rs);
-      const rows = [['시각(KST)', '거래소', '구분', '방향', '금액(KRW)', '출금 수수료(KRW)', '상태', '합계 포함']];
-      rs.forEach(r => rows.push([r.d, r.ex, r.src === 'int' ? cT(r.note || '거래소 내부 지급') : '은행', r.dir === 'in' ? '입금' : '출금', cKw(num(r.amt)), cKw(num(r.fee)), r.stRaw || r.st, r.st === 'done' ? 'O' : 'X(' + (r.st === 'fail' ? '실패·취소' : '진행 중') + ')']));
-      rows.push([]); rows.push(['월', '넣은 원화(은행 입금)', '뺀 원화(은행 출금)', '순투입(넣은 − 뺀)', '출금 수수료', '거래소 내부 지급(순투입 제외)', '완료 건수']);
-      const gm = {}; rs.forEach(r => { const ym = String(r.d).slice(0, 7); (gm[ym] || (gm[ym] = [])).push(r); });
-      Object.keys(gm).sort().reverse().forEach(ym => { const g = krwAgg(gm[ym]); rows.push([ym, cKw(g.in), cKw(g.out), cKw(g.net), cKw(g.fee), cKw(g.intIn), g.n]); });
-      rows.push([periodName() + ' 합계', cKw(a.in), cKw(a.out), cKw(a.net), cKw(a.fee), cKw(a.intIn), a.n]);
-      rows.push(['원화 입출금은 매매 손익이 아니에요(쓰려고 뺀 돈·새로 넣은 돈) — 실현손익·시장 변동에 들어가지 않아요']);
-      download('원화_입출금_' + stamp() + '.csv', rows);
-    },
-    async daily() {
-      const D = S.D;
-      const full = await fetchDayEventsChunked();
-      if (!full && !partHave('ev')) await partsWaitFor('ev');
-      const rows = [['날짜', '요일', '마감 총자산(USD)', '전일대비(USD)', 'USDT 종가(KRW)', '김프(%)', '거래건수', '당일 실현(USD)', '마감 미실현(USD)', 'AI 평가', '요약', '다음 액션']];
-      D.daily.slice().reverse().forEach(d => { const r = D.reviews[d.date] || {}, s = D.usdt[d.date] || {}, ai = isAI(r);
-        rows.push([isoDay(d.date) || d.date, d.dow || '', cN(d.val.toFixed(2)), d.delta == null ? '' : cN(d.delta.toFixed(2)), s.usdt != null && isFinite(s.usdt) ? s.usdt : '', s.kimp != null && isFinite(s.kimp) ? num(s.kimp).toFixed(2) : '', (dayCnt(d.date, true) || { n: (D.evByDay.get(d.date) || []).length }).n, cN(num(D.realized[d.date])), d.date === D.todayKey ? cN(D.unreal.toFixed(2)) : '', ai ? r.s || '' : '', ai ? cT(r.sum || '') : '', ai ? cT(r.next || '') : '']); });
-      rows.push([]); rows.push(['시각', '자산', '유형', '내용', '수량', '금액', '참조']);
-      (full ? full.events : D.events).forEach(e => rows.push([e.iso || e.t, e.sym, e.k, cT(e.d), cEv(e, e.q), cEv(e, e.a), e.tx]));
-      if (!full) rows.push(['(일부) 전체 기록을 받지 못해 화면에 실린 최근 기록만 담았어요']);
-      download('일별기록_' + stamp() + '.csv', rows);
-      if (!full) toast('전체 기록을 받지 못해 최근 기록만 내보냈어요', true);
-    },
-    pend() {
-      const rows = [['감지 시각', '유형', '자산', '체인', '영향(USD)', '자동 숨김', '온체인 기록', '거래소 기록', '불일치', '후보 1', '일치도']];
-      S.D.pendings.forEach(p => { const c = arr(p.cands)[0] || {}; rows.push([p.t, p.kind, p.sym, p.chain, p.usd == null ? '' : cN(p.usd), cT(p.hideReason || ''), cT(p.onchain), cT(p.ex), cT(p.gap), cT(c.label || ''), c.pct != null ? c.pct + '%' : '']); });
-      download('미매칭_' + stamp() + '.csv', rows);
-    },
-    settings() {
-      const D = S.D, rows = [['구분', '별칭/거래소', '체인', '주소']];
-      D.wallets.forEach(w => rows.push(['추적 지갑', cT(w.alias || ''), w.chains || '', w.addr || '']));
-      D.deposits.forEach(d => rows.push(['거래소 입금주소', d.ex || '', d.net || '', d.addr || '']));
-      if (rows.length === 1) { toast('내보낼 추적 설정이 없어요', true); return; }
-      download('추적설정_' + stamp() + '.csv', rows);
-    }
-  };
 
   function syncUrl() {
     const qs = new URLSearchParams(location.search);
@@ -7587,19 +8145,29 @@
     try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).then(ok, fail); else fail(); } catch (e) { fail(); }
   }
   function closeDrawer(noFocus) {
-    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : null;
+    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
     S.drawer = null; renderOverlay();
     if (history.state && history.state.tjDr) { try { if (noFocus) history.replaceState(null, '', location.href); else history.back(); } catch (e) {  } }
     if (noFocus || !bk) return;
-    const el = bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v);
+    const el = bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k));
     if (el && el.focus) { try { el.focus(); } catch (e) {  } }
+  }
+  function closeDrawerThen(then) {
+    if (!S.drawer) { then(); return; }
+    const back = !!(history.state && history.state.tjDr);
+    let done = false;
+    const fin = () => { if (done) return; done = true; window.removeEventListener('popstate', onPop9); then(); };
+    const onPop9 = () => setTimeout(fin, 0);
+    if (back) { window.addEventListener('popstate', onPop9); setTimeout(fin, 600); }
+    closeDrawer();
+    if (!back) fin();
   }
   function drawerHist() { try { if (!(history.state && history.state.tjDr)) history.pushState({ tjDr: 1 }, '', location.href); } catch (e) {  } }
   window.addEventListener('popstate', ev => {
     if (!S.drawer || (ev.state && ev.state.tjDr)) return;
-    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : null;
+    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
     S.drawer = null; renderOverlay();
-    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v));
+    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k)));
     if (el && el.focus) { try { el.focus(); } catch (e) {  } }
   });
   function openFut() {
@@ -7616,8 +8184,9 @@
   const vib = () => { try { if (S.mobile && navigator.vibrate && navigator.userActivation && navigator.userActivation.isActive) navigator.vibrate(8); } catch (e) {  } };
   function ofResolve(a, verdict, extra, okMsg) {
     const body = Object.assign({ address: a, verdict }, extra || {});
-    return post('/api/outflow_resolve', body, d => okMsg || (d && d.restartNeeded ? '내 지갑으로 등록했어요 · 수집기 재시작 뒤 반영돼요' : '저장했어요')).then(d => {
+    return post('/api/outflow_resolve', body, d => okMsg || (d && d.restartNeeded ? '내 지갑으로 등록했어요 · 수집기 재시작 뒤 반영돼요' : verdict === 'own' && d && d.apply && d.apply.runner ? '내 지갑으로 등록했어요 · 곧 자동으로 수집을 시작해요' : '저장했어요')).then(d => {
       if (d) { S.of.form[a] = ''; ['alias', 'chains', 'ex', 'cat', 'memo'].forEach(k => { delete S.drafts['of:' + a + ':' + k]; }); if (verdict !== 'clear') S.of.open.delete(a); }
+      if (d && verdict === 'own') rlFetch(true);
       return d;
     });
   }
@@ -7640,12 +8209,23 @@
     curToggle: () => { animReset(); S.cur = S.cur === 'KRW' ? 'USD' : 'KRW'; LS.set('tj_v2_cur', S.cur); vib(); render(); },
     hideToggle: () => setHide(!S.hide),
     randToggle: () => setRand(!S.rand),
+    rkSet: () => {
+      const el = document.querySelector('[data-draft="rk"]'), raw = S.drafts.rk != null ? String(S.drafts.rk) : (el ? el.value : '');
+      const v = parseFloat(String(raw).replace(/[×xX\s]/g, ''));
+      if (!RK_OK(v)) { toast('배수는 0.2~5 사이(0.8~1.25 제외)로 넣어 주세요', true); return; }
+      delete S.drafts.rk; LS.set('tj_v2_rk', String(v)); rkApply(); toast('랜덤값 배수를 고정했어요 — 다시 열어도 같은 배수');
+    },
+    rkClear: () => { delete S.drafts.rk; LS.del('tj_v2_rk'); rkApply(); toast('랜덤값 배수 고정을 풀었어요 — 열 때마다 무작위'); },
     logoToggle: () => { LS.set('tj_v2_nologo', logosOff() ? '0' : '1'); toast(logosOff() ? '토큰 로고 끔 — 외부 요청 없음(지금 떠 있는 로고는 새로고침하면 사라져요)' : '토큰 로고 켬'); render(); if (!logosOff()) hydrateLogos(); },
     tipShow: el => toast(String(el.dataset.v || ''), false, 6000),
     bfMin: () => { S.bfMin = !S.bfMin; SS.set('tj_v2_bfmin', S.bfMin ? '1' : '0'); $('#bf').innerHTML = bfHTML(S.D && S.D.backfill); bfPad(); const b = $('#bf [data-a=bfMin]'); if (b) b.focus({ preventScroll: true }); },
     habRetry: () => habLoad(true),
     mDisp: el => uiSheetOpen('mdisp', '', '표시', el),
     mDispGo: () => { uiSheetClose(true); location.hash = '#settings/display'; },
+    bestMonths: el => { uiSheetOpen('bestm', '', '최고의 날 · ' + ((CH_RANGES.find(r => r[0] === S.chartDays) || [0, ''])[1] || '기간'), el); },
+    bestMore: () => { S.bestMore = !S.bestMore; renderOverlay(); },
+    bestPick: el => { const iso = String(el.dataset.v || ''); if (!isYMD(iso)) return; S.bestPick = iso; uiSheetClose(true); renderView(); A.receiptTop({ dataset: { v: iso } }); },
+    benchRows: el => uiSheetOpen('benchRows', String(el.dataset.v || ''), '안 팔았다면 · 판 것 하나씩', el),
     benchTog: el => { const k = el.dataset.v, s9 = benchSet(); if (BENCH_K.indexOf(k) < 0) return; if (s9.has(k)) s9.delete(k); else s9.add(k);
       LS.set('tj_v2_bench', Array.from(s9).join(',')); if (s9.size) benchLoad(!(S.bench && S.bench.d)); vib(); renderView(); },
     chartDays: el => { const v = +el.dataset.v; if (!CH_RANGES.some(r => r[0] === v)) return; S.chartDays = v; S.chartUser = true; LS.set('tj_v2_chart_days', String(v)); vib(); if (v > 30) histLoad(); renderView(); },
@@ -7662,7 +8242,7 @@
     drawerClose: () => closeDrawer(),
     receipt: el => { const v = String(el.dataset.v || ''), i = v.indexOf('|'); if (i > 0) openReceipt(v.slice(0, i), v.slice(i + 1), el.dataset.rk); },
     receiptTop: el => { const iso = isoDay(String(el.dataset.v || '')); if (!iso) return; const rows = dayContrib(iso), i = rows.findIndex(rcptable);
-      if (i >= 0) openReceipt(iso, rows[i].sym, i + 1); else { wkOff(); S.day = iso.slice(5); S.calYM = iso.slice(0, 7); go('daily'); } },
+      if (i >= 0) openReceipt(iso, rows[i].sym, i + 1); else openDay(iso); },
     lpGo: el => { const v = String(el.dataset.v || '').split('|'), iso = v[0], pool = v[1] || '', key = v[2] || '';
       if (!isISO(iso) || !pool) return;
       const md = iso.slice(5), keys = key ? [key] : S.D.lpCycles.filter(p => String(p.sym) === pool && Math.abs(num((p.realizedByDay || {})[md]) + num((p.realizedByDay || {})[iso])) >= 0.005).map(p => p.key);
@@ -7697,17 +8277,6 @@
       const jump = () => setTimeout(() => { const c = document.getElementById('dayEv'); if (!c) return; c.scrollIntoView({ block: 'start' }); const h = c.querySelector('.h2'); if (h) { h.setAttribute('tabindex', '-1'); try { h.focus({ preventScroll: true }); } catch (e) {  } } }, 80);
       if (S.tab !== 'daily') { location.hash = 'daily'; jump(); } else { renderView(); jump(); }
     },
-    rcptCsv: () => {
-      const R = S.rcpt, d = R && ((S.rcptC || {})[R.key] || {}).d; if (!d || d.empty) return;
-      const rows = [['차익 영수증(참고용)', R.iso, d.sym], ['실현(USD)', cN(d.realized.usd)], ['실현(KRW · 매도 시각 환율)', d.realized.krw == null ? '' : cN(d.realized.krw)],
-        ['매도 대금(USD · 세금 명세)', cN(d.tax.disp)], ['매도 대금(KRW)', d.tax.dispKrw == null ? '' : cN(d.tax.dispKrw)]];
-      if (d.tax.recon) rows.push(['매수 원가(USD) = 대금 − 실현', cN((d.tax.disp - d.realized.usd).toFixed(2))]);
-      rows.push(['원가 확인(%)', d.sell.costKnownPct == null ? '' : d.sell.costKnownPct]);
-      rows.push([]); rows.push(['시각(KST)', '장소', '수량', '금액(USD)', '체결가(USD)', '환율(KRW/USD)', '원가 미확인 수량']);
-      arr(d.fills).forEach(f => rows.push([R.iso + ' ' + kstHM(f.ts), f.v, cN(f.q), cN(f.usd), f.px, f.rate == null ? '' : f.rate, f.unk == null ? '' : cN(f.unk)]));
-      if (d.fillsTotal > arr(d.fills).length) rows.push(['(일부) 큰 매도 ' + arr(d.fills).length + '건 · 전체 ' + d.fillsTotal + '건']);
-      download('차익영수증_' + d.sym + '_' + R.iso + '.csv', rows);
-    },
     revTog: el => { S.revOpen = S.revOpen === el.dataset.v ? null : el.dataset.v; renderView(); },
     attTog: el => { S.attOpen = S.attOpen === el.dataset.v ? null : el.dataset.v; renderView(); },
     dayView: el => { S.dayView = el.dataset.v === 'each' ? 'each' : 'grp'; S.dayEvLimit = 20; renderView(); },
@@ -7736,12 +8305,15 @@
     holdMore: () => { S.hold.limit += 50; renderView(); },
     holdLess: () => { S.hold.limit = S.mobile ? 12 : 15; renderView(); },
     venueAll: () => { S.venueAll = !S.venueAll; renderView(); },
-    venueTog: el => tog(S.venueOpen, el.dataset.k),
+    venueOpen: el => venueOpen(el),
+    venueCoin: el => { const sym = String(el.dataset.v || ''); if (sym) revealAndHighlight('coin:' + sym); },
+    venueCoinAll: () => { S.venueCoinAll = !S.venueCoinAll; renderOverlay(); },
+    venueRec: () => { const v = arr(S.D && S.D.venues).find(x => nmKey(x.name) === S.venueK), f = v && vnSrc(vnModel(v)); if (!f) return;
+      S.src = { mode: f.mode, key: f.key }; S.j.limit = J_FIRST; closeDrawer(true); S.tab = 'journal'; S.pop = null;
+      try { history.pushState(null, '', location.pathname + location.search + '#journal'); } catch (e) {  } syncUrl(); render(); window.scrollTo(0, 0); },
     stTog: el => tog(S.stOpen, el.dataset.k),
     lpTog: el => tog(S.lpOpen, el.dataset.k),
     lpClosed: () => { S.lpClosed = !S.lpClosed; renderView(); },
-    csvHold: () => CSV.hold(), csvJournal: () => { S.pop = null; CSV.journal(); renderView(); }, csvTax: () => { S.pop = null; CSV.tax(); renderView(); }, csvKrw: () => { S.pop = null; CSV.krw(); renderView(); },
-    csvDaily: () => CSV.daily(), csvPend: () => CSV.pend(), csvSettings: () => CSV.settings(),
     pop: el => { const v = el.dataset.v; S.pop = S.pop === v || (v === 'period' && S.pop === 'range') ? null : v; if (S.pop === 'dpk') S.drafts.dpq = ''; renderView();
       if (v === 'dpk') { const n = S.pop === 'dpk' ? (S.mobile ? null : $('.pop.dpkpop input')) : $('#dayEv [data-a=pop][data-v=dpk]'); if (n) n.focus({ preventScroll: true }); } },
     popClose: () => { S.pop = null; renderView(); },
@@ -7805,7 +8377,7 @@
         .then(d => {
           S.dm.busy = false;
           if (!d) return;
-          S.dm.local[k] = { memo: String(d.memo || ''), at: num(d.at) || Math.floor(Date.now() / 1000) };
+          S.dm.local = Object.assign({}, S.dm.local, { [k]: { memo: String(d.memo || ''), at: num(d.at) || Math.floor(Date.now() / 1000) } });
           delete S.drafts['dm:' + k];
           if (S.dm.ed === k) S.dm.ed = null;
           const ae = document.activeElement; if (ae && ae.blur && ae.getAttribute && ae.getAttribute('data-draft') === 'dm:' + k) ae.blur();
@@ -7875,7 +8447,7 @@
     ofTog: el => tog(S.of.open, el.dataset.k),
     flowRec: el => { const k = el.dataset.k; if (S.of.fr.has(k)) S.of.fr.delete(k); else S.of.fr.add(k); renderView(); },
     flowReg: el => { const a = el.dataset.k, r = ofByAddr(el.dataset.v), x = r && r.flow ? r.flow.recips.find(y => y.addr === a) : null;
-      confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 추적 지갑에 추가해요' + (x && x.chains.length ? '(' + x.chains.map(c => CHAIN_KO[c] || c).join(' · ') + ')' : '') + '.\n근거: ' + (x ? x.score.ev.map(e => hs(e.t, 1)).join(' · ') : '') + '\n수집기가 다시 시작되면 과거 내역을 채워요.', ok: '등록',
+      confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 추적 지갑에 추가해요' + (x && x.chains.length ? '(' + x.chains.map(c => CHAIN_KO[c] || c).join(' · ') + ')' : '') + '.\n근거: ' + (x ? x.score.ev.map(e => hs(e.t, 1)).join(' · ') : '') + '\n' + (ofAuto() ? '곧 자동으로 수집을 시작해 과거 내역을 채워요.' : '수집기가 다시 시작되면 과거 내역을 채워요.'), ok: '등록',
         run: () => post('/api/flow_register', { address: a }, d => (d && d.restartNeeded ? '내 지갑으로 등록했어요 · 수집기 재시작 뒤 반영돼요' : '내 지갑으로 등록했어요')) }); },
     ofPick: el => { const a = el.dataset.k; S.of.form[a] = S.of.form[a] === el.dataset.v ? '' : el.dataset.v; vib(); renderView(); },
     ofChain: el => { const a = el.dataset.k, k = 'of:' + a + ':chains', r = ofByAddr(a); const cur = S.drafts[k] != null ? String(S.drafts[k]).split(',').filter(Boolean) : (r ? r.chains.slice() : []); const i = cur.indexOf(el.dataset.v); if (i >= 0) cur.splice(i, 1); else cur.push(el.dataset.v); S.drafts[k] = cur.join(','); renderView(); },
@@ -7888,7 +8460,7 @@
       } else if (v === 'own') {
         const chs = S.drafts['of:' + a + ':chains'] != null ? String(S.drafts['of:' + a + ':chains']).split(',').filter(Boolean) : (r ? r.chains : []);
         if (!chs.length) { toast('추적할 체인을 하나 이상 고르세요', true); return; }
-        confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 ' + (dk('alias') || '새 지갑') + ' 이름으로 추적 지갑에 추가해요.\n수집기가 다시 시작되면 과거 내역을 채우고, 이 주소로 보낸 전송은 내 지갑 간 이동으로 바뀌어요.', ok: '등록', run: () => ofResolve(a, 'own', { alias: dk('alias') || undefined, chains: chs }) });
+        confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 ' + (dk('alias') || '새 지갑') + ' 이름으로 추적 지갑에 추가해요.\n' + (ofAuto() ? '곧 자동으로 수집을 시작해' : '수집기가 다시 시작되면') + ' 과거 내역을 채우고, 이 주소로 보낸 전송은 내 지갑 간 이동으로 바뀌어요.', ok: '등록', run: () => ofResolve(a, 'own', { alias: dk('alias') || undefined, chains: chs }) });
       } else if (v === 'exchange') {
         const ex = dk('ex'); if (!ex) { toast('거래소를 고르세요', true); return; }
         ofResolve(a, 'exchange', { exchange: ex, chains: r ? r.chains : undefined }, (EX_NAMES[ex] || ex) + ' 입금주소로 저장했어요 · 1분 안에 원가가 이어져요');
@@ -7897,9 +8469,10 @@
         confirmAsk({ title: '외부 유출로 확정할까요?', body: ofName(r || { address: a }) + ' 로 보낸 ' + (r ? m(r.usdAtSend || r.usdNow) : '') + ' 를 "' + cat + '"(으)로 기록해요. 되돌리기로 언제든 취소할 수 있어요.', ok: '확정', danger: true, run: () => ofResolve(a, 'external', { category: cat, memo: dk('memo') || undefined }, '외부 유출로 기록했어요') });
       }
     },
-    ofOwnQuick: el => { const a = el.dataset.k, r = ofByAddr(a); confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 추적 지갑에 추가해요(' + (r ? r.chainNames.join(' · ') : '') + ').\n근거: ' + ((r && r.suggest && r.suggest.evidence) || '') + '\n수집기가 다시 시작되면 과거 내역을 채우고, 이 주소로 보낸 전송은 내 지갑 간 이동으로 바뀌어요.', ok: '등록', run: () => ofResolve(a, 'own', { alias: short(a), chains: r ? r.chains : undefined }) }); },
+    ofOwnQuick: el => { const a = el.dataset.k, r = ofByAddr(a); confirmAsk({ title: '내 지갑으로 등록할까요?', body: short(a) + ' 를 추적 지갑에 추가해요(' + (r ? r.chainNames.join(' · ') : '') + ').\n근거: ' + ((r && r.suggest && r.suggest.evidence) || '') + '\n' + (ofAuto() ? '곧 자동으로 수집을 시작해' : '수집기가 다시 시작되면') + ' 과거 내역을 채우고, 이 주소로 보낸 전송은 내 지갑 간 이동으로 바뀌어요.', ok: '등록', run: () => ofResolve(a, 'own', { alias: short(a), chains: r ? r.chains : undefined }) }); },
     ofRetQuick: el => { const a = el.dataset.k; confirmAsk({ title: '되돌려 받음으로 정리할까요?', body: short(a) + ' 는 흐름 추적으로 보낸 돈 이상을 돌려받았어요(직접·경유·거래소·브릿지).\n\'정리된 내역\'으로 옮기고 확인 필요 합계에서 빼요. 원장·손익은 그대로예요.', ok: '정리', run: () => post('/api/outflow_resolve', { address: a, op: 'ret', on: true }, '되돌려 받음으로 정리했어요') }); },
     flowAll: el => { const a = el.dataset.k; if (S.of.fa.has(a)) S.of.fa.delete(a); else S.of.fa.add(a); renderView(); },
+    flowSpoof: el => { const a = el.dataset.k; if (S.of.fsp.has(a)) S.of.fsp.delete(a); else S.of.fsp.add(a); renderView(); },
     ofUndo: el => { const a = el.dataset.k, r0 = (S.D.of || []).find(r => r.address === a);
       if (r0 && r0.retOk) return confirmAsk({ title: '되돌려 받음 정리를 되돌릴까요?', body: short(a) + ' 를 다시 "확인 필요"로 돌려요.', ok: '되돌리기', run: () => post('/api/outflow_resolve', { address: a, op: 'ret', on: false }, '되돌렸어요') });
       const au = r0 && !r0.verdict && (r0.matched || r0.bucket === 'returned' || r0.brU || !!r0.autoMatch); confirmAsk({ title: au ? '자동 매칭을 끌까요?' : '판정을 되돌릴까요?', body: au ? short(a) + ' 의 ' + (r0.matched ? (r0.bucket === 'bridge' ? '브릿지 자동 매칭(원가 이관)' : '거래소 입금 자동 매칭(원가 이관)') : r0.brU ? '브릿지 라벨' : r0.bucket === 'returned' ? '되돌려 받음 상쇄' : '일부 자동 매칭(원가 이관)') + '을 끄고 다시 "확인 필요"로 돌려요.' : short(a) + ' 를 다시 "확인 필요"로 돌려요. 내 지갑 등록은 설정에 남아요(지갑 삭제는 ‘연결 · 키’에서).', ok: '되돌리기', run: () => ofResolve(a, 'clear', {}, '되돌렸어요') }); },
@@ -8032,6 +8605,179 @@
   const oaPendTxt = T => !T.pend ? '' : '<span class="pvx oapend">' + [T.pendAuto ? '시세 대기 ' + T.pendAuto + '개' : '', T.pend - T.pendAuto - T.pendBrk - (T.pendNft || 0) - (T.nftErr || 0) ? '평가 대기 ' + (T.pend - T.pendAuto - T.pendBrk - (T.pendNft || 0) - (T.nftErr || 0)) + '개' : '',
     T.brkFail ? '증권사 동기화 실패 ' + T.brkFail + '곳' : '', T.pendBrk - T.brkFail ? '증권사 첫 동기화 대기 ' + (T.pendBrk - T.brkFail) + '곳' : '',
     T.pendNft ? 'NFT 바닥가 대기 ' + T.pendNft + '개' : '', T.nftErr ? 'NFT 조회 실패' : ''].filter(Boolean).join(' · ') + '</span>';
+  function levS() { if (!S.lev) S.lev = { st: '', d: null, at: 0, err: '', tab: 'all' }; return S.lev; }
+  function levLoad(force) {
+    const L = levS();
+    if (L.st === 'loading' || L.st === 'none') return;
+    if (!force && L.at && Date.now() - L.at < 60000) return;
+    L.st = 'loading';
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
+    const tmo = setTimeout(() => { if (ac) ac.abort(); }, 30000);
+    fetch('/api/leverage', ac ? { cache: 'no-store', signal: ac.signal } : { cache: 'no-store' }).then(r => {
+      if (r.status === 401) { onUnauthorized(); throw new Error('HTTP 401'); }
+      if (r.status === 404) { L.st = 'none'; L.d = null; return null; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json().then(j => { if (!j || j.v !== 1 || !Array.isArray(j.rows)) throw new Error('응답 형식 오류'); L.d = j; L.st = 'ok'; L.err = ''; L.okAt = Date.now(); });
+    }).catch(e => { L.st = 'err'; L.d = null; L.err = (e && e.name === 'AbortError') ? '응답이 30초 넘게 없어요' : ((e && e.message) || String(e)); })
+      .then(() => { clearTimeout(tmo); L.at = Date.now(); if (S.D && S.tab === 'dash') renderView(); if (S.drawer === 'lev') renderOverlay(); });
+  }
+  function levData() {
+    const L = levS();
+    if (L.d && L.okAt && Date.now() - L.okAt > 300000) { L.d = null; if (L.st !== 'loading') L.st = 'err'; L.err = '5분 넘게 새 값을 못 받았어요'; }
+    return L.d;
+  }
+  const levNeed = ms => { const L = levS(); if (L.st !== 'loading' && L.st !== 'none' && (!L.at || Date.now() - L.at >= (ms || 60000))) levLoad(true); };
+  setInterval(() => { if (!document.hidden && !S.locked && S.D && (S.tab === 'dash' || S.drawer === 'lev')) levNeed(60000); }, 15000);
+  const LEV_ST = { safe: '안전', warn: '주의', danger: '위험', unknown: '확인 못 함', nothr: '기준 모름' };
+  const LEV_OFF = { MARGIN_CALL: '마진콜', PRE_LIQUIDATION: '청산 직전', FORCE_LIQUIDATION: '청산 진행', LIQUIDATION: '청산 진행', BANKRUPTCY: '파산', Liq: '청산 진행', Adl: '자동 감축(ADL)' };
+  const LEV_MN = { ltv: 'LTV', margin_level: '레벨', debt_ratio: '부채 비율', risk_rate: '위험률', mgn_ratio: '증거금 비율', mm_rate: '유지증거금률' };
+  const levPv = t => '<span class="pvx">' + esc(t) + '</span>';
+  const levSide = r => r.side === 'SHORT' ? '숏' : r.side === 'LONG' ? '롱' : '방향 모름';
+  const levTitle = r => r.kind === 'fut' ? esc(r.base || r.sym || '') + ' ' + levSide(r) + (r.lev ? ' <span class="pvx">×' + esc(String(+(+r.lev).toFixed(2))) + '</span>' : '') : esc(r.kindKo || '');
+  function levMetric(r) {
+    if (r.kind === 'fut') return r.liq ? '청산가 ' + px(r.liq) : '<span class="mut">청산가 없음</span>';
+    const mt = r.metric;
+    if (!mt) return '<span class="mut">—</span>';
+    return levPv(mt.inf ? (LEV_MN[mt.name] || '') + ' 부채 없음' : mt.txt.replace(/^마진 레벨/, '레벨'));
+  }
+  function levLine(r, short) {
+    if (short && r.state !== 'unknown') {
+      const off9 = r.official && r.official.level >= 1 ? (LEV_OFF[r.official.v] || r.official.v) + ' · ' : '';
+      const pre9 = r.state === 'danger' ? '위험 · ' : r.state === 'warn' ? '주의 · ' : '';
+      return esc(off9) + pre9 + (r.state === 'nothr' && r.kind !== 'fut' ? '기준 모름' : levPv(r.dropShort || r.drop || ''));
+    }
+    if (r.state === 'unknown') return (short ? '값 못 받음(' : '지금 값을 못 받았어요(') + ago(r.measuredAt) + ' 값' + (r.kind === 'fut' ? (r.liq ? ' · 청산가 ' + px(r.liq) : '') : r.metric ? ' · ' + levPv(r.metric.txt) : '') + ')' + (short ? '' : ' — 받을 때까지 안전·위험 판정을 하지 않아요');
+    const off = r.official && r.official.level >= 1 ? (LEV_OFF[r.official.v] || r.official.v) + ' · ' : '';
+    const pre = r.state === 'danger' ? '위험 · ' : r.state === 'warn' ? '주의 · ' : r.state === 'nothr' && r.kind !== 'fut' ? '기준 모름 · ' : '';
+    const d = r.drop ? levPv(r.drop) : r.kind === 'fut' ? '' : levPv('거래소가 마진콜·청산 기준을 주지 않아 값만 보여요');
+    return esc(off) + pre + d;
+  }
+  const levAgeT = (r, full) => (r.sent ? '<span class="lvsent" title="' + esc(r.sent.label + ' — 빠른 감시가 텔레그램으로 알렸어요 · 값 측정 ' + ago(r.measuredAt)) + '">' + (full ? esc(r.sent.label) : '알림 보냄') + ' · ' + ago(r.sent.at) + '</span>' : ago(r.measuredAt));
+  function levGauge(r) {
+    const g = r.gauge, L9 = r.lbl || {};
+    if (!g || r.state === 'unknown') return '<div class="lvg none" aria-hidden="true"></div><div class="lvgl"><span>' + (r.state === 'unknown' ? '판정 보류' : levPv(L9.now || '기준 모름')) + '</span><span>' + (r.state === 'unknown' ? '' : '기준 모름') + '</span></div>';
+    const pc = v => Math.round(Math.max(0, Math.min(1, num(v))) * 1000) / 10 + '%';
+    const end = r.kind === 'fut' ? '청산 ' + (r.liq ? px(r.liq) : '') : levPv(L9.end || '');
+    return '<div class="lvg" role="img" aria-label="' + esc((L9.now || '') + ' · ' + (L9.mark || '') + ' · ' + (L9.end || '')) + '"><i class="f" style="width:' + pc(g.fill) + '"></i>' + (g.at != null ? '<i class="c" style="left:' + pc(g.at) + '"></i>' : '') + '<i class="e"></i></div>'
+      + '<div class="lvgl num"><span>' + levPv(L9.now || '') + '</span><span>' + (L9.mark ? levPv(L9.mark) + ' · ' : '') + end + '</span></div>';
+  }
+  function levSub(r) {
+    if (r.kind === 'fut') return (r.mode ? (r.mode === 'cross' ? '교차' : '격리') + ' · ' : '') + '진입 ' + px(r.entry) + ' · 마크 ' + px(r.mark);
+    const ds = arr(r.debts), cs = arr(r.coll), yr = ds.find(x => x.yr != null);
+    if (r.kind === 'loan') return '담보 ' + esc(cs.map(c => c.ccy).join('·') || '—') + ' → 부채 ' + esc(ds.map(x => x.ccy).join('·') || '—') + (yr ? ' · ' + levPv('연 ' + pctS(yr.yr * 100, 1).replace('+', '')) : '');
+    return '차입 ' + esc(ds.map(x => x.ccy).join('·') || '—') + (num(r.dayUsd) > 0 ? ' · 하루 이자 ≈ ' + m(r.dayUsd) : '');
+  }
+  function levDebtHTML(cls) {
+    const D = S.D;
+    if (!D || !arr(D.debts).length) return '';
+    return '<span class="lvdebt' + (cls ? ' ' + cls : '') + '" title="' + esc(D.debtLbl + ' — ' + D.debtTip() + ' · 상환 전 · 총자산에 이미 빠져 있어요') + '"><span class="mut">빌린 돈</span> <b class="num down">' + m(D.debtUsd, { sign: true, compact: true }) + '</b> <span class="mut">(총자산에 반영됨)</span></span>';
+  }
+  function levHTML() {
+    levNeed(60000);
+    const L = levS(), d = levData();
+    const icon = '<svg class="lvic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>';
+    const debtH = levDebtHTML();
+    if (L.st === 'none' || (!d && L.st !== 'err')) return debtH ? '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + debtH + '<span class="sp"></span>' + (L.st === 'none' ? '' : '<span class="cap" role="status">불러오는 중…</span>') + '</section>' : '';
+    if (!d) return '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + debtH + '<span class="mut" role="status">불러오지 못했어요 · ' + esc(errTxt(L.err)) + '</span><span class="sp"></span><button class="link" data-a="levRetry">다시 시도</button></section>';
+    const C = d.counts || {}, rows = arr(d.rows), top = rows[0];
+    const unc = num(C.unconfirmed), age = d.levTs ? ago(d.levTs) : '';
+    const pills = (num(C.danger) ? '<span class="lvp danger pvx">위험 ' + C.danger + '</span>' : '') + (num(C.warn) ? '<span class="lvp warn pvx">주의 ' + C.warn + '</span>' : '') + (num(C.unknown) ? '<span class="lvp unk pvx">확인 못 함 ' + C.unknown + '</span>' : '');
+    const day = d.dayUsd != null && num(d.dayUsd) > 0 ? '하루 이자 ≈ ' + m(d.dayUsd) : '';
+    if (!rows.length) {
+      const msg = d.missing ? '수집 전' : '열린 것 없음 · <span class="pvx">' + num(d.exchanges) + '개 거래소</span> ' + age;
+      return '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + (debtH ? debtH + '<span class="mut lvmsg">' + (d.missing ? '수집 전' : age) + '</span>' : '<span class="mut lvmsg">' + msg + '</span>') + '<span class="sp"></span>'
+        + (unc ? '<span class="cap pvx">확인 못 한 곳 ' + unc + '</span>' : '') + '<button class="link" data-a="levOpen">전체 보기' + IC.right + '</button></section>';
+    }
+    const stc = top ? top.state : 'safe';
+    if (S.mobile) {
+      const next = rows.slice(1, 3).map(r => '<span class="lvmr"><span>' + esc(r.exKo) + ' ' + levTitle(r) + ' · ' + levMetric(r) + '</span><span class="lvmd st-' + r.state + '">' + (r.state === 'unknown' ? '확인 못 함' : r.kind === 'fut' ? (r.dist != null ? levPv(r.dist <= 0 ? '청산가 지남' : '청산까지 ' + (r.side === 'SHORT' ? '+' : '−') + (r.dist * 100).toFixed(1) + '%') : '청산가 없음') : r.dropCall != null && r.dropCall > 0 ? levPv('콜까지 −' + Math.round(r.dropCall * 100) + '%') : r.dropLiq != null && r.dropLiq > 0 ? levPv('청산까지 −' + Math.round(r.dropLiq * 100) + '%') : esc(LEV_ST[r.state])) + '</span></span>').join('');
+      const pills2 = (num(C.danger) ? '<span class="lvp danger pvx">위험 ' + C.danger + '</span>' : '') + (num(C.warn) ? '<span class="lvp warn pvx">주의 ' + C.warn + '</span>' : '') + (!num(C.danger) && !num(C.warn) && num(C.unknown) ? '<span class="lvp unk pvx">확인 못 함 ' + C.unknown + '</span>' : '');
+      return '<button type="button" class="card lev lvm st-' + stc + '" data-a="levOpen" aria-label="레버리지 · 대출 — 전체 보기"><span class="lvh"><b>레버리지 · 대출</b>' + (pills2 || '<span class="lvp pvx">열린 것 ' + rows.length + '</span>') + '<span class="sp"></span><span class="cap lvcnt pvx">' + rows.length + '개' + IC.right + '</span></span>'
+        + (debtH ? levDebtHTML('lvmdebt') : '') + '<span class="lvml st-' + stc + '">' + esc(top.exKo) + ' ' + levTitle(top) + ' — ' + levLine(top, true) + '</span>' + (top.state !== 'unknown' && top.gauge ? '<span class="lvgw">' + levGauge(top) + '</span>' : '')
+        + (next ? '<span class="lvml2">' + next + '</span>' : '') + '<span class="lvmf"><span>' + (day || '&nbsp;') + '</span><span>' + (unc ? '<span class="pvx">확인 못 한 곳 ' + unc + '</span> · ' : '') + levAgeT(top, true) + '</span></span></button>';
+    }
+    const row = r => '<button type="button" class="lvr st-' + r.state + '" data-a="levOpen" data-v="' + esc(r.id) + '"><span class="lvn"><b>' + esc(r.exKo) + ' <span class="k">· ' + (r.kind === 'fut' ? levTitle(r) : esc(r.kindKo)) + '</span></b><span class="cap">' + levSub(r) + '</span></span>'
+      + '<span class="lvgw">' + levGauge(r) + '</span><span class="lvv num">' + levMetric(r) + '</span><span class="lvd st-' + r.state + '">' + levLine(r, true) + '</span><span class="lva">' + levAgeT(r) + '</span></button>';
+    const more = rows.length > 3 ? uiMore('lev:dash', rows.slice(3), 0, row, { less: true, cls: 'lvmore', label: (rest) => '<span class="pvx">' + rest + '개 더</span> · ' + rows.slice(3, 5).map(r => esc(r.exKo + ' ' + (r.kind === 'fut' ? (r.base || '') + ' ' + levSide(r) : r.kindKo))).join(' · ') + (rest > 2 ? ' 외' : '') }) : '';
+    return '<section class="card lev st-' + stc + '" aria-label="레버리지 · 대출"><div class="lvh">' + icon + '<h2>레버리지 · 대출</h2><span class="lvp pvx">열린 것 ' + rows.length + '</span>' + (day ? '<span class="lvp num">' + day + '</span>' : '') + pills + (debtH ? '<span class="lvp lvpd">' + debtH + '</span>' : '')
+      + '<span class="sp"></span>' + (unc ? '<span class="cap pvx" title="키 권한·조회 실패로 위험을 확인하지 못한 곳(전체 보기에서 이유)">확인 못 한 곳 ' + unc + '</span>' : '') + '<button class="link" data-a="levOpen">전체 보기' + IC.right + '</button></div>'
+      + '<div class="lvrows">' + rows.slice(0, 3).map(row).join('') + more + '</div></section>';
+  }
+  function levCard(r) {
+    const kv = [];
+    const add = (k, v) => { if (v != null && v !== '') kv.push('<div><span>' + esc(k) + '</span><b class="num">' + v + '</b></div>'); };
+    const ds = arr(r.debts), cs = arr(r.coll), mt = r.metric;
+    const rateT = x => (x && x.yr != null ? levPv('연 ' + (x.yr * 100).toFixed(x.yr < 0.1 ? 2 : 1) + '%') : '<span class="mut">모름</span>');
+    if (r.kind === 'fut') {
+      add('수량', q(r.qty) + ' ' + esc(r.qtyUnit === 'contract' ? '계약' : r.qtyUnit === 'usd' ? 'USD' : (r.base || '')));
+      add('진입', px(r.entry)); add('마크', px(r.mark)); add('청산가', r.liq ? px(r.liq) : '<span class="mut">없음</span>');
+      add('미실현', r.upnlUsd != null ? '<span class="' + clsV(r.upnlUsd) + '">' + m(r.upnlUsd, { sign: true }) + '</span>' : '—');
+      add('레버리지', r.lev ? levPv('×' + String(+(+r.lev).toFixed(2))) : '—');
+      add('증거금', r.mode === 'cross' ? '교차' : r.mode === 'isolated' ? '격리' : '—');
+      if (r.acctMm != null) add('계정 유지증거금률', levPv((r.acctMm * 100).toFixed(1) + '%'));
+    } else {
+      if (r.kind === 'loan') {
+        add('담보', cs.map(c => q(c.qty) + ' ' + esc(c.ccy)).join(' · ') || '—');
+        ds.forEach(x => add('부채 ' + x.ccy, q(x.total)));
+      }
+      if (mt) add(LEV_MN[mt.name] || '지표', levPv(mt.inf ? '부채 없음' : String(mt.txt || '').split(' ').pop()));
+      if (mt && (mt.call != null || mt.liq != null || mt.warn != null)) add(mt.call != null ? '마진콜 · 청산' : '경고 · 청산', levPv([mt.call != null ? mt.call : mt.warn, mt.liq].filter(v => v != null).map(v => mt.unit === 'frac' ? (v * 100).toFixed(1) + '%' : String(+v.toFixed(2))).join(' · ')));
+      ds.slice(0, 3).forEach(x => add((r.kind === 'loan' ? '원금 · 이자' : x.ccy + ' 원금 · 이자') + (r.kind === 'loan' && ds.length > 1 ? ' ' + x.ccy : ''), x.principal != null ? q(x.principal) + ' · ' + q(x.interest) : q(x.total) + ' <span class="mut pvx">(합)</span>'));
+      if (ds.length) add('이자율', rateT(ds.find(x => x.yr != null) || ds[0]));
+      if (num(r.dayUsd) > 0) add('하루 이자', '≈ ' + m(r.dayUsd));
+      if (r.liqPx) add('청산가', esc(String(r.liqPair || '').split(/[-/_]/)[0]) + ' ' + px(r.liqPx));
+      if (r.pairDist != null) add('청산가까지', levPv((r.pairDist * 100).toFixed(1) + '%'));
+    }
+    add('기준', '<span' + (r.note ? ' title="' + esc(r.note) + '"' : '') + '>' + (r.thr === 'api' ? '거래소 제공' : r.thr === 'doc' ? '공식 문서' : r.thr === 'config' ? '내 설정' : r.thr === 'tj' ? 'tj-bot 기본(거래소가 마진콜 기준을 주지 않음)' : '<span class="mut">기준 모름</span>') + '</span>');
+    add('측정', ago(r.measuredAt));
+    const off = r.fresh && r.state !== 'unknown' && r.official && r.official.level >= 1 ? '<span class="lvp ' + (r.official.level >= 2 ? 'danger' : 'warn') + '" title="거래소가 알려 준 상태">' + esc(LEV_OFF[r.official.v] || r.official.v) + '</span>' : '';
+    return '<article class="lvc st-' + r.state + '" data-lid="' + esc(r.id) + '" tabindex="-1"><div class="lvch"><b>' + esc(r.exKo) + ' ' + (r.kind === 'fut' ? '선물' : esc(r.kindKo)) + '</b><span class="cap">' + (r.kind === 'fut' ? levTitle(r) + (r.mode ? ' · ' + (r.mode === 'cross' ? '교차' : '격리') : '') : levSub(r)) + '</span><span class="sp"></span>' + off + '<span class="lvp ' + esc(r.state) + '">' + esc(LEV_ST[r.state] || r.state) + '</span></div>'
+      + '<div class="lvkv">' + kv.join('') + '</div>' + (r.state === 'unknown' ? '' : '<div class="lvgw">' + levGauge(r) + '</div>')
+      + '<div class="lvd st-' + r.state + '">' + levLine(r, false) + (r.sent ? ' · ' + levAgeT(r, true) : '') + '</div></article>';
+  }
+  function levDrawer() {
+    const L = levS(), d = levData();
+    const head = '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer lev" role="dialog" aria-modal="true" aria-label="레버리지 · 대출"><div class="dh"><div class="h2">레버리지 · 대출</div><span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>';
+    if (!d) return head + '<div class="cap" role="status">' + (L.st === 'err' ? '불러오지 못했어요 · ' + esc(errTxt(L.err)) + ' <button class="link" data-a="levRetry">다시 시도</button>' : '불러오는 중…') + '</div></aside>';
+    const rows = arr(d.rows), T = d.tabs || {}, tab = ['all', 'fut', 'margin', 'loan'].indexOf(L.tab) >= 0 ? L.tab : 'all';
+    const seg = '<div class="seg lvseg" role="group" aria-label="종류">' + [['all', '전체'], ['fut', '선물'], ['margin', '마진'], ['loan', '대출']].map(x => '<button data-a="levTab" data-v="' + x[0] + '" class="' + (tab === x[0] ? 'on' : '') + '" aria-pressed="' + (tab === x[0]) + '">' + x[1] + ' <span class="num pvx">' + num(T[x[0]]) + '</span></button>').join('') + '</div>';
+    const cap = '<div class="cap lvcap"><span class="pvx">' + num(d.exchanges) + '개 거래소</span> · 마진·대출·선물 10분마다 확인' + (d.levTs ? ' · 마지막 확인 ' + ago(d.levTs) : '') + (d.missing ? ' · 아직 수집 전' : '') + '</div>';
+    const DD = S.D && arr(S.D.debts).length ? S.D : null;
+    const tiles = '<div class="lvtiles">' + uiCell('빌린 돈 합계', DD ? '<span class="down">' + m(DD.debtUsd, { sign: true, compact: true }) + '</span>' : d.debtUsd != null && num(d.debtUsd) > 0 ? '<span class="down">' + m(-num(d.debtUsd), { compact: true }) + '</span>' : '<span class="mut">없음</span>', null, null, DD ? DD.debtLbl + ' — 총자산에 이미 빠져 있어요 · ' + DD.debtTip() + ' · 상환 전' : '')
+      + uiCell('하루 이자 (추정)', d.dayUsd != null && num(d.dayUsd) > 0 ? '≈ ' + m(d.dayUsd, { compact: true }) : '<span class="mut">—</span>')
+      + uiCell('선물 미실현', d.upnlUsd != null ? '<span class="' + clsV(d.upnlUsd) + '">' + m(d.upnlUsd, { sign: true, compact: true }) + '</span>' : '<span class="mut">' + (d.tabs && d.tabs.fut ? '모름' : '포지션 없음') + '</span>') + '</div>'
+      + '<div class="cap lvpart">' + (DD ? '빌린 돈은 총자산에 이미 빠져 있어요(상환 전) · 거래소·코인별은 아래 카드' : '') + (d.dayPartial ? (DD ? ' · ' : '') + '시세나 이자율을 모르는 통화는 하루 이자에서 빠졌어요' : '') + (d.debtStale ? (DD || d.dayPartial ? ' · ' : '') + '확인 못 한 줄은 마지막 값으로 더했어요' : '') + (d.upnlPartial && d.upnlUsd != null ? (DD || d.dayPartial || d.debtStale ? ' · ' : '') + '미실현을 모르는 포지션은 선물 미실현 합에서 빠졌어요' : '') + '</div>';
+    const list = rows.filter(r => tab === 'all' || r.kind === tab);
+    const cards = list.length ? uiMore('lev:dr:' + tab, list, 4, levCard, { unit: '개', less: true, label: rest => '<span class="pvx">' + rest + '개 더</span> — ' + list.slice(4, 6).map(r => esc(r.exKo + ' ' + (r.kind === 'fut' ? (r.base || '') + ' ' + levSide(r) : r.kindKo))).join(' · ') + (rest > 2 ? ' 외' : '') })
+      : '<div class="futnone">' + IC.info.replace('<svg', '<svg width="18" height="18"') + '<span>' + (tab === 'all' ? '열린 선물·마진 차입·대출이 없어요' : '이 종류는 열린 것이 없어요') + '</span></div>';
+    const U = arr(d.unconfirmed), N = arr(d.unsupported);
+    const fl = (U.length || N.length) ? '<div class="lvfold">' + uiFold('lev:unc', {
+      cls: 'plain', label: '확인 못 한 곳과 지원 안 함',
+      head: '<b class="pvx">확인 못 한 곳 ' + U.length + ' · 지원 안 함 ' + N.length + '</b><span class="cap">' + esc(U.concat(N).slice(0, 2).map(x => x.exKo + ' ' + x.productKo + '(' + x.reason + ')').join(' · ')) + '</span>',
+      body: () => U.concat(N).map(x => '<div class="kv"><span class="row gap8">' + exLogo(x.ex) + '<span><b style="color:var(--text)">' + esc(x.exKo) + '</b> ' + esc(x.productKo) + '</span></span><span class="' + (U.indexOf(x) >= 0 ? 'wtxt' : 'mut') + '">' + esc(x.reason) + '</span></div>').join('')
+        + '<div class="cap" style="margin-top:8px">확인 못 한 곳은 위험이 있어도 이 화면에 안 보일 수 있어요 — 키 권한(읽기)·연결을 확인해 주세요. 지원 안 함 = 거래소가 공개 API 를 주지 않거나 계정을 열지 않은 곳이에요.</div>'
+    }) + '</div>' : '';
+    return head + cap + seg + tiles + '<div class="lvcards">' + cards + '</div>' + fl + '</aside>';
+  }
+  function levOpen(el) {
+    const ae = document.activeElement;
+    S.levBack = ae && ae.getAttribute && ae.getAttribute('data-a') ? { el: ae, a: ae.getAttribute('data-a'), v: ae.getAttribute('data-v') } : null;
+    const L = levS(), id = el && el.dataset ? el.dataset.v : '';
+    if (id && L.d) { const r = arr(L.d.rows).find(x => x.id === id); if (r && L.tab !== 'all' && r.kind !== L.tab) L.tab = 'all';
+      if (r) { const lst = arr(L.d.rows).filter(x => L.tab === 'all' || x.kind === L.tab), i = lst.indexOf(r); if (i >= 4) S.uiMore['lev:dr:' + L.tab] = i + 1; } }
+    S.drawer = 'lev';
+    drawerHist();
+    renderOverlay();
+    const c = id ? [...document.querySelectorAll('#overlay .lvc')].find(x => x.getAttribute('data-lid') === id) : null;
+    if (c) { try { c.scrollIntoView({ block: 'center' }); c.focus({ preventScroll: true }); } catch (e) {  } }
+    else { const b = $('#overlay .drawer [data-a="drawerClose"]'); if (b) b.focus(); }
+    levNeed(30000);
+  }
+  Object.assign(A, {
+    levOpen: el => levOpen(el),
+    levTab: el => { const L = levS(), v = el.dataset.v; if (['all', 'fut', 'margin', 'loan'].indexOf(v) < 0) return; L.tab = v; vib(); renderOverlay(); },
+    levRetry: () => { const L = levS(); L.st = ''; L.at = 0; levLoad(true); renderView(); if (S.drawer === 'lev') renderOverlay(); },
+  });
   function oaLoad(force) {
     const O = S.oa;
     if (O.st === 'loading' || O.st === 'none') return;
@@ -8343,6 +9089,14 @@
     return ({ bought: '산 것', mint_paid: '유료 민팅', mint_free: '직접 민팅(무료)', claim: '직접 수령(무료)', internal: '내 다른 지갑에서 옮김', received: '남이 보낸 것',
       airdrop_mass: '대량 에어드랍', unknown: '들어온 경위 모름' }[a.kind] || esc(a.kind_ko || a.kind)) + paid;
   }
+  function nftTrade(r) {
+    const t = r && r.trade;
+    if (!t || (!t.exact && num(t.within) <= 7)) return '';
+    const txt = t.exact ? (num(t.days) < 1 ? '오늘 거래' : '마지막 거래 ' + num(t.days) + '일 전') : num(t.within) === 30 ? '30일 거래' + (num(t.n) ? ' ' + num(t.n) + '건' : '') : '최근 ' + num(t.within) + '일 안 거래';
+    const old = num(t.days) > 90, out = r.reason === 'thin_old' && !r.promoted && !r.watch;
+    return '<span class="' + (old ? 'wtxt' : 'mut') + '" title="' + esc('거래가 뜸한 컬렉션 — 바닥가(리스팅)로 평가 · 근거 = 오픈시 30일 체결 수·마지막 체결' + (out ? ' · 마지막 거래 90일+ 라 총자산에서는 뺐어요' : '')) + '">' + txt + (out ? ' · 총자산 제외' : '') + '</span>';
+  }
+  const nftSer = r => { const x = r && r.series; if (!x || !x.plat) return ''; return esc(x.plat) + (x.split ? ' · 시리즈 나누는 중' : ''); };
   function nftTrackRows(d) {
     const seen = new Set(), out = [];
     arr(d.tracked).concat(arr(d.watch)).forEach(r => { if (r && r.key && !seen.has(r.key)) { seen.add(r.key); out.push(r); } });
@@ -8350,10 +9104,11 @@
   }
   function nftRow(r) {
     const fp = r.fp || null, held = num(r.count) > 0, v = r.value || null, dd = r.dday || null;
-    const sub = [nftCh(r.chain), r.watch && !held ? '지켜보기 · 보유 없음' : r.promoted ? '직접 고름' : nftAcq(r)].filter(Boolean).join(' · ');
+    const sub = [nftCh(r.chain), nftSer(r), r.watch && !held ? '지켜보기 · 보유 없음' : r.promoted ? '직접 고름' : nftAcq(r)].filter(Boolean).join(' · ');
     const undo = r.watch ? '<button class="link nftun" data-a="nftOp" data-op="watch_remove" data-k="' + esc(r.key) + '">지켜보기 해제</button>'
       : r.promoted ? '<button class="link nftun" data-a="nftOp" data-op="unpromote" data-k="' + esc(r.key) + '">추적 해제</button>' : '';
-    const fpTxt = fp && fp.native ? '<div class="num">' + nftNat(fp.native, fp.sym) + (fp.usd != null ? ' · ' + px(fp.usd) : '') + '</div><div class="nfts">' + esc((NFT_SRC[fp.src] || fp.src_ko || fp.src || '') + (fp.at ? ' · ' + ago(fp.at) : '')) + (fp.stale ? ' · <span class="wtxt">오래됨</span>' : '') + '</div>'
+    const trd = nftTrade(r);
+    const fpTxt = fp && fp.native ? '<div class="num">' + nftNat(fp.native, fp.sym) + (fp.usd != null ? ' · ' + px(fp.usd) : '') + '</div><div class="nfts">' + esc((fp.basis === 'last' ? '마지막 체결가 · ' : '') + (NFT_SRC[fp.src] || fp.src_ko || fp.src || '') + (fp.at ? ' · ' + ago(fp.at) : '')) + (fp.stale ? ' · <span class="wtxt">오래됨</span>' : '') + (trd ? ' · ' + trd : '') + '</div>'
       : '<div class="mut">—</div><div class="nfts">' + (r.neg ? '시세 출처에 없음' : '바닥가 받는 중') + '</div>';
     const vol = fp && fp.vol7 != null ? nftNat(fp.vol7, fp.sym) : fp && fp.vol24 != null ? '<span class="nfts">24h</span> ' + nftNat(fp.vol24, fp.sym) : '—';
     const day = dd && dd.pct != null && isFinite(dd.pct) ? '<span class="' + clsP(dd.pct) + '" title="' + esc('어제 대비 바닥가(달러) ' + pctS(dd.pct, 2) + (dd.usd != null ? ' · 평가 ' + nM(dd.usd, { sign: true }) : '')) + '">' + pctS(dd.pct, 1) + '</span>' : '<span class="mut">—</span>';
@@ -8371,7 +9126,8 @@
     const sub = [nftCh(r.chain), r.std, n9 ? nQ(n9) + '개' : ''].filter(Boolean).join(' · ');
     const hint = !fp && r.chain !== 'sol' && r.reason !== 'checking' && S.nft.d && !(S.nft.d.sources && S.nft.d.sources.opensea && S.nft.d.sources.opensea.key) ? ' · EVM 바닥가 출처 없음 — 오픈시 키 필요' : '';
     const acq = nftAcq(r);
-    const why = esc(r.reason_ko || r.reason || '') + (acq && r.reason !== 'checking' ? ' · ' + acq : '') + hint;
+    const trd = nftTrade(r), ser = r.series && r.series.plat && !r.series.split ? esc(r.series.plat) : '';
+    const why = (ser ? ser + ' · ' : '') + esc(r.reason_ko || r.reason || '') + (acq && r.reason !== 'checking' ? ' · ' + acq : '') + (trd ? ' · ' + trd : '') + hint;
     const fpT = fp && fp.native ? nftNat(fp.native, fp.sym) + (n9 > 1 || nftMask() ? ' × ' + nQ(n9) : '') + (v && v.usd != null ? ' ≈ ' + nM(v.usd) : '') : '—';
     const btn = (op, t, c) => '<button class="btn sm' + (c ? ' ' + c : '') + '" data-a="nftOp" data-op="' + op + '" data-k="' + esc(r.key) + '"' + (S.nft.busy ? ' disabled' : '') + '>' + t + '</button>';
     return '<div class="nftc" data-anc="nft:' + esc(r.key) + '">' + nftThumb(r) + '<div class="nftct"><div><b>' + esc(r.name) + '</b> <span class="nfts">' + sub + '</span></div><div class="nftwhy pvx">' + why + '</div></div>'
@@ -8397,7 +9153,9 @@
     const sumC = '<section class="card nftsum" aria-label="NFT 요약"><div class="nfth"><h2>NFT</h2><div class="nftcnt pvx">추적 <b>' + tr.filter(r => num(r.count) > 0).length + '</b> · 후보 <b>' + cands.length + '</b> · 스팸으로 거름 <b>' + num(sp.n) + '</b>'
       + (lpn ? ' · LP 포지션 NFT ' + lpn + '개는 LP 화면에서' : '') + prog + '</div></div>'
       + '<div class="nftsr"><div><div class="nftl">추적 중 평가(바닥가 × 개수)</div><div class="nftbig num">' + nM(num(T.usd), { compact: true }) + '</div>'
-      + (num(T.pending) ? '<div class="nfts pvx">바닥가 대기 ' + num(T.pending) + '개 — 합계에서 빠짐</div>' : '') + '</div>'
+      + (num(T.pending) ? '<div class="nfts pvx">바닥가 대기 ' + num(T.pending) + '개 — 합계에서 빠짐</div>' : '')
+      + (num(T.old_n) ? '<div class="nfts pvx" title="거래가 뜸한 컬렉션 중 마지막 거래가 90일 넘은 것 — 여기 평가엔 넣고 총자산(전체 순자산)에서는 뺐어요 · 직접 추적에 넣으면 포함">마지막 거래 90일+ ' + num(T.old_n) + '개(' + nM(num(T.old_usd), { compact: true }) + ') — 총자산에선 뺌</div>' : '')
+      + (num(T.split) ? '<div class="nfts pvx">아트블럭 시리즈 나누는 중 ' + num(T.split) + '개 — 다음 발견 때 시리즈별 바닥가로</div>' : '') + '</div>'
       + '<div class="nftinc"><span>총자산에 포함</span><button class="sw2' + (inc ? ' on' : '') + '" data-a="nftInc" role="switch" aria-checked="' + inc + '" aria-label="NFT 평가를 총자산(전체 순자산)에 포함"' + (N.busy ? ' disabled' : '') + '></button></div></div>'
       + '<div class="nfts">' + (inc ? '켜짐 — 대시보드·기타 자산의 \'전체 순자산\'에 NFT 줄이 더해져요(코인 총자산 숫자는 그대로)' : '꺼짐 — NFT 는 여기서만 따로 보여요') + '</div></section>';
     const head = '<div class="nftr nfthd" role="row"><div role="columnheader">컬렉션</div><div class="r" role="columnheader">개수</div><div class="r" role="columnheader">바닥가</div><div class="r" role="columnheader">거래량 7일</div><div class="r" role="columnheader">오늘 변동</div><div class="c" role="columnheader">7일 추이</div><div class="r" role="columnheader">평가</div></div>';
@@ -8417,7 +9175,7 @@
       + (N.hidOpen ? '<div class="nftsl">' + hid.map(x => '<div class="nftsi" data-anc="nft:' + esc(x.key) + '"><span class="nftsn">' + esc(x.name) + '</span><span class="nfts">' + esc(nftCh(x.chain)) + '</span><span class="sp"></span><button class="btn sm" data-a="nftOp" data-op="unhide" data-k="' + esc(x.key) + '">다시 보기</button></div>').join('') + '</div>' : '') + '</section>' : '';
     const srcs = d.sources || {}, uns = arr(sc.unsupported).map(u => nftCh(u.chain)).filter(Boolean), cg = srcs.coingecko || {};
     const osk = !!(srcs.opensea && srcs.opensea.key), cgPl = cg.plan === 'pro' ? '프로' : '데모', cgTxt = '코인게코 NFT(' + (cg.key ? (cg.key_bad ? cgPl + ' 키 거부 — 무키로 조회 중' : cgPl + ' 키') : '무키 — 무료 데모 키를 넣으면 빨라져요') + ')';
-    const note = '<div class="nftnote">바닥가 출처: 솔라나 = 매직에덴(1시간마다) · EVM = ' + (osk ? '오픈시(키 있음 · 최우선 · 미검증) → ' + cgTxt : cgTxt + ' · 오픈시 키를 넣으면 오픈시를 최우선으로 써서 NFT 추적이 더 원활해요(설정 › 연결·키)')
+    const note = '<div class="nftnote">바닥가 출처: 솔라나 = 매직에덴(1시간마다) · EVM = ' + (osk ? '오픈시(키 있음 · 최우선 · 추적 15분 · 그 밖 6시간마다) → ' + cgTxt : cgTxt + ' · 오픈시 키를 넣으면 오픈시를 최우선으로 써서 NFT 추적이 더 원활해요(설정 › 연결·키)')
       + (uns.length ? ' · ' + esc(uns.join('·')) + ' NFT 는 무료 탐색기 API 미지원이라 제외' : '') + ' · 이미지는 외부 주소라 기본 숨김(머리글자 표시)</div>';
     return '<div class="nftw">' + nftNotice(d) + sumC + trC + caC + spC + hiC + note + '</div>';
   }
@@ -8506,7 +9264,7 @@
     else inp = '<input class="field num alin alpct" inputmode="decimal" value="' + esc(String(v)) + '" data-alth="' + esc(key) + '" aria-label="' + esc(sp.label) + ' (%)"><span class="alu">%</span>';
     return '<span class="alth"><span class="cap pvx">' + esc(sp.label) + '</span>' + inp + recB + '</span>';
   }
-  const AL_NOW = ['liq', 'price', 'bigflow', 'depeg', 'health', 'move'];
+  const AL_NOW = ['liq', 'price', 'bigflow', 'arrive', 'depeg', 'balmis', 'health', 'stall', 'move'];
   const AL_DAILY = [['pnl'], ['recon'], ['scam'], ['lprange'], ['review', 'weekly'], ['oa'], ['digest'], ['other']];
   const AL_TIER0 = { now: ['즉시', '지금 폰을 보고 해야 할 일 · 소리'], daily: ['하루 요약', '소리 없이 한 통'], web: ['시스템', '분류·동기화·과거 기록 가져오기·재계산 — 텔레그램 안 보내고 상태 패널에만'] };
   const alTierL = (D, t) => { const x = arr(D.tiers).find(y => y && y.key === t); return [x && x.label || AL_TIER0[t][0], x && x.sub || AL_TIER0[t][1]]; };
@@ -8530,9 +9288,9 @@
     const D = S.al.d, on = alOn(D, c.key), n7 = (D.counts7 || {})[c.key] || {}, id = 'sx-al-' + sxId(c.key), tg = D.tg && D.tg.connected;
     const exp = () => {
       const ths = arr(c.th).length && on ? '<div class="alths">' + arr(c.th).map(alThH).join('') + '</div>' : '';
-      const hint = !on ? (c.key === 'move' ? '켜면 총자산에서 비중이 큰 코인만 · 코인마다 하루 한 번' : '') : c.key === 'liq' && D.futuresN === 0 ? '지금 선물 포지션이 없어요 — 생기면 판정해요' : c.key === 'lprange' && D.lpOpen === 0 ? '지금 열린 LP 가 없어요' : '';
+      const hint = !on ? (c.key === 'move' ? '켜면 총자산에서 비중이 큰 코인만 · 코인마다 하루 한 번' : c.key === 'stall' || c.key === 'balmis' ? '꺼 둬도 상태 패널·대시보드 상태 카드에는 그대로 보여요' : '') : c.key === 'liq' && D.futuresN === 0 ? '지금 선물 포지션이 없어요 — 생기면 판정해요' : c.key === 'lprange' && D.lpOpen === 0 ? '지금 열린 LP 가 없어요' : '';
       const cnt = [num(n7.sent) ? '보냄 ' + num(n7.sent) + '통' : '', num(n7.skip) ? '꺼서 안 보냄 ' + num(n7.skip) + '건' : '', num(n7.held) ? '밤에 모음 ' + num(n7.held) + '건' : ''].filter(Boolean);
-      return '<div class="cap pvx">' + esc(c.desc) + '</div>' + ths + (hint ? '<div class="cap alhint">' + esc(hint) + '</div>' : '') + alPrev(c.sample, 'now')
+      return '<div class="cap pvx">' + esc(c.desc) + '</div>' + ths + (hint ? '<div class="cap alhint">' + esc(hint) + '</div>' : '') + alPrev(c.sample, c.key === 'arrive' ? 'daily' : 'now')
         + '<div class="sx-acts"><span class="cap num al7 pvx">지난 7일 ' + (cnt.length ? cnt.join(' · ') : '0건') + '</span><span class="sp"></span><button class="btn sm altest" data-a="alTest" data-v="' + esc(c.key) + '"' + (tg ? '' : ' disabled title="텔레그램 연결 뒤에 쓸 수 있어요"') + ' aria-label="' + esc(c.label) + ' 테스트 보내기">테스트</button></div>';
     };
     return sxIt(id, esc(c.label), '', sxSw('alCat', on, c.label + ' 알림' + (c.crit ? ' (늘 켜짐 · 끌 수 없음)' : ''), ' data-v="' + esc(c.key) + '"' + (c.crit ? ' disabled aria-disabled="true" title="봇이 멈춘 걸 알려야 해서 끌 수 없어요"' : '')), { exp, cls: 'alrow' + (on ? '' : ' off') });
@@ -8546,6 +9304,11 @@
     }
     const pre = D.preset, tg = D.tg && D.tg.connected, pr = arr(D.presets).find(p => p.key === pre), cats = arr(D.cats), s7 = alSum7(D);
     const mig = D.migrated === 'v1-rec' ? '새 방식(즉시 + 하루 요약)으로 옮겼어요 · 예전 설정은 서버에 따로 보관' : D.migrated === 'v1-custom' ? '직접 고른 켬·끔은 그대로 옮겼어요 · 예전 설정은 서버에 따로 보관' : '';
+    const migQ = !!(D.prefs && D.prefs.quiet && D.prefs.quiet.on);
+    const migL = !D.migrated ? [] : [D.migrated === 'v1-rec' ? '예전 ‘추천’에서 켜져 있던 보유 코인 급등락 알림은 이제 꺼져 있어요 — 받으려면 아래 ‘보유 코인 급등락’을 켜세요.' : '',
+      migQ ? '조용한 시간에도 목표가·손절, 스테이블 가격 이탈, 내가 안 한 큰 출금은 이제 바로 와요 — 밤에 모아 두는 건 급등락뿐이에요.' : '',
+      '나머지 소식은 하루 한 통 요약으로 묶여요.'].filter(Boolean);
+    const migCard = migL.length ? '<div class="sx-card almig" role="note"><b>알림 방식이 바뀌었어요</b>' + migL.map(x => '<div class="cap">' + esc(x) + '</div>').join('') + '</div>' : '';
     const hero = '<div class="alhero"><div class="alhero-t"><b>꼭 필요한 것만</b><span class="cap">' + (mig ? esc(mig) : '급한 건 바로 · 나머지는 하루 한 통') + '</span></div>'
       + '<span class="cap num pvx alhero-n" title="하루 요약·시스템으로 돌린 소식을 하나씩 보냈다면 몇 통이었는지">지난 7일 보냄 ' + s7.sent + '통' + (s7.old > s7.sent ? ' · 예전 같았으면 ' + s7.old + '통' : '') + '</span></div>';
     const presets = '<div class="sx-alp" id="sx-al-pre">' + sxSeg('alPreset', arr(D.presets).map(p => [p.key, esc(p.label), pre === p.key]), '알림 추천값', true).replace(/<button data-a="alPreset" data-v="([^"]*)"/g, (a, k) => { const p9 = arr(D.presets).find(x => esc(x.key) === k); return a + (p9 && p9.desc ? ' title="' + esc(p9.desc) + '"' : ''); })
@@ -8558,7 +9321,7 @@
       sxSw('alQuiet', q.on, '조용한 시간'), { cls: 'alrow alq' + (q.on ? '' : ' off'), exp: () => (q.on ? '<div class="alths"><span class="alth">' + uiPick('alq_from', alTimes(String(q.from)), String(q.from), '조용한 시간 시작', { cls: 'altm' }) + '<span class="cap">부터</span>'
         + uiPick('alq_to', alTimes(String(q.to)), String(q.to), '조용한 시간 끝', { cls: 'altm' }) + '<span class="cap">까지</span>'
         + (q.from === '01:00' && q.to === '08:00' ? '<span class="pill ok sm altag">추천</span>' : '<button class="pill a sm altag" data-a="alQuietRec" title="추천값으로 되돌리기">추천 01:00~08:00</button>') + '</span></div>' : '<div class="cap">스위치를 켜면 시간을 고를 수 있어요</div>')
-        + '<div class="cap pvx" style="margin-top:6px">급등락만 모아요 — 청산가·목표가·큰 출금·스테이블·봇 멈춤은 밤에도 바로 와요</div>' }) : '';
+        + '<div class="cap pvx" style="margin-top:6px">급등락만 모아요 — 청산가·목표가·큰 출금·스테이블·봇 멈춤·내 이체 도착 확인은 밤에도 바로 와요</div>' }) : '';
     const nowCard = '<div class="sx-card alcard altier" id="sx-al-now">' + head('now') + nowC.map(alRow).join('') + quiet + '</div>';
     const dc = cats.filter(c => alTier(c) === 'daily'), used = new Set(), groups = [];
     AL_DAILY.forEach(g => { const ks = g.filter(k => dc.some(c => c.key === k)); if (ks.length) { groups.push(ks); ks.forEach(k => used.add(k)); } });
@@ -8578,8 +9341,8 @@
       + (anyD ? '' : '<div class="cap alhint" style="margin:-6px 0 12px">하루 요약을 받지 않아요 — 칩을 누르면 다시 넣어요</div>') + dgRow + '</div>';
     const sysCard = '<div class="sx-card alcard altier alsys" id="sx-al-sys"><button type="button" class="alsysb" data-a="sxHealth" aria-label="시스템 소식 — 상태 패널 열기"><span class="aldot web"></span><b>' + esc(alTierL(D, 'web')[0]) + '</b>'
       + '<span class="cap alsysc">' + esc(alTierL(D, 'web')[1]) + '</span><span class="sp"></span><span class="cap num pvx alsysn">7일 ' + s7.sys + '건</span>' + IC.right + '</button></div>';
-    return hero + presets + nowCard + dayCard + sysCard
-      + '<div class="cap pvx sx-note">즉시는 소리와 함께 밤에도 와요 · 하루 요약은 소리 없이 하루 한 번 · 같은 문제는 생길 때·풀릴 때 두 번만 · 테스트는 예시 한 통(시간당 6통)</div>';
+    return hero + migCard + presets + nowCard + dayCard + sysCard
+      + '<div class="cap pvx sx-note">즉시는 소리와 함께 밤에도 와요(내 이체 도착 확인은 소리 없이) · 하루 요약은 소리 없이 하루 한 번 · 같은 문제는 생길 때·풀릴 때 두 번(봇 멈춤이 1시간 넘으면 한 번 더) · 테스트는 예시 한 통(시간당 6통)</div>';
   }
 
   async function alSave(body, prev, okMsg) {
@@ -8704,6 +9467,8 @@
 
   Object.assign(UI_REVEAL, {
     coin: id => { S.hold.mode = 'all'; S.hold.showDust = true; const rows = holdRows().rows, i = rows.findIndex(r => r.g.key === id || r.g.sym === id);
+      if (i < 0) { const st9 = arr(S.D.stableGroups).find(g => String(g.sym || '').toUpperCase() === String(id || '').toUpperCase());
+        if (st9) { S.stOpen.add(st9.sym); S.justOpened.add('st:' + st9.sym); return { tab: 'dash', anc: 'cash:' + st9.sym }; } }
       if (i < 0) { const sy9 = String(id || '').split('~')[0].toUpperCase(), z9 = arr(S.D.zeroInst).some(x => String(x.sym || '').toUpperCase() === sy9);
         if (!z9) return null; S.hold.showZero = true; return { tab: 'dash', anc: 'zcoin:' + sy9 }; } const k = rows[i].g.key; if (i >= S.hold.limit) S.hold.limit = i + 1; S.hold.open.add(k); S.justOpened.add('h:' + k); return { tab: 'dash', anc: 'coin:' + k }; },
     cycle: id => { S.j.view = 'cycles'; S.j.status = 'all'; S.j.q = ''; S.drafts.jq = '';
@@ -8793,6 +9558,7 @@
     if ((ev.key === 'Enter' || ev.key === ' ') && t.matches && t.matches('[role="button"][data-a]')) { ev.preventDefault(); const fn = A[t.getAttribute('data-a')]; if (fn) fn(t, ev); }
   });
   let inputT = null;
+  document.addEventListener('compositionend', ev => { const t = ev.target, lv = t && t.getAttribute && t.getAttribute('data-input'); if (lv === 'jq' || lv === 'uq') t.dispatchEvent(new Event('input', { bubbles: true })); });
   document.addEventListener('input', ev => {
     const t = ev.target;
     const k = t.getAttribute && t.getAttribute('data-draft');
@@ -8804,6 +9570,7 @@
     if (live === 'oflq') { ofLkInput(t); return; }
     if (live === 'jq' || live === 'uq') {
       clearTimeout(inputT);
+      if (ev.isComposing) return;
       inputT = setTimeout(() => {
         if (live === 'jq') { S.j.q = t.value; S.j.limit = J_FIRST; } else S.u.q = t.value;
         const pos = t.selectionStart;
@@ -8832,29 +9599,45 @@
 
   const SVGNS = 'http://www.w3.org/2000/svg';
   const PV_CNT = '.fbtn > .n,.subtabs .n,.dpc .n,.hidbar .cnts,.contrib .ttl .mut';
+  const OWN_WC = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function ownText(t, p, v) {
+    if (!(S.hide || S.rand) || !v || typeof ownScrub !== 'function' || /^(SCRIPT|STYLE|TEXTAREA|NOSCRIPT)$/.test(p.tagName) || (p.closest && p.closest('.pv,.rv'))) return v;
+    const pl9 = p.closest ? p.closest('.pvl') : null, pk9 = pl9 && pl9.getAttribute('data-pk');
+    const w = pl9 ? v.split(MK_RE).map((x, i) => (i % 2 ? x : String(x).replace(/^(\s*)([^]*?)(\s*)$/, (a, l, c, r) => l + (c ? (pk9 ? ownNm(c, pk9) : ownIn(c)) : '') + r))).join('') : ownScrubM(v);
+    if (w === v || !netOk(t, 't', v, w)) return v;
+    t.nodeValue = w; return w;
+  }
   function pvTextNode(t) {
-    const p = t.parentNode, v = t.nodeValue;
+    const p = t.parentNode;
+    let v = t.nodeValue;
+    if (p && v && p.nodeType === 1 && typeof ownText === 'function') v = ownText(t, p, v);
     if (p && v && p.nodeType === 1 && (S.rand || v.indexOf(RS_A) >= 0)) { rvTextNode(t, p, v); return; }
     if (!p || !v || p.nodeType !== 1 || /^(SCRIPT|STYLE|TEXTAREA|NOSCRIPT)$/.test(p.tagName) || (p.closest && p.closest('.pv,.badge,.pvx,' + PV_CNT))) return;
     if (p.closest && p.closest('[data-a="rpPick"],.cal [data-a="pickDay"] > .dn')) return;
     let w = v;
-    if (S.hide && /\d/.test(v)) w = v.split(PV_RE).map((x, i) => i % 2 ? pvW(x) : pvNet(x)).join('');
-    if (w.indexOf(PV_A) < 0) return;
+    const pl = S.hide && p.closest ? p.closest('.pvl') : null;
+    if (pl) { const pk = pl.getAttribute('data-pk');
+      w = v.split(PV_RE).map((x, i) => i % 2 ? pvW(x) : ownSeg(x, pk)).join('');
+      if (w.indexOf(PV_A) < 0) { if (w !== v && netOk(t, 't', v, w)) t.nodeValue = w; return; } }
+    else if (S.hide && /\d/.test(v)) { const inL = !!(p.closest && p.closest('.pvl'));
+      w = v.split(PV_RE).map((x, i) => i % 2 ? pvW(x) : inL ? locName(x) : pvNet(x)).join(''); }
+    if (w.indexOf(PV_A) < 0) { if (w !== v && S.hide && netOk(t, 't', v, w)) t.nodeValue = w; return; }
     if (p.namespaceURI === SVGNS) { t.nodeValue = w.replace(PV_RE, '$1'); p.classList.add('pv'); return; }
     const f = document.createDocumentFragment();
     w.split(PV_RE).forEach((x, i) => { if (!x) return; if (i % 2) { const sp = document.createElement('span'); sp.className = 'pv'; sp.textContent = x; f.appendChild(sp); } else f.appendChild(document.createTextNode(x)); });
     p.replaceChild(f, t);
   }
   function pvAttrs(el) {
+    if (typeof ownAttrs === 'function') ownAttrs(el);
     if (S.rand || rvHas(el)) { rvAttrs(el); return; }
     if (S.hide && el.closest && el.closest('.pvx')) return;
     for (const a of ['title', 'aria-label']) {
       const v = el.getAttribute && el.getAttribute(a); if (!v) continue;
-      const w = (S.hide ? pvNet(v.replace(PV_RE, '$1')) : v).replace(PV_RE, '$1');
-      if (w !== v) el.setAttribute(a, w);
+      const w = (S.hide ? (el.hasAttribute('data-pvl') ? locName : pvNet)(v.replace(PV_RE, '$1')) : v).replace(PV_RE, '$1');
+      if (w !== v && netOk(el, a, v, w)) el.setAttribute(a, w);
     }
   }
-  const RV_IN = new WeakMap(), RV_IN_SEL = 'input[data-pv],input[data-pr],input[data-alias],input[data-draft="nalias"],input[data-draft$=":alias"],input[data-su-in="w_label"],input[data-su-in="p_label"]';
+  const RV_IN = new WeakMap(), RV_IN_SEL = 'input[data-draft="rk"],input[data-pv],input[data-pr],input[data-alias],input[data-draft="nalias"],input[data-draft$=":alias"],input[data-su-in="w_label"],input[data-su-in="p_label"]';
   const RV_VAL = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
   const RV_HIDE_SEL = 'input[data-pr],input[data-alias],input[data-draft="nalias"],input[data-draft$=":alias"],input[data-su-in="w_label"],input[data-su-in="p_label"]';
   const rvLock = el => !!(S.rand || (S.hide && el.matches && el.matches(RV_HIDE_SEL)));
@@ -8882,7 +9665,7 @@
           }
           RV_IN.set(el, { v: el.value, a: el.getAttribute('value'), c: el.getAttribute('data-cur'), d: el.disabled, ph: el.getAttribute('placeholder') });
           try { Object.defineProperty(el, 'value', { configurable: true, get() { return RV_VAL.get.call(this); },
-            set(x) { const s9 = RV_IN.get(this); if (s9 && rvLock(this)) s9.v = String(x == null ? '' : x); else RV_VAL.set.call(this, x); } }); } catch (e) {  }
+            set(x) { const s9 = RV_IN.get(this); if (s9 && (s9.own ? !!(S.hide || S.rand) : rvLock(this))) s9.v = String(x == null ? '' : x); else RV_VAL.set.call(this, x); } }); } catch (e) {  }
         }
         RV_VAL.set.call(el, ''); el.removeAttribute('value'); el.removeAttribute('data-cur'); el.disabled = true; el.setAttribute('placeholder', S.rand ? '랜덤값 모드 — 가려짐' : '숨김 모드 — 가려짐');
       } else if (sv) {
@@ -8895,6 +9678,42 @@
       }
     });
   }
+  const RV_OWN_SEL = 'input[type="search"],input[type="text"],input:not([type])';
+  const RV_TYPED = typeof WeakMap === 'function' ? new WeakMap() : null;
+  const RV_TYPK = new Map();
+  const rvKey = el => { if (!el || !el.getAttribute) return ''; const d9 = el.getAttribute('data-draft'), n9 = el.getAttribute('data-su-in') || el.getAttribute('name') || el.getAttribute('aria-label');
+    return d9 ? 'd:' + d9 : el.id ? 'i:' + el.id : n9 ? 'n:' + n9 : ''; };
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('input', ev => {
+    const el = ev.target; if (!RV_TYPED || !ev.isTrusted || !(S.hide || S.rand) || !el || !el.matches || !el.matches(RV_OWN_SEL)) return;
+    RV_TYPED.set(el, el.value); const k9 = rvKey(el); if (k9) RV_TYPK.set(k9, el.value); }, true);
+  function rvOwnInputs(root, live) {
+    if (!root || root.nodeType !== 1 || typeof ownScrub !== 'function') return;
+    const on = !!(S.hide || S.rand);
+    if (!on) RV_TYPK.clear();
+    const list9 = root.matches && root.matches(RV_OWN_SEL) ? [root] : Array.from(root.querySelectorAll(RV_OWN_SEL));
+    list9.forEach(el => {
+      if (el.matches && el.matches(RV_IN_SEL)) return;
+      const sv = RV_IN.get(el);
+      if (on) {
+        const k9 = rvKey(el), typed9 = (RV_TYPED && RV_TYPED.get(el) === el.value) || (!!k9 && RV_TYPK.get(k9) === el.value);
+        if (sv || !el.value || typed9 || ownScrub(el.value) === el.value) return;
+        if (document.activeElement === el && (el.id || el.getAttribute('data-draft'))) { const ov9 = $('#overlay'); rvFoc = { id: el.id || '', k: el.getAttribute('data-draft') || '', a: el.selectionStart, b: el.selectionEnd, ov: !!(ov9 && ov9.contains(el)) }; }
+        RV_IN.set(el, { v: el.value, a: el.getAttribute('value'), c: el.getAttribute('data-cur'), d: el.disabled, ph: el.getAttribute('placeholder'), own: true });
+        try { Object.defineProperty(el, 'value', { configurable: true, get() { return RV_VAL.get.call(this); },
+          set(x) { const s9 = RV_IN.get(this); if (s9 && (S.hide || S.rand)) s9.v = String(x == null ? '' : x); else RV_VAL.set.call(this, x); } }); } catch (e) {  }
+        RV_VAL.set.call(el, ''); el.removeAttribute('value'); el.disabled = true; el.setAttribute('placeholder', S.rand ? '랜덤값 모드 — 가려짐' : '숨김 모드 — 가려짐');
+      } else {
+        if (RV_TYPED) RV_TYPED.delete(el);
+        if (sv && sv.own) {
+          RV_IN.delete(el);
+          try { delete el.value; } catch (e) {  }
+          if (sv.a != null) el.setAttribute('value', sv.a);
+          el.value = sv.v; el.disabled = sv.d;
+          if (sv.ph != null) el.setAttribute('placeholder', sv.ph); else el.removeAttribute('placeholder');
+        }
+      }
+    });
+  }
   function pvAnim(root) {
     if (!root || root.nodeType !== 1 || !(S.hide || S.rand)) return;
     const SEL = '[data-n][data-v],[data-fl][data-v]', list = root.matches && root.matches(SEL) ? [root] : [];
@@ -8903,7 +9722,7 @@
   }
   function pvFix(root) {
     if (!root) return;
-    if ((S.rand || S.hide) && root.nodeType === 1) rvInputs(root);
+    if ((S.rand || S.hide) && root.nodeType === 1) { rvInputs(root); if (typeof rvOwnInputs === 'function') rvOwnInputs(root, true); }
     pvAnim(root);
     if (root.nodeType === 3) { pvTextNode(root); return; }
     if (root.nodeType !== 1) return;
@@ -8911,7 +9730,7 @@
     const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), list = []; let n;
     while ((n = tw.nextNode())) list.push(n);
     list.forEach(pvTextNode);
-    pvAttrs(root); root.querySelectorAll('[title],[aria-label],.lkc[data-q]').forEach(pvAttrs);
+    pvAttrs(root); root.querySelectorAll('[title],[aria-label],.lkc[data-q],[placeholder],[data-l]').forEach(pvAttrs);
   }
   if (window.MutationObserver) new MutationObserver(recs => {
     for (const r of recs) {
@@ -8921,14 +9740,18 @@
         if (x9 != null && s9) { if (r.attributeName === 'value') s9.a = x9; else s9.c = x9; r.target.removeAttribute(r.attributeName); } }
       else if (S.hide || S.rand) pvAttrs(r.target);
     }
-  }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'data-q', 'value', 'data-cur'] });
+    if ((S.hide || S.rand) && typeof rvOwnInputs === 'function' && recs.some(r => r.type === 'childList' || (r.type === 'attributes' && r.attributeName === 'value'))) rvOwnInputs(document.body, true);
+  }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'data-q', 'value', 'data-cur', 'placeholder', 'data-l'] });
   function rvTextNode(t, p, v) {
     if (/^(SCRIPT|STYLE|TEXTAREA|NOSCRIPT)$/.test(p.tagName)) return;
     const keep = !!(p.closest && (p.closest('.pv,.rv,.badge,.pvx,' + PV_CNT) || p.closest('[data-a="rpPick"],.cal [data-a="pickDay"] > .dn')));
     if (keep && v.indexOf(RS_A) < 0) return;
     let w = v;
-    if (S.rand && !keep && /\d/.test(v)) w = pvNetM(v);
-    if (w.indexOf(RS_A) < 0 && w.indexOf(PV_A) < 0) return;
+    const pl = S.rand && !keep && p.closest ? p.closest('.pvl') : null;
+    if (pl) { const pk = pl.getAttribute('data-pk'); w = v.split(MK_RE).map((x, i) => (i % 2 ? x : ownSeg(x, pk))).join('');
+      if (w.indexOf(RS_A) < 0 && w.indexOf(PV_A) < 0) { if (w !== v && netOk(t, 't', v, w)) t.nodeValue = w; return; } }
+    else if (S.rand && !keep && /\d/.test(v)) w = p.closest && p.closest('.pvl') ? locNameM(v) : pvNetM(v);
+    if (w.indexOf(RS_A) < 0 && w.indexOf(PV_A) < 0) { if (w !== v && netOk(t, 't', v, w)) t.nodeValue = w; return; }
     if (p.namespaceURI === SVGNS) { const pv9 = w.indexOf(PV_A) >= 0; t.nodeValue = w.replace(PV_RE, '$1').replace(RS_RE, '$1'); p.classList.add(pv9 ? 'pv' : 'rv'); return; }
     if (w.indexOf(PV_A) < 0) { const sp = document.createElement('span'); sp.className = 'rv'; sp.textContent = w.replace(RS_RE, '$1'); p.replaceChild(sp, t); return; }
     const f = document.createDocumentFragment();
@@ -8944,13 +9767,26 @@
       if (a === 'data-q' && !(el.matches && el.matches('.lkc'))) continue;
       const v = el.getAttribute(a); if (!v || RV_SEEN.has(v)) continue;
       const w = a === 'data-q' ? (S.rand && /\d/.test(v) ? pvNet(v).replace(PV_RE, '•••') : v)
-        : (S.rand && !keep && /\d/.test(v) ? pvNetM(v) : v).replace(PV_RE, '$1').replace(RS_RE, '$1');
+        : (S.rand && !keep && (/\d/.test(v) || el.hasAttribute('data-pvl')) ? (el.hasAttribute('data-pvl') ? locNameM : pvNetM)(v) : v).replace(PV_RE, '$1').replace(RS_RE, '$1');
       if (RV_SEEN.size > 20000) RV_SEEN.clear();
       RV_SEEN.add(w);
-      if (w !== v) el.setAttribute(a, w);
+      if (w !== v && netOk(el, a, v, w)) el.setAttribute(a, w);
     }
   }
+  function rvCookie() {
+    try {
+      const has = /(?:^|;\s*)tj_v2_rand=1(?:;|$)/.test(document.cookie || '');
+      if (S.rand === has) return;
+      document.cookie = 'tj_v2_rand=' + (S.rand ? '1; Max-Age=31536000' : '0; Max-Age=0') + '; Path=/; SameSite=Strict' + (location.protocol === 'https:' ? '; Secure' : '');
+    } catch (e) {  }
+  }
+  function rvLinks() {
+    if (!S.rand) return;
+    const pre = []; Object.keys(EXPL).forEach(k => { pre.push(EXPL[k][0], EXPL[k][1]); });
+    document.querySelectorAll('a[href]').forEach(a => { const u = a.getAttribute('href') || ''; if (pre.some(p => u.indexOf(p) === 0)) { a.removeAttribute('href'); a.removeAttribute('target'); } });
+  }
   function rvMark() {
+    rvCookie();
     let wm = document.getElementById('randWm');
     if (!S.rand) { if (wm) wm.remove(); return; }
     if (wm) return;
@@ -8987,11 +9823,19 @@
   const pvRoot = () => {
     const r = document.documentElement; r.classList.toggle('pvh', !!(S.hide || S.rand)); r.classList.toggle('pvr', !!S.rand); rvInputs(document.body); pvAnim(document.body);
     const srch9 = window.TJSearch; if (srch9 && typeof srch9._pvGuard === 'function') { try { srch9._pvGuard(); } catch (e) {  } }
+    rvOwnInputs(document.body);
     const wow9 = window.TJWow; if (wow9 && typeof wow9.onPv === 'function') { try { wow9.onPv(); } catch (e) {  } }
+    const hl9 = window.TJHealth; if (hl9 && hl9._state && (hl9._state.open || hl9._state.pop) && typeof hl9.repaint === 'function') { try { hl9.repaint(); } catch (e) {  } }
     if (S.hide || S.rand) document.querySelectorAll('.sx-usd').forEach(el => { if (!el.querySelector('.pv')) el.innerHTML = '<span class="pv">' + PVM.usd + '</span>'; });
     if (S.hide || S.rand) document.querySelectorAll('.prt').forEach(el => { if (!el.querySelector('.pv')) el.innerHTML = '<span class="pv">' + PR_FAKE + '</span>'; });
+    if (S.hide || S.rand) document.querySelectorAll('.aib').forEach(el => { if (el.textContent !== AI_HIDE) el.textContent = AI_HIDE; });
+    if (S.hide || S.rand) document.querySelectorAll('.aib-l').forEach(el => { el.textContent = '가림'; });
+    if (S.hide || S.rand) document.querySelectorAll('.pvm').forEach(el => { const t9 = String(el.textContent || '').trim(), sg = /^[+−-]/.test(t9) ? t9.charAt(0) : ''; el.innerHTML = sg + pvMoney('', true).replace(PV_RE, '<span class="pv">$1</span>'); });
+    if (S.hide || S.rand) document.querySelectorAll('[data-pvt]').forEach(el => { const v9 = el.getAttribute('title'); if (v9) el.setAttribute('title', pvNet(v9.replace(PV_RE, '$1').replace(RS_RE, '$1')).replace(PV_RE, '$1')); });
+    rvLinks();
     if (S.hide || S.rand) LS.del('tj_v2_srch_recent');
     rvMark();
+    const su9 = window.__tjSetup; if (su9 && su9.U && (su9.U.open || su9.U.tierSheet || su9.U.panelOpen) && typeof su9.render === 'function') { try { su9.render(); } catch (e) {  } }
   };
   function oaSwapKeepForm() {
     const v = $('#view');
@@ -9013,6 +9857,15 @@
     if (!S.hide && !S.rand) rvRefocus();
     toast(S.hide ? '금액 숨김 켜짐' + (S.mobile ? '' : ' · Shift+H 로 끄기') : '금액 보이기');
   }
+  function rkApply() {
+    RK = rkFix() || RK_DRAW;
+    S.anim.first = true; S.anim.nums = {}; S.anim.cells = {};
+    const ae9 = document.activeElement; if (ae9 && ae9.getAttribute && ae9.getAttribute('data-draft') === 'rk') ae9.blur();
+    render();
+    if (S.rand && S.deferred) renderView();
+    renderOverlay();
+    if (S.rand) pvFix(document.body);
+  }
   function setRand(on) {
     S.rand = !!on; LS.set('tj_v2_rand', S.rand ? '1' : '0');
     if (S.rand && S.hide) { S.hide = false; LS.set('tj_v2_hide', '0'); }
@@ -9032,9 +9885,11 @@
 
   window.__tjSearchApi = {
     pvStripAmt,
+    ownNm, locName,
     S, esc, m, px, q, krw, short, fmtTs, isoDay, isoOf, ymOf, pvW, PVM, num, arr, IC, LS, toast, render, icon, CHAIN_KO, chainOf, exUrl, evA, hs, pctS,
     Finder, sxIndex, sxGo, sxWalRows, openReceipt, nftLoad, oaNeed, partHave, dayCnt, dayContrib, rcptable, hydrateLogos, dayKeyOf, oaNameTxt,
     initHash: location.hash,
+    closeDrawerThen,
     pvOn: () => !!(S.hide || S.rand),
     goTab: t => { if (S.tab === t) render(); else location.hash = '#' + t; },
     goDay: k => { wkOff(); S.day = k; S.calYM = ymOf(k) || S.calYM; S.dayEvLimit = 20; if (S.tab === 'daily') render(); else location.hash = '#daily'; }
@@ -9043,13 +9898,17 @@
   const KB_TAB = { d: 'dash', j: 'journal', l: 'daily', o: 'outflows', u: 'unmatched', a: 'other', s: 'settings' };
   let kbG = 0;
   const kbRows = () => Array.from(document.querySelectorAll('#view [data-anc]')).filter(x => x.offsetParent || x.getClientRects().length);
+  function rowFocusEl(n) {
+    if (n.matches('button,[tabindex],a[href]')) return n;
+    return Array.from(n.querySelectorAll('button,[tabindex="0"],a[href]')).find(x => !x.closest('[data-kbskip]')) || null;
+  }
   function kbMove(dir) {
     const L = kbRows(); if (!L.length) return;
     const cur = document.querySelector('#view .kbsel'), i = cur ? L.indexOf(cur) : -1;
     const n = L[Math.max(0, Math.min(L.length - 1, i < 0 ? (dir > 0 ? 0 : L.length - 1) : i + dir))];
     if (cur && cur !== n) cur.classList.remove('kbsel');
     n.classList.add('kbsel');
-    const f = n.matches('button,[tabindex],a[href]') ? n : n.querySelector('button,[tabindex="0"],a[href]');
+    const f = rowFocusEl(n);
     if (f) { try { f.focus({ preventScroll: true }); } catch (e) {  } }
     try { n.scrollIntoView({ block: 'nearest', behavior: uiReduce() ? 'auto' : 'smooth' }); } catch (e) { n.scrollIntoView(); }
   }
@@ -9107,10 +9966,12 @@
   if (S.hide || S.rand) pvFix(document.body);
   bootLoad();
   setInterval(() => { if (!document.hidden) refresh(false, null, true); }, POLL_MS);
+  setInterval(() => { if (!document.hidden && !S.locked && (RLW.size || arr(S.D && S.D.of).some(x => x.applyWait))) rlFetch(false); }, 5000);
   window.TJ = { clearCache: clearCache, onUnauthorized: onUnauthorized, isLocked: () => !!S.locked, bfInfo: () => (S.locked ? null : bfInfo()),
     revealAndHighlight: revealAndHighlight,
     ext: { S, m, esc, num, arr, nf, q, px, pxC, short, fmtTs, isoDay, todayISO, pvOn, cls, pctS, IC, LS, toast, post, render, renderView, gMatch, KV, pvStripAmt,
-      revealAndHighlight, planOfGroup, rate: () => rate(), lockedNow: () => !!S.locked } };
+      revealAndHighlight, planOfGroup, rate: () => rate(), lockedNow: () => !!S.locked, retPct,
+      confirmAsk, pvm } };
   if (window.TJHealth && typeof window.TJHealth.chrome === 'function') { try { window.TJHealth.chrome(S.mobile); } catch (e) {  } }
   window.__tjBooted = true;
   window.__tj = { S, A, refresh, applyPatch, derive, clearCache, px, px4, hs, moneyTxt, pxC,

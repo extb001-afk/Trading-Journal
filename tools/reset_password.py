@@ -53,6 +53,7 @@ def main(argv):
         login_auth.set_password(pw)
         _rm(login_auth.SESS_PATH)
         _rm(login_auth.INTERNAL_PATH)
+        _rm(login_auth.SETUP_CODE_PATH)
         print("새 비밀번호를 저장했어요 · 모든 기기 로그아웃 — 브라우저에서 다시 로그인하세요")
         return 0
     have = [p for p in (login_auth.AUTH_PATH, login_auth.SESS_PATH, login_auth.INTERNAL_PATH) if os.path.exists(p)]
@@ -69,9 +70,11 @@ def main(argv):
             return 1
     for p in have:
         _rm(p)
+    _rm(login_auth.SETUP_CODE_PATH)
     print("지웠어요: " + ", ".join(os.path.relpath(p, common.BASE_DIR) for p in have))
     print(f"이제 이 컴퓨터에서 http://127.0.0.1:{_port()}/login 을 열어 새 비밀번호를 만드세요"
           " (web.login 이 켜져 있는 동안은 그 전까지 화면이 열리지 않아요)")
+    print(f"그 화면이 묻는 설정 코드 = {login_auth.SETUP_CODE_REL} 파일 내용(화면을 열면 tj-web 이 만들어요 — cat {login_auth.SETUP_CODE_REL})")
     return 0
 
 

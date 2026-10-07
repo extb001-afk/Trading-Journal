@@ -239,6 +239,7 @@ def _match(withdraws, deposits, onchain_txids=frozenset(), linked_dep_uuids=froz
 
 def hop_candidates(withdraws, deposits, dest_of=None, own_wallets=frozenset()):
     out = set()
+    dd = None
     for w in withdraws:
         a = w.get("address")
         if not a or _own(own_wallets, w):
@@ -252,9 +253,14 @@ def hop_candidates(withdraws, deposits, dest_of=None, own_wallets=frozenset()):
         ws = canon_sym(w.get("currency"))
         if wts is None:
             continue
-        for d in deposits:
-            dts = _ts(d.get("done_at")) or _ts(d.get("created_at"))
-            t = norm_txid(d.get("txid")) if d.get("txid") else ""
-            if t and dts is not None and canon_sym(d.get("currency")) == ws and 0 <= dts - wts <= WINDOW_ADDR:
+        if dd is None:
+            dd = {}
+            for d in deposits:
+                dts = _ts(d.get("done_at")) or _ts(d.get("created_at"))
+                t = norm_txid(d.get("txid")) if d.get("txid") else ""
+                if t and dts is not None:
+                    dd.setdefault(canon_sym(d.get("currency")), []).append((dts, t))
+        for dts, t in dd.get(ws, ()):
+            if 0 <= dts - wts <= WINDOW_ADDR:
                 out.add(t)
     return out

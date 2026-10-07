@@ -4,6 +4,7 @@
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const money = v => (window.__tj && typeof window.__tj.moneyTxt === 'function') ? window.__tj.moneyTxt(v) : String(v == null ? '' : v);
   const H = { data: null, err: null, at: 0, open: false, pop: false, inflight: false, showAllResolved: false, knownOpen: false, incOpen: new Set(), unitsAll: false };
+  const OPS = { d: null, err: null, at: 0, ask: '', askBody: '', det: new Set(), busy: false, inflight: false, scrollTo: '' };
   const bfInfo = () => { try { const f = window.TJ && window.TJ.bfInfo; return typeof f === 'function' ? f() : null; } catch (e) { return null; } };
   const bfRing = b => { const r = 5.5, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, b.pct)) / 100;
     return '<svg class="tjh-ring' + (b.stalled ? ' st' : '') + '" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="' + r + '" fill="none" stroke-width="2" class="bg"/><circle cx="7" cy="7" r="' + r + '" fill="none" stroke-width="2" class="fg" stroke-dasharray="' + (c * Math.max(p, 0.04)).toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 7 7)"/></svg>'; };
@@ -82,6 +83,8 @@
 .tjh-inc .act{font-size:13px;margin-top:8px;padding:8px 10px;border-radius:9px;background:var(--surface2);color:var(--text2);line-height:1.5;word-break:break-word}
 .tjh-inc .act b{color:var(--text);font-weight:650}
 .tjh-empty{display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:14px;background:var(--okBg);color:var(--ok);font-weight:650;font-size:14px}
+.tjh-empty.unk{background:var(--surface2);color:var(--muted)} .tjh-pop .ok.unk{color:var(--muted);align-items:flex-start;font-weight:600;font-size:13.5px;line-height:1.5} .tjh-pop .ok.unk .tjh-dot{margin-top:5px}   /* exte1006: 확인 불가 = 회색(알약과 같은 색) */
+html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior:contain}   /* exte1006: 상태 패널이 떠 있는 동안 뒤 화면 세로 스크롤 잠금(앱 서랍과 같은 규약) */
 .tjh-bnr{padding:12px 14px;border-radius:12px;background:var(--dangerBg);color:var(--danger);font-size:13.5px;margin-bottom:12px;line-height:1.5}
 .tjh-bnr.g{background:var(--surface2);color:var(--text2)}
 .tjh-watch{font-size:13px;color:var(--text2);display:flex;gap:8px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)}
@@ -132,6 +135,28 @@
 .tjh-bfb .bar i{display:block;height:100%;border-radius:99px;background:var(--warn)}
 .tjh-bfb .bar.st i{background:var(--muted)}
 .tjh-bfb .j b{color:var(--text)}
+/* exta1006: 정리 요청(격리 재처리 · 재계산 승인 · 자리수 다름) — 머리 = 개수·요약 · 상세 접기 · 확인 칸 = 대상 결과를 보여 준 뒤 한 번 더 */
+.tjh-ops{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden}
+.tjh-ops .oh{display:flex;align-items:center;gap:10px;min-height:48px;padding:10px 14px;font-size:14px}
+.tjh-ops .oh b{font-weight:700;min-width:0}
+.tjh-ops .oh .cap{font-size:12.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tjh-ops .oh .sp{flex:1}
+.tjh-ops .ob{padding:0 14px 12px;font-size:13px;color:var(--text2);line-height:1.55}
+.tjh-ops .ob .note{font-size:12.5px;color:var(--muted);margin:2px 0 8px}
+.tjh-ops .rows{display:flex;flex-direction:column;border-top:1px solid var(--line);margin:4px 0 8px}
+.tjh-ops .r{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.tjh-ops .r:last-child{border-bottom:0}
+.tjh-ops .r .k{flex:none;min-width:64px;color:var(--text2);font-variant-numeric:tabular-nums}
+.tjh-ops .r .v{flex:1;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tjh-ops .r .n{flex:none;margin-left:auto;font-variant-numeric:tabular-nums;color:var(--text);font-weight:650;white-space:nowrap}
+.tjh-ops .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tjh-ops .more{color:var(--accent);font-weight:700;font-size:12.5px;white-space:nowrap}
+.tjh-ops .cf{margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--surface2);border:1px solid var(--line2);font-size:13px;color:var(--text2);line-height:1.55}
+.tjh-ops .cf b{color:var(--text)}
+.tjh-ops .cf .acts{margin-top:8px}
+.tjh-ops .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:6px;background:var(--surface2);color:var(--muted);white-space:nowrap}
+.tjh-ops .tag.w{background:var(--warnBg);color:var(--warn)} .tjh-ops .tag.ok{background:var(--okBg);color:var(--ok)}
+.tjh-opsnone{font-size:13px;color:var(--muted);padding:2px 0}
 @media (max-width:640px){
   .tjh-pop{left:0!important;right:0!important;top:auto!important;bottom:0;width:100%;max-width:none;max-height:80vh;overflow:auto;border-radius:20px 20px 0 0;border-width:1px 0 0;padding:14px 10px calc(14px + env(safe-area-inset-bottom))}
   .tjh-pbg{position:fixed;inset:0;background:var(--dim);z-index:71}
@@ -171,7 +196,9 @@
   const isLocked = () => !!(H.locked || (window.TJ && typeof window.TJ.isLocked === 'function' && window.TJ.isLocked()));
   function lock() {
     H.locked = true; H.data = null; H.err = null; H.at = 0; H.pop = false; H.open = false; H.knownOpen = false; H.showAllResolved = false;
+    OPS.d = null; OPS.err = null; OPS.ask = ''; OPS.askBody = ''; OPS.det.clear();
     const ov = document.getElementById('tjhOverlay'); if (ov) ov.remove();
+    document.documentElement.classList.remove('tjh-lock');
     const pp = document.getElementById('tjhPop'); if (pp) pp.remove();
     try { chrome(); } catch (e) {  }
   }
@@ -260,7 +287,16 @@
       + (H.knownOpen ? kn.map(x => '<div class="tjh-row kn"><i></i><div class="rb"><div class="r1"><b>' + esc(money(x.title)) + '</b><span>' + esc(x.known) + '</span></div><span class="r2" title="' + esc(money(x.detail)) + '">' + esc(money(x.detail)) + '</span></div></div>').join('') : '') : '';
     const b9 = bfInfo();
     const bfH = b9 ? '<button class="tjh-bfl" data-h="full" title="과거 거래 불러오기 — 작업별 진행은 전체 상태에서">' + bfRing(b9) + '<span>과거 거래 불러오는 중 <b class="pvx">' + b9.pct + '%' + (b9.stalled ? ' · 멈춤' : '') + '</b></span><span class="sp"></span><span class="pvx">' + (b9.n ? '작업 ' + b9.n + '개 ›' : '자세히 ›') + '</span></button>' : '';
-    return head + bfH + (rows || '<div class="ok"><span class="tjh-dot"></span>' + (kn.length ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>') + knH + tgNote() + popFoot();
+    return head + bfH + (rows || okOrUnk(false, kn.length)) + knH + tgNote() + popFoot();
+  }
+  function okOrUnk(panel, kn) {
+    if (overall() === 'unknown') {
+      const why = (H.data && H.data.note) || (H.err ? '상태를 불러오지 못했어요' : '아직 상태 점검 결과가 없어요');
+      return panel ? '<div class="tjh-empty unk"><span class="tjh-dot unknown"></span><span>확인 불가 — 문제가 있는지 아직 알 수 없어요</span></div>'
+        : '<div class="ok unk"><span class="tjh-dot unknown"></span><span>확인 불가 — ' + esc(why) + '</span></div>';
+    }
+    return panel ? '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>'
+      : '<div class="ok"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>';
   }
   function tgNote() {
     const t = (H.data && H.data.telegram) || null;
@@ -279,7 +315,16 @@
     return '<div class="tjh-inc ' + lv + (known ? ' kn' : '') + (open ? ' open' : '') + '"><button class="tjh-ih" data-h="inc" data-v="' + esc(id) + '" aria-expanded="' + open + '"><i class="tjh-lv"></i><b>' + (known ? '' : LBL[lv] + ' · ') + esc(money(x.title)) + '</b><span class="sp"></span>' + badge + chev + '</button>'
       + (open ? '<div class="tjh-ib"><div class="d">' + esc(money(x.detail)) + '</div>'
         + '<div class="m"><span>' + esc(x.unit) + '</span><span>시작 ' + esc(hm(since)) + ' · ' + esc(ago(nowS() - since)) + '째</span><span>' + esc(tg) + '</span></div>'
-        + (compact ? '' : (x.action ? '<div class="act" title="' + esc(x.action) + '"><b>조치</b> · ' + esc(actTxt(x.action)) + '</div>' : '')) + '</div>' : '') + '</div>';
+        + (compact ? '' : (x.action ? '<div class="act" title="' + esc(x.action) + '"><b>조치</b> · ' + esc(actTxt(x.action)) + '</div>' : ''))
+        + (compact ? '' : opsLinkHTML(x)) + '</div>' : '') + '</div>';
+  }
+  const OPS_LINK = { 'ledger:poison': 'poison', 'rebuild:pnl': 'pnl', 'ledger:decimals': 'dec' };
+  const KEY_LINK = { 'key:etherscan': 'etherscan' };
+  function opsLinkHTML(x) {
+    const id9 = String(x.check || x.id || '').split('#')[0], kk = KEY_LINK[id9] || KEY_LINK[String(x.id || '')];
+    if (kk) return '<div style="margin-top:8px"><button class="link" data-h="keyGoto" data-v="' + kk + '">설정에서 키 넣기 ›</button></div>';
+    const k = OPS_LINK[id9] || OPS_LINK[String(x.id || '')];
+    return k ? '<div style="margin-top:8px"><button class="link" data-h="opsGoto" data-v="' + k + '">정리 요청에서 처리 ›</button></div>' : '';
   }
   function unitsHTML() {
     const us = (H.data && H.data.units) || [];
@@ -316,7 +361,7 @@
     const bad = t.consecFail > 0;
     return '<div class="tjh-tg"><span class="tjh-dot ' + (bad ? 'crit' : 'ok') + '"></span><div><b>텔레그램 연결됨</b><div class="cap">'
       + (bad ? '최근 발송 실패 ' + t.consecFail + '회' + (t.lastError ? ' · ' + esc(t.lastError) : '') : (t.lastOk ? '마지막 발송 ' + esc(ago(nowS() - t.lastOk)) + ' 전' : '아직 발송 없음'))
-      + ' · 오류(빨강)만 알림, 6시간마다 리마인드, 09시 요약' + (t.queued ? ' · 대기 ' + t.queued + '통' : '') + '</div></div></div>';
+      + ' · 봇 멈춤(빨강)만 알림 · 1시간 넘게 이어지면 한 번 더 · 풀리면 한 번 · 안 풀린 문제는 하루 요약에' + (t.queued ? ' · 대기 ' + t.queued + '통' : '') + '</div></div></div>';
   }
   function resolvedHTML(limit) {
     const rs = (H.data && H.data.resolved) || [];
@@ -338,7 +383,7 @@
     const op = openNew(), kn = openKnown();
     const crit = op.filter(x => x.level === 'crit'), warn = op.filter(x => x.level !== 'crit');
     h += '<div class="tjh-sec"><div class="tt">열린 문제 <span class="n pvx">' + op.length + '</span>' + (op.length ? '<span class="n">· 누르면 설명·조치</span>' : '') + '</div>'
-      + (op.length ? crit.concat(warn).map(x => incHTML(x, false)).join('') : '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn.length ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>') + '</div>';
+      + (op.length ? crit.concat(warn).map(x => incHTML(x, false)).join('') : okOrUnk(true, kn.length)) + '</div>';
     if (kn.length) h += '<div class="tjh-sec"><button class="tt tjh-kn" style="padding:0;margin-bottom:10px" data-h="known" aria-expanded="' + H.knownOpen + '">알려진 사항 <span class="n pvx">' + kn.length + ' · 오래 지속 · 판정은 그대로</span><span class="sp"></span><span class="n pvx">' + (H.knownOpen ? '접기' : '펼치기') + '</span></button>'
       + (H.knownOpen ? kn.map(x => incHTML(x, false, true)).join('') : '') + '</div>';
     const b9 = bfInfo();
@@ -349,10 +394,151 @@
       h += '<div class="tjh-sec"><div class="tt">관찰 중 <span class="n pvx">아직 지속 조건 전 · 알림 없음</span></div>'
         + wt.concat(sup).map(x => '<div class="tjh-watch"><span class="tjh-dot sm ' + (x.suppressed ? 'off' : LVW(x.level, 'off')) + '"></span><span><b>' + esc(x.unit) + '</b> · ' + esc(money(x.title)) + ' <span class="cap">' + esc(x.suppressed ? '(' + x.suppressed + ' — 원인 쪽에서 추적)' : x.detail) + '</span></span></div>').join('') + '</div>';
     }
+    if (!inSettings) h += opsHTML();
     h += '<div class="tjh-sec"><div class="tt">유닛별 상태·신선도</div>' + unitsHTML() + '</div>';
     h += '<div class="tjh-sec"><div class="tt">최근 복구</div>' + resolvedHTML(H.showAllResolved ? 20 : (inSettings ? 5 : 8)) + '</div>';
     h += '<div class="tjh-sec"><div class="tt">알림</div>' + tgHTML() + '</div>';
     return h;
+  }
+  const ext = () => (window.TJ && window.TJ.ext) || null;
+  const pvOn = () => { const e = ext(); try { return !!(e && e.pvOn && e.pvOn()); } catch (er) { return false; } };
+  const usd = (v, sign) => { const e = ext(); if (e && typeof e.m === 'function') return e.m(+v || 0, { sign: !!sign }); const n = +v || 0; return (sign && n > 0 ? '+' : n < 0 ? '−' : '') + '$' + Math.abs(n).toFixed(2); };
+  async function loadOps() {
+    if (OPS.inflight || isLocked()) return;
+    OPS.inflight = true;
+    try {
+      const r = await fetch('/api/ops', { cache: 'no-store' });
+      if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) return;
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (isLocked()) { OPS.d = null; return; }
+      OPS.d = j && j.ok ? j : null; OPS.err = null; OPS.at = Date.now();
+      if (OPS.ask && JSON.stringify(opsBody(OPS.ask, OPS.d)) !== OPS.askBody) { OPS.ask = ''; OPS.askBody = ''; }
+    } catch (e) { OPS.err = (e && e.message) || String(e); } finally { OPS.inflight = false; }
+    if (!isLocked() && H.open) paint();
+  }
+  async function opsSend(path, body) {
+    const e = ext();
+    if (!e || typeof e.post !== 'function' || OPS.busy) return;
+    OPS.busy = true; paint();
+    try {
+      const d = await e.post(path, body, x => (x && x.msg) || '요청함');
+      if (d && d.ops) { OPS.d = d.ops; OPS.ask = ''; OPS.askBody = ''; }
+    } finally { OPS.busy = false; paint(); loadOps(); }
+  }
+  function opsHead(id, title, cap, tag) {
+    const open = OPS.det.has(id);
+    return '<button class="oh" style="width:100%;text-align:left" data-h="opsDet" data-v="' + esc(id) + '" aria-expanded="' + open + '"><b>' + esc(title) + '</b>'
+      + (tag || '') + '<span class="cap pvx">' + esc(cap) + '</span><span class="sp"></span><span class="more pvx">' + (open ? '접기' : '자세히') + '</span></button>';
+  }
+  function opsPnl(d) {
+    const p = d.pnl, ap = d.approve;
+    if (!p || (!p.pending && !(ap && ap.live))) return '';
+    const id = 'pnl', open = OPS.det.has(id) || OPS.ask === 'approve' || OPS.ask === 'cancel';
+    const mo = (p.months || []).map(x => '<div class="r"><span class="k pvx">' + esc(x.month) + '</span><span class="v">실현 ' + esc(usd(x.before)) + ' → ' + esc(usd(x.after)) + '</span><span class="n">' + esc(usd(x.diff, true)) + '</span></div>').join('');
+    const oc = (p.open_cost || []).map(x => '<div class="r"><span class="k">' + esc(x.sym || ('그룹 ' + x.group)) + '</span><span class="v">안 판 원가 ' + esc(usd(x.before)) + ' → ' + esc(usd(x.after)) + '</span><span class="n">' + esc(usd(x.diff, true)) + '</span></div>').join('');
+    const more = ((p.n_months || 0) > (p.months || []).length ? '<div class="note pvx">… 외 ' + ((p.n_months || 0) - (p.months || []).length) + '달</div>' : '')
+      + ((p.n_open_cost || 0) > (p.open_cost || []).length ? '<div class="note pvx">… 포지션 ' + ((p.n_open_cost || 0) - (p.open_cost || []).length) + '개 더</div>' : '');
+    const nM = p.n_months || 0, nO = p.n_open_cost || 0;
+    const mine = !!(ap && ap.live && ap.report_sha && p.report_sha && ap.report_sha === p.report_sha);
+    const cap = mine ? '승인함 · 다음 재계산에서 같은 결과면 반영' : p.pending ? [nM ? '바뀌는 달 ' + nM : '', nO ? '포지션 원가 ' + nO : '', p.unv && (p.unv.after || 0) > (p.unv.before || 0) ? '원가미상 증가' : ''].filter(Boolean).join(' · ') || '자세히 보고 판단'
+      : '승인됨 · ' + hm(ap.until) + '까지';
+    let b = '<div class="ob">';
+    if (p.pending) {
+      b += '<div class="note">재계산이 과거 손익·안 판 포지션 원가를 바꿔 원장 교체를 멈췄어요(원장은 그대로). 아래 차이가 의도한 것(새로 받은 과거 거래·수수료 반영 등)이면 승인하세요 — <b>이 결과에만</b> 적용돼요.</div>'
+        + (p.why ? '<div class="note pvx">재계산 사유: ' + esc(p.why) + '</div>' : '')
+        + (p.reason ? '<div class="note">보류 사유: ' + esc(money(p.reason)) + '</div>' : '')
+        + (mo || oc ? '<div class="rows">' + mo + oc + '</div>' + more : '')
+        + (p.unv && (p.unv.after || 0) > (p.unv.before || 0) ? '<div class="note">원가미상 매도 ' + esc(usd(p.unv.before)) + ' → ' + esc(usd(p.unv.after)) + '</div>' : '')
+        + (p.approve_note ? '<div class="note">' + esc(pvOn() ? '승인 상태 안내가 있어요(금액 보이기에서 확인)' : p.approve_note) + '</div>' : '')
+        + '<div class="note pvx">보고서 ' + (p.report_sha ? esc(p.report_sha.slice(0, 12)) + '… · ' + (p.report_ok ? '보존됨' : '보존본 없음') : '없음') + ' · ' + esc(hm(p.ts)) + '</div>';
+      if (mine) {
+        b += '<div class="note">이 결과를 승인했어요 — 다음 자동 재계산(약 10분 안)이 같은 결과면 원장을 바꾸고, 다르면 다시 여기서 물어봐요.</div>';
+      } else if (OPS.ask === 'approve') {
+        b += '<div class="cf" role="group" aria-label="재계산 승인 확인"><b>이 결과를 승인할까요?</b><br>보고서 <span class="pvx">' + esc((p.report_sha || '').slice(0, 12)) + '…</span>와 <b>같은 결과</b>가 나오는 다음 재계산 1회(48시간 안)만 원장을 바꿔요. 결과가 달라지면 다시 멈추고 여기서 다시 물어봐요.'
+          + '<div class="acts"><button class="btn sm pri" data-h="opsGo" data-v="approve"' + (OPS.busy ? ' disabled' : '') + '>승인</button><button class="btn sm" data-h="opsNo">취소</button></div></div>';
+      } else if (p.report_sha && p.report_ok && p.approvable === false) {
+        b += '<div class="note">보고서에 빠진 재료가 있어 승인할 수 없어요(원장은 그대로) — 재계산이 온전한 보고서를 만들면 다시 판단해요.</div>';
+      } else if (p.report_sha && p.report_ok) {
+        b += '<div class="acts"><button class="btn sm" data-h="opsAsk" data-v="approve">이 결과 승인…</button></div>';
+      } else {
+        b += '<div class="note">보고서가 없어 승인할 수 없어요 — 다음 자동 재계산 결과로 다시 판단해요.</div>';
+      }
+    }
+    if (ap && ap.live) {
+      b += (p.pending ? '<div class="note" style="margin-top:8px">' : '<div class="note">') + '승인 있음 · <span class="pvx">' + esc(hm(ap.until)) + '까지 · 보고서 ' + esc((ap.report_sha || '').slice(0, 12)) + '…</span></div>';
+      b += OPS.ask === 'cancel'
+        ? '<div class="cf"><b>승인을 취소할까요?</b> 다음 재계산은 차이가 있으면 다시 멈춰요.<div class="acts"><button class="btn sm warn" data-h="opsGo" data-v="cancel"' + (OPS.busy ? ' disabled' : '') + '>승인 취소</button><button class="btn sm" data-h="opsNo">닫기</button></div></div>'
+        : '<div class="acts"><button class="btn sm" data-h="opsAsk" data-v="cancel">승인 취소…</button></div>';
+    }
+    b += '</div>';
+    return '<div class="tjh-ops">' + opsHead(id, '재계산 승인', cap, p.pending && !mine ? ' <span class="tag w pvx">대기</span>' : ' <span class="tag ok pvx">승인됨</span>') + (open ? b : '') + '</div>';
+  }
+  function opsPoison(d) {
+    const q = d.poison || {};
+    if (!q.n) return '';
+    const id = 'poison', open = OPS.det.has(id) || OPS.ask === 'poison';
+    const wait = (q.items || []).filter(x => x.state !== '성공' && !x.corrupt);
+    const cap = [q.waiting ? '대기 ' + q.waiting : '', q.failed ? '다시 실패 ' + q.failed : '', q.done ? '처리됨 ' + q.done : ''].filter(Boolean).join(' · ') + (q.requested ? ' · 요청 처리 중' : '');
+    let b = '<div class="ob"><div class="note">수집한 기록 중 장부에 넣다 오류가 난 것은 원본 그대로 따로 보관돼요(장부에서 빠진 상태). 원인을 고친 뒤 다시 처리하면 같은 경로로 장부에 넣어요 — 또 실패하면 기록만 남고 그대로예요.</div><div class="rows">'
+      + (q.items || []).slice(0, 12).map(x => '<div class="r"><span class="k pvx">' + esc(hm(x.ts)) + '</span><span class="v" title="' + esc(x.err) + '">' + esc((x.chain ? x.chain + ' · ' : '') + x.kind + (x.ref ? ' · ' + x.ref : '') + ' — ' + x.err) + '</span><span class="n pvx">' + esc(x.state) + '</span></div>').join('') + '</div>'
+      + ((q.items || []).length > 12 ? '<div class="note pvx">… ' + ((q.n || 0) - 12) + '건 더 · 전체 목록: python3 tools/replay_poison.py</div>' : '');
+    if (wait.length) {
+      b += OPS.ask === 'poison'
+        ? '<div class="cf"><b>' + wait.length + '건을 다시 처리할까요?</b> tj-core 가 다음 주기(몇 초~1분)에 하나씩 장부에 넣어요. 성공한 것은 다시 하지 않아요.<div class="acts"><button class="btn sm pri" data-h="opsGo" data-v="poison"' + (OPS.busy ? ' disabled' : '') + '>다시 처리</button><button class="btn sm" data-h="opsNo">취소</button></div></div>'
+        : '<div class="acts"><button class="btn sm" data-h="opsAsk" data-v="poison">' + (wait.length === 1 ? '1건' : wait.length + '건') + ' 다시 처리…</button></div>';
+    }
+    b += '</div>';
+    return '<div class="tjh-ops">' + opsHead(id, '격리된 기록', cap, q.waiting || q.failed ? ' <span class="tag w pvx">' + ((q.waiting || 0) + (q.failed || 0)) + '</span>' : '') + (open ? b : '') + '</div>';
+  }
+  function opsDec(d) {
+    const z = d.decimals || {}, its = z.items || [];
+    if (!its.length) return '';
+    const id = 'dec', cf = its.filter(x => x.kind === 'conflict'), wt = its.filter(x => x.kind !== 'conflict');
+    const open = OPS.det.has(id) || /^dec:/.test(OPS.ask);
+    const cap = [cf.length ? '다름 ' + cf.length : '', wt.length ? '다음 재계산 대기 ' + wt.length : ''].filter(Boolean).join(' · ');
+    const lab = { conflict: '다름', pending: '채움 대기', resolve: '해결 대기' };
+    let b = '<div class="ob"><div class="note">토큰 자리수(소수점 자리)가 장부 저장값과 수집기 관측값이 다른 자산이에요. 저장값은 덮지 않았어요 — 관측값이 맞으면 ‘관측값으로 다시 기장’을 요청하세요. 지금 장부는 그대로이고, 다음 자동 재계산이 새 자리수로 다시 계산해요(손익이 바뀌면 재계산 승인에서 다시 물어봐요).</div><div class="rows">';
+    for (const x of its.slice(0, 12)) {
+      const key = 'dec:' + x.aid, res = (z.results || {})[String(x.aid)];
+      b += '<div class="r"><span class="k">' + esc(x.symbol || '?') + '</span><span class="v pvx">' + esc((x.chain || '') + ' · 저장 ' + (x.stored == null ? '없음' : x.stored) + ' → 관측 ' + x.seen) + (res && !res.ok ? ' · 거절: ' + esc(res.err || '') : '') + '</span><span class="n pvx">'
+        + (x.kind === 'conflict' && (z.requested || []).indexOf(x.aid) < 0 ? '<button class="link" data-h="opsAsk" data-v="' + key + '">관측값으로…</button>' : esc((z.requested || []).indexOf(x.aid) >= 0 ? '요청 처리 중' : lab[x.kind] || x.kind)) + '</span></div>';
+      if (OPS.ask === key) {
+        b += '<div class="cf"><b>' + esc(x.symbol || '?') + ' 자리수를 ' + esc(String(x.stored)) + ' → ' + esc(String(x.seen)) + '(으)로 다시 기장할까요?</b> 지금 장부는 그대로예요. 다음 자동 재계산에서 이 자산의 수량이 새 자리수로 다시 계산돼요.'
+          + '<div class="acts"><button class="btn sm pri" data-h="opsGo" data-v="' + key + '"' + (OPS.busy ? ' disabled' : '') + '>요청</button><button class="btn sm" data-h="opsNo">취소</button></div></div>';
+      }
+    }
+    b += '</div></div>';
+    return '<div class="tjh-ops">' + opsHead(id, '토큰 자리수', cap, cf.length ? ' <span class="tag w pvx">' + cf.length + '</span>' : '') + (open ? b : '') + '</div>';
+  }
+  function opsHTML() {
+    const d = OPS.d;
+    if (!d) return OPS.err ? '<div class="tjh-sec"><div class="tt">정리 요청</div><div class="tjh-opsnone">불러오지 못했어요 — ' + esc(OPS.err) + '</div></div>' : '';
+    const parts = [opsPnl(d), opsPoison(d), opsDec(d)].filter(Boolean);
+    const apMine = !!(d.approve && d.approve.live && d.pnl && d.approve.report_sha && d.approve.report_sha === d.pnl.report_sha);
+    const n = (d.pnl && d.pnl.pending && !apMine ? 1 : 0) + ((d.poison || {}).waiting || 0) + ((d.poison || {}).failed || 0) + ((d.decimals || {}).conflicts || 0);
+    return '<div class="tjh-sec"><div class="tt">정리 요청 <span class="n pvx">' + (n ? n + '건 · 확인 뒤 버튼으로' : '처리할 것 없음') + '</span></div>'
+      + (parts.length ? parts.join('') : '<div class="tjh-opsnone">손으로 정리할 기록이 없어요(격리 기록 · 재계산 승인 · 자리수 다름).</div>') + '</div>';
+  }
+  function opsBody(v, d) {
+    if (!d) return null;
+    if (v === 'approve') return d.pnl && d.pnl.report_sha ? { path: '/api/ops/rebuild_approve', body: { report_sha: d.pnl.report_sha } } : null;
+    if (v === 'cancel') return d.approve && d.approve.live ? { path: '/api/ops/rebuild_cancel', body: {} } : null;
+    if (v === 'poison') { const ids = ((d.poison || {}).items || []).filter(x => x.state !== '성공' && !x.corrupt).map(x => x.id); return ids.length ? { path: '/api/ops/poison_replay', body: { ids } } : null; }
+    if (/^dec:\d+$/.test(v)) {
+      const x = ((d.decimals || {}).items || []).find(y => 'dec:' + y.aid === v && y.kind === 'conflict');
+      return x ? { path: '/api/ops/decimals_resolve', body: { asset_id: x.aid, stored: x.stored, seen: x.seen } } : null;
+    }
+    return null;
+  }
+  function opsClick(a, v) {
+    const d = OPS.d;
+    if (a === 'opsDet') { if (OPS.det.has(v)) OPS.det.delete(v); else OPS.det.add(v); paint(); refocus('[data-h="opsDet"]', v); return; }
+    if (a === 'opsAsk') { const t = opsBody(v, d); if (!t) return; OPS.ask = v; OPS.askBody = JSON.stringify(t); paint(); const b = document.querySelector('#tjhOverlay [data-h="opsGo"]'); if (b) try { b.focus({ preventScroll: false }); } catch (e) {  } return; }
+    if (a === 'opsNo') { OPS.ask = ''; OPS.askBody = ''; paint(); return; }
+    if (a !== 'opsGo' || v !== OPS.ask || !OPS.askBody) return;
+    const t = JSON.parse(OPS.askBody);
+    opsSend(t.path, t.body);
   }
   function panelHTML() {
     const o = overall();
@@ -404,6 +590,7 @@
     chrome();
     try { window.dispatchEvent(new Event('tj:health')); } catch (e) {  }
     const ov = document.getElementById('tjhOverlay');
+    document.documentElement.classList.toggle('tjh-lock', !!H.open);
     if (H.open) {
       const scrollTop = ov && ov.querySelector('.tjh-panel') ? ov.querySelector('.tjh-panel').scrollTop : 0;
       let host = ov;
@@ -411,6 +598,11 @@
       host.innerHTML = panelHTML();
       const p = host.querySelector('.tjh-panel');
       if (p) p.scrollTop = scrollTop;
+      if (OPS.scrollTo) {
+        const b = host.querySelector('[data-h="opsDet"][data-v="' + OPS.scrollTo + '"]');
+        if (b) { OPS.scrollTo = ''; try { b.scrollIntoView({ block: 'start' }); b.focus({ preventScroll: true }); } catch (e9) {  } }
+        else if (OPS.d && !OPS.inflight) OPS.scrollTo = '';
+      }
     } else if (ov) {
       ov.remove();
     }
@@ -439,6 +631,7 @@
     const c = document.getElementById('tjhClose');
     if (c) c.focus();
     load();
+    loadOps();
   }
   function closePanel() {
     H.open = false;
@@ -456,11 +649,26 @@
     else if (a === 'popClose') togglePop(false);
     else if (a === 'full') { H.pop = false; openPanel(); }
     else if (a === 'close') closePanel();
-    else if (a === 'refresh') load();
+    else if (a === 'refresh') { load(); loadOps(); }
     else if (a === 'moreRes') { H.showAllResolved = true; paint(); }
     else if (a === 'known') { ev.preventDefault(); H.knownOpen = !H.knownOpen; paint(); }
     else if (a === 'inc') { ev.preventDefault(); const v = el.getAttribute('data-v') || ''; if (H.incOpen.has(v)) H.incOpen.delete(v); else H.incOpen.add(v); paint(); refocus('[data-h="inc"]', v); }
     else if (a === 'units') { ev.preventDefault(); H.unitsAll = !H.unitsAll; paint(); refocus('[data-h="units"]', null); }
+    else if (a === 'opsDet' || a === 'opsAsk' || a === 'opsNo' || a === 'opsGo') { ev.preventDefault(); opsClick(a, el.getAttribute('data-v') || ''); }
+    else if (a === 'opsGoto') {
+      ev.preventDefault(); const v = el.getAttribute('data-v') || ''; OPS.det.add(v); H.pop = false;
+      if (!H.open) openPanel(); else { paint(); loadOps(); }
+      OPS.scrollTo = v; paint();
+    }
+    else if (a === 'keyGoto') {
+      ev.preventDefault(); H.pop = false; H.open = false; paint();
+      try {
+        const su = window.__tjSetup, k = el.getAttribute('data-v') || '';
+        if (su && su.U) su.U.xp = k;
+        if (location.hash === '#settings/keys') { if (su && typeof su.render === 'function') su.render(); }
+        else location.hash = 'settings/keys';
+      } catch (e) {  }
+    }
     else if (a === 'tg') {
       ev.preventDefault(); H.pop = false; H.open = false; paint();
       try {
@@ -471,17 +679,18 @@
     }
   });
   document.addEventListener('keydown', ev => {
-    if (ev.key === 'Escape' && H.open) { ev.stopPropagation(); closePanel(); }
+    if (ev.key === 'Escape' && H.open && OPS.ask) { ev.stopPropagation(); OPS.ask = ''; OPS.askBody = ''; paint(); }
+    else if (ev.key === 'Escape' && H.open) { ev.stopPropagation(); closePanel(); }
     else if (ev.key === 'Escape' && H.pop) { ev.stopPropagation(); togglePop(false); const b = Array.from(document.querySelectorAll('.tjh-btn')).find(x => x.offsetParent); if (b) b.focus(); }
   }, true);
   document.addEventListener('pointerdown', ev => { if (H.pop && !ev.target.closest('.tjh-pop') && !ev.target.closest('.tjh-btn')) togglePop(false); }, true);
   window.addEventListener('resize', () => { if (H.pop) paintPop(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - H.at > POLL_MS) load(); });
-  setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
+  setInterval(() => { if (!document.hidden) { load(); if (H.open) loadOps(); } }, POLL_MS);
   setInterval(() => { const s = document.querySelector('#tjhOverlay .tjh-sub'); if (s && !document.hidden) s.innerHTML = headerLine(); }, 15000);
 
   function refocus(sel, v) { const b = Array.from(document.querySelectorAll('#tjhOverlay ' + sel + ', #tjhCard ' + sel + ', #tjhPop ' + sel)).find(x => v == null || x.getAttribute('data-v') === v); if (b) { try { b.focus({ preventScroll: true }); } catch (e) {  } } }
-  window.TJHealth = { chrome: chrome, view: view, summary: summary, open: openPanel, close: closePanel, pop: togglePop, reload: load, lock: lock, _state: H };
+  window.TJHealth = { chrome: chrome, view: view, summary: summary, open: openPanel, close: closePanel, pop: togglePop, reload: load, lock: lock, _state: H, repaint: () => paint() };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { chrome(); load(); });
   else { chrome(); load(); }
 })();

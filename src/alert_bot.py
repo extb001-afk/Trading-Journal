@@ -17,9 +17,14 @@ import alert_prefs as AP
 
 log = common.setup_logging("tj-alert")
 
-SOURCES = ("pending_dm.jsonl", "alerts_web.jsonl")
+SOURCES = ("pending_dm.jsonl", "alerts_web.jsonl", AP.FAST_QUEUE)
+FROM_START = frozenset({AP.FAST_QUEUE})
 CURSOR_PATH = os.path.join(common.STATE_DIR, "tg_cursor.json")
 POLL_SEC = 20
+URGENT_TICK = 0.5
+URGENT_MAX_PASS = 10
+URGENT_LATE = 120
+URGENT_REPLAY = 3600
 MAX_PER_CYCLE = 15
 READ_LINES_MAX = 500
 COALESCE_MIN = 4
@@ -204,10 +209,49 @@ def init_cursor(cursor: dict) -> bool:
         if fn in cursor:
             continue
         path = os.path.join(common.STATE_DIR, fn)
-        cursor[fn] = _tail_end(path) if os.path.exists(path) else 0
+        cursor[fn] = _fast_start(path) if fn in FROM_START else (_tail_end(path) if os.path.exists(path) else 0)
         log.info("%s 커서 초기화 — 백로그 %d바이트 건너뜀(파일 끝에서 시작)", fn, cursor[fn])
         changed = True
     return changed
+
+
+def _fast_start(path: str, now: float = None) -> int:
+    if not os.path.exists(path):
+        return 0
+    lo = (time.time() if now is None else now) - URGENT_REPLAY
+    pos = 0
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                if not line.endswith(b"\n"):
+                    break
+                try:
+                    ts = float((json.loads(line.decode("utf-8", "replace")) or {}).get("ts") or 0)
+                except (ValueError, TypeError, AttributeError):
+                    ts = 0.0
+                if not (1e9 < ts < 1e11) or ts >= lo:
+                    return pos
+                pos += len(line)
+    except OSError:
+        return 0
+    return pos
+
+
+def _fast_send_ok(kind, conn=None) -> bool:
+    try:
+        t9, c9 = _tg_creds()
+        if not (t9 and c9):
+            return False
+        return AP.decide(AP.load(), AP.cat_of(kind), time.time(), conn, kind) == "send"
+    except Exception:
+        return True
+
+
+def _fast_to(kind, token, chat):
+    if kind in AP.FAST_KINDS:
+        t9, c9 = _tg_creds()
+        return (t9, c9) if (t9 and c9) else (None, None)
+    return token, chat
 
 
 def read_chunk(path: str, off: int, max_lines: int = READ_LINES_MAX):
@@ -250,8 +294,8 @@ def coalesce_k(rows) -> list:
     done_kinds = set()
     for i, k, d, o in first:
         grp = by_kind[k]
-        if len(grp) < COALESCE_MIN or k == AP.TEST_KIND:
-            msgs.append((i, d.get("text") or f"[{k}] {json.dumps(d, ensure_ascii=False)[:300]}", k, [o]))
+        if len(grp) < COALESCE_MIN or k == AP.TEST_KIND or k in AP.FAST_KINDS:
+            msgs.append((i, (_late_note(d) if k in AP.FAST_KINDS else (d.get("text") or f"[{k}] {json.dumps(d, ensure_ascii=False)[:300]}")), k, [o]))
             continue
         if k in done_kinds:
             continue
@@ -261,15 +305,57 @@ def coalesce_k(rows) -> list:
         heads = {str(x.get("text") or "").lstrip()[:1] for _o, x in grp}
         head = "✅" if heads == {"✅"} else "🔴" if AP.tier(c9.get("key")) == "now" else "📋"
         act = {"🔴": "앱에서 하나씩 확인하세요", "✅": "할 일은 없어요"}.get(head, "급한 건 아니에요")
+        if AP.tier(c9.get("key")) == "now":
+            items = []
+            for _o, x in grp:
+                ls = [s9.strip() for s9 in str(x.get("text") or "").split("\n") if s9.strip() and not s9.strip().startswith("[보기]")]
+                items.append((_o, ls))
+            acts = {ls[1] for _o, ls in items if len(ls) > 1}
+            common_act = next(iter(acts)) if len(acts) == 1 and all(len(ls) > 1 for _o, ls in items) else None
+            if common_act:
+                act = common_act.rstrip(".")
+            elif acts:
+                act = "건마다 할 일을 적었어요" if head != "🔴" else "건마다 할 일을 적었어요 — 하나씩 확인하세요"
+            parts, body, cov9 = [], [], []
+            for _o, ls in items:
+                det = ls[2:] if common_act else ls[1:]
+                it = (ls[0].lstrip("🔴📋✅ ") + ("" if not det else " · " + " · ".join(det))) if ls else str(grp[0][1].get("kind") or "")
+                if len(it) > 3300:
+                    it = it[:3300] + " …(잘림 — 앱에서 확인)"
+                if body and sum(len(b9) + 3 for b9 in body) + len(it) > 3400:
+                    parts.append((body, cov9))
+                    body, cov9 = [], []
+                body.append(it)
+                cov9.append(_o)
+            parts.append((body, cov9))
+            for pi, (body, cov9) in enumerate(parts):
+                tag = "" if len(parts) == 1 else f" ({pi + 1}/{len(parts)})"
+                msgs.append((i, f"{head} {c9.get('label') or '알림'} {len(grp)}건이 한꺼번에 왔어요{tag}\n" + act
+                             + (" — 전부:" if len(parts) == 1 else " — 이어서:" if pi else " — 다음 통에 이어서:") + "\n- " + "\n- ".join(body),
+                             k, cov9 if pi < len(parts) - 1 else [o9 for o9, _x in grp], pi < len(parts) - 1))
+            continue
         msgs.append((i, f"{head} {c9.get('label') or '알림'} {len(grp)}건이 한꺼번에 왔어요\n"
                      + act + f" — 최근 {len(last3)}건:\n- " + "\n- ".join(x.lstrip('🔴📋✅ ') for x in last3), k,
                      [o9 for o9, _x in grp]))
     chunk_end = rows[-1][0] if rows else 0
     out = []
-    for j, (_i, text, k, cov) in enumerate(msgs):
-        nxt = msgs[j + 1][0] if j + 1 < len(msgs) else None
+    for j, mj in enumerate(msgs):
+        _i, text, k, cov = mj[:4]
+        if len(mj) > 4 and mj[4]:
+            out.append((None, text, k, cov))
+            continue
+        nxt = next((m9[0] for m9 in msgs[j + 1:]), None)
         out.append((rows[nxt - 1][0] if nxt else chunk_end, text, k, cov))
     return out
+
+
+def _late_note(d, now=None) -> str:
+    text = str(d.get("text") or f"[{d.get('kind')}]")
+    ts9 = _num_ts(d.get("ts"))
+    lag = ((time.time() if now is None else now) - ts9) if ts9 else 0
+    if lag > URGENT_LATE:
+        text += f"\n(감지 {int(lag // 60)}분 전 알림이 늦게 나가요 — 지금 상태는 앱에서 확인하세요)"
+    return text
 
 
 def coalesce(rows) -> list:
@@ -379,6 +465,8 @@ def load_hold() -> dict:
     for k, v in list((dg.get("k") or {}).items() if isinstance(dg.get("k"), dict) else ())[:200]:
         if isinstance(k, str) and 0 < len(k) <= 48 and _cnt(v):
             h["dg"].setdefault("k", {})[k] = _cnt(v)
+    if _cnt(dg.get("fix")):
+        h["dg"]["fix"] = _cnt(dg["fix"])
     for x in (dg.get("items") if isinstance(dg.get("items"), list) else [])[-DG_ITEMS_MAX:]:
         if isinstance(x, dict) and x.get("cat") in AP.CAT:
             h["dg"]["items"].append({"cat": x["cat"], "kind": str(x.get("kind") or "")[:40], "text": str(x.get("text") or "")[:300],
@@ -432,6 +520,22 @@ def hold_add(h: dict, src, off, cat: str, kind: str, text: str, now: float) -> b
 DG_ITEMS_MAX = 120
 
 
+RECON_KINDS = ("EXF_RECON", "RECON", "EX_RECON")
+_FIX_RE = re.compile(r"(\d[\d,]*)\s*개\s*(?:통화|자산)\s*보정")
+
+
+def recon_fixed(text, d=None) -> int:
+    if isinstance(d, dict) and _cnt(d.get("fixed")):
+        return _cnt(d["fixed"])
+    m = _FIX_RE.search(str(text or ""))
+    if m:
+        try:
+            return int(m.group(1).replace(",", ""))
+        except ValueError:
+            return 1
+    return 1
+
+
 def _dg_key(kind, d=None) -> str:
     k = str(kind or "?")[:40]
     if k == "LP_RANGE" and isinstance(d, dict) and isinstance(d.get("out"), bool):
@@ -452,6 +556,8 @@ def dg_add(h: dict, src, off, cat: str, kind: str, text: str, now: float, d=None
     gk = g.setdefault("k", {})
     if kk in gk or len(gk) < 200:
         gk[kk] = _cnt(gk.get(kk)) + 1
+    if kind in RECON_KINDS:
+        g["fix"] = _cnt(g.get("fix")) + recon_fixed(text, d)
     it = {"cat": cat, "kind": kind, "text": str(text or "")[:300], "ts": int(now), "d": d if isinstance(d, dict) else None}
     items = g["items"] + [it]
     if len(items) > DG_ITEMS_MAX:
@@ -492,6 +598,9 @@ def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict
             out.append((off, None))
             continue
         kind = str(d.get("kind") or "?")
+        if kind in AP.FAST_KINDS:
+            out.append((off, d))
+            continue
         if kind == AP.TEST_KIND:
             if tleft > 0:
                 tleft -= 1
@@ -500,6 +609,11 @@ def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict
                 out.append((off, None))
                 if off > counted:
                     log.info("테스트 알림 시간당 %d통 넘음 — 버림", TEST_HOURLY)
+            continue
+        if kind == BAL_KIND and isinstance(hst, dict) and hst.get("last_eval"):
+            if off > counted:
+                stat_add(st, AP.cat_of(kind, d.get("cat")), "skip", 1, now)
+            out.append((off, None))
             continue
         if kind == BAL_KIND and hst is not None:
             try:
@@ -593,11 +707,15 @@ def _md_ko(iso: str) -> str:
         return str(iso)
 
 
-def _open_problems(hst) -> list:
+def _open_problems(hst, stall_on=False) -> list:
     out = []
     try:
         for i in ((hst or {}).get("incidents") or {}).values():
-            if not isinstance(i, dict) or i.get("resolved") or str(i.get("id") or "").startswith(("quota:", "bfstall:", "gaps:")):
+            if not isinstance(i, dict) or i.get("resolved") or str(i.get("id") or "").startswith(("quota:", "bfstall:", "gaps:", "key:")):
+                continue
+            if not stall_on and health.alert_cat(i) == "stall":
+                continue
+            if health.alert_cat(i) == "bal":
                 continue
             out.append((0 if i.get("level") == "crit" else 1, str(i.get("title") or "")[:40]))
     except Exception:
@@ -609,17 +727,41 @@ def _open_bal_keys(hst) -> int:
     try:
         n = 0
         for i in ((hst or {}).get("incidents") or {}).values():
-            if isinstance(i, dict) and i.get("check") == "balcheck:mismatch" and not i.get("resolved"):
-                n += len(i.get("keys") or ()) or 1
+            if not (isinstance(i, dict) and i.get("check") == "balcheck:mismatch" and not i.get("resolved")):
+                continue
+            if not i.get("announced") or i.get("muted"):
+                continue
+            if not i.get("bal_v"):
+                n += (len(i.get("keys") or ()) or 1) if i.get("level") == "crit" else 0
+                continue
+            if i.get("level") != "crit" or not i.get("notify"):
+                continue
+            pend9 = set()
+            for o in (hst or {}).get("outbox") or ():
+                if isinstance(o, dict) and o.get("kind") in ("open", "group", "remind") and i.get("id") in (o.get("incs") or ()):
+                    pend9.update(o.get("keys") or ())
+            n += len((set(i.get("keys_told") or ()) & set(i.get("keys") or ())) - pend9)
         return n
     except Exception:
         return 0
 
 
+def _open_bal_any(hst) -> bool:
+    try:
+        return any(isinstance(i, dict) and i.get("check") == "balcheck:mismatch" and not i.get("resolved") and i.get("level") in ("warn", "crit")
+                   for i in ((hst or {}).get("incidents") or {}).values())
+    except Exception:
+        return False
+
+
 def compose_digest(dg: dict, doc: dict, now: float, hst=None, cfg=None):
     if not AP.digest_on(doc, now):
         return None, None, "KRW"
-    live = lambda kind: AP.effective(doc, AP.cat_of(str(kind or "").split(":", 1)[0]), now)
+    hbal9 = isinstance(hst, dict) and bool(hst.get("last_eval"))
+
+    def live(kind):
+        k9 = str(kind or "").split(":", 1)[0]
+        return not (hbal9 and k9 == BAL_KIND) and AP.effective(doc, AP.cat_of(k9), now)
     items = [x for x in list((dg or {}).get("items") or []) if isinstance(x, dict) and live(x.get("kind"))]
     kc = (dg or {}).get("k")
     if not isinstance(kc, dict):
@@ -650,19 +792,24 @@ def compose_digest(dg: dict, doc: dict, now: float, hst=None, cfg=None):
         top = [t for t in (d.get("top") or []) if isinstance(t, list) and len(t) >= 2]
         if top:
             lines.append("많이 움직인 코인 " + " · ".join(f"{t[0]} {'+' if float(t[1]) >= 0 else '−'}{abs(float(t[1])):.0f}%" for t in top[:3]))
-        cv = [c for c in (d.get("curve") or []) if isinstance(c, list) and len(c) == 2]
+        cv = [c for c in (d.get("curve") or []) if isinstance(c, list) and len(c) >= 2]
         if len(cv) >= 2:
-            curve = [float(c[1]) for c in cv]
+            curve = [[float(c[1]), c[2]] for c in cv] if any(len(c) > 2 for c in cv) else [float(c[1]) for c in cv]
     elif by.get("PNL_DAILY"):
         t9 = by["PNL_DAILY"][-1]["text"]
         lines.append(t9.split("\n", 2)[1] if "\n" in t9 else "손익 요약 도착")
     good, check = [], []
-    rec_n = sum(kc.get(k, 0) for k in ("EXF_RECON", "RECON", "EX_RECON"))
+    rec_n = sum(kc.get(k, 0) for k in RECON_KINDS)
+    fix_n = _cnt((dg or {}).get("fix")) if "fix" in (dg or {}) else sum(recon_fixed(x.get("text"), x.get("d")) for x in items if x.get("kind") in RECON_KINDS)
+    if not live("EXF_RECON"):
+        fix_n = 0
     mism = kc.get("BALANCE_MISMATCH", 0)
-    told = _open_bal_keys(hst)
+    told = _open_bal_keys(hst) if AP.effective(doc, "balmis", now) else 0
     if mism or told:
         check.append(f"잔고가 기록과 다른 곳 {max(mism, told)}" + ("(이미 알림)" if told and not mism else ""))
-    elif rec_n:
+    if rec_n and fix_n:
+        good.append(f"잔고 맞춤: {fix_n}개 고침")
+    elif rec_n and not (mism or told or _open_bal_any(hst)):
         good.append("잔고는 모두 맞아요")
     rv = by.get("REVIEW_DAILY", []) + by.get("REVIEW_WEEKLY", [])
     if rv or kc.get("REVIEW_DAILY") or kc.get("REVIEW_WEEKLY"):
@@ -688,7 +835,7 @@ def compose_digest(dg: dict, doc: dict, now: float, hst=None, cfg=None):
     oa_n = kc.get("OA_ALERT", 0) + kc.get("NFT_CG_SLOW", 0)
     if oa_n and not oa_items:
         check.append(f"기타 자산 소식 {oa_n}")
-    probs = _open_problems(hst)
+    probs = _open_problems(hst, AP.effective(doc, "stall", now))
     if probs and AP.effective(doc, "digest", now):
         check.append(f"안 풀린 봇 문제 {len(probs)}(" + ", ".join(probs[:2]) + ")")
     known = {"PNL_DAILY", "EXF_RECON", "RECON", "EX_RECON", "BALANCE_MISMATCH", "REVIEW_DAILY", "REVIEW_WEEKLY", "BIG_INFLOW", "LP_RANGE", "UNKNOWN",
@@ -851,6 +998,108 @@ def scan_crit(path: str, fn: str, start: int, hold: dict, limit: int = CRIT_SCAN
     return out
 
 
+_URG = {"pos": {}}
+
+
+def urgent_pass(now=None) -> int:
+    c = _URG
+    token, chat, cursor, hold = c.get("token"), c.get("chat"), c.get("cursor"), c.get("hold")
+    if not token or not chat or cursor is None or hold is None:
+        return 0
+    conn, st = c.get("conn"), c.get("st") or {"days": {}, "counted": {}}
+    sent = 0
+    for fn in SOURCES:
+        path = os.path.join(common.STATE_DIR, fn)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        cur = int(cursor.get(fn, 0) or 0)
+        if cur > size:
+            continue
+        pos = max(cur, int(c["pos"].get(fn, cur) or cur))
+        if pos >= size:
+            continue
+        rows, _end = read_chunk(path, pos)
+        for off, d in rows:
+            kind = str(d.get("kind") or "") if isinstance(d, dict) else ""
+            if kind not in AP.FAST_KINDS or held(hold, fn, off):
+                c["pos"][fn] = off
+                continue
+            cat = AP.cat_of(kind, d.get("cat"))
+            if sent:
+                time.sleep(0.3)
+            if not _fast_send_ok(kind, conn):
+                if mark_done(hold, fn, [off], cur):
+                    save_hold(hold)
+                c["pos"][fn] = off
+                try:
+                    stat_add(st, cat, "skip", 1, now)
+                except Exception as e:
+                    log.warning("발송 기록 실패(무시): %s", e)
+                continue
+            token, chat = _tg_creds()
+            if not token or not chat:
+                return sent
+            if sent >= URGENT_MAX_PASS or not send(token, chat, _late_note(d)):
+                return sent
+            sent += 1
+            if mark_done(hold, fn, [off], cur):
+                save_hold(hold)
+            c["pos"][fn] = off
+            try:
+                stat_add(st, cat, "sent", 1, now)
+            except Exception as e:
+                log.warning("발송 기록 실패(무시): %s", e)
+            ts9 = _num_ts(d.get("ts"))
+            log.info("긴급 알림 즉시 발송(%s%s)", kind, f" · 줄 시각 뒤 {time.time() - ts9:.1f}초" if ts9 else "")
+    return sent
+
+
+def _num_ts(v) -> float:
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if 1e9 < x < 1e11 else 0.0
+
+
+def _urgent_hook():
+    try:
+        urgent_pass()
+    except Exception as e:
+        log.warning("긴급 즉시 경로 실패(다음 틱): %s", e)
+
+
+_REAL_SLEEP = time.sleep
+
+
+def _wait_urgent(sec: float) -> None:
+    if time.sleep is not _REAL_SLEEP:
+        _urgent_hook()
+        time.sleep(sec)
+        return
+    end = time.time() + sec
+    while True:
+        _urgent_hook()
+        left = end - time.time()
+        if left <= 0:
+            return
+        time.sleep(min(URGENT_TICK, left))
+
+
+def _wait_creds(sec: float) -> None:
+    if time.sleep is not _REAL_SLEEP:
+        time.sleep(sec)
+        return
+    end = time.time() + sec
+    while time.time() < end:
+        tok9, chat9 = _tg_creds()
+        if tok9 and chat9:
+            return
+        time.sleep(min(URGENT_TICK, max(0.0, end - time.time())))
+
+
 def _save_cursor(cursor: dict, fn: str, off: int) -> bool:
     cursor[fn] = off
     try:
@@ -872,6 +1121,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         off = 0
         st["counted"][fn] = 0
         hold["ids"][fn] = []
+        _URG["pos"].pop(fn, None)
     if off >= size:
         return
     rows, chunk_end = read_chunk(path, off)
@@ -902,10 +1152,19 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                 far = [r for r in drop_scam(far) if isinstance(r[1], dict)]
             for _e, text, kind, cov in coalesce_k(far):
                 crit9 = AP.cat_of(kind) in AP.CRIT
+                if kind in AP.FAST_KINDS and not _fast_send_ok(kind, conn):
+                    if mark_done(hold, fn, cov, off):
+                        save_hold(hold)
+                    try:
+                        stat_add(st, AP.cat_of(kind), "skip", len(cov), time.time())
+                    except Exception as e:
+                        log.warning("발송 기록 실패(무시): %s", e)
+                    continue
                 _SENT_TIMES[:] = [t for t in _SENT_TIMES if time.time() - t < 3600]
                 if not crit9 and len(_SENT_TIMES) >= HOURLY_CAP:
                     continue
-                if sent_n >= MAX_PER_CYCLE or not send(token, chat, text):
+                tk9, ch9 = _fast_to(kind, token, chat)
+                if sent_n >= MAX_PER_CYCLE or (kind in AP.FAST_KINDS and not tk9) or not send(tk9, ch9, text):
                     break
                 sent_n += 1
                 if not crit9:
@@ -923,7 +1182,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
     for end_off, text, kind, cov in msgs:
         now = time.time()
         is_test = kind == AP.TEST_KIND
-        free = is_test or AP.cat_of(kind) in AP.CRIT
+        free = is_test or AP.cat_of(kind) in AP.CRIT or kind in AP.FAST_KINDS
         _SENT_TIMES[:] = [t for t in _SENT_TIMES if now - t < 3600]
         if sent_n >= MAX_PER_CYCLE:
             break
@@ -933,7 +1192,26 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                 log.warning("시간당 발송 상한 %d 도달 — 남은 알림은 다음 사이클에 묶어서 발송(봇 이상 경보는 그대로 보냄)", HOURLY_CAP)
             blocked = True
             continue
-        if not send(token, chat, text):
+        _urgent_hook()
+        if kind in AP.FAST_KINDS and not _fast_send_ok(kind, conn) and not (cov and all(held(hold, fn, o) for o in cov)):
+            try:
+                stat_add(st, AP.cat_of(kind), "skip", len(cov), time.time())
+            except Exception as e:
+                log.warning("발송 기록 실패(무시): %s", e)
+            if blocked or (ceil9 is not None and end_off > ceil9):
+                if mark_done(hold, fn, cov, off):
+                    save_hold(hold)
+            else:
+                off = end_off
+                _save_cursor(cursor, fn, off)
+            continue
+        if cov and all(held(hold, fn, o) for o in cov):
+            if not (blocked or (ceil9 is not None and end_off > ceil9)):
+                off = end_off
+                _save_cursor(cursor, fn, off)
+            continue
+        tk9, ch9 = _fast_to(kind, token, chat)
+        if (kind in AP.FAST_KINDS and not tk9) or not send(tk9, ch9, text):
             break
         sent_n += 1
         if kind == BAL_KIND and hst is not None and bal_keys:
@@ -941,7 +1219,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                 health.note_bal_dm(hst, [k for o in cov for k in (bal_keys.get(o) or ())], time.time())
             except Exception as e:
                 log.warning("잔고 불일치 발송 키 기록 실패(무시): %s", e)
-        hc9 = blocked or (ceil9 is not None and end_off > ceil9)
+        hc9 = blocked or end_off is None or (ceil9 is not None and end_off > ceil9)
         if mark_done(hold, fn, cov if hc9 else [o for o in cov if o > end_off], off if hc9 else end_off):
             save_hold(hold)
         if not hc9:
@@ -980,7 +1258,8 @@ def main():
             if not warned:
                 log.info("TJ_TG_TOKEN/TJ_TG_CHAT 대기 중 — .env 에 넣으면 즉시 발송 시작")
                 warned = True
-            time.sleep(60)
+            _URG.update(token=None, chat=None)
+            _wait_creds(60)
             continue
         warned = False
         now0 = time.time()
@@ -1004,6 +1283,8 @@ def main():
             conn = None
         if init_cursor(cursor):
             common.atomic_write_json(CURSOR_PATH, cursor)
+        _URG.update(token=token, chat=chat, cursor=cursor, doc=doc, conn=conn, st=st, hold=hold)
+        _urgent_hook()
         try:
             big = any(len(v) > HOLD_IDS_WARN for v in hold["ids"].values())
             if big:
@@ -1013,6 +1294,7 @@ def main():
         except Exception as e:
             log.warning("조용한 시간 묶음 발송 실패(다음 사이클): %s", e)
         for fn in SOURCES:
+            _urgent_hook()
             try:
                 run_source(fn, token, chat, cursor, doc, conn, st, hold, cap_state, mon.st)
             except Exception as e:
@@ -1024,7 +1306,7 @@ def main():
             log.warning("하루 요약 발송 실패(다음 사이클): %s", e)
         if st.get("_dirty"):
             save_stats(st)
-        time.sleep(POLL_SEC)
+        _wait_urgent(POLL_SEC)
 
 
 def cli_test() -> int:

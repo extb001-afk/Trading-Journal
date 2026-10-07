@@ -2,6 +2,7 @@
 (function () {
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const $ = (s, r) => (r || document).querySelector(s);
+  const suOwn = t => { const a = window.__tjSearchApi; try { return a && typeof a.ownNm === 'function' ? a.ownNm(t, 'w') : String(t); } catch (e) { return String(t); } };
   const LS = {
     get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {  } }
@@ -149,9 +150,10 @@
       : x.st === 'more' ? '이미 등록됨 · 체인 추가: ' + x.newCh.map(chainName).join(' · ')
       : x.st === 'have' ? '이미 등록됨' + (x.w && x.w.label ? ' (' + x.w.label + ')' : '') + ' — 건너뛰어요'
       : x.st === 'dup' ? '중복 입력 — 한 번만 추가해요' : x.err;
+    const txtH = x.st === 'have' ? '이미 등록됨' + (x.w && x.w.label ? ' (<span class="pvl" data-pk="w">' + esc(suOwn(x.w.label)) + '</span>)' : '') + ' — 건너뛰어요' : esc(txt);
     return '<li class="su-pi ' + x.st + '"><span class="su-pic" aria-hidden="true">' + W_IC[x.st] + '</span><div class="su-pib"><span class="su-pa num">' + esc(t) + '</span>'
       + (x.c ? ' <span class="pill ' + (x.c.kind === 'sol' ? 'ok' : 'a') + ' sm">' + (x.c.kind === 'sol' ? 'Solana' : 'EVM') + '</span>' : '')
-      + '<div class="su-pis">' + esc(txt) + '</div>' + (se && x.c && x.st !== 'have' && x.st !== 'dup' ? '<div class="su-pis su-pise">지난 저장 실패 · ' + esc(se) + '</div>' : '') + '</div></li>';
+      + '<div class="su-pis' + (x.st === 'have' ? ' pvl' : '') + '">' + txtH + '</div>' + (se && x.c && x.st !== 'have' && x.st !== 'dup' ? '<div class="su-pis su-pise">지난 저장 실패 · ' + esc(se) + '</div>' : '') + '</div></li>';
   }
   const W_HINT = '0x… (EVM·BSC 공용) 또는 Solana 주소 · 여러 개는 쉼표나 줄바꿈(Enter)으로 나눠 한 번에 넣을 수 있어요 · 개인 키·시드는 절대 입력하지 마세요 — 주소만 필요합니다';
   function wMsgHTML(an) {
@@ -161,7 +163,7 @@
     if (!an.multi) {
       const x = an.items[0];
       return x.st === 'bad' ? '<span class="su-bad">' + esc(x.err) + '</span>'
-        : x.st === 'have' ? '<span class="su-bad">이미 같은 체인으로 등록된 주소예요' + (x.w && x.w.label ? ' (' + esc(x.w.label) + ')' : '') + '</span>'
+        : x.st === 'have' ? '<span class="su-bad pvl">이미 같은 체인으로 등록된 주소예요' + (x.w && x.w.label ? ' (<span class="pvl" data-pk="w">' + esc(suOwn(x.w.label)) + '</span>)' : '') + '</span>'
         : '<span class="' + (x.st === 'warn' ? 'su-warnt' : 'su-good') + '">' + esc(x.c.note) + (x.st === 'more' ? ' · 이미 등록된 주소 — 새 체인 추가: ' + esc(x.newCh.map(chainName).join(' · ')) : '') + '</span>';
     }
     const cnt = k => an.items.filter(x => x.st === k).length, n = an.save.length;
@@ -172,13 +174,32 @@
       + '<div class="su-mnote" role="note"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg><span>여러 개는 추가한 뒤 목록에서 이름·메모를 붙여요</span></div>'
       + '<ul class="su-prev" aria-label="추가할 주소 미리 보기">' + shown.map(wItemHTML).join('') + (an.items.length > shown.length ? '<li class="su-pi have"><span class="su-pic" aria-hidden="true">…</span><div class="su-pib"><div class="su-pis">외 ' + (an.items.length - shown.length) + '개</div></div></li>' : '') + '</ul>'
       + '<div class="su-psum" aria-live="polite">' + sum + '</div>'
-      + (n > MAX_BATCH ? '<div class="su-bad" style="margin-top:6px">한 번에 최대 ' + MAX_BATCH + '개까지 추가할 수 있어요 — 지금 ' + n + '개, 나눠서 넣어 주세요</div>' : '')
+      + (n > MAX_BATCH ? '<div class="su-warnt pvx" style="margin-top:6px">한 번에 ' + MAX_BATCH + '개씩 넣어요 — 지금 ' + n + '개 · \'앞의 ' + MAX_BATCH + '개 먼저 추가\'를 누르면 나머지 ' + (n - MAX_BATCH) + '개는 칸에 남아 이어서 넣을 수 있어요</div>' : '')
+      + wCapHTML(an)
       + (an.needChain ? '<div class="su-bad" style="margin-top:6px">아래에서 EVM 체인을 하나 이상 고르세요</div>' : '');
   }
   function wBtn(an) {
     if (!an.multi) return { t: U.busy.wadd ? '추가 중…' : '지갑 추가', dis: !!U.busy.wadd };
     const n = an.save.length;
-    return { t: U.busy.wadd ? '추가 중…' : n ? '지갑 ' + n + '개 추가' : '추가할 주소 없음', dis: !!U.busy.wadd || !n || n > MAX_BATCH || an.needChain };
+    return { t: U.busy.wadd ? '추가 중…' : n > MAX_BATCH ? '앞의 ' + MAX_BATCH + '개 먼저 추가' : n ? '지갑 ' + n + '개 추가' : '추가할 주소 없음', dis: !!U.busy.wadd || !n || an.needChain };
+  }
+  function wCapHTML(an) {
+    const cap = U.st && U.st.walletCap, T = U.tier;
+    if (!cap) return '';
+    if (!T && an.save.length) loadTier();
+    const fresh = an.save.filter(x => x.st !== 'more').slice(0, MAX_BATCH), nNew = fresh.length, have = ((U.st && U.st.wallets) || []).length;
+    let out = '';
+    if (nNew && have + nNew > cap.max) out += '<div class="su-bad pvx" style="margin-top:6px">지갑은 최대 ' + cap.max + '개 — 지금 ' + have + '개 등록 · 새 주소 ' + nNew + '개 중 ' + Math.max(0, cap.max - have) + '개만 들어가요(안 쓰는 주소를 빼면 그만큼 더 넣을 수 있어요)</div>';
+    else if (nNew) out += '<div class="cap pvx" style="margin-top:6px">추가하면 ' + (have + nNew) + ' / ' + cap.max + '개</div>';
+    if (nNew && T && T.pairCost) {
+      const add = {}, chs = Array.from(U.chains || []), nEvm = fresh.filter(x => x.c && x.c.kind === 'evm').length, nSol = nNew - nEvm;
+      chs.forEach(c => { const pc = T.pairCost[c]; if (pc && nEvm) add[pc.prov] = (add[pc.prov] || 0) + pc.day * nEvm; });
+      if (nSol) add.helius = (add.helius || 0) + nSol * 1440 * 1.5;
+      const es = (T.budget || {}).etherscan, x = add.etherscan || 0;
+      if (x) out += '<div class="cap pvx">새 주소는 처음 이력을 받는 동안 지금 주기예요 — 이더스캔 하루 +' + fmtN(x) + '콜' + (es ? ' (지금 예상 ' + fmtN(es.perDay) + ' → ' + fmtN(es.perDay + x) + ' / 상한 ' + fmtN(es.cap) + ')' : '')
+        + ((es && es.perDay + x > es.cap) ? ' · <span class="su-badt">상한을 넘으면 확인 간격을 자동으로 늘려요</span>' : '') + ' · 이력을 다 받고 쉬는 주소가 되면 거의 0이에요</div>';
+    }
+    return out;
   }
   const NEWW = 'tj_new_wallets', NEWW_TTL = 2 * 3600 * 1000;
   function newW() { try { const v = JSON.parse(SS.get(NEWW) || 'null'); if (v && Array.isArray(v.keys) && Date.now() - v.ts < NEWW_TTL) return new Set(v.keys); } catch (e) {  } return new Set(); }
@@ -321,7 +342,7 @@
   };
   const XP_HELP = {
     helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요합니다 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
-    etherscan: { url: 'https://etherscan.io/myapikey', why: '선택 — Ethereum·Arbitrum·Polygon 과거 거래 백필이 수십 배 빨라집니다. 없어도 전 체인 동작합니다.', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
+    etherscan: { url: 'https://etherscan.io/myapikey', why: 'EVM 지갑이 있으면 필수(무료) — Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받아요. 없으면 공개 탐색기로만 받아 느리거나(일부 체인은 막혀) 늦게 기록될 수 있어요.', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
     opensea: { url: 'https://docs.opensea.io/reference/api-keys', why: '선택 · 추천 — 넣으면 기타 자산 › NFT 의 EVM 바닥가를 오픈시에서 먼저 받아(최우선) 작은 컬렉션까지 NFT 추적이 더 원활해요. 없으면 코인게코(무료 데모 키 권장). 미검증(키 없이 공개 문서만 보고 연결).', steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
@@ -404,7 +425,7 @@
     const chips = (st.chains || []).filter(c => c && c.key && String(c.key)[0] !== '_').map(c => '<button class="su-chip' + (U.chains.has(c.key) ? ' on' : '') + '" data-su="chain" data-v="' + esc(c.key) + '" aria-pressed="' + U.chains.has(c.key) + '">' + esc(c.name) + '</button>').join('');
     let list = '';
     if (ws.length && !noList) {
-      list = '<div class="su-list">' + ws.map(w => '<div class="su-row' + (nw.has(w.address) ? ' new' : '') + '"><div style="min-width:0;flex:1"><b>' + esc(w.label || '(이름 없음)') + '</b> ' + pill(w.kind === 'sol' ? 'ok' : 'a', w.kind === 'sol' ? 'Solana' : 'EVM')
+      list = '<div class="su-list">' + ws.map(w => '<div class="su-row' + (nw.has(w.address) ? ' new' : '') + '"><div style="min-width:0;flex:1"><b class="pvl"' + (w.label ? ' data-pk="w"' : '') + '>' + esc(w.label ? suOwn(w.label) : '(이름 없음)') + '</b> ' + pill(w.kind === 'sol' ? 'ok' : 'a', w.kind === 'sol' ? 'Solana' : 'EVM')
         + (nw.has(w.address) ? ' <span class="pill w sm" title="이름은 설정 › 추적 지갑에서 이름을 누르면 바로 바꿀 수 있어요">새로 추가</span>' : '')
         + '<div class="su-addr num">' + esc(w.address) + '</div><div class="cap">' + w.chains.map(chainName).map(esc).join(' · ') + '</div>'
         + (w.reconDone && w.reconDone.length ? ' <span class="pill w sm" title="기초잔고 대조가 끝난 뒤 추가된 체인(' + esc(w.reconDone.map(chainName).join(', ')) + ') — 백필이 끝난 뒤 재구축(README › 백필)하면 이 지갑의 과거 보유분까지 맞춰집니다">과거 보유분 재구축 필요</span>' : '')
@@ -417,7 +438,8 @@
       + '<div class="su-chains' + (an.onlySol ? ' hidden' : '') + '" id="suChains"><div class="cap" style="margin-bottom:6px">EVM 체인 선택 · 같은 주소를 체인별로 추적합니다 <button class="link" data-su="chainAll">전체</button> · <button class="link" data-su="chainNone">해제</button></div><div class="su-chiprow">' + chips + '</div></div>'
       + '<div class="su-actions"><button class="btn pri" id="suWadd" data-su="wadd"' + (wb.dis ? ' disabled' : '') + '>' + esc(wb.t) + '</button><span class="cap su-kbd">Enter = 줄바꿈(다음 주소) · ⌘/Ctrl+Enter = 추가</span></div>'
       + wResHTML()
-      + list + (ws.some(w => w.kind === 'sol') && st.solNeedsHelius && !st.explorers.helius.set ? '<div class="bnr w" style="margin-top:12px"><div><b>Solana 지갑은 Helius 키가 필요합니다</b><div class="bd">다음 단계에서 무료 키를 넣으면 Solana 수집이 시작됩니다.</div></div></div>' : '') + '</div>';
+      + list + (ws.some(w => w.kind === 'sol') && st.solNeedsHelius && !st.explorers.helius.set ? '<div class="bnr w" style="margin-top:12px"><div><b>Solana 지갑은 Helius 키가 필요합니다</b><div class="bd">다음 단계에서 무료 키를 넣으면 Solana 수집이 시작됩니다.</div></div></div>' : '')
+      + evmKeyBanner(st) + '</div>';
   }
 
   function fieldsHTML(gk, g, help) {
@@ -467,13 +489,23 @@
       : '';
     return '<div class="cap su-p su-cgplan">등급: <b>' + esc(p.text) + '</b>' + (p.budgetText ? '<br>' + esc(p.budgetText) : '') + sh + '</div>';
   }
+  function evmKeyBanner(st) {
+    if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
+    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요합니다(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
+  }
+  function xpPill(st, k) {
+    if (k === 'helius') return st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? pill('w', 'Solana 필수') : pill('g', 'Solana 지갑이 있으면 필수');
+    if (k === 'etherscan') return st.evmNeedsKeys ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
+    return pill('g', k === 'coingecko' ? '선택 · 무료' : '선택');
+  }
   function keysHTML() {
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보입니다(값은 다시 표시하지 않음).</div>'
+      + evmKeyBanner(st)
       + ['helius', 'etherscan', 'coingecko', 'opensea'].filter(k => st.explorers[k]).map(k => {
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius');
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>'
-          + (k === 'helius' && st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? ' ' + pill('w', 'Solana 필수') : ' ' + pill('g', k === 'helius' ? 'Solana 지갑이 있으면 필수' : k === 'coingecko' ? '선택 · 무료' : '선택'))
+          + ' ' + xpPill(st, k)
           + '<span class="sp"></span>' + pill(g.set ? 'ok' : 'g', g.set ? '저장됨' + (g.plan && g.plan.plan ? ' · ' + (g.plan.plan === 'pro' ? '프로' : '데모') : '') : '미설정') + '</button>'
           + (open ? '<div class="su-accb">' + fieldsHTML(k, g, cgPlanHTML(g) + '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
@@ -510,12 +542,16 @@
     const st = U.st, T = U.tg, tg = st.telegram || {};
     let body = '';
     if (T.phase === 'done' || (tg.connected && T.phase !== 'wait')) {
-      body = '<div class="su-tgdone"><div class="su-big">' + pill('ok', '연결됨') + '</div><div><b>@' + esc(tg.bot || '?') + '</b> → ' + esc(tg.chatName || '채팅') + ' <span class="cap num">(' + esc(tg.chatMasked || '') + ')</span><div class="cap">목표가·손절 도달, 새 거래 분류, 검토 필요 알림이 이 채팅으로 옵니다 (시간당 최대 30통, 같은 종류는 묶어서). 어떤 알림을 받을지는 설정 › 알림(텔레그램)에서 골라요.</div></div></div>'
+      body = '<div class="su-tgdone"><div class="su-big">' + pill('ok', '연결됨') + '</div><div><b>@' + (tg.bot ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.bot)) + '</span>' : '?') + '</b> → ' + (tg.chatName ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.chatName)) + '</span>' : '채팅') + ' <span class="cap num">(' + esc(tg.chatMasked || '') + ')</span><div class="cap">목표가·손절 도달, 새 거래 분류, 검토 필요 알림이 이 채팅으로 옵니다 (시간당 최대 30통, 같은 종류는 묶어서). 어떤 알림을 받을지는 설정 › 알림(텔레그램)에서 골라요.</div></div></div>'
         + '<div class="su-actions"><button class="btn" data-su="tgtest">테스트 알림 보내기</button><button class="btn danger" data-su="tgoff">연결 해제</button></div>';
     } else if (T.phase === 'wait') {
       const mm = Math.max(0, Math.floor(T.left / 60)), ss = Math.max(0, T.left % 60);
-      body = '<div class="su-tgwait"><div class="su-qrbox">' + (T.link ? qrSVG(T.link, 176) : '') + '<div class="cap" style="text-align:center;margin-top:6px">휴대폰 카메라로 스캔</div></div>'
-        + '<div style="min-width:0;flex:1"><div class="su-h" style="margin:0 0 6px">봇 <span class="num">@' + esc(T.bot && T.bot.username) + '</span> 에게 /start 를 보내세요</div>'
+      const pv9 = (() => { const a9 = window.__tjSearchApi; try { return !!(a9 && typeof a9.pvOn === 'function' && a9.pvOn()); } catch (e) { return false; } })();
+      if (pv9) body = '<div class="su-tgwait"><div style="min-width:0;flex:1"><div class="su-h" style="margin:0 0 6px">텔레그램 연결 대기 중</div><div class="cap">가림 모드에서는 연결 코드를 숨겨요 — 가림을 끄면 QR·연결 버튼이 다시 보여요</div>'
+        + '<div class="su-wait"><span class="su-spin" aria-hidden="true"></span>/start 기다리는 중 · <span class="num">' + mm + ':' + (ss < 10 ? '0' : '') + ss + '</span> 남음</div>'
+        + '<div style="margin-top:10px"><button class="link" data-su="tgcancel">다른 토큰으로</button></div></div></div>';
+      else body = '<div class="su-tgwait"><div class="su-qrbox">' + (T.link ? qrSVG(T.link, 176) : '') + '<div class="cap" style="text-align:center;margin-top:6px">휴대폰 카메라로 스캔</div></div>'
+        + '<div style="min-width:0;flex:1"><div class="su-h" style="margin:0 0 6px">봇 <span class="num">@' + (T.bot && T.bot.username ? '<span class="pvl" data-pk="w">' + esc(suOwn(T.bot.username)) + '</span>' : '') + '</span> 에게 /start 를 보내세요</div>'
         + '<ol class="su-ol"><li>아래 버튼(또는 QR)으로 텔레그램에서 봇을 엽니다</li><li><b>시작(Start)</b> 을 누르면 이 화면이 자동으로 채팅을 찾습니다</li><li>찾으면 테스트 메시지를 보내고 저장합니다</li></ol>'
         + '<div class="su-actions" style="margin-top:10px"><a class="btn pri" href="' + esc(T.link) + '" target="_blank" rel="noopener noreferrer">텔레그램에서 열기</a><button class="btn" data-su="copy" data-v="' + esc(T.start) + '">명령 복사: <span class="num">' + esc(T.start) + '</span></button></div>'
         + '<div class="su-wait"><span class="su-spin" aria-hidden="true"></span>/start 기다리는 중 · <span class="num">' + mm + ':' + (ss < 10 ? '0' : '') + ss + '</span> 남음</div>'
@@ -536,10 +572,12 @@
     const a = U.st.apply || {};
     if (!a.runner) return '<div class="su-apply"><b>적용</b><div class="cap">이 설치는 유닛 러너 없이 실행 중입니다. 지갑·탐색기 키를 바꾼 뒤 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).</div><div class="su-form" style="margin-top:8px"><code class="su-code su-grow">' + esc(a.manual) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(a.manual) + '">복사</button></div></div>';
     const us = a.units || {};
-    return '<div class="su-apply"><b>적용 상태</b><div class="cap">설정을 바꾸면 해당 유닛이 약 30초 안에 스스로 다시 시작합니다. 거래소 키·텔레그램은 재시작 없이 1분 안에 반영됩니다.</div><div class="su-units">'
-      + Object.keys(UNIT_KO).map(u => { const x = us[u] || {}; const cls = x.state === 'applied' ? 'ok' : x.state === 'pending' ? 'a' : x.state === 'waiting' ? 'g' : 'g';
-        const t = x.state === 'applied' ? '적용됨' : x.state === 'pending' ? '적용 중' : x.state === 'waiting' ? '대기' : '—';
-        return '<div class="su-unit"><span>' + UNIT_KO[u] + '</span>' + pill(cls, t) + (x.state === 'waiting' && x.why ? '<div class="cap">' + esc(x.why) + '</div>' : '') + '</div>'; }).join('') + '</div></div>';
+    const rl = a.mode === 'reload';
+    return '<div class="su-apply"><b>적용 상태</b><div class="cap">' + (rl ? '지갑을 넣으면 약 30초 안에 수집기가 자동으로 다시 시작합니다. 탐색기 키를 바꾸면 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).' : '설정을 바꾸면 해당 유닛이 약 30초 안에 스스로 다시 시작합니다. 거래소 키·텔레그램은 재시작 없이 1분 안에 반영됩니다.') + '</div><div class="su-units">'
+      + Object.keys(UNIT_KO).map(u => { const x = us[u] || {}; const cls = x.state === 'applied' ? 'ok' : x.state === 'pending' ? 'a' : x.state === 'manual' ? 'w' : x.state === 'waiting' ? 'g' : 'g';
+        const t = x.state === 'applied' ? '적용됨' : x.state === 'pending' ? '적용 중' : x.state === 'manual' ? '재시작 필요' : x.state === 'waiting' ? '대기' : '—';
+        return '<div class="su-unit"><span>' + UNIT_KO[u] + '</span>' + pill(cls, t) + (x.state === 'waiting' && x.why ? '<div class="cap">' + esc(x.why) + '</div>' : '') + '</div>'; }).join('') + '</div>'
+      + (rl && Object.keys(us).some(u => (us[u] || {}).state === 'manual') ? '<div class="su-form" style="margin-top:8px"><code class="su-code su-grow">' + esc(a.manual) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(a.manual) + '">복사</button></div>' : '') + '</div>';
   }
   function finishHTML() {
     const st = U.st, cur = draft('cur') || st.prefs.currency || 'KRW', light = document.documentElement.getAttribute('data-theme') === 'light';
@@ -547,11 +585,11 @@
     const exN = EX_ORDER.filter(k => st.exchanges[k].set).length;
     const rows = [['지갑', st.wallets.length ? st.wallets.length + '개 주소' : '없음 — 나중에 설정 탭에서 추가', st.wallets.length > 0],
       ['Helius (Solana)', st.explorers.helius.set ? '저장됨' : (st.wallets.some(w => w.kind === 'sol') ? '필요 — Solana 수집 대기' : '선택'), st.explorers.helius.set],
-      ['Etherscan 가속', st.explorers.etherscan.set ? '저장됨' : '없음 (blockscout 로 동작)', st.explorers.etherscan.set],
+      ['Etherscan', st.explorers.etherscan.set ? '저장됨' : (st.evmNeedsKeys ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (blockscout 로 동작)'), st.explorers.etherscan.set],
       ['거래소', exN ? exN + '곳 연결' : '없음 (온체인만)', exN > 0], ['텔레그램', st.telegram.connected ? '@' + (st.telegram.bot || '') + ' 연결됨' : '연결 안 함', st.telegram.connected]];
     return '<div class="su-sec"><div class="su-h">표시</div><div class="cap" style="margin:10px 0 8px">기준 통화</div><div class="opts">' + opt('cur', 'KRW', cur === 'KRW', 'KRW', '업비트 USDT 환산') + opt('cur', 'USD', cur === 'USD', 'USD', '달러 원가 기준') + '</div>'
       + '<div class="cap" style="margin:14px 0 8px">테마</div><div class="opts">' + opt('theme', 'dark', !light, '다크', '기본') + opt('theme', 'light', light, '라이트', '밝은 배경') + '</div></div>'
-      + '<div class="su-sec"><div class="su-h">요약</div>' + rows.map(r => '<div class="kv"><span>' + esc(r[0]) + '</span><span class="' + (r[2] ? 'oktxt' : 'mut') + '">' + esc(r[1]) + '</span></div>').join('') + applyHTML() + '</div>';
+      + '<div class="su-sec"><div class="su-h">요약</div>' + rows.map(r => '<div class="kv"><span>' + esc(r[0]) + '</span><span class="' + (r[2] ? 'oktxt' : 'mut') + '">' + esc(r[1]) + '</span></div>').join('') + evmKeyBanner(st) + applyHTML() + '</div>';
   }
   const PERP_FMT = { evm: '0x… EVM 주소', sol: 'Solana 주소', dydx: 'dydx1… 주소' };
   function perpDex() { const P = (U.st && U.st.perp) || {}, ds = P.dexes || []; return ds.find(d => d.key === U.pdex) || ds[0] || null; }
@@ -570,7 +608,7 @@
       const s9 = ((stt[w.dex] || {}).accts || {})[w.address] || {}, wait = (stt[w.dex] || {}).wait;
       const stH = s9.err || wait ? '<span class="pill w sm" title="' + esc(s9.err || wait) + '">' + (s9.ts ? '지연' : '오류') + '</span> <span class="cap">' + esc(String(s9.err || wait).slice(0, 60)) + '</span>'
         : '<span class="cap">' + esc(ago9(s9.ts)) + (s9.ts && s9.equity != null ? ' · 계정 가치 $' + esc(Number(s9.equity).toLocaleString('en-US', { maximumFractionDigits: 2 })) : '') + '</span>';
-      return '<div class="su-row"><div style="min-width:0;flex:1"><b>' + esc(w.label || '(이름 없음)') + '</b> ' + pill('a', w.name)
+      return '<div class="su-row"><div style="min-width:0;flex:1"><b class="pvl"' + (w.label ? ' data-pk="w"' : '') + '>' + esc(w.label ? suOwn(w.label) : '(이름 없음)') + '</b> ' + pill('a', w.name)
         + '<div class="su-addr num">' + esc(w.address) + '</div><div>' + stH + (s9.unk ? ' <span class="cap" title="Lighter 체결 중 방향을 판정하지 못해 손익을 기록하지 않은 건수">· 손익 판정 못 한 체결 ' + esc(s9.unk) + '건</span>' : '') + '</div></div>'
         + '<button class="btn sm" data-su="pdel" data-v="' + esc(w.dex + '|' + w.address) + '" aria-label="퍼프 덱스 주소 삭제">삭제</button></div>';
     }).join('') + '</div>' : '';
@@ -602,8 +640,230 @@
       + (needW ? '<div class="su-skip"><button class="link" data-su="later">나중에 할게요 (설정 탭에서 언제든 가능)</button></div>' : '')
       + '</div></div>';
   }
+  const TIER_SHORT = ['지금 주기', '조금 느리게', '1시간마다', '6시간마다', '하루 1회'];
+  const PROV_NAME = p => p === 'etherscan' ? '이더스캔' : p === 'helius' ? '헬리우스(Solana)' : /^blockscout:/.test(p) ? '블록스카웃 ' + chainName(p.split(':')[1]) : /^rpc:/.test(p) ? '공개 RPC ' + chainName(p.split(':')[1]) : p;
+  const fmtN = n => (n == null ? '—' : Math.round(n).toLocaleString('ko-KR'));
+  function inSec(ts) { const s = Math.round(ts - Date.now() / 1000); return s <= 60 ? '곧' : s < 3600 ? Math.round(s / 60) + '분 뒤' : s < 86400 ? Math.round(s / 3600) + '시간 뒤' : Math.round(s / 86400) + '일 뒤'; }
+  async function loadTier(force, q) {
+    if (isLocked() || U.tierBusy) return;
+    if (!force && U.tier && Date.now() - U.tierAt < 60000) return;
+    if (!force && U.tierErrAt && Date.now() - U.tierErrAt < Math.min(60000, 5000 * Math.pow(2, Math.max(0, (U.tierErrN || 1) - 1)))) return;
+    U.tierBusy = true;
+    try {
+      const r = await fetch('/api/setup/tier' + (q || ''), { cache: 'no-store' });
+      let d = null; try { d = await r.json(); } catch (e) { d = null; }
+      if (isLocked()) { U.tierBusy = false; return; }
+      if (d && d.ok) { U.tier = d; U.tierAt = Date.now(); U.tierErr = ''; U.tierErrN = 0; U.tierErrAt = 0; } else { U.tierErr = (d && d.error) || ('HTTP ' + r.status); U.tierErrN = (U.tierErrN || 0) + 1; U.tierErrAt = Date.now(); }
+    } catch (e) { if (isLocked()) { U.tierBusy = false; return; } U.tierErr = '연결 실패'; U.tierErrN = (U.tierErrN || 0) + 1; U.tierErrAt = Date.now(); }
+    U.tierBusy = false;
+    if (!(document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-su-in'))) fill();
+  }
+  function tierRows() {
+    const T = U.tier || {}, lab = {};
+    ((U.st && U.st.wallets) || []).forEach(w => { lab[w.kind === 'sol' ? w.address : String(w.address).toLowerCase()] = w; });
+    return Object.keys(T.addrs || {}).map(k => ({ k, w: lab[k], pairs: T.addrs[k] })).filter(r => r.w)
+      .sort((a, b) => Math.min(...a.pairs.map(p => p.t)) - Math.min(...b.pairs.map(p => p.t)) || String(a.w.label).localeCompare(String(b.w.label)));
+  }
+  function periodTxt(sec) { sec = Math.round(sec || 0); return sec >= 120 ? Math.round(sec / 60) + '분' : sec + '초'; }
+  function pairChip(p) {
+    const T = U.tier || {}, ht = (T.holdText || {})[p.h] || '';
+    const HS = { code: '계약·위임', hist: '이력 받는 중', boot: '준비 중', nosent: '확인 중', req: '확인 요청됨', path: '수집 방식상', off: '꺼짐' };
+    const sc9 = (T.scopes || {})[p.c] || {}, slow9 = !p.h && !p.e && p.t === 0 && sc9.period && sc9.basePoll && sc9.period > sc9.basePoll * 1.01;
+    const lbl = p.h ? '지금 주기' + (HS[p.h] ? '(' + HS[p.h] + ')' : '') : p.e ? '빈 지갑 · 하루 1회' : (slow9 ? periodTxt(sc9.period) + '마다' : (TIER_SHORT[p.t] || '')) + (p.f ? ' · 옛 기록 채우는 중' : '');
+    return '<span class="pill ' + (p.t === 0 ? 'ok' : 'g') + ' sm su-tc pvx" title="' + esc(chainName(p.c) + ' · ' + lbl + (ht ? ' — ' + ht : '') + (p.full ? ' · 마지막 확인 ' + ago(p.full) : '') + (p.f ? ' · 처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요' : '')) + '">' + esc(chainName(p.c)) + ' · ' + esc(lbl) + (p.wake ? ' · 확인 중' : '') + '</span>';
+  }
+  function tierWHTML(el) {
+    const T = U.tier, k0 = el && el.getAttribute('data-w') || '';
+    if (!T) { loadTier(); return '<div class="cap">' + (U.tierErr ? '확인 주기 정보를 못 불러왔어요 · ' + esc(U.tierErr) + ' <button class="link" data-su="tload">다시</button>' : '확인 주기 불러오는 중…') + '</div>'; }
+    const k = /^0x/i.test(k0) ? k0.toLowerCase() : k0, ps = (T.addrs || {})[k] || [];
+    if (!ps.length) return '<div class="cap">확인 주기 — 수집기가 이 주소를 아직 장부에 올리지 않았어요(다음 주기에)</div>';
+    const rest = ps.filter(p => p.t > 0 && !p.h), lastFull = Math.max(0, ...ps.map(p => p.full || 0));
+    const nxt = rest.map(p => p.nextAct).filter(Boolean);
+    return '<div class="su-tw pvx"><div class="cap su-twh">확인 주기 · ' + (rest.length ? '쉬는 체인 ' + rest.length + '/' + ps.length + (nxt.length ? ' · 다음 점검 ' + inSec(Math.min(...nxt)) : '') : '모든 체인 지금 주기') + (lastFull ? ' · 마지막 전체 확인 ' + esc(ago(lastFull)) : '') + (ps.some(p => p.f) ? ' · 처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요' : '') + '</div>'
+      + '<div class="su-tcs">' + ps.map(pairChip).join('') + '</div>'
+      + (rest.length ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(k) + '">지금 확인</button> <span class="cap">다음 수집 주기에 이 주소를 탐색기로 한 번 확인해요</span>' : '') + '</div>';
+  }
+  function budgetRows(T, extra) {
+    const b = T.budget || {}, keys = Object.keys(b);
+    const main = keys.filter(k => b[k].limit), pub = keys.filter(k => !b[k].limit);
+    const row = k => {
+      const e = b[k], add = extra && extra[k] || 0, v = e.perDay + add, cap = e.cap || 0, pct = cap ? Math.min(100, Math.round(100 * v / e.limit)) : 0;
+      return '<div class="su-brow"><div class="su-brh"><b>' + esc(PROV_NAME(k)) + '</b><span class="num">' + fmtN(v) + ' / ' + fmtN(e.limit) + '<span class="cap"> 하루</span></span></div>'
+        + '<div class="su-bbar" role="img" aria-label="' + esc(PROV_NAME(k) + ' 예상 ' + pct + '% · 상한 ' + T.budgetPct + '%') + '"><i class="' + (v > cap ? 'o' : '') + '" style="width:' + pct + '%"></i><s style="left:' + T.budgetPct + '%"></s></div>'
+        + '<div class="cap">' + (add ? '추가 전 ' + fmtN(e.perDay) + ' → 추가 직후 ' + fmtN(v) + ' · ' : '') + '상한(' + T.budgetPct + '%) ' + fmtN(cap) + (v > cap ? ' · <span class="su-badt">넘어요 — 확인 간격을 자동으로 늘려요</span>' : '') + '</div></div>';
+    };
+    const pubSum = pub.reduce((a, k) => a + b[k].perDay, 0);
+    return main.map(row).join('')
+      + (pub.length ? '<div class="cap su-bpub">공개 RPC·블록스카웃 ' + pub.length + '곳 · 하루 합 약 ' + fmtN(pubSum) + '콜 — 공표 하루 한도가 없는 곳이라 노드별 속도 제한(게이트)으로 천천히 불러요'
+        + ' <button class="link" data-su="tpub" aria-expanded="' + !!U.tierPub + '">' + (U.tierPub ? '접기' : '곳별 보기') + '</button></div>'
+        + (U.tierPub ? '<ul class="su-bpl">' + pub.sort((x, y) => b[y].perDay - b[x].perDay).map(k => '<li>' + esc(PROV_NAME(k)) + ' <span class="num">' + fmtN(b[k].perDay) + '</span></li>').join('') + '</ul>' : '') : '');
+  }
+  function tierHTML() {
+    const T = U.tier;
+    if (!T) { loadTier(); return '<div class="cap">' + (U.tierErr ? '확인 주기 정보를 못 불러왔어요 · ' + esc(U.tierErr) + ' <button class="link" data-su="tload">다시</button>' : '확인 주기 불러오는 중…') + '</div>'; }
+    loadTier();
+    const all = [].concat(...Object.values(T.addrs || {})), cnt = [0, 0, 0, 0, 0];
+    all.forEach(p => { cnt[p.h ? 0 : Math.min(4, p.t)]++; });
+    const holds = {}; all.filter(p => p.h).forEach(p => { holds[p.h] = (holds[p.h] || 0) + 1; });
+    const cap = T.cap || {}, es = T.esToday || {}, hl = T.helToday || {}, sc = Object.values(T.scopes || {}), nF = all.filter(p => p.f).length;
+    const gate = sc.some(x => x.gate), str = Math.max(1, ...sc.map(x => x.stretch || 1));
+    const tiles = '<div class="su-ttiles"><div><b class="num">' + fmtN(cap.n) + '<span class="cap">/' + fmtN(cap.max) + '</span></b><span>등록 주소</span></div>'
+      + '<div><b class="num">' + fmtN(all.length - cnt[0]) + '<span class="cap">/' + fmtN(all.length) + '</span></b><span>쉬는 주소·체인</span></div>'
+      + '<div><b class="num">' + fmtN(es.n) + '</b><span>이더스캔 오늘(UTC)</span></div></div>';
+    const steps = '<div class="su-tsteps">' + cnt.map((n, i) => '<span class="pill ' + (i === 0 ? 'ok' : 'g') + ' sm">' + TIER_SHORT[i] + ' <b class="num">' + n + '</b></span>').join('') + '</div>'
+      + (Object.keys(holds).length ? '<div class="cap">지금 주기 이유 · ' + Object.keys(holds).map(h => esc((T.holdText || {})[h] || h) + ' ' + holds[h]).join(' · ') + '</div>' : '')
+      + ((nF || hl.fillFirst) ? '<div class="cap">옛 기록 채우는 중' + (nF ? ' ' + nF + '곳' : '') + ' — 하루 한도 안에서 옛 기록부터 몰아서 받아요(처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요)'
+        + (nF && es.rt != null ? ' · 이더스캔 실시간 확인 몫 하루 ' + fmtN(es.rt) + '콜 · 오늘 남은 옛 기록 몫 ' + fmtN(es.fillLeft || 0) + '콜' : '')
+        + (hl.fillFirst && hl.rt != null ? ' · 헬리우스(Solana) 실시간 확인 몫 하루 ' + fmtN(hl.rt) + '크레딧 · 오늘 남은 옛 기록 몫 ' + fmtN(hl.fillLeft || 0) + '크레딧' : '') + '</div>' : '')
+      + (hl.pn ? '<div class="cap">Solana 새 거래 확인 = 공개 노드(' + esc(hl.pn.host || 'publicnode') + ') 먼저 · 백업 헬리우스'
+        + (hl.pn.hlClosedUntil ? ' — 오늘 헬리우스 한도를 다 써서 ' + new Date(hl.pn.hlClosedUntil * 1000).toTimeString().slice(0, 5) + '까지 공개 노드로만 이어 받아요'
+          : (hl.pn.ok ? (hl.pn.rate != null ? ' · 최근 응답 ' + Math.round(hl.pn.rate * 100) + '%' : '') + (hl.pn.floorPct != null ? ' · 헬리우스 실시간 몫 하루 ' + hl.pn.floorPct + '%(남는 몫은 옛 기록에)' : '')
+            : ' — 지금 공개 노드 응답이 고르지 않아 헬리우스로 확인 중(헬리우스 몫을 더 써요)')) + '</div>' : '')
+      + (all.some(p => p.e) ? '<div class="cap">빈 지갑 ' + all.filter(p => p.e).length + '곳 — 기록이 하나도 없어 활동은 하루 한 번 확인해요(토큰 입금만 오면 주 1회 확인 때 기록 — 시각·수량은 그대로)</div>' : '')
+      + Object.keys(T.scopes || {}).filter(k => { const x = T.scopes[k]; return x && x.period && x.basePoll && x.period > x.basePoll * 1.01; })
+        .map(k => { const x = T.scopes[k]; return '<div class="cap">' + esc(chainName(k)) + ' 지갑 ' + fmtN(x.pairs || 0) + '개라 ' + periodTxt(x.period) + '마다 확인해요(하루 한도 안 · 최근에 쓴 지갑 ' + fmtN(x.t0 || 0) + '개 기준)'
+          + (k === 'sol' && hl.fillFirst ? ' — 지금은 옛 기록부터 채워서 새 거래 확인이 이보다 늦을 수 있어요' : '') + '</div>'; }).join('')
+      + (T.rpcFb || []).map(x => '<div class="cap">' + esc(chainName(x.c)) + ' — ' + esc(x.text) + '</div>').join('');
+    const warn = gate ? '<div class="bnr w su-tw2"><div><b>이더스캔 하루 예산(' + T.budgetPct + '%)에 가까워 아껴 쓰는 중</b><div class="bd">지금 주기 주소도 공개 RPC 로 먼저 보고 바뀐 게 있을 때만 이더스캔을 불러요' + (str > 1 ? ' · 확인 간격 ×' + str : '') + ' — 토큰 입금만 조금 늦게(최대 ' + Math.round(10 * str) + '분) 기록돼요</div></div></div>' : '';
+    const stale = sc.filter(x => x.stale).length ? '<div class="cap su-badt">수집기 장부가 30분 넘게 갱신되지 않았어요 — 수집기 상태를 확인하세요</div>' : '';
+    return '<div class="su-tier pvx">' + tiles + steps + warn + stale
+      + '<div class="su-th">하루 예상 호출 <span class="cap">(지금 등록 상태 · 쉬는 주소는 탐색기 0콜)</span></div>' + budgetRows(T)
+      + '<div class="cap su-tnote">쉬는 주소로 들어온 입금은 그 주소의 느린 확인 때 기록돼요(6개월 넘게 안 쓴 주소 = 최대 약 하루 늦게). 내가 보내면(서명) 바로 지금 주기로 돌아와요.</div>'
+      + '<div class="su-actions"><button class="btn sm" data-su="tsheet">주소별 확인 주기 (' + fmtN(Object.keys(T.addrs || {}).length) + ')</button><button class="btn sm" data-su="tcheck">모두 지금 확인</button></div></div>';
+  }
+  function tierSheetHTML() {
+    const rows = tierRows();
+    return '<div class="su-bg su-tbg" role="dialog" aria-modal="true" aria-labelledby="suTierT"><div class="su-tsheet">'
+      + '<div class="su-tsh"><h3 id="suTierT">주소별 확인 주기</h3><button class="btn sm" data-su="tclose" aria-label="닫기">닫기</button></div>'
+      + '<div class="cap su-p pvx">지금 주기 = 매 수집 주기 · 쉬는 주소 = 계단 간격마다 nonce·잔고만 보고(탐색기 0콜) 바뀌면 그때 탐색기로 복구 · 토큰 입금은 받침 확인(6시간, 6개월↑ 하루) 때</div>'
+      + '<div class="su-tlist">' + rows.map(r => {
+        const rest = r.pairs.some(p => p.t > 0 && !p.h), lf = Math.max(0, ...r.pairs.map(p => p.full || 0));
+        return '<div class="su-trow"><div class="su-trm"><b class="pvl"' + (r.w.label ? ' data-pk="w"' : '') + '>' + esc(r.w.label ? suOwn(r.w.label) : '(이름 없음)') + '</b> <span class="num su-tad">' + esc(r.k.length > 14 ? r.k.slice(0, 6) + '…' + r.k.slice(-4) : r.k) + '</span>'
+          + (lf ? '<span class="cap pvx"> · 확인 ' + esc(ago(lf)) + '</span>' : '') + '<div class="su-tcs">' + r.pairs.map(pairChip).join('') + '</div></div>'
+          + (rest ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(r.k) + '">지금 확인</button>' : '') + '</div>';
+      }).join('') + '</div></div></div>';
+  }
+  let tierEl = null;
+  function renderTierSheet() {
+    if (U.tierSheet && U.tier) {
+      if (!tierEl) { tierEl = document.createElement('div'); tierEl.id = 'suTier'; document.body.appendChild(tierEl); }
+      tierEl.innerHTML = tierSheetHTML();
+      document.documentElement.classList.add('su-lock');
+    } else if (tierEl) { tierEl.remove(); tierEl = null; if (!U.open && !U.perm) document.documentElement.classList.remove('su-lock'); }
+  }
+  const CH_COLOR = { eth: '#7C9CFF', base: '#5B8DEF', arbitrum: '#7FC4E8', optimism: '#F25F5C', sol: '#4FC3A1', bsc: '#F2C661', linea: '#B49CFF', blast: '#E5D86A',
+    zksync: '#8B93A4', scroll: '#E0B88A', polygon: '#A07CF0', gnosis: '#3E9C8C', robinhood: '#9AD57A', arc: '#6FA8DC' };
+  const chColor = k => CH_COLOR[k] || ('hsl(' + (Array.from(String(k)).reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7)) + ' 45% 62%)');
+  const CH_ST = { ok: ['ok', '정상'], filling: ['a', '옛 기록 채우는 중'], empty: ['g', '빈 지갑'], off: ['g', '꺼 둠'] };
+  const CH_LOCK = { sep: '따로 수집', rpc: '노드 직접 읽기', last: '마지막 EVM', boot: '첫 수집 중' };
+  const CH_REC_IC = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5v8"/><path d="M6.6 6.8a7.5 7.5 0 1 0 10.8 0"/></svg>';
+  function chMoney(usd) {
+    const E = window.TJ && window.TJ.ext;
+    if (E && typeof E.m === 'function') return typeof E.pvm === 'function' ? E.pvm(E.m(usd)) : '<span class="pvm">' + esc(E.m(usd)) + '</span>';
+    return '<span class="pvm">$' + esc(Math.round(usd).toLocaleString('en-US')) + '</span>';
+  }
+  const chEvery = s => (s == null ? '' : s < 60 ? s + '초마다' : (Math.round(s / 6) / 10).toString().replace(/\.0$/, '') + '분마다');
+  const chDay = ts => { const d = new Date(ts * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  async function loadChains(force) {
+    if (isLocked() || U.chBusy) return;
+    if (!force && U.ch && Date.now() - U.chAt < 60000) return;
+    if (!force && U.chErrAt && Date.now() - U.chErrAt < Math.min(60000, 5000 * Math.pow(2, Math.max(0, (U.chErrN || 1) - 1)))) return;
+    U.chBusy = true;
+    try {
+      const r = await fetch('/api/setup/chains', { cache: 'no-store' });
+      if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) { U.chBusy = false; return; }
+      let d = null; try { d = await r.json(); } catch (e) { d = null; }
+      if (isLocked()) { U.chBusy = false; return; }
+      if (d && d.ok) { U.ch = d; U.chAt = Date.now(); U.chErr = ''; U.chErrN = 0; U.chErrAt = 0; } else { U.chErr = (d && d.error) || ('HTTP ' + r.status); U.chErrN = (U.chErrN || 0) + 1; U.chErrAt = Date.now(); }
+    } catch (e) { if (isLocked()) { U.chBusy = false; return; } U.chErr = '연결 실패'; U.chErrN = (U.chErrN || 0) + 1; U.chErrAt = Date.now(); }
+    U.chBusy = false;
+    if (!(document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-su-in'))) fill();
+  }
+  function chSpark(r) {
+    if (!r.on) return '<span class="su-chdash" aria-hidden="true"></span><span class="su-chn">조회 안 함</span>';
+    if (r.sent30 == null) return '<span class="su-chn">—</span>';
+    const sp = Array.isArray(r.spark) ? r.spark : [], mx = Math.max(1, ...sp), col = chColor(r.key);
+    return '<span class="su-chsp" aria-hidden="true">' + sp.map(v => v ? '<i style="height:' + Math.max(2, Math.round(20 * v / mx)) + 'px;background:' + col + '"></i>' : '<i class="z"></i>').join('') + '</span>'
+      + '<span class="su-chn">' + fmtN(r.sent30) + '건</span>';
+  }
+  function chSub(r) {
+    if (!r.on) return '조회 안 함 · 알림 없음' + (r.offAt ? ' · ' + chDay(r.offAt) + '에 끔' : '') + ' · 지갑 ' + fmtN(r.wallets) + '개';
+    const p = ['지갑 ' + fmtN(r.wallets) + '개' + (r.pollSec ? ' · <b>' + esc(chEvery(r.pollSec)) + '</b> 확인' : '')];
+    if (r.rest) p.push('오래 안 쓴 ' + fmtN(r.rest) + '곳은 쉬어요');
+    if (r.status === 'filling') p.push('처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요');
+    if (!r.can) p.push(esc(r.why || '여기서 못 꺼요'));
+    else if (r.auto) p.push('활동이 보여 자동으로 켠 체인');
+    return p.join(' · ');
+  }
+  function chRow(r, first) {
+    const st = CH_ST[r.status], name = esc(r.name || r.key);
+    const sw = '<button class="sw2' + (r.on ? ' on' : '') + '" data-su="chTog" data-v="' + esc(r.key) + '" role="switch" aria-checked="' + !!r.on + '" aria-label="' + name + ' 조회"' + (r.can ? '' : ' disabled title="' + esc(r.why || '') + '"') + '></button>';
+    const rec = r.recommend ? '<div class="su-chrec">' + '<span class="su-chri">' + CH_REC_IC + '</span><span class="su-chrt"><b>끄는 걸 추천해요</b><span> — 이 체인에서 보낸 거래가 지갑마다 ' + fmtN(U.ch.nonceMax) + '번 이하예요</span></span>'
+      + '<span class="su-chrm">가장 많은 지갑도 ' + fmtN(r.maxNonce) + '번' + (r.calls ? ' · 하루 −' + fmtN(r.calls.perDay) + '콜' : '') + (r.big ? ' · <b class="su-chbig">잔고 ' + chMoney(r.usd) + ' 있음</b>' : '') + '</span></div>' : '';
+    return '<div class="su-chr' + (r.recommend ? ' rec' : '') + (r.on ? '' : ' off') + (first ? ' first' : '') + '" data-ch="' + esc(r.key) + '"><div class="su-chm"><div class="su-chh"><i class="su-chd" style="background:' + chColor(r.key) + '"></i><b>' + name + '</b>'
+      + (st ? pill(st[0] + ' sm', st[1]) : '') + (r.can ? '' : pill('g sm', CH_LOCK[r.lock] || '끄기 잠금')) + '</div><div class="su-chs">' + chSub(r) + '</div></div>'
+      + '<div class="su-chc">' + chSpark(r) + '</div>' + sw + rec + '</div>';
+  }
+  function chainsHTML() {
+    const C = U.ch;
+    if (!C) { loadChains(); return '<div class="cap">' + (U.chErr ? '체인 목록을 못 불러왔어요 · ' + esc(U.chErr) + ' <button class="link" data-su="chLoad">다시</button>' : '체인 목록 불러오는 중…') + '</div>'; }
+    loadChains();
+    const rows = Array.isArray(C.rows) ? C.rows : [];
+    const on = rows.filter(r => r.on), off = rows.filter(r => !r.on);
+    const rec = on.filter(r => r.recommend), rest = on.filter(r => !r.recommend).sort((a, b) => (b.sent30 || 0) - (a.sent30 || 0) || (b.wallets || 0) - (a.wallets || 0));
+    const LIM = 6, all = !!U.chAll, shown = all ? rest : rest.slice(0, LIM);
+    const head = '<div class="su-chtop"><b class="su-cht">체인별 조회</b><span class="su-chmeta">켜짐 ' + fmtN(C.nOn) + ' · 꺼짐 ' + fmtN(C.nOff) + ' · 지갑 ' + fmtN(C.nWallets) + '개</span><span class="sp"></span>'
+      + (C.nRec ? pill('w sm su-chrb', '끄기 추천 ' + C.nRec) : '') + '</div>'
+      + '<p class="su-chp">안 쓰는 체인을 끄면 조회·알림이 멈추고 컴퓨터·API 한도를 아껴요. 언제든 다시 켤 수 있어요(켜면 빠진 기간을 이어 받아요).</p>';
+    const steps = Array.isArray(C.pollSteps) && C.pollSteps.length ? '<div class="su-chinfo"><b>확인 주기는 지갑 수에 맞춰 늘어나요</b><div class="su-tsteps">' + C.pollSteps.map(x => pill('g sm', String(x.label || ''))).join('') + '</div></div>' : '';
+    const colh = '<div class="su-chr su-chcol" aria-hidden="true"><span class="su-chm">체인 · 상태 · 확인 주기</span><span class="su-chc">최근 30일 보낸 거래</span><span class="su-chsw">조회</span></div>';
+    const list = rec.map((r, i) => chRow(r, i === 0)).join('') + shown.map((r, i) => chRow(r, !rec.length && i === 0)).join('')
+      + (rest.length > LIM ? '<div class="su-chmore"><button class="btn sm" data-su="chAll" aria-expanded="' + all + '">' + (all ? '접기' : '다른 체인 ' + fmtN(rest.length - LIM) + '개 더 보기 · 모두 조회 중') + '</button></div>' : '');
+    const offH = off.length ? '<div class="su-choh">꺼 둔 체인 ' + fmtN(off.length) + '<span>조회·알림 멈춤 · 그동안 새 거래·잔고 변화는 안 들어와요 · 다시 켜면 끈 날부터 이어 받아요</span></div>' + off.map((r, i) => chRow(r, i === 0)).join('') : '';
+    const calls = C.callsDay != null ? '<div class="su-chfoot"><div class="su-chfh"><b>하루 예상 호출</b><span class="cap">켜진 체인 ' + fmtN(C.nOn) + '개 · 수집기 장부 기준</span><span class="sp"></span><span class="num">' + fmtN(C.callsDay) + '콜</span></div>'
+      + (C.recCallsDay ? '<div class="cap">추천 ' + fmtN(C.nRec) + '개를 끄면 하루 약 ' + fmtN(C.recCallsDay) + '콜 줄어요</div>' : '') + '</div>' : '';
+    const swept = C.sweptAt ? '<div class="cap su-chnote">nonce = 하루 한 번 점검 기준(' + esc(ago(C.sweptAt)) + ') · 모르는 지갑(EOA 확인 전·점검 실패·이틀 넘은 값)이 하나라도 있거나, 최근 30일 안에 보낸 거래가 있거나, 옛 기록을 채우는 중이면 추천하지 않아요</div>' : '';
+    return '<section class="su-ch pvx" aria-label="체인별 조회">' + head + steps + colh + list + offH + calls + swept + '</section>';
+  }
+  function chApplyTxt(ap) {
+    if (ap && ap.mode === 'reload') return '저장하면 약 30초 안에 수집기·웹이 자동으로 다시 시작해 적용돼요';
+    return ap && ap.runner ? '저장하면 15초 안에 자동으로 적용돼요' : '적용하려면 웹·수집기 재시작이 필요해요(' + esc((ap && ap.manual) || 'pm2 restart tj-evm tj-core tj-web') + ')';
+  }
+  function chAsk(r) {
+    const E = window.TJ && window.TJ.ext, name = r.name || r.key, ap = U.ch && U.ch.apply;
+    const run = () => chSet(r.key, !r.on);
+    let title, body, ok;
+    if (r.on) {
+      title = name + ' 조회를 끌까요?';
+      const kv = (k, v) => '<span class="su-mdk">' + k + '</span><span class="su-mdv">' + v + '</span>';
+      body = '<span class="su-md pvx"><span class="su-mdp">끄는 동안 이 체인의 새 거래·잔고 변화가 안 들어와요' + (r.usd != null ? ' — 지금까지 기록과 잔고(지금 <b>' + chMoney(r.usd) + '</b>)는 그대로 남지만 멈춘 값이에요' : ' — 지금까지 기록은 그대로 남아요') + '.<br>다시 켜면 끈 날부터 빠진 기간을 이어 받아요.</span>'
+        + '<span class="su-mdc"><span class="su-mdh"><i class="su-chd" style="background:' + chColor(r.key) + '"></i><b>' + esc(name) + '</b><span class="cap">지갑 ' + fmtN(r.wallets) + '개' + (r.pollSec ? ' · ' + esc(chEvery(r.pollSec)) + ' 확인 중' : '') + '</span><span class="sp"></span>' + (r.recommend ? pill('w sm', '끄기 추천') : '') + '</span>'
+        + '<span class="su-mdg">' + kv('멈춰요', '이 체인 조회 · 입금·출금 알림 · 미추적 체인 경고') + kv('남아요', '지금까지 기록' + (r.usd != null ? ' · 잔고 ' + chMoney(r.usd) + '(멈춘 값)' : '') + ' — 켜면 다시 따라가요') + (r.calls ? kv('아껴요', '하루 약 ' + fmtN(r.calls.perDay) + '콜') : '') + '</span>'
+        + '<span class="su-mdf">' + (r.recommend ? '보낸 거래가 지갑마다 ' + fmtN(U.ch.nonceMax) + '번 이하라 추천했어요 · 가장 많은 지갑도 ' + fmtN(r.maxNonce) + '번' : '추천 조건(지갑 전부 보낸 거래 ' + fmtN(U.ch.nonceMax) + '번 이하 확인 · 최근 30일 0건)에 안 맞는 체인이에요 — 쓰는 체인인지 한 번 더 확인하세요')
+        + (r.big ? ' · <b class="su-chbig">잔고 ' + chMoney(r.usd) + ' 있음</b>' : '') + '</span></span>'
+        + '<span class="su-mda">' + chApplyTxt(ap) + '</span></span>';
+      ok = '끄기';
+    } else {
+      title = name + ' 조회를 다시 켤까요?';
+      body = '<span class="su-md pvx"><span class="su-mdp">' + (r.offAt ? chDay(r.offAt) + '에 끈 뒤로 ' : '') + '빠진 기간을 이어 받아요 — 그동안 거래가 많았으면 다 받을 때까지 조금 걸려요.<br>조회·입금·출금 알림도 다시 켜져요.</span>'
+        + '<span class="su-mda">' + chApplyTxt(ap) + '</span></span>';
+      ok = '켜기';
+    }
+    if (E && typeof E.confirmAsk === 'function') E.confirmAsk({ title, bodyHtml: body, ok, run, pvx: true });
+    else if (window.confirm(title)) run();
+  }
+  async function chSet(key, on) {
+    if (U.chSetBusy) return;
+    U.chSetBusy = true;
+    const r = await api('chains/set', { chain: key, on });
+    U.chSetBusy = false;
+    if (!r || !r.ok) { toast((r && r.error) || '저장 실패', true); return; }
+    const row = U.ch && (U.ch.rows || []).find(x => x.key === key), nm = row ? row.name : key;
+    toast(nm + (on ? ' 조회를 다시 켰어요' : ' 조회를 껐어요') + (r.apply && r.apply.mode === 'reload' ? ' — 곧 자동으로 다시 시작해 적용돼요' : r.apply && !r.apply.runner ? ' — 웹·수집기 재시작 뒤 적용돼요' : ''));
+    await loadChains(true);
+  }
   const ipHTML = () => (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>');
-  const SLOTS = { keys: keysHTML, exchanges: exchangesHTML, telegram: tgHTML, wadd: () => walletsHTML(true), perp: perpHTML, apply: applyHTML, ip: ipHTML };
+  const SLOTS = { keys: keysHTML, exchanges: exchangesHTML, telegram: tgHTML, wadd: () => walletsHTML(true), perp: perpHTML, apply: applyHTML, ip: ipHTML, tier: tierHTML, tierw: tierWHTML, chains: chainsHTML };
   let wizEl = null, permEl = null;
   function onSettings() { return /^settings(\/|$)/.test((location.hash || '').replace('#', '')); }
   function slotErrHTML() { return '<div class="su-bad" style="padding:8px 0">연결·키 상태를 불러오지 못했어요' + (U.err ? ' · ' + esc(U.err) : '') + ' <button class="link" data-su="retry">다시 시도</button></div>'; }
@@ -612,7 +872,7 @@
     const els = document.querySelectorAll('[data-su-slot]');
     if (!els.length) return;
     if (!U.st) { if (U.err) els.forEach(el => { el.innerHTML = slotErrHTML(); }); return; }
-    els.forEach(el => { const f = SLOTS[el.getAttribute('data-su-slot')]; if (f) el.innerHTML = U.open ? '' : f(); });
+    els.forEach(el => { const f = SLOTS[el.getAttribute('data-su-slot')]; if (f) el.innerHTML = U.open ? '' : f(el); });
     document.querySelectorAll('[data-su-slot] [data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
     document.querySelectorAll('[data-su-slot] textarea[data-su-in]').forEach(autoGrow);
   }
@@ -626,6 +886,7 @@
       document.documentElement.classList.add('su-lock');
     } else if (wizEl) { wizEl.remove(); wizEl = null; document.documentElement.classList.remove('su-lock'); }
     fill();
+    renderTierSheet();
     document.querySelectorAll('[data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
     document.querySelectorAll('textarea[data-su-in]').forEach(autoGrow);
     if (keepFocus) { const el = $('[data-su-in="' + keepFocus + '"]'); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {  } } }
@@ -643,6 +904,8 @@
     U.locked = true;
     stopPoll(); if (U.dpPoll) { clearInterval(U.dpPoll); U.dpPoll = null; }
     U.st = null; U.err = null; U.d = {}; U.test = {}; U.busy = {}; U.dpWait = {}; U.wRes = null; U.wErr = {}; U.perm = null; U.open = false; U.ack = {}; U.needAck = {}; U.ip = '';
+    U.tier = null; U.tierErr = ''; U.tierErrN = 0; U.tierErrAt = 0; U.tierSheet = false; if (tierEl) { tierEl.remove(); tierEl = null; }
+    U.ch = null; U.chErr = ''; U.chErrN = 0; U.chErrAt = 0; U.chAll = false;
     Object.assign(U.tg, { phase: 'idle', err: '', bot: null, link: '', start: '', left: 0, tok: '' });
     if (wizEl) { wizEl.remove(); wizEl = null; }
     if (permEl) { permEl.remove(); permEl = null; }
@@ -675,22 +938,23 @@
   async function waddMany(an) {
     if (an.secret) { toast(W_SECRET[an.secret], true); return; }
     if (!an.save.length) { toast(an.items.some(x => x.st === 'bad') ? '오류 난 주소를 고쳐 주세요' : '새로 추가할 주소가 없어요 (모두 이미 등록됨·중복)', true); return; }
-    if (an.save.length > MAX_BATCH) { toast('한 번에 최대 ' + MAX_BATCH + '개까지 — 나눠서 넣어 주세요', true); return; }
     if (an.needChain) { toast('EVM 체인을 하나 이상 고르세요', true); return; }
+    const send = an.save.slice(0, MAX_BATCH), later = an.save.slice(MAX_BATCH).map(x => x.t);
     U.busy.wadd = true; render();
-    const r = await api('wallets/add_many', { addresses: an.save.map(x => x.t), chains: Array.from(U.chains) });
+    const r = await api('wallets/add_many', { addresses: send.map(x => x.t), chains: Array.from(U.chains) });
     U.busy.wadd = false;
     if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
     const res = Array.isArray(r.results) ? r.results : [], failed = {};
     res.forEach(x => { if (x.status === 'invalid' || x.status === 'error') failed[x.input] = x.error || '저장 안 됨'; });
     const added = res.filter(x => x.status === 'added');
-    const keep = an.items.filter(x => x.st === 'bad' || (failed[x.t] != null && x.st !== 'dup')).map(x => x.t);
+    const keep = an.items.filter(x => x.st === 'bad' || (failed[x.t] != null && x.st !== 'dup')).map(x => x.t).concat(later);
     U.wErr = failed;
     U.wRes = { added: added.length, skipped: an.items.filter(x => x.st === 'have' || x.st === 'dup').length + res.filter(x => x.status === 'exists' || x.status === 'dup').length,
       left: keep.length, fails: an.items.filter(x => x.st === 'bad').map(x => ({ t: x.t, err: x.err })).concat(Object.keys(failed).map(t => ({ t, err: failed[t] }))) };
     if (keep.length) U.d.w_addr = keep.join('\n'); else delete U.d.w_addr;
     markNew(added.map(x => x.address));
-    toast(added.length ? added.length + '개 추가됨 — 이름은 목록에서 붙여요' + (keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : '') : '추가된 주소가 없어요' + (keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : ''), !added.length);
+    toast(added.length ? added.length + '개 추가됨 — 이름은 목록에서 붙여요' + (later.length ? ' · 남은 ' + later.length + '개는 칸에 — 한 번 더 누르면 이어서 추가' : keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : '') : '추가된 주소가 없어요' + (keep.length ? ' · ' + keep.length + '개는 칸에 남겼어요' : ''), !added.length);
+    U.tierAt = 0;
     await refreshStatus();
     if (added.length) {
       const r0 = document.querySelector('#suWizard .su-row.new, #walCard .newrow');
@@ -699,6 +963,22 @@
     }
   }
   const A = {
+    async tcheck(el) {
+      const a = el.getAttribute('data-v') || '';
+      if (!a && !window.confirm('쉬는 주소까지 모두 다음 수집 주기에 탐색기로 한 번씩 확인할까요?\n(이더스캔 호출이 한 번에 늘어요 — 보통은 주소별 \'지금 확인\'으로 충분해요)')) return;
+      el.disabled = true;
+      const r = await api('wallets/check_now', a ? { address: a } : {});
+      toast(r.ok ? (r.same ? '방금 요청했어요 — 곧 확인해요' : (a ? '이 주소를' : '모든 주소를') + ' 다음 수집 주기(1~2분 안)에 확인해요') : (r.error || '요청 실패'), !r.ok);
+      el.disabled = false;
+      setTimeout(() => loadTier(true), 2500);
+    },
+    tsheet() { U.tierSheet = true; renderTierSheet(); const b = document.querySelector('#suTier [data-su="tclose"]'); if (b) b.focus(); },
+    tclose() { U.tierSheet = false; renderTierSheet(); const b = document.querySelector('[data-su="tsheet"]'); if (b) b.focus(); },
+    tload() { U.tierErr = ''; loadTier(true); },
+    tpub() { U.tierPub = !U.tierPub; fill(); },
+    chTog(el) { const k = el.getAttribute('data-v'), r = U.ch && (U.ch.rows || []).find(x => x.key === k); if (r && r.can) chAsk(r); },
+    chLoad() { U.chErr = ''; loadChains(true); },
+    chAll() { U.chAll = !U.chAll; fill(); },
     async wadd() {
       if (U.busy.wadd) return;
       const an = wAnalyze(draft('w_addr'));
@@ -713,7 +993,7 @@
       if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
       delete U.d.w_addr; delete U.d.w_label; U.wRes = null; U.wErr = {};
       if (r.added && r.added.address) markNew([r.added.address]);
-      toast('추가됨 · ' + label + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러옵니다');
+      toast('추가됨 · ' + suOwn(label) + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러옵니다');
       await refreshStatus();
       if (window.__tj && window.__tj.refresh) window.__tj.refresh();
     },
@@ -739,7 +1019,7 @@
       U.busy.padd = false;
       if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
       delete U.d.p_addr; delete U.d.p_label;
-      toast('추가됨 · ' + label + ' (' + d.name + ') — 15초 안에 수집을 시작합니다');
+      toast('추가됨 · ' + suOwn(label) + ' (' + d.name + ') — 15초 안에 수집을 시작합니다');
       await refreshStatus();
     },
     async pdel(el) {
@@ -878,7 +1158,7 @@
 
   document.addEventListener('click', ev => {
     const t = ev.target.closest && ev.target.closest('[data-su]');
-    if (!t || !(t.closest('#suWizard') || t.closest('[data-su-scope]') || t.closest('#suPerm'))) return;
+    if (!t || !(t.closest('#suWizard') || t.closest('[data-su-scope]') || t.closest('#suPerm') || t.closest('#suTier'))) return;
     if (U.perm && !t.closest('#suPerm')) return;
     if (t.tagName === 'A') return;
     ev.preventDefault();
@@ -903,6 +1183,7 @@
   document.addEventListener('keydown', ev => {
     const t = ev.target, k = t.getAttribute && t.getAttribute('data-su-in');
     if (ev.key === 'Escape' && U.perm) { A.permClose(); return; }
+    if (ev.key === 'Escape' && U.tierSheet) { A.tclose(); return; }
     if (ev.key === 'Escape' && U.open) { A.close(); return; }
     if (ev.key !== 'Enter' || !k) return;
     if (k === 'w_addr' && !(ev.metaKey || ev.ctrlKey)) return;
@@ -984,6 +1265,61 @@
     '.su-wfail{margin:6px 0 2px 18px;padding:0;font-size:12.5px;color:var(--danger);word-break:break-all}',
     '.su-row.new{background:var(--accentBg);border-radius:12px;padding:12px;margin-top:6px;border-bottom-color:transparent}',
     '.su-chains{margin-top:8px}',
+    '.su-tier{display:flex;flex-direction:column;gap:10px}',
+    '.su-ttiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}',
+    '.su-ttiles>div{background:var(--surface2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}',
+    '.su-ttiles b{font-size:18px;line-height:1.2} .su-ttiles span{font-size:12px;color:var(--text2)}',
+    '.su-tsteps,.su-tcs{display:flex;gap:6px;flex-wrap:wrap}',
+    '.su-tcs{margin:6px 0}',
+    '.su-th{font-weight:700;font-size:14px;margin-top:4px}',
+    '.su-brow{padding:8px 0;border-bottom:1px solid var(--line)}',
+    '.su-brh{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;flex-wrap:wrap}',
+    '.su-bbar{position:relative;height:8px;border-radius:99px;background:var(--surface2);margin:6px 0 4px;overflow:hidden}',
+    '.su-bbar i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--accent)} .su-bbar i.o{background:var(--danger)}',
+    '.su-bbar s{position:absolute;top:0;bottom:0;width:2px;background:var(--text2);opacity:.55}',
+    '.su-bpub{line-height:1.6} .su-bpl{margin:4px 0 0 18px;padding:0;font-size:12.5px;color:var(--text2);columns:2}',
+    '.su-tnote{line-height:1.6}',
+    '.su-tw{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)} .su-twh{line-height:1.5}',
+    '.su-tsheet{width:640px;max-width:100%;background:var(--bg);border-radius:22px;box-shadow:var(--pop);padding:20px 22px}',
+    '.su-tsh{display:flex;justify-content:space-between;align-items:center;gap:10px} .su-tsh h3{margin:0;font-size:18px}',
+    '.su-tlist{margin-top:8px;border-top:1px solid var(--line)}',
+    '.su-trow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)} .su-trm{min-width:0;flex:1} .su-tad{font-size:12.5px;color:var(--text2)}',
+    '.su-ch{display:flex;flex-direction:column;min-width:0}',
+    '.su-chtop{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap} .su-cht{font-size:15px;font-weight:700} .su-chmeta{font-size:12.5px;color:var(--text2);font-variant-numeric:tabular-nums}',
+    '.su-chtop .sp,.su-chfh .sp,.su-mdh .sp{flex:1}',
+    '.su-chp{margin:6px 2px 12px;font-size:13px;line-height:1.55;color:var(--text2)}',
+    '.su-chinfo{background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-size:13px;display:flex;flex-direction:column;gap:8px}',
+    '.su-chr{display:grid;grid-template-columns:minmax(0,1fr) 128px 46px;column-gap:18px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}',
+    '.su-chr.first,.su-chcol+.su-chr{border-top-color:transparent}',
+    '.su-chcol{padding:10px 0 6px;border-top:0;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--muted)} .su-chcol .su-chm{padding-left:18px} .su-chcol .su-chc,.su-chcol .su-chsw{text-align:right}',
+    '.su-chr.rec{background:color-mix(in srgb,var(--warn) 6.5%,transparent);border-radius:12px;padding:10px 12px;margin:4px -12px;border-top-color:transparent}',
+    '.su-chr.rec+.su-chr{border-top-color:transparent}',
+    '.su-chm{min-width:0} .su-chh{display:flex;align-items:center;gap:8px;min-width:0} .su-chh b{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.su-chd{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}',
+    '.su-chs{font-size:12.5px;line-height:1.45;color:var(--text2);margin-top:2px;padding-left:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .su-chs b{color:var(--text);font-weight:600}',
+    '.su-chr.off .su-chh b{color:var(--text2)} .su-chr.off .su-chd{opacity:.35} .su-chr.off .su-chs{color:var(--muted)}',
+    '.su-chc{display:flex;flex-direction:column;align-items:flex-end;gap:3px;min-width:0}',
+    '.su-chsp{display:flex;align-items:flex-end;gap:3px;height:20px} .su-chsp i{width:4px;border-radius:1.5px;opacity:.85} .su-chsp i.z{height:2px;background:var(--line2);opacity:1;border-radius:1px}',
+    '.su-chdash{width:102px;height:20px;border-bottom:1px dashed var(--line2);display:block;box-sizing:border-box;margin-bottom:-10px}',
+    '.su-chn{font-size:12px;line-height:1.5;color:var(--muted);font-variant-numeric:tabular-nums}',
+    '.su-chr .sw2{justify-self:end}',
+    '.su-chrec{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;line-height:1.5;min-width:0}',
+    '.su-chri{color:var(--warn);display:grid;place-items:center;flex:none}',
+    '.su-chrt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1} .su-chrt b{color:var(--warn);font-weight:650} .su-chrt span{color:var(--text)}',
+    '.su-chrm{font-size:12px;color:var(--text2);white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}',
+    '.su-chbig{color:var(--warn);font-weight:650}',
+    '.su-chmore{padding:8px 0 2px}',
+    '.su-choh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--text2);font-weight:650;margin:16px 0 2px} .su-choh span{font-size:12px;font-weight:500;color:var(--muted)}',
+    '.su-chfoot{border-top:1px solid var(--line);margin-top:4px;padding:12px 0 4px;display:flex;flex-direction:column;gap:4px} .su-chfh{display:flex;align-items:baseline;gap:8px;font-size:13.5px;flex-wrap:wrap}',
+    '.su-chnote{margin-top:8px;line-height:1.55}',
+    '.su-md{display:block} .su-mdp{display:block;line-height:1.65}',
+    '.su-mdc{display:block;margin-top:14px;background:var(--surface2);border-radius:12px;padding:12px 14px;color:var(--text)}',
+    '.su-mdh{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .su-mdh b{font-size:14px;font-weight:600}',
+    '.su-mdg{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:5px 14px;margin-top:10px;font-size:13px;line-height:1.5;font-variant-numeric:tabular-nums}',
+    '.su-mdk{color:var(--text2);white-space:nowrap} .su-mdv{color:var(--text);min-width:0}',
+    '.su-mdf{display:block;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line2);font-size:12.5px;color:var(--muted)}',
+    '.su-mda{display:block;margin-top:10px;font-size:12.5px;color:var(--text2)}',
+    '@media (max-width:640px){.su-chr{grid-template-columns:minmax(0,1fr) auto 46px;column-gap:10px}.su-chs{white-space:normal}.su-chsp,.su-chdash{display:none}.su-chcol .su-chc{font-size:11px;max-width:64px;white-space:normal;line-height:1.3}.su-chrec{flex-wrap:wrap}.su-chrt{white-space:normal}.su-chrm{flex-basis:100%;white-space:normal;padding-left:23px}.su-chr.rec{margin:4px -8px;padding:10px 8px}}',
     '.su-chiprow{display:flex;gap:6px;flex-wrap:wrap}',
     '.su-chip{padding:6px 11px;border-radius:99px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface2);color:var(--text2)}',
     '.su-chip.on{background:var(--accentBg);color:var(--accent);border-color:transparent}',
@@ -1006,6 +1342,7 @@
     '.su-tgwait{display:flex;gap:20px;align-items:flex-start;margin-top:6px}',
     '.su-qrbox{flex:none;background:#fff;border-radius:14px;padding:8px}',
     '.su-qr{display:block}',
+    'html.pvh .su-tgwait .su-qrbox,html.pvh .su-tgwait .su-actions{display:none}',
     '.su-wait{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13.5px;color:var(--text2)}',
     '.su-spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:suspin .9s linear infinite}',
     '@keyframes suspin{to{transform:rotate(360deg)}}',
@@ -1020,6 +1357,7 @@
     '.su-foot{display:flex;gap:8px;align-items:center;margin-top:18px}',
     '.su-skip{text-align:center;margin-top:12px}',
     '.su-demo{position:relative;z-index:31;text-align:center;font-size:12.5px;font-weight:700;padding:5px 12px;background:var(--warnBg);color:var(--warn)}',
+    '@media (max-width:640px){.su-tsheet{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}.su-bpl{columns:1}.su-ttiles b{font-size:16px}}',
     '@media (max-width:640px){.su-perm{border-radius:0;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom));border-width:0 0 0 4px}.su-perm h3{font-size:19px}.su-bg{padding:0}.su-wiz{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom));border:0}.su-step span{display:none}.su-step.on span{display:inline}.su-tgwait{flex-direction:column;align-items:center}.su-sec{padding:16px}.su-grow{min-width:0;flex-basis:100%}.su-form .field[style]{width:100%!important}.su-kbd{display:none}}'
   ].join('\n');
   document.head.appendChild(css);

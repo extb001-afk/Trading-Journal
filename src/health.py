@@ -22,7 +22,7 @@ EVAL_PATH = os.path.join(common.STATE_DIR, "health_eval.json")
 STATUS_PATH = os.path.join(common.STATE_DIR, "health_status.json")
 HB_DIR = os.path.join(common.STATE_DIR, "health")
 UNITS = ["tj-evm", "tj-sol", "tj-bsc", "tj-core", "tj-web", "tj-alert", "tj-review", "tj-ex", "tj-exf"]
-OPTIONAL_UNITS = []
+OPTIONAL_UNITS = ["tj-review"]
 _UNIT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 LEVELS = {"ok": 0, "warn": 1, "crit": 2}
 BUCKET = 300
@@ -34,10 +34,14 @@ DEFAULTS = {
     "ignore_units": [],
     "optional_units": OPTIONAL_UNITS,
     "tunnel": {},
+    "heartbeat_url": "",
+    "heartbeat_sec": 300,
     "rss_warn_mb": {"tj-web": 2200, "*": 600},
     "checks_off": [],
     "telegram_min_level": "crit",
     "remind_hours": 0,
+    "remind_once_sec": 3600,
+    "flap_hold_sec": 900,
     "tg_min_age_sec": 180,
     "digest_hour": 9,
     "hourly_cap": 12,
@@ -161,6 +165,12 @@ def settings(cfg: dict) -> dict:
     else:
         out["tunnel"] = {}
     out["bf_stall_sec"] = float(((cfg or {}).get("backfill") or {}).get("stall_sec") or 3600)
+    hb = out.get("heartbeat_url")
+    out["heartbeat_url"] = hb.strip() if isinstance(hb, str) and re.fullmatch(r"https?://[^\s]{4,500}", hb.strip()) else ""
+    try:
+        out["heartbeat_sec"] = max(60, int(float(out.get("heartbeat_sec") or 300)))
+    except (TypeError, ValueError):
+        out["heartbeat_sec"] = 300
     return out
 
 
@@ -511,10 +521,109 @@ def _cname(c) -> str:
     return str(c)[:1].upper() + str(c)[1:]
 
 
+_CHALLENGE_RX = re.compile(r"just a moment|cf-mitigated|cf-chl|challenge-platform|attention required", re.I)
+
+
+def is_challenge(msg) -> bool:
+    return bool(msg) and bool(_CHALLENGE_RX.search(str(msg)))
+
+
+def es_reset_text(now: float = None) -> str:
+    now = time.time() if now is None else now
+    return time.strftime("%H:%M", time.localtime((int(now) // 86400 + 1) * 86400 + 300))
+
+
+PACE_GRACE_SEC = 7200
+
+
+def pace_alive(src: dict, now: float):
+    if (src or {}).get("ok") is False:
+        return None
+    try:
+        pa = float((src or {}).get("paced_at") or 0)
+        ls = float((src or {}).get("last_success_ts") or 0)
+    except (TypeError, ValueError):
+        return None
+    if pa <= 0 or now - pa > 600:
+        return None
+    if ls <= 0 or now - ls > PACE_GRACE_SEC:
+        return None
+    return pa
+
+
+def fill_paced(sub: str, budget: float, keep: float = 0.02, now: float = None) -> bool:
+    now = time.time() if now is None else now
+    day = int(now // 86400)
+    n = 0
+    try:
+        d = os.path.join(common.quota_dir(), sub)
+        for f in os.listdir(d):
+            if f.endswith(".json"):
+                j = _read(os.path.join(d, f), None)
+                if isinstance(j, dict) and j.get("day") == day:
+                    n += int(j.get("n") or 0)
+    except (OSError, TypeError, ValueError):
+        return False
+    return n >= budget * ((now % 86400) / 86400.0) - budget * keep
+
+
+def fill_slow(obs: dict, bu: str, key: str, it: dict = None, now: float = None) -> bool:
+    if not (obs.get("fill_paced") or {}).get(bu):
+        return False
+    now = time.time() if now is None else now
+    try:
+        pa9 = float((it or {}).get("paced_at") or 0)
+    except (TypeError, ValueError):
+        pa9 = 0.0
+    if pa9 <= 0 or now - pa9 > 3600:
+        return False
+    ps9 = (((obs.get("hb") or {}).get(bu) or {}).get("sources") or {}).get(str(key).split(":")[0]) or {}
+    if bu == "sol" and ps9.get("primary") == "open":
+        return False
+    return (bu == "evm" and ps9.get("kind") == "etherscan") or (bu == "sol" and bool(ps9.get("helius_budget")))
+
+
+def _fill_paced_map(cfg: dict, now: float) -> dict:
+    try:
+        import bf_engine
+        es9 = (cfg or {}).get("etherscan") or {}
+        if float(es9.get("pace_burst_pct", 4)) >= 100:
+            return {"evm": False, "sol": False}
+        keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
+        es = float(es9.get("daily_budget") or 80000)
+        burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
+        return {"evm": bf_engine.es_ledger_rooms(now, es, burst, keep)["fill"] <= 0,
+                "sol": bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg))["fill"] <= 0}
+    except Exception:
+        return {}
+
+
+PACE_NOTE_FILL = "하루 한도 안에서 천천히 확인 중 — 처음 넣은 지갑은 옛 기록부터 채워서 첫날은 새 거래 확인이 평소보다 늦을 수 있어요"
+PACE_NOTE_HEAD = "하루 한도 안에서 천천히 확인 중 — 새 거래 확인이 하루 몫보다 많아 남은 시간에 고르게 나눠 확인해요(평소보다 늦을 수 있어요)"
+
+
+def _pace_note(cfg: dict, now: float, unit: str) -> str:
+    ff = None
+    try:
+        import bf_engine
+        es9 = (cfg or {}).get("etherscan") or {}
+        keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
+        burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
+        if unit == "sol":
+            ff = bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg)).get("fillFirst")
+        else:
+            ff = bf_engine.es_ledger_rooms(now, float(es9.get("daily_budget") or 80000), burst, keep).get("fillFirst")
+    except Exception:
+        ff = None
+    return PACE_NOTE_HEAD if ff is False else PACE_NOTE_FILL
+
+
 def human_err(msg, label: str = "") -> str:
     if not msg:
         return msg
     m = common.redact_secret_text(str(msg))
+    if is_challenge(m):
+        return "외부 탐색기가 사람 확인 화면으로 막는 중(HTTP 403 · 우리 쪽 문제 아님)"
     if _PERMANENT_RX.search(m):
         return m
     low = m.lower()
@@ -668,11 +777,30 @@ def _bs_internal_text(chain: str, bs: dict, stall_sec=None):
     return txt
 
 
+def uncollected_text(rt):
+    if not isinstance(rt, dict):
+        return None
+
+    def _d(t):
+        return datetime.fromtimestamp(float(t), KST).strftime("%Y-%m-%d") \
+            if isinstance(t, (int, float)) and not isinstance(t, bool) and t > 0 else None
+    try:
+        a, b = int(rt.get("from") or 0), int(rt.get("to") or 0)
+    except (TypeError, ValueError):
+        return None
+    if b <= 0:
+        return None
+    da, db = _d(rt.get("from_ts")), _d(rt.get("floor_ts"))
+    per = f"({da or '?'}~{db}" + " 전)" if db else (f"({da}부터)" if da else "")
+    return (f"옛 구간 미수집: 블록 {a:,}~{b:,}{per} — 로그 노드가 보관하지 않아 못 받음 · "
+            "그 앞 보유는 기초 잔고(원가 미확인)로 맞춤")
+
+
 def collect_sources(cfg: dict, st: dict, now: float) -> list:
     S = common.STATE_DIR
     out = []
     chains = (cfg.get("chains") or {}) if cfg else {}
-    hb = read_heartbeats()
+    hb = read_heartbeats(cfg)
     hb_src = {}
     for unit, doc in hb.items():
         for k, s in ((doc.get("sources") or {}).items()):
@@ -695,6 +823,9 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
             ex.append(f"{s['lag_blocks']}블록 뒤")
         return s.get("last_success_ts"), err, " · ".join(ex) or None
 
+    rpcfb9 = _read(os.path.join(S, "rpc_fallback.json"), {}) or {}
+    rpcfb9 = rpcfb9 if isinstance(rpcfb9, dict) else {}
+    pn9 = None
     for c in sorted(chains):
         if not isinstance(chains[c], dict):
             continue
@@ -713,6 +844,15 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         hts, herr, hex_ = hbinfo("evm", c)
         if hts:
             cands.append(float(hts))
+        pa9 = pace_alive(hb_src.get(("evm", c)), now)
+        if pa9:
+            cands.append(pa9)
+            if pn9 is None:
+                pn9 = _pace_note(cfg, now, "evm")
+            hex_ = " · ".join(x for x in (hex_, pn9) if x)
+        esu9 = (hb_src.get(("evm", c)) or {}).get("es_daily_until")
+        if isinstance(esu9, (int, float)) and not isinstance(esu9, bool) and esu9 > now:
+            hex_ = " · ".join(x for x in (hex_, f"이더스캔 하루 한도 쉼 — {time.strftime('%H:%M', time.localtime(float(esu9)))} 저절로 복귀") if x)
         rts, _rerr, _rex = hbinfo("evm", f"{c}:rpclog")
         if rts:
             cands.append(float(rts))
@@ -741,9 +881,42 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
                 herr, hex_ = None, " · ".join(ex9)
         elif int9:
             partial9, pkind9, hex_ = True, "internal", int9
+        gs9 = [g for g in ((d or {}).get("_retention_gaps") or []) if isinstance(g, dict)] if isinstance(d, dict) else []
+        rt9 = uncollected_text({"from": min(int(g.get("from") or 0) for g in gs9), "to": max(int(g.get("to") or 0) for g in gs9),
+                                "from_ts": min(gs9, key=lambda g: int(g.get("from") or 0)).get("from_ts"),
+                                "floor_ts": max(gs9, key=lambda g: int(g.get("to") or 0)).get("floor_ts")}) if gs9 \
+            else uncollected_text((hb_src.get(("evm", c)) or {}).get("retention"))
+        if rt9:
+            hex_ = " · ".join(x for x in (hex_, rt9) if x)
+        bk9h = (hb_src.get(("evm", c)) or {}).get("rpc_bk")
+        if isinstance(bk9h, dict):
+            t9 = []
+            if bk9h.get("new"):
+                t9.append(f"새 지갑 {int(bk9h['new'])}개 과거 기록 수집 중")
+            if bk9h.get("internal"):
+                t9.append(f"지갑 {int(bk9h['internal'])}개 내부 이동(internal) RPC 로 다시 채우는 중")
+            if bk9h.get("extend"):
+                t9.append(f"지갑 {int(bk9h['extend'])}개 과거 창 확장 중")
+            if t9:
+                hex_ = " · ".join(x for x in (hex_, " · ".join(t9) + f"(옛 구간 {float(bk9h.get('pct') or 0):.0f}%)") if x)
+        hbs9 = hb_src.get(("evm", c)) or {}
+        fb9h = hbs9.get("rpc_fb")
+        if "rpc_fb" not in hbs9:
+            r9 = rpcfb9.get(c) if isinstance(rpcfb9.get(c), dict) else {}
+            fb9h = r9 if r9.get("active") and r9.get("text") else None
+        if not (isinstance(fb9h, dict) and fb9h.get("text")):
+            fb9h = None
+        if fb9h:
+            hex_ = " · ".join(x for x in (hex_, str(fb9h["text"])[:200]) if x)
+        else:
+            lim9h = (hb_src.get(("evm", c)) or {}).get("rpc_limited")
+            if isinstance(lim9h, str) and lim9h:
+                hex_ = " · ".join(x for x in (hex_, f"제한된 백업({lim9h[:80]})") if x)
         out.append(_source(st, now, f"chain:{c}", "tj-evm", _cname(c), "chain",
                            max(cands) if cands else None, human_err(herr, _cname(c)), hex_))
         out[-1]["err_raw"] = common.redact_urls(common.redact_secret_text(herr, generic=False)) if herr else None
+        if rt9:
+            out[-1]["uncollected"] = True
         if chains[c].get("_auto") and not cands and not out[-1]["last_success"]:
             acts9 = [float(v.get("activatedAt")) for k9, v in (_activity_pairs() or {}).items()
                      if str(k9).split(":", 1)[0] == c and isinstance(v, dict) and v.get("active") and v.get("activatedAt")]
@@ -769,7 +942,14 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         if (isinstance(job9, dict) and job9.get("kind") == "extend"
                 and isinstance(job9.get("wallets"), list)):
             bw9 |= {str(x).lower() for x in job9["wallets"] if str(x).lower() in wl9}
-        if chains[c].get("rpc_log_discovery") and isinstance(dr, dict):
+        if not cfail9:
+            for k9, v9 in dd9.items():
+                w9 = str(k9)[4:].lower() if str(k9).startswith("_bk:") else ""
+                if w9 in wl9 and isinstance(v9, dict) and v9.get("why") == "new":
+                    done9, to9 = v9.get("done"), v9.get("to")
+                    if type(done9) is int and type(to9) is int and done9 < to9:
+                        bw9.add(w9)
+        if chains[c].get("rpc_log_discovery") and common.chain_discovery(c, chains[c]) != "rpc" and isinstance(dr, dict):
             for k9, v9 in dr.items():
                 w9 = str(k9)[4:].lower() if str(k9).startswith("_nw:") else ""
                 if w9 in wl9 and isinstance(v9, dict):
@@ -811,6 +991,13 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         d = _read(os.path.join(S, "cursor_sol.json"), {}) or {}
         hts, herr, hex_ = hbinfo("sol", "sol")
         cands = [float(x) for x in (d.get("_synced_at"), hts) if x]
+        pa9 = pace_alive(hb_src.get(("sol", "sol")), now)
+        if pa9:
+            cands.append(pa9)
+            hex_ = " · ".join(x for x in (hex_, _pace_note(cfg, now, "sol")) if x)
+        hcu9 = (hb_src.get(("sol", "sol")) or {}).get("helius_daycap_until")
+        if isinstance(hcu9, (int, float)) and not isinstance(hcu9, bool) and hcu9 > now:
+            hex_ = " · ".join(x for x in (hex_, f"헬리우스 하루 한도 쉼 — {time.strftime('%H:%M', time.localtime(float(hcu9)))} 저절로 복귀") if x)
         out.append(_source(st, now, "chain:sol", "tj-sol", "Solana", "chain", max(cands) if cands else None, human_err(herr, "Solana"), hex_))
     for (unit, k), s in hb_src.items():
         if (unit, k) in used_hb or (unit == "evm" and k.endswith(":rpclog")):
@@ -912,12 +1099,23 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
     return out
 
 
-def read_heartbeats() -> dict:
+def read_heartbeats(cfg: dict = None) -> dict:
     out = {}
+    off = set((cfg or {}).get("_disabled_chains") or ())
+    evm_wait = False
+    if cfg is not None and off and not any(isinstance(w, dict) and w.get("type", "evm") == "evm" for w in cfg.get("wallets") or []):
+        rb = _read(os.path.join(common.STATE_DIR, "runner_evm.json"), None)
+        evm_wait = (isinstance(rb, dict) and rb.get("state") == "waiting" and rb.get("why") == "EVM 지갑 없음"
+                    and isinstance(rb.get("ts"), (int, float)) and 0 <= time.time() - float(rb["ts"]) < 120)
     for p in glob.glob(os.path.join(HB_DIR, "*.json")):
         d = _read(p, None)
         if isinstance(d, dict) and d.get("ts") and d.get("schema") == 1 and isinstance(d.get("sources"), dict):
-            out[str(d.get("unit") or os.path.basename(p)[:-5])] = d
+            unit = str(d.get("unit") or os.path.basename(p)[:-5])
+            if unit == "evm" and off:
+                if evm_wait:
+                    continue
+                d = dict(d, sources={k: v for k, v in d["sources"].items() if str(k).split(":", 1)[0] not in off})
+            out[unit] = d
     return out
 
 
@@ -1022,7 +1220,10 @@ def collect_balcheck():
         top = f"{m.get('chain')} {m.get('sym')} 차이 ${abs(float(m.get('diffUsd') or 0)):,.0f}"
     items = [{"key": m.get("key"), "chain": m.get("chain"), "wallet": str(m.get("wallet") or ""), "sym": m.get("sym"), "ca": m.get("ca"),
               "diffUsd": float(m.get("diffUsd") or 0), "carried": bool(m.get("carried")),
-              "carriedN": int(m.get("carriedN") or 0), "seenAt": m.get("seenAt")} for m in conf]
+              "ledger": m.get("ledger"), "onchain": m.get("onchain"),
+
+              "carriedN": int(m.get("carriedN") or 0), "seenAt": m.get("seenAt"),
+              "firstSeen": m.get("firstSeen")} for m in conf]
     fixed = [m for m in mm if m.get("ledgerFixed")]
     return {"checkedAt": d.get("checkedAt"), "confirmed": len(conf), "watch": len(mm) - len(conf) - len(fixed),
             "resolving": len(fixed),
@@ -1030,9 +1231,176 @@ def collect_balcheck():
             "unchecked": d.get("unchecked"), "capped": bool(d.get("capped")), "pairs": d.get("pairs")}
 
 
+BAL_READY_SEC = 86400
+BAL_BUSY_MAX = 3 * 86400
+
+
+def collect_bal_busy(now: float, extrb=None, bf=None) -> dict:
+    out = {"global": [], "chains": {}, "wallets": {}}
+
+    def addc(ch, why):
+        lst = out["chains"].setdefault(str(ch), [])
+        if why not in lst:
+            lst.append(why)
+    try:
+        conn = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=2)
+        try:
+            rows = conn.execute("SELECT k, v FROM meta WHERE k LIKE 'ext_prewindow:%'").fetchall()
+        finally:
+            conn.close()
+        for k, v in rows:
+            try:
+                if int(v) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            ch = str(k)[len("ext_prewindow:"):]
+            if re.fullmatch(r"[a-z0-9]{2,20}", ch):
+                addc(ch, "옛 기록을 반영하는 재계산 대기")
+            else:
+                if "재계산 대기" not in out["global"]:
+                    out["global"].append("재계산 대기")
+    except sqlite3.Error:
+        out["unknown"] = True
+    if isinstance(extrb, dict) and extrb.get("running"):
+        out["global"].append("재계산 중")
+    for unit, items in ((bf or {}).items() if isinstance(bf, dict) else ()):
+        if not isinstance(items, dict) or str(unit).startswith("_"):
+            continue
+        for key, it in items.items():
+            if not isinstance(it, dict) or not (str(key).endswith(":extend") or it.get("phase") == "extend") or it.get("phase") == "done":
+                continue
+            try:
+                if now - float(it.get("updated") or 0) > 7 * 86400:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            ch = {"bsc": "bsc", "sol": "sol", "ex": "upbit"}.get(unit) or (str(key).split(":", 1)[0] if unit == "evm" else None)
+            if ch:
+                addc(ch, "과거 기록 범위를 넓히는 중")
+    cb = _read(os.path.join(common.STATE_DIR, "cursor_bsc.json"), None)
+    nw = cb.get("_neww") if isinstance(cb, dict) else None
+    if isinstance(nw, dict):
+        for w in nw.get("wallets") or []:
+            out["wallets"].setdefault(f"bsc|{str(w).lower()}", []).append("새 지갑 과거 기록 수집 중")
+    bn = _read(os.path.join(common.STATE_DIR, "bsc_nonce.json"), None)
+    for w, ws in ((bn.get("w") or {}).items() if isinstance(bn, dict) and isinstance(bn.get("w"), dict) else ()):
+        try:
+            miss = int((ws or {}).get("missing") or 0)
+        except (TypeError, ValueError):
+            continue
+        if miss > 0:
+            out["wallets"].setdefault(f"bsc|{str(w).lower()}", []).append(f"로그 없는 송금 {miss}건 회수 중")
+    return out
+
+
+def bal_busy_reasons(it: dict, bb: dict, sync_bad: dict) -> list:
+    ch = str(it.get("chain") or "")
+    w = str(it.get("wallet") or "")
+    w = w if ch == "sol" else w.lower()
+    out = []
+    for x in list((bb or {}).get("global") or []) + list(((bb or {}).get("chains") or {}).get(ch) or []) \
+            + list(((bb or {}).get("wallets") or {}).get(f"{ch}|{w}") or []):
+        if x not in out:
+            out.append(x)
+    if ch in (sync_bad or {}):
+        out.append(sync_bad[ch])
+    if it.get("carried"):
+        out.append("이번 판에 다시 대조하지 못함(다음 판에 이어서)")
+    return out
+
+
+def _fq(x) -> str:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return "?"
+    s9 = f"{v:,.2f}" if abs(v) >= 1000 else f"{v:,.6g}"
+    return s9.replace("-", "−")
+
+
+def bal_guess(it: dict) -> str:
+    try:
+        lq, oq = float(it.get("ledger")), float(it.get("onchain"))
+    except (TypeError, ValueError):
+        return ""
+    if abs(lq) < 1e-12 and oq > 0:
+        return "장부에 이 코인이 아예 없어요 — 들어온 기록을 못 받은 듯해요"
+    if abs(oq) < 1e-12 and lq > 0:
+        return "실제로는 다 빠져나갔어요 — 장부에 없는 출금이 있는 듯해요"
+    if oq > lq:
+        return "실제가 더 많아요 — 장부에 없는 입금(로그 없는 입금·내부 이동 등)이 있는 듯해요"
+    if lq > oq:
+        return "장부가 더 많아요 — 장부에 없는 출금·수수료(로그 없는 송금 등)가 있는 듯해요"
+    return ""
+
+
+def bal_line(it: dict) -> str:
+    ch = it.get("chain")
+    d9 = f"(차이 ${abs(float(it.get('diffUsd') or 0)):,.0f})"
+    qty9 = it.get("ledger") is not None and it.get("onchain") is not None
+    if ch == "upbit":
+        return f"업비트 {it.get('sym')} — " + (f"장부 {_fq(it.get('ledger'))} · 업비트 잔고 {_fq(it.get('onchain'))} {d9}" if qty9 else d9)
+    return (f"{CHAIN_NAME.get(ch, ch)} 지갑 {_short_addr(it.get('wallet'))} 의 {it.get('sym')} — "
+            + (f"장부 {_fq(it.get('ledger'))} · 실제 {_fq(it.get('onchain'))} {d9}" if qty9 else d9))
+
+
+def bal_text(items: list, more: bool = False) -> str:
+    items = sorted(items or [], key=lambda x: -abs(float(x.get("diffUsd") or 0)))
+    n = len(items)
+    lines = [f"🔴 잔고가 장부와 하루 넘게 다른 곳이 {n}곳 더 생겼어요" if more else f"🔴 잔고가 장부와 하루 넘게 달라요 · {n}곳"]
+    stuck = sorted({w9 for x in items for w9 in (x.get("stuck") or [])})
+    if stuck:
+        lines.append("할 일: 기다리기 — " + " · ".join(stuck[:3]) + "이(가) 3일 넘게 안 끝났어요. 상태 패널에서 진행을 확인하세요.")
+    else:
+        lines.append("할 일: 앱 › 잔고 맞추기에서 이 지갑·코인을 열어 빠진 입출금이 있는지 보세요(장부는 자동으로 고치지 않아요) — 수집·재계산은 다 끝났어요.")
+    for it in items[:5]:
+        lines.append(bal_line(it))
+        g9 = bal_guess(it)
+        if g9:
+            lines.append(f"  짐작: {g9}")
+    if n > 5:
+        lines.append(f"… 외 {n - 5}곳(앱 › 잔고 맞추기)")
+    return "\n".join(lines)
+
+
 def _short_addr(a: str) -> str:
     a = str(a or "")
     return a[:6] + "…" + a[-4:] if len(a) > 14 else a
+
+
+REST_LATE_MARGIN = 900
+REST_LATE_MAX = 26 * 3600
+
+
+def tier_rest_map() -> dict:
+    out = {}
+    for f in glob.glob(os.path.join(common.STATE_DIR, "addr_tier_*.json")):
+        if os.path.basename(f) == "addr_tier_req.json":
+            continue
+        d = _read(f, None)
+        if not isinstance(d, dict) or not isinstance(d.get("pairs"), dict) or not d.get("scope"):
+            continue
+        sc = str(d["scope"])
+        for w, p in d["pairs"].items():
+            if isinstance(p, dict) and (int(p.get("tier") or 0) > 0 or p.get("rest") is True) and not p.get("hold"):
+                out.setdefault(sc, {})[w if sc == "sol" else str(w).lower()] = int(p.get("full") or 0)
+    return out
+
+
+def rest_late(it: dict, rest: dict, now: float = None) -> bool:
+    now = time.time() if now is None else now
+    ch = it.get("chain")
+    w = it.get("wallet") or ""
+    w = w if ch == "sol" else str(w).lower()
+    full = (rest.get(ch) or {}).get(w)
+    if full is None:
+        return False
+    try:
+        fs = float(it["firstSeen"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return full < fs + REST_LATE_MARGIN and 0 <= now - fs < REST_LATE_MAX
 
 
 def balcheck_split(bc: dict, sources) -> tuple:
@@ -1045,9 +1413,15 @@ def balcheck_split(bc: dict, sources) -> tuple:
             pw[k9[6:]] = [str(x).lower() for x in (s9.get("partial_wallets") or [])]
             pnw[k9[6:]] = [str(x).lower() for x in (s9.get("partial_native_wallets") or [])]
     now9, late9 = [], []
+    try:
+        rest9 = tier_rest_map()
+    except Exception:
+        rest9 = {}
     for it in bc.get("items") or []:
         ch, w = it.get("chain"), str(it.get("wallet") or "").lower()
-        if ch in pw and w and any(p9 and w.startswith(p9) for p9 in pw[ch]):
+        if rest9 and rest_late(it, rest9):
+            late9.append(it)
+        elif ch in pw and w and any(p9 and w.startswith(p9) for p9 in pw[ch]):
             late9.append(it)
         elif ch in bfw and w and any(p9 and w.startswith(p9) for p9 in bfw[ch]):
             late9.append(it)
@@ -1065,6 +1439,15 @@ def _activity_pairs() -> dict:
     d = _read(os.path.join(common.STATE_DIR, "chain_activity.json"), None)
     p = d.get("pairs") if isinstance(d, dict) else None
     return p if isinstance(p, dict) else {}
+
+
+def collect_poison():
+    try:
+        import tsfix
+        return tsfix.status()
+    except (Exception, SystemExit) as e:
+        log.warning("격리 기록 집계 실패: %s", e)
+        return {"error": common.safe_err(e)[:160]}
 
 
 def collect_chainsweep():
@@ -1181,7 +1564,7 @@ def collect_dm(st: dict, now: float, tg_configured: bool):
         return None
     cur = _read(os.path.join(common.STATE_DIR, "tg_cursor.json"), {}) or {}
     lag = 0
-    for fn in ("pending_dm.jsonl", "alerts_web.jsonl"):
+    for fn in ("pending_dm.jsonl", "alerts_web.jsonl", "alerts_fast.jsonl"):
         p = os.path.join(common.STATE_DIR, fn)
         try:
             sz = os.path.getsize(p)
@@ -1328,6 +1711,14 @@ ACTIONS = {
 }
 
 
+def collect_keys(cfg: dict, now: float = None) -> dict:
+    try:
+        import settings_store
+        return {"evm": settings_store.needs_etherscan(cfg or {}), "etherscan": bool(settings_store.env_value("TJ_ETHERSCAN_KEY"))}
+    except Exception:
+        return {}
+
+
 def awake_age(now: float, base, sleeps) -> float:
     if base is None:
         return None
@@ -1470,6 +1861,8 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             ttl = f"{s['label']} 부분 동기화"
         elif lvl == "ok":
             ttl = f"{s['label']} 동기화" if s["kind"] in ("chain", "upbit", "exchange") else s["label"]
+            if s.get("uncollected"):
+                ttl += " · 옛 구간 미수집"
         det = (("로그 트랙 마지막 성공 " if s.get("partial") and s.get("partial_kind") != "internal" else "마지막 성공 ")
                + (fmt_ago(real) + " 전" if s["last_success"] else f"기록 없음(관측 {fmt_ago(real)})"))
         if s.get("err"):
@@ -1513,14 +1906,53 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     ssrc = (sol_doc.get("sources") or {}).get("sol") or {}
     if ssrc and "tj-sol" in units:
         le = ssrc.get("last_error") or {}
-        quota = ssrc.get("primary") == "open" and (le.get("kind") == "quota" or "max usage" in str(le.get("msg") or "").lower()
-                                                  or int(ssrc.get("rl_429_total") or 0) > 0)
+        try:
+            cap9 = float(ssrc.get("helius_daycap_until") or 0)
+        except (TypeError, ValueError):
+            cap9 = 0.0
+        ours9 = cap9 > now
+        cont9 = ours9 and bool(ssrc.get("helius_continue"))
+        quota = ours9 or (ssrc.get("primary") == "open" and (le.get("kind") == "quota" or "max usage" in str(le.get("msg") or "").lower()
+                                                            or int(ssrc.get("rl_429_total") or 0) > 0))
         via = ssrc.get("current_source") or "공개 RPC"
-        add("quota:helius", "tj-sol", "Helius 한도 소진 · 공개 RPC 사용 중" if quota else "Helius", "warn" if quota else "ok",
-            (f"주 RPC(Helius) 크레딧 소진 — 30분마다 재확인, 지금은 {via} 로 동기화 중" if quota else "주 RPC 정상"),
-            "Helius 플랜·키를 바꾸거나(설정 › 연결 · 키) 그대로 두면 공개 RPC 로 계속 동기화합니다(속도만 느림)",
+        hh9 = time.strftime('%H:%M', time.localtime(cap9)) if cap9 else ""
+        add("quota:helius", "tj-sol", ("Helius 하루 예산 소진 · 공개 노드로 계속" if cont9 else "Helius 하루 예산 소진 · 수집 쉼" if ours9
+                                       else "Helius 한도 소진 · 공개 RPC 사용 중") if quota else "Helius",
+            "warn" if quota else "ok",
+            (f"우리 하루 예산(Helius 월 크레딧의 80% ÷ 30)을 다 써서 {hh9} 까지 새 거래 확인은 공개 노드({ssrc.get('head_rpc') or 'publicnode'})로, 옛 기록은 아카이브 공개 노드로 이어 받아요"
+             " — 처음 넣은 지갑의 첫 백필·닫힌 토큰 계정 정리는 그때까지 미뤄요" if cont9 else
+             f"우리 하루 예산(Helius 월 크레딧의 80% ÷ 30)을 다 써서 {hh9} 까지 솔라나 수집을 쉬어요(기록은 그대로 · 풀리면 이어 받음)"
+             if ours9 else f"주 RPC(Helius) 크레딧 소진 — 30분마다 재확인, 지금은 {via} 로 동기화 중" if quota else "주 RPC 정상"),
+            (f"{hh9}에 Helius 가 저절로 다시 쓰여요 — 그때 미룬 일을 이어 받아요(더 넉넉히 쓰려면 Helius 플랜을 올리고 설정의 월 크레딧을 바꾸세요)" if cont9 else
+             f"{hh9}에 수집이 저절로 다시 시작돼요 — 쉬는 동안 빠진 기록은 그때 이어 받아요(더 자주 받으려면 Helius 플랜을 올리고 설정의 월 크레딧을 바꾸세요)"
+             if ours9 else "Helius 플랜·키를 바꾸거나(설정 › 연결 · 키) 그대로 두면 공개 RPC 로 계속 동기화합니다(속도만 느림)"),
             persist=0, resolve=600, notify=False, remind=False, kind="quota")
         chip("Helius 한도" if quota else None)
+        if ssrc.get("head_rpc_on"):
+            ou9 = ssrc.get("head_rpc_open_until")
+            rate9 = ssrc.get("head_rpc_rate")
+            n9 = int(ssrc.get("head_rpc_n") or 0)
+            open9 = isinstance(ou9, (int, float)) and not isinstance(ou9, bool) and ou9 > now
+            low9 = isinstance(rate9, (int, float)) and n9 >= 20 and rate9 < 0.9
+            sick9 = open9 or low9
+            host9 = ssrc.get("head_rpc") or "publicnode"
+            why9 = str(ssrc.get("head_rpc_why") or "")[:120]
+            add("rpc:sol_head", "tj-sol", "Solana 공개 노드 응답 이상 · 헬리우스로 대신 확인" if sick9 else "Solana 새 거래 확인 노드",
+                "warn" if sick9 else "ok",
+                (f"새 거래 확인용 공개 노드({host9})가 " + (f"{time.strftime('%H:%M', time.localtime(float(ou9)))}까지 쉬는 중" if open9 else
+                                                       f"최근 응답 {round(float(rate9) * 100)}%({n9}회)") + (f" — {why9}" if why9 else "") +
+                 " · 그동안 헬리우스로 확인해서 헬리우스 하루 몫을 더 써요(옛 기록이 늦어질 수 있음)") if sick9 else
+                f"새 거래 확인 = 공개 노드({host9}) 먼저 · 백업 헬리우스" + (f" · 최근 응답 {round(float(rate9) * 100)}%" if isinstance(rate9, (int, float)) else ""),
+                "저절로 다시 써요(연속 실패 = 1분부터 길게 쉼 · 대조에서 누락이 보이면 6시간) — 오래 이어지면 설정 sol.head_rpc 로 다른 노드를 지정하거나 \"\"(끔)로 헬리우스만 쓰세요",
+                persist=900, resolve=600, notify=False, remind=False, kind="quota")
+    kk = obs.get("keys") or {}
+    if kk.get("evm") and "tj-evm" in units and "etherscan" in kk:
+        have = bool(kk.get("etherscan"))
+        add("key:etherscan", "tj-evm", "이더스캔 키" if have else "이더스캔 키가 필요해요(무료)", "ok" if have else "warn",
+            "저장됨" if have else ("EVM 지갑이 있는데 이더스캔 키가 없어요 — 지금은 공개 탐색기·RPC 로만 받아 느리거나, 막힌 체인(Arbitrum·Polygon 등)은 "
+                                  "늦게 기록될 수 있어요(기록이 사라지지는 않아요)"),
+            "etherscan.io/myapikey 에서 무료 키를 받아 설정 › 연결 · 키 › Etherscan 에 넣으세요",
+            persist=0, resolve=60, notify=False, remind=False, kind="key")
     bf_units = {"evm": "tj-evm", "bsc": "tj-bsc", "sol": "tj-sol", "exf": "tj-exf", "ex": "tj-ex"}
     for bu, items in (obs.get("bf") or {}).items():
         if not isinstance(items, dict) or bu.startswith("_"):
@@ -1533,11 +1965,15 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                 continue
             moved = float(it.get("moved_at") or it.get("started") or upd or now)
             stalled = it.get("phase") != "done" and now - moved > float(h.get("bf_stall_sec") or 3600)
+            slow9 = stalled and fill_slow(obs, bu, key, it, now)
+            if slow9:
+                stalled = False
             un = bf_units.get(bu, f"tj-{bu}")
             add(f"bfstall:{bu}:{key}", un if un in units else "system", "과거 데이터 가져오기 멈춤" if stalled else "과거 데이터 가져오기",
                 "warn" if stalled else "ok",
                 (f"{key} — {fmt_ago(now - moved)} 동안 진행 없음" + (f" · {str(it.get('note'))[:120]}" if it.get("note") else "")
-                 if stalled else f"{key} {it.get('phase')}"),
+                 if stalled else (f"{key} 오늘 옛 기록 몫을 다 써서 남는 몫으로 이어 받는 중(UTC 0시에 다시 몰아서) · 처음 넣은 지갑은 첫날 새 거래 확인이 평소보다 늦을 수 있어요"
+                                  if bu in ("evm", "sol") else f"{key} 하루 한도 안에서 남는 몫으로 천천히 채우는 중(새 거래 확인 먼저)") if slow9 else f"{key} {it.get('phase')}"),
                 "해당 유닛 로그 확인(pm2 logs " + un + ") — 거래소 API 한도·권한이면 설정의 날짜를 늦추거나 그대로 두세요(원장 재계산은 막지 않음)",
                 persist=0, resolve=600, notify=False, remind=False, kind="bfstall")
     for k9, s9 in (((obs.get("hb") or {}).get("evm") or {}).get("sources") or {}).items():
@@ -1565,9 +2001,11 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     if isinstance(pg, dict) and "tj-core" in units:
         rb9 = float((xr or {}).get("rebuilt_at") or 0) if isinstance(xr, dict) else 0.0
         if not pg.get("ok") and not pg.get("approved") and float(pg.get("ts") or 0) > rb9:
-            add("rebuild:pnl", "tj-core", "재계산이 과거 손익을 바꿔 보류", "warn", str(pg.get("reason") or "")[:300],
-                "변경 내용 확인: python3 tools/rebuild_approve.py — 맞으면 --yes 로 승인(다음 재계산 1회 통과)",
-                persist=0, resolve=600, remind=False, kind="rebuild")
+            act9 = ("상태 › 정리 요청 › '재계산 승인'에서 바뀐 달·포지션을 확인하고 승인(또는 python3 tools/rebuild_approve.py --yes)"
+                    if pg.get("report_sha") else "보고서가 없어 승인할 수 없어요 — 다음 자동 재계산 결과로 다시 판단")
+            add("rebuild:pnl", "tj-core", "재계산이 과거 손익을 바꿔 보류", "warn",
+                (str(pg.get("reason") or "") + (" · " + str(pg.get("approve_note")) if pg.get("approve_note") else ""))[:300],
+                act9, persist=0, resolve=600, remind=False, kind="rebuild")
         elif float(pg.get("ts") or 0) > now - 86400:
             add("rebuild:pnl", "tj-core", "재계산 손익 게이트", "ok",
                 ("승인으로 통과 · " + str(pg.get("reason") or "")[:200]) if pg.get("approved") else "과거 손익 차이 임계 이내",
@@ -1576,13 +2014,32 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     if isinstance(di, dict) and isinstance(di.get("items"), dict) and "tj-core" in units:
         its = [x for x in di["items"].values() if isinstance(x, dict)]
         cf = [x for x in its if x.get("kind") == "conflict"]
-        pd = [x for x in its if x.get("kind") == "pending"]
+        pd = [x for x in its if x.get("kind") in ("pending", "resolve")]
         if cf or pd:
             det = " · ".join(f"{x.get('symbol') or '?'}({x.get('chain')}) 저장 {x.get('stored')} → 관측 {x.get('seen')}" for x in (cf or pd)[:4])
             add("ledger:decimals", "tj-core", f"토큰 자리수 다름 {len(cf)}개" if cf else f"토큰 자리수 채움 대기 {len(pd)}개",
                 "warn" if cf else "ok", det[:300],
-                "다른 값은 덮지 않았어요 — python3 tools/fill_decimals.py 로 확인" if cf else "다음 자동 재구축에서 채워져요(수량 표시가 맞춰짐)",
+                ("다른 값은 덮지 않았어요 — 상태 › 정리 요청 › '자리수 다름'에서 확인하고 관측값으로 다시 기장 요청(또는 python3 tools/fill_decimals.py)"
+                 if cf else "다음 자동 재구축에서 채워져요(수량 표시가 맞춰짐 · 손익이 바뀌면 재계산 승인 필요)"),
                 persist=0, resolve=600, remind=False, kind="ledger")
+    po = obs.get("poison")
+    if "tj-core" in units and ((isinstance(po, dict) and int(po.get("total") or 0) > 0) or "ledger:poison" in open_ids):
+        n9 = int((po or {}).get("total") or 0) if isinstance(po, dict) else 0
+        parts = []
+        if isinstance(po, dict) and po.get("missing_ts"):
+            parts.append(f"시각 없음 {po['missing_ts']}건" + (f"(블록 시각으로 보강해 다시 보냄 {po['sent']}건 — 처리 대기)" if po.get("sent") else "")
+                         + (f" · 블록 번호 없어 자동 보강 불가 {po['no_block']}건" if po.get("no_block") else ""))
+        if isinstance(po, dict) and po.get("other"):
+            parts.append(f"처리 오류 {po['other']}건")
+        if isinstance(po, dict) and po.get("corrupt"):
+            parts.append(f"손상된 줄 {po['corrupt']}건")
+        if isinstance(po, dict) and po.get("oldest"):
+            parts.append("가장 오래된 것 " + fmt_ts(po["oldest"]))
+        add("ledger:poison", "tj-core", f"격리된 거래 기록 {n9}건" if n9 else "격리된 거래 기록",
+            None if (isinstance(po, dict) and po.get("error")) else ("warn" if n9 else "ok"),
+            ("집계 실패: " + str(po["error"])) if (isinstance(po, dict) and po.get("error")) else (" · ".join(parts) if n9 else "모두 처리됨"),
+            "시각 없는 건은 수집기가 블록 시각을 구하는 대로 자동으로 다시 보내요 · 목록: python3 tools/replay_poison.py — 원인을 고친 뒤 --apply --all 로 다시 처리",
+            persist=0, resolve=600, notify=False, remind=False, kind="ledger")
     tn = obs.get("tunnel")
     tu = ((h.get("tunnel") or {}) if isinstance(h.get("tunnel"), dict) else {}).get("unit")
     if tn is not None and tu and tu in units:
@@ -1746,6 +2203,19 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "warn" if bad else "ok", det,
             "디스크 여유 확보(옛 백업 정리) 뒤 tj-core 로그의 '원장 정기 백업' 줄 확인",
             persist=0, resolve=600, notify=False, remind=False, kind="backup")
+    lw = obs.get("liqw")
+    if isinstance(lw, dict) and isinstance(lw.get("status"), dict) and "tj-exf" in units and "tj-exf" not in down_units \
+            and "tj-exf" not in (obs.get("intent_active") or ()):
+        if lw["status"].get("on"):
+            age9 = eff_age("liq:watch", float(lw.get("ts") or 0) or None)
+            if age9 is not None:
+                lvl9 = "crit" if age9 >= 600 else "warn" if age9 >= 120 else "ok"
+                add("liq:watch", "tj-exf", "청산 빠른 감시 멈춤" if lvl9 != "ok" else "청산 빠른 감시", lvl9,
+                    f"마지막 판 {fmt_ago(age9)} 전 — 그동안 선물 청산·대출·마진 위험 알림이 안 나가요" if lvl9 != "ok" else "정상(몇 초마다)",
+                    "pm2 restart tj-exf — 반복되면 pm2 logs tj-exf 에서 '청산' 줄 확인", persist=0, resolve=120, kind="hb")
+        else:
+            add("liq:watch", "tj-exf", "청산 빠른 감시", "ok", f"꺼짐 — {str(lw['status'].get('why') or '')[:80]}", persist=0, resolve=60,
+                notify=False, remind=False, kind="hb")
     cur_b = int(now // BUCKET)
     for u in units:
         s = logs.get(u)
@@ -1880,12 +2350,65 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         elif bc.get("capped"):
             det += (" · " if det else "") + "이번 판 호출 상한 도달"
         crit9 = lvl == "crit"
+        due9, busy9 = [], []
+        mem9 = obs.get("bal_mem") if isinstance(obs.get("bal_mem"), dict) else {}
+        if bc.get("items") is not None and not held_all9:
+            sync_bad9 = {}
+            for c9 in checks:
+                cid9 = str(c9.get("id") or "")
+                if cid9.startswith("sync:chain:") and c9.get("level") in ("warn", "crit"):
+                    sync_bad9[cid9[len("sync:chain:"):]] = f"{c9.get('label') or cid9[11:]} 수집이 지금 정상이 아님"
+                elif cid9 in ("sync:ex:upbit", "upbit:pending") and c9.get("level") not in ("ok", "off"):
+                    sync_bad9["upbit"] = "업비트 수집이 지금 정상이 아님"
+            bb9 = obs.get("balbusy") if isinstance(obs.get("balbusy"), dict) else {}
+            live9 = set()
+            unk9 = bool(bb9.get("unknown"))
+            hk9 = {str(x.get("key")) for x in hred9}
+            for it in ([] if unk9 else now9):
+                k9 = str(it.get("key") or "")
+                if k9 in hk9:
+                    live9.add(k9)
+                    try:
+                        if k9 in mem9 and now - float(mem9[k9]) >= BAL_READY_SEC:
+                            due9.append(dict(it, stuck=[]))
+                    except (TypeError, ValueError):
+                        pass
+                    continue
+                why9 = bal_busy_reasons(it, bb9, sync_bad9)
+                try:
+                    old9 = now - float(it.get("firstSeen") or now) >= BAL_BUSY_MAX
+                except (TypeError, ValueError):
+                    old9 = False
+                if why9 and not old9:
+                    busy9.append((it, why9))
+                    mem9.pop(k9, None)
+                    continue
+                live9.add(k9)
+                try:
+                    rs9 = float(mem9.get(k9) or now)
+                except (TypeError, ValueError):
+                    rs9 = now
+                mem9[k9] = rs9 if rs9 <= now else now
+                if now - mem9[k9] >= BAL_READY_SEC:
+                    due9.append(dict(it, stuck=why9 if why9 else []))
+            for k9 in ([] if unk9 else [k for k in mem9 if k not in live9 and k not in {str(x.get("key")) for x in hred9}]):
+                del mem9[k9]
+            if busy9:
+                det += (" / " if det else "") + "진행 중이라 알림 보류: " + " · ".join(
+                    f"{CHAIN_NAME.get(it.get('chain'), it.get('chain'))} {_short_addr(it.get('wallet'))} {it.get('sym')}({why9[0]})" for it, why9 in busy9[:4]) \
+                    + (f" 외 {len(busy9) - 4}건" if len(busy9) > 4 else "")
+            wait9 = [it for it in now9 if str(it.get("key")) in live9 and not any(str(it.get("key")) == str(d.get("key")) for d in due9)]
+            if wait9:
+                det += (" / " if det else "") + f"진행 중인 일 없음 · 24시간 지켜보는 중 {len(wait9)}건"
         add("balcheck:mismatch", "tj-web", ttl, lvl, det,
             "대시보드 미매칭 › 잔고 대사에서 확인 (원장은 자동 보정하지 않음)" if lvl == "crit"
             else "외부 탐색기(블록스카웃)가 복구되면 다음 대조에서 저절로 맞춰져요 — 복구 뒤에도 남으면 미매칭 › 잔고 대사에서 확인",
-            persist=0, notify=crit9, remind=crit9, kind="balcheck")
+            persist=0, notify=crit9 and bool(due9), remind=False, kind="balcheck")
+        checks[-1]["bal_v"] = 2
         if crit9 and bc.get("items") is not None:
-            checks[-1]["keys"] = sorted({str(x.get("key")) for x in now9 if x.get("key")})
+            checks[-1]["crit_keys"] = sorted({str(x.get("key")) for x in now9 if x.get("key")})
+            checks[-1]["keys"] = sorted({str(x.get("key")) for x in due9 if x.get("key")})
+            checks[-1]["tg_items"] = [{k: x.get(k) for k in ("key", "chain", "wallet", "sym", "ledger", "onchain", "diffUsd", "stuck")} for x in due9]
         if held_all9:
             checks[-1]["level"] = None
         chip(("잔고 지연 대기 " if lvl == "warn" else "잔고 불일치 ") + str(bc["confirmed"] if lvl != "crit" or bc.get("items") is None else len(now9))
@@ -1943,6 +2466,17 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             f"여유 {gb:,.1f}GB ({pct:.1f}%)", "오래된 백업(ledger.db.bak_*)·로그 정리 — 원장 쓰기가 실패하기 전에",
             kind="disk")
         chip(f"디스크 여유 {gb:,.0f}GB")
+    rl = obs.get("reload")
+    if isinstance(rl, dict) and rl.get("level") in ("warn", "ok"):
+        try:
+            rl_fresh = now - float(rl.get("ts") or 0) < 6 * 3600
+        except (TypeError, ValueError):
+            rl_fresh = False
+        lvl = "warn" if rl.get("level") == "warn" and rl_fresh else "ok"
+        add("reload:wallet", "system", "지갑 등록 뒤 자동 재시작 실패" if lvl != "ok" else "지갑 등록 자동 재시작", lvl,
+            f"연속 {int(rl.get('fails') or 0)}회 실패" + (f" · {rl.get('error')}" if rl.get("error") and lvl != "ok" else ""),
+            "pm2 logs tj-reload --lines 50 — 새 지갑은 수동 재시작(pm2 restart tj-evm tj-sol tj-bsc tj-core tj-web)으로도 반영돼요",
+            kind="reload")
     wb = obs.get("web")
     if wb:
         add("web:loopback", "tj-web", "대시보드 응답 없음" if not wb["lo"] else "대시보드 응답",
@@ -2002,10 +2536,43 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             else ("정상" if not fl9 else f"읽기 실패 {len(fl9)}개 관찰 중(1시간 넘으면 주황)"),
             "해당 파일 손상·권한 확인(쓰는 유닛 로그) — 손상이면 그 유닛 재시작으로 다시 써지는지 확인",
             persist=0, kind="input")
+    grp9 = {}
+    for c in checks:
+        if alert_cat(c) == "stall" and not c.get("new_chain"):
+            grp9.setdefault(c["unit"], []).append(c)
+
+    def _all_down(cs9):
+        lv9 = [c["level"] for c in cs9]
+        if any(x not in ("crit", None) for x in lv9):
+            return "ok"
+        return "crit" if all(x == "crit" for x in lv9) else None
+
+    def _add_all(cid9, unit9, cs9, ttl9):
+        lv9 = _all_down(cs9)
+        if lv9 == "ok" and cid9 not in open_ids:
+            return
+        cs9 = sorted(cs9, key=lambda c: -float(c.get("age") or 0))
+        names9 = ", ".join(f"{c.get('label') or c['title']}({fmt_ago(c['age'])})" if c.get("age") is not None else str(c.get("label") or c["title"])
+                           for c in cs9[:6]) + (f" 외 {len(cs9) - 6}개" if len(cs9) > 6 else "")
+        sn9 = [float(c["since"]) for c in cs9 if isinstance(c.get("since"), (int, float)) and not isinstance(c.get("since"), bool)]
+        add(cid9, unit9, ttl9 if lv9 != "ok" else f"체인 {len(cs9)}개 수집", lv9,
+            (f"체인 하나씩이 아니라 {len(cs9)}개가 한꺼번에 멈췄어요 — {names9}" if lv9 != "ok" else f"체인 {len(cs9)}개 중 수집되는 곳이 있어요"),
+            ("pm2 logs " + unit9 + " --lines 100 — 수집기 자체·공용 키(이더스캔 등)·인터넷 연결 확인" if unit9 != "system"
+             else "인터넷 연결·공용 키 확인 — 수집기마다 pm2 logs 로 멈춘 지점 확인"),
+            since=(max(sn9) if sn9 and lv9 != "ok" else None), persist=120, kind="chainall")
+        checks[-1]["units"] = sorted({c["unit"] for c in cs9})
+
+    for u9 in sorted(u for u, cs9 in grp9.items() if len(cs9) >= 2):
+        _add_all(f"chainall:{u9}", u9, grp9[u9], f"체인 {len(grp9[u9])}개 수집이 모두 멈춤")
+    if len(grp9) >= 2:
+        al9 = [c for cs9 in grp9.values() for c in cs9]
+        _add_all("chainall:*", "system", al9, f"모든 체인 수집이 멈춤 · 체인 {len(al9)}개")
     dep = {"tj-web": ("price", "ex_price", "dex_price", "daily", "balcheck", "rabby"), }
     sync_bad_units = {c["unit"] for c in checks if c["id"].startswith(("sync:", "hb:")) and c["level"] in ("warn", "crit")}
     upend9 = any(c["id"] == "upbit:pending" and c["level"] in ("warn", "crit") for c in checks)
     ublock9 = any(s9.get("key") == "ex:upbit" and s9.get("pending_block") for s9 in obs.get("sources") or [])
+    hb_bad9 = {c["unit"] for c in checks if c["id"].startswith("hb:") and c["level"] in ("warn", "crit")}
+    allc9 = any(c["id"] == "chainall:*" and c["level"] == "crit" for c in checks)
     for c in checks:
         if c["level"] not in ("warn", "crit"):
             continue
@@ -2014,8 +2581,12 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             c["suppressed"] = f"{c['unit']} 중지"
         elif "tj-web" in down_units and k in dep["tj-web"]:
             c["suppressed"] = "tj-web 중지"
-        elif net_bad and k in ("chain", "exchange", "upbit", "price", "ex_price", "dex_price", "stake", "errors", "tg", "tunnel"):
+        elif net_bad and k in ("chain", "exchange", "upbit", "price", "ex_price", "dex_price", "stake", "errors", "tg", "tunnel", "chainall"):
             c["suppressed"] = "네트워크 끊김"
+        elif k == "chainall" and set(c.get("units") or ()) & (down_units | hb_bad9):
+            c["suppressed"] = "프로세스·수집 루프 점검이 담당"
+        elif k == "chainall" and c["id"] != "chainall:*" and allc9:
+            c["suppressed"] = "모든 체인 멈춤이 담당"
         elif k == "errors" and c["unit"] in sync_bad_units:
             c["suppressed"] = "동기화 체크가 담당"
         elif c["id"] == "sync:ex:upbit" and upend9 and ublock9:
@@ -2060,20 +2631,41 @@ def step(st: dict, checks: list, now: float, h: dict) -> list:
             want = "warn"
         if i is not None:
             i.pop("unseen_since", None)
-        if i is None and want:
+        hv9 = (st.get("res_hold") or {}).get(cid) if i is None and lvl in ("warn", "crit") else None
+        if isinstance(hv9, dict) and isinstance(hv9.get("i"), dict):
+            i = hv9["i"]
+            del st["res_hold"][cid]
+            i.pop("resolved", None)
+            i.pop("resolved_detail", None)
+            st["history"] = [x for x in (st.get("history") or []) if not (isinstance(x, dict) and x.get("id") == i.get("id"))]
+            i.update(title=c["title"], detail=c["detail"], action=c["action"], level=want or lvl, notify=c["notify"], remind=c["remind"],
+                     kind=c.get("kind") or i.get("kind"), flaps=int(i.get("flaps") or 0) + 1)
+            inc[cid] = i
+            if want == "crit" and i.get("peak") != "crit":
+                i["peak"] = "crit"
+                events.append(("escalate", i))
+        elif i is None and want:
             i = inc[cid] = {"id": f"{cid}@{int(now)}", "check": cid, "unit": c["unit"], "title": c["title"],
                             "detail": c["detail"], "action": c["action"], "level": want, "peak": want,
                             "opened": now, "since": c.get("since") or r["bad_since"], "notify": c["notify"],
-                            "remind": c["remind"], "msg_id": None, "announced": None, "last_notified": None}
-            for k9 in ("keys", "tg_force"):
+                            "remind": c["remind"], "msg_id": None, "announced": None, "last_notified": None, "kind": c.get("kind")}
+            for k9 in ("keys", "tg_force", "crit_keys", "tg_items", "bal_v"):
                 if c.get(k9):
                     i[k9] = c[k9]
             events.append(("open", i))
         elif i is not None:
+            if c.get("kind") == "balcheck" and lvl in ("ok", "off"):
+                i["notify"] = False
+                for k9 in ("keys", "tg_items"):
+                    i.pop(k9, None)
+            if lvl in ("warn", "crit") and c.get("kind") == "balcheck" and c.get("bal_v") and not i.get("bal_v"):
+                for k9 in ("announced", "queued", "soft_told", "keys_told", "dedup", "muted", "last_notified", "reminded"):
+                    i.pop(k9, None)
+                i["msg_id"] = None
             if lvl in ("warn", "crit"):
                 i.update(title=c["title"], detail=c["detail"], action=c["action"], level=lvl)
-                i.update(notify=c["notify"], remind=c["remind"])
-                for k9 in ("keys", "tg_force"):
+                i.update(notify=c["notify"], remind=c["remind"], kind=c.get("kind") or i.get("kind"))
+                for k9 in ("keys", "tg_force", "crit_keys", "tg_items", "bal_v"):
                     if c.get(k9):
                         i[k9] = c[k9]
                     else:
@@ -2119,7 +2711,88 @@ def _min_level(h) -> int:
 
 UNIT_KO = {"tj-evm": "이더리움 계열 수집", "tj-sol": "솔라나 수집", "tj-bsc": "BSC 수집", "tj-ex": "업비트 수집", "tj-exf": "해외 거래소 수집",
            "tj-core": "장부 계산", "tj-web": "화면 서버", "tj-alert": "알림", "tj-review": "AI 복기"}
-_ACT_ROUTINE = "대부분 저절로 풀려요 — 한 시간 넘게 이어지면 상태 패널에서 원인과 조치를 보세요."
+_ACT_ROUTINE = "대부분 저절로 풀려요 — 한 시간 넘게 이어지면 한 번 더 알려 드릴게요(원인과 조치는 상태 패널에)."
+_AUTO_KINDS = frozenset({"chain", "exchange", "upbit", "price", "ex_price", "dex_price", "net", "stake", "tunnel"})
+_ACT_MANUAL = "저절로 안 풀릴 수 있어요 — 상태 패널에서 원인과 조치를 확인하세요."
+_ACT_DISK = "저절로 풀리지 않아요 — 디스크 공간을 비워 주세요(오래된 백업·로그 정리). 남은 공간은 상태 패널에 있어요."
+_ACT_SOFT = "따로 할 일은 없어요 — 진행은 상태 패널에서 볼 수 있어요."
+_ACT_LATE = "한 시간 넘게 이어지고 있어요 — 상태 패널에서 원인과 조치를 확인하세요."
+_KIND_BY_PREFIX = (("disk:", "disk"), ("net:", "net"), ("proc:", "proc"), ("restart:", "restart"), ("inbox:", "inbox"), ("hb:", "hb"),
+                   ("sync:chain:", "chain"), ("sync:ex:upbit", "upbit"), ("sync:ex:", "exchange"), ("price:", "price"), ("stake:", "stake"),
+                   ("tunnel", "tunnel"))
+
+
+def _kind_of(i) -> str:
+    k = str((i or {}).get("kind") or "")
+    if k:
+        return k
+    c = str((i or {}).get("check") or "")
+    return next((v for p, v in _KIND_BY_PREFIX if c.startswith(p)), "")
+
+
+STALL_GATE_KIND = "CHAIN_STALL"
+BAL_GATE_KIND = "BAL_LONG"
+_GATE_OF = {"stall": STALL_GATE_KIND, "bal": BAL_GATE_KIND}
+STALL_CHECK_KINDS = frozenset({"chain"})
+
+
+def alert_cat(i) -> str:
+    if not isinstance(i, dict):
+        return "health"
+    c = str(i.get("check") or i.get("id") or "")
+    if c.split("@", 1)[0] == "balcheck:mismatch":
+        return "bal"
+    return "stall" if c.startswith("sync:") and _kind_of(i) in STALL_CHECK_KINDS else "health"
+
+
+def _stall_on(now: float = None) -> bool:
+    try:
+        import alert_prefs as _ap9
+        return bool(_ap9.effective(_ap9.load(), "stall", now))
+    except Exception:
+        return False
+
+
+def _by_cat(lst) -> list:
+    return [x for x in ([i for i in lst if alert_cat(i) == c9] for c9 in ("health", "bal", "stall")) if x]
+
+
+def _noun_of(lst) -> str:
+    c9 = {alert_cat(i) for i in lst or ()}
+    return "체인 수집 지연" if c9 == {"stall"} else "잔고 불일치" if c9 == {"bal"} else "봇 문제"
+
+
+def _soft(i) -> bool:
+    return bool(i.get("tg_force")) and LEVELS.get(i.get("peak"), 0) < LEVELS["crit"]
+
+
+def _txt_group(lst, now) -> str:
+    acts9 = {_act(i) for i in lst}
+    lines = [f"{'📋' if all(_soft(i) for i in lst) else '🔴'} {_noun_of(lst)} {len(lst)}건이 한꺼번에 생겼어요",
+             acts9.pop() if len(acts9) == 1 else _ACT_MANUAL]
+    return "\n".join(lines + [f"- {i['title']} · {_u(i)} ({fmt_ago(now - i['since'])}째)" for i in lst[:12]])
+
+
+def _txt_remind(lst, now) -> str:
+    if len(lst) == 1:
+        return msg_remind(lst[0], now)
+    return "\n".join([f"🔴 아직 안 풀린 {_noun_of(lst)} {len(lst)}건", _ACT_LATE] + [f"- {i['title']} ({fmt_ago(now - i['since'])}째)" for i in lst[:12]])
+
+
+def _txt_resolve(lst, now) -> str:
+    if len(lst) == 1:
+        return msg_resolve(lst[0], now)
+    return "\n".join([f"✅ {_noun_of(lst)} {len(lst)}건이 풀렸어요", "할 일은 없어요."]
+                     + [f"- {i['title']} ({fmt_ago(i['resolved'] - i['since'])})" for i in lst[:12]])
+
+
+def _act(i) -> str:
+    if bool(i.get("tg_force")) and LEVELS.get(i.get("peak"), 0) < LEVELS["crit"]:
+        return _ACT_SOFT
+    k = _kind_of(i)
+    if k == "disk":
+        return _ACT_DISK
+    return _ACT_ROUTINE if k in _AUTO_KINDS else _ACT_MANUAL
 
 
 def _u(i) -> str:
@@ -2127,33 +2800,73 @@ def _u(i) -> str:
     return UNIT_KO.get(u) or ("원격 접속" if u.endswith("-tunnel") else u)
 
 
-_PLAIN = (("대시보드 미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("잔고 대사", "잔고 맞추기"),
+_PLAIN = (("외부 탐색기(블록스카웃)", "외부 탐색기"), ("대시보드 미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("잔고 대사", "잔고 맞추기"),
           ("원가 미상", "원가 모름"), ("원가 미확인", "원가 모름"), ("블록스카웃", "외부 탐색기"), ("blockscout", "외부 탐색기"),
           ("백필", "과거 기록 가져오기"), ("미매칭", "짝 못 찾은 거래"), ("대사", "잔고 맞추기"), ("커서·하트비트", "진행 기록"),
           ("커서", "진행 위치"), ("폴백", "대체 경로"), ("REDERIVE", "다시 계산"), ("rederive", "다시 계산"), ("자동 보정하지", "자동으로 고치지"), ("보정하지", "고치지"),
-          ("보정했", "고쳤"), ("보정", "고침"), ("정산", "마감"))
+          ("보정했", "고쳤"), ("보정", "고침"), ("미정산", "확정 전"), ("정산", "마감"))
+_PLAIN_SKIP = re.compile(
+    r"https?://[^\s)\]]+"
+    r"|`[^`\n]*`"
+    r"|\b0x[0-9a-fA-F]+"
+    r"|(?:[A-Za-z0-9_.~-]+/)+[A-Za-z0-9_.~-]*"
+    r"|[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+(?::\d{1,5})?"
+    r"|[A-Za-z0-9]*_[A-Za-z0-9_]+")
+
+
+def _plain_seg(s: str) -> str:
+    for a, b in _PLAIN:
+        s = s.replace(a, b)
+    return s
 
 
 def plain_text(s) -> str:
     s = str(s or "")
-    for a, b in _PLAIN:
-        s = s.replace(a, b)
-    return s
+    out, pos = [], 0
+    for m in _PLAIN_SKIP.finditer(s):
+        out.append(_plain_seg(s[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_plain_seg(s[pos:]))
+    return "".join(out)
+
+
+def ext_cause(i) -> str:
+    if _kind_of(i) != "chain":
+        return ""
+    det = str(i.get("detail") or "")
+    es = "이더스캔 하루 한도" in det or "day/limit" in det.lower()
+    hl = "헬리우스 하루 한도" in det
+    ch = "사람 확인" in det or is_challenge(det)
+    if not (es or ch or hl):
+        return ""
+    m9 = re.search(r"이더스캔 하루 한도 쉼 — (\d{2}:\d{2})", det)
+    h9 = re.search(r"헬리우스 하루 한도 쉼 — (\d{2}:\d{2})", det)
+    parts = []
+    if es:
+        parts.append(f"이더스캔 무료 하루 한도에 닿아 쉬는 중이에요({m9.group(1) if m9 else es_reset_text()}에 저절로 풀려요)")
+    if hl:
+        parts.append(f"헬리우스 하루 예산(무료 한도의 80%)에 닿아 쉬는 중이에요({h9.group(1) if h9 else '자정 무렵'}에 저절로 풀려요)")
+    if ch:
+        parts.append("외부 탐색기가 사람 확인 화면으로 막고 있어요(우리 쪽 문제 아님 — 저쪽이 풀면 저절로 다시 받아요)")
+    return " · ".join(parts) + " — 기록은 그대로고, 풀리면 따라잡아요."
 
 
 def msg_open(i, now) -> str:
     icon = "🔴" if i["peak"] == "crit" else "📋"
     det = str(i.get("detail") or "").replace("\n", " ")
     if i.get("check") == "balcheck:mismatch":
+        if i.get("tg_items"):
+            return bal_text(i["tg_items"])
         n9 = len(i.get("keys") or ()) or 1
         return (f"🔴 잔고가 기록과 다른 곳이 {n9}곳 있어요\n앱 › 잔고 맞추기에서 어느 지갑·코인인지 확인하세요(기록은 자동으로 고치지 않아요).\n"
                 f"{fmt_ago(now - i['since'])}째 · {det[:140]}")
-    return (f"{icon} {i['title']} · {_u(i)}\n{_ACT_ROUTINE}\n"
+    return (f"{icon} {i['title']} · {_u(i)}\n{ext_cause(i) or _act(i)}\n"
             f"{fmt_ago(now - i['since'])}째 · {det[:140]}")
 
 
 def msg_remind(i, now) -> str:
-    return f"🔴 아직 안 풀렸어요 · {i['title']} ({fmt_ago(now - i['since'])}째)\n{_ACT_ROUTINE}"
+    return f"🔴 아직 안 풀렸어요 · {i['title']} ({fmt_ago(now - i['since'])}째)\n{_ACT_DISK if _kind_of(i) == 'disk' else _ACT_LATE}"
 
 
 def msg_resolve(i, now) -> str:
@@ -2225,6 +2938,7 @@ def bal_covered(st: dict, keys) -> bool:
 
 
 def plan(st: dict, events: list, now: float, h: dict, tg_configured: bool):
+    _normalize_legacy_safe(st, now, h)
     r = _plan_raw(st, events, now, h, tg_configured)
     for o in st.get("outbox") or []:
         if isinstance(o, dict) and isinstance(o.get("text"), str):
@@ -2259,7 +2973,9 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
             nb_cache.append(_quiet_until(now))
         return nb_cache[0]
 
-    def put(item, soft_only):
+    def put(item, soft_only, src=None):
+        if src:
+            _gk(item, src)
         if soft_only:
             nb9 = not_before()
             if nb9:
@@ -2267,6 +2983,20 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         ob.append(item)
 
     recent_dm = _bal_dm_recent(st, now)
+
+    def _gk(item, src):
+        return _tag(item, src)
+
+    bi9 = inc.get("balcheck:mismatch")
+    if isinstance(bi9, dict):
+        for o in [o for o in ob if isinstance(o, dict) and o.get("cat") == "bal" and o.get("kind") in ("open", "group", "remind")
+                  and bi9.get("id") in (o.get("incs") or [])]:
+            ob.remove(o)
+            if o["kind"] in ("open", "group") and not bi9.get("announced"):
+                for k9 in ("queued", "soft_told", "keys_told"):
+                    bi9.pop(k9, None)
+            elif o.get("keys"):
+                bi9["keys_told"] = sorted(set(bi9.get("keys_told") or ()) - set(o["keys"]))
 
     opens, resolved = [], []
     for typ, i in events:
@@ -2282,23 +3012,36 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
             opens.append(i)
         elif typ == "resolve":
             pend = [o for o in ob if o["kind"] in ("open", "group") and i["id"] in o["incs"]]
-            if i.get("announced"):
+            if i.get("announced") and float(h.get("flap_hold_sec") or 0) > 0:
+                st.setdefault("res_hold", {})[i["check"]] = {"i": i, "at": now}
+            elif i.get("announced"):
                 resolved.append(i)
             elif pend:
                 for o in pend:
                     o["incs"].remove(i["id"])
                     if o["kind"] == "open" or not o["incs"]:
                         ob.remove(o)
-                put({"kind": "flap", "text": msg_flap(i, now), "reply": None, "incs": [i["id"]], "created": now}, soft(i))
-    if len(resolved) == 1:
-        i = resolved[0]
-        put({"kind": "resolve", "text": msg_resolve(i, now), "reply": i.get("msg_id"),
-             "incs": [i["id"]], "created": now}, soft(i))
-    elif resolved:
-        lines = [f"✅ 봇 문제 {len(resolved)}건이 풀렸어요", "할 일은 없어요."] + [f"- {i['title']} ({fmt_ago(i['resolved'] - i['since'])})"
-                                                                    for i in resolved[:12]]
-        put({"kind": "resolve", "text": "\n".join(lines), "reply": resolved[0].get("msg_id"),
-             "incs": [i["id"] for i in resolved], "created": now}, all(soft(i) for i in resolved))
+                put({"kind": "flap", "text": msg_flap(i, now), "reply": None, "incs": [i["id"]], "created": now}, soft(i), [i])
+    rh9 = st.get("res_hold") if isinstance(st.get("res_hold"), dict) else {}
+    for cid9 in list(rh9):
+        hv9 = rh9[cid9]
+        if not isinstance(hv9, dict) or not isinstance(hv9.get("i"), dict):
+            del rh9[cid9]
+            continue
+        r9 = (st.get("checks") or {}).get(cid9)
+        if not (isinstance(r9, dict) and r9.get("last") == now and r9.get("lvl") in ("ok", "off")):
+            hv9.setdefault("miss", now)
+            hv9["at"] = now
+            if now - float(hv9.get("miss") or now) >= float((h.get("t") or {}).get("vanish_sec", 3600)):
+                del rh9[cid9]
+            continue
+        hv9.pop("miss", None)
+        if now - float(hv9.get("at") or 0) >= float(h.get("flap_hold_sec") or 0):
+            resolved.append(hv9["i"])
+            del rh9[cid9]
+    for rs9 in _by_cat(resolved):
+        put({"kind": "resolve", "text": _txt_resolve(rs9, now), "reply": rs9[0].get("msg_id"),
+             "incs": [i["id"] for i in rs9], "created": now}, all(soft(i) for i in rs9), rs9)
     for i in inc.values():
         if eligible(i) and not i.get("announced") and not i.get("queued") and i not in opens:
             opens.append(i)
@@ -2310,22 +3053,20 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
     for i in opens:
         if i.get("keys"):
             i["keys_told"] = sorted(set(i.get("keys_told") or ()) | set(i["keys"]))
-    if len(opens) >= h["group_min"]:
-        lines = [f"{'📋' if all(soft(i) for i in opens) else '🔴'} 봇 문제 {len(opens)}건이 한꺼번에 생겼어요", _ACT_ROUTINE]
-        for i in opens[:12]:
-            lines.append(f"- {i['title']} · {_u(i)} ({fmt_ago(now - i['since'])}째)")
-        put({"kind": "group", "text": "\n".join(lines), "reply": None, "incs": [i["id"] for i in opens],
-             "created": now}, all(soft(i) for i in opens))
-        for i in opens:
-            i["queued"] = True
-            if soft(i):
-                i["soft_told"] = True
-    else:
-        for i in opens:
-            put({"kind": "open", "text": msg_open(i, now), "reply": None, "incs": [i["id"]], "created": now}, soft(i))
-            i["queued"] = True
-            if soft(i):
-                i["soft_told"] = True
+    for op9 in _by_cat(opens):
+        if len(op9) >= h["group_min"]:
+            put({"kind": "group", "text": _txt_group(op9, now), "reply": None, "incs": [i["id"] for i in op9],
+                 "created": now}, all(soft(i) for i in op9), op9)
+            for i in op9:
+                i["queued"] = True
+                if soft(i):
+                    i["soft_told"] = True
+        else:
+            for i in op9:
+                put({"kind": "open", "text": msg_open(i, now), "reply": None, "incs": [i["id"]], "created": now}, soft(i), [i])
+                i["queued"] = True
+                if soft(i):
+                    i["soft_told"] = True
     for i in inc.values():
         if i.get("check") != "balcheck:mismatch" or not eligible(i) or not (i.get("announced") or i.get("queued")):
             continue
@@ -2334,12 +3075,15 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         new9 = cur9 - told9 - recent_dm
         upd9 = told9 | (cur9 & recent_dm)
         if new9 and not any(i["id"] in o["incs"] and o["kind"] in ("open", "group", "remind") for o in ob):
-            ob.append({"kind": "remind", "text": f"🔴 잔고가 기록과 다른 곳이 {len(new9)}곳 더 늘었어요\n앱에서 어느 지갑·코인인지 확인하세요.\n{str(i['detail'])[:140]}",
-                       "reply": i.get("msg_id"), "incs": [i["id"]], "created": now})
+            nit9 = [x for x in (i.get("tg_items") or []) if str(x.get("key")) in new9]
+            ob.append({"kind": "remind", "text": (bal_text(nit9, more=True) if nit9 else
+                                                  f"🔴 잔고가 기록과 다른 곳이 {len(new9)}곳 더 늘었어요\n앱에서 어느 지갑·코인인지 확인하세요.\n{str(i['detail'])[:140]}"),
+                       "reply": i.get("msg_id"), "incs": [i["id"]], "created": now, "keys": sorted(new9)})
+            _gk(ob[-1], [i])
             upd9 |= new9
         if upd9 != told9:
             i["keys_told"] = sorted(upd9)
-    rh = float(h.get("remind_hours") or 0) * 3600
+    rh = 0.0 if float(h.get("remind_once_sec") or 0) > 0 else float(h.get("remind_hours") or 0) * 3600
     cand = [i for i in inc.values() if rh > 0 and i.get("announced") and i.get("remind", True) and eligible(i)
             and i.get("level") == "crit" and not any(o["kind"] == "remind" and i["id"] in o["incs"] for o in ob)]
     age = lambda i: now - float(i.get("last_notified") or i["announced"])
@@ -2348,19 +3092,31 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
         for i in due:
             if i.get("keys"):
                 i["keys_told"] = sorted(set(i.get("keys_told") or ()) | set(i["keys"]))
-        if len(due) == 1:
-            ob.append({"kind": "remind", "text": msg_remind(due[0], now), "reply": due[0].get("msg_id"),
-                       "incs": [due[0]["id"]], "created": now})
-        else:
-            lines = [f"🔴 아직 안 풀린 봇 문제 {len(due)}건", _ACT_ROUTINE]
-            for i in due[:12]:
-                lines.append(f"- {i['title']} ({fmt_ago(now - i['since'])}째)")
-            ob.append({"kind": "remind", "text": "\n".join(lines), "reply": due[0].get("msg_id"),
-                       "incs": [i["id"] for i in due], "created": now})
+        for dd9 in _by_cat(due):
+            ob.append({"kind": "remind", "text": _txt_remind(dd9, now), "reply": dd9[0].get("msg_id"),
+                       "incs": [i["id"] for i in dd9], "created": now})
+            _gk(ob[-1], dd9)
+    ro9 = float(h.get("remind_once_sec") or 0)
+    if ro9 > 0:
+        c1 = [i for i in inc.values() if i.get("announced") and not i.get("reminded") and i.get("remind", True) and eligible(i)
+              and i.get("level") == "crit" and now - float(i["announced"]) >= ro9
+              and not any(o["kind"] in ("open", "group", "remind") and i["id"] in o["incs"] for o in ob)]
+        if c1:
+            c1.sort(key=lambda i: i["opened"])
+            for i in c1:
+                i["reminded"] = now
+                if i.get("keys"):
+                    i["keys_told"] = sorted(set(i.get("keys_told") or ()) | set(i["keys"]))
+            for cc9 in _by_cat(c1):
+                ob.append({"kind": "remind", "once": True, "text": _txt_remind(cc9, now), "reply": cc9[0].get("msg_id"),
+                           "incs": [i["id"] for i in cc9], "created": now})
+                _gk(ob[-1], cc9)
     today = nk.strftime("%Y-%m-%d")
     if nk.hour >= int(h["digest_hour"]) and st.get("digest_date") != today:
         st["digest_date"] = today
-        opn = sorted((i for i in inc.values() if not str(i.get("id") or "").startswith(("quota:", "bfstall:", "gaps:"))),
+        sk9 = _stall_on(now)
+        opn = sorted((i for i in inc.values() if not str(i.get("id") or "").startswith(("quota:", "bfstall:", "gaps:"))
+                      and (sk9 or alert_cat(i) != "stall") and alert_cat(i) != "bal"),
                      key=lambda x: (-LEVELS.get(x["level"], 0), x["opened"]))
         if opn:
             crit = [i for i in opn if i["level"] == "crit"]
@@ -2371,12 +3127,116 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
             ob.append({"kind": "digest", "text": f"{head}: {body}{tail}", "reply": None, "incs": [], "created": now})
 
 
+_ONCE_PREFIX = ("🔴 아직 안 풀렸어요", "🔴 아직 안 풀린 봇 문제")
+
+
+CAT_V = 2
+
+
+def _tag(item: dict, src) -> dict:
+    c9 = {alert_cat(x) for x in src or ()}
+    item["cat"] = c9.pop() if len(c9) == 1 else "health"
+    item["cat_v"] = CAT_V
+    if item["cat"] in _GATE_OF:
+        item["gk"] = _GATE_OF[item["cat"]]
+    else:
+        item.pop("gk", None)
+    return item
+
+
+_LEGACY_KINDS = ("open", "group", "remind", "resolve", "flap")
+
+
+def _normalize_legacy(ob: list, by_id: dict, now: float, h: dict) -> int:
+    n9 = 0
+    for o in list(ob):
+        if not isinstance(o, dict) or _cur_tag(o) or o.get("kind") not in _LEGACY_KINDS or not o.get("incs"):
+            continue
+        src9 = [by_id.get(x) for x in o["incs"]]
+        if o.get("keys") and all(isinstance(x, dict) and alert_cat(x) == "bal" for x in src9):
+            ob.remove(o)
+            for x in src9:
+                if x.get("keys_told"):
+                    x["keys_told"] = sorted(set(x["keys_told"]) - set(o.get("keys") or ()))
+            n9 += 1
+            continue
+        if not all(isinstance(x, dict) for x in src9) or o.get("keys"):
+            _tag(o, src9 if all(isinstance(x, dict) for x in src9) else [])
+            continue
+        try:
+            new9 = _rebuild_legacy(o, src9, now, h)
+        except Exception as e:
+            log.warning("옛 알림 대기열 항목 다시 만들기 실패(그대로 둠): %s", e)
+            _tag(o, src9 if len(_by_cat(src9)) < 2 else [])
+            continue
+        at9 = ob.index(o)
+        ob[at9:at9 + 1] = new9
+        n9 += 1
+    if n9:
+        log.info("배포 전 알림 대기열 %d건을 사건 단위(봇 정지·체인 수집 지연)로 다시 만듦", n9)
+    return n9
+
+
+def _rebuild_legacy(o: dict, src9: list, now: float, h: dict) -> list:
+    once9 = bool(o["once"]) if "once" in o else str(o.get("text") or "").startswith(_ONCE_PREFIX)
+    new9 = []
+    for part in _by_cat(src9):
+        if alert_cat(part[0]) == "bal" and o["kind"] in ("open", "group", "remind"):
+            if o["kind"] in ("open", "group"):
+                for x in part:
+                    if not x.get("announced"):
+                        x.pop("queued", None)
+                        x.pop("soft_told", None)
+            continue
+        if o["kind"] in ("open", "flap"):
+            batches = [[i] for i in part]
+        elif o["kind"] == "group" and len(part) < int(h.get("group_min") or 4):
+            batches = [[i] for i in part]
+        else:
+            batches = [part]
+        for b in batches:
+            it = {k: v for k, v in o.items() if k not in ("text", "incs", "reply", "keys", "once", "gk", "cat", "cat_v")}
+            it["incs"] = [i["id"] for i in b]
+            if o["kind"] in ("open", "group") and len(b) == 1:
+                it.update(kind="open", text=msg_open(b[0], now), reply=None)
+            elif o["kind"] == "group":
+                it.update(text=_txt_group(b, now), reply=None)
+            elif o["kind"] == "remind":
+                it.update(text=_txt_remind(b, now), reply=b[0].get("msg_id"), once=once9)
+            else:
+                r9 = [dict(i, resolved=i.get("resolved") or now) for i in b]
+                it.update(text=(msg_flap(r9[0], now) if o["kind"] == "flap" else _txt_resolve(r9, now)), reply=(None if o["kind"] == "flap" else b[0].get("msg_id")))
+            it["text"] = plain_text(common.redact_secret_text(it["text"], generic=False))
+            new9.append(_tag(it, b))
+    return new9
+
+
+def _cur_tag(o: dict) -> bool:
+    return "cat" in o and o.get("cat_v") == CAT_V
+
+
+def _normalize_legacy_safe(st: dict, now: float, h: dict) -> int:
+    try:
+        ob = st.setdefault("outbox", [])
+        if not any(isinstance(o, dict) and not _cur_tag(o) and o.get("incs") for o in ob):
+            return 0
+        by_id = {i["id"]: i for i in list((st.get("incidents") or {}).values()) + list(st.get("history") or []) if isinstance(i, dict) and i.get("id")}
+        for hv9 in (st.get("res_hold") or {}).values():
+            if isinstance(hv9, dict) and isinstance(hv9.get("i"), dict) and hv9["i"].get("id"):
+                by_id.setdefault(hv9["i"]["id"], hv9["i"])
+        return _normalize_legacy(ob, by_id, now, h)
+    except Exception as e:
+        log.warning("옛 알림 대기열 다시 만들기 실패(그대로 둠): %s", e)
+        return 0
+
+
 def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
     ob = st.setdefault("outbox", [])
     sent_t = [x for x in st.get("sent_times", []) if now - x < 3600]
     n = 0
     by_id = {i["id"]: i for i in list(st.get("incidents", {}).values()) + list(st.get("history", []))}
     live_ids = {i["id"] for i in st.get("incidents", {}).values()}
+    _normalize_legacy_safe(st, now, h)
     for o in list(ob):
         if now - o["created"] > 86400:
             ob.remove(o)
@@ -2386,6 +3246,17 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
                     if i is not None and iid in live_ids and not i.get("announced"):
                         i.pop("queued", None)
                         i.pop("soft_told", None)
+            elif o.get("kind") == "remind":
+                once9 = bool(o["once"]) if "once" in o else str(o.get("text") or "").startswith(("🔴 아직 안 풀렸어요", "🔴 아직 안 풀린 봇 문제"))
+                keys9 = set(o.get("keys") or ())
+                ids9 = set(o.get("incs") or [])
+                held9 = [v9["i"] for v9 in (st.get("res_hold") or {}).values() if isinstance(v9, dict) and isinstance(v9.get("i"), dict)]
+                for i in list(st.get("incidents", {}).values()) + list(st.get("history", [])) + held9:
+                    if isinstance(i, dict) and i.get("id") in ids9:
+                        if once9:
+                            i.pop("reminded", None)
+                        if keys9 and i.get("keys_told"):
+                            i["keys_told"] = sorted(set(i["keys_told"]) - keys9)
             log.warning("헬스 알림 %s 이 24시간 넘게 발송되지 못해 버림(사건 %d건 — 열린 사건은 다시 대기열에)", o.get("kind"), len(o.get("incs") or []))
             continue
         if o.get("not_before"):
@@ -2394,9 +3265,10 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
                     continue
             except (TypeError, ValueError):
                 pass
+        gk9 = o.get("gk")
         if gate is not None:
             try:
-                go = bool(gate(o["kind"], o["text"]))
+                go = bool(gate(gk9 or o["kind"], o["text"]))
             except Exception as e:
                 log.warning("알림 설정 관문 실패(보냄): %s", e)
                 go = True
@@ -2410,6 +3282,8 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
                         i["announced"] = now
                         i["last_notified"] = now
                         i["msg_id"] = None
+                        if gk9:
+                            i["muted"] = True
                     elif o["kind"] == "remind":
                         i["last_notified"] = now
                 continue
@@ -2425,6 +3299,7 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
             i = by_id.get(iid)
             if not i:
                 continue
+            i.pop("muted", None)
             if o["kind"] in ("open", "group"):
                 i["announced"] = now
                 i["last_notified"] = now
@@ -2456,11 +3331,12 @@ def known_note(check, level, detail, opened, now):
     return None
 
 
-def _inc_view(i, now):
+def _inc_view(i, now, stall_on=True):
+    tg9 = bool(i.get("notify", True)) and not i.get("muted") and (stall_on or alert_cat(i) != "stall" or bool(i.get("announced")))
     out = {"id": i["id"], "check": i["check"], "unit": i["unit"], "title": i["title"], "detail": i["detail"],
            "action": i["action"], "level": i.get("level"), "peak": i.get("peak"), "since": i.get("since"),
-           "opened": i.get("opened"), "resolved": i.get("resolved"), "notified": bool(i.get("announced")),
-           "telegram": i.get("notify", True)}
+           "opened": i.get("opened"), "resolved": i.get("resolved"), "notified": bool(i.get("announced")) and not i.get("muted"),
+           "telegram": tg9}
     kn = known_note(i.get("check"), i.get("level"), i.get("detail"), i.get("opened") or i.get("since"), now) if not i.get("resolved") else None
     if kn:
         out["known"] = kn
@@ -2469,9 +3345,10 @@ def _inc_view(i, now):
 
 def build_status(st: dict, obs: dict, checks: list, now: float, h: dict) -> dict:
     inc = st.get("incidents", {})
-    open_v = sorted((_inc_view(i, now) for i in inc.values()),
+    sk9 = _stall_on(now) if any(alert_cat(i) == "stall" for i in list(inc.values()) + list(st.get("history") or [])) else True
+    open_v = sorted((_inc_view(i, now, sk9) for i in inc.values()),
                     key=lambda x: (-LEVELS.get(x["level"], 0), -(x["opened"] or 0)))
-    hist = [_inc_view(i, now) for i in reversed(st.get("history", [])) if not i.get("quiet")][:20]
+    hist = [_inc_view(i, now, sk9) for i in reversed(st.get("history", [])) if not i.get("quiet")][:20]
     overall = "crit" if any(x["level"] == "crit" for x in open_v) else "warn" if open_v else "ok"
     watching = [{"id": c["id"], "unit": c["unit"], "title": c["title"], "level": c["level"], "detail": c["detail"],
                  "suppressed": c.get("suppressed")}
@@ -2585,6 +3462,28 @@ class Monitor:
         self.last = 0.0
         self.interval = DEFAULTS["interval_sec"]
         self.obs, self.checks = None, None
+        self.hb_last = 0.0
+        self.hb_busy = False
+
+    def heartbeat(self, h: dict, now: float, opener=None) -> bool:
+        url = h.get("heartbeat_url") or ""
+        if not url or self.hb_busy or now - self.hb_last < float(h.get("heartbeat_sec") or 300):
+            return False
+        self.hb_last, self.hb_busy = now, True
+
+        def _go():
+            try:
+                import urllib.request
+                req = urllib.request.Request(url, headers={"User-Agent": "tj-bot-health/1"})
+                with (opener.open if opener else urllib.request.urlopen)(req, timeout=10) as r:
+                    r.read(256)
+            except Exception as e:
+                log.debug("헬스 하트비트 실패(%s)", type(e).__name__)
+            finally:
+                self.hb_busy = False
+        import threading
+        threading.Thread(target=_go, name="tj-health-hb", daemon=True).start()
+        return True
 
     def _cfg(self):
         if self.cfg is not None:
@@ -2659,15 +3558,19 @@ class Monitor:
                 "tunnel": pr["tunnel"]() if "tunnel" in pr else collect_tunnel(h, pm2),
                 "debt": collect_debt(self.logs, now, h),
                 "exbal": collect_exbal(now),
+                "keys": collect_keys(cfg, now),
                 "restarts": {u: m.get("ev", []) for u, m in rmem.items()},
                 "intent_active": intent_active,
                 "logs": {u: self.logs.summary(u, now, h["t"]) for u in h["units"]},
                 "sources": collect_sources(cfg, st, now),
                 "bf": _read(os.path.join(common.STATE_DIR, "backfill_status.json"), {}) or {},
+                "fill_paced": _fill_paced_map(cfg, now),
                 "extrb": _read(os.path.join(common.STATE_DIR, "ext_rebuild_status.json"), None),
                 "decis": _read(os.path.join(common.STATE_DIR, "asset_decimals_issues.json"), None),
+                "poison": collect_poison(),
                 "pnlgate": _read(os.path.join(common.STATE_DIR, "rebuild_pnl_gate.json"), None),
-                "hb": read_heartbeats(),
+                "liqw": _read(os.path.join(common.STATE_DIR, "liq_watch.json"), None),
+                "hb": read_heartbeats(cfg),
                 "daily": daily, "review": review,
                 "webdiag": _read(os.path.join(common.STATE_DIR, "web_diag.json"), None),
                 "backup": _read(os.path.join(common.STATE_DIR, "backups", "backup_status.json"), None),
@@ -2676,9 +3579,11 @@ class Monitor:
                 "chainsweep": collect_chainsweep(),
                 "inbox": pr["inbox"]() if "inbox" in pr else collect_inbox(st, now),
                 "disk": pr["disk"]() if "disk" in pr else collect_disk(),
+                "reload": _read(os.path.join(common.STATE_DIR, "health_reload.json"), None),
                 "web": pr["web"]() if "web" in pr else collect_web(cfg, st, now),
                 "tg": dict(TG_STATS, configured=bool(tg_configured)),
                 "dm": collect_dm(st, now, bool(tg_configured))}
+        obs["balbusy"] = collect_bal_busy(now, obs.get("extrb"), obs.get("bf"))
         obs["unreadable"] = collect_unreadable(st, now)
         return obs
 
@@ -2695,9 +3600,14 @@ class Monitor:
         obs = self.observe(cfg, h, now, tg_configured)
         obs["wake_at"] = st.get("wake_at")
         obs["sleeps"] = st.get("sleeps")
-        obs["prev_inc"] = {k: {"level": (v or {}).get("level"), "keys": list((v or {}).get("keys") or [])}
+        obs["bal_mem"] = st.setdefault("bal_ready", {})
+        obs["prev_inc"] = {k: {"level": (v or {}).get("level"), "keys": list((v or {}).get("crit_keys") or (v or {}).get("keys") or [])}
                            for k, v in (st.get("incidents") or {}).items()}
-        checks = evaluate(obs, h, open_ids={k: (v or {}).get("unit") for k, v in (st.get("incidents") or {}).items()})
+        open9 = {k: (v or {}).get("unit") for k, v in (st.get("incidents") or {}).items()}
+        for cid9, hv9 in (st.get("res_hold") or {}).items():
+            if isinstance(hv9, dict) and isinstance(hv9.get("i"), dict):
+                open9.setdefault(cid9, hv9["i"].get("unit"))
+        checks = evaluate(obs, h, open_ids=open9)
         events = step(st, checks, now, h)
         for typ, i in events:
             (log.info if typ == "resolve" else log.warning)(
@@ -2713,4 +3623,5 @@ class Monitor:
         except OSError as e:
             log.warning("헬스 상태 저장 실패: %s", e)
         self.obs, self.checks = obs, checks
+        self.heartbeat(h, now)
         return status

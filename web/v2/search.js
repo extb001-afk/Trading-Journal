@@ -5,7 +5,7 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const LS_RECENT = 'tj_v2_srch_recent', LS_SAVED = 'tj_v2_srch_saved';
   const RECENT_MAX = 8, SAVED_MAX = 12, GROUP_N = 3, GROUP_ALL = 40, SRV_DEBOUNCE = 150, Q_MAX = 120;
-  const KINDS = [['coin', '코인'], ['cycle', '매매일지'], ['outflow', '보낸 내역'], ['tx', '거래·해시'], ['event', '기록'], ['day', '날짜'], ['receipt', '차익 영수증'],
+  const KINDS = [['sale', '세일 참가'], ['coin', '코인'], ['cycle', '매매일지'], ['outflow', '보낸 내역'], ['tx', '거래·해시'], ['event', '기록'], ['day', '날짜'], ['receipt', '차익 영수증'],
     ['review', '리뷰'], ['memo', '근거 메모'], ['pending', '미매칭'], ['nft', 'NFT'], ['other', '기타 자산'], ['wallet', '지갑'], ['deposit', '입금 주소'], ['setting', '설정']];
   const KL = Object.fromEntries(KINDS);
   const KORD = Object.fromEntries(KINDS.map((k, i) => [k[0], i]));
@@ -13,9 +13,13 @@
   const TABK = { coin: 'dash', cycle: 'journal', event: 'journal', tx: 'journal', outflow: 'outflows', pending: 'unmatched', nft: 'other', other: 'other', day: 'daily', review: 'daily', receipt: 'daily', memo: 'daily' };
   const CHAIN_ALIAS = { ethereum: 'eth', eth: 'eth', mainnet: 'eth', base: 'base', arb: 'arbitrum', arbitrum: 'arbitrum', op: 'optimism', optimism: 'optimism', bsc: 'bsc', bnb: 'bsc',
     polygon: 'polygon', matic: 'polygon', sol: 'sol', solana: 'sol', zksync: 'zksync', scroll: 'scroll', gnosis: 'gnosis', avax: 'avalanche', avalanche: 'avalanche', linea: 'linea',
-    blast: 'blast', mantle: 'mantle', monad: 'monad', kaia: 'kaia', bera: 'berachain', berachain: 'berachain', hyperevm: 'hyperevm', sonic: 'sonic', abstract: 'abstract', robinhood: 'robinhood' };
+    blast: 'blast', mantle: 'mantle', monad: 'monad', kaia: 'kaia', bera: 'berachain', berachain: 'berachain', hyperevm: 'hyperevm', sonic: 'sonic', abstract: 'abstract', robinhood: 'robinhood',
+    이더리움: 'eth', 베이스: 'base', 아비트럼: 'arbitrum', 옵티미즘: 'optimism', 폴리곤: 'polygon', pol: 'polygon', bep20: 'bsc', erc20: 'eth', 솔라나: 'sol', xdai: 'gnosis',
+    아발란체: 'avalanche', trc20: 'tron', trx: 'tron', 트론: 'tron', '0g': 'zerog', swellchain: 'swell',
+    'arbitrum one': 'arbitrum', 'op mainnet': 'optimism', 'bnb chain': 'bsc', 'bnb smart chain': 'bsc', '바이낸스 체인': 'bsc', 'zksync era': 'zksync', 'avalanche c-chain': 'avalanche' };
   const TYPE_WORDS = { swap: ['스왑', '온체인 매수', '온체인 매도', 'swap'], buy: ['매수'], sell: ['매도'], deposit: ['입금'], withdraw: ['출금'], send: ['전송', '보냄'], lp: ['lp', '유동성'],
     fee: ['가스', '수수료'], airdrop: ['에어드랍', 'airdrop'] };
+  const TYPE_KO = { 매도: 'sell', 매수: 'buy', 스왑: 'swap', 입금: 'deposit', 받음: 'deposit', 출금: 'withdraw', 보냄: 'withdraw', 가스: 'gas', 수수료: 'gas', 전송: 'transfer', 이동: 'transfer', 유동성: 'lp' };
   const SCOPE_WORDS = { 코인: 'coin', 보유: 'coin', 매매일지: 'cycle', 사이클: 'cycle', 보낸: 'outflow', 보낸내역: 'outflow', 해시: 'tx', tx: 'tx', 기록: 'event', 날짜: 'day', 일별: 'day', 리뷰: 'review',
     영수증: 'receipt', 메모: 'memo', 미매칭: 'pending', nft: 'nft', 기타: 'other', 지갑: 'wallet', 입금: 'deposit', 설정: 'setting' };
   const SV = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
@@ -32,6 +36,7 @@
     open: false, q: '', scope: 'all', sel: 0, expand: '', P: null, items: [], flat: [], groups: [], srv: null, srvQ: '', srvBusy: false, srvErr: '', ctl: null, tmr: 0,
     prevFocus: null, pushed: false, back: null, backTmr: 0, copyArm: -1, kbd: false,
     ask: null, askBusy: '', askTmr: 0,
+    srvKinds: '', srvErrQ: null, cwait: false,
     pvSig: null, srvPv: null, pend: null
   };
   const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } };
@@ -45,8 +50,9 @@
   const reduce = () => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
   const KMOD = isMac ? '⌘' : 'Ctrl';
-  const norm = s => String(s == null ? '' : s).toLowerCase().replace(/<[^>]*>/g, '').replace(/[\s·・,.\-_/()'’‘"`›>|:]+/g, '');
   const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+  const nf = s => { const t = String(s == null ? '' : s); if (!/[^\x00-\x7f]/.test(t) || !t.normalize) return t; return t.split('…').map(x => x.normalize('NFKC')).join('…').replace(/[\u1100-\u1112]/g, c => CHO.charAt(c.charCodeAt(0) - 0x1100)); };
+  const norm = s => nf(s).toLowerCase().replace(/<[^>]*>/g, '').replace(/[\s·・,.\-_/()'’‘"`›>|:]+/g, '');
   const cho = s => { let o = ''; for (const ch of String(s)) { const c = ch.charCodeAt(0) - 0xAC00; o += c >= 0 && c < 11172 ? CHO.charAt(Math.floor(c / 588)) : ch; } return o; };
   const isCho = s => /^[ㄱ-ㅎ]+$/.test(s);
   const pad2 = n => (n < 10 ? '0' : '') + n;
@@ -65,7 +71,8 @@
     if (iso > t) iso = (y - 1) + '-' + pad2(mm) + '-' + pad2(dd);
     return iso;
   }
-  function validIso(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); if (!m) return false; const y = +m[1], mo = +m[2], d = +m[3]; return mo >= 1 && mo <= 12 && d >= 1 && d <= lastDay(y, mo); }
+  const Y_MIN = 1970, Y_MAX = 2100;
+  function validIso(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); if (!m) return false; const y = +m[1], mo = +m[2], d = +m[3]; return y >= Y_MIN && y <= Y_MAX && mo >= 1 && mo <= 12 && d >= 1 && d <= lastDay(y, mo); }
   function parseDate(s0) {
     const s = String(s0 || '').trim().replace(/\s+/g, ' ');
     if (!s) return null;
@@ -77,7 +84,7 @@
     const wd = new Date(Date.parse(t + 'T00:00:00Z')).getUTCDay(), mon = addDays(t, -((wd + 6) % 7));
     if (s === '이번주' || s === '이번 주') return { from: mon, to: t, label: '이번 주' };
     if (s === '지난주' || s === '지난 주') return { from: addDays(mon, -7), to: addDays(mon, -1), label: '지난주 ' + (+addDays(mon, -7).slice(5, 7)) + '/' + (+addDays(mon, -7).slice(8)) + '–' + (+addDays(mon, -1).slice(5, 7)) + '/' + (+addDays(mon, -1).slice(8)) };
-    const month = (y, mo) => (mo >= 1 && mo <= 12 ? { from: y + '-' + pad2(mo) + '-01', to: y + '-' + pad2(mo) + '-' + pad2(lastDay(y, mo)), label: (y !== +t.slice(0, 4) ? y + '년 ' : '') + mo + '월' } : null);
+    const month = (y, mo) => (mo >= 1 && mo <= 12 && y >= Y_MIN && y <= Y_MAX ? { from: y + '-' + pad2(mo) + '-01', to: y + '-' + pad2(mo) + '-' + pad2(lastDay(y, mo)), label: (y !== +t.slice(0, 4) ? y + '년 ' : '') + mo + '월' } : null);
     if (s === '이번달' || s === '이번 달') return month(+t.slice(0, 4), +t.slice(5, 7));
     if (s === '지난달' || s === '지난 달') { const y = +t.slice(0, 4), mo = +t.slice(5, 7); return mo === 1 ? month(y - 1, 12) : month(y, mo - 1); }
     let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s); if (m) return one(m[1] + '-' + pad2(+m[2]) + '-' + pad2(+m[3]));
@@ -99,39 +106,118 @@
     return krw ? v / (rate || 1384) : v;
   }
 
-  const FILT_RE = /(^|\s)(coin|sym|chain|type|kind|after|before|on|pnl|amt|in):(\S+)/gi;
+  const FILT_RE = /(^|\s)(-?)(coin|sym|chain|type|kind|after|before|on|pnl|amt|in|addr|tx|wallet|ex|has):(\S+)/gi;
+  const UNK_RE = /(^|\s)(-?[A-Za-z_]{2,12}):(\S+)/g;
+  const EX_ALIAS = { upbit: 'upbit', 업비트: 'upbit', bithumb: 'bithumb', 빗썸: 'bithumb', binance: 'binance', 바이낸스: 'binance', bybit: 'bybit', 바이빗: 'bybit', okx: 'okx',
+    kucoin: 'kucoin', 쿠코인: 'kucoin', gate: 'gate', 'gate.io': 'gate', gateio: 'gate', 게이트: 'gate', hyperliquid: 'hyperliquid', 하이퍼리퀴드: 'hyperliquid', bitget: 'bitget',
+    coinone: 'coinone', 코인원: 'coinone', korbit: 'korbit', 코빗: 'korbit', mexc: 'mexc', htx: 'htx', huobi: 'htx',
+    오케이엑스: 'okx', 게이트아이오: 'gate', 비트겟: 'bitget', 후오비: 'htx' };
+  const EX_KO = { upbit: '업비트', bithumb: '빗썸', binance: '바이낸스', bybit: '바이빗', okx: 'OKX', kucoin: '쿠코인', gate: '게이트', hyperliquid: 'Hyperliquid', bitget: 'Bitget',
+    coinone: '코인원', korbit: '코빗', mexc: 'MEXC', htx: 'HTX' };
+  const KO_AL = { 비트코인: 'BTC', 이더리움: 'ETH', 솔라나: 'SOL', 리플: 'XRP', 테더: 'USDT', 유에스디코인: 'USDC', 바이낸스코인: 'BNB', 도지코인: 'DOGE', 도지: 'DOGE', 에이다: 'ADA',
+    카르다노: 'ADA', 트론: 'TRX', 아발란체: 'AVAX', 체인링크: 'LINK', 폴카닷: 'DOT', 폴리곤: 'POL', 라이트코인: 'LTC', 비트코인캐시: 'BCH', 시바이누: 'SHIB', 유니스왑: 'UNI',
+    니어: 'NEAR', 앱토스: 'APT', 수이: 'SUI', 아비트럼: 'ARB', 옵티미즘: 'OP', 스텔라루멘: 'XLM', 이더리움클래식: 'ETC', 코스모스: 'ATOM', 페페: 'PEPE', 톤코인: 'TON', 헤데라: 'HBAR',
+    하이퍼리퀴드: 'HYPE', 월드코인: 'WLD', 세이: 'SEI', 봉크: 'BONK', 비트: 'BTC', 이더: 'ETH', 솔: 'SOL', 트럼프: 'TRUMP', 시바: 'SHIB', 아비: 'ARB', 폴카: 'DOT', 링크: 'LINK',
+    월코: 'WLD', 하이퍼: 'HYPE', 온도: 'ONDO', 에테나: 'ENA', 주피터: 'JUP', 펭구: 'PENGU', 비캐: 'BCH', 이클: 'ETC', 스텔라: 'XLM', 알고랜드: 'ALGO', 샌드박스: 'SAND',
+    엑시: 'AXS', 셀레스티아: 'TIA' };
+  function aliasSyms(tok, held) {
+    const t = nf(tok).trim();
+    if (!t) return [];
+    if (KO_AL[t]) return [KO_AL[t]];
+    if (t.length < 2 || !/^[가-힣ㄱ-ㅎ]+$/.test(t)) return [];
+    const ch = isCho(t);
+    if (!ch && /[ㄱ-ㅎ]/.test(t)) return [];
+    const c = [];
+    Object.keys(KO_AL).forEach(n => { const cn = cho(n); const r = ch ? (cn === t ? 0 : cn.indexOf(t) === 0 ? 1 : -1) : (n.indexOf(t) === 0 ? 1 : -1); if (r >= 0) c.push([r, n.length, KO_AL[n]]); });
+    const h = held && held.size ? held : null;
+    const out = [];
+    c.filter(x => x[0] === 0 || !h || h.has(x[2])).sort((x, y) => x[0] - y[0] || x[1] - y[1]).forEach(x => { if (out.indexOf(x[2]) < 0) out.push(x[2]); });
+    return out.slice(0, 4);
+  }
+  const RX_SHORT_HEX = /^(0x)?([0-9a-fA-F]{2,62})(?:\.{2,3}|…)([0-9a-fA-F]{2,62})$/, RX_SHORT_B58 = /^([1-9A-HJ-NP-Za-km-z]{3,60})(?:\.{2,3}|…)([1-9A-HJ-NP-Za-km-z]{3,60})$/;
+  const RX_TICK = /^\$?[A-Z][A-Z0-9]{1,9}$|^[0-9][A-Z][A-Z0-9]{0,8}$/;
+  const isB58P = t => /^[1-9A-HJ-NP-Za-km-z]{4,31}$/.test(t) && !/^\d+$/.test(t)
+    && ((/[a-z]/.test(t) && /[A-Z]/.test(t) && !/^[A-Z][a-z]+$/.test(t)) || (/\d/.test(t) && t.length >= 8));
+  function tokKind(t, held) {
+    t = String(t || '');
+    if (/^0x[0-9a-fA-F]{40}$/.test(t)) return 'addr';
+    if (/^0x[0-9a-fA-F]{64}$/.test(t) || /^[0-9a-fA-F]{64}$/.test(t)) return 'tx';
+    let m = RX_SHORT_HEX.exec(t);
+    if (m && (m[1] || m[2].length + m[3].length >= 8) && !/^[A-Za-z]+$/.test(m[2] + m[3])) return 'shorthex';
+    m = RX_SHORT_B58.exec(t);
+    if (m && (/\d/.test(m[1] + m[2]) || (/[a-z]/.test(t) && /[A-Z]/.test(t)))) return 'shortb58';
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,90}$/.test(t) && !/^\d+$/.test(t)) return 'b58x';
+    if (/^(0x[0-9a-fA-F]{2,63}|[0-9a-fA-F]{6,63})$/.test(t) && !/^\d+$/.test(t) && (/^0x/i.test(t) || /\d/.test(t))) return 'hexp';
+    if (parseDate(t) || /^(19|20)\d\d$/.test(t)) return 'date';
+    if (/^\d{1,6}-\d{1,2}(?:-\d{1,2})?$/.test(t)) return 'baddate';
+    if (/^\d{4,15}$/.test(t) && +t >= 1000) return 'numtext';
+    if (/^[$]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$|^[$]?\d{4,}(?:\.\d+)?$/.test(t) && +t.replace(/[$,]/g, '') >= 1000) return 'amount';
+    if (RX_TICK.test(t)) return 'ticker';
+    if (isB58P(t)) return 'b58p';
+    if (/^[가-힣ㄱ-ㅎ]+$/.test(t) && aliasSyms(t, held).length) return 'alias';
+    return 'text';
+  }
+  const heldSyms = () => { const a = API(); const D = a && a.S && a.S.D; return new Set(arr(D && D.groups).map(g => String(g.sym || '').toUpperCase()).filter(Boolean)); };
   function parseQ(raw0) {
-    const raw = String(raw0 || '').slice(0, Q_MAX);
-    const P = { raw, text: '', toks: [], f: {}, chips: [], type: 'text', date: null, amt: null, hex: '', scope: '' };
+    const raw9 = String(raw0 || '').slice(0, Q_MAX), raw = nf(raw9);
+    const P = { raw: raw9, text: '', toks: [], f: {}, nf: {}, chips: [], type: 'text', date: null, amt: null, hex: '', hexSuf: '', scope: '', ignored: [], tick: '', alias: [], numText: false, srvOnly: false, tk: [], ticks: [], b58p: [], exact: false };
     const a = API(), rate = a && a.S.D ? num(a.S.D.rate) || 1384 : 1384;
-    let rest = raw.replace(FILT_RE, (all, sp, k0, v0) => {
-      const k = k0.toLowerCase(), v = String(v0);
-      if (k === 'coin' || k === 'sym') { P.f.coin = v.toUpperCase(); P.chips.push({ k: 'coin', t: '코인 ' + v.toUpperCase() }); }
-      else if (k === 'chain') { const c = CHAIN_ALIAS[v.toLowerCase()] || v.toLowerCase(); P.f.chain = c; P.chips.push({ k: 'chain', t: '체인 ' + ((a && a.CHAIN_KO[c]) || v) }); }
-      else if (k === 'type' || k === 'kind') { const w = v.toLowerCase(); P.f.type = TYPE_WORDS[w] ? w : w; P.chips.push({ k: 'type', t: '종류 ' + (TYPE_WORDS[w] ? TYPE_WORDS[w][0] : v) }); }
-      else if (k === 'after' || k === 'before' || k === 'on') {
+    const ign = (t, why) => { if (!P.ignored.some(x => x.t === t)) P.ignored.push({ t, why }); };
+    const neg = (k, v, t) => { (P.nf[k] = P.nf[k] || []).indexOf(v) < 0 && P.nf[k].push(v); P.chips.push({ k: '-' + k, t }); };
+    let rest = raw.replace(FILT_RE, (all, sp, ng, k0, v0) => {
+      const k = k0.toLowerCase(), v = String(v0), isNeg = ng === '-', tok = all.trim();
+      if (isNeg && ['coin', 'sym', 'chain', 'type', 'kind', 'ex', 'has', 'wallet'].indexOf(k) < 0) { ign(tok, '빼기(-)를 쓸 수 없는 조건'); return sp; }
+      if (k === 'coin' || k === 'sym') { const c = v.toUpperCase(); if (isNeg) neg('coin', c, '코인 ' + c + ' 빼기'); else { P.f.coin = c; P.chips.push({ k: 'coin', t: '코인 ' + c }); } }
+      else if (k === 'chain') { const c = CHAIN_ALIAS[v.toLowerCase()] || v.toLowerCase(); const lab = (a && a.CHAIN_KO[c]) || v; if (isNeg) neg('chain', c, '체인 ' + lab + ' 빼기'); else { P.f.chain = c; P.chips.push({ k: 'chain', t: '체인 ' + lab }); } }
+      else if (k === 'type' || k === 'kind') {
+        const w0 = v.toLowerCase(), w = TYPE_KO[v] || TYPE_KO[w0] || w0;
+        if (!TYPE_WORDS[w] && !SRV_TYPE[w]) { ign(tok, '모르는 종류'); return sp; }
+        const lab = TYPE_WORDS[w] ? TYPE_WORDS[w][0] : ({ gas: '가스', transfer: '전송' }[w] || v);
+        if (isNeg) neg('type', w, '종류 ' + lab + ' 빼기'); else { P.f.type = w; P.chips.push({ k: 'type', t: '종류 ' + lab }); }
+      } else if (k === 'after' || k === 'before' || k === 'on') {
         const d = parseDate(v);
         if (d) { if (k === 'after') P.f.after = d.from; else if (k === 'before') P.f.before = d.to; else { P.f.after = d.from; P.f.before = d.to; } P.chips.push({ k, t: (k === 'after' ? d.label + ' 이후' : k === 'before' ? d.label + ' 이전' : d.label) }); }
+        else ign(tok, /^\d{5,}|^\d{4}-/.test(v) && !/^(19[7-9]\d|20\d\d|2100)-/.test(v) ? '날짜 범위(' + Y_MIN + '~' + Y_MAX + ') 밖' : '날짜를 알아듣지 못했어요');
       } else if (k === 'pnl' || k === 'amt') {
         const m = /^(<=|>=|<|>|=)?(-?[₩$]?[\d.,]+(?:만|억|천|k|m)?)$/i.exec(v);
-        if (m) { const neg = /^-/.test(m[2]), n0 = parseAmt(m[2].replace(/^-/, ''), rate); if (n0 != null) { P.f[k] = { op: m[1] || (k === 'amt' ? '>=' : '='), v: neg ? -n0 : n0 }; P.chips.push({ k, t: (k === 'pnl' ? '손익 ' : '금액 ') + (m[1] || '') + v.replace(/^[<>=]+/, '') }); } }
-      } else if (k === 'in') { const sc = SCOPE_WORDS[v] || SCOPE_WORDS[v.toLowerCase()] || (KL[v] ? v : ''); if (sc) { P.scope = sc; P.chips.push({ k: 'in', t: KL[sc] + '에서' }); } }
+        const n0 = m ? parseAmt(m[2].replace(/^-/, ''), rate) : null;
+        if (m && n0 != null) { const neg9 = /^-/.test(m[2]); P.f[k] = { op: m[1] || (k === 'amt' ? '>=' : '='), v: neg9 ? -n0 : n0 }; P.chips.push({ k, t: (k === 'pnl' ? '손익 ' : '금액 ') + (m[1] || '') + v.replace(/^[<>=]+/, '') }); }
+        else ign(tok, '숫자 조건을 알아듣지 못했어요');
+      } else if (k === 'in') { const sc = SCOPE_WORDS[v] || SCOPE_WORDS[v.toLowerCase()] || (KL[v] ? v : ''); if (sc) { P.scope = sc; P.chips.push({ k: 'in', t: KL[sc] + '에서' }); } else ign(tok, '모르는 범위'); }
+      else if (k === 'addr' || k === 'tx') { const v9 = /^0x/i.test(v) ? v.toLowerCase() : v; P.f[k] = v9.slice(0, 90); P.chips.push({ k, t: (k === 'addr' ? '주소 ' : '해시 ') + v9.slice(0, 10) + (v9.length > 10 ? '…' : '') }); }
+      else if (k === 'wallet') { if (isNeg) neg('wallet', v, '지갑 ' + v + ' 빼기'); else { P.f.wallet = v; P.chips.push({ k: 'wallet', t: '지갑 ' + v }); } }
+      else if (k === 'ex') { const x = EX_ALIAS[v.toLowerCase()] || EX_ALIAS[v] || ''; if (!x) { ign(tok, '모르는 거래소'); return sp; } if (isNeg) neg('ex', x, (EX_KO[x] || x) + ' 빼기'); else { P.f.ex = x; P.chips.push({ k: 'ex', t: '거래소 ' + (EX_KO[x] || x) }); } }
+      else if (k === 'has') { if (!/^(memo|memos|메모|근거)$/i.test(v)) { ign(tok, 'has: 는 memo 만 알아요'); return sp; } if (isNeg) neg('has', 'memo', '메모 없는 것만'); else { P.f.has = 'memo'; P.chips.push({ k: 'has', t: '메모 있는 것만' }); } }
       return sp;
-    }).trim();
+    });
+    rest = rest.replace(UNK_RE, (all, sp, k0, v0) => (/^-?(https?|ftp|mailto)$/i.test(k0) || /^\/\//.test(v0) ? all : (ign(all.trim(), '모르는 조건'), sp))).trim();
     P.text = rest;
     P.toks = rest.split(/\s+/).map(norm).filter(Boolean);
-    const one = rest.replace(/\s+/g, '');
-    if (/^0x[0-9a-f]{2,}$/i.test(one)) { P.type = 'hex'; P.hex = one.toLowerCase(); }
-    else if (/^[1-9A-HJ-NP-Za-km-z]{6,}$/.test(one) && /\d/.test(one) && /[a-z]/.test(one) && /[A-Z]/.test(one)) { P.type = 'b58'; P.hex = one; }
+    P.srvOnly = !!(P.f.wallet || P.f.ex || P.f.has || P.nf.wallet || P.nf.ex || P.nf.has);
+    const tks = rest.split(/\s+/).filter(Boolean), held9 = tks.some(x => /^[가-힣ㄱ-ㅎ]+$/.test(x)) ? heldSyms() : null;
+    P.tk = tks.map(t => ({ t, k: tokKind(t, held9) }));
+    P.ticks = Array.from(new Set(P.tk.filter(x => x.k === 'ticker').map(x => x.t.replace(/^\$/, '').toUpperCase())));
+    P.b58p = P.tk.filter(x => x.k === 'b58p').map(x => x.t);
+    const one = P.tk.length === 1 ? rest : '', k1 = one ? P.tk[0].k : '';
+    let m9;
+    if (k1 === 'addr' || k1 === 'tx' || k1 === 'hexp') { P.type = 'hex'; P.hex = (k1 === 'tx' && !/^0x/i.test(one) ? '0x' : '') + one.toLowerCase(); P.exact = k1 !== 'hexp'; }
+    else if (k1 === 'shorthex' && (m9 = RX_SHORT_HEX.exec(one))) {
+      P.type = 'hex'; P.hex = ((m9[1] || '') + m9[2]).toLowerCase(); P.hexSuf = m9[3].toLowerCase();
+    } else if (k1 === 'shortb58' && (m9 = RX_SHORT_B58.exec(one))) {
+      P.type = 'b58'; P.hex = m9[1]; P.hexSuf = m9[2];
+    } else if (k1 === 'b58x' || k1 === 'b58p') { P.type = 'b58'; P.hex = one; P.exact = k1 === 'b58x'; }
     else {
-      const d = parseDate(rest);
+      const d = parseDate(rest) || (k1 === 'date' && /^(19|20)\d\d$/.test(rest) ? { from: rest + '-01-01', to: rest + '-12-31', label: rest + '년' } : null);
       if (d) { P.type = 'date'; P.date = d; }
       else {
+        if (/^\d{1,6}-\d{1,2}(-\d{1,2})?$/.test(rest)) ign(rest, /^(19[7-9]\d|20\d\d|2100)-/.test(rest) ? '없는 날짜' : '날짜 범위(' + Y_MIN + '~' + Y_MAX + ') 밖');
         const am = /^[₩$]?\s?\d[\d,]*(?:\.\d+)?\s?(?:만|억|천|k|m)?원?$/i.test(rest) && !/^\d{1,3}$/.test(rest) ? parseAmt(rest, rate) : null;
-        if (am != null && am >= 50) { P.type = 'amt'; P.amt = am; }
+        if (am != null && am >= 50) { P.type = 'amt'; P.amt = am; P.numText = /^\d{4,15}$/.test(rest); }
         else if (/^[A-Za-z0-9]{2,12}$/.test(rest)) P.type = 'ticker';
       }
     }
+    P.tick = P.ticks[0] || '';
+    if (/^[가-힣ㄱ-ㅎ]+$/.test(rest)) P.alias = aliasSyms(rest, heldSyms());
     return P;
   }
 
@@ -151,8 +237,17 @@
   function addrScore(v, P) {
     if (!P.hex || !v) return 0;
     const s = String(v), sl = s.toLowerCase(), h = P.hex.toLowerCase();
+    const cs = P.type === 'b58';
+    if (P.hexSuf) {
+      const v9 = cs ? s : sl, pre = cs ? P.hex : h, sf = cs ? P.hexSuf : P.hexSuf.toLowerCase();
+      if (v9.indexOf(pre) === 0 && v9.slice(-sf.length) === sf) return 110;
+      if (pre.length >= 6 && sf.length >= 4 && v9 === pre.slice(0, 6) + '…' + sf.slice(-4)) return 105;
+      return 0;
+    }
+    if (P.exact) return (cs ? s === P.hex : sl === h) ? 120 : 0;
+    if (cs) return s === P.hex ? 120 : s.indexOf(P.hex) === 0 ? 90 : P.hex.length >= 6 && s.indexOf(P.hex) > 0 ? 40 : 0;
     if (sl === h) return 120;
-    if (sl.indexOf(h) === 0) return 90;
+    if (sl.indexOf(h) === 0 || (!/^0x/.test(h) && sl.indexOf('0x' + h) === 0)) return 90;
     if (P.hex.length >= 6 && sl.indexOf(h) > 0) return 40;
     return 0;
   }
@@ -177,29 +272,79 @@
   const pvx = s => '<span class="pvx">' + s + '</span>';
   function locHTML(g) {
     const L = arr(g && g.locList), n = L.length;
-    if (!n) return g && g.locSummary && g.locSummary !== '—' ? esc(nameMask(g.locSummary)) : '';
+    if (!n) return g && g.locSummary && g.locSummary !== '—' ? String(g.locSummary).split(' · ').map(x => esc(nameMask(x, / ?지갑$/.test(x) && !/^지갑 \d/.test(x) ? 'w' : undefined))).join(' · ') : '';
     const ws = L.filter(l => l.wallet).length;
     if (ws === n && n >= 3) return esc('지갑 ') + pvx(n + '곳');
-    return L.slice(0, 2).map(l => esc(nameMask(l.w))).join(' · ') + (n > 2 ? ' 외 ' + pvx((n - 2) + '곳') : '');
+    return L.slice(0, 2).map(l => esc(nameMask(l.w, l.wallet ? 'w' : undefined))).join(' · ') + (n > 2 ? ' 외 ' + pvx((n - 2) + '곳') : '');
   }
-  function nameMask(s) {
+  function nameMask(s, kind) {
     const t = String(s == null ? '' : s);
-    if (!pvOn() || !/\d/.test(t)) return t;
-    const a = API(), fake = a ? a.pvW((a.PVM && a.PVM.n) || '8,888') : '•••';
+    if (!pvOn()) return t;
+    const a = API();
+    if (a && typeof a.ownNm === 'function') return kind === 'm' || kind === 'w' ? a.ownNm(t, kind) : a.locName(t);
+    if (!/\d/.test(t)) return t;
+    const fake = a ? a.pvW((a.PVM && a.PVM.n) || '8,888') : '•••';
     return t.split(/(0x[0-9a-fA-F]{40}|[A-Za-z0-9]{4,10}…[A-Za-z0-9]{3,6}|[1-9A-HJ-NP-Za-km-z]{32,44})/).map((x, i) => (i % 2 ? x : x.replace(/\d[\d,.]*/g, () => fake))).join('');
   }
 
   const inRange = (iso, f) => (!f.after || (iso && iso >= f.after)) && (!f.before || (iso && iso.slice(0, 10) <= f.before));
   const cmp = (v, c) => { if (!c || v == null) return true; const x = num(v); return c.op === '<' ? x < c.v : c.op === '<=' ? x <= c.v : c.op === '>' ? x > c.v : c.op === '>=' ? x >= c.v : Math.abs(x - c.v) <= Math.max(1, Math.abs(c.v) * 0.01); };
+  const typeWords = t => TYPE_WORDS[t] || TYPE_WORDS[{ gas: 'fee', transfer: 'send' }[t]] || [t];
+  function evTypes(k0, d0) {
+    const k = String(k0 || ''), d = String(d0 || '');
+    const et = /LP|유동성/.test(k) ? 'lp' : k.indexOf('매수') >= 0 ? (d.indexOf('스왑') >= 0 ? 'swap' : 'buy') : k.indexOf('매도') >= 0 ? (d.indexOf('스왑') >= 0 ? 'swap' : 'sell')
+      : k.indexOf('입금') >= 0 ? 'deposit' : k.indexOf('외부 전송') >= 0 ? 'withdraw' : k.indexOf('전송') >= 0 ? (d.indexOf('→ 외부') >= 0 || d.indexOf('보낸 내역') >= 0 ? 'withdraw' : 'transfer')
+        : (k.indexOf('가스') >= 0 || d.slice(0, 12).indexOf('가스') >= 0) ? 'gas' : 'transfer';
+    return et === 'swap' && k.indexOf('매도') >= 0 ? ['swap', 'sell'] : et === 'swap' && k.indexOf('매수') >= 0 ? ['swap', 'buy'] : [et];
+  }
+  const tysOf = it => (it.tys ? it.tys : it.evk ? evTypes(it.evk, it.evd) : []);
+  function typeHit(it, t) {
+    const s9 = SRV_TYPE[t];
+    if (s9) return tysOf(it).indexOf(s9) >= 0;
+    const kk = String(it.evk || '').toLowerCase();
+    return !!it.evk && typeWords(t).some(w => kk.indexOf(String(w).toLowerCase()) >= 0);
+  }
+  const symsOf = it => (it.syms && it.syms.length ? it.syms : (it.sym != null && it.sym !== '' ? [it.sym] : [])).map(x => String(x || '').toUpperCase());
+  const hexPre = (v, q) => { const s9 = String(v || ''); return /^0x/i.test(q) ? s9.toLowerCase().indexOf(q.toLowerCase()) === 0 : s9.indexOf(q) === 0; };
+  const tkRx = t => new RegExp('(^|[^0-9A-Za-z])' + t.replace(/[^0-9A-Za-z]/g, '') + '([^0-9A-Za-z]|$)', 'i');
+  function tokOk(it, P) {
+    const tk = arr(P.tk);
+    if (!tk.length) return true;
+    const multi = tk.length > 1, txt = () => (it.__mt != null ? String(it.__mt) : String(it.title || '').replace(/<[^>]*>/g, '') + ' ' + String(it.sub || '').replace(/<[^>]*>/g, ''));
+    const ids = [it.addr, it.tx].filter(x => typeof x === 'string' && x).map(String);
+    for (const x of tk) {
+      if (x.k === 'ticker') {
+        const t = x.t.replace(/^\$/, '').toUpperCase(), sy = symsOf(it);
+        if (sy.length ? sy.indexOf(t) < 0 : !tkRx(t).test(txt())) return false;
+      } else if (!multi) continue;
+      else if (x.k === 'b58p') { if (!ids.some(v => v.indexOf(x.t) === 0) && txt().indexOf(x.t) < 0) return false; }
+      else if (x.k === 'hexp') { const h = x.t.toLowerCase(); if (!ids.some(v => { const l = v.toLowerCase(); return l.indexOf(h) === 0 || (!/^0x/.test(h) && l.indexOf('0x' + h) === 0); })) return false; }
+      else if (x.k === 'addr' || x.k === 'tx') { const h = (x.k === 'tx' && !/^0x/i.test(x.t) ? '0x' : '') + x.t.toLowerCase(); if (!ids.some(v => v.toLowerCase() === h)) return false; }
+      else if (x.k === 'b58x') { if (ids.indexOf(x.t) < 0) return false; }
+      else if (x.k === 'shorthex' || x.k === 'shortb58') {
+        const hx = x.k === 'shorthex', m = (hx ? RX_SHORT_HEX : RX_SHORT_B58).exec(x.t);
+        if (!m) continue;
+        const pre = hx ? ((m[1] || '') + m[2]).toLowerCase() : m[1], suf = hx ? m[3].toLowerCase() : m[2];
+        if (!ids.some(v => { const v9 = hx ? v.toLowerCase() : v; return ((v9.indexOf(pre) === 0 || (hx && !/^0x/.test(pre) && v9.indexOf('0x' + pre) === 0)) && v9.slice(-suf.length) === suf)
+          || (pre.length >= 6 && suf.length >= 4 && v9 === pre.slice(0, 6) + '…' + suf.slice(-4)); })) return false;
+      }
+    }
+    return true;
+  }
   function passF(it, P) {
-    const f = P.f, pv = pvOn();
-    if (f.coin && it.sym && String(it.sym).toUpperCase() !== f.coin) return false;
-    if (f.coin && !it.sym && it.kind !== 'setting') return false;
+    const f = P.f, pv = pvOn(), N = P.nf || {}, sy = symsOf(it);
+    if (N.coin && sy.some(x => N.coin.indexOf(x) >= 0)) return false;
+    if (N.chain && arr(it.chains).some(c => N.chain.indexOf(c) >= 0)) return false;
+    if (N.type && N.type.some(t => typeHit(it, t))) return false;
+    if (f.coin && sy.length && sy.indexOf(f.coin) < 0) return false;
+    if (f.coin && !sy.length && it.kind !== 'setting') return false;
+    if (f.addr && !hexPre(it.addr, f.addr)) return false;
+    if (f.tx && !hexPre(it.tx, f.tx)) return false;
     if (f.chain && it.chains && it.chains.length && it.chains.indexOf(f.chain) < 0) return false;
     if (f.chain && it.chains && !it.chains.length && it.kind !== 'setting') return false;
     if ((f.after || f.before) && it.iso !== undefined && !inRange(it.iso, f)) return false;
     if ((f.after || f.before) && it.iso === undefined && it.kind !== 'setting' && it.kind !== 'coin' && it.kind !== 'wallet' && it.kind !== 'deposit') return false;
-    if (f.type) { const ws = TYPE_WORDS[f.type] || [f.type], kk = String(it.evk || '').toLowerCase(); if (!it.evk || !ws.some(w => kk.indexOf(w.toLowerCase()) >= 0)) return false; }
+    if (f.type && !typeHit(it, f.type)) return false;
     if (!pv && f.pnl && !cmp(it.pnl, f.pnl)) return false;
     if (!pv && f.pnl && it.pnl == null) return false;
     if (!pv && f.amt && (it.usd == null || !cmp(Math.abs(num(it.usd)), f.amt))) return false;
@@ -210,7 +355,7 @@
   function kindIcon(kind, it) {
     const a = API(), IC = (a && a.IC) || {}, T = IC.tab || {};
     if (kind === 'coin' || (kind === 'cycle' && it && it.sym && a)) { try { return '<span class="tjs-cic">' + a.icon(it.sym, 'sm', { chain: it.chainName || '' }) + '</span>'; } catch (e) {  } }
-    const m0 = { cycle: T.journal, event: T.journal, tx: IX.hash, outflow: T.outflows, pending: T.unmatched, day: T.daily, review: IX.spark, receipt: IX.rcpt, memo: IX.memo, nft: IX.nft, other: IX.other,
+    const m0 = { cycle: T.journal, event: T.journal, tx: IX.hash, outflow: T.outflows, sale: T.outflows, pending: T.unmatched, day: T.daily, review: IX.spark, receipt: IX.rcpt, memo: IX.memo, nft: IX.nft, other: IX.other,
       wallet: IC.wallet, deposit: IC.bank || IC.wallet, setting: IC.gear }[kind];
     return tic(m0 || IX.go);
   }
@@ -218,19 +363,32 @@
   function clientItems(P) {
     const a = API();
     if (!a || !a.S || !a.S.D) return [];
+    if (P.srvOnly) return [];
     const S = a.S, D = S.D, out = [], T = termsOf(P), toks = P.toks, m = a.m, pv = pvOn();
     const want = k => !P.scope || P.scope === k || (P.scope === 'wallet' && k === 'deposit') || (P.scope === 'tx' && k === 'tx');
     const addrQ = P.type === 'hex' || P.type === 'b58';
-    const push = it => { if (it && it.sc > 0 && passF(it, P)) out.push(it); };
+    const push = (it, mt) => { if (it && it.sc > 0 && passF(it, P) && tokOk(mt == null ? it : Object.assign({}, it, { __mt: mt }), P)) out.push(it); };
+    const pushR = (raw, it) => push(it, it && pv && raw ? [it.title, it.sub].map(h => String(h || '').replace(/<[^>]*>/g, '')).join(' ') + ' ' + String(raw) : undefined);
     const chainKeys = names => arr(names).map(x => { const s = String(x || '').toLowerCase(); return CHAIN_ALIAS[s] || Object.keys(a.CHAIN_KO).find(k => a.CHAIN_KO[k].toLowerCase() === s) || s; });
+    const chainKey1 = x => { const s = nf(String(x || '')).trim().toLowerCase(); if (!s) return ''; const s2 = s.replace(/\s+(외\s*\d+.*|입금.*|출금.*|체인|네트워크|network)$/i, '').trim();
+      for (const t of s2 && s2 !== s ? [s, s2] : [s]) { const k = CHAIN_ALIAS[t] || (a.CHAIN_KO[t] ? t : Object.keys(a.CHAIN_KO).find(k9 => String(a.CHAIN_KO[k9]).toLowerCase() === t)); if (k) return CHAIN_ALIAS[k] || k; }
+      return ''; };
+    const chainsIn = txt => { const out9 = []; nf(String(txt || '')).split(/\s*(?:·|\/|,|→|->|\(|\))\s*/).forEach(pc => { const k = chainKey1(pc); if (k && out9.indexOf(k) < 0) out9.push(k); }); return out9; };
+    const posCh = new Map(arr(D.positions).map(p9 => [p9 && p9.key, p9 && p9.chain]));
+    const evChain = e => { const sr9 = String(e.src || ''), seg = String(e.d || '').split(' · ')[0]; let cks = seg ? chainsIn(seg) : [];
+      if (!cks.length && sr9.indexOf('ex:') !== 0 && e.pkey && posCh.get(e.pkey)) { const mk = chainsIn(posCh.get(e.pkey)); cks = mk.length === 1 ? mk : []; }
+      return cks; };
     const amtNear = usd => (P.type === 'amt' && !pv && usd != null && num(usd) !== 0 ? (Math.abs(Math.abs(num(usd)) - P.amt) <= Math.max(5, P.amt * 0.1) ? 70 : 0) : 0);
-    const textOrNone = (name, extra) => (P.toks.length && P.type !== 'amt' && P.type !== 'date' ? score(name, extra, toks) : 0);
+    const textOrNone = (name, extra) => (P.toks.length && (P.type !== 'amt' || P.numText) && P.type !== 'date' ? score(name, extra, toks) : 0);
+    const al9 = arr(P.alias);
     const onlyFilters = !P.text && (P.chips.length > 0);
 
+    if (window.TJSale && window.TJSale.searchItems && (!P.scope || P.scope === 'outflow' || P.scope === 'sale')) { try { window.TJSale.searchItems(P, { rtHTML }).forEach(it => { if (passF(it, P)) out.push(it); }); } catch (e) {  } }
     if (want('coin')) arr(D.groups).forEach(g => {
       const cas = arr(g.insts).map(i => i.ca).filter(Boolean);
       let sc = addrQ ? Math.max(0, ...cas.map(c => addrScore(c, P))) : textOrNone(g.sym, arr(g.insts).map(i => String(i.name || '').split(' · ')[0]).join(' '));
       sc = sc || amtNear(g.value) || (onlyFilters ? 10 : 0);
+      if (al9.indexOf(String(g.sym || '').toUpperCase()) >= 0) sc = Math.max(sc, 100 - 10 * al9.indexOf(String(g.sym || '').toUpperCase()));
       if (P.type === 'ticker' && sc && norm(g.sym) === norm(P.text)) sc += 50;
       if (sc) sc += Math.min(20, Math.log10(Math.max(1, num(g.value))) * 3);
       const roi = g.roi != null && isFinite(g.roi) ? g.roi : null;
@@ -245,6 +403,7 @@
     if (want('cycle')) arr(D.merged).concat(arr(D.lpCycles)).forEach(p => {
       if (!p || !p.sym) return;
       let sc = textOrNone(p.sym, (p._lp ? 'lp 유동성 ' + (p._lp.protocol || '') : '') + ' ' + (p._st || p.status || ''));
+      if (al9.indexOf(String(p.sym || '').toUpperCase()) >= 0) sc = Math.max(sc, 100 - 10 * al9.indexOf(String(p.sym || '').toUpperCase()));
       if (!sc && P.type === 'date' && p._last && p._last.slice(0, 10) >= P.date.from && String(p.opened || '').length >= 5) { const o = a.isoDay(String(p.opened).slice(0, 5)); if (o && o <= P.date.to) sc = 30; }
       sc = sc || (onlyFilters ? 10 : 0);
       const realized = num(p.realized) + num(p.realizedFb);
@@ -256,22 +415,24 @@
     });
     const SPAM_PILL = ' <span class="pill g sm">숨김·스팸</span>';
     if (want('outflow') || (addrQ && want('tx'))) arr(D.of).forEach(r => {
-      const nm = r.alias || '';
+      const nm = r.alias || String(r.memo || '').slice(0, 40) || ''; const nmK = r.alias ? 'w' : 'm';
       const spamR = r.bucket === 'spam' || !!r.dustPoison;
+      const saleA = r.bucket === 'exchange' && r.autoMatch && arr(r.autoMatch.basis).indexOf('sale') >= 0;
       let sc = addrQ ? addrScore(r.address, P) : textOrNone(nm || r.address, [r.memo, r.exchange, arr(r.tokens).map(t => t.sym).join(' '), arr(r.chainNames).join(' '), r.category].join(' '));
       sc = sc || amtNear(r.usdAtSend) || (onlyFilters ? 10 : 0);
       const iso = r.lastTs ? isoOfD(new Date(num(r.lastTs) * 1000 + KST)) : '';
-      if (want('outflow')) push({ kind: 'outflow', id: r.address, sc, addr: r.address, chains: arr(r.chains), iso, usd: r.usdAtSend, sym: arr(r.tokens)[0] ? arr(r.tokens)[0].sym : '', spam: spamR,
-        title: (r.special ? esc('여러 주소') : nm ? mark(nameMask(nm), T) + ' <span class="tjs-mono tjs-mut">' + shortMark(r.address, P) + '</span>' : '<span class="tjs-mono">' + shortMark(r.address, P) + '</span>')
-          + (spamR ? (r.dustPoison ? ' <span class="pill g sm">주소 오염 의심</span>' : SPAM_PILL) : r.bucket === 'own' ? ' <span class="pill ok sm">내 지갑</span>' : r.bucket === 'exchange' ? ' <span class="pill a sm">거래소 입금</span>' : r.bucket === 'pending' ? ' <span class="pill w sm">확인 필요</span>' : ''),
-        sub: esc(arr(r.chainNames).slice(0, 3).join(' · ')) + ' · ' + pvx(num(r.count) + '건'),
-        rt: rtHTML(r.sendKnown && r.usdAtSend ? m(r.usdAtSend, { compact: true }) : '—', r.netUsd != null && num(r.netUsd) > 0.5 ? '순유출 ' + m(num(r.netUsd), { compact: true }) : ''),
+      if (want('outflow')) pushR(nm, { kind: 'outflow', id: r.address, sc, addr: r.address, chains: arr(r.chains), iso, usd: r.usdAtSend, tys: ['withdraw'], sym: arr(r.tokens)[0] ? arr(r.tokens)[0].sym : '', syms: arr(r.tokens).map(t => t && t.sym).filter(Boolean), spam: spamR,
+        title: (r.special ? esc('여러 주소') : nm ? mark(nameMask(nm, nmK), T) + ' <span class="tjs-mono tjs-mut">' + shortMark(r.address, P) + '</span>' : '<span class="tjs-mono">' + shortMark(r.address, P) + '</span>')
+          + (spamR ? (r.dustPoison ? ' <span class="pill g sm">주소 오염 의심</span>' : SPAM_PILL) : r.bucket === 'own' ? ' <span class="pill ok sm">내 지갑</span>' : r.bucket === 'exchange' ? ' <span class="pill a sm">' + (saleA ? '토큰 세일 입찰' : '거래소 입금') + '</span>' : r.bucket === 'pending' ? ' <span class="pill w sm">확인 필요</span>'
+            : r.bucket === 'external' ? ' <span class="pill ' + (r.category === '세일 참가금' ? 'w' : 'e') + ' sm">' + esc(r.category === '세일 참가금' ? '세일 참가' : '외부') + '</span>' : ''),
+        sub: esc(arr(r.chainNames).slice(0, 3).join(' · ')) + ' · ' + pvx(num(r.count) + '건') + (r.category ? ' · ' + esc(r.category) : ''),
+        rt: rtHTML(r.sendKnown && r.usdAtSend ? m(r.usdAtSend, { compact: true }) : '—', r.sendKnown && r.usdAtSend && window.TJSale ? window.TJSale.mAlt(r.usdAtSend, { compact: true }) : ''),
         anc: 'outflow:' + r.address, tab: 'outflows', of: r, acts: spamR ? (addrActs(r.address, arr(r.chains)[0], true) || []).filter(x => !x.copy) : addrActs(r.address, arr(r.chains)[0], true) });
       if (addrQ && want('tx')) arr(r.txs).forEach(t => {
         const s9 = addrScore(t && t.tx, P); if (!s9) return;
         const tiso = t.ts ? isoOfD(new Date(num(t.ts) * 1000 + KST)) : '';
         const spamT = spamR || !!(t && t.phantom);
-        push({ kind: 'tx', id: 'of|' + t.tx, sc: s9, tx: t.tx, chains: t.chain ? [t.chain] : [], iso: tiso, usd: t.usd, sym: t.sym, evk: '전송', spam: spamT,
+        push({ kind: 'tx', id: 'of|' + t.tx, sc: s9, tx: t.tx, chains: t.chain ? [t.chain] : [], iso: tiso, usd: t.usd, sym: t.sym, evk: '전송', tys: ['withdraw'], spam: spamT,
           title: '<span class="tjs-mono">tx ' + shortMark(t.tx, P) + '</span>' + (spamT ? (t && t.phantom ? ' <span class="pill g sm">가짜 전송</span>' : SPAM_PILL) : ''), sub: esc((tiso ? tiso.slice(5) + ' · ' : '') + '보낸 전송 ' + (t.sym || '') + (t.chain ? ' · ' + (a.CHAIN_KO[t.chain] || t.chain) : '') + ' → ') + '<span class="tjs-mono">' + esc(a.short(r.address)) + '</span>',
           rt: rtHTML(t.usd != null ? m(num(t.usd), { compact: true }) : '', ''), anc: 'outflow:' + r.address, tab: 'outflows', acts: txActs(t.tx, t.chain) });
       });
@@ -285,14 +446,14 @@
         let sc = 0, kind = 'event';
         if (addrQ) { sc = addrScore(e.tx, P); kind = 'tx'; }
         else if (P.type === 'date') sc = iso >= P.date.from && iso <= P.date.to ? 20 : 0;
-        else if (P.toks.length && P.type !== 'amt') sc = score(e.sym, (e.k || '') + ' ' + (e.d || ''), toks) * 0.6;
+        else if (P.toks.length && (P.type !== 'amt' || P.numText)) sc = score(e.sym, (e.k || '') + ' ' + (e.d || ''), toks) * 0.6 || (al9.indexOf(String(e.sym || '').toUpperCase()) >= 0 ? 50 : 0);
         else if (P.type === 'amt') sc = 0;
         else if (onlyFilters) sc = 8;
         if (!sc) continue;
         if ((kind === 'tx' && !want('tx')) || (kind === 'event' && !want('event'))) continue;
-        const sr9 = String(e.src || ''), ch9 = sr9.indexOf('w:') === 0 ? (CHAIN_ALIAS[sr9.slice(2).toLowerCase()] || sr9.slice(2).toLowerCase()) : '';
+        const cks9 = evChain(e), ch9 = cks9.length === 1 ? cks9[0] : '';
         const fullTx = typeof e.tx === 'string' && e.tx && e.tx !== '—' && e.tx.indexOf('…') < 0;
-        push({ kind, id: (e.src || '') + '|' + (e.tx || '') + '|' + e.t + '|' + (e.sym || '') + '|' + (e.k || ''), sc, tx: e.tx, sym: e.sym, iso, evk: e.k, usd: null, chains: ch9 ? [ch9] : [],
+        push({ kind, id: (e.src || '') + '|' + (e.tx || '') + '|' + e.t + '|' + (e.sym || '') + '|' + (e.k || ''), sc, tx: e.tx, sym: e.sym, iso, evk: e.k, evd: e.d, usd: null, chains: cks9,
           title: (kind === 'tx' ? '<span class="tjs-mono">tx ' + shortMark(e.tx, P) + '</span> ' : '') + '<span class="tjs-kb">' + esc(e.k || '') + '</span> ' + mark(e.sym || '', T),
           sub: esc(String(e.t || '')) + (e.d ? ' · ' + esc(String(e.d).slice(0, 60)) : ''), rt: rtHTML(a.evA(e) || '', ''),
           anc: 'evday:' + iso, tab: 'journal', acts: fullTx && ch9 ? txActs(e.tx, ch9) : null });
@@ -384,8 +545,8 @@
       rows.forEach(r => {
         const addr = r.w ? r.w.addr : r.s && r.s.address, chains = r.w ? String(r.w.chains || '') : arr(r.s && r.s.chains).join(' ');
         const sc = addrQ ? addrScore(addr, P) : textOrNone(r.alias || '', chains + ' 지갑');
-        push({ kind: 'wallet', id: r.k, sc, addr, chains: chainKeys(String(chains).split(/\s*[,·/]\s*/)),
-          title: mark(nameMask(r.alias) || '(이름 없음)', T) + ' <span class="tjs-mono tjs-mut">' + shortMark(addr, P) + '</span>', sub: esc((r.s && r.s.kind === 'sol') || !/^0x/i.test(String(addr)) ? 'Solana 지갑' : 'EVM 지갑') + ' · 설정 › 지갑 · 주소',
+        pushR(r.alias, { kind: 'wallet', id: r.k, sc, addr, chains: chainKeys(String(chains).split(/\s*[,·/]\s*/)),
+          title: mark(nameMask(r.alias, 'w') || '(이름 없음)', T) + ' <span class="tjs-mono tjs-mut">' + shortMark(addr, P) + '</span>', sub: esc((r.s && r.s.kind === 'sol') || !/^0x/i.test(String(addr)) ? 'Solana 지갑' : 'EVM 지갑') + ' · 설정 › 지갑 · 주소',
           rt: r.wait ? '<span class="pill g sm">수집 대기</span>' : '', go: () => closeKeep(() => a.sxGo('wallets', '', { pre: () => { S.set.walAll = true; S.set.walOpen = r.k; S.set.walQ = ''; }, hl: '.sx-wr.open' })),
           acts: addrActs(addr, '', false) });
       });
@@ -428,7 +589,8 @@
     const ch = chain || (String(addr).indexOf('0x') === 0 ? 'eth' : 'sol');
     const acts = [];
     if (!of && (a.S.D && arr(a.S.D.of).some(r => r.address === addr))) acts.push({ t: '보낸 내역에서 열기', go: () => goAnc('outflow', addr, 'outflows') });
-    acts.push({ t: '탐색기에서 보기', ext: a.exUrl(ch, addr, true) });
+    const xu = a.exUrl(ch, addr, true);
+    if (xu) acts.push({ t: '탐색기에서 보기', ext: xu });
     acts.push({ t: '주소 복사', copy: addr });
     acts.push({ t: '이름 붙이기', sub: '설정 › 지갑 · 주소', go: () => closeKeep(() => a.sxGo('wallets', 'names', { hl: '' })) });
     return acts;
@@ -436,26 +598,33 @@
   function txActs(tx, chain) {
     const a = API(); if (!a || typeof tx !== 'string' || !tx || tx === '—' || tx.indexOf('…') >= 0) return null;
     const ch = chain || (String(tx).indexOf('0x') === 0 ? 'eth' : 'sol');
-    return [{ t: '탐색기에서 tx 보기', ext: a.exUrl(ch, tx, false) }, { t: '해시 복사', copy: tx }];
+    const xu = a.exUrl(ch, tx, false);
+    return (xu ? [{ t: '탐색기에서 tx 보기', ext: xu }] : []).concat([{ t: '해시 복사', copy: tx }]);
   }
 
   function serverItems(P) {
     const R = ST.srv, a = API();
     if (!R || ST.srvQ !== P.raw || !a || locked() || ST.srvPv !== pvOn()) return [];
     const out = [], T = termsOf(P), m = a.m;
-    arr(R.groups).forEach(g => arr(g.items).forEach((x, i) => {
+    arr(R.groups).forEach(g => arr(g.items).concat(arr(ST.srvAdd && ST.srvAdd[g.kind])).forEach((x, i) => {
       if (!x || typeof x !== 'object') return;
       const kind = KL[x.kind] ? x.kind : (KL[g.kind] ? g.kind : 'event');
       if (P.scope && P.scope !== kind && !(P.scope === 'wallet' && kind === 'deposit')) return;
       const anc = String(x.anc || '');
       const pv9 = pvOn(), numMask = s9 => String(s9 || '').replace(/\d[\d,.]*/g, () => a.pvW((a.PVM && a.PVM.n) || '8,888'));
-      const ttl9 = pv9 && (kind === 'other' || kind === 'wallet' || kind === 'outflow' || kind === 'deposit') ? nameMask(x.title) : String(x.title || '');
-      const title = x.tx ? '<span class="tjs-mono">tx ' + shortMark(x.tx, P) + '</span>' + (ttl9 ? ' ' + mark(ttl9, T) : '') : x.addr && !ttl9 ? '<span class="tjs-mono">' + shortMark(x.addr, P) + '</span>' : mark(ttl9, T);
+      const ofR9 = pv9 && kind === 'outflow' && a.S && a.S.D ? arr(a.S.D.of).find(r9 => r9 && 'of:' + r9.address === String(x.id != null ? x.id : x.key || '')) : null;
+      const ofK9 = kind !== 'outflow' ? '' : ofR9 ? (ofR9.alias ? 'w' : ofR9.memo ? 'm' : '') : /^(?:0x)?[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10}$|^주소 미상 출금$/.test(String(x.title || '').trim()) ? '' : 'm';
+      let ttl9 = pv9 && (kind === 'other' || kind === 'wallet' || kind === 'outflow' || kind === 'deposit') ? nameMask(x.title, ofK9 || undefined) : String(x.title || '');
+      if (pv9 && kind === 'wallet') { const t9 = String(x.title || '').trim(), ad9 = x.addr && typeof a.short === 'function' ? a.short(String(x.addr)) : '';
+        const nm9 = ad9 && t9.slice(-ad9.length) === ad9 ? t9.slice(0, -ad9.length).trim() : (t9.match(/^([^]*?)\s+((?:0x)?[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10})$/) || [])[1] || (/^(?:0x)?[A-Za-z0-9]{3,12}…[A-Za-z0-9]{3,10}$/.test(t9) ? '' : t9);
+        ttl9 = nm9 ? nameMask(nm9, 'w') + t9.slice(t9.indexOf(nm9) + nm9.length) : t9; }
+      const ttlTx = x.tx && /^tx\s/.test(ttl9) ? '' : ttl9;
+      const title = x.tx ? '<span class="tjs-mono">tx ' + shortMark(x.tx, P) + '</span>' + (ttlTx ? ' ' + mark(ttlTx, T) : '') : x.addr && !ttl9 ? '<span class="tjs-mono">' + shortMark(x.addr, P) + '</span>' : mark(ttl9, T);
       const bodyKind = kind === 'memo' || kind === 'review';
       const it = { kind, id: String(x.id != null ? x.id : (x.tx || x.addr || i)), sc: 50 - i * 0.01 + num(x.score) * 0.01, srv: true, sym: x.sym, iso: x.date ? String(x.date).slice(0, 10) : '', usd: x.usd, tx: x.tx, addr: x.addr,
         chains: x.chain ? [String(x.chain).toLowerCase()] : [], spam: !!x.spam,
         title: title + (x.spam ? ' <span class="pill g sm">숨김·스팸</span>' : ''),
-        sub: pv9 && bodyKind ? '본문은 가리기 중이라 숨겨요' : typeof x.hl === 'string' && x.hl && !pv9 ? hlSafe(x.hl) : esc(pv9 && kind === 'other' ? numMask(x.sub) : (x.sub || '')),
+        sub: pv9 && bodyKind ? '본문은 가리기 중이라 숨겨요' : typeof x.hl === 'string' && x.hl && !pv9 ? hlSafe(x.hl) : esc(pv9 && kind === 'deposit' ? String(x.sub || '').replace(/(^| · )메모 [^]*$/, '$1메모') : pv9 && kind === 'other' ? numMask(x.sub) : (x.sub || '')),
         rt: rtHTML(x.usd != null && isFinite(+x.usd) ? m(num(x.usd), { compact: true }) : '', ''), anc, tab: TABK[kind] || '' };
       if ((kind === 'memo' || kind === 'review') && /^\d{4}-\d{2}-\d{2}/.test(String(x.date || '')) && !/^rw:/.test(String(x.id || ''))) {
         const d9 = String(x.date).slice(0, 10), k9 = a.dayKeyOf ? a.dayKeyOf(d9) : null;
@@ -465,6 +634,7 @@
       if (kind === 'wallet' && !anc) it.go = () => closeKeep(() => { let k9 = ''; try { const rw = a.sxWalRows(); const hit = rw.find(r9 => String((r9.w ? r9.w.addr : r9.s && r9.s.address) || r9.k).toLowerCase() === String(x.addr || '').toLowerCase()); k9 = hit ? hit.k : ''; } catch (e) { k9 = ''; }
         a.sxGo('wallets', '', { pre: () => { a.S.set.walAll = true; a.S.set.walOpen = k9; a.S.set.walQ = ''; }, hl: k9 ? '.sx-wr.open' : '' }); });
       if (kind === 'deposit' && !anc) it.go = () => closeKeep(() => a.sxGo('wallets', 'deposits', { hl: '' }));
+      if ((P.tick || arr(P.alias).length) && tierOf(it, P) === 0) it.sc += 50;
       if (x.tx) it.acts = txActs(x.tx, x.chain);
       else if (x.addr) it.acts = addrActs(x.addr, x.chain, kind === 'outflow');
       if (it.spam && it.acts) it.acts = it.acts.filter(y => !y.copy);
@@ -489,6 +659,36 @@
       default: return it.kind + '|' + id;
     }
   }
+  const SRV_KS = new Set(['coin', 'event', 'tx', 'outflow', 'memo', 'review', 'wallet', 'deposit', 'nft', 'other']);
+  const hasCond = P => Object.keys(P.f || {}).length > 0 || Object.keys(P.nf || {}).length > 0;
+  function srvJudge(P) {
+    if (!hasCond(P)) return null;
+    const R = ST.srv;
+    if (R && ST.srvQ === P.raw && ST.srvPv === pvOn()) {
+      if (R.building || R.demo) return null;
+      const got = new Set(arr(R.groups).map(g => g.kind)), ks = String(ST.srvKinds || '').split(',').filter(Boolean);
+      return { judged: k => got.has(k) || (!R.partial && (!ks.length || ks.indexOf(k) >= 0)) };
+    }
+    if (ST.srvErrQ === P.raw) return null;
+    const sp = srvParamsOf(P.raw, ST.scope);
+    return !sp.q || sp.q.length < 2 || sp.skip ? null : 'wait';
+  }
+  const confKey = it => (it.kind === 'coin' ? 'coin|' + String(it.sym || String(it.id || '').replace(/^coin:/, '').split('~')[0]).toUpperCase() : canonKey(it));
+  function cliConfirm(cli, srv, P) {
+    const J = srvJudge(P);
+    ST.cwait = J === 'wait';
+    if (!J) return cli;
+    const keys = new Set(srv.map(confKey)), txs = new Map();
+    srv.forEach(x => { if ((x.kind === 'tx' || x.kind === 'event') && typeof x.tx === 'string' && x.tx) { const k9 = x.tx.toLowerCase(); if (!txs.has(k9)) txs.set(k9, []); txs.get(k9).push(String(x.sym || '').toUpperCase()); } });
+    return cli.filter(it => {
+      if (!SRV_KS.has(it.kind)) return true;
+      if (J === 'wait') return false;
+      if (!J.judged(it.kind)) return true;
+      if (keys.has(confKey(it))) return true;
+      const sy = txs.get(typeof it.tx === 'string' ? it.tx.toLowerCase() : '');
+      return !!sy && (it.kind === 'tx' || it.kind === 'event') && (sy.indexOf(String(it.sym || '').toUpperCase()) >= 0 || sy.indexOf('') >= 0);
+    });
+  }
   function mergeItems(cli, srv) {
     const by = new Map(), out = [];
     const keyOf = canonKey;
@@ -507,6 +707,15 @@
     });
     return out;
   }
+  function tierOf(it, P) {
+    const t0 = P.tick ? P.tick.toLowerCase() : (P.toks[0] || '');
+    if (!t0 || !(P.type === 'ticker' || P.type === 'text')) return 0;
+    const sy = norm(it.sym || ''), ti = norm(String(it.title || '').replace(/<[^>]*>/g, ''));
+    const ai = it.sym ? arr(P.alias).indexOf(String(it.sym).toUpperCase()) : -1;
+    if ((sy && sy === t0) || ai === 0) return 0;
+    if ((sy && sy.indexOf(t0) === 0) || ti.indexOf(t0) === 0 || ai > 0) return 1;
+    return 2;
+  }
   function groupOf(items, P) {
     const g = new Map();
     items.forEach(it => { if (!g.has(it.kind)) g.set(it.kind, []); g.get(it.kind).push(it); });
@@ -514,7 +723,11 @@
     const ord = k => (lead.indexOf(k) >= 0 ? lead.indexOf(k) - 100 : KORD[k]);
     const best = k => Math.max(...g.get(k).map(x => x.sc));
     const ks = Array.from(g.keys()).sort((x, y) => (lead.length ? ord(x) - ord(y) : 0) || best(y) - best(x) || KORD[x] - KORD[y]);
-    return ks.map(k => ({ kind: k, items: g.get(k).sort((x, y) => (x.spam ? 1 : 0) - (y.spam ? 1 : 0) || y.sc - x.sc || String(y.iso || '').localeCompare(String(x.iso || ''))) }));
+    const ranked = P.type === 'ticker' || P.type === 'text';
+    return ks.map(k => ({ kind: k, items: g.get(k).sort((x, y) => (x.spam ? 1 : 0) - (y.spam ? 1 : 0)
+      || (k === 'sale' ? y.sc - x.sc : 0)
+      || (ranked ? tierOf(x, P) - tierOf(y, P) || (k === 'coin' ? y.sc - x.sc : String(y.iso || '').localeCompare(String(x.iso || '')) || y.sc - x.sc)
+        : y.sc - x.sc || String(y.iso || '').localeCompare(String(x.iso || '')))) }));
   }
 
   const ASK_KEYS = ['coin', 'chain', 'type', 'after', 'before', 'pnl', 'amt'];
@@ -562,8 +775,9 @@
       let p = null;
       const a9 = API(), qs9 = pvOn() && a9 && typeof a9.pvStripAmt === 'function' ? a9.pvStripAmt(q0) : q0;
       try { p = Promise.resolve(fn(qs9)); } catch (e) { p = Promise.resolve(null); }
-      p.then(r => { const ok = r && r.ok && r.filters && typeof r.filters === 'object' ? r : null; if (ASK_CACHE.size > 30) ASK_CACHE.clear(); ASK_CACHE.set(q0, ok); askApply(q0, ok); },
-        () => { ASK_CACHE.set(q0, null); askApply(q0, null); });
+      const gen9 = ST.gen;
+      p.then(r => { if (gen9 !== ST.gen) return; const ok = r && r.ok && r.filters && typeof r.filters === 'object' ? r : null; if (ASK_CACHE.size > 30) ASK_CACHE.clear(); ASK_CACHE.set(q0, ok); askApply(q0, ok); },
+        () => { if (gen9 !== ST.gen) return; ASK_CACHE.set(q0, null); askApply(q0, null); });
     }, 350);
   }
   function askApply(q0, r) {
@@ -579,16 +793,22 @@
     const prevSig = ST.selSig, prevKey = ST.flat && ST.flat[ST.sel] ? canonKey(ST.flat[ST.sel]) : '';
     const P = parseQ(effQ());
     ST.P = P;
-    if (!P.raw.trim() || locked()) { ST.groups = []; ST.flat = []; ST.items = []; ST.selSig = ''; return; }
+    if (!P.raw.trim() || locked()) { ST.groups = []; ST.flat = []; ST.items = []; ST.selSig = ''; ST.cwait = false; return; }
     const a = API();
     if (a) { try { a.nftLoad(false); } catch (e) {  } try { a.oaNeed(300000); } catch (e) {  } }
     const scope = ST.scope !== 'all' ? ST.scope : P.scope;
     const P2 = Object.assign({}, P, { scope });
-    let items = mergeItems(clientItems(P2), serverItems(P2));
+    const srv9 = serverItems(P2);
+    let items = mergeItems(cliConfirm(clientItems(P2), srv9, P2), srv9);
     ST.items = items;
     ST.groups = groupOf(items, P2);
     ST.flat = [];
-    ST.groups.forEach(gr => { const lim = scope || ST.expand === gr.kind ? GROUP_ALL : GROUP_N; gr.shown = gr.items.slice(0, lim); gr.more = gr.items.length > lim; gr.shown.forEach(it => ST.flat.push(it)); });
+    ST.groups.forEach(gr => {
+      const lim = scope ? gr.items.length : ST.expand === gr.kind ? GROUP_ALL : GROUP_N, sg = srvGroup(gr.kind);
+      gr.srvN = sg && sg.n != null ? +sg.n : null;
+      gr.srvMore = !!(sg && !sg.end && (sg.more || (gr.srvN != null && srvLoaded(gr.kind) + (+sg.offset || 0) < gr.srvN)));
+      gr.shown = gr.items.slice(0, lim); gr.more = gr.items.length > lim || (!scope && gr.srvMore); gr.shown.forEach(it => ST.flat.push(it));
+    });
     const sig = effQ() + '|' + scope + '|' + (ST.expand || '');
     if (prevKey && prevSig === sig) { const j = ST.flat.findIndex(it => canonKey(it) === prevKey); if (j >= 0) ST.sel = j; }
     ST.selSig = sig;
@@ -607,13 +827,51 @@
     if (f.before) out.push('before:' + f.before);
     if (!pv && f.pnl) out.push('pnl:' + cmpTxt(f.pnl));
     if (!pv && f.amt) out.push('amt:' + cmpTxt(f.amt));
+    if (f.addr) out.push('addr:' + f.addr);
+    if (f.tx) out.push('tx:' + f.tx);
+    if (f.wallet) out.push('wallet:' + f.wallet);
+    if (f.ex) out.push('ex:' + f.ex);
+    if (f.has) out.push('has:' + f.has);
+    const N = P.nf || {};
+    arr(N.coin).forEach(v => out.push('-coin:' + v));
+    arr(N.chain).forEach(v => out.push('-chain:' + v));
+    arr(N.type).forEach(v => { if (SRV_TYPE[v]) out.push('-type:' + SRV_TYPE[v]); });
+    arr(N.ex).forEach(v => out.push('-ex:' + v));
+    arr(N.has).forEach(v => out.push('-has:' + v));
+    arr(N.wallet).forEach(v => out.push('-wallet:' + v));
     let text = P.text;
     if (pv) { const a9 = API(); text = a9 && typeof a9.pvStripAmt === 'function' ? a9.pvStripAmt(text) : text.replace(/(^|\s)[₩$]?\s?\d[\d,]*(?:\.\d+)?\s?(?:만|억|천|k|m)?원?(?=\s|$)/gi, (all, sp) => (/^\s*\d{1,2}$/.test(all) ? all : sp)).replace(/\s{2,}/g, ' ').trim(); }
     const sc = scope && scope !== 'all' ? scope : P.scope;
-    const skip = sc === 'setting' || sc === 'receipt' || (!text && !out.length);
+    const skip = sc === 'setting' || sc === 'receipt' || sc === 'sale' || (!text && !out.length);
     return { q: (out.join(' ') + (text ? ' ' + text : '')).trim().slice(0, Q_MAX), kinds: sc ? (SRV_KINDS[sc] || '') : '', skip };
   }
   const srvQueryOf = q => srvParamsOf(q).q;
+  const srvGroup = k => (ST.srv && ST.srvQ === effQ() ? arr(ST.srv.groups).find(g => g.kind === k) : null);
+  const srvLoaded = k => { const g = srvGroup(k); return g ? arr(g.items).length + arr(ST.srvAdd && ST.srvAdd[k]).length : 0; };
+  function srvMore(k) {
+    const g = srvGroup(k);
+    if (!g || ST.srvMoreBusy || locked()) return;
+    const q0 = effQ(), sp = srvParamsOf(q0, ST.scope), pv0 = pvOn(), off = (+g.offset || 0) + srvLoaded(k);
+    if (!sp.q || sp.skip) return;
+    const paint9 = () => { if (ST.open) paintBody(); };
+    const r0 = ST.srv, req9 = {};
+    ST.srvMoreReq = req9; ST.srvMoreBusy = k; paint9();
+    const mine = () => ST.srvMoreReq === req9;
+    fetch('/api/search?q=' + encodeURIComponent(sp.q) + '&kinds=' + encodeURIComponent(k) + '&limit=50&offset=' + off, { cache: 'no-store', credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then(j => {
+        if (!mine()) return;
+        ST.srvMoreBusy = ''; ST.srvMoreReq = null;
+        if (ST.srv !== r0 || !r0 || q0 !== effQ() || locked() || pv0 !== pvOn() || !j || !j.ok) { paint9(); return; }
+        const g2 = arr(j.groups).find(x => x.kind === k);
+        const same = !!(g2 && +g2.offset === off), got = same ? arr(g2.items) : [];
+        ST.srvAdd = ST.srvAdd || {};
+        ST.srvAdd[k] = arr(ST.srvAdd[k]).concat(got);
+        if (g2) { g.n = g2.n != null ? g2.n : g.n; g.more = !!g2.more && got.length > 0; if (!got.length) g.end = true; } else { g.more = false; if (!j.partial) g.end = true; }
+        if (j.partial) ST.srv.partial = true;
+        run(); paint9();
+      }, () => { if (!mine()) return; ST.srvMoreBusy = ''; ST.srvMoreReq = null; ST.srvErr = 'more'; paint9(); });
+  }
   function srvKick() {
     clearTimeout(ST.tmr);
     const raw = srvParamsOf(effQ(), ST.scope).q;
@@ -627,8 +885,9 @@
       paintMeta();
       fetch('/api/search?q=' + encodeURIComponent(sp.q) + (sp.kinds ? '&kinds=' + encodeURIComponent(sp.kinds) : '') + '&limit=30', { cache: 'no-store', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined })
         .then(r => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? 'none' : 'HTTP ' + r.status))))
-        .then(j => { if (ST.ctl !== ctl || q0 !== effQ() || locked() || pv0 !== pvOn()) return; ST.srv = j && j.ok ? j : null; ST.srvQ = q0; ST.srvPv = pv0; ST.srvBusy = false; ST.srvErr = j && j.ok ? '' : 'err'; run(); paintBody(); })
-        .catch(e => { if (e && e.name === 'AbortError') return; if (ST.ctl !== ctl) return; ST.srvBusy = false; ST.srvErr = String((e && e.message) || 'err'); paintMeta(); });
+        .then(j => { if (ST.ctl !== ctl || q0 !== effQ() || locked() || pv0 !== pvOn()) return; ST.srv = j && j.ok ? j : null; ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.srvQ = q0; ST.srvPv = pv0; ST.srvKinds = sp.kinds || ''; ST.srvErrQ = j && j.ok ? null : q0; ST.srvBusy = false; ST.srvErr = j && j.ok ? '' : 'err'; run(); paintBody(); })
+        .catch(e => { if (e && e.name === 'AbortError') return; if (ST.ctl !== ctl) return; ST.srvBusy = false; ST.srvErr = String((e && e.message) || 'err');
+          if (q0 === effQ() && !locked()) { ST.srvErrQ = q0; run(); paintBody(); } else paintMeta(); });
     }, SRV_DEBOUNCE);
   }
 
@@ -670,7 +929,7 @@
     const R = ensureRoot(), h = $('.tjs-head', R), a = API();
     const inp = $('#tjsQ', R);
     const saved = savedGet().some(x => x.q === ST.q.trim());
-    const ph = '코인 · 주소 · 해시 · 날짜 · 설정' + (wide() ? ' — 예: sol · 0x17a0 · 10/2 · coin:ETH after:2026-09' : '');
+    const ph = '코인 · 주소 · 해시 · 날짜 · 설정' + (wide() ? ' — 예: sol · 0x1234 · 10/2 · coin:ETH after:2026-09' : '');
     if (!inp) {
       h.innerHTML = '<label class="tjs-in">' + ((a && a.IC.search) || '') + '<input id="tjsQ" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="tjsList" aria-autocomplete="list" aria-label="전체 검색" maxlength="' + Q_MAX + '" placeholder="' + esc(ph) + '">'
         + '<span class="tjs-askb" hidden>' + IX.spark + '<span class="t">문장으로 찾기</span></span><button type="button" class="tjs-star" data-srch="save" aria-label="이 검색 저장">' + IX.star + '</button><button type="button" class="tjs-x" data-srch="clear" aria-label="지우기">' + IX.x + '</button>'
@@ -701,14 +960,18 @@
     } else if (ST.askBusy && ST.askBusy === ST.q.trim()) h += '<div class="tjs-ask"><span class="tjs-spin" aria-hidden="true"></span><span class="tjs-asklab">문장을 조건으로 바꾸는 중… 그동안 글자로 먼저 찾았어요</span></div>';
     if (pvOn() && (P.f.amt || P.f.pnl)) h += '<div class="tjs-tip" style="margin-top:8px">가리기·랜덤값 중에는 금액·손익 조건(amt: · pnl:)을 쓰지 않고 찾아요</div>';
     if (P.chips.length && !A) h += '<div class="tjs-fchips">' + IX.filter + P.chips.map((c, i) => '<button type="button" class="tjs-fc" data-srch="unf" data-v="' + i + '">' + esc(c.t) + '<span aria-hidden="true">' + IX.x + '</span><span class="sr">필터 지우기</span></button>').join('') + '</div>';
+    const ig9 = arr(P.ignored).concat(ST.srv && ST.srvQ === effQ() ? arr(ST.srv.ignored) : []), seen9 = new Set();
+    const igs = ig9.filter(x => x && x.t && !seen9.has(x.t) && seen9.add(x.t));
+    if (igs.length && ST.q.trim()) h += '<div class="tjs-tip tjs-ign" role="status"><b>이 조건은 무시했어요</b> · ' + igs.slice(0, 4).map(x => '<code>' + esc(String(x.t).slice(0, 40)) + '</code> ' + esc(x.why || '')).join(' · ') + '</div>';
     const q = ST.q.trim();
     const counts = {}; ST.items.forEach(it => { counts[it.kind] = (counts[it.kind] || 0) + 1; });
-    const scopes = q ? [['all', '전체', ST.items.length]].concat(ST.groups.map(g => [g.kind, KL[g.kind], g.items.length])) : SCOPE0.map(s => [s[0], s[1], null]);
+    const gN = g => Math.max(g.items.length, g.srvN || 0);
+    const scopes = q ? [['all', '전체', ST.groups.reduce((t, g) => t + gN(g), 0)]].concat(ST.groups.map(g => [g.kind, KL[g.kind], gN(g)])) : SCOPE0.map(s => [s[0], s[1], null]);
     if (q && ST.scope !== 'all' && !counts[ST.scope]) scopes.push([ST.scope, KL[ST.scope], 0]);
-    h += '<div class="tjs-scopes" role="tablist" aria-label="찾을 종류">' + scopes.map(s => '<button type="button" role="tab" class="tjs-chip' + (ST.scope === s[0] ? ' on' : '') + '" aria-selected="' + (ST.scope === s[0]) + '" data-srch="scope" data-v="' + s[0] + '">' + esc(s[1]) + (s[2] != null ? ' <small class="pvx">' + s[2] + '</small>' : '') + '</button>').join('') + '</div>';
+    h += '<div class="tjs-scopes" role="tablist" aria-label="찾을 종류">' + scopes.map(s => '<button type="button" role="tab" class="tjs-chip' + (ST.scope === s[0] ? ' on' : '') + '" aria-selected="' + (ST.scope === s[0]) + '" data-srch="scope" data-v="' + s[0] + '">' + esc(s[1]) + (s[2] != null ? ' <small class="pvx">' + Number(s[2]).toLocaleString('en-US') + '</small>' : '') + '</button>').join('') + '</div>';
     mt.innerHTML = h;
     const cnt = $('.tjs-cnt', R);
-    if (cnt) cnt.innerHTML = q ? pvx(ST.items.length + '개') + (ST.srvBusy ? ' <span class="tjs-spin" aria-hidden="true"></span>' : '') : '';
+    if (cnt) cnt.innerHTML = q ? pvx(ST.groups.reduce((t, g) => t + gN(g), 0).toLocaleString('en-US') + '개') + (ST.srvBusy ? ' <span class="tjs-spin" aria-hidden="true"></span>' : '') : '';
   }
   function rowHTML(it, i) {
     const sel = i === ST.sel && (wide() || ST.kbd);
@@ -744,19 +1007,28 @@
     let h = '';
     const exact = (P.type === 'hex' || P.type === 'b58') && P.hex.length >= 10 ? ST.flat.find(it => (it.addr && String(it.addr).toLowerCase() === P.hex.toLowerCase()) || (it.tx && String(it.tx).toLowerCase() === P.hex.toLowerCase())) : null;
     let i = 0;
+    const fmtN = n => Number(n).toLocaleString('en-US');
     ST.groups.forEach(g => {
-      h += '<div class="tjs-gh">' + esc(KL[g.kind]) + ' <span class="n pvx">' + g.items.length + '</span><span class="sp"></span>' + (g.more ? '<button type="button" class="tjs-lnk" data-srch="more" data-v="' + g.kind + '">모두 ›</button>' : (ST.expand === g.kind ? '<button type="button" class="tjs-lnk" data-srch="less" data-v="' + g.kind + '">접기</button>' : '')) + '</div>';
+      const tot = Math.max(g.items.length, g.srvN || 0);
+      h += '<div class="tjs-gh">' + esc(KL[g.kind]) + ' <span class="n pvx">' + fmtN(tot) + (tot > g.shown.length ? '<span class="tjs-of"> 중 ' + fmtN(g.shown.length) + '</span>' : '') + '</span><span class="sp"></span>' + (g.more ? '<button type="button" class="tjs-lnk" data-srch="more" data-v="' + g.kind + '">모두 ›</button>' : (ST.expand === g.kind ? '<button type="button" class="tjs-lnk" data-srch="less" data-v="' + g.kind + '">접기</button>' : '')) + '</div>';
       h += '<div class="tjs-sl">' + g.shown.map(it => rowHTML(it, i++)).join('') + '</div>';
+      const sc9 = ST.scope !== 'all' ? ST.scope : P.scope;
+      if (sc9 && g.srvMore) h += '<button type="button" class="tjs-moreq tjs-srvmore" data-srch="srvmore" data-v="' + esc(g.kind) + '"' + (ST.srvMoreBusy === g.kind ? ' disabled' : '') + '>' + (ST.srvMoreBusy === g.kind ? '<span class="tjs-spin" aria-hidden="true"></span>' : IX.go) + '<span>더 보기 — <span class="pvx">' + fmtN(g.items.length) + ' / ' + fmtN(tot) + '</span></span><span class="sp"></span>›</button>';
       if (g.kind === 'coin' && P.type === 'ticker' && g.items[0] && !ST.scope.match(/cycle|event/)) {
         const s0 = g.items[0].sym;
         h += '<button type="button" class="tjs-moreq" data-srch="filt" data-v="' + esc(String(s0 || '').toUpperCase()) + '">' + IX.filter + '<span><b>' + esc(s0) + '</b> 기록 — 매매일지 전체 기록에서 거르기</span><span class="sp"></span>›</button>';
       }
     });
-    if (!ST.flat.length) h += '<div class="tjs-none"><b>‘' + esc(q) + '’와 맞는 결과가 없어요</b><span>' + (ST.srvBusy ? '전체 기록에서 더 찾는 중…' : P.type === 'amt' && pvOn() ? '가리기·랜덤값 중에는 금액으로 찾지 않아요' : '주소·해시는 앞 4자리부터, 날짜는 10/2 · 어제처럼 넣어 보세요') + '</span></div>';
+    const srvOk = ST.srv && ST.srvQ === effQ(), srvPart = srvOk && ST.srv.partial, srvFail = !!(ST.srvErr && ST.srvErr !== 'none');
+    if (!ST.flat.length) h += '<div class="tjs-none"><b>' + (ST.cwait && !srvOk ? '‘' + esc(q) + '’ — 조건에 맞는 것을 전체 기록에서 찾는 중…' : srvPart ? '‘' + esc(q) + '’ — 시간 안에 다 찾지 못했어요(일부만)' : srvFail ? '‘' + esc(q) + '’ — 받아 둔 화면 데이터에는 없어요' : '‘' + esc(q) + '’와 맞는 결과가 없어요') + '</b><span>'
+      + (ST.srvBusy || ST.cwait ? '전체 기록에서 더 찾는 중…' : srvPart ? '조건을 더 넣어 좁혀 보세요(예: coin:ETH · after:2026-09)' : srvFail ? '전체 기록 검색이 실패했어요 — 결과가 없는 게 아니에요. 잠시 뒤 다시 찾아 보세요'
+        : P.type === 'amt' && pvOn() ? '가리기·랜덤값 중에는 금액으로 찾지 않아요' : '주소·해시는 앞 4자리부터, 날짜는 10/2 · 어제처럼 넣어 보세요') + '</span></div>';
     if (exact && exact.acts && !wide()) h += '<div class="tjs-gh">정확히 일치하면</div><div class="tjs-exact"><div class="tjs-exh">' + exact.title + '</div><div class="tjs-acts">' + exact.acts.map((x, k) => actBtn(x, 'x' + k, k === 0)).join('') + '</div></div>';
     if ((P.type === 'hex' || P.type === 'b58') && P.hex.length < 10 && ST.flat.length) h += '<div class="tjs-tip"><b>전체 주소·해시를 붙여 넣으면</b> 정확히 하나로 좁혀요 — 보낸 전송·미매칭은 전체 해시로, 체결은 앞 6 · 뒤 4 자리로 맞춰요</div>';
     if (ST.srv && ST.srv.building) h += '<div class="tjs-tip"><span class="tjs-spin" aria-hidden="true"></span> 전체 기록 색인을 만드는 중 — 받아 둔 화면 데이터에서 먼저 찾았어요</div>';
-    else if (ST.srvErr && ST.srvErr !== 'none' && ST.srvErr !== 'err') h += '<div class="tjs-tip">전체 기록 검색에 닿지 못했어요 — 받아 둔 화면 데이터에서만 찾았어요</div>';
+    else if (srvFail && ST.flat.length) h += '<div class="tjs-tip tjs-warn">전체 기록 검색이 실패했어요 — 받아 둔 화면 데이터에서만 찾았어요(더 있을 수 있어요)</div>';
+    if (srvPart && ST.flat.length) h += '<div class="tjs-tip tjs-warn">시간이 모자라 <b>일부만</b> 찾았어요 — 조건을 더 넣으면 다 찾아요</div>';
+    if (srvOk && ST.srv.upgrading) h += '<div class="tjs-tip"><span class="tjs-spin" aria-hidden="true"></span> 검색 색인을 새 형식으로 바꾸는 중 — 잠시 일부만 나올 수 있어요</div>';
     L.innerHTML = h;
     paintPv();
     keysPaint();
@@ -772,6 +1044,7 @@
   }
   function paintPv() {
     const R = ensureRoot(), V = $('.tjs-pv', R), a = API();
+    V._it = null; V._acts = null;
     if (!wide()) { V.innerHTML = ''; return; }
     const it = ST.q.trim() ? ST.flat[ST.sel] : null;
     if (!it || !a) { V.innerHTML = '<div class="tjs-pv0">' + IX.spark + '<b>' + (ST.q.trim() ? '결과를 고르면 여기서 미리 봐요' : '찾고 싶은 걸 넣어 보세요') + '</b><span>↑↓ 로 고르고 ↵ 로 그 화면 그 자리로</span></div>'; return; }
@@ -792,7 +1065,7 @@
     V.innerHTML = h;
     V._acts = acts; V._it = it;
   }
-  const openLabel = it => ({ coin: '대시보드 보유 코인에서 열기', cycle: '매매일지 사이클 열기', outflow: '보낸 내역에서 열기', tx: '그날 기록에서 열기', event: '그날 기록에서 열기', day: '일별에서 열기',
+  const openLabel = it => ({ coin: '대시보드 보유 코인에서 열기', cycle: '매매일지 사이클 열기', outflow: '보낸 내역에서 열기', sale: '보낸 내역 세일 참가금 보기', tx: '그날 기록에서 열기', event: '그날 기록에서 열기', day: '일별에서 열기',
     receipt: '차익 영수증 열기', review: '그날 리뷰 열기', memo: '그날 근거 메모 열기', pending: '미매칭에서 열기', nft: 'NFT 에서 열기', other: '기타 자산에서 열기', wallet: '설정 › 지갑에서 열기',
     deposit: '입금 주소 열기', setting: '그 설정으로 가기' }[it.kind] || '열기');
   function keysPaint() {
@@ -820,6 +1093,10 @@
     paintAll(); srvKick(); askKick();
     const i = $('#tjsQ', ROOT); if (i) { try { i.focus({ preventScroll: true }); i.setSelectionRange(i.value.length, i.value.length); } catch (e) { i.focus(); } }
   }
+  function wipeQ() {
+    ST.srvErrQ = null; ST.srvKinds = ''; ST.cwait = false; ST.selSig = ''; ST.copyArm = -1; ST.pend = null;
+    const V = ROOT && ROOT.querySelector('.tjs-pv'); if (V) { V._it = null; V._acts = null; }
+  }
   function pvGuard() {
     const p = pvOn();
     if (p) { try { if (localStorage.getItem(LS_RECENT) != null) localStorage.removeItem(LS_RECENT); } catch (e) {  } }
@@ -830,7 +1107,8 @@
     if (ST.ctl) { try { ST.ctl.abort(); } catch (e) {  } }
     clearTimeout(ST.tmr); clearTimeout(ST.askTmr);
     ST.ctl = null; ST.srv = null; ST.srvQ = ''; ST.srvPv = null; ST.srvBusy = false; ST.srvErr = ''; ST.items = []; ST.flat = []; ST.groups = []; ST.P = null;
-    ST.ask = null; ST.askBusy = ''; ASK_CACHE.clear(); ST.q = ''; ST.sel = 0; ST.expand = '';
+    ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.gen = (ST.gen || 0) + 1;
+    ST.ask = null; ST.askBusy = ''; ASK_CACHE.clear(); ST.q = ''; ST.sel = 0; ST.expand = ''; wipeQ();
     if (ROOT) { ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) e.innerHTML = ''; }); const i = ROOT.querySelector('#tjsQ'); if (i) i.value = ''; }
     hideBack(); ST.back = null;
     return true;
@@ -840,7 +1118,8 @@
     if (ST.ctl) { try { ST.ctl.abort(); } catch (e) {  } }
     clearTimeout(ST.tmr); clearTimeout(ST.askTmr);
     ST.ctl = null; ST.srv = null; ST.srvQ = ''; ST.srvBusy = false; ST.srvErr = ''; ST.items = []; ST.flat = []; ST.groups = []; ST.P = null;
-    ST.ask = null; ST.askBusy = ''; ST.q = ''; ST.after = null; ST.pend = null; ST.srvPv = null; ASK_CACHE.clear();
+    ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.gen = (ST.gen || 0) + 1;
+    ST.ask = null; ST.askBusy = ''; ST.q = ''; ST.after = null; ST.pend = null; ST.srvPv = null; ASK_CACHE.clear(); wipeQ();
     hideBack(); ST.back = null;
     if (ROOT) ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) e.innerHTML = ''; });
     const i = ROOT && ROOT.querySelector('#tjsQ'); if (i) i.value = '';
@@ -917,7 +1196,8 @@
     hideBack();
     const el = document.createElement('div');
     el.id = 'tjsBack'; el.className = 'tjs-back'; el.setAttribute('role', 'status');
-    el.innerHTML = ((API() && API().IC.search) || '') + '<span class="tjs-bt">검색 ‘' + esc(q.length > 24 ? q.slice(0, 24) + '…' : q) + '’ 에서 열림</span><span class="sp"></span><button type="button" data-srch="reopen">결과로 ‹</button><button type="button" class="x" data-srch="unback" aria-label="닫기">' + IX.x + '</button>';
+    const qShow = pvOn() ? nameMask(q) : q;
+    el.innerHTML = ((API() && API().IC.search) || '') + '<span class="tjs-bt">검색 ‘' + esc(qShow.length > 24 ? qShow.slice(0, 24) + '…' : qShow) + '’ 에서 열림</span><span class="sp"></span><button type="button" data-srch="reopen">결과로 ‹</button><button type="button" class="x" data-srch="unback" aria-label="닫기">' + IX.x + '</button>';
     backEl = el;
     ST.back = { q, sc, at: Date.now(), hc: 0 };
     const B = document.getElementById('banners');
@@ -953,6 +1233,7 @@
     else if (k === 'scope') { ST.scope = v || 'all'; ST.sel = 0; ST.expand = ''; paintAll(); srvKick(); refocus(); }
     else if (k === 'more') { if (ST.q.trim()) { ST.scope = v; ST.sel = 0; paintAll(); srvKick(); refocus(); } }
     else if (k === 'less') { ST.expand = ''; paintAll(); refocus(); }
+    else if (k === 'srvmore') { srvMore(v); refocus(); }
     else if (k === 'pick') { const i = +v; ST.sel = i; const it = ST.flat[i]; if (wide() && !ev.detail) { paintBody(); return; } openItem(it); }
     else if (k === 'again') { const r = v.charAt(0) === 's' ? savedGet()[+v.slice(1)] : recentGet()[+v.slice(1)]; if (r) { ST.q = r.q; ST.sel = 0; if (ST.ask && ST.ask.q !== ST.q) ST.ask = null; paintAll(); srvKick(); askKick(); refocus(); } }
     else if (k === 'unrecent') { const r = recentGet(); r.splice(+v, 1); lsSet(LS_RECENT, r); paintBody(); }
@@ -972,8 +1253,9 @@
     } else if (k === 'pact') { const V = $('.tjs-pv', ROOT), acts = V && V._acts; if (acts) runAct(acts[+v], 'p' + v, V._it); }
   }
   function removeFilter(q, k) {
-    const keys = k === 'coin' ? ['coin', 'sym'] : k === 'type' ? ['type', 'kind'] : [k];
-    return String(q).replace(FILT_RE, (all, sp, k0) => (keys.indexOf(k0.toLowerCase()) >= 0 ? sp : all)).replace(/\s{2,}/g, ' ').trim();
+    const ng = String(k).charAt(0) === '-', k1 = ng ? String(k).slice(1) : k;
+    const keys = k1 === 'coin' ? ['coin', 'sym'] : k1 === 'type' ? ['type', 'kind'] : [k1];
+    return String(q).replace(FILT_RE, (all, sp, ng0, k0) => (keys.indexOf(k0.toLowerCase()) >= 0 && (ng0 === '-') === ng ? sp : all)).replace(/\s{2,}/g, ' ').trim();
   }
   const refocus = () => { const i = $('#tjsQ', ROOT); if (i && document.activeElement !== i) { try { i.focus({ preventScroll: true }); } catch (e) { i.focus(); } } };
   function inField(t) { return !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)); }
@@ -983,16 +1265,27 @@
     const sel = '.modal-bg,.drawer,.usheet,.usheet-bg,#suWizard,#suPerm,.tjh-bg,[aria-modal="true"],[role="dialog"]';
     return Array.from(document.querySelectorAll(sel)).some(e => !(ROOT && ROOT.contains(e)) && e.getClientRects().length > 0);
   }
+  function drawerOnly() {
+    const a = API();
+    if (!a || !a.S || !a.S.drawer || a.S.modal || a.S.sheet || typeof a.closeDrawerThen !== 'function') return false;
+    const sel = '.modal-bg,.drawer,.usheet,.usheet-bg,#suWizard,#suPerm,.tjh-bg,[aria-modal="true"],[role="dialog"],[role="alertdialog"]';
+    return Array.from(document.querySelectorAll(sel)).every(e => (ROOT && ROOT.contains(e)) || !e.getClientRects().length || !!e.closest('#overlay .drawer'));
+  }
+  function fromDrawer() { const a = API(); a.closeDrawerThen(() => { if (!ST.open && !locked()) open(null); }); }
   function onKey(ev) {
     const a = API();
     const mod = ev.metaKey || ev.ctrlKey;
     if (mod && !ev.altKey && !ev.shiftKey && (ev.key === 'k' || ev.key === 'K')) {
       if (ST.open) { ev.preventDefault(); ev.stopPropagation(); close(); return; }
+      if (!locked() && !ev.isComposing && drawerOnly()) { ev.preventDefault(); ev.stopPropagation(); fromDrawer(); return; }
       if (otherDialog() || locked()) return;
       ev.preventDefault(); ev.stopPropagation(); open(null); return;
     }
     if (!ST.open) {
-      if (ev.key === '/' && !mod && !ev.altKey && !inField(ev.target) && a && a.S.tab !== 'settings' && !otherDialog() && !locked()) { ev.preventDefault(); open(null); }
+      if (ev.key === '/' && !mod && !ev.altKey && !inField(ev.target) && a && a.S.tab !== 'settings' && !locked()) {
+        if (!ev.isComposing && drawerOnly()) { ev.preventDefault(); fromDrawer(); return; }
+        if (!otherDialog()) { ev.preventDefault(); open(null); }
+      }
       return;
     }
     if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); if (ST.q && !wide()) { close(); return; } close(); return; }
@@ -1138,6 +1431,8 @@
     '.tjs-moreq svg{width:16px;height:16px;color:var(--accent);flex:none}.tjs-moreq .sp{flex:1}',
     '.tjs-tip{font-size:12px;color:var(--muted);line-height:1.65;padding:10px 12px;border-radius:12px;background:var(--surface2);margin-top:12px}.tjs-tip b{color:var(--text2)}',
     '.tjs-tip code{font-family:var(--mono);font-size:11.5px;background:var(--surface3);padding:0 4px;border-radius:4px;color:var(--text2)}',
+    '.tjs-tip.tjs-warn{background:var(--warnBg);color:var(--warn)}.tjs-tip.tjs-warn b{color:inherit}.tjs-ign{margin-top:10px}.tjs-gh .n .tjs-of{color:var(--faint);font-weight:600}',
+    '.tjs-srvmore[disabled]{opacity:.6;cursor:default}',
     '.tjs-none{display:flex;flex-direction:column;gap:4px;padding:28px 12px;text-align:center;color:var(--muted);font-size:13px}.tjs-none b{color:var(--text);font-size:14.5px}',
     '.tjs-exact{border-radius:14px;background:var(--surface);border:1px solid var(--line);padding:12px}.tjs-exh{font-size:14px;font-weight:700;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
     '.tjs-acts{display:flex;flex-wrap:wrap;gap:6px}',
@@ -1206,6 +1501,6 @@
       if (s9 !== sig) { const pvc = sig && sig.split('|').slice(0, 2).join('|') !== s9.split('|').slice(0, 2).join('|'); sig = s9; paintAll(); if (pvc) srvKick(); }
     }, 700);
   }
-  window.TJSearch = { open, close, lock, srvQueryOf, srvParamsOf, canonKey, _run: run, _pvGuard: pvGuard, _sig: watchSig, _runAct: runAct, _savedToggle: savedToggle, _askSave: askSave, parseQ, parseDate, parseAmt, mark, score, mergeItems, groupOf, clientItems, serverItems, removeFilter, looksAsk, askChips, effQ, _rowHTML: rowHTML, _emptyHTML: emptyHTML, _hlSafe: hlSafe, _st: ST };
+  window.TJSearch = { open, close, lock, srvQueryOf, srvParamsOf, canonKey, _run: run, _pvGuard: pvGuard, _sig: watchSig, _runAct: runAct, _cliConfirm: cliConfirm, _evTypes: evTypes, _srvKick: srvKick, _savedToggle: savedToggle, _askSave: askSave, parseQ, tokKind, _tokOk: tokOk, parseDate, parseAmt, mark, score, mergeItems, groupOf, clientItems, serverItems, removeFilter, looksAsk, askChips, effQ, nf, aliasSyms, tierOf, srvMore, addrScore, _askKick: askKick, _askCacheHas: q => ASK_CACHE.has(q), _rowHTML: rowHTML, _emptyHTML: emptyHTML, _hlSafe: hlSafe, _st: ST };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();

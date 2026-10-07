@@ -245,7 +245,11 @@ def _classify(code, kind, body) -> str:
             return "reject"
         return "net"
     if code and 400 <= code < 500:
-        return "plan"
+        c9, m9 = cgplan.error_of(body)
+        ml = ((m9 or "") + " " + (body if isinstance(body, str) else "")).lower()
+        if c9 in (10005, 10012) or any(w in ml for w in _PLAN_WORDS):
+            return "plan"
+        return "badreq"
     return "net"
 
 
@@ -323,6 +327,8 @@ def request(path, lane, via, allow=True, valid=None):
             _bench(k, cls, ra)
         elif cls == "plan":
             _fam_bench(path, FAMILY_S)
+        elif cls == "badreq":
+            pass
         else:
             _fam_bench(path, BAD_BODY_S)
         _stat(lane, "fail")

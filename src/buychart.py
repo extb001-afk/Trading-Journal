@@ -100,6 +100,101 @@ def _tx_ok(t) -> bool:
 
 WAC_REBASE = 1e-150
 LINEAGE_DEPTH = 8
+XC_DEPTH = 6
+
+
+def xc_leaves(lots, depth_max=XC_DEPTH):
+    out = []
+
+    def walk(lot, known, cost, depth, seen, chain_hint, btx):
+        kind = str(lot.get("kind") or "")
+        tx = str(lot.get("tx") or "")
+        me = (kind, tx.lower(), str(lot.get("from") or "").lower(), str(lot.get("qty")))
+        kids = lot.get("srcLots") if isinstance(lot.get("srcLots"), list) else None
+        if kind == "swap" and cost > 0:
+            q0, c0 = num(lot.get("qty")) or 0.0, num(lot.get("cost")) or 0.0
+            out.append({"kind": "swap", "chain": lot.get("chain") or chain_hint, "tx": tx, "block": lot.get("block"), "known": known, "cost": cost,
+                        "un": (c0 / q0) if (q0 > 0 and c0 > 0) else cost / known, "depth": depth, "lot": kind, "cut": None, "btx": btx,
+                        "q0": q0 if q0 > 0 else known})
+            return
+        cut = "cycle" if me in seen else ("depth" if depth >= depth_max else None)
+        if kids and cut is None:
+            ks = [(k9, num(k9.get("known")) or 0.0) for k9 in kids if isinstance(k9, dict)]
+            tot = sum(w for _k, w in ks if w > 0)
+            if tot > 0:
+                for k9, w in ks:
+                    if w > 0:
+                        walk(k9, known * w / tot, cost * w / tot, depth + 1, seen | {me}, lot.get("src") or chain_hint,
+                             tx if kind.startswith("bridge") else btx)
+                return
+        out.append({"kind": "open", "chain": lot.get("src") or lot.get("chain") or chain_hint, "tx": tx, "block": lot.get("block"),
+                    "known": known, "cost": cost, "un": (cost / known) if known > 0 and cost > 0 else None, "depth": depth, "lot": kind or "?", "cut": cut,
+                    "btx": btx})
+
+    for lot in lots or ():
+        if not isinstance(lot, dict):
+            continue
+        k, c = num(lot.get("known")) or 0.0, num(lot.get("cost")) or 0.0
+        if k > 0:
+            walk(lot, k, max(0.0, c), 0, frozenset(), None, None)
+    return out
+
+
+def xc_lot_ts(stx, blk, chain, tx, block) -> int:
+    if chain == "sol":
+        st = (stx or {}).get(tx)
+        return int(st["ts"]) if isinstance(st, dict) and st.get("ts") else 0
+    try:
+        return int((blk or {}).get(f"{chain}|{int(block)}") or 0) if block not in (None, "") else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+XC_LATE_RULE = "경유 역추적한 원천 매수 원가 — 매수 시각을 못 찾아 도착 시각에 표시"
+
+
+def xc_settle(legs, inflows):
+    out, inf, seen = [], list(inflows or ()), {}
+    for l9 in legs or ():
+        x9 = l9.get("xc")
+        if not x9:
+            out.append(l9)
+            continue
+        if not l9.get("ts"):
+            q9, u9 = float(l9.get("q") or 0), l9.get("usd")
+            inf.append({"ts": int(x9.get("arrTs") or 0), "q": q9, "usd": u9, "un": (float(u9) / q9) if (u9 and q9 > 0) else None, "k": "전송",
+                        "d": l9.get("d"), "pkey": None, "chain": l9.get("chain"), "rule": XC_LATE_RULE})
+            continue
+        rk = (x9.get("chain"), str(x9.get("tx") or "").lower(), x9.get("token"), l9.get("pid"), int(l9["ts"]))
+        p9 = seen.get(rk)
+        if p9 is None:
+            seen[rk] = l9
+            out.append(l9)
+        else:
+            p9["q"] = float(p9["q"]) + float(l9["q"])
+            p9["usd"] = (float(p9.get("usd") or 0) + float(l9.get("usd") or 0)) or None
+            p9["share"] = None
+    inf.sort(key=lambda x9: x9["ts"])
+    return out, inf
+
+
+def in_rule(d) -> str:
+    d = str(d or "")
+    if "경유" in d:
+        return "경유 지갑의 매수 원가를 거슬러 계산한 값(먼저 들어온 몫부터 · 끝 원천은 그 지갑 평균 원가)"
+    if "세일 영수증" in d:
+        return "세일 영수증 토큰의 원가(세일 참여 금액)를 그대로 이어받음"
+    if "세일" in d:
+        return "토큰 세일 참여 금액(참여 − 환불)을 원가로"
+    if "돌아옴" in d or "이어받" in d:
+        return "보낸 쪽(내 다른 계정) 원가를 그대로 이어받음"
+    if "스테이킹" in d or "시가" in d or "시세" in d:
+        return "받은 시각 시세를 원가로"
+    if "브릿지" in d:
+        return "브릿지 출발 쪽 원가를 그대로 이어받음"
+    if "승계" in d or "이관" in d or "복원" in d:
+        return "보낸 쪽 원가를 그대로 이어받음(보낸 쪽 매수 기록은 못 찾음)"
+    return "기록에 적힌 원가(규칙 표시 없음)"
 
 
 _U = 1.12e-16
@@ -350,6 +445,7 @@ def legs_from_engine(cards, real_keys, iso):
     where = {id(e): pk for pk, c in cards.items() for _ts, e in c["ev"]}
     acc, fee, other, unk, src = {}, {}, [0.0, 0.0], 0.0, []
     cvs = {}
+    infl = {}
     need = {}
     for pk, e in sells:
         cm = e["_cmp"] or {}
@@ -363,6 +459,8 @@ def legs_from_engine(cards, real_keys, iso):
                 a9 = acc.setdefault(id(ev0), [ev0, 0.0, 0.0])
             elif ev0 is not None and str(ev0.get("k") or "") == "LP 수수료 수령":
                 a9 = fee.setdefault(id(ev0), [ev0, 0.0, 0.0])
+            elif ev0 is not None and isinstance(_key, tuple) and _key and _key[0] in ("in", "xc"):
+                a9 = infl.setdefault(id(ev0), [ev0, 0.0, 0.0])
             else:
                 other[0] += q9
                 other[1] += c9
@@ -395,10 +493,15 @@ def legs_from_engine(cards, real_keys, iso):
         un = num(e.get("un"))
         krw = num(e.get("aK"))
         f9 = q9 / q0 if q0 > 0 else 0.0
-        legs.append({"ts": int(e.get("_ts") or 0), "q": q9, "usd": c9 if c9 > 0 else None, "un": un if un and un > 0 else ((c9 / q9) if q9 else None),
-                     "krw": (krw * f9) if krw and krw > 0 else None, "pid": e.get("_pid"), "pkey": pk,
-                     "chain": (cards.get(pk) or {}).get("chain"), "k": str(e.get("k") or ""), "d": str(e.get("d") or ""), "src": e.get("src"),
-                     "share": round(f9, 6)})
+        l9 = {"ts": int(e.get("_ts") or 0), "q": q9, "usd": c9 if c9 > 0 else None, "un": un if un and un > 0 else ((c9 / q9) if q9 else None),
+              "krw": (krw * f9) if krw and krw > 0 else None, "pid": e.get("_pid"), "pkey": pk,
+              "chain": (cards.get(pk) or {}).get("chain"), "k": str(e.get("k") or ""), "d": str(e.get("d") or ""), "src": e.get("src"),
+              "share": round(f9, 6)}
+        if isinstance(e.get("_xc"), dict):
+            l9["xc"] = dict(e["_xc"])
+            l9["chain"] = e["_xc"].get("chainKo") or l9["chain"]
+            l9["share"] = None
+        legs.append(l9)
     for i9, (e, q9, c9) in cvs.items():
         pk = where.get(i9)
         if pk is not None and pk not in order and pk not in src:
@@ -408,8 +511,18 @@ def legs_from_engine(cards, real_keys, iso):
                      "krw": None, "pid": e.get("_pid"), "pkey": pk, "chain": (cards.get(pk) or {}).get("chain"), "k": "브릿지 전환",
                      "d": f"{fr9} → 브릿지 전환 · " + str(e.get("d") or ""), "src": e.get("src"), "from": fr9, "share": 1.0})
     legs.sort(key=lambda x: (x["ts"], str(x["pkey"])))
+    inflows = []
+    for i9, (e, q9, c9) in infl.items():
+        if q9 <= 0:
+            continue
+        x9 = e.get("_xc") if isinstance(e.get("_xc"), dict) else {}
+        d9 = str(e.get("d") or "")
+        inflows.append({"ts": int(e.get("_ts") or 0), "q": q9, "usd": c9 if c9 > 0 else None, "un": (c9 / q9) if c9 > 0 else None,
+                        "k": str(e.get("k") or ""), "d": d9, "pkey": where.get(i9), "chain": x9.get("chainKo") or (cards.get(where.get(i9)) or {}).get("chain"),
+                        "rule": x9.get("rule") or in_rule(d9)})
+    inflows.sort(key=lambda x: (x["ts"], str(x["pkey"])))
     lpf = {"n": len(fee), "qty": sum(v[1] for v in fee.values()), "usd": sum(v[2] for v in fee.values())}
-    return {"legs": legs, "lpFee": {"n": lpf["n"], "qty": _r(lpf["qty"]), "usd": round(lpf["usd"], 2)},
+    return {"legs": legs, "inflows": inflows, "lpFee": {"n": lpf["n"], "qty": _r(lpf["qty"]), "usd": round(lpf["usd"], 2)},
             "cards": list(order), "srcCards": src, "unmatched": sim9["unmatched"] if sim9 else 0, "fallback": sim9["fallback"] if sim9 else 0,
             "trimmed": {"n": 0, "qty": 0}, "simSells": len(miss),
             "other": {"qty": _r(other[0]), "usd": round(other[1], 2)}, "unknownQty": _r(unk), "source": "mixed" if miss else "engine",

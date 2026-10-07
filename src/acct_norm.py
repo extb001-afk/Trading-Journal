@@ -219,7 +219,8 @@ def fill_ts(order: dict):
             if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
                 ts = float(v) / (1000.0 if float(v) > 1e11 else 1.0)
             elif v:
-                ts = datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+                import common
+                ts = common.iso_epoch(v)
         except (TypeError, ValueError):
             ts = None
         if ts and (best is None or ts > best):

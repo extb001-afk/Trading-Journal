@@ -468,7 +468,7 @@ def owner_queue(conn, chains, wallets, origin_cache, prio_syms=(), limit=2000) -
         " json_extract(r.snapshot,'$.token_transfers') AS tt"
         " FROM postings p JOIN assets a ON a.asset_id = p.asset_id JOIN raw_txs r ON r.chain = p.source_ns AND r.txhash = p.source_id"
         " WHERE p.leg_kind='acq' AND p.event IN ('PROGRAM_IN','TRANSFER_IN') AND p.cost_usd IS NULL AND a.kind='token'"
-        " AND p.source_ns IN (" + ",".join("?" * len(chains)) + ") ORDER BY p.event_ts DESC, p.posting_id DESC", tuple(chains)).fetchall()
+        " AND p.source_ns IN (" + ",".join("?" * len(chains)) + ") ORDER BY p.event_ts DESC, p.posting_id DESC", tuple(chains))
     later = []
     for r in rows:
         w9 = str(r["loc"] or "").split(":")[-1].lower()
@@ -509,7 +509,7 @@ def heuristic_scan(conn, stable_syms, days=30) -> list:
         "SELECT p.source_ns AS ch, p.source_id AS tx, p.event_ts AS ts, p.location AS loc, lower(a.address) AS tok,"
         " upper(a.symbol) AS sym, p.qty_base AS q, a.decimals AS dec, json_extract(r.snapshot,'$.token_transfers') AS tt"
         " FROM postings p JOIN assets a ON a.asset_id = p.asset_id JOIN raw_txs r ON r.chain = p.source_ns AND r.txhash = p.source_id"
-        " WHERE p.leg_kind='acq' AND p.event='PROGRAM_IN' AND p.cost_usd IS NULL AND a.kind='token'").fetchall()
+        " WHERE p.leg_kind='acq' AND p.event='PROGRAM_IN' AND p.cost_usd IS NULL AND a.kind='token'")
     for r in rows:
         if r["sym"] in stable_syms:
             continue

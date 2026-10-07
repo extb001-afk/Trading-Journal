@@ -22,15 +22,26 @@ HOLD_TEXT_MAX = 40
 
 CATS = [
     {"key": "health", "n": 1, "tier": "now", "crit": True, "label": "봇이 멈춤(몇 분 이상)",
-     "desc": "수집·계산·서버가 몇 분 넘게 멈추면 알려요 — 생겼을 때 한 번, 풀렸을 때 한 번(더 나빠지면 한 번 더). 봇이 멈춘 걸 알려야 해서 끌 수 없어요."},
+     "desc": "프로그램·장부 계산·서버·디스크·거래소·시세 수집이 몇 분 넘게 멈추거나 한 수집기의 체인이 모두 함께 멈추면 알려요 — 생겼을 때 한 번, 풀렸을 때 한 번(더 나빠지면 한 번 더). "
+             "봇이 멈춘 걸 알려야 해서 끌 수 없어요. 체인 하나만 늦는 건 아래 '체인 수집 지연'이에요."},
+    {"key": "stall", "n": 19, "tier": "now", "label": "체인 수집 지연",
+     "desc": "체인 하나의 수집이 늦거나 멈춘 것(대부분 저절로 풀림) — 기본은 상태 패널에만. 켜면 생겼을 때·풀렸을 때 텔레그램으로도 알려요(한 시간 넘게 이어지면 한 번 더). "
+             "한 수집기의 체인이 모두 함께 멈추면 이 칸과 상관없이 '봇이 멈춤'으로 와요."},
+    {"key": "balmis", "n": 20, "tier": "now", "label": "잔고 불일치(하루 넘게)",
+     "desc": "장부와 실제 잔고가 다른 곳이 — 수집·재계산처럼 진행 중인 일이 다 끝난 뒤에도 — 24시간 넘게 그대로면 한 번 알려요(어느 지갑·코인 · 장부와 실제 · 짐작되는 까닭 · 할 일). "
+             "진행 중인 동안의 차이는 상태 패널·잔고 맞추기에만 보여요."},
     {"key": "price", "n": 3, "tier": "now", "label": "목표가·손절 도달",
      "desc": "매매일지에 걸어 둔 목표가·손절선에 닿으면 바로 알려요(1분 간격 감시 · 코인마다 하루 한 번)."},
     {"key": "bigflow", "n": 12, "tier": "now", "th": ["flow_min"], "label": "내가 안 한 큰 출금",
-     "desc": "밖으로 나간 금액이 기준 이상이면 바로 알려요 — 내 지갑·내 거래소끼리 옮긴 건 빼요. 내가 한 게 아니면 바로 확인하세요. 큰 입금은 급하지 않아서 하루 요약에 넣어요."},
+     "desc": "모르는 주소로 기준 이상 나가면 바로 알려요(밤에도) — 내 지갑·내 거래소·브릿지로 옮긴 건 빼고, 장부를 맞춘 기록(거래소 잔고 맞춤·차입 반영)도 빼요. "
+             "내가 옮긴 돈이 제때(일반 30분·브릿지 2시간) 안 들어오거나 수수료보다 많이 줄어 들어와도 소리로 알려요. 큰 입금은 급하지 않아서 하루 요약에 넣어요."},
+    {"key": "arrive", "n": 18, "tier": "now", "label": "내 이체 도착 확인",
+     "desc": "내 지갑·내 거래소·브릿지로 옮긴 큰 금액(큰 출금 기준 이상)이 도착하면 소리 없이 한 통 — 걸린 시간·받은 수량·수수료로 줄어든 양. 보낼 때는 알리지 않아요."},
     {"key": "depeg", "n": 14, "tier": "now", "th": ["depeg_pct"], "label": "스테이블 가격 이탈",
      "desc": "USDC·USDT 같은 스테이블이 1달러에서 기준 이상 벗어나면 알려요(해외 거래소 시세). 벗어날 때 한 번, 돌아올 때 한 번."},
-    {"key": "liq", "n": 15, "tier": "now", "th": ["liq_pct"], "label": "선물 청산가 근접",
-     "desc": "선물 포지션이 청산가에 기준 이내로 다가오면 알려요 — 처음 한 번, 거리가 절반으로 줄면 한 번 더, 벗어나면 한 번. 청산가 정보가 있는 포지션만."},
+    {"key": "liq", "n": 15, "tier": "now", "th": ["liq_pct"], "label": "청산 근접(선물·대출·마진)",
+     "desc": "열린 선물 포지션은 몇 초마다(가까우면 2초) 시세를 보고 청산가에 기준 이내로 다가오면 바로 알려요 — 처음 한 번, 거리가 절반으로 줄면 한 번 더, "
+             "벗어나면 한 번(소리 없이). 담보대출 LTV·마진 레벨도 마진콜 90% → 마진콜 → 청산 직전 단계로 알려요. 끄면 빠른 감시도 같이 멈춰요."},
     {"key": "move", "n": 11, "tier": "now", "th": ["move_1h", "move_24h", "move_weight", "move_min"], "label": "보유 코인 급등락",
      "desc": "총자산에서 비중이 큰 코인이 1시간·24시간 안에 크게 움직이면 알려요 — 코인마다 하루 한 번 · 조용한 시간(밤)엔 모았다가. 기본은 꺼져 있어요."},
     {"key": "pnl", "n": 8, "tier": "daily", "th": ["pnl_time"], "label": "오늘 손익",
@@ -98,19 +109,26 @@ _V1_REC_TH = {"pnl_time": "23:55", "move_1h": 10, "move_24h": 20, "move_min": 10
 KIND_CAT = {
     "open": "health", "group": "health", "remind": "health", "resolve": "health", "flap": "health",
     "POISON": "health",
+    "CHAIN_STALL": "stall",
+    "BAL_LONG": "balmis",
     "digest": "digest",
     "TARGET_HIT": "price", "STOP_HIT": "price",
     "EXF_RECON": "recon", "RECON": "recon", "EX_RECON": "recon", "BALANCE_MISMATCH": "recon",
     "PROGRAM_IN": "sync", "SWAP": "sync", "TRANSFER_OUT": "sync", "TRANSFER_OUT_EX": "sync", "DEPOSIT_MATCHED": "sync",
     "PROMOTE": "sync", "NEW_ASSET": "sync", "EX_FILL_SKIP": "sync", "EX_DEPOSIT_SKIP": "sync", "EX_WITHDRAW_SKIP": "sync",
     "ES_FALLBACK": "sync", "ES_FALLBACK_NONE": "sync", "ES_DAILY_LIMIT": "sync",
+    "RPC_FALLBACK": "sync",
     "LP_ADD": "sync", "LP_REMOVE": "sync", "LP_ADJUST": "sync", "SALE_CAND": "sync",
     "BACKFILL_DONE": "backfill", "REDERIVE": "backfill", "CHAIN_AUTO": "backfill",
     "UNKNOWN": "scam",
     "PNL_DAILY": "pnl", "REVIEW_DAILY": "review", "REVIEW_WEEKLY": "weekly", "PRICE_MOVE": "move", "BIG_FLOW": "bigflow",
+    "MOVE_LATE": "bigflow", "MOVE_SHORT": "bigflow", "MOVE_ARRIVED": "arrive",
     "LP_RANGE": "lprange", "DEPEG": "depeg", "LIQ_NEAR": "liq", "OA_ALERT": "oa",
+    "LOAN_RISK": "liq", "MARGIN_RISK": "liq",
     "NFT_CG_SLOW": "oa",
 }
+STALL_KIND = "CHAIN_STALL"
+BAL_KIND_GATE = "BAL_LONG"
 TEST_KIND = "ALERT_TEST"
 FIRST_BACKFILL_KIND = "BACKFILL_DONE"
 KIND_TIER = {"BIG_INFLOW": "daily"}
@@ -118,10 +136,13 @@ KIND_CAT["BIG_INFLOW"] = "bigflow"
 
 JARGON = ("대사", "백필", "미매칭", "원가 미확인", "원가 미상", "정산", "rederive", "REDERIVE", "커서", "폴백", "블록스카웃", "blockscout", "보정")
 SAMPLES = {
-    "health": "🔴 Base 수집이 52분째 멈췄어요\n대부분 저절로 풀려요 — 1시간 넘으면 상태 패널에서 원인을 보세요.\n마지막 수집 52분 전",
-    "digest": "안 풀린 봇 문제 1건 — Base 수집 지연(1시간 12분째)",
+    "health": "🔴 프로세스 중지 · 장부 계산\n저절로 안 풀릴 수 있어요 — 상태 패널에서 원인과 조치를 확인하세요.\n5분째 · 프로그램이 꺼져 있어요",
+    "stall": "🔴 Base 동기화 멈춤 · 이더리움 계열 수집\n대부분 저절로 풀려요 — 한 시간 넘게 이어지면 한 번 더 알려 드릴게요(원인과 조치는 상태 패널에).\n52분째 · 마지막 성공 52분 전",
+    "digest": "안 풀린 봇 문제 1건 — 장부 계산 멈춤(1시간 12분째)",
+    "balmis": "🔴 잔고가 장부와 하루 넘게 달라요 · 1곳\n할 일: 앱 › 잔고 맞추기에서 이 지갑·코인을 열어 빠진 입출금이 있는지 보세요(장부는 자동으로 고치지 않아요) — 수집·재계산은 다 끝났어요.\n"
+              "BSC 지갑 0x1a2b…9f0e 의 BNB — 장부 1.2 · 실제 2.7 (차이 $921)\n  짐작: 실제가 더 많아요 — 장부에 없는 입금(로그 없는 입금·내부 이동 등)이 있는 듯해요",
     "price": "🔴 ETH 목표가에 닿았어요\n팔 계획이었다면 지금이에요.\n지금 $4,512 · 목표 $4,500",
-    "recon": "잔고는 모두 맞아요 (3곳 확인)",
+    "recon": "잔고 맞춤: 2개 고침 (고친 게 없는 날은 '잔고는 모두 맞아요')",
     "sync": "(텔레그램으로 보내지 않아요 — 상태 패널에만)",
     "backfill": "📋 과거 기록을 다 가져왔어요\n할 일은 없어요 — 이제 손익·보유가 전체 기간 기준이에요.",
     "scam": "처음 보는 토큰 4",
@@ -129,7 +150,8 @@ SAMPLES = {
     "review": "AI 복기가 도착했어요 · 10-05(일) 양호",
     "weekly": "주간 복기가 도착했어요 · 09-29~10-05 양호",
     "move": "🔴 SOL 1시간 만에 11% 올랐어요\n급하지 않아요 — 목표가를 걸어 두면 거기서 알려 드려요.\n보유 ₩120만 · 총자산의 4%",
-    "bigflow": "🔴 밖으로 −₩500만 나갔어요\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\n외부 전송 USDC · 오늘 나간 돈 합계 −₩500만",
+    "bigflow": "🔴 USDC 3,600개(−₩500만)가 밖으로 나갔어요 → 외부 0x3c7e…cd34\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\nBase 지갑 A · 13:05",
+    "arrive": "✅ USDC 5,000개가 Base 지갑 A에 들어왔어요\n할 일은 없어요.\n이더리움 지갑 A에서 보낸 지 7분 · 수수료로 0.5개 줄었어요",
     "lprange": "LP 범위 벗어남 1",
     "depeg": "🔴 USDC 가격이 1달러에서 1.3% 벗어났어요\n많이 들고 있다면 다른 스테이블로 옮길지 살펴보세요.\n지금 $0.987 · 기준 ±1%",
     "liq": "🔴 ETH 선물 청산가까지 8% 남았어요\n증거금을 넣거나 포지션을 줄이세요.\n현재 2,410 · 청산 2,217 · 바이낸스",
@@ -137,7 +159,7 @@ SAMPLES = {
     "other": "그 밖의 소식 1건",
 }
 DIGEST_SAMPLE = ("📋 하루 요약 · 10월 6일(화)\n어제 실현 +₩12만 · 매도 4건 · 총자산 +₩80만\n많이 움직인 코인 SOL +9% · ETH −3%\n"
-                 "잔고는 모두 맞아요 · AI 복기가 도착했어요(양호)\n살펴볼 것 2가지 — 처음 보는 토큰 1 · LP 범위 벗어남 1")
+                 "잔고 맞춤: 2개 고침 · AI 복기가 도착했어요(양호)\n살펴볼 것 2가지 — 처음 보는 토큰 1 · LP 범위 벗어남 1")
 
 
 def cat_of(kind, hint=None) -> str:
@@ -152,20 +174,26 @@ def cat_of(kind, hint=None) -> str:
     return "other"
 
 
+NEW_CATS = ("arrive",)
+NEW_OFF_CATS = ("stall",)
+QUIET_ONLY_SOUND = ("move", "arrive")
+REC_OFF_NOW = ("move", "stall")
+
+
 def _preset_cats(name: str) -> dict:
     if name == "rec":
-        return {k: ("off" if TIER[k] == "web" or k == "move" else "on") for k in CAT_KEYS}
+        return {k: ("off" if TIER[k] == "web" or k in REC_OFF_NOW else "on") for k in CAT_KEYS}
     if name == "min":
-        return {k: ("on" if TIER[k] == "now" and k != "move" else "off") for k in CAT_KEYS}
+        return {k: ("on" if TIER[k] == "now" and k not in QUIET_ONLY_SOUND and k not in REC_OFF_NOW else "off") for k in CAT_KEYS}
     if name == "all":
         return {k: ("off" if TIER[k] == "web" else "on") for k in CAT_KEYS}
     raise KeyError(name)
 
 
 PRESETS = {
-    "rec": {"label": "추천", "desc": "급한 것 5가지는 바로(소리) + 나머지는 하루 한 통 요약(무음) · 봇 내부 소식은 안 보냄"},
-    "min": {"label": "최소", "desc": "급한 것 5가지만 바로 — 하루 요약도 안 받음"},
-    "all": {"label": "전부", "desc": "추천 + 보유 코인 급등락까지(밤엔 모아서)"},
+    "rec": {"label": "추천", "desc": "급한 것 6가지는 바로(소리) + 나머지는 하루 한 통 요약(무음) · 봇 내부 소식·체인 수집 지연은 안 보냄(상태 패널에서)"},
+    "min": {"label": "최소", "desc": "급한 것 6가지만 바로 — 하루 요약도 안 받음"},
+    "all": {"label": "전부", "desc": "추천 + 보유 코인 급등락(밤엔 모아서) · 체인 수집 지연까지"},
 }
 PRESET_ORDER = ("rec", "min", "all")
 
@@ -241,6 +269,17 @@ def normalize(raw) -> dict:
                 d["cats"][k] = m
         except Exception:
             pass
+    for k in NEW_OFF_CATS:
+        if not (isinstance(cats.get(k), str) and cats.get(k) in MODES):
+            d["cats"][k] = "off"
+    miss = [k for k in NEW_CATS if not (isinstance(cats.get(k), str) and cats.get(k) in MODES)]
+    if miss:
+        for name in PRESET_ORDER:
+            pc = _preset_cats(name)
+            if all(d["cats"][k] == pc[k] for k in CAT_KEYS if k not in NEW_CATS and k not in NEW_OFF_CATS and k not in CRIT and TIER[k] != "web"):
+                for k in miss:
+                    d["cats"][k] = pc[k]
+                break
     th = raw.get("th") if isinstance(raw.get("th"), dict) else {}
     for k in TH:
         try:
@@ -394,10 +433,39 @@ def first_week(conn, now=None) -> dict:
     return {"connectedAt": int(conn), "until": int(until), "active": now < until}
 
 
+_SW = {"sig": None, "on": True}
+_SW_OFF = (False, 0, "false", "off", "0", "no")
+
+
+def liq_switch_on(cfg=None) -> bool:
+    if cfg is None:
+        p = common.CONFIG_PATH
+        try:
+            st = os.stat(p)
+            sig = (p, st.st_mtime_ns, st.st_size)
+        except OSError:
+            sig = (p, None, None)
+        if sig != _SW["sig"]:
+            _SW["sig"] = sig
+            try:
+                cfg = common.read_json(p, {})
+            except (Exception, SystemExit):
+                return _SW["on"]
+            if not isinstance(cfg, dict):
+                return _SW["on"]
+            _SW["on"] = liq_switch_on(cfg)
+        return _SW["on"]
+    al = cfg.get("alerts") if isinstance(cfg, dict) else None
+    v = al.get("liq_fast", True) if isinstance(al, dict) else True
+    return not (v in _SW_OFF or (isinstance(v, str) and v.strip().lower() in _SW_OFF))
+
+
 def effective(doc, key, now=None, conn=None) -> bool:
     if key in CRIT:
         return True
     if TIER.get(key) == "web":
+        return False
+    if key == "liq" and not liq_switch_on():
         return False
     m = doc["cats"].get(key, "on")
     if m == "auto":
@@ -433,8 +501,12 @@ def quiet_until(doc, now=None):
     return end.timestamp()
 
 
-URGENT_KINDS = frozenset({"LIQ_NEAR", "STOP_HIT"})
+URGENT_KINDS = frozenset({"LIQ_NEAR", "STOP_HIT", "BIG_FLOW"})
 QUIET_CATS = frozenset({"move"})
+
+FAST_KINDS = frozenset({"LIQ_NEAR", "LOAN_RISK", "MARGIN_RISK"})
+FAST_QUEUE = "alerts_fast.jsonl"
+URGENT_KINDS = URGENT_KINDS | FAST_KINDS
 
 
 def digest_on(doc, now=None, conn=None) -> bool:
@@ -447,6 +519,8 @@ def decide(doc, key, now=None, conn=None, kind=None) -> str:
         return "web"
     if not effective(doc, key, now, conn):
         return "skip"
+    if kind in FAST_KINDS:
+        return "send"
     if t == "daily":
         return "daily" if TIER.get(key) == "daily" or digest_on(doc, now, conn) else "skip"
     if key in QUIET_CATS and kind not in URGENT_KINDS and in_quiet(doc, now):

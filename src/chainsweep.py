@@ -116,7 +116,9 @@ def chain_list(cfg: dict) -> dict:
     for k, cc in (cfg.get("chains") or {}).items():
         if k in out and isinstance(cc, dict) and cc.get("rpcs"):
             out[k][3] = list(dict.fromkeys([str(u) for u in cc["rpcs"]] + out[k][3]))
-    return out
+    off = set(cfg.get("_disabled_chains") or [])
+    off.update(k for k, cc in (cfg.get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(k, cc))
+    return {k: v for k, v in out.items() if k not in off}
 
 
 def wallets(cfg: dict):
@@ -136,9 +138,8 @@ def wallets(cfg: dict):
 
 
 def _post(url: str, body, timeout: float):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "User-Agent": UA})
-    return json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
+    import bf_engine
+    return bf_engine.rpc_post(url, body, timeout=timeout, ua=UA)
 
 
 def _host(url) -> str:
@@ -147,6 +148,11 @@ def _host(url) -> str:
 
 def _batch(url: str, calls: list, bmax: int, timeout: float, pace: float, post=None) -> list:
     post = post or _post
+    try:
+        import bf_engine
+        bmax = max(1, min(int(bmax), bf_engine.gate(url).batch_cap(int(bmax))))
+    except Exception:
+        pass
     out = []
     for i in range(0, len(calls), bmax):
         part = calls[i:i + bmax]
@@ -226,12 +232,16 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
         prev = g_ch.get(key) or {}
         prev_ok = set(prev.get("addrs") or []) if prev.get("ok") else set()
         per = {}
+        checked = []
         px = usd_of(sym)
         for i, a in enumerate(addrs):
             try:
                 nonce, bal = int(got[2 + i], 16), int(got[2 + n + i], 16)
             except (TypeError, ValueError):
                 continue
+            if nonce < 0 or bal < 0:
+                continue
+            checked.append(a)
             units = bal / 1e18
             usd = units * px if px is not None else None
             sig = nonce > 0 or (usd is not None and usd >= float(st["min_usd"])) \
@@ -247,7 +257,7 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
                 fresh = a in prev_ok and not old9.get("active")
                 activate(k9, int(prev["head"]) - 1 if fresh else None, "sweep", base9 if fresh else None)
         g_ch[key] = {"ok": True, "head": head, "checkedAt": int(now),
-                     "addrs": [a for a in addrs if not (g_pr.get(f"{key}:{a}") or {}).get("active")]}
+                     "addrs": [a for a in checked if not (g_pr.get(f"{key}:{a}") or {}).get("active")]}
         res["chains"][key] = {"ok": True, "name": name, "sym": sym, "head": head, "active": per}
     for c9, a9 in sorted(ledger_pairs or ()):
         activate(f"{c9}:{str(a9).lower()}", None, "ledger")

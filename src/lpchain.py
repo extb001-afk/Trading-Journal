@@ -28,19 +28,23 @@ def _rpcs(cfg: dict, chain: str) -> list:
     out = list(c.get("rpcs") or [])
     if c.get("rpc") and c["rpc"] not in out:
         out.append(c["rpc"])
+    if not out:
+        try:
+            from evm_watch import RpcSynthMixin
+            out = list(RpcSynthMixin.RPC_DEFAULT.get(chain) or [])
+        except Exception:
+            out = []
     return out
 
 
 def eth_call(cfg: dict, chain: str, to: str, data: str, timeout: int = 10):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_call",
                        "params": [{"to": to, "data": "0x" + data.replace("0x", "")}, "latest"]}).encode()
+    import bf_engine as _bfe8
     for rpc in _rpcs(cfg, chain):
         try:
-            req = urllib.request.Request(rpc, data=body, headers={"Content-Type": "application/json",
-                                                                  "User-Agent": common.ua_for(rpc, "tj-bot/0.1")})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                d = json.loads(r.read().decode())
-            res = d.get("result")
+            d = _bfe8.rpc_post(rpc, json.loads(body), timeout=timeout, ua="tj-bot/0.1")
+            res = d.get("result") if isinstance(d, dict) else None
             if isinstance(res, str) and res.startswith("0x") and len(res) > 2:
                 return res[2:]
         except Exception:

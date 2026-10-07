@@ -56,7 +56,7 @@
     tick(); lockT = setInterval(tick, 1000);
   }
   function setDisabled(on) {
-    ['pw', 'bLogin', 'np', 'np2', 'bSetup'].forEach(function (id) { var el = $(id); if (el) el.disabled = !!on; });
+    ['pw', 'bLogin', 'sc', 'np', 'np2', 'bSetup'].forEach(function (id) { var el = $(id); if (el) el.disabled = !!on; });
   }
 
   function post(path, body) {
@@ -78,8 +78,10 @@
     $('ttl').textContent = '비밀번호 만들기';
     $('desc').textContent = '이 대시보드를 여는 비밀번호예요. 다른 기기(같은 와이파이·테일넷·휴대폰)에서 열 때도 이 비밀번호를 물어요. 계정은 하나라 아이디는 없어요.';
     show($('step'), true); show($('fSetup'), true); show($('fLogin'), false);
+    var cp = String((ST && ST.setupCodePath) || 'state/auth_setup_code');
+    $('scHelp').textContent = '설치 폴더의 ' + cp + ' 파일에 적힌 코드예요 — 이 컴퓨터 터미널에서 cat ' + cp + ' (쓰고 나면 지워져요)';
     $('foot').textContent = '나중에 바꾸기 = 설정 › 로그인 · 잊었을 때 = 이 컴퓨터에서 python3 tools/reset_password.py';
-    rules(); var n = $('np'); if (n) n.focus();
+    rules(); var n = $('sc'); if (n) n.focus();
   }
   function modeSetupElsewhere() {
     wipeCache();
@@ -130,13 +132,16 @@
     if (!st.len) { msg(((ST && ST.pwMin) || 10) + '자 이상으로 만들어 주세요'); return; }
     if (!st.same) { msg('같은 글자만 반복하거나 짧은 숫자만으로는 만들 수 없어요'); return; }
     if (!st.match) { msg('두 칸의 비밀번호가 달라요'); return; }
+    var sc = (($('sc') || {}).value || '').trim();
+    if (!sc) { msg('설정 코드를 넣어 주세요 — ' + $('scHelp').textContent); var c = $('sc'); if (c) c.focus(); return; }
     busy = true; setDisabled(true); msg('');
-    post('/api/auth/setup', { password: a }).then(function (x) {
+    post('/api/auth/setup', { password: a, code: sc }).then(function (x) {
       busy = false;
       if (x.st === 200 && x.d.ok) { $('np').value = ''; $('np2').value = ''; location.replace(nextUrl()); return; }
       setDisabled(false);
       if (x.st === 409) { boot(); return; }
       msg(String(x.d.error || ('만들지 못했어요 (HTTP ' + x.st + ')')));
+      if (x.d.code) { var c2 = $('sc'); if (c2) { c2.select(); c2.focus(); } }
     }, function () { busy = false; setDisabled(false); msg('서버에 연결하지 못했어요 — tj-web 이 켜져 있는지 확인하세요'); });
   }
 

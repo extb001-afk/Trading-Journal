@@ -1,11 +1,12 @@
 """Long-range total-asset curve and daily close prices."""
 from __future__ import annotations
 
+import functools
 import os
 import re
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import candles
 import common
@@ -40,13 +41,20 @@ def day_end(iso) -> int:
 
 
 def days_between(a, b):
-    out = []
+    return list(_days_between_t(a, b))
+
+
+@functools.lru_cache(maxsize=256)
+def _days_between_t(a, b):
     d = datetime.strptime(a, "%Y-%m-%d")
     e = datetime.strptime(b, "%Y-%m-%d")
+    if 1000 <= d.year and e.year <= 9999:
+        return tuple(date.fromordinal(o).isoformat() for o in range(d.toordinal(), e.toordinal() + 1))
+    out = []
     while d <= e:
         out.append(d.strftime("%Y-%m-%d"))
         d += timedelta(days=1)
-    return out
+    return tuple(out)
 
 
 def px_at(rows, T, step=86400, pts=False):
@@ -378,6 +386,19 @@ _SOL_ADDR = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
 
 def valid_addr(chain, a) -> bool:
     return isinstance(a, str) and bool((_SOL_ADDR if chain == "sol" else _EVM_ADDR).fullmatch(a))
+
+
+def off_chains_now() -> set:
+    try:
+        cfg = common.read_json(common.CONFIG_PATH, {}) or {}
+    except (Exception, SystemExit):
+        return set()
+    ch = cfg.get("chains") if isinstance(cfg.get("chains"), dict) else {}
+    return {c for c, cc in ch.items() if isinstance(cc, dict) and not common.chain_enabled(c, cc)}
+
+
+def spec_off(k, off) -> bool:
+    return bool(off) and str(k).startswith("ca:") and str(k).split(":", 2)[1] in off
 
 
 def span(lo, hi):
@@ -951,9 +972,12 @@ class HistCurve:
                 if not fx_ok and not over() and self._fx_due(lo, hi, now):
                     self._fetch_fx(lo, hi, now)
                     fx_ok = self._fx_ready(lo, hi)
+                off9 = off_chains_now()
                 for k in order:
                     if over():
                         break
+                    if spec_off(k, off9):
+                        continue
                     if not fetch_now(k):
                         continue
                     self._fetch_spec(k, lo, hi, now, need=want[k]["days"])
@@ -1423,10 +1447,11 @@ class DayClose:
                         fx = fetch_fx_entry(flo, fx_days[-1], now, fx)
                 fxp = dict((fx or {}).get("p") or {}) if isinstance(fx, dict) else {}
                 fx_ready = not fx_days or self._fx_ok(fx, fx_days[0], fx_days[-1])
+                off9 = off_chains_now()
                 for k, ds, _w in ready:
                     if (candles.budget_left() or 0) <= 0:
                         break
-                    if not ds:
+                    if not ds or spec_off(k, off9):
                         continue
                     if needs_krw(k) and not fx_ready and k.startswith("ex:"):
                         continue

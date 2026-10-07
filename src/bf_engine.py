@@ -27,13 +27,15 @@ def _url_host(url) -> str:
 
 class NetError(RuntimeError):
 
-    def __init__(self, msg: str, kind: str, code=None, retry_after=None, cap=None, host=None):
+    def __init__(self, msg: str, kind: str, code=None, retry_after=None, cap=None, host=None, earliest=None):
         super().__init__(common.redact_secret_text(msg))
         self.kind = kind
         self.code = code
         self.retry_after = retry_after
         self.cap = cap
         self.host = host
+        self.earliest = earliest
+        self.latest = None
 
 
 class CircuitOpen(NetError):
@@ -60,13 +62,51 @@ _RANGE_CAP_RE = re.compile(r"(?:maximum block range|block range (?:is )?(?:too l
                            re.I)
 
 
+_NUM = r"(0x[0-9a-f]+|\d+)"
+_RETENTION_RES = (
+    re.compile(r"not contained in the inclusion range\s*\[\s*" + _NUM + r"(?:\s*,\s*" + _NUM + r")?", re.I),
+    re.compile(r"lowest height is\s*" + _NUM, re.I),
+    re.compile(r"(?:earliest|oldest|first) (?:available|retained|indexed)(?: (?:block|height))?(?: number)?\s*(?:is|:|=)?\s*" + _NUM, re.I),
+)
+
+
+def _num(v):
+    if v is None:
+        return None
+    try:
+        n = int(v, 16) if v.lower().startswith("0x") else int(v)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
+def retention_bounds(msg) -> tuple:
+    s = str(msg or "")
+    for rx in _RETENTION_RES:
+        m = rx.search(s)
+        if m:
+            lo = _num(m.group(1))
+            hi = _num(m.group(2)) if m.re.groups >= 2 else None
+            if lo is not None and (hi is None or hi >= lo):
+                return lo, hi
+    return None, None
+
+
 def classify_rpc_error(err) -> NetError:
     if isinstance(err, dict):
         code, msg = err.get("code"), str(err.get("message") or err)
+        d9 = err.get("data")
+        if isinstance(d9, str) and d9.strip() and d9 not in msg:
+            msg = f"{msg} — {d9}"
     else:
         code, msg = None, str(err)
     low = msg.lower()
     text = f"rpc-error {code}: {msg[:160]}"
+    e9, h9 = retention_bounds(msg)
+    if e9 is not None:
+        r9 = NetError(text, "pruned", code=code, earliest=e9)
+        r9.latest = h9
+        return r9
     if "header not found" in low or "missing trie node" in low or "pruned" in low \
             or "history has been pruned" in low or "block not found" in low \
             or ("historical state" in low and "not available" in low) \
@@ -88,6 +128,14 @@ def classify_rpc_error(err) -> NetError:
                       retry_after=(1.0 + random.random() * 0.5) if persec else ((20.0 + random.random() * 10) if permin else None))
         e9.persec = persec
         return e9
+    mc9 = re.search(r"(?:limited to a|up to a|maximum)\s+(\d{1,7})\s+(?:block\s+)?(?:range|blocks)\b", low)
+    if mc9 and int(mc9.group(1)) > 0:
+        return NetError(text, "range", code=code, cap=int(mc9.group(1)))
+    mc8 = (re.search(r"spans \d+ blocks.{0,80}?but only (\d{1,7}) are allowed", low) or re.search(r"\brange \d+ exceeds limit of (\d{1,7})", low)
+           or re.search(r"max block range (\d{1,7})", low) or re.search(r"block range greater than (\d{1,7}) max", low)
+           or re.search(r"blocks distance:?\s*(\d{1,7})", low))
+    if mc8 and int(mc8.group(1)) > 0:
+        return NetError(text, "range", code=code, cap=int(mc8.group(1)))
     m = _RANGE_CAP_RE.search(msg)
     ms = re.search(r"block span \d+ .{0,60}?exceeds? the limit (\d{2,7})", low)
     if ms:
@@ -102,14 +150,95 @@ def classify_rpc_error(err) -> NetError:
     return NetError(text, "rpc", code=code)
 
 
-def classify_exc(e: BaseException, host: str = None) -> NetError:
+RPC_NEAR_HEAD = 256
+_FAIL_TRANSIENT = ("quota", "budget", "circuit", "http429", "http5xx", "timeout", "conn", "dns", "payload")
+_FAIL_TRANSIENT_MSG = ("timeout", "timed out", "deadline exceeded", "execution aborted", "context canceled", "canceled due to", "request was canceled",
+                       "too many requests", "rate limit", "ratelimit", "request limit reached", "compute units per second", "request rate exceeded",
+                       "daily request count exceeded", "busy", "try again", "temporarily", "temporary", "service unavailable", "resource unavailable",
+                       "overloaded", "over capacity", "internal error", "internal server error", "bad gateway", "gateway timeout", "upstream",
+                       "not synced", "syncing")
+_FAIL_EXEC = ("execution reverted", "reverted", "revert", "vm execution error", "out of gas", "invalid opcode", "bad instruction", "badinstruction",
+              "invalid jump", "stack underflow", "stack limit reached", "stack overflow", "stackunderflow", "stackoverflow", "write protection",
+              "gas uint64 overflow", "return data out of bounds", "gas required exceeds allowance")
+_FAIL_PERM_MSG = ("required historical state unavailable", "method not found", "does not exist/is not available", "not whitelisted",
+                  "not supported", "unsupported", "method not available")
+_FAIL_AMBIG = ("header not found", "block not found", "unknown block")
+_ERRDICT_RE = re.compile(r"\{['\"]code['\"]:\s*(-?\d+),\s*['\"]message['\"]:\s*['\"]([^'\"]*)")
+
+
+def _fail_neterr(x):
+    if isinstance(x, NetError):
+        return x
+    net9 = getattr(x, "net", None)
+    if isinstance(net9, NetError):
+        return net9
+    if isinstance(x, urllib.error.HTTPError):
+        return classify_exc(x)
+    if isinstance(x, dict):
+        return classify_rpc_error(x)
+    if isinstance(x, (OSError, TimeoutError)):
+        return NetError(f"conn: {str(x)[:160]}", "conn")
+    if isinstance(x, ValueError):
+        return NetError(f"payload: {str(x)[:160]}", "payload")
+    s9 = str(x)
+    m9 = _ERRDICT_RE.search(s9)
+    if m9:
+        return classify_rpc_error({"code": int(m9.group(1)), "message": m9.group(2)})
+    return classify_rpc_error(s9)
+
+
+def _fail_class_one(x, block, head) -> str:
+    if isinstance(x, str):
+        return "permanent"
+    if isinstance(x, (TypeError, KeyError, AttributeError, IndexError)):
+        return "permanent"
+    n9 = _fail_neterr(x)
+    k9, msg9, code9 = n9.kind, str(n9).lower(), getattr(n9, "code", None)
+    if k9 in _FAIL_TRANSIENT:
+        return "transient"
+    if k9 == "http4xx":
+        return "transient" if code9 in (408, 425) else "permanent"
+    if k9 == "null":
+        return "permanent"
+    if any(p in msg9 for p in _FAIL_PERM_MSG) and not any(p in msg9 for p in ("timeout", "timed out", "rate limit", "too many")):
+        return "permanent"
+    if k9 == "pruned":
+        if any(p in msg9 for p in _FAIL_AMBIG):
+            h9 = None
+            try:
+                h9 = head() if callable(head) else head
+            except Exception:
+                h9 = None
+            if block is None or h9 is None:
+                return "transient"
+            return "transient" if int(h9) - int(block) <= RPC_NEAR_HEAD else "permanent"
+        return "permanent"
+    if k9 == "range":
+        return "permanent" if any(w in msg9 for w in ("range", "block", "result", "logs", "response size", "distance")) else "transient"
+    if any(p in msg9 for p in _FAIL_TRANSIENT_MSG):
+        return "transient"
+    if code9 == 3 or any(p in msg9 for p in _FAIL_EXEC):
+        return "exec"
+    return "transient"
+
+
+def rpc_fail_class(e, block: int = None, head=None) -> str:
+    items = list(getattr(e, "errs", None) or [e])
+    got = {_fail_class_one(x, block, head) for x in items}
+    for c9 in ("transient", "exec", "permanent"):
+        if c9 in got:
+            return c9
+    return "permanent"
+
+
+def classify_exc(e: BaseException, host: str = None, body_bytes: bytes = None) -> NetError:
     if isinstance(e, NetError):
         return e
     if isinstance(e, urllib.error.HTTPError):
         code = e.code
         body = ""
         try:
-            body = (e.read() or b"")[:300].decode("utf-8", "replace")
+            body = ((body_bytes if body_bytes is not None else e.read()) or b"")[:300].decode("utf-8", "replace")
         except Exception:
             pass
         ra = retry_after_sec(e.headers.get("Retry-After") if e.headers else None)
@@ -119,7 +248,7 @@ def classify_exc(e: BaseException, host: str = None) -> NetError:
             return NetError(msg, kind, code=code, retry_after=ra, host=host)
         if 500 <= code < 600:
             return NetError(msg, "http5xx", code=code, retry_after=ra, host=host)
-        if code == 400 and body:
+        if code in (400, 413) and body:
             e9 = classify_rpc_error(body)
             if e9.kind in ("range", "pruned", "timeout"):
                 e9.host = host
@@ -141,11 +270,13 @@ def classify_exc(e: BaseException, host: str = None) -> NetError:
 
 DEFAULT_POLICY = {"rate": 4.0, "burst": 4, "conc": 4, "reserve": 0}
 HOST_POLICIES = {
-    "rpc1.monad.xyz": {"rate": 2.0, "burst": 2, "conc": 1},
-    "rpc2.monad.xyz": {"rate": 2.0, "burst": 2, "conc": 1},
+    "rpc1.monad.xyz": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 5.0, "call_burst": 6},
+    "rpc2.monad.xyz": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 15.0, "call_burst": 10},
+    "rpc.monad.xyz": {"rate": 4.0, "burst": 4, "conc": 2, "call_rate": 8.0, "call_burst": 10},
     "rpc.plasma.to": {"rate": 2.0, "burst": 2, "conc": 1},
-    "xlayerrpc.okx.com": {"rate": 2.0, "burst": 2, "conc": 1},
-    "rpc.xlayer.tech": {"rate": 2.0, "burst": 2, "conc": 1},
+    "xlayerrpc.okx.com": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 15.0, "call_burst": 15},
+    "rpc.xlayer.tech": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 15.0, "call_burst": 15},
+    "rpc.stable.xyz": {"rate": 4.0, "burst": 4, "conc": 2, "call_rate": 40.0, "call_burst": 40},
     "public-en.node.kaia.io": {"rate": 2.0, "burst": 2, "conc": 1},
     "api.avax.network": {"rate": 2.0, "burst": 2, "conc": 1},
     "rpc.frax.com": {"rate": 2.0, "burst": 2, "conc": 1},
@@ -166,10 +297,24 @@ HOST_POLICIES = {
     "*.bnbchain.org": {"rate": 4.0, "burst": 4, "conc": 3},
     "bsc.rpc.sentio.xyz": {"rate": 1.0, "burst": 2, "conc": 1},
     "rpc.mainnet.chain.robinhood.com": {"rate": 2.0, "burst": 2, "conc": 1},
-    "robinhood.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1},
+    "robinhood.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 6.0, "call_burst": 3,
+                           "share": "drpc", "share_rate": 25.0, "share_burst": 50},
+    "mainnet.base.org": {"rate": 1.0, "burst": 1, "conc": 1, "call_rate": 5.0, "call_burst": 10},
+    "gateway.tenderly.co": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 5.0, "call_burst": 10},
+    "base.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 6.0, "call_burst": 3, "share": "drpc", "share_rate": 25.0, "share_burst": 50},
     "rpc.mainnet.arc.io": {"rate": 2.0, "burst": 2, "conc": 1},
     "rpc.quicknode.mainnet.arc.io": {"rate": 2.0, "burst": 2, "conc": 1},
-    "rpc.blast.io": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 8.0, "call_burst": 8},
+    "rpc.blast.io": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 7.0, "call_burst": 8},
+    "*.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 6.0, "call_burst": 3, "share": "drpc", "share_rate": 25.0, "share_burst": 50},
+    "rpc.mevblocker.io": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 10.0, "call_burst": 10},
+    "arb1.arbitrum.io": {"rate": 3.0, "burst": 3, "conc": 2, "call_rate": 10.0, "call_burst": 10},
+    "mainnet.optimism.io": {"rate": 3.0, "burst": 3, "conc": 2, "call_rate": 10.0, "call_burst": 10},
+    "rpc.scroll.io": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 10.0, "call_burst": 10},
+    "mainnet.era.zksync.io": {"rate": 3.0, "burst": 3, "conc": 2, "call_rate": 3.0, "call_burst": 4},
+    "rpc.gnosischain.com": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 10.0, "call_burst": 10},
+    "rpc.gnosis.gateway.fm": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 10.0, "call_burst": 10},
+    "mainnet.megaeth.com": {"rate": 3.0, "burst": 3, "conc": 2, "call_rate": 12.0, "call_burst": 12},
+    "mainnet.storyrpc.io": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 10.0, "call_burst": 10},
 }
 
 BREAKER_FAILS = 4
@@ -187,6 +332,53 @@ def _pol_num(v, default, typ, lo, hi):
     if x != x or x in (float("inf"), float("-inf")):
         return default
     return typ(min(hi, max(lo, x)))
+
+
+class _SharedBucket:
+
+    def __init__(self, name: str, rate, burst):
+        self.name = name
+        self.rate = _pol_num(rate, 0.0, float, 0.0, 10000.0)
+        self.burst = _pol_num(burst, self.rate, float, 1.0, 10000.0) if self.rate else 0.0
+        self.tokens = self.burst
+        self.t_last = time.monotonic()
+        self.lock = threading.Lock()
+
+    def _refill(self):
+        now_m = time.monotonic()
+        self.tokens = min(self.burst, self.tokens + (now_m - self.t_last) * self.rate)
+        self.t_last = now_m
+
+    def peek(self, cost: int = 1) -> float:
+        if not self.rate:
+            return 0.0
+        with self.lock:
+            self._refill()
+            need = min(float(cost), self.burst)
+            return 0.0 if self.tokens >= need else (need - self.tokens) / self.rate
+
+    def try_take(self, cost: int = 1) -> float:
+        if not self.rate:
+            return 0.0
+        with self.lock:
+            self._refill()
+            need = min(float(cost), self.burst)
+            if self.tokens < need:
+                return (need - self.tokens) / self.rate
+            self.tokens -= float(max(1, cost))
+            return 0.0
+
+
+_SHARES = {}
+_SHARES_LOCK = threading.Lock()
+
+
+def _share_bucket(name: str, rate, burst):
+    with _SHARES_LOCK:
+        b = _SHARES.get(name)
+        if b is None:
+            b = _SHARES[name] = _SharedBucket(name, rate, burst)
+        return b
 
 
 class HostGate:
@@ -214,6 +406,8 @@ class HostGate:
         self.call_burst = _pol_num(pol.get("call_burst"), self.call_rate, float, 1.0, 10000.0) if self.call_rate else 0.0
         self.c_tokens = self.call_burst
         self.c_last = time.monotonic()
+        sh9 = str(pol.get("share") or "").strip().lower()
+        self.share = _share_bucket(sh9, pol.get("share_rate"), pol.get("share_burst")) if sh9 else None
 
     def _wait_needed(self, prio: str, cost: int = 1) -> float:
         now_m = time.monotonic()
@@ -240,7 +434,12 @@ class HostGate:
         return w
 
     def batch_cap(self, default: int = 40) -> int:
-        return max(1, min(int(default), int(self.call_burst))) if self.call_rate else int(default)
+        cap = int(default)
+        if self.call_rate:
+            cap = max(1, min(cap, int(self.call_burst)))
+        if self.share is not None and self.share.rate:
+            cap = max(1, min(cap, int(self.share.burst)))
+        return cap
 
     def acquire(self, prio: str = "fg", deadline: float = None, cost: int = 1):
         while True:
@@ -253,6 +452,8 @@ class HostGate:
                     w = left + 0.05
                 else:
                     w = self._wait_needed(prio, cost)
+                    if w <= 0 and self.share is not None:
+                        w = self.share.try_take(cost)
                 if w <= 0:
                     self.tokens -= 1.0
                     if self.call_rate:
@@ -337,6 +538,10 @@ class HostGate:
     def is_open(self) -> bool:
         return self.open_until > time.time()
 
+    def resting(self) -> bool:
+        now = time.time()
+        return self.open_until > now or self.pause_until > now
+
 
 _GATES = {}
 _GATES_LOCK = threading.Lock()
@@ -345,7 +550,7 @@ _POLICY_OVERRIDES = {}
 
 ES_DAILY_BUDGET = 80000
 ESB_FLUSH_EVERY = 20
-_ESB = {"day": None, "n": 0, "flushed": 0, "others": 0, "others_at": 0.0}
+_ESB = {"day": None, "n": 0, "nh": 0, "flushed": 0, "others": 0, "others_h": 0, "others_at": 0.0, "yday_h": None, "fq": 0.0, "others_fq": 0}
 _ESB_LOCK = threading.Lock()
 
 
@@ -353,14 +558,112 @@ def _esb_dir() -> str:
     return os.path.join(common.quota_dir(), "es_budget")
 
 
+_ESB_INST = os.urandom(4).hex()
+
+ESB_HIST = "head_days.hist"
+ESB_HIST_KEEP_DAYS = 3
+
+
+def _esb_rec_head(j: dict) -> int:
+    try:
+        return int((j.get("nh") if "nh" in j else j.get("n")) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _esb_rec_fq(j: dict) -> int:
+    try:
+        return int(j.get("fq") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _esb_hist_read(d: str) -> dict:
+    try:
+        with open(os.path.join(d, ESB_HIST), "r", encoding="utf-8") as f:
+            j = json.load(f)
+        return j if isinstance(j, dict) and isinstance(j.get("days"), dict) else {"days": {}}
+    except (OSError, ValueError):
+        return {"days": {}}
+
+
+def _esb_hist_merge(d: str, add: dict, today: int) -> bool:
+    try:
+        with open(os.path.join(d, "hist.lock"), "a+b") as lk:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+            try:
+                return _esb_hist_merge_locked(d, add, today)
+            finally:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        return False
+
+
+def _esb_hist_merge_locked(d: str, add: dict, today: int) -> bool:
+    try:
+        h = _esb_hist_read(d)
+        days = h["days"]
+        for day, recs in add.items():
+            cur = days.get(str(int(day)))
+            if not isinstance(cur, dict):
+                cur = days[str(int(day))] = {}
+            for stem, (nh, n) in recs.items():
+                try:
+                    o0, o1 = int(cur[stem][0] or 0), int(cur[stem][1] or 0)
+                except (KeyError, IndexError, TypeError, ValueError):
+                    o0 = o1 = 0
+                cur[stem] = [max(o0, int(nh)), max(o1, int(n))]
+        for k in [k for k in days if not str(k).lstrip("-").isdigit() or int(k) < today - ESB_HIST_KEEP_DAYS]:
+            days.pop(k, None)
+        common.atomic_write_json(os.path.join(d, ESB_HIST), {"days": days})
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def es_head_on(d: str, day: int):
+    recs = _esb_hist_read(d)["days"].get(str(int(day)))
+    if not isinstance(recs, dict) or not recs:
+        return None
+    tot = 0
+    for v in recs.values():
+        if isinstance(v, list) and v and isinstance(v[0], int):
+            tot += v[0]
+    return tot
+
+
+def _esb_roll(day: int):
+    prev, proc = _ESB["day"], _ESB.get("last_proc")
+    if prev is not None and proc and (_ESB["n"] or _ESB["nh"]):
+        _esb_hist_merge(_esb_dir(), {prev: {f"{proc}.{os.getpid()}.{_ESB_INST}": [_ESB["nh"], _ESB["n"]]}}, day)
+    _ESB.update(day=day, n=0, nh=0, flushed=0, others=0, others_h=0, others_at=0.0, yday_h=None, others_fq=0)
+
+
 def _esb_sync(proc: str, now: float):
     d = _esb_dir()
-    me = f"{proc}.{os.getpid()}.json"
     try:
         os.makedirs(d, exist_ok=True)
-        common.atomic_write_json(os.path.join(d, me), {"day": _ESB["day"], "n": _ESB["n"], "proc": proc, "pid": os.getpid(), "at": int(now)})
+        with open(os.path.join(d, "hist.lock"), "a+b") as lk:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+            try:
+                _esb_sync_locked(d, proc, now)
+            finally:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    _ESB["others_at"] = now
+
+
+def _esb_sync_locked(d: str, proc: str, now: float):
+    me = f"{proc}.{os.getpid()}.{_ESB_INST}.json"
+    try:
+        rec9 = {"day": _ESB["day"], "n": _ESB["n"], "nh": _ESB["nh"], "fq": int(_ESB["fq"]), "proc": proc, "pid": os.getpid(), "inst": _ESB_INST, "at": int(now)}
+        if _ESB.get("closed"):
+            rec9["closed"] = True
+        common.atomic_write_json(os.path.join(d, me), rec9)
         _ESB["flushed"] = _ESB["n"]
-        tot = 0
+        tot = toth = fq9 = 0
+        old9 = {}
         for f in os.listdir(d):
             if not f.endswith(".json") or f == me:
                 continue
@@ -372,35 +675,873 @@ def _esb_sync(proc: str, now: float):
                 continue
             if j.get("day") == _ESB["day"]:
                 tot += int(j.get("n") or 0)
+                toth += _esb_rec_head(j)
+                fq9 = max(fq9, _esb_rec_fq(j))
+                if not j.get("closed"):
+                    tot += ESB_FLUSH_EVERY
             elif isinstance(j.get("day"), int) and j["day"] < _ESB["day"]:
-                try:
-                    os.remove(os.path.join(d, f))
-                except OSError:
-                    pass
+                old9[f] = j
+        if old9:
+            add9 = {}
+            for f, j in old9.items():
+                add9.setdefault(j["day"], {})[f[:-5]] = [_esb_rec_head(j), int(j.get("n") or 0)]
+            if _esb_hist_merge_locked(d, add9, _ESB["day"]):
+                for f in old9:
+                    try:
+                        os.remove(os.path.join(d, f))
+                    except OSError:
+                        pass
         _ESB["others"] = tot
+        _ESB["others_h"] = toth
+        _ESB["others_fq"] = fq9
+        _ESB["yday_h"] = es_head_on(d, _ESB["day"] - 1)
     except OSError:
         pass
-    _ESB["others_at"] = now
 
 
-def es_budget_take(proc: str, now: float = None) -> bool:
+ES_PACE_BURST_FRAC = 0.04
+ES_FILL_KEEP_FRAC = 0.02
+ES_FILL_KEEP_MIN = 0.01
+ES_HEAD_MULT = 1.25
+ES_HEAD_MIN_FRAC = 0.10
+ES_HEAD_MAX_FRAC = 0.70
+ES_HEAD_EARLY = 0.10
+ES_FILL_ACTIVE_SEC = 3600
+ES_KINDS = ("head", "fill", "aux")
+_ESB_WHY = threading.local()
+
+
+def es_head_share(head_used: float, yday_head, now: float, budget: float = None, fill_active: bool = False, floor: float = None) -> int:
+    b = float(ES_DAILY_BUDGET if budget is None else budget)
+    fl = float(ES_HEAD_MIN_FRAC if floor is None else floor)
+    if fill_active:
+        return int(b * fl)
+    e = (now % 86400) / 86400.0
+    m = max(float(yday_head or 0), float(head_used or 0) / max(e, ES_HEAD_EARLY))
+    return int(min(b * ES_HEAD_MAX_FRAC, max(b * fl, m * ES_HEAD_MULT)))
+
+
+def es_fill_active(fq: float, now: float) -> bool:
+    try:
+        return float(fq or 0) > 0 and now - float(fq) <= ES_FILL_ACTIVE_SEC
+    except (TypeError, ValueError):
+        return False
+
+
+def es_rooms(used: float, head_used: float, yday_head, now: float, budget: float = None, burst: float = None, keep: float = None,
+             fill_active: bool = False, floor: float = None) -> dict:
+    b = float(ES_DAILY_BUDGET if budget is None else budget)
+    fl = float(ES_HEAD_MIN_FRAC if floor is None else floor)
+    bu = float(ES_PACE_BURST_FRAC if burst is None else burst)
+    kp = float(ES_FILL_KEEP_FRAC if keep is None else keep)
+    if bu >= 1.0:
+        left = int(b - used)
+        return {"head": left, "fill": left, "rt": None, "fillFirst": False, "off": True}
+    e = (now % 86400) / 86400.0
+    r = es_head_share(head_used, yday_head, now, b, fill_active, fl)
+    spent9 = max(0.0, float(used) - float(head_used or 0)) + min(float(head_used or 0), r * e)
+    affordable = (b - spent9 - b * max(kp, ES_FILL_KEEP_MIN)) / max(1.0 - e, 1e-9)
+    r = min(r, max(int(b * fl), int(affordable)))
+    resv = r * (1.0 - e)
+    head = b - used - resv
+    fill = head - b * max(kp, ES_FILL_KEEP_MIN)
+    return {"head": int(head), "fill": int(fill), "rt": r, "fillFirst": bool(fill_active), "off": False}
+
+
+def es_pace_room(kind: str = "head", now: float = None) -> int:
     now = time.time() if now is None else now
     day = int(now // 86400)
     with _ESB_LOCK:
+        if kind == "fill":
+            _ESB["fq"] = now
+        if _ESB["day"] == day:
+            used, hu, yd, fq = _ESB["n"] + _ESB["others"], _ESB["nh"] + _ESB["others_h"], _ESB["yday_h"], max(_ESB["fq"], _ESB["others_fq"])
+        else:
+            used, hu, yd, fq = 0, 0, None, _ESB["fq"]
+    return es_rooms(used, hu, yd, now, fill_active=es_fill_active(fq, now))["fill" if kind in ("fill", "aux") else "head"]
+
+
+def es_ledger_read(now: float = None, d: str = None) -> dict:
+    now = time.time() if now is None else now
+    day = int(now // 86400)
+    d = d or _esb_dir()
+    n = nh = fq = 0
+    hm9 = None
+    try:
+        for f in os.listdir(d):
+            if f.endswith(".json"):
+                try:
+                    j = common.read_json(os.path.join(d, f), {})
+                except (Exception, SystemExit):
+                    continue
+                if isinstance(j, dict) and j.get("day") == day:
+                    n += int(j.get("n") or 0)
+                    nh += _esb_rec_head(j)
+                    fq = max(fq, _esb_rec_fq(j))
+                    hm9 = _hm_pick(hm9, j, now)
+    except (OSError, TypeError, ValueError):
+        pass
+    return {"n": n, "nh": nh, "fq": fq, "ydayHead": es_head_on(d, day - 1), "hm": hm9[1] if hm9 else None}
+
+
+def es_ledger_rooms(now: float = None, budget: float = None, burst: float = None, keep: float = None) -> dict:
+    now = time.time() if now is None else now
+    L = es_ledger_read(now)
+    r = es_rooms(L["n"], L["nh"], L["ydayHead"], now, budget, burst, keep, fill_active=es_fill_active(L["fq"], now))
+    return dict(L, **r)
+
+
+def es_budget_why() -> str:
+    return getattr(_ESB_WHY, "v", "")
+
+
+def es_budget_take(proc: str, now: float = None, kind: str = "head") -> bool:
+    now = time.time() if now is None else now
+    day = int(now // 86400)
+    _ESB_WHY.v = ""
+    k = kind if kind in ES_KINDS else "head"
+    with _ESB_LOCK:
         if _ESB["day"] != day:
-            _ESB.update(day=day, n=0, flushed=0, others=0, others_at=0.0)
+            _esb_roll(day)
         if now - _ESB["others_at"] > 30 or _ESB["n"] - _ESB["flushed"] >= ESB_FLUSH_EVERY:
             _esb_sync(proc, now)
-        if _ESB["n"] + _ESB["others"] >= ES_DAILY_BUDGET:
+        used = _ESB["n"] + _ESB["others"]
+        if used >= ES_DAILY_BUDGET:
             if _ESB["n"] != _ESB["flushed"]:
                 _esb_sync(proc, now)
+            _ESB_WHY.v = "day"
+            return False
+        if k == "fill":
+            _ESB["fq"] = now
+        fa = es_fill_active(max(_ESB["fq"], _ESB["others_fq"]), now)
+        if es_rooms(used, _ESB["nh"] + _ESB["others_h"], _ESB["yday_h"], now, fill_active=fa)["fill" if k == "aux" else k] <= 0:
+            _ESB_WHY.v = "pace"
+            _ESB["paced"] = int(_ESB.get("paced") or 0) + 1
             return False
         _ESB["n"] += 1
+        if k == "head":
+            _ESB["nh"] += 1
+        _ESB["last_proc"] = proc
         return True
 
 
-ES_DISPATCH_GAP = 0.5
-ES_DISPATCH_FALLBACK = 1.0
+def es_budget_flush(closed: bool = False):
+    if not _ESB_LOCK.acquire(timeout=1.0):
+        return
+    try:
+        if _ESB["day"] is None:
+            return
+        proc = _ESB.get("last_proc")
+        if not proc:
+            return
+        _ESB["closed"] = bool(closed)
+        _esb_sync(proc, time.time())
+    finally:
+        _ESB_LOCK.release()
+
+
+def _esb_atexit():
+    try:
+        es_budget_flush(closed=True)
+    except Exception:
+        pass
+
+
+__import__("atexit").register(_esb_atexit)
+
+
+def es_budget_install_sigterm():
+    import signal
+
+    def _h(signum, _frame):
+        _esb_atexit()
+        _hl_atexit()
+        _rpc_day_atexit()
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    try:
+        signal.signal(signal.SIGTERM, _h)
+    except (ValueError, OSError):
+        pass
+
+
+HL_KINDS = ("head", "fill", "aux", "must")
+HL_FLUSH_EVERY = 20
+HM_FRESH_SEC = 900
+
+
+def _hm_pick(cur, j: dict, now: float):
+    try:
+        hm, at = j.get("hm"), float(j.get("at") or 0)
+    except (TypeError, ValueError):
+        return cur
+    if isinstance(hm, bool) or not isinstance(hm, (int, float)) or not 0.0 < float(hm) <= 1.0 or j.get("closed") or now - at > HM_FRESH_SEC:
+        return cur
+    if cur is None or at > cur[0]:
+        return (at, float(hm))
+    return cur
+
+
+class DayMeter:
+
+    def __init__(self, sub: str, budget: int, burst: float = 0.04, keep: float = 0.02, fill_first: bool = False, head_min: float = None):
+        self.sub, self.budget, self.burst, self.keep = sub, int(budget), float(burst), float(keep)
+        self.fill_first = bool(fill_first)
+        self.head_min = ES_HEAD_MIN_FRAC if head_min is None else float(head_min)
+        self.st = {"day": None, "n": 0, "nh": 0, "fq": 0.0, "flushed": 0, "others": 0, "others_h": 0, "others_fq": 0,
+                   "others_at": 0.0, "yday_h": None, "paced": 0}
+        self.lock = threading.Lock()
+        self.inst = os.urandom(4).hex()
+        self.why = threading.local()
+        self.proc = None
+        self._hist_pend = {}
+        self.hm_pub = False
+
+    def _dir(self) -> str:
+        return os.path.join(common.quota_dir(), self.sub)
+
+    def keep_credits(self) -> int:
+        return int(self.budget * max(self.keep, ES_FILL_KEEP_MIN))
+
+    def fill_cap_fresh(self) -> int:
+        return int(self.budget - int(self.budget * self.head_min) - self.keep_credits())
+
+    def _sync(self, now: float) -> bool:
+        d = self._dir()
+        ok = True
+        me = f"{self.proc}.{os.getpid()}.{self.inst}.json"
+        try:
+            os.makedirs(d, exist_ok=True)
+            if self.fill_first and self._hist_pend and isinstance(self.st["day"], int):
+                if _esb_hist_merge_locked(d, {dy: {me[:-5]: v} for dy, v in self._hist_pend.items()}, self.st["day"]):
+                    self._hist_pend.clear()
+            rec9 = {"day": self.st["day"], "n": self.st["n"], "nh": self.st["nh"], "fq": int(self.st["fq"] or 0),
+                    "proc": self.proc, "pid": os.getpid(), "inst": self.inst, "at": int(now)}
+            if self.hm_pub:
+                rec9["hm"] = round(float(self.head_min), 5)
+            if self.st.get("closed"):
+                rec9["closed"] = True
+            common.atomic_write_json(os.path.join(d, me), rec9)
+            self.st["flushed"] = self.st["n"]
+            tot = toth = fq9 = 0
+            hm9 = None
+            old9 = {}
+            for f in os.listdir(d):
+                if not f.endswith(".json") or f == me:
+                    continue
+                try:
+                    j = common.read_json(os.path.join(d, f), None)
+                except (Exception, SystemExit):
+                    j = None
+                if not isinstance(j, dict):
+                    ok = False
+                    continue
+                if j.get("day") == self.st["day"]:
+                    tot += int(j.get("n") or 0)
+                    toth += _esb_rec_head(j)
+                    fq9 = max(fq9, _esb_rec_fq(j))
+                    hm9 = _hm_pick(hm9, j, now)
+                    if not j.get("closed"):
+                        tot += HL_FLUSH_EVERY
+                elif isinstance(j.get("day"), int) and j["day"] < self.st["day"]:
+                    old9[f] = j
+            if old9:
+                done9 = True
+                if self.fill_first:
+                    add9 = {}
+                    for f, j in old9.items():
+                        add9.setdefault(j["day"], {})[f[:-5]] = [_esb_rec_head(j), int(j.get("n") or 0)]
+                    done9 = _esb_hist_merge_locked(d, add9, self.st["day"])
+                if done9:
+                    for f in old9:
+                        try:
+                            os.remove(os.path.join(d, f))
+                        except OSError:
+                            pass
+            self.st["others"] = tot
+            self.st["others_h"] = toth
+            self.st["others_fq"] = fq9
+            self.st["others_hm"] = hm9
+            if self.fill_first:
+                self.st["yday_h"] = es_head_on(d, self.st["day"] - 1)
+        except (OSError, TypeError, ValueError):
+            return False
+        self.st["others_at"] = now
+        return ok
+
+    def _locked_sync(self, now: float) -> bool:
+        try:
+            os.makedirs(self._dir(), exist_ok=True)
+            with open(os.path.join(self._dir(), "reserve.lock"), "a+b") as lk:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+                try:
+                    return self._sync(now)
+                finally:
+                    fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            return False
+
+    def _room(self, kind: str, used: int, now: float) -> int:
+        if not self.fill_first:
+            if self.burst >= 1.0:
+                return int(self.budget - used)
+            line = self.budget * ((now % 86400) / 86400.0)
+            if kind in ("fill", "aux"):
+                lim = line - self.budget * self.keep
+            elif kind == "must":
+                lim = self.budget
+            else:
+                lim = line + self.budget * self.burst
+            return int(min(lim, self.budget) - used)
+        if kind == "must":
+            return int(self.budget - used)
+        r = es_rooms(used, self.st["nh"] + self.st["others_h"], self.st["yday_h"], now, budget=self.budget, burst=self.burst, keep=self.keep,
+                     fill_active=es_fill_active(max(float(self.st["fq"] or 0), float(self.st["others_fq"] or 0)), now), floor=self.floor_now(now))
+        return int(r["fill" if kind in ("fill", "aux") else "head"])
+
+    def floor_now(self, now: float = None) -> float:
+        if self.hm_pub:
+            return float(self.head_min)
+        hm9 = self.st.get("others_hm")
+        now = time.time() if now is None else now
+        if hm9 and now - float(hm9[0]) <= HM_FRESH_SEC:
+            return float(hm9[1])
+        return float(self.head_min)
+
+    def _roll(self, now: float):
+        day = int(now // 86400)
+        if self.st["day"] != day:
+            prev = self.st["day"]
+            if self.fill_first and prev is not None and self.proc and (self.st["n"] or self.st["nh"]):
+                self._hist_pend[prev] = [int(self.st["nh"]), int(self.st["n"])]
+            self.st.update(day=day, n=0, nh=0, flushed=0, others=0, others_h=0, others_fq=0, others_hm=None, others_at=0.0, yday_h=None, paced=0)
+
+    def room(self, kind: str = "head", now: float = None, proc: str = None) -> int:
+        now = time.time() if now is None else now
+        with self.lock:
+            if proc:
+                self.proc = proc
+            self._roll(now)
+            if self.fill_first and kind == "fill":
+                self.st["fq"] = now
+            if self.proc and now - self.st["others_at"] > 30:
+                self._locked_sync(now)
+            return self._room(kind if kind in HL_KINDS else "head", self.st["n"] + self.st["others"], now)
+
+    def take(self, proc: str, n: int = 1, kind: str = "head", now: float = None) -> bool:
+        now = time.time() if now is None else now
+        self.why.v = ""
+        k = kind if kind in HL_KINDS else "head"
+        with self.lock:
+            self.proc = proc
+            self._roll(now)
+            try:
+                os.makedirs(self._dir(), exist_ok=True)
+                lk = open(os.path.join(self._dir(), "reserve.lock"), "a+b")
+            except OSError:
+                self.why.v = "io"
+                return False
+            try:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+                if not self._sync(now):
+                    self.why.v = "io"
+                    return False
+                used = self.st["n"] + self.st["others"]
+                if used + n > self.budget:
+                    self.why.v = "day"
+                    return False
+                if self.fill_first and k == "fill":
+                    self.st["fq"] = now
+                if self._room(k, used, now) < n:
+                    self.why.v = "pace"
+                    self.st["paced"] += 1
+                    return False
+                h9 = n if k in ("head", "must") else 0
+                self.st["n"] += n
+                self.st["nh"] += h9
+                if not self._sync(now):
+                    self.st["n"] -= n
+                    self.st["nh"] -= h9
+                    self.why.v = "io"
+                    return False
+                return True
+            except OSError:
+                self.why.v = "io"
+                return False
+            finally:
+                try:
+                    fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                lk.close()
+
+    def add(self, proc: str, n: int = 1, now: float = None, kind: str = "head"):
+        now = time.time() if now is None else now
+        k = kind if kind in HL_KINDS else "head"
+        with self.lock:
+            self.proc = proc
+            self._roll(now)
+            self.st["n"] += int(n)
+            if k in ("head", "must"):
+                self.st["nh"] += int(n)
+            elif k == "fill" and self.fill_first:
+                self.st["fq"] = now
+            self._locked_sync(now)
+
+    def day_capped(self, now: float = None) -> bool:
+        now = time.time() if now is None else now
+        with self.lock:
+            self._roll(now)
+            ok = self._locked_sync(now)
+            return (not ok) or self.st["n"] + self.st["others"] >= self.budget
+
+    def last_why(self) -> str:
+        return getattr(self.why, "v", "")
+
+    def used(self, now: float = None) -> tuple:
+        now = time.time() if now is None else now
+        with self.lock:
+            self._roll(now)
+            return self.st["n"] + self.st["others"], self.budget
+
+    def flush(self, closed: bool = False):
+        if not self.lock.acquire(timeout=1.0):
+            return
+        try:
+            if self.st["day"] is None or not self.proc:
+                return
+            self.st["closed"] = bool(closed)
+            self._locked_sync(time.time())
+        finally:
+            self.lock.release()
+
+
+def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = None, now: float = None, floor: float = None) -> dict:
+    now = time.time() if now is None else now
+    L = es_ledger_read(now, d=os.path.join(common.quota_dir(), sub))
+    fl = L["hm"] if L.get("hm") is not None else floor
+    r = es_rooms(L["n"], L["nh"], L["ydayHead"], now, budget, burst, keep, fill_active=es_fill_active(L["fq"], now), floor=fl)
+    return dict(L, **r, floorUsed=fl)
+
+
+HELIUS_MONTHLY_DEFAULT = 1_000_000
+
+
+def helius_day_budget(cfg: dict) -> int:
+    try:
+        m = float(((cfg or {}).get("sol") or {}).get("helius_monthly_credits") or HELIUS_MONTHLY_DEFAULT)
+    except (TypeError, ValueError):
+        m = float(HELIUS_MONTHLY_DEFAULT)
+    try:
+        pct = min(100.0, max(1.0, float(((cfg or {}).get("addr_tier") or {}).get("budget_pct") or 80)))
+    except (TypeError, ValueError):
+        pct = 80.0
+    return max(100, int(m * pct / 100.0 / 31.0))
+
+
+HELIUS = DayMeter("helius_budget", helius_day_budget({}), fill_first=True)
+
+
+HELIUS_HEAD_MIN_PCT = 10.0
+
+
+def helius_head_min(cfg: dict) -> float:
+    try:
+        v = ((cfg or {}).get("sol") or {}).get("helius_head_min_pct")
+        pct = float(HELIUS_HEAD_MIN_PCT if v is None else v)
+    except (TypeError, ValueError):
+        pct = HELIUS_HEAD_MIN_PCT
+    return min(70.0, max(1.0, pct)) / 100.0
+
+
+HELIUS_HEAD_MIN_PN_PCT = 3.0
+
+
+def helius_head_min_pn(cfg: dict, head_used: float, yday_head, now: float, budget: float) -> float:
+    hi = helius_head_min(cfg)
+    try:
+        v = ((cfg or {}).get("sol") or {}).get("helius_head_min_pct_pn")
+        lo = float(HELIUS_HEAD_MIN_PN_PCT if v is None else v) / 100.0
+    except (TypeError, ValueError):
+        lo = HELIUS_HEAD_MIN_PN_PCT / 100.0
+    lo = min(hi, max(0.01, lo))
+    e = (now % 86400) / 86400.0
+    m = max(float(yday_head or 0), float(head_used or 0) / max(e, ES_HEAD_EARLY))
+    return min(hi, max(lo, m * ES_HEAD_MULT / max(1.0, float(budget))))
+
+
+HG_LOCK_WAIT = 30.0
+_HG_LOCAL = threading.Lock()
+
+
+def host_gap_wait(host: str, method: str = None, gap: float = 0.0, method_gap: float = 0.0, deadline: float = None):
+    gap, method_gap = max(0.0, float(gap or 0)), max(0.0, float(method_gap or 0))
+    if gap <= 0 and method_gap <= 0:
+        return
+    key = re.sub(r"[^A-Za-z0-9_.-]", "_", str(host or "x"))[:80] or "x"
+    with _HG_LOCAL:
+        try:
+            d = os.path.join(common.quota_dir(), "rpc_gap")
+            os.makedirs(d, exist_ok=True)
+            fd = os.open(os.path.join(d, key + ".slot"), os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as e:
+            raise NetError(f"budget: {key} 공유 간격 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+        try:
+            t_lock = time.time()
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.time() - t_lock > HG_LOCK_WAIT or (deadline is not None and time.time() >= deadline):
+                        raise NetError(f"budget: {key} 공유 간격 잠금 대기 초과", "budget", host=key)
+                    time.sleep(0.02)
+                except OSError as e:
+                    raise NetError(f"budget: {key} 공유 간격 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+            try:
+                now = time.time()
+                try:
+                    st = json.loads(os.pread(fd, 8192, 0).decode("utf-8", "replace") or "{}")
+                    st = st if isinstance(st, dict) else {"*": now}
+                except ValueError:
+                    st = {"*": now, str(method or "*")[:64]: now}
+
+                def _t(k):
+                    try:
+                        v = float(st.get(k) or 0)
+                    except (TypeError, ValueError):
+                        v = now
+                    return now if v > now + 5 else v
+
+                wait = max(_t("*") + gap, (_t(method) + method_gap) if method else 0.0) - now
+                if wait > 0:
+                    if deadline is not None and now + wait > deadline:
+                        raise NetError(f"budget: {key} 공유 간격 대기가 마감을 넘음", "budget", host=key)
+                    time.sleep(wait)
+                t9 = time.time()
+                st = {k: v for k, v in st.items() if isinstance(v, (int, float)) and t9 - float(v) < 3600}
+                st["*"] = t9
+                if method:
+                    st[str(method)[:64]] = t9
+                b = json.dumps(st).encode()
+                os.ftruncate(fd, 0)
+                os.pwrite(fd, b, 0)
+            except OSError as e:
+                raise NetError(f"budget: {key} 공유 간격 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+        finally:
+            os.close(fd)
+
+
+SOL_HELIUS_RPS = 8.0
+SOL_HELIUS_DAS_GAP = 1.0
+SOL_HELIUS_GPA_GAP = 0.25
+SOL_HELIUS_DAS = frozenset({"das", "getAsset", "getAssetBatch", "getAssetsByOwner", "getAssetsByGroup", "getAssetsByCreator", "getAssetsByAuthority",
+                            "searchAssets", "getAssetProof", "getAssetProofBatch", "getSignaturesForAsset", "getTokenAccounts", "getNftEditions"})
+SOL_ARCHIVE_HOSTS = ("api.mainnet-beta.solana.com", "api.mainnet.solana.com")
+_SOL_METER = {"helius": 1.0 / SOL_HELIUS_RPS, "head": ("solana-rpc.publicnode.com", 0.1), "archive": (set(SOL_ARCHIVE_HOSTS), 10.0 / 32, 10.0 / 8),
+              "other": (set(), 0.125)}
+
+
+def _host_norm(url) -> str:
+    try:
+        return (urllib.parse.urlsplit(str(url or "").strip()).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+def sol_meter_configure(cfg: dict):
+    sol = (cfg or {}).get("sol") or {}
+
+    def f(k, d, lo, hi):
+        try:
+            v = sol.get(k)
+            x = float(d if v is None else v)
+        except (TypeError, ValueError):
+            x = float(d)
+        return min(hi, max(lo, x)) if x == x else float(d)
+    hu = sol.get("head_rpc", "https://solana-rpc.publicnode.com")
+    head_h = _host_norm(hu) if isinstance(hu, str) and hu.strip() else ""
+    au = sol.get("archive_rpc", "https://api.mainnet-beta.solana.com")
+    arch = set(SOL_ARCHIVE_HOSTS)
+    if isinstance(au, str) and au.strip():
+        arch.add(_host_norm(au))
+    arch.discard("")
+    other = {_host_norm(u) for u in [sol.get("rpc_fallback")] + list(sol.get("rpc_fallbacks") or []) + list(((cfg or {}).get("balance_check") or {}).get("sol_rpcs") or [])
+             if isinstance(u, str) and u.strip()}
+    other -= arch | {head_h, ""}
+    other = {h for h in other if not (h == "helius-rpc.com" or h.endswith(".helius-rpc.com"))}
+    _SOL_METER_SET[0] = True
+    _SOL_METER.update(helius=1.0 / f("helius_rps", SOL_HELIUS_RPS, 0.5, 1000),
+                      head=(head_h or "solana-rpc.publicnode.com", f("head_rpc_gap_ms", 100, 0, 10000) / 1000.0),
+                      archive=(arch, 10.0 / f("archive_rpc_per10s", 32, 1, 1000), 10.0 / f("archive_rpc_method_per10s", 8, 1, 1000)),
+                      other=(other, f("rpc_other_gap_ms", 125, 0, 10000) / 1000.0))
+
+
+def sol_meter_class(url):
+    h = _host_norm(url)
+    if not h:
+        return None
+    if h == "helius-rpc.com" or h.endswith(".helius-rpc.com"):
+        return h, "helius", _SOL_METER["helius"], 0.0
+    hits = []
+    if h in _SOL_METER["archive"][0]:
+        hits.append(("archive", _SOL_METER["archive"][1], _SOL_METER["archive"][2]))
+    if h == _SOL_METER["head"][0]:
+        hits.append(("head", _SOL_METER["head"][1], 0.0))
+    if h in _SOL_METER["other"][0]:
+        hits.append(("other", _SOL_METER["other"][1], 0.0))
+    if not hits:
+        return None
+    return h, "+".join(x[0] for x in hits), max(x[1] for x in hits), max(x[2] for x in hits)
+
+
+_SOL_METER_SET = [False]
+
+
+def _sol_meter_ensure():
+    if not _SOL_METER_SET[0]:
+        _SOL_METER_SET[0] = True
+        try:
+            sol_meter_configure(common.load_config())
+        except (Exception, SystemExit):
+            pass
+
+
+def rpc_gap(url, method: str = None, deadline: float = None, sol: bool = False):
+    _sol_meter_ensure()
+    c = sol_meter_class(url)
+    if c is None and sol:
+        h9 = _host_norm(url)
+        c = (h9, "other", _SOL_METER["other"][1], 0.0) if h9 else None
+    if c is None:
+        return
+    h, _cls, gap, mgap = c
+    mkey = (str(method) if method else None) if mgap > 0 else None
+    if _cls == "helius" and method:
+        if str(method) in SOL_HELIUS_DAS:
+            mkey, mgap = "_helius_das", max(mgap, SOL_HELIUS_DAS_GAP)
+        elif str(method) == "getProgramAccounts":
+            mkey, mgap = "getProgramAccounts", max(mgap, SOL_HELIUS_GPA_GAP)
+    host_gap_wait(h, mkey, gap * 1.002, mgap * 1.002, deadline)
+
+
+def _rpc_methods_of(data) -> list:
+    try:
+        d = json.loads(data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data) if isinstance(data, (bytes, bytearray, str)) else data
+    except (ValueError, UnicodeDecodeError):
+        return [None]
+    if isinstance(d, dict):
+        return [d.get("method")]
+    if isinstance(d, list) and d:
+        return [x.get("method") if isinstance(x, dict) else None for x in d]
+    return [None]
+
+
+def sol_open(req, timeout, method: str = None, deadline: float = None, sol: bool = False):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    _sol_meter_ensure()
+    if sol or sol_meter_class(url) is not None:
+        for m9 in ([method] if method else _rpc_methods_of(getattr(req, "data", None))):
+            rpc_gap(url, m9, deadline, sol=sol)
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def is_helius_rpc(sol_cfg: dict) -> bool:
+    v = str((sol_cfg or {}).get("rpc") or "")
+    if v == "helius":
+        return True
+    h = (urllib.parse.urlsplit(v).hostname or "").lower() if "://" in v else ""
+    return h == "helius-rpc.com" or h.endswith(".helius-rpc.com")
+
+
+def helius_configure(cfg: dict):
+    es9 = (cfg or {}).get("etherscan") or {}
+    try:
+        burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
+        keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
+    except (TypeError, ValueError):
+        burst, keep = 0.04, 0.02
+    with HELIUS.lock:
+        HELIUS.budget = helius_day_budget(cfg)
+        HELIUS.burst, HELIUS.keep = burst, keep
+        HELIUS.head_min = helius_head_min(cfg)
+
+
+def _hl_atexit():
+    try:
+        HELIUS.flush(closed=True)
+    except Exception:
+        pass
+
+
+__import__("atexit").register(_hl_atexit)
+
+
+RPC_DAY_MONTH_DAYS = 31.0
+RPC_DAY_DEFAULT = {
+    "drpc": {"hosts": ["*.drpc.org"], "unit": "cu", "month": 210_000_000, "cu": 20, "cu_heavy": 300},
+    "tenderly": {"hosts": ["gateway.tenderly.co"], "unit": "bytes", "day": 1_000_000_000, "max_resp": 2_000_000},
+}
+RPC_DAY_MAX_RESP = 2_000_000
+_RPC_DAY = {}
+_RPC_DAY_LOCK = threading.Lock()
+_RPC_DAY_PROC = os.path.splitext(os.path.basename((__import__("sys").argv or ["py"])[0] or "py"))[0] or "py"
+
+
+def _rpc_day_pct(cfg: dict) -> float:
+    try:
+        v = (cfg or {}).get("rpc_day_pct")
+        if v is None:
+            v = ((cfg or {}).get("addr_tier") or {}).get("budget_pct") or 80
+        return min(100.0, max(1.0, float(v)))
+    except (TypeError, ValueError):
+        return 80.0
+
+
+def rpc_day_configure(cfg: dict):
+    over = (cfg or {}).get("rpc_day_limits") if isinstance((cfg or {}).get("rpc_day_limits"), dict) else {}
+    pct = _rpc_day_pct(cfg)
+    with _RPC_DAY_LOCK:
+        old = dict(_RPC_DAY)
+        _RPC_DAY.clear()
+        for name in list(dict.fromkeys(list(RPC_DAY_DEFAULT) + list(over))):
+            ov = over.get(name)
+            if ov is False:
+                continue
+            spec = dict(RPC_DAY_DEFAULT.get(name) or {}, **(ov if isinstance(ov, dict) else {}))
+            if not spec.get("hosts") or spec.get("unit") not in ("cu", "bytes", "calls"):
+                continue
+            try:
+                per_day = float(spec["day"]) if spec.get("day") else float(spec["month"]) / RPC_DAY_MONTH_DAYS
+            except (KeyError, TypeError, ValueError):
+                continue
+            budget = max(1, int(per_day * pct / 100.0))
+            prev = old.get(name)
+            if prev is not None and prev["spec"].get("unit") == spec.get("unit"):
+                m9 = prev["meter"]
+                with m9.lock:
+                    m9.budget = budget
+            else:
+                m9 = DayMeter(f"rpc_day_{name}", budget, burst=1.0, keep=0.0)
+            m9.proc = m9.proc or _RPC_DAY_PROC
+            _RPC_DAY[name] = {"spec": spec, "meter": m9, "pct": pct, "refused": prev.get("refused", 0) if prev else 0}
+
+
+def _rpc_day_of(host: str):
+    h = (host or "").lower()
+    with _RPC_DAY_LOCK:
+        for name, ent in _RPC_DAY.items():
+            for p in ent["spec"].get("hosts") or ():
+                p = str(p).lower()
+                if h == p or (p.startswith("*.") and (h.endswith(p[1:]) or h == p[2:])):
+                    return name
+    return None
+
+
+def rpc_day_unit(name: str):
+    with _RPC_DAY_LOCK:
+        ent = _RPC_DAY.get(name)
+        return ent["spec"].get("unit") if ent else None
+
+
+def _rpc_day_units(name: str, methods=None, cost: int = 1) -> int:
+    with _RPC_DAY_LOCK:
+        ent = _RPC_DAY.get(name)
+        spec = ent["spec"] if ent else {}
+        bud = ent["meter"].budget if ent else 1
+    u = spec.get("unit")
+    if u == "bytes":
+        try:
+            mx = int(spec.get("max_resp") or RPC_DAY_MAX_RESP)
+        except (TypeError, ValueError):
+            mx = RPC_DAY_MAX_RESP
+        return max(1, min(mx, bud))
+    if u == "calls":
+        return max(1, int(cost))
+    cu, heavy = int(spec.get("cu") or 20), int(spec.get("cu_heavy") or spec.get("cu") or 20)
+    ms = list(methods or [])
+    if not ms:
+        return cu * max(1, int(cost))
+    return sum(heavy if str(m).startswith(("debug_", "trace_")) else cu for m in ms)
+
+
+def rpc_day_take(name: str, host: str, units: int):
+    with _RPC_DAY_LOCK:
+        ent = _RPC_DAY.get(name)
+    if ent is None:
+        return None
+    now = time.time()
+    m9 = ent["meter"]
+    if m9.take(m9.proc or _RPC_DAY_PROC, max(1, int(units)), kind="must", now=now):
+        return int(now // 86400)
+    if m9.last_why() == "io":
+        _stat(host, "quota_io")
+        e9 = NetError(f"budget: {name} 하루 장부 기록 실패 — 합계를 모르면 승인 안 함(이번 요청 보류 · 다른 노드로)", "budget", host=host)
+        e9.local = True
+        raise e9
+    used, bud = m9.used(now=now)
+    err = NetError(f"quota: {name} 오늘(UTC) 몫(공표 한도 {ent.get('pct', 80):g}% 규칙) 다 씀 "
+                   f"{used}/{bud}{ent['spec'].get('unit')} — UTC 자정까지 이 노드 쉼(다른 노드로)", "quota", host=host)
+    err.local = True
+    with _RPC_DAY_LOCK:
+        ent["refused"] = int(ent.get("refused") or 0) + 1
+    nxt = (int(now) // 86400 + 1) * 86400 + 60
+    gate(host).failure(err, quota_open=max(60.0, nxt - now) / 1.1)
+    _stat(host, "quota_local")
+    raise err
+
+
+def rpc_day_settle(name: str, actual: int, reserved: int, day):
+    delta = int(actual) - int(reserved)
+    if not delta or day is None:
+        return
+    with _RPC_DAY_LOCK:
+        ent = _RPC_DAY.get(name)
+    if ent is None:
+        return
+    now = time.time()
+    if int(now // 86400) != int(day):
+        return
+    try:
+        ent["meter"].add(ent["meter"].proc or _RPC_DAY_PROC, delta, now=now)
+    except Exception:
+        pass
+
+
+def rpc_day_status() -> dict:
+    out = {}
+    with _RPC_DAY_LOCK:
+        ents = dict(_RPC_DAY)
+    for name, ent in ents.items():
+        try:
+            used, bud = ent["meter"].used()
+        except Exception:
+            used, bud = 0, ent["meter"].budget
+        out[name] = {"used": int(used), "budget": int(bud), "unit": ent["spec"].get("unit"), "refused": int(ent.get("refused") or 0)}
+    return out
+
+
+def _rpc_day_atexit():
+    with _RPC_DAY_LOCK:
+        ents = list(_RPC_DAY.values())
+    for ent in ents:
+        try:
+            ent["meter"].flush(closed=True)
+        except Exception:
+            pass
+
+
+__import__("atexit").register(_rpc_day_atexit)
+rpc_day_configure({})
+
+
+ES_DISPATCH_GAP = 0.51
+ES_DISPATCH_FALLBACK = 1.25
 _es_log = __import__("logging").getLogger("tj-bf")
 ES_DISPATCH_LOCK_WAIT = 30.0
 _ES_DISPATCH_LOCAL = threading.Lock()
@@ -477,12 +1618,26 @@ def es_budget_used() -> tuple:
         return _ESB["n"] + _ESB["others"], ES_DAILY_BUDGET
 
 
+_CONFIGURED = [False]
+_CFG_ENSURE_LOCK = threading.Lock()
+
+
 def configure(cfg: dict):
-    global QUOTA_OPEN, ES_DAILY_BUDGET
+    global QUOTA_OPEN, ES_DAILY_BUDGET, ES_PACE_BURST_FRAC, ES_FILL_KEEP_FRAC
+    _CONFIGURED[0] = True
     try:
         ES_DAILY_BUDGET = int(((cfg or {}).get("etherscan") or {}).get("daily_budget") or 80000)
     except (TypeError, ValueError):
         ES_DAILY_BUDGET = 80000
+    es9 = (cfg or {}).get("etherscan") or {}
+    try:
+        ES_PACE_BURST_FRAC = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
+        ES_FILL_KEEP_FRAC = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
+    except (TypeError, ValueError):
+        ES_PACE_BURST_FRAC, ES_FILL_KEEP_FRAC = 0.04, 0.02
+    helius_configure(cfg)
+    rpc_day_configure(cfg)
+    sol_meter_configure(cfg)
     bf = (cfg or {}).get("backfill") or {}
     for h, p in (bf.get("hosts") or {}).items():
         if isinstance(p, dict):
@@ -491,6 +1646,8 @@ def configure(cfg: dict):
         QUOTA_OPEN = float(bf["quota_open_sec"])
     with _GATES_LOCK:
         _GATES.clear()
+    with _SHARES_LOCK:
+        _SHARES.clear()
 
 
 def _policy_for(host: str) -> dict:
@@ -519,7 +1676,7 @@ def gate_wait(url_or_host: str, prio: str = "bg") -> float:
         now = time.time()
         if g.open_until > now:
             return g.open_until - now
-        return max(0.0, g._wait_needed(prio, 1))
+        return max(0.0, g._wait_needed(prio, 1), g.share.peek(1) if g.share is not None else 0.0)
 
 
 def gate(url_or_host: str) -> HostGate:
@@ -573,24 +1730,28 @@ RETRYABLE = ("http429", "http5xx", "timeout", "conn", "dns", "payload")
 
 
 def _open(req, timeout):
-    return urllib.request.urlopen(req, timeout=timeout)
+    return sol_open(req, timeout)
 
 
 def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout: float = 25.0,
                  retries: int = 3, retry_5xx: bool = True, prio: str = "fg", deadline: float = None,
                  ua: str = UA, max_inline_wait: float = 20.0, breaker_5xx: bool = True, cost: int = 1,
-                 sem_timeout: float = None, gate_host: str = None):
+                 sem_timeout: float = None, gate_host: str = None, rpc_methods=None):
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     g = gate(gate_host or host)
     last = None
     hard = sem_timeout is not None
+    rd9 = _rpc_day_of(host) if _RPC_DAY else None
+    rdu9 = _rpc_day_units(rd9, rpc_methods, cost) if rd9 else 0
+    rdb9 = bool(rd9) and rpc_day_unit(rd9) == "bytes"
 
     def _left():
         return None if deadline is None else deadline - time.time()
     for i in range(max(1, retries)):
         if hard and _left() is not None and _left() <= 0:
             raise NetError(f"budget: {host} 요청 마감 지남", "budget", host=host)
-        g.acquire(prio=prio, deadline=deadline, cost=cost)
+        rdd9 = rpc_day_take(rd9, host, rdu9) if rd9 else None
+        rds9 = False
         if not hard:
             g.sem.acquire()
         else:
@@ -598,6 +1759,11 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             st9 = float(sem_timeout) if l9 is None else min(float(sem_timeout), l9)
             if st9 <= 0 or not g.sem.acquire(timeout=st9):
                 raise NetError(f"budget: {host} 동시 요청 대기 {max(0.0, st9):.1f}s 초과", "budget", host=host)
+        try:
+            g.acquire(prio=prio, deadline=deadline, cost=cost)
+        except BaseException:
+            g.sem.release()
+            raise
         try:
             to9 = timeout
             if hard and _left() is not None:
@@ -614,8 +1780,15 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
                 es_dispatch_wait(deadline)
             _stat(host, "calls")
             with _open(req, to9) as r:
-                g.observe(r.headers)
-                raw = r.read()
+                g.observe(getattr(r, "headers", None))
+                raw = r.read(rdu9 + 1) if rdb9 else r.read()
+            if rdb9:
+                rpc_day_settle(rd9, len(raw), rdu9, rdd9)
+                rds9 = True
+                if len(raw) > rdu9:
+                    e9 = NetError(f"payload: {host} 응답이 하루 장부 예약 상한 {rdu9:,}바이트를 넘음 — 받은 만큼 셈 · 구간·배치를 줄여 다시", "range", host=host)
+                    e9.results = True
+                    raise e9
             try:
                 d = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError) as e:
@@ -625,7 +1798,15 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
         except CircuitOpen:
             raise
         except Exception as e:
-            err = classify_exc(e, host)
+            bb9 = None
+            if rdb9 and rdd9 is not None and not rds9 and isinstance(e, urllib.error.HTTPError):
+                try:
+                    bb9 = e.read(rdu9 + 1) or b""
+                except Exception:
+                    bb9 = None
+                if bb9 is not None:
+                    rpc_day_settle(rd9, len(bb9), rdu9, rdd9)
+            err = classify_exc(e, host, body_bytes=bb9)
             if isinstance(e, urllib.error.HTTPError):
                 g.observe(e.headers)
             _stat(host, err.kind)
@@ -648,6 +1829,39 @@ def http_json(url: str, **kw):
     return http_request(url, **kw)[0]
 
 
+class RpcTransportError(ConnectionError):
+
+    def __init__(self, err):
+        super().__init__(str(err))
+        self.net = err
+        for k9 in ("kind", "code", "retry_after", "host"):
+            setattr(self, k9, getattr(err, k9, None))
+        self.local = bool(getattr(err, "local", False))
+
+
+def _rpc_cfg_ensure():
+    if _CONFIGURED[0]:
+        return
+    with _CFG_ENSURE_LOCK:
+        if _CONFIGURED[0]:
+            return
+        try:
+            configure(common.load_config())
+        except (Exception, SystemExit):
+            _CONFIGURED[0] = True
+
+
+def rpc_post(url: str, body, *, timeout: float = 25.0, ua: str = None, retries: int = 1, prio: str = "fg", deadline: float = None):
+    items = body if isinstance(body, list) else [body]
+    methods = [str(it.get("method") or "") for it in items if isinstance(it, dict)]
+    _rpc_cfg_ensure()
+    try:
+        return http_json(url, data=json.dumps(body).encode(), timeout=timeout, retries=retries, prio=prio, deadline=deadline,
+                         ua=ua or UA, cost=max(1, len(items)), rpc_methods=methods or None, breaker_5xx=False)
+    except NetError as e:
+        raise RpcTransportError(e) from e
+
+
 RATE_RETRIES = 4
 
 
@@ -668,7 +1882,7 @@ def rpc_call(url: str, method: str, params, *, timeout: float = 25.0, retries: i
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     for i9 in range(RATE_RETRIES + 1):
-        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline)
+        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, rpc_methods=(method,))
         if not isinstance(d, dict):
             raise NetError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})", "payload", host=host)
         if not d.get("error"):
@@ -713,7 +1927,8 @@ def _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host) -> list:
     body = json.dumps([{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
                        for i, (m, p) in enumerate(calls)]).encode()
     for i9 in range(RATE_RETRIES + 1):
-        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, cost=len(calls))
+        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, cost=len(calls),
+                      rpc_methods=[m for m, _p in calls])
         if isinstance(d, dict) and d.get("error"):
             err = classify_rpc_error(d["error"])
             err.host = host
@@ -1060,7 +2275,7 @@ class LogScanner:
                  caps: dict = None, fallback: dict = None, sleep: float = 0.0, timeout: float = 25.0,
                  per_ep_workers: int = 1, prio: str = "fg", log=None, name: str = "logs",
                  canary: dict = None, recent_blocks: int = 200_000, positions: dict = None,
-                 head_guard: bool = True, head_refresh_sec: float = 15.0):
+                 head_guard: bool = True, head_refresh_sec: float = 15.0, soft: dict = None):
         self.positions = dict(positions) if positions else {1: topic0, 2: topic0}
         self.canary = canary
         self.recent_blocks = int(recent_blocks)
@@ -1075,6 +2290,8 @@ class LogScanner:
         for u, c in self.fallback.items():
             self.caps.setdefault(u, c)
         self.pruned_below = {}
+        self.retention_floor = None
+        self.retention_hint = {}
         self.sleep = float(sleep)
         self.timeout = float(timeout)
         self.per_ep_workers = max(1, int(per_ep_workers))
@@ -1089,6 +2306,33 @@ class LogScanner:
         self.lag_head = {}
         self.head_fail = {}
         self.head_off = set()
+        self.soft = soft if isinstance(soft, dict) else None
+
+    SOFT_SLOW_N = 8
+
+    def _soft_fail(self, url, n: int):
+        if self.soft is None:
+            return
+        s = self.soft.get(url) if isinstance(self.soft.get(url), dict) else {}
+        best = int(s.get("best") or 0)
+        self.soft[url] = {"cap": max(1, min(n - 1, max(n // 2, best if best < n else 0))), "fail": int(n), "ok": 0, "best": 0}
+
+    def _soft_ok(self, url, n: int):
+        s = self.soft.get(url) if self.soft is not None else None
+        if not isinstance(s, dict):
+            return
+        s["best"] = max(int(s.get("best") or 0), int(n))
+        if s.get("fail") and n > int(s["fail"]):
+            s["fail"] = None
+        if n < int(s["cap"]):
+            return
+        s["ok"] = int(s.get("ok") or 0) + 1
+        if not s.get("fail") or int(s["cap"]) * 2 < int(s["fail"]):
+            s["cap"], s["ok"] = int(s["cap"]) * 2, 0
+        elif s["ok"] >= self.SOFT_SLOW_N:
+            s["cap"], s["ok"] = int(s["cap"]) + max(1, int(s["cap"]) // 8), 0
+        if int(s["cap"]) >= min(self.span, int(self.caps.get(url) or self.span)):
+            self.soft.pop(url, None)
 
     def _known_head(self, url, need: int, refresh: bool = True):
         h = self.ep_head.get(url)
@@ -1113,7 +2357,15 @@ class LogScanner:
         return h2
 
     def _cap(self, url):
-        return min(self.span, int(self.caps.get(url) or self.span))
+        c = min(self.span, int(self.caps.get(url) or self.span))
+        s = self.soft.get(url) if self.soft is not None else None
+        return min(c, max(1, int(s["cap"]))) if isinstance(s, dict) and s.get("cap") else c
+
+    def _retention_all(self, eps):
+        eps = list(eps)
+        if not eps or any(u not in self.retention_hint for u in eps):
+            return None
+        return min(int(self.retention_hint[u]) for u in eps)
 
     def _query(self, url, frm, to, pos):
         tp = [self.positions.get(pos, self.topic0), None, None] + [None] * max(0, pos - 2)
@@ -1288,6 +2540,7 @@ class LogScanner:
                     with cv:
                         inflight.discard((a, b))
                         done[a] = (b, f)
+                        self._soft_ok(url, b - a + 1)
                         advance_locked()
                         cv.notify_all()
                 except Exception as e:
@@ -1305,13 +2558,43 @@ class LogScanner:
                                 if not getattr(err, "results", False):
                                     self.caps[url] = max(self.min_span, (b - a + 1) // 2)
                                 self.metrics["halved"] += 1
-                                requeue([[a, mid], [mid + 1, b]])
+                                if getattr(err, "results", False) and self.soft is not None:
+                                    self._soft_fail(url, b - a + 1)
+                                    requeue([[a, b]])
+                                else:
+                                    requeue([[a, mid], [mid + 1, b]])
                             else:
                                 st["stop"] = common.redact_secret_text(f"{_url_host(url)} 최소 구간({self.min_span})도 거부: {err}")
                         elif err.kind == "timeout" and (b - a + 1) > self.min_span:
                             mid = (a + b) // 2
                             self.metrics["halved"] += 1
                             requeue([[a, mid], [mid + 1, b]])
+                        elif err.kind == "pruned" and isinstance(getattr(err, "earliest", None), int):
+                            n9, h9 = int(err.earliest), getattr(err, "latest", None)
+                            h9 = int(h9) if isinstance(h9, int) and not isinstance(h9, bool) else None
+                            parts9 = []
+                            if a < n9:
+                                pb9 = n9 - 1
+                                self.pruned_below[url] = max(self.pruned_below.get(url, -1), pb9)
+                                self.retention_hint[url] = max(self.retention_hint.get(url, 0), n9)
+                                self.metrics["pruned"] += 1
+                                parts9.append([a, min(b, pb9)])
+                            lo9 = max(a, n9)
+                            if h9 is not None and b > h9 and lo9 <= b:
+                                self.lag_head[url] = (h9, time.time())
+                                self.metrics["lag_clip"] += 1
+                                if lo9 <= h9:
+                                    parts9.append([lo9, h9])
+                                parts9.append([max(lo9, h9 + 1), b])
+                            elif lo9 <= b and a < n9:
+                                parts9.append([lo9, b])
+                            requeue(parts9 or [[a, b]])
+                            if not parts9:
+                                self.metrics["retention_odd"] = self.metrics.get("retention_odd", 0) + 1
+                            fl9 = self._retention_all(all_eps)
+                            if fl9 is not None and st["last"] + 1 < fl9 and st["stop"] is None:
+                                st["stop"] = (f"구간 {st['last'] + 1}-{fl9 - 1}: 노드 보관 범위 밖(첫 보관 블록 {fl9}) — "
+                                              "이 노드들에선 영영 못 받음")
                         elif err.kind == "pruned":
                             self.pruned_below[url] = max(self.pruned_below.get(url, -1), b)
                             self.metrics["pruned"] += 1
@@ -1322,7 +2605,9 @@ class LogScanner:
                     if self.log and err.kind not in ("range",):
                         self.log.info("%s %s %d-%d %s — 재배치", self.name,
                                       urllib.parse.urlsplit(url).hostname, a, b, str(err)[:120])
-                    if err.kind not in ("range", "pruned", "timeout"):
+                    if err.kind not in ("range", "pruned", "timeout") or (err.kind == "pruned" and isinstance(getattr(err, "earliest", None), int)
+                                                                          and not (a < err.earliest or (isinstance(getattr(err, "latest", None), int)
+                                                                                                        and b > err.latest))):
                         time.sleep(min(5.0, 0.5 + random.random()))
 
         threads = []
@@ -1339,6 +2624,10 @@ class LogScanner:
             if st["stop"] and self.log:
                 self.log.warning("%s 스캔 중단: %s (연속 완료 %d)", self.name, st["stop"], st["last"])
             self.last_stop = st["stop"]
+            self.retention_floor = None
+            fl9 = self._retention_all(all_eps)
+            if st["last"] < frm and fl9 is not None and fl9 > frm:
+                self.retention_floor = fl9
             return found, st["last"]
 
 
@@ -1519,6 +2808,15 @@ class Health:
             now = int(time.time())
             s.update(ok=True, last_cycle_ts=now, last_success_ts=now, consecutive_failures=0)
         self.facts(key, kind, **kv)
+
+    BASE_KEYS = ("kind", "ok", "last_cycle_ts", "last_success_ts", "consecutive_failures", "last_error")
+
+    def reset_facts(self, key: str):
+        with self.lock:
+            s = self.src.get(key)
+            if isinstance(s, dict):
+                for k in [k for k in s if k not in self.BASE_KEYS]:
+                    del s[k]
 
     def fail(self, key: str, err, kind: str = None, **kv) -> int:
         with self.lock:

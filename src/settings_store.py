@@ -264,7 +264,12 @@ def validate_address(addr: str):
     return "sol", a, "Solana 주소 형식 확인됨"
 
 
-MAX_ADDRESSES = 60
+MAX_ADDRESSES = 500
+
+
+def cap_error(n_now: int) -> str:
+    return (f"지갑은 최대 {MAX_ADDRESSES}개까지 등록할 수 있습니다 (지금 {n_now}개) — 안 쓰는 주소를 목록에서 빼면 그만큼 더 넣을 수 있어요."
+            " 이미 등록된 주소에 체인을 더하는 건 개수와 상관없이 됩니다")
 
 
 def read_config_raw() -> dict:
@@ -289,6 +294,13 @@ def evm_chains(cfg: dict) -> list:
     if isinstance(cfg.get("bsc"), dict):
         out.append(("bsc", names["bsc"]))
     return out
+
+
+def needs_etherscan(cfg: dict) -> bool:
+    for w in (cfg or {}).get("wallets") or []:
+        if isinstance(w, dict) and str(w.get("type", "evm")) == "evm" and w.get("address"):
+            return True
+    return False
 
 
 def _label_ok(label: str) -> str:
@@ -320,8 +332,9 @@ def add_wallet(address: str, label: str, chains: list) -> dict:
     with LOCK:
         cfg = read_config_raw()
         wallets = cfg.setdefault("wallets", [])
-        if len({_addr_key(w) for w in wallets}) >= MAX_ADDRESSES:
-            raise ValueError(f"지갑은 최대 {MAX_ADDRESSES}개까지 등록할 수 있습니다")
+        keys9 = {_addr_key(w) for w in wallets}
+        if addr not in keys9 and len(keys9) >= MAX_ADDRESSES:
+            raise ValueError(cap_error(len(keys9)))
         have = {(w.get("type", "evm"), w.get("chain"), (w.get("address") or "") if w.get("type") == "sol"
                  else (w.get("address") or "").lower()) for w in wallets}
         added = []
@@ -386,7 +399,8 @@ def add_wallets(addresses, chains: list) -> list:
     if not isinstance(addresses, list) or not addresses:
         raise ValueError("추가할 주소가 없습니다")
     if len(addresses) > MAX_BATCH:
-        raise ValueError(f"한 번에 최대 {MAX_BATCH}개까지 추가할 수 있습니다 (지금 {len(addresses)}개) — 나눠서 넣어 주세요")
+        raise ValueError(f"한 번에 최대 {MAX_BATCH}개까지 추가할 수 있습니다 (지금 {len(addresses)}개) — {MAX_BATCH}개씩 나눠서 여러 번 넣어 주세요"
+                         f" (전체 최대 {MAX_ADDRESSES}개)")
     if not isinstance(chains, list) or len(chains) > 40 or any(not isinstance(c, str) for c in chains):
         raise ValueError("chains 는 체인 이름 배열입니다")
     why = secret_like(addresses)
@@ -439,7 +453,7 @@ def add_wallets(addresses, chains: list) -> list:
                 continue
             if not known:
                 if n_addr >= MAX_ADDRESSES:
-                    r.update(status="error", error=f"지갑은 최대 {MAX_ADDRESSES}개까지 등록할 수 있습니다")
+                    r.update(status="error", error=cap_error(n_addr))
                     continue
                 n_addr += 1
                 labels[addr] = _auto_label(kind, n_addr, used)

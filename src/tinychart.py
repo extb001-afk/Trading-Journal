@@ -127,15 +127,66 @@ def money_short(v, cur="KRW") -> str:
     return f"{sg}${a:,.0f}"
 
 
-def render(vals, w=720, h=300, axis=True, cur="KRW", up=None, theme="dark") -> bytes:
-    v = [float(x) for x in vals if x is not None and math.isfinite(float(x))]
+def flow_ret(first, last, flow_sum=0.0):
+    try:
+        f0, l0, s0 = float(first), float(last), float(flow_sum or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(f0) and math.isfinite(l0) and math.isfinite(s0)) or f0 == 0:
+        return None
+    return (l0 - f0 - s0) / f0 * 100
+
+
+def _split(vals, flows=None):
+    pts = []
+    fl_on = flows is not None
+    for i, x in enumerate(vals or ()):
+        fl = None
+        if isinstance(x, (list, tuple)):
+            fl_on = True
+            fl = x[1] if len(x) > 1 else None
+            x = x[0] if x else None
+        elif flows is not None:
+            fl = flows[i] if i < len(flows) else None
+        try:
+            fv = float(x)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(fv):
+            continue
+        try:
+            fl = float(fl) if fl is not None and math.isfinite(float(fl)) else None
+        except (TypeError, ValueError):
+            fl = None
+        pts.append((fv, fl))
+    return [a for a, _b in pts], ([b for _a, b in pts] if fl_on else None)
+
+
+def headline(vals, flows=None):
+    v, fl = _split(vals, flows)
+    if len(v) < 2:
+        return {"day": 0.0, "period": 0.0, "rising": True, "net": False}
+    if fl is None:
+        day = (v[-1] / v[-2] - 1) * 100 if v[-2] else 0.0
+        chg = (v[-1] / v[0] - 1) * 100 if v[0] else 0.0
+        return {"day": day, "period": chg, "rising": v[-1] >= v[0], "net": False}
+    d9 = flow_ret(v[-2], v[-1], fl[-1]) if fl[-1] is not None else None
+    known = all(x is not None for x in fl[1:])
+    p9 = flow_ret(v[0], v[-1], sum(fl[1:])) if known else None
+    rising = (p9 >= 0) if p9 is not None else ((d9 >= 0) if d9 is not None else v[-1] >= v[0])
+    return {"day": d9, "period": p9, "rising": rising, "net": True}
+
+
+def render(vals, w=720, h=300, axis=True, cur="KRW", up=None, theme="dark", flows=None) -> bytes:
+    v, fl = _split(vals, flows)
+    hd = headline(list(zip(v, fl)) if fl is not None else v)
     if len(v) < 2:
         v = (v or [0.0]) * 2
     dark = theme != "light"
     bg = _hex("0E1621" if dark else "FFFFFF")
     grid = _hex("1F2B38" if dark else "E6E9EF")
     lab = _hex("8FA3B6" if dark else "6B7280")
-    rising = (v[-1] >= v[0]) if up is None else bool(up)
+    rising = hd["rising"] if up is None else bool(up)
     col = _hex("F25F5C" if rising else "4F8CFF")
     im = _Img(w, h, bg)
     padL, padR, padT, padB = 18, (150 if axis else 18), 44, 22
@@ -165,15 +216,16 @@ def render(vals, w=720, h=300, axis=True, cur="KRW", up=None, theme="dark") -> b
     lx, ly = pts[-1]
     im.disk(lx, ly, 7.5, col, 0.25)
     im.disk(lx, ly, 4.5, col, 1.0)
-    day = (v[-1] / v[-2] - 1) * 100 if v[-2] else 0.0
-    dcol = _hex("F25F5C" if day >= 0 else "4F8CFF")
+    day = hd["day"]
+    dcol = _hex("F25F5C" if day >= 0 else "4F8CFF") if day is not None else col
     im.line(pts[-2][0], pts[-2][1], pts[-1][0], pts[-1][1], dcol, 4.6)
     im.disk(lx, ly, 4.5, dcol, 1.0)
-    chg = (v[-1] / v[0] - 1) * 100 if v[0] else 0.0
-    big = f"{'+' if day >= 0 else '−'}{abs(day):.1f}%"
-    im.text(padL, 12, big, dcol, 3)
-    if len(v) > 2:
-        im.text(padL + im.text_w(big, 3) + 12, 20, f"{len(v)}D {'+' if chg >= 0 else '−'}{abs(chg):.1f}%", lab, 2)
+    chg = hd["period"]
+    big = f"{'+' if day >= 0 else '−'}{abs(day):.1f}%" if day is not None else ""
+    if big:
+        im.text(padL, 12, big, dcol, 3)
+    if len(v) > 2 and chg is not None:
+        im.text(padL + (im.text_w(big, 3) + 12 if big else 0), 20 if big else 12, f"{len(v)}D {'+' if chg >= 0 else '−'}{abs(chg):.1f}%", lab, 2)
     if axis:
         tx = w - padR + 12
         clamp = lambda yy: int(max(padT - 6, min(h - padB - 14, yy - 7)))

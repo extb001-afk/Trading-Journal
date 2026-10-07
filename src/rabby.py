@@ -49,9 +49,9 @@ def settings(cfg: dict) -> dict:
     return s
 
 
-def evm_wallets(cfg: dict) -> list:
+def evm_wallets(cfg: dict, include_disabled: bool = False) -> list:
     out = set()
-    for w in (cfg or {}).get("wallets") or []:
+    for w in list((cfg or {}).get("wallets") or []) + (list((cfg or {}).get("_disabled_wallets") or []) if include_disabled else []):
         if not isinstance(w, dict) or w.get("type") == "sol" or w.get("chain") == "sol":
             continue
         a = str(w.get("address") or "").strip().lower()
@@ -62,7 +62,7 @@ def evm_wallets(cfg: dict) -> list:
 
 def wallet_chains(cfg: dict) -> set:
     out = set()
-    for w in (cfg or {}).get("wallets") or []:
+    for w in list((cfg or {}).get("wallets") or []) + list((cfg or {}).get("_disabled_wallets") or []):
         if isinstance(w, dict) and w.get("chain") and w.get("type") != "sol":
             out.add((str(w.get("address") or "").lower(), str(w["chain"])))
     return out
@@ -93,6 +93,7 @@ def chain_resolver(cfg: dict, state: dict):
     bmap = bot_chain_ids(cfg)
     known = set(((cfg or {}).get("chains") or {}).keys()) | {"bsc"}
     known |= {str(w.get("chain")) for w in (cfg or {}).get("wallets") or [] if isinstance(w, dict) and w.get("chain")}
+    known |= set((cfg or {}).get("_disabled_chains") or [])
 
     def res(rid):
         rid = str(rid or "")
@@ -233,6 +234,27 @@ def due_wallet(state: dict, addrs: list, now: float, every_sec: float):
     return best
 
 
+def _freeze_disabled(cfg: dict, state: dict, old: dict, fresh: dict) -> dict:
+    off = set((cfg or {}).get("_disabled_chains") or ())
+    off.update(c for c, cc in ((cfg or {}).get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(c, cc))
+    if not off:
+        return fresh
+    ids = dict((state or {}).get("chainIds") or {})
+    for c in fresh.get("chains") or []:
+        if isinstance(c, dict) and c.get("cid") is not None:
+            ids[c["id"]] = c["cid"]
+    resolve = chain_resolver(cfg, dict(state or {}, chainIds=ids))
+    out = dict(fresh)
+    for field, key in (("tokens", "chain"), ("protocols", "chain"), ("chains", "id")):
+        kept = [dict(x, _chainoff_at=x.get("_chainoff_at") or old.get("fetchedAt"))
+                for x in old.get(field) or [] if isinstance(x, dict) and resolve(x.get(key)) in off]
+        out[field] = [x for x in fresh.get(field) or [] if not (isinstance(x, dict) and resolve(x.get(key)) in off)] + kept
+    out["total"] = (_num(fresh.get("total"))
+                    - sum(_num(x.get("usd")) for x in fresh.get("chains") or [] if isinstance(x, dict) and resolve(x.get("id")) in off)
+                    + sum(_num(x.get("usd")) for x in old.get("chains") or [] if isinstance(x, dict) and resolve(x.get("id")) in off))
+    return out
+
+
 def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.sleep, log=None) -> str:
     s = settings(cfg)
     if not s["enabled"]:
@@ -273,7 +295,7 @@ def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.s
     w = dict(st["wallets"].get(a) or {})
     w["triedAt"] = int(now)
     if res == "ok":
-        w.update(d)
+        w.update(_freeze_disabled(cfg, st, w, d))
         w["fetchedAt"] = int(time.time() if now is None else now)
         w.pop("err", None)
         ids = dict(st.get("chainIds") or {})
@@ -358,7 +380,7 @@ def merge(state: dict, *, resolve, wallet_chains_set: set, known_pairs: set, hel
                 continue
             kind = "missed" if tracked_chain(bc) else "chain"
             items.append({"addr": addr, "rid": rid, "bc": bc, "sym": t.get("sym") or "?", "amt": _num(t["amt"]), "px": _num(t["px"]),
-                          "usd": usd, "proto": "", "pname": "", "kind": kind, "at": fat,
+                          "usd": usd, "proto": "", "pname": "", "kind": kind, "at": int(t.get("_chainoff_at") or fat),
                           "chain": chain_label(state, rid, chain_names)})
         for p in w.get("protocols") or []:
             rid = p.get("chain") or ""
@@ -396,13 +418,13 @@ def merge(state: dict, *, resolve, wallet_chains_set: set, known_pairs: set, hel
                 for x in good:
                     items.append({"addr": addr, "rid": rid, "bc": bc, "sym": x.get("sym") or "?", "amt": _num(x["amt"]), "px": _num(x["px"]),
                                   "usd": _num(x["amt"]) * _num(x["px"]), "proto": p.get("proto") or "", "pname": pn, "iname": nm,
-                                  "idx": it.get("idx") or "", "kind": "proto", "at": fat, "chain": chain_label(state, rid, chain_names)})
+                                  "idx": it.get("idx") or "", "kind": "proto", "at": int(p.get("_chainoff_at") or fat), "chain": chain_label(state, rid, chain_names)})
                 for x in it.get("debts") or []:
                     u = _num(x.get("amt")) * _num(x.get("px"))
                     if u <= 0:
                         continue
                     debts.append({"addr": addr, "rid": rid, "bc": bc, "sym": x.get("sym") or "?", "qty": -_num(x["amt"]), "px": _num(x["px"]),
-                                  "usd": -u, "proto": p.get("proto") or "", "pname": pn, "iname": nm, "at": fat,
+                                  "usd": -u, "proto": p.get("proto") or "", "pname": pn, "iname": nm, "at": int(p.get("_chainoff_at") or fat),
                                   "chain": chain_label(state, rid, chain_names)})
     for x in items:
         wallets[x["addr"]]["only"] += x["usd"]
@@ -457,7 +479,8 @@ def rows_for(m: dict, labels: dict, now: float) -> list:
         else:
             sub = f"{x['chain']} · {short(x['addr'])} · Rabby 기준" + (" (봇 미추적 토큰)" if x["kind"] == "missed" else "")
         r["locs"].append({"w": w, "ch": x["chain"], "sub": sub, "qty": x["amt"], "rb": 1,
-                          "loc": f"rabby:{x['rid']}:{x['addr']}" + (f":{x['proto']}" if x["proto"] else "")})
+                          "loc": f"rabby:{x['rid']}:{x['addr']}" + (f":{x['proto']}" if x["proto"] else ""),
+                          "usd": round(x["usd"], 2), "pname": x.get("pname") or "", "iname": x.get("iname") or "", "rbKind": kk})
     out = []
     for k, r in sorted(by.items(), key=lambda kv: -kv[1]["usd"]):
         if r["qty"] <= 0:

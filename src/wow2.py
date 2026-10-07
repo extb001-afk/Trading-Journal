@@ -124,11 +124,14 @@ def _disp_name(name, symbol=None) -> str:
 def _group_names(conn) -> dict:
     if conn is None:
         return {}
-    try:
+
+    def run():
         sym9 = {}
         for r in conn.execute("SELECT group_id, MIN(symbol) s FROM assets WHERE group_id IS NOT NULL GROUP BY group_id"):
             sym9[str(r["group_id"])] = r["s"]
         return {str(r["group_id"]): _disp_name(r["name"], sym9.get(str(r["group_id"]))) for r in conn.execute("SELECT group_id, name FROM asset_groups")}
+    try:
+        return dict(_memo(conn, ("groups",), run, ttl=0))
     except sqlite3.Error:
         return {}
 
@@ -161,6 +164,13 @@ def _locs_at(conn, ts: int, aliases: dict, chain_names: dict) -> dict:
     return out
 
 
+def _quar_ids(daily, kit_groups) -> set:
+    rev9 = daily.get("_risk_rev") if isinstance(daily, dict) else None
+    if isinstance(rev9, str):
+        return {s9 for s9 in rev9.split(",") if s9}
+    return {str(g9) for g9, v9 in (kit_groups or {}).items() if isinstance(v9, dict) and v9.get("skip")}
+
+
 def tm(iso: str, hist=None, daily=None, fields=None, conn=None, chain_names=None, now_px=None, top=12, dpx=None) -> dict:
     if not ISO_RE.match(str(iso or "")):
         return {"ok": False, "error": "날짜는 YYYY-MM-DD"}
@@ -179,14 +189,18 @@ def tm(iso: str, hist=None, daily=None, fields=None, conn=None, chain_names=None
     rows, total, x, src, no_px, curve_usd = {}, None, 0.0, "", None, None
     d9 = (daily or {}).get(iso) if isinstance(daily, dict) else None
     if isinstance(d9, dict) and isinstance(d9.get("g"), dict):
+        q9 = _quar_ids(daily, KG)
+        if q9 and any(str(k9) in q9 for k9 in d9["g"]):
+            d9 = dict(d9, g={k9: v9 for k9, v9 in d9["g"].items() if str(k9) not in q9})
         pmap = dict(((dpx or {}).get(iso) or {}).get("p") or {}) if isinstance((dpx or {}).get(iso), dict) else {}
         if isinstance(d9.get("px"), dict):
             pmap.update(d9["px"].get("p") or {})
+        sym9 = d9.get("sym") if isinstance(d9.get("sym"), dict) else {}
         for gid, gv in d9["g"].items():
             usd9 = _f(gv)
             p = _f(pmap.get(str(gid)) if pmap.get(str(gid)) is not None else pmap.get(gid))
             if abs(usd9) >= 1e-9:
-                rows[str(gid)] = {"usd": usd9, "qty": (usd9 / p) if p > 0 else None, "px": p, "approx": p <= 0}
+                rows[str(gid)] = {"usd": usd9, "qty": (usd9 / p) if p > 0 else None, "px": p, "approx": p <= 0, "sym": sym9.get(str(gid))}
         total = _f(d9.get("val"), None) if d9.get("val") is not None else None
         x = (total - sum(_f(v) for v in d9["g"].values())) if total is not None else _f(d9.get("x"))
         src = "d30"
@@ -237,6 +251,10 @@ def tm(iso: str, hist=None, daily=None, fields=None, conn=None, chain_names=None
         usd = _f(r["usd"]) if "usd" in r else _f(r.get("qty")) * _f(r.get("px"))
         kg = KG.get(gid) or KG.get(int(gid)) if gid.isdigit() else KG.get(gid)
         kg = kg if isinstance(kg, dict) else {}
+        if kg.get("skip"):
+            etc_usd += usd
+            etc_now += usd
+            continue
         if usd < 0.5:
             etc_usd += usd
             st9 = bool(kg.get("st")) or _disp_name(kg.get("sym") or r.get("sym") or names.get(gid) or "").upper() in STABLE
@@ -317,7 +335,74 @@ def tm(iso: str, hist=None, daily=None, fields=None, conn=None, chain_names=None
     now_tot = sum((it["nowUsd"] if it["nowUsd"] is not None else it["usd"]) for it in items) + x + etc_now
     out["nowTotal"] = round(now_tot, 2) if len(miss) < len(items) else None
     out["nowMiss"] = len(miss)
+    fx9 = _f((d9 or {}).get("usdt")) if src == "d30" and isinstance(d9, dict) else 0.0
+    if fx9 <= 0:
+        fx9 = _hist_fx(hist, iso)
+    out["fx"] = round(fx9, 4) if fx9 > 0 else None
+    out["totalKrw"] = round(out["total"] * fx9) if fx9 > 0 else None
+    out["flows"] = period_flows(iso, fields, hist)
     return out
+
+
+def _hist_fx(hist, iso) -> float:
+    st9 = getattr(hist, "st", None) or {} if hist is not None else {}
+    f9 = (st9.get("f") or {}).get(iso)
+    if isinstance(f9, list) and len(f9) > 1 and _f(f9[1]) > 0:
+        return _f(f9[1])
+    d9 = (st9.get("d") or {}).get(iso)
+    if isinstance(d9, list) and len(d9) > 1 and _f(d9[0]) > 0 and _f(d9[1]) > 0:
+        return _f(d9[1]) / _f(d9[0])
+    return 0.0
+
+
+def period_flows(iso: str, fields=None, hist=None, today: str = None) -> dict:
+    f = fields or {}
+    today = today or datetime.now(KST).strftime("%Y-%m-%d")
+    rate = _f(f.get("rate"), 0.0)
+    t0 = datetime.strptime(today, "%Y-%m-%d")
+    ds = {}
+    for r in f.get("dailySeries") or ():
+        if not isinstance(r, dict):
+            continue
+        k = str(r.get("date") or "")
+        m = re.fullmatch(r"(\d{2})-(\d{2})", k)
+        if not m:
+            continue
+        try:
+            d = datetime(t0.year, int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            continue
+        if d > t0:
+            d = d.replace(year=t0.year - 1)
+        ds[d.strftime("%Y-%m-%d")] = r
+    hf = ((getattr(hist, "st", None) or {}).get("f") or {}) if hist is not None else {}
+    usd = krw = 0.0
+    n = miss = nofx = 0
+    try:
+        x = datetime.strptime(iso, "%Y-%m-%d") + timedelta(days=1)
+    except (TypeError, ValueError):
+        return {"usd": 0.0, "krw": 0.0, "days": 0, "miss": 0, "nofx": 0}
+    while x <= t0:
+        k = x.strftime("%Y-%m-%d")
+        x += timedelta(days=1)
+        n += 1
+        r = ds.get(k)
+        if r is not None and r.get("flow") is not None:
+            v = _f(r.get("flow"))
+            u9 = _f(r.get("usdt"))
+            usd += v
+            krw += v * (u9 if (k < today and u9 > 0) else rate)
+            continue
+        h9 = hf.get(k)
+        if isinstance(h9, list) and h9 and h9[0] is not None:
+            v = _f(h9[0])
+            usd += v
+            krw += v * (_f(h9[1]) if len(h9) > 1 and _f(h9[1]) > 0 else rate)
+            if len(h9) > 4 and isinstance(h9[4], dict) and _f(h9[4].get("nofx")):
+                nofx += 1
+            continue
+        miss += 1
+    return {"usd": round(usd, 2), "krw": round(krw), "days": n, "miss": miss, "nofx": nofx}
 
 
 WD_EVENTS = ("EXF_WITHDRAW", "EX_WITHDRAW")
@@ -343,9 +428,9 @@ def _legs(conn, since=0) -> dict:
             out = []
             for r in conn.execute(sql, args):
                 dec = r["dec"] if r["dec"] is not None else 18
-                out.append((int(r["ts"]), str(r["g"]), _f(r["q"]) / (10 ** int(dec)), str(r["loc"]), str(r["ev"])))
+                out.append((int(r["ts"]), str(r["g"]), _f(r["q"]) / (10 ** int(dec)), str(r["loc"]), str(r["ev"]), str(r["tx"] or "")))
             return out
-        base = ("SELECT p.event_ts ts, a.group_id g, a.decimals dec, p.location loc, p.qty_base q, p.event ev FROM postings p"
+        base = ("SELECT p.event_ts ts, a.group_id g, a.decimals dec, p.location loc, p.qty_base q, p.event ev, p.source_id tx FROM postings p"
                 " JOIN assets a ON a.asset_id = p.asset_id WHERE a.group_id IS NOT NULL AND ")
         lo = since - MATCH_AFTER_S if since else 0
         ph = lambda t: ",".join("?" * len(t))
@@ -354,16 +439,33 @@ def _legs(conn, since=0) -> dict:
             "ex_dep": q(base + "p.leg_kind = 'move_in' AND p.location LIKE 'exchange:%' AND p.event IN (" + ph(DEP_EVENTS) + ") AND p.event_ts >= ?", DEP_EVENTS + (lo,)),
             "w_in": q(base + "p.leg_kind IN ('acq', 'move_in') AND p.location LIKE 'wallet:%' AND p.event IN (" + ph(W_IN_EVENTS) + ") AND p.event_ts >= ?", W_IN_EVENTS + (lo,)),
             "w_out": q(base + "p.leg_kind = 'move_out' AND p.location LIKE 'wallet:%' AND p.event IN (" + ph(W_OUT_EVENTS) + ") AND p.event_ts >= ?", W_OUT_EVENTS + (lo,)),
+            "w_br": q(base + "p.leg_kind = 'move_out' AND p.location LIKE 'wallet:%' AND p.event = 'BRIDGE' AND p.event_ts >= ?", (lo,)),
             "open": q(base + "p.leg_kind = 'opening' AND p.event IN (" + ph(OPEN_EVENTS) + ") AND p.event_ts >= ?", OPEN_EVENTS + (since,)),
         }
     try:
-        return _memo(conn, ("legs", since), run)
+        return _memo(conn, ("legs2", since), run)
     except sqlite3.Error as e:
         log.warning("자금 흐름 재료 조회 실패: %s", type(e).__name__)
         return {}
 
 
-def _match(src, dst, sym, used_src, used_dst, cond=None):
+def _of_dest_txs(conn):
+    def run():
+        out = []
+        for r in conn.execute("SELECT p.source_id tx, p.location loc FROM postings p WHERE p.source_kind = 'chain_tx' AND p.leg_kind = 'move_in'"
+                              " AND (p.location LIKE 'out:%' OR (p.location LIKE 'wallet:%' AND p.event IN ('TRANSFER_SELF', 'TRANSFER_OUT')))"):
+            loc = str(r["loc"] or "")
+            if r["tx"] and loc.count(":") >= 2:
+                out.append((str(r["tx"]), loc.split(":", 2)[2]))
+        return out
+    try:
+        return _memo(conn, ("of_dest_tx",), run)
+    except sqlite3.Error as e:
+        log.warning("보낸 내역 목적지 전송 조회 실패: %s", type(e).__name__)
+        return []
+
+
+def _match(src, dst, sym, used_src, used_dst, cond=None, lo_tol=MATCH_TOL, hi_tol=MATCH_TOL):
     import bisect
     by = {}
     for j, d in enumerate(dst):
@@ -390,7 +492,7 @@ def _match(src, dst, sym, used_src, used_dst, cond=None):
             if j in used_dst:
                 continue
             d = dst[j]
-            if abs(abs(d[2]) - qs) <= qs * MATCH_TOL and (cond is None or cond(s, d)):
+            if qs * (1 - lo_tol) <= abs(d[2]) <= qs * (1 + hi_tol) and (cond is None or cond(s, d)):
                 used_src.add(i)
                 used_dst.add(j)
                 out.append((i, j))
@@ -438,7 +540,11 @@ def _valuer(hist):
                 pm = {}
             pm_cache[sp] = pm
         p = _f(pm.get(datetime.fromtimestamp(int(ts), KST).strftime("%Y-%m-%d")))
-        return p if p > 0 else (_f(g.get("lp")) or None)
+        if p > 0:
+            return p
+        price.fb += 1
+        return _f(g.get("lp")) or None
+    price.fb = 0
     return price
 
 
@@ -482,10 +588,12 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
     SRC_KRW, SRC_COIN = node("in:krw", "원화 입금", 0, "src"), node("in:coin", "코인으로 받음", 0, "src")
     SRC_OPEN = node("in:open", "수집 시작 때 있던 코인", 0, "src")
     SRC_BACK = node("in:back", "지갑에서 거래소로", 0, "src")
+    SRC_BR = node("in:bridge", "다른 체인에서 옮겨 옴", 0, "src")
     SRC_GAIN = node("in:gain", "그 전부터 있던 돈 · 늘어난 몫" if since_ts else "늘어난 몫", 0, "gain")
     D = {k: node("now:" + k, lab, 3, "dst") for k, lab in (("coin_ex", "거래소 코인"), ("coin_w", "지갑 코인"), ("stable", "스테이블"), ("lp", "DeFi · LP"),
                                                            ("cash", "거래소 원화"), ("krw_out", "원화로 돌아옴"), ("sent", "밖으로 보냄"),
-                                                           ("toex", "거래소로 옮김"), ("fee", "수수료 · 가스"), ("loss", "줄어든 몫"))}
+                                                           ("toex", "거래소로 옮김"), ("bridge", "다른 체인으로 옮김"), ("fee", "수수료 · 가스"),
+                                                           ("unexpl", "설명 안 됨"), ("loss", "줄어든 몫"))}
     sym_of = lambda g: str(names.get(str(g)) or ("#" + str(g)))[:16]
     symu = lambda g: sym_of(g).upper()
     kf = (f.get("krwFlows") or {}).get("rows") or []
@@ -555,22 +663,25 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
         if o.get("exwdOnly"):
             continue
         u = _f(o.get("usdAtSend"))
+        cut9 = _f(o.get("txsCut")) > 0 and isinstance(o.get("walletDays"), dict) and o.get("walletUsdAtSend") is not None
         if o.get("exwd") and isinstance(o.get("txs"), list) and o["txs"]:
-            u = sum(_f(x.get("usdAtSend", x.get("usd"))) for x in o["txs"] if isinstance(x, dict) and not x.get("ex"))
+            u = _f(o.get("walletUsdAtSend")) if cut9 else sum(_f(x.get("usdAtSend", x.get("usd"))) for x in o["txs"] if isinstance(x, dict) and not x.get("ex"))
         if since_ts:
             if int(_f(o.get("lastTs"))) < since_ts:
                 continue
             tx9 = [x for x in (o.get("txs") or ()) if isinstance(x, dict) and int(_f(x.get("ts"))) >= since_ts and not (o.get("exwd") and x.get("ex"))]
             if (tx9 or o.get("exwd")) and int(_f(o.get("firstTs"))) < since_ts:
-                u = sum(_f(x.get("usdAtSend", x.get("usd"))) for x in tx9)
+                u = (sum(_f(v) for d, v in o["walletDays"].items() if str(d) >= str(since)) if cut9
+                     else sum(_f(x.get("usdAtSend", x.get("usd"))) for x in tx9))
         if u <= 0:
             continue
         chs = o.get("chains") or o.get("chainNames") or []
         ch = _chain_key(chs[0] if isinstance(chs, list) and chs else (chs if isinstance(chs, str) else ""), chain_names)
         e = sent_ch.setdefault(ch, {"usd": 0.0, "rows": []})
         e["usd"] += u
-        lab9 = str(o.get("alias") or o.get("label") or _short(o.get("address")))[:40]
-        e["rows"].append(_row(int(_f(o.get("lastTs"))) or None, lab9, u, None, "확인 전" if st9 == "pending" else "밖(외부)" if st9 == "external" else st9))
+        lab9 = str(o.get("alias") or o.get("label") or str(o.get("memo") or "").strip() or _short(o.get("address")))[:40]
+        e["rows"].append(_row(int(_f(o.get("lastTs"))) or None, lab9, u, None, "확인 전" if st9 == "pending" else
+                              ("세일 참가" if o.get("category") == "세일 참가금" else "밖(외부)") if st9 == "external" else st9))
     gas_ch = {}
     if since_ts:
         ym0 = datetime.fromtimestamp(since_ts, KST).strftime("%Y-%m")
@@ -602,14 +713,45 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
     price = _valuer(hist)
     loc_key = lambda loc9: str(loc9).split(":")[1] if ":" in str(loc9) else ""
     ex_wd, ex_dep, w_in, w_out, opn = (L.get(k) or [] for k in ("ex_wd", "ex_dep", "w_in", "w_out", "open"))
+    w_br = L.get("w_br") or []
+    skip9 = {str(g9) for g9, v9 in ((getattr(hist, "kit", None) or {} if hist is not None else {}).get("groups") or {}).items()
+             if isinstance(v9, dict) and v9.get("skip")}
+    if skip9:
+        ex_wd, ex_dep, w_in, w_out, opn, w_br = ([lg for lg in x9 if str(lg[1]) not in skip9] for x9 in (ex_wd, ex_dep, w_in, w_out, opn, w_br))
     u_wd, u_dep, u_win, u_wout = set(), set(), set(), set()
     p_xx = _match(ex_wd, ex_dep, symu, u_wd, u_dep, cond=lambda s, d: loc_key(s[3]) != loc_key(d[3]))
     p_xw = _match(ex_wd, w_in, symu, u_wd, u_win)
     p_wx = _match(w_out, ex_dep, symu, u_wout, u_dep)
+    br_tx = {}
+    br_cut = {}
+    for o in f.get("outflows") or ():
+        st9 = str((o or {}).get("status") or "") if isinstance(o, dict) else ""
+        if st9.startswith(("bridge", "own")):
+            for x9 in o.get("txs") or ():
+                if isinstance(x9, dict) and x9.get("tx"):
+                    br_tx[str(x9["tx"]).lower()] = "own" if st9.startswith("own") else "bridge"
+            if _f(o.get("txsCut")) > 0 and o.get("address"):
+                br_cut[str(o["address"])] = "own" if st9.startswith("own") else "bridge"
+    if br_cut and conn is not None:
+        for tx9, a9 in _of_dest_txs(conn):
+            if a9 in br_cut:
+                br_tx.setdefault(tx9.lower(), br_cut[a9])
+    br_src = [(lg, "bridge") for lg in w_br] + [(w_out[i], br_tx[w_out[i][5].lower()]) for i in range(len(w_out))
+                                               if i not in u_wout and len(w_out[i]) > 5 and w_out[i][5].lower() in br_tx]
+    u_br = set()
+    p_br = _match([x[0] for x in br_src], w_in, symu, u_br, u_win, cond=lambda s, d: s[3] != d[3], lo_tol=0.10, hi_tol=0.02)
+
+    conf = {"day": 0.0, "now": 0.0, "none": 0}
 
     def val(leg):
+        fb0 = getattr(price, "fb", 0)
         p = price(leg[1], leg[0])
-        return abs(leg[2]) * p if p else 0.0
+        v = abs(leg[2]) * p if p else 0.0
+        if p is None:
+            conf["none"] += 1
+        elif p:
+            conf["now" if getattr(price, "fb", 0) > fb0 else "day"] += v
+        return v
     in_ts = lambda leg: (not since_ts) or leg[0] >= since_ts
     route, back = {}, {}
     for i, j in p_xw:
@@ -660,11 +802,34 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
         v = val(o9)
         if v > 0:
             put(open_in, (kind9, loc_key(o9[3])), o9, v)
+    br_in, br_out, br_fee, unexpl = {}, {}, {}, {}
+    for i, j in p_br:
+        s9, d9 = br_src[i][0], w_in[j]
+        if not in_ts(d9):
+            continue
+        v_in = val(d9)
+        val(s9)
+        if v_in <= 0:
+            continue
+        ck_s, ck_d = loc_key(s9[3]), loc_key(d9[3])
+        put(br_in, ck_d, d9, v_in, sym_of(d9[1]) + " ← " + (chain_names.get(ck_s) or ck_s.capitalize()))
+        put(br_out, ck_s, s9, v_in, sym_of(s9[1]) + " → " + (chain_names.get(ck_d) or ck_d.capitalize()))
+        fee9 = max(0.0, abs(s9[2]) - abs(d9[2])) * (v_in / abs(d9[2])) if abs(d9[2]) > 0 else 0.0
+        if fee9 > 0:
+            br_fee[ck_s] = br_fee.get(ck_s, 0.0) + fee9
+    for i, (s9, why9) in enumerate(br_src):
+        if i in u_br or not in_ts(s9):
+            continue
+        v = val(s9)
+        if v > 0:
+            e9 = unexpl.setdefault(loc_key(s9[3]), {"usd": 0.0, "rows": []})
+            e9["usd"] += v
+            e9["rows"].append(_row(s9[0], sym_of(s9[1]), v, abs(s9[2]), "내 다른 지갑(추적 밖)" if why9 == "own" else "브릿지 · 도착 못 찾음"))
     keyk = lambda kind, k: k if kind == "exchange" else _chain_key(k, chain_names) or k
     exs = set(krw["in"]) | set(krw["out"]) | set(hold_ex) | set(cash_ex) | set(gas_ex) | {k[0] for k in route} | {k[0] for k in back} | set(ex_out) \
         | {k[1] for k in coin_in if k[0] == "exchange"} | {k[1] for k in open_in if k[0] == "exchange"}
     chs = set(hold_w) | set(lp_ch) | set(sent_ch) | set(gas_ch) | {k[1] for k in route} | {k[1] for k in back} \
-        | {k[1] for k in coin_in if k[0] == "wallet"} | {k[1] for k in open_in if k[0] == "wallet"}
+        | {k[1] for k in coin_in if k[0] == "wallet"} | {k[1] for k in open_in if k[0] == "wallet"} | set(br_in) | set(br_out) | set(unexpl)
     EXN = {e: node("ex:" + e, EX_KO.get(e, e), 1, "ex") for e in exs if e}
     CHN = {c: node("ch:" + c, (chain_names.get(c) or c.capitalize()) + " 지갑", 2, "ch") for c in chs if c}
     srt = lambda rows: sorted(rows, key=lambda x: -(x["t"] or 0))
@@ -717,6 +882,19 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
     for e, v in gas_ex.items():
         if e in EXN:
             link(EXN[e], D["fee"], v["usd"], "fee", [_row(None, k9, u9) for k9, u9 in v["parts"].items()])
+    for c, v in br_fee.items():
+        e = gas_ch.setdefault(c, {"usd": 0.0, "parts": {}})
+        e["usd"] += v
+        e["parts"]["브릿지 수수료"] = e["parts"].get("브릿지 수수료", 0.0) + v
+    for c, v in br_in.items():
+        if c in CHN:
+            link(SRC_BR, CHN[c], v["usd"], "bridge_in", srt(v["rows"]), len(v["rows"]))
+    for c, v in br_out.items():
+        if c in CHN:
+            link(CHN[c], D["bridge"], v["usd"], "bridge_out", srt(v["rows"]), len(v["rows"]))
+    for c, v in unexpl.items():
+        if c in CHN:
+            link(CHN[c], D["unexpl"], v["usd"], "unexpl", srt(v["rows"]), len(v["rows"]))
     for c, v in gas_ch.items():
         if c in CHN:
             link(CHN[c], D["fee"], v["usd"], "fee", [_row(None, k9, u9) for k9, u9 in sorted(v["parts"].items(), key=lambda kv: -kv[1])])
@@ -733,7 +911,9 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
     tot = {"in_krw": sm(s=SRC_KRW), "in_coin": sm(s=SRC_COIN), "in_open": sm(s=SRC_OPEN), "back": sm(s=SRC_BACK),
            "now": sm(t=(D["coin_ex"], D["coin_w"], D["stable"], D["lp"], D["cash"])),
            "out_krw": sm(t=D["krw_out"]), "sent": sm(t=D["sent"]), "fee": sm(t=D["fee"]),
-           "gain": sm(s=SRC_GAIN), "loss": sm(t=D["loss"]),
+           "gain": sm(s=SRC_GAIN), "loss": sm(t=D["loss"]), "bridge": sm(s=SRC_BR), "unexpl": sm(t=D["unexpl"]),
+           "bridgeN": len([1 for _i, j in p_br if in_ts(w_in[j])]),
+           "pxDay": round(conf["day"] / (conf["day"] + conf["now"]), 4) if conf["day"] + conf["now"] > 0 else None, "pxNone": conf["none"],
            "routes": sum(r["n"] for r in route.values() if r["n"]) + sum(r["n"] for r in back.values() if r["n"]),
            "internal": len([1 for i, _j in p_xx if in_ts(ex_wd[i])])}
     return {"ok": True, "nodes": out_nodes, "links": links, "totals": tot, "since": since or None, "at": int(time.time())}
@@ -765,6 +945,7 @@ _STOP = {"에서", "에", "의", "을", "를", "은", "는", "이", "가", "도"
 _AMT_RE = re.compile(r"(\$|₩)?\s?([\d,.]+)\s?(억|만|천)?\s?(원|달러|불|usd|krw)?\s?(이상|넘는|넘게|초과|보다 큰|이하|미만|안 되는|아래)", re.I)
 _MONTH_RE = re.compile(r"(?:(\d{4})년\s?)?(\d{1,2})월(?!\s?\d{1,2}일)")
 _RECENT_RE = re.compile(r"(?:최근|지난)\s?(\d{1,3})\s?(일|주|달|개월)")
+_YEAR_WORDS = (("재작년", -2), ("지난해", -1), ("작년", -1), ("이번 해", 0), ("올해", 0), ("금년", 0))
 _KO_COIN = {"이더": "ETH", "비트": "BTC", "솔": "SOL", "버추얼": "VIRTUAL", "파이": "PI", "트럼프": "TRUMP", "온도": "ONDO", "에테나": "ENA",
             "아비": "ARB", "샌드박스": "SAND", "엑시": "AXS", "스택스": "STX", "셀레스티아": "TIA", "주피터": "JUP", "렌더": "RENDER", "펭구": "PENGU"}
 _LLM_MAX_DAY = 40
@@ -788,12 +969,41 @@ def ask_rules(q: str, today: datetime = None, coins=None, rate: float = 1384.0) 
         hits += 1
     s = si._FILTER_RE.sub(" ", s)
     d0 = today.date()
-    if "올해" in s or "이번 해" in s:
-        f.setdefault("after", f"{d0.year}-01-01"); f.setdefault("before", d0.isoformat()); echo.append("올해"); hits += 1
-        s = s.replace("올해", " ")
-    elif "작년" in s or "지난해" in s:
-        f.setdefault("after", f"{d0.year - 1}-01-01"); f.setdefault("before", f"{d0.year - 1}-12-31"); echo.append("작년"); hits += 1
-        s = s.replace("작년", " ").replace("지난해", " ")
+    yoff, yw = None, None
+    for w9, off9 in _YEAR_WORDS:
+        if w9 in s:
+            yoff, yw = off9, w9
+            s = s.replace(w9, " ")
+            break
+    if yoff is not None and "after" not in f:
+        y = d0.year + yoff
+        md9 = re.search(r"(\d{1,2})월\s?(\d{1,2})일", s)
+        mm9 = _MONTH_RE.search(s)
+        if md9:
+            try:
+                dd9 = datetime(y, int(md9.group(1)), int(md9.group(2))).date().isoformat()
+                f["after"] = f["before"] = dd9
+                echo.append(f"{y}년 {int(md9.group(1))}월 {int(md9.group(2))}일"); hits += 1
+                s = s[:md9.start()] + " " + s[md9.end():]
+            except ValueError:
+                md9 = None
+        if not md9 and mm9 and 1 <= int(mm9.group(2)) <= 12:
+            y9 = int(mm9.group(1)) if mm9.group(1) else y
+            mo = int(mm9.group(2))
+            a, b = _month_range(y9, mo)
+            f["after"], f["before"] = a, min(b, d0.isoformat())
+            echo.append(f"{y9}년 {mo}월"); hits += 1
+            s = s[:mm9.start()] + " " + s[mm9.end():]
+        elif not md9 and "after" not in f:
+            f["after"], f["before"] = f"{y}-01-01", min(f"{y}-12-31", d0.isoformat())
+            echo.append({"지난해": "작년", "이번 해": "올해", "금년": "올해"}.get(yw, yw)); hits += 1
+    if "after" not in f:
+        my9 = re.search(r"(?<!\d)(\d{4})년(?!\s?\d{1,2}월)", s)
+        if my9 and 2000 <= int(my9.group(1)) <= d0.year:
+            y9 = int(my9.group(1))
+            f["after"], f["before"] = f"{y9}-01-01", min(f"{y9}-12-31", d0.isoformat())
+            echo.append(f"{y9}년"); hits += 1
+            s = s[:my9.start()] + " " + s[my9.end():]
     m = _RECENT_RE.search(s)
     if m and "after" not in f:
         n, u = int(m.group(1)), m.group(2)
@@ -861,8 +1071,9 @@ def ask_rules(q: str, today: datetime = None, coins=None, rate: float = 1384.0) 
                 break
     rest = []
     known = {str(c).upper() for c in (coins or ())}
+    kw = lambda x: any(w.strip() and w.strip() in x for w in _LOSS + _GAIN) or any(w.strip() and w.strip() in x for _t, ws in _TYPE_WORDS for w in ws)
     for tok in s.split():
-        t9 = re.sub(r"(에서|에|의|을|를|은|는|이|가|도|만|로|으로|랑|하고)$", "", tok)
+        t9 = tok if (tok in _KO_COIN or tok in si.KO_ALIAS or kw(tok)) else re.sub(r"(에서|에|의|을|를|은|는|이|가|도|만|로|으로|랑|하고)$", "", tok)
         if not t9 or t9 in _STOP or tok in _STOP:
             continue
         if chain_w and t9.lower() == chain_w:
@@ -872,7 +1083,7 @@ def ask_rules(q: str, today: datetime = None, coins=None, rate: float = 1384.0) 
         if "coin" not in f and (al or (re.fullmatch(r"[A-Za-z][A-Za-z0-9]{1,11}", t9) and (up in known or t9.isupper()))):
             f["coin"] = al or up; echo.append(f["coin"]); hits += 1
             continue
-        if any(w.strip() and w.strip() in t9 for w in _LOSS + _GAIN) or any(w.strip() and w.strip() in t9 for _t, ws in _TYPE_WORDS for w in ws):
+        if kw(tok) or kw(t9):
             continue
         if any(t9.lower() == w or t9 == w for ws in _CHAIN_WORDS.values() for w in ws):
             continue

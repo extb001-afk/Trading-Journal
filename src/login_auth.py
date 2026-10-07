@@ -22,6 +22,9 @@ log = logging.getLogger("tj-web")
 AUTH_PATH = os.path.join(common.STATE_DIR, "auth.json")
 SESS_PATH = os.path.join(common.STATE_DIR, "auth_sessions.json")
 INTERNAL_PATH = os.path.join(common.STATE_DIR, "auth_internal_token")
+SETUP_CODE_PATH = os.path.join(common.STATE_DIR, "auth_setup_code")
+SETUP_CODE_REL = "state/auth_setup_code"
+_SC_ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 V2_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "v2")
 COOKIE = "tj_session"
 INTERNAL_HDR = "X-TJ-Internal"
@@ -90,6 +93,10 @@ def init(cfg: dict) -> Settings:
         st = password_state()[0]
         log.info("웹 로그인 켜짐 — 세션 %d일 · 미사용 %d일 · 비밀번호 %s", S.session_days, S.idle_days,
                  {"set": "설정됨", "none": "없음(이 컴퓨터에서 /login 으로 만드세요)", "damaged": "파일 손상(tools/reset_password.py)"}[st])
+        if st == "none":
+            setup_code(create=True)
+        elif st == "set":
+            drop_setup_code()
     else:
         try:
             os.unlink(INTERNAL_PATH)
@@ -337,6 +344,60 @@ def internal_token(create=False) -> str:
     return t
 
 
+def _sc_norm(s) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())[:64]
+
+
+def setup_code(create=False) -> str:
+    with _LOCK:
+        if password_state()[0] != "none":
+            return ""
+        return _setup_code_locked(create)
+
+
+def _setup_code_locked(create=False) -> str:
+    bad = False
+    try:
+        with open(SETUP_CODE_PATH, "r", encoding="ascii") as f:
+            c = _sc_norm(f.read())
+        if len(c) == 16:
+            _tighten(SETUP_CODE_PATH)
+            return c
+        bad = True
+    except FileNotFoundError:
+        pass
+    except (OSError, UnicodeDecodeError):
+        bad = True
+    if not create:
+        return ""
+    os.makedirs(os.path.dirname(SETUP_CODE_PATH), exist_ok=True)
+    if bad:
+        try:
+            os.unlink(SETUP_CODE_PATH)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return ""
+    try:
+        fd = os.open(SETUP_CODE_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return _setup_code_locked(False)
+    except OSError:
+        return ""
+    c = "".join(secrets.choice(_SC_ALPHA) for _ in range(16))
+    with os.fdopen(fd, "w", encoding="ascii") as f:
+        f.write("-".join(c[i:i + 4] for i in range(0, 16, 4)) + "\n")
+    log.info("첫 비밀번호 설정 코드를 만들었어요 — 이 컴퓨터의 %s 파일(첫 비밀번호 화면에 넣기 · 쓰고 나면 지워짐)", SETUP_CODE_REL)
+    return c
+
+
+def drop_setup_code() -> None:
+    try:
+        os.unlink(SETUP_CODE_PATH)
+    except OSError:
+        pass
+
+
 def rotate_internal_token() -> str:
     t = secrets.token_urlsafe(32)
     ss._atomic_write_text(INTERNAL_PATH, t + "\n", 0o600)
@@ -407,6 +468,14 @@ def _bucket(ip: str) -> str:
     return str(a)
 
 
+def bucket_of(h) -> str:
+    p = _peer(h)
+    if not (p is not None and p.is_loopback and proxied(h)):
+        return _bucket(client_ip(h))
+    x = _ip((h.headers.get("X-Forwarded-For") or "").split(",")[-1])
+    return "p:" + _bucket(str(x)) if x is not None and not x.is_loopback else "p:?"
+
+
 def proxied_https(h) -> bool:
     p = _peer(h)
     xfp = (h.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
@@ -469,6 +538,12 @@ class Limiter:
         self.ip = {}
         self.glob = []
         self.lock = threading.Lock()
+        self.gen = False
+
+    def reset(self):
+        with self.lock:
+            self.ip.clear()
+            self.glob = []
 
     def _st(self, b, now):
         st = self.ip.get(b)
@@ -607,7 +682,16 @@ def _post_ok(h, onboarding, csrf_tok=None) -> bool:
     return True
 
 
+def _sync_limiter() -> None:
+    with _LOCK:
+        sig = _auth_locked()["sig"]
+        if getattr(LIM, "gen", False) is not False and LIM.gen != sig:
+            LIM.reset()
+        LIM.gen = sig
+
+
 def _limited(h, b, direct) -> bool:
+    _sync_limiter()
     w = LIM.wait(b, direct)
     if not w:
         return False
@@ -640,16 +724,20 @@ def _verify_limited(h, b, pw, rec, label):
 
 
 def _status(h):
+    _sync_limiter()
     st, _rec = password_state()
     sess, tok, _had = session_of(h)
     d = {"ok": True, "enabled": True, "passwordSet": st == "set", "damaged": st == "damaged", "authed": sess is not None,
          "sessionDays": S.session_days, "idleDays": S.idle_days, "pwMin": PW_MIN}
     if st == "none":
         d["canSetup"] = setup_allowed(h)
+        if d["canSetup"]:
+            setup_code(create=True)
+            d["setupCodePath"] = SETUP_CODE_REL
     if sess is not None:
         d.update(csrf=_sess_csrf(tok), exp=sess["e"], sessions=session_count())
     else:
-        w = LIM.wait(_bucket(client_ip(h)), direct_loopback(h))
+        w = LIM.wait(bucket_of(h), direct_loopback(h))
         if w:
             d["retryAfter"] = w
     return _json(h, 200, d)
@@ -663,7 +751,7 @@ def _login(h, onboarding):
         return _json(h, 503, {"ok": False, "error": "인증 파일이 손상됐어요 — 서버에서 python3 tools/reset_password.py 로 다시 만드세요"})
     if st == "none":
         return _json(h, 409, {"ok": False, "setup": True, "error": "아직 비밀번호가 없어요 — 이 컴퓨터에서 먼저 만드세요"})
-    b, direct = _bucket(client_ip(h)), direct_loopback(h)
+    b, direct = bucket_of(h), direct_loopback(h)
     if _limited(h, b, direct):
         return True
     body = _read_json(h)
@@ -708,6 +796,13 @@ def _setup(h, onboarding):
     body = _read_json(h)
     if body is None:
         return _json(h, 400, {"ok": False, "error": "본문 형식 오류(JSON 객체, 4KB 이하)"})
+    want = setup_code(create=True)
+    got = _sc_norm(body.get("code"))
+    if not want or not got or not hmac.compare_digest(got.encode("ascii"), want.encode("ascii")):
+        if got:
+            log.info("첫 비밀번호 설정 코드 틀림(%s)", bucket_of(h))
+        msg = ("설정 코드가 맞지 않아요" if got else "설정 코드를 넣어 주세요") + f" — 이 컴퓨터의 {SETUP_CODE_REL} 파일 내용(터미널: cat {SETUP_CODE_REL})"
+        return _json(h, 403, {"ok": False, "code": True, "error": msg})
     pw = body.get("password")
     prob = password_problem(pw)
     if prob:
@@ -718,6 +813,7 @@ def _setup(h, onboarding):
         rec = set_password(pw)
         revoke(None)
         tok = new_session(rec)
+        drop_setup_code()
     log.info("웹 로그인 비밀번호 설정(첫 실행)")
     return _json(h, 200, {"ok": True}, (_set_cookie(h, tok, S.session_days * 86400),))
 
@@ -734,7 +830,7 @@ def _session_post(h, onboarding, path, sess, tok):
         n = revoke(None)
         log.info("모든 기기 로그아웃(%d개 세션)", n)
         return _json(h, 200, {"ok": True, "revoked": n}, (clear, ("Clear-Site-Data", '"cache"')))
-    b = _bucket(client_ip(h))
+    b = bucket_of(h)
     if _limited(h, b, direct_loopback(h)):
         return True
     body = _read_json(h)

@@ -225,7 +225,8 @@ def _rpc(urls, method, params, timeout=20):
     for u in urls or []:
         try:
             req = urllib.request.Request(u, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            import bf_engine as _bfe9
+            with _bfe9.sol_open(req, timeout, method, sol=True) as r:
                 d = json.loads(r.read().decode())
             if "result" in d:
                 return d["result"]

@@ -33,6 +33,7 @@ import health
 import spamguard
 import depaddr
 import onboarding
+import demo_data
 import login_auth
 import lpdec
 import lpchain
@@ -46,6 +47,7 @@ import xchain_match
 import search_index
 import wow
 import wow2
+import ops_requests
 import other_assets
 import nft
 import candles
@@ -57,9 +59,12 @@ import coverage_limits
 import rawtx_cache
 import acct_norm
 import rabby
+import salelink
 import day_memo
 import alert_prefs
 import alert_watch
+import flowev
+import addr_ai
 try:
     from review_prompt import PROMPT_VERSION as REVIEW_PV
 except Exception:
@@ -188,6 +193,56 @@ def futures_api_payload():
     return out9
 
 
+def leverage_api_payload(now=None):
+    import leverage
+    import lev_view
+    now9 = time.time() if now is None else float(now)
+    lev9 = leverage.read_state(now9)
+    futs9 = {}
+    try:
+        on9 = perp_active() or {}
+    except Exception:
+        on9 = {}
+    for ex9 in FUT_CEX + tuple(k9 for k9 in PERP_KEYS if k9 in on9):
+        fp9 = os.path.join(common.STATE_DIR, f"futures_{ex9}.json")
+        if not os.path.exists(fp9):
+            continue
+        try:
+            d9 = common.read_json(fp9, {})
+        except SystemExit:
+            continue
+        if isinstance(d9, dict):
+            futs9[ex9] = perp_filter(d9, on9[ex9], now9, ex9) if ex9 in on9 else d9
+    try:
+        th9 = float(((alert_prefs.load(BUILDER.prefs()) or {}).get("th") or {}).get("liq_pct") or 10)
+    except Exception:
+        th9 = 10.0
+    lm9, lp9 = None, os.path.join(common.STATE_DIR, "liq_watch.json")
+    if os.path.exists(lp9):
+        try:
+            lm9 = common.read_json(lp9, None)
+        except SystemExit:
+            lm9 = None
+    syms9 = set()
+    for it9 in lev9.get("items") or []:
+        if isinstance(it9, dict):
+            syms9 |= {str(x.get("ccy") or "").upper() for x in (it9.get("debt") or []) + (it9.get("collateral") or []) if isinstance(x, dict)}
+            syms9.add(str((it9.get("position") or {}).get("settle") or "").upper())
+    syms9 = {"BTC" if s9 == "XBT" else s9 for s9 in syms9}
+    syms9 = {s9 for s9 in syms9 if s9 and s9 not in STABLE_GROUPS and not _ex_stable_sym(s9)}
+    sp9 = getattr(BUILDER, "spot", None) if "BUILDER" in globals() else None
+    if sp9 is not None and syms9:
+        sp9.want(syms9)
+
+    def price9(s9):
+        s9 = str(s9 or "").upper()
+        s9 = "BTC" if s9 == "XBT" else s9
+        if s9 in STABLE_GROUPS or _ex_stable_sym(s9):
+            return 1.0
+        return sp9.price(s9) if sp9 is not None else None
+    return lev_view.build(lev9, futs9, price9, th9, lm9, now9)
+
+
 def review_pause_eff(prefs) -> dict:
     v = (prefs or {}).get("review_pause")
     return {"on": bool(isinstance(v, dict) and v.get("on") is True), "at": (v or {}).get("at") if isinstance(v, dict) else None}
@@ -211,6 +266,7 @@ _V2_FILES = {"index.html": "text/html; charset=utf-8",
              "app.js": "application/javascript; charset=utf-8",
              "health.js": "application/javascript; charset=utf-8",
              "search.js": "application/javascript; charset=utf-8",
+             "salelink.js": "application/javascript; charset=utf-8",
              "wow.js": "application/javascript; charset=utf-8"}
 
 
@@ -227,7 +283,7 @@ def _ui_route(path: str):
 _ASSETS = {}
 _ASSETS_LOCK = threading.Lock()
 _V2_JS_RE = re.compile(rb'<script src="/v2/app\.js"></script>')
-_V2_VER_JS = ("health.js", "search.js")
+_V2_VER_JS = ("health.js", "search.js", "wow.js", "setup.js")
 
 
 def _asset(fpath: str) -> dict:
@@ -297,6 +353,219 @@ def _scam_name(sym):
     if spamguard.impostor_of(s) or spamguard.odd_symbol(s):
         return "사칭 문자(유사 글자)"
     return None
+
+
+SNAPFILE_PATH = os.path.join(common.STATE_DIR, "web_snap_last.bin")
+SNAPFILE_EVERY = 300
+SNAPFILE_MAX_AGE = 1800
+_SNAPFILE = {"at": 0.0, "ver": None, "lock": threading.Lock()}
+_SNAPFILE_MAGIC = b"TJSNAP1\n"
+_LASTSCAN_KEY = b'"lastScan": '
+_LASTSCAN_RX = re.compile(r"(\d+)(초|분) 전 스캔")
+
+
+def _code_sig() -> str:
+    h = hashlib.sha1()
+    d9 = os.path.dirname(os.path.abspath(__file__))
+    for n9 in sorted(os.listdir(d9)):
+        if n9.endswith(".py"):
+            with open(os.path.join(d9, n9), "rb") as f9:
+                h.update(n9.encode() + b"\0" + f9.read())
+    seen9 = set()
+    for sd in (os.path.join(os.path.dirname(d9), "seed"), os.path.join(common.BASE_DIR, "seed")):
+        rp = os.path.realpath(sd)
+        if rp in seen9 or not os.path.isdir(rp):
+            continue
+        seen9.add(rp)
+        for root9, dirs9, files9 in os.walk(rp):
+            dirs9.sort()
+            for n9 in sorted(files9):
+                fp9 = os.path.join(root9, n9)
+                with open(fp9, "rb") as f9:
+                    h.update(b"seed:" + os.path.relpath(fp9, rp).encode() + b"\0" + f9.read())
+    return h.hexdigest()[:16]
+
+
+_SIG0 = {}
+
+
+def _snapfile_sig() -> dict:
+    if not _SIG0:
+        with open(common.CONFIG_PATH, "rb") as f9:
+            cfg9 = hashlib.sha1(f9.read()).hexdigest()[:16]
+        try:
+            st9 = os.stat(common.ENV_PATH)
+            env9 = [st9.st_mtime_ns, st9.st_size]
+        except OSError:
+            env9 = None
+        _SIG0.update(code=_code_sig(), cfg=cfg9, env=env9)
+    out = dict(_SIG0)
+    c9 = dbm.open_db(common.DB_PATH, readonly=True)
+    try:
+        out["led"] = [list(r) for r in c9.execute("SELECT k, v FROM meta WHERE k IN ('schema_version', 'ext_rebuilt_at') ORDER BY k")]
+    finally:
+        c9.close()
+    return out
+
+
+def _snapfile_save(snap, force=False, still_ok=None):
+    now = time.time()
+    with _SNAPFILE["lock"]:
+        if not force and (_SNAPFILE["ver"] == snap.ver or now - _SNAPFILE["at"] < SNAPFILE_EVERY):
+            return False
+        _SNAPFILE["at"], _SNAPFILE["ver"] = now, snap.ver
+    try:
+        parts = snap.parts_gz or {}
+        blobs = [snap.gz, snap.slim_gz or b""] + [parts[n] for n in websnap.PARTS if n in parts]
+        head = {"ver": snap.ver, "at": snap.at, "built_at": snap.built_at, "hero": snap.hero, "sig": _snapfile_sig(),
+                "slim": snap.slim_gz is not None, "parts": [n for n in websnap.PARTS if n in parts], "lens": [len(b) for b in blobs],
+                "h": hashlib.sha1(b"".join(blobs)).hexdigest()}
+        hj = json.dumps(head, ensure_ascii=False).encode()
+        tmp = SNAPFILE_PATH + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "wb") as f9:
+            f9.write(_SNAPFILE_MAGIC + str(len(hj)).encode() + b"\n" + hj)
+            for b9 in blobs:
+                f9.write(b9)
+            f9.flush()
+            os.fsync(f9.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, SNAPFILE_PATH)
+        if still_ok is not None and not still_ok():
+            _snapfile_drop()
+            return False
+        return True
+    except Exception as e:
+        log.warning("스냅샷 저장본 쓰기 실패(무시): %s", type(e).__name__)
+        with _SNAPFILE["lock"]:
+            _SNAPFILE["ver"] = None
+        return False
+
+
+def _snapfile_drop():
+    try:
+        os.unlink(SNAPFILE_PATH)
+    except OSError:
+        pass
+    with _SNAPFILE["lock"]:
+        _SNAPFILE["at"], _SNAPFILE["ver"] = 0.0, None
+
+
+def _aged_last_scan(raw: bytes, elapsed: float):
+    if raw.count(_LASTSCAN_KEY) != 1:
+        return None
+    i = raw.index(_LASTSCAN_KEY) + len(_LASTSCAN_KEY)
+    if raw[i:i + 1] != b'"':
+        return None
+    end = raw.find(b'"', i + 1, i + 202)
+    if end < 0 or b"\\" in raw[i + 1:end]:
+        return None
+    m9 = _LASTSCAN_RX.fullmatch(raw[i + 1:end].decode("utf-8", "replace"))
+    if not m9:
+        return raw
+    ago = int(m9.group(1)) * (1 if m9.group(2) == "초" else 60) + int(max(0.0, elapsed))
+    new = f"{ago}초 전 스캔" if ago < 90 else f"{ago // 60}분 전 스캔"
+    return raw[:i] + json.dumps(new, ensure_ascii=False).encode() + raw[end + 1:]
+
+
+def _snapfile_load(gen: int, stale_max: float):
+    if not os.path.exists(SNAPFILE_PATH):
+        return None
+    why = ""
+    try:
+        with open(SNAPFILE_PATH, "rb") as f9:
+            data = f9.read()
+        if not data.startswith(_SNAPFILE_MAGIC):
+            raise ValueError("magic")
+        rest = data[len(_SNAPFILE_MAGIC):]
+        n9, _, rest = rest.partition(b"\n")
+        head = json.loads(rest[:int(n9)])
+        body = rest[int(n9):]
+        lens = [int(x) for x in head["lens"]]
+        if sum(lens) != len(body) or hashlib.sha1(body).hexdigest() != head.get("h"):
+            raise ValueError("length/hash")
+        blobs, o9 = [], 0
+        for L9 in lens:
+            blobs.append(body[o9:o9 + L9])
+            o9 += L9
+        at = float(head["at"])
+        hero = head.get("hero") if isinstance(head.get("hero"), dict) else None
+        age9 = time.time() - at
+        if age9 > min(stale_max, SNAPFILE_MAX_AGE) or age9 < -60:
+            why = "너무 오래됨(%d분)" % int(age9 // 60) if age9 > 0 else "시각이 미래"
+        elif not hero or hero.get("todayKey") != datetime.now(KST).strftime("%m-%d"):
+            why = "날짜 바뀜"
+        else:
+            sig0, sig1 = head.get("sig") or {}, _snapfile_sig()
+            if sig0 != sig1:
+                why = "바뀜: " + ",".join(k for k in ("code", "cfg", "env", "led") if sig0.get(k) != sig1.get(k))
+        if why:
+            log.info("스냅샷 저장본 안 씀(%s) — 첫 빌드를 기다림", why)
+            return None
+        raw = gzip.decompress(blobs[0])
+        if hashlib.sha1(raw).hexdigest()[:16] != head["ver"]:
+            raise ValueError("ver")
+        names = head.get("parts") or []
+        slim_ok = head.get("slim") and len(names) == len(websnap.PARTS) and len(blobs) == 2 + len(names)
+        el9 = max(0.0, age9)
+        raw2 = _aged_last_scan(raw, el9)
+        slim2 = _aged_last_scan(gzip.decompress(blobs[1]), el9) if slim_ok else None
+        if raw2 is None or (slim_ok and slim2 is None):
+            log.info("스냅샷 저장본 안 씀(수집 시각 칸 없음) — 첫 빌드를 기다림")
+            return None
+        snap = websnap.Snap.__new__(websnap.Snap)
+        snap.raw, snap.at, snap.gen = raw2, at, gen
+        snap.gz = blobs[0] if raw2 == raw else websnap.gz(raw2)
+        snap.ver = head["ver"] if raw2 == raw else hashlib.sha1(raw2).hexdigest()[:16]
+        snap.built_at, snap.hero = head.get("built_at"), hero
+        if slim_ok:
+            snap.slim_gz = blobs[1] if slim2 == gzip.decompress(blobs[1]) else websnap.gz(slim2)
+            snap.parts_gz = dict(zip(names, blobs[2:]))
+        else:
+            snap.slim_gz = snap.parts_gz = None
+        return snap
+    except Exception as e:
+        log.warning("스냅샷 저장본 읽기 실패(지움): %s", type(e).__name__)
+        _snapfile_drop()
+        return None
+
+
+_HERO_HTML = {}
+_HERO_HTML_LOCK = threading.Lock()
+
+
+def _hero_ok(b, snap) -> bool:
+    try:
+        if b is None or snap is None:
+            return False
+        lim = float(getattr(b, "SNAP_STALE_MAX", 120))
+        if time.time() - float(snap.at) > lim:
+            return False
+        if snap.gen != b.__dict__.get("_inval", 0) or b.__dict__.get("_build_err") is not None:
+            return False
+        tk = (getattr(snap, "hero", None) or {}).get("todayKey")
+        return tk == datetime.now(KST).strftime("%m-%d")
+    except Exception:
+        return False
+
+
+def _wallet_reload_view() -> dict:
+    try:
+        import wallet_register as _wr9
+        alive9 = _wr9.auto_reload_alive()
+        return {"ok": True, "auto": bool(_wr9.apply_info().get("runner")), "addrs": sorted(_wr9.pending_addrs()) if alive9 else []}
+    except Exception:
+        return {"ok": True, "auto": False, "addrs": []}
+
+
+def _bcall(name, *a):
+    f9 = getattr(BUILDER, name, None)
+    return f9(*a) if callable(f9) else None
+
+
+def _mats_ready(path) -> bool:
+    r9 = _bcall("mats_wait", path)
+    return True if r9 is None else bool(r9)
 
 
 def _publish_snap(pub, gen, out=None):
@@ -436,6 +705,26 @@ def dust_usd_eff(prefs) -> float:
         return 50.0
 
 
+def _tx_norm(tx) -> str:
+    tx = str(tx or "")
+    return tx.lower() if tx.startswith("0x") else tx
+
+
+def _of_linked_txs(of_dec) -> dict:
+    out = {}
+    for ent in (of_dec or {}).values():
+        if not isinstance(ent, dict):
+            continue
+        for l in (ent.get("links") or ()):
+            if not isinstance(l, dict):
+                continue
+            kp = str(l.get("key") or "").split("|")
+            if len(kp) < 3 or kp[0] != "chain_tx" or not kp[1] or not kp[2]:
+                continue
+            out[(kp[1], _tx_norm(kp[2]))] = "세일 토큰" if l.get("kind") == "tokens" else "환불"
+    return out
+
+
 def _classify_pendings(pendings, prefs):
     dust = dust_usd_eff(prefs)
     for p in pendings:
@@ -506,6 +795,8 @@ def snapshot_refresher():
 
 PREFS_PATH = os.path.join(common.STATE_DIR, "ui_prefs.json")
 PREFS_LOCK = threading.Lock()
+_OPS_RL = __import__("collections").deque()
+_OPS_RL_LOCK = threading.Lock()
 SELL_EVALS = sellchart.EvalStore()
 BUY_EVALS = sellchart.EvalStore(kind="buy")
 DAY_MEMOS = day_memo.Store()
@@ -1098,6 +1389,8 @@ class Spot:
         self.ex_want = set()
         self._ex_at = {}
         self.token_pairs = set()
+        self.off_chains = set()
+        self.off_at = {}
         self._tp_slots = {}
         self.token_slow = set()
         self.meta_want = set()
@@ -1153,15 +1446,17 @@ class Spot:
 
     def want_tokens(self, pairs, slot="main"):
         with self.lock:
-            self._tp_slots[slot] = {p for p in pairs if p[0] and p[1]}
+            off = self.off_chains
+            self._tp_slots[slot] = {p for p in pairs if p[0] and p[1] and p[0] not in off}
             self.token_pairs = set().union(*self._tp_slots.values())
 
     def set_token_prio(self, prio, skip=None, slow=None, meta_want=None):
         with self.lock:
-            self.token_prio = {p: float(v or 0) for p, v in (prio or {}).items() if p and p[0] and p[1]}
+            off = self.off_chains
+            self.token_prio = {p: float(v or 0) for p, v in (prio or {}).items() if p and p[0] and p[1] and p[0] not in off}
             self.token_skip = set(skip or ())
             self.token_slow = set(slow or ())
-            self.meta_want = set(meta_want or ())
+            self.meta_want = {p for p in (meta_want or ()) if p and p[0] not in off}
 
     def ex_age(self, ex, sym):
         ts = self.ex_ts.get(f"{ex}:{sym}")
@@ -1169,7 +1464,8 @@ class Spot:
 
     def want_okx(self, pairs):
         with self.lock:
-            self.okx_pairs = {p for p in pairs if p[0] and p[1]}
+            off = self.off_chains
+            self.okx_pairs = {p for p in pairs if p[0] and p[1] and p[0] not in off}
 
     def want_ex(self, exs):
         with self.lock:
@@ -1200,7 +1496,7 @@ class Spot:
 
     def dex_reserve(self, chain, ca):
         key = f"{chain}:{ca}"
-        if time.time() - self.dex_res_ts.get(key, 0) > self.RESERVE_STALE_SEC:
+        if self.off_at.get(chain, time.time()) - self.dex_res_ts.get(key, 0) > self.RESERVE_STALE_SEC:
             return None
         return self.dex_res.get(key)
 
@@ -1237,7 +1533,7 @@ class Spot:
     def dex_price(self, chain, ca):
         key = f"{chain}:{ca}"
         ts = self.dex_ts.get(key, 0)
-        if time.time() - ts > self.dex_max_age:
+        if self.off_at.get(chain, time.time()) - ts > self.dex_max_age:
             return None
         px = self.dex_usd.get(key)
         res = self.dex_reserve(chain, ca)
@@ -1799,11 +2095,12 @@ def _px_took(px) -> bool:
 HIST_NF = "nf"
 
 
-def _hist_kit_rows(daily, today_iso, cache, flow_nf=()):
+def _hist_kit_rows(daily, today_iso, cache, flow_nf=(), val_nf=()):
     rows = list(daily or ())
     n = len(rows)
     t0 = datetime.strptime(today_iso, "%Y-%m-%d")
     fnf = set(flow_nf or ())
+    vnf = set(val_nf or ())
     out, nf, past, fin = [], set(), 0, 0
     for i, r in enumerate(rows):
         iso = (t0 - timedelta(days=n - 1 - i)).strftime("%Y-%m-%d")
@@ -1811,7 +2108,7 @@ def _hist_kit_rows(daily, today_iso, cache, flow_nf=()):
         if iso < today_iso:
             past += 1
             c = (cache or {}).get(iso)
-            if not (isinstance(c, dict) and c.get("val") is not None):
+            if iso in vnf or not (isinstance(c, dict) and c.get("val") is not None):
                 r2[HIST_NF] = ("val", "flow")
                 r2["val"] = None
                 r2["flow"] = None
@@ -1850,6 +2147,10 @@ def _dec_or0(x) -> Decimal:
         return Decimal(0)
 
 
+class _BuildObsolete(Exception):
+    pass
+
+
 class StateBuilder:
     LEDGER_GEN = 2
     skip_gen_check = False
@@ -1862,12 +2163,62 @@ class StateBuilder:
     KEEP_DIAG = os.environ.get("TJ_REPLAY_DEBUG") == "1" or os.environ.get("TJ_KEEP_DIAG") == "1"
     _SIG_SKIP = frozenset(("web_diag.json", "daily_cache.json", "daily_px.json", "px_cache_web.json", "backfill_status.json",
                            "upbit_orders_state.json", "ledger.db-shm", "pending_dm.jsonl.1",
+                           "alert_watch.json",
                            "curve_hist.json", "curve_hist_px.json",
                            "search.db", "search.db-wal", "search.db-shm",
-                           rawtx_cache.FILE)
+                           rawtx_cache.FILE,
+                           "web_snap_last.bin", "web_snap_last.bin.tmp",
+                           "day_memos.json")
                           + nft.STATE_FILES)
-    _SIG_SKIP_RX = re.compile(r"^(cursor_|emitted_|enrich_|pending_detail_|health_|alerts_)|(token_meta|mint_meta)[\w.-]*\.json$"
+    _SIG_SKIP_RX = re.compile(r"^(cursor_|emitted_|enrich_|pending_detail_|health_|alerts_|runner_)|(token_meta|mint_meta)[\w.-]*\.json$"
                               r"|\.(lock|tmp|pending|log)$|\.bak|\.absent")
+
+    _SIG_CONTENT = ("outflow_decisions.json", "ui_prefs.json")
+    PREFS_NOBUILD = frozenset(("alert_prefs", "alert_prefs_v1",
+                               "review_len", "review_pause", "review_fill",
+                               "plans"))
+
+    def _sig_content(self, name, st9):
+        key9 = (st9.st_mtime_ns, st9.st_size, st9.st_ino)
+        memo9 = self.__dict__.setdefault("_sigc_memo", {})
+        hit9 = memo9.get(name)
+        prov9 = frozenset(((self.__dict__.get("_of_auto") or {}).get("proven") or {})) if name == "outflow_decisions.json" else None
+        if hit9 is not None and hit9[0] == key9 and hit9[1] == prov9:
+            return hit9[2]
+        try:
+            with open(os.path.join(common.STATE_DIR, name), "rb") as f9:
+                d9 = json.loads(f9.read().decode("utf-8"))
+            if not isinstance(d9, dict):
+                raise ValueError("not dict")
+            if name == "outflow_decisions.json":
+                v9 = self._dec_build_view(d9, prov9)
+            else:
+                v9 = self._prefs_build_view(d9)
+            h9 = ("c", hashlib.sha1(json.dumps(v9, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest())
+        except (OSError, ValueError, TypeError):
+            h9 = ("s",) + key9
+        memo9[name] = (key9, prov9, h9)
+        return h9
+
+    @staticmethod
+    def _dec_build_view(d9, proven=None):
+        dd9 = d9.get("decisions") if isinstance(d9.get("decisions"), dict) else {}
+        out9 = {}
+        for a9, v9 in dd9.items():
+            if not isinstance(v9, dict):
+                out9[a9] = v9
+                continue
+            w9 = {k9: x9 for k9, x9 in v9.items() if k9 not in ("memo", "ts")}
+            nm9 = salelink.dest_name(a9, v9)
+            if nm9 != salelink.dest_name(a9, {}):
+                w9["_nm"] = nm9
+            if w9 or proven is None or a9 in proven:
+                out9[a9] = w9
+        return {"v": d9.get("version"), "d": out9, "x": sorted(k9 for k9 in d9 if k9 not in ("decisions", "version", "updated"))}
+
+    @classmethod
+    def _prefs_build_view(cls, d9):
+        return {k9: v9 for k9, v9 in d9.items() if k9 not in cls.PREFS_NOBUILD}
 
     def _rtxc(self):
         r9 = self.__dict__.get("_rtx")
@@ -1887,7 +2238,10 @@ class StateBuilder:
                     if n9 in self._SIG_SKIP or self._SIG_SKIP_RX.search(n9) or not e9.is_file(follow_symlinks=False):
                         continue
                     st9 = e9.stat(follow_symlinks=False)
-                    sig.append((n9, st9.st_mtime_ns, st9.st_size))
+                    if n9 in self._SIG_CONTENT:
+                        sig.append((n9,) + self._sig_content(n9, st9))
+                    else:
+                        sig.append((n9, st9.st_mtime_ns, st9.st_size))
             return tuple(sorted(sig))
         except OSError:
             return None
@@ -1909,16 +2263,19 @@ class StateBuilder:
     def cache(self, v):
         if v is None:
             self.__dict__["_inval"] = self.__dict__.get("_inval", 0) + 1
+            if self.__dict__.get("_snapfile_on"):
+                _snapfile_drop()
         self.__dict__["_cache"] = v
 
     def __init__(self):
         self.cfg = common.load_config()
         self.addr_label = {}
-        for w in self.cfg.get("wallets", []):
+        for w in common.history_wallets(self.cfg):
             a = w["address"] if w.get("type") == "sol" else w["address"].lower()
             if w.get("label"):
                 self.addr_label[a] = w["label"]
         self.spot = Spot()
+        self._spot_off()
         try:
             self.spot.min_reserve_usd = float((self.cfg.get("price_guard") or {}).get(
                 "min_reserve_usd", Spot.MIN_RESERVE_USD))
@@ -1978,6 +2335,32 @@ class StateBuilder:
         self._lp_lock = threading.Lock()
         threading.Thread(target=self._lp_worker, daemon=True, name="lp-worker").start()
         threading.Thread(target=self._rabby_worker, daemon=True, name="rabby-worker").start()
+        self._addr_ai_targets = []
+        self._addr_ai_paused = lambda: review_pause_eff(self.prefs()).get("on")
+        self._addr_ai_busy = lambda: bool(SELL_EVALS.running or BUY_EVALS.running)
+        threading.Thread(target=addr_ai.worker_loop, args=(self,), daemon=True, name="addr-ai-worker").start()
+
+    def _hist_wallets(self) -> list:
+        return common.history_wallets(self.cfg)
+
+    def _spot_off(self):
+        off = set(self.cfg.get("_disabled_chains") or ())
+        self.spot.off_chains = off
+        if not off:
+            return
+        try:
+            raw9 = common.read_json(common.CONFIG_PATH, {}) or {}
+        except (Exception, SystemExit):
+            raw9 = {}
+        now9 = time.time()
+        for ch9 in off:
+            cc9 = (raw9.get("chains") or {}).get(ch9) if isinstance(raw9.get("chains"), dict) else None
+            mk9 = cc9.get("_chainoff") if isinstance(cc9, dict) else None
+            at9 = mk9.get("at") if isinstance(mk9, dict) else None
+            if not (isinstance(at9, (int, float)) and not isinstance(at9, bool) and 0 < at9 <= now9):
+                ts9 = [float(v) for k, v in (self.spot.dex_ts or {}).items() if str(k).startswith(ch9 + ":") and isinstance(v, (int, float))]
+                at9 = max(ts9) if ts9 else now9
+            self.spot.off_at[ch9] = float(at9)
 
     def _rabby_worker(self):
         s = rabby.settings(self.cfg)
@@ -2005,17 +2388,19 @@ class StateBuilder:
         prev = common.read_json(LP_POS_PATH, {}) or {}
         pos = dict(prev.get("positions") or {})
         nft_prev = dict(prev.get("wallet_nfts") or {})
+        off9 = set(self.cfg.get("_disabled_chains") or ())
+        off9.update(c for c, cc in (self.cfg.get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(c, cc))
         with self._lp_lock:
-            ledger_open = list(self._lp_targets)
+            ledger_open = [t for t in self._lp_targets if t[0] not in off9]
         targets = {t9[3]: (t9[0], t9[1], t9[2]) for t9 in ledger_open}
         extra = {t9[3]: (t9[4] if len(t9) > 4 else {}) for t9 in ledger_open}
         mgrs_all = lpdec.lp_managers(common.BASE_DIR)
-        nfts = {}
+        nfts = {k: v for k, v in nft_prev.items() if str(k).split(":", 1)[0] in off9}
         for w in self.cfg.get("wallets") or []:
             if not isinstance(w, dict) or w.get("type", "evm") == "sol":
                 continue
             ch = w.get("chain"); wa = str(w.get("address") or "").lower()
-            if ch not in mgrs_all or not wa:
+            if ch in off9 or ch not in mgrs_all or not wa:
                 continue
             lst = lpchain.list_wallet_positions(self.cfg, ch, wa)
             key9 = f"{ch}:{wa}"
@@ -2051,6 +2436,9 @@ class StateBuilder:
                 n_ok += 1
             time.sleep(0.2)
         for loc in list(pos):
+            ch9 = str((pos[loc] or {}).get("chain") or (loc.split(":")[1] if ":" in loc else ""))
+            if ch9 in off9:
+                continue
             if loc not in targets and now9 - int(pos[loc].get("t") or 0) > 7 * 86400:
                 pos.pop(loc, None)
         common.atomic_write_json(LP_POS_PATH, {"updated": now9, "positions": pos, "wallet_nfts": nfts,
@@ -2146,7 +2534,7 @@ class StateBuilder:
             m = {}
             for r in conn.execute("SELECT a.chain, a.address, a.symbol, g.name AS gname FROM assets a LEFT JOIN asset_groups g"
                                   " ON g.group_id=a.group_id WHERE a.address IS NOT NULL").fetchall():
-                m[(r["chain"], xchain_match.norm(r["address"]))] = r["gname"] or r["symbol"]
+                m[(r["chain"], xchain_match.norm(r["address"]))] = self._gsym(r)
         except Exception:
             m = {}
         finally:
@@ -2192,12 +2580,15 @@ class StateBuilder:
             time.sleep(60)
             try:
                 with self._origin_lock:
-                    todo = sorted(self._origin_pending)[:5]
+                    pending9 = sorted(self._origin_pending)
+                off9 = set(self.cfg.get("_disabled_chains") or ())
+                hints9 = self._origin_net_hints(pending9) if (off9 and pending9) else {}
+                todo = [tx for tx in pending9 if hints9.get(str(tx).lower(), (None, None))[1] not in off9][:5] if off9 else pending9[:5]
                 if not todo:
                     continue
                 cache = common.read_json(path, {})
                 now9 = int(time.time())
-                hints9 = self._origin_net_hints(todo)
+                hints9 = self._origin_net_hints(todo) if not off9 else hints9
                 for tx in todo:
                     ent = cache.get(tx)
                     net9, ch9 = hints9.get(tx, (None, None))
@@ -2232,7 +2623,7 @@ class StateBuilder:
                     if found:
                         cache[tx] = found
                     else:
-                        n9 = int((ent or {}).get("n") or (2 if ent and "n" not in ent else 0)) + 1
+                        n9 = int((ent or {}).get("n") or (2 if ent and "n" not in ent else 0)) + (0 if (off9 and not ch9) else 1)
                         cache[tx] = {"chain": None, "from": None, "to": None, "t": now9, "n": n9}
                         if n9 >= 3:
                             cache[tx]["na"] = "notfound"
@@ -2380,6 +2771,8 @@ class StateBuilder:
             return str(row["symbol"]).strip() or "TOKEN"
         return re.sub(r"#\d+$", "", name)
 
+    CANCEL_PH = frozenset(("prep", "load·replay", "outflow_dest·match", "rt_same", "xfer_links·positions", "signer·cards", "cex_proof·prices", "pendings"))
+
     def _ph(self, name):
         cur = self.__dict__.get("_ph_cur")
         if cur is None:
@@ -2387,6 +2780,9 @@ class StateBuilder:
         t = time.time()
         cur.append((name, int((t - self.__dict__.get("_ph_t", t)) * 1000)))
         self._ph_t = t
+        g0 = self.__dict__.get("_ph_gen0")
+        if g0 is not None and name in self.CANCEL_PH and self.__dict__.get("_inval", 0) != g0:
+            raise _BuildObsolete(name)
 
     def _ph_note(self, total_ms):
         ph = [[n9, ms9] for n9, ms9 in (self.__dict__.get("_ph_cur") or [])]
@@ -2415,12 +2811,15 @@ class StateBuilder:
                 building = {}
                 self.cache = building
                 gen0 = self.__dict__.get("_inval", 0)
+            obsolete9 = None
+            mp0 = self.__dict__.get("_mp_n", 0)
             sig9 = self._input_sig()
             conn = dbm.open_db(common.DB_PATH, readonly=True)
             try:
                 conn.execute("BEGIN")
                 t0_9 = time.time()
                 self._ph_cur, self._ph_t = [], t0_9
+                self._ph_gen0 = gen0
                 nb9 = getattr(self.px, "nb_begin", None)
                 if nb9:
                     nb9()
@@ -2441,27 +2840,47 @@ class StateBuilder:
                     self._build_cold_ms = self.build_ms
                 if self.build_ms >= 20000:
                     log.info("빌드 %.1f초 (느림 — 보유·기록 규모 또는 원장 잠금 확인)", self.build_ms / 1000)
+            except _BuildObsolete as e:
+                obsolete9 = str(e)
             except BaseException as e:
                 self._build_err = f"{type(e).__name__}: {common.safe_err(e)}"
                 raise
             finally:
+                self._ph_gen0 = None
                 conn.close()
-            with self.lock:
-                published = self.cache is building
+            if obsolete9 is not None:
+                log.info("빌드 도중 사용자 변경(%s 단계 뒤 %.1f초) — 이 빌드는 그만두고 곧바로 새로 빌드", obsolete9, time.time() - t0_9)
+                published = False
+            else:
+                published, out = self._publish_built(out, gen0, mp0, sig9, building)
+        if obsolete9 is not None:
+            return self.build()
+        if published and self.snaps.wanted:
+            threading.Thread(target=self.snaps.precompute, daemon=True, name="snap-delta").start()
+        return out
+
+    def _publish_built(self, out, gen0, mp0, sig9, building):
+        if True:
+            with self._publock():
+                if self.__dict__.get("_mp_n", 0) != mp0:
+                    try:
+                        out = self._mp_apply(out, self.__dict__.get("_mp_kinds") or frozenset())
+                    except Exception as e:
+                        log.warning("칸 고치기(빌드 뒤) 실패(무시): %s", type(e).__name__)
+                with self.lock:
+                    published = self.cache is building
+                    if published:
+                        self.cache = out
+                        self.cache_at = time.time()
+                        self._last_out, self._last_out_at, self._last_out_gen = out, self.cache_at, gen0
+                        self._built_sig = sig9
                 if published:
-                    self.cache = out
-                    self.cache_at = time.time()
-                    self._last_out, self._last_out_at, self._last_out_gen = out, self.cache_at, gen0
-                    self._built_sig = sig9
-            if published:
-                self._publish(out, gen0)
+                    self._publish(out, gen0)
             try:
                 self._rtxc().maybe_save()
             except Exception as e:
                 log.warning("raw_txs 캐시 저장 실패(무시): %s", e)
-        if published and self.snaps.wanted:
-            threading.Thread(target=self.snaps.precompute, daemon=True, name="snap-delta").start()
-        return out
+        return published, out
 
     def soft_invalidate(self, kick: bool = True):
         with self.lock:
@@ -2474,18 +2893,169 @@ class StateBuilder:
         if kick:
             self.kick_refresh()
 
-    def _publish(self, out, gen):
+    def _publock(self):
+        l9 = self.__dict__.get("_pub_lock")
+        if l9 is None:
+            with self.lock:
+                l9 = self.__dict__.get("_pub_lock")
+                if l9 is None:
+                    l9 = self._pub_lock = threading.Lock()
+        return l9
+
+    MP_KINDS = frozenset(("of_memo", "day_memo", "plan", "review"))
+
+    def mpatch(self, kinds) -> bool:
+        kinds = frozenset(kinds) & self.MP_KINDS
+        if not kinds:
+            return False
+        try:
+            with self.lock:
+                self._mp_n = self.__dict__.get("_mp_n", 0) + 1
+                self._mp_kinds = frozenset(self.__dict__.get("_mp_kinds") or frozenset()) | kinds
+            with self._publock():
+                with self.lock:
+                    base, gen = self.__dict__.get("_last_out"), self.__dict__.get("_last_out_gen")
+                    cur9 = self.snaps.cur
+                    ok = (base is not None and gen == self.__dict__.get("_inval", 0) and cur9 is not None and cur9.gen == gen
+                          and self._build_err is None)
+                if not ok:
+                    return False
+                new = self._mp_apply(base, kinds)
+                with self.lock:
+                    if self.__dict__.get("_last_out") is not base or self.__dict__.get("_inval", 0) != gen:
+                        return False
+                    self._last_out = new
+                    if self.__dict__.get("_cache") is base:
+                        self.__dict__["_cache"] = new
+                if self.__dict__.get("_snapfile_on"):
+                    _snapfile_drop()
+                self._publish(new, gen, at=cur9.at)
+                return self._build_err is None
+        except Exception as e:
+            log.warning("칸 고치기 실패(종전 무효화로): %s", type(e).__name__)
+            return False
+
+    def _mp_apply(self, out, kinds):
+        f = out.get("fields") if isinstance(out, dict) else None
+        if not isinstance(f, dict):
+            raise ValueError("fields 없음")
+        g = dict(f)
+        if "of_memo" in kinds:
+            dec = self.outflow_decisions()
+            old_m = {}
+            rows = []
+            for r9 in f.get("outflows") or []:
+                if isinstance(r9, dict) and "address" in r9:
+                    d9 = dec.get(r9["address"]) if isinstance(dec.get(r9["address"]), dict) else {}
+                    old_m[r9["address"]] = r9.get("memo")
+                    if r9.get("memo") != d9.get("memo") or r9.get("decidedTs") != d9.get("ts"):
+                        r9 = dict(r9, memo=d9.get("memo"), decidedTs=d9.get("ts"))
+                rows.append(r9)
+            g["outflows"] = rows
+            dep = []
+            for r9 in f.get("depositRows") or []:
+                a9 = r9.get("addr") if isinstance(r9, dict) else None
+                v9 = dec.get(a9) if isinstance(a9, str) and isinstance(dec.get(a9), dict) else None
+                if v9 is not None and v9.get("verdict") == "exchange" and a9 in old_m:
+                    om9 = old_m[a9]
+                    if r9.get("memo") == "보낸 내역 판정" + (f" · {om9}" if om9 else "") and r9.get("ex") == (v9.get("exchange") or "?"):
+                        nm9 = "보낸 내역 판정" + (f" · {v9['memo']}" if v9.get("memo") else "")
+                        if nm9 != r9.get("memo"):
+                            r9 = dict(r9, memo=nm9)
+                dep.append(r9)
+            g["depositRows"] = dep
+        if "day_memo" in kinds:
+            mm9, err9 = DAY_MEMOS.read()
+            if err9 or "dayMemosErr" in f or "dayMemos" not in f:
+                raise ValueError("근거 메모 파일 이상")
+            g["dayMemos"] = mm9
+        if "plan" in kinds:
+            if "plans" not in f or "planMemos" not in f:
+                raise ValueError("계획 칸 없음")
+            g["plans"], g["planMemos"] = self._plans_view(self.prefs())
+        if "review" in kinds:
+            pr9 = self.prefs()
+            for k9, v9 in (("reviewLen", review_len_eff(pr9)), ("reviewPause", review_pause_eff(pr9)),
+                           ("reviewFill", review_progress.fill_eff(pr9.get("review_fill")) if review_progress is not None else None)):
+                if k9 not in f:
+                    raise ValueError("리뷰 칸 없음")
+                g[k9] = v9
+        return dict(out, fields=g)
+
+    @staticmethod
+    def _plans_view(prefs):
+        plans_out = {}
+        plan_memos = {}
+        for k, p in (prefs.get("plans") or {}).items():
+            if isinstance(p, dict) and isinstance(p.get("memo"), str) and p.get("memo").strip():
+                plan_memos[k] = p["memo"]
+            try:
+                t = float(p.get("target") or 0)
+                s = float(p.get("stop") or 0)
+            except (TypeError, ValueError):
+                t = s = 0
+            if 0 < s < t < float("inf"):
+                plans_out[k] = {"target": t, "stop": s, "src": p.get("src") or "CEX",
+                                "venue": p.get("venue") or "감시 중",
+                                "tags": p.get("tags") or [],
+                                "memo": p.get("memo") or ""}
+        return plans_out, plan_memos
+
+    def _publish(self, out, gen, at=None):
         try:
             try:
                 pub = dict(out, health=health.compact(health.web_view()))
             except Exception as e:
                 log.warning("health 요약 실패(무시): %s", e)
                 pub = out
-            self.snaps.publish(_publish_snap(pub, gen, out))
+            snap9 = _publish_snap(pub, gen, out)
+            if at is not None:
+                snap9.at = float(at)
+            self.snaps.publish(snap9)
             self._build_err = None
+            if self.__dict__.get("_snapfile_on") and gen == self.__dict__.get("_inval", 0):
+                _snapfile_save(snap9, still_ok=lambda: self.__dict__.get("_inval", 0) == gen)
         except Exception as e:
             self._build_err = f"publish {type(e).__name__}: {common.safe_err(e)}"
             log.warning("스냅샷 게시 실패: %s", e)
+
+    def restore_snapfile(self) -> bool:
+        ok = False
+        try:
+            _snapfile_sig()
+        except Exception as e:
+            log.warning("스냅샷 저장본 서명 실패(저장본 끔): %s", type(e).__name__)
+            return False
+        try:
+            with self.lock:
+                gen9 = self.__dict__.get("_inval", 0)
+            snap = _snapfile_load(gen9, self.SNAP_STALE_MAX)
+            if snap is not None:
+                with self.lock:
+                    if self.snaps.cur is None and self.__dict__.get("_inval", 0) == gen9:
+                        self.snaps.publish(snap)
+                        ok = True
+                if ok:
+                    self._restored = True
+                    log.info("스냅샷 저장본으로 시작(%d초 전 · 버전 %s) — 배경 빌드로 새로", int(time.time() - snap.at), snap.ver[:8])
+                    self.kick_refresh()
+        except Exception as e:
+            log.warning("스냅샷 저장본 복원 실패(무시): %s", type(e).__name__)
+        self.__dict__["_snapfile_on"] = True
+        return ok
+
+    MATS_FREE = frozenset(("/api/state", "/api/v2/state", "/api/v2/part", "/api/health", "/api/wallet_reload"))
+
+    def mats_wait(self, path) -> bool:
+        if not self.__dict__.get("_restored") or self.__dict__.get("_last_out") is not None:
+            return True
+        if not str(path).startswith("/api/") or path in self.MATS_FREE or path == "/api/ops" or str(path).startswith("/api/ops/"):
+            return True
+        try:
+            self.build()
+        except Exception as e:
+            log.warning("첫 빌드 대기 실패(%s): %s", str(path)[:40], type(e).__name__)
+        return self.__dict__.get("_last_out") is not None
 
     def snapshot(self, max_age=None) -> "websnap.Snap":
         now = time.time()
@@ -2677,6 +3247,7 @@ class StateBuilder:
         gas_by_month = {}
         tax_rows = []
         realized_by_date = {}
+        realized_by_loc = {}
         extra_events = []
         stake_rwd = {}
         stake_inc = {}
@@ -2819,7 +3390,7 @@ class StateBuilder:
         up_dep_uid_tx = {}
         up_dep_uid_ts = {}
         wallet_label = {}
-        for w9 in (self.cfg.get("wallets") or []):
+        for w9 in self._hist_wallets():
             wallet_label[str(w9.get("address") or "").lower()] = str(w9.get("label") or w9.get("chain") or "내 지갑")
         exf_dep_tx = {}
         for rf9 in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit' AND exchange!='upbit'"
@@ -3033,6 +3604,9 @@ class StateBuilder:
         xc_stable = frozenset(r0["group_id"] for r0 in rows if (r0["gname"] or "") in STABLE_GROUPS and r0["group_id"] is not None)
         xc_cands = xchain_match.send_candidates(rows, xc_cache, xchain_match.load_seed(common.BASE_DIR)) + \
             xchain_match.candidates(rows, xc_cache, frozenset(set(fx_wd) | ub_wd_tx), xc_stable)
+        xc_off9 = set(self.cfg.get("_disabled_chains") or ())
+        if xc_off9:
+            xc_cands = [c9 for c9 in xc_cands if c9.get("chain") not in xc_off9]
         if hasattr(self, "_xc_lock"):
             with self._xc_lock:
                 self._xc_pending = xc_cands[:50]
@@ -3104,7 +3678,7 @@ class StateBuilder:
             flow["_cost_krw_used"] = used_krw + taken
             return taken
 
-        def tax_krw_acq(tax9, g, flow, cc9, cck9, rate_s, dkey):
+        def tax_krw_acq(tax9, g, flow, cc9, cck9, rate_s, dkey, venue_loc=None):
             fck9, fcu9 = float(flow.get("cost_krw") or 0), float(flow.get("cost") or 0)
             if not g["is_stable"] and fck9 > 0 and fcu9 > 0 and 0.5 <= (fck9 / fcu9) / max(rate_s, 1.0) <= 2.0:
                 tax9["_akr"] = float(cc9) * fck9 / fcu9
@@ -3119,6 +3693,8 @@ class StateBuilder:
                     adj9 = float(cc9) * rate_s - tax9["_akr"]
                     flow["rbdk"][dkey] = flow["rbdk"].get(dkey, 0.0) + adj9
                     realized_krw_by_date[dkey] = realized_krw_by_date.get(dkey, 0) + adj9
+                    if venue_loc is not None:
+                        realized_by_loc.setdefault((venue_loc, dkey), [0.0, 0.0])[1] += adj9
                     tax9["_akm"] = 1
 
         offc_sold = [0, Decimal(0)]
@@ -3181,6 +3757,53 @@ class StateBuilder:
                 a9[0] += q9 * s9
                 a9[1] += c9 * s9
             return dst9
+
+        xc_tok9 = {}
+        for v9 in (xc_cache.get("ws") or {}).values():
+            for w9 in (v9 if isinstance(v9, list) else ()):
+                if isinstance(w9, dict) and w9.get("src_tx") and w9.get("token"):
+                    xc_tok9.setdefault(str(w9["src_tx"]).lower(), (str(w9.get("token_chain") or w9.get("src_chain") or ""), str(w9["token"])))
+        xc_stx9 = xc_cache.get("stx") if isinstance(xc_cache.get("stx"), dict) else {}
+        xc_blk9 = xc_cache.get("blk") if isinstance(xc_cache.get("blk"), dict) else {}
+        cp_xrec = {}
+
+        def cp_xc(g, r9, xc9, cov9, inh9, ch9, ts9):
+            p9 = cp_pool(g)
+            if p9 is None or cov9 <= 0:
+                return
+            lv9 = buychart.xc_leaves(xc9.get("lots"))
+            kq9, kc9 = sum(x9["known"] for x9 in lv9), sum(x9["cost"] for x9 in lv9)
+            if not lv9 or kq9 <= 0:
+                return
+            fq9 = float(cov9) / kq9
+            for i9, x9 in enumerate(lv9):
+                q9 = x9["known"] * fq9
+                c9 = (x9["cost"] * float(inh9) / kc9) if kc9 > 0 else float(inh9) * x9["known"] / kq9
+                cc9 = str(x9.get("chain") or ch9 or "")
+                tk9 = r9["address"] if cc9 == ch9 else None
+                if tk9 is None and x9.get("btx"):
+                    bt9 = xc_tok9.get(str(x9["btx"]).lower())
+                    tk9 = bt9[1] if bt9 and bt9[0] == cc9 else None
+                tsx9 = buychart.xc_lot_ts(xc_stx9, xc_blk9, cc9, x9["tx"], x9.get("block"))
+                buy9 = x9["kind"] == "swap"
+                info9 = {"chain": cc9, "chainKo": CHAIN_NAME.get(cc9, cc9), "tx": x9["tx"], "block": x9.get("block"), "token": tk9,
+                         "arrPid": r9["posting_id"], "arrTs": int(ts9), "via": xc9.get("via") or "", "lot": x9.get("lot"), "depth": x9.get("depth"),
+                         "cut": x9.get("cut")}
+                if not buy9:
+                    info9["rule"] = buychart.in_rule("경유") if x9.get("lot") == "hop" else "경유 역추적 원가 · 더 앞 원천을 못 찾음(그 로트 원가 그대로)"
+                rec9 = {"t": datetime.fromtimestamp(tsx9 or ts9, KST).strftime("%m-%d %H:%M"),
+                        "k": "온체인 매수" if buy9 else "전송",
+                        "d": (f"{CHAIN_NAME.get(cc9, cc9)} · 스왑 매수 · {xc9.get('label') or '경유 역추적'} (원장 밖 · 경유 역추적)" if buy9
+                              else f"{xc9.get('label') or '경유 역추적'} · 원가 이관"),
+                        "q": f"{q9:.10f}", "a": f"${c9:,.2f}", "tx": "—", "src": None, "_ts": tsx9 if buy9 else int(ts9), "_pid": None,
+                        "_xc": info9}
+                if buy9 and x9.get("un"):
+                    rec9["un"] = x9["un"]
+                if buy9:
+                    rec9 = cp_xrec.setdefault((cc9, str(x9["tx"]).lower(), r9["posting_id"]), rec9)
+                key9 = ("xc", r9["posting_id"], i9)
+                cp_add(g, key9, q9, c9)
+                cp_ev[key9] = rec9
 
         def cv_label(mp9, sym9):
             out9, own9 = [], False
@@ -3278,6 +3901,13 @@ class StateBuilder:
                 g9b = G.get(flow["_gid"])
                 if g9b is not None and not g9b.get("is_stable"):
                     key9 = (cur_row[0]["posting_id"], flow["_gid"])
+                    cp_sync(g9b, key9)
+                    cp_ev.setdefault(key9, e0)
+            elif (cur_row[0] is not None and flow.get("_gid") is not None and k in ("전송", "입금 확인")
+                  and cur_row[0]["leg_kind"] in ("acq", "move_in") and (cur_row[0]["group_id"] or -cur_row[0]["asset_id"]) == flow["_gid"]):
+                g9b = G.get(flow["_gid"])
+                if g9b is not None and not g9b.get("is_stable"):
+                    key9 = ("in", cur_row[0]["posting_id"], flow["_gid"])
                     cp_sync(g9b, key9)
                     cp_ev.setdefault(key9, e0)
             if "매수" in k and "매도" not in k:
@@ -3612,6 +4242,7 @@ class StateBuilder:
                     ev(fl9, ts9, "LP 전환 매도", f"{lp_label(d['bx'])} · 풀 안에서 스테이블로 전환된 원금(= 매도 · 실현 "
                        + f"{'+' if pnl9 >= 0 else '−'}${abs(float(pnl9)):,.2f})",
                        f"{float(qi):,.4f}".rstrip("0").rstrip("."), f"${float(pi):,.2f}", txh9, un=_un(qi, pi))
+                    fl9["events"][-1]["_tax"] = tax9
                     if d.get("_cp") and d["fk"] > 0:
                         fs9x = float(qi / d["fk"])
                         cmx = {k9: [v9[0] * fs9x, v9[1] * fs9x] for k9, v9 in d["_cp"].items()}
@@ -3699,6 +4330,7 @@ class StateBuilder:
                    if int(r0["qty_base"]) > 0 and r0["event"] != "TRANSFER_OUT"
                    and str(r0["location"] or "").startswith(("wallet:", "exchange:"))}
         of_noauto = {a for a, v in self.outflow_decisions().items() if isinstance(v, dict) and v.get("noAuto")}
+        of_dec9 = self.outflow_decisions()
         rt_pair = {}
         rt_transit = {}
         _ro, _ri = {}, {}
@@ -3879,7 +4511,7 @@ class StateBuilder:
             self._of_claims = {}
         try:
             sale_lots = sale_match.build_lots(common.read_json(SALE_PATH, {}) or {}, _sale_px, prefs.get("sale_link_off") or ())
-            my9 = {str(w9.get("address") or "").lower() for w9 in (self.cfg.get("wallets") or []) if isinstance(w9, dict)}
+            my9 = {str(w9.get("address") or "").lower() for w9 in self._hist_wallets() if isinstance(w9, dict)}
             sale_in, sale_need = sale_match.collect_inflows(conn, sale_lots, origin_cache, my9)
             own_dep9 = set(uuid2txh) | set(xf_links) | {u0 for m0 in of_match.values() for u0 in _of_uids(m0)}
             sale_in = [x9 for x9 in sale_in
@@ -4092,6 +4724,10 @@ class StateBuilder:
             o9["first"] = min(o9["first"], ts9)
             o9["last"] = max(o9["last"], ts9)
             o9["txs"].add(txh9)
+            for l0 in ((_ro.get((r9["source_ns"], r9["source_id"])) or {}).get("loc") or ()):
+                p0 = str(l0).split(":")
+                if len(p0) >= 3 and p0[2]:
+                    o9.setdefault("from_w", set()).add("w:" + p0[2])
             o9.setdefault("txsyms", {}).setdefault(txh9, set()).add(g9["sym"])
             usd_send = Decimal(r9["cost_usd"]) if r9["cost_usd"] is not None else None
             mc9, mk9, mu9 = consume(g9, q9)
@@ -4113,14 +4749,17 @@ class StateBuilder:
                 tk9["usd_send_known"] = False
             else:
                 tk9["usd_send"] += usd_send
-            if len(o9["list"]) < 200:
-                s9o = signer9.get((r9["source_ns"], r9["source_id"]))
-                sg9o = (None if not s9o or spamguard.snapshot_synth(s9o[1], s9o[2]) or not s9o[0]
-                        else spamguard.signer_mine(*s9o, my_all9))
-                o9["list"].append({"ts": int(ts9), "t": datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d %H:%M"),
-                                   "chain": chain9, "tx": txh9, "sym": g9["sym"], "qty": float(q9),
-                                   "usdAtSend": float(usd_send) if usd_send is not None else None, "costUsd": float(mc9),
-                                   "signed": sg9o, "key": self._of_key(r9)})
+                o9["wusd"] = o9.get("wusd", 0.0) + float(usd_send)
+                dk9 = datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d")
+                wd9 = o9.setdefault("wdays", {})
+                wd9[dk9] = wd9.get(dk9, 0.0) + float(usd_send)
+            s9o = signer9.get((r9["source_ns"], r9["source_id"]))
+            sg9o = (None if not s9o or spamguard.snapshot_synth(s9o[1], s9o[2]) or not s9o[0]
+                    else spamguard.signer_mine(*s9o, my_all9))
+            li9 = self._of_list_add(o9, {"ts": int(ts9), "t": datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d %H:%M"),
+                                         "chain": chain9, "tx": txh9, "sym": g9["sym"], "qty": float(q9),
+                                         "usdAtSend": float(usd_send) if usd_send is not None else None, "costUsd": float(mc9),
+                                         "signed": sg9o, "key": self._of_key(r9)})
             qs9 = f"{q9:,.4f}".rstrip("0").rstrip(".")
             ex_fx = fx_dep_tx.get(t9n) or fx_dep_tx.get(txh9)
             u_up = up_dep_by_tx.get(t9n) or up_dep_by_tx.get(txh9)
@@ -4143,16 +4782,16 @@ class StateBuilder:
                 arr9 = {"basis": "bridge", "chain": bm9["chain"], "tx": bm9["tx"], "wallet": bm9.get("wallet") or "",
                         "sym": bm9["sym"], "qty": float(bm9["qty"]), "dt": int(bm9["ts"] - ts9)}
                 o9.setdefault("arrivals", []).append(dict(arr9, ts=int(bm9["ts"]), sentSym=g9["sym"], sentQty=float(q9)))
-                if o9["list"] and o9["list"][-1]["tx"] == txh9:
-                    o9["list"][-1]["match"] = arr9
+                if li9 is not None:
+                    li9["match"] = arr9
             elif ex_fx or u_up:
                 if basis9 in ("txid", "amount_time", "hop_split"):
                     g9["risk_allow"] = True
                 o9.setdefault("mtx", set()).add(txh9)
                 o9.setdefault("basis", set()).add(basis9)
                 o9["musd"] = o9.get("musd", 0.0) + (float(usd_send) if usd_send is not None and g9["gid"] in ever_in else 0.0)
-                o9["list"][-1]["match"] = {"basis": basis9, "exchange": fx_name.get(ex_fx, ex_fx) if ex_fx else "업비트"} \
-                    if o9["list"] and o9["list"][-1]["tx"] == txh9 else None
+                if li9 is not None:
+                    li9["match"] = {"basis": basis9, "exchange": fx_name.get(ex_fx, ex_fx) if ex_fx else "업비트"}
             if ex_fx:
                 e5 = fxdep_transit.setdefault((t9n, g9["sym"]), {"qty": Decimal(0), "cost": Decimal(0), "known": Decimal(0),
                                                                   "unknown": Decimal(0), "left": Decimal(0), "gid": g9["gid"],
@@ -4218,8 +4857,8 @@ class StateBuilder:
                 o9.setdefault("basis", set()).add("sale")
                 o9["musd"] = o9.get("musd", 0.0) + (float(usd_send) if usd_send is not None and g9["gid"] in ever_in else 0.0)
                 o9["auto"] = ("sale", "토큰 세일 입찰", None)
-                if o9["list"] and o9["list"][-1]["tx"] == txh9:
-                    o9["list"][-1]["match"] = {"basis": "sale", "exchange": "토큰 세일 입찰", "lot": lb9["id"]}
+                if li9 is not None:
+                    li9["match"] = {"basis": "sale", "exchange": "토큰 세일 입찰", "lot": lb9["id"]}
                 d9 = f"{CHAIN_NAME.get(chain9, chain9)} → 토큰 세일 입찰 ({lb9['label']} · 원가는 수령 토큰으로 이어짐)"
             else:
                 unk9 = mu9 + max(Decimal(0), q9 - (mk9 + mu9))
@@ -4247,10 +4886,12 @@ class StateBuilder:
                     o9.setdefault("mtx", set()).add(txh9)
                 o9.setdefault("basis", set()).add("roundtrip")
                 o9["musd"] = o9.get("musd", 0.0) + (float(usd_send) if usd_send is not None and g9["gid"] in ever_in else 0.0)
-                if o9["list"] and o9["list"][-1]["tx"] == txh9:
-                    o9["list"][-1]["match"] = {"basis": "roundtrip", "exchange": "프로그램 예치 왕복"}
+                if li9 is not None:
+                    li9["match"] = {"basis": "roundtrip", "exchange": "프로그램 예치 왕복"}
                 if g9["is_stable"]:
                     d9 += " · 프로그램 예치(왕복 — 같은 지갑으로 전액 복귀)"
+            if (li9.get("match") or {}).get("basis") in ("sale", "roundtrip") and ts9 >= now - flowev.WINDOW:
+                o9.setdefault("flow_matches", []).append(li9)
             g9["last_out"] = {"ex": None, "tx": txh9}
             a9 = f"${float(usd_send):,.2f}" if usd_send is not None and g9["gid"] in ever_in else f"${float(mc9):,.2f}"
             un9 = _un(q9, usd_send if usd_send is not None and g9["gid"] in ever_in else mc9)
@@ -4263,13 +4904,29 @@ class StateBuilder:
                 mv_note(g9["cur"], lab9 or "외부 주소", q9, own=bool(lab9))
                 if g9["is_stable"]:
                     extra_ev(ts9, g9, "외부 전송", d9, qs9, a9, txh9, un=un9)
+                    of_ev9 = extra_events[-1]
                 else:
                     ev(g9["cur"], ts9, "외부 전송", d9, qs9, a9, txh9, un=un9)
+                    of_ev9 = g9["cur"]["events"][-1]
                 if g9["qty_known"] + g9["qty_unknown"] <= Decimal("0.000001"):
                     g9["cur"] = None
             else:
                 extra_ev(ts9, g9, "외부 전송", d9, qs9, a9 if usd_send is not None and g9["gid"] in ever_in else "—", txh9,
                          un=un9 if usd_send is not None and g9["gid"] in ever_in else None)
+                of_ev9 = extra_events[-1]
+            if not (ex_fx or u_up or bm9):
+                try:
+                    if sale9:
+                        of9 = {"c": "sale_auto", "nm": "토큰 세일 입찰", "lab": d9}
+                    else:
+                        of9 = salelink.label(CHAIN_NAME.get(chain9, chain9), dest9, of_dec9.get(dest9), c9t,
+                                             system=(dest9 == "0x0000000000000000000000000000000000008001" and chain9 == "zksync"),
+                                             roundtrip=bool(rb9 and r9["asset_id"] in rb9[0]))
+                    lw9 = sorted(str(l0).split(":", 2)[2] for l0 in ((_ro.get((r9["source_ns"], r9["source_id"])) or {}).get("loc") or ())
+                                 if str(l0).count(":") >= 2)
+                    of_ev9["of"] = dict(of9, a=dest9, ch=chain9, tx=str(txh9 or ""), w=lw9[0] if lw9 else "", **({} if sale9 else {"cost": c9t}))
+                except Exception as e9:
+                    log.debug("외부 전송 분류 표식 실패: %s", e9)
 
         win_cut = {}
         for r in rows:
@@ -4303,15 +4960,19 @@ class StateBuilder:
             g_w["qty_unknown"] += d_w
             note_unk(g_w, backfill_t0, "창 이전 보유분 · 창 절단 추정(원가 없음)", d_w, "", chain9=r["chain"] or "?")
 
-        my_evm9 = {str(w9.get("address") or "").lower() for w9 in (self.cfg.get("wallets") or []) if w9.get("type") != "sol"}
-        my_all9 = my_evm9 | {str(w9.get("address") or "") for w9 in (self.cfg.get("wallets") or []) if w9.get("type") == "sol"}
+        my_evm9 = {str(w9.get("address") or "").lower() for w9 in self._hist_wallets() if w9.get("type") != "sol"}
+        my_all9 = my_evm9 | {str(w9.get("address") or "") for w9 in self._hist_wallets() if w9.get("type") == "sol"}
         spoof_keys = set()
         wbal9 = {}
         self._ph("xfer_links·positions")
         signer9 = self._signer_map(conn, rows)
         pid_row = {}
 
+        g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
         for r in rows:
+            n9i += 1
+            if not (n9i & 4095) and g0_9 is not None and self.__dict__.get("_inval", 0) != g0_9:
+                raise _BuildObsolete("replay")
             g = gstate(r)
             chain = r["chain"] or "?"
             g["chains"].add(chain)
@@ -4473,6 +5134,8 @@ class StateBuilder:
                             fl9f["rbdk"][dk9f] = fl9f["rbdk"].get(dk9f, 0.0) - float(Fk9) * rt9f
                             realized_by_date[dk9f] = realized_by_date.get(dk9f, 0) - float(Fk9)
                             realized_krw_by_date[dk9f] = realized_krw_by_date.get(dk9f, 0) - float(Fk9) * rt9f
+                            if d9f.get("loc") is not None:
+                                _rl9 = realized_by_loc.setdefault((d9f["loc"], dk9f), [0.0, 0.0]); _rl9[0] -= float(Fk9); _rl9[1] -= float(Fk9) * rt9f
                             if d9f["tax"] is not None:
                                 _tax_add(d9f["tax"], "fee", Fk9)
                             fee_diag["usd_realized"] += Fk9
@@ -5028,8 +5691,16 @@ class StateBuilder:
             if lk == "opening":
                 back_o = q < 0 and (r["source_ns"] or "") != "upbit:recon_comp"
                 xk9 = exf_kind(r)
-                if xk9 == "fix":
+                late9 = evk == "EXF_ADJUST" and str(r["source_id"] or "").startswith("exflate:")
+                if xk9 == "fix" or late9:
                     back_o = False
+                try:
+                    rb9 = int(str(r["source_id"]).rsplit(":", 1)[1])
+                except (IndexError, ValueError):
+                    rb9 = ts
+                at9 = "대사 시각" if ts >= rb9 - 60 else ("원장이 처음 모자란 때로 당김" if q > 0 else "잔고가 남던 구간 시작으로 당김")
+                hl9 = xk9 == "fix" and (r["source_ns"] or "") == "hyperliquid:recon" and (r["symbol"] or "").upper() in _hl_cash_syms()
+                hl_lab9 = "Hyperliquid 무기한 손익·펀딩 정산 (그 대사 구간 합 — 대사 시각)"
                 g["qty_timeline"].append((min(ts, backfill_t0) if back_o else ts, q))
                 if q > 0:
                     if g["is_stable"]:
@@ -5037,16 +5708,21 @@ class StateBuilder:
                         g["cost"] += q
                     else:
                         g["qty_unknown"] += q
-                        if evk in ("EXF_ADJUST", "EX_ADJUST"):
+                        if late9:
+                            note_unk(g, ts, "늦게 찾은 과거 체결 상쇄 유입(원가 없음)", q, "", chain9=chain)
+                        elif evk in ("EXF_ADJUST", "EX_ADJUST"):
                             note_unk(g, ts, "거래소 잔고 정정 유입(원가 없음)", q, "", chain9=chain)
                         elif ":stake:" in (r["location"] or ""):
                             note_unk(g, ts, "솔라나 스테이킹 기초 잔고 · 수집 시작 이전 위임분(원가 없음)", q, "", chain9=chain)
                         else:
                             note_unk(g, ts, (f"{CHAIN_NAME.get(chain, chain)} " if chain and chain != "?" else "") + "기초 잔고 · 수집 시작 이전 보유분(원가 없음)", q, "", chain9=chain)
-                    if xk9 == "fix" or (xk9 == "init" and ts > backfill_t0 + 86400):
+                    if late9:
+                        extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {StateBuilder.LATE_OFFSET_KO}",
+                                 _recon_q(q), "—", txh, vq=q)
+                    elif xk9 == "fix" or (xk9 == "init" and ts > backfill_t0 + 86400):
                         lab9 = ("원화 정산 · 체결 원화 순지출(예수금에서 나감)·코인 모으기·은행 입금 (원화는 원장 밖 — 예수금은 따로 표시)"
-                                if g.get("is_fiat") else
-                                "잔고 정정 · 수집 누락 추정 (Earn 예치·이자·간편전환·내부 이체 등 — 대사 시각)")
+                                if g.get("is_fiat") else hl_lab9 if hl9 else
+                                f"잔고 정정 · 수집 누락 추정 (원인 모름 — 수집 밖 유입, 예: 이자·내부 이체 · {at9})")
                         extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {lab9}",
                                  _recon_q(q), "—", txh, vq=q)
                     else:
@@ -5054,14 +5730,17 @@ class StateBuilder:
                                  _recon_q(q), "—", txh, vq=q)
                 else:
                     consume(g, -q)
-                    if xk9 == "fix":
+                    if late9:
+                        extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {StateBuilder.LATE_OFFSET_KO}",
+                                 _recon_q(q), "—", txh, vq=q)
+                    elif xk9 == "fix":
                         db9 = (ex_debt9.get(r["source_ns"]) or {}).get((r["symbol"] or "").upper())
                         ln9 = (ex_loan9.get(r["source_ns"]) or {}).get((r["symbol"] or "").upper())
                         try:
                             rb9 = int(str(r["source_id"]).rsplit(":", 1)[1])
                         except (IndexError, ValueError):
                             rb9 = ts
-                        if int(r["leg_seq"] or 0) == 2:
+                        if common.exf_is_debt_int(evk, r["leg_seq"], r["source_ns"], r["source_id"]):
                             lab9 = f"{ln9 + ' 이자' if ln9 else '마진 차입 이자'} · 부채 이자 누적 {_recon_q(-q)} (비용 — 총자산에서 뺌, 대사 시각)"
                         elif db9 is not None and -db9 * Decimal("0.5") <= -q <= -db9 * Decimal("1.01") + EPS:
                             if ts < rb9 - 60:
@@ -5070,8 +5749,10 @@ class StateBuilder:
                                 lab9 = f"{ln9 + ' 부채' if ln9 else '마진 부채'} 반영 · 차입 {_recon_q(-q)} 차감 (총자산에서 뺌 — 대사 시각)"
                         elif g.get("is_fiat"):
                             lab9 = "원화 잔고 정정(감소) · 수집 밖 출금·결제 추정 (대사 시각)"
+                        elif hl9:
+                            lab9 = hl_lab9
                         else:
-                            lab9 = "잔고 정정(감소) · 수집 밖 유출 추정 (Earn 예치·간편전환·내부 이체 등 — 대사 시각)"
+                            lab9 = f"잔고 정정(감소) · 원인 모름 — 수집 밖 이동 추정 (예: 예치·내부 이체 · {at9})"
                         extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {lab9}",
                                  _recon_q(q), "—", txh, vq=q)
                     elif str(r["location"] or "").startswith("exchange:") and (r["source_ns"] or "") != "upbit:recon_comp":
@@ -5140,6 +5821,7 @@ class StateBuilder:
                     flow["cost_krw"] += krw_of(inh9, ts)
                     diag["xc_inh_n"] += 1
                     diag["xc_inh_cost"] += inh9
+                    cp_xc(g, r, xc9, cov9, inh9, chain, ts)
                     xc_used[r["posting_id"]] = {"tx": txh, "chain": chain, "sym": g["sym"], "qty": float(q), "cov": float(cov9),
                                                 "cost": round(float(inh9), 2), "label": xc9["label"], "via": xc9["via"], "ts": int(ts)}
                     ev(flow, ts, "전송", f"{xc9['label']} · 원가 이관 (${float(inh9):,.2f})",
@@ -5435,6 +6117,7 @@ class StateBuilder:
                         flow.setdefault("rch", {}).setdefault(dkey, set()).add(cur_lab[0] or "?")
                         realized_by_date[dkey] = realized_by_date.get(dkey, 0) + float(pnl)
                         realized_krw_by_date[dkey] = realized_krw_by_date.get(dkey, 0) + float(pnl) * rate_s
+                        _rl9 = realized_by_loc.setdefault((loc9, dkey), [0.0, 0.0]); _rl9[0] += float(pnl); _rl9[1] += float(pnl) * rate_s
                         tax9 = {"sold": dkey, "sym": g["sym"], "ticker": g["sym"],
                                 "ex": ex_label if is_ex else "온체인(DEX)",
                                 "qty": _f(from_known, 4),
@@ -5448,7 +6131,7 @@ class StateBuilder:
                             flow["oa_real"] = flow.get("oa_real", Decimal(0)) + pnl * oa9 / from_known
                             offc_sold[0] += 1
                             offc_sold[1] += pnl * oa9 / from_known
-                        tax_krw_acq(tax9, g, flow, consumed_cost, consumed_cost_krw, rate_s, dkey)
+                        tax_krw_acq(tax9, g, flow, consumed_cost, consumed_cost_krw, rate_s, dkey, venue_loc=loc9)
                         tax_rows.append(tax9)
                     if from_unknown > 0 and g["is_stable"]:
                         pass
@@ -5490,7 +6173,7 @@ class StateBuilder:
                     if evk == "EXF_SELL":
                         fee_disp[(r["source_ns"], txh)] = {"g": g, "gid": g["gid"], "flow": flow, "dkey": dkey, "qty": qty, "usd": cost,
                                                            "fk": qty if g["is_stable"] else from_known, "tax": tax9, "u": u, "ud": ud,
-                                                           "fu9": fu9, "rate": rate_s}
+                                                           "fu9": fu9, "rate": rate_s, "loc": loc9}
                     if is_pay9:
                         flow.setdefault("pay_dates", []).append(dkey)
                         flow["paid_usd"] = flow.get("paid_usd", Decimal(0)) + cost
@@ -5523,6 +6206,7 @@ class StateBuilder:
                             flow["rbdk"][dkey] = flow["rbdk"].get(dkey, 0.0) - float(Gk9) * rate_s
                             realized_by_date[dkey] = realized_by_date.get(dkey, 0) - float(Gk9)
                             realized_krw_by_date[dkey] = realized_krw_by_date.get(dkey, 0) - float(Gk9) * rate_s
+                            _rl9 = realized_by_loc.setdefault((loc9, dkey), [0.0, 0.0]); _rl9[0] -= float(Gk9); _rl9[1] -= float(Gk9) * rate_s
                             _tax_add(tax9, "fee", Gk9)
                         if Gu9 > 0:
                             u["proceeds"] -= Gu9
@@ -5543,6 +6227,7 @@ class StateBuilder:
                        f"{qty:,.4f}".rstrip("0").rstrip("."), f"${float(cost):,.2f}", txh, un=_un(qty, cost))
                     if cmp9s is not None:
                         flow["events"][-1]["_cmp"] = cmp9s
+                    flow["events"][-1]["_tax"] = tax9 if tax9 is not None else (be_tax[-1][1] if be_sale9 and be_tax else None)
                     if is_pay9:
                         flow["events"][-1]["_pay"] = True
                     elif cv9:
@@ -5551,6 +6236,7 @@ class StateBuilder:
                     ev(flow, ts, "온체인 매도", f"{CHAIN_NAME.get(chain, chain)} · 정산액 산정 중"
                        + (" · 매수 대금 지불(스왑 지불 레그)" if is_pay9 else ""),
                        f"{qty:,.4f}".rstrip("0").rstrip("."), "—", txh)
+                    flow["events"][-1]["_tax"] = None
                     np9 = noproc.setdefault(g["gid"], {"sym": g["sym"], "n": 0, "qty": Decimal(0), "cost": Decimal(0), "unk": Decimal(0),
                                                        "first": dkey, "last": dkey, "where": set(), "tx": [], "old": False})
                     np9["old"] = np9["old"] or (time.time() - float(ts or 0) > 3600)
@@ -5873,7 +6559,8 @@ class StateBuilder:
             elif gp12 and gp12.get("strong"):
                 g12["risk_reason"] = f"기초잔고 앵커 + 고플러스 {gp12['label']}"
                 quarantined.add(gid12)
-        self._goplus_want = sorted(goplus_want9)
+        off12 = set(self.cfg.get("_disabled_chains") or ())
+        self._goplus_want = sorted(p for p in goplus_want9 if p[0] not in off12)
         self._risk_quarantined = quarantined
         self._risk_airdrop_only = frozenset(g9 for g9 in airdrop_only & quarantined
                                             if str(G[g9].get("risk_reason") or "").startswith("실매수 이력 없는 에어드랍 유입"))
@@ -5920,7 +6607,7 @@ class StateBuilder:
                     v9 = sm9.get("voter")
                     rw9 = stake_rwd.get(row["location"] or "")
                     sub9 = (f"{CHAIN_NAME.get(ch, ch)} · SOL ({STAKE_STATE_KO.get(sm9.get('state'), '스테이킹')}"
-                            f" · 검증인 {(v9[:4] + '…' + v9[-4:]) if v9 else '미상'}) · 계정 {sa9[:4]}…{sa9[-4:]}")
+                            f" · 검증인 {(v9[:4] + '…' + v9[-4:]) if v9 else '미상'}) · 계정 {sa9[:4]}…{sa9[-4:]} · {wa[:6]}…{wa[-4:]}")
                     if rw9 and rw9[0] > 0:
                         sub9 += f" · 누적 보상 {float(rw9[0]):,.4f} SOL"
                     outl.append({"w": (f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"),
@@ -5953,6 +6640,21 @@ class StateBuilder:
                 return [{"w": d9["label"],
                          "sub": f"외부 전송 확인 · {(d9.get('to') or '')[:12]}…", "qty": 0}]
             return [{"w": "확인 필요", "sub": "원장 위치 없음 — 미매칭 탭 참조", "qty": 0}]
+
+        def venue_w(loc):
+            parts = str(loc or "").split(":")
+            if parts[0] == "exchange" and len(parts) >= 2:
+                return fx_name.get(parts[1], parts[1])
+            if parts[0] != "wallet":
+                return None
+            ch = parts[1] if len(parts) >= 2 else "?"
+            wa = parts[2] if len(parts) >= 3 and parts[2] else None
+            if not wa:
+                return "SOL 지갑" if ch == "sol" else "EVM 지갑"
+            label = aliases.get(wa) or self.addr_label.get(wa) or wa[:8]
+            if len(parts) >= 5 and parts[3] == "stake":
+                return f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"
+            return label if str(label).rstrip().endswith("지갑") else f"{label} 지갑"
 
         ub_coins = {}
         ub2 = {}
@@ -6124,6 +6826,8 @@ class StateBuilder:
                    "locs": locs_for(gid, uncred)}
             if src9 and px:
                 row["pxSrc"] = src9
+                if src9.startswith("dex:") and dex_key and dex_key[0] in self.spot.off_chains:
+                    row["pxFrozen"] = True
                 if age9 is not None:
                     row["pxAge"] = int(max(0, age9))
             if gid_pairs.get(gid) and qty * (px or 0) >= 1:
@@ -6237,7 +6941,7 @@ class StateBuilder:
                             and not spamguard.is_genuine(bc9, ca9):
                         return "가짜 대표 심볼(정품 CA 아님)"
                     return None
-                labels9 = {a9: (aliases.get(a9) or self.addr_label.get(a9) or a9[:8]) for a9 in rabby.evm_wallets(self.cfg)}
+                labels9 = {a9: (aliases.get(a9) or self.addr_label.get(a9) or a9[:8]) for a9 in rabby.evm_wallets(self.cfg, include_disabled=True)}
                 try:
                     import hl_spot
                     hl9 = hl_spot.known_addresses(self.cfg)
@@ -6260,11 +6964,17 @@ class StateBuilder:
             rb_view, rb_debts = None, []
         rb_net = round((rb_view or {}).get("onlyUsd", 0.0) + sum(d9["usd"] for d9 in rb_debts), 2)
 
+        grp4r = {}
         for e4r in fx_transit.values():
             st4r, fl4r = e4r.get("story"), e4r.get("story_flow")
             if st4r and fl4r is not None:
-                fl4r["events"] = sorted(st4r + fl4r["events"], key=lambda e9: (e9.get("_ts") or 0, e9["t"]))
+                grp4r.setdefault(id(fl4r), (fl4r, []))[1].append(st4r)
                 e4r["story"] = []
+        for fl4r, sts4r in grp4r.values():
+            cat4r = []
+            for st4r in reversed(sts4r):
+                cat4r += st4r
+            fl4r["events"] = sorted(cat4r + fl4r["events"], key=lambda e9: (e9.get("_ts") or 0, e9["t"]))
 
         d9j = prefs.get("dust_usd")
         try:
@@ -6832,10 +7542,15 @@ class StateBuilder:
                 return None
             return rr9 or "실매수 이력 없는 유입"
         fold9 = {}
+        of_linked9 = _of_linked_txs(of_dec9)
         for p9 in pendings:
             k9 = str(p9.get("key") or "").split(":", 1)[0]
             tx9 = str(p9.get("tx") or "")
             if k9 not in ("PROGRAM_IN", "UNKNOWN", "NEW_ASSET") or not tx9 or not p9.get("chainKey"):
+                continue
+            ol9 = of_linked9.get((p9["chainKey"], _tx_norm(tx9)))
+            if ol9:
+                p9["autoDone"] = f"보낸 내역에 연결됨({ol9}) — 받은 것과 연결로 설명됨"
                 continue
             if k9 == "PROGRAM_IN" and (tx9 in fx_wd or tx9.lower() in fx_wd or tx9 in ub_wd_tx or tx9.lower() in ub_wd_tx):
                 p9["autoDone"] = "거래소 출금 도착(txid 일치) — 출금 기록으로 설명됨"
@@ -6892,7 +7607,7 @@ class StateBuilder:
 
         _classify_pendings(pendings, prefs)
 
-        wallets_cfg = self.cfg["wallets"]
+        wallets_cfg = self._hist_wallets()
         by_addr = {}
         for w in wallets_cfg:
             k9 = w["address"] if w.get("type") == "sol" else w["address"].lower()
@@ -7057,7 +7772,7 @@ class StateBuilder:
             m9 = re.match(r"^g(\d+)$", str(p9.get("gkey") or "")) or re.match(r"^(?:unv|unkh|risk):g?(\d+)$", str(p9.get("key") or ""))
             if m9 and p9.get("sym") == "TOKEN" and int(m9.group(1)) in disp9:
                 p9["sym"] = disp9[int(m9.group(1))]
-        _nopid9 = lambda e9: {k9: v9 for k9, v9 in e9.items() if k9 not in ("_pid", "_lnk", "_mv", "_src", "_cmp", "_cv")}
+        _nopid9 = lambda e9: {k9: v9 for k9, v9 in e9.items() if k9 not in ("_pid", "_lnk", "_mv", "_src", "_cmp", "_cv", "_tax", "_vq")}
         extra_events_out = [_nopid9(e9) for e9 in sorted(sorted(ev_main9, key=_k9)[-150:] + sorted(ev_wd9, key=_k9)[-150:], key=_k9)]
         extra_events_hidden = [_nopid9(e9) for e9 in sorted(ev_hid9, key=_k9)[-150:]]
         hid_kind_n9 = {"scam": 0, "dust": 0}
@@ -7081,24 +7796,10 @@ class StateBuilder:
                    "swapTx": gas_applied["n"],
                    "exFee": _f(sum((v9["usd"] for v9 in ex_fee.values()), Decimal(0)), 2) or 0}
 
-        plans_out = {}
-        plan_memos = {}
         day_memos9, day_memos_err9 = DAY_MEMOS.read()
         if day_memos_err9:
             log.warning("그날 매매 근거 메모 파일 이상(%s) — 화면엔 빈 것 · 저장 거부", day_memos_err9)
-        for k, p in (prefs.get("plans") or {}).items():
-            if isinstance(p, dict) and isinstance(p.get("memo"), str) and p.get("memo").strip():
-                plan_memos[k] = p["memo"]
-            try:
-                t = float(p.get("target") or 0)
-                s = float(p.get("stop") or 0)
-            except (TypeError, ValueError):
-                t = s = 0
-            if 0 < s < t < float("inf"):
-                plans_out[k] = {"target": t, "stop": s, "src": p.get("src") or "CEX",
-                                "venue": p.get("venue") or "감시 중",
-                                "tags": p.get("tags") or [],
-                                "memo": p.get("memo") or ""}
+        plans_out, plan_memos = self._plans_view(prefs)
 
         fiats = []
         if ub2:
@@ -7478,6 +8179,44 @@ class StateBuilder:
         outflows_out, outflows_pending, of_tot = self._outflows(
             conn, ob, live_px, G, frozenset(quarantined), dust_ev,
             exwd=[e9 for e9 in wdt_all if e9["state"] == "out" and e9["ts"] >= ask9])
+        try:
+            st9 = getattr(self, "_outflow_status", None) or {}
+            for e9 in (x9 for _k0, _s0, _c0, evs0 in pos_ev_full for x9 in evs0):
+                o9 = e9.get("of")
+                if o9 and o9.get("c") == "pending":
+                    salelink.relabel(o9, st9.get(o9.get("a")), CHAIN_NAME.get(o9.get("ch"), o9.get("ch")))
+            for e9 in extra_events + ev_main9 + ev_wd9 + ev_hid9:
+                o9 = e9.get("of")
+                if o9 and o9.get("c") == "pending":
+                    salelink.relabel(o9, st9.get(o9.get("a")), CHAIN_NAME.get(o9.get("ch"), o9.get("ch")))
+            sug9 = getattr(self, "_of_sug_pid", None) or {}
+            if sug9:
+                for _k0, _s0, _c0, evs0 in pos_ev_full:
+                    for e9 in evs0:
+                        x9 = sug9.get(e9.get("_pid"))
+                        if x9 and "매도" not in str(e9.get("k") or ""):
+                            e9["ofc"] = dict(x9)
+                for e9 in extra_events + ev_hid9:
+                    x9 = sug9.get(e9.get("_pid"))
+                    if x9 and "매도" not in str(e9.get("k") or ""):
+                        e9["ofc"] = dict(x9)
+            def _ofc_cp9(dst9, src9):
+                if len(dst9) != len(src9) or any(c9.get("t") != s9.get("t") or c9.get("k") != s9.get("k") or c9.get("tx") != s9.get("tx") for c9, s9 in zip(dst9, src9)):
+                    return
+                for c9, s9 in zip(dst9, src9):
+                    if s9.get("ofc"):
+                        c9["ofc"] = dict(s9["ofc"])
+                    else:
+                        c9.pop("ofc", None)
+            src_ev9 = {k0: evs0 for k0, _s0, _c0, evs0 in pos_ev_full}
+            for p9 in positions:
+                cp9 = p9.get("events")
+                if cp9 and p9.get("key") in src_ev9:
+                    _ofc_cp9(cp9, src_ev9[p9["key"]][-len(cp9):])
+            _ofc_cp9(extra_events_out, sorted(sorted(ev_main9, key=_k9)[-150:] + sorted(ev_wd9, key=_k9)[-150:], key=_k9))
+            _ofc_cp9(extra_events_hidden, sorted(ev_hid9, key=_k9)[-150:])
+        except Exception as e9:
+            log.debug("세일 연결 제안 표식 실패: %s", e9)
         for p9 in pendings:
             h9 = (getattr(self, "_of_untracked_hint", None) or {}).get(acct_norm.canon(p9.get("sym")))
             if h9 and str(p9.get("key") or "").startswith(("unv:", "unkh:")):
@@ -7499,10 +8238,15 @@ class StateBuilder:
             self._hl_neg_mark(G, hl_cash9)
         except Exception as e9:
             log.warning("Hyperliquid 음수 허용 그룹 장기 곡선 표식 실패(다음 빌드): %s", e9)
+        try:
+            lg9 = conn.execute("SELECT v FROM meta WHERE k='ext_rebuilt_at'").fetchone()
+            led_gen9 = int(float(lg9[0])) if lg9 and lg9[0] else 0
+        except Exception:
+            led_gen9 = 0
         daily = self._daily_series(G, today_kst, override_px, live_px,
                                    ca_gids=ca_all, ex_gids=set(ex_gid),
                                    skip_gids=quarantined, pending_gids=pending_gids, native_c=native_c9 | ex_c9,
-                                   hold_qty=hold_qty, extra=xtra9, extra_ok=x_ok, now_ts=now,
+                                   hold_qty=hold_qty, extra=xtra9, extra_ok=x_ok, now_ts=now, led_gen=led_gen9,
                                    neg_ok=hl_cash9,
                                    debt_moves=self._debt_redate_moves(conn),
                                    transit=[e9 for e9 in wdt_all if e9["state"] == "pending"],
@@ -7524,11 +8268,13 @@ class StateBuilder:
         except Exception as e9:
             log.warning("Rabby 일별 보강 실패: %s", e9)
         offc_ids9 = frozenset()
+        vflow_loc9 = None
         try:
             offc_ids9 = frozenset({(f"{e9}:withdraw", u9) for e9, u9 in offc_wd if offc_self_wd(e9, u9)}
                                   | {(f"{e9}:deposit", u9) for e9, u9 in offc_dep if e9 in offc_on})
             flows9 = self._daily_flows(conn, daily, G, today_kst, live_px, frozenset(quarantined), rate_fx, transit=wdt_all,
                                        offc_ids=offc_ids9)
+            vflow_loc9 = getattr(self, "_venue_flow", None)
             for row9 in daily:
                 fl9 = flows9.get(row9.get("date"))
                 row9["flow"] = fl9[0] if fl9 else 0
@@ -7539,6 +8285,25 @@ class StateBuilder:
                     row9["flowTop"] = [["Rabby 기준 첫 반영(봇 미추적 보유)", round(float(row9["rbNew"]), 2)]] + list(row9.get("flowTop") or [])[:2]
         except Exception as e9:
             log.warning("일별 순유입 계산 실패: %s", e9)
+        try:
+            pid_gid9, spoof_pids9 = {}, set()
+            for r9 in rows:
+                if r9["event"] not in flowev.EV_ALL:
+                    continue
+                if (r9["source_ns"], r9["source_id"], r9["asset_id"]) in spoof_keys or int(r9["qty_base"]) == 0:
+                    spoof_pids9.add(r9["posting_id"])
+                if r9["leg_kind"] == "move_in" and (r9["location"] or "").startswith("out:"):
+                    pid_gid9[r9["posting_id"]] = r9["group_id"] or -r9["asset_id"]
+            fm9 = {a9: o9["flow_matches"] for a9, o9 in ob.items() if o9.get("flow_matches")}
+            of_rows_fe9 = [dict(r9, txs=list(r9.get("txs") or ()) + fm9[r9["address"]]) if r9.get("address") in fm9 else r9 for r9 in outflows_out]
+            self._flow_ev = flowev.collect(
+                conn, G, live_px, now, transit=wdt_all, of_rows=of_rows_fe9, of_match=of_match, of_bridge=of_bridge, deps=of_deps,
+                offc_ids=offc_ids9, debts=StateBuilder._flow_debts(), skip_gids=frozenset(quarantined),
+                names={"chain": CHAIN_NAME, "wallet": wallet_label}, fx=lambda t9: self.px.fx_at(int(t9 * 1000)) or rate_fx, xf_links=xf_links,
+                proof_sends=[dict(s9, gid=pid_gid9.get(s9["pid"])) for s9 in of_sends], deposit_exchange=self._deposit_exchange,
+                skip_pids=frozenset(spoof_pids9))
+        except Exception as e9:
+            log.warning("큰 출금 재료(flowev) 실패 — 이번 빌드는 판정 재료 없음: %s", e9)
         att_ok9 = False
         try:
             lpf9 = {}
@@ -7573,7 +8338,8 @@ class StateBuilder:
         _daily_krw(daily, today_kst.strftime("%m-%d"))
         try:
             td9 = today_kst.strftime("%Y-%m-%d")
-            hd9, hnf9, hok9 = _hist_kit_rows(daily, td9, self.daily, self.__dict__.get("_flow_nf") or ())
+            hd9, hnf9, hok9 = _hist_kit_rows(daily, td9, self.daily, self.__dict__.get("_flow_nf") or (),
+                                             val_nf=self.__dict__.get("_daily_nf") or ())
             if hnf9:
                 log.debug("장기 곡선 재료: 비확정 지난날 %d(%s…) — 값 비워 넘김", len(hnf9), min(hnf9))
             if hok9:
@@ -7606,7 +8372,12 @@ class StateBuilder:
         self._ph("futures")
         day_ix, day_acts = self._day_index(pos_ev_full, ev_main9 + ev_wd9, ev_hid9, lp_events)
         stab_ix = self._stab_index(stab_ev, day_acts)
-        self._day_idx = {"builtAt": int(now), "ix": day_ix, "rbd": realized_by_date, "stab": stab_ix,
+        try:
+            krw_ix9 = self._krw_day_index(conn, day_acts)
+        except Exception as e9:
+            log.warning("그날 기록 원화 입출금 색인 실패(목록에서 빠짐): %s", e9)
+            krw_ix9 = {}
+        self._day_idx = {"builtAt": int(now), "ix": day_ix, "rbd": realized_by_date, "stab": stab_ix, "krw": krw_ix9,
                          "fut": fut.get("realizedByDate") or {},
                          "tax": tax_rows, "taxToday": today_kst,
                          "futDetail": getattr(self, "_fut_detail", None),
@@ -7734,6 +8505,10 @@ class StateBuilder:
             self._attach_flows(conn, outflows_out, live_px, G)
         except Exception as e:
             log.warning("flow 붙이기 실패: %s", e)
+        try:
+            self._addr_ai_targets = addr_ai.attach(outflows_out, pendings, self.cfg)
+        except Exception as e:
+            log.warning("AI 주소 의견 붙이기 실패: %s", type(e).__name__)
         cls_n9 = {}
         for w9 in wd_rows9:
             cls_n9[w9["cls"]] = cls_n9.get(w9["cls"], 0) + 1
@@ -7742,7 +8517,7 @@ class StateBuilder:
         xfer_links_out = [{"dep": k9, "wd": v9["wd_uuid"], "sym": v9["sym"], "qty": v9["qty"], "wdEx": v9["wd_ex"], "depEx": v9["dep_ex"],
                            "rule": v9["rule"], "label": v9["label"], "dt": v9["dt"], "via": v9.get("via"), "off": k9 not in xl_on9}
                           for k9, v9 in sorted(xl_all9.items(), key=lambda kv: (kv[1]["sym"], kv[0]))]
-        my_w9 = {str(w9.get("address") or "").lower() for w9 in (self.cfg.get("wallets") or []) if isinstance(w9, dict)}
+        my_w9 = {str(w9.get("address") or "").lower() for w9 in self._hist_wallets() if isinstance(w9, dict)}
         sale_out = []
         for l9 in sale_lots:
             u9 = sale_used.get(l9["id"]) or {}
@@ -7756,7 +8531,8 @@ class StateBuilder:
         self._sale_lot_ids = {l9["id"] for l9 in sale_lots}
         self._sale_prio = {str(u9.get("sym") or "").upper() for u9 in unverified.values() if u9.get("sym")}
         diag_out["open_cancel_pairs"] = getattr(self, "_open_cancel_n", 0)
-        diag_out["unv_all"] = {"rows": len(unverified), "proceeds": round(float(sum((u9["proceeds"] for u9 in unverified.values()), Decimal(0))), 2)}
+        diag_out["unv_all"] = {"rows": len(unverified), "proceeds": round(float(sum((u9["proceeds"] for u9 in unverified.values()), Decimal(0))), 2),
+                               "by": {str(g9): round(float(u9["proceeds"]), 2) for g9, u9 in unverified.items()}}
         diag_out["sale_lots"] = len(sale_lots)
         diag_out["sale_links"] = len(sale_links)
         diag_out["sale_cost_usd"] = round(float(sum((u9["cost"] for u9 in sale_used.values()), Decimal(0))), 2)
@@ -7782,7 +8558,7 @@ class StateBuilder:
                                      for w9 in sorted(unpriced_w, key=lambda w9: -max(w9["cost"], w9["ref"]))[:10]
                                      if max(w9["cost"], w9["ref"]) >= 1]
         dex_rows9 = sorted((float(c9.get("pxAge") or 0), c9["qty"] * float(c9.get("price") or 0)) for c9 in coins
-                           if str(c9.get("pxSrc") or "").startswith("dex:") and c9.get("pxAge") is not None
+                           if str(c9.get("pxSrc") or "").startswith("dex:") and c9.get("pxAge") is not None and not c9.get("pxFrozen")
                            and (c9.get("price") or 0) > 0 and (c9.get("qty") or 0) > 0)
         dex_tot9 = sum(v9 for _a9, v9 in dex_rows9)
         p90w9, acc9 = None, 0.0
@@ -7813,6 +8589,9 @@ class StateBuilder:
                 self._wdiag_at = time.time()
             except OSError as e9:
                 log.warning("web_diag.json 쓰기 실패: %s", e9)
+        if not self.spot.rate and time.time() - float(self.__dict__.get("_rate_fb_warn") or 0) > 3600:
+            self._rate_fb_warn = time.time()
+            log.warning("지금 환율(KRW/USDT)을 아직 못 받아 원화 환산에 고정 대체값 1384 를 씀 — 시세 수집이 돌면 저절로 바뀜")
         fields = {
             "costOverrideRows": cost_ov_rows,
             "costDecidedRows": cost_decided_rows,
@@ -7827,6 +8606,7 @@ class StateBuilder:
             "rabby": ({"wallets": rb_recon, "onlyUsd": rb_view["onlyUsd"], "debtUsd": round(sum(d9["usd"] for d9 in rb_debts), 2),
                        "at": rb_view["at"], "status": rb_view["state"]} if rb_view is not None else None),
             "outflows": outflows_out, "outflowsPending": outflows_pending, "outflowsTotals": of_tot,
+            "walletAuto": bool(self.__dict__.get("_of_auto_reload")),
             "saleCandAlert": prefs.get("sale_cand_alert") is not False,
             "krwFlows": self._krw_flows(conn),
             "transits": [dict(self._transit_loc(e9, now)["tr"], sym=e9["sym"], qty=float(e9["qty"]), key=f"g{e9['gid']}")
@@ -7854,6 +8634,7 @@ class StateBuilder:
             "reviewsWeekly": reviews_weekly,
             "rate": self.spot.rate or 1384,
             "fxRate": self.spot.fx_basis or (self.spot.rate or 1384),
+            "rateSrc": "live" if self.spot.rate else "fallback",
             "dailySeries": daily,
             "todayByCoin": hold_today9, "spark7": spark7_9,
             "usdtByDate": {d["date"]: {"usdt": d["usdt"], "kimp": d["kimp"]} for d in daily},
@@ -7861,6 +8642,9 @@ class StateBuilder:
             "upbitConnected": (bool(ub2)
                                and time.time() - (ub2.get("ts") or 0) < 600),
             "srcChips": src_chips, "walletRows": wallet_rows,
+            "venueFlows30": _venue_flows30(vflow_loc9, realized_by_loc, venue_w, today_kst),
+            "exBalTs": dict({fx_name.get(e9, e9): round(t9) for e9, (_p9, t9) in bal_src9.items() if t9 > 0},
+                            **({"업비트": round(float(ub2.get("ts") or 0))} if float(ub2.get("ts") or 0) > 0 else {})),
             "depositRows": deposit_rows, "aliasRows": [],
             "unpricedSyms": [w9["sym"] for w9 in sorted(unpriced_w, key=lambda w9: -max(w9["cost"], w9["ref"]))],
             "unpricedTop": [dict(w9, cost=round(w9["cost"], 2), ref=round(w9["ref"], 2))
@@ -7887,7 +8671,7 @@ class StateBuilder:
                                 w["address"] if w.get("type") == "sol"
                                 else w["address"].lower())
                              or w.get("label") or w["address"][:8])
-                            for w in self.cfg.get("wallets", [])},
+                            for w in self._hist_wallets()},
             "dustUsd": dust_usd_eff(prefs),
             "fallbackOn": fb_on,
             "offchainSelf": offc_sum9,
@@ -7974,6 +8758,51 @@ class StateBuilder:
     OUTFLOW_CATEGORIES = ("송금·결제/선물", OUTFLOW_SALE_CAT, "분실·해킹", "기타")
     OUTFLOW_PATH = os.path.join(common.STATE_DIR, "outflow_decisions.json")
 
+    @staticmethod
+    def _dec_core(e):
+        return {k9: v9 for k9, v9 in e.items() if k9 not in ("memo", "ts")} if isinstance(e, dict) else None
+
+    def of_memo_only(self, a, old, new) -> bool:
+        co, cn = self._dec_core(old), self._dec_core(new)
+        if co is not None and co == cn:
+            return True
+        if co in (None, {}) and cn in (None, {}):
+            return a not in ((self.__dict__.get("_of_auto") or {}).get("proven") or {})
+        return False
+
+    def of_row_patch(self, a, new, old) -> dict:
+        e9 = new if isinstance(new, dict) else {}
+        o9 = old if isinstance(old, dict) else {}
+        v9 = e9.get("verdict")
+        st0 = (self.__dict__.get("_outflow_status") or {}).get(a)
+        still = a in (self.__dict__.get("_outflow_still") or ())
+        st = None
+        if v9 == "external":
+            st = "external"
+        elif v9 == "exchange":
+            st = "exchange_applying" if still else "exchange"
+        elif v9 == "own":
+            st = "own_restart_needed" if still else "own"
+        elif self._dec_core(old) == self._dec_core(new) or (self._dec_core(old) in (None, {}) and self._dec_core(new) in (None, {})):
+            st = st0
+        elif v9 == "clear" and e9.get("ret") is True and o9.get("ret") is not True and not e9.get("noAuto") and not o9.get("noAuto") \
+                and o9.get("verdict") in (None, "clear") and st0 in ("pending", "bridge_untracked"):
+            st = "returned"
+        out = {"status": st, "verdict": v9 or None, "category": e9.get("category"), "memo": e9.get("memo"), "alias": e9.get("alias"),
+               "noAuto": bool(e9.get("noAuto")), "decidedTs": e9.get("ts"),
+               "excludeLegs": [str(k0.get("key") if isinstance(k0, dict) else k0) for k0 in (e9.get("excludeLegs") or []) if isinstance(k0, (str, dict))][:200]}
+        if st is not None:
+            out["retOk"] = bool(e9.get("ret") is True and st == "returned")
+        if st == "own_restart_needed":
+            try:
+                import wallet_register as _wr9
+                out["applyWait"] = bool(_wr9.auto_reload_alive() and a in _wr9.pending_addrs())
+            except Exception:
+                out["applyWait"] = False
+        if e9.get("exchange"):
+            out["exchange"] = e9["exchange"]
+        return out
+
     def outflow_decisions(self) -> dict:
         d = common.read_json(self.OUTFLOW_PATH, {}) if os.path.exists(self.OUTFLOW_PATH) else {}
         dd = d.get("decisions") if isinstance(d, dict) else None
@@ -8007,7 +8836,7 @@ class StateBuilder:
         if w.startswith("w:"):
             ad9 = w[2:]
             k9 = ad9.lower() if ad9.startswith("0x") else ad9
-            for w9 in (self.cfg.get("wallets") or []):
+            for w9 in self._hist_wallets():
                 if isinstance(w9, dict) and w9.get("address"):
                     a9 = str(w9["address"])
                     if (a9.lower() if a9.startswith("0x") else a9) == k9 and w9.get("label"):
@@ -8018,7 +8847,7 @@ class StateBuilder:
     OF_CAND_WINDOW = 60 * 86400
     SALE_CAND_PATH = os.path.join(common.STATE_DIR, "sale_cand_alerts.json")
 
-    def _of_sale_cands(self, a, first_ts, stable_syms, px_of=None) -> list:
+    def _of_sale_cands(self, a, first_ts, stable_syms, px_of=None, skip=()) -> list:
         cl9 = getattr(self, "_of_claims", None) or {}
         rr9 = getattr(self, "_risk_reasons", None) or {}
         taken9 = {str(l9.get("key")) for v9 in self.outflow_decisions().values() if isinstance(v9, dict) for l9 in (v9.get("links") or [])
@@ -8026,6 +8855,8 @@ class StateBuilder:
         out = []
         for c9 in (getattr(self, "_of_cands", None) or {}).values():
             if not (first_ts <= int(c9["ts"]) <= first_ts + self.OF_CAND_WINDOW) or c9["key"] in cl9 or c9["key"] in taken9 or c9.get("sale"):
+                continue
+            if c9["key"] in skip:
                 continue
             if c9.get("gid") in rr9:
                 continue
@@ -8057,7 +8888,7 @@ class StateBuilder:
                 continue
             if not first9:
                 out9.append({"ts": int(time.time()), "kind": "SALE_CAND", "sym": "",
-                             "text": f"🔗 세일 참가금 {a[:6]}…{a[-4:]} 에 연결할 후보가 생겼어요 — 새 {len(new9)}건"
+                             "text": f"🔗 세일 참가금 {salelink.name_addr(a, self.outflow_decisions().get(a))} 에 연결할 후보가 생겼어요 — 새 {len(new9)}건"
                                      f"(모두 {len(keys)}건) · 보낸 내역 › 정리된 내역에서 '받은 것과 연결'"})
             d9[a] = sorted(old9 | set(keys))
             changed = True
@@ -8200,7 +9031,7 @@ class StateBuilder:
                 l9 = k.setdefault(a9, [])
                 if (kind, name) not in l9:
                     l9.append((kind, name))
-        for w in self.cfg.get("wallets") or []:
+        for w in self._hist_wallets():
             put(w.get("address"), "my_wallet", w.get("label") or "내 지갑")
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트",
                    "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
@@ -8260,7 +9091,7 @@ class StateBuilder:
                 wds.append(row)
             elif rf["kind"] == "deposit" and st == "ACCEPTED":
                 deps.append(row)
-        own = {xfer_match.norm_addr(w9.get("address")) for w9 in (self.cfg.get("wallets") or []) if w9.get("address")}
+        own = {xfer_match.norm_addr(w9.get("address")) for w9 in self._hist_wallets() if w9.get("address")}
         own_ch = {}
         for w9 in (self.cfg.get("wallets") or []):
             if w9.get("address"):
@@ -8366,7 +9197,7 @@ class StateBuilder:
         cls_fn = getattr(self, "_wd_cls_fn", None)
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
         wl9 = {}
-        for w9 in (self.cfg.get("wallets") or []):
+        for w9 in self._hist_wallets():
             if isinstance(w9, dict) and w9.get("address"):
                 wl9[xfer_match.norm_addr(w9["address"])] = str(w9.get("label") or "")
         arr_tx, dep_ts, cands = {}, {}, []
@@ -8437,7 +9268,7 @@ class StateBuilder:
                 dst = str(d9.get("alias") or "내 지갑")
             e.update({"addr": addr, "net": net, "txid_raw": txr, "start": start, "until": int(start + win * 3600), "own": own,
                       "cls": cls, "dst": dst, "key": key, "verdict": vd, "arr_ts": None, "state": None, "why": None,
-                      "src": fx_name.get(e["ex"], e["ex"])})
+                      "src": fx_name.get(e["ex"], e["ex"]), "fee": p.get("fee")})
             if st in ("CANCELED", "CANCELLED", "REJECTED", "FAILED"):
                 e["state"] = "cancel"
                 out.append(e)
@@ -8743,7 +9574,7 @@ class StateBuilder:
         ok = set()
         if not rt_pair:
             return ok
-        cfg_mine = {str(w.get("address") or "").lower() for w in (self.cfg.get("wallets") or []) if isinstance(w, dict)}
+        cfg_mine = {str(w.get("address") or "").lower() for w in self._hist_wallets() if isinstance(w, dict)}
         for ki, ko in rt_pair.items():
             try:
                 ri = conn.execute("SELECT snapshot, wallets FROM raw_txs WHERE chain=? AND txhash=?", ki).fetchone()
@@ -8795,6 +9626,24 @@ class StateBuilder:
             return []
         return out
 
+    OF_LIST_CAP = 200
+
+    @classmethod
+    def _of_list_add(cls, o9: dict, item: dict) -> dict:
+        lst = o9["list"]
+        lst.append(item)
+        o9["listN"] = int(o9.get("listN") or 0) + 1
+        if len(lst) >= 2 * cls.OF_LIST_CAP:
+            lst.sort(key=lambda x9: x9["ts"])
+            del lst[:-cls.OF_LIST_CAP]
+        return item
+
+    @classmethod
+    def _of_list_cut(cls, o9: dict) -> int:
+        lst = sorted(o9.get("list") or (), key=lambda x9: x9["ts"])
+        o9["list"] = lst[-cls.OF_LIST_CAP:]
+        return max(0, int(o9.get("listN") or len(lst)) - len(o9["list"]))
+
     def _outflows(self, conn, ob: dict, live_px: dict, G: dict, scam_gids=frozenset(), dust_usd: float = 0.0, exwd=None):
         dec = self.outflow_decisions()
         known = self._known_addrs()
@@ -8803,9 +9652,17 @@ class StateBuilder:
                        for w in (common.read_json(common.CONFIG_PATH, {}) or {}).get("wallets") or []}
         except BaseException:
             reg_now = set()
+        try:
+            import wallet_register as _wr9
+            alive9 = _wr9.auto_reload_alive()
+            reload_addrs9 = _wr9.pending_addrs() if alive9 else set()
+            auto9 = bool(_wr9.apply_info().get("runner"))
+        except Exception:
+            reload_addrs9, auto9 = set(), False
+        self._of_auto_reload = auto9
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트",
                    "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
-        groups = {a: dict(v, resolved_rows=False) for a, v in ob.items()}
+        groups = {a: dict(v, resolved_rows=False, list=list(v.get("list") or ())) for a, v in ob.items()}
         try:
             gid_ca9 = {r9[0] for r9 in conn.execute("SELECT DISTINCT COALESCE(group_id, -asset_id) FROM assets"
                                                     " WHERE kind='token' AND address IS NOT NULL").fetchall()} - \
@@ -8841,8 +9698,8 @@ class StateBuilder:
                 tk9 = o9["tokens"].setdefault(sym9, {"qty": Decimal(0), "cost": None, "usd_send": Decimal(0),
                                                      "usd_send_known": False, "gid": gid9r, "unknown": Decimal(0)})
                 tk9["qty"] += qn
-                if len(o9["list"]) < 200:
-                    o9["list"].append({"ts": int(r["event_ts"]), "t": datetime.fromtimestamp(r["event_ts"], KST).strftime("%Y-%m-%d %H:%M"),
+                o9.setdefault("hsyms", {}).setdefault(r["source_id"], set()).add(sym9)
+                self._of_list_add(o9, {"ts": int(r["event_ts"]), "t": datetime.fromtimestamp(r["event_ts"], KST).strftime("%Y-%m-%d %H:%M"),
                                        "chain": r["source_ns"], "tx": r["source_id"], "sym": sym9, "qty": float(qn),
                                        "usdAtSend": None, "costUsd": None})
         for e9 in (exwd or ()):
@@ -8868,13 +9725,15 @@ class StateBuilder:
                 tk9["usd_send"] += q9
             else:
                 tk9["usd_send_known"] = False
-            if len(o9["list"]) < 200:
-                o9["list"].append({"ts": int(e9["ts"]), "t": datetime.fromtimestamp(e9["ts"], KST).strftime("%Y-%m-%d %H:%M"),
+            o9.setdefault("hsyms", {}).setdefault(e9.get("txid_raw") or f"{e9['ex']}:{e9['uuid']}", set()).add(e9["sym"])
+            self._of_list_add(o9, {"ts": int(e9["ts"]), "t": datetime.fromtimestamp(e9["ts"], KST).strftime("%Y-%m-%d %H:%M"),
                                    "chain": ch9 or (e9.get("net") or ""), "tx": e9.get("txid_raw") or "", "sym": e9["sym"], "qty": float(q9),
                                    "usdAtSend": float(q9) if g9.get("is_stable") else None, "costUsd": float(e9.get("cost") or 0),
                                    "ex": e9["src"], "signed": True,
                                    "key": self._wd_key(e9["ex"], e9["uuid"])})
             o9.setdefault("exwd", []).append(e9)
+        for o9 in groups.values():
+            o9["listCut"] = self._of_list_cut(o9)
         pool = {a: f"{kk[0][1]}" for a, kk in known.items() if kk and kk[0][0] in ("my_wallet", "exchange_deposit")}
         for a, v in dec.items():
             if isinstance(v, dict) and v.get("verdict") in ("own", "exchange"):
@@ -8927,6 +9786,8 @@ class StateBuilder:
                 up_from.setdefault(f9.lower() if f9.startswith("0x") else f9, []).append(t9)
         rows = []
         sale_cands9 = {}
+        sug_pid9 = {}
+        self._of_sug_pid = sug_pid9
         utd9 = None if not any(blabels.get(a0) for a0, *_r in out) else self._untracked_net_deps(conn)
         utd_hint = {}
         self._of_untracked_hint = utd_hint
@@ -9002,6 +9863,8 @@ class StateBuilder:
             if status == "pending":
                 n_pend += 1
             hints = [{"kind": k9, "label": n9} for k9, n9 in (known.get(a) or [])]
+            if flow_trace.is_burn(a) and not hints:
+                hints.append({"kind": "burn", "label": "발행·소각·시스템 주소 — 누구의 지갑도 아님"})
             if blab9 and not any(h9["kind"] == "bridge" for h9 in hints):
                 hints.append({"kind": "bridge", "label": f"브릿지 · {blab9['name']}"})
             bas9 = sorted(o9.get("basis") or ())
@@ -9123,19 +9986,35 @@ class StateBuilder:
                             "costUsd": _f(float(s9["cost"]), 2) if st9 == "applied" and s9.get("cost") is not None else None})
             lref9 = float(ms9.get("refundUsd") or 0) if verdict == "external" else 0.0
             cand9 = None
+            cand_top9 = None
             if verdict == "external" and d9.get("category") == self.OUTFLOW_SALE_CAT:
                 ss9 = {sy9.upper() for sy9, t9 in o9["tokens"].items() if (G.get(t9.get("gid")) or {}).get("is_stable") and not _ph9(t9)}
-                cand9 = self._of_sale_cands(a, int(o9["first"]), ss9, px_of=lambda g9: live_px.get(g9))
+                dis9 = {str(x9) for x9 in (d9.get("dismiss") or []) if isinstance(x9, str)}
+                cand9 = self._of_sale_cands(a, int(o9["first"]), ss9, px_of=lambda g9: live_px.get(g9), skip=dis9)
                 sale_cands9[a] = cand9
+                sent_q9 = {sy9.upper(): float(t9["qty"]) for sy9, t9 in o9["tokens"].items() if sy9.upper() in ss9}
+                fw9 = o9.get("from_w") or set()
+                cx9 = [(getattr(self, "_of_cands", None) or {}).get(k9) for k9 in cand9]
+                cx9 = [c9 for c9 in cx9 if c9]
+                def _rk9(c9):
+                    same9 = bool(c9.get("stable")) and abs(float(c9.get("qty") or 0) - sent_q9.get(str(c9.get("sym") or "").upper(), -1e18)) <= \
+                        0.01 * max(1.0, sent_q9.get(str(c9.get("sym") or "").upper(), 0))
+                    return (str(c9.get("where") or "") not in fw9, not same9, abs(int(c9["ts"]) - int(o9["first"])))
+                cand_top9 = [{"key": c9["key"], "sym": c9["sym"], "qty": c9["qty"], "ts": int(c9["ts"]), "stable": bool(c9.get("stable")),
+                              "where": self._of_where(c9.get("where") or ""), "fromSender": str(c9.get("where") or "") in fw9,
+                              "kind": "refund" if c9.get("stable") else "tokens"} for c9 in sorted(cx9, key=_rk9)[:3]]
+                for c9 in cx9:
+                    sug_pid9.setdefault(c9["pid"], {"a": a, "nm": salelink.dest_name(a, d9), "key": c9["key"],
+                                                    "kind": "refund" if c9.get("stable") else "tokens", "fromSender": str(c9.get("where") or "") in fw9})
             ltok9 = sum(float(x9["costUsd"] or 0) for x9 in lv9 if x9["kind"] == "tokens" and x9["st"] == "applied")
             ad_syms9 = {sy9 for sy9, t9 in o9["tokens"].items() if _ph9(t9) and _ad9(t9)}
             ph_syms9 = {sy9 for sy9, t9 in o9["tokens"].items() if _ph9(t9)} - ad_syms9
             ph_txn9 = 0
             if ph_syms9:
                 tsy9 = {tx9: set(sy9) for tx9, sy9 in (o9.get("txsyms") or {}).items()}
-                for x9 in o9["list"]:
-                    if x9.get("tx") and x9["tx"] not in (o9.get("txsyms") or {}):
-                        tsy9.setdefault(x9["tx"], set()).add(x9.get("sym"))
+                for tx9, sy9 in (o9.get("hsyms") or {}).items():
+                    if tx9 not in (o9.get("txsyms") or {}):
+                        tsy9.setdefault(tx9, set()).update(sy9)
                 ph_txn9 = sum(1 for tx9 in o9["txs"] if tsy9.get(tx9) and tsy9[tx9] <= ph_syms9)
             wait9 = None
             if verdict == "external" and d9.get("category") == self.OUTFLOW_SALE_CAT \
@@ -9154,11 +10033,13 @@ class StateBuilder:
                              and all(t9["usd_send_known"] for t9 in o9["tokens"].values() if not _ph9(t9))
                              and max(send9, now9) < dust_usd),
                 "status": status, "verdict": verdict or None, "retOk": bool(d9.get("ret") is True and status == "returned"),
+                "applyWait": bool(status == "own_restart_needed" and a in reload_addrs9),
                 "category": d9.get("category"), "memo": d9.get("memo"), "alias": d9.get("alias"),
                 "links": lv9, "linkRefundUsd": _f(lref9, 2) or 0, "linkTokenUsd": _f(ltok9, 2) or 0, "saleWait": wait9,
                 "excludeLegs": [str(k0.get("key") if isinstance(k0, dict) else k0) for k0 in (d9.get("excludeLegs") or [])
                                 if isinstance(k0, (str, dict))][:200],
                 "candN": len(cand9) if cand9 is not None else None,
+                "candTop": cand_top9,
                 "linkPaidUsd": _f(float(ms9["paidUsd"]), 2) if verdict == "external" and ms9.get("paidUsd") is not None else None,
                 "exchange": d9.get("exchange") or (o9["auto"][1] if o9.get("auto") else None),
                 "decidedTs": d9.get("ts"), "hints": hints, "flags": flags,
@@ -9176,8 +10057,12 @@ class StateBuilder:
                 "netUsd": _f(sent_v - ret_usd - ltok9, 2) or 0, "matchedUsd": _f(m_usd, 2) or 0,
                 "priorIn": {"n": len(rt9["before"]), "usd": _f(sum(x["usd"] or 0 for x in rt9["before"]), 2) or 0},
                 "txs": [dict(x9, phantom=True) if x9.get("sym") in ph_syms9 else dict(x9, quar="airdrop") if x9.get("sym") in ad_syms9 else x9
-                        for x9 in sorted(o9["list"], key=lambda x: -x["ts"])[:50]],
+                        for x9 in sorted(o9["list"], key=lambda x: -x["ts"])[:self.OF_LIST_CAP]],
+                "txsCut": int(o9.get("listCut") or 0),
                 "phantomTxN": ph_txn9})
+            if o9.get("listCut"):
+                rows[-1]["walletUsdAtSend"] = float(o9.get("wusd") or 0.0)
+                rows[-1]["walletDays"] = dict(o9.get("wdays") or {})
             if xw9:
                 rows[-1]["exwd"] = [{"ex": x9["ex"], "exName": x9["src"], "sym": x9["sym"], "qty": float(x9["qty"]), "net": x9.get("net") or "",
                                      "txid": x9.get("txid_raw") or "", "uuid": str(x9["uuid"]), "ts": int(x9["ts"]), "addr": x9.get("addr") or "",
@@ -9204,9 +10089,14 @@ class StateBuilder:
         rows.sort(key=lambda r9: (r9["status"] != "pending", -r9["lastTs"]))
         self._outflow_dests = {r9["address"]: r9["chains"] for r9 in rows}
         self._outflow_status = {r9["address"]: r9["status"] for r9 in rows}
+        self._outflow_still = frozenset(a9 for a9 in self._outflow_status if a9 in ob)
         self._outflow_autorows = {r9["address"] for r9 in rows if r9.get("autoMatch")}
         self._outflow_exwd = {r9["address"] for r9 in rows if r9.get("exwdOnly")}
         self._outflow_first = {r9["address"]: r9["firstTs"] for r9 in rows}
+        self._outflow_from_w = {a9: set(o9.get("from_w") or ()) for a9, o9 in groups.items() if o9.get("from_w")}
+        self._sale_send_tx = {str(t9).lower() for a9, o9 in groups.items()
+                              if isinstance(dec.get(a9), dict) and dec[a9].get("verdict") == "external" and dec[a9].get("category") == self.OUTFLOW_SALE_CAT
+                              for t9 in (o9.get("txs") or ()) if t9}
         self._outflow_legkeys = {r9["address"]: {str(t9.get("key")) for t9 in (groups.get(r9["address"]) or {}).get("list") or [] if t9.get("key")}
                                  for r9 in rows}
         self._outflow_legmeta = {a9: {x0[6]: (x0[7], x0[8]) for x0 in (o9.get("sends") or ()) if x0[6]} for a9, o9 in ob.items()}
@@ -9236,6 +10126,9 @@ class StateBuilder:
         cache = self._flow_cache_load()
         rows = [r9 for r9 in rows if not r9.get("exwdOnly")]
         cands = flow_trace.candidates(rows, cache, min_usd=float((self.cfg.get("flow_trace") or {}).get("min_usd") or flow_trace.MIN_USD))
+        off9 = set(self.cfg.get("_disabled_chains") or ())
+        if off9:
+            cands = [c9 for c9 in cands if not off9.intersection(c9.get("chains") or ())]
         lk9 = getattr(self, "_flow_lock", None)
         if lk9 is not None:
             with lk9:
@@ -9314,6 +10207,8 @@ class StateBuilder:
             if g9.get("sym") in ("SOL", "ETH", "BNB", "POL") and live_px.get(gid9):
                 nat_gid.setdefault(g9["sym"], gid9)
 
+        q_flow9 = set(getattr(self, "_risk_quarantined", None) or ()) - set(getattr(self, "_risk_airdrop_only", None) or ())
+
         def px_now(chain, token, sym):
             if token == "native":
                 g9 = nat_gid.get(flow_trace.NATIVE.get(chain, "SOL") if chain != "sol" else "SOL")
@@ -9325,6 +10220,8 @@ class StateBuilder:
                 return None
             if (G.get(g9) or {}).get("is_stable"):
                 return 1.0
+            if g9 in q_flow9:
+                return None
             return float(live_px.get(g9) or 0) or None
 
         def lookalike(x9):
@@ -9339,11 +10236,12 @@ class StateBuilder:
                     grp9[(ra9["chain"], xchain_match.norm(ra9["address"]))] = gs9
         except Exception:
             grp9 = {}
+        spam_tok9 = self._flow_spam_tokens(ap[1], q_flow9)
         ctx = {"mine": mine, "alias": alias, "exch": exch, "bridges": bridges, "lookalike": lookalike, "back": back,
-               "from_mine": from_mine, "exch_in": exch_in, "wd_in": wd_in, "rows": rinfo, "grp": grp9}
+               "from_mine": from_mine, "exch_in": exch_in, "wd_in": wd_in, "rows": rinfo, "grp": grp9, "spam_tok": spam_tok9}
         reg9 = {}
         for r9 in rows:
-            if r9["status"] not in flow_trace.ELIGIBLE or r9["address"] in ("multi", "?") or r9.get("dust"):
+            if r9["status"] not in flow_trace.ELIGIBLE or r9["address"] in ("multi", "?") or r9.get("dust") or flow_trace.is_burn(r9["address"]):
                 continue
             if max(float(r9.get("usdAtSend") or 0), float(r9.get("usdNow") or 0)) < flow_trace.MIN_USD:
                 continue
@@ -9379,6 +10277,11 @@ class StateBuilder:
                     g9 = reg9.setdefault(x9["addr"], {"chains": set(), "dests": set(), "level": x9["score"]["level"]})
                     g9["chains"].update(x9["chains"]); g9["dests"].add(r9["address"])
         self._flow_recips = reg9
+
+    @staticmethod
+    def _flow_spam_tokens(amap: dict, quarantined) -> frozenset:
+        q9 = set(quarantined or ())
+        return frozenset(k9 for k9, g9 in (amap or {}).items() if g9 in q9) if q9 else frozenset()
 
     EX_NAME_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
 
@@ -9440,6 +10343,8 @@ class StateBuilder:
             what = {"collect": "과거 거래 조회 중", "extend": "과거 창 넓히는 중", "emit": "찾은 거래 기록에 반영 중"}.get(ph, "과거 거래 불러오는 중")
         elif kind == "extend" or ph == "extend":
             what = "과거 창 넓히는 중"
+        elif ph == "wait":
+            what = "옛 기록 차례 대기(오늘 몫을 다 써서 UTC 0시 · 한국 오전 9시에 이어 받음)"
         elif ph == "sigs" or kind == "sigs":
             what = "거래 서명 모으는 중"
         elif ph == "parse":
@@ -9465,7 +10370,7 @@ class StateBuilder:
         last = datetime.fromtimestamp(mv, KST).strftime("%H:%M") if mv else None
         if last and mv and now - mv >= 86400:
             last = datetime.fromtimestamp(mv, KST).strftime("%m-%d %H:%M")
-        stalled = bool(mv) and now - mv >= StateBuilder.BF_STALL_SEC
+        stalled = bool(mv) and now - mv >= StateBuilder.BF_STALL_SEC and ph != "wait"
         eta_s = None
         if not stalled and eta is not None and float(eta) > 0:
             eta_s = "약 " + StateBuilder._eta_ko(float(eta)) + " 남음"
@@ -9534,7 +10439,11 @@ class StateBuilder:
                         curs[ch] = common.read_json(
                             os.path.join(sd, f"cursor_evm_{ch}.json"), {})
                     a = w["address"].lower()
-                    if a in curs[ch]:
+                    bk9 = curs[ch].get("_bk:" + a)
+                    if isinstance(bk9, dict) and bk9.get("why") == "new" and type(bk9.get("done")) is int and type(bk9.get("to")) is int \
+                            and type(bk9.get("from")) is int and bk9["done"] < bk9["to"]:
+                        units += min(1.0, max(0.0, (bk9["done"] - bk9["from"]) / max(1, bk9["to"] - bk9["from"])))
+                    elif a in curs[ch]:
                         units += 1.0
                         done_pairs += 1
                         ch_done[ch] = ch_done.get(ch, 0) + 1
@@ -9606,7 +10515,8 @@ class StateBuilder:
                     total += 1
                     cur = common.read_json(
                         os.path.join(sd, f"cursor_evm_{w['chain']}.json"), {})
-                    if w["address"].lower() in cur:
+                    bk9 = cur.get("_bk:" + w["address"].lower())
+                    if w["address"].lower() in cur and not (isinstance(bk9, dict) and bk9.get("why") == "new"):
                         done += 1
                 if total and done >= total:
                     return "증분 감시"
@@ -9729,6 +10639,40 @@ class StateBuilder:
     KRW_FAIL_ST = frozenset(("REJECTED", "FAILED", "CANCELLED", "CANCELED", "REFUNDED"))
 
     @staticmethod
+    def _krw_bank_moves(conn, exs):
+        exs = tuple(exs)
+        if not exs:
+            return []
+        latest9 = {}
+        for ex9, kind9, uid9, rev9, pl9 in conn.execute(
+                "SELECT exchange, kind, uuid, revision, payload FROM raw_ex WHERE exchange IN (" + ",".join("?" * len(exs)) + ")"
+                " AND kind IN ('deposit', 'withdraw')", exs):
+            k9 = (ex9, kind9, uid9)
+            if k9 not in latest9 or int(rev9) > latest9[k9][0]:
+                latest9[k9] = (int(rev9), pl9)
+        out = []
+        for (ex9, kind9, _u9), (_r9, pl9) in latest9.items():
+            try:
+                o9 = json.loads(pl9)
+                if str(o9.get("currency") or "").upper() != "KRW":
+                    continue
+                st9 = str(o9.get("state") or "").upper()
+                amt9 = float(o9.get("amount") or 0)
+                if kind9 == "deposit" and st9 == "ACCEPTED":
+                    k9 = amt9
+                elif kind9 == "withdraw" and st9 == "DONE":
+                    k9 = -(amt9 + float(o9.get("fee") or 0))
+                else:
+                    continue
+                ts9 = datetime.fromisoformat(str(o9.get("done_at") or o9["created_at"])).timestamp()
+                int9 = kind9 == "deposit" and (str(o9.get("transaction_type") or "").lower() == "internal"
+                                               or str(o9.get("txid") or "").startswith(("quarterly_payment", "quick_payment")))
+            except (ValueError, TypeError, KeyError):
+                continue
+            out.append((ex9, ts9, k9, int9))
+        return out
+
+    @staticmethod
     def _krw_flow_row(ex9, exn9, kind9, uid9, o):
         if str(o.get("currency") or "").upper() != "KRW":
             return None
@@ -9816,6 +10760,8 @@ class StateBuilder:
     FLOW_DEBT_KO = "마진 부채 반영(차입)"
     FLOW_ARR_KO = "거래소 출금 도착"
     FLOW_DEBT_FIRST_KO = "기존 부채 첫 반영(차입 — 이날 첫 관측)"
+    LATE_OFFSET_KO = "늦게 찾은 과거 체결 상쇄(같은 돈 두 번 안 잡히게)"
+    FLOW_LATE_KO = "늦게 찾은 체결 상쇄"
 
     @staticmethod
     def _flow_debts() -> dict:
@@ -9863,6 +10809,7 @@ class StateBuilder:
                      days=None, dpx=None, fx_day=None) -> dict:
         hist9 = days is not None
         if not hist9:
+            self._venue_flow = None
             self._flow_px_delta = {}
             self._flow_nf = set()
         if not daily and not hist9:
@@ -9877,6 +10824,7 @@ class StateBuilder:
                 d9 = today_kst - timedelta(days=i)
                 keys[d9.strftime("%Y-%m-%d")] = d9.strftime("%m-%d")
         lo_ts = datetime.strptime(min(keys), "%Y-%m-%d").replace(tzinfo=KST).timestamp()
+        vflow9 = {} if not hist9 else None
         dpx = (self.daily_px or {}) if dpx is None else dpx
         today_iso9 = today_kst.strftime("%Y-%m-%d")
         acc = {}
@@ -9910,6 +10858,7 @@ class StateBuilder:
             b9 = (e9.get("fp") or {}).get(sid9)
             return (float(b9) if b9 else cur9), cur9
         ext9 = set()
+        sale_tx9 = getattr(self, "_sale_send_tx", None) or set()
         arr_tx9 = set()
         for w9 in (transit or ()):
             if not isinstance(w9, dict) or w9.get("state") != "arrived":
@@ -9919,14 +10868,14 @@ class StateBuilder:
                 arr_tx9.add(_txk(t9))
         acc_k = {}
         debts9 = StateBuilder._flow_debts()
-        for ts9, qb9, dec9, gid9, ev9, lk9, ns9, rsym9, lseq9, sid9 in conn.execute(
+        for ts9, qb9, dec9, gid9, ev9, lk9, ns9, rsym9, lseq9, sid9, loc9 in conn.execute(
                 "SELECT p.event_ts, p.qty_base, a.decimals, COALESCE(a.group_id, -a.asset_id), p.event, p.leg_kind, p.source_ns, a.symbol,"
-                " p.leg_seq, p.source_id"
+                " p.leg_seq, p.source_id, p.location"
                 " FROM postings p JOIN assets a ON a.asset_id = p.asset_id WHERE p.event_ts >= ?"
                 " AND p.location NOT LIKE 'out:%' AND p.location NOT LIKE 'lp:%'", (int(lo_ts),)):
             if ev9 in self.FLOW_SKIP_EV or lk9 in ("fee", "gas") or gid9 in skip_gids:
                 continue
-            if ev9 == "EXF_ADJUST" and int(lseq9 or 0) == 2 and str(ns9 or "").endswith(":recon"):
+            if common.exf_is_debt_int(ev9, lseq9, ns9, sid9):
                 continue
             g9 = G.get(gid9)
             if not g9 or g9.get("is_fiat"):
@@ -9944,9 +10893,13 @@ class StateBuilder:
                 continue
             sym9 = g9.get("sym") or "?"
             lbl9 = f"{self.FLOW_KO.get(ev9, ev9)} {sym9}"
+            if ev9 == "TRANSFER_OUT" and str(sid9 or "").lower() in sale_tx9:
+                lbl9 = f"세일 참가금 {sym9}"
             if offc_ids and (ns9, sid9) in offc_ids:
                 lbl9 = f"{self.FLOW_OFFC_KO[0 if q9 < 0 else 1]} {sym9}"
-            if ev9 in ("EXF_ADJUST", "EX_ADJUST") and q9 < 0:
+            if ev9 == "EXF_ADJUST" and str(sid9 or "").startswith("exflate:"):
+                lbl9 = f"{StateBuilder.FLOW_LATE_KO} {sym9}"
+            elif ev9 in ("EXF_ADJUST", "EX_ADJUST") and q9 < 0:
                 db9 = (debts9.get(ns9) or {}).get(str(rsym9 or "").upper())
                 if db9 is not None and -db9 * Decimal("0.5") <= -q9 <= -db9 * Decimal("1.01") + EPS:
                     lbl9 = f"{StateBuilder.FLOW_DEBT_KO} {sym9}"
@@ -9970,6 +10923,9 @@ class StateBuilder:
             a9[lbl9] = a9.get(lbl9, Decimal(0)) + q9
             gpx[(ck9, gid9)] = px9
             gpxc[(ck9, gid9)] = pxc9
+            if vflow9 is not None and q9:
+                vf9 = vflow9.setdefault(str(loc9 or ""), [0.0, 0.0])
+                vf9[0 if q9 > 0 else 1] += abs(float(q9) * float(px9))
         if transit is not None:
             st9 = {str(e9["uuid"]): e9.get("state") for e9 in transit}
             now9 = {str(e9["uuid"]): [e9["gid"], float(e9["qty"])] for e9 in transit if e9.get("state") == "pending"}
@@ -10037,29 +10993,8 @@ class StateBuilder:
             a9 = acc_k.setdefault(ck9, {}).setdefault(grp9, {})
             a9[lbl9] = a9.get(lbl9, 0.0) + usd9
         try:
-            latest9 = {}
-            for kind9, uid9, rev9, pl9 in conn.execute(
-                    "SELECT kind, uuid, revision, payload FROM raw_ex WHERE exchange='upbit' AND kind IN ('deposit', 'withdraw')"):
-                if (kind9, uid9) not in latest9 or int(rev9) > latest9[(kind9, uid9)][0]:
-                    latest9[(kind9, uid9)] = (int(rev9), pl9)
-            for (kind9, _u9), (_r9, pl9) in latest9.items():
-                try:
-                    o9 = json.loads(pl9)
-                    if str(o9.get("currency") or "").upper() != "KRW":
-                        continue
-                    st9 = str(o9.get("state") or "").upper()
-                    amt9 = float(o9.get("amount") or 0)
-                    if kind9 == "deposit" and st9 == "ACCEPTED":
-                        k9 = amt9
-                    elif kind9 == "withdraw" and st9 == "DONE":
-                        k9 = -(amt9 + float(o9.get("fee") or 0))
-                    else:
-                        continue
-                    ts9 = datetime.fromisoformat(str(o9.get("done_at") or o9["created_at"])).timestamp()
-                    int9 = kind9 == "deposit" and (str(o9.get("transaction_type") or "").lower() == "internal"
-                                                   or str(o9.get("txid") or "").startswith(("quarterly_payment", "quick_payment")))
-                except (ValueError, TypeError, KeyError):
-                    continue
+            for ex9, ts9, k9, int9 in StateBuilder._krw_bank_moves(conn, ("upbit",) if hist9 else ("upbit", "bithumb")):
+                up9 = ex9 == "upbit"
                 if ts9 < lo_ts:
                     continue
                 if fx_day is not None:
@@ -10076,12 +11011,20 @@ class StateBuilder:
                         _px_took(self.px)
                         self._flow_nf.add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"))
                     fx9 = float(fxr9 or rate_now or self.spot.rate or 1384)
-                add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), "krw:" + ("int" if int9 else "in" if k9 > 0 else "out"),
-                    "업비트 원화 지급(예치금 이용료 등·은행 아님)" if int9 else "원화 입금(은행에서)" if k9 > 0 else "원화 출금(은행으로)", k9 / fx9)
+                if up9:
+                    add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), "krw:" + ("int" if int9 else "in" if k9 > 0 else "out"),
+                        "업비트 원화 지급(예치금 이용료 등·은행 아님)" if int9 else "원화 입금(은행에서)" if k9 > 0 else "원화 출금(은행으로)", k9 / fx9)
+                else:
+                    add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), f"krw:{ex9}:" + ("int" if int9 else "in" if k9 > 0 else "out"),
+                        "빗썸 원화 지급(거래소 내부·은행 아님)" if int9 else "빗썸 원화 입금(은행에서)" if k9 > 0 else "빗썸 원화 출금(은행으로)", k9 / fx9)
+                if vflow9 is not None and k9 and datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d") in keys:
+                    vf9 = vflow9.setdefault(f"exchange:{ex9}", [0.0, 0.0])
+                    vf9[0 if k9 > 0 else 1] += abs(k9 / fx9)
         except Exception as e9:
             if hist9:
                 raise
-            log.warning("일별 순유입: 업비트 원화 입출금 조회 실패: %s", e9)
+            vflow9 = None
+            log.warning("일별 순유입: 원화 입출금(업비트·빗썸) 조회 실패: %s", e9)
         def bands9(ck9, gm9, bases9):
             par9 = {g0: g0 for g0 in gm9}
 
@@ -10177,6 +11120,8 @@ class StateBuilder:
                 fpd9[keys[ck9]] = round(dlt9, 2)
         if hist9 and nofx9:
             out["_nofx"] = {d9: round(v9, 2) for d9, v9 in nofx9.items()}
+        if vflow9 is not None:
+            self._venue_flow = vflow9
         return out
 
     ATT_TOP = 5
@@ -10218,19 +11163,31 @@ class StateBuilder:
                 " FROM postings p JOIN assets a ON a.asset_id = p.asset_id WHERE p.event_ts >= ?"
                 " AND p.location NOT LIKE 'out:%'")
         try:
-            rows9 = conn.execute(sql9.format(", p.leg_seq, p.source_ns"), (int(lo_ts),)).fetchall()
+            rows9 = conn.execute(sql9.format(", p.leg_seq, p.source_ns, p.source_id"), (int(lo_ts),)).fetchall()
         except Exception as e9:
             if "no such column" not in str(e9):
                 raise
-            rows9 = [tuple(r9) + (None, None) for r9 in conn.execute(sql9.format(""), (int(lo_ts),))]
-        for ts9, qb9, dec9, gid9, ev9, lk9, loc9, lseq9, ns9 in rows9:
+            rows9 = [tuple(r9) + (None, None, None) for r9 in conn.execute(sql9.format(""), (int(lo_ts),))]
+        krwf9 = {}
+        for ts9, qb9, dec9, gid9, ev9, lk9, loc9, lseq9, ns9, sid9 in rows9:
             if gid9 in skip_gids:
                 continue
             g9 = G.get(gid9)
-            if not g9 or g9.get("is_fiat"):
+            if g9 and g9.get("is_fiat"):
+                loc9s = str(loc9 or "")
+                if (loc9s.startswith("exchange:") and not loc9s.startswith("exchange:upbit")
+                        and (lk9 in ("fee", "gas") or ev9 in self.ATT_TRADE_EV)):
+                    ck9 = datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d")
+                    if ck9 in ck_set:
+                        try:
+                            krwf9[ck9] = krwf9.get(ck9, Decimal(0)) + Decimal(int(qb9)) / (Decimal(10) ** int(dec9 if dec9 is not None else 8))
+                        except (TypeError, ValueError, InvalidOperation):
+                            pass
+                continue
+            if not g9:
                 continue
             is_lp9 = str(loc9 or "").startswith("lp:")
-            int9 = ev9 == "EXF_ADJUST" and int(lseq9 or 0) == 2 and str(ns9 or "").endswith(":recon")
+            int9 = common.exf_is_debt_int(ev9, lseq9, ns9, sid9)
             if lk9 in ("fee", "gas") or int9:
                 slot9 = 1
             elif ev9 in self.ATT_TRADE_EV:
@@ -10264,6 +11221,11 @@ class StateBuilder:
         tc9 = getattr(self, "_upbit_krw_tl", None)
         tlo_ok9 = tl9 is not None and isinstance(tc9, tuple) and len(tc9) > 2 and tc9[1] is tl9
         tlo9 = tc9[2] if tlo_ok9 else []
+        try:
+            krwb9 = [(t9, k9) for _e9, t9, k9, _i9 in StateBuilder._krw_bank_moves(conn, ("bithumb",))]
+        except Exception as e9:
+            log.debug("자산 변동 분해: 빗썸 원화 입출금 조회 실패(종전대로): %s", e9)
+            krwb9 = []
         krw_up_now = float(extra.get("krw_up") or 0)
         krw_other_now = float(extra.get("krw_other") or 0)
         has_krw9 = "krw_up" in extra
@@ -10376,6 +11338,12 @@ class StateBuilder:
                         continue
                     fx9 = float(fxat9(int(t9 * 1000)) or rate_now or 1384)
                     kx += float(d9) * (1 / ud - 1 / fx9)
+            if has_krw9 and krwb9 and ud and callable(fxat9):
+                a9, b9 = day_ts(ckd)
+                for t9, d9 in krwb9:
+                    if a9 <= t9 <= b9:
+                        fx9 = float(fxat9(int(t9 * 1000)) or rate_now or 1384)
+                        kx += float(d9) * (1 / ud - 1 / fx9)
             mk = sum(by9.values()) + kx
             dfx9 = (dpx.get(ckd) or {}).get("p") or {}
             lg9 = legs.get(ckd) or {}
@@ -10469,13 +11437,18 @@ class StateBuilder:
             if tl9 is not None and ud:
                 ord9 = krw_sum(tlo9, ckd) / ud
                 dep9 = krw_sum(tl9, ckd) / ud - ord9
-            tr += ord9
-            tall += ord9
+            ordb9 = depb9 = 0.0
+            if ud:
+                ordb9 = float(krwf9.get(ckd) or 0) / ud
+                lob9, hib9 = day_ts(ckd)
+                depb9 = sum(k9 for t9, k9 in krwb9 if lob9 <= t9 <= hib9) / ud
+            tr += ord9 + ordb9
+            tall += ord9 + ordb9
             dv = float(rd.get("val") or 0) - float(rp9.get("val") or 0)
             fl = float(rd.get("flow") or 0)
             rs = dv - mk - fl - tr
             dx = (float(rd.get("val") or 0) - gsum(gd)) - (float(rp9.get("val") or 0) - gsum(gp))
-            xo = dx - ord9 - dep9 - kx0
+            xo = dx - ord9 - dep9 - ordb9 - depb9 - kx0
             mv = sorted(((s9, v9) for s9, v9 in by9.items() if abs(v9) >= 0.005), key=lambda kv: (-abs(kv[1]), kv[0]))
             top = [[s9, round(v9 / base9[s9] * 100, 2) if base9.get(s9) else None, round(v9, 2)] for s9, v9 in mv[:self.ATT_TOP]]
             rest9 = mv[self.ATT_TOP:]
@@ -10729,7 +11702,7 @@ class StateBuilder:
                       skip_gids=None,
                       ex_gids=None, pending_gids=None,
                       hold_qty=None, extra=None, extra_ok=True, now_ts=None, native_c=None, debt_moves=None, transit=None,
-                      stable_aliases=None, day_close=None, neg_ok=None) -> list:
+                      stable_aliases=None, day_close=None, neg_ok=None, led_gen=None) -> list:
         lo_bind9 = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
         bound9, legacy9 = _bind_px_blocks(self.daily, self.daily_px, lo_bind9)
         if legacy9:
@@ -10830,6 +11803,8 @@ class StateBuilder:
         days = []
         att_src9 = {}
         self._daily_att_src = att_src9
+        nf9 = set()
+        self._daily_nf = nf9
         frozen_ok = os.path.exists(os.path.join(common.STATE_DIR, "backfill_done"))
         meta_keys = ("_v", "_risk_rev", "_live", "_live_ok", "_reset_at")
         pinned9 = (_pin_frozen_x(self.daily, self.daily_px, (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d"))
@@ -10864,6 +11839,26 @@ class StateBuilder:
             log.info("격리 집합 변경 — 동결 과거일 %d일은 그룹별 마감값으로 재산출, 구형식 %d일은 재계산", n_re, n_drop)
             if frozen_ok:
                 common.atomic_write_json(DAILY_PATH, self.daily)
+        lg_now9 = int(led_gen or 0)
+
+        def led_old(lg9, ts9):
+            if not lg_now9:
+                return False
+            try:
+                return int(float(lg9)) != lg_now9 if lg9 is not None else float(ts9 or 0) < lg_now9
+            except (TypeError, ValueError):
+                return True
+
+        old9 = set()
+        if lg_now9 and hold_qty is not None and frozen_ok:
+            lo9, td9 = (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"), today_kst.strftime("%Y-%m-%d")
+            old9 = {ck9 for ck9, c9 in self.daily.items()
+                    if not str(ck9).startswith("_") and isinstance(c9, dict) and lo9 <= str(ck9) < td9
+                    and c9.get("src") == "live" and c9.get("snap") and led_old(c9.get("lg"), c9.get("snap"))}
+            if old9 and self.__dict__.get("_led_old_logged") != (lg_now9, tuple(sorted(old9))):
+                self._led_old_logged = (lg_now9, tuple(sorted(old9)))
+                log.warning("일별: 원장 교체(세대 %s) 전 마감 스냅샷으로 동결된 날 %s — 지금 원장 수량으로 다시 계산(가격·x 는 그날 고정값)",
+                            lg_now9, sorted(old9))
         live_snap = self.daily.get("_live") if isinstance(self.daily.get("_live"), dict) else None
         live_ok = self.daily.get("_live_ok") if isinstance(self.daily.get("_live_ok"), dict) else None
         timelines = {}
@@ -11103,7 +12098,7 @@ class StateBuilder:
             dow = "일월화수목금토"[int(d.strftime("%w"))]
             is_today = (i == 0)
             ck = d.strftime("%Y-%m-%d")
-            if not is_today and frozen_ok and ck in self.daily:
+            if not is_today and frozen_ok and ck in self.daily and ck not in old9:
                 c = self.daily[ck]
                 z_st9 = (c.get("src") == "live" and isinstance(c.get("z"), list) and isinstance(c.get("g"), dict)
                          and any(str(gid9) in c["z"] and str(gid9) not in c["g"] for gid9 in stable_gids9))
@@ -11152,11 +12147,17 @@ class StateBuilder:
             end_ms = now_ms if is_today else int(end_ts * 1000)
             snap1 = None
             part1 = None
+            old1 = False
+            old_sn1 = None
             if not is_today and hold_qty is not None:
                 for sn9 in (live_snap, live_ok, (dpx.get(ck) or {}).get("partial")):
                     if (sn9 and sn9.get("date") == ck and isinstance(sn9.get("g"), dict)
                             and float(sn9.get("ts") or 0) >= end_ts - DAILY_LIVE_WIN):
                         if not sn9.get("defer"):
+                            if led_old(sn9.get("lg"), sn9.get("ts")):
+                                old1 = True
+                                old_sn1 = old_sn1 or sn9
+                                continue
                             snap1 = sn9
                             break
                         if part1 is None:
@@ -11174,6 +12175,8 @@ class StateBuilder:
                     self.daily[ck] = {"val": v1, "usdt": snap1.get("usdt"), "kimp": snap1.get("kimp"),
                                       "g": dict(gs), "x": round(xs, 2), "src": "live", "st": stable_rev9,
                                       "snap": int(float(snap1.get("ts") or 0))}
+                    if snap1.get("lg") is not None:
+                        self.daily[ck]["lg"] = snap1["lg"]
                     xu9s = xu_keep(snap1.get("xu"))
                     if xu9s:
                         self.daily[ck]["xu"] = xu9s
@@ -11261,7 +12264,7 @@ class StateBuilder:
                         and gid not in ex_gids and gid not in override_px):
                     continue
                 ov = override_px.get(gid)
-                if ov is not None:
+                if ov is not None and not ((ck in old9 or old1) and sid in fixed_p):
                     pxu9[sid] = float(ov)
                     gvals[sid] = qty * Decimal(str(ov))
                     if not skip9:
@@ -11346,13 +12349,19 @@ class StateBuilder:
             usdt = None
             kimp = None
             fx = None
-            if px_live:
+            fix9 = ck in old9 or old1
+            fx_src9 = ((self.daily.get(ck) if ck in old9 else None) or old_sn1 or {}) if fix9 else {}
+            if fix9 and fx_src9.get("usdt"):
+                usdt = fx_src9["usdt"]
+                kimp = fx_src9.get("kimp")
+                fx = float(usdt)
+            elif px_live:
                 usdt = self.spot.rate or None
                 if usdt and self.spot.fx_basis:
                     kimp = round((usdt / self.spot.fx_basis - 1) * 100, 2)
             else:
                 fx = self.px.fx_at(end_ms)
-                if fx is None and _px_took(self.px):
+                if fx is None and (_px_took(self.px) or fix9):
                     defer = True
                 usdt = round(fx) if fx else None
                 if usdt and self.spot.fx_basis:
@@ -11411,12 +12420,16 @@ class StateBuilder:
             if x_carry >= 1:
                 entry["xc"] = round(x_carry, 2)
             days.append(entry)
+            if ck in old9 and defer:
+                nf9.add(ck)
             g_out = {k: round(float(v), 4) for k, v in gvals.items() if abs(v) >= Decimal("0.00005")}
             att_src9[ck] = (g_out, pxu9, (ubs_now if hold_qty is not None else {}) if is_today else xrest9)
             if is_today and hold_qty is not None:
                 self.daily["_live"] = {"date": ck, "ts": round(now_ts, 3), "val": entry["val"], "usdt": usdt,
                                        "kimp": kimp, "g": g_out, "x": round(x_day, 2), "defer": defer,
                                        "p": {k9: round(v9, 12) for k9, v9 in new_p.items()}}
+                if lg_now9:
+                    self.daily["_live"]["lg"] = lg_now9
                 if ubs_now:
                     self.daily["_live"]["xu"] = xu_keep(ubs_now)
                 if pend9:
@@ -11458,7 +12471,7 @@ class StateBuilder:
                         if part1.get("xs"):
                             self.daily[ck]["xs"] = 1
                     else:
-                        self.daily[ck]["why"] = "no_snap"
+                        self.daily[ck]["why"] = "led" if old1 else "no_snap"
                 if entry.get("est"):
                     self.daily[ck]["est"] = entry["est"]
                 if entry.get("xc"):
@@ -11560,6 +12573,7 @@ class StateBuilder:
         short_n = notional - long_n
         by_date, rows = {}, []
         by_date_krw = {}
+        by_date_ex = {}
         for r9 in ev:
             try:
                 t9 = int(r9.get("t") or 0)
@@ -11571,7 +12585,13 @@ class StateBuilder:
             dt9 = datetime.fromtimestamp(t9 / 1000, KST)
             dk9 = dt9.strftime("%Y-%m-%d")
             by_date[dk9] = by_date.get(dk9, 0) + amt9
-            by_date_krw[dk9] = by_date_krw.get(dk9, 0) + amt9 * (fxb.rate_at(t9 // 1000) if fxb else float(self.spot.rate or 1384))
+            k9 = amt9 * (fxb.rate_at(t9 // 1000) if fxb else float(self.spot.rate or 1384))
+            by_date_krw[dk9] = by_date_krw.get(dk9, 0) + k9
+            x9 = by_date_ex.setdefault((dk9, r9.get("ex")), [0.0, 0.0, 0, 0])
+            x9[0] += amt9
+            x9[1] += k9
+            x9[2] += 1 if r9.get("kind") == "REALIZED" else 0
+            x9[3] = max(x9[3], t9)
             if r9.get("kind") == "REALIZED":
                 rows.append(dict({"t": dt9.strftime("%m-%d %H:%M"), "_ts": t9,
                                   "sym": r9.get("symbol") or "—",
@@ -11650,6 +12670,7 @@ class StateBuilder:
             "positions": pos_out,
             "realizedByDate": {k: round(v, 2) for k, v in by_date.items()},
             "realizedKrwByDate": {k: round(v) for k, v in by_date_krw.items()},
+            "realizedByDateEx": _fut_by_date_ex(by_date_ex, exn),
             "realizedRows": rows[:60],
             "realizedRowsTotal": len(rows), "realizedSummary": realized_summary,
             "realizedTotal": round(sum(r9["pnl"] for r9 in rows), 2)}
@@ -11721,7 +12742,7 @@ class StateBuilder:
 
     def _risk_wl_hit(self, conn, g, wl) -> bool:
         my9 = set()
-        for w9 in self.cfg.get("wallets", []):
+        for w9 in self._hist_wallets():
             my9.add(w9["address"] if w9.get("type") == "sol" else w9["address"].lower())
         for ch9, txh9, ca9 in (g.get("risk_srcs") or [])[:50]:
             row9 = conn.execute("SELECT snapshot FROM raw_txs WHERE chain=? AND txhash=?",
@@ -11912,6 +12933,8 @@ class StateBuilder:
         kind_map = self.DM_KINDS
         for d in reversed(self._dm_records()):
             k = d.get("kind")
+            if k == "RECON":
+                continue
             pl = d.get("payload") or {}
             key = f"{k}:{pl.get('txhash') or d.get('ts')}"
             if key in seen or key in ignored:
@@ -12061,6 +13084,55 @@ class StateBuilder:
         out.sort(key=lambda o: -o["ts"])
         return out
 
+    def _krw_day_index(self, conn, acts):
+        try:
+            kf9 = self._krw_flows(conn)
+        except Exception as e9:
+            log.warning("그날 기록 원화 입출금 색인 실패(목록에서 빠짐): %s", e9)
+            kf9 = None
+        ix = {}
+        for r9 in ((kf9 or {}).get("rows") or ()):
+            try:
+                key9 = str(r9.get("key") or "")
+                if r9.get("st") != "done" or key9.startswith("upbit:withdraw:"):
+                    continue
+                ex9 = key9.split(":", 1)[0]
+                ts9, amt9, fee9 = int(r9["t"]), int(r9["amt"]), int(r9.get("fee") or 0)
+                exn9 = str(r9.get("ex") or ex9)
+            except (TypeError, ValueError, KeyError):
+                continue
+            if ts9 <= 0 or amt9 <= 0:
+                continue
+            if r9.get("src") == "int":
+                d9 = f"{exn9} 원화 지급 · {r9.get('note') or '거래소 내부 지급'} (은행 아님)"
+            elif r9.get("dir") == "in":
+                d9 = f"{exn9} 입금 ← 은행 (원화 입금)"
+            else:
+                d9 = f"{exn9} 출금 → 은행 (원화 출금" + (f" · 수수료 ₩{fee9:,}" if fee9 else "") + ")"
+            e9 = {"t": datetime.fromtimestamp(ts9, KST).strftime("%m-%d %H:%M"), "sym": "KRW", "k": "전송", "d": d9,
+                  "q": f"{amt9:,}", "a": f"₩{amt9:,}", "tx": "—", "src": f"ex:{ex9}"}
+            d = acct_norm.iso_day(ts9)
+            ix.setdefault(d, []).append((ts9, e9))
+            a = acts.get(d)
+            if a is None:
+                a = acts[d] = {"n": 0, "b": 0, "s": 0, "dep": 0, "h": 0, "src": {}}
+            a["kw"] = int(a.get("kw") or 0) + 1
+            ks9 = a.setdefault("kwSrc", {})
+            ks9[e9["src"]] = int(ks9.get(e9["src"]) or 0) + 1
+        return ix
+
+    @staticmethod
+    def _krw_rows(idx, d_from, d_to):
+        out = []
+        for d, lst in (idx.get("krw") or {}).items():
+            if d_from <= d <= d_to:
+                for ts, e in lst:
+                    o = dict(e)
+                    o["ts"], o["iso"], o["kind"] = ts, d, "krw"
+                    out.append(o)
+        out.sort(key=lambda o: -o["ts"])
+        return out
+
     DAY_EV_LIMIT_MAX = 20000
 
     def day_events(self, d_from, d_to, limit=None, offset=0):
@@ -12094,7 +13166,8 @@ class StateBuilder:
             counts[o.get("k") or "?"] = counts.get(o.get("k") or "?", 0) + 1
         return {"ok": True, "from": d_from, "to": d_to, "builtAt": idx["builtAt"], "n": len(vis),
                 "counts": counts, "days": per, "events": vis, "hidden": hid,
-                "conv": self._conv_rows(idx, d_from, d_to)}
+                "conv": self._conv_rows(idx, d_from, d_to),
+                "krw": StateBuilder._krw_rows(idx, d_from, d_to)}
 
     def _day_events_page(self, idx, d_from, d_to, limit, offset):
         ix = idx["ix"]
@@ -12651,6 +13724,44 @@ class StateBuilder:
         cs9 = res.get("candles") or []
         return (int(cs9[0][0]), int(cs9[-1][0]) + int(iv_s)) if cs9 else None
 
+    @staticmethod
+    def _xc_resolve(legs, raw_syms):
+        fam = {str(x9 or "").split("#", 1)[0].strip().upper() for x9 in raw_syms}
+        conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+        try:
+            for l9 in legs:
+                x9 = l9["xc"]
+                ch9, tx9 = str(x9.get("chain") or ""), str(x9.get("tx") or "")
+                if not ch9 or not tx9:
+                    continue
+                txq9 = tx9.lower() if tx9.startswith("0x") else tx9
+                hit9 = None
+                for r9 in conn9.execute("SELECT p.posting_id, p.event_ts, a.symbol FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
+                                        " WHERE p.source_kind = 'chain_tx' AND p.source_ns = ? AND p.source_id = ? AND p.leg_kind = 'acq'",
+                                        (ch9, txq9)).fetchall():
+                    if str(r9["symbol"] or "").split("#", 1)[0].strip().upper() in fam:
+                        hit9 = r9
+                        break
+                if hit9 is not None:
+                    l9["pid"], l9["ts"] = int(hit9["posting_id"]), int(hit9["event_ts"])
+                    x9["tsFrom"] = "ledger"
+                    continue
+                if l9["ts"] or x9.get("block") in (None, ""):
+                    continue
+                try:
+                    blk9 = int(x9["block"])
+                except (TypeError, ValueError):
+                    continue
+                for r9 in conn9.execute("SELECT txhash FROM raw_txs WHERE chain = ? AND block = ? LIMIT 8", (ch9, blk9)).fetchall():
+                    p9 = conn9.execute("SELECT event_ts FROM postings WHERE source_kind = 'chain_tx' AND source_ns = ? AND source_id = ? LIMIT 1",
+                                       (ch9, r9["txhash"])).fetchone()
+                    if p9 is not None and p9["event_ts"]:
+                        l9["ts"] = int(p9["event_ts"])
+                        x9["tsFrom"] = "block"
+                        break
+        finally:
+            conn9.close()
+
     def _buy_cards(self, raw_syms):
         idx = self._day_idx
         ck = (idx.get("builtAt"), tuple(sorted(str(x) for x in raw_syms)))
@@ -12708,7 +13819,11 @@ class StateBuilder:
         cards = self._buy_cards(raw_syms)
         real = buychart.sell_cards(cards, iso)
         ex = buychart.extract_legs(cards, real, iso)
-        legs = ex["legs"]
+        legs = list(ex["legs"])
+        inflows = [dict(x9) for x9 in (ex.get("inflows") or ())]
+        if any(l9.get("xc") for l9 in legs):
+            self._xc_resolve([l9 for l9 in legs if l9.get("xc")], raw_syms)
+            legs, inflows = buychart.xc_settle(legs, inflows)
         specs, gtok = self._sell_specs([l9["pid"] for l9 in legs if l9.get("pid")])
         ko2code = {v9: k9 for k9, v9 in candles.CHAIN_KO.items()}
         card_gid = lambda pk9: (int(m9.group(1)) if (m9 := re.match(r"g(\d+)", str(pk9 or ""))) else None)
@@ -12750,6 +13865,8 @@ class StateBuilder:
                         tok9 = r9["address"] if r9 else None
                     finally:
                         conn9.close()
+                if l9.get("xc") and l9["xc"].get("chain"):
+                    ch9, tok9 = str(l9["xc"]["chain"]), l9["xc"].get("token")
                 sp9 = {"venue": "dex", "chain": ch9, "token": tok9} if (tok9 and ch9 in candles.GT_NETWORK) else None
                 gid9 = gid_of.get(l9["pkey"], any_gid)
             q9 = float(l9["q"])
@@ -12763,6 +13880,8 @@ class StateBuilder:
                   "vkey": candles.spec_key(sp9) if sp9 else None}
             if l9.get("from"):
                 f9["from"] = l9["from"]
+            if l9.get("xc"):
+                f9["via"] = "경유 역추적" + (" · 시각 = 같은 블록" if l9["xc"].get("tsFrom") == "block" else "")
             if px is None and cur == "KRW" and l9.get("un"):
                 need_fx.append(f9)
             fills.append(f9)
@@ -12775,6 +13894,15 @@ class StateBuilder:
                     g["spec"] = dict(g["spec"], tx_addrs=sorted(set(g["spec"].get("tx_addrs") or ()) | set(sp9["tx_addrs"])))
                 g["usd"] += float(l9.get("usd") or 0)
                 g["n"] += 1
+        inf_out = []
+        for x9 in inflows:
+            u9 = x9.get("un")
+            f9 = {"ts": x9["ts"], "q": float(x9["q"]), "un": u9, "usd": x9.get("usd"), "px": (u9 if cur != "KRW" else None),
+                  "kind": "입금", "d": x9.get("d"), "rule": x9.get("rule"), "chain": x9.get("chain")}
+            f9["amt"] = (f9["px"] * f9["q"]) if f9["px"] else None
+            if f9["px"] is None and u9:
+                need_fx.append(f9)
+            inf_out.append(f9)
         if need_fx and fetch:
             t9 = [f["ts"] for f in need_fx]
             iv_fx = iv if max(t9) - min(t9) <= 86400 else "1h"
@@ -12792,13 +13920,19 @@ class StateBuilder:
         lg9 = {"cards": ex["cards"], "srcCards": ex["srcCards"], "unmatched": ex["unmatched"], "fallback": ex.get("fallback", 0),
                "source": ex.get("source"), "simSells": ex.get("simSells", 0), "other": ex.get("other"), "unknownQty": ex.get("unknownQty"),
                "trimmed": ex["trimmed"], "lpFee": ex["lpFee"],
-               "n": len(legs), "priced": len(fills)}
+               "n": len(legs), "priced": len(fills), "inflows": len(inf_out),
+               "inflowQty": sellchart._r(sum(f9["q"] for f9 in inf_out)), "inflowUsd": round(sum(float(f9.get("usd") or 0) for f9 in inf_out), 2)}
         out = {"ok": True, "side": "buy", "date": iso, "sym": want, "iv": iv, "builtAt": base.get("builtAt"), "cur": cur, "autoEval": True,
                "curSym": sellchart.CUR_SYM.get(cur, ""), "sellVenue": sell.get("venue"), "venues": venues, "venue": None,
                "fills": [], "segs": [], "chart": None, "summary": None, "legs": lg9,
+               "inflows": [{"ts": f9["ts"], "px": sellchart._r(f9["px"]) if f9["px"] else None, "q": sellchart._r(f9["q"]),
+                            "amt": sellchart._r(f9["amt"]) if f9["amt"] else None, "kind": "입금", "d": f9.get("d"), "rule": f9.get("rule"),
+                            "chain": f9.get("chain")} for f9 in sorted(inf_out, key=lambda f9: f9["ts"])],
                "sell": {k: v for k, v in sell_ctx.items() if v is not None}}
         if not fills:
-            out["why"] = ("이 매도의 원가가 된 매수 기록을 찾지 못했어요(이전 보유분 · 원가 미상 · 이관 짝 없음)" if not legs
+            out["why"] = (("이 매도의 원가는 매수 기록이 아니라 입금으로 잡혔어요 — " + str(max(inf_out, key=lambda f9: f9["q"]).get("rule") or "규칙 표시 없음"))
+                          if inf_out else
+                          "이 매도의 원가가 된 매수 기록을 찾지 못했어요(이전 보유분 · 원가 미상 · 이관 짝 없음)" if not legs
                           else "매수 체결가를 표시 통화로 바꾸지 못했어요")
             cache[ck] = (time.time(), out)
             return self._with_eval(out)
@@ -13076,6 +14210,34 @@ class StateBuilder:
             }
             prev = d["val"]
         return out
+
+
+def _chain_usd_now():
+    b9 = BUILDER
+    last9 = b9.__dict__.get("_last_out") if b9 is not None else None
+    f9 = last9.get("fields") if isinstance(last9, dict) and isinstance(last9.get("fields"), dict) else last9
+    if not isinstance(f9, dict):
+        return None
+    rev9 = {v: k for k, v in CHAIN_NAME.items()}
+    out = {}
+    for row in list(f9.get("coins") or []) + list(f9.get("stables") or []):
+        if not isinstance(row, dict):
+            continue
+        try:
+            px9 = float(row.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if px9 <= 0:
+            continue
+        for l9 in row.get("locs") or []:
+            k9 = rev9.get(l9.get("ch")) if isinstance(l9, dict) else None
+            if not k9:
+                continue
+            try:
+                out[k9] = out.get(k9, 0.0) + max(0.0, float(l9.get("qty") or 0)) * px9
+            except (TypeError, ValueError):
+                continue
+    return out
 
 
 BUILDER: StateBuilder = None
@@ -13469,6 +14631,26 @@ def _private_cache(cache: str, proxied: bool, ctype: str = "") -> str:
     return c
 
 
+REQ_SWITCH_SEC = 0.001
+_SW_BASE = sys.getswitchinterval()
+_SW_LOCK = threading.Lock()
+_SW_N = [0]
+
+
+def _sw_enter():
+    with _SW_LOCK:
+        _SW_N[0] += 1
+        if _SW_N[0] == 1:
+            sys.setswitchinterval(min(REQ_SWITCH_SEC, _SW_BASE))
+
+
+def _sw_exit():
+    with _SW_LOCK:
+        _SW_N[0] = max(0, _SW_N[0] - 1)
+        if _SW_N[0] == 0:
+            sys.setswitchinterval(_SW_BASE)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "tj-web/0.1"
     protocol_version = "HTTP/1.1"
@@ -13476,6 +14658,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+    def parse_request(self):
+        ok = super().parse_request()
+        if ok and not getattr(self, "_tj_sw", False):
+            self._tj_sw = True
+            _sw_enter()
+        return ok
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        finally:
+            if getattr(self, "_tj_sw", False):
+                self._tj_sw = False
+                _sw_exit()
 
     def version_string(self):
         return "tj-web"
@@ -13726,6 +14923,7 @@ class Handler(BaseHTTPRequestHandler):
         decs = d.setdefault("decisions", {})
         if not isinstance(decs, dict):
             decs = d["decisions"] = {}
+        old9 = copy.deepcopy(decs.get(a)) if isinstance(decs.get(a), dict) else None
         prev0 = decs.get(a) if isinstance(decs.get(a), dict) else {}
         if "memo" not in body and prev0.get("memo"):
             memo = str(prev0["memo"])
@@ -13735,6 +14933,8 @@ class Handler(BaseHTTPRequestHandler):
             ent["links"] = prev0["links"]
         if verdict == "external" and prev0.get("verdict") == "external" and isinstance(prev0.get("excludeLegs"), list) and prev0["excludeLegs"]:
             ent["excludeLegs"] = prev0["excludeLegs"]
+        if verdict == "external" and prev0.get("verdict") == "external" and isinstance(prev0.get("dismiss"), list) and prev0["dismiss"]:
+            ent["dismiss"] = prev0["dismiss"]
         if verdict == "clear":
             st9 = (getattr(BUILDER, "_outflow_status", None) or {}).get(a)
             if not prev0.get("verdict") and (st9 in ("exchange_matched", "returned", "bridge_matched", "bridge_untracked")
@@ -13756,18 +14956,17 @@ class Handler(BaseHTTPRequestHandler):
         d["version"] = 1
         d["updated"] = int(time.time())
         common.atomic_write_json(BUILDER.OUTFLOW_PATH, d)
-        with BUILDER.lock:
-            BUILDER.cache = None
-        return self._send(200, {"ok": True, "address": a, "decision": decs.get(a),
+        self._of_after_save(a, old9, decs.get(a))
+        return self._send(200, {"ok": True, "address": a, "decision": decs.get(a), "row": _bcall("of_row_patch", a, decs.get(a), old9),
                                 "restartNeeded": restart, "apply": apply9,
                                 "note": ("config 등록 완료 — tj-evm·tj-sol·tj-bsc·tj-core 재기동 뒤 백필·내 지갑 이동으로 재분류" if restart
-                                         else ("등록 완료 — 유닛 러너가 30초 안에 수집기·core 를 다시 시작해 백필·재분류" if (verdict == "own" and not exw9)
+                                         else ("등록 완료 — 약 30초 안에 수집기·core 가 자동으로 다시 시작해 백필·재분류" if (verdict == "own" and not exw9)
                                                else ("tj-core 가 60초 안에 재분류(거래소 입금 원가 승계)" if verdict == "exchange" else "저장됨")))})
 
     def _outflow_op(self, a: str, body: dict):
         op = body.get("op")
-        if op not in ("memo", "link", "unlink", "exclude", "include", "ret"):
-            return self._send(400, {"ok": False, "error": "op 는 memo | link | unlink | exclude | include | ret"})
+        if op not in ("memo", "link", "unlink", "exclude", "include", "ret", "dismiss", "undismiss"):
+            return self._send(400, {"ok": False, "error": "op 는 memo | link | unlink | exclude | include | ret | dismiss | undismiss"})
         dests = getattr(BUILDER, "_outflow_dests", None)
         if dests is None:
             BUILDER.build()
@@ -13780,6 +14979,7 @@ class Handler(BaseHTTPRequestHandler):
             decs = d["decisions"] = {}
         if not a or (a not in dests and a not in decs):
             return self._send(404, {"ok": False, "error": "보낸 내역에 없는 목적지 주소"})
+        old9 = copy.deepcopy(decs.get(a)) if isinstance(decs.get(a), dict) else None
         ent = dict(decs.get(a)) if isinstance(decs.get(a), dict) else {}
         now9 = int(time.time())
         if op == "ret":
@@ -13804,6 +15004,27 @@ class Handler(BaseHTTPRequestHandler):
                 ent.setdefault("ts", now9)
             else:
                 ent.pop("memo", None)
+        elif op in ("dismiss", "undismiss"):
+            if ent.get("verdict") != "external":
+                return self._send(409, {"ok": False, "error": "외부 유출로 확정한 목적지만 제안을 정리할 수 있어요"})
+            k9 = body.get("key")
+            cur9 = [str(x9) for x9 in (ent.get("dismiss") or []) if isinstance(x9, str)]
+            if not isinstance(k9, str) or not k9 or len(k9) > 300:
+                return self._send(400, {"ok": False, "error": "key 는 후보 키 문자열"})
+            if op == "dismiss":
+                if k9 not in (getattr(BUILDER, "_of_cands", None) or {}):
+                    return self._send(400, {"ok": False, "error": "지금 후보에 없는 유입이에요"})
+                cur9 = [x9 for x9 in cur9 if x9 != k9] + [k9]
+            else:
+                if k9 not in cur9:
+                    return self._send(400, {"ok": False, "error": "뺀 제안이 아니에요"})
+                cur9 = [x9 for x9 in cur9 if x9 != k9]
+            if len(cur9) > 200:
+                return self._send(400, {"ok": False, "error": "아님은 200개까지"})
+            if cur9:
+                ent["dismiss"] = cur9
+            else:
+                ent.pop("dismiss", None)
         elif op in ("exclude", "include"):
             if ent.get("verdict") != "external":
                 return self._send(409, {"ok": False, "error": "외부 유출로 확정한 목적지만 참가금 레그를 고를 수 있어요"})
@@ -13879,9 +15100,19 @@ class Handler(BaseHTTPRequestHandler):
         d["version"] = 1
         d["updated"] = now9
         common.atomic_write_json(BUILDER.OUTFLOW_PATH, d)
+        self._of_after_save(a, old9, ent)
+        return self._send(200, {"ok": True, "address": a, "decision": ent, "row": _bcall("of_row_patch", a, ent, old9)})
+
+    def _of_after_save(self, a, old, new):
+        if _bcall("of_memo_only", a, old, new) and _bcall("mpatch", {"of_memo"}):
+            try:
+                if salelink.dest_name(a, old if isinstance(old, dict) else {}) != salelink.dest_name(a, new if isinstance(new, dict) else {}):
+                    BUILDER.soft_invalidate()
+            except Exception:
+                BUILDER.soft_invalidate()
+            return
         with BUILDER.lock:
             BUILDER.cache = None
-        return self._send(200, {"ok": True, "address": a, "decision": ent})
 
     OF_CAND_CAP = 300
     OF_CAND_CAP_STABLE = 100
@@ -13907,6 +15138,8 @@ class Handler(BaseHTTPRequestHandler):
         taken9 = {str(l9.get("key")) for a9, v9 in decs.items() if a9 != a and isinstance(v9, dict)
                   for l9 in (v9.get("links") or []) if isinstance(l9, dict)}
         ret9 = (getattr(BUILDER, "_outflow_rettx", None) or {}).get(a) or set()
+        fw9 = (getattr(BUILDER, "_outflow_from_w", None) or {}).get(a) or set()
+        dis9 = {str(x9) for x9 in (((decs.get(a) or {}) if isinstance(decs.get(a), dict) else {}).get("dismiss") or []) if isinstance(x9, str)}
         cl9 = getattr(BUILDER, "_of_claims", None) or {}
         where = BUILDER._of_where
         quar9 = getattr(BUILDER, "_risk_quarantined", None) or set()
@@ -13920,14 +15153,15 @@ class Handler(BaseHTTPRequestHandler):
                   "t": datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d %H:%M"), "where": where(c9.get("where") or ""),
                   "chain": c9.get("chain") or "", "tx": c9.get("ref") or "", "stable": bool(c9.get("stable")),
                   "sale": bool(c9.get("sale")), "fromDest": str(c9.get("ref") or "").lower() in ret9, "quar": c9.get("gid") in quar9,
-                  "linked": mine9.get(c9["key"]) or (own9[2] if own9 and own9[0] == a else None)}
+                  "linked": mine9.get(c9["key"]) or (own9[2] if own9 and own9[0] == a else None),
+                  "fromSender": str(c9.get("where") or "") in fw9, "dismissed": c9["key"] in dis9}
             if q9 and q9 not in (x9["sym"] + " " + x9["where"] + " " + x9["tx"] + " " + x9["t"]).lower():
                 continue
             if x9["quar"] and not spam9 and not x9["linked"]:
                 quar_n += 1
                 continue
             out.append(x9)
-        out.sort(key=lambda x9: (x9["stable"], x9["ts"] - first9))
+        out.sort(key=lambda x9: (x9["stable"], x9["dismissed"], not x9["fromSender"], x9["ts"] - first9))
         tok9 = [x9 for x9 in out if not x9["stable"]]
         st9 = [x9 for x9 in out if x9["stable"]]
         shown = tok9[:self.OF_CAND_CAP] + st9[:self.OF_CAND_CAP_STABLE]
@@ -13996,12 +15230,21 @@ class Handler(BaseHTTPRequestHandler):
         snap = getattr(getattr(b, "snaps", None), "cur", None) if b is not None else None
         hero = getattr(snap, "hero", None) if snap is not None else None
         csp = (("Content-Security-Policy", _v2_csp(a["raw"], a["hash"])),)
-        if not hero or time.time() - snap.at > 120 or b"<!--HERO-->" not in a["raw"]:
+        if hero and any(c.strip() == "tj_v2_rand=1" for raw9 in (self.headers.get_all("Cookie") or []) for c in raw9.split(";")):
+            hero = None
+        if not hero or not _hero_ok(b, snap) or b"<!--HERO-->" not in a["raw"]:
             return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="private, no-cache", extra=csp)
-        js = json.dumps(hero, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").encode()
-        raw = a["raw"].replace(b"<!--HERO-->", b'<script id="tjHero" type="application/json">' + js + b"</script>", 1)
-        etag = f'W/"{a["hash"]}-{snap.ver[:8]}"'
-        self._send_bytes(200, raw, websnap.gz(raw), "text/html; charset=utf-8", etag=etag, cache="private, no-cache", extra=csp)
+        k9 = (a["hash"], snap.ver)
+        with _HERO_HTML_LOCK:
+            m9 = _HERO_HTML.get(k9)
+        if m9 is None:
+            js = json.dumps(hero, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").encode()
+            raw = a["raw"].replace(b"<!--HERO-->", b'<script id="tjHero" type="application/json">' + js + b"</script>", 1)
+            m9 = (raw, websnap.gz(raw), f'W/"{a["hash"]}-{snap.ver[:8]}"')
+            with _HERO_HTML_LOCK:
+                _HERO_HTML.clear()
+                _HERO_HTML[k9] = m9
+        self._send_bytes(200, m9[0], m9[1], "text/html; charset=utf-8", etag=m9[2], cache="private, no-cache", extra=csp)
 
     def _send_state_v2(self, query):
         qs9 = urllib.parse.parse_qs(query)
@@ -14207,6 +15450,33 @@ class Handler(BaseHTTPRequestHandler):
             body["error"] = st.errors[k9].get("error")
         self._send(200, body)
 
+    def _ops_post(self, path: str, body: dict):
+        if not self._write_guard():
+            return None
+        now9 = time.time()
+        with _OPS_RL_LOCK:
+            while _OPS_RL and now9 - _OPS_RL[0] > 60:
+                _OPS_RL.popleft()
+            if len(_OPS_RL) >= 30:
+                return self._send(429, {"ok": False, "error": "요청이 너무 많아요 — 잠시 뒤 다시"})
+            _OPS_RL.append(now9)
+        act = path[len("/api/ops/"):]
+        if act == "rebuild_approve":
+            sha9 = body.get("report_sha")
+            ok9, msg9 = ops_requests.approve(sha9 if isinstance(sha9, str) else "", "web")
+        elif act == "rebuild_cancel":
+            ok9 = ops_requests.cancel_approve()
+            msg9 = "승인 취소" if ok9 else "취소할 승인이 없어요"
+        elif act == "poison_replay":
+            ids9 = body.get("ids")
+            ok9, msg9 = ops_requests.poison_request(ids=ids9 if isinstance(ids9, list) else None, all_=False, by="web")
+        elif act == "decimals_resolve":
+            ok9, msg9 = ops_requests.decimals_request(body.get("asset_id"), body.get("stored"), body.get("seen"), "web")
+        else:
+            return self._send(404, {"ok": False, "error": "없는 요청"})
+        log.warning("정리 요청(%s): %s — %s", act, "접수" if ok9 else "거절", str(msg9)[:160])
+        return self._send(200 if ok9 else 409, {"ok": bool(ok9), ("msg" if ok9 else "error"): msg9, "ops": ops_requests.status()})
+
     def _write_guard(self, need_json: bool = True, origin_err: str = "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다") -> bool:
         if not onboarding.origin_ok(self, required=True):
             self._send(403, {"ok": False, "error": origin_err})
@@ -14276,12 +15546,16 @@ class Handler(BaseHTTPRequestHandler):
         g9 = lambda k: (qs9.get(k) or [""])[0]
         last9 = getattr(BUILDER, "_last_out", None) or {}
         f9 = last9.get("fields") if isinstance(last9, dict) else None
+        bt9 = last9.get("builtAt") if isinstance(last9, dict) and isinstance(f9, dict) else None
         if not isinstance(f9, dict) and onboarding.DEMO:
             try:
-                f9 = (BUILDER.build() or {}).get("fields")
+                b9 = BUILDER.build() or {}
+                f9, bt9 = b9.get("fields"), b9.get("builtAt")
             except Exception:
                 f9 = None
         f9 = f9 if isinstance(f9, dict) else {}
+        if not f9:
+            bt9 = None
         conn9 = None
         try:
             if path == "/api/search/ask":
@@ -14290,14 +15564,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = wow2.ask(g9("q"), coins=coins9, chains=sorted(CHAIN_NAME), rate=float(f9.get("rate") or 1384),
                                llm_on=(cfg9.get("ask_llm") is True) and not onboarding.DEMO, llm_cap=int(cfg9.get("ask_llm_daily_max") or 40))
                 return self._send(200 if body.get("ok") else 400, body)
-            conn9 = None if onboarding.DEMO else wow2._ro()
+            conn9 = demo_data.ledger() if onboarding.DEMO else wow2._ro()
+            hist9 = demo_data.DemoHist() if onboarding.DEMO else histcurve.HIST
             if path == "/api/wow/tm":
-                kit9 = getattr(histcurve.HIST, "kit", None) or {}
-                now9 = {str(k): float(g.get("lp") or 0) for k, g in (kit9.get("groups") or {}).items()}
-                body = wow2.tm(g9("date"), hist=histcurve.HIST, daily=getattr(BUILDER, "daily", None), dpx=getattr(BUILDER, "daily_px", None), fields=f9, conn=conn9,
+                kit9 = getattr(hist9, "kit", None) or {}
+                now9 = {str(k): float(g.get("lp") or g.get("ov") or 0) for k, g in (kit9.get("groups") or {}).items()}
+                body = wow2.tm(g9("date"), hist=None if onboarding.DEMO else hist9, daily=getattr(BUILDER, "daily", None), dpx=getattr(BUILDER, "daily_px", None), fields=f9, conn=conn9,
                               chain_names=CHAIN_NAME, now_px=now9)
+                if body.get("ok"):
+                    body["builtAt"] = bt9
             else:
-                body = wow2.flows(f9, conn=conn9, chain_names=CHAIN_NAME, since=g9("since") or None, hist=histcurve.HIST)
+                body = wow2.flows(f9, conn=conn9, chain_names=CHAIN_NAME, since=g9("since") or None, hist=hist9)
             self._send(200 if body.get("ok") else 400, body)
         except Exception as e9:
             log.warning("감탄 기능 %s 실패: %s", path, type(e9).__name__, exc_info=True)
@@ -14315,7 +15592,7 @@ class Handler(BaseHTTPRequestHandler):
         kinds9 = [k for k in g9("kinds").split(",") if k] or None
         try:
             body = search_index.search(g9("q")[:search_index.Q_MAX], kinds=kinds9, limit=g9("limit") or None,
-                                       after=g9("after") or None, before=g9("before") or None)
+                                       after=g9("after") or None, before=g9("before") or None, offset=g9("offset") or None)
         except Exception as e9:
             log.warning("검색 실패: %s", type(e9).__name__)
             return self._send(503, {"ok": False, "error": "검색하지 못했어요 — 잠시 뒤 다시"})
@@ -14510,7 +15787,10 @@ class Handler(BaseHTTPRequestHandler):
         except day_memo.Full as e:
             return self._send(409, {"ok": False, "error": common.safe_err(e)})
         BUILDER.purge_memo_charts(d9, s9)
-        BUILDER.soft_invalidate()
+        if not _bcall("mpatch", {"day_memo"}):
+            if BUILDER.__dict__.get("_snapfile_on"):
+                _snapfile_drop()
+            BUILDER.soft_invalidate()
         q9 = False if review_pause_eff(BUILDER.prefs() if BUILDER is not None else {}).get("on") else DAY_MEMO_REEVAL.schedule(d9, s9)
         self._send(200, {"ok": True, "date": d9, "sym": s9, "memo": m9, "at": rec9["at"] if rec9 else int(time.time()),
                          "deleted": not m9, "changed": True, "reeval": bool(q9)})
@@ -14535,6 +15815,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if onboarding.handle_get(self, path):
                 return
+            if not _mats_ready(path):
+                return self._send(503, {"ok": False, "error": "계산 재료를 만드는 중 — 잠시 뒤 다시 시도하세요"})
             ui9 = _ui_route(path)
             if ui9:
                 return self._send_asset(ui9[0], ui9[1], query)
@@ -14561,7 +15843,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/bench":
                 b9 = bench_series()
                 try:
-                    b9.update(wow.bench(getattr(BUILDER, "_day_idx", None)))
+                    sn9 = (urllib.parse.parse_qs(query).get("since") or [""])[0].strip()
+                    b9.update(wow.bench(getattr(BUILDER, "_day_idx", None), since=sn9 if re.fullmatch(r"\d{4}-\d{2}-\d{2}", sn9) else None))
                 except Exception as e9:
                     log.warning("비교선(안 팔았다면) 계산 실패: %s", common.safe_err(e9)[:120])
                 self._send(200, b9)
@@ -14589,6 +15872,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_nft(query)
             elif path == "/api/alert_prefs":
                 self._send(200, _alert_view(BUILDER.prefs()))
+            elif path == "/api/wallet_reload":
+                self._send(200, _wallet_reload_view())
             elif path == "/api/outflow_candidates":
                 self._send_outflow_cands(query)
             elif path == "/design_futures_preview.html":
@@ -14597,6 +15882,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_optional("futures.html", "text/html; charset=utf-8")
             elif path == "/api/futures":
                 self._send(200, futures_api_payload())
+            elif path == "/api/leverage":
+                self._send(200, leverage_api_payload())
             elif path == "/api/coverage_limits":
                 if not os.path.exists(COVERAGE_PATH):
                     coverage_refresh()
@@ -14609,6 +15896,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/health":
                 self._send(200, {"ok": True, "spot_updated": BUILDER.spot.updated,
                                  "last_scan": BUILDER._last_scan_str(), "health": health.web_view()})
+            elif path == "/api/ops":
+                self._send(200, ops_requests.status())
             else:
                 self._send(404, {"error": "not found"})
         except BrokenPipeError:
@@ -14660,6 +15949,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "JSON 형식 오류"})
             if not isinstance(body, dict):
                 return self._send(400, {"error": "JSON 객체 필요"})
+            if not _mats_ready(path):
+                return self._send(503, {"ok": False, "error": "계산 재료를 만드는 중 — 잠시 뒤 다시 시도하세요"})
             if path == "/api/flow_register":
                 return self._flow_register(body)
             if path in ("/api/other_assets/save", "/api/other_assets/delete"):
@@ -14676,6 +15967,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._alert_test_post(body)
             if path == "/api/wd_dest_register":
                 return self._wd_dest_register(body)
+            if path.startswith("/api/ops/"):
+                return self._ops_post(path, body)
             PREFS_LOCK.acquire()
             locked = True
             prefs = BUILDER.prefs()
@@ -14746,8 +16039,9 @@ class Handler(BaseHTTPRequestHandler):
                     if f in body:
                         ent[f] = body[f]
                 common.atomic_write_json(PREFS_PATH, prefs)
-                with BUILDER.lock:
-                    BUILDER.cache = None
+                if not _bcall("mpatch", {"plan"}):
+                    with BUILDER.lock:
+                        BUILDER.cache = None
                 self._send(200, {"ok": True})
             elif path in ("/api/ignore", "/api/ignore_bulk"):
                 keys = body.get("keys") if path.endswith("_bulk") else [body.get("key")]
@@ -14898,16 +16192,18 @@ class Handler(BaseHTTPRequestHandler):
                 rl9 = prefs.get("review_len") if isinstance(prefs.get("review_len"), dict) else {}
                 prefs["review_len"] = dict(rl9, **{kind9: len9})
                 common.atomic_write_json(PREFS_PATH, prefs)
-                with BUILDER.lock:
-                    BUILDER.cache = None
+                if not _bcall("mpatch", {"review"}):
+                    with BUILDER.lock:
+                        BUILDER.cache = None
                 self._send(200, {"ok": True, "kind": kind9, "len": len9, "reviewLen": review_len_eff(prefs)})
             elif path == "/api/review_pause":
                 if not isinstance(body.get("on"), bool):
                     return self._send(400, {"ok": False, "error": "on 은 true/false"})
                 prefs["review_pause"] = {"on": body["on"], "at": int(time.time())}
                 common.atomic_write_json(PREFS_PATH, prefs)
-                with BUILDER.lock:
-                    BUILDER.cache = None
+                if not _bcall("mpatch", {"review"}):
+                    with BUILDER.lock:
+                        BUILDER.cache = None
                 self._send(200, {"ok": True, "reviewPause": review_pause_eff(prefs)})
             elif path == "/api/review_fill":
                 ord9, par9 = body.get("order"), body.get("parallel")
@@ -14916,8 +16212,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"ok": False, "error": "order(recent|oldest) + parallel(1|3) 필요"})
                 prefs["review_fill"] = {"order": ord9, "parallel": par9}
                 common.atomic_write_json(PREFS_PATH, prefs)
-                with BUILDER.lock:
-                    BUILDER.cache = None
+                if not _bcall("mpatch", {"review"}):
+                    with BUILDER.lock:
+                        BUILDER.cache = None
                 self._send(200, {"ok": True, "reviewFill": review_progress.fill_eff(prefs["review_fill"])})
             elif path == "/api/dust_threshold":
                 try:
@@ -15049,6 +16346,44 @@ def _tg_connected() -> bool:
         return False
 
 
+def _venue_flows30(vflow, real_loc, venue_w, today_kst):
+    lo9 = (today_kst - timedelta(days=29)).strftime("%Y-%m-%d")
+    by = {}
+
+    def slot(loc):
+        w9 = venue_w(loc)
+        if not w9:
+            return None
+        return by.setdefault(w9, {"in": 0.0, "out": 0.0, "realized": 0.0, "realizedKrw": 0.0})
+    for loc9, v9 in (vflow or {}).items():
+        b9 = slot(loc9)
+        if b9 is not None:
+            b9["in"] += float(v9[0])
+            b9["out"] += float(v9[1])
+    for (loc9, d9), v9 in (real_loc or {}).items():
+        if str(d9) < lo9:
+            continue
+        b9 = slot(loc9)
+        if b9 is not None:
+            b9["realized"] += float(v9[0])
+            b9["realizedKrw"] += float(v9[1])
+    return {"days": 30, "flowOk": vflow is not None,
+            "by": {k9: {"in": round(b9["in"], 2), "out": round(b9["out"], 2), "realized": round(b9["realized"], 2),
+                        "realizedKrw": round(b9["realizedKrw"])} for k9, b9 in by.items()}}
+
+
+def _fut_by_date_ex(by_date_ex, exn):
+    out = {}
+    for (dk9, ex9), v9 in by_date_ex.items():
+        if abs(v9[0]) < 0.005:
+            continue
+        out.setdefault(dk9, []).append({"ex": exn.get(ex9, ex9), "exKey": ex9, "usd": round(v9[0], 2), "krw": round(v9[1]),
+                                        "n": v9[2], "t": datetime.fromtimestamp(v9[3] / 1000, KST).strftime("%H:%M") if v9[3] else ""})
+    for l9 in out.values():
+        l9.sort(key=lambda x: (-abs(x["usd"]), str(x["exKey"])))
+    return out
+
+
 def _alert_view(prefs) -> dict:
     b9 = BUILDER.__dict__ if BUILDER is not None else {}
     f9 = ((b9.get("_last_out") or {}).get("fields")) or {}
@@ -15105,11 +16440,6 @@ def _alert_watch_inputs(doc, conn, now):
              "ex_usd": getattr(sp, "ex_usd", None) or {}, "ex_ts": getattr(sp, "ex_ts", None) or {},
              "dex_usd": getattr(sp, "dex_usd", None) or {}, "dex_ts": getattr(sp, "dex_ts", None) or {}} if sp is not None else None
     fut9 = oa9 = None
-    if alert_prefs.effective(doc, "liq", now, conn):
-        try:
-            fut9 = futures_api_payload()
-        except (Exception, SystemExit):
-            fut9 = None
     if True:
         try:
             with other_assets.STORE_LOCK:
@@ -15129,20 +16459,58 @@ def _alert_watch_inputs(doc, conn, now):
         pub9 = public_url(getattr(b9, "cfg", None))
     except Exception:
         pub9 = ""
-    return {"out": out9, "spot": spot9, "futures": fut9, "oa": oa9, "cur": cur9, "link_daily": _alert_link_daily(), "pub": pub9}
+    return {"out": out9, "spot": spot9, "futures": fut9, "oa": oa9, "cur": cur9, "link_daily": _alert_link_daily(), "pub": pub9,
+            "flows": b9.__dict__.get("_flow_ev")}
+
+
+ALERT_FLOW_FRESH = 300
+
+
+def _flow_rearm(st, now):
+    st["flow2"] = {"boff": 1, "aoff": 1}
+    st.pop("flow2_rearm_at", None)
+    st["flow2_paused"] = 1
+
+
+def _flow_fresh_kick(now):
+    try:
+        b9 = BUILDER
+        snap9 = b9.snaps.cur
+        if snap9 is None or now - float(snap9.at) >= ALERT_FLOW_FRESH:
+            if snap9 is None or getattr(b9, "_built_sig", None) is None or b9._input_sig() != b9._built_sig:
+                b9.kick_refresh()
+    except Exception as e9:
+        log.warning("큰 출금 재료 재빌드 요청 실패(다음 판): %s", e9)
 
 
 def alert_watch_once(st: dict, now: float = None) -> list:
     now = time.time() if now is None else now
     if not _tg_connected():
+        _flow_rearm(st, now)
         return []
     prefs = BUILDER.prefs()
     doc = alert_prefs.load(prefs)
     conn = alert_prefs.connect_ts()
-    if not any(alert_prefs.effective(doc, k, now, conn) for k, _fn in alert_watch.PRODUCERS):
+    if not any(alert_prefs.effective(doc, k, now, conn) for k in getattr(alert_watch, "WATCH_CATS", [k9 for k9, _fn in alert_watch.PRODUCERS])):
+        _flow_rearm(st, now)
         return []
+    if alert_prefs.effective(doc, "bigflow", now, conn) or alert_prefs.effective(doc, "arrive", now, conn):
+        _flow_fresh_kick(now)
     snap9 = copy.deepcopy(st)
-    alerts = alert_watch.step(_alert_watch_inputs(doc, conn, now), doc, st, now, conn, log)
+    inp9 = _alert_watch_inputs(doc, conn, now)
+    if st.pop("flow2_paused", None):
+        st["flow2_rearm_at"] = int(now)
+    if "flow2_rearm_at" in st:
+        fl9 = inp9.get("flows")
+        try:
+            fresh9 = isinstance(fl9, dict) and float(fl9.get("builtAt") or 0) >= float(st["flow2_rearm_at"])
+        except (TypeError, ValueError):
+            fresh9 = True
+        if fresh9:
+            st.pop("flow2_rearm_at", None)
+        else:
+            inp9 = dict(inp9, flows=None)
+    alerts = alert_watch.step(inp9, doc, st, now, conn, log)
     try:
         for a9 in alerts:
             _append_alert(a9)
@@ -15208,9 +16576,11 @@ def _balcheck_defer_keys(state: dict) -> set:
         items = [m for m in (state.get("mismatches") or []) if m.get("confirmed")]
         _now9, late9 = health.balcheck_split({"items": items}, srcs)
         out9 = set()
+        rest9 = health.tier_rest_map()
         for m in late9:
             try:
-                if m.get("key") and 0 <= now9 - float(m.get("firstSeen") or 0) < 86400:
+                lim9 = health.REST_LATE_MAX if health.rest_late(m, rest9, now9) else 86400
+                if m.get("key") and 0 <= now9 - float(m.get("firstSeen") or 0) < lim9:
                     out9.add(m["key"])
             except (TypeError, ValueError):
                 pass
@@ -15384,6 +16754,8 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
     if now < GOPLUS_STATUS.get("limitedUntil", 0):
         return 0
     want = list(getattr(BUILDER, "_goplus_want", None) or [])
+    off9 = set((getattr(BUILDER, "cfg", None) or {}).get("_disabled_chains") or [])
+    want = [p for p in want if p and p[0] not in off9]
     if not want:
         return 0
     cache = common.read_json(GOPLUS_PATH, {}) if os.path.exists(GOPLUS_PATH) else {}
@@ -15626,12 +16998,32 @@ def _login_startup_warnings(cfg):
         log.warning("로그인 상태 안내 실패: %s", type(e).__name__)
 
 
+def port_busy_exit(port: int, e: OSError, demo: bool = False):
+    import errno
+    if getattr(e, "errno", None) not in (errno.EADDRINUSE, 10048):
+        raise e
+    if demo:
+        msg = f"포트 {port} 을(를) 다른 프로그램이 쓰고 있어요 — 데모는 TJ_PORT=다른번호 로 다시 실행하세요(예: TJ_PORT=8024 bash tools/setup.sh --demo)"
+    else:
+        msg = (f"포트 {port} 을(를) 다른 프로그램이 쓰고 있어요 — config.json 의 web.port 를 바꾸고 tj-web 을 다시 시작하세요"
+               f"(TJ_PORT 환경변수는 데모 전용이라 일반 실행에선 쓰지 않아요)")
+    log.error(msg)
+    raise SystemExit(2)
+
+
 def main():
     global BUILDER
     if onboarding.demo_main(sys.modules[__name__]):
         return
     common.ensure_dirs()
     cfg = common.load_config()
+    bf_engine.configure(cfg)
+    try:
+        tp9, cp9 = str(os.environ.get("TJ_PORT") or "").strip(), int((cfg.get("web") or {}).get("port", 8023))
+        if tp9 and tp9 != str(cp9):
+            log.warning("TJ_PORT=%s 는 데모(TJ_DEMO=1) 전용이라 무시해요 — 일반 실행 포트는 config.json 의 web.port(지금 %d)", tp9[:8], cp9)
+    except (TypeError, ValueError):
+        pass
     try:
         n9 = (common.scrub_secret_file(COVERAGE_PATH) + bf_engine.scrub_status_file()
               + common.scrub_secret_file(chainsweep.STATUS_PATH))
@@ -15645,6 +17037,9 @@ def main():
         log.warning("px1004 이관 실패(다음 기동에 다시): %s", common.safe_err(e9)[:160])
     login_auth.init(cfg)
     BUILDER = StateBuilder()
+    import chainoff
+    chainoff.BAL_FN = _chain_usd_now
+    BUILDER.restore_snapfile()
     threading.Thread(target=BUILDER.spot.loop, daemon=True).start()
     threading.Thread(target=plan_monitor_loop, daemon=True).start()
     threading.Thread(target=goplus_loop, daemon=True).start()
@@ -15660,7 +17055,10 @@ def main():
                        nft_fn=lambda: _nft_tracker().view(), chain_names=CHAIN_NAME)
     threading.Thread(target=alert_watch_loop, daemon=True, name="alert-watch").start()
     port = int((cfg.get("web") or {}).get("port", 8023))
-    lo = QuietHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        lo = QuietHTTPServer(("127.0.0.1", port), Handler)
+    except OSError as e9:
+        port_busy_exit(port, e9)
     lo_t = threading.Thread(target=lo.serve_forever, daemon=True, name="http-lo")
     lo_t.start()
     log.info("가동: http://127.0.0.1:%d (루프백)", port)

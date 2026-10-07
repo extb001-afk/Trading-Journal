@@ -1,13 +1,14 @@
 # API 키 받는 법
 
-tj-bot 은 **키 없이도 돕니다.** 키는 더 빨리·더 넓게 받게 해 줄 뿐이에요(Solana 지갑이 있으면 Helius 키만 꼭 필요).
+tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어요. 꼭 넣을 키는 둘 — Solana 지갑이 있으면 **Helius**, EVM 지갑이 있으면 **Etherscan**(둘 다 무료).
+나머지 키는 더 빨리·더 넓게 받게 해 줄 뿐이고, 탐색기·시세 키는 공표 한도의 80% 를 기준으로 하루 몫을 정해 천천히 부릅니다.
 키는 웹 **설정 › 연결·키** 에 붙여 넣으면 `.env`(권한 600)에 저장되고, 화면에는 •••• 로만 보입니다(거래소 공개 API 키만 끝 4자리).
 키 값은 주소(URL)·로그·상태 파일·화면 응답 어디에도 남기지 않습니다 — 요청 헤더로만 보냅니다.
 
 | 키(`.env` 이름) | 꼭 필요? | 무료? | 어디에 쓰나 | 없으면 |
 |---|---|---|---|---|
-| `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | 무료 플랜 | Solana 지갑 거래·잔고·토큰·NFT 수집 | Solana 지갑을 못 받아요 |
-| `TJ_ETHERSCAN_KEY` | 선택 | 무료 | EVM 과거 거래 백필 가속 · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 탐색기로 천천히 받아요 |
+| `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | 무료 플랜 | Solana 지갑 옛 기록·토큰·NFT 수집, 새 거래 확인의 백업 | Solana 지갑을 못 받아요 |
+| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 탐색기·RPC 로 받아 느리거나 늦게 기록될 수 있어요 |
 | `TJ_COINGECKO_KEY` | 선택 | Demo 무료 · Pro 유료 | 코인게코 시세 · DEX 토큰 시세 · 원가·차트 시세 · NFT 바닥가 | 전부 무키(공용 무료 한도)로 — 느리고 막히기 쉬워요 |
 | `TJ_OPENSEA_KEY` | 선택 | 무료 신청 | EVM NFT 바닥가 최우선 출처 | 코인게코 NFT 로 |
 | 거래소 키(업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트) | 선택 | 무료 | 그 거래소 잔고·체결·입출금 | 그 거래소는 안 받아요 |
@@ -22,15 +23,26 @@ tj-bot 은 **키 없이도 돕니다.** 키는 더 빨리·더 넓게 받게 해
 3. **설정 › 연결·키 › 탐색기 키 › Helius** 에 붙여 넣고 저장.
 
 - 쓰는 곳: Solana 지갑의 거래·잔고·토큰, Solana NFT 자동 발견.
-- 무료 한도 안에서 천천히 부릅니다.
+- **새 거래 확인은 무료 공개 노드(publicnode)가 먼저** 하고, 응답이 없거나 이상하면 같은 요청을 Helius 로 다시 보내요. 공개 노드는 최근 약 18시간만 보관해서,
+  마지막 확인이 12시간보다 오래된 주소와 처음 넣은 지갑은 Helius 로 확인하고, Helius 가 주기적으로 공개 노드 결과를 대조합니다.
+- **하루 몫** = 월 크레딧(무료 100만 · 유료면 `config.json` 의 `sol.helius_monthly_credits`)의 80% ÷ 30(무료 기준 약 2만 6천).
+  새 거래 확인 몫을 먼저 떼어 두고(옛 기록을 채우는 동안은 하루 몫의 10% — `sol.helius_head_min_pct`) 나머지는 UTC 0시(한국 오전 9시)부터 옛 기록에 먼저 써요.
+  그래서 처음 넣은 지갑은 첫날 새 거래 확인이 평소보다 늦을 수 있고, 오늘 옛 기록 몫을 다 쓴 뒤 넣은 지갑은 다음 오전 9시에 시작해요.
+- 하루 몫을 다 쓰면 그날 끝까지 Helius 를 쉬고 공개 노드로 이어 받아요(옛 기록 = Solana 공식 공개 노드 · 공표 한도의 80% 안).
+  공개 노드를 끄려면 `sol.head_rpc`·`sol.archive_rpc` 를 `""` 로(그러면 Helius 만 쓰고, 하루 몫이 다 차면 그날 끝까지 쉼).
 
-## Etherscan — `TJ_ETHERSCAN_KEY` (EVM 가속)
+## Etherscan — `TJ_ETHERSCAN_KEY` (EVM 지갑이 있으면 필수)
 
 1. https://etherscan.io/myapikey 에 가입 → **Add** 로 키 만들기(무료).
 2. **설정 › 연결·키 › 탐색기 키 › Etherscan** 에 저장.
 
-- 쓰는 곳: Ethereum·Arbitrum·Polygon 등 EVM 과거 거래 백필(수십 배 빨라짐), 블록스카웃이 없는 체인의 NFT 자동 발견.
-- 없어도 동작합니다(공개 탐색기·RPC 로 천천히).
+- 쓰는 곳: Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받기(키 하나로 여러 체인), 블록스카웃이 없는 체인의 NFT 자동 발견. 무료 키는 Base 를 지원하지 않아요(Base 는 공개 RPC 로 받음).
+- **필수지만 막지는 않아요** — EVM 지갑이 있는데 키가 없으면 설정 마법사·키 카드('EVM 필수')·상태 패널에 '이더스캔 키가 필요해요(무료)'가 떠요(텔레그램으로는 안 감).
+  키가 없어도 공개 탐색기·RPC 로 계속 받지만 느리거나, 공개 탐색기가 막힌 체인(Arbitrum·Polygon 등)은 늦게 기록될 수 있어요(기록이 사라지지는 않아요).
+- **하루 몫** = 공표 무료 한도(하루 10만 회)의 80%(8만 회) · 초당 요청은 공표 3회보다 낮은 2회. 새 거래 확인 몫(하루의 약 10~70% — 실제 사용량으로 정함)을
+  먼저 떼어 두고, 나머지는 옛 기록 채우기가 UTC 0시(한국 오전 9시)부터 몰아서 써요 — 처음 넣은 지갑은 첫날 새 거래 확인이 늦을 수 있고,
+  옛 기록이 다 채워지면 새 거래 확인이 하루 몫을 그대로 씁니다.
+- 하루 몫을 다 쓰거나 키가 거부되면 그 체인은 블록스카웃(살아 있으면) 또는 공개 RPC 로 이어 받아요. 공개 RPC 로 갔다면 이더스캔이 살아날 때 알아서 돌아옵니다.
 
 ## CoinGecko — `TJ_COINGECKO_KEY` (데모 또는 프로 — 자동 판별)
 
@@ -105,11 +117,17 @@ tj-bot 은 **키 없이도 돕니다.** 키는 더 빨리·더 넓게 받게 해
 
 ## English
 
-All keys are optional except `TJ_HELIUS_KEY` when you track a Solana wallet. Paste keys in **Settings › Connections & keys**;
-they are stored in `.env` (mode 600), shown masked, and sent only as request headers (never in URLs, logs or state files).
+Two free keys are required: `TJ_HELIUS_KEY` when you track a Solana wallet and `TJ_ETHERSCAN_KEY` when you track an EVM wallet
+(for Etherscan this is a warning only — collection still runs on public explorers/RPC without it, just slower or later). All other keys are optional.
+Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mode 600), shown masked, and sent only as request headers (never in URLs, logs or state files).
 
-- **Helius** (`TJ_HELIUS_KEY`, free plan — https://dashboard.helius.dev): Solana wallets and Solana NFT discovery.
-- **Etherscan** (`TJ_ETHERSCAN_KEY`, free — https://etherscan.io/myapikey): faster EVM history backfill; NFT discovery where no Blockscout exists.
+- **Helius** (`TJ_HELIUS_KEY`, free plan — https://dashboard.helius.dev): Solana history, tokens and NFT discovery, and backup for new-transaction
+  checks (those go to the free publicnode first; Helius cross-checks it). Daily share = 80% of the monthly credits ÷ 30; old history gets it first
+  from 00:00 UTC while 10% (`sol.helius_head_min_pct`) is kept for new transactions; once used up, public nodes carry on until the UTC day ends.
+- **Etherscan** (`TJ_ETHERSCAN_KEY`, free — https://etherscan.io/myapikey): fast and complete Ethereum/Arbitrum/Polygon history (the free key does not
+  cover Base, which is read from public RPC); NFT discovery where no Blockscout exists. Daily share = 80% of the published 100k/day, at most 2 requests/s;
+  a share for new-transaction checks is kept and the rest goes to old history from 00:00 UTC. When the key is refused or the share runs out,
+  that chain continues on Blockscout (if it is up) or public RPC; from public RPC it returns to Etherscan by itself once Etherscan recovers.
 - **CoinGecko** (`TJ_COINGECKO_KEY`, free demo or paid pro — https://www.coingecko.com/en/developers/dashboard, plan auto-detected):
   one key shared by CoinGecko USD prices for coins no exchange priced (Binance → Bybit → CoinGecko order unchanged), DEX token prices
   (CoinGecko on-chain / GeckoTerminal data, pool liquidity included for the thin-pool guard), historical prices for cost basis and charts,

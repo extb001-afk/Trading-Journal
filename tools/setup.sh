@@ -57,6 +57,7 @@ if command -v pm2 >/dev/null 2>&1; then
   pm2 start ecosystem.config.js     # 전체 시작 (지갑 없으면 수집기는 조용히 대기)
   pm2 save                          # 재부팅 후에도 자동 시작하려면 + 'pm2 startup' 안내를 따르세요
   open http://127.0.0.1:8023/       # 첫 화면에서 설정 마법사가 열립니다 (리눅스는 브라우저로 직접)
+  cat state/auth_setup_code         # 첫 비밀번호 화면이 묻는 설정 코드 (tj-web 이 처음 켜질 때 만듦 · 쓰고 나면 지워짐)
 EOF
 else
   warn "pm2 가 없습니다 — Node.js 설치 후 'npm install -g pm2' (권장)"
@@ -69,6 +70,6 @@ pm2 없이 바로 써 보려면 (터미널 5개, 각각 켜 두기):
   $PY src/unit_runner.py sol
   $PY src/unit_runner.py bsc
   # (선택) 거래소: $PY src/upbit_link.py  ·  $PY src/ex_foreign.py  ·  알림: $PY src/alert_bot.py
-그리고 http://127.0.0.1:8023/ 을 여세요.
+그리고 http://127.0.0.1:8023/ 을 여세요. 첫 비밀번호 화면의 설정 코드 = cat state/auth_setup_code
 EOF
 fi
