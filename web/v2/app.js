@@ -485,7 +485,7 @@
   };
   const fmtTs = v => {
     if (v == null || v === '') return '';
-    if (typeof v === 'number' || /^\d+(\.\d+)?$/.test(String(v))) { const n = num(v), d = new Date(n * (n < 1e12 ? 1000 : 1)); return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+    if (typeof v === 'number' || /^\d+(\.\d+)?$/.test(String(v))) { const n = num(v), d = new Date(n * (n < 1e12 ? 1000 : 1) + KST_MS); return pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()); }
     return String(v);
   };
 
@@ -1986,7 +1986,7 @@
     renderView();
   }
   function renderView() {
-    try { renderViewRaw(); S.viewOk = !!S.D; if (S.D && S.rescue && S.rescue.card) S.rescue.card = false; }
+    try { renderViewRaw(); S.viewOk = !!S.D; if (S.rescue) S.rescue.streak = 0; if (S.D && S.rescue && S.rescue.card) S.rescue.card = false; }
     catch (e) { rescue(e, 'render:' + S.tab); }
   }
   const KEEP_LS = { tj_v2_theme: 1, tj_v2_scheme: 1, tj_v2_hide: 1, tj_v2_rand: 1, tj_v2_nologo: 1 };
@@ -2012,6 +2012,19 @@
     logError('[tj] 화면 그리기 실패(' + where + '): ' + msg, e);
     const R = S.rescue || (S.rescue = { n: 0 });
     R.n++; R.msg = msg; R.where = where; R.stack = e && e.stack ? String(e.stack).split('\n').slice(0, 4).join('\n') : '';
+    R.streak = (R.streak || 0) + 1;
+    if (R.streak < 2 && S.data) {
+      try {
+        S.pop = null; S.modal = null; S.drawer = null; S.sheet = null;
+        if (where === 'derive' || !S.D) { S.D = derive(S.data); if (!S.inited) initFromData(); }
+        renderChrome(); renderViewRaw(); S.viewOk = true; R.streak = 0;
+        return;
+      } catch (e1) {
+        const m1 = (e1 && e1.message) || String(e1);
+        logError('[tj] 창을 걷고 다시 그리기도 실패: ' + m1, e1);
+        R.streak = 2; R.msg = m1; R.where = where + ' → 창 걷고 재시도';
+      }
+    }
     if (!R.tried && S.data) {
       R.tried = true;
       resetPrefs(); clearCache(); resetView();
@@ -2050,7 +2063,7 @@
     const v = $('#view');
     let html;
     const pw = S.D ? partWait(S.tab) : '';
-    if (!S.D) html = S.err ? errorCard() : skeleton();
+    if (!S.D) html = S.rescue && S.rescue.card ? rescueCard() : S.err ? errorCard() : skeleton();
     else if (pw) html = pw;
     else if (S.tab === 'journal') html = vJournal();
     else if (S.tab === 'daily') html = vDaily();
@@ -2247,6 +2260,7 @@
     $('#bf').innerHTML = window.TJHealth ? '' : bfHTML(D && D.backfill);
     bfPad();
     if (window.TJHealth) window.TJHealth.chrome(S.mobile);
+    fitTop();
     fitStatus();
     fitLogo();
   }
@@ -2296,6 +2310,26 @@
     else st.removeAttribute('title');
   }
   if (window.ResizeObserver && $('#status')) new ResizeObserver(() => fitStatus()).observe($('#status'));
+  const HK = ['hk1', 'hk2', 'hk3'];
+  let hkKey = '';
+  function fitTop() {
+    const de = document.documentElement, top = $('header.top'), inn = top && $('.in', top), tb = $('#tabs'), st = $('#status');
+    if (!inn || !tb) return;
+    const keyOf = () => innerWidth + '|' + tb.scrollWidth + '|' + Array.from(inn.children).filter(c => c !== st && c !== tb).map(c => c.offsetWidth).join(',') + '|' + HK.map(c => de.classList.contains(c) ? 1 : 0).join('');
+    if (!inn.offsetWidth) { if (HK.some(c => de.classList.contains(c))) { HK.forEach(c => de.classList.remove(c)); de.style.removeProperty('--toph'); } hkKey = ''; return; }
+    if (hkKey && keyOf() === hkKey) return;
+    HK.forEach(c => de.classList.remove(c));
+    const over = () => tb.scrollWidth > tb.clientWidth + 1 || (!!st && st.getBoundingClientRect().width < 16);
+    for (let i = 0; i < HK.length && over(); i++) de.classList.add(HK[i]);
+    if (de.classList.contains('hk3')) de.style.setProperty('--toph', Math.ceil(top.getBoundingClientRect().height) + 'px'); else de.style.removeProperty('--toph');
+    hkKey = keyOf();
+    if (tb.scrollWidth > tb.clientWidth + 1) { const on = $('.tab.on', tb); if (on) { const r = on.getBoundingClientRect(), R = tb.getBoundingClientRect(); if (r.left < R.left || r.right > R.right) tb.scrollLeft += (r.left + r.right) / 2 - (R.left + R.right) / 2; } }
+  }
+  { let hkRaf = 0; const re = () => { cancelAnimationFrame(hkRaf); hkRaf = requestAnimationFrame(() => { try { fitTop(); } catch (e) {  } }); };
+    window.addEventListener('resize', re, { passive: true });
+    try { if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => { hkKey = ''; re(); }); } catch (e) {  }
+    const inn = $('header.top .in');
+    if (inn && window.ResizeObserver) { const ro = new ResizeObserver(re); const obs = () => Array.from(inn.children).forEach(c => { if (c.id !== 'status') ro.observe(c); }); obs(); if (window.MutationObserver) new MutationObserver(obs).observe(inn, { childList: true }); } }
   const logoRO = window.ResizeObserver ? new ResizeObserver(() => fitLogo(true)) : null;
   function fitLogo(fromRO) {
     const top = $('#mtop'), lg = top && top.querySelector('.logo'), t = lg && lg.querySelector('.ltx');
@@ -2789,7 +2823,9 @@
     grid += '</div>';
     const amt9 = c => (c.pnl != null ? ' <span class="' + cls(c.pnl) + '">' + pvm(m(c.pnl, { sign: true, compact: true })) + '</span>' : '');
     const best2 = bestC ? '가장 잘 맞는 때 <b class="up">' + HB_WD[bestC.wd] + ' · ' + HB_SLOT[bestC.h] + ' ' + Math.round(bestC.r) + '%</b> · ' + bestC.n + '묶음' + amt9(bestC) : '';
-    const worst2 = worst ? '가장 안 맞는 때 <b class="down">' + HB_WD[worst.wd] + ' · ' + HB_SLOT[worst.h] + ' ' + Math.round(worst.r) + '%</b> · ' + worst.n + '묶음' + amt9(worst) : '';
+    const flat9 = !!(worst && bestC) && (worst === bestC || Math.round(worst.r) === Math.round(bestC.r));
+    const worst2 = flat9 ? '<span class="mut">' + (pool.length < 2 ? '비교할 시간대가 아직 부족해요 — ' + minN + '묶음 이상 쌓인 칸이 하나뿐' : '시간대마다 이익 비율이 같아 가장 안 맞는 때는 아직 없어요') + '</span>'
+      : worst ? '가장 안 맞는 때 <b class="down">' + HB_WD[worst.wd] + ' · ' + HB_SLOT[worst.h] + ' ' + Math.round(worst.r) + '%</b> · ' + worst.n + '묶음' + amt9(worst) : '';
     const left = '<section class="card hbcard"><div class="row"><b class="hbt">시간대 × 요일 · 이익 난 매도 비율</b><span class="sp"></span><span class="cap">칸 숫자 = 매도 묶음 수 · 진할수록 평균에서 멀어요 · 5묶음 미만은 흐리게</span></div>' + grid
       + '<div class="hbf">' + [best2, worst2].filter(Boolean).map(x => '<span>' + x + '</span>').join('') + '</div></section>';
     const hs = arr(d.hold).filter(x => num(x.n) > 0 && num(x.cost) > 0).map(x => ({ k: x.k, n: num(x.n), r: num(x.pnl) / num(x.cost) * 100 }));
@@ -4534,7 +4570,7 @@
     const leg = tierLeg('hm', '지난 1년 전체 날 중 순위', 'hleg');
     const grid = '<div class="hmw" data-ks="heat"><div class="hmm pvx">' + mos + '</div><div class="hmb"><div class="hmd pvx"><span>월</span><span></span><span>수</span><span></span><span>금</span><span></span><span>일</span></div><div class="hmg">' + cells + '</div></div></div>';
     const sumLine = '<span class="cap pvx num">수익 ' + w + '일 · 손실 ' + l + '일' + (best.n > 1 ? ' · 최장 연속 ' + best.n + '일' : '') + '</span>';
-    return '<section class="card heat" aria-label="지난 1년 하루 실현손익"><div class="hmh"><div><div class="cap">지난 1년 · 하루 실현손익</div><div class="hmt">언제 잘했고, 언제 망했나</div></div><span class="sp"></span>' + leg + '</div>'
+    return '<section class="card heat" aria-label="지난 1년 하루 실현손익"><div class="hmh"><div><div class="cap">지난 1년 · 하루 실현손익</div><div class="hmt">좋았던 날과 아쉬웠던 날</div></div><span class="sp"></span>' + leg + '</div>'
       + grid + (S.mobile ? uiFold('heat:st', { cls: 'plain', head: sumLine, body: () => stats, label: '1년 요약 4칸', def: false }) : stats)
       + '<div class="cap hcap">칸을 누르면 그날 카드(실현·리뷰·기록)로 · 금액은 칸 툴팁에만</div></section>';
   }
@@ -5164,9 +5200,9 @@
       + (S.mobile || S.narrow ? '<div class="m-list">' + days.map(d => { const u = D.usdt[d.date] || {}; const st = d.date === D.todayKey ? !!D._todayStep : D.steps.indexOf(d.date) >= 0; return '<button class="it" data-a="pickDay" data-v="' + esc(d.date) + '"><div><b class="num">' + esc(d.date) + '</b> <span class="mut">' + esc(d.dow || '') + '</span><div class="sub num">' + esc(summary(d)) + '</div></div><div class="r"><div class="val num"' + (d.rb ? ' title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"' : apTitle(d)) + '>' + (apOf(d) ? '≈ ' : '') + m(dval(d), { compact: true }) + '</div><div class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '" style="font-size:13px">' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (st || spl(d) ? ' · 입출금' : '') + '</div></div></button>'; }).join('') + '</div>'
         : '<table><thead><tr><th>날짜</th><th class="l">요약</th><th>USDT 종가</th><th>김프</th><th>총자산</th><th>변동</th></tr></thead><tbody>' + days.map(d => {
           const u = D.usdt[d.date] || {}, kp = u.kimp != null ? num(u.kimp) : null, st = d.date === D.todayKey ? !!D._todayStep : D.steps.indexOf(d.date) >= 0;
-          return '<tr class="clk' + (S.day === d.date ? ' open' : '') + '" data-a="pickDay" data-v="' + esc(d.date) + '" role="button" tabindex="0"><td class="num nowrap" title="' + esc(isoDay(d.date) || d.date) + '">' + esc(d.date) + ' <span class="mut">(' + esc(d.dow || '') + ')</span></td><td class="l"><span class="t2">' + summary(d).split(' · ').map(x => '<span class="nowrap">' + esc(x) + '</span>').join(' · ') + '</span>' + (isLLM(D.reviews[d.date]) ? ' <span class="tag-ai">AI 리뷰</span>' : '') + '</td><td class="num pvx">' + (u.usdt ? '₩' + nf('ko-KR').format(num(u.usdt)) : '—') + '</td><td class="num nowrap" style="color:' + kimpCol(kp) + '">' + (kp == null ? '—' : pctS(kp, 2) + (kp > 2 ? kimpChip(kp) : '')) + '</td><td class="num" title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"><b>' + (apOf(d) ? '<span class="mut">≈ </span>' : '') + m(dval(d), { compact: true }) + '</b>' + (d.rbNew ? '<div class="sub">Rabby 기준 첫 반영</div>' : '') + '</td><td class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '"' + (dlt(d) == null ? '' : ' title="' + esc(m(dlt(d), { sign: true }) + (attOf(d.date) ? ' — ' + attLine(attOf(d.date), 3, false) : '')) + '"') + '>' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (spl(d) && dlt(d) != null && (d.date === D.todayKey ? D._todayFlow : d.flow) != null ? (() => { const fl = d.date === D.todayKey ? num(D._todayFlow) : dayFlowV(d), mk = dlt(d) - fl;
-            if (attOf(d.date)) return '<div class="sub nowrap" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '">입출금 ' + m(fl, { sign: true, compact: true }) + '</div>';
-            return '<div class="sub nowrap" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '">시장 <span class="' + cls(mk) + '">' + m(mk, { sign: true, compact: true }) + '</span> · 입출금 ' + m(fl, { sign: true, compact: true }) + '</div>'; })() : (st ? '<div class="sub">입출금 포함</div>' : '')) + '</td></tr>';
+          return '<tr class="clk' + (S.day === d.date ? ' open' : '') + '" data-a="pickDay" data-v="' + esc(d.date) + '" role="button" tabindex="0"><td class="num rcd" title="' + esc(isoDay(d.date) || d.date) + '"><span class="nowrap">' + esc(d.date) + '</span> <span class="mut nowrap">(' + esc(d.dow || '') + ')</span></td><td class="l"><span class="t2">' + summary(d).split(' · ').map(x => '<span class="nowrap">' + esc(x) + '</span>').join(' · ') + '</span>' + (isLLM(D.reviews[d.date]) ? ' <span class="tag-ai">AI 리뷰</span>' : '') + '</td><td class="num pvx">' + (u.usdt ? '₩' + nf('ko-KR').format(num(u.usdt)) : '—') + '</td><td class="num rck" style="color:' + kimpCol(kp) + '">' + (kp == null ? '—' : '<span class="nowrap">' + pctS(kp, 2) + '</span>' + (kp > 2 ? kimpChip(kp) : '')) + '</td><td class="num" title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"><b>' + (apOf(d) ? '<span class="mut">≈ </span>' : '') + m(dval(d), { compact: true }) + '</b>' + (d.rbNew ? '<div class="sub">Rabby 기준 첫 반영</div>' : '') + '</td><td class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '"' + (dlt(d) == null ? '' : ' title="' + esc(m(dlt(d), { sign: true }) + (attOf(d.date) ? ' — ' + attLine(attOf(d.date), 3, false) : '')) + '"') + '>' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (spl(d) && dlt(d) != null && (d.date === D.todayKey ? D._todayFlow : d.flow) != null ? (() => { const fl = d.date === D.todayKey ? num(D._todayFlow) : dayFlowV(d), mk = dlt(d) - fl;
+            if (attOf(d.date)) return '<div class="sub rcsplit" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '"><span class="rcp">입출금 <span class="nowrap">' + m(fl, { sign: true, compact: true }) + '</span></span></div>';
+            return '<div class="sub rcsplit" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '"><span class="rcp">시장 <span class="nowrap ' + cls(mk) + '">' + m(mk, { sign: true, compact: true }) + '</span></span> · <span class="rcp">입출금 <span class="nowrap">' + m(fl, { sign: true, compact: true }) + '</span></span></div>'; })() : (st ? '<div class="sub">입출금 포함</div>' : '')) + '</td></tr>';
         }).join('') + '</tbody></table>') + '</div>';
   }
 
@@ -5252,12 +5288,13 @@
       (D.bcWatch.length ? '<span class="cap pvx">관찰 중 ' + D.bcWatch.length + '</span>' : '') + (D.bc.unchecked ? '<span class="cap wtxt pvx" title="대조 호출 상한에 걸려 이번 판에 못 본 (체인, 지갑) 쌍 — 다음 판에 이어서 봐요(그 쌍의 지난 불일치는 그대로 보여요)">이번 판 미대조 ' + D.bc.unchecked + '쌍</span>' : ''),
       '원장 ≠ 온체인 실잔고 — 알림 전용 · ' + esc(fmtTs(D.bc.checkedAt)) + ' 대조', '원장 잔고와 온체인 실잔고가 다른 지갑·토큰이에요(알림 전용 · 원장은 그대로). 두 번 연속 확인되면 "확정"으로 표시돼요.') + (open ? clps('ug:bal', rows) : '') + '</div>';
   }
+  const pQty = p => { const v = p && p.qty; if (v == null || v === '') return ''; const qn = +v; return isFinite(qn) && qn !== 0 ? q(qn) + ' ' : ''; };
   function pDesc(p) {
-    const qn = num(p.qty), sym = String(p.sym || '');
-    if (p._cat === 'unv') return q(qn) + ' ' + sym + ' 매도';
-    if (p._cat === 'unkh') return q(qn) + ' ' + sym + ' 보유';
-    if (p._cat === 'lost') return q(qn) + ' ' + sym + ' 창 이전 보유분 처분';
-    if (p._cat === 'spam') return p.key === 'risk:summary' ? '저평가 격리분 일괄' : q(qn) + ' ' + (URL_NM.test(sym) ? '개' : sym) + ' 수령';
+    const qt = pQty(p), sym = String(p.sym || '');
+    if (p._cat === 'unv') return qt + sym + ' 매도';
+    if (p._cat === 'unkh') return qt + sym + ' 보유';
+    if (p._cat === 'lost') return qt + sym + ' 창 이전 보유분 처분';
+    if (p._cat === 'spam') return p.key === 'risk:summary' ? '저평가 격리분 일괄' : qt + (URL_NM.test(sym) ? (qt ? '개' : '토큰') : sym) + ' 수령';
     if (p._cat === 'xfer') return '→ ' + (p.to ? short(p.to) : hs(p.ex || '외부 주소'));
     if (p._cat === 'prog') return '컨트랙트 경유 수령 · ' + short(p.tx || p.onchain);
     return hs(p.onchain || p.gap || '');
@@ -5289,9 +5326,10 @@
     const lg = D0().symLogo[String(p0.sym || '').toUpperCase()] || {};
     const cmp = arr(list).some(x => num(x.usd) >= 1e4), tot = sum(ms, p => num(p.usd));
     const locs = ms.map(p => pSub(p, list) || (p.ckey ? '업비트' : '지갑')).filter((v, i, a) => v && a.indexOf(v) === i);
+    const gq = ms.every(p => pQty(p)) ? q(sum(ms, p => num(p.qty))) + ' ' : '';
     return '<div class="uit ugp' + (open ? ' open' : '') + '"><div class="ih" role="button" tabindex="0" data-a="uItem" data-k="' + esc(gk) + '" aria-expanded="' + open + '">'
-      + '<span class="who">' + icon(p0.sym, 'sm', lg) + '<span class="ell"><b>' + esc(p0.sym) + '</b> <span class="mut" style="font-size:13px">' + ms.length + '곳</span><span class="sub ell mob-only">' + esc(q(sum(ms, p => num(p.qty))) + ' ' + p0.sym + ' 보유 · ' + locs.join(' · ')) + '</span></span></span>'
-      + '<span class="dsc ell" title="' + esc(ms.map(p => (pSub(p, list) || '—') + ' ' + q(num(p.qty)) + ' · ' + m(num(p.usd))).join('\n')) + '">' + esc(q(sum(ms, p => num(p.qty))) + ' ' + p0.sym + ' 보유') + ' <span class="mut">· ' + esc(locs.join(' · ')) + '</span></span>'
+      + '<span class="who">' + icon(p0.sym, 'sm', lg) + '<span class="ell"><b>' + esc(p0.sym) + '</b> <span class="mut" style="font-size:13px">' + ms.length + '곳</span><span class="sub ell mob-only">' + esc(gq + p0.sym + ' 보유 · ' + locs.join(' · ')) + '</span></span></span>'
+      + '<span class="dsc ell" title="' + esc(ms.map(p => (pSub(p, list) || '—') + ' ' + (pQty(p) || '수량 — ') + '· ' + m(num(p.usd))).join('\n')) + '">' + esc(gq + p0.sym + ' 보유') + ' <span class="mut">· ' + esc(locs.join(' · ')) + '</span></span>'
       + '<span class="imp"><b class="num"' + (cmp ? ' title="' + esc(m(tot)) + '"' : '') + '>' + m(tot, { compact: cmp }) + '</b><span class="cap">평가 합</span></span><span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span></div>'
       + (open ? clps('u:' + gk, '<div class="ugsub">' + ms.map((p, i) => pItem(p, i, list)).join('') + '</div>') : '') + '</div>';
   }
@@ -5384,7 +5422,7 @@
   }
   function vOutflows() {
     const D = S.D;
-    if (!D.hasOF) return '<div class="card empty" style="margin-top:12px"><div class="eic">' + IC.tab.outflows + '</div><b>보낸 내역을 준비하고 있어요</b>수집 서버가 업데이트되면, 내가 외부 주소로 보낸 전송을 목적지별로 모아 여기서 정리할 수 있어요.<br>(내 지갑 · 거래소 입금주소 · 외부 유출 중 무엇인지 표시)</div>';
+    if (!D.hasOF) return '<div class="card empty" style="margin-top:12px"><div class="eic">' + IC.tab.outflows + '</div><b>보낸 내역을 아직 만들지 못했어요</b>첫 수집이나 화면 계산(빌드)이 끝나면, 내가 외부 주소로 보낸 전송을 받는 주소별로 모아 내 지갑 · 거래소 입금주소 · 외부 유출 중 무엇인지 정리할 수 있어요.<br>몇 분이 지나도 이 화면이면 <b>설정 › 상태 패널</b>에서 수집기(tj-core)와 화면(tj-web)이 돌고 있는지 확인하세요.</div>';
     const sh = S.of.showHidden;
     const val = r => (r.sendKnown ? r.usdAtSend : 0) || r.usdNow;
     const pendAll = D.of.filter(r => r.bucket === 'pending'), pend = (sh ? pendAll : D.ofPend.concat(D.ofBrU)).slice().sort((a, b) => val(b) - val(a) || b.lastTs - a.lastTs);
@@ -5858,7 +5896,7 @@
     const moreN = D.wdDestN - Math.min(60, D.wdDest.length);
     return head + (rows || '<div class="card empty"><b>미등록 목적지가 없어요</b></div>') + (rows && moreN > 0 ? '<div class="cap" style="margin:4px 0 12px">외 ' + moreN + '곳</div>' : '');
   }
-  const fmtYMD = ts => { const d = new Date(num(ts) * 1000); return isNaN(d) || !ts ? '' : d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+  const fmtYMD = ts => { const d = new Date(num(ts) * 1000 + KST_MS); return isNaN(d) || !ts ? '' : d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); };
   function saleBox(p) {
     const ls = arr(S.D.saleLinks).filter(x => String(x.sym).toUpperCase() === String(p.sym).toUpperCase());
     if (!ls.length || p._lp) return '';
@@ -6089,7 +6127,7 @@
       + '<a href="#settings/wallets" class="sx-bn">' + n('wal', nW) + '<span>추적 지갑</span></a>'
       + '<a href="#settings/alerts" class="sx-bn">' + n('al', alc ? alc.on : null, alc ? alc.n : null) + '<span>켜진 알림</span></a></div>';
     const rows = [];
-    if (K && K.empty.length) rows.push(sxTrow('sx-att-keys', 'key', 'w', '빈 키 ' + K.empty.length + '개', esc(K.emptyNames.join(' · ')), '<button class="btn sm pri" data-a="sxKeyFill">키 넣기</button>'));
+    if (K && K.empty.length) rows.push(sxTrow('sx-att-keys', 'key', 'w', '빈 키 ' + K.empty.length + '개', esc(K.emptyNames.length > 2 ? K.emptyNames.slice(0, 2).join(' · ') + ' 외 ' + (K.emptyNames.length - 2) + '개' : K.emptyNames.join(' · ')), '<button class="btn sm pri" data-a="sxKeyFill">키 넣기</button>'));
     if (H && H.loaded && H.crit + H.warn > 0) rows.push(sxTrow('sx-att-health', 'pulse', (H.crit ? 'e' : 'w') + ' sx-live', '상태 · ' + esc(H.label), H.known ? '알려진 사항 ' + H.known : H.ext ? '외부 서비스 원인 포함' : '60초마다 점검한 결과', '<button class="btn sm" data-a="sxHealth">상태 패널</button>'));
     if (K && !K.tg) rows.push(sxTrow('sx-att-tg', 'bell', 'w', '알림 봇 미연결', '오류가 나도 텔레그램으로 알릴 곳이 없어요', '<a class="btn sm" href="#settings/keys/telegram">연결</a>'));
     const ok = K && H && H.loaded && !rows.length ? '<div class="sx-okl"><span class="dot"></span>손댈 것이 없어요' + (H.known ? ' · 알려진 사항 ' + H.known + '건' : '') + '</div>' : '';
@@ -6573,9 +6611,9 @@
   }
   const REV_FILL = [['recent:1', '최근부터 채우기', '최근 날부터 · 한 건씩'], ['oldest:1', '오래된 날부터', '차례로 · 한 건씩'], ['recent:3', '동시에 여러\u00a0건', '3건씩 · 더 빠르게(사용량 같음)']];
   const rpDur = s => { s = Math.max(0, Math.round(num(s))); if (s < 60) return s + '초'; if (s < 3600) return Math.floor(s / 60) + '분' + (s % 60 ? ' ' + (s % 60) + '초' : ''); const h = Math.floor(s / 3600), mi = Math.floor((s % 3600) / 60); return h + '시간' + (mi ? ' ' + mi + '분' : ''); };
-  const clockTxt = t => { const d = new Date(num(t) * 1000), n = new Date(), hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-    const dd = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 864e5);
-    return dd === 0 ? hm : dd === 1 ? '내일 ' + hm : dd === -1 ? '어제 ' + hm : (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + hm; };
+  const clockTxt = t => { const ms = num(t) * 1000, d = new Date(ms + KST_MS), hm = pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+    const dd = Math.floor((ms + KST_MS) / 864e5) - Math.floor((Date.now() + KST_MS) / 864e5);
+    return dd === 0 ? hm : dd === 1 ? '내일 ' + hm : dd === -1 ? '어제 ' + hm : (d.getUTCMonth() + 1) + '월 ' + d.getUTCDate() + '일 ' + hm; };
   const revItemTxt = c => c.kind === 'weekly' ? (c.label || c.key) + ' 주간' : (/^\d{4}-\d{2}-\d{2}$/.test(String(c.key)) ? +String(c.key).slice(5, 7) + '월 ' + +String(c.key).slice(8, 10) + '일' : String(c.key)) + ' 일간';
   function revProgHTML(P, rf) {
     if (!P) return '';
@@ -6696,6 +6734,8 @@
       AU_KEYS.forEach(k => { delete S.drafts[k]; });
       S.authPw = false; S.authErr = '';
       if (x.d.csrf && S.auth && S.auth.d) S.auth.d.csrf = x.d.csrf;
+      S.csrf = '';
+      try { const st9 = window.__tjSetup && window.__tjSetup.U && window.__tjSetup.U.st; if (st9) st9.csrf = ''; } catch (e) {  }
       toast('비밀번호를 바꿨어요' + (x.d.revoked ? ' · 다른 기기 ' + num(x.d.revoked) + '개는 로그아웃됐어요' : ''));
       authLoad(true); renderView();
       return;
@@ -7022,17 +7062,47 @@
   let ovIme = null, ovIdle = false;
   document.addEventListener('compositionstart', ev => { const o = $('#overlay'); ovIme = o && ev.target && o.contains(ev.target) ? ev.target : null; }, true);
   document.addEventListener('compositionend', () => { if (!ovIme) return; ovIme = null; if (ovIdle) { ovIdle = false; renderOverlay(); } }, true);
+  let ovErrLast = '';
+  function ovErrHTML(e, where, sheet) {
+    const msg = (e && e.message) || String(e);
+    if (ovErrLast !== where + msg) { ovErrLast = where + msg; logError('[tj] 창 그리기 실패(' + where + '): ' + msg, e); }
+    const ic = k => { try { return IC[k] || ''; } catch (e9) { return ''; } };
+    const cl = sheet ? 'uiSheetClose' : 'drawerClose', x = '<button type="button" class="iconbtn" data-a="' + cl + '" aria-label="닫기">' + (ic('close') || '×') + '</button>';
+    const body = '<div class="empty" role="alert"><div class="eic">' + ic('alert') + '</div><b>이 창을 그리지 못했어요</b><div style="margin:6px 0 14px">화면 설정은 그대로예요 — 닫고 다시 열어 보세요. 계속되면 새로고침해 주세요.</div>'
+      + '<button type="button" class="btn" data-a="' + cl + '">닫기</button>'
+      + '<details class="errd" style="margin-top:14px;font-size:12.5px"><summary>오류 내용</summary><div class="cap" style="white-space:pre-wrap;text-align:left">' + esc(errTxt('[' + where + '] ' + msg)) + '</div></details></div>';
+    return sheet
+      ? '<div class="usheet-bg" data-a="uiSheetClose"></div><div class="usheet" role="dialog" aria-modal="true" aria-label="창을 열지 못했어요"><div class="ush dh"><h4>창을 열지 못했어요</h4><span class="sp"></span>' + x + '</div><div class="usb">' + body + '</div></div>'
+      : '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="창을 열지 못했어요"><div class="dh"><div class="h2">창을 열지 못했어요</div><span class="sp"></span>' + x + '</div>' + body + '</aside>';
+  }
+  const ovPath = (root, el) => { const p = []; for (let n = el; n && n !== root; n = n.parentElement) { const par = n.parentElement; if (!par) return null; p.unshift(Array.prototype.indexOf.call(par.children, n)); } return { p, tag: el.tagName, cls: String(el.className || ''), ks: el.getAttribute && el.getAttribute('data-ks') }; };
+  const ovAt = (root, fp) => {
+    if (fp.ks) { const k = root.querySelector('[data-ks="' + (window.CSS && CSS.escape ? CSS.escape(fp.ks) : fp.ks) + '"]'); if (k) return k; }
+    let n = root; for (const i of fp.p) { n = n && n.children[i]; if (!n) return null; }
+    return n && n.tagName === fp.tag ? n : null;
+  };
+  function ovScrollKeep(root) { const out = []; root.querySelectorAll('*').forEach(e => { if (e.scrollLeft > 0) { const fp = ovPath(root, e); if (fp) out.push([fp, e.scrollLeft]); } }); return out; }
+  const ovCls = c => String(c || '').split(/\s+/).filter(x => x && x !== 'fl' && x !== 'fr' && x !== 'ovx').sort().join(' ');
+  function ovScrollBack(root, xs) { xs.forEach(([fp, x]) => { const el = ovAt(root, fp); if (el && ovCls(el.className) === ovCls(fp.cls)) el.scrollLeft = x; }); }
+  function ovVisBox(el) { const d = el && el.closest && el.closest('.drawer,.usheet,.modal'); if (!d) return null; const b = d.getBoundingClientRect(), hd = d.querySelector(':scope > .dh'); let top = b.top; if (hd && !hd.contains(el) && getComputedStyle(hd).position === 'sticky') top = Math.max(top, hd.getBoundingClientRect().bottom); return { d, top, bottom: b.bottom }; }
+  function ovIsVis(el) { try { const v = ovVisBox(el); if (!v) return false; const r = el.getBoundingClientRect(); return r.bottom > v.top && r.top < v.bottom; } catch (e) { return false; } }
+  function ovFocusVis(el, was) { if (!was) return; try { const v = ovVisBox(el); if (!v) return; const r = el.getBoundingClientRect(); if (r.bottom > v.bottom) v.d.scrollTop += r.bottom - v.bottom + 12; else if (r.top < v.top) v.d.scrollTop -= v.top - r.top + 12; } catch (e) {  } }
+  function ovFocusBack(root, fp, was) { const el = ovAt(root, fp); if (el && el.focus && String(el.className || '').split(' ')[0] === fp.cls.split(' ')[0]) { try { el.focus({ preventScroll: true }); } catch (e) {  } ovFocusVis(el, was); } }
   function renderOverlay() {
     { const o = $('#overlay'), a = document.activeElement;
       if (ovIme && a === ovIme && a.isConnected && o && o.contains(a) && o.getAttribute('data-k') === (S.drawer || '') + '|' + (S.modal ? 'm' : '') + '|' + (S.sheet ? 's:' + S.sheet.k + ':' + S.sheet.v : '')) { ovIdle = true; return; }
       ovIdle = false; }
     let h = '';
+    try {
     if (S.drawer === 'fut' && S.D) h += futDrawer();
     if (S.drawer === 'rcpt' && S.D) h += rcptDrawer();
     if (S.drawer === 'frcpt' && S.D) h += futRcptDrawer();
     if (S.drawer === 'lev' && S.D) h += levDrawer();
     if (S.drawer === 'venue' && S.D) h += venueDrawer();
+    } catch (e) { h = ovErrHTML(e, 'drawer:' + S.drawer); }
+    try {
     if (S.sheet && S.D) h += uiSheetHTML();
+    } catch (e) { h += ovErrHTML(e, 'sheet:' + (S.sheet && S.sheet.k), true); }
     if (S.modal) {
       const md = S.modal;
       h += '<div class="modal-bg" data-a="modalBg"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mdT"><h4 id="mdT"' + (md.pvx ? ' class="pvx"' : '') + '>' + esc(md.title) + '</h4>' + (md.bodyHtml != null ? '<p class="mdb">' + md.bodyHtml + '</p>' : '<p' + (md.pvx ? ' class="pvx"' : '') + '>' + esc(md.body) + '</p>')
@@ -7042,24 +7112,38 @@
     const ov = $('#overlay');
     const had = ov.getAttribute('data-k') || '';
     const ae = document.activeElement, fa = ae && ov.contains(ae) && ae.getAttribute ? ae.getAttribute('data-a') : null, fv = fa ? ae.getAttribute('data-v') : null, fk = fa ? ae.getAttribute('data-k') : null;
+    const fvis0 = !!(ae && ov.contains(ae) && ovIsVis(ae));
     const key = (S.drawer || '') + '|' + (S.modal ? 'm' : '') + '|' + (S.sheet ? 's:' + S.sheet.k + ':' + S.sheet.v : '');
     const dy0 = had === key && ov.querySelector('.drawer') ? ov.querySelector('.drawer').scrollTop : 0;
     const sy0 = had === key && ov.querySelector('.usheet') ? ov.querySelector('.usheet').scrollTop : 0;
     const fdr = ae && ov.contains(ae) && ae.tagName === 'INPUT' && ae.getAttribute('data-draft') && !ae.disabled && !RV_IN.has(ae) ? { k: ae.getAttribute('data-draft'), a: ae.selectionStart, b: ae.selectionEnd } : null;
+    if (had === key && ov.__h === h && h) {
+      ov.querySelectorAll('input[data-draft]').forEach(el => { const k9 = el.getAttribute('data-draft'); if (S.drafts[k9] != null && el.value !== S.drafts[k9] && el !== document.activeElement) el.value = S.drafts[k9]; });
+      ovAfter(h); return;
+    }
+    const hx = had === key ? ovScrollKeep(ov) : null, fpath = had === key && ae && ov.contains(ae) && ae !== ov ? ovPath(ov, ae) : null;
     ov.innerHTML = h;
+    ov.__h = h;
+    if (hx) ovScrollBack(ov, hx);
     ov.querySelectorAll('input[data-draft]').forEach(el => { const k9 = el.getAttribute('data-draft'); if (S.drafts[k9] != null) el.value = S.drafts[k9]; });
     if (fdr) { const el = Array.from(ov.querySelectorAll('input[data-draft]')).find(x => x.getAttribute('data-draft') === fdr.k); if (el) { el.focus(); try { el.setSelectionRange(fdr.a, fdr.b); } catch (e) {  } } }
     if (dy0) { const d = ov.querySelector('.drawer'); if (d) d.scrollTop = dy0; }
     if (sy0) { const u = ov.querySelector('.usheet'); if (u) u.scrollTop = sy0; }
     if (had === key) ov.querySelectorAll('.drawer,.drawer-bg,.sheet-bg,.modal,.modal-bg,.usheet,.usheet-bg').forEach(x => { x.style.animation = 'none'; });
     ov.setAttribute('data-k', key);
-    if (fa && had === key) { const fs = [...ov.querySelectorAll(ae.tagName.toLowerCase() + '[data-a="' + fa + '"]')], same = x => x.getAttribute('data-k') === fk, f = fk != null ? fs.find(x => same(x) && (fv == null || x.getAttribute('data-v') === fv)) : (fv != null && fs.find(x => x.getAttribute('data-v') === fv)) || fs[0]; if (f) f.focus(); }
+    if (fa && had === key) { const fs = [...ov.querySelectorAll(ae.tagName.toLowerCase() + '[data-a="' + fa + '"]')], same = x => x.getAttribute('data-k') === fk, f = fk != null ? fs.find(x => same(x) && (fv == null || x.getAttribute('data-v') === fv)) : (fv != null && fs.find(x => x.getAttribute('data-v') === fv)) || fs[0]; if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } ovFocusVis(f, fvis0); } }
+    else if (fpath && !fdr && (document.activeElement === document.body || !ov.contains(document.activeElement))) ovFocusBack(ov, fpath, fvis0);
     hydrateLogos();
+    ovAfter(h);
+  }
+  function ovAfter(h) {
+    const ov = $('#overlay');
     { const on = !!h; ['header.top', '#mtop', '#banners', '#view', '#tabbar', '#bf'].forEach(sel => { const x = $(sel); if (x && x.inert !== on) x.inert = on; }); }
     document.documentElement.classList.toggle('ov-lock', !!h);
     { const on = !!S.modal; ov.querySelectorAll('.usheet,.usheet-bg,.drawer,.drawer-bg').forEach(x => { if (x.inert !== on) x.inert = on; }); }
     const ok = $('#overlay [data-a="modalOk"]') || $('#overlay [data-a="modalCancel"]');
     if (S.modal && ok && !S.modal._focused) { S.modal._focused = true; ok.focus(); }
+    if (S.drawer === 'frcpt') frChipFix();
     bindSwipe();
   }
   function swipeSkip(el, t) {
@@ -8068,6 +8152,7 @@
     if (!force && c && (c.st === 'load' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') frPick(R, c.d); return; }
     const at = S.D.builtAt;
     C[R.key] = { st: 'load', at, d: c && c.d };
+    if (c && c.d && !c.d.empty) frPick(R, c.d);
     fetch('/api/fut_receipt?date=' + R.iso, { cache: 'no-store' })
       .then(r => { if (r.status === 401) { onUnauthorized(); throw new Error('401'); } if (r.status === 404) { const e = new Error('old'); e.old = true; throw e; } return r.json().catch(() => null).then(d => { if (r.status === 503) { const e = new Error('색인을 만드는 중 — 잠시 뒤 다시'); e.idx = true; throw e; } if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status)); return d; }); })
       .then(d => { C[R.key] = { st: 'ok', at, d }; if (frOn(R)) frPick(S.frc, d); })
@@ -8139,42 +8224,48 @@
     const ttl = '선물 영수증 · ' + (dt.getMonth() + 1) + '월 ' + dt.getDate() + '일 (' + DOWS[dt.getDay()] + ')' + (R.rank ? ' 그날 실현 기여 ' + R.rank + '위' : '');
     let body;
     if (d && d.empty) body = '<div class="empty"><div class="eic">' + IC.cal + '</div><b>그날 선물 정산이 없어요</b><span class="cap">기여 줄에도 선물 줄이 없어요</span></div>';
-    else if (d) body = futRcptBody(R, d) + (c.st === 'load' ? '<div class="cap">새 기록으로 다시 계산하는 중…</div>' : c.st === 'err' ? '<div class="fbnote">새로 불러오지 못해 직전 영수증을 보여 줘요</div>' : '');
+    else if (d) body = futRcptBody(R, d) + (c.st === 'load' ? '<div class="cap">새 기록으로 다시 계산하는 중…</div>' : c.st === 'err' ? '<div class="fbnote">새로 불러오지 못해 직전 영수증을 보여 줘요 <button class="link" data-a="frRetry">다시 시도</button></div>' : '');
     else if (c.st === 'err') body = '<div class="empty"><div class="eic">' + IC.alert + '</div><b>' + (c.old ? '서버를 업데이트하면 볼 수 있어요' : '영수증을 불러오지 못했어요') + '</b>' + (c.old ? '' : '<span class="cap">' + esc(errTxt(c.msg || '')) + '</span><button class="btn sm" data-a="frRetry" style="margin-top:10px">' + IC.undo + ' 다시 시도</button>') + '</div>';
     else body = '<div class="rload" aria-busy="true"><i></i><i></i><i></i><span class="cap">영수증 불러오는 중…</span></div>';
-    const tv = d && !d.empty && d.total ? KV(num(d.total.usd), d.total.krw != null ? num(d.total.krw) : null) : null;
-    const rsum = tv != null ? '<span class="rsum num"><b>선물</b> <span class="' + cls(tv) + '">' + m(tv, { sign: true, compact: true }) + '</span></span>' : '';
+    const fx = d && !d.empty ? frFocus(R, d) : null;
+    const tv = d && !d.empty && d.total ? (fx ? KV(num(fx.usd), fx.krw) : KV(num(d.total.usd), d.total.krw != null ? num(d.total.krw) : null)) : null;
+    const rsum = tv != null ? '<span class="rsum num"><b>' + (fx ? esc(fx.ex) : '선물') + '</b> <span class="' + cls(tv) + '">' + m(tv, { sign: true, compact: true }) + '</span></span>' : '';
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer rcpt frc" role="dialog" aria-modal="true" aria-label="선물 영수증"><div class="dh"><span class="cap rtop">' + esc(ttl) + '</span>' + rsum + '<span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>' + body + '</aside>';
   }
+  const frFocus = (R, d) => { const exs = arr(d && d.byEx); return R && R.ex && exs.length > 1 && d.exKinds && d.exKinds[R.ex] ? exs.find(x => x.exKey === R.ex) || null : null; };
   function futRcptBody(R, d) {
     const t = d.total || {}, tv = KV(num(t.usd), t.krw != null ? num(t.krw) : null);
-    const rk = num(t.usd) ? tv / num(t.usd) : 1, V = u => num(u) * rk;
+    const rk = num(t.usd) ? tv / num(t.usd) : 1, V = (u, kw) => (kw != null && isFinite(kw) ? KV(num(u), num(kw)) : num(u) * rk);
     const exs = arr(d.byEx), coins = arr(d.coins);
+    const fx = frFocus(R, d), xk = fx && d.exKinds && d.exKinds[fx.exKey] || null;
+    const H = xk ? { v: KV(num(fx.usd), fx.krw), r: V(xk.realized, xk.realizedKrw), f: V(xk.fee, xk.feeKrw), u: V(xk.funding, xk.fundingKrw), ff: V(num(xk.fee) + num(xk.funding), xk.feeKrw != null && xk.fundingKrw != null ? num(xk.feeKrw) + num(xk.fundingKrw) : null), c: num(xk.closes), w: num(xk.wins), l: num(xk.losses) }
+      : { v: tv, r: V(t.realized, t.realizedKrw), f: V(t.fee, t.feeKrw), u: V(t.funding, t.fundingKrw), ff: V(num(t.fee) + num(t.funding), t.feeKrw != null && t.fundingKrw != null ? num(t.feeKrw) + num(t.fundingKrw) : null), c: num(t.closes), w: num(t.wins), l: num(t.losses) };
+    const nEv = xk ? num(fx.n) : exs.reduce((a, x) => a + num(x.n), 0);
     const bb = coins.some(c => arr(c.trades).some(x => x.feeIncl));
     const pr = coins.reduce((a, c) => [a[0] + num((c.priced || {}).n), a[1] + num((c.priced || {}).of)], [0, 0]);
     const head = '<div class="rch"><div class="rcl"><div class="row gap8 rcn"><span class="ic sm" style="background:var(--surface3);color:var(--text2)">' + IC.scale.replace('<svg', '<svg width="14" height="14"') + '</span><b class="rsym">선물 정산</b>'
-      + (exs.length ? '<span class="pill g sm">' + esc(exs.map(x => x.ex).join(' · ')) + '</span>' : '') + (pr[1] ? '<span class="pill ' + (pr[0] === pr[1] ? 'a' : 'g') + ' sm pvx">가격 ' + pr[0] + '/' + pr[1] + '건</span>' : '')
+      + (xk ? '<span class="pill a sm">' + esc(fx.ex) + '</span>' : exs.length ? '<span class="pill g sm">' + esc(exs.map(x => x.ex).join(' · ')) + '</span>' : '') + (pr[1] ? '<span class="pill ' + (pr[0] === pr[1] ? 'a' : 'g') + ' sm pvx">가격 ' + pr[0] + '/' + pr[1] + '건</span>' : '')
       + (arr(d.stale).length ? '<span class="pill w sm">수집 지연</span>' : '') + '</div>'
-      + '<div class="rbig num ' + cls(tv) + '">' + m(tv, { sign: true }) + '</div>'
-      + '<div class="cap num">실현 ' + m(V(t.realized), { sign: true }) + ' · 수수료 ' + m(V(t.fee), { sign: true }) + ' · 펀딩 ' + m(V(t.funding), { sign: true }) + (S.cur === 'USD' ? '' : ' · 정산 시각 환율') + '</div>'
-      + (exs.length > 1 || bb ? '<div class="cap num frex">' + exs.map(x => esc(x.ex) + ' <b class="' + clsV(KV(num(x.usd), x.krw)) + '">' + m(KV(num(x.usd), x.krw), { sign: true, compact: true }) + '</b>').join(' · ') + (bb ? ' · 바이빗은 실현에 수수료 포함' : '') + '</div>' : '') + '</div>';
-    const hs = coins.flatMap(c => arr(c.trades)).filter(x => x.holdS != null);
+      + '<div class="rbig num ' + cls(H.v) + '">' + m(H.v, { sign: true }) + '</div>'
+      + '<div class="cap num">' + (xk ? esc(fx.ex) + ' ' : '') + '실현 ' + m(H.r, { sign: true }) + ' · 수수료 ' + m(H.f, { sign: true }) + ' · 펀딩 ' + m(H.u, { sign: true }) + (S.cur === 'USD' ? '' : ' · 정산 시각 환율') + '</div>'
+      + (exs.length > 1 || bb ? '<div class="cap num frex">' + (xk ? '그날 선물 전체 <b class="' + clsV(tv) + '">' + m(tv, { sign: true, compact: true }) + '</b> = ' : '')
+        + exs.map(x => esc(x.ex) + ' <b class="' + clsV(KV(num(x.usd), x.krw)) + '">' + m(KV(num(x.usd), x.krw), { sign: true, compact: true }) + '</b>' + (num(x.n) ? '<span class="mut pvx"> 정산 ' + num(x.n) + '건</span>' : '')).join(' · ') + (bb ? ' · 바이빗은 실현에 수수료 포함' : '') + '</div>' : '') + '</div>';
+    const hs = coins.flatMap(c => arr(c.trades)).filter(x => x.holdS != null && (!xk || x.exKey === fx.exKey));
     const avgH = hs.length ? hs.reduce((a, x) => a + num(x.holdS), 0) / hs.length : null;
-    const ff = V(num(t.fee) + num(t.funding));
-    const st = '<div class="rst"><div><span class="l">청산</span><b class="num">' + num(t.closes) + '건</b><span class="s num">' + num(t.wins) + '승 ' + num(t.losses) + '패</span></div>'
-      + '<div><span class="l">수수료·펀딩</span><b class="num ' + clsV(ff) + '">' + m(ff, { sign: true, compact: true }) + '</b><span class="s num">펀딩 ' + m(V(t.funding), { sign: true, compact: true }) + '</span></div>'
-      + '<div><span class="l">평균 보유</span><b class="num">' + (avgH != null ? durTxt(avgH) : '—') + '</b><span class="s num">' + (hs.length ? '진입 시각 있는 ' + hs.length + '건' : '진입 시각 모름') + '</span></div></div>';
+    const st = '<div class="rst"><div title="청산 = 주문 단위 · 정산 = 체결마다의 실현 줄(일별 기록의 건수)"><span class="l">' + (xk ? esc(fx.ex) + ' 청산' : '청산') + '</span><b class="num">' + H.c + '건</b><span class="s num">' + H.w + '승 ' + H.l + '패' + (nEv && nEv !== H.c ? ' · 정산 ' + nEv + '건' : '') + '</span></div>'
+      + '<div><span class="l">수수료·펀딩</span><b class="num ' + clsV(H.ff) + '">' + m(H.ff, { sign: true, compact: true }) + '</b><span class="s num">펀딩 ' + m(H.u, { sign: true, compact: true }) + '</span></div>'
+      + (hs.length ? '<div><span class="l">평균 보유</span><b class="num">' + durTxt(avgH) + '</b><span class="s num">진입 시각 있는 ' + hs.length + '건</span></div>' : '') + '</div>';
     const c = coins.find(x => x.coin === R.coin) || coins[0];
     if (!c) return head + st + '</div>';
     const chips = coins.length > 1 ? '<div class="rkvn frch" role="group" aria-label="종목"><span class="cap rkvl">종목</span>' + coins.map(x => { const on = x.coin === c.coin, v = KV(num(x.usd), x.krw);
       return '<button class="chip' + (on ? ' on' : '') + '" data-a="frCoin" data-v="' + esc(x.coin) + '" aria-pressed="' + on + '">' + esc(x.label) + ' <span class="num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</span> <span class="mut num">· ' + num(x.closes) + '건</span></button>'; }).join('') + '</div>' : '';
     const sec = '<section class="rsec rkc frk"><div class="row rtth rkh"><span class="rtt">실제 시세 위 내 진입·청산</span><span class="sp"></span><div class="seg rkseg" role="group" aria-label="봉 간격">'
       + FR_IVS.map(o => '<button data-a="frIv" data-v="' + o[0] + '" class="' + (R.iv === o[0] ? 'on' : '') + '" aria-pressed="' + (R.iv === o[0]) + '">' + o[1] + '</button>').join('') + '</div></div>' + chips + rkFut(R, d, c) + '</section>';
-    const cv = KV(num(c.usd), c.krw), crk = num(c.usd) ? cv / num(c.usd) : rk, CV = u => num(u) * crk;
+    const cv = KV(num(c.usd), c.krw), crk = num(c.usd) ? cv / num(c.usd) : rk, CV = (u, kw) => (kw != null && isFinite(kw) ? KV(num(u), num(kw)) : num(u) * crk);
     const tile = (l, vh, s0, c0) => '<div class="rkt"><span class="l">' + l + '</span><b class="num ' + (c0 || '') + '">' + vh + '</b><span class="s num">' + s0 + '</span></div>';
-    const tiles = '<div class="rk4">' + tile('순손익', m(cv, { sign: true, compact: true }), '실현 + 수수료 + 펀딩', clsV(cv)) + tile('실현', m(CV(c.realized), { sign: true, compact: true }), num(c.closes) + '건 · ' + num(c.wins) + '승 ' + num(c.losses) + '패', clsV(c.realized))
-      + tile('수수료', num(c.fee) ? m(CV(c.fee), { sign: true, compact: true }) : '—', bb && arr(c.trades).some(x => x.feeIncl) ? '바이빗 몫은 실현에 포함' : '진입 + 청산', clsV(c.fee))
-      + tile('펀딩', num(c.funding) ? m(CV(c.funding), { sign: true, compact: true }) : '—', arr(c.fundingRows).length ? arr(c.fundingRows).length + '회' : '그날 펀딩 없음', clsV(c.funding)) + '</div>';
+    const tiles = '<div class="rk4">' + tile('순손익', m(cv, { sign: true, compact: true }), '실현 + 수수료 + 펀딩', clsV(cv)) + tile('실현', m(CV(c.realized, c.realizedKrw), { sign: true, compact: true }), num(c.closes) + '건 · ' + num(c.wins) + '승 ' + num(c.losses) + '패', clsV(c.realized))
+      + tile('수수료', num(c.fee) ? m(CV(c.fee, c.feeKrw), { sign: true, compact: true }) : '—', bb && arr(c.trades).some(x => x.feeIncl) ? '바이빗 몫은 실현에 포함' : '진입 + 청산', clsV(c.fee))
+      + tile('펀딩', num(c.funding) ? m(CV(c.funding, c.fundingKrw), { sign: true, compact: true }) : '—', arr(c.fundingRows).length ? arr(c.fundingRows).length + '회' : '그날 펀딩 없음', clsV(c.funding)) + '</div>';
     const cb = String(c.coin);
     const row = x => {
       const pv = KV(num(x.pnl), x.pnlKrw), fv = KV(num(x.fee), x.feeKrw);
@@ -8185,12 +8276,12 @@
           + ' · ' + (x.entryTs ? (x.entryTs < num(x.exitTs) - 86400 || kstHM(x.entryTs) > kstHM(x.exitTs) ? frMD(x.entryTs) : kstHM(x.entryTs)) + ' → ' + kstHM(num(x.exitTs)) + (x.holdS != null ? ' (' + durTxt(num(x.holdS)) + ')' : '') : kstHM(num(x.exitTs)) + ' 청산 · 진입 시각 모름') + (x.px === 'derived' ? ' · 진입가 = 정산으로 유도' : '')
         : '가격 없음 — 정산 금액만(' + esc(x.why || '가격 칸 없음') + ') · ' + kstHM(num(x.exitTs)) + ' 정산' + (num(x.rows) > 1 ? ' · ' + x.rows + '행 묶음' : '');
       return '<div class="frow" data-frt="' + esc(x.id) + '" tabindex="0">' + exLogo(x.exKey) + '<div class="fqm"><div class="row gap8"><b>' + esc(futSym(x.symbol)) + '</b>' + sd + (x.liq ? '<span class="pill w sm">강제청산</span>' : '') + '</div><div class="cap num">' + l2 + '</div></div>'
-        + '<div class="fqr num"><b class="' + clsV(pv) + '">' + m(pv, { sign: true, compact: true }) + '</b><span class="cap">' + (x.feeIncl ? '수수료 포함' + (x.feeInfo ? ' ' + m(num(x.feeInfo), { sign: true, compact: true }) : '') : num(x.fee) ? '수수료 ' + m(fv, { sign: true, compact: true }) : '') + '</span></div></div>';
+        + '<div class="fqr num"><b class="' + clsV(pv) + '">' + m(pv, { sign: true }) + '</b><span class="cap">' + (x.feeIncl ? '수수료 포함' + (x.feeInfo ? ' ' + m(num(x.feeInfo), { sign: true }) : '') : num(x.fee) ? '수수료 ' + m(fv, { sign: true }) : '') + '</span></div></div>';
     };
     const trs = arr(c.trades);
     const lst = '<section class="rsec frl"><div class="row rtth"><span class="rtt">청산 ' + trs.length + '건 · ' + esc(c.label) + '</span><span class="sp"></span><span class="cap num pvx">가격 ' + num((c.priced || {}).n) + '/' + num((c.priced || {}).of) + '</span></div>'
       + (trs.length ? trs.map(row).join('') : '<div class="cap">그날 이 종목 청산 없음 — 수수료·펀딩만</div>') + (num(c.tradesTotal) > trs.length ? '<div class="cap">큰 손익 ' + trs.length + '건만 표시 · 전체 ' + c.tradesTotal + '건(합계는 전 건)</div>' : '')
-      + (arr(c.fundingRows).length ? uiFold('frc:fund', { cls: 'plain', head: '<b>펀딩 ' + arr(c.fundingRows).length + '회</b><span class="cap num">' + m(CV(c.funding), { sign: true }) + '</span>', label: '펀딩 내역',
+      + (arr(c.fundingRows).length ? uiFold('frc:fund', { cls: 'plain', head: '<b>펀딩 ' + arr(c.fundingRows).length + '회</b><span class="cap num">' + m(CV(c.funding, c.fundingKrw), { sign: true }) + '</span>', label: '펀딩 내역',
         body: () => arr(c.fundingRows).map(f => '<div class="row frf num"><span class="cap">' + kstHM(num(f.ts)) + ' · ' + esc(f.ex || f.exKey) + '</span><span class="sp"></span><b class="' + clsV(f.usd) + '">' + m(KV(num(f.usd), f.krw), { sign: true }) + '</b></div>').join('') }) : '') + '</section>';
     const un = arr(d.unpriced);
     const ftxt = (pr[1] ? '가격 있는 청산 ' + pr[0] + '/' + pr[1] + '건' : '') + (un.length ? ' · ' + un.map(u => esc(u.ex) + ' ' + u.n + '건은 ' + esc(u.reason)).join(' · ') + '이라 정산 금액만' : '') + (d.other && num(d.other.usd) ? ' · 종목 없는 정산 ' + m(KV(num(d.other.usd), d.other.krw), { sign: true }) : '');
@@ -8211,7 +8302,7 @@
     const ch = x.chart || {}, cs0 = arr(ch.candles).filter(r => Array.isArray(r) && r.length >= 6 && isFinite(r[2]) && isFinite(r[3]));
     const marks = arr(x.marks).filter(k => k && k.ts), spans = arr(x.spans).filter(s0 => s0 && num(s0.entryPx) > 0 && num(s0.exitPx) > 0);
     const vns = arr(x.venues);
-    const vchips = vns.length > 1 ? '<div class="rkvn" role="group" aria-label="봉 출처 거래소"><span class="cap rkvl">봉</span>' + vns.map(o => { const on = o.key === x.venue; return '<button class="chip' + (on ? ' on' : '') + '" data-a="frVenue" data-v="' + esc(o.key) + '" aria-pressed="' + on + '">' + esc(o.label) + ' <span class="mut num">' + num(o.n) + '건</span></button>'; }).join('') + '</div>' : '';
+    const vchips = vns.length > 1 ? '<div class="rkvn" role="group" aria-label="거래소 — 그 거래소 봉과 진입·청산"><span class="cap rkvl">거래소</span>' + vns.map(o => { const on = o.key === x.venue; return '<button class="chip' + (on ? ' on' : '') + '" data-a="frVenue" data-v="' + esc(o.key) + '" aria-pressed="' + on + '">' + esc(o.label) + ' <span class="mut num">' + num(o.n) + '건</span></button>'; }).join('') + '</div>' : '';
     if (!ch.ok && !marks.length) return '<div class="rkwhy cap" role="status">' + esc(ch.why || '그릴 진입·청산이 없어요') + '</div>';
     if (!ch.ok || !cs0.length) {
       const why = ch.why || '봉을 받지 못했어요';
@@ -8222,23 +8313,24 @@
     const src = ch.src || {}, w = x.window || {};
     const ivS = { '1m': 60, '5m': 300, '1h': 3600 }[src.iv] || 300;
     const Wd = Math.round(Math.max(300, Math.min(756, S.mobile ? (window.innerWidth || 390) - 34 : 756)));
-    const PH = S.mobile ? 210 : 270, VH = S.mobile ? 40 : 52, GAP = 8, AX = 22, T = 30, Lp = 8, Rp = 10;
+    const PH = S.mobile ? 210 : 270, VH = S.mobile ? 40 : 52, GAP = 8, AX = 22, T = 30, Rp = 10;
     const H = T + PH + GAP + VH + AX;
     const t0 = num(w.from) || cs0[0][0], t1 = (num(w.to) || cs0[cs0.length - 1][0]) + ivS;
-    const inView = cs0.filter(r => r[0] + ivS > t0 && r[0] < t1);
-    const bn = rcBin(inView.length ? inView : cs0, Math.floor((Wd - Lp - Rp) / 2.5)), cs = bn.cs, bS = ivS * bn.k;
-    const X = t => Lp + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (Wd - Lp - Rp);
+    const inView = cs0.filter(r => r[0] + ivS > t0 && r[0] < t1), cv0 = inView.length ? inView : cs0;
     const ys = [];
-    cs.forEach(r => ys.push(r[2], r[3]));
+    cv0.forEach(r => ys.push(r[2], r[3]));
     marks.forEach(k => { if (num(k.px) > 0) ys.push(num(k.px)); });
     spans.forEach(s0 => ys.push(num(s0.entryPx), num(s0.exitPx)));
     let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
     const pad = (y1 - y0) * 0.07 || y1 * 0.05 || 1; y0 = Math.max(0, y0 - pad); y1 += pad;
     const Y = p => T + (1 - (p - y0) / (y1 - y0)) * PH;
+    const yt = rcTicks(y0, y1, S.mobile ? 3 : 4).filter(p => Y(p) > T + 8 && Y(p) < T + PH - 4);
+    const gut = S.mobile && yt.length ? Math.ceil(Math.max.apply(null, yt.map(p => rkTw(px(p), 11.5)))) + 8 : 0, Lp = gut ? gut + 8 : 8;
+    const bn = rcBin(cv0, Math.floor((Wd - Lp - Rp) / 2.5)), cs = bn.cs, bS = ivS * bn.k;
+    const X = t => Lp + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (Wd - Lp - Rp);
     const vmax = Math.max.apply(null, cs.map(r => num(r[5]))) || 1, VB = T + PH + GAP + VH;
     const bw = Math.max(1, Math.min(9, 0.68 * (Wd - Lp - Rp) * bS / (t1 - t0)));
-    const yt = rcTicks(y0, y1, S.mobile ? 3 : 4).filter(p => Y(p) > T + 8 && Y(p) < T + PH - 4);
-    const grid = yt.map(p => '<line x1="' + Lp + '" x2="' + (Wd - Rp) + '" y1="' + Y(p).toFixed(1) + '" y2="' + Y(p).toFixed(1) + '" class="gl"/><text x="' + (Lp + 4) + '" y="' + (Y(p) - 4).toFixed(1) + '" class="tk">' + esc(px(p)) + '</text>').join('');
+    const grid = yt.map(p => '<line x1="' + Lp + '" x2="' + (Wd - Rp) + '" y1="' + Y(p).toFixed(1) + '" y2="' + Y(p).toFixed(1) + '" class="gl"/><text x="' + (gut ? gut - 4 : Lp + 4) + '" y="' + (gut ? Y(p) + 4 : Y(p) - 4).toFixed(1) + '"' + (gut ? ' text-anchor="end"' : '') + ' class="tk">' + esc(px(p)) + '</text>').join('');
     const stp = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].find(s0 => (t1 - t0) / 60 / s0 <= (S.mobile ? 4 : 7)) || 1440;
     const xt = []; for (let t = Math.ceil((t0 + 32400) / (stp * 60)) * stp * 60 - 32400; t <= t1; t += stp * 60) xt.push(t);
     const xax = xt.map(t => '<text x="' + X(t).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="' + (X(t) < 24 ? 'start' : X(t) > Wd - 24 ? 'end' : 'middle') + '" class="tk">' + (stp >= 1440 ? frMD(t).slice(0, 5) : kstHM(t)) + '</text>').join('');
@@ -8261,7 +8353,7 @@
     const qmx = Math.max.apply(null, marks.map(k => num(k.q))) || 1;
     const tri = (k, xm, ym) => { const s0 = Math.max(8, Math.min(16, 8 + 8 * Math.sqrt(num(k.q) / qmx))), h0 = s0 * 0.9, up = k.side === 'LONG';
       const p = up ? [[xm, ym - h0 * 0.15], [xm - s0 / 2, ym + h0 * 0.85], [xm + s0 / 2, ym + h0 * 0.85]] : [[xm, ym + h0 * 0.15], [xm - s0 / 2, ym - h0 * 0.85], [xm + s0 / 2, ym - h0 * 0.85]];
-      return '<path d="M' + p.map(z => z[0].toFixed(1) + ' ' + z[1].toFixed(1)).join('L') + 'Z" class="fo ' + (up ? 'fl' : 'fs') + '"><title>' + esc(kstHM(num(k.ts)) + ' ' + (up ? '롱' : '숏') + ' 진입 · ' + px(num(k.px)) + (k.q ? ' · ' + q(num(k.q)) + ' ' + c.coin : '') + ' · ' + (EX_NAMES[k.exKey] || k.exKey)) + '</title></path>'; };
+      return '<path d="M' + p.map(z => z[0].toFixed(1) + ' ' + z[1].toFixed(1)).join('L') + 'Z" class="fo ' + (up ? 'fl' : 'fs') + '"><title>' + esc(kstHM(num(k.ts)) + ' ' + (up ? '롱' : '숏') + ' 진입 · ' + px(num(k.px)) + (num(k.fills) > 1 ? '(평균)' : '') + (k.q ? ' · ' + q(num(k.q)) + ' ' + c.coin : '') + (num(k.fills) > 1 ? ' · 한 주문 ' + num(k.fills) + '체결' : '') + ' · ' + (EX_NAMES[k.exKey] || k.exKey)) + '</title></path>'; };
     const opens = marks.filter(k => k.kind === 'open' && num(k.px) > 0 && num(k.ts) >= t0 && num(k.ts) <= t1).map(k => tri(k, X(num(k.ts)), Y(num(k.px)))).join('');
     const pills = [], trById = {};
     arr(c.trades).forEach(t9 => { if (t9 && t9.id) trById[t9.id] = t9; });
@@ -8283,12 +8375,23 @@
     let st = (src.fallback && tr.length ? tr[0].label + ' 봉 없음 → ' : '') + (src.label || '') + ' ' + (RC_IVK[src.iv] || src.iv || '');
     if (src.iv && src.iv !== x.iv) st += ' · ' + (src.iv === '1h' ? '창이 길어 1시간봉(저해상도)' : (RC_IVK[x.iv] || x.iv) + '이 없어 저해상도');
     if (x.srcNote) st += ' · ' + x.srcNote;
+    if (x.capNote) st += ' · ' + x.capNote;
     st += ' · 가격축 USDT(선물 상세와 같은 규칙)';
     if (nAp) st += ' · 가격 없는 청산 ' + nAp + '건은 그 시각 봉 종가에 빈 점';
     if (bn.k > 1) st += ' · ' + bn.k + '봉씩 묶어 그림';
     const srcLine = '<div class="rksrc cap"><span title="' + esc(tr.length ? '시도: ' + tr.map(t9 => t9.label + ' — ' + (t9.note || t9.why)).join('\n') : '') + '">' + esc(st) + '</span></div>';
     return vchips + leg + '<div class="rscw rkw' + (loading ? ' rkld' : '') + '">' + (loading ? rkRe('새로 받는 중') : '') + svg + '</div>' + srcLine;
   }
+  function frChipFix() {
+    const row = $('#overlay .frc .frch'); if (!row || row.scrollWidth <= row.clientWidth + 1) { if (row) row.classList.remove('fl', 'fr'); return; }
+    const R = S.frc, on = row.querySelector('.chip.on');
+    if (R && on && R._chipAt !== R.coin) {
+      R._chipAt = R.coin;
+      if (on.offsetLeft < row.scrollLeft || on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, on.offsetLeft - 32);
+    }
+    dpFade(row);
+  }
+  document.addEventListener('scroll', ev => { const t = ev.target; if (t && t.classList && t.classList.contains('frch')) dpFade(t); }, true);
   const frHl = (id) => { const g = document.querySelector('#overlay .frc svg.rkg.fut'); if (!g) return;
     g.classList.toggle('hl', !!id); g.querySelectorAll('[data-fk]').forEach(n => n.classList.toggle('on', !!id && n.getAttribute('data-fk') === id)); };
   ['mouseover', 'focusin'].forEach(tp => document.addEventListener(tp, ev => { const r = ev.target && ev.target.closest ? ev.target.closest('#overlay .frc [data-frt]') : null; if (r) frHl(r.getAttribute('data-frt')); }));
@@ -8489,8 +8592,8 @@
     frVenue: el => { const R = S.frc; if (!R) return; R.venue = String(el.dataset.v || '').slice(0, 40); frChart(); renderOverlay(); },
     frRetry: () => { if (S.frc) { frLoad(true); renderOverlay(); } },
     frChartRetry: () => { if (S.frc) { frChart(true); renderOverlay(); } },
-    frFut: () => { closeDrawer(true); openFut(); },
-    frDay: () => { const R = S.frc; if (!R) return; closeDrawer(true); openDay(R.iso); },
+    frFut: () => closeDrawerThen(openFut),
+    frDay: () => { const R = S.frc; if (!R) return; const iso = R.iso; closeDrawerThen(() => openDay(iso)); },
     receipt: el => { const v = String(el.dataset.v || ''), i = v.indexOf('|'); if (i > 0) openReceipt(v.slice(0, i), v.slice(i + 1), el.dataset.rk); },
     receiptTop: el => { const iso = isoDay(String(el.dataset.v || '')); if (!iso) return; const rows = dayContrib(iso), i = rows.findIndex(rcptable);
       const fi = rows.findIndex(x => x.fut);
@@ -9200,7 +9303,8 @@
       + '<button class="btn pri oaadd" data-a="oaNew">+ 자산 추가</button></div>'
       + oaAlloc() + oaRows(list)
       + '<div class="oanote">주식(종목 코드 있으면)·금은 시세 자동, 부동산·자동차·비상장은 직접 입력 — 값·수량을 고치면 이전 값이 기록으로 남아요' + (arr(O.d.brokers).some(b => b.enabled) ? ' · 증권사 연결은 ' + esc(OA_UNVER) : '') + '</div></section>';
-    return kq + '<div class="oagrid">' + card + '<div class="oaside">' + oaHist() + '</div></div>';
+    const oh9 = oaHist();
+    return kq + '<div class="oagrid' + (oh9 ? '' : ' one') + '">' + card + (oh9 ? '<div class="oaside">' + oh9 + '</div>' : '') + '</div>';
   }
   function oaFormReset(o) {
     ['name', 'ticker', 'qty', 'value', 'date', 'memo'].forEach(k => { delete S.drafts['oa:' + k]; });
@@ -10073,6 +10177,7 @@
     return s.replace(/\uE010(\d+)\uE011/g, (a, i) => keep[+i]).replace(/\s{2,}/g, ' ').trim();
   }
   const pvRoot = () => {
+    { const ov9 = $('#overlay'); if (ov9) ov9.__h = ''; }
     const r = document.documentElement; r.classList.toggle('pvh', !!(S.hide || S.rand)); r.classList.toggle('pvr', !!S.rand); rvInputs(document.body); pvAnim(document.body);
     const srch9 = window.TJSearch; if (srch9 && typeof srch9._pvGuard === 'function') { try { srch9._pvGuard(); } catch (e) {  } }
     rvOwnInputs(document.body);

@@ -1136,7 +1136,7 @@ class Indexer:
         now = self.clock()
         if fsig == self._tx_fsig and not (self._tx_pending and now - self._tx_rescan_at >= TX_RESCAN_S):
             return
-        lc = sqlite3.connect(f"file:{lp}?mode=ro", uri=True, timeout=10)
+        lc = sqlite3.connect(common.sqlite_ro_uri(lp), uri=True, timeout=10)
         try:
             lc.execute("BEGIN")
             try:
@@ -1929,7 +1929,7 @@ def search(q: str, kinds=None, limit=None, after=None, before=None, path=None, t
     base = {"ok": True, "q": q, "parsed": {}, "tookMs": 0, "building": False, "indexedAt": None, "groups": [], "total": 0, "ignored": []}
     if not _demo() and os.path.exists(path):
         try:
-            c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+            c = sqlite3.connect(common.sqlite_ro_uri(path), uri=True, timeout=2)
             c.execute("PRAGMA query_only=1")
             c.execute("BEGIN")
         except sqlite3.Error:

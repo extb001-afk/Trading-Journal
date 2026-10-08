@@ -119,7 +119,7 @@ def recon_done_sets(scope: str, db_path: str = None) -> tuple:
     if not os.path.exists(db_path):
         return init, added, False
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1)
+        conn = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=1)
         try:
             done = conn.execute("SELECT v FROM meta WHERE k=?", (f"recon_done_{scope}",)).fetchone()
             if done and done[0]:
@@ -1223,7 +1223,7 @@ def boot_from_ledger(scope: str, wallets, db_path: str = None) -> dict:
     if not os.path.exists(db_path):
         return {}
     want = {(w if scope == "sol" else str(w).lower()): w for w in wallets}
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+    conn = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=30)
     out = {}
 
     def put(f, t):

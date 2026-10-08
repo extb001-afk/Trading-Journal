@@ -13,7 +13,13 @@ CONFIG_PATH = os.environ.get("TJ_CONFIG", os.path.join(BASE_DIR, "config.json"))
 DB_PATH = os.path.join(STATE_DIR, "ledger.db")
 DEMO_ISOLATED = False
 if os.environ.get("TJ_DEMO") == "1":
-    STATE_DIR = os.environ.get("TJ_DEMO_STATE") or tempfile.mkdtemp(prefix="tj_demo_state_")
+    STATE_DIR = os.environ.get("TJ_DEMO_STATE") or ""
+    if not STATE_DIR:
+        import atexit as _atexit9
+        import shutil as _shutil9
+        STATE_DIR = tempfile.mkdtemp(prefix="tj_demo_state_")
+        _owner9 = os.getpid()
+        _atexit9.register(lambda d=STATE_DIR: _shutil9.rmtree(d, ignore_errors=True) if os.getpid() == _owner9 else None)
     os.environ["TJ_DEMO_STATE"] = STATE_DIR
     INBOX_DIR = os.path.join(STATE_DIR, "inbox")
     DB_PATH = os.path.join(STATE_DIR, "ledger.db")
@@ -30,20 +36,63 @@ def setup_logging(name: str) -> logging.Logger:
         stream=sys.stdout,
     )
     add_secret_filter()
-    cpu_reserve_apply()
     return logging.getLogger(name)
 
 
+CPU_RESERVE_MIN = 4
+BUILD_PROC_MODES = ("auto", "off", "fork")
 _CPU_PLAN = None
 _CPU_APPLIED = False
+
+
+def _env_file_value(key: str):
+    try:
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                if s.startswith("export "):
+                    s = s[7:].lstrip()
+                k, v = s.split("=", 1)
+                if k.strip() == key:
+                    return v.strip().strip("'\"")
+    except OSError:
+        return None
+    return None
+
+
+def build_proc_mode():
+    for src, get in (("env", lambda: os.environ.get("TJ_BUILD_PROC")), (".env", lambda: _env_file_value("TJ_BUILD_PROC")),
+                     ("config", lambda: _cfg_build_proc())):
+        try:
+            v = get()
+        except Exception:
+            v = None
+        if v is not None and str(v).strip():
+            return str(v).strip().lower(), src
+    return "auto", "기본"
+
+
+def _cfg_build_proc():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    v = d.get("build_proc") if isinstance(d, dict) else None
+    return v if isinstance(v, str) else None
 
 
 def cpu_plan() -> dict:
     global _CPU_PLAN
     if _CPU_PLAN is not None:
         return _CPU_PLAN
-    mode = str(os.environ.get("TJ_BUILD_PROC") or "auto").strip().lower()
+    mode, msrc = build_proc_mode()
     p = {"on": False, "core": None, "cores": os.cpu_count() or 1, "why": ""}
+    bad = mode not in BUILD_PROC_MODES and mode not in ("0", "no", "false")
+    if bad:
+        mode = "auto"
     inh = str(os.environ.get("TJ_CPU_PLAN") or "")
     aff = None
     if hasattr(os, "sched_getaffinity"):
@@ -52,12 +101,12 @@ def cpu_plan() -> dict:
         except OSError:
             aff = None
     if mode in ("off", "0", "no", "false"):
-        p["why"] = "꺼짐(TJ_BUILD_PROC=off) — 웹 안에서 빌드"
+        p["why"] = f"꺼짐(TJ_BUILD_PROC=off · {msrc}) — 웹 안에서 빌드"
     elif not hasattr(os, "fork"):
         p["why"] = "fork 없음 — 웹 안에서 빌드"
     elif mode == "fork":
-        p.update(on=True, why="강제(TJ_BUILD_PROC=fork)")
-        if aff and len(aff) >= 2:
+        p.update(on=True, why=f"강제(TJ_BUILD_PROC=fork · {msrc})")
+        if aff and len(aff) >= CPU_RESERVE_MIN:
             p.update(core=aff[-1], cores=len(aff))
     elif not sys.platform.startswith("linux") or aff is None:
         p["why"] = "리눅스 아님 — 웹 안에서 빌드(코어 지정 기능 없음)"
@@ -66,12 +115,33 @@ def cpu_plan() -> dict:
         p.update(on=True, core=c9, cores=n9, why=f"코어 {n9}개 — {c9}번 = 화면 계산 전용(물려받음)")
     elif len(aff) < 2:
         p.update(cores=len(aff), why="코어 1개 — 웹 안에서 빌드")
+    elif len(aff) < CPU_RESERVE_MIN:
+        p.update(on=True, cores=len(aff), why=f"코어 {len(aff)}개 — {CPU_RESERVE_MIN}개 미만이라 전용 코어 없이 빌드 자식만")
     else:
         p.update(on=True, core=aff[-1], cores=len(aff), why=f"코어 {len(aff)}개 — {aff[-1]}번 = 화면 계산 전용")
+    if bad:
+        p["why"] += " · 모르는 TJ_BUILD_PROC 값이라 auto 로"
     if p["on"] and p["core"] is not None and not inh:
         os.environ["TJ_CPU_PLAN"] = f"{p['core']}/{p['cores']}"
     _CPU_PLAN = p
     return p
+
+
+def sqlite_memstatus_off() -> bool:
+    if not sys.platform.startswith("linux") or not cpu_plan().get("on"):
+        return None
+    try:
+        import ctypes
+        import ctypes.util
+        lib = ctypes.CDLL(ctypes.util.find_library("sqlite3") or "libsqlite3.so.0")
+        rc = lib.sqlite3_config(9, ctypes.c_int(0))
+        if rc == 21 and "sqlite3" not in sys.modules:
+            lib.sqlite3_shutdown()
+            rc = lib.sqlite3_config(9, ctypes.c_int(0))
+            lib.sqlite3_initialize()
+        return rc == 0
+    except (OSError, AttributeError, TypeError, ValueError):
+        return False
 
 
 def cpu_reserve_apply():
@@ -677,6 +747,23 @@ def upbit_fresh_sec(cfg) -> int:
 def ensure_dirs() -> None:
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(INBOX_DIR, exist_ok=True)
+
+
+def sqlite_ro_uri(path: str, immutable: bool = False) -> str:
+    q = urllib.parse.quote(os.fspath(path), safe="/:\\")
+    return "file:" + q + "?mode=ro" + ("&immutable=1" if immutable else "")
+
+
+def tighten_config_mode(path: str = None) -> bool:
+    p = path or CONFIG_PATH
+    try:
+        st = os.stat(p)
+        if (st.st_mode & 0o170000) != 0o100000 or not (st.st_mode & 0o077) or (hasattr(os, "getuid") and st.st_uid != os.getuid()):
+            return False
+        os.chmod(p, st.st_mode & 0o700)
+        return True
+    except OSError:
+        return False
 
 
 def atomic_write_json(path: str, obj) -> None:

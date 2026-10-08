@@ -535,7 +535,7 @@ def decimals_items() -> list:
 def _ledger_decimals(aid: int):
     if not os.path.exists(common.DB_PATH):
         return "nodb"
-    c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=10)
+    c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
     try:
         r = c.execute("SELECT decimals, chain, address FROM assets WHERE asset_id=?", (int(aid),)).fetchone()
     finally:

@@ -14,6 +14,8 @@ import uuid as uuid_mod
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acct_norm
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import bf_engine
 from inbox import SegmentWriter
 
@@ -220,7 +222,7 @@ def _recon_marker():
     if not os.path.exists(common.DB_PATH):
         return 0
     try:
-        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=5)
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
         try:
             r = c.execute("SELECT v FROM meta WHERE k='recon_done_upbit'").fetchone()
         finally:

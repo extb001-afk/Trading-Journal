@@ -1877,7 +1877,7 @@ def run_once(cfg, state_dir, db_path, base_dir, rows_cands, limit=1, budget=300,
     import sqlite3
     cache = load_cache(state_dir)
     seed = load_seed(base_dir)
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
+    conn = sqlite3.connect(_cm9.sqlite_ro_uri(db_path), uri=True, timeout=10)
     done = []
     try:
         anchors = anchors_from_state(state_dir, conn, cfg)

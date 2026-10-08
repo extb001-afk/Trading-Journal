@@ -25,6 +25,8 @@ SPARK_N = 15
 BAL_FN = None
 AUTO_INFO_FN = None
 AUTO_LIM_MAX = 100.0
+AUTO_GRACE_DAYS = 30
+AUTO_PREF_KEY = "chain_auto_off"
 _SENT_CACHE = {"at": 0.0, "db": None, "v": None}
 _SENT_TTL = 300.0
 _SENT_LOCK = threading.Lock()
@@ -64,7 +66,7 @@ def _sent_by_chain(now: float):
     since = int(now - SENT_DAYS * 86400)
     out = {}
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=3)
+        conn = sqlite3.connect(common.sqlite_ro_uri(db), uri=True, timeout=3)
         try:
             rows = conn.execute("SELECT location, source_id, MIN(event_ts) FROM postings WHERE leg_kind='gas' AND source_kind='chain_tx'"
                                 " AND event_ts>=? GROUP BY location, source_id", (since,)).fetchall()
@@ -251,6 +253,19 @@ def _evm_chains_on(cfg: dict) -> set:
     return {str(w.get("chain")) for w in cfg.get("wallets") or [] if isinstance(w, dict) and w.get("type", "evm") == "evm" and w.get("chain")}
 
 
+def _auto_since(chain: str, gate: dict):
+    best = None
+    for key, ent in (((gate or {}).get("pairs") or {}) if isinstance(gate, dict) else {}).items():
+        if not isinstance(ent, dict) or not ent.get("active") or not str(key).startswith(chain + ":"):
+            continue
+        for f9 in ("activatedAt", "firstSeen"):
+            v9 = ent.get(f9)
+            if isinstance(v9, (int, float)) and not isinstance(v9, bool) and v9 > 0:
+                best = v9 if best is None else min(best, v9)
+                break
+    return best
+
+
 def _off_reason(chain: str, cc, evm_on: set, runner: bool, wallets=(), book: dict = None) -> str:
     if chain in UNSUPPORTED:
         return UNSUPPORTED[chain]
@@ -307,13 +322,17 @@ def summary(now: float = None) -> dict:
         can = not why
         se = (sent or {}).get(k) if sent is not None else None
         holds = sm.get("holds") if isinstance(sm.get("holds"), dict) else {}
+        auto9 = bool(isinstance(lch.get(k), dict) and lch[k].get("_auto")) or bool(mark.get("created"))
+        as9 = _auto_since(k, gate) if (on and auto9) else None
+        grace9 = as9 is not None and now - float(as9) < AUTO_GRACE_DAYS * 86400
         rec = bool(on and can and ws and unknown == 0 and known and max(known) <= NONCE_MAX
                    and sent is not None and sm and not int(sm.get("filling") or 0) and not any(int(holds.get(h) or 0) for h in ("boot", "hist"))
-                   and not int((se or {}).get("n") or 0))
+                   and not int((se or {}).get("n") or 0) and not grace9)
         rows.append({
             "key": k, "name": names.get(k, k), "on": on, "can": can, "why": why,
             "lock": None if can else ("sep" if k in UNSUPPORTED else "rpc" if why == RPC_ONLY_WHY else "boot" if why == FIRST_SCAN_WHY else "last"),
-            "auto": bool(isinstance(lch.get(k), dict) and lch[k].get("_auto")) or bool(mark.get("created")),
+            "auto": auto9,
+            "autoNewDays": int(max(0.0, now - float(as9)) // 86400) if grace9 else None,
             "wallets": len(ws), "nonces": nonces, "maxNonce": max(known) if known else None, "unknown": unknown,
             "status": "off" if not on else _status_of(book, len(ws)),
             "fill": int(sm.get("filling") or 0) if sm else None, "rest": (sum(int(x or 0) for x in tiers[1:]) if tiers else None),
@@ -334,7 +353,9 @@ def summary(now: float = None) -> dict:
     tot_calls = [r["calls"]["perDay"] for r in on_rows if r.get("calls")]
     sw = gate.get("updatedAt")
     return {"ok": True, "at": int(now), "rows": rows, "nOn": len(on_rows), "nOff": len(rows) - len(on_rows), "nRec": len(rec_rows),
-            "nWallets": len(all_w), "nonceMax": NONCE_MAX, "bigUsd": BIG_USD, "sweptAt": int(sw) if isinstance(sw, (int, float)) else None,
+            "nWallets": len(all_w), "nonceMax": NONCE_MAX, "bigUsd": BIG_USD, "autoGraceDays": AUTO_GRACE_DAYS,
+            "autoOffOn": auto_enabled(),
+            "sweptAt": int(sw) if isinstance(sw, (int, float)) else None,
             "callsDay": sum(tot_calls) if tot_calls else None,
             "recCallsDay": sum(r["calls"]["perDay"] for r in rec_rows if r.get("calls")) if rec_rows and all(r.get("calls") for r in rec_rows) else None,
             "pollSteps": None,
@@ -368,6 +389,23 @@ def _backup(raw_bytes: bytes, now: float) -> str:
 
 def _ign_has(ign: list, chain: str) -> bool:
     return any(str(x).lower() == chain for x in ign)
+
+
+def auto_enabled() -> bool:
+    p = os.path.join(common.STATE_DIR, "ui_prefs.json")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if not isinstance(d, dict):
+        return False
+    v = d.get(AUTO_PREF_KEY)
+    if v is None:
+        return True
+    return bool(isinstance(v, dict) and v.get("on") is True)
 
 
 def _keep_on_path() -> str:
@@ -417,7 +455,7 @@ def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
             if not auto:
                 _keep_on_set(chain, on)
             return {"ok": True, "chain": chain, "on": on, "changed": False, "apply": apply_info()}
-        if auto and (not known[chain].get("recommend") or chain in _keep_on()):
+        if auto and (not known[chain].get("recommend") or chain in _keep_on() or not auto_enabled()):
             return {"ok": True, "chain": chain, "on": cur_on, "changed": False, "apply": apply_info()}
         if not on and not known[chain]["can"]:
             raise ValueError(known[chain]["why"] or "이 체인은 여기서 끌 수 없어요")
@@ -472,7 +510,7 @@ def _recon_ready(chain: str, addrs) -> bool:
     if not addrs or not os.path.exists(common.DB_PATH):
         return False
     try:
-        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=3)
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
         try:
             if not c.execute("SELECT v FROM meta WHERE k=?", (f"recon_done_{chain}",)).fetchone():
                 return False
@@ -492,6 +530,8 @@ def _recon_ready(chain: str, addrs) -> bool:
 
 
 def auto_off(now: float = None) -> list:
+    if not auto_enabled():
+        return []
     with _SENT_LOCK:
         _SENT_CACHE.update(at=0.0, db=None, v=None)
     keep = _keep_on()
@@ -518,6 +558,8 @@ def auto_off(now: float = None) -> list:
         except (TypeError, ValueError):
             continue
         if not (r.get("recommend") and v9 <= lim and r["key"] not in keep):
+            continue
+        if inf.get("unk"):
             continue
         if not _recon_ready(r["key"], (wal9 or {}).get(r["key"])):
             continue

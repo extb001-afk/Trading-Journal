@@ -10,11 +10,33 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # README 약속 = Python 3.9+ — 가장 낮은 판 · 기본 판 · 최신 판
+        python-version: ["3.9", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+      - name: Compile every Python file (py_compile — syntax on this Python, no .pyc written)
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          bad = 0
+          files = sorted(p for d in ("src", "tools", "tests") for p in pathlib.Path(d).rglob("*.py"))
+          for p in files:
+              try:
+                  compile(p.read_text(encoding="utf-8"), str(p), "exec")
+              except SyntaxError as e:
+                  bad += 1
+                  print(f"::error file={p},line={e.lineno}::{e.msg}")
+          print(f"{len(files)} files · {bad} syntax errors · Python {sys.version.split()[0]}")
+          sys.exit(1 if bad or not files else 0)
+          PY
+      - name: Shell scripts (bash -n)
+        run: for f in tools/*.sh; do bash -n "$f"; done
       - name: Run tests (standard library only, no network)
         run: python3 tests/run_all.py

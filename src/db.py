@@ -1,6 +1,8 @@
 """SQLite ledger schema and access helpers."""
 import sqlite3
 
+import common
+
 SCHEMA_VERSION = 2
 
 DDL = [
@@ -116,7 +118,7 @@ DDL = [
 
 def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
     if readonly:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        conn = sqlite3.connect(common.sqlite_ro_uri(path), uri=True, timeout=10)
     else:
         conn = sqlite3.connect(path, timeout=30)
         has_meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()

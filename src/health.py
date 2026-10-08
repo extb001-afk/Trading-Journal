@@ -219,7 +219,7 @@ def _unreadable_rules(rel: str):
         "upbit_balances.json": [r"sync:ex:upbit", r"upbit:pending"],
         "upbit_sync.json": [r"sync:ex:upbit", r"upbit:pending"],
         "spot.json": [r"sync:price:.+"],
-        "web_diag.json": [r"sync:price:dex", r"goplus:queue", r"ledger:neg", r"price:proof", r"price:unpriced", r"web:build", r"rabby:gap"],
+        "web_diag.json": [r"sync:price:dex", r"goplus:queue", r"ledger:neg", r"price:proof", r"price:unpriced", r"web:build", r"web:buildmode", r"rabby:gap"],
         "daily_cache.json": [r"daily:close"],
         "reviews_llm.json": [r"review:daily"],
         "chain_sweep.json": [r"chainsweep:(?:untracked|stale)"],
@@ -282,6 +282,48 @@ def fmt_ts(ts) -> str:
     if not ts:
         return "—"
     return datetime.fromtimestamp(float(ts), KST).strftime("%m-%d %H:%M")
+
+
+BUILD_EX_WHY = {"rebuild": "원장 재구축 중", "swap": "원장 교체 직후"}
+
+
+def build_ex_text(ex, now: float) -> str:
+    if not isinstance(ex, list):
+        return ""
+    xs = [x for x in ex if isinstance(x, dict) and isinstance(x.get("ms"), (int, float)) and isinstance(x.get("at"), (int, float))
+          and now - float(x["at"]) < 86400]
+    if not xs:
+        return ""
+    w9 = {str(x.get("why") or "") for x in xs}
+    lab = "원장 재구축 중·교체 직후" if {"rebuild", "swap"} <= w9 else BUILD_EX_WHY.get(next(iter(w9)), "원장 재구축 중") if len(w9) == 1 else "원장 재구축 중"
+    return (f" · {lab} 빌드 {len(xs)}회(최대 {max(float(x['ms']) for x in xs) / 1000:.1f}초 · 마지막 {fmt_ts(max(float(x['at']) for x in xs))})는 표본 제외")
+
+
+def build_mode_view(bp, now: float):
+    if not isinstance(bp, dict):
+        return None
+    try:
+        nf, ni, fails = int(bp.get("fork") or 0), int(bp.get("inproc") or 0), int(bp.get("fails") or 0)
+        paused = int(bp.get("paused") or 0)
+        fmax = int(bp.get("fail_max") or 3)
+    except (TypeError, ValueError):
+        return None
+    il = bp.get("inproc_last") if isinstance(bp.get("inproc_last"), dict) else None
+    last_in = ""
+    if il and isinstance(il.get("at"), (int, float)):
+        last_in = f" · 마지막 웹 안 빌드 {fmt_ts(il['at'])}({fmt_ago(now - float(il['at']))} 전) — {str(il.get('why') or '?')[:120]}"
+    if not bp.get("on"):
+        return {"title": "빌드 방식: 웹 안", "chip": "빌드 웹 안", "level": "ok", "fork": False,
+                "detail": f"화면 계산을 웹 프로세스 안에서 — {str(bp.get('why') or '별도 프로세스 안 씀')[:120]}"}
+    core9 = bp.get("core")
+    where = f"코어 {core9}번 전용 · 코어 {bp.get('cores')}개" if core9 is not None else f"코어 {bp.get('cores')}개"
+    cnt = f"이번 가동 별도 {nf}회 · 웹 안 {ni}회"
+    if paused > 0:
+        return {"title": "빌드 방식: 웹 안(별도 프로세스 쉼)", "chip": f"빌드 웹 안 · 쉼 {fmt_ago(paused)}", "level": "warn", "fork": False,
+                "detail": f"별도 프로세스 연속 실패 {fmax}번 — {fmt_ago(paused)} 뒤 다시 별도 프로세스로({where}) · {cnt}"
+                          + (f" · 직전 실패: {str(bp.get('last_err'))[:120]}" if bp.get("last_err") else "") + last_in}
+    return {"title": "빌드 방식: 별도 프로세스", "chip": "빌드 별도 프로세스", "level": "ok", "fork": True,
+            "detail": f"화면 계산 = 별도 프로세스({where}) · {cnt}" + (f" · 연속 실패 {fails}/{fmax}" if fails else "") + last_in}
 
 
 class LogWatch:
@@ -1243,7 +1285,7 @@ def collect_bal_busy(now: float, extrb=None, bf=None) -> dict:
         if why not in lst:
             lst.append(why)
     try:
-        conn = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=2)
+        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
         try:
             rows = conn.execute("SELECT k, v FROM meta WHERE k LIKE 'ext_prewindow:%'").fetchall()
         finally:
@@ -1472,7 +1514,7 @@ def collect_chainsweep():
 def collect_inbox(st: dict, now: float):
     mem = st.setdefault("inbox", {})
     try:
-        conn = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=2)
+        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
         try:
             rows = conn.execute("SELECT stream, seg, off FROM inbox_offsets").fetchall()
         finally:
@@ -2094,7 +2136,7 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         if 1800 <= wd_age9 < float(t.get("webdiag_hold_sec") or 21600):
             for cid9, unit9, kind9 in (("goplus:queue", "tj-web", "goplus"), ("ledger:neg", "tj-core", "ledger"),
                                        ("price:proof", "tj-web", "price"), ("price:unpriced", "tj-web", "price"),
-                                       ("web:build", "tj-web", "web"), ("rabby:gap", "tj-web", "rabby")):
+                                       ("web:build", "tj-web", "web"), ("web:buildmode", "tj-web", "web"), ("rabby:gap", "tj-web", "rabby")):
                 if cid9 in open_ids:
                     add(cid9, unit9, "판단 보류", None, f"웹 빌드 진단이 {fmt_ago(wd_age9)} 전 것 — 다음 빌드 뒤 다시 판정(그동안 직전 판정 유지)",
                         "", persist=0, resolve=600, notify=False, remind=False, kind=kind9)
@@ -2148,14 +2190,29 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             " · 대시보드 '시세 없음 N개'는 소액·스캠까지 센 전체이고 여기는 그중 원가·참고가가 큰 실보유만",
             persist=3600, resolve=600, notify=False, remind=False, kind="price")
     bd = wd.get("build") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None
+    bpm9 = build_mode_view(wd.get("build_proc") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None, now)
     if isinstance(bd, dict) and "tj-web" in units and int(bd.get("n") or 0) >= 5:
         p95 = float(bd.get("p95") or 0) / 1000
-        slow = p95 > float(t.get("build_p95_warn_s") or 10)
+        thr_u9 = t.get("build_p95_warn_s")
+        fork9 = bool(bpm9 and bpm9.get("fork"))
+        if thr_u9:
+            thr9, thr_lab9 = float(thr_u9), "설정"
+        else:
+            thr9, thr_lab9 = (60.0, "별도 프로세스") if fork9 else (10.0, "웹 안")
+        slow = p95 > thr9
         add("web:build", "tj-web", f"웹 빌드 느림 p95 {p95:.1f}초" if slow else "웹 빌드", "warn" if slow else "ok",
             f"최근 {int(bd.get('n') or 0)}회 · 중앙 {float(bd.get('p50') or 0) / 1000:.1f}초 · p95 {p95:.1f}초 · 마지막 {float(bd.get('last_ms') or 0) / 1000:.1f}초"
-            + (f" · 재시작 직후 첫 빌드 {float(bd['cold_ms']) / 1000:.1f}초는 표본 제외" if isinstance(bd.get("cold_ms"), (int, float)) else ""),
+            + f" · 문턱 {thr9:g}초({thr_lab9})"
+            + (f" · 재시작 직후 첫 빌드 {float(bd['cold_ms']) / 1000:.1f}초는 표본 제외" if isinstance(bd.get("cold_ms"), (int, float)) else "")
+            + build_ex_text(wd.get("build_ex"), now)
+            + (f" · {bpm9['chip']}" if bpm9 else ""),
             "보유·기록 규모 증가 또는 원장 잠금(백업·재구축) 확인 — 웹 서버(tj-web) 로그의 '빌드 N초' 줄",
             persist=900, resolve=600, notify=False, remind=False, kind="web")
+    if bpm9 and "tj-web" in units:
+        add("web:buildmode", "tj-web", bpm9["title"], bpm9["level"], bpm9["detail"],
+            "웹 서버(tj-web) 로그의 '빌드 자식 실패' 줄 — 쉼이 끝나면 저절로 별도 프로세스로 돌아감(재시작해도 바로 돌아감)" if bpm9["level"] == "warn" else "",
+            persist=600, resolve=300, notify=False, remind=False, kind="web")
+        chip(bpm9["chip"])
     rb = wd.get("rabby") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None
     if isinstance(rb, dict) and "tj-web" in units:
         long_ = [w for w in (rb.get("wallets") or []) if isinstance(w, dict) and w.get("gapSince")

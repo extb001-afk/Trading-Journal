@@ -35,7 +35,7 @@ def _ro(path=None):
     p = path or common.DB_PATH
     if not os.path.exists(p):
         return None
-    c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=5)
+    c = sqlite3.connect(common.sqlite_ro_uri(p), uri=True, timeout=5)
     c.row_factory = sqlite3.Row
     return c
 

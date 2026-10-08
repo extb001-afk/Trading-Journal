@@ -226,6 +226,10 @@ def set_password(pw: str, iters: int = None, expected=None) -> dict:
             raise AuthChanged()
         _write(AUTH_PATH, rec)
         _AUTH.update(sig=_sig(AUTH_PATH), rec=rec, err=None)
+    try:
+        ss.rotate_csrf_token()
+    except Exception as e:
+        log.warning("CSRF 토큰 교체 실패(비밀번호는 저장됨): %s", type(e).__name__)
     return rec
 
 

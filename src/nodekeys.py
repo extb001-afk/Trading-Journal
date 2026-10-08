@@ -58,9 +58,10 @@ def _qn_url(v: str, want: str) -> str:
     h = (sp.hostname or "").lower()
     if sp.scheme != "https" or not h.endswith(".quiknode.pro") or sp.username or sp.password:
         return ""
-    if want == "bsc" and ".bsc." not in f".{h}":
+    labs = h.split(".")[:-2]
+    if want == "bsc" and "bsc" not in labs:
         return ""
-    if want == "base" and "base" not in h:
+    if want == "base" and "base-mainnet" not in labs:
         return ""
     return urllib.parse.urlunsplit(("https", h, sp.path or "/", "", ""))
 

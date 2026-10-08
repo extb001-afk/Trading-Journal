@@ -12,6 +12,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import health
 import alert_prefs as AP
 
@@ -931,7 +933,7 @@ def drop_scam(rows, conn_factory=None):
     try:
         import sqlite3
         import spamguard
-        conn = conn_factory() if conn_factory else sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=10)
+        conn = conn_factory() if conn_factory else sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
     except Exception as e:
         log.warning("스캠 알림 거르기 생략(원장 열기 실패): %s", e)
         return rows

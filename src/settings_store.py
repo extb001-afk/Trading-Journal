@@ -180,6 +180,12 @@ def csrf_token() -> str:
         return t
 
 
+def rotate_csrf_token() -> None:
+    import secrets
+    with LOCK:
+        _atomic_write_text(TOKEN_PATH, secrets.token_urlsafe(32) + "\n", 0o600)
+
+
 _RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
        0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
        0x000000000000008A, 0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
@@ -284,7 +290,7 @@ def read_config_raw() -> dict:
 
 def write_config_raw(cfg: dict) -> None:
     try:
-        mode = os.stat(common.CONFIG_PATH).st_mode & 0o777
+        mode = (os.stat(common.CONFIG_PATH).st_mode & 0o700) or 0o600
     except OSError:
         mode = 0o600
     _atomic_write_text(common.CONFIG_PATH, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", mode)
@@ -611,9 +617,20 @@ def unit_inputs(unit: str, cfg: dict | None = None, env: dict | None = None):
         return True, "", _h([allw, cfg.get("exchange_addresses"), hk, nk, cfg.get("backfill_months"),
                              cfg.get("backfill_full_history")])
     if unit == "web":
-        raw = dict(cfg)
-        return True, "", _h([raw, nk])
+        return True, "", _h([web_restart_view(cfg), nk])
     return True, "", _h([unit])
+
+
+WEB_HOT_TOP = ("perp_wallets",)
+WEB_HOT_WALLET_FIELDS = ("label",)
+
+
+def web_restart_view(cfg: dict) -> dict:
+    v = {k: x for k, x in (cfg or {}).items() if k not in WEB_HOT_TOP}
+    for k in ("wallets", "_disabled_wallets"):
+        if isinstance(v.get(k), list):
+            v[k] = [{f: y for f, y in w.items() if f not in WEB_HOT_WALLET_FIELDS} if isinstance(w, dict) else w for w in v[k]]
+    return v
 
 
 RUNNER_UNITS = ("evm", "sol", "bsc", "core", "web")

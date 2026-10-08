@@ -182,8 +182,8 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   }
   function hm(ts) {
     if (!ts) return '—';
-    const d = new Date(ts * 1000), p = n => (n < 10 ? '0' : '') + n;
-    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    const d = new Date(ts * 1000 + 32400000), p = n => (n < 10 ? '0' : '') + n;
+    return p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
   }
 
   const LVW = (v, dflt) => (v === 'ok' || v === 'warn' || v === 'crit' || v === 'off' || v === 'unknown') ? v : dflt;

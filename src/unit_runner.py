@@ -9,6 +9,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import settings_store as ss
 
 SCRIPTS = {"evm": "evm_watch.py", "sol": "sol_watch.py", "bsc": "bsc_watch.py", "core": "core.py", "web": "web.py"}

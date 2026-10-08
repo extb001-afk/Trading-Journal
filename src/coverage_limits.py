@@ -258,7 +258,7 @@ def api_limits_markdown(t=None) -> str:
     return "\n".join(L).rstrip() + "\n"
 
 
-def build(base=None, exl_path=None, speed_path=None, now=None):
+def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
     st = os.path.join(base, "state") if base else common.STATE_DIR
     cfg = _rj(os.path.join(base, "config.json") if base else common.CONFIG_PATH, {}) or {}
     base = base or common.BASE_DIR
@@ -272,7 +272,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None):
     exl = (_rj(exl_path, {}) if exl_path else common.seed_json("coverage/exchange_limits.json", {}, base_dir=base)) or {}
     speed = (_rj(speed_path, {}) if speed_path else common.seed_json("coverage/speed_model.json", {}, base_dir=base)) or {}
     other_speed = _rj(os.path.join(st, "chain_backfill_speed.json"), None)
-    db = sqlite3.connect(f"file:{os.path.join(st, 'ledger.db')}?mode=ro", uri=True, timeout=10)
+    db = conn or sqlite3.connect(common.sqlite_ro_uri(os.path.join(st, 'ledger.db')), uri=True, timeout=10)
     try:
         wallets = {}
         for ch, a, lab in db.execute("SELECT chain, address, label FROM wallets"):
@@ -289,7 +289,8 @@ def build(base=None, exl_path=None, speed_path=None, now=None):
         except sqlite3.Error:
             n_open = None
     finally:
-        db.close()
+        if conn is None:
+            db.close()
     sources, unavailable = [], []
     for ch, meta in CHAIN_TRACKS.items():
         cws = wallets.get(ch) or []

@@ -236,21 +236,30 @@ def build() -> dict:
         f["realizedByDate"][r["sold"]] = round(f["realizedByDate"].get(r["sold"], 0) + r["disp"] - r["acq"], 2)
     total_now = (sum(c["qty"] * c["price"] for c in coins) + sum(s["qty"] for s in f["stables"])
                  + f["fiats"][0]["krw"] / f["rate"] + _LP_VALUE + _LP_FEES)
-    walk = [1.0]
-    for _ in range(29):
-        walk.append(walk[-1] * (1 + rnd.uniform(-0.028, 0.034)))
-    a0, a1 = math.log(0.86 / walk[0]), math.log(1.0 / walk[-1])
-    vals = [total_now * w * math.exp(a0 + (a1 - a0) * i / 29) for i, w in enumerate(walk)]
+    paths = _px_paths(now)
+    wd = round(total_now * 0.05, 2)
+    fixed = sum(s["qty"] for s in f["stables"]) + f["fiats"][0]["krw"] / f["rate"] + _LP_VALUE + _LP_FEES
+    qty_of = {c["sym"]: c["qty"] for c in coins if c.get("price")}
+
+    def val_at(i, k):
+        return sum(q * paths[s][i] for s, q in qty_of.items()) + fixed + (wd if k > 20 else 0.0)
     series = []
     for k in range(29, -1, -1):
         day = now - timedelta(days=k)
-        val = vals[29 - k]
+        i = 29 - k
+        val = total_now if k == 0 else val_at(i, k)
         usdt = 1360 + rnd.randint(0, 40)
         kimp = round(rnd.uniform(0.2, 2.6), 2)
-        series.append({"date": _mmdd(day), "dow": DOW[day.weekday()], "val": round(val, 2), "usdt": usdt, "kimp": kimp,
-                       "flow": round(-total_now * 0.05, 2) if k == 20 else 0.0})
+        row = {"date": _mmdd(day), "dow": DOW[day.weekday()], "val": round(val, 2), "usdt": usdt, "kimp": kimp,
+               "flow": -wd if k == 20 else 0.0}
+        if i:
+            row["att"] = _att(qty_of, paths, i, val - series[-1]["val"], row["flow"])
+        series.append(row)
         f["usdtByDate"][_mmdd(day)] = {"usdt": usdt, "kimp": kimp}
     f["dailySeries"] = series
+    f["todayByCoin"] = {s.upper(): [round((paths[s][29] / paths[s][28] - 1) * 100, 2), round(q * (paths[s][29] - paths[s][28]), 2)]
+                        for s, q in qty_of.items() if paths[s][28] > 0}
+    f["spark7"] = {s.upper(): [round(p, 10) for p in paths[s][23:30]] for s in qty_of}
     f["realizedMonth"] = 0.0
     d["realizedMonth"] = round(sum(v for k, v in f["realizedByDate"].items() if k[:2] == now.strftime("%m")), 2)
     for k in range(1, 6):
@@ -266,13 +275,13 @@ def build() -> dict:
                                {"chain": "Base", "spot": round(21.7 / 4, 2), "tx": 53}]
     f["pendings"] = [
         {"key": "p1", "t": (now - timedelta(days=2)).strftime("%m-%d %H:%M"), "kind": "원가미상 보유 (폴백 OFF · 손익 제외(평가 포함))",
-         "sym": "DEGEN", "chain": "Base", "onchain": "52,000 DEGEN · 평가 $354", "ex": "—",
+         "sym": "DEGEN", "chain": "Base", "qty": 52000.0, "usd": 353.6, "onchain": "52,000 DEGEN · 평가 $354", "ex": "—",
          "gap": "매수 기록 없는 유입", "why": "외부에서 받은 토큰이라 원가를 알 수 없습니다. 원가를 지정하거나 평균가 폴백을 켜세요.", "cands": []},
         {"key": "p2", "t": (now - timedelta(days=5)).strftime("%m-%d %H:%M"), "kind": "외부 전송 확인", "sym": "USDC",
          "chain": "Arbitrum", "onchain": "2,000 USDC → " + _short(demo_evm(77)), "ex": "—", "gap": "미등록 주소로 전송",
          "why": "본인 지갑이면 설정에서 지갑으로 등록하세요.", "cands": []},
         {"key": "risk:g141", "t": (now - timedelta(days=1)).strftime("%m-%d %H:%M"), "kind": "스팸·에어드랍 의심", "sym": "CLAIM",
-         "chain": "Base", "onchain": "1,000 CLAIM · 평가 $0.00 표시 제외", "ex": "—", "gap": "실매수 이력 없는 에어드랍 유입",
+         "chain": "Base", "qty": 1000.0, "onchain": "1,000 CLAIM · 평가 $0.00 표시 제외", "ex": "—", "gap": "실매수 이력 없는 에어드랍 유입",
          "why": "실매수·스왑 이력이 없는 유입분이라 목록에서 제외했습니다.", "cands": []}]
     f["extraEvents"] = [{"t": (now - timedelta(days=3)).strftime("%m-%d %H:%M"), "sym": "USDC", "k": "전송",
                          "d": "메인 → 업비트 입금", "q": "3,000", "a": "$3,000", "tx": _tx("x1"), "src": "ex:upbit",
@@ -290,17 +299,181 @@ def build() -> dict:
     f["krwFlows"] = {"rows": [{"dir": "in", "ex": "업비트", "st": "done", "amt": round(krw0 * w9, -4), "t": int((now - timedelta(days=d9)).timestamp())}
                               for w9, d9 in ((0.42, 330), (0.21, 210), (0.12, 120), (0.08, 45))]
                      + [{"dir": "out", "ex": "업비트", "st": "done", "amt": round(krw0 * 0.05, -4), "t": int((now - timedelta(days=20)).timestamp())}]}
-    fut = f["futures"]
-    fut.update({"realizedRows": [{"t": (now - timedelta(days=k)).strftime("%m-%d %H:%M"), "_ts": int((now - timedelta(days=k)).timestamp() * 1000),
-                                  "sym": "ETHUSDT", "ex": "바이낸스", "pnl": round(rnd.uniform(-120, 260), 2)} for k in (1, 4, 9)]})
-    fut["realizedTotal"] = round(sum(r["pnl"] for r in fut["realizedRows"]), 2)
-    w9 = sum(1 for r in fut["realizedRows"] if r["pnl"] > 0)
-    l9 = sum(1 for r in fut["realizedRows"] if r["pnl"] < 0)
-    fut["pnlBreak"] = {"realized": fut["realizedTotal"], "funding": 0.0, "fee": 0.0, "net": fut["realizedTotal"], "wins": w9, "losses": l9,
-                       "winRate": round(w9 / (w9 + l9) * 100, 1) if (w9 + l9) else None}
-    for r in fut["realizedRows"]:
-        fut["realizedByDate"][r["t"][:5]] = round(fut["realizedByDate"].get(r["t"][:5], 0) + r["pnl"], 2)
+    f["futures"].update(fut_state(now))
+    f["outflows"] = _outflows(now)
     return d
+
+
+_VOL = {"ETH": 0.024, "SOL": 0.034, "BNB": 0.018, "LINK": 0.03, "DEGEN": 0.06}
+
+
+def _px_paths(now=None) -> dict:
+    rnd = random.Random(1008)
+    out = {}
+    for sym, _ch, px, _q, _a in _COINS + [("DEGEN", "base", 0.0068, 52000.0, 0)]:
+        lr = [0.0]
+        for _ in range(29):
+            lr.append(lr[-1] + rnd.gauss(0.0045, _VOL.get(sym, 0.045)))
+        out[sym] = [px * math.exp(x - lr[-1]) for x in lr]
+    return out
+
+
+def _att(qty_of, paths, i, dv, flow) -> dict:
+    by = {s: q * (paths[s][i] - paths[s][i - 1]) for s, q in qty_of.items()}
+    mv = sorted(((s, v) for s, v in by.items() if abs(v) >= 0.005), key=lambda kv: (-abs(kv[1]), kv[0]))
+    top = [[s, round((paths[s][i] / paths[s][i - 1] - 1) * 100, 2), round(v, 2)] for s, v in mv[:5]]
+    rest = mv[5:]
+    mk = sum(by.values())
+    return {"mk": round(mk, 2), "top": top, "etc": [len(rest), round(sum(v for _s, v in rest), 2)], "kx": 0.0, "tr": 0.0, "fee": 0.0,
+            "lp": 0.0, "xo": 0.0, "rs": round(dv - mk - flow, 2)}
+
+
+FUT_RATE = 1385.0
+FUT_EXN = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}
+
+
+def _ms(day, h, mi, s=0, ms=0) -> int:
+    return int(day.replace(hour=h, minute=mi, second=s, microsecond=0).timestamp() * 1000) + ms
+
+
+def fut_fixture(now=None):
+    import fut_rcpt
+    now = now or datetime.now(KST)
+    d0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    d1, d4, d9 = d0 - timedelta(days=1), d0 - timedelta(days=4), d0 - timedelta(days=9)
+    trades, ev = [], []
+
+    def bt(sym, tid, oid, side, px, q, pnl, t, fee):
+        trades.append({"symbol": sym, "id": tid, "orderId": oid, "side": side, "positionSide": "BOTH", "price": f"{px}", "qty": f"{q}",
+                       "realizedPnl": f"{pnl}", "time": t})
+        ts = t // 1000 * 1000
+        if pnl:
+            ev.append({"t": ts, "symbol": sym, "kind": "REALIZED", "amount": pnl, "uid": f"bn:{tid}1:REALIZED_PNL:{ts}", "ex": "binance"})
+        ev.append({"t": ts, "symbol": sym, "kind": "FEE", "amount": fee, "uid": f"bn:{tid}2:COMMISSION:{ts}", "ex": "binance"})
+    bt("ETHUSDT", 51001, 81001, "BUY", 3850.0, 1.2, 0, _ms(d1, 9, 12, 5, 312), -1.848)
+    bt("ETHUSDT", 51002, 81002, "BUY", 3862.5, 0.8, 0, _ms(d1, 9, 31, 40, 118), -1.236)
+    bt("ETHUSDT", 51003, 81003, "SELL", 3905.4, 1.0, 50.4, _ms(d1, 11, 47, 22, 904), -1.5622)
+    bt("ETHUSDT", 51004, 81004, "SELL", 3921.1, 1.0, 66.1, _ms(d1, 13, 52, 10, 450), -1.5684)
+    bt("SOLUSDT", 52001, 82001, "BUY", 210.0, 10, 0, _ms(d1, 0, 40, 12, 200), -0.84)
+    bt("SOLUSDT", 52002, 82002, "SELL", 214.0, 15, 40.0, _ms(d1, 14, 20, 33, 250), -1.284)
+    bt("SOLUSDT", 52003, 82003, "BUY", 211.5, 5, 12.5, _ms(d1, 15, 40, 10, 700), -0.423)
+    for h9, a9 in ((1, -0.42), (9, -0.38)):
+        t9 = _ms(d1, h9, 0)
+        ev.append({"t": t9, "symbol": "SOLUSDT", "kind": "FUNDING", "amount": a9, "uid": f"bn:5300{h9}:FUNDING_FEE:{t9}", "ex": "binance"})
+    t9 = _ms(d4, 21, 3, 44)
+    ev += [{"t": t9, "symbol": "BTCUSDT", "kind": "REALIZED", "amount": -25.4, "uid": f"bn:54001:REALIZED_PNL:{t9}", "ex": "binance"},
+           {"t": t9, "symbol": "BTCUSDT", "kind": "FEE", "amount": -1.27, "uid": f"bn:54002:COMMISSION:{t9}", "ex": "binance"}]
+    bt("ETHUSDT", 50901, 80901, "BUY", 3700.0, 0.6, 0, _ms(d9, 8, 5), -0.888)
+    bt("ETHUSDT", 50902, 80902, "SELL", 3846.7, 0.6, 88.02, _ms(d9, 19, 44, 31, 555), -0.9232)
+    items = []
+
+    def bb(oid, sym, side, q, ep, xp, of, cf, lev, t):
+        sg = 1 if side == "Sell" else -1
+        pnl = round((xp - ep) * q * sg - of - cf, 4)
+        items.append({"symbol": sym, "orderId": oid, "side": side, "qty": f"{q}", "closedSize": f"{q}", "avgEntryPrice": f"{ep}", "avgExitPrice": f"{xp}",
+                      "closedPnl": f"{pnl}", "openFee": f"{of}", "closeFee": f"{cf}", "leverage": lev, "updatedTime": f"{t}", "execType": "Trade"})
+        ev.append({"t": t, "symbol": sym, "kind": "REALIZED", "amount": pnl, "uid": f"bb:{oid}:{t}", "ex": "bybit"})
+    bb("dm-bb-0001", "BTCUSDT", "Buy", 0.05, 64250.0, 63810.0, 1.6063, 1.5953, "5", _ms(d1, 12, 15, 40, 210))
+    bb("dm-bb-0002", "ETHUSDT", "Sell", 0.5, 3890.0, 3871.2, 0.9725, 0.9678, "10", _ms(d1, 16, 5, 12, 480))
+    bb("dm-bb-0003", "SOLUSDT", "Sell", 20, 205.1, 206.95, 2.051, 2.0695, "3", _ms(d4, 10, 22, 5))
+    ev.sort(key=lambda r: (r["t"], r["uid"]))
+    now_ms = int(now.timestamp() * 1000)
+    px = {"binance": {"v": fut_rcpt.PX_V, "ts": now_ms // 1000, "cursor": {}, "rows": fut_rcpt.merge([], fut_rcpt.rows_binance(trades), now_ms)},
+          "bybit": {"v": fut_rcpt.PX_V, "ts": now_ms // 1000, "cursor": {}, "rows": fut_rcpt.merge([], fut_rcpt.rows_bybit(items), now_ms)}}
+    return ev, px
+
+
+def fut_fev(ev) -> list:
+    out = []
+    for r in ev:
+        t9, a9 = int(r["t"]), float(r["amount"])
+        out.append((datetime.fromtimestamp(t9 / 1000, KST).strftime("%Y-%m-%d"), t9, a9, a9 * FUT_RATE, r))
+    return out
+
+
+def fut_by_date_ex(by_date_ex, exn) -> dict:
+    out = {}
+    for (dk9, ex9), v9 in by_date_ex.items():
+        if abs(v9[0]) < 0.005:
+            continue
+        out.setdefault(dk9, []).append({"ex": exn.get(ex9, ex9), "exKey": ex9, "usd": round(v9[0], 2), "krw": round(v9[1]),
+                                        "n": v9[2], "t": datetime.fromtimestamp(v9[3] / 1000, KST).strftime("%H:%M") if v9[3] else ""})
+    for l9 in out.values():
+        l9.sort(key=lambda x: (-abs(x["usd"]), str(x["exKey"])))
+    return out
+
+
+def fut_state(now=None) -> dict:
+    ev, _px = fut_fixture(now)
+    by_date, by_krw, by_ex, rows = {}, {}, {}, []
+    for dk9, t9, a9, k9, r9 in fut_fev(ev):
+        by_date[dk9] = by_date.get(dk9, 0) + a9
+        by_krw[dk9] = by_krw.get(dk9, 0) + k9
+        x9 = by_ex.setdefault((dk9, r9["ex"]), [0.0, 0.0, 0, 0])
+        x9[0] += a9
+        x9[1] += k9
+        x9[2] += 1 if r9["kind"] == "REALIZED" else 0
+        x9[3] = max(x9[3], t9)
+        if r9["kind"] == "REALIZED":
+            rows.append({"t": datetime.fromtimestamp(t9 / 1000, KST).strftime("%m-%d %H:%M"), "_ts": t9, "sym": r9["symbol"],
+                         "ex": FUT_EXN.get(r9["ex"], r9["ex"]), "pnl": round(a9, 4)})
+    rows.sort(key=lambda x: -x["_ts"])
+    brk = {"REALIZED": 0.0, "FUNDING": 0.0, "FEE": 0.0}
+    for r9 in ev:
+        brk[r9["kind"]] += r9["amount"]
+    w9 = sum(1 for r in ev if r["kind"] == "REALIZED" and r["amount"] > 0)
+    l9 = sum(1 for r in ev if r["kind"] == "REALIZED" and r["amount"] < 0)
+    fsum = {}
+    for x9 in rows:
+        k9 = (datetime.fromtimestamp(x9["_ts"] / 1000, KST).strftime("%Y-%m"), x9["sym"], x9["ex"])
+        a9 = fsum.setdefault(k9, [0, 0.0, 0.0])
+        a9[0] += 1
+        if x9["pnl"] > 0:
+            a9[1] += x9["pnl"]
+        else:
+            a9[2] -= x9["pnl"]
+    return {"realizedByDate": {k: round(v, 2) for k, v in by_date.items()}, "realizedKrwByDate": {k: round(v) for k, v in by_krw.items()},
+            "realizedByDateEx": fut_by_date_ex(by_ex, FUT_EXN), "realizedRows": rows[:60], "realizedRowsTotal": len(rows),
+            "realizedSummary": [[k[0], k[1], k[2], v[0], round(v[1], 4), round(v[2], 4)] for k, v in sorted(fsum.items())],
+            "realizedTotal": round(sum(r["pnl"] for r in rows), 2),
+            "pnlBreak": {"realized": round(brk["REALIZED"], 2), "funding": round(brk["FUNDING"], 2), "fee": round(brk["FEE"], 2),
+                         "net": round(brk["REALIZED"] + brk["FUNDING"] + brk["FEE"], 2), "wins": w9, "losses": l9,
+                         "winRate": round(w9 / (w9 + l9) * 100, 1) if (w9 + l9) else None}}
+
+
+def fut_raw(now=None) -> dict:
+    ev, _px = fut_fixture(now)
+    t = int(time.time()) - 240
+    out = {}
+    for ex, bal in (("binance", 4820.5), ("bybit", 2310.0)):
+        out[ex] = {"ts": t, "wallet": {"balance": bal}, "positions": [], "events": [{k: v for k, v in r.items() if k != "ex"} for r in ev if r["ex"] == ex]}
+    return out
+
+
+def _outflows(now) -> list:
+    def row(addr, chains, toks, status, days, extra=None):
+        ts = int((now - timedelta(days=days)).timestamp())
+        txs = [{"ts": ts - 600 * j, "t": datetime.fromtimestamp(ts - 600 * j, KST).strftime("%Y-%m-%d %H:%M"), "chain": chains[0],
+                "tx": "0x" + _hex(f"of:{addr}:{j}", 64), "sym": t["sym"], "qty": t["qty"], "usdAtSend": t.get("usdAtSend"), "costUsd": t.get("usdAtSend")}
+               for j, t in enumerate(toks)]
+        send = sum(t.get("usdAtSend") or 0 for t in toks)
+        cur = sum(t["usdNow"] for t in toks)
+        r = {"address": addr, "chains": chains, "chainNames": [CHAIN_NAME.get(c, c) for c in chains], "firstTs": ts - 600 * (len(toks) - 1), "lastTs": ts,
+             "first": datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d"), "last": datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d"),
+             "count": len(toks), "tokens": toks, "usdAtSend": round(send, 2), "usdNow": round(cur, 2), "costUsd": round(send, 2), "usdAtSendKnown": True,
+             "dust": False, "status": status, "verdict": None, "retOk": False, "applyWait": False, "category": None, "memo": None, "alias": None,
+             "links": [], "linkRefundUsd": 0, "linkTokenUsd": 0, "saleWait": None, "excludeLegs": [], "candN": None, "candTop": [], "linkPaidUsd": None,
+             "exchange": None, "decidedTs": None, "hints": [], "flags": [], "autoMatch": None, "noAuto": False, "bridge": None, "arrivals": [], "arrivalsN": 0,
+             "suggest": None, "suggestions": [], "returned": [], "returnedN": 0, "returnedUsd": 0, "returnKind": None, "netUsd": round(send, 2), "matchedUsd": 0,
+             "priorIn": {"n": 0, "usd": 0}, "txs": txs, "txsCut": 0, "phantomTxN": 0}
+        r.update(extra or {})
+        return r
+    usdc = lambda q: {"sym": "USDC", "qty": q, "usdAtSend": q, "usdNow": q, "costUsd": q, "unknownCostQty": 0}
+    return [row(demo_evm(77), ["arbitrum"], [usdc(2000.0)], "pending", 5),
+            row(demo_evm(90), ["eth"], [usdc(3000.0)], "exchange_matched", 3,
+                {"exchange": "업비트", "autoMatch": {"basis": ["txid"], "matched": 1, "of": 1, "exchange": "업비트"}, "matchedUsd": 3000.0}),
+            row(demo_evm(78), ["base"], [{"sym": "ETH", "qty": 0.5, "usdAtSend": 1850.0, "usdNow": 1960.0, "costUsd": 1655.0, "unknownCostQty": 0}],
+                "external", 12, {"verdict": "external", "memo": "데모 — 다른 사람에게 보낸 돈(합성)", "decidedTs": int((now - timedelta(days=11)).timestamp())})]
 
 
 def depaddr_status() -> dict:
@@ -365,8 +538,7 @@ def daily_freeze() -> dict:
     f = d["fields"]
     now = datetime.now(KST)
     coins = [c for c in f["coins"] if c.get("price")]
-    cash = f["fiats"][0]["krw"] / f["rate"]
-    base = sum(c["qty"] * c["price"] for c in coins) + sum(s9["qty"] for s9 in f["stables"]) + cash + _LP_VALUE + _LP_FEES
+    paths = _px_paths(now)
     out = {}
     ser = f["dailySeries"]
     for i, r in enumerate(ser):
@@ -374,12 +546,13 @@ def daily_freeze() -> dict:
         iso = day.strftime("%Y-%m-%d")
         if iso >= now.strftime("%Y-%m-%d"):
             continue
-        sc = float(r["val"]) / base if base else 1.0
-        g = {c["key"][1:]: round(c["qty"] * c["price"] * sc, 2) for c in coins}
+        j = 29 - (len(ser) - 1 - i)
+        pd = {c["key"][1:]: paths[c["sym"]][j] for c in coins}
+        g = {c["key"][1:]: round(c["qty"] * pd[c["key"][1:]], 2) for c in coins}
         for s9 in f["stables"]:
             g[s9["key"][1:]] = round(s9["qty"], 2)
         out[iso] = {"g": g, "val": float(r["val"]), "x": round(float(r["val"]) - sum(g.values()), 2), "usdt": r.get("usdt"),
-                    "px": {"p": {c["key"][1:]: round(c["price"] * sc, 10) for c in coins}},
+                    "px": {"p": {k9: round(v9, 10) for k9, v9 in pd.items()}},
                     "sym": dict({c["key"][1:]: c["sym"] for c in coins}, **{s9["key"][1:]: s9["sym"] for s9 in f["stables"]})}
     _EXTRA.update(dday=k, daily=out)
     return out
@@ -441,3 +614,194 @@ def ledger():
                   " VALUES (?,?,?,?,?,?,?, 'demo', 'demo', 0, 1)", P)
     c.commit()
     return c
+
+
+_DEMO_W = (("메인", "evm", 1, ("eth", "base", "arbitrum", "optimism", "bsc")), ("트레이딩", "evm", 2, ("base", "arbitrum", "polygon")),
+           ("솔라나", "sol", 1, ("sol",)))
+
+
+def demo_config() -> dict:
+    import json
+    import os
+    import common
+    try:
+        with open(os.path.join(common.BASE_DIR, "config.example.json"), encoding="utf-8") as f9:
+            ex = json.load(f9)
+    except (OSError, ValueError):
+        ex = {}
+    cfg = {k: ex[k] for k in ("chains", "bsc", "sol", "evm_poll_sec", "backfill_months") if k in ex}
+    cfg.setdefault("chains", {c: {} for c in ("eth", "base", "arbitrum", "optimism", "polygon")})
+    ws = []
+    for lab, kind, i, chs in _DEMO_W:
+        for c in chs:
+            if kind == "sol":
+                ws.append({"type": "sol", "address": demo_sol(i), "label": lab})
+            else:
+                ws.append({"type": "bsc_rpc" if c == "bsc" else "evm", "chain": c, "address": demo_evm(i), "label": lab})
+    cfg["wallets"] = ws
+    return cfg
+
+
+def _wkey(kind, i):
+    return demo_sol(i) if kind == "sol" else demo_evm(i).lower()
+
+
+def _tier_books(now: float):
+    import addr_tier
+    poll = {"eth": 45, "arbitrum": 45, "optimism": 45, "polygon": 45, "sol": 60}
+    path = {"eth": "etherscan", "arbitrum": "etherscan", "polygon": "etherscan", "optimism": "blockscout", "sol": "helius"}
+    pairs = [("eth", "evm", 1, 0, None, None, False, 2), ("arbitrum", "evm", 1, 0, None, None, False, 4), ("arbitrum", "evm", 2, 2, None, None, False, 70),
+             ("optimism", "evm", 1, 3, None, None, False, 150), ("polygon", "evm", 2, 0, None, "extend", False, 1), ("sol", "sol", 1, 0, None, None, False, 1)]
+    addrs, sums = {}, {}
+    for sc, kind, i, t, h, fill, empty, sent_d in pairs:
+        iv = None if t == 0 else (poll[sc] * 5 if t == 1 else 3600 if t == 2 else 21600 if t == 3 else 86400)
+        full = now - rnd_off(sc, i)
+        addrs.setdefault(_wkey(kind, i), []).append({"c": sc, "t": t, "h": h, "full": int(full), "sent": int(now - sent_d * 86400),
+                                                     "nextAct": int(full + iv) if iv else None, "nextFull": int(full + 21600) if iv else None,
+                                                     "wake": False, "f": fill, "e": empty})
+        s9 = sums.setdefault(sc, {"scope": sc, "path": path[sc], "safe": True, "active": True, "tiers": [0, 0, 0, 0, 0], "holds": {}, "fullPerDay": 0.0,
+                                  "actPerDay": 0.0, "stretch": 1.0, "gate": False, "basePoll": poll[sc], "pairs": 0, "period": poll[sc], "t0": 0,
+                                  "filling": 0, "empty": 0, "lastCycle": {}})
+        s9["tiers"][t] += 1
+        s9["pairs"] += 1
+        s9["t0"] += 1 if t == 0 else 0
+        s9["filling"] += 1 if fill else 0
+        s9["fullPerDay"] += 86400.0 / poll[sc] if t == 0 else 86400.0 / 21600 + 0.5
+        s9["actPerDay"] += 0.0 if t == 0 else 86400.0 / iv
+    books = {}
+    for sc, s9 in sums.items():
+        s9["fullPerDay"] = round(s9["fullPerDay"], 1)
+        s9["actPerDay"] = round(s9["actPerDay"], 1)
+        if s9["path"] == "helius":
+            s9["solCost"] = round(s9["fullPerDay"] * 1.2)
+            s9["actPerDay"] = 0.0
+        books[sc] = {"path": s9["path"], "summary": s9, "updatedAt": int(now - 40),
+                     "perDay": s9.get("solCost") if s9["path"] == "helius" else round(s9["fullPerDay"] * addr_tier.per_check_calls(s9["path"], s9["path"] == "etherscan"))}
+    return books, addrs
+
+
+def chains_view(now=None) -> dict:
+    import chainoff
+    now = int(now or time.time())
+    rnd = random.Random(108)
+    nm = chainoff._names()
+    cfg = demo_config()
+    books, _addrs = _tier_books(now)
+    by = {}
+    for _lab, kind, i, chs in _DEMO_W:
+        for c in chs:
+            by.setdefault(c, []).append(_wkey(kind, i))
+
+    def spark(n):
+        sp = [0] * chainoff.SPARK_N
+        for _ in range(n):
+            sp[rnd.randrange(chainoff.SPARK_N)] += 1
+        return sp
+    plan = {
+        "eth": ([184], 23, 61840.2, ""), "arbitrum": ([96, 41], 12, 31220.7, ""), "base": ([312, 77], 31, 46910.4, chainoff.RPC_ONLY_WHY),
+        "optimism": ([6], 0, 64.3, ""), "polygon": ([3], 0, 4590.1, ""), "bsc": ([58], 4, 2898.0, chainoff.UNSUPPORTED["bsc"]),
+        "sol": ([None], 18, 31790.5, chainoff.UNSUPPORTED["sol"])}
+    rows = []
+    for k, (nonces, sent, usd, why) in plan.items():
+        ws = by.get(k) or []
+        book = books.get(k) or {}
+        sm = book.get("summary") or {}
+        tiers = sm.get("tiers")
+        known = [n for n in nonces if n is not None]
+        rec = bool(not why and known and len(known) == len(nonces) and max(known) <= chainoff.NONCE_MAX and not sent and sm and not sm.get("filling"))
+        rows.append({"key": k, "name": nm.get(k, k), "on": True, "can": not why, "why": why,
+                     "lock": None if not why else ("sep" if k in chainoff.UNSUPPORTED else "rpc"), "auto": False,
+                     "wallets": len(ws), "nonces": nonces, "maxNonce": max(known) if known else None, "unknown": len(nonces) - len(known),
+                     "status": chainoff._status_of(book, len(ws)), "fill": int(sm.get("filling") or 0) if sm else None,
+                     "rest": sum(int(x or 0) for x in tiers[1:]) if tiers else None, "pollSec": chainoff._poll_sec(k, cfg, cfg, book),
+                     "calls": chainoff._calls_of(book, cfg), "sent30": sent, "spark": spark(sent), "usd": usd, "big": usd >= chainoff.BIG_USD,
+                     "offAt": None, "autoOff": False, "autoNewDays": None, "recommend": rec})
+    rows.append({"key": "gnosis", "name": nm.get("gnosis", "Gnosis"), "on": False, "can": True, "why": "", "lock": None, "auto": False,
+                 "wallets": 1, "nonces": [0], "maxNonce": 0, "unknown": 0, "status": "off", "fill": None, "rest": None, "pollSec": None, "calls": None,
+                 "sent30": 0, "spark": [0] * chainoff.SPARK_N, "usd": 0.0, "big": False, "offAt": now - 9 * 86400, "autoOff": True, "autoNewDays": None,
+                 "recommend": False})
+    on = [r for r in rows if r["on"]]
+    rec = [r for r in rows if r["recommend"]]
+    tot = [r["calls"]["perDay"] for r in on if r.get("calls")]
+    return {"ok": True, "at": now, "rows": rows, "nOn": len(on), "nOff": len(rows) - len(on), "nRec": len(rec), "nWallets": len(_DEMO_W),
+            "nonceMax": chainoff.NONCE_MAX, "bigUsd": chainoff.BIG_USD, "autoGraceDays": getattr(chainoff, "AUTO_GRACE_DAYS", 30),
+            "sweptAt": now - 5 * 3600, "callsDay": sum(tot) if tot else None,
+            "recCallsDay": sum(r["calls"]["perDay"] for r in rec if r.get("calls")) if rec and all(r.get("calls") for r in rec) else None,
+            "pollSteps": None, "apply": {"runner": True, "mode": "runner", "evmRunner": True, "manual": chainoff.MANUAL, "units": list(chainoff.UNITS)}}
+
+
+def tier_view(raw_path: str = "", now=None) -> dict:
+    import addr_tier
+    import settings_store as ss
+    now = float(now or time.time())
+    cfg = demo_config()
+    out = addr_tier.web_view(cfg, now=now)
+    books, addrs = _tier_books(now)
+    scopes = {}
+    for sc, b in books.items():
+        s9 = b["summary"]
+        scopes[sc] = {"path": b["path"], "safe": True, "safeNote": None, "gate": False, "stretch": 1.0, "boot": True, "tiers": s9["tiers"],
+                      "updatedAt": b["updatedAt"], "stale": False, "pairs": s9["pairs"], "t0": s9["t0"], "period": s9["period"], "basePoll": s9["basePoll"],
+                      "empty": 0, "filling": s9["filling"], "perDay": b["perDay"],
+                      "prov": b["path"] if b["path"] in ("helius", "etherscan") else f"{b['path']}:{sc}"}
+    budget = addr_tier.estimate([dict(b["summary"], lp=b["path"] == "etherscan") for b in books.values()], cfg)
+    for v in budget.values():
+        v["now"] = v["perDay"]
+    es = dict(out.get("esToday") or {}, n=int((budget.get("etherscan") or {}).get("perDay", 0) * 0.42))
+    out.update(scopes=scopes, addrs=addrs, budget=budget, esToday=es, at=int(now),
+               cap={"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len(_DEMO_W)})
+    return out
+
+
+def rnd_off(sc, i) -> int:
+    return 60 + (int(_hex(f"tier:{sc}:{i}", 6), 16) % 3000)
+
+
+def coverage(now=None) -> dict:
+    import sqlite3
+    import coverage_limits
+    now = int(now or time.time())
+    c = sqlite3.connect(":memory:")
+    try:
+        c.executescript("CREATE TABLE wallets (chain TEXT, address TEXT, label TEXT);"
+                        "CREATE TABLE postings (location TEXT, event_ts INTEGER, leg_kind TEXT);")
+        for lab, kind, i, chs in _DEMO_W:
+            for ch in chs:
+                a = demo_sol(i) if kind == "sol" else demo_evm(i).lower()
+                c.execute("INSERT INTO wallets VALUES (?,?,?)", (ch, a, lab))
+                c.execute("INSERT INTO postings VALUES (?,?,?)", (f"wallet:{ch}:{a}", now - (120 + 7 * i) * 86400, "acq"))
+        c.execute("INSERT INTO postings VALUES ('wallet:eth:x', ?, 'opening')", (now - 150 * 86400,))
+        c.commit()
+        return coverage_limits.build(now=now, conn=c)
+    finally:
+        c.close()
+
+
+def fut_candles(out: dict) -> dict:
+    import candles
+    w = out["window"]
+    iv = out.get("ivUse") or out.get("iv") or "5m"
+    step = int(candles.IV_SEC.get(iv, 300))
+    pts = sorted((float(m["ts"]), float(m["px"])) for m in out.get("marks") or () if m.get("px"))
+    if not pts:
+        pts = [(float(w["from"]), {"BTC": 64000.0, "ETH": 3880.0, "SOL": 210.0}.get(str(out.get("sym")), 100.0))]
+
+    def at(t):
+        if t <= pts[0][0]:
+            return pts[0][1]
+        for (t0, p0), (t1, p1) in zip(pts, pts[1:]):
+            if t0 <= t <= t1:
+                return p0 + (p1 - p0) * ((t - t0) / (t1 - t0) if t1 > t0 else 1.0)
+        return pts[-1][1]
+    cs, t, prev = [], int(w["from"]), None
+    while t <= int(w["to"]):
+        c = at(t + step) * (1 + 0.0011 * math.sin(t / 1700.0) + 0.0005 * math.sin(t / 290.0))
+        o = c if prev is None else prev
+        cs.append([t, round(o, 6), round(max(o, c) * 1.0006, 6), round(min(o, c) * 0.9994, 6), round(c, 6), round(40 + 30 * abs(math.sin(t / 1300.0)), 3)])
+        prev, t = c, t + step
+    out["chart"] = {"ok": True, "src": {"label": "합성 시세(데모)", "key": "demo:" + str(out.get("sym")), "venue": "demo", "iv": iv, "tag": "primary",
+                                        "fallback": False}, "tried": [], "candles": cs, "complete": True, "volUnit": "coin", "why": None}
+    for m in out.get("marks") or ():
+        if not m.get("px") and cs:
+            m["px"] = next((r[4] for r in reversed(cs) if r[0] <= m["ts"]), cs[0][4])
+    return out

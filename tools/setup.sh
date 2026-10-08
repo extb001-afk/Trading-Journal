@@ -28,7 +28,11 @@ if [[ "${1:-}" == "--demo" ]]; then
 fi
 
 if [[ -f config.json ]]; then
-  ok "config.json 있음 (유지)"
+  if chmod 600 config.json 2>/dev/null; then
+    ok "config.json 있음 (유지 · 권한 600)"
+  else
+    warn "config.json 권한을 600 으로 바꾸지 못했어요 — 파일 소유자를 확인하고 'chmod 600 config.json' 을 직접 하세요"
+  fi
 else
   cp config.example.json config.json
   chmod 600 config.json

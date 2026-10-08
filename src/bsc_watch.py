@@ -12,6 +12,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import bf_engine
 from inbox import SegmentWriter
 
@@ -904,7 +906,7 @@ class BscWatcher:
             return False
         import sqlite3
         try:
-            con = sqlite3.connect("file:" + common.DB_PATH + "?mode=ro", uri=True, timeout=10)
+            con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
             try:
                 rows = con.execute("SELECT txhash, block, json_extract(snapshot, '$.tx.from') FROM raw_txs WHERE chain='bsc'").fetchall()
             finally:
@@ -1487,7 +1489,7 @@ class BscWatcher:
         if any(not memo[h].get("to") for h in need) and os.path.exists(common.DB_PATH):
             import sqlite3
             try:
-                con = sqlite3.connect("file:" + common.DB_PATH + "?mode=ro", uri=True, timeout=10)
+                con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
                 try:
                     q9 = [h for h in need if not memo[h].get("to")]
                     rows = []
@@ -1523,7 +1525,7 @@ class BscWatcher:
         if not os.path.exists(common.DB_PATH):
             return []
         import sqlite3
-        con = sqlite3.connect("file:" + common.DB_PATH + "?mode=ro", uri=True, timeout=10)
+        con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
         try:
             rows = con.execute(
                 "SELECT r.payload FROM raw_ex r JOIN (SELECT exchange, uuid, max(revision) AS rv FROM raw_ex WHERE kind='withdraw'"

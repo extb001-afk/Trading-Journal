@@ -18,7 +18,9 @@ import traceback
 log = logging.getLogger("tj")
 
 TIMEOUT_S = 900
-STALL_S = 90
+STALL_S = 180
+DEADLOCK_S = 3.0
+FORK_TRIES = 3
 FAIL_MAX = 3
 FAIL_PAUSE_S = 3600
 MEM_MIN_MB = 1200
@@ -29,6 +31,7 @@ PARENT_ONLY = frozenset((
     "_built_sig", "_build_err", "_soft_dirty", "_refreshing", "_last_client", "_ph_gen0", "_ph_cur", "_ph_t",
     "_build_hist", "_build_warm", "_build_cold_ms", "_ph_hist", "_ph_last", "build_ms", "_pub_lock", "_bp_shm",
     "spot", "px", "_pxq", "snaps", "cfg", "_snapfile_on", "_bp_threads",
+    "_build_ex", "_rb_gen",
 ))
 CHILD_ONLY = frozenset(("_lpx_cache", "_wd_cls_fn"))
 INPLACE = ("daily", "daily_px", "_flow_nf", "_px_bf_seen", "_of_deps_origin", "_offc_addrs", "_proof_div_seen",
@@ -42,12 +45,15 @@ SPOT_UNION = ("syms", "ex_want")
 SPOT_KEYED = ("guarded", "_guard_seen", "_guard_logged")
 
 MODSET = (("web", "_PERP_BAD_WARNED"), ("__main__", "_PERP_BAD_WARNED"))
+MODDICT = (("web", "_GSYM_MEMO", 200000), ("__main__", "_GSYM_MEMO", 200000),
+           ("spamguard", "_IMP_MEMO", 100000), ("spamguard", "_CS_MEMO", 200000))
 HASH_MAX_N = 20000
 
 _LOCK_T = type(threading.Lock())
 _RLOCK_T = type(threading.RLock())
 
-_ST = {"fails": 0, "pause_until": 0.0, "n_fork": 0, "n_inproc": 0, "last": None, "last_err": None, "skipped": {}}
+_ST = {"fails": 0, "pause_until": 0.0, "n_fork": 0, "n_inproc": 0, "last": None, "last_err": None, "skipped": {},
+       "why_in": None, "inproc_last": None, "pause_why": None}
 
 
 def plan() -> dict:
@@ -60,6 +66,8 @@ def status() -> dict:
     return {"on": bool(p.get("on")), "core": p.get("core"), "cores": p.get("cores"), "why": p.get("why"),
             "fork": _ST["n_fork"], "inproc": _ST["n_inproc"], "fails": _ST["fails"],
             "paused": max(0, int(_ST["pause_until"] - time.time())), "last": _ST["last"], "last_err": _ST["last_err"],
+            "inproc_last": dict(_ST["inproc_last"]) if isinstance(_ST.get("inproc_last"), dict) else None,
+            "fail_max": FAIL_MAX, "pause_min": FAIL_PAUSE_S // 60,
             "mb": round(float(_ST.get("bytes") or 0) / 1e6, 1), "child_mb": _ST.get("child_mb"), "child_s": _ST.get("child_s"),
             "recv_s": _ST.get("recv_s"),
             "skipped": dict(_ST["skipped"])}
@@ -68,12 +76,16 @@ def status() -> dict:
 def usable() -> bool:
     p = plan()
     if not p.get("on"):
+        _ST["why_in"] = None
         return False
-    if time.time() < _ST["pause_until"]:
+    left = _ST["pause_until"] - time.time()
+    if left > 0:
+        _ST["why_in"] = f"연속 실패 {FAIL_MAX}번 뒤 쉼(약 {max(1, int(left // 60))}분 남음) — 직전 실패: {_ST.get('pause_why') or '?'}"
         return False
     av = _mem_avail_mb()
     if av is not None and av < MEM_MIN_MB:
         _ST["last"] = f"램 여유 {av}MB < {MEM_MIN_MB}MB — 이번은 웹 안에서"
+        _ST["why_in"] = f"램 여유 {av}MB < {MEM_MIN_MB}MB"
         return False
     return True
 
@@ -111,8 +123,38 @@ def _proc_cpu(pid):
         return None
 
 
+def _proc_read_bytes(pid):
+    try:
+        with open(f"/proc/{pid}/io", "r", encoding="ascii") as f:
+            for ln in f:
+                if ln.startswith("read_bytes:"):
+                    return int(ln.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _proc_lockwait(pid):
+    try:
+        th, stt = None, None
+        with open(f"/proc/{pid}/status", "r", encoding="ascii", errors="replace") as f:
+            for ln in f:
+                if ln.startswith("State:"):
+                    stt = ln.split()[1]
+                elif ln.startswith("Threads:"):
+                    th = int(ln.split()[1])
+        with open(f"/proc/{pid}/wchan", "r", encoding="ascii", errors="replace") as f:
+            wc = f.read().strip()
+    except (OSError, ValueError, IndexError):
+        return None
+    return th == 1 and stt == "S" and wc.startswith("futex")
+
+
 def note_inproc():
     _ST["n_inproc"] += 1
+    if plan().get("on"):
+        _ST["inproc_last"] = {"at": int(time.time()), "why": str(_ST.get("why_in") or _ST.get("last_err") or "?")[:200]}
+    _ST["why_in"] = None
 
 
 class nogc:
@@ -276,8 +318,12 @@ def _close_inherited(keep):
         fds = [int(x) for x in os.listdir("/proc/self/fd")]
     except (OSError, ValueError):
         return None
+    try:
+        nul = os.open(os.devnull, os.O_RDWR)
+    except OSError:
+        nul = None
     for fd in fds:
-        if fd in keep:
+        if fd in keep or fd == nul:
             continue
         try:
             m9 = os.fstat(fd).st_mode
@@ -285,10 +331,18 @@ def _close_inherited(keep):
             continue
         if stat.S_ISSOCK(m9) or stat.S_ISFIFO(m9):
             try:
-                os.close(fd)
+                if nul is not None:
+                    os.dup2(nul, fd)
+                else:
+                    os.close(fd)
                 n9 += 1
             except OSError:
                 pass
+    if nul is not None:
+        try:
+            os.close(nul)
+        except OSError:
+            pass
     return n9
 
 
@@ -355,6 +409,29 @@ def _modset_end(before):
     return out
 
 
+def _moddict_begin():
+    out = {}
+    for mn, nm, _cap in MODDICT:
+        v = getattr(sys.modules.get(mn), nm, None) if sys.modules.get(mn) is not None else None
+        if isinstance(v, dict) and (mn, nm) not in out:
+            out[(mn, nm)] = (v, len(v))
+    return out
+
+
+def _moddict_end(before):
+    out = {}
+    for (mn, nm), (v0, n0) in before.items():
+        v = getattr(sys.modules.get(mn), nm, None)
+        if v is not v0 or not isinstance(v, dict) or len(v) <= n0:
+            continue
+        try:
+            import itertools
+            out[f"{mn}.{nm}"] = dict(itertools.islice(v.items(), n0, None))
+        except (RuntimeError, TypeError):
+            continue
+    return out
+
+
 def _child_run(b, conn, shm, wfd):
     code = 0
     t_c0 = time.time()
@@ -399,6 +476,7 @@ def _child_run(b, conn, shm, wfd):
             objs[k] = (v,) + _snap_obj(v, OBJ_SKIP.get(k, frozenset()))
         hs9 = _hist_begin()
         ms9 = _modset_begin()
+        md9 = _moddict_begin()
         fp0 = {k: _fp(v) for k, v in before.items()
                if k not in PARENT_ONLY and k not in CHILD_ONLY and k not in objs and k not in INPLACE and k not in REBOUND and _small(v)}
         sp = b.spot
@@ -454,8 +532,8 @@ def _child_run(b, conn, shm, wfd):
                     pxd[k] = ("keyed", kd)
             elif k not in px_before or b9 is not v:
                 pxd[k] = ("set", v)
-        pay = {"priv_mb": _priv_mb(), "child_s": round(time.time() - t_c0, 1), "socks": socks9,
-               "hist": _hist_end(hs9), "modset": _modset_end(ms9),
+        pay = {"priv_mb": _priv_mb(), "child_s": time.time() - t_c0, "socks": socks9,
+               "hist": _hist_end(hs9), "modset": _modset_end(ms9), "moddict": _moddict_end(md9),
                "st": st, "gone": gone, "obj": obj_ch, "orig_add": orig_add, "spot": spot, "pxd": pxd,
                "miss": miss, "ph": list(b.__dict__.get("_ph_cur") or []), "ph_t": b.__dict__.get("_ph_t"),
                "threads": threading.active_count()}
@@ -523,7 +601,22 @@ def shm_get(shm) -> int:
     return struct.unpack_from("q", shm, 0)[0]
 
 
+_DEADLOCK = object()
+
+
 def run(b):
+    for i in range(FORK_TRIES):
+        r = _run_once(b)
+        if r is not _DEADLOCK:
+            return r
+        _ST["deadlocks"] = _ST.get("deadlocks", 0) + 1
+        log.warning("빌드 자식이 fork 순간 물려받은 잠금에 걸림(스레드 하나 · futex 대기 %.0f초) — %s", DEADLOCK_S,
+                    "곧바로 다시 fork(%d/%d)" % (i + 2, FORK_TRIES) if i + 1 < FORK_TRIES else "이번 빌드는 웹 안에서")
+    _fail(f"자식 잠금 멈춤 {FORK_TRIES}번 연속(fork 순간 다른 스레드가 쥔 잠금)")
+    return None
+
+
+def _run_once(b):
     import db as dbm
     import common
     t0 = time.time()
@@ -568,6 +661,10 @@ def run(b):
         wfd = None
         buf = bytearray()
         last_cpu, last_prog, why = None, time.time(), None
+        last_rb = None
+        lock_since = None
+        killed9 = False
+        deadlock9 = False
         while True:
             try:
                 struct.pack_into("q", shm, 0, int(b.__dict__.get("_inval", 0)))
@@ -583,15 +680,28 @@ def run(b):
                 last_prog = now
                 continue
             c9 = _proc_cpu(pid)
-            if c9 is not None and c9 != last_cpu:
-                last_cpu, last_prog = c9, now
-            if now - last_prog > STALL_S:
+            rb9 = _proc_read_bytes(pid)
+            moved9 = False
+            if c9 is None:
+                last_prog = now
+            elif c9 != last_cpu:
+                last_cpu, last_prog, moved9 = c9, now, True
+            if rb9 is not None and rb9 != last_rb:
+                if last_rb is not None:
+                    last_prog, moved9 = now, True
+                last_rb = rb9
+            lw9 = None if moved9 else _proc_lockwait(pid)
+            lock_since = (lock_since or now) if lw9 else None
+            if lock_since is not None and now - lock_since >= DEADLOCK_S:
+                why, deadlock9 = "교착", True
+            elif now - last_prog > STALL_S:
                 why = f"멈춤({STALL_S}초 진행 없음)"
             elif now - t0 > TIMEOUT_S:
                 why = f"시간 초과({TIMEOUT_S}초)"
             if why:
                 try:
                     os.kill(pid, signal.SIGKILL)
+                    killed9 = True
                 except OSError:
                     pass
                 break
@@ -600,8 +710,12 @@ def run(b):
         except ChildProcessError:
             status = None
         pid = None
+        if killed9:
+            sweep_tmp(min_age=KILL_TMP_MIN_AGE, since=t0)
+        if deadlock9:
+            return _DEADLOCK
         if why is None and not buf:
-            why = f"자식 종료(상태 {status}) — 결과 없음"
+            why = f"자식 종료({_status_text(status)}) — 결과 없음"
         res = None
         if why is None:
             try:
@@ -617,17 +731,15 @@ def run(b):
         if res[0] == "err":
             _ST["fails"] = 0
             _ST["last"] = f"자식 빌드 예외 {res[1]}"
-            if res[1] == "SystemExit":
-                raise SystemExit(res[2])
-            log.warning("빌드 예외(자식): %s: %s", res[1], res[2])
-            raise ChildBuildError(f"{res[1]}: {res[2]}")
+            _raise_child_err(res)
         _ST["fails"] = 0
         _ST["n_fork"] += 1
         _ST["last"] = f"{'완료' if res[0] == 'ok' else '사용자 변경으로 그만둠'} {time.time() - t0:.1f}초"
         if res[0] == "ok":
+            cs9 = float(res[2].get("child_s") or 0)
             _ST["child_mb"] = res[2].get("priv_mb")
-            _ST["child_s"] = res[2].get("child_s")
-            _ST["recv_s"] = round(time.time() - t0 - float(res[2].get("child_s") or 0), 2)
+            _ST["child_s"] = round(cs9, 1)
+            _ST["recv_s"] = round(max(0.0, time.time() - t0 - cs9), 2)
         _ST["last_err"] = None
         if res[0] == "ok" and res[2].get("skipped"):
             for k in res[2]["skipped"]:
@@ -656,12 +768,80 @@ def run(b):
         conn.close()
 
 
+def _raise_child_err(res):
+    if res[1] == "SystemExit":
+        raise SystemExit(res[2])
+    tb9 = res[3] if len(res) > 3 and isinstance(res[3], str) else ""
+    try:
+        import common
+        tb9 = common.redact_secret_text(tb9, generic=False)
+    except Exception:
+        tb9 = ""
+    log.warning("빌드 예외(자식): %s: %s%s", res[1], res[2], ("\n자식 빌드 traceback(끝 4000자):\n" + tb9.rstrip()) if tb9 else "")
+    raise ChildBuildError(f"{res[1]}: {res[2]}")
+
+
+def _status_text(status) -> str:
+    if status is None:
+        return "상태 모름"
+    try:
+        code = os.waitstatus_to_exitcode(status)
+    except (AttributeError, ValueError):
+        return f"상태 {status}"
+    if code < 0:
+        try:
+            nm = signal.Signals(-code).name
+        except ValueError:
+            nm = "?"
+        return f"신호 {-code}({nm})"
+    return f"종료 코드 {code}"
+
+
+TMP_PREFIX = ".tmp_"
+TMP_KEEP_S = 3600
+KILL_TMP_MIN_AGE = 30
+
+
+def sweep_tmp(min_age: float = TMP_KEEP_S, since: float = None, root: str = None, now: float = None) -> int:
+    import common
+    root = root or common.STATE_DIR
+    now = time.time() if now is None else now
+    n = 0
+    try:
+        tops = [root] + [e.path for e in os.scandir(root) if e.is_dir(follow_symlinks=False)]
+    except OSError:
+        return 0
+    for d in tops:
+        try:
+            it = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in it:
+            if not e.name.startswith(TMP_PREFIX):
+                continue
+            try:
+                if not e.is_file(follow_symlinks=False):
+                    continue
+                mt = e.stat(follow_symlinks=False).st_mtime
+                if now - mt < min_age or (since is not None and mt < since):
+                    continue
+                os.unlink(e.path)
+                n += 1
+            except OSError:
+                continue
+    if n:
+        log.info("쓰다 만 임시 파일 %d개 정리(state/.tmp_*)", n)
+    return n
+
+
 def _fail(why):
     _ST["fails"] += 1
     _ST["last"] = f"실패: {why} — 이번 빌드는 웹 안에서"
     _ST["last_err"] = why
+    _ST["why_in"] = why
     if _ST["fails"] >= FAIL_MAX:
         _ST["pause_until"] = time.time() + FAIL_PAUSE_S
+        _ST["pause_why"] = why
         log.warning("빌드 자식 연속 실패 %d번(%s) — %d분 동안 웹 안에서 빌드", _ST["fails"], why, FAIL_PAUSE_S // 60)
         _ST["fails"] = 0
     else:
@@ -701,6 +881,19 @@ def apply(b, pay, qsnap):
         v = getattr(sys.modules.get(mn), an, None)
         if isinstance(v, set):
             v |= set(add)
+    caps9 = {f"{mn}.{nm}": cap for mn, nm, cap in MODDICT}
+    for nm, add in (pay.get("moddict") or {}).items():
+        mn, _d, an = nm.partition(".")
+        v = getattr(sys.modules.get(mn), an, None) if sys.modules.get(mn) is not None else None
+        if not isinstance(v, dict) or not isinstance(add, dict) or nm not in caps9:
+            continue
+        room = caps9[nm] - len(v)
+        for k, x in add.items():
+            if room <= 0:
+                break
+            if k not in v:
+                v[k] = x
+                room -= 1
     add = pay.get("orig_add")
     if add:
         lk = b.__dict__.get(SETQ["_origin_pending"])

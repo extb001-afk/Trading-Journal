@@ -37,6 +37,8 @@ RPCWIN_COVER_SEC = 2 * 3600
 RPCWIN_MAX_WINDOWS = 12
 RPCWIN_SENDS = 4
 BS403_SEC = 86400
+ES_UNSUP_SEC = 7 * 86400
+ES_UNSUP_RE = re.compile(r"not supported|upgrade your api plan|not available (?:on|for) (?:the )?free|free api access|chain.*not.*(?:supported|available)", re.I)
 BS_BLOCKED = common.BS_BLOCKED
 SOL_SPEND_MIN = Decimal("0.02")
 DUST_USD = 1.0
@@ -47,6 +49,10 @@ TR = xm.TR
 STABLE_SYMS = {"USDT", "USDC", "DAI", "USDE", "FDUSD", "BUSD", "USD1", "PYUSD", "USDG", "TUSD"}
 NATIVE = xm.NATIVE
 CHAIN_KO = xm.CHAIN_KO
+
+
+class EsUnsupported(RuntimeError):
+    pass
 
 
 def D(x) -> Decimal:
@@ -315,10 +321,19 @@ def es_token_legs(H, rows):
             ts9, bn9 = int(it.get("timeStamp") or 0), int(it.get("blockNumber") or 0)
         except (TypeError, ValueError):
             continue
-        out.append({"tx": norm(it.get("hash")), "ts": ts9, "block": bn9, "dir": d9, "cp": t if d9 == "out" else f,
-                    "cp_contract": False, "cp_name": None, "token": norm(it.get("contractAddress")),
-                    "sym": str(it.get("tokenSymbol") or "?")[:24], "qty": str(q)})
+        lg9 = {"tx": norm(it.get("hash")), "ts": ts9, "block": bn9, "dir": d9, "cp": t if d9 == "out" else f,
+               "cp_contract": False, "cp_name": None, "token": norm(it.get("contractAddress")),
+               "sym": str(it.get("tokenSymbol") or "?")[:24], "qty": str(q)}
+        if str(it.get("logIndex") or "").strip().isdigit():
+            lg9["li"] = int(str(it.get("logIndex")).strip())
+        out.append(lg9)
     return out
+
+
+def leg_key(x) -> tuple:
+    if x.get("li") is not None:
+        return (x.get("tx"), "li", x.get("li"))
+    return (x.get("tx"), x.get("dir"), x.get("cp"), x.get("token"), str(x.get("qty")))
 
 
 def es_native_legs(H, rows, chain):
@@ -579,11 +594,15 @@ class Scanner:
         except Exception:
             return ""
 
+    def _es_unsup(self, chain) -> bool:
+        t9 = ((self.c.get("_memo") or {}).get("es_unsup") or {}).get(chain)
+        return bool(isinstance(t9, (int, float)) and time.time() - t9 < ES_UNSUP_SEC)
+
     def _alt(self, chain):
         cc = (self.cfg.get("chains") or {}).get(chain) or {}
         if not isinstance(cc, dict) or chain in ("sol", "bsc"):
             return None
-        if cc.get("etherscan_chainid") and self._es_key():
+        if cc.get("etherscan_chainid") and self._es_key() and not self._es_unsup(chain):
             return "es"
         if cc.get("rpcs") or cc.get("rpc") or cc.get("rpc_logs"):
             return "rpcwin"
@@ -592,8 +611,14 @@ class Scanner:
     def _scan_alt(self, ent, cand, chain):
         how = self._alt(chain)
         if how == "es":
-            self.scan_evm_es(ent, cand, chain)
-        elif how == "rpcwin":
+            try:
+                self.scan_evm_es(ent, cand, chain)
+                return
+            except EsUnsupported:
+                self.c.setdefault("_memo", {}).setdefault("es_unsup", {})[chain] = int(time.time())
+                (ent.get("evm") or {}).pop(chain, None)
+                how = self._alt(chain)
+        if how == "rpcwin":
             cc = (self.cfg.get("chains") or {}).get(chain) or {}
             try:
                 spb = 86400.0 / float(cc.get("blocks_per_day")) if cc.get("blocks_per_day") else 2.0
@@ -632,6 +657,8 @@ class Scanner:
             return []
         if "rate limit" in msg or "max calls" in msg or "limit reached" in msg:
             raise xm.Paused("이더스캔 한도 — 다음 주기에 이어서")
+        if ES_UNSUP_RE.search(msg):
+            raise EsUnsupported("이더스캔이 이 체인을 지원하지 않음(요금제)")
         raise RuntimeError("이더스캔 응답 오류: " + common.safe_err(msg)[:120])
 
     def _es_http(self, url, timeout=30):
@@ -673,7 +700,10 @@ class Scanner:
                 rows = self._es(chain, {"module": "account", "action": act, "address": H, "page": s["page"], "offset": ES_PAGE,
                                         "sort": "desc", "startblock": 0, "endblock": 9999999999})
                 legs = es_native_legs(H, rows, chain) if kind == "nat" else es_token_legs(H, rows)
-                s["legs"] += [x for x in legs if x["ts"] >= since]
+                seen9 = {leg_key(x) for x in s["legs"]}
+                for x in legs:
+                    if x["ts"] >= since and leg_key(x) not in seen9:
+                        s["legs"].append(x)
                 s["n"] += 1
                 s["page"] += 1
                 oldest = min((int(r.get("timeStamp") or 0) for r in rows if isinstance(r, dict)), default=0)

@@ -11,6 +11,8 @@ from decimal import Decimal, localcontext, InvalidOperation, ROUND_CEILING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import db as dbm
 import pricing
 import acct_norm
@@ -71,7 +73,7 @@ class Core:
                 raise SystemExit(f"★원장 파일 없음: {common.DB_PATH} — 새 원장 생성은 TJ_ALLOW_NEW_LEDGER=1 명시 필요★")
         else:
             _ro9 = None
-            for _uri9 in (f"file:{common.DB_PATH}?mode=ro", f"file:{common.DB_PATH}?mode=ro&immutable=1", None):
+            for _uri9 in (common.sqlite_ro_uri(common.DB_PATH), common.sqlite_ro_uri(common.DB_PATH, immutable=True), None):
                 try:
                     _ro9 = (sqlite3.connect(_uri9, uri=True, timeout=10) if _uri9
                             else sqlite3.connect(common.DB_PATH, timeout=10))
@@ -6104,7 +6106,7 @@ class Core:
 
     def _ext_position_gate(self, new_db: str, pairs: set, prefixes: set, locked=()):
         live = self._positions(self.conn)
-        c = sqlite3.connect(f"file:{new_db}?mode=ro&immutable=1", uri=True)
+        c = sqlite3.connect(common.sqlite_ro_uri(new_db, immutable=True), uri=True)
         try:
             new = self._positions(c)
             return self._ext_position_gate_cmp(live, new, c, pairs, prefixes, locked)
@@ -6326,7 +6328,7 @@ class Core:
                 c2.close()
             self._ext_merge_px(os.path.join(shadow, "px_cache_core.json"))
             shutil.copyfile(new_db, tmp)
-            c3 = sqlite3.connect(f"file:{tmp}?mode=ro&immutable=1", uri=True)
+            c3 = sqlite3.connect(common.sqlite_ro_uri(tmp, immutable=True), uri=True)
             try:
                 ok3 = c3.execute("PRAGMA quick_check").fetchone()[0] == "ok"
             finally:

@@ -264,9 +264,32 @@ class SnapStore:
         self.memo = {}
         self.wanted = {}
         self.parts_old = {}
+        self.pins = {}
     PARTS_KEEP = 4
     PARTS_KEEP_SEC = 600
     PARTS_KEEP_MAX = 16
+    PIN_SEC = 86400
+    PIN_MAX = 6
+
+    def pin(self, ver: str, now=None):
+        if not ver:
+            return
+        with self.lock:
+            self.pins[ver] = time.time() if now is None else now
+
+    def hold(self, ver: str, now=None):
+        if not ver:
+            return
+        with self.lock:
+            if ver in self.pins:
+                self.pins[ver] = time.time() if now is None else now
+
+    def _pins_live(self, now):
+        live = sorted(((t, v) for v, t in self.pins.items() if now - t <= self.PIN_SEC), reverse=True)[:self.PIN_MAX]
+        keep = {v for _t, v in live}
+        for v in [v for v in self.pins if v not in keep]:
+            self.pins.pop(v, None)
+        return keep
 
     def part_gz(self, ver: str, name: str):
         with self.lock:
@@ -303,13 +326,14 @@ class SnapStore:
             self.memo = {k: v for k, v in self.memo.items() if k[1] == snap.ver}
             self._evict()
 
-    def _evict(self):
-        now = time.time()
+    def _evict(self, now=None):
+        now = time.time() if now is None else now
         recent = set(self.order[-self.RECENT:])
+        pinned = self._pins_live(now)
         keep, last_anchor = [], None
         for v in self.order:
             at = self.old[v][0]
-            if v in recent:
+            if v in recent or v in pinned:
                 keep.append(v)
             elif now - at <= self.ANCHOR_KEEP and (last_anchor is None or at - last_anchor >= self.ANCHOR_SEC):
                 keep.append(v)
@@ -318,6 +342,9 @@ class SnapStore:
             if v not in keep:
                 self.old.pop(v, None)
         self.order = keep
+        cur9 = self.cur.ver if self.cur is not None else None
+        for v in [v for v in self.pins if v not in self.old and v != cur9]:
+            self.pins.pop(v, None)
 
     def _cur_parsed(self):
         if self._cur_obj is None:

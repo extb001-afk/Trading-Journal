@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+if __name__ == "__main__":
+    common.cpu_reserve_apply()
 import review_prompt as rp
 import review_progress as rprog
 import salelink as _salelink

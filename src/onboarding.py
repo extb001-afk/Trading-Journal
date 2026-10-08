@@ -139,6 +139,26 @@ def scrub(msg, extra=()) -> str:
     return s[:300]
 
 
+def demo_synth() -> bool:
+    return DEMO and not os.path.exists(common.CONFIG_PATH)
+
+
+def why_text(e, what: str) -> str:
+    log.warning("%s 읽기 실패: %s", what, scrub(type(e).__name__))
+    if isinstance(e, FileNotFoundError):
+        return ("필요한 파일이 아직 없어요 — config.json 이 없거나 수집기가 아직 한 번도 돌지 않았어요. "
+                "설정 마법사에서 지갑을 넣고 수집기(pm2 start ecosystem.config.js)를 켠 뒤 몇 분 뒤에 다시 보세요")
+    if isinstance(e, PermissionError):
+        return "파일을 읽을 권한이 없어요 — tj-bot 폴더와 state/ 의 소유자가 화면(tj-web)을 띄운 사용자와 같은지 확인하세요"
+    if isinstance(e, sqlite3.Error):
+        return "원장(state/ledger.db)을 읽지 못했어요 — 아직 만들어지기 전이거나 잠겨 있어요. 잠시 뒤 다시 시도하세요"
+    if isinstance(e, (ValueError, SystemExit)):
+        return "설정·상태 파일 형식이 깨졌을 수 있어요 — config.json 을 확인하고, 계속되면 tj-web 로그(pm2 logs tj-web)를 보세요"
+    if isinstance(e, OSError):
+        return "파일을 읽지 못했어요(디스크·파일 문제) — tj-web 로그(pm2 logs tj-web)를 확인하세요"
+    return "예상하지 못한 오류가 났어요 — tj-web 로그(pm2 logs tj-web)에서 자세한 내용을 확인하세요"
+
+
 def _base(name: str, default: str) -> str:
     v = os.environ.get("TJ_TEST_BASE_" + name.upper(), "")
     return v.rstrip("/") if v.startswith("http://127.0.0.1:") else default
@@ -753,7 +773,7 @@ def _recon_done() -> list:
     if not os.path.exists(common.DB_PATH):
         return []
     try:
-        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=3)
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
         try:
             return [r[0][len("recon_done_"):] for r in c.execute("SELECT k FROM meta WHERE k LIKE 'recon_done_%'")]
         finally:
@@ -811,12 +831,21 @@ def _node_test(group: str, got: dict) -> dict:
     out = []
     back = {"bsc": 180 * 192_000, "base": 180 * 43_200}
     probe = {"bsc": "0x0000000000000000000000000000000000001000", "base": "0x4200000000000000000000000000000000000006"}
+    cid_want = {"bsc": 56, "base": 8453}
     for c in ("bsc", "base"):
         for p9, u in us[c]:
             if p9 != group:
                 continue
             r = {"chain": c, "ok": False}
             try:
+                try:
+                    cid9 = int(str(_node_rpc(u, "eth_chainId", [])), 16)
+                except (TypeError, ValueError):
+                    cid9 = None
+                if cid9 != cid_want[c]:
+                    r["err"] = f"다른 체인 주소(체인 번호 {cid9 if cid9 is not None else '모름'} — {c.upper()} 는 {cid_want[c]})"
+                    out.append(r)
+                    continue
                 head = int(_node_rpc(u, "eth_blockNumber", []), 16)
                 r["head"] = head
                 bal = _node_rpc(u, "eth_getBalance", [probe[c], hex(max(1, head - back[c]))])
@@ -842,7 +871,7 @@ def _recon_late() -> set:
     if not os.path.exists(common.DB_PATH):
         return set()
     try:
-        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=3)
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
         try:
             rd = {}
             for k, v in c.execute("SELECT k, v FROM meta WHERE k LIKE 'recon_done_%'"):
@@ -877,8 +906,10 @@ def status() -> dict:
         raw = ss.read_config_raw()
     except (OSError, ValueError) as e:
         if not DEMO:
-            return {"ok": False, "error": "config.json 을 읽지 못했습니다: " + (type(e).__name__ if isinstance(e, OSError) else scrub(e))}
-        raw = {"chains": {}, "wallets": []}
+            if isinstance(e, FileNotFoundError):
+                return {"ok": False, "error": "config.json 이 없어요 — 저장소 폴더에서 bash tools/setup.sh 로 만들고(config.example.json 복사) 화면을 새로 고치세요"}
+            return {"ok": False, "error": "config.json 을 읽지 못했어요 — " + (why_text(e, "config.json") if isinstance(e, OSError) else scrub(e))}
+        raw = demo_data.demo_config()
     try:
         cfg = ss.load_config_quiet()
     except Exception:
@@ -987,7 +1018,7 @@ def _tier_view(raw_path: str) -> dict:
         out["cap"] = {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len({ss._addr_key(w) for w in raw.get("wallets") or []})}
         return out
     except Exception as e:
-        return {"ok": False, "error": "확인 주기 정보를 읽지 못했어요: " + scrub(type(e).__name__)}
+        return {"ok": False, "error": why_text(e, "확인 주기 정보")}
 
 
 def _explorers_status(grp) -> dict:
@@ -1020,7 +1051,7 @@ def _perp_status(raw) -> dict:
         return {"dexes": [{"key": k, "name": v["name"], "kind": v["kind"]} for k, v in perp_dex.DEXES.items()],
                 "wallets": ss.perp_list(raw), "state": perp_dex.status(raw), "max": ss.MAX_PERP}
     except Exception as e:
-        return {"error": scrub(type(e).__name__), "dexes": [], "wallets": []}
+        return {"error": why_text(e, "퍼프 덱스 상태"), "dexes": [], "wallets": []}
 
 
 def _depaddr_status(env) -> dict:
@@ -1028,7 +1059,7 @@ def _depaddr_status(env) -> dict:
         import depaddr
         return depaddr.summary(env)
     except Exception as e:
-        return {"error": scrub(type(e).__name__)}
+        return {"error": why_text(e, "입금주소 수집 현황")}
 
 
 def handle_get(h, path: str) -> bool:
@@ -1048,6 +1079,12 @@ def handle_get(h, path: str) -> bool:
             return True
         h._send(200, status())
         return True
+    if demo_synth() and path in ("/api/setup/tier", "/api/setup/chains"):
+        try:
+            h._send(200, demo_data.tier_view(getattr(h, "path", "") or "") if path == "/api/setup/tier" else demo_data.chains_view())
+        except Exception as e:
+            h._send(200, {"ok": False, "error": why_text(e, "확인 주기 정보" if path == "/api/setup/tier" else "체인 목록")})
+        return True
     if path == "/api/setup/tier":
         if not client_allowed(h.client_address[0]):
             h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
@@ -1062,13 +1099,19 @@ def handle_get(h, path: str) -> bool:
             import chainoff
             h._send(200, chainoff.summary())
         except Exception as e:
-            h._send(200, {"ok": False, "error": "체인 목록을 읽지 못했어요: " + scrub(type(e).__name__)})
+            h._send(200, {"ok": False, "error": why_text(e, "체인 목록")})
         return True
     if DEMO and path in ("/api/state", "/api/v2/state"):
         h._send(200, demo_data.build())
         return True
     if DEMO and path == "/api/futures":
-        h._send(200, {})
+        h._send(200, demo_data.fut_raw())
+        return True
+    if demo_synth() and path == "/api/coverage_limits":
+        try:
+            h._send(200, {"ok": True, "data": demo_data.coverage()})
+        except Exception as e:
+            h._send(200, {"ok": False, "error": why_text(e, "수집 한계")})
         return True
     if path == "/api/day_events" and (DEMO or not os.path.exists(common.DB_PATH)):
         h._send(200, {"ok": True, "n": 0, "counts": {}, "days": {}, "events": [], "hidden": []})
@@ -1151,7 +1194,7 @@ def handle_post(h, path: str) -> bool:
         res = {"ok": False, "error": scrub(e)}
     except Exception as e:
         log.warning("setup %s 실패: %s", act, scrub(type(e).__name__))
-        res = {"ok": False, "error": "처리 중 오류: " + scrub(type(e).__name__)}
+        res = {"ok": False, "error": "저장하다 예상하지 못한 오류가 났어요 — 바뀐 것이 있는지 화면을 새로 고쳐 확인하고, 계속되면 tj-web 로그(pm2 logs tj-web)를 보세요"}
     code = 200 if res.get("ok") else (429 if res.get("rate") else 400)
     h._send(code, res)
     return True
@@ -1406,8 +1449,49 @@ class DemoBuilder:
     spot = _DemoSpot()
     daily_px = None
 
+    def __init__(self, webmod=None):
+        self.web = webmod
+
     def build(self):
         return demo_data.build()
+
+    def snapshot(self):
+        return None
+
+    def kick_refresh(self):
+        return None
+
+    def fut_receipt(self, iso):
+        import fut_rcpt
+        ev, px = demo_data.fut_fixture()
+        names = dict(demo_data.FUT_EXN, **(getattr(self.web, "PERP_NAMES", None) or {}))
+        byex = getattr(self.web, "_fut_by_date_ex", None) or demo_data.fut_by_date_ex
+        body = fut_rcpt.assemble(iso, demo_data.fut_fev(ev), px, names, byex, int(time.time() * 1000), stale=(), accts={})
+        body["builtAt"] = demo_data._day_built()
+        return body
+
+    def _fut_view(self):
+        v = self.__dict__.get("_fv")
+        sb = getattr(self.web, "StateBuilder", None)
+        if v is None and sb is not None:
+            v = sb.__new__(sb)
+            v.fut_receipt = self.fut_receipt
+            self._fv = v
+        return v
+
+    def fut_chart(self, iso, sym, iv="5m", venue=None, fetch=True, cache_only=False):
+        v = self._fut_view()
+        if v is None:
+            return {"ok": True, "empty": True, "side": "fut", "date": iso, "sym": sym}
+        out = v.fut_chart(iso, sym, iv, venue, fetch=False)
+        if isinstance(out, dict) and out.get("ok") and not out.get("empty") and out.get("chart") is None and out.get("window"):
+            demo_data.fut_candles(out)
+        return out
+
+    def chart_request(self, iso, sym, iv="5m", after="1h", venue=None, wait=None, side="sell", bvenue=None):
+        if side == "fut":
+            return self.fut_chart(iso, sym, iv, venue), "ok"
+        return {"ok": False, "error": "데모에는 이 차트가 없어요(합성 데이터)"}, "ok"
 
     @property
     def _day_idx(self):
@@ -1434,11 +1518,21 @@ def demo_main(webmod) -> bool:
     except (OSError, ValueError):
         cport = None
     port = int(os.environ.get("TJ_PORT") or cport or 8023)
-    webmod.BUILDER = DemoBuilder()
+    webmod.BUILDER = DemoBuilder(webmod)
     try:
         srv = ThreadingHTTPServer(("127.0.0.1", port), webmod.Handler)
     except OSError as e:
         webmod.port_busy_exit(port, e, demo=True)
     log.info("★데모 모드★ http://127.0.0.1:%d/v2/ — 합성 데이터(실지갑 아님), 저장 POST 거부", port)
-    srv.serve_forever()
+    def _term9(*_a):
+        raise SystemExit(0)
+    try:
+        import signal as _sig9
+        _sig9.signal(_sig9.SIGTERM, _term9)
+    except (ValueError, OSError):
+        pass
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
     return True

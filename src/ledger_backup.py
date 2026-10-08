@@ -93,7 +93,7 @@ def due(now: float, st: dict) -> bool:
 def dump_prefs(db_path: str, state_dir: str) -> dict:
     out = {"ts": int(time.time())}
     try:
-        c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+        c = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=30)
         try:
             c.row_factory = sqlite3.Row
             out["decisions"] = [dict(r) for r in c.execute("SELECT * FROM decisions").fetchall()]
@@ -206,7 +206,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
                 os.remove(tmp + sfx)
         fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
         os.close(fd)
-        src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60)
+        src = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=60)
         dst = sqlite3.connect(tmp)
         try:
             src.backup(dst)

@@ -423,7 +423,7 @@ def _db_currencies(ex: str) -> dict:
     if not os.path.exists(common.DB_PATH):
         return out
     try:
-        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=5)
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
     except sqlite3.Error:
         return out
     try:

@@ -93,6 +93,8 @@ html.wow-lock,html.wow-lock body{overflow:hidden}
 .wchipb{height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);color:var(--text2);font:500 13px var(--sans);cursor:pointer}
 .wchipb[aria-pressed="true"]{background:var(--segOn);color:var(--text);font-weight:600}
 .wnote{font-size:12.5px;color:var(--faint);line-height:1.55}
+.wnd summary{cursor:pointer;list-style:none;padding:4px 0;min-height:32px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}.wnd summary::-webkit-details-marker{display:none}
+.wnd .wndm{color:var(--accent);font-weight:600}.wnd[open] .wndm{display:none}.wnd .wndb{padding-top:4px}
 .wempty{padding:28px 10px;text-align:center;color:var(--muted);font-size:14px;line-height:1.6}
 /* ④ 타임머신 */
 .wtm-scr{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:14px 18px 8px;margin-bottom:14px;user-select:none;-webkit-user-select:none}
@@ -581,9 +583,10 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
         + '<span>지금 있는 돈 <b>' + M(t.now, { compact: true }) + '</b></span><span>원화로 돌아온 돈 <b>' + M(t.out_krw, { compact: true }) + '</b></span></div>';
       return tot + '<div class="wfl-wrap" id="wflWrap"><div class="wfl-cols" id="wflCols"></div><div id="wflMap" style="position:relative"></div></div>'
         + '<div class="wfl-sel" id="wflSel" aria-live="polite">' + flSelHTML() + '</div>'
-        + '<div class="wnote">띠 굵기 = 금액(그날 가격) · 띠를 누르면 그 길의 전송 목록 · 거래소 ↔ 지갑 = 출금과 도착을 짝지은 것(<span class="pvx">' + num(t.routes) + '건</span> · 내 거래소끼리 옮긴 <span class="pvx">' + num(t.internal) + '건</span>은 뺐어요) · 체인끼리 옮긴 것 = 브릿지 출발과 도착 짝(<span class="pvx">' + num(t.bridgeN) + '건</span> · 못 찾은 것 = 설명 안 됨) · 지금 있는 곳 = 지금 시세 · '
+        + '<details class="wnote wnd"><summary>띠 굵기 = 금액 · 띠를 누르면 그 길의 전송 목록 · 늘어난·줄어든 몫은 추정(손익 아님) <span class="wndm">자세히</span></summary>'
+        + '<div class="wndb">띠 굵기 = 금액(그날 가격) · 띠를 누르면 그 길의 전송 목록 · 거래소 ↔ 지갑 = 출금과 도착을 짝지은 것(<span class="pvx">' + num(t.routes) + '건</span> · 내 거래소끼리 옮긴 <span class="pvx">' + num(t.internal) + '건</span>은 뺐어요) · 체인끼리 옮긴 것 = 브릿지 출발과 도착 짝(<span class="pvx">' + num(t.bridgeN) + '건</span> · 못 찾은 것 = 설명 안 됨) · 지금 있는 곳 = 지금 시세 · '
         + (t.pxDay != null ? '이동 금액 중 그날 가격 ' + P(num(t.pxDay) * 100, 0) + (num(t.pxDay) < 0.995 ? '(나머지는 그날 가격이 없어 지금 시세)' : '') + (num(t.pxNone) ? ' · 가격 없어 뺀 기록 <span class="pvx">' + num(t.pxNone) + '건</span>' : '') + ' · ' : '')
-        + '<b style="color:var(--up)">' + (F.per === 'all' ? '늘어난 몫' : '그 전부터 있던 돈 · 늘어난 몫') + '</b> / <b style="color:var(--down)">줄어든 몫</b> = 들어온 것과 지금·나간 것의 차이 — 시세·매매 손익에 원장에서 짝을 못 찾은 이동·거래소 대사 보정이 섞인 추정이라 손익으로 읽지 마세요(손익은 매매일지·대시보드)</div>';
+        + '<b style="color:var(--up)">' + (F.per === 'all' ? '늘어난 몫' : '그 전부터 있던 돈 · 늘어난 몫') + '</b> / <b style="color:var(--down)">줄어든 몫</b> = 들어온 것과 지금·나간 것의 차이 — 시세·매매 손익에 원장에서 짝을 못 찾은 이동·거래소 대사 보정이 섞인 추정이라 손익으로 읽지 마세요(손익은 매매일지·대시보드)</div></details>';
     },
     after: el => {
       const w = $('#wflWrap', el); if (!w) return;

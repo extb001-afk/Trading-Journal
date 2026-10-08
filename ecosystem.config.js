@@ -7,8 +7,8 @@ const base = {
   interpreter: PY,
   env: { PYTHONUNBUFFERED: '1' },
   autorestart: true,
-  restart_delay: 5000,
-  max_restarts: 50,
+  exp_backoff_restart_delay: 2000,
+  max_restarts: 1000,
   min_uptime: 30000,
   time: true,
 };

@@ -525,19 +525,26 @@
     if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
     return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요합니다(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
   }
-  function xpPill(st, k) {
+  function xpPill(st, k, desc) {
     if (k === 'helius') return st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? pill('w', 'Solana 필수') : pill('g', 'Solana 지갑이 있으면 필수');
     if (k === 'etherscan') return st.evmNeedsKeys ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
+    if (desc) return '<span class="pill g su-xpd">' + esc('선택 · ' + desc) + '</span>';
     return pill('g', k === 'coingecko' ? '선택 · 무료' : '선택');
+  }
+  function xpName(name) {
+    const s9 = String(name || ''), i = s9.indexOf(' (');
+    if (i <= 0 || s9.slice(-1) !== ')') return { t: s9, d: '' };
+    const d = s9.slice(i + 2, -1);
+    return /—|,/.test(d) || d.length > 14 ? { t: s9.slice(0, i), d } : { t: s9, d: '' };
   }
   function keysHTML() {
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보입니다(값은 다시 표시하지 않음).</div>'
       + evmKeyBanner(st)
       + ['helius', 'etherscan', 'coingecko', 'opensea'].concat(NODE_KEYS).filter(k => st.explorers[k]).map(k => {
-        const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius');
-        return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>'
-          + ' ' + xpPill(st, k)
+        const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius'), nm = xpName(g.name);
+        return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"' + (nm.d ? ' title="' + esc(g.name) + '"' : '') + '><b>' + esc(nm.t) + '</b>'
+          + ' ' + xpPill(st, k, nm.d)
           + '<span class="sp"></span>' + pill(g.set ? 'ok' : 'g', g.set ? '저장됨' + (g.plan && g.plan.plan ? ' · ' + (g.plan.plan === 'pro' ? '프로' : '데모') : '') : '미설정') + '</button>'
           + (open ? '<div class="su-accb">' + fieldsHTML(k, g, cgPlanHTML(g) + nodePlanHTML(st, k) + '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
@@ -824,7 +831,7 @@
     if (r.rest) p.push('오래 안 쓴 ' + fmtN(r.rest) + '곳은 쉬어요');
     if (r.status === 'filling') p.push('처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요');
     if (!r.can) p.push(esc(r.why || '여기서 못 꺼요'));
-    else if (r.auto) p.push('활동이 보여 자동으로 켠 체인');
+    else if (r.auto) p.push('활동이 보여 자동으로 켠 체인' + (r.autoNewDays != null ? ' · 끄기 추천은 ' + fmtN(Math.max(1, (U.ch.autoGraceDays || 30) - r.autoNewDays)) + '일 뒤부터' : ''));
     return p.join(' · ');
   }
   function chRow(r, first) {
@@ -836,6 +843,33 @@
       + (st ? pill(st[0] + ' sm', st[1]) : '') + (r.can ? '' : pill('g sm', CH_LOCK[r.lock] || '끄기 잠금')) + '</div><div class="su-chs">' + chSub(r) + '</div></div>'
       + '<div class="su-chc">' + chSpark(r) + '</div>' + sw + rec + '</div>';
   }
+  function chAutoHTML(C, off) {
+    const ao = C.autoOffOn !== false, nAuto = (off || []).filter(r => r.autoOff).length;
+    return '<div class="su-chauto"><span class="su-cham"><b>추천 체인 자동으로 끄기</b>'
+      + '<span>‘끄는 걸 추천해요’ 체인 중 남은 값이 소액 기준 이하인 체인은 점검 때 자동으로 꺼요' + (ao ? '' : ' · 지금은 꺼 둠 — 추천만 보여 줘요') + '</span>'
+      + (!ao && nAuto ? '<span class="su-chaon">이미 자동으로 꺼 둔 체인 ' + fmtN(nAuto) + '개는 그대로예요 — 다시 켜려면 아래 꺼 둔 체인에서 직접 켜세요</span>' : '')
+      + '</span><button class="sw2' + (ao ? ' on' : '') + '" data-su="chAutoTog" role="switch" aria-checked="' + ao + '" aria-label="추천 체인 자동으로 끄기"' + (U.chAutoBusy ? ' disabled' : '') + '></button></div>';
+  }
+  async function chAutoSet(on) {
+    if (isLocked() || U.chAutoBusy || !U.ch) return;
+    U.chAutoBusy = true;
+    fill();
+    let ok = false, err = '';
+    try {
+      if (!U.st || !U.st.csrf) await load();
+      const r = await fetch('/api/chain_auto_off', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-TJ-CSRF': (U.st && U.st.csrf) || '' }, body: JSON.stringify({ on }) });
+      if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) { U.chAutoBusy = false; return; }
+      let d = null; try { d = await r.json(); } catch (e) { d = null; }
+      ok = !!(r.ok && d && d.ok);
+      err = (d && d.error) || ('HTTP ' + r.status);
+    } catch (e) { err = '서버 연결 실패'; }
+    U.chAutoBusy = false;
+    if (isLocked()) return;
+    if (!ok) { toast(err || '저장 실패', true); fill(); return; }
+    if (U.ch) U.ch.autoOffOn = on;
+    toast(on ? '추천 체인 자동 끄기를 켰어요' : '추천 체인 자동 끄기를 껐어요 — 이미 꺼 둔 체인은 그대로예요');
+    await loadChains(true);
+  }
   function chainsHTML() {
     const C = U.ch;
     if (!C) { loadChains(); return '<div class="cap">' + (U.chErr ? '체인 목록을 못 불러왔어요 · ' + esc(U.chErr) + ' <button class="link" data-su="chLoad">다시</button>' : '체인 목록 불러오는 중…') + '</div>'; }
@@ -846,7 +880,8 @@
     const LIM = 6, all = !!U.chAll, shown = all ? rest : rest.slice(0, LIM);
     const head = '<div class="su-chtop"><b class="su-cht">체인별 조회</b><span class="su-chmeta">켜짐 ' + fmtN(C.nOn) + ' · 꺼짐 ' + fmtN(C.nOff) + ' · 지갑 ' + fmtN(C.nWallets) + '개</span><span class="sp"></span>'
       + (C.nRec ? pill('w sm su-chrb', '끄기 추천 ' + C.nRec) : '') + '</div>'
-      + '<p class="su-chp">안 쓰는 체인을 끄면 조회·알림이 멈추고 컴퓨터·API 한도를 아껴요. 언제든 다시 켤 수 있어요(켜면 빠진 기간을 이어 받아요).</p>';
+      + '<p class="su-chp">안 쓰는 체인을 끄면 조회·알림이 멈추고 컴퓨터·API 한도를 아껴요. 언제든 다시 켤 수 있어요(켜면 빠진 기간을 이어 받아요).</p>'
+      + chAutoHTML(C, off);
     const steps = Array.isArray(C.pollSteps) && C.pollSteps.length ? '<div class="su-chinfo"><b>확인 주기는 지갑 수에 맞춰 늘어나요</b><div class="su-tsteps">' + C.pollSteps.map(x => pill('g sm', String(x.label || ''))).join('') + '</div></div>' : '';
     const colh = '<div class="su-chr su-chcol" aria-hidden="true"><span class="su-chm">체인 · 상태 · 확인 주기</span><span class="su-chc">최근 30일 보낸 거래</span><span class="su-chsw">조회</span></div>';
     const list = rec.map((r, i) => chRow(r, i === 0)).join('') + shown.map((r, i) => chRow(r, !rec.length && i === 0)).join('')
@@ -1011,6 +1046,7 @@
     chTog(el) { const k = el.getAttribute('data-v'), r = U.ch && (U.ch.rows || []).find(x => x.key === k); if (r && r.can) chAsk(r); },
     chLoad() { U.chErr = ''; loadChains(true); },
     chAll() { U.chAll = !U.chAll; fill(); },
+    chAutoTog() { if (U.ch) chAutoSet(U.ch.autoOffOn === false); },
     async wadd() {
       if (U.busy.wadd) return;
       const an = wAnalyze(draft('w_addr'));
@@ -1344,6 +1380,9 @@
     '.su-chdash{width:102px;height:20px;border-bottom:1px dashed var(--line2);display:block;box-sizing:border-box;margin-bottom:-10px}',
     '.su-chn{font-size:12px;line-height:1.5;color:var(--muted);font-variant-numeric:tabular-nums}',
     '.su-chr .sw2{justify-self:end}',
+    '.su-chauto{display:flex;align-items:center;gap:14px;background:var(--surface2);border-radius:12px;padding:12px 14px;margin:0 0 10px;min-width:0}',
+    '.su-cham{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px;font-size:13px;line-height:1.5} .su-cham b{font-size:13.5px;font-weight:650;color:var(--text)} .su-cham span{color:var(--text2)} .su-cham .su-chaon{color:var(--warn)}',
+    '.su-chauto .sw2{position:relative;flex:none} .su-chauto .sw2::before{content:"";position:absolute;inset:-9px -4px}',
     '.su-chrec{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;line-height:1.5;min-width:0}',
     '.su-chri{color:var(--warn);display:grid;place-items:center;flex:none}',
     '.su-chrt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1} .su-chrt b{color:var(--warn);font-weight:650} .su-chrt span{color:var(--text)}',
