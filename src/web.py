@@ -17151,8 +17151,11 @@ def _fut_by_date_ex(by_date_ex, exn):
     for (dk9, ex9), v9 in by_date_ex.items():
         if abs(v9[0]) < 0.005:
             continue
-        out.setdefault(dk9, []).append({"ex": exn.get(ex9, ex9), "exKey": ex9, "usd": round(v9[0], 2), "krw": round(v9[1]),
-                                        "n": v9[2], "t": datetime.fromtimestamp(v9[3] / 1000, KST).strftime("%H:%M") if v9[3] else ""})
+        r9 = {"ex": exn.get(ex9, ex9), "exKey": ex9, "usd": round(v9[0], 2), "krw": round(v9[1]),
+              "n": v9[2], "t": datetime.fromtimestamp(v9[3] / 1000, KST).strftime("%H:%M") if v9[3] else ""}
+        if v9[3]:
+            r9["ts"] = int(v9[3] // 1000)
+        out.setdefault(dk9, []).append(r9)
     for l9 in out.values():
         l9.sort(key=lambda x: (-abs(x["usd"]), str(x["exKey"])))
     return out

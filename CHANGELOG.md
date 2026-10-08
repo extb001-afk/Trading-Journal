@@ -3,6 +3,26 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트 뒤에는 `pm2 restart ecosystem.config.js` 로 유닛을 다시 켜세요(바뀐 유닛만 다시 켜도 됩니다).
 
+## 2026-10-09 새벽 — 3차 검수 반영 · 실현 표기
+
+**그날 카드 '총 실현' = 현물 실현 + 선물 실현 · 그날의 기록 시간순 · 진입 시각 추정 · 검색 돋보기**
+
+- **그날 카드 실현 표기** — 위 칸 이름을 '총 실현'(현물 + 선물)으로, '왜 움직였나'의 실현 줄을 '현물 실현'(LP 수수료·스테이킹 보상 포함) · '선물 실현' 두 줄로 나눴어요.
+  두 줄 합 = 위 칸(원화 모드면 칸과 같은 체결·정산 시각 원화 — 종가 환율로 다시 곱한 차이는 '환율' 줄로). 선물 정산 이익이 그날 총자산 변화에 아직 안 든 몫은
+  '선물 미반영' 줄로 보여 줄 합 = 전일 대비를 지켜요(선물 지갑은 거래소 잔고 대사로만 원장에 들어와요). 작은 금액이어도 실현 두 줄은 '나머지'로 접지 않아요.
+  대시보드 '오늘 무엇이 움직였나'·'M월 한눈에'·곡선 툴팁·자동 요약도 같은 줄이에요(요약의 '큰 요인'에서는 서로 지워지는 선물 짝을 빼요).
+- **그날의 기록 시간순** — 선물 정산 묶음 줄이 맨 위 고정이 아니라 그 거래소 그날 마지막 정산 시각 자리에 와요.
+- **선물 영수증 — 진입 시각 추정** — 빠진 청산 뒤 같은 가격으로 다시 진입해도 옛 진입 시각을 물려받지 않아요: 그 종목 체결이 7일 넘게 없다가 다시 진입했고
+  청산이 그 재진입분만으로 덮이며 잔량이 청산의 2배 이상이면 재진입부터 다시 세우고 '진입 시각 추정'을 붙여요(같은 포지션의 뒤 분할 청산에도).
+- **선물 영수증 — 바이빗 펀딩** — 진입 시각을 몰라도 정산 차이가 펀딩 한 번 상한(명목가 3%) 안이면 거래소 가격을 보이고 '펀딩 포함 가능'을 붙여요.
+- **화면** — 검색 돋보기가 모든 폭에서 보여요(941~1002px 은 머리 줄이 두 줄).
+
+**English** — Day card: the top tile is now "total realized" (spot + futures) and the breakdown shows "spot realized" and "futures realized" rows that add up to it
+(KRW at fill/settlement time; the closing-rate difference goes to the FX row). Futures profit not yet in that day's total assets is shown as "futures not yet reflected"
+so the rows still sum to the day's change. Day records list futures settlements in time order. Futures receipts: a same-price re-entry after a missing close no longer
+inherits an old entry time (7-day idle rule, marked "estimated"); Bybit settlements without a known entry show the exchange price when within one funding cap.
+The search button shows at every width.
+
 ## 2026-10-09 — 수정 재검증 반영
 
 **선물 영수증 진입 시각 보호 · 화면(글꼴 자체 제공·폰 일별 배치·원화 목표가) · 운영 안전장치 · 공개 시험 확대 · MIT**

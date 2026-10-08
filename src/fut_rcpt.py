@@ -351,6 +351,8 @@ AVG_TOL = 2e-3
 ANCHOR_WORK = (16, 1024)
 ZERO_TOL = 1e-6
 FUND_H_MAX = 0.03
+STALE_MS = 7 * DAY_MS
+STALE_MULT = 2.0
 PX_RATIO_MAX = 10.0
 _FB = object()
 
@@ -382,16 +384,22 @@ def _walk(rows, qty_of):
         return list(rows), {}
     eps = WALK_TOL * max(qs)
     st = {"LONG": [0.0, 0.0, None, True, [], 0.0], "SHORT": [0.0, 0.0, None, True, [], 0.0]}
+    idl = {"LONG": [-1, 0.0], "SHORT": [-1, 0.0]}
+    estp = {"LONG": False, "SHORT": False}
     out, ent = [], {}
     work = [ANCHOR_WORK[0] * len(rows) + ANCHOR_WORK[1]]
 
     def flat(sd):
         st[sd][:] = [0.0, 0.0, None, True, [], 0.0]
+        idl[sd][:] = [-1, 0.0]
+        estp[sd] = False
 
-    def add(sd, q, p, ts):
+    def add(sd, q, p, ts, idle=False):
         s = st[sd]
         if s[0] <= eps:
             s[:] = [0.0, 0.0, ts, True, [], 0.0]
+            idl[sd][:] = [-1, 0.0]
+            idle = False
         raw = q * s[5] / s[0] if s[0] > eps and s[5] > 0 else q
         s[0] += q
         if p:
@@ -400,6 +408,10 @@ def _walk(rows, qty_of):
             s[3] = False
         s[4].append((ts, raw, p))
         s[5] += raw
+        if idle:
+            idl[sd][:] = [len(s[4]) - 1, raw]
+        elif idl[sd][0] >= 0:
+            idl[sd][1] += raw
 
     def anchor(sd, q, ep):
         s = st[sd]
@@ -418,8 +430,23 @@ def _walk(rows, qty_of):
         if best:
             k, Q, PQ = best
             s[:] = [Q * f, PQ * f, lots[k][0], True, lots[k:], Q]
+            i9 = idl[sd][0]
+            idl[sd][:] = [i9 - k, idl[sd][1]] if i9 > k else [-1, 0.0]
         else:
             s[:] = [s[0], ep * s[0], None, True, [(None, s[0], ep)], s[0]]
+            idl[sd][:] = [-1, 0.0]
+
+    def idle_anchor(sd, q):
+        s, (i9, R9) = st[sd], idl[sd]
+        f = s[0] / s[5] if s[5] > 0 else 0.0
+        if R9 * f + eps < q or len(s[4]) - i9 > work[0]:
+            return False
+        lots = s[4][i9:]
+        work[0] -= len(lots)
+        PQ = sum(p9 * q9 for _t9, q9, p9 in lots if p9)
+        s[:] = [R9 * f, PQ * f, lots[0][0], all(p9 for _t9, _q9, p9 in lots), lots, R9]
+        idl[sd][:] = [-1, 0.0]
+        return True
 
     def avg(sd):
         s = st[sd]
@@ -436,14 +463,17 @@ def _walk(rows, qty_of):
         elif s[5] > 0 and s[0] < s[5] * 1e-12:
             s[4][:] = [(s[2], s[0], e or (s[1] / s[0] if s[0] else None))]
             s[5] = s[0]
+            idl[sd][:] = [-1, 0.0]
 
     sq = [_seq(r) for r in rows]
     by_id = all(x is not None for x in sq)
     order = sorted(range(len(rows)), key=(lambda i: (rows[i]["ts_ms"], sq[i], i)) if by_id else
                    (lambda i: (rows[i]["ts_ms"], 0 if rows[i].get("role") == "close" else 1, i)))
+    last = None
     for i in order:
         r, q = rows[i], qs[i]
         sd, ts, xp = r["side"], r["ts_ms"], num(r.get("px"))
+        gap, last = (ts - last if last is not None else 0), ts
         net = r.get("pm") != "hedge"
         o = "SHORT" if sd == "LONG" else "LONG"
         if r.get("role") == "open":
@@ -458,7 +488,7 @@ def _walk(rows, qty_of):
                     add(sd, q - cq, xp, ts)
                     out.append(dict(r, _q=q - cq, uid=f"{r.get('uid')}:r"))
                 continue
-            add(sd, q, xp, ts)
+            add(sd, q, xp, ts, idle=gap >= STALE_MS)
             out.append(r)
             continue
         P = st[sd][0]
@@ -481,6 +511,11 @@ def _walk(rows, qty_of):
         e, ep = avg(sd), (None if r.get("fee_incl") else _row_entry(r, q))
         if e and ep and abs(ep / e - 1) > AVG_TOL:
             anchor(sd, q, ep)
+            estp[sd] = False
+        elif idl[sd][0] > 0 and P >= STALE_MULT * q and idle_anchor(sd, q):
+            estp[sd] = True
+        if estp[sd]:
+            r = dict(r, _est=True)
         ent[id(r)] = st[sd][2]
         take(sd, q)
         out.append(r)
@@ -563,9 +598,9 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         else:
             ep, src = num(r.get("entry_px")), (r.get("entry_src") or "none")
         if not xp or not q:
-            return r["side"], xp, None, q, "none", ("계약 크기 모름" if ex == "okx" and not q else "가격 칸 없음"), 0.0
+            return r["side"], xp, None, q, "none", ("계약 크기 모름" if ex == "okx" and not q else "가격 칸 없음"), 0.0, False
         if not ep:
-            return r["side"], xp, None, q, "none", "진입가 없음", 0.0
+            return r["side"], xp, None, q, "none", "진입가 없음", 0.0, False
         sg = 1 if r["side"] == "LONG" else -1
         gross = (xp - ep) * q * sg
         want = amt
@@ -573,14 +608,15 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             want = amt + abs(num(r.get("fee_open")) or 0) + abs(num(r.get("fee_close")) or 0)
         tol = max(abs(want) * PX_TOL_PCT / 100, abs(xp * q) * 0.0002, 0.01)
         if max(ep, xp) / min(ep, xp) > PX_RATIO_MAX:
-            return r["side"], None, None, q, "none", "진입·청산가 10배 넘게 차이(가격 칸 의심)", 0.0
+            return r["side"], None, None, q, "none", "진입·청산가 10배 넘게 차이(가격 칸 의심)", 0.0, False
         if abs(gross - want) > tol:
-            nh = int(r["ts_ms"]) // 3600000 - int(ets) // 3600000 if isinstance(ets, (int, float)) and ets > 0 else 0
+            known = isinstance(ets, (int, float)) and ets > 0
+            nh = int(r["ts_ms"]) // 3600000 - int(ets) // 3600000 if known else 1
             fund = want - gross
             if not (src == "exchange" and nh >= 1 and abs(fund) <= abs(ep * q) * FUND_H_MAX * nh):
-                return r["side"], None, None, q, "none", "거래소 값끼리 안 맞음(가격 × 수량 ≠ 정산)", 0.0
-            return r["side"], xp, ep, q, src, None, fund
-        return r["side"], xp, ep, q, src, None, 0.0
+                return r["side"], None, None, q, "none", "거래소 값끼리 안 맞음(가격 × 수량 ≠ 정산)", 0.0, False
+            return r["side"], xp, ep, q, src, None, fund, not known
+        return r["side"], xp, ep, q, src, None, 0.0, False
 
     def pend_why(ex, t):
         d = px.get(ex) or {}
@@ -626,9 +662,9 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             hit = uidmap.get(safe(r.get("uid")))
             if hit and hit[0] == ex:
                 row = hit[1]
-        fund9 = 0.0
+        fund9, may9 = 0.0, False
         if row is not None:
-            side, xp, ep, q, src, why, fund9 = px_of(ex, row, a, ent.get(id(row)))
+            side, xp, ep, q, src, why, fund9, may9 = px_of(ex, row, a, ent.get(id(row)))
         else:
             side = xp = ep = q = None
             src = "none"
@@ -645,7 +681,7 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         if g is None:
             g = groups[gk] = {"ex": ex, "sym": sym, "ts": [], "pnl": 0.0, "pnlKrw": 0.0, "n": 0, "q": 0.0, "xq": 0.0, "eq": 0.0,
                               "side": side, "src": src, "why": why, "lev": None, "liq": False, "feeIncl": False, "feeInfo": 0.0, "ent": [],
-                              "fund": 0.0}
+                              "fund": 0.0, "est": False, "fmay": False}
             order.append(gk)
         g["ts"].append(t)
         pk9 = _pair(r.get("uid"))
@@ -658,6 +694,7 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         if row is not None:
             g["lev"] = g["lev"] or num(row.get("lev"))
             g["liq"] = g["liq"] or bool(row.get("liq"))
+            g["est"] = g["est"] or bool(row.get("_est"))
             if row.get("fee_incl"):
                 g["feeIncl"] = True
                 g["feeInfo"] -= abs(num(row.get("fee_open")) or 0) + abs(num(row.get("fee_close")) or 0)
@@ -666,6 +703,7 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             g["xq"] += xp * q
             g["eq"] += ep * q
             g["fund"] += fund9
+            g["fmay"] = g["fmay"] or may9
         elif g["src"] != "none":
             g["src"], g["why"] = "none", why
     ms_of = {}
@@ -741,12 +779,13 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         t_exit = max(g["ts"])
         priced = g["src"] != "none" and g["q"] > 0
         side = g["side"] if g["src"] != "none" or g["side"] else None
-        entry_ts = None
+        entry_ts, est = None, False
         if priced and side:
             es = g["ent"]
             if es and all(e is not _FB for e in es):
                 vals = [e for e in es if e is not None]
                 entry_ts = min(vals) if vals else None
+                est = g["est"] and entry_ts is not None
             else:
                 key = (g["ex"], g["sym"], side)
                 prev = [x for x in closes.get(key, ()) if x < min(g["ts"])]
@@ -766,6 +805,10 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             tr["feeInfo"] = round(g["feeInfo"], 6)
         if priced and abs(g["fund"]) >= 5e-7:
             tr["fundIncl"] = round(g["fund"], 6)
+            if g["fmay"]:
+                tr["fundMaybe"] = True
+        if est:
+            tr["entryEst"] = True
         c["trades"].append(tr)
         c["closes"] += 1
         x9 = exc.setdefault(g["ex"], [0, 0, 0])

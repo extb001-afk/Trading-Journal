@@ -3,8 +3,9 @@
 tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어요. 꼭 넣을 키는 둘 — Solana 지갑이 있으면 **Helius**, EVM 지갑이 있으면 **Etherscan**(둘 다 무료).
 나머지 키는 더 빨리·더 넓게 받게 해 줄 뿐이고, 탐색기·시세 키는 공표 한도의 80% 를 기준으로 하루 몫을 정해 천천히 부릅니다.
 키는 웹 **설정 › 연결·키** 에 붙여 넣으면 `.env`(권한 600)에 저장되고, 화면에는 •••• 로만 보입니다(거래소 공개 API 키만 끝 4자리).
-키 값은 주소(URL)·로그·상태 파일·화면 응답 어디에도 남기지 않습니다 — 요청 헤더로만 보냅니다.
-(노드 키만 예외 — NodeReal·Ankr·QuickNode 는 키가 노드 주소에 들어가는 방식이라 그 주소를 메모리에서만 만들어 부르고, `config.json`·상태 파일에는 쓰지 않습니다.)
+키 값은 `config.json`·상태 파일·화면 응답에 남기지 않고, 오류 문구·로그·상태 패널에 찍히는 주소는 호스트 이름만 남깁니다(경로·쿼리 제거).
+보내는 방식은 각 서비스가 정한 대로예요 — 거래소(서명)·코인게코·오픈시 = 요청 헤더 · Helius·Etherscan = 요청 주소의 키 칸(`api-key`·`apikey`) ·
+텔레그램 = 봇 주소 경로(봇 토큰) · 노드 키(NodeReal·Ankr·QuickNode) = 노드 주소에 들어가는 방식. 키가 든 주소는 메모리에서만 만들어 부르고 `config.json`·상태 파일에는 쓰지 않습니다.
 
 | 키(`.env` 이름) | 꼭 필요? | 무료? | 어디에 쓰나 | 없으면 |
 |---|---|---|---|---|
@@ -122,9 +123,11 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 
 Two free keys are required: `TJ_HELIUS_KEY` when you track a Solana wallet and `TJ_ETHERSCAN_KEY` when you track an EVM wallet
 (for Etherscan this is a warning only — collection still runs on public explorers/RPC without it, just slower or later). All other keys are optional.
-Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mode 600), shown masked, and sent only as request headers (never in URLs, logs or state files).
-The one exception is the optional node keys (`TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`, `TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY` — BNB Chain/Base archive
-nodes): those providers put the key in the endpoint URL, which is built in memory only and never written to `config.json` or state files.
+Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mode 600), shown masked, and never written to `config.json`, state files or
+screen responses; URLs in error messages, logs and the status panel are reduced to the host name. Each key is sent the way its service requires: request headers
+for exchanges (signed), CoinGecko and OpenSea; the URL key parameter for Helius (`api-key`) and Etherscan (`apikey`); the URL path for the Telegram bot token;
+and the endpoint URL for the optional node keys (`TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`, `TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY`). URLs that carry a key
+are built in memory only.
 
 - **Helius** (`TJ_HELIUS_KEY`, free plan — https://dashboard.helius.dev): Solana history, tokens and NFT discovery, and backup for new-transaction
   checks (those go to the free publicnode first; Helius cross-checks it). Daily share = 80% of the monthly credits ÷ 30; old history gets it first

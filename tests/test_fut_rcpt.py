@@ -148,6 +148,38 @@ finally:
     F.ANCHOR_WORK = _aw
 a = at(r, ms(10, 5))
 check("[누락] 다시 세우기 작업 상한을 넘으면 = 진입 시각 모름(이틀 전 아님)", a and a["entryTs"] is None and a["px"] != "none", a)
+B_SP = [bill(1001, 1, 100, 1.0, 0, ms(10, d=-36)), bill(1002, 2, 60, 1.1, 6, ms(11, d=-36)), dict(bill(1003, 2, 40, 1.1, 4, ms(12, d=-36)), subType="199"),
+        bill(1004, 1, 10, 1.0, 0, ms(10)), bill(1005, 2, 10, 1.05, 0.5, ms(10, 5))]
+E_SP = [ev("okx", "REALIZED", 0.5, ms(10, 5), "AAA-USDT-SWAP", "ok:1005:p")]
+r = asm(E_SP, okpx(B_SP))
+a = at(r, ms(10, 5))
+check("[누락·같은 가격] 빠진 청산 뒤 같은 가격 재진입 5분 거래 = 보유 300초(36일 아님) · 진입 시각 추정 표식",
+      a and a["holdS"] == 300 and a["entryTs"] == ms(10) / 1000 and a.get("entryEst") is True and a["entryPx"] == 1.0, a)
+B_SP3 = B_SP[:4] + [bill(1015, 2, 5, 1.05, 0.25, ms(10, 5)), bill(1016, 2, 5, 1.05, 0.25, ms(10, 10))]
+r = asm([ev("okx", "REALIZED", 0.25, ms(10, 5), "AAA-USDT-SWAP", "ok:1015:p"), ev("okx", "REALIZED", 0.25, ms(10, 10), "AAA-USDT-SWAP", "ok:1016:p")], okpx(B_SP3))
+a, b = at(r, ms(10, 5)), at(r, ms(10, 10))
+check("[누락·같은 가격] 추정 포지션 분할 청산 두 번 = 둘 다 진입 10:00 · 진입 시각 추정 표식",
+      a and b and a["entryTs"] == ms(10) / 1000 and b["entryTs"] == ms(10) / 1000 and a.get("entryEst") is True and b.get("entryEst") is True, (a, b))
+B_SP2 = B_SP + [bill(1006, 1, 3, 1.0, 0, ms(12)), bill(1007, 2, 3, 1.1, 0.3, ms(12, 30))]
+r = asm(E_SP + [ev("okx", "REALIZED", 0.3, ms(12, 30), "AAA-USDT-SWAP", "ok:1007:p")], okpx(B_SP2))
+b = at(r, ms(12, 30))
+check("[누락·같은 가격] 다시 세운 뒤 다음 왕복 = 진입 12:00 · 보유 30분 · 추정 표식 없음", b and b["holdS"] == 1800 and "entryEst" not in b, b)
+B_LH = [bill(1101, 1, 100, 1.0, 0, ms(9, d=-40)), bill(1102, 2, 100, 1.2, 20, ms(9))]
+r = asm([ev("okx", "REALIZED", 20.0, ms(9), "AAA-USDT-SWAP", "ok:1102:p")], okpx(B_LH))
+a = at(r, ms(9))
+check("[누락·같은 가격] 진짜 40일 보유 뒤 한 번에 청산 = 40일 그대로 · 추정 표식 없음", a and a["holdS"] == 40 * 86400 and "entryEst" not in a, a)
+B_LH2 = [bill(1201, 1, 100, 1.0, 0, ms(9, d=-40)), bill(1202, 2, 30, 1.1, 3, ms(9, d=-1)), bill(1203, 2, 70, 1.2, 14, ms(9))]
+r = asm([ev("okx", "REALIZED", 14.0, ms(9), "AAA-USDT-SWAP", "ok:1203:p")], okpx(B_LH2))
+a = at(r, ms(9))
+check("[누락·같은 가격] 40일 보유 · 하루 전 일부 청산 · 그날 나머지 청산 = 40일 그대로", a and a["holdS"] == 40 * 86400 and "entryEst" not in a, a)
+B_LH3 = [bill(1301, 1, 100, 1.0, 0, ms(9, d=-30)), bill(1302, 1, 10, 1.0, 0, ms(9, d=-25)), bill(1303, 2, 10, 1.1, 1, ms(9))]
+r = asm([ev("okx", "REALIZED", 1.0, ms(9), "AAA-USDT-SWAP", "ok:1303:p")], okpx(B_LH3))
+a = at(r, ms(9))
+check("[누락·같은 가격] 보유 중 7일 안 된 공백 뒤 추가 진입 · 일부 청산 = 30일 전 진입 그대로", a and a["entryTs"] == ms(9, d=-30) / 1000 and "entryEst" not in a, a)
+B_LH4 = [bill(1401, 1, 10, 1.0, 0, ms(9, d=-30)), bill(1402, 1, 10, 1.0, 0, ms(8)), bill(1403, 2, 15, 1.1, 1.5, ms(9))]
+r = asm([ev("okx", "REALIZED", 1.5, ms(9), "AAA-USDT-SWAP", "ok:1403:p")], okpx(B_LH4))
+a = at(r, ms(9))
+check("[누락·같은 가격] 재진입 묶음이 청산을 못 덮음 = 다시 세우지 않음(30일 전 진입)", a and a["entryTs"] == ms(9, d=-30) / 1000 and "entryEst" not in a, a)
 
 T5 = [bnt(30, "BUY", "LONG", 100, 1, 0, ms(8)), bnt(31, "SELL", "SHORT", 100, 1, 0, ms(8, 30)), bnt(32, "SELL", "LONG", 100, 1, 0, ms(9)),
       bnt(33, "BUY", "SHORT", 90, 1, 10, ms(10)), bnt(34, "BUY", "LONG", 100, 1, 0, ms(11)), bnt(35, "SELL", "LONG", 110, 1, 10, ms(12))]
@@ -201,7 +233,11 @@ check("[펀딩] 진입 시각 앎 · 정시 지남 · 상한 안 = 거래소 가
       and a["exitPx"] == 2.1 and abs(a.get("fundIncl", 0) - 1.5) < 1e-6 and a["pnl"] == PNL and a["entryTs"] == T_IN / 1000, a)
 r = asm([ev("bybit", "REALIZED", PNL, T_OUT, "BBBUSDT", f"bb:c1:{T_OUT}")], bypx([by_close("c1", T_OUT, PNL)], []))
 a = at(r, T_OUT)
-check("[펀딩] 진입 시각 모름 = 종전처럼 버림('거래소 값끼리 안 맞음')", a and a["px"] == "none" and a["why"].startswith("거래소 값끼리") and "fundIncl" not in a, a)
+check("[펀딩] 진입 시각 모름 · 차이가 펀딩 한 번 상한(3%) 안 = 거래소 가격 표시 · 펀딩 몫 1.5 · '펀딩 포함 가능'",
+      a and a["px"] == "exchange" and a["entryPx"] == 2.0 and abs(a.get("fundIncl", 0) - 1.5) < 1e-6 and a.get("fundMaybe") is True and a["entryTs"] is None, a)
+r = asm([ev("bybit", "REALIZED", PNL, T_OUT, "BBBUSDT", f"bb:c1:{T_OUT}")], bypx([by_close("c1", T_OUT, PNL)], [by_open("e1", T_IN)]))
+a = at(r, T_OUT)
+check("[펀딩] 진입 시각 앎 = '펀딩 포함 가능' 표식 없음(정시 수로 확인)", a and a["px"] == "exchange" and "fundMaybe" not in a, a)
 T_OUT2 = ms(9, 58)
 r = asm([ev("bybit", "REALIZED", PNL, T_OUT2, "BBBUSDT", f"bb:c2:{T_OUT2}")], bypx([by_close("c2", T_OUT2, PNL)], [by_open("e1", T_IN)]))
 a = at(r, T_OUT2)
@@ -210,6 +246,10 @@ BIG = round(10 - 0.2 + 20, 10)
 r = asm([ev("bybit", "REALIZED", BIG, T_OUT, "BBBUSDT", f"bb:c3:{T_OUT}")], bypx([by_close("c3", T_OUT, BIG)], [by_open("e1", T_IN)]))
 a = at(r, T_OUT)
 check("[펀딩] 차이가 펀딩 상한을 넘음 = 버림", a and a["px"] == "none", a)
+r = asm([ev("bybit", "REALIZED", BIG, T_OUT, "BBBUSDT", f"bb:c3:{T_OUT}")], bypx([by_close("c3", T_OUT, BIG)], []))
+a = at(r, T_OUT)
+check("[펀딩] 진입 시각 모름 · 차이가 펀딩 한 번 상한을 넘음 = 종전처럼 버림('거래소 값끼리 안 맞음')",
+      a and a["px"] == "none" and a["why"].startswith("거래소 값끼리") and "fundIncl" not in a, a)
 BY_AGG = {"symbol": "BBBUSDT", "side": "Sell", "orderId": "c9", "updatedTime": str(ms(10)), "closedSize": "2", "avgEntryPrice": "97.5",
           "avgExitPrice": "110", "closedPnl": "25", "openFee": "0", "closeFee": "0", "leverage": "2", "execType": "Trade"}
 r = asm([ev("bybit", "REALIZED", 25.0, ms(10), "BBBUSDT", f"bb:c9:{ms(10)}")],
@@ -221,6 +261,10 @@ OKP = round(10 - 0.2, 10)
 r = asm([ev("bybit", "REALIZED", OKP, T_OUT2, "BBBUSDT", f"bb:c4:{T_OUT2}")], bypx([by_close("c4", T_OUT2, OKP)], [by_open("e1", T_IN)]))
 a = at(r, T_OUT2)
 check("[펀딩] 펀딩 없이 맞는 정산 = 가격 표시 · 펀딩 몫 칸 없음", a and a["px"] == "exchange" and "fundIncl" not in a, a)
+T_LH = ms(9, d=-71)
+r = asm([ev("bybit", "REALIZED", OKP, T_OUT2, "BBBUSDT", f"bb:c5:{T_OUT2}")], bypx([by_close("c5", T_OUT2, OKP)], [by_open("e5", T_LH)]))
+a = at(r, T_OUT2)
+check("[누락·같은 가격] 바이빗 71일 보유 뒤 청산 = 진입 71일 전 그대로 · 추정 표식 없음", a and a["entryTs"] == T_LH / 1000 and "entryEst" not in a, a)
 
 E_ALL = (E1 + [ev("binance", "FEE", -0.3, ms(9), "AAAUSDT", "bn:2:F:1"), ev("binance", "FUNDING", 0.07, ms(9, 1), "AAAUSDT", "bn:9:U:1")]
          + [x for x in E4 if x[0] == ISO] + [ev("okx", "FEE", -0.2, ms(10, 5), "AAA-USDT-SWAP", "ok:104:f")]
