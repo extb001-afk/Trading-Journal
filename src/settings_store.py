@@ -621,7 +621,7 @@ def unit_inputs(unit: str, cfg: dict | None = None, env: dict | None = None):
     return True, "", _h([unit])
 
 
-WEB_HOT_TOP = ("perp_wallets",)
+WEB_HOT_TOP = ("perp_wallets", "runner")
 WEB_HOT_WALLET_FIELDS = ("label",)
 
 

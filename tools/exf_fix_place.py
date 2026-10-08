@@ -70,11 +70,11 @@ def _planner(conn):
 def _ro():
     p = common.DB_PATH
     try:
-        c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=30)
+        c = sqlite3.connect(common.sqlite_ro_uri(p), uri=True, timeout=30)
         c.execute("SELECT 1 FROM postings LIMIT 1").fetchall()
     except sqlite3.OperationalError:
         assert not os.path.exists(p + "-wal") or os.path.getsize(p + "-wal") == 0, "WAL 이 남아 있는데 읽기 전용 열기 실패"
-        c = sqlite3.connect(f"file:{p}?immutable=1", uri=True)
+        c = sqlite3.connect(common.sqlite_ro_uri(p, immutable=True), uri=True)
     c.row_factory = sqlite3.Row
     return c
 

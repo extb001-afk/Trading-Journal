@@ -2163,11 +2163,26 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             top0 = [x for x in (ng.get("top") or []) if isinstance(x, dict)]
             top9 = [x for x in top0 if abs(float(x.get("usd") or 0)) >= 0.5]
             n_neg9 = max(len(top9), int(ng.get("n") or 0) - (len(top0) - len(top9)))
-            top = " · ".join(f"{x.get('sym')} {loc_ko(x.get('loc'))} ${abs(float(x.get('usd') or 0)):,.0f}" for x in top9[:3])
-            add("ledger:neg", "tj-core", f"원장 음수 보유 ${abs(nusd):,.0f}" if bad else "원장 음수 보유", "warn" if bad else "ok",
-                (f"{n_neg9}곳(마진 차입 제외) · {top} — 보유량은 0 으로 보이지만 원장 결손(누락 입금·원가 이관) 신호") if bad
-                else "없음(마진 차입 제외)",
-                "대시보드 보유 목록의 음수 위치 확인 — 빠진 입금·지갑 등록·거래소 이력 기간을 점검",
+            pd9 = ng.get("pend") if isinstance(ng.get("pend"), dict) else {}
+            try:
+                p_n9, p_usd9 = int(pd9.get("n") or 0), float(pd9.get("usd") or 0)
+            except (TypeError, ValueError):
+                p_n9, p_usd9 = 0, 0.0
+            all_pd9 = bad and p_n9 > 0 and p_n9 >= n_neg9
+            top = " · ".join(f"{x.get('sym')} {loc_ko(x.get('loc'))} ${abs(float(x.get('usd') or 0)):,.0f}"
+                             + ("(재계산 대기)" if x.get("pend") and not all_pd9 else "") for x in top9[:3])
+            if all_pd9:
+                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 재계산 대기: 과거 기록을 늦게 받은 옛 거래가 이미 맞춰 둔 기초잔고와 겹친 일시 음수"
+                        " (그동안 같은 거래의 다른 쪽 — 내 다른 지갑 — 이 그만큼 많게 보일 수 있음) · 과거 기록 범위 넓히기가 끝나면 원장 자동 재계산이 다시 맞춤")
+                act9 = "과거 기록 넓히기·재계산이 끝날 때까지 기다린 뒤에도 남으면 빠진 입금·지갑 등록을 점검 — 진행은 설정 › 과거 데이터 더 가져오기"
+            else:
+                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 보유량은 0 으로 보이지만 원장 결손(누락 입금·원가 이관) 신호"
+                        + (f" · 그중 {p_n9}곳 ${abs(p_usd9):,.0f} 은 재계산 대기(늦게 받은 옛 거래 — 자동 재계산이 다시 맞춤)" if p_n9 > 0 else ""))
+                act9 = "대시보드 보유 목록의 음수 위치 확인 — 빠진 입금·지갑 등록·거래소 이력 기간을 점검"
+            add("ledger:neg", "tj-core", (f"원장 음수 보유 ${abs(nusd):,.0f}" + (" · 재계산 대기" if all_pd9 else "")) if bad else "원장 음수 보유",
+                "warn" if bad else "ok",
+                det9 if bad else "없음(마진 차입 제외)",
+                act9,
                 persist=float(t.get("neg_hold_persist") or 7200), resolve=600, notify=False, remind=False, kind="ledger")
         pdv = [x for x in (wd.get("proof_div") or []) if isinstance(x, dict)
                and float(x.get("usd") or 0) >= float(t.get("proof_div_min_usd") or 500)]
@@ -2213,6 +2228,26 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "웹 서버(tj-web) 로그의 '빌드 자식 실패' 줄 — 쉼이 끝나면 저절로 별도 프로세스로 돌아감(재시작해도 바로 돌아감)" if bpm9["level"] == "warn" else "",
             persist=600, resolve=300, notify=False, remind=False, kind="web")
         chip(bpm9["chip"])
+    for u9 in ("web", "core", "evm", "sol", "bsc"):
+        rb9 = (obs.get("runner") or {}).get(u9)
+        mem9 = rb9.get("mem") if isinstance(rb9, dict) and isinstance(rb9.get("mem"), dict) else None
+        if mem9 is None or f"tj-{u9}" not in units or not (isinstance(rb9.get("ts"), (int, float)) and now - float(rb9["ts"]) < 1800):
+            continue
+        rs9 = [x for x in (mem9.get("restarts") or []) if isinstance(x, (int, float)) and 0 <= now - float(x) < 86400]
+        cap9, cur9 = mem9.get("max_mb"), mem9.get("rss_mb")
+        last9 = mem9.get("last") if isinstance(mem9.get("last"), dict) else {}
+        cur_t9 = (f"지금 {int(cur9):,}MB" if isinstance(cur9, (int, float)) else "지금 값 모름") + (f" · 상한 {int(cap9):,}MB" if cap9 else " · 상한 꺼짐")
+        if not rs9 and not cap9:
+            continue
+        if rs9:
+            lt9 = datetime.fromtimestamp(float(last9.get("ts") or rs9[-1]), KST).strftime("%m-%d %H:%M")
+            det9 = (f"최근 24시간 {len(rs9)}번 · 마지막 {lt9}(RSS {int(last9.get('rss_mb') or 0):,}MB > 상한 {int(last9.get('max_mb') or 0):,}MB) · " + cur_t9)
+        else:
+            det9 = cur_t9
+        add(f"runner:mem:{u9}", f"tj-{u9}", f"메모리 상한 넘어 다시 시작 {len(rs9)}번(24시간)" if rs9 else "메모리 상한", "warn" if rs9 else "ok", det9,
+            f"tj-{u9} 메모리가 상한을 넘어 정상 종료 뒤 다시 시작했어요(데이터 손실 없음) — 자주 반복되면 로그의 '메모리 상한' 줄과 보유·기록 규모 확인 ·"
+            f" 상한은 환경변수 TJ_RUNNER_MAX_MB_{u9.upper()} 또는 config.json runner.max_mb.{u9}(0 = 끔)" if rs9 else "",
+            persist=0, resolve=3600, notify=False, remind=False, kind="web")
     rb = wd.get("rabby") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None
     if isinstance(rb, dict) and "tj-web" in units:
         long_ = [w for w in (rb.get("wallets") or []) if isinstance(w, dict) and w.get("gapSince")
@@ -3637,6 +3672,7 @@ class Monitor:
                 "inbox": pr["inbox"]() if "inbox" in pr else collect_inbox(st, now),
                 "disk": pr["disk"]() if "disk" in pr else collect_disk(),
                 "reload": _read(os.path.join(common.STATE_DIR, "health_reload.json"), None),
+                "runner": {u9: _read(os.path.join(common.STATE_DIR, f"runner_{u9}.json"), None) for u9 in ("web", "core", "evm", "sol", "bsc")},
                 "web": pr["web"]() if "web" in pr else collect_web(cfg, st, now),
                 "tg": dict(TG_STATS, configured=bool(tg_configured)),
                 "dm": collect_dm(st, now, bool(tg_configured))}

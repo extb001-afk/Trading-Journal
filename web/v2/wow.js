@@ -233,6 +233,10 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
 .wsl-kv{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--text2)}
 .wsl-kv>span:last-child{font-family:var(--mono);text-align:right}
 .wsl-pl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:14px}
+.wsl-plh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;font-size:12.5px;color:var(--muted)}.wsl-plh+.wsl-pl{margin-top:8px}
+.wsl-plh .wseg button{padding:0 11px}
+.wsl-eq{font:500 12px var(--mono);color:var(--faint);min-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wsl-pl+.wnote{margin-top:6px}
 .wsl-pl label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);min-width:0}
 .wsl-pl input{width:100%;min-width:0;box-sizing:border-box;height:44px;border-radius:12px;border:1px solid var(--line2);background:var(--bg);color:var(--text);font:500 15px var(--mono);padding:0 12px;outline:none}
 .wsl-pl input:focus{border-color:var(--accent)}
@@ -339,7 +343,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
   window.addEventListener('popstate', ev => { if (st.view && !(ev.state && ev.state.tjWow)) close(true); });
   function lock() {
     close(true);
-    st.tm.cache = {}; st.tm.re = {}; st.tm.series = null; st.tm.err = ''; st.fl.cache = {}; st.sell.dT = null; st.sell.dS = null;
+    st.tm.cache = {}; st.tm.re = {}; st.tm.series = null; st.tm.err = ''; st.fl.cache = {}; st.sell.dT = null; st.sell.dS = null; st.sell.snap = null;
   }
   function onPv() {
     if (!st.view) return;
@@ -371,7 +375,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
   const A = {
     close: () => close(),
     open: el => open(el.getAttribute('data-v'), { opener: el }),
-    sell: el => { st.sell.key = el.getAttribute('data-k') || ''; st.sell.f = 0.5; st.sell.saveMsg = ''; st.sell.dT = null; st.sell.dS = null; open('sell', { sm: true, opener: el }); }
+    sell: el => { st.sell.key = el.getAttribute('data-k') || ''; st.sell.f = 0.5; st.sell.saveMsg = ''; st.sell.dT = null; st.sell.dS = null; st.sell.snap = null; open('sell', { sm: true, opener: el }); }
   };
 
   function slot(k, g) {
@@ -849,6 +853,8 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
       if (!c) return '<div class="wempty">이 코인의 보유·시세를 찾지 못했어요</div>';
       const g = c.g, pcv = Math.round(c.f * 100), plan = c.plan;
       const tgt = plan && num(plan.target) > 0 ? plan.target : null, stp = plan && num(plan.stop) > 0 ? plan.stop : null, pv = x.pvOn();
+      const sn = slSnap(x, tgt, stp), live = sn.live, cu = sn.cu, rt = sn.rt, inV = (d, o) => (d != null ? String(d) : o == null ? '' : cu === 'USD' ? String(o) : slIn(num(o), cu, rt));
+      const vT = pv ? '' : inV(st.sell.dT, sn.oT), vS = pv ? '' : inV(st.sell.dS, sn.oS), uL = cu === 'KRW' ? '원화' : 'USD';
       return '<div class="wsl-h"><span class="av">' + esc(String(g.sym).slice(0, 1)) + '</span><span style="min-width:0"><b>' + esc(g.sym) + ' 지금 팔면</b><small>보유 ' + x.q(num(g.qty)) + ' · ' + locSumH(g) + ' · <span class="pvx">원가 확인 ' + Math.round((1 - Math.min(1, num(g.unkPct))) * 100) + '%</span></small></span></div>'
         + '<div class="wsl-kv"><span>팔 양</span><span class="pvx"><b id="wslPct">' + pcv + '%</b></span></div>'
         + '<div class="wsl-tr" id="wslTr" tabindex="0" role="slider" aria-label="팔 양" aria-valuemin="1" aria-valuemax="100" aria-valuenow="' + pcv + '" aria-valuetext="' + pcv + '%"><span class="tk"></span><span class="fi" style="width:' + pcv + '%"></span><span class="th" style="left:' + pcv + '%"></span></div>'
@@ -856,13 +862,18 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
         + '<div class="wsl-res"><div><div style="font-size:12.5px;color:var(--muted)">예상 실현손익</div><div class="big ' + cls(c.est) + '" id="wslBig">' + M(c.est, { sign: true }) + '</div><div class="wnote" id="wslSub">' + sellSub(c) + '</div></div>'
         + '<div style="height:1px;background:var(--line2)"></div><div class="wsl-kv"><span>올해 누적 양도차익</span><span id="wslYtd">' + sellYtd(c) + '</span></div>'
         + (num(g.unkQty) > 0 ? '<div class="wsl-kv"><span>원가 모르는 수량</span><span style="color:var(--ext)" id="wslUnk">' + x.q(c.unkSell) + ' ' + esc(g.sym) + ' 포함</span></div><div class="wnote">장부처럼 원가 아는 수량부터 판다고 계산했어요 — 원가 모르는 몫(아는 몫을 다 판 뒤)은 손익 0 · 미매칭에서 원가를 정하면 더 정확해져요</div>' : '') + '</div>'
-        + (c.pkey ? '<div class="wsl-pl"><label>목표가 (USD)<input inputmode="decimal" id="wslT" data-pv value="' + (pv ? '' : esc(String(st.sell.dT != null ? st.sell.dT : tgt != null ? tgt : ''))) + '" placeholder="' + (pv ? '숨김 중' : esc(sigf(c.price * 1.25))) + '" autocomplete="off"' + (pv ? ' disabled' : '') + '></label><label>손절선 (USD · 선택)<input inputmode="decimal" id="wslS" data-pv value="' + (pv ? '' : esc(String(st.sell.dS != null ? st.sell.dS : stp != null ? stp : ''))) + '" placeholder="' + (pv ? '숨김 중' : esc(sigf(c.price * 0.9))) + '" autocomplete="off"' + (pv ? ' disabled' : '') + '></label></div>'
+        + (c.pkey ? '<div class="wsl-plh"><span>목표가 · 손절선</span><span class="wseg" role="group" aria-label="입력 통화">' + [['KRW', '₩ 원화'], ['USD', '$ 달러']].map(o => '<button type="button" class="' + (cu === o[0] ? 'on' : '') + '" aria-pressed="' + (cu === o[0]) + '" data-w="slCur" data-v="' + o[0] + '"' + (o[0] === 'KRW' && !live ? ' disabled title="지금 환율을 아직 못 받았어요"' : '') + '>' + o[1] + '</button>').join('') + '</span></div>'
+          + (live ? '' : '<div class="wnote">지금 환율을 아직 못 받아 원화 입력은 잠시 막아 뒀어요 — 달러로 넣어 주세요</div>')
+          + '<div class="wsl-pl"><label>목표가 (' + uL + ')<input inputmode="decimal" id="wslT" data-pv value="' + esc(vT) + '" placeholder="' + (pv ? '숨김 중' : esc(slIn(c.price * 1.25, cu, rt))) + '" autocomplete="off"' + (pv ? ' disabled' : '') + '><span class="wsl-eq" id="wslTq">' + (pv ? '' : esc(slEq(vT, cu, rt))) + '</span></label>'
+          + '<label>손절선 (' + uL + ' · 선택)<input inputmode="decimal" id="wslS" data-pv value="' + esc(vS) + '" placeholder="' + (pv ? '숨김 중' : esc(slIn(c.price * 0.9, cu, rt))) + '" autocomplete="off"' + (pv ? ' disabled' : '') + '><span class="wsl-eq" id="wslSq">' + (pv ? '' : esc(slEq(vS, cu, rt))) + '</span></label></div>'
+          + (cu === 'KRW' && !pv ? '<div class="wnote">원화로 넣으면 지금 환율(₩' + (typeof x.nf === 'function' ? x.nf('ko-KR', 0, 0).format(rt) : Math.round(rt)) + '/$)로 달러로 바꿔 저장해요 — 감시·알림은 달러 시세 기준</div>' : '')
           + '<div class="wsl-act"><button type="button" class="wbtn" style="flex:1" data-w="close">닫기</button><button type="button" class="wbtn pri" style="flex:1.4" data-w="slSave"' + (pv ? ' disabled title="숨김 중엔 저장할 수 없어요"' : '') + '>목표가로 저장</button></div>' : '<div class="wsl-act"><button type="button" class="wbtn" style="flex:1" data-w="close">닫기</button></div>')
         + (st.sell.saveMsg ? '<div class="wnote" style="margin-top:8px">' + esc(st.sell.saveMsg) + '</div>' : '')
         + '<div class="wnote" style="text-align:center;margin-top:10px">이 봇은 주문을 넣지 않아요 · 계산만 해요</div>';
     },
     after: el => {
-      [['#wslT', 'dT'], ['#wslS', 'dS']].forEach(([id9, k9]) => { const i9 = $(id9, el); if (i9 && !i9.disabled) i9.addEventListener('input', () => { st.sell[k9] = i9.value; }); });
+      [['#wslT', 'dT'], ['#wslS', 'dS']].forEach(([id9, k9]) => { const i9 = $(id9, el); if (i9 && !i9.disabled) i9.addEventListener('input', () => { st.sell[k9] = i9.value;
+        const q9 = $(id9 + 'q', el), sn9 = st.sell.snap; if (q9 && sn9) q9.textContent = slEq(i9.value, sn9.cu, sn9.rt); }); });
       const tr = $('#wslTr', el); if (!tr) return;
       let drag = false;
       const pick = ev => { const r = tr.getBoundingClientRect(); return Math.max(0.01, Math.min(1, (ev.clientX - r.left) / r.width)); };
@@ -881,12 +892,35 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
     + ' · 수수료 ≈ ' + M(-num(c.fee), { compact: true }) + ' (' + (c.fr && c.fr.src === 'sym' ? '이 코인 지난 매도 평균 ' : c.fr && c.fr.src === 'all' ? '지난 매도 평균 ' : '기본 ') + P(num(c.fr && c.fr.r) * 100, 2) + ')';
   const sellYtd = c => M(c.ytd, { compact: true, sign: true }) + ' → <b style="color:var(--warn)">' + M(c.ytd + c.est, { compact: true, sign: true }) + '</b>';
   const sigf = v => { if (!(v > 0)) return ''; const d = v >= 100 ? 2 : v >= 1 ? 4 : 8; return String(+v.toFixed(d)); };
+  const slLive = x => !(x && typeof x.rateLive === 'function') || !!x.rateLive();
+  function slSnap(x, tgt, stp) {
+    if (st.sell.snap) return st.sell.snap;
+    const rt = slRate(x), live = slLive(x);
+    return (st.sell.snap = { rt, live, cu: live && !(x && x.S.cur === 'USD') ? 'KRW' : 'USD', oT: tgt, oS: stp,
+      pT: tgt != null ? slIn(num(tgt), 'KRW', rt) : null, pS: stp != null ? slIn(num(stp), 'KRW', rt) : null });
+  }
+  const slRate = x => { const r = num(x && x.rate && x.rate()); return r > 0 ? r : 1384; };
+  const sigK = v => { if (!(v > 0)) return ''; return v >= 1000 ? String(Math.round(v)) : v >= 1 ? String(+v.toFixed(2)) : String(+v.toPrecision(4)); };
+  const slIn = (usd, cu, rt) => (cu === 'KRW' ? sigK(usd * rt) : sigf(usd));
+  const slNum = t => { const v = String(t == null ? '' : t).replace(/[,\s$₩]/g, ''); return v === '' ? null : parseFloat(v); };
+  const slEq = (t, cu, rt) => { const v = slNum(t); if (!(v != null && isFinite(v) && v > 0)) return ''; return cu === 'KRW' ? '≈ $' + (v / rt >= 1000 ? (v / rt).toLocaleString('en-US', { maximumFractionDigits: 2 }) : sigf(v / rt)) : '≈ ₩' + (v * rt >= 1000 ? Math.round(v * rt).toLocaleString('ko-KR') : sigK(v * rt)); };
   Object.assign(A, {
     slQ: el => { st.sell.f = num(el.getAttribute('data-v')) || 0.5; paint(); },
+    slCur: el => {
+      const sn = st.sell.snap, to = el.getAttribute('data-v') === 'USD' ? 'USD' : 'KRW'; if (!sn || to === sn.cu) return;
+      if (!(sn.live && sn.rt > 0)) return;
+      ['dT', 'dS'].forEach(k9 => { const v = slNum(st.sell[k9]); if (st.sell[k9] != null && v != null && isFinite(v) && v > 0) st.sell[k9] = slIn(sn.cu === 'KRW' ? v / sn.rt : v, to, sn.rt); });
+      sn.cu = to; st.sell.saveMsg = ''; paint();
+    },
     slSave: () => {
       const c = sellCalc(), x = X(); if (!c || !c.pkey || !x || x.pvOn()) return;
-      const rd = id => { const v = String(($(id) || {}).value || '').replace(/[,\s$]/g, ''); return v === '' ? null : parseFloat(v); };
-      const t = rd('#wslT'), s = rd('#wslS');
+      const sn = st.sell.snap; if (!sn) return;
+      const cu = sn.cu, rt = sn.rt;
+      if (cu === 'KRW' && !(sn.live && rt > 0)) { st.sell.saveMsg = '지금 환율을 받지 못해 원화로는 저장할 수 없어요 — 달러로 넣어 주세요'; paint(); return; }
+      const rd = (id, o, pf) => { const raw = String(($(id) || {}).value || '').trim(), v = slNum(raw); if (v == null || cu === 'USD') return v;
+        if (num(o) > 0 && pf != null && raw === pf) return num(o);
+        return isFinite(v) && v > 0 ? +(v / rt).toPrecision(8) : v; };
+      const t = rd('#wslT', sn.oT, sn.pT), s = rd('#wslS', sn.oS, sn.pS);
       if (!(t != null && isFinite(t) && t > 0)) { st.sell.saveMsg = '목표가를 숫자로 넣어 주세요'; paint(); return; }
       if (s != null && !(isFinite(s) && s > 0 && s < t)) { st.sell.saveMsg = '손절선은 0보다 크고 목표가보다 낮아야 해요'; paint(); return; }
       const body = { key: c.pkey, target: t }; if (s != null) body.stop = s;
@@ -1045,7 +1079,8 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
     }).catch(() => null);
   }
 
-  window.TJWow = { slot, open, close, askParse, lock, onPv, _tmSet: tmSet, _st: st, _views: VIEWS, _taxYtd: taxYtd, _planRows: planRows, _yearData: yearData, _sellCalc: sellCalc, _flLayout: flLayout, _flMap: flMap, _flSelHTML: flSelHTML, _yeModel: yeModel };
+  window.TJWow = { slot, open, close, askParse, lock, onPv, ccy: { inp: slIn, num: slNum, eq: slEq },
+    _tmSet: tmSet, _st: st, _views: VIEWS, _taxYtd: taxYtd, _planRows: planRows, _yearData: yearData, _sellCalc: sellCalc, _flLayout: flLayout, _flMap: flMap, _flSelHTML: flSelHTML, _yeModel: yeModel };
   const hook = () => { if (window.TJ) { window.TJ.askParse = askParse; window.TJ.wow = window.TJWow; } };
   hook();
   const x0 = X(), had0 = !!(x0 && x0.S && x0.S.D);

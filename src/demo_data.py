@@ -469,9 +469,12 @@ def _outflows(now) -> list:
         r.update(extra or {})
         return r
     usdc = lambda q: {"sym": "USDC", "qty": q, "usdAtSend": q, "usdNow": q, "costUsd": q, "unknownCostQty": 0}
+    ex9 = row(demo_evm(90), ["eth"], [usdc(3000.0)], "exchange_matched", 3,
+              {"exchange": "업비트", "autoMatch": {"basis": ["txid"], "matched": 1, "of": 1, "exchange": "업비트"}, "matchedUsd": 3000.0,
+               "hints": [{"kind": "exchange_txid", "chip": "업비트 입금 자동 매칭 · 1/1건", "label": "업비트 입금으로 자동 매칭(근거: txid 일치) · 1/1건 · 원가 이관됨"}]})
+    ex9["txs"][0]["match"] = {"basis": "txid", "exchange": "업비트"}
     return [row(demo_evm(77), ["arbitrum"], [usdc(2000.0)], "pending", 5),
-            row(demo_evm(90), ["eth"], [usdc(3000.0)], "exchange_matched", 3,
-                {"exchange": "업비트", "autoMatch": {"basis": ["txid"], "matched": 1, "of": 1, "exchange": "업비트"}, "matchedUsd": 3000.0}),
+            ex9,
             row(demo_evm(78), ["base"], [{"sym": "ETH", "qty": 0.5, "usdAtSend": 1850.0, "usdNow": 1960.0, "costUsd": 1655.0, "unknownCostQty": 0}],
                 "external", 12, {"verdict": "external", "memo": "데모 — 다른 사람에게 보낸 돈(합성)", "decidedTs": int((now - timedelta(days=11)).timestamp())})]
 
@@ -495,6 +498,9 @@ def _extra_key():
     return datetime.now(KST).strftime("%Y-%m-%d")
 
 
+_HAB_HOURS = (10, 10, 11, 11, 11, 14, 15, 22, 22, 23, 23)
+
+
 def day_idx() -> dict:
     k = _extra_key()
     if _EXTRA["day"] == k and _EXTRA["idx"] is not None:
@@ -510,6 +516,8 @@ def day_idx() -> dict:
             for _s in range(rnd.randint(1, 5)):
                 hold_h = rnd.choice([3, 10, 30, 46, 80, 200, 500, 1500, 3000])
                 t = start + timedelta(hours=hold_h + rnd.randint(0, 48))
+                hh = _HAB_HOURS[rnd.randrange(len(_HAB_HOURS))] if rnd.random() < 0.75 else t.hour
+                t += timedelta(hours=(hh - t.hour) % 24)
                 if t >= now - timedelta(hours=1):
                     continue
                 hr = t.hour

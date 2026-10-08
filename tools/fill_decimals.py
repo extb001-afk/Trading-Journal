@@ -45,7 +45,7 @@ def main():
     as_json = "--json" in sys.argv
     if not os.path.exists(common.DB_PATH):
         raise SystemExit("원장 없음: " + common.DB_PATH)
-    c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=30)
+    c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=30)
     c.row_factory = sqlite3.Row
     meta = meta_caches()
     posted = {int(r[0]): int(r[1]) for r in c.execute(

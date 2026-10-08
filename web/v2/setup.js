@@ -755,7 +755,7 @@
         + (nF && es.rt != null ? ' · 이더스캔 실시간 확인 몫 하루 ' + fmtN(es.rt) + '콜 · 오늘 남은 옛 기록 몫 ' + fmtN(es.fillLeft || 0) + '콜' : '')
         + (hl.fillFirst && hl.rt != null ? ' · 헬리우스(Solana) 실시간 확인 몫 하루 ' + fmtN(hl.rt) + '크레딧 · 오늘 남은 옛 기록 몫 ' + fmtN(hl.fillLeft || 0) + '크레딧' : '') + '</div>' : '')
       + (hl.pn ? '<div class="cap">Solana 새 거래 확인 = 공개 노드(' + esc(hl.pn.host || 'publicnode') + ') 먼저 · 백업 헬리우스'
-        + (hl.pn.hlClosedUntil ? ' — 오늘 헬리우스 한도를 다 써서 ' + new Date(hl.pn.hlClosedUntil * 1000).toTimeString().slice(0, 5) + '까지 공개 노드로만 이어 받아요'
+        + (hl.pn.hlClosedUntil ? ' — 오늘 헬리우스 한도를 다 써서 ' + kstHM9(hl.pn.hlClosedUntil) + '까지 공개 노드로만 이어 받아요'
           : (hl.pn.ok ? (hl.pn.rate != null ? ' · 최근 응답 ' + Math.round(hl.pn.rate * 100) + '%' : '') + (hl.pn.floorPct != null ? ' · 헬리우스 실시간 몫 하루 ' + hl.pn.floorPct + '%(남는 몫은 옛 기록에)' : '')
             : ' — 지금 공개 노드 응답이 고르지 않아 헬리우스로 확인 중(헬리우스 몫을 더 써요)')) + '</div>' : '')
       + (all.some(p => p.e) ? '<div class="cap">빈 지갑 ' + all.filter(p => p.e).length + '곳 — 기록이 하나도 없어 활동은 하루 한 번 확인해요(토큰 입금만 오면 주 1회 확인 때 기록 — 시각·수량은 그대로)</div>' : '')
@@ -802,7 +802,8 @@
     return '<span class="pvm">$' + esc(Math.round(usd).toLocaleString('en-US')) + '</span>';
   }
   const chEvery = s => (s == null ? '' : s < 60 ? s + '초마다' : (Math.round(s / 6) / 10).toString().replace(/\.0$/, '') + '분마다');
-  const chDay = ts => { const d = new Date(ts * 1000); return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const chDay = ts => { const d = new Date(ts * 1000 + 32400000); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); };
+  function kstHM9(ts) { const d = new Date(ts * 1000 + 32400000); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
   async function loadChains(force) {
     if (isLocked() || U.chBusy) return;
     if (!force && U.ch && Date.now() - U.chAt < 60000) return;

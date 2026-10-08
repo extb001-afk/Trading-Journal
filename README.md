@@ -67,20 +67,20 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-08 저녁 · 외부 검토 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-08 저녁](CHANGELOG.md#2026-10-08-저녁--외부-검토-반영) 에 있어요.
+이번 판(2026-10-09 · 수정 재검증 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-09](CHANGELOG.md#2026-10-09--수정-재검증-반영) 에 있어요.
 
-- **선물 영수증 가격·진입 시각** — 바이낸스·OKX(한 방향 모드) 청산에도 가격이 붙고, 진입 시각은 누적 포지션 기준이에요(분할 청산 · 반전·손익 0 청산은 가격이 맞을 때만).
-  바이빗은 체결 내역(`/v5/execution/list`)에서 진입을 받아요.
-- **선물 영수증 차트·금액** — 고른 거래소의 봉·점만 · 같은 주문 ▲ 하나 · 거래소 줄로 열면 그 거래소 금액 · 원화는 종류별 · 거래 줄은 정확값 · 폰은 칩 줄 가로 넘김.
-- **화면** — 좁은 폭에서 탭을 둘째 줄로 접기 · 서랍 오류가 설정을 지우지 않음 · 갱신 때 서랍 스크롤·초점 유지 · 한국 시간 통일 · 대비·터치 영역(44px)·워터마크·문구.
-- **상태 전송** — `/api/state` 가 `If-None-Match` 에 304 · 화면을 다시 열면 차이(델타)만 받아요.
-- **빌드** — 상태 패널 빌드 경고에서 원장 재구축 구간 제외 · 빌드 방식 칩 · 문턱 60초(별도 프로세스) · 빌드 자식 교착 원인 제거(SQLite 메모리 통계 끔)·걸리면 다시 fork.
-- **체인 자동 끄기** — 시세 장애 때는 안 꺼요 · 자동으로 켠 체인은 30일 유예 · **설정 › 지갑 · 주소 › 체인별 조회**에 켬/끔 스위치.
-- **데모·CI** — 데모에 선물 영수증·체인 설정·보낸 내역 · CI = Python 3.9·3.11·3.13 + HTTP 로그인 시험 · `config.json` 은 본인만 읽게(0600).
+- **선물 영수증** — 강제청산·ADL 이 기록에서 빠져도 뒤 거래가 옛 진입 시각을 물려받지 않아요(OKX 한 방향 모드 강제청산·ADL·블록 체결 · 진입 체결 평균과 교차 확인) ·
+  바이빗 정산에 펀딩이 섞인 청산도 거래소 가격 표시 · 거래소 줄로 열면 배지·종목 칩·네 칸·청산 목록도 그 거래소(「전체 보기」로 전체) · 폰 머리 정리.
+- **화면** — 글꼴(IBM Plex)을 저장소에서 직접 제공(Google Fonts 요청 없음) · 폰 일별 기록 = 달력 → 그날 카드 → 그날의 기록 ·
+  목표가·손절선 원화/달러 입력(저장·감시는 달러) · 대시보드 오른쪽 열 자체 스크롤 없앰 · 습관 '가장 잘 맞는 때'는 비교할 시간대가 있을 때만 ·
+  641~1100px 머리 줄 검색 돋보기 · 그날 카드 금액을 눌러 전체 금액.
+- **운영** — 지운 지갑 이름도 바로 반영 · 화면 계산 자식의 정상 대기를 교착으로 오판하지 않음 · 바이빗 이어 받기 커서 오류에서 멈추지 않음 ·
+  유닛 러너 메모리 상한(tj-web 기본 3GB) · 원장 음수 보유가 과거 기록 넓히기 때문이면 '재계산 대기' 설명 · 이더스캔 'unsupported chainid' = 미지원.
+- **시험·라이선스** — 공개 시험 1,300건 넘게(선물 영수증·빌드 분리·노드 키·화면 스냅숏·체인 끄기 추가) · 라이선스 = [MIT](LICENSE).
+- 지난 판(2026-10-08 저녁): 선물 영수증 가격·진입 시각 · 화면 다듬기 · 상태 전송 304 · 체인 자동 끄기 스위치 · 빌드 자식 교착 원인 제거 —
+  [CHANGELOG.md › 2026-10-08 저녁](CHANGELOG.md#2026-10-08-저녁--외부-검토-반영)
 - 지난 판(2026-10-08 오후): 선물 영수증 · 업비트 거래 시작 전 코인 평가 · 화면 계산은 따로(리눅스 · 끄기 = [고급 설정](#고급-설정)의 `TJ_BUILD_PROC=off`) · 디자인 정리 —
   [CHANGELOG.md › 2026-10-08](CHANGELOG.md#2026-10-08)
-- 지난 판(2026-10-07): 체인별 조회 켜기·끄기(추천 체인 자동 끄기) · 보관처 상세 · 매수 점 거슬러 찾기 · 확인 주기 계단 · 이더스캔·헬리우스 하루 몫(공표 한도 80%) ·
-  탐색기가 막히면 공개 RPC 로 자동 대체 · Base 공개 RPC 직접 · Solana 새 거래는 공개 노드 먼저 · 빗썸 원화 입출금 — [CHANGELOG.md › 2026-10-07](CHANGELOG.md#2026-10-07)
 
 ### 대시보드
 
@@ -575,17 +575,21 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   브릿지 탐색기(도착 확인), 환율, 텔레그램 발송, NFT 바닥가(코인게코·매직에덴·오픈시 — 컬렉션 주소만), Hyperliquid 공개 조회(내 주소).
   원장 내용 자체는 보내지 않습니다.
   예외: AI 기능(기본 꺼짐)을 켜면 그날 요약·영수증 요약을 내 컴퓨터의 `claude` CLI 로 보냅니다.
-- **브라우저(화면)가 직접 부르는 외부 주소** — 위는 서버가 부르는 곳이고, 화면을 연 브라우저도 다음 두 곳에 직접 요청합니다(그 서비스는 접속 IP 를 볼 수 있어요):
-  - **Google Fonts**(`fonts.googleapis.com`·`fonts.gstatic.com`) — 숫자·본문 글꼴(IBM Plex). 받지 못하면 시스템 글꼴로 보입니다.
+- **브라우저(화면)가 직접 부르는 외부 주소** — 위는 서버가 부르는 곳이고, 화면을 연 브라우저도 다음 곳에 직접 요청합니다(그 서비스는 접속 IP 를 볼 수 있어요):
+  - **글꼴**(IBM Plex Sans KR·IBM Plex Mono) — 이제 저장소에서 제공(외부 요청 없음): `web/v2/fonts/` 의 글자 조각(woff2)을 tj-web 이 직접 내고,
+    브라우저는 화면에 나온 글자의 조각만 받아요. 라이선스 = SIL Open Font License 1.1(`web/v2/fonts/OFL.txt`).
   - **jsDelivr**(`cdn.jsdelivr.net`) — 코인 로고와 토큰 목록. 로고 주소에 **체인·컨트랙트 주소·심볼**이 들어가 그 서비스가 내가 가진 토큰 목록을 짐작할 수 있고,
     금액 숨김·랜덤값 모드에서도 나갑니다. 원치 않으면 **설정 › 화면 · 표시 › 토큰 로고**를 끄세요(이 기기에만 저장 · 끄면 로고·토큰 목록을 전혀 요청하지 않고 글자 아이콘만).
-  - 글꼴·로고를 저장소 안에서 직접 제공하는 방식(외부 요청 0)은 아직 없습니다.
+  - 코인 로고를 저장소 안에서 직접 제공하는 방식(외부 요청 0)은 아직 없습니다 — 위 설정으로 끌 수 있어요.
   - **Cloudflare 같은 프록시·터널을 앞에 두면** 그쪽 설정에 따라 **Web Analytics** 스크립트(`static.cloudflareinsights.com`)가 페이지에 끼워 넣어질 수 있어요 —
     tj-bot 이 넣는 것이 아니라 프록시가 넣는 것이니, 원치 않으면 Cloudflare 대시보드에서 그 사이트의 Web Analytics(자동 삽입)를 끄세요.
 - AI 리뷰·평가는 내 컴퓨터의 `claude` CLI 를 쓰며, 넘기는 환경변수는 허용 목록뿐입니다(PATH·HOME·로케일, 프록시 `HTTP(S)_PROXY`·`NO_PROXY`·`ALL_PROXY`,
   사내 인증서 `NODE_EXTRA_CA_CERTS`·`SSL_CERT_FILE`·`SSL_CERT_DIR`, Claude 로그인·게이트웨이·Bedrock·Vertex 변수). 거래소 키와 `.env` 값은 넘기지 않습니다.
   AI 매도·매수 평가는 기본 꺼짐 — `config.json` 의 `review.sell_eval_daily_max`·`review.buy_eval_daily_max` 를 1 이상(하루 최대 호출 수)으로 켭니다.
 - 로그인 화면이 뜨면(로그아웃·만료·다른 기기에서 모두 로그아웃) 그 브라우저에 남은 화면 저장본(IndexedDB·버전 키)을 지웁니다.
+- **원장 사본이 `state/` 밖에 생기는 때** — 자동 재구축(확장 백필 뒤 등) 동안 **홈 폴더**에 원장 약 3배 + 2GB 의 임시 사본(`~/tj_shadow_extrebuild_<시각>/`, 권한 700)과
+  진단 보고서(`~/tj_shadow_extrebuild_<시각>.report.json`, 최근 3개)가 생겼다가 사본은 끝나면 지워집니다. 다른 사용자와 같이 쓰는 컴퓨터이거나 홈 폴더가 작으면
+  `config.json` 의 `"backfill": {"rebuild_dir": "/내/디스크/경로"}` 로 옮기세요([백필 · 재구축](#백필--재구축--재백필)).
 
 ## 고급 설정
 
@@ -607,8 +611,10 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 | `TJ_TG_API` | 텔레그램 공식 주소 | 시험용 — `http://127.0.0.1:<포트>` 만 받음(그 밖의 주소는 무시) |
 | `TJ_CONFIG_FAIL_WAIT` | 45 | `config.json` 이 깨졌을 때 pm2 아래에서 다시 켜지기 전 기다리는 초(최대 600) |
 | `TJ_RUNNER_CHECK_SEC` · `TJ_RUNNER_SETTLE_SEC` | 15 · 10 | 유닛 러너가 설정 바뀜을 보는 간격 · 바뀐 뒤 기다렸다 다시 켜는 초 |
+| `TJ_RUNNER_MAX_MB_<유닛>`(예: `TJ_RUNNER_MAX_MB_WEB`) | web 3072 · 그 밖 0(끔) | 유닛 러너가 띄운 프로세스의 메모리(RSS, MB) 상한 — 검사(15초) 2번 연속 넘으면 정상 종료 뒤 다시 켬(데이터 손실 없음 · 상태 패널에 '메모리 상한 넘어 다시 시작' 한 줄). `0` = 끔 · 256 미만은 256. 환경변수 → `.env` → `config.json` 의 `runner.max_mb.<유닛>` 순서로 읽고, 바꾸면 다음 검사부터(재시작 불필요). 화면 계산 자식·검색 프로세스는 합치지 않음. pm2 `max_memory_restart` 는 러너 유닛엔 효과가 없어요(러너 프로세스만 잼) |
 | `TJ_DEPADDR_PACE` | 0.4 | 거래소 입금주소 자동 수집의 콜 간격(초) |
 | `TJ_REBUILD_FX_CALLS` | 3000 | 재계산 도구(`tools/rebuild2.py`)가 과거 환율을 받는 호출 상한 |
+| `TJ_TENSOR_KEY` | 없음 | 자리만 — Solana NFT 텐서(Tensor) 바닥가는 아직 구현 전이라 넣어도 쓰지 않아요(NFT 진단 응답에 '키 있음' 여부만 · Solana 바닥가는 매직에덴 공개 API) |
 | `TJ_DEMO` · `TJ_DEMO_STATE` · `TJ_PORT` | 없음 | 데모 전용(`bash tools/setup.sh --demo` 가 씀) — 데모 임시 폴더 · 데모 포트 |
 | `TJ_ALLOW_NEW_LEDGER` | (러너가 자동) | 원장 파일이 없을 때 새로 만들기 허락 — `src/core.py` 를 러너 없이 직접 띄울 때만 `1` |
 
@@ -621,6 +627,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 |---|---|---|
 | `build_proc` | `auto` | 위 `TJ_BUILD_PROC` 와 같은 값(`auto`·`off`·`fork`) — 환경변수·`.env` 에 없을 때 |
 | `backup.keep_db` | 3 | 원장 정기 백업(하루 1번, `state/backups/`) 보관 수(1~30) |
+| `runner.max_mb.<유닛>` | web 3072 · 그 밖 0 | 위 `TJ_RUNNER_MAX_MB_<유닛>` 과 같은 값(환경변수·`.env` 에 없을 때) — 예: `"runner": {"max_mb": {"web": 2048}}` |
+| `health.t.build_p95_warn_s` | 별도 프로세스 60 · 웹 안 10 | 상태 패널 '웹 빌드 느림' 문턱(최근 빌드 소요 p95, 초) — 값을 넣으면 빌드 방식과 상관없이 그 값 |
 | `backfill.auto_rebuild` | 켜짐 | `false` 면 자동 재구축 끔([백필 · 재구축](#백필--재구축--재백필)) |
 | `backfill.rebuild_dir` | `~`(홈) | 자동 재구축 임시 사본 위치(원장 약 3배 + 2GB · `state/`·저장소 밖이어야 함) |
 | `backfill.rebuild_keep_recent` · `rebuild_keep_oldest` | 1 · true | 교체 전 원장 보존본 수(최근 N개) · 가장 오래된 정상본 남기기 — 디스크가 작으면 `0`·`false` |
@@ -642,12 +650,12 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 python3 tests/run_all.py
 ```
 
-설치·키·네트워크 없이 표준 라이브러리만으로 돕니다(합성 데이터 · 임시 폴더 · 바깥 연결 차단). 검색 해석·악의적 입력, 알림 분류·묶음·문구, 분석 계산 예제(안 팔았다면·습관·흐름 지도·하루 요약 그림·문장 검색·격리 자산 분리), 수집→원장(시각 보강·WAL 정리), NFT 시세, 레버리지·청산 감시, 재계산 승인을 확인합니다 — 특히 확인하지 못한 것을 '없음·해소·도착'으로 확정하지 않는지 봅니다. 웹 로그인 경로(쿠키 없이 401 · 다른 Host 421 · CSRF 없이 403 · 연속 실패 잠금)도 실제 HTTP 로 확인합니다. 하나라도 실패하면 종료 코드 1입니다.
+설치·키·네트워크 없이 표준 라이브러리만으로 돕니다(합성 데이터 · 임시 폴더 · 바깥 연결 차단). 검색 해석·악의적 입력, 알림 분류·묶음·문구, 분석 계산 예제(안 팔았다면·습관·흐름 지도·하루 요약 그림·문장 검색·격리 자산 분리), 수집→원장(시각 보강·WAL 정리), NFT 시세, 레버리지·청산 감시, 재계산 승인, 선물 영수증 누적 포지션(분할·반전·강제청산 누락), 빌드 분리 교착 판정, 노드 키 한도(키를 설정 파일에 안 씀), 체인 끄기 추천·자동 끄기, 화면 스냅숏 저장·복원을 확인합니다 — 특히 확인하지 못한 것을 '없음·해소·도착'으로 확정하지 않는지 봅니다. 웹 로그인 경로(쿠키 없이 401 · 다른 Host 421 · CSRF 없이 403 · 연속 실패 잠금)도 실제 HTTP 로 확인합니다. 하나라도 실패하면 종료 코드 1입니다.
 GitHub 에 올리면 `.github/workflows/tests.yml` 이 Python 3.9 · 3.11 · 3.13 에서 전체 파일 문법 검사(`py_compile`)와 같은 명령을 돌립니다.
 
 ## 라이선스
 
-라이선스 미정 — 정해지기 전까지는 저작권자 허락 없이 재배포·수정 배포를 할 수 없습니다.
+[MIT 라이선스](LICENSE) — 자유롭게 쓰고 고치고 배포할 수 있어요(저작권 표시·라이선스 문구 유지).
 이 소프트웨어는 있는 그대로 제공되며 손익·세금 계산의 정확성을 보증하지 않습니다.
 
 ---
@@ -729,7 +737,7 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Security:** binds to 127.0.0.1 by default (optional Tailscale IP; public IPs and 0.0.0.0 are refused); password login is on
   by default, but still never expose the port directly to the internet; every POST needs a same-origin `Origin` header and a CSRF token; secrets stay in `.env`
   (mode 600) — except the unverified broker adapters, whose secrets live in `config.json`, so `config.json` is kept at mode 600 as well (setup.sh and tj-web tighten it).
-  The browser itself loads fonts from Google Fonts and coin logos/token lists from jsDelivr (logo URLs contain chain, contract and symbol — turn
+  Fonts (IBM Plex, SIL OFL 1.1) are served from the repository (`web/v2/fonts/`, no external request); the browser itself loads coin logos/token lists from jsDelivr (logo URLs contain chain, contract and symbol — turn
   logos off in Settings › 화면 · 표시 › 토큰 로고); a Cloudflare proxy may inject its Web Analytics script — disable that in Cloudflare if unwanted.
   Advanced environment variables and config keys are listed under [고급 설정](#고급-설정); release notes are in [CHANGELOG.md](CHANGELOG.md).
 - **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled. Only an
@@ -740,4 +748,4 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
   same command on Python 3.9, 3.11 and 3.13.
-- **License:** not decided yet (all rights reserved until then). Provided as is; PnL and tax figures are an aid, not advice.
+- **License:** [MIT](LICENSE). Provided as is; PnL and tax figures are an aid, not advice.

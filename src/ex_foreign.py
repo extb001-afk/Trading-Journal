@@ -3584,6 +3584,8 @@ def _fut_bybit(env):
                       {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                        "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig})
         if d.get("retCode") != 0:
+            if str(d.get("retCode")) == "10006":
+                raise RateLimited(f"bybit 10006 {_xm(d.get('retMsg'))}", 429)
             raise RuntimeError(f"bybit {d.get('retCode')} {_xm(d.get('retMsg'))}")
         return d.get("result") or {}
 
@@ -3819,12 +3821,20 @@ def _px_bb_window(bpage, cur, slot, path, s, e, conv, rows, budget):
             params["cursor"] = cursor
         time.sleep(PACE)
         budget[0] += 1
-        got, nxt = bpage(path, params)
+        try:
+            got, nxt = bpage(path, params)
+        except RateLimited:
+            raise
+        except Exception:
+            if cursor:
+                cur.pop(slot, None)
+            raise
         rows.extend(conv(got))
-        if not nxt:
+        if not nxt or not got:
             cur.pop(slot, None)
             return s, e
-        if not got or nxt in seen:
+        if nxt in seen:
+            cur.pop(slot, None)
             raise RuntimeError("bybit 선물 페이지 커서 미전진")
         seen.add(nxt)
         cursor = nxt
@@ -3903,10 +3913,31 @@ def _px_okx(bills, raw, now_ms):
     rows = fut_rcpt.rows_okx(raw)
     try:
         if not cur.get("bf_done") or cur.get("bf_v") != PX_OKX_BF_V:
-            got = list(bills("/api/v5/account/bills-archive", {"begin": str(now_ms - 89 * DAY * 1000), "end": str(now_ms - 6 * DAY * 1000)}))
-            rows += fut_rcpt.rows_okx(got)
-            cur["bf_done"], cur["bf_v"] = True, PX_OKX_BF_V
-            log.info("okx 선물 가격 과거 채움 끝(bills %d건)", len(got))
+            job = cur.get("bf_job") if isinstance(cur.get("bf_job"), dict) else {}
+            b9, e9, a9 = fut_rcpt.num(job.get("b")), fut_rcpt.num(job.get("e")), job.get("after")
+            if job.get("v") != PX_OKX_BF_V or b9 is None or e9 is None or not 0 < b9 < e9:
+                b9, e9, a9 = now_ms - 89 * DAY * 1000, now_ms - 6 * DAY * 1000, None
+            a9 = fut_rcpt.safe(a9, 40) if isinstance(a9, str) else ""
+            ex9 = dict({"begin": str(int(b9)), "end": str(int(e9))}, **({"after": a9} if a9 else {}))
+            got, last9, done9 = [], a9, False
+            try:
+                for b in bills("/api/v5/account/bills-archive", ex9):
+                    got.append(b)
+                    if isinstance(b, dict) and b.get("billId"):
+                        last9 = fut_rcpt.safe(b.get("billId"), 40) or last9
+                    if len(got) >= PX_CALLS_MAX * 100:
+                        break
+                else:
+                    done9 = True
+            finally:
+                rows += fut_rcpt.rows_okx(got)
+                if done9:
+                    cur["bf_done"], cur["bf_v"] = True, PX_OKX_BF_V
+                    cur.pop("bf_job", None)
+                    log.info("okx 선물 가격 과거 채움 끝(bills %d건)", len(got))
+                else:
+                    cur["bf_job"] = {"v": PX_OKX_BF_V, "b": int(b9), "e": int(e9), "after": last9}
+                    log.info("okx 선물 가격 과거 채움 이어서(이번 bills %d건 · 다음 주기)", len(got))
         miss = {k: v for k, v in (cur.get("ct_miss") or {}).items() if isinstance(v, (int, float)) and v > now_ms - DAY * 1000}
         need = sorted({r["symbol"] for r in rows + list(st.get("rows") or []) if isinstance(r, dict) and r.get("qty_ct") and r.get("symbol") not in ct and r.get("symbol") not in miss})
         for iid in need[:PX_OKX_CT_MAX]:

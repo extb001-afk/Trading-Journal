@@ -23,10 +23,12 @@ _COIN_RE = re.compile(r"[-_/]?(USDT|USDC|USD)([-_]?(SWAP|PERP|M))?$", re.I)
 _SAFE_RE = re.compile(r"[^\w.:/-]")
 
 OKX_OPEN = {"3": "LONG", "4": "SHORT", "206": "LONG", "207": "SHORT"}
-OKX_CLOSE = {"5": "LONG", "6": "SHORT", "100": "LONG", "101": "SHORT", "104": "LONG", "105": "SHORT", "208": "LONG", "209": "SHORT"}
-OKX_LIQ = {"100", "101", "104", "105"}
-OKX_NET = {"1": ("LONG", "SHORT"), "2": ("SHORT", "LONG")}
-OKX_BF_V = 2
+OKX_CLOSE = {"5": "LONG", "6": "SHORT", "100": "LONG", "101": "SHORT", "102": "SHORT", "103": "LONG", "104": "LONG", "105": "SHORT",
+             "106": "SHORT", "107": "LONG", "125": "LONG", "126": "SHORT", "127": "SHORT", "128": "LONG", "208": "LONG", "209": "SHORT"}
+OKX_LIQ = {"100", "101", "102", "103", "104", "105", "106", "107"}
+OKX_NET = {"1": ("LONG", "SHORT"), "2": ("SHORT", "LONG"), "204": ("LONG", "SHORT"), "205": ("SHORT", "LONG")}
+OKX_NET_ANYTYPE = {"204", "205"}
+OKX_BF_V = 3
 
 
 def num(v):
@@ -164,8 +166,8 @@ def rows_okx(bills):
             continue
         st = str(b.get("subType") or "")
         role, sd = ("close", OKX_CLOSE[st]) if st in OKX_CLOSE else ("open", OKX_OPEN[st]) if st in OKX_OPEN else (None, None)
-        if (role is None and st in OKX_NET and str(b.get("type") or "") == "2" and str(b.get("instType") or "SWAP") == "SWAP"
-                and str(b.get("instId") or "").upper().endswith("-SWAP")):
+        if (role is None and st in OKX_NET and (str(b.get("type") or "") == "2" or st in OKX_NET_ANYTYPE)
+                and str(b.get("instType") or "SWAP") == "SWAP" and str(b.get("instId") or "").upper().endswith("-SWAP")):
             p9 = num(b.get("pnl"))
             role, sd = ("close", OKX_NET[st][1]) if p9 else ("open", OKX_NET[st][0])
         if role is None:
@@ -345,7 +347,10 @@ def _ts_s(ms):
 CEX_KEYS = ("binance", "bybit", "okx")
 WALK_TOL = 1e-9
 REV_TOL = 1e-4
+AVG_TOL = 2e-3
+ANCHOR_WORK = (16, 1024)
 ZERO_TOL = 1e-6
+FUND_H_MAX = 0.03
 PX_RATIO_MAX = 10.0
 _FB = object()
 
@@ -364,26 +369,57 @@ def _pair(uid):
     return u[:-2] if len(u) > 2 and u[-2:] in (":p", ":f") else None
 
 
+def _row_entry(r, q):
+    e = pnum(r.get("entry_px"))
+    if e or r.get("fee_incl"):
+        return e
+    return _derive_entry(r.get("side"), num(r.get("px")), num(r.get("pnl")), q)
+
+
 def _walk(rows, qty_of):
     qs = [qty_of(r) for r in rows]
     if not rows or any(q is None or q <= 0 for q in qs):
         return list(rows), {}
     eps = WALK_TOL * max(qs)
-    st = {"LONG": [0.0, 0.0, None, True], "SHORT": [0.0, 0.0, None, True]}
+    st = {"LONG": [0.0, 0.0, None, True, [], 0.0], "SHORT": [0.0, 0.0, None, True, [], 0.0]}
     out, ent = [], {}
+    work = [ANCHOR_WORK[0] * len(rows) + ANCHOR_WORK[1]]
 
     def flat(sd):
-        st[sd][:] = [0.0, 0.0, None, True]
+        st[sd][:] = [0.0, 0.0, None, True, [], 0.0]
 
     def add(sd, q, p, ts):
         s = st[sd]
         if s[0] <= eps:
-            s[:] = [0.0, 0.0, ts, True]
+            s[:] = [0.0, 0.0, ts, True, [], 0.0]
+        raw = q * s[5] / s[0] if s[0] > eps and s[5] > 0 else q
         s[0] += q
         if p:
             s[1] += p * q
         else:
             s[3] = False
+        s[4].append((ts, raw, p))
+        s[5] += raw
+
+    def anchor(sd, q, ep):
+        s = st[sd]
+        lots, Q, PQ, best = s[4], 0.0, 0.0, None
+        f = s[0] / s[5] if s[5] > 0 else 0.0
+        if f > 0 and len(lots) <= work[0]:
+            work[0] -= len(lots)
+            for k in range(len(lots) - 1, -1, -1):
+                t9, q9, p9 = lots[k]
+                if not p9:
+                    break
+                Q += q9
+                PQ += p9 * q9
+                if Q * f + eps >= q and abs(ep / (PQ / Q) - 1) <= AVG_TOL:
+                    best = (k, Q, PQ)
+        if best:
+            k, Q, PQ = best
+            s[:] = [Q * f, PQ * f, lots[k][0], True, lots[k:], Q]
+        else:
+            s[:] = [s[0], ep * s[0], None, True, [(None, s[0], ep)], s[0]]
 
     def avg(sd):
         s = st[sd]
@@ -397,6 +433,9 @@ def _walk(rows, qty_of):
             s[1] = e * s[0]
         if s[0] <= eps:
             flat(sd)
+        elif s[5] > 0 and s[0] < s[5] * 1e-12:
+            s[4][:] = [(s[2], s[0], e or (s[1] / s[0] if s[0] else None))]
+            s[5] = s[0]
 
     sq = [_seq(r) for r in rows]
     by_id = all(x is not None for x in sq)
@@ -439,6 +478,9 @@ def _walk(rows, qty_of):
             flat(sd)
             out.append(r)
             continue
+        e, ep = avg(sd), (None if r.get("fee_incl") else _row_entry(r, q))
+        if e and ep and abs(ep / e - 1) > AVG_TOL:
+            anchor(sd, q, ep)
         ent[id(r)] = st[sd][2]
         take(sd, q)
         out.append(r)
@@ -513,7 +555,7 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
     for v in opens.values():
         v.sort(key=lambda r: r["ts_ms"])
 
-    def px_of(ex, r, amt):
+    def px_of(ex, r, amt, ets=None):
         q = qty_of(ex, r)
         xp = num(r.get("px"))
         if ex == "okx":
@@ -521,9 +563,9 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         else:
             ep, src = num(r.get("entry_px")), (r.get("entry_src") or "none")
         if not xp or not q:
-            return r["side"], xp, None, q, "none", ("계약 크기 모름" if ex == "okx" and not q else "가격 칸 없음")
+            return r["side"], xp, None, q, "none", ("계약 크기 모름" if ex == "okx" and not q else "가격 칸 없음"), 0.0
         if not ep:
-            return r["side"], xp, None, q, "none", "진입가 없음"
+            return r["side"], xp, None, q, "none", "진입가 없음", 0.0
         sg = 1 if r["side"] == "LONG" else -1
         gross = (xp - ep) * q * sg
         want = amt
@@ -531,10 +573,14 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             want = amt + abs(num(r.get("fee_open")) or 0) + abs(num(r.get("fee_close")) or 0)
         tol = max(abs(want) * PX_TOL_PCT / 100, abs(xp * q) * 0.0002, 0.01)
         if max(ep, xp) / min(ep, xp) > PX_RATIO_MAX:
-            return r["side"], None, None, q, "none", "진입·청산가 10배 넘게 차이(가격 칸 의심)"
+            return r["side"], None, None, q, "none", "진입·청산가 10배 넘게 차이(가격 칸 의심)", 0.0
         if abs(gross - want) > tol:
-            return r["side"], None, None, q, "none", "거래소 값끼리 안 맞음(가격 × 수량 ≠ 정산)"
-        return r["side"], xp, ep, q, src, None
+            nh = int(r["ts_ms"]) // 3600000 - int(ets) // 3600000 if isinstance(ets, (int, float)) and ets > 0 else 0
+            fund = want - gross
+            if not (src == "exchange" and nh >= 1 and abs(fund) <= abs(ep * q) * FUND_H_MAX * nh):
+                return r["side"], None, None, q, "none", "거래소 값끼리 안 맞음(가격 × 수량 ≠ 정산)", 0.0
+            return r["side"], xp, ep, q, src, None, fund
+        return r["side"], xp, ep, q, src, None, 0.0
 
     def pend_why(ex, t):
         d = px.get(ex) or {}
@@ -580,8 +626,9 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             hit = uidmap.get(safe(r.get("uid")))
             if hit and hit[0] == ex:
                 row = hit[1]
+        fund9 = 0.0
         if row is not None:
-            side, xp, ep, q, src, why = px_of(ex, row, a)
+            side, xp, ep, q, src, why, fund9 = px_of(ex, row, a, ent.get(id(row)))
         else:
             side = xp = ep = q = None
             src = "none"
@@ -597,7 +644,8 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         g = groups.get(gk)
         if g is None:
             g = groups[gk] = {"ex": ex, "sym": sym, "ts": [], "pnl": 0.0, "pnlKrw": 0.0, "n": 0, "q": 0.0, "xq": 0.0, "eq": 0.0,
-                              "side": side, "src": src, "why": why, "lev": None, "liq": False, "feeIncl": False, "feeInfo": 0.0, "ent": []}
+                              "side": side, "src": src, "why": why, "lev": None, "liq": False, "feeIncl": False, "feeInfo": 0.0, "ent": [],
+                              "fund": 0.0}
             order.append(gk)
         g["ts"].append(t)
         pk9 = _pair(r.get("uid"))
@@ -617,6 +665,7 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             g["q"] += q
             g["xq"] += xp * q
             g["eq"] += ep * q
+            g["fund"] += fund9
         elif g["src"] != "none":
             g["src"], g["why"] = "none", why
     ms_of = {}
@@ -647,9 +696,16 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         if c is None:
             c = coins[c0] = {"coin": c0, "label": c0 + " 무기한", "usd": 0.0, "krw": 0.0, "realized": 0.0, "fee": 0.0, "funding": 0.0,
                              "realizedKrw": 0.0, "feeKrw": 0.0, "fundingKrw": 0.0,
-                             "closes": 0, "wins": 0, "losses": 0, "venues": {}, "trades": [], "funding_l": [], "syms": set()}
+                             "closes": 0, "wins": 0, "losses": 0, "venues": {}, "trades": [], "funding_l": [], "syms": set(), "exs": {}}
         c["syms"].add(sym)
         return c
+
+    def cex(c, ex):
+        x = c["exs"].get(ex)
+        if x is None:
+            x = c["exs"][ex] = {"usd": 0.0, "krw": 0.0, "realized": 0.0, "fee": 0.0, "funding": 0.0, "realizedKrw": 0.0, "feeKrw": 0.0,
+                                "fundingKrw": 0.0, "closes": 0, "priced": 0, "wins": 0, "losses": 0}
+        return x
 
     def venue(c, ex, sym, a):
         v = c["venues"].setdefault((ex, sym), {"exKey": ex, "ex": exn.get(ex, ex), "symbol": sym, "usd": 0.0, "n": 0})
@@ -667,6 +723,11 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
         f9 = "realized" if kd == "REALIZED" else "fee" if kd == "FEE" else "funding"
         c[f9] += a
         c[f9 + "Krw"] += k
+        x9 = cex(c, r.get("ex"))
+        x9["usd"] += a
+        x9["krw"] += k
+        x9[f9] += a
+        x9[f9 + "Krw"] += k
         v = venue(c, r.get("ex"), sym, a)
         if kd == "REALIZED":
             v["n"] += 1
@@ -703,16 +764,23 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
               "why": None if priced else (g["why"] or "가격 칸 없음")}
         if g["feeIncl"] and g["feeInfo"]:
             tr["feeInfo"] = round(g["feeInfo"], 6)
+        if priced and abs(g["fund"]) >= 5e-7:
+            tr["fundIncl"] = round(g["fund"], 6)
         c["trades"].append(tr)
         c["closes"] += 1
         x9 = exc.setdefault(g["ex"], [0, 0, 0])
         x9[0] += 1
+        y9 = cex(c, g["ex"])
+        y9["closes"] += 1
+        y9["priced"] += 1 if priced else 0
         if g["pnl"] > 0:
             c["wins"] += 1
             x9[1] += 1
+            y9["wins"] += 1
         elif g["pnl"] < 0:
             c["losses"] += 1
             x9[2] += 1
+            y9["losses"] += 1
         if not priced:
             u = unp.setdefault(g["ex"], {})
             u[tr["why"]] = u.get(tr["why"], 0) + 1
@@ -776,6 +844,9 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
                           "closes": c["closes"], "wins": c["wins"], "losses": c["losses"], "venues": vs,
                           "priced": {"n": sum(1 for x in c["trades"] if x["px"] != "none"), "of": len(c["trades"])},
                           "trades": trs, "tradesTotal": len(c["trades"]), "tradesTotalEx": tot_ex, "opens": ops[-OPENS_MAX:],
+                          "exStats": {ex: {**{k: (round(v) if k.endswith("Krw") or k == "krw" else round(v, 6)) for k, v in e.items() if isinstance(v, float)},
+                                           "closes": e["closes"], "wins": e["wins"], "losses": e["losses"], "priced": {"n": e["priced"], "of": e["closes"]}}
+                                      for ex, e in sorted(c["exs"].items(), key=lambda kv: str(kv[0]))},
                           "fundingRows": sorted(c["funding_l"], key=lambda x: x["ts"]),
                           "looseFee": round(sum(a for t, a, k, ex, sym, u in loose_fee if sym in c["syms"]), 6)})
     out_coins.sort(key=lambda c: (-abs(c["usd"]), c["coin"]))

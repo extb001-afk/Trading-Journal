@@ -58,8 +58,7 @@ def _write_private_json(path: str, obj):
 
 
 def _ro(path, immutable: bool = False):
-    q = "mode=ro&immutable=1" if immutable else "mode=ro"
-    return sqlite3.connect(f"file:{path}?{q}", uri=True, timeout=10)
+    return sqlite3.connect(common.sqlite_ro_uri(path, immutable=immutable), uri=True, timeout=10)
 
 
 def snapshot_from(baseline_dir: str, shadow_dir: str) -> tuple:
@@ -113,7 +112,7 @@ def snapshot_live(shadow_dir: str) -> tuple:
         for p in (base, base + "-wal", base + "-shm"):
             if os.path.exists(p):
                 os.remove(p)
-    src = sqlite3.connect(f"file:{LIVE_DB}?mode=ro", uri=True, timeout=30)
+    src = sqlite3.connect(common.sqlite_ro_uri(LIVE_DB), uri=True, timeout=30)
     tgt = sqlite3.connect(baseline)
     try:
         src.backup(tgt)

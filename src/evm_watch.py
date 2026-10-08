@@ -4372,6 +4372,15 @@ class RpcChainWatcher(RpcSynthMixin):
         self.sym_path = os.path.join(common.STATE_DIR, f"rpc_token_sym_{chain}.json")
         self.sym = common.read_json(self.sym_path, {})
         self.progress = bf_engine.progress("evm")
+        try:
+            jobs9 = self._bk_jobs()
+            if jobs9 or self.cursor.get("_hq"):
+                self.progress.update(f"{chain}:rpc", phase="extend", unit="blocks",
+                                     done=sum(max(0, int(j["done"]) - int(j["from"])) for j in jobs9.values()),
+                                     total=max(1, sum(max(0, int(j["to"]) - int(j["from"])) for j in jobs9.values())),
+                                     note="재기동 — 뒤 차선 이어서")
+        except (TypeError, ValueError, KeyError) as e9:
+            log.warning("%s 뒤 차선 진행률 기동 표시 실패(첫 사이클 뒤 표시): %s", chain, type(e9).__name__)
         self._pref = None
         self._txmeta = {}
         self._st_memo = {}

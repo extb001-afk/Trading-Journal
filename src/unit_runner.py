@@ -18,8 +18,63 @@ CHECK_SEC = float(os.environ.get("TJ_RUNNER_CHECK_SEC", "15"))
 SETTLE_SEC = float(os.environ.get("TJ_RUNNER_SETTLE_SEC", "10"))
 STOP_GRACE = 20
 
+DEFAULT_MAX_MB = {"web": 3072}
+MEM_FLOOR_MB = 256
+MEM_CHECK_N = 2
+MEM_KEEP_S = 86400
+
 log = common.setup_logging("tj-runner")
 _stop = {"sig": None}
+_MEM = {"restarts": [], "last": None, "rss_mb": None, "max_mb": 0}
+
+
+def max_mb(unit, env=None, cfg=None) -> int:
+    key = f"TJ_RUNNER_MAX_MB_{str(unit).upper()}"
+    cands = [os.environ.get(key)]
+    try:
+        cands.append((env if env is not None else ss.read_env()).get(key))
+    except Exception:
+        pass
+    try:
+        rc = cfg if cfg is not None else ss.read_config_raw()
+        mm = (rc.get("runner") or {}).get("max_mb") if isinstance(rc, dict) and isinstance(rc.get("runner"), dict) else None
+        cands.append(mm.get(unit) if isinstance(mm, dict) else None)
+    except Exception:
+        pass
+    for v in cands:
+        if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
+            continue
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            continue
+        if n <= 0:
+            return 0
+        return max(MEM_FLOOR_MB, n)
+    return int(DEFAULT_MAX_MB.get(unit, 0))
+
+
+def rss_mb(pid):
+    try:
+        with open(f"/proc/{pid}/status", "r", encoding="ascii", errors="replace") as f:
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    return int(ln.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(int(pid))], capture_output=True, text=True, timeout=5).stdout.strip()
+        return int(out.split()[0]) // 1024 if out else None
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+def _mem_view(now=None):
+    now = time.time() if now is None else now
+    _MEM["restarts"] = [t for t in _MEM["restarts"] if now - t < MEM_KEEP_S]
+    if not _MEM["max_mb"] and not _MEM["restarts"]:
+        return None
+    return {"max_mb": _MEM["max_mb"], "rss_mb": _MEM["rss_mb"], "restarts": list(_MEM["restarts"]), "last": _MEM["last"]}
 
 
 def _evaluate(unit):
@@ -32,6 +87,9 @@ def _evaluate(unit):
 
 def _beat(unit, **kw):
     try:
+        mv9 = _mem_view()
+        if mv9 is not None:
+            kw["mem"] = mv9
         common.atomic_write_json(os.path.join(common.STATE_DIR, f"runner_{unit}.json"),
                                  dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())))
     except Exception:
@@ -93,12 +151,22 @@ def main():
         _beat(unit, state="running", why="", fp=fp, child=p.pid)
         reason = None
         next_check = time.time() + CHECK_SEC
+        over9 = 0
         while _stop["sig"] is None:
             if p.poll() is not None:
                 reason = f"자식 종료 rc={p.returncode}"
                 break
             if time.time() >= next_check:
                 next_check = time.time() + CHECK_SEC
+                cap9 = max_mb(unit)
+                rss9 = rss_mb(p.pid) if cap9 else None
+                _MEM["max_mb"], _MEM["rss_mb"] = cap9, rss9
+                over9 = over9 + 1 if (cap9 and rss9 is not None and rss9 > cap9) else 0
+                if over9 >= MEM_CHECK_N:
+                    reason = f"메모리 상한 넘음(RSS {rss9:,}MB > 상한 {cap9:,}MB · {MEM_CHECK_N}번 연속) — 정상 종료 뒤 다시 시작"
+                    _MEM["restarts"].append(int(time.time()))
+                    _MEM["last"] = {"ts": int(time.time()), "rss_mb": rss9, "max_mb": cap9}
+                    break
                 r2, _w2, fp2 = _evaluate(unit)
                 if fp2 != fp and fp2 != "err":
                     _sleep(SETTLE_SEC)
@@ -111,6 +179,13 @@ def main():
         if _stop["sig"] is not None:
             _stop_child(p)
             break
+        if reason.startswith("메모리"):
+            log.warning("[%s] %s", unit, reason)
+            _beat(unit, state="restarting", why=reason, fp=fp)
+            _stop_child(p)
+            backoff = 5.0 if time.time() - started > 120 else min(60.0, backoff * 2)
+            _sleep(backoff)
+            continue
         log.info("[%s] %s", unit, reason)
         if reason.startswith("설정"):
             log.info("[%s] 정지 신호(SIGINT) 전송 — 이어지는 KeyboardInterrupt 트레이스백은 정상 종료 과정", unit)

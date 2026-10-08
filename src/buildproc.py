@@ -7,6 +7,7 @@ import logging
 import mmap
 import os
 import pickle
+import platform
 import select
 import signal
 import struct
@@ -20,6 +21,7 @@ log = logging.getLogger("tj")
 TIMEOUT_S = 900
 STALL_S = 180
 DEADLOCK_S = 3.0
+DEADLOCK_UNK_S = 20.0
 FORK_TRIES = 3
 FAIL_MAX = 3
 FAIL_PAUSE_S = 3600
@@ -134,20 +136,63 @@ def _proc_read_bytes(pid):
     return None
 
 
-def _proc_lockwait(pid):
+_FUTEX_NR = {"x86_64": 202, "amd64": 202, "aarch64": 98, "arm64": 98, "riscv64": 98}.get(platform.machine().lower())
+_FUTEX_WAIT_OPS = frozenset((0, 6, 9, 11, 13))
+
+
+def lock_obs(status_txt, wchan_txt, syscall_txt, futex_nr=None) -> dict:
+    th = stt = None
+    csw = None
+    for ln in (status_txt or "").splitlines():
+        try:
+            if ln.startswith("State:"):
+                stt = ln.split()[1]
+            elif ln.startswith("Threads:"):
+                th = int(ln.split()[1])
+            elif ln.startswith(("voluntary_ctxt_switches:", "nonvoluntary_ctxt_switches:")):
+                csw = (csw or 0) + int(ln.split()[1])
+        except (ValueError, IndexError):
+            continue
+    cand = th == 1 and stt == "S" and str(wchan_txt or "").strip().startswith("futex")
+    untimed = None
+    nr9 = _FUTEX_NR if futex_nr is None else futex_nr
+    parts = str(syscall_txt or "").split()
+    if cand and nr9 is not None and len(parts) >= 5:
+        try:
+            if int(parts[0]) == nr9 and (int(parts[2], 16) & 0x7F) in _FUTEX_WAIT_OPS:
+                untimed = int(parts[4], 16) == 0
+        except ValueError:
+            untimed = None
+    return {"cand": bool(cand), "untimed": untimed, "csw": csw}
+
+
+def lock_step(prev, obs, now):
+    if not isinstance(obs, dict) or not obs.get("cand") or obs.get("untimed") is False:
+        return None, False
+    csw = obs.get("csw")
+    if prev is None or csw != prev[1]:
+        prev = (now, csw)
+    lim = DEADLOCK_S if obs.get("untimed") else DEADLOCK_UNK_S
+    return prev, now - prev[0] >= lim
+
+
+def _read_txt(path):
     try:
-        th, stt = None, None
-        with open(f"/proc/{pid}/status", "r", encoding="ascii", errors="replace") as f:
-            for ln in f:
-                if ln.startswith("State:"):
-                    stt = ln.split()[1]
-                elif ln.startswith("Threads:"):
-                    th = int(ln.split()[1])
-        with open(f"/proc/{pid}/wchan", "r", encoding="ascii", errors="replace") as f:
-            wc = f.read().strip()
-    except (OSError, ValueError, IndexError):
+        with open(path, "r", encoding="ascii", errors="replace") as f:
+            return f.read()
+    except OSError:
         return None
-    return th == 1 and stt == "S" and wc.startswith("futex")
+
+
+def _proc_lockwait(pid):
+    st9 = _read_txt(f"/proc/{pid}/status")
+    wc9 = _read_txt(f"/proc/{pid}/wchan")
+    if st9 is None or wc9 is None:
+        return None
+    obs = lock_obs(st9, wc9, None)
+    if obs["cand"]:
+        obs = lock_obs(st9, wc9, _read_txt(f"/proc/{pid}/syscall"))
+    return obs
 
 
 def note_inproc():
@@ -610,7 +655,8 @@ def run(b):
         if r is not _DEADLOCK:
             return r
         _ST["deadlocks"] = _ST.get("deadlocks", 0) + 1
-        log.warning("빌드 자식이 fork 순간 물려받은 잠금에 걸림(스레드 하나 · futex 대기 %.0f초) — %s", DEADLOCK_S,
+        log.warning("빌드 자식이 fork 순간 물려받은 잠금에 걸림(스레드 하나 · 시간 제한 없는 futex 대기 %.0f초 — 대기 종류를 못 읽으면 %.0f초) — %s",
+                    DEADLOCK_S, DEADLOCK_UNK_S,
                     "곧바로 다시 fork(%d/%d)" % (i + 2, FORK_TRIES) if i + 1 < FORK_TRIES else "이번 빌드는 웹 안에서")
     _fail(f"자식 잠금 멈춤 {FORK_TRIES}번 연속(fork 순간 다른 스레드가 쥔 잠금)")
     return None
@@ -662,7 +708,7 @@ def _run_once(b):
         buf = bytearray()
         last_cpu, last_prog, why = None, time.time(), None
         last_rb = None
-        lock_since = None
+        lock9 = None
         killed9 = False
         deadlock9 = False
         while True:
@@ -690,9 +736,11 @@ def _run_once(b):
                 if last_rb is not None:
                     last_prog, moved9 = now, True
                 last_rb = rb9
-            lw9 = None if moved9 else _proc_lockwait(pid)
-            lock_since = (lock_since or now) if lw9 else None
-            if lock_since is not None and now - lock_since >= DEADLOCK_S:
+            if moved9:
+                lock9, dl9 = None, False
+            else:
+                lock9, dl9 = lock_step(lock9, _proc_lockwait(pid), now)
+            if dl9:
                 why, deadlock9 = "교착", True
             elif now - last_prog > STALL_S:
                 why = f"멈춤({STALL_S}초 진행 없음)"

@@ -1,18 +1,23 @@
 """Verification gate for automatic ledger window rebuilds."""
 import hashlib
 import json
+import os
 import sqlite3
 import sys
 from decimal import Decimal
 
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+import common
+
+
 def _ro(p):
     try:
-        c = sqlite3.connect(f"file:{p}?mode=ro", uri=True, timeout=30)
+        c = sqlite3.connect(common.sqlite_ro_uri(p), uri=True, timeout=30)
         c.execute("SELECT 1").fetchone()
         return c
     except sqlite3.OperationalError:
-        return sqlite3.connect(f"file:{p}?mode=ro&immutable=1", uri=True, timeout=30)
+        return sqlite3.connect(common.sqlite_ro_uri(p, immutable=True), uri=True, timeout=30)
 
 
 TABLES = {
@@ -125,7 +130,7 @@ def cmd_gates(db, bal_path=None, live=None):
             led_live = set()
             if live and os.path.exists(live):
                 try:
-                    c9 = sqlite3.connect(f"file:{live}?mode=ro", uri=True)
+                    c9 = sqlite3.connect(common.sqlite_ro_uri(live), uri=True)
                     try:
                         led_live = {r[0] for r in c9.execute("SELECT DISTINCT upper(a.symbol) FROM postings p JOIN assets a ON a.asset_id=p.asset_id"
                                                              " WHERE p.location='exchange:upbit'")}

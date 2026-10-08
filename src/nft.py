@@ -1751,7 +1751,7 @@ class Tracker:
                 res = d.get("result")
                 if str(d.get("status")) != "1":
                     msg = (str(res) if not isinstance(res, list) else "") + " " + str(d.get("message") or "")
-                    if "not supported for this chain" in msg or "upgrade your api plan" in msg.lower():
+                    if "not supported for this chain" in msg or "upgrade your api plan" in msg.lower() or "unsupported chain" in msg.lower():
                         return None, "unsupported"
                     if "no transactions found" in msg.lower() or (isinstance(res, list) and not res):
                         break

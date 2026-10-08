@@ -3,6 +3,44 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트 뒤에는 `pm2 restart ecosystem.config.js` 로 유닛을 다시 켜세요(바뀐 유닛만 다시 켜도 됩니다).
 
+## 2026-10-09 — 수정 재검증 반영
+
+**선물 영수증 진입 시각 보호 · 화면(글꼴 자체 제공·폰 일별 배치·원화 목표가) · 운영 안전장치 · 공개 시험 확대 · MIT**
+
+- **선물 영수증 — 진입 시각 보호** — 강제청산·ADL 이 기록에서 빠져도 뒤 거래가 옛 진입 시각을 물려받지 않아요. OKX 한 방향(net) 모드의 강제청산(102·103·106·107)·ADL(125~128)·블록 체결(204·205)을
+  청산·체결 행으로 받고, 청산의 진입가가 쌓아 온 진입 체결 평균과 0.2% 넘게 다르면 뒤쪽 진입 묶음으로 다시 세워요(맞는 묶음이 없으면 '진입 시각 모름').
+  부분 청산은 진입 묶음 수량도 같이 줄이고, 다시 세우기 작업량에는 상한이 있어요. 바이빗 청산 기록(주문 단위 합산)은 이 평균 검사에서 빠져요.
+  업데이트 뒤 OKX 는 최근 3개월을 한 번 더 받아요(한 주기 20쪽까지 · 받은 만큼 저장하고 이어 받음).
+- **선물 영수증 — 바이빗 펀딩** — 바이빗 정산 손익에 보유 중 펀딩이 섞여 거래소 가격까지 버리던 것 → 진입 시각을 알고 펀딩 시각을 지났고 차이가 명목가 × 3% × 지난 펀딩 수 안이면 가격을 보여 주고 펀딩 몫(fundIncl)은 따로.
+- **선물 영수증 — 거래소 줄로 열기** — 일별 기록의 거래소 줄로 열면 '가격 n/m건' 배지·종목 칩(그 거래소 종목만)·칩 아래 네 칸·청산 목록·펀딩도 그 거래소 기준(서버 `coins[].exStats`) · 「전체 보기」로 전 거래소.
+- **선물 영수증 — 폰 머리** — 순위('그날 실현 기여 n위')는 둘째 줄 보조 글, 평균 보유는 한 줄.
+- **화면 — 글꼴 자체 제공** — IBM Plex Sans KR·Mono 를 `web/v2/fonts/` 에서 제공(unicode-range 조각 woff2 · 첫 화면은 쓰는 글자 조각만 받음 · SIL OFL 1.1) — Google Fonts 요청 없음 · CSP 에서 구글 주소 뺌.
+- **화면 — 폰 일별 기록** — 잔디 → 달력 → 그날 카드 → 그날의 기록 순서(날짜를 누르면 그날 카드로 부드럽게 이동). 데스크톱 배치는 그대로.
+- **화면 — 목표가·손절선 원화/달러** — '지금 팔면?'·매매일지 계획 시트의 목표가·손절선을 ₩/$ 칩으로 입력(다른 통화 환산값 표시 · 저장·감시·알림은 달러).
+  원화 입력은 지금 환율로 바꿔 저장하고, 손대지 않은 기존 값은 원래 달러 그대로예요. 실제 환율을 못 받았을 때는 달러로만 입력해요. 감시 카드·보유 펼침 줄도 원화 화면이면 ≈₩ 로 보여요.
+- **화면 — 대시보드 오른쪽 열** — 자체 스크롤을 없애 페이지를 내리면 끝까지 보여요(열 전체가 화면에 들어갈 때만 따라 내려옴).
+- **화면 — 습관·머리 줄·그날 카드** — 비교할 시간대가 하나뿐이거나 비율이 같으면 '가장 잘/안 맞는 때' 대신 중립 안내 · 641~1100px 머리 줄에 검색 돋보기 ·
+  남은 시간 표시 3곳 한국 시간 · 그날 카드 큰 숫자를 눌러 전체 금액(숨김·랜덤값 유지) · 자동 매칭 칩 글은 서버가 따로 보냄 · 덮여 안 쓰이던 서랍 CSS 정리.
+- **운영** — 설정에서 지운 지갑 이름도 재시작 없이 반영 · 화면 계산 자식의 정상 대기(시간 제한 있는 대기)를 교착으로 오판하지 않음 ·
+  바이빗 진입 체결·청산 손익 과거 채움이 만료·무효 커서에서 멈추지 않음(레이트 한도 retCode 10006 은 커서 유지) · SQLite 메모리 통계 끄기를 파이썬 쪽에서 확인해 '끔/못 끔/확인 불가'로 기록 ·
+  유닛 러너 메모리 상한(tj-web 기본 3GB · `TJ_RUNNER_MAX_MB_<유닛>` · 0 = 끔) · tools 원장 경로의 `# ? %` 처리 · 옛 화면 경로(/classic·/futures)는 파일이 없으면 새 화면으로 ·
+  이더스캔 'unsupported chainid' 도 미지원으로 처리.
+- **상태 패널** — '원장 음수 보유'가 과거 기록을 넓히는 도중 늦게 들어온 옛 거래 때문이면 '재계산 대기' 설명을 붙여요(경고는 그대로 — 재계산 뒤에도 남으면 빠진 입금 점검).
+  EVM 수집기가 재시작돼도 진행 중인 과거 기록 넓히기를 원장 자동 재계산이 '끝남'으로 착각하지 않아요.
+- **시험** — 공개 시험 추가: 선물 영수증(누적 포지션·분할·반전·강제청산 누락·펀딩) · 빌드 분리(교착 판정·폴백) · 노드 키(무료 80%·유료 비율·키를 설정 파일에 안 씀) ·
+  화면 스냅숏(버전 키·델타·저장·복원) · 체인 끄기(추천 기준·잠금·자동 끄기 스위치·시세 장애·자동 체인 30일 유예) — 전체 1,300건 넘게.
+- **문서·라이선스** — 재구축 때 원장 임시 사본이 `state/` 밖(홈 폴더 · 원장 3배+2GB · `backfill.rebuild_dir` 로 변경)에 생긴다는 안내 · 고급 설정에 `TJ_TENSOR_KEY`·`health.t.build_p95_warn_s`·러너 메모리 상한 ·
+  라이선스 = MIT(`LICENSE`).
+
+**English** — Re-verification fixes (2026-10-09). Futures receipts: a missing liquidation/ADL no longer makes later trades inherit an old entry time (OKX one-way liquidation 102·103·106·107,
+ADL 125–128 and block trades are now rows; a close whose entry price differs from the running entry average by more than 0.2% re-anchors to the matching recent entries, otherwise
+"entry time unknown"; partial closes shrink entry lots; bounded work). Bybit closes that include funding keep the exchange price (funding shown separately). Opening a receipt from an
+exchange row scopes the badge, coin chips, tiles and close list to that exchange ("show all" for every exchange). UI: IBM Plex fonts are served from the repo (no Google Fonts),
+phone daily view puts the calendar first, target/stop inputs accept KRW or USD (stored in USD; USD only when no live FX rate), the dashboard right column no longer scrolls on its own,
+habits only name a "best time" when there is something to compare. Ops: cleared wallet names apply without restart, the build child no longer mistakes timed waits for a deadlock,
+Bybit cursors recover from expired/invalid cursors (rate limit 10006 keeps the cursor), SQLite memory-stats off is verified, a runner memory cap (tj-web 3 GB by default), negative
+ledger holdings caused by a running history extension are explained, and restarting the EVM collector no longer lets the ledger rebuild mid-extension. More public tests (1,300+). License: MIT.
+
 ## 2026-10-08 저녁 — 외부 검토 반영
 
 **선물 영수증 가격·진입 시각 · 화면 다듬기 · 상태 전송 304 · 운영 안전장치**

@@ -279,11 +279,20 @@ _V2_FILES = {"index.html": "text/html; charset=utf-8",
              "wow.js": "application/javascript; charset=utf-8"}
 
 
+V2_FONT_DIR = os.path.join(V2_DIR, "fonts")
+_V2_FONT_RE = re.compile(r"[a-z]{1,16}-[0-9]{3}-[0-9a-f]{12}\.woff2")
+
+
 def _ui_route(path: str):
     if path in ("/v2", "/v2/", "/v2/index.html") or (UI_DEFAULT == "v2" and path in ("/", "/index.html")):
         return os.path.join(V2_DIR, "index.html"), _V2_FILES["index.html"]
     if path.startswith("/v2/") and path[4:] in _V2_FILES:
         return os.path.join(V2_DIR, path[4:]), _V2_FILES[path[4:]]
+    if path.startswith("/v2/fonts/"):
+        n9 = path[len("/v2/fonts/"):]
+        ct9 = "text/css; charset=utf-8" if n9 == "plex.css" else "font/woff2" if _V2_FONT_RE.fullmatch(n9) else None
+        f9 = os.path.join(V2_FONT_DIR, n9) if ct9 else None
+        return (f9, ct9) if f9 and os.path.isfile(f9) else None
     if path == "/classic" and os.path.isfile(os.path.join(WEB_DIR, "index.html")):
         return os.path.join(WEB_DIR, "index.html"), "text/html; charset=utf-8"
     return None
@@ -298,9 +307,12 @@ _V2_VER_JS = ("health.js", "search.js", "wow.js", "setup.js")
 def _asset(fpath: str) -> dict:
     deps = [fpath]
     v2_index = os.path.normpath(fpath) == os.path.normpath(os.path.join(V2_DIR, "index.html"))
+    font_css = os.path.join(V2_FONT_DIR, "plex.css")
     if v2_index:
         deps.append(os.path.join(V2_DIR, "app.js"))
         deps += [os.path.join(V2_DIR, n) for n in _V2_VER_JS]
+        if os.path.isfile(font_css):
+            deps.append(font_css)
     key = tuple((os.stat(d).st_mtime_ns, os.stat(d).st_size) for d in deps)
     with _ASSETS_LOCK:
         ent = _ASSETS.get(fpath)
@@ -314,6 +326,9 @@ def _asset(fpath: str) -> dict:
         for n9 in _V2_VER_JS:
             a9 = _asset(os.path.join(V2_DIR, n9))
             raw = raw.replace(b'<script src="/v2/' + n9.encode() + b'"></script>', b'<script src="/v2/' + n9.encode() + b'?v=' + a9["hash"].encode() + b'"></script>', 1)
+        if deps[-1] == font_css:
+            fv9 = _asset(font_css)["hash"].encode()
+            raw = re.sub(rb"(['\"])/v2/fonts/plex\.css\1", lambda m9: m9.group(1) + b"/v2/fonts/plex.css?v=" + fv9 + m9.group(1), raw, count=1)
     h = hashlib.sha1(raw).hexdigest()[:16]
     a = {"raw": raw, "gz": websnap.gz(raw) if len(raw) >= 1024 else None, "etag": f'W/"{h}"', "hash": h}
     with _ASSETS_LOCK:
@@ -2798,6 +2813,28 @@ class StateBuilder:
         labs = [k for k, _ in sorted(chl.items(), key=lambda kv: (-kv[1], kv[0]))]
         return " · ".join(labs) if len(labs) <= 2 else " · ".join(labs[:2]) + f" 외 {len(labs) - 2}"
 
+    PREWIN_MAX = 20000
+
+    @staticmethod
+    def _prewin_pairs(conn, cap: int = None) -> set:
+        cap = StateBuilder.PREWIN_MAX if cap is None else cap
+        out = set()
+        try:
+            ks = conn.execute("SELECT k FROM meta WHERE k >= 'ext_prewindow_tx:' AND k < 'ext_prewindow_tx;' LIMIT ?", (int(cap),)).fetchall()
+            for (k9,) in ks:
+                parts = str(k9).split(":", 2)
+                if len(parts) != 3:
+                    continue
+                for g9, loc9 in conn.execute(
+                        "SELECT DISTINCT a.group_id, p.location FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
+                        " WHERE p.source_kind='chain_tx' AND p.source_ns=? AND p.source_id=?", (parts[1], parts[2])).fetchall():
+                    if g9 is not None:
+                        out.add((int(g9), loc9))
+        except Exception as e9:
+            log.warning("재계산 대기 표식 읽기 실패(원장 음수 보유 문구 구분 없이): %s", type(e9).__name__)
+            return set()
+        return out
+
     @staticmethod
     def _gsym(row) -> str:
         k9 = (row["gname"], row["symbol"])
@@ -2998,21 +3035,27 @@ class StateBuilder:
             return a9 if w.get("type") == "sol" else a9.lower()
         by_row, by_addr = {}, {}
         for w in raw9.get("wallets") or []:
-            if not isinstance(w, dict) or not w.get("address") or not w.get("label"):
+            if not isinstance(w, dict) or not w.get("address"):
                 continue
-            by_row.setdefault((w.get("type", "evm"), w.get("chain"), akey(w)), w["label"])
+            lab0 = w.get("label") if isinstance(w.get("label"), str) else ""
+            by_row.setdefault((w.get("type", "evm"), w.get("chain"), akey(w)), lab0)
             if w.get("type", "evm") in ("evm", "bsc_rpc"):
-                by_addr.setdefault(akey(w), w["label"])
-            elif w.get("type") == "sol":
-                by_addr.setdefault(akey(w), w["label"])
+                by_addr.setdefault(akey(w), lab0)
         n9 = 0
         for k9 in ("wallets", "_disabled_wallets"):
             for w in cfg9.get(k9) or []:
                 if not isinstance(w, dict) or not w.get("address"):
                     continue
-                lab9 = by_addr.get(akey(w)) if w.get("_auto") else by_row.get((w.get("type", "evm"), w.get("chain"), akey(w)))
-                if lab9 and lab9 != w.get("label"):
-                    w["label"] = lab9
+                key9 = akey(w) if w.get("_auto") else (w.get("type", "evm"), w.get("chain"), akey(w))
+                src9 = by_addr if w.get("_auto") else by_row
+                if key9 not in src9:
+                    continue
+                lab9 = src9[key9]
+                if lab9 != (w.get("label") or ""):
+                    if lab9 or w.get("_auto"):
+                        w["label"] = lab9
+                    else:
+                        w.pop("label", None)
                     n9 += 1
         pw9 = raw9.get("perp_wallets")
         if pw9 != cfg9.get("perp_wallets"):
@@ -8216,6 +8259,11 @@ class StateBuilder:
             neg_hold.append({"key": f"g{r9['gid']}", "sym": g9["sym"], "loc": loc9, "qty": float(r9["qty"]),
                              "usd": round(usd9, 2), "debt": bool(ex9 and (ex9, (g9["sym"] or "").upper()) in debt_sym9)})
         neg_hold.sort(key=lambda d9: d9["usd"])
+        if neg_hold:
+            pend9 = self._prewin_pairs(conn)
+            for n9 in neg_hold:
+                if (int(n9["key"][1:]), n9["loc"]) in pend9:
+                    n9["pend"] = True
 
         rate_fx = self.spot.rate or 1384
         hold_qty = {gid9: led_by_gid.get(gid9, Decimal(0)) + uncred_gid.get(gid9, Decimal(0))
@@ -8893,9 +8941,11 @@ class StateBuilder:
                 p90w9 = a9
                 break
         neg_nd9 = [n9 for n9 in neg_hold if not n9.get("debt") and n9["usd"] <= -NEG_DIAG_MIN_USD]
+        neg_pd9 = [n9 for n9 in neg_nd9 if n9.get("pend")]
         wd9 = {"ts": int(now),
                "neg": {"n": len(neg_nd9), "usd": round(sum(n9["usd"] for n9 in neg_nd9), 2),
-                       "top": [{k9: n9[k9] for k9 in ("sym", "loc", "usd")} for n9 in neg_nd9[:3]]},
+                       "top": [{k9: n9[k9] for k9 in ("sym", "loc", "usd")} | ({"pend": True} if n9.get("pend") else {}) for n9 in neg_nd9[:3]],
+                       "pend": {"n": len(neg_pd9), "usd": round(sum(n9["usd"] for n9 in neg_pd9), 2)}},
                "proof_div": list(self.spot.proof_div), "ex_dead": dict(self.spot.ex_dead), "ex_dead_held": dead_held9,
                "unpriced_held": diag_out["unpriced_held"],
                "gt": dict(self.spot.gt_stat), "ds": dict(self.spot.ds_stat), "goplus": dict(GOPLUS_STATUS, started=int(GOPLUS_T0)),
@@ -10200,9 +10250,11 @@ class StateBuilder:
                 hints.append({"kind": "sale_bid", "label": "토큰 세일 입찰 — 체결분은 수령 토큰(세일 로트)이 입찰액을 원가로 이어받음 · "
                                                             f"{len(o9.get('mtx') or ())}/{len(o9.get('rtx') or o9['txs'])}건"})
             elif o9.get("auto"):
+                nm9 = f"{len(o9.get('mtx') or ())}/{len(o9.get('rtx') or o9['txs'])}"
                 hints.append({"kind": "exchange_txid" if bas9 == ["txid"] else "exchange_auto",
+                              "chip": f"{o9['auto'][1]} 입금 자동 매칭 · {nm9}건",
                               "label": f"{o9['auto'][1]} 입금으로 자동 매칭(근거: " + " / ".join(OF_BASIS_KO.get(b9, b9) for b9 in bas9 or ["txid"])
-                              + f") · {len(o9.get('mtx') or ())}/{len(o9.get('rtx') or o9['txs'])}건 · "
+                              + f") · {nm9}건 · "
                               + ("창 이전 입금 · 원가 이관 없음" if o9.get("prewin") and o9["prewin"] >= len(o9.get("mtx") or ())
                                  else (f"원가 이관됨(창 이전 입금 {o9['prewin']}건 제외)" if o9.get("prewin") else "원가 이관됨"))})
             if "roundtrip" in bas9:
@@ -15198,7 +15250,7 @@ def _v2_csp(raw: bytes, key: str) -> str:
             continue
         hs.append("'sha256-" + base64.b64encode(hashlib.sha256(m9.group("b")).digest()).decode() + "'")
     c = ("default-src 'self'; script-src 'self' " + " ".join(dict.fromkeys(hs)) + "; "
-         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; "
+         "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "
          "img-src 'self' data: blob: https:; connect-src 'self' https://cdn.jsdelivr.net; "
          "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
     _V2_CSP.clear()
@@ -15902,6 +15954,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "note": "수집기가 다음 주기(≤1분)에 옛 구간을 가져오고, 끝나면 tj-core 가 원장을 자동 재구축합니다(≈4분 소비 정지)"})
 
     def _send_asset(self, fpath, ctype, query=""):
+        if ctype == "font/woff2":
+            with open(fpath, "rb") as f:
+                raw = f.read()
+            return self._send_bytes(200, raw, None, ctype, etag='W/"' + os.path.basename(fpath)[:-6] + '"', cache="private, max-age=31536000, immutable")
         a = _asset(fpath)
         if os.path.normpath(fpath) == os.path.normpath(os.path.join(V2_DIR, "index.html")):
             return self._send_v2_index(a)
@@ -16534,8 +16590,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_asset(ui9[0], ui9[1], query)
             if path == "/" or path == "/index.html":
                 self._send_asset(os.path.join(WEB_DIR, "index.html"), "text/html; charset=utf-8")
-            elif path == "/design_cex_preview.html":
-                return self._send_optional("design_cex_preview.html", "text/html; charset=utf-8")
+            elif path == "/classic":
+                self._send_bytes(302, b"", None, "text/plain; charset=utf-8", extra=(("Location", "/"),))
             elif path == "/support.js":
                 self._send_optional("support.js", "application/javascript; charset=utf-8")
             elif path == "/api/state":
@@ -16590,10 +16646,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _wallet_reload_view())
             elif path == "/api/outflow_candidates":
                 self._send_outflow_cands(query)
-            elif path == "/design_futures_preview.html":
-                self._send_optional("design_futures_preview.html", "text/html; charset=utf-8")
             elif path == "/futures":
-                self._send_optional("futures.html", "text/html; charset=utf-8")
+                if os.path.isfile(os.path.join(WEB_DIR, "futures.html")):
+                    self._send_optional("futures.html", "text/html; charset=utf-8")
+                else:
+                    self._send_bytes(302, b"", None, "text/plain; charset=utf-8", extra=(("Location", "/"),))
             elif path == "/api/futures":
                 self._send(200, futures_api_payload())
             elif path == "/api/leverage":
@@ -17752,7 +17809,9 @@ def main():
     common.ensure_dirs()
     ms9 = globals().get("_SQLITE_MEMSTAT_OFF")
     if ms9 is not None:
-        log.info("SQLite 메모리 통계 %s(빌드 자식 교착 방지 — fork 순간 다른 스레드가 쥔 전역 뮤텍스)", "끔" if ms9 else "못 끔(종전 — 교착이면 다시 fork)")
+        log.info("SQLite 메모리 통계 %s — %s(빌드 자식 교착 방지 — fork 순간 다른 스레드가 쥔 전역 뮤텍스)",
+                 "끔" if ms9 is True else ("끄기 시도함 · 적용 확인 불가" if ms9 == "unverified" else "못 끔(종전 — 교착이면 다시 fork)"),
+                 common.SQLITE_MEMSTAT_WHY[0] or "-")
     try:
         buildproc.sweep_tmp()
     except Exception as e9:

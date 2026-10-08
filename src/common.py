@@ -127,20 +127,84 @@ def cpu_plan() -> dict:
     return p
 
 
-def sqlite_memstatus_off() -> bool:
+SQLITE_MEMSTAT_WHY = [""]
+
+
+def _sqlite_lib():
+    import ctypes
+    import ctypes.util
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec("_sqlite3")
+        origin = getattr(spec, "origin", None) if spec is not None else None
+    except (ImportError, ValueError):
+        origin = None
+    try:
+        if origin == "built-in":
+            lib = ctypes.CDLL(None)
+            if hasattr(lib, "sqlite3_config"):
+                return lib, "builtin"
+        elif origin and os.path.isfile(origin):
+            lib = ctypes.CDLL(origin)
+            if hasattr(lib, "sqlite3_config"):
+                return lib, "ext"
+    except OSError:
+        pass
+    return ctypes.CDLL(ctypes.util.find_library("sqlite3") or "libsqlite3.so.0"), "name"
+
+
+def _memstatus_apply(lib) -> object:
+    import ctypes
+    rc = lib.sqlite3_config(9, ctypes.c_int(0))
+    if rc == 21 and "sqlite3" not in sys.modules and "_sqlite3" not in sys.modules:
+        lib.sqlite3_shutdown()
+        rc = lib.sqlite3_config(9, ctypes.c_int(0))
+    if rc != 0:
+        SQLITE_MEMSTAT_WHY[0] = f"설정 거부(코드 {rc} — 이미 초기화)"
+        return False
+    try:
+        import sqlite3 as _s9
+        c9 = _s9.connect(":memory:")
+        try:
+            c9.execute("CREATE TABLE t9 (x)")
+            c9.executemany("INSERT INTO t9 VALUES (?)", [(i,) for i in range(200)])
+            c9.execute("SELECT sum(x) FROM t9").fetchall()
+            rc2 = lib.sqlite3_config(9, ctypes.c_int(0))
+            fn9 = lib.sqlite3_memory_used
+            fn9.restype = ctypes.c_int64
+            used9 = int(fn9())
+            lv9 = lib.sqlite3_libversion
+            lv9.restype = ctypes.c_char_p
+            ver9 = (lv9() or b"").decode("ascii", "replace")
+        finally:
+            c9.close()
+    except Exception as e:
+        SQLITE_MEMSTAT_WHY[0] = f"확인 불가({type(e).__name__})"
+        return "unverified"
+    if rc2 == 0:
+        SQLITE_MEMSTAT_WHY[0] = "파이썬 sqlite3 는 다른 SQLite 사본을 씀(끈 것은 안 쓰는 사본)"
+        return False
+    if ver9 != _s9.sqlite_version:
+        SQLITE_MEMSTAT_WHY[0] = f"버전이 다름(끈 것 {ver9[:16]} · 파이썬 {_s9.sqlite_version[:16]})"
+        return False
+    if used9 != 0:
+        SQLITE_MEMSTAT_WHY[0] = "파이썬 쪽 통계가 여전히 셈(memory_used > 0)"
+        return False
+    SQLITE_MEMSTAT_WHY[0] = "파이썬 sqlite3 와 같은 라이브러리에서 확인"
+    return True
+
+
+def sqlite_memstatus_off():
     if not sys.platform.startswith("linux") or not cpu_plan().get("on"):
         return None
     try:
-        import ctypes
-        import ctypes.util
-        lib = ctypes.CDLL(ctypes.util.find_library("sqlite3") or "libsqlite3.so.0")
-        rc = lib.sqlite3_config(9, ctypes.c_int(0))
-        if rc == 21 and "sqlite3" not in sys.modules:
-            lib.sqlite3_shutdown()
-            rc = lib.sqlite3_config(9, ctypes.c_int(0))
-            lib.sqlite3_initialize()
-        return rc == 0
-    except (OSError, AttributeError, TypeError, ValueError):
+        lib, src9 = _sqlite_lib()
+        r9 = _memstatus_apply(lib)
+        if src9 == "name" and r9 is not False:
+            SQLITE_MEMSTAT_WHY[0] += " · 이름으로 찾은 사본"
+        return r9
+    except (OSError, AttributeError, TypeError, ValueError) as e:
+        SQLITE_MEMSTAT_WHY[0] = f"못 끔({type(e).__name__})"
         return False
 
 
