@@ -58,6 +58,20 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
+- **선물 영수증** — 일별 기록의 '그날 실현 기여'·'그날의 기록'에서 선물 정산 줄을 누르면(선물만 있는 날은 '최고의 날' 칩도) 차익 영수증 같은 서랍이 열려요:
+  그날 합·거래소·종목 칩, 실제 시세 차트 위의 진입(▲ 롱 · ▼ 숏)·청산(●) 점과 평균 진입가, 청산 목록·수수료·펀딩. 그날 합은 지금 선물 실현과 똑같아요(정산 금액은 거래소 원본 그대로).
+  진입·청산 가격은 **바이낸스·바이빗·OKX·Hyperliquid** 만 — 수집기가 정산을 받는 같은 응답에서 가격을 옆 파일 `state/futures_px_<거래소>.json`(표시 전용 · 지워도 다시 생김)에 남기고,
+  바이낸스만 선물 체결 내역을 조금 더 불러요(공표 한도 80% 안). 바이낸스·OKX 의 3개월 넘은 날과 그 밖의 퍼프 덱스(dYdX·Lighter·GMX·Jupiter·Pacifica)는 정산 금액만 보여 주고,
+  게이트·쿠코인 선물은 종전처럼 받지 않아요. 업데이트 뒤 가격은 수집기 두 주기(약 20~30분) 안에 채워져요.
+- **업비트 거래 시작 전 코인도 평가** — 업비트에 들어왔지만 업비트 원화·BTC·USDT 마켓이 아직 없는 코인은 전에는 0원이었어요. 이제
+  입출금 txid 로 같은 토큰(같은 체인·컨트랙트)임이 확인되면 그 토큰을 확인한 다른 거래소 시세 → 같은 심볼 다른 거래소 시세(그 토큰 DEX 시세와 2배 넘게 다르면 버림) → 그 토큰 DEX 시세 순으로 평가하고,
+  체인 기록 없이 업비트가 직접 넣어 준 코인(업비트 안 스왑·에어드랍)은 같은 심볼 거래소 시세가 2곳 이상에서 서로 2배 안으로 맞을 때만 평가해요(아니면 종전대로 0).
+  보유 코인 펼침의 가격 출처에 **'거래 시작 전'**(증명 없이 평가하면 '· N곳 일치')이 붙고, 업비트 거래가 시작되면(마켓 목록 1시간마다 확인) 업비트 시세로 돌아가요.
+  지난날 마감 기록은 바꾸지 않고 오늘부터 반영해요.
+- **화면 계산은 따로(리눅스)** — 리눅스에서 코어가 2개 이상이면 화면 계산(빌드)을 tj-web 의 자식 프로세스에서 하고, 가장 높은 번호 코어 1개를 그 계산 전용으로 비워 둬요
+  (다른 tj 유닛은 나머지 코어). 계산이 도는 동안에도 화면 응답·배경 작업이 느려지지 않아요. 자식이 실패하면(남은 램 1.2GB 미만·멈춤·시간 초과) 그 회차는 종전처럼
+  tj-web 안에서 계산하고, 3번 연속 실패하면 1시간 동안 자식을 쓰지 않아요. 맥·코어 1개는 종전 그대로입니다. 끄려면 환경변수 `TJ_BUILD_PROC=off`
+  (예: `TJ_BUILD_PROC=off pm2 restart ecosystem.config.js --update-env` — 코어 배분은 유닛이 켜질 때 정해져 전부 다시 켜야 해요).
 - **보관처 상세** — 대시보드 '보관처별' 줄을 누르면 오른쪽에서 서랍이 열려요(폰은 아래에서 올라오는 시트). 체인별 비중을 누르면 탐색기, 주소는 바로 복사,
   코인을 누르면 보유표로 가요. 거래소는 체인 대신 '잔고 기준 N분 전'을 보여 주고, 계산이 안 된 칸은 '—' 로 둡니다.
 - **매수 점 거슬러 찾기** — 경유 지갑·브릿지를 거쳐 거래소로 들어가 판 코인도 원가를 처음 산 매수(스왑)까지 따라가 영수증 차트에 점을 찍어요.
@@ -78,6 +92,8 @@
   그 체인에서 보낸 거래가 지갑마다 10번 이하면 **'끄는 걸 추천해요'** 로 강조하고 끄면 줄어드는 하루 호출 수를 보여 줘요. 다만 모르는 지갑(확인 전·점검 실패)이
   하나라도 있거나, 최근 30일 안에 보낸 거래가 있거나, 옛 기록을 채우는 중이면 추천하지 않아요. 잔고가 $100 넘게 남아 있으면 추천 옆에 같이 적어 둡니다.
   BSC·Solana(따로 도는 수집기)와 일부 체인은 아직 이 스위치로 못 꺼요(줄에 이유 표시).
+  **추천 체인은 기본으로 꺼져요** — '끄는 걸 추천해요' 조건에 맞고 그 체인에 든 값(시세 있는 코인 + LP + NFT)이 소액 기준(최대 $100) 이하이면, 기초 잔고 대조가 끝난 뒤
+  활동 점검 때 알아서 끄고 텔레그램으로 한 줄 알려요. 손으로 다시 켠 체인은 다시 자동으로 끄지 않고, 꺼 둔 체인에 새 잔고·활동이 생기면 미추적 체인 점검이 알려요.
 - **확인 주기가 지갑 수에 맞춰 늘어나요** — 지갑이 많아 이더스캔 하루 몫(공표 한도의 80% — 같은 키를 쓰는 체인 합산)을 넘을 것 같으면 기본 확인 주기를 지갑 수에 맞춰 늘려요(최대 15분 —
   그래도 넘치면 종전처럼 간격을 더 벌려요). 지갑 칩의 **'M분마다'** 와 'Solana 지갑 N개라 M분마다 확인해요' 같은 줄로 보여 주고, 체인별 조회 카드에도 같은 주기가 나와요.
 - **Solana 도 하루 몫** — 헬리우스 무료 월 한도(100만 크레딧)의 80% 를 30일로 나눈 하루 몫(약 2만 6천) 안에 들도록 Solana 기본 주기를 맞춰요.
@@ -133,6 +149,10 @@
 | ![차익 영수증 타점 차트 — NMR: 산 곳·판 곳을 시세 위에 점으로](docs/screenshots/50_receipt_chart_nmr.png) | ![차익 영수증 타점 차트 — JPYC: 산 곳·판 곳을 시세 위에 점으로](docs/screenshots/51_receipt_chart_jpyc.png) |
 
 ![선물 상세 — 포지션·펀딩·수수료](docs/screenshots/16_futures_drawer.png)
+
+| 선물 영수증 — 데스크톱 | 선물 영수증 — 모바일 |
+|---|---|
+| ![선물 영수증 — 그날 청산한 포지션과 실제 시세 위 진입(▲▼)·청산(○), 수익·손실 구간](docs/screenshots/53_futures_receipt.png) | ![모바일 선물 영수증(아래에서 올라오는 시트)](docs/screenshots/54_mobile_futures_receipt.png) |
 
 ### 일별 기록 · 명세
 
@@ -226,6 +246,7 @@ bash tools/setup.sh
 | `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받음(키 하나로 여러 체인 · 하루 무료 한도의 80% 만). 없으면 공개 탐색기·RPC 로 받아 느리거나 늦게 기록될 수 있음 |
 | `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) 또는 유료 **Pro** 키 — 자동 판별 | 키 하나를 코인게코 시세(거래소 값이 없는 코인)·DEX 토큰 시세·원가·차트·NFT 바닥가가 같이 써서 빨라짐. 몫이 모자라거나 실패하면 그 콜만 무키로. 없으면 전부 무키 공용 한도라 느리고 NFT 바닥가는 처음 몇 시간 걸릴 수 있음. 프로 키는 플랜 한도의 10%(기본 · 25·50·80% 선택)만 씀 |
 | `TJ_OPENSEA_KEY` | 선택 | https://docs.opensea.io/reference/api-keys (무료 신청) | 넣으면 EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 원활하게 추적(없거나 실패하면 코인게코) |
+| `TJ_NODEREAL_KEY` · `TJ_ANKR_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal·Ankr 대시보드(무료 키 있음) · QuickNode 는 유료 엔드포인트 주소 | BNB Chain·Base 옛 기록(아카이브) 노드 — 넣으면 BNB Chain 을 공개 노드 보관 기간보다 옛날까지 받음. 없으면 공개 노드로. 무료 키는 월 한도의 80%, 유료는 사용 비율(기본 10%) 안에서만 씀 — **설정 › 연결·키** 에서 요금제·연결 시험 |
 | `UPBIT_ACCESS` · `UPBIT_SECRET` | 선택 | 업비트 › 마이페이지 › Open API 관리 | 업비트 입출금·체결·잔고 |
 | `TJ_BITHUMB_KEY` · `TJ_BITHUMB_SECRET` | 선택 | 빗썸 › 마이페이지 › API 관리 | 빗썸 |
 | `TJ_BINANCE_KEY` · `TJ_BINANCE_SECRET` | 선택 | 바이낸스 › API Management | 바이낸스 |
@@ -246,6 +267,7 @@ RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐
 유료 키·노드는 넣으면 더 빨라지거나 BNB Chain 처럼 더 옛 기록까지 받게 해 줄 뿐입니다. 외부 API 는 **공표 한도의 80%** 를 기준으로 하루 몫을 정해 천천히 부르고,
 한도를 공표하지 않은 공개 노드는 초당 요청 수를 스스로 낮게 묶습니다. 탐색기가 막혀도 공개 RPC 로 이어 받습니다([위](#이번-판에-더해진-것)).
 더 빠른 유료 RPC 가 있으면 `config.json` 의 `chains.<체인>`·`bsc`·`sol` RPC 목록에 넣을 수 있습니다(키 박힌 URL 은 남에게 보여 주지 마세요).
+BNB Chain·Base 옛 기록용 노드 키(NodeReal·Ankr·QuickNode)는 위 표처럼 `.env` 에 넣으면 노드 주소를 메모리에서만 만들어 쓰고 `config.json` 에는 키 박힌 주소를 쓰지 않습니다.
 
 `config.json` 에서 알아 두면 좋은 키:
 
@@ -363,6 +385,7 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 |---|---|
 | 사양 | 최소 2코어 · 램 4GB · SSD 40GB(지갑 수십 개) / 넉넉히 4코어 · 램 8GB · SSD 80GB 이상(지갑 수백 개·체인 여럿) |
 | 실제 쓰는 양(참고) | 평소 유닛 전체 램 약 1.3~2.5GB(가장 큰 건 화면 서버 tj-web) · CPU 는 코어 1개의 10~20% · 첫 백필·재구축 때만 코어 1개를 몇 시간 씀 |
+| 코어 배분(자동) | 코어 2개 이상이면 가장 높은 번호 코어 1개 = 화면 계산(tj-web 자식 프로세스) 전용, 나머지 유닛은 다른 코어로 — 끄기 `TJ_BUILD_PROC=off`([위](#이번-판에-더해진-것)) |
 | 운영체제 | Ubuntu 24.04 LTS(22.04 이상이면 기본 python3 로 동작) — 파이썬 패키지 설치 없음 |
 | 램 4GB 서버 | 스왑 4GB 를 만들어 두세요(화면 계산이 몰릴 때 대비) |
 | IP | **고정 공인 IP** — 그 IP 를 거래소 API 키의 화이트리스트에 넣습니다 |
@@ -541,7 +564,7 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **퍼프 덱스(선택)** — 주소만으로 공개 조회되는 곳(Hyperliquid·GMX 등)의 포지션·정산. **Hyperliquid** 는 현물·무기한 현금·스테이킹까지 원장·대사(선택).
 - **NFT(표시 전용)** — 보유 자동 발견(크립토펑크 등 표준 이전 NFT 포함), 바닥가·거래량 확인된 컬렉션 자동 추적, 후보·스팸 거르기·지켜보기, 총자산 포함 스위치.
 - **LP** — Uniswap v3/v4·PancakeSwap·SushiSwap·Aerodrome/Velodrome Slipstream·Meteora DLMM 등 포지션 원금·수수료 평가.
-- **손익** — 사이클별 투입·실현·미실현, 차익 영수증(매수·매도 한 차트·점수), 월/일 실현손익 달력과 매매 근거 메모,
+- **손익** — 사이클별 투입·실현·미실현, 차익 영수증(매수·매도 한 차트·점수), 선물 영수증(그날 선물 정산 — 진입·청산 차트), 월/일 실현손익 달력과 매매 근거 메모,
   전일 대비 분해(시세 몫은 코인별 표), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(참고용 표).
 - **내 매매 돌아보기** — 타임머신 · 자금 흐름 지도 · 팔기 전 미리보기 · 올해 결산 · 계획 지키기 점수 · 매매 습관 · 하루 실현 잔디 · BTC 비교선.
 - **전체 검색** — ⌘K(또는 /)로 코인·주소·해시·날짜·금액·메모·리뷰를 한 번에(필터 문법 `coin:` `chain:` `type:` `after:` `pnl:` `amt:` …, 문장 검색).
@@ -582,7 +605,7 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   로그인이 꺼져 있으면 리버스 프록시·터널 헤더가 붙은 요청을 전부 거부합니다.
 - 비밀값은 `.env`(600)에만 저장되고 화면에는 •••• 로만 보입니다(거래소 공개 API 키만 끝 4자리). `.env`·`config.json`·`state/` 는 `.gitignore` 에 들어 있습니다 — 절대 커밋하지 마세요.
 - 밖으로 나가는 요청은 조회뿐입니다: 블록 탐색기·RPC(내 주소), 거래소 API, 가격(GeckoTerminal·DexScreener·거래소 공개 시세·주식/금 공개 시세),
-  스캠 판정(GoPlus — 후보 토큰 주소만), 지갑 포트폴리오 보강(Rabby 공개 API — 내 EVM 주소, `rabby.enabled: false` 로 끔),
+  스캠 판정(GoPlus — 후보 토큰 주소만), 지갑 포트폴리오 보강(Rabby 공개 API — 평가액 $1,000 이상인 내 EVM 주소만, 기준 `rabby.min_wallet_usd` · `rabby.enabled: false` 로 끔),
   브릿지 탐색기(도착 확인), 환율, 텔레그램 발송, NFT 바닥가(코인게코·매직에덴·오픈시 — 컬렉션 주소만), Hyperliquid 공개 조회(내 주소).
   원장 내용 자체는 보내지 않습니다.
   예외: AI 기능(기본 꺼짐)을 켜면 그날 요약·영수증 요약을 내 컴퓨터의 `claude` CLI 로 보냅니다.
@@ -623,6 +646,8 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 
 - **Requirements:** macOS or Linux, Python 3.9+ (standard library only). Node.js + pm2 optional (recommended for auto-restart).
 - **Always-on server:** use a fixed-IP Linux box (Ubuntu 24.04; 2–4 cores, 4–8 GB RAM — add 4 GB swap on 4 GB, 40–80 GB SSD) and whitelist that IP on your exchange API keys. Keep the web UI bound to 127.0.0.1; open it with `ssh -L 8023:127.0.0.1:8023 user@server` or an HTTPS tunnel/reverse proxy with login on — never expose the port directly.
+  On Linux with 2+ cores the screen build runs in a forked tj-web child pinned to the highest-numbered core, and every other unit stays off that core
+  (falls back to building in tj-web on failure; macOS and single-core machines are unchanged; disable with `TJ_BUILD_PROC=off` on all units).
 - **Start:** `bash tools/setup.sh` (creates `config.json`, `.env` (mode 600) and `state/`; installs nothing), then
   `pm2 start ecosystem.config.js` and open http://127.0.0.1:8023/ — a setup wizard handles wallets (paste many at once), keys and Telegram.
   `bash tools/setup.sh --demo` shows synthetic data without saving anything.
@@ -668,6 +693,17 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   history in the background), and any EVM chain whose Etherscan/Blockscout is blocked or out of quota switches to public RPC automatically
   and back when the explorer recovers (`rpc_fallback: false` to disable). Bithumb KRW bank deposits/withdrawals now show up in the daily
   records, net flow and breakdown, and "baseline reconciled" notices no longer fill the unmatched list.
+  Chains that meet the switch-off suggestion and hold $100 or less (priced coins + LP + NFT) are now switched off automatically after their baseline
+  reconciliation (one Telegram line; a chain you switch back on stays on). Optional node keys (`TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`,
+  `TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY` — Settings › 연결·키) add archive nodes for BNB Chain/Base history (free keys at 80% of the
+  monthly quota, paid at a usage share, 10% by default), and the Rabby portfolio check only covers EVM wallets worth $1,000+ (`rabby.min_wallet_usd`).
+- **New in this update:** futures receipts — click a futures settlement line in the daily records to open a drawer with that day's total (identical
+  to realized futures PnL), per-symbol chips, entry ▲▼ / exit ● dots on a real price chart, closes, fees and funding; entry/exit prices come from
+  Binance, Bybit, OKX and Hyperliquid (stored display-only in `state/futures_px_<exchange>.json`; Binance/OKX days older than 3 months and other perp
+  DEXes show settlement amounts only). Coins sitting on Upbit before Upbit lists them (no KRW/BTC/USDT market yet) are no longer valued at 0: a token
+  proven by deposit/withdrawal txid uses the proving exchange, then the same symbol on other exchanges (dropped if 2x off the token's DEX price),
+  then that DEX price; Upbit-credited coins without a chain record need 2+ exchanges agreeing within 2x. The price source reads '거래 시작 전'
+  (pre-listing), past closed days are not rewritten, and Upbit's own price takes over once the market opens.
 - **Search (new):** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
   (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested

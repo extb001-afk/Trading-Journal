@@ -2590,7 +2590,8 @@ class Core:
             return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
         cc9 = self.cfg["chains"][chain]
         rpc_only9 = common.chain_discovery(chain, cc9) == "rpc"
-        base9 = None if (rpc_only9 or not cc9.get("blockscout")) else str(cc9["blockscout"]).rstrip("/")
+        bsoff9 = common.bs_blocked(chain, cc9)
+        base9 = None if (rpc_only9 or bsoff9 or not cc9.get("blockscout")) else str(cc9["blockscout"]).rstrip("/")
         from evm_watch import RpcSynthMixin as _RS
         rpcs9 = list(cc9.get("rpcs") or _RS.RPC_DEFAULT.get(chain) or [])
         if not rpcs9:
@@ -2633,9 +2634,12 @@ class Core:
         excl = {x[0] for x in (common.NATIVE_MIRROR.get(chain), common.ZK_STACK.get(chain)) if x}
         mc9 = recon.MULTICALL3_BY_CHAIN.get(chain, recon.MULTICALL3)
         nat9 = mode in ("nat", "natx")
+        sweep9 = None
+        if bsoff9 and not nat9:
+            sweep9 = {str(k).lower(): str(v) for tab9 in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS) for k, v in (tab9.get(chain) or {}).items()}
         return lambda: recon.fetch_evm_rpc_balances(rpcs9, wallets, cas, discover_url=None if nat9 else base9, must=must,
                                                     exclude=excl, want_native=mode != "tok", want_tokens=not nat9,
-                                                    multicall=mc9, wallet_cas=wcas, block=blk9, strict=strict9)
+                                                    multicall=mc9, wallet_cas=wcas, block=blk9, strict=strict9, sweep=sweep9)
 
     @staticmethod
     def _recon_src(bal: dict, wallets=None) -> dict:

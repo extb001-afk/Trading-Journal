@@ -118,12 +118,25 @@ def chain_list(cfg: dict) -> dict:
             out[k][3] = list(dict.fromkeys([str(u) for u in cc["rpcs"]] + out[k][3]))
     off = set(cfg.get("_disabled_chains") or [])
     off.update(k for k, cc in (cfg.get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(k, cc))
+    off -= auto_off_keys()
     return {k: v for k, v in out.items() if k not in off}
+
+
+def auto_off_keys() -> set:
+    try:
+        raw = common.read_json(common.CONFIG_PATH, {}) or {}
+    except (Exception, SystemExit):
+        return set()
+    ch = raw.get("chains") if isinstance(raw, dict) else None
+    return {str(k) for k, cc in (ch or {}).items() if isinstance(cc, dict) and not common.chain_enabled(k, cc)
+            and isinstance(cc.get("_chainoff"), dict) and cc["_chainoff"].get("auto") is True}
 
 
 def wallets(cfg: dict):
     addrs, labels, tracked = set(), {}, set()
-    for w in cfg.get("wallets") or []:
+    auto9 = auto_off_keys()
+    off_w9 = [w for w in cfg.get("_disabled_wallets") or [] if isinstance(w, dict) and w.get("chain") in auto9]
+    for w in list(cfg.get("wallets") or []) + off_w9:
         t = w.get("type", "evm")
         if t not in ("evm", "bsc_rpc"):
             continue
@@ -133,7 +146,8 @@ def wallets(cfg: dict):
         addrs.add(a)
         if w.get("label") and a not in labels:
             labels[a] = str(w["label"])
-        tracked.add(("bsc" if t == "bsc_rpc" else str(w.get("chain")), a))
+        if w.get("chain") not in auto9:
+            tracked.add(("bsc" if t == "bsc_rpc" else str(w.get("chain")), a))
     return sorted(addrs), labels, tracked
 
 
@@ -263,6 +277,10 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
         activate(f"{c9}:{str(a9).lower()}", None, "ledger")
     gate["updatedAt"] = int(now)
     dec = {(d["chain"], d["addr"]): d for d in common.gate_decisions(cfg, gate)} if settings(cfg).get("enabled") else {}
+    off9 = set(cfg.get("_disabled_chains") or []) | auto_off_keys()
+    for d9 in dec.values():
+        if d9["chain"] in off9:
+            d9.update(ok=False, reason="설정에서 끈 체인", block=None)
     auto_on = bool((cfg.get("chain_sweep") or {}).get("auto_enable") is True)
     for k9, e9 in sorted(g_pr.items()):
         if not e9.get("active") or ":" not in k9:

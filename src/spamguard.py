@@ -97,7 +97,21 @@ def _one_off(head_raw: str):
     return hits[0] if len(hits) == 1 else None
 
 
+_IMP_MEMO = {}
+_IMP_MEMO_MAX = 100000
+
+
 def impostor_of(sym):
+    raw = str(sym or "")
+    r = _IMP_MEMO.get(raw, _IMP_MEMO)
+    if r is _IMP_MEMO:
+        r = _impostor_calc(raw)
+        if len(_IMP_MEMO) < _IMP_MEMO_MAX:
+            _IMP_MEMO[raw] = r
+    return r
+
+
+def _impostor_calc(sym):
     raw = str(sym or "")
     if not raw:
         return None

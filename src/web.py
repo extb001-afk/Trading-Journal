@@ -56,6 +56,7 @@ import sellchart
 import buychart
 import netpace
 import coverage_limits
+import buildproc
 import rawtx_cache
 import acct_norm
 import rabby
@@ -91,6 +92,10 @@ except Exception:
     perp_dex, PERP_NAMES = None, {}
 FUT_CEX = ("binance", "bybit", "okx")
 PERP_KEYS = tuple(PERP_NAMES)
+try:
+    import fut_rcpt
+except Exception:
+    fut_rcpt = None
 FUT_FEE_SYM = "선물 수수료·펀딩"
 _FUT_SYM_RE = re.compile(r"[-_/]?(USDT|USDC|USD)([-_]?(SWAP|PERP|M))?$", re.I)
 
@@ -259,6 +264,7 @@ log = common.setup_logging("tj-web")
 getcontext().prec = 60
 
 KST = timezone(timedelta(hours=9))
+_GSYM_MEMO = {}
 WEB_DIR = os.path.join(common.BASE_DIR, "web")
 UI_DEFAULT = "v2"
 V2_DIR = os.path.join(WEB_DIR, "v2")
@@ -2331,6 +2337,7 @@ class StateBuilder:
         self._flow_pending = []
         self._flow_lock = threading.Lock()
         threading.Thread(target=self._flow_worker, daemon=True, name="flow-worker").start()
+        self._bot_wallet_usd = rabby.load_bot_usd(os.path.join(common.STATE_DIR, rabby.BOTUSD_NAME))
         self._lp_targets = []
         self._lp_lock = threading.Lock()
         threading.Thread(target=self._lp_worker, daemon=True, name="lp-worker").start()
@@ -2368,7 +2375,7 @@ class StateBuilder:
         while True:
             try:
                 s = rabby.settings(self.cfg)
-                res = rabby.refresh_once(self.cfg, RABBY_PATH, log=log.info)
+                res = rabby.refresh_once(self.cfg, RABBY_PATH, log=log.info, bot_usd=self.__dict__.get("_bot_wallet_usd"))
                 if res == "ok":
                     self.soft_invalidate()
             except (Exception, SystemExit) as e:
@@ -2673,12 +2680,22 @@ class StateBuilder:
             time.sleep(gap)
             return base_get(u)
         mine9 = {str(w.get("address") or "").lower() for w in (self.cfg.get("wallets") or []) if isinstance(w, dict)}
-        todo = [(c9, a9) for c9, a9 in self._sale_queue if c9 in bases
+        blk9 = self.__dict__.setdefault("_sale_blocked", {})
+        todo = [(c9, a9) for c9, a9 in self._sale_queue if c9 in bases and blk9.get(c9, 0) <= now
                 and sale_match.needs_refresh(owners.get(f"{c9}:{a9}"), now, hot=a9 in mine9)][:budget]
         changed = False
         for c9, a9 in todo:
+            if blk9.get(c9, 0) > now:
+                continue
             try:
                 rec = sale_match.fetch_owner(slow_get, bases[c9], c9, a9, seed, now)
+            except urllib.error.HTTPError as e:
+                if e.code != 403:
+                    log.info("sale-worker: %s %s 조회 보류(%s) — 다음 주기", c9, a9[:10], str(e)[:80])
+                    break
+                blk9[c9] = now + 6 * 3600
+                log.info("sale-worker: %s 블록스카웃 접속 차단(403) — 6시간 동안 이 체인 건너뜀", c9)
+                continue
             except OSError as e:
                 log.info("sale-worker: %s %s 조회 보류(%s) — 다음 주기", c9, a9[:10], str(e)[:80])
                 break
@@ -2766,6 +2783,17 @@ class StateBuilder:
 
     @staticmethod
     def _gsym(row) -> str:
+        k9 = (row["gname"], row["symbol"])
+        v9 = _GSYM_MEMO.get(k9)
+        if v9 is not None:
+            return v9
+        v9 = StateBuilder._gsym_calc(row)
+        if len(_GSYM_MEMO) < 200000:
+            _GSYM_MEMO[k9] = v9
+        return v9
+
+    @staticmethod
+    def _gsym_calc(row) -> str:
         name = row["gname"] or (row["symbol"] or "?")
         if row["symbol"] and re.fullmatch(r"TOKEN#\d+", name or ""):
             return str(row["symbol"]).strip() or "TOKEN"
@@ -2781,7 +2809,7 @@ class StateBuilder:
         cur.append((name, int((t - self.__dict__.get("_ph_t", t)) * 1000)))
         self._ph_t = t
         g0 = self.__dict__.get("_ph_gen0")
-        if g0 is not None and name in self.CANCEL_PH and self.__dict__.get("_inval", 0) != g0:
+        if g0 is not None and name in self.CANCEL_PH and self._inval_now() != g0:
             raise _BuildObsolete(name)
 
     def _ph_note(self, total_ms):
@@ -2814,20 +2842,25 @@ class StateBuilder:
             obsolete9 = None
             mp0 = self.__dict__.get("_mp_n", 0)
             sig9 = self._input_sig()
-            conn = dbm.open_db(common.DB_PATH, readonly=True)
+            conn = None
             try:
-                conn.execute("BEGIN")
                 t0_9 = time.time()
                 self._ph_cur, self._ph_t = [], t0_9
                 self._ph_gen0 = gen0
-                nb9 = getattr(self.px, "nb_begin", None)
-                if nb9:
-                    nb9()
-                try:
-                    out = self._build(conn)
-                finally:
+                out = self._build_child()
+                if out is None:
+                    buildproc.note_inproc()
+                    conn = dbm.open_db(common.DB_PATH, readonly=True)
+                    conn.execute("BEGIN")
+                    nb9 = getattr(self.px, "nb_begin", None)
                     if nb9:
-                        self._pxq.add(self.px.nb_end())
+                        nb9()
+                    try:
+                        with buildproc.nogc():
+                            out = self._build(conn)
+                    finally:
+                        if nb9:
+                            self._pxq.add(self.px.nb_end())
                 self._ph("reviews·tail")
                 self.build_ms = int((time.time() - t0_9) * 1000)
                 self._ph_note(self.build_ms)
@@ -2847,7 +2880,8 @@ class StateBuilder:
                 raise
             finally:
                 self._ph_gen0 = None
-                conn.close()
+                if conn is not None:
+                    conn.close()
             if obsolete9 is not None:
                 log.info("빌드 도중 사용자 변경(%s 단계 뒤 %.1f초) — 이 빌드는 그만두고 곧바로 새로 빌드", obsolete9, time.time() - t0_9)
                 published = False
@@ -2858,6 +2892,31 @@ class StateBuilder:
         if published and self.snaps.wanted:
             threading.Thread(target=self.snaps.precompute, daemon=True, name="snap-delta").start()
         return out
+
+    def _build_child(self):
+        if not buildproc.usable():
+            return None
+        q9 = buildproc.qsnap_of(self)
+        res = buildproc.run(self)
+        if res is None:
+            return None
+        if res[0] == "obsolete":
+            raise _BuildObsolete(res[1])
+        _k9, out, pay = res
+        self._ph_cur = list(pay.get("ph") or [])
+        if pay.get("ph_t"):
+            self._ph_t = float(pay["ph_t"])
+        buildproc.apply(self, pay, q9)
+        return out
+
+    def _thread_names(self):
+        if self.__dict__.get("_bp_shm") is not None and isinstance(self.__dict__.get("_bp_threads"), list):
+            return list(self.__dict__["_bp_threads"])
+        return [t9.name for t9 in threading.enumerate()]
+
+    def _inval_now(self):
+        shm = self.__dict__.get("_bp_shm")
+        return buildproc.shm_get(shm) if shm is not None else self.__dict__.get("_inval", 0)
 
     def _publish_built(self, out, gen0, mp0, sig9, building):
         if True:
@@ -3148,13 +3207,25 @@ class StateBuilder:
         except (ValueError, TypeError, InvalidOperation) as e9:
             log.warning("업비트 수수료 원본 읽기 실패(수수료 열 0 유지): %s", e9)
 
+        kst_fm = {}
+
+        def kst_fmt(ts9, fmt9):
+            t9 = type(ts9)
+            k9 = ("m", fmt9, ts9 // 60) if t9 is int else ("f", fmt9, ts9) if t9 is float else None
+            if k9 is None:
+                return datetime.fromtimestamp(ts9, KST).strftime(fmt9)
+            v9 = kst_fm.get(k9)
+            if v9 is None:
+                v9 = kst_fm[k9] = datetime.fromtimestamp(ts9, KST).strftime(fmt9)
+            return v9
+
         def ex_fee_add(ex9, usd9, ts9):
             if usd9 <= 0:
                 return
             a9 = ex_fee.setdefault(ex9, {"usd": Decimal(0), "tx": 0})
             a9["usd"] += usd9
             a9["tx"] += 1
-            m9 = ex_fee_m.setdefault(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m"), {}).setdefault(ex9, {"usd": Decimal(0), "tx": 0})
+            m9 = ex_fee_m.setdefault(kst_fmt(ts9, "%Y-%m"), {}).setdefault(ex9, {"usd": Decimal(0), "tx": 0})
             m9["usd"] += usd9
             m9["tx"] += 1
         cost_ov = prefs.get("cost_overrides") or {}
@@ -3622,7 +3693,8 @@ class StateBuilder:
 
         def _un(qn, usd):
             try:
-                qd, ud = Decimal(str(qn)), Decimal(str(usd))
+                qd = qn if type(qn) is Decimal else Decimal(str(qn))
+                ud = usd if type(usd) is Decimal else Decimal(str(usd))
             except (InvalidOperation, ValueError, TypeError):
                 return None
             if not qd.is_finite() or not ud.is_finite() or qd == 0 or ud == 0:
@@ -3634,7 +3706,7 @@ class StateBuilder:
             if isinstance(sym, dict):
                 gid_e, sym = sym.get("gid"), sym.get("sym")
             e0 = {
-                "t": datetime.fromtimestamp(ts, KST).strftime("%m-%d %H:%M"),
+                "t": kst_fmt(ts, "%m-%d %H:%M"),
                 "sym": sym, "k": k, "d": d, "q": q, "a": a, "_gid": gid_e,
                 "tx": (tx[:6] + "…" + tx[-4:]) if tx else "—", "src": cur_src[0],
                 "_ts": int(ts or 0),
@@ -3737,12 +3809,12 @@ class StateBuilder:
             if p9 is not None:
                 p9.sync(g["qty_known"], g["cost"], key if key is not None else ("u", g["gid"]))
 
-        def cp_take(g, take9, cost9):
+        def cp_take(g, take9, cost9, want=True):
             p9 = cp_pool(g)
             if p9 is None or float(take9) <= 0:
                 return None
             cp_sync(g)
-            return p9.take(g["qty_known"], take9, cost9, ("m", g["gid"]), CP_EMIT_MAX)
+            return p9.take(g["qty_known"], take9, cost9, ("m", g["gid"]), CP_EMIT_MAX, want=want)
 
         def cp_emit(mp9, unk9, q9, c9):
             if mp9 is None and not unk9:
@@ -3817,7 +3889,7 @@ class StateBuilder:
                     own9 = True
             return " · ".join(out9 + ([sym9] if (own9 or not out9) else []))
 
-        def consume(g, qty):
+        def consume(g, qty, cp=True):
             oa_last[0] = Decimal(0)
             krw_last[0] = None
             cost_taken = Decimal(0)
@@ -3830,7 +3902,7 @@ class StateBuilder:
                 wac = g["cost"] / g["qty_known"]
                 take = min(rem, g["qty_known"])
                 oa_last[0] = oa_take(g, take)
-                cp_last[0] = cp_take(g, take, wac * take)
+                cp_last[0] = cp_take(g, take, wac * take, cp)
                 g["qty_known"] -= take
                 cost_taken = wac * take
                 krw_last[0] = consume_krw(g, cost_taken)
@@ -3886,7 +3958,7 @@ class StateBuilder:
 
         def ev(flow, ts, k, d, q, a, tx, un=None):
             e0 = {
-                "t": datetime.fromtimestamp(ts, KST).strftime("%m-%d %H:%M"),
+                "t": kst_fmt(ts, "%m-%d %H:%M"),
                 "k": k, "d": d, "q": q, "a": a,
                 "tx": (tx[:6] + "…" + tx[-4:]) if tx else "—", "src": cur_src[0],
                 "_ts": int(ts or 0),
@@ -4929,8 +5001,10 @@ class StateBuilder:
                     log.debug("외부 전송 분류 표식 실패: %s", e9)
 
         win_cut = {}
+        qn_all9 = []
         for r in rows:
             q_w = self._norm(r)
+            qn_all9.append((r, q_w))
             if r["leg_kind"] == "opening" and q_w < 0:
                 continue
             if r["event"] == "TRANSFER_OUT":
@@ -4967,16 +5041,35 @@ class StateBuilder:
         self._ph("xfer_links·positions")
         signer9 = self._signer_map(conn, rows)
         pid_row = {}
+        sell_wm = {}
+
+        def sell_pre(fl9, evs9):
+            w9 = sell_wm.get(id(fl9))
+            if w9 is None or w9[0] is not fl9 or w9[1] is not evs9:
+                return 0, 0
+            f9, l9, n9 = w9[2], w9[3], w9[4]
+            for k9 in range(len(evs9) - n9 + 1):
+                if evs9[k9] is f9:
+                    return (k9, n9) if evs9[k9 + n9 - 1] is l9 else (0, 0)
+            return 0, 0
+
+        def sell_mark(fl9):
+            evs9 = fl9["events"]
+            if evs9:
+                sell_wm[id(fl9)] = (fl9, evs9, evs9[0], evs9[-1], len(evs9))
+            else:
+                sell_wm.pop(id(fl9), None)
 
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
         for r in rows:
             n9i += 1
-            if not (n9i & 4095) and g0_9 is not None and self.__dict__.get("_inval", 0) != g0_9:
+            if not (n9i & 4095) and g0_9 is not None and self._inval_now() != g0_9:
                 raise _BuildObsolete("replay")
             g = gstate(r)
             chain = r["chain"] or "?"
             g["chains"].add(chain)
-            q = self._norm(r)
+            qn9 = qn_all9[n9i - 1] if n9i <= len(qn_all9) else None
+            q = qn9[1] if qn9 is not None and qn9[0] is r else self._norm(r)
             ts = r["event_ts"]
             lk, evk = r["leg_kind"], r["event"]
             cur_row[0] = r
@@ -5080,7 +5173,7 @@ class StateBuilder:
                     kd9w[1] += 1
                     if usd9w > kd9w[2]:
                         kd9w[2], kd9w[3], kd9w[4] = usd9w, int(ts or 0), (r["location"] or "").split(":")[-1]
-                consume(g, -q)
+                consume(g, -q, cp=False)
                 g["qty_timeline"].append((ts, q))
                 continue
             if lk == "gas" and evk == "EXF_FEE":
@@ -5148,7 +5241,7 @@ class StateBuilder:
                         fl9f["proceeds_krw"] = fl9f.get("proceeds_krw", Decimal(0)) - F9 * Decimal(str(rt9f))
             if lk == "gas" and evk == "EXF_FEE":
                 ex_fee_add((r["location"] or "").split(":")[-1], F9, ts)
-                consume(g, -q)
+                consume(g, -q, cp=False)
                 g["qty_timeline"].append((ts, q))
                 continue
             if lk == "gas":
@@ -5169,7 +5262,7 @@ class StateBuilder:
                 cinfo = gas_by_chain.setdefault(chain, {"usd": Decimal(0), "tx": 0})
                 cinfo["usd"] += usd
                 cinfo["tx"] += 1
-                mk9 = datetime.fromtimestamp(ts, KST).strftime("%Y-%m")
+                mk9 = kst_fmt(ts, "%Y-%m")
                 mi9 = gas_by_month.setdefault(mk9, {}).setdefault(
                     chain, {"usd": Decimal(0), "tx": 0})
                 mi9["usd"] += usd
@@ -5180,7 +5273,7 @@ class StateBuilder:
                     tgt = g2["cur"] or (g2["flows"][-1] if g2["flows"] else None)
                     if tgt:
                         tgt["fee"] += usd
-                consume(g, -q)
+                consume(g, -q, cp=False)
                 g["qty_timeline"].append((ts, q))
                 continue
 
@@ -5623,13 +5716,18 @@ class StateBuilder:
                                 e4["oa"] = e4.get("oa", Decimal(0)) + oa4
                             e4["unknown"] += mu4 + max(Decimal(0), (-q) - (mk4 + mu4))
                             if g["cur"] is not None:
-                                mv4 = [e9 for e9 in g["cur"]["events"] if "매도" not in str(e9.get("k") or "")]
+                                evs4w = g["cur"]["events"]
+                                k4w, n4w = sell_pre(g["cur"], evs4w)
+                                hd4w, tl4w = evs4w[:k4w], evs4w[k4w + n4w:]
+                                mv4 = [e9 for e9 in hd4w if "매도" not in str(e9.get("k") or "")] + [e9 for e9 in tl4w if "매도" not in str(e9.get("k") or "")]
                                 if mv4:
                                     for e9 in mv4:
                                         e9.setdefault("_mv", r["posting_id"])
                                     e4.setdefault("story", []).extend(mv4)
                                     e4["story_flow"] = g["cur"]
-                                    g["cur"]["events"] = [e9 for e9 in g["cur"]["events"] if "매도" in str(e9.get("k") or "")]
+                                    g["cur"]["events"] = ([e9 for e9 in hd4w if "매도" in str(e9.get("k") or "")] + evs4w[k4w:k4w + n4w]
+                                                          + [e9 for e9 in tl4w if "매도" in str(e9.get("k") or "")])
+                                sell_mark(g["cur"])
                                 if g["qty_known"] + g["qty_unknown"] <= Decimal("0.000001"):
                                     g["cur"] = None
                     elif evk in ("BRIDGE", "TRANSFER_OUT_EX") and \
@@ -5729,7 +5827,7 @@ class StateBuilder:
                         extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · 기초 잔고 (백필 창 이전 보유분)",
                                  _recon_q(q), "—", txh, vq=q)
                 else:
-                    consume(g, -q)
+                    consume(g, -q, cp=False)
                     if late9:
                         extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {StateBuilder.LATE_OFFSET_KO}",
                                  _recon_q(q), "—", txh, vq=q)
@@ -6038,7 +6136,7 @@ class StateBuilder:
                 qty = -q
                 g["qty_timeline"].append((ts, q))
                 if g.get("is_fiat"):
-                    consume(g, qty)
+                    consume(g, qty, cp=False)
                     if evk == "EXF_SELL":
                         fee_disp[(r["source_ns"], txh)] = {"g": g, "gid": g["gid"], "qty": qty, "usd": cost, "fiat": True}
                     continue
@@ -6415,6 +6513,25 @@ class StateBuilder:
         self._ph("signer·cards")
         cex_proof = self._cex_proof(conn)
         self.spot.want_ex({ex9 for gid9, lst9 in cex_proof.items() if gid9 in gid_pairs for ex9, _c9 in lst9})
+        def pre_mkt9(sym9):
+            return bool(self.spot.upbit_krw) and sym9 not in self.spot.upbit_krw and sym9 not in self.spot.upbit_alt
+        exk9 = {}
+        for gid9, ex9 in ex_gid.items():
+            s9 = acct_norm.canon((G.get(gid9) or {}).get("sym"), ex9) if ex9 == "upbit" else None
+            if s9:
+                exk9.setdefault(s9, []).append(gid9)
+        pre_og9 = {}
+        for og9 in sorted(cex_proof):
+            if (G.get(og9) or {}).get("is_stable"):
+                continue
+            for ex9, cur9 in cex_proof[og9]:
+                for xg9 in (exk9.get(acct_norm.canon(cur9, ex9)) or ()) if ex9 == "upbit" else ():
+                    if og9 not in pre_og9.setdefault(xg9, []):
+                        pre_og9[xg9].append(og9)
+        pre_want9 = [xg9 for xg9 in pre_og9 if xg9 in price_groups and pre_mkt9(price_groups[xg9]["sym"])
+                     and not self.spot.ex_price("upbit", price_groups[xg9]["sym"])]
+        self.spot.want_tokens([p9 for xg9 in pre_want9 for og9 in pre_og9[xg9] for p9 in tok_pairs9.get(og9) or ()], slot="expre")
+        self.spot.want_ex({ex9 for xg9 in pre_want9 for og9 in pre_og9[xg9] for ex9, _c9 in cex_proof.get(og9) or ()})
 
         def cex_px_for(gid9):
             for ex9, cur9 in cex_proof.get(gid9) or ():
@@ -6709,6 +6826,52 @@ class StateBuilder:
             med9 = vals9[n9 // 2][0] if n9 % 2 else (vals9[n9 // 2 - 1][0] + vals9[n9 // 2][0]) / 2
             return {"px": med9, "srcs": [fx_name.get(e9, e9) for _v9, e9 in vals9], "note": "다른 거래소 참고가(동일 코인 미확인)"}
 
+        pre_used9 = self._px_pre_gids = {}
+
+        def pre_px9(xg9, sym9, qty9):
+            ogs9 = pre_og9.get(xg9) or ()
+            for og9 in ogs9:
+                for ex9, cur9 in cex_proof.get(og9) or ():
+                    p9 = self.spot.ex_price(ex9, cur9) if ex9 != "upbit" else None
+                    if p9:
+                        return float(p9), f"cex:{fx_name.get(ex9, ex9)}", self.spot.ex_age(ex9, cur9), None, 0
+            vs9 = []
+            for ex9 in self.CEX_PX_ORDER:
+                p9 = self.spot.ex_price(ex9, sym9) if ex9 != "upbit" else None
+                if p9 and p9 > 0:
+                    vs9.append((ex9, float(p9), self.spot.ex_age(ex9, sym9)))
+            gp9 = self.spot.price(sym9)
+            if gp9 and gp9 > 0 and not any(e9 == "binance" for e9, _p9, _a9 in vs9):
+                vs9.append(("글로벌", float(gp9), glob_age9(sym9)))
+            if not ogs9:
+                for ex9, p9, a9 in vs9:
+                    n9 = sum(1 for _e9, q9, _a9 in vs9 if max(p9, q9) / min(p9, q9) <= self.PRE_DIVERGE)
+                    if n9 >= 2:
+                        return p9, f"cex:{fx_name.get(ex9, ex9)}", a9, None, n9
+                return 0.0, None, None, None, 0
+            dref9, dval9 = None, None
+            for og9 in ogs9:
+                for ch9, ca9 in tok_pairs9.get(og9) or ():
+                    dp9 = self.spot.dex_price(ch9, ca9)
+                    if not dp9:
+                        continue
+                    dref9 = dref9 or float(dp9)
+                    rv9 = self.spot.dex_reserve(ch9, ca9)
+                    if rv9 is not None and qty9 > 0 and dp9 * qty9 > rv9:
+                        continue
+                    dval9 = (float(dp9), (ch9, ca9))
+                    break
+                if dval9:
+                    break
+            for ex9, p9, a9 in vs9:
+                if dref9 and max(p9, dref9) / min(p9, dref9) > self.PRE_DIVERGE:
+                    continue
+                return p9, f"cex:{fx_name.get(ex9, ex9)}", a9, None, 0
+            if dval9:
+                k9 = dval9[1]
+                return dval9[0], "dex:" + self.spot.dex_src.get(f"{k9[0]}:{k9[1]}", "gecko"), self.spot.dex_age(*k9), k9, 0
+            return 0.0, None, None, None, 0
+
         for gid, g in sorted(price_groups.items(), key=lambda kv: kv[1]["sym"]):
             sym = g["sym"]
             uncred = uncred_gid.get(gid, Decimal(0))
@@ -6763,6 +6926,11 @@ class StateBuilder:
                                                                or (sym in self.spot.upbit_alt
                                                                    and sym not in (getattr(self.spot, "upbit_alt_miss", None) or ()))))):
                     pending_gids.add(gid)
+                if not px and ex_gid[gid] == "upbit" and gid not in pending_gids and pre_mkt9(sym):
+                    pp9, ps9, pa9, pk9, pn9 = pre_px9(gid, sym, qty)
+                    if pp9:
+                        px, src9, age9 = pp9, ps9, pa9
+                        pre_used9[gid] = (ps9, pk9, pp9, pn9)
             elif gid in native_kind9 and has_ca and self.spot.price(sym):
                 px = self.spot.price(sym)
                 src9, age9 = "cex:글로벌", glob_age9(sym)
@@ -6808,6 +6976,8 @@ class StateBuilder:
                 for ch2, ca2 in gid_pairs[gid]:
                     lp9 = self.spot.dex_usd.get(f"{ch2}:{ca2}") or px or 0
                     hold_prio[(ch2, ca2)] = max(hold_prio.get((ch2, ca2), 0.0), float(lp9 or 0) * qty)
+            if gid in pre_used9 and pre_used9[gid][1] and gid in live and gid not in quarantined and qty > 0:
+                hold_prio[pre_used9[gid][1]] = max(hold_prio.get(pre_used9[gid][1], 0.0), float(px or 0) * qty)
             if gid not in live:
                 continue
             if gid in quarantined:
@@ -6830,6 +7000,13 @@ class StateBuilder:
                     row["pxFrozen"] = True
                 if age9 is not None:
                     row["pxAge"] = int(max(0, age9))
+                if gid in pre_used9:
+                    row["pxPre"] = 1
+                    if pre_used9[gid][3]:
+                        row["pxPreN"] = pre_used9[gid][3]
+                    pk9 = pre_used9[gid][1]
+                    if pk9 and pk9[0] in self.spot.off_chains:
+                        row["pxFrozen"] = True
             if gid_pairs.get(gid) and qty * (px or 0) >= 1:
                 row["ck"], row["ca"] = gid_pairs[gid][0][0], gid_pairs[gid][0][1]
             if dsym9:
@@ -6863,6 +7040,10 @@ class StateBuilder:
                             d9["sym"], d9["gid"], d9["ex"], d9["cex"], d9["pair"], d9["dex"], d9["diff"] * 100,
                             f"{d9['res']:,}", f"{d9['usd']:,.0f}")
         self.__dict__["_proof_div_seen"] = {d9["gid"] for d9 in proof_div9}
+        for g9 in sorted(set(pre_used9) - set(self.__dict__.get("_pre_seen") or ())):
+            log.info("거래 시작 전 평가: g%s %s — 업비트 마켓 없음 → %s $%.6g (%s)", g9, (G.get(g9) or {}).get("sym"), pre_used9[g9][0], pre_used9[g9][2],
+                     ("입출금 증명 g" + ",".join(str(o9) for o9 in pre_og9[g9])) if pre_og9.get(g9) else f"증명 없음 · 거래소 {pre_used9[g9][3]}곳 일치")
+        self.__dict__["_pre_seen"] = set(pre_used9)
         self._live_px = dict(live_px)
         okx_thresh = float((self.cfg.get("okx_dex") or {}).get("krw_threshold", 1_000_000))
         rate_now = self.spot.rate or 1400
@@ -6942,6 +7123,8 @@ class StateBuilder:
                         return "가짜 대표 심볼(정품 CA 아님)"
                     return None
                 labels9 = {a9: (aliases.get(a9) or self.addr_label.get(a9) or a9[:8]) for a9 in rabby.evm_wallets(self.cfg, include_disabled=True)}
+                watch9 = set(rabby.watch_addrs(rb_st, list(labels9), self.__dict__.get("_bot_wallet_usd"), rabby.settings(self.cfg)["min_wallet_usd"]))
+                labels9 = {a9: l9 for a9, l9 in labels9.items() if a9 in watch9}
                 try:
                     import hl_spot
                     hl9 = hl_spot.known_addresses(self.cfg)
@@ -6958,7 +7141,8 @@ class StateBuilder:
                 rb_debts = rabby.debt_rows(rb_view, labels9)
                 rb_view["labels"] = labels9
                 rb_view["state"] = {"backoffUntil": rb_st.get("backoffUntil"), "lastErr": rb_st.get("lastErr"),
-                                    "calls": rb_st.get("calls"), "enabled": rabby.settings(self.cfg)["enabled"]}
+                                    "calls": rb_st.get("calls"), "enabled": rabby.settings(self.cfg)["enabled"],
+                                    "minUsd": rabby.settings(self.cfg)["min_wallet_usd"]}
         except Exception as e9:
             log.warning("Rabby 보강 실패(봇 숫자만 표시): %s", e9)
             rb_view, rb_debts = None, []
@@ -8126,15 +8310,32 @@ class StateBuilder:
         lp_events_out = sorted((e9 for l9 in lp_ev_by9.values() for e9 in l9[-300:]), key=lambda e9: e9["_ts"])
         lp_total = sum((l9["value"] + l9["fees"] + (l9.get("rewards") or 0)) for l9 in lps_out)
         rb_recon = []
+        bot_w9 = {}
+        row_px_b9 = {c9["key"]: float(c9.get("price") or 0) for c9 in coins + stables}
+        for gid9, lr9 in locs_by_gid.items():
+            px9 = row_px_b9.get(f"g{gid9}", 0.0)
+            if px9 <= 0:
+                continue
+            for l9 in lr9:
+                p9 = str(l9["location"] or "").split(":")
+                if p9[0] != "wallet" or len(p9) < 3 or not p9[2]:
+                    continue
+                u9 = float(Decimal(l9["qty_norm"])) * px9
+                if u9 > 0:
+                    bot_w9[p9[2].lower()] = bot_w9.get(p9[2].lower(), 0.0) + u9
+        for l9 in lps_out:
+            ow9 = str((lp_onchain.get(l9.get("key")) or {}).get("owner") or "").lower()
+            if ow9:
+                bot_w9[ow9] = bot_w9.get(ow9, 0.0) + float(l9.get("value") or 0) + float(l9.get("fees") or 0) \
+                    + float(l9.get("rewards") or 0)
+        self._bot_wallet_usd = dict(bot_w9)
+        if self.__dict__.get("_bot_usd_saved") != bot_w9:
+            try:
+                common.atomic_write_json(os.path.join(common.STATE_DIR, rabby.BOTUSD_NAME), {"v": 1, "t": int(now), "w": {a9: round(v9, 2) for a9, v9 in bot_w9.items()}})
+                self._bot_usd_saved = dict(bot_w9)
+            except OSError as e9:
+                log.warning("지갑별 봇 평가 저장 실패(다음 빌드에 다시): %s", e9)
         if rb_view:
-            bot_w9 = {}
-            for (ch9, a9), lst9 in priced9.items():
-                bot_w9[a9] = bot_w9.get(a9, 0.0) + sum(u9 for _s9, u9 in lst9)
-            for l9 in lps_out:
-                ow9 = str((lp_onchain.get(l9.get("key")) or {}).get("owner") or "").lower()
-                if ow9:
-                    bot_w9[ow9] = bot_w9.get(ow9, 0.0) + float(l9.get("value") or 0) + float(l9.get("fees") or 0) \
-                        + float(l9.get("rewards") or 0)
             for a9, wv9 in sorted(rb_view["wallets"].items(), key=lambda kv: -kv[1]["rabby"]):
                 b9 = round(bot_w9.get(a9, 0.0), 2)
                 rb_recon.append({"addr": a9, "label": rb_view["labels"].get(a9) or a9[:8], "bot": b9, "rabby": wv9["rabby"],
@@ -8381,6 +8582,8 @@ class StateBuilder:
                          "fut": fut.get("realizedByDate") or {},
                          "tax": tax_rows, "taxToday": today_kst,
                          "futDetail": getattr(self, "_fut_detail", None),
+                         "futEv": getattr(self, "_fut_ev", None), "futStale": list(fut.get("staleExchanges") or ()),
+                         "futAccts": getattr(self, "_fut_accts", None) or {},
                          "pos": positions}
         acts_md9 = {acct_norm.mmdd(k9): v9 for k9, v9 in day_acts.items() if k9 >= lo9}
         self._ph("day_index")
@@ -8537,7 +8740,7 @@ class StateBuilder:
         diag_out["sale_links"] = len(sale_links)
         diag_out["sale_cost_usd"] = round(float(sum((u9["cost"] for u9 in sale_used.values()), Decimal(0))), 2)
         diag_out["sale_heuristic"] = len((common.read_json(SALE_PATH, {}) or {}).get("heuristic") or [])
-        diag_out["workers"] = sorted(t9.name for t9 in threading.enumerate() if t9.name.endswith("-worker"))
+        diag_out["workers"] = sorted(n9 for n9 in self._thread_names() if n9.endswith("-worker"))
         diag_out["net_pace"] = netpace.stats()
         diag_out["proof_diverge"] = list(self.spot.proof_div)
         diag_out["goplus"] = dict(GOPLUS_STATUS)
@@ -8579,6 +8782,7 @@ class StateBuilder:
                "build": dict(build_stats(self.__dict__.get("_build_hist") or []), cold_ms=self.__dict__.get("_build_cold_ms")),
                "build_hist": list(self.__dict__.get("_build_hist") or []),
                "phases": self._ph_view(),
+               "build_proc": buildproc.status(),
                "rabby": ({"wallets": [{k9: r9[k9] for k9 in ("addr", "label", "bot", "rabby", "diff", "only", "rest", "fetchedAt", "top") if k9 in r9}
                                       | ({"gapSince": r9["gapSince"]} if r9.get("gapSince") else {})
                                       for r9 in rb_recon], "status": rb_view["state"]} if rb_view is not None else None)}
@@ -8650,7 +8854,7 @@ class StateBuilder:
             "unpricedTop": [dict(w9, cost=round(w9["cost"], 2), ref=round(w9["ref"], 2))
                             for w9 in sorted(unpriced_w, key=lambda w9: -max(w9["cost"], w9["ref"]))[:20] if max(w9["cost"], w9["ref"]) >= 1],
             "backfillProgress": self._backfill_progress(conn),
-            "backfillSince": self._backfill_since_view(),
+            "backfillSince": self._backfill_since_view(conn),
             "gasByMonth": {m: [{"chain": CHAIN_NAME.get(c, c), "spot": _f(v["usd"], 2) or 0,
                                 "tx": v["tx"]}
                                for c, v in sorted(mm.items(), key=lambda kv: -kv[1]["usd"])]
@@ -8704,7 +8908,7 @@ class StateBuilder:
 
     BF_REQ_PATH = os.path.join(common.STATE_DIR, "backfill_request.json")
 
-    def _backfill_since_view(self):
+    def _backfill_since_view(self, conn=None):
         try:
             req = common.read_json(self.BF_REQ_PATH, {}) if os.path.exists(self.BF_REQ_PATH) else {}
         except BaseException:
@@ -8729,14 +8933,15 @@ class StateBuilder:
                                  "updated": it.get("updated")})
         meta = {}
         try:
-            c9 = dbm.open_db(common.DB_PATH, readonly=True)
+            c9 = conn if conn is not None else dbm.open_db(common.DB_PATH, readonly=True)
             try:
                 for r9 in c9.execute("SELECT k, v FROM meta WHERE k IN ('ext_rebuilt_at', 'ext_rebuild_fail_at', 'ext_rebuild_fails',"
                                      " 'ext_rebuild_last_error', 'ext_rebuild_started_at', 'rebuild_not_before')"
                                      " OR k LIKE 'ext_prewindow:%'").fetchall():
                     meta[r9["k"]] = r9["v"]
             finally:
-                c9.close()
+                if c9 is not conn:
+                    c9.close()
         except Exception:
             pass
         g9 = bf_engine.SINCE.target(None)
@@ -12003,7 +12208,8 @@ class StateBuilder:
                 changed = True
                 log.info("일별 %s: 기존 부채 첫 반영 소급(posting %s) %s %s × $%s → %+.2f", ck9, m9["pid"], g09.get("sym"),
                          format(m9["q"], "f"), format(p9, "f"), float(dv9))
-        bf_gids9 = sorted(gid9 for gid9 in (set(ca_gids) | set(ex_gids)) if gid9 in G and gid9 not in override_px
+        pre9 = self.__dict__.get("_px_pre_gids") or {}
+        bf_gids9 = sorted(gid9 for gid9 in (set(ca_gids) | set(ex_gids)) if gid9 in G and gid9 not in override_px and gid9 not in pre9
                           and not G[gid9].get("is_stable") and not G[gid9].get("is_fiat") and (live_px.get(gid9) or 0) > 0)
         bf_rev9 = ",".join(str(x) for x in bf_gids9)
         bf_seen9 = self.__dict__.setdefault("_px_bf_seen", {})
@@ -12574,6 +12780,7 @@ class StateBuilder:
         by_date, rows = {}, []
         by_date_krw = {}
         by_date_ex = {}
+        fev9 = []
         for r9 in ev:
             try:
                 t9 = int(r9.get("t") or 0)
@@ -12587,6 +12794,7 @@ class StateBuilder:
             by_date[dk9] = by_date.get(dk9, 0) + amt9
             k9 = amt9 * (fxb.rate_at(t9 // 1000) if fxb else float(self.spot.rate or 1384))
             by_date_krw[dk9] = by_date_krw.get(dk9, 0) + k9
+            fev9.append((dk9, t9, amt9, k9, r9))
             x9 = by_date_ex.setdefault((dk9, r9.get("ex")), [0.0, 0.0, 0, 0])
             x9[0] += amt9
             x9[1] += k9
@@ -12611,6 +12819,8 @@ class StateBuilder:
                              "ex": exn.get(r9.get("ex"), r9.get("ex")), "amt": amt9})
         fee9.sort(key=lambda x: -x["_ts"])
         self._fut_detail = {"rows": rows, "fee": fee9}
+        self._fut_ev = fev9
+        self._fut_accts = {k9: sorted(v9) for k9, v9 in (perp_on or {}).items()}
         fsum = {}
         for x9 in rows:
             k9 = (datetime.fromtimestamp(x9["_ts"] / 1000, KST).strftime("%Y-%m"), x9["sym"], x9["ex"])
@@ -12767,6 +12977,7 @@ class StateBuilder:
         return False
 
     CEX_PX_ORDER = ("binance", "bybit", "okx", "gate", "kucoin", "upbit", "bithumb")
+    PRE_DIVERGE = 2.0
     _CEX_FAIL_STATES = {"CANCELLED", "CANCELED", "FAILED", "FAIL", "REJECTED", "REJECT", "REFUNDED"}
 
     def _cex_proof(self, conn) -> dict:
@@ -13493,10 +13704,12 @@ class StateBuilder:
         buy = side == "buy"
         fn = (lambda **k9: self.receipt_chart_buy(iso, sym, iv, venue, bvenue, **k9)) if buy else \
             (lambda **k9: self.receipt_chart(iso, sym, iv, after, venue, **k9))
+        if side == "fut":
+            fn = lambda **k9: self.fut_chart(iso, sym, iv, venue, **k9)
         hit = fn(cache_only=True)
         if hit is not None:
             return hit, "ok"
-        key = (iso, sym, iv, "-" if buy else after, venue or "") + (("buy", bvenue or "") if buy else ())
+        key = (iso, sym, iv, "-" if buy else after, venue or "") + (("buy", bvenue or "") if buy else ()) + (("fut",) if side == "fut" else ())
         now = time.time()
         J, L = StateBuilder._CHART_JOBS, StateBuilder._CHART_JLOCK
         with L:
@@ -13629,6 +13842,131 @@ class StateBuilder:
         if (out.get("chart") or {}).get("ok") or not fetch:
             cache[ck] = (time.time(), out)
         return self._with_eval(out)
+
+    FUT_RC_MAX = 16
+    FUT_SPAN_LO_S = 30 * 3600
+    FUT_SPAN_MAX_S = 7 * 86400
+    FUT_EXN = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}
+
+    def _fut_px(self):
+        px = {ex: fut_rcpt.load_cached(ex) for ex in fut_rcpt.PX_EX}
+        return px, tuple(id(px[ex]) for ex in fut_rcpt.PX_EX)
+
+    def fut_receipt(self, iso):
+        idx = getattr(self, "_day_idx", None)
+        if fut_rcpt is None or not idx or idx.get("futEv") is None:
+            return None
+        px, pk = self._fut_px()
+        ck = (idx["builtAt"], iso)
+        C = self.__dict__.setdefault("_fut_rc", {})
+        hit = C.get(ck)
+        if hit and hit[0] == pk and hit[1] is idx["futEv"]:
+            return hit[2]
+        body = fut_rcpt.assemble(iso, idx["futEv"], px, dict(self.FUT_EXN, **PERP_NAMES), _fut_by_date_ex, int(time.time() * 1000),
+                                 stale=idx.get("futStale") or (), accts=idx.get("futAccts") or {})
+        body["builtAt"] = idx["builtAt"]
+        if len(C) >= self.FUT_RC_MAX:
+            C.pop(next(iter(C)))
+        C[ck] = (pk, idx["futEv"], body)
+        return body
+
+    @staticmethod
+    def _fut_spec(ex, coin, sym):
+        q = fut_rcpt.quote_of(sym)
+        q = q if q in ("USDT", "USDC") else "USDT"
+        if ex == "bybit":
+            return {"venue": "bybit_linear", "base": coin, "quote": q}
+        return {"venue": "binance_futures", "base": coin, "quote": q}
+
+    def fut_chart(self, iso, sym, iv="5m", venue=None, fetch=True, cache_only=False):
+        base = self.fut_receipt(iso)
+        if base is None:
+            return None
+        c = next((x for x in base.get("coins") or () if x.get("coin") == sym), None)
+        if base.get("empty") or c is None:
+            return {"ok": True, "empty": True, "side": "fut", "date": iso, "sym": sym}
+        ck = ("fut", base.get("builtAt"), id(base), iso, sym, iv, venue or "", bool(fetch))
+        cache = self.__dict__.setdefault("_chart_cache", {})
+        hit = cache.get(ck)
+        if hit and time.time() - hit[0] < self.CHART_TTL_S:
+            return hit[1]
+        if cache_only:
+            return None
+        trs = c.get("trades") or []
+        tot = sum(abs(v["usd"]) for v in c["venues"]) or 0.0
+        vby = {}
+        for v in c["venues"]:
+            x = vby.setdefault(v["exKey"], {"key": v["exKey"], "label": v["ex"] + " " + v["symbol"], "sym": v["symbol"], "n": 0, "usd": 0.0})
+            x["n"] += v["n"]
+            x["usd"] += v["usd"]
+        venues = sorted(vby.values(), key=lambda x: (-abs(x["usd"]), x["key"]))
+        for x in venues:
+            x["usd"] = round(x["usd"], 2)
+            x["sharePct"] = round(100.0 * abs(x["usd"]) / tot, 1) if tot else None
+        sel = next((x for x in venues if x["key"] == venue), None) or venues[0]
+        if not trs:
+            out = {"ok": True, "side": "fut", "date": iso, "sym": sym, "label": c.get("label"), "iv": iv, "builtAt": base.get("builtAt"), "venues": [], "venue": sel["key"],
+                   "cur": "USD", "window": None, "marks": [], "spans": [],
+                   "chart": {"ok": False, "src": None, "tried": [], "candles": [], "complete": True, "why": "그날 이 종목은 청산이 없어(수수료·펀딩만) 차트를 그리지 않아요"}}
+            cache[ck] = (time.time(), out)
+            return out
+        now = time.time()
+        ex_ts = [float(t["exitTs"]) for t in trs]
+        en_ts = [float(t["entryTs"]) for t in trs if t.get("entryTs")] + [float(o["ts"]) for o in c.get("opens") or ()]
+        w1 = min(max(ex_ts) + 3600, now)
+        w0 = min(min(ex_ts) - 3600, (min(en_ts) - 1800) if en_ts else float("inf"))
+        w0 = max(w0, w1 - self.FUT_SPAN_MAX_S)
+        iv_use = "1h" if w1 - w0 > self.FUT_SPAN_LO_S else iv
+        iv_s = candles.IV_SEC[iv_use]
+        w0, w1 = int(w0) // iv_s * iv_s, int(w1)
+        out = {"ok": True, "side": "fut", "date": iso, "sym": sym, "label": c.get("label"), "iv": iv, "ivUse": iv_use, "builtAt": base.get("builtAt"),
+               "venues": [{k: v for k, v in x.items() if k != "sym"} for x in venues], "venue": sel["key"], "cur": "USD",
+               "window": {"from": w0, "to": w1}, "chart": None, "marks": [], "spans": []}
+        cs9 = None
+        if fetch:
+            prim = self._fut_spec(sel["key"], sym, sel["sym"])
+            if sel["key"] not in ("binance", "bybit"):
+                out["srcNote"] = f"{sel['label']} 봉 대신 같은 코인 선물 봉"
+            plan = candles.plan_chain(prim, sym, "USD")
+            alts = [(sp, None, "alt_cex") for sp in ({"venue": "binance_futures", "base": sym, "quote": "USDT"},
+                                                       {"venue": "bybit_linear", "base": sym, "quote": "USDT"})
+                    if candles.spec_key(sp) != candles.spec_key(prim)]
+            plan = plan[:1] + alts + plan[1:]
+            ref = sorted(float(t["exitPx"]) for t in trs if t.get("exitPx"))
+            res = candles.best_chart(plan, iv_use, w0, w1 + iv_s, "USD", budget_s=self.CHART_BUDGET_S, ref_px=ref[len(ref) // 2] if ref else None)
+            cs9 = res["candles"]
+            out["chart"] = {"ok": res["ok"], "src": res["src"], "tried": res["tried"], "candles": cs9 or [], "complete": bool(res.get("complete", True)),
+                            "volUnit": "coin" if res["ok"] else None,
+                            "why": None if res["ok"] else "봉을 받지 못했어요 — " + " · ".join(
+                                f"{t['label']}: {t.get('note') or t.get('why')}" for t in res["tried"][:4])}
+        bars = sorted(cs9 or [], key=lambda r9: r9[0])
+
+        def close_at(ts9):
+            if not bars:
+                return None
+            lo9, hi9 = 0, len(bars) - 1
+            while lo9 < hi9:
+                mid9 = (lo9 + hi9 + 1) // 2
+                if bars[mid9][0] <= ts9:
+                    lo9 = mid9
+                else:
+                    hi9 = mid9 - 1
+            return bars[lo9][4]
+        for t in trs:
+            p9 = t.get("exitPx")
+            out["marks"].append({"id": t["id"], "ts": t["exitTs"], "px": p9 if p9 else close_at(t["exitTs"]), "kind": "close", "side": t.get("side"),
+                                 "exKey": t["exKey"], "q": t.get("qty"), "pnl": t["pnl"], "approx": not p9})
+            if p9 and t.get("entryPx"):
+                out["spans"].append({"id": t["id"], "from": t.get("entryTs"), "to": t["exitTs"], "entryPx": t["entryPx"], "exitPx": p9,
+                                     "side": t.get("side"), "pnl": t["pnl"]})
+        for o in c.get("opens") or ():
+            out["marks"].append({"ts": o["ts"], "px": o["px"], "kind": "open", "side": o["side"], "exKey": o["exKey"], "q": o.get("q"), "approx": False})
+        out["marks"].sort(key=lambda x: x["ts"])
+        if len(cache) >= self.CHART_CACHE_MAX:
+            cache.pop(next(iter(cache)))
+        if (out.get("chart") or {}).get("ok") or not fetch:
+            cache[ck] = (time.time(), out)
+        return out
 
     def purge_memo_charts(self, iso, sym):
         def hit(key9):
@@ -14240,6 +14578,145 @@ def _chain_usd_now():
     return out
 
 
+def _chain_auto_off_info():
+    b9 = BUILDER
+    if b9 is None:
+        return None
+    try:
+        last9 = b9.latest(0) if b9.__dict__.get("_built_sig") != b9._input_sig() else b9.__dict__.get("_last_out")
+    except (Exception, SystemExit):
+        return None
+    f9 = last9.get("fields") if isinstance(last9, dict) and isinstance(last9.get("fields"), dict) else last9
+    if not isinstance(f9, dict):
+        return None
+    rev9 = {v: k for k, v in CHAIN_NAME.items()}
+    out = {}
+
+    def add9(k9, v9):
+        try:
+            v9 = float(v9 or 0)
+        except (TypeError, ValueError):
+            return
+        if math.isfinite(v9) and v9 > 0:
+            e9 = out.setdefault(k9, {"usd": 0.0})
+            e9["usd"] += v9
+    for row in list(f9.get("coins") or []) + list(f9.get("stables") or []):
+        if not isinstance(row, dict):
+            continue
+        try:
+            px9 = float(row.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(px9) or px9 <= 0:
+            continue
+        for l9 in row.get("locs") or []:
+            k9 = rev9.get(l9.get("ch")) if isinstance(l9, dict) else None
+            if k9:
+                try:
+                    add9(k9, float(l9.get("qty") or 0) * px9)
+                except (TypeError, ValueError):
+                    continue
+    for lp9 in f9.get("lps") or []:
+        if not isinstance(lp9, dict) or lp9.get("closed"):
+            continue
+        k9 = lp9.get("chainKey") or rev9.get(lp9.get("chain"))
+        if k9:
+            for a9 in ("value", "fees", "rewards"):
+                add9(k9, lp9.get(a9))
+    try:
+        for it9 in (_nft_tracker().view() or {}).get("tracked") or []:
+            if isinstance(it9, dict) and it9.get("chain") and not it9.get("hidden"):
+                add9(str(it9["chain"]), (it9.get("value") or {}).get("usd") if isinstance(it9.get("value"), dict) else None)
+    except Exception:
+        return None
+    try:
+        lim9 = min(100.0, dust_usd_eff(b9.prefs()))
+    except Exception:
+        lim9 = 50.0
+    return {"lim": lim9, "chains": out}
+
+
+class _SearchPool:
+    N = 2
+    TIMEOUT = 20.0
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.idle = []
+        self.sem = threading.BoundedSemaphore(self.N)
+        self.off_until = 0.0
+
+    def _spawn(self):
+        return subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_worker.py")],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, bufsize=0,
+                                cwd=common.BASE_DIR, env=dict(os.environ))
+
+    @staticmethod
+    def _kill(p):
+        try:
+            p.kill()
+            p.wait(timeout=5)
+        except Exception:
+            pass
+
+    def run(self, req: dict):
+        if time.time() < self.off_until or not self.sem.acquire(timeout=5):
+            return None
+        p = None
+        try:
+            with self.lock:
+                while self.idle:
+                    p = self.idle.pop()
+                    if p.poll() is None:
+                        break
+                    p = None
+            if p is None:
+                p = self._spawn()
+            import select
+            end9 = time.monotonic() + self.TIMEOUT
+            fd_in9, fd_out9 = p.stdin.fileno(), p.stdout.fileno()
+            os.set_blocking(fd_in9, False)
+            os.set_blocking(fd_out9, False)
+            msg9 = json.dumps(req).encode("ascii") + b"\n"
+            while msg9:
+                left9 = end9 - time.monotonic()
+                if left9 <= 0 or not select.select([], [fd_in9], [], left9)[1]:
+                    raise TimeoutError("검색 일꾼 입력 대기 초과")
+                try:
+                    n9 = os.write(fd_in9, msg9)
+                except BlockingIOError:
+                    continue
+                msg9 = msg9[n9:]
+            line9 = bytearray()
+            while not line9.endswith(b"\n"):
+                left9 = end9 - time.monotonic()
+                if left9 <= 0 or not select.select([fd_out9], [], [], left9)[0]:
+                    raise TimeoutError("검색 일꾼 응답 없음")
+                try:
+                    chunk9 = os.read(fd_out9, 65536)
+                except BlockingIOError:
+                    continue
+                if not chunk9:
+                    raise EOFError("검색 일꾼 응답 닫힘")
+                line9.extend(chunk9)
+            if line9.count(b"\n") != 1:
+                raise ValueError("검색 일꾼 응답 줄 수 이상")
+            out9 = json.loads(line9)
+            with self.lock:
+                self.idle.append(p)
+            p = None
+            return out9.get("body") if isinstance(out9, dict) and out9.get("ok") else None
+        except Exception as e:
+            log.warning("검색 일꾼 실패(직접 검색으로): %s", type(e).__name__)
+            self.off_until = time.time() + 60
+            return None
+        finally:
+            if p is not None:
+                self._kill(p)
+            self.sem.release()
+
+
+SEARCH_POOL = _SearchPool()
 BUILDER: StateBuilder = None
 OA_Q: "other_assets.Quoter | None" = None
 
@@ -15367,18 +15844,38 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(503, {"ok": False, "error": "기록 색인을 만드는 중 — 잠시 뒤 다시 시도하세요"})
         self._send(200, body)
 
+    def _send_fut_receipt(self, query):
+        qs = urllib.parse.parse_qs(query)
+        d9 = (qs.get("date") or [""])[0].strip()
+        if not self._DAY_RE.fullmatch(d9):
+            return self._send(400, {"ok": False, "error": "date(YYYY-MM-DD) 필요"})
+        try:
+            datetime.strptime(d9, "%Y-%m-%d")
+        except ValueError:
+            return self._send(400, {"ok": False, "error": "date는 유효한 YYYY-MM-DD 날짜여야 합니다"})
+        fn9 = getattr(BUILDER, "fut_receipt", None)
+        if fn9 is None:
+            return self._send(200, {"ok": True, "empty": True, "date": d9})
+        BUILDER.snapshot()
+        body = fn9(d9)
+        if body is None:
+            BUILDER.kick_refresh()
+            return self._send(503, {"ok": False, "error": "기록 색인을 만드는 중 — 잠시 뒤 다시 시도하세요"})
+        self._send(200, body)
+
     _IV_OK = ("1m", "5m")
     _AFTER_OK = ("1h", "6h", "24h")
 
-    def _chart_args(self, src):
+    def _chart_args(self, src, fut_ok=False):
         if not isinstance(src, dict):
             return None, {"ok": False, "error": "date(YYYY-MM-DD)·sym 필요"}
         g = lambda k, d="": (src.get(k) if isinstance(src.get(k), str) else d)
         d9, sym = (g("date") or "").strip(), (g("sym") or "").strip()
         iv, after, venue = g("iv", "5m") or "5m", g("after", "1h") or "1h", (g("venue") or "").strip() or None
         side, bvenue = g("side", "sell") or "sell", (g("bvenue") or "").strip() or None
-        if side not in ("sell", "buy") or (src.get("side") is not None and not isinstance(src.get("side"), str)) or (bvenue is not None and len(bvenue) > 200):
-            return None, {"ok": False, "error": "side = sell|buy · bvenue ≤ 200자"}
+        if side not in (("sell", "buy", "fut") if fut_ok else ("sell", "buy")) or (src.get("side") is not None and not isinstance(src.get("side"), str)) \
+                or (bvenue is not None and len(bvenue) > 200):
+            return None, {"ok": False, "error": "side = sell|buy" + ("|fut" if fut_ok else "") + " · bvenue ≤ 200자"}
         if not self._DAY_RE.fullmatch(d9) or not sym or len(sym) > 120:
             return None, {"ok": False, "error": "date(YYYY-MM-DD)·sym 필요"}
         try:
@@ -15393,7 +15890,7 @@ class Handler(BaseHTTPRequestHandler):
         if not onboarding.origin_ok(self, required=False):
             return self._send(403, {"ok": False, "error": "다른 출처(사이트)에서 온 요청은 거부합니다"})
         qs = urllib.parse.parse_qs(query)
-        a9, err = self._chart_args({k: v[0] for k, v in qs.items() if v})
+        a9, err = self._chart_args({k: v[0] for k, v in qs.items() if v}, fut_ok=True)
         if err:
             return self._send(400, err)
         BUILDER.snapshot()
@@ -15590,9 +16087,12 @@ class Handler(BaseHTTPRequestHandler):
         qs9 = urllib.parse.parse_qs(query or "")
         g9 = lambda k: (qs9.get(k) or [""])[0]
         kinds9 = [k for k in g9("kinds").split(",") if k] or None
+        req9 = {"q": g9("q")[:search_index.Q_MAX], "kinds": kinds9, "limit": g9("limit") or None,
+                "after": g9("after") or None, "before": g9("before") or None, "offset": g9("offset") or None}
         try:
-            body = search_index.search(g9("q")[:search_index.Q_MAX], kinds=kinds9, limit=g9("limit") or None,
-                                       after=g9("after") or None, before=g9("before") or None, offset=g9("offset") or None)
+            body = SEARCH_POOL.run(req9)
+            if body is None:
+                body = search_index.search(req9["q"], kinds=kinds9, limit=req9["limit"], after=req9["after"], before=req9["before"], offset=req9["offset"])
         except Exception as e9:
             log.warning("검색 실패: %s", type(e9).__name__)
             return self._send(503, {"ok": False, "error": "검색하지 못했어요 — 잠시 뒤 다시"})
@@ -15854,6 +16354,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_curve_hist(query)
             elif path == "/api/receipt":
                 self._send_receipt(query)
+            elif path == "/api/fut_receipt":
+                self._send_fut_receipt(query)
             elif path == "/api/receipt_chart":
                 self._send_receipt_chart(query)
             elif path == "/api/receipt_eval":
@@ -16649,6 +17151,7 @@ def balcheck_loop():
 
 def chainsweep_loop():
     time.sleep(240)
+    _chain_auto_off()
     sp_once = False
     while True:
         st9 = chainsweep.settings(BUILDER.cfg)
@@ -16704,11 +17207,27 @@ def chainsweep_loop():
                     chainsweep.speed_tick(cfg9, gate9)
                 except (Exception, SystemExit) as e:
                     log.warning("체인 백필 속도 실측 실패(다음 판): %s", e)
+                _chain_auto_off()
             except (Exception, SystemExit) as e:
                 log.warning("미추적 체인 점검 실패(1시간 뒤 재시도): %s", e)
                 time.sleep(3600)
                 continue
         time.sleep(iv)
+
+
+def _chain_auto_off():
+    try:
+        import chainoff
+        off9 = chainoff.auto_off()
+    except (Exception, SystemExit) as e:
+        log.warning("체인 자동 끄기 실패(다음 점검 때): %s", common.safe_err(e)[:160])
+        return []
+    if off9:
+        log.info("체인 자동 끔(활동 없음 — 추천 조건): %s", ", ".join(off9))
+        _append_alert({"ts": int(time.time()), "kind": "CHAIN_AUTO",
+                       "text": "[체인 자동 끔] 지갑마다 보낸 거래가 거의 없고 최근 30일 활동이 없어 조회를 꺼 뒀어요: " + ", ".join(off9)
+                               + "\n켜려면 설정 › 지갑 › 체인별 조회에서 스위치를 켜세요(다시 켠 체인은 자동으로 끄지 않아요)."})
+    return off9
 
 
 def _goplus_fetch(cid, ca_l):
@@ -17039,6 +17558,7 @@ def main():
     BUILDER = StateBuilder()
     import chainoff
     chainoff.BAL_FN = _chain_usd_now
+    chainoff.AUTO_INFO_FN = _chain_auto_off_info
     BUILDER.restore_snapfile()
     threading.Thread(target=BUILDER.spot.loop, daemon=True).start()
     threading.Thread(target=plan_monitor_loop, daemon=True).start()

@@ -762,6 +762,115 @@ def _recon_done() -> list:
         return []
 
 
+NODE_UNITS = ["tj-bsc", "tj-evm", "tj-core", "tj-web"]
+
+
+def _node_apply(group: str) -> dict:
+    try:
+        import wallet_register as wr
+        wr._record_reload({"ts": int(time.time()), "chains": ["bsc", "base"], "source": "nodekeys:" + str(group)[:20], "units": list(NODE_UNITS)})
+    except Exception:
+        pass
+    try:
+        import chainoff
+        return chainoff.apply_info()
+    except Exception:
+        return {"mode": "", "manual": "pm2 restart " + " ".join(NODE_UNITS)}
+
+
+def _node_bad(group: str, got: dict) -> str:
+    import nodekeys
+    for k, v in got.items():
+        if k in (nodekeys.ENV_QN_BSC, nodekeys.ENV_QN_BASE):
+            if not nodekeys._qn_url(v, "bsc" if k == nodekeys.ENV_QN_BSC else "base"):
+                return ("BSC" if k == nodekeys.ENV_QN_BSC else "Base") + " 엔드포인트는 https://…quiknode.pro/… 주소(그 체인용)를 그대로 붙여 넣으세요"
+        elif not nodekeys.KEY_RE.match(v):
+            return "키 형식이 아니에요(영문·숫자·-·_ 8~128자)"
+    return ""
+
+
+def _node_rpc(url: str, method: str, params: list, timeout: float = 15.0):
+    import bf_engine
+    d = bf_engine.http_json(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                            timeout=timeout, retries=1)
+    if not isinstance(d, dict) or "result" not in d:
+        code9 = ((d or {}).get("error") or {}).get("code") if isinstance(d, dict) and isinstance(d.get("error"), dict) else None
+        raise RuntimeError("노드가 거절" + (f"(코드 {int(code9)})" if isinstance(code9, int) else ""))
+    return d["result"]
+
+
+def _node_test(group: str, got: dict) -> dict:
+    import nodekeys
+    bad = _node_bad(group, got)
+    if bad:
+        return {"ok": False, "error": bad}
+    env9 = dict(nodekeys._env())
+    env9.update(got)
+    keys9 = [v for v in got.values() if v] + [env9.get(k, "") for k, _ in ss.GROUPS[group]["fields"]]
+    us = nodekeys.urls(env9)
+    out = []
+    back = {"bsc": 180 * 192_000, "base": 180 * 43_200}
+    probe = {"bsc": "0x0000000000000000000000000000000000001000", "base": "0x4200000000000000000000000000000000000006"}
+    for c in ("bsc", "base"):
+        for p9, u in us[c]:
+            if p9 != group:
+                continue
+            r = {"chain": c, "ok": False}
+            try:
+                head = int(_node_rpc(u, "eth_blockNumber", []), 16)
+                r["head"] = head
+                bal = _node_rpc(u, "eth_getBalance", [probe[c], hex(max(1, head - back[c]))])
+                r["archive"] = isinstance(bal, str) and bal.startswith("0x")
+                r["ok"] = True
+            except Exception as e:
+                nm9 = type(e).__name__
+                kind9 = getattr(e, "kind", "") or ""
+                r["err"] = (str(e) if isinstance(e, RuntimeError) and str(e).startswith("노드가 거절") else
+                            "한도·속도 제한" if kind9 in ("http429", "quota", "budget") else
+                            "인증 실패(키·주소 확인)" if kind9 in ("http4xx",) else
+                            "연결 실패" if kind9 in ("timeout", "conn", "dns", "http5xx", "circuit") or nm9 in ("URLError", "TimeoutError") else
+                            "응답 오류")
+            out.append(r)
+    if not out:
+        return {"ok": False, "error": "시험할 값이 없어요 — 키(또는 엔드포인트)를 넣고 시험하세요"}
+    det = " · ".join(f"{r['chain'].upper()} " + (("최신 블록 OK · 옛 블록(약 180일 전) " + ("됨" if r.get("archive") else "안 됨")) if r["ok"] else ("실패 — " + r.get("err", "")))
+                     for r in out)
+    return {"ok": True, "test": {"ok": all(r["ok"] for r in out), "detail": det, "results": out}}
+
+
+def _recon_late() -> set:
+    if not os.path.exists(common.DB_PATH):
+        return set()
+    try:
+        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=3)
+        try:
+            rd = {}
+            for k, v in c.execute("SELECT k, v FROM meta WHERE k LIKE 'recon_done_%'"):
+                try:
+                    rd[k[len("recon_done_"):]] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            r9 = c.execute("SELECT v FROM meta WHERE k='ext_rebuilt_at'").fetchone()
+            try:
+                er = float(r9[0]) if r9 else 0.0
+            except (TypeError, ValueError):
+                er = 0.0
+            out = set()
+            for ch, a, t in c.execute("SELECT chain, address, added_at FROM wallets"):
+                try:
+                    t9 = float(t or 0)
+                except (TypeError, ValueError):
+                    continue
+                if ch in rd and t9 > rd[ch] and t9 > er:
+                    a9 = str(a or "")
+                    out.add((ch, a9.lower() if a9.startswith("0x") else a9))
+            return out
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return set()
+
+
 def status() -> dict:
     env = ss.read_env()
     try:
@@ -776,15 +885,16 @@ def status() -> dict:
         cfg = raw
     st = ss.read_settings()
     wl = ss.wallet_list(raw)
-    done = set(_recon_done())
+    late9 = _recon_late()
     try:
         import wallet_register as _wr
         wait9 = _wr.pending_addrs() if _wr.auto_reload_alive() else set()
     except Exception:
         wait9 = set()
     for w in wl:
-        w["reconDone"] = sorted(c for c in w["chains"] if c in done)
         a9 = str(w.get("address") or "")
+        k9 = a9.lower() if a9.startswith("0x") else a9
+        w["reconDone"] = sorted(c for c in w["chains"] if (c, k9) in late9)
         if (a9.lower() if a9.startswith("0x") else a9) in wait9:
             w["applyWait"] = True
 
@@ -833,6 +943,7 @@ def status() -> dict:
         "solNeedsHelius": (raw.get("sol") or {}).get("rpc") == "helius",
         "evmNeedsKeys": _evm_needs_keys(raw),
         "explorers": _explorers_status(grp),
+        "nodes": _nodes_status(),
         "exchanges": exs,
         "telegram": {"connected": tg_set, "bot": tgs.get("bot") if tg_set else None,
                      "chatName": tgs.get("chat_name") if tg_set else None,
@@ -881,6 +992,9 @@ def _tier_view(raw_path: str) -> dict:
 
 def _explorers_status(grp) -> dict:
     out = {k: grp(g) for k, g in ss.EXPLORERS.items()}
+    for k in ss.NODE_GROUPS:
+        if out.get(k) is not None:
+            out[k]["set"] = bool(out[k].get("partial"))
     cg = out.get("coingecko")
     if cg is not None:
         cg["plan"] = None
@@ -890,6 +1004,14 @@ def _explorers_status(grp) -> dict:
             except Exception:
                 cg["plan"] = cgplan.status(None)
     return out
+
+
+def _nodes_status() -> dict:
+    try:
+        import nodekeys
+        return nodekeys.status()
+    except Exception:
+        return {}
 
 
 def _perp_status(raw) -> dict:
@@ -1098,6 +1220,24 @@ def _dispatch(act: str, b: dict) -> dict:
     if act == "wallets/label":
         n = ss.rename_wallet(b.get("address"), b.get("label"))
         return {"ok": bool(n), **({} if n else {"error": "없는 주소입니다"})}
+    if act == "keys/nodeplan":
+        import nodekeys
+        p9 = str(b.get("provider") or "")
+        if p9 not in nodekeys.PROVIDERS:
+            return {"ok": False, "error": "알 수 없는 서비스"}
+        plan9, share9, month9 = b.get("plan"), b.get("share"), b.get("month")
+        if plan9 not in ("free", "paid") or (nodekeys.PROVIDERS[p9]["paid_only"] and plan9 != "paid"):
+            return {"ok": False, "error": "요금제는 무료·유료 중 하나(QuickNode 는 유료만)"}
+        if isinstance(share9, bool) or share9 not in nodekeys.SHARES:
+            return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
+        if month9 is not None and (isinstance(month9, bool) or not isinstance(month9, int) or not 0 < month9 <= 10 ** 12):
+            return {"ok": False, "error": "월 한도는 1 이상 정수(비우면 무료 한도 기준)"}
+        with ss.LOCK:
+            cur9 = ss.read_settings()
+            np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
+            np9[p9] = {"plan": plan9, "share": share9, "month": month9}
+            ss.update_settings(**{nodekeys.PLANS_KEY: np9})
+        return {"ok": True, "nodes": nodekeys.status(), "apply": _node_apply(p9)}
     if act == "keys/cgshare":
         v = b.get("share")
         if not cgplan.valid_share(v):
@@ -1111,6 +1251,8 @@ def _dispatch(act: str, b: dict) -> dict:
         fields = [k for k, _ in ss.GROUPS[g]["fields"]]
         if act == "keys/delete":
             ss.write_env({k: None for k in fields})
+            if g in ss.NODE_GROUPS:
+                return {"ok": True, "apply": _node_apply(g)}
             if g in ss.EXCHANGES:
                 _perm_record(g, None)
             if g == "coingecko":
@@ -1125,6 +1267,15 @@ def _dispatch(act: str, b: dict) -> dict:
         for k in fields:
             v = str(vals_in.get(k) or "").strip()
             vals[k] = ss.validate_env_value(k, v) if v else ""
+        if act == "keys/save" and g in ss.NODE_GROUPS:
+            got = {k: v for k, v in vals.items() if v}
+            if not got:
+                return {"ok": False, "error": "값을 넣으세요"}
+            bad = _node_bad(g, got)
+            if bad:
+                return {"ok": False, "error": bad}
+            ss.write_env(got)
+            return {"ok": True, "apply": _node_apply(g)}
         if act == "keys/save":
             if not all(vals.values()):
                 return {"ok": False, "error": "모든 칸을 채우세요"}
@@ -1176,6 +1327,11 @@ def _dispatch(act: str, b: dict) -> dict:
                 except Exception:
                     pass
             return {"ok": True}
+        if g in ss.NODE_GROUPS:
+            lim = _limited("test:" + g, 5, 60) or _limited("test:any", 20, 600)
+            if lim:
+                return lim
+            return _node_test(g, {k: v for k, v in vals.items() if v})
         lim = _limited("test:" + g, 5, 60) or _limited("test:any", 20, 600)
         if lim:
             return lim

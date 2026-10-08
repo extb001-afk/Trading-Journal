@@ -355,16 +355,17 @@ class CpPool:
             else:
                 self.m *= kn / sq
 
-    def take(self, kn, take, cost, merge_key, max_n=64):
+    def take(self, kn, take, cost, merge_key, max_n=64, want=True):
         kn, take, cost = float(kn), float(take), float(cost)
         if take <= 0 or kn <= 0 or not self.it:
             return None
         f = min(1.0, take / kn)
         m = self.m
-        out = self._take_fast(m, f, cost, merge_key, max_n) if len(self.it) > max_n else None
+        out = self._take_fast(m, f, cost, merge_key, max_n, want) if len(self.it) > max_n else None
         if out is None:
             if len(self.it) <= max_n:
                 CpPool.STATS["slow_small"] += 1
+        if out is None and want:
             out = {k: [a[0] * m * f, a[1] * m * f] for k, a in self.it.items() if a[0] * m * f > 1e-15}
             tc = sum(v[1] for v in out.values())
             tq = sum(v[0] for v in out.values()) or 1.0
@@ -374,9 +375,9 @@ class CpPool:
         self.m = m * (1.0 - f)
         if f >= 1.0 - 1e-12 or self.m < 1e-12:
             self._clear()
-        return out
+        return out if want else None
 
-    def _take_fast(self, m, f, cost, merge_key, max_n):
+    def _take_fast(self, m, f, cost, merge_key, max_n, want=True):
         it = self.it
         K = max_n - 1
         fx = self._fx
@@ -394,6 +395,9 @@ class CpPool:
         if T is None or R is None or len(fx.top) != K or T[0] * m * f == R[0] * m * f:
             CpPool.STATS["slow_tie"] += 1
             return None
+        if not want:
+            CpPool.STATS["fast"] += 1
+            return True
         tc = self.sc * m * f
         tq = self.sq * m * f or 1.0
         res = {}

@@ -4,6 +4,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 나머지 키는 더 빨리·더 넓게 받게 해 줄 뿐이고, 탐색기·시세 키는 공표 한도의 80% 를 기준으로 하루 몫을 정해 천천히 부릅니다.
 키는 웹 **설정 › 연결·키** 에 붙여 넣으면 `.env`(권한 600)에 저장되고, 화면에는 •••• 로만 보입니다(거래소 공개 API 키만 끝 4자리).
 키 값은 주소(URL)·로그·상태 파일·화면 응답 어디에도 남기지 않습니다 — 요청 헤더로만 보냅니다.
+(노드 키만 예외 — NodeReal·Ankr·QuickNode 는 키가 노드 주소에 들어가는 방식이라 그 주소를 메모리에서만 만들어 부르고, `config.json`·상태 파일에는 쓰지 않습니다.)
 
 | 키(`.env` 이름) | 꼭 필요? | 무료? | 어디에 쓰나 | 없으면 |
 |---|---|---|---|---|
@@ -11,6 +12,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 | `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 탐색기·RPC 로 받아 느리거나 늦게 기록될 수 있어요 |
 | `TJ_COINGECKO_KEY` | 선택 | Demo 무료 · Pro 유료 | 코인게코 시세 · DEX 토큰 시세 · 원가·차트 시세 · NFT 바닥가 | 전부 무키(공용 무료 한도)로 — 느리고 막히기 쉬워요 |
 | `TJ_OPENSEA_KEY` | 선택 | 무료 신청 | EVM NFT 바닥가 최우선 출처 | 코인게코 NFT 로 |
+| `TJ_NODEREAL_KEY` · `TJ_ANKR_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal·Ankr 무료 키 · QuickNode 유료 | BNB Chain·Base 옛 기록(아카이브) 노드 — 무료 키는 월 한도의 80%, 유료는 사용 비율(기본 10%) 안에서만 | 공개 노드로 — BNB Chain 은 공개 노드 보관 기간까지만 |
 | 거래소 키(업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트) | 선택 | 무료 | 그 거래소 잔고·체결·입출금 | 그 거래소는 안 받아요 |
 | `TJ_TG_TOKEN` · `TJ_TG_CHAT` | 선택 | 무료 | 텔레그램 알림 | 알림 없이 화면만 |
 
@@ -105,6 +107,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 > 권한을 API 로 확인할 수 없는 업비트·빗썸·쿠코인·게이트는 '조회 권한만 켰음' 확인을 눌러야 저장됩니다.
 
 - 쓰는 곳: 그 거래소의 잔고·체결·입출금(무엇을 어디까지 받는지는 [COLLECTION_LIMITS.md](COLLECTION_LIMITS.md)).
+- 바이낸스·바이빗·OKX 는 같은 조회 키로 선물 손익과 선물 영수증의 진입·청산 가격도 받습니다(추가 권한 필요 없음 · 바이낸스만 선물 체결 내역을 조금 더 부름 — 공표 한도 80% 안).
 - 거래소 공개 시세(달러·원화 시세)는 키 없이 받습니다.
 
 ## 텔레그램 — `TJ_TG_TOKEN` · `TJ_TG_CHAT`
@@ -120,6 +123,8 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 Two free keys are required: `TJ_HELIUS_KEY` when you track a Solana wallet and `TJ_ETHERSCAN_KEY` when you track an EVM wallet
 (for Etherscan this is a warning only — collection still runs on public explorers/RPC without it, just slower or later). All other keys are optional.
 Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mode 600), shown masked, and sent only as request headers (never in URLs, logs or state files).
+The one exception is the optional node keys (`TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`, `TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY` — BNB Chain/Base archive
+nodes): those providers put the key in the endpoint URL, which is built in memory only and never written to `config.json` or state files.
 
 - **Helius** (`TJ_HELIUS_KEY`, free plan — https://dashboard.helius.dev): Solana history, tokens and NFT discovery, and backup for new-transaction
   checks (those go to the free publicnode first; Helius cross-checks it). Daily share = 80% of the monthly credits ÷ 30; old history gets it first
@@ -138,4 +143,5 @@ Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mo
   borrowed), and all processes share one budget file.
 - **OpenSea** (`TJ_OPENSEA_KEY`, free application — https://docs.opensea.io/reference/api-keys): first source for EVM NFT floors.
 - **Exchanges**: read-only keys with an IP whitelist only; keys with trade/withdraw/transfer permissions are refused where the exchange lets us check.
+  Binance, Bybit and OKX keys also feed futures PnL and the futures-receipt entry/exit prices (no extra permission).
 - **Telegram** (`TJ_TG_TOKEN`, `TJ_TG_CHAT`): create a bot with @BotFather; the setup wizard fills the chat id.

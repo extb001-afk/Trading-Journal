@@ -23,6 +23,10 @@ import bf_engine
 import calendar
 import depaddr
 from inbox import SegmentWriter
+try:
+    import fut_rcpt
+except Exception:
+    fut_rcpt = None
 
 log = logging.getLogger("tj-exf")
 _exf_fmt = logging.Formatter("%(asctime)s %(levelname)s [tj-exf] %(message)s")
@@ -101,7 +105,8 @@ _BN_W_SAPI = {"/sapi/v1/margin/myTrades": 10, "/sapi/v1/margin/account": 10, "/s
               "/sapi/v1/margin/tradeCoeff": 10, "/sapi/v1/margin/crossMarginData": 1,
               "/sapi/v2/loan/flexible/collateral/data": 400, "/sapi/v2/loan/flexible/loanable/data": 400}
 _BN_W_UID = {"/sapi/v1/capital/withdraw/history": 18000, "/sapi/v1/convert/tradeFlow": 3000}
-_BN_W_FAPI = {"/fapi/v1/income": 30, "/fapi/v2/account": 5, "/fapi/v2/positionRisk": 5, "/fapi/v2/balance": 5}
+_BN_W_FAPI = {"/fapi/v1/income": 30, "/fapi/v2/account": 5, "/fapi/v2/positionRisk": 5, "/fapi/v2/balance": 5,
+              "/fapi/v1/userTrades": 5}
 _KC_W = {"/api/v1/accounts": 5, "/api/v1/withdrawals": 20, "/api/v1/deposits": 5, "/api/v1/fills": 10,
          "/api/v3/margin/accounts": 15, "/api/v1/convert/order/history": 5,
          "/api/v3/isolated/accounts": 15, "/api/v1/margin/config": 25, "/api/v1/isolated/symbols": 3,
@@ -3523,6 +3528,7 @@ def _fut_binance(env):
             "INSURANCE_CLEAR": "REALIZED", "DELIVERED_SETTELMENT": "REALIZED", "DELIVERED_SETTLEMENT": "REALIZED",
             "COMMISSION_REBATE": "FEE", "API_REBATE": "FEE", "REFERRAL_KICKBACK": "FEE"}
     pages = 0
+    n_ev0 = len(ev)
     while pages < 5:
         time.sleep(PACE)
         rows = fcall("/fapi/v1/income", {"startTime": cur, "limit": 1000}) or []
@@ -3560,6 +3566,7 @@ def _fut_binance(env):
                 "init_margin": float(acct.get("totalInitialMargin") or 0),
                 "mm_scope": "cross" if cross_ok9 else None},
                poss, ev, {"income": cur})
+    _px_safe("binance", lambda: _px_binance(fcall, ev, ev[n_ev0:]))
 
 
 def _fut_bybit(env):
@@ -3623,11 +3630,13 @@ def _fut_bybit(env):
         bb_t = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith("bb:")]
         s_ms = (max(bb_t) - DAY * 1000) if bb_t else now_ms
     s_ms = max(now_ms - 729 * DAY * 1000, min(s_ms, now_ms - 7 * DAY * 1000))
+    pxraw = []
     while s_ms < now_ms:
         e_ms = min(s_ms + 7 * DAY * 1000 - 1000, now_ms)
         time.sleep(PACE)
         for c in bpages("/v5/position/closed-pnl", {"category": "linear", "limit": 100,
                                                      "startTime": s_ms, "endTime": e_ms}):
+            pxraw.append(c)
             uid = f"bb:{c.get('orderId')}:{c.get('updatedTime')}"
             if uid in seen:
                 continue
@@ -3650,6 +3659,7 @@ def _fut_bybit(env):
                     time.sleep(PACE)
                     add9.extend(bpages("/v5/position/closed-pnl", {"category": "linear", "limit": 100, "startTime": h9, "endTime": e9}))
                     h9 = e9
+                pxraw.extend(add9)
                 for c in add9:
                     uid = f"bb:{c.get('orderId')}:{c.get('updatedTime')}"
                     if uid in seen:
@@ -3663,6 +3673,7 @@ def _fut_bybit(env):
                 log.warning("bybit 선물 과거 청산손익 채움 실패(다음 주기 재시도): %s", str(e)[:160])
     _fut_write("bybit", {"balance": None, "note": "통합계좌에 포함 — 잔고는 현물 집계에"},
                poss, ev, dict({"closed_pnl": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {})))
+    _px_safe("bybit", lambda: _px_bybit(bpages, pxraw, ev, now_ms))
 
 
 def _fut_okx(env):
@@ -3738,7 +3749,9 @@ def _fut_okx(env):
             except Exception as e:
                 log.warning("okx 선물 과거 정산 채움 실패(다음 주기 재시도): %s", str(e)[:160])
     import itertools as _it
+    pxraw = []
     for b in _it.chain(*srcs):
+        pxraw.append(b)
         bid = b.get("billId")
         t9 = int(b.get("ts") or 0)
         base_uid = f"ok:{bid}"
@@ -3755,6 +3768,123 @@ def _fut_okx(env):
                        "amount": fee, "uid": base_uid + ":f"})
     _fut_write("okx", {"balance": None, "note": "트레이딩 계정에 포함 — 잔고는 현물 집계에"},
                poss, ev, dict({"bills": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {})))
+    _px_safe("okx", lambda: _px_okx(bills, pxraw, now_ms))
+
+
+PX_CALLS_MAX = 20
+PX_OKX_CT_MAX = 5
+
+
+def _px_safe(ex, fn):
+    if fut_rcpt is None:
+        return
+    try:
+        fn()
+    except (Exception, SystemExit) as e:
+        log.warning("%s 선물 가격 옆 파일 실패(정산 무관 · 다음 주기): %s", ex, _xm(repr(e))[:160])
+
+
+def _px_bybit(bpages, raw, ev, now_ms):
+    st = fut_rcpt.load("bybit")
+    cur = dict(st.get("cursor") or {})
+    rows, calls = fut_rcpt.rows_bybit(raw), 0
+    try:
+        if not cur.get("bf_done"):
+            bb_t = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith("bb:")]
+            lo = max(now_ms - 729 * DAY * 1000, (min(bb_t) - DAY * 1000) if bb_t else now_ms)
+            hi9 = fut_rcpt.num(cur.get("bf_hi"))
+            hi = int(hi9) if hi9 is not None and lo < hi9 <= now_ms else now_ms - 6 * DAY * 1000
+            while hi > lo and calls < PX_CALLS_MAX:
+                s9 = max(lo, hi - 7 * DAY * 1000 + 1000)
+                time.sleep(PACE)
+                got = list(bpages("/v5/position/closed-pnl", {"category": "linear", "limit": 100, "startTime": s9, "endTime": hi}))
+                calls += 1 + len(got) // 100
+                rows += fut_rcpt.rows_bybit(got)
+                hi = s9
+                cur["bf_hi"] = hi
+            if hi <= lo:
+                cur["bf_done"] = True
+                cur.pop("bf_hi", None)
+                log.info("bybit 선물 가격 과거 채움 끝(%d콜)", calls)
+    finally:
+        fut_rcpt.update("bybit", rows, now_ms, cursor=cur)
+
+
+def _px_okx(bills, raw, now_ms):
+    st = fut_rcpt.load("okx")
+    cur, ct = dict(st.get("cursor") or {}), dict(st.get("ct") or {})
+    rows = fut_rcpt.rows_okx(raw)
+    try:
+        if not cur.get("bf_done"):
+            got = list(bills("/api/v5/account/bills-archive", {"begin": str(now_ms - 89 * DAY * 1000), "end": str(now_ms - 6 * DAY * 1000)}))
+            rows += fut_rcpt.rows_okx(got)
+            cur["bf_done"] = True
+            log.info("okx 선물 가격 과거 채움 끝(bills %d건)", len(got))
+        miss = {k: v for k, v in (cur.get("ct_miss") or {}).items() if isinstance(v, (int, float)) and v > now_ms - DAY * 1000}
+        need = sorted({r["symbol"] for r in rows + list(st.get("rows") or []) if isinstance(r, dict) and r.get("qty_ct") and r.get("symbol") not in ct and r.get("symbol") not in miss})
+        for iid in need[:PX_OKX_CT_MAX]:
+            time.sleep(PACE)
+            miss[iid] = now_ms
+            d9 = http_json("https://www.okx.com/api/v5/public/instruments?" + urllib.parse.urlencode({"instType": "SWAP", "instId": iid}))
+            if isinstance(d9, dict) and str(d9.get("code")) == "0":
+                ct.update(fut_rcpt.okx_ct(d9.get("data")))
+            if iid in ct:
+                miss.pop(iid, None)
+        cur["ct_miss"] = miss
+    finally:
+        fut_rcpt.update("okx", rows, now_ms, cursor=cur, ct=ct)
+
+
+def _px_binance(fcall, ev, new_ev):
+    now_ms = int(time.time() * 1000)
+    st = fut_rcpt.load("binance")
+    cur = dict(st.get("cursor") or {})
+
+    def ok_job(x):
+        return (isinstance(x, (list, tuple)) and len(x) == 3 and isinstance(x[0], str) and x[0]
+                and fut_rcpt.num(x[1]) is not None and fut_rcpt.num(x[2]) is not None and fut_rcpt.num(x[1]) <= fut_rcpt.num(x[2]))
+    plan = [[x[0], int(x[1]), int(x[2])] for x in (cur.get("bf_plan") if isinstance(cur.get("bf_plan"), list) else []) if ok_job(x)]
+    if not cur.get("bf_done") and not isinstance(cur.get("bf_plan"), list):
+        plan = fut_rcpt.bn_plan(ev, now_ms)
+        log.info("binance 선물 가격 과거 채움 계획 %d창", len(plan))
+    jobs = fut_rcpt.bn_plan(new_ev, now_ms) + plan
+    rows, calls = [], 0
+    try:
+        while jobs and calls < PX_CALLS_MAX:
+            sym, s9, e9 = jobs[0]
+            start, end, finished = int(s9), int(e9), False
+            while calls < PX_CALLS_MAX:
+                time.sleep(PACE)
+                got = fcall("/fapi/v1/userTrades", {"symbol": sym, "startTime": start, "endTime": end, "limit": 1000})
+                calls += 1
+                if not isinstance(got, list):
+                    raise RuntimeError("binance userTrades 형식 오류")
+                rows += fut_rcpt.rows_binance(got)
+                if len(got) < 1000:
+                    finished = True
+                    break
+                nxt = max((int(fut_rcpt.num(t.get("time")) or 0) for t in got if isinstance(t, dict)), default=start)
+                if nxt >= end:
+                    finished = True
+                    break
+                if nxt <= start:
+                    log.warning("binance userTrades %s 같은 ms 1,000건 넘음 — 그 창 나머지는 건너뜀(가격 일부 없음)", sym)
+                    finished = True
+                    break
+                start = nxt
+                jobs[0] = [sym, start, end]
+            if finished:
+                jobs.pop(0)
+            else:
+                jobs[0] = [sym, start, end]
+    finally:
+        cur["bf_plan"] = jobs
+        if not jobs:
+            if not cur.get("bf_done"):
+                log.info("binance 선물 가격 과거 채움 끝")
+            cur["bf_done"] = True
+            cur.pop("bf_plan", None)
+        fut_rcpt.update("binance", rows, now_ms, cursor=cur)
 
 
 def _keep_view(bp9, pend_bp):
@@ -4162,6 +4292,7 @@ def _hl_on(cfg) -> bool:
 
 
 def main():
+    common.cpu_reserve_apply()
     common.ensure_dirs()
     writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
     n9 = common.scrub_secret_file(STATE_PATH)

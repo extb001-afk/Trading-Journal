@@ -62,6 +62,7 @@ html.wow-lock,html.wow-lock body{overflow:hidden}
 .wst-x svg{width:18px;height:18px}
 .wst-b{padding:20px 26px 26px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .wst-grab{display:block;align-self:center;width:40px;height:4px;border-radius:2px;background:var(--line2);margin:10px auto 0;flex:none}
+@media (min-width:641px){.wst-grab{display:none}}   /* design1008 P3-6: 손잡이는 폰 아래 시트에만(PC = 가운데 모달) */
 .wst-box.bare .wst-b{padding-top:14px}
 .wst-dk{display:inline-flex;gap:8px;align-items:center}
 .wst-mb{display:none}
@@ -327,6 +328,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
       : '<div class="wst-h' + (h.slim ? ' slim' : '') + '"><div style="min-width:0"><div class="wst-k pvx">' + esc(h.k) + '</div><h3 id="wowT"' + (h.slim ? ' class="wsr"' : '') + '>' + h.t + '</h3></div><span class="sp"></span>'
         + (h.act || '') + '<button type="button" class="wst-x" data-w="close" aria-label="닫기">' + ICO.x + '</button></div>';
     el.innerHTML = '<div class="wst-bg" data-w="close"></div><div class="wst-box' + (h.bare ? ' bare' : '') + '">' + hd + '<div class="wst-b">' + v.body() + '</div></div>';
+    { const x9 = X(); if (x9 && typeof x9.hydrateLogos === 'function') x9.hydrateLogos(); }
     document.documentElement.classList.add('wow-lock');
     const b = $('.wst-b', el); if (b && keepY) b.scrollTop = keepY;
     if (v.after) v.after(el);
@@ -392,7 +394,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
   const yeYear = () => String(st.ye.year || yeDefault());
   const yearLabel = yr => { const d = new Date(Date.now() + KST), y = String(yr || yeDefault()); return y + '년 결산' + (y === String(d.getUTCFullYear()) && d.getUTCMonth() < 11 ? ' 미리 보기' : ''); };
 
-  const PAL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--accent)', 'var(--c5)'];
+  const PAL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c6)', 'var(--c7)'];
   const LOC_PAL = { '거래소': 'var(--c1)', '원화·기타': 'var(--c5)', '기록 없음': 'var(--line2)' };
   VIEWS.tm = {
     head: () => ({ k: '타임머신', t: st.tm.date ? esc(dlabel(st.tm.date)) + '의 내 지갑' : '지난날의 내 지갑',
@@ -435,9 +437,11 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
           + (chg != null ? ' · 그대로 뒀을 때와 ' + P(actChg - chg, 1, true) + 'p' : '')
           : nowAct > 0 && thenV ? (!sameB ? '최신 기록으로 다시 세는 중 — 잠시 뒤 입출금 뺀 수익률을 보여 드려요' : !fl ? '입출금 기록을 받으면 입출금 뺀 수익률을 보여 드려요' : flMiss ? '입출금·환율 모르는 날 <span class="pvx">' + flMiss + '일</span> — 수익률은 생략했어요' : '') : '') + '</span></div></div>' : '';
       const bl = arr(d.byLoc), blTot = bl.reduce((a, b) => a + num(b[1]), 0) || 1;
-      let segs = bl.slice(0, 5).map((b, i) => [b[0], num(b[1]) / blTot * 100, LOC_PAL[b[0]] || PAL[(i + 1) % 5]]);
+      let segs = bl.slice(0, 5).map(b => [b[0], num(b[1]) / blTot * 100, LOC_PAL[b[0]] || '']);
+      const usedC = new Set(segs.map(s0 => s0[2]).filter(Boolean));
+      segs.forEach(s0 => { if (!s0[2]) { s0[2] = PAL.find(c => !usedC.has(c)) || 'var(--c5)'; usedC.add(s0[2]); } });
       const restS = 100 - segs.reduce((a, s0) => a + s0[1], 0);
-      if (restS > 0.3) segs.push(['그 밖', restS, 'var(--c5)']);
+      if (restS > 0.3) segs.push(['그 밖', restS, usedC.has('var(--c5)') ? 'var(--line2)' : 'var(--c5)']);
       if (!segs.length) segs = items.slice(0, 5).map((it, i) => [it.sym, num(it.share), PAL[i]]);
       const R0 = 82, C = 2 * Math.PI * R0; let off = 0;
       const ring = segs.map(s0 => { const len = Math.max(0, s0[1] / 100 * C - 2.5); const c = '<circle cx="110" cy="110" r="' + R0 + '" fill="none" stroke="' + s0[2] + '" stroke-width="28" stroke-dasharray="' + len.toFixed(1) + ' ' + C.toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 110 110)"/>'; off += s0[1] / 100 * C; return c; }).join('');
@@ -451,7 +455,8 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
         const nm9 = t9.slice(i9 + 3);
         return '<span class="pvl">' + esc(t9.slice(0, i9 + 3)) + '</span><span class="pvl" data-pk="w">' + esc(a9 && typeof a9.ownNm === 'function' ? a9.ownNm(nm9, 'w') : nm9) + '</span>'; };
       const rows = items.map((it, i) => { const cg9 = it.chg != null && DV(it.usd) > 0 ? num(it.nowUsd) / DV(it.usd) * 100 - 100 : null, lc = arr(it.locs), lt = lc.length ? lc.slice(0, 2).map(l => locNmH(l[0])).join(' · ') + (num(it.nLocs) > 2 ? ' 외 ' + (num(it.nLocs) - 2) + '곳' : '') : '보관처 기록 없음';
-        return '<div class="rw"><span class="n"><span class="av" style="background:' + PAL[i % 5] + '">' + esc(String(it.sym).slice(0, 1)) + '</span><span style="min-width:0"><b>' + esc(it.sym) + (it.approx ? '<span class="wapx" aria-label="어림">≈</span>' : '') + '</b><small>' + lt + '</small></span></span>'
+        const lg9 = x.S.D && x.S.D.symLogo && x.S.D.symLogo[it.sym];
+        return '<div class="rw"><span class="n">' + (typeof x.icon === 'function' ? x.icon(it.sym, 'sm', lg9 ? { ck: lg9.ck, ca: lg9.ca } : {}) : '<span class="av" style="background:' + PAL[i % 5] + '">' + esc(String(it.sym).slice(0, 1)) + '</span>') + '<span style="min-width:0"><b>' + esc(it.sym) + (it.approx ? '<span class="wapx" aria-label="어림">≈</span>' : '') + '</b><small>' + lt + '</small></span></span>'
           + '<span class="r">' + P(it.share, 1) + '</span><span class="r c3">' + M(DV(it.usd), { compact: true }) + '</span><span class="r ' + cls(cg9) + '">' + (cg9 != null ? P(cg9, 1, true) : '<span class="pvx" style="color:var(--faint)">시세 없음</span>') + '</span></div>'; }).join('');
       const tbl = '<div class="wcard"><div class="wtbl"><div class="hd"><span>코인 · 보관처</span><span class="r">비중</span><span class="r c3">그날 평가</span><span class="r">지금 그대로면</span></div>' + rows
         + (d.rest ? '<div class="rw"><span class="n"><span class="av" style="background:var(--c5)">+</span><span><b>그 밖 <span class="pvx">' + d.rest.n + '종</span></b><small>작은 보유 합</small></span></span><span class="r">' + P(d.rest.usd / d.total * 100, 1) + '</span><span class="r c3">' + M(DV(d.rest.usd), { compact: true }) + '</span><span class="r ' + cls(d.rest.usd ? d.rest.nowUsd / DV(d.rest.usd) - 1 : 0) + '">' + (d.rest.usd && d.rest.nowUsd ? P((d.rest.nowUsd / DV(d.rest.usd) - 1) * 100, 1, true) : '') + '</span></div>' : '')

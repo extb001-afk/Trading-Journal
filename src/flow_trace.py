@@ -1,10 +1,15 @@
 """Traces funds sent to unknown addresses."""
 import json
+import math
 import os
 import re
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from decimal import Decimal, InvalidOperation
 
+import bf_engine
 import netpace
 import common
 import xchain_match as xm
@@ -25,6 +30,14 @@ SOL_TX_MAX = 500
 EVM_PAGES = 12
 BSC_WINDOWS = 8
 BSC_SENDS = 8
+ES_API = "https://api.etherscan.io/v2/api"
+ES_PAGE = 200
+RPCWIN_WINDOWS = 4
+RPCWIN_COVER_SEC = 2 * 3600
+RPCWIN_MAX_WINDOWS = 12
+RPCWIN_SENDS = 4
+BS403_SEC = 86400
+BS_BLOCKED = common.BS_BLOCKED
 SOL_SPEND_MIN = Decimal("0.02")
 DUST_USD = 1.0
 HID_KEEP = 30
@@ -281,6 +294,51 @@ def bs_native_legs(H, items, chain):
     return out
 
 
+def es_token_legs(H, rows):
+    H = norm(H)
+    out = []
+    for it in rows or []:
+        if not isinstance(it, dict):
+            continue
+        f, t = norm(it.get("from")), norm(it.get("to"))
+        if H not in (f, t) or f == t:
+            continue
+        try:
+            dec = int(it.get("tokenDecimal") or 18)
+            q = D(it.get("value")) / (Decimal(10) ** dec)
+        except (ValueError, TypeError, InvalidOperation):
+            continue
+        if q <= 0:
+            continue
+        d9 = "out" if f == H else "in"
+        try:
+            ts9, bn9 = int(it.get("timeStamp") or 0), int(it.get("blockNumber") or 0)
+        except (TypeError, ValueError):
+            continue
+        out.append({"tx": norm(it.get("hash")), "ts": ts9, "block": bn9, "dir": d9, "cp": t if d9 == "out" else f,
+                    "cp_contract": False, "cp_name": None, "token": norm(it.get("contractAddress")),
+                    "sym": str(it.get("tokenSymbol") or "?")[:24], "qty": str(q)})
+    return out
+
+
+def es_native_legs(H, rows, chain):
+    H = norm(H)
+    out = []
+    for it in rows or []:
+        if not isinstance(it, dict) or norm(it.get("from")) != H or str(it.get("isError") or "0") != "0":
+            continue
+        try:
+            v = D(it.get("value")) / Decimal(10 ** 18)
+            ts9, bn9 = int(it.get("timeStamp") or 0), int(it.get("blockNumber") or 0)
+        except (ValueError, TypeError, InvalidOperation):
+            continue
+        if v <= 0:
+            continue
+        out.append({"tx": norm(it.get("hash")), "ts": ts9, "block": bn9, "dir": "out", "cp": norm(it.get("to")),
+                    "cp_contract": False, "cp_name": None, "token": "native", "sym": NATIVE.get(chain, "ETH"), "qty": str(v)})
+    return out
+
+
 def log_legs(H, logs, dec_of, sym_of, ts_of):
     H = norm(H)
     out = []
@@ -308,6 +366,24 @@ def log_legs(H, logs, dec_of, sym_of, ts_of):
 class Scanner:
 
     def __init__(self, cfg, cache, px=None, budget=40, sleep=0.35, log=None, sym_of=None):
+        try:
+            import evm_watch
+            chains9 = {}
+            for ch9, cc9 in (cfg.get("chains") or {}).items():
+                if not isinstance(cc9, dict) or ch9 in ("sol", "bsc"):
+                    chains9[ch9] = cc9
+                    continue
+                cc9 = dict(cc9)
+                if not cc9.get("rpcs") or not cc9.get("rpc_logs"):
+                    nd9 = evm_watch.rpc_nodes(cfg, ch9)
+                    if not cc9.get("rpcs"):
+                        cc9["rpcs"] = list(nd9.get("detail") or [])
+                    if not cc9.get("rpc_logs"):
+                        cc9["rpc_logs"] = list(nd9.get("logs") or cc9.get("rpcs") or [])
+                chains9[ch9] = cc9
+            cfg = dict(cfg, chains=chains9)
+        except Exception:
+            pass
         memo = cache.setdefault("_memo", {})
         for k in ("etx", "blk", "dec"):
             memo.setdefault(k, {})
@@ -488,7 +564,160 @@ class Scanner:
         ent.setdefault("bal", {})["sol"] = {"t": now, "items": bal}
 
     def _bs(self, chain):
+        if chain in BS_BLOCKED or common.chain_discovery(chain, (self.cfg.get("chains") or {}).get(chain)) == "rpc":
+            return ""
         return self.t._bs(chain)
+
+    def _bs_dead(self, chain) -> bool:
+        t9 = ((self.c.get("_memo") or {}).get("bs403") or {}).get(chain)
+        return bool(isinstance(t9, (int, float)) and time.time() - t9 < BS403_SEC and self._alt(chain))
+
+    def _es_key(self) -> str:
+        try:
+            import settings_store
+            return str(settings_store.env_value("TJ_ETHERSCAN_KEY") or "").strip()
+        except Exception:
+            return ""
+
+    def _alt(self, chain):
+        cc = (self.cfg.get("chains") or {}).get(chain) or {}
+        if not isinstance(cc, dict) or chain in ("sol", "bsc"):
+            return None
+        if cc.get("etherscan_chainid") and self._es_key():
+            return "es"
+        if cc.get("rpcs") or cc.get("rpc") or cc.get("rpc_logs"):
+            return "rpcwin"
+        return None
+
+    def _scan_alt(self, ent, cand, chain):
+        how = self._alt(chain)
+        if how == "es":
+            self.scan_evm_es(ent, cand, chain)
+        elif how == "rpcwin":
+            cc = (self.cfg.get("chains") or {}).get(chain) or {}
+            try:
+                spb = 86400.0 / float(cc.get("blocks_per_day")) if cc.get("blocks_per_day") else 2.0
+            except (TypeError, ValueError, ZeroDivisionError):
+                spb = 2.0
+            span = self.t._span(chain)
+            try:
+                import evm_watch
+                caps9 = evm_watch.rpc_nodes(self.cfg, chain).get("caps") or {}
+                spans9 = [min(span, int(caps9.get(u) or span)) for u in self.t._evm_urls(chain, logs=True)]
+                if spans9:
+                    span = max(1, max(spans9))
+            except Exception:
+                pass
+            wins = max(1, min(RPCWIN_MAX_WINDOWS, int(math.ceil(RPCWIN_COVER_SEC / max(1.0, span * spb)))))
+            self.scan_rpcwin(ent, cand, chain, span, wins, RPCWIN_SENDS, spb)
+        else:
+            ent.setdefault("blocked", [])
+            if chain not in ent["blocked"]:
+                ent["blocked"].append(chain)
+
+    def _es(self, chain, params):
+        cid = ((self.cfg.get("chains") or {}).get(chain) or {}).get("etherscan_chainid")
+        key = self._es_key()
+        if not cid or not key:
+            raise RuntimeError("이더스캔 키·체인 번호 없음")
+        if not bf_engine.es_budget_take("web", kind="aux"):
+            raise xm.Paused("이더스캔 하루 예산(보조 몫) — 다음 주기에 이어서")
+        q = dict(params, chainid=cid, apikey=key)
+        d = self._es_http(ES_API + "?" + urllib.parse.urlencode(q)) or {}
+        res = d.get("result")
+        if str(d.get("status")) == "1" and isinstance(res, list):
+            return res
+        msg = (str(d.get("message") or "") + " " + (res if isinstance(res, str) else "")).lower()
+        if "no transactions found" in msg or "no records found" in msg:
+            return []
+        if "rate limit" in msg or "max calls" in msg or "limit reached" in msg:
+            raise xm.Paused("이더스캔 한도 — 다음 주기에 이어서")
+        raise RuntimeError("이더스캔 응답 오류: " + common.safe_err(msg)[:120])
+
+    def _es_http(self, url, timeout=30):
+        t = self.t
+        if t.calls >= t.budget:
+            raise xm.Budget()
+        t.calls += 1
+        req = urllib.request.Request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
+        try:
+            netpace.wait(url)
+        except netpace.Cooldown as e:
+            raise xm.Paused(str(e))
+        try:
+            try:
+                bf_engine.es_dispatch_wait(time.time() + 60)
+            except bf_engine.NetError as e:
+                raise xm.Paused("이더스캔 간격 대기 초과 — 다음 주기에 이어서") from e
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if netpace.note_error(url, e):
+                raise xm.Paused(f"{netpace.host_of(url)} 429")
+            raise RuntimeError(f"이더스캔 HTTP {e.code}") from None
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"이더스캔 연결 실패: {type(e.reason).__name__}") from None
+        finally:
+            time.sleep(t.sleep)
+
+    def scan_evm_es(self, ent, cand, chain):
+        H = norm(cand["dest"])
+        st = ent.setdefault("evm", {}).setdefault(chain, {})
+        since = cand["first"] - 60
+        for kind, act in (("tok", "tokentx"), ("nat", "txlist")):
+            s = st.setdefault(kind, {"legs": [], "page": 1, "done": False, "n": 0})
+            while not s["done"]:
+                if s["n"] >= EVM_PAGES:
+                    s["done"], s["capped"] = True, True
+                    break
+                rows = self._es(chain, {"module": "account", "action": act, "address": H, "page": s["page"], "offset": ES_PAGE,
+                                        "sort": "desc", "startblock": 0, "endblock": 9999999999})
+                legs = es_native_legs(H, rows, chain) if kind == "nat" else es_token_legs(H, rows)
+                s["legs"] += [x for x in legs if x["ts"] >= since]
+                s["n"] += 1
+                s["page"] += 1
+                oldest = min((int(r.get("timeStamp") or 0) for r in rows if isinstance(r, dict)), default=0)
+                if len(rows) < ES_PAGE or (oldest and oldest < since):
+                    s["done"] = True
+        legs = st["tok"]["legs"] + st["nat"]["legs"]
+        evs = evm_events(H, chain, legs)
+        self._price_events(evs)
+        self.resolve_bridges(ent, evs)
+        st["ev"] = evs
+        st["capped"] = any(st[k].get("capped") for k in ("tok", "nat"))
+        st["via"] = "etherscan"
+        self._rpc_balances(ent, chain, H, legs)
+
+    def _rpc_balances(self, ent, chain, H, legs):
+        pad = "0x" + "0" * 24 + H[2:]
+        bal = []
+        b = self.t._evm(chain, "eth_getBalance", [H, "latest"])
+        try:
+            v = Decimal(int(b or "0x0", 16)) / Decimal(10 ** 18)
+        except (TypeError, ValueError):
+            v = Decimal(0)
+        if v > 0:
+            bal.append({"chain": chain, "token": "native", "sym": NATIVE.get(chain, "ETH"), "qty": str(v)})
+        toks = []
+        for x in legs:
+            if x["token"] != "native" and x["token"] not in toks:
+                toks.append(x["token"])
+        for tok in toks[:8]:
+            try:
+                r = self.t._evm(chain, "eth_call", [{"to": tok, "data": "0x70a08231" + pad[2:]}, "latest"])
+                q = Decimal(int(r or "0x0", 16)) / (Decimal(10) ** self.t.decimals(chain, tok))
+            except xm.Budget:
+                raise
+            except Exception:
+                continue
+            if q > 0:
+                bal.append({"chain": chain, "token": tok, "sym": self.sym_of(chain, tok) or short(tok), "qty": str(q)})
+        now = int(time.time())
+        for lg in bal:
+            u, src = self.value(lg, now)
+            if u is not None:
+                lg["usd"], lg["ps"] = u, src
+        ent.setdefault("bal", {})[chain] = {"t": now, "items": bal}
 
     def scan_evm_bs(self, ent, cand, chain):
         H = norm(cand["dest"])
@@ -549,85 +778,69 @@ class Scanner:
                 lg["usd"], lg["ps"] = u, src
         ent.setdefault("bal", {})[chain] = {"t": now, "items": bal}
 
-    def _dec_safe(self, tok):
+    def _dec_safe(self, tok, chain="bsc"):
         try:
-            return self.t.decimals("bsc", tok)
+            return self.t.decimals(chain, tok)
         except xm.Budget:
             raise
         except Exception:
             return 18
 
     def scan_bsc(self, ent, cand):
+        self.scan_rpcwin(ent, cand, "bsc", 10000, BSC_WINDOWS, BSC_SENDS, 0.45)
+
+    def scan_rpcwin(self, ent, cand, chain, span, windows, sends_n, spb0):
         H = norm(cand["dest"])
-        st = ent.setdefault("evm", {}).setdefault("bsc", {"sends": {}, "legs": []})
+        st = ent.setdefault("evm", {}).setdefault(chain, {"sends": {}, "legs": []})
+        st.setdefault("sends", {})
+        st.setdefault("legs", [])
         pad = "0x" + "0" * 24 + H[2:]
-        sends = sorted([s for s in cand["sends"] if s.get("chain") == "bsc" and s.get("tx")], key=lambda s: -float(s.get("usd") or 0))[:BSC_SENDS]
+        sends = sorted([s for s in cand["sends"] if s.get("chain") == chain and s.get("tx")], key=lambda s: -float(s.get("usd") or 0))[:sends_n]
         seen = {(x["tx"], x["dir"], x["cp"], x["token"], x["qty"]) for x in st["legs"]}
         head = None
         for s in sends:
             k = norm(s["tx"])
             w = st["sends"].setdefault(k, {"block": None, "done": 0, "ts": int(s.get("ts") or 0)})
             if w["block"] is None:
-                w["block"] = int(self.t.receipt("bsc", s["tx"])["block"] or 0)
+                w["block"] = int(self.t.receipt(chain, s["tx"])["block"] or 0)
             if w["block"] and not w.get("spb"):
                 if head is None:
-                    head = int(self.t._evm("bsc", "eth_blockNumber", []) or "0x0", 16)
-                end = min(w["block"] + BSC_WINDOWS * 10000, head - 1)
-                if end - w["block"] >= 1000:
-                    t_end = self.t.block_ts("bsc", end)
-                    w["spb"] = (t_end - w["ts"]) / float(end - w["block"]) if t_end and t_end > w["ts"] else 0.45
+                    head = int(self.t._evm(chain, "eth_blockNumber", []) or "0x0", 16)
+                end = min(w["block"] + windows * span, head - 1)
+                if end - w["block"] >= min(1000, span):
+                    t_end = self.t.block_ts(chain, end)
+                    w["spb"] = (t_end - w["ts"]) / float(end - w["block"]) if t_end and t_end > w["ts"] else spb0
 
             def ts_of(bn, w=w):
-                return int(w["ts"] + (bn - w["block"]) * float(w.get("spb") or 0.45))
-            while w["done"] < BSC_WINDOWS and w["block"]:
-                lo = w["block"] + w["done"] * 10000
-                hi = lo + 9999
+                return int(w["ts"] + (bn - w["block"]) * float(w.get("spb") or spb0))
+            while w["done"] < windows and w["block"]:
+                lo = w["block"] + w["done"] * span
+                hi = lo + span - 1
                 if head is None:
-                    head = int(self.t._evm("bsc", "eth_blockNumber", []) or "0x0", 16)
-                if hi > head:
+                    head = int(self.t._evm(chain, "eth_blockNumber", []) or "0x0", 16)
+                if lo > head or (chain == "bsc" and hi > head):
                     break
+                hi = min(hi, head)
                 logs = []
                 for tp in ([TR, pad], [TR, None, pad]):
-                    logs += self.t._evm("bsc", "eth_getLogs", [{"fromBlock": hex(lo), "toBlock": hex(hi), "topics": tp}], logs=True) or []
-                for x in log_legs(H, logs, self._dec_safe, lambda tok: self.sym_of("bsc", tok) or short(tok), ts_of):
+                    logs += self.t._evm(chain, "eth_getLogs", [{"fromBlock": hex(lo), "toBlock": hex(hi), "topics": tp}], logs=True) or []
+                for x in log_legs(H, logs, lambda tok: self._dec_safe(tok, chain), lambda tok: self.sym_of(chain, tok) or short(tok), ts_of):
                     key = (x["tx"], x["dir"], x["cp"], x["token"], x["qty"])
                     if key not in seen:
                         seen.add(key)
                         st["legs"].append(x)
+                if hi < lo + span - 1:
+                    break
                 w["done"] += 1
-        evs = evm_events(H, "bsc", st["legs"])
+        evs = evm_events(H, chain, st["legs"])
         self._price_events(evs)
         self.resolve_bridges(ent, evs)
         st["ev"] = evs
-        st["window"] = BSC_WINDOWS * 10000
-        bal = []
-        b = self.t._evm("bsc", "eth_getBalance", [H, "latest"])
-        try:
-            v = Decimal(int(b or "0x0", 16)) / Decimal(10 ** 18)
-        except (TypeError, ValueError):
-            v = Decimal(0)
-        if v > 0:
-            bal.append({"chain": "bsc", "token": "native", "sym": "BNB", "qty": str(v)})
-        toks = []
-        for x in st["legs"]:
-            if x["token"] not in toks:
-                toks.append(x["token"])
-        for tok in toks[:8]:
-            try:
-                r = self.t._evm("bsc", "eth_call", [{"to": tok, "data": "0x70a08231" + pad[2:]}, "latest"])
-                q = Decimal(int(r or "0x0", 16)) / (Decimal(10) ** self.t.decimals("bsc", tok))
-            except xm.Budget:
-                raise
-            except Exception:
-                continue
-            if q > 0:
-                bal.append({"chain": "bsc", "token": tok, "sym": self.sym_of("bsc", tok) or short(tok), "qty": str(q)})
-        now = int(time.time())
-        for lg in bal:
-            u, src = self.value(lg, now)
-            if u is not None:
-                lg["usd"], lg["ps"] = u, src
-        ent.setdefault("bal", {})["bsc"] = {"t": now, "items": bal}
+        st["window"] = windows * span
+        st["spb0"] = spb0
+        if chain != "bsc":
+            st["via"] = "rpc"
+        self._rpc_balances(ent, chain, H, st["legs"])
 
     def scan(self, ent, cand):
         chains = cand["chains"] or (["sol"] if not cand["dest"].startswith("0x") else [])
@@ -636,8 +849,17 @@ class Scanner:
                 self.scan_sol(ent, cand)
             elif ch == "bsc":
                 self.scan_bsc(ent, cand)
-            elif self._bs(ch):
-                self.scan_evm_bs(ent, cand, ch)
+            elif self._bs(ch) and not self._bs_dead(ch):
+                try:
+                    self.scan_evm_bs(ent, cand, ch)
+                except urllib.error.HTTPError as e:
+                    if e.code != 403:
+                        raise
+                    self.c.setdefault("_memo", {}).setdefault("bs403", {})[ch] = int(time.time())
+                    (ent.get("evm") or {}).pop(ch, None)
+                    self._scan_alt(ent, cand, ch)
+            elif self._alt(ch):
+                self._scan_alt(ent, cand, ch)
             else:
                 ent.setdefault("skip", [])
                 if ch not in ent["skip"]:
@@ -1060,8 +1282,13 @@ def account(row, ent, ctx, px_now=None, max_recips=12):
                 out["notes"].append(f"{CHAIN_KO.get(ch, ch)} 조회 상한에 닿아 최근 일부만 읽었어요")
             if ch == "bsc" and st.get("window"):
                 out["notes"].append("BSC 는 공개 노드 한도로 보낸 뒤 약 10시간 안의 이동만 읽어요")
+            elif st.get("window"):
+                h9 = max(1, round(float(st["window"]) * float(st.get("spb0") or 2.0) / 3600))
+                out["notes"].append(f"{CHAIN_KO.get(ch, ch)} 는 탐색기가 막혀 공개 노드로 보낸 뒤 약 {h9}시간 안의 토큰 이동만 읽어요")
         for ch in ent.get("skip") or []:
             out["notes"].append(f"{CHAIN_KO.get(ch, ch)} 는 공개 탐색기가 없어 이 주소 활동을 못 읽어요")
+        for ch in ent.get("blocked") or []:
+            out["notes"].append(f"{CHAIN_KO.get(ch, ch)} 는 공개 탐색기가 막혀(접속 차단) 이번엔 이 주소 활동을 못 읽었어요 — 다음 재조회 때 다시")
         if unpriced:
             out["notes"].append(f"가격을 모르는 토큰 전송 {unpriced}건은 금액에서 빠졌어요")
     if mixed > max(100.0, sent * 0.1):

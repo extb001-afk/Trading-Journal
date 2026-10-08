@@ -30,7 +30,65 @@ def setup_logging(name: str) -> logging.Logger:
         stream=sys.stdout,
     )
     add_secret_filter()
+    cpu_reserve_apply()
     return logging.getLogger(name)
+
+
+_CPU_PLAN = None
+_CPU_APPLIED = False
+
+
+def cpu_plan() -> dict:
+    global _CPU_PLAN
+    if _CPU_PLAN is not None:
+        return _CPU_PLAN
+    mode = str(os.environ.get("TJ_BUILD_PROC") or "auto").strip().lower()
+    p = {"on": False, "core": None, "cores": os.cpu_count() or 1, "why": ""}
+    inh = str(os.environ.get("TJ_CPU_PLAN") or "")
+    aff = None
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            aff = sorted(os.sched_getaffinity(0))
+        except OSError:
+            aff = None
+    if mode in ("off", "0", "no", "false"):
+        p["why"] = "꺼짐(TJ_BUILD_PROC=off) — 웹 안에서 빌드"
+    elif not hasattr(os, "fork"):
+        p["why"] = "fork 없음 — 웹 안에서 빌드"
+    elif mode == "fork":
+        p.update(on=True, why="강제(TJ_BUILD_PROC=fork)")
+        if aff and len(aff) >= 2:
+            p.update(core=aff[-1], cores=len(aff))
+    elif not sys.platform.startswith("linux") or aff is None:
+        p["why"] = "리눅스 아님 — 웹 안에서 빌드(코어 지정 기능 없음)"
+    elif inh.count("/") == 1 and inh.split("/")[0].isdigit() and inh.split("/")[1].isdigit():
+        c9, n9 = (int(x) for x in inh.split("/"))
+        p.update(on=True, core=c9, cores=n9, why=f"코어 {n9}개 — {c9}번 = 화면 계산 전용(물려받음)")
+    elif len(aff) < 2:
+        p.update(cores=len(aff), why="코어 1개 — 웹 안에서 빌드")
+    else:
+        p.update(on=True, core=aff[-1], cores=len(aff), why=f"코어 {len(aff)}개 — {aff[-1]}번 = 화면 계산 전용")
+    if p["on"] and p["core"] is not None and not inh:
+        os.environ["TJ_CPU_PLAN"] = f"{p['core']}/{p['cores']}"
+    _CPU_PLAN = p
+    return p
+
+
+def cpu_reserve_apply():
+    global _CPU_APPLIED
+    if _CPU_APPLIED:
+        return
+    _CPU_APPLIED = True
+    try:
+        c9 = cpu_plan().get("core")
+        if c9 is None or not hasattr(os, "sched_setaffinity"):
+            return
+        cur = set(os.sched_getaffinity(0))
+        rest = cur - {c9}
+        if rest and rest != cur:
+            os.sched_setaffinity(0, rest)
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
@@ -52,6 +110,14 @@ DEFAULT_DISCOVERY = {"robinhood": "rpc", "arc": "rpc",
                      "base": "rpc"}
 
 DEFAULT_NATIVE_SYMBOL = {"arc": "USDC"}
+
+
+BS_BLOCKED = frozenset(("base", "arbitrum", "polygon"))
+
+
+def bs_blocked(name: str, cc) -> bool:
+    v = (cc or {}).get("discovery") if isinstance(cc, dict) else None
+    return name in BS_BLOCKED and str(v or "").lower() != "explorer"
 
 
 def chain_discovery(name: str, cc) -> str:
@@ -570,6 +636,11 @@ def load_config() -> dict:
             if _meta[3]:
                 cfg["wrapped_native"].setdefault(_name, _meta[3])
     _CFG_LOADED[0] = True
+    try:
+        import nodekeys
+        nodekeys.apply(cfg)
+    except Exception as e:
+        logging.getLogger("tj").warning("노드 키 적용 실패(종전 설정으로 계속): %s", type(e).__name__)
     return cfg
 
 

@@ -31,7 +31,8 @@ RABBY_CHAIN_IDS = {"eth": 1, "bsc": 56, "arb": 42161, "op": 10, "base": 8453, "m
                    "megaeth": 4326, "stable": 988, "gravity": 1625, "chiliz": 88888, "story": 1514, "cfx": 1030,
                    "merlin": 4200, "ape": 33139}
 DEF = {"enabled": True, "wallet_every_h": 24.0, "gap_sec": 75.0, "backoff_sec": 1800.0, "backoff_max_sec": 21600.0,
-       "first_delay_sec": 300.0, "tick_sec": 600.0, "timeout_sec": 40.0, "min_usd": 0.01, "daily_calls_max": 150}
+       "first_delay_sec": 300.0, "tick_sec": 600.0, "timeout_sec": 40.0, "min_usd": 0.01, "daily_calls_max": 150,
+       "min_wallet_usd": 1000.0}
 
 
 class RateLimited(OSError):
@@ -185,22 +186,78 @@ def trim_protocols(pl) -> list:
     return out
 
 
-def fetch_wallet(addr: str, get=None, sleep=time.sleep, gap: float = 75.0, timeout: float = 40.0) -> dict:
+def fetch_wallet(addr: str, get=None, sleep=time.sleep, gap: float = 75.0, timeout: float = 40.0, want_protocols=None) -> dict:
     get = get or (lambda u: http_get(u, timeout))
-    toks = get(f"{API}/v1/user/token_list?id={addr}&is_all=false")
-    sleep(gap)
     total = get(f"{API}/v1/user/total_balance?id={addr}")
-    sleep(gap)
-    prots = get(f"{API}/v1/user/complex_protocol_list?id={addr}")
-    if not isinstance(toks, list) or not isinstance(total, dict) or not isinstance(prots, list):
+    if not isinstance(total, dict):
         raise ValueError("Rabby 응답 형식이 예상과 다름")
     chains = []
     for c in total.get("chain_list") or []:
         if isinstance(c, dict) and c.get("id"):
             chains.append({"id": str(c["id"]), "cid": c.get("community_id"), "name": str(c.get("name") or c["id"])[:40],
                            "usd": _num(c.get("usd_value"))})
-    return {"total": _num(total.get("total_usd_value")), "chains": chains,
-            "tokens": trim_tokens(toks), "protocols": trim_protocols(prots)}
+    tot = _num(total.get("total_usd_value"))
+    prots = []
+    if want_protocols is None or want_protocols(tot):
+        sleep(gap)
+        pl = get(f"{API}/v1/user/complex_protocol_list?id={addr}")
+        if not isinstance(pl, list):
+            raise ValueError("Rabby 응답 형식이 예상과 다름")
+        prots = trim_protocols(pl)
+    return {"total": tot, "chains": chains, "tokens": [], "protocols": prots}
+
+
+def need_protocols(prev: dict, bot_usd, total: float, *, now: float = None) -> bool:
+    if not isinstance(prev, dict) or not prev.get("fetchedAt") or prev.get("protocols"):
+        return True
+    try:
+        if (time.time() if now is None else float(now)) - float(prev["fetchedAt"]) >= RB_EVERY_SAME:
+            return True
+    except (TypeError, ValueError):
+        return True
+    try:
+        b = float(bot_usd)
+    except (TypeError, ValueError):
+        return True
+    return abs(float(total) - b) > max(200.0, 0.05 * max(float(total), b, 0.0))
+
+
+BOTUSD_NAME = "rabby_bot_usd.json"
+
+
+def load_bot_usd(path: str):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("w"), dict):
+        return None
+    out = {}
+    for a, v in d["w"].items():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f == f and abs(f) != float("inf") and isinstance(a, str) and a.startswith("0x"):
+            out[a.lower()] = f
+    return out
+
+
+def watch_addrs(state: dict, addrs: list, bot_usd, min_usd: float) -> list:
+    if not min_usd or min_usd <= 0:
+        return list(addrs)
+    ws = (state or {}).get("wallets") or {}
+    bu = bot_usd if isinstance(bot_usd, dict) else {}
+    out = []
+    for a in addrs:
+        try:
+            v = max(float(bu.get(a) or 0), float((ws.get(a) or {}).get("total") or 0))
+        except (TypeError, ValueError):
+            v = 0.0
+        if v >= min_usd:
+            out.append(a)
+    return out
 
 
 def load_state(path: str) -> dict:
@@ -221,16 +278,44 @@ def _write(path: str, obj):
     os.replace(tmp, path)
 
 
-def due_wallet(state: dict, addrs: list, now: float, every_sec: float):
+RB_EVERY_SAME = 7 * 86400
+RB_EVERY_EMPTY = 30 * 86400
+RB_EMPTY_USD = 1.0
+
+
+def wallet_every(w: dict, bot_usd, every_sec: float) -> float:
+    if not isinstance(w, dict) or not w.get("fetchedAt"):
+        return 0.0
+    if w.get("protocols"):
+        return every_sec
+    try:
+        rb = float(w.get("total") or 0)
+        bu = float(bot_usd or 0)
+    except (TypeError, ValueError):
+        return every_sec
+    if rb < RB_EMPTY_USD and bu < RB_EMPTY_USD:
+        return max(every_sec, RB_EVERY_EMPTY)
+    return max(every_sec, RB_EVERY_SAME)
+
+
+def due_wallet(state: dict, addrs: list, now: float, every_sec: float, bot_usd: dict = None):
     ws = (state or {}).get("wallets") or {}
-    best, best_t = None, None
+    bot_usd = bot_usd if isinstance(bot_usd, dict) else {}
+    best, best_k = None, None
     for a in addrs:
-        t = float((ws.get(a) or {}).get("fetchedAt") or 0)
-        tt = float((ws.get(a) or {}).get("triedAt") or 0)
-        if now - t < every_sec or now - tt < min(every_sec, 3 * 3600):
+        w = ws.get(a) or {}
+        t = float(w.get("fetchedAt") or 0)
+        tt = float(w.get("triedAt") or 0)
+        ev = wallet_every(w, bot_usd.get(a), every_sec)
+        if now - t < ev or now - tt < min(every_sec, 3 * 3600):
             continue
-        if best is None or t < best_t:
-            best, best_t = a, t
+        try:
+            v = float(bot_usd[a]) if a in bot_usd else float(w.get("total") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        k = (-v, t)
+        if best is None or k < best_k:
+            best, best_k = a, k
     return best
 
 
@@ -255,7 +340,7 @@ def _freeze_disabled(cfg: dict, state: dict, old: dict, fresh: dict) -> dict:
     return out
 
 
-def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.sleep, log=None) -> str:
+def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.sleep, log=None, bot_usd: dict = None) -> str:
     s = settings(cfg)
     if not s["enabled"]:
         return "off"
@@ -267,10 +352,12 @@ def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.s
         return "cooldown"
     day = time.strftime("%Y-%m-%d", time.gmtime(now + 9 * 3600))
     calls = st.get("calls") if isinstance(st.get("calls"), dict) else {}
-    if int(calls.get(day) or 0) + 3 > int(s["daily_calls_max"]):
+    if int(calls.get(day) or 0) + 2 > int(s["daily_calls_max"]):
         return "cap"
-    addrs = evm_wallets(cfg)
-    a = due_wallet(st, addrs, now, s["wallet_every_h"] * 3600)
+    if bot_usd is None and s["min_wallet_usd"] > 0:
+        return "idle"
+    addrs = watch_addrs(st, evm_wallets(cfg), bot_usd, s["min_wallet_usd"])
+    a = due_wallet(st, addrs, now, s["wallet_every_h"] * 3600, bot_usd)
     if not a:
         return "idle"
     n = {"c": 0}
@@ -280,7 +367,9 @@ def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.s
         return (get or (lambda x: http_get(x, s["timeout_sec"])))(u)
     res, err = "ok", None
     try:
-        d = fetch_wallet(a, get=counted, sleep=sleep, gap=s["gap_sec"], timeout=s["timeout_sec"])
+        prev9 = dict(st["wallets"].get(a) or {})
+        d = fetch_wallet(a, get=counted, sleep=sleep, gap=s["gap_sec"], timeout=s["timeout_sec"],
+                         want_protocols=lambda tot9: need_protocols(prev9, (bot_usd or {}).get(a) if isinstance(bot_usd, dict) else None, tot9, now=now))
     except RateLimited as e:
         res, err = "ratelimited", common.safe_err(e)
     except Exception as e:

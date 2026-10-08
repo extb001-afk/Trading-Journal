@@ -474,7 +474,7 @@
     if (!i.pxSrc) return '';
     if (i.pxSrc === 'rabby') return 'Rabby 기준' + (i.pxAge != null ? ' · ' + ageTxt(Math.max(60, i.pxAge)) : '');
     const p9 = i.pxSrc.split(':'), lab = p9[0] === 'cex' ? (p9.slice(1).join(':') + ' 시세') : (PX_SRC[p9[1]] || 'DEX');
-    return lab + (i.pxAge != null && i.pxAge > PX_STALE ? ' · ≈ ' + ageTxt(i.pxAge) : '');
+    return (i.pxPre ? '거래 시작 전 · ' : '') + lab + (i.pxPreN ? ' · ' + i.pxPreN + '곳 일치' : '') + (i.pxAge != null && i.pxAge > PX_STALE ? ' · ≈ ' + ageTxt(i.pxAge) : '');
   };
   const rbChip = g => g && g.rabby ? ' <span class="pill a sm rbchip" title="봇이 추적하지 않는 보유예요 — Rabby(DeBank 데이터)가 이 지갑에 있다고 본 수량·USD 로 총자산에 더했어요(원가·손익 추적 밖). 봇이 그 체인·토큰을 추적하면 자동으로 봇 숫자로 바뀌어요">Rabby 기준 · ' + ago(g.rabby) + '</span>' : '';
   const staleChip = g => g.staleAge && g.staleVal >= g.value * 0.1 ? ' <span class="pill w sm" title="DEX 가격이 ' + ageTxt(g.staleAge) + ' 값이에요 — 조회가 밀려 마지막 가격으로 평가 중(6시간 넘으면 평가 제외)">≈ ' + ageTxt(g.staleAge) + '</span>' : '';
@@ -1131,7 +1131,7 @@
       const rb = c.rabby && typeof c.rabby === 'object' ? c.rabby : null;
       const unkQty = rb ? 0 : avg > 0 ? (fbc > 0 ? 0 : Math.max(0, qty - kq)) : qty;
       const inst = { key: c.key, sym, name: c.name, chain: chainOf(c.name), ck: c.ck, ca: c.ca, qty, price, avg, kq, fbQty: num(c.fbQty), fbCost: fbc, cost, pnl, value, unkQty, hasCost,
-        pxSrc: String(c.pxSrc || ''), pxAge: c.pxAge != null ? num(c.pxAge) : null, rabby: rb };
+        pxSrc: String(c.pxSrc || ''), pxAge: c.pxAge != null ? num(c.pxAge) : null, pxPre: !!c.pxPre, pxPreN: num(c.pxPreN), rabby: rb };
       if (rb) { g.rabby = g.rabby ? Math.min(g.rabby, num(rb.at)) : num(rb.at); g.rbValue = (g.rbValue || 0) + value; if (c.rbKind != null) g.rbKind = String(c.rbKind || ''); }
       if (inst.pxSrc.startsWith('dex:') && inst.pxAge != null && inst.pxAge > PX_STALE && value > 0) { g.staleAge = Math.max(g.staleAge || 0, inst.pxAge); g.staleVal = (g.staleVal || 0) + value; }
       g.insts.push(inst); g.keys.push(c.key); D.instOf[c.key] = inst;
@@ -2079,12 +2079,12 @@
   function focusKey(v) {
     const ae = document.activeElement;
     if (!ae || ae === document.body || !v.contains(ae) || !ae.getAttribute || !(ae.getAttribute('data-a') || ae.getAttribute('data-su')) || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return null;
-    return { t: ae.tagName, a: ae.getAttribute('data-a'), su: ae.getAttribute('data-su'), v: ae.getAttribute('data-v'), f: ae.getAttribute('data-f'), k: ae.getAttribute('data-k') };
+    return { t: ae.tagName, a: ae.getAttribute('data-a'), su: ae.getAttribute('data-su'), v: (ae.getAttribute('data-fv') || ae.getAttribute('data-v')), f: ae.getAttribute('data-f'), k: ae.getAttribute('data-k') };
   }
   function focusBack(v, k) {
     const ae = document.activeElement;
     if (ae && ae !== document.body && v.contains(ae)) return;
-    const el = [...v.querySelectorAll(k.t.toLowerCase() + (k.a ? '[data-a="' + k.a + '"]' : '[data-su="' + k.su + '"]'))].find(x => x.getAttribute('data-v') === k.v && x.getAttribute('data-f') === k.f && x.getAttribute('data-k') === k.k);
+    const el = [...v.querySelectorAll(k.t.toLowerCase() + (k.a ? '[data-a="' + k.a + '"]' : '[data-su="' + k.su + '"]'))].find(x => (x.getAttribute('data-fv') || x.getAttribute('data-v')) === k.v && x.getAttribute('data-f') === k.f && x.getAttribute('data-k') === k.k);
     if (el) { try { el.focus({ preventScroll: true }); } catch (e) {  } }
   }
   function subtabEdge() {
@@ -2093,7 +2093,7 @@
       if (!st.__edge) { st.__edge = 1; st.addEventListener('scroll', edge, { passive: true }); }
       edge();
     });
-    document.querySelectorAll('#view .subtabs').forEach(st => {
+    document.querySelectorAll('#view .subtabs, #view .hscroll, #view .oaflt, #view .total .wowbar').forEach(st => {
       const edge = () => st.classList.toggle('ovx', st.scrollLeft + st.clientWidth < st.scrollWidth - 1);
       const on = st.querySelector('button.on');
       if (on && st.scrollWidth > st.clientWidth + 1) { const r = on.offsetLeft + on.offsetWidth - st.clientWidth + 24; if (r > st.scrollLeft) st.scrollLeft = r; }
@@ -2797,7 +2797,7 @@
     const hold = '<section class="card hbcard"><b class="hbt">보유 기간별 평균 수익률</b>' + (hs.length ? hs.map(x => '<div class="hbr"><span class="k">' + esc(x.k) + '</span><span class="bar"><i class="' + (x.r >= 0 ? 'u' : 'd') + '" style="width:' + Math.max(3, Math.abs(x.r) / mx * 100).toFixed(1) + '%"></i></span><b class="num ' + cls(x.r) + '">' + pctS(x.r, 1) + '</b><span class="n num">' + x.n + '</span></div>').join('')
       : '<div class="cap">보유 기간을 알 수 있는 매도가 아직 없어요</div>') + '<div class="cap">원가 대비 · 기간 = 그 코인 첫 매수부터 판 날까지 · 오른쪽 = 매도 묶음 수</div></section>';
     const nx = arr(d.next), pu = nx[1] ? nx[0] / nx[1] * 100 : null, C = 2 * Math.PI * 38;
-    const ring = pu == null ? '' : '<section class="card hbcard hbring"><svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="38" fill="none" stroke="var(--surface3)" stroke-width="10"/><circle cx="48" cy="48" r="38" fill="none" stroke="var(--warn)" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (C * pu / 100).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 48 48)"/><text x="48" y="54" text-anchor="middle" class="rtx">' + Math.round(pu) + '%</text></svg>'
+    const ring = pu == null ? '' : '<section class="card hbcard hbring"><svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="38" fill="none" stroke="var(--line2)" stroke-width="10"/><circle cx="48" cy="48" r="38" fill="none" stroke="var(--warn)" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (C * pu / 100).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 48 48)"/><text x="48" y="54" text-anchor="middle" class="rtx">' + Math.round(pu) + '%</text></svg>'
       + '<div class="rt"><b class="hbt">판 다음 날 더 오른 비율</b><span>10번 중 ' + Math.round(pu / 10) + '번은 다음 날 마감가가 판 값보다 1% 넘게 높았어요</span><span class="cap">시세 기록 있는 ' + nx[1] + '묶음 · 다음 날 평균 ' + pctS(num(d.nextAvg), 1) + '</span></div></section>';
     return '<div class="habs pvx"><div class="hbhd"><div class="cap">나의 매매 습관 · 지난 12개월 · 매도 ' + d.n + '묶음</div>' + head + '</div>'
       + '<div class="hbgrid">' + left + '<div class="hbside">' + hold + ring + '</div></div>'
@@ -3403,7 +3403,7 @@
       }).join('') || '<div class="mut" style="font-size:14px;padding:10px 0">보관처가 없어요</div>') + '</div>'
       + (vis.length > 8 ? '<div class="row" style="margin-top:8px"><span class="cap num">' + (S.venueAll ? '' : '외 ' + (vis.length - 8) + '곳 · ' + m(sum(vis.slice(8), v => v.total), { compact: true })) + '</span><span class="sp"></span><button class="link" data-a="venueAll">' + (S.venueAll ? '접기' : '모두 보기') + '</button></div>' : '') + '</div>';
   }
-  const VN_COL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)'], VN_REST = 'var(--c5)', VN_TOP = 6;
+  const VN_TOP = 6;
   const vnCash = sym => { const s = String(sym || '').toUpperCase(); return s === 'KRW' || !!(S.D && S.D.stableSyms && S.D.stableSyms.has(s)); };
   function vnModel(v) {
     const D = S.D, tot = num(v.total);
@@ -3412,11 +3412,6 @@
       c.usd += num(it.usd); if (typeof it.qty === 'number') c.qty += it.qty; else { c.qn = false; c.lbl = it.qty; } });
     const coins = Array.from(cm.values()).sort((a, b) => b.usd - a.usd || (a.sym < b.sym ? -1 : 1));
     coins.forEach(c => { c.pct = tot > 0 ? Math.max(0, c.usd) / tot * 100 : 0; });
-    const head = coins.slice(0, 4).filter(c => c.usd > 0), restUsd = tot - sum(head, c => c.usd);
-    const slices = head.map((c, i) => ({ sym: c.sym, pct: c.pct, col: VN_COL[i] }));
-    if (restUsd > tot * 1e-6 && tot > 0) slices.push({ sym: '', pct: restUsd / tot * 100, col: VN_REST });
-    const sp = sum(slices, x => x.pct); if (slices.length && sp > 0) slices.forEach(x => { x.pct = x.pct / sp * 100; });
-    const colOf = sym => { const i = head.findIndex(c => c.sym === sym); return i >= 0 ? VN_COL[i] : VN_REST; };
     const chm = new Map();
     v.items.forEach(it => { const ch = String(it.ch || ''); if (!ch) return; chm.set(ch, (chm.get(ch) || 0) + num(it.usd)); });
     const chains = Array.from(chm.entries()).map(([ch, usd]) => ({ ch, usd, pct: tot > 0 ? Math.max(0, usd) / tot * 100 : 0 })).sort((a, b) => b.usd - a.usd);
@@ -3433,28 +3428,21 @@
     const evm = v.kind === 'wallet' && chains.some(c => c.ch !== 'Solana');
     const kindTxt = v.kind === 'wallet' ? '지갑 · ' + (sol ? 'SOL' : evm && chains.some(c => c.ch === 'Solana') ? 'EVM · SOL' : 'EVM') : v.kind === 'lp' ? 'LP' : allCash ? '현금' : '거래소';
     const share = num(D.total) > 0 ? tot / num(D.total) * 100 : 0;
-    return { v, tot, coins, slices, colOf, chains, addrs, chAddr, kindTxt, share };
+    return { v, tot, coins, chains, addrs, chAddr, kindTxt, share };
   }
   function vnExpl(ch, addr) { const k = CHAIN_KEY[ch]; return k && EXPL[k] && addr && !S.rand ? EXPL[k][1] + encodeURIComponent(addr) : null; }
-  function vnRing(M) {
-    const C = 2 * Math.PI * 58;
-    let off = 0;
-    const segs = M.slices.map(x => { const len = x.pct / 100 * C, gap = M.slices.length > 1 ? Math.min(3, len / 2) : 0;
-      const h = '<circle cx="75" cy="75" r="58" fill="none" stroke="' + x.col + '" stroke-width="16" stroke-dasharray="' + Math.max(0, len - gap).toFixed(2) + ' ' + C.toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 75 75)" data-pct="' + x.pct.toFixed(4) + '"></circle>';
-      off += len; return h; }).join('');
-    return '<div class="vnring"><svg width="150" height="150" viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="58" fill="none" stroke="var(--surface3)" stroke-width="16"></circle>' + segs + '</svg>'
-      + '<div class="vnrc"><span>총자산의</span><b class="num">' + (M.share < 0 ? '−' : '') + (Math.abs(M.share) >= 0.5 || M.share === 0 ? Math.round(Math.abs(M.share)) : '<1') + '%</b></div></div>';
-  }
+  const vnBar = p => '<div class="mini" aria-hidden="true"><i style="width:' + Math.min(100, Math.max(0, num(p))).toFixed(1) + '%"></i></div>';
+  const vnPct = p => '<span class="num vnp">' + Math.round(num(p)) + '%</span>';
   function vnFlows(M) {
     const F = S.D.vflows, v = M.v, by = F && F.by ? F.by[v.name] : null, Z = { in: 0, out: 0, realized: 0, realizedKrw: 0 };
     const okF = !!(F && F.flowOk && v.kind !== 'lp'), okR = !!(F && v.kind !== 'lp'), x = by || Z;
-    const cell = (k, h) => '<div class="vnfc"><span>' + k + '</span>' + h + '</div>';
     const rec = vnSrc(M);
     const rzV = KV(num(x.realized), x.realizedKrw != null ? num(x.realizedKrw) : null);
-    return '<section class="vnc vnfl"><div class="vnh"><b>드나든 돈 · 최근 30일</b>' + (rec ? '<button class="link" data-a="venueRec">이곳 기록 보기 ›</button>' : '') + '</div><div class="vnf3">'
-      + cell('들어옴', okF ? '<b class="num' + (num(x.in) > 0 ? ' up' : '') + '">' + (num(x.in) > 0 ? '+' : '') + m(num(x.in), { compact: true }) + '</b>' : '<b class="mut">—</b>')
-      + cell('나감', okF ? '<b class="num' + (num(x.out) > 0 ? ' down' : '') + '">' + (num(x.out) > 0 ? '−' : '') + m(num(x.out), { compact: true }) + '</b>' : '<b class="mut">—</b>')
-      + cell('이곳 매매 실현', okR ? '<b class="num ' + clsV(rzV) + '">' + m(rzV, { sign: true, compact: true }) + '</b>' : '<b class="mut">—</b>')
+    const dash = '<span class="mut">—</span>';
+    return '<section class="vnsec vnfl"><div class="vnh"><b>드나든 돈 · 최근 30일</b>' + (rec ? '<button class="link" data-a="venueRec">이곳 기록 보기 ›</button>' : '') + '</div><div class="vntiles">'
+      + uiCell('들어옴', okF ? '<span class="' + (num(x.in) > 0 ? 'up' : '') + '">' + (num(x.in) > 0 ? '+' : '') + m(num(x.in), { compact: true }) + '</span>' : dash)
+      + uiCell('나감', okF ? '<span class="' + (num(x.out) > 0 ? 'down' : '') + '">' + (num(x.out) > 0 ? '−' : '') + m(num(x.out), { compact: true }) + '</span>' : dash)
+      + uiCell('이곳 매매 실현', okR ? '<span class="' + clsV(rzV) + '">' + m(rzV, { sign: true, compact: true }) + '</span>' : dash)
       + '</div></section>';
   }
   function vnSrc(M) {
@@ -3465,36 +3453,38 @@
   }
   function vnChains(M) {
     const v = M.v;
-    if (v.kind === 'cex') { const ts = (S.D.exBalTs || {})[v.name]; return '<section class="vnc"><div class="vnh"><b>잔고</b><span class="cap">' + (ts ? '잔고 기준 ' + ago(ts) : '잔고 시각 모름') + '</span></div></section>'; }
     if (v.kind !== 'wallet' || !M.chains.length) return '';
-    const bar = '<div class="vnbar" aria-hidden="true">' + M.chains.filter(c => c.usd > 0).map((c, i) => '<span style="flex:' + Math.max(0.5, c.pct).toFixed(2) + ';background:' + (i < 4 ? VN_COL[i] : VN_REST) + '"></span>').join('') + '</div>';
     const anyL = M.chains.some(c => vnExpl(c.ch, M.chAddr[c.ch]));
-    const list = '<div class="vnchl">' + M.chains.map((c, i) => { const u = vnExpl(c.ch, M.chAddr[c.ch]), inner = '<i style="background:' + (i < 4 ? VN_COL[i] : VN_REST) + '"></i><span class="ell">' + esc(c.ch) + '</span><span class="num mut">' + Math.round(c.pct) + '%</span>';
-      return u ? '<a class="vnch" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + inner + '</a>' : '<span class="vnch">' + inner + '</span>'; }).join('') + '</div>';
+    const rows = M.chains.map(c => { const u = vnExpl(c.ch, M.chAddr[c.ch]);
+      const nm = u ? '<a class="ell vnchn" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + esc(c.ch) + '</a>' : '<span class="ell vnchn">' + esc(c.ch) + '</span>';
+      return '<div class="it vnch"><div class="top2">' + nm + '<b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>' + vnBar(c.pct) + '</div>'; }).join('');
     const ad = M.addrs.map(a => '<div class="vnad"><span class="mono">' + esc(short(a)) + '</span><span class="sp"></span>' + copyBtn(a) + '</div>').join('');
-    return '<section class="vnc"><div class="vnh"><b>체인별</b>' + (anyL ? '<span class="cap">눌러서 탐색기</span>' : '') + '</div>' + bar + list + (ad ? '<div class="vnads">' + ad + '</div>' : '') + '</section>';
+    return '<section class="vnsec"><div class="vnh"><b>체인별</b>' + (anyL ? '<span class="cap">이름 누르면 탐색기</span>' : '') + '</div><div class="cust vnl">' + rows + '</div>' + (ad ? '<div class="vnads">' + ad + '</div>' : '') + '</section>';
   }
   function vnCoins(M) {
     const all = M.coins, open = !!S.venueCoinAll, shown = open ? all : all.slice(0, VN_TOP), rest = all.slice(VN_TOP);
-    const row = c => { const col = M.colOf(c.sym), lg = S.D.symLogo && S.D.symLogo[c.sym];
+    const row = c => { const lg = S.D.symLogo && S.D.symLogo[c.sym];
       const qt = c.qn ? q(c.qty) : c.lbl && c.lbl.krw != null ? krw(c.lbl.krw) : esc(String(c.lbl == null ? '' : c.lbl));
       const go = c.sym !== 'KRW' && M.v.kind !== 'lp';
-      return '<' + (go ? 'button data-a="venueCoin" data-v="' + esc(c.sym) + '"' : 'div') + ' class="vnco">' + icon(c.sym, '', lg ? { ck: lg.ck, ca: lg.ca } : {})
-        + '<span class="vncm"><span class="vncn"><b>' + esc(c.sym) + '</b><span class="num mut">' + qt + '</span></span><span class="vnpb"><i style="width:' + Math.min(100, Math.max(0, c.pct)).toFixed(1) + '%;background:' + col + '"></i></span></span>'
-        + '<span class="vncv"><b class="num">' + m(c.usd, { compact: true }) + '</b><span class="num mut">' + Math.round(c.pct) + '%</span></span></' + (go ? 'button' : 'div') + '>'; };
-    return '<section class="vnc vncs"><div class="vnh"><b>들어 있는 코인</b>' + (M.v.kind !== 'lp' ? '<span class="cap">눌러서 보유표로</span>' : '') + '</div>' + shown.map(row).join('')
-      + (rest.length ? '<button class="vnmore" data-a="venueCoinAll" aria-expanded="' + open + '"><span class="pvx">' + (open ? '접기' : '그 밖 ' + rest.length + '종') + '</span><span class="num">' + (open ? '▴' : m(sum(rest, c => c.usd), { compact: true }) + ' ▾') + '</span></button>' : '') + '</section>';
+      return '<div class="it vnco"><' + (go ? 'button type="button" data-a="venueCoin" data-v="' + esc(c.sym) + '"' : 'div') + ' class="vnrow"><div class="top2">' + icon(c.sym, '', lg ? { ck: lg.ck, ca: lg.ca } : {})
+        + '<span class="vncn ell"><span class="vnsym">' + esc(c.sym) + '</span> <span class="num mut">' + qt + '</span></span><b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>'
+        + vnBar(c.pct) + '</' + (go ? 'button' : 'div') + '></div>'; };
+    const more = rest.length ? '<div class="umore"><button type="button" class="ubtn" data-a="venueCoinAll" aria-expanded="' + open + '">'
+      + (open ? '접기<span class="uchev up" aria-hidden="true">' + IC.chev + '</span>' : '<span class="pvx">그 밖 ' + rest.length + '종</span> <span class="mut num">· ' + m(sum(rest, c => c.usd), { compact: true }) + '</span>' + UI_CHEV) + '</button></div>' : '';
+    return '<section class="vnsec vncs"><div class="vnh"><b>들어 있는 코인</b>' + (M.v.kind !== 'lp' ? '<span class="cap">눌러서 보유표로</span>' : '') + '</div><div class="cust vnl">' + shown.map(row).join('') + '</div>' + more + '</section>';
   }
   function venueDrawer() {
     const D = S.D, v = arr(D.venues).find(x => nmKey(x.name) === S.venueK);
     const close = '<button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button>';
     if (!v) return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세"><div class="dh"><div class="h2">보관처 상세</div><span class="sp"></span>' + close + '</div><div class="cap" role="status">이 보관처는 지금 목록에 없어요(잔고 0 · 이름 바뀜)</div></aside>';
     const M = vnModel(v);
+    const exTs = (D.exBalTs || {})[v.name];
     const meta = v.kind === 'wallet' ? '코인 ' + M.coins.length + '종 · 체인 ' + M.chains.length + '개 · ' + scanText(D.lastScan) + ' 수집'
-      : v.kind === 'cex' ? '코인 ' + M.coins.length + '종' + ((D.exBalTs || {})[v.name] ? ' · ' + ago(D.exBalTs[v.name]) + ' 잔고' : '') : '포지션 ' + M.coins.length + '개';
+      : v.kind === 'cex' ? '코인 ' + M.coins.length + '종 · ' + (exTs ? '잔고 기준 ' + ago(exTs) : '잔고 시각 모름') : '포지션 ' + M.coins.length + '개';
+    const share = (M.share < 0 ? '−' : '') + (Math.abs(M.share) >= 0.5 || M.share === 0 ? Math.round(Math.abs(M.share)) : '<1') + '%';
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세">'
-      + '<div class="dh"><span class="pill">' + esc(M.kindTxt) + '</span><span class="vnt ell pvl">' + esc(locName(v.name)) + '</span><span class="sp"></span>' + close + '</div>'
-      + '<section class="vnc vnhero">' + vnRing(M) + '<div class="vnhv"><span class="cap">이곳에 있는 돈</span><b class="num vnbig">' + m(M.tot, { compact: true }) + '</b><span class="num mut">' + mAlt(M.tot) + '</span><span class="cap pvx">' + esc(meta) + '</span></div></section>'
+      + '<div class="dh"><div class="h2 vnt ell pvl">' + esc(locName(v.name)) + '</div><span class="pill sm vnkind">' + esc(M.kindTxt) + '</span><span class="sp"></span>' + close + '</div>'
+      + '<section class="vnhero"><span class="cap">이곳에 있는 돈 · 총자산의 <span class="num">' + esc(share) + '</span></span><b class="num vnbig">' + m(M.tot, { compact: true }) + '</b><span class="num mut vnalt">' + mAlt(M.tot) + '</span><span class="cap pvx vnmeta">' + esc(meta) + '</span></section>'
       + vnFlows(M) + vnChains(M) + vnCoins(M) + '</aside>';
   }
   function venueOpen(el) {
@@ -3855,7 +3845,7 @@
       if (ag.aftD.length) { const d = ag.aftD.length > 1 ? mdOf(ag.aftD[0]) + '~' + mdOf(ag.aftD[ag.aftD.length - 1]) : mdOf(ag.aftD[0]);
         aside.push('이후 ' + d + (done ? ' 전량 매도' : ' 매도') + (ag.aftR ? ' ' + sg(ag.hasK ? KV(ag.aftR, ag.aftRK) : ag.aftR) : '') + ' (기간 밖)'); }
     }
-    const rt = esc(p.chain === '?' ? '거래소' : p.chain) + ' · ' + (done ? esc(p.opened) + ' ~ ' + esc(last) : esc(p.opened) + ' 시작') + (legs ? '<span class="pvx">' + esc(legs) + '</span>' : '') + (aside.length ? ' · ' + esc(aside.join(' · ')) : '');
+    const rt = '<span class="rtp">' + esc(p.chain === '?' ? '거래소' : p.chain) + ' · ' + (done ? esc(p.opened) + ' ~ ' + esc(last) : esc(p.opened) + ' 시작') + (legs ? '<span class="pvx">' + esc(legs) + '</span>' : '') + '</span>' + (aside.length ? '<span class="rta num">\u00A0· ' + esc(aside.join(' · ')) + '</span>' : '');
     const steps = arr(p.steps).map(term), s0 = steps[0] || '';
     const chip = s0 && s0 !== String(p.sym) ? '<span class="pill ' + (STEP_CHIP[s0] || 'g') + ' sm"' + (steps.length > 1 ? ' title="경로: ' + esc(steps.join(' → ')) + '"' : '') + '>' + esc(s0) + '</span>' : '';
     let prog;
@@ -3915,7 +3905,7 @@
     const pillTip = pillDup ? (/title="([^"]*)"/.exec(pillH) || [])[1] || '' : '';
     return '<div class="card cyc' + (open ? ' open' : '') + '" data-anc="cycle:' + esc(p.key) + '"><div class="hd" role="button" tabindex="0" aria-expanded="' + open + '" data-a="jTog" data-k="' + esc(p.key) + '">'
       + '<div class="asset">' + (p._lp ? lpIcon(p._lp) : icon(p.sym, false, S.D.symLogo[String(p.sym).toUpperCase()] || {})) + '<div class="ell"><div class="sym ell' + (p._lp ? ' lpsym' : '') + '"' + (pillTip ? ' title="' + pillTip + '"' : '') + '>' + nm + impChip(p) + (pillDup ? '' : ' ' + pillH) + '</div></div></div>'
-      + '<div class="stepcol"><div class="rt ell" title="' + esc(plainT(ln[0])) + '">' + ln[0] + '</div><div class="mt" title="' + esc(plainT(ln[1])) + '">' + ln[1] + '</div></div>'
+      + '<div class="stepcol"><div class="rt ell' + (ln[0].indexOf('class="rtp"') >= 0 ? ' rtf' : '') + '" title="' + esc(plainT(ln[0])) + '">' + ln[0] + '</div><div class="mt" title="' + esc(plainT(ln[1])) + '">' + ln[1] + '</div></div>'
       + '<div class="kcol"><div class="k" title="' + (perOn ? '선택한 기간에 체결된 매도의 실현손익' : '사이클 시작부터 누적') + '">' + (perOn ? '기간 실현' : '실현') + '</div>' + realCell + '</div>'
       + '<div class="kcol"><div class="k">투입</div>' + costCell + '</div>'
       + '<div class="kcol"><div class="k">지금 가치</div>' + nowCell + '</div>'
@@ -4443,7 +4433,7 @@
     const tISO = isoDay(D.todayKey) || todayISO();
     const mmP = pad2(mo + 1) + '-';
     let closed = 0;
-    const mob = S.mobile, dotMax = mob ? 1 : 4;
+    const mob = S.mobile, dotMax = mob ? 1 : 3;
     const wsel0 = wkSelNow(), wsel = wsel0 && (!wsel0.f || wsel0.f.slice(0, 7) === ym) ? wsel0 : null;
     let cells = DOWS_MON.map((d, i) => '<div class="dw' + (i === 6 ? ' sun' : i === 5 ? ' sat' : '') + '">' + d + '</div>').join('') + '<div class="dw wkc">주간 실현</div>';
     const mdays = realDays(ym);
@@ -4553,7 +4543,7 @@
     const day = wsel ? wkPanelHTML(wsel) : reviewHTML();
     const heat = heatHTML();
     if (S.mobile) return heat + '<div class="dgrid dm">' + day + dayEventsHTML() + '<div class="dcol">' + cal + glance + '</div></div>';
-    return heat + '<div class="dgrid"><div class="dcol">' + cal + glance + '</div>' + day + '</div>' + dayEventsHTML();
+    return heat + '<div class="dgrid' + (calView() === 'list' ? ' dlist' : '') + '"><div class="dcol">' + cal + glance + '</div>' + day + '</div>' + dayEventsHTML();
   }
   function wkPanelHTML(sel) {
     const D = S.D, wk = sel.wk;
@@ -4755,6 +4745,7 @@
           + (x.lpN ? '<span class="ell lpn" title="' + esc(x.ids.join('\n')) + '"><span class="nm">' + esc(x.sym) + '</span> <span class="id">×' + x.lpN + '</span></span>' : lpNmHTML(x.sym, x.lp)) + '<span class="cb2"><i class="' + (vv >= 0 ? 'p' : 'n') + '" style="width:' + Math.max(3, Math.abs(x.v) / mx * 100).toFixed(1) + '%"></i></span><b class="num ' + clsV(vv) + '">' + m(vv, { sign: true, compact: true }) + '</b>';
         if (x.lp) { const lk = x.lpN ? '' : String((x.p && x.p.key) || ''), pool = String(x.lpN ? x.pool : (x.p && x.p.sym) || x.sym);
           return '<button class="cr clk" data-a="lpGo" data-v="' + esc(iso + '|' + pool + '|' + lk) + '" title="이 LP 보기 ›" aria-label="' + esc(String(x.sym) + ' — 이 LP 보기') + '">' + inner + '</button>'; }
+        if (x.fut) return '<button class="cr clk" data-a="futRcpt" data-v="' + esc(iso) + '" data-rk="' + (i + 1) + '" title="선물 영수증 — 그날 선물 진입·청산">' + inner + '</button>';
         return rcptable(x) ? '<button class="cr clk" data-a="receipt" data-v="' + esc(iso + '|' + x.sym) + '" data-rk="' + (i + 1) + '" title="' + esc(x.sym) + ' 차익 영수증">' + inner + '</button>' : '<div class="cr">' + inner + '</div>'; }).join('')
         + (rest.length ? '<div class="cap num crest">외 ' + rest.length + '개' + (S.mobile ? ' · ' + esc(rest.slice(0, 3).map(x => x.lpN ? x.sym : String(x.sym).replace(/\s+#\d+$/, '')).join(' · ')) + (rest.length > 3 ? ' 등' : '') : '') + ' · ' + m(sum(rest, x => KV(x.v, x.vk)), { sign: true, compact: true }) + '</div>' : '')
         + (Math.abs(odd) * (S.cur === 'USD' ? 1 : rate()) >= (S.cur === 'USD' ? 0.005 : 0.5) ? '<div class="cap num crest" title="코인·LP·선물별 줄에서 빠진 $0.005 미만 조각(가스·스테이블 환전 끝전 등)과 반올림의 합 — 위 줄들과 더하면 제목 실현과 같아요">' + (Math.abs(odd) * (S.cur === 'USD' ? 1 : rate()) < (S.cur === 'USD' ? 1 : 1000) ? '기타 소액 ' : '그 밖 ') + m(odd, { sign: true }) + '</div>' : '') + '</div>';
@@ -4783,9 +4774,9 @@
       : '<div class="noai">' + IC.info.replace('<svg', '<svg width="18" height="18"') + (isToday ? '오늘의 AI 리뷰는 23:50 에 만들어져요' : noTrade ? noTradeTxt : '이 날은 AI 리뷰가 아직 없어요') + '</div>';
     const fx = (u.usdt ? 'USDT ₩' + nf('ko-KR').format(num(u.usdt)) : '') + (kp != null ? (u.usdt ? ' · ' : '') + '김프 ' + pctS(kp, 2) + kimpChip(kp) : '');
     const stPill = '<span class="pill ' + (isToday ? 'w' : 'g') + ' sm"' + (!isToday && !snap ? ' title="최근 30일 밖이라 그날 총자산 마감 기록이 없어요 — 전일 대비·자산 변동 분해도 없어요"' : '') + '>' + (isToday ? (S.mobile ? '실시간' : '실시간 · 23:59 마감') : (snap ? (S.mobile ? '마감' : '마감 기록') : '마감 기록 없음')) + '</span>';
-    const h3 = '<h3 class="v num">' + (tiny ? '<span class="mut">≈0</span> <small class="mut tiny">(끝전 ' + m(r, { sign: true }) + ')</small>' : r ? '<span class="' + cls(r) + '">' + m(r, { sign: true }) + '</span>' : '<span class="mut">없음</span>') + '</h3>';
+    const h3 = '<h3 class="v num">' + (tiny ? '<span class="mut">≈0</span> <small class="mut tiny">(끝전 ' + m(r, { sign: true }) + ')</small>' : r ? '<span class="' + cls(r) + '" title="' + esc(m(r, { sign: true })) + '">' + m(r, { sign: true, compact: true }) + '</span>' : '<span class="mut">없음</span>') + '</h3>';
     const totS = total != null ? '<span' + (!isToday ? apTitle(snap) : '') + '>총자산 ' + (!isToday && apOf(snap) ? '≈ ' : '') + m(total, { compact: true }) + '</span>' : '';
-    const chgV = delta != null ? '<span class="' + (isStep || isSplit ? 'mut' : cls(delta)) + '">' + m(delta, { sign: true }) + '</span>' : '<span class="mut">—</span>';
+    const chgV = delta != null ? '<span class="' + (isStep || isSplit ? 'mut' : cls(delta)) + '" title="' + esc(m(delta, { sign: true })) + '">' + m(delta, { sign: true, compact: true }) + '</span>' : '<span class="mut">—</span>';
     const chgS = delta != null ? pctS(pvV ? delta / pvV * 100 : null, 2) + (attK ? '' : isSplit && dFl != null ? ' ' + flowSplit(delta, dFl, isToday ? D._todayFlowTop : (snap || {}).flowTop, true) : (isStep ? ' · 입출금 포함' : '')) : (snap || isToday ? '전일 마감 없음' : '');
     const tiles2 = '<div class="dtl2"><div class="dtile"><span class="l">' + (futOnly ? '선물 정산' : '실현') + '</span>' + h3 + '<span class="s num facts">' + facts + '</span></div>'
       + '<div class="dtile dchg"><span class="l">전일 대비</span><b class="v num">' + chgV + '</b><span class="s num">' + [chgS, totS].filter(Boolean).join(' · ') + '</span></div></div>';
@@ -5092,21 +5083,22 @@
     if (!iso) return [];
     const ex = fu.realizedByDateEx;
     if (ex && typeof ex === 'object' && !Array.isArray(ex)) return arr(ex[iso]).filter(x => x && isFinite(+x.usd) && Math.abs(+x.usd) >= 0.005 && srcPass({ src: 'ex:' + String(x.exKey || '') }))
-      .map(x => ({ ex: String(x.ex || x.exKey || ''), usd: +x.usd, krw: x.krw != null && isFinite(+x.krw) ? +x.krw : null, n: Math.max(0, Math.floor(num(x.n))), t: /^\d\d:\d\d$/.test(String(x.t || '')) ? String(x.t) : '' }));
+      .map(x => ({ ex: String(x.ex || x.exKey || ''), usd: +x.usd, krw: x.krw != null && isFinite(+x.krw) ? +x.krw : null, n: Math.max(0, Math.floor(num(x.n))), t: /^\d\d:\d\d$/.test(String(x.t || '')) ? String(x.t) : '', iso, exKey: String(x.exKey || '') }));
     const u = num((fu.realizedByDate || {})[iso]), k = (fu.realizedKrwByDate || {})[iso];
     if (Math.abs(u) < 0.005 || S.src.mode !== 'all') return [];
-    return [{ ex: '', usd: u, krw: k != null && isFinite(+k) ? +k : null, n: 0, t: '' }];
+    return [{ ex: '', usd: u, krw: k != null && isFinite(+k) ? +k : null, n: 0, t: '', iso, exKey: '' }];
   }
   function futDayHTML(x, mode) {
     const v = KV(x.usd, x.krw), alt = S.cur === 'USD' ? mAlt(x.krw != null ? x.krw / rate() : x.usd, { sign: true, compact: mode === 'bn' }) : mAlt(x.usd, { sign: true, compact: mode === 'bn' });
-    const nm = esc(x.ex || '선물'), ct = x.n ? '<span class="pvx">' + x.n + '건</span>' : '', tip = ' title="' + esc('선물 정산' + (x.ex ? ' · ' + x.ex : '') + ' — 정산 + 수수료 + 펀딩 · 누르면 선물 화면') + '"';
+    const nm = esc(x.ex || '선물'), ct = x.n ? '<span class="pvx">' + x.n + '건</span>' : '', tip = ' title="' + esc('선물 정산' + (x.ex ? ' · ' + x.ex : '') + ' — 정산 + 수수료 + 펀딩 · 누르면 선물 영수증') + '"';
+    const fa = x.iso ? 'data-a="futRcpt" data-fv="' + esc(x.iso + '|' + (x.exKey || '')) + '"' : 'data-a="openFut"';
     const amt = '<b class="num ' + clsV(v) + '">' + m(v, { sign: true, compact: mode === 'bn' }) + '</b>';
     const FUT_CV = IC.right.replace('<svg', '<svg class="cv" width="14" height="14"');
-    if (mode === 'bn') return '<div class="bn futd" data-n="0"><button class="bh" data-a="openFut"' + tip + '><span class="l1">' + evPill('선물 정산') + '<b class="sy ell">' + nm + '</b>' + (ct ? '<span class="ct num">' + ct + '</span>' : '') + '<b class="am num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</b></span>'
+    if (mode === 'bn') return '<div class="bn futd" data-n="0"><button class="bh" ' + fa + tip + '><span class="l1">' + evPill('선물 정산') + '<b class="sy ell">' + nm + '</b>' + (ct ? '<span class="ct num">' + ct + '</span>' : '') + '<b class="am num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</b></span>'
       + '<span class="l2 num"><span class="ell">' + esc(x.t) + '</span><span>' + alt + '</span>' + FUT_CV + '</span></button></div>';
-    if (mode === 'div') return '<div class="futd" data-n="0" data-a="openFut" role="button" tabindex="0"' + tip + ' style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer"><div class="row gap8">' + evPill('선물 정산') + '<b>' + nm + '</b>' + (ct ? ' <span class="mut num">' + ct + '</span>' : '') + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(x.t) + '</span></div>'
+    if (mode === 'div') return '<div class="futd" data-n="0" ' + fa + ' role="button" tabindex="0"' + tip + ' style="padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer"><div class="row gap8">' + evPill('선물 정산') + '<b>' + nm + '</b>' + (ct ? ' <span class="mut num">' + ct + '</span>' : '') + '<span class="sp"></span><span class="mut num" style="font-size:12.5px">' + esc(x.t) + '</span></div>'
       + '<div class="row sub num"><span class="sp"></span><span style="text-align:right">' + amt + '<div class="mut" style="font-size:12px">' + alt + '</div></span></div></div>';
-    return '<tr class="clk futd" data-n="0" data-a="openFut" role="button" tabindex="0"' + tip + '><td class="l mut num nowrap">' + esc(x.t) + '</td><td class="l">' + evPill('선물 정산') + '</td><td class="l"><b>' + nm + '</b></td><td class="l"><span class="t2">' + ct + '</span></td><td class="num nowrap">—</td>'
+    return '<tr class="clk futd" data-n="0" ' + fa + ' role="button" tabindex="0"' + tip + '><td class="l mut num nowrap">' + esc(x.t) + '</td><td class="l">' + evPill('선물 정산') + '</td><td class="l"><b>' + nm + '</b></td><td class="l"><span class="t2">' + ct + '</span></td><td class="num nowrap">—</td>'
       + '<td class="num nowrap">' + amt + '<div class="sub num">' + alt + '</div></td><td class="tx num nowrap mut">' + FUT_CV + '</td></tr>';
   }
   function dayEventsHTML() {
@@ -5172,7 +5164,7 @@
       + (S.mobile || S.narrow ? '<div class="m-list">' + days.map(d => { const u = D.usdt[d.date] || {}; const st = d.date === D.todayKey ? !!D._todayStep : D.steps.indexOf(d.date) >= 0; return '<button class="it" data-a="pickDay" data-v="' + esc(d.date) + '"><div><b class="num">' + esc(d.date) + '</b> <span class="mut">' + esc(d.dow || '') + '</span><div class="sub num">' + esc(summary(d)) + '</div></div><div class="r"><div class="val num"' + (d.rb ? ' title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"' : apTitle(d)) + '>' + (apOf(d) ? '≈ ' : '') + m(dval(d), { compact: true }) + '</div><div class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '" style="font-size:13px">' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (st || spl(d) ? ' · 입출금' : '') + '</div></div></button>'; }).join('') + '</div>'
         : '<table><thead><tr><th>날짜</th><th class="l">요약</th><th>USDT 종가</th><th>김프</th><th>총자산</th><th>변동</th></tr></thead><tbody>' + days.map(d => {
           const u = D.usdt[d.date] || {}, kp = u.kimp != null ? num(u.kimp) : null, st = d.date === D.todayKey ? !!D._todayStep : D.steps.indexOf(d.date) >= 0;
-          return '<tr class="clk' + (S.day === d.date ? ' open' : '') + '" data-a="pickDay" data-v="' + esc(d.date) + '" role="button" tabindex="0"><td class="num">' + esc(isoDay(d.date) || d.date) + ' <span class="mut">' + esc(d.dow || '') + '</span></td><td class="l"><span class="t2">' + esc(summary(d)) + '</span>' + (isLLM(D.reviews[d.date]) ? ' <span class="tag-ai">AI 리뷰</span>' : '') + '</td><td class="num pvx">' + (u.usdt ? '₩' + nf('ko-KR').format(num(u.usdt)) : '—') + '</td><td class="num nowrap" style="color:' + kimpCol(kp) + '">' + (kp == null ? '—' : pctS(kp, 2) + (kp > 2 ? kimpChip(kp) : '')) + '</td><td class="num" title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"><b>' + (apOf(d) ? '<span class="mut">≈ </span>' : '') + m(dval(d), { compact: true }) + '</b>' + (d.rbNew ? '<div class="sub">Rabby 기준 첫 반영</div>' : '') + '</td><td class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '"' + (dlt(d) == null ? '' : ' title="' + esc(m(dlt(d), { sign: true }) + (attOf(d.date) ? ' — ' + attLine(attOf(d.date), 3, false) : '')) + '"') + '>' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (spl(d) && dlt(d) != null && (d.date === D.todayKey ? D._todayFlow : d.flow) != null ? (() => { const fl = d.date === D.todayKey ? num(D._todayFlow) : dayFlowV(d), mk = dlt(d) - fl;
+          return '<tr class="clk' + (S.day === d.date ? ' open' : '') + '" data-a="pickDay" data-v="' + esc(d.date) + '" role="button" tabindex="0"><td class="num nowrap" title="' + esc(isoDay(d.date) || d.date) + '">' + esc(d.date) + ' <span class="mut">(' + esc(d.dow || '') + ')</span></td><td class="l"><span class="t2">' + summary(d).split(' · ').map(x => '<span class="nowrap">' + esc(x) + '</span>').join(' · ') + '</span>' + (isLLM(D.reviews[d.date]) ? ' <span class="tag-ai">AI 리뷰</span>' : '') + '</td><td class="num pvx">' + (u.usdt ? '₩' + nf('ko-KR').format(num(u.usdt)) : '—') + '</td><td class="num nowrap" style="color:' + kimpCol(kp) + '">' + (kp == null ? '—' : pctS(kp, 2) + (kp > 2 ? kimpChip(kp) : '')) + '</td><td class="num" title="' + esc(m(dval(d)) + (apOf(d) ? ' · ' + apTxt(d) : '') + rbDayTxt(d)) + '"><b>' + (apOf(d) ? '<span class="mut">≈ </span>' : '') + m(dval(d), { compact: true }) + '</b>' + (d.rbNew ? '<div class="sub">Rabby 기준 첫 반영</div>' : '') + '</td><td class="num ' + (st || spl(d) ? 'mut' : cls(dlt(d))) + '"' + (dlt(d) == null ? '' : ' title="' + esc(m(dlt(d), { sign: true }) + (attOf(d.date) ? ' — ' + attLine(attOf(d.date), 3, false) : '')) + '"') + '>' + (dlt(d) == null ? '—' : m(dlt(d), { sign: true, compact: true })) + (spl(d) && dlt(d) != null && (d.date === D.todayKey ? D._todayFlow : d.flow) != null ? (() => { const fl = d.date === D.todayKey ? num(D._todayFlow) : dayFlowV(d), mk = dlt(d) - fl;
             if (attOf(d.date)) return '<div class="sub nowrap" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '">입출금 ' + m(fl, { sign: true, compact: true }) + '</div>';
             return '<div class="sub nowrap" title="' + esc(flowTip(fl, d.date === D.todayKey ? D._todayFlowTop : d.flowTop)) + '">시장 <span class="' + cls(mk) + '">' + m(mk, { sign: true, compact: true }) + '</span> · 입출금 ' + m(fl, { sign: true, compact: true }) + '</div>'; })() : (st ? '<div class="sub">입출금 포함</div>' : '')) + '</td></tr>';
         }).join('') + '</tbody></table>') + '</div>';
@@ -5201,7 +5193,7 @@
     const hcTxt = Object.keys(hc).filter(k => hc[k]).map(k => HIDE_LBL[k] + ' ' + hc[k]).join(' · ');
     const hidChip = D.pendHid.length ? uiHidChip(D.pendHid.length, 'uHidden', S.u.showHidden, '자동으로 숨긴 항목 ' + D.pendHid.length + '건' + (hcTxt ? '(' + hcTxt + ')' : '') + (S.u.showHidden ? ' — 누르면 닫아요' : ' — 누르면 목록 위에 보여요')) : '';
     const split = D.unkhSymN && D.pendN !== D.unkhSymN ? '<span class="pvx">' + esc(pendSplitTxt()) + '</span> · ' : '';
-    const top = '<div class="filters uhead"><div style="min-width:0"><div class="h2">확인이 필요한 ' + D.pendN + '건</div><div class="cap ucap1" title="원가를 지정하거나 무시로 정리하면 목록에서 빠져요 · 원가가 붙으면 평단·실현손익이 다시 계산됩니다">' + split + '원가를 정하거나 숨기면 목록에서 빠져요</div></div><div class="sp"></div>'
+    const top = '<div class="filters uhead"><div style="min-width:0"><div class="cap ucap1" title="원가를 지정하거나 무시로 정리하면 목록에서 빠져요 · 원가가 붙으면 평단·실현손익이 다시 계산됩니다"><b class="ucnt">확인이 필요한 ' + D.pendN + '건</b> · ' + split + '원가를 정하거나 숨기면 목록에서 빠져요</div></div><div class="sp"></div>'
       + '<div class="row gap8 srchrow">' + searchBox('uq', '코인·유형 검색', S.u.q) + hidChip
       + '</div></div>';
     const bal = balGroupHTML();
@@ -5417,7 +5409,7 @@
     const hidChip = nHid ? uiHidChip(nHid, 'ofHidden', sh, '자동으로 숨긴 전송 ' + nHid + '곳' + (spam.length ? ' · 사칭 토큰 로그 ' + spam.length : '') + (nDust ? ' · 소액·주소 오염 ' + nDust : '') + (sh ? ' — 누르면 다시 숨겨요' : ' — 누르면 목록에 함께 보여요')) : '';
     const seg = '<div class="stw"><div class="subtabs" role="tablist">' + [['pending', '확인 필요', pend.length], ['history', '정리됨', res.length]].concat(D.wdDest.length ? [['wdest', '출금 받은 주소', D.wdDestN]] : []).map(t => '<button role="tab" aria-selected="' + (S.of.view === t[0]) + '" class="' + (S.of.view === t[0] ? 'on' : '') + '" data-a="ofView" data-v="' + t[0] + '"' + (t[0] === 'history' ? ' title="정리된 내역"' : t[0] === 'wdest' ? ' title="거래소 출금 받은 주소"' : '') + '>' + t[1] + '<span class="n">' + t[2] + '</span></button>').join('') + '</div>'
       + (D.of.some(ofIsSale) ? '' : '<button class="pill g sm ofsl0" data-a="ofWaitGo" title="세일에 넣은 전송을 외부 → 세일 참가금으로 고르면 여기 모여요">세일 참가금 0</button>') + hidChip + '</div>';
-    const head = '<div class="ofhd"><div class="h2">보낸 내역</div><div class="cap">어디로 보냈는지 정하면 총자산·손익이 정확해져요</div></div>';
+    const head = '<div class="ofhd"><div class="cap">어디로 보냈는지 정하면 총자산·손익이 정확해져요</div></div>';
     let body;
     const ocb = offcAsk() + offcGroup();
     if (S.of.view === 'history') body = ofHistory(res);
@@ -5450,6 +5442,7 @@
     }
     if (r.exwd && r.exwd.length) { const ex = r.exwd.map(x => x.exName).filter((x, i, a) => x && a.indexOf(x) === i); chips.push(['a', ex.join('·') + ' 출금' + (r.exwdN > 1 ? ' ' + r.exwdN + '건' : ''), r.exwdOffc ? '오프체인 ' + r.exwdOffc.n + '건 포함 — 거래소 사용자끼리 체인 밖 이체' : '거래소 출금']); }
     if (!chips.length && r.hints.length) chips.push(r.hints[0].kind === 'burn' ? ['g', '발행·소각 주소', String(hs(r.hints[0].label))] : ['ok', String(hs(r.hints[0].label)), '알려진 주소']);
+    chips.forEach(c => { const mm = /^(.+?) 입금으로 자동 매칭\(근거: [^)]*\) · (\d+\/\d+)건/.exec(c[1]); if (mm) { c[2] = c[1]; c[1] = mm[1] + ' 입금 자동 매칭 · ' + mm[2] + '건'; } });
     return chips;
   }
   function ofCard(r, hist) {
@@ -5992,7 +5985,8 @@
     const st = suSt();
     if (!st) return null;
     const XO = ['helius', 'etherscan', 'coingecko', 'opensea'];
-    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
+    const NODE = st.nodes && typeof st.nodes === 'object' ? Object.keys(st.nodes) : [];
+    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).filter(k => !NODE.includes(k) || (xp[k] && xp[k].set)).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
     const empty = xk.filter(k => !(xp[k] && xp[k].set)), exSet = ek.filter(k => ex[k] && ex[k].set), tg = st.telegram || {};
     const P = st.perp || {}, pw = arr(P.wallets), stt = P.state || {};
     const pBad = pw.filter(w => { const s9 = ((stt[w.dex] || {}).accts || {})[w.address] || {}; return s9.err || (stt[w.dex] || {}).wait; }).length;
@@ -6999,6 +6993,7 @@
     const st = rb.status || {}, now = Date.now() / 1000;
     const cool = num(st.backoffUntil) > now ? '<div class="cap wtxt" style="margin-top:8px">Rabby 요청 한도(429)로 ' + esc(fmtTs(st.backoffUntil)) + '까지 쉬는 중 — 그동안 마지막 값을 나이와 함께 계속 써요</div>' : '';
     const off = st.enabled === false ? '<div class="cap" style="margin-top:8px">수집 꺼짐(config rabby.enabled) — 마지막 값만 표시해요</div>' : '';
+    const minTxt = num(st.minUsd) > 0 ? '<div class="cap" style="margin-top:8px">Rabby 요청 한도가 작아서(8시간에 약 9번) ' + m(num(st.minUsd), { compact: true }) + ' 이상 지갑만 봐요 · 지갑당 1~2번 요청 · 기준 = 봇 평가와 Rabby 마지막 값 중 큰 쪽 (config rabby.min_wallet_usd)</div>' : '';
     const rbAge = ts => { const s0 = Math.max(0, now - num(ts)); return s0 < 3600 ? ago(ts) : s0 < 72 * 3600 ? Math.floor(s0 / 3600) + '시간 전' : Math.floor(s0 / 86400) + '일 전'; };
     const rows = arr(rb.wallets).map(w => {
       const B = num(w.bot), Rb = num(w.rabby), gap = Rb - B, over = !!w.gapSince, lim = Math.max(200, 0.05 * Math.max(B, Rb, 0));
@@ -7014,7 +7009,7 @@
         + (over ? ' · 차이 큼(' + esc(ago(w.gapSince)) + '부터)' : '') + (botOver ? ' · ' + (old ? 'Rabby 자료 뒤에 들어온 돈일 수 있어요' : 'Rabby 가 못 본 토큰·시세 차일 수 있어요') : '')
         + (w.err ? ' · <span class="wtxt">최근 실패: ' + esc(errTxt((String(w.err).replace(/\s*https?:\/\/\S+/g, '').trim() || String(w.err)).slice(0, 60))) + '</span>' : '') + '</div></div></div>';
     }).join('');
-    return rows + cool + off;
+    return rows + cool + off + minTxt;
   }
   function aliasCell(w) {
     const k = w.key || w.addr || '';
@@ -7034,6 +7029,7 @@
     let h = '';
     if (S.drawer === 'fut' && S.D) h += futDrawer();
     if (S.drawer === 'rcpt' && S.D) h += rcptDrawer();
+    if (S.drawer === 'frcpt' && S.D) h += futRcptDrawer();
     if (S.drawer === 'lev' && S.D) h += levDrawer();
     if (S.drawer === 'venue' && S.D) h += venueDrawer();
     if (S.sheet && S.D) h += uiSheetHTML();
@@ -8051,6 +8047,253 @@
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer rcpt" role="dialog" aria-modal="true" aria-label="' + esc(R.sym + ' 차익 영수증') + '"><div class="dh"><span class="cap rtop">' + esc(ttl) + '</span>' + rsum + '<span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>' + body + '</aside>';
   }
 
+  const FR_IVS = [['5m', '5분봉'], ['1m', '1분봉']];
+  const frOn = R => S.drawer === 'frcpt' && S.frc && S.frc.key === R.key;
+  const frSide = s => (s === 'LONG' ? '롱' : s === 'SHORT' ? '숏' : '');
+  const frMD = ts => { const x = new Date((ts + 32400) * 1000); return pad2(x.getUTCMonth() + 1) + '-' + pad2(x.getUTCDate()) + ' ' + pad2(x.getUTCHours()) + ':' + pad2(x.getUTCMinutes()); };
+  function openFutRcpt(iso, exKey, rank) {
+    if (!S.D || !isISO(iso)) return;
+    const first = S.drawer !== 'frcpt';
+    const ae = document.activeElement, back = first ? (ae && ae.getAttribute && ae.getAttribute('data-a') ? { el: ae, a: ae.getAttribute('data-a'), v: (ae.getAttribute('data-fv') || ae.getAttribute('data-v')) } : null) : (S.frc && S.frc.back);
+    S.drawer = 'frcpt'; S.pop = null; S.modal = null;
+    S.frc = { iso, key: iso, ex: String(exKey || ''), rank: +rank || 0, coin: '', iv: '5m', venue: '', back };
+    if (first) drawerHist();
+    frLoad();
+    renderOverlay();
+    if (first) { const b = $('#overlay .drawer [data-a="drawerClose"]'); if (b) b.focus(); }
+  }
+  function frLoad(force) {
+    const R = S.frc; if (!R || !S.D) return;
+    const C = S.frC || (S.frC = {}), c = C[R.key];
+    if (!force && c && (c.st === 'load' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') frPick(R, c.d); return; }
+    const at = S.D.builtAt;
+    C[R.key] = { st: 'load', at, d: c && c.d };
+    fetch('/api/fut_receipt?date=' + R.iso, { cache: 'no-store' })
+      .then(r => { if (r.status === 401) { onUnauthorized(); throw new Error('401'); } if (r.status === 404) { const e = new Error('old'); e.old = true; throw e; } return r.json().catch(() => null).then(d => { if (r.status === 503) { const e = new Error('색인을 만드는 중 — 잠시 뒤 다시'); e.idx = true; throw e; } if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status)); return d; }); })
+      .then(d => { C[R.key] = { st: 'ok', at, d }; if (frOn(R)) frPick(S.frc, d); })
+      .catch(e => { C[R.key] = { st: 'err', at: 0, old: !!(e && e.old), msg: String((e && e.message) || e), d: C[R.key] && C[R.key].d }; })
+      .then(() => { if (frOn(R)) renderOverlay(); });
+  }
+  function frPick(R, d) {
+    const cs = arr(d && d.coins);
+    if (!cs.length) return;
+    if (!R.coin || !cs.some(c => c.coin === R.coin)) {
+      const byEx = R.ex ? cs.filter(c => arr(c.venues).some(v => v.exKey === R.ex)).sort((a, b) => Math.abs(num(arr(b.venues).filter(v => v.exKey === R.ex).reduce((s0, v) => s0 + num(v.usd), 0))) - Math.abs(num(arr(a.venues).filter(v => v.exKey === R.ex).reduce((s0, v) => s0 + num(v.usd), 0)))) : [];
+      R.coin = (byEx[0] || cs[0]).coin;
+      R.venue = R.ex && byEx[0] ? R.ex : '';
+    }
+    frChart();
+  }
+  const frK = R => R.key + '|' + R.coin + '|' + R.iv + '|' + (R.venue || '');
+  function frChart(force) {
+    const R = S.frc; if (!R || !R.coin || !S.D) return;
+    const k = frK(R), C = S.frX || (S.frX = {}), c = C[k];
+    if (!force && c && (c.st === 'load' || c.st === 'prep' || c.st === 'old' || (c.st === 'ok' && c.at === S.D.builtAt))) { if (c.st === 'ok') frPrefetch(R); return; }
+    const gen = (S.frGen = (S.frGen || 0) + 1);
+    C[k] = { st: 'load', gen, at: S.D.builtAt, n: 0, d: c && c.d };
+    frFetch(R, k, { coin: R.coin, iv: R.iv, venue: R.venue }, gen, 0);
+  }
+  function frPrefetch(R) {
+    if (!R || !frOn(R) || R.preOff || !S.D || R.iv !== '5m') return;
+    const d = ((S.frC || {})[R.key] || {}).d, X = S.frX || {};
+    const P = S.frPre, pc = P && X[P.k];
+    if (pc && pc.gen === P.gen && (pc.st === 'load' || pc.st === 'prep')) return;
+    const c = arr(d && d.coins).slice(0, 3).map(x => x.coin).filter(x => x !== R.coin).map(x => ({ coin: x, k: R.key + '|' + x + '|5m|' })).find(x => !X[x.k]);
+    if (!c) return;
+    const gen = (S.frGen = (S.frGen || 0) + 1);
+    X[c.k] = { st: 'load', gen, at: S.D.builtAt, n: 0, pre: true };
+    S.frPre = { k: c.k, gen };
+    frFetch(R, c.k, { coin: c.coin, iv: '5m', venue: '' }, gen, 0);
+  }
+  function frFetch(R, k, v, gen, n) {
+    const C = S.frX, live = () => !!C[k] && C[k].gen === gen, pre = !!(C[k] && C[k].pre);
+    const url = '/api/receipt_chart?side=fut&date=' + R.iso + '&sym=' + encodeURIComponent(v.coin) + '&iv=' + v.iv + (v.venue ? '&venue=' + encodeURIComponent(v.venue) : '');
+    fetch(url, { cache: 'no-store' })
+      .then(r => {
+        if (r.status === 401) { onUnauthorized(); throw new Error('로그인이 필요해요'); }
+        if (r.status === 404) { const e = new Error('old'); e.old = true; throw e; }
+        return r.json().catch(() => null).then(d => {
+          if ((r.status === 202 && d && d.ok) || r.status === 503) return { prep: d || {}, idx: r.status === 503 };
+          if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+          return { d };
+        });
+      })
+      .then(x => {
+        if (!live()) return;
+        if (x.prep) {
+          if (pre && x.prep.status === 'busy' && !(S.frc && frK(S.frc) === k)) { delete C[k]; R.preOff = true; return; }
+          if (n + 1 >= RC_TRIES) { C[k] = { st: 'err', gen, at: 0, msg: '시세를 1분 넘게 받는 중이에요 — 잠시 뒤 다시 눌러 주세요', d: C[k].d }; return; }
+          C[k] = Object.assign({}, C[k], { st: 'prep', n: n + 1, busy: x.prep.status === 'busy', idx: !!x.idx });
+          setTimeout(() => { if (!live()) return; if (!frOn(R)) { delete C[k]; return; } frFetch(S.frc, k, v, gen, n + 1); }, Math.min(10, Math.max(1, num(x.prep.retryAfter) || 3)) * 1000);
+          return;
+        }
+        C[k] = { st: 'ok', gen, at: C[k].at, d: x.d };
+      })
+      .catch(e => { if (live()) C[k] = { st: e && e.old ? 'old' : 'err', gen, at: 0, msg: e && e.old ? '' : String((e && e.message) || e), d: C[k].d }; })
+      .then(() => { if (S.frc && frOn(R) && frK(S.frc) === k) renderOverlay(); if (pre || (S.frc && frK(S.frc) === k)) frPrefetch(S.frc); });
+  }
+  function futRcptDrawer() {
+    const R = S.frc; if (!R) return '';
+    const c = (S.frC || {})[R.key] || {}, d = c.d;
+    const dt = new Date(R.iso + 'T00:00:00');
+    const ttl = '선물 영수증 · ' + (dt.getMonth() + 1) + '월 ' + dt.getDate() + '일 (' + DOWS[dt.getDay()] + ')' + (R.rank ? ' 그날 실현 기여 ' + R.rank + '위' : '');
+    let body;
+    if (d && d.empty) body = '<div class="empty"><div class="eic">' + IC.cal + '</div><b>그날 선물 정산이 없어요</b><span class="cap">기여 줄에도 선물 줄이 없어요</span></div>';
+    else if (d) body = futRcptBody(R, d) + (c.st === 'load' ? '<div class="cap">새 기록으로 다시 계산하는 중…</div>' : c.st === 'err' ? '<div class="fbnote">새로 불러오지 못해 직전 영수증을 보여 줘요</div>' : '');
+    else if (c.st === 'err') body = '<div class="empty"><div class="eic">' + IC.alert + '</div><b>' + (c.old ? '서버를 업데이트하면 볼 수 있어요' : '영수증을 불러오지 못했어요') + '</b>' + (c.old ? '' : '<span class="cap">' + esc(errTxt(c.msg || '')) + '</span><button class="btn sm" data-a="frRetry" style="margin-top:10px">' + IC.undo + ' 다시 시도</button>') + '</div>';
+    else body = '<div class="rload" aria-busy="true"><i></i><i></i><i></i><span class="cap">영수증 불러오는 중…</span></div>';
+    const tv = d && !d.empty && d.total ? KV(num(d.total.usd), d.total.krw != null ? num(d.total.krw) : null) : null;
+    const rsum = tv != null ? '<span class="rsum num"><b>선물</b> <span class="' + cls(tv) + '">' + m(tv, { sign: true, compact: true }) + '</span></span>' : '';
+    return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer rcpt frc" role="dialog" aria-modal="true" aria-label="선물 영수증"><div class="dh"><span class="cap rtop">' + esc(ttl) + '</span>' + rsum + '<span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>' + body + '</aside>';
+  }
+  function futRcptBody(R, d) {
+    const t = d.total || {}, tv = KV(num(t.usd), t.krw != null ? num(t.krw) : null);
+    const rk = num(t.usd) ? tv / num(t.usd) : 1, V = u => num(u) * rk;
+    const exs = arr(d.byEx), coins = arr(d.coins);
+    const bb = coins.some(c => arr(c.trades).some(x => x.feeIncl));
+    const pr = coins.reduce((a, c) => [a[0] + num((c.priced || {}).n), a[1] + num((c.priced || {}).of)], [0, 0]);
+    const head = '<div class="rch"><div class="rcl"><div class="row gap8 rcn"><span class="ic sm" style="background:var(--surface3);color:var(--text2)">' + IC.scale.replace('<svg', '<svg width="14" height="14"') + '</span><b class="rsym">선물 정산</b>'
+      + (exs.length ? '<span class="pill g sm">' + esc(exs.map(x => x.ex).join(' · ')) + '</span>' : '') + (pr[1] ? '<span class="pill ' + (pr[0] === pr[1] ? 'a' : 'g') + ' sm pvx">가격 ' + pr[0] + '/' + pr[1] + '건</span>' : '')
+      + (arr(d.stale).length ? '<span class="pill w sm">수집 지연</span>' : '') + '</div>'
+      + '<div class="rbig num ' + cls(tv) + '">' + m(tv, { sign: true }) + '</div>'
+      + '<div class="cap num">실현 ' + m(V(t.realized), { sign: true }) + ' · 수수료 ' + m(V(t.fee), { sign: true }) + ' · 펀딩 ' + m(V(t.funding), { sign: true }) + (S.cur === 'USD' ? '' : ' · 정산 시각 환율') + '</div>'
+      + (exs.length > 1 || bb ? '<div class="cap num frex">' + exs.map(x => esc(x.ex) + ' <b class="' + clsV(KV(num(x.usd), x.krw)) + '">' + m(KV(num(x.usd), x.krw), { sign: true, compact: true }) + '</b>').join(' · ') + (bb ? ' · 바이빗은 실현에 수수료 포함' : '') + '</div>' : '') + '</div>';
+    const hs = coins.flatMap(c => arr(c.trades)).filter(x => x.holdS != null);
+    const avgH = hs.length ? hs.reduce((a, x) => a + num(x.holdS), 0) / hs.length : null;
+    const ff = V(num(t.fee) + num(t.funding));
+    const st = '<div class="rst"><div><span class="l">청산</span><b class="num">' + num(t.closes) + '건</b><span class="s num">' + num(t.wins) + '승 ' + num(t.losses) + '패</span></div>'
+      + '<div><span class="l">수수료·펀딩</span><b class="num ' + clsV(ff) + '">' + m(ff, { sign: true, compact: true }) + '</b><span class="s num">펀딩 ' + m(V(t.funding), { sign: true, compact: true }) + '</span></div>'
+      + '<div><span class="l">평균 보유</span><b class="num">' + (avgH != null ? durTxt(avgH) : '—') + '</b><span class="s num">' + (hs.length ? '진입 시각 있는 ' + hs.length + '건' : '진입 시각 모름') + '</span></div></div>';
+    const c = coins.find(x => x.coin === R.coin) || coins[0];
+    if (!c) return head + st + '</div>';
+    const chips = coins.length > 1 ? '<div class="rkvn frch" role="group" aria-label="종목"><span class="cap rkvl">종목</span>' + coins.map(x => { const on = x.coin === c.coin, v = KV(num(x.usd), x.krw);
+      return '<button class="chip' + (on ? ' on' : '') + '" data-a="frCoin" data-v="' + esc(x.coin) + '" aria-pressed="' + on + '">' + esc(x.label) + ' <span class="num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</span> <span class="mut num">· ' + num(x.closes) + '건</span></button>'; }).join('') + '</div>' : '';
+    const sec = '<section class="rsec rkc frk"><div class="row rtth rkh"><span class="rtt">실제 시세 위 내 진입·청산</span><span class="sp"></span><div class="seg rkseg" role="group" aria-label="봉 간격">'
+      + FR_IVS.map(o => '<button data-a="frIv" data-v="' + o[0] + '" class="' + (R.iv === o[0] ? 'on' : '') + '" aria-pressed="' + (R.iv === o[0]) + '">' + o[1] + '</button>').join('') + '</div></div>' + chips + rkFut(R, d, c) + '</section>';
+    const cv = KV(num(c.usd), c.krw), crk = num(c.usd) ? cv / num(c.usd) : rk, CV = u => num(u) * crk;
+    const tile = (l, vh, s0, c0) => '<div class="rkt"><span class="l">' + l + '</span><b class="num ' + (c0 || '') + '">' + vh + '</b><span class="s num">' + s0 + '</span></div>';
+    const tiles = '<div class="rk4">' + tile('순손익', m(cv, { sign: true, compact: true }), '실현 + 수수료 + 펀딩', clsV(cv)) + tile('실현', m(CV(c.realized), { sign: true, compact: true }), num(c.closes) + '건 · ' + num(c.wins) + '승 ' + num(c.losses) + '패', clsV(c.realized))
+      + tile('수수료', num(c.fee) ? m(CV(c.fee), { sign: true, compact: true }) : '—', bb && arr(c.trades).some(x => x.feeIncl) ? '바이빗 몫은 실현에 포함' : '진입 + 청산', clsV(c.fee))
+      + tile('펀딩', num(c.funding) ? m(CV(c.funding), { sign: true, compact: true }) : '—', arr(c.fundingRows).length ? arr(c.fundingRows).length + '회' : '그날 펀딩 없음', clsV(c.funding)) + '</div>';
+    const cb = String(c.coin);
+    const row = x => {
+      const pv = KV(num(x.pnl), x.pnlKrw), fv = KV(num(x.fee), x.feeKrw);
+      const sd = x.side ? '<span class="pill ' + (x.side === 'LONG' ? 'up' : 'down') + ' sm">' + (x.side === 'LONG' ? '▲ 롱' : '▼ 숏') + (x.lev ? ' ×' + esc(String(x.lev)) : '') + '</span>' : '<span class="pill g sm">방향 없음</span>';
+      const pc = x.entryPx && x.exitPx ? (x.exitPx / x.entryPx - 1) * 100 * (x.side === 'SHORT' ? -1 : 1) : null;
+      const l2 = x.px !== 'none' && x.exitPx
+        ? q(num(x.qty)) + ' ' + esc(cb) + ' · 진입 <b>' + px(num(x.entryPx)) + '</b> → 청산 <b>' + px(num(x.exitPx)) + '</b>' + (pc != null ? ' <span class="' + cls(pc) + '">(' + pctS(pc, 1) + ')</span>' : '')
+          + ' · ' + (x.entryTs ? (x.entryTs < num(x.exitTs) - 86400 || kstHM(x.entryTs) > kstHM(x.exitTs) ? frMD(x.entryTs) : kstHM(x.entryTs)) + ' → ' + kstHM(num(x.exitTs)) + (x.holdS != null ? ' (' + durTxt(num(x.holdS)) + ')' : '') : kstHM(num(x.exitTs)) + ' 청산 · 진입 시각 모름') + (x.px === 'derived' ? ' · 진입가 = 정산으로 유도' : '')
+        : '가격 없음 — 정산 금액만(' + esc(x.why || '가격 칸 없음') + ') · ' + kstHM(num(x.exitTs)) + ' 정산' + (num(x.rows) > 1 ? ' · ' + x.rows + '행 묶음' : '');
+      return '<div class="frow" data-frt="' + esc(x.id) + '" tabindex="0">' + exLogo(x.exKey) + '<div class="fqm"><div class="row gap8"><b>' + esc(futSym(x.symbol)) + '</b>' + sd + (x.liq ? '<span class="pill w sm">강제청산</span>' : '') + '</div><div class="cap num">' + l2 + '</div></div>'
+        + '<div class="fqr num"><b class="' + clsV(pv) + '">' + m(pv, { sign: true, compact: true }) + '</b><span class="cap">' + (x.feeIncl ? '수수료 포함' + (x.feeInfo ? ' ' + m(num(x.feeInfo), { sign: true, compact: true }) : '') : num(x.fee) ? '수수료 ' + m(fv, { sign: true, compact: true }) : '') + '</span></div></div>';
+    };
+    const trs = arr(c.trades);
+    const lst = '<section class="rsec frl"><div class="row rtth"><span class="rtt">청산 ' + trs.length + '건 · ' + esc(c.label) + '</span><span class="sp"></span><span class="cap num pvx">가격 ' + num((c.priced || {}).n) + '/' + num((c.priced || {}).of) + '</span></div>'
+      + (trs.length ? trs.map(row).join('') : '<div class="cap">그날 이 종목 청산 없음 — 수수료·펀딩만</div>') + (num(c.tradesTotal) > trs.length ? '<div class="cap">큰 손익 ' + trs.length + '건만 표시 · 전체 ' + c.tradesTotal + '건(합계는 전 건)</div>' : '')
+      + (arr(c.fundingRows).length ? uiFold('frc:fund', { cls: 'plain', head: '<b>펀딩 ' + arr(c.fundingRows).length + '회</b><span class="cap num">' + m(CV(c.funding), { sign: true }) + '</span>', label: '펀딩 내역',
+        body: () => arr(c.fundingRows).map(f => '<div class="row frf num"><span class="cap">' + kstHM(num(f.ts)) + ' · ' + esc(f.ex || f.exKey) + '</span><span class="sp"></span><b class="' + clsV(f.usd) + '">' + m(KV(num(f.usd), f.krw), { sign: true }) + '</b></div>').join('') }) : '') + '</section>';
+    const un = arr(d.unpriced);
+    const ftxt = (pr[1] ? '가격 있는 청산 ' + pr[0] + '/' + pr[1] + '건' : '') + (un.length ? ' · ' + un.map(u => esc(u.ex) + ' ' + u.n + '건은 ' + esc(u.reason)).join(' · ') + '이라 정산 금액만' : '') + (d.other && num(d.other.usd) ? ' · 종목 없는 정산 ' + m(KV(num(d.other.usd), d.other.krw), { sign: true }) : '');
+    const foot = '<div class="rft"><span class="cap pvx">' + ftxt + '</span><span class="sp"></span><button class="btn sm" data-a="frFut">선물 상세 ›</button><button class="btn sm" data-a="frDay">그날 기록 보기</button></div>';
+    return head + st + '</div>' + sec + tiles + lst + foot;
+  }
+  function rkFut(R, d, c) {
+    const C = S.frX || {}, ch0 = C[frK(R)] || {};
+    const loading = ch0.st === 'load' || ch0.st === 'prep';
+    const x = ch0.st === 'ok' ? ch0.d : loading && ch0.d ? ch0.d : null;
+    const H0 = 30 + (S.mobile ? 210 : 270) + 8 + (S.mobile ? 40 : 52) + 22;
+    const skel = msg => '<div class="rscw rkw rksk"><div class="rkskb" style="height:' + H0 + 'px" aria-hidden="true"><i></i></div><div class="rkov"><span class="rkwait" role="status" aria-live="polite"><i class="spin" aria-hidden="true"></i>' + msg + '</span></div></div>';
+    if (!x) {
+      if (loading) return skel(ch0.idx ? '기록 색인을 만드는 중 — 잠시 뒤 다시 확인해요' : ch0.busy ? '다른 차트를 먼저 받는 중 — 차례를 기다려요' : esc(c.label) + ' ' + (RC_IVK[R.iv] || '') + ' 시세 받는 중…' + (ch0.n ? ' <span class="mut">(' + ch0.n + '번째 확인)</span>' : ''));
+      if (ch0.st === 'err') return '<div class="rkwhy cap" role="status">실제 시세를 받지 못해 진입·청산 점만 보여 줘요 · ' + esc(errTxt(ch0.msg || '오류')) + ' <button class="link" data-a="frChartRetry">다시 받기</button></div>';
+      return '';
+    }
+    const ch = x.chart || {}, cs0 = arr(ch.candles).filter(r => Array.isArray(r) && r.length >= 6 && isFinite(r[2]) && isFinite(r[3]));
+    const marks = arr(x.marks).filter(k => k && k.ts), spans = arr(x.spans).filter(s0 => s0 && num(s0.entryPx) > 0 && num(s0.exitPx) > 0);
+    const vns = arr(x.venues);
+    const vchips = vns.length > 1 ? '<div class="rkvn" role="group" aria-label="봉 출처 거래소"><span class="cap rkvl">봉</span>' + vns.map(o => { const on = o.key === x.venue; return '<button class="chip' + (on ? ' on' : '') + '" data-a="frVenue" data-v="' + esc(o.key) + '" aria-pressed="' + on + '">' + esc(o.label) + ' <span class="mut num">' + num(o.n) + '건</span></button>'; }).join('') + '</div>' : '';
+    if (!ch.ok && !marks.length) return '<div class="rkwhy cap" role="status">' + esc(ch.why || '그릴 진입·청산이 없어요') + '</div>';
+    if (!ch.ok || !cs0.length) {
+      const why = ch.why || '봉을 받지 못했어요';
+      const pts = marks.filter(k => num(k.px) > 0);
+      return vchips + '<div class="rkwhy cap" role="status" title="' + esc(arr(ch.tried).map(t9 => t9.label + ': ' + (t9.note || t9.why)).join('\n')) + '">실제 시세를 받지 못해 진입·청산 점만 보여 줘요 · ' + esc(why) + ' <button class="link" data-a="frChartRetry">다시 받기</button></div>'
+        + (pts.length ? '<div class="cap num frpts">' + pts.slice(0, 12).map(k => kstHM(num(k.ts)) + ' ' + (k.kind === 'open' ? (k.side === 'LONG' ? '▲' : '▼') + ' 진입' : (k.approx ? '◌' : '○') + ' 청산') + ' ' + px(num(k.px))).join(' · ') + '</div>' : '');
+    }
+    const src = ch.src || {}, w = x.window || {};
+    const ivS = { '1m': 60, '5m': 300, '1h': 3600 }[src.iv] || 300;
+    const Wd = Math.round(Math.max(300, Math.min(756, S.mobile ? (window.innerWidth || 390) - 34 : 756)));
+    const PH = S.mobile ? 210 : 270, VH = S.mobile ? 40 : 52, GAP = 8, AX = 22, T = 30, Lp = 8, Rp = 10;
+    const H = T + PH + GAP + VH + AX;
+    const t0 = num(w.from) || cs0[0][0], t1 = (num(w.to) || cs0[cs0.length - 1][0]) + ivS;
+    const inView = cs0.filter(r => r[0] + ivS > t0 && r[0] < t1);
+    const bn = rcBin(inView.length ? inView : cs0, Math.floor((Wd - Lp - Rp) / 2.5)), cs = bn.cs, bS = ivS * bn.k;
+    const X = t => Lp + (Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0) * (Wd - Lp - Rp);
+    const ys = [];
+    cs.forEach(r => ys.push(r[2], r[3]));
+    marks.forEach(k => { if (num(k.px) > 0) ys.push(num(k.px)); });
+    spans.forEach(s0 => ys.push(num(s0.entryPx), num(s0.exitPx)));
+    let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    const pad = (y1 - y0) * 0.07 || y1 * 0.05 || 1; y0 = Math.max(0, y0 - pad); y1 += pad;
+    const Y = p => T + (1 - (p - y0) / (y1 - y0)) * PH;
+    const vmax = Math.max.apply(null, cs.map(r => num(r[5]))) || 1, VB = T + PH + GAP + VH;
+    const bw = Math.max(1, Math.min(9, 0.68 * (Wd - Lp - Rp) * bS / (t1 - t0)));
+    const yt = rcTicks(y0, y1, S.mobile ? 3 : 4).filter(p => Y(p) > T + 8 && Y(p) < T + PH - 4);
+    const grid = yt.map(p => '<line x1="' + Lp + '" x2="' + (Wd - Rp) + '" y1="' + Y(p).toFixed(1) + '" y2="' + Y(p).toFixed(1) + '" class="gl"/><text x="' + (Lp + 4) + '" y="' + (Y(p) - 4).toFixed(1) + '" class="tk">' + esc(px(p)) + '</text>').join('');
+    const stp = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].find(s0 => (t1 - t0) / 60 / s0 <= (S.mobile ? 4 : 7)) || 1440;
+    const xt = []; for (let t = Math.ceil((t0 + 32400) / (stp * 60)) * stp * 60 - 32400; t <= t1; t += stp * 60) xt.push(t);
+    const xax = xt.map(t => '<text x="' + X(t).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="' + (X(t) < 24 ? 'start' : X(t) > Wd - 24 ? 'end' : 'middle') + '" class="tk">' + (stp >= 1440 ? frMD(t).slice(0, 5) : kstHM(t)) + '</text>').join('');
+    const cbx = [];
+    const candles = cs.map(r => {
+      const xm = X(r[0] + bS / 2), up = r[4] >= r[1], yo = Y(Math.max(r[1], r[4])), yc = Y(Math.min(r[1], r[4])), vh = num(r[5]) / vmax * VH;
+      cbx.push([xm - Math.max(1, bw / 2), Y(r[2]), xm + Math.max(1, bw / 2), Y(r[3])]);
+      return '<g class="' + (up ? 'cu' : 'cd') + '"><line x1="' + xm.toFixed(1) + '" x2="' + xm.toFixed(1) + '" y1="' + Y(r[2]).toFixed(1) + '" y2="' + Y(r[3]).toFixed(1) + '"/><rect x="' + (xm - bw / 2).toFixed(1) + '" y="' + yo.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(1, yc - yo).toFixed(1) + '"/>'
+        + '<rect class="vb" x="' + (xm - bw / 2).toFixed(1) + '" y="' + (VB - vh).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(0.5, vh).toFixed(1) + '"/>'
+        + '<title>' + esc(kstHM(r[0]) + (bn.k > 1 ? ' (' + bn.k + '봉 묶음)' : '') + ' · 시 ' + px(r[1]) + ' · 고 ' + px(r[2]) + ' · 저 ' + px(r[3]) + ' · 종 ' + px(r[4])) + '</title></g>';
+    }).join('');
+    const occ = [], early = [];
+    const zones = spans.map(s0 => {
+      const xa = s0.from ? X(num(s0.from)) : Lp, xb = X(num(s0.to)), ya = Y(num(s0.entryPx)), yb = Y(num(s0.exitPx));
+      if (s0.from && num(s0.from) < t0) early.push(s0);
+      return '<g class="fsp" data-fk="' + esc(s0.id) + '"><rect x="' + Math.min(xa, xb).toFixed(1) + '" y="' + Math.min(ya, yb).toFixed(1) + '" width="' + Math.max(1, Math.abs(xb - xa)).toFixed(1) + '" height="' + Math.max(1, Math.abs(yb - ya)).toFixed(1) + '" class="' + (num(s0.pnl) >= 0 ? 'fz' : 'fn') + '"/>'
+        + '<line x1="' + xa.toFixed(1) + '" x2="' + xb.toFixed(1) + '" y1="' + ya.toFixed(1) + '" y2="' + ya.toFixed(1) + '" class="fe"/></g>';
+    }).join('');
+    const earlyLab = early.length ? (() => { const e0 = early.reduce((a, b) => (num(b.from) < num(a.from) ? b : a)); return '<text x="' + (Lp + 4) + '" y="' + (Y(num(e0.entryPx)) - 5).toFixed(1) + '" class="ucx">← 진입 ' + esc(frMD(num(e0.from))) + '</text>'; })() : '';
+    const qmx = Math.max.apply(null, marks.map(k => num(k.q))) || 1;
+    const tri = (k, xm, ym) => { const s0 = Math.max(8, Math.min(16, 8 + 8 * Math.sqrt(num(k.q) / qmx))), h0 = s0 * 0.9, up = k.side === 'LONG';
+      const p = up ? [[xm, ym - h0 * 0.15], [xm - s0 / 2, ym + h0 * 0.85], [xm + s0 / 2, ym + h0 * 0.85]] : [[xm, ym + h0 * 0.15], [xm - s0 / 2, ym - h0 * 0.85], [xm + s0 / 2, ym - h0 * 0.85]];
+      return '<path d="M' + p.map(z => z[0].toFixed(1) + ' ' + z[1].toFixed(1)).join('L') + 'Z" class="fo ' + (up ? 'fl' : 'fs') + '"><title>' + esc(kstHM(num(k.ts)) + ' ' + (up ? '롱' : '숏') + ' 진입 · ' + px(num(k.px)) + (k.q ? ' · ' + q(num(k.q)) + ' ' + c.coin : '') + ' · ' + (EX_NAMES[k.exKey] || k.exKey)) + '</title></path>'; };
+    const opens = marks.filter(k => k.kind === 'open' && num(k.px) > 0 && num(k.ts) >= t0 && num(k.ts) <= t1).map(k => tri(k, X(num(k.ts)), Y(num(k.px)))).join('');
+    const pills = [], trById = {};
+    arr(c.trades).forEach(t9 => { if (t9 && t9.id) trById[t9.id] = t9; });
+    const closes = marks.filter(k => k.kind === 'close' && num(k.px) > 0).map(k => {
+      const tr0 = trById[k.id], xm = X(num(k.ts)), ym = Y(num(k.px)), pv = KV(num(k.pnl), tr0 ? tr0.pnlKrw : null);
+      const full = kstHM(num(k.ts)) + ' ' + (k.side ? frSide(k.side) + ' 청산' : '청산(방향 없음)') + ' · ' + (k.approx ? '≈' : '') + px(num(k.px)) + (k.approx ? '(그 시각 봉 종가)' : '') + (k.q ? ' · ' + q(num(k.q)) + ' ' + c.coin : '') + ' · ' + m(pv, { sign: true }) + ' · ' + (EX_NAMES[k.exKey] || k.exKey);
+      if (!k.approx) { const lab = m(pv, { sign: true, compact: true }), tw0 = rkTw(lab, 10.5) + 12;
+        const cand = [{ x: xm + 7, y: ym - 9, w: tw0, h: 17 }, { x: xm - 7 - tw0, y: ym - 9, w: tw0, h: 17 }, { x: xm - tw0 / 2, y: ym + 9, w: tw0, h: 17 }, { x: xm - tw0 / 2, y: ym - 26, w: tw0, h: 17 }].filter(z => z.y >= 2 && z.y + 17 <= T + PH);
+        const cc = rkFit(occ, cand, Lp + 2, Wd - Rp - 2, cbx) || rkFit(occ, cand, Lp + 2, Wd - Rp - 2, null);
+        if (cc) pills.push('<g class="fpl ' + (num(k.pnl) >= 0 ? 'p' : 'n') + '" data-fk="' + esc(k.id) + '"><rect x="' + cc.x.toFixed(1) + '" y="' + cc.y.toFixed(1) + '" width="' + cc.w.toFixed(1) + '" height="17" rx="5"/><text x="' + (cc.x + 6).toFixed(1) + '" y="' + (cc.y + 12.5).toFixed(1) + '">' + esc(lab) + '</text></g>'); }
+      return '<circle cx="' + xm.toFixed(1) + '" cy="' + ym.toFixed(1) + '" r="' + (k.approx ? 4.5 : 5.2) + '" class="fc ' + (k.approx || !k.side ? 'fx' : k.side === 'LONG' ? 'fl' : 'fs') + '" data-fk="' + esc(k.id) + '"><title>' + esc(full) + '</title></circle>';
+    }).join('');
+    const nAp = marks.filter(k => k.kind === 'close' && k.approx).length;
+    const aria = (c.label || '') + ' ' + (src.label || '') + ' ' + (RC_IVK[src.iv] || '') + ' 위에 진입 ' + marks.filter(k => k.kind === 'open').length + '회 · 청산 ' + marks.filter(k => k.kind === 'close').length + '회';
+    const svg = '<svg class="rsc rkg fut" width="' + Wd + '" height="' + H + '" viewBox="0 0 ' + Wd + ' ' + H + '" role="img" aria-label="' + esc(aria) + '">' + grid + '<line x1="' + Lp + '" x2="' + (Wd - Rp) + '" y1="' + VB + '" y2="' + VB + '" class="gl"/>'
+      + zones + candles + earlyLab + opens + closes + pills.join('') + xax + '</svg>';
+    const leg = '<div class="rkleg cap frleg"><span><i class="lg fl tri" aria-hidden="true">▲</i>롱 진입</span><span><i class="lg fs tri" aria-hidden="true">▼</i>숏 진입</span><span><i class="lg fcl" aria-hidden="true"></i>청산(테 색 = 방향)</span><span><i class="lg fe" aria-hidden="true"></i>평균 진입가</span><span><i class="lg fz" aria-hidden="true"></i>수익 구간</span><span><i class="lg fn" aria-hidden="true"></i>손실 구간</span>' + (nAp ? '<span><i class="lg fx" aria-hidden="true"></i>가격 없음(≈)</span>' : '') + '</div>';
+    const tr = arr(ch.tried);
+    let st = (src.fallback && tr.length ? tr[0].label + ' 봉 없음 → ' : '') + (src.label || '') + ' ' + (RC_IVK[src.iv] || src.iv || '');
+    if (src.iv && src.iv !== x.iv) st += ' · ' + (src.iv === '1h' ? '창이 길어 1시간봉(저해상도)' : (RC_IVK[x.iv] || x.iv) + '이 없어 저해상도');
+    if (x.srcNote) st += ' · ' + x.srcNote;
+    st += ' · 가격축 USDT(선물 상세와 같은 규칙)';
+    if (nAp) st += ' · 가격 없는 청산 ' + nAp + '건은 그 시각 봉 종가에 빈 점';
+    if (bn.k > 1) st += ' · ' + bn.k + '봉씩 묶어 그림';
+    const srcLine = '<div class="rksrc cap"><span title="' + esc(tr.length ? '시도: ' + tr.map(t9 => t9.label + ' — ' + (t9.note || t9.why)).join('\n') : '') + '">' + esc(st) + '</span></div>';
+    return vchips + leg + '<div class="rscw rkw' + (loading ? ' rkld' : '') + '">' + (loading ? rkRe('새로 받는 중') : '') + svg + '</div>' + srcLine;
+  }
+  const frHl = (id) => { const g = document.querySelector('#overlay .frc svg.rkg.fut'); if (!g) return;
+    g.classList.toggle('hl', !!id); g.querySelectorAll('[data-fk]').forEach(n => n.classList.toggle('on', !!id && n.getAttribute('data-fk') === id)); };
+  ['mouseover', 'focusin'].forEach(tp => document.addEventListener(tp, ev => { const r = ev.target && ev.target.closest ? ev.target.closest('#overlay .frc [data-frt]') : null; if (r) frHl(r.getAttribute('data-frt')); }));
+  ['mouseout', 'focusout'].forEach(tp => document.addEventListener(tp, ev => { const r = ev.target && ev.target.closest ? ev.target.closest('#overlay .frc [data-frt]') : null; if (r && !(ev.relatedTarget && r.contains(ev.relatedTarget))) frHl(null); }));
+
   function syncUrl() {
     const qs = new URLSearchParams(location.search);
     if (S.src.mode === 'all') qs.delete('src'); else qs.set('src', S.src.mode + (S.src.key ? ':' + S.src.key : ''));
@@ -8145,11 +8388,11 @@
     try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).then(ok, fail); else fail(); } catch (e) { fail(); }
   }
   function closeDrawer(noFocus) {
-    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
+    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'frcpt' && S.frc ? S.frc.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
     S.drawer = null; renderOverlay();
     if (history.state && history.state.tjDr) { try { if (noFocus) history.replaceState(null, '', location.href); else history.back(); } catch (e) {  } }
     if (noFocus || !bk) return;
-    const el = bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k));
+    const el = bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => (x.getAttribute('data-fv') || x.getAttribute('data-v')) === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k));
     if (el && el.focus) { try { el.focus(); } catch (e) {  } }
   }
   function closeDrawerThen(then) {
@@ -8165,9 +8408,9 @@
   function drawerHist() { try { if (!(history.state && history.state.tjDr)) history.pushState({ tjDr: 1 }, '', location.href); } catch (e) {  } }
   window.addEventListener('popstate', ev => {
     if (!S.drawer || (ev.state && ev.state.tjDr)) return;
-    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
+    const bk = S.drawer === 'rcpt' && S.rcpt ? S.rcpt.back : S.drawer === 'frcpt' && S.frc ? S.frc.back : S.drawer === 'fut' ? S.futBack : S.drawer === 'lev' ? S.levBack : S.drawer === 'venue' ? S.venueBack : null;
     S.drawer = null; renderOverlay();
-    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => x.getAttribute('data-v') === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k)));
+    const el = bk && (bk.el && bk.el.isConnected ? bk.el : [...document.querySelectorAll('#view [data-a="' + bk.a + '"]')].find(x => (x.getAttribute('data-fv') || x.getAttribute('data-v')) === bk.v && (bk.k == null || x.getAttribute('data-k') === bk.k)));
     if (el && el.focus) { try { el.focus(); } catch (e) {  } }
   });
   function openFut() {
@@ -8240,9 +8483,18 @@
       openDay(el.dataset.v); },
     openFut: openFut,
     drawerClose: () => closeDrawer(),
+    futRcpt: el => { const v = String(el.dataset.fv || el.dataset.v || ''), i = v.indexOf('|'); openFutRcpt(i > 0 ? v.slice(0, i) : v, i > 0 ? v.slice(i + 1) : '', el.dataset.rk); },
+    frCoin: el => { const R = S.frc; if (!R) return; R.coin = String(el.dataset.v || '').slice(0, 60); R.venue = ''; frChart(); renderOverlay(); },
+    frIv: el => { const R = S.frc; if (!R) return; R.iv = el.dataset.v === '1m' ? '1m' : '5m'; frChart(); renderOverlay(); },
+    frVenue: el => { const R = S.frc; if (!R) return; R.venue = String(el.dataset.v || '').slice(0, 40); frChart(); renderOverlay(); },
+    frRetry: () => { if (S.frc) { frLoad(true); renderOverlay(); } },
+    frChartRetry: () => { if (S.frc) { frChart(true); renderOverlay(); } },
+    frFut: () => { closeDrawer(true); openFut(); },
+    frDay: () => { const R = S.frc; if (!R) return; closeDrawer(true); openDay(R.iso); },
     receipt: el => { const v = String(el.dataset.v || ''), i = v.indexOf('|'); if (i > 0) openReceipt(v.slice(0, i), v.slice(i + 1), el.dataset.rk); },
     receiptTop: el => { const iso = isoDay(String(el.dataset.v || '')); if (!iso) return; const rows = dayContrib(iso), i = rows.findIndex(rcptable);
-      if (i >= 0) openReceipt(iso, rows[i].sym, i + 1); else openDay(iso); },
+      const fi = rows.findIndex(x => x.fut);
+      if (i >= 0) openReceipt(iso, rows[i].sym, i + 1); else if (fi >= 0) openFutRcpt(iso, '', fi + 1); else openDay(iso); },
     lpGo: el => { const v = String(el.dataset.v || '').split('|'), iso = v[0], pool = v[1] || '', key = v[2] || '';
       if (!isISO(iso) || !pool) return;
       const md = iso.slice(5), keys = key ? [key] : S.D.lpCycles.filter(p => String(p.sym) === pool && Math.abs(num((p.realizedByDay || {})[md]) + num((p.realizedByDay || {})[iso])) >= 0.005).map(p => p.key);
@@ -8753,7 +9005,7 @@
     const U = arr(d.unconfirmed), N = arr(d.unsupported);
     const fl = (U.length || N.length) ? '<div class="lvfold">' + uiFold('lev:unc', {
       cls: 'plain', label: '확인 못 한 곳과 지원 안 함',
-      head: '<b class="pvx">확인 못 한 곳 ' + U.length + ' · 지원 안 함 ' + N.length + '</b><span class="cap">' + esc(U.concat(N).slice(0, 2).map(x => x.exKo + ' ' + x.productKo + '(' + x.reason + ')').join(' · ')) + '</span>',
+      head: '<b class="pvx nowrap">확인 못 한 곳 ' + U.length + ' · 지원 안 함 ' + N.length + '</b><span class="cap">이유는 펼쳐서</span>',
       body: () => U.concat(N).map(x => '<div class="kv"><span class="row gap8">' + exLogo(x.ex) + '<span><b style="color:var(--text)">' + esc(x.exKo) + '</b> ' + esc(x.productKo) + '</span></span><span class="' + (U.indexOf(x) >= 0 ? 'wtxt' : 'mut') + '">' + esc(x.reason) + '</span></div>').join('')
         + '<div class="cap" style="margin-top:8px">확인 못 한 곳은 위험이 있어도 이 화면에 안 보일 수 있어요 — 키 권한(읽기)·연결을 확인해 주세요. 지원 안 함 = 거래소가 공개 API 를 주지 않거나 계정을 열지 않은 곳이에요.</div>'
     }) + '</div>' : '';
@@ -8919,7 +9171,7 @@
     return '<section class="card oahist" aria-label="평가 기록"><div class="oah2">평가 기록 · ' + oaTitle(o) + ' <span class="mut oahs">(' + (o.auto ? '일별 종가 자동' : o.broker ? '증권사' : '직접 입력') + ')</span><span class="sp"></span><button class="link oaedl" data-a="oaSel" data-v="' + esc(o.id) + '" aria-haspopup="dialog">고치기</button></div>' + svg + (lines || '<div class="cap">기록 없음</div>') + '</section>';
   }
   function vOther() {
-    const sb = '<div class="seg oasub" role="group" aria-label="기타 자산 보기">' + [['assets', '부동산 · 주식 · 금 · 현금 · 부채'], ['nft', 'NFT']].map(x =>
+    const sb = '<div class="subtabs oasub" role="group" aria-label="기타 자산 보기">' + [['assets', '부동산 · 주식 · 금 · 현금 · 부채'], ['nft', 'NFT']].map(x =>
       '<button data-a="oaSub" data-v="' + x[0] + '" class="' + (S.oa.sub === x[0] ? 'on' : '') + '" aria-pressed="' + (S.oa.sub === x[0]) + '">' + x[1] + '</button>').join('') + '</div>';
     return sb + (S.oa.sub === 'nft' ? vNft() : vOtherAssets());
   }
@@ -8936,7 +9188,7 @@
     const chs = it.map(o => ({ o, c: oaChg(o) })).filter(x => x.c);
     const chA = sum(chs.filter(x => x.c.auto), x => x.c.v), chM = sum(chs.filter(x => !x.c.auto), x => x.c.v), chT = chA + chM;
     const kq = '<div class="kpis4 oak">'
-      + '<div class="card kq"><span class="ql">전체 순자산 <i>(코인 + 기타' + (T.nftOn ? ' + NFT' : '') + ' − 부채)</i></span><span class="qv num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</span><span class="qs num">코인 ' + m(T.coin, { compact: true }) + ' · 기타 ' + m(T.assets, { compact: true }) + (T.nftOn ? ' · NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : m(T.nft, { compact: true })) : '') + ' · 부채 ' + m(-T.debt, { compact: true }) + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span></div>'
+      + '<div class="card kq"><span class="ql">전체 순자산 <i>(코인 + 기타' + (T.nftOn ? ' + NFT' : '') + ' − 부채)</i></span><span class="qv num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</span><span class="qs num"><span class="nowrap">코인 ' + m(T.coin, { compact: true }) + '</span> · <span class="nowrap">기타 ' + m(T.assets, { compact: true }) + '</span>' + (T.nftOn ? ' · <span class="nowrap">NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : m(T.nft, { compact: true })) + '</span>' : '') + ' · <span class="nowrap">부채 ' + m(-T.debt, { compact: true }) + '</span>' + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span></div>'
       + '<div class="card kq"><span class="ql">기타 자산</span><span class="qv num">' + m(T.assets, { compact: true }) + '</span><span class="qs"><span class="pvx">' + (it.length - debts.length) + '개 · 시세 자동 ' + autoN.length + '개' + (autoN.length ? '(' + [stN ? '주식 ' + stN : '', gN ? '금 ' + gN : ''].filter(Boolean).join('·') + ')' : '') + ' · 직접 입력 ' + (it.length - debts.length - autoN.length) + '개</span></span></div>'
       + '<div class="card kq"><span class="ql">부채</span><span class="qv num oadebt">' + m(-T.debt, { compact: true }) + '</span><span class="qs">' + (debts.length ? debts.slice(0, 3).map(oaName).join(' · ') + (debts.length > 3 ? ' 외 ' + (debts.length - 3) : '') : '없음') + '</span></div>'
       + '<div class="card kq"><span class="ql">지난 평가 대비</span><span class="qv num ' + cls(chT) + '">' + (chs.length ? m(chT, { sign: true, compact: true }) : '—') + '</span><span class="qs num">시세 자동 <span class="' + cls(chA) + '">' + m(chA, { sign: true, compact: true }) + '</span> · 직접 수정 <span class="' + cls(chM) + '">' + m(chM, { sign: true, compact: true }) + '</span></span></div></div>';
@@ -9005,7 +9257,7 @@
     const nOn = nftIncl().on;
     if ((!S.oa.d && !nOn) || (!oaItems().length && !oaBrkPend().length && !nOn)) return '';
     const T = oaTot();
-    return '<a class="oaln" href="#other" aria-label="전체 순자산 — 기타 자산 탭으로"><span class="mut">전체 순자산</span> <b class="num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</b> <span class="mut num oalnx">= 코인 ' + m(T.coin, { compact: true }) + ' + 기타 ' + m(T.assets, { compact: true }) + (T.nftOn ? ' + NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : m(T.nft, { compact: true })) : '') + ' − 부채 ' + m(T.debt, { compact: true }) + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span><span class="sp"></span><span class="link">기타 자산 ' + IC.right + '</span></a>';
+    return '<a class="oaln" href="#other" aria-label="전체 순자산 — 기타 자산 탭으로"><span class="mut">전체 순자산</span> <b class="num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</b> <span class="mut num oalnx">= <span class="nowrap">코인 ' + m(T.coin, { compact: true }) + '</span> <span class="nowrap">+ 기타 ' + m(T.assets, { compact: true }) + '</span>' + (T.nftOn ? ' <span class="nowrap">+ NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : m(T.nft, { compact: true })) + '</span>' : '') + ' <span class="nowrap">− 부채 ' + m(T.debt, { compact: true }) + '</span>' + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span><span class="sp"></span><span class="link">기타 자산 ' + IC.right + '</span></a>';
   }
   function brokersBody() {
     oaNeed(300000);
@@ -9971,7 +10223,7 @@
     revealAndHighlight: revealAndHighlight,
     ext: { S, m, esc, num, arr, nf, q, px, pxC, short, fmtTs, isoDay, todayISO, pvOn, cls, pctS, IC, LS, toast, post, render, renderView, gMatch, KV, pvStripAmt,
       revealAndHighlight, planOfGroup, rate: () => rate(), lockedNow: () => !!S.locked, retPct,
-      confirmAsk, pvm } };
+      confirmAsk, pvm, icon, hydrateLogos } };
   if (window.TJHealth && typeof window.TJHealth.chrome === 'function') { try { window.TJHealth.chrome(S.mobile); } catch (e) {  } }
   window.__tjBooted = true;
   window.__tj = { S, A, refresh, applyPatch, derive, clearCache, px, px4, hs, moneyTxt, pxC,

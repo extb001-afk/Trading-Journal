@@ -32,7 +32,7 @@ HOST_POLICY = {
     "api.upbit.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.bithumb.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.binance.com": {"rate": 4.0, "burst": 4, "conc": 2},
-    "fapi.binance.com": {"rate": 4.0, "burst": 4, "conc": 2},
+    "fapi.binance.com": {"rate": 0.5, "burst": 2, "conc": 1},
     "api.bybit.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "www.okx.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.gateio.ws": {"rate": 4.0, "burst": 4, "conc": 2},
@@ -59,7 +59,7 @@ try:
 except Exception:
     pass
 
-VENUE_KO = {"upbit": "업비트", "bithumb": "빗썸", "binance": "바이낸스", "binance_futures": "바이낸스 선물", "bybit": "바이빗",
+VENUE_KO = {"upbit": "업비트", "bithumb": "빗썸", "binance": "바이낸스", "binance_futures": "바이낸스 선물", "bybit": "바이빗", "bybit_linear": "바이빗 선물",
             "okx": "OKX", "gate": "게이트", "kucoin": "쿠코인", "dex": "DEX"}
 CHAIN_KO = {"eth": "Ethereum", "bsc": "BSC", "base": "Base", "sol": "Solana", "arbitrum": "Arbitrum", "polygon": "Polygon",
             "optimism": "Optimism", "zksync": "zkSync", "megaeth": "MegaETH", "robinhood": "Robinhood"}
@@ -363,7 +363,7 @@ def market_name(venue, base, quote):
     b, q = str(base or "").upper(), str(quote or "").upper()
     if venue in ("upbit", "bithumb"):
         return f"{q}-{b}"
-    if venue in ("binance", "binance_futures", "bybit"):
+    if venue in ("binance", "binance_futures", "bybit", "bybit_linear"):
         return f"{b}{q}"
     if venue in ("okx", "kucoin"):
         return f"{b}-{q}"
@@ -469,7 +469,7 @@ def _iso_kst(ts):
     return datetime.fromtimestamp(int(ts), KST).strftime("%Y-%m-%d %H:%M:%S")
 
 
-PAGE_N = {"upbit": 200, "bithumb": 200, "binance": 1000, "binance_futures": 1000, "bybit": 1000, "okx": 100,
+PAGE_N = {"upbit": 200, "bithumb": 200, "binance": 1000, "binance_futures": 1000, "bybit": 1000, "bybit_linear": 1000, "okx": 100,
           "gate": 900, "kucoin": 1500, "dex": 1000}
 
 
@@ -488,9 +488,9 @@ def _page_url(venue, mk, iv, a, b):
         host = "https://api.binance.com/api/v3/klines" if venue == "binance" else "https://fapi.binance.com/fapi/v1/klines"
         return (f"{host}?symbol={q(mk)}&interval={iv}&startTime={a * 1000}&endTime={b * 1000 - 1}&limit=1000",
                 parse_binance)
-    if venue == "bybit":
+    if venue in ("bybit", "bybit_linear"):
         ivb = {"1m": "1", "5m": "5", "1h": "60", "1d": "D"}[iv]
-        return (f"https://api.bybit.com/v5/market/kline?category=spot&symbol={q(mk)}&interval={ivb}"
+        return (f"https://api.bybit.com/v5/market/kline?category={'linear' if venue == 'bybit_linear' else 'spot'}&symbol={q(mk)}&interval={ivb}"
                 f"&start={a * 1000}&end={b * 1000 - 1}&limit=1000", parse_bybit)
     if venue == "okx":
         bar = {"1m": "1m", "5m": "5m", "1h": "1H", "1d": "1Dutc"}[iv]
@@ -530,7 +530,7 @@ def _no_market(venue, err=None, body=None):
                 return False
             m9 = str(e9.get("message") or "").lower()
             return str(e9.get("name")) in ("404", "400") and ("code not found" in m9 or "market" in m9 or "not found" in m9)
-        if venue == "bybit":
+        if venue in ("bybit", "bybit_linear"):
             return body.get("retCode") in (10001, "10001") or "symbol" in str(body.get("retMsg") or "").lower()
         if venue == "okx":
             return str(body.get("code")) in ("51001", "51000")

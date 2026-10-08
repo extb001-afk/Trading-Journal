@@ -4400,20 +4400,26 @@ class RpcChainWatcher(RpcSynthMixin):
         raise last if last else RuntimeError("rpc 미구성")
 
     def _batch(self, calls: list, urls: list = None) -> list:
-        last = None
+        last, all_bad = None, None
         for url in self._order(urls or self.cfg_rpcs):
             try:
                 out = []
                 cap = bf_engine.gate(url).batch_cap(40)
                 for i in range(0, len(calls), cap):
                     out += bf_engine.rpc_batch(url, calls[i:i + cap], timeout=30, retries=1)
+                if out and all(isinstance(r, Exception) for r in out):
+                    all_bad = out
+                    continue
                 return out
             except Exception as e:
                 last = e
+        if all_bad is not None:
+            return all_bad
         raise last if last else RuntimeError("rpc 미구성")
 
     def _head(self) -> int:
         h = int(self._rpc_call("eth_blockNumber", []), 16)
+        self._log_head = h
         if self.chain_id is not None and not getattr(self, "_cid_ok", False):
             cid = int(self._rpc_call("eth_chainId", []), 16)
             if cid != self.chain_id:
@@ -5755,6 +5761,18 @@ class RpcChainWatcher(RpcSynthMixin):
         caps0 = self.__dict__.setdefault("_log_caps", {})
         fb0 = getattr(self, "logs_fallback", None) or {}
         prim0 = getattr(self, "logs_primary", None) or self.logs_rpcs
+        head9 = self.__dict__.get("_log_head")
+        if isinstance(head9, int) and c >= head9 - bf_engine.RPC_NEAR_HEAD:
+            try:
+                import nodekeys
+                key9 = [u for u in prim0 if nodekeys.is_key_node(u)]
+            except Exception:
+                key9 = []
+            if key9 and len(key9) < len(prim0):
+                prim0 = [u for u in prim0 if u not in key9]
+                fb0 = dict(fb0)
+                for u9 in key9:
+                    fb0.setdefault(u9, int(caps0.get(u9) or self.span))
         for i in range(0, len(ws), mx):
             pads = ["0x" + w[2:].rjust(64, "0") for w in ws[i:i + mx]]
             scanner = bf_engine.LogScanner(

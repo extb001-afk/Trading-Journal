@@ -291,7 +291,12 @@ HOST_POLICIES = {
     "mainnet.helius-rpc.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.mainnet-beta.solana.com": {"rate": 3.0, "burst": 3, "conc": 2},
     "solana-rpc.publicnode.com": {"rate": 3.0, "burst": 3, "conc": 2},
-    "bsc-mainnet.nodereal.io": {"rate": 8.0, "burst": 8, "conc": 4},
+    "bsc-mainnet.nodereal.io": {"rate": 2.0, "burst": 1, "conc": 2, "call_rate": 1.4, "call_burst": 1,
+                                "share": "node_nodereal", "share_rate": 1.4, "share_burst": 1, "share_xproc": True},
+    "rpc.ankr.com": {"rate": 6.0, "burst": 6, "conc": 3, "call_rate": 12.0, "call_burst": 12,
+                     "share": "node_ankr", "share_rate": 12.0, "share_burst": 12, "share_xproc": True},
+    "*.quiknode.pro": {"rate": 5.0, "burst": 5, "conc": 3, "call_rate": 10.0, "call_burst": 10,
+                       "share": "node_quicknode", "share_rate": 10.0, "share_burst": 10, "share_xproc": True},
     "bsc.rpc.blxrbdn.com": {"rate": 2.0, "burst": 2, "conc": 2},
     "rpc-bsc.48.club": {"rate": 2.0, "burst": 2, "conc": 2},
     "*.bnbchain.org": {"rate": 4.0, "burst": 4, "conc": 3},
@@ -369,15 +374,78 @@ class _SharedBucket:
             return 0.0
 
 
+class _XprocSharedBucket(_SharedBucket):
+
+    def _io(self, cost: int, take: bool) -> float:
+        with self.lock:
+            try:
+                d = os.path.join(common.quota_dir(), "rpc_gap")
+                os.makedirs(d, exist_ok=True)
+                fd = os.open(os.path.join(d, re.sub(r"[^a-z0-9_]", "_", self.name)[:40] + ".bucket"), os.O_RDWR | os.O_CREAT, 0o600)
+            except OSError as e:
+                raise NetError(f"budget: {self.name} 공유 버킷 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return 0.02
+                except OSError as e:
+                    raise NetError(f"budget: {self.name} 공유 버킷 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+                try:
+                    now = time.monotonic()
+                    raw = os.pread(fd, 256, 0)
+                    try:
+                        st = json.loads(raw.decode("ascii"))
+                        at, tok = float(st["at"]), float(st["tokens"])
+                        if not (0.0 <= at <= now + 1.0 and -100000.0 <= tok <= self.burst):
+                            raise ValueError("bucket")
+                    except (ValueError, TypeError, KeyError, UnicodeDecodeError):
+                        at, tok = now, (0.0 if raw else self.burst)
+                    tok = min(self.burst, tok + max(0.0, now - at) * self.rate)
+                    need = min(float(cost), self.burst)
+                    w = 0.0 if tok >= need else (need - tok) / self.rate
+                    if take:
+                        if w <= 0:
+                            tok -= float(max(1, cost))
+                        b = json.dumps({"at": now, "tokens": tok}).encode("ascii")
+                        os.ftruncate(fd, 0)
+                        if os.pwrite(fd, b, 0) != len(b):
+                            raise OSError("short write")
+                    self.tokens, self.t_last = tok, now
+                    return w
+                except OSError as e:
+                    raise NetError(f"budget: {self.name} 공유 버킷 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+                finally:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+            finally:
+                os.close(fd)
+
+    def peek(self, cost: int = 1) -> float:
+        if not self.rate:
+            return 0.0
+        try:
+            return self._io(cost, False)
+        except NetError:
+            return 1.0
+
+    def try_take(self, cost: int = 1) -> float:
+        if not self.rate:
+            return 0.0
+        return self._io(cost, True)
+
+
 _SHARES = {}
 _SHARES_LOCK = threading.Lock()
 
 
-def _share_bucket(name: str, rate, burst):
+def _share_bucket(name: str, rate, burst, xproc: bool = False):
     with _SHARES_LOCK:
         b = _SHARES.get(name)
         if b is None:
-            b = _SHARES[name] = _SharedBucket(name, rate, burst)
+            b = _SHARES[name] = (_XprocSharedBucket if xproc else _SharedBucket)(name, rate, burst)
         return b
 
 
@@ -407,7 +475,7 @@ class HostGate:
         self.c_tokens = self.call_burst
         self.c_last = time.monotonic()
         sh9 = str(pol.get("share") or "").strip().lower()
-        self.share = _share_bucket(sh9, pol.get("share_rate"), pol.get("share_burst")) if sh9 else None
+        self.share = _share_bucket(sh9, pol.get("share_rate"), pol.get("share_burst"), bool(pol.get("share_xproc"))) if sh9 else None
 
     def _wait_needed(self, prio: str, cost: int = 1) -> float:
         now_m = time.monotonic()
@@ -442,6 +510,8 @@ class HostGate:
         return cap
 
     def acquire(self, prio: str = "fg", deadline: float = None, cost: int = 1):
+        if deadline is None and isinstance(self.share, _XprocSharedBucket):
+            deadline = time.time() + HG_LOCK_WAIT
         while True:
             with self.lock:
                 now = time.time()
@@ -1418,9 +1488,10 @@ def rpc_day_configure(cfg: dict):
                 continue
             try:
                 per_day = float(spec["day"]) if spec.get("day") else float(spec["month"]) / RPC_DAY_MONTH_DAYS
+                pct_e = min(100.0, max(1.0, float(spec["pct"]))) if spec.get("pct") is not None else pct
             except (KeyError, TypeError, ValueError):
                 continue
-            budget = max(1, int(per_day * pct / 100.0))
+            budget = max(1, int(per_day * pct_e / 100.0))
             prev = old.get(name)
             if prev is not None and prev["spec"].get("unit") == spec.get("unit"):
                 m9 = prev["meter"]
@@ -1429,7 +1500,7 @@ def rpc_day_configure(cfg: dict):
             else:
                 m9 = DayMeter(f"rpc_day_{name}", budget, burst=1.0, keep=0.0)
             m9.proc = m9.proc or _RPC_DAY_PROC
-            _RPC_DAY[name] = {"spec": spec, "meter": m9, "pct": pct, "refused": prev.get("refused", 0) if prev else 0}
+            _RPC_DAY[name] = {"spec": spec, "meter": m9, "pct": pct_e, "refused": prev.get("refused", 0) if prev else 0}
 
 
 def _rpc_day_of(host: str):
@@ -1464,10 +1535,11 @@ def _rpc_day_units(name: str, methods=None, cost: int = 1) -> int:
     if u == "calls":
         return max(1, int(cost))
     cu, heavy = int(spec.get("cu") or 20), int(spec.get("cu_heavy") or spec.get("cu") or 20)
+    cm = spec.get("cu_methods") if isinstance(spec.get("cu_methods"), dict) else {}
     ms = list(methods or [])
     if not ms:
-        return cu * max(1, int(cost))
-    return sum(heavy if str(m).startswith(("debug_", "trace_")) else cu for m in ms)
+        return max(cu, max((int(v) for v in cm.values()), default=cu)) * max(1, int(cost))
+    return sum(int(cm.get(str(m)) or (heavy if str(m).startswith(("debug_", "trace_")) else cu)) for m in ms)
 
 
 def rpc_day_take(name: str, host: str, units: int):
@@ -1639,6 +1711,7 @@ def configure(cfg: dict):
     rpc_day_configure(cfg)
     sol_meter_configure(cfg)
     bf = (cfg or {}).get("backfill") or {}
+    _POLICY_OVERRIDES.clear()
     for h, p in (bf.get("hosts") or {}).items():
         if isinstance(p, dict):
             _POLICY_OVERRIDES[str(h).lower()] = p
@@ -1879,6 +1952,7 @@ def _rate_wait(err, i: int, deadline) -> float:
 
 def rpc_call(url: str, method: str, params, *, timeout: float = 25.0, retries: int = 2,
              prio: str = "fg", deadline: float = None, allow_null: bool = False):
+    _rpc_cfg_ensure()
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     for i9 in range(RATE_RETRIES + 1):
@@ -1905,6 +1979,7 @@ def rpc_batch(url: str, calls: list, *, timeout: float = 30.0, retries: int = 2,
               deadline: float = None) -> list:
     if not calls:
         return []
+    _rpc_cfg_ensure()
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     out = _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host)
     for i9 in range(RATE_RETRIES):

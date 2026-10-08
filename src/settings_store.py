@@ -21,7 +21,12 @@ EXPLORERS = {
     "etherscan": {"name": "Etherscan (EVM 가속)", "fields": [("TJ_ETHERSCAN_KEY", "API Key")]},
     "opensea": {"name": "OpenSea (NFT 바닥가 — 넣으면 최우선)", "fields": [("TJ_OPENSEA_KEY", "API Key")]},
     "coingecko": {"name": "CoinGecko (시세·DEX·차트·NFT 바닥가 — 무료 데모 또는 유료 프로 키, 자동 판별)", "fields": [("TJ_COINGECKO_KEY", "API Key (Demo · Pro)")]},
+    "nodereal": {"name": "NodeReal (BSC 옛 기록 — 무료 키로도 됨)", "fields": [("TJ_NODEREAL_KEY", "API Key")]},
+    "ankr": {"name": "Ankr (BSC·Base 옛 기록 — 무료 키로도 됨)", "fields": [("TJ_ANKR_KEY", "API Key")]},
+    "quicknode": {"name": "QuickNode (유료 — 체인별 엔드포인트 주소)", "fields": [("TJ_QUICKNODE_BSC_KEY", "BSC 엔드포인트 주소"),
+                                                                      ("TJ_QUICKNODE_BASE_KEY", "Base 엔드포인트 주소")]},
 }
+NODE_GROUPS = ("nodereal", "ankr", "quicknode")
 EXCHANGES = {
     "upbit": {"name": "업비트", "fields": [("UPBIT_ACCESS", "Access Key"), ("UPBIT_SECRET", "Secret Key")]},
     "bithumb": {"name": "빗썸", "fields": [("TJ_BITHUMB_KEY", "API Key"), ("TJ_BITHUMB_SECRET", "Secret Key")]},
@@ -581,9 +586,14 @@ def unit_inputs(unit: str, cfg: dict | None = None, env: dict | None = None):
     bsc = sorted({(w.get("address") or "").lower() for w in ws if w.get("type") == "bsc_rpc"})
     hk = hashlib.sha256(genv("TJ_HELIUS_KEY").encode()).hexdigest()[:8] if genv("TJ_HELIUS_KEY") else ""
     ek = hashlib.sha256(genv("TJ_ETHERSCAN_KEY").encode()).hexdigest()[:8] if genv("TJ_ETHERSCAN_KEY") else ""
+    try:
+        import nodekeys
+        nk = nodekeys.fingerprint()
+    except Exception:
+        nk = ""
     if unit == "evm":
         used = sorted({c for c, _ in evm})
-        fp = _h([evm, {c: (cfg.get("chains") or {}).get(c) for c in used}, ek, cfg.get("evm_poll_sec")])
+        fp = _h([evm, {c: (cfg.get("chains") or {}).get(c) for c in used}, ek, cfg.get("evm_poll_sec"), nk])
         return (bool(evm), "EVM 지갑 없음" if not evm else "", fp)
     if unit == "sol":
         need_key = (cfg.get("sol") or {}).get("rpc") == "helius"
@@ -594,15 +604,15 @@ def unit_inputs(unit: str, cfg: dict | None = None, env: dict | None = None):
             return False, "Helius 키 없음(Solana 수집에 필요 — 무료 발급)", fp
         return True, "", fp
     if unit == "bsc":
-        return (bool(bsc), "BSC 지갑 없음" if not bsc else "", _h([bsc, cfg.get("bsc")]))
+        return (bool(bsc), "BSC 지갑 없음" if not bsc else "", _h([bsc, cfg.get("bsc"), nk]))
     if unit == "core":
         allw = sorted({(w.get("type", "evm"), w.get("chain"), w.get("address") if w.get("type") == "sol"
                         else (w.get("address") or "").lower()) for w in ws})
-        return True, "", _h([allw, cfg.get("exchange_addresses"), hk, cfg.get("backfill_months"),
+        return True, "", _h([allw, cfg.get("exchange_addresses"), hk, nk, cfg.get("backfill_months"),
                              cfg.get("backfill_full_history")])
     if unit == "web":
         raw = dict(cfg)
-        return True, "", _h([raw])
+        return True, "", _h([raw, nk])
     return True, "", _h([unit])
 
 

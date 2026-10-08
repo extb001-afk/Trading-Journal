@@ -346,6 +346,10 @@
     opensea: { url: 'https://docs.opensea.io/reference/api-keys', why: '선택 · 추천 — 넣으면 기타 자산 › NFT 의 EVM 바닥가를 오픈시에서 먼저 받아(최우선) 작은 컬렉션까지 NFT 추적이 더 원활해요. 없으면 코인게코(무료 데모 키 권장). 미검증(키 없이 공개 문서만 보고 연결).', steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
+  XP_HELP.nodereal = { url: 'https://dashboard.nodereal.io', why: '선택 · 무료 키로도 됨 — BSC 옛 기록(아카이브)을 빠르게 받아요(한 번에 5만 블록). 없으면 BSC 옛 기록은 무료 공개 노드로 천천히 받아요(최신 기록은 늘 공개 노드로 바로). Base 는 지원 안 해요.', steps: ['nodereal.io 가입(무료) → Dashboard → Create API Key', 'BSC 엔드포인트 주소 끝의 키만(…/v1/ 뒤) 붙여넣기'] };
+  XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: '선택 · 무료 키로도 됨 — BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 없으면 무료 공개 노드로 받아요(Base 는 공개 노드로도 옛 기록 됨 — 넣으면 더 빨라요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기'] };
+  XP_HELP.quicknode = { url: 'https://dashboard.quicknode.com', why: '선택 · 유료만(무료 등급 없음) — 이미 쓰는 유료 엔드포인트가 있으면 체인별 주소를 그대로 넣으세요(BSC·Base 아카이브 · 한 번에 1만 블록). 다른 곳에서 쓰던 키일 수 있어 기본은 월 한도의 10% 만 써요.', steps: ['QuickNode 대시보드 → Endpoints', 'BSC·Base 엔드포인트 주소(https://….quiknode.pro/…/)를 각 칸에 붙여넣기'] };
+  const NODE_KEYS = ['nodereal', 'ankr', 'quicknode'];
   const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate'];
   const STEPS = [{ k: 'wallets', t: '지갑' }, { k: 'keys', t: '탐색기 키' }, { k: 'exchanges', t: '거래소' }, { k: 'telegram', t: '텔레그램' }, { k: 'finish', t: '표시·완료' }];
   const UNIT_KO = { evm: 'EVM 수집기', sol: 'Solana 수집기', bsc: 'BSC 수집기', core: '원장(core)', web: '웹' };
@@ -442,6 +446,16 @@
       + evmKeyBanner(st) + '</div>';
   }
 
+  async function nodePlanSave(p, patch) {
+    const n = U.st && U.st.nodes && U.st.nodes[p];
+    if (!n || U.busy['np' + p]) return;
+    const body = Object.assign({ provider: p, plan: n.plan, share: n.share, month: n.month == null ? null : n.month }, patch);
+    U.busy['np' + p] = true; render();
+    const r = await api('keys/nodeplan', body);
+    U.busy['np' + p] = false;
+    toast(r.ok ? n.name + ' 사용 한도를 바꿨어요 — 수집기가 곧 다시 시작해요' : (r.error || '저장 실패'), !r.ok);
+    await refreshStatus();
+  }
   function fieldsHTML(gk, g, help) {
     const t = U.test[gk];
     const tr = t ? '<div class="su-test ' + (t.ok ? 'ok' : 'bad') + '">' + (t.ok ? '연결 성공 · ' : '실패 · ') + esc(t.detail || '') + (t.warn || []).map(w => '<div class="su-warnline">' + esc(w) + '</div>').join('') + '</div>' : '';
@@ -489,6 +503,24 @@
       : '';
     return '<div class="cap su-p su-cgplan">등급: <b>' + esc(p.text) + '</b>' + (p.budgetText ? '<br>' + esc(p.budgetText) : '') + sh + '</div>';
   }
+  function nodePlanHTML(st, k) {
+    const n = st && st.nodes && st.nodes[k];
+    if (!n) return '';
+    const unit = n.unitKo || (n.unit === 'cu' ? 'CU' : '콜');
+    const busy = !!U.busy['np' + k];
+    const plan = n.paidOnly ? '' : '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 요금제" style="align-items:center;margin-top:6px"><span class="cap">요금제</span>'
+      + [['free', '무료 키'], ['paid', '유료 키']].map(([v, t]) => { const on = n.plan === v; return '<button class="su-chip' + (on ? ' on' : '') + '" data-su="nplan" data-p="' + esc(k) + '" data-v="' + v + '" aria-pressed="' + on + '"' + (busy ? ' disabled' : '') + '>' + t + '</button>'; }).join('') + '</div>';
+    const paid = n.plan === 'paid'
+      ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 사용 비율" style="align-items:center;margin-top:6px"><span class="cap">사용 비율</span>'
+        + (n.shares || []).map(v => { const on = Number(v) === Number(n.share); return '<button class="su-chip' + (on ? ' on' : '') + '" data-su="nshare" data-p="' + esc(k) + '" data-v="' + esc(v) + '" aria-pressed="' + on + '"' + (busy ? ' disabled' : '') + '>' + esc(v) + '%</button>'; }).join('') + '</div>'
+        + '<label class="su-fl" style="margin-top:6px"><span class="cap">내 요금제 월 한도(' + unit + ' · 모르면 비워 두면 무료 한도 ' + fmtN(n.freeMonth) + ' 기준)</span>'
+        + '<input class="field" inputmode="numeric" data-su-in="nm_' + esc(k) + '" placeholder="' + (n.month ? esc(fmtN(n.month)) : '예: 50000000') + '" aria-label="' + esc(n.name) + ' 월 한도"></label>'
+        + '<div class="su-actions"><button class="btn sm" data-su="nmonth" data-p="' + esc(k) + '"' + (busy ? ' disabled' : '') + '>월 한도 저장</button></div>'
+      : '';
+    const use = (n.chains && n.chains.length ? '지금 쓰는 체인: ' + n.chains.map(c => c.toUpperCase()).join('·') + ' · ' : '')
+      + (n.plan === 'paid' ? '월 한도 × ' + n.share + '%' : '무료 한도의 ' + n.pct + '%') + ' = 하루 약 ' + fmtN(n.perDay) + ' ' + unit;
+    return '<div class="cap su-p su-cgplan">' + esc(use) + plan + paid + '<div class="cap" style="margin-top:4px">옛 기록은 처음 한 번만 채우고, 최신 기록은 늘 공개 노드로 먼저 받아요 — 이 키는 옛 기록·옛 거래 상세에만 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.</div></div>';
+  }
   function evmKeyBanner(st) {
     if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
     return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요합니다(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
@@ -502,12 +534,12 @@
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보입니다(값은 다시 표시하지 않음).</div>'
       + evmKeyBanner(st)
-      + ['helius', 'etherscan', 'coingecko', 'opensea'].filter(k => st.explorers[k]).map(k => {
+      + ['helius', 'etherscan', 'coingecko', 'opensea'].concat(NODE_KEYS).filter(k => st.explorers[k]).map(k => {
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius');
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>'
           + ' ' + xpPill(st, k)
           + '<span class="sp"></span>' + pill(g.set ? 'ok' : 'g', g.set ? '저장됨' + (g.plan && g.plan.plan ? ' · ' + (g.plan.plan === 'pro' ? '프로' : '데모') : '') : '미설정') + '</button>'
-          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, cgPlanHTML(g) + '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
+          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, cgPlanHTML(g) + nodePlanHTML(st, k) + '<div class="cap su-p">' + esc(h.why) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div><ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }
   function ago(ts) {
@@ -787,7 +819,7 @@
       + '<span class="su-chn">' + fmtN(r.sent30) + '건</span>';
   }
   function chSub(r) {
-    if (!r.on) return '조회 안 함 · 알림 없음' + (r.offAt ? ' · ' + chDay(r.offAt) + '에 끔' : '') + ' · 지갑 ' + fmtN(r.wallets) + '개';
+    if (!r.on) return '조회 안 함 · 알림 없음' + (r.offAt ? ' · ' + chDay(r.offAt) + (r.autoOff ? '에 자동으로 끔(활동 없음)' : '에 끔') : '') + ' · 지갑 ' + fmtN(r.wallets) + '개';
     const p = ['지갑 ' + fmtN(r.wallets) + '개' + (r.pollSec ? ' · <b>' + esc(chEvery(r.pollSec)) + '</b> 확인' : '')];
     if (r.rest) p.push('오래 안 쓴 ' + fmtN(r.rest) + '곳은 쉬어요');
     if (r.status === 'filling') p.push('처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요');
@@ -1047,7 +1079,8 @@
     },
     async ksave(el) {
       const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g], vals = groupVals(g);
-      if (grp.fields.some(f => !vals[f.key])) { toast(grp.partial ? '바꾸려면 모든 칸을 새로 입력하세요' : '모든 칸을 채우세요', true); return; }
+      const node = NODE_KEYS.indexOf(g) >= 0;
+      if (node ? grp.fields.every(f => !vals[f.key]) : grp.fields.some(f => !vals[f.key])) { toast(node ? '값을 넣으세요' : grp.partial ? '바꾸려면 모든 칸을 새로 입력하세요' : '모든 칸을 채우세요', true); return; }
       if (needAck(g) && !U.ack[g]) { toast("'조회 권한만 켰음'을 먼저 체크하세요", true); return; }
       U.busy['s' + g] = true; render();
       const r = await api('keys/save', { group: g, values: vals, readOnlyAck: !!U.ack[g] });
@@ -1066,6 +1099,14 @@
       if (!window.confirm(grp.name + ' 키를 이 서버에서 지울까요?')) return;
       const r = await api('keys/delete', { group: g });
       delete U.test[g]; delete U.ack[g]; delete U.needAck[g]; toast(r.ok ? '삭제했습니다' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
+    },
+    async nplan(el) { await nodePlanSave(el.getAttribute('data-p'), { plan: el.getAttribute('data-v') }); },
+    async nshare(el) { await nodePlanSave(el.getAttribute('data-p'), { share: Number(el.getAttribute('data-v')) }); },
+    async nmonth(el) {
+      const p = el.getAttribute('data-p'), raw = draft('nm_' + p).replace(/[,\s]/g, '');
+      if (raw && !/^[1-9][0-9]{0,11}$/.test(raw)) { toast('월 한도는 숫자만(쉼표 없이)', true); return; }
+      await nodePlanSave(p, { month: raw ? Number(raw) : null });
+      delete U.d['nm_' + p];
     },
     async cgshare(el) {
       const v = Number(el.getAttribute('data-v'));

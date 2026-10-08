@@ -350,7 +350,7 @@ def _bs_token_list(base_url: str, w: str) -> dict:
 def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, discover_url: str = None,
                            must: dict = None, exclude=(), want_native: bool = True, want_tokens: bool = True,
                            multicall: str = MULTICALL3, wallet_cas: dict = None, block: int = None, strict=None,
-                           sleep=time.sleep) -> dict:
+                           sweep: dict = None, sleep=time.sleep) -> dict:
     urls = [u for u in (rpc_urls or []) if u]
     if not urls:
         raise RuntimeError("RPC 엔드포인트 없음 — 대사 보류")
@@ -358,6 +358,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
     excl = {str(x).lower() for x in exclude or ()}
     must = {str(w).lower(): {str(c).lower() for c in (s or ())} for w, s in (must or {}).items()}
     cas = {str(ca).lower(): m for ca, m in (token_cas or {}).items() if str(ca).lower() not in excl}
+    sw = {str(ca).lower(): s for ca, s in (sweep or {}).items() if str(ca).lower() not in excl}
+    spec = {}
 
     def is_strict(w, ca):
         if ca in must.get(str(w).lower(), ()):
@@ -416,6 +418,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 continue
             base_w = cas if wallet_cas is None else {str(x).lower() for x in (wallet_cas.get(str(w).lower()) or ())}
             cw = {ca for ca in base_w if ca not in excl} | {ca for ca in (bs.get(w) or {}) if ca not in excl}
+            spec[w] = set(sw) - cw - must.get(str(w).lower(), set())
+            cw |= set(sw)
             pairs += [(w, ca) for ca in sorted(cw)]
             queried[w] = sorted(cw)
         items = [(("bal", w, ca), ca, _SEL_BAL + str(w).lower().replace("0x", "").rjust(64, "0")) for w, ca in pairs]
@@ -435,7 +439,7 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 else:
                     dec = d9
             if v is None:
-                if is_strict(w, ca):
+                if is_strict(w, ca) and ca not in spec.get(w, ()):
                     hold.setdefault(w, []).append(ca)
                 else:
                     unobs.setdefault(w, []).append(ca)
@@ -444,7 +448,7 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 diff.append((w, ca, None if not b9 else b9[1], v))
             if v:
                 per[w][("token", ca)] = v
-                meta[ca] = tuple(cas[ca]) if ca in cas else ((b9[0] if b9 else None), dec)
+                meta[ca] = tuple(cas[ca]) if ca in cas else ((b9[0] if b9 else sw.get(ca)), dec)
     for w in hold:
         per.pop(w, None)
     return {"per_wallet": per, "_meta": meta, "_source": "rpc", "_block": bn, "_block_ts": bts, "_bs_diff": diff, "_unobs": unobs,

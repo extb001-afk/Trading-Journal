@@ -17,6 +17,10 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import common
+try:
+    import fut_rcpt
+except Exception:
+    fut_rcpt = None
 
 log = logging.getLogger("tj-exf")
 
@@ -508,6 +512,8 @@ def fetch_hyperliquid(ctx, addr, st, add):
         _ev(add, t, sym, "REALIZED", _f(r.get("closedPnl")), f"hl:{addr}:{tid}:p", liq)
         if str(r.get("feeToken") or "USDC").upper() == "USDC":
             _ev(add, t, sym, "FEE", -_f(r.get("fee")), f"hl:{addr}:{tid}:f", liq)
+        if getattr(ctx, "px", None) is not None:
+            ctx.px.extend(fut_rcpt.rows_hl([r], addr, _usd))
 
     def funding(start):
         return ctx.call(HL_URL, {"type": "userFunding", "user": addr, "startTime": int(start)}) or []
@@ -519,8 +525,13 @@ def fetch_hyperliquid(ctx, addr, st, add):
         _ev(add, int(r.get("time") or 0), _usd(d.get("coin")), "FUNDING", _f(d.get("usdc")),
             f"hl:{addr}:fd:{r.get('time')}:{d.get('coin')}")
 
+    fresh = not (st.get("fills") or {}).get("next")
     asc_pages(ctx, st, "fills", fills, lambda r: int(r.get("time") or 0), on_fill, 2000)
     asc_pages(ctx, st, "funding", funding, lambda r: int(r.get("time") or 0), on_fund, 500)
+    bf = getattr(ctx, "px_bf", None)
+    if bf is not None and fresh:
+        bf["done"].add(addr)
+        bf["next"].pop(addr, None)
     return poss, info
 
 
@@ -1098,6 +1109,36 @@ def _keep_got(ctx, addr, m, poss, now, e):
     return True
 
 
+PX_BF_DEADLINE_S = 10.0
+
+
+def _hl_px_backfill(addrs, cursor, pxl, pxbf, t0_ms, now):
+    import hl_spot
+    page = int(hl_spot.WEIGHTS.get("userFillsByTime", 20)) + int(hl_spot.RESERVE.get("userFillsByTime", 0))
+    ctx = Ctx("hyperliquid", t0_ms, now, budget=PX_BF_DEADLINE_S)
+    for addr in addrs:
+        if addr in pxbf["done"]:
+            continue
+        stop = int((((cursor.get(addr) or {}).get("fills") or {}).get("next")) or 0)
+        start = int(pxbf["next"].get(addr) or t0_ms)
+        if start >= stop:
+            pxbf["done"].add(addr)
+            pxbf["next"].pop(addr, None)
+            continue
+        if hl_spot.GOV.used_now() + 2 * page > hl_spot.GOV.cap:
+            break
+        rows = ctx.call(HL_URL, {"type": "userFillsByTime", "user": addr, "startTime": start, "aggregateByTime": False}) or []
+        if not isinstance(rows, list):
+            break
+        pxl.extend(fut_rcpt.rows_hl(rows, addr, _usd))
+        last = max((int(r.get("time") or 0) for r in rows if isinstance(r, dict)), default=stop)
+        if not rows or len(rows) < 2000 or last >= stop or last <= start:
+            pxbf["done"].add(addr)
+            pxbf["next"].pop(addr, None)
+        else:
+            pxbf["next"][addr] = last
+
+
 def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
     now = int(now or time.time())
     path = fut_path(dex)
@@ -1118,9 +1159,22 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
     share = max(20.0, float(DEXES[dex]["budget"]) / max(1, len(accts)))
     cache, calls, last_call = {}, 0, 0.0
     ctx = None
+    pxl, pxbf, px_ok = None, None, []
+    if dex == "hyperliquid" and fut_rcpt is not None:
+        try:
+            c9 = fut_rcpt.load(dex).get("cursor") or {}
+            d9, n9 = c9.get("bf_done"), c9.get("bf_next")
+            pxbf = {"done": {x for x in d9 if isinstance(x, str)} if isinstance(d9, list) else set(),
+                    "next": {k: int(v) for k, v in n9.items() if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
+                             and abs(v) < 1e15} if isinstance(n9, dict) else {}}
+            pxl = []
+        except Exception as e9:
+            log.warning("%s 가격 옆 파일 커서 읽기 실패(이번 주기 가격 보강 건너뜀 · 정산 무관): %s", dex, common.safe_err(e9)[:120])
+            pxl, pxbf = None, None
     for a in accts:
         ctx = Ctx(dex, t0_ms, now, budget=share, cache=cache)
         ctx._last = last_call
+        ctx.px, ctx.px_bf = pxl, pxbf
         addr = a["address"]
         m = dict(ameta.get(addr) or {}, label=a.get("label") or "")
         if http_err is not None:
@@ -1138,6 +1192,8 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
             new_ev.append(dict(e, acct=addr))
         try:
             p9, info = FETCHERS[dex](ctx, addr, st, add)
+            if pxl is not None:
+                px_ok.append(addr)
             poss += [_clean_pos(p, addr) for p in p9]
             m.update({"ts": now, "equity": round(_f(info.get("equity")), 2) if info.get("equity") is not None else None})
             m.pop("err", None)
@@ -1194,6 +1250,16 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
     out = {"v": FILE_VER, "ts": now if ok_any else int(old.get("ts") or 0), "dex": dex, "wallet": wallet, "positions": poss,
            "events": ev, "cursor": cursor, "accts": ameta}
     common.atomic_write_json(path, out)
+    if pxl is not None:
+        try:
+            _hl_px_backfill(px_ok, cursor, pxl, pxbf, t0_ms, now)
+        except Exception as e9:
+            log.info("hyperliquid 가격 옆 파일 과거 채움 다음 주기로(정산 무관): %s", common.safe_err(e9)[:120])
+        try:
+            fut_rcpt.update(dex, pxl, now * 1000, cursor={"bf_done": sorted(pxbf["done"] & set(want)), "bf_next": {k: v for k, v in pxbf["next"].items() if k in want}},
+                            keep=lambda r: r.get("acct") in want)
+        except (Exception, SystemExit) as e9:
+            log.warning("%s 가격 옆 파일 저장 실패(정산 무관): %s", dex, common.safe_err(e9)[:120])
     if http_err is not None:
         raise http_err
     if not ok_any and last_err is not None:
@@ -1232,6 +1298,11 @@ def snapshot_all(cfg=None, now=None):
                 log.info("%s 퍼프 주소가 없어 스냅숏을 지웠어요", dex)
             except FileNotFoundError:
                 pass
+            if fut_rcpt is not None:
+                try:
+                    os.remove(fut_rcpt.px_path(dex))
+                except OSError:
+                    pass
     t0 = _t0_ms(cfg, now)
     res = {}
 

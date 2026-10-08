@@ -13,6 +13,7 @@ import settings_store as ss
 NONCE_MAX = 10
 NONCE_MAX_AGE = 2 * 86400
 BIG_USD = 100.0
+KEEP_ON_NAME = "chainoff_keep_on.json"
 UNSUPPORTED = {"bsc": "BSC 는 따로 도는 수집기(tj-bsc)라 이 버튼으로는 아직 못 꺼요",
                "sol": "Solana 는 따로 도는 수집기(tj-sol)라 이 버튼으로는 아직 못 꺼요"}
 UNITS = ["tj-evm", "tj-core", "tj-web"]
@@ -22,6 +23,8 @@ BACKUP_KEEP = 20
 SENT_DAYS = 30
 SPARK_N = 15
 BAL_FN = None
+AUTO_INFO_FN = None
+AUTO_LIM_MAX = 100.0
 _SENT_CACHE = {"at": 0.0, "db": None, "v": None}
 _SENT_TTL = 300.0
 _SENT_LOCK = threading.Lock()
@@ -320,6 +323,7 @@ def summary(now: float = None) -> dict:
             "spark": None if sent is None else list((se or {}).get("spark") or [0] * SPARK_N),
             "usd": usd, "big": bool(usd is not None and usd >= BIG_USD),
             "offAt": int(mark["at"]) if not on and isinstance(mark.get("at"), (int, float)) else None,
+            "autoOff": bool(not on and mark.get("auto")),
             "recommend": rec,
         })
     on_rows = [r for r in rows if r["on"]]
@@ -366,8 +370,26 @@ def _ign_has(ign: list, chain: str) -> bool:
     return any(str(x).lower() == chain for x in ign)
 
 
-def set_enabled(chain, on, now: float = None) -> dict:
+def _keep_on_path() -> str:
+    return os.path.join(common.STATE_DIR, KEEP_ON_NAME)
+
+
+def _keep_on() -> set:
+    d = _read(_keep_on_path(), {})
+    return {str(x) for x in (d.get("chains") or []) if isinstance(x, str)} if isinstance(d, dict) else set()
+
+
+def _keep_on_set(chain: str, keep: bool):
+    cur = _keep_on()
+    nxt = (cur | {chain}) if keep else (cur - {chain})
+    if nxt != cur:
+        common.atomic_write_json(_keep_on_path(), {"chains": sorted(nxt)})
+
+
+def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
     now = time.time() if now is None else now
+    if auto and on:
+        raise ValueError("자동은 끄기만 합니다")
     if not isinstance(chain, str) or not KEY_RE.match(chain):
         raise ValueError("체인 이름 형식이 아닙니다")
     if not isinstance(on, bool):
@@ -383,13 +405,20 @@ def set_enabled(chain, on, now: float = None) -> dict:
         chains = raw.setdefault("chains", {})
         if not isinstance(chains, dict):
             raise ValueError("config.json chains 형식 오류")
+        if auto:
+            with _SENT_LOCK:
+                _SENT_CACHE.update(at=0.0, db=None, v=None)
         known = {r["key"]: r for r in summary(now)["rows"]}
         if chain not in known:
             raise ValueError("설정에 없는 체인입니다")
         cc = chains.get(chain)
         cur_on = not (isinstance(cc, dict) and not common.chain_enabled(chain, cc))
         if cur_on == on:
+            if not auto:
+                _keep_on_set(chain, on)
             return {"ok": True, "chain": chain, "on": on, "changed": False, "apply": apply_info()}
+        if auto and (not known[chain].get("recommend") or chain in _keep_on()):
+            return {"ok": True, "chain": chain, "on": cur_on, "changed": False, "apply": apply_info()}
         if not on and not known[chain]["can"]:
             raise ValueError(known[chain]["why"] or "이 체인은 여기서 끌 수 없어요")
         sw = raw.get("chain_sweep")
@@ -398,6 +427,8 @@ def set_enabled(chain, on, now: float = None) -> dict:
         ign = list((sw or {}).get("ignore") or [])
         if not on:
             mark = {"at": int(now)}
+            if auto:
+                mark["auto"] = True
             if isinstance(cc, dict):
                 mark["had"] = "enabled" in cc
                 cc["enabled"] = False
@@ -405,7 +436,7 @@ def set_enabled(chain, on, now: float = None) -> dict:
             else:
                 mark["created"] = True
                 chains[chain] = {"enabled": False, "_chainoff": mark}
-            if not _ign_has(ign, chain):
+            if not auto and not _ign_has(ign, chain):
                 ign.append(chain)
                 mark["ign"] = True
         else:
@@ -431,7 +462,71 @@ def set_enabled(chain, on, now: float = None) -> dict:
             raw["chain_sweep"] = dict(sw or {}, ignore=ign)
         bk = _backup(raw_bytes, now)
         ss.write_config_raw(raw)
+        if not auto:
+            _keep_on_set(chain, on)
     return {"ok": True, "chain": chain, "on": on, "changed": True, "apply": request_apply(chain, on), "backup": os.path.basename(bk)}
+
+
+def _recon_ready(chain: str, addrs) -> bool:
+    addrs = {str(a).lower() for a in (addrs or ())}
+    if not addrs or not os.path.exists(common.DB_PATH):
+        return False
+    try:
+        c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=3)
+        try:
+            if not c.execute("SELECT v FROM meta WHERE k=?", (f"recon_done_{chain}",)).fetchone():
+                return False
+            r = c.execute("SELECT payload FROM raw_observations WHERE obs_id=?", (f"recon:{chain}",)).fetchone()
+            try:
+                d9 = json.loads(r[0]) if r and r[0] else {}
+                seen = {str(w).lower() for w, v in d9.items() if isinstance(v, dict)} if isinstance(d9, dict) else set()
+            except (TypeError, ValueError):
+                seen = set()
+            done = {str(k).split(":", 2)[2].lower() for (k,) in c.execute("SELECT k FROM meta WHERE k LIKE ?", (f"wrecon_done:{chain}:%",))
+                    if str(k).startswith(f"wrecon_done:{chain}:") and len(str(k).split(":", 2)) == 3}
+            return addrs <= (seen | done)
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return False
+
+
+def auto_off(now: float = None) -> list:
+    with _SENT_LOCK:
+        _SENT_CACHE.update(at=0.0, db=None, v=None)
+    keep = _keep_on()
+    try:
+        info = AUTO_INFO_FN() if AUTO_INFO_FN is not None else None
+    except Exception:
+        info = None
+    if not isinstance(info, dict) or not isinstance(info.get("chains"), dict):
+        return []
+    try:
+        lim = max(0.0, min(AUTO_LIM_MAX, float(info.get("lim"))))
+    except (TypeError, ValueError):
+        return []
+    out = []
+    try:
+        raw9 = ss.read_config_raw()
+        wal9 = _chain_wallets(raw9, ss.load_config_quiet(), _read(common.ACTIVITY_GATE_PATH, {}))
+    except Exception:
+        return []
+    for r in summary(now)["rows"]:
+        inf = info["chains"].get(r["key"]) if isinstance(info["chains"].get(r["key"]), dict) else {"usd": 0.0}
+        try:
+            v9 = float(inf.get("usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not (r.get("recommend") and v9 <= lim and r["key"] not in keep):
+            continue
+        if not _recon_ready(r["key"], (wal9 or {}).get(r["key"])):
+            continue
+        try:
+            if set_enabled(r["key"], False, now, auto=True).get("changed"):
+                out.append(r["key"])
+        except ValueError:
+            continue
+    return out
 
 
 def apply_info() -> dict:

@@ -71,7 +71,7 @@ class _SentTap:
 
 _NONCE_STOP_KINDS = ("http429", "quota", "circuit")
 _NONCE_NEXT_KINDS = ("pruned", "null", "http5xx", "http4xx", "timeout", "conn", "dns", "payload")
-_ARCHIVE_HOST_HINTS = ("nodereal",)
+_ARCHIVE_HOST_HINTS = ("nodereal", "ankr.com", "quiknode.pro")
 
 
 def _archive_like(url) -> bool:
@@ -220,7 +220,10 @@ class Rpc:
         for _attempt in range(len(self.urls)):
             url = self.urls[self.i]
             try:
-                res = bf_engine.rpc_batch(url, calls, timeout=timeout, retries=1)
+                res = []
+                cap = bf_engine.gate(url).batch_cap(max(1, len(calls)))
+                for i9 in range(0, len(calls), cap):
+                    res += bf_engine.rpc_batch(url, calls[i9:i9 + cap], timeout=timeout, retries=1)
                 if res and all(isinstance(r, Exception) for r in res):
                     raise res[0]
                 return res
@@ -329,6 +332,7 @@ class BscWatcher:
                 g9.open_until = max(g9.open_until, time.time() + 60)
                 log.info("BSC 노드 %s 헤드 %d 가 %d블록 뒤처짐 — 60초 제외", common.redact_urls(u), h9, top - h9)
         self.node_heads = {common.redact_urls(u): h9 for u, h9 in heads.items()}
+        self._log_head = top
         return top
 
     def token_info(self, ca: str) -> tuple:
@@ -413,10 +417,22 @@ class BscWatcher:
     def discover(self, frm: int, to: int, budget_sec: float = 600, on_advance=None, topics=None) -> "tuple | None":
         if to < frm:
             return set(), frm - 1
+        eps9, fb9 = list(self.logs_rpc.urls), dict(self.logs_fb or {})
+        head9 = self.__dict__.get("_log_head")
+        if isinstance(head9, int) and frm >= head9 - bf_engine.RPC_NEAR_HEAD:
+            try:
+                import nodekeys
+                key9 = [u9 for u9 in eps9 if nodekeys.is_key_node(u9)]
+            except Exception:
+                key9 = []
+            if key9 and len(key9) < len(eps9):
+                eps9 = [u9 for u9 in eps9 if u9 not in key9]
+                for u9 in key9:
+                    fb9.setdefault(u9, int(self.span_caps.get(u9) or self.span))
         sc = bf_engine.LogScanner(
-            list(self.logs_rpc.urls), TRANSFER_TOPIC, list(topics) if topics else self.topics,
+            eps9, TRANSFER_TOPIC, list(topics) if topics else self.topics,
             span=max(self.span, self.span_max),
-            caps=self.span_caps, fallback=self.logs_fb, sleep=self.logs_sleep, timeout=25,
+            caps=self.span_caps, fallback=fb9, sleep=self.logs_sleep, timeout=25,
             per_ep_workers=self.scan_workers, log=log, name="bsc getLogs",
             canary=getattr(self, "canary", bf_engine.BSC_CANARY), head_guard=getattr(self, "logs_head_guard", True),
             positions=({1: [TRANSFER_TOPIC, DEPOSIT_TOPIC, WITHDRAWAL_TOPIC], 2: TRANSFER_TOPIC}

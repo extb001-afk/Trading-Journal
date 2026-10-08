@@ -205,18 +205,20 @@ def family(s) -> str:
     return _FAMILY.get(c, c)
 
 
-def bridge_fits(sent: Decimal, got: Decimal, sym: str) -> bool:
+def bridge_fits(sent: Decimal, got: Decimal, sym: str, fam=None) -> bool:
     if sent <= 0 or got <= 0:
         return False
-    lo = sent * (Decimal(1) - BRIDGE_REL) - (BRIDGE_ABS_STABLE if family(sym) in STABLES else Decimal(0))
+    lo = sent * (Decimal(1) - BRIDGE_REL) - (BRIDGE_ABS_STABLE if (family(sym) if fam is None else fam) in STABLES else Decimal(0))
     return lo <= got <= sent * (Decimal(1) + Decimal("1e-9"))
 
 
 def bridge_match(sends, arrivals, competitors=(), skip=frozenset(), no_auto=frozenset(), window=BRIDGE_WINDOW):
     by_fam = {}
+    fam_a = {}
     for a in arrivals:
         if a.get("ok", True):
-            by_fam.setdefault(family(a["sym"]), []).append(a)
+            fa9 = fam_a[id(a)] = family(a["sym"])
+            by_fam.setdefault(fa9, []).append(a)
     cs, ca = {}, {}
     pool = [(s, False) for s in sends if s["pid"] not in skip] + [(c, True) for c in competitors]
     for s, comp in pool:
@@ -234,9 +236,9 @@ def bridge_match(sends, arrivals, competitors=(), skip=frozenset(), no_auto=froz
             if comp:
                 fit = -600 <= dt <= LEDGER_BRIDGE_WINDOW and a["qty"] <= s["qty"] * Decimal("1.02")
             elif s.get("oft"):
-                fit = family(a["sym"]) == fs and 0 <= dt <= OFT_WINDOW and abs(a["qty"] - s["qty"]) <= s["qty"] * OFT_QTY_TOL
-            elif family(a["sym"]) == fs:
-                fit = 0 <= dt <= window and bridge_fits(s["qty"], a["qty"], s["sym"])
+                fit = fam_a[id(a)] == fs and 0 <= dt <= OFT_WINDOW and abs(a["qty"] - s["qty"]) <= s["qty"] * OFT_QTY_TOL
+            elif fam_a[id(a)] == fs:
+                fit = 0 <= dt <= window and bridge_fits(s["qty"], a["qty"], s["sym"], fs)
             else:
                 fit = 0 <= dt <= window and xstable_fits(s["qty"], a["qty"])
             if fit:
