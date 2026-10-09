@@ -449,6 +449,44 @@ def _legs(conn, since=0) -> dict:
         return {}
 
 
+WD_FEE_IN_LEG = {"upbit": "EX_WITHDRAW", "gate": "EXF_WITHDRAW", "bithumb": "EXF_WITHDRAW", "hyperliquid": "EXF_WITHDRAW"}
+
+
+def _wd_fee_net(conn, legs):
+    def run():
+        out = {}
+        for r in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='withdraw' AND exchange IN (" + ",".join("?" * len(WD_FEE_IN_LEG)) + ")"
+                              " GROUP BY exchange, uuid HAVING revision = MAX(revision)", tuple(WD_FEE_IN_LEG)):
+            try:
+                p9 = json.loads(r["payload"])
+                f9, a9 = float(p9.get("fee") or 0), float(p9.get("amount") or 0)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            fc9 = str(p9.get("fee_ccy") or p9.get("fee_currency") or "").upper()
+            if str(p9.get("state") or "").upper() != "DONE" or (fc9 and fc9 != str(p9.get("currency") or "").upper()) or not (f9 > 0 and a9 > 0):
+                continue
+            out[(str(r["exchange"]), str(r["uuid"]))] = (f9, a9)
+        return out
+    try:
+        fees = _memo(conn, ("wdfee",), run) if legs else {}
+    except sqlite3.Error:
+        return legs
+    if not fees:
+        return legs
+    out = []
+    for lg in legs:
+        loc9 = str(lg[3])
+        ex9 = loc9.split(":")[1] if ":" in loc9 else ""
+        fa9 = fees.get((ex9, str(lg[5]))) if len(lg) > 5 and WD_FEE_IN_LEG.get(ex9) == lg[4] else None
+        if fa9:
+            q9, (f9, a9) = abs(lg[2]), fa9
+            want9 = a9 + f9 if ex9 == "upbit" else a9
+            if f9 < q9 and abs(q9 - want9) <= max(want9 * 1e-6, 1e-8):
+                lg = (lg[0], lg[1], -(q9 - f9)) + tuple(lg[3:])
+        out.append(lg)
+    return out
+
+
 def _of_dest_txs(conn):
     def run():
         out = []
@@ -706,6 +744,8 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
         e = gas_ch.setdefault(ck, {"usd": 0.0, "parts": {}})
         for k9, lab9 in (("spot", "매매 가스"), ("lp", "LP 가스")):
             v9 = _f(g.get(k9))
+            if k9 == "spot":
+                v9 -= _f(g.get("br"))
             if v9 > 0:
                 e["usd"] += v9
                 e["parts"][lab9] = e["parts"].get(lab9, 0.0) + v9
@@ -713,6 +753,7 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
     price = _valuer(hist)
     loc_key = lambda loc9: str(loc9).split(":")[1] if ":" in str(loc9) else ""
     ex_wd, ex_dep, w_in, w_out, opn = (L.get(k) or [] for k in ("ex_wd", "ex_dep", "w_in", "w_out", "open"))
+    ex_wd = _wd_fee_net(conn, ex_wd) if conn is not None else ex_wd
     w_br = L.get("w_br") or []
     skip9 = {str(g9) for g9, v9 in ((getattr(hist, "kit", None) or {} if hist is not None else {}).get("groups") or {}).items()
              if isinstance(v9, dict) and v9.get("skip")}

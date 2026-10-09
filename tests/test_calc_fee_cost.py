@@ -175,7 +175,8 @@ check("F4 대금 미상 매도·원가미상 매도 검토 없음(AAA·BBB)",
       not [p for p in pend if p.get("sym") in ("AAA", "BBB") and str(p.get("key")).startswith(("noproc:", "unv:"))], pend)
 check("F5 평균가 대체: 매수 없는 사이클의 원가 미상 매도는 새 사이클 평단으로 실현 안 함(그날 0)", abs(rbd.get(iso(D5), 0.0)) <= 0.05, rbd)
 pz = [p for p in pos if p.get("sym") == "ZZZ"]
-check("F6 브릿지 tx 에서 받은 ZZZ 5 개 = 원가 미상 보유 카드", any(abs(float(p.get("unknownQty") or 0) - 5) <= 1e-6 for p in pz), pz)
+check("F6 브릿지 tx 에서 받은 ZZZ 5 개(낸 것 TKB 하나 · 받은 것 하나 = 예치 증서) = TKB 원가 $100 승계 카드(원가 미상 0)",
+      any(abs(float(p.get("bought") or 0) - 5) <= 1e-6 and abs(float(p.get("cost") or 0) - 100) <= 0.01 and not float(p.get("unknownQty") or 0) for p in pz), pz)
 tot = round(sum(rbd.values()), 2)
 cards = round(sum(float(p.get("realized") or 0) + float(p.get("realizedFb") or 0) for p in pos), 2)
 check("불변: 헤더 실현 합 = 카드 실현 합", abs(tot - cards) <= 0.05, (tot, cards))

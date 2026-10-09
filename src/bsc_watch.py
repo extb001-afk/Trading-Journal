@@ -284,6 +284,10 @@ class BscWatcher:
         self.wallets = [w.lower() for w in wallets]
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get("bsc") or "").lower() or None
         self.discover_wrap = bc.get("discover_wrap") is not False and bool(self.wrapped_ca)
+        try:
+            self.sell_verify_blocks = max(0, int(bc.get("sell_verify_blocks", self.SELL_WD_RECENT)))
+        except (TypeError, ValueError):
+            self.sell_verify_blocks = self.SELL_WD_RECENT
         self.wallet_since = bf_engine.wallet_since_map(cfg, "bsc")
         self.topics = [_pad_topic(w) for w in self.wallets]
         self.writer = _SentTap(writer, self)
@@ -526,6 +530,76 @@ class BscWatcher:
                          "total": {"value": str(v)}})
         return legs, ints
 
+    SELL_WD_RECENT = 100
+
+    def _sell_unwrap(self, tx: dict, rc: dict, tts: list, ints: list) -> list:
+        wr = getattr(self, "wrapped_ca", None)
+        f = str(tx.get("from") or "").lower()
+        my = set(self.wallets)
+        if not wr or f not in my:
+            return []
+        try:
+            if int(tx.get("value") or "0x0", 16):
+                return []
+        except (TypeError, ValueError):
+            return []
+        if any(str(t.get("to") or "").lower() in my for t in tts) or any(str(i.get("to") or "").lower() in my for i in ints):
+            return []
+        if not any(str(t.get("from") or "").lower() == f for t in tts):
+            return []
+        wd = dep = 0
+        src = None
+        for lg in rc.get("logs") or []:
+            tp = lg.get("topics") or []
+            if len(tp) != 2 or (lg.get("address") or "").lower() != wr:
+                continue
+            t0 = (tp[0] or "").lower()
+            who = ("0x" + str(tp[1])[-40:]).lower()
+            if who in my or t0 not in (DEPOSIT_TOPIC, WITHDRAWAL_TOPIC):
+                continue
+            try:
+                v = int(lg.get("data") or "0x0", 16)
+            except ValueError:
+                continue
+            if t0 == WITHDRAWAL_TOPIC:
+                wd += v
+                src = src or who
+            else:
+                dep += v
+        x = wd - dep
+        if x <= 0 or not src:
+            return []
+        amt = self._sell_unwrap_check(f, tx, rc, x)
+        if amt <= 0:
+            log.info("BSC %s 매도 받은 BNB 추정 %d — 잔고 변화로는 안 받음(받는 사람 다름) · 행 안 만듦", str(tx.get("hash"))[:12], x)
+            return []
+        return [{"from": src, "to": f, "value": str(amt), "success": True, "attr": "balance_delta"}]
+
+    def _sell_unwrap_check(self, f: str, tx: dict, rc: dict, x: int) -> int:
+        pub = getattr(self, "nonce_pub_rpc", None)
+        head = getattr(self, "_log_head", None)
+        try:
+            blk = int(tx["blockNumber"], 16)
+            fee = int(rc["gasUsed"], 16) * int(rc.get("effectiveGasPrice") or tx.get("gasPrice") or "0x0", 16)
+        except (KeyError, TypeError, ValueError):
+            return x
+        lim = getattr(self, "sell_verify_blocks", self.SELL_WD_RECENT)
+        if pub is None or not isinstance(head, int) or blk < 1 or not lim or head - blk > lim:
+            return x
+        try:
+            res = pub.batch([("eth_getBalance", [f, hex(blk - 1)]), ("eth_getBalance", [f, hex(blk)]),
+                             ("eth_getTransactionCount", [f, hex(blk - 1)]), ("eth_getTransactionCount", [f, hex(blk)])], timeout=15)
+            b0, b1, n0, n1 = (int(r, 16) for r in res)
+        except Exception as e:
+            log.info("BSC %s 매도 받은 BNB 잔고 확인 실패(로그 값 사용): %s", str(tx.get("hash"))[:12], common.safe_err(e)[:80])
+            return x
+        if n1 - n0 != 1:
+            return x
+        r = b1 - b0 + fee
+        if r <= 0:
+            return 0
+        return min(r, x)
+
     def _token_info_batch(self, cas):
         cas = sorted(c for c in set(cas) if c not in self.token_meta and not self.nodec.perm(c))
         if not cas:
@@ -619,6 +693,8 @@ class BscWatcher:
             })
         wl9, wi9 = self._wrap_moves(rc, tts) if status == "0x1" else ([], [])
         tts.extend(wl9)
+        if status == "0x1":
+            wi9 = wi9 + self._sell_unwrap(tx, rc, tts, wi9)
         return {
             "tx": {
                 "hash": tx["hash"], "from": tx.get("from"), "to": tx.get("to"),

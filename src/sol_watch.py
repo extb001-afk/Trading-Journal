@@ -662,6 +662,36 @@ def _token_owner_hints(instructions: list, mine=()) -> dict:
     return out
 
 
+ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+_ATA_MEMO = {}
+
+
+def ata_address(owner: str, mint: str, token_program: str):
+    k = (owner, mint, token_program)
+    if k in _ATA_MEMO:
+        return _ATA_MEMO[k]
+    try:
+        o9, m9, p9 = lpsol.b58decode(owner), lpsol.b58decode(mint), lpsol.b58decode(token_program)
+        a = lpsol.find_pda([o9, p9, m9], ATA_PROGRAM)[0] if len(o9) == 32 and len(m9) == 32 and len(p9) == 32 else None
+    except (KeyError, ValueError, TypeError):
+        a = None
+    if len(_ATA_MEMO) > 50_000:
+        _ATA_MEMO.clear()
+    _ATA_MEMO[k] = a
+    return a
+
+
+def ata_owner_of(acct: str, mint, owners, program=None):
+    if not isinstance(acct, str) or not isinstance(mint, str) or not acct or not mint:
+        return None
+    progs = (program,) if program in TOKEN_PROGRAMS else TOKEN_PROGRAMS
+    for o in sorted(owners or ()):
+        for p9 in progs:
+            if ata_address(o, mint, p9) == acct:
+                return o
+    return None
+
+
 def stake_state(act, deact, epoch) -> str:
     try:
         act, deact, epoch = int(act), int(deact), int(epoch)
@@ -1058,7 +1088,8 @@ class SolWatcher:
                 return f"?{ix9}"
             if hint9 is None:
                 hint9 = _token_owner_hints(all_ins, mine)
-            return (getattr(self, "ata_owner", None) or {}).get(acct9) or hint9.get(acct9) or f"?{ix9}"
+            return ((getattr(self, "ata_owner", None) or {}).get(acct9) or hint9.get(acct9)
+                    or ata_owner_of(acct9, row.get("mint"), mine, row.get("programId")) or f"?{ix9}")
         tb = {}
         for row in pre_tb:
             key = (owner_of(row), row.get("mint"))

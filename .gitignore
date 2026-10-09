@@ -24,3 +24,9 @@ config*.json
 !config.example.json
 env*.txt
 *.json.bak
+*.tar.gz
+*~
+*.save
+*.env
+*.key
+*.pem

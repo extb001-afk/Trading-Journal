@@ -15,7 +15,8 @@
   [첫 실행](#5-첫-실행--얼마나-걸리고-어디서-보나) · [화면 열기·다른 기기](#6-화면-열기--다른-기기에서-보기) · [서버에서 늘 켜 두기](#6-1-서버리눅스에서-늘-켜-두기) · [문제 해결](#7-문제-해결--자주-묻는-5가지)
 - 기능: [지갑 여러 개 한 번에](#지갑-주소-여러-개-한-번에) · [텔레그램 알림](#텔레그램-알림-설정) · [금액 랜덤값](#금액-랜덤값-모드) · [금액 가리기](#금액-가리기숨김-모드) ·
   [기타 자산](#기타-자산--증권사-연결은-미검증) · [NFT](#nft-보유--바닥가) · [Hyperliquid](#hyperliquid--현물--무기한--스테이킹) · [시세 출처](#시세-출처--동명-코인-거르기) ·
-  [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필) · [백업·복구](#백업--복구)
+  [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필) · [백업·복구](#백업--복구) ·
+  [업데이트](#업데이트) · [멈추기·지우기](#멈추기--지우기)
 - 참고: [기능 요약](#기능-요약) · [구조](#구조) · [보안·데이터](#보안--데이터) · [고급 설정(환경변수·설정 키)](#고급-설정) · [알아 둘 것](#알아-둘-것) · [시험 실행](#시험-실행) · [라이선스](#라이선스)
 
 ---
@@ -70,18 +71,24 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-09 오후 · 외부 전면검토 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-09 오후](CHANGELOG.md#2026-10-09-오후--외부-전면검토-반영) 에 있어요. 사진은 지난 판 그대로예요.
+이번 판(2026-10-09 밤 · 외부 수정 검증 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-09 밤](CHANGELOG.md#2026-10-09-밤--외부-수정-검증-반영) 에 있어요.
+사진은 지난 판 그대로예요(대시보드 LP 는 이제 큰 표 대신 레버리지 · 대출 바로 아래 카드 — 사진과 위치가 달라요).
 
-- **업데이트 뒤** — 모든 유닛을 다시 켜세요(`pm2 restart ecosystem.config.js`). 원가 미확인 수량의 '최초 인식 시가'(기본 켬)·수수료 원가 규약·스테이블 원화 환차로
-  실현손익·명세 숫자가 바뀔 수 있어요(추정한 행은 '추정' 표시 · 재구축은 필요 없어요).
-- **선물 정산 = 정산 시각** — 거래소 잔고에 합쳐진 선물 지갑(바이낸스·바이빗·OKX)의 실현 손익·수수료·펀딩을 정산 시각에 기장해요(첫 대사 때 지난 것도 한 번 다시 놓음 ·
-  `tools/exf_fut_place.py` 로 미리보기·되돌리기) · 해외 거래소 잔고 대사는 불완전한 응답을 보류하고 표본 두 번이 맞을 때만.
-- **양도차익 명세** — 스테이블코인 원화 환차손익(별도 표 · 처분 행을 누르면 환차 상세) · 선물 손익·기타 소득 별도 표 · 원가 미확인 = 처음 생긴 날 시가로 추정(끄기 = 설정 › 원가 계산) ·
-  가스·체결·출금 수수료 원가 규약 하나로.
-- **곡선** — 원장 밖 금액(거래소 원화·업비트 미매칭 코인·LP·Rabby)을 구성요소별 규칙 하나로 계산해 30일·장기 곡선이 같은 값 · 빗썸 원화는 날마다 되감은 그날 잔고 · 정한 지난날 값은 다시 매기지 않음.
-- **백업·복구** — [서버 밖 둘째 백업과 되돌리기](#백업--복구)(`tools/offsite_backup.py` · `tools/ledger_restore.py`) · 원장 파일이 사라지면 빈 원장을 만들지 않고 복구 안내.
-- **그 밖** — 청산 감시 '못 보고 있어요' 알림·위험 구간 다시 알림 · 직접 감싸기·풀기(WETH 등)를 전환으로 · 상태 패널 '재계산 대기'에 넓히기 진행률 ·
-  화면·접근성 묶음 · 보안 문제 비공개 보고([SECURITY.md](SECURITY.md)).
+- **업데이트** — 이번 판부터 [업데이트](#업데이트) 순서(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`)를 따라 주세요. 재구축은 필요 없어요.
+  설정 맨 아래에 버전이 보이고, 원장에 데이터 개정 번호(`data_rev`)를 적기 시작해요. 최초 인식 시가 안전장치·수수료 규약 정리로 실현손익·명세 숫자가 조금 바뀔 수 있어요.
+- **원장 지키기** — 깨진 원장은 띄우지 않고 '원장 손상 — 복구 필요'로 기다려요 · 원장 없음·손상·감시 유닛 꺼짐을 화면 위 배너로 · pm2 없이 돌려도 멈춘 유닛을 알아채요 ·
+  [복구 도구](#백업--복구)는 기준 블록을 실제 원장에서 찾고 원장 밖 사본도 되돌려요(`ledger_restore.py files`).
+- **최초 인식 시가 안전장치** — 같은 주소로 돌아온 코인은 보낼 때 원가를 이어받고, 확인 안 된 토큰·실제 매도가의 10배 넘는 시세는 매기지 않으며, 한 번 매긴 값은 고정해요.
+- **수수료·브릿지·재생 순서** — 가스 반영을 꺼도 수수료로 쓴 코인의 처분 손익은 실현에 · 브릿지 수수료도 같은 규약 · 같은 블록은 tx 순번·로그 번호 순으로 재생 · 브릿지 짝 보강.
+- **선물·청산 감시** — 선물 정산 자산(BNB 수수료·코인 마진)은 그 자산으로 기장 · 재배치를 되돌리면 `--apply` 전까지 자동 적용 안 함 · 한 번 읽은 거래소를 못 보면 알림 ·
+  낡은 가격으로 목표가·손절을 판정하지 않음.
+- **그 밖** — 방금 예치한 LP 포지션 바로 평가 · 그날 마감가는 그 시각까지의 정보만 · 웹 서버 느린 연결 방어(헤더 10초 · IP당 동시 연결 32) · 첫 설치 카드·폰 명세 등 화면 다듬기 ·
+  [업데이트](#업데이트)·[멈추기 · 지우기](#멈추기--지우기) 절 · 1회 도구 2개(`tools/upbit_trades_fill.py` · `tools/repair_wrap_legs.py`).
+- **2차(지난 지적 중 남은 것)** — 분류 보류 거래도 잔고 변화 기록 · 유동성 모르는 DEX 가격은 OKX DEX 와 맞을 때만 · 환율이 1시간 넘게 낡으면 그날 마감 보류 ·
+  대표 심볼 [확인 필요·정품 등록](#시세-출처--동명-코인-거르기) · Katana vbUSDC = 스테이블 · 시세 없는 스왑 원가 넘기기(가치 없는 동반 토큰 = `seed/zero_value_companions.json`) ·
+  바이비트 심볼 나누기·거래소 서버 시각·쿠코인 HF 체결 · BSC 토큰 → BNB 매도 대금 · 미추적 체인 스테이블 점검 · OKX·쿠코인·게이트 마진 체결 미수집을 [알아 둘 것](#알아-둘-것)에.
+- 지난 판(2026-10-09 오후): 선물 정산 = 정산 시각 · 스테이블 원화 환차 · 최초 인식 시가 · 수수료 원가 규약 · 곡선 재설계 · 서버 밖 둘째 백업 —
+  [CHANGELOG.md › 2026-10-09 오후](CHANGELOG.md#2026-10-09-오후--외부-전면검토-반영)
 - 지난 판(2026-10-09 새벽): 그날 카드 '총 실현' = 현물 실현 + 선물 실현 · 그날의 기록 시간순 · 선물 영수증 '진입 시각 추정' · 검색 돋보기 모든 폭 —
   [CHANGELOG.md › 2026-10-09 새벽](CHANGELOG.md#2026-10-09-새벽--3차-검수-반영--실현-표기)
 - 지난 판(2026-10-09 · 수정 재검증): 선물 영수증 진입 시각 보호 · 글꼴 자체 제공 · 목표가·손절선 원화/달러 · 유닛 러너 메모리 상한 · 공개 시험 확대 · MIT —
@@ -281,8 +288,13 @@ pm2 없이 쓰려면 터미널 여러 개에서 각각 켜 두세요:
 python3 src/unit_runner.py web     # 화면 (필수)
 python3 src/unit_runner.py core    # 원장 쓰기 (필수)
 python3 src/unit_runner.py evm     # EVM 지갑 · sol · bsc 도 같은 식
-python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = 해외 거래소 · src/alert_bot.py = 텔레그램
+python3 src/alert_bot.py           # 상태 점검·원장 경고·텔레그램 (권장 — 꺼져 있으면 화면 위에 '감시 유닛이 꺼져 있어요')
+python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = 해외 거래소
 ```
+
+로그를 파일로 남기려면 **덧붙이기(`>>`)** 로 여세요 — 예: `python3 src/unit_runner.py web >> ~/tj-logs/tj-web.log 2>&1`
+(`>` 로 열면 `tools/rotate_logs.sh` 로 잘라도 그 프로세스가 옛 위치에 이어 써서 크기가 줄지 않아요). 멈추기 = 각 터미널에서 Ctrl+C.
+pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유닛>.json`(pid·시각)으로 멈춘 유닛을 알려 줍니다.
 
 ### 5) 첫 실행 — 얼마나 걸리고 어디서 보나
 
@@ -487,9 +499,14 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 ## 시세 출처 · 동명 코인 거르기
 
 - **달러 시세 순서 = 바이낸스 → 바이빗 → 코인게코.** 원화 마켓이 없는 업비트·빗썸 보유 코인, 원가(매수 시점 1분봉), 장기 곡선·그날 마감가가 이 순서를 씁니다.
+- **원화 환율(업비트 USDT 원화 호가)** 은 받은 시각과 함께 둡니다. 1시간 넘게 못 받으면 화면 숫자는 마지막 값으로 보이되 그날 마감은 미루고, 그날은 그 시각 1분봉 환율로 닫습니다(고정 대체값은 마감·곡선에 저장하지 않음).
 - **업비트·빗썸의 USDT·BTC 마켓 시세는 쓰지 않습니다**(거래가 얇아 튀는 일이 잦음). 원화 마켓 시세와 원화 환산용 업비트 KRW-USDT 는 그대로 씁니다.
 - **동명 코인 거르기** — 같은 티커라도 다른 코인일 수 있어, 코인게코 매핑이 다른 코인이라고 하거나 기준가와 0.5~2배 넘게 어긋나면 그 거래소 시세를 버리고 사유를 남깁니다.
-- 온체인 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외)로 평가하고, 원가가 필요한데 거래소 1분봉이 같은 코인으로 확인되지 않으면 코인게코(컨트랙트 주소)를 씁니다.
+- 온체인 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외 · 풀 유동성을 모르는 가격도 OKX DEX 값이 10% 안에서 같을 때만 씀)로 평가하고, 원가가 필요한데 거래소 1분봉이 같은 코인으로 확인되지 않으면 코인게코(컨트랙트 주소)를 씁니다.
+- **대표 심볼 '확인 필요'** — USDT·WBTC 같은 대표 심볼인데 정품 목록(내장 + `state/genuine_tokens.json`)에 없는 컨트랙트는 심볼만으로 숨기지 않습니다.
+  유동성 있는 시세(풀 유동성이 `price_guard.min_reserve_usd` 이상)나 거래소 출금 도착이 있으면 정품으로 보고, 아니면 보유표 '값 없는 토큰'에 **확인 필요** 배지로 보입니다.
+  확인 전에는 평가 0 — 총자산·일별 기록·알림에 넣지 않습니다(주소 오염용 가짜 USDT 대비). 배지를 눌러 **정품으로 등록**하면 그 심볼 시세(스테이블은 액면 $1)로 평가하고 남이 보낸 토큰의 '에어드랍 의심' 격리도 풉니다(고플러스 스캠 확증은 그대로 · 풀기 = 보유 상세의 '직접 등록' 표식).
+  보이지 않는 글자·유사 글자가 섞인 이름은 종전대로 사칭으로 숨깁니다.
 - **코인게코 키**(`TJ_COINGECKO_KEY`, 선택)가 있으면 코인게코·GeckoTerminal 조회를 키로 먼저 부르고, 키 몫이 모자라거나 실패하면 그 콜만 예전처럼 무키로 부릅니다.
   순서는 그대로 — 거래소 값이 있는 코인은 코인게코를 부르지 않고, 그 코인의 확인용 조회(동명 거르기 기준가)는 키 몫을 아끼려고 무키로 둡니다.
 
@@ -529,7 +546,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 **자동 백업(같은 컴퓨터)** — `tj-core` 가 매일 04:30(KST) 이후 원장을 `state/backups/ledger_YYYYMMDD.db` 로 떠 둡니다
 (sqlite 온라인 백업 · 무결성 검사 통과본만 · 기본 3개 — `config.json` 의 `"backup": {"keep_db": 3}`). 같은 때 원장 밖 사본
 (`files_YYYYMMDD/` — 지난날 고정가·AI 리뷰·기타 자산·설정·NFT 설정·메모·지갑 목록, `prefs_YYYYMMDD.json` — 화면에서 내린 판정)도 남깁니다.
-`.env`(키)는 넣지 않으니 따로 보관하세요. 백업이 36시간 넘게 없으면 상태 패널 주황, 3일 넘으면 빨강 + 텔레그램.
+`.env`(키)는 넣지 않고, `config.json` 은 지갑 목록·거래소 입금주소만 담으니 두 파일은 따로 보관하세요.
+백업이 36시간 넘게 없으면 상태 패널 주황, 3일 넘으면 빨강 + 텔레그램(디스크 부족으로 건너뛴 채 30시간이면 그때 빨강 + 텔레그램).
 
 **서버 밖 둘째 백업(권장)** — 같은 디스크의 백업은 디스크 사고 한 번에 원장과 같이 사라집니다. 다른 컴퓨터로 매일 보내려면
 `config.json` 에 받을 곳을 적고(값은 예시)
@@ -543,6 +561,10 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 `python3 tools/offsite_backup.py test`(연결 확인) → `python3 tools/offsite_backup.py run --force`(첫 전송) 로 확인하고,
 크론에 `17 * * * * cd <설치 폴더> && python3 tools/offsite_backup.py run` 처럼 매시 등록하세요(하루 1번만 보냄 · 실패 뒤 3시간 쉼).
 원장 스냅숏을 압축해(gzip · sha256) 받는 쪽에서 다시 계산한 sha256 이 같을 때만 제자리에 둡니다. 결과는 상태 패널 '서버 밖 백업'.
+묶음은 **압축만 하고 암호화하지 않습니다** — 받는 컴퓨터에 들어갈 수 있는 사람은 원장(거래·주소·금액)을 읽을 수 있으니 믿는 컴퓨터로만 보내세요.
+처음 접속할 때 받는 쪽 호스트 키를 묻지 않고 받아들이고(`StrictHostKeyChecking=accept-new` — 그 뒤 키가 바뀌면 거부), 처음부터 확인하려면
+먼저 `ssh -p <포트> -i ~/.ssh/tj_offsite <사용자>@<호스트>` 로 한 번 접속해 지문을 받는 쪽에서 확인한 값과 맞춰 두세요.
+`test` 는 연결·폴더·여유 공간과 함께 보낼 도구(rsync, 없으면 scp)와 받는 쪽 rsync 까지 확인합니다.
 이 컴퓨터에서 밖으로 ssh 를 못 나가면 `"mode": "outbox"` — 묶음만 `state/backups/offsite/` 에 만들고 받는 쪽이 `rsync` 로 가져간 뒤
 `offsite_backup.py confirm <묶음> <sha256>` 으로 알려 줘야 '성공'이 됩니다(받는 쪽 크론 예 = `python3 tools/offsite_backup.py --help`).
 
@@ -553,13 +575,40 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 3. `pm2 stop tj-core tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web` → 같은 명령에 `--apply`
 4. `pm2 start tj-core` → 몇 분 뒤 `pm2 start tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web`
 
-지금 원장은 지우지 않고 `state/ledger.db.pre_restore_<시각>` 으로 남깁니다. 백업 뒤에 모은 거래는 두 가지로 다시 채웁니다 —
-수집기가 보낸 기록(`state/inbox/`)을 8일 동안 남겨 두므로 그 안의 백업이면 `tj-core` 가 백업 시점부터 그대로 다시 읽고,
-더 오래된 백업이면 도구가 수집기 커서를 '백업 시각 − 12시간' 앞으로 되감아 다시 받게 합니다(바꾼 상태 파일 원본은 `state/restore_<시각>/`).
+지금 원장은 지우지 않고 `state/ledger.db.pre_restore_<시각>` 으로 남깁니다(최근 2개만 — `--keep-pre`). 백업 뒤에 모은 거래는 두 가지로 다시 채웁니다 —
+다 읽은 수집 기록(`state/inbox/`)을 기본 8일(`TJ_INBOX_RETAIN_DAYS`) · 스트림당 512MiB 까지 남겨 두므로(넘으면 오래된 것부터 지움 — 보장 기간이 아니에요)
+백업 시점 기록이 아직 남아 있으면 `tj-core` 가 그 자리부터 그대로 다시 읽고, 없으면 도구가 수집기 커서를 '백업 시각 − 12시간' 이전에 원장에 들어온
+마지막 블록으로 되감아 다시 받게 합니다(그 체인 거래가 없던 백업이면 블록 시간으로 넉넉히 되감고 미리보기에 ★ 표시 · 바꾼 상태 파일 원본은 `state/restore_<시각>/`).
+되돌리면 **원장 안 판정**(매칭 확인·원가 지정 등)도 백업 시점으로 돌아가요 — 미리보기가 백업 뒤에 생긴 판정 수를 알려 줍니다(화면 설정·보낸 내역 판정은 원장 밖이라 그대로).
+원장 밖 사본(지난날 고정가·AI 리뷰·기타 자산·설정·메모·화면 설정)은 따로: `python3 tools/ledger_restore.py files` → `files <YYYYMMDD>`(미리보기) →
+`pm2 stop tj-web tj-review` → 같은 명령에 `--apply`(지금 파일은 `state/restore_files_<시각>/` 에 먼저 보존).
 서버 밖 백업에서 되돌릴 때는 `python3 tools/offsite_backup.py fetch` 로 받은 뒤 그 경로로 `restore`.
 
-원장 파일이 없는데 백업·수집 기록이 남아 있으면 `tj-core` 는 빈 원장을 새로 만들지 않고 기다립니다(상태 패널 '원장 파일 없음 — 복구 필요').
+원장 파일이 없는데 백업·수집 기록이 남아 있으면 `tj-core` 는 빈 원장을 새로 만들지 않고 기다립니다(상태 패널·화면 위 배너 '원장 파일 없음 — 복구 필요').
+원장이 **깨졌을 때**도 같아요 — 띄우기 전 가벼운 검사(작은 원장은 `quick_check` 까지 · 큰 원장은 `tj-core` 가 곧바로 죽으면 그때)로 손상을 확인하면
+다시 띄우지 않고 '원장 손상 — 복구 필요'로 기다립니다(위 되돌리기 순서 그대로). 감시 유닛(`tj-alert`)이 꺼져 있어도 화면이 직접 알려 줍니다.
 정말 새 원장으로 시작하려면 `python3 tools/ledger_restore.py new --apply`(수집도 처음부터면 `pm2 stop tj-evm tj-sol tj-bsc tj-ex tj-exf` 뒤 `--fresh-collect` 추가 → 끝나면 다시 `pm2 start`).
+
+## 업데이트
+
+이 설치의 버전은 화면 **설정** 맨 아래(`VERSION` 파일 · `/api/health` 의 `version`)에 보입니다.
+
+1. 멈추기 — `pm2 stop ecosystem.config.js`(pm2 없이: 각 터미널에서 Ctrl+C)
+2. 백업 확인 — 상태 패널 '원장 백업'이 초록인지, `python3 tools/ledger_restore.py list` 맨 위가 최근 것인지
+   (없으면 유닛을 멈춘 지금 `cp state/ledger.db state/ledger.db.pre_update_$(date +%Y%m%d)` 로 한 벌)
+3. 받기 — `git pull`
+4. 점검 — `bash tools/setup.sh`(아무것도 설치하지 않음 · 설정 파일·권한 확인)
+5. 다시 켜기 — `pm2 start ecosystem.config.js`(새 유닛·설정까지 붙게 restart 대신 start) → 설정 맨 아래 버전이 바뀌었는지 · 상태 패널이 초록인지
+
+**되돌리기** — `git checkout <예전 버전의 커밋·태그>` → 다시 켜기. 업데이트가 원장 내용을 한 방향으로 바꿨다면(CHANGELOG 에 '데이터 개정 N' 이라고 적어요 —
+원장 `meta` 의 `data_rev`) 그 변환을 모르는 예전 코드는 원장을 쓰지 않고 기다립니다(화면 위 '원장이 코드보다 새 판 — 코드 업데이트 필요').
+그때는 업데이트 **전** 백업으로 원장도 되돌리세요(`python3 tools/ledger_restore.py list` → `restore <번호>` · 위 '되돌리기' 순서). 데이터 개정이 없는 업데이트는 코드만 되돌리면 됩니다.
+
+## 멈추기 · 지우기
+
+- 잠깐 멈추기 — `pm2 stop ecosystem.config.js` → 다시 `pm2 start ecosystem.config.js`(pm2 없이: Ctrl+C → 같은 명령으로 다시)
+- 완전히 지우기 — `pm2 delete ecosystem.config.js && pm2 save` → 크론에 넣은 줄(`tools/rotate_logs.sh` · `tools/offsite_backup.py`)도 지우기 →
+  설치 폴더 삭제. `state/` 에 원장·백업이 있으니 남길 거면 먼저 설치 폴더 **밖으로** 옮기세요. 서버 밖 백업을 켰다면 받는 쪽 폴더(`backup.offsite.path`)도 따로 정리.
 
 ---
 
@@ -610,6 +659,10 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   - `tools/ledger_restore.py` — 원장 백업 목록·검사·되돌리기와 그 사이 수집분 다시 받기([백업 · 복구](#백업--복구)).
   - `tools/offsite_backup.py` — 서버 밖 둘째 백업(다른 컴퓨터로 ssh 전송 또는 outbox · sha256 확인 · 결과는 상태 패널 '서버 밖 백업').
   - `tools/exf_fut_place.py` — 선물 정산 재배치 계획 보기·되돌리기(업데이트 뒤 tj-core 가 첫 대사 때 스스로 한 번 적용 — 이 도구는 확인용).
+    되돌리면 `--apply` 로 다시 적용할 때까지 자동으로 다시 적용하지 않고, `--apply` 는 적용 전 원장 백업을 한 벌 떠요. 근거가 모자란 거래소는 기다리며 상태 패널 '선물 재배치 대기'에 보여요.
+  - `tools/latefix_move.py` — 늦게 찾은 옛 체결의 보정 줄을 그 체결 직후로 옮기는 1회 복구(기본 = 점검만 · `--apply` 는 tj-core·tj-exf·tj-web 을 멈춘 동안 · 되돌리기 = `--undo <기록> --apply`).
+  - `tools/upbit_trades_fill.py` — 업비트 옛 주문(체결 목록 없이 받은 것)의 실제 체결 시각 채우기(1회 · 미리보기 → `--fetch --yes` → `--apply --yes` · 원장은 tj-core 가 다시 기장).
+  - `tools/repair_wrap_legs.py` — 이더스캔 경로로 기장된 직접 감싸기·풀기(WETH 등)의 빠진 랩드 토큰 레그 1회 복구(기본 = 점검만 · `--apply --yes` · 외부 호출 없음).
 
 ## 보안 · 데이터
 
@@ -698,7 +751,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 - 시간대는 한국 시간(KST), 화면은 한국어입니다.
 - 거래소·체인 API 가 주지 않는 옛 기록은 가져오지 않습니다 — [docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md)·화면 **설정 › 수집 한계**.
-- BNB Chain 은 노드가 내부 이동(trace)을 주지 않아 **컨트랙트가 보내 준 BNB**(토큰 → BNB 매도 대금·브리지 지급·환불)를 못 받습니다 — 그 매도는 '보냄'으로 남고 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다. 토큰을 USDT 등 토큰으로 팔면 해당 없음.
+- OKX·쿠코인·게이트는 **마진 체결을 수집하지 않습니다**(현물 체결과 마진 잔고·대출만) — 마진 계정에서 사고판 손익이 빠지고 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
+- BNB Chain 은 노드가 내부 이동(trace)을 주지 않습니다 — **내가 서명한 토큰 → BNB 매도**의 받은 BNB 는 WBNB 풀기 기록(방금 거래는 잔고로 한 번 더 확인)으로 받지만, **남이 실행한 거래로 컨트랙트가 보내 준 BNB**(브리지 지급·환불·봇이 대신 판 매도 대금)는 못 받아 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
 - 신고용 명세는 계산 보조 자료입니다. 세무 판단은 전문가와 확인하세요.
 
 ## 시험 실행
@@ -760,15 +814,20 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Look back at your trading:** a time machine (drag the curve to see that day's holdings vs. "if you had held"), a money-flow map
   (deposits → exchanges → wallets → where it is now), a sell preview (expected realized PnL and this year's taxable gain), a year-end card set,
   a plan-keeping score, trading habits by weekday/hour and holding time, a one-year realized-PnL heatmap and BTC / "never sold" comparison lines.
-- **Release notes:** what changed in each release (external full-review fixes — futures booked at settlement time, stablecoin KRW FX gains in the
+- **Release notes:** what changed in each release (fixes from an external re-verification — corrupt-ledger hold, version and data-revision display,
+  restore tool fixes, first-seen price safeguards, fee/bridge cost rules, replay order, futures/liquidation watch, slow-connection limits, instant
+  valuation of new LP positions, plus balance changes for unclassified transactions, unverified DEX prices, "needs check" major symbols with a genuine list,
+  exchange server time, KuCoin HF fills and a dashboard LP card — on the night of 2026-10-09; external full-review fixes — futures booked at settlement time, stablecoin KRW FX gains in the
   tax statement, first-seen cost estimates, one fee-cost rule, a curve redesign and off-site backup/restore — on the afternoon of 2026-10-09; day-card realized
   wording early on 2026-10-09; re-verification fixes on 2026-10-09; external review fixes on the evening of 2026-10-08; futures receipts and the separate build
-  process earlier on 2026-10-08) is in [CHANGELOG.md](CHANGELOG.md). After updating, restart all units (`pm2 restart ecosystem.config.js`); realized PnL and
-  statement numbers may change (estimated rows are marked).
+  process earlier on 2026-10-08) is in [CHANGELOG.md](CHANGELOG.md). To update, follow [업데이트](#업데이트) (stop → check backup → `git pull` →
+  `bash tools/setup.sh` → `pm2 start ecosystem.config.js`); realized PnL and statement numbers may change (estimated rows are marked).
 - **Backup and restore:** tj-core keeps a daily ledger backup in `state/backups/` (3 by default). `tools/ledger_restore.py` lists, checks and restores backups
   and re-collects what came after; `tools/offsite_backup.py` sends a compressed, sha256-verified copy to another machine over ssh (or leaves it in an outbox
   for the other side to pull) — `backup.offsite` in `config.json`, off by default. tj-core waits instead of creating an empty ledger when the old one is missing.
-  `tools/exf_fut_place.py` previews or undoes the one-time futures settlement re-placement.
+  `tools/exf_fut_place.py` previews or undoes the one-time futures settlement re-placement (after an undo it is not re-applied automatically until `--apply`).
+  A corrupt ledger is not started ("원장 손상 — 복구 필요"); `tools/ledger_restore.py files` restores the off-ledger copies. One-time repair tools:
+  `tools/latefix_move.py`, `tools/upbit_trades_fill.py`, `tools/repair_wrap_legs.py` (dry run by default).
 - **Search:** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
   (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested

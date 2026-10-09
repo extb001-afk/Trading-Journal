@@ -117,4 +117,19 @@ chk(near(total_usd(m13["p"], FX), 2000.0) and m13["p"]["ku"] == [2.8e6, "snap"],
 chk(near(carry_usd(resolve(E(9, 9), src_of(rest=7.0)), FX), 7.0), "W 이월 몫 = carry 구성요소 합", None)
 chk(xparts.same(m13["p"], migrate_legacy(E(9, 10), 2000.0, "live", FX, None, src_of(ku=2.8e6, kb=0.0))["p"]), "W 같은 입력 = 같은 구성요소(결정적)", None)
 
+ku15 = [(E(9, 1), 3e6)]
+kb15 = [(E(9, 1), 1e6)]
+s15 = src_of(ku=3e6, kb=1e6, tl_ku=ku15, tl_kb=kb15)
+m15 = migrate_legacy(E(9, 10), 100.0, "live", FX, None, s15)
+chk(m15["p"]["ku"] == [0.0, "snap"] and m15["p"]["kb"] == [1e6, "tl"], "X NK1 옛 마감 $100 · 업비트 이력 ₩300만 · 빗썸 ₩100만 → ku [0, snap] · kb [100만, tl]", m15)
+chk(near(total_usd(m15["p"], FX), 100.0 + 1e6 / FX) and m15["p"]["rest"] == [100.0, "snap"], "X NK1 합계 = 옛 마감 + 빗썸 원화만(업비트 원화를 얹지 않음)",
+    total_usd(m15["p"], FX))
+chk("분해 불가(ku" in m15["note"] and "원화 추가(kb)" in m15["note"], "X NK1 문구 = 더한 키(kb) + 분해 불가(ku)", m15["note"])
+m16 = migrate_legacy(E(9, 10), 2000.0, "live", FX, None, src_of(ku=2.8e6, kb=1.4e6, tl_ku=[(E(9, 1), 2.8e6)], tl_kb=[(E(9, 1), 1.4e6)]))
+chk(m16["p"]["ku"] == [2.8e6, "snap"] and m16["p"]["kb"] == [1.4e6, "tl"] and near(total_usd(m16["p"], FX), 3000.0) and "분해 불가" not in m16["note"],
+    "X NK1 업비트가 맞는 옛 마감(빗썸만 빠짐) = 업비트 관측 · 빗썸 추가(종전 그대로)", m16)
+m17 = migrate_legacy(E(9, 10), 1000.0, "live", FX, None, src_of(ku=2.8e6, kb=0.0, tl_ku=[(E(9, 1), 2.8e6)], tl_kb=[]))
+chk(m17["p"]["ku"] == [0.0, "snap"] and near(total_usd(m17["p"], FX), 1000.0) and "분해 불가(ku" in m17["note"] and "원화 추가" not in m17["note"],
+    "X NK1 빗썸 없음 · 업비트 안 맞음 = 합계 그대로 · 분해 불가(ku)만", m17)
+
 T.finish()

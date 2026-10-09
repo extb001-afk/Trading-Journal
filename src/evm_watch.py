@@ -1038,6 +1038,41 @@ class RpcSynthMixin:
                         "total": {"value": str(v)}})
         return out
 
+    SELL_HINTS = False
+
+    def _sell_wd_hint(self, tx: dict, rc: dict, tts: list, myset: set):
+        wr = str(getattr(self, "wrapped_ca", None) or "").lower()
+        f = str(tx.get("from") or "").lower()
+        if not wr or f not in myset or rc.get("status") != "0x1":
+            return None
+        try:
+            if int(tx.get("value") or "0x0", 16):
+                return None
+        except (TypeError, ValueError):
+            return None
+        if any(str(t.get("to") or "").lower() in myset for t in tts) or not any(str(t.get("from") or "").lower() == f for t in tts):
+            return None
+        wd = dep = 0
+        src = None
+        for lg in rc.get("logs") or []:
+            tps = lg.get("topics") or []
+            if len(tps) != 2 or (lg.get("address") or "").lower() != wr:
+                continue
+            t0 = (tps[0] or "").lower()
+            who = ("0x" + str(tps[1])[-40:]).lower()
+            if who in myset or t0 not in (self.WETH_DEPOSIT, self.WETH_WITHDRAWAL):
+                continue
+            try:
+                v = int(lg.get("data") or "0x", 16)
+            except ValueError:
+                continue
+            if t0 == self.WETH_WITHDRAWAL:
+                wd += v
+                src = src or who
+            else:
+                dep += v
+        return (f, src, wd - dep) if src and wd - dep > 0 else None
+
     def _rpc_synth_detail(self, h: str) -> dict:
         tx = self._rpc_call("eth_getTransactionByHash", [h])
         rc = self._rpc_call("eth_getTransactionReceipt", [h])
@@ -1125,6 +1160,15 @@ class RpcSynthMixin:
                                   "decimals": dec9},
                         "total": {"value": str(v)}})
         tts.extend(self._wrap_legs(rc.get("logs") or [], tts, myset))
+        if getattr(self, "SELL_HINTS", False) and not emitter and not msrc:
+            hint9 = self._sell_wd_hint(tx, rc, tts, myset)
+            hd9 = self.__dict__.setdefault("_sell_wd", {})
+            if hint9:
+                if len(hd9) > 20000:
+                    hd9.clear()
+                hd9[h.lower()] = hint9
+            else:
+                hd9.pop(h.lower(), None)
         internal = []
         if emitter or msrc:
             v_top = int(tx.get("value", "0x0"), 16)
@@ -2801,6 +2845,7 @@ _ES_Q = {}
 _ES_Q_LOCK = threading.Lock()
 ES_Q_TTL = 900
 _ES_WMEM = {}
+ES_FAIL_ISOLATE_SEC = 1800
 
 
 class EtherscanWatcher(RpcSynthMixin):
@@ -3307,6 +3352,9 @@ class EtherscanWatcher(RpcSynthMixin):
         wcost9 = mem9["cost"]
         for w9 in [w9 for w9 in wcost9 if w9 not in self.wallets]:
             wcost9.pop(w9, None)
+        ft9 = mem9.setdefault("fail_t0", {})
+        for w9 in [w9 for w9 in ft9 if w9 not in self.wallets]:
+            ft9.pop(w9, None)
         for w in order9:
             first = w not in self.cursor
             since = int(self.cursor.get(w, 0))
@@ -3377,8 +3425,14 @@ class EtherscanWatcher(RpcSynthMixin):
                 cycle_ok = False
                 failed_w += 1
                 fail_since[w] = since
+                t9, f9 = time.time(), ft9.get(w)
+                if isinstance(f9, list) and len(f9) == 2 and t9 - float(f9[1]) <= ES_FAIL_ISOLATE_SEC:
+                    f9[1] = t9
+                else:
+                    ft9[w] = [t9, t9]
                 _revoke_stamp_disk(self.cursor_path)
                 continue
+            ft9.pop(w, None)
             per_wallet[w] = (txs, tts, its)
             since_of[w] = since
             from_of[w] = frm
@@ -3388,7 +3442,15 @@ class EtherscanWatcher(RpcSynthMixin):
                 tb.clear_empty(w, "rows")
         self._es_kind = "head"
         merged = self.merge_wallet_rows(per_wallet)
-        eff_safe = min([safe] + [int(v) for v in fail_since.values()])
+        now9 = time.time()
+        iso9 = {w for w in fail_since if now9 - float((ft9.get(w) or [now9])[0]) >= ES_FAIL_ISOLATE_SEC}
+        note9 = mem9.setdefault("iso_note", set())
+        note9.intersection_update(ft9)
+        if iso9 - note9:
+            log.warning("%s etherscan 목록 조회 %d분 넘게 실패한 지갑 %s — 그 지갑만 보류(커서 유지), 다른 지갑은 진행(겹친 tx 는 회복 때 레그 합집합)",
+                        self.chain, ES_FAIL_ISOLATE_SEC // 60, [w9[:10] for w9 in sorted(iso9 - note9)])
+        note9.update(iso9)
+        eff_safe = min([safe] + [int(v) for w, v in fail_since.items() if w not in iso9])
         bad_w = set()
         n_emit = 0
         relist = []
@@ -3688,10 +3750,14 @@ class EtherscanWatcher(RpcSynthMixin):
                             "total": {"value": str(v9)}})
             except (TypeError, ValueError):
                 return None
-        wl9 = EtherscanWatcher._es_wrap_legs(self, t, tx["status"], ent, tts) if t else []
+        wl9 = EtherscanWatcher._es_wrap_legs(self, t, tx["status"], ent, []) if t else []
         if wl9 is None:
             return None
-        tts.extend(wl9)
+        for r9 in wl9:
+            if not any(str(t9.get("from") or "").lower() == r9["from"] and str(t9.get("to") or "").lower() == r9["to"]
+                       and str((t9.get("token") or {}).get("address") or "").lower() == r9["token"]["address"]
+                       and str((t9.get("total") or {}).get("value")) == r9["total"]["value"] for t9 in tts):
+                tts.append(r9)
         its = []
         for r in ent["it"]:
             if str(r.get("type") or "").lower() in EtherscanWatcher.ES_NONVALUE_INTERNAL:
@@ -3703,6 +3769,13 @@ class EtherscanWatcher(RpcSynthMixin):
                             "error": None if str(r.get("isError") or "0") == "0" else "err"})
             except (TypeError, ValueError):
                 return None
+        for r9 in wl9:
+            a9, b9 = str(r9.get("from") or "").lower(), str(r9.get("to") or "").lower()
+            wr9 = str((r9.get("token") or {}).get("address") or "").lower()
+            if b9 != RpcSynthMixin.ZERO_ADDR or not a9 or a9 != str((t or {}).get("from") or "").lower():
+                continue
+            if not any(str(i.get("from") or "").lower() == wr9 and str(i.get("to") or "").lower() == a9 and i.get("success") for i in its):
+                its.append({"from": wr9, "to": a9, "value": str((r9.get("total") or {}).get("value")), "success": True, "error": None})
         return {"tx": tx, "token_transfers": tts, "internal": its}
 
 
@@ -4298,6 +4371,7 @@ class RpcChainWatcher(RpcSynthMixin):
     LOGS_FALLBACK_MAX_CAP = 100
     MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
     TRACE_SKIP_SELECTORS = ("0xa9059cbb", "0x095ea7b3", "0x23b872dd", "0x39509351", "0xa457c2d7", "0xd505accf")
+    SELL_HINTS = True
     handover = "rescan"
     lanes_cfg = None
     addr_max = 0
@@ -5219,6 +5293,47 @@ class RpcChainWatcher(RpcSynthMixin):
             cv = cs.get(w) if isinstance(cs, dict) else None
         return isinstance(cv, int) and int(blk) <= cv
 
+    def _sell_pick(self, cands: list, w: str, rb: int) -> tuple:
+        def no_back(s):
+            tx = s.get("tx") or {}
+            inp = str(tx.get("raw_input") or "0x").lower()
+            return (tx.get("from") or "").lower() == w and (tx.get("to") or "").lower() != w and (inp == "0x" or inp[:10] in self.TRACE_SKIP_SELECTORS)
+        c2 = [s for s in cands if not no_back(s)]
+        if len(c2) == 1:
+            return c2, None
+        hd9 = self.__dict__.get("_sell_wd") or {}
+        hit = []
+        for s in c2 or cands:
+            hn = hd9.get(str((s.get("tx") or {}).get("hash") or "").lower())
+            if hn and hn[0] == w and int(hn[2]) == int(rb):
+                hit.append((s, hn[1]))
+        if len(hit) == 1:
+            return [hit[0][0]], hit[0][1]
+        return cands, None
+
+    def _sell_fill(self, pool: list, w: str, diff: int, nk: str) -> int:
+        hd9 = self.__dict__.get("_sell_wd") or {}
+        got = []
+        for s in pool:
+            tx = s.get("tx") or {}
+            h9 = str(tx.get("hash") or "").lower()
+            hn = hd9.get(h9)
+            if not hn or hn[0] != w or tx.get("status") != "ok":
+                continue
+            if any((it.get("to") or "").lower() == w for it in s.get("internal") or []):
+                continue
+            if self._explorer_era(w, int(tx.get("block_number") or 0), nk):
+                continue
+            got.append((s, hn))
+        if not got or sum(int(hn[2]) for _s, hn in got) != int(diff):
+            return 0
+        for s9, hn in got:
+            s9.setdefault("internal", []).append({"from": hn[1], "to": w, "value": str(int(hn[2])), "success": True, "attr": "balance_delta"})
+            s9["internal_note"] = "balance_delta"
+            if s9["tx"]["hash"].lower() in self.emitted:
+                self.__dict__.setdefault("_reemit", set()).add(s9["tx"]["hash"].lower())
+        return len(got)
+
     def _native(self, w: str, c: int, last: int, pool: list, deadline: float, nk: str = "_ns", head: int = None) -> dict:
         ns = (self.cursor.get(nk) or {}).get(w)
         own_i, nat_i = self._implied([s for s in pool if self._touches(s, w)], w)
@@ -5286,10 +5401,13 @@ class RpcChainWatcher(RpcSynthMixin):
                         continue
                     if rn == 0 and rb > 0 and not self._explorer_era(w, y, nk):
                         cands = [s for s in here if s["tx"].get("status") == "ok"]
+                        src9 = None
+                        if len(cands) > 1:
+                            cands, src9 = self._sell_pick(cands, w, rb)
                         if len(cands) == 1:
                             s9 = cands[0]
                             s9.setdefault("internal", []).append(
-                                {"from": (s9["tx"].get("to") or s9["tx"].get("from") or "").lower(), "to": w,
+                                {"from": src9 or (s9["tx"].get("to") or s9["tx"].get("from") or "").lower(), "to": w,
                                  "value": str(rb), "success": True, "attr": "balance_delta"})
                             s9["internal_note"] = "balance_delta"
                             if s9["tx"]["hash"].lower() in self.emitted:
@@ -5358,6 +5476,12 @@ class RpcChainWatcher(RpcSynthMixin):
                 raise RuntimeError("nonce 틈 스캔 예산 소진 — 다음 사이클 재시도")
         own2, nat2 = self._implied([s for s in pool if self._touches(s, w)], w)
         eo2, en2 = int(ns[3]) + own2, int(ns[4]) + nat2
+        if (dn, db) != (eo2, en2) and dn == eo2 and db > en2:
+            n9 = self._sell_fill(pool, w, db - en2, nk)
+            if n9:
+                own2, nat2 = self._implied([s for s in pool if self._touches(s, w)], w)
+                eo2, en2 = int(ns[3]) + own2, int(ns[4]) + nat2
+                recs.append({"kind": "sell_filled", "w": w[:10], "from": int(ns[0]), "to": last, "txs": n9})
         if (dn, db) != (eo2, en2):
             rec = {"kind": "gap", "w": w[:10], "from": int(ns[0]), "to": last, "nonce_missing": dn - eo2,
                    "native_diff": str(db - en2), "added": added}

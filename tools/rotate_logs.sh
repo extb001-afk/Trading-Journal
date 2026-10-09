@@ -7,6 +7,8 @@ usage() {
   크기 상한(--max-mb)을 넘은 tj-*.log 만: 끝 --keep-mb 를 <이름>.1 로 보존(직전 .1 은 덮음) → 원본을 0 바이트로 자른다(복사-자르기).
   --dry-run = 무엇을 자를지만 보여 줌 · 리눅스·맥 둘 다 · 크론 예: 0 * * * * bash <설치 폴더>/tools/rotate_logs.sh
   pm2-logrotate 를 쓰는 설치는 이 도구가 필요 없다(둘 중 하나만).
+  pm2 없이 직접 파일로 남길 때는 ★덧붙이기(>>)로 열어야 한다★ — 예: python3 src/unit_runner.py web >> ~/tj-logs/tj-web.log 2>&1
+    ('>' 로 열면 자른 뒤에도 그 프로세스가 옛 위치에 이어 써서 앞부분이 빈 구멍인 같은 크기 파일이 되고, 다음 실행마다 다시 자른다)
 USAGE
 }
 while [ $# -gt 0 ]; do

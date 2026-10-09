@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
+import shutil
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -88,6 +91,8 @@ def _undo(path):
     conn.execute("BEGIN IMMEDIATE")
     try:
         mark9 = str(c._meta_get("exf_fut_place_v") or "").split(":")
+        if len(mark9) >= 2 and mark9[1] == "undone":
+            raise ValueError("이미 되돌린 원장(표식 %s) — 다시 하려면 --apply" % ":".join(mark9))
         if len(mark9) != 3 or mark9[0] != str(d["v"]):
             raise ValueError("원장의 이관 세대 표식이 자료와 다름(이미 되돌렸거나 다른 원장)")
         if int(mark9[2]) != len(plan) or len({(m["ex"], m["sym"]) for m in plan}) != len(plan):
@@ -129,7 +134,19 @@ def _undo(path):
         bad_p = sorted(k for k in set(pos0) | set(pos1) if Decimal(str(pos0.get(k) or 0)) != Decimal(str(pos1.get(k) or 0)))
         if bad_l or bad_p:
             raise ValueError(f"되돌린 뒤 원장 합·positions 가 달라짐 {bad_l[:5]} {bad_p[:5]}")
-        conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v' OR k LIKE 'exf\\_fut\\_cur\\_%' ESCAPE '\\'")
+        nt9 = 0
+        for m in plan:
+            ex, sym = m["ex"], m["sym"]
+            for b9 in (m["tomb_new"] if isinstance(m.get("tomb_new"), list) else m["cands"]):
+                if not isinstance(m.get("tomb_new"), list):
+                    has9 = any(not common.exf_is_debt_int("EXF_ADJUST", int(r9[0]), f"{ex}:recon", f"exfrecon:{sym}:{int(b9)}") for r9 in conn.execute(
+                        "SELECT leg_seq FROM postings WHERE source_kind='exchange' AND source_ns=? AND source_id=? AND location=? AND event='EXF_ADJUST'",
+                        (f"{ex}:recon", f"exfrecon:{sym}:{int(b9)}", m["loc"])))
+                    if not has9:
+                        continue
+                nt9 += conn.execute("DELETE FROM exf_adj_tomb WHERE ex=? AND sym=? AND bts=?", (ex, sym, int(b9))).rowcount
+        conn.execute("DELETE FROM meta WHERE k LIKE 'exf\\_fut\\_cur\\_%' ESCAPE '\\' OR k=?", (core.Core.EXF_FUT_WAIT_META,))
+        conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_place_v', ?)", (f"{d['v']}:undone:{int(time.time())}",))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -141,7 +158,8 @@ def _undo(path):
         pass
     ts9 = [m["t_from"] for m in plan if m.get("t_from") is not None]
     hd = common.mark_hist_dirty(min(ts9)) if ts9 else None
-    print(f"되돌림 {len(plan)} 통화 · meta exf_fut_place_v·exf_fut_cur_* 삭제 · daily_cache 무효화 · 장기 곡선 표식 {hd}")
+    print(f"되돌림 {len(plan)} 통화 · 지운 대사 경계 {nt9}줄 삭제 · meta exf_fut_place_v = '{d['v']}:undone:…'(자동 적용 금지 — 다시 하려면 --apply)"
+          f" · exf_fut_cur_* 삭제 · daily_cache 무효화 · 장기 곡선 표식 {hd}")
     return 0
 
 
@@ -173,21 +191,73 @@ def _snap(conn, locs):
     return led, pos
 
 
-def main():
-    a = sys.argv[1:]
-    out = a[a.index("--json") + 1] if "--json" in a else None
-    if "--undo" in a:
+def _backup(conn):
+    bd = os.path.join(common.STATE_DIR, "backups")
+    os.makedirs(bd, exist_ok=True)
+    size = os.path.getsize(common.DB_PATH) + (os.path.getsize(common.DB_PATH + "-wal") if os.path.exists(common.DB_PATH + "-wal") else 0)
+    free = shutil.disk_usage(bd).free
+    if free < size * 1.2:
+        raise ValueError(f"디스크 여유 {free / 1024 ** 3:.1f}GB < 원장×1.2 {size * 1.2 / 1024 ** 3:.1f}GB — 공간을 비우거나, 따로 백업을 떴으면 --no-backup")
+    dst = os.path.join(bd, f"ledger_pre_futplace_v{core.Core.EXF_FUT_V}_{time.strftime('%Y%m%d_%H%M%S')}.db")
+    tmp = dst + ".tmp"
+    fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
+    os.close(fd)
+    try:
+        b9 = sqlite3.connect(tmp)
+        try:
+            conn.backup(b9)
+            b9.execute("PRAGMA journal_mode=DELETE")
+            if not b9.execute("SELECT count(*) FROM meta").fetchone()[0]:
+                raise ValueError("백업본 meta 비어 있음")
+        finally:
+            b9.close()
+        os.replace(tmp, dst)
+    except BaseException:
+        for sfx in ("", "-wal", "-shm", "-journal"):
+            if os.path.exists(tmp + sfx):
+                os.remove(tmp + sfx)
+        raise
+    return dst
+
+
+def _args(argv):
+    ap = argparse.ArgumentParser(prog="exf_fut_place.py", description="선물 정산 재배치(1회 이관) — 미리보기(기본·읽기 전용) · 적용(--apply) · 되돌리기(--undo). "
+                                 "적용·되돌리기는 tj-core 정지 중에만.")
+    ap.add_argument("--json", metavar="OUT", help="미리보기 계획을 이 파일로(state·설정·.env 안 거부)")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--apply", action="store_true", help="적용(적용할 것이 있으면 먼저 원장 백업 1부) — 되돌린 원장도 다시")
+    g.add_argument("--undo", metavar="UNDO_JSON", help="되돌리기(state/exf_fut_place_v<N>.json) — 표식 '세대:undone:시각'(자동 적용 금지)")
+    ap.add_argument("--expect", metavar="PLAN_JSON", help="--apply: 검토한 미리보기 계획(--json 출력)과 잠금 안 계획이 같을 때만")
+    ap.add_argument("--no-backup", action="store_true", help="--apply: 적용 전 원장 백업 생략(배포 도구처럼 따로 백업을 뜬 경우만)")
+    a = ap.parse_args(argv)
+    if (a.expect or a.no_backup) and not a.apply:
+        ap.error("--expect·--no-backup 은 --apply 와 같이")
+    return a
+
+
+def main(argv=None):
+    a = _args(sys.argv[1:] if argv is None else argv)
+    out = a.json
+    if not os.path.isfile(common.DB_PATH):
+        print(f"거부: 원장 없음({common.DB_PATH}) — TJ_BASE 확인(빈 원장을 만들지 않음)")
+        return 1
+    if a.undo:
         if not _core_stopped():
             print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함(우회 옵션 없음)")
             return 1
-        return _undo(a[a.index("--undo") + 1])
-    if "--apply" in a:
+        return _undo(a.undo)
+    if a.apply:
         if not _core_stopped():
             print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함(우회 옵션 없음)")
             return 1
         expect = None
-        if "--expect" in a:
-            expect = (json.load(open(a[a.index("--expect") + 1])) or {}).get("plan")
+        if a.expect:
+            try:
+                with open(a.expect, encoding="utf-8") as fh:
+                    expect = (json.load(fh) or {}).get("plan")
+            except (OSError, ValueError) as e:
+                print(f"거부: --expect 파일 읽기 실패 — {e}")
+                return 1
             if not isinstance(expect, list):
                 print("거부: --expect 파일에 plan 없음")
                 return 1
@@ -198,14 +268,25 @@ def main():
         conn.row_factory = sqlite3.Row
         c = _planner(conn)
         before = c._meta_get("exf_fut_place_v")
+        sc, pend = c._exf_fut_place_scope()
         locs = sorted({f"exchange:{ex}" for ex in core.Core.EXF_FUT_EX})
+        if sc != "done":
+            pl0, _cu = c._exf_fut_place_plan(only=pend)
+            if any(m.get("cands") for m in pl0) and not a.no_backup:
+                try:
+                    bk = _backup(conn)
+                except (OSError, ValueError, sqlite3.Error) as e:
+                    print(f"거부: 적용 전 원장 백업 실패 — {e} · 원장 무변")
+                    return 1
+                print(f"적용 전 원장 백업: {bk}")
         led0, pos0 = _snap(conn, locs)
-        res = c._exf_fut_place_once(expect=expect)
+        res = c._exf_fut_place_once(expect=expect, redo=True)
         after = c._meta_get("exf_fut_place_v")
         if res is False:
             print("거부: 잠금 안에서 다시 세운 계획이 --expect 와 다름(원장이 그 사이 바뀜) — 원장 무변")
             return 1
-        if res is None and str(after or "").split(":", 1)[0] != str(core.Core.EXF_FUT_V):
+        sc1, pend1 = c._exf_fut_place_scope()
+        if res is None and sc1 not in ("done", "partial"):
             print("실패: 적용 안 됨(로그 참고) — 원장 무변")
             return 1
         led1, pos1 = _snap(conn, locs)
@@ -215,7 +296,8 @@ def main():
         if bad_l or bad_p:
             print(f"★일치 검사 실패 — 원장 합 다름 {bad_l[:10]} · positions 다름 {bad_p[:10]} (적용은 끝남 — 배포 도구는 중단·원장까지 롤백)★")
             return 1
-        print(f"적용: meta exf_fut_place_v {before} → {after} · 일치 검사 통과(거래소 위치 {len(locs)}곳 · 원장 합 {len(led1)}칸 · positions {len(pos1)}칸 무변)")
+        print(f"적용: meta exf_fut_place_v {before} → {after} · 일치 검사 통과(거래소 위치 {len(locs)}곳 · 원장 합 {len(led1)}칸 · positions {len(pos1)}칸 무변)"
+              + (f" · ★대기 거래소 {','.join(sorted(pend1))}(다음 대사에 core 가 그 거래소만 다시)★" if sc1 == "partial" else ""))
         return 0
     if out:
         try:
@@ -224,7 +306,15 @@ def main():
             print(f"거부: --json 출력 경로 — {e}")
             return 1
     conn = _ro()
-    plan, curs = _planner(conn)._exf_fut_place_plan()
+    pc = _planner(conn)
+    sc, pend = pc._exf_fut_place_scope()
+    if sc == "done":
+        print(f"이미 적용(meta exf_fut_place_v={pc._meta_get('exf_fut_place_v')}) — core·--apply 는 다시 하지 않음(아래 계획은 점검용)")
+    elif sc == "undone":
+        print(f"되돌린 원장(meta exf_fut_place_v={pc._meta_get('exf_fut_place_v')} — 자동 적용 금지) · 아래는 --apply 로 다시 할 때의 계획")
+    elif sc == "partial":
+        print(f"일부 거래소만 옮긴 원장 — 남은 거래소 {','.join(sorted(pend))} 만")
+    plan, curs = pc._exf_fut_place_plan(only=pend)
     _print(plan, curs)
     if out:
         try:

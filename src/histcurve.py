@@ -18,6 +18,7 @@ KST = timezone(timedelta(hours=9))
 HIST_V = 1
 FLOW_V = 3
 FIRST_DAY = "2026-01-01"
+MIN_REC_TS = 1262304000
 RUN_CALLS = 150
 RUN_GAP_S = 600
 ADOPT_GAP_S = 3600
@@ -73,6 +74,32 @@ def px_at(rows, T, step=86400, pts=False):
         return None
     r = rows[i]
     if pts:
+        return r[4] if T - r[0] <= 2 * 86400 else None
+    if T < r[0] + step:
+        first9 = i == 0 or r[0] - (rows[i - 1][0] + step) > 3 * 86400
+        if first9 and r[1] > 0 and r[4] > 0 and max(r[1] / r[4], r[4] / r[1]) > 3:
+            return None
+        if r[1] > 0:
+            return r[1]
+        return None if first9 else rows[i - 1][4]
+    return r[4] if T - (r[0] + step) <= 3 * 86400 else None
+
+
+def _px_at_v1(rows, T, step=86400, pts=False):
+    if not rows:
+        return None
+    lo, hi = 0, len(rows)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if rows[mid][0] <= T:
+            lo = mid + 1
+        else:
+            hi = mid
+    i = lo - 1
+    if i < 0:
+        return None
+    r = rows[i]
+    if pts:
         if i + 1 < len(rows) and rows[i + 1][0] - r[0] <= 2 * 86400 and rows[i + 1][0] > r[0]:
             a, b = r, rows[i + 1]
             return a[4] + (b[4] - a[4]) * (T - a[0]) / (b[0] - a[0])
@@ -82,6 +109,10 @@ def px_at(rows, T, step=86400, pts=False):
             return r[4]
         return r[1] + (r[4] - r[1]) * (T - r[0]) / step
     return r[4] if T - (r[0] + step) <= 3 * 86400 else None
+
+
+def _same_px(a, b, rel=1e-9) -> bool:
+    return a is not None and b is not None and abs(float(a) - float(b)) <= rel * max(1.0, abs(float(b)))
 
 
 def _row_idx(rows, T):
@@ -279,8 +310,25 @@ def group_desc(gid, g, ca_gids, ex_gid, major_gids, override_px, pairs, stable_s
             "ex": ex, "maj": gid in (major_gids or ()), "ov": float(ov) if ov is not None else None}
 
 
+def curve_first_day(groups, xsrc, floor_ts, today_iso) -> str:
+    ts = [float(g["tl"][0][0]) for g in (groups or {}).values() if g.get("tl")]
+    x9 = xsrc if isinstance(xsrc, dict) else {}
+    for tl9 in ((x9.get("tl") or {}).values() if isinstance(x9.get("tl"), dict) else ()):
+        if tl9:
+            ts.append(min(float(t9) for t9, _d9 in tl9))
+    for v9 in ((x9.get("first") or {}).values() if isinstance(x9.get("first"), dict) else ()):
+        if xparts.num(v9):
+            ts.append(float(v9))
+    ts = [t9 for t9 in ts if t9 >= MIN_REC_TS]
+    day = datetime.fromtimestamp(min(ts), KST).strftime("%Y-%m-%d") if ts else FIRST_DAY
+    if xparts.num(floor_ts) and float(floor_ts) >= MIN_REC_TS:
+        day = max(day, datetime.fromtimestamp(float(floor_ts), KST).strftime("%Y-%m-%d"))
+    return min(day, today_iso)
+
+
 def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, override_px, live_px, pairs, transit,
-             extra, daily_rows, daily_cache, stable_syms=None, first_day=FIRST_DAY, flow_kit=None, neg_ok=None, xkit=None, rb_days=None):
+             extra, daily_rows, daily_cache, stable_syms=None, first_day=None, flow_kit=None, neg_ok=None, xkit=None, rb_days=None,
+             first_floor=None):
     stable_syms = stable_syms or STABLE_SYMS
     groups = {}
     for gid, g in G.items():
@@ -333,6 +381,8 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
         v9 = round(float(c["val"]) + float((rb_days or {}).get(iso) or 0), 2)
         ap9 = ap_flag(v9, c.get("est"), c.get("xc"))
         dcv[iso] = [v9, round(v9 * u9) if u9 > 0 else None, ap9, "dc", round(float(c.get("est") or 0) + float(c.get("xc") or 0), 2) if ap9 else 0]
+    if not first_day:
+        first_day = curve_first_day(groups, xk.get("src"), first_floor, today_iso)
     return {
         "v": HIST_V, "today": today_iso, "first": first_day, "groups": groups,
         "transit": [(e["gid"], int(e["ts"]), float(e["qty"])) for e in (transit or ())],
@@ -427,7 +477,15 @@ def fetch_fx_entry(lo, hi, now, prev=None):
     r = candles.fetch_cex("upbit", "USDT", "KRW", "1d", t0, t1, now=now)
     e = prev if isinstance(prev, dict) else {}
     if r.ok:
-        p = {iso: round(v, 4) for iso in days_between(lo, hi) for v in [px_at(r.candles, day_end(iso))] if v}
+        pp9 = e.get("p") if isinstance(e.get("p"), dict) else {}
+        p = {}
+        for iso in days_between(lo, hi):
+            v = px_at(r.candles, day_end(iso))
+            o9 = xparts.num(pp9.get(iso))
+            if o9 and _same_px(round(_px_at_v1(r.candles, day_end(iso)) or 0, 4), o9, 1e-6):
+                v = o9
+            if v:
+                p[iso] = round(v, 4)
         return {"st": "ok", "lo": lo, "hi": hi, "p": p, "src": "upbit:KRW-USDT", "at": int(now)}
     st = "wait" if r.why == "budget" else "err"
     return {"st": st, "n": _prev_fails(e, lo, hi) + (1 if st == "err" else 0), "lo": lo, "hi": hi, "p": e.get("p") or {}, "why": r.why,
@@ -467,11 +525,15 @@ def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, bl
             if iso in p:
                 continue
             v = px_at(rows, day_end(iso), pts=is_pts)
-            if v and conv is not None:
+            vo9 = _px_at_v1(rows, day_end(iso), pts=is_pts) if prevp.get(iso) and prev_venue(iso)[1] == label else None
+            if (v or vo9) and conv is not None:
                 f9 = fx_get(iso)
                 if not f9:
                     fx_miss = True
-                v = v / f9 if f9 else None
+                v = v / f9 if f9 and v else None
+                vo9 = vo9 / f9 if f9 and vo9 else None
+            if vo9 and _same_px(vo9, prevp[iso]):
+                v = prevp[iso]
             if v and v > 0:
                 p[iso] = v
                 ps[iso] = label
@@ -1414,6 +1476,8 @@ class HistCurve:
                     and isinstance(xr9, dict) and xr9.get("x") is not None):
                 return self._row(c9[0], c9[1], xr9, self.fx(k), r9[3])
             return r9
+        if meta.get("first"):
+            keys = [k for k in keys if k >= meta["first"]]
         if rng:
             lo = (datetime.now(KST) - timedelta(days=int(rng) - 1)).strftime("%Y-%m-%d")
             keys = [k for k in keys if k >= lo]

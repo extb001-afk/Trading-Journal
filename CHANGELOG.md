@@ -1,7 +1,107 @@
 # 변경 내역 (Changelog)
 
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
-업데이트 뒤에는 `pm2 restart ecosystem.config.js` 로 유닛을 다시 켜세요(바뀐 유닛만 다시 켜도 됩니다).
+업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
+
+## 2026-10-09 밤 — 외부 수정 검증 반영
+
+**원장 손상 대기·버전 표시 · 복구 도구 · 최초 인식 시가 안전장치 · 수수료·브릿지 규약 · 재생 순서 · 선물·청산 감시 · 곡선 마감가 · 새 LP 바로 평가 · 웹 느린 연결 방어 · 화면 ·
+분류 보류 거래 · 미검증 DEX 가격·환율 시각 · 대표 심볼 '확인 필요'·정품 등록 · 원가 넘기기 · 거래소 서버 시각·쿠코인 HF · 체인 수집기 · 대시보드 LP 카드**
+
+지난 판(2026-10-09 오후)을 다시 검증한 외부 검토를 하나씩 재현해 보고 진짜인 것을 고친 판이에요 — 1차 = 새 지적과 '먼저 고칠 것', 2차 = 지난 지적 중 아직 '안 고쳐짐'·'일부'였던 것(숫자가 틀리는 것부터).
+사진은 지난 판 그대로예요(대시보드 LP 카드 위치는 사진과 달라요).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`). 재구축은 필요 없어요.
+> 이 판부터 설정 맨 아래에 버전(`VERSION`)이 보이고, 원장에 **데이터 개정 번호**(`meta` 의 `data_rev`)를 적어요 — 이 판 = 데이터 개정 1(선물 정산 재배치를 적용할 때 기록).
+> 이 번호를 모르는 예전 판 코드는 그 칸을 무시하므로, 이 판에서 되돌릴 때는 코드만 되돌리면 돼요. 최초 인식 시가 안전장치·수수료 규약·원가 넘기기 정리로 실현손익·명세 숫자가 조금 바뀔 수 있어요.
+> 수집기 쪽 고침(BSC 매도 대금 · 빗썸 과거 지정가 체결 시각)은 새로 받는 거래부터예요. 이미 원장에 있는 분류 보류 거래의 잔고 변화는 재구축([백필 · 재구축](README.md#백필--재구축--재백필)) 때 들어가요.
+
+**1차 — 새 지적 · 먼저 고칠 것**
+
+- **원장 지키기·상태** — 깨진 원장은 띄우지 않고 '원장 손상 — 복구 필요'로 기다려요(띄우기 전 가벼운 검사 · 작은 원장은 `quick_check` 까지 · 큰 원장은 tj-core 가 곧바로 죽으면 그때 ·
+  손상 오류가 난 기록은 격리하지 않고 멈춤). 원장 없음·손상·감시 유닛 꺼짐을 화면 위 배너로 알려요(tj-alert 없이도). pm2 없이 돌려도 멈춘 유닛·처음부터 실패하는 수집기·빈 시세를 알아채요
+  (각 유닛이 `state/runner_<유닛>.json` 에 30초마다 기록). 디스크 부족으로 백업을 건너뛴 채 30시간이면 빨강 + 텔레그램 · 버전 표시(`VERSION` · `/api/health`)·데이터 개정 번호.
+- **복구 도구** — `tools/ledger_restore.py` 가 EVM 기준 블록을 실제 원장(들어온 시각)에서 찾고, 기준이 없는 RPC 커서는 블록 시간으로 넉넉히 되감아 미리보기에 ★ 로 알려요 ·
+  RPC 로 받은 체인은 백업 뒤 방출했던 거래를 해시로 다시 받아 로그 없는 송금도 채워요 · 원장 밖 사본 되돌리기(`ledger_restore.py files` · 깨진 사본이 하나라도 있으면 전체 거부) ·
+  미리보기에 백업 뒤 생긴 판정 수 · 되돌리기 전 원장은 최근 2개만 보존(`--keep-pre`) · 깨진·0바이트 백업은 '열기 실패' · 저장소에 없는 도구를 가리키던 안내 고침.
+  서버 밖 백업은 scp 제한 시간·보낼 도구(rsync/scp)와 받는 쪽 rsync 확인 · 압축만 하고 암호화하지 않는다는 안내 · 처음 접속 때 호스트 키 자동 수락을 문서에.
+- **최초 인식 시가 안전장치** — 보냈다 같은 주소에서 돌아온 코인은 보낼 때 원가를 이어받고, 확인 안 된 컨트랙트 토큰과 실제 매도가의 10배 넘는 시세는 매기지 않으며(원가 미확인 + 검토),
+  한 번 매긴 값은 고정해요(`state/first_seen_px.json` · 원장 밖 백업에도 포함 · 시세를 기다리는 동안 '시세 대기'). 받은 날 판 몫은 판 값이 원가 · 시세 없는 가스는 검토 행 ·
+  폰 카드·보유 줄 '추정' 표시와 처음 한 번 안내 · 이름은 '최초 인식 시가' 하나로.
+- **수수료 원가 규약** — 가스 반영을 꺼도 수수료로 쓴 코인(가스·거래소 출금 수수료)의 시가 − 원가 차익은 실현에 반영해요(스위치는 비용만 정함 · 끄면 출금 수수료도 가스·수수료 탭에 따로).
+  브릿지 수수료도 같은 규약(떼인 코인의 처분 손익은 늘 실현 · 시가 비용은 켬일 때만 · 끄면 가스·수수료 탭 출발 체인 줄에). 가스 규칙 '시가 미상'에 출금·브릿지 수수료가 음수로 섞이던 것,
+  자금 흐름 지도의 출금·브릿지 수수료 중복, 환율 기록 없는 시각의 수수료 처분 행에 생기던 가짜 원화 환차를 고쳤어요 · 스테이블 '추정' 표기는 거래소·지갑 이동 뒤에도 붙어요(숫자 무변) ·
+  명세 안내 '가스·수수료 탭 전체'에 거래소 출금 수수료도 들어가요.
+- **재생 순서·브릿지·스왑** — 같은 블록은 원본의 tx 순번·로그 번호로, 같은 초 묶음은 아무도 모자라지 않는 순서로 재생해요 · 브릿지 도착이 출발보다 10분까지 먼저 찍혀도 짝 ·
+  컨트랙트가 다른 비슷한 수량 후보가 둘이면 짝을 보류(검토) · 시세 없는 다리가 여러 개인 스왑은 원가를 시세 비례(없으면 균등 · 추정)로 나눔 · 브릿지 예치 증서는 낸 토큰 원가를 이어받음(화면 계산만 · 원장 무변).
+- **선물·청산 감시** — 선물 정산 자산(BNB 수수료·코인 마진)은 그 자산으로 기장하고 화면은 달러 환산 · 선물 정산 재배치: 되돌리면 `--apply` 전까지 자동 적용 안 함 · 적용 전 원장 백업 ·
+  준비된 거래소부터(대기 거래소는 상태 패널 '선물 재배치 대기') · 대기 시작 시각은 재시작해도 이어받음. 잔고 대사 표본에서 바이낸스 선물 지갑 몫을 빼고, 표본이 1시간 연속 다르면 반영(상태 패널).
+  청산 감시: 한 번이라도 읽은 거래소는 권한 오류도 10분 뒤 주황 · 1시간 넘게 못 보면 한 번 알림 · 5~30분 간격 재시도 · 1단계 위험 구간도 다시 알림 · 재진입 알림은 최소 15분 간격 ·
+  목표가·손절은 낡거나 멈춘 가격으로 판정하지 않음('감시 불가'). 1회 도구(`exf_fut_place.py` · `latefix_move.py`)의 `-h` 는 사용법만 보이고, 적용은 유닛이 멈췄는지 확인해요.
+- **곡선** — 옛 마감 변환은 빗썸 원화만 더함 · LP 없는 현금도 처음 관측 전은 0 · 장기 곡선은 첫 기록 날부터 · 그날 마감가는 그 시각까지의 정보만(보간·미래 종가 금지 · 받아 둔 지난날은 그대로).
+- **LP** — 방금 예치한 LP 포지션을 바로 평가해요(정기 갱신을 기다리는 동안 20초마다 '원장에 있고 평가가 없는' 열린 포지션만 · 종전엔 다음 갱신까지 총자산이 원금만큼 줄어 보였어요).
+- **웹 서버** — 느린 연결 방어: 요청 줄 + 헤더는 10초 안에 · 루프백이 아닌 주소는 IP당 동시 연결 32(`web.max_conn_per_ip`) · 대기열 128 · 로그인 전 요청 본문도 크기에 맞춘 제한 시간 ·
+  데모 서버도 같은 상한. `.env` 가 BOM 으로 시작해도 첫 키를 읽고, `/api/day_events` 를 조건 없이 부르면 최신순 5,000건 페이지로 줘요.
+- **화면** — 첫 설치 카드는 Solana 지갑이 있을 때만 Helius 를 요구 · 카드 닫기·설정에서 다시 보기 · 마법사 단계 새로고침 유지 · 폰 양도차익 명세 큰 금액 겹침·잘림 없음 ·
+  대시보드 배경 갱신이 글자 선택을 지우지 않음 · 명세 카드에 '스테이블 환차손익' 카드(식이 맞게) · '스테이블 환차는 명세에만(실현손익엔 없음)' 문구 · 머리 상태 칩 짧게 · 시트 안 Tab 순환 ·
+  펼친 사이클 금액 표기 통일.
+**2차 — 지난 지적 중 '안 고쳐짐'·'일부'였던 것**
+
+- **분류 보류 거래** — 분류 보류(UNKNOWN) 거래도 지갑 잔고 변화를 기록해요(시세 없이 원가만 넘김 — 손익 없음 · 내 지갑끼리는 위치 이동) · '분류 보류' 검토를 원장에서 늘 읽어 지난 기록도 보여요 ·
+  일별 순유입에선 입출금이 아니라 매매로 봐요.
+- **가격·환율** — 풀 유동성을 모르는 DEX 가격은 '미검증'으로 총자산·알림에서 빼요(지금 쓸 가격이 OKX DEX 값과 10% 안일 때만 인정 · 유동성 값이 낡아도 마지막 값이 얇으면 계속 제외) ·
+  원화 환율을 받은 시각과 함께 두고 1시간 넘게 못 받으면 그날 마감을 미뤄요(그날은 그 시각 1분봉 환율로 닫힘 · 고정 대체값은 마감·곡선에 저장 안 함).
+- **대표 심볼 '확인 필요' · 정품 등록** — USDT·WBTC 같은 대표 심볼인데 정품 목록에 없는 컨트랙트를 심볼만으로 숨기지 않아요 — 유동성 있는 시세·거래소 출금 도착이면 정품,
+  아니면 '값 없는 토큰'에 **확인 필요** 배지(확인 전 평가 0 · 총자산·기록·알림 밖). 배지의 [정품으로 등록] = 사용자 정품 목록(`state/genuine_tokens.json` · 원장 밖 백업에 포함) —
+  등록한 대표 스테이블은 액면 $1, 남이 보낸 토큰의 '에어드랍 의심' 격리도 풀어요(고플러스 스캠 확증은 그대로). 알림의 사칭 판정도 같은 유동성 기준이고, 내가 서명해 보낸 거래는 사칭으로 지우지 않아요.
+- **Katana vbUSDC** — Vault Bridge USDC 를 계약 주소 기준 검증 스테이블(액면 $1 · USDC 묶음)로 — 원가 기록 없이 받은 vbUSDC 와 그것으로 산 코인의 원가가 추정 시가 대신 액면,
+  처분은 명세 스테이블 원화 환차 표로(같은 이름의 다른 계약·다른 체인은 그대로).
+- **원가 넘기기** — 시세 없는 다리 여러 개 스왑에서 같이 받은 시세 있는 코인·스테이블 잔돈은 그 시각 시가만 원가로(나머지는 시세 없는 코인에) · 한쪽만 시세 있는 스왑의 시세 없는 다리 여럿도
+  시가 있는 쪽 합을 나눠 원가·정산액으로('추정' 표시 · 시세를 쓰는 쪽 = 네이티브·거래소 자산·정품 계약만) · 경제 가치 없는 동반 토큰(BNB Chain 스테이킹의 govBNB 같은 투표권 토큰 —
+  `seed/zero_value_companions.json` · 이 설치 덧붙임 = `state/seed_local/zero_value_companions.json`)은 원가 나눔 가중 0, 스왑 가스도 실제 증서 쪽에 ·
+  브릿지 예치 증서와 같이 받은 가스 환불 잔돈이 증서 원가 승계를 막지 않아요(화면 계산만 · 원장 무변).
+- **거래소 수집** — 바이비트 붙은 심볼을 거래소 공개 종목 목록(하루 1회)으로 나누고, 대금 통화를 모르면 유령 코인 대신 체결 보류 · 새 설치·첫 연결 때 바이낸스·바이비트·쿠코인·OKX 옛 출금에도 수수료 반영 ·
+  대사가 토큰 자릿수 18 을 지어내지 않음 · OKX 명목가를 모르면 '—'. 서명 시각을 거래소 서버 시각에 맞춰요(1시간마다 · 시각 오류 때 다시 재고 1번 재시도) · 쿠코인 고빈도(HF) 계정 체결 수집
+  (일시 실패한 구간은 다음 주기에 이어 받음) · 바이낸스 선물 수익이 같은 ms 에 1,000줄 넘어도 페이지를 넘겨요 · 빗썸·업비트 과거 창 지정가 주문을 마지막 체결 시각으로 · OKX·쿠코인·게이트 마진 체결은 수집하지 않음을 문서에.
+- **체인 수집기** — BSC·추적 없는 RPC 체인의 '내 토큰 → 네이티브' 매도에 받은 네이티브를 기록해요(랩드 풀기 로그 · 방금 거래는 잔고로 확인 — 같은 블록 승인·매도 여럿·옛 구간 합계) ·
+  이더스캔 색인 전 직접 풀기의 ETH 수령(소각 Transfer 를 남기는 랩드 구현 포함) · 블록스카웃 delegatecall 줄 제외 · owner 없는 옛 솔라나 응답의 연관 토큰 계정 소유자 계산.
+- **미추적 체인 · 지갑 격리** — 미추적 체인 점검이 정식 스테이블(balanceOf)까지 봐서 토큰만 받은 지갑도 찾아요(실제로 추적에 합류한 쌍만 빼고 · 설정에서 끈 체인의 발견은 경고·알림 없이 상세에 '끈 체인 N건') ·
+  이더스캔 체인에서 한 지갑 목록 조회가 30분 넘게 실패하면 그 지갑만 보류하고 나머지는 계속 수집해요(회복 때 겹친 거래는 레그 합집합으로 보강).
+- **대시보드 LP 카드** — LP 포지션이 큰 표 대신 레버리지 · 대출 바로 아래 카드로 와요(가치 큰 순 앞 2개 + 'N개 더' · 줄을 누르면 제자리 펼침 · 종료된 포지션 링크 · 폰은 목록 줄) ·
+  레버리지 · 대출도 앞 2줄 + 'N개 더'.
+
+**함께**
+
+- **문서·저장소** — README [업데이트](README.md#업데이트)·[멈추기 · 지우기](README.md#멈추기--지우기) 절 · pm2 없이 쓸 때 로그는 덧붙이기(`>>`) · `alert_bot` 권장 · Ctrl+C 안내 ·
+  [SECURITY.md](SECURITY.md) 에 예외 3가지(증권사 비밀값은 `config.json` · 서버 밖 백업 · AI 요약) · 수집 기록 보존은 기본 8일 · 스트림당 512MiB 상한(보장 기간 아님) ·
+  `.gitignore` 에 압축 백업·편집기 사본·키 파일 · 1회 도구 `tools/upbit_trades_fill.py`(업비트 옛 주문의 실제 체결 시각 채우기)·`tools/repair_wrap_legs.py`(직접 감싸기·풀기의 빠진 레그 복구) 공개.
+- **시험** — 공개 시험 추가: 원장 손상·데이터 개정·pm2 없는 상태 점검·화면 배너 · 실제 core 로 복구 · 최초 인식 시가 안전장치 · 수수료 비용 끔·브릿지 스왑·출금 수수료 흐름 · 선물 자산·재배치 되돌리기·
+  대사 표본·청산 감시 재시도·낡은 가격 · 곡선 시작일 · 느린 연결·로그인 전 본문 · 새 LP 바로 평가 · 1회 도구 인자 · (2차) 분류 보류 거래 · 미검증 DEX 가격·환율 시각 · 대표 심볼 확인·정품 등록 ·
+  vbUSDC · 원가 넘기기 n:m · 바이비트 심볼 나누기·첫 연결 출금 수수료·자릿수 · 거래소 서버 시각·쿠코인 HF · LP 카드 — 전체 2,700건 넘게(파일 77개).
+
+**English** — Fixes from an external re-verification of the previous release (night of 2026-10-09). A corrupt ledger is no longer started: units wait with
+"ledger corrupt — restore needed" (a light check before start, `quick_check` on small ledgers), and a missing/corrupt ledger or a stopped monitor unit shows as a banner
+even without tj-alert; stalled units are detected without pm2 too. The version (`VERSION`) is shown at the bottom of Settings and the ledger now records a data revision
+(`meta.data_rev`, revision 1 = futures settlement re-placement); older code ignores it, so rolling back from this release needs the code only. The restore tool finds EVM base
+blocks from the real ledger, rewinds RPC cursors by block time when there is no base (marked ★), re-fetches log-less native transfers by hash and can restore off-ledger copies
+(`ledger_restore.py files`). First-seen price safeguards: coins coming back from the same address inherit their cost, unverified tokens and prices over 10× the actual sale price
+are not used, and assigned values are fixed. Fee-cost rule: the price-minus-cost gain on coins spent as fees (gas, withdrawal and bridge fees) is realized even with gas costs off.
+Replay order inside a block follows tx index and log index; bridge matching tolerates arrivals up to 10 minutes early and holds ambiguous candidates. Futures settlements are booked in
+their own asset (BNB fees, coin margin); an undone re-placement is not re-applied until `--apply`. Liquidation watch alerts when a venue it has read before is unreadable, repeats
+in stage 1 and does not judge targets/stops on stale prices. Day-close prices use only information up to that time. New LP positions are valued right away. The web server limits slow
+connections (headers within 10 s, 32 concurrent connections per non-loopback IP). README gains "update" and "stop · uninstall" sections; SECURITY.md lists the three exceptions to
+"secrets only in `.env`". Second round (earlier findings still open): unclassified (UNKNOWN) transactions now record wallet balance changes; DEX prices with unknown pool liquidity
+count only when they match OKX DEX within 10%, and the day close waits when the KRW rate is over an hour old; major symbols (USDT, WBTC …) on unlisted contracts are no longer hidden
+by symbol alone but shown as "needs check" (valued 0 until confirmed; a user genuine list in `state/genuine_tokens.json`); Katana vbUSDC is a verified stablecoin by contract;
+cost carry-over for multi-leg swaps without prices (zero-value companion tokens such as govBNB in `seed/zero_value_companions.json`); Bybit symbols split by the public instrument list,
+withdrawal fees on first connect, request timestamps synced to exchange server time, KuCoin HF fills; BSC token-to-BNB sales record the BNB received; tracked-chain sweeps see
+stablecoin balances and one failing wallet no longer blocks the rest; the dashboard LP table became a card under leverage/loans. Collector-side fixes apply to newly fetched
+transactions. Screenshots unchanged (the LP card position differs from them).
+
+**알려진 한계(다음 판에)**
+
+- 코인으로 정산된 선물 손익(바이낸스 BNB 수수료·OKX 코인 마진 등)의 화면 달러 환산은 지금 시세 기준이라, 지난 정산 금액이 시세에 따라 조금씩 움직여 보여요 — 원장은 코인 수량 그대로라 실현손익·명세 숫자와는 무관 · 다음 판에 정산 시각 시세로.
+- 외부 RPC·탐색기 응답 본문에 크기 상한이 없어요(비정상적으로 큰 응답 방어 — 다음 판에).
 
 ## 2026-10-09 오후 — 외부 전면검토 반영
 

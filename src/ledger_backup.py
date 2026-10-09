@@ -24,7 +24,9 @@ _DB_RX = re.compile(r"^ledger_(\d{8})\.db$")
 _JS_RX = re.compile(r"^prefs_(\d{8})\.json$")
 _FD_RX = re.compile(r"^files_(\d{8})$")
 KEEP_FILES = 30
-FILES_STATE = ("daily_px.json", "other_assets.json", "settings.json", "nft_prefs.json", "day_memos.json")
+FILES_STATE = ("daily_px.json", "other_assets.json", "settings.json", "nft_prefs.json", "day_memos.json",
+               "first_seen_px.json",
+               "genuine_tokens.json")
 FILES_STATE_RX = re.compile(r"^reviews_llm[\w-]*\.json$")
 CONFIG_KEYS = ("wallets", "exchange_addresses")
 
@@ -236,7 +238,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
             st["files"] = backup_files(day, os.path.dirname(db_path))
             st["files_err"] = None
         except Exception as e9:
-            st["files_err"] = f"{type(e9).__name__}: {common.safe_err(e9)}"[:200]
+            st["files_err"] = _err_text(e9)[:200]
         gone = _rotate(_DB_RX, keep_db()) + _rotate(_JS_RX, KEEP_JSON) + _rotate_dirs(_FD_RX, KEEP_FILES)
         st.update(last_ok=int(time.time()), last_date=day, last_path=dst_path, size=os.path.getsize(dst_path),
                   dur=round(time.time() - t0, 1), skip=None, err=None)
@@ -251,11 +253,24 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
                     os.remove(tmp + sfx)
             except OSError:
                 pass
-        st.update(err=f"{type(e).__name__}: {common.safe_err(e)}"[:200], skip=None)
+        st.update(err=_err_text(e)[:200], skip=None)
         _write_status(st)
         if log:
             log.warning("원장 정기 백업 실패(1시간 뒤 재시도): %s", st["err"])
     return st
+
+
+def _err_text(e) -> str:
+    m = common.safe_err(e)
+    if re.search(r"[가-힣]", m):
+        return m
+    if isinstance(e, OSError) and getattr(e, "errno", None) == 28:
+        return "디스크가 가득 찼어요 — state/backups 여유를 확보하세요"
+    if isinstance(e, sqlite3.OperationalError) and "full" in m.lower():
+        return "디스크가 가득 찼어요(sqlite) — state/backups 여유를 확보하세요"
+    if isinstance(e, PermissionError):
+        return f"권한이 없어요 — {m}"
+    return f"{type(e).__name__}: {m}"
 
 
 def tick(log=None, now: float = None, db_path: str = None) -> bool:
@@ -366,6 +381,83 @@ def new_ledger_ok(state_dir: str = None, consume: bool = False, now: float = Non
         except OSError:
             pass
     return ok
+
+
+CORRUPT_WHY = "원장 손상 — 백업에서 되돌리기 필요(python3 tools/ledger_restore.py list)"
+DEEP_PRESTART_MAX = 512 * 1024 ** 2
+_LIGHT_TABLES = ("meta", "postings", "raw_txs", "raw_ex", "inbox_offsets", "positions", "decisions", "wallets", "assets", "transfers", "tx_class")
+_CORRUPT_MSG = ("malformed", "not a database", "corrupt", "disk image")
+
+
+def corrupt_error(e) -> bool:
+    m = str(e).lower()
+    return isinstance(e, sqlite3.DatabaseError) and any(x in m for x in _CORRUPT_MSG)
+
+
+def _ro_connect(path: str):
+    last = None
+    for imm in (False, True):
+        c = None
+        try:
+            c = sqlite3.connect(common.sqlite_ro_uri(path, immutable=imm), uri=True, timeout=10)
+            c.execute("SELECT 1").fetchone()
+            return c
+        except sqlite3.OperationalError as e:
+            last = e
+            if c is not None:
+                c.close()
+    raise last
+
+
+def ledger_check_light(path: str) -> tuple:
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            hdr = f.read(100)
+    except OSError as e:
+        return True, f"검사 못 함: {common.safe_err(e)[:120]}"
+    if size < 512 or not hdr.startswith(b"SQLite format 3\x00"):
+        return False, f"파일 머리가 SQLite 원장이 아님(크기 {size:,}바이트 — 덮어쓰기·잘림)"
+    ps = int.from_bytes(hdr[16:18], "big")
+    ps = 65536 if ps == 1 else ps
+    if ps < 512 or ps > 65536 or ps & (ps - 1):
+        return False, f"머리의 페이지 크기 칸 손상({ps})"
+    if size % ps:
+        return False, f"파일 크기({size:,})가 페이지 크기({ps}) 배수가 아님 — 잘림·덧붙음"
+    try:
+        c = _ro_connect(path)
+    except sqlite3.Error as e:
+        return (False, f"열기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+    try:
+        names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "meta" not in names:
+            return False, "meta 표 없음(원장 형식 아님)"
+        c.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
+        for t in _LIGHT_TABLES:
+            if t in names:
+                c.execute(f'SELECT max(rowid) FROM "{t}"').fetchone()
+                c.execute(f'SELECT rowid FROM "{t}" LIMIT 1').fetchone()
+        return True, ""
+    except sqlite3.Error as e:
+        return (False, f"읽기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+    finally:
+        c.close()
+
+
+def ledger_check_deep(path: str) -> tuple:
+    try:
+        c = _ro_connect(path)
+    except sqlite3.Error as e:
+        return (False, f"열기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+    try:
+        rows = [r[0] for r in c.execute("PRAGMA quick_check").fetchall()]
+    except sqlite3.Error as e:
+        return (False, f"빠른 검사 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+    finally:
+        c.close()
+    if rows == ["ok"]:
+        return True, ""
+    return False, "빠른 검사(quick_check) 실패: " + "; ".join(str(x) for x in rows[:3])[:200]
 
 
 def fsync_file(path: str):

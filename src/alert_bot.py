@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 if __name__ == "__main__":
     common.cpu_reserve_apply()
+import unit_beat
 import health
 import alert_prefs as AP
 
@@ -934,7 +935,7 @@ def drop_scam(rows, conn_factory=None):
         n = 0
         for i in want:
             pl = rows[i][1]["payload"]
-            if spamguard.tx_scam_reason(conn, pl["chain"], pl["txhash"], my):
+            if spamguard.tx_scam_reason(conn, pl["chain"], pl["txhash"], my, price_guard=cfg.get("price_guard")):
                 out[i] = (rows[i][0], None)
                 n += 1
         if n:
@@ -1236,6 +1237,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
 
 def main():
     common.ensure_dirs()
+    unit_beat.start("alert")
     cursor = common.read_json(CURSOR_PATH, {})
     warned = False
     cap_state = {}

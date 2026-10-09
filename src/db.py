@@ -5,6 +5,39 @@ import common
 
 SCHEMA_VERSION = 2
 
+DATA_REV = 1
+DATA_REVS = {
+    1: "기준선(10-09) — 선물 정산 재배치(exf_fut_place) 를 아는 코드. 이 번호로 올리는 변환은 그 기능 쪽이 붙인다",
+}
+
+
+def ledger_data_rev(conn) -> int:
+    has = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
+    row = conn.execute("SELECT v FROM meta WHERE k='data_rev'").fetchone() if has else None
+    return int(str(row[0]).strip()) if row is not None else 0
+
+
+def bump_data_rev(conn, rev: int) -> int:
+    rev = int(rev)
+    if not 1 <= rev <= DATA_REV:
+        raise ValueError(f"data_rev {rev} — 이 코드는 1~{DATA_REV} 만 안다(DATA_REV·DATA_REVS 먼저 올리기)")
+    cur = ledger_data_rev(conn)
+    if rev > cur:
+        conn.execute("INSERT INTO meta (k, v) VALUES ('data_rev', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(rev),))
+        return rev
+    return cur
+
+
+def data_rev_refusal(conn):
+    try:
+        v = ledger_data_rev(conn)
+    except ValueError:
+        return "원장의 데이터 개정 번호(meta data_rev)를 읽을 수 없어요 — 손상이 아닌지 확인(python3 tools/ledger_restore.py check)"
+    if v > DATA_REV:
+        return (f"원장이 이 코드보다 새 데이터 변환을 거쳤어요(원장 개정 {v} > 코드 {DATA_REV}) — 코드를 최신으로 올리세요(README '업데이트'). "
+                "옛 코드를 써야 하면 그 변환 전 백업으로 되돌리세요(python3 tools/ledger_restore.py list). 원장은 그대로 뒀어요")
+    return None
+
 DDL = [
     "PRAGMA journal_mode=WAL",
     """CREATE TABLE IF NOT EXISTS meta (
@@ -127,6 +160,11 @@ def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
             conn.close()
             raise SystemExit(f"원장(state/ledger.db)이 이 코드보다 새 형식이에요(원장 {row[0]} > 코드 {SCHEMA_VERSION}) — 코드를 최신으로 올리세요. "
                              "원장은 그대로 뒀어요(옛 코드로 내려가려면 그때의 백업으로: python3 tools/ledger_restore.py list)")
+        if has_meta:
+            why9 = data_rev_refusal(conn)
+            if why9:
+                conn.close()
+                raise SystemExit(why9)
         for ddl in DDL:
             conn.execute(ddl)
         if row is None:

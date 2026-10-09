@@ -114,9 +114,10 @@ def hist_run(b, G, hold, today, series, extra, tmp, now_ts, pre=None):
     if pre is not None:
         common.atomic_write_json(pth, pre)
     H = histcurve.HistCurve(path=pth, px_path=pxp)
-    days = histcurve.days_between(histcurve.FIRST_DAY, today.strftime("%Y-%m-%d"))
-    H.px["fx"] = {"lo": histcurve.FIRST_DAY, "hi": today.strftime("%Y-%m-%d"), "st": "ok", "p": {d9: FX for d9 in days}}
     kit = histcurve.make_kit(today.strftime("%Y-%m-%d"), G, hold, set(), set(), {}, set(), {}, {}, {}, [], copy.deepcopy(extra), series, b.daily, **xkw(b))
+    lo9 = min(histcurve.FIRST_DAY, kit.get("first") or histcurve.FIRST_DAY)
+    days = histcurve.days_between(lo9, today.strftime("%Y-%m-%d"))
+    H.px["fx"] = {"lo": lo9, "hi": today.strftime("%Y-%m-%d"), "st": "ok", "p": {d9: FX for d9 in days}}
     H.run_once(kit, cap=0, now=now_ts)
     code, body = H.view(None)
     return H, {r[0]: r for r in body["days"]}
@@ -327,6 +328,49 @@ sj = run(b, {}, {}, D(10, 9), NOWj, mkx(NOWj, rest=500.0, ub={"QQQ": [1000.0, 20
 cj = b.daily.get(iso(10, 5)) or {}
 chk(cj.get("src") == "partial" and abs((val_of(sj, 10, 5) or 0) - 2500) < 0.01 and (cj.get("xu") or {}).get("QQQ") == [1000.0, 2000.0],
     "J cv336 이관으로 채운 미매칭 코인(QQQ $2,000) = 동결 val 2,500 + 동결 항목 xu 에 기록", (val_of(sj, 10, 5), cj))
+
+def obs_day(b, m, d, rest):
+    import xparts
+    b.daily_px[iso(m, d)] = {"p": {}, "k": {}, "xv": {"v": xparts.GEN, "p": {"ku": [0.0, "snap"], "kb": [0.0, "snap"], "ub": [{}, "snap"],
+                                                                         "rest": [rest, "snap"]}, "fx": FX, "how": "obs"}}
+
+
+NOWk = E(10, 9, 12, 0, 0)
+reset_files()
+b = unit_builder()
+obs_day(b, 9, 9, 7000.0)
+Xk1 = mkx(NOWk, rest=7000.0, tl_kb=[], first={"rest": None})
+sk1 = run(b, {}, {}, D(10, 9), NOWk, Xk1)
+Hk1, vk1 = hist_run(b, {}, {}, D(10, 9), sk1, Xk1, "chk1", NOWk)
+chk(iso(8, 10) not in vk1 or abs(vk1[iso(8, 10)][1]) < 0.01, "K NK2① LP 없음 · 현금 관측 9/9 부터 → 60일 전(8/10) = 0(오늘 현금을 지난날로 끌고 가지 않음)",
+    vk1.get(iso(8, 10)))
+chk(abs((val_of(sk1, 9, 20) or 0) - 7000) < 0.01 and abs(vk1.get(iso(9, 9), [0, 0])[1] - 7000) < 0.01, "K NK2① 관측 뒤 날(9/20) · 관측일(9/9) = 현금 $7,000",
+    (val_of(sk1, 9, 20), vk1.get(iso(9, 9))))
+chk(abs(float(((b.daily_px.get("_xfirst") or {}).get("rest")) or 0) - E(9, 9)) < 1, "K NK2① 현금 첫 관측 시각 저장(관측 보관 기간 밖으로 밀려나도 늦어지지 않게)",
+    b.daily_px.get("_xfirst"))
+reset_files()
+b = unit_builder()
+obs_day(b, 9, 9, 7000.0)
+Xk2 = mkx(NOWk, rest=7000.0 + 10000.0, tl_kb=[], first={"rest": E(9, 29) - 3600})
+sk2 = run(b, {}, {}, D(10, 9), NOWk, Xk2)
+chk(abs((val_of(sk2, 9, 19) or 0) - 7000) < 0.01, "K NK2② LP 9/29 시작 · 현금 9/9 부터 → 9/19 = 현금만($7,000 — 종전 0)", val_of(sk2, 9, 19))
+Hk2, vk2 = hist_run(b, {}, {}, D(10, 9), sk2, Xk2, "chk2", NOWk)
+chk(iso(9, 1) not in vk2 or abs(vk2[iso(9, 1)][1]) < 0.01, "K NK2② 현금 첫 관측(9/9) 전 날(9/1) = 0", vk2.get(iso(9, 1)))
+b.daily_px.pop(iso(9, 9), None)
+sk3 = run(b, {}, {}, D(10, 9), NOWk + 60, Xk2)
+chk(abs((val_of(sk3, 9, 19) or 0) - 7000) < 0.01, "K NK2③ 관측 기록이 사라져도 저장된 첫 관측 시각으로 9/19 = 현금 그대로", val_of(sk3, 9, 19))
+reset_files()
+b = unit_builder()
+run(b, {}, {}, D(10, 9), NOWk, mkx(NOWk, rest=0.0, tl_kb=[], first={"rest": None}))
+dpx_before = json.load(open(web.DAILY_PX_PATH)) if os.path.exists(web.DAILY_PX_PATH) else {}
+run(b, {}, {}, D(10, 9), NOWk + 60, mkx(NOWk + 60, rest=7000.0, tl_kb=[], first={"rest": None}))
+dpx_disk = json.load(open(web.DAILY_PX_PATH)) if os.path.exists(web.DAILY_PX_PATH) else {}
+chk("_xfirst" not in dpx_before and abs(float((dpx_disk.get("_xfirst") or {}).get("rest") or 0) - int(NOWk + 60)) < 1,
+    "K NK2⑤ cv402 첫 관측 시각만 바뀐 빌드 = daily_px 파일에도 저장(메모리만 아님)", (dpx_before.get("_xfirst"), dpx_disk.get("_xfirst")))
+reset_files()
+b = unit_builder()
+sk4 = run(b, {}, {}, D(10, 9), NOWk, mkx(NOWk, rest=500.0, tl_kb=[], first={}))
+chk(abs((val_of(sk4, 9, 15) or 0) - 500) < 0.01 and "_xfirst" not in b.daily_px, "K NK2④ 첫 활동 시각 모름 = 자르지 않음(종전 이월) · 저장 없음", val_of(sk4, 9, 15))
 
 reset_files()
 T.finish()

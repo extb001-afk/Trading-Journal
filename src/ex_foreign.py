@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import base64
+import email.utils
+import functools
 import hashlib
 import hmac
 import json
@@ -21,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 if __name__ == "__main__":
     common.cpu_reserve_apply()
+import unit_beat
 import bf_engine
 import calendar
 import depaddr
@@ -75,10 +78,17 @@ def _read_capped(r, cap: int, what: str = "") -> bytes:
 
 
 def _err_body(e, n: int = ERR_BODY_MAX) -> str:
+    d9 = getattr(e, "__dict__", None)
+    c9 = d9.get("_tj_body") if isinstance(d9, dict) else None
+    if isinstance(c9, str):
+        return c9[:n]
     try:
-        return e.read(n).decode("utf-8", "replace") if getattr(e, "fp", None) else ""
+        s9 = e.read(ERR_BODY_MAX).decode("utf-8", "replace") if getattr(e, "fp", None) else ""
     except Exception:
-        return ""
+        s9 = ""
+    if isinstance(d9, dict):
+        d9["_tj_body"] = s9
+    return s9[:n]
 
 
 class RateLimited(RuntimeError):
@@ -92,7 +102,8 @@ class SignatureExpired(RuntimeError):
     pass
 
 
-_BN_W_API = {"/api/v3/myTrades": 20, "/api/v3/account": 20, "/api/v3/exchangeInfo": 20, "/api/v3/openOrders": 80}
+_BN_W_API = {"/api/v3/myTrades": 20, "/api/v3/account": 20, "/api/v3/exchangeInfo": 20, "/api/v3/openOrders": 80,
+             "/api/v3/time": 1}
 _BN_W_SAPI = {"/sapi/v1/margin/myTrades": 10, "/sapi/v1/margin/account": 10, "/sapi/v1/margin/isolated/account": 10,
               "/sapi/v1/capital/withdraw/history": 10, "/sapi/v1/simple-earn/flexible/position": 150,
               "/sapi/v1/simple-earn/locked/position": 150, "/sapi/v2/loan/flexible/ongoing/orders": 300,
@@ -102,6 +113,7 @@ _BN_W_UID = {"/sapi/v1/capital/withdraw/history": 18000, "/sapi/v1/convert/trade
 _BN_W_FAPI = {"/fapi/v1/income": 30, "/fapi/v2/account": 5, "/fapi/v2/positionRisk": 5, "/fapi/v2/balance": 5,
               "/fapi/v1/userTrades": 5}
 _KC_W = {"/api/v1/accounts": 5, "/api/v1/withdrawals": 20, "/api/v1/deposits": 5, "/api/v1/fills": 10,
+         "/api/v1/hf/fills": 2, "/api/v1/hf/accounts/ledgers": 2, "/api/v1/timestamp": 3,
          "/api/v3/margin/accounts": 15, "/api/v1/convert/order/history": 5,
          "/api/v3/isolated/accounts": 15, "/api/v1/margin/config": 25, "/api/v1/isolated/symbols": 3,
          "/api/v3/margin/borrowRate": 5}
@@ -239,6 +251,196 @@ def _gov_prepare(host: str, path: str) -> None:
     _HTTP_TL.admitted = (host, path)
 
 
+CLOCK_PATH_NAME = "exf_clock.json"
+CLOCK_TTL = 3600
+CLOCK_ERR_GAP = 60
+CLOCK_FAIL_GAP = 600
+CLOCK_MAX_OFF_MS = 86400 * 1000
+CLOCK_WARN_MS = 2000
+CLOCK_HOST = {"api.binance.com": "binance", "fapi.binance.com": "binance", "dapi.binance.com": "binance",
+              "api.bybit.com": "bybit", "www.okx.com": "okx", "api.kucoin.com": "kucoin",
+              "api-futures.kucoin.com": "kucoin", "api.gateio.ws": "gate", "api.bithumb.com": "bithumb"}
+CLOCK_SRC = {"binance": "https://api.binance.com/api/v3/time", "bybit": "https://api.bybit.com/v5/market/time",
+             "okx": "https://www.okx.com/api/v5/public/time", "kucoin": "https://api.kucoin.com/api/v1/timestamp",
+             "gate": "https://api.gateio.ws/api/v4/spot/time", "bithumb": "https://api.bithumb.com/v1/ticker?markets=KRW-BTC"}
+_CLOCK_ON = [False]
+_CLOCK = {}
+_CLOCK_LOCK = threading.Lock()
+
+
+def _clock_parse(ex: str, d, date_hdr):
+    try:
+        if ex == "binance":
+            return int(d["serverTime"])
+        if ex == "bybit":
+            if d.get("time"):
+                return int(d["time"])
+            r9 = d.get("result") or {}
+            return int(r9["timeNano"]) // 1000000 if r9.get("timeNano") else int(r9["timeSecond"]) * 1000
+        if ex == "okx":
+            return int(d["data"][0]["ts"])
+        if ex == "kucoin":
+            return int(d["data"]) if str(d.get("code")) == "200000" else None
+        if ex == "gate":
+            return int(d["server_time"])
+        if ex == "bithumb":
+            return int(email.utils.parsedate_to_datetime(date_hdr).timestamp() * 1000) + 500 if date_hdr else None
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+        return None
+    return None
+
+
+def _clock_fetch(ex: str):
+    url = CLOCK_SRC.get(ex)
+    if not url:
+        return None
+    host, path = _gov_route(url)
+    try:
+        _rl_check(host)
+    except RateLimited:
+        return None
+    _gov_admit(host, path)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = _read_capped(r, 256 * 1024, host + path)
+            dh = r.headers.get("Date") if r.headers is not None else None
+        t1 = time.time()
+        d = json.loads(raw.decode("utf-8")) if raw else None
+    except urllib.error.HTTPError as e:
+        if e.code in (429, 418):
+            _rl_hit(host, e)
+        log.warning("%s 서버 시각 조회 실패: HTTP %s", ex, e.code)
+        return None
+    except Exception as e:
+        log.warning("%s 서버 시각 조회 실패: %s", ex, _xm(repr(e))[:120])
+        return None
+    srv = _clock_parse(ex, d if isinstance(d, dict) else {}, dh)
+    if not srv:
+        log.warning("%s 서버 시각 응답 형식 오류 — 보정은 직전 값 그대로", ex)
+        return None
+    off = srv - (t0 + t1) / 2.0 * 1000.0
+    if abs(off) > CLOCK_MAX_OFF_MS:
+        log.warning("%s 서버 시각 차이 %.0f초 — 응답 이상으로 보고 버림", ex, off / 1000.0)
+        return None
+    return int(round(off)), int((t1 - t0) * 1000)
+
+
+def _clock_save() -> None:
+    if not _CLOCK_ON[0]:
+        return
+    with _CLOCK_LOCK:
+        doc = {"v": 1, "ex": {k: {k2: v[k2] for k2 in ("off", "at", "rtt") if k2 in v} for k, v in _CLOCK.items() if "at" in v}}
+    try:
+        common.atomic_write_json(os.path.join(common.STATE_DIR, CLOCK_PATH_NAME), doc)
+    except Exception as e:
+        log.warning("서버 시각 차이 기록 실패: %s", e)
+
+
+def _clock_restore() -> int:
+    p9 = os.path.join(common.STATE_DIR, CLOCK_PATH_NAME)
+    try:
+        d = common.read_json(p9, {}) if os.path.exists(p9) else {}
+    except SystemExit:
+        d = {}
+    n = 0
+    for ex, v in ((d.get("ex") or {}).items() if isinstance(d, dict) and isinstance(d.get("ex"), dict) else ()):
+        try:
+            off9, at9 = int(v["off"]), float(v["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if ex in CLOCK_SRC and abs(off9) <= CLOCK_MAX_OFF_MS:
+            _CLOCK[ex] = {"off": off9, "at": at9, "rtt": int(v.get("rtt") or 0)}
+            n += 1
+    _CLOCK_ON[0] = True
+    return n
+
+
+def _clock_sync(ex: str, why: str, gap: float) -> bool:
+    if http_json is not _HTTP_JSON_IMPL:
+        return False
+    now = time.time()
+    with _CLOCK_LOCK:
+        c = _CLOCK.setdefault(ex, {})
+        if now - float(c.get("try") or 0) < gap:
+            return False
+        c["try"] = now
+        old = c.get("off")
+    got = _clock_fetch(ex)
+    if got is None:
+        return False
+    off, rtt = got
+    with _CLOCK_LOCK:
+        c = _CLOCK.setdefault(ex, {})
+        c.update(off=off, at=time.time(), rtt=rtt)
+    _clock_save()
+    if abs(off) >= CLOCK_WARN_MS and (old is None or abs(int(old) - off) >= 1000 or why != "1시간마다"):
+        log.warning("%s 서버 시각과 이 서버 시계가 %+.1f초 다름(%s) — 서명 시각을 거래소 시각에 맞춰 보냄(서버 시간 동기화 확인 권장)",
+                    ex, off / 1000.0, why)
+    elif why != "1시간마다":
+        log.info("%s 서버 시각 다시 잼(%s): 차이 %+d ms · 왕복 %d ms", ex, why, off, rtt)
+    return True
+
+
+def _srv_ms(host: str) -> int:
+    ex = CLOCK_HOST.get(host)
+    off = 0
+    if ex and _CLOCK_ON[0]:
+        c = _CLOCK.get(ex) or {}
+        if time.time() - float(c.get("at") or 0) >= CLOCK_TTL:
+            _clock_sync(ex, "1시간마다", CLOCK_FAIL_GAP)
+            c = _CLOCK.get(ex) or {}
+        off = int(c.get("off") or 0)
+    return int(time.time() * 1000) + off
+
+
+def _okx_ts(ms: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms // 1000)) + f".{ms % 1000:03d}Z"
+
+
+_CLOCK_ERR = {"binance": lambda d: str(d.get("code")) == "-1021",
+              "bybit": lambda d: str(d.get("retCode")) == "10002",
+              "okx": lambda d: str(d.get("code")) == "50102",
+              "kucoin": lambda d: str(d.get("code")) == "400002",
+              "gate": lambda d: str(d.get("label")) == "REQUEST_EXPIRED"}
+
+
+def _clock_seen(host: str, d=None, err=None) -> None:
+    ex = CLOCK_HOST.get(host)
+    if not ex or not _CLOCK_ON[0] or ex not in _CLOCK_ERR:
+        return
+    if err is not None:
+        if getattr(err, "code", None) not in (400, 401, 403):
+            return
+        try:
+            d = json.loads(_err_body(err) or "null")
+        except ValueError:
+            return
+    if not isinstance(d, dict) or not _CLOCK_ERR[ex](d):
+        return
+    if _clock_sync(ex, "서명 시각 오류", CLOCK_ERR_GAP):
+        _HTTP_TL.clock_hit = ex
+
+
+def _clock_retry(fn):
+    @functools.wraps(fn)
+    def w(*a, **k):
+        _HTTP_TL.clock_hit = None
+        try:
+            r = fn(*a, **k)
+        except Exception:
+            if not getattr(_HTTP_TL, "clock_hit", None):
+                raise
+            _HTTP_TL.clock_hit = None
+            return fn(*a, **k)
+        if getattr(_HTTP_TL, "clock_hit", None):
+            _HTTP_TL.clock_hit = None
+            return fn(*a, **k)
+        return r
+    return w
+
+
 def http_json(url: str, headers: dict | None = None, data: bytes | None = None,
               method: str | None = None, timeout: int = 20):
     host, path = _gov_route(url)
@@ -257,12 +459,15 @@ def http_json(url: str, headers: dict | None = None, data: bytes | None = None,
                 _gov_headers(host, path, r.headers)
             except Exception:
                 pass
-            return json.loads(_read_capped(r, HTTP_MAX_BYTES_PATH.get(path, HTTP_MAX_BYTES), host + path).decode("utf-8"))
+            out9 = json.loads(_read_capped(r, HTTP_MAX_BYTES_PATH.get(path, HTTP_MAX_BYTES), host + path).decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code in (429, 418):
             ra = _rl_hit(host, e)
             raise RateLimited(f"{host} HTTP {e.code} — {int(ra)}초 백오프", e.code) from None
+        _clock_seen(host, err=e)
         raise
+    _clock_seen(host, out9)
+    return out9
 
 
 _HTTP_JSON_IMPL = http_json
@@ -314,10 +519,11 @@ def fetch_binance(env, t0: int, t1: int):
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
     out_w, out_d = [], []
 
+    @_clock_retry
     def call(path, extra):
         _gov_prepare("api.binance.com", path)
         q = dict(extra)
-        q["timestamp"] = int(time.time() * 1000)
+        q["timestamp"] = _srv_ms("api.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
         sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
@@ -369,10 +575,11 @@ def fetch_bybit(env, t0: int, t1: int):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
     out_w, out_d = [], []
 
+    @_clock_retry
     def call(path, params):
         _gov_prepare("api.bybit.com", path)
         qs = urllib.parse.urlencode(params)
-        ts = str(int(time.time() * 1000))
+        ts = str(_srv_ms("api.bybit.com"))
         recv = "10000"
         sig = hmac.new(sec.encode(), (ts + key + recv + qs).encode(), hashlib.sha256).hexdigest()
         d = http_json(f"https://api.bybit.com{path}?{qs}",
@@ -520,12 +727,12 @@ def fetch_okx(env, t0: int, t1: int):
     key, sec, pph = env["TJ_OKX_KEY"], env["TJ_OKX_SECRET"], env["TJ_OKX_PASSPHRASE"]
     out_w, out_d = [], []
 
+    @_clock_retry
     def call(path, params):
         _gov_prepare("www.okx.com", path)
         qs = urllib.parse.urlencode(params)
         full = path + ("?" + qs if qs else "")
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + \
-            f".{int(time.time() * 1000) % 1000:03d}Z"
+        ts = _okx_ts(_srv_ms("www.okx.com"))
         sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
                                         hashlib.sha256).digest()).decode()
         d = http_json("https://www.okx.com" + full,
@@ -579,9 +786,10 @@ def fetch_kucoin(env, t0: int, t1: int):
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
     out_w, out_d = [], []
 
+    @_clock_retry
     def call(path_with_qs):
         _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
-        ts = str(int(time.time() * 1000))
+        ts = str(_srv_ms("api.kucoin.com"))
         sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
                                         hashlib.sha256).digest()).decode()
         pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
@@ -672,10 +880,11 @@ def fetch_gate(env, t0: int, t1: int, dep_t0: int = None):
     out_w, out_d = [], []
     _DEP_DENIED.discard("gate")
 
+    @_clock_retry
     def call(path, params):
         _gov_prepare("api.gateio.ws", path)
         qs = urllib.parse.urlencode(params)
-        ts = str(int(time.time()))
+        ts = str(_srv_ms("api.gateio.ws") // 1000)
         body_hash = hashlib.sha512(b"").hexdigest()
         payload = f"GET\n{path}\n{qs}\n{body_hash}\n{ts}"
         sig = hmac.new(sec.encode(), payload.encode(), hashlib.sha512).hexdigest()
@@ -740,7 +949,7 @@ def fetch_bithumb(env, t0: int, t1: int):
     def call(path, params):
         _gov_prepare("api.bithumb.com", path)
         payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
-                   "timestamp": int(time.time() * 1000)}
+                   "timestamp": _srv_ms("api.bithumb.com")}
         if params:
             raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
             payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
@@ -890,10 +1099,11 @@ def norm_fill(ex, fid, ts_ms, base, quote, side, price, qty, fee, fee_ccy):
 def _binance_caller(env):
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
 
+    @_clock_retry
     def call(path, extra):
         _gov_prepare("api.binance.com", path)
         q = dict(extra)
-        q["timestamp"] = int(time.time() * 1000)
+        q["timestamp"] = _srv_ms("api.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
         sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
@@ -1431,13 +1641,93 @@ def fills_binance(env, st, t0: int, t1: int):
     return [f for f in fills if t0 * 1000 <= f["ts"] <= collected_until]
 
 
+BB_UNI_NAME = "exf_bybit_symbols.json"
+BB_UNI_URL = "https://api.bybit.com/v5/market/instruments-info"
+BB_HOLD_MAX = 2000
+_BB_UNI = {"ts": 0.0, "fail": 0.0, "sym": None, "path": None}
+
+
+def _bb_universe(now: float, need: bool = False):
+    u = _BB_UNI
+    p = os.path.join(common.STATE_DIR, BB_UNI_NAME)
+    if u.get("path") != p:
+        u.update(ts=0.0, fail=0.0, sym=None, path=p)
+        try:
+            d = common.read_json(p, {}) if os.path.exists(p) else {}
+        except SystemExit:
+            d = {}
+        sy = d.get("symbols") if isinstance(d, dict) else None
+        if isinstance(sy, dict) and sy:
+            u["sym"] = {str(k): (str(v[0]), str(v[1])) for k, v in sy.items() if isinstance(v, list) and len(v) >= 2 and v[0] and v[1]}
+            try:
+                u["ts"] = float(d.get("ts") or 0)
+            except (TypeError, ValueError):
+                u["ts"] = 0.0
+    due = now - u["ts"] >= BN_UNI_TTL or (need and now - u["ts"] >= BN_UNI_RETRY)
+    if due and now - u["fail"] >= BN_UNI_RETRY:
+        try:
+            sym, cur, seen9 = {}, "", set()
+            for _pg in range(10):
+                q9 = {"category": "spot", "limit": 1000}
+                if cur:
+                    q9["cursor"] = cur
+                d = http_json(BB_UNI_URL + "?" + urllib.parse.urlencode(q9), timeout=30)
+                if not isinstance(d, dict) or d.get("retCode") != 0 or not isinstance((d.get("result") or {}).get("list"), list):
+                    raise RuntimeError(f"instruments-info 형식 오류 {_xm((d or {}).get('retCode') if isinstance(d, dict) else type(d).__name__)}")
+                for r in d["result"]["list"]:
+                    if not isinstance(r, dict):
+                        continue
+                    s9 = str(r.get("symbol") or "").upper()
+                    b9, q9b = str(r.get("baseCoin") or "").upper(), str(r.get("quoteCoin") or "").upper()
+                    if s9 and b9 and q9b and b9 != q9b:
+                        sym[s9] = (b9, q9b)
+                cur = str(d["result"].get("nextPageCursor") or "")
+                if not cur or cur in seen9:
+                    break
+                seen9.add(cur)
+            if not sym:
+                raise RuntimeError("instruments-info 종목 0")
+            u["sym"], u["ts"] = dict(u["sym"] or {}, **sym), float(now)
+            common.atomic_write_json(p, {"ts": int(now), "symbols": {k: list(v) for k, v in u["sym"].items()}})
+            log.info("bybit 종목 목록 갱신: %d개(이번 응답 %d)", len(u["sym"]), len(sym))
+        except Exception as e:
+            u["fail"] = float(now)
+            log.warning("bybit instruments-info 갱신 실패(%s · 1시간 뒤 재시도): %s",
+                        "직전 목록 사용" if u["sym"] else "종전 주요 쿼트로", _xm(repr(e))[:140])
+    return u["sym"]
+
+
+def _bb_split(sym: str, uni):
+    s = str(sym or "").upper()
+    if uni and s in uni:
+        return uni[s]
+    b, q = split_pair(s)
+    return (b, q) if (b and q) else (None, None)
+
+
+def _bb_fill(r, b, q):
+    return norm_fill("bybit", r.get("execId"), r.get("execTime"), b, q, str(r.get("side", "")).lower(),
+                     r.get("execPrice"), r.get("execQty"), r.get("execFee"), r.get("feeCurrency") or q)
+
+
+def _bb_hold_keep(st: dict, cp: dict) -> bool:
+    h9 = cp.get("bb_hold") if isinstance(cp, dict) else None
+    if not isinstance(h9, dict) or not h9:
+        return False
+    dst = (st.setdefault("fills", {})).setdefault("bb_hold", {})
+    add = {k: v for k, v in h9.items() if k not in dst}
+    dst.update(add)
+    return bool(add)
+
+
 def fills_bybit(env, st, t0: int, t1: int):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
 
+    @_clock_retry
     def call(params):
         _gov_prepare("api.bybit.com", "/v5/execution/list")
         qs = urllib.parse.urlencode(params)
-        ts = str(int(time.time() * 1000))
+        ts = str(_srv_ms("api.bybit.com"))
         recv = "10000"
         sig = hmac.new(sec.encode(), (ts + key + recv + qs).encode(), hashlib.sha256).hexdigest()
         d = http_json(f"https://api.bybit.com/v5/execution/list?{qs}",
@@ -1448,6 +1738,31 @@ def fills_bybit(env, st, t0: int, t1: int):
         return d.get("result") or {}
 
     fills = []
+    now9 = int(time.time())
+    uni = [_bb_universe(now9), False]
+
+    def split9(sym):
+        b9, q9 = _bb_split(sym, uni[0])
+        if not q9 and not uni[1]:
+            uni[1] = True
+            uni[0] = _bb_universe(now9, need=True)
+            b9, q9 = _bb_split(sym, uni[0])
+        return b9, q9
+    hold = st.get("bb_hold") if isinstance(st.get("bb_hold"), dict) else {}
+    st["bb_hold"] = hold
+    out9 = set()
+    for k9 in sorted(hold, key=lambda k: str((hold[k] or {}).get("execTime") or "")):
+        r9 = hold[k9] if isinstance(hold[k9], dict) else {}
+        b9, q9 = split9(r9.get("symbol"))
+        if q9:
+            f9 = _bb_fill(r9, b9, q9)
+            f9["late"] = 1
+            fills.append(f9)
+            out9.add(k9)
+    for k9 in out9:
+        hold.pop(k9, None)
+    if out9:
+        log.info("bybit 보류 체결 %d건 방출(종목 목록으로 대금 통화 확인)", len(out9))
     s = t0
     while s < t1:
         e = min(s + 6 * DAY, t1)
@@ -1460,11 +1775,17 @@ def fills_bybit(env, st, t0: int, t1: int):
             res = call(p)
             rows = res.get("list") or []
             for r in rows:
-                b, q = split_pair(r.get("symbol") or "")
-                fills.append(norm_fill("bybit", r.get("execId"), r.get("execTime"),
-                                       b, q, str(r.get("side", "")).lower(),
-                                       r.get("execPrice"), r.get("execQty"),
-                                       r.get("execFee"), r.get("feeCurrency") or q))
+                k9 = str(r.get("execId") or "")
+                if k9 in out9:
+                    continue
+                b, q = split9(r.get("symbol"))
+                if not q:
+                    if k9 and k9 not in hold and str(r.get("symbol") or "").strip():
+                        hold[k9] = {kk: r.get(kk) for kk in ("symbol", "execId", "execTime", "side", "execPrice", "execQty", "execFee", "feeCurrency")}
+                        hold[k9]["held_at"] = now9
+                        log.warning("bybit 체결 보류 — 종목 목록에 없는 심볼 %s(대금 통화 모름): %s", _xm(r.get("symbol"))[:24], k9[:24])
+                    continue
+                fills.append(_bb_fill(r, b, q))
             cursor = res.get("nextPageCursor") or ""
             if cursor and cursor in seen_cursors:
                 raise RuntimeError("bybit 체결 페이지 커서 순환 — 다음 주기 재시도")
@@ -1473,18 +1794,27 @@ def fills_bybit(env, st, t0: int, t1: int):
             if not cursor or not rows:
                 break
         s = e
+    if len(hold) > BB_HOLD_MAX:
+        for k9 in sorted(hold, key=lambda k: int((hold[k] or {}).get("held_at") or 0))[:len(hold) - BB_HOLD_MAX]:
+            hold.pop(k9, None)
+        log.warning("bybit 보류 체결 상한 %d 초과 — 가장 오래된 것부터 버림", BB_HOLD_MAX)
+    if hold:
+        _recon_hold(st, "bb_split", now9, f"바이비트 대금 통화 모르는 체결 {len(hold)}건 보류")
+    else:
+        st.pop("bb_hold", None)
+        _recon_hold_clear(st, "bb_split")
     return fills
 
 
 def fills_okx(env, st, t0: int, t1: int):
     key, sec, pph = env["TJ_OKX_KEY"], env["TJ_OKX_SECRET"], env["TJ_OKX_PASSPHRASE"]
 
+    @_clock_retry
     def call(params):
         _gov_prepare("www.okx.com", "/api/v5/trade/fills-history")
         qs = urllib.parse.urlencode(params)
         full = "/api/v5/trade/fills-history" + ("?" + qs if qs else "")
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + \
-            f".{int(time.time() * 1000) % 1000:03d}Z"
+        ts = _okx_ts(_srv_ms("www.okx.com"))
         sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
                                         hashlib.sha256).digest()).decode()
         d = http_json("https://www.okx.com" + full,
@@ -1531,9 +1861,10 @@ def fills_okx(env, st, t0: int, t1: int):
 def fills_kucoin(env, st, t0: int, t1: int):
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
 
+    @_clock_retry
     def call(path_with_qs):
         _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
-        ts = str(int(time.time() * 1000))
+        ts = str(_srv_ms("api.kucoin.com"))
         sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
                                         hashlib.sha256).digest()).decode()
         pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
@@ -1566,16 +1897,162 @@ def fills_kucoin(env, st, t0: int, t1: int):
                 break
             page += 1
         s = e
-    return fills
+    return fills + _kucoin_hf_pass(call, st, t0, t1, fills)
+
+
+KC_HF_LEDGER_PAGES = 50
+KC_HF_FILL_PAGES = 100
+KC_HF_DENY = ("kucoin 400007", "kucoin 400006", "kucoin 400003", "kucoin 404", "HTTPError 404", "HTTP Error 404", "HTTPError 401", "HTTPError 403",
+              "HTTP Error 401", "HTTP Error 403")
+
+
+def _kc_ctx_symbol(r):
+    c9 = r.get("context") if isinstance(r, dict) else None
+    if isinstance(c9, str):
+        try:
+            c9 = json.loads(c9)
+        except ValueError:
+            m9 = re.search(r'"symbol"\s*:\s*"([A-Za-z0-9]+-[A-Za-z0-9]+)"', c9)
+            return m9.group(1).upper() if m9 else None
+    if isinstance(c9, dict) and "-" in str(c9.get("symbol") or ""):
+        return str(c9["symbol"]).upper()
+    return None
+
+
+def _kucoin_hf_window(call, s, e, have_ids):
+    syms, last = set(), None
+    for _ in range(KC_HF_LEDGER_PAGES):
+        q9 = {"bizType": "TRADE_EXCHANGE", "startAt": s * 1000, "endAt": e * 1000, "limit": 200}
+        if last:
+            q9["lastId"] = last
+        rows = call("/api/v1/hf/accounts/ledgers?" + urllib.parse.urlencode(q9))
+        if isinstance(rows, dict):
+            rows = rows.get("items") if "items" in rows else ([] if not rows else None)
+        if not isinstance(rows, list):
+            raise RuntimeError("kucoin hf ledgers 응답 형식 오류")
+        for r in rows:
+            sy = _kc_ctx_symbol(r)
+            if sy:
+                syms.add(sy)
+        if len(rows) < 200:
+            break
+        last = rows[-1].get("id") if isinstance(rows[-1], dict) else None
+        if not last:
+            raise RuntimeError("kucoin hf ledgers 다음 쪽 id 없음")
+        time.sleep(PACE)
+    else:
+        raise RuntimeError(f"kucoin hf ledgers {KC_HF_LEDGER_PAGES}쪽 초과")
+    out = []
+    for sy in sorted(syms):
+        last = None
+        for _ in range(KC_HF_FILL_PAGES):
+            time.sleep(PACE)
+            q9 = {"symbol": sy, "startAt": s * 1000, "endAt": e * 1000, "limit": 100}
+            if last:
+                q9["lastId"] = last
+            data = call("/api/v1/hf/fills?" + urllib.parse.urlencode(q9))
+            items = data.get("items") if isinstance(data, dict) else None
+            if items is None and data in ({}, None):
+                items = []
+            if not isinstance(items, list):
+                raise RuntimeError(f"kucoin hf fills {sy} 응답 형식 오류")
+            for r in items:
+                b, _, q = str(r.get("symbol") or sy).partition("-")
+                f9 = norm_fill("kucoin", f"{r.get('symbol') or sy}:{r.get('tradeId')}", r.get("createdAt"),
+                               b, q, str(r.get("side", "")).lower(), r.get("price"), r.get("size"), r.get("fee"), r.get("feeCurrency"))
+                if f9["id"] in have_ids:
+                    continue
+                have_ids.add(f9["id"])
+                out.append(f9)
+            if len(items) < 100:
+                break
+            last = data.get("lastId") or (items[-1].get("id") if isinstance(items[-1], dict) else None)
+            if not last:
+                raise RuntimeError(f"kucoin hf fills {sy} 다음 쪽 id 없음")
+        else:
+            raise RuntimeError(f"kucoin hf fills {sy} {KC_HF_FILL_PAGES}쪽 초과")
+    return out
+
+
+def _kc_hf_transient(e, msg: str) -> bool:
+    if isinstance(e, urllib.error.HTTPError):
+        return int(getattr(e, "code", 0) or 0) >= 500
+    if isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError)) or type(e) is OSError:
+        return True
+    m9 = re.search(r"kucoin (\d{6})", msg or "")
+    if m9:
+        return m9.group(1).startswith("5") or m9.group(1) == "429000"
+    return "쪽 초과" in (msg or "")
+
+
+def _kucoin_hf_pass(call, st, t0: int, t1: int, classic: list) -> list:
+    now9 = int(time.time())
+    regular = t1 >= now9 - 3600
+    if float(st.get("kc_hf_off") or 0) > now9:
+        return []
+    have_ids = {f["id"] for f in classic}
+    gap9 = int(st.get("kc_hf_gap") or 0) if regular else 0
+    h0 = min(int(t0), gap9) if gap9 else int(t0)
+    out = []
+    s9 = h0
+    try:
+        while s9 < t1:
+            e9 = min(s9 + 6 * DAY, t1)
+            out += _kucoin_hf_window(call, s9, e9, have_ids)
+            s9 = e9
+    except (RateLimited, SignatureExpired):
+        if regular:
+            st["kc_hf_gap"] = h0
+        raise
+    except Exception as e9:
+        msg9 = _xm(repr(e9))
+        if isinstance(e9, urllib.error.HTTPError):
+            msg9 += " " + _xm(_err_body(e9)[:200])
+        tr9 = _kc_hf_transient(e9, msg9) and not any(k9 in msg9 for k9 in KC_HF_DENY)
+        if not regular:
+            if tr9:
+                raise RuntimeError(f"kucoin HF 체결(과거 창) 일시 실패 — 이 조각 다음 주기에 다시: {msg9[:160]}") from None
+            log.warning("kucoin HF 체결(과거 창) 결정적 오류 — 이 조각의 HF 체결 생략(옛 계정 체결은 정상): %s", msg9[:160])
+            return []
+        if not tr9:
+            st["kc_hf_off"] = now9 + DENY_COOL_SEC
+            _recon_hold_clear(st, "kc_hf")
+            if gap9:
+                st["kc_hf_lost"] = {"from": int(h0), "to": int(t0), "at": now9}
+                st.pop("kc_hf_gap", None)
+                log.warning("★kucoin HF 밀린 구간 %s~%s 회수 불가(결정적 오류) — 그 구간 HF 체결은 빠질 수 있음(수동 확인)★: %s",
+                            time.strftime("%Y-%m-%d", time.localtime(h0)), time.strftime("%Y-%m-%d", time.localtime(t0)), msg9[:160])
+            log.warning("kucoin HF 체결 조회 거부·결정적 오류 — %d시간 쉼(옛 계정 체결은 정상): %s", DENY_COOL_SEC // 3600, msg9[:160])
+            return []
+        st["kc_hf_gap"] = h0
+        st["partial"] = (str(st.get("partial")) + " · " if st.get("partial") else "") + "쿠코인 HF 체결 일시 실패(밀린 하한 보존 — 다음 주기 다시)"
+        _recon_hold_clear(st, "kc_hf")
+        log.warning("kucoin HF 체결 조회 일시 실패(다음 주기에 %s 부터 다시 — 옛 계정 체결은 정상 · 이번 주기 완주·잔고 승격 보류): %s",
+                    time.strftime("%m-%d %H:%M", time.localtime(h0)), msg9[:160])
+        return []
+    if regular:
+        _recon_hold_clear(st, "kc_hf")
+        st.pop("kc_hf_off", None)
+        st.pop("kc_hf_gap", None)
+        on9 = int(st.get("kc_hf_on") or 0)
+        if not on9:
+            on9 = st["kc_hf_on"] = now9
+        for f in out:
+            if gap9 or f["ts"] < on9 * 1000:
+                f["late"] = 1
+        if out:
+            log.info("kucoin HF 계정 체결 %d건(옛 계정 체결과 겹침 제외%s)", len(out), " · 밀린 구간 회수" if gap9 else "")
+    return out
 
 
 def fills_gate(env, st, t0: int, t1: int):
     key, sec = env["TJ_GATE_KEY"], env["TJ_GATE_SECRET"]
 
+    @_clock_retry
     def call(params):
         _gov_prepare("api.gateio.ws", "/api/v4/spot/my_trades")
         qs = urllib.parse.urlencode(params)
-        ts = str(int(time.time()))
+        ts = str(_srv_ms("api.gateio.ws") // 1000)
         body_hash = hashlib.sha512(b"").hexdigest()
         path = "/api/v4/spot/my_trades"
         payload = f"GET\n{path}\n{qs}\n{body_hash}\n{ts}"
@@ -1610,7 +2087,7 @@ def _bithumb_caller(env):
     def call(path, params):
         _gov_prepare("api.bithumb.com", path)
         payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
-                   "timestamp": int(time.time() * 1000)}
+                   "timestamp": _srv_ms("api.bithumb.com")}
         if params:
             raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
             payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
@@ -1960,10 +2437,19 @@ def _bithumb_ext_fills(call, st, ext, a, b, deadline, emit, save):
                 cur["fin"] = True
                 save()
                 break
-            f9, past = _bithumb_asc_page(rows, int(a), int(b))
+            raw9 = {}
+            f9, past = _bithumb_asc_page(rows, int(a), int(b), raw9)
             f9 = [f for f in f9 if f["id"] not in tracked]
+            rt9 = ext.setdefault("bt_rt", {})
+            try:
+                f9 = _bithumb_retime(call, f9, raw9, rt9, deadline)
+            except _BithumbBudget:
+                save()
+                return False
             if f9:
                 emit(f9)
+            if len(rt9) > BITHUMB_RT_KEEP:
+                ext["bt_rt"] = dict(list(rt9.items())[-BITHUMB_RT_KEEP:])
             ts9 = [t for t in (_bithumb_row_ts(r, None) for r in rows) if t is not None]
             cur["page"] = page + 1
             cur["n"] = int(cur.get("n") or 0) + 1
@@ -1976,6 +2462,53 @@ def _bithumb_ext_fills(call, st, ext, a, b, deadline, emit, save):
             save()
             page += 1
     return all((sc["st"].get(q) or {}).get("fin") for q in BITHUMB_EXT_STATES)
+
+
+BITHUMB_RT_KEEP = 400
+
+
+class _BithumbBudget(RuntimeError):
+    pass
+
+
+def _bithumb_retime(call, fills, raw, cache=None, deadline=None):
+    import acct_norm
+    cache = {} if cache is None else cache
+    out = []
+    for f in fills:
+        u = f["id"].split(":", 1)[1]
+        r = raw.get(u) or {}
+        if str(r.get("ord_type") or "") != "limit":
+            out.append(f)
+            continue
+        if u not in cache:
+            if deadline is not None and time.time() >= deadline:
+                raise _BithumbBudget("bithumb 과거 창 체결 시각 확인 — 시간 예산 소진")
+            try:
+                o = call("/v1/order", {"uuid": u})
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    raise
+                o = None
+            finally:
+                time.sleep(PACE)
+            fts = None
+            if isinstance(o, dict) and str(o.get("uuid") or "") == u and str(o.get("state") or "") in ("done", "cancel"):
+                merged = dict(r)
+                merged.update(o)
+                fts = acct_norm.fill_ts(merged)
+                if fts and int(fts) * 1000 != int(f["ts"]):
+                    try:
+                        f2 = _bithumb_fill(merged, int(fts) * 1000)
+                    except RuntimeError:
+                        f2 = None
+                    if f2 is None or _dstr(f2["qty"]) != _dstr(f["qty"]):
+                        fts = None
+            cache[u] = int(fts) * 1000 if fts else 0
+        if cache[u] and int(cache[u]) != int(f["ts"]):
+            f = dict(f, ts=int(cache[u]))
+        out.append(f)
+    return out
 
 
 def _bithumb_ext_part(ext):
@@ -2310,10 +2843,11 @@ def convert_binance_dust(env, t0: int, t1: int):
     return out
 
 
+@_clock_retry
 def _kucoin_call(env, path_with_qs):
     _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
-    ts = str(int(time.time() * 1000))
+    ts = str(_srv_ms("api.kucoin.com"))
     sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(), hashlib.sha256).digest()).decode()
     pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(), hashlib.sha256).digest()).decode()
     d = http_json("https://api.kucoin.com" + path_with_qs,
@@ -2480,7 +3014,7 @@ def _http_json_err(url, headers=None, data=None, method=None, timeout=20):
         return http_json(url, headers, data, method, timeout)
     except urllib.error.HTTPError as e:
         try:
-            body = e.read(ERR_BODY_MAX).decode("utf-8", "ignore")
+            body = _err_body(e)
             try:
                 body = json.dumps(json.loads(body), separators=(",", ":"))
             except ValueError:
@@ -2596,6 +3130,7 @@ class _Bal(dict):
         super().__init__(*a, **k)
         self.debts = {}
         self.sources = []
+        self.by_src = {}
         self.loans = []
 
 
@@ -2648,6 +3183,8 @@ def _sub_bal(ex, src, fn, out, extra_deny=(), lenient=False):
         out.loans.extend(local.loans)
     if isinstance(getattr(out, "sources", None), list):
         out.sources.append(src)
+    if isinstance(getattr(out, "by_src", None), dict):
+        out.by_src[src] = dict(local)
 
 
 _DEBT_SEEN = {}
@@ -2695,11 +3232,12 @@ def _loan_add(o, ex, src, product, label, collateral, debt, since=None, extra=No
         o.loans.append(rec)
 
 
+@_clock_retry
 def _binance_signed(env, path, params=None, method="GET"):
     _gov_prepare("api.binance.com", path)
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
     p = dict(params or {})
-    p["timestamp"] = int(time.time() * 1000)
+    p["timestamp"] = _srv_ms("api.binance.com")
     p["recvWindow"] = 10000
     qs = urllib.parse.urlencode(p)
     sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
@@ -2825,7 +3363,7 @@ def _bal_binance(env):
     def _futures(o):
         key2, sec2 = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
         _gov_prepare("fapi.binance.com", "/fapi/v2/balance")
-        q2 = urllib.parse.urlencode({"timestamp": int(time.time() * 1000),
+        q2 = urllib.parse.urlencode({"timestamp": _srv_ms("fapi.binance.com"),
                                      "recvWindow": 10000})
         sig2 = hmac.new(sec2.encode(), q2.encode(), hashlib.sha256).hexdigest()
         rows = _http_json_err(f"https://fapi.binance.com/fapi/v2/balance?{q2}&signature={sig2}",
@@ -2921,11 +3459,12 @@ def _bal_binance(env):
     return out
 
 
+@_clock_retry
 def _bybit_get(env, path, params):
     _gov_prepare("api.bybit.com", path)
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
     qs = urllib.parse.urlencode(params or {})
-    ts = str(int(time.time() * 1000))
+    ts = str(_srv_ms("api.bybit.com"))
     sig = hmac.new(sec.encode(), (ts + key + "10000" + qs).encode(), hashlib.sha256).hexdigest()
     d = http_json(f"https://api.bybit.com{path}" + (f"?{qs}" if qs else ""),
                   {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
@@ -2940,7 +3479,7 @@ def _bal_bybit(env):
     _gov_prepare("api.bybit.com", "/v5/account/wallet-balance")
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
     q = "accountType=UNIFIED"
-    ts = str(int(time.time() * 1000))
+    ts = str(_srv_ms("api.bybit.com"))
     sig = hmac.new(sec.encode(), (ts + key + "10000" + q).encode(), hashlib.sha256).hexdigest()
     d = http_json(f"https://api.bybit.com/v5/account/wallet-balance?{q}",
                   {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
@@ -2958,7 +3497,7 @@ def _bal_bybit(env):
     time.sleep(PACE)
     _gov_prepare("api.bybit.com", "/v5/asset/transfer/query-account-coins-balance")
     q2 = "accountType=FUND"
-    ts2 = str(int(time.time() * 1000))
+    ts2 = str(_srv_ms("api.bybit.com"))
     sig2 = hmac.new(sec.encode(), (ts2 + key + "10000" + q2).encode(),
                     hashlib.sha256).hexdigest()
     d2 = http_json(f"https://api.bybit.com/v5/asset/transfer/query-account-coins-balance?{q2}",
@@ -3026,13 +3565,13 @@ def _bal_bybit(env):
     return out
 
 
+@_clock_retry
 def _okx_get(env, path, params=None):
     _gov_prepare("www.okx.com", path)
     key, sec, pph = env["TJ_OKX_KEY"], env["TJ_OKX_SECRET"], env["TJ_OKX_PASSPHRASE"]
     qs = urllib.parse.urlencode(params or {})
     full = path + ("?" + qs if qs else "")
-    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + \
-        f".{int(time.time() * 1000) % 1000:03d}Z"
+    ts = _okx_ts(_srv_ms("www.okx.com"))
     sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
                                     hashlib.sha256).digest()).decode()
     d = http_json("https://www.okx.com" + full,
@@ -3164,10 +3703,11 @@ def _bal_okx(env):
     return out
 
 
+@_clock_retry
 def _kucoin_get(env, path_with_qs):
     _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
-    ts = str(int(time.time() * 1000))
+    ts = str(_srv_ms("api.kucoin.com"))
     sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
                                     hashlib.sha256).digest()).decode()
     pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
@@ -3211,11 +3751,12 @@ def _bal_kucoin(env):
     return out
 
 
+@_clock_retry
 def _gate_get(env, path, params=None):
     _gov_prepare("api.gateio.ws", path)
     key, sec = env["TJ_GATE_KEY"], env["TJ_GATE_SECRET"]
     qs = urllib.parse.urlencode(params or {})
-    ts = str(int(time.time()))
+    ts = str(_srv_ms("api.gateio.ws") // 1000)
     bh = hashlib.sha512(b"").hexdigest()
     sig = hmac.new(sec.encode(), f"GET\n{path}\n{qs}\n{bh}\n{ts}".encode(),
                    hashlib.sha512).hexdigest()
@@ -3267,7 +3808,7 @@ def _bithumb_get(env, path, params=None):
     _gov_prepare("api.bithumb.com", path)
     key, sec = env["TJ_BITHUMB_KEY"], env["TJ_BITHUMB_SECRET"]
     payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
-               "timestamp": int(time.time() * 1000)}
+               "timestamp": _srv_ms("api.bithumb.com")}
     if params:
         raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
         payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
@@ -3604,6 +4145,9 @@ _WD_TERMINAL = set(PEND_FINAL) | {"CANCELED", "REFUNDED"}
 SNAP_AGREE_REL = 1e-4
 SNAP_AGREE_ABS = 1e-6
 _SNAP_MISS = {}
+SNAP_MISS_CAP = 6
+SNAP_MISS_PATH = os.path.join(common.STATE_DIR, "exf_snap_miss.json")
+_SNAP_MISS_ST = {}
 
 
 def _wd_inflight(rows, now: int) -> list:
@@ -3643,12 +4187,66 @@ def _snap_agree(a: dict, b: dict):
     fa, fb = _snap_flat(a), _snap_flat(b)
     if fa is None or fb is None:
         return False, "형식 오류"
+    pa, pb = (a or {}).get("fut_part"), (b or {}).get("fut_part")
+    if isinstance(pa, dict) and isinstance(pb, dict):
+        for fx9, p9 in ((fa, pa), (fb, pb)):
+            for k9, v9 in p9.items():
+                ku9 = str(k9).upper()
+                try:
+                    fv9 = float(v9)
+                except (TypeError, ValueError):
+                    return False, "형식 오류"
+                if ku9 in fx9:
+                    fx9[ku9] -= fv9
     for k in sorted(set(fa) | set(fb)):
         x, y = fa.get(k, 0.0), fb.get(k, 0.0)
         m = max(abs(x), abs(y))
         if abs(x - y) > max(SNAP_AGREE_REL * m, SNAP_AGREE_ABS):
             return False, f"{k} {(y - x) / m * 100:+.4f}%" if m else k
     return True, ""
+
+
+def _snap_miss_save():
+    try:
+        _SNAP_MISS_ST["seen"] = set(_SNAP_MISS_ST.get("seen") or ()) | set(_SNAP_MISS_ST.get("ex") or {})
+        common.atomic_write_json(SNAP_MISS_PATH, {"v": 1, "ts": int(time.time()), "ex": _SNAP_MISS_ST.get("ex") or {},
+                                                  "seen": sorted(_SNAP_MISS_ST["seen"])})
+    except Exception as e:
+        log.warning("잔고 표본 불일치 상태 쓰기 실패: %s", repr(e)[:120])
+
+
+def _snap_promote_ok(ex, prevp, snap9, now=None):
+    now = int(time.time() if now is None else now)
+    if "ex" not in _SNAP_MISS_ST:
+        try:
+            d9 = common.read_json(SNAP_MISS_PATH, {}) or {}
+        except (Exception, SystemExit):
+            d9 = {}
+        _SNAP_MISS_ST["ex"] = {str(k): v for k, v in ((d9.get("ex") if isinstance(d9.get("ex"), dict) else {}) or {}).items() if isinstance(v, dict)}
+        _SNAP_MISS_ST["seen"] = {str(x) for x in (d9.get("seen") if isinstance(d9.get("seen"), list) else [])}
+    st9 = _SNAP_MISS_ST["ex"]
+    agree9, why9 = _snap_agree(prevp, snap9)
+    if agree9:
+        _SNAP_MISS.pop(ex, None)
+        if st9.pop(ex, None) is not None:
+            _SNAP_MISS_ST.setdefault("seen", set()).add(ex)
+            _snap_miss_save()
+        return True, ""
+    e9 = st9.setdefault(ex, {"since": now, "n": 0, "k": 0})
+    e9["n"] = int(e9.get("n") or 0) + 1
+    e9["k"] = int(e9.get("k") or 0) + 1
+    e9["why"], e9["at"] = str(why9)[:80], now
+    _SNAP_MISS[ex] = e9["n"]
+    if e9["n"] % 6 == 1:
+        log.info("%s 잔고 표본 불일치(%s · 연속 %d주기) — 승격 보류, 다음 주기 표본과 다시 비교", ex, why9, e9["n"])
+    if e9["k"] >= SNAP_MISS_CAP:
+        e9["k"], e9["forced"], e9["nf"] = 0, now, int(e9.get("nf") or 0) + 1
+        _snap_miss_save()
+        log.warning("★%s 잔고 표본이 %d주기 연속 달라(%s) — 일치 확인 없이 직전 표본 반영(대사가 멈춰 총자산이 굳지 않게 · 상태 패널 '잔고 표본 계속 다름')★",
+                    ex, SNAP_MISS_CAP, why9)
+        return "forced", why9
+    _snap_miss_save()
+    return False, why9
 
 
 def _invalidate_balance_snapshot(ex):
@@ -3700,13 +4298,17 @@ def _fut_opt(v):
     return x9 if x9 is not None and x9 == x9 and abs(x9) != float("inf") else None
 
 
+BN_INCOME_MS_PAGES = 20
+
+
 def _fut_binance(env):
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
 
+    @_clock_retry
     def fcall(path, extra=None):
         _gov_prepare("fapi.binance.com", path)
         q = dict(extra or {})
-        q["timestamp"] = int(time.time() * 1000)
+        q["timestamp"] = _srv_ms("fapi.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
         sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
@@ -3745,18 +4347,38 @@ def _fut_binance(env):
     while pages < 5:
         time.sleep(PACE)
         rows = fcall("/fapi/v1/income", {"startTime": cur, "limit": 1000}) or []
-        for r in rows:
-            uid = f"bn:{r.get('tranId')}:{r.get('incomeType')}:{r.get('time')}"
-            if uid in seen:
-                continue
-            seen.add(uid)
-            ev.append({"t": int(r.get("time") or 0), "symbol": r.get("symbol") or "",
-                       "kind": kmap.get(r.get("incomeType"), "OTHER"),
-                       "amount": float(r.get("income") or 0), "uid": uid})
+
+        def _take(rows9):
+            n9 = 0
+            for r in rows9:
+                uid = f"bn:{r.get('tranId')}:{r.get('incomeType')}:{r.get('time')}"
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                n9 += 1
+                e9 = {"t": int(r.get("time") or 0), "symbol": r.get("symbol") or "",
+                      "kind": kmap.get(r.get("incomeType"), "OTHER"),
+                      "amount": float(r.get("income") or 0), "uid": uid}
+                if str(r.get("asset") or "").strip():
+                    e9["asset"] = str(r.get("asset")).strip().upper()
+                ev.append(e9)
+            return n9
+        _take(rows)
         if rows:
             nxt = max(int(r.get("time") or 0) for r in rows)
             if len(rows) >= 1000 and nxt <= cur:
-                raise RuntimeError("binance income 커서 전진 불가(동일 ms 1000건 초과) — 스냅샷 보류")
+                for pg9 in range(1, BN_INCOME_MS_PAGES + 1):
+                    time.sleep(PACE)
+                    rows_ms = fcall("/fapi/v1/income", {"startTime": cur, "endTime": cur, "page": pg9, "limit": 1000}) or []
+                    if any(int(r.get("time") or 0) != cur for r in rows_ms):
+                        raise RuntimeError("binance income 같은 ms 페이지 응답에 다른 시각 — 스냅샷 보류")
+                    if _take(rows_ms) == 0 and pg9 > 1 and len(rows_ms) >= 1000:
+                        raise RuntimeError("binance income 같은 ms 페이지가 새 줄을 안 줌(page 미지원?) — 스냅샷 보류")
+                    if len(rows_ms) < 1000:
+                        break
+                else:
+                    raise RuntimeError(f"binance income 같은 ms {BN_INCOME_MS_PAGES * 1000}건 초과 — 스냅샷 보류(다음 주기 다시)")
+                nxt = cur + 1
             cur = max(cur, nxt)
         if len(rows) < 1000:
             break
@@ -3788,10 +4410,11 @@ def _fut_binance(env):
 def _fut_bybit(env):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
 
+    @_clock_retry
     def bcall(path, q):
         _gov_prepare("api.bybit.com", path)
         qs = urllib.parse.urlencode(q)
-        ts = str(int(time.time() * 1000))
+        ts = str(_srv_ms("api.bybit.com"))
         sig = hmac.new(sec.encode(), (ts + key + "10000" + qs).encode(),
                        hashlib.sha256).hexdigest()
         d = http_json(f"https://api.bybit.com{path}?{qs}",
@@ -4001,14 +4624,15 @@ def _fut_okx(env):
         pnl = float(b.get("pnl") or 0)
         fee = float(b.get("fee") or 0)
         kind9 = "FUNDING" if str(b.get("type")) == "8" else "REALIZED"
+        ccy9 = {"asset": str(b.get("ccy")).strip().upper()} if str(b.get("ccy") or "").strip() else {}
         if pnl != 0 and base_uid + ":p" not in seen:
             seen.add(base_uid + ":p")
-            ev.append({"t": t9, "symbol": b.get("instId") or "", "kind": kind9,
-                       "amount": pnl, "uid": base_uid + ":p"})
+            ev.append(dict({"t": t9, "symbol": b.get("instId") or "", "kind": kind9,
+                            "amount": pnl, "uid": base_uid + ":p"}, **ccy9))
         if fee != 0 and base_uid + ":f" not in seen:
             seen.add(base_uid + ":f")
-            ev.append({"t": t9, "symbol": b.get("instId") or "", "kind": "FEE",
-                       "amount": fee, "uid": base_uid + ":f"})
+            ev.append(dict({"t": t9, "symbol": b.get("instId") or "", "kind": "FEE",
+                            "amount": fee, "uid": base_uid + ":f"}, **ccy9))
     _fut_write("okx", {"balance": None, "note": "트레이딩 계정에 포함 — 잔고는 현물 집계에"},
                poss, ev, dict({"bills": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {})))
     _px_safe("okx", lambda: _px_okx(bills, pxraw, now_ms))
@@ -4308,21 +4932,23 @@ def futures_snapshot_all(env):
                 log.warning("%s 선물 스냅샷 실패(다음 주기): %s", ex, msg[:140])
 
 
+@_clock_retry
 def _bn_deriv_get(env, host, path, params=None):
     _gov_prepare(host, path)
     key, sec = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
     q = dict(params or {})
-    q["timestamp"] = int(time.time() * 1000)
+    q["timestamp"] = _srv_ms(host)
     q["recvWindow"] = 10000
     qs = urllib.parse.urlencode(q)
     sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
     return _http_json_err(f"https://{host}{path}?{qs}&signature={sig}", {"X-MBX-APIKEY": key})
 
 
+@_clock_retry
 def _kucoin_fut_get(env, path_with_qs):
     _gov_prepare("api-futures.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
-    ts = str(int(time.time() * 1000))
+    ts = str(_srv_ms("api-futures.kucoin.com"))
     sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(), hashlib.sha256).digest()).decode()
     pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(), hashlib.sha256).digest()).decode()
     d = http_json("https://api-futures.kucoin.com" + path_with_qs,
@@ -4346,7 +4972,7 @@ def _lev_body(fn, rl_host=None):
             return fn(*a, **k)
         except urllib.error.HTTPError as e:
             try:
-                body = e.read(ERR_BODY_MAX).decode("utf-8", "ignore")[:300]
+                body = _err_body(e)[:300]
             except Exception:
                 body = ""
             if rl_host and e.code == 403 and "too frequent" in body.lower():
@@ -4597,7 +5223,10 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                 _save()
                 continue
             try:
-                rows = FILL_FETCHERS[ex](env, json.loads(json.dumps(st.get("fills") or {})), a, b)
+                cp9 = json.loads(json.dumps(st.get("fills") or {}))
+                rows = FILL_FETCHERS[ex](env, cp9, a, b)
+                if _bb_hold_keep(st, cp9):
+                    _save()
             except Exception as e:
                 ext["fills_err"] = _xm(repr(e))[:160]
                 days9, kind9 = _fills_limit_kind(repr(e))
@@ -4676,12 +5305,14 @@ def _hl_on(cfg) -> bool:
 def main():
     common.cpu_reserve_apply()
     common.ensure_dirs()
+    unit_beat.start("exf")
     writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
     n9 = common.scrub_secret_file(STATE_PATH)
     if n9:
         log.info("exf_state: 수정 전 오류 문구 %d칸 비밀값 가림", n9)
     state = common.read_json(STATE_PATH, {})
     _cool_restore()
+    _clock_restore()
     depaddr.start_background(_env)
     try:
         import perp_dex
@@ -4840,18 +5471,14 @@ def main():
                         snap9["sources"] = sorted(set(bal9.sources))
                     if getattr(bal9, "loans", None):
                         snap9["loans"] = list(bal9.loans)
+                    if ex == "binance" and isinstance((getattr(bal9, "by_src", None) or {}).get("futures"), dict):
+                        snap9["fut_part"] = dict(bal9.by_src["futures"])
                     if isinstance(prev_balances, dict) and (prev_balances or not bal9):
-                        agree9, why9 = _snap_agree(prevp, snap9)
+                        agree9, why9 = _snap_promote_ok(ex, prevp, snap9)
                         if agree9:
-                            _SNAP_MISS.pop(ex, None)
                             common.atomic_write_json(bp9, prevp)
                             if loud9:
-                                log.info("%s: 잔고 스냅샷 승격 (%d종)", ex, len(prev_balances))
-                        else:
-                            _SNAP_MISS[ex] = _SNAP_MISS.get(ex, 0) + 1
-                            if _SNAP_MISS[ex] % 6 == 1:
-                                log.info("%s 잔고 표본 불일치(%s · 연속 %d주기) — 승격 보류, 다음 주기 표본과 다시 비교",
-                                         ex, why9, _SNAP_MISS[ex])
+                                log.info("%s: 잔고 스냅샷 승격 (%d종)%s", ex, len(prev_balances), " — 일치 확인 없이(연속 불일치 상한)" if agree9 == "forced" else "")
                     common.atomic_write_json(pend_bp, snap9)
                     common.atomic_write_json(bp9 + ".view", snap9)
                     if loud9:

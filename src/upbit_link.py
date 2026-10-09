@@ -16,6 +16,7 @@ import acct_norm
 import common
 if __name__ == "__main__":
     common.cpu_reserve_apply()
+import unit_beat
 import bf_engine
 from inbox import SegmentWriter
 
@@ -349,9 +350,10 @@ def fetch_orders(up: "Upbit", months: float, open_now: list | None = None):
     next_state = {"backfilled_until": (max(start, now - win) if sweep_ok else cur),
                   "complete": False, "uuids": sorted(seen)[-20000:],
                   "open_track": track, "resweep_i": 1, "track_pending": pending}
-    for k9 in ("ext_from", "ext_target", "ext_start", "ext_emit"):
+    for k9 in ("ext_from", "ext_target", "ext_start", "ext_emit", "tfill"):
         if k9 in st:
             next_state[k9] = st[k9]
+    _tfill_add(next_state, [o for o in keep if _kst_day(_iso_ts(o.get("created_at"))) != _kst_day(now)])
     if resolved:
         log.info("오래 걸린 주문 체결 확정 %d건 (추적 %d · 확정 대기 %d)", len(resolved), len(track), pending)
     return keep + resolved, sweep_ok, next_state
@@ -383,6 +385,134 @@ def _oo_sig(rows: list) -> list:
 EXT_CHUNK = 30 * 86400
 
 
+TFILL_MAX = 20
+TFILL_RESEND = 600
+TFILL_SENDS = 5
+TFILL_TRIES = 10
+TFILL_QMAX = 20000
+_TFILL_KEEP = ("uuid", "market", "side", "state", "ord_type", "executed_volume", "paid_fee", "executed_funds", "trades_count", "trades")
+
+
+def _kst_day(ts):
+    try:
+        return time.strftime("%Y-%m-%d", time.gmtime(float(ts) + 9 * 3600))
+    except (TypeError, ValueError):
+        return None
+
+
+def _tfill_add(state: dict, orders) -> int:
+    q = state.get("tfill") if isinstance(state.get("tfill"), dict) else {}
+    n = 0
+    for o in orders or ():
+        if not isinstance(o, dict) or str(o.get("ord_type") or "") != "limit" or acct_norm.fill_ts(o) is not None:
+            continue
+        u = str(o.get("uuid") or "")
+        if not u or u in q or len(q) >= TFILL_QMAX:
+            continue
+        q[u] = {k: o.get(k) for k in ("market", "side", "state", "ord_type", "executed_volume", "paid_fee", "executed_funds",
+                                      "trades_count", "created_at") if o.get(k) is not None}
+        n += 1
+    if q:
+        state["tfill"] = q
+    return n
+
+
+def _tfill_done(uuids):
+    import sqlite3
+    if not os.path.exists(common.DB_PATH):
+        return None
+    try:
+        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
+        try:
+            out = {}
+            for u in uuids:
+                r = c.execute("SELECT payload FROM raw_ex WHERE exchange='upbit' AND kind='order' AND uuid=? ORDER BY revision DESC LIMIT 1",
+                              (u,)).fetchone()
+                try:
+                    out[u] = bool(r) and acct_norm.fill_ts(json.loads(r[0])) is not None
+                except (TypeError, ValueError):
+                    out[u] = False
+            return out
+        finally:
+            c.close()
+    except Exception as e:
+        log.warning("체결 시각 채우기 확인(원장 읽기) 실패 — 다음 주기: %s", e)
+        return None
+
+
+def _tfill_pass(up: "Upbit", writer, state: dict) -> int:
+    q = state.get("tfill") if isinstance(state.get("tfill"), dict) else {}
+    if not q:
+        return 0
+    now9 = int(time.time())
+    sent9 = [u for u, v in q.items() if isinstance(v, dict) and v.get("sent")]
+    dn9 = _tfill_done(sent9) if sent9 else None
+    if dn9 is not None:
+        for u in sent9:
+            ent = q[u]
+            if dn9.get(u):
+                q.pop(u, None)
+            elif now9 - int(ent.get("sent") or 0) >= TFILL_RESEND:
+                ent.pop("sent", None)
+                ent["ns"] = int(ent.get("ns") or 0) + 1
+                if ent["ns"] >= TFILL_SENDS:
+                    log.warning("체결 시각 채우기 %s %d번 보냈으나 원장 반영 없음(새 시각 환율·시세 실패 등) — 생성 시각 그대로(대기열에서 뺌)", u[:12], ent["ns"])
+                    q.pop(u, None)
+    items, drop, n = [], [], 0
+    for u in sorted(q, key=lambda k: (str((q[k] or {}).get("created_at") or ""), k)):
+        if n >= TFILL_MAX:
+            break
+        ent = q[u] if isinstance(q[u], dict) else {}
+        if ent.get("sent"):
+            continue
+        n += 1
+        try:
+            o = up.get("/v1/order", {"uuid": u})
+        except urllib.error.HTTPError as e:
+            if _note_backoff(up, e):
+                break
+            if e.code == 404:
+                ent["nf"] = int(ent.get("nf") or 0) + 1
+                if ent["nf"] >= NOTFOUND_DROP:
+                    log.warning("체결 시각 채우기 %s 단건 404 %d회 — 생성 시각 그대로(대기열에서 뺌)", u[:12], ent["nf"])
+                    drop.append(u)
+                continue
+            ent["n"] = int(ent.get("n") or 0) + 1
+            continue
+        except Exception as e:
+            ent["n"] = int(ent.get("n") or 0) + 1
+            log.warning("체결 시각 채우기 %s 단건 조회 실패(다음 주기 재시도): %s", u[:12], repr(e)[:120])
+            continue
+        finally:
+            time.sleep(0.15)
+        resp = {k: o.get(k) for k in _TFILL_KEEP if isinstance(o, dict) and k in o}
+        stored = dict({k: v for k, v in ent.items() if k not in ("n", "nf", "sent", "ns")}, uuid=u)
+        merged, why = acct_norm.trades_fill_merge(stored, resp)
+        if merged is not None:
+            items.append(dict(resp, uuid=u))
+            continue
+        ent["n"] = int(ent.get("n") or 0) + 1
+        if ent["n"] >= TFILL_TRIES or why not in ("체결 목록 없음", "체결 수 다름", "형식"):
+            log.warning("체결 시각 채우기 %s 검사 실패(%s) — 생성 시각 그대로(대기열에서 뺌)", u[:12], why)
+            drop.append(u)
+    for u in drop:
+        q.pop(u, None)
+    for u in [k for k, v in q.items() if isinstance(v, dict) and not v.get("sent") and int(v.get("n") or 0) >= TFILL_TRIES]:
+        log.warning("체결 시각 채우기 %s 일시 실패 %d회 — 생성 시각 그대로(대기열에서 뺌)", u[:12], TFILL_TRIES)
+        q.pop(u, None)
+    if items:
+        writer.append({"v": 1, "kind": "ex_order_trades", "exchange": "upbit", "ts": int(time.time()), "src": "upbit_link", "orders": items})
+        for it in items:
+            if isinstance(q.get(it["uuid"]), dict):
+                q[it["uuid"]]["sent"] = now9
+        log.info("체결 시각 채우기 %d건 보냄(대기열 %d — 원장 반영 확인 뒤 뺌)", len(items), len(q))
+    if q:
+        state["tfill"] = q
+    else:
+        state.pop("tfill", None)
+    return len(items)
+
+
 def extend_orders(up: "Upbit", months: float, target: float, next_state: dict, seen_extra: set):
     now = time.time()
     if next_state.get("ext_target") != int(target):
@@ -397,6 +527,7 @@ def extend_orders(up: "Upbit", months: float, target: float, next_state: dict, s
     a = max(float(target), frm - EXT_CHUNK)
     seen = set(next_state.get("uuids") or []) | seen_extra | set(next_state.get("open_track") or {})
     out, ok, cur = _sweep(up, a, frm, seen)
+    _tfill_add(next_state, out)
     if ok:
         next_state["ext_from"] = int(a)
         next_state["ext_emit"] = int(next_state.get("ext_emit") or 0) + len(out)
@@ -555,6 +686,10 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
     if orders:
         writer.append({"v": 1, "kind": "ex_fills", "exchange": "upbit",
                        "ts": int(time.time()), "orders": orders})
+    try:
+        _tfill_pass(up, writer, next_state)
+    except Exception as e:
+        log.warning("체결 시각 채우기 실패(다음 주기 재시도): %s", repr(e)[:140])
     next_state["complete"] = bool(open_ok and sweep_ok and not next_state.get("track_pending"))
     common.atomic_write_json(ORDERS_STATE, next_state)
     pend = int(next_state.get("track_pending") or 0)
@@ -632,6 +767,7 @@ def _cycle_once(up, writer, months: float, bo: "_Backoff", poll: int) -> int:
 
 def main():
     common.ensure_dirs()
+    unit_beat.start("ex")
     writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
     warned = False
     up = None

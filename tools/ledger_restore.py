@@ -20,6 +20,7 @@ import ledger_backup as lb
 
 STREAMS = ("evm", "sol", "bsc", "ex")
 MARGIN_H = 12
+PRE_RESTORE_KEEP = 2
 UNIT_SCRIPTS = ("core.py", "unit_runner.py", "evm_watch.py", "sol_watch.py", "bsc_watch.py", "upbit_link.py", "ex_foreign.py", "web.py")
 STOP_HINT = "pm2 stop tj-core tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web"
 START_HINT = "pm2 start tj-core  →  (몇 분 뒤) pm2 start tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web"
@@ -97,7 +98,7 @@ def inspect(path: str) -> dict:
     c = _ro(path)
     try:
         has = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        meta = {r["k"]: r["v"] for r in c.execute("SELECT k, v FROM meta WHERE k IN ('schema_version', 'rebuild_incomplete', 'ext_rebuilt_at')")} \
+        meta = {r["k"]: r["v"] for r in c.execute("SELECT k, v FROM meta WHERE k IN ('schema_version', 'rebuild_incomplete', 'ext_rebuilt_at', 'data_rev')")} \
             if "meta" in has else {}
         offs = {r["stream"]: (int(r["seg"]), int(r["off"])) for r in c.execute("SELECT stream, seg, off FROM inbox_offsets")} \
             if "inbox_offsets" in has else {}
@@ -116,13 +117,22 @@ def inspect(path: str) -> dict:
 
 
 def check(path: str, full: bool = False) -> dict:
-    info = inspect(path)
+    try:
+        info = inspect(path)
+    except sqlite3.DatabaseError as e:
+        return {"ok": False, "why": [f"열기 실패: {common.safe_err(e)}"], "info": None, "full": full}
     why = []
     sv = info["meta"].get("schema_version")
     if sv is None or str(sv) != str(dbm.SCHEMA_VERSION):
         why.append(f"원장 세대 {sv} ≠ 코드 {dbm.SCHEMA_VERSION}")
     if info["meta"].get("rebuild_incomplete"):
         why.append("재파생 미완 표식(rebuild_incomplete)")
+    try:
+        dr9 = int(str(info["meta"].get("data_rev") or 0).strip())
+        if dr9 > dbm.DATA_REV:
+            why.append(f"데이터 개정 {dr9} > 코드 {dbm.DATA_REV}(코드를 먼저 최신으로)")
+    except ValueError:
+        why.append("데이터 개정 번호(meta data_rev) 해석 불가")
     for t9 in ("postings", "raw_txs", "raw_ex", "inbox_offsets"):
         if t9 not in info["tables"]:
             why.append(f"표 없음: {t9}")
@@ -162,7 +172,7 @@ def coverage(offsets: dict, inbox_dir: str = None) -> dict:
     return out
 
 
-def running_units(root: str = ROOT) -> list:
+def running_units(root: str = ROOT, scripts=UNIT_SCRIPTS) -> list:
     try:
         out = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "command="], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
@@ -177,7 +187,7 @@ def running_units(root: str = ROOT) -> list:
         pid, cmd = int(parts[0]), parts[1]
         for tok in cmd.split():
             name = os.path.basename(tok)
-            if name not in UNIT_SCRIPTS:
+            if name not in scripts:
                 continue
             if os.path.isabs(tok):
                 if os.path.realpath(os.path.dirname(tok)) != src:
@@ -197,6 +207,17 @@ def running_units(root: str = ROOT) -> list:
     return hits
 
 
+def _load_cfg() -> dict:
+    try:
+        import settings_store
+        cfg = settings_store.load_config_quiet()
+        if isinstance(cfg, dict):
+            return cfg
+    except (Exception, SystemExit):
+        pass
+    return _read_json(common.CONFIG_PATH, {}) or {}
+
+
 def _backup_sets(path: str, cut: int) -> dict:
     c = _ro(path)
     try:
@@ -204,8 +225,8 @@ def _backup_sets(path: str, cut: int) -> dict:
         for ch, h in c.execute("SELECT chain, txhash FROM raw_txs"):
             tx.setdefault(ch, set()).add(h if ch == "sol" else str(h).lower())
         anchor = {}
-        for ch, b in c.execute("SELECT chain, max(block) FROM raw_txs WHERE ts IS NOT NULL AND ts <= ? AND block IS NOT NULL"
-                               " GROUP BY chain", (cut,)):
+        for ch, b in c.execute("SELECT chain, max(CAST(block AS INTEGER)) FROM raw_txs WHERE chain != 'sol' AND block IS NOT NULL"
+                               " AND ingested_at <= ? GROUP BY chain", (cut,)):
             if b is not None:
                 anchor[ch] = int(b)
         bsc_max = c.execute("SELECT max(block) FROM raw_txs WHERE chain='bsc'").fetchone()[0]
@@ -269,8 +290,45 @@ def _drop_wallet_evm(cur: dict, w: str):
         es["seen"].pop(w, None)
 
 
-def plan_evm(sd: str, B: dict, notes: list) -> dict:
+EVM_BPD_DEFAULT = 43200
+BLOCK_SEC_SAFETY = 0.8
+
+
+def block_sec(sd: str, ch: str, cfg: dict = None):
+    cands = []
+    hb = _read_json(os.path.join(sd, "health", "evm.json"), {}) or {}
+    for k9 in (ch, f"{ch}:rpclog"):
+        v9 = ((hb.get("sources") or {}).get(k9) or {}).get("block_sec_est") if isinstance(hb, dict) else None
+        if isinstance(v9, (int, float)) and not isinstance(v9, bool) and 0.01 <= v9 <= 600:
+            cands.append((float(v9), "수집기 관측"))
+    bpd = ((cfg or {}).get("chains") or {}).get(ch, {}).get("blocks_per_day") if isinstance(((cfg or {}).get("chains") or {}).get(ch), dict) else None
+    if bpd is None:
+        try:
+            import chaincatalog
+            bpd = (chaincatalog.CATALOG.get(ch) or {}).get("blocks_per_day")
+        except Exception:
+            bpd = None
+    try:
+        if bpd and float(bpd) > 0:
+            cands.append((86400.0 / float(bpd), "설정 blocks_per_day"))
+    except (TypeError, ValueError):
+        pass
+    if not cands:
+        cands.append((86400.0 / EVM_BPD_DEFAULT, "기본값"))
+    sec, src = min(cands)
+    return sec * BLOCK_SEC_SAFETY, src
+
+
+def _time_back(sd, ch, cfg, cut, now):
+    sec, src = block_sec(sd, ch, cfg)
+    return int(max(0, now - cut) / sec) + 1, f"블록 시간 {sec:.3g}초({src} × {BLOCK_SEC_SAFETY:g})"
+
+
+def plan_evm(sd: str, B: dict, notes: list, cut: int = None, now: int = None, cfg: dict = None) -> dict:
+    now = int(time.time()) if now is None else int(now)
+    cut = now if cut is None else int(cut)
     files = {}
+    dropped = {}
     for n in sorted(os.listdir(sd)):
         m = re.match(r"^emitted_(evm|rpc)_([\w.-]+)\.json$", n)
         if m:
@@ -280,6 +338,7 @@ def plan_evm(sd: str, B: dict, notes: list) -> dict:
                 keep = [h for h in em if str(h).lower() in B["tx"].get(ch, set())]
                 if len(keep) != len(em):
                     files[n] = keep
+                    dropped.setdefault(ch, set()).update(str(h).lower() for h in em if str(h).lower() not in B["tx"].get(ch, set()))
                     notes.append(f"{n}: 방출 기록 {len(em)} → {len(keep)}(백업에 없는 {len(em) - len(keep)}건 다시 보냄)")
     for n in sorted(os.listdir(sd)):
         m = re.match(r"^cursor_(evm|rpc)_([\w.-]+)\.json$", n)
@@ -288,18 +347,28 @@ def plan_evm(sd: str, B: dict, notes: list) -> dict:
         kind, ch = m.groups()
         cur = _read_json(os.path.join(sd, n), None)
         if not isinstance(cur, dict):
+            notes.append(f"★{n}: 읽지 못함(손상) — 그대로 둠 · 이 체인 그 사이 거래가 빠질 수 있어요(파일을 확인한 뒤 다시 미리보기)★")
             continue
         new = json.loads(json.dumps(cur))
         b = B["anchor"].get(ch)
         if kind == "rpc":
-            if b is not None and isinstance(new.get("from_block"), int) and new["from_block"] > b:
-                new["from_block"] = b
-                notes.append(f"{n}: from_block → {b}")
+            fb = new.get("from_block")
+            if not isinstance(fb, int) or isinstance(fb, bool):
+                notes.append(f"{n}: from_block 없음(아직 첫 수집 전) — 그대로")
+            elif b is not None:
+                if fb > b:
+                    new["from_block"] = b
+                notes.append(f"{n}: from_block {fb} → {min(fb, b)}(기준 블록 {b} 이하)")
+            else:
+                back, why = _time_back(sd, ch, cfg, cut, now)
+                new["from_block"] = max(0, fb - back)
+                notes.append(f"★{n}: 기준 블록 없음(백업에 이 체인 거래가 여유 이전에 없음) — from_block {fb} → {new['from_block']}"
+                             f"(시간으로 되감음 · {why})★")
             new.pop("_scan", None)
         else:
             rpc_track = "_rpc_v" in new
             known = B["wallets"].get(ch, set())
-            no_anchor = []
+            timed = []
             for w in _evm_wallet_keys(new):
                 if known and w.lower() not in known:
                     _drop_wallet_evm(new, w)
@@ -307,12 +376,22 @@ def plan_evm(sd: str, B: dict, notes: list) -> dict:
                     continue
                 if b is None:
                     cov = new.get("_cov:" + w)
-                    if not rpc_track and isinstance(cov, int) and new[w] > cov:
-                        new[w] = cov
-                        new.pop("_disc:" + w, None)
-                        notes.append(f"{n}: 기준 블록 없음 → {w[:10]}… 창 처음({cov})부터 다시 훑음")
-                    else:
-                        no_anchor.append(w)
+                    if not rpc_track and isinstance(cov, int) and not isinstance(cov, bool):
+                        if new[w] > cov:
+                            new[w] = cov
+                            new.pop("_disc:" + w, None)
+                            notes.append(f"{n}: 기준 블록 없음 → {w[:10]}… 창 처음({cov})부터 다시 훑음")
+                        else:
+                            notes.append(f"{n}: 기준 블록 없음 · {w[:10]}… 커서가 이미 창 처음({cov}) — 그대로")
+                        continue
+                    back, why = _time_back(sd, ch, cfg, cut, now)
+                    lo = max([x for x in (cov, new.get("_start")) if isinstance(x, int) and not isinstance(x, bool)] or [0])
+                    old9 = new[w]
+                    new[w] = max(lo, old9 - back) if old9 > lo else old9
+                    new.pop("_disc:" + w, None)
+                    if isinstance(new.get("_ns"), dict):
+                        new["_ns"].pop(w, None)
+                    timed.append((w, old9, new[w], why))
                     continue
                 if new[w] > b:
                     new[w] = b
@@ -320,15 +399,45 @@ def plan_evm(sd: str, B: dict, notes: list) -> dict:
                     if rpc_track:
                         if isinstance(new.get("_ns"), dict):
                             new["_ns"].pop(w, None)
-            if no_anchor:
-                notes.append(f"★{n}: 기준 블록 없음(백업에 이 체인 거래가 여유 이전에 없음) — 지갑 {len(no_anchor)}개 커서 그대로"
-                             f"(그 사이 거래는 tools/backfill_gap.py scan-evm --from-ts 로)★")
+            if timed:
+                notes.append(f"★{n}: 기준 블록 없음(백업에 이 체인 거래가 여유 이전에 없음) — {'RPC 트랙 ' if rpc_track else ''}지갑 {len(timed)}개 시간으로 되감음"
+                             f"({timed[0][3]} · 예 {timed[0][0][:10]}… {timed[0][1]} → {timed[0][2]})★")
+            if rpc_track and dropped.get(ch):
+                pp9 = f"pending_detail_{ch}.json"
+                pend9 = _read_json(os.path.join(sd, pp9), {})
+                pend9 = dict(pend9) if isinstance(pend9, dict) else {}
+                n0 = len(pend9)
+                for h9 in sorted(dropped[ch]):
+                    if re.fullmatch(r"0x[0-9a-f]{64}", h9):
+                        pend9.setdefault(h9, 0)
+                if len(pend9) != n0:
+                    files[pp9] = pend9
+                    notes.append(f"{pp9}: 백업 뒤 방출한 {len(pend9) - n0}건을 해시로 다시 받음(로그 없는 네이티브 이동 포함 — 되감은 첫 구간은 잔고 기준점 없이 시작)")
+                cc9 = ((cfg or {}).get("chains") or {}).get(ch)
+                cc9 = cc9 if isinstance(cc9, dict) else {}
+                lanes9 = isinstance(new.get("_handover"), dict) and cc9.get("rpc_lanes") is not False
+                tm9 = str(cc9.get("rpc_trace") or "").lower() or ("own" if lanes9 else "all")
+                if tm9 == "own" and not lanes9:
+                    notes.append(f"★{n}: 이 체인은 trace 범위가 '내 지갑 발신만'(rpc_trace=own · 단일 차선)이라 복구 구간의 외부발 internal 입금(외부 → 컨트랙트 → 내 지갑)은"
+                                 f" 다시 받을 때 trace 되지 않아 빠질 수 있어요 — tj-evm 을 켜기 전에 config.json chains.{ch}.rpc_trace 를 지우거나 \"all\" 로 바꾸면"
+                                 f" 재시도 큐({pp9})가 전부 trace 해 다시 받아요(큐가 빈 뒤 되돌리기)★")
+                if tm9 == "own" and lanes9:
+                    hq9 = new.get("_hq") if isinstance(new.get("_hq"), dict) else {}
+                    h0 = len(hq9)
+                    for h9 in sorted(dropped[ch]):
+                        if re.fullmatch(r"0x[0-9a-f]{64}", h9):
+                            hq9.setdefault(h9, 0)
+                    if len(hq9) != h0:
+                        new["_hq"] = hq9
+                        notes.append(f"{n}: 차선 모드(내 지갑 발신만 trace) — 복구 해시 {len(hq9) - h0}건을 인계 큐(_hq)에도(외부 → 컨트랙트 → 내 지갑 internal 입금도 trace)")
             if b is not None:
                 notes.append(f"{n}: 지갑 커서 → 블록 {b} 이하")
             for k9 in ("_scan", "_bkscan"):
                 new.pop(k9, None)
         for k9 in ("_synced_at", "_synced_tok_at"):
             new.pop(k9, None)
+        if not any(n in x for x in notes):
+            notes.append(f"{n}: 지갑 없음 — 동기화 도장만 지움")
         if new != cur:
             files[n] = new
     if any(n.startswith("cursor_evm_") for n in files):
@@ -558,7 +667,13 @@ def _rewind_binance(fst: dict, trades: dict) -> int:
 def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None, state_dir: str = None) -> dict:
     sd = state_dir or common.STATE_DIR
     now = int(time.time()) if now is None else int(now)
-    info = inspect(backup)
+    try:
+        info = inspect(backup)
+    except sqlite3.DatabaseError as e:
+        raise SystemExit(f"백업 열기 실패: {common.safe_err(e)} — 깨졌거나 원장 백업 파일이 아니에요(list 의 다른 번호로)")
+    miss9 = [t9 for t9 in ("meta", "raw_txs", "raw_ex", "inbox_offsets", "wallets") if t9 not in info["tables"]]
+    if miss9:
+        raise SystemExit(f"원장 백업이 아니에요(표 없음: {', '.join(miss9)}) — 빈 파일·다른 파일이면 list 의 다른 번호로")
     T = info["T"]
     cut = int(T - margin_h * 3600)
     cov = coverage(info["offsets"], os.path.join(sd, "inbox"))
@@ -568,7 +683,7 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
         B = _backup_sets(backup, cut)
         cfg = _read_json(common.CONFIG_PATH, {}) or {}
         if "evm" in rewind:
-            files.update(plan_evm(sd, B, notes))
+            files.update(plan_evm(sd, B, notes, cut=cut, now=now, cfg=_load_cfg()))
         if "sol" in rewind:
             files.update(plan_sol(sd, B, cfg, cut, notes))
         if "bsc" in rewind:
@@ -577,7 +692,21 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
             files.update(plan_ex(sd, B, cut, notes))
             notes.append("업비트 입출금: tj-ex 를 다시 시작하면 창 전체를 다시 보냄(파일 커서 없음)")
     return {"backup": backup, "T": T, "cut": cut, "margin_h": margin_h, "info": info, "coverage": cov, "rewind": rewind,
-            "files": files, "notes": notes}
+            "files": files, "notes": notes, "decisions_after": decisions_after(T)}
+
+
+def decisions_after(T: int, live: str = None):
+    live = live or common.DB_PATH
+    if not os.path.exists(live):
+        return None
+    try:
+        c = _ro(live)
+        try:
+            return int(c.execute("SELECT count(*) FROM decisions WHERE created_at > ?", (int(T),)).fetchone()[0])
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return None
 
 
 def invalidate_curves(sd: str):
@@ -621,7 +750,8 @@ def reset_inbox_offsets(path: str, streams: list) -> list:
     return list(streams)
 
 
-def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir: str = None, log=print) -> dict:
+def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir: str = None, log=print,
+          keep_pre: int = PRE_RESTORE_KEEP) -> dict:
     sd = state_dir or common.STATE_DIR
     live = common.DB_PATH
     if proc_check:
@@ -637,65 +767,221 @@ def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir:
     free = shutil.disk_usage(sd).free
     if free < need:
         raise SystemExit(f"디스크 여유 부족 — 여유 {_gb(free)} < 필요 {_gb(need)}(백업 복사본). 오래된 보존본(state/ledger.db.pre_*)을 정리한 뒤 다시")
-    ts = time.strftime("%Y%m%d_%H%M%S")
     lock = os.path.join(sd, "restore.lock")
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
     except FileExistsError:
         raise SystemExit(f"다른 복구가 진행 중이에요(또는 지난 복구가 중간에 멈춤): {lock} — 확인 뒤 지우고 다시")
-    rec_dir = os.path.join(sd, f"restore_{ts}")
-    os.makedirs(rec_dir, mode=0o700)
-    tmp = live + f".restore_{ts}.tmp"
+    rec_dir = tmp = None
     changed = []
     try:
-        copy_ledger(p["backup"], tmp)
-        for sfx in ("-wal", "-shm", "-journal"):
-            if os.path.exists(tmp + sfx):
-                os.remove(tmp + sfx)
-        reset_inbox_offsets(tmp, [s for s, cv in p["coverage"].items() if cv["state"] == "gap"])
-        c = sqlite3.connect(common.sqlite_ro_uri(tmp, immutable=True), uri=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        base9, k9 = ts, 1
+        while os.path.exists(os.path.join(sd, f"restore_{ts}")) or os.path.exists(live + f".pre_restore_{ts}"):
+            k9 += 1
+            ts = f"{base9}_{k9}"
+        rec_dir = os.path.join(sd, f"restore_{ts}")
+        os.makedirs(rec_dir, mode=0o700)
+        tmp = live + f".restore_{ts}.tmp"
         try:
-            ok = c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-        finally:
-            c.close()
-        if not ok:
-            raise SystemExit("복사본 빠른 검사 실패 — 되돌리지 않았어요(디스크 확인)")
-        for name, obj in sorted(p["files"].items()):
-            src9 = os.path.join(sd, name)
-            if os.path.exists(src9):
-                shutil.copy2(src9, os.path.join(rec_dir, name))
-            if obj is None:
+            copy_ledger(p["backup"], tmp)
+            for sfx in ("-wal", "-shm", "-journal"):
+                if os.path.exists(tmp + sfx):
+                    os.remove(tmp + sfx)
+            reset_inbox_offsets(tmp, [s for s, cv in p["coverage"].items() if cv["state"] == "gap"])
+            c = sqlite3.connect(common.sqlite_ro_uri(tmp, immutable=True), uri=True)
+            try:
+                ok = c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            finally:
+                c.close()
+            if not ok:
+                raise SystemExit("복사본 빠른 검사 실패 — 되돌리지 않았어요(디스크 확인)")
+            for name, obj in sorted(p["files"].items()):
+                src9 = os.path.join(sd, name)
                 if os.path.exists(src9):
-                    os.remove(src9)
-                    changed.append(f"치움 {name}")
-            else:
-                common.atomic_write_json(src9, obj)
-                changed.append(f"고침 {name}")
-        if not os.path.exists(live):
-            for sfx in ("-wal", "-shm"):
-                if os.path.exists(live + sfx):
-                    os.replace(live + sfx, live + f".orphan_{ts}{sfx}")
-        res = lb.swap_in(live, tmp, live + f".pre_restore_{ts}")
-    except BaseException:
+                    shutil.copy2(src9, os.path.join(rec_dir, name))
+                if obj is None:
+                    if os.path.exists(src9):
+                        os.remove(src9)
+                        changed.append(f"치움 {name}")
+                else:
+                    common.atomic_write_json(src9, obj)
+                    changed.append(f"고침 {name}")
+            if not os.path.exists(live):
+                for sfx in ("-wal", "-shm"):
+                    if os.path.exists(live + sfx):
+                        os.replace(live + sfx, live + f".orphan_{ts}{sfx}")
+            res = lb.swap_in(live, tmp, live + f".pre_restore_{ts}")
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            try:
+                common.atomic_write_json(os.path.join(rec_dir, "plan.json"), {"ts": int(time.time()), "backup": p["backup"], "failed": True,
+                                                                             "changed": changed})
+            except OSError:
+                pass
+            raise
+        log(f"원장 교체 완료 — 이전 원장: {os.path.basename(res['kept']) if res['kept'] else '(없었음)'}"
+            + ("" if res["linked"] or not res["kept"] else " · 하드 링크 불가라 이름 바꾸기로"))
+        invalidate_curves(sd)
+        gone = prune_pre_restore(sd, keep_pre, keep_path=res["kept"])
+        if gone:
+            log("오래된 복구 전 보존본 정리(최근 %d개만): %s" % (keep_pre, ", ".join(os.path.basename(g) for g in gone)))
+        rec = {"ts": int(time.time()), "backup": p["backup"], "T": p["T"], "cut": p["cut"], "margin_h": p["margin_h"],
+               "coverage": p["coverage"], "rewind": p["rewind"], "changed": changed, "notes": p["notes"],
+               "kept": res["kept"], "originals": rec_dir, "pre_restore_pruned": [os.path.basename(g) for g in gone]}
+        common.atomic_write_json(os.path.join(rec_dir, "plan.json"), rec)
+        lb.fsync_dir(sd)
+        return rec
+    finally:
         try:
-            os.remove(tmp)
+            os.remove(lock)
         except OSError:
             pass
-        common.atomic_write_json(os.path.join(rec_dir, "plan.json"), {"ts": int(time.time()), "backup": p["backup"], "failed": True,
-                                                                     "changed": changed})
-        os.remove(lock)
-        raise
-    log(f"원장 교체 완료 — 이전 원장: {os.path.basename(res['kept']) if res['kept'] else '(없었음)'}"
-        + ("" if res["linked"] or not res["kept"] else " · 하드 링크 불가라 이름 바꾸기로"))
-    invalidate_curves(sd)
-    rec = {"ts": int(time.time()), "backup": p["backup"], "T": p["T"], "cut": p["cut"], "margin_h": p["margin_h"],
-           "coverage": p["coverage"], "rewind": p["rewind"], "changed": changed, "notes": p["notes"],
-           "kept": res["kept"], "originals": rec_dir}
-    common.atomic_write_json(os.path.join(rec_dir, "plan.json"), rec)
-    lb.fsync_dir(sd)
-    os.remove(lock)
-    return rec
+
+
+def prune_pre_restore(sd: str, keep: int = PRE_RESTORE_KEEP, keep_path: str = None) -> list:
+    keep = max(1, int(keep))
+    pre = os.path.basename(common.DB_PATH) + ".pre_restore_"
+    try:
+        names = sorted((n for n in os.listdir(sd) if n.startswith(pre) and not n.endswith(("-wal", "-shm"))),
+                       key=lambda n: os.path.getmtime(os.path.join(sd, n)), reverse=True)
+    except OSError:
+        return []
+    if keep_path:
+        kp = os.path.basename(keep_path)
+        names = [kp] + [n for n in names if n != kp] if kp in names else names
+    gone = []
+    for n in names[keep:]:
+        for sfx in ("", "-wal", "-shm"):
+            q = os.path.join(sd, n + sfx)
+            try:
+                os.remove(q)
+                if not sfx:
+                    gone.append(q)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                break
+    return gone
+
+
+FILES_STOP_HINT = "pm2 stop tj-web tj-review"
+FILES_UNITS = ("web.py", "unit_runner.py web", "review_daily.py")
+_SEED_LOCAL_RX = re.compile(r"^seed_local__([\w.-]+(?:__[\w.-]+)*\.json)$")
+
+
+def files_days(state_dir: str = None) -> list:
+    bdir = os.path.join(state_dir or common.STATE_DIR, "backups")
+    days = set()
+    try:
+        for n in os.listdir(bdir):
+            m = re.match(r"^(?:files_(\d{8})|prefs_(\d{8})\.json)$", n)
+            if m:
+                days.add(m.group(1) or m.group(2))
+    except OSError:
+        pass
+    return sorted(days, reverse=True)
+
+
+def files_plan(day: str, state_dir: str = None) -> dict:
+    sd = state_dir or common.STATE_DIR
+    if not re.fullmatch(r"\d{8}", str(day or "")):
+        raise SystemExit("날짜는 YYYYMMDD — python3 tools/ledger_restore.py files 로 목록")
+    bdir = os.path.join(sd, "backups")
+    fdir = os.path.join(bdir, f"files_{day}")
+    items, manual, info = [], [], []
+    if os.path.isdir(fdir):
+        for n in sorted(os.listdir(fdir)):
+            src = os.path.join(fdir, n)
+            if not os.path.isfile(src) or n.endswith(".tmp"):
+                continue
+            m = _SEED_LOCAL_RX.match(n)
+            if n in lb.FILES_STATE or lb.FILES_STATE_RX.match(n):
+                items.append((src, n))
+            elif m and ".." not in m.group(1).split("__"):
+                items.append((src, os.path.join("seed_local", *m.group(1).split("__"))))
+            elif n == "config_subset.json":
+                manual.append(f"{src} — config.json 의 지갑 목록(wallets)·거래소 입금주소(exchange_addresses) 사본: 필요하면 손으로 옮기세요(키·토큰은 원래 안 담김)")
+    pj = os.path.join(bdir, f"prefs_{day}.json")
+    if os.path.isfile(pj):
+        d9 = _read_json(pj, None)
+        if not isinstance(d9, dict):
+            raise SystemExit(f"열기 실패: {pj} — 깨진 사본(다른 날짜로)")
+        for key, name in (("ui_prefs", "ui_prefs.json"), ("outflow_decisions", "outflow_decisions.json")):
+            if isinstance(d9.get(key), (dict, list)):
+                items.append((("json", d9[key], pj), name))
+        if isinstance(d9.get("decisions"), list):
+            info.append(f"원장 판정(decisions) {len(d9['decisions'])}건은 원장 안 표라 이 명령으로 안 바뀌어요 — 원장째 되돌리기 = restore")
+    if not items and not manual:
+        raise SystemExit(f"{day} 사본이 없어요(state/backups/files_{day}/ · prefs_{day}.json) — files 로 목록")
+    return {"day": day, "items": items, "manual": manual, "info": info}
+
+
+def files_payloads(fp: dict) -> tuple:
+    ok, bad = [], []
+    for src, rel in fp["items"]:
+        if os.path.isabs(rel) or ".." in rel.split(os.sep):
+            bad.append(f"{rel}: 경로 이상")
+            continue
+        if isinstance(src, tuple):
+            ok.append((rel, json.dumps(src[1], ensure_ascii=False, indent=1).encode("utf-8")))
+            continue
+        try:
+            with open(src, "rb") as f:
+                data = f.read()
+            val = json.loads(data.decode("utf-8"))
+            if not isinstance(val, (dict, list)):
+                raise ValueError("JSON 객체·배열이 아님")
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            bad.append(f"{rel}: {common.safe_err(e)[:80]}")
+            continue
+        ok.append((rel, data))
+    return ok, bad
+
+
+def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=print) -> dict:
+    sd = state_dir or common.STATE_DIR
+    if proc_check:
+        run = running_units(scripts=UNIT_SCRIPTS + ("review_daily.py",))
+        if run is None:
+            raise SystemExit("프로세스 목록(ps)을 못 읽어 유닛 정지를 확인할 수 없어요 — 정지를 직접 확인했다면 --no-proc-check")
+        web9 = [(pid, n) for pid, n in run if n in FILES_UNITS]
+        if web9:
+            raise SystemExit("먼저 화면·리뷰 유닛을 멈추세요: " + FILES_STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in web9))
+    payloads, bad = files_payloads(fp)
+    if bad:
+        raise SystemExit("깨진 사본이 있어 아무것도 안 바꿨어요(하나라도 깨지면 전체 거부): " + " · ".join(bad[:5])
+                         + " — 다른 날짜로: python3 tools/ledger_restore.py files")
+    base9 = os.path.join(sd, "restore_files_" + time.strftime("%Y%m%d_%H%M%S"))
+    keep, k9 = base9, 1
+    while os.path.exists(keep):
+        k9 += 1
+        keep = f"{base9}_{k9}"
+    os.makedirs(keep, mode=0o700)
+    done = []
+    for rel, data in payloads:
+        dst = os.path.join(sd, rel)
+        if os.path.exists(dst):
+            os.makedirs(os.path.dirname(os.path.join(keep, rel)), mode=0o700, exist_ok=True)
+            shutil.copy2(dst, os.path.join(keep, rel))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        tmp9 = dst + ".restore_tmp"
+        fd = os.open(tmp9, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp9, dst)
+        done.append(rel)
+    if "daily_px.json" in done:
+        invalidate_curves(sd)
+    common.atomic_write_json(os.path.join(keep, "plan.json"), {"ts": int(time.time()), "day": fp["day"], "restored": done})
+    log(f"되돌림 {len(done)}개: " + ", ".join(done) + f"\n지금 것 보존: {keep}")
+    return {"restored": done, "kept": keep}
 
 
 COLLECTOR_UNITS = ("evm_watch.py", "sol_watch.py", "bsc_watch.py", "upbit_link.py", "ex_foreign.py",
@@ -757,12 +1043,19 @@ def _print_plan(p: dict, log=print):
         log("  · " + n)
     if p["files"]:
         log(f"  바꿀 상태 파일 {len(p['files'])}개: " + ", ".join(sorted(p["files"])))
+    da9 = p.get("decisions_after")
+    if da9:
+        log(f"  ★지금 원장의 판정(매칭 확인·원가 지정 등) {da9}건이 백업 뒤에 생겼어요 — 되돌리면 원장에서 사라져요(화면에서 다시 · "
+            "원장 밖 화면 설정·보낸 내역 판정은 그대로)★")
 
 
 EPILOG = """순서: list → restore <번호>(미리보기) → pm2 stop tj-core tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web → restore <번호> --apply
       → pm2 start tj-core → (몇 분 뒤) pm2 start tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web
-지금 원장은 state/ledger.db.pre_restore_<시각> 으로 보존 · 바꾼 수집기 상태 파일 원본은 state/restore_<시각>/.
-백업 뒤 수집분: 인박스(8일 보존)에 백업 위치가 남았으면 core 가 그대로 다시 읽고, 아니면 수집기 커서를 '백업 시각 − 여유(12시간)' 앞으로 되감는다.
+지금 원장은 state/ledger.db.pre_restore_<시각> 으로 보존(최근 2개만 — --keep-pre) · 바꾼 수집기 상태 파일 원본은 state/restore_<시각>/.
+백업 뒤 수집분: 인박스에 백업 위치가 남았으면(다 읽은 세그먼트 기본 8일 · 스트림당 512MiB 상한 — TJ_INBOX_RETAIN_DAYS) core 가 그대로 다시 읽고,
+  아니면 수집기 커서를 '백업 시각 − 여유(12시간)' 이전에 들어온 마지막 블록으로 되감는다(기준 블록이 없는 체인은 시간으로 되감고 ★ 안내).
+되돌리면 원장 안 판정(매칭 확인·원가 지정 등 decisions)도 백업 시점으로 — 그 뒤 판정은 다시(미리보기가 건수를 알려 줌).
+원장 밖 사본(지난날 고정가·AI 리뷰·기타 자산·설정·메모·화면 설정): files → files <YYYYMMDD> → pm2 stop tj-web tj-review → --apply.
 원장이 없고 정말 새로 시작: new --apply (수집도 처음부터면 --fresh-collect)."""
 
 
@@ -781,6 +1074,11 @@ def main(argv=None) -> int:
     r.add_argument("--rewind", default="auto", help="auto(인박스에 없는 스트림만) | all | none | evm,sol,bsc,ex")
     r.add_argument("--full-check", action="store_true", help="적용 전 integrity_check(느림 · 기본은 quick_check)")
     r.add_argument("--no-proc-check", action="store_true", help="유닛 정지 확인을 못 하는 환경에서만")
+    r.add_argument("--keep-pre", type=int, default=PRE_RESTORE_KEEP, help=f"복구 전 보존본(ledger.db.pre_restore_*) 최근 몇 개 남길지(기본 {PRE_RESTORE_KEEP} · 최소 1)")
+    fl = sub.add_parser("files", help="원장 밖 사본(files_<날짜>/ · prefs_<날짜>.json) 되돌리기(기본 = 미리보기)")
+    fl.add_argument("day", nargs="?", help="YYYYMMDD — 없으면 목록")
+    fl.add_argument("--apply", action="store_true")
+    fl.add_argument("--no-proc-check", action="store_true", help="화면 유닛 정지 확인을 못 하는 환경에서만")
     n = sub.add_parser("new", help="정말 새 원장으로 시작")
     n.add_argument("--apply", action="store_true")
     n.add_argument("--fresh-collect", action="store_true", help="수집 커서·방출 기록도 옆으로(처음부터 다시 받음 — 수집기를 먼저 멈춤)")
@@ -804,6 +1102,28 @@ def main(argv=None) -> int:
             print(f"{k:2}. {r9['name']}  {_gb(r9['size'])}  {_kst(r9['mtime'])}  {extra}")
         print("\n다음: python3 tools/ledger_restore.py restore <번호>   (미리보기 → --apply)")
         return 0
+    if a.cmd == "files":
+        if not a.day:
+            days = files_days()
+            if not days:
+                print("원장 밖 사본이 없어요(state/backups/files_<날짜>/ · prefs_<날짜>.json — tj-core 정기 백업이 매일 만듦)")
+                return 1
+            print("원장 밖 사본 날짜(새 것부터): " + " ".join(days))
+            print("다음: python3 tools/ledger_restore.py files <YYYYMMDD>   (미리보기 → --apply)")
+            return 0
+        fp = files_plan(a.day)
+        for src, rel in fp["items"]:
+            print(f"  되돌림 대상: state/{rel}  ← " + (f"{os.path.basename(src[2])} 의 칸" if isinstance(src, tuple) else os.path.relpath(src, common.STATE_DIR)))
+        for x in fp["manual"] + fp["info"]:
+            print("  · " + x)
+        for x in files_payloads(fp)[1]:
+            print("  ★깨짐(적용 거부): " + x + "★")
+        if not a.apply:
+            print(f"\n미리보기예요(아무것도 안 바꿈). 적용: {FILES_STOP_HINT} → 같은 명령 + --apply → pm2 start tj-web tj-review")
+            return 0
+        files_apply(fp, proc_check=not a.no_proc_check)
+        print("다음: pm2 start tj-web tj-review")
+        return 0
     if a.cmd == "check":
         res = check(resolve(a.backup), full=not a.quick)
         print(("정상" if res["ok"] else "문제: " + " · ".join(res["why"])) + f" ({'integrity_check' if res['full'] else 'quick_check'})")
@@ -826,7 +1146,7 @@ def main(argv=None) -> int:
                 print("\n떠 있는 유닛: " + ", ".join(f"{n9}(pid {pid})" for pid, n9 in run) + f" — 적용 전에 {STOP_HINT}")
             print("\n미리보기예요(아무것도 안 바꿈). 적용: 같은 명령 + --apply")
             return 0
-        rec = apply(p, full_check=a.full_check, proc_check=not a.no_proc_check)
+        rec = apply(p, full_check=a.full_check, proc_check=not a.no_proc_check, keep_pre=a.keep_pre)
         print(f"\n완료 — 기록·원본: {rec['originals']}")
         print("다음: " + START_HINT)
         return 0

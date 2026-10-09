@@ -1117,7 +1117,15 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         tk9 = sp.get("tick") if isinstance(sp.get("tick"), dict) else {}
         ex9 = (f"마지막 한 바퀴 {float(tk9.get('sec') or 0):.0f}초" + (f"(가장 느린 단계: {tk9['slowest']})" if tk9.get("slowest") else "")
                if tk9.get("sec") and float(tk9["sec"]) > 60 else None)
-        out.append(_source(st, now, "price:spot", "tj-web", "시세 갱신", "price", sp.get("updated"), None, ex9))
+        has9 = any(isinstance(sp.get(k9), dict) and sp.get(k9) for k9 in ("usd", "ex_usd", "dex_usd"))
+        wt9 = sp.get("want") if isinstance(sp.get("want"), dict) else None
+        try:
+            need9 = wt9 is None or bool(wt9.get("ex")) or int(wt9.get("dex") or 0) > 0
+        except (TypeError, ValueError):
+            need9 = True
+        if not has9 and need9:
+            ex9 = " · ".join(x for x in (ex9, "받은 시세 없음(바퀴는 돎)") if x)
+        out.append(_source(st, now, "price:spot", "tj-web", "시세 갱신", "price", sp.get("updated") if (has9 or not need9) else None, None, ex9))
         usd_ts = [float(v) for v in (sp.get("usd_ts") or {}).values() if isinstance(v, (int, float))]
         if usd_ts:
             out.append(_source(st, now, "price:global", "tj-web", "글로벌 시세", "price", max(usd_ts)))
@@ -1601,13 +1609,54 @@ def collect_poison():
         return {"error": common.safe_err(e)[:160]}
 
 
+def _sweep_scope():
+    try:
+        import copy
+        import chainsweep as _cs9
+        cf9 = _read(common.CONFIG_PATH, None)
+        if not isinstance(cf9, dict) or not isinstance(cf9.get("wallets"), list):
+            return set(), {}
+        cf9 = copy.deepcopy(cf9)
+        cf9.setdefault("chains", {})
+        off9 = {}
+        for n, cc in (cf9.get("chains") or {}).items():
+            if isinstance(cc, dict) and not common.chain_enabled(n, cc):
+                co9 = cc.get("_chainoff") if isinstance(cc.get("_chainoff"), dict) else {}
+                try:
+                    off9[n] = float(co9["at"]) if co9.get("auto") is True and co9.get("at") else None
+                except (TypeError, ValueError):
+                    off9[n] = None
+        common.apply_activity_gate(cf9)
+        return {pr for pr in _cs9.wallets(cf9)[2] if pr[0] not in off9}, off9
+    except (Exception, SystemExit):
+        return set(), {}
+
+
 def collect_chainsweep():
     d = _read(os.path.join(common.STATE_DIR, "chain_sweep.json"), None)
     if not isinstance(d, dict):
         return None
     fs = [f for f in (d.get("findings") or []) if isinstance(f, dict)]
-    act9 = _activity_pairs()
-    fs = [f for f in fs if not (act9.get(f"{f.get('chain')}:{str(f.get('wallet') or '').lower()}") or {}).get("active")]
+    joined9, off9 = _sweep_scope()
+    fs = [f for f in fs if (str(f.get("chain") or ""), str(f.get("wallet") or "").lower()) not in joined9]
+    n_off = 0
+    if off9:
+        act9 = _activity_pairs()
+        keep9 = []
+        for f in fs:
+            c9 = str(f.get("chain") or "")
+            if c9 in off9:
+                at9 = off9[c9]
+                a9 = (act9.get(f"{c9}:{str(f.get('wallet') or '').lower()}") or {}).get("activatedAt")
+                try:
+                    new9 = at9 is not None and a9 is not None and float(a9) > at9
+                except (TypeError, ValueError):
+                    new9 = False
+                if not new9:
+                    n_off += 1
+                    continue
+            keep9.append(f)
+        fs = keep9
     try:
         import chainsweep as _cs9
         sp9 = _read(common.BACKFILL_SPEED_PATH, None) or {}
@@ -1616,7 +1665,7 @@ def collect_chainsweep():
         fs = [_cs9.refresh_reason(f, (sp9.get("chains") or {}) if isinstance(sp9, dict) else {}, auto9) for f in fs]
     except Exception:
         pass
-    return {"checkedAt": d.get("checkedAt"), "findings": fs,
+    return {"checkedAt": d.get("checkedAt"), "findings": fs, "off": n_off,
             "auto": len(d.get("autoEnabled") or []), "errors": len(d.get("errors") or []), "chains": len(d.get("chains") or {})}
 
 
@@ -1717,6 +1766,7 @@ def collect_web(cfg: dict, st: dict, now: float):
 FUT_WAIT_WARN_S = 3600
 FUT_WAIT_FRESH_S = 2400
 FUT_FB_SHOW_S = 86400
+FUT_PLACE_FRESH_S = 7200
 
 
 def collect_fut_wait(now: float, path: str = None) -> list:
@@ -1742,6 +1792,13 @@ def collect_fut_wait(now: float, path: str = None) -> list:
             continue
         if age >= FUT_WAIT_WARN_S:
             warn_w[str(ex)] = age
+    fb_live = {}
+    for ex, it in sorted(w.items()):
+        if fresh and isinstance(it, dict) and it.get("fallback"):
+            try:
+                fb_live[str(ex)] = float(it.get("since") or now)
+            except (TypeError, ValueError):
+                continue
     fb_at = {}
     for x in [x for x in (d.get("fb") or []) if isinstance(x, dict)]:
         ex = str(x.get("ex") or "")
@@ -1759,12 +1816,58 @@ def collect_fut_wait(now: float, path: str = None) -> list:
                                    "(그 사이 선물 정산은 지난날로 들어갈 수 있음)"))
         else:
             out.append(dict(base, cid=f"futwait:{ex}", title=f"{nm} 선물 정산 대기 없음", level="ok", detail="잔고 대사 정상 진행"))
-        if ex in fb_at:
+        if ex in fb_live:
+            out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 못 받아 종전 규칙으로 대사 중 ({fmt_ago(now - fb_live[ex])}째)", level="warn",
+                            detail="선물 정산 파일이 3시간 넘게 잔고를 못 덮어 종전 규칙으로 대사하는 중 — 그 사이 선물 정산은 정산 시각이 아니라 "
+                                   "지난날로 들어갈 수 있어요(원장 합·보유는 맞음 · 이중 계상 없음) · 선물 수집이 되살아나면 저절로 풀려요"))
+        elif ex in fb_at:
             out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 못 받아 종전 규칙으로 대사 ({fmt_ago(now - fb_at[ex])} 전)", level="warn",
                             detail="선물 정산 파일이 3시간 넘게 잔고를 못 덮어 종전 규칙으로 대사 — 그 사이 선물 정산은 정산 시각이 아니라 "
                                    "지난날로 들어갔을 수 있어요(원장 합·보유는 맞음 · 이중 계상 없음)"))
         else:
             out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 종전 규칙 전환 없음(최근 하루)", level="ok", detail="정상"))
+    try:
+        pfresh = now - float(d.get("ts") or 0) <= FUT_PLACE_FRESH_S
+    except (TypeError, ValueError):
+        pfresh = False
+    pl = d.get("place") if isinstance(d.get("place"), dict) else {}
+    pbase = dict(base, kind="futplace", action="상세 사유는 tj-core 로그 '선물 정산 재배치' · 미리보기 python3 tools/exf_fut_place.py — 선물 정산 수집이 되살아나거나"
+                                                " 원장 백업이 생기면 다음 대사에 저절로 옮겨요(그 전 정산은 옛 배치 그대로 · 합은 맞음)")
+    for ex in sorted(set(names) | {str(k) for k in pl}):
+        nm = names.get(ex, ex)
+        it = pl.get(ex) if pfresh and isinstance(pl.get(ex), dict) else None
+        if it:
+            out.append(dict(pbase, cid=f"futplace:{ex}", title=f"선물 재배치 대기: {nm} — {str(it.get('why') or '사유 모름')[:120]}", level="warn",
+                            detail="지난 대사가 지난날로 보낸 선물 정산을 정산 시각으로 다시 놓는 1회 작업을 이 거래소만 미뤘어요(다른 거래소는 옮김)"))
+        else:
+            out.append(dict(pbase, cid=f"futplace:{ex}", title=f"{nm} 선물 재배치 대기 없음", level="ok", detail="정상"))
+    return out
+
+
+SNAP_MISS_SHOW_S = 7200
+
+
+def collect_snap_miss(now: float, path: str = None) -> list:
+    d = _read(path or os.path.join(common.STATE_DIR, "exf_snap_miss.json"), None)
+    if not isinstance(d, dict) or not isinstance(d.get("ex"), dict):
+        return []
+    names = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "하이퍼리퀴드"}
+    base = {"unit": "tj-exf", "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "snapmiss",
+            "action": "보통 선물·봇 거래가 잦아 10분마다 잔고가 움직이는 계정 — 할 일 없음(총자산이 최대 1시간 늦게 따라와요). 거래가 없는데 이어지면 tj-exf 로그 '잔고 표본 불일치' 확인"}
+    out = []
+    for ex in sorted({str(k) for k in d["ex"]} | {str(x) for x in (d.get("seen") if isinstance(d.get("seen"), list) else [])}):
+        it = d["ex"].get(ex)
+        nm = names.get(ex, ex)
+        try:
+            live = isinstance(it, dict) and it.get("forced") and now - float(it.get("at") or 0) <= SNAP_MISS_SHOW_S
+        except (TypeError, ValueError):
+            live = False
+        if live:
+            out.append(dict(base, cid=f"snapmiss:{ex}", title=f"잔고 표본 계속 다름: {nm} {str(it.get('why') or '').split(' ')[0]}", level="warn",
+                            detail=f"10분마다 받는 잔고 표본이 {int(it.get('n') or 0)}주기째 서로 달라({str(it.get('why') or '')[:60]}) 일치 확인 없이"
+                                   f" 약 1시간마다 반영 중 — 마지막 반영 {fmt_ts(float(it['forced']))}"))
+        else:
+            out.append(dict(base, cid=f"snapmiss:{ex}", title=f"{nm} 잔고 표본 일치", level="ok", detail="정상"))
     return out
 
 
@@ -1983,6 +2086,69 @@ def _liq_blind_checks(add, st9: dict, now: float) -> None:
                 since=since9, persist=0, resolve=60, notify=False, remind=False, kind="liqblind")
 
 
+RUNNER_KEYS = ("web", "core", "evm", "sol", "bsc", "ex", "exf", "alert")
+RUNNER_STALE_SEC = 180
+PM2LESS_NO_OK_SEC = 600
+PM2LESS_ALL_SEC = 300
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError, TypeError, ValueError):
+        return True
+
+
+def runner_alive(rec, now: float):
+    if not isinstance(rec, dict) or rec.get("by") == "reload":
+        return None
+    try:
+        age = now - float(rec.get("ts"))
+    except (TypeError, ValueError):
+        return None
+    pid = rec.get("pid")
+    alive_pid = _pid_alive(pid) if pid else True
+    if age > RUNNER_STALE_SEC:
+        return False, f"마지막 기록 {fmt_ago(age)} 전" + (" · 프로세스는 있음(멈춤)" if pid and alive_pid else " · 프로세스 없음")
+    if not alive_pid:
+        return False, f"기록 {fmt_ago(age)} 전 · 그 프로세스(pid {pid})가 없음"
+    why = str(rec.get("why") or "")
+    return True, ("대기: " + why[:80] if rec.get("state") == "waiting" and why else "실행 중") + f" · 기록 {fmt_ago(max(0.0, age))} 전 (pm2 없음 — 러너 기록)"
+
+
+def ledger_wait_item(rc, now: float, db_path: str = None):
+    if not isinstance(rc, dict) or rc.get("state") != "waiting" or rc.get("by") == "reload":
+        return None
+    try:
+        if not now - float(rc.get("ts")) < 600:
+            return None
+    except (TypeError, ValueError):
+        return None
+    why = str(rc.get("why") or "")
+    dbp = db_path or common.DB_PATH
+    ev = " · ".join(str(x) for x in (rc.get("evidence") or [])[:4])
+    try:
+        since = int(float(rc.get("since") or rc.get("ts")))
+    except (TypeError, ValueError):
+        since = None
+    if why.startswith("원장 파일 없음") and not os.path.exists(dbp):
+        return {"id": "ledger:missing", "kind": "missing", "title": "원장 파일 없음 — 복구 필요", "since": since,
+                "detail": "예전 원장 흔적: " + ev + " — 빈 원장을 만들지 않고 기다리는 중(수집은 인박스에 쌓임)",
+                "action": "python3 tools/ledger_restore.py list → restore <번호>(미리보기) → --apply · 정말 새로 시작이면 tools/ledger_restore.py new --apply"}
+    if why.startswith("원장이 이 코드보다 새") and os.path.exists(dbp):
+        return {"id": "ledger:newer", "kind": "newer", "title": "원장이 코드보다 새 판 — 코드 업데이트 필요", "since": since,
+                "detail": why[:300] + " — core 를 띄우지 않고 기다리는 중(수집은 인박스에 쌓임)",
+                "action": "README '업데이트' 절대로 코드를 최신으로(git pull → bash tools/setup.sh → 재시작) · 옛 코드를 써야 하면 python3 tools/ledger_restore.py list"}
+    if why.startswith("원장 손상") and os.path.exists(dbp):
+        return {"id": "ledger:corrupt", "kind": "corrupt", "title": "원장 손상 — 복구 필요", "since": since,
+                "detail": "검사 결과: " + (ev or "?") + " — 원장을 열지 않고 기다리는 중(수집은 인박스에 쌓임 · 되돌리면 지금 원장은 보존본으로 남음)",
+                "action": "python3 tools/ledger_restore.py list → restore <번호>(미리보기) → 유닛 정지 → --apply → pm2 start tj-core"}
+    return None
+
+
 def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     t = h["t"]
     now = obs["now"]
@@ -2011,7 +2177,20 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     down_units = set()
     for u in units:
         if pm2 is None:
-            add(f"proc:{u}", u, "프로세스 상태", None, "pm2 확인 불가")
+            ra = runner_alive((obs.get("runner") or {}).get(u[3:] if u.startswith("tj-") else u), now)
+            if ra is None:
+                if u in (h.get("optional_units") or ()):
+                    continue
+                add(f"proc:{u}", u, "프로세스 상태", None, "pm2 확인 불가 · 러너 기록 없음")
+                continue
+            if ra[0]:
+                add(f"proc:{u}", u, "프로세스 상태", "ok", ra[1], persist=t["proc_persist"], resolve=60, kind="proc")
+            else:
+                down_units.add(u)
+                src9 = {"tj-ex": "upbit_link.py", "tj-exf": "ex_foreign.py", "tj-alert": "alert_bot.py"}.get(u)
+                add(f"proc:{u}", u, "프로세스 중지", "crit", ra[1] + " (pm2 없음 — 러너 기록)",
+                    f"그 유닛을 다시 켜세요: python3 src/{src9 or 'unit_runner.py ' + u[3:]} — 켠 터미널의 마지막 출력에서 원인 확인",
+                    persist=t["proc_persist"], resolve=60, kind="proc")
             continue
         p = pm2.get(u)
         stt = (p or {}).get("status") or "없음"
@@ -2108,6 +2287,12 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                 since=s["new_chain"], persist=120, kind=s["kind"])
             checks[-1].update(age=real, age_eff=real, label=s["label"], new_chain=True)
             continue
+        if pm2 is None and lvl == "ok" and not s["last_success"] and s["kind"] in ("chain", "upbit") and age is not None and age >= PM2LESS_NO_OK_SEC:
+            add(cid, s["unit"], f"{s['label']} 시작 뒤 성공 없음", "warn",
+                f"관측 {fmt_ago(real)}째 성공 기록 없음" + (f" · 최근 오류: {str(s['err'])[:120]}" if s.get("err") else ""),
+                ACTIONS[s["kind"]].format(unit=s["unit"]) + " (pm2 없이 돌리면 그 유닛을 켠 터미널의 출력)", since=s["first_seen"], persist=120, kind=s["kind"])
+            checks[-1].update(age=real, age_eff=age, label=s["label"])
+            continue
         partial_ok = lvl == "ok" and s.get("partial")
         if partial_ok:
             lvl = "warn"
@@ -2131,6 +2316,16 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         checks[-1].update(age=real, age_eff=age, label=s["label"])
         if pdur is not None and pdur >= float(t.get("partial_tg_sec") or 86400):
             checks[-1]["tg_force"] = True
+    if pm2 is None:
+        fast9 = [s for s in (obs.get("sources") or []) if s.get("kind") in ("chain", "upbit") and not s.get("new_chain")]
+        if fast9 and all(now - float(s.get("first_seen") or now) >= PM2LESS_ALL_SEC for s in fast9):
+            stale9 = [s for s in fast9 if not s.get("last_success") or now - float(s["last_success"]) >= PM2LESS_ALL_SEC]
+            bad9 = len(stale9) == len(fast9)
+            add("collect:all", "system", "모든 수집기 5분째 성공 없음" if bad9 else "수집기 성공", "warn" if bad9 else "ok",
+                (f"{len(fast9)}곳(" + ", ".join(str(s.get('label')) for s in fast9[:6]) + (" …" if len(fast9) > 6 else "") + ") 모두 5분 넘게 성공 없음")
+                if bad9 else f"{len(fast9) - len(stale9)}/{len(fast9)}곳 5분 안 성공",
+                "인터넷 연결·키를 확인하고, pm2 없이 돌리면 각 수집기를 켠 터미널의 출력을 보세요" if bad9 else "",
+                persist=0, resolve=120, kind="chain")
     for s in obs.get("sources") or []:
         if s.get("key") != "ex:upbit" or "track_pending" not in s:
             continue
@@ -2265,6 +2460,9 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                 persist=0, resolve=600, notify=False, remind=False, kind="rebuild")
     if "tj-core" in units:
         for c9 in collect_fut_wait(now):
+            add(**c9)
+    if "tj-exf" in units:
+        for c9 in collect_snap_miss(now):
             add(**c9)
     di = obs.get("decis")
     if isinstance(di, dict) and isinstance(di.get("items"), dict) and "tj-core" in units:
@@ -2501,6 +2699,8 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         old = age is not None and age > float(t.get("backup_warn_h") or 36) * 3600
         crit9 = age is not None and age > float(t.get("backup_crit_h") or 72) * 3600
         skip = bk.get("skip") == "disk" and now - float(bk.get("skip_at") or 0) < 86400
+        if skip and age is not None and age > float(t.get("backup_disk_crit_h") or 30) * 3600:
+            crit9 = True
         bad = old or skip
         if bk.get("last_ok"):
             det = f"마지막 원장 백업 {fmt_ago(age)} 전({fmt_ts(bk['last_ok'])}, {float(bk.get('size') or 0) / 1024 ** 3:.2f}GB)"
@@ -2511,7 +2711,8 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                     f"{float(bk.get('need') or 10 * 1024 ** 3) / 1024 ** 3:.1f}GB)")
         elif bk.get("err") and bad:
             det += f" · 최근 실패: {str(bk['err'])[:100]}"
-        add("backup:age", "tj-core", (f"원장 백업 {int(age // 86400)}일째 없음" if crit9 else "원장 백업 건너뜀(디스크 부족)" if skip
+        add("backup:age", "tj-core", ("원장 백업 못 함(디스크 부족) — 마지막 " + fmt_ago(age) + " 전" if (crit9 and skip) else
+                                      f"원장 백업 {int(age // 86400)}일째 없음" if crit9 else "원장 백업 건너뜀(디스크 부족)" if skip
                                       else f"원장 백업 {fmt_ago(age)} 없음") if bad else "원장 백업",
             "crit" if crit9 else "warn" if bad else "ok", det,
             "디스크 여유 확보(옛 백업 정리) 뒤 tj-core 로그의 '원장 정기 백업' 줄 확인",
@@ -2538,13 +2739,9 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "crit" if crit_o9 else "warn" if bad9 else "ok", det9,
             "python3 tools/offsite_backup.py status · test(연결 확인) · run --force — 원격 키·폴더·여유 공간 확인",
             persist=0, resolve=600, notify=crit_o9, remind=crit_o9, kind="backup")
-    rc9 = (obs.get("runner") or {}).get("core")
-    if isinstance(rc9, dict) and rc9.get("state") == "waiting" and str(rc9.get("why") or "").startswith("원장 파일 없음") \
-            and isinstance(rc9.get("ts"), (int, float)) and now - float(rc9["ts"]) < 600 and not os.path.exists(common.DB_PATH):
-        add("ledger:missing", "tj-core", "원장 파일 없음 — 복구 필요", "crit",
-            "예전 원장 흔적: " + " · ".join(str(x) for x in (rc9.get("evidence") or [])[:4]) + " — 빈 원장을 만들지 않고 기다리는 중(수집은 인박스에 쌓임)",
-            "python3 tools/ledger_restore.py list → restore <번호>(미리보기) → --apply · 정말 새로 시작이면 tools/ledger_restore.py new --apply",
-            persist=0, resolve=60, kind="backup")
+    lw9 = ledger_wait_item((obs.get("runner") or {}).get("core"), now)
+    if lw9:
+        add(lw9["id"], "tj-core", lw9["title"], "crit", lw9["detail"], lw9["action"], since=lw9.get("since"), persist=0, resolve=60, kind="backup")
     lw = obs.get("liqw")
     if isinstance(lw, dict) and isinstance(lw.get("status"), dict) and "tj-exf" in units and "tj-exf" not in down_units \
             and "tj-exf" not in (obs.get("intent_active") or ()):
@@ -2793,9 +2990,10 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         usd9 = sum(float(f.get("usd") or 0) for f in fs)
         add("chainsweep:untracked", "tj-web",
             (f"미추적 체인에 잔고/활동 {len(fs)}건" + (f" (≈${usd9:,.0f})" if usd9 else "")) if fs else "미추적 체인 점검",
-            lvl, " / ".join(_cs9.finding_text(f) for f in fs[:6]) + (f" 외 {len(fs) - 6}건" if len(fs) > 6 else "")
-            if fs else f"체인 {cs.get('chains')}개 점검 — 발견 없음" + (f" · 활동 게이트 자동 추적 {cs['auto']}쌍" if cs.get("auto") else "")
-            + (f" · 조회 실패 {cs['errors']}개 체인" if cs.get("errors") else ""),
+            lvl, (" / ".join(_cs9.finding_text(f) for f in fs[:6]) + (f" 외 {len(fs) - 6}건" if len(fs) > 6 else "")
+                  if fs else f"체인 {cs.get('chains')}개 점검 — 발견 없음" + (f" · 활동 게이트 자동 추적 {cs['auto']}쌍" if cs.get("auto") else "")
+                  + (f" · 조회 실패 {cs['errors']}개 체인" if cs.get("errors") else ""))
+            + (f" · 끈 체인 {cs['off']}건(설정에서 끈 체인 — 알림 없음)" if cs.get("off") else ""),
             "그 체인을 추적에 추가하거나(속도 측정이 끝나면 활동 지갑은 자동으로 켜져요), 필요 없는 체인·지갑이면 무시 목록(설정 파일)에 넣어 경고에서 뺄 수 있어요",
             persist=0, remind=False, kind="chainsweep")
         chip(f"미추적 체인 {len(fs)}건" if fs else "미추적 체인 없음")
@@ -3759,8 +3957,13 @@ def web_view(now: float = None) -> dict:
     if isinstance(d, dict):
         d = common.scrub_secrets(d)[0]
     if not isinstance(d, dict):
-        return {"v": 1, "overall": "unknown", "updatedAt": None, "open": [], "resolved": [], "watching": [],
-                "units": [], "note": "아직 상태 점검 결과가 없어요 — 감시 프로그램(알림·감시)이 첫 점검 전이거나 꺼져 있어요"}
+        off9 = os.environ.get("TJ_DEMO") != "1" and not (runner_alive(_read(os.path.join(common.STATE_DIR, "runner_alert.json"), None), now) or (False,))[0]
+        d = {"v": 1, "overall": "unknown", "updatedAt": None, "open": [], "resolved": [], "watching": [], "units": [],
+             "note": ("감시 유닛(tj-alert)이 꺼져 있어요 — 원장·백업·수집 문제를 화면·텔레그램으로 알려 주지 못해요(켜기: pm2 start tj-alert · pm2 없이: python3 src/alert_bot.py)"
+                      if off9 else "아직 상태 점검 결과가 없어요 — 감시 프로그램(tj-alert)이 첫 점검 전이에요")}
+        if off9:
+            d["monitorOff"] = True
+        return _with_ledger_wait(d, now)
     iv = float(d.get("interval") or 60)
     age = now - float(d.get("updatedAt") or 0)
     if age > max(300, 5 * iv):
@@ -3772,14 +3975,35 @@ def web_view(now: float = None) -> dict:
                       "action": "pm2 restart tj-alert 후 pm2 logs tj-alert 확인", "level": "crit", "peak": "crit",
                       "since": d.get("updatedAt"), "opened": d.get("updatedAt"), "notified": False,
                       "telegram": False}] + list(d.get("open") or [])
+    return _with_ledger_wait(d, now)
+
+
+def _with_ledger_wait(d: dict, now: float) -> dict:
+    try:
+        lw = ledger_wait_item(_read(os.path.join(common.STATE_DIR, "runner_core.json"), None), now)
+    except Exception:
+        lw = None
+    if not lw:
+        return d
+    d = dict(d)
+    d["ledgerWait"] = {k: lw[k] for k in ("id", "kind", "title", "detail", "action", "since")}
+    if not any(isinstance(x, dict) and lw["id"] in (x.get("id"), x.get("check")) for x in d.get("open") or []):
+        d["open"] = [{"id": lw["id"], "check": lw["id"], "unit": "tj-core", "title": lw["title"], "detail": lw["detail"], "action": lw["action"],
+                      "level": "crit", "peak": "crit", "since": lw["since"], "opened": lw["since"], "notified": False, "telegram": False}] + list(d.get("open") or [])
+    d["overall"] = "crit"
     return d
 
 
 def compact(view: dict) -> dict:
     op = view.get("open") or []
-    return {"overall": view.get("overall"), "crit": sum(1 for x in op if x.get("level") == "crit"),
-            "warn": sum(1 for x in op if x.get("level") != "crit"), "updatedAt": view.get("updatedAt"),
-            "stale": bool(view.get("stale"))}
+    out = {"overall": view.get("overall"), "crit": sum(1 for x in op if x.get("level") == "crit"),
+           "warn": sum(1 for x in op if x.get("level") != "crit"), "updatedAt": view.get("updatedAt"),
+           "stale": bool(view.get("stale"))}
+    if view.get("ledgerWait"):
+        out["ledger"] = view["ledgerWait"]
+    if view.get("monitorOff"):
+        out["monitorOff"] = True
+    return out
 
 
 TG_STATS = {"last_ok": None, "last_fail": None, "fail_since": None, "consec_fail": 0, "last_error": None}
@@ -3946,7 +4170,7 @@ class Monitor:
                 "inbox": pr["inbox"]() if "inbox" in pr else collect_inbox(st, now),
                 "disk": pr["disk"]() if "disk" in pr else collect_disk(),
                 "reload": _read(os.path.join(common.STATE_DIR, "health_reload.json"), None),
-                "runner": {u9: _read(os.path.join(common.STATE_DIR, f"runner_{u9}.json"), None) for u9 in ("web", "core", "evm", "sol", "bsc")},
+                "runner": {u9: _read(os.path.join(common.STATE_DIR, f"runner_{u9}.json"), None) for u9 in RUNNER_KEYS},
                 "web": pr["web"]() if "web" in pr else collect_web(cfg, st, now),
                 "tg": dict(TG_STATS, configured=bool(tg_configured)),
                 "dm": collect_dm(st, now, bool(tg_configured))}

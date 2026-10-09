@@ -47,8 +47,11 @@ BLIND_DANGER_SEC = 120
 BLIND_REMIND_SEC = 3600
 BLIND_IDLE_SEC = 600
 PERM_RETRY_HELD = 300
+BLIND_IDLE_TG_SEC = 3600
+PERM_RETRY_SEEN = (300, 1800)
 REPEAT_MIN_DEF = 60
 REENTER_X = 1.1
+REENTER_MIN_SEC = 900
 REENTER_RISK_X = 0.95
 SLOW_AGE = 1800
 FILE_FORGET = 86400
@@ -330,6 +333,8 @@ def judge_futures(mem: dict, rows: list, gone: list, th: float, now: float, link
             e.pop("out", None)
             out.append(_alert("LIQ_NEAR", f"🔴 {r['name']} 가격이 청산가에 닿았거나 지났어요\n지금 증거금을 넣거나 포지션을 줄이세요.\n{nums}{link}",
                         {"k": k, "g": "fut", "st": 3, "d1": d1, "n": r["name"]}))
+        elif e.get("out") and d <= th and r.get("alert_ok") and now - float(_f(e.get("at")) or 0) < REENTER_MIN_SEC:
+            e.pop("out", None)
         elif e.get("out") and d <= th and r.get("alert_ok"):
             s9 = 3 if cross else 1
             e.update(st=s9, d1=round(d, 3), at=int(now))
@@ -343,7 +348,7 @@ def judge_futures(mem: dict, rows: list, gone: list, th: float, now: float, link
             h2 = (f"🔴 {r['name']} 청산가에 더 가까워졌어요" if nopct else f"🔴 {r['name']} 청산가까지 {pct(d)}로 더 가까워졌어요")
             out.append(_alert("LIQ_NEAR", f"{h2}\n지금 증거금을 넣거나 포지션을 줄이세요.\n{nums}{link}",
                         {"k": k, "g": "fut", "st": 2, "d1": d1, "n": r["name"]}))
-        elif rep and st >= 2 and d <= th and r.get("alert_ok") and now - float(_f(e.get("at")) or 0) >= rep:
+        elif rep and st >= 1 and d <= th and r.get("alert_ok") and now - float(_f(e.get("at")) or 0) >= rep:
             e["at"] = int(now)
             dur9 = ago_ko(now - float(_f(e.get("t1")) or _f(e.get("at")) or now))
             h3 = (f"🔴 {r['name']} 가격이 아직 청산가에 닿았거나 지난 상태예요" if cross else
@@ -567,6 +572,7 @@ def judge_risk(mem: dict, rows: list, gone: list, now: float, link: str = "", re
             s_h = max(risk_stage(x["r"] / REENTER_RISK_X, x.get("call"), x.get("liq")) if (x.get("call") and x.get("r") is not None) else 0,
                       x.get("st_off") or 0)
             if s_h < told:
+                e["pk"] = max(int(_f(e.get("pk")) or 0), told)
                 told = max(1, s_h)
                 e["st"] = told
         if e is not None and rep and s >= 2 and s <= told and x.get("alert_ok") and now - float(_f(e.get("at")) or 0) >= rep \
@@ -582,8 +588,13 @@ def judge_risk(mem: dict, rows: list, gone: list, now: float, link: str = "", re
             txt9, meta9 = f"{head9}\n{todo9} {dtxt}.\n{_risk_nums(x)}{link}", {"k": k, "g": "risk", "st": told, "n": what, "rep": 1}
             out.append(_alert("LOAN_RISK", txt9, meta9) if loan else _alert("MARGIN_RISK", txt9, meta9))
             continue
+        if s > told and x.get("alert_ok") and e is not None and s <= int(_f(e.get("pk")) or 0) and now - float(_f(e.get("at")) or 0) < REENTER_MIN_SEC:
+            e["st"] = s
+            continue
         if s > told and x.get("alert_ok"):
             mem[k] = {"st": s, "at": int(now), "label": what, "t1": int(_f((e or {}).get("t1")) or now)}
+            if e is not None and int(_f(e.get("pk")) or 0) > s:
+                mem[k]["pk"] = int(_f(e.get("pk")))
             subj = METRIC_SUBJ.get(x.get("metric") or "", "위험 지표가")
             head = {1: f"🔴 {what}: {subj} 마진콜 문턱의 90%에 닿았어요",
                     2: f"🔴 {what}: 마진콜에 닿았어요(긴급)",
@@ -790,9 +801,11 @@ class Watcher:
                                           "worst": str(v9.get("worst") or "")[:200]}
         self.__dict__["_prev"] = prev
         bl = d.get("blind") if isinstance(d.get("blind"), dict) else {}
+        sn = d.get("seen") if isinstance(d.get("seen"), dict) else {}
         return {"v": 1, "fut": d.get("fut") if isinstance(d.get("fut"), dict) else {},
                 "risk": d.get("risk") if isinstance(d.get("risk"), dict) else {},
                 "blind": {str(a): b for a, b in bl.items() if isinstance(b, dict)},
+                "seen": {str(a): int(_f(b) or 0) for a, b in sn.items() if _f(b)},
                 "moved": {str(a): str(b) for a, b in mv.items() if isinstance(b, str)}}
 
     def _reconcile(self):
@@ -899,6 +912,8 @@ class Watcher:
             del self.st["risk"][k]
         for b in [b for b in self.st.get("blind") or {} if b == f"f:{ex}" or (b.startswith("r:") and _risk_ex(b[2:]) == ex)]:
             del self.st["blind"][b]
+        for b in [b for b in self.st.get("seen") or {} if b == f"f:{ex}" or (b.startswith("r:") and _risk_ex(b[2:]) == ex)]:
+            del self.st["seen"][b]
         self.v.pop(ex, None)
         for src in [s9 for s9 in self.risk if _risk_ex(s9) == ex]:
             self.risk.pop(src, None)
@@ -1379,7 +1394,12 @@ class Watcher:
             kind = "net"
         j["fails"] = int(j.get("fails") or 0) + 1
         if kind == "perm":
-            j["until"] = now + (PERM_RETRY_HELD if self._held_job(name) else PERM_COOL)
+            if self._held_job(name):
+                j["until"] = now + PERM_RETRY_HELD
+            elif self._seen_job(name):
+                j["until"] = now + min(PERM_RETRY_SEEN[1], PERM_RETRY_SEEN[0] * 2 ** min(3, j["fails"] - 1))
+            else:
+                j["until"] = now + PERM_COOL
         elif kind == "rl":
             j["until"] = now + 30
         elif name.startswith(("mark:", "rpx:", "hl:")):
@@ -1423,6 +1443,22 @@ class Watcher:
         return False
 
     @staticmethod
+    def _place_of_job(name):
+        kind, _, rest = str(name).partition(":")
+        return {"acct": "f:" + rest, "mark": "f:" + rest, "hl": "f:hl:" + rest, "risk": "r:" + rest}.get(kind)
+
+    def _seen_job(self, name) -> bool:
+        b = self._place_of_job(name)
+        return bool(b and b in (self.st.get("seen") or {}))
+
+    @staticmethod
+    def _grp(b) -> str:
+        g, _, k = b.partition(":")
+        if g == "f" and k.startswith("hl:"):
+            return "hyperliquid"
+        return k if g == "f" else _risk_ex(k)
+
+    @staticmethod
     def _where(b) -> str:
         g, _, k = b.partition(":")
         if g == "r":
@@ -1442,6 +1478,8 @@ class Watcher:
 
     def _blind_eval(self, now, th, frows, rrows) -> list:
         mem = self.st.setdefault("blind", {})
+        seen9 = self.st.setdefault("seen", {})
+        idle9 = []
         prev = self.__dict__.get("_prev") or {}
         places = ["f:" + vk for vk in self.v] + ["r:" + src for src in self.risk]
         wf, wr = {}, {}
@@ -1467,6 +1505,10 @@ class Watcher:
             s["where"] = where
             hold = self._held(b)
             ok_at = float(s.get(tsf) or 0)
+            if ok_at and int(ok_at) >= int(seen9.get(b) or 0) + 3600:
+                if b not in seen9:
+                    self.dirty = True
+                seen9[b] = int(ok_at)
             p9 = prev.get(b) if not ok_at else None
             if not ok_at:
                 s.setdefault("bl_t0", now)
@@ -1493,7 +1535,7 @@ class Watcher:
             lvl = 0
             if age >= ((BLIND_DANGER_SEC if danger else BLIND_SEC) if hold else BLIND_IDLE_SEC):
                 lvl = (3 if danger else 2) if hold else 1
-            if lvl == 1 and s.get("ekind") == "perm":
+            if lvl == 1 and s.get("ekind") == "perm" and b not in seen9:
                 lvl = 0
             if int(s.get("bl") or 0) != lvl:
                 self.dirty = True
@@ -1522,8 +1564,34 @@ class Watcher:
                 out.append(_alert(kind, txt, {"k": b, "g": "blind", "st": 3, "n": where, "rep": 1}))
             elif e is not None and lvl == 0 and ok_at and ok_at >= float(_f(e.get("at")) or 0) and s.get("ok"):
                 del mem[b]
-                out.append(_alert(kind, f"✅ 청산 감시가 {where}{_eul(where)} 다시 보고 있어요\n할 일은 없어요 — 감시를 이어 가요.\n"
-                                  f"약 {ago_ko(ok_at - float(_f(e.get('s0')) or _f(e.get('t')) or ok_at))} 동안 못 봤어요", {"k": b, "g": "blind", "st": 0}))
+                if not e.get("fold"):
+                    out.append(_alert(kind, f"✅ 청산 감시가 {where}{_eul(where)} 다시 보고 있어요\n할 일은 없어요 — 감시를 이어 가요.\n"
+                                      f"약 {ago_ko(ok_at - float(_f(e.get('s0')) or _f(e.get('t')) or ok_at))} 동안 못 봤어요", {"k": b, "g": "blind", "st": 0}))
+            elif lvl == 1 and e is None and b in seen9:
+                idle9.append({"b": b, "where": where, "kind": kind, "tail": tail, "age": age, "ref": ref, "perm": s.get("ekind") == "perm"})
+        grp9 = {}
+        for it in idle9:
+            grp9.setdefault(self._grp(it["b"]), []).append(it)
+        for gk, its in sorted(grp9.items()):
+            if not any(x["age"] >= BLIND_IDLE_TG_SEC for x in its):
+                continue
+            told9 = any(isinstance(m9, dict) and self._grp(b9) == gk and int(m9.get("st") or 0) >= 1 for b9, m9 in mem.items())
+            if told9:
+                its = [x for x in its if x["age"] >= BLIND_IDLE_TG_SEC]
+            its.sort(key=lambda x: (not x["b"].startswith("f:"), x["b"]))
+            for i9, it in enumerate(its):
+                mem[it["b"]] = {"st": 1, "at": int(now), "t": int(now), "s0": int(it["ref"])}
+                if told9 or i9 > 0:
+                    mem[it["b"]]["fold"] = 1
+            if told9:
+                continue
+            it = max(its, key=lambda x: x["age"])
+            names9 = " · ".join(x["where"] for x in its)
+            todo9 = ("API 키·IP 허용 목록을 확인하세요(설정 › 거래소 키)." if any(x["perm"] for x in its)
+                     else "연결이 돌아오면 저절로 이어져요 — 그 전에 열 거면 거래소(앱·웹)에서 직접 지켜보세요.")
+            txt = (f"🔴 청산 감시가 {names9}{_eul(names9)} {ago_ko(it['age'])}째 못 보고 있어요\n"
+                   f"지금 열린 포지션·대출은 없었어요 — 그사이 새로 열면 청산 경고를 못 받아요. {todo9}\n" + it["tail"])
+            out.append(_alert(its[0]["kind"], txt, {"k": its[0]["b"], "g": "blind", "st": 1, "n": names9}))
         return out
 
     def step(self, now=None):
@@ -2049,6 +2117,9 @@ class Watcher:
         blive9 = {"f:" + vk for vk in self.v} | {"r:" + src for src in srcs}
         for b in [b for b in self.st.get("blind") or {} if not unknown9 and b not in blive9]:
             del self.st["blind"][b]
+            self.dirty = True
+        for b in [b for b in self.st.get("seen") or {} if not unknown9 and b not in blive9]:
+            del self.st["seen"][b]
             self.dirty = True
         for k in [k for k in self.st["fut"] if not unknown9 and not _vk_of(k).startswith("lev:") and _vk_of(k) not in live]:
             del self.st["fut"][k]

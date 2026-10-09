@@ -49,6 +49,7 @@ KRW_MARKETS = {"업비트", "빗썸"}
 GAS_KIND_KO = {"FAILED": "실패 tx", "LP_ADD": "LP 예치", "LP_REMOVE": "LP 회수", "NOOP": "승인·기타", "TRANSFER_OUT_EX": "거래소 입금 전송",
                "BRIDGE": "브릿지", "TRANSFER_SELF": "내 지갑 간 이동", "TRANSFER_OUT": "외부 전송", "PROGRAM_IN": "프로그램 수령",
                "SWAP": "매매 미연결 스왑"}
+GAS_KIND_KO["BRIDGE_FEE"] = "브릿지 수수료"
 GAS_MENTION_MIN = 5.0
 GAS_MENTION_PCT = 0.05
 FAILED_GAS_MUST = 50.0

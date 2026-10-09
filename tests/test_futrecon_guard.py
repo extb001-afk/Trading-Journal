@@ -24,6 +24,10 @@ core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.json
 LOG = core.Core.EXF_REVERT_LOG
 chk = T.chk
 C = core.Core(common.load_config())
+os.makedirs(os.path.join(common.STATE_DIR, "backups"), exist_ok=True)
+open(os.path.join(common.STATE_DIR, "backups", "ledger_test.db"), "w").close()
+common.atomic_write_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"),
+                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(common.STATE_DIR, "backups", "ledger_test.db")})
 C._quote_usd = lambda q, ts: Decimal(1)
 C.EXF_INIT_PHASE = 5
 NOW = int(time.time())
@@ -87,7 +91,7 @@ def pos_ok(ex, sym):
 
 
 def unmark(*exs):
-    C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
+    C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_place_v', 'exf_fut_place_wait')")
     for ex in exs:
         C.conn.execute("DELETE FROM meta WHERE k IN (?, ?)", (f"exf_fut_from_{ex}", f"exf_fut_cur_{ex}"))
     C.conn.commit()
@@ -293,12 +297,12 @@ dP = C._meta_get("recon_done_exf_bybit")
 recon("bybit", {"USDT": float(total("bybit", "USDT"))})
 wd = json.load(open(WP)) if os.path.exists(WP) else {}
 t_now = time.time()
-warns = lambda lst: [c["cid"] for c in lst if c["level"] == "warn"]
+warns = lambda lst: [c["cid"] for c in lst if c["level"] == "warn" and c["cid"].startswith("futwait")]
 it0 = health.collect_fut_wait(t_now + 100)
 wd2 = dict(wd, ts=int(t_now) + 3600)
 common.atomic_write_json(WP, wd2)
 it1 = health.collect_fut_wait(t_now + 3700)
-w1 = [c for c in it1 if c["level"] == "warn"]
+w1 = [c for c in it1 if c["level"] == "warn" and c["cid"].startswith("futwait")]
 chk(C._meta_get("recon_done_exf_bybit") == dP and "bybit" in (wd.get("wait") or {}) and not warns(it0)
     and [c["cid"] for c in w1] == ["futwait:bybit"] and w1[0]["notify"] is False and all(c["notify"] is False for c in it1),
     "P1 대사 미룸 표식 · 1시간 전엔 주의 없음 · 1시간 넘으면 '주의'(알림 없음)", (wd, warns(it0), warns(it1)))

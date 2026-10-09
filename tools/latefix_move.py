@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
 import sqlite3
@@ -9,9 +10,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
 import common
 from core import Core
+from exf_fix_place import _core_stopped
 
 KST = timezone(timedelta(hours=9))
 TOL = Decimal("0.00000001")
@@ -220,7 +223,7 @@ def _sums(rw, keys):
             for k in sorted(keys)}
 
 
-def _apply(moves):
+def _apply(moves, before_commit=None):
     rw = sqlite3.connect(common.DB_PATH, timeout=30, isolation_level=None)
     done = []
     try:
@@ -266,6 +269,8 @@ def _apply(moves):
         for k in sym_keys:
             if Core._exf_bounds_q(rw, *k) != b0[k]:
                 raise RuntimeError(f"{k[0]} {k[1]}: 구간 경계가 바뀜(내부 오류)")
+        if before_commit is not None:
+            before_commit(done)
         rw.execute("COMMIT")
         return done
     except BaseException:
@@ -321,23 +326,54 @@ def _invalidate(t_min):
     print("장기 곡선 다시 계산 표식:", common.mark_hist_dirty(int(t_min)))
 
 
-def _since(a):
-    if "--since" not in a:
+def _since(v):
+    if v is None:
         return int(time.time()) - 7 * 86400
-    v = a[a.index("--since") + 1]
     if v.isdigit():
         return int(v)
     return int(datetime.strptime(v, "%Y-%m-%d").replace(tzinfo=KST).timestamp())
 
 
-def main():
-    a = sys.argv[1:]
-    apply = "--apply" in a
+def _args(argv):
+    ap = argparse.ArgumentParser(prog="latefix_move.py", description="늦게 찾은 옛 체결의 대사 시각 보정 줄을 그 체결 직후로 옮기기(1회 복구) — 점검 기본(쓰기 없음) · "
+                                 "--apply 는 tj-core·tj-exf·tj-web 정지 중에만.")
+    ap.add_argument("--since", metavar="YYYY-MM-DD|epoch", help="이 뒤 관측된 늦은 체결만(기본 7일 전)")
+    ap.add_argument("--ex", metavar="EX", help="이 거래소만")
+    ap.add_argument("--sym", metavar="SYM,…", help="이 심볼만(쉼표)")
+    ap.add_argument("--undo", metavar="UNDO_JSON", help="되돌리기(state/latefix_move_undo_….json) — --apply 와 같이 써야 실제로 씀")
+    ap.add_argument("--apply", action="store_true", help="실제로 쓴다(없으면 점검만)")
+    return ap.parse_args(argv)
+
+
+def _write_undo(path, obj):
+    with open(path, "w") as f:
+        json.dump(obj, f)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def main(argv=None):
+    a = _args(sys.argv[1:] if argv is None else argv)
+    apply = a.apply
     assert os.path.abspath(common.DB_PATH).startswith(os.path.abspath(common.STATE_DIR)), "DB 경로가 state 밖"
     print(f"원장 {common.DB_PATH}")
-    if "--undo" in a:
-        f = a[a.index("--undo") + 1]
-        undo = json.load(open(f))
+    if not os.path.isfile(common.DB_PATH):
+        print("거부: 원장 없음 — TJ_BASE 확인(빈 원장을 만들지 않음)")
+        return 1
+    if apply and not _core_stopped():
+        print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함 — tj-core·tj-exf·tj-web 을 멈춘 뒤(우회 옵션 없음)")
+        return 1
+    if a.undo:
+        f = a.undo
+        try:
+            with open(f) as fh:
+                undo = json.load(fh)
+        except (OSError, ValueError) as e:
+            print(f"거부: 되돌리기 파일 읽기 실패 — {e}")
+            return 1
+        if not isinstance(undo, list):
+            print("거부: 되돌리기 파일 형식 오류(목록 아님)")
+            return 1
         print(f"되돌리기 {len(undo)}건 ({f})")
         if not apply:
             print("(점검만 — 쓰려면 --apply)")
@@ -350,10 +386,10 @@ def main():
         _invalidate(min([m["ts_old"] for m in undo] + [p["ts"] for m in undo for p in m["parts"]]))
         print(f"되돌림 {len(undo)}건")
         return 0
-    only_ex = a[a.index("--ex") + 1] if "--ex" in a else None
-    only_sym = {x.strip().upper() for x in a[a.index("--sym") + 1].split(",")} if "--sym" in a else None
+    only_ex = a.ex
+    only_sym = {x.strip().upper() for x in a.sym.split(",")} if a.sym else None
     conn = _ro()
-    moves, rejects = plan(conn, _since(a), only_ex)
+    moves, rejects = plan(conn, _since(a.since), only_ex)
     conn.close()
     if only_sym:
         moves = [m for m in moves if m["sym"] in only_sym]
@@ -374,14 +410,14 @@ def main():
         f.flush()
         os.fsync(f.fileno())
     try:
-        done = _apply(moves)
-    except RuntimeError as e:
+        done = _apply(moves, before_commit=lambda d9: _write_undo(undo, d9))
+    except (RuntimeError, OSError) as e:
+        try:
+            _write_undo(undo, moves)
+        except OSError:
+            pass
         print(f"★적용 전부 취소(원장 무변)★ {e} · 되돌리기 파일(미사용) {undo}")
         return 4
-    with open(undo, "w") as f:
-        json.dump(done, f)
-        f.flush()
-        os.fsync(f.fileno())
     _invalidate(min(p["ts"] for m in done for p in m["parts"]))
     print(f"적용 {len(done)}건 · 되돌리기 파일 {undo}")
     return 0

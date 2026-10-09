@@ -247,6 +247,24 @@ def ssh_cmd(c: dict) -> list:
     return a
 
 
+def scp_cmd(c: dict) -> list:
+    a = ["scp", "-q", "-P", str(c["port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30",
+         "-o", "StrictHostKeyChecking=accept-new"]
+    if c.get("key"):
+        a += ["-i", c["key"], "-o", "IdentitiesOnly=yes"]
+    return a
+
+
+def transfer_tool(c: dict) -> tuple:
+    if not shutil.which("ssh"):
+        return None, "ssh 가 없어요(OpenSSH 클라이언트 설치)"
+    if shutil.which("rsync"):
+        return "rsync", "rsync(이어받기 · 속도 상한)"
+    if shutil.which("scp"):
+        return "scp", "scp(rsync 없음 — 끊기면 처음부터 · 속도 상한은 scp -l)"
+    return None, "rsync·scp 가 둘 다 없어요(rsync 설치 권장)"
+
+
 def remote(c: dict, script: str, timeout: float = 120) -> str:
     r = subprocess.run(ssh_cmd(c) + [f"{c['user']}@{c['host']}", script], capture_output=True, text=True, timeout=timeout)
     if r.returncode:
@@ -284,9 +302,7 @@ def send(c: dict, files: list, timeout: float = 6 * 3600):
         if c["bwlimit_kbps"]:
             a.append(f"--bwlimit={int(c['bwlimit_kbps'])}")
     else:
-        a = ["scp", "-q", "-P", str(c["port"]), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"] \
-            + (["-i", c["key"], "-o", "IdentitiesOnly=yes"] if c.get("key") else []) \
-            + (["-l", str(int(c["bwlimit_kbps"]) * 8)] if c["bwlimit_kbps"] else [])
+        a = scp_cmd(c) + (["-l", str(int(c["bwlimit_kbps"]) * 8)] if c["bwlimit_kbps"] else [])
     r = subprocess.run(a + files + [dest], capture_output=True, text=True, timeout=timeout)
     if r.returncode:
         raise RuntimeError(f"보내기 실패 rc={r.returncode}: {(r.stderr or r.stdout).strip()[-200:]}")
@@ -350,7 +366,7 @@ def recv(c: dict, name: str, dst: str, timeout: float = 6 * 3600):
     rp = _rpath(c)
     src = f"{c['user']}@{c['host']}:" + ((rp + "/").replace("$HOME/", "") if rp.startswith("$HOME/") else rp + "/") + name
     a = ["rsync", "-t", "--partial"] + rsync_protect_args() + ["-e", " ".join(shlex.quote(x) for x in ssh_cmd(c))] if shutil.which("rsync") else \
-        ["scp", "-q", "-P", str(c["port"]), "-o", "BatchMode=yes"] + (["-i", c["key"], "-o", "IdentitiesOnly=yes"] if c.get("key") else [])
+        scp_cmd(c)
     r = subprocess.run(a + [src, dst], capture_output=True, text=True, timeout=timeout)
     if r.returncode:
         raise RuntimeError(f"받기 실패 {name}: {(r.stderr or r.stdout).strip()[-200:]}")
@@ -387,6 +403,19 @@ def fetch(c: dict, stamp: str = None, log=print) -> str:
         raise RuntimeError("풀린 원장 sha256 불일치")
     os.replace(out + ".part", out)
     return out
+
+
+def err_text(e) -> str:
+    m = common.safe_err(e)
+    if re.search(r"[가-힣]", m):
+        return m
+    if isinstance(e, subprocess.TimeoutExpired):
+        return "시간 초과(보내기·원격 명령이 끝나지 않음) — 연결·속도 상한(bwlimit_kbps)을 확인하세요"
+    if isinstance(e, OSError) and getattr(e, "errno", None) == 28:
+        return "디스크가 가득 찼어요 — 이 컴퓨터 state/backups 여유를 확보하세요"
+    if isinstance(e, PermissionError):
+        return f"권한이 없어요 — {m}"
+    return f"{type(e).__name__}: {m}"
 
 
 def due(c: dict, st: dict, now: float) -> bool:
@@ -482,7 +511,7 @@ def run(force: bool = False, check: bool = True, cfg: dict = None, now: float = 
                 + f": {man['stamp']} ({man['db']['size'] / 1024 ** 3:.2f}GB 압축 · {st['dur']:.0f}초)")
             return 0
         except Exception as e:
-            st.update(err=f"{type(e).__name__}: {common.safe_err(e)}"[:240], err_at=int(now + (time.time() - t0)), running=False)
+            st.update(err=err_text(e)[:240], err_at=int(now + (time.time() - t0)), running=False)
             write_status(st)
             log("서버 밖 백업 실패: " + st["err"])
             for n in os.listdir(OUT_DIR) if os.path.isdir(OUT_DIR) else []:
@@ -507,7 +536,11 @@ EPILOG = """설정(config.json — 값은 예시):
                 ssh -i ~/.ssh/<키> <사용자>@<이 컴퓨터> "cd <설치 폴더> && python3 tools/offsite_backup.py confirm $s $h"
 크론(매시 — 하루 1번만 보냄 · 실패 뒤 3시간 쉼):  17 * * * * cd <설치 폴더> && python3 tools/offsite_backup.py run
 묶음 = 원장 압축본(.db.gz) · 원장 밖 사본(.files.tar.gz — .env 제외) · manifest(sha256) — 받는 쪽 sha256 이 같을 때만 제자리로.
-되돌리기 = fetch → python3 tools/ledger_restore.py restore <받은 경로>."""
+되돌리기 = fetch → python3 tools/ledger_restore.py restore <받은 경로>.
+보안(NC7 ⑤): 묶음은 압축만 하고 ★암호화하지 않아요★ — 받는 컴퓨터에 접근할 수 있는 사람은 원장(거래·주소·금액)을 읽을 수 있으니 믿는 컴퓨터만.
+  처음 접속 때 원격 호스트 키를 묻지 않고 받아들여요(StrictHostKeyChecking=accept-new — 그 뒤 키가 바뀌면 거부). 처음부터 확인하려면
+  먼저 ssh -p <포트> -i <키> <사용자>@<호스트> 로 한 번 접속해 지문을 원격 관리자에게 받은 값과 맞춰 known_hosts 에 넣으세요.
+  test = ssh 연결 · 원격 폴더·여유 · 보낼 도구(rsync → 없으면 scp)와 원격 rsync 까지 확인."""
 
 
 def main(argv=None) -> int:
@@ -540,8 +573,21 @@ def main(argv=None) -> int:
             print("원격 설정이 없거나 outbox 모드예요: " + " · ".join(pr or ["mode=outbox"]))
             return 2
         if a.cmd == "test":
-            out = remote(c, f"mkdir -p {_q(_rpath(c))} && df -Pk {_q(_rpath(c))} | tail -1 && command -v sha256sum")
-            print("연결 정상 · 원격 여유: " + out.strip().splitlines()[0])
+            tool9, why9 = transfer_tool(c)
+            if tool9 is None:
+                print("보낼 도구 없음: " + why9)
+                return 1
+            try:
+                out = remote(c, f"mkdir -p {_q(_rpath(c))} && df -Pk {_q(_rpath(c))} | tail -1 && command -v sha256sum"
+                                " && (command -v rsync >/dev/null && echo TJ_RSYNC_OK || echo TJ_RSYNC_NO)")
+            except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+                print("연결 실패: " + common.safe_err(e)[:300])
+                return 1
+            lines9 = [x for x in out.strip().splitlines() if x.strip()]
+            if tool9 == "rsync" and "TJ_RSYNC_OK" not in lines9:
+                print("원격에 rsync 가 없어요 — 이 컴퓨터는 rsync 로 보내므로 실패해요(원격에 rsync 설치)")
+                return 1
+            print("연결 정상 · 보내기: " + why9 + " · 원격 여유: " + (lines9[0] if lines9 else "?"))
             return 0
         if a.cmd == "list-remote":
             for s in remote_stamps(c):

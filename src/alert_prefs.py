@@ -113,6 +113,7 @@ KIND_CAT = {
     "BAL_LONG": "balmis",
     "digest": "digest",
     "TARGET_HIT": "price", "STOP_HIT": "price",
+    "PLAN_BLIND": "price",
     "EXF_RECON": "recon", "RECON": "recon", "EX_RECON": "recon", "BALANCE_MISMATCH": "recon",
     "PROGRAM_IN": "sync", "SWAP": "sync", "TRANSFER_OUT": "sync", "TRANSFER_OUT_EX": "sync", "DEPOSIT_MATCHED": "sync",
     "PROMOTE": "sync", "NEW_ASSET": "sync", "EX_FILL_SKIP": "sync", "EX_DEPOSIT_SKIP": "sync", "EX_WITHDRAW_SKIP": "sync",

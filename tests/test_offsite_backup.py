@@ -151,6 +151,8 @@ for k in (10, 11, 12):
     OB.run(now=NOW + k * 86400, force=True, log=lambda *a: None)
 OB.send = fake_send
 ck("[2] 전송 실패 반복 = 이 컴퓨터 묶음 keep_local 개만(wl314 ④)", len(OB.local_stamps()) == 1, OB.local_stamps())
+ck("[2] O: 실패 문구 = 도구가 만든 한국어 그대로(원시 오류 이름 'RuntimeError:' 없음)", OB.read_status().get("err") == "시험: 보내기 실패", OB.read_status().get("err"))
+ck("[2] O: 디스크 가득 = 쉬운 말", "디스크가 가득" in OB.err_text(OSError(28, "No space left on device")))
 
 for bad9 in ("/srv/$(id)", "/srv/a b", "/srv/`id`", "/srv/;rm", "/srv/../etc", "relative/path"):
     ck(f"[1] 경로 거부: {bad9!r}", OB.problems(OB.conf({"backup": {"offsite": dict(CFG["backup"]["offsite"], path=bad9)}})) != [])
@@ -212,6 +214,10 @@ b = ev(backup={"created": HN - 10 * 86400, "last_ok": HN - 4 * 86400, "size": 1}
 ck("[6] 원장 백업 4일 = 빨강 · 텔레그램 · '4일째'", b["level"] == "crit" and b["notify"] is True and "4일째" in b["title"], b)
 b = ev(backup={"created": HN - 10 * 86400, "last_ok": HN - 3600, "skip": "disk", "skip_at": HN - 60, "free": 1 << 30, "need": 6 << 30})["backup:age"]
 ck("[6] 디스크 부족 문구 = 실제 필요량", "필요 6.0GB" in b["detail"], b)
+b = ev(backup={"created": HN - 10 * 86400, "last_ok": HN - 25 * 3600, "skip": "disk", "skip_at": HN - 60, "free": 1 << 30, "need": 6 << 30})["backup:age"]
+ck("[6] W2 디스크 부족 건너뜀 · 마지막 백업 25시간 = 주황(오늘 몇 번 더 시도)", b["level"] == "warn" and b["notify"] is False, b)
+b = ev(backup={"created": HN - 10 * 86400, "last_ok": HN - 31 * 3600, "skip": "disk", "skip_at": HN - 60, "free": 1 << 30, "need": 6 << 30})["backup:age"]
+ck("[6] W2 디스크 부족 건너뜀 · 마지막 백업 31시간 = 빨강 · 텔레그램 · '디스크 부족'", b["level"] == "crit" and b["notify"] is True and "디스크 부족" in b["title"], b)
 cks = ev(backup=None)
 ck("[6] 서버 밖 백업 꺼짐 = 점검 없음", "offsite:age" not in cks)
 o = ev(offsite={"enabled": True, "warn_h": 36, "status": {"last_ok": HN - 3600, "last_stamp": "tjoff_x", "size": 1 << 30, "dest": "backup.invalid:/srv"}})
@@ -245,4 +251,35 @@ ck("[6] 원장 없음 대기 = 빨강 · 복구 명령", m.get("ledger:missing",
 os.rename(common.DB_PATH + ".moved", common.DB_PATH)
 m = ev(runner={"core": {"state": "waiting", "why": "원장 파일 없음 — 백업에서 되돌리기 필요", "ts": int(HN)}})
 ck("[6] 원장이 다시 생기면 점검 없음", "ledger:missing" not in m)
+import contextlib
+import io
+c7 = OB.conf({"backup": {"offsite": {"enabled": True, "host": "box.invalid", "user": "bk", "port": 2222, "path": "/srv/x", "key": KEY}}})
+sc7 = OB.scp_cmd(c7)
+ck("[7] scp 도 ConnectTimeout·끊김 감지·호스트 키 규칙(ssh 와 같게)", "ConnectTimeout=20" in sc7 and "ServerAliveInterval=30" in sc7
+   and "StrictHostKeyChecking=accept-new" in sc7 and sc7[sc7.index("-P") + 1] == "2222", sc7)
+real_which, real_remote, real_conf = OB.shutil.which, OB.remote, OB.conf
+
+
+def run_test(which_has, remote_out):
+    OB.shutil.which = lambda n: ("/usr/bin/" + n) if n in which_has else None
+    OB.remote = (lambda c, script, timeout=120: remote_out) if not isinstance(remote_out, Exception) else \
+        (lambda c, script, timeout=120: (_ for _ in ()).throw(remote_out))
+    OB.conf = lambda cfg=None: c7
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = OB.main(["test"])
+    finally:
+        OB.shutil.which, OB.remote, OB.conf = real_which, real_remote, real_conf
+    return rc, out.getvalue()
+
+
+r7 = run_test({"ssh"}, "/dev/x 100 1 99 1% /srv\n/usr/bin/sha256sum\nTJ_RSYNC_OK\n")
+ck("[7] 이 컴퓨터에 rsync·scp 가 없으면 test = 실패(종전 '연결 정상')", r7[0] == 1 and "보낼 도구 없음" in r7[1], r7)
+r7 = run_test({"ssh", "rsync"}, "/dev/x 100 1 99 1% /srv\n/usr/bin/sha256sum\nTJ_RSYNC_NO\n")
+ck("[7] 이 컴퓨터는 rsync 인데 원격에 rsync 없음 = 실패 안내", r7[0] == 1 and "원격에 rsync" in r7[1], r7)
+r7 = run_test({"ssh", "scp"}, "/dev/x 100 1 99 1% /srv\n/usr/bin/sha256sum\nTJ_RSYNC_NO\n")
+ck("[7] scp 만 있으면 정상(원격 rsync 불필요) · 어떤 도구로 보내는지 표시", r7[0] == 0 and "scp" in r7[1] and "연결 정상" in r7[1], r7)
+r7 = run_test({"ssh", "rsync"}, RuntimeError("원격 명령 실패 rc=255: Connection timed out"))
+ck("[7] 연결 실패 = 한 줄 안내(traceback 없음)", r7[0] == 1 and "연결 실패" in r7[1], r7)
 T.finish()

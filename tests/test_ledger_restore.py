@@ -300,9 +300,9 @@ def make_backup(path):
 
     def tx(chain, h, blk, ts, snap=None, ing=None):
         c.execute("INSERT INTO raw_txs VALUES(?,?,?,?,?,?,?,?)", (chain, h, blk, None, ts, json.dumps(snap or {}), "[]", ing or T_BK))
-    tx("eth", "0xE1", 1000, T_BK - 20 * 3600)
-    tx("eth", "0xE2", 1100, T_BK - 13 * 3600)
-    tx("eth", "0xE3", 1200, T_BK - 1 * 3600)
+    tx("eth", "0xE1", 1000, None, ing=T_BK - 20 * 3600)
+    tx("eth", "0xE2", 1100, None, ing=T_BK - 13 * 3600)
+    tx("eth", "0xE3", 1200, None, ing=T_BK - 1 * 3600)
     tx("bsc", "0xB1", 50000, None)
     tx("sol", SIG(1), 900, T_BK - 30 * 3600, {"fee_payer": SOLW, "deltas": []})
     tx("sol", SIG(2), 950, T_BK - 14 * 3600, {"fee_payer": "x", "deltas": [
@@ -394,7 +394,7 @@ ck("[5] 인박스 앞부분 지워짐 = 네 스트림 모두 되감기", sorted(
 ck("[5] 기준 시각 = 백업 데이터 시각 · 여유 12시간", p["T"] == T_BK and p["cut"] == T_BK - 12 * 3600, (p["T"], p["cut"]))
 rec = LR.apply(p, proc_check=False, log=lambda *a: None)
 ce = rj("cursor_evm_eth.json")
-ck("[5] EVM 지갑 커서 = 여유 이전 마지막 블록(1100)", ce.get(W1) == 1100 and ce.get(W2) == 1100, ce)
+ck("[5] EVM 지갑 커서 = 여유 이전에 들어온 마지막 블록(1100 · ts 없는 실제 모양)", ce.get(W1) == 1100 and ce.get(W2) == 1100, ce)
 ck("[5] EVM 백업 뒤 넣은 지갑 = 기록 지움(새 지갑처럼)", WNEW not in ce and "_cov:" + WNEW not in ce, ce)
 ck("[5] EVM 동기화 도장·발견 체크포인트 지움 · 창 하한 유지", "_synced_at" not in ce and "_synced_tok_at" not in ce and "_disc:" + W1 not in ce
    and ce.get("_cov:" + W1) == 10, ce)
@@ -491,4 +491,122 @@ try:
     ck("[6] 유닛이 떠 있으면 적용 거부(정지 안내)", refused)
 finally:
     LR.running_units = saved_ru
+import contextlib
+import io
+
+
+def run_cli(argv):
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            rc = LR.main(argv)
+        return rc, out.getvalue(), None
+    except SystemExit as e:
+        return (e.code if isinstance(e.code, int) else str(e.code)), out.getvalue(), None
+    except Exception as e:
+        return None, out.getvalue(), type(e).__name__
+
+
+clear_state()
+os.makedirs(os.path.join(S, "backups"))
+Z0 = os.path.join(S, "backups", "ledger_20261001.db")
+open(Z0, "wb").close()
+GB = os.path.join(S, "backups", "ledger_20261002.db")
+with open(GB, "wb") as f:
+    f.write(os.urandom(64 * 1024))
+r9 = run_cli(["check", GB])
+ck("[8] ① 깨진 백업 check = '열기 실패'(traceback 없음)", r9[2] is None and r9[0] == 1 and "열기 실패" in r9[1], r9)
+r9 = run_cli(["restore", GB])
+ck("[8] ① 깨진 백업 restore = '열기 실패' 거부(traceback 없음)", r9[2] is None and "열기 실패" in str(r9[0]), r9)
+r9 = run_cli(["restore", Z0, "--rewind", "all"])
+ck("[8] ① 0바이트 백업 restore(되감기 포함) = '원장 백업이 아니에요' 거부(traceback 없음)", r9[2] is None and "원장 백업이 아니에요" in str(r9[0]), r9)
+r9 = run_cli(["list"])
+ck("[8] ① list 는 깨진 것도 한 줄로(열기 실패 표시)", r9[2] is None and r9[0] == 0, r9)
+
+clear_state()
+os.makedirs(os.path.join(S, "backups"))
+make_backup(BK)
+mkdb(live, 1, "cur")
+c9 = sqlite3.connect(live)
+c9.execute("CREATE TABLE decisions (decision_id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, target TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL)")
+for at9 in (T_BK - 86400, T_BK + 60, NOW - 60):
+    c9.execute("INSERT INTO decisions (kind, target, payload, created_at) VALUES ('x', 't', '{}', ?)", (at9,))
+c9.commit()
+c9.close()
+state_files()
+for n in (2, 3):
+    seg("evm", n)
+seg("ex", 3)
+seg("sol", 1)
+seg("bsc", 1)
+p9 = LR.plan(BK, now=NOW)
+ck("[8] ④ 미리보기 = 백업 뒤 판정 수(되돌리면 사라짐)", p9.get("decisions_after") == 2, p9.get("decisions_after"))
+real_strftime = time.strftime
+time.strftime = lambda fmt, *a: "20261009_120000" if fmt == "%Y%m%d_%H%M%S" else real_strftime(fmt, *a)
+res9 = []
+try:
+    for _ in range(3):
+        res9.append(T.safe(LR.apply, LR.plan(BK, now=NOW), proc_check=False, log=lambda *a: None))
+finally:
+    time.strftime = real_strftime
+ck("[8] ② 같은 초에 세 번 적용 = 모두 끝까지(기록 폴더 _2·_3) · 잠금 파일 안 남음",
+   all(isinstance(r, dict) and "originals" in r for r in res9) and not os.path.exists(os.path.join(S, "restore.lock"))
+   and len({r.get("originals") for r in res9 if isinstance(r, dict)}) == 3, res9)
+pre9 = sorted(n for n in os.listdir(S) if n.startswith("ledger.db.pre_restore_") and not n.endswith(("-wal", "-shm")))
+ck("[8] ③ 복구 전 보존본 = 최근 2개만(오래된 것 정리)", len(pre9) == 2 and any(n.endswith("_3") for n in pre9), pre9)
+
+clear_state()
+os.makedirs(os.path.join(S, "backups", "files_20261008"))
+fd9 = os.path.join(S, "backups", "files_20261008")
+for n9, v9 in (("daily_px.json", {"2026-10-07": {"BTC": 1}}), ("settings.json", {"tg": {"chat": "x"}}),
+               ("seed_local__ticker_aliases.json", {"A": "B"}), ("config_subset.json", {"wallets": []}), ("evil.sh", "x")):
+    with open(os.path.join(fd9, n9), "w", encoding="utf-8") as f:
+        json.dump(v9, f)
+with open(os.path.join(S, "backups", "prefs_20261008.json"), "w", encoding="utf-8") as f:
+    json.dump({"ts": 1, "decisions": [{"kind": "x"}], "ui_prefs": {"hide": True}, "outflow_decisions": {"0xa": "mine"}}, f)
+wj("daily_px.json", {"2026-10-07": {"BTC": 999}})
+wj("daily_cache.json", {"x": 1})
+r9 = run_cli(["files"])
+ck("[8] ⑥ files = 사본 날짜 목록", r9[2] is None and r9[0] == 0 and "20261008" in r9[1], r9)
+r9 = run_cli(["files", "20261008"])
+ck("[8] ⑥ files <날짜> = 미리보기(아무것도 안 바꿈)", r9[2] is None and r9[0] == 0 and rj("daily_px.json") == {"2026-10-07": {"BTC": 999}}
+   and "daily_px.json" in r9[1] and "config.json" in r9[1], r9)
+saved_ru = LR.running_units
+LR.running_units = lambda root=None, **k: [(4242, "web.py")]
+try:
+    r9 = run_cli(["files", "20261008", "--apply"])
+finally:
+    LR.running_units = saved_ru
+ck("[8] ⑥ tj-web 이 떠 있으면 적용 거부", r9[2] is None and "pm2 stop tj-web" in str(r9[0]) and rj("daily_px.json")["2026-10-07"]["BTC"] == 999, r9)
+r9 = run_cli(["files", "20261008", "--apply", "--no-proc-check"])
+kept9 = [n for n in os.listdir(S) if n.startswith("restore_files_")]
+ck("[8] ⑥ 적용 = 지난날 고정가·설정·seed_local·화면 설정·보낸 내역 판정 되돌림",
+   r9[2] is None and r9[0] == 0 and rj("daily_px.json") == {"2026-10-07": {"BTC": 1}} and rj("settings.json") == {"tg": {"chat": "x"}}
+   and rj(os.path.join("seed_local", "ticker_aliases.json")) == {"A": "B"} and rj("ui_prefs.json") == {"hide": True}
+   and rj("outflow_decisions.json") == {"0xa": "mine"}, r9)
+ck("[8] ⑥ 이름 규칙 밖 파일·설정 부분 사본은 자동으로 안 씀", not os.path.exists(os.path.join(S, "evil.sh")) and not os.path.exists(os.path.join(S, "config_subset.json")))
+ck("[8] ⑥ 지금 파일은 restore_files_<시각>/ 에 먼저 보존 · 고정가가 바뀌면 곡선 캐시 무효화",
+   len(kept9) == 1 and json.load(open(os.path.join(S, kept9[0], "daily_px.json"), encoding="utf-8")) == {"2026-10-07": {"BTC": 999}}
+   and not os.path.exists(os.path.join(S, "daily_cache.json")), kept9)
+open(os.path.join(fd9, "daily_px.json"), "w", encoding="utf-8").write('{"2026-10-07": {"BTC": 1')
+wj("daily_px.json", {"2026-10-07": {"BTC": 777}})
+wj("settings.json", {"tg": {"chat": "now"}})
+r9 = run_cli(["files", "20261008", "--apply", "--no-proc-check"])
+ck("[8] op405 ② 깨진 사본(잘린 daily_px) 하나 = 전체 거부 · 지금 파일 무변 · 보존 폴더 안 만듦",
+   r9[2] is None and "깨진 사본" in str(r9[0]) and rj("daily_px.json") == {"2026-10-07": {"BTC": 777}} and rj("settings.json") == {"tg": {"chat": "now"}}
+   and len([n for n in os.listdir(S) if n.startswith("restore_files_")]) == 1, r9)
+r9 = run_cli(["files", "20261008"])
+ck("[8] op405 ② 미리보기에 깨진 사본 표시", r9[2] is None and "깨짐" in r9[1] and "daily_px.json" in r9[1], r9)
+with open(os.path.join(fd9, "daily_px.json"), "w", encoding="utf-8") as f:
+    json.dump({"2026-10-07": {"BTC": 1}}, f)
+LR.running_units = lambda root=None, **k: [(4243, "review_daily.py")] if "review_daily.py" in (k.get("scripts") or ()) else []
+try:
+    r9 = run_cli(["files", "20261008", "--apply"])
+finally:
+    LR.running_units = saved_ru
+ck("[8] op405 ③ tj-review(review_daily.py)가 떠 있으면 files 적용 거부(정지 안내)", r9[2] is None and "pm2 stop tj-web tj-review" in str(r9[0])
+   and "review_daily.py" in str(r9[0]) and rj("daily_px.json") == {"2026-10-07": {"BTC": 777}}, r9)
+ck("[8] op405 ③ 원장 되돌리기(restore)는 tj-review 를 막지 않음(원장을 안 씀) — 기본 검사 목록에 없음", "review_daily.py" not in LR.UNIT_SCRIPTS)
+r9 = run_cli(["files", "2026-10-08"])
+ck("[8] ⑥ 날짜 형식이 틀리면 안내(traceback 없음)", r9[2] is None and "YYYYMMDD" in str(r9[0]), r9)
 T.finish()

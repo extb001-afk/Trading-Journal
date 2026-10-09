@@ -25,6 +25,10 @@ import exf_fut_place
 
 chk = T.chk
 C = core.Core(common.load_config())
+os.makedirs(os.path.join(common.STATE_DIR, "backups"), exist_ok=True)
+open(os.path.join(common.STATE_DIR, "backups", "ledger_test.db"), "w").close()
+common.atomic_write_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"),
+                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(common.STATE_DIR, "backups", "ledger_test.db")})
 C._quote_usd = lambda q, ts: Decimal(1)
 C.EXF_INIT_PHASE = 5
 NOW = int(time.time())
@@ -210,7 +214,8 @@ chk(cur.get("t") == int(C._meta_get("recon_done_exf_okx")) and cur.get("s", {}).
 chk(any(int(b) == G["b3"] for b, in C.conn.execute("SELECT bts FROM exf_adj_tomb WHERE ex='okx' AND sym='USDT'")), "G7 지운 대사 경계 기록(tomb)")
 rc = exf_fut_place._undo(os.path.join(common.STATE_DIR, "exf_fut_place_v1.json"))
 snap1 = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings WHERE location='exchange:okx'").fetchall())
-chk(rc == 0 and snap1 == snap0 and pos_ok("okx", "USDT") and C._meta_get("exf_fut_place_v") is None, "G8 되돌리기 = 재배치 전 줄 그대로 · 표식 지움")
+chk(rc == 0 and snap1 == snap0 and pos_ok("okx", "USDT") and str(C._meta_get("exf_fut_place_v")).startswith("1:undone:"),
+    "G8 되돌리기 = 재배치 전 줄 그대로 · 표식 = '1:undone:시각'(NB2 — 자동 적용 금지)", C._meta_get("exf_fut_place_v"))
 
 print("[G9] 후보가 만든 행을 후보 아닌 것이 줄였으면 그 후보는 건너뜀")
 t0 = tick(0) - 4000
@@ -427,9 +432,12 @@ C.conn.execute("UPDATE meta SET v=? WHERE k='exf_fut_place_v'", (mk0,))
 C.conn.commit()
 chk(rcc == 1 and rcn == 1 and C._meta_get("exf_fut_place_v") == mk0, "L2b (fr297 #3) 정본과 다른 자료 · 원장 표식의 통화 수와 다른 자료 = 거부", (outc[-150:], outn[-150:]))
 rcu, outu = tool("--undo", undo_p)
-chk(rcu == 0 and pos_ok("bybit", "USDC") and C._meta_get("exf_fut_place_v") is None, "L3 정본 되돌리기 자료 = 되돌림(합·보유 무변)", outu[-200:])
+chk(rcu == 0 and pos_ok("bybit", "USDC") and str(C._meta_get("exf_fut_place_v")).startswith("1:undone:"), "L3 정본 되돌리기 자료 = 되돌림(합·보유 무변 · 표식 undone)",
+    outu[-200:])
 rcu2, outu2 = tool("--undo", undo_p)
-chk(rcu2 == 1, "L4 이미 되돌린 원장(세대 표식 없음)에 다시 = 거부", outu2[-200:])
+chk(rcu2 == 1 and "이미 되돌린 원장" in outu2, "L4 이미 되돌린 원장(표식 undone)에 다시 = 거부", outu2[-200:])
+C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
+C.conn.commit()
 
 print("[N] 감사 기록 쓰기 실패 = 같은 트랜잭션에 표식(meta exf_revert_log_fail '<누계>:<시각>') → 이관 미리보기 종료 1 · 자동 경로 보류")
 C.EXF_FUT_EX = ()

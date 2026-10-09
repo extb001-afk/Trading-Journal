@@ -1219,15 +1219,17 @@
       if (window.__tj && window.__tj.refresh) window.__tj.refresh();
       render();
     },
-    goto(el) { U.step = +el.getAttribute('data-v'); render(); },
-    prev() { U.step = Math.max(0, U.step - 1); render(); },
-    next() { U.step = Math.min(STEPS.length - 1, U.step + 1); refreshStatus(); },
-    async finish() { const r = await api('finish', {}); if (!r.ok) { toast(r.error || '저장 실패', true); return; } U.open = false; stopPollIfIdle(); toast('설정 완료 — 첫 수집이 끝나면 대시보드가 채워져요'); await refreshStatus(); if (window.__tj) window.__tj.refresh(); },
-    later() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
-    close() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
-    wizard() { U.open = true; U.step = 0; render(); },
+    goto(el) { U.step = +el.getAttribute('data-v'); wizKeep(); render(); },
+    prev() { U.step = Math.max(0, U.step - 1); wizKeep(); render(); },
+    next() { U.step = Math.min(STEPS.length - 1, U.step + 1); wizKeep(); refreshStatus(); },
+    async finish() { const r = await api('finish', {}); if (!r.ok) { toast(r.error || '저장 실패', true); return; } U.open = false; SS.set('tj_su_wiz', '0'); SS.set('tj_su_step', '0'); stopPollIfIdle(); toast('설정 완료 — 첫 수집이 끝나면 대시보드가 채워져요'); await refreshStatus(); if (window.__tj) window.__tj.refresh(); },
+    later() { SS.set('tj_setup_later', '1'); U.open = false; SS.set('tj_su_wiz', '0'); render(); },
+    close() { SS.set('tj_setup_later', '1'); U.open = false; SS.set('tj_su_wiz', '0'); render(); },
+    wizard() { U.open = true; U.step = wizStep(); wizKeep(); render(); },
     async retry() { U.err = null; await refreshStatus(); },
   };
+  function wizStep() { const n = parseInt(SS.get('tj_su_step') || '0', 10); return n >= 0 && n < STEPS.length ? n : 0; }
+  function wizKeep() { SS.set('tj_su_step', String(U.step)); SS.set('tj_su_wiz', U.open ? '1' : '0'); }
   function dpPoll() {
     if (U.dpPoll) return;
     U.dpPoll = setInterval(async () => {
@@ -1468,7 +1470,7 @@
   (async function init() {
     await load();
     if (!U.st) return;
-    if (U.st.needsSetup && SS.get('tj_setup_later') !== '1') U.open = true;
+    if ((U.st.needsSetup && SS.get('tj_setup_later') !== '1') || SS.get('tj_su_wiz') === '1') { U.open = true; U.step = wizStep(); }
     render();
   })();
   window.__tjSetup = { U, A, render, fill, lock, qrEncode, toChecksum, checkAddr, keccak256, splitAddrs, wAnalyze, wSecret };

@@ -1,5 +1,9 @@
 """Spam and fake-token filtering."""
+import json
+import os
 import re
+import threading
+import time
 import unicodedata
 
 MAJORS = {"USDT", "USDC", "USDG", "DAI", "BUSD", "FDUSD", "PYUSD", "USD1", "USDE", "USDS", "TUSD", "USDP",
@@ -234,6 +238,123 @@ _ALIAS = {"TETHER": "USDT", "TETHERUSD": "USDT", "BSCUSD": "USDT", "USDCOIN": "U
 _GEN = None
 
 
+USER_FILE = "genuine_tokens.json"
+USER_EVERY = 5.0
+USER_MAX = 2000
+_USER = {"sig": None, "at": None, "set": frozenset(), "map": {}}
+_USER_LOCK = threading.Lock()
+
+
+def user_path():
+    try:
+        import common
+        return os.path.join(common.STATE_DIR, USER_FILE)
+    except Exception:
+        return None
+
+
+def _norm_ca(chain, ca):
+    ch = str(chain or "").strip().lower()
+    a = str(ca or "").strip()
+    return ch, (a if ch == "sol" else a.lower())
+
+
+def _user_read(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return frozenset(), {}
+    except (OSError, ValueError):
+        return frozenset(), {}
+    s, out = set(), {}
+    if not isinstance(d, dict):
+        return frozenset(), {}
+    for ch, m in d.items():
+        if not isinstance(ch, str) or ch.startswith("_") or not isinstance(m, dict):
+            continue
+        for a, sym in m.items():
+            if not isinstance(a, str) or a.startswith("_") or len(s) >= USER_MAX:
+                continue
+            k = _norm_ca(ch, a)
+            if not k[0] or not k[1]:
+                continue
+            s.add(k)
+            out.setdefault(k[0], {})[k[1]] = str(sym)[:24] if isinstance(sym, str) else ""
+    return frozenset(s), out
+
+
+def _user_refresh(force=False):
+    now = time.monotonic()
+    u = _USER
+    if not force and u["at"] is not None and now - u["at"] < USER_EVERY:
+        return u
+    with _USER_LOCK:
+        p = user_path()
+        try:
+            st = os.stat(p) if p else None
+            sig = (p, st.st_mtime_ns, st.st_size) if st else (p, None, None)
+        except OSError:
+            sig = (p, None, None)
+        if force or sig != u["sig"]:
+            s, m = _user_read(p) if p and sig[1] is not None else (frozenset(), {})
+            u.update(sig=sig, set=s, map=m)
+        u["at"] = now
+    return u
+
+
+def user_sig():
+    return _user_refresh()["sig"]
+
+
+def user_tokens() -> dict:
+    return {ch: dict(m) for ch, m in _user_refresh()["map"].items()}
+
+
+def is_user_genuine(chain, ca) -> bool:
+    return _norm_ca(chain, ca) in _user_refresh()["set"]
+
+
+def set_user_genuine(chain, ca, sym, on: bool) -> bool:
+    import common
+    p = user_path()
+    ch, a = _norm_ca(chain, ca)
+    with _USER_LOCK:
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if not isinstance(d, dict):
+                d = {}
+        except FileNotFoundError:
+            d = {}
+        except (OSError, ValueError):
+            raise ValueError("정품 목록 파일이 깨져 있어요 — state/" + USER_FILE + " 를 고치거나 지운 뒤 다시")
+        m = d.get(ch) if isinstance(d.get(ch), dict) else {}
+        hit = next((k for k in m if isinstance(k, str) and _norm_ca(ch, k)[1] == a), None)
+        if on:
+            if hit is not None:
+                return False
+            if sum(len(v) for k, v in d.items() if isinstance(v, dict) and not str(k).startswith("_")) >= USER_MAX:
+                raise ValueError(f"정품 목록이 가득 찼어요({USER_MAX}개)")
+            m[a] = str(sym or "")[:24]
+        else:
+            if hit is None:
+                return False
+            m.pop(hit, None)
+        if m:
+            d[ch] = m
+        else:
+            d.pop(ch, None)
+        common.atomic_write_json(p, d)
+    _user_refresh(force=True)
+    return True
+
+
+def plain_symbol(sym) -> bool:
+    s = str(sym or "")
+    return bool(s.strip()) and clean(s) == s and s.replace("₮", "T").isascii()
+
+
 def _genuine():
     global _GEN
     if _GEN is None:
@@ -255,7 +376,8 @@ def _genuine():
 def is_genuine(chain, ca) -> bool:
     ch = str(chain or "")
     a = str(ca or "")
-    return (ch, a if ch == "sol" else a.lower()) in _genuine()
+    k = (ch, a if ch == "sol" else a.lower())
+    return k in _genuine() or k in _user_refresh()["set"]
 
 
 def major_of(sym):
@@ -328,7 +450,7 @@ STABLE_MAJ = {"USDT", "USDC", "USDG", "DAI", "BUSD", "FDUSD", "PYUSD", "USD1", "
 POISON_STABLE_QTY = 0.001
 
 
-def tx_scam_reason(conn, chain, txh, my):
+def tx_scam_reason(conn, chain, txh, my, price_guard=None):
     ch = str(chain or "")
     t = str(txh or "")
     t = t.lower() if t.startswith("0x") else t
@@ -360,6 +482,8 @@ def tx_scam_reason(conn, chain, txh, my):
         r = None
         if q == 0:
             r = "수량 0 전송(주소 오염)"
+        elif mine and lk in ("move_out", "disp"):
+            return None
         elif kind == "token":
             priced = None
 
@@ -371,7 +495,12 @@ def tx_scam_reason(conn, chain, txh, my):
                 r = None if priced or is_genuine(ch, ca) else "사칭 심볼 토큰"
             elif fake_major(s, [(ch, ca)]):
                 priced = _priced()
-                r = None if priced else f"가짜 {major_of(s)}(정품 컨트랙트 아님)"
+                liq = False
+                if not priced and plain_symbol(s):
+                    liq = spot_liquid(ch, ca, price_guard)
+                    if liq is None:
+                        return None
+                r = None if priced or liq else f"가짜 {major_of(s)}(정품 컨트랙트 아님)"
             if r is None and lk == "move_out" and ch != "sol" and sg and signer_known_other(sg[0], sg[1], sg[2], my) \
                     and not is_genuine(ch, ca):
                 has_inflow = conn.execute(
@@ -386,6 +515,57 @@ def tx_scam_reason(conn, chain, txh, my):
             return None
         why = why or r
     return why
+
+
+SPOT_FILE = "spot.json"
+RESERVE_STALE_SEC = 6 * 3600
+_SPOT = {"sig": None, "d": None}
+
+
+def spot_liquid(chain, ca, price_guard=None):
+    try:
+        import common
+        p = os.path.join(common.STATE_DIR, SPOT_FILE)
+        st = os.stat(p)
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return None
+    sig = (p, st.st_mtime_ns, st.st_size)
+    if _SPOT["sig"] != sig:
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if not isinstance(d, dict):
+                return None
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError):
+            return None
+        _SPOT.update(sig=sig, d=d)
+    d = _SPOT["d"]
+    g = price_guard if isinstance(price_guard, dict) else {}
+    try:
+        mn = float(g.get("min_reserve_usd", 10000.0))
+    except (TypeError, ValueError):
+        mn = 10000.0
+    try:
+        mx = max(1800.0, float(g.get("dex_max_age_sec", 6 * 3600)))
+    except (TypeError, ValueError):
+        mx = 6 * 3600.0
+    ch, a = _norm_ca(chain, ca)
+    k = f"{ch}:{a}"
+    try:
+        now = time.time()
+        px = float((d.get("dex_usd") or {}).get(k) or 0)
+        rv = (d.get("dex_res") or {}).get(k)
+        if rv is None or now - float((d.get("dex_res_ts") or {}).get(k) or 0) > RESERVE_STALE_SEC:
+            return False
+        if now - float((d.get("dex_ts") or {}).get(k) or 0) > mx:
+            return False
+        return 0 < px < float("inf") and mn <= float(rv) < float("inf")
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 _CS_MEMO = {}

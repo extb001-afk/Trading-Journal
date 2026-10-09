@@ -432,6 +432,8 @@ class Core:
             for it in snap.get("internal", []):
                 if it.get("success") is False or it.get("error"):
                     continue
+                if str(it.get("type") or "").lower() in ("delegatecall", "staticcall", "callcode"):
+                    continue
                 f2, t2 = addr(it.get("from")), addr(it.get("to"))
                 try:
                     v2 = int((it.get("value") or 0))
@@ -1318,6 +1320,33 @@ class Core:
                     legs.append(("disp", aid, -left, b))
         return legs
 
+    @staticmethod
+    def _unknown_legs(perw: dict, loc_of) -> list:
+        by = {}
+        for (w, aid), v in perw.items():
+            if v:
+                by.setdefault(aid, []).append((w or "", v))
+        legs = []
+        for aid in sorted(by):
+            ws = sorted(by[aid])
+            mo = mi = min(-sum(v for _w, v in ws if v < 0), sum(v for _w, v in ws if v > 0))
+            for w, v in ws:
+                if v < 0:
+                    m = min(-v, mo)
+                    mo -= m
+                    if m:
+                        legs.append(("move_out", aid, -m, loc_of(w)))
+                    if -v > m:
+                        legs.append(("disp", aid, v + m, loc_of(w)))
+                else:
+                    m = min(v, mi)
+                    mi -= m
+                    if m:
+                        legs.append(("move_in", aid, m, loc_of(w)))
+                    if v > m:
+                        legs.append(("acq", aid, v - m, loc_of(w)))
+        return legs
+
     LEG_BY_EVENT = {
         "SWAP": ("disp", "acq"), "CONVERT": ("move_out", "move_in"),
         "TRANSFER_SELF": ("move_out", "move_in"), "TRANSFER_OUT_EX": ("move_out", "move_in"),
@@ -1365,6 +1394,8 @@ class Core:
                     "counterparties": (dest or {}).get("cps") or [],
                     "deltas": {str(k): str(v) for k, v in deltas.items()}}, event_ts=ts)
         elif event in ("UNKNOWN", "NEW_ASSET"):
+            if event == "UNKNOWN":
+                legs = self._unknown_legs(perw, loc_of)
             if not quiet:
                 dm(event, f"[{chain}] {event} — 검토 필요 tx {txhash}",
                    {"chain": chain, "txhash": txhash,
@@ -1988,7 +2019,7 @@ class Core:
 
     def _px_skip_json(self) -> str:
         try:
-            sig = tuple(self.conn.execute("SELECT COUNT(*), MAX(asset_id) FROM assets").fetchone())
+            sig = tuple(self.conn.execute("SELECT COUNT(*), MAX(asset_id) FROM assets").fetchone()) + (spamguard.user_sig(),)
         except sqlite3.Error:
             return self._px_skip[1]
         if sig != self._px_skip[0]:
@@ -2583,7 +2614,7 @@ class Core:
                     "SELECT address, symbol, decimals FROM assets"
                     " WHERE chain='bsc' AND kind='token'").fetchall():
                 if r["address"]:
-                    cas[r["address"]] = (r["symbol"], 18 if r["decimals"] is None else r["decimals"])
+                    cas[r["address"]] = (r["symbol"], r["decimals"] if r["decimals"] is not None else self._meta_dec("bsc", r["address"]))
             rpcs8 = list(self.cfg["bsc"]["detail_rpcs"])
             return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
         cc9 = self.cfg["chains"][chain]
@@ -2601,7 +2632,7 @@ class Core:
         cas = {}
         for r in self.conn.execute("SELECT address, symbol, decimals FROM assets WHERE chain=? AND kind='token'", (chain,)).fetchall():
             if r["address"]:
-                cas[str(r["address"]).lower()] = (r["symbol"], 18 if r["decimals"] is None else r["decimals"])
+                cas[str(r["address"]).lower()] = (r["symbol"], r["decimals"] if r["decimals"] is not None else self._meta_dec(chain, r["address"]))
         rt9 = set()
         for ca9, meta9 in ((cc9.get("recon_tokens") or {}).items()):
             ca9 = str(ca9).lower()
@@ -3284,6 +3315,7 @@ class Core:
     def _consume_ex(self, rec: dict):
         ex = rec.get("exchange", "upbit")
         now = int(time.time())
+        self._wd_fee_new_ex(ex)
         n_new = n_matched = 0
         late_wd = {}
         for kind, rows in (("deposit", rec.get("deposits") or []),
@@ -3501,6 +3533,7 @@ class Core:
         ex = str(rec.get("exchange") or "")
         if not ex or ex == "upbit":
             return
+        self._wd_fee_new_ex(ex)
         now = int(time.time())
         n = 0
         late9 = []
@@ -4168,7 +4201,7 @@ class Core:
                      format(q9, "f"), format(net9, "f"), len(parts), format(Decimal(rem9) / scale, "f"))
         return out
 
-    def _exf_fut_place_plan(self):
+    def _exf_fut_place_plan(self, only=None):
         plan, curs = [], {}
         self.__dict__.pop("_exf_late_bcache", None)
         self.__dict__.pop("_exf_lfm", None)
@@ -4179,8 +4212,10 @@ class Core:
             log9 = self._exf_revert_rows()
         except ValueError as e9:
             return [{"ex": ex9, "sym": "*", "err": str(e9), "skip": []} for ex9 in self.EXF_FUT_EX
-                    if self._meta_get(f"recon_done_exf_{ex9}")], {}
+                    if self._meta_get(f"recon_done_exf_{ex9}") and (only is None or ex9 in only)], {}
         for ex in self.EXF_FUT_EX:
+            if only is not None and ex not in only:
+                continue
             d9 = self._meta_get(f"recon_done_exf_{ex}")
             if not d9:
                 continue
@@ -4255,49 +4290,114 @@ class Core:
             n += 1
         return n
 
-    def _exf_fut_place_once(self, expect=None):
-        if str(self._meta_get("exf_fut_place_v") or "").split(":", 1)[0] == str(self.EXF_FUT_V):
+    EXF_FUT_WAIT_META = "exf_fut_place_wait"
+    EXF_FUT_BACKUP_MAX_AGE = 36 * 3600
+
+    def _exf_fut_place_scope(self):
+        p9 = str(self._meta_get("exf_fut_place_v") or "").split(":")
+        if p9[0] != str(self.EXF_FUT_V):
+            return "todo", None
+        if len(p9) >= 2 and p9[1] == "undone":
+            return "undone", None
+        try:
+            w9 = json.loads(self._meta_get(self.EXF_FUT_WAIT_META) or "null")
+        except (TypeError, ValueError):
+            w9 = None
+        if isinstance(w9, dict) and w9.get("v") == self.EXF_FUT_V and isinstance(w9.get("ex"), dict) and w9["ex"]:
+            return "partial", {str(x) for x in w9["ex"]}
+        return "done", None
+
+    def _exf_fut_backup_ok(self):
+        try:
+            st9 = common.read_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"), {}) or {}
+            p9 = str(st9.get("last_path") or "")
+            if time.time() - float(st9.get("last_ok") or 0) <= self.EXF_FUT_BACKUP_MAX_AGE and p9 and os.path.isfile(p9):
+                return p9
+        except (Exception, SystemExit):
+            pass
+        return None
+
+    def _exf_fut_place_once(self, expect=None, redo=False, auto=False):
+        sc, pend = self._exf_fut_place_scope()
+        if sc == "done" or (sc == "undone" and not redo):
             return None
         if self.conn.in_transaction:
             self.conn.commit()
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            if str(self._meta_get("exf_fut_place_v") or "").split(":", 1)[0] == str(self.EXF_FUT_V):
+            sc, pend = self._exf_fut_place_scope()
+            if sc == "done" or (sc == "undone" and not redo):
                 self.conn.rollback()
                 return None
-            plan, curs = self._exf_fut_place_plan()
+            plan, curs = self._exf_fut_place_plan(only=pend)
             if expect is not None and json.loads(json.dumps(plan)) != json.loads(json.dumps(expect)):
                 self.conn.rollback()
                 log.error("선물 정산 재배치 거부 — 잠금 안 계획(%d)이 검토한 계획(%d)과 다름(원장이 그 사이 바뀜)", len(plan), len(expect))
                 return False
-            err9 = [m for m in plan if m.get("err")]
-            if err9:
+            errx = {}
+            for m in plan:
+                if m.get("err"):
+                    errx.setdefault(m["ex"], f"{m['sym']}: {m['err']}" if m.get("sym") not in (None, "*") else str(m["err"]))
+            scope9 = [ex9 for ex9 in self.EXF_FUT_EX if (pend is None or ex9 in pend) and self._meta_get(f"recon_done_exf_{ex9}")]
+            act9 = [m for m in plan if m.get("cands") and m["ex"] not in errx]
+            bk9 = None
+            if auto and act9:
+                bk9 = self._exf_fut_backup_ok()
+                if bk9 is None:
+                    for m in act9:
+                        errx.setdefault(m["ex"], "적용 전 원장 백업 없음(36시간 안 정기 백업 — state/backups · 디스크 여유 확인)")
+                    act9 = []
+            okx9 = [ex9 for ex9 in scope9 if ex9 not in errx]
+            if errx and not okx9:
                 self.conn.rollback()
+                self._exf_fut_place_wait_set(errx)
                 if time.time() - float(self.__dict__.get("_exf_fut_err_log", 0) or 0) >= 3600:
                     self._exf_fut_err_log = time.time()
-                    log.error("★선물 정산 재배치 보류 — 계획 못 세운 통화 %d개: %s★ (tools/exf_fut_place.py 로 확인)", len(err9),
-                              "; ".join(f"{m['ex']} {m['sym']}: {m['err']}" for m in err9[:4]))
+                    log.error("★선물 정산 재배치 보류 — 거래소 %d곳: %s★ (tools/exf_fut_place.py 로 확인)", len(errx),
+                              "; ".join(f"{k} {v}" for k, v in sorted(errx.items())[:4]))
                 return None
-            act9 = [m for m in plan if m.get("cands")]
+            for m in act9:
+                m["tomb_new"] = [int(b9) for b9 in m["cands"] if self.conn.execute(
+                    "SELECT 1 FROM exf_adj_tomb WHERE ex=? AND sym=? AND bts=?", (m["ex"], m["sym"], int(b9))).fetchone() is None]
+            keep9 = [m for m in plan if m["ex"] not in errx]
+            n_prev = 0
+            undo_p9 = os.path.join(common.STATE_DIR, f"exf_fut_place_v{self.EXF_FUT_V}.json")
+            if sc == "partial":
+                try:
+                    n_prev = int(str(self._meta_get("exf_fut_place_v") or "").split(":")[2])
+                except (IndexError, ValueError):
+                    n_prev = 0
             if act9:
-                common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_fut_place_v{self.EXF_FUT_V}.json"),
-                                         {"ts": int(time.time()), "v": self.EXF_FUT_V, "plan": plan, "curs": curs})
+                prev9 = None
+                if sc == "partial" and n_prev:
+                    prev9 = common.read_json(undo_p9, None)
+                    if not (isinstance(prev9, dict) and prev9.get("v") == self.EXF_FUT_V and isinstance(prev9.get("plan"), list)):
+                        raise ValueError("앞 회차 되돌리기 자료가 없거나 다름 — 이어 붙일 수 없음")
+                cu9 = {k9: v9 for k9, v9 in curs.items() if k9 not in errx}
+                common.atomic_write_json(undo_p9, {"ts": int(time.time()), "v": self.EXF_FUT_V,
+                                                   "plan": (prev9["plan"] if prev9 else []) + keep9,
+                                                   "curs": dict((prev9 or {}).get("curs") or {}, **cu9)})
             n = self._exf_fut_place_apply(act9) if act9 else 0
-            for ex9 in self.EXF_FUT_EX:
+            for ex9 in okx9:
                 d9 = self._meta_get(f"recon_done_exf_{ex9}")
-                if not d9:
-                    continue
                 if self._meta_get(f"exf_fut_cur_{ex9}") is None:
                     self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)",
                                       (f"exf_fut_cur_{ex9}", json.dumps({"t": int(float(d9)), "s": curs.get(ex9) or {}}, sort_keys=True)))
                 if self._meta_get(f"exf_fut_from_{ex9}") is None:
                     self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (f"exf_fut_from_{ex9}", str(int(float(d9)))))
-            self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_place_v', ?)", (f"{self.EXF_FUT_V}:{int(time.time())}:{n}",))
+            self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_place_v', ?)", (f"{self.EXF_FUT_V}:{int(time.time())}:{n_prev + n}",))
+            dbm.bump_data_rev(self.conn, 1)
+            if errx:
+                self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)",
+                                  (self.EXF_FUT_WAIT_META, json.dumps({"v": self.EXF_FUT_V, "ex": errx}, ensure_ascii=False, sort_keys=True)))
+            else:
+                self.conn.execute("DELETE FROM meta WHERE k=?", (self.EXF_FUT_WAIT_META,))
             self.conn.commit()
         except Exception as e:
             self.conn.rollback()
             log.error("선물 정산 재배치 보류(되돌림 · 다음 대사에 다시): %s", e)
             return None
+        self._exf_fut_place_wait_set(errx)
         for m in plan:
             if m.get("err"):
                 log.error("선물 정산 재배치: %s %s 통화 전체 건너뜀 — %s", m["ex"], m["sym"], m["err"])
@@ -4305,12 +4405,28 @@ class Core:
                 log.warning("선물 정산 재배치: %s %s 보류(옛 배치 유지 — 근거 부족): %s", m["ex"], m["sym"], m["hold"])
             for b9, why9 in m.get("skip") or ():
                 log.warning("선물 정산 재배치: %s %s 대사 %s 건너뜀 — %s", m["ex"], m["sym"], b9, why9)
+        if errx:
+            log.warning("★선물 정산 재배치 — 거래소 %s 는 대기(나머지는 옮김 · 다음 대사에 그 거래소만 다시): %s★", ",".join(sorted(errx)),
+                        "; ".join(f"{k} {v}" for k, v in sorted(errx.items())[:4]))
         if n:
             self._exf_hist_touch(min(m["t_from"] for m in act9 if m.get("t_from") is not None))
-            log.warning("★선물 정산 재배치 %d개 통화(대사 %d건 — 지난날 소급·되돌림 → 정산 시각) — 원장 합 무변, 지난 곡선 무효화★", n,
-                        sum(len(m["cands"]) for m in act9))
+            log.warning("★선물 정산 재배치 %d개 통화(대사 %d건 — 지난날 소급·되돌림 → 정산 시각) — 원장 합 무변, 지난 곡선 무효화%s★", n,
+                        sum(len(m["cands"]) for m in act9), f" · 적용 전 원장 백업 {bk9}" if bk9 else "")
             self._exf_hist_flush()
         return n
+
+    def _exf_fut_place_wait_set(self, errx: dict) -> None:
+        new9 = {str(k): str(v)[:200] for k, v in (errx or {}).items()}
+        old9 = self.__dict__.get("_exf_fut_place_wait")
+        if old9 == new9 and (not new9 or time.time() - float(self.__dict__.get("_exf_fut_place_wait_at") or 0) < 3600):
+            return
+        since9 = dict(self.__dict__.get("_exf_fut_place_since") or {})
+        for k in new9:
+            since9.setdefault(k, int(time.time()))
+        self._exf_fut_place_since = {k: v for k, v in since9.items() if k in new9}
+        self._exf_fut_place_wait = new9
+        self._exf_fut_place_wait_at = time.time()
+        self._exf_fut_wait_save()
 
     def _exf_unit_usd(self, ex: str, sym: str, insts: list):
         s9 = sym.upper()
@@ -4445,6 +4561,12 @@ class Core:
             a0 = r9.get("amount")
             if not s9 or isinstance(a0, bool) or isinstance(r9.get("t"), bool):
                 continue
+            as9 = r9.get("asset")
+            if isinstance(as9, str) and as9.strip():
+                as9 = as9.strip().upper()
+                if not as9.isalnum() or len(as9) > 20:
+                    continue
+                s9 = as9
             try:
                 t9 = int(r9.get("t") or 0)
                 a9 = Decimal(str(a0 if a0 is not None else 0))
@@ -4499,10 +4621,9 @@ class Core:
     EXF_FUT_WAIT_S = 3 * 3600
 
     def _exf_fut_hold(self, ex: str, bal: dict, bts: int, done_ts, now: int) -> bool:
-        w9 = self.__dict__.setdefault("_exf_fut_wait", {})
-        if not self.__dict__.get("_exf_fut_wait_init"):
-            self._exf_fut_wait_init = True
+        if self._exf_fut_wait_boot():
             self._exf_fut_wait_save()
+        w9 = self.__dict__.setdefault("_exf_fut_wait", {})
         if not done_ts or ex not in self.EXF_FUT_EX:
             self._exf_fut_wait_end(ex)
             return False
@@ -4515,7 +4636,7 @@ class Core:
             self._exf_fut_wait_end(ex)
             return False
         new9 = ex not in w9
-        t0 = w9.setdefault(ex, [now, 0])
+        t0 = w9.setdefault(ex, [now, 0, False])
         if now - t0[0] < self.EXF_FUT_WAIT_S:
             if now - t0[1] >= 900:
                 t0[1] = now
@@ -4525,32 +4646,59 @@ class Core:
             elif new9:
                 self._exf_fut_wait_save()
             return True
-        if t0[1] >= 0:
+        if not t0[2]:
             log.warning("★%s 선물 정산 파일이 %d분 넘게 잔고를 못 덮음 — 종전 규칙으로 대사(파일 뒤 정산은 지난날로 소급될 수 있음 · 이중 계상 없음)★",
                         ex, self.EXF_FUT_WAIT_S // 60)
-            t0[1] = -1
+            t0[1], t0[2] = now, True
             fb9 = self.__dict__.setdefault("_exf_fut_fb", [])
             fb9.append({"ex": ex, "at": int(now), "since": int(t0[0])})
             del fb9[:-10]
+            self._exf_fut_wait_save()
+        elif now - t0[1] >= 900:
+            t0[1] = now
             self._exf_fut_wait_save()
         return False
 
     EXF_FUT_WAIT_PATH = os.path.join(common.STATE_DIR, "exf_fut_wait.json")
 
+    def _exf_fut_wait_boot(self) -> bool:
+        if self.__dict__.get("_exf_fut_wait_init"):
+            return False
+        self._exf_fut_wait_init = True
+        w9 = self.__dict__.setdefault("_exf_fut_wait", {})
+        try:
+            old9 = common.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
+            for e9, it9 in ((old9.get("wait") if isinstance(old9.get("wait"), dict) else {}) or {}).items():
+                if e9 in self.EXF_FUT_EX and isinstance(it9, dict) and isinstance(it9.get("since"), int) and not isinstance(it9.get("since"), bool):
+                    w9.setdefault(e9, [int(it9["since"]), 0, bool(it9.get("fallback"))])
+        except (Exception, SystemExit) as e9:
+            log.warning("선물 대사 대기 표식 읽기 실패(처음부터): %s", e9)
+        return True
+
     def _exf_fut_wait_end(self, ex: str) -> None:
+        self._exf_fut_wait_boot()
         if self.__dict__.get("_exf_fut_wait", {}).pop(ex, None) is not None:
             self._exf_fut_wait_save()
 
     def _exf_fut_wait_save(self) -> None:
         try:
+            self._exf_fut_wait_boot()
             w9 = self.__dict__.get("_exf_fut_wait") or {}
             fb9 = list(self.__dict__.get("_exf_fut_fb") or [])
-            if not fb9:
+            old9 = None
+            if not fb9 or self.__dict__.get("_exf_fut_place_wait") is None:
                 old9 = common.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
+            if not fb9:
                 fb9 = [x for x in (old9.get("fb") or []) if isinstance(x, dict)][-10:]
                 self._exf_fut_fb = fb9
-            common.atomic_write_json(self.EXF_FUT_WAIT_PATH, {"v": 1, "ts": int(time.time()), "fb": fb9,
-                                                             "wait": {e9: {"since": int(t9[0]), "fallback": t9[1] < 0} for e9, t9 in w9.items()}})
+            pw9 = self.__dict__.get("_exf_fut_place_wait")
+            if pw9 is None:
+                pl9 = (old9 or {}).get("place") if isinstance((old9 or {}).get("place"), dict) else {}
+            else:
+                ps9 = self.__dict__.get("_exf_fut_place_since") or {}
+                pl9 = {e9: {"why": why9, "since": int(ps9.get(e9) or time.time())} for e9, why9 in pw9.items()}
+            common.atomic_write_json(self.EXF_FUT_WAIT_PATH, {"v": 1, "ts": int(time.time()), "fb": fb9, "place": pl9,
+                                                             "wait": {e9: {"since": int(t9[0]), "fallback": bool(t9[2])} for e9, t9 in w9.items()}})
         except (Exception, SystemExit) as e9:
             log.warning("선물 대사 대기 표식 쓰기 실패: %s", e9)
 
@@ -5323,7 +5471,7 @@ class Core:
         self._exf_redate_once()
         self._exf_debt_redate_once()
         self._exf_fix_place_once()
-        self._exf_fut_place_once()
+        self._exf_fut_place_once(auto=True)
         st_all = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
         now = int(time.time())
         for ex, st in (st_all or {}).items():
@@ -5572,9 +5720,28 @@ class Core:
 
     def _wd_fee_leg_on(self, ex: str, wts) -> bool:
         try:
-            return ex in self.EXF_WD_FEE_SEPARATE and wts is not None and int(wts) >= int(getattr(self, "wd_fee_since", 0) or 0)
+            return ex in self.EXF_WD_FEE_SEPARATE and wts is not None and int(wts) >= self._wd_fee_since_of(ex)
         except (TypeError, ValueError):
             return False
+
+    def _wd_fee_since_of(self, ex: str) -> int:
+        r9 = self.conn.execute("SELECT v FROM meta WHERE k=?", (f"exf_wd_fee_since:{ex}",)).fetchone()
+        if r9 is not None:
+            try:
+                return int(r9[0])
+            except (TypeError, ValueError):
+                pass
+        return int(getattr(self, "wd_fee_since", 0) or 0)
+
+    def _wd_fee_new_ex(self, ex: str) -> None:
+        if ex not in self.EXF_WD_FEE_SEPARATE:
+            return
+        if self.conn.execute("SELECT 1 FROM meta WHERE k=?", (f"exf_wd_fee_since:{ex}",)).fetchone():
+            return
+        if self.conn.execute("SELECT 1 FROM raw_ex WHERE exchange=? LIMIT 1", (ex,)).fetchone():
+            return
+        self.conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES (?, '0')", (f"exf_wd_fee_since:{ex}",))
+        log.info("%s 처음 연결 — 출금 수수료 레그 = 모든 출금(기준 시각 0 · X9)", ex)
 
     def _post_exf_withdraw(self, ex: str, uid: str, d: dict) -> bool:
         try:
@@ -5810,7 +5977,7 @@ class Core:
                 if shape(news) != shape(olds) or any(int(r9["event_ts"]) != new_ts for r9 in news):
                     undo = "다시 만든 레그가 다름"
                 elif any(o["cost_usd"] is not None for o in olds) and any(r9["cost_usd"] is None for r9 in news):
-                    undo = "새 시각 원가 USD 미확보(환율·쿼트 시세 일시 실패)"
+                    undo = "새 시각 원가 USD 미확보(이번 적용 중 환율·쿼트 시세를 못 받음 — 조회 실패 또는 실패 뒤 60초 쉼 동안의 주문 · 다음 --apply 때 다시)"
                 else:
                     n_moved += 1
                     t_min = min([t for t in [t_min, new_ts] + [int(o["event_ts"]) for o in olds] if t is not None])
@@ -6688,6 +6855,9 @@ class Core:
                 self.conn.rollback()
                 raise
             except Exception as e:
+                if ledger_backup.corrupt_error(e):
+                    self.conn.rollback()
+                    raise
                 self.conn.rollback()
                 common.append_durable_jsonl(
                     os.path.join(common.STATE_DIR, "poison.jsonl"),
@@ -7500,3 +7670,9 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         log.info("정지 신호(SIGINT) — 종료")
+    except sqlite3.DatabaseError as e:
+        if not ledger_backup.corrupt_error(e):
+            raise
+        log.critical("★%s — %s · 백업에서 되돌리기: python3 tools/ledger_restore.py list → restore <백업> --apply★",
+                     ledger_backup.CORRUPT_WHY, common.safe_err(e)[:160])
+        sys.exit(3)

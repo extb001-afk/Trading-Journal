@@ -84,14 +84,17 @@ else
   warn "pm2 가 없습니다 — Node.js 설치 후 'npm install -g pm2' (권장)"
   cat <<EOF
 
-pm2 없이 바로 써 보려면 (터미널 5개, 각각 켜 두기):
+pm2 없이 바로 써 보려면 (터미널 6개, 각각 켜 두기):
   $PY src/unit_runner.py web
   $PY src/unit_runner.py core
   $PY src/unit_runner.py evm
   $PY src/unit_runner.py sol
   $PY src/unit_runner.py bsc
-  # (선택) 거래소: $PY src/upbit_link.py  ·  $PY src/ex_foreign.py  ·  알림: $PY src/alert_bot.py
+  $PY src/alert_bot.py              # 상태 점검·원장 경고(텔레그램 연결 전에도 화면 상태 패널을 채움 — 권장)
+  # (선택) 거래소: $PY src/upbit_link.py  ·  $PY src/ex_foreign.py
 그리고 http://127.0.0.1:${PORT}/ 을 여세요. 첫 비밀번호 화면의 설정 코드 = cat state/auth_setup_code
-로그는 각 터미널에 나옵니다(파일로 남기려면 '... > ~/tj-logs/tj-web.log 2>&1' — 자르기: bash tools/rotate_logs.sh ~/tj-logs)
+멈추기: 각 터미널에서 Ctrl+C(유닛 러너는 자기가 띄운 프로세스를 정상 종료한 뒤 끝나요).
+로그는 각 터미널에 나옵니다. 파일로 남기려면 ★덧붙이기(>>)로★ — 예: $PY src/unit_runner.py web >> ~/tj-logs/tj-web.log 2>&1
+  ('>' 로 열면 자르기 뒤에도 그 프로세스가 옛 위치에 이어 써서 크기가 안 줄어요 · 자르기: bash tools/rotate_logs.sh ~/tj-logs)
 EOF
 fi

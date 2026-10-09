@@ -230,12 +230,14 @@ run(w, 10)
 MODE["pos"] = "401"
 run(w, 10)
 j9 = w.jobs["acct:binance"]
-check("K2 들고 있는 것 없는 곳의 권한 오류 = 종전 6시간 쉼", j9["until"] - T[0] > 5 * 3600, j9["until"] - T[0])
+check("K2 들고 있는 것 없는 곳이라도 읽은 적 있으면 권한 오류 = 5분 뒤 다시(NB1 — 종전 6시간 · 한 번도 못 읽은 곳만 6시간: test_liq_seen S6)",
+      0 < j9["until"] - T[0] <= 300, j9["until"] - T[0])
 a = run(w, 320)
 st5 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
 a += run(w, 300)
 st9 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
-check("K2 … 텔레그램 0 · 상태 bl 0(들고 있는 것 없는 곳의 권한 오류 = 그 상품 권한 없는 키 — 늘 주황 소음 금지)", not a and st5.get("bl") == 0 and st9.get("bl") == 0,
+check("K2 … 텔레그램 0(1시간 뒤 1통 — test_liq_seen S1) · 5분엔 bl 0 · 10분 넘으면 bl 1(NB1 — 읽은 적 있는 곳의 권한 오류 = 연결 오류처럼 주황)",
+      not a and st5.get("bl") == 0 and st9.get("bl") == 1,
       (heads(a), st5, st9))
 reset()
 w = mk()

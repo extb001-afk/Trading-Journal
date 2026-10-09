@@ -84,7 +84,7 @@ def net_error_text(e) -> str:
 def read_env_file(path: str = None) -> dict:
     out = {}
     try:
-        with open(path or ENV_PATH, "r", encoding="utf-8") as f:
+        with open(path or ENV_PATH, "r", encoding="utf-8-sig") as f:
             for line in f:
                 kv = parse_env_line(line)
                 if kv:
@@ -369,7 +369,7 @@ def _secret_values() -> list:
     vals = []
     envp = ENV_PATH
     try:
-        with open(envp, "r", encoding="utf-8") as f:
+        with open(envp, "r", encoding="utf-8-sig") as f:
             for line in f:
                 s = line.strip()
                 if not s or s.startswith("#") or "=" not in s:
@@ -1011,6 +1011,7 @@ SEED_SET_LISTS = {
     "bridge_contracts.json": ((),),
     "sale_contracts.json": (("cca_factories",), ("chains",)),
     "xchain_bridges.json": (("sol_lp_markers",), ("evm_contracts", "*", "chains")),
+    "zero_value_companions.json": (("tokens",),),
 }
 SEED_ID_LISTS = {"coverage/api_limits.json": (("exchanges",), ("chains",), ("perps",))}
 

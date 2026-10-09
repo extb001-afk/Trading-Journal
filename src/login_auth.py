@@ -35,6 +35,7 @@ PW_MIN, PW_MAX = 10, 256
 MAX_SESSIONS = 20
 SEEN_SAVE_SEC = 600
 BODY_MAX = 4096
+PRE_AUTH_BODY_MIN_SEC, PRE_AUTH_BODY_RATE = 10.0, 4096
 FAIL_MAX, FAIL_WINDOW = 5, 600
 LOCK_BASE, LOCK_CAP = 900, 86400
 LOCK_DECAY = 86400
@@ -652,7 +653,7 @@ def _is_page(path: str) -> bool:
     return "." not in last or last.endswith(".html")
 
 
-def _read_json(h, limit=BODY_MAX):
+def _read_json(h, limit=BODY_MAX, pre_auth=False):
     try:
         n = int(h.headers.get("Content-Length") or 0)
     except ValueError:
@@ -662,8 +663,10 @@ def _read_json(h, limit=BODY_MAX):
     if n == 0:
         return {}
     h.connection.settimeout(10)
+    rd = getattr(h, "tj_read_within", None) if pre_auth else None
     try:
-        d = json.loads(h.rfile.read(n).decode("utf-8"))
+        raw = rd(n, max(PRE_AUTH_BODY_MIN_SEC, n / PRE_AUTH_BODY_RATE)) if callable(rd) else h.rfile.read(n)
+        d = json.loads(raw.decode("utf-8"))
     except (ValueError, OSError, RecursionError):
         return None
     return d if isinstance(d, dict) else None
@@ -759,7 +762,7 @@ def _login(h, onboarding):
     b, direct = bucket_of(h), direct_loopback(h)
     if _limited(h, b, direct):
         return True
-    body = _read_json(h)
+    body = _read_json(h, pre_auth=True)
     if body is None:
         return _json(h, 400, {"ok": False, "error": "본문 형식 오류(JSON 객체, 4KB 이하)"})
     pw = body.get("password")
@@ -798,7 +801,7 @@ def _setup(h, onboarding):
                               else "인증 파일이 손상됐어요 — 서버에서 python3 tools/reset_password.py 로 다시 만드세요"})
     if not setup_allowed(h):
         return _json(h, 403, {"ok": False, "error": "첫 비밀번호는 이 컴퓨터에서만 만들 수 있어요 — 서버에서 http://127.0.0.1:포트/login 으로 여세요"})
-    body = _read_json(h)
+    body = _read_json(h, pre_auth=True)
     if body is None:
         return _json(h, 400, {"ok": False, "error": "본문 형식 오류(JSON 객체, 4KB 이하)"})
     want = setup_code(create=True)

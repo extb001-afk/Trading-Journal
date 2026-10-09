@@ -212,6 +212,8 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
       const j = await r.json();
       if (isLocked()) { H.data = null; return; }
       H.data = j.health || null;
+      H.ver = typeof j.version === 'string' ? j.version.slice(0, 40) : '';
+      H.drev = Number.isInteger(j.dataRev) ? j.dataRev : null;
       H.err = null;
       H.at = Date.now();
     } catch (e) {
@@ -255,7 +257,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
       const part = (k, v) => '<span class="tjh-part ' + partTone(k) + '"><i></i><span class="tjh-n">' + LBL[k] + ' ' + v + '</span></span>';
       return '<span class="tjh-long">' + [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span class="tjh-part known"><i></i><span class="tjh-n">알려진 사항 ' + c.known + '</span></span>' : ''].filter(Boolean).join('<span class="tjh-sep" aria-hidden="true"> · </span>') + '</span><span class="tjh-short" aria-hidden="true">' + shortH() + '</span>';
     }
-    const label = o === 'unknown' ? (mobile ? '' : LBL.unknown) : (mobile ? '' : '정상');
+    const label = o === 'unknown' ? (mobile ? '' : H.err && !H.data ? LBL.unknown : '감시 꺼짐') : (mobile ? '' : '정상');
     return '<span class="tjh-dot ' + o + '"></span>' + (label ? '<span class="tjh-n">' + esc(label) + '</span>' : '');
   }
   function btnTitle() {
@@ -551,7 +553,9 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   function summary() {
     const c = counts(), o = overall();
     return { loaded: !!H.data, err: H.err || '', overall: o, crit: c.crit, warn: c.warn, known: c.known, label: c.crit + c.warn ? splitLabel(c) : c.known ? '알려진 사항 ' + c.known : LBL[o],
-      ext: (c.crit + c.warn) > 0 && openNew().every(x => extOf(x)), tg: !!(H.data && H.data.telegram && H.data.telegram.configured) };
+      ext: (c.crit + c.warn) > 0 && openNew().every(x => extOf(x)), tg: !!(H.data && H.data.telegram && H.data.telegram.configured),
+      ledger: H.data && H.data.ledgerWait && typeof H.data.ledgerWait === 'object' ? H.data.ledgerWait : null, monitorOff: !!(H.data && H.data.monitorOff),
+      version: H.ver || '', dataRev: H.drev };
   }
 
   function ensureStyle() {

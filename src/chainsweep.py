@@ -187,6 +187,54 @@ def _batch(url: str, calls: list, bmax: int, timeout: float, pace: float, post=N
     return out
 
 
+def _stable_cas_for(key: str) -> dict:
+    try:
+        import pricing
+        return {str(ca).lower(): str(sym) for ca, sym in ((pricing.STABLE_CAS.get(key) or {}).items())}
+    except Exception:
+        return {}
+
+
+def _stable_bal(url: str, cas: dict, cand: list, st: dict, bmax: int, post, res: dict):
+    ca9 = sorted(cas)
+    calls = [("eth_call", [{"to": ca, "data": "0x70a08231" + "0" * 24 + a[2:]}, "latest"]) for a in cand for ca in ca9]
+    r = _batch(url, calls, int(bmax), float(st["timeout"]), float(st["pace_sec"]), post)
+    res["calls"] += len(calls)
+    res["http"] += -(-len(calls) // int(bmax))
+    raw = {}
+    for i, a in enumerate(cand):
+        for j, ca in enumerate(ca9):
+            v = r[i * len(ca9) + j]
+            try:
+                n9 = int(v, 16) if isinstance(v, str) and v not in ("0x", "") else 0
+            except ValueError:
+                n9 = 0
+            if 0 < n9 < 2 ** 255:
+                raw[(a, ca)] = n9
+    need = sorted({ca for _a, ca in raw})
+    dec = {}
+    if need:
+        d9 = _batch(url, [("eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"]) for ca in need], int(bmax),
+                    float(st["timeout"]), float(st["pace_sec"]), post)
+        res["calls"] += len(need)
+        res["http"] += -(-len(need) // int(bmax))
+        for ca, v in zip(need, d9):
+            try:
+                n9 = int(v, 16)
+            except (TypeError, ValueError):
+                raise RuntimeError(f"decimals 응답 이상 {ca[:10]}")
+            if not 0 <= n9 <= 36:
+                raise RuntimeError(f"decimals 범위 밖 {ca[:10]}: {n9}")
+            dec[ca] = n9
+    out = {}
+    for (a, ca), n9 in raw.items():
+        u9 = n9 / 10 ** dec[ca]
+        usd9, by9 = out.get(a, (0.0, {}))
+        by9[cas[ca]] = round(by9.get(cas[ca], 0.0) + u9, 6)
+        out[a] = (usd9 + u9, by9)
+    return out
+
+
 def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict = None, ledger_pairs=None) -> dict:
     st = settings(cfg)
     now = time.time() if now is None else now
@@ -225,7 +273,7 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
     for key, (name, cid, sym, rpcs, bmax) in chains.items():
         calls = [("eth_chainId", []), ("eth_blockNumber", [])] + [("eth_getTransactionCount", [a, "latest"]) for a in addrs] \
             + [("eth_getBalance", [a, "latest"]) for a in addrs]
-        got, errs = None, []
+        got, errs, url_ok = None, [], None
         for url in rpcs:
             try:
                 r = _batch(url, calls, int(bmax), float(st["timeout"]), float(st["pace_sec"]), post)
@@ -233,7 +281,7 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
                 res["http"] += -(-len(calls) // int(bmax))
                 if int(r[0], 16) != int(cid):
                     raise RuntimeError(f"chainId {int(r[0], 16)} ≠ {cid}")
-                got = r
+                got, url_ok = r, url
                 break
             except Exception as e:
                 errs.append(f"{_host(url)}: {common.safe_err(e)[:100]}")
@@ -248,6 +296,15 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
         per = {}
         checked = []
         px = usd_of(sym)
+        cas9 = _stable_cas_for(key) if key not in ign else {}
+        cand9 = [a for a in addrs if (key, a) not in tracked and f"{key}:{a}" not in ign] if cas9 else []
+        tok9, tok_ok9 = {}, False
+        if cand9:
+            try:
+                tok9, tok_ok9 = _stable_bal(url_ok, cas9, cand9, st, int(bmax), post, res), True
+            except Exception as e:
+                res.setdefault("tokErrors", []).append(f"{key}: {_host(url_ok)}: {common.safe_err(e)[:100]}")
+        prev_tok = set(prev.get("taddrs") or []) if prev.get("ok") else set()
         for i, a in enumerate(addrs):
             try:
                 nonce, bal = int(got[2 + i], 16), int(got[2 + n + i], 16)
@@ -262,16 +319,31 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
                 or (usd is None and units >= float(st["min_units_unpriced"]))
             k9 = f"{key}:{a}"
             old9 = g_pr.get(k9) or {}
+            t_live = tok_ok9 and a in cand9
+            if t_live:
+                t_usd, t_by = tok9.get(a, (0.0, {}))
+            else:
+                t_by = old9.get("stable") if isinstance(old9.get("stable"), dict) else {}
+                t_usd = sum(float(v or 0) for v in t_by.values())
+            tsig = t_live and t_usd >= float(st["min_usd"])
+            t_disp = t_usd if (tsig or (not t_live and t_by)) else 0.0
             base9 = [int(old9.get("nonce") or 0), str(old9.get("bal") or "0")]
-            if nonce or bal or k9 in g_pr:
+            if nonce or bal or tsig or k9 in g_pr:
                 per[a] = [nonce, str(bal)]
                 e9 = g_pr.setdefault(k9, {})
-                e9.update(nonce=nonce, bal=str(bal), lastChecked=int(now), usd=round(usd, 2) if usd is not None else None)
-            if sig:
-                fresh = a in prev_ok and not old9.get("active")
+                u9 = (usd or 0.0) + t_disp if (usd is not None or t_disp) else None
+                e9.update(nonce=nonce, bal=str(bal), lastChecked=int(now), usd=round(u9, 2) if u9 is not None else None)
+                if tsig:
+                    e9["stable"] = t_by
+                elif t_live:
+                    e9.pop("stable", None)
+            if sig or tsig:
+                fresh = a in prev_ok and not old9.get("active") and (not tsig or a in prev_tok)
                 activate(k9, int(prev["head"]) - 1 if fresh else None, "sweep", base9 if fresh else None)
         g_ch[key] = {"ok": True, "head": head, "checkedAt": int(now),
                      "addrs": [a for a in checked if not (g_pr.get(f"{key}:{a}") or {}).get("active")]}
+        if tok_ok9:
+            g_ch[key]["taddrs"] = [a for a in cand9 if a in checked and not (g_pr.get(f"{key}:{a}") or {}).get("active")]
         res["chains"][key] = {"ok": True, "name": name, "sym": sym, "head": head, "active": per}
     for c9, a9 in sorted(ledger_pairs or ()):
         activate(f"{c9}:{str(a9).lower()}", None, "ledger")
@@ -294,6 +366,7 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
         units = int(e9.get("bal") or 0) / 1e18
         f = {"chain": c9, "name": name, "wallet": a9, "label": labels.get(a9, ""), "nonce": int(e9.get("nonce") or 0),
              "bal": round(units, 8), "sym": sym, "usd": e9.get("usd"), "since": e9.get("since_block"),
+             "stable": e9.get("stable") if isinstance(e9.get("stable"), dict) else None,
              "chainTracked": c9 in (cfg.get("chains") or {}) or (c9 == "bsc" and bool(cfg.get("bsc")))}
         d = dec.get((c9, a9))
         if d and d["ok"] and auto_on:
@@ -327,6 +400,8 @@ def refresh_reason(f: dict, speed_rows: dict, auto_on: bool) -> dict:
 def finding_text(f: dict) -> str:
     who = (f.get("label") or "") + f"({f['wallet'][:6]}…{f['wallet'][-4:]})"
     amt = f"${f['usd']:,.2f}" if f.get("usd") is not None else f"{f['bal']:g} {f['sym']}(시세 미상)"
+    if isinstance(f.get("stable"), dict) and f["stable"]:
+        amt += " (" + " · ".join(f"{k} {float(v):,.2f}" for k, v in sorted(f["stable"].items())) + ")"
     tail = f" · 보낸 거래 {f['nonce']}건" if f.get("nonce") else ""
     kind = "" if not f.get("chainTracked") else " · 체인은 추적 중(이 지갑 미등록)"
     rs = str(f.get("reason") or "")

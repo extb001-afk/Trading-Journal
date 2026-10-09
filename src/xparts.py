@@ -9,6 +9,7 @@ RANK = {"snap": 3, "tl": 2, "carry": 1, "zero": 0}
 TOL_KRW = 1000.0
 CHK_TOL_KRW = 100_000.0
 CHK_TOL_PCT = 0.01
+REST_SEEN_USD = 1.0
 
 
 def num(v):
@@ -149,6 +150,21 @@ def carry_usd(parts, fx) -> float:
     return out
 
 
+def rest_first(lp_first, obs, now=None, seen=None) -> tuple:
+    cand = []
+    for o in (obs or {}).values():
+        if isinstance(o, dict) and (num(o.get("rest")) or 0.0) >= REST_SEEN_USD and num(o.get("end")):
+            cand.append(float(o["end"]))
+    n = now if isinstance(now, dict) else {}
+    if (num(n.get("rest")) or 0.0) >= REST_SEEN_USD and num(n.get("ts")):
+        cand.append(float(n["ts"]))
+    if num(seen):
+        cand.append(float(seen))
+    seen2 = min(cand) if cand else None
+    f = [t for t in (num(lp_first), seen2) if t]
+    return (min(f) if f else None), seen2
+
+
 def obs_entry(end_ts, parts, kinds=("snap",)) -> dict:
     o = {"end": float(end_ts)}
     for key in KEYS:
@@ -177,11 +193,14 @@ def migrate_legacy(end_ts, x, xk, fx, xu, src, add_missing=True) -> dict:
             if r < -tol:
                 continue
             p = {"ku": [k_u, "snap"], "kb": [k_b, "snap"], "ub": [ub, "snap"], "rest": [round(r, 2), "snap"]}
-            note = "live 보존"
-            for key, use, v in (("ku", use_ku, ku), ("kb", use_kb, kb)):
-                if not use and v is not None and v > 0 and add_missing:
-                    p[key] = [v, "tl"]
-                    note = "live 보존 + 원화 추가(" + key + ")"
+            added, odd = [], []
+            if not use_kb and kb is not None and kb > 0 and add_missing:
+                p["kb"] = [kb, "tl"]
+                added.append("kb")
+            if not use_ku and ku is not None and ku > 0:
+                odd.append("ku")
+            note = "live 보존" + (" + 원화 추가(" + "·".join(added) + ")" if added else "") + \
+                (" · 분해 불가(" + "·".join(odd) + " — 옛 마감 합계가 그 원화 이력보다 작음 → 0 관측 그대로)" if odd else "")
             return {"p": p, "note": note}
     return {"p": {"ku": [0.0, "snap"], "kb": [0.0, "snap"], "ub": [ub, "snap"], "rest": [round(x - uu, 2), "snap"]}, "note": "분해 불가(덩어리)"}
 

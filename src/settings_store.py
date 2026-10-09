@@ -54,7 +54,7 @@ def _parse_env_line(line: str):
 def read_env() -> dict:
     out = {}
     try:
-        with open(ENV_PATH, "r", encoding="utf-8") as f:
+        with open(ENV_PATH, "r", encoding="utf-8-sig") as f:
             for line in f:
                 kv = _parse_env_line(line)
                 if kv and kv[0]:
@@ -109,7 +109,7 @@ def write_env(updates: dict) -> None:
         clean[k] = None if v is None else validate_env_value(k, v)
     with LOCK:
         try:
-            with open(ENV_PATH, "r", encoding="utf-8") as f:
+            with open(ENV_PATH, "r", encoding="utf-8-sig") as f:
                 lines = f.read().splitlines()
         except FileNotFoundError:
             lines = ["# tj-bot 비밀값 — 웹 설정 화면이 관리합니다 (직접 수정해도 됩니다). 절대 공유·커밋 금지."]

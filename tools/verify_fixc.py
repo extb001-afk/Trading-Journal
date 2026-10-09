@@ -154,10 +154,17 @@ def cmd_gates(db, bal_path=None, live=None):
     return 0 if ok else 1
 
 
+USAGE = """verify_fixc — 재파생 원장 판정(읽기 전용 · 네트워크 없음)
+  python3 tools/verify_fixc.py hash DB                                   결정성 해시(postings·positions·tx_class·transfers)
+  python3 tools/verify_fixc.py same DB1 DB2                              두 재파생 결과 해시 같음(다르면 종료 코드 1)
+  python3 tools/verify_fixc.py gates DB [--balances F] [--live LIVE_DB]  게이트 b·c(LP 구조 · 업비트 잔고 대조)
+종료 코드: 0 = PASS · 1 = FAIL."""
+
+
 def main():
     a = sys.argv[1:]
-    if not a:
-        raise SystemExit(__doc__)
+    if not a or a[0] in ("-h", "--help"):
+        raise SystemExit(USAGE)
     if a[0] == "hash":
         sys.exit(cmd_hash(a[1]))
     if a[0] == "same":
@@ -166,7 +173,7 @@ def main():
         bal = a[a.index("--balances") + 1] if "--balances" in a else None
         live = a[a.index("--live") + 1] if "--live" in a else None
         sys.exit(cmd_gates(a[1], bal, live))
-    raise SystemExit(__doc__)
+    raise SystemExit(USAGE)
 
 
 if __name__ == "__main__":

@@ -83,6 +83,7 @@ for _ch, _m in {
     "avalanche": {"0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": "USDC", "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": "USDT"},
     "story": {"0xf1815bd50389c46847f0bda824ec8da914045d14": "USDC"},
     "abstract": {"0x84a71ccd554cc1b02749b35d22f684cc8ec987e1": "USDC", "0x0709f39376deee2a2dfc94a58edeb2eb9df012bd": "USDT"},
+    "katana": {"0x203a662b0bd271a6ed5a60edfbd04bfce608fd36": "USDC"},
 }.items():
     STABLE_CAS.setdefault(_ch, {}).update(_m)
 STABLE_SYMS = {"USDT", "USDC", "DAI"}
@@ -1400,8 +1401,8 @@ def ds_token_prices(chain: str, cas: list):
                     px = float(pr.get("priceUsd") or 0)
                 except (TypeError, ValueError):
                     continue
-                if _fin(px) and (orig not in best or (liq or 0.0) > best[orig][0]):
-                    best[orig] = (liq or 0.0, px)
+                if liq is not None and _fin(px) and (orig not in best or liq > best[orig][0]):
+                    best[orig] = (liq, px)
     _DS_META = meta
     return {k: v[1] for k, v in best.items()}, {k: v for k, v in res.items() if k in best}
 

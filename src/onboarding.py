@@ -1538,7 +1538,6 @@ class DemoBuilder:
 def demo_main(webmod) -> bool:
     if not DEMO:
         return False
-    from http.server import ThreadingHTTPServer
     common.ensure_dirs()
     try:
         cport = (ss.read_config_raw().get("web") or {}).get("port")
@@ -1547,7 +1546,7 @@ def demo_main(webmod) -> bool:
     port = int(os.environ.get("TJ_PORT") or cport or 8023)
     webmod.BUILDER = DemoBuilder(webmod)
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", port), webmod.Handler)
+        srv = webmod.QuietHTTPServer(("127.0.0.1", port), webmod.Handler)
     except OSError as e:
         webmod.port_busy_exit(port, e, demo=True)
     log.info("★데모 모드★ http://127.0.0.1:%d/v2/ — 합성 데이터(실지갑 아님), 저장 POST 거부", port)

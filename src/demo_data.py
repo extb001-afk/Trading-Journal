@@ -149,6 +149,12 @@ def build() -> dict:
                       "avg": avg, "kqty": qty, "fbQty": 0, "fbCost": 0, "locs": locs_for(sym, ch, qty)})
     coins.append({"key": "g140", "sym": "DEGEN", "name": "DEGEN · Base", "qty": 52000.0, "price": 0.0068, "avg": 0,
                   "kqty": 0, "fbQty": 0, "fbCost": 0, "locs": locs_for("DEGEN", "base", 52000.0)})
+    coins.append({"key": "g141", "sym": "WBTC", "name": "WBTC · Arbitrum", "qty": 0.8, "price": 0, "avg": 0,
+                  "kqty": 0, "fbQty": 0, "fbCost": 0, "locs": locs_for("WBTC", "arbitrum", 0.8),
+                  "unv": "WBTC", "ck": "arbitrum", "ca": "0x" + _hex("unv-token", 40)})
+    for c9 in coins:
+        if c9["sym"] == "JUP":
+            c9["fsc"] = 2460.0
     f["coins"] = coins
     f["unpricedSyms"] = []
     f["stables"] = [
@@ -240,7 +246,7 @@ def build() -> dict:
                       "events": [{"t": fs_got.strftime("%m-%d %H:%M"), "k": "전송", "d": "Ethereum 외부 유입 (원가 미상)",
                                   "q": f"{fs_q:,.0f}", "a": "—", "tx": _tx("ZRO"), "src": None},
                                  {"t": fs_sold.strftime("%m-%d %H:%M"), "k": "거래소 매도",
-                                  "d": "업비트 · KRW 마켓 체결 · 원가 일부 추정(처음 인식한 날 시가)",
+                                  "d": "업비트 · KRW 마켓 체결 · 원가 일부 최초 인식 시가",
                                   "q": f"{fs_q:,.0f}", "a": f"${fs_q * fs_out:,.0f}", "tx": "—", "src": "ex:upbit"}]})
     f["taxRows"].append({"sold": _mmdd(fs_sold), "sym": "ZRO", "ticker": "ZRO", "ex": "업비트 · 최초 인식 시가", "qty": fs_q,
                          "acq": round(fs_q * fs_px, 2), "disp": round(fs_q * fs_out, 2), "fee": 0})
@@ -257,9 +263,22 @@ def build() -> dict:
                                  {"t": zb_t[2].strftime("%m-%d %H:%M"), "k": "온체인 매도", "d": "Base · 스왑 매도", "q": "300", "a": f"${zb_q * zb_out:,.0f}", "tx": _tx("ZRB3"), "src": None}]})
     f["taxRows"].append({"sold": _mmdd(zb_t[2]), "sym": "ZRO", "ticker": "ZRO", "ex": "온체인(DEX)", "qty": zb_q,
                          "acq": round(zb_q * zb_px, 2), "disp": round(zb_q * zb_out, 2), "fee": 0})
+    wt_got, wt_sold = now - timedelta(days=2, hours=6), now - timedelta(days=1, hours=3)
+    wt_q, wt_out = 8000.0, 0.0515
+    positions.append({"unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": wt_q, "unvProceeds": round(wt_q * wt_out, 2), "realizedFb": 0,
+                      "soldProceeds": round(wt_q * wt_out, 2), "avgSell": wt_out, "key": "g154", "sym": "WEN", "chain": "Solana",
+                      "status": "종료", "held": 0.0, "bought": 0.0, "movedQty": 0, "movedCost": 0, "soldQty": wt_q, "avg": 0,
+                      "cost": 0, "realized": 0, "unreal": 0, "opened": _mmdd(wt_got), "_ots": int(wt_got.timestamp()),
+                      "fee": "$0.01", "steps": ["외부 유입", "전량 매도"], "realizedByDay": {},
+                      "unvByDay": {_mmdd(wt_sold): [1, round(wt_q * wt_out, 2)]},
+                      "events": [{"t": wt_got.strftime("%m-%d %H:%M"), "k": "전송", "d": "Solana 외부 유입 (원가 미상)",
+                                  "q": f"{wt_q:,.0f}", "a": "—", "tx": _tx("WEN", True), "src": None},
+                                 {"t": wt_sold.strftime("%m-%d %H:%M"), "k": "온체인 매도", "d": "Solana · 스왑 매도 · 원가 미확인",
+                                  "q": f"{wt_q:,.0f}", "a": f"${wt_q * wt_out:,.0f}", "tx": _tx("WEN2", True), "src": None}]})
     f["fsRealByDate"] = {_mmdd(fs_sold): [fs_real, round(fs_real * f["rate"])]}
     f["firstSeen"] = {"on": True, "eff": True, "fb": False, "n": 3, "usd": round(fs_q * fs_px + 420.0, 2), "miss": 1, "rows": 1,
-                      "real": fs_real, "stN": 1, "stUsd": 3000.0}
+                      "real": fs_real, "stN": 1, "stUsd": 3000.0,
+                      "hold": {"wait": 1, "unv": 2}, "wait": 1, "ret": 1, "sd": 1, "pin": 3, "note": False}
     f["positions"] = positions
     for e, sym, realized, sold, avg, sell_px in evs_all:
         f["taxRows"].append({"sold": e["t"][:5], "sym": sym, "ticker": sym, "ex": "업비트", "qty": sold,
@@ -317,7 +336,12 @@ def build() -> dict:
          "why": "본인 지갑이면 설정에서 지갑으로 등록하세요.", "cands": []},
         {"key": "risk:g141", "t": (now - timedelta(days=1)).strftime("%m-%d %H:%M"), "kind": "스팸·에어드랍 의심", "sym": "CLAIM",
          "chain": "Base", "qty": 1000.0, "onchain": "1,000 CLAIM · 평가 $0.00 표시 제외", "ex": "—", "gap": "실매수 이력 없는 에어드랍 유입",
-         "why": "실매수·스왑 이력이 없는 유입분이라 목록에서 제외했습니다.", "cands": []}]
+         "why": "실매수·스왑 이력이 없는 유입분이라 목록에서 제외했습니다.", "cands": []},
+        {"key": "unv:154", "t": _mmdd(wt_sold), "kind": "원가미상 매도 검토", "sym": "WEN", "chain": "—",
+         "onchain": f"{wt_q:,.4f} WEN 매도 · 정산 ${wt_q * wt_out:,.2f}", "ex": "—",
+         "gap": "1건 · 실매수 기록 없는 유입분 · 최초 인식 시가 시세 대기(받으면 자동 반영)", "fsHold": "wait",
+         "why": "매수 기록이 없는 유입분의 매도라 실현손익에서 제외했습니다. 원가 지정 또는 이체·에어드랍 확인이 필요합니다.",
+         "gkey": "g154", "costOv": None, "qty": wt_q, "usd": round(wt_q * wt_out, 2), "cands": [], "candsHint": ""}]
     f["extraEvents"] = [{"t": (now - timedelta(days=3)).strftime("%m-%d %H:%M"), "sym": "USDC", "k": "전송",
                          "d": "메인 → 업비트 입금", "q": "3,000", "a": "$3,000", "tx": _tx("x1"), "src": "ex:upbit",
                          "_ts": int((now - timedelta(days=3)).timestamp())}]

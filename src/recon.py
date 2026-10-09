@@ -423,7 +423,7 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
             pairs += [(w, ca) for ca in sorted(cw)]
             queried[w] = sorted(cw)
         items = [(("bal", w, ca), ca, _SEL_BAL + str(w).lower().replace("0x", "").rjust(64, "0")) for w, ca in pairs]
-        items += [(("dec", ca), ca, _SEL_DEC) for ca in sorted({ca for _w, ca in pairs if ca not in cas})]
+        items += [(("dec", ca), ca, _SEL_DEC) for ca in sorted({ca for _w, ca in pairs if ca not in cas or cas[ca][1] is None})]
         items.sort(key=lambda it: 0 if (it[0][0] == "bal" and is_strict(it[0][1], it[0][2])) else 1)
         got = _mc_call(urls, blk, items, multicall, sleep=sleep)
         for (w, ca) in pairs:
@@ -438,6 +438,10 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                     v = None
                 else:
                     dec = d9
+            elif v and cas[ca][1] is None:
+                dd = got.get(("dec", ca))
+                d9 = int.from_bytes(dd, "big") if dd is not None and len(dd) == 32 else None
+                dec = d9 if d9 is not None and d9 <= 77 else None
             if v is None:
                 if is_strict(w, ca) and ca not in spec.get(w, ()):
                     hold.setdefault(w, []).append(ca)
@@ -448,7 +452,7 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 diff.append((w, ca, None if not b9 else b9[1], v))
             if v:
                 per[w][("token", ca)] = v
-                meta[ca] = tuple(cas[ca]) if ca in cas else ((b9[0] if b9 else sw.get(ca)), dec)
+                meta[ca] = (tuple(cas[ca]) if cas[ca][1] is not None else (cas[ca][0], dec)) if ca in cas else ((b9[0] if b9 else sw.get(ca)), dec)
     for w in hold:
         per.pop(w, None)
     return {"per_wallet": per, "_meta": meta, "_source": "rpc", "_block": bn, "_block_ts": bts, "_bs_diff": diff, "_unobs": unobs,
