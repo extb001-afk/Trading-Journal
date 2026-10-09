@@ -39,17 +39,7 @@ HOLD_IDS_WARN = 4 * READ_LINES_MAX
 
 
 def _env():
-    out = {}
-    try:
-        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, v = line.split("=", 1)
-                    out[k] = v
-    except OSError:
-        pass
-    return out
+    return common.read_env_file()
 
 
 def _tg_creds():

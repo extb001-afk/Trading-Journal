@@ -144,7 +144,7 @@ def _liq_key(row):
     return (None, None)
 
 
-SENT_KO = {("fut", 1): "소리 알림 보냄", ("fut", 2): "더 가까워져 한 번 더 보냄",
+SENT_KO = {("fut", 1): "소리 알림 보냄", ("fut", 2): "더 가까워져 한 번 더 보냄", ("fut", 3): "청산가에 닿아 한 번 더 보냄",
            ("risk", 1): "소리 알림 보냄", ("risk", 2): "긴급 알림 보냄(마진콜)", ("risk", 3): "긴급 알림 보냄(청산 임박)"}
 
 
@@ -163,7 +163,7 @@ def _sent(row, liq_mem):
     st = int(_f(e.get("st")) or 0)
     if st <= 0:
         return None
-    return {"st": st, "at": int(_f(e.get("at")) or 0), "label": SENT_KO.get((g, min(st, 3 if g == "risk" else 2)), "알림 보냄")}
+    return {"st": st, "at": int(_f(e.get("at")) or 0), "label": SENT_KO.get((g, min(st, 3)), "알림 보냄")}
 
 
 def _debt_rows(it, price):

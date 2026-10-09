@@ -294,13 +294,26 @@ def cg_points_day(key, url_base, day0, store=None, keyed=False):
     return pts
 
 
-def _c_coingecko(sym, ms):
+def _c_coingecko(sym, ms, cache=None):
     cid = _cg_sym_id(sym)
     if not cid:
         return None
-    store = _CG_STORE[0]
-    pts = cg_points_day(f"id:{cid}", f"https://api.coingecko.com/api/v3/coins/{urllib.parse.quote(cid, safe='')}",
-                        (int(ms) // 1000) // 86400 * 86400, store, keyed=True)
+    day0 = (int(ms) // 1000) // 86400 * 86400
+    key, url = f"id:{cid}", f"https://api.coingecko.com/api/v3/coins/{urllib.parse.quote(cid, safe='')}"
+    if cache is None:
+        store = _CG_STORE[0]
+        pts = cg_points_day(key, url, day0, store, keyed=True)
+    else:
+        dk = f"{key}:{int(day0)}"
+        with cache.lock:
+            own = cache.d.setdefault("cgday", {})
+            tmp = {dk: own[dk]} if dk in own else {}
+        pts = cg_points_day(key, url, day0, tmp, keyed=True)
+        if dk in tmp:
+            with cache.lock:
+                if dk not in own:
+                    own[dk] = tmp[dk]
+                    cache._dirty += 1
     v = _cg_pts_at(pts, int(ms)) if pts else None
     if v:
         import logging
@@ -520,7 +533,7 @@ class PxCache:
         ven9 = None
         for _name, fn in CANDLE_ORDER:
             try:
-                px = fn(sym, m)
+                px = fn(sym, m, cache=self) if fn is _c_coingecko else fn(sym, m)
             except Exception:
                 px = None
             if px:

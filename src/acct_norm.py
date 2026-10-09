@@ -226,3 +226,57 @@ def fill_ts(order: dict):
         if ts and (best is None or ts > best):
             best = ts
     return int(best) if best else None
+
+
+UPBIT_TERMINAL = ("done", "cancel")
+
+
+def _dec(v):
+    from decimal import Decimal, InvalidOperation
+    try:
+        d = Decimal(str(v))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return d if d.is_finite() else None
+
+
+def trades_fill_merge(stored: dict, resp: dict):
+    if not isinstance(stored, dict) or not isinstance(resp, dict):
+        return None, "형식"
+    if fill_ts(stored) is not None:
+        return None, "이미 체결 목록 있음"
+    for k in ("uuid", "market", "side", "state"):
+        if str(stored.get(k) or "").lower() != str(resp.get(k) or "").lower():
+            return None, f"{k} 다름"
+    if str(stored.get("state") or "").lower() not in UPBIT_TERMINAL:
+        return None, "종결 아님"
+    tr = resp.get("trades")
+    if not isinstance(tr, list) or not tr or not all(isinstance(t, dict) for t in tr):
+        return None, "체결 목록 없음"
+    from decimal import Decimal
+    sv, sf = Decimal(0), Decimal(0)
+    for t in tr:
+        v9, f9 = _dec(t.get("volume")), _dec(t.get("funds"))
+        if v9 is None or f9 is None or v9 < 0 or f9 < 0 or fill_ts({"trades": [t]}) is None:
+            return None, "체결 행 읽기 실패"
+        sv += v9
+        sf += f9
+    ev = _dec(stored.get("executed_volume"))
+    if ev is None or ev <= 0 or sv != ev:
+        return None, "체결 수량 합 다름"
+    if stored.get("executed_funds") not in (None, ""):
+        ef = _dec(stored.get("executed_funds"))
+        if ef is None or sf != ef:
+            return None, "체결 금액 합 다름"
+    if stored.get("trades_count") is not None:
+        try:
+            if int(stored["trades_count"]) != len(tr):
+                return None, "체결 수 다름"
+        except (TypeError, ValueError):
+            return None, "체결 수 읽기 실패"
+    for k in ("executed_volume", "paid_fee", "executed_funds"):
+        if resp.get(k) not in (None, "") and stored.get(k) not in (None, "") and _dec(resp.get(k)) != _dec(stored.get(k)):
+            return None, f"{k} 다름"
+    out = dict(stored)
+    out["trades"] = tr
+    return out, None

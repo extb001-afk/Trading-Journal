@@ -159,6 +159,24 @@ def why_text(e, what: str) -> str:
     return "예상하지 못한 오류가 났어요 — tj-web 로그(pm2 logs tj-web)에서 자세한 내용을 확인하세요"
 
 
+def net_why(e) -> str:
+    import socket
+    import ssl
+    log.warning("외부 연결 실패: %s", scrub(type(e).__name__))
+    r = getattr(e, "reason", None)
+    if isinstance(e, urllib.error.HTTPError):
+        return f"서버가 거절했어요(HTTP {e.code}) — 잠시 뒤 다시 시도하세요"
+    if isinstance(e, (socket.timeout, TimeoutError)) or isinstance(r, (socket.timeout, TimeoutError)):
+        return "응답이 너무 늦어요 — 잠시 뒤 다시 시도하세요"
+    if isinstance(e, ssl.SSLError) or isinstance(r, ssl.SSLError):
+        return "보안 연결(SSL)을 맺지 못했어요 — 서버 시계와 인증서 설정을 확인하세요"
+    if isinstance(r, socket.gaierror) or isinstance(e, socket.gaierror):
+        return "주소를 찾지 못했어요 — 이 서버의 인터넷(DNS) 연결을 확인하세요"
+    if isinstance(e, ConnectionError) or isinstance(r, (ConnectionError, OSError)) or isinstance(e, urllib.error.URLError):
+        return "서버에 닿지 못했어요 — 이 서버의 인터넷 연결·방화벽을 확인하고 잠시 뒤 다시 시도하세요"
+    return "예상하지 못한 오류가 났어요 — 잠시 뒤 다시 시도하고, 계속되면 tj-web 로그(pm2 logs tj-web)를 보세요"
+
+
 def _base(name: str, default: str) -> str:
     v = os.environ.get("TJ_TEST_BASE_" + name.upper(), "")
     return v.rstrip("/") if v.startswith("http://127.0.0.1:") else default
@@ -613,7 +631,8 @@ def _test_group(group: str, v: list) -> dict:
             t = _err_text(code, d)
             return {"ok": False, "detail": t + _ip_hint(t)}
     except Exception as e:
-        return {"ok": False, "detail": "연결 실패: " + scrub(e, v)}
+        log.warning("키 시험 연결 실패(%s): %s", group, scrub(e, v)[:200])
+        return {"ok": False, "detail": "연결 실패 — " + net_why(e)}
     return {"ok": False, "detail": "알 수 없는 대상"}
 
 
@@ -629,7 +648,8 @@ def _tg(token: str, method: str, params: dict | None = None, timeout: int = 12):
         code, d = _http(f"{base}/bot{token}/{method}", {"Content-Type": "application/x-www-form-urlencoded"}, data, "POST",
                         timeout=timeout)
     except Exception as e:
-        raise RuntimeError("텔레그램 연결 실패: " + scrub(e, [token]))
+        log.warning("텔레그램 연결 실패: %s", scrub(e, [token])[:200])
+        raise RuntimeError("텔레그램 연결 실패 — " + net_why(e))
     if not isinstance(d, dict):
         raise RuntimeError(f"텔레그램 응답 오류 (HTTP {code})")
     return d
@@ -1125,6 +1145,10 @@ def handle_get(h, path: str) -> bool:
     if path == "/api/receipt" and (DEMO or not os.path.exists(common.DB_PATH)):
         h._send(200, {"ok": True, "empty": True})
         return True
+    if not DEMO and not os.path.exists(common.DB_PATH) and path in ("/api/fut_receipt", "/api/receipt_list", "/api/outflow_candidates"):
+        h._send(200, {"ok": True, "empty": True, "n": 0, "items": []} if path != "/api/outflow_candidates" else
+                {"ok": True, "empty": True, "total": 0, "totalTok": 0, "totalStable": 0, "shown": 0, "quarN": 0, "cands": []})
+        return True
     if path in ("/api/state", "/api/v2/state") and not os.path.exists(common.DB_PATH):
         try:
             cfg = ss.load_config_quiet()
@@ -1145,7 +1169,7 @@ def _read_body(h):
     h.connection.settimeout(10)
     try:
         body = json.loads(h.rfile.read(n).decode() or "{}") if n else {}
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) else None
 
@@ -1306,6 +1330,9 @@ def _dispatch(act: str, b: dict) -> dict:
                     pass
             return {"ok": True}
         vals_in = b.get("values") if isinstance(b.get("values"), dict) else {}
+        bad9 = [k for k in fields if vals_in.get(k) is not None and not isinstance(vals_in.get(k), str)]
+        if bad9:
+            return {"ok": False, "error": "키 값은 글자로만 넣을 수 있어요"}
         vals = {}
         for k in fields:
             v = str(vals_in.get(k) or "").strip()

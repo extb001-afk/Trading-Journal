@@ -51,15 +51,7 @@ DAY = 86400
 
 
 def _env() -> dict:
-    env = {}
-    p = common.ENV_PATH
-    if os.path.exists(p):
-        for line in open(p):
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, _, v = line.partition("=")
-                env[k] = v
-    return env
+    return common.read_env_file()
 
 
 def _xm(v) -> str:
@@ -1014,6 +1006,8 @@ BN_SWEEP_SEC = 24 * 3600
 BN_INVALID_RECHECK = 7 * DAY
 BN_RECENT_SEC = 7 * DAY
 BN_LATE_MARGIN = 120
+BN_FIRST_SWEEP_SEC = 180
+RECON_HOLD_CAP = 6 * 3600
 _BN_UNI = {"ts": 0.0, "fail": 0.0, "sym": None, "path": None}
 _WD_TOUCH = {}
 _POLL_HINT = [POLL_SEC]
@@ -1102,10 +1096,36 @@ def _bn_inv_load(lst, at, uni, now):
     return {p: t for p, t in out.items() if now - t < BN_INVALID_RECHECK}
 
 
+def _recon_hold(fst: dict, key: str, now: int, why: str) -> bool:
+    hs = fst.get("hold_since")
+    if not isinstance(hs, dict):
+        hs = fst["hold_since"] = {}
+    try:
+        t0 = int(hs.get(key) or 0) or int(now)
+    except (TypeError, ValueError):
+        t0 = int(now)
+    hs[key] = t0
+    if int(now) - t0 > RECON_HOLD_CAP:
+        return False
+    rh = fst.get("recon_hold")
+    fst["recon_hold"] = (str(rh) + " · " if rh else "") + str(why)[:120]
+    return True
+
+
+def _recon_hold_clear(fst: dict, key: str) -> None:
+    hs = fst.get("hold_since")
+    if isinstance(hs, dict):
+        hs.pop(key, None)
+        if not hs:
+            fst.pop("hold_since", None)
+
+
 def fills_binance(env, st, t0: int, t1: int):
     call = _binance_caller(env)
     now9 = int(time.time())
     late_before = int(st.get("bn_acct_at") or st.get("backfilled_until") or 0)
+    if not st.get("backfilled_until") and not st.get("bn_sweep_full") and not isinstance(st.get("bn_first_sweep"), dict):
+        st["bn_first_sweep"] = {"at": now9, "n": 0, "done": []}
     acct = call("/api/v3/account", {"omitZeroBalances": "true"})
     acct_at = int(time.time())
     cur = {}
@@ -1242,7 +1262,29 @@ def fills_binance(env, st, t0: int, t1: int):
                 continue
             poll(p9, *cand[p9])
             n_safe += 1
-        if uni:
+        fs9 = st.get("bn_first_sweep") if isinstance(st.get("bn_first_sweep"), dict) else None
+        if uni and fs9 is not None:
+            done9 = {str(x) for x in (fs9.get("done") or [])} | polled
+            need9 = {s9 for s9 in uni if s9 not in inv and uni[s9][0] != uni[s9][1]}
+            todo9 = sorted(need9 - done9)
+            fs9["done"], fs9["n"] = sorted(done9), len(done9 & need9)
+            n2 = int(len(need9) * poll9 / BN_SWEEP_SEC) + 1
+            t_end9 = time.time() + BN_FIRST_SWEEP_SEC
+            for k9, p9 in enumerate(todo9):
+                if k9 >= n2 and time.time() >= t_end9:
+                    break
+                poll(p9, uni[p9][0], uni[p9][1])
+                n_sweep += 1
+                fs9["done"].append(p9)
+                done9.add(p9)
+                fs9["n"] = len(done9 & need9)
+            if not (need9 - done9 - set(inv)):
+                st.pop("bn_first_sweep", None)
+                st["bn_sweep_full"] = now9
+                _recon_hold_clear(st, "first_sweep")
+                fs9 = None
+                log.info("binance 전 심볼 안전망 첫 바퀴 완료(%d개) — 이제 잔고 대사 시작", len(need9))
+        elif uni:
             rest = sorted(s9 for s9 in uni if s9 not in cand and s9 not in inv and uni[s9][0] != uni[s9][1])
             if rest:
                 n2 = int(len(rest) * poll9 / BN_SWEEP_SEC) + 1
@@ -1253,8 +1295,16 @@ def fills_binance(env, st, t0: int, t1: int):
                 st["bn_sweep_pos"] = (pos + n2) % len(rest)
     except (RateLimited, SignatureExpired) as e:
         partial = _xm(str(e))[:160]
+    if isinstance(st.get("bn_first_sweep"), dict) and polled:
+        fsd9 = st["bn_first_sweep"]
+        fsd9["done"] = sorted({str(x) for x in (fsd9.get("done") or [])} | polled)
     if open_now is not None:
         st["bn_open"] = open_now
+    if isinstance(st.get("bn_first_sweep"), dict):
+        if not _recon_hold(st, "first_sweep", now9, "후보 밖 전 심볼 첫 바퀴 진행 중(%d개 확인)" % int(st["bn_first_sweep"].get("n") or 0)):
+            st.pop("bn_first_sweep", None)
+            _recon_hold_clear(st, "first_sweep")
+            log.warning("binance 전 심볼 첫 바퀴가 %d시간 넘게 못 끝남 — 잔고 대사 보류 해제(늦게 찾은 체결은 core 늦은 행 흡수)", RECON_HOLD_CAP // 3600)
     st["extra_bases"] = sorted(set(st["extra_bases"]) | {cand[p9][0] for p9 in polled if p9 in cursors and p9 in cand})
     st["invalid_at"] = {p9: int(t9) for p9, t9 in inv.items()}
     st["invalid_pairs"] = sorted(inv)
@@ -1346,11 +1396,20 @@ def fills_binance(env, st, t0: int, t1: int):
                 time.sleep(0.15)
             st["m_bal"], st["m_iso"] = mcur, icur
             st["margin_chk"] = {k9: int(v9) for k9, v9 in m_chk.items() if k9 in mpairs}
+            _recon_hold_clear(st, "margin")
         except (RateLimited, SignatureExpired) as e9m:
             partial = _xm(str(e9m))[:160]
         except Exception as e9m:
-            log.warning("binance 마진 체결 수집 생략(다음 주기 재시도 — 스팟은 정상): %s",
-                        _xm(repr(e9m))[:140])
+            msg9m = _xm(repr(e9m))
+            if isinstance(e9m, urllib.error.HTTPError):
+                msg9m += " " + _xm(_err_body(e9m)[:200])
+            if any(k9 in msg9m for k9 in _DENY_SIGS):
+                _recon_hold_clear(st, "margin")
+                log.warning("binance 마진 체결 수집 생략(권한 없음/마진 미개설 — 스팟은 정상): %s", msg9m[:140])
+            else:
+                held9 = _recon_hold(st, "margin", now9, "마진 체결 수집 실패")
+                log.warning("binance 마진 체결 수집 생략(다음 주기 재시도 — 스팟은 정상 · %s): %s",
+                            "이번 주기 잔고 승격 보류" if held9 else "보류 상한 지남 — 대사 계속", msg9m[:140])
     st["margin_invalid_at"] = {k9: int(v9) for k9, v9 in m_inv.items()}
     st["margin_invalid"] = sorted(m_inv)
     st["margin_cursor"] = m_cursors
@@ -2357,10 +2416,14 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
     cv = fst.setdefault(key, {})
     label = CONVERT_LABEL.get(key, key)
     ck9 = f"{ex}:{key}"
+    hk9 = "cv:" + key
+    unres9 = hk9 in (fst.get("hold_since") or {})
     if time.time() < max(float(cv.get("off_until") or 0), float(_CV_OFF.get(ck9, 0) or 0) if _COOL_ON[0] else 0.0):
+        if unres9:
+            _recon_hold(fst, hk9, now, f"{label} 조회 실패 뒤 재시도 대기")
         return []
     if key == "cv_dust" and cv.get("bf") and now - int(cv.get("until") or 0) < DUST_IDLE_SEC \
-            and not (fst.get("bn_last_dirty") or []):
+            and not (fst.get("bn_last_dirty") or []) and not unres9:
         return []
     lo = int(now - window)
     t0 = lo if not cv.get("bf") else max(lo, min(int(now - 3 * DAY), int(cv.get("until") or lo)))
@@ -2371,6 +2434,7 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
     try:
         rows = fn(env, t0, now)
     except RateLimited:
+        _recon_hold(fst, hk9, now, f"{label} 조회 레이트 제한")
         return []
     except Exception as e:
         msg = _xm(repr(e))[:200]
@@ -2378,8 +2442,13 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
         cv["off_until"] = time.time() + (DENY_COOL_SEC if deny else CV_RETRY_SEC)
         _CV_OFF[ck9] = cv["off_until"]
         cv["err"], cv["err_at"] = msg, int(now)
-        log.warning("%s %s 내역 조회 생략(%s — 체결·잔고·대사는 계속): %s", ex, label,
-                    "권한 없음 · 6h 뒤 재시도" if deny else "30분 뒤 재시도", msg[:160])
+        held9 = False
+        if deny:
+            _recon_hold_clear(fst, hk9)
+        else:
+            held9 = _recon_hold(fst, hk9, now, f"{label} 조회 실패")
+        log.warning("%s %s 내역 조회 생략(%s — 체결·잔고 수집은 계속%s): %s", ex, label,
+                    "권한 없음 · 6h 뒤 재시도" if deny else "30분 뒤 재시도", " · 성공 때까지 잔고 대사 보류" if held9 else "", msg[:160])
         return []
     if isinstance(rows, _PartialConvertRows):
         msg = rows.error
@@ -2387,6 +2456,10 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
         cv["off_until"] = time.time() + (DENY_COOL_SEC if deny else CV_RETRY_SEC)
         _CV_OFF[ck9] = cv["off_until"]
         cv["err"], cv["err_at"] = msg, int(now)
+        if deny:
+            _recon_hold_clear(fst, hk9)
+        else:
+            _recon_hold(fst, hk9, now, f"{label} 일부만 조회")
         return list(rows)
     if not cv.get("bf"):
         log.info("%s %s 과거분 백필 완료: %d건 (창 %s~)", ex, label, len(rows), time.strftime("%Y-%m-%d", time.gmtime(t0)))
@@ -2398,6 +2471,7 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
     cv.pop("err", None)
     cv.pop("off_until", None)
     _CV_OFF.pop(ck9, None)
+    _recon_hold_clear(fst, hk9)
     return rows
 
 
@@ -2658,43 +2732,95 @@ def _balance_rows(rows):
     return rows
 
 
+def _bn_amt(row, key, what):
+    if not isinstance(row, dict):
+        raise RuntimeError(f"{what} 행 형식 오류 — 부분 잔고 발행 보류")
+    v = row.get(key)
+    if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
+        raise RuntimeError(f"{what} 금액 필드 누락({key}) — 부분 잔고 발행 보류")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise RuntimeError(f"{what} 금액 형식 오류({key}) — 부분 잔고 발행 보류") from None
+    if f != f or f in (float("inf"), float("-inf")):
+        raise RuntimeError(f"{what} 금액 형식 오류({key}) — 부분 잔고 발행 보류")
+    return f
+
+
+def _bn_sym(row, key, what):
+    v = row.get(key) if isinstance(row, dict) else None
+    if not isinstance(v, str) or not v.strip():
+        raise RuntimeError(f"{what} 통화 필드 누락({key}) — 부분 잔고 발행 보류")
+    return v.strip().upper()
+
+
+_BN_TOTAL_WARNED = set()
+
+
+def _bn_total_check(total, got, what):
+    if total is None:
+        if what not in _BN_TOTAL_WARNED:
+            _BN_TOTAL_WARNED.add(what)
+            log.warning("%s 응답에 total 없음 — 목록 완전성 검증 생략(명세와 다름 · 종전대로 진행)", what)
+        return
+    try:
+        n = int(str(total).strip())
+    except (TypeError, ValueError, AttributeError):
+        raise RuntimeError(f"{what} total 형식 오류 — 부분 잔고 발행 보류") from None
+    if n != int(got):
+        raise RuntimeError(f"{what} 받은 행 {int(got)} ≠ total {n} — 부분 잔고 발행 보류(다음 주기 재조회)")
+
+
 def _bal_binance(env):
     out = _Bal()
     d = _binance_signed(env, "/api/v3/account")
     spot_ld = {}
+    if not isinstance(d, dict):
+        raise RuntimeError("binance 스팟 잔고 응답 형식 오류 — 부분 잔고 발행 보류")
     for b in _balance_rows(d.get("balances")):
-        v0 = float(b.get("free") or 0) + float(b.get("locked") or 0)
-        _add_to(out, b["asset"], v0)
-        a0 = str(b.get("asset") or "").upper()
+        a0 = _bn_sym(b, "asset", "binance 스팟")
+        v0 = _bn_amt(b, "free", "binance 스팟") + _bn_amt(b, "locked", "binance 스팟")
+        _add_to(out, a0, v0)
         if a0.startswith("LD") and len(a0) > 2 and v0 > 0:
             spot_ld[a0] = v0
     earn_flex = []
+    earn_coll = {}
 
     def _cross(o):
         d2 = _binance_signed(env, "/sapi/v1/margin/account")
+        if not isinstance(d2, dict):
+            raise RuntimeError("binance 교차 마진 응답 형식 오류 — 부분 잔고 발행 보류")
         for a in _balance_rows(d2.get("userAssets")):
-            v = float(a.get("netAsset") or 0)
+            sym = _bn_sym(a, "asset", "binance 교차 마진")
+            v = _bn_amt(a, "netAsset", "binance 교차 마진")
             if v < 0:
-                _debt_add(o, "binance", "margin", a.get("asset"), v)
+                _debt_add(o, "binance", "margin", sym, v)
             else:
-                _add_to(o, a.get("asset"), v)
+                _add_to(o, sym, v)
 
     def _iso(o):
         d2 = _binance_signed(env, "/sapi/v1/margin/isolated/account")
+        if not isinstance(d2, dict):
+            raise RuntimeError("binance 격리 마진 응답 형식 오류 — 부분 잔고 발행 보류")
         for pair in _balance_rows(d2.get("assets")):
+            if not isinstance(pair, dict):
+                raise RuntimeError("binance 격리 마진 행 형식 오류 — 부분 잔고 발행 보류")
             for side in ("baseAsset", "quoteAsset"):
-                a = pair.get(side) or {}
-                v = float(a.get("netAsset") or 0)
+                a = pair.get(side)
+                if not isinstance(a, dict):
+                    raise RuntimeError(f"binance 격리 마진 {side} 누락 — 부분 잔고 발행 보류")
+                sym = _bn_sym(a, "asset", "binance 격리 마진")
+                v = _bn_amt(a, "netAsset", "binance 격리 마진")
                 if v < 0:
-                    _debt_add(o, "binance", "isolated", a.get("asset"), v)
+                    _debt_add(o, "binance", "isolated", sym, v)
                 else:
-                    _add_to(o, a.get("asset"), v)
+                    _add_to(o, sym, v)
 
     def _fund(o):
         rows = _binance_signed(env, "/sapi/v1/asset/get-funding-asset", method="POST")
         for a in _balance_rows(rows):
-            _add_to(o, a.get("asset"), float(a.get("free") or 0) + float(a.get("locked") or 0)
-                    + float(a.get("freeze") or 0) + float(a.get("withdrawing") or 0))
+            _add_to(o, _bn_sym(a, "asset", "binance 펀딩"),
+                    sum(_bn_amt(a, k9, "binance 펀딩") for k9 in ("free", "locked", "freeze", "withdrawing")))
 
     def _futures(o):
         key2, sec2 = env["TJ_BINANCE_KEY"], env["TJ_BINANCE_SECRET"]
@@ -2705,35 +2831,52 @@ def _bal_binance(env):
         rows = _http_json_err(f"https://fapi.binance.com/fapi/v2/balance?{q2}&signature={sig2}",
                               {"X-MBX-APIKEY": key2})
         for a in _balance_rows(rows):
-            _add_to(o, a.get("asset"), float(a.get("balance") or 0))
+            _add_to(o, _bn_sym(a, "asset", "binance 선물"), _bn_amt(a, "balance", "binance 선물"))
 
     def _earn(o):
         flex9 = set()
+        coll9 = {}
         for path, amt_key in (("/sapi/v1/simple-earn/flexible/position", "totalAmount"),
                               ("/sapi/v1/simple-earn/locked/position", "amount")):
-            page = 1
+            page, got9 = 1, 0
             while page <= 20:
                 d2 = _binance_signed(env, path, {"current": page, "size": 100})
+                if not isinstance(d2, dict):
+                    raise RuntimeError("binance Earn 응답 형식 오류 — 부분 잔고 발행 보류")
                 rows = _balance_rows(d2.get("rows"))
                 for r2 in rows:
-                    _add_to(o, r2.get("asset"), float(r2.get(amt_key) or 0))
-                    if amt_key == "totalAmount" and r2.get("asset"):
-                        flex9.add(str(r2["asset"]).upper())
+                    _earn_amount(o, r2, "asset", amt_key)
+                    if amt_key == "totalAmount":
+                        a9 = r2["asset"].strip().upper()
+                        flex9.add(a9)
+                        c9 = r2.get("collateralAmount")
+                        if c9 not in (None, ""):
+                            try:
+                                cv9 = float(c9)
+                            except (TypeError, ValueError):
+                                raise RuntimeError("binance Earn 담보량 형식 오류 — 부분 잔고 발행 보류") from None
+                            if cv9 > 0:
+                                coll9[a9] = coll9.get(a9, 0.0) + cv9
+                got9 += len(rows)
                 if len(rows) < 100:
                     break
                 page += 1
                 time.sleep(PACE)
             else:
                 raise RuntimeError("binance Earn 20페이지 초과 — 부분 잔고 폐기(상한 조정 필요)")
+            _bn_total_check(d2.get("total"), got9, "binance Earn " + ("유동" if amt_key == "totalAmount" else "고정"))
         earn_flex[:] = sorted(flex9)
+        earn_coll.clear()
+        earn_coll.update(coll9)
 
     def _loan(o):
-        page = 1
+        page, got9 = 1, 0
         while page <= 20:
             d2 = _binance_signed(env, "/sapi/v2/loan/flexible/ongoing/orders", {"current": page, "limit": 100})
             if not isinstance(d2, dict):
                 raise RuntimeError("binance flexible loan 응답 형식 오류")
             rows = _balance_rows(d2.get("rows"))
+            got9 += len(rows)
             for r2 in rows:
                 ck, cv = _loan_amt(r2, "collateralCoin", "collateralAmount", "binance 대출 담보")
                 lk, lv = _loan_amt(r2, "loanCoin", "totalDebt", "binance 대출 차입")
@@ -2744,6 +2887,7 @@ def _bal_binance(env):
                     pass
                 _loan_add(o, "binance", "loan", "flexible-loan", "바이낸스 담보대출", {ck: cv}, {lk: lv}, extra=ex9)
             if len(rows) < 100:
+                _bn_total_check(d2.get("total"), got9, "binance 담보대출")
                 return
             page += 1
             time.sleep(PACE)
@@ -2760,6 +2904,18 @@ def _bal_binance(env):
             k9 = "LD" + x9
             if k9 in spot_ld and k9 in out:
                 out[k9] -= spot_ld[k9]
+                if out[k9] <= 1e-12:
+                    del out[k9]
+    if "earn" in out.sources and "loan" in out.sources and earn_coll:
+        lc9 = {}
+        for ln9 in out.loans:
+            if isinstance(ln9, dict) and ln9.get("ex") == "binance":
+                for k9, v9 in (ln9.get("collateral") or {}).items():
+                    lc9[k9] = lc9.get(k9, 0.0) + float(v9)
+        for k9, v9 in lc9.items():
+            dup9 = min(v9, earn_coll.get(k9, 0.0))
+            if dup9 > 0 and k9 in out:
+                out[k9] -= dup9
                 if out[k9] <= 1e-12:
                     del out[k9]
     return out
@@ -3443,6 +3599,58 @@ def krw_backfill_pass(env: dict, state: dict, writer, now: int, window: int) -> 
     return "ok"
 
 
+WD_FLY_MAX = 24 * 3600
+_WD_TERMINAL = set(PEND_FINAL) | {"CANCELED", "REFUNDED"}
+SNAP_AGREE_REL = 1e-4
+SNAP_AGREE_ABS = 1e-6
+_SNAP_MISS = {}
+
+
+def _wd_inflight(rows, now: int) -> list:
+    out = []
+    for r in rows or ():
+        if not isinstance(r, dict) or str(r.get("state") or "").upper() in _WD_TERMINAL:
+            continue
+        c9 = _iso_epoch(r.get("created_at"))
+        if c9 and int(now) - c9 <= WD_FLY_MAX:
+            out.append(r)
+    return out
+
+
+def _snap_flat(snap: dict):
+    out = {}
+    for fld, pfx in (("balances", ""), ("debts", "부채 ")):
+        d = snap.get(fld) if isinstance(snap, dict) else None
+        if d is None:
+            continue
+        if not isinstance(d, dict):
+            return None
+        for k, v in d.items():
+            ku = str(k).upper()
+            if ku in ("KRW", "USD"):
+                continue
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                return None
+            if fv != fv:
+                return None
+            out[pfx + ku] = out.get(pfx + ku, 0.0) + fv
+    return out
+
+
+def _snap_agree(a: dict, b: dict):
+    fa, fb = _snap_flat(a), _snap_flat(b)
+    if fa is None or fb is None:
+        return False, "형식 오류"
+    for k in sorted(set(fa) | set(fb)):
+        x, y = fa.get(k, 0.0), fb.get(k, 0.0)
+        m = max(abs(x), abs(y))
+        if abs(x - y) > max(SNAP_AGREE_REL * m, SNAP_AGREE_ABS):
+            return False, f"{k} {(y - x) / m * 100:+.4f}%" if m else k
+    return True, ""
+
+
 def _invalidate_balance_snapshot(ex):
     bp = os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json")
     _keep_view(bp, bp + ".pending")
@@ -3463,13 +3671,15 @@ def _fut_path(ex):
     return os.path.join(common.STATE_DIR, f"futures_{ex}.json")
 
 
-def _fut_write(ex, wallet, positions, events, cursor):
+def _fut_write(ex, wallet, positions, events, cursor, covered_through=None):
     events = sorted(events, key=lambda r: r["t"])
     if len(events) > 20000:
         log.warning("%s 선물 정산 이벤트 %d건 (파일 비대) — 보존 유지, 보관정책 검토 필요", ex, len(events))
-    common.atomic_write_json(_fut_path(ex), {
-        "ts": int(time.time()), "wallet": wallet, "positions": positions,
-        "events": events, "cursor": cursor})
+    ts9 = int(time.time())
+    d9 = {"ts": ts9, "wallet": wallet, "positions": positions, "events": events, "cursor": cursor}
+    if covered_through is not None:
+        d9["inc_cov_ts"] = min(ts9, int(covered_through))
+    common.atomic_write_json(_fut_path(ex), d9)
 
 
 def _fut_req(v, what):
@@ -3530,6 +3740,7 @@ def _fut_binance(env):
             "INSURANCE_CLEAR": "REALIZED", "DELIVERED_SETTELMENT": "REALIZED", "DELIVERED_SETTLEMENT": "REALIZED",
             "COMMISSION_REBATE": "FEE", "API_REBATE": "FEE", "REFERRAL_KICKBACK": "FEE"}
     pages = 0
+    cov9 = None
     n_ev0 = len(ev)
     while pages < 5:
         time.sleep(PACE)
@@ -3550,6 +3761,9 @@ def _fut_binance(env):
         if len(rows) < 1000:
             break
         pages += 1
+    else:
+        cov9 = (int(cur) - 1) // 1000
+        log.info("binance 선물 정산 따라잡는 중(5쪽 상한) — 파일 시각 = 확인된 정산 끝 %s", time.strftime("%m-%d %H:%M:%S", time.localtime(cov9)))
     _fnum9 = _fut_opt
     ap9, cmm9 = acct.get("positions"), None
     if (isinstance(ap9, list) and all(isinstance(a9, dict) and isinstance(a9.get("isolated"), bool) for a9 in ap9)
@@ -3567,7 +3781,7 @@ def _fut_binance(env):
                 "margin_balance": cmb9 if cross_ok9 else None,
                 "init_margin": float(acct.get("totalInitialMargin") or 0),
                 "mm_scope": "cross" if cross_ok9 else None},
-               poss, ev, {"income": cur})
+               poss, ev, {"income": cur}, covered_through=cov9)
     _px_safe("binance", lambda: _px_binance(fcall, ev, ev[n_ev0:]))
 
 
@@ -3688,8 +3902,25 @@ def _fut_bybit(env):
     _px_safe("bybit", lambda: _px_bybit(bpage, pxraw, ev, now_ms))
 
 
+def _okx_notional(p, pos, ct_get):
+    nu = _fut_opt(p.get("notionalUsd"))
+    if nu:
+        return abs(nu)
+    cv, mk = _fut_opt(ct_get(p.get("instId"))), _fut_opt(p.get("markPx"))
+    return abs(pos) * cv * mk if (cv and mk and cv > 0 and mk > 0) else None
+
+
 def _fut_okx(env):
     poss = []
+    ct9 = []
+
+    def ct_get(iid):
+        if not ct9:
+            try:
+                ct9.append((fut_rcpt.load("okx").get("ct") or {}) if fut_rcpt else {})
+            except Exception:
+                ct9.append({})
+        return ct9[0].get(iid)
     for p in _okx_get(env, "/api/v5/account/positions"):
         if not isinstance(p, dict):
             raise RuntimeError("okx position 행 형식 오류 — 스냅숏 보류")
@@ -3698,7 +3929,7 @@ def _fut_okx(env):
             continue
         if p.get("posSide") not in ("long", "short", "net"):
             raise RuntimeError("okx position 방향(posSide) 모름 — 스냅숏 보류")
-        poss.append({"symbol": p.get("instId"),
+        poss.append({"symbol": p.get("instId"), "notional": _okx_notional(p, pos, ct_get),
                      "side": (str(p.get("posSide")).upper() if p.get("posSide") in ("long", "short")
                               else ("LONG" if pos > 0 else "SHORT")),
                      "qty": abs(pos), "entry": float(p.get("avgPx") or 0),
@@ -4515,6 +4746,7 @@ def main():
             if new_w or new_d or loud9:
                 log.info("%s: 출금 %d(신규 %d) · 입금 %d(신규 %d)",
                          ex, len(w_rows), len(new_w), len(d_rows), len(new_d))
+            wd_fly9 = _wd_inflight(w_rows, now) if wd_ok else []
             fills_ok, fills_new = False, 0
             fills_rl = False
             fst = None
@@ -4530,6 +4762,7 @@ def main():
                 f_rows = FILL_FETCHERS[ex](env, fst, ft0, now)
                 partial9 = fst.pop("partial", None)
                 f_rows = f_rows + convert_rows(ex, env, fst, now, window)
+                hold9 = fst.pop("recon_hold", None)
                 fseen = fst.setdefault("seen", {})
                 new_f = [f for f in f_rows if f["id"] not in fseen]
                 if new_f:
@@ -4550,10 +4783,12 @@ def main():
                     fst["backfilled_until"] = now
                 st["fills"] = fst
                 common.atomic_write_json(STATE_PATH, state)
-                fills_ok, fills_new = not partial9, len(new_f)
+                fills_ok, fills_new = not partial9 and not hold9, len(new_f)
                 fills_rl = bool(partial9) and ex == "binance"
                 if new_f or loud9:
                     log.info("%s: 체결 %d건 (신규 %d)", ex, len(f_rows), len(new_f))
+                if hold9 and not partial9:
+                    log.info("%s 잔고 승격 보류(부가 수집 미완 — %s): 받은 체결·커서는 반영, 다음 주기 다시", ex, str(hold9)[:200])
                 if partial9:
                     log.info("%s 체결 부분 주기(받은 몫·커서 보존, 백필 도장·잔고 승격 보류 — 다음 주기에 이어서): %s", ex, partial9)
             except Exception as e:
@@ -4572,13 +4807,15 @@ def main():
             bp9 = os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json")
             pend_bp = bp9 + ".pending"
             try:
-                if (not fills_ok or fills_new or (st.get("fills") or {}).get("track_pending")
+                if wd_fly9 and fills_ok and not fills_new and loud9:
+                    log.info("%s 진행 중 출금 %d건(종결 전) — 잔고 승격 보류(출금 기장 전 잔고로 대사 금지)", ex, len(wd_fly9))
+                if (not fills_ok or fills_new or wd_fly9 or (st.get("fills") or {}).get("track_pending")
                         or (st.get("fills") or {}).get("open_unknown")):
                     _keep_view(bp9, pend_bp)
                     for p9 in (bp9, pend_bp):
                         if os.path.exists(p9):
                             os.remove(p9)
-                    if not fills_ok and not fills_rl:
+                    if (not fills_ok or (wd_fly9 and not fills_new)) and not fills_rl:
                         try:
                             bal9 = BAL_FETCHERS[ex](env)
                             snap9 = {"ts": int(time.time()), "balances": dict(bal9)}
@@ -4596,10 +4833,6 @@ def main():
                     bal9 = BAL_FETCHERS[ex](env)
                     prevp = common.read_json(pend_bp, {})
                     prev_balances = prevp.get("balances")
-                    if isinstance(prev_balances, dict) and (prev_balances or not bal9):
-                        common.atomic_write_json(bp9, prevp)
-                        if loud9:
-                            log.info("%s: 잔고 스냅샷 승격 (%d종)", ex, len(prev_balances))
                     snap9 = {"ts": int(time.time()), "balances": dict(bal9)}
                     if isinstance(getattr(bal9, "debts", None), dict):
                         snap9["debts"] = {k9: v9 for k9, v9 in bal9.debts.items() if v9 < 0}
@@ -4607,6 +4840,18 @@ def main():
                         snap9["sources"] = sorted(set(bal9.sources))
                     if getattr(bal9, "loans", None):
                         snap9["loans"] = list(bal9.loans)
+                    if isinstance(prev_balances, dict) and (prev_balances or not bal9):
+                        agree9, why9 = _snap_agree(prevp, snap9)
+                        if agree9:
+                            _SNAP_MISS.pop(ex, None)
+                            common.atomic_write_json(bp9, prevp)
+                            if loud9:
+                                log.info("%s: 잔고 스냅샷 승격 (%d종)", ex, len(prev_balances))
+                        else:
+                            _SNAP_MISS[ex] = _SNAP_MISS.get(ex, 0) + 1
+                            if _SNAP_MISS[ex] % 6 == 1:
+                                log.info("%s 잔고 표본 불일치(%s · 연속 %d주기) — 승격 보류, 다음 주기 표본과 다시 비교",
+                                         ex, why9, _SNAP_MISS[ex])
                     common.atomic_write_json(pend_bp, snap9)
                     common.atomic_write_json(bp9 + ".view", snap9)
                     if loud9:

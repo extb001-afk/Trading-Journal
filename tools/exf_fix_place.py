@@ -46,7 +46,7 @@ def _is_core_proc(p) -> bool:
 
 def _core_stopped() -> bool:
     try:
-        r = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=20)
+        r = subprocess.run([os.environ.get("PM2_BIN") or "pm2", "jlist"], capture_output=True, text=True, timeout=20)
         lst = json.loads(r.stdout) if r.returncode == 0 and (r.stdout or "").strip() else None
     except Exception:
         return False

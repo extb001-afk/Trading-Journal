@@ -10,12 +10,13 @@ from datetime import date, datetime, timedelta, timezone
 
 import candles
 import common
+import xparts
 
 log = common.setup_logging("tj-web")
 
 KST = timezone(timedelta(hours=9))
 HIST_V = 1
-FLOW_V = 2
+FLOW_V = 3
 FIRST_DAY = "2026-01-01"
 RUN_CALLS = 150
 RUN_GAP_S = 600
@@ -279,7 +280,7 @@ def group_desc(gid, g, ca_gids, ex_gid, major_gids, override_px, pairs, stable_s
 
 
 def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, override_px, live_px, pairs, transit,
-             extra, daily_rows, daily_cache, stable_syms=None, first_day=FIRST_DAY, flow_kit=None, neg_ok=None):
+             extra, daily_rows, daily_cache, stable_syms=None, first_day=FIRST_DAY, flow_kit=None, neg_ok=None, xkit=None, rb_days=None):
     stable_syms = stable_syms or STABLE_SYMS
     groups = {}
     for gid, g in G.items():
@@ -311,21 +312,31 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
         rows.append([iso, round(float(v), 2), round(float(k)) if isinstance(k, (int, float)) and not isinstance(k, bool) else None,
                      ap_flag(v, r.get("est"), r.get("xc")), float(r.get("usdt") or 0) or None,
                      round(float(r.get("est") or 0) + float(r.get("xc") or 0), 2), fl])
-    anchor = None
-    for iso, *_rest in rows:
-        c = (daily_cache or {}).get(iso)
-        if isinstance(c, dict) and c.get("x") is not None:
-            anchor = {"day": iso, "x": float(c.get("x") or 0), "xc": float(c.get("xc") or 0), "usdt": float(c.get("usdt") or 0) or None}
-            break
-    x_now = float(extra.get("ub") or 0) + float(extra.get("fiat") or 0) + float(extra.get("lp") or 0)
-    if anchor is None:
-        anchor = {"day": today_iso, "x": x_now, "xc": x_now, "usdt": float(extra.get("rate") or 0) or None}
-    tl9 = extra.get("krw_up_tl")
+    xk = dict(xkit or {})
+    if not isinstance(xk.get("src"), dict):
+        x_now = float(extra.get("ub") or 0) + float(extra.get("fiat") or 0) + float(extra.get("lp") or 0)
+        xk = {"src": {"now": {"ts": time.time(), "ku": 0.0, "kb": 0.0, "ub": {}, "rest": x_now}}, "obs": {}, "days": {}}
+    sym_tl = {}
+    for gid9, tl9 in sorted((extra.get("ub_tl") or {}).items() if isinstance(extra.get("ub_tl"), dict) else ()):
+        if gid9 in groups:
+            sym_tl.setdefault(str(groups[gid9].get("sym") or "").upper(), []).append((gid9, [(int(t), float(d)) for t, d in tl9]))
+    xk["sym_tl"] = sym_tl
+    xk["rate"] = float(extra.get("rate") or 0) or None
+    win9 = {r[0] for r in rows}
+    lo9 = min(win9) if win9 else today_iso
+    dcv = {}
+    for iso, c in sorted((daily_cache or {}).items()):
+        if not (isinstance(c, dict) and len(str(iso)) == 10 and str(iso)[4] == "-" and str(iso) < lo9 and str(iso) in (xk.get("days") or {})
+                and c.get("xraw") is not None and isinstance(c.get("val"), (int, float))):
+            continue
+        u9 = float(c.get("usdt") or 0)
+        v9 = round(float(c["val"]) + float((rb_days or {}).get(iso) or 0), 2)
+        ap9 = ap_flag(v9, c.get("est"), c.get("xc"))
+        dcv[iso] = [v9, round(v9 * u9) if u9 > 0 else None, ap9, "dc", round(float(c.get("est") or 0) + float(c.get("xc") or 0), 2) if ap9 else 0]
     return {
         "v": HIST_V, "today": today_iso, "first": first_day, "groups": groups,
         "transit": [(e["gid"], int(e["ts"]), float(e["qty"])) for e in (transit or ())],
-        "anchor": anchor, "krw_up_now": float(extra.get("krw_up") or 0),
-        "krw_up_tl": [(int(t), float(d)) for t, d in tl9] if tl9 is not None else None,
+        "xk": xk, "dcv": dcv,
         "daily": rows, "made": time.time(), "fk": flow_kit,
     }
 
@@ -421,6 +432,23 @@ def fetch_fx_entry(lo, hi, now, prev=None):
     st = "wait" if r.why == "budget" else "err"
     return {"st": st, "n": _prev_fails(e, lo, hi) + (1 if st == "err" else 0), "lo": lo, "hi": hi, "p": e.get("p") or {}, "why": r.why,
             "at": int(now)}
+
+
+HL_CALLS_PER_FETCH = 2
+
+
+def _hl_charge() -> bool:
+    b = getattr(candles._TL, "bud", None)
+    if b is None:
+        return True
+    if candles._bud_left(b) < HL_CALLS_PER_FETCH:
+        return False
+    for _i in range(HL_CALLS_PER_FETCH):
+        candles._bud_take(b)
+    with candles._CALL_LOCK:
+        candles.CALLS["n"] += HL_CALLS_PER_FETCH
+        candles.CALLS["by_host"]["api.hyperliquid.xyz"] = candles.CALLS["by_host"].get("api.hyperliquid.xyz", 0) + HL_CALLS_PER_FETCH
+    return True
 
 
 def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, blocked=None):
@@ -630,7 +658,10 @@ def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, bl
     elif kind == "ex" and rest.startswith("hyperliquid:"):
         b = rest.split(":", 1)[1]
         import hl_spot
-        r = hl_spot.daily_candles(b, t0, t1, now=now)
+        if _hl_charge():
+            r = hl_spot.daily_candles(b, t0, t1, now=now)
+        else:
+            r = candles.Result(why="budget", note="호출 예산")
         if r.ok:
             take(r.candles, label=f"hyperliquid:{b}")
         else:
@@ -892,6 +923,7 @@ class HistCurve:
         d = dict(self.st.get("d") or {})
         s = dict(self.st.get("s") or {})
         f = dict(self.st.get("f") or {})
+        xs = dict(self.st.get("x") or {})
         win = set()
         for row9 in kit.get("daily") or ():
             iso, usd, krw, ap, _u, apu = row9[:6]
@@ -913,6 +945,7 @@ class HistCurve:
             for iso in [k for k in d if k >= dirty9[0] and k not in win and k < today]:
                 d.pop(iso, None)
                 s.pop(iso, None)
+                xs.pop(iso, None)
             for iso in [k for k in f if k >= dirty9[0] and k not in win and k < today]:
                 f.pop(iso, None)
         rep["vblk"] = 0
@@ -1010,9 +1043,10 @@ class HistCurve:
                     continue
                 row = list(v9["row"])
                 if not day_final(iso):
-                    row[2], row[3], row[4] = 1, "hp", round(v9["cov"][1] + v9["cov"][2], 2) or 1.0
+                    row = self._row(v9["cov"][0], v9["cov"][1], v9["xr"], self.fx(iso), "hp")
                 d[iso] = row
                 s[iso] = v9["cov"]
+                xs[iso] = v9["xr"]
                 rep["computed"] += 1
             if overlap:
                 rep["overlap"] = {iso: vals[iso] for iso in ov_days if iso in vals}
@@ -1024,6 +1058,7 @@ class HistCurve:
         else:
             self.pending = False
             self.progress = {"specs": 0, "done": 0, "pending": 0}
+        rep["xfix"] = self._x_refresh(kit, d, s, xs, win, today)
         rep["calls"] = candles.CALLS["n"] - n0
         rep["by_host"] = {h: n - h0.get(h, 0) for h, n in candles.CALLS["by_host"].items() if n - h0.get(h, 0)}
         rep["flows"], rep["flow_left"] = self._flows(kit, d, f, win, today)
@@ -1033,8 +1068,9 @@ class HistCurve:
         self.progress["calls"] = meta["calls"]
         meta.update(pending=bool(self.pending), progress={k9: v9 for k9, v9 in self.progress.items() if k9 != "calls"},
                     flow_pending=bool(self.flow_pending))
+        xs = {k9: v9 for k9, v9 in xs.items() if k9 in d and isinstance(d[k9], list) and len(d[k9]) >= 4 and d[k9][3] in ("hc", "hp")}
         with self.lock:
-            self.st = {"_v": HIST_V, "d": d, "s": s, "f": f, "fv": FLOW_V, "meta": meta}
+            self.st = {"_v": HIST_V, "d": d, "s": s, "f": f, "fv": FLOW_V, "meta": meta, "x": xs}
         common.atomic_write_json(self.path, self.st)
         if rep["fetched"] or rep["calls"] or rep.get("vblk"):
             common.atomic_write_json(self.px_path, self.px)
@@ -1042,9 +1078,9 @@ class HistCurve:
             self._dirty_done(dirty9[1])
             log.warning("장기 곡선: 원장 지난 시각 변경 표식 — %s 부터 창 밖 동결 날 다시 계산(%d일)", dirty9[0], rep["computed"])
         self.last_run = rep
-        log.info("장기 곡선: 받은 날 %d · 계산·동결 %d · 가격 출처 %d/%d · 외부 호출 %d %s · 남은 날 %s · 입출금 %d일(남은 %d)",
+        log.info("장기 곡선: 받은 날 %d · 계산·동결 %d · 가격 출처 %d/%d · 외부 호출 %d %s · 남은 날 %s · 입출금 %d일(남은 %d) · 원장 밖 금액 다시 %d일",
                  rep["adopted"], rep["computed"], rep["done"], rep["specs"], rep["calls"], rep["by_host"], self.progress.get("pending"),
-                 rep["flows"], rep["flow_left"])
+                 rep["flows"], rep["flow_left"], rep["xfix"])
         return rep
 
     def flow_prices(self, kit, days):
@@ -1184,16 +1220,138 @@ class HistCurve:
         e9 = specs.get(sp)
         return view(e9, blocked_union(e9, self._dc_entry(sp)) | map_blocked(sp))
 
+    @staticmethod
+    def _x_src(kit):
+        xk = kit.get("xk") or {}
+        src = dict(xk.get("src") or {})
+        src["obs"] = xk.get("obs") or {}
+        return src
+
+    @staticmethod
+    def _x_fin(xr):
+        parts, fx = xr["p"], xr.get("fx")
+        uu = xparts.ub_usd((parts.get("ub") or [{}])[0])
+        cut = min(float(xr.get("cut") or 0.0), uu)
+        cr = xparts.carry_usd(parts, fx) - (cut if (parts.get("ub") or [None, None])[1] == "carry" else 0.0)
+        xr["cut"] = round(cut, 2)
+        xr["x"] = round(xparts.total_usd(parts, fx) - cut, 2)
+        xr["xc"] = round(max(cr, 0.0), 2)
+        return xr
+
+    def _x_rec(self, kit, iso, qty_of, old=None, qcache=None):
+        xk = kit.get("xk") or {}
+        e9 = day_end(iso) - 1
+        dd = (xk.get("days") or {}).get(iso)
+        src = self._x_src(kit)
+        now9 = xparts.num((src.get("now") or {}).get("ts"))
+        if isinstance(dd, dict) and isinstance(dd.get("p"), dict):
+            parts = {k9: [xparts.ub_norm(v9[0]) if k9 == "ub" else v9[0], v9[1]] for k9, v9 in dd["p"].items()}
+            fx = dd.get("fx") or self.fx(iso) or xk.get("rate")
+            uat = e9
+        else:
+            pin9 = (old or {}).get("p")
+            parts = xparts.resolve(e9, src, pinned=pin9)
+            fx = self.fx(iso) or xparts.num((old or {}).get("fx")) or xk.get("rate")
+            pu9 = (pin9 or {}).get("ub")
+            if old and xparts.num(old.get("uat")) and isinstance(pu9, (list, tuple)) and len(pu9) >= 2 and pu9[1] in ("snap", "carry"):
+                uat = float(old["uat"])
+            else:
+                near9 = xparts.nearest(src.get("obs") or {}, e9, now9, "ub")
+                uat = float(near9["end"]) if near9 is not None else (now9 or e9)
+        cut = self._ub_cut_at(kit, (parts.get("ub") or [{}])[0], uat, iso, qty_of, qcache)
+        return self._x_fin({"p": parts, "fx": fx, "cut": cut, "uat": uat})
+
+    @staticmethod
+    def _ub_cut_at(kit, ub, uat, iso, qty_of, qcache=None):
+        if not ub:
+            return 0.0
+        xk = kit.get("xk") or {}
+        if abs(float(uat) - (day_end(iso) - 1)) < 1:
+            q_of = qty_of
+        else:
+            iso_o = datetime.fromtimestamp(float(uat), KST).strftime("%Y-%m-%d")
+            if iso_o >= str(kit.get("today") or ""):
+                grp9 = kit.get("groups") or {}
+
+                def q_of(gid):
+                    return float((grp9.get(gid) or {}).get("hold") or 0.0)
+            else:
+                qc9 = qcache if qcache is not None else {}
+                if iso_o not in qc9:
+                    qc9[iso_o] = rewind(kit, [iso_o])
+                q9 = qc9[iso_o]
+
+                def q_of(gid):
+                    return (q9.get(gid) or {}).get(iso_o, 0.0)
+        return xparts.ub_cut(ub, float(uat), xk.get("sym_tl") or {}, q_of)[0]
+
+    @staticmethod
+    def _row(priced, miss, xr, fx, kind):
+        usd = round(float(priced) + float(xr["x"]), 2)
+        krw = round(usd * fx) if fx else None
+        if kind == "hp":
+            return [usd, krw, 1, "hp", round(float(miss) + float(xr["xc"]), 2) or 1.0]
+        ap = ap_flag(usd, miss, xr["xc"])
+        return [usd, krw, ap, "hc", round(float(miss) + float(xr["xc"]), 2) if ap else 0]
+
+    def _x_refresh(self, kit, d, s, xs, win, today):
+        xk = kit.get("xk") or {}
+        days9 = xk.get("days") or {}
+        src = self._x_src(kit)
+        n, redo = 0, []
+        for iso in sorted(d):
+            r = d[iso]
+            if iso in win or iso >= today or not isinstance(r, list) or len(r) < 4 or r[3] not in ("hc", "hp"):
+                continue
+            cov = s.get(iso)
+            if not (isinstance(cov, list) and len(cov) >= 4):
+                continue
+            if len(cov) < 5:
+                redo.append(iso)
+                continue
+            old = xs.get(iso) if isinstance(xs.get(iso), dict) else None
+            dd = days9.get(iso)
+            e9 = day_end(iso) - 1
+            if isinstance(dd, dict) and isinstance(dd.get("p"), dict):
+                parts = {k9: [xparts.ub_norm(v9[0]) if k9 == "ub" else v9[0], v9[1]] for k9, v9 in dd["p"].items()}
+                fx = dd.get("fx") or self.fx(iso) or xk.get("rate")
+            else:
+                parts = xparts.resolve(e9, src, pinned=(old or {}).get("p"))
+                fx = self.fx(iso) or xparts.num((old or {}).get("fx")) or xk.get("rate")
+            uat9 = (e9 if isinstance(dd, dict) and isinstance(dd.get("p"), dict) else xparts.num((old or {}).get("uat")))
+            if old and xparts.same(parts, old.get("p")) and old.get("fx") == fx and uat9 == xparts.num(old.get("uat")):
+                continue
+            if old and uat9 and uat9 == xparts.num(old.get("uat")) and xparts.same({"ub": parts.get("ub")}, {"ub": (old.get("p") or {}).get("ub")}):
+                xr = self._x_fin({"p": parts, "fx": fx, "cut": old.get("cut", cov[4]), "uat": uat9})
+            else:
+                redo.append(iso)
+                continue
+            xs[iso] = xr
+            s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]]
+            d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), r[3])
+            n += 1
+        if redo:
+            qty = rewind(kit, redo)
+            qc9 = {}
+            for iso in redo:
+                cov = s[iso]
+                xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=xs.get(iso), qcache=qc9)
+                xs[iso] = xr
+                s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]]
+                d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), d[iso][3])
+                n += 1
+        for iso, row in sorted((kit.get("dcv") or {}).items()):
+            r9 = d.get(iso)
+            if iso not in win and iso < today and isinstance(r9, list) and len(r9) >= 4 and r9[3] == "dc" and list(r9[:5]) != list(row):
+                d[iso] = list(row)
+                n += 1
+        return n
+
     def _compute(self, kit, days, qty):
         G = kit["groups"]
         specs = self.px.get("specs") or {}
-        an = kit["anchor"]
-        an_end = day_end(an["day"]) - 1
-        tl = kit.get("krw_up_tl")
-        kn = kit.get("krw_up_now") or 0.0
-        k_anchor = None
-        if tl is not None:
-            k_anchor = kn - sum(dk for t9, dk in tl if t9 > an_end)
+        st_x = (self.st or {}).get("x") or {}
+        qc9 = {}
         ff_cache = {}
 
         def ffill(pm):
@@ -1229,20 +1387,11 @@ class HistCurve:
                         a9[2] += 1
         out = {}
         for iso in days:
-            e9 = day_end(iso) - 1
             priced, miss, n_miss = acc[iso]
             fx = self.fx(iso)
-            x = an["x"]
-            if k_anchor is not None and fx and an.get("usdt"):
-                kT = kn - sum(dk for t9, dk in tl if t9 > e9)
-                if kT >= -1000:
-                    x = an["x"] - k_anchor / an["usdt"] + max(kT, 0.0) / fx
-            xc = an["xc"]
-            usd = round(priced + x, 2)
-            krw = round(usd * fx) if fx else None
-            ap = ap_flag(usd, miss, xc)
-            out[iso] = {"row": [usd, krw, ap, "hc", round(miss + xc, 2) if ap else 0], "cov": [round(priced, 2), round(miss, 2), round(xc, 2), n_miss],
-                        "x": round(x, 2)}
+            xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=st_x.get(iso), qcache=qc9)
+            out[iso] = {"row": self._row(priced, miss, xr, fx, "hc"),
+                        "cov": [round(priced, 2), round(miss, 2), xr["xc"], n_miss, xr["cut"]], "x": xr["x"], "xr": xr}
         return out
 
     def view(self, rng):
@@ -1252,13 +1401,24 @@ class HistCurve:
         with self.lock:
             d = self.st.get("d") or {}
             f = self.st.get("f") or {}
+            s9 = self.st.get("s") or {}
+            x9 = self.st.get("x") or {}
             meta = dict(self.st.get("meta") or {})
             keys = sorted(d)
         today = datetime.now(KST).strftime("%Y-%m-%d")
+
+        def row_of(k):
+            r9 = d[k]
+            c9, xr9 = s9.get(k), x9.get(k)
+            if (isinstance(r9, list) and len(r9) >= 4 and r9[3] in ("hc", "hp") and isinstance(c9, list) and len(c9) >= 5
+                    and isinstance(xr9, dict) and xr9.get("x") is not None):
+                return self._row(c9[0], c9[1], xr9, self.fx(k), r9[3])
+            return r9
         if rng:
             lo = (datetime.now(KST) - timedelta(days=int(rng) - 1)).strftime("%Y-%m-%d")
             keys = [k for k in keys if k >= lo]
-        days = [[k, d[k][0], d[k][1], int(d[k][2] or 0), (d[k][4] if len(d[k]) > 4 else 0) or 0]
+        rows9 = {k: row_of(k) for k in keys if k < today}
+        days = [[k, rows9[k][0], rows9[k][1], int(rows9[k][2] or 0), (rows9[k][4] if len(rows9[k]) > 4 else 0) or 0]
                 + (list(f[k][:3]) if isinstance(f.get(k), list) and len(f[k]) >= 3 else [None, None, None])
                 + [nofx_of(f.get(k))] for k in keys if k < today]
         building = bool(self.pending)
@@ -1272,6 +1432,8 @@ DC_DAY_CALLS = 600
 DC_GAP_S = 300
 DC_SETTLE_S = 1800
 DC_KEEP_DAYS = 50
+DC_OLD_RUN_CALLS = 40
+DC_OLD_BUSY_CALLS = 10
 DC_REQ_TTL_S = 3 * 86400
 
 
@@ -1298,6 +1460,7 @@ class DayClose:
         st = common.read_json(self.path, None) if os.path.exists(self.path) else None
         self.st = st if isinstance(st, dict) and st.get("_v") == 1 else {"_v": 1, "s": {}, "fx": None, "calls": []}
         self.want = {}
+        self.want_old = {}
         self.gen = 0
         self.last_kick = 0.0
         self.last_run = None
@@ -1320,12 +1483,13 @@ class DayClose:
     def _sources(self, spec):
         own = (self.st.get("s") or {}).get(spec)
         hs = ((getattr(self.hist, "px", None) or {}).get("specs") or {}).get(spec) if self.hist is not None else None
-        blk9 = blocked_union(own, hs) | map_blocked(spec)
+        old9 = (self.st.get("o") or {}).get(spec)
+        blk9 = blocked_union(own, hs, old9) | map_blocked(spec)
         c9 = self.__dict__.setdefault("_views", {})
         if len(c9) > 4000:
             c9.clear()
         out = []
-        for e9, bor9 in ((own, False), (hs, True)):
+        for e9, bor9 in ((own, False), (hs, True), (old9, False)):
             if not isinstance(e9, dict):
                 out.append(e9)
                 continue
@@ -1337,7 +1501,7 @@ class DayClose:
             out.append(c9[key9][1])
         return tuple(out)
 
-    def lookup(self, spec, iso, now=None, w=0.0):
+    def lookup(self, spec, iso, now=None, w=0.0, ask=True, old=False):
         now = time.time() if now is None else now
         if spec == "stable":
             return 1.0, "ok"
@@ -1353,6 +1517,13 @@ class DayClose:
         if any(st9 == "none" for _e, st9 in dst9):
             return None, "none"
         retry9 = bool(dst9)
+        if not ask:
+            return None, ("retry" if retry9 else "pending")
+        if old and iso < (datetime.fromtimestamp(now, KST) - timedelta(days=DC_KEEP_DAYS)).strftime("%Y-%m-%d"):
+            with self.lock:
+                r = self.want_old.setdefault(spec, {"days": set(), "w": 0.0, "t0": now})
+                r["days"].add(iso)
+            return None, ("retry" if retry9 else "pending")
         with self.lock:
             r = self.want.setdefault(spec, {"days": set(), "w": 0.0, "t0": now})
             r["days"].add(iso)
@@ -1396,7 +1567,7 @@ class DayClose:
 
     def kick(self, now=None):
         now = time.time() if now is None else now
-        if self.want and now - self.last_kick >= self.gap:
+        if (self.want or self.want_old) and now - self.last_kick >= self.gap:
             self.last_kick = now
             self.ev.set()
             return True
@@ -1406,12 +1577,74 @@ class DayClose:
         while True:
             self.ev.wait(self.gap * 2)
             self.ev.clear()
-            if not self.want:
+            if not self.want and not self.want_old:
                 continue
             try:
                 self.run_once()
             except Exception as e:
                 log.warning("그날 마감가 받기 실패(다음에 다시): %s", e)
+
+    def _run_old(self, items, o, fxo, now, rep):
+        hpx9 = (getattr(self.hist, "px", None) or {}) if self.hist is not None else {}
+        hs9 = hpx9.get("specs") or {}
+        off9 = off_chains_now()
+        fxp = {}
+        for e9 in (hpx9.get("fx"), fxo):
+            if isinstance(e9, dict) and isinstance(e9.get("p"), dict):
+                fxp.update(e9["p"])
+        kd = sorted({d for k, ds, _w in items if needs_krw(k) for d in ds})
+        miss9 = [d for d in kd if d not in fxp]
+        out9 = [d for d in miss9 if not (isinstance(fxo, dict) and (fxo.get("lo") or "9999") <= d <= (fxo.get("hi") or ""))]
+        if miss9 and (candles.budget_left() or 0) > 0 and (out9 or due(fxo if isinstance(fxo, dict) else None, now)):
+            flo = (datetime.strptime(miss9[0], "%Y-%m-%d") - timedelta(days=FFILL_DAYS)).strftime("%Y-%m-%d")
+            fhi = miss9[-1]
+            if isinstance(fxo, dict) and fxo.get("lo") and fxo.get("hi"):
+                flo, fhi = min(flo, fxo["lo"]), max(fhi, fxo["hi"])
+            fxn = fetch_fx_entry(flo, fhi, now, fxo)
+            if isinstance(fxn, dict) and isinstance(fxo, dict) and fxn.get("st") != "ok":
+                fxn = dict(fxn, p=dict(fxo.get("p") or {}, **(fxn.get("p") or {})))
+            fxo = fxn
+            if isinstance(fxo, dict):
+                fxp.update(fxo.get("p") or {})
+        for k, ds, _w in items:
+            if (candles.budget_left() or 0) <= 0:
+                break
+            ds = {d for d in ds if self.lookup_state(k, d, now) == "pending"}
+            if not ds or spec_off(k, off9):
+                continue
+            if needs_krw(k) and k.startswith("ex:") and any(d not in fxp for d in ds):
+                continue
+            prev = o.get(k) if isinstance(o.get(k), dict) else None
+            hsk9 = hs9.get(k) if isinstance(hs9.get(k), dict) else None
+            if prev and all(self.covers(prev, d9) for d9 in ds) and not due(view(prev, blocked_union(prev, hsk9) | map_blocked(k)), now):
+                continue
+            lo = (datetime.strptime(min(ds), "%Y-%m-%d") - timedelta(days=FFILL_DAYS)).strftime("%Y-%m-%d")
+            hi = max(ds)
+            if prev and prev.get("lo") and prev.get("hi"):
+                lo, hi = min(lo, prev["lo"]), max(hi, prev["hi"])
+            e = fetch_entry(k, lo, hi, now, need=ds, fx_get=fxp.get, prev=prev, xref=xref_fn(k, (o, hs9)), blocked=blocked_union(hsk9))
+            gone9 = set(e.pop("_drop", None) or ())
+            e.pop("_chg", None)
+            if prev and isinstance(prev.get("p"), dict) and not is_final(e):
+                e["p"] = dict({d9: v9 for d9, v9 in prev["p"].items() if d9 not in gone9}, **(e.get("p") or {}))
+            o[k] = e
+            rep["old_fetched"] = rep.get("old_fetched", 0) + 1
+        return fxo
+
+    def ask_old(self, spec, days, w=0.0, now=None):
+        if not spec or spec in ("stable", "ov") or not days:
+            return
+        now = time.time() if now is None else now
+        with self.lock:
+            r = self.want_old.setdefault(spec, {"days": set(), "w": 0.0, "t0": now})
+            r["days"] |= set(days)
+            r["w"] = max(float(r.get("w") or 0), float(w or 0))
+
+    def old_status(self) -> dict:
+        with self.lock:
+            left = {k: len(v.get("days") or ()) for k, v in self.want_old.items()}
+        lr = self.last_run if isinstance(self.last_run, dict) else {}
+        return {"specs": len(left), "days": sum(left.values()), "done": len(self.st.get("o") or {}), "last": int(lr.get("old_fetched") or 0)}
 
     def _fx_ok(self, fx, lo, hi):
         return isinstance(fx, dict) and (fx.get("lo") or "9999") <= lo and (fx.get("hi") or "") >= hi and int(fx.get("at") or 0) >= settle_ts(hi) - DC_SETTLE_S \
@@ -1427,7 +1660,10 @@ class DayClose:
         cap = max(0, min(int(cap), self.day_calls - sum(n for _t, n in calls9)))
         with self.lock:
             items = sorted(((k, set(v["days"]), v["w"]) for k, v in self.want.items()), key=lambda x: (-x[2], x[0]))
+            items_old = sorted(((k, set(v["days"]), v["w"]) for k, v in self.want_old.items()), key=lambda x: (-x[2], -len(x[1]), x[0]))
         lo_keep = (datetime.fromtimestamp(now, KST) - timedelta(days=DC_KEEP_DAYS)).strftime("%Y-%m-%d")
+        o = dict(self.st.get("o") or {})
+        fxo = self.st.get("fxo")
         s = dict(self.st.get("s") or {})
         chg_log = {k: dict(v) for k, v in (self.st.get("chg") or {}).items() if isinstance(v, dict)}
         chg_new = {}
@@ -1435,7 +1671,7 @@ class DayClose:
         fx = self.st.get("fx")
         n0 = candles.CALLS["n"]
         done = set()
-        if items and cap > 0:
+        if (items or items_old) and cap > 0:
             with candles.call_budget(cap) as bud:
                 ready = [(k, {d for d in ds if now >= settle_ts(d) and d >= lo_keep}, w) for k, ds, w in items]
                 fx_days = sorted({d for k, ds, _w in ready if needs_krw(k) for d in ds})
@@ -1483,6 +1719,10 @@ class DayClose:
                         e["p"] = dict({d9: v9 for d9, v9 in prev["p"].items() if d9 not in drop9}, **(e.get("p") or {}))
                     s[k] = e
                     rep["fetched"] += 1
+                if items_old and (candles.budget_left() or 0) > 0:
+                    ob9 = DC_OLD_BUSY_CALLS if getattr(self.hist, "pending", False) else DC_OLD_RUN_CALLS
+                    with candles.call_budget(ob9):
+                        fxo = self._run_old(items_old, o, fxo, now, rep)
             rep["calls"] = cap - max(0, bud[0])
         s = {k: v for k, v in s.items() if isinstance(v, dict) and (v.get("hi") or "") >= lo_keep}
         if rep["calls"]:
@@ -1509,7 +1749,8 @@ class DayClose:
             chg_log = {k: v for k, v in chg_log.items() if v}
             self.st = dict({"_v": 1, "s": s, "fx": fx, "calls": calls9},
                            **({"px1004": self.st["px1004"]} if isinstance(self.st.get("px1004"), dict) else {}),
-                           **({"chg": chg_log} if chg_log else {}))
+                           **({"chg": chg_log} if chg_log else {}),
+                           **({"o": o} if o else {}), **({"fxo": fxo} if fxo else {}))
             self.gen += 1
             for k, ds, _w in items:
                 left = {d for d in ds if d >= lo_keep and self.lookup_state(k, d, now) in ("pending",)}
@@ -1524,8 +1765,16 @@ class DayClose:
                 if not r["days"]:
                     self.want.pop(k, None)
                     done.add(k)
+            for k, ds, _w in items_old:
+                r = self.want_old.get(k)
+                if r is None:
+                    continue
+                r["days"] -= {d for d in ds if self.lookup_state(k, d, now) != "pending"}
+                if not r["days"]:
+                    self.want_old.pop(k, None)
             rep["resolved"] = len(done)
             rep["left"] = len(self.want)
+            rep["old_left"] = len(self.want_old)
         if rep["fetched"] or rep["calls"]:
             with self.lock:
                 common.atomic_write_json(self.path, self.st)

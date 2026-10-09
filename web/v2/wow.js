@@ -818,8 +818,9 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
     const x = X(), D = x && x.S.D; if (!D) return 0;
     let s = 0;
     const KV = typeof x.KV === 'function' ? x.KV : (u => u);
-    if (D.taxFull) arr(D.taxSum).forEach(r => { if (String(r.ym || '').slice(0, 4) === yr) s += KV(num(r.disp) - num(r.acq) - num(r.fee), r.pk2 != null ? r.pk2 : r.pk); });
-    else arr(D.tax).forEach(r => { const iso = isoOfKey(String(r.sold || '').slice(0, 10)) || isoOfKey(String(r.sold || '').slice(0, 5)); if (iso.slice(0, 4) !== yr) return;
+    const yt = r => !r.fut && !r.futFee && r.tk !== 'inc' && !/^(스테이킹 보상|유동성 수수료|유동성 리워드)$/.test(String(r.ex || ''));
+    if (D.taxFull) arr(D.taxSum).forEach(r => { if (String(r.ym || '').slice(0, 4) === yr && yt(r)) s += KV(num(r.disp) - num(r.acq) - num(r.fee), r.pk2 != null ? r.pk2 : r.pk); });
+    else arr(D.tax).forEach(r => { const iso = isoOfKey(String(r.sold || '').slice(0, 10)) || isoOfKey(String(r.sold || '').slice(0, 5)); if (iso.slice(0, 4) !== yr || !yt(r)) return;
       const u = num(r.disp) - num(r.acq) - num(r.fee), rk = num(r.rate) > 0 ? num(r.rate) : null;
       s += KV(u, rk ? (r.akr != null ? (num(r.disp) - num(r.fee)) * rk - num(r.akr) : u * rk) : null); });
     return s;
@@ -860,7 +861,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
         + '<div class="wsl-tr" id="wslTr" tabindex="0" role="slider" aria-label="팔 양" aria-valuemin="1" aria-valuemax="100" aria-valuenow="' + pcv + '" aria-valuetext="' + pcv + '%"><span class="tk"></span><span class="fi" style="width:' + pcv + '%"></span><span class="th" style="left:' + pcv + '%"></span></div>'
         + '<div class="wsl-q">' + [[0.25, '25%'], [0.5, '50%'], [1, '전부']].map(o => '<button type="button" class="wbtn' + (Math.abs(c.f - o[0]) < 0.001 ? ' on' : '') + '" aria-pressed="' + (Math.abs(c.f - o[0]) < 0.001) + '" data-w="slQ" data-v="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>'
         + '<div class="wsl-res"><div><div style="font-size:12.5px;color:var(--muted)">예상 실현손익</div><div class="big ' + cls(c.est) + '" id="wslBig">' + M(c.est, { sign: true }) + '</div><div class="wnote" id="wslSub">' + sellSub(c) + '</div></div>'
-        + '<div style="height:1px;background:var(--line2)"></div><div class="wsl-kv"><span>올해 누적 양도차익</span><span id="wslYtd">' + sellYtd(c) + '</span></div>'
+        + '<div style="height:1px;background:var(--line2)"></div><div class="wsl-kv"><span>올해 누적 양도차익(명세 기준)</span><span id="wslYtd">' + sellYtd(c) + '</span></div>'
         + (num(g.unkQty) > 0 ? '<div class="wsl-kv"><span>원가 모르는 수량</span><span style="color:var(--ext)" id="wslUnk">' + x.q(c.unkSell) + ' ' + esc(g.sym) + ' 포함</span></div><div class="wnote">장부처럼 원가 아는 수량부터 판다고 계산했어요 — 원가 모르는 몫(아는 몫을 다 판 뒤)은 손익 0 · 미매칭에서 원가를 정하면 더 정확해져요</div>' : '') + '</div>'
         + (c.pkey ? '<div class="wsl-plh"><span>목표가 · 손절선</span><span class="wseg" role="group" aria-label="입력 통화">' + [['KRW', '₩ 원화'], ['USD', '$ 달러']].map(o => '<button type="button" class="' + (cu === o[0] ? 'on' : '') + '" aria-pressed="' + (cu === o[0]) + '" data-w="slCur" data-v="' + o[0] + '"' + (o[0] === 'KRW' && !live ? ' disabled title="지금 환율을 아직 못 받았어요"' : '') + '>' + o[1] + '</button>').join('') + '</span></div>'
           + (live ? '' : '<div class="wnote">지금 환율을 아직 못 받아 원화 입력은 잠시 막아 뒀어요 — 달러로 넣어 주세요</div>')

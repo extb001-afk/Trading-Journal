@@ -117,14 +117,7 @@ class Rpc:
     def __init__(self, cfg: dict):
         key = os.environ.get("TJ_HELIUS_KEY", "")
         if not key:
-            envp = common.ENV_PATH
-            try:
-                with open(envp, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.startswith("TJ_HELIUS_KEY="):
-                            key = line.strip().split("=", 1)[1]
-            except OSError:
-                pass
+            key = common.read_env_file().get("TJ_HELIUS_KEY", "")
         sol = cfg.get("sol", {})
         if sol.get("rpc") == "helius":
             if not key:
@@ -648,6 +641,27 @@ def _stake_ix_accounts(instructions: list, owners) -> list:
     return out
 
 
+def _token_owner_hints(instructions: list, mine=()) -> dict:
+    out = {}
+    mine = set(mine or ())
+    for ins in instructions or []:
+        p = ins.get("parsed") if isinstance(ins, dict) else None
+        if not isinstance(p, dict) or not isinstance(p.get("info"), dict):
+            continue
+        info, t, prog = p["info"], str(p.get("type") or ""), str(ins.get("program") or "")
+        if prog == "spl-associated-token-account" and t in ("create", "createIdempotent"):
+            a, o = info.get("account"), info.get("wallet")
+        elif prog in ("spl-token", "spl-token-2022") and t in ("initializeAccount", "initializeAccount2", "initializeAccount3", "closeAccount"):
+            a, o = info.get("account"), info.get("owner")
+        elif prog in ("spl-token", "spl-token-2022") and t in ("transfer", "transferChecked", "burn", "burnChecked") and info.get("authority") in mine:
+            a, o = info.get("source") or info.get("account"), info.get("authority")
+        else:
+            continue
+        if isinstance(a, str) and isinstance(o, str) and a and o:
+            out.setdefault(a, o)
+    return out
+
+
 def stake_state(act, deact, epoch) -> str:
     try:
         act, deact, epoch = int(act), int(deact), int(epoch)
@@ -1026,18 +1040,56 @@ class SolWatcher:
                                    "delta": str(d), "owner": f"{stake_of[k]}:stake:{k}"})
             elif abs(d) > 1_000_000:
                 counterparties.add(k)
+        pre_tb, post_tb = list(meta.get("preTokenBalances") or []), list(meta.get("postTokenBalances") or [])
+        idx_owner = {r9.get("accountIndex"): r9.get("owner") for r9 in pre_tb + post_tb
+                     if isinstance(r9, dict) and r9.get("owner") and isinstance(r9.get("accountIndex"), int)}
+        hint9 = None
+
+        def owner_of(row):
+            nonlocal hint9
+            o9 = row.get("owner")
+            ix9 = row.get("accountIndex")
+            if o9 or not isinstance(ix9, int):
+                return o9
+            if ix9 in idx_owner:
+                return idx_owner[ix9]
+            acct9 = keys[ix9] if 0 <= ix9 < len(keys) else None
+            if not acct9:
+                return f"?{ix9}"
+            if hint9 is None:
+                hint9 = _token_owner_hints(all_ins, mine)
+            return (getattr(self, "ata_owner", None) or {}).get(acct9) or hint9.get(acct9) or f"?{ix9}"
         tb = {}
-        for row in (meta.get("preTokenBalances") or []):
-            key = (row.get("owner"), row.get("mint"))
+        for row in pre_tb:
+            key = (owner_of(row), row.get("mint"))
             ent = tb.setdefault(key, [0, 0, (row.get("uiTokenAmount") or {}).get("decimals")])
             ent[0] += int((row.get("uiTokenAmount") or {}).get("amount") or 0)
-        for row in (meta.get("postTokenBalances") or []):
-            key = (row.get("owner"), row.get("mint"))
+        for row in post_tb:
+            key = (owner_of(row), row.get("mint"))
             ent = tb.setdefault(key, [0, 0, (row.get("uiTokenAmount") or {}).get("decimals")])
             ent[1] += int((row.get("uiTokenAmount") or {}).get("amount") or 0)
+        unres9 = [{"acct": keys[int(o9[1:])] if int(o9[1:]) < len(keys) else None, "mint": m9, "delta": str(b1 - b0)}
+                  for (o9, m9), (b0, b1, _d9) in tb.items() if isinstance(o9, str) and o9.startswith("?") and m9 and b1 != b0]
+        hold9o = self.__dict__.setdefault("_own_hold", tsfix.TsHold())
+        if unres9:
+            old9 = not any(isinstance(r9, dict) and r9.get("owner") for r9 in pre_tb + post_tb)
+            if not old9 and hold9o.hold(sig):
+                raise RuntimeError(f"tx {sig[:12]} 토큰 잔고 {len(unres9)}줄 소유자 모름 — 보류(커서 유지 · 다음 사이클 다시)")
+            now9 = time.time()
+            if now9 - float(self.__dict__.get("_own_warn_at", 0) or 0) >= 600:
+                self._own_warn_at = now9
+                log.error("★tx %s 토큰 잔고 %d줄 소유자를 못 찾음(%s) — 그 줄 빼고 내보냄 · 목록 state/sol_owner_unknown.jsonl(내 계정이면 입출금이 빠짐)★",
+                          sig[:12], len(unres9), "owner 칸 없는 옛 응답" if old9 else f"{hold9o.limit}회 연속")
+            try:
+                common.append_durable_jsonl(os.path.join(common.STATE_DIR, "sol_owner_unknown.jsonl"),
+                                            {"ts": int(now9), "sig": sig, "old": old9, "rows": unres9})
+            except OSError as e9:
+                log.warning("sol_owner_unknown.jsonl 기록 실패: %s", e9)
+        else:
+            hold9o.clear(sig)
         for (owner, mint), (b0, b1, dec) in tb.items():
             d = b1 - b0
-            if not d or not owner or not mint:
+            if not d or not owner or not mint or str(owner).startswith("?"):
                 continue
             if owner in mine:
                 sym, dec2 = self.mint_info(mint, dec if isinstance(dec, int) else 0)

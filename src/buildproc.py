@@ -416,7 +416,8 @@ def _hist_begin():
         return real_w(path, obj, *a, **k)
     common.atomic_write_json = write
     want0 = {sp: (set((v or {}).get("days") or ()), float((v or {}).get("w") or 0)) for sp, v in dict(DC.want).items()}
-    return {"H": H, "DC": DC, "kit0": H.kit, "lo0": H.last_offer, "want0": want0, "notes": notes}
+    wold0 = {sp: (set((v or {}).get("days") or ()), float((v or {}).get("w") or 0)) for sp, v in dict(getattr(DC, "want_old", None) or {}).items()}
+    return {"H": H, "DC": DC, "kit0": H.kit, "lo0": H.last_offer, "want0": want0, "wold0": wold0, "notes": notes}
 
 
 def _hist_end(hs):
@@ -430,9 +431,16 @@ def _hist_end(hs):
         w9 = float((v or {}).get("w") or 0)
         if dn or w9 > w0:
             add[sp] = (dn, w9, (v or {}).get("t0"))
+    add_old = {}
+    for sp, v in dict(getattr(DC, "want_old", None) or {}).items():
+        d0, w0 = hs.get("wold0", {}).get(sp, (set(), 0.0))
+        dn = set((v or {}).get("days") or ()) - d0
+        w9 = float((v or {}).get("w") or 0)
+        if dn or w9 > w0:
+            add_old[sp] = (dn, (v or {}).get("t0"), w9)
     kit_set = H.kit is not hs["kit0"]
     return {"kit": H.kit if kit_set else None, "kit_set": kit_set, "offered": H.last_offer != hs["lo0"], "last_offer": H.last_offer,
-            "want_add": add, "notes": list(hs["notes"])}
+            "want_add": add, "want_old_add": add_old, "notes": list(hs["notes"])}
 
 
 def _modset_begin():
@@ -1006,6 +1014,13 @@ def _apply_hist(hs):
                 r = DC.want.setdefault(sp, {"days": set(), "w": 0.0, "t0": t0 or time.time()})
                 r["days"] |= set(dn)
                 r["w"] = max(float(r.get("w") or 0), float(w9 or 0))
+    add_old = hs.get("want_old_add") or {}
+    if add_old and hasattr(DC, "want_old"):
+        with DC.lock:
+            for sp, (dn, t0, *w9) in add_old.items():
+                r = DC.want_old.setdefault(sp, {"days": set(), "w": 0.0, "t0": t0 or time.time()})
+                r["days"] |= set(dn)
+                r["w"] = max(float(r.get("w") or 0), float(w9[0] if w9 else 0))
     if hs.get("kit_set"):
         with H.lock:
             H.kit = hs.get("kit")

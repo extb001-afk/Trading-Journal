@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+case "${1:-}" in
+  -h|--help)
+    cat <<'USAGE'
+tj-bot 첫 설치 도우미 — 아무것도 설치하지 않습니다(확인·안내만). 여러 번 실행해도 안전합니다.
+  bash tools/setup.sh          점검 + config.json·.env·state/ 준비 + 다음 단계 안내
+  bash tools/setup.sh --demo   합성 데이터로 화면만 구경(저장 안 함 · 포트 TJ_PORT=8024 bash tools/setup.sh --demo)
+USAGE
+    exit 0;;
+  ""|--demo) ;;
+  *) echo "모르는 옵션: $1 (bash tools/setup.sh --help)"; exit 2;;
+esac
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
@@ -51,6 +62,12 @@ mkdir -p state && chmod 700 state
 ok "state/ 준비 (원장·캐시가 여기 쌓입니다)"
 
 "$PY" -m py_compile src/*.py && ok "파이썬 소스 컴파일 확인"
+PORT="$("$PY" -c 'import json,sys
+try:
+    p = int((json.load(open("config.json")).get("web") or {}).get("port") or 8023)
+except Exception:
+    p = 8023
+print(p if 0 < p < 65536 else 8023)' 2>/dev/null || echo 8023)"
 
 echo
 if command -v pm2 >/dev/null 2>&1; then
@@ -60,7 +77,7 @@ if command -v pm2 >/dev/null 2>&1; then
 다음 단계:
   pm2 start ecosystem.config.js     # 전체 시작 (지갑 없으면 수집기는 조용히 대기)
   pm2 save                          # 재부팅 후에도 자동 시작하려면 + 'pm2 startup' 안내를 따르세요
-  open http://127.0.0.1:8023/       # 첫 화면에서 설정 마법사가 열립니다 (리눅스는 브라우저로 직접)
+  open http://127.0.0.1:${PORT}/       # 첫 화면에서 설정 마법사가 열립니다 (리눅스는 브라우저로 직접)
   cat state/auth_setup_code         # 첫 비밀번호 화면이 묻는 설정 코드 (tj-web 이 처음 켜질 때 만듦 · 쓰고 나면 지워짐)
 EOF
 else
@@ -74,6 +91,7 @@ pm2 없이 바로 써 보려면 (터미널 5개, 각각 켜 두기):
   $PY src/unit_runner.py sol
   $PY src/unit_runner.py bsc
   # (선택) 거래소: $PY src/upbit_link.py  ·  $PY src/ex_foreign.py  ·  알림: $PY src/alert_bot.py
-그리고 http://127.0.0.1:8023/ 을 여세요. 첫 비밀번호 화면의 설정 코드 = cat state/auth_setup_code
+그리고 http://127.0.0.1:${PORT}/ 을 여세요. 첫 비밀번호 화면의 설정 코드 = cat state/auth_setup_code
+로그는 각 터미널에 나옵니다(파일로 남기려면 '... > ~/tj-logs/tj-web.log 2>&1' — 자르기: bash tools/rotate_logs.sh ~/tj-logs)
 EOF
 fi

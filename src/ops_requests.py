@@ -493,7 +493,7 @@ def poison_request(ids=None, all_=False, by: str = "") -> tuple:
         todo = [i for i, e in ents.items() if e["state"] != "성공" and not e["corrupt"]]
         if not todo:
             return False, "다시 처리할 격리 기록이 없어요"
-        common.atomic_write_json(_p(POISON_REQ_NAME), {"all": True, "ids": [], "ts": int(time.time()), "by": str(by)[:40]})
+        _poison_req_write(True, [], by)
         return True, f"요청함 — 격리 기록 {len(todo)}건을 tj-core 가 다음 주기에 다시 처리합니다"
     ids = [str(x) for x in (ids or []) if isinstance(x, str)]
     if not ids or len(ids) > 500:
@@ -501,8 +501,26 @@ def poison_request(ids=None, all_=False, by: str = "") -> tuple:
     bad = [i for i in ids if i not in ents or ents[i]["state"] == "성공" or ents[i]["corrupt"]]
     if bad:
         return False, f"지금 목록에 없거나 이미 처리된 기록 {len(bad)}건 — 새로 고친 뒤 다시"
-    common.atomic_write_json(_p(POISON_REQ_NAME), {"all": False, "ids": ids, "ts": int(time.time()), "by": str(by)[:40]})
-    return True, f"요청함 — {len(ids)}건을 tj-core 가 다음 주기에 다시 처리합니다"
+    n9 = _poison_req_write(False, ids, by)
+    return True, f"요청함 — {len(ids)}건을 tj-core 가 다음 주기에 다시 처리합니다" + (f"(아직 처리 전인 앞 요청과 합쳐 {n9}건)" if n9 > len(ids) else "")
+
+
+def _poison_req_write(all_: bool, ids: list, by: str) -> int:
+    import fcntl
+    path = _p(POISON_REQ_NAME)
+    with open(path + ".lock", "a+") as lk:
+        fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+        try:
+            prev = _safe_read(path, None)
+            if isinstance(prev, dict):
+                if prev.get("all") is True:
+                    all_ = True
+                elif not all_:
+                    ids = list(dict.fromkeys([str(x) for x in (prev.get("ids") or []) if isinstance(x, str)] + list(ids)))[:5000]
+            common.atomic_write_json(path, {"all": bool(all_), "ids": [] if all_ else ids, "ts": int(time.time()), "by": str(by)[:40]})
+        finally:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    return 0 if all_ else len(ids)
 
 
 def _meta_dec_cache(chain: str, ca: str):

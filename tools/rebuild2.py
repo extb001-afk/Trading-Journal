@@ -471,10 +471,22 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         return s9
 
     order = []
+    fut_sc, rec_sc = {}, set()
     for a in anchors:
         sid, ns, aid, loc, qb = a[2], a[1], a[5], a[6], int(a[7])
         T = anchor_time(sid, obs, meta)
         order.append((T if T is not None else -1, a, False))
+        if a[11] == "EXF_ADJUST" and T is not None:
+            sc9 = (str(sid), loc, sh_idx.sym_of.get(aid, ""))
+            if common.exf_is_fut(a[11], ns):
+                fut_sc.setdefault(sc9, (T, a))
+            elif str(ns).endswith(":recon"):
+                rec_sc.add(sc9)
+    for sc9, (T9, a9) in fut_sc.items():
+        if sc9 in rec_sc:
+            continue
+        order.append((T9, (a9[0], a9[1].rsplit(":", 1)[0] + ":recon", a9[2], 0, T9, a9[5], a9[6], "0", None, None, "opening", "EXF_ADJUST",
+                           a9[12]), False))
     for T9, oid9, ch9, aid9, loc9 in synth:
         order.append((T9, ("opening", ch9, oid9, _next_seq(ch9, oid9), T9, aid9, loc9, "0", None, None, "opening", "OPENING",
                            core_mod_ver(core)), True))
@@ -487,13 +499,13 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         if ns in ("upbit:recon_comp", "upbit:recon"):
             dropped_comp += 1
             continue
-        if T < 0:
+        if T < 0 or common.exf_is_fut(a[11], ns):
             cur9 = conn.execute("INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts,"
                                 " asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event, classifier_ver)"
                                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", a)
             if cur9.rowcount:
                 core._bump_position(aid, qb, loc)
-                sh_idx.add_sorted(aid, loc, 0, True, q_live, sym=sh_idx.sym_of.get(aid, ""))
+                sh_idx.add_sorted(aid, loc, max(0, T), True, q_live, sym=sh_idx.sym_of.get(aid, ""))
             verbatim += 1
             continue
         sym9 = sh_idx.sym_of.get(aid, "")
@@ -549,7 +561,9 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
             changed += 1
         if ov and new_qb > 0 and ns in ov_chains and sid.startswith("recon:"):
             ets = min(int(ets), core._win_t0(T, ns))
-        if (new_qb > 0) != (qb > 0):
+        if (new_qb > 0) != (qb > 0) and str(ns).endswith(":recon") and (str(sid), loc, sym9) in fut_sc:
+            ets = T
+        elif (new_qb > 0) != (qb > 0):
             ets = (T - int(core.recon_months * 30 * 86400)) if (new_qb > 0 and core.recon_months > 0) else T
         cur9 = conn.execute("INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts,"
                             " asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event, classifier_ver)"

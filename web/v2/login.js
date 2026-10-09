@@ -1,7 +1,8 @@
 (function () {
   'use strict';
   var H = document.documentElement;
-  try { var t = localStorage.getItem('tj_v2_theme'); if (t === 'light' || t === 'dark') H.setAttribute('data-theme', t); } catch (e) {  }
+  var t = null; try { t = localStorage.getItem('tj_v2_theme'); } catch (e) {  }
+  try { H.setAttribute('data-theme', t === 'light' || t === 'dark' ? t : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')); } catch (e) {  }
   try { if (H.getAttribute('data-theme') === 'light') { var m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', '#F3F4F7'); } } catch (e) {  }
 
   function nextUrl() {

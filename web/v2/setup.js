@@ -61,16 +61,16 @@
     if (!a) return null;
     if (/^0x/i.test(a)) {
       const b = a.slice(2);
-      if (!/^[0-9a-fA-F]{40}$/.test(b)) return { err: 'EVM 주소는 0x + 16진수 40자입니다 (지금 ' + b.length + '자)' };
-      if (/^0+$/.test(b)) return { err: '0 주소는 추적할 수 없습니다' };
+      if (!/^[0-9a-fA-F]{40}$/.test(b)) return { err: 'EVM 주소는 0x + 16진수 40자예요 (지금 ' + b.length + '자)' };
+      if (/^0+$/.test(b)) return { err: '0 주소는 추적할 수 없어요' };
       if (b !== b.toLowerCase() && b !== b.toUpperCase()) {
-        if (toChecksum(a) !== '0x' + b) return { err: '체크섬 불일치 — 한 글자가 틀렸을 수 있습니다. 원문을 다시 복사하세요' };
+        if (toChecksum(a) !== '0x' + b) return { err: '체크섬 불일치 — 한 글자가 틀렸을 수 있어요. 원문을 다시 복사하세요' };
         return { kind: 'evm', addr: a, note: 'EVM · 체크섬 확인됨' };
       }
       return { kind: 'evm', addr: a, note: 'EVM · 체크섬 없는 주소(오타 주의)', warn: true };
     }
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) return { err: '0x… EVM 주소 또는 Solana 주소가 아닙니다' };
-    if (b58len(a) !== 32) return { err: 'Solana 주소는 base58 32바이트여야 합니다' };
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) return { err: '지원하지 않는 주소예요 — EVM(0x…)·Solana 주소만 넣을 수 있어요' };
+    if (b58len(a) !== 32) return { err: '지원하지 않는 주소예요 — EVM(0x…)·Solana 주소만 넣을 수 있어요' };
     return { kind: 'sol', addr: a, note: 'Solana 주소' };
   }
 
@@ -92,13 +92,13 @@
     const a = String(raw || '').trim();
     if (!a) return null;
     if (kind === 'dydx') {
-      if (!/^dydx1[02-9ac-hj-np-z]{38}$/i.test(a)) return { err: 'dYdX 주소는 dydx1 로 시작하는 43자입니다 (지금 ' + a.length + '자)' };
+      if (!/^dydx1[02-9ac-hj-np-z]{38}$/i.test(a)) return { err: 'dYdX 주소는 dydx1 로 시작하는 43자예요 (지금 ' + a.length + '자)' };
       return bech32Ok(a, 'dydx') ? { addr: a.toLowerCase(), note: 'dYdX 주소 확인됨' } : { err: 'dYdX 주소 체크섬 불일치 — 원문을 다시 복사하세요' };
     }
     const c = checkAddr(a);
     if (!c || c.err) return c;
-    if (kind === 'evm' && c.kind !== 'evm') return { err: name + ' 은 0x… EVM 주소를 씁니다' };
-    if (kind === 'sol' && c.kind !== 'sol') return { err: name + ' 는 Solana 주소를 씁니다' };
+    if (kind === 'evm' && c.kind !== 'evm') return { err: name + ' 은 0x… EVM 주소를 써요' };
+    if (kind === 'sol' && c.kind !== 'sol') return { err: name + ' 는 Solana 주소를 써요' };
     return { addr: c.addr, note: c.note };
   }
 
@@ -127,7 +127,7 @@
     ((U.st && U.st.wallets) || []).forEach(w => { have[w.kind === 'sol' ? w.address : String(w.address || '').toLowerCase()] = w; });
     const items = toks.map(t => {
       const c = checkAddrM(t);
-      if (!c || c.err) return { t, st: 'bad', err: c ? c.err : '주소가 아닙니다' };
+      if (!c || c.err) return { t, st: 'bad', err: c ? c.err : '주소가 아니에요' };
       const k = wKey(c);
       if (seen.has(k)) return { t, st: 'dup', c };
       seen.add(k);
@@ -155,7 +155,7 @@
       + (x.c ? ' <span class="pill ' + (x.c.kind === 'sol' ? 'ok' : 'a') + ' sm">' + (x.c.kind === 'sol' ? 'Solana' : 'EVM') + '</span>' : '')
       + '<div class="su-pis' + (x.st === 'have' ? ' pvl' : '') + '">' + txtH + '</div>' + (se && x.c && x.st !== 'have' && x.st !== 'dup' ? '<div class="su-pis su-pise">지난 저장 실패 · ' + esc(se) + '</div>' : '') + '</div></li>';
   }
-  const W_HINT = '0x… (EVM·BSC 공용) 또는 Solana 주소 · 여러 개는 쉼표나 줄바꿈(Enter)으로 나눠 한 번에 넣을 수 있어요 · 개인 키·시드는 절대 입력하지 마세요 — 주소만 필요합니다';
+  const W_HINT = '0x… (EVM·BSC 공용) 또는 Solana 주소 · 여러 개는 쉼표나 줄바꿈(Enter)으로 나눠 한 번에 넣을 수 있어요 · 개인 키·시드는 절대 입력하지 마세요 — 주소만 필요해요';
   function wMsgHTML(an) {
     if (!an.toks.length) return '<span class="cap">' + esc(W_HINT) + '</span>';
     const secret = an.secret ? '<div class="su-bad" role="alert"' + (an.multi ? ' style="margin-bottom:8px"' : '') + '>' + esc(W_SECRET[an.secret]) + '</div>' : '';
@@ -332,16 +332,16 @@
   }
 
   const EX_HELP = {
-    upbit: { url: 'https://upbit.com/mypage/open_api_management', steps: ['업비트 웹 로그인 → 마이페이지 → Open API 관리', '권한은 <b>자산조회</b>만 체크 (주문하기·출금하기·입금하기는 체크하지 마세요)', '허용 IP 주소에 <b>이 서버의 공인 IP</b> 를 입력 (업비트는 IP 등록 필수)', 'Access Key·Secret Key 발급 — Secret 은 한 번만 보이니 바로 붙여넣으세요'], note: '키 유효기간(1년)이 지나면 다시 발급해야 합니다.' },
-    bithumb: { url: 'https://www.bithumb.com/react/api-support/management-api', steps: ['빗썸 웹 로그인 → 마이페이지 → API 관리 → <b>API 2.0</b> 키 생성', '권한은 <b>자산조회</b>만 선택 (주문·출금 제외)', '허용 IP 에 이 서버 공인 IP 등록', 'API Key·Secret Key 를 붙여넣기'], note: '구 API(1.0) 키는 지원하지 않습니다.' },
-    binance: { url: 'https://www.binance.com/en/my/settings/api-management', steps: ['Account → API Management → Create API → <b>System generated</b>', '권한은 <b>Enable Reading</b> 만 (Spot & Margin Trading·Futures·Withdrawals·Universal Transfer 모두 끔)', 'IP access restrictions → <b>Restrict access to trusted IPs only</b> → 이 서버 공인 IP', 'API Key·Secret Key 붙여넣기'], note: '저장할 때 키 권한을 확인해 거래·출금·이체 권한이 켜져 있으면 저장하지 않습니다.' },
-    bybit: { url: 'https://www.bybit.com/app/user/api-management', steps: ['Account & Security → API → Create New Key → <b>System-generated API Keys</b>', '<b>API Transaction</b> 대신 <b>Read-Only</b> 선택', 'IP 제한: <b>Only IPs with permissions granted</b> → 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '통합 거래 계정(UTA) 기준으로 조회합니다.' },
+    upbit: { url: 'https://upbit.com/mypage/open_api_management', steps: ['업비트 웹 로그인 → 마이페이지 → Open API 관리', '권한은 <b>자산조회</b>만 체크 (주문하기·출금하기·입금하기는 체크하지 마세요)', '허용 IP 주소에 <b>이 서버의 공인 IP</b> 를 입력 (업비트는 IP 등록 필수)', 'Access Key·Secret Key 발급 — Secret 은 한 번만 보이니 바로 붙여넣으세요'], note: '키 유효기간(1년)이 지나면 다시 발급해야 해요.' },
+    bithumb: { url: 'https://www.bithumb.com/react/api-support/management-api', steps: ['빗썸 웹 로그인 → 마이페이지 → API 관리 → <b>API 2.0</b> 키 생성', '권한은 <b>자산조회</b>만 선택 (주문·출금 제외)', '허용 IP 에 이 서버 공인 IP 등록', 'API Key·Secret Key 를 붙여넣기'], note: '구 API(1.0) 키는 지원하지 않아요.' },
+    binance: { url: 'https://www.binance.com/en/my/settings/api-management', steps: ['Account → API Management → Create API → <b>System generated</b>', '권한은 <b>Enable Reading</b> 만 (Spot & Margin Trading·Futures·Withdrawals·Universal Transfer 모두 끔)', 'IP access restrictions → <b>Restrict access to trusted IPs only</b> → 이 서버 공인 IP', 'API Key·Secret Key 붙여넣기'], note: '저장할 때 키 권한을 확인해 거래·출금·이체 권한이 켜져 있으면 저장하지 않아요.' },
+    bybit: { url: 'https://www.bybit.com/app/user/api-management', steps: ['Account & Security → API → Create New Key → <b>System-generated API Keys</b>', '<b>API Transaction</b> 대신 <b>Read-Only</b> 선택', 'IP 제한: <b>Only IPs with permissions granted</b> → 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '통합 거래 계정(UTA) 기준으로 조회해요.' },
     okx: { url: 'https://www.okx.com/account/my-api', steps: ['프로필 → API → Create API key', '권한은 <b>Read</b> 만 (Trade·Withdraw 체크 금지)', 'IP 주소 허용 목록에 이 서버 공인 IP', '만들 때 정한 <b>Passphrase</b> 도 함께 입력'], note: 'Passphrase 는 OKX 가 다시 보여주지 않으니 기억해 두세요.' },
     kucoin: { url: 'https://www.kucoin.com/account/api', steps: ['API Management → Create API → API Trading', '권한은 <b>General</b> 만 (Spot·Margin·Futures Trading, Transfer, Withdrawal 끔)', 'IP Restriction → 이 서버 공인 IP', 'API Key·Secret·<b>Passphrase</b> 입력'], note: '' },
     gate: { url: 'https://www.gate.io/myaccount/api_key_manage', steps: ['API Keys → Create API Key → <b>API v4 Key</b>', '권한: Spot·Wallet 을 <b>Read Only</b> 로 (나머지 끔)', 'IP 화이트리스트에 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '' }
   };
   const XP_HELP = {
-    helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요합니다 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
+    helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요해요 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
     etherscan: { url: 'https://etherscan.io/myapikey', why: 'EVM 지갑이 있으면 필수(무료) — Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받아요. 없으면 공개 탐색기로만 받아 느리거나(일부 체인은 막혀) 늦게 기록될 수 있어요.', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
     opensea: { url: 'https://docs.opensea.io/reference/api-keys', why: '선택 · 추천 — 넣으면 기타 자산 › NFT 의 EVM 바닥가를 오픈시에서 먼저 받아(최우선) 작은 컬렉션까지 NFT 추적이 더 원활해요. 없으면 코인게코(무료 데모 키 권장). 미검증(키 없이 공개 문서만 보고 연결).', steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
@@ -402,7 +402,7 @@
   }
   function toast(msg, err) {
     const t = $('#toast'); if (!t) return;
-    t.innerHTML = '<div class="toast' + (err ? ' e' : '') + '" role="status">' + esc(msg) + '</div>';
+    t.innerHTML = '<div class="toast' + (err ? ' e' : '') + '">' + esc(msg) + '</div>';
     clearTimeout(toast._t); toast._t = setTimeout(() => { t.innerHTML = ''; }, err ? 4600 : 2600);
   }
   const draft = (k, v) => { if (v === undefined) return U.d[k] || ''; U.d[k] = v; };
@@ -432,17 +432,17 @@
       list = '<div class="su-list">' + ws.map(w => '<div class="su-row' + (nw.has(w.address) ? ' new' : '') + '"><div style="min-width:0;flex:1"><b class="pvl"' + (w.label ? ' data-pk="w"' : '') + '>' + esc(w.label ? suOwn(w.label) : '(이름 없음)') + '</b> ' + pill(w.kind === 'sol' ? 'ok' : 'a', w.kind === 'sol' ? 'Solana' : 'EVM')
         + (nw.has(w.address) ? ' <span class="pill w sm" title="이름은 설정 › 추적 지갑에서 이름을 누르면 바로 바꿀 수 있어요">새로 추가</span>' : '')
         + '<div class="su-addr num">' + esc(w.address) + '</div><div class="cap">' + w.chains.map(chainName).map(esc).join(' · ') + '</div>'
-        + (w.reconDone && w.reconDone.length ? ' <span class="pill w sm" title="기초잔고 대조가 끝난 뒤 추가된 체인(' + esc(w.reconDone.map(chainName).join(', ')) + ') — 백필이 끝난 뒤 재구축(README › 백필)하면 이 지갑의 과거 보유분까지 맞춰집니다">과거 보유분 재구축 필요</span>' : '')
+        + (w.reconDone && w.reconDone.length ? ' <span class="pill w sm" title="기초잔고 대조가 끝난 뒤 추가된 체인(' + esc(w.reconDone.map(chainName).join(', ')) + ') — 옛 기록 수집이 끝난 뒤 재구축(README › 백필)하면 이 지갑의 과거 보유분까지 맞춰져요">과거 보유분 재구축 필요</span>' : '')
         + '</div><button class="btn sm" data-su="wdel" data-v="' + esc(w.address) + '" aria-label="지갑 삭제">삭제</button></div>').join('') + '</div>';
     }
-    return '<div class="su-sec"><div class="su-h">추적할 지갑</div><div class="cap su-p">주소만으로 온체인 거래를 읽어 매매일지를 만듭니다. 서명·송금 권한은 필요 없고 요청하지도 않습니다. 새 지갑은 최근 ' + esc(st.backfillMonths) + '개월 거래부터 자동으로 불러옵니다.</div>'
+    return '<div class="su-sec"><div class="su-h">추적할 지갑</div><div class="cap su-p">주소만으로 온체인 거래를 읽어 매매일지를 만들어요. 서명·송금 권한은 필요 없고 요청하지도 않아요. 새 지갑은 최근 ' + esc(st.backfillMonths) + '개월 거래부터 자동으로 불러와요.</div>'
       + '<div class="su-form su-wform"><textarea class="field su-grow su-ta" rows="1" data-su-in="w_addr" placeholder="0x… 또는 Solana 주소 (여러 개 가능)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="지갑 주소 — 여러 개는 쉼표·줄바꿈으로 구분" aria-describedby="suVmsg"></textarea>'
       + '<input class="field' + (an.multi ? ' hidden' : '') + '" id="suWLabel" style="width:170px" data-su-in="w_label" placeholder="이름 (예: 메인)" maxlength="24" aria-label="지갑 이름"></div>'
       + '<div class="su-vmsg" id="suVmsg">' + wMsgHTML(an) + '</div>'
-      + '<div class="su-chains' + (an.onlySol ? ' hidden' : '') + '" id="suChains"><div class="cap" style="margin-bottom:6px">EVM 체인 선택 · 같은 주소를 체인별로 추적합니다 <button class="link" data-su="chainAll">전체</button> · <button class="link" data-su="chainNone">해제</button></div><div class="su-chiprow">' + chips + '</div></div>'
+      + '<div class="su-chains' + (an.onlySol ? ' hidden' : '') + '" id="suChains"><div class="cap" style="margin-bottom:6px">EVM 체인 선택 · 같은 주소를 체인별로 추적해요 <button class="link" data-su="chainAll">전체</button> · <button class="link" data-su="chainNone">해제</button></div><div class="su-chiprow">' + chips + '</div></div>'
       + '<div class="su-actions"><button class="btn pri" id="suWadd" data-su="wadd"' + (wb.dis ? ' disabled' : '') + '>' + esc(wb.t) + '</button><span class="cap su-kbd">Enter = 줄바꿈(다음 주소) · ⌘/Ctrl+Enter = 추가</span></div>'
       + wResHTML()
-      + list + (ws.some(w => w.kind === 'sol') && st.solNeedsHelius && !st.explorers.helius.set ? '<div class="bnr w" style="margin-top:12px"><div><b>Solana 지갑은 Helius 키가 필요합니다</b><div class="bd">다음 단계에서 무료 키를 넣으면 Solana 수집이 시작됩니다.</div></div></div>' : '')
+      + list + (ws.some(w => w.kind === 'sol') && st.solNeedsHelius && !st.explorers.helius.set ? '<div class="bnr w" style="margin-top:12px"><div><b>Solana 지갑은 Helius 키가 필요해요</b><div class="bd">다음 단계에서 무료 키를 넣으면 Solana 수집이 시작돼요.</div></div></div>' : '')
       + evmKeyBanner(st) + '</div>';
   }
 
@@ -473,7 +473,7 @@
     const saved = ex.perm && ex.perm.how ? '<div class="cap su-permnote">저장된 키 · ' + (ex.perm.how === 'api' ? '<span class="oktxt">조회 전용 자동 확인됨</span>' : '조회 전용 본인 확인') + (ex.perm.at ? ' <span class="num">' + esc(ago(ex.perm.at)) + '</span>' : '') + ' · <b>연결 테스트</b>(빈 칸)로 다시 검사할 수 있어요</div>' : '';
     const line = ex.permCheck
       ? '<div class="cap su-permnote">저장할 때 키 권한을 자동으로 확인해요 — <b>조회 말고 다른 권한(거래·출금·이체 등)이 켜져 있으면 저장하지 않아요.</b> 확인이 안 되면(연결 실패) 저장하지 않으니 잠시 뒤 다시 저장하세요.</div>'
-      : '<div class="cap su-permnote">' + esc(g.name) + '는 API 로 키 권한을 확인할 수 없어요(자동 확인은 바이낸스·바이비트·OKX 만) — 발급 화면에서 <b>조회 권한만</b> 켰는지 직접 확인하고 체크하세요.</div>';
+      : '<div class="cap su-permnote">' + esc(g.name) + '는 API 로 키 권한을 확인할 수 없어요(자동 확인은 바이낸스·바이빗·OKX 만) — 발급 화면에서 <b>조회 권한만</b> 켰는지 직접 확인하고 체크하세요.</div>';
     const why = U.needAck[gk] && ex.permCheck ? '<div class="su-warnline">' + esc(U.needAck[gk]) + '</div>' : '';
     const box = needAck(gk) ? '<button type="button" class="su-ack' + (on ? ' on' : '') + '" role="checkbox" aria-checked="' + on + '" data-su="kack" data-v="' + gk + '"><i aria-hidden="true"></i><span>이 키는 <b>조회(읽기) 권한만</b> 켰어요 — 주문·거래·출금·이체 권한은 모두 껐어요</span></button>' : '';
     return '<div class="su-permbox">' + line + why + box + saved + '</div>';
@@ -484,7 +484,7 @@
     const kick = p.stored ? '저장된 키 검사 결과 · 키는 그대로 두었어요' : '이 키는 저장하지 않았어요';
     return '<div class="su-bg su-permbg" role="alertdialog" aria-modal="true" aria-labelledby="suPermT" aria-describedby="suPermD"><div class="su-perm">'
       + '<div class="su-permhead"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4.5M12 17.5v.01"/></svg>'
-      + '<div style="min-width:0"><div class="su-permkick">' + esc(kick) + '</div><h3 id="suPermT">' + esc(p.title || '위험한 권한이 켜져 있습니다') + '</h3></div></div>'
+      + '<div style="min-width:0"><div class="su-permkick">' + esc(kick) + '</div><h3 id="suPermT">' + esc(p.title || '위험한 권한이 켜져 있어요') + '</h3></div></div>'
       + '<div class="su-permsec"><b>켜져 있는 권한</b><ul>' + (p.danger || []).map(d => '<li><span class="pill e sm">' + esc(PERM_KIND[d.kind] || d.kind) + '</span> ' + esc(d.label) + '</li>').join('') + '</ul></div>'
       + '<div class="su-permsec"><b>왜 위험한가요</b><p id="suPermD">' + esc(p.why || '') + '</p></div>'
       + '<div class="su-permsec"><b>조회 전용 키로 다시 만드는 법</b><ol>' + (p.fix || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ol>'
@@ -523,7 +523,7 @@
   }
   function evmKeyBanner(st) {
     if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
-    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요합니다(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
+    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요해요(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
   }
   function xpPill(st, k, desc) {
     if (k === 'helius') return st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? pill('w', 'Solana 필수') : pill('g', 'Solana 지갑이 있으면 필수');
@@ -539,7 +539,7 @@
   }
   function keysHTML() {
     const st = U.st;
-    return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보입니다(값은 다시 표시하지 않음).</div>'
+    return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보여요(값은 다시 표시하지 않음).</div>'
       + evmKeyBanner(st)
       + ['helius', 'etherscan', 'coingecko', 'opensea'].concat(NODE_KEYS).filter(k => st.explorers[k]).map(k => {
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius'), nm = xpName(g.name);
@@ -558,8 +558,8 @@
     if (!dp && !keySet) return '';
     dp = dp || {};
     const busy = dp.running || dp.requested || U.dpWait[k];
-    const head = dp.count ? '입금주소 <b class="num">' + esc(dp.count) + '</b>개' + (dp.addresses && dp.addresses !== dp.count ? ' <span class="cap">(주소 ' + esc(dp.addresses) + '종 · 통화 ' + esc(dp.currencies) + '개)</span>' : '')
-      : (keySet ? '입금주소 수집 대기' : '입금주소 없음');
+    const head = dp.count ? '입금 주소 <b class="num">' + esc(dp.count) + '</b>개' + (dp.addresses && dp.addresses !== dp.count ? ' <span class="cap">(주소 ' + esc(dp.addresses) + '종 · 통화 ' + esc(dp.currencies) + '개)</span>' : '')
+      : (keySet ? '입금 주소 수집 대기' : '입금 주소 없음');
     const when = dp.lastRefresh ? ' · 마지막 갱신 ' + esc(ago(dp.lastRefresh)) : (keySet ? ' · 곧 첫 수집' : '');
     const st9 = busy ? ' ' + pill('a', dp.running ? '수집 중…' : '요청됨') : dp.lastError ? ' <span class="pill w sm" title="' + esc(dp.lastError) + '">' + (dp.lastRefresh && dp.lastRefresh >= (dp.lastAttempt || 0) ? '일부 실패' : '실패 · 기존 주소 유지') + '</span>' : '';
     return '<div class="su-dep"><div style="min-width:0"><span>' + head + '</span><span class="cap">' + when + '</span>' + st9 + '</div><span class="sp"></span>'
@@ -567,21 +567,21 @@
   }
   function exchangesHTML() {
     const st = U.st;
-    return '<div class="su-sec"><div class="su-h">거래소 API (선택 · 조회 전용)</div><div class="cap su-p">입금·체결·잔고를 가져와 온체인 전송과 짝지어 원가를 이어 줍니다. <b>조회(읽기) 권한만</b> 켠 키를 쓰세요 — 이 봇은 주문·출금 API 를 호출하지 않습니다.</div>'
-      + '<div class="cap su-p">키를 저장하면 <b>내 계정 입금주소</b>를 자동으로 모읍니다(첫 수집 즉시 · 하루 1회 · 새 코인·네트워크가 생기면 바로). 이 주소들로 보낸 전송은 거래소 입금으로 자동 인식하고, 거래소가 주소를 바꿔도 옛 주소는 지우지 않습니다.</div>'
+    return '<div class="su-sec"><div class="su-h">거래소 API (선택 · 조회 전용)</div><div class="cap su-p">입금·체결·잔고를 가져와 온체인 전송과 짝지어 원가를 이어 줘요. <b>조회(읽기) 권한만</b> 켠 키를 쓰세요 — 이 봇은 주문·출금 API 를 호출하지 않아요.</div>'
+      + '<div class="cap su-p">키를 저장하면 <b>내 계정 입금 주소</b>를 자동으로 모아요(첫 수집 즉시 · 하루 1회 · 새 코인·네트워크가 생기면 바로). 이 주소들로 보낸 전송은 거래소 입금으로 자동 인식하고, 거래소가 주소를 바꿔도 옛 주소는 지우지 않아요.</div>'
       + '<div class="su-ipbox"><div style="min-width:0"><b>이 서버의 공인 IP</b><div class="cap">거래소 키의 IP 화이트리스트에 넣을 값</div></div><span class="sp"></span>' + (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>') + '</div>'
       + EX_ORDER.map(k => {
         const g = st.exchanges[k], h = EX_HELP[k], open = U.ex === k;
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="ex" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b><span class="sp"></span>' + pill(g.set ? 'ok' : g.partial ? 'w' : 'g', g.set ? '연결됨' : g.partial ? '일부 입력' : '미설정') + '</button>'
           + depRowHTML(k, (st.depaddr || {})[k], g.set)
-          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작됩니다(재시작 불필요)</div>') + '</div>' : '') + '</div>';
+          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작돼요(재시작 불필요)</div>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }
   function tgHTML() {
     const st = U.st, T = U.tg, tg = st.telegram || {};
     let body = '';
     if (T.phase === 'done' || (tg.connected && T.phase !== 'wait')) {
-      body = '<div class="su-tgdone"><div class="su-big">' + pill('ok', '연결됨') + '</div><div><b>@' + (tg.bot ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.bot)) + '</span>' : '?') + '</b> → ' + (tg.chatName ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.chatName)) + '</span>' : '채팅') + ' <span class="cap num">(' + esc(tg.chatMasked || '') + ')</span><div class="cap">목표가·손절 도달, 새 거래 분류, 검토 필요 알림이 이 채팅으로 옵니다 (시간당 최대 30통, 같은 종류는 묶어서). 어떤 알림을 받을지는 설정 › 알림(텔레그램)에서 골라요.</div></div></div>'
+      body = '<div class="su-tgdone"><div class="su-big">' + pill('ok', '연결됨') + '</div><div><b>@' + (tg.bot ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.bot)) + '</span>' : '?') + '</b> → ' + (tg.chatName ? '<span class="pvl" data-pk="w">' + esc(suOwn(tg.chatName)) + '</span>' : '채팅') + ' <span class="cap num">(' + esc(tg.chatMasked || '') + ')</span><div class="cap">목표가·손절 도달, 새 거래 분류, 검토 필요 알림이 이 채팅으로 와요 (시간당 최대 30통, 같은 종류는 묶어서). 어떤 알림을 받을지는 설정 › 알림(텔레그램)에서 골라요.</div></div></div>'
         + '<div class="su-actions"><button class="btn" data-su="tgtest">테스트 알림 보내기</button><button class="btn danger" data-su="tgoff">연결 해제</button></div>';
     } else if (T.phase === 'wait') {
       const mm = Math.max(0, Math.floor(T.left / 60)), ss = Math.max(0, T.left % 60);
@@ -591,7 +591,7 @@
         + '<div style="margin-top:10px"><button class="link" data-su="tgcancel">다른 토큰으로</button></div></div></div>';
       else body = '<div class="su-tgwait"><div class="su-qrbox">' + (T.link ? qrSVG(T.link, 176) : '') + '<div class="cap" style="text-align:center;margin-top:6px">휴대폰 카메라로 스캔</div></div>'
         + '<div style="min-width:0;flex:1"><div class="su-h" style="margin:0 0 6px">봇 <span class="num">@' + (T.bot && T.bot.username ? '<span class="pvl" data-pk="w">' + esc(suOwn(T.bot.username)) + '</span>' : '') + '</span> 에게 /start 를 보내세요</div>'
-        + '<ol class="su-ol"><li>아래 버튼(또는 QR)으로 텔레그램에서 봇을 엽니다</li><li><b>시작(Start)</b> 을 누르면 이 화면이 자동으로 채팅을 찾습니다</li><li>찾으면 테스트 메시지를 보내고 저장합니다</li></ol>'
+        + '<ol class="su-ol"><li>아래 버튼(또는 QR)으로 텔레그램에서 봇을 열어요</li><li><b>시작(Start)</b> 을 누르면 이 화면이 자동으로 채팅을 찾아요</li><li>찾으면 테스트 메시지를 보내고 저장해요</li></ol>'
         + '<div class="su-actions" style="margin-top:10px"><a class="btn pri" href="' + esc(T.link) + '" target="_blank" rel="noopener noreferrer">텔레그램에서 열기</a><button class="btn" data-su="copy" data-v="' + esc(T.start) + '">명령 복사: <span class="num">' + esc(T.start) + '</span></button></div>'
         + '<div class="su-wait"><span class="su-spin" aria-hidden="true"></span>/start 기다리는 중 · <span class="num">' + mm + ':' + (ss < 10 ? '0' : '') + ss + '</span> 남음</div>'
         + (T.err ? '<div class="su-bad" style="margin-top:8px">' + esc(T.err) + '</div>' : '')
@@ -601,18 +601,18 @@
           + '<button class="btn" data-su="tgmanual">테스트 후 저장</button></div>' : '')
         + '</div></div>';
     } else {
-      body = '<ol class="su-ol"><li>텔레그램에서 <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> → <code>/newbot</code> → 이름·아이디 정하기</li><li>받은 토큰(<code>123456789:AA…</code>)을 붙여넣고 확인</li><li>알림 전용 <b>새 봇</b>을 쓰세요 — 다른 프로그램이 쓰는 봇은 업데이트를 뺏고 뺏겨 연결이 끊깁니다</li></ol>'
+      body = '<ol class="su-ol"><li>텔레그램에서 <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> → <code>/newbot</code> → 이름·아이디 정하기</li><li>받은 토큰(<code>123456789:AA…</code>)을 붙여넣고 확인</li><li>알림 전용 <b>새 봇</b>을 쓰세요 — 다른 프로그램이 쓰는 봇은 업데이트를 뺏고 뺏겨 연결이 끊겨요</li></ol>'
         + '<div class="su-form"><input class="field su-grow" type="password" autocomplete="off" spellcheck="false" data-su-in="tg_token" placeholder="봇 토큰 붙여넣기" aria-label="텔레그램 봇 토큰"><button class="btn pri" data-su="tgval"' + (U.busy.tg ? ' disabled' : '') + '>' + (U.busy.tg ? '확인 중…' : '토큰 확인') + '</button></div>'
         + (T.err ? '<div class="su-bad" style="margin-top:8px">' + esc(T.err) + '</div>' : '');
     }
-    return '<div class="su-sec"><div class="su-h">텔레그램 알림 (선택)</div><div class="cap su-p">연결하지 않아도 모든 기능이 동작합니다. 알림은 연결하는 순간부터 새로 생긴 것만 보냅니다.</div>' + body + '</div>';
+    return '<div class="su-sec"><div class="su-h">텔레그램 알림 (선택)</div><div class="cap su-p">연결하지 않아도 모든 기능이 동작해요. 알림은 연결하는 순간부터 새로 생긴 것만 보내요.</div>' + body + '</div>';
   }
   function applyHTML() {
     const a = U.st.apply || {};
-    if (!a.runner) return '<div class="su-apply"><b>적용</b><div class="cap">이 설치는 유닛 러너 없이 실행 중입니다. 지갑·탐색기 키를 바꾼 뒤 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).</div><div class="su-form" style="margin-top:8px"><code class="su-code su-grow">' + esc(a.manual) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(a.manual) + '">복사</button></div></div>';
+    if (!a.runner) return '<div class="su-apply"><b>적용</b><div class="cap">수집기를 따로 실행 중이에요 — 지갑·키를 바꾼 뒤 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).</div><div class="su-form" style="margin-top:8px"><code class="su-code su-grow">' + esc(a.manual) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(a.manual) + '">복사</button></div></div>';
     const us = a.units || {};
     const rl = a.mode === 'reload';
-    return '<div class="su-apply"><b>적용 상태</b><div class="cap">' + (rl ? '지갑을 넣으면 약 30초 안에 수집기가 자동으로 다시 시작합니다. 탐색기 키를 바꾸면 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).' : '설정을 바꾸면 해당 유닛이 약 30초 안에 스스로 다시 시작합니다. 거래소 키·텔레그램은 재시작 없이 1분 안에 반영됩니다.') + '</div><div class="su-units">'
+    return '<div class="su-apply"><b>적용 상태</b><div class="cap">' + (rl ? '지갑을 넣으면 약 30초 안에 수집기가 자동으로 다시 시작해요. 탐색기 키를 바꾸면 한 번 재시작하세요 (거래소 키·텔레그램은 재시작 없이 1분 안에 반영).' : '설정을 바꾸면 해당 수집기가 약 30초 안에 스스로 다시 시작해요. 거래소 키·텔레그램은 재시작 없이 1분 안에 반영돼요.') + '</div><div class="su-units">'
       + Object.keys(UNIT_KO).map(u => { const x = us[u] || {}; const cls = x.state === 'applied' ? 'ok' : x.state === 'pending' ? 'a' : x.state === 'manual' ? 'w' : x.state === 'waiting' ? 'g' : 'g';
         const t = x.state === 'applied' ? '적용됨' : x.state === 'pending' ? '적용 중' : x.state === 'manual' ? '재시작 필요' : x.state === 'waiting' ? '대기' : '—';
         return '<div class="su-unit"><span>' + UNIT_KO[u] + '</span>' + pill(cls, t) + (x.state === 'waiting' && x.why ? '<div class="cap">' + esc(x.why) + '</div>' : '') + '</div>'; }).join('') + '</div>'
@@ -634,7 +634,7 @@
   function perpDex() { const P = (U.st && U.st.perp) || {}, ds = P.dexes || []; return ds.find(d => d.key === U.pdex) || ds[0] || null; }
   function perpVmsg(d, raw) {
     const c = d ? checkPerpAddr(d.kind, raw, d.name) : null;
-    return !c ? '<span class="cap">' + esc(d ? d.name + ' — ' + PERP_FMT[d.kind] : '') + ' · 개인 키·시드는 절대 입력하지 마세요 — 주소만 필요합니다</span>'
+    return !c ? '<span class="cap">' + esc(d ? d.name + ' — ' + PERP_FMT[d.kind] : '') + ' · 개인 키·시드는 절대 입력하지 마세요 — 주소만 필요해요</span>'
       : c.err ? '<span class="su-bad">' + esc(c.err) + '</span>' : '<span class="su-good">' + esc(c.note) + '</span>';
   }
   function perpHTML() {
@@ -652,8 +652,8 @@
         + '<button class="btn sm" data-su="pdel" data-v="' + esc(w.dex + '|' + w.address) + '" aria-label="퍼프 덱스 주소 삭제">삭제</button></div>';
     }).join('') + '</div>' : '';
     return '<div class="su-sec"><div class="su-h">퍼프 덱스 (선택 · 주소만)</div>'
-      + '<div class="cap su-p">탈중앙 선물 거래소(퍼프 덱스) 주소를 넣으면 <b>현재 포지션·거래 내역·펀딩·청산</b>을 선물 화면에 거래소 선물과 나란히 보여 줍니다. 실현 손익·펀딩·수수료는 매매일지·세금 명세의 선물 정산에 같은 규칙으로 들어가요(USD 기준 · 원화 = 정산 시각 환율). 키·서명은 필요 없고 요청하지도 않습니다(공개 조회).</div>'
-      + '<div class="cap su-p">덱스에 맡긴 담보·계정 가치는 총자산에 더하지 않아요(표시 전용 — Rabby 가 이미 잡는 경우 이중 계산 방지). 새 주소는 저장 후 15초 안에 수집을 시작하고, 과거 기록은 수집 시작일부터 받을 수 있는 만큼 몇 주기에 나눠 받습니다.</div>'
+      + '<div class="cap su-p">탈중앙 선물 거래소(퍼프 덱스) 주소를 넣으면 <b>현재 포지션·거래 내역·펀딩·청산</b>을 선물 화면에 거래소 선물과 나란히 보여 줘요. 실현 손익·펀딩·수수료는 매매일지·세금 명세의 선물 정산에 같은 규칙으로 들어가요(USD 기준 · 원화 = 정산 시각 환율). 키·서명은 필요 없고 요청하지도 않아요(공개 조회).</div>'
+      + '<div class="cap su-p">덱스에 맡긴 담보·계정 가치는 총자산에 더하지 않아요(표시 전용 — Rabby 가 이미 잡는 경우 이중 계산 방지). 새 주소는 저장 후 15초 안에 수집을 시작하고, 옛 기록은 수집 시작일부터 받을 수 있는 만큼 몇 주기에 나눠 받아요.</div>'
       + '<div class="su-chiprow" role="group" aria-label="퍼프 덱스 고르기" style="margin-bottom:10px">' + chips + '</div>'
       + '<div class="su-form"><input class="field su-grow" data-su-in="p_addr" placeholder="' + esc(d ? d.name + ' 주소 (' + PERP_FMT[d.kind] + ')' : '주소') + '" autocomplete="off" spellcheck="false" aria-label="퍼프 덱스 주소">'
       + '<input class="field" style="width:170px" data-su-in="p_label" placeholder="이름 (예: 메인)" maxlength="24" aria-label="퍼프 덱스 주소 이름"></div>'
@@ -668,9 +668,9 @@
     const st = U.st, s = STEPS[U.step];
     const nav = STEPS.map((x, i) => '<button class="su-step' + (i === U.step ? ' on' : '') + (i < U.step ? ' done' : '') + '" data-su="goto" data-v="' + i + '"' + (i === U.step ? ' aria-current="step"' : '') + '><i>' + (i + 1) + '</i><span>' + x.t + '</span></button>').join('');
     const needW = s.k === 'wallets' && !st.wallets.length;
-    return '<div class="su-bg" role="dialog" aria-modal="true" aria-labelledby="suTitle"><div class="su-wiz">'
+    return '<div class="su-bg" role="dialog" aria-modal="true" aria-labelledby="suTitle"><div class="su-wiz" tabindex="-1">'
       + '<div class="su-top"><div class="logo"><i></i><span id="suTitle">처음 설정</span></div>' + (st.demo ? pill('w', '데모 모드') : '') + '<span class="sp"></span><button class="iconbtn" data-su="close" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
-      + '<div class="su-intro cap">온체인 지갑과 거래소 기록을 모아 매매일지·손익을 자동으로 만듭니다. 모든 데이터는 이 서버에만 저장되고, 화면은 이 컴퓨터(또는 테일넷)에서만 열립니다.</div>'
+      + '<div class="su-intro cap">온체인 지갑과 거래소 기록을 모아 매매일지·손익을 자동으로 만들어요. 모든 데이터는 이 서버에만 저장되고, 화면은 이 컴퓨터(또는 테일넷)에서만 열려요.</div>'
       + '<nav class="su-steps" aria-label="설정 단계">' + nav + '</nav>'
       + '<div class="su-body">' + SEC[s.k]() + '</div>'
       + '<div class="su-foot">' + (U.step > 0 ? '<button class="btn" data-su="prev">이전</button>' : '<span></span>') + '<span class="sp"></span>'
@@ -948,11 +948,23 @@
     if (!U.st || isLocked()) { if (!isLocked()) fill(); return; }
     const keepFocus = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-su-in');
     const pos = keepFocus && document.activeElement.selectionStart;
+    const ae9 = document.activeElement, wfk = wizEl && ae9 && wizEl.contains(ae9) && ae9.getAttribute && ae9.getAttribute('data-su') ? [ae9.getAttribute('data-su'), ae9.getAttribute('data-v')] : null;
     if (U.open) {
-      if (!wizEl) { wizEl = document.createElement('div'); wizEl.id = 'suWizard'; document.body.appendChild(wizEl); }
+      const fresh = !wizEl;
+      if (fresh) { U.retFocus = ae9 && ae9 !== document.body ? ae9 : null; wizEl = document.createElement('div'); wizEl.id = 'suWizard'; document.body.appendChild(wizEl); }
       wizEl.innerHTML = wizardHTML();
       document.documentElement.classList.add('su-lock');
-    } else if (wizEl) { wizEl.remove(); wizEl = null; document.documentElement.classList.remove('su-lock'); }
+      if (!keepFocus && !(U.perm)) {
+        const back = wfk ? [...wizEl.querySelectorAll('[data-su="' + wfk[0] + '"]')].find(x => x.getAttribute('data-v') === wfk[1] && !x.disabled) : null;
+        const box = wizEl.querySelector('.su-wiz');
+        if (back) back.focus({ preventScroll: true });
+        else if (box && (fresh || !wizEl.contains(document.activeElement))) box.focus({ preventScroll: true });
+      }
+    } else if (wizEl) {
+      wizEl.remove(); wizEl = null; document.documentElement.classList.remove('su-lock');
+      const rf = U.retFocus; U.retFocus = null;
+      if (rf && rf.isConnected) { try { rf.focus({ preventScroll: true }); } catch (e) {  } }
+    }
     fill();
     renderTierSheet();
     document.querySelectorAll('[data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
@@ -990,7 +1002,7 @@
       const r = await api('telegram/poll', {});
       U.tg._inflight = false;
       if (U.tg.phase !== 'wait') return;
-      if (r.ok && r.connected) { stopPoll(); U.tg.phase = 'done'; U.tg.err = ''; U.tg.tok = ''; toast('텔레그램 연결 완료 — 테스트 메시지를 보냈습니다'); await refreshStatus(); return; }
+      if (r.ok && r.connected) { stopPoll(); U.tg.phase = 'done'; U.tg.err = ''; U.tg.tok = ''; toast('텔레그램 연결 완료 — 테스트 메시지를 보냈어요'); await refreshStatus(); return; }
       if (r.ok && r.waiting) { U.tg.left = r.left; U.tg.err = r.hint || ''; }
       else if (!r.ok) { U.tg.err = r.error || '확인 실패'; if (r.expired) { stopPoll(); U.tg.phase = 'idle'; } }
       render();
@@ -1062,7 +1074,7 @@
       if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
       delete U.d.w_addr; delete U.d.w_label; U.wRes = null; U.wErr = {};
       if (r.added && r.added.address) markNew([r.added.address]);
-      toast('추가됨 · ' + suOwn(label) + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러옵니다');
+      toast('추가됨 · ' + suOwn(label) + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러와요');
       await refreshStatus();
       if (window.__tj && window.__tj.refresh) window.__tj.refresh();
     },
@@ -1074,9 +1086,9 @@
     },
     async wdel(el) {
       const a = el.getAttribute('data-v');
-      if (!window.confirm('이 지갑을 추적 목록에서 뺄까요?\n' + a + '\n\n이미 기록된 거래는 원장에 남습니다(깨끗이 지우려면 README › 재백필).')) return;
+      if (!window.confirm('이 지갑을 추적 목록에서 뺄까요?\n' + a + '\n\n이미 기록된 거래는 원장에 남아요(깨끗이 지우려면 README › 재백필).')) return;
       const r = await api('wallets/remove', { address: a });
-      toast(r.ok ? '삭제했습니다' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
+      toast(r.ok ? '삭제했어요' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
     },
     pdex(el) { U.pdex = el.getAttribute('data-v'); render(); },
     async padd() {
@@ -1088,15 +1100,15 @@
       U.busy.padd = false;
       if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
       delete U.d.p_addr; delete U.d.p_label;
-      toast('추가됨 · ' + suOwn(label) + ' (' + d.name + ') — 15초 안에 수집을 시작합니다');
+      toast('추가됨 · ' + suOwn(label) + ' (' + d.name + ') — 15초 안에 수집을 시작해요');
       await refreshStatus();
     },
     async pdel(el) {
       const v = el.getAttribute('data-v') || '', i = v.indexOf('|'), dex = v.slice(0, i), a = v.slice(i + 1);
       const nm = (((U.st.perp || {}).dexes || []).find(x => x.key === dex) || {}).name || dex;
-      if (!window.confirm(nm + ' 주소를 목록에서 뺄까요?\n' + a + '\n\n이 주소의 선물 포지션·정산이 화면과 매매일지 합계에서 바로 빠집니다.')) return;
+      if (!window.confirm(nm + ' 주소를 목록에서 뺄까요?\n' + a + '\n\n이 주소의 선물 포지션·정산이 화면과 매매일지 합계에서 바로 빠져요.')) return;
       const r = await api('perp/remove', { dex, address: a });
-      toast(r.ok ? '삭제했습니다' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
+      toast(r.ok ? '삭제했어요' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
       if (r.ok && window.__tj && window.__tj.refresh) window.__tj.refresh();
     },
     chain(el) { const k = el.getAttribute('data-v'); if (U.chains.has(k)) U.chains.delete(k); else U.chains.add(k); render(); },
@@ -1106,7 +1118,7 @@
     ex(el) { const k = el.getAttribute('data-v'); U.ex = U.ex === k ? null : k; render(); },
     async ktest(el) {
       const g = el.getAttribute('data-v');
-      U.busy['t' + g] = true; render();
+      U.busy['t' + g] = true; delete U.test[g]; render();
       const vals = groupVals(g), stored = Object.keys(vals).every(k => !vals[k]);
       const r = await api('keys/test', { group: g, values: vals });
       U.busy['t' + g] = false;
@@ -1124,18 +1136,18 @@
       U.busy['s' + g] = false;
       if (!r.ok) {
         if (r.permBlock) { U.perm = Object.assign({}, r.permBlock, { stored: false }); clearVals(g); U.ack[g] = false; delete U.test[g]; }
-        else if (r.needAck) { U.needAck[g] = r.reason || r.error || ''; U.ack[g] = false; toast(r.error || '조회 권한 확인이 필요합니다', true); }
+        else if (r.needAck) { U.needAck[g] = r.reason || r.error || ''; U.ack[g] = false; toast(r.error || '조회 권한 확인이 필요해요', true); }
         else toast(r.error || '저장 실패', true);
         render(); return;
       }
-      clearVals(g); delete U.ack[g]; delete U.needAck[g];
-      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않습니다')); await refreshStatus();
+      clearVals(g); delete U.ack[g]; delete U.needAck[g]; delete U.test[g];
+      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요')); await refreshStatus();
     },
     async kdel(el) {
       const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g];
       if (!window.confirm(grp.name + ' 키를 이 서버에서 지울까요?')) return;
       const r = await api('keys/delete', { group: g });
-      delete U.test[g]; delete U.ack[g]; delete U.needAck[g]; toast(r.ok ? '삭제했습니다' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
+      delete U.test[g]; delete U.ack[g]; delete U.needAck[g]; toast(r.ok ? '삭제했어요' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();
     },
     async nplan(el) { await nodePlanSave(el.getAttribute('data-p'), { plan: el.getAttribute('data-v') }); },
     async nshare(el) { await nodePlanSave(el.getAttribute('data-p'), { share: Number(el.getAttribute('data-v')) }); },
@@ -1161,13 +1173,13 @@
       const r = await api('depaddr/refresh', { exchange: k });
       if (!r.ok) { toast(r.error || '요청 실패', true); return; }
       U.dpWait[k] = Date.now();
-      toast('입금주소 새로고침을 요청했습니다 — 수집기가 10초 안에 시작합니다');
+      toast('입금 주소 새로고침을 요청했어요 — 수집기가 10초 안에 시작해요');
       render(); dpPoll();
     },
     async ip() { const r = await api('public_ip', {}); if (r.ok) U.ip = r.ip; else toast(r.error || '조회 실패', true); render(); },
     copy(el) {
       const t = el.getAttribute('data-v') || '';
-      const done = () => toast('복사했습니다');
+      const done = () => toast('복사했어요');
       if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, () => window.prompt('직접 복사하세요', t));
       else { try { window.prompt('직접 복사하세요 (Ctrl/Cmd+C)', t); } catch (e) {  } }
     },
@@ -1189,13 +1201,13 @@
       if (!tok) { U.tg.err = 'chat_id 를 바꾸려면 봇 토큰을 같이 입력하세요'; render(); return; }
       const r = await api('telegram/manual', { chat_id: draft('tg_chat').trim(), token: tok });
       if (!r.ok) { U.tg.err = r.error || '실패'; render(); return; }
-      stopPoll(); U.tg.phase = 'done'; U.tg.tok = ''; delete U.d.tg_chat; delete U.d.tg_mtoken; toast('연결 완료 — 테스트 메시지를 보냈습니다'); await refreshStatus();
+      stopPoll(); U.tg.phase = 'done'; U.tg.tok = ''; delete U.d.tg_chat; delete U.d.tg_mtoken; toast('연결 완료 — 테스트 메시지를 보냈어요'); await refreshStatus();
     },
-    async tgtest() { const r = await api('telegram/test', {}); toast(r.ok ? '테스트 알림을 보냈습니다' : (r.error || '실패'), !r.ok); },
+    async tgtest() { const r = await api('telegram/test', {}); toast(r.ok ? '테스트 알림을 보냈어요' : (r.error || '실패'), !r.ok); },
     async tgoff() {
-      if (!window.confirm('텔레그램 알림 연결을 해제할까요? (봇 토큰·chat_id 를 이 서버에서 지웁니다)')) return;
+      if (!window.confirm('텔레그램 알림 연결을 해제할까요? (봇 토큰·chat_id 를 이 서버에서 지워요)')) return;
       const r = await api('telegram/disconnect', {});
-      U.tg.phase = 'idle'; toast(r.ok ? '연결을 해제했습니다' : (r.error || '실패'), !r.ok); await refreshStatus();
+      U.tg.phase = 'idle'; toast(r.ok ? '연결을 해제했어요' : (r.error || '실패'), !r.ok); await refreshStatus();
     },
     cur(el) {
       const v = el.getAttribute('data-v'); draft('cur', v); LS.set('tj_v2_cur', v);
@@ -1210,7 +1222,7 @@
     goto(el) { U.step = +el.getAttribute('data-v'); render(); },
     prev() { U.step = Math.max(0, U.step - 1); render(); },
     next() { U.step = Math.min(STEPS.length - 1, U.step + 1); refreshStatus(); },
-    async finish() { const r = await api('finish', {}); if (!r.ok) { toast(r.error || '저장 실패', true); return; } U.open = false; stopPollIfIdle(); toast('설정 완료 — 첫 수집이 끝나면 대시보드가 채워집니다'); await refreshStatus(); if (window.__tj) window.__tj.refresh(); },
+    async finish() { const r = await api('finish', {}); if (!r.ok) { toast(r.error || '저장 실패', true); return; } U.open = false; stopPollIfIdle(); toast('설정 완료 — 첫 수집이 끝나면 대시보드가 채워져요'); await refreshStatus(); if (window.__tj) window.__tj.refresh(); },
     later() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
     close() { SS.set('tj_setup_later', '1'); U.open = false; render(); },
     wizard() { U.open = true; U.step = 0; render(); },
@@ -1263,6 +1275,14 @@
     if (ev.key === 'Escape' && U.perm) { A.permClose(); return; }
     if (ev.key === 'Escape' && U.tierSheet) { A.tclose(); return; }
     if (ev.key === 'Escape' && U.open) { A.close(); return; }
+    const trap = U.perm ? permEl : U.open ? wizEl : null;
+    if (ev.key === 'Tab' && trap) {
+      const f = [...trap.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(x => x.getClientRects().length);
+      if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (ev.shiftKey ? i <= 0 : (i < 0 || i === f.length - 1)) { ev.preventDefault(); f[ev.shiftKey ? f.length - 1 : 0].focus(); }
+      return;
+    }
     if (ev.key !== 'Enter' || !k) return;
     if (k === 'w_addr' && !(ev.metaKey || ev.ctrlKey)) return;
     ev.preventDefault();
@@ -1279,6 +1299,7 @@
     'html.su-lock,html.su-lock body{overflow:hidden}',
     '.su-bg{position:fixed;inset:0;z-index:80;background:var(--dim);display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}',
     '.su-wiz{width:780px;max-width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:22px;box-shadow:var(--pop);padding:22px 26px 20px}',
+    '.su-wiz:focus{outline:none}',
     '.su-top{display:flex;align-items:center;gap:10px}',
     '.su-intro{margin:10px 0 16px;line-height:1.6}',
     '.su-steps{display:flex;gap:6px;margin-bottom:18px;overflow-x:auto;scrollbar-width:none}',
@@ -1404,6 +1425,7 @@
     '.su-chiprow{display:flex;gap:6px;flex-wrap:wrap}',
     '.su-chip{padding:6px 11px;border-radius:99px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface2);color:var(--text2)}',
     '.su-chip.on{background:var(--accentBg);color:var(--accent);border-color:transparent}',
+    '.su-chip.on::before{content:"✓ ";font-weight:700}',
     '.su-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}',
     '.su-list{margin-top:14px;border-top:1px solid var(--line)}',
     '.su-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}',

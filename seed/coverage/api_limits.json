@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-08",
+  "updated": "2026-10-09",
   "note": "거래소·체인별 'API 로 되는 것 / 안 되는 것' 정리표 — 설정 › 수집 한계 카드의 '거래소·체인별 한계 정리'와 public/docs/COLLECTION_LIMITS.md 의 원본(문서는 src/coverage_limits.py api_limits_markdown() 으로 만든다). 봇은 API 한도를 우회하지 않는다(아카이브 신청·CSV 가져오기 없음) — 못 받는 것은 여기 적고 이용자가 직접 정한다. 날짜는 실측으로 확인한 범위(연 단위)이거나 거래소 문서의 한도다.",
   "columns": {"kind": "데이터 종류", "api": "API 로 가능한 최대 과거", "bot": "봇이 받는 범위", "miss": "못 받는 것", "todo": "이용자가 할 일"},
   "actions": {
@@ -31,14 +31,16 @@
       {"kind": "현물·마진 체결", "api": "페어별 전 이력 — 단 페어 이름을 줘야만 알려 줘요", "bot": "잔고·입출금·과거 체결에 나온 코인 × USDT·USDC·BTC·BNB·FDUSD 페어만 물어봐요", "miss": "거래소 안에서만 사고 다 판 코인(입출금·잔고에 안 나옴)이나 다른 쿼트 페어의 체결 — 그 손익이 빠져요", "todo": "cost,market"},
       {"kind": "간편전환(Convert)", "api": "한 번에 30일 창씩(오래된 기록의 한도는 미확인)", "bot": "수집 기간 전체", "miss": "API 보존 한도보다 옛 전환", "todo": "cost,market"},
       {"kind": "선물", "api": "손익 내역(income) 약 1년(거래소 문서, 미확인)·선물 체결은 최근 6개월(거래소 문서)", "bot": "손익 내역(실현손익·수수료·펀딩비)으로 기록 — 선물 영수증 차트의 진입·청산 가격·수량은 최근 3개월 체결만 따로 받아요(표시 전용 · 손익 계산엔 안 씀)", "miss": "보존 한도보다 옛 선물 손익", "todo": ""},
-      {"kind": "Earn(예치)·에어드랍·소액 전환(Dust)·유니버설 이체·Pay·P2P", "api": "각각 별도 API(보존 한도 제각각)", "bot": "수집 안 함 — Earn 은 잔고만", "miss": "이런 경로로 들어오고 나간 기록 — 잔고 대조가 기초 잔고(원가 미확인)로 맞춰요", "todo": "cost,market,breakeven"},
+      {"kind": "소액 전환(Dust → BNB 등)", "api": "2020-12-01 이후 — 한 번에 90일 창씩, 창마다 최근 100건까지(거래소 문서)", "bot": "수집 기간 전체 — 전환 체결(작은 코인 매도 → 받은 코인 매수)로 기록. 현물 잔고가 바뀐 주기 + 하루 1번 확인", "miss": "90일 창 하나에 전환이 100건을 넘으면 그 창을 못 받아요(경고 · 30분마다 다시 시도) · 2020-12 이전 전환", "todo": "cost,market"},
+      {"kind": "Earn(예치)·에어드랍·유니버설 이체·Pay·P2P", "api": "각각 별도 API(보존 한도 제각각)", "bot": "수집 안 함 — Earn 은 잔고만", "miss": "이런 경로로 들어오고 나간 기록 — 잔고 대조가 기초 잔고(원가 미확인)로 맞춰요", "todo": "cost,market,breakeven"},
       {"kind": "오프체인 이체(거래소 사용자끼리)", "api": "입출금 내역의 txid 가 'Off-chain transfer …'로만 나와요(상대 계정 정보 없음)", "bot": "받아요 — 기본은 외부로 나간 것으로 봐요", "miss": "받는 쪽이 내 다른 계정인지는 API 로 알 수 없어요", "todo": "offchain"}
      ]},
     {"id": "bybit", "name": "바이비트", "perm": "저장할 때 키 권한을 자동 확인 — 읽기/쓰기 키·출금 권한이면 저장하지 않아요",
      "rows": [
       {"kind": "현물 체결·선물 청산손익·거래 내역", "api": "최근 2년(730일) — 그 이전은 API 가 거부(영구 불가)", "bot": "2년 안에서 수집 기간 전체", "miss": "2년보다 옛 체결·손익 — 날마다 한도가 하루씩 앞으로 밀려요", "todo": "cost,market,breakeven"},
       {"kind": "입금·출금", "api": "2년 넘게도 받아요(한 번에 30일 창, 실측: 수년 전 기록까지 받음)", "bot": "수집 기간 전체", "miss": "없음", "todo": ""},
-      {"kind": "간편전환(Convert)·Earn", "api": "키에 해당 조회 권한이 있어야 해요", "bot": "권한이 없으면 건너뜀 — Earn 은 잔고만", "miss": "권한 없는 키로는 전환 기록이 빠져요", "todo": "cost,market"}
+      {"kind": "간편전환(Convert)·Earn", "api": "키에 해당 조회 권한이 있어야 해요", "bot": "권한이 없으면 건너뜀 — Earn 은 잔고만", "miss": "권한 없는 키로는 전환 기록이 빠져요", "todo": "cost,market"},
+      {"kind": "선물 수수료·펀딩", "api": "청산 손익(closed-pnl)에 진입 수수료·보유 중 펀딩이 합쳐져 나와요", "bot": "청산 시각의 선물 정산에 함께 반영(낸 날로 따로 나누지 않음)", "miss": "수수료·펀딩이 낸 날이 아니라 청산한 날 총자산에 들어가요(합은 같음)", "todo": ""}
      ]},
     {"id": "okx", "name": "OKX", "perm": "저장할 때 키 권한을 자동 확인 — Trade·Withdraw 권한이면 저장하지 않아요",
      "rows": [
@@ -63,7 +65,8 @@
     {"id": "evm_explorer", "match": ["eth", "arbitrum", "polygon", "optimism", "gnosis", "scroll", "zksync", "megaeth", "story"], "name": "Ethereum·Arbitrum·Polygon·Optimism·Gnosis·Scroll·zkSync 등", "rows": [
       {"kind": "전송·토큰·내부 이동", "api": "체인 시작부터(이더스캔 V2·blockscout 탐색기)", "bot": "수집 기간 전체 — Ethereum·Arbitrum·Polygon 은 이더스캔 키가 있어야 빨라요. 탐색기가 막히면(하루 한도·키 거부·403·색인 정지) 그 체인은 공개 RPC 로 이어 받고, 탐색기가 살아나면 돌아가요", "miss": "Optimism 2023-06 이전 레거시 구간은 색인 방식이 달라 빠질 수 있어요", "todo": "cost,market"}]},
     {"id": "bsc", "match": ["bsc"], "name": "BNB Chain", "rows": [
-      {"kind": "전송·토큰", "api": "공개 노드는 최근 구간만 보관 — 옛 블록은 아카이브 노드(유료, 예: NodeReal)", "bot": "아카이브 RPC 를 넣으면 수집 기간 전체, 없으면 최근 구간만", "miss": "아카이브 없이는 공개 노드 보관 기간보다 옛 이력", "todo": "cost,market,register"}]},
+      {"kind": "전송·토큰", "api": "공개 노드는 최근 구간만 보관 — 옛 블록은 아카이브 노드(유료, 예: NodeReal)", "bot": "아카이브 RPC 를 넣으면 수집 기간 전체, 없으면 최근 구간만", "miss": "아카이브 없이는 공개 노드 보관 기간보다 옛 이력", "todo": "cost,market,register"},
+      {"kind": "컨트랙트가 보내 준 BNB(내부 이동)", "api": "BNB Chain 노드는 내부 이동(trace)을 주지 않아요 — 잔고 차이로만 보여요", "bot": "내 거래의 토큰·BNB 직접 송수신과 WBNB 감싸기·풀기는 받아요", "miss": "컨트랙트가 보내 준 BNB(토큰 → BNB 매도 대금·브리지 지급·환불) — 그 매도는 '보냄'으로 남고(실현손익 없음), 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메워요", "todo": "cost,market,breakeven"}]},
     {"id": "base", "match": ["base"], "name": "Base", "rows": [
       {"kind": "전송·토큰·내부 ETH 이동", "api": "체인 시작부터(공개 아카이브 RPC) — Base 블록스카웃 API 는 막혀 있고(2026-10 기준 403), 무료 이더스캔 키는 Base 를 지원하지 않아요", "bot": "공개 RPC 로 직접 — 새 거래를 먼저 받고 옛 구간은 뒤에서 채워요. 내가 보낸 거래의 내부 ETH 이동은 추적(trace)으로, 남이 보낸 ETH·로그 없는 이동은 잔고·nonce 대조로 찾아요", "miss": "무료 노드의 추적이 시간 초과로 끝내 실패한 거래는 내부 ETH 이동의 수량만 잔고 대조로 맞추고 손익 해석이 빠질 수 있어요 · 옛 구간을 채우는 동안 새로 넣은 지갑의 기초 잔고 확인이 늦어요", "todo": ""}]},
     {"id": "xlayer_stable", "match": ["xlayer", "stable"], "name": "X Layer·Stable", "rows": [
@@ -77,7 +80,7 @@
     {"id": "abstract", "match": ["abstract"], "name": "Abstract", "rows": [
       {"kind": "전송·토큰·가스", "api": "공식 RPC 가 아카이브라 과거 조회 가능", "bot": "수집 기간 전체", "miss": "L1(이더리움)→Abstract 브리지 입금 때 돌려받는 가스 환급은 따로 기록하지 않아요 — 차이는 잔고 대조가 기초 잔고로 맞춰요", "todo": ""}]},
     {"id": "rpc_archive", "match": ["monad", "plasma", "kaia", "fraxtal", "bob", "avalanche", "arc"], "name": "Monad·Plasma·Kaia·Fraxtal·BOB·Avalanche C 등 RPC 전용 체인", "rows": [
-      {"kind": "전송·토큰", "api": "공식 아카이브 RPC 로 과거 조회 가능(getLogs 구간 제한 때문에 느릴 수 있어요)", "bot": "수집 기간 전체 — 수집 시작일을 앞당기면 빠진 앞 구간만 훑어요", "miss": "없음(느릴 뿐)", "todo": ""}]}
+      {"kind": "전송·토큰", "api": "공식 아카이브 RPC 로 과거 조회 가능(getLogs 구간 제한 때문에 느릴 수 있어요)", "bot": "수집 기간 전체 — 수집 시작일을 앞당기면 빠진 앞 구간만 훑어요", "miss": "추적(trace) 노드가 없는 체인에서 남의 거래로 컨트랙트가 넣어 준 네이티브 코인(브리지 중계자 지급 등)은 시각을 못 찾을 수 있어요 — 잔고 대조가 기초 잔고(원가 미확인)로 메워요. 그 밖은 느릴 뿐 빠짐 없음", "todo": "cost,market"}]}
   ],
   "perps": [
     {"id": "hyperliquid", "name": "Hyperliquid", "perm": "주소만으로 공개 조회(키·서명 없음 — 조회 전용)",

@@ -629,6 +629,29 @@ def daily_note(path: str, date_iso: str, usd: float, now: float, per_wallet: dic
     return d
 
 
+def day_values(note: dict, isos, today_iso: str, today_usd: float) -> dict:
+    first = (note or {}).get("first")
+    out = {}
+    if not first:
+        return out
+    rec = dict((note or {}).get("d") or {})
+    rec[today_iso] = today_usd
+    ks = sorted(rec)
+    for iso in sorted(set(isos or ())):
+        if iso < first:
+            continue
+        v = rec.get(iso)
+        if v is None:
+            prev = [k for k in ks if k <= iso]
+            if not prev:
+                continue
+            v = rec[prev[-1]]
+        v = round(float(v), 2)
+        if v:
+            out[iso] = v
+    return out
+
+
 def daily_overlay(daily: list, note: dict, today_iso: str, today_usd: float, year: int = None) -> None:
     first = (note or {}).get("first")
     if not first or not daily:

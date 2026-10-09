@@ -167,7 +167,9 @@ GENUINE_CAS = {
         "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0": "MATIC",
         "0xb8c77482e45f1f44de1745f52c74426c631bdd52": "BNB",
     },
-    "base": {"0x4200000000000000000000000000000000000006": "WETH"},
+    "base": {"0x4200000000000000000000000000000000000006": "WETH",
+             "0x0555e30da8f98308edb960aa94c0db47230d2b9c": "WBTC",
+             "0x820c137fa70c8691f0e44dc420a5e53c168921dc": "USDS"},
     "arbitrum": {
         "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": "WETH",
         "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f": "WBTC",
@@ -177,6 +179,7 @@ GENUINE_CAS = {
         "0x4200000000000000000000000000000000000006": "WETH",
         "0x4200000000000000000000000000000000000042": "OP",
         "0x68f180fcce6836688e9084f035309e29bf0a2095": "WBTC",
+        "0x01bff41798a0bcf287b996046ca68b395dbc1071": "USDT0",
     },
     "polygon": {
         "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": "WETH",
@@ -200,6 +203,7 @@ GENUINE_CAS = {
     "zksync": {
         "0x000000000000000000000000000000000000800a": "ETH",
         "0x5aea5775959fbc2557cc8789bc1bf90a239d9a91": "WETH",
+        "0x4b9eb6c0b6ea15176bbf62841c6b2a8a398cb656": "DAI",
     },
     "scroll": {"0x5300000000000000000000000000000000000004": "WETH"},
     "gnosis": {"0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1": "WETH"},
@@ -212,6 +216,9 @@ GENUINE_CAS = {
     "sol": {
         "So11111111111111111111111111111111111111112": "WSOL",
         "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": "PYUSD",
+        "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB": "USD1",
+        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs": "WETH",
+        "DEkqHyPN7GMRJ5cArtQFAWefqbZb33Hyf6s5iCwjEonT": "USDE",
     },
 }
 try:

@@ -31,19 +31,7 @@ SPAN = {"nodereal": 50000, "ankr": 3000, "quicknode": 10000}
 
 
 def _env() -> dict:
-    out = {}
-    try:
-        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                s = line.strip()
-                if not s or s.startswith("#") or "=" not in s:
-                    continue
-                if s.startswith("export "):
-                    s = s[7:].lstrip()
-                k, v = s.split("=", 1)
-                out[k.strip()] = v.strip().strip("'\"")
-    except OSError:
-        pass
+    out = common.read_env_file()
     for k in (ENV_NODEREAL, ENV_ANKR, ENV_QN_BSC, ENV_QN_BASE):
         if os.environ.get(k):
             out[k] = os.environ[k]

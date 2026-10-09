@@ -204,7 +204,8 @@ def build() -> dict:
                           "held": qty, "bought": bought, "movedQty": 0, "movedCost": 0, "soldQty": sold,
                           "avg": avg, "cost": cost, "realized": realized, "unreal": round(qty * (px - avg), 2),
                           "opened": _mmdd(opened), "_ots": int(opened.timestamp()),
-                          "fee": f"${rnd.uniform(0.4, 38):.2f}", "steps": steps, "events": events})
+                          "fee": f"${rnd.uniform(0.4, 38):.2f}", "steps": steps, "events": events,
+                          "realizedByDay": {e["t"][:5]: realized for e in events if e["k"] == "거래소 매도" and realized}})
         for e in events:
             if e["k"] == "거래소 매도":
                 evs_all.append((e, sym, realized, sold, avg, sell_px))
@@ -218,6 +219,7 @@ def build() -> dict:
                           "chain": CHAIN_NAME[ch], "status": "종료", "held": 0.0, "bought": q, "movedQty": 0,
                           "movedCost": 0, "soldQty": q, "avg": avg, "cost": round(q * avg, 2), "realized": realized,
                           "unreal": 0, "opened": _mmdd(opened), "_ots": int(opened.timestamp()), "fee": "$6.20",
+                          "realizedByDay": {_mmdd(closed): realized} if realized else {},
                           "steps": ["온체인 매수", "거래소 입금", "전량 매도"],
                           "events": [{"t": opened.strftime("%m-%d %H:%M"), "k": "온체인 매수", "d": f"{CHAIN_NAME[ch]} · 스왑",
                                       "q": f"{q:,.0f}", "a": f"${q * avg:,.0f}", "tx": _tx(sym, ch == "sol"), "src": None},
@@ -225,6 +227,39 @@ def build() -> dict:
                                       "q": f"{q:,.0f}", "a": f"${q * out:,.0f}", "tx": "—", "src": "ex:upbit"}]})
         f["taxRows"].append({"sold": _mmdd(closed), "sym": sym, "ticker": sym, "ex": "업비트", "qty": float(q),
                              "acq": round(q * avg, 2), "disp": round(q * out, 2), "fee": 0})
+    fs_got, fs_sold = now - timedelta(days=24, hours=5), now - timedelta(days=18, hours=2)
+    fs_q, fs_px, fs_out = 1250.0, 3.10, 3.62
+    fs_real = round(fs_q * (fs_out - fs_px), 2)
+    positions.append({"unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
+                      "soldProceeds": round(fs_q * fs_out, 2), "avgSell": fs_out, "key": "g152", "sym": "ZRO", "chain": "Ethereum",
+                      "status": "종료", "held": 0.0, "bought": fs_q, "movedQty": 0, "movedCost": 0, "soldQty": fs_q, "avg": fs_px,
+                      "cost": round(fs_q * fs_px, 2), "realized": fs_real, "unreal": 0, "opened": _mmdd(fs_got), "_ots": int(fs_got.timestamp()),
+                      "fee": "$2.10", "steps": ["온체인 매수", "거래소 입금", "전량 매도"],
+                      "fsEst": {"cost": round(fs_q * fs_px, 2), "qty": fs_q, "real": fs_real},
+                      "realizedByDay": {_mmdd(fs_sold): fs_real},
+                      "events": [{"t": fs_got.strftime("%m-%d %H:%M"), "k": "전송", "d": "Ethereum 외부 유입 (원가 미상)",
+                                  "q": f"{fs_q:,.0f}", "a": "—", "tx": _tx("ZRO"), "src": None},
+                                 {"t": fs_sold.strftime("%m-%d %H:%M"), "k": "거래소 매도",
+                                  "d": "업비트 · KRW 마켓 체결 · 원가 일부 추정(처음 인식한 날 시가)",
+                                  "q": f"{fs_q:,.0f}", "a": f"${fs_q * fs_out:,.0f}", "tx": "—", "src": "ex:upbit"}]})
+    f["taxRows"].append({"sold": _mmdd(fs_sold), "sym": "ZRO", "ticker": "ZRO", "ex": "업비트 · 최초 인식 시가", "qty": fs_q,
+                         "acq": round(fs_q * fs_px, 2), "disp": round(fs_q * fs_out, 2), "fee": 0})
+    zb_q, zb_px, zb_out = 300.0, 3.30, 3.55
+    zb_t = [now - timedelta(days=16, hours=h) for h in (9, 6, 2)]
+    positions.append({"unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
+                      "soldProceeds": round(zb_q * zb_out, 2), "avgSell": zb_out, "key": "g153", "sym": "ZRO", "chain": "Base",
+                      "status": "종료", "held": 0.0, "bought": zb_q, "movedQty": 0, "movedCost": 0, "soldQty": zb_q, "avg": zb_px,
+                      "cost": round(zb_q * zb_px, 2), "realized": round(zb_q * (zb_out - zb_px), 2), "unreal": 0, "opened": _mmdd(zb_t[0]),
+                      "_ots": int(zb_t[0].timestamp()), "fee": "$0.40", "steps": ["온체인 매수", "전량 매도"],
+                      "realizedByDay": {_mmdd(zb_t[2]): round(zb_q * (zb_out - zb_px), 2)},
+                      "events": [{"t": zb_t[0].strftime("%m-%d %H:%M"), "k": "온체인 매수", "d": "Base · 스왑", "q": "150", "a": f"${150 * zb_px:,.0f}", "tx": _tx("ZRB1"), "src": None},
+                                 {"t": zb_t[1].strftime("%m-%d %H:%M"), "k": "온체인 매수", "d": "Base · 스왑", "q": "150", "a": f"${150 * zb_px:,.0f}", "tx": _tx("ZRB2"), "src": None},
+                                 {"t": zb_t[2].strftime("%m-%d %H:%M"), "k": "온체인 매도", "d": "Base · 스왑 매도", "q": "300", "a": f"${zb_q * zb_out:,.0f}", "tx": _tx("ZRB3"), "src": None}]})
+    f["taxRows"].append({"sold": _mmdd(zb_t[2]), "sym": "ZRO", "ticker": "ZRO", "ex": "온체인(DEX)", "qty": zb_q,
+                         "acq": round(zb_q * zb_px, 2), "disp": round(zb_q * zb_out, 2), "fee": 0})
+    f["fsRealByDate"] = {_mmdd(fs_sold): [fs_real, round(fs_real * f["rate"])]}
+    f["firstSeen"] = {"on": True, "eff": True, "fb": False, "n": 3, "usd": round(fs_q * fs_px + 420.0, 2), "miss": 1, "rows": 1,
+                      "real": fs_real, "stN": 1, "stUsd": 3000.0}
     f["positions"] = positions
     for e, sym, realized, sold, avg, sell_px in evs_all:
         f["taxRows"].append({"sold": e["t"][:5], "sym": sym, "ticker": sym, "ex": "업비트", "qty": sold,
@@ -276,7 +311,7 @@ def build() -> dict:
     f["pendings"] = [
         {"key": "p1", "t": (now - timedelta(days=2)).strftime("%m-%d %H:%M"), "kind": "원가미상 보유 (폴백 OFF · 손익 제외(평가 포함))",
          "sym": "DEGEN", "chain": "Base", "qty": 52000.0, "usd": 353.6, "onchain": "52,000 DEGEN · 평가 $354", "ex": "—",
-         "gap": "매수 기록 없는 유입", "why": "외부에서 받은 토큰이라 원가를 알 수 없습니다. 원가를 지정하거나 평균가 폴백을 켜세요.", "cands": []},
+         "gap": "매수 기록 없는 유입", "why": "외부에서 받은 토큰이라 원가를 알 수 없어요. 원가를 지정하거나 평균가 대체를 켜세요.", "cands": []},
         {"key": "p2", "t": (now - timedelta(days=5)).strftime("%m-%d %H:%M"), "kind": "외부 전송 확인", "sym": "USDC",
          "chain": "Arbitrum", "onchain": "2,000 USDC → " + _short(demo_evm(77)), "ex": "—", "gap": "미등록 주소로 전송",
          "why": "본인 지갑이면 설정에서 지갑으로 등록하세요.", "cands": []},

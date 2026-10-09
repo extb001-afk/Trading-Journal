@@ -5,7 +5,7 @@ const PY = process.env.TJ_PYTHON || 'python3';
 const base = {
   cwd: ROOT,
   interpreter: PY,
-  env: { PYTHONUNBUFFERED: '1' },
+  env: { PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
   autorestart: true,
   exp_backoff_restart_delay: 2000,
   max_restarts: 1000,

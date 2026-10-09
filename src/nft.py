@@ -1736,7 +1736,8 @@ class Tracker:
             return None, "nokey"
         rows, partial = [], False
         for act in ("tokennfttx", "token1155tx"):
-            got, seen, startblock, page = 0, set(), 0, 1
+            got, startblock, page = 0, 0, 1
+            carry, tail, tail_blk = {}, {}, None
             while True:
                 q = urllib.parse.urlencode({"chainid": cid, "module": "account", "action": act, "address": addr, "page": page,
                                             "offset": ES_PAGE, "sort": "asc", "startblock": startblock, "apikey": key})
@@ -1762,9 +1763,13 @@ class Tracker:
                     if not isinstance(r9, dict):
                         continue
                     fp9 = (r9.get("hash"), r9.get("logIndex"), r9.get("contractAddress"), r9.get("tokenID"), r9.get("from"), r9.get("to"), r9.get("tokenValue"))
-                    if fp9 in seen:
+                    b9 = str(r9.get("blockNumber") or "")
+                    if carry.get((b9, fp9), 0) > 0:
+                        carry[(b9, fp9)] -= 1
                         continue
-                    seen.add(fp9)
+                    if b9 != tail_blk:
+                        tail, tail_blk = {}, b9
+                    tail[(b9, fp9)] = tail.get((b9, fp9), 0) + 1
                     rows.append(r9)
                     got += 1
                 if len(res) < ES_PAGE:
@@ -1783,6 +1788,7 @@ class Tracker:
                     partial = True
                     break
                 startblock, page = nb, 1
+                carry = {k9: v9 for k9, v9 in tail.items()} if tail_blk == str(nb) else {}
         items = parse_es_nft(rows, addr)
         if partial:
             for it in items:

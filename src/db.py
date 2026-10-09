@@ -125,7 +125,8 @@ def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
         row = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone() if has_meta else None
         if row is not None and int(row[0]) > SCHEMA_VERSION:
             conn.close()
-            raise SystemExit(f"DB 스키마({row[0]})가 코드({SCHEMA_VERSION})보다 최신 — 전진만 허용")
+            raise SystemExit(f"원장(state/ledger.db)이 이 코드보다 새 형식이에요(원장 {row[0]} > 코드 {SCHEMA_VERSION}) — 코드를 최신으로 올리세요. "
+                             "원장은 그대로 뒀어요(옛 코드로 내려가려면 그때의 백업으로: python3 tools/ledger_restore.py list)")
         for ddl in DDL:
             conn.execute(ddl)
         if row is None:

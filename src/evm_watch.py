@@ -3568,6 +3568,62 @@ class EtherscanWatcher(RpcSynthMixin):
                       h9[:12], hold.limit)
             return 0
 
+    ES_WRAP_DEPOSIT_SEL = "0xd0e30db0"
+    ES_WRAP_WITHDRAW_SEL = "0x2e1a7d4d"
+    ES_NONVALUE_INTERNAL = frozenset(("delegatecall", "staticcall", "callcode"))
+
+    def _es_wrap_legs(self, t: dict, status: str, ent: dict, tts: list):
+        wr = str(getattr(self, "wrapped_ca", None) or "").lower()
+        if not wr or not t or status != "ok" or str(t.get("to") or "").lower() != wr:
+            return []
+        fr = str(t.get("from") or "").lower()
+        ws9 = getattr(self, "wallets", None)
+        if not fr or (ws9 is not None and fr not in ws9):
+            return []
+        inp = str(t.get("input") or "").lower()
+        mid = str(t.get("methodId") or "").lower()
+        sel = inp[:10] if inp.startswith("0x") and len(inp) >= 10 else (mid[:10] if len(mid) >= 10 else "")
+        empty9 = inp == "0x" or (inp == "" and mid == "0x")
+        z9 = RpcSynthMixin.ZERO_ADDR
+        try:
+            if sel == EtherscanWatcher.ES_WRAP_DEPOSIT_SEL or empty9:
+                v, a, b = int(t.get("value") or 0), z9, fr
+            elif sel == EtherscanWatcher.ES_WRAP_WITHDRAW_SEL:
+                a, b = fr, z9
+                if len(inp) >= 74 and re.fullmatch(r"[0-9a-f]{64}", inp[10:74]):
+                    v = int(inp[10:74], 16)
+                else:
+                    v = sum(int(r.get("value") or 0) for r in ent.get("it") or []
+                            if str(r.get("from") or "").lower() == wr and str(r.get("to") or "").lower() == fr
+                            and str(r.get("isError") or "0") == "0"
+                            and str(r.get("type") or "").lower() not in EtherscanWatcher.ES_NONVALUE_INTERNAL)
+            else:
+                return []
+        except (TypeError, ValueError):
+            return []
+        if v <= 0:
+            return []
+        for r in tts:
+            tok9 = r.get("token") or {}
+            if str(tok9.get("address") or "").lower() == wr and str(r.get("from") or "").lower() == a \
+                    and str(r.get("to") or "").lower() == b and str((r.get("total") or {}).get("value")) == str(v):
+                return []
+        dec9 = sym9 = None
+        for r in ent.get("tt") or []:
+            if str(r.get("contractAddress") or "").lower() == wr and r.get("tokenDecimal") not in (None, ""):
+                dec9, sym9 = int(r.get("tokenDecimal")), r.get("tokenSymbol")
+                break
+        if dec9 is None:
+            try:
+                dec9 = self._rpc_token_dec(wr)
+            except bf_engine.TokenNoDecimals:
+                return []
+            except Exception as e9:
+                log.warning("etherscan %s 랩드 네이티브 %s 자릿수 조회 실패 — 보류: %s", str(t.get("hash"))[:12], wr[:10], str(e9)[:100])
+                return None
+        return [{"from": a, "to": b, "token": {"address": wr, "symbol": sym9, "decimals": dec9, "type": "ERC-20"},
+                 "total": {"value": str(v)}}]
+
     def _snapshot(self, ent: dict):
         t = ent["tx"]
         ts9 = EtherscanWatcher._ent_ts(self, ent)
@@ -3632,8 +3688,14 @@ class EtherscanWatcher(RpcSynthMixin):
                             "total": {"value": str(v9)}})
             except (TypeError, ValueError):
                 return None
+        wl9 = EtherscanWatcher._es_wrap_legs(self, t, tx["status"], ent, tts) if t else []
+        if wl9 is None:
+            return None
+        tts.extend(wl9)
         its = []
         for r in ent["it"]:
+            if str(r.get("type") or "").lower() in EtherscanWatcher.ES_NONVALUE_INTERNAL:
+                continue
             try:
                 its.append({"from": r.get("from"), "to": r.get("to"),
                             "value": str(int(r.get("value") or 0)),
@@ -6150,14 +6212,7 @@ def main():
         if w.get("type", "evm") == "evm":
             by_chain.setdefault(w["chain"], []).append(w["address"])
     shared_writer = SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
-    es_key = ""
-    try:
-        with open(common.ENV_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("TJ_ETHERSCAN_KEY="):
-                    es_key = line.strip().split("=", 1)[1]
-    except OSError:
-        pass
+    es_key = common.read_env_file().get("TJ_ETHERSCAN_KEY", "")
     chain_poll_cfg = {}
 
     def make_watcher(cfg, chain, addrs):

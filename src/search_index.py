@@ -1444,6 +1444,14 @@ def alias_syms(tok: str, held=None):
     return out[:4], ("cho" if cho_only else "prefix") if out else None
 
 
+def krw_rate(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if 100 <= x <= 10000 else None
+
+
 def parse_query(q: str, today: datetime = None, held=None, names=None):
     today = today or datetime.now(KST)
     nm = names if isinstance(names, Names) else NAMES
@@ -1776,8 +1784,13 @@ def _kind_query(p, kind, fts_on, ctx):
             continue
         if v.startswith("~"):
             x = float(v[1:])
-            where.append(f"d.{col} IS NOT NULL AND abs(d.{col}) BETWEEN ? AND ?")
-            args += [x * 0.99, x * 1.01]
+            kr9 = p.get("krw_rate") if k == "amt" else None
+            if kr9:
+                where.append(f"d.{col} IS NOT NULL AND (abs(d.{col}) BETWEEN ? AND ? OR abs(d.{col}) BETWEEN ? AND ?)")
+                args += [x * 0.99, x * 1.01, x / kr9 * 0.95, x / kr9 * 1.05]
+            else:
+                where.append(f"d.{col} IS NOT NULL AND abs(d.{col}) BETWEEN ? AND ?")
+                args += [x * 0.99, x * 1.01]
         else:
             m = _CMP.fullmatch(v)
             op, x = m.group(1) or "=", float(m.group(2))
@@ -1819,8 +1832,13 @@ def _kind_query(p, kind, fts_on, ctx):
     for tok in p.get("numtext") or ():
         x = float(int(tok))
         c3, a3 = _text_cond(tok, fts_on)
-        where.append(f"((d.usd IS NOT NULL AND abs(d.usd) BETWEEN ? AND ?) OR {c3})")
-        args += [x * 0.99, x * 1.01] + a3
+        kr9 = p.get("krw_rate")
+        if kr9:
+            where.append(f"((d.usd IS NOT NULL AND (abs(d.usd) BETWEEN ? AND ? OR abs(d.usd) BETWEEN ? AND ?)) OR {c3})")
+            args += [x * 0.99, x * 1.01, x / kr9 * 0.95, x / kr9 * 1.05] + a3
+        else:
+            where.append(f"((d.usd IS NOT NULL AND abs(d.usd) BETWEEN ? AND ?) OR {c3})")
+            args += [x * 0.99, x * 1.01] + a3
     for tl, syms, mode in p.get("alias") or ():
         if ctx.get("has_tg", True):
             sq = "(d.id IN (SELECT x.id FROM tg x WHERE x.kind = ? AND x.t IN (%s))" % ",".join("?" * len(syms)) + (" OR d.sym_u IN (%s))" % ",".join("?" * len(syms)) if ctx.get("mixed") else ")")
@@ -1919,7 +1937,7 @@ def _wallet_addrs(c, val):
 
 
 def search(q: str, kinds=None, limit=None, after=None, before=None, path=None, today: datetime = None, budget_s: float = QUERY_BUDGET_S,
-           clock=time.monotonic, offset=None) -> dict:
+           clock=time.monotonic, offset=None, krw=None) -> dict:
     t0 = clock()
     q = str(q or "")[:Q_MAX]
     path = path or db_path()
@@ -1948,6 +1966,7 @@ def search(q: str, kinds=None, limit=None, after=None, before=None, path=None, t
             except (sqlite3.Error, ValueError, TypeError):
                 pass
         p = parse_query(q, today, held=held, names=names)
+        p["krw_rate"] = krw_rate(krw)
         ign = p["ignored"]
         for k9, v9 in (("after", after), ("before", before)):
             if not v9:

@@ -36,7 +36,9 @@ jobs:
           print(f"{len(files)} files · {bad} syntax errors · Python {sys.version.split()[0]}")
           sys.exit(1 if bad or not files else 0)
           PY
-      - name: Shell scripts (bash -n)
-        run: for f in tools/*.sh; do bash -n "$f"; done
       - name: Run tests (standard library only, no network)
         run: python3 tests/run_all.py
+      - name: Check browser scripts parse (node --check)
+        run: for f in web/v2/*.js; do node --check "$f" || exit 1; done
+      - name: Check shell scripts parse (bash -n)
+        run: for f in tools/*.sh; do bash -n "$f" || exit 1; done

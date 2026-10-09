@@ -24,7 +24,7 @@ def main():
                 raise ValueError("req")
             body = search_index.search(str(req.get("q") or "")[:search_index.Q_MAX], kinds=req.get("kinds") or None,
                                        limit=req.get("limit") or None, after=req.get("after") or None,
-                                       before=req.get("before") or None, offset=req.get("offset") or None)
+                                       before=req.get("before") or None, offset=req.get("offset") or None, krw=req.get("krw") or None)
             out = {"ok": True, "body": body}
         except Exception as e:
             out = {"ok": False, "err": type(e).__name__}

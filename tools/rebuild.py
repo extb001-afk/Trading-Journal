@@ -52,8 +52,9 @@ def main():
         return
     guard_core_stopped()
     if hasattr(core_mod.Core, "_upbit_asset"):
-        raise SystemExit("★canonical C 원장에서는 tools/rebuild.py 사용 금지 — tools/rebuild2.py(shadow 재파생·게이트·"
-                         "컷오버 절차)를 사용하라★")
+        raise SystemExit("이 도구(tools/rebuild.py)는 옛 원장 형식용이라 지금 원장에서는 쓸 수 없어요 — 다시 계산은 "
+                         "python3 tools/rebuild2.py --shadow-dir <빈 폴더>(사본에서 계산·비교만) · 자동 재구축은 tj-core 가 해요(README '백필 · 재구축'). "
+                         "[canonical C 원장에서는 tools/rebuild.py 사용 금지]")
     c = core_mod.Core(cfg)
     conn = c.conn
 

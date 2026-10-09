@@ -15,7 +15,7 @@
   [첫 실행](#5-첫-실행--얼마나-걸리고-어디서-보나) · [화면 열기·다른 기기](#6-화면-열기--다른-기기에서-보기) · [서버에서 늘 켜 두기](#6-1-서버리눅스에서-늘-켜-두기) · [문제 해결](#7-문제-해결--자주-묻는-5가지)
 - 기능: [지갑 여러 개 한 번에](#지갑-주소-여러-개-한-번에) · [텔레그램 알림](#텔레그램-알림-설정) · [금액 랜덤값](#금액-랜덤값-모드) · [금액 가리기](#금액-가리기숨김-모드) ·
   [기타 자산](#기타-자산--증권사-연결은-미검증) · [NFT](#nft-보유--바닥가) · [Hyperliquid](#hyperliquid--현물--무기한--스테이킹) · [시세 출처](#시세-출처--동명-코인-거르기) ·
-  [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필)
+  [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필) · [백업·복구](#백업--복구)
 - 참고: [기능 요약](#기능-요약) · [구조](#구조) · [보안·데이터](#보안--데이터) · [고급 설정(환경변수·설정 키)](#고급-설정) · [알아 둘 것](#알아-둘-것) · [시험 실행](#시험-실행) · [라이선스](#라이선스)
 
 ---
@@ -25,14 +25,17 @@
 | 순서 | 할 일 | 명령·위치 |
 |---|---|---|
 | 1 | **Python 3.9+** 가 있는 macOS/Linux 준비 (pm2 는 선택) | `python3 --version` |
-| 2 | 받고 설치 점검 — 아무것도 설치하지 않습니다 | `git clone <이 저장소 주소> tj-bot` → `cd tj-bot` → `bash tools/setup.sh` |
+| 2 | 받고 설치 점검 — 아무것도 설치하지 않습니다 | `git clone <저장소 주소> tj-bot`(이 페이지 위 **Code** 버튼의 HTTPS 주소) → `cd tj-bot` → `bash tools/setup.sh` |
 | 3 | 키 준비 — Solana 지갑이 있으면 Helius, EVM 지갑이 있으면 Etherscan 무료 키가 필수(Etherscan 은 경고만 — 없어도 돌지만 느림), 나머지는 선택 | [키 표](#3-키-준비--env-와-configjson) · 거래소 키는 **조회 권한만** |
 | 4 | 실행 | `pm2 start ecosystem.config.js` (pm2 없이: [아래](#4-실행--설정-마법사)) |
-| 5 | 화면 열기 → 설정 마법사에서 지갑·키·거래소·텔레그램 | **http://127.0.0.1:8023/** |
+| 5 | 화면 열기 → 첫 비밀번호 만들기(**설정 코드** = `cat state/auth_setup_code`) → 설정 마법사에서 지갑·키·거래소·텔레그램 | **http://127.0.0.1:8023/** (`web.port` 를 바꿨으면 그 번호) |
 | 6 | 첫 백필 기다리기 — 보통 수십 분, 많으면 몇 시간(첫날은 옛 기록부터 채워서 새 거래 확인이 늦을 수 있음) | 화면 위 **상태 패널** |
 | 7 | 남은 '원가 미확인'만 정리 | **미매칭** 탭 |
 
 먼저 구경만 하려면 `bash tools/setup.sh --demo` — 합성 데이터로 화면만 띄우고 아무것도 저장하지 않습니다(포트를 바꾸려면 `TJ_PORT=8024 bash tools/setup.sh --demo`).
+
+오래 켜 둘 거라면 두 가지도 해 두세요 — 로그가 끝없이 커지지 않게 **로그 자르기**(pm2 를 쓰면 `pm2 install pm2-logrotate`, 아니면 크론에 `bash tools/rotate_logs.sh`),
+디스크 사고에 대비해 **서버 밖 백업**([백업 · 복구](#백업--복구)).
 
 > **업데이트 안내 — 이미 쓰던 설치라면:** 이번 판부터 `config.json` 에 `web.login` 이 **없어도 로그인이 켜집니다.**
 > 업데이트 뒤 `pm2 restart tj-web` 하고 **이 컴퓨터에서** http://127.0.0.1:8023/ 을 열어 비밀번호부터 만드세요
@@ -67,19 +70,22 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-09 · 수정 재검증 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-09](CHANGELOG.md#2026-10-09--수정-재검증-반영) 에 있어요.
+이번 판(2026-10-09 오후 · 외부 전면검토 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-09 오후](CHANGELOG.md#2026-10-09-오후--외부-전면검토-반영) 에 있어요. 사진은 지난 판 그대로예요.
 
-- **새벽 추가(3차 검수 반영)** — 그날 카드 위 칸 '총 실현' = '왜 움직였나'의 '현물 실현' + '선물 실현' · 그날의 기록 시간순 · 선물 영수증 '진입 시각 추정' · 검색 돋보기 모든 폭 —
+- **업데이트 뒤** — 모든 유닛을 다시 켜세요(`pm2 restart ecosystem.config.js`). 원가 미확인 수량의 '최초 인식 시가'(기본 켬)·수수료 원가 규약·스테이블 원화 환차로
+  실현손익·명세 숫자가 바뀔 수 있어요(추정한 행은 '추정' 표시 · 재구축은 필요 없어요).
+- **선물 정산 = 정산 시각** — 거래소 잔고에 합쳐진 선물 지갑(바이낸스·바이빗·OKX)의 실현 손익·수수료·펀딩을 정산 시각에 기장해요(첫 대사 때 지난 것도 한 번 다시 놓음 ·
+  `tools/exf_fut_place.py` 로 미리보기·되돌리기) · 해외 거래소 잔고 대사는 불완전한 응답을 보류하고 표본 두 번이 맞을 때만.
+- **양도차익 명세** — 스테이블코인 원화 환차손익(별도 표 · 처분 행을 누르면 환차 상세) · 선물 손익·기타 소득 별도 표 · 원가 미확인 = 처음 생긴 날 시가로 추정(끄기 = 설정 › 원가 계산) ·
+  가스·체결·출금 수수료 원가 규약 하나로.
+- **곡선** — 원장 밖 금액(거래소 원화·업비트 미매칭 코인·LP·Rabby)을 구성요소별 규칙 하나로 계산해 30일·장기 곡선이 같은 값 · 빗썸 원화는 날마다 되감은 그날 잔고 · 정한 지난날 값은 다시 매기지 않음.
+- **백업·복구** — [서버 밖 둘째 백업과 되돌리기](#백업--복구)(`tools/offsite_backup.py` · `tools/ledger_restore.py`) · 원장 파일이 사라지면 빈 원장을 만들지 않고 복구 안내.
+- **그 밖** — 청산 감시 '못 보고 있어요' 알림·위험 구간 다시 알림 · 직접 감싸기·풀기(WETH 등)를 전환으로 · 상태 패널 '재계산 대기'에 넓히기 진행률 ·
+  화면·접근성 묶음 · 보안 문제 비공개 보고([SECURITY.md](SECURITY.md)).
+- 지난 판(2026-10-09 새벽): 그날 카드 '총 실현' = 현물 실현 + 선물 실현 · 그날의 기록 시간순 · 선물 영수증 '진입 시각 추정' · 검색 돋보기 모든 폭 —
   [CHANGELOG.md › 2026-10-09 새벽](CHANGELOG.md#2026-10-09-새벽--3차-검수-반영--실현-표기)
-
-- **선물 영수증** — 강제청산·ADL 이 기록에서 빠져도 뒤 거래가 옛 진입 시각을 물려받지 않아요(OKX 한 방향 모드 강제청산·ADL·블록 체결 · 진입 체결 평균과 교차 확인) ·
-  바이빗 정산에 펀딩이 섞인 청산도 거래소 가격 표시 · 거래소 줄로 열면 배지·종목 칩·네 칸·청산 목록도 그 거래소(「전체 보기」로 전체) · 폰 머리 정리.
-- **화면** — 글꼴(IBM Plex)을 저장소에서 직접 제공(Google Fonts 요청 없음) · 폰 일별 기록 = 달력 → 그날 카드 → 그날의 기록 ·
-  목표가·손절선 원화/달러 입력(저장·감시는 달러) · 대시보드 오른쪽 열 자체 스크롤 없앰 · 습관 '가장 잘 맞는 때'는 비교할 시간대가 있을 때만 ·
-  641~1100px 머리 줄 검색 돋보기 · 그날 카드 금액을 눌러 전체 금액.
-- **운영** — 지운 지갑 이름도 바로 반영 · 화면 계산 자식의 정상 대기를 교착으로 오판하지 않음 · 바이빗 이어 받기 커서 오류에서 멈추지 않음 ·
-  유닛 러너 메모리 상한(tj-web 기본 3GB) · 원장 음수 보유가 과거 기록 넓히기 때문이면 '재계산 대기' 설명 · 이더스캔 'unsupported chainid' = 미지원.
-- **시험·라이선스** — 공개 시험 1,300건 넘게(선물 영수증·빌드 분리·노드 키·화면 스냅숏·체인 끄기 추가) · 라이선스 = [MIT](LICENSE).
+- 지난 판(2026-10-09 · 수정 재검증): 선물 영수증 진입 시각 보호 · 글꼴 자체 제공 · 목표가·손절선 원화/달러 · 유닛 러너 메모리 상한 · 공개 시험 확대 · MIT —
+  [CHANGELOG.md › 2026-10-09](CHANGELOG.md#2026-10-09--수정-재검증-반영)
 - 지난 판(2026-10-08 저녁): 선물 영수증 가격·진입 시각 · 화면 다듬기 · 상태 전송 304 · 체인 자동 끄기 스위치 · 빌드 자식 교착 원인 제거 —
   [CHANGELOG.md › 2026-10-08 저녁](CHANGELOG.md#2026-10-08-저녁--외부-검토-반영)
 - 지난 판(2026-10-08 오후): 선물 영수증 · 업비트 거래 시작 전 코인 평가 · 화면 계산은 따로(리눅스 · 끄기 = [고급 설정](#고급-설정)의 `TJ_BUILD_PROC=off`) · 디자인 정리 —
@@ -360,12 +366,13 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
    - 나 혼자 잠깐 볼 때: 내 컴퓨터에서 `ssh -L 8023:127.0.0.1:8023 사용자@서버` → 내 컴퓨터 브라우저로 http://127.0.0.1:8023/ (첫 비밀번호도 이렇게 만듭니다).
    - 휴대폰 등 어디서나: 위 6) 의 **HTTPS 리버스 프록시·터널**(클라우드플레어 터널 등 — 로그인 필수) 또는 Tailscale.
 4. 거래소 키를 서버 IP 로 화이트리스트한 키로 바꿔 넣었는지, 상태 패널에서 거래소 동기화가 초록인지 확인합니다.
-5. 백업: `state/`·`.env`·`config.json` 을 가끔 서버 밖으로 복사해 두세요(원장 정기 백업은 같은 서버 디스크에 남습니다).
+5. 백업: 원장 정기 백업은 같은 서버 디스크에 남으니 [서버 밖 둘째 백업](#백업--복구)(`tools/offsite_backup.py`)을 켜 두고, `.env`·`config.json` 은 따로 보관하세요.
 6. 로그 정리: pm2 를 쓰면 `pm2 install pm2-logrotate`(권장), 아니면 `bash tools/rotate_logs.sh` 를 크론에 — **둘 중 하나만** 쓰세요(`--dry-run` 으로 먼저 확인 · `-h` 사용법).
 
 ### 7) 문제 해결 — 자주 묻는 5가지
 
-1. **화면이 안 열려요** — `pm2 ls` 로 `tj-web` 이 online 인지, `pm2 logs tj-web --lines 50` 에 오류가 있는지 보세요.
+1. **화면이 안 열려요** — `pm2 ls` 로 `tj-web` 이 online 인지, `pm2 logs tj-web --lines 50` 에 오류가 있는지 보세요
+   (pm2 없이 직접 실행했다면 `src/unit_runner.py web` 을 켠 터미널의 출력).
    8023 포트를 다른 프로그램이 쓰고 있으면 `config.json` 의 `web.port` 를 바꾸고 `pm2 restart tj-web`(로그에 '포트 … 을(를) 다른 프로그램이 쓰고 있어요' 한 줄).
    `TJ_PORT` 환경변수는 데모(`--demo`) 전용입니다 — 일반 실행 포트는 `web.port` 하나로, 하루 리뷰·상태 점검·비밀번호 재설정 도구가 같은 값을 읽습니다.
 2. **거래소 키 저장이 거부돼요 / 동기화가 멈췄어요** — 키에 거래·출금·이체 권한이 켜져 있으면 저장을 거부합니다(조회만 켜서 새로 발급).
@@ -514,7 +521,45 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - 설정 마법사가 '과거 보유분 재구축 필요'라고 표시한 지갑(기초 잔고 대조가 끝난 뒤 추가한 체인)을 확실히 맞추려면 아래 재백필을 하세요.
 - 어떤 작업이든 유닛을 직접 멈췄다가 중간에 실패했다면 `pm2 start ecosystem.config.js` 로 다시 켜세요(멈춘 유닛이 모두 올라옵니다). `pm2 ls` 로 전부 online 인지 확인하세요.
 - **재백필**(처음부터 다시): 지갑을 빼도 이미 기록된 거래는 원장에 남습니다. 깨끗이 다시 시작하려면
-  `pm2 stop all` → `state/` 폴더 이름을 바꿔 보관(예: `state.old`) → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`.
+  `pm2 stop all` → `state/` 폴더를 설치 폴더 **밖으로** 옮겨 보관(예: `mv state ../tj_state_old`) → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`.
+  (설치 폴더 안에 `state.old` 처럼 두면 `git add -A` 때 원장·설정이 함께 올라갈 수 있어요.)
+
+## 백업 · 복구
+
+**자동 백업(같은 컴퓨터)** — `tj-core` 가 매일 04:30(KST) 이후 원장을 `state/backups/ledger_YYYYMMDD.db` 로 떠 둡니다
+(sqlite 온라인 백업 · 무결성 검사 통과본만 · 기본 3개 — `config.json` 의 `"backup": {"keep_db": 3}`). 같은 때 원장 밖 사본
+(`files_YYYYMMDD/` — 지난날 고정가·AI 리뷰·기타 자산·설정·NFT 설정·메모·지갑 목록, `prefs_YYYYMMDD.json` — 화면에서 내린 판정)도 남깁니다.
+`.env`(키)는 넣지 않으니 따로 보관하세요. 백업이 36시간 넘게 없으면 상태 패널 주황, 3일 넘으면 빨강 + 텔레그램.
+
+**서버 밖 둘째 백업(권장)** — 같은 디스크의 백업은 디스크 사고 한 번에 원장과 같이 사라집니다. 다른 컴퓨터로 매일 보내려면
+`config.json` 에 받을 곳을 적고(값은 예시)
+
+```json
+"backup": {"offsite": {"enabled": true, "host": "backup.example.net", "user": "backup", "port": 22,
+                       "key": "~/.ssh/tj_offsite", "path": "/srv/tj_offsite", "keep": 2, "bwlimit_kbps": 4096}}
+```
+
+받는 컴퓨터의 `~/.ssh/authorized_keys` 에 이 컴퓨터의 공개 키(`ssh-keygen -t ed25519 -f ~/.ssh/tj_offsite -N ""` 로 만든 `.pub`)를 넣은 뒤
+`python3 tools/offsite_backup.py test`(연결 확인) → `python3 tools/offsite_backup.py run --force`(첫 전송) 로 확인하고,
+크론에 `17 * * * * cd <설치 폴더> && python3 tools/offsite_backup.py run` 처럼 매시 등록하세요(하루 1번만 보냄 · 실패 뒤 3시간 쉼).
+원장 스냅숏을 압축해(gzip · sha256) 받는 쪽에서 다시 계산한 sha256 이 같을 때만 제자리에 둡니다. 결과는 상태 패널 '서버 밖 백업'.
+이 컴퓨터에서 밖으로 ssh 를 못 나가면 `"mode": "outbox"` — 묶음만 `state/backups/offsite/` 에 만들고 받는 쪽이 `rsync` 로 가져간 뒤
+`offsite_backup.py confirm <묶음> <sha256>` 으로 알려 줘야 '성공'이 됩니다(받는 쪽 크론 예 = `python3 tools/offsite_backup.py --help`).
+
+**되돌리기** — 원장이 깨지거나 사라지면:
+
+1. `python3 tools/ledger_restore.py list` — 되돌릴 수 있는 백업과 '이어읽기/되감기' 여부
+2. `python3 tools/ledger_restore.py restore <번호>` — 미리보기(무엇을 되돌리고 무엇을 다시 받는지 · 아무것도 안 바꿈)
+3. `pm2 stop tj-core tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web` → 같은 명령에 `--apply`
+4. `pm2 start tj-core` → 몇 분 뒤 `pm2 start tj-evm tj-sol tj-bsc tj-ex tj-exf tj-web`
+
+지금 원장은 지우지 않고 `state/ledger.db.pre_restore_<시각>` 으로 남깁니다. 백업 뒤에 모은 거래는 두 가지로 다시 채웁니다 —
+수집기가 보낸 기록(`state/inbox/`)을 8일 동안 남겨 두므로 그 안의 백업이면 `tj-core` 가 백업 시점부터 그대로 다시 읽고,
+더 오래된 백업이면 도구가 수집기 커서를 '백업 시각 − 12시간' 앞으로 되감아 다시 받게 합니다(바꾼 상태 파일 원본은 `state/restore_<시각>/`).
+서버 밖 백업에서 되돌릴 때는 `python3 tools/offsite_backup.py fetch` 로 받은 뒤 그 경로로 `restore`.
+
+원장 파일이 없는데 백업·수집 기록이 남아 있으면 `tj-core` 는 빈 원장을 새로 만들지 않고 기다립니다(상태 패널 '원장 파일 없음 — 복구 필요').
+정말 새 원장으로 시작하려면 `python3 tools/ledger_restore.py new --apply`(수집도 처음부터면 `pm2 stop tj-evm tj-sol tj-bsc tj-ex tj-exf` 뒤 `--fresh-collect` 추가 → 끝나면 다시 `pm2 start`).
 
 ---
 
@@ -560,7 +605,11 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 - 원본(raw) 기록은 보존되고, 분류·원가·손익은 원본에서 다시 계산할 수 있습니다(위 '재구축').
 - 로그 정리: `pm2 install pm2-logrotate`(pm2 쓸 때 권장) 또는 `bash tools/rotate_logs.sh` 크론 — 둘 중 하나만(`--dry-run` 으로 먼저 확인).
-- 백업할 것: `state/`(특히 `state/ledger.db` — tj-core 가 정기 백업도 남김)·`.env`·`config.json`.
+- 백업할 것: `state/`(특히 `state/ledger.db` — tj-core 가 정기 백업도 남김)·`.env`·`config.json`. 서버 밖 백업·되돌리기는 위 '백업 · 복구'.
+- 운영 도구(`tools/`):
+  - `tools/ledger_restore.py` — 원장 백업 목록·검사·되돌리기와 그 사이 수집분 다시 받기([백업 · 복구](#백업--복구)).
+  - `tools/offsite_backup.py` — 서버 밖 둘째 백업(다른 컴퓨터로 ssh 전송 또는 outbox · sha256 확인 · 결과는 상태 패널 '서버 밖 백업').
+  - `tools/exf_fut_place.py` — 선물 정산 재배치 계획 보기·되돌리기(업데이트 뒤 tj-core 가 첫 대사 때 스스로 한 번 적용 — 이 도구는 확인용).
 
 ## 보안 · 데이터
 
@@ -575,8 +624,9 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
   파일을 직접 복사해 넣었다면 `chmod 600 config.json .env` 를 한 번 해 두세요. `.env`·`config.json`·`state/` 는 `.gitignore` 에 들어 있습니다 — 절대 커밋하지 마세요.
 - 밖으로 나가는 요청은 조회뿐입니다: 블록 탐색기·RPC(내 주소), 거래소 API, 가격(GeckoTerminal·DexScreener·거래소 공개 시세·주식/금 공개 시세),
   스캠 판정(GoPlus — 후보 토큰 주소만), 지갑 포트폴리오 보강(Rabby 공개 API — 평가액 $1,000 이상인 내 EVM 주소만, 기준 `rabby.min_wallet_usd` · `rabby.enabled: false` 로 끔),
-  브릿지 탐색기(도착 확인), 환율, 텔레그램 발송, NFT 바닥가(코인게코·매직에덴·오픈시 — 컬렉션 주소만), Hyperliquid 공개 조회(내 주소).
-  원장 내용 자체는 보내지 않습니다.
+  브릿지 탐색기(도착 확인), 환율, 텔레그램 발송, NFT 바닥가(코인게코·매직에덴·오픈시 — 컬렉션 주소만), Hyperliquid 공개 조회(내 주소),
+  내 공인 IP 확인(api.ipify.org — 설정 화면에서 거래소 IP 허용 목록 안내 버튼을 누를 때만).
+  원장 내용 자체는 보내지 않습니다. 예외: 서버 밖 백업(`backup.offsite` — 기본 꺼짐)을 켜면 압축한 원장 사본을 **내가 지정한 컴퓨터**로 ssh 로 보냅니다.
   예외: AI 기능(기본 꺼짐)을 켜면 그날 요약·영수증 요약을 내 컴퓨터의 `claude` CLI 로 보냅니다.
 - **브라우저(화면)가 직접 부르는 외부 주소** — 위는 서버가 부르는 곳이고, 화면을 연 브라우저도 다음 곳에 직접 요청합니다(그 서비스는 접속 IP 를 볼 수 있어요):
   - **글꼴**(IBM Plex Sans KR·IBM Plex Mono) — 이제 저장소에서 제공(외부 요청 없음): `web/v2/fonts/` 의 글자 조각(woff2)을 tj-web 이 직접 내고,
@@ -593,6 +643,7 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 - **원장 사본이 `state/` 밖에 생기는 때** — 자동 재구축(확장 백필 뒤 등) 동안 **홈 폴더**에 원장 약 3배 + 2GB 의 임시 사본(`~/tj_shadow_extrebuild_<시각>/`, 권한 700)과
   진단 보고서(`~/tj_shadow_extrebuild_<시각>.report.json`, 최근 3개)가 생겼다가 사본은 끝나면 지워집니다. 다른 사용자와 같이 쓰는 컴퓨터이거나 홈 폴더가 작으면
   `config.json` 의 `"backfill": {"rebuild_dir": "/내/디스크/경로"}` 로 옮기세요([백필 · 재구축](#백필--재구축--재백필)).
+- **보안 문제를 찾았다면** 공개 이슈 대신 저장소의 **Security › Report a vulnerability**(비공개 보고)로 알려 주세요. 재현 방법만 적고 실제 키·주소·잔고는 넣지 마세요.
 
 ## 고급 설정
 
@@ -630,6 +681,8 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 |---|---|---|
 | `build_proc` | `auto` | 위 `TJ_BUILD_PROC` 와 같은 값(`auto`·`off`·`fork`) — 환경변수·`.env` 에 없을 때 |
 | `backup.keep_db` | 3 | 원장 정기 백업(하루 1번, `state/backups/`) 보관 수(1~30) |
+| `backup.offsite` | 꺼짐 | 서버 밖 둘째 백업 — 받을 곳·방식(`push`/`outbox`)·보관 수·속도 상한([백업 · 복구](#백업--복구) · 키 전체 = `python3 tools/offsite_backup.py --help`) |
+| `alerts.liq_repeat_min` | 60 | 청산 위험 구간에 머무는 동안 다시 알리는 간격(분 · `0` = 끔 · 5~1440) |
 | `runner.max_mb.<유닛>` | web 3072 · 그 밖 0 | 위 `TJ_RUNNER_MAX_MB_<유닛>` 과 같은 값(환경변수·`.env` 에 없을 때) — 예: `"runner": {"max_mb": {"web": 2048}}` |
 | `health.t.build_p95_warn_s` | 별도 프로세스 60 · 웹 안 10 | 상태 패널 '웹 빌드 느림' 문턱(최근 빌드 소요 p95, 초) — 값을 넣으면 빌드 방식과 상관없이 그 값 |
 | `backfill.auto_rebuild` | 켜짐 | `false` 면 자동 재구축 끔([백필 · 재구축](#백필--재구축--재백필)) |
@@ -645,6 +698,7 @@ python3 src/upbit_link.py          # (선택) 업비트 · src/ex_foreign.py = �
 
 - 시간대는 한국 시간(KST), 화면은 한국어입니다.
 - 거래소·체인 API 가 주지 않는 옛 기록은 가져오지 않습니다 — [docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md)·화면 **설정 › 수집 한계**.
+- BNB Chain 은 노드가 내부 이동(trace)을 주지 않아 **컨트랙트가 보내 준 BNB**(토큰 → BNB 매도 대금·브리지 지급·환불)를 못 받습니다 — 그 매도는 '보냄'으로 남고 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다. 토큰을 USDT 등 토큰으로 팔면 해당 없음.
 - 신고용 명세는 계산 보조 자료입니다. 세무 판단은 전문가와 확인하세요.
 
 ## 시험 실행
@@ -706,9 +760,15 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Look back at your trading:** a time machine (drag the curve to see that day's holdings vs. "if you had held"), a money-flow map
   (deposits → exchanges → wallets → where it is now), a sell preview (expected realized PnL and this year's taxable gain), a year-end card set,
   a plan-keeping score, trading habits by weekday/hour and holding time, a one-year realized-PnL heatmap and BTC / "never sold" comparison lines.
-- **Release notes:** what changed in each release (external review fixes — futures receipt prices and entry times, screen fixes, 304/delta state
-  transfer, build and chain auto-off safeguards — on the evening of 2026-10-08; futures receipts, pre-listing prices and the separate build process earlier on 2026-10-08;
-  per-chain on/off, holding-place drawer, check-interval tiers, daily API budgets and RPC fallbacks on 2026-10-07) is in [CHANGELOG.md](CHANGELOG.md).
+- **Release notes:** what changed in each release (external full-review fixes — futures booked at settlement time, stablecoin KRW FX gains in the
+  tax statement, first-seen cost estimates, one fee-cost rule, a curve redesign and off-site backup/restore — on the afternoon of 2026-10-09; day-card realized
+  wording early on 2026-10-09; re-verification fixes on 2026-10-09; external review fixes on the evening of 2026-10-08; futures receipts and the separate build
+  process earlier on 2026-10-08) is in [CHANGELOG.md](CHANGELOG.md). After updating, restart all units (`pm2 restart ecosystem.config.js`); realized PnL and
+  statement numbers may change (estimated rows are marked).
+- **Backup and restore:** tj-core keeps a daily ledger backup in `state/backups/` (3 by default). `tools/ledger_restore.py` lists, checks and restores backups
+  and re-collects what came after; `tools/offsite_backup.py` sends a compressed, sha256-verified copy to another machine over ssh (or leaves it in an outbox
+  for the other side to pull) — `backup.offsite` in `config.json`, off by default. tj-core waits instead of creating an empty ledger when the old one is missing.
+  `tools/exf_fut_place.py` previews or undoes the one-time futures settlement re-placement.
 - **Search:** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
   (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested
@@ -742,6 +802,7 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   (mode 600) — except the unverified broker adapters, whose secrets live in `config.json`, so `config.json` is kept at mode 600 as well (setup.sh and tj-web tighten it).
   Fonts (IBM Plex, SIL OFL 1.1) are served from the repository (`web/v2/fonts/`, no external request); the browser itself loads coin logos/token lists from jsDelivr (logo URLs contain chain, contract and symbol — turn
   logos off in Settings › 화면 · 표시 › 토큰 로고); a Cloudflare proxy may inject its Web Analytics script — disable that in Cloudflare if unwanted.
+  Report security problems privately (GitHub › Security › Report a vulnerability — see [SECURITY.md](SECURITY.md)).
   Advanced environment variables and config keys are listed under [고급 설정](#고급-설정); release notes are in [CHANGELOG.md](CHANGELOG.md).
 - **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled. Only an
   allow-list of environment variables is passed to it (PATH, HOME, locale, `HTTP(S)_PROXY`/`NO_PROXY`/`ALL_PROXY`, corporate CA variables

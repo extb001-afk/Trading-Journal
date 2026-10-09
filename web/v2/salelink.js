@@ -6,6 +6,8 @@
   const Z = () => window.__tjSheets || null;
   const ready = () => !!(X() && Y());
   const CATS = ['세일 참가금', '송금·결제/선물', '분실·해킹', '기타'];
+  const catLbl = c => (c === '송금·결제/선물' ? '송금·결제·증여' : String(c == null ? '' : c));
+  const joRo = w => { const c = String(w).charCodeAt(String(w).length - 1), j = c >= 0xAC00 && c <= 0xD7A3 ? (c - 0xAC00) % 28 : 0; return j && j !== 8 ? '으로' : '로'; };
   const SALE = '세일 참가금';
   const SALE_WORDS = /세일|참가금|참여금|예치|회수\s*대기|청약|\bsale\b|\bido\b|\bico\b/i;
   const esc0 = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -60,7 +62,7 @@
     }
     return { c: o.c || 'pending', cat: o.cat || '', r: null };
   }
-  const CLS_KO = { sale: '세일 참가', sale_auto: '토큰 세일 입찰', ext: '외부 유출', own: '내 지갑', exchange: '거래소 입금주소', returned: '되돌려 받음', ret: '되돌려 받음', spam: '사칭·스팸 로그', system: '시스템 주소', bridge: '브릿지 → 내 지갑', pending: '확인 필요' };
+  const CLS_KO = { sale: '세일 참가', sale_auto: '토큰 세일 입찰', ext: '외부 유출', own: '내 지갑', exchange: '거래소 입금 주소', returned: '되돌려 받음', ret: '되돌려 받음', spam: '사칭·스팸 로그', system: '시스템 주소', bridge: '브릿지 → 내 지갑', pending: '확인 필요' };
   const CLS_TONE = { sale: 'w', sale_auto: 'a', ext: 'e', own: 'ok', exchange: 'a', returned: 'ok', ret: 'ok', spam: 'g', system: 'g', bridge: 'ok', pending: 'w' };
 
   function rowHTML(e) {
@@ -84,7 +86,7 @@
   function rowText(e) {
     if (!ready() || !e || !e.of) return null;
     const cc = curCls(e);
-    return (CLS_KO[cc.c] || CLS_KO.pending) + (cc.c === 'ext' && CATS.indexOf(cc.cat) >= 0 ? ' · ' + cc.cat : '') + ' · 눌러서 자세히';
+    return (CLS_KO[cc.c] || CLS_KO.pending) + (cc.c === 'ext' && CATS.indexOf(cc.cat) >= 0 ? ' · ' + catLbl(cc.cat) : '') + ' · 눌러서 자세히';
   }
 
   function mAlt(usd, o) { const x = X(), S = x.S, c = S.cur; S.cur = c === 'USD' ? 'KRW' : 'USD'; try { return x.m(usd, o); } finally { S.cur = c; } }
@@ -151,7 +153,7 @@
       h += '<div class="cap" style="margin:10px 0">보낸 내역에서 이미 정리된 전송이에요.</div>';
     } else {
       const on = cc.c === 'sale' ? SALE : cc.c === 'ext' ? cc.cat : '';
-      h += '<div class="sllh"><span class="lab">무엇이었나요?</span>' + (cc.c === 'pending' ? '' : '<button type="button" class="lnk mut" data-a="slClear" data-k="' + esc(a) + '">분류 풀기</button>') + '</div><div class="optline slcats">' + CATS.map(c => '<button type="button" class="fbtn' + (on === c ? ' on' : '') + '" data-a="slCat" data-k="' + esc(a) + '" data-v="' + esc(c) + '" aria-pressed="' + (on === c) + '">' + esc(c === SALE ? '세일 참여' : c) + '</button>').join('')
+      h += '<div class="sllh"><span class="lab">무엇이었나요?</span>' + (cc.c === 'pending' ? '' : '<button type="button" class="lnk mut" data-a="slClear" data-k="' + esc(a) + '">분류 풀기</button>') + '</div><div class="optline slcats">' + CATS.map(c => '<button type="button" class="fbtn' + (on === c ? ' on' : '') + '" data-a="slCat" data-k="' + esc(a) + '" data-v="' + esc(c) + '" aria-pressed="' + (on === c) + '">' + esc(c === SALE ? '세일 참여' : catLbl(c)) + '</button>').join('')
         + '<button type="button" class="fbtn" data-a="slGo" data-k="' + esc(a) + '" data-v="own">내 지갑·거래소예요</button></div>'
         + (cc.c === 'pending' ? '<div class="cap">고르기 전까지는 확인 필요로 남아요(총자산에서는 이미 빠져 있어요)</div>' : '');
       if (cc.c === 'sale' && r) h += saleBox(r);
@@ -165,7 +167,7 @@
   function saleBox(r) {
     const x = X(), p = salePnl(r);
     let h = (p.opt ? '<div class="cap" style="margin:4px 0 8px">' + OPT_PILL + ' 저장했어요 · 서버가 다시 계산하면 금액이 그 값으로 바뀌어요</div>' : '') + '<div class="slbox slsale">' + kv('넣은 돈', x.m(p.sent) + ' <span class="cap">' + mAlt(p.sent) + '</span>') + kv('환불', x.m(p.ret), 'ok')
-      + kv('받은 코인 원가', x.m(p.tokCost)) + (p.coinN ? kv('받은 코인 지금 가치', p.nowOk ? x.m(p.now) : '시세 없음') : '') + kv('<b>회수 대기</b>', '<b>' + x.m(p.wait) + '</b>')
+      + kv('받은 코인 원가', x.m(p.tokCost)) + (p.coinN ? kv('받은 코인 평가금액', p.nowOk ? x.m(p.now) : '시세 없음') : '') + kv('<b>회수 대기</b>', '<b>' + x.m(p.wait) + '</b>')
       + (p.coinN && p.nowOk ? kv('세일 손익(지금 기준)', '<b class="' + x.cls(p.pnl) + '">' + x.m(p.pnl, { sign: true }) + '</b>') : '') + '</div>';
     const cs = candLive(r);
     if (cs.length) h += '<div class="lab sllab">연결할까요?</div>' + cs.map(c => '<div class="slcand in">' + candLine(r, c) + '</div>').join('');
@@ -190,7 +192,7 @@
     slOpen: el => { const z = Z(), e = REG[num(el.getAttribute('data-v'))]; if (!z || !e) return; z.open('sl', String(el.getAttribute('data-v')), e.of ? '보낸 전송' : '세일 연결 제안', el); },
     slCat: el => { const x = X(), a = el.getAttribute('data-k'), c = el.getAttribute('data-v'), r = ofRow(a); if (!x || !a || CATS.indexOf(c) < 0) return;
       if (r && r.bucket === 'external' && r.category === c) return;
-      x.post('/api/outflow_resolve', { address: a, verdict: 'external', category: c }, (c === SALE ? '세일 참여로 정했어요' : c + '(으)로 정했어요') + ' · 보낸 내역과 같이 바뀌어요').then(() => { const z = Z(); if (z) z.redraw(); }); },
+      x.post('/api/outflow_resolve', { address: a, verdict: 'external', category: c }, (c === SALE ? '세일 참여로 정했어요' : catLbl(c) + joRo(catLbl(c)) + ' 정했어요') + ' · 보낸 내역과 같이 바뀌어요').then(() => { const z = Z(); if (z) z.redraw(); }); },
     slClear: el => { const x = X(), a = el.getAttribute('data-k'); if (!x || !a) return; x.post('/api/outflow_resolve', { address: a, verdict: 'clear' }, '분류를 풀었어요 · 확인 필요로 돌아가요').then(() => { const z = Z(); if (z) z.redraw(); }); },
     slMemo: el => { const x = X(), a = el.getAttribute('data-k'); if (!x || !a || pvOn()) return;
       const d = x.S.drafts['slm:' + a], r = ofRow(a), v = String(d == null ? (r ? r.memo : '') : d).trim();

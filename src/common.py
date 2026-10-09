@@ -45,21 +45,59 @@ _CPU_PLAN = None
 _CPU_APPLIED = False
 
 
-def _env_file_value(key: str):
-    try:
-        with open(ENV_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                s = line.strip()
-                if not s or s.startswith("#") or "=" not in s:
-                    continue
-                if s.startswith("export "):
-                    s = s[7:].lstrip()
-                k, v = s.split("=", 1)
-                if k.strip() == key:
-                    return v.strip().strip("'\"")
-    except OSError:
+def parse_env_line(line: str):
+    s = str(line or "").strip()
+    if not s or s.startswith("#") or "=" not in s:
         return None
-    return None
+    if s.startswith("export "):
+        s = s[7:].lstrip()
+    k, v = s.split("=", 1)
+    k, v = k.strip(), v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        v = v[1:-1]
+    return (k, v) if k else None
+
+
+def net_error_text(e) -> str:
+    import socket as _so
+    import ssl as _ssl
+    import urllib.error as _ue
+    r = getattr(e, "reason", None) if isinstance(e, _ue.URLError) else None
+    x = r if isinstance(r, BaseException) else e
+    if isinstance(e, _ue.HTTPError):
+        return f"상대 서버가 거부했어요(HTTP {e.code}) — 키·권한·IP 허용 목록을 확인하세요"
+    if isinstance(x, (_so.timeout, TimeoutError)) or "timed out" in str(x).lower():
+        return "응답이 없어요(시간 초과) — 인터넷 연결·방화벽을 확인하고 잠시 뒤 다시 시도하세요"
+    if isinstance(x, _so.gaierror):
+        return "주소를 찾지 못했어요(DNS) — 인터넷 연결을 확인하세요"
+    if isinstance(x, _ssl.SSLError) or "certificate" in str(x).lower():
+        return "보안 연결(SSL)에 실패했어요 — 컴퓨터 시계가 맞는지, 회사·학교 프록시가 끼어 있지 않은지 확인하세요"
+    if isinstance(x, ConnectionRefusedError):
+        return "연결이 거부됐어요 — 방화벽·프록시 설정을 확인하세요"
+    if isinstance(x, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+        return "연결이 중간에 끊겼어요 — 잠시 뒤 다시 시도하세요"
+    if isinstance(x, OSError):
+        return "네트워크 오류로 연결하지 못했어요 — 인터넷 연결을 확인하세요"
+    return "연결하지 못했어요 — 잠시 뒤 다시 시도하고, 계속되면 tj-web 로그를 확인하세요"
+
+
+def read_env_file(path: str = None) -> dict:
+    out = {}
+    try:
+        with open(path or ENV_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                kv = parse_env_line(line)
+                if kv:
+                    out[kv[0]] = kv[1]
+    except OSError:
+        pass
+    return out
+
+
+def _env_file_value(key: str):
+    if not os.path.exists(ENV_PATH):
+        return None
+    return read_env_file().get(key)
 
 
 def build_proc_mode():
@@ -809,8 +847,8 @@ def upbit_fresh_sec(cfg) -> int:
 
 
 def ensure_dirs() -> None:
-    os.makedirs(STATE_DIR, exist_ok=True)
-    os.makedirs(INBOX_DIR, exist_ok=True)
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    os.makedirs(INBOX_DIR, mode=0o700, exist_ok=True)
 
 
 def sqlite_ro_uri(path: str, immutable: bool = False) -> str:
@@ -939,6 +977,13 @@ def exf_is_debt_int(event, leg_seq, source_ns, source_id) -> bool:
         return False
     return (event == "EXF_ADJUST" and seq9 == 2 and str(source_ns or "").endswith(":recon")
             and not str(source_id or "").startswith(EXF_LATE_PFX))
+
+
+EXF_FUT_NS = "futpnl"
+
+
+def exf_is_fut(event, source_ns) -> bool:
+    return event == "EXF_ADJUST" and str(source_ns or "").endswith(":" + EXF_FUT_NS)
 
 
 def append_durable_jsonl(path: str, obj) -> None:

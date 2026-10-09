@@ -212,7 +212,8 @@
       else {
         if (/^\d{1,6}-\d{1,2}(-\d{1,2})?$/.test(rest)) ign(rest, /^(19[7-9]\d|20\d\d|2100)-/.test(rest) ? '없는 날짜' : '날짜 범위(' + Y_MIN + '~' + Y_MAX + ') 밖');
         const am = /^[₩$]?\s?\d[\d,]*(?:\.\d+)?\s?(?:만|억|천|k|m)?원?$/i.test(rest) && !/^\d{1,3}$/.test(rest) ? parseAmt(rest, rate) : null;
-        if (am != null && am >= 50) { P.type = 'amt'; P.amt = am; P.numText = /^\d{4,15}$/.test(rest); }
+        if (am != null && am >= 50) { P.type = 'amt'; P.amt = am; P.numText = /^\d{4,15}$/.test(rest);
+          if (/^\d[\d,]*(?:\.\d+)?$/.test(rest)) { const k9 = parseFloat(rest.replace(/,/g, '')) / rate; if (k9 >= 5) P.amtK = k9; } }
         else if (/^[A-Za-z0-9]{2,12}$/.test(rest)) P.type = 'ticker';
       }
     }
@@ -378,7 +379,8 @@
     const evChain = e => { const sr9 = String(e.src || ''), seg = String(e.d || '').split(' · ')[0]; let cks = seg ? chainsIn(seg) : [];
       if (!cks.length && sr9.indexOf('ex:') !== 0 && e.pkey && posCh.get(e.pkey)) { const mk = chainsIn(posCh.get(e.pkey)); cks = mk.length === 1 ? mk : []; }
       return cks; };
-    const amtNear = usd => (P.type === 'amt' && !pv && usd != null && num(usd) !== 0 ? (Math.abs(Math.abs(num(usd)) - P.amt) <= Math.max(5, P.amt * 0.1) ? 70 : 0) : 0);
+    const near9 = (u, a) => a > 0 && Math.abs(Math.abs(num(u)) - a) <= Math.max(5, a * 0.1);
+    const amtNear = usd => (P.type === 'amt' && !pv && usd != null && num(usd) !== 0 ? (near9(usd, P.amt) || near9(usd, P.amtK) ? 70 : 0) : 0);
     const textOrNone = (name, extra) => (P.toks.length && (P.type !== 'amt' || P.numText) && P.type !== 'date' ? score(name, extra, toks) : 0);
     const al9 = arr(P.alias);
     const onlyFilters = !P.text && (P.chips.length > 0);
@@ -843,7 +845,8 @@
     if (pv) { const a9 = API(); text = a9 && typeof a9.pvStripAmt === 'function' ? a9.pvStripAmt(text) : text.replace(/(^|\s)[₩$]?\s?\d[\d,]*(?:\.\d+)?\s?(?:만|억|천|k|m)?원?(?=\s|$)/gi, (all, sp) => (/^\s*\d{1,2}$/.test(all) ? all : sp)).replace(/\s{2,}/g, ' ').trim(); }
     const sc = scope && scope !== 'all' ? scope : P.scope;
     const skip = sc === 'setting' || sc === 'receipt' || sc === 'sale' || (!text && !out.length);
-    return { q: (out.join(' ') + (text ? ' ' + text : '')).trim().slice(0, Q_MAX), kinds: sc ? (SRV_KINDS[sc] || '') : '', skip };
+    const a8 = API(), krw = !pv && P.amtK && a8 && a8.S.D ? num(a8.S.D.rate) || 0 : 0;
+    return { q: (out.join(' ') + (text ? ' ' + text : '')).trim().slice(0, Q_MAX), kinds: sc ? (SRV_KINDS[sc] || '') : '', skip, krw };
   }
   const srvQueryOf = q => srvParamsOf(q).q;
   const srvGroup = k => (ST.srv && ST.srvQ === effQ() ? arr(ST.srv.groups).find(g => g.kind === k) : null);
@@ -857,7 +860,7 @@
     const r0 = ST.srv, req9 = {};
     ST.srvMoreReq = req9; ST.srvMoreBusy = k; paint9();
     const mine = () => ST.srvMoreReq === req9;
-    fetch('/api/search?q=' + encodeURIComponent(sp.q) + '&kinds=' + encodeURIComponent(k) + '&limit=50&offset=' + off, { cache: 'no-store', credentials: 'same-origin' })
+    fetch('/api/search?q=' + encodeURIComponent(sp.q) + '&kinds=' + encodeURIComponent(k) + '&limit=50&offset=' + off + (sp.krw ? '&krw=' + encodeURIComponent(String(Math.round(sp.krw * 100) / 100)) : ''), { cache: 'no-store', credentials: 'same-origin' })
       .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
       .then(j => {
         if (!mine()) return;
@@ -883,7 +886,7 @@
       const q0 = effQ(), sp = srvParamsOf(q0, ST.scope), pv0 = pvOn();
       if (!sp.q || sp.skip || locked()) { ST.srvBusy = false; return; }
       paintMeta();
-      fetch('/api/search?q=' + encodeURIComponent(sp.q) + (sp.kinds ? '&kinds=' + encodeURIComponent(sp.kinds) : '') + '&limit=30', { cache: 'no-store', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined })
+      fetch('/api/search?q=' + encodeURIComponent(sp.q) + (sp.kinds ? '&kinds=' + encodeURIComponent(sp.kinds) : '') + '&limit=30' + (sp.krw ? '&krw=' + encodeURIComponent(String(Math.round(sp.krw * 100) / 100)) : ''), { cache: 'no-store', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined })
         .then(r => (r.ok ? r.json() : Promise.reject(new Error(r.status === 404 ? 'none' : 'HTTP ' + r.status))))
         .then(j => { if (ST.ctl !== ctl || q0 !== effQ() || locked() || pv0 !== pvOn()) return; ST.srv = j && j.ok ? j : null; ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.srvQ = q0; ST.srvPv = pv0; ST.srvKinds = sp.kinds || ''; ST.srvErrQ = j && j.ok ? null : q0; ST.srvBusy = false; ST.srvErr = j && j.ok ? '' : 'err'; run(); paintBody(); })
         .catch(e => { if (e && e.name === 'AbortError') return; if (ST.ctl !== ctl) return; ST.srvBusy = false; ST.srvErr = String((e && e.message) || 'err');

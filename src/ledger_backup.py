@@ -17,14 +17,14 @@ AT_HM = (4, 30)
 KEEP_DB = 3
 KEEP_DB_MAX = 30
 KEEP_JSON = 30
-MIN_FREE = 10 * 1024 ** 3
+MIN_FREE = 512 * 1024 ** 2
 RETRY_S = 3600
 START_GRACE_S = 600
 _DB_RX = re.compile(r"^ledger_(\d{8})\.db$")
 _JS_RX = re.compile(r"^prefs_(\d{8})\.json$")
 _FD_RX = re.compile(r"^files_(\d{8})$")
 KEEP_FILES = 30
-FILES_STATE = ("daily_px.json",)
+FILES_STATE = ("daily_px.json", "other_assets.json", "settings.json", "nft_prefs.json", "day_memos.json")
 FILES_STATE_RX = re.compile(r"^reviews_llm[\w-]*\.json$")
 CONFIG_KEYS = ("wallets", "exchange_addresses")
 
@@ -191,7 +191,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
     free = shutil.disk_usage(BACKUP_DIR).free
     st["free"] = int(free)
     if free < max(MIN_FREE, int(size * 1.2)):
-        st.update(skip="disk", skip_at=int(now))
+        st.update(skip="disk", skip_at=int(now), need=int(max(MIN_FREE, size * 1.2)))
         _write_status(st)
         if log:
             log.warning("원장 정기 백업 건너뜀 — 디스크 여유 %.1fGB < 필요 %.1fGB(1시간 뒤 재시도)",
@@ -285,3 +285,149 @@ def tick(log=None, now: float = None, db_path: str = None) -> bool:
         if log:
             log.warning("원장 정기 백업 점검 실패(다음 주기): %s", e)
         return False
+
+
+STREAM_STATE = {
+    "evm": (re.compile(r"^emitted_(?:evm|rpc)_[\w.-]+\.json$"),),
+    "sol": (re.compile(r"^emitted_sol\.json$"),),
+    "bsc": (re.compile(r"^emitted_bsc\.json$"),),
+    "ex": (re.compile(r"^upbit_orders_state\.json$"), re.compile(r"^exf_state\.json$")),
+}
+NEW_LEDGER_OK = "ledger_new_ok.json"
+NEW_LEDGER_OK_TTL = 3600
+
+
+def _nonempty_json(path: str) -> bool:
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return os.path.exists(path)
+    return bool(d)
+
+
+def inbox_segments(inbox_dir: str, stream: str) -> list:
+    d = os.path.join(inbox_dir, stream)
+    try:
+        return sorted(int(f.split(".")[0]) for f in os.listdir(d) if f.endswith(".jsonl") and f.split(".")[0].isdigit())
+    except OSError:
+        return []
+
+
+def prior_ledger_evidence(state_dir: str = None, db_path: str = None) -> list:
+    sd = state_dir or common.STATE_DIR
+    dbp = db_path or os.path.join(sd, "ledger.db")
+    base = os.path.basename(dbp)
+    out = []
+    bdir = os.path.join(sd, "backups")
+    try:
+        bk = sorted(n for n in os.listdir(bdir) if _DB_RX.match(n) or _JS_RX.match(n) or n == "backup_status.json")
+    except OSError:
+        bk = []
+    if bk:
+        dbs = [n for n in bk if _DB_RX.match(n)]
+        out.append(f"원장 백업 {len(dbs)}개(state/backups)" if dbs else "백업 기록(state/backups)")
+    try:
+        side = sorted(n for n in os.listdir(os.path.dirname(dbp) or ".") if n.startswith((base + ".", base + "-")))
+    except OSError:
+        side = []
+    if side:
+        out.append("이전 원장 보존본·부속 파일: " + ", ".join(side[:3]) + (" …" if len(side) > 3 else ""))
+    if os.path.exists(os.path.join(sd, "backfill_done")):
+        out.append("백필 완료 표식(state/backfill_done)")
+    ib = os.path.join(sd, "inbox")
+    try:
+        names = os.listdir(sd)
+    except OSError:
+        names = []
+    for stream, rxs in STREAM_STATE.items():
+        segs = inbox_segments(ib, stream)
+        if segs and segs[0] > 1:
+            out.append(f"인박스 {stream} 앞부분(세그먼트 1~{segs[0] - 1})을 예전 원장이 이미 읽고 지움")
+            continue
+        if not segs:
+            sent = [n for n in names if any(rx.match(n) for rx in rxs) and _nonempty_json(os.path.join(sd, n))]
+            if sent:
+                out.append(f"수집기 {stream} 가 보낸 기록({sent[0]}{' 외' if len(sent) > 1 else ''})은 있는데 인박스가 비어 있음")
+    return out
+
+
+def new_ledger_ok(state_dir: str = None, consume: bool = False, now: float = None) -> bool:
+    p = os.path.join(state_dir or common.STATE_DIR, NEW_LEDGER_OK)
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        ok = isinstance(d, dict) and 0 <= (time.time() if now is None else now) - float(d.get("ts") or 0) <= NEW_LEDGER_OK_TTL
+    except (OSError, ValueError, TypeError):
+        return False
+    if consume:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    return ok
+
+
+def fsync_file(path: str):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def fsync_dir(path: str) -> bool:
+    try:
+        fd = os.open(path or ".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        return False
+    try:
+        os.fsync(fd)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def swap_in(live: str, new: str, keep_as: str = None, log=None) -> dict:
+    d = os.path.dirname(os.path.abspath(live))
+    fsync_file(new)
+    linked, kept = False, None
+    if os.path.exists(live):
+        if not keep_as:
+            raise ValueError("live 가 있으면 keep_as 필요(옛 원장 보존 이름)")
+        if os.path.lexists(keep_as):
+            raise FileExistsError(keep_as)
+        try:
+            os.link(live, keep_as)
+            linked = True
+        except OSError as e:
+            if log:
+                log.warning("원장 하드 링크 실패(%s) — 이름 바꾸기 두 번으로 교체", e)
+        moved, renamed = [], False
+        try:
+            for sfx in ("-wal", "-shm"):
+                if os.path.exists(live + sfx):
+                    os.replace(live + sfx, keep_as + sfx)
+                    moved.append(sfx)
+            if not linked:
+                os.replace(live, keep_as)
+                renamed = True
+            os.replace(new, live)
+        except BaseException:
+            if renamed and not os.path.exists(live):
+                os.replace(keep_as, live)
+            for sfx in reversed(moved):
+                if os.path.exists(keep_as + sfx) and not os.path.exists(live + sfx):
+                    os.replace(keep_as + sfx, live + sfx)
+            if linked and os.path.exists(keep_as) and os.path.exists(live) and os.path.samefile(keep_as, live):
+                os.remove(keep_as)
+            fsync_dir(d)
+            raise
+        kept = keep_as
+        fsync_dir(d)
+        return {"linked": linked, "kept": kept}
+    os.replace(new, live)
+    fsync_dir(d)
+    return {"linked": linked, "kept": kept}

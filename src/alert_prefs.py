@@ -315,7 +315,7 @@ def apply_post(cur_raw, body):
     if "preset" in body:
         if len(body) != 1:
             return None, "preset 은 단독으로만 보낼 수 있어요"
-        if body["preset"] not in PRESETS:
+        if not isinstance(body["preset"], str) or body["preset"] not in PRESETS:
             return None, "preset 은 rec|min|all"
         d = preset_doc(body["preset"])
         cur9 = normalize(cur_raw)

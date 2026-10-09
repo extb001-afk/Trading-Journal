@@ -19,3 +19,8 @@ __pycache__/
 .DS_Store
 dist/
 dev/
+state*/
+config*.json
+!config.example.json
+env*.txt
+*.json.bak

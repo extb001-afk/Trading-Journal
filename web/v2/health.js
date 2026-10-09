@@ -16,7 +16,7 @@
     .replace(/pm2 restart (tj-[a-z]+)/g, (a, u) => (UNIT_KO[u] || u) + ' 재시작')
     .replace(/pm2 monit/g, '메모리 추이');
   const LV = { ok: 0, warn: 1, crit: 2 };
-  const LBL = { ok: '정상', warn: '주의', crit: '오류', unknown: '확인 불가' };
+  const LBL = { ok: '정상', warn: '주의', crit: '오류', get unknown() { return H.err && !H.data ? '상태 못 받음' : '감시 꺼짐·첫 점검 전'; } };
   const UNIT_KO = {
     'tj-evm': 'EVM 수집', 'tj-sol': 'Solana 수집', 'tj-bsc': 'BSC 수집', 'tj-core': '원장 처리', 'tj-web': '대시보드·시세',
     'tj-alert': '알림·감시', 'tj-review': '하루 리뷰', 'tj-ex': '업비트', 'tj-exf': '해외 거래소', system: '시스템'
@@ -255,7 +255,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
       const part = (k, v) => '<span class="tjh-part ' + partTone(k) + '"><i></i><span class="tjh-n">' + LBL[k] + ' ' + v + '</span></span>';
       return '<span class="tjh-long">' + [c.crit ? part('crit', c.crit) : '', c.warn ? part('warn', c.warn) : '', c.known ? '<span class="tjh-part known"><i></i><span class="tjh-n">알려진 사항 ' + c.known + '</span></span>' : ''].filter(Boolean).join('<span class="tjh-sep" aria-hidden="true"> · </span>') + '</span><span class="tjh-short" aria-hidden="true">' + shortH() + '</span>';
     }
-    const label = o === 'unknown' ? (mobile ? '' : '확인 불가') : (mobile ? '' : '정상');
+    const label = o === 'unknown' ? (mobile ? '' : LBL.unknown) : (mobile ? '' : '정상');
     return '<span class="tjh-dot ' + o + '"></span>' + (label ? '<span class="tjh-n">' + esc(label) + '</span>' : '');
   }
   function btnTitle() {
@@ -267,7 +267,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   }
   function popHTML() {
     const d = H.data;
-    if (!d) return '<div class="ph"><span>' + (H.err ? '상태를 불러오지 못했습니다 · ' + esc(H.err) : '불러오는 중…') + '</span></div>' + popFoot();
+    if (!d) return '<div class="ph"><span>' + (H.err ? '상태를 불러오지 못했어요 · ' + esc(H.err) : '불러오는 중…') + '</span></div>' + popFoot();
     const op = openNew().slice().sort((a, b) => ((b.level === 'crit') - (a.level === 'crit')) || ((extOf(b) ? 1 : 0) - (extOf(a) ? 1 : 0)));
     const kn = openKnown();
     const anyExt = op.some(x => extOf(x));
@@ -292,11 +292,11 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   function okOrUnk(panel, kn) {
     if (overall() === 'unknown') {
       const why = (H.data && H.data.note) || (H.err ? '상태를 불러오지 못했어요' : '아직 상태 점검 결과가 없어요');
-      return panel ? '<div class="tjh-empty unk"><span class="tjh-dot unknown"></span><span>확인 불가 — 문제가 있는지 아직 알 수 없어요</span></div>'
-        : '<div class="ok unk"><span class="tjh-dot unknown"></span><span>확인 불가 — ' + esc(why) + '</span></div>';
+      return panel ? '<div class="tjh-empty unk"><span class="tjh-dot unknown"></span><span>' + esc(LBL.unknown) + ' — 문제가 있는지 아직 알 수 없어요</span></div>'
+        : '<div class="ok unk"><span class="tjh-dot unknown"></span><span>' + esc(LBL.unknown) + ' — ' + esc(why) + '</span></div>';
     }
-    return panel ? '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>'
-      : '<div class="ok"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없습니다' : '열린 문제가 없습니다') + '</div>';
+    return panel ? '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없어요' : '열린 문제가 없어요') + '</div>'
+      : '<div class="ok"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없어요' : '열린 문제가 없어요') + '</div>';
   }
   function tgNote() {
     const t = (H.data && H.data.telegram) || null;
@@ -357,7 +357,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   }
   function tgHTML() {
     const t = (H.data && H.data.telegram) || {};
-    if (!t.configured) return '<div class="tjh-tg"><span class="tjh-dot off"></span><div><b>텔레그램 미연결</b><div class="cap">연결하면 오류(빨강)만 알림으로 받습니다 · 주의(주황)는 이 화면에만</div></div></div>';
+    if (!t.configured) return '<div class="tjh-tg"><span class="tjh-dot off"></span><div><b>텔레그램 미연결</b><div class="cap">연결하면 오류(빨강)만 알림으로 받아요 · 주의(주황)는 이 화면에만</div></div></div>';
     const bad = t.consecFail > 0;
     return '<div class="tjh-tg"><span class="tjh-dot ' + (bad ? 'crit' : 'ok') + '"></span><div><b>텔레그램 연결됨</b><div class="cap">'
       + (bad ? '최근 발송 실패 ' + t.consecFail + '회' + (t.lastError ? ' · ' + esc(t.lastError) : '') : (t.lastOk ? '마지막 발송 ' + esc(ago(nowS() - t.lastOk)) + ' 전' : '아직 발송 없음'))
@@ -372,13 +372,13 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   }
   function headerLine() {
     const d = H.data;
-    if (!d) return H.err ? '상태를 불러오지 못했습니다 · ' + esc(H.err) : '불러오는 중…';
+    if (!d) return H.err ? '상태를 불러오지 못했어요 · ' + esc(H.err) : '불러오는 중…';
     return '마지막 점검 ' + (d.updatedAt ? esc(ago(nowS() - d.updatedAt)) + ' 전' : '—') + ' · 60초마다 점검';
   }
   function bodyHTML(inSettings) {
     const d = H.data;
     let h = '';
-    if (!d) return '<div class="tjh-bnr g">' + (H.err ? '상태를 불러오지 못했습니다 — ' + esc(H.err) : '불러오는 중…') + '</div>';
+    if (!d) return '<div class="tjh-bnr g">' + (H.err ? '상태를 불러오지 못했어요 — ' + esc(H.err) : '불러오는 중…') + '</div>';
     if (d.note) h += '<div class="tjh-bnr g">' + esc(d.note) + '</div>';
     const op = openNew(), kn = openKnown();
     const crit = op.filter(x => x.level === 'crit'), warn = op.filter(x => x.level !== 'crit');

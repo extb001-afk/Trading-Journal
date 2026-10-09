@@ -942,6 +942,10 @@ _CHAIN_WORDS = {"eth": ("이더리움", "ethereum", "이더 체인", "메인넷"
                 "hyperliquid": ("하이퍼리퀴드", "hyperliquid"), "kaia": ("카이아", "kaia"), "linea": ("리니아", "linea")}
 _STOP = {"에서", "에", "의", "을", "를", "은", "는", "이", "가", "도", "만", "한", "본", "했던", "했던거", "거래", "거래들", "것", "거", "들", "좀", "모두", "전부", "보여줘", "보여 줘",
          "찾아줘", "찾아", "알려줘", "목록", "내역", "기록", "중", "중에", "때", "날", "있는", "있던", "된", "했던것", "코인", "코인들", "내", "나의", "제일", "가장", "큰"}
+def _gain_word(s: str) -> bool:
+    return any(w in s for w in _GAIN) or re.search(r"(?:^|\s)번(?:\s|$)", s) is not None
+
+
 _AMT_RE = re.compile(r"(\$|₩)?\s?([\d,.]+)\s?(억|만|천)?\s?(원|달러|불|usd|krw)?\s?(이상|넘는|넘게|초과|보다 큰|이하|미만|안 되는|아래)", re.I)
 _MONTH_RE = re.compile(r"(?:(\d{4})년\s?)?(\d{1,2})월(?!\s?\d{1,2}일)")
 _RECENT_RE = re.compile(r"(?:최근|지난)\s?(\d{1,3})\s?(일|주|달|개월)")
@@ -1042,13 +1046,19 @@ def ask_rules(q: str, today: datetime = None, coins=None, rate: float = 1384.0) 
             krw = (m.group(1) == "₩") or (m.group(4) or "").lower() in ("원", "krw") or (m.group(3) is not None and m.group(1) != "$")
             usd = v / (rate or 1384) if krw else v
             op = ">" if m.group(5) in ("이상", "넘는", "넘게", "초과", "보다 큰") else "<"
-            f["amt"] = op + str(int(round(usd)))
-            echo.append(("₩" + f"{int(v):,}" if krw else "$" + f"{v:,.0f}") + (" 이상" if op == ">" else " 이하")); hits += 1
             s = s[:m.start()] + " " + s[m.end():]
+            gw, lw = _gain_word(s), any(w in s for w in _LOSS)
+            amt9 = int(round(usd))
+            if "pnl" not in f and op == ">" and (gw or lw or "손익" in s):
+                f["pnl"] = (">" + str(amt9)) if (gw or (not lw)) else ("<-" + str(amt9))
+                echo.append(("₩" + f"{int(v):,}" if krw else "$" + f"{v:,.0f}") + (" 넘게 손실" if (lw and not gw) else " 넘게 수익" if gw else " 넘는 손익")); hits += 1
+            else:
+                f["amt"] = op + str(amt9)
+                echo.append(("₩" + f"{int(v):,}" if krw else "$" + f"{v:,.0f}") + (" 이상" if op == ">" else " 이하")); hits += 1
     if "pnl" not in f:
         if any(w in s for w in _LOSS):
             f["pnl"] = "<0"; echo.append("손실"); hits += 1
-        elif any(w in s for w in _GAIN):
+        elif _gain_word(s):
             f["pnl"] = ">0"; echo.append("수익"); hits += 1
     if "type" not in f:
         for t, words in _TYPE_WORDS:
@@ -1083,7 +1093,7 @@ def ask_rules(q: str, today: datetime = None, coins=None, rate: float = 1384.0) 
         if "coin" not in f and (al or (re.fullmatch(r"[A-Za-z][A-Za-z0-9]{1,11}", t9) and (up in known or t9.isupper()))):
             f["coin"] = al or up; echo.append(f["coin"]); hits += 1
             continue
-        if kw(tok) or kw(t9):
+        if kw(tok) or kw(t9) or tok == "번" or t9 == "손익":
             continue
         if any(t9.lower() == w or t9 == w for ws in _CHAIN_WORDS.values() for w in ws):
             continue

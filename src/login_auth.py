@@ -45,6 +45,7 @@ PROXY_HDRS = ("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "Forwa
               "Cf-Connecting-Ip", "Cf-Ray", "Cf-Visitor", "Cf-Warp-Tag-Id", "True-Client-Ip")
 _PROXY_PREFIX = ("cf-", "x-forwarded-")
 _PROXY_HDRS = PROXY_HDRS
+_PUB_FONT_RE = re.compile(r"/v2/fonts/(?:plex\.css|[a-z]{1,16}-[0-9]{3}-[0-9a-f]{12}\.woff2)")
 LOGIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 _COMMON_WEAK = {"password12", "password123", "password1234", "password12345", "passw0rd12", "qwertyuiop", "qwerty1234",
                 "qwerty12345", "1q2w3e4r5t", "1q2w3e4r5t6y", "1qaz2wsx3edc", "asdfghjkl;", "asdfghjkl1", "zxcvbnm123",
@@ -663,7 +664,7 @@ def _read_json(h, limit=BODY_MAX):
     h.connection.settimeout(10)
     try:
         d = json.loads(h.rfile.read(n).decode("utf-8"))
-    except (ValueError, OSError):
+    except (ValueError, OSError, RecursionError):
         return None
     return d if isinstance(d, dict) else None
 
@@ -954,6 +955,8 @@ def _handle(h, onboarding, method, path, query):
             return _file(h, "login.html", "text/html; charset=utf-8")
         if path == "/v2/login.js":
             return _file(h, "login.js", "application/javascript; charset=utf-8")
+        if _PUB_FONT_RE.fullmatch(path):
+            return False
         if path == "/api/auth/status":
             return _status(h)
         if _internal_ok(h):

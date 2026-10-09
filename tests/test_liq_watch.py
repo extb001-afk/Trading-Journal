@@ -259,7 +259,8 @@ s9 = w.v["binance"]
 check("E1 권한 오류 = 포지션 없음 아님 — 들고 감시 · 닫힘/해소 ✅ 없음", s9.get("pos") and s9.get("ekind") == "perm" and not got, (s9.get("ekind"), [x["text"][:30] for x in got]))
 j9 = w.jobs["acct:binance"]
 e1t = [c[0] for c in calls("fapi.binance.com", "/fapi/v3/positionRisk", T[0] - 40)]
-check("E2 권한 오류 = 6시간 쉼(첫 401 뒤 계정 조회 0)", j9["until"] - T[0] > 5 * 3600 and len(e1t) == 1, (j9["until"] - T[0], len(e1t)))
+check("E2 권한 오류(포지션 들고 있음) = 5분 쉼(첫 401 뒤 40초 동안 계정 조회 0 · 6시간 아님)",
+      0 < j9["until"] - T[0] <= LW.PERM_RETRY_HELD and len(e1t) == 1, (j9["until"] - T[0], len(e1t)))
 W.mark[("binance", "BTCUSDT")] = 70000.0
 got = run(w, 10)
 check("E3 포지션이 낡은 동안(90초 넘음)엔 시세가 멀어져도 해소 ✅ 안 함", not got, [x["text"][:30] for x in got])

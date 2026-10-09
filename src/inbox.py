@@ -6,6 +6,8 @@ import time
 
 SEG_MAX_BYTES = 8 * 1024 * 1024
 SEG_MAX_AGE_SEC = 3600
+RETAIN_SEC = 8 * 86400
+RETAIN_MAX_BYTES = 512 * 1024 * 1024
 LOCK_FILE = ".queue.lock"
 
 
@@ -148,15 +150,34 @@ class SegmentReader:
             finally:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
-    def _gc_locked(self, consumed_seg: int) -> None:
+    @staticmethod
+    def retain_sec() -> float:
+        v = os.environ.get("TJ_INBOX_RETAIN_DAYS")
+        if v not in (None, ""):
+            try:
+                return max(0.0, float(v)) * 86400
+            except ValueError:
+                pass
+        return RETAIN_SEC
+
+    def _gc_locked(self, consumed_seg: int, now: float = None) -> None:
         segs = self._segs()
         if not segs:
             return
         active = segs[-1]
-        for s in segs:
-            if s >= active or s >= consumed_seg:
+        keep_s = self.retain_sec()
+        now = time.time() if now is None else now
+        kept = 0
+        for s in sorted((x for x in segs if x < active and x < consumed_seg), reverse=True):
+            p = self._path(s)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if keep_s > 0 and now - st.st_mtime < keep_s and kept + st.st_size <= RETAIN_MAX_BYTES:
+                kept += st.st_size
                 continue
             try:
-                os.unlink(self._path(s))
+                os.unlink(p)
             except OSError:
                 pass

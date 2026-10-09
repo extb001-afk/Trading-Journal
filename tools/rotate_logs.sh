@@ -22,7 +22,7 @@ done
 case "$MAX_MB" in ''|*[!0-9]*) echo "--max-mb 는 숫자만(MB 정수)"; exit 2;; esac
 case "$KEEP_MB" in ''|*[!0-9]*) echo "--keep-mb 는 숫자만(MB 정수)"; exit 2;; esac
 [ "$KEEP_MB" -lt "$MAX_MB" ] || { echo "--keep-mb 는 --max-mb 보다 작아야"; exit 2; }
-[ -d "$DIR" ] || { echo "디렉터리 없음: $DIR"; exit 2; }
+[ -d "$DIR" ] || { echo "디렉터리 없음: $DIR — pm2 없이 실행하면 로그는 터미널(또는 직접 돌린 파일)로 나와요: 그 폴더를 인자로(예: bash tools/rotate_logs.sh ~/tj-logs · 파일 이름 tj-*.log)"; exit 2; }
 max=$((MAX_MB * 1024 * 1024)); keep=$((KEEP_MB * 1024 * 1024)); n=0; freed=0
 for f in "$DIR"/tj-*.log; do
   [ -f "$f" ] || continue

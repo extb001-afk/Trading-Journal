@@ -48,13 +48,7 @@ _VAL_RE = re.compile(r"^[\x21-\x7e]{1,512}$")
 
 
 def _parse_env_line(line: str):
-    s = line.strip()
-    if not s or s.startswith("#") or "=" not in s:
-        return None
-    if s.startswith("export "):
-        s = s[7:].lstrip()
-    k, v = s.split("=", 1)
-    return k.strip(), v.strip()
+    return common.parse_env_line(line)
 
 
 def read_env() -> dict:
@@ -152,9 +146,28 @@ def read_settings() -> dict:
         return {}
 
 
+def _read_settings_for_write() -> dict:
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except ValueError:
+        d = None
+    if isinstance(d, dict):
+        return d
+    bad = SETTINGS_PATH + f".bad.{int(time.time())}"
+    try:
+        os.replace(SETTINGS_PATH, bad)
+    except OSError:
+        pass
+    __import__("logging").getLogger("tj-settings").error("state/settings.json 손상 — %s 로 옮기고 새로 씀(텔레그램 연결 정보 등은 다시 저장 필요할 수 있음)", bad)
+    return {}
+
+
 def update_settings(**kw) -> dict:
     with LOCK:
-        s = read_settings()
+        s = _read_settings_for_write()
         for k, v in kw.items():
             if v is None:
                 s.pop(k, None)
@@ -252,8 +265,31 @@ def b58decode(s: str) -> bytes:
     return b"\x00" * pad + raw
 
 
+SOL_NOT_WALLET = {
+    "11111111111111111111111111111111": "시스템 프로그램",
+    "So11111111111111111111111111111111111111112": "wSOL 민트",
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": "토큰 프로그램",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": "토큰-2022 프로그램",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": "연결 토큰 계정 프로그램",
+    "Stake11111111111111111111111111111111111111": "스테이크 프로그램",
+    "Vote111111111111111111111111111111111111111": "투표 프로그램",
+    "ComputeBudget111111111111111111111111111111": "컴퓨트 예산 프로그램",
+}
+try:
+    import pricing as _pricing
+    SOL_NOT_WALLET.update({m: f"{sym} 민트" for m, sym in _pricing.STABLE_MINTS.items()})
+except Exception:
+    SOL_NOT_WALLET.update({"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC 민트", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT 민트"})
+
+
 def validate_address(addr: str):
     a = (addr or "").strip()
+    sec9 = secret_like([a]) or ("개인 키(Solana 비밀 키)처럼 보이는 값이에요 — 지우고 주소만 넣으세요. 개인 키는 절대 입력하지 마세요"
+                                if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{80,90}", a) else "")
+    if sec9:
+        raise ValueError(sec9.replace("아무것도 저장하지 않았습니다", "저장하지 않았습니다"))
+    if a in SOL_NOT_WALLET:
+        raise ValueError(f"지갑 주소가 아니에요({SOL_NOT_WALLET[a]}) — 내 지갑 주소를 넣으세요")
     if a.lower().startswith("0x"):
         body = a[2:]
         if len(body) != 40 or not re.fullmatch(r"[0-9a-fA-F]{40}", body):
@@ -269,9 +305,9 @@ def validate_address(addr: str):
             note = "체크섬 없는 주소(전부 소문자/대문자) — 오타 여부를 한 번 더 확인하세요"
         return "evm", "0x" + body.lower(), note
     if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", a):
-        raise ValueError("0x… EVM 주소 또는 Solana(base58) 주소가 아닙니다")
+        raise ValueError("0x… EVM 주소 또는 Solana(base58) 주소가 아닙니다 — 비트코인·트론·코스모스 등은 지원하지 않아요")
     if len(b58decode(a)) != 32:
-        raise ValueError("Solana 주소는 base58 로 32바이트여야 합니다")
+        raise ValueError("Solana 주소는 base58 로 32바이트여야 합니다(트론 T… 주소 등은 지원하지 않아요)")
     return "sol", a, "Solana 주소 형식 확인됨"
 
 

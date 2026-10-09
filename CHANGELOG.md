@@ -3,6 +3,71 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트 뒤에는 `pm2 restart ecosystem.config.js` 로 유닛을 다시 켜세요(바뀐 유닛만 다시 켜도 됩니다).
 
+## 2026-10-09 오후 — 외부 전면검토 반영
+
+**선물 정산 = 정산 시각 · 스테이블 원화 환차 · 최초 인식 시가 · 수수료 원가 · 곡선 재설계 · 서버 밖 둘째 백업 · 청산 감시 · 화면·접근성**
+
+직전 공개판 전체를 다시 본 외부 검토(71건)를 하나씩 재현해 보고 진짜인 것을 고친 판이에요. 사진은 지난 판 그대로예요.
+
+> **업데이트 뒤 숫자가 바뀔 수 있어요** — `pm2 restart ecosystem.config.js` 로 모든 유닛을 다시 켜세요. 원가를 모르던 수량에 '최초 인식 시가'(기본 켬)가 붙고,
+> 수수료 원가 규약·스테이블 원화 환차가 실현손익·양도차익 명세에 들어가요(추정한 행은 '추정' 표시). tj-core 는 첫 거래소 대사 때 지난 선물 정산을 정산 시각으로 한 번 다시 놓고,
+> 30일·장기 곡선은 새 규칙으로 한 번 다시 계산돼요(재구축은 필요 없어요).
+
+- **선물 정산 = 정산 시각** — 거래소 잔고에 합쳐진 선물 지갑(바이낸스·바이빗·OKX)의 실현 손익·수수료·펀딩을 대사하는 날이 아니라 **정산 시각**에 총자산으로 기장해요(지난날로 소급하지 않음).
+  업데이트 뒤 첫 대사 때 지난 대사가 다른 날로 보낸 선물 정산을 한 번 다시 놓아요 — 근거(감사 기록·선물 정산 파일)가 모자란 통화는 옛 배치 그대로 두고,
+  `tools/exf_fut_place.py` 로 계획 미리보기·되돌리기를 할 수 있어요. 선물 정산 파일이 잔고를 못 덮으면 그 거래소 대사를 미루고(상한 3시간 · 1시간 넘게 미루면 상태 패널 '주의'),
+  늦게 찾은 옛 체결의 상쇄는 그 체결 직후에 둬요. 대사 되돌림은 부채 이자를 지우지 않고, 재구축은 선물 정산 금액·시각을 그대로 이어 가요. '선물 미반영' 줄은 아직 대사 전인 정산만이에요.
+- **해외 거래소 잔고 대사** — 잔고 응답의 금액 칸이 빠졌거나 목록이 불완전하면 조회 실패로 보고 보류 · 잔고 표본 두 번이 일치할 때만 대사 · 마진 체결·간편전환 일시 실패와 진행 중 출금 동안엔 대사를 미뤄요 ·
+  바이낸스 담보대출 담보가 Earn 과 두 번 세이던 것 고침 · 바이낸스를 새로 연결하면 모든 심볼 체결 확인을 마친 뒤 첫 대사.
+- **양도차익 명세 — 스테이블 원화 환차** — 스테이블코인을 원화로 산 몫은 산 때 원화를 취득가로 써서 환차손익을 별도 표로 보여 줘요. 원화 기록이 없는 몫(액면 입금·기초 잔고)은 처분 시각 환율(환차 0)이고,
+  거래소↔지갑·해외 거래소로 옮겨도 원화 원가 몫과 액면 몫을 따로 이어 가요(수수료로 쓴 몫·오프체인 왕복 포함). 처분 행을 누르면 **환차 상세**(용도 · 처분 환율 · 평균 취득 환율 · 주요 매수 상위 3 · 계산식)가 열려요.
+  선물 손익·기타 소득(스테이킹·유동성 보상)도 별도 표 · 추정 행 배지 · 시행일 문구는 날짜 기준 · 원가 방식 설명 · 선물 승률은 '정산 건 기준'으로 표기.
+- **최초 인식 시가(기본 켬)** — 원가를 모르는 수량(기초 잔고·원가 없는 입금·에어드랍)의 원가를 그 수량이 장부에 처음 생긴 날 시가로 추정해요. 명세·카드·실현손익 머리에 '추정'으로 표시하고,
+  스테이블은 원화 취득가를 그때 환율로, 직접 지정한 원가가 먼저예요. 옛날 날(원장 시작일까지) 시세는 남는 API 사용량으로 천천히 받아 채우고(진행률 = 설정 › 원가 계산),
+  '이 중 추정' 실현은 수수료·가스 뒤 금액이에요. 가치를 모르는 스왑으로 이어받은 수량은 스왑 날 시가로 다시 매기지 않아요. 끄기 = **설정 › 원가 계산**.
+- **수수료 원가 규약** — 가스·체결 수수료로 낸 코인·거래소 출금 수수료 = 그때 시가만큼 비용 + 원가를 아는 몫의 처분 손익(업비트·게이트·빗썸 출금 수수료 몫의 원가가 사라지던 것 고침 · 명세에도 한 줄씩) ·
+  양쪽 시세가 없는 스왑은 원가를 그대로 이어받음 · 브릿지 거래에서 받은 토큰 반영 · 평균가 대체는 그 사이클의 평단만.
+- **재생 순서·브릿지 짝** — 같은 초의 매수·매도는 블록 번호·체결 시각(ms)·보유로 순서를 정하고, 브릿지 도착은 id 로 이어진 짝을 먼저 확정한 뒤 수량 98~102%·분할 묶음·같은 컨트랙트 우선·스팸 제외로 짝지어요 ·
+  늦게 기록된 거래소 출금도 같은 txid 도착에 원가를 넘겨요(화면 계산만 · 원장 무변).
+- **곡선 재설계** — 원장 밖 금액(업비트·빗썸 원화, 업비트 미매칭 코인, LP, Rabby 몫)을 구성요소별 규칙 하나로 계산해 30일 곡선과 장기 곡선이 같은 값을 써요.
+  일별 마감 때 구성요소를 따로 기록하고(원화는 원 단위·환율·잔고 시각과 함께), 빗썸 원화도 지난날마다 거래 기록으로 되감은 그날 잔고를 써요(종전 = 지금 잔고를 모든 지난날에).
+  한 번 정한 지난날 값은 다시 매기지 않고(옛 계산 동결값만 한 번 규칙대로 다시), 장기 곡선 30일 창 밖 날에도 그날 Rabby 몫이 들어가며, 업비트 미매칭 코인이 원장에 편입돼도 두 번 세지 않아요.
+  장기 곡선 순유입에 빗썸 원화 입출금도 넣고, 기록과 실제 잔고가 크게 어긋난 구간은 가까운 실측값을 써요. 누락 레그 재기장·원장 복구 뒤에는 곡선을 다시 계산해요.
+- **서버 밖 둘째 백업 · 복구** — 원장 파일이 없는데 예전 원장 흔적(백업·수집 기록)이 있으면 빈 원장을 만들지 않고 기다리며 복구를 안내해요(상태 패널 '원장 파일 없음 — 복구 필요').
+  원장 교체는 원자적으로, 수집기 기록(`state/inbox/`)은 읽은 뒤에도 8일 남겨요. 새 도구 `tools/ledger_restore.py`(백업 목록·검사·되돌리기·그 사이 수집분 다시 받기)와
+  `tools/offsite_backup.py`(압축 원장 사본을 다른 컴퓨터로 · sha256 확인 · 밖으로 ssh 를 못 나가면 outbox 모드 · 기본 꺼짐) — README [백업 · 복구](README.md#백업--복구).
+  정기 백업이 3일 넘게 없으면 상태 패널 빨강 + 텔레그램.
+- **청산 감시** — 거래소 조회가 막혀도 마지막 값으로 위험 알림을 보내고, '청산 감시가 <곳>을 못 보고 있어요' 알림·상태 패널 빨강 · 청산가 도달은 늘 한 번 더 ·
+  위험 구간이면 1시간마다 다시(`alerts.liq_repeat_min` · 0 = 끔) · 벗어났다 다시 들어오면 다시 알림 · OKX 선물 명목가에 계약 단가 반영 · BTC 비교선이 일별 가격을 제대로 찾음.
+- **수집기** — 이더스캔 경로의 직접 감싸기·풀기(WETH·WPOL 등)를 전환으로 기록 · 프록시 내부 호출(delegatecall 등)을 값 이동으로 두 번 세지 않음 ·
+  솔라나 옛 응답의 소유자 없는 토큰 줄을 버리지 않음 · 주요 L2·솔라나 정품 브리지 토큰이 '가짜'로 숨겨지던 것 고침 · NFT 1155 중복 줄 개수 ·
+  BNB Chain·추적 노드 없는 체인의 수집 한계를 문서에.
+- **상태 패널 — 재계산 대기** — 잔고 불일치·원장 음수의 '재계산 대기' 칸에 그 체인 과거 기록 넓히기의 진행률·남은 시간과 '끝나면 원장 자동 재계산으로 사라져요'를 보여 줘요.
+  넓히기가 끝날 때까지는 '주의'(주황)이고, 끝났는데도 3일 넘게 남으면 오류(빨강)·알림. 탐색기 ↔ RPC 로 경로가 바뀐 체인의 옛 진행 표식과 하루 넘게 갱신 없는 표식은 '진행 중'으로 보지 않아요.
+- **화면·접근성** — 금액 칸 말줄임 없앰(축약·줄바꿈) · 명세 카드 '양도차익(명세 기준)'과 머리 차이 줄 · 첫 설치 안내 카드·수집 전 문구 · 자동 갱신이 입력 중인 글자를 지우지 않음 ·
+  설정 마법사 초점·오류 문구 · 숫자만 쳐도 원화 금액 검색 · 접근성(h1·표 머리·토스트·확인 창 초점·차트 점) · 라이트 테마 대비 · 로그인 화면 글꼴·시스템 테마 · 해요체·용어 통일.
+- **운영·보안** — `.env` 읽기 규칙 하나로(`export` · `=` 앞뒤 공백 · 같은 따옴표 한 겹) · 연결 수·차트 캐시 상한 · 입력 검사 · 지갑이 아닌 주소(토큰 민트 등) 등록 거부 ·
+  손상된 설정 파일은 덮어쓰기 전에 보존 · 격리 재처리 요청은 앞 요청과 합침 · 배경 스레드가 손상된 상태 파일에 조용히 죽지 않음 · 쉬운 오류 문구 · 폴더 권한·인코딩 점검.
+- **문서·저장소** — README '백업 · 복구' · 첫 비밀번호의 설정 코드(`cat state/auth_setup_code`) 안내 · 재백필 때 `state/` 는 설치 폴더 밖으로 ·
+  [SECURITY.md](SECURITY.md)(보안 문제는 비공개 보고로) · `.gitignore` 에 설치 폴더 안 사본(`state*/`·`config*.json`·`env*.txt`) · CI 는 브라우저 스크립트 문법(`node --check`)도 확인 ·
+  수집 한계 문서에 바이낸스 소액 전환(Dust)·바이빗 선물 수수료·펀딩·BNB Chain 내부 이동·추적 노드 없는 체인.
+- **시험** — 공개 시험 추가: 선물 정산(재배치·근거 검사·늦은 체결) · 스테이블 환차 · 최초 인식 시가·옛날 시세 · 수수료 원가 · 재생 순서·브릿지 짝 · 곡선 구성요소 · 원장 복구 · 서버 밖 백업 ·
+  청산 감시 · 재계산 대기 · `.env` 읽기 — 전체 1,900건 넘게(파일 45개).
+
+**English** — External full-review fixes (afternoon of 2026-10-09; 71 findings on the previous public release reproduced and fixed where real).
+Futures settlements merged into exchange balances (Binance/Bybit/OKX) are booked at settlement time instead of the reconciliation day; after updating, tj-core re-places
+earlier settlements once (`tools/exf_fut_place.py` previews/undoes it; currencies without enough evidence keep the old placement). Exchange balance reconciliation waits on
+incomplete responses, needs two matching samples, and no longer double-counts Binance loan collateral. Capital-gains statement: stablecoin KRW FX gains/losses (KRW cost only
+for the part bought with KRW, carried across exchange/wallet moves), a per-row FX detail popup, and separate futures and other-income tables. Unknown-cost amounts are now
+valued at the price on the day they first appeared in the ledger ("first-seen price", on by default, marked as estimated; Settings › 원가 계산). One fee-cost rule for gas,
+trading-fee coins and withdrawal fees. Same-second replay order and bridge matching are deterministic. Curves: off-ledger amounts (Upbit/Bithumb KRW, unmatched Upbit coins,
+LP, Rabby) use one per-component rule shared by the 30-day and long-range curves, Bithumb KRW is rewound per day, and fixed past values are not re-priced.
+Backup: a ledger-restore tool (`tools/ledger_restore.py`) and an optional off-site backup (`tools/offsite_backup.py`, push or outbox, sha256-verified); tj-core no longer
+creates an empty ledger when an old one is missing. Liquidation watch alerts when it cannot see a venue and repeats in the danger zone. Collectors: direct wrap/unwrap
+on the Etherscan path is booked as a conversion. Status panel shows history-extension
+progress for "waiting for recalculation". UI/accessibility fixes, `.env` parsing unified, SECURITY.md. Screenshots unchanged. Numbers may change after updating —
+restart all units with `pm2 restart ecosystem.config.js`.
+
 ## 2026-10-09 새벽 — 3차 검수 반영 · 실현 표기
 
 **그날 카드 '총 실현' = 현물 실현 + 선물 실현 · 그날의 기록 시간순 · 진입 시각 추정 · 검색 돋보기**
