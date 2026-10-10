@@ -10,6 +10,7 @@ import _harness as T
 
 LOGS = "http://127.0.0.1:9/logs"
 DET = "http://127.0.0.1:9/detail"
+ARCH = "http://127.0.0.1:9/archive"
 W1 = "0x" + "a1" * 20
 W2 = "0x" + "a2" * 20
 OTHER = "0x" + "b0" * 20
@@ -59,6 +60,12 @@ class Chain:
         self.n = 0
         self.lock = threading.Lock()
         self.calls = {}
+        self.bal0 = None
+        self.prune = None
+        self.arch_calls = {}
+        self.arch_fail = None
+        self.hang = None
+        self.kw_seen = []
 
     def ts(self, b):
         return BASE_T + int(b * BSEC)
@@ -77,9 +84,32 @@ class Chain:
         self.tx[h] = {"blk": blk, "from": frm, "to": to, "value": val, "logs": []}
         return h
 
+    def internal(self, blk, sender, contract, to, val, mention=False, logs=()):
+        h = self._h()
+        self.tx[h] = {"blk": blk, "from": sender, "to": contract, "value": 0, "logs": list(logs), "int": [(to, val)],
+                      "mlogs": [(contract, to)] if mention else []}
+        return h
+
+    def balance(self, w, b):
+        w = str(w).lower()
+        v = int(self.bal0.get(w, 0)) if self.bal0 is not None else 10 ** 24
+        for t in self.tx.values():
+            if t["blk"] > b:
+                continue
+            if t["from"] == w:
+                v -= 21000 + t["value"]
+            if t["to"] == w:
+                v += t["value"]
+            for to9, v9 in t.get("int") or ():
+                if to9 == w:
+                    v += v9
+        return v
+
     def answer(self, url, m, p):
         with self.lock:
             self.calls[m] = self.calls.get(m, 0) + 1
+            if url == ARCH:
+                self.arch_calls[m] = self.arch_calls.get(m, 0) + 1
         if m == "eth_blockNumber":
             return hex(self.head)
         if m == "eth_getBlockByNumber":
@@ -88,8 +118,16 @@ class Chain:
                 return None
             r = {"number": hex(b), "timestamp": hex(self.ts(b)), "hash": "0x" + format(b, "064x")}
             if len(p) > 1 and p[1] is True:
-                r["transactions"] = [{"hash": h, "from": t["from"], "to": t["to"]} for h, t in sorted(self.tx.items()) if t["blk"] == b]
+                r["transactions"] = [{"hash": h, "from": t["from"], "to": t["to"], "value": hex(t["value"])} for h, t in sorted(self.tx.items()) if t["blk"] == b]
             return r
+        if m == "eth_getBlockReceipts":
+            b = int(p[0], 16)
+            if not 0 <= b <= self.head:
+                return None
+            return [{"transactionHash": h, "status": "0x1", "blockNumber": hex(b),
+                     "logs": [{"address": tok, "topics": [TRANSFER, pad(fr), pad(to)], "data": hex(v)} for tok, fr, to, v in t["logs"]]
+                     + [{"address": ca, "topics": ["0x" + "77" * 32, pad(to)], "data": "0x"} for ca, to in t.get("mlogs") or ()]}
+                    for h, t in sorted(self.tx.items()) if t["blk"] == b]
         if m == "eth_getLogs":
             q = p[0]
             a, b = int(q["fromBlock"], 16), int(q["toBlock"], 16)
@@ -142,14 +180,32 @@ class Chain:
         if m == "eth_getCode":
             return "0x"
         if m == "eth_getBalance":
-            return "0x0"
+            b = self.head if p[1] in ("latest", "pending") else int(p[1], 16)
+            if b > self.head:
+                return {"_err": {"code": -32000, "message": "header not found"}}
+            if url == ARCH and self.arch_fail == "429":
+                return {"_err": {"code": 429, "message": "Too Many Requests"}}
+            if self.prune is not None and url != ARCH and b < self.head - self.prune:
+                return {"_err": {"code": -32000, "message": "missing trie node (synthetic)"}}
+            return hex(self.balance(p[0], b))
         return {"_err": {"code": -32601, "message": "method not mocked " + m}}
 
 
 CH = Chain()
 
 
+def _hang(url, methods, deadline, kw):
+    CH.kw_seen.append((url, tuple(methods), deadline, kw.get("sem_timeout")))
+    hg = CH.hang
+    if hg and url == hg.get("url") and hg.get("method") in methods:
+        sec = float(hg.get("sec") or 0)
+        wait = sec if deadline is None else max(0.0, min(sec, float(deadline) - time.time()))
+        time.sleep(wait)
+        raise bf_engine.NetError(f"timeout: {url} (synthetic hang {wait:.1f}s)", "timeout", host="127.0.0.1")
+
+
 def fake_call(url, method, params, *, timeout=25.0, retries=2, prio="fg", deadline=None, allow_null=False, **kw):
+    _hang(url, (method,), deadline, kw)
     r = CH.answer(url, method, params)
     if isinstance(r, dict) and "_err" in r:
         e = bf_engine.classify_rpc_error(r["_err"])
@@ -161,6 +217,7 @@ def fake_call(url, method, params, *, timeout=25.0, retries=2, prio="fg", deadli
 
 
 def fake_batch(url, calls, *, timeout=30.0, retries=2, prio="fg", deadline=None, **kw):
+    _hang(url, [m for m, _p in calls], deadline, kw)
     out = []
     for m, p in calls:
         try:

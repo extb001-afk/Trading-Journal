@@ -241,8 +241,19 @@ try:
         raised9 = True
 finally:
     os.replace = real_replace
-n9 = T.safe(lambda: sqlite3.connect(lw).execute("SELECT count(*) FROM t").fetchone()[0])
-ck("[2] 교체 실패 뒤 옛 원장 = 자기 WAL 커밋까지(5행) — wl314 ②", raised9 and n9 == 5 and os.path.exists(lw + "-wal"), (raised9, n9))
+wal9 = os.path.exists(lw + "-wal")
+
+
+def _cnt9():
+    c9 = sqlite3.connect(lw)
+    try:
+        return c9.execute("SELECT count(*) FROM t").fetchone()[0]
+    finally:
+        c9.close()
+
+
+n9 = T.safe(_cnt9)
+ck("[2] 교체 실패 뒤 옛 원장 = 자기 WAL 커밋까지(5행) — wl314 ②", raised9 and n9 == 5 and wal9, (raised9, n9, wal9))
 ck("[2] 교체 실패 = 보존본 링크 정리(옛 원장 그대로라 필요 없음)", not os.path.exists(lw + ".pre_x") and not os.path.exists(lw + ".pre_x-wal"))
 
 pw = os.path.join(T.TMP, "walsrc.db")

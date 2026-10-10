@@ -989,6 +989,61 @@ def hist_dirty_update(fn, state_dir: str = None):
         return new
 
 
+HIST_LATE_K = "hist_late"
+HIST_LATE_PID_K = "hist_late_pid"
+HIST_LATE_KEEP = 32
+HIST_LATE_JOIN_S = 120
+HIST_LATE_TTL_S = 14 * 86400
+
+
+def kst_day0(ts) -> int:
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    k = _tz(_td(hours=9))
+    d = _dt.fromtimestamp(int(float(ts)), k)
+    return int(d.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+def hist_late_read(conn) -> list:
+    try:
+        r = conn.execute("SELECT v FROM meta WHERE k=?", (HIST_LATE_K,)).fetchone()
+    except Exception:
+        return []
+    try:
+        d = json.loads(r[0]) if r and r[0] else None
+    except (TypeError, ValueError):
+        return []
+    out = []
+    for m in ((d or {}).get("m") or []) if isinstance(d, dict) else []:
+        try:
+            iso = str(m[1])
+            if len(iso) != 10 or iso[4] != "-":
+                continue
+            out.append([int(m[0]), iso, int(m[2]), int(m[3])])
+        except (TypeError, ValueError, IndexError):
+            continue
+    return sorted(out)
+
+
+def hist_late_put(conn, ts, now: float = None) -> str:
+    import time as _time
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    now = _time.time() if now is None else float(now)
+    iso = _dt.fromtimestamp(int(ts), _tz(_td(hours=9))).strftime("%Y-%m-%d")
+    ms = [m for m in hist_late_read(conn) if now - m[3] < HIST_LATE_TTL_S]
+    nid = max((ms[-1][0] + 1) if ms else 0, int(now * 1000))
+    if ms and now - ms[-1][2] < HIST_LATE_JOIN_S:
+        last = ms[-1]
+        ms[-1] = [nid, min(last[1], iso), last[2], int(now)]
+    else:
+        ms.append([nid, iso, int(now), int(now)])
+    while len(ms) > HIST_LATE_KEEP:
+        a, b = ms[0], ms[1]
+        ms[:2] = [[b[0], min(a[1], b[1]), min(a[2], b[2]), max(a[3], b[3])]]
+    conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                 (HIST_LATE_K, json.dumps({"v": 1, "m": ms}, separators=(",", ":"))))
+    return iso
+
+
 EXF_LATE_PFX = "exflate:"
 
 

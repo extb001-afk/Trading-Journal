@@ -747,7 +747,7 @@
     const HS = { code: '계약·위임', hist: '이력 받는 중', boot: '준비 중', nosent: '확인 중', req: '확인 요청됨', path: '수집 방식상', off: '꺼짐' };
     const sc9 = (T.scopes || {})[p.c] || {}, slow9 = !p.h && !p.e && p.t === 0 && sc9.period && sc9.basePoll && sc9.period > sc9.basePoll * 1.01;
     const lbl = p.h ? '지금 주기' + (HS[p.h] ? '(' + HS[p.h] + ')' : '') : p.e ? '빈 지갑 · 1시간마다' : (slow9 ? periodTxt(sc9.period) + '마다' : (TIER_SHORT[p.t] || '')) + (p.f ? ' · 옛 기록 채우는 중' : '');
-    return '<span class="pill ' + (p.t === 0 ? 'ok' : 'g') + ' sm su-tc pvx" title="' + esc(chainName(p.c) + ' · ' + lbl + (ht ? ' — ' + ht : '') + (p.full ? ' · 마지막 확인 ' + ago(p.full) : '') + (p.f ? ' · 처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요' : '')) + '">' + esc(chainName(p.c)) + ' · ' + esc(lbl) + (p.wake ? ' · 확인 중' : '') + '</span>';
+    return '<span class="pill ' + (p.t === 0 ? 'ok' : 'g') + ' sm su-tc pvx" title="' + esc(chainName(p.c) + ' · ' + lbl + (ht ? ' — ' + ht : '') + (p.full ? ' · 마지막 확인 ' + ago(p.full) : '') + (p.f ? ' · 옛 기록은 뒤에서 채우는 중 — 새 거래는 지금 주기대로 확인해요' : '')) + '">' + esc(chainName(p.c)) + ' · ' + esc(lbl) + (p.wake ? ' · 확인 중' : '') + '</span>';
   }
   function tierWHTML(el) {
     const T = U.tier, k0 = el && el.getAttribute('data-w') || '';
@@ -756,7 +756,7 @@
     if (!ps.length) return '<div class="cap">확인 주기 — 수집기가 이 주소를 아직 장부에 올리지 않았어요(다음 주기에)</div>';
     const rest = ps.filter(p => p.t > 0 && !p.h), lastFull = Math.max(0, ...ps.map(p => p.full || 0));
     const nxt = rest.map(p => p.nextAct).filter(Boolean);
-    return '<div class="su-tw pvx"><div class="cap su-twh">확인 주기 · ' + (rest.length ? '쉬는 체인 ' + rest.length + '/' + ps.length + (nxt.length ? ' · 다음 점검 ' + inSec(Math.min(...nxt)) : '') : '모든 체인 지금 주기') + (lastFull ? ' · 마지막 전체 확인 ' + esc(ago(lastFull)) : '') + (ps.some(p => p.f) ? ' · 처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요' : '') + '</div>'
+    return '<div class="su-tw pvx"><div class="cap su-twh">확인 주기 · ' + (rest.length ? '쉬는 체인 ' + rest.length + '/' + ps.length + (nxt.length ? ' · 다음 점검 ' + inSec(Math.min(...nxt)) : '') : '모든 체인 지금 주기') + (lastFull ? ' · 마지막 전체 확인 ' + esc(ago(lastFull)) : '') + (ps.some(p => p.f) ? ' · 옛 기록은 뒤에서 채우는 중 — 새 거래는 지금 주기대로 확인해요' : '') + '</div>'
       + '<div class="su-tcs">' + ps.map(pairChip).join('') + '</div>'
       + (rest.length ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(k) + '">지금 확인</button> <span class="cap">다음 수집 주기에 이 주소를 탐색기로 한 번 확인해요</span>' : '') + '</div>';
   }
@@ -799,7 +799,7 @@
       + (all.some(p => p.e) ? '<div class="cap">빈 지갑 ' + all.filter(p => p.e).length + '곳 — 기록이 하나도 없어도 10분마다 활동을 보고 1시간마다 탐색기로 확인해요(토큰 입금도 1시간 안에 기록 — 시각·수량은 그대로)</div>' : '')
       + Object.keys(T.scopes || {}).filter(k => { const x = T.scopes[k]; return x && x.period && x.basePoll && x.period > x.basePoll * 1.01; })
         .map(k => { const x = T.scopes[k]; return '<div class="cap">' + esc(chainName(k)) + ' 지갑 ' + fmtN(x.pairs || 0) + '개라 ' + periodTxt(x.period) + '마다 확인해요(하루 한도 안 · 최근에 쓴 지갑 ' + fmtN(x.t0 || 0) + '개 기준)'
-          + (k === 'sol' && hl.fillFirst ? ' — 지금은 옛 기록부터 채워서 새 거래 확인이 이보다 늦을 수 있어요' : '') + '</div>'; }).join('')
+          + (k === 'sol' && hl.fillFirst ? ' — 옛 기록은 뒤에서 채우는 중(새 거래 확인 몫을 먼저 떼어 둬요)' : '') + '</div>'; }).join('')
       + (T.rpcFb || []).map(x => '<div class="cap">' + esc(chainName(x.c)) + ' — ' + esc(x.text) + '</div>').join('')
       + (T.inflow && T.inflow.sec && (T.inflow.rows || []).some(x => x.n) ? '<div class="cap">쉬는 지갑 토큰 받음 확인 ' + periodTxt(T.inflow.sec) + '마다(받은 주소만 바로 탐색기로) · '
         + T.inflow.rows.filter(x => x.n).map(x => esc(chainName(x.c)) + ' ' + (x.at ? esc(ago(x.at)) : '아직 확인 전') + (x.node ? '(' + esc(x.node) + ')' : '') + (x.ok ? '' : ' — 직전 확인 실패, 곧 다시')).join(' · ') + '</div>' : '');
@@ -870,7 +870,7 @@
     if (!r.on) return '조회 안 함 · 알림 없음' + (r.offAt ? ' · ' + chDay(r.offAt) + (r.autoOff ? '에 자동으로 끔(활동 없음)' : '에 끔') : '') + ' · 지갑 ' + fmtN(r.wallets) + '개';
     const p = ['지갑 ' + fmtN(r.wallets) + '개' + (r.pollSec ? ' · <b>' + esc(chEvery(r.pollSec)) + '</b> 확인' : '')];
     if (r.rest) p.push('오래 안 쓴 ' + fmtN(r.rest) + '곳은 쉬어요');
-    if (r.status === 'filling') p.push('처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요');
+    if (r.status === 'filling') p.push('옛 기록은 뒤에서 채우는 중 — 새 거래는 지금 주기대로 확인해요');
     if (!r.can) p.push(esc(r.why || '여기서 못 꺼요'));
     else if (r.auto) p.push('활동이 보여 자동으로 켠 체인' + (r.autoNewDays != null ? ' · 끄기 추천은 ' + fmtN(Math.max(1, (U.ch.autoGraceDays || 30) - r.autoNewDays)) + '일 뒤부터' : ''));
     return p.join(' · ');

@@ -112,9 +112,17 @@ chk(abs(xv_sum(xv) - lv["x"]) < 0.01 and abs(lv["x"] - 3200) < 0.01, "A2 합 = x
 t3 = files(up_age=700)
 f, lv, xv = build()
 p = xv.get("p") or {}
-chk("ku" not in p and "ub" not in p and "ubv" not in xv, "A3 업비트 스냅숏 낡음 = ku·ub 키 없음(0 으로 굳지 않게)", xv)
+chk(p.get("ku") == [2800000.0, "carry"] and "ub" not in p and "ubv" not in xv, "A3 업비트 스냅숏 낡음(700초) = ku 마지막 값 carry · ub 키 없음(0 으로 굳지 않게)", xv)
 chk(abs(xv["rt"].get("upbit", 0) - (t3 - 700)) <= 2, "A3 rt 에 낡은 업비트 스냅숏 시각은 남김", xv.get("rt"))
-chk(abs(xv_sum(xv) - lv["x"]) < 0.01 and abs(lv["x"] - 1000) < 0.01, "A3 합 = x(업비트 빠진 x 그대로)", (lv.get("x"), xv))
+chk(abs(xv_sum(xv) - lv["x"]) < 0.01 and abs(lv["x"] - 3000) < 0.01, "A3 합 = x(낡은 업비트 원화 ₩280만도 x 엔 그대로 · 미매칭 코인만 빠짐)", (lv.get("x"), xv))
+fu = [x9 for x9 in f.get("fiats") or [] if x9["ex"] == "업비트"]
+chk(len(fu) == 1 and fu[0]["krw"] == 2800000.0 and fu[0].get("stale") is True and 690 <= fu[0].get("age", 0) <= 720 and "업비트 잔고" in fu[0]["note"],
+    "A3 화면 업비트 원화 = 마지막 값 + stale·age·'업비트 잔고 N분 전'(다른 거래소 원화와 같은 모양)", fu)
+t3b = files(up_age=90000)
+f, lv, xv = build()
+p = xv.get("p") or {}
+chk("ku" not in p and "ub" not in p and abs(lv["x"] - 1000) < 0.01 and not [x9 for x9 in f.get("fiats") or [] if x9["ex"] == "업비트"],
+    "A3b 하루 넘게 낡은 업비트 스냅숏 = 끊긴 것으로 보고 원화 뺌(ku 키 없음 · x 빗썸만)", (lv.get("x"), xv, f.get("fiats")))
 
 files(bt=None)
 f, lv, xv = build()

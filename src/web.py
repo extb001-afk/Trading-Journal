@@ -65,6 +65,7 @@ import buildproc
 import rawtx_cache
 import acct_norm
 import provbal
+import ubfill
 import rabby
 import salelink
 import day_memo
@@ -135,6 +136,36 @@ def _fut_notional(p):
 def _fut_notional_sum(poss):
     v9 = [_fut_notional(p) for p in poss]
     return None if any(x is None for x in v9) else sum(v9)
+
+
+_FUT_USD_SETTLE = frozenset({"USDT", "USDC", "USDG", "USD", "BUSD", "FDUSD", "USDE", "DAI", "TUSD", "PYUSD", "USD1"})
+
+
+def _fut_settle(p) -> str:
+    s9 = str(p.get("settle") or "").strip().upper()
+    if s9:
+        return s9
+    if p.get("ex") == "okx":
+        pt9 = str(p.get("symbol") or "").upper().split("-")
+        if len(pt9) >= 3 and pt9[1] == "USD" and pt9[0] and (pt9[2] == "SWAP" or pt9[2].isdigit()):
+            return pt9[0]
+    return ""
+
+
+def _fut_upnl_usd(p, price_fn):
+    u9 = _fin(p.get("upnl") or 0)
+    if u9 is None:
+        return None, "미실현 값이 숫자가 아님"
+    s9 = _fut_settle(p)
+    if not s9 or s9 in _FUT_USD_SETTLE:
+        return u9, None
+    try:
+        px9 = _fin(price_fn(s9)) if price_fn else None
+    except Exception:
+        px9 = None
+    if not px9 or px9 <= 0:
+        return None, f"{s9} 정산 — {s9} 시세가 없어 달러로 못 바꿈"
+    return u9 * px9, None
 
 
 def perp_active():
@@ -983,6 +1014,8 @@ def _sol_stake_accounts() -> dict:
 DAILY_V = 4
 DAILY_LIVE_WIN = 900
 DAILY_LQ_V = 1
+HL_SETTLE_S = 300
+HL_MAXWAIT_S = 3600
 DAILY_PX_PATH = os.path.join(common.STATE_DIR, "daily_px.json")
 DAILY_PX_SEED = os.path.join(common.STATE_DIR, "daily_px_seed.json")
 DAILY_PX_KEEP = 45
@@ -1165,9 +1198,9 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
                 gid9 = int(sid9)
             except (TypeError, ValueError):
                 continue
-            if gv9 < DC_SMALL_USD or gid9 not in G:
+            if abs(gv9) < DC_SMALL_USD or gid9 not in G:
                 continue
-            np9, st9 = day_close(gid9, ck9, gv9)
+            np9, st9 = day_close(gid9, ck9, abs(gv9))
             if np9:
                 plan9.append((ck9, sid9, float(op9), float(np9), False))
             elif st9 == "none":
@@ -1213,7 +1246,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
             if int(sid9) not in skip9:
                 c9["val"] = _f(Decimal(str(c9["val"])) + nv9 - ov9, 2) or 0
                 if c9.get("est"):
-                    e9s = float(c9["est"]) - float(ov9)
+                    e9s = float(c9["est"]) - abs(float(ov9))
                     if e9s >= 1:
                         c9["est"] = round(e9s, 2)
                     else:
@@ -1309,7 +1342,7 @@ def _px1004_reset(daily, dpx, G, today_iso, day_close, live_px=None, skip_gids=N
                 c9["g"][sid9] = round(float(nv9), 4)
                 if gid9 not in skip9:
                     c9["val"] = _f(Decimal(str(c9["val"])) + nv9 - ov9, 2) or 0
-                    c9["est"] = round(float(c9.get("est") or 0) + float(nv9), 2)
+                    c9["est"] = round(float(c9.get("est") or 0) + abs(float(nv9)), 2)
                     d9[1] += float(nv9 - ov9)
                     out["dv"] += float(nv9 - ov9)
                 if isinstance(c9.get("dcp"), dict):
@@ -1426,12 +1459,16 @@ def _xv_ob(xv):
         return out
     if xv.get("v") == xparts.GEN:
         for key, a9 in (xv.get("ob") or {}).items():
+            if key == "ku" and xv.get("ufk"):
+                continue
             if key in xparts.KRW and isinstance(a9, (list, tuple)) and len(a9) >= 2 and xparts.num(a9[0]) and xparts.num(a9[1]) is not None:
                 out.append((key, float(a9[0]), float(a9[1])))
         return out
     rt9 = xv.get("rt") if isinstance(xv.get("rt"), dict) else {}
     p9 = xv.get("p") if isinstance(xv.get("p"), dict) else {}
     for key, ex9 in (("ku", "upbit"), ("kb", "bithumb")):
+        if key == "ku" and xv.get("ufk"):
+            continue
         v9 = p9.get(key)
         t9 = xparts.num(rt9.get(ex9))
         if t9 and isinstance(v9, (list, tuple)) and len(v9) >= 2 and xparts.num(v9[0]) is not None:
@@ -2857,6 +2894,7 @@ class StateBuilder:
     ACTIVE_SEC = 90
     INPUT_MAX_AGE = 60
     KEEP_DIAG = os.environ.get("TJ_REPLAY_DEBUG") == "1" or os.environ.get("TJ_KEEP_DIAG") == "1"
+    UB_KRW_KEEP_SEC = 86400
     _SIG_SKIP = frozenset(("web_diag.json", "daily_cache.json", "daily_px.json", "px_cache_web.json", "backfill_status.json",
                            "upbit_orders_state.json", "ledger.db-shm", "pending_dm.jsonl.1",
                            "alert_watch.json",
@@ -3199,6 +3237,86 @@ class StateBuilder:
         note = "원가·손익·지난날 곡선은 옛 기록을 다 받으면(" + " · ".join(parts) + ") 정확하게 맞춰져요 — 오늘 보유·총자산은 지금 실제 잔고예요"
         return {"usd": pv.get("usd"), "n": pv.get("n"), "chains": pv.get("chains"), "note": note,
                 "skipped": pv.get("skipped") or {}}
+
+    def _ub_fill_view(self, conn, snap, pos_disp, G, transit_gids, now):
+        info = {"why": "none", "n": 0, "ts": int(float((snap or {}).get("ts") or 0))}
+        if not snap:
+            return pos_disp, {}, {}, info
+        if not (now - float(snap.get("ts") or 0) < common.upbit_fresh_sec(self.cfg)):
+            info["why"] = "stale"
+            return pos_disp, {}, {}, info
+        def ts_of9(pl):
+            try:
+                return acct_norm.fill_ts(pl) or datetime.fromisoformat(str(pl["created_at"])).timestamp()
+            except (ValueError, TypeError, KeyError):
+                return None
+        dm, why = ubfill.snapshot_deltas(conn, snap, ts_of9)
+        info["why"] = why
+        if not dm:
+            return pos_disp, {}, {}, info
+        loc = "exchange:upbit"
+        out = list(pos_disp)
+        dl, kc = {}, {}
+        applied = {}
+        for sym, e in sorted(dm.items()):
+            dq = e["dq"]
+            if dq == 0:
+                continue
+            idx = sorted((i for i, r in enumerate(out)
+                          if r["location"] == loc and r["qty"] > 0 and not (G.get(r["gid"]) or {}).get("is_fiat")
+                          and str((G.get(r["gid"]) or {}).get("sym") or "").upper() == sym),
+                         key=lambda i: (-out[i]["qty"], out[i]["gid"]))
+            if dq > 0:
+                if idx:
+                    i = idx[0]
+                    out[i] = dict(out[i], qty=out[i]["qty"] + dq)
+                    gid = out[i]["gid"]
+                else:
+                    tg = sorted(g9 for g9 in transit_gids if str((G.get(g9) or {}).get("sym") or "").upper() == sym
+                                and not (G.get(g9) or {}).get("is_fiat"))
+                    if not tg:
+                        continue
+                    gid = tg[0]
+                    out.append({"gid": gid, "location": loc, "qty": dq})
+                dl[(gid, loc)] = dl.get((gid, loc), Decimal(0)) + dq
+                applied[sym] = applied.get(sym, Decimal(0)) + dq
+                if e["k"] > 0:
+                    usd9 = Decimal(0)
+                    for ccy9, amt9 in e["c"].items():
+                        if ccy9 == "KRW":
+                            p9 = (1.0 / float(self.spot.rate)) if self.spot.rate else 0.0
+                        elif ccy9 in STABLE_GROUPS:
+                            p9 = 1.0
+                        else:
+                            p9 = float(self.spot.ex_price("upbit", ccy9) or self.spot.price(ccy9) or 0)
+                        if p9 <= 0:
+                            usd9 = None
+                            break
+                        usd9 += amt9 * Decimal(str(p9))
+                    if usd9 is not None:
+                        k9, c9 = kc.get(gid, (Decimal(0), Decimal(0)))
+                        kc[gid] = (k9 + e["k"], c9 + usd9)
+            else:
+                left = -dq
+                for i in idx:
+                    take = min(out[i]["qty"], left)
+                    if take <= 0:
+                        continue
+                    out[i] = dict(out[i], qty=out[i]["qty"] - take)
+                    gid = out[i]["gid"]
+                    dl[(gid, loc)] = dl.get((gid, loc), Decimal(0)) - take
+                    applied[sym] = applied.get(sym, Decimal(0)) - take
+                    left -= take
+                    if left <= 0:
+                        break
+            info["n"] += int(e["n"])
+        krw9 = Decimal(0)
+        for sym, a9 in applied.items():
+            e = dm.get(sym) or {}
+            if a9 and e.get("dq") and e.get("krw"):
+                krw9 += e["krw"] * a9 / e["dq"]
+        info["krw_tl"] = float(krw9)
+        return out, dl, kc, info
 
     def _spot_off(self):
         off = set(self.cfg.get("_disabled_chains") or ())
@@ -6877,6 +6995,9 @@ class StateBuilder:
             lot9 = sale_lot_by.get(sl9["lot"]) if sl9 else None
             if not lot9 or g9["is_stable"] or q9 <= 0:
                 return None
+            if sl9.get("unit") is None and not sl9.get("manual"):
+                g9["risk_allow"] = True
+                return None
             if sl9.get("manual"):
                 fin9 = of_finalize(lot9)
                 if fin9[0] != "ok":
@@ -7288,6 +7409,11 @@ class StateBuilder:
             log.warning("브릿지 도착 짝 계산 실패(이번 빌드 대체 매칭 없음): %s", common.safe_err(e9)[:160])
             br_plan, br_amb, br_sum = {}, {}, {}
         self._disc_back = disc_bk9 = set()
+        try:
+            balw_disc9 = {r9[0] for r9 in conn.execute("SELECT obs_id FROM raw_observations WHERE obs_id LIKE 'recon:%:disc:%'"
+                                                        " AND instr(payload, ?) > 0", ('"bsc_balance_watch"',))}
+        except Exception:
+            balw_disc9 = set()
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
         for r in rows:
             if lf_pend and (r["source_ns"], r["source_id"]) != lf_pend[-1][7]:
@@ -8194,11 +8320,12 @@ class StateBuilder:
                 hl_lab9 = "Hyperliquid 무기한 손익·펀딩 정산 (그 대사 구간 합 — 대사 시각)"
                 fut9 = common.exf_is_fut(evk, r["source_ns"])
                 fut_lab9 = "선물 정산 · 실현 손익·수수료·펀딩 (선물 지갑 잔고 — 정산 시각)"
-                disc_b9 = disc9 and q > 0 and not _scam_name(r["symbol"])
+                disc_b9 = disc9 and q > 0 and not _scam_name(r["symbol"]) and str(r["source_id"] or "") not in balw_disc9
                 t_tl9 = min(ts, backfill_t0) if (back_o or disc_b9) else ts
                 g["qty_timeline"].append((t_tl9, q))
-                if disc_b9:
+                if disc_b9 or (disc9 and q > 0 and str(r["source_id"] or "") in balw_disc9):
                     g.setdefault("disc_tl", []).append((ts, q))
+                if disc_b9:
                     disc_bk9.add(g["gid"])
                 if evk == "OPENING":
                     g.setdefault("open_tl", []).append((t_tl9, q))
@@ -8969,7 +9096,8 @@ class StateBuilder:
                 sym0 = ((G.get(d0["gid"]) or {}).get("sym") or "").upper()
                 if sym0:
                     by_symloc.setdefault((sym0, d0["location"]), []).append(d0)
-        for rows0 in by_symloc.values():
+        ex_resid9 = {}
+        for key0, rows0 in by_symloc.items():
             neg0 = sum((-r["qty"] for r in rows0 if r["qty"] < 0), Decimal(0))
             if neg0 <= 0:
                 continue
@@ -8980,6 +9108,40 @@ class StateBuilder:
                 neg0 -= take0
                 if neg0 <= 0:
                     break
+            if neg0 > 0:
+                ex_resid9[key0] = neg0
+        exb9 = StateBuilder._exf_bal_view()
+        debt_cap9 = {}
+        for ex9, (_bp9, bd9) in exb9.items():
+            for s9, v9 in ((bd9.get("debts") or {}).items() if isinstance(bd9.get("debts"), dict) else ()):
+                try:
+                    fv9 = Decimal(str(v9))
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+                su9 = str(s9).upper()
+                if fv9.is_finite() and fv9 < 0 and su9 not in ("KRW", "USD"):
+                    debt_cap9[(f"exchange:{ex9}", su9)] = debt_cap9.get((f"exchange:{ex9}", su9), Decimal(0)) - fv9
+        debt_take9 = {}
+        debt_over9 = {}
+        for (sym0, loc0), rem0 in sorted(ex_resid9.items()):
+            cap0 = debt_cap9.get((loc0, sym0))
+            if not cap0:
+                continue
+            left0 = min(rem0, cap0)
+            if rem0 > cap0:
+                debt_over9[(loc0, sym0)] = rem0 - cap0
+            for r in sorted((r for r in by_symloc[(sym0, loc0)] if r["qty"] < 0), key=lambda r: (r["qty"], r["gid"])):
+                t0 = min(-r["qty"], left0)
+                if t0 > 0:
+                    debt_take9[(r["gid"], loc0)] = t0
+                    left0 -= t0
+                if left0 <= 0:
+                    break
+        debt_capg9 = {}
+        for d0 in pos_rows:
+            k0 = (d0["location"], ((G.get(d0["gid"]) or {}).get("sym") or "").upper())
+            if k0 in debt_cap9 and not (G.get(d0["gid"]) or {}).get("is_fiat"):
+                debt_capg9[d0["gid"]] = debt_capg9.get(d0["gid"], Decimal(0)) + debt_cap9[k0]
         pv_its9 = []
         try:
             pv_its9 = self._prov_items(conn)
@@ -9022,7 +9184,19 @@ class StateBuilder:
         upbit_transit_gids = {
             e2["gid"] for lst in ex_transit.values() for e2 in lst
             if not e2["credited"] and not e2["used"]}
+        ub_path9 = os.path.join(common.STATE_DIR, "upbit_balances.json")
+        ub_snap9 = None
+        uf_dl9, uf_kc9, self._ub_fill_info = {}, {}, {"why": "none", "n": 0, "ts": 0}
+        try:
+            ub_snap9 = common.read_json(ub_path9, {}) if os.path.exists(ub_path9) else {}
+            pos_disp9, uf_dl9, uf_kc9, self._ub_fill_info = self._ub_fill_view(conn, ub_snap9, pos_disp9, G, upbit_transit_gids, now)
+        except Exception as e9:
+            log.warning("업비트 미체결 주문 체결분 보정 실패(원장 수량 그대로): %s", common.safe_err(e9)[:160])
+        for gid9, (k9, c9) in uf_kc9.items():
+            uncred_known[gid9] = uncred_known.get(gid9, Decimal(0)) + k9
+            uncred_cost[gid9] = uncred_cost.get(gid9, Decimal(0)) + c9
         hl_neg = {}
+        debt_neg9 = {}
         hl_cash_syms9 = _hl_cash_syms()
         for r in pos_disp9:
             locs_by_gid.setdefault(r["gid"], []).append(
@@ -9035,10 +9209,13 @@ class StateBuilder:
                   and str((G.get(r["gid"]) or {}).get("sym") or "").upper() in hl_cash_syms9):
                 led_by_gid[r["gid"]] = led_by_gid.get(r["gid"], Decimal(0)) + r["qty"]
                 hl_neg[r["gid"]] = led_by_gid[r["gid"]]
+            elif r["qty"] < -EPS and (r["gid"], r["location"]) in debt_take9:
+                led_by_gid[r["gid"]] = led_by_gid.get(r["gid"], Decimal(0)) - debt_take9[(r["gid"], r["location"])]
+                debt_neg9[r["gid"]] = debt_neg9.get(r["gid"], Decimal(0)) + debt_take9[(r["gid"], r["location"])]
 
         live = {gid: g for gid, g in G.items()
                 if not g.get("is_fiat")
-                and (led_by_gid.get(gid, Decimal(0)) + uncred_gid.get(gid, Decimal(0)) > EPS or gid in hl_neg)}
+                and (led_by_gid.get(gid, Decimal(0)) + uncred_gid.get(gid, Decimal(0)) > EPS or gid in hl_neg or gid in debt_neg9)}
         price_groups = dict(live)
         price_t0 = (today_kst - timedelta(days=29)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         for gid, g in G.items():
@@ -9320,11 +9497,17 @@ class StateBuilder:
                     if gid in hl_neg and row["location"] == "exchange:hyperliquid" and qn < 0:
                         outl.append({"w": fx_name.get("hyperliquid", "Hyperliquid"), "qty": qn,
                                      "sub": "무기한 현금 음수(미실현 이익 인출 — 포지션 청산 때 메워짐 · 총자산에서 차감)"})
+                    elif (gid, row["location"]) in debt_take9:
+                        ex9 = (row["location"] or "").split(":", 1)[1]
+                        outl.append({"w": fx_name.get(ex9, ex9), "qty": -float(debt_take9[(gid, row["location"])]),
+                                     "sub": "빌린 몫 · 잔고를 넘은 차입(총자산에서 차감)"})
                     continue
                 parts = (row["location"] or "").split(":")
                 if parts[0] == "exchange":
                     exn = fx_name.get(parts[1], parts[1])
                     outl.append({"w": exn, "sub": "거래소 잔고 (입금·체결 원장)", "qty": qn})
+                    if (gid, row["location"]) in uf_dl9:
+                        outl[-1]["sub"] += " · 미체결 주문 체결분 포함(원장 기록 전)"
                     continue
                 ch = parts[1] if len(parts) >= 2 else "?"
                 wa = parts[2] if len(parts) >= 3 and parts[2] else None
@@ -9391,7 +9574,7 @@ class StateBuilder:
         xv_up_coin9 = None
         ub_path2 = os.path.join(common.STATE_DIR, "upbit_balances.json")
         if os.path.exists(ub_path2):
-            ub2 = common.read_json(ub_path2, {})
+            ub2 = ub_snap9 if ub_snap9 is not None else common.read_json(ub_path2, {})
             if time.time() - (ub2.get("ts") or 0) < common.upbit_fresh_sec(self.cfg):
                 xv_up_coin9 = float(ub2.get("ts") or 0)
                 for acc in ub2.get("accounts") or []:
@@ -9624,7 +9807,7 @@ class StateBuilder:
             row = {"key": f"g{gid}", "sym": dsym9 or sym,
                    "name": (dsym9 or sym) + (" · " + "/".join(sorted(CHAIN_NAME.get(c, c) for c in g["chains"]))),
                    "qty": qty, "price": px, "avg": avg,
-                   "kqty": float(min(qty_dec, k_all)),
+                   "kqty": float(max(min(qty_dec, k_all), Decimal(0))),
                    "fbQty": _f(max(float(qty) - float(k_all), 0.0), 6) or 0,
                    "fbCost": _f(max(float(qty) - float(k_all), 0.0) * avg, 2) if (fb_on and avg > 0) else 0,
                    "locs": locs_for(gid, uncred)}
@@ -9992,7 +10175,7 @@ class StateBuilder:
                             vis9.append(e9)
                     fl["events"] = vis9
                 active = (g["cur"] is fl)
-                held = float(led_by_gid.get(gid, Decimal(0)) + uncred_gid.get(gid, Decimal(0))) if active else 0
+                held = float(led_by_gid.get(gid, Decimal(0)) + uncred_gid.get(gid, Decimal(0)) + debt_neg9.get(gid, Decimal(0))) if active else 0
                 held_known = min(held, float(k_all))
                 bought = float(fl["bought"])
                 if bought <= 0 and not fl["events"] and not (fl["rbd"] or fl["ubd"]):
@@ -10715,10 +10898,13 @@ class StateBuilder:
 
         fiats = []
         xv_up_krw9 = None
+        xv_up_krw_st9 = False
         if ub2:
             ub = ub2
-            if time.time() - (ub.get("ts") or 0) < 600:
+            age_u9 = time.time() - float(ub.get("ts") or 0)
+            if age_u9 < self.UB_KRW_KEEP_SEC:
                 xv_up_krw9 = float(ub.get("ts") or 0)
+                xv_up_krw_st9 = age_u9 >= common.upbit_fresh_sec(self.cfg)
                 for acc in ub.get("accounts") or []:
                     if acc.get("currency") == "KRW":
                         try:
@@ -10726,23 +10912,17 @@ class StateBuilder:
                         except (TypeError, ValueError):
                             krw = 0
                         if krw > 0:
-                            fiats.append({"ex": "업비트", "krw": krw, "note": "거래소 예수금"})
+                            fu9 = {"ex": "업비트", "krw": krw, "note": "거래소 예수금"}
+                            if xv_up_krw_st9:
+                                fu9.update(age=int(age_u9), stale=True, note=f"거래소 예수금 · 업비트 잔고 {_ago_ko(age_u9)} 전")
+                            fiats.append(fu9)
         fx_name9 = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX",
                     "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸"}
         ex_debts = []
         bal_src9 = {}
         xv_krw9 = {}
         for ex9, kn9 in fx_name9.items():
-            bp0 = os.path.join(common.STATE_DIR, f"exf_balances_{ex9}.json")
-            bp9, bd9 = None, {}
-            for c9 in (bp0, bp0 + ".pending", bp0 + ".view"):
-                try:
-                    d9 = common.read_json(c9, {}) if os.path.exists(c9) else {}
-                except (Exception, SystemExit):
-                    d9 = {}
-                if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
-                    bp9, bd9 = c9, d9
-                    break
+            bp9, bd9 = exb9.get(ex9) or (None, {})
             if bp9 is None:
                 continue
             bal_src9[ex9] = (bp9, float(bd9.get("ts") or 0))
@@ -10826,6 +11006,10 @@ class StateBuilder:
             ex9 = fx_name.get(loc9.split(":")[1], loc9.split(":")[1]) if loc9.startswith("exchange:") else None
             neg_hold.append({"key": f"g{r9['gid']}", "sym": g9["sym"], "loc": loc9, "qty": float(r9["qty"]),
                              "usd": round(usd9, 2), "debt": bool(ex9 and (ex9, (g9["sym"] or "").upper()) in debt_sym9)})
+            ov9 = debt_over9.pop((loc9, (g9["sym"] or "").upper()), None)
+            if ov9:
+                neg_hold.append({"key": f"g{r9['gid']}", "sym": g9["sym"], "loc": loc9, "qty": -float(ov9),
+                                 "usd": round(-float(ov9) * px9, 2), "debt": False, "over": True})
         neg_hold.sort(key=lambda d9: d9["usd"])
         if neg_hold:
             pend9 = self._prewin_pairs(conn)
@@ -11184,7 +11368,7 @@ class StateBuilder:
                  "krw_up_tl": self._upbit_krw_timeline(conn) if up_fresh9 else None}
         xv_p9 = {}
         if xv_up_krw9 is not None:
-            xv_p9["ku"] = [round(xtra9["krw_up"], 2), "snap"]
+            xv_p9["ku"] = [round(xtra9["krw_up"], 2), "carry" if xv_up_krw_st9 else "snap"]
         if "bithumb" in xv_krw9:
             xv_p9["kb"] = [round(xv_krw9["bithumb"][0], 2), "carry" if xv_krw9["bithumb"][2] else "snap"]
         if xv_up_coin9 is not None:
@@ -11196,6 +11380,8 @@ class StateBuilder:
         if ub2 and float(ub2.get("ts") or 0):
             rt9["upbit"] = int(float(ub2["ts"]))
         xv9 = {"v": XV_V, "p": xv_p9, "fx": rate_fx, "rt": rt9}
+        if (self.__dict__.get("_ub_fill_info") or {}).get("krw_tl"):
+            xv9["ufk"] = 1
         if x_ubs and xv_up_coin9 is not None:
             xv9["ubv"] = {s9: round(a9[1], 2) for s9, a9 in sorted(x_ubs.items())}
         if not self.spot.rate:
@@ -11221,6 +11407,7 @@ class StateBuilder:
             led_gen9 = int(float(lg9[0])) if lg9 and lg9[0] else 0
         except Exception:
             led_gen9 = 0
+        hl_marks9 = common.hist_late_read(conn)
         try:
             mk9 = os.path.join(common.STATE_DIR, "backfill_done")
             try:
@@ -11237,11 +11424,24 @@ class StateBuilder:
             log.warning("거래소 지문 읽기 실패(이번 빌드 종전대로): %s", e9)
             xq9, xqb9 = None, None
         self._xq9 = (xq9, xqb9)
-        daily = self._daily_series(G, today_kst, override_px, live_px,
+        curve_G9 = G
+        if uf_dl9:
+            uf_ts9 = int((self.__dict__.get("_ub_fill_info") or {}).get("ts") or now)
+            curve_G9 = dict(G)
+            for (gid9, _l9), dq9 in sorted(uf_dl9.items()):
+                g9 = curve_G9.get(gid9)
+                if g9 is not None and dq9:
+                    curve_G9[gid9] = dict(g9, qty_timeline=list(g9.get("qty_timeline") or ()) + [(uf_ts9, dq9)])
+            krw_tl9 = float((self.__dict__.get("_ub_fill_info") or {}).get("krw_tl") or 0)
+            xs9 = xtra9.get("xsrc")
+            if krw_tl9 and isinstance(xs9, dict) and isinstance(xs9.get("tl"), dict) and xs9["tl"].get("ku") is not None:
+                xtra9["xsrc"] = dict(xs9, tl=dict(xs9["tl"], ku=sorted(list(xs9["tl"]["ku"]) + [(uf_ts9, krw_tl9)], key=lambda t9: t9[0])))
+        daily = self._daily_series(curve_G9, today_kst, override_px, live_px,
                                    ca_gids=ca_all, ex_gids=set(ex_gid),
                                    skip_gids=quarantined, pending_gids=pending_gids, native_c=native_c9 | ex_c9,
-                                   hold_qty=hold_qty, extra=xtra9, extra_ok=x_ok, now_ts=now, led_gen=led_gen9,
+                                   hold_qty=hold_qty, extra=xtra9, extra_ok=x_ok, now_ts=now, led_gen=led_gen9, hist_late=hl_marks9,
                                    neg_ok=hl_cash9,
+                                   debt_neg=debt_capg9,
                                    debt_moves=self._debt_redate_moves(conn),
                                    transit=[e9 for e9 in wdt_all if e9["state"] == "pending"],
                                    stable_aliases=_stable_regroup_aliases(conn),
@@ -11368,10 +11568,12 @@ class StateBuilder:
                 log.debug("장기 곡선 재료: 비확정 지난날 %d(%s…) — 값 비워 넘김", len(hnf9), min(hnf9))
             if hok9:
                 histcurve.HIST.offer(td9, lambda: histcurve.make_kit(
-                    td9, G, hold_qty, quarantined, ca_all, ex_gid, native_c9 | ex_c9, override_px, live_px, gid_pairs_all,
+                    td9, curve_G9, hold_qty, quarantined, ca_all, ex_gid, native_c9 | ex_c9, override_px, live_px, gid_pairs_all,
                     [e9 for e9 in wdt_all if e9["state"] == "pending"], xtra9, hd9, self.daily, stable_syms=STABLE_GROUPS,
                     flow_kit=self._hist_flow_kit(G, quarantined, offc_ids9, wdt_all, rate_fx, td9, daily),
                     neg_ok=hl_cash9, xkit=self.__dict__.get("_x_kit"),
+                    debt_neg=dict(debt_capg9),
+                    debt_days={k9: dict(v9) for k9, v9 in ((self.daily_px or {}).get("_dbt") or {}).items() if isinstance(v9, dict)},
                     rb_days=dict(rb_dc9),
                     first_floor=None if self.cfg.get("backfill_full_history") else _bf_since,
                     xq=(self.__dict__.get("_xq9") or (None, None))[0], xq_base=(self.__dict__.get("_xq9") or (None, None))[1]))
@@ -11554,7 +11756,7 @@ class StateBuilder:
                              "bidderMine": l9["bidder"] in my_w9, "label": l9["label"], "cur": l9["cur"], "bids": l9["bids"],
                              "paid": _f(l9["paid"], 6), "refund": _f(l9["refund"], 6), "paidUsd": _f(l9["paid_usd"], 2),
                              "refundUsd": _f(l9["refund_usd"], 2), "costUsd": _f(l9["cost"], 2), "qty": _f(l9["qty"], 6),
-                             "unit": float(l9["unit"]), "receiptSym": l9.get("receipt_sym"), "bidTx": l9["bid_tx"][:5], "claimTx": l9["claim_tx"][:5],
+                             "unit": None if l9["unit"] is None else float(l9["unit"]), "receiptSym": l9.get("receipt_sym"), "bidTx": l9["bid_tx"][:5], "claimTx": l9["claim_tx"][:5],
                              "usedQty": _f(u9.get("qty") or 0, 6) or 0, "usedCost": _f(u9.get("cost") or 0, 2) or 0, "usedN": u9.get("n") or 0,
                              "rows": u9.get("rows") or [], "off": bool(l9["off"])})
         self._sale_lot_ids = {l9["id"] for l9 in sale_lots}
@@ -11680,7 +11882,7 @@ class StateBuilder:
             "usdtByDate": {d["date"]: {"usdt": d["usdt"], "kimp": d["kimp"]} for d in daily},
             "lastScan": self._last_scan_str(),
             "upbitConnected": (bool(ub2)
-                               and time.time() - (ub2.get("ts") or 0) < 600),
+                               and time.time() - (ub2.get("ts") or 0) < common.upbit_fresh_sec(self.cfg)),
             "srcChips": src_chips, "walletRows": wallet_rows,
             "venueFlows30": _venue_flows30(vflow_loc9, realized_by_loc, venue_w, today_kst),
             "exBalTs": dict({fx_name.get(e9, e9): round(t9) for e9, (_p9, t9) in bal_src9.items() if t9 > 0},
@@ -14022,6 +14224,21 @@ class StateBuilder:
     FLOW_LATE_KO = "늦게 찾은 체결 상쇄"
 
     @staticmethod
+    def _exf_bal_view() -> dict:
+        out = {}
+        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb"):
+            bp0 = os.path.join(common.STATE_DIR, f"exf_balances_{ex9}.json")
+            for c9 in (bp0, bp0 + ".pending", bp0 + ".view"):
+                try:
+                    d9 = common.read_json(c9, {}) if os.path.exists(c9) else {}
+                except (Exception, SystemExit):
+                    d9 = {}
+                if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
+                    out[ex9] = (c9, d9)
+                    break
+        return out
+
+    @staticmethod
     def _flow_debts() -> dict:
         out = {}
         for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb"):
@@ -15213,7 +15430,7 @@ class StateBuilder:
                       skip_gids=None,
                       ex_gids=None, pending_gids=None,
                       hold_qty=None, extra=None, extra_ok=True, now_ts=None, native_c=None, debt_moves=None, transit=None,
-                      stable_aliases=None, day_close=None, neg_ok=None, led_gen=None, xq=None, xq_base=None) -> list:
+                      stable_aliases=None, day_close=None, neg_ok=None, led_gen=None, xq=None, xq_base=None, debt_neg=None, hist_late=None) -> list:
         lo_bind9 = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
         bound9, legacy9 = _bind_px_blocks(self.daily, self.daily_px, lo_bind9)
         if legacy9:
@@ -15389,6 +15606,13 @@ class StateBuilder:
         stable_base9 = ",".join(str(x) for x in stable_gids9)
         neg9 = sorted(g9 for g9 in (neg_ok or ()) if g9 in G)
         stable_rev9 = stable_base9 + ("|n:" + ",".join(str(x) for x in neg9) if neg9 else "")
+        dbt_now9 = {str(g9): round(float(q9), 8) for g9, q9 in sorted((debt_neg or {}).items()) if g9 in G and q9 > 0}
+
+        def dbt_day(ck9, *sns9):
+            for v9 in ((dpx.get("_dbt") or {}).get(ck9),) + tuple((s9 or {}).get("dbt") for s9 in sns9):
+                if isinstance(v9, dict):
+                    return v9
+            return dbt_now9
 
         tr_by9 = {}
         for e9 in (transit or ()):
@@ -15502,6 +15726,47 @@ class StateBuilder:
                 old9 = set(old9) | lpfix9
                 log.warning("일별: LP 위치 레그 보정·발견 시점 기초 잔고(지난날 포함 %d일)·새 거래소(%d일 · %s) — 옛 되감기로 동결된 날 %s 다시 계산"
                             "(가격·환율은 그날 고정값 · 수량·새 거래소 원장 밖 구성요소만)", n_dq9, n_xq9, xq9, sorted(lpfix9))
+        hl9 = [m for m in (hist_late or ()) if isinstance(m, (list, tuple)) and len(m) >= 4] if hold_qty is not None else []
+        hq_now9 = max((int(m[0]) for m in hl9), default=0)
+        hlr9 = set()
+        if hl9:
+            quiet9 = now_ts - max(int(m[3]) for m in hl9) >= HL_SETTLE_S
+            rdy9 = [m for m in hl9 if quiet9 or now_ts - int(m[3]) >= HL_MAXWAIT_S]
+            if rdy9 and frozen_ok:
+                lo9h, td9h = (today_kst - timedelta(days=max(29, DAILY_PX_KEEP))).strftime("%Y-%m-%d"), today_kst.strftime("%Y-%m-%d")
+                for ck9, c9 in self.daily.items():
+                    if str(ck9).startswith("_") or not isinstance(c9, dict) or not (lo9h <= str(ck9) < td9h):
+                        continue
+                    try:
+                        hq9 = int(c9.get("hq") or 0)
+                    except (TypeError, ValueError):
+                        hq9 = 0
+                    if any(m[1] <= str(ck9) and int(m[0]) > hq9 for m in rdy9):
+                        hlr9.add(ck9)
+                if hlr9:
+                    old9 = set(old9) | hlr9
+                    if self.__dict__.get("_hl_logged") != (hq_now9, len(hlr9)):
+                        self._hl_logged = (hq_now9, len(hlr9))
+                        log.warning("일별: 늦게 들어온 원장 행(%s 부터) — 그 뒤 동결된 날 %d일(%s~%s) 다시 계산(가격·환율·원장 밖 금액은 그날 고정값 · 수량만)",
+                                    min(m[1] for m in rdy9), len(hlr9), min(hlr9), max(hlr9))
+            fw9 = self.daily_px.get("_hlf") if isinstance(self.daily_px.get("_hlf"), dict) else {}
+            try:
+                fwid9 = int(fw9.get("id") or 0)
+            except (TypeError, ValueError):
+                fwid9 = 0
+            new9 = [m for m in rdy9 if int(m[0]) > fwid9] if frozen_ok else []
+            if new9:
+                min9 = min(m[1] for m in new9)
+                if min9 < (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"):
+                    try:
+                        t9h = int(datetime.strptime(min9, "%Y-%m-%d").replace(tzinfo=today_kst.tzinfo, hour=12).timestamp())
+                        log.info("장기 곡선 다시 계산 표식(늦은 원장 행): %s 부터", common.mark_hist_dirty(t9h))
+                    except Exception as e9:
+                        log.warning("장기 곡선 다시 계산 표식(늦은 원장 행) 실패: %s", e9)
+                        new9 = []
+                if new9:
+                    self.daily_px["_hlf"] = {"id": max(int(m[0]) for m in new9), "at": int(now_ts)}
+                    px_changed = True
         if xq9 is not None:
             lo9x = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
             for ck9, e9 in dpx.items():
@@ -15555,7 +15820,7 @@ class StateBuilder:
                     if not (skip_gids and gid9 in skip_gids):
                         c9["val"] = _f(Decimal(str(c9["val"])) + nv9 - ov9, 2) or 0
                         if c9.get("est"):
-                            e9s = float(c9["est"]) - float(ov9)
+                            e9s = float(c9["est"]) - abs(float(ov9))
                             if e9s >= 1:
                                 c9["est"] = round(e9s, 2)
                             else:
@@ -15726,7 +15991,7 @@ class StateBuilder:
             dow = "일월화수목금토"[int(d.strftime("%w"))]
             is_today = (i == 0)
             ck = d.strftime("%Y-%m-%d")
-            if i >= 30 and ck not in lpfix9:
+            if i >= 30 and ck not in lpfix9 and ck not in hlr9:
                 continue
             if not is_today and frozen_ok and ck in self.daily and ck not in old9:
                 c = self.daily[ck]
@@ -15786,7 +16051,8 @@ class StateBuilder:
                         if not sn9.get("defer"):
                             if (led_old(sn9.get("lg"), sn9.get("ts")) or sn9.get("dq", "") != dfp9
                                     or (xq9 is not None and xq_new(sn9.get("xq", xqb9)))
-                                    or float(sn9.get("ts") or 0) < bf_at9):
+                                    or float(sn9.get("ts") or 0) < bf_at9
+                                    or any(m[1] <= ck and int(m[0]) > int(sn9.get("hq") or 0) for m in hl9)):
                                 old1 = True
                                 old_sn1 = old_sn1 or sn9
                                 if float(sn9.get("ts") or 0) < bf_at9 and isinstance(sn9.get("p"), dict):
@@ -15837,6 +16103,8 @@ class StateBuilder:
                         self.daily[ck]["xq"] = xq9
                     if snap1.get("lg") is not None:
                         self.daily[ck]["lg"] = snap1["lg"]
+                    if hq_now9:
+                        self.daily[ck]["hq"] = hq_now9
                     self.daily[ck]["xraw"] = xs_raw9
                     xc_sn9 = xparts.carry_usd(xs_p9, xs_fx9)
                     if xc_sn9 >= 1:
@@ -15865,6 +16133,8 @@ class StateBuilder:
                                     lp9[k9] = float(Decimal(str(v9)) / q9)
                     dpx[ck] = {"p": {k9: v9 for k9, v9 in lp9.items() if v9}, "k": {k9: "live" for k9, v9 in lp9.items() if v9},
                                "x": round(xs, 2), "xk": "live"}
+                    if isinstance(snap1.get("dbt"), dict):
+                        dpx.setdefault("_dbt", {})[ck] = dict(snap1["dbt"])
                     if xu9s:
                         dpx[ck]["xu"] = xu9s
                     dpx[ck]["xv"] = _xv_disk(xs_p9, xs_fx9, "snap", **dict(xs_m9, **({"xq": xq9} if xq9 is not None else {})))
@@ -15903,6 +16173,7 @@ class StateBuilder:
                 part_g9 = part1["g"]
                 part_p9 = part1.get("p") if isinstance(part1.get("p"), dict) else {}
                 part_pend9 = {str(x9) for x9 in (part1.get("pend") or ())}
+            dn9 = dbt_now9 if is_today else dbt_day(ck, part1, old_sn1)
             for gid, g in G.items():
                 skip9 = bool(skip_gids and gid in skip_gids)
                 if g.get("is_fiat"):
@@ -15915,7 +16186,10 @@ class StateBuilder:
                         if ts * 1000 <= end_ms:
                             qty += dq
                 if qty <= EPS and not (qty < -EPS and neg_ok and gid in neg_ok):
-                    continue
+                    dc9 = dn9.get(str(gid)) if qty < -EPS else None
+                    if not dc9:
+                        continue
+                    qty = max(qty, -Decimal(str(dc9)))
                 sym = g["sym"]
                 sid = str(gid)
                 if g["is_stable"]:
@@ -15939,7 +16213,7 @@ class StateBuilder:
                 if sid in fixed_p:
                     px = fixed_p[sid]
                     kind = fixed_k.get(sid) or "now"
-                elif part_g9 is not None and sid in part_g9 and sid not in part_pend9 and float(part_g9[sid]) > 0:
+                elif part_g9 is not None and sid in part_g9 and sid not in part_pend9 and float(part_g9[sid]) != 0:
                     px = part_p9.get(sid) or float(Decimal(str(part_g9[sid])) / qty)
                     kind = "live"
                 elif gid in ub_tl9 and str(sym or "").upper() in ubpx9:
@@ -15989,8 +16263,8 @@ class StateBuilder:
                     if sp9 and 0.5 <= sp9 / float(px) <= 2.0:
                         px, kind = sp9, "seed"
                 if (kind == "now" and day_close is not None and hold_qty is not None and sid not in fixed_p
-                        and float(qty) * float(px or 0) >= DC_SMALL_USD):
-                    dcp9 = day_close(gid, ck, float(qty) * float(px or 0))[0]
+                        and abs(float(qty) * float(px or 0)) >= DC_SMALL_USD):
+                    dcp9 = day_close(gid, ck, abs(float(qty) * float(px or 0)))[0]
                     if dcp9:
                         px, kind = dcp9, "d"
                 if px and sid not in fixed_p:
@@ -16007,7 +16281,7 @@ class StateBuilder:
                 if not skip9:
                     total += gvals[sid]
                     if kind == "now" and not is_today:
-                        est += gvals[sid]
+                        est += abs(gvals[sid])
                         n_est9 += 1
             usdt = None
             kimp = None
@@ -16068,9 +16342,13 @@ class StateBuilder:
                 self.daily["_live"] = {"date": ck, "ts": round(now_ts, 3), "val": entry["val"], "usdt": usdt,
                                        "kimp": kimp, "g": g_out, "x": round(x_day, 2), "defer": defer,
                                        "p": {k9: round(v9, 12) for k9, v9 in new_p.items()}}
+                if dbt_now9:
+                    self.daily["_live"]["dbt"] = dict(dbt_now9)
                 if lg_now9:
                     self.daily["_live"]["lg"] = lg_now9
                 self.daily["_live"]["dq"] = dfp9
+                if hq_now9:
+                    self.daily["_live"]["hq"] = hq_now9
                 if xq9 is not None:
                     self.daily["_live"]["xq"] = xq9
                 if ubs_now:
@@ -16109,6 +16387,8 @@ class StateBuilder:
                                   "lq": DAILY_LQ_V, "dq": dfp9}
                 if xq9 is not None:
                     self.daily[ck]["xq"] = xq9
+                if hq_now9:
+                    self.daily[ck]["hq"] = hq_now9
                 if xp9 is not None:
                     self.daily[ck]["xraw"] = round(x_raw9, 2)
                 if xrest9:
@@ -16140,6 +16420,8 @@ class StateBuilder:
                     e9 = dpx.setdefault(ck, {"p": {}, "k": {}})
                     e9.setdefault("p", {}).update(new_p)
                     e9.setdefault("k", {}).update(new_k)
+                    if dn9 and not isinstance((dpx.get("_dbt") or {}).get(ck), dict):
+                        dpx.setdefault("_dbt", {})[ck] = dict(dn9)
                     for k9, v9 in new_lp.items():
                         e9.setdefault("lp", {}).setdefault(k9, v9)
                     if xp9 is not None:
@@ -16265,7 +16547,9 @@ class StateBuilder:
                 ev.append(dict(r9, ex=ex9))
         exn = dict({"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}, **PERP_NAMES)
         notional = _fut_notional_sum(poss)
-        upnl = sum(float(p.get("upnl") or 0) for p in poss)
+        upv9 = [_fut_upnl_usd(p, self.spot.price) for p in poss]
+        upk9 = [u9 for u9, _w9 in upv9 if u9 is not None]
+        upnl = sum(upk9) if (upk9 or not poss) else None
         long_n = _fut_notional_sum([p for p in poss if p.get("side") == "LONG"])
         short_n = _fut_notional_sum([p for p in poss if p.get("side") != "LONG"])
         by_date, rows = {}, []
@@ -16336,7 +16620,7 @@ class StateBuilder:
                 elif amt9 < 0:
                     losses += 1
         pos_out = []
-        for p in poss:
+        for p, (pu9, pw9) in zip(poss, upv9):
             try:
                 liq9 = float(p.get("liq") or 0)
                 mark9 = float(p.get("mark") or 0)
@@ -16351,7 +16635,9 @@ class StateBuilder:
                             "qty": float(p.get("qty") or 0),
                             "entry": float(p.get("entry") or 0),
                             "mark": mark9,
-                            "upnl": round(float(p.get("upnl") or 0), 2),
+                            "upnl": None if pu9 is None else round(pu9, 2),
+                            **({"upnlWhy": pw9} if pw9 else {}),
+                            **({"settle": st9} if (st9 := _fut_settle(p)) and st9 not in _FUT_USD_SETTLE else {}),
                             "lev": str(p.get("leverage") or ""),
                             "liq": liq9, "liqDist": dist9})
         return {
@@ -16365,7 +16651,8 @@ class StateBuilder:
                          "winRate": (round(wins / (wins + losses) * 100, 1)
                                      if (wins + losses) else None)},
             "longNotional": None if long_n is None else round(long_n, 2), "shortNotional": None if short_n is None else round(short_n, 2),
-            "upnl": round(upnl, 2), "posCount": len(poss), "ts": ts_max,
+            "upnl": None if upnl is None else round(upnl, 2), "posCount": len(poss), "ts": ts_max,
+            "upnlPartial": any(u9 is None for u9, _w9 in upv9),
             "snapshotTs": snapshot_ts, "staleExchanges": stale_ex,
             "venues": venues,
             "positions": pos_out,
@@ -21013,11 +21300,15 @@ def _chain_auto_off():
     return off9
 
 
+GOPLUS_BODY_MAX = 4 << 20
+
+
 def _goplus_fetch(cid, ca_l):
     req = urllib.request.Request(
         f"https://api.gopluslabs.io/api/v1/token_security/{cid}?contract_addresses={ca_l}",
         headers={"User-Agent": "tj-bot/0.1", "Accept": "application/json"})
-    return json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(common.read_capped(r, GOPLUS_BODY_MAX).decode())
 
 
 def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
@@ -21096,6 +21387,11 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
                 continue
             fail_until[key] = now + GOPLUS_FAIL_RETRY
             note(f"HTTP {e.code}", f"{key} — 이 CA 만 1시간 뒤 재시도")
+            sleep(6.7)
+            continue
+        except common.ResponseTooLarge as e:
+            fail_until[key] = now + GOPLUS_FAIL_RETRY
+            note("응답 큼", f"{common.safe_err(e)[:60]} ({key}) — 이 CA 만 1시간 뒤 재시도")
             sleep(6.7)
             continue
         except Exception as e:

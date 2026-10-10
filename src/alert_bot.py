@@ -1,6 +1,7 @@
 """Telegram alert sender (price targets, health, daily summaries)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -28,6 +29,8 @@ URGENT_TICK = 0.5
 URGENT_MAX_PASS = 10
 URGENT_LATE = 120
 URGENT_REPLAY = 3600
+URGENT_BACKOFF_MAX = 300
+URGENT_PERM_SEC = 1800
 MAX_PER_CYCLE = 15
 READ_LINES_MAX = 500
 COALESCE_MIN = 4
@@ -78,6 +81,10 @@ TG_API = _tg_api_base()
 
 
 _TG_WAIT_UNTIL = [0.0]
+_LAST_SEND = {"cls": None}
+_TG_PERM_CODES = frozenset({400, 401, 403, 404})
+TG_BODY_MAX = 1 << 20
+TG_ERR_BODY_MAX = 64 << 10
 TG_RETRY_MAX = 3600
 
 
@@ -97,6 +104,7 @@ def _silent_text(text: str) -> bool:
 def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
     now = time.time()
     if now < _TG_WAIT_UNTIL[0]:
+        _LAST_SEND["cls"] = "wait"
         return False, None, f"텔레그램 속도 제한 대기 {int(_TG_WAIT_UNTIL[0] - now) + 1}초"
     text = common.redact_secret_text(text, generic=False)
     params = {"chat_id": chat, "text": text[:3900]}
@@ -107,19 +115,23 @@ def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
         params["allow_sending_without_reply"] = "true"
     req = urllib.request.Request(f"{TG_API}/bot{token}/sendMessage", data=urllib.parse.urlencode(params).encode())
     ra = 0.0
+    cls9 = "temp"
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            d = json.loads(r.read().decode())
+            d = json.loads(common.read_capped(r, TG_BODY_MAX).decode())
         ok = d.get("ok") is True
         err = None if ok else str(d.get("description") or "ok=false")[:160]
         mid = ((d.get("result") or {}).get("message_id")) if ok else None
         if not ok and int(d.get("error_code") or 0) == 429:
             ra = _retry_after(d) or 30.0
+        elif not ok and int(d.get("error_code") or 0) in _TG_PERM_CODES:
+            cls9 = "perm"
     except urllib.error.HTTPError as e:
         ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+        cls9 = "perm" if e.code in _TG_PERM_CODES else "temp"
         if e.code == 429:
             try:
-                ra = _retry_after(e.read()) or 30.0
+                ra = _retry_after(common.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
             except Exception:
                 ra = 30.0
         log.warning("발송 실패: %s", err)
@@ -129,7 +141,11 @@ def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
     if ra > 0:
         _TG_WAIT_UNTIL[0] = time.time() + min(ra, TG_RETRY_MAX)
         log.warning("텔레그램 속도 제한(429) — %d초 쉬고 이어서 보냄", int(min(ra, TG_RETRY_MAX)))
+        _LAST_SEND["cls"] = "wait"
         return False, None, f"텔레그램 속도 제한(429) — {int(min(ra, TG_RETRY_MAX))}초 대기"
+    _LAST_SEND["cls"] = "ok" if ok else cls9
+    if ok:
+        _URG_BACKOFF.update(n=0, until=0.0, perm=False)
     health.note_send(ok, err)
     return ok, mid, err
 
@@ -156,7 +172,7 @@ def send_photo(token: str, chat: str, png: bytes, caption: str = "", silent: boo
     ra = 0.0
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(r.read().decode())
+            d = json.loads(common.read_capped(r, TG_BODY_MAX).decode())
         ok = d.get("ok") is True
         err = None if ok else str(d.get("description") or "ok=false")[:160]
         mid = ((d.get("result") or {}).get("message_id")) if ok else None
@@ -166,7 +182,7 @@ def send_photo(token: str, chat: str, png: bytes, caption: str = "", silent: boo
         ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
         if e.code == 429:
             try:
-                ra = _retry_after(e.read()) or 30.0
+                ra = _retry_after(common.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
             except Exception:
                 ra = 30.0
         log.warning("그림 발송 실패: %s", err)
@@ -243,6 +259,8 @@ def _fast_send_ok(kind, conn=None) -> bool:
 def _fast_to(kind, token, chat):
     if kind in AP.FAST_KINDS:
         t9, c9 = _tg_creds()
+        if t9 and c9 and _urg_backoff_wait(t9, c9, time.time()):
+            return None, None
         return (t9, c9) if (t9 and c9) else (None, None)
     return token, chat
 
@@ -992,6 +1010,36 @@ def scan_crit(path: str, fn: str, start: int, hold: dict, limit: int = CRIT_SCAN
 
 
 _URG = {"pos": {}}
+_URG_BACKOFF = {"n": 0, "until": 0.0, "sig": None, "perm": False}
+
+
+def _cred_sig(token, chat) -> str:
+    return hashlib.sha256(f"{token}\n{chat}".encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _urg_backoff_wait(token, chat, now: float) -> bool:
+    bo = _URG_BACKOFF
+    if bo["until"] <= now:
+        return False
+    if bo["sig"] == _cred_sig(token, chat):
+        return True
+    bo.update(n=0, until=0.0, sig=None, perm=False)
+    log.info("텔레그램 자격 증명이 바뀜 — 긴급 알림 재시도 대기를 풀고 바로 다시 보냄")
+    return False
+
+
+def _urg_backoff_fail(token, chat, now: float = None) -> None:
+    cls9 = _LAST_SEND.get("cls")
+    if cls9 == "wait":
+        return
+    bo = _URG_BACKOFF
+    now = time.time() if now is None else now
+    bo["n"] = min(int(bo["n"]) + 1, 30)
+    perm = cls9 == "perm"
+    d9 = URGENT_PERM_SEC if perm else min(URGENT_BACKOFF_MAX, URGENT_TICK * (2 ** bo["n"]))
+    bo.update(until=now + d9, sig=_cred_sig(token, chat), perm=perm)
+    log.warning("긴급 알림 발송 실패%s — %d초 뒤 다시(연속 %d회 · 줄은 남아 있음)",
+                "(봇 차단·채팅 ID·토큰 확인 — 400·401·403·404)" if perm else "", int(d9), bo["n"])
 
 
 def urgent_pass(now=None) -> int:
@@ -1000,6 +1048,8 @@ def urgent_pass(now=None) -> int:
     if not token or not chat or cursor is None or hold is None:
         return 0
     conn, st = c.get("conn"), c.get("st") or {"days": {}, "counted": {}}
+    if _urg_backoff_wait(token, chat, time.time()):
+        return 0
     sent = 0
     for fn in SOURCES:
         path = os.path.join(common.STATE_DIR, fn)
@@ -1034,8 +1084,13 @@ def urgent_pass(now=None) -> int:
             token, chat = _tg_creds()
             if not token or not chat:
                 return sent
-            if sent >= URGENT_MAX_PASS or not send(token, chat, _late_note(d)):
+            if sent >= URGENT_MAX_PASS:
                 return sent
+            _LAST_SEND["cls"] = None
+            if not send(token, chat, _late_note(d)):
+                _urg_backoff_fail(token, chat)
+                return sent
+            _URG_BACKOFF.update(n=0, until=0.0, perm=False)
             sent += 1
             if mark_done(hold, fn, [off], cur):
                 save_hold(hold)
@@ -1235,10 +1290,32 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         save_hold(hold)
 
 
+def _load_cursor() -> dict:
+    try:
+        cur = common.read_json(CURSOR_PATH, {})
+        why = None if isinstance(cur, dict) else f"객체가 아님({type(cur).__name__})"
+    except (Exception, SystemExit) as e:
+        cur, why = None, str(e)[:160]
+    if why is not None:
+        dst = CURSOR_PATH + ".bad"
+        if os.path.exists(dst):
+            dst = f"{CURSOR_PATH}.bad.{int(time.time())}_{os.getpid()}"
+        try:
+            os.replace(CURSOR_PATH, dst)
+        except OSError:
+            dst = "(옮기지 못함)"
+        log.warning("텔레그램 커서 파일 손상 — 원본 → %s · 소스마다 파일 끝(긴급 큐는 최근 1시간)부터 다시: %s", os.path.basename(dst), why)
+        return {}
+    out = {k: v for k, v in cur.items() if isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+    if len(out) != len(cur):
+        log.warning("텔레그램 커서 칸 %d개 형식 이상 — 그 소스만 처음 시작처럼 다시 잡음", len(cur) - len(out))
+    return out
+
+
 def main():
     common.ensure_dirs()
     unit_beat.start("alert")
-    cursor = common.read_json(CURSOR_PATH, {})
+    cursor = _load_cursor()
     warned = False
     cap_state = {}
     mon = health.Monitor()

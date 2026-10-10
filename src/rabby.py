@@ -653,6 +653,19 @@ def day_values(note: dict, isos, today_iso: str, today_usd: float) -> dict:
     return out
 
 
+def day_new(note: dict, isos, today_iso: str) -> dict:
+    newv = dict((note or {}).get("n") or {})
+    first = (note or {}).get("first")
+    if first and first not in newv and not (note or {}).get("wf"):
+        newv[first] = ((note or {}).get("d") or {}).get(first, 0)
+    out = {}
+    for iso in day_values(note, isos, today_iso, 0.0):
+        nv = round(float(newv.get(iso) or 0), 2)
+        if nv:
+            out[iso] = nv
+    return out
+
+
 def daily_overlay(daily: list, note: dict, today_iso: str, today_usd: float, year: int = None) -> None:
     first = (note or {}).get("first")
     if not first or not daily:

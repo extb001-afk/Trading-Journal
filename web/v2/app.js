@@ -682,6 +682,13 @@
   const pctS = (v, d) => { if (v == null || !isFinite(v)) return '—'; const t = Math.abs(v).toFixed(d == null ? 1 : d); return (+t === 0 ? '' : v > 0 ? '+' : v < 0 ? '−' : '') + t + '%'; };
   const kimpCol = k => (k == null || !isFinite(k)) ? 'var(--muted)' : 'var(--text2)';
   const kimpChip = k => (k == null || !isFinite(k)) ? '' : k > 2 ? '<span class="kchip hi" title="김프 2% 초과">높음</span>' : k < 0.8 ? '<span class="kchip" title="김프 0.8% 미만">낮음</span>' : '';
+  function fxNote(D) {
+    if (!D || D.rateSrc === 'live') return '';
+    const fb = D.rateSrc === 'fallback';
+    const t = fb ? '업비트 USDT 원화 시세를 아직 못 받아 고정 대체값으로 원화를 환산 중이에요 — 원화 숫자가 실제와 다를 수 있어요'
+      : '업비트 USDT 원화 시세를 ' + (D.rateAt ? fmtTs(D.rateAt) + ' 뒤로 ' : '한동안 ') + '못 받아 마지막 값으로 환산 중이에요 — 다시 받으면 저절로 풀려요';
+    return ' <span class="wtxt" title="' + esc(t) + '">· ' + (fb ? '환율 대체값' : '환율 오래됨') + '</span>';
+  }
   const cls = v => (v > 0 ? 'up' : v < 0 ? 'down' : 'mut');
   const clsP = (v, d) => (v == null || !isFinite(v) || +Math.abs(v).toFixed(d == null ? 1 : d) === 0 ? 'mut' : cls(v));
   const clsV = v => cls(v == null || !isFinite(v) || isZ(v) ? 0 : v);
@@ -1128,7 +1135,8 @@
     const f = (d && d.fields) || {};
     const D = { f, todayKey: d.todayKey || todayISO().slice(5), builtAt: d.builtAt };
     D.rate = num(f.rate) || 1384; D.fx = num(f.fxRate) || D.rate; D.kimp = (D.rate / D.fx - 1) * 100;
-    D.rateLive = f.rateSrc !== 'fallback' && num(f.rate) > 0;
+    D.rateSrc = ['live', 'stale', 'fallback'].indexOf(f.rateSrc) >= 0 ? f.rateSrc : (num(f.rate) > 0 ? 'live' : 'fallback'); D.rateAt = num(f.rateAt) || null;
+    D.rateLive = D.rateSrc === 'live' && num(f.rate) > 0;
     const stables = arr(f.stables), coins = arr(f.coins), fiats = arr(f.fiats), lps = arr(f.lps).map(normLP).filter(Boolean);
     D.stables = stables; D.fiats = fiats; D.lps = lps;
     D.krw = f.krwFlows && typeof f.krwFlows === 'object' && Array.isArray(f.krwFlows.rows) ? f.krwFlows : null;
@@ -1181,7 +1189,7 @@
       const pnl = hasCost ? (fbc > 0 ? qty * price - cost : (price - avg) * kq) : 0;
       const value = qty * price;
       const rb = c.rabby && typeof c.rabby === 'object' ? c.rabby : null;
-      const unkQty = rb ? 0 : avg > 0 ? (fbc > 0 ? 0 : Math.max(0, qty - kq)) : qty;
+      const unkQty = rb ? 0 : avg > 0 ? (fbc > 0 ? 0 : Math.max(0, qty - kq)) : Math.max(0, qty);
       const inst = { key: c.key, sym, name: c.name, chain: chainOf(c.name), ck: c.ck, ca: c.ca, genU: !!c.genU, qty, price, avg, kq, fbQty: num(c.fbQty), fbCost: fbc, cost, pnl, value, unkQty, hasCost,
         pxSrc: String(c.pxSrc || ''), pxAge: c.pxAge != null ? num(c.pxAge) : null, pxPre: !!c.pxPre, pxPreN: num(c.pxPreN), rabby: rb };
       if (rb) { g.rabby = g.rabby ? Math.min(g.rabby, num(rb.at)) : num(rb.at); g.rbValue = (g.rbValue || 0) + value; if (c.rbKind != null) g.rbKind = String(c.rbKind || ''); }
@@ -2317,7 +2325,7 @@
     if (short) return '<span class="dot ' + dc + '" title="' + esc(scan) + '"></span>' + opt;
     return '<span class="dot ' + dc + '"' + (D ? ' title="' + esc(scan) + '"' : '') + '></span><span class="scan">' + esc(scan) + '</span>' + opt
       + (D ? '<span class="scanmeta pvx">· 지갑 ' + D.wallets.length + ' · 거래소 ' + D.exN + '</span>'
-        + '<span class="fx num" title="업비트 USDT 매도호가 · 김프">USDT ₩' + nf('ko-KR').format(D.rate) + ' · 김프 <b style="color:' + kimpCol(D.kimp) + '">' + pctS(D.kimp, 2) + '</b>' + kimpChip(D.kimp) + '</span>' : '');
+        + '<span class="fx num" title="업비트 USDT 매도호가 · 김프">USDT ₩' + nf('ko-KR').format(D.rate) + (D.rateSrc === 'fallback' ? '' : ' · 김프 <b style="color:' + kimpCol(D.kimp) + '">' + pctS(D.kimp, 2) + '</b>' + kimpChip(D.kimp)) + fxNote(D) + '</span>' : '');
   }
   function tabBadge(k) {
     const D = S.D;
@@ -2484,7 +2492,7 @@
     if (g.key.indexOf('~') > 0) return g.keys.indexOf(pk) >= 0;
     return String(sym).toUpperCase() === g.key && !(g.twin && S.D.groups.some(x => x !== g && x.key.indexOf(g.key + '~') === 0 && x.keys.indexOf(pk) >= 0));
   }
-  function dustOk(v) { return S.hold.showDust || S.dust <= 0 || v >= S.dust; }
+  function dustOk(v) { return S.hold.showDust || S.dust <= 0 || Math.abs(v) >= S.dust; }
   function monthRealized(ym) {
     ym = ym || ymShift(0);
     const ks = Object.keys(S.D.realized).filter(k => k.slice(0, 3) === ym.slice(5, 7) + '-' && ymOf(k) === ym);
@@ -2842,7 +2850,7 @@
       + '<span class="tchg num" id="heroChg">' + (hw ? '<span class="skl chskl" aria-hidden="true"></span>' : rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + (D.prov && D.prov.note ? '<div class="cap histcap" role="status">' + esc(D.prov.note) + '</div>' : '') + '</section>';
     const futNet = num((fut.pnlBreak || {}).net != null ? fut.pnlBreak.net : fut.realizedTotal);
     const futOpen = futOk && num(fut.posCount) > 0;
-    const futV = !futOk ? '<span class="mut">수집 대기</span>' : futOpen ? '<span class="' + cls(num(fut.upnl)) + '">' + m(num(fut.upnl), { sign: true, compact: true }) + '</span>' : '<span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>';
+    const futV = !futOk ? '<span class="mut">수집 대기</span>' : futOpen ? '<span class="' + cls(num(fut.upnl)) + '"' + (fut.upnlPartial ? ' title="코인 정산 포지션 일부는 시세가 없어 빼고 더했어요"' : '') + '>' + upnlH(fut.upnl, null, { sign: true, compact: true }) + '</span>' : '<span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>';
     const futS = '<span class="pvx">' + (futOpen ? '오픈 ' + num(fut.posCount) + '건 · 규모 </span>' + (fut.notional == null ? '—' : m(num(fut.notional), { compact: true })) + '<span class="pvx">' : '오픈 포지션 없음') + (exs || ndex ? ' · ' + (exs ? '거래소 ' + exs + '곳' : '') + (ndex ? (exs ? ' · ' : '') + '덱스 ' + ndex + '곳' : '') : Object.keys(fut.realizedByDate || {}).length ? '' : ' · ' + (exLinked() ? '첫 수집 전' : '거래소 연결 전')) + '</span>' + (futOpen ? ' · 누적 <span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>' : '') + (stale.length ? ' · ' + esc(stale.map(x => EX_NAMES[x] || x).join(', ')) + ' 제외' : '');
     const futTip = futFxNote(futNet);
     const tEvs = dayFull(tk) || (partHave('ev') ? (D.evByDay.get(tk) || []) : null), tBuys = [];
@@ -3394,7 +3402,7 @@
     const head = '<div class="tblhead"><h2 class="h2">보유 코인</h2><span class="cap num">' + rows.length + '종 · ' + ({ value: '평가금액', roi: '수익률', pnl: '평가손익' })[S.hold.sort] + ' 순</span>' + dustLink + '<div class="sp"></div>' + seg + dseg + '</div>';
     if (!rows.length) {
       return '<div class="card">' + head + '<div class="empty"><div class="eic">' + IC.coin + '</div><b>' + (D.groups.length ? '표시할 코인이 없어요' : '보유 코인이 없어요') + '</b>'
-        + (hidden.length ? '소액 기준($' + S.dust + ') 미만 ' + hidden.length + '종이 숨겨져 있어요. <button class="link" data-a="toggleDust">모두 보기</button>' : '지갑 스캔·거래소 동기화 후 여기에 나타나요.') + '</div>' + zeroFoldHTML() + '</div>';
+        + (hidden.length ? '소액 기준($' + S.dust + ') 미만 ' + hidden.length + '종이 숨겨져 있어요. <button class="link" data-a="toggleDust">모두 보기</button>' : '지갑 스캔·거래소 동기화 후 여기에 나타나요.') + '</div>' + zeroFoldHTML() + debtFootHTML() + '</div>';
     }
     let body;
     if (S.mobile) {
@@ -3428,7 +3436,13 @@
     const zf = zeroFoldHTML();
     const foot = rest.length ? '<div class="foot"><span class="num">나머지 ' + rest.length + '종 · ' + m(sum(rest, r => r.value), { compact: true }) + '</span><button class="link" data-a="holdMore">' + (rest.length > 50 ? '50종 더 보기' : rest.length + '종 모두 보기') + IC.right + '</button></div>'
       : (rows.length > (S.mobile ? 12 : 15) ? '<div class="foot"><span>' + rows.length + '종 모두 표시 중</span><button class="link" data-a="holdLess">접기</button></div>' : '');
-    return '<div class="card">' + head + body + foot + zf + '</div>';
+    return '<div class="card">' + head + body + foot + zf + debtFootHTML() + '</div>';
+  }
+  function debtFootHTML() {
+    const D = S.D, neg = (D.groups || []).filter(g => num(g.qty) < 0 && num(g.value) <= -0.005);
+    if (!neg.length || S.hold.mode !== 'all') return '';
+    return '<div class="foot zfold"><span><span class="pvx">빌린 몫이 잔고를 넘은 코인 <b class="num">' + neg.length + '</b>종</span> · <b class="num">' + m(sum(neg, g => num(g.value)), { compact: true }) + '</b> <span class="mut pvx">· '
+      + esc(neg.slice(0, 3).map(g => g.sym).join(' · ') + (neg.length > 3 ? ' 외' : '')) + ' — 총자산에서 차감 · 빌린 돈은 레버리지·대출 칸</span></span></div>';
   }
   function zeroFoldHTML() {
     const D = S.D, z = D.zeroInst || [];
@@ -3514,15 +3528,16 @@
       + stakeNote(g) + '<div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap"><span class="cap num">원가 ' + (g.cost > 0 ? m(g.cost) : '—') + (g.unkQty > 0 ? ' · 원가 미확인 ' + q(g.unkQty) + ' ' + esc(g.sym) : '') + '</span><span class="sp"></span><button class="link" data-a="goJournalSym" data-v="' + esc(g.sym) + '">매매일지에서 보기' + IC.right + '</button></div></div>' + plan + '</div></div>';
   }
   const futSym = s => { const b = String(s || '').replace(/[-_/]?(USDT|USDC|USD)([-_]?(SWAP|PERP|M))?$/i, ''); return (b || s) + ' 무기한'; };
+  const upnlH = (v, why, o) => v == null ? '<span class="mut" title="' + esc(why || '코인 정산 — 시세가 없어 달러로 못 바꿈') + '">—</span>' : m(num(v), o);
   const exKey = ex => { const e = String(ex || '').toLowerCase(); return EX_NAMES[e] ? e : (EX_BY_KO[ex] || e); };
   function futPosHTML(side) {
     const f = S.D.fut, ps = arr(f.positions);
     if (!ps.length) return '';
     return '<div class="card' + (side ? ' sidec' : '') + '"><div class="tblhead"><h2 class="h2">선물 포지션</h2><span class="cap num">' + ps.length + '개 · 마크가 기준' + (side ? '' : ' · 총자산 미반영') + '</span><div class="sp"></div><button class="link" data-a="openFut">상세' + IC.right + '</button></div>'
-      + (S.mobile || side ? '<div class="m-list">' + ps.map(p => '<div class="it">' + icon(p.sym, true) + '<div class="ell"><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub">' + esc(EX_NAMES[exKey(p.ex)] || p.ex) + (p.dex ? ' <span class="pill g sm">덱스</span>' : '') + ' · ' + q(num(p.qty)) + '</div></div><div class="r"><div class="val num ' + cls(num(p.upnl)) + '">' + m(num(p.upnl), { sign: true }) + '</div><div class="sub num">' + (num(p.liq) > 0 && p.liqDist != null ? '청산까지 ' + Math.abs(num(p.liqDist)).toFixed(1) + '%' : '청산가 없음') + '</div></div></div>').join('') + '</div>'
+      + (S.mobile || side ? '<div class="m-list">' + ps.map(p => '<div class="it">' + icon(p.sym, true) + '<div class="ell"><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub">' + esc(EX_NAMES[exKey(p.ex)] || p.ex) + (p.dex ? ' <span class="pill g sm">덱스</span>' : '') + ' · ' + q(num(p.qty)) + '</div></div><div class="r"><div class="val num ' + cls(num(p.upnl)) + '">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</div><div class="sub num">' + (num(p.liq) > 0 && p.liqDist != null ? '청산까지 ' + Math.abs(num(p.liqDist)).toFixed(1) + '%' : '청산가 없음') + '</div></div></div>').join('') + '</div>'
         : '<table><thead><tr><th scope="col">포지션</th><th scope="col">수량</th><th scope="col">진입 / 마크</th><th scope="col">평가손익</th><th scope="col">청산까지</th></tr></thead><tbody>' + ps.map(p => {
           const d9 = num(p.liq) > 0 && p.liqDist != null ? Math.abs(num(p.liqDist)) : null;
-          return '<tr><td><div class="asset">' + icon(p.sym, true) + '<div><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub row gap6">' + exLogo(exKey(p.ex)) + esc(EX_NAMES[exKey(p.ex)] || p.ex) + (p.dex ? '<span class="pill g sm">덱스</span>' : '') + '</div></div></div></td><td class="num">' + q(num(p.qty)) + '</td><td class="num">' + px(num(p.entry)) + '<div class="sub">' + px(num(p.mark)) + '</div></td><td class="num ' + cls(num(p.upnl)) + '" style="font-weight:700">' + m(num(p.upnl), { sign: true }) + '</td><td class="num">' + (d9 == null ? '<span class="mut">없음</span>' : '<span style="color:' + (d9 < 10 ? 'var(--danger)' : d9 < 25 ? 'var(--warn)' : 'var(--text2)') + '">' + d9.toFixed(1) + '%</span><div class="sub">' + px(num(p.liq)) + '</div>') + '</td></tr>';
+          return '<tr><td><div class="asset">' + icon(p.sym, true) + '<div><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub row gap6">' + exLogo(exKey(p.ex)) + esc(EX_NAMES[exKey(p.ex)] || p.ex) + (p.dex ? '<span class="pill g sm">덱스</span>' : '') + '</div></div></div></td><td class="num">' + q(num(p.qty)) + '</td><td class="num">' + px(num(p.entry)) + '<div class="sub">' + px(num(p.mark)) + '</div></td><td class="num ' + cls(num(p.upnl)) + '" style="font-weight:700">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</td><td class="num">' + (d9 == null ? '<span class="mut">없음</span>' : '<span style="color:' + (d9 < 10 ? 'var(--danger)' : d9 < 25 ? 'var(--warn)' : 'var(--text2)') + '">' + d9.toFixed(1) + '%</span><div class="sub">' + px(num(p.liq)) + '</div>') + '</td></tr>';
         }).join('') + '</tbody></table>') + '</div>';
   }
   const pxrRaw = v => (v >= 1000 ? nf('en-US', null, 0).format(v) : v >= 1 ? trimZeros(v.toFixed(4)) : trimZeros(v.toPrecision(4)));
@@ -6235,7 +6250,7 @@
     if (!ls.length || p._lp) return '';
     return '<div class="pbox"><div class="ttl">토큰 세일 매수 <span class="cap">경매 입찰 원가를 받은 토큰에 이었어요</span></div>'
       + ls.map(x => '<div class="kv" style="align-items:center;gap:8px"><span style="min-width:0;overflow-wrap:anywhere">' + esc(x.label || '토큰 세일')
-        + '<span class="cap" style="display:block;overflow-wrap:anywhere">참여 ' + esc(m(num(x.paidUsd))) + ' · 환불 ' + esc(m(num(x.refundUsd))) + ' · 단가 ' + (S.hide ? '$' + pvW(PVM.px) : '$' + esc(rw(String(Number(num(x.unit).toPrecision(6))))))
+        + '<span class="cap" style="display:block;overflow-wrap:anywhere">참여 ' + esc(m(num(x.paidUsd))) + ' · 환불 ' + esc(m(num(x.refundUsd))) + ' · 단가 ' + (x.unit == null ? '미확인' : S.hide ? '$' + pvW(PVM.px) : '$' + esc(rw(String(Number(num(x.unit).toPrecision(6))))))
         + ' · 받은 ' + esc(q(num(x.qty))) + (x.receiptSym ? ' (' + esc(x.receiptSym) + ' 교환)' : '')
         + '<br>연결 ' + esc(q(num(x.usedQty))) + ' · 원가 ' + esc(m(num(x.usedCost))) + ' · 입찰 지갑 ' + esc(short(x.bidder)) + (x.bidderMine ? '' : ' (미등록)')
         + (x.off ? ' · <span class="wtxt">끊음 — 원가 미확인으로 계산 중</span>' : '') + (x._opt ? ' · <span class="wtxt">반영 중</span>' : '') + '</span></span>'
@@ -6702,7 +6717,7 @@
       + (bc.unchecked ? ' · <span class="wtxt pvx">이번 판 미대조 ' + bc.unchecked + '쌍</span>' : bc.capped ? ' · 호출 상한 도달' : '') + (bc.errors ? ' · 오류 ' + bc.errors + '건' : '') + (D.bcWatch.length ? ' · 관찰 ' + D.bcWatch.length : '') : '아직 대조 결과가 없어요';
     const bcRow = '<div class="sx-it" id="sx-data-bc"><span class="dot' + (!bc || D.bcConfirmed.length || bc.errors ? ' w' : '') + '"></span><div class="sx-itx"><span class="tx"><b>온체인 잔고 대조</b><span class="cap num">' + bcCap + '</span></span></div>'
       + (bc && bc.mismatches.length ? '<button class="btn sm" data-a="goPend" data-v="bal">보기</button>' : bc ? sxPill(D.bcConfirmed.length ? 'w' : 'ok', '불일치 ' + D.bcConfirmed.length) : '') + '</div>';
-    const fx = '<div class="sx-it" id="sx-data-fx"><span class="dot i"></span><div class="sx-itx"><span class="tx"><b>환율</b><span class="cap num">USDT ₩' + nf('ko-KR').format(D.rate) + ' · 매매기준율 ₩' + nf('ko-KR', null, 1).format(D.fx) + ' · 김프 ' + pctS(D.kimp, 2) + '</span></span></div></div>';
+    const fx = '<div class="sx-it" id="sx-data-fx"><span class="dot ' + (D.rateSrc === 'live' ? 'i' : 'w') + '"></span><div class="sx-itx"><span class="tx"><b>환율</b><span class="cap num">USDT ₩' + nf('ko-KR').format(D.rate) + ' · 매매기준율 ₩' + nf('ko-KR', null, 1).format(D.fx) + (D.rateSrc === 'fallback' ? '' : ' · 김프 ' + pctS(D.kimp, 2)) + fxNote(D) + '</span></span></div></div>';
     const un = cd ? arr(cd.unavailable) : [], cnt = k => un.filter(u => u.severity === k).length;
     const limCap = cd ? 'API 한도 ' + cnt('hard') + ' · 일부 누락 ' + cnt('partial') + ' · 그 밖 ' + (un.length - cnt('hard') - cnt('partial')) : cov && cov.st === 'err' ? '불러오지 못했어요' : '불러오는 중…';
     return big + '<div class="sx-card">' + sxGrp('수집 상태') + src + up + bcRow + fx + '</div>'
@@ -7548,7 +7563,7 @@
     const f = S.D.fut, b = f.pnlBreak || {}, mm = f.mmRatio || {};
     const ps = arr(f.positions);
     const net = num(b.net != null ? b.net : f.realizedTotal);
-    const tiles = ps.length ? '<div class="futtiles"><div><div class="l">포지션 규모</div><div class="v num">' + (f.ts && f.notional != null ? m(num(f.notional), { compact: true }) : '—') + '</div></div><div><div class="l">롱 / 숏</div><div class="v num" style="font-size:14px">' + (f.longNotional == null ? '—' : m(num(f.longNotional), { compact: true })) + ' / ' + (f.shortNotional == null ? '—' : m(num(f.shortNotional), { compact: true })) + '</div></div><div><div class="l">평가손익</div><div class="v num ' + cls(num(f.upnl)) + '">' + (f.ts ? m(num(f.upnl), { sign: true, compact: true }) : '—') + '</div></div></div>'
+    const tiles = ps.length ? '<div class="futtiles"><div><div class="l">포지션 규모</div><div class="v num">' + (f.ts && f.notional != null ? m(num(f.notional), { compact: true }) : '—') + '</div></div><div><div class="l">롱 / 숏</div><div class="v num" style="font-size:14px">' + (f.longNotional == null ? '—' : m(num(f.longNotional), { compact: true })) + ' / ' + (f.shortNotional == null ? '—' : m(num(f.shortNotional), { compact: true })) + '</div></div><div><div class="l">평가손익</div><div class="v num ' + cls(num(f.upnl)) + '"' + (f.upnlPartial ? ' title="코인 정산 포지션 일부는 시세가 없어 빼고 더했어요"' : '') + '>' + (f.ts ? upnlH(f.upnl, null, { sign: true, compact: true }) : '—') + '</div></div></div>'
       : '<div class="futnone">' + IC.info.replace('<svg', '<svg width="18" height="18"') + '<span>오픈 포지션 없음 · 누적 순손익 <b class="num ' + cls(net) + '">' + m(net, { sign: true }) + '</b></span></div>';
     const hasDex = Object.keys(f.venues || {}).length > 0;
     const bReal = num(b.realized != null ? b.realized : f.realizedTotal);
@@ -7561,7 +7576,7 @@
       + (b.winRate != null ? '<div class="kv"><span title="거래소 정산 건 단위 — 한 포지션이 여러 번 나눠 정산되면 여러 건으로 세요(포지션 단위 아님)">승률(정산 건 기준)</span><b class="num">' + num(b.winRate).toFixed(1) + '% · ' + (num(b.wins) + num(b.losses)) + '건 중 ' + num(b.wins) + '승</b></div>' : '')
       + Object.keys(mm).filter(x => num((mm[x] || {}).maint) > 0).map(x => '<div class="kv"><span>' + esc(EX_NAMES[x] || x) + ' 유지증거금률</span><b class="num">' + num(mm[x].ratio).toFixed(2) + '%</b></div>').join('')
       + (arr(f.staleExchanges).length ? '<div class="fbnote">수집 지연 · 합산에서 제외: ' + esc(arr(f.staleExchanges).map(x => EX_NAMES[x] || x).join(', ')) + '</div>' : '') + '</div>';
-    const pos = ps.length ? '<div class="blk" style="margin-top:14px"><div class="ttl">오픈 포지션 ' + ps.length + '</div>' + ps.map(p => '<div class="kv"><span class="row gap8" style="align-items:flex-start;white-space:normal;min-width:0;flex:1">' + exLogo(exKey(p.ex)) + '<span><b style="color:var(--text)">' + esc(futSym(p.sym)) + '</b> <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + (p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span><div class="sub num">' + q(num(p.qty)) + ' · 진입 ' + px(num(p.entry)) + ' · 마크 ' + px(num(p.mark)) + (num(p.liq) > 0 ? ' · 청산 ' + px(num(p.liq)) : '') + '</div></span></span><b class="num ' + cls(num(p.upnl)) + '">' + m(num(p.upnl), { sign: true }) + '</b></div>').join('') + '</div>' : '';
+    const pos = ps.length ? '<div class="blk" style="margin-top:14px"><div class="ttl">오픈 포지션 ' + ps.length + '</div>' + ps.map(p => '<div class="kv"><span class="row gap8" style="align-items:flex-start;white-space:normal;min-width:0;flex:1">' + exLogo(exKey(p.ex)) + '<span><b style="color:var(--text)">' + esc(futSym(p.sym)) + '</b> <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + (p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span><div class="sub num">' + q(num(p.qty)) + ' · 진입 ' + px(num(p.entry)) + ' · 마크 ' + px(num(p.mark)) + (num(p.liq) > 0 ? ' · 청산 ' + px(num(p.liq)) : '') + '</div></span></span><b class="num ' + cls(num(p.upnl)) + '">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</b></div>').join('') + '</div>' : '';
     const rr = arr(f.realizedRows).slice().sort((a, c) => num(c._ts) - num(a._ts)).slice(0, 30);
     const rrRow = r => '<div class="kv" style="font-size:13px"><span class="row gap8">' + exLogo(exKey(r.ex)) + '<span class="num">' + esc(r.t) + ' · <b style="color:var(--text)">' + esc(futSym(r.sym)) + '</b>' + (r.liq ? ' <span class="pill down sm">청산</span>' : '') + '</span></span><b class="num ' + cls(num(r.pnl)) + '">' + m(num(r.pnl), { sign: true }) + '</b></div>';
     const rows = '<div class="blk" style="margin-top:14px"><div class="ttl">최근 정산 ' + rr.length + '건</div>' + (rr.length ? uiMore('fut:rr', rr, 10, rrRow, { unit: '건', less: true }) : '<div class="mut" style="font-size:14px">없음</div>') + '</div>';

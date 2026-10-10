@@ -641,7 +641,7 @@ def _fill_paced_map(cfg: dict, now: float) -> dict:
         return {}
 
 
-PACE_NOTE_FILL = "하루 한도 안에서 천천히 확인 중 — 처음 넣은 지갑은 옛 기록부터 채워서 첫날은 새 거래 확인이 평소보다 늦을 수 있어요"
+PACE_NOTE_FILL = "하루 한도 안에서 천천히 확인 중 — 새 거래 확인 몫을 먼저 떼어 두고 옛 기록은 남는 몫으로 뒤에서 채워요(새 거래 확인이 그 몫보다 많으면 남은 시간에 고르게 나눠 확인)"
 PACE_NOTE_HEAD = "하루 한도 안에서 천천히 확인 중 — 새 거래 확인이 하루 몫보다 많아 남은 시간에 고르게 나눠 확인해요(평소보다 늦을 수 있어요)"
 
 
@@ -2506,7 +2506,7 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             add(f"bfstall:{bu}:{key}", un if un in units else "system", "과거 데이터 가져오기 멈춤" if stalled else "과거 데이터 가져오기",
                 "warn" if stalled else "ok",
                 (f"{key} — {fmt_ago(now - moved)} 동안 진행 없음" + (f" · {str(it.get('note'))[:120]}" if it.get("note") else "")
-                 if stalled else (f"{key} 오늘 옛 기록 몫을 다 써서 남는 몫으로 이어 받는 중(UTC 0시에 다시 몰아서) · 처음 넣은 지갑은 첫날 새 거래 확인이 평소보다 늦을 수 있어요"
+                 if stalled else (f"{key} 오늘 옛 기록 몫을 다 써서 남는 몫으로 이어 받는 중(UTC 0시에 다시 몰아서) · 새 거래 확인은 먼저 떼어 둔 몫으로 지금 주기대로"
                                   if bu in ("evm", "sol") else f"{key} 하루 한도 안에서 남는 몫으로 천천히 채우는 중(새 거래 확인 먼저)") if slow9 else f"{key} {it.get('phase')}"),
                 "해당 유닛 로그 확인(pm2 logs " + un + ") — 거래소 API 한도·권한이면 설정의 날짜를 늦추거나 그대로 두세요(원장 재계산은 막지 않음)",
                 persist=0, resolve=600, notify=False, remind=False, kind="bfstall")
@@ -2672,24 +2672,24 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             ph9 = bf_ext_phrase(obs.get("bf"), now) if bad and p_n9 > 0 else ""
             first9 = False
             if all_pd9:
-                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 재계산 대기: 과거 기록을 늦게 받은 옛 거래가 이미 맞춰 둔 기초잔고와 겹친 일시 음수"
+                det9 = (f"{n_neg9}곳(거래소 차입 몫 제외 — 총자산에서 차감됨) · {top} — 재계산 대기: 과거 기록을 늦게 받은 옛 거래가 이미 맞춰 둔 기초잔고와 겹친 일시 음수"
                         " (그동안 같은 거래의 다른 쪽 — 내 다른 지갑 — 이 그만큼 많게 보일 수 있음) · "
                         + (f"{ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 — 기다리면 됨" if ph9 else "과거 기록 범위 넓히기가 끝나면 원장 자동 재계산이 다시 맞춤"))
                 act9 = ((f"기다리면 됨 — {ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 · " if ph9 else "")
                         + "과거 기록 넓히기·재계산이 끝날 때까지 기다린 뒤에도 남으면 빠진 입금·지갑 등록을 점검 — 진행은 설정 › 과거 데이터 더 가져오기")
             elif not os.path.exists(os.path.join(common.STATE_DIR, "backfill_done")):
                 first9 = True
-                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 첫 백필 중: 기초잔고 대사(창 이전 보유 맞추기) 전이라 판 코인이 음수로 보일 수 있음"
+                det9 = (f"{n_neg9}곳(거래소 차입 몫 제외 — 총자산에서 차감됨) · {top} — 첫 백필 중: 기초잔고 대사(창 이전 보유 맞추기) 전이라 판 코인이 음수로 보일 수 있음"
                         " · 체인·거래소별 첫 수집이 끝나 대사가 되면 자동으로 맞춰짐")
                 act9 = "기다리면 됨 — 진행은 화면 위 상태 칩 '과거 N%' · 대사가 끝난 뒤에도 남으면 빠진 입금·지갑 등록·거래소 이력 기간을 점검"
             else:
-                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 보유량은 0 으로 보이지만 원장 결손(누락 입금·원가 이관) 신호"
+                det9 = (f"{n_neg9}곳(거래소 차입 몫 제외 — 총자산에서 차감됨) · {top} — 보유량은 0 으로 보이지만 원장 결손(누락 입금·원가 이관) 신호"
                         + (f" · 그중 {p_n9}곳 ${abs(p_usd9):,.0f} 은 재계산 대기(늦게 받은 옛 거래 — "
                            + (f"{ph9}가 끝나면 " if ph9 else "") + "자동 재계산이 다시 맞춤)" if p_n9 > 0 else ""))
                 act9 = "대시보드 보유 목록의 음수 위치 확인 — 빠진 입금·지갑 등록·거래소 이력 기간을 점검"
             add("ledger:neg", "tj-core", (f"원장 음수 보유 ${abs(nusd):,.0f}" + (" · 재계산 대기" if all_pd9 else " · 첫 백필 중" if first9 else "")) if bad else "원장 음수 보유",
                 "warn" if bad else "ok",
-                det9 if bad else "없음(마진 차입 제외)",
+                det9 if bad else "없음(거래소 차입 몫은 총자산에서 차감됨)",
                 act9,
                 persist=float(t.get("neg_hold_persist") or 7200), resolve=600, notify=False, remind=False, kind="ledger")
         pdv = [x for x in (wd.get("proof_div") or []) if isinstance(x, dict)

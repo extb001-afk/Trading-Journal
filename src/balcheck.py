@@ -200,6 +200,17 @@ def _ledger(conn, pairs: list) -> dict:
     return out
 
 
+def _native_gid(conn, chain: str, sym: str):
+    try:
+        r = conn.execute("SELECT group_id FROM assets WHERE kind='native' AND chain=? AND group_id IS NOT NULL LIMIT 1", (chain,)).fetchone()
+        if r and r[0] is not None:
+            return r[0]
+        r = conn.execute("SELECT group_id FROM asset_groups WHERE name=? LIMIT 1", (str(sym or "").upper(),)).fetchone()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
 def _anchored_pairs(conn) -> set:
     out = set()
     try:
@@ -402,8 +413,9 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             items.append(("native", None, qb, 18 if dec is None else int(dec),
                           float(live_px.get(gid) or 0), sym or cfg.get("native_symbol", {}).get(ch) or ch.upper(), gid))
         else:
-            items.append(("native", None, 0, 18, 0.0,
-                          (cfg.get("native_symbol") or {}).get(ch) or ch.upper(), None))
+            sym9 = (cfg.get("native_symbol") or {}).get(ch) or ch.upper()
+            gid9 = _native_gid(conn, ch, sym9)
+            items.append(("native", None, 0, 18, float(live_px.get(gid9) or 0) if gid9 is not None else 0.0, sym9, gid9))
         stables = {ca.lower(): s for ca, s in (pricing.STABLE_CAS.get(ch) or {}).items()}
         seen_ca = set()
         for aid, (qb, kind, addr, sym, dec, gid) in rows.items():

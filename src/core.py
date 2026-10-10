@@ -7323,6 +7323,37 @@ class Core:
         if txhash:
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (f"ext_prewindow_tx:{chain}:{txhash}", str(ts)))
 
+    def _hist_late_scan(self, now: float = None):
+        if self.conn.in_transaction:
+            return None
+        now = time.time() if now is None else float(now)
+        top = int(self.conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()[0] or 0)
+        cur = self._meta_get(common.HIST_LATE_PID_K)
+        try:
+            cur = int(cur) if cur is not None else None
+        except (TypeError, ValueError):
+            cur = None
+        if cur is not None and top <= cur:
+            return None
+        t9 = None
+        if cur is not None:
+            r = self.conn.execute(
+                "SELECT MIN(p.event_ts) FROM postings p WHERE p.posting_id > ? AND p.posting_id <= ? AND p.event_ts < ?"
+                " AND NOT (p.source_kind='chain_tx' AND EXISTS (SELECT 1 FROM meta m WHERE m.k = 'ext_prewindow_tx:' || p.source_ns || ':' || p.source_id))",
+                (cur, top, common.kst_day0(now))).fetchone()
+            t9 = r[0] if r else None
+        self.conn.execute("BEGIN")
+        try:
+            iso = common.hist_late_put(self.conn, int(t9), now) if t9 is not None else None
+            self.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (common.HIST_LATE_PID_K, str(top)))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        if iso:
+            log.info("늦은 원장 행(posting %d~%d) — 지난 곡선 다시 계산 표식: %s 부터", (cur or 0) + 1, top, iso)
+        return iso
+
     EXT_STREAMS = frozenset(("evm", "sol", "bsc", "ex"))
     EXT_STALL_SEC = 3600
     EXT_RETRY_MAX = 24 * 3600
@@ -8025,6 +8056,14 @@ class Core:
             except Exception as e:
                 self.conn.rollback()
                 log.error("발견 시점 기초 잔고 처리 실패(다음 주기): %s", common.safe_err(str(e))[:200])
+            try:
+                self._hist_late_scan()
+            except Exception as e:
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                log.warning("늦은 원장 행 표식 실패(다음 주기): %s", common.safe_err(str(e))[:200])
             ledger_backup.tick(log)
             if self.conn.in_transaction:
                 log.error("★패스 종료 후 트랜잭션 잔류 — 방어 롤백 (누수 경로 추적 필요)★")

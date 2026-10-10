@@ -71,17 +71,19 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-10 (2) · 새 설치본 수집 · 최신 우선)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-10 (2)](CHANGELOG.md#2026-10-10-2--새-설치본-수집--최신-우선) 에 있어요.
-사진은 다시 찍지 않았어요 — 위 '확인 주기'(45·46)·설정 › 연결·키(탐색기 키) 사진은 지난 판 화면이라, 지금은 확인 주기가 '지금 주기 · 10분 잔고 점검 · 1시간 탐색기 확인' 으로 짧아졌고 Ankr 칸에 '필수' 표시가 붙어요.
+이번 판(2026-10-10 (3) · 외부 검토 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-10 (3)](CHANGELOG.md#2026-10-10-3--외부-검토-반영) 에 있어요.
+사진은 다시 찍지 않았어요 — 지금 화면엔 사진에 없는 작은 표시가 더해졌어요: 환율이 대체값·오래된 값이면 상태줄·설정 환율 줄에 '환율 대체값'·'환율 오래됨'(대체값이면 김프 숨김) ·
+거래소에서 빌린 코인이 그 거래소 잔고를 넘으면 보관처 줄 '빌린 몫'과 보유표 끝 '빌린 몫이 잔고를 넘은 코인 N종' · 업비트 잔고가 10분 넘게 늦으면 원화 줄에 '업비트 잔고 N분 전'.
+위 '확인 주기'(45·46)·설정 › 연결·키(탐색기 키) 사진은 2026-10-10 판 화면이라, 지금은 확인 주기가 '지금 주기 · 10분 잔고 점검 · 1시간 탐색기 확인' 으로 짧아졌고 Ankr 칸에 '필수' 표시가 붙어요.
 
-- **업데이트** — [업데이트](#업데이트) 순서대로(전부 멈춘 뒤 한꺼번에 시작) · 재구축·데이터 개정 없음. EVM 지갑이 있으면 **Ankr 무료 키**를 넣어 주세요(설정 › 연결·키 · 저장할 때 연결 1콜 확인 — [키 표](#3-키-준비--env-와-configjson)).
-  지난날 곡선은 LP 를 열었다 닫은 날·발견 시점 기초 잔고가 있는 날·백필 뒤 처음 넣은 거래소가 있으면 첫 화면 계산 때 한 번 다시 계산돼요(그날 값이 바뀔 수 있음).
-- **최신 먼저 · 옛 기록은 옆에서** — 새로 설치해도 모든 경로(Base 같은 RPC 체인·BNB Chain·Solana·탐색기)가 첫 주기부터 최신 블록을 보고 옛 기록은 옆 차선으로 · 새로 받는 체인은 블록스카웃을 첫 경로로 안 씀 ·
-  옛 구간 실패(노드 시간 초과·429)는 '나중에 다시'로 넘겨 최신을 막지 않음 · 백필 땐 실시간 몫만 남기고 무료 한도를 몰아 씀(하루 몫의 최대 10배 · 31일 합 80% 안).
-- **쉬는 지갑·전송 중** — 오래 안 쓴 지갑도 10분 잔고 점검 · 1시간 탐색기 확인 · 들어온 토큰은 10분마다 따로 확인(Ankr) · 거래소 → 내 지갑 '전송 중'이면 그 주소를 10분마다 · 받는 쪽 수집 전엔 48시간 지나도 '나감'으로 안 바꿈.
-- **첫 대사 전 오늘 보유·총자산 = 지금 실제 잔고** — 원가·손익·지난날 곡선은 옛 기록을 다 받으면(곡선 아래 진행률·남은 시간) 정확하게 · 전송 중 출금과 이중으로 세지 않음.
-- **그 밖** — 키 저장 때 연결 시험 · 지난날 곡선 LP 이중 계상 · 거래소 키 나중 추가 소급 · 스팸·사칭 행 숨김 · 받기만 한 옛 토큰은 코인게코 시세가 있을 때만 평가 · 응답 크기 상한 마무리 · AI 평가 실패 사유 · 화면 다듬기 ·
-  지난 판 알려진 한계 4가지 고침 · [AI 기능 켜기](#ai-기능-켜기--claude-cli-로그인) 절.
+- **업데이트** — [업데이트](#업데이트) 순서대로(전부 멈춘 뒤 한꺼번에 시작) · 재구축·데이터 개정 없음. 거래소에서 빌린 코인이 그 거래소 잔고를 넘어 있으면 업데이트한 날 오늘 총자산이 그 몫만큼 한 번 내려가요(빌린 몫을 이제 실제로 뺌 · 이미 굳은 지난날은 그대로).
+- **총자산이 실제보다 크게 보이던 것** — 거래소 마진·대출로 빌린 코인을 쓰거나 옮긴 몫을 부채 한도 안에서 총자산에서 뺌 · 업비트 지정가 주문이 일부만 체결된 동안 그 수량을 지금 보유에 반영 ·
+  업비트 원화가 10분 넘게 늦어도 빼지 않고 'N분 전'으로(하루까지).
+- **지난 곡선** — 마감 뒤 늦게 들어온 지난 거래가 이미 굳은 지난 일별 값·장기 곡선에도 반영돼요(사건 날부터만 · 그날 가격·환율은 그대로 · '−X 다음 날 +X' 손익 쌍 없음).
+- **수집** — BNB Chain 에 남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB 를 잔고 감시로 받아요(옛 블록을 좁히는 아카이브 키 = Ankr 무료 키) · EVM 옛 구간 채우기가 느린 추적 하나에 몇 시간씩 멈추던 것 고침.
+- **그 밖** — GoPlus 응답 상한 · 긴급 알림 백오프 · 환율 대체값 표시 · 세일 부분 환불 원가 · OKX 코인 정산 손익 달러 환산 · 파이썬 3.9 응답 읽기 · 옛 기록 채우기 안내 문구 · 지난 판 알려진 한계(GoPlus) 고침.
+- 지난 판(2026-10-10 (2)): 새 설치본 최신 먼저(RPC 차선·BNB Chain·Solana) · 블록스카웃 첫 경로 금지 · Ankr 필수·키 저장 연결 시험 · 쉬는 지갑 1시간 · 백필 몰아 쓰기 · 첫 대사 전 지금 잔고 —
+  [CHANGELOG.md › 2026-10-10 (2)](CHANGELOG.md#2026-10-10-2--새-설치본-수집--최신-우선)
 - 지난 판(2026-10-10): 옛 보유 토큰 찾기 · 발견 시점 기초 잔고 · Alchemy 키 · 노드 키 버스트 · EVM 체인 표 · 선물 코인 정산 달러 · Base 넓히기 —
   [CHANGELOG.md › 2026-10-10](CHANGELOG.md#2026-10-10--옛-보유-토큰-찾기--alchemy-키)
 - 지난 판(2026-10-09 밤): 원장 손상 대기·버전 표시 · 복구 도구 · 최초 인식 시가 안전장치 · 분류 보류 거래 · 대표 심볼 확인·정품 등록 · 대시보드 LP 카드 —
@@ -217,7 +219,7 @@ bash tools/setup.sh
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | https://dashboard.helius.dev (무료) | Solana 지갑 수집 |
 | `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받음(키 하나로 여러 체인 · 하루 무료 한도의 80% 만). 없으면 공개 노드(RPC)로 받아 최신 거래는 바로 보이지만 옛 기록은 늦게 채워짐 |
 | `TJ_ALCHEMY_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://dashboard.alchemy.com/signup (무료 — 월 3,000만 CU) | 지갑이 한 번이라도 주고받은 토큰 전부와 지금 잔고를 찾아 옛 보유 토큰을 빠뜨리지 않게 함(Base·Ethereum·Arbitrum 등). 감시·옛 기록은 무료 노드로 받고 이 키는 토큰·잔고 찾기에만 — 무료 한도의 80% 아래(하루 몫). 없어도 수집은 돌지만 옛 보유 토큰 찾기가 약해짐(탐색기 한 곳만) |
-| `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://www.ankr.com/rpc/ (무료 Freemium) | 오래 안 쓴 지갑에 들어온 토큰을 10분마다 빠르게 확인하고, BNB Chain·Base 옛 기록(아카이브)을 빠르게 받고, 같은 키로 토큰 찾기를 보조(Advanced API). 무료 한도의 80% 아래. 없어도 수집은 돌지만 공개 노드로만 받아 늦을 수 있음 |
+| `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://www.ankr.com/rpc/ (무료 Freemium) | 오래 안 쓴 지갑에 들어온 토큰을 10분마다 빠르게 확인하고, BNB Chain·Base 옛 기록(아카이브)을 빠르게 받고, BNB Chain 에 남이 그냥 보낸 BNB 를 옛 블록 잔고로 찾고, 같은 키로 토큰 찾기를 보조(Advanced API). 무료 한도의 80% 아래. 없어도 수집은 돌지만 공개 노드로만 받아 늦을 수 있음 |
 | `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) 또는 유료 **Pro** 키 — 자동 판별 | 키 하나를 코인게코 시세(거래소 값이 없는 코인)·DEX 토큰 시세·원가·차트·NFT 바닥가가 같이 써서 빨라짐. 몫이 모자라거나 실패하면 그 콜만 무키로. 없으면 전부 무키 공용 한도라 느리고 NFT 바닥가는 처음 몇 시간 걸릴 수 있음. 프로 키는 플랜 한도의 10%(기본 · 25·50·80% 선택)만 씀 |
 | `TJ_OPENSEA_KEY` | 선택 | https://docs.opensea.io/reference/api-keys (무료 신청) | 넣으면 EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 원활하게 추적(없거나 실패하면 코인게코) |
 | `TJ_NODEREAL_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal(https://dashboard.nodereal.io) 대시보드(무료 키 있음) · QuickNode 는 유료 엔드포인트 주소 | BNB Chain·Base 옛 기록(아카이브) 노드 — 넣으면 BNB Chain 을 공개 노드 보관 기간보다 옛날까지 받음. 없으면 공개 노드로. 무료 키는 월 한도의 80%(백필 때 실시간 몫을 남기고 하루 몫의 최대 10배까지 버스트), 유료는 사용 비율(기본 10%) 안에서만 씀 — **설정 › 연결·키** 에서 요금제·연결 시험 |
@@ -529,7 +531,7 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 ## 시세 출처 · 동명 코인 거르기
 
 - **달러 시세 순서 = 바이낸스 → 바이빗 → 코인게코.** 원화 마켓이 없는 업비트·빗썸 보유 코인, 원가(매수 시점 1분봉), 장기 곡선·그날 마감가가 이 순서를 씁니다.
-- **원화 환율(업비트 USDT 원화 호가)** 은 받은 시각과 함께 둡니다. 1시간 넘게 못 받으면 화면 숫자는 마지막 값으로 보이되 그날 마감은 미루고, 그날은 그 시각 1분봉 환율로 닫습니다(고정 대체값은 마감·곡선에 저장하지 않음).
+- **원화 환율(업비트 USDT 원화 호가)** 은 받은 시각과 함께 둡니다. 1시간 넘게 못 받으면 화면 숫자는 마지막 값으로 보이되(상태줄·설정 환율 줄에 '환율 오래됨' · 고정 대체값이면 '환율 대체값' + 김프 숨김) 그날 마감은 미루고, 그날은 그 시각 1분봉 환율로 닫습니다(고정 대체값은 마감·곡선에 저장하지 않음).
 - **업비트·빗썸의 USDT·BTC 마켓 시세는 쓰지 않습니다**(거래가 얇아 튀는 일이 잦음). 원화 마켓 시세와 원화 환산용 업비트 KRW-USDT 는 그대로 씁니다.
 - **동명 코인 거르기** — 같은 티커라도 다른 코인일 수 있어, 코인게코 매핑이 다른 코인이라고 하거나 기준가와 0.5~2배 넘게 어긋나면 그 거래소 시세를 버리고 사유를 남깁니다.
 - 온체인 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외 · 풀 유동성을 모르는 가격도 OKX DEX 값이 10% 안에서 같을 때만 씀)로 평가하고, 원가가 필요한데 거래소 1분봉이 같은 코인으로 확인되지 않으면 코인게코(컨트랙트 주소)를 씁니다.
@@ -822,7 +824,7 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 - 시간대는 한국 시간(KST), 화면은 한국어입니다.
 - 거래소·체인 API 가 주지 않는 옛 기록은 가져오지 않습니다 — [docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md)·화면 **설정 › 수집 한계**.
 - OKX·쿠코인·게이트는 **마진 체결을 수집하지 않습니다**(현물 체결과 마진 잔고·대출만) — 마진 계정에서 사고판 손익이 빠지고 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
-- BNB Chain 은 노드가 내부 이동(trace)을 주지 않습니다 — **내가 서명한 토큰 → BNB 매도**의 받은 BNB 는 WBNB 풀기 기록(방금 거래는 잔고로 한 번 더 확인)으로 받지만, **남이 실행한 거래로 컨트랙트가 보내 준 BNB**(브리지 지급·환불·봇이 대신 판 매도 대금)는 못 받아 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
+- BNB Chain 은 노드가 내부 이동(trace)을 주지 않고 로그 없는 BNB 입금을 주소로 찾을 길이 없습니다 — **내가 서명한 토큰 → BNB 매도**의 받은 BNB 는 WBNB 풀기 기록(방금 거래는 잔고로 한 번 더 확인)으로, **남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB**(브리지 지급·환불)는 약 1분마다 지갑 BNB 잔고를 읽어 설명 안 되는 증가를 옛 블록 잔고로 좁혀(아카이브 키 — Ankr·NodeReal 무료 키) 그 거래를 찾아 받습니다. 어느 거래가 보냈는지 못 가리면 그 블록 시각의 기초 잔고(원가 미확인)로 넣습니다(아카이브 키가 없으면 최근 블록 내용을 훑어 직접 받은 거래만 찾음) — [수집 한계](docs/COLLECTION_LIMITS.md).
 - 신고용 명세는 계산 보조 자료입니다. 세무 판단은 전문가와 확인하세요.
 - **알려진 한계(이번 판)** — 무엇이 보이는지 · 언제 저절로 풀리는지 · 피하는 법:
   - 새로 설치한 직후 한 체인의 모든 지갑이 옛 기록을 다 받을 때까지(그 체인 첫 잔고 대사 전) 오늘 보유·총자산은 지금 실제 잔고로 보이지만, 원가·손익·지난날 곡선에는 수집 기간 전부터 있던 보유(기초 잔고)가 아직 빠져 있어요 — 판 코인 원가가 '미확인'이거나 지난날 곡선이 낮게 보일 수 있고, 상태 패널에 '원장 음수 보유 … · 첫 백필 중'(주황)이 잠깐 보일 수 있어요. 그 체인 백필이 끝나면 저절로 맞춰져요(진행·남은 시간 = 대시보드 곡선 아래 안내·상태 패널) · 빨리 보려면 백필 기간(최근 N개월)을 짧게 잡으세요.
@@ -835,7 +837,10 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
   - 이더스캔 첫 백필 창 밖에서 늦게 색인된 내부 이체(컨트랙트가 보낸 네이티브 코인) 일부는 자동으로 다시 확인되지 않을 수 있어요(드묾) — 그 지갑 네이티브 수량이 조금 어긋나 보이면 상태 패널의 잔고 대조로 확인하세요.
   - 지갑을 넣을 때 고르는 체인 칩에는 아직 체인마다 어떤 경로로 받는지 설명이 없어요 — [수집 한계](docs/COLLECTION_LIMITS.md) 표를 보세요(다음 판에 화면 설명).
   - 설치·재시작 직후 몇 초 동안 상태 표시줄에 '대시보드 응답 없음' 경고가 잠깐 보일 수 있어요 — 첫 화면 계산이 끝나면 사라져요(새로 고침).
-  - 토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 다른 외부 조회와 같은 상한으로 맞춰요.
+  - 거래소에서 빌린 코인의 부채는 이 판부터 일별 마감마다 기록해요 — 업데이트 전 날을 다시 계산할 땐 '지금 부채'를 한도로 써서, 그 사이 갚은 빚이 있으면 그날이 빌린 몫만큼 높게 보일 수 있어요 · 업데이트한 날 '오늘 변동'에 빌린 몫만큼 하락이 한 번 보여요.
+  - 업비트 지정가 주문의 부분 체결은 체결 시각을 몰라 '잔고 스냅숏 시각'에 생긴 것으로 봐요 — 업비트 잔고가 10분 넘게 늦는 동안·주문이 끝난 직후 원장 기록 전(몇 초~한 주기)엔 보정이 빠져 총자산이 잠깐 튈 수 있어요(다음 주기에 맞춰짐).
+  - BNB Chain 잔고 감시가 보낸 거래를 못 가린 컨트랙트 BNB(브리지 지급 등)는 그 블록 시각의 기초 잔고(원가 미확인)로 들어가요 — 원가를 알면 직접 넣으세요 · 컨트랙트(스마트) 지갑은 잔고 감시 대상이 아니에요(잔고 대조 알림만) · 이 판 전에 놓친 BNB 는 잔고 대조 부족이 $500·2% 이상일 때만 최근 30일 안에서 찾아요.
+  - 늦게 들어온 지난 거래로 지난 곡선을 다시 계산할 때, 그날 마감 스냅숏에 시세가 없던 코인은 지금 시세 근사로 들어갈 수 있어요 · 옛 기록을 넓히는 동안처럼 늦은 거래가 계속 들어오면 1시간에 한 번 다시 계산해요.
 
 ## 시험 실행
 
@@ -875,7 +880,7 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   wallets' incoming tokens are checked less often). Alchemy (`TJ_ALCHEMY_KEY`, https://dashboard.alchemy.com/signup) finds every token a wallet ever touched
   plus current balances so long-held tokens are not missed (watching and backfill stay on free nodes; metered under 80% of the free 30M CU/month; saving the key
   needs no restart). Ankr (`TJ_ANKR_KEY`, https://www.ankr.com/rpc/) checks idle wallets for incoming tokens every 10 minutes, speeds up BNB Chain/Base archive
-  backfill and backs token discovery. Every key is checked with one read-only call when saved (a refused key is not saved). NodeReal and QuickNode node keys are optional;
+  backfill, reads old-block balances for the BNB Chain balance watch (plain BNB sent to you) and backs token discovery. Every key is checked with one read-only call when saved (a refused key is not saved). NodeReal and QuickNode node keys are optional;
   free node keys may burst up to 10x the daily share while catching up, after keeping the measured real-time share (rolling 31-day total stays under 80% of the
   monthly limit). CoinGecko (demo or pro — detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
   with an IP whitelist (keys with trade/withdraw/transfer permissions are refused where the exchange lets us check).
@@ -916,11 +921,13 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Borrowed coins:** `loan_short` in `config.json` — confirmed exchange-loan periods only, e.g. (synthetic) `[{"exchange": "okx", "asset": "ETH", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}]` —
   gives coins borrowed and withdrawn (exchange balance pushed below zero, later refilled on the same exchange) a cost at the borrow-time price; the difference on refill is realized
   (a "대출 상환" row in the statement; display calculation only, with first-seen pricing on — the default; empty = off).
-- **Release notes:** what changed in each release (newest blocks first on every collection path for fresh installs — RPC side lanes, BNB Chain and Solana —,
+- **Release notes:** what changed in each release (external review fixes — exchange margin/loan debt subtracted from the total, partial fills of open Upbit orders,
+  late transactions re-computing closed past days, plain BNB received on BNB Chain found by a balance watch, an EVM back-lane budget, a GoPlus response cap,
+  urgent-alert backoff and fallback-FX notes — on 2026-10-10 (3); newest blocks first on every collection path for fresh installs — RPC side lanes, BNB Chain and Solana —,
   no Blockscout as a first path, a required free Ankr key and a one-call connection check when any key is saved, idle wallets checked at least hourly with
   10-minute incoming-token checks, catch-up bursts of up to ten days of free quota, today's holdings at the actual current balance before a chain's first
   reconciliation (no double counting with in-transit withdrawals), late trace filling, past-curve LP and exchange-key fixes, hidden spam/impersonation rows,
-  response caps on the remaining direct lookups (the GoPlus token-safety lookup follows next release) and real AI failure reasons — on 2026-10-10 (2); old-holding discovery, found-at-discovery opening balances, the Alchemy key field, node-key catch-up bursts,
+  response caps on the remaining direct lookups and real AI failure reasons — on 2026-10-10 (2); old-holding discovery, found-at-discovery opening balances, the Alchemy key field, node-key catch-up bursts,
   an EVM chain table, settlement-time prices for coin-settled futures, response size caps on the shared request path, faster Base backfill, Bybit futures fees/funding at payment time,
   borrowed-coin cost and a Bithumb fill-time tool — on 2026-10-10; fixes from an external re-verification — corrupt-ledger hold, version and data-revision display,
   restore tool fixes, first-seen price safeguards, fee/bridge cost rules, replay order, futures/liquidation watch, slow-connection limits, instant
@@ -990,7 +997,12 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   few hours on public nodes; a few late-indexed internal transfers outside Etherscan's first backfill window may not be re-checked automatically (rare — check
   the balance reconciliation in the status panel); the chain chips in the add-wallet form do not yet explain how each chain is collected (see
   `docs/COLLECTION_LIMITS.md`); a "dashboard not responding" warning can flash for a few seconds right after install or restart (it clears once the first
-  build finishes).
+  build finishes). Exchange debt is recorded at each daily close from this release on — recomputing an earlier day uses today's debt (a loan repaid since then
+  makes that day look higher), and the update day shows a one-time drop by the borrowed amount; partial Upbit fills are treated as happening at the balance
+  snapshot time (the API gives no fill time) and are skipped while the Upbit balance is over 10 minutes old or right after an order completes; contract-sent BNB
+  whose sending transaction cannot be identified enters as an opening balance (cost unknown) at that block time, smart-contract wallets are not balance-watched,
+  and BNB missed before this release is searched only for confirmed shortfalls of $500/2% or more within 30 days; recomputing a closed day after a late
+  transaction may value coins that had no price in that day's snapshot at today's price.
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
   same command on Python 3.9, 3.11 and 3.13.

@@ -260,24 +260,22 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
             if filled <= 0:
                 continue
             csym = str(cur.get("sym") or "?").upper()
+            bad9 = any(not (Decimal(0) <= Decimal(b.get("refunded") or 0) <= Decimal(b["amount"])) for b in bids)
+            paid_usd = refund_usd = Decimal(0)
+            ok = not bad9
             if csym in STABLE_CUR:
                 paid_usd, refund_usd = paid, refund
             else:
-                paid_usd = refund_usd = Decimal(0)
-                ok = True
                 for b in bids:
                     px = price_fn(csym, int(b.get("bid_ts") or 0)) if price_fn else None
-                    pxr = price_fn(csym, int(b.get("exit_ts") or b.get("bid_ts") or 0)) if price_fn else None
-                    if not px or not pxr:
+                    if not px:
                         ok = False
                         break
                     paid_usd += Decimal(b["amount"]) / (Decimal(10) ** cdec) * Decimal(str(px))
-                    refund_usd += Decimal(b.get("refunded") or 0) / (Decimal(10) ** cdec) * Decimal(str(pxr))
-                if not ok:
-                    continue
-            cost = paid_usd - refund_usd
-            if cost <= 0:
-                continue
+                    refund_usd += Decimal(b.get("refunded") or 0) / (Decimal(10) ** cdec) * Decimal(str(px))
+            cost = paid_usd - refund_usd if ok else None
+            if cost is not None and cost <= 0:
+                cost = None
             ratio = _dec((rd or {}).get("ratio")) or Decimal(1)
             qty = filled * ratio if rd else filled
             final = {"addr": rd["to"], "sym": rd.get("sym") or "?"} if rd else {"addr": tok["addr"], "sym": tok.get("sym") or "?"}
@@ -288,7 +286,7 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
                          "ratio": ratio if rd else Decimal(1), "filled": filled,
                          "label": str((seed["auctions"].get(f"{chain}:{a}") or {}).get("label") or LABEL),
                          "cur": csym, "paid": paid, "refund": refund, "paid_usd": paid_usd, "refund_usd": refund_usd,
-                         "cost": cost, "qty": qty, "unit": cost / qty, "token": final["addr"], "sym": str(final["sym"]).upper(),
+                         "cost": cost, "qty": qty, "unit": None if cost is None else cost / qty, "token": final["addr"], "sym": str(final["sym"]).upper(),
                          "receipt": tok["addr"] if rd else None, "receipt_sym": tok.get("sym") if rd else None,
                          "senders": senders, "t0": min(int(b.get("bid_ts") or 0) for b in bids), "t_claim": t_claim,
                          "t_end": t_claim + WINDOW_SEC, "bid_tx": [b["bid_tx"] for b in bids],
@@ -403,8 +401,9 @@ def match(lots, inflows) -> dict:
                 rt = l9.get("ratio") or Decimal(1)
                 take_f = min(x["qty"] * rt, left[l9["id"]])
                 left[l9["id"]] -= take_f
-                links[x["pid"]] = {"lot": l9["id"], "take": take_f / rt, "qty": x["qty"], "unit": l9["unit"] * rt,
-                                   "cost": take_f * l9["unit"], "ts": x["ts"], "ref": x["ref"], "kind": x["kind"],
+                un9 = l9.get("unit")
+                links[x["pid"]] = {"lot": l9["id"], "take": take_f / rt, "qty": x["qty"], "unit": None if un9 is None else un9 * rt,
+                                   "cost": None if un9 is None else take_f * un9, "ts": x["ts"], "ref": x["ref"], "kind": x["kind"],
                                    "sender": x["sender"], "rcpt": True, "take_final": take_f}
                 hit = l9
                 break
@@ -426,7 +425,7 @@ def match(lots, inflows) -> dict:
                     continue
             take = min(x["qty"], left[l9["id"]])
             left[l9["id"]] -= take
-            links[x["pid"]] = {"lot": l9["id"], "take": take, "qty": x["qty"], "unit": l9["unit"], "cost": take * l9["unit"],
+            links[x["pid"]] = {"lot": l9["id"], "take": take, "qty": x["qty"], "unit": l9["unit"], "cost": None if l9["unit"] is None else take * l9["unit"],
                                "ts": x["ts"], "ref": x["ref"], "kind": x["kind"], "sender": x["sender"]}
             break
     return links
@@ -447,8 +446,9 @@ def redeem_pairs(lots, seed=None) -> dict:
 
 
 def desc(lot) -> str:
+    un9 = lot.get("unit")
     return (f"토큰 세일 매수 · 참여 ${float(lot['paid_usd']):,.2f} · 환불 ${float(lot['refund_usd']):,.2f}"
-            f" · 단가 ${float(lot['unit']):,.6g} ({lot['label']})")
+            + (" · 단가 미확인" if un9 is None else f" · 단가 ${float(un9):,.6g}") + f" ({lot['label']})")
 
 
 def owner_queue(conn, chains, wallets, origin_cache, prio_syms=(), limit=2000) -> list:

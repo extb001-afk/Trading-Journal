@@ -4715,7 +4715,8 @@ def _fut_okx(env):
                      "qty": abs(pos), "entry": float(p.get("avgPx") or 0),
                      "mark": float(p.get("markPx") or 0),
                      "upnl": _fut_opt(p.get("upl")), "leverage": p.get("lever"),
-                     "liq": float(p.get("liqPx") or 0)})
+                     "liq": float(p.get("liqPx") or 0),
+                     "settle": (str(p.get("ccy") or "").strip().upper() or None), "inst_type": p.get("instType") or None})
     st = common.read_json(_fut_path("okx"), {})
     ev = list(st.get("events") or [])
     seen = {r.get("uid") for r in ev}

@@ -3,6 +3,84 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-10 (3) — 외부 검토 반영
+
+**거래소 마진·대출 부채 차감 · 업비트 열린 주문 부분 체결 · 늦게 들어온 거래 → 지난 곡선 다시 계산 · BNB Chain 에 그냥 받은 BNB · EVM 옛 구간 채우기 예산 ·
+GoPlus 응답 상한 · 긴급 알림 백오프 · 환율 대체값 표시 · 세일 환불 원가 · OKX 코인 정산 손익 · 파이썬 3.9 응답 읽기 · 첫날 안내 문구**
+
+공개판을 읽은 외부 검토 두 건의 지적을 하나씩 코드로 재현해, 영향이 큰 것을 고친 판이에요 — 총자산이 실제보다 크게 보이던 경우(거래소에서 빌린 코인을 쓰거나 옮김 ·
+업비트 지정가 주문이 일부만 체결된 동안), 늦게 들어온 지난 거래가 이미 굳은 지난 곡선을 고치지 않던 것, BNB Chain 에서 남이 그냥 보낸 BNB 를 못 받던 것,
+EVM 옛 구간 채우기가 몇 시간씩 멈추던 것. 드문 경우는 아래 알려진 한계에 적었어요. 사진은 다시 찍지 않았어요(README '이번 판' 안내).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js` — 유닛을 전부 멈춘 뒤 한꺼번에 시작).
+> 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 · 새 상태 파일 `state/bsc_balw.json` 과 일별 캐시·원장 메타에 새로 생기는 칸은 옛 코드가 읽지 않음).
+> 거래소에서 빌린 코인이 그 거래소 잔고를 넘어 있으면 업데이트한 날 오늘 총자산이 그 몫만큼 한 번 내려가요(이미 굳은 지난날 값은 그대로 · 다음 마감부터 그날 부채를 함께 기록).
+> BNB Chain 잔고 감시가 옛 블록을 좁히려면 아카이브 키(Ankr 무료 키 — EVM 필수 키와 같은 것 · 또는 NodeReal)가 있어야 해요. 없으면 공개 노드가 보관한 최근 블록만 훑어 직접 받은 거래를 찾아요.
+
+- **거래소 마진·대출 부채를 총자산에서 뺌** — 빌린 코인을 쓰거나(마진 롱) 다른 곳으로 옮겨(대출금 출금) 그 거래소 원장 칸이 음수가 되면, 그 거래소 잔고 정보의 부채 한도 안에서
+  그 몫을 총자산에서 실제로 빼요(종전엔 양수 칸만 더해 빌린 만큼 부풀었음) · 오늘 총자산·상단 요약·보유 행·오늘 일별 값이 같은 숫자 · 담보대출은 부채에 이미 들어 있어 따로 안 빼요(이중 차감 없음) ·
+  부채보다 큰 음수·부채 없는 음수는 종전처럼 빼지 않고 상태 패널 '원장 음수 보유' 경고 · 일별 마감마다 그날 부채를 기록해 나중에 다시 계산해도 같은 값 ·
+  보관처 줄 '빌린 몫 · 잔고를 넘은 차입(총자산에서 차감)' · 보유표 끝 '빌린 몫이 잔고를 넘은 코인 N종'.
+- **업비트 열린 주문의 부분 체결** — 주문이 끝나기 전(원장 기록 전) 일부 체결된 수량을 지금 보유에 반영해요(매수 + · 매도 − · 원화 예수금과 같은 시점의 잔고 스냅숏 ·
+  BTC·USDT 마켓은 상대 코인도 · 같은 주문이 이미 원장에 있으면 그만큼 뺌) — 부분 매도 중 총자산이 체결 금액만큼 크게, 부분 매수 중 작게 보이던 것 고침 ·
+  늘어난 몫은 그 체결 금액으로 임시 원가 · 지난날 곡선은 그 스냅숏 시각의 증감으로 · 업비트 원화 예수금이 10분 넘게 늦어도 빼지 않고 '업비트 잔고 N분 전'으로 보여요(하루까지).
+- **늦게 들어온 거래 → 지난 곡선 다시 계산** — 수집 정지 뒤 따라잡기·느린 무료 키·회수한 입금처럼 그날 마감 뒤에 원장에 들어온 지난 거래가 이미 굳은 지난 일별 값과 장기 곡선에도 반영돼요 —
+  원장이 그 거래의 가장 이른 날을 표식으로 남기고(같은 거래를 다시 넣어 원장이 안 바뀌면 표식 없음 · 재시작해도 안 잃음) 화면이 그 날부터만 한 번 다시 계산(그날 가격·환율·원장 밖 금액은 그대로 · 수량만) ·
+  따라잡는 동안엔 5분 조용해지면, 계속 붐벼도 1시간에 한 번 · 지난 곡선의 '−X 다음 날 +X' 같은 손익 쌍이 사라져요.
+- **BNB Chain 에 그냥 받은 BNB** — 남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB(로그 없음)를 잔고 감시로 받아요: 최신 확인이 끝난 주기마다(약 1분) 지갑 BNB 잔고를 공개 노드에서 묶어 읽고,
+  기록한 거래로 설명 안 되는 증가가 있으면 옛 블록 잔고로 반씩 좁혀(아카이브 키 · 입금 한 건에 수십 콜 · 하루 상한) 그 블록의 거래를 실제 거래로 기록 ·
+  보낸 거래를 못 가리면 그 블록 시각의 기초 잔고(원가 미확인) · 아카이브 키가 없으면 최근 256블록 안을 훑어 직접 받은 거래만 · 이 판 전에 놓친 BNB 는 잔고 대조가 두 번 확인한 부족($500·2% 이상)에서
+  최근 30일 안을 같은 방식으로 · 잔고 대조가 BNB 기록이 없는 지갑도 비교 · 실행마다 시간·호출 상한이 있어 최신 수집을 붙잡지 않아요 ·
+  [수집 한계](docs/COLLECTION_LIMITS.md) BNB Chain 줄 정정(키 없는 공개 로그 노드로 약 150일 · 아카이브는 무료 키로도).
+- **EVM 옛 구간 채우기** — 한 지갑의 느린 내부 이동 추적(trace)이 같은 묶음의 다른 지갑을 굶겨 옛 구간이 몇 시간씩 멈추던 것 고침(확인한 블록 잔고를 다음 주기로 이어 쓰기 · 지난번 못 본 지갑부터 ·
+  뒤 차선 사이클 길이 상한 → 새 거래 확인 간격도 안 늘어남) · 노드 한도(429)·일시 보류로는 구간을 반으로 줄이지 않음 · 뒤 차선의 추적 실패는 첫 실패에 '나중에 다시'(30일) ·
+  과거 상태가 없는 추적 노드는 기다리지 않고 잔고 차이로 맞춤 · 추적 노드를 따로 안 넣었으면 탐색기 → RPC 인계 겹침 1시간 · 줄어든 getLogs 구간 상한을 30분마다 원래대로 ·
+  한 줄로 받던 RPC 체인도 수집 시작일을 앞당기면 앞 구간을 뒤 차선으로(새 거래 확인이 멈추지 않음).
+- **작은 것** — 토큰 보안(GoPlus) 조회 응답 4MiB 상한(넘으면 조회 실패로 · 위험 캐시 보존 · 1시간 뒤 다시) · 텔레그램 긴급 알림 발송 실패 재시도를 지수 백오프로(최대 5분 · 봇 차단·채팅 ID 오류 = 30분 ·
+  설정을 바꾸면 바로) · 텔레그램 응답 본문 상한 · 알림 커서 파일이 깨져도 알림 유닛이 재시작을 되풀이하지 않음(`.bad` 로 옮기고 새로) ·
+  환율이 대체값·오래된 값이면 상태줄·설정 환율 줄에 '환율 대체값'·'환율 오래됨'(대체값이면 김프 숨김) · 토큰 세일(CCA) 부분 환불 원가 = 실제로 쓴 몫 × 입찰 시각 시세(환불 때 시세가 달라도 원가가 줄거나 세일 연결이 사라지지 않음 ·
+  형식이 이상하면 '단가 미확인') · OKX 코인 정산(역계약) 선물의 평가손익을 그 코인 시세로 달러 환산(시세가 없으면 '—' · 합계는 아는 것만) · 파이썬 3.9 에서 RPC 응답을 밝힌 길이만큼만 읽음(메모리) ·
+  옛 기록 채우기 안내 문구를 '새 거래 확인 먼저'에 맞춤(종전 '첫날은 새 거래 확인이 늦을 수 있어요').
+
+**함께**
+
+- **문서** — [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) BNB Chain 줄(받은 BNB · 공개 노드 약 150일 · 아카이브 무료 키)·RPC 전용 체인 수집 시작일 앞당김 · [API_KEYS.md](docs/API_KEYS.md) Ankr 쓰는 곳 ·
+  README '알아 둘 것' BNB Chain·환율 표시·알려진 한계 · 지난 판 GoPlus 한계 고침.
+- **시험** — 공개 시험 추가: 부채 차감(마진 롱·대출 출금·담보대출·Hyperliquid 현금 공존·부채 없는 음수) · 업비트 부분 체결(부분 매수·매도·누적·종결 전환·낡은 스냅숏) · 늦은 거래 표식·다시 계산 ·
+  BNB Chain 잔고 감시·기장·곡선 위치 · 뒤 차선 예산·추적 · GoPlus 상한 · 긴급 알림 백오프 · 환율 표시 · 세일 환불 원가 · OKX 역계약 · 3.9 응답 읽기 · 안내 문구 — 전체 4,600건 넘게(파일 140개).
+
+**English · External review fixes** — Two external reviews of the public release were reproduced finding by finding and the high-impact ones fixed.
+Exchange margin/loan debt is now subtracted from the total: when borrowed coins are spent (margin long) or moved out (loan withdrawn) and an exchange ledger cell goes
+negative, that amount is deducted up to the debt reported by the exchange (collateral loans are already in that debt, so nothing is counted twice); negatives larger
+than the debt or with no debt are still excluded and flagged, and each daily close records that day's debt so recomputation gives the same value. Partial fills of open
+Upbit limit orders are applied to current holdings before the order is booked (same snapshot as the KRW balance; BTC/USDT markets adjust both sides), so the total no
+longer looks too high during a partial sell or too low during a partial buy; a KRW balance older than 10 minutes is kept with a "N minutes ago" note (up to a day).
+Late transactions that reach the ledger after their day was closed (catch-up after a stop, slow free keys, recovered deposits) now re-compute closed daily values and the
+long-range curve from the event day only (that day's prices, FX and off-ledger amounts are kept; quietly batched, at most hourly), removing "−X then +X" PnL pairs.
+BNB Chain now finds plain BNB sent to you and BNB paid out by contracts (no logs) with a balance watch: wallet BNB balances are read about every minute and an
+unexplained increase is narrowed down by bisecting old-block balances (archive key — free Ankr or NodeReal; a few dozen calls per deposit, daily cap); the transaction
+is booked when found, otherwise an opening balance (cost unknown) at that block time; without an archive key only the last 256 blocks are scanned for direct transfers,
+and BNB missed before this release is searched within 30 days when the balance check confirms a shortfall twice. EVM back-lane backfill no longer starves other wallets
+behind one slow trace (balances carried across cycles, rotation, a cycle-length cap), does not halve its range on 429 or holds, hands failed back-lane traces to "retry
+later" at once, settles traces on nodes without historical state from balance differences and restores shrunk getLogs caps every 30 minutes. Also: a 4 MiB cap on GoPlus
+responses, exponential backoff for failed urgent Telegram alerts (5 minutes max, 30 minutes for a blocked bot or wrong chat ID), the alert unit survives a corrupt cursor
+file, "fallback/stale FX" notes in the status line and settings (kimchi premium hidden on fallback), token-sale (CCA) partial-refund cost = bid actually spent × bid-time
+price, OKX coin-settled (inverse) futures PnL in USD, Python 3.9 reads RPC responses up to the declared length, and the backfill wording matches "new transactions first".
+No rebuild and no data revision.
+
+**알려진 한계(다음 판에)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
+
+- 거래소 부채는 이 판부터 일별 마감마다 기록해요 — 그 전 날을 다시 계산하면 '지금 부채'를 한도로 써서, 그 사이 빚을 갚았으면 그날이 빌린 몫만큼 높게 보일 수 있어요 ·
+  업데이트한 날 '오늘 변동'에 빌린 몫만큼 하락이 한 번 보여요 · 빌린 몫이 잔고를 넘은 코인은 보유표 행 대신 표 끝 한 줄로만 보여요.
+- 업비트 열린 주문 응답엔 체결 시각이 없어 부분 체결을 '잔고 스냅숏 시각에 생긴 것'으로 봐요 — 실제 체결 ~ 지금 사이 날을 다시 계산하면 그 체결 금액만큼 어긋날 수 있고,
+  업비트 잔고가 10분 넘게 늦는 동안·주문이 끝난 직후 원장 기록 전(몇 초~한 주기)엔 보정이 빠져요.
+- BNB Chain 잔고 감시가 보낸 거래를 못 가린 컨트랙트 BNB(브리지 지급 등)는 그 블록 시각의 기초 잔고(원가 미확인)로 들어가요 · 같은 블록에 무관한 내 거래가 겹치면 보낸 쪽이 틀릴 수 있어요(금액·시각은 맞음) ·
+  컨트랙트(스마트) 지갑은 잔고 감시 대상이 아니에요 · 이 판 전에 놓친 작은 BNB($500·2% 미만)나 30일보다 옛 몫은 기초 잔고로 남아요.
+- 늦은 거래로 마감 스냅숏 날을 다시 계산하면 그날 스냅숏에 시세가 없던 코인은 지금 시세 근사로 들어갈 수 있어요 · 업데이트 전에 이미 굳은 날의 늦은 거래는 자동으로 소급하지 않아요 ·
+  옛 기록 넓히기처럼 늦은 거래가 계속 들어오는 동안엔 1시간에 한 번 다시 계산해요(작은 기기에선 몇십 초 CPU).
+- OKX 마진(MARGIN) 포지션의 평가손익 단위는 실계정으로 확인하지 못해 코인 정산 규칙(증거금 통화 단위)과 같게 봐요.
+- 지난 판 한계(첫 대사 전 원가·손익 · 로그 없는 BNB 발신 봇 · Base trace 늦은 채움 · 코인 카드 스팸 줄 · 원화 거래소 나중 추가 · 체인 칩 설명)는 그대로예요 — [2026-10-10 (2)](#2026-10-10-2--새-설치본-수집--최신-우선).
+
 ## 2026-10-10 (2) — 새 설치본 수집 · 최신 우선
 
 **새 설치본 RPC 차선 · 블록스카웃 첫 경로 금지 · BNB Chain·Solana 최신 먼저 · Ankr 키 필수 · 키 저장 연결 시험 · 쉬는 지갑 1시간 · 토큰 받음 확인 10분 ·
@@ -70,13 +148,13 @@ while the measured real-time share is kept (rolling 31 days under 80%). Also: LP
 past daily values once, Coptic/Cherokee look-alike impersonation and spam rows are hidden, opening-balance-only tokens are valued only with a CoinGecko contract
 price, response size caps on the remaining direct lookups, and real Claude CLI failure reasons in AI evaluations. No rebuild and no data revision.
 
-**알려진 한계(다음 판에)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
+**알려진 한계(다음 판에 · GoPlus 줄은 → 2026-10-10 (3) 판에서 고침)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
 
 - 첫 대사 전엔 원가·손익·지난날 곡선에 수집 기간 이전 보유가 빠져 있어요(오늘 보유·총자산은 지금 잔고로 맞음) · 그 '지금 잔고'는 BNB Chain·Solana 조회 도중 출금이 겹치거나 전송 중 출금과 창 이전 보유가 겹치면 잠깐 덜 보일 수 있어요.
 - 시간당 수백 건씩 로그 없는 BNB 발신을 하는 봇 같은 주소는 BNB Chain 회수가 사이클당 몇 건이라 뒤처져요.
 - Base 등 공개 노드만 쓰는 체인은 trace 노드 한도에 걸리면 내부 이동이 늦게 채워져요(백오프 · 30일) · Alchemy 키만 넣은 설치는 Arbitrum 등의 옛 구간이 느려요(Etherscan·Ankr 권장).
 - 코인 카드 안 기록 줄의 사칭·스팸 줄 · 업비트·빗썸 외 원화 거래소를 나중에 넣을 때 지난 곡선 소급 · 체인 칩 설명 화면은 다음 판에.
-- 토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 같은 상한(32MiB)으로.
+- ~~토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 같은 상한(32MiB)으로~~ — **2026-10-10 (3) 판에서 고침**(4MiB 상한 · 넘으면 조회 실패로 · [2026-10-10 (3)](#2026-10-10-3--외부-검토-반영)).
 
 ## 2026-10-10 — 옛 보유 토큰 찾기 · Alchemy 키
 

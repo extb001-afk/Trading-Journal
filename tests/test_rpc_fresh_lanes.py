@@ -526,8 +526,10 @@ lf9 = cpt.get("_leaf_fail") or {}
 T.chk(not isinstance(rpt, dict) and H["peek_nat2"] in wrt.hashes() and H["newest_nat"] in wrt.hashes(),
       "P1t ★엿보기 창 안 W1 internal 입금의 잎 trace 408 이 W2 순수 ETH 입금·W1 다른 ETH 입금 방출을 막지 않음(같은 주기)★(수정 전 = 한 지갑 예외로 전체 엿보기 정합 건너뜀)",
       {"r": rpt, "emitted": sorted(h[-6:] for h in wrt.hashes())})
-T.chk(not any(("@_peek_ns" in k9) or k9.endswith(f":{HEAD0 - 100}") for k9 in lf9) and not (cpt.get("_leaf_later") or {}),
-      "P1t 엿보기 잎 실패 = 보류·계수 없음(_leaf_fail·_leaf_later 안 남김 — 라이브 차선이 그 블록을 라이브 규약으로)", {"leaf_fail": lf9, "later": cpt.get("_leaf_later")})
+lv9 = int((cpt.get("_handover") or {}).get("live") or 0)
+T.chk(not any(("@_peek_ns" in k9) or k9.endswith(f":{HEAD0 - 100}") for k9 in lf9)
+      and not any(int((v or {}).get("blk") or 0) > lv9 for v in (cpt.get("_leaf_later") or {}).values()),
+      "P1t 엿보기 잎 실패 = 보류·계수 없음(_leaf_fail·_leaf_later 안 남김 — 라이브 차선이 그 블록을 라이브 규약으로)", {"leaf_fail": lf9, "later": cpt.get("_leaf_later"), "live": lv9})
 T.chk(W2 in (cpt.get("_peek_wdone") or {}) and W1 not in (cpt.get("_peek_wdone") or {}),
       "P1t 성공한 지갑만 엿보기 정합 끝 기록(_peek_wdone W2) · 실패 지갑(W1)은 다음 사이클 다시", cpt.get("_peek_wdone"))
 rpt2 = cyc(wpt)

@@ -12,7 +12,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | 무료 플랜 | Solana 지갑 옛 기록·토큰·NFT 수집, 새 거래 확인의 백업 | Solana 지갑을 못 받아요 |
 | `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 노드(RPC)로 받아요 — 최신 거래는 바로, 옛 기록은 천천히 |
 | `TJ_ALCHEMY_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료(월 3,000만 CU) | 지갑이 주고받은 토큰 전부 + 지금 잔고 찾기(오래 들고만 있던 옛 보유 토큰을 빠뜨리지 않게) | 수집은 돌지만 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만) |
-| `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 Freemium | 오래 안 쓴 지갑에 들어온 토큰 10분마다 확인 · BNB Chain·Base 옛 기록(아카이브) 가속 · 토큰 찾기 보조(Advanced API) | 무료 공개 노드로만 — 늦을 수 있어요(1시간 확인이 받쳐 줌) |
+| `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 Freemium | 오래 안 쓴 지갑에 들어온 토큰 10분마다 확인 · BNB Chain·Base 옛 기록(아카이브) 가속 · BNB Chain 에 남이 그냥 보낸 BNB 찾기(옛 블록 잔고) · 토큰 찾기 보조(Advanced API) | 무료 공개 노드로만 — 늦을 수 있어요(1시간 확인이 받쳐 줌) |
 | `TJ_COINGECKO_KEY` | 선택 | Demo 무료 · Pro 유료 | 코인게코 시세 · DEX 토큰 시세 · 원가·차트 시세 · NFT 바닥가 | 전부 무키(공용 무료 한도)로 — 느리고 막히기 쉬워요 |
 | `TJ_OPENSEA_KEY` | 선택 | 무료 신청 | EVM NFT 바닥가 최우선 출처 | 코인게코 NFT 로 |
 | `TJ_NODEREAL_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal 무료 키 · QuickNode 유료 | BNB Chain·Base 옛 기록(아카이브) 노드 — 무료 키는 월 한도의 80%(백필 때 실시간 몫을 남기고 하루 몫의 최대 10배까지 당겨 씀 · 최근 31일 합 80% 안), 유료는 사용 비율(기본 10%) 안에서만 | 공개 노드로 — BNB Chain 은 공개 노드 보관 기간까지만 |
@@ -97,7 +97,8 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
   공개 노드가 막힐 때 빠질 수 있어요(1시간마다 탐색기 확인이 받쳐 줘요). 설정 화면·상태 패널에 경고가 뜨지만 수집은 그대로 돌아요.
 
 - 쓰는 곳: BSC·Base 옛 기록(아카이브 — 한 번에 3천 블록), 같은 키로 토큰 찾기 보조(Advanced API — `rpc.ankr.com/multichain`).
-  최신 기록은 늘 무료 공개 노드가 먼저입니다.
+  최신 기록은 늘 무료 공개 노드가 먼저입니다. BNB Chain 잔고 감시가 기록으로 설명 안 되는 BNB 증가(남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB)를 찾으면
+  그 구간을 옛 블록 잔고로 반씩 좁혀요(입금 한 건에 수십 콜 · 하루 상한 · 평소 0콜) — 키가 없으면 공개 노드가 보관한 최근 블록만 훑어요([수집 한계](COLLECTION_LIMITS.md)).
 - 쉬는 지갑 토큰 받음 확인: 탐색기로 수집하는 체인(Ethereum·Arbitrum·Polygon·Gnosis·Story 등)에서 한동안 안 쓴 지갑·빈 지갑에 토큰이 들어왔는지
   10분마다 한 번 getLogs 로 묶어(지갑 묶음 — 보통 500개씩) 확인하고, 받은 지갑만 바로 탐색기로 기록해요. Ankr 무료 키가 안 여는 체인·키가 없을 때는 무료 공개 노드로
   (Alchemy 는 이 용도에 안 써요 — 무료 getLogs 요청당 10블록 상한). 설정 `addr_tier.inflow_sec`(기본 600초 · 0 = 끔).
@@ -204,7 +205,8 @@ are built in memory only.
   path exists. One full pass at first, then only (wallet, chain) pairs that free signals show as changed. Metered with the official CU table under a
   daily share of 80% of the monthly limit (and 80% of the per-second limit); the key is read on every call, so saving it needs no restart.
 - **Ankr** (`TJ_ANKR_KEY`, free Freemium — https://www.ankr.com/rpc/ — required for EVM wallets: 10-minute incoming-token checks for idle wallets)
-  and **NodeReal** (`TJ_NODEREAL_KEY`): faster BSC/Base archive backfill; the
+  and **NodeReal** (`TJ_NODEREAL_KEY`): faster BSC/Base archive backfill and old-block balances for the BNB Chain balance watch (finds plain BNB sent to you
+  or paid out by contracts — a few dozen calls per deposit, daily cap, zero calls otherwise; without a key only recent blocks are scanned); the
   same Ankr key also backs token discovery (Advanced API, 700 credits per request). Each keyed service has its own daily ledger capped at 80%.
   Ankr also runs the 10-minute "tokens received by resting wallets" check (one batched `eth_getLogs` per chain, recipient topic = your wallets;
   public nodes when the key is missing or the chain is not open on the free plan; never Alchemy — its free getLogs is capped at 10 blocks).

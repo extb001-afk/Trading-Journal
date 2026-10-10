@@ -340,7 +340,7 @@ def disc_fp(G) -> str:
 
 def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, override_px, live_px, pairs, transit,
              extra, daily_rows, daily_cache, stable_syms=None, first_day=None, flow_kit=None, neg_ok=None, xkit=None, rb_days=None,
-             first_floor=None, xq=None, xq_base=None):
+             first_floor=None, xq=None, xq_base=None, debt_neg=None, debt_days=None):
     stable_syms = stable_syms or STABLE_SYMS
     groups = {}
     for gid, g in G.items():
@@ -357,6 +357,9 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
             groups[gid]["lpt"] = sorted((int(ts), float(dq)) for ts, dq in g["lp_tl"])
         if neg_ok and gid in neg_ok:
             groups[gid]["neg"] = True
+        elif debt_neg and (debt_neg.get(gid) or 0) > 0:
+            groups[gid]["dneg"] = float(debt_neg[gid])
+    dbt_days = {str(k): dict(v) for k, v in (debt_days or {}).items() if isinstance(v, dict) and str(k) < today_iso}
     n = len(daily_rows or ())
     t0 = datetime.strptime(today_iso, "%Y-%m-%d")
     rows = []
@@ -410,7 +413,7 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
         "dq": disc_fp({gid9: g9 for gid9, g9 in G.items() if gid9 not in (skip_gids or ())}),
         "xq": xq, "xqb": xq_base if xq_base is not None else xq,
         "transit": [(e["gid"], int(e["ts"]), float(e["qty"])) for e in (transit or ())],
-        "xk": xk, "dcv": dcv,
+        "xk": xk, "dcv": dcv, "dbt": dbt_days,
         "daily": rows, "made": time.time(), "fk": flow_kit,
     }
 
@@ -421,6 +424,7 @@ def rewind(kit, days):
     for gid, ts, q in kit.get("transit") or ():
         tr.setdefault(gid, []).append((ts, q))
     lpo = kit.get("lpo") or {}
+    dbt = kit.get("dbt") or {}
     out = {}
     for gid, g in kit["groups"].items():
         q = g["hold"]
@@ -437,6 +441,10 @@ def rewind(kit, days):
                 qq += sum(dq for t9, dq in lpt if t9 > lpo[d])
             if qq > EPS or (g.get("neg") and qq < -EPS):
                 res[d] = qq
+            elif qq < -EPS:
+                cap = float((dbt[d].get(str(gid)) or 0) if isinstance(dbt.get(d), dict) else (g.get("dneg") or 0))
+                if cap > 0:
+                    res[d] = max(qq, -cap)
         if res:
             out[gid] = res
     return out
@@ -1037,7 +1045,11 @@ class HistCurve:
         last_hc = (datetime.strptime(oldest, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
         rep["dirty_from"] = dirty9[0] if dirty9 else None
         if dirty9:
+            dcv_d9 = kit.get("dcv") or {}
             for iso in [k for k in d if k >= dirty9[0] and k not in win and k < today]:
+                r9 = d[iso]
+                if iso in dcv_d9 and isinstance(r9, list) and len(r9) >= 4 and r9[3] == "dc":
+                    continue
                 d.pop(iso, None)
                 s.pop(iso, None)
                 xs.pop(iso, None)
@@ -1297,6 +1309,18 @@ class HistCurve:
             return 0, len(todo)
         self.flow_fails = 0
         nofx = res.pop("_nofx", None) or {}
+        dc9 = [iso for iso in todo if d[iso][3] == "dc"]
+        if dc9:
+            try:
+                import rabby
+                rbn9 = rabby.day_new(rabby.load_state(os.path.join(common.STATE_DIR, rabby.DAILY_NAME)), dc9, today)
+            except Exception as e9:
+                log.warning("장기 곡선 입출금: Rabby 첫 반영 읽기 실패(원장 순유입만): %s", e9)
+                rbn9 = {}
+            for iso, nv9 in rbn9.items():
+                v9 = res.get(iso)
+                res[iso] = (round((float(v9[0]) if v9 else 0.0) + nv9, 2),
+                            [["Rabby 기준 첫 반영(봇 미추적 보유)", nv9]] + [list(t) for t in ((v9[1] if v9 else None) or ())][:2])
         held = 0
         for iso in todo:
             r9 = d[iso]

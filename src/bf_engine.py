@@ -111,7 +111,7 @@ def classify_rpc_error(err) -> NetError:
         return r9
     if "header not found" in low or "missing trie node" in low or "pruned" in low \
             or "history has been pruned" in low or "block not found" in low \
-            or ("historical state" in low and "not available" in low) \
+            or ("historical state" in low and ("not available" in low or "unavailable" in low)) \
             or "historical version not found" in low or "failed to load state at height" in low:
         return NetError(text, "pruned", code=code)
     if "context deadline exceeded" in low or "execution timeout" in low or "query timeout" in low \
@@ -2257,7 +2257,11 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             _stat(host, "calls")
             with _open(req, to9) as r:
                 g.observe(getattr(r, "headers", None))
-                raw = r.read((min(rdu9, HTTP_MAX_BYTES) if rdb9 else HTTP_MAX_BYTES) + 1)
+                n9 = (min(rdu9, HTTP_MAX_BYTES) if rdb9 else HTTP_MAX_BYTES) + 1
+                ln9 = getattr(r, "length", None)
+                if isinstance(ln9, int) and not isinstance(ln9, bool) and ln9 >= 0:
+                    n9 = min(n9, ln9 + 1)
+                raw = r.read(n9)
             if rdb9:
                 rpc_day_settle(rd9, len(raw), rdu9, rdd9)
                 rds9 = True
@@ -2387,12 +2391,12 @@ def rpc_call(url: str, method: str, params, *, timeout: float = 25.0, retries: i
 
 
 def rpc_batch(url: str, calls: list, *, timeout: float = 30.0, retries: int = 2, prio: str = "fg",
-              deadline: float = None) -> list:
+              deadline: float = None, sem_timeout: float = None) -> list:
     if not calls:
         return []
     _rpc_cfg_ensure()
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
-    out = _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host)
+    out = _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host, sem_timeout)
     for i9 in range(RATE_RETRIES):
         idx = [k for k, r in enumerate(out) if isinstance(r, NetError) and _persec(r)]
         if not idx:
@@ -2403,25 +2407,25 @@ def rpc_batch(url: str, calls: list, *, timeout: float = 30.0, retries: int = 2,
         if w9 is None:
             break
         time.sleep(w9)
-        again = _rpc_batch_once(url, [calls[k] for k in idx], timeout, retries, prio, deadline, host)
+        again = _rpc_batch_once(url, [calls[k] for k in idx], timeout, retries, prio, deadline, host, sem_timeout)
         for k, r in zip(idx, again):
             out[k] = r
     return out
 
 
-def _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host) -> list:
+def _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host, sem_timeout=None) -> list:
     body = json.dumps([{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
                        for i, (m, p) in enumerate(calls)]).encode()
     for i9 in range(RATE_RETRIES + 1):
         try:
             d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, cost=len(calls),
-                          rpc_methods=[m for m, _p in calls])
+                          rpc_methods=[m for m, _p in calls], sem_timeout=sem_timeout)
         except NetError as err9:
             if err9.kind != "range" or not getattr(err9, "results", False) or len(calls) < 2:
                 raise
             mid9 = len(calls) // 2
-            return (_rpc_batch_once(url, calls[:mid9], timeout, retries, prio, deadline, host)
-                    + _rpc_batch_once(url, calls[mid9:], timeout, retries, prio, deadline, host))
+            return (_rpc_batch_once(url, calls[:mid9], timeout, retries, prio, deadline, host, sem_timeout)
+                    + _rpc_batch_once(url, calls[mid9:], timeout, retries, prio, deadline, host, sem_timeout))
         if isinstance(d, dict) and d.get("error"):
             err = classify_rpc_error(d["error"])
             err.host = host

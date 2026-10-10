@@ -63,7 +63,7 @@ CHAIN_TRACKS = {
     "somnia": {"track": "blockscout_v2", "label": "Somnia", "genesis": None, "limit_kind": "none",
                "reason_ko": "blockscout 목록으로 과거 조회 가능"},
     "bsc": {"track": "rpc_getlogs_archive", "label": "BNB Chain", "genesis": "2020-08-29", "limit_kind": "archive_only",
-            "reason_ko": "공개 노드는 최근 구간만 보관해요 — 옛 블록은 아카이브 노드(NodeReal, 유료)가 있어야 받을 수 있어요. 구독이 끝나면 약 1개월 이전 BSC 이력은 못 받아요"},
+            "reason_ko": "키 없는 공개 로그 노드로 약 150일 전까지 받아요(기본 수집 기간 5개월) — 그보다 옛 블록과 옛 블록 잔고는 아카이브 노드 키(Ankr·NodeReal 무료 키)가 있어야 해요. 로그 없는 받은 BNB 는 잔고 감시로 찾아요(못 가리면 기초 잔고 — 수집 한계 문서)"},
     "sol": {"track": "sol_signatures", "label": "Solana", "genesis": "2020-03-16", "limit_kind": "rate_cost",
             "reason_ko": "서명 목록은 전 이력 조회 가능. 거래 1건마다 조회 1회라 시간이 활동량에 비례하고, 헬리우스 크레딧이 떨어지면 공개 RPC(느림)로 받아요"},
 }
