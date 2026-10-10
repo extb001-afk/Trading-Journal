@@ -2495,8 +2495,8 @@
     const wl = arr(st.wallets).length, bf = bfInfo(), pre = preData();
     if (!(wl === 0 || pre || (!st.onboarded && bf && !arr(D.events).length))) return null;
     const solW = arr(st.wallets).some(w => w && w.kind === 'sol'), solNeed = !!st.solNeedsHelius && solW;
-    const K = sxKeys(), xp = st.explorers || {}, needX = !!(st.evmNeedsKeys || solNeed);
-    const miss = [st.evmNeedsKeys && !(xp.etherscan || {}).set ? 'Etherscan' : '', solNeed && !(xp.helius || {}).set ? 'Helius' : ''].filter(Boolean);
+    const K = sxKeys(), xp = st.explorers || {}, needX = !!(st.evmNeedsKeys || st.evmNeedsAlchemy || solNeed);
+    const miss = [st.evmNeedsKeys && !(xp.etherscan || {}).set ? 'Etherscan' : '', st.evmNeedsAlchemy && xp.alchemy && !xp.alchemy.set ? 'Alchemy' : '', solNeed && !(xp.helius || {}).set ? 'Helius' : ''].filter(Boolean);
     return { wl, bf, pre, K, needX, miss, tg: !!(st.telegram && st.telegram.connected) };
   }
   const ONB_X = 'tj_v2_onbx';
@@ -6352,9 +6352,9 @@
   function sxKeys() {
     const st = suSt();
     if (!st) return null;
-    const XO = ['helius', 'etherscan', 'coingecko', 'opensea'];
+    const XO = ['helius', 'etherscan', 'alchemy', 'coingecko', 'opensea'];
     const NODE = st.nodes && typeof st.nodes === 'object' ? Object.keys(st.nodes) : [];
-    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).filter(k => !NODE.includes(k) || (xp[k] && xp[k].set)).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
+    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).filter(k => !NODE.includes(k) || (xp[k] && xp[k].set) || (k === 'alchemy' && st.evmNeedsAlchemy)).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
     const empty = xk.filter(k => !(xp[k] && xp[k].set)), exSet = ek.filter(k => ex[k] && ex[k].set), tg = st.telegram || {};
     const P = st.perp || {}, pw = arr(P.wallets), stt = P.state || {};
     const pBad = pw.filter(w => { const s9 = ((stt[w.dex] || {}).accts || {})[w.address] || {}; return s9.err || (stt[w.dex] || {}).wait; }).length;
@@ -6805,7 +6805,7 @@
     const openIt = id => () => S.set.open.add(id);
     const xpOpen = k => () => { const u = suU(); if (u) u.xp = k; };
     const exOpen = k => () => { const u = suU(); if (u) u.ex = k; };
-    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
+    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['alchemy', 'Alchemy', '알케미 evm 토큰 잔고 찾기 노드 api 키 key 필수 무료 cu'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
       .forEach(x => add('keys', '', x[1] + ' 키', x[2], '[data-su="xp"][data-v="' + x[0] + '"]', xpOpen(x[0])));
     add('keys', 'exchanges', '거래소 조회 키', '거래소 api 키 key 업비트 바이낸스 조회 전용 read only', '.sx-exslot');
     [['upbit', '업비트'], ['bithumb', '빗썸'], ['binance', '바이낸스 Binance'], ['bybit', '바이빗 Bybit'], ['okx', 'OKX'], ['kucoin', '쿠코인 KuCoin'], ['gate', '게이트 Gate']]
@@ -7573,14 +7573,15 @@
         const dline = dx ? '<div class="cap">주소 ' + Object.keys(ac).length + '개' + (w.equity != null ? ' · 계정 가치 ' + m(num(w.equity)) : '') + (nliq ? ' · 청산 ' + nliq + '건' : '') + ' · 총자산 미반영</div>'
           + (errs.length ? '<div class="cap wtxt" title="' + esc(errTxt(errs.map(a => a.slice(0, 6) + '…' + a.slice(-4) + ' — ' + ac[a].err).join('\n'))) + '">수집 오류·지연 주소 ' + errs.length + '개 · 다음 주기에 다시 받아요</div>' : '') : '';
         return '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div class="row gap8">' + exLogo(k) + '<b>' + esc(EX_NAMES[k] || k) + '</b>' + (dx ? '<span class="pill g sm">덱스</span>' : '') + '<span class="sp"></span><span class="cap num">' + (e.ts ? fmtTs(num(e.ts)) + ' 수집' : '수집 대기') + '</span></div>'
-          + (dx ? dline : '<div class="cap">' + (w.balance != null && isFinite(num(w.balance)) ? '가용 증거금 <span class="num">' + m(num(w.balance)) + '</span>' : esc(hs(String(w.note || '').replace(/통합계좌\(UNIFIED\)/g, '통합계좌')))) + ' · 이벤트 ' + evs.length + '건</div>') + '<div class="cap num">' + Object.keys(kinds).map(x => esc(KN[x] || x) + ' ' + m(kinds[x], { sign: true })).join(' · ') + '</div></div>';
+          + (dx ? dline : '<div class="cap">' + (w.balance != null && isFinite(num(w.balance)) ? '가용 증거금 <span class="num">' + m(num(w.balance)) + '</span>' : esc(hs(String(w.note || '').replace(/통합계좌\(UNIFIED\)/g, '통합계좌')))) + ' · 이벤트 ' + evs.length + '건</div>') + '<div class="cap num">' + Object.keys(kinds).map(x => esc(KN[x] || x) + ' ' + m(kinds[x], { sign: true })).join(' · ') + (evs.some(x => x.px_est) ? ' · 일부 지금 시세 추정' : '') + '</div></div>';
       }).join('') + '</div>';
     } else if (S.futErr) ex = '<div class="fbnote">거래소 원본을 불러오지 못했어요</div>';
     else ex = '<div class="cap">거래소별 원본 불러오는 중…</div>';
     const exT = S.fut && Object.keys(S.fut).some(isDex) ? '거래소·덱스별 원본' : '거래소별 원본';
     ex = '<div class="futrawf">' + uiFold('fut:raw', { cls: 'plain', head: '<b>' + exT + '</b><span class="cap">수집 시각 · 가용 증거금 · 이벤트 합</span>', body: () => ex, label: exT }) + '</div>';
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="선물 상세"><div class="dh"><h2 class="h2">선물 상세</h2>' + (f.ts ? '<span class="rsum num"><span class="' + cls(net) + '">' + m(net, { sign: true, compact: true }) + '</span></span>' : '') + '<span class="sp"></span>' + (legacyOn("futures") ? '<a class="link hide-sm" href="/futures">기존 선물 페이지</a>' : '') + '<button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>'
-      + '<div class="cap" style="margin-bottom:12px">' + (f.ts ? fmtTs(num(f.ts)) + ' 기준 · 마크가 · 총자산 미반영 (증거금은 거래소 잔고에 포함)' : '수집 대기') + '</div>' + tiles + pos + brk + rows + ex + '</aside>';
+      + '<div class="cap" style="margin-bottom:12px">' + (f.ts ? fmtTs(num(f.ts)) + ' 기준 · 마크가 · 총자산 미반영 (증거금은 거래소 잔고에 포함)' : '수집 대기') + '</div>'
+      + (num(f.coinEst) ? '<div class="fbnote">코인으로 정산된 ' + num(f.coinEst) + '건은 정산 시각 시세 기록이 없어 지금 시세로 추정한 달러예요(나머지는 정산 시각 시세)</div>' : '') + tiles + pos + brk + rows + ex + '</aside>';
   }
 
   function openReceipt(iso, sym, rank) {
@@ -8646,7 +8647,8 @@
       + (cfr.length ? uiFold('frc:fund', { cls: 'plain', head: '<b>펀딩 ' + cfr.length + '회</b><span class="cap num">' + m(CV(ce.funding, ce.fundingKrw), { sign: true }) + '</span>', label: '펀딩 내역',
         body: () => cfr.map(f => '<div class="row frf num"><span class="cap">' + kstHM(num(f.ts)) + ' · ' + esc(f.ex || f.exKey) + '</span><span class="sp"></span><b class="' + clsV(f.usd) + '">' + m(KV(num(f.usd), f.krw), { sign: true }) + '</b></div>').join('') }) : '') + '</section>';
     const un = unX;
-    const ftxt = (pr[1] ? '가격 있는 청산 ' + pr[0] + '/' + pr[1] + '건' : '') + (un.length ? ' · ' + un.map(u => esc(u.ex) + ' ' + u.n + '건은 ' + esc(u.reason)).join(' · ') + '이라 정산 금액만' : '') + (d.other && num(d.other.usd) ? ' · 종목 없는 정산 ' + m(KV(num(d.other.usd), d.other.krw), { sign: true }) : '');
+    const ftxt = (pr[1] ? '가격 있는 청산 ' + pr[0] + '/' + pr[1] + '건' : '') + (un.length ? ' · ' + un.map(u => esc(u.ex) + ' ' + u.n + '건은 ' + esc(u.reason)).join(' · ') + '이라 정산 금액만' : '') + (d.other && num(d.other.usd) ? ' · 종목 없는 정산 ' + m(KV(num(d.other.usd), d.other.krw), { sign: true }) : '')
+      + (num(d.coinEst) ? ' · 코인 정산 ' + num(d.coinEst) + '건은 지금 시세로 추정' : '');
     const foot = '<div class="rft"><span class="cap pvx">' + ftxt + '</span><span class="sp"></span><button class="btn sm" data-a="frFut">선물 상세 ›</button><button class="btn sm" data-a="frDay">그날 기록 보기</button></div>';
     return head + st + '</div>' + sec + tiles + lst + foot;
   }

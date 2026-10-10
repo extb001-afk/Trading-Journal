@@ -4407,6 +4407,159 @@ def _fut_binance(env):
     _px_safe("binance", lambda: _px_binance(fcall, ev, ev[n_ev0:]))
 
 
+BB_TLOG_TYPES = frozenset(("TRADE", "SETTLEMENT", "DELIVERY", "LIQUIDATION", "ADL"))
+BB_TLOG_CALLS_MAX = 40
+BB_TLOG_OVERLAP_MS = 3600 * 1000
+BB_TLOG_LAG_MS = 120 * 1000
+BB_TLOG_QUIET_MS = 300 * 1000
+BB_TLOG_OFF_MS = 6 * 3600 * 1000
+
+
+def _bb_num(v):
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return 0.0
+    return _fut_opt(v)
+
+
+def _bb_tlog_events(rows, tl_from, seen, ev):
+    n9 = bad9 = 0
+    for r in rows:
+        if str(r.get("type") or "") not in BB_TLOG_TYPES or str(r.get("category") or "linear") != "linear":
+            continue
+        rid, t9 = str(r.get("id") or "").strip(), _fut_opt(r.get("transactionTime"))
+        cf9, fd9, fe9 = _bb_num(r.get("cashFlow")), _bb_num(r.get("funding")), _bb_num(r.get("fee"))
+        if not rid or t9 is None or t9 <= 0 or None in (cf9, fd9, fe9):
+            bad9 += 1
+            continue
+        if int(t9) < tl_from:
+            continue
+        base9 = {"t": int(t9), "symbol": r.get("symbol") or ""}
+        if str(r.get("currency") or "").strip():
+            base9["asset"] = str(r.get("currency")).strip().upper()
+        for suf9, kind9, amt9 in ((":p", "REALIZED", cf9), (":f", "FEE", -fe9), (":n", "FUNDING", fd9)):
+            uid9 = f"bbt:{rid}{suf9}"
+            if amt9 == 0 or uid9 in seen:
+                continue
+            seen.add(uid9)
+            e9 = dict(base9, kind=kind9, amount=amt9, uid=uid9)
+            if kind9 == "REALIZED":
+                if str(r.get("orderId") or "").strip():
+                    e9["oid"] = str(r.get("orderId")).strip()
+                if str(r.get("type")) == "LIQUIDATION":
+                    e9["liq"] = True
+            ev.append(e9)
+            n9 += 1
+    if bad9:
+        log.warning("bybit 거래 내역 형식 이상 %d줄 — 그 줄만 뺌(대사 나머지가 흡수)", bad9)
+    return n9
+
+
+def _bb_tlog_window(bcall, cur, s, e, out, budget):
+    p9 = cur.get("tlog_pg")
+    cursor = ""
+    if isinstance(p9, dict):
+        ps9, pe9, pc9 = _fut_opt(p9.get("s")), _fut_opt(p9.get("e")), p9.get("cursor")
+        if ps9 == s and pe9 is not None and s < pe9 <= s + 7 * DAY * 1000 and isinstance(pc9, str) and pc9:
+            e, cursor = int(pe9), pc9
+        else:
+            cur.pop("tlog_pg", None)
+    seen9 = {cursor} if cursor else set()
+    while True:
+        if budget[0] >= BB_TLOG_CALLS_MAX:
+            return None
+        q9 = {"accountType": "UNIFIED", "category": "linear", "limit": 50, "startTime": s, "endTime": e}
+        if cursor:
+            q9["cursor"] = cursor
+        time.sleep(PACE)
+        budget[0] += 1
+        try:
+            res9 = bcall("/v5/account/transaction-log", q9)
+            rows9 = res9.get("list") if isinstance(res9, dict) else None
+            if not isinstance(rows9, list) or any(not isinstance(x9, dict) for x9 in rows9):
+                raise RuntimeError("bybit transaction-log 목록 결손·형식 오류")
+        except Exception:
+            if cursor:
+                cur.pop("tlog_pg", None)
+            raise
+        out.extend(rows9)
+        nxt9 = res9.get("nextPageCursor") or ""
+        if not nxt9 or not rows9:
+            cur.pop("tlog_pg", None)
+            return e
+        if nxt9 in seen9:
+            cur.pop("tlog_pg", None)
+            raise RuntimeError("bybit transaction-log 페이지 커서 미전진")
+        seen9.add(nxt9)
+        cursor = nxt9
+        cur["tlog_pg"] = {"s": s, "e": e, "cursor": cursor}
+
+
+def _bb_tlog_pass(bcall, cur0, ev, seen, now_ms):
+    cur = {k: cur0[k] for k in ("tlog_from", "tlog", "tlog_pg", "tlog_off", "tlog_err") if k in cur0}
+    tl_from = cur.get("tlog_from")
+    raw9 = []
+    if not (isinstance(tl_from, int) and not isinstance(tl_from, bool) and tl_from > 0):
+        cur.pop("tlog_from", None)
+        if now_ms < (_fut_opt(cur.get("tlog_off")) or 0):
+            return cur, None, raw9
+        try:
+            _bb_tlog_window(bcall, {}, now_ms - 3 * BB_TLOG_QUIET_MS, now_ms, raw9, [0])
+            tm9 = [int(_fut_opt(r.get("transactionTime")) or 0) for r in raw9 if str(r.get("type") or "") in BB_TLOG_TYPES]
+            open9 = False
+            if not any(t9 >= now_ms - BB_TLOG_QUIET_MS for t9 in tm9):
+                for sc9 in ("USDT", "USDC"):
+                    pos9 = bcall("/v5/position/list", {"category": "linear", "settleCoin": sc9, "limit": 200})
+                    pp9 = pos9.get("list") if isinstance(pos9, dict) else None
+                    if not isinstance(pp9, list) or any(not isinstance(p9, dict) for p9 in pp9):
+                        raise RuntimeError("bybit 전환 포지션 목록 결손·형식 오류")
+                    if pos9.get("nextPageCursor") or any(_fut_req(p9.get("size"), "수량(size)") != 0 for p9 in pp9):
+                        open9 = True
+                        break
+        except RateLimited:
+            return cur, None, []
+        except Exception as e9:
+            cur["tlog_off"] = now_ms + BB_TLOG_OFF_MS
+            log.warning("bybit 거래 내역(transaction-log) 조회 실패 — 선물 수수료·펀딩은 종전처럼 청산 시각(6시간 뒤 다시): %s", _xm(repr(e9))[:160])
+            return cur, None, []
+        cur.pop("tlog_off", None)
+        if any(t9 >= now_ms - BB_TLOG_QUIET_MS for t9 in tm9):
+            log.info("bybit 거래 내역 전환 미룸 — 최근 5분 선물 체결·정산 있음(다음 주기)")
+            return cur, None, []
+        if open9:
+            log.info("bybit 거래 내역 전환 미룸 — 미청산 linear 포지션 있음(다음 주기)")
+            return cur, None, []
+        cur["tlog_from"] = cur["tlog"] = now_ms
+        log.info("★bybit 선물 수수료·펀딩 = 낸 시각(transaction-log) 전환 — %s 부터(그 앞은 종전 closed-pnl)★",
+                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_ms / 1000)))
+        return cur, (now_ms - BB_TLOG_LAG_MS) // 1000, []
+    c9 = _fut_opt(cur.get("tlog"))
+    done9 = int(c9) if c9 is not None and tl_from <= c9 <= now_ms else tl_from
+    s9 = max(tl_from, done9 - BB_TLOG_OVERLAP_MS)
+    budget = [0]
+    try:
+        while s9 < now_ms:
+            got9 = []
+            try:
+                e9 = _bb_tlog_window(bcall, cur, s9, min(s9 + 7 * DAY * 1000 - 1000, now_ms), got9, budget)
+            finally:
+                raw9.extend(got9)
+                _bb_tlog_events(got9, tl_from, seen, ev)
+            if e9 is None:
+                log.info("bybit 거래 내역 따라잡는 중(주기 상한 %d쪽) — 덮은 시각 %s", BB_TLOG_CALLS_MAX,
+                         time.strftime("%m-%d %H:%M", time.localtime(done9 / 1000)))
+                break
+            done9 = max(done9, e9)
+            s9 = e9
+        cur.pop("tlog_err", None)
+    except Exception as e9:
+        if now_ms - (_fut_opt(cur.get("tlog_err")) or 0) >= 3600 * 1000:
+            cur["tlog_err"] = now_ms
+            log.warning("bybit 거래 내역(transaction-log) 수집 실패 — 선물 정산 %s 까지만(다음 주기 다시): %s",
+                        time.strftime("%m-%d %H:%M", time.localtime(done9 / 1000)), _xm(repr(e9))[:160])
+    cur["tlog"] = done9
+    return cur, (min(done9, now_ms) - BB_TLOG_LAG_MS) // 1000, raw9
+
+
 def _fut_bybit(env):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
 
@@ -4472,6 +4625,20 @@ def _fut_bybit(env):
     ev = list(st.get("events") or [])
     seen = {r.get("uid") for r in ev}
     now_ms = int(time.time() * 1000)
+    tlc9, tlcov9, tlraw9 = _bb_tlog_pass(bcall, dict(st.get("cursor") or {}), ev, seen, now_ms)
+    tl9 = tlc9.get("tlog_from") if isinstance(tlc9.get("tlog_from"), int) else None
+
+    def _cp_take(c):
+        uid = f"bb:{c.get('orderId')}:{c.get('updatedTime')}"
+        if uid in seen:
+            return
+        seen.add(uid)
+        t9 = int(c.get("updatedTime") or 0)
+        if tl9 is not None and t9 >= tl9:
+            ev.append({"t": t9, "symbol": c.get("symbol") or "", "kind": "CLOSEDPNL", "amount": 0.0,
+                       "net": _fut_opt(c.get("closedPnl")), "uid": uid})
+            return
+        ev.append({"t": t9, "symbol": c.get("symbol") or "", "kind": "REALIZED", "amount": float(c.get("closedPnl") or 0), "uid": uid})
     c0 = (st.get("cursor") or {}).get("closed_pnl")
     if isinstance(c0, (int, float)) and c0 > 0:
         s_ms = int(c0) - DAY * 1000
@@ -4486,13 +4653,7 @@ def _fut_bybit(env):
         for c in bpages("/v5/position/closed-pnl", {"category": "linear", "limit": 100,
                                                      "startTime": s_ms, "endTime": e_ms}):
             pxraw.append(c)
-            uid = f"bb:{c.get('orderId')}:{c.get('updatedTime')}"
-            if uid in seen:
-                continue
-            seen.add(uid)
-            ev.append({"t": int(c.get("updatedTime") or 0), "symbol": c.get("symbol") or "",
-                       "kind": "REALIZED", "amount": float(c.get("closedPnl") or 0),
-                       "uid": uid})
+            _cp_take(c)
         s_ms = e_ms
     hist_lo = (st.get("cursor") or {}).get("hist_lo")
     tg9 = bf_engine.SINCE.target("bybit")
@@ -4510,19 +4671,15 @@ def _fut_bybit(env):
                     h9 = e9
                 pxraw.extend(add9)
                 for c in add9:
-                    uid = f"bb:{c.get('orderId')}:{c.get('updatedTime')}"
-                    if uid in seen:
-                        continue
-                    seen.add(uid)
-                    ev.append({"t": int(c.get("updatedTime") or 0), "symbol": c.get("symbol") or "",
-                               "kind": "REALIZED", "amount": float(c.get("closedPnl") or 0), "uid": uid})
+                    _cp_take(c)
                 hist_lo = want9
                 log.info("bybit 선물 과거 청산손익 채움 %s~ · %d건", time.strftime("%Y-%m-%d", time.gmtime(want9 / 1000)), len(add9))
             except Exception as e:
                 log.warning("bybit 선물 과거 청산손익 채움 실패(다음 주기 재시도): %s", str(e)[:160])
     _fut_write("bybit", {"balance": None, "note": "통합계좌에 포함 — 잔고는 현물 집계에"},
-               poss, ev, dict({"closed_pnl": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {})))
-    _px_safe("bybit", lambda: _px_bybit(bpage, pxraw, ev, now_ms))
+               poss, ev, dict({"closed_pnl": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {}), **tlc9),
+               covered_through=tlcov9)
+    _px_safe("bybit", lambda: _px_bybit(bpage, pxraw, ev, now_ms, tl=(tl9, tlraw9)))
 
 
 def _okx_notional(p, pos, ct_get):
@@ -4713,7 +4870,7 @@ def _px_bybit_exec(bpage, cur, ev, now_ms, budget, rows):
         h9 = fut_rcpt.num(cur.get("ex_lo"))
         if h9 is None:
             return
-        bb_t = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith("bb:")]
+        bb_t = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith(("bb:", "bbt:"))]
         if not bb_t:
             return
         lo = max(now_ms - 729 * DAY * 1000, min(bb_t) - PX_BB_EX_PAD_MS)
@@ -4729,10 +4886,13 @@ def _px_bybit_exec(bpage, cur, ev, now_ms, budget, rows):
         log.info("bybit 선물 진입 체결 과거 채움 끝")
 
 
-def _px_bybit(bpage, raw, ev, now_ms):
+def _px_bybit(bpage, raw, ev, now_ms, tl=None):
+    tl_from, tlraw = tl if isinstance(tl, tuple) and len(tl) == 2 else (None, ())
     st = fut_rcpt.load("bybit")
     cur = dict(st.get("cursor") or {})
     rows, budget = fut_rcpt.rows_bybit(raw), [0]
+    if tl_from is not None:
+        rows.extend(fut_rcpt.rows_bybit_tlog(tlraw, cp=raw))
     try:
         if not cur.get("bf_done"):
             bb_t = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith("bb:")]
@@ -4759,7 +4919,8 @@ def _px_bybit(bpage, raw, ev, now_ms):
                 cur["ex_off"] = now_ms + PX_BB_EX_OFF_MS
                 log.warning("bybit 선물 진입 체결 조회 실패(6시간 뒤 다시 · 정산 무관): %s", _xm(repr(e9))[:160])
     finally:
-        fut_rcpt.update("bybit", rows, now_ms, cursor=cur)
+        fut_rcpt.update("bybit", rows, now_ms, cursor=cur,
+                        keep=None if tl_from is None else (lambda r9: not (str(r9.get("uid") or "").startswith("bb:") and r9["ts_ms"] >= tl_from)))
 
 
 def _px_okx(bills, raw, now_ms):

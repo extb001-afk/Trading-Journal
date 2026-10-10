@@ -93,6 +93,23 @@ SWEEP_CHAINS = {
     "injective": ("Injective EVM", 1776, "INJ", ["https://sentry.evm-rpc.injective.network"], 23),
     "swell": ("Swellchain", 1923, "ETH", ["https://swell.drpc.org"], 3),
     "shape": ("Shape", 360, "ETH", ["https://mainnet.shape.network"], 23),
+    "adi": ("ADI Chain", 36900, "ADI", ["https://rpc.adifoundation.ai"], 23),
+    "anime": ("Animechain", 69000, "ANIME", ["https://public-rpc.anime.xyz"], 10),
+    "astar": ("Astar", 592, "ASTR", ["https://evm.astar.network"], 23),
+    "boba": ("Boba", 288, "ETH", ["https://mainnet.boba.network"], 10),
+    "citrea": ("Citrea", 4114, "cBTC", ["https://rpc.mainnet.citrea.xyz"], 23),
+    "earnm": ("EARNM", 32766, "EARNM", ["https://earnm-mainnet.g.alchemy.com/public"], 23),
+    "galactica": ("Galactica", 613419, "GNET", ["https://galactica-mainnet.g.alchemy.com/public"], 23),
+    "gensyn": ("Gensyn", 685689, "ETH", ["https://gensyn-mainnet.g.alchemy.com/public"], 23),
+    "humanity": ("Humanity", 6985385, "H", ["https://humanity-mainnet.g.alchemy.com/public"], 23),
+    "mythos": ("Mythos", 42018, "ETH", ["https://mythos-mainnet.g.alchemy.com/public"], 23),
+    "rise": ("RISE", 4153, "ETH", ["https://rpc.risechain.com"], 23),
+    "settlus": ("Settlus", 5371, "ETH", ["https://settlus-mainnet.g.alchemy.com/public"], 23),
+    "superseed": ("Superseed", 5330, "ETH", ["https://mainnet.superseed.xyz"], 23),
+    "worldmobile": ("World Mobile Chain", 869, "WMTX", ["https://worldmobilechain-mainnet.g.alchemy.com/public"], 23),
+    "zetachain": ("ZetaChain", 7000, "ZETA", ["https://zetachain-mainnet.g.allthatnode.com/archive/evm", "https://zeta-chain.drpc.org"], 23),
+    "pharos": ("Pharos", 1672, "PROS", ["https://rpc.pharos.xyz"], 23),
+    "jovay": ("Jovay", 5734951, "ETH", ["https://rpc.jovay.io"], 23),
 }
 DOLLAR_NATIVE = {"XDAI", "USDC", "USDT0", "GHO"}
 

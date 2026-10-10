@@ -16,6 +16,8 @@ import urllib.request
 import common
 
 UA = "tj-bot/0.1 (personal trade journal)"
+HTTP_MAX_BYTES = 32 * 1024 * 1024
+HTTP_ERR_MAX_BYTES = 64 * 1024
 
 
 def _url_host(url) -> str:
@@ -238,7 +240,7 @@ def classify_exc(e: BaseException, host: str = None, body_bytes: bytes = None) -
         code = e.code
         body = ""
         try:
-            body = ((body_bytes if body_bytes is not None else e.read()) or b"")[:300].decode("utf-8", "replace")
+            body = ((body_bytes if body_bytes is not None else e.read(HTTP_ERR_MAX_BYTES)) or b"")[:300].decode("utf-8", "replace")
         except Exception:
             pass
         ra = retry_after_sec(e.headers.get("Retry-After") if e.headers else None)
@@ -297,6 +299,10 @@ HOST_POLICIES = {
                      "share": "node_ankr", "share_rate": 12.0, "share_burst": 12, "share_xproc": True},
     "*.quiknode.pro": {"rate": 5.0, "burst": 5, "conc": 3, "call_rate": 10.0, "call_burst": 10,
                        "share": "node_quicknode", "share_rate": 10.0, "share_burst": 10, "share_xproc": True},
+    "*.g.alchemy.com": {"rate": 2.0, "burst": 2, "conc": 2, "call_rate": 2.0, "call_burst": 2,
+                        "share": "node_alchemy", "share_rate": 2.0, "share_burst": 2, "share_xproc": True},
+    "rpc.ankr.com#adv": {"rate": 0.6, "burst": 2, "conc": 1, "call_rate": 0.6, "call_burst": 2,
+                         "share": "node_ankr_adv", "share_rate": 0.6, "share_burst": 2, "share_xproc": True},
     "bsc.rpc.blxrbdn.com": {"rate": 2.0, "burst": 2, "conc": 2},
     "rpc-bsc.48.club": {"rate": 2.0, "burst": 2, "conc": 2},
     "*.bnbchain.org": {"rate": 4.0, "burst": 4, "conc": 3},
@@ -669,9 +675,35 @@ def _esb_hist_merge(d: str, add: dict, today: int) -> bool:
         return False
 
 
-def _esb_hist_merge_locked(d: str, add: dict, today: int) -> bool:
+def _hist_load(d: str):
+    p9 = os.path.join(d, ESB_HIST)
     try:
-        h = _esb_hist_read(d)
+        with open(p9, "r", encoding="utf-8") as f:
+            j = json.load(f)
+    except FileNotFoundError:
+        return {"days": {}}, "missing"
+    except (OSError, ValueError):
+        return {"days": {}}, "bad"
+    if not isinstance(j, dict) or not isinstance(j.get("days"), dict):
+        return {"days": {}}, "bad"
+    return j, "ok"
+
+
+def _hist_keep_bad(d: str):
+    try:
+        os.replace(os.path.join(d, ESB_HIST), os.path.join(d, f"{ESB_HIST}.bad.{int(time.time())}"))
+    except OSError:
+        pass
+
+
+def _esb_hist_merge_locked(d: str, add: dict, today: int, keep: int = None) -> bool:
+    try:
+        if keep is not None:
+            h, st9 = _hist_load(d)
+            if st9 == "bad":
+                _hist_keep_bad(d)
+        else:
+            h = _esb_hist_read(d)
         days = h["days"]
         for day, recs in add.items():
             cur = days.get(str(int(day)))
@@ -683,9 +715,9 @@ def _esb_hist_merge_locked(d: str, add: dict, today: int) -> bool:
                 except (KeyError, IndexError, TypeError, ValueError):
                     o0 = o1 = 0
                 cur[stem] = [max(o0, int(nh)), max(o1, int(n))]
-        for k in [k for k in days if not str(k).lstrip("-").isdigit() or int(k) < today - ESB_HIST_KEEP_DAYS]:
+        for k in [k for k in days if not str(k).lstrip("-").isdigit() or int(k) < today - (ESB_HIST_KEEP_DAYS if keep is None else int(keep))]:
             days.pop(k, None)
-        common.atomic_write_json(os.path.join(d, ESB_HIST), {"days": days})
+        common.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, days=days) if keep is not None else {"days": days})
         return True
     except (OSError, TypeError, ValueError):
         return False
@@ -966,6 +998,10 @@ class DayMeter:
         self.proc = None
         self._hist_pend = {}
         self.hm_pub = False
+        self.hist_keep = 0
+
+    def _hkeep(self):
+        return max(int(self.hist_keep or 0), ESB_HIST_KEEP_DAYS)
 
     def _dir(self) -> str:
         return os.path.join(common.quota_dir(), self.sub)
@@ -982,8 +1018,8 @@ class DayMeter:
         me = f"{self.proc}.{os.getpid()}.{self.inst}.json"
         try:
             os.makedirs(d, exist_ok=True)
-            if self.fill_first and self._hist_pend and isinstance(self.st["day"], int):
-                if _esb_hist_merge_locked(d, {dy: {me[:-5]: v} for dy, v in self._hist_pend.items()}, self.st["day"]):
+            if (self.fill_first or self.hist_keep) and self._hist_pend and isinstance(self.st["day"], int):
+                if _esb_hist_merge_locked(d, {dy: {me[:-5]: v} for dy, v in self._hist_pend.items()}, self.st["day"], keep=self._hkeep()):
                     self._hist_pend.clear()
             rec9 = {"day": self.st["day"], "n": self.st["n"], "nh": self.st["nh"], "fq": int(self.st["fq"] or 0),
                     "proc": self.proc, "pid": os.getpid(), "inst": self.inst, "at": int(now)}
@@ -1017,11 +1053,11 @@ class DayMeter:
                     old9[f] = j
             if old9:
                 done9 = True
-                if self.fill_first:
+                if self.fill_first or self.hist_keep:
                     add9 = {}
                     for f, j in old9.items():
                         add9.setdefault(j["day"], {})[f[:-5]] = [_esb_rec_head(j), int(j.get("n") or 0)]
-                    done9 = _esb_hist_merge_locked(d, add9, self.st["day"])
+                    done9 = _esb_hist_merge_locked(d, add9, self.st["day"], keep=self._hkeep())
                 if done9:
                     for f in old9:
                         try:
@@ -1082,7 +1118,7 @@ class DayMeter:
         day = int(now // 86400)
         if self.st["day"] != day:
             prev = self.st["day"]
-            if self.fill_first and prev is not None and self.proc and (self.st["n"] or self.st["nh"]):
+            if (self.fill_first or self.hist_keep) and prev is not None and self.proc and (self.st["n"] or self.st["nh"]):
                 self._hist_pend[prev] = [int(self.st["nh"]), int(self.st["n"])]
             self.st.update(day=day, n=0, nh=0, flushed=0, others=0, others_h=0, others_fq=0, others_hm=None, others_at=0.0, yday_h=None, paced=0)
 
@@ -1098,7 +1134,7 @@ class DayMeter:
                 self._locked_sync(now)
             return self._room(kind if kind in HL_KINDS else "head", self.st["n"] + self.st["others"], now)
 
-    def take(self, proc: str, n: int = 1, kind: str = "head", now: float = None) -> bool:
+    def take(self, proc: str, n: int = 1, kind: str = "head", now: float = None, limit: int = None) -> bool:
         now = time.time() if now is None else now
         self.why.v = ""
         k = kind if kind in HL_KINDS else "head"
@@ -1117,12 +1153,13 @@ class DayMeter:
                     self.why.v = "io"
                     return False
                 used = self.st["n"] + self.st["others"]
-                if used + n > self.budget:
+                lim9 = limit(now) if callable(limit) else limit
+                if used + n > (self.budget if lim9 is None else max(0, int(lim9))):
                     self.why.v = "day"
                     return False
                 if self.fill_first and k == "fill":
                     self.st["fq"] = now
-                if self._room(k, used, now) < n:
+                if limit is None and self._room(k, used, now) < n:
                     self.why.v = "pace"
                     self.st["paced"] += 1
                     return False
@@ -1500,6 +1537,9 @@ def rpc_day_configure(cfg: dict):
             else:
                 m9 = DayMeter(f"rpc_day_{name}", budget, burst=1.0, keep=0.0)
             m9.proc = m9.proc or _RPC_DAY_PROC
+            m9.hist_keep = RPC_DAY_WINDOW if _burst_x(spec) else 0
+            if m9.hist_keep:
+                _hist_since_ensure(m9._dir(), int(time.time() // 86400))
             _RPC_DAY[name] = {"spec": spec, "meter": m9, "pct": pct_e, "refused": prev.get("refused", 0) if prev else 0}
 
 
@@ -1536,10 +1576,147 @@ def _rpc_day_units(name: str, methods=None, cost: int = 1) -> int:
         return max(1, int(cost))
     cu, heavy = int(spec.get("cu") or 20), int(spec.get("cu_heavy") or spec.get("cu") or 20)
     cm = spec.get("cu_methods") if isinstance(spec.get("cu_methods"), dict) else {}
+    cp = spec.get("cu_prefix") if isinstance(spec.get("cu_prefix"), dict) else {}
     ms = list(methods or [])
     if not ms:
         return max(cu, max((int(v) for v in cm.values()), default=cu)) * max(1, int(cost))
-    return sum(int(cm.get(str(m)) or (heavy if str(m).startswith(("debug_", "trace_")) else cu)) for m in ms)
+
+    def one(m):
+        m = str(m)
+        if cm.get(m):
+            return int(cm[m])
+        for pre, v in cp.items():
+            if m.startswith(str(pre)):
+                return int(v)
+        return heavy if m.startswith(("debug_", "trace_")) else cu
+    return sum(one(m) for m in ms)
+
+
+RPC_DAY_WINDOW = 31
+RPC_DAY_BURST_RESERVE = 0.5
+_BURST_TL = threading.local()
+
+
+def _hist_since_ensure(d: str, today: int):
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "reserve.lock"), "a+b") as lk:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+            try:
+                h, st9 = _hist_load(d)
+                if st9 == "ok" and isinstance(h.get("since"), int) and not isinstance(h.get("since"), bool):
+                    return
+                if st9 == "bad":
+                    _hist_keep_bad(d)
+                    h = {"days": {}}
+                common.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, since=int(today)))
+            finally:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _burst_x(spec) -> float:
+    try:
+        x = float((spec or {}).get("burst") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if x > 1.0 and (spec or {}).get("month") and not (spec or {}).get("day") else 0.0
+
+
+class ledger_burst:
+
+    def __init__(self, on: bool = True):
+        self.on = bool(on)
+
+    def __enter__(self):
+        self.prev = getattr(_BURST_TL, "on", False)
+        _BURST_TL.on = self.on
+        return self
+
+    def __exit__(self, *a):
+        _BURST_TL.on = self.prev
+        return False
+
+
+def burst_on() -> bool:
+    return bool(getattr(_BURST_TL, "on", False))
+
+
+def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None):
+    lo = today - (RPC_DAY_WINDOW - 1)
+    per = {}
+    h9, st9 = _hist_load(d)
+    if st9 == "bad":
+        return None
+    since = h9.get("since") if isinstance(h9.get("since"), int) and not isinstance(h9.get("since"), bool) else None
+    for k, recs in (h9.get("days") or {}).items():
+        try:
+            day = int(k)
+        except (TypeError, ValueError):
+            continue
+        if lo <= day < today and isinstance(recs, dict):
+            for stem, v in recs.items():
+                try:
+                    n9 = int(v[1])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                per[(day, stem)] = max(per.get((day, stem), 0), n9)
+    try:
+        names = os.listdir(d)
+    except OSError:
+        names = []
+    for f in names:
+        if not f.endswith(".json"):
+            continue
+        try:
+            j = common.read_json(os.path.join(d, f), None)
+            day = j.get("day") if isinstance(j, dict) else None
+            if isinstance(day, int) and lo <= day < today:
+                per[(day, f[:-5])] = max(per.get((day, f[:-5]), 0), int(j.get("n") or 0))
+        except (Exception, SystemExit):
+            continue
+    seen = {day for day, _s in per}
+    unknown = sum(1 for day in range(lo, today) if day not in seen and not (since is not None and day >= since)
+                  and not (fresh_day is not None and day < fresh_day))
+    return sum(max(0, v) for v in per.values()) + unknown * max(0, int(n_day))
+
+
+def rpc_day_limits(name: str, now: float = None) -> dict:
+    now = time.time() if now is None else now
+    with _RPC_DAY_LOCK:
+        ent = _RPC_DAY.get(name)
+    if ent is None:
+        return {}
+    return _rpc_day_lims(ent, now)
+
+
+def _rpc_day_lims(ent: dict, now: float) -> dict:
+    m9 = ent["meter"]
+    n_day = int(m9.budget)
+    x = _burst_x(ent["spec"])
+    if not x:
+        return {"normal": n_day, "burst": n_day, "cap": None, "prev": None, "x": 1.0}
+    today = int(now // 86400)
+    fd9 = ent["spec"].get("fresh_since")
+    fd9 = int(fd9) if isinstance(fd9, int) and not isinstance(fd9, bool) else None
+    if ent["spec"].get("svc"):
+        try:
+            import nodekeys
+            fd9 = nodekeys.fresh_day(str(ent["spec"]["svc"]))
+        except Exception:
+            pass
+    try:
+        cap = int(float(ent["spec"]["month"]) * float(ent.get("pct") or 80.0) / 100.0)
+    except (KeyError, TypeError, ValueError):
+        return {"normal": n_day, "burst": n_day, "cap": None, "prev": None, "x": 1.0}
+    prev = _rpc_day_prev_used(m9._dir(), today, n_day, fd9)
+    if prev is None:
+        return {"normal": n_day, "burst": n_day, "cap": cap, "prev": None, "x": x, "bad": True}
+    room = cap - prev
+    normal = max(0, min(n_day, room))
+    reserve = int((RPC_DAY_WINDOW - 1) * n_day * RPC_DAY_BURST_RESERVE)
+    return {"normal": normal, "burst": max(normal, min(int(n_day * x), room - reserve)), "cap": cap, "prev": prev, "x": x}
 
 
 def rpc_day_take(name: str, host: str, units: int):
@@ -1549,14 +1726,34 @@ def rpc_day_take(name: str, host: str, units: int):
         return None
     now = time.time()
     m9 = ent["meter"]
-    if m9.take(m9.proc or _RPC_DAY_PROC, max(1, int(units)), kind="must", now=now):
+    bu9 = burst_on()
+    hold9 = {}
+
+    def lim_fn(now9):
+        hold9["L"] = _rpc_day_lims(ent, now9)
+        return hold9["L"]["burst"] if bu9 else hold9["L"]["normal"]
+    bx9 = bool(_burst_x(ent["spec"]))
+    if m9.take(m9.proc or _RPC_DAY_PROC, max(1, int(units)), kind="must", now=now, limit=lim_fn if bx9 else None):
         return int(now // 86400)
+    lims = hold9.get("L")
+    lim9 = None if lims is None else (lims["burst"] if bu9 else lims["normal"])
     if m9.last_why() == "io":
         _stat(host, "quota_io")
         e9 = NetError(f"budget: {name} 하루 장부 기록 실패 — 합계를 모르면 승인 안 함(이번 요청 보류 · 다른 노드로)", "budget", host=host)
         e9.local = True
         raise e9
     used, bud = m9.used(now=now)
+    if lim9 is not None:
+        bud = lim9
+    if lims is not None and not bu9 and used + max(1, int(units)) <= lims["burst"]:
+        e8 = NetError(f"quota: {name} 오늘(UTC) 평소 몫 다 씀 {used}/{bud}{ent['spec'].get('unit')} — 따라잡기(백필) 호출만 더 받음(다른 노드로)",
+                      "quota", host=host)
+        e8.local = True
+        e8.normal_only = True
+        with _RPC_DAY_LOCK:
+            ent["refused"] = int(ent.get("refused") or 0) + 1
+        _stat(host, "quota_local")
+        raise e8
     err = NetError(f"quota: {name} 오늘(UTC) 몫(공표 한도 {ent.get('pct', 80):g}% 규칙) 다 씀 "
                    f"{used}/{bud}{ent['spec'].get('unit')} — UTC 자정까지 이 노드 쉼(다른 노드로)", "quota", host=host)
     err.local = True
@@ -1595,6 +1792,12 @@ def rpc_day_status() -> dict:
         except Exception:
             used, bud = 0, ent["meter"].budget
         out[name] = {"used": int(used), "budget": int(bud), "unit": ent["spec"].get("unit"), "refused": int(ent.get("refused") or 0)}
+        if _burst_x(ent["spec"]):
+            try:
+                l9 = rpc_day_limits(name)
+                out[name].update(normal=l9.get("normal"), burst=l9.get("burst"), cap=l9.get("cap"), prev=l9.get("prev"))
+            except Exception:
+                pass
     return out
 
 
@@ -1806,11 +2009,26 @@ def _open(req, timeout):
     return sol_open(req, timeout)
 
 
+ANKR_ADV_GATE = "rpc.ankr.com#adv"
+
+
+def _ankr_adv(url: str, rpc_methods, cost: int):
+    try:
+        path = urllib.parse.urlsplit(url).path or ""
+    except ValueError:
+        return None, rpc_methods
+    if not path.startswith("/multichain"):
+        return None, rpc_methods
+    return ANKR_ADV_GATE, (rpc_methods if rpc_methods else ["ankr_"] * max(1, int(cost or 1)))
+
+
 def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout: float = 25.0,
                  retries: int = 3, retry_5xx: bool = True, prio: str = "fg", deadline: float = None,
                  ua: str = UA, max_inline_wait: float = 20.0, breaker_5xx: bool = True, cost: int = 1,
                  sem_timeout: float = None, gate_host: str = None, rpc_methods=None):
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
+    if gate_host is None and host == "rpc.ankr.com":
+        gate_host, rpc_methods = _ankr_adv(url, rpc_methods, cost)
     g = gate(gate_host or host)
     last = None
     hard = sem_timeout is not None
@@ -1854,7 +2072,7 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             _stat(host, "calls")
             with _open(req, to9) as r:
                 g.observe(getattr(r, "headers", None))
-                raw = r.read(rdu9 + 1) if rdb9 else r.read()
+                raw = r.read((min(rdu9, HTTP_MAX_BYTES) if rdb9 else HTTP_MAX_BYTES) + 1)
             if rdb9:
                 rpc_day_settle(rd9, len(raw), rdu9, rdd9)
                 rds9 = True
@@ -1862,6 +2080,10 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
                     e9 = NetError(f"payload: {host} 응답이 하루 장부 예약 상한 {rdu9:,}바이트를 넘음 — 받은 만큼 셈 · 구간·배치를 줄여 다시", "range", host=host)
                     e9.results = True
                     raise e9
+            if len(raw) > HTTP_MAX_BYTES:
+                e9 = NetError(f"payload: {host} response size over {HTTP_MAX_BYTES:,} bytes — 구간·배치를 줄여 다시", "range", host=host)
+                e9.results = True
+                raise e9
             try:
                 d = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError) as e:
@@ -1874,10 +2096,12 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             bb9 = None
             if rdb9 and rdd9 is not None and not rds9 and isinstance(e, urllib.error.HTTPError):
                 try:
-                    bb9 = e.read(rdu9 + 1) or b""
+                    bb9 = e.read(min(rdu9, HTTP_ERR_MAX_BYTES) + 1) or b""
                 except Exception:
                     bb9 = None
-                if bb9 is not None:
+                if bb9 is not None and len(bb9) > HTTP_ERR_MAX_BYTES:
+                    bb9 = bb9[:HTTP_ERR_MAX_BYTES]
+                elif bb9 is not None:
                     rpc_day_settle(rd9, len(bb9), rdu9, rdd9)
             err = classify_exc(e, host, body_bytes=bb9)
             if isinstance(e, urllib.error.HTTPError):
@@ -1924,13 +2148,15 @@ def _rpc_cfg_ensure():
             _CONFIGURED[0] = True
 
 
-def rpc_post(url: str, body, *, timeout: float = 25.0, ua: str = None, retries: int = 1, prio: str = "fg", deadline: float = None):
+def rpc_post(url: str, body, *, timeout: float = 25.0, ua: str = None, retries: int = 1, prio: str = "fg", deadline: float = None,
+             burst: bool = None):
     items = body if isinstance(body, list) else [body]
     methods = [str(it.get("method") or "") for it in items if isinstance(it, dict)]
     _rpc_cfg_ensure()
     try:
-        return http_json(url, data=json.dumps(body).encode(), timeout=timeout, retries=retries, prio=prio, deadline=deadline,
-                         ua=ua or UA, cost=max(1, len(items)), rpc_methods=methods or None, breaker_5xx=False)
+        with ledger_burst(burst_on() if burst is None else bool(burst)):
+            return http_json(url, data=json.dumps(body).encode(), timeout=timeout, retries=retries, prio=prio, deadline=deadline,
+                             ua=ua or UA, cost=max(1, len(items)), rpc_methods=methods or None, breaker_5xx=False)
     except NetError as e:
         raise RpcTransportError(e) from e
 
@@ -2002,8 +2228,15 @@ def _rpc_batch_once(url, calls, timeout, retries, prio, deadline, host) -> list:
     body = json.dumps([{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
                        for i, (m, p) in enumerate(calls)]).encode()
     for i9 in range(RATE_RETRIES + 1):
-        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, cost=len(calls),
-                      rpc_methods=[m for m, _p in calls])
+        try:
+            d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, cost=len(calls),
+                          rpc_methods=[m for m, _p in calls])
+        except NetError as err9:
+            if err9.kind != "range" or not getattr(err9, "results", False) or len(calls) < 2:
+                raise
+            mid9 = len(calls) // 2
+            return (_rpc_batch_once(url, calls[:mid9], timeout, retries, prio, deadline, host)
+                    + _rpc_batch_once(url, calls[mid9:], timeout, retries, prio, deadline, host))
         if isinstance(d, dict) and d.get("error"):
             err = classify_rpc_error(d["error"])
             err.host = host
@@ -2350,7 +2583,7 @@ class LogScanner:
                  caps: dict = None, fallback: dict = None, sleep: float = 0.0, timeout: float = 25.0,
                  per_ep_workers: int = 1, prio: str = "fg", log=None, name: str = "logs",
                  canary: dict = None, recent_blocks: int = 200_000, positions: dict = None,
-                 head_guard: bool = True, head_refresh_sec: float = 15.0, soft: dict = None):
+                 head_guard: bool = True, head_refresh_sec: float = 15.0, soft: dict = None, burst: bool = None):
         self.positions = dict(positions) if positions else {1: topic0, 2: topic0}
         self.canary = canary
         self.recent_blocks = int(recent_blocks)
@@ -2371,6 +2604,7 @@ class LogScanner:
         self.timeout = float(timeout)
         self.per_ep_workers = max(1, int(per_ep_workers))
         self.prio = prio
+        self.burst = burst
         self.log = log
         self.name = name
         self.metrics = {"calls": 0, "range_split": 0, "halved": 0, "pruned": 0, "errors": 0, "head_calls": 0, "lag_clip": 0}
@@ -2442,13 +2676,25 @@ class LogScanner:
             return None
         return min(int(self.retention_hint[u]) for u in eps)
 
+    def _burst_for(self, to: int) -> bool:
+        if self.burst is not None:
+            return bool(self.burst)
+        hs = [h for h in (self.ep_head or {}).values() if isinstance(h, int)]
+        with _EP_HEADS_LOCK:
+            hs += [g[0] for u, g in _EP_HEADS.items() if (u in self.eps or u in self.fallback) and g and isinstance(g[0], int)]
+        return bool(hs) and int(to) < max(hs) - RPC_NEAR_HEAD
+
+    def _chunk_burst(self, url, chunk) -> bool:
+        return self._burst_for(min(int(chunk[1]), int(chunk[0]) + self._cap(url) - 1))
+
     def _query(self, url, frm, to, pos):
         tp = [self.positions.get(pos, self.topic0), None, None] + [None] * max(0, pos - 2)
         tp[pos] = self.pads
         while tp and tp[-1] is None:
             tp.pop()
-        res = rpc_call(url, "eth_getLogs", [{"fromBlock": hex(frm), "toBlock": hex(to), "topics": tp}],
-                       timeout=self.timeout, retries=1, prio=self.prio, allow_null=True)
+        with ledger_burst(self._burst_for(to)):
+            res = rpc_call(url, "eth_getLogs", [{"fromBlock": hex(frm), "toBlock": hex(to), "topics": tp}],
+                           timeout=self.timeout, retries=1, prio=self.prio, allow_null=True)
         if not isinstance(res, list):
             raise NetError(f"getLogs 비정상 result: {type(res).__name__}", "null",
                            host=urllib.parse.urlsplit(url).hostname)
@@ -2508,8 +2754,12 @@ class LogScanner:
                                            for h, (r, w) in self.canary_view.items()),
                                  "" if anyok else " — 통과 노드 없음(판정 불가 노드로 계속)")
 
+        normal_off = set()
+
         def usable(url, chunk):
             if url in untrusted and chunk[0] <= old_below:
+                return False
+            if url in normal_off and not self._chunk_burst(url, chunk):
                 return False
             lh = self.lag_head.get(url)
             if lh is not None and chunk[0] > lh[0] and time.time() - lh[1] < max(1.0, self.head_refresh_sec):
@@ -2556,7 +2806,9 @@ class LogScanner:
                             break
                         if pending and not inflight and all(
                                 not usable(u, pending[0]) for u in all_eps):
-                            if any(u in self.lag_head and pending[0][0] > self.lag_head[u][0] for u in all_eps):
+                            if normal_off and any(u in normal_off for u in all_eps) and not self._burst_for(pending[0][1]):
+                                st["stop"] = f"구간 {pending[0][0]}-{pending[0][1]}: 노드 키 오늘 평소 몫 다 씀 — 다음 사이클(공개 노드가 되면 그쪽으로)"
+                            elif any(u in self.lag_head and pending[0][0] > self.lag_head[u][0] for u in all_eps):
                                 st["stop"] = (f"구간 {pending[0][0]}-{pending[0][1]}: 로그 노드 헤드 미도달"
                                               f"(최고 {max(v[0] for v in self.lag_head.values())}) — 다음 사이클")
                             else:
@@ -2673,6 +2925,9 @@ class LogScanner:
                         elif err.kind == "pruned":
                             self.pruned_below[url] = max(self.pruned_below.get(url, -1), b)
                             self.metrics["pruned"] += 1
+                            requeue([[a, b]])
+                        elif err.kind == "quota" and getattr(err, "normal_only", False):
+                            normal_off.add(url)
                             requeue([[a, b]])
                         else:
                             requeue([[a, b]])

@@ -3,6 +3,78 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-10 — 옛 보유 토큰 찾기 · Alchemy 키
+
+**옛 보유 토큰 찾기 · 발견 시점 기초 잔고 · Alchemy 키 칸 · 노드 키 버스트 · EVM 체인 표 · 선물 코인 정산 달러 · 외부 응답 크기 상한 ·
+Base 과거 기록 넓히기 · 바이빗 선물 수수료·펀딩 · 빌린 코인 원가 · 빗썸 지난 체결 시각**
+
+수집 기간(기본 5개월)보다 먼저부터 들고만 있던 토큰을 빠뜨리지 않게 한 판이에요 — 지갑을 등록할 때 체인마다 무료·키 출처를 합쳐 '그 지갑이 주고받은 모든 토큰'을 찾고,
+그래도 놓친 토큰은 나갈 때 그 직전 블록 잔고로 바로잡아요. 지난 판의 알려진 한계 2가지(코인 정산 선물 달러 환산 · 외부 응답 크기 상한)도 고쳤어요(응답 크기 상한은 공통 RPC·탐색기 요청 경로까지 — 아래 알려진 한계).
+사진은 설정 › 연결·키(탐색기 키) 한 장만 새로 찍었어요(Alchemy 칸) — 대시보드 LP 카드 위치는 여전히 사진과 달라요.
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`). 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 —
+> 단 아래 1회 도구를 `--apply` 로 적용했다면 되돌릴 때 적용 전 백업으로).
+> EVM 지갑이 있으면 **Alchemy 무료 키**를 넣어 주세요(설정 › 연결·키 — 저장하면 바로 쓰고 재시작 없음). 없어도 돌지만 옛 보유 토큰 찾기가 약해지고 설정·상태 패널에 경고가 떠요.
+> 이미 등록한 지갑은 잔고 대조가 한 번에 20쌍(지갑, 체인)씩 천천히 첫 발견을 돌려요(지갑이 많으면 하루쯤). 한 번에 점검하려면 README [옛 보유 토큰 찾기 · 체인 표](README.md#옛-보유-토큰-찾기--체인-표).
+
+- **옛 보유 토큰 찾기** — 지갑을 등록할 때(기초 잔고 대조) 체인마다 되는 출처를 합쳐(이더스캔·루트스캔·블록스카웃·Alchemy·Ankr·Rabby 포트폴리오·RPC 로그 훑기 + 원장의 정품 토큰)
+  그 지갑이 한 번이라도 주고받은 토큰을 모두 찾고, 같은 블록 잔고로 기초 잔고를 맞춰요 · 스팸 의심 토큰은 넣지 않아요 · 키 쓰는 API 는 처음 1번 + 그 지갑에 새 거래·잔고 변화가 보일 때만
+  (안 쓰는 지갑은 0콜) · 잔고 대조가 원장 밖 보유도 돌아가며 확인(상태 패널 한 줄 · 알림 없음) · [수집 한계](docs/COLLECTION_LIMITS.md)에 체인별 '옛 보유 토큰 찾기' 줄
+  (Base·BNB Chain·X Layer 는 키가 없으면 '옛 보유 확인 불가') · 체인별 출처표 = `seed/coverage/token_sources.json` · 끄기 = `config.json` 의 `"token_discovery": {"enabled": false}` ·
+  이미 등록한 지갑 전수 점검 = 1회 도구 `tools/token_recheck_1010.py`(미리보기 전용).
+- **발견 시점 기초 잔고** — 그래도 놓친 옛 보유 토큰을 내보내 원장 수량이 마이너스가 되면, 그 거래 직전 블록의 실제 잔고(무료 RPC 2콜)로 확인된 만큼 '발견 시점 기초 잔고'
+  (원가 미상 · 발견 시각 시세로 추정)를 자동으로 적어요 — 지난날 곡선은 그대로 · 사칭·혼용 심볼·숨긴 토큰은 건너뛰고, 내가 서명하지 않은 유출은 남이 실행한 교환·LP 의 네이티브·정품 토큰만 ·
+  확인이 안 되면 마이너스 그대로 두고 다시 시도(점점 길게 · 최대 6시간 간격) · 끄기 = `"negabs_enabled": false`(또는 `TJ_NEGABS=0`) ·
+  업데이트 전에 이미 생긴 마이너스 칸·전수 점검 결과는 1회 도구 `tools/negabs_1010.py`(미리보기 → `--apply`).
+- **Alchemy 키 칸** — 설정 › 연결·키에 Alchemy(EVM 지갑이 있으면 '필수' 표시 · 경고만 — 막지 않음) · 지갑 토큰·잔고 찾기 전용(`alchemy_getTokenBalances` — 감시·백필은 무료 노드) ·
+  공식 CU 표로 세는 하루 장부(월 무료 한도의 80% ÷ 31 · 초당도 80% 아래) · 연결 테스트 = Ethereum·Base 최신 블록 1번씩 · 저장 즉시 사용(재시작 없음) · 노드 키 칸마다 '오늘 쓴 양' ·
+  Ankr 토큰 찾기(Advanced API)는 같은 장부(요청당 700 크레딧)·따로 속도 한도로 · [API 키 받는 법](docs/API_KEYS.md)에 Alchemy·Ankr 절.
+- **노드 키 버스트** — 무료 노드 키(Alchemy·Ankr·NodeReal)는 백필·첫 전수처럼 밀린 일을 따라잡을 때 하루 몫을 3배까지 당겨 써요(최근 31일 합은 늘 월 한도의 80% 안 · 앞으로의 감시 몫은 남김 ·
+  유료 키는 버스트 없음) · 칸에 '버스트 중' · 사용 기록이 없는 지난날은 평소 몫을 썼다고 보수적으로 세서 업데이트 뒤 한 달쯤은 버스트가 드물어요 —
+  새로 받은 키라면 그 칸의 **새로 받은 키(지난 사용 없음)** 를 켜면 바로(자동으로 켜지지 않음 · 키를 다른 값으로 바꿔 저장하면 꺼짐).
+- **EVM 체인 표** — Alchemy 가 지원하는 EVM 메인넷 73개 체인 표(`seed/coverage/evm_chains.json` — 체인 id·Alchemy 네트워크·토큰 API 지원·'무료 경로 있음 / Alchemy 필요'·잔고 찾기·백필 보조·감시 예비 경로) ·
+  미추적 체인 점검 목록 +18 · 표에 있다고 추적하지 않아요(추적은 종전처럼 활동이 보이면 자동 켜기).
+- **선물 — 코인 정산 달러** — 코인으로 정산된 선물 손익(BNB 수수료·코인 마진)의 달러를 정산 시각 시세로 매겨요(받아 둔 1분봉 → 그날 마감가 → 둘 다 없으면 지금 시세 + '추정' 건수 표시 · 외부 호출 없음) —
+  지난 선물 손익·영수증·명세 선물 행이 시세 따라 움직이던 것 · 원장은 종전처럼 코인 수량.
+- **바이빗 선물 수수료·펀딩** — 거래 내역(transaction-log)으로 수수료·펀딩은 낸 시각에, 실현 손익은 청산 체결 시각에 따로 기장해요(받기 시작한 뒤부터 · 그 전 기록과 조회 권한 없는 키는 종전처럼 청산 시각에 합쳐서 · 합은 같음).
+- **빌린 코인 원가** — 거래소 대출로 빌려 출금한 코인(거래소 보유가 출금으로 0 밑으로 갔다 나중에 같은 거래소 유입으로 채워진 몫)의 원가 = 빌린 시각 시가, 채울 때 차이 = 실현 ·
+  `config.json` 의 `loan_short` 에 대출 기록으로 확인된 기간을 적었을 때만(비우면 종전 = 원가 미확인 · 6시간 안에 채워진 몫·업비트·빗썸·Hyperliquid 는 제외 · 최초 인식 시가가 켜져 있을 때 — 기본) ·
+  명세 '대출 상환' 행 · 화면 계산만(원장 무변).
+- **Base 과거 기록 넓히기** — 늦게 시작한 지갑 묶음이 앞선 묶음을 따라잡으면 한 묶음으로 합쳐 같은 구간을 두 번 훑지 않아요 · 지갑이 많은 묶음도 한 번에 훑는 구간이 늘어나요
+  (지갑 수만큼 드는 잔고·nonce 확인 시간은 구간 판정에서 뺌 — Base 처럼 지갑 많은 체인이 몇 배 빨라짐) · 진행률·남은 시간을 실제로 훑을 블록 기준으로.
+- **빗썸 지난 체결 시각** — 예전 판이 '주문 생성 시각'으로 적은 빗썸 지정가 체결을 '마지막 체결 시각'으로 바로잡는 1회 도구 `tools/bithumb_filltime_1010.py`
+  (미리보기 → `--fetch`(빗썸 주문 단건 조회 · 초당 4) → `--apply` · 수량·금액·종목은 그대로, 날짜 배치만) · 재구축이 해외 체결 원본의 최신 개정을 써요(바로잡은 시각이 재구축 뒤에도 유지).
+- **외부 응답 크기 상한** — 공통 요청 경로(EVM·BSC 수집·백필·토큰 찾기의 RPC·탐색기 호출)의 응답 본문을 정상 32MiB · 오류 64KiB 까지만 읽어요(넘으면 그 요청만 실패 — RPC 배치는 반으로 나눠 다시 · 로그 훑기는 그 구간을 반으로).
+
+**함께**
+
+- **문서** — README 처음 표·키 표에 Alchemy · [옛 보유 토큰 찾기 · 체인 표](README.md#옛-보유-토큰-찾기--체인-표) 절 · 1회 도구 3개·`loan_short`·`token_discovery`·`negabs_enabled` ·
+  `.env.example` 에 `TJ_ALCHEMY_KEY` · [API_KEYS.md](docs/API_KEYS.md) Alchemy·Ankr·버스트 · [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) '옛 보유 토큰 찾기' 줄·바이빗 선물 수수료·펀딩.
+- **시험** — 공개 시험 추가: 토큰 발견·잔고 대조 · 발견 시점 기초 잔고(재구축·멱등 포함)·화면 문구 · Alchemy 키·노드 장부·버스트 · EVM 체인 표 · 코인 정산 선물 달러 · 응답 크기 상한 ·
+  Base 묶음 합치기 · 바이빗 거래 내역 · 빌린 코인 원가 · 빗썸 체결 시각 — 전체 3,200건 넘게(파일 90개).
+
+**English** — Tokens held since before the collection window (5 months by default) are no longer missed. When a wallet is registered, per-chain sources are merged
+(Etherscan, Routescan, Blockscout, Alchemy, Ankr, the Rabby portfolio, RPC log scans and genuine tokens already in the ledger) to find every token the wallet ever touched,
+and opening balances are set from same-block balances (suspected spam is skipped). Keyed APIs are called once per (wallet, chain) and again only when free signals show
+activity; Base, BNB Chain and X Layer need a free Alchemy/Ankr key for this (`seed/coverage/token_sources.json`; off with `"token_discovery": {"enabled": false}`).
+If a missed token is later sent out and the ledger goes negative, the balance one block earlier is read (free RPC) and a "found-at-discovery opening balance" (cost unknown,
+valued at the price then) is booked (`"negabs_enabled": false` turns it off). New **Alchemy key** field (shown as required with an EVM wallet; warning only), metered per day
+with the official CU table under 80% of the free plan, no restart needed; Ankr's Advanced API is metered on the same ledger. Free node keys may **burst** up to 3x the daily share
+while catching up (rolling 31-day total under 80%; a "new key (no past use)" switch lets a fresh key burst right away). `seed/coverage/evm_chains.json` lists the 73 Alchemy-supported
+EVM mainnets with free vs Alchemy-only paths (+18 chains in the untracked-chain sweep). Coin-settled futures PnL is now valued at the settlement-time price (cached 1-minute candle →
+day close → current price marked "estimated"), and response bodies on the shared RPC/explorer request path are capped (32 MiB, errors 64 KiB; some direct lookups are not yet — see known limits). Base-style chains with many wallets backfill
+old history several times faster (merged tail lanes). Bybit futures fees and funding are booked when paid (transaction log). `loan_short` in `config.json` (confirmed exchange-loan
+periods only) gives borrowed-and-withdrawn coins a cost at the borrow-time price. One-time tools: `tools/token_recheck_1010.py` (preview-only scan of existing wallets),
+`tools/negabs_1010.py` (preview, then `--apply`) and `tools/bithumb_filltime_1010.py` (re-time old Bithumb limit fills to the last fill). No rebuild and no data revision.
+Only the Settings › keys (explorer keys) screenshot was retaken (Alchemy row); the dashboard LP card position still differs.
+
+**알려진 한계(다음 판에)**
+
+- 옛 보유 토큰 찾기에서 판정(DEX 조회)이 잠깐 실패해 '일시 보류'된 토큰 중 시세를 아직 모르는 것은 잔고 대조에서 빠져요 — 그런 토큰을 들고만 있으면 빠진 것을 알려 주지 않을 수 있어요.
+- BNB Chain 지갑별 기초 잔고 대조에서 '일시 보류'된 토큰도 확인한 것으로 남아, 그 토큰의 옛 거래가 늦게 들어오면 기초 잔고로 상쇄될 수 있어요(드묾).
+- 남이 실행한 교환으로 나간, 정품 목록 밖 일반 토큰은 화면에서 정품 등록을 할 수 없어 발견 시점 기초 잔고를 다시 시도(`tools/negabs_1010.py --apply --retry`)해도 건너뛰어요 — 다음 판에 도구에서 등록하는 길을 더해요.
+- 응답 크기 상한은 공통 요청 경로에만 걸려 있어요 — 공통 경로를 거치지 않는 직접 조회(솔라나 수집·대사, 시세·OKX 토큰 가격, Rabby, 업비트, 입금 주소, 브릿지·자금 흐름 추적, LP 목록, 세일 매칭, 거래 출처)는 아직 본문 끝까지 읽어요(이상하게 큰 응답 하나가 그 프로세스 메모리를 쓸 수 있음 — 다음 판에 같은 상한으로).
+
 ## 2026-10-09 밤 — 외부 수정 검증 반영
 
 **원장 손상 대기·버전 표시 · 복구 도구 · 최초 인식 시가 안전장치 · 수수료·브릿지 규약 · 재생 순서 · 선물·청산 감시 · 곡선 마감가 · 새 LP 바로 평가 · 웹 느린 연결 방어 · 화면 ·
@@ -98,10 +170,10 @@ withdrawal fees on first connect, request timestamps synced to exchange server t
 stablecoin balances and one failing wallet no longer blocks the rest; the dashboard LP table became a card under leverage/loans. Collector-side fixes apply to newly fetched
 transactions. Screenshots unchanged (the LP card position differs from them).
 
-**알려진 한계(다음 판에)**
+**알려진 한계(→ 2026-10-10 판에서 고침)**
 
-- 코인으로 정산된 선물 손익(바이낸스 BNB 수수료·OKX 코인 마진 등)의 화면 달러 환산은 지금 시세 기준이라, 지난 정산 금액이 시세에 따라 조금씩 움직여 보여요 — 원장은 코인 수량 그대로라 실현손익·명세 숫자와는 무관 · 다음 판에 정산 시각 시세로.
-- 외부 RPC·탐색기 응답 본문에 크기 상한이 없어요(비정상적으로 큰 응답 방어 — 다음 판에).
+- ~~코인으로 정산된 선물 손익(바이낸스 BNB 수수료·OKX 코인 마진 등)의 화면 달러 환산이 지금 시세 기준~~ — **2026-10-10 판에서 고침**(정산 시각 시세로 · [2026-10-10](#2026-10-10--옛-보유-토큰-찾기--alchemy-키)).
+- ~~외부 RPC·탐색기 응답 본문에 크기 상한이 없음~~ — **2026-10-10 판에서 공통 요청 경로를 고침**(정상 32MiB · 오류 64KiB · 직접 조회 몇 곳은 다음 판 — 2026-10-10 알려진 한계).
 
 ## 2026-10-09 오후 — 외부 전면검토 반영
 

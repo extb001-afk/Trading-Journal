@@ -490,12 +490,37 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
     for T9, oid9, ch9, aid9, loc9 in synth:
         order.append((T9, ("opening", ch9, oid9, _next_seq(ch9, oid9), T9, aid9, loc9, "0", None, None, "opening", "OPENING",
                            core_mod_ver(core)), True))
+    import discopen as _dsc
+    dobs = _dsc.disc_obs(conn)
+    have_d = {str(a[2]) for a in anchors if _dsc.is_disc(a[2])}
+    for sid9, v9 in sorted(dobs.items()):
+        if sid9 not in have_d:
+            order.append((v9["T"], ("opening", v9["chain"], sid9, 0, v9["at"], v9["aid"], v9["loc"], "0", None, None, "opening", "OPENING",
+                                    core_mod_ver(core)), False))
     order.sort(key=lambda x: x[0])
     seen_leg = set()
     for T, a, is_new in order:
         sk, ns, sid, seq, ets, aid, loc, qb = a[0], a[1], a[2], a[3], a[4], a[5], a[6], int(a[7])
         dec = sh_idx.meta_dec.get(aid, 18)
         q_live = _qty_norm(qb, dec)
+        if sid in dobs and dobs[sid]["aid"] == aid and dobs[sid]["loc"] == loc:
+            v9 = dobs[sid]
+            base9 = _dsc.base_at(conn, loc, aid, v9["blk"], v9["T"], sid)
+            new_qb = qb if base9 is None else v9["bal"] - base9
+            rows.append({"ns": ns, "sid": sid, "asset": f"{sh_idx.sym_of.get(aid, '')}#{aid}", "tgt_asset": aid, "loc": loc, "T": T, "disc": True,
+                         "diff_live": str(q_live), "diff_new": str(_qty_norm(new_qb, dec)), "delta": str(_qty_norm(new_qb, dec) - q_live)})
+            if new_qb == 0:
+                zeroed += 1
+                continue
+            if new_qb != qb:
+                changed += 1
+            cur9 = conn.execute("INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
+                                " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('opening',?,?,?,?,?,?,?,NULL,NULL,'opening','OPENING',?)",
+                                (ns, sid, seq, v9["at"] if new_qb > 0 else v9["T"], aid, loc, str(new_qb), a[12]))
+            if cur9.rowcount:
+                core._bump_position(aid, new_qb, loc)
+                sh_idx.add_sorted(aid, loc, T, True, _qty_norm(new_qb, dec), sym=sh_idx.sym_of.get(aid, ""))
+            continue
         if ns in ("upbit:recon_comp", "upbit:recon"):
             dropped_comp += 1
             continue
@@ -1335,6 +1360,11 @@ def obs_replay_gate(live_db: str, shadow_db: str, spot_path: str, tol_usd: float
             **cnt}
 
 
+def exf_trade_rows(conn):
+    return conn.execute("SELECT exchange, payload FROM raw_ex WHERE kind='trade' AND exchange != 'upbit'"
+                        " GROUP BY exchange, uuid HAVING revision = MAX(revision) ORDER BY observed_at, exchange, uuid").fetchall()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shadow-dir", default=os.path.join(os.path.expanduser("~"), "tj_shadow_rebuild"),
@@ -1509,8 +1539,7 @@ def main():
     conn.commit()
     print(f"[4a] 업비트 입금 canonical 기장 {dep_n}건 (링크 매칭 {m}건) / [4b] 출금 기장 {wd_n}건")
     nf = 0
-    for t in conn.execute("SELECT exchange, payload FROM raw_ex WHERE kind='trade'"
-                          " AND exchange != 'upbit' ORDER BY observed_at, exchange, uuid, revision").fetchall():
+    for t in exf_trade_rows(conn):
         try:
             if c._post_exf_fill(t["exchange"], json.loads(t["payload"])):
                 nf += 1

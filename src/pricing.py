@@ -811,6 +811,73 @@ class PxCache:
         self.maybe_save()
         return fx
 
+    FX_WARM_SPAN = 200
+    FX_WARM_MAX_CALLS = 40
+    FX_WARM_GAP = 0.15
+    FX_WARM_BUDGET = 30.0
+    FX_NEG_SEC = 60
+
+    def fx_warm(self, ts_ms_list, max_calls: int = None) -> int:
+        from datetime import datetime, timezone
+        mins = sorted({(int(t) // 60_000) * 60_000 for t in (ts_ms_list or ()) if int(t) > FX_USDT_FIRST_MS + 86_400_000})
+        with self.lock:
+            mins = [m for m in mins if str(m) not in self.d["fx"]]
+            neg = self.d["neg_ts"].get("_fx", 0)
+        if not mins or time.time() - neg < self.FX_NEG_SEC:
+            return 0
+        groups = []
+        for m in mins:
+            if groups and m - groups[-1][0] < (self.FX_WARM_SPAN - 1) * 60_000:
+                groups[-1].append(m)
+            else:
+                groups.append([m])
+        cap = self.FX_WARM_MAX_CALLS if max_calls is None else int(max_calls)
+        t_end = time.time() + self.FX_WARM_BUDGET
+        n, failed = 0, False
+        for i, g in enumerate(groups[:max(0, cap)]):
+            if time.time() >= t_end:
+                break
+            if i:
+                time.sleep(self.FX_WARM_GAP)
+            to_s = datetime.fromtimestamp(g[-1] / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            try:
+                arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WARM_SPAN}")
+            except Exception:
+                arr = None
+            if not isinstance(arr, list):
+                with self.lock:
+                    self.d["neg_ts"]["_fx"] = int(time.time())
+                    self._dirty += 1
+                failed = True
+                break
+            cs = []
+            for c in arr:
+                try:
+                    ts = datetime.strptime(c["candle_date_time_utc"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000
+                    op = float(c["opening_price"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if _fin(op):
+                    cs.append((ts, op))
+            cs.sort()
+            put, j, best = {}, 0, None
+            for m in g:
+                while j < len(cs) and cs[j][0] <= m:
+                    best = cs[j][1]
+                    j += 1
+                if best is not None:
+                    put[str(m)] = best
+            if put:
+                with self.lock:
+                    for k, v in put.items():
+                        if k not in self.d["fx"]:
+                            self.d["fx"][k] = v
+                            n += 1
+                    self._dirty += len(put)
+        if n or failed:
+            self.maybe_save()
+        return n
+
 
 class PxFetchQueue:
 

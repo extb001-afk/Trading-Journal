@@ -213,7 +213,7 @@ def _unreadable_rules(rel: str):
     if m:
         return [r"exbal:stale", r"debt:margin"], set()
     table = {
-        "onchain_check.json": [r"balcheck:(?:mismatch|stale)"],
+        "onchain_check.json": [r"balcheck:(?:mismatch|stale|disc)"],
         "exf_state.json": [r"sync:ex:(?!upbit$).+"],
         "exf_active.json": [r"sync:ex:(?!upbit$).+"],
         "upbit_balances.json": [r"sync:ex:upbit", r"upbit:pending"],
@@ -1279,7 +1279,8 @@ def collect_balcheck():
     return {"checkedAt": d.get("checkedAt"), "confirmed": len(conf), "watch": len(mm) - len(conf) - len(fixed),
             "resolving": len(fixed),
             "errors": len(d.get("errors") or []), "top": top, "items": items,
-            "unchecked": d.get("unchecked"), "capped": bool(d.get("capped")), "pairs": d.get("pairs")}
+            "unchecked": d.get("unchecked"), "capped": bool(d.get("capped")), "pairs": d.get("pairs"),
+            "disc": d.get("disc") if isinstance(d.get("disc"), dict) else None}
 
 
 BAL_READY_SEC = 86400
@@ -2035,7 +2036,8 @@ ACTIONS = {
 def collect_keys(cfg: dict, now: float = None) -> dict:
     try:
         import settings_store
-        return {"evm": settings_store.needs_etherscan(cfg or {}), "etherscan": bool(settings_store.env_value("TJ_ETHERSCAN_KEY"))}
+        return {"evm": settings_store.needs_etherscan(cfg or {}), "etherscan": bool(settings_store.env_value("TJ_ETHERSCAN_KEY")),
+                "alchemyNeed": settings_store.needs_alchemy(cfg or {}), "alchemy": bool(settings_store.env_value("TJ_ALCHEMY_KEY"))}
     except Exception:
         return {}
 
@@ -2400,6 +2402,14 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "저장됨" if have else ("EVM 지갑이 있는데 이더스캔 키가 없어요 — 지금은 공개 탐색기·RPC 로만 받아 느리거나, 막힌 체인(Arbitrum·Polygon 등)은 "
                                   "늦게 기록될 수 있어요(기록이 사라지지는 않아요)"),
             "etherscan.io/myapikey 에서 무료 키를 받아 설정 › 연결 · 키 › Etherscan 에 넣으세요",
+            persist=0, resolve=60, notify=False, remind=False, kind="key")
+    if kk.get("alchemyNeed") and "alchemy" in kk and ("tj-evm" in units or "tj-bsc" in units):
+        have = bool(kk.get("alchemy"))
+        add("key:alchemy", "tj-evm" if "tj-evm" in units else "tj-bsc", "Alchemy 키" if have else "Alchemy 키가 필요해요(무료)", "ok" if have else "warn",
+            "저장됨 — 지갑 토큰·잔고 찾기에 써요(감시·옛 기록은 무료 노드)" if have else
+            ("EVM 지갑이 있는데 Alchemy 키가 없어요 — 지갑이 주고받은 토큰 전부와 지금 잔고를 한 번에 찾지 못해, 옛 보유 토큰 찾기가 약해져요"
+             "(탐색기 한 곳만 — 그 탐색기가 막힌 체인은 오래 들고만 있던 토큰을 놓칠 수 있어요). 거래 수집·감시는 그대로 돌아요"),
+            "dashboard.alchemy.com/signup 에서 무료 키를 받아 설정 › 연결 · 키 › Alchemy 에 넣으세요(재시작 없이 바로 써요)",
             persist=0, resolve=60, notify=False, remind=False, kind="key")
     bf_units = {"evm": "tj-evm", "bsc": "tj-bsc", "sol": "tj-sol", "exf": "tj-exf", "ex": "tj-ex"}
     for bu, items in (obs.get("bf") or {}).items():
@@ -2982,6 +2992,17 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             add("balcheck:stale", "tj-web", "잔고 대조 멈춤" if lvl != "ok" else "잔고 대조 주기", lvl,
                 f"마지막 대조 {fmt_ago(now - float(bc['checkedAt']))} 전", "pm2 logs tj-web 에서 '온체인 잔고 대조' 확인",
                 persist=0, kind="balcheck")
+        ds9 = bc.get("disc")
+        if isinstance(ds9, dict):
+            fp9, no9 = int(ds9.get("failPairs") or 0), list(ds9.get("noOld") or [])
+            lvl9 = "warn" if fp9 else "ok"
+            det9 = (f"찾은 쌍 {int(ds9.get('done') or 0)}/{int(ds9.get('pairs') or 0)}"
+                    + (f" · 발견 실패 {fp9}쌍(" + ", ".join(f"{k} {v}" for k, v in sorted((ds9.get('failBy') or {}).items())) + ")" if fp9 else "")
+                    + (f" · 스팸 의심으로 기초 잔고에 안 넣은 토큰 {int(ds9.get('skip') or 0)}" if ds9.get("skip") else "")
+                    + (" · 이 체인은 옛 보유 확인 불가: " + ", ".join(no9) if no9 else ""))
+            add("balcheck:disc", "tj-web", f"토큰 발견 실패 {fp9}쌍" if fp9 else "토큰 발견", lvl9, det9,
+                "발견 실패는 다음 대조(1시간)에 다시 · 한도면 다음 날(UTC) · '옛 보유 확인 불가' 체인은 설정 › 노드 키에 Alchemy·Ankr 무료 키를 넣으면 풀려요",
+                persist=0, notify=False, remind=False, kind="balcheck")
     cs = obs.get("chainsweep")
     if cs is not None:
         import chainsweep as _cs9

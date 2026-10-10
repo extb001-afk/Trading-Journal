@@ -159,6 +159,8 @@
   },
   "price_overrides": {},
   "price_overrides_note": "수동 가격 고정용 비상 스위치. 'chain:CA소문자': USD고정가(0=평가불가). 평시엔 CA·체인 DEX 실가가 1차 소스라 불필요. 수정 후 tj-web 재시작",
+  "loan_short": [],
+  "loan_short_note": "거래소 대출로 빌려 출금했던 기간 [{exchange, asset('*'=전부), from, to(YYYY-MM-DD)}] — 그 안에서 거래소 보유가 출금으로 0 밑으로 갔다 같은 거래소 유입으로 채워진 몫 = 빌린 코인(원가 = 빌린 시각 시가 · 갚을 때 차이 = 실현). 비우면 꺼짐. 수정 후 pm2 restart tj-web",
   "backfill_months": 5,
   "other_assets": {
     "quotes": true,

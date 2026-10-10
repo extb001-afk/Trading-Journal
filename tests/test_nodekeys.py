@@ -70,9 +70,9 @@ check("K2 받은 주소 = 질의·조각 떼고 호스트 소문자", NK._qn_url
       == "https://fake-one.bsc.quiknode.pro/tok12345/", NK._qn_url("https://Fake-One.BSC.quiknode.pro/tok12345/?a=1#f", "bsc"))
 
 pl0 = NK.plans({})
-check("K3a 기본 = NodeReal·Ankr 무료 · QuickNode 유료 10% · 월 한도 없음",
+check("K3a 기본 = NodeReal·Ankr·Alchemy 무료 · QuickNode 유료 10% · 월 한도 없음",
       pl0 == {"nodereal": {"plan": "free", "share": 10, "month": None}, "ankr": {"plan": "free", "share": 10, "month": None},
-              "quicknode": {"plan": "paid", "share": 10, "month": None}}, pl0)
+              "quicknode": {"plan": "paid", "share": 10, "month": None}, "alchemy": {"plan": "free", "share": 10, "month": None}}, pl0)
 pl1 = NK.plans({"node_plans": {"nodereal": {"plan": "paid", "share": 25, "month": 500_000_000},
                                "ankr": {"plan": "paid", "share": 7, "month": True},
                                "quicknode": {"plan": "free", "share": 50, "month": 1000}}})
@@ -135,8 +135,9 @@ check("K6g Base 상한 = 기존 유지 + Ankr 3천 · QuickNode 1만",
 check("K6h Base 상태(archive) = 키 노드는 뒤 예비(공개 상태 풀 먼저)", cb["archive_rpcs"][-2:] == [u for _, u in us["base"]]
       and len(cb["archive_rpcs"]) > 2, cb["archive_rpcs"])
 lim = cfg["rpc_day_limits"]
-check("K6i 하루 장부 표 = 서비스 셋 다(무료 80% · QuickNode 유료 10%)",
-      set(lim) == {"node_nodereal", "node_ankr", "node_quicknode"} and lim["node_nodereal"]["pct"] == 80.0 and lim["node_quicknode"]["pct"] == 10.0, lim)
+check("K6i 하루 장부 표 = 서비스 넷 다(무료 80% · QuickNode 유료 10% · Alchemy 는 노드 풀 밖이어도 장부는 있음)",
+      set(lim) == {"node_nodereal", "node_ankr", "node_quicknode", "node_alchemy"} and lim["node_nodereal"]["pct"] == 80.0 and lim["node_quicknode"]["pct"] == 10.0
+      and lim["node_alchemy"]["pct"] == 80.0, lim)
 snap1 = json.dumps(cfg, sort_keys=True)
 NK.apply(cfg, env=ENV, settings={})
 check("K6j 두 번 붙여도 같음(중복 주소 없음)", json.dumps(cfg, sort_keys=True) == snap1)

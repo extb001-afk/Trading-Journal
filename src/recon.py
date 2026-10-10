@@ -350,7 +350,7 @@ def _bs_token_list(base_url: str, w: str) -> dict:
 def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, discover_url: str = None,
                            must: dict = None, exclude=(), want_native: bool = True, want_tokens: bool = True,
                            multicall: str = MULTICALL3, wallet_cas: dict = None, block: int = None, strict=None,
-                           sweep: dict = None, sleep=time.sleep) -> dict:
+                           sweep: dict = None, wallet_extra: dict = None, sleep=time.sleep) -> dict:
     urls = [u for u in (rpc_urls or []) if u]
     if not urls:
         raise RuntimeError("RPC 엔드포인트 없음 — 대사 보류")
@@ -360,6 +360,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
     cas = {str(ca).lower(): m for ca, m in (token_cas or {}).items() if str(ca).lower() not in excl}
     sw = {str(ca).lower(): s for ca, s in (sweep or {}).items() if str(ca).lower() not in excl}
     spec = {}
+    wx = {str(w).lower(): {str(c).lower() for c in (s or ())} - excl for w, s in (wallet_extra or {}).items()}
+    xonly = {}
 
     def is_strict(w, ca):
         if ca in must.get(str(w).lower(), ()):
@@ -418,8 +420,11 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 continue
             base_w = cas if wallet_cas is None else {str(x).lower() for x in (wallet_cas.get(str(w).lower()) or ())}
             cw = {ca for ca in base_w if ca not in excl} | {ca for ca in (bs.get(w) or {}) if ca not in excl}
-            spec[w] = set(sw) - cw - must.get(str(w).lower(), set())
-            cw |= set(sw)
+            ex9 = wx.get(str(w).lower()) or set()
+            spec[w] = (set(sw) | ex9) - cw - must.get(str(w).lower(), set())
+            if ex9 - cw - set(sw) - must.get(str(w).lower(), set()):
+                xonly[w] = sorted(ex9 - cw - set(sw) - must.get(str(w).lower(), set()))
+            cw |= set(sw) | ex9
             pairs += [(w, ca) for ca in sorted(cw)]
             queried[w] = sorted(cw)
         items = [(("bal", w, ca), ca, _SEL_BAL + str(w).lower().replace("0x", "").rjust(64, "0")) for w, ca in pairs]
@@ -455,5 +460,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 meta[ca] = (tuple(cas[ca]) if cas[ca][1] is not None else (cas[ca][0], dec)) if ca in cas else ((b9[0] if b9 else sw.get(ca)), dec)
     for w in hold:
         per.pop(w, None)
-    return {"per_wallet": per, "_meta": meta, "_source": "rpc", "_block": bn, "_block_ts": bts, "_bs_diff": diff, "_unobs": unobs,
+    out9 = {"per_wallet": per, "_meta": meta, "_source": "rpc", "_block": bn, "_block_ts": bts, "_bs_diff": diff, "_unobs": unobs,
             "_hold": hold, "_queried": queried, "_multicall": bool(multicall)}
+    if xonly:
+        out9["_extra_only"] = xonly
+    return out9

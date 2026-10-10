@@ -202,19 +202,85 @@ def fut_ev_usd(r9, price_fn):
     a9 = str((r9 or {}).get("asset") or "").strip().upper()
     if not a9 or a9 in STABLE_GROUPS or a9 in ("USD", "FDUSD", "TUSD", "USDP") or _ex_stable_sym(a9):
         return r9
+    est9 = False
     try:
         px9 = price_fn(a9) if price_fn else None
+        if isinstance(px9, tuple):
+            px9, est9 = px9
         q9 = float(r9.get("amount") or 0)
+        px9 = float(px9) if px9 is not None else None
     except (TypeError, ValueError):
         return None
-    if not px9 or px9 <= 0 or q9 != q9:
+    if not px9 or px9 <= 0 or px9 != px9 or q9 != q9:
         return None
-    return dict(r9, amount=q9 * float(px9), amt_native=q9)
+    out9 = dict(r9, amount=q9 * px9, amt_native=q9)
+    if est9:
+        out9["px_est"] = True
+    return out9
+
+
+FUT_PX_NEAR_S = 86400
+FUT_PX_FAR_S = 7 * 86400
+
+
+def _fut_candle_past(fxb, sym, t_ms, within_s):
+    if fxb is None or not fxb.candle(sym, int(t_ms) // 1000):
+        return None
+    ks, pts = fxb._csym[str(sym or "").upper()]
+    m = (int(t_ms) // 60_000) * 60_000
+    if m in pts:
+        return pts[m]
+    j = bisect.bisect_right(ks, m) - 1
+    return pts[ks[j]] if j >= 0 and m - ks[j] <= int(within_s) * 1000 else None
+
+
+def _fut_fxb(px, spot):
+    fx9, c9 = _px_tables(px)
+    return acct_norm.FxBook(fx9, os.path.join(common.STATE_DIR, "px_cache_core.json"), getattr(spot, "rate", None) or None, web_candle=c9)
+
+
+def fut_px_at(fxb, spot_fn, now=None):
+    memo9 = {}
+    now = time.time() if now is None else now
+
+    def f9(sym, t_ms):
+        s9 = str(sym or "").strip().upper()
+        try:
+            t9 = int(t_ms or 0)
+        except (TypeError, ValueError):
+            t9 = 0
+        k9 = (s9, t9 // 60_000)
+        if k9 in memo9:
+            return memo9[k9]
+        p9 = None
+        if t9 > 0:
+            p9 = _fut_candle_past(fxb, s9, t9, FUT_PX_NEAR_S)
+            if not p9 and DAYCLOSE_ON:
+                try:
+                    p9 = histcurve.DAYCLOSE.lookup("sym:" + histcurve.base_sym(s9), acct_norm.iso_day(t9 // 1000), now, 0.0, ask=False)[0]
+                except Exception:
+                    p9 = None
+            if not p9:
+                p9 = _fut_candle_past(fxb, s9, t9, FUT_PX_FAR_S)
+        r9 = None
+        try:
+            if p9 and float(p9) > 0:
+                r9 = (float(p9), False)
+            else:
+                sp9 = spot_fn(s9) if spot_fn else None
+                r9 = (float(sp9), True) if sp9 and float(sp9) > 0 else (None, False)
+        except (TypeError, ValueError):
+            r9 = (None, False)
+        memo9[k9] = r9
+        return r9
+    return f9
 
 
 def futures_api_payload():
     out9 = {}
-    sp9 = getattr(BUILDER, "spot", None) if "BUILDER" in globals() else None
+    b9 = BUILDER if "BUILDER" in globals() else None
+    sp9 = getattr(b9, "spot", None)
+    pxf9 = None
     try:
         on9 = perp_active() or {}
     except Exception:
@@ -228,7 +294,9 @@ def futures_api_payload():
         except SystemExit:
             continue
         if ex9 not in on9 and isinstance(d9, dict) and isinstance(d9.get("events"), list) and any(isinstance(r9, dict) and r9.get("asset") for r9 in d9["events"]):
-            evs9 = [fut_ev_usd(r9, sp9.price if sp9 is not None else None) if isinstance(r9, dict) else r9 for r9 in d9["events"]]
+            if pxf9 is None:
+                pxf9 = fut_px_at(_fut_fxb(getattr(b9, "px", None), sp9), sp9.price if sp9 is not None else None)
+            evs9 = [fut_ev_usd(r9, lambda a9, r9=r9: pxf9(a9, r9.get("t"))) if isinstance(r9, dict) else r9 for r9 in d9["events"]]
             d9 = dict(d9, events=[r9 for r9 in evs9 if r9 is not None])
         out9[ex9] = perp_filter(d9, on9[ex9], None, ex9) if ex9 in on9 else d9
     return out9
@@ -887,6 +955,8 @@ def snapshot_refresher():
 
 
 PREFS_PATH = os.path.join(common.STATE_DIR, "ui_prefs.json")
+DISC_OPEN_KO = "발견 시점 기초 잔고 — 원가 미상, 발견 시각 시세로 추정"
+DISC_OPEN_KO_UNK = "발견 시점 기초 잔고 · 등록 대사가 놓친 옛 보유분(원가 미상 — 발견 시각 시세로 추정)"
 PREFS_LOCK = threading.Lock()
 _OPS_RL = __import__("collections").deque()
 _OPS_RL_LOCK = threading.Lock()
@@ -1744,6 +1814,53 @@ def _bridge_plan(deps, arrs, links=None, amb=None) -> dict:
             used.add(a["pid"])
             out[a["pid"]] = d["pid"]
     return out
+
+
+LOAN_MIN_S = 6 * 3600
+LOAN_SKIP_EX = ("upbit", "bithumb", "hyperliquid")
+
+
+def _loan_windows(cfg_v) -> dict:
+    out = {}
+    for w9 in (cfg_v if isinstance(cfg_v, list) else ()):
+        if not isinstance(w9, dict):
+            continue
+        ex9, as9 = str(w9.get("exchange") or "").strip().lower(), str(w9.get("asset") or "").strip().upper()
+        f9, t9 = bf_engine.parse_date_ts(w9.get("from")), bf_engine.parse_date_ts(w9.get("to"))
+        if not ex9 or not as9 or f9 is None or t9 is None:
+            continue
+        if not isinstance(w9.get("to"), (int, float)):
+            t9 += 86400 - 1
+        if t9 >= f9:
+            out.setdefault((ex9, as9), []).append((int(f9), int(t9)))
+    return out
+
+
+def _loan_plan(items, min_s=LOAN_MIN_S, allow=None):
+    from collections import deque
+    qty, shorts, wd, fill = {}, {}, {}, {}
+    for pid, key, kind, ts, q in items:
+        pre = qty.get(key, Decimal(0))
+        post = pre + q
+        qty[key] = post
+        if q < 0:
+            dig = max(Decimal(0), -post) - max(Decimal(0), -pre)
+            if dig > EPS:
+                shorts.setdefault(key, deque()).append([pid if kind == "wd" else None, dig, ts])
+        elif q > 0 and pre < -EPS:
+            f = min(q, -pre)
+            dq = shorts.get(key)
+            while f > EPS and dq:
+                s = dq[0]
+                take = min(f, s[1])
+                if kind == "in" and s[0] is not None and ts - s[2] >= min_s and (allow is None or allow(key, s[2], ts)):
+                    wd[s[0]] = wd.get(s[0], Decimal(0)) + take
+                    fill.setdefault(pid, []).append((s[0], take))
+                s[1] -= take
+                f -= take
+                if s[1] <= EPS:
+                    dq.popleft()
+    return wd, fill
 
 
 OFFC_EXCHANGES = ("binance", "bybit", "okx", "kucoin", "gate", "bithumb")
@@ -5505,7 +5622,7 @@ class StateBuilder:
                 a9["usd"] += usd9
                 a9["br"] = a9.get("br", Decimal(0)) + usd9
 
-        def fee_gain(g9, unit9, mk9, mc9, ts9, dkey9, chain9, mck9=None, mix9=None, stl9=None, cmp9=None, fs9=None):
+        def fee_gain(g9, unit9, mk9, mc9, ts9, dkey9, chain9, mck9=None, mix9=None, stl9=None, cmp9=None, fs9=None, lab9=None, fsm9=True):
             if unit9 is None or mk9 <= EPS or unit9 <= 0 or g9.get("is_fiat"):
                 return Decimal(0)
             gain9 = unit9 * mk9 - mc9
@@ -5519,12 +5636,14 @@ class StateBuilder:
             realized_by_date[dkey9] = realized_by_date.get(dkey9, 0) + float(gain9)
             realized_krw_by_date[dkey9] = realized_krw_by_date.get(dkey9, 0) + float(gain9) * rt9
             d9 = unit9 * mk9
-            t9 = {"sold": dkey9, "sym": g9["sym"], "ticker": g9["sym"], "ex": "수수료로 쓴 코인(처분)",
+            t9 = {"sold": dkey9, "sym": g9["sym"], "ticker": g9["sym"], "ex": lab9 or "수수료로 쓴 코인(처분)",
                   "qty": _f(mk9, 4), "acq": _f(mc9, 2), "disp": _f(d9, 2), "fee": 0, "rate": round(rt9, 4), "rateSrc": rs9,
                   "_acq": float(mc9), "_disp": float(d9), "_qty": float(mk9)}
             if rs9 not in ("spot", "default"):
                 tax_krw_acq(t9, g9, fl9, mc9, mck9, rt9, dkey9, mix9=mix9)
-            if fs9 is not None:
+            if not fsm9:
+                pass
+            elif fs9 is not None:
                 sv9 = fs_last[0]
                 fs_last[0] = fs9
                 fs_mark(g9, fl9, t9, cmp9, mk9, d9, mc9, rt9, dkey9)
@@ -5535,6 +5654,43 @@ class StateBuilder:
                 stable_fx_mark(t9, mc9, False, stl9=stl9, cck9=mck9, mix9=mix9, use9="수수료")
             tax_rows.append(t9)
             return gain9
+
+        def loan_settle():
+            for g9, lf9, ts9, dk9, ch9, tx9, loc9, _k9, row9 in lf_pend:
+                qp9 = sum((t9 for w9, t9 in lf9 if w9 in loan_px), Decimal(0))
+                if qp9 <= EPS:
+                    continue
+                unit9 = sum((loan_px[w9] * t9 for w9, t9 in lf9 if w9 in loan_px), Decimal(0)) / qp9
+                fk9 = min(qp9, g9["qty_known"])
+                mc9 = (g9["cost"] / g9["qty_known"]) * fk9 if g9["qty_known"] > EPS else Decimal(0)
+                mck9 = consume_krw(g9, mc9)
+                mix9, stl9 = krw_mix[0], krw_stl[0]
+                oa_take(g9, fk9)
+                cmp9 = cp_emit(cp_take(g9, fk9, mc9), qp9 - fk9, qp9, mc9)
+                g9["qty_known"] -= fk9
+                g9["cost"] -= mc9
+                g9["qty_unknown"] = max(Decimal(0), g9["qty_unknown"] - (qp9 - fk9))
+                ex9 = loc9.split(":")[1] if loc9.count(":") >= 1 else loc9
+                n0 = len(tax_rows)
+                gain9 = fee_gain(g9, unit9, fk9, mc9, ts9, dk9, ch9, mck9, mix9=mix9, stl9=stl9, cmp9=cmp9,
+                                 lab9=f"{fx_name.get(ex9, ex9)} 대출 상환(빌린 코인 · 빌린 시각 시가로 정산)", fsm9=False)
+                fl9 = g9["cur"] or flow_of(g9, ts9, ch9)
+                if len(tax_rows) > n0:
+                    t9 = tax_rows[-1]
+                    t9["ex"] = str(t9.get("ex") or "") + FS_EX
+                    fs_sum["rows"] += 1
+                    fs_sales.append((fl9, t9, 1.0, float(mc9), float(t9.get("rate") or 0), dk9))
+                cr9, cs9 = cur_row[0], cur_src[0]
+                cur_row[0], cur_src[0] = row9, "ex:" + ex9
+                ev(fl9, ts9, "전송", f"{fx_name.get(ex9, ex9)} 대출 상환 · 빌린 {_qfmt(qp9)} {g9['sym']} 갚음 — 빌린 시각 시가 ${float(unit9):,.6g} 로 정산"
+                   f"(추정 · 실현 ${float(gain9):,.2f})", _qfmt(qp9), "—", tx9)
+                cur_row[0], cur_src[0] = cr9, cs9
+                fs_sum["loan"]["settled"] += 1
+                fs_sum["loan"]["v0"] += float(unit9 * qp9)
+                fs_sum["loan"]["gain"] += float(gain9)
+                if g9["qty_known"] + g9["qty_unknown"] <= Decimal("0.000001"):
+                    g9["cur"] = None
+            lf_pend.clear()
 
         cur_src = [None]
         cur_row = [None]
@@ -6802,6 +6958,39 @@ class StateBuilder:
                 except Exception as e9:
                     log.debug("외부 전송 분류 표식 실패: %s", e9)
 
+        loan_wd, loan_fill, loan_fsum, loan_px, lf_pend, loan_unp = {}, {}, {}, {}, [], {}
+        loan_win = _loan_windows(self.cfg.get("loan_short"))
+        if fs_on and loan_win:
+            try:
+                it9, lsym9 = [], {}
+                for r in rows:
+                    l9 = r["location"] or ""
+                    if not l9.startswith("exchange:") or l9.split(":")[1] in LOAN_SKIP_EX:
+                        continue
+                    s9 = (l9.split(":")[1], (r["symbol"] or "").upper())
+                    if s9 not in loan_win and (s9[0], "*") not in loan_win:
+                        continue
+                    if (r["gname"] or "") in STABLE_GROUPS or (r["kind"] == "exchange_currency" and (
+                            _ex_stable_sym(r["symbol"]) or (r["symbol"] or "").upper() == "KRW")):
+                        continue
+                    lk9, ev9 = r["leg_kind"], r["event"]
+                    k9 = ("wd" if lk9 == "move_out" and ev9 in ("EXF_WITHDRAW", "EX_WITHDRAW")
+                          and not (ev9 == "EXF_WITHDRAW" and offc_self_wd(l9.split(":")[1], r["source_id"]))
+                          else "in" if lk9 in ("move_in", "acq") else "x")
+                    kk9 = (r["group_id"] or -r["asset_id"], l9)
+                    lsym9.setdefault(kk9, s9)
+                    it9.append((r["posting_id"], kk9, k9, int(r["event_ts"]), self._norm(r)))
+
+                def _lw_ok(kk9, t_wd9, t_fill9):
+                    s9 = lsym9.get(kk9)
+                    return bool(s9) and any(f9 <= t_wd9 and t_fill9 <= e9 for f9, e9 in (loan_win.get(s9, []) + loan_win.get((s9[0], "*"), [])))
+                loan_wd, loan_fill = _loan_plan(it9, allow=_lw_ok)
+                loan_fsum = {p9: sum((x9[1] for x9 in v9), Decimal(0)) for p9, v9 in loan_fill.items()}
+            except Exception as e9:
+                log.warning("거래소 대출(공매도) 원가 계획 실패(이번 빌드 종전): %s", common.safe_err(e9)[:160])
+                loan_wd, loan_fill, loan_fsum = {}, {}, {}
+        fs_sum["loan"] = {"wd": len(loan_wd), "fill": len(loan_fill), "q": float(sum(loan_wd.values(), Decimal(0))), "priced": 0, "settled": 0,
+                          "v0": 0.0, "gain": 0.0}
         win_cut = {}
         qn_all9 = []
         for r in rows:
@@ -6814,6 +7003,8 @@ class StateBuilder:
             st_w = win_cut.get(r["group_id"] or -r["asset_id"])
             if st_w is None:
                 st_w = win_cut[r["group_id"] or -r["asset_id"]] = [Decimal(0), Decimal(0), None]
+            if loan_wd and (r["posting_id"] in loan_wd or r["posting_id"] in loan_fsum):
+                q_w = q_w + loan_wd.get(r["posting_id"], Decimal(0)) - loan_fsum.get(r["posting_id"], Decimal(0))
             st_w[0] += q_w
             if st_w[0] < st_w[1]:
                 st_w[1] = st_w[0]
@@ -6918,6 +7109,8 @@ class StateBuilder:
             br_plan, br_amb, br_sum = {}, {}, {}
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
         for r in rows:
+            if lf_pend and (r["source_ns"], r["source_id"]) != lf_pend[-1][7]:
+                loan_settle()
             n9i += 1
             if not (n9i & 4095) and g0_9 is not None and self._inval_now() != g0_9:
                 raise _BuildObsolete("replay")
@@ -6972,6 +7165,8 @@ class StateBuilder:
             cost = Decimal(r["cost_usd"]) if r["cost_usd"] is not None else swap_fill.get(r["posting_id"])
             dkey = acct_norm.iso_day(ts)
             txh = r["source_id"]
+            if loan_fill and r["posting_id"] in loan_fill:
+                lf_pend.append((g, loan_fill[r["posting_id"]], ts, dkey, chain, txh, loc9, (r["source_ns"], txh), r))
 
             if r["kind"] in ("native", "exchange_currency"):
                 g["risk_allow"] = True
@@ -7573,6 +7768,17 @@ class StateBuilder:
                         d2 = (f"{fx_name.get(ex9w, ex9w)} 토큰 전환 출금 ({g['sym']} → {sw9['g']['sym']} · 원가 이동)" if sw9
                               else f"{fx_name.get(ex9w, ex9w)} 출금 → {dst9} (원가 이동)" if t4
                               else f"{fx_name.get(ex9w, ex9w)} 출금 (txid 없음 · 원가 소실)")
+                        lb9 = loan_wd.get(r["posting_id"]) if loan_wd else None
+                        if lb9:
+                            g["qty_unknown"] += lb9
+                            k09, c09 = g["qty_known"], g["cost"]
+                            note_unk(g, ts, f"{fx_name.get(ex9w, ex9w)} 대출로 빌린 코인(출금 · 그 시각 시가 추정)", lb9, t4 or "", ex9=ex9w, chain9=chain, unc9=lb9)
+                            if g["qty_known"] - k09 > EPS:
+                                loan_px[r["posting_id"]] = (g["cost"] - c09) / (g["qty_known"] - k09)
+                                fs_sum["loan"]["priced"] += 1
+                            else:
+                                loan_unp[g["gid"]] = loan_unp.get(g["gid"], [Decimal(0), int(ts)])
+                                loan_unp[g["gid"]][0] += lb9
                         mc4, mk4, mu4 = consume(g, -q)
                         cp_o4 = cp_last[0]
                         kr4 = krw_took(mc4, ts)
@@ -7786,7 +7992,8 @@ class StateBuilder:
                 continue
 
             if lk == "opening":
-                back_o = q < 0 and (r["source_ns"] or "") != "upbit:recon_comp"
+                disc9 = ":disc:" in str(r["source_id"] or "")
+                back_o = q < 0 and (r["source_ns"] or "") != "upbit:recon_comp" and not disc9
                 xk9 = exf_kind(r)
                 late9 = evk == "EXF_ADJUST" and str(r["source_id"] or "").startswith("exflate:")
                 if xk9 == "fix" or late9:
@@ -7814,6 +8021,8 @@ class StateBuilder:
                             note_unk(g, ts, "거래소 잔고 정정 유입(원가 없음)", q, "", chain9=chain)
                         elif ":stake:" in (r["location"] or ""):
                             note_unk(g, ts, "솔라나 스테이킹 기초 잔고 · 수집 시작 이전 위임분(원가 없음)", q, "", chain9=chain)
+                        elif disc9:
+                            note_unk(g, ts, (f"{CHAIN_NAME.get(chain, chain)} " if chain and chain != "?" else "") + DISC_OPEN_KO_UNK, q, "", chain9=chain)
                         else:
                             note_unk(g, ts, (f"{CHAIN_NAME.get(chain, chain)} " if chain and chain != "?" else "") + "기초 잔고 · 수집 시작 이전 보유분(원가 없음)", q, "", chain9=chain)
                     if late9:
@@ -7826,7 +8035,8 @@ class StateBuilder:
                         extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {lab9}",
                                  _recon_q(q), "—", txh, vq=q)
                     else:
-                        extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · 기초 잔고 (백필 창 이전 보유분)",
+                        extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · "
+                                 + (DISC_OPEN_KO if disc9 else "기초 잔고 (백필 창 이전 보유분)"),
                                  _recon_q(q), "—", txh, vq=q)
                 else:
                     consume(g, -q, cp=False)
@@ -8457,6 +8667,16 @@ class StateBuilder:
                     g["cur"] = None
                 continue
 
+        if lf_pend:
+            loan_settle()
+        for gid_u9, (q_u9, ts_u9) in loan_unp.items():
+            g_u9 = G.get(gid_u9)
+            if g_u9 is None:
+                continue
+            c_u9, k_u9, _x9 = consume(g_u9, q_u9)
+            if k_u9 > EPS:
+                o_u9 = g_u9.get("unv_lost") or (Decimal(0), Decimal(0), ts_u9)
+                g_u9["unv_lost"] = (o_u9[0] + k_u9, o_u9[1] + c_u9, min(int(o_u9[2] or ts_u9), ts_u9))
         cur_row[0] = None
         for fl9, tx9, sh9, c9, rt9, dk9 in fs_sales:
             est9 = (float(tx9.get("_disp", tx9.get("disp")) or 0) - float(tx9.get("_fee", tx9.get("fee")) or 0)) * sh9 - c9
@@ -15338,6 +15558,7 @@ class StateBuilder:
             perp_on = {}
             log.warning("퍼프 덱스 설정 읽기 실패(합류 생략): %s", e9)
         venues = {}
+        pxf9, est_n9 = None, 0
         for ex9 in FUT_CEX + tuple(k9 for k9 in PERP_KEYS if k9 in perp_on):
             try:
                 d9 = common.read_json(
@@ -15379,9 +15600,12 @@ class StateBuilder:
                 if a9 is None or (tt9 and not (FUT_T_MIN_MS <= tt9 <= t_hi9)):
                     continue
                 if r9.get("asset"):
-                    r9 = fut_ev_usd(r9, self.spot.price)
+                    if pxf9 is None:
+                        pxf9 = fut_px_at(fxb if fxb is not None else _fut_fxb(getattr(self, "px", None), self.spot), self.spot.price)
+                    r9 = fut_ev_usd(r9, lambda a9, t9=r9.get("t"): pxf9(a9, t9))
                     if r9 is None:
                         continue
+                    est_n9 += 1 if r9.get("px_est") else 0
                 ev.append(dict(r9, ex=ex9))
         exn = dict({"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}, **PERP_NAMES)
         notional = _fut_notional_sum(poss)
@@ -15494,7 +15718,8 @@ class StateBuilder:
             "realizedByDateEx": _fut_by_date_ex(by_date_ex, exn),
             "realizedRows": rows[:60],
             "realizedRowsTotal": len(rows), "realizedSummary": realized_summary,
-            "realizedTotal": round(sum(r9["pnl"] for r9 in rows), 2)}
+            "realizedTotal": round(sum(r9["pnl"] for r9 in rows), 2),
+            "coinEst": est_n9}
 
     @staticmethod
     def _impostor_reason(g, has_ca: bool, pairs=None, native: bool = False, priced: bool = True, liquid=False):

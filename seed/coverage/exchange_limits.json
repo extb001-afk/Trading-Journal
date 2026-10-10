@@ -263,8 +263,8 @@
    },
    "transaction_log": {
     "endpoint": "GET /v5/account/transaction-log (창 ≤7일)",
-    "bot_uses": false,
-    "bot_ref": "",
+    "bot_uses": true,
+    "bot_ref": "ex_foreign.py:_bb_tlog_pass(선물 수수료·펀딩·실현 — category linear · 전환 뒤만)",
     "doc_limit": "최근 2년(doc)",
     "doc_url": "https://bybit-exchange.github.io/docs/v5/account/transaction-log",
     "rejected_before": "2024-09-28",

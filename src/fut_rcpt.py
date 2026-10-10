@@ -159,6 +159,32 @@ def rows_bybit_exec(items):
     return out
 
 
+def rows_bybit_tlog(items, cp=()):
+    lev = {}
+    for c in cp or ():
+        if isinstance(c, dict) and c.get("orderId") and num(c.get("leverage")) is not None:
+            lev[str(c.get("orderId"))] = num(c.get("leverage"))
+    out = []
+    for x in items or ():
+        if not isinstance(x, dict) or str(x.get("type") or "") not in ("TRADE", "LIQUIDATION", "ADL") or str(x.get("category") or "linear") != "linear":
+            continue
+        pnl, xp, q = num(x.get("cashFlow")), pnum(x.get("tradePrice")), pnum(x.get("qty"))
+        sd = {"Sell": "LONG", "Buy": "SHORT"}.get(x.get("side"))
+        if not pnl or not xp or not q or not sd or not x.get("id"):
+            continue
+        sz = num(x.get("size"))
+        if sz is not None:
+            before = sz + (q if sd == "LONG" else -q)
+            if (before > 0) == (sd == "LONG") and abs(before) > 0:
+                q = min(q, abs(before))
+        r = _row(f"bbt:{x.get('id')}:p", x.get("symbol"), x.get("transactionTime"), "close", sd, xp, qty_base=q, pnl=pnl,
+                 entry_px=_derive_entry(sd, xp, pnl, q), entry_src="derived", lev=lev.get(str(x.get("orderId") or "")),
+                 oid=safe(x.get("orderId"), 80) or None, liq=True if str(x.get("type")) == "LIQUIDATION" else None, pm="hedge")
+        if r and r.get("entry_px"):
+            out.append(r)
+    return out
+
+
 def rows_okx(bills):
     out = []
     for b in bills or ():
@@ -913,4 +939,5 @@ def assemble(iso, fev, px, exn, byex_fn, now_ms, stale=(), accts=None):
             "other": {k: (round(v) if k == "krw" else round(v, 6)) for k, v in other.items()},
             "unpriced": [{"exKey": ex, "ex": exn.get(ex, ex), "n": sum(u.values()), "reason": max(u.items(), key=lambda kv: kv[1])[0]}
                          for ex, u in sorted(unp.items())],
-            "stale": sorted(set(stale) & {r.get("ex") for _d, _t, _a, _k, r in day})}
+            "stale": sorted(set(stale) & {r.get("ex") for _d, _t, _a, _k, r in day}),
+            "coinEst": sum(1 for _d, _t, _a, _k, r in day if isinstance(r, dict) and r.get("px_est"))}

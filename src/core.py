@@ -19,11 +19,13 @@ import pricing
 import acct_norm
 import spamguard
 import recon
+import token_discovery
 import lpdec
 import lpsol
 import bf_engine
 import ledger_backup
 import ops_requests
+import discopen
 from inbox import SegmentReader
 
 log = common.setup_logging("tj-core")
@@ -2616,7 +2618,11 @@ class Core:
                 if r["address"]:
                     cas[r["address"]] = (r["symbol"], r["decimals"] if r["decimals"] is not None else self._meta_dec("bsc", r["address"]))
             rpcs8 = list(self.cfg["bsc"]["detail_rpcs"])
-            return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
+            prep8 = self._disc_prep("bsc", "bsc", wallets, self._recon_strict_fn("bsc"))
+            if prep8 is None:
+                return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
+            own8 = self._disc_own_cas("bsc", wallets)
+            return lambda: token_discovery.bsc_fetch(rpcs8, wallets, cas, own8, prep8)
         cc9 = self.cfg["chains"][chain]
         rpc_only9 = common.chain_discovery(chain, cc9) == "rpc"
         bsoff9 = common.bs_blocked(chain, cc9)
@@ -2666,9 +2672,34 @@ class Core:
         sweep9 = None
         if bsoff9 and not nat9:
             sweep9 = {str(k).lower(): str(v) for tab9 in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS) for k, v in (tab9.get(chain) or {}).items()}
-        return lambda: recon.fetch_evm_rpc_balances(rpcs9, wallets, cas, discover_url=None if nat9 else base9, must=must,
-                                                    exclude=excl, want_native=mode != "tok", want_tokens=not nat9,
-                                                    multicall=mc9, wallet_cas=wcas, block=blk9, strict=strict9, sweep=sweep9)
+        prep9 = None if nat9 else self._disc_prep(chain, "evm", wallets, strict9)
+
+        def _go9(prep9=prep9):
+            ext9 = token_discovery.recon_extra_safe(prep9, upto=blk9)
+            bal9 = recon.fetch_evm_rpc_balances(rpcs9, wallets, cas, discover_url=None if nat9 else base9, must=must,
+                                                exclude=excl, want_native=mode != "tok", want_tokens=not nat9,
+                                                multicall=mc9, wallet_cas=wcas, block=blk9, strict=strict9, sweep=sweep9,
+                                                **({"wallet_extra": ext9["extra"]} if ext9.get("extra") else {}))
+            return token_discovery.filter_result(bal9, prep9, ext9)
+        return _go9
+
+    def _disc_prep(self, chain: str, kind: str, wallets: list, strict):
+        if (self.cfg.get("token_discovery") or {}).get("enabled") is False:
+            return None
+        try:
+            return token_discovery.recon_prep(self.conn, self.cfg, chain, list(wallets), strict, kind=kind)
+        except Exception as e:
+            log.warning("recon %s 토큰 발견 재료 실패(종전 목록으로): %s", chain, common.safe_err(e)[:120])
+            return None
+
+    def _disc_own_cas(self, chain: str, wallets: list) -> dict:
+        own = {str(w).lower(): set() for w in wallets}
+        for r in self.conn.execute("SELECT DISTINCT p.location, a.address FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
+                                   " WHERE a.chain=? AND a.kind='token' AND p.location LIKE ?", (chain, f"wallet:{chain}:%")).fetchall():
+            parts = str(r[0] or "").split(":")
+            if len(parts) == 3 and parts[2].lower() in own and r[1]:
+                own[parts[2].lower()].add(str(r[1]).lower())
+        return own
 
     @staticmethod
     def _recon_src(bal: dict, wallets=None) -> dict:
@@ -2940,6 +2971,12 @@ class Core:
             log.info("%s 잔고 = RPC 블록 %s (블록스카웃과 다른 칸 %d · 관측 불가로 뺀 칸 %d)", label, b9.get("_block"), nd, nu)
             for w9, ca9, bv9, rv9 in (b9.get("_bs_diff") or [])[:20]:
                 log.info("  %s %s 블록스카웃 %s → RPC %s", str(w9)[:10], str(ca9)[:10], bv9, rv9)
+        if isinstance(b9.get("_disc"), dict):
+            nk = sum(len(v) for v in (b9.get("_disc_keep") or {}).values())
+            ns = sum(len(v) for v in (b9.get("_disc_skip") or {}).values())
+            nf = len((b9["_disc"].get("fail") or {}))
+            if nk or ns or nf:
+                log.info("%s 토큰 발견: 원장 밖 보유 %d칸(기초 잔고로) · 스팸 의심 제외 %d칸 · 발견 일부 실패 %d지갑", label, nk, ns, nf)
         return job["bal"]
 
     def _wallet_backfilled(self, chain: str, kind: str, w: str) -> bool:
@@ -3115,6 +3152,35 @@ class Core:
             self.conn.commit()
             log.warning("★활동 게이트 합류 %d쌍: %s★", len(added), ", ".join(added[:12]))
         return len(added)
+
+    def _negabs_on(self) -> bool:
+        return self.cfg.get("negabs_enabled", True) is not False and os.environ.get("TJ_NEGABS") != "0"
+
+    def _negabs_runner(self):
+        r = self.__dict__.get("_negabs")
+        if r is None:
+            r = self._negabs = discopen.Runner(self, log)
+        return r
+
+    def _negabs_note(self, chain: str, txhash: str) -> int:
+        if not self._negabs_on():
+            return 0
+        try:
+            return self._negabs_runner().note(chain, txhash)
+        except Exception as e:
+            log.warning("발견 시점 기초 잔고 후보 기록 실패(무시 — 도구로 다시 찾음) %s: %s", txhash[:14], common.safe_err(str(e))[:160])
+            return 0
+
+    def negabs_pass(self, drained=frozenset()) -> int:
+        if not self._negabs_on():
+            return 0
+        return self._negabs_runner().run(drained)
+
+    def _disc_max_t(self, chain: str) -> int:
+        cache = self.__dict__.setdefault("_disc_t_cache", {})
+        if chain not in cache:
+            cache[chain] = discopen.max_t(self.conn, chain)
+        return cache[chain]
 
     def recon_pass(self, drained: set):
         jobs = self.__dict__.setdefault("_recon_jobs", {})
@@ -5999,6 +6065,119 @@ class Core:
                  json.dumps(why_n, ensure_ascii=False) if why_n else "")
         return {"ok": n_ok, "moved": n_moved, "skip": n_skip, "why": why_n}
 
+    EXF_RETIME_EX = ("bithumb",)
+
+    def _consume_exf_retime(self, rec: dict):
+        ex = str(rec.get("exchange") or "")
+        if ex not in self.EXF_RETIME_EX:
+            log.warning("체결 시각 바로잡기: 받지 않는 거래소 %r — 레코드 무시", ex[:20])
+            return {"ok": 0, "undo": 0, "skip": 0, "why": {}}
+        ns = f"{ex}:trade"
+        now = int(time.time())
+        items = [it for it in (rec.get("fills") or []) if isinstance(it, dict)]
+        n_ok = n_undo = n_skip = 0
+        t_min = None
+        why_n = {}
+
+        def legs(fid9):
+            return self.conn.execute(
+                "SELECT leg_seq, asset_id, location, qty_base, leg_kind, event, event_ts, cost_usd FROM postings"
+                " WHERE source_kind='exchange' AND source_ns=? AND source_id=?", (ns, fid9)).fetchall()
+
+        def shape(rows):
+            return sorted((int(r["leg_seq"]), int(r["asset_id"]), str(r["location"]), str(int(r["qty_base"])), str(r["leg_kind"]), str(r["event"]))
+                          for r in rows)
+
+        def skip(fid9, why, quiet=False):
+            nonlocal n_skip
+            n_skip += 1
+            why_n[why] = why_n.get(why, 0) + 1
+            if not quiet:
+                log.warning("%s 체결 시각 바로잡기 건너뜀 %s: %s", ex, fid9[:24], why)
+        try:
+            ms9 = [int(it.get("ts") or 0) for it in items]
+            if hasattr(self.px, "fx_warm") and any(m > 0 for m in ms9):
+                self.px.fx_warm([m for m in ms9 if m > 0])
+        except Exception as e:
+            log.warning("체결 시각 바로잡기: 환율 미리 받기 실패(체결마다 따로 받음): %s", common.safe_err(e)[:120])
+        for it in items:
+            fid = str(it.get("id") or "")
+            try:
+                t_old, t_new = int(it.get("ts_old")), int(it.get("ts"))
+            except (TypeError, ValueError):
+                skip(fid, "형식")
+                continue
+            row = self.conn.execute("SELECT revision, payload, observed_at FROM raw_ex WHERE exchange=? AND kind='trade' AND uuid=?"
+                                    " ORDER BY revision DESC LIMIT 1", (ex, fid)).fetchone() if fid.startswith(ex + ":") else None
+            try:
+                old = json.loads(row["payload"]) if row else None
+            except (TypeError, ValueError):
+                old = None
+            if not isinstance(old, dict):
+                skip(fid, "원본 없음")
+                continue
+            if isinstance(old.get("_tj_retime"), dict):
+                skip(fid, "이미 바로잡음", quiet=True)
+                continue
+            if old.get("late") or old.get("src"):
+                skip(fid, "늦은 체결·전환 표식")
+                continue
+            try:
+                cur_ts = int(old.get("ts") or 0)
+            except (TypeError, ValueError):
+                cur_ts = 0
+            if cur_ts != t_old:
+                skip(fid, "원본 시각이 요청과 다름")
+                continue
+            if t_new <= t_old or t_new > (now + 300) * 1000:
+                skip(fid, "새 시각 이상(옛 시각 이하·미래)")
+                continue
+            merged = dict(old, ts=t_new)
+            merged["_tj_retime"] = {"old": t_old, "at": int(rec.get("ts") or now), "src": str(rec.get("src") or "")[:60]}
+            self.conn.execute("SAVEPOINT exf_retime")
+            undo = None
+            self.conn.execute("INSERT INTO raw_ex (exchange, kind, uuid, revision, payload, observed_at) VALUES (?, 'trade', ?, ?, ?, ?)",
+                              (ex, fid, int(row["revision"]) + 1, json.dumps(merged, ensure_ascii=False), int(row["observed_at"])))
+            olds = legs(fid)
+            if olds:
+                for o in olds:
+                    self._bump_position(o["asset_id"], -int(o["qty_base"]), o["location"])
+                self.conn.execute("DELETE FROM postings WHERE source_kind='exchange' AND source_ns=? AND source_id=?", (ns, fid))
+                self._post_exf_fill(ex, merged)
+                news = legs(fid)
+                had = {int(o["leg_seq"]) for o in olds if o["cost_usd"] is not None}
+                if shape(news) != shape(olds) or any(int(r9["event_ts"]) != t_new // 1000 for r9 in news):
+                    undo = "다시 만든 레그가 다름"
+                elif any(int(r9["leg_seq"]) in had and r9["cost_usd"] is None for r9 in news):
+                    undo = "새 시각 원가 USD 미확보(환율·쿼트 시세를 못 받음 — 다음 --apply 때 다시)"
+                else:
+                    t_min = min([t for t in [t_min, t_old // 1000, t_new // 1000] if t is not None])
+            if undo:
+                self.conn.execute("ROLLBACK TO exf_retime")
+                why_n[undo] = why_n.get(undo, 0) + 1
+                n_undo += 1
+                log.warning("%s 체결 %s 시각 바로잡기 되돌림(원본 개정도 취소 — 다음 적용 때 재시도): %s", ex, fid[:24], undo)
+            else:
+                n_ok += 1
+            self.conn.execute("RELEASE exf_retime")
+        if t_min is not None:
+            self._drop_daily_cache()
+            try:
+                log.info("장기 곡선 다시 계산 표식: %s 부터", common.mark_hist_dirty(t_min))
+            except Exception as e:
+                log.warning("장기 곡선 다시 계산 표식 실패: %s", e)
+        if n_ok or n_undo or n_skip:
+            try:
+                m9 = json.loads(self._meta_get(f"exf_retime:{ex}") or "{}")
+            except (TypeError, ValueError):
+                m9 = {}
+            m9 = m9 if isinstance(m9, dict) else {}
+            m9.update(n=int(m9.get("n") or 0) + n_ok, undo=int(m9.get("undo") or 0) + n_undo, skip=int(m9.get("skip") or 0) + n_skip, at=now)
+            self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (f"exf_retime:{ex}", json.dumps(m9)))
+        log.info("[ex] %s 지난 체결 시각 바로잡기: 바로잡음 %d · 되돌림 %d · 건너뜀 %d %s", ex, n_ok, n_undo, n_skip,
+                 json.dumps(why_n, ensure_ascii=False) if why_n else "")
+        return {"ok": n_ok, "undo": n_undo, "skip": n_skip, "why": why_n}
+
     @staticmethod
     def _upbit_open_partial(o: dict):
         market = str(o.get("market") or "")
@@ -6436,8 +6615,9 @@ class Core:
                     a9 = self.conn.execute("SELECT kind, address FROM assets WHERE asset_id=?", (aid,)).fetchone()
                     k9 = "native:none" if (a9 and a9[0] == "native") else f"token:{str((a9 or [None, ''])[1] or '').lower()}"
                     if k9 not in pay.get(w, set()):
-                        continue
-                sid, t9 = f"recon:{chain}", int(T)
+                        k9 = None
+                if chain != "bsc" or k9 is not None:
+                    sid, t9 = f"recon:{chain}", int(T)
             else:
                 if wtimes is None:
                     wtimes = self._wrecon_times(chain)
@@ -6452,7 +6632,10 @@ class Core:
             if sid:
                 a9 = self.conn.execute("SELECT kind, address FROM assets WHERE asset_id=?", (aid,)).fetchone()
                 if a9 and a9[0] == "token" and not self._obs_tok_observed(sid, w, a9[1]):
-                    continue
+                    sid = None
+            if not sid and loc.count(":") == 2:
+                sid, t9 = discopen.absorbed_by(self.conn, chain, loc, aid, blk9, ts)
+            if sid:
                 self._anchor_adjust(chain, sid, t9, aid, loc, -d, txhash)
                 n9 += 1
         return n9
@@ -6464,6 +6647,8 @@ class Core:
         pos_ts = self._win_t0(T, chain)
         if sid != f"recon:{chain}" and f9 is not None:
             pos_ts = min(pos_ts, int(f9) - 1)
+        if discopen.is_disc(sid):
+            pos_ts = discopen.anchor_at(self.conn, sid) or pos_ts
         touch9 = getattr(self, "_anchor_touch", None)
         if r:
             q0 = int(r["qty_base"])
@@ -6733,6 +6918,7 @@ class Core:
                 ev = self.apply(chain, txhash, "", rec["snapshot"])
                 log.info("[%s] %s → %s", chain, txhash[:14], ev)
                 self._note_pre_window(chain, (rec["snapshot"].get("tx") or {}).get("timestamp"), txhash)
+                self._negabs_note(chain, txhash)
             else:
                 self._rederive_anchor_safe(chain, txhash, rec)
         elif rec.get("kind") == "sol_tx":
@@ -6757,6 +6943,8 @@ class Core:
             self._consume_fills(rec)
         elif rec.get("kind") == "ex_order_trades":
             self._consume_order_trades(rec)
+        elif rec.get("kind") == "exf_fill_retime":
+            self._consume_exf_retime(rec)
         elif rec.get("kind") == "exf_fills":
             self._consume_exf_fills(rec)
         elif rec.get("kind") == "exf_late_cycle":
@@ -6930,12 +7118,13 @@ class Core:
             return
         T, ws = self._recon_view(chain)
         wT = self._wrecon_times(chain)
-        if (not T or ts >= T) and not any(ts < t9 for t3 in wT.values() for t9 in t3[:2] if t9):
+        dT = self._disc_max_t(chain)
+        if (not T or ts >= T) and not any(ts < t9 for t3 in wT.values() for t9 in t3[:2] if t9) and not (dT and ts < dT):
             return
         if txhash:
             hit = False
             blk9 = self._tx_block(chain, txhash)
-            for r in self.conn.execute("SELECT DISTINCT p.location, a.kind, a.address FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
+            for r in self.conn.execute("SELECT DISTINCT p.location, a.kind, a.address, p.asset_id FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
                                        " WHERE p.source_kind='chain_tx' AND p.source_ns=? AND p.source_id=? AND p.location LIKE ?",
                                        (chain, txhash, f"wallet:{chain}:%")).fetchall():
                 w = r[0].split(":", 2)[2].lower()
@@ -6946,7 +7135,9 @@ class Core:
                 tok9 = r[1] != "native"
                 if (T and w in ws and self._absorbed(f"recon:{chain}", ts, T, blk9)
                         and (not tok9 or self._obs_tok_observed(f"recon:{chain}", w, r[2]))) \
-                        or (wt9 and self._absorbed(sid9, ts, wt9, blk9) and (not tok9 or self._obs_tok_observed(sid9, w, r[2]))):
+                        or (wt9 and self._absorbed(sid9, ts, wt9, blk9) and (not tok9 or self._obs_tok_observed(sid9, w, r[2]))) \
+                        or (dT and ts < dT and r[0].count(":") == 2
+                            and discopen.absorbed_by(self.conn, chain, r[0], r[3], blk9, ts)[0] is not None):
                     hit = True
                     break
             if not hit:
@@ -7651,6 +7842,11 @@ class Core:
             except Exception as e:
                 self.conn.rollback()
                 log.error("recon_pass 실패(다음 주기 재시도): %s", e)
+            try:
+                self.negabs_pass(drained)
+            except Exception as e:
+                self.conn.rollback()
+                log.error("발견 시점 기초 잔고 처리 실패(다음 주기): %s", common.safe_err(str(e))[:200])
             ledger_backup.tick(log)
             if self.conn.in_transaction:
                 log.error("★패스 종료 후 트랜잭션 잔류 — 방어 롤백 (누수 경로 추적 필요)★")

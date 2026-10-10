@@ -213,8 +213,55 @@ def api_limits_table(base=None, active_ex=None, active_chains=None, active_perps
             c2 = dict(c)
             if active_chains is not None:
                 c2["used"] = bool(set(c.get("match") or [c.get("id")]) & set(active_chains))
+            ob9 = old_holdings_row(c.get("match") or [c.get("id")], base)
+            if ob9:
+                c2["rows"] = list(c.get("rows") or []) + [ob9]
             out["chains"].append(c2)
     return out
+
+
+TOKEN_SOURCES_NAME = "token_sources.json"
+
+
+def old_holdings_row(match, base=None):
+    t = common.seed_json("coverage/" + TOKEN_SOURCES_NAME, None, base_dir=base or common.BASE_DIR)
+    rows = (t or {}).get("chains") if isinstance(t, dict) else None
+    if not isinstance(rows, dict):
+        return None
+    how, key9, slow9 = {}, [], []
+    for ch in match or []:
+        r = rows.get(ch)
+        if not isinstance(r, dict):
+            continue
+        nm = str(r.get("name") or ch)
+        if r.get("etherscan") == "free":
+            m = "이더스캔(무료 키)"
+        elif r.get("routescan"):
+            m = "루트스캔(키 없음)"
+        elif str(r.get("blockscout") or "").startswith("https://"):
+            m = "블록스카웃(키 없음)"
+        elif r.get("alchemy") or r.get("ankr"):
+            m = "Alchemy·Ankr 무료 키" if (r.get("alchemy") and r.get("ankr")) else ("Alchemy 무료 키" if r.get("alchemy") else "Ankr 무료 키")
+            key9.append(nm)
+        elif r.get("logs_span"):
+            m = "RPC 로그 훑기(느림)"
+            slow9.append(nm)
+        else:
+            m = "없음"
+            key9.append(nm)
+        how.setdefault(m, []).append(nm)
+    if not how:
+        return None
+    miss = []
+    if key9:
+        miss.append("·".join(key9) + ": 키가 없으면 옛 보유 확인 불가(원장 정품 토큰·검증 스테이블만 같은 블록 잔고로 확인) — 옮길 때 원장 음수로 드러나요")
+    if slow9:
+        miss.append("·".join(slow9) + ": 색인 API 가 없어 RPC 로그를 훑어요(지갑당 몇 분~수십 분 — 등록 때 1회)")
+    return {"kind": "옛 보유 토큰 찾기(수집 기간 전부터 들고만 있던 토큰)",
+            "api": "블록 0부터 그 지갑이 주고받은 모든 토큰 — " + " · ".join(f"{'·'.join(v)}: {k}" for k, v in how.items()),
+            "bot": "지갑을 등록할 때 1회 여러 출처 합집합(+ Alchemy·Ankr 키가 있으면 더하고 · 원장 정품 토큰은 모든 지갑에)으로 찾아 같은 블록 잔고로 기초 잔고를 맞춰요."
+                   " 그 뒤엔 그 지갑에 새 거래·잔고 변화가 있을 때만 다시 찾아요(키 쓰는 API 는 하루 한도 80%). 스팸 의심 토큰은 기초 잔고에 넣지 않아요",
+            "miss": " · ".join(miss) if miss else "없음", "todo": ""}
 
 
 def _md_cell(t):

@@ -347,9 +347,10 @@
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
   XP_HELP.nodereal = { url: 'https://dashboard.nodereal.io', why: '선택 · 무료 키로도 됨 — BSC 옛 기록(아카이브)을 빠르게 받아요(한 번에 5만 블록). 없으면 BSC 옛 기록은 무료 공개 노드로 천천히 받아요(최신 기록은 늘 공개 노드로 바로). Base 는 지원 안 해요.', steps: ['nodereal.io 가입(무료) → Dashboard → Create API Key', 'BSC 엔드포인트 주소 끝의 키만(…/v1/ 뒤) 붙여넣기'] };
-  XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: '선택 · 무료 키로도 됨 — BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 없으면 무료 공개 노드로 받아요(Base 는 공개 노드로도 옛 기록 됨 — 넣으면 더 빨라요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기'] };
+  XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: '선택 · 무료 키로도 됨 — BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 같은 키로 지갑 토큰 찾기도 보조해요(Advanced API). 없으면 무료 공개 노드로 받아요(Base 는 공개 노드로도 옛 기록 됨 — 넣으면 더 빨라요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기'] };
   XP_HELP.quicknode = { url: 'https://dashboard.quicknode.com', why: '선택 · 유료만(무료 등급 없음) — 이미 쓰는 유료 엔드포인트가 있으면 체인별 주소를 그대로 넣으세요(BSC·Base 아카이브 · 한 번에 1만 블록). 다른 곳에서 쓰던 키일 수 있어 기본은 월 한도의 10% 만 써요.', steps: ['QuickNode 대시보드 → Endpoints', 'BSC·Base 엔드포인트 주소(https://….quiknode.pro/…/)를 각 칸에 붙여넣기'] };
-  const NODE_KEYS = ['nodereal', 'ankr', 'quicknode'];
+  XP_HELP.alchemy = { url: 'https://dashboard.alchemy.com/signup', why: 'EVM 지갑이 있으면 필수(무료) — 지갑이 한 번이라도 주고받은 토큰 전부와 지금 잔고를 찾아 오래 들고만 있던 토큰도 빠뜨리지 않아요(Base·Ethereum·Arbitrum 등). 없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만). 무료 한도의 80% 아래로만 써요.', steps: ['dashboard.alchemy.com/signup 가입(무료)', 'Create new app → 네트워크는 전부 켠 채로(기본값) → API Key 복사', '키만(https://…/v2/ 뒤의 값) 붙여넣기 → 연결 테스트(Ethereum·Base 1번씩)'] };
+  const NODE_KEYS = ['nodereal', 'ankr', 'quicknode', 'alchemy'];
   const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate'];
   const STEPS = [{ k: 'wallets', t: '지갑' }, { k: 'keys', t: '탐색기 키' }, { k: 'exchanges', t: '거래소' }, { k: 'telegram', t: '텔레그램' }, { k: 'finish', t: '표시·완료' }];
   const UNIT_KO = { evm: 'EVM 수집기', sol: 'Solana 수집기', bsc: 'BSC 수집기', core: '원장(core)', web: '웹' };
@@ -453,7 +454,7 @@
     U.busy['np' + p] = true; render();
     const r = await api('keys/nodeplan', body);
     U.busy['np' + p] = false;
-    toast(r.ok ? n.name + ' 사용 한도를 바꿨어요 — 수집기가 곧 다시 시작해요' : (r.error || '저장 실패'), !r.ok);
+    toast(r.ok ? n.name + (r.apply && r.apply.restart === false ? ' 설정을 바꿨어요 — 재시작 없이 바로 써요' : ' 사용 한도를 바꿨어요 — 수집기가 곧 다시 시작해요') : (r.error || '저장 실패'), !r.ok);
     await refreshStatus();
   }
   function fieldsHTML(gk, g, help) {
@@ -518,16 +519,32 @@
         + '<div class="su-actions"><button class="btn sm" data-su="nmonth" data-p="' + esc(k) + '"' + (busy ? ' disabled' : '') + '>월 한도 저장</button></div>'
       : '';
     const use = (n.chains && n.chains.length ? '지금 쓰는 체인: ' + n.chains.map(c => c.toUpperCase()).join('·') + ' · ' : '')
-      + (n.plan === 'paid' ? '월 한도 × ' + n.share + '%' : '무료 한도의 ' + n.pct + '%') + ' = 하루 약 ' + fmtN(n.perDay) + ' ' + unit;
-    return '<div class="cap su-p su-cgplan">' + esc(use) + plan + paid + '<div class="cap" style="margin-top:4px">옛 기록은 처음 한 번만 채우고, 최신 기록은 늘 공개 노드로 먼저 받아요 — 이 키는 옛 기록·옛 거래 상세에만 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.</div></div>';
+      + (n.plan === 'paid' ? '월 한도 × ' + n.share + '%' : '무료 한도의 ' + n.pct + '%') + ' = 하루 약 ' + fmtN(n.perDay) + ' ' + unit
+      + (typeof n.usedToday === 'number' ? ' · 오늘 쓴 양 ' + fmtN(n.usedToday) + (n.bursting ? ' · 버스트 중' : '') : '');
+    const note = n.pool === false
+      ? '지갑 토큰·잔고 찾기에만 써요 — 처음 한 번 전부 확인하고, 그 뒤엔 무료 노드로 움직임이 보인 지갑만 다시 물어요(감시·옛 기록은 무료 노드). 하루 몫을 다 쓰면 그날(UTC)은 쉬고 다음 날 이어서 해요. 키는 저장하면 바로 쓰고, 요금제를 바꾸면 수집기가 자동으로 다시 시작해요.'
+      : '옛 기록은 처음 한 번만 채우고, 최신 기록은 늘 공개 노드로 먼저 받아요 — 이 키는 옛 기록·옛 거래 상세에만 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.';
+    const fresh = n.burstX > 1 ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 새로 받은 키" style="align-items:center;margin-top:6px">'
+      + '<button class="su-chip' + (n.freshSince ? ' on' : '') + '" data-su="nfresh" data-p="' + esc(k) + '" aria-pressed="' + !!n.freshSince + '"' + (busy ? ' disabled' : '') + '>새로 받은 키(지난 사용 없음)</button>'
+      + '<span class="cap">' + esc(n.freshSince ? n.freshSince + ' 에 새로 받은 키로 봐요 — 그 전 기록 없는 날은 0(키를 바꿔 저장하면 꺼져요)' : '다른 곳에서 쓰던 키가 아니면 켜세요 — 끄면 기록 없는 지난날을 평소 몫으로 셈(업그레이드 뒤 한 달은 버스트가 거의 없음)') + '</span></div>' : '';
+    const bnote = n.burstX > 1 ? ' 백필·첫 전수 중엔 하루 몫을 ' + n.burstX + '배까지 당겨 써요(최근 31일 합은 월 한도의 ' + n.pct + '% 안 · 감시 몫은 남김).' : '';
+    return '<div class="cap su-p su-cgplan">' + esc(use) + plan + paid + fresh + '<div class="cap" style="margin-top:4px">' + esc(note + bnote) + '</div></div>';
   }
   function evmKeyBanner(st) {
+    return etherscanBanner(st) + alchemyBanner(st);
+  }
+  function etherscanBanner(st) {
     if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
     return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요해요(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
+  }
+  function alchemyBanner(st) {
+    if (!st || !st.evmNeedsAlchemy || !st.explorers.alchemy || st.explorers.alchemy.set) return '';
+    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Alchemy 키가 필요해요(무료)</b><div class="bd">지갑이 주고받은 토큰 전부와 지금 잔고를 찾아 옛 보유 토큰을 빠뜨리지 않게 해요 — 없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만). 거래 수집·감시는 그대로 돌아요.</div></div></div>';
   }
   function xpPill(st, k, desc) {
     if (k === 'helius') return st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? pill('w', 'Solana 필수') : pill('g', 'Solana 지갑이 있으면 필수');
     if (k === 'etherscan') return st.evmNeedsKeys ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
+    if (k === 'alchemy' && 'evmNeedsAlchemy' in st) return st.evmNeedsAlchemy ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
     if (desc) return '<span class="pill g su-xpd">' + esc('선택 · ' + desc) + '</span>';
     return pill('g', k === 'coingecko' ? '선택 · 무료' : '선택');
   }
@@ -541,7 +558,7 @@
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보여요(값은 다시 표시하지 않음).</div>'
       + evmKeyBanner(st)
-      + ['helius', 'etherscan', 'coingecko', 'opensea'].concat(NODE_KEYS).filter(k => st.explorers[k]).map(k => {
+      + ['helius', 'etherscan', 'alchemy', 'coingecko', 'opensea'].concat(NODE_KEYS.filter(k => k !== 'alchemy')).filter(k => st.explorers[k]).map(k => {
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius'), nm = xpName(g.name);
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"' + (nm.d ? ' title="' + esc(g.name) + '"' : '') + '><b>' + esc(nm.t) + '</b>'
           + ' ' + xpPill(st, k, nm.d)
@@ -625,7 +642,8 @@
     const rows = [['지갑', st.wallets.length ? st.wallets.length + '개 주소' : '없음 — 나중에 설정 탭에서 추가', st.wallets.length > 0],
       ['Helius (Solana)', st.explorers.helius.set ? '저장됨' : (st.wallets.some(w => w.kind === 'sol') ? '필요 — Solana 수집 대기' : '선택'), st.explorers.helius.set],
       ['Etherscan', st.explorers.etherscan.set ? '저장됨' : (st.evmNeedsKeys ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (blockscout 로 동작)'), st.explorers.etherscan.set],
-      ['거래소', exN ? exN + '곳 연결' : '없음 (온체인만)', exN > 0], ['텔레그램', st.telegram.connected ? '@' + (st.telegram.bot || '') + ' 연결됨' : '연결 안 함', st.telegram.connected]];
+    ].concat(st.explorers.alchemy ? [['Alchemy', st.explorers.alchemy.set ? '저장됨' : (st.evmNeedsAlchemy ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (EVM 지갑이 생기면 필요)'), st.explorers.alchemy.set]] : []).concat([
+      ['거래소', exN ? exN + '곳 연결' : '없음 (온체인만)', exN > 0], ['텔레그램', st.telegram.connected ? '@' + (st.telegram.bot || '') + ' 연결됨' : '연결 안 함', st.telegram.connected]]);
     return '<div class="su-sec"><div class="su-h">표시</div><div class="cap" style="margin:10px 0 8px">기준 통화</div><div class="opts">' + opt('cur', 'KRW', cur === 'KRW', 'KRW', '업비트 USDT 환산') + opt('cur', 'USD', cur === 'USD', 'USD', '달러 원가 기준') + '</div>'
       + '<div class="cap" style="margin:14px 0 8px">테마</div><div class="opts">' + opt('theme', 'dark', !light, '다크', '기본') + opt('theme', 'light', light, '라이트', '밝은 배경') + '</div></div>'
       + '<div class="su-sec"><div class="su-h">요약</div>' + rows.map(r => '<div class="kv"><span>' + esc(r[0]) + '</span><span class="' + (r[2] ? 'oktxt' : 'mut') + '">' + esc(r[1]) + '</span></div>').join('') + evmKeyBanner(st) + applyHTML() + '</div>';
@@ -1141,7 +1159,7 @@
         render(); return;
       }
       clearVals(g); delete U.ack[g]; delete U.needAck[g]; delete U.test[g];
-      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요')); await refreshStatus();
+      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요') + (r.apply && r.apply.restart === false ? ' · 재시작 없이 바로 써요' : '')); await refreshStatus();
     },
     async kdel(el) {
       const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g];
@@ -1151,6 +1169,7 @@
     },
     async nplan(el) { await nodePlanSave(el.getAttribute('data-p'), { plan: el.getAttribute('data-v') }); },
     async nshare(el) { await nodePlanSave(el.getAttribute('data-p'), { share: Number(el.getAttribute('data-v')) }); },
+    async nfresh(el) { const p = el.getAttribute('data-p'), n = U.st && U.st.nodes && U.st.nodes[p]; await nodePlanSave(p, { fresh: !(n && n.freshSince) }); },
     async nmonth(el) {
       const p = el.getAttribute('data-p'), raw = draft('nm_' + p).replace(/[,\s]/g, '');
       if (raw && !/^[1-9][0-9]{0,11}$/.test(raw)) { toast('월 한도는 숫자만(쉼표 없이)', true); return; }

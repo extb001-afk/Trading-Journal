@@ -30,6 +30,10 @@ DEFAULTS = {
     "sol_rpcs": None,
     "sol_max_calls": 80,
     "upbit": True,
+    "disc": True,
+    "disc_per_pair": 8,
+    "disc_refresh_max": 20,
+    "disc_refresh_sec": 120,
 }
 UPBIT_KEY = ("upbit", "exchange:upbit")
 _EX_TERMINAL = ("ACCEPTED", "DONE", "CANCELLED", "CANCELED", "REJECTED", "FAILED", "REFUNDED")
@@ -364,6 +368,17 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
     done_pairs = set()
     failed_keys = set()
     rr_next = 0
+    disc_on = bool(st.get("disc")) and (cfg.get("token_discovery") or {}).get("enabled") is not False
+    disc_rr = dict((prev or {}).get("discRr") or {})
+    disc_unseen = set()
+    dstate, disc_due, disc_n, dplan = {}, [], 0, {}
+    if disc_on:
+        try:
+            import token_discovery as _td
+            dstate = _td.load_state()
+        except Exception as e:
+            disc_on = False
+            errors.append(f"토큰 발견 상태 읽기 실패: {common.safe_err(e)[:60]}")
     for i9, (ch, w) in enumerate(order9):
         if caller.capped():
             capped = True
@@ -405,13 +420,54 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
         for ca, s in stables.items():
             if ca not in seen_ca:
                 items.append(("token", ca, 0, None, 1.0, s, None))
-        for kind, ca, qb, dec, px, sym, gid in items:
+                seen_ca.add(ca)
+        if disc_on:
+            led_cas9 = {str(v[2]).lower() for v in rows.values() if v[1] == "token" and v[2]}
+            ent9 = ((dstate.get("pairs") or {}).get(f"{ch}:{w}") or {})
+            cand9 = []
+            for ca9, ss9 in sorted((ent9.get("cas") or {}).items()):
+                m9 = (ent9.get("meta") or {}).get(ca9) or {}
+                sk9 = (ent9.get("skip") or {}).get(ca9)
+                if ca9 in led_cas9 or ca9 in seen_ca or (sk9 is not None and _td.skip_final(sk9)) or not m9.get("px"):
+                    continue
+                ok9, _why9 = _td.static_credible(ch, ca9, ss9, m9)
+                if ok9 is False:
+                    continue
+                cand9.append((ca9, m9))
+            per9 = max(0, int(st.get("disc_per_pair") or 0))
+            rr9 = None
+            dix9 = len(items)
+            if cand9 and per9:
+                o9 = int(disc_rr.get(f"{ch}:{w}") or 0) % len(cand9)
+                pick9 = (cand9[o9:] + cand9[:o9])[:per9]
+                picked9 = {c9 for c9, _m in pick9}
+                disc_unseen |= {f"{ch}:{w}:{c9}" for c9, _m in cand9 if c9 not in picked9}
+                rr9 = [f"{ch}:{w}", o9, len(cand9), [c9 for c9, _m in pick9], 0]
+                for ca9, m9 in pick9:
+                    items.append(("token", ca9, 0, m9.get("dec"), float(m9["px"]), (m9.get("sym") or ca9[:10]) + " (발견)", None))
+                    seen_ca.add(ca9)
+        for ix9, (kind, ca, qb, dec, px, sym, gid) in enumerate(items):
             if caller.capped():
                 capped = True
                 break
+            if disc_on and rr9 is not None and ix9 >= dix9:
+                rr9[4] += 1
             try:
                 if kind == "native":
                     raw = int(caller.rpc(ch, "eth_getBalance", [w, "latest"]), 16)
+                    if disc_on:
+                        try:
+                            sig9 = dict(_td.wallet_sig(conn, ch, w), nat=str(raw))
+                            ent9 = (dstate.get("pairs") or {}).get(f"{ch}:{w}") or {}
+                            if ch not in dplan:
+                                dplan[ch] = [x for x in _td.plan(ch, cfg) if x != "logs"]
+                            need9, why9 = _td.need_refresh(ent9, sig9, srcs=dplan[ch])
+                            if need9:
+                                disc_due.append((ch, w, sig9, why9))
+                            elif ent9 and "nat" not in (ent9.get("sig") or {}):
+                                disc_due.append((ch, w, sig9, "baseline"))
+                        except Exception:
+                            pass
                 else:
                     data = "0x70a08231" + w.replace("0x", "").rjust(64, "0")
                     r = caller.rpc(ch, "eth_call", [{"to": ca, "data": data}, "latest"])
@@ -441,10 +497,43 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                 found.append({"key": f"{ch}:{w}:{ca or 'native'}", "wallet": w, "chain": ch, "sym": sym,
                               "ca": ca, "ledger": float(lq), "onchain": float(oq),
                               "diffUsd": round(float(diff_usd), 2)})
+        if disc_on and rr9 is not None:
+            disc_rr[rr9[0]] = (rr9[1] + rr9[4]) % rr9[2]
+            disc_unseen |= {f"{rr9[0]}:{c9}" for c9 in rr9[3][rr9[4]:]}
         if capped:
             rr_next = (rr0 + i9) % len(pairs)
             break
         done_pairs.add((ch, w))
+    disc_sum = None
+    if disc_on:
+        t9 = time.time()
+        cfg9 = cfg
+        for ch, w, sig9, why9 in disc_due:
+            if why9 == "baseline":
+                try:
+                    def _fn(cur, k9=f"{ch}:{w}", sig9=sig9):
+                        e9 = (cur.get("pairs") or {}).get(k9)
+                        if isinstance(e9, dict):
+                            e9["sig"] = dict(e9.get("sig") or {}, **{k: v for k, v in sig9.items() if k not in (e9.get("sig") or {})})
+                        return cur
+                    _td.update_state(_fn)
+                except OSError:
+                    pass
+                continue
+            if disc_n >= int(st.get("disc_refresh_max") or 0) or time.time() - t9 > float(st.get("disc_refresh_sec") or 0):
+                break
+            try:
+                r9 = _td.discover(ch, w, cfg=cfg9, sources=dplan.get(ch), deadline=t9 + float(st.get("disc_refresh_sec") or 0),
+                                  burst=(why9 == "first"))
+                _td.save_result(ch, w, r9, sig9, why9)
+                disc_n += 1
+            except Exception as e:
+                if len(errors) < 20:
+                    errors.append(f"토큰 발견 {ch}:{w[:8]}: {common.safe_err(e)[:60]}")
+        try:
+            disc_sum = dict(_td.summary(cfg), refreshed=disc_n, due=len([x for x in disc_due if x[3] != "baseline"]))
+        except Exception:
+            disc_sum = None
     sol_ws = _sol_wallets(cfg) if st.get("sol") else []
     if anch is not None:
         fresh += [("sol", w9) for w9 in sol_ws if ("sol", w9.lower()) not in anch]
@@ -558,6 +647,10 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
         for k, v in prev_pending.items():
             if str(k).startswith("upbit:") and now - int(v) < 3 * 86400:
                 pending.setdefault(k, v)
+    for k9 in disc_unseen:
+        if k9 in prev_pending:
+            pending.setdefault(k9, prev_pending[k9])
+    failed_keys |= disc_unseen
     if capped or errors:
         done_keys = {m["key"] for m in found}
         for k, v in prev_pending.items():
@@ -587,7 +680,9 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             "capped": capped, "checked": checked, "pairs": len(pairs) + len(sol_ws) + stake_n, "errors": errors,
             "mismatches": found, "pending": pending, "rrNext": rr_next, "unchecked": unchecked,
             "fresh": [f"{c9}:{w9}" for c9, w9 in fresh],
-            "alerted": dict((prev or {}).get("alerted") or {})}
+            "alerted": dict((prev or {}).get("alerted") or {}),
+            **({"discRr": disc_rr} if disc_rr else {}),
+            **({"disc": disc_sum} if disc_sum is not None else {})}
 
 
 def _recheck_carried(m: dict, led, st: dict) -> None:

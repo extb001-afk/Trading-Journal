@@ -4511,9 +4511,8 @@ class RpcChainWatcher(RpcSynthMixin):
         try:
             jobs9 = self._bk_jobs()
             if jobs9 or self.cursor.get("_hq"):
-                self.progress.update(f"{chain}:rpc", phase="extend", unit="blocks",
-                                     done=sum(max(0, int(j["done"]) - int(j["from"])) for j in jobs9.values()),
-                                     total=max(1, sum(max(0, int(j["to"]) - int(j["from"])) for j in jobs9.values())),
+                dn9, tt9 = self._bk_lane(jobs9)
+                self.progress.update(f"{chain}:rpc", phase="extend", unit="blocks", done=dn9, total=tt9,
                                      note="재기동 — 뒤 차선 이어서")
         except (TypeError, ValueError, KeyError) as e9:
             log.warning("%s 뒤 차선 진행률 기동 표시 실패(첫 사이클 뒤 표시): %s", chain, type(e9).__name__)
@@ -6050,6 +6049,7 @@ class RpcChainWatcher(RpcSynthMixin):
             todo = [h for h in todo if isinstance(dets.get(h), dict)]
         pool = [dets[h] for h in todo]
         self._mc_rate = None
+        t_st9 = time.time()
         n_mc = self._mc_balances(ws, last) if self.multicall else 0
         if n_mc < len(ws) and self._mc_rate is not None:
             raise self._mc_rate
@@ -6058,6 +6058,8 @@ class RpcChainWatcher(RpcSynthMixin):
                 self._states([(w, last) for w in ws if (w, last) not in self.__dict__.setdefault("_st_memo", {})])
             except StateUnavailable:
                 pass
+        if bk:
+            self._bk_fixed = time.time() - t_st9
         new_ns = {}
         for w in ws:
             new_ns[w] = (self._native(w, c, last, pool, deadline + 120, nk) if bk else self._native(w, c, last, pool, deadline + 120, head=head))["ns"]
@@ -6115,6 +6117,25 @@ class RpcChainWatcher(RpcSynthMixin):
     def _bk_jobs(self) -> dict:
         return {w: self.cursor["_bk:" + w] for w in self.wallets if isinstance(self.cursor.get("_bk:" + w), dict)}
 
+    @staticmethod
+    def _bk_lane(jobs: dict) -> tuple:
+        def _union(iv):
+            n, s0, e0 = 0, None, None
+            for s, e in sorted(iv):
+                if e <= s:
+                    continue
+                if e0 is None or s > e0:
+                    if e0 is not None:
+                        n += e0 - s0
+                    s0, e0 = s, e
+                elif e > e0:
+                    e0 = e
+            return n + ((e0 - s0) if e0 is not None else 0)
+        rows = [(int(j["from"]), max(int(j["from"]), int(j["done"])), int(j["to"])) for j in jobs.values()]
+        tot = _union([(f, t) for f, _d, t in rows])
+        left = _union([(d, t) for _f, d, t in rows])
+        return max(0, tot - left), max(1, tot)
+
     def _bk_step(self, head: int, deadline: float) -> tuple:
         adv, stalled = 0, False
         bud9 = max(1.0, deadline - time.time())
@@ -6129,23 +6150,29 @@ class RpcChainWatcher(RpcSynthMixin):
             d = min(groups)
             ws = groups[d]
             to = min(int(jobs[w].get("to") or 0) for w in ws)
+            nxt = min((g for g in groups if g > d), default=None)
             tgt = min(to, d + span)
+            clip = nxt is not None and nxt < tgt
+            if clip:
+                tgt = nxt
             if tgt <= d:
                 break
             t0 = time.time()
+            self._bk_fixed = 0.0
             try:
                 got = self._advance(ws, d, tgt, head, deadline, bk=True)
             except StateUnavailable as e:
                 got = d
                 log.info("%s 뒤 차선 상태 조회 불가(다음 사이클): %s", self.chain, e)
             el = time.time() - t0
+            el_var = max(0.0, el - min(el, max(0.0, float(self.__dict__.get("_bk_fixed") or 0.0))))
             if got <= d:
                 stalled = True
                 span = max(2000, span // 2)
                 self.cursor["_bkspan"] = int(span)
                 break
             adv += got - d
-            if got >= tgt and el < bud9 / 3:
+            if got >= tgt and el_var < bud9 / 3 and not clip:
                 span = min(self.bk_span, span * 2)
             self.cursor["_bkspan"] = int(span)
         if not self._bk_jobs() and self.cursor.get("_hq") and time.time() < deadline:
@@ -6274,8 +6301,8 @@ class RpcChainWatcher(RpcSynthMixin):
                         pass
             jobs9 = self._bk_jobs()
             if jobs9 or self.cursor.get("_hq"):
-                tot9 = sum(max(0, int(j["to"]) - int(j["from"])) for j in jobs9.values())
-                left9 = sum(max(0, int(j["to"]) - int(j["done"])) for j in jobs9.values())
+                dn9, tot9 = self._bk_lane(jobs9) if jobs9 else (0, 0)
+                left9 = tot9 - dn9
                 bk9 = {"wallets": len(jobs9), "new": sum(1 for j in jobs9.values() if j.get("why") == "new"),
                        "internal": sum(1 for j in jobs9.values() if j.get("why") == "internal"),
                        "extend": sum(1 for j in jobs9.values() if j.get("why") == "extend"),
@@ -6294,9 +6321,8 @@ class RpcChainWatcher(RpcSynthMixin):
         common.atomic_write_json(self.cursor_path, self.cursor)
         common.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
         if bk9 is not None:
-            self.progress.update(f"{self.chain}:rpc", phase="extend", unit="blocks",
-                                 done=sum(max(0, int(j["done"]) - int(j["from"])) for j in self._bk_jobs().values()),
-                                 total=max(1, sum(max(0, int(j["to"]) - int(j["from"])) for j in self._bk_jobs().values())),
+            dn9, tt9 = self._bk_lane(self._bk_jobs())
+            self.progress.update(f"{self.chain}:rpc", phase="extend", unit="blocks", done=dn9, total=tt9,
                                  note=(self.last_scan_metrics or {}).get("stop"))
         else:
             self.progress.update(f"{self.chain}:rpc", phase="live" if complete else ("extend" if self.cursor.get("_since_ext") else "scan"),

@@ -805,7 +805,18 @@ def _recon_done() -> list:
 NODE_UNITS = ["tj-bsc", "tj-evm", "tj-core", "tj-web"]
 
 
-def _node_apply(group: str) -> dict:
+def _node_apply(group: str, key_change: bool = False) -> dict:
+    try:
+        import nodekeys
+        hot9 = key_change and group in nodekeys.HOT_KEYS
+    except Exception:
+        hot9 = False
+    if hot9:
+        try:
+            import chainoff
+            return dict(chainoff.apply_info(), restart=False)
+        except Exception:
+            return {"mode": "", "manual": "", "restart": False}
     try:
         import wallet_register as wr
         wr._record_reload({"ts": int(time.time()), "chains": ["bsc", "base"], "source": "nodekeys:" + str(group)[:20], "units": list(NODE_UNITS)})
@@ -832,7 +843,7 @@ def _node_bad(group: str, got: dict) -> str:
 def _node_rpc(url: str, method: str, params: list, timeout: float = 15.0):
     import bf_engine
     d = bf_engine.http_json(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
-                            timeout=timeout, retries=1)
+                            timeout=timeout, retries=1, rpc_methods=(method,))
     if not isinstance(d, dict) or "result" not in d:
         code9 = ((d or {}).get("error") or {}).get("code") if isinstance(d, dict) and isinstance(d.get("error"), dict) else None
         raise RuntimeError("노드가 거절" + (f"(코드 {int(code9)})" if isinstance(code9, int) else ""))
@@ -846,6 +857,8 @@ def _node_test(group: str, got: dict) -> dict:
         return {"ok": False, "error": bad}
     env9 = dict(nodekeys._env())
     env9.update(got)
+    if group == "alchemy":
+        return _alchemy_test(env9)
     keys9 = [v for v in got.values() if v] + [env9.get(k, "") for k, _ in ss.GROUPS[group]["fields"]]
     us = nodekeys.urls(env9)
     out = []
@@ -872,18 +885,47 @@ def _node_test(group: str, got: dict) -> dict:
                 r["archive"] = isinstance(bal, str) and bal.startswith("0x")
                 r["ok"] = True
             except Exception as e:
-                nm9 = type(e).__name__
-                kind9 = getattr(e, "kind", "") or ""
-                r["err"] = (str(e) if isinstance(e, RuntimeError) and str(e).startswith("노드가 거절") else
-                            "한도·속도 제한" if kind9 in ("http429", "quota", "budget") else
-                            "인증 실패(키·주소 확인)" if kind9 in ("http4xx",) else
-                            "연결 실패" if kind9 in ("timeout", "conn", "dns", "http5xx", "circuit") or nm9 in ("URLError", "TimeoutError") else
-                            "응답 오류")
+                r["err"] = _node_err(e)
             out.append(r)
     if not out:
         return {"ok": False, "error": "시험할 값이 없어요 — 키(또는 엔드포인트)를 넣고 시험하세요"}
     det = " · ".join(f"{r['chain'].upper()} " + (("최신 블록 OK · 옛 블록(약 180일 전) " + ("됨" if r.get("archive") else "안 됨")) if r["ok"] else ("실패 — " + r.get("err", "")))
                      for r in out)
+    return {"ok": True, "test": {"ok": all(r["ok"] for r in out), "detail": det, "results": out}}
+
+
+def _node_err(e, auth: str = "인증 실패(키·주소 확인)") -> str:
+    nm9 = type(e).__name__
+    kind9 = getattr(e, "kind", "") or ""
+    return (str(e) if isinstance(e, RuntimeError) and str(e).startswith("노드가 거절") else
+            "한도·속도 제한" if kind9 in ("http429", "quota", "budget") else
+            auth if kind9 in ("http4xx",) else
+            "연결 실패" if kind9 in ("timeout", "conn", "dns", "http5xx", "circuit") or nm9 in ("URLError", "TimeoutError") else
+            "응답 오류")
+
+
+ALCHEMY_TEST_NETS = (("eth-mainnet", "Ethereum"), ("base-mainnet", "Base"))
+
+
+def _alchemy_test(env9: dict) -> dict:
+    import nodekeys
+    out = []
+    for net, nm in ALCHEMY_TEST_NETS:
+        u = nodekeys.alchemy_url(net, env=env9)
+        if not u:
+            break
+        r = {"chain": nm, "ok": False}
+        try:
+            r["head"] = int(str(_node_rpc(u, "eth_blockNumber", [])), 16)
+            r["ok"] = True
+        except Exception as e:
+            r["err"] = _node_err(e, auth="키 거부 또는 이 네트워크가 앱에서 꺼져 있음(Alchemy 대시보드 › 앱 › Networks 에서 켜기)")
+        out.append(r)
+    if not out:
+        return {"ok": False, "error": "시험할 값이 없어요 — Alchemy API 키를 넣고 시험하세요"}
+    det = " · ".join(r["chain"] + (" 최신 블록 OK" if r["ok"] else " 실패 — " + r.get("err", "")) for r in out)
+    if all(r["ok"] for r in out):
+        det += " — 지갑 토큰·잔고 찾기에 써요(감시·옛 기록은 무료 노드)"
     return {"ok": True, "test": {"ok": all(r["ok"] for r in out), "detail": det, "results": out}}
 
 
@@ -993,6 +1035,7 @@ def status() -> dict:
         "wallets": wl, "chains": [{"key": k, "name": n} for k, n in ss.evm_chains(raw)],
         "solNeedsHelius": (raw.get("sol") or {}).get("rpc") == "helius",
         "evmNeedsKeys": _evm_needs_keys(raw),
+        "evmNeedsAlchemy": _evm_needs_alchemy(raw),
         "explorers": _explorers_status(grp),
         "nodes": _nodes_status(),
         "exchanges": exs,
@@ -1015,6 +1058,13 @@ def status() -> dict:
 def _evm_needs_keys(raw) -> bool:
     try:
         return ss.needs_etherscan(raw)
+    except Exception:
+        return False
+
+
+def _evm_needs_alchemy(raw) -> bool:
+    try:
+        return ss.needs_alchemy(raw)
     except Exception:
         return False
 
@@ -1299,12 +1349,22 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
         if month9 is not None and (isinstance(month9, bool) or not isinstance(month9, int) or not 0 < month9 <= 10 ** 12):
             return {"ok": False, "error": "월 한도는 1 이상 정수(비우면 무료 한도 기준)"}
+        fresh9 = b.get("fresh")
+        if fresh9 is not None and not isinstance(fresh9, bool):
+            return {"ok": False, "error": "'새로 받은 키' 값은 켜기·끄기만 됩니다"}
         with ss.LOCK:
             cur9 = ss.read_settings()
             np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
-            np9[p9] = {"plan": plan9, "share": share9, "month": month9}
+            old9 = np9.get(p9) if isinstance(np9.get(p9), dict) else {}
+            eff9 = nodekeys.plans(cur9).get(p9) or {}
+            new9 = {"plan": plan9, "share": share9, "month": month9}
+            fs9 = old9.get("fresh_since") if fresh9 is None else (time.strftime("%Y-%m-%d", time.gmtime()) if fresh9 else None)
+            if nodekeys._fresh_str(fs9):
+                new9["fresh_since"] = fs9
+            np9[p9] = new9
             ss.update_settings(**{nodekeys.PLANS_KEY: np9})
-        return {"ok": True, "nodes": nodekeys.status(), "apply": _node_apply(p9)}
+        same9 = all(eff9.get(k) == new9.get(k) for k in ("plan", "share", "month"))
+        return {"ok": True, "nodes": nodekeys.status(), "apply": _node_apply(p9, key_change=False) if not same9 else {"restart": False}}
     if act == "keys/cgshare":
         v = b.get("share")
         if not cgplan.valid_share(v):
@@ -1319,7 +1379,7 @@ def _dispatch(act: str, b: dict) -> dict:
         if act == "keys/delete":
             ss.write_env({k: None for k in fields})
             if g in ss.NODE_GROUPS:
-                return {"ok": True, "apply": _node_apply(g)}
+                return {"ok": True, "apply": _node_apply(g, key_change=True)}
             if g in ss.EXCHANGES:
                 _perm_record(g, None)
             if g == "coingecko":
@@ -1344,8 +1404,18 @@ def _dispatch(act: str, b: dict) -> dict:
             bad = _node_bad(g, got)
             if bad:
                 return {"ok": False, "error": bad}
+            old9 = ss.read_env()
+            chg9 = any(str(old9.get(k) or "").strip() != v for k, v in got.items())
             ss.write_env(got)
-            return {"ok": True, "apply": _node_apply(g)}
+            if chg9:
+                import nodekeys
+                with ss.LOCK:
+                    cur9 = ss.read_settings()
+                    np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
+                    if isinstance(np9.get(g), dict) and "fresh_since" in np9[g]:
+                        np9[g] = {k: v for k, v in np9[g].items() if k != "fresh_since"}
+                        ss.update_settings(**{nodekeys.PLANS_KEY: np9})
+            return {"ok": True, "apply": _node_apply(g, key_change=True)}
         if act == "keys/save":
             if not all(vals.values()):
                 return {"ok": False, "error": "모든 칸을 채우세요"}

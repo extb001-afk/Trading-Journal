@@ -321,7 +321,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
         + (compact ? '' : opsLinkHTML(x)) + '</div>' : '') + '</div>';
   }
   const OPS_LINK = { 'ledger:poison': 'poison', 'rebuild:pnl': 'pnl', 'ledger:decimals': 'dec' };
-  const KEY_LINK = { 'key:etherscan': 'etherscan' };
+  const KEY_LINK = { 'key:etherscan': 'etherscan', 'key:alchemy': 'alchemy' };
   function opsLinkHTML(x) {
     const id9 = String(x.check || x.id || '').split('#')[0], kk = KEY_LINK[id9] || KEY_LINK[String(x.id || '')];
     if (kk) return '<div style="margin-top:8px"><button class="link" data-h="keyGoto" data-v="' + kk + '">설정에서 키 넣기 ›</button></div>';
