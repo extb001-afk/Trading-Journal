@@ -1617,6 +1617,7 @@ def main():
         online_unpatch(pricing)
         if "fx_at" in c.px.__dict__:
             del c.px.__dict__["fx_at"]
+        c.px.d.setdefault("neg_ts", {}).pop("_fx", None)
         n_lp9 = 0
         for r9 in conn.execute("SELECT DISTINCT source_ns, source_id FROM postings WHERE source_kind='chain_tx'"
                                " AND event LIKE 'LP\\_%' ESCAPE '\\' AND leg_kind IN ('disp','acq') AND cost_usd IS NULL"
@@ -1634,7 +1635,7 @@ def main():
                 "SELECT DISTINCT (event_ts / 60) * 60 FROM postings WHERE cost_usd IS NOT NULL AND cost_krw IS NULL").fetchall()]
             if ms9:
                 t9 = time.time()
-                st9 = c.px.prefetch_fx(ms9, max_calls=fx_calls9, deadline=time.time() + 1800)
+                st9 = c.px.prefetch_fx_patient(ms9, max_calls=fx_calls9, deadline=time.time() + 1800)
                 print(f"[5b] 환율 선조회: 분 {len(ms9)} → {st9['calls']}콜 · {st9['filled']}분 채움 ({time.time() - t9:.0f}s)")
         c.px.flush()
         core_mod.time.time = fixed_time9

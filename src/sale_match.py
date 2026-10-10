@@ -10,6 +10,7 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 
 import netpace
+import common
 
 T_BID_SUBMITTED = "0x650baad5cd8ca09b8f580be220fa04ce2ba905a041f764b6a3fe2c848eb70540"
 T_BID_EXITED = "0x054fe6469466a0b4d2a6ae4b100e5f9c494c958f04b4000f44d470088dd97930"
@@ -64,7 +65,7 @@ def http_get_json(url: str, timeout: float = 25):
     netpace.wait(url)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(r.read().decode())
+            d = json.loads(common.read_capped(r).decode())
     except urllib.error.HTTPError as e:
         netpace.note_error(url, e)
         raise

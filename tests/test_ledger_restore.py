@@ -328,9 +328,11 @@ def state_files():
                                "_synced_at": NOW, "_synced_tok_at": NOW})
     wj("emitted_evm_eth.json", ["0xe1", "0xe2", "0xe3", "0xe4new"])
     wj("cursor_sol.json", {SOLW: SIG(9), "_slot:" + SOLW: 1500, "_pnv:" + SOLW: {"x": 1}, ATA: "atasig9", "_slot:" + ATA: 1490,
-                           STK: "stksig9", "_stk:" + STK: {"w": SOLW, "rwd_next": 800}, "_synced_at": NOW})
+                           STK: "stksig9", "_stk:" + STK: {"w": SOLW, "rwd_next": 800}, "_synced_at": NOW,
+                           "_fbw:ATANEW": {"o": SOLW, "s": 1400}, "_hl:ATANEW": {"o": SOLW, "sig": "atanew9", "slot": 1495}})
     wj("emitted_sol.json", [SIG(1), SIG(2), SIG(3), SIG(9), f"stakerwd:{STK}:800"])
-    wj("cursor_bsc.json", {"from_block": 900000, "head": 900020, "_cov": 1000, "_synced_at": NOW, "_scan": {"a": 1}})
+    wj("cursor_bsc.json", {"from_block": 900000, "head": 900020, "_cov": 1000, "_synced_at": NOW, "_scan": {"a": 1},
+                           "_live": {"done": 950000, "holes": [[900000, 940000]], "fb": 900000}, "_lscan": {"frm": 950001}})
     wj("emitted_bsc.json", ["0xb1", "0xb2new"])
     wj("bsc_nonce.json", {"w": {W1: {"hashes": {"0xb1": 50000, "0xb2new": 899000}, "blocks": [50000, 899000], "missing": 1}}, "boot": 1})
     wj("bsc_xin.json", {"tx": {"0xb2new": {"r": "emit"}, "0xb1": {"r": "emit"}, "0xold": {"r": "old"}}})
@@ -406,10 +408,13 @@ ck("[5] 솔라나 지갑 커서 = 여유 이전 그 지갑이 낀 마지막 서�
 ck("[5] 솔라나 스테이크 계정 커서 = 그 계정 잔고가 바뀐 서명", cs.get(STK) == SIG(2), cs)
 ck("[5] 솔라나 토큰 계정 커서 = 지움(목록 처음부터 · 방출 기록이 거름)", ATA not in cs and "_slot:" + ATA not in cs, cs)
 ck("[5] 솔라나 스테이킹 보상 다음 에폭 낮춤", cs["_stk:" + STK]["rwd_next"] < 800, cs["_stk:" + STK])
+ck("[5] 솔라나 첫 백필 진행 표식·엿보기 기준(_fbw·_hl) 지움(되감은 원장 = 처음부터 새 관점으로 다시 읽음 · sollive1010)",
+   not [k for k in cs if k.startswith(("_fbw:", "_hl:"))], [k for k in cs if k.startswith(("_fbw:", "_hl:"))])
 ck("[5] 솔라나 방출 기록 = 백업에 있는 것만(합성 보상 ID 포함)", rj("emitted_sol.json") == [SIG(1), SIG(2), SIG(3), f"stakerwd:{STK}:800"], rj("emitted_sol.json"))
 ck("[5] 합성 ID(stakerwd:…)는 서명 커서로 안 씀(wl316 ①)", not any(str(v).startswith(("stakerwd:", "stakeopen:")) for v in cs.values()), cs)
 cb = rj("cursor_bsc.json")
 ck("[5] BSC from_block 되감음(창 하한 위) · 체크포인트·도장 지움", 1000 <= cb["from_block"] < 900000 and "_scan" not in cb and "_synced_at" not in cb, cb)
+ck("[5] BSC 라이브 차선 기록(_live·_lscan) 지움 — 되감기 기준 뒤를 받은 것으로 남기지 않음(bsclive1010)", "_live" not in cb and "_lscan" not in cb, cb)
 ck("[5] BSC 방출 기록·발신 색인·출금 회수 기록 = 백업 것만", rj("emitted_bsc.json") == ["0xb1"]
    and list(rj("bsc_nonce.json")["w"][W1]["hashes"]) == ["0xb1"] and "missing" not in rj("bsc_nonce.json")["w"][W1]
    and "0xb2new" not in rj("bsc_xin.json")["tx"] and "0xold" in rj("bsc_xin.json")["tx"])

@@ -257,3 +257,14 @@ def same(a, b, tol=0.005) -> bool:
         elif abs((num(pa[0]) or 0.0) - (num(pb[0]) or 0.0)) > tol:
             return False
     return True
+
+
+def rest_obs_at(parts, end_ts, ts=None):
+    p = (parts or {}).get("rest")
+    if not (isinstance(p, (list, tuple)) and len(p) >= 2 and p[1] == "snap"):
+        return None
+    e = float(end_ts)
+    t = num(ts)
+    if t is not None and e - 86400 < t <= e:
+        return t
+    return e

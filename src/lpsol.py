@@ -227,7 +227,7 @@ def _rpc(urls, method, params, timeout=20):
             req = urllib.request.Request(u, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1"})
             import bf_engine as _bfe9
             with _bfe9.sol_open(req, timeout, method, sol=True) as r:
-                d = json.loads(r.read().decode())
+                d = json.loads(_bfe9.common.read_capped(r).decode())
             if "result" in d:
                 return d["result"]
         except Exception:

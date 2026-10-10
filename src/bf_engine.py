@@ -705,6 +705,14 @@ def _esb_hist_merge_locked(d: str, add: dict, today: int, keep: int = None) -> b
         else:
             h = _esb_hist_read(d)
         days = h["days"]
+        if keep is not None and int(keep) >= RPC_DAY_WINDOW:
+            k9 = h.get("k31")
+            if isinstance(k9, int) and not isinstance(k9, bool):
+                later9 = [int(k) for k in days if str(k).lstrip("-").isdigit() and int(k) > k9]
+                if later9:
+                    s9 = h.get("since") if isinstance(h.get("since"), int) and not isinstance(h.get("since"), bool) else None
+                    h["since"] = max(s9 if s9 is not None else -10 ** 9, max(later9) + 1)
+            h["k31"] = int(today)
         for day, recs in add.items():
             cur = days.get(str(int(day)))
             if not isinstance(cur, dict):
@@ -808,19 +816,26 @@ ES_HEAD_MULT = 1.25
 ES_HEAD_MIN_FRAC = 0.10
 ES_HEAD_MAX_FRAC = 0.70
 ES_HEAD_EARLY = 0.10
+ES_FILL_HEAD_MIN_FRAC = 0.03
 ES_FILL_ACTIVE_SEC = 3600
 ES_KINDS = ("head", "fill", "aux")
 _ESB_WHY = threading.local()
 
 
-def es_head_share(head_used: float, yday_head, now: float, budget: float = None, fill_active: bool = False, floor: float = None) -> int:
+def es_head_share(head_used: float, yday_head, now: float, budget: float = None, fill_active: bool = False, floor: float = None,
+                  base: float = None) -> int:
     b = float(ES_DAILY_BUDGET if budget is None else budget)
-    fl = float(ES_HEAD_MIN_FRAC if floor is None else floor)
-    if fill_active:
-        return int(b * fl)
+    bb = b if base is None else float(base)
+    fl = _es_floor(fill_active, floor)
     e = (now % 86400) / 86400.0
     m = max(float(yday_head or 0), float(head_used or 0) / max(e, ES_HEAD_EARLY))
-    return int(min(b * ES_HEAD_MAX_FRAC, max(b * fl, m * ES_HEAD_MULT)))
+    return int(min(b * ES_HEAD_MAX_FRAC, max(bb * fl, m * ES_HEAD_MULT)))
+
+
+def _es_floor(fill_active: bool, floor: float = None) -> float:
+    if floor is not None:
+        return float(floor)
+    return ES_FILL_HEAD_MIN_FRAC if fill_active else ES_HEAD_MIN_FRAC
 
 
 def es_fill_active(fq: float, now: float) -> bool:
@@ -831,22 +846,23 @@ def es_fill_active(fq: float, now: float) -> bool:
 
 
 def es_rooms(used: float, head_used: float, yday_head, now: float, budget: float = None, burst: float = None, keep: float = None,
-             fill_active: bool = False, floor: float = None) -> dict:
+             fill_active: bool = False, floor: float = None, base: float = None) -> dict:
     b = float(ES_DAILY_BUDGET if budget is None else budget)
-    fl = float(ES_HEAD_MIN_FRAC if floor is None else floor)
+    bb = b if base is None else float(base)
+    fl = _es_floor(fill_active, floor)
     bu = float(ES_PACE_BURST_FRAC if burst is None else burst)
     kp = float(ES_FILL_KEEP_FRAC if keep is None else keep)
     if bu >= 1.0:
         left = int(b - used)
         return {"head": left, "fill": left, "rt": None, "fillFirst": False, "off": True}
     e = (now % 86400) / 86400.0
-    r = es_head_share(head_used, yday_head, now, b, fill_active, fl)
+    r = es_head_share(head_used, yday_head, now, b, fill_active, fl, base=bb)
     spent9 = max(0.0, float(used) - float(head_used or 0)) + min(float(head_used or 0), r * e)
-    affordable = (b - spent9 - b * max(kp, ES_FILL_KEEP_MIN)) / max(1.0 - e, 1e-9)
-    r = min(r, max(int(b * fl), int(affordable)))
+    affordable = (b - spent9 - bb * max(kp, ES_FILL_KEEP_MIN)) / max(1.0 - e, 1e-9)
+    r = min(r, max(int(bb * fl), int(affordable)))
     resv = r * (1.0 - e)
     head = b - used - resv
-    fill = head - b * max(kp, ES_FILL_KEEP_MIN)
+    fill = head - bb * max(kp, ES_FILL_KEEP_MIN)
     return {"head": int(head), "fill": int(fill), "rt": r, "fillFirst": bool(fill_active), "off": False}
 
 
@@ -999,6 +1015,9 @@ class DayMeter:
         self._hist_pend = {}
         self.hm_pub = False
         self.hist_keep = 0
+        self.month_cap = None
+        self.flex_x = 0.0
+        self.fresh_svc = None
 
     def _hkeep(self):
         return max(int(self.hist_keep or 0), ESB_HIST_KEEP_DAYS)
@@ -1087,7 +1106,53 @@ class DayMeter:
         except OSError:
             return False
 
-    def _room(self, kind: str, used: int, now: float) -> int:
+    def window_on(self) -> bool:
+        return bool(self.fill_first and self.month_cap and float(self.flex_x or 0) >= 1.0)
+
+    _flex_on = window_on
+
+    def eff_budget(self, now: float):
+        if not self._flex_on():
+            return None
+        fd9 = None
+        if self.fresh_svc:
+            try:
+                import nodekeys
+                fd9 = nodekeys.fresh_day(str(self.fresh_svc))
+            except Exception:
+                fd9 = None
+        used, head = self.st["n"] + self.st["others"], self.st["nh"] + self.st["others_h"]
+        try:
+            F = month_flex(self._dir(), now, self.budget, int(self.month_cap), head, fd9)
+        except (OSError, TypeError, ValueError):
+            F = None
+        if F is None:
+            return None
+        if float(self.flex_x) <= 1.0:
+            d9 = max(0, int(min(self.budget, F["room"])))
+            return (d9, d9)
+        bh = max(0, int(min(F["room"], used - head + self.budget)))
+        bf = max(0, int(min(self.budget * float(self.flex_x), F["ahead"])))
+        return (bh, bf)
+
+    def take_hard(self, proc: str, n: int = 1, kind: str = "head", now: float = None) -> bool:
+        k = kind if kind in HL_KINDS else "head"
+        ix = 1 if k in ("fill", "aux") else 0
+
+        def lim(now9):
+            eb9 = self.eff_budget(now9)
+            return self.budget if eb9 is None else eb9[ix]
+        return self.take(proc, n, kind=k, now=now, limit=lim)
+
+    def _room(self, kind: str, used: int, now: float, budget=None) -> int:
+        if budget is not None and self.fill_first:
+            b9 = budget[1] if kind in ("fill", "aux") else budget[0]
+            if kind == "must":
+                return int(b9 - used)
+            r = es_rooms(used, self.st["nh"] + self.st["others_h"], self.st["yday_h"], now, budget=b9, burst=self.burst, keep=self.keep,
+                         fill_active=es_fill_active(max(float(self.st["fq"] or 0), float(self.st["others_fq"] or 0)), now), floor=self.floor_now(now),
+                         base=self.budget)
+            return int(r["fill" if kind in ("fill", "aux") else "head"])
         if not self.fill_first:
             if self.burst >= 1.0:
                 return int(self.budget - used)
@@ -1132,7 +1197,7 @@ class DayMeter:
                 self.st["fq"] = now
             if self.proc and now - self.st["others_at"] > 30:
                 self._locked_sync(now)
-            return self._room(kind if kind in HL_KINDS else "head", self.st["n"] + self.st["others"], now)
+            return self._room(kind if kind in HL_KINDS else "head", self.st["n"] + self.st["others"], now, budget=self.eff_budget(now))
 
     def take(self, proc: str, n: int = 1, kind: str = "head", now: float = None, limit: int = None) -> bool:
         now = time.time() if now is None else now
@@ -1154,12 +1219,14 @@ class DayMeter:
                     return False
                 used = self.st["n"] + self.st["others"]
                 lim9 = limit(now) if callable(limit) else limit
-                if used + n > (self.budget if lim9 is None else max(0, int(lim9))):
+                eb9 = self.eff_budget(now) if lim9 is None else None
+                db9 = self.budget if eb9 is None else eb9[1 if k in ("fill", "aux") else 0]
+                if used + n > (db9 if lim9 is None else max(0, int(lim9))):
                     self.why.v = "day"
                     return False
                 if self.fill_first and k == "fill":
                     self.st["fq"] = now
-                if limit is None and self._room(k, used, now) < n:
+                if limit is None and self._room(k, used, now, budget=eb9) < n:
                     self.why.v = "pace"
                     self.st["paced"] += 1
                     return False
@@ -1200,7 +1267,8 @@ class DayMeter:
         with self.lock:
             self._roll(now)
             ok = self._locked_sync(now)
-            return (not ok) or self.st["n"] + self.st["others"] >= self.budget
+            eb9 = self.eff_budget(now)
+            return (not ok) or self.st["n"] + self.st["others"] >= (self.budget if eb9 is None else max(eb9))
 
     def last_why(self) -> str:
         return getattr(self.why, "v", "")
@@ -1223,12 +1291,27 @@ class DayMeter:
             self.lock.release()
 
 
-def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = None, now: float = None, floor: float = None) -> dict:
+def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = None, now: float = None, floor: float = None, flex: dict = None) -> dict:
     now = time.time() if now is None else now
-    L = es_ledger_read(now, d=os.path.join(common.quota_dir(), sub))
+    d9 = os.path.join(common.quota_dir(), sub)
+    L = es_ledger_read(now, d=d9)
     fl = L["hm"] if L.get("hm") is not None else floor
-    r = es_rooms(L["n"], L["nh"], L["ydayHead"], now, budget, burst, keep, fill_active=es_fill_active(L["fq"], now), floor=fl)
-    return dict(L, **r, floorUsed=fl)
+    eb9 = None
+    if isinstance(flex, dict) and flex.get("cap") and float(flex.get("x") or 0) >= 1.0:
+        try:
+            m9 = DayMeter(sub, int(budget), fill_first=True)
+            m9.month_cap, m9.flex_x, m9.fresh_svc = int(flex["cap"]), float(flex["x"]), "helius" if sub == "helius_budget" else None
+            m9.st.update(day=int(now // 86400), n=int(L["n"]), nh=int(L["nh"]))
+            eb9 = m9.eff_budget(now)
+        except Exception:
+            eb9 = None
+    fa9 = es_fill_active(L["fq"], now)
+    if eb9 is None:
+        r = es_rooms(L["n"], L["nh"], L["ydayHead"], now, budget, burst, keep, fill_active=fa9, floor=fl)
+        return dict(L, **r, floorUsed=fl, dayCap=int(budget))
+    r = es_rooms(L["n"], L["nh"], L["ydayHead"], now, eb9[0], burst, keep, fill_active=fa9, floor=fl, base=budget)
+    rf = es_rooms(L["n"], L["nh"], L["ydayHead"], now, eb9[1], burst, keep, fill_active=fa9, floor=fl, base=budget)
+    return dict(L, **dict(r, fill=rf["fill"]), floorUsed=fl, dayCap=int(max(eb9)), fillCap=int(eb9[1]))
 
 
 HELIUS_MONTHLY_DEFAULT = 1_000_000
@@ -1473,10 +1556,35 @@ def helius_configure(cfg: dict):
         keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
     except (TypeError, ValueError):
         burst, keep = 0.04, 0.02
+    fx9 = helius_flex(cfg)
     with HELIUS.lock:
         HELIUS.budget = helius_day_budget(cfg)
         HELIUS.burst, HELIUS.keep = burst, keep
         HELIUS.head_min = helius_head_min(cfg)
+        HELIUS.month_cap = fx9["cap"] if fx9 else None
+        HELIUS.flex_x = fx9["x"] if fx9 else 0.0
+        HELIUS.fresh_svc = "helius" if fx9 else None
+        HELIUS.hist_keep = RPC_DAY_WINDOW if fx9 else 0
+    if fx9:
+        _hist_since_ensure(HELIUS._dir(), int(time.time() // 86400))
+
+
+def helius_flex(cfg: dict):
+    sol9 = (cfg or {}).get("sol") or {}
+    on9 = sol9.get("helius_burst") is not False
+    try:
+        m = float(sol9.get("helius_monthly_credits") or HELIUS_MONTHLY_DEFAULT)
+        pct = min(100.0, max(1.0, float(((cfg or {}).get("addr_tier") or {}).get("budget_pct") or 80)))
+    except (TypeError, ValueError):
+        return None
+    x = 1.0
+    if on9 and m <= HELIUS_MONTHLY_DEFAULT:
+        try:
+            import nodekeys
+            x = max(1.0, float(nodekeys.BURST_X))
+        except Exception:
+            x = 1.0
+    return {"cap": int(m * pct / 100.0), "x": x}
 
 
 def _hl_atexit():
@@ -1537,7 +1645,7 @@ def rpc_day_configure(cfg: dict):
             else:
                 m9 = DayMeter(f"rpc_day_{name}", budget, burst=1.0, keep=0.0)
             m9.proc = m9.proc or _RPC_DAY_PROC
-            m9.hist_keep = RPC_DAY_WINDOW if _burst_x(spec) else 0
+            m9.hist_keep = RPC_DAY_WINDOW if _win_spec(spec) else 0
             if m9.hist_keep:
                 _hist_since_ensure(m9._dir(), int(time.time() // 86400))
             _RPC_DAY[name] = {"spec": spec, "meter": m9, "pct": pct_e, "refused": prev.get("refused", 0) if prev else 0}
@@ -1593,7 +1701,9 @@ def _rpc_day_units(name: str, methods=None, cost: int = 1) -> int:
 
 
 RPC_DAY_WINDOW = 31
-RPC_DAY_BURST_RESERVE = 0.5
+RPC_RT_MARGIN = 1.5
+RPC_RT_FLOOR = 0.05
+RPC_RT_LOOKBACK = 7
 _BURST_TL = threading.local()
 
 
@@ -1614,6 +1724,11 @@ def _hist_since_ensure(d: str, today: int):
                 fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
     except OSError:
         pass
+
+
+def _win_spec(spec) -> bool:
+    sp = spec or {}
+    return bool(_burst_x(sp)) or bool(sp.get("window") and sp.get("month") and not sp.get("day"))
 
 
 def _burst_x(spec) -> float:
@@ -1643,9 +1758,10 @@ def burst_on() -> bool:
     return bool(getattr(_BURST_TL, "on", False))
 
 
-def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None):
+def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None, rt_out: dict = None, day_out: dict = None):
     lo = today - (RPC_DAY_WINDOW - 1)
     per = {}
+    perh = {}
     h9, st9 = _hist_load(d)
     if st9 == "bad":
         return None
@@ -1662,6 +1778,10 @@ def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None
                 except (IndexError, TypeError, ValueError):
                     continue
                 per[(day, stem)] = max(per.get((day, stem), 0), n9)
+                try:
+                    perh[(day, stem)] = max(perh.get((day, stem), 0), min(n9, int(v[0])))
+                except (IndexError, TypeError, ValueError):
+                    perh[(day, stem)] = max(perh.get((day, stem), 0), n9)
     try:
         names = os.listdir(d)
     except OSError:
@@ -1674,12 +1794,21 @@ def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None
             day = j.get("day") if isinstance(j, dict) else None
             if isinstance(day, int) and lo <= day < today:
                 per[(day, f[:-5])] = max(per.get((day, f[:-5]), 0), int(j.get("n") or 0))
+                perh[(day, f[:-5])] = max(perh.get((day, f[:-5]), 0), min(int(j.get("n") or 0), _esb_rec_head(j)))
         except (Exception, SystemExit):
             continue
+    if rt_out is not None:
+        for (day, _s), v in perh.items():
+            rt_out[day] = rt_out.get(day, 0) + max(0, v)
     seen = {day for day, _s in per}
-    unknown = sum(1 for day in range(lo, today) if day not in seen and not (since is not None and day >= since)
-                  and not (fresh_day is not None and day < fresh_day))
-    return sum(max(0, v) for v in per.values()) + unknown * max(0, int(n_day))
+    unk = [day for day in range(lo, today) if day not in seen and not (since is not None and day >= since)
+           and not (fresh_day is not None and day < fresh_day)]
+    if day_out is not None:
+        for (day, _s), v in per.items():
+            day_out[day] = day_out.get(day, 0) + max(0, v)
+        for day in unk:
+            day_out[day] = max(0, int(n_day))
+    return sum(max(0, v) for v in per.values()) + len(unk) * max(0, int(n_day))
 
 
 def rpc_day_limits(name: str, now: float = None) -> dict:
@@ -1691,13 +1820,38 @@ def rpc_day_limits(name: str, now: float = None) -> dict:
     return _rpc_day_lims(ent, now)
 
 
-def _rpc_day_lims(ent: dict, now: float) -> dict:
+def month_flex(d: str, now: float, base: int, cap: int, head: int, fresh_day: int = None):
+    today = int(now // 86400)
+    rtd, dd = {}, {}
+    prev = _rpc_day_prev_used(d, today, base, fresh_day, rt_out=rtd, day_out=dd)
+    if prev is None:
+        return None
+    e = (now % 86400) / 86400.0
+    rt_hist = max((v for dy, v in rtd.items() if dy >= today - RPC_RT_LOOKBACK), default=0)
+    rt = max(float(rt_hist), float(max(0, int(head or 0))) / max(e, ES_HEAD_EARLY))
+    rtm = min(float(base), max(rt * RPC_RT_MARGIN, float(base) * RPC_RT_FLOOR))
+    lo = today - (RPC_DAY_WINDOW - 1)
+    tail = float(sum(dd.get(dy, 0) for dy in range(lo, today)))
+    ahead = float(cap) - tail
+    for j in range(1, RPC_DAY_WINDOW):
+        tail -= dd.get(lo + j - 1, 0)
+        ahead = min(ahead, float(cap) - tail - j * rtm)
+    return {"prev": int(prev), "room": int(cap) - int(prev), "ahead": int(ahead), "rt": int(rt), "rtm": int(rtm), "left": rtm * (1.0 - e)}
+
+
+def _rpc_day_today(m9, now: float, live: bool) -> tuple:
+    if live and m9.st.get("day") == int(now // 86400):
+        return int(m9.st["n"] + m9.st["others"]), int(m9.st["nh"] + m9.st["others_h"])
+    L = es_ledger_read(now, d=m9._dir())
+    return int(L["n"]), int(L["nh"])
+
+
+def _rpc_day_lims(ent: dict, now: float, live: bool = False) -> dict:
     m9 = ent["meter"]
     n_day = int(m9.budget)
     x = _burst_x(ent["spec"])
-    if not x:
+    if not x and not _win_spec(ent["spec"]):
         return {"normal": n_day, "burst": n_day, "cap": None, "prev": None, "x": 1.0}
-    today = int(now // 86400)
     fd9 = ent["spec"].get("fresh_since")
     fd9 = int(fd9) if isinstance(fd9, int) and not isinstance(fd9, bool) else None
     if ent["spec"].get("svc"):
@@ -1710,13 +1864,25 @@ def _rpc_day_lims(ent: dict, now: float) -> dict:
         cap = int(float(ent["spec"]["month"]) * float(ent.get("pct") or 80.0) / 100.0)
     except (KeyError, TypeError, ValueError):
         return {"normal": n_day, "burst": n_day, "cap": None, "prev": None, "x": 1.0}
-    prev = _rpc_day_prev_used(m9._dir(), today, n_day, fd9)
-    if prev is None:
+    used, head = _rpc_day_today(m9, now, live)
+    if not x:
+        F = month_flex(m9._dir(), now, n_day, cap, head, fd9)
+        if F is None:
+            return {"normal": n_day, "burst": n_day, "cap": cap, "prev": None, "x": 1.0, "bad": True}
+        d9 = max(0, int(min(n_day, F["room"])))
+        return {"normal": d9, "burst": d9, "cap": cap, "prev": F["prev"], "x": 1.0, "room": F["room"], "rt": F["rt"], "rtm": F["rtm"], "used": used, "head": head}
+    return node_day_lims(m9._dir(), now, n_day, x, cap, used, head, fd9)
+
+
+def node_day_lims(d: str, now: float, n_day: int, x: float, cap: int, used: int, head: int, fresh_day: int = None) -> dict:
+    F = month_flex(d, now, n_day, cap, head, fresh_day)
+    if F is None:
         return {"normal": n_day, "burst": n_day, "cap": cap, "prev": None, "x": x, "bad": True}
-    room = cap - prev
-    normal = max(0, min(n_day, room))
-    reserve = int((RPC_DAY_WINDOW - 1) * n_day * RPC_DAY_BURST_RESERVE)
-    return {"normal": normal, "burst": max(normal, min(int(n_day * x), room - reserve)), "cap": cap, "prev": prev, "x": x}
+    room, rtm, left = F["room"], F["rtm"], F["left"]
+    normal = max(0, min(room, used - head + n_day))
+    burst = max(0, int(min(n_day * x, F["ahead"] - left)))
+    return {"normal": int(normal), "burst": burst, "cap": cap, "prev": F["prev"], "x": x, "room": room, "ahead": F["ahead"],
+            "rt": F["rt"], "rtm": int(rtm), "used": used, "head": head}
 
 
 def rpc_day_take(name: str, host: str, units: int):
@@ -1730,10 +1896,11 @@ def rpc_day_take(name: str, host: str, units: int):
     hold9 = {}
 
     def lim_fn(now9):
-        hold9["L"] = _rpc_day_lims(ent, now9)
+        hold9["L"] = _rpc_day_lims(ent, now9, live=True)
         return hold9["L"]["burst"] if bu9 else hold9["L"]["normal"]
     bx9 = bool(_burst_x(ent["spec"]))
-    if m9.take(m9.proc or _RPC_DAY_PROC, max(1, int(units)), kind="must", now=now, limit=lim_fn if bx9 else None):
+    wn9 = bx9 or _win_spec(ent["spec"])
+    if m9.take(m9.proc or _RPC_DAY_PROC, max(1, int(units)), kind="fill" if (bx9 and bu9) else "must", now=now, limit=lim_fn if wn9 else None):
         return int(now // 86400)
     lims = hold9.get("L")
     lim9 = None if lims is None else (lims["burst"] if bu9 else lims["normal"])
@@ -1754,6 +1921,15 @@ def rpc_day_take(name: str, host: str, units: int):
             ent["refused"] = int(ent.get("refused") or 0) + 1
         _stat(host, "quota_local")
         raise e8
+    if lims is not None and bu9 and used + max(1, int(units)) <= lims["normal"]:
+        e7 = NetError(f"quota: {name} 오늘(UTC) 백필 몫 다 씀 {used}/{bud}{ent['spec'].get('unit')} — 실시간 몫은 남겨 둠(백필은 다른 노드·다음 주기)",
+                      "quota", host=host)
+        e7.local = True
+        e7.burst_only = True
+        with _RPC_DAY_LOCK:
+            ent["refused"] = int(ent.get("refused") or 0) + 1
+        _stat(host, "quota_local")
+        raise e7
     err = NetError(f"quota: {name} 오늘(UTC) 몫(공표 한도 {ent.get('pct', 80):g}% 규칙) 다 씀 "
                    f"{used}/{bud}{ent['spec'].get('unit')} — UTC 자정까지 이 노드 쉼(다른 노드로)", "quota", host=host)
     err.local = True
@@ -1795,7 +1971,8 @@ def rpc_day_status() -> dict:
         if _burst_x(ent["spec"]):
             try:
                 l9 = rpc_day_limits(name)
-                out[name].update(normal=l9.get("normal"), burst=l9.get("burst"), cap=l9.get("cap"), prev=l9.get("prev"))
+                out[name].update(normal=l9.get("normal"), burst=l9.get("burst"), cap=l9.get("cap"), prev=l9.get("prev"),
+                                  rt=l9.get("rt"), rtm=l9.get("rtm"), room=l9.get("room"))
             except Exception:
                 pass
     return out
@@ -2043,23 +2220,31 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             raise NetError(f"budget: {host} 요청 마감 지남", "budget", host=host)
         rdd9 = rpc_day_take(rd9, host, rdu9) if rd9 else None
         rds9 = False
+
+        def _unsent(rdd9=rdd9):
+            if hard and rd9 and rdd9 is not None:
+                rpc_day_settle(rd9, 0, rdu9, rdd9)
         if not hard:
             g.sem.acquire()
         else:
             l9 = _left()
             st9 = float(sem_timeout) if l9 is None else min(float(sem_timeout), l9)
             if st9 <= 0 or not g.sem.acquire(timeout=st9):
+                _unsent()
                 raise NetError(f"budget: {host} 동시 요청 대기 {max(0.0, st9):.1f}s 초과", "budget", host=host)
         try:
             g.acquire(prio=prio, deadline=deadline, cost=cost)
         except BaseException:
             g.sem.release()
+            _unsent()
             raise
         try:
             to9 = timeout
             if hard and _left() is not None:
                 l9 = _left()
                 if l9 <= 0:
+                    _unsent()
+                    rds9 = True
                     raise NetError(f"budget: {host} 요청 마감 지남", "budget", host=host)
                 to9 = min(float(timeout), l9)
             h = {"User-Agent": common.ua_for(url, ua), "Accept": "application/json"}
@@ -2177,12 +2362,12 @@ def _rate_wait(err, i: int, deadline) -> float:
 
 
 def rpc_call(url: str, method: str, params, *, timeout: float = 25.0, retries: int = 2,
-             prio: str = "fg", deadline: float = None, allow_null: bool = False):
+             prio: str = "fg", deadline: float = None, allow_null: bool = False, sem_timeout: float = None):
     _rpc_cfg_ensure()
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     host = (urllib.parse.urlsplit(url).hostname or "?").lower()
     for i9 in range(RATE_RETRIES + 1):
-        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, rpc_methods=(method,))
+        d = http_json(url, data=body, timeout=timeout, retries=retries, prio=prio, deadline=deadline, rpc_methods=(method,), sem_timeout=sem_timeout)
         if not isinstance(d, dict):
             raise NetError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})", "payload", host=host)
         if not d.get("error"):
@@ -2755,11 +2940,14 @@ class LogScanner:
                                  "" if anyok else " — 통과 노드 없음(판정 불가 노드로 계속)")
 
         normal_off = set()
+        burst_off = set()
 
         def usable(url, chunk):
             if url in untrusted and chunk[0] <= old_below:
                 return False
             if url in normal_off and not self._chunk_burst(url, chunk):
+                return False
+            if url in burst_off and self._chunk_burst(url, chunk):
                 return False
             lh = self.lag_head.get(url)
             if lh is not None and chunk[0] > lh[0] and time.time() - lh[1] < max(1.0, self.head_refresh_sec):
@@ -2808,6 +2996,8 @@ class LogScanner:
                                 not usable(u, pending[0]) for u in all_eps):
                             if normal_off and any(u in normal_off for u in all_eps) and not self._burst_for(pending[0][1]):
                                 st["stop"] = f"구간 {pending[0][0]}-{pending[0][1]}: 노드 키 오늘 평소 몫 다 씀 — 다음 사이클(공개 노드가 되면 그쪽으로)"
+                            elif burst_off and any(u in burst_off for u in all_eps) and self._burst_for(pending[0][1]):
+                                st["stop"] = f"구간 {pending[0][0]}-{pending[0][1]}: 노드 키 오늘 백필 몫 다 씀(실시간 몫은 남겨 둠) — 다음 사이클"
                             elif any(u in self.lag_head and pending[0][0] > self.lag_head[u][0] for u in all_eps):
                                 st["stop"] = (f"구간 {pending[0][0]}-{pending[0][1]}: 로그 노드 헤드 미도달"
                                               f"(최고 {max(v[0] for v in self.lag_head.values())}) — 다음 사이클")
@@ -2928,6 +3118,9 @@ class LogScanner:
                             requeue([[a, b]])
                         elif err.kind == "quota" and getattr(err, "normal_only", False):
                             normal_off.add(url)
+                            requeue([[a, b]])
+                        elif err.kind == "quota" and getattr(err, "burst_only", False):
+                            burst_off.add(url)
                             requeue([[a, b]])
                         else:
                             requeue([[a, b]])
@@ -3281,3 +3474,25 @@ def effective_backfill_t0(cfg: dict, now: float = None) -> int:
     t = now - months * 30 * 86400 if months > 0 else 0
     s = SINCE.target(None)
     return int(min(t, s) if s else t)
+
+
+BSC_BACKFILL_DAYS_DEFAULT = 120
+
+
+def bsc_backfill_days(cfg: dict) -> int:
+    cfg = cfg if isinstance(cfg, dict) else {}
+    bc = cfg.get("bsc") if isinstance(cfg.get("bsc"), dict) else {}
+    v = bc.get("backfill_days")
+    if v is not None and not isinstance(v, bool):
+        try:
+            return max(1, int(v))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if not cfg.get("backfill_full_history"):
+        try:
+            m = float(cfg.get("backfill_months") or 0)
+        except (TypeError, ValueError):
+            m = 0.0
+        if 0 < m < 1200:
+            return max(1, int(round(m * 30)))
+    return BSC_BACKFILL_DAYS_DEFAULT

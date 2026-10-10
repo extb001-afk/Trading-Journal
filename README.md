@@ -13,7 +13,7 @@
 
 - [설치 자세히](#설치-자세히): [준비물](#1-준비물) · [받기·설치 점검](#2-받기--설치-점검) · [키 준비](#3-키-준비--env-와-configjson) · [실행·설정 마법사](#4-실행--설정-마법사) ·
   [첫 실행](#5-첫-실행--얼마나-걸리고-어디서-보나) · [화면 열기·다른 기기](#6-화면-열기--다른-기기에서-보기) · [서버에서 늘 켜 두기](#6-1-서버리눅스에서-늘-켜-두기) · [문제 해결](#7-문제-해결--자주-묻는-5가지)
-- 기능: [지갑 여러 개 한 번에](#지갑-주소-여러-개-한-번에) · [텔레그램 알림](#텔레그램-알림-설정) · [금액 랜덤값](#금액-랜덤값-모드) · [금액 가리기](#금액-가리기숨김-모드) ·
+- 기능: [지갑 여러 개 한 번에](#지갑-주소-여러-개-한-번에) · [AI 기능 켜기](#ai-기능-켜기--claude-cli-로그인) · [텔레그램 알림](#텔레그램-알림-설정) · [금액 랜덤값](#금액-랜덤값-모드) · [금액 가리기](#금액-가리기숨김-모드) ·
   [기타 자산](#기타-자산--증권사-연결은-미검증) · [NFT](#nft-보유--바닥가) · [Hyperliquid](#hyperliquid--현물--무기한--스테이킹) · [시세 출처](#시세-출처--동명-코인-거르기) ·
   [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필) · [백업·복구](#백업--복구) ·
   [업데이트](#업데이트) · [멈추기·지우기](#멈추기--지우기)
@@ -27,10 +27,10 @@
 |---|---|---|
 | 1 | **Python 3.9+** 가 있는 macOS/Linux 준비 (pm2 는 선택) | `python3 --version` |
 | 2 | 받고 설치 점검 — 아무것도 설치하지 않습니다 | `git clone <저장소 주소> tj-bot`(이 페이지 위 **Code** 버튼의 HTTPS 주소) → `cd tj-bot` → `bash tools/setup.sh` |
-| 3 | 키 준비 — Solana 지갑이 있으면 Helius, EVM 지갑이 있으면 Etherscan·Alchemy 무료 키가 필수(둘 다 경고만 — 없어도 돌지만 느리거나 옛 보유 토큰 찾기가 약해짐), 나머지는 선택 | [키 표](#3-키-준비--env-와-configjson) · 거래소 키는 **조회 권한만** |
+| 3 | 키 준비 — Solana 지갑이 있으면 Helius, EVM 지갑이 있으면 Etherscan·Alchemy·Ankr 무료 키가 필수(EVM 키 셋은 경고만 — 없어도 돌지만 옛 기록이 늦거나 옛 보유 토큰 찾기·쉬는 지갑 입금 확인이 약해짐), 나머지는 선택 | [키 표](#3-키-준비--env-와-configjson) · 거래소 키는 **조회 권한만** |
 | 4 | 실행 | `pm2 start ecosystem.config.js` (pm2 없이: [아래](#4-실행--설정-마법사)) |
 | 5 | 화면 열기 → 첫 비밀번호 만들기(**설정 코드** = `cat state/auth_setup_code`) → 설정 마법사에서 지갑·키·거래소·텔레그램 | **http://127.0.0.1:8023/** (`web.port` 를 바꿨으면 그 번호) |
-| 6 | 첫 백필 기다리기 — 보통 수십 분, 많으면 몇 시간(첫날은 옛 기록부터 채워서 새 거래 확인이 늦을 수 있음) | 화면 위 **상태 패널** |
+| 6 | 첫 백필 기다리기 — 보통 수십 분, 많으면 몇 시간(최신 거래는 첫 주기부터 먼저 보이고 옛 기록은 뒤에서 채워요 · 그동안도 오늘 보유·총자산은 지금 실제 잔고) | 화면 위 **상태 패널** |
 | 7 | 남은 '원가 미확인'만 정리 | **미매칭** 탭 |
 
 먼저 구경만 하려면 `bash tools/setup.sh --demo` — 합성 데이터로 화면만 띄우고 아무것도 저장하지 않습니다(포트를 바꾸려면 `TJ_PORT=8024 bash tools/setup.sh --demo`).
@@ -71,15 +71,19 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-10 · 옛 보유 토큰 찾기 · Alchemy 키)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-10](CHANGELOG.md#2026-10-10--옛-보유-토큰-찾기--alchemy-키) 에 있어요.
-사진은 설정 › 연결·키(탐색기 키) 한 장만 새로 찍었어요(**Alchemy 칸**) — 대시보드 LP 는 레버리지 · 대출 바로 아래 카드라 사진과 위치가 달라요.
+이번 판(2026-10-10 (2) · 새 설치본 수집 · 최신 우선)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-10 (2)](CHANGELOG.md#2026-10-10-2--새-설치본-수집--최신-우선) 에 있어요.
+사진은 다시 찍지 않았어요 — 위 '확인 주기'(45·46)·설정 › 연결·키(탐색기 키) 사진은 지난 판 화면이라, 지금은 확인 주기가 '지금 주기 · 10분 잔고 점검 · 1시간 탐색기 확인' 으로 짧아졌고 Ankr 칸에 '필수' 표시가 붙어요.
 
-- **업데이트** — [업데이트](#업데이트) 순서대로 · 재구축·데이터 개정 없음. EVM 지갑이 있으면 **Alchemy 무료 키**를 넣어 주세요(설정 › 연결·키 · 저장하면 바로 · 재시작 없음 — [키 표](#3-키-준비--env-와-configjson)).
-- **옛 보유 토큰 찾기** — 지갑을 등록할 때 체인별 무료·키 출처를 합쳐 그 지갑이 주고받은 모든 토큰을 찾아 같은 블록 잔고로 기초 잔고 · 놓친 토큰이 나가 원장이 마이너스가 되면
-  직전 블록 잔고로 '발견 시점 기초 잔고' · 이미 등록한 지갑은 1회 도구로 한 번에 점검 — [옛 보유 토큰 찾기 · 체인 표](#옛-보유-토큰-찾기--체인-표).
-- **노드 키** — Alchemy 칸(EVM 지갑이 있으면 필수 표시 · 오늘 쓴 양) · Ankr 키로 토큰 찾기 보조 · 무료 키 버스트(따라잡을 때 하루 몫 3배까지 · 최근 31일 합은 80% 안) · '새로 받은 키' 스위치.
-- **선물·거래소** — 코인 정산 선물 손익의 달러 = 정산 시각 시세 · 바이빗 선물 수수료·펀딩 = 낸 시각 · 거래소 대출로 빌린 코인 원가([`loan_short`](#3-키-준비--env-와-configjson)) · 빗썸 지난 체결 시각 1회 도구.
-- **그 밖** — Base 처럼 지갑 많은 체인의 과거 기록 넓히기가 몇 배 빨라짐 · Alchemy 지원 EVM 73개 체인 표(`seed/coverage/evm_chains.json`) · 미추적 체인 점검 +18 · 외부 응답 크기 상한(공통 요청 경로 — 직접 조회 몇 곳은 다음 판).
+- **업데이트** — [업데이트](#업데이트) 순서대로(전부 멈춘 뒤 한꺼번에 시작) · 재구축·데이터 개정 없음. EVM 지갑이 있으면 **Ankr 무료 키**를 넣어 주세요(설정 › 연결·키 · 저장할 때 연결 1콜 확인 — [키 표](#3-키-준비--env-와-configjson)).
+  지난날 곡선은 LP 를 열었다 닫은 날·발견 시점 기초 잔고가 있는 날·백필 뒤 처음 넣은 거래소가 있으면 첫 화면 계산 때 한 번 다시 계산돼요(그날 값이 바뀔 수 있음).
+- **최신 먼저 · 옛 기록은 옆에서** — 새로 설치해도 모든 경로(Base 같은 RPC 체인·BNB Chain·Solana·탐색기)가 첫 주기부터 최신 블록을 보고 옛 기록은 옆 차선으로 · 새로 받는 체인은 블록스카웃을 첫 경로로 안 씀 ·
+  옛 구간 실패(노드 시간 초과·429)는 '나중에 다시'로 넘겨 최신을 막지 않음 · 백필 땐 실시간 몫만 남기고 무료 한도를 몰아 씀(하루 몫의 최대 10배 · 31일 합 80% 안).
+- **쉬는 지갑·전송 중** — 오래 안 쓴 지갑도 10분 잔고 점검 · 1시간 탐색기 확인 · 들어온 토큰은 10분마다 따로 확인(Ankr) · 거래소 → 내 지갑 '전송 중'이면 그 주소를 10분마다 · 받는 쪽 수집 전엔 48시간 지나도 '나감'으로 안 바꿈.
+- **첫 대사 전 오늘 보유·총자산 = 지금 실제 잔고** — 원가·손익·지난날 곡선은 옛 기록을 다 받으면(곡선 아래 진행률·남은 시간) 정확하게 · 전송 중 출금과 이중으로 세지 않음.
+- **그 밖** — 키 저장 때 연결 시험 · 지난날 곡선 LP 이중 계상 · 거래소 키 나중 추가 소급 · 스팸·사칭 행 숨김 · 받기만 한 옛 토큰은 코인게코 시세가 있을 때만 평가 · 응답 크기 상한 마무리 · AI 평가 실패 사유 · 화면 다듬기 ·
+  지난 판 알려진 한계 4가지 고침 · [AI 기능 켜기](#ai-기능-켜기--claude-cli-로그인) 절.
+- 지난 판(2026-10-10): 옛 보유 토큰 찾기 · 발견 시점 기초 잔고 · Alchemy 키 · 노드 키 버스트 · EVM 체인 표 · 선물 코인 정산 달러 · Base 넓히기 —
+  [CHANGELOG.md › 2026-10-10](CHANGELOG.md#2026-10-10--옛-보유-토큰-찾기--alchemy-키)
 - 지난 판(2026-10-09 밤): 원장 손상 대기·버전 표시 · 복구 도구 · 최초 인식 시가 안전장치 · 분류 보류 거래 · 대표 심볼 확인·정품 등록 · 대시보드 LP 카드 —
   [CHANGELOG.md › 2026-10-09 밤](CHANGELOG.md#2026-10-09-밤--외부-수정-검증-반영)
 - 지난 판(2026-10-09 오후): 선물 정산 = 정산 시각 · 스테이블 원화 환차 · 최초 인식 시가 · 수수료 원가 규약 · 곡선 재설계 · 서버 밖 둘째 백업 —
@@ -211,11 +215,12 @@ bash tools/setup.sh
 | 키(`.env` 이름) | 필수? | 어디서 받나 | 언제 필요한가 |
 |---|---|---|---|
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | https://dashboard.helius.dev (무료) | Solana 지갑 수집 |
-| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받음(키 하나로 여러 체인 · 하루 무료 한도의 80% 만). 없으면 공개 탐색기·RPC 로 받아 느리거나 늦게 기록될 수 있음 |
+| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://etherscan.io/myapikey (무료) | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받음(키 하나로 여러 체인 · 하루 무료 한도의 80% 만). 없으면 공개 노드(RPC)로 받아 최신 거래는 바로 보이지만 옛 기록은 늦게 채워짐 |
 | `TJ_ALCHEMY_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://dashboard.alchemy.com/signup (무료 — 월 3,000만 CU) | 지갑이 한 번이라도 주고받은 토큰 전부와 지금 잔고를 찾아 옛 보유 토큰을 빠뜨리지 않게 함(Base·Ethereum·Arbitrum 등). 감시·옛 기록은 무료 노드로 받고 이 키는 토큰·잔고 찾기에만 — 무료 한도의 80% 아래(하루 몫). 없어도 수집은 돌지만 옛 보유 토큰 찾기가 약해짐(탐색기 한 곳만) |
+| `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | https://www.ankr.com/rpc/ (무료 Freemium) | 오래 안 쓴 지갑에 들어온 토큰을 10분마다 빠르게 확인하고, BNB Chain·Base 옛 기록(아카이브)을 빠르게 받고, 같은 키로 토큰 찾기를 보조(Advanced API). 무료 한도의 80% 아래. 없어도 수집은 돌지만 공개 노드로만 받아 늦을 수 있음 |
 | `TJ_COINGECKO_KEY` | 선택 | https://www.coingecko.com/en/developers/dashboard → **Demo** 키(무료) 또는 유료 **Pro** 키 — 자동 판별 | 키 하나를 코인게코 시세(거래소 값이 없는 코인)·DEX 토큰 시세·원가·차트·NFT 바닥가가 같이 써서 빨라짐. 몫이 모자라거나 실패하면 그 콜만 무키로. 없으면 전부 무키 공용 한도라 느리고 NFT 바닥가는 처음 몇 시간 걸릴 수 있음. 프로 키는 플랜 한도의 10%(기본 · 25·50·80% 선택)만 씀 |
 | `TJ_OPENSEA_KEY` | 선택 | https://docs.opensea.io/reference/api-keys (무료 신청) | 넣으면 EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 원활하게 추적(없거나 실패하면 코인게코) |
-| `TJ_NODEREAL_KEY` · `TJ_ANKR_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal(https://dashboard.nodereal.io)·Ankr(https://www.ankr.com/rpc/) 대시보드(무료 키 있음) · QuickNode 는 유료 엔드포인트 주소 | BNB Chain·Base 옛 기록(아카이브) 노드 — 넣으면 BNB Chain 을 공개 노드 보관 기간보다 옛날까지 받음(Ankr 키는 같은 키로 토큰 찾기 보조 — Advanced API). 없으면 공개 노드로. 무료 키는 월 한도의 80%(백필 때 하루 몫 3배까지 버스트), 유료는 사용 비율(기본 10%) 안에서만 씀 — **설정 › 연결·키** 에서 요금제·연결 시험 |
+| `TJ_NODEREAL_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal(https://dashboard.nodereal.io) 대시보드(무료 키 있음) · QuickNode 는 유료 엔드포인트 주소 | BNB Chain·Base 옛 기록(아카이브) 노드 — 넣으면 BNB Chain 을 공개 노드 보관 기간보다 옛날까지 받음. 없으면 공개 노드로. 무료 키는 월 한도의 80%(백필 때 실시간 몫을 남기고 하루 몫의 최대 10배까지 버스트), 유료는 사용 비율(기본 10%) 안에서만 씀 — **설정 › 연결·키** 에서 요금제·연결 시험 |
 | `UPBIT_ACCESS` · `UPBIT_SECRET` | 선택 | 업비트 › 마이페이지 › Open API 관리 | 업비트 입출금·체결·잔고 |
 | `TJ_BITHUMB_KEY` · `TJ_BITHUMB_SECRET` | 선택 | 빗썸 › 마이페이지 › API 관리 | 빗썸 |
 | `TJ_BINANCE_KEY` · `TJ_BINANCE_SECRET` | 선택 | 바이낸스 › API Management | 바이낸스 |
@@ -230,6 +235,7 @@ bash tools/setup.sh
 > **거래소 키는 반드시 '조회(읽기)' 권한만 켜고, IP 화이트리스트를 거세요.**
 > 거래·출금·이체 권한은 절대 켜지 마세요. 바이낸스·바이빗·OKX 는 저장할 때 권한을 확인해 거래·출금·이체가 켜진 키를 거부하고,
 > 권한을 API 로 확인할 수 없는 업비트·빗썸·쿠코인·게이트는 '조회 권한만 켰음' 확인을 눌러야 저장됩니다.
+> 모든 키는 저장할 때 읽기 전용 1콜로 연결을 확인합니다 — 서비스가 키를 거부하면(401·403) 저장하지 않고, 연결이 안 되면(시간 초과 등) 저장한 뒤 경고만 띄웁니다.
 > 개인 키·시드 문구는 어디에도 필요 없습니다 — 이 봇은 조회만 합니다.
 
 RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐색기만 씁니다 — 기본 설정은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있고,
@@ -237,8 +243,11 @@ RPC 키는 필요 없습니다. `config.example.json` 은 공개 RPC·무료 탐
 한도를 공표하지 않은 공개 노드는 초당 요청 수를 스스로 낮게 묶습니다. 탐색기가 막혀도 공개 RPC 로 이어 받습니다(`rpc_fallback` — 아래 표 · [변경 내역 2026-10-07](CHANGELOG.md#2026-10-07)).
 노드 키(Alchemy·Ankr·NodeReal)는 **설정 › 연결·키 › 탐색기 키** 에 키만 붙여 넣으면 `.env` 에만 저장되고 노드 주소는 메모리에서만 만들어집니다(`config.json` 에 키가 박히지 않음).
 감시·백필은 늘 무료 노드가 먼저이고, 키를 쓰는 호출은 서비스마다 하루 장부로 세어 **공표 무료 한도의 80%** 를 넘기 전에 그날은 멈춥니다(유료 요금제를 고르면 월 한도 × 사용 비율 10·25·50·80%).
-무료 노드 키는 백필·첫 전수처럼 밀린 일을 따라잡을 때만 하루 몫을 3배까지 당겨 쓰고(**버스트** — 최근 31일 합은 늘 월 한도의 80% 안 · 감시 몫은 남겨 둠) 설정 칸에 '버스트 중'이 보입니다.
+무료 노드 키는 백필·첫 전수처럼 밀린 일을 따라잡을 때 실시간이 실제로 쓰는 몫(장부 실측 × 1.5)만 남기고 하루 몫의 **최대 10배(열흘치)** 까지 당겨 씁니다
+(**버스트** — 최근 31일 합은 늘 월 한도의 80% 안 · 실시간 호출은 백필 때문에 막히지 않음) · 설정 칸에 '버스트 중'·'실시간 하루 약 · 오늘 백필 상한'이 보입니다.
 키를 새로 받아 처음 넣었다면 그 칸의 **새로 받은 키(지난 사용 없음)** 를 켜면 바로 버스트를 씁니다(자동으로 켜지지 않음 · 다른 곳에서 쓰던 키면 켜지 말 것 — [docs/API_KEYS.md](docs/API_KEYS.md)).
+오래(7일 넘게) 보내지 않은 지갑도 10분마다 잔고를 보고(공개 노드 · 묶음 1콜) 1시간마다 탐색기로 확인하고, 그런 지갑에 들어온 토큰은 10분마다 따로 확인합니다(Ankr 키 → 없으면 공개 노드 getLogs · `addr_tier.inflow_sec`) —
+들어온 입금은 늦어도 약 1시간 안에 기록되고, 거래소에서 내 지갑으로 보낸 출금이 '전송 중'이면 그 주소는 10분마다 확인합니다(지갑이 아주 많아 하루 한도를 넘을 때만 간격을 자동으로 늘림).
 더 빠른 유료 RPC 가 있으면 `config.json` 의 `chains.<체인>`·`bsc`·`sol` RPC 목록에 넣을 수 있습니다(키 박힌 URL 은 남에게 보여 주지 마세요).
 BNB Chain·Base 옛 기록용 노드 키(NodeReal·Ankr·QuickNode)는 위 표처럼 `.env` 에 넣으면 노드 주소를 메모리에서만 만들어 쓰고 `config.json` 에는 키 박힌 주소를 쓰지 않습니다.
 
@@ -265,7 +274,7 @@ BNB Chain·Base 옛 기록용 노드 키(NodeReal·Ankr·QuickNode)는 위 표�
 | `rpc_fallback` · `chains.<체인>.rpc_fallback` | 켜짐 | 이더스캔·블록스카웃이 막히면 그 체인을 공개 RPC 로 대체 — `false` 면 끔(전체 / 그 체인만) |
 | `chains.base.discovery` | `rpc` | Base 수집 방식 — 공개 RPC 로 직접. `"explorer"` 면 블록스카웃(되돌리기) |
 | `sol.helius_monthly_credits` | 없음(100만) | 헬리우스 월 크레딧(무료 플랜 100만). 유료 플랜이면 그 값을 적으세요 — 하루 몫 = 이 값의 80% ÷ 30 |
-| `sol.helius_head_min_pct` | 10 | 옛 기록을 채우는 동안 새 거래 확인에 떼어 두는 헬리우스 하루 몫(%) · 1~70 |
+| `sol.helius_head_min_pct` | 10 | 옛 기록을 채우는 동안 새 거래 확인에 떼어 두는 헬리우스 하루 몫(%)의 상한 · 1~70 — 공개 노드가 새 거래 확인을 맡아 건강하면 실제 사용량 × 1.25 까지 줄여요(바닥 3%) |
 | `sol.head_rpc` · `sol.archive_rpc` | publicnode · Solana 공식 공개 노드 | Solana 새 거래 확인용 / 헬리우스 몫이 없을 때 옛 기록용 공개 노드. `""` 면 끔(헬리우스만) |
 | `price_overrides` | 없음 | 비상용 수동 가격 고정 |
 | `loan_short` | 없음(꺼짐) | 거래소 대출로 빌려 출금했던 기간 — 예(합성): `[{"exchange": "okx", "asset": "ETH", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}]`(asset `"*"` = 그 거래소 전부 · 날짜 = UTC 그날 처음~끝). 그 기간에 거래소 보유가 출금으로 0 밑으로 내려갔다가 나중에 같은 거래소 입금·매수로 채워진 몫만 '빌린 코인'으로 계산(원가 = 빌린 시각 시가 · 갚을 때 되산 원가와의 차 = 실현 · 명세 '대출 상환' 행 · 화면 계산만 — 원장 무변). **대출 기록으로 확인된 기간만** 넣으세요 — 모양만으로는 정하지 않아요(6시간 안에 채워진 몫·업비트·빗썸·Hyperliquid·스테이블 제외 · 시세가 없으면 종전처럼 원가 미확인). 최초 인식 시가가 켜져 있을 때만(기본 켬) · 바꾸면 `pm2 restart tj-web` |
@@ -301,15 +310,16 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
 
 - 처음엔 지갑마다 **최근 5개월**을 거슬러 받습니다(백필). 그동안 화면 숫자는 계속 바뀝니다.
 - 걸리는 시간(이 저장소의 실측 모델 `seed/coverage/speed_model.json` 기준, 무료 한도):
-  - 이더스캔 계열 체인: 지갑당 수 초~수십 초 · Optimism 등 블록스카웃 계열: 지갑당 수십 초~4분 · Base(공개 RPC): 새 거래는 바로, 옛 기록은 뒤에서 채움(지갑·기간에 따라 몇 시간까지)
-  - BNB Chain: 지갑 수와 무관하게 5개월 ≈ 20~25분 · Solana: 거래 1건 ≈ 0.4초(1,000건 ≈ 7분)
+  - 이더스캔 계열 체인: 지갑당 수 초~수십 초 · Base·Optimism 등 이더스캔 키가 없는 체인: 공개 RPC 로 받아요 — **가장 최근 거래는 첫 주기(1~2분) 안에 먼저 보이고**, 최근 48시간 나머지와 옛 구간은 뒤에서 따로 채워서 지갑·노드에 따라 몇 시간~며칠(그동안도 새 거래는 바로 보여요 · 새 설치는 블록스카웃을 수집 첫 경로로 쓰지 않아요)
+  - BNB Chain: 지갑 수와 무관하게 5개월 ≈ 20~25분(최신 블록은 첫 주기부터 · 옛 기록은 옆 차선에서) · Solana: 거래 1건 ≈ 0.4초(1,000건 ≈ 7분 — 최근 하루 거래는 첫 확인 때 먼저 보이고 옛 기록은 뒤에서 이어 받아요)
   - 거래소: 업비트 과거 체결은 1분에 7일 창씩 이어 받아 몇 달이면 수십 분 — 해외 거래소도 비슷
   - 지갑·거래가 많으면 **몇 시간** 걸릴 수 있습니다. 그 뒤로는 증분만 받아 1~몇 분 안에 따라갑니다.
-  - 이더스캔·헬리우스 하루 몫은 옛 기록 채우기가 먼저 쓰므로, **첫날은 새 거래 확인이 평소보다 늦을 수 있어요.** 옛 기록이 다 채워지면 평소 속도로 돌아옵니다.
+  - 옛 기록을 채우는 동안에도 이더스캔·헬리우스·노드 키는 **새 거래 확인 몫(실제 사용량에 여유를 더한 만큼)을 먼저 떼어 두고** 남는 한도를 옛 기록에 몰아 써요 — 첫날에도 새 거래는 보통 몇 분 안에 보여요.
 - 어디서 보나:
   - 화면 위의 **상태 표시줄 → 상태 패널 열기** — 수집기별 '과거 기록 수집 중'·지연·오류
   - **설정 › 수집 한계** — 거래소·체인별로 어디까지 받았고 무엇을 못 받는지([docs/COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) 와 같은 내용)
   - 로그: `pm2 logs tj-core` · `pm2 logs tj-evm` 등
+- 옛 기록을 다 받기 전(그 체인 첫 잔고 대사 전)에도 **오늘 보유·총자산은 지금 실제 잔고**로 보여요(보관처 '지금 잔고(옛 기록 받는 중)'). 원가·손익·지난날 곡선은 옛 기록을 다 받으면 정확하게 맞춰지고, 대시보드 곡선 아래에 진행률·남은 시간이 보여요.
 - 백필이 끝나기 전에는 '원가 미확인'·잔고 차이가 많이 보이는 게 정상입니다. 끝난 뒤에도 남는 것만 **미매칭** 탭에서 처리하세요.
 - 텔레그램을 연결해도 동기화·과거 기록 가져오기 같은 봇 내부 소식은 텔레그램으로 보내지 않습니다(상태 패널에만 — 처음 다 가져왔을 때 한 통만). 자세한 건 [텔레그램 알림 설정](#텔레그램-알림-설정).
 
@@ -405,6 +415,25 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
 - 한 번에 최대 50개. 더 많으면 나눠서 넣으세요.
 - 이름(별칭)·메모는 추가한 뒤 지갑 목록에서 하나씩 붙입니다.
 - **개인 키·시드 문구는 절대 넣지 마세요** — 주소만 필요합니다. 줄로 나뉜 키 조각처럼 보이는 입력은 주소로 저장하지 않습니다.
+
+## AI 기능 켜기 — `claude` CLI 로그인
+
+AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌리는 그 컴퓨터(서버)의 `claude` CLI**(Claude Code)를 그대로 씁니다. 기본은 꺼져 있습니다.
+
+1. **설치** — 봇을 돌리는 컴퓨터에 Claude Code 를 설치합니다(공식 안내: https://docs.claude.com/en/docs/claude-code/setup).
+2. **봇과 같은 사용자로 로그인** — pm2 로 봇을 돌리는 사용자(예: 서버의 `tj`)로 들어가 `claude` 를 한 번 실행하고 안내대로 로그인합니다(`/login`).
+   - 브라우저가 없는 서버: 로그인 화면이 주는 주소를 다른 기기 브라우저에서 열어 승인하거나,
+     `claude setup-token` 으로 만든 토큰을 `CLAUDE_CODE_OAUTH_TOKEN` 으로, 또는 API 키를 `ANTHROPIC_API_KEY` 로 그 사용자의 환경에 둡니다.
+     봇은 CLI 에 허용 목록의 환경변수만 넘깁니다(기본 환경·프록시·사내 인증서, Claude 로그인·게이트웨이·Bedrock·Vertex 변수 — 아래 '알아 둘 것' 참고) — `.env` 의 거래소 키 등은 넘기지 않습니다.
+   - 봇이 이미 pm2 로 돌고 있으면 새 환경변수(토큰·API 키)는 그냥 재시작으론 안 들어갑니다 — 그 변수를 셸에 넣은 뒤 `pm2 restart tj-web --update-env`(리뷰가 켜져 있으면 `pm2 restart tj-review --update-env` 도) 하고 `pm2 save` 로 바뀐 환경을 저장합니다(안 하면 재부팅 때 예전 값으로 돌아갑니다).
+3. **확인** — 같은 사용자로 `claude -p "ok"` 가 대답하면 됩니다.
+4. **켜기** — 영수증 평가 = `config.json` 의 `review.buy_eval_daily_max`·`review.sell_eval_daily_max`(하루 상한, 예: 20) 뒤 `pm2 restart tj-web` · 일간·주간 AI 리뷰 = `TJ_ENABLE_REVIEW=1 pm2 start ecosystem.config.js --only tj-review`(이 값은 `.env` 가 아니라 pm2 를 띄우는 셸의 환경변수로 줘야 `tj-review` 유닛이 생깁니다) 뒤 `pm2 save`.
+
+자주 막히는 것:
+- 영수증에 **"Claude 접근이 막혀 있어요"** — 로그인한 계정의 조직(팀·회사) 설정에서 Claude Code 사용이 꺼져 있습니다. 관리자에게 켜 달라고 하거나,
+  개인 계정으로 다시 로그인하거나 `ANTHROPIC_API_KEY` 를 쓰세요.
+- **"Claude 로그인이 필요해요"** — 로그인이 끊겼습니다(다른 사용자로 로그인했거나 토큰 만료). 2번을 봇과 같은 사용자로 다시.
+- **"Claude 사용 한도에 걸렸어요"** — 잠시 뒤 '다시 평가'.
 
 ## 텔레그램 알림 설정
 
@@ -542,6 +571,9 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
 - **EVM 체인 표** — Alchemy 가 지원하는 EVM 메인넷 73개 = `seed/coverage/evm_chains.json`(체인 id·Alchemy 네트워크 이름·토큰 API 지원·'무료 경로 있음 / Alchemy 필요'·잔고 찾기·백필 보조·감시 예비 경로).
   표에 있다고 추적하지는 않아요 — 추적은 종전처럼 하루 1번 미추적 체인 점검에서 활동이 보이면 켜져요(설정 › 지갑 · 주소 › 체인별 조회에서 끔). Alchemy 앱에서 네트워크를 꺼 두면
   그 체인 조회가 막히니 앱의 네트워크는 전부 켜 두세요.
+- **받기만 한 옛 토큰** — 수집 기간 전부터 들고만 있던(기초 잔고뿐 · 이 기간에 사고판 적 없는) 토큰은 코인게코에 그 컨트랙트 시세가 있을 때만 평가해요 — 받기만 한 스캠 토큰이
+  총자산을 부풀리지 않게(없으면 0 · 격리 줄 · 정품 등록하면 평가). DEX 조회가 잠깐 실패해 판정을 미룬 토큰은 1시간마다 다시 판정하고 그동안 상태 패널에 '토큰 판정 대기 N'(노랑)이 보여요.
+- **정품 등록(도구)** — 남이 실행한 교환·LP 로 나간 일반 토큰(정품 목록 밖)이 마이너스로 남으면 `python3 tools/negabs_1010.py --genuine <CA> --chain <체인> --wallet <주소>`(미리보기) → `--apply`(정품 등록 + 그 칸 다시 시도).
 - 끄기 — `config.json` 의 `"token_discovery": {"enabled": false}`(종전 대사로) · `"negabs_enabled": false`(발견 시점 기초 잔고 끔).
 
 ## 백필 · 재구축 · 재백필
@@ -690,7 +722,7 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
   - `tools/upbit_trades_fill.py` — 업비트 옛 주문(체결 목록 없이 받은 것)의 실제 체결 시각 채우기(1회 · 미리보기 → `--fetch --yes` → `--apply --yes` · 원장은 tj-core 가 다시 기장).
   - `tools/repair_wrap_legs.py` — 이더스캔 경로로 기장된 직접 감싸기·풀기(WETH 등)의 빠진 랩드 토큰 레그 1회 복구(기본 = 점검만 · `--apply --yes` · 외부 호출 없음).
   - `tools/token_recheck_1010.py` — 이미 등록한 지갑의 옛 보유 토큰을 한 번에 전부 점검할 때(미리보기 전용 · 원장 쓰기 없음 · `--plan-only` 로 예상 콜 먼저 · 결과 JSON 줄은 아래 도구가 읽음 · [옛 보유 토큰 찾기](#옛-보유-토큰-찾기--체인-표)).
-  - `tools/negabs_1010.py` — 업데이트 전에 이미 생긴 원장 마이너스 칸(놓친 옛 보유 토큰)이나 위 점검 결과(`--recheck <파일>`)를 발견 시점 기초 잔고로 반영할 때(기본 = 미리보기 · `--rpc` 직전 블록 잔고 확인 · `--apply` = tj-core 가 다시 확인한 뒤 기장).
+  - `tools/negabs_1010.py` — 업데이트 전에 이미 생긴 원장 마이너스 칸(놓친 옛 보유 토큰)이나 위 점검 결과(`--recheck <파일>`)를 발견 시점 기초 잔고로 반영할 때(기본 = 미리보기 · `--rpc` 직전 블록 잔고 확인 · `--apply` = tj-core 가 다시 확인한 뒤 기장 · `--genuine <CA> --chain --wallet` = 그 칸 일반 토큰 정품 등록).
   - `tools/bithumb_filltime_1010.py` — 예전 판이 빗썸 지정가 체결을 주문 생성 시각으로 적었을 때 마지막 체결 시각으로 바로잡기(1회 · `--base <설치 폴더>` · 미리보기 → `--fetch`(초당 4) → `--apply` · tj-core 가 다시 기장 · 적용 뒤 예전 판으로 되돌리려면 적용 전 백업으로).
 
 ## 보안 · 데이터
@@ -778,6 +810,12 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
 | `rabby.enabled` · `rabby.min_wallet_usd` | 켜짐 · 1000 | 지갑 포트폴리오 보강(Rabby 공개 API) · 대상 지갑 평가액 기준 |
 | `token_discovery.enabled` | 켜짐 | `false` 면 지갑 등록 대사의 옛 보유 토큰 찾기를 끄고 종전 대사로([옛 보유 토큰 찾기](#옛-보유-토큰-찾기--체인-표)) |
 | `negabs_enabled` | 켜짐 | `false` 면 발견 시점 기초 잔고(놓친 옛 보유 토큰이 나가 생긴 원장 마이너스를 직전 블록 잔고로 바로잡기) 끔 |
+| `rpc_first` · `chains.<체인>.rpc_first` | 켜짐 | 새로 받는 탐색기 체인(Ethereum·Arbitrum·Polygon 등)의 수집 순서 = 이더스캔(키 있고 그 체인 지원) → 공개 RPC → 블록스카웃은 최후. 체인별로 처음 정한 순서는 `state/evm_route.json` 에 고정(이미 탐색기로 받던 설치본 = 종전 순서) · `false` = 종전(이더스캔 → 블록스카웃 → RPC) |
+| `chains.<체인>.rpc_lanes` · `chains.<체인>.rpc_lanes_recent_hours` | 켜짐 · 48 | RPC 로 받는 체인 = 최신 블록 먼저(라이브 차선) + 옛 구간은 뒤 차선 · 라이브 차선이 처음 맡는 최근 시간. `false` = 종전 단일 차선(창 시작부터 순서대로) |
+| `addr_tier.inflow_sec` | 600 | 쉬는·빈 지갑에 들어온 토큰 확인 간격(초 · Ankr 키 → 공개 노드 getLogs · `0` = 끔 · tj-evm 재시작 때 반영) |
+| `bsc.lanes` · `bsc.backfill_days` | 켜짐 · `backfill_months` × 30 | BNB Chain 최신 블록 먼저 + 옛 기록 옆 차선(`false` = 종전 한 차선) · BSC 수집 기간(일 — 따로 정할 때만) |
+| `sol.live_first_hours` · `sol.live_first_n` · `sol.old_slice_sec` | 24 · 100 · 60 | Solana 첫 동기화 때 먼저 받는 최근 시간 · 주소당 건수 · 옛 구간을 사이클마다 끊어 받는 초(`live_first_hours`·`old_slice_sec` 가 `0` = 종전 순서) |
+| `sol.helius_burst` | 켜짐 | 무료 헬리우스의 옛 기록 버스트(하루 몫의 최대 10배 · 최근 31일 합 80% 안) — `false` 면 끔 |
 
 ## 알아 둘 것
 
@@ -786,6 +824,18 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
 - OKX·쿠코인·게이트는 **마진 체결을 수집하지 않습니다**(현물 체결과 마진 잔고·대출만) — 마진 계정에서 사고판 손익이 빠지고 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
 - BNB Chain 은 노드가 내부 이동(trace)을 주지 않습니다 — **내가 서명한 토큰 → BNB 매도**의 받은 BNB 는 WBNB 풀기 기록(방금 거래는 잔고로 한 번 더 확인)으로 받지만, **남이 실행한 거래로 컨트랙트가 보내 준 BNB**(브리지 지급·환불·봇이 대신 판 매도 대금)는 못 받아 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메웁니다.
 - 신고용 명세는 계산 보조 자료입니다. 세무 판단은 전문가와 확인하세요.
+- **알려진 한계(이번 판)** — 무엇이 보이는지 · 언제 저절로 풀리는지 · 피하는 법:
+  - 새로 설치한 직후 한 체인의 모든 지갑이 옛 기록을 다 받을 때까지(그 체인 첫 잔고 대사 전) 오늘 보유·총자산은 지금 실제 잔고로 보이지만, 원가·손익·지난날 곡선에는 수집 기간 전부터 있던 보유(기초 잔고)가 아직 빠져 있어요 — 판 코인 원가가 '미확인'이거나 지난날 곡선이 낮게 보일 수 있고, 상태 패널에 '원장 음수 보유 … · 첫 백필 중'(주황)이 잠깐 보일 수 있어요. 그 체인 백필이 끝나면 저절로 맞춰져요(진행·남은 시간 = 대시보드 곡선 아래 안내·상태 패널) · 빨리 보려면 백필 기간(최근 N개월)을 짧게 잡으세요.
+  - 첫 대사 전 '지금 잔고'는 1시간마다 다시 읽어요 — BNB Chain·Solana 잔고를 읽는 도중에 출금이 겹치거나, 거래소 → 내 지갑 '전송 중' 출금이 아직 안 닿았는데 그 지갑에 수집 기간 이전 보유가 함께 있으면 그 보유가 잠깐 덜 보일 수 있어요 — 다음 조회(1시간 안)·도착 기록 뒤 맞춰져요.
+  - 코인 카드 안 기록 줄에 사칭·스팸 토큰 줄이 남을 수 있어요 — 기록 목록·보유·총자산에선 빠지니 무시해도 돼요.
+  - 업비트·빗썸이 아닌 원화 거래소 키를 백필이 끝난 뒤 처음 넣으면 그 거래소 원화 몫이 지난 곡선에 소급되지 않을 수 있어요 — 넣은 날부터는 맞아요 · 처음 설치할 때 거래소 키를 함께 넣으면 피할 수 있어요.
+  - 시간당 수백 건씩 로그 없는 BNB 발신(순수 BNB 송금)을 하는 봇 같은 주소는 BNB Chain 이 그런 발신을 사이클마다 몇 건씩만 되찾아 기록이 뒤처질 수 있어요(최근 발신부터 · 보통 지갑은 해당 없음 · 잔고 대사가 차이를 표시).
+  - Base 처럼 공개 노드만 쓰는 RPC 체인은 내부 이체 확인(trace)이 노드 시간 초과·한도(429)에 걸리면 늦게 채워져요 — 거래는 먼저 기록되고 내부 이동(컨트랙트가 보낸 ETH)은 '나중에 다시'로 점점 길게(최대 6시간 간격 · 30일까지) 다시 추적해 채워요([수집 한계](docs/COLLECTION_LIMITS.md)) · 따로 할 일 없이 기다리면 돼요(무료 키로는 Base 추적을 못 써요).
+  - Alchemy 키만 넣은 설치는 Arbitrum 등 이더스캔 체인의 옛 구간을 공개 노드로 받아 오래 걸려요(최신 거래는 바로) — Etherscan·Ankr 무료 키를 같이 넣으세요. 이더스캔 키를 나중에 지우면 그 체인은 공개 노드로 옮겨 가며 최근 몇 시간을 다시 훑어요(보통 몇 분 · 노드가 잠깐 막히면 그동안 새 거래가 늦을 수 있음).
+  - 이더스캔 첫 백필 창 밖에서 늦게 색인된 내부 이체(컨트랙트가 보낸 네이티브 코인) 일부는 자동으로 다시 확인되지 않을 수 있어요(드묾) — 그 지갑 네이티브 수량이 조금 어긋나 보이면 상태 패널의 잔고 대조로 확인하세요.
+  - 지갑을 넣을 때 고르는 체인 칩에는 아직 체인마다 어떤 경로로 받는지 설명이 없어요 — [수집 한계](docs/COLLECTION_LIMITS.md) 표를 보세요(다음 판에 화면 설명).
+  - 설치·재시작 직후 몇 초 동안 상태 표시줄에 '대시보드 응답 없음' 경고가 잠깐 보일 수 있어요 — 첫 화면 계산이 끝나면 사라져요(새로 고침).
+  - 토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 다른 외부 조회와 같은 상한으로 맞춰요.
 
 ## 시험 실행
 
@@ -820,17 +870,21 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Start:** `bash tools/setup.sh` (creates `config.json` and `.env` (both mode 600) and `state/`; installs nothing), then
   `pm2 start ecosystem.config.js` and open http://127.0.0.1:8023/ — a setup wizard handles wallets (paste many at once), keys and Telegram.
   `bash tools/setup.sh --demo` shows synthetic data without saving anything.
-- **Keys:** a free Helius key is required for Solana wallets, and free Etherscan and Alchemy keys for EVM wallets (both are a warning only —
-  without them collection still runs on public explorers/RPC, just slower or later). Alchemy (`TJ_ALCHEMY_KEY`, https://dashboard.alchemy.com/signup)
-  finds every token a wallet ever touched plus current balances so long-held tokens are not missed (watching and backfill stay on free nodes; metered per day
-  under 80% of the free 30M CU/month; saving the key needs no restart). Ankr (`TJ_ANKR_KEY`, also token-discovery backup), NodeReal and QuickNode node keys are optional;
-  free node keys may burst up to 3x the daily share while catching up (rolling 31-day total stays under 80% of the monthly limit). CoinGecko (demo or pro —
-  detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
+- **Keys:** free keys are required for Helius (Solana wallets) and for Etherscan, Alchemy and Ankr (EVM wallets — the three EVM keys are a warning only:
+  without them collection still runs on public nodes, newest transactions first, but old history fills more slowly, old-holding discovery is weaker and idle
+  wallets' incoming tokens are checked less often). Alchemy (`TJ_ALCHEMY_KEY`, https://dashboard.alchemy.com/signup) finds every token a wallet ever touched
+  plus current balances so long-held tokens are not missed (watching and backfill stay on free nodes; metered under 80% of the free 30M CU/month; saving the key
+  needs no restart). Ankr (`TJ_ANKR_KEY`, https://www.ankr.com/rpc/) checks idle wallets for incoming tokens every 10 minutes, speeds up BNB Chain/Base archive
+  backfill and backs token discovery. Every key is checked with one read-only call when saved (a refused key is not saved). NodeReal and QuickNode node keys are optional;
+  free node keys may burst up to 10x the daily share while catching up, after keeping the measured real-time share (rolling 31-day total stays under 80% of the
+  monthly limit). CoinGecko (demo or pro — detected automatically) and OpenSea keys are optional; exchange keys must be **read-only**
   with an IP whitelist (keys with trade/withdraw/transfer permissions are refused where the exchange lets us check).
   Defaults run on free keys and public nodes only; external APIs are paced to 80% of their published limits.
 - **First run:** the default backfill is the last 5 months; expect minutes to a few hours depending on wallets and trades.
-  Progress is shown in the status panel and in Settings > collection limits. The Etherscan and Helius daily shares go to old history first,
-  so new-transaction checks can be slower on the first day.
+  Progress is shown in the status panel and in Settings > collection limits. Every collection path (explorers, EVM RPC chains, BNB Chain, Solana) looks at
+  the newest blocks first and fills old history in a side lane with whatever quota real-time checks leave, so new transactions show up within minutes even
+  on the first day (a fresh install never starts on Blockscout). Until a chain's old history is in, today's holdings and total use the actual current
+  balance; cost, PnL and past curves become exact once old history is complete (progress and time left are shown under the curve).
 - **Hyperliquid · NFT · prices:** Hyperliquid (HyperCore spot fills/transfers, perps cash and staked HYPE booked like an exchange and reconciled —
   opt in with `"hyperliquid": {"spot": true}`); NFT holdings with floor prices (auto-tracks collections with a floor and recent volume,
   candidate list, spam filtering with reasons, watch-only collections, an "include in total" switch that is off by default, CryptoPunks and
@@ -856,11 +910,17 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   (`seed/coverage/token_sources.json`). If a missed token is later sent out and the ledger goes negative, the balance one block earlier is read and a "found-at-discovery
   opening balance" (cost unknown) is booked. One-time tools for existing wallets: `tools/token_recheck_1010.py` (preview-only scan) → `tools/negabs_1010.py --recheck <file>`
   (preview, then `--apply`). `seed/coverage/evm_chains.json` lists the 73 Alchemy-supported EVM mainnets (free vs Alchemy-only paths); being listed does not mean tracked.
+  Tokens only ever received before the window (opening balance only) are valued only when CoinGecko has a price for that contract, so received scam tokens do not
+  inflate the total; `tools/negabs_1010.py --genuine <CA> --chain <chain> --wallet <address>` registers a plain token as genuine for a negative cell.
   Switches: `"token_discovery": {"enabled": false}`, `"negabs_enabled": false`.
 - **Borrowed coins:** `loan_short` in `config.json` — confirmed exchange-loan periods only, e.g. (synthetic) `[{"exchange": "okx", "asset": "ETH", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}]` —
   gives coins borrowed and withdrawn (exchange balance pushed below zero, later refilled on the same exchange) a cost at the borrow-time price; the difference on refill is realized
   (a "대출 상환" row in the statement; display calculation only, with first-seen pricing on — the default; empty = off).
-- **Release notes:** what changed in each release (old-holding discovery, found-at-discovery opening balances, the Alchemy key field, node-key catch-up bursts,
+- **Release notes:** what changed in each release (newest blocks first on every collection path for fresh installs — RPC side lanes, BNB Chain and Solana —,
+  no Blockscout as a first path, a required free Ankr key and a one-call connection check when any key is saved, idle wallets checked at least hourly with
+  10-minute incoming-token checks, catch-up bursts of up to ten days of free quota, today's holdings at the actual current balance before a chain's first
+  reconciliation (no double counting with in-transit withdrawals), late trace filling, past-curve LP and exchange-key fixes, hidden spam/impersonation rows,
+  response caps on the remaining direct lookups (the GoPlus token-safety lookup follows next release) and real AI failure reasons — on 2026-10-10 (2); old-holding discovery, found-at-discovery opening balances, the Alchemy key field, node-key catch-up bursts,
   an EVM chain table, settlement-time prices for coin-settled futures, response size caps on the shared request path, faster Base backfill, Bybit futures fees/funding at payment time,
   borrowed-coin cost and a Bithumb fill-time tool — on 2026-10-10; fixes from an external re-verification — corrupt-ledger hold, version and data-revision display,
   restore tool fixes, first-seen price safeguards, fee/bridge cost rules, replay order, futures/liquidation watch, slow-connection limits, instant
@@ -911,11 +971,26 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   logos off in Settings › 화면 · 표시 › 토큰 로고); a Cloudflare proxy may inject its Web Analytics script — disable that in Cloudflare if unwanted.
   Report security problems privately (GitHub › Security › Report a vulnerability — see [SECURITY.md](SECURITY.md)).
   Advanced environment variables and config keys are listed under [고급 설정](#고급-설정); release notes are in [CHANGELOG.md](CHANGELOG.md).
-- **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled. Only an
+- **AI features** (daily/weekly review, receipt evaluation) are off by default and use your local `claude` CLI when enabled (log in as the same OS user that runs the bot: run `claude` → `/login`; on a headless server use `claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY`; check with `claude -p "ok"`; "organization has disabled Claude subscription access" means your org admin turned Claude Code off — ask them, log in with a personal account, or use an API key). Only an
   allow-list of environment variables is passed to it (PATH, HOME, locale, `HTTP(S)_PROXY`/`NO_PROXY`/`ALL_PROXY`, corporate CA variables
   `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`/`SSL_CERT_DIR`, and Claude login/gateway/Bedrock/Vertex variables) — never exchange keys or `.env` values.
   Receipt buy/sell evaluation is off by default; enable it by setting `review.sell_eval_daily_max` / `review.buy_eval_daily_max` to 1 or more
   (max calls per day). `review.coach_role` and `review.known_patterns` tailor the daily/weekly review to your style.
+- **Known limitations (this release):** until every wallet on a chain finishes its backfill (the chain's first balance reconciliation), today's holdings and
+  total use the actual current balance, but cost, PnL and past curves still miss holdings from before the backfill window — sold coins may show unknown cost,
+  past curves may look low and the status panel may briefly show a negative-holding warning marked "첫 백필 중" (first backfill, orange); it fixes itself (shorter backfill = sooner).
+  That interim current balance is re-read hourly — a withdrawal landing while BNB Chain/Solana balances are being read, or an exchange-to-own-wallet transfer still
+  in transit to a wallet that also held coins from before the window, can make that older holding look briefly smaller until the next read or arrival.
+  Impersonation/spam rows can remain inside a coin card's history (they are hidden from the history list and excluded from holdings and totals); a KRW
+  exchange other than Upbit/Bithumb added after the backfill finished may not be applied to the past curve (correct from that day — add exchange keys at
+  install time to avoid it); bot-like addresses sending hundreds of log-less BNB transfers per hour fall behind on BNB Chain (only a few are recovered per
+  cycle, newest first); on public-node-only chains such as Base, internal-transfer traces that time out or hit 429 fill in later (the trade is recorded first,
+  internal ETH is re-traced with backoff up to 6 hours apart for 30 days — no action needed; free keys cannot trace Base); an Alchemy-only install backfills old
+  Arbitrum/Etherscan-chain history slowly over public nodes (add the free Etherscan and Ankr keys), and removing the Etherscan key later re-scans the last
+  few hours on public nodes; a few late-indexed internal transfers outside Etherscan's first backfill window may not be re-checked automatically (rare — check
+  the balance reconciliation in the status panel); the chain chips in the add-wallet form do not yet explain how each chain is collected (see
+  `docs/COLLECTION_LIMITS.md`); a "dashboard not responding" warning can flash for a few seconds right after install or restart (it clears once the first
+  build finishes).
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
   same command on Python 3.9, 3.11 and 3.13.

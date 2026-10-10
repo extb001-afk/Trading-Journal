@@ -8,6 +8,7 @@ import urllib.parse
 
 import bf_engine
 import cgplan
+import common
 
 LANES = ("live", "past", "nft")
 GT_ROOT = "https://api.geckoterminal.com/api/v2"
@@ -204,7 +205,7 @@ def _err_info(e):
     if isinstance(e, urllib.error.HTTPError):
         body = ""
         try:
-            body = (e.read() or b"")[:400].decode("utf-8", "replace")
+            body = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:400].decode("utf-8", "replace")
         except Exception:
             body = ""
         ra = None

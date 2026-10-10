@@ -2605,7 +2605,7 @@ class Core:
     def _recon_fetch(self, chain: str, kind: str, wallets: list) -> dict:
         return self._recon_fetch_plan(chain, kind, wallets)()
 
-    def _recon_fetch_plan(self, chain: str, kind: str, wallets: list, mode: str = None):
+    def _recon_fetch_plan(self, chain: str, kind: str, wallets: list, mode: str = None, latest: bool = False):
         wallets = list(wallets)
         if kind == "sol":
             url9 = self._sol_rpc_url()
@@ -2656,7 +2656,9 @@ class Core:
             blk9 = min(int(cur9.get(w, cur9.get(str(w).lower()))) for w in wallets)
         except (TypeError, ValueError):
             blk9 = None
-        if not blk9 or blk9 <= 0:
+        if latest:
+            blk9 = None
+        elif not blk9 or blk9 <= 0:
             def _no_cur(chain=chain):
                 raise RuntimeError(f"recon {chain} 수집기 커서 블록 없음 — 대사 보류")
             return _no_cur
@@ -2835,6 +2837,18 @@ class Core:
     def _obs_tok_observed(self, sid: str, w: str, ca: str) -> bool:
         un, q = self._obs_cov(sid)
         k9 = f"{str(w).lower()}:{str(ca or '').lower()}"
+        if q is None and (sid == "recon:bsc" or str(sid).startswith("recon:bsc:")) and k9 not in un:
+            ck9 = self.__dict__.setdefault("_obs_bsc_keys_cache", {})
+            r9 = self.conn.execute("SELECT payload, observed_at FROM raw_observations WHERE obs_id=?", (sid,)).fetchone()
+            key9 = (sid, r9[1] if r9 else None)
+            if key9 not in ck9:
+                try:
+                    d9 = json.loads(r9[0]) if r9 and r9[0] else {}
+                except (TypeError, ValueError):
+                    d9 = {}
+                ck9[key9] = {str(x).lower(): {str(y).lower() for y in v} for x, v in d9.items() if isinstance(v, dict)} \
+                    if isinstance(d9, dict) else {}
+            return f"token:{str(ca or '').lower()}" in ck9[key9].get(str(w).lower(), set())
         return k9 not in un and (q is None or k9 in q)
 
     def _recon_onchain(self, chain: str, bal: dict) -> dict:
@@ -3313,12 +3327,155 @@ class Core:
         marker = os.path.join(common.STATE_DIR, "backfill_done")
         if not os.path.exists(marker):
             all_done = all(self._meta_get(f"recon_done_{c}") for c, _ in scopes)
-            all_done = all_done and bool(self._meta_get("recon_done_upbit"))
-            if scopes and all_done:
+            if not self._meta_get("recon_done_upbit") and self._upbit_keys():
+                all_done = False
+            exf9 = self._exf_connected() if all_done else []
+            if all_done and any(not self._meta_get(f"recon_done_exf_{ex9}") for ex9 in exf9):
+                all_done = False
+            if all_done and (scopes or (self._upbit_keys() or exf9)):
                 with open(marker, "w") as f:
-                    f.write(str(int(time.time())))
+                    f.write(repr(time.time()))
                 log.info("★백필 완료 마커 생성 — 일별 스냅샷 동결 시작★")
                 dm("BACKFILL_DONE", "전 체인 백필+기초잔고 대사 완료 — 일별 스냅샷 동결 시작")
+
+    @staticmethod
+    def _upbit_keys() -> bool:
+        e9 = common.read_env_file()
+        return bool(e9.get("UPBIT_ACCESS") and e9.get("UPBIT_SECRET"))
+
+    def _exf_connected(self) -> list:
+        import settings_store
+        e9 = common.read_env_file()
+        out = [ex9 for ex9, sp9 in settings_store.EXCHANGES.items()
+               if ex9 != "upbit" and all(e9.get(k9) for k9, _l9 in sp9.get("fields") or ())]
+        try:
+            import hl_spot
+            if hl_spot.addresses(self.cfg):
+                out.append("hyperliquid")
+        except Exception:
+            pass
+        return out
+
+    PROV_FILE = "prov_bal.json"
+    PROV_EVERY = 3600
+    PROV_TICK = 120
+
+    def _prov_targets(self) -> list:
+        scopes = [(c, "evm") for c in self.cfg.get("chains", {}) if self.my_wallets.get(c)]
+        if self.sol_wallets:
+            scopes.append(("sol", "sol"))
+        if any(w.get("type") == "bsc_rpc" for w in self.cfg["wallets"]):
+            scopes.append(("bsc", "bsc"))
+        out = []
+        for chain, kind in scopes:
+            ws = sorted(self.sol_wallets) if kind == "sol" else sorted(self.my_wallets.get(chain, set()))
+            if ws and not self._meta_get(f"recon_done_{chain}"):
+                out.append((chain, kind, "chain", ws))
+        return out
+
+    @staticmethod
+    def _prov_pack(bal: dict, mode: str, t0: float, req=None, t1: float = None, kind: str = None) -> dict:
+        bal = bal or {}
+        per = bal.get("per_wallet") or {}
+        meta = bal.get("_meta") or {}
+        hold = set(bal.get("_hold") or ())
+        qd = bal.get("_queried") if bal.get("_source") == "rpc" and isinstance(bal.get("_queried"), dict) else None
+        un = bal.get("_unobs") if isinstance(bal.get("_unobs"), dict) else {}
+        zeros = bal.get("_zero") if isinstance(bal.get("_zero"), dict) else {}
+        rpc9 = bal.get("_source") == "rpc"
+        blk9, bts9 = bal.get("_block"), bal.get("_block_ts")
+        out = {"mode": mode, "at": int(t0), "t1": int(t1 if t1 is not None else t0), "wallets": {}}
+        if rpc9 and isinstance(blk9, int) and not isinstance(blk9, bool) and isinstance(bts9, int) and not isinstance(bts9, bool):
+            out["block"], out["bts"] = blk9, bts9
+        if req is not None:
+            out["req"] = sorted(str(w) for w in req)
+        for w, wb in per.items():
+            if w in hold or not isinstance(wb, dict):
+                continue
+            d = {"tok": {}}
+            for key, amt in wb.items():
+                try:
+                    k2, addr = key
+                    a9 = int(amt)
+                except (TypeError, ValueError):
+                    continue
+                if a9 < 0:
+                    continue
+                if k2 == "native":
+                    d["native"] = str(a9)
+                else:
+                    sym, dec = (meta.get(addr) or (None, None))[:2]
+                    d["tok"][str(addr)] = [str(a9), sym, dec]
+            for ca in zeros.get(w) or ():
+                if ca:
+                    d["tok"].setdefault(str(ca), ["0", None, None])
+            if qd is not None:
+                d["q"] = sorted({str(x).lower() for x in (qd.get(w) or ())})
+            elif kind != "sol":
+                d["q"] = sorted({str(x).lower() for x in d["tok"]})
+            if un.get(w):
+                d["unobs"] = sorted({str(x).lower() for x in un[w]})
+            out["wallets"][str(w)] = d
+        return out
+
+    def prov_pass(self):
+        now = time.time()
+        if now - float(self.__dict__.get("_prov_last") or 0) < self.PROV_TICK:
+            return
+        self._prov_last = now
+        p = os.path.join(common.STATE_DIR, self.PROV_FILE)
+        if self.recon_months <= 0:
+            if os.path.exists(p):
+                os.remove(p)
+            return
+        try:
+            st = common.read_json(p, {})
+        except (Exception, SystemExit):
+            st = {}
+        st = st if isinstance(st, dict) else {}
+        jobs = self.__dict__.setdefault("_prov_jobs", {})
+        tg = {c: (k, m, ws) for c, k, m, ws in self._prov_targets()}
+        changed = False
+        for c in [c for c in st if c not in tg]:
+            st.pop(c, None)
+            changed = True
+        for c, (kind, mode, ws) in tg.items():
+            job = jobs.get(c)
+            if job is not None:
+                if not job["ev"].is_set():
+                    continue
+                jobs.pop(c, None)
+                if job["bal"] is not None and job["mode"] == mode and job["wallets"] == ws:
+                    st[c] = self._prov_pack(job["bal"], mode, job["t0"], req=ws, t1=job.get("t1"), kind=kind)
+                    changed = True
+                elif job["err"] is not None:
+                    log.info("임시 잔고 %s 조회 실패(다음 바퀴): %s", c, common.safe_err(job["err"])[:120])
+                continue
+            ent = st.get(c)
+            if isinstance(ent, dict) and ent.get("mode") == mode and (ent.get("req") or sorted((ent.get("wallets") or {}).keys())) == sorted(str(w) for w in ws) \
+                    and now - float(ent.get("at") or 0) < self.PROV_EVERY:
+                continue
+            if any(not j["ev"].is_set() for j in jobs.values()):
+                continue
+            try:
+                fn = self._recon_fetch_plan(c, kind, ws, None, latest=True)
+            except Exception as e:
+                log.info("임시 잔고 %s 조회 준비 실패(다음 바퀴): %s", c, common.safe_err(e)[:120])
+                continue
+            job = {"wallets": ws, "mode": mode, "t0": now, "bal": None, "err": None, "ev": threading.Event()}
+
+            def _run(job=job, fn=fn):
+                try:
+                    job["bal"] = fn()
+                except BaseException as e:
+                    job["err"] = e
+                finally:
+                    job["t1"] = time.time()
+                    job["ev"].set()
+            jobs[c] = job
+            threading.Thread(target=_run, name=f"tj-prov-{c}", daemon=True).start()
+        if changed:
+            common.atomic_write_json(p, st)
 
     def _streams_have_data(self) -> bool:
         for stream, reader in (("evm", self.reader), ("sol", self.sol_reader),
@@ -6068,6 +6225,25 @@ class Core:
     EXF_RETIME_EX = ("bithumb",)
 
     def _consume_exf_retime(self, rec: dict):
+        if not hasattr(self.px, "nb_begin"):
+            return self._consume_exf_retime_cached(rec)
+        self.px.nb_begin()
+        try:
+            return self._consume_exf_retime_cached(rec)
+        finally:
+            pend = self.px.nb_end()
+            if pend:
+                try:
+                    q = self.__dict__.get("_exf_retime_pxq")
+                    if q is None:
+                        q = self._exf_retime_pxq = pricing.FxWarmQueue(self.px, name="tj-retime-px")
+                    q.add(pend)
+                    log.info("체결 시각 바로잡기: 캐시에 없는 환율·시세 %d개 = 배경에서 받는 중(원장 반영은 기다리지 않음 · 못 바로잡은 체결은 몇 분 뒤 --apply 다시)",
+                             len(pend))
+                except Exception as e:
+                    log.warning("체결 시각 바로잡기: 배경 조회 시작 실패: %s", common.safe_err(e)[:120])
+
+    def _consume_exf_retime_cached(self, rec: dict):
         ex = str(rec.get("exchange") or "")
         if ex not in self.EXF_RETIME_EX:
             log.warning("체결 시각 바로잡기: 받지 않는 거래소 %r — 레코드 무시", ex[:20])
@@ -6081,7 +6257,7 @@ class Core:
 
         def legs(fid9):
             return self.conn.execute(
-                "SELECT leg_seq, asset_id, location, qty_base, leg_kind, event, event_ts, cost_usd FROM postings"
+                "SELECT leg_seq, asset_id, location, qty_base, leg_kind, event, event_ts, cost_usd, cost_krw FROM postings"
                 " WHERE source_kind='exchange' AND source_ns=? AND source_id=?", (ns, fid9)).fetchall()
 
         def shape(rows):
@@ -6094,12 +6270,6 @@ class Core:
             why_n[why] = why_n.get(why, 0) + 1
             if not quiet:
                 log.warning("%s 체결 시각 바로잡기 건너뜀 %s: %s", ex, fid9[:24], why)
-        try:
-            ms9 = [int(it.get("ts") or 0) for it in items]
-            if hasattr(self.px, "fx_warm") and any(m > 0 for m in ms9):
-                self.px.fx_warm([m for m in ms9 if m > 0])
-        except Exception as e:
-            log.warning("체결 시각 바로잡기: 환율 미리 받기 실패(체결마다 따로 받음): %s", common.safe_err(e)[:120])
         for it in items:
             fid = str(it.get("id") or "")
             try:
@@ -6146,10 +6316,13 @@ class Core:
                 self._post_exf_fill(ex, merged)
                 news = legs(fid)
                 had = {int(o["leg_seq"]) for o in olds if o["cost_usd"] is not None}
+                had_krw = {int(o["leg_seq"]) for o in olds if o["cost_krw"] is not None}
                 if shape(news) != shape(olds) or any(int(r9["event_ts"]) != t_new // 1000 for r9 in news):
                     undo = "다시 만든 레그가 다름"
                 elif any(int(r9["leg_seq"]) in had and r9["cost_usd"] is None for r9 in news):
                     undo = "새 시각 원가 USD 미확보(환율·쿼트 시세를 못 받음 — 다음 --apply 때 다시)"
+                elif any(int(r9["leg_seq"]) in had_krw and r9["cost_krw"] is None for r9 in news):
+                    undo = "새 시각 원가 KRW 미확보(환율을 못 받음 — 다음 --apply 때 다시)"
                 else:
                     t_min = min([t for t in [t_min, t_old // 1000, t_new // 1000] if t is not None])
             if undo:
@@ -7842,6 +8015,11 @@ class Core:
             except Exception as e:
                 self.conn.rollback()
                 log.error("recon_pass 실패(다음 주기 재시도): %s", e)
+            try:
+                self.prov_pass()
+            except Exception as e:
+                self.conn.rollback()
+                log.warning("임시 잔고 처리 실패(다음 주기): %s", common.safe_err(str(e))[:200])
             try:
                 self.negabs_pass(drained)
             except Exception as e:

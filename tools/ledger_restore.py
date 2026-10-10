@@ -492,6 +492,8 @@ def plan_sol(sd: str, B: dict, cfg: dict, cut: int, notes: list) -> dict:
             back = int((time.time() - cut) // 172800) + 2
             stk["rwd_next"] = max(0, stk["rwd_next"] - back)
     new.pop("_synced_at", None)
+    for k9 in [k9 for k9 in new if k9.startswith(("_hl:", "_fbw:"))]:
+        new.pop(k9, None)
     if new != cur:
         files["cursor_sol.json"] = new
         notes.append(f"cursor_sol.json: 기준 서명으로 되감은 주소 {n_set} · 처음부터 다시 받을 주소 {n_drop}")
@@ -521,7 +523,7 @@ def plan_bsc(sd: str, B: dict, cut: int, now: int, notes: list) -> dict:
             if b < fb:
                 new["from_block"] = max(0, b)
                 notes.append(f"cursor_bsc.json: from_block {fb} → {new['from_block']}")
-        for k9 in ("_scan", "_synced_at"):
+        for k9 in ("_scan", "_synced_at", "_live", "_lscan"):
             new.pop(k9, None)
         if new != cur:
             files["cursor_bsc.json"] = new

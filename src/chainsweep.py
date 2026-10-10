@@ -391,7 +391,7 @@ def run_once(cfg: dict, price_fn=None, post=None, now: float = None, gate: dict 
             res["autoEnabled"].append(f)
         else:
             f["reason"] = (d or {}).get("reason") or ("BSC 는 수동 등록(설정 화면)" if c9 == "bsc" else
-                                                      "자동 켜기 꺼짐(chain_sweep.auto_enable)" if d and d["ok"] else "")
+                                                      "자동 켜기 꺼짐 — 설정 › 지갑 추가에서 같은 주소에 이 체인을 고르면 등록" if d and d["ok"] else "")
             res["findings"].append(f)
     res["findings"].sort(key=lambda f: (-(f["usd"] or 0), f["chain"], f["wallet"]))
     return res

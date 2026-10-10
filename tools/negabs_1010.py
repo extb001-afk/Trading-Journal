@@ -68,6 +68,8 @@ def preview_neg(a, cfg) -> list:
             if (a.chain and ch != a.chain) or (a.wallet and w != a.wallet.lower()):
                 continue
             ar = discopen.asset_row(conn, aid)
+            if getattr(a, "genuine", None) and str((ar[2] if ar else "") or "").lower() != str(a.genuine).lower():
+                continue
             pl = discopen.plan_cell(conn, ch, w, aid, prefs, my.get(ch))
             k = discopen.cand_key(ch, w, aid)
             st0 = discopen._jload(discopen._meta(conn, k), None)
@@ -170,6 +172,39 @@ def preview_recheck(a, cfg, path) -> list:
     return out
 
 
+def check_genuine(a, cfg) -> tuple:
+    ch, w, ca = str(a.chain or ""), str(a.wallet or "").lower(), str(a.genuine or "").lower()
+    if w not in (_wallets(cfg).get(ch) or set()):
+        return False, "추적 중인 등록 지갑·체인 아님(--chain · --wallet 확인)", ""
+    if len(ca) != 42 or not ca.startswith("0x") or any(x not in "0123456789abcdef" for x in ca[2:]):
+        return False, "EVM 토큰 컨트랙트 주소(0x + 40자리)가 아님", ""
+    conn = _ro()
+    try:
+        r = conn.execute("SELECT asset_id, symbol FROM assets WHERE kind='token' AND chain=? AND lower(address)=?", (ch, ca)).fetchone()
+        if not r:
+            return False, "원장에 없는 토큰", ""
+        loc = f"wallet:{ch}:{w}"
+        if not discopen.cell_negative(conn, ch, loc, r[0]):
+            return False, "그 지갑 원장 음수 칸이 아님 — 이 명령은 음수 복구(② --retry) 전용", r[1] or ""
+        why = discopen.asset_guard(conn, r[0], _prefs())
+        if why:
+            return False, f"정품 등록 불가 — {why}" + (" (대표 심볼 흉내는 화면 '확인 필요' 배지에서)" if "사칭" in why else ""), r[1] or ""
+        pl = discopen.plan_cell(conn, ch, w, r[0], _prefs(), _wallets(cfg).get(ch))
+        import spamguard
+        if spamguard.is_genuine(ch, ca):
+            return True, f"이미 정품 목록 — 판정 {pl.get('st')}{' · ' + pl['why'] if pl.get('why') else ''}", r[1] or ""
+        if pl.get("st") != "skip" or "서명하지 않은" not in str(pl.get("why") or ""):
+            return False, f"정품 등록으로 풀리는 칸이 아님(판정 {pl.get('st')}{' · ' + pl['why'] if pl.get('why') else ''})", r[1] or ""
+        fn = discopen.first_neg(discopen.cell_rows(conn, loc, r[0]))
+        ev = conn.execute("SELECT event FROM tx_class WHERE chain=? AND txhash=?", (ch, fn["tx"])).fetchone() if isinstance(fn, dict) else None
+        ev = str(ev[0] if ev else "")
+        if not (ev in discopen.SWAPLIKE or ev.startswith("LP_")):
+            return False, f"남이 서명한 교환·LP 유출이 아님({ev or '분류 없음'}) — 정품 등록으로 풀리지 않음(주소 오염 가짜 전송 의심)", r[1] or ""
+        return True, f"{r[1] or ca} — 남이 서명한 유출이라 건너뛴 칸 · 공식 주소를 직접 확인했다면 --apply 로 정품 등록 + 그 칸 다시 요청", r[1] or ""
+    finally:
+        conn.close()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="발견 시점 기초 잔고 — 미리보기(기본) · --apply = tj-core 요청 파일")
     ap.add_argument("--apply", action="store_true", help="요청 파일을 쓴다(원장은 tj-core 가 다시 확인한 뒤 기장)")
@@ -179,8 +214,30 @@ def main(argv=None):
     ap.add_argument("--wallet")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--retry", action="store_true", help="이미 결과 난 칸도 다시(② --apply)")
+    ap.add_argument("--genuine", metavar="CA", help="④ 그 지갑 음수 칸의 일반 토큰을 정품 등록(--chain · --wallet 필수 · 미리보기 기본 · --apply = 등록 + 그 칸 다시 요청)")
     a = ap.parse_args(argv)
     cfg = common.load_config()
+    if a.genuine:
+        if a.recheck or not (a.chain and a.wallet):
+            ap.error("--genuine 은 --chain · --wallet 과 함께(--recheck 와는 따로)")
+        out9 = sys.stderr if a.json else sys.stdout
+        ok, msg, sym = check_genuine(a, cfg)
+        print(("[정품 등록 가능] " if ok else "[정품 등록 안 함] ") + msg, file=out9)
+        if not ok:
+            return 1
+        if not a.apply:
+            print("미리보기 — 쓰기 없음", file=out9)
+            return 0
+        import spamguard
+        try:
+            changed = spamguard.set_user_genuine(a.chain, a.genuine, sym, True)
+        except ValueError as e:
+            print("정품 등록 실패:", e, file=out9)
+            return 1
+        print(("정품 등록함 → state/" + spamguard.USER_FILE) if changed else "이미 정품 목록 — 등록 그대로", file=out9)
+        if changed:
+            time.sleep(float(getattr(spamguard, "USER_EVERY", 5.0)) + 1.0)
+        a.retry = True
     if a.recheck:
         rows = preview_recheck(a, cfg, a.recheck)
         if a.json:

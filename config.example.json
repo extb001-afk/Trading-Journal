@@ -9,6 +9,7 @@
       "etherscan_chainid": 1
     },
     "base": {
+      "_note": "기본 = RPC 전용 발견(코드 기본값 discovery=rpc — base.blockscout.com API 는 Cloudflare 403 · 무료 이더스캔 키는 Base 미지원). 최신 거래 먼저 · 옛 구간은 뒤 차선. blockscout 주소는 보조 조회용(막히면 건너뜀) · 탐색기로 되돌리기 = \"discovery\": \"explorer\"",
       "blockscout": "https://base.blockscout.com",
       "conf_depth": 30,
       "blocks_per_day": 43200
@@ -46,7 +47,7 @@
       "blocks_per_day": 17000
     },
     "robinhood": {
-      "_note": "기본 비활성 — 블록스카웃이 일반 요청을 막는 경우가 있다. 켜려면 enabled=true + browser_ua",
+      "_note": "RPC 전용 발견(discovery=rpc · 기본 켜짐) — 블록스카웃 API 는 Cloudflare 403 이라 부르지 않는다. archive_rpcs(유료 키, 선택)를 주면 옛 구간 네이티브도 이분 탐색",
       "discovery": "rpc",
       "rpcs": [
         "https://rpc.mainnet.chain.robinhood.com"
@@ -107,8 +108,14 @@
     "logs_rpcs": [
       "https://bsc.rpc.blxrbdn.com",
       "https://rpc-bsc.48.club",
-      "https://bsc.drpc.org"
+      "https://bsc.rpc.sentio.xyz"
     ],
+    "_logs_rpcs_note": "지갑 필터 getLogs 5,000블록을 받는 무키 노드(실측: sentio = 150일 전 구간까지 · blxrbdn ≈100일 · 48.club = 최근만 · drpc 무료 = 400·429라 뺌). 옛 구간을 키 없이 받는 길은 sentio — 빼면 키 없는 설치의 BSC 첫 백필이 멈춤",
+    "logs_rpcs_fallback": {
+      "https://bsc.blockrazor.xyz": 25,
+      "https://1rpc.io/bnb": 50
+    },
+    "_logs_rpcs_fallback_note": "주 풀(logs_rpcs)이 전부 막혔을 때만 노드별 상한(블록)으로 잘게 조회(최근 꼬리용)",
     "logs_sleep_sec": 1.2,
     "detail_rpcs": [
       "https://bsc-dataseed.bnbchain.org",
@@ -118,7 +125,7 @@
     ],
     "poll_sec": 90,
     "getlogs_span": 5000,
-    "backfill_days": 150,
+    "_backfill_days_note": "BSC 첫 백필 창 = backfill_months × 30일(마법사가 보여 주는 '최근 N개월'과 같음). 따로 정하려면 \"backfill_days\": 일수. 최신 블록은 첫 주기부터 실시간으로 보고, 옛 기록은 옆 차선으로 함께 받는다(끄기 \"lanes\": false)",
     "conf_depth": 20
   },
   "web": {
@@ -155,7 +162,7 @@
     "interval_sec": 86400,
     "min_usd": 1.0,
     "ignore": [],
-    "_note": "미추적 체인 점검(src/chainsweep.py, tj-web 하루 1회 — 등록 EVM 주소 × 66체인 nonce·잔고) + (체인, 지갑) 활동 게이트(state/chain_activity.json). auto_enable=true 면 활동이 확인된 쌍만 자동 추적(src/chaincatalog.py). ignore: ['<체인>', '<체인>:<0x지갑>']"
+    "_note": "미추적 체인 점검(src/chainsweep.py, tj-web 하루 1회 — 등록 EVM 주소 × 84체인 nonce·잔고) + (체인, 지갑) 활동 게이트(state/chain_activity.json). auto_enable=true 면 활동이 확인된 쌍만 자동 추적(src/chaincatalog.py). ignore: ['<체인>', '<체인>:<0x지갑>']"
   },
   "price_overrides": {},
   "price_overrides_note": "수동 가격 고정용 비상 스위치. 'chain:CA소문자': USD고정가(0=평가불가). 평시엔 CA·체인 DEX 실가가 1차 소스라 불필요. 수정 후 tj-web 재시작",

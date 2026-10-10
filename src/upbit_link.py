@@ -83,7 +83,7 @@ class Upbit:
                         self.remaining_min = int(part[4:])
                     except ValueError:
                         pass
-            return json.loads(r.read().decode())
+            return json.loads(common.read_capped(r).decode())
 
 
 def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60, stop=None) -> list:

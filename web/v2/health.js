@@ -109,6 +109,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
 .tjh-inc{padding:0;border-left-width:4px;overflow:hidden}
 .tjh-ih{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:10px 14px;text-align:left;font-size:14px;color:var(--text)}
 .tjh-ih b{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tjh-ifl{margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted)}   /* uifix1010(L5): 받음 확인 한 줄 */
 .tjh-ih .sp{flex:1}
 .tjh-ih .tjh-pill{flex:none}
 .tjh-lv{width:8px;height:8px;border-radius:50%;flex:none;background:var(--warn)}
@@ -168,6 +169,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
   .tjh-tbl td.lg{font-size:12px;color:var(--muted);width:auto!important}
   .tjh-tbl td{width:auto!important}
   .tjh-k{display:inline;padding-left:6px}
+  .tjh-ih b{white-space:normal;overflow:visible;line-height:1.35}   /* uifix1010(L10): 폰 문제 줄 제목은 줄바꿈('…필요해요(무…' 말줄임 대신) */
   .tjh-tbl td:first-child{display:flex;align-items:baseline}
 }`;
 
@@ -321,12 +323,17 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
         + (compact ? '' : opsLinkHTML(x)) + '</div>' : '') + '</div>';
   }
   const OPS_LINK = { 'ledger:poison': 'poison', 'rebuild:pnl': 'pnl', 'ledger:decimals': 'dec' };
-  const KEY_LINK = { 'key:etherscan': 'etherscan', 'key:alchemy': 'alchemy' };
+  const KEY_LINK = { 'key:etherscan': 'etherscan', 'key:alchemy': 'alchemy', 'key:ankr': 'ankr', 'key:helius': 'helius' };
   function opsLinkHTML(x) {
     const id9 = String(x.check || x.id || '').split('#')[0], kk = KEY_LINK[id9] || KEY_LINK[String(x.id || '')];
     if (kk) return '<div style="margin-top:8px"><button class="link" data-h="keyGoto" data-v="' + kk + '">설정에서 키 넣기 ›</button></div>';
     const k = OPS_LINK[id9] || OPS_LINK[String(x.id || '')];
     return k ? '<div style="margin-top:8px"><button class="link" data-h="opsGoto" data-v="' + k + '">정리 요청에서 처리 ›</button></div>' : '';
+  }
+  function inflowLine(u) {
+    const rx = /쉬는 지갑 토큰 받음 확인 ((?:(?!\s·\s).)+)(\s·\s직전 확인 실패 — 곧 다시)?/;
+    const parts = (u.sources || []).map(s0 => { const mm = rx.exec(String(s0.detail || '')); return mm ? esc(s0.label) + ' ' + esc(mm[1]) + (mm[2] ? ' — 직전 확인 실패, 곧 다시' : '') : ''; }).filter(Boolean);
+    return parts.length ? '<div class="tjh-ifl">쉬는 지갑 토큰 받음 확인 · ' + parts.join(' · ') + '</div>' : '';
   }
   function unitsHTML() {
     const us = (H.data && H.data.units) || [];
@@ -350,7 +357,7 @@ html.tjh-lock,html.tjh-lock body{overflow:hidden} .tjh-panel{overscroll-behavior
         + (okN ? '<span class="tjh-src pvx"><span class="tjh-dot sm ok"></span>정상 ' + okN + '</span>' : '');
       return '<tr data-anc="unit:' + esc(u.unit) + '"><td style="width:118px"><div class="tjh-u"><span class="tjh-dot sm ' + lvl + '"></span><b>' + esc(u.unit) + '</b></div><div class="tjh-k">' + esc(UNIT_KO[u.unit] || '') + '</div></td>'
         + '<td class="lg pvx" style="width:112px">' + esc(ps) + (sub ? '<div class="cap" style="font-size:12px">' + esc(sub) + '</div>' : '') + '</td>'
-        + '<td><div class="tjh-srcs">' + (srcs || '<span class="tjh-src off">추적 소스 없음</span>') + '</div></td></tr>';
+        + '<td><div class="tjh-srcs">' + (srcs || '<span class="tjh-src off">추적 소스 없음</span>') + '</div>' + inflowLine(u) + '</td></tr>';
     };
     const badU = us.filter(bad), okU = us.filter(u => !bad(u));
     const list = H.unitsAll ? us.map(u => row(u, true)) : badU.map(u => row(u, false));

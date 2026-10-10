@@ -66,12 +66,12 @@
   ],
   "chains": [
     {"id": "evm_explorer", "match": ["eth", "arbitrum", "polygon", "optimism", "gnosis", "scroll", "zksync", "megaeth", "story"], "name": "Ethereum·Arbitrum·Polygon·Optimism·Gnosis·Scroll·zkSync 등", "rows": [
-      {"kind": "전송·토큰·내부 이동", "api": "체인 시작부터(이더스캔 V2·blockscout 탐색기)", "bot": "수집 기간 전체 — Ethereum·Arbitrum·Polygon 은 이더스캔 키가 있어야 빨라요. 탐색기가 막히면(하루 한도·키 거부·403·색인 정지) 그 체인은 공개 RPC 로 이어 받고, 탐색기가 살아나면 돌아가요", "miss": "Optimism 2023-06 이전 레거시 구간은 색인 방식이 달라 빠질 수 있어요", "todo": "cost,market"}]},
+      {"kind": "전송·토큰·내부 이동", "api": "체인 시작부터(이더스캔 V2·blockscout 탐색기)", "bot": "수집 기간 전체 — Ethereum·Arbitrum·Polygon 은 이더스캔 키가 있어야 빨라요. 새로 설치하면 이더스캔 키가 없는 체인은 처음부터 공개 RPC 로 받아요(최근 48시간을 먼저 · 옛 구간은 뒤에서 채움 — 블록스카웃은 수집 첫 경로로 쓰지 않아요: 2026-10 실측 여러 체인 403·301). 이미 블록스카웃으로 받던 설치본은 그대로이고, 탐색기가 막히면(하루 한도·키 거부·403·색인 정지) 공개 RPC 로 이어 받다가 살아나면 돌아가요", "miss": "Optimism 2023-06 이전 레거시 구간은 색인 방식이 달라 빠질 수 있어요", "todo": "cost,market"}]},
     {"id": "bsc", "match": ["bsc"], "name": "BNB Chain", "rows": [
       {"kind": "전송·토큰", "api": "공개 노드는 최근 구간만 보관 — 옛 블록은 아카이브 노드(유료, 예: NodeReal)", "bot": "아카이브 RPC 를 넣으면 수집 기간 전체, 없으면 최근 구간만", "miss": "아카이브 없이는 공개 노드 보관 기간보다 옛 이력", "todo": "cost,market,register"},
       {"kind": "컨트랙트가 보내 준 BNB(내부 이동)", "api": "BNB Chain 노드는 내부 이동(trace)을 주지 않아요 — 잔고 차이로만 보여요", "bot": "내 거래의 토큰·BNB 직접 송수신과 WBNB 감싸기·풀기는 받아요. 내가 서명한 토큰 → BNB 매도(PancakeSwap 등 — 라우터가 WBNB 를 풀어 보내는 것)의 받은 BNB 도 받아요(WBNB 풀기 기록으로 · 방금 거래는 그 블록 잔고로 한 번 더 확인 — 수수료를 뗀 금액이면 실제 받은 금액, 남에게 보낸 것이면 기록 안 함)", "miss": "남이 실행한 거래로 컨트랙트가 보내 준 BNB(브리지 지급·환불·봇이 대신 판 매도 대금) — 잔고 대조가 차이를 기초 잔고(원가 미확인)로 메워요. 옛 블록(잔고 확인 불가)의 매도에서 받은 BNB 를 같은 거래에서 바로 다른 곳으로 보냈다면 받은 것으로 기록될 수 있어요(드묾 — 잔고 대조가 차이를 드러내요)", "todo": "cost,market,breakeven"}]},
     {"id": "base", "match": ["base"], "name": "Base", "rows": [
-      {"kind": "전송·토큰·내부 ETH 이동", "api": "체인 시작부터(공개 아카이브 RPC) — Base 블록스카웃 API 는 막혀 있고(2026-10 기준 403), 무료 이더스캔 키는 Base 를 지원하지 않아요", "bot": "공개 RPC 로 직접 — 새 거래를 먼저 받고 옛 구간은 뒤에서 채워요. 내가 보낸 거래의 내부 ETH 이동은 추적(trace)으로, 남이 보낸 ETH·로그 없는 이동은 잔고·nonce 대조로 찾아요", "miss": "무료 노드의 추적이 시간 초과로 끝내 실패한 거래는 내부 ETH 이동의 수량만 잔고 대조로 맞추고 손익 해석이 빠질 수 있어요 · 옛 구간을 채우는 동안 새로 넣은 지갑의 기초 잔고 확인이 늦어요", "todo": ""}]},
+      {"kind": "전송·토큰·내부 ETH 이동", "api": "체인 시작부터(공개 아카이브 RPC) — Base 블록스카웃 API 는 막혀 있고(2026-10 기준 403), 무료 이더스캔 키는 Base 를 지원하지 않아요", "bot": "공개 RPC 로 직접 — 새 거래를 먼저 받고 옛 구간은 뒤에서 채워요. 내가 보낸 거래의 내부 ETH 이동은 추적(trace)으로, 남이 보낸 ETH·로그 없는 이동은 잔고·nonce 대조로 찾아요", "miss": "무료 노드의 추적이 시간 초과로 실패한 거래는 내부 ETH 이동 없이 먼저 기록하고 나중에 다시 추적해 채워요(최대 30일 — 끝내 안 되면 수량만 잔고 대조로 맞추고 손익 해석이 빠질 수 있어요) · 옛 구간을 채우는 동안 새로 넣은 지갑의 기초 잔고 확인이 늦어요", "todo": ""}]},
     {"id": "xlayer_stable", "match": ["xlayer", "stable"], "name": "X Layer·Stable", "rows": [
       {"kind": "전송·토큰", "api": "공개 노드가 옛 구간 로그를 주지 않거나 최근 약 3주만 보관(아카이브 없음)", "bot": "추적을 켠 날부터", "miss": "그 이전 이력 — 그때 가진 수량은 기초 잔고(원가 미확인)", "todo": "cost,market"}]},
     {"id": "robinhood", "match": ["robinhood"], "name": "Robinhood Chain", "rows": [
@@ -79,7 +79,7 @@
     {"id": "somnia", "match": ["somnia"], "name": "Somnia", "rows": [
       {"kind": "전송·토큰", "api": "탐색기(blockscout) 색인이 RPC 보다 크게 뒤처져 있어요(2026-08 초에서 멈춤)", "bot": "탐색기 색인까지만", "miss": "색인이 멈춘 뒤의 이력 — 탐색기가 따라잡으면 자동으로 받아요", "todo": ""}]},
     {"id": "sol", "match": ["sol"], "name": "Solana", "rows": [
-      {"kind": "전송·토큰·스왑", "api": "체인 시작부터(서명 목록)", "bot": "수집 기간 전체 — 거래 1건마다 조회 1회라 활동이 많으면 오래 걸려요. Helius 키 필요 — 하루 몫은 옛 기록이 먼저 쓰고, 새 거래 확인은 공개 노드(publicnode)가 먼저(Helius 하루 몫을 다 쓰면 그날 끝까지 공개 노드로)", "miss": "없음(느릴 뿐 — 첫날은 새 거래 확인이 늦을 수 있어요)", "todo": ""}]},
+      {"kind": "전송·토큰·스왑", "api": "체인 시작부터(서명 목록)", "bot": "수집 기간 전체 — 거래 1건마다 조회 1회라 활동이 많으면 오래 걸려요. Helius 키 필요 — 하루 몫은 옛 기록이 먼저 쓰고, 새 거래 확인은 공개 노드(publicnode)가 먼저(Helius 하루 몫을 다 쓰면 그날 끝까지 공개 노드로)", "miss": "없음(느릴 뿐 — 최근 하루 거래는 첫 확인 때 먼저 보이고, 옛 기록은 뒤에서 이어 받아요)", "todo": ""}]},
     {"id": "abstract", "match": ["abstract"], "name": "Abstract", "rows": [
       {"kind": "전송·토큰·가스", "api": "공식 RPC 가 아카이브라 과거 조회 가능", "bot": "수집 기간 전체", "miss": "L1(이더리움)→Abstract 브리지 입금 때 돌려받는 가스 환급은 따로 기록하지 않아요 — 차이는 잔고 대조가 기초 잔고로 맞춰요", "todo": ""}]},
     {"id": "rpc_archive", "match": ["monad", "plasma", "kaia", "fraxtal", "bob", "avalanche", "arc"], "name": "Monad·Plasma·Kaia·Fraxtal·BOB·Avalanche C 등 RPC 전용 체인", "rows": [

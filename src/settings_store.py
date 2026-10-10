@@ -22,7 +22,7 @@ EXPLORERS = {
     "opensea": {"name": "OpenSea (NFT 바닥가 — 넣으면 최우선)", "fields": [("TJ_OPENSEA_KEY", "API Key")]},
     "coingecko": {"name": "CoinGecko (시세·DEX·차트·NFT 바닥가 — 무료 데모 또는 유료 프로 키, 자동 판별)", "fields": [("TJ_COINGECKO_KEY", "API Key (Demo · Pro)")]},
     "nodereal": {"name": "NodeReal (BSC 옛 기록 — 무료 키로도 됨)", "fields": [("TJ_NODEREAL_KEY", "API Key")]},
-    "ankr": {"name": "Ankr (BSC·Base 옛 기록 · 토큰 찾기 보조 — 무료 키로도 됨)", "fields": [("TJ_ANKR_KEY", "API Key")]},
+    "ankr": {"name": "Ankr (받은 토큰 확인 · BSC·Base 옛 기록 — 무료 키)", "fields": [("TJ_ANKR_KEY", "API Key")]},
     "quicknode": {"name": "QuickNode (유료 — 체인별 엔드포인트 주소)", "fields": [("TJ_QUICKNODE_BSC_KEY", "BSC 엔드포인트 주소"),
                                                                       ("TJ_QUICKNODE_BASE_KEY", "Base 엔드포인트 주소")]},
     "alchemy": {"name": "Alchemy (EVM 지갑 토큰·잔고 찾기 — 무료 키)", "fields": [("TJ_ALCHEMY_KEY", "API Key")]},
@@ -357,6 +357,16 @@ def needs_alchemy(cfg: dict) -> bool:
         if isinstance(w, dict) and str(w.get("type", "evm")) in ("evm", "bsc_rpc") and w.get("address"):
             return True
     return False
+
+
+def needs_helius(cfg: dict) -> bool:
+    if not isinstance(cfg, dict) or (cfg.get("sol") or {}).get("rpc") != "helius":
+        return False
+    return any(isinstance(w, dict) and w.get("type") == "sol" and w.get("address") for w in cfg.get("wallets") or [])
+
+
+def needs_ankr(cfg: dict) -> bool:
+    return needs_alchemy(cfg)
 
 
 def _label_ok(label: str) -> str:

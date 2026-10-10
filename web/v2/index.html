@@ -359,6 +359,8 @@ tr.open td{background:var(--surface2);border-bottom-color:transparent}
 .xrow td>.clps>div{padding:0 24px 18px}
 .xbox{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;text-align:left}
 .xbox .blk,.blk{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;min-width:0}
+.xbox .blk td>.sub.ell{white-space:normal;max-width:none!important;overflow:visible;word-break:keep-all}   
+.kv .sub.ell.trs{white-space:normal;overflow:visible;text-overflow:clip;word-break:keep-all}   
 .blk .ttl{font-size:13px;font-weight:700;color:var(--text2);margin-bottom:8px;display:flex;align-items:center;gap:8px}
 .kv{display:flex;align-items:baseline;gap:12px;font-size:14px;padding:5px 0}
 .kv>span:first-child{color:var(--text2);white-space:nowrap}
@@ -385,6 +387,7 @@ button.tipc{cursor:help;font-family:inherit;border:0}
 .cust .items{margin-top:8px;font-size:13px}
 .cust .items div{display:flex;gap:8px;padding:3px 0;color:var(--text2)}
 .cust .items div span:last-child{margin-left:auto;white-space:nowrap}
+.cust .items div .mut.trs{display:block;margin-left:0;white-space:normal;word-break:keep-all}   
 .mini{height:5px;background:var(--surface2);border-radius:9px;margin-top:7px;overflow:hidden}
 .mini i{display:block;height:100%;border-radius:9px;background:var(--accent);transition:width .6s var(--ease)}
 .lines .r{display:flex;font-size:14px;padding:6px 0;color:var(--text2);gap:10px;align-items:baseline}
@@ -1787,6 +1790,7 @@ table.axtb{min-width:470px;width:100%}
 .ht.hx th,.ht.hx td{padding-left:12px;padding-right:12px}
 .ht.hx th:first-child,.ht.hx td:first-child{padding-left:24px}
 .ht.hx th:last-child,.ht.hx td:last-child{padding-right:24px}
+.ht.hx .mini-t th,.ht.hx .mini-t td{padding-left:8px;padding-right:8px}.ht.hx .mini-t th:first-child,.ht.hx .mini-t td:first-child{padding-left:0}.ht.hx .mini-t th:last-child,.ht.hx .mini-t td:last-child{padding-right:0}   
 .ht.hx td{padding-top:14px;padding-bottom:14px;border-bottom-color:var(--surface2)}
 .ht.hx .val{font-size:15px}
 .ht.hx .sub{font-size:12px;color:var(--faint)}
@@ -1848,6 +1852,7 @@ tr.clk:hover .xch{color:var(--text2)}
 .m-list .it .mb2 .l2 .td{color:var(--rule)}
 .m-list .it .mb2 .l2 .tdl{color:var(--muted)} .m-list .it .mb2 .l2 .tdl .tp{font-weight:600}
 .m-list .it .mb2 .mbx{margin-left:auto;flex:0 1 auto;min-width:0;white-space:nowrap;font-size:11px}
+.m-list .it .mb2{flex-wrap:wrap}   
 @media (max-width:900px){ .ht.hx th,.ht.hx td{padding-left:8px;padding-right:8px} .ht.hx th:first-child,.ht.hx td:first-child{padding-left:16px} .ht.hx th:last-child,.ht.hx td:last-child{padding-right:16px} .tdc .tp{font-size:14px} .tdc .ta{font-size:12px} }
 .foot{font-size:13px}
 .zfold{border-top:0}
@@ -1900,7 +1905,7 @@ tr.clk:hover .xch{color:var(--text2)}
   .dmemo .dmr .dms + .dmt{order:3;flex-basis:100%}   
   .dmemo .dmr .dms ~ .btn.ghost{margin-left:auto}
 }
-.card.rev .abr{grid-template-columns:72px minmax(0,1fr) 100px;font-size:13px;gap:12px}
+.card.rev .abr{grid-template-columns:88px minmax(0,1fr) 100px;font-size:13px;gap:12px}   
 .card.rev .atrk{height:8px;border-radius:4px}
 .card.rev .abars{gap:10px}
 .card.rev .amv{padding-top:10px}

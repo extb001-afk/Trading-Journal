@@ -342,12 +342,12 @@
   };
   const XP_HELP = {
     helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요해요 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
-    etherscan: { url: 'https://etherscan.io/myapikey', why: 'EVM 지갑이 있으면 필수(무료) — Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받아요. 없으면 공개 탐색기로만 받아 느리거나(일부 체인은 막혀) 늦게 기록될 수 있어요.', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
+    etherscan: { url: 'https://etherscan.io/myapikey', why: 'EVM 지갑이 있으면 필수(무료) — Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받아요. 없으면 공개 노드(RPC)로만 받아 옛 기록이 늦게 채워져요(최신 거래는 바로 보여요).', steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
     opensea: { url: 'https://docs.opensea.io/reference/api-keys', why: '선택 · 추천 — 넣으면 기타 자산 › NFT 의 EVM 바닥가를 오픈시에서 먼저 받아(최우선) 작은 컬렉션까지 NFT 추적이 더 원활해요. 없으면 코인게코(무료 데모 키 권장). 미검증(키 없이 공개 문서만 보고 연결).', steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', why: '선택 · 무료 — 넣으면 코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요(바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격 — 키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로). 키 없으면 공용 무료 한도라 NFT 바닥가는 몇 시간 걸릴 수 있어요. 유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아보고, 프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%(기본 · 25·50·80% 로 바꿀 수 있음)만 써요. 재시작 없이 바로 써요.', steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
   XP_HELP.nodereal = { url: 'https://dashboard.nodereal.io', why: '선택 · 무료 키로도 됨 — BSC 옛 기록(아카이브)을 빠르게 받아요(한 번에 5만 블록). 없으면 BSC 옛 기록은 무료 공개 노드로 천천히 받아요(최신 기록은 늘 공개 노드로 바로). Base 는 지원 안 해요.', steps: ['nodereal.io 가입(무료) → Dashboard → Create API Key', 'BSC 엔드포인트 주소 끝의 키만(…/v1/ 뒤) 붙여넣기'] };
-  XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: '선택 · 무료 키로도 됨 — BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 같은 키로 지갑 토큰 찾기도 보조해요(Advanced API). 없으면 무료 공개 노드로 받아요(Base 는 공개 노드로도 옛 기록 됨 — 넣으면 더 빨라요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기'] };
+  XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: 'EVM 지갑이 있으면 필수(무료 Freemium) — 오래 안 쓴 지갑에 들어온 토큰을 10분마다 빠르게 확인하고, BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 같은 키로 지갑 토큰 찾기도 보조해요(Advanced API). 없으면 무료 공개 노드로만 받아 늦을 수 있어요. 무료 한도의 80% 아래로만 써요. 저장할 때 연결을 한 번 확인해요(키가 거부되면 저장하지 않아요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기 → 저장(연결 확인 1번)'] };
   XP_HELP.quicknode = { url: 'https://dashboard.quicknode.com', why: '선택 · 유료만(무료 등급 없음) — 이미 쓰는 유료 엔드포인트가 있으면 체인별 주소를 그대로 넣으세요(BSC·Base 아카이브 · 한 번에 1만 블록). 다른 곳에서 쓰던 키일 수 있어 기본은 월 한도의 10% 만 써요.', steps: ['QuickNode 대시보드 → Endpoints', 'BSC·Base 엔드포인트 주소(https://….quiknode.pro/…/)를 각 칸에 붙여넣기'] };
   XP_HELP.alchemy = { url: 'https://dashboard.alchemy.com/signup', why: 'EVM 지갑이 있으면 필수(무료) — 지갑이 한 번이라도 주고받은 토큰 전부와 지금 잔고를 찾아 오래 들고만 있던 토큰도 빠뜨리지 않아요(Base·Ethereum·Arbitrum 등). 없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만). 무료 한도의 80% 아래로만 써요.', steps: ['dashboard.alchemy.com/signup 가입(무료)', 'Create new app → 네트워크는 전부 켠 채로(기본값) → API Key 복사', '키만(https://…/v2/ 뒤의 값) 붙여넣기 → 연결 테스트(Ethereum·Base 1번씩)'] };
   const NODE_KEYS = ['nodereal', 'ankr', 'quicknode', 'alchemy'];
@@ -401,10 +401,10 @@
     }
     return { ok: false, error: '요청 실패' };
   }
-  function toast(msg, err) {
+  function toast(msg, err, ms) {
     const t = $('#toast'); if (!t) return;
     t.innerHTML = '<div class="toast' + (err ? ' e' : '') + '">' + esc(msg) + '</div>';
-    clearTimeout(toast._t); toast._t = setTimeout(() => { t.innerHTML = ''; }, err ? 4600 : 2600);
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.innerHTML = ''; }, ms || (err ? 4600 : 2600));
   }
   const draft = (k, v) => { if (v === undefined) return U.d[k] || ''; U.d[k] = v; };
 
@@ -504,7 +504,9 @@
       : '';
     return '<div class="cap su-p su-cgplan">등급: <b>' + esc(p.text) + '</b>' + (p.budgetText ? '<br>' + esc(p.budgetText) : '') + sh + '</div>';
   }
+  const freshKeySet = (st, k) => { const g = st && st.explorers && st.explorers[k]; return !!(g && (g.set || g.partial)); };
   function nodePlanHTML(st, k) {
+    if (k === 'helius') return heliusFreshHTML(st);
     const n = st && st.nodes && st.nodes[k];
     if (!n) return '';
     const unit = n.unitKo || (n.unit === 'cu' ? 'CU' : '콜');
@@ -520,31 +522,48 @@
       : '';
     const use = (n.chains && n.chains.length ? '지금 쓰는 체인: ' + n.chains.map(c => c.toUpperCase()).join('·') + ' · ' : '')
       + (n.plan === 'paid' ? '월 한도 × ' + n.share + '%' : '무료 한도의 ' + n.pct + '%') + ' = 하루 약 ' + fmtN(n.perDay) + ' ' + unit
-      + (typeof n.usedToday === 'number' ? ' · 오늘 쓴 양 ' + fmtN(n.usedToday) + (n.bursting ? ' · 버스트 중' : '') : '');
-    const note = n.pool === false
+      + (typeof n.usedToday === 'number' ? ' · 오늘 쓴 양 ' + fmtN(n.usedToday) + (n.bursting ? ' · 버스트 중' : '') : '')
+      + (typeof n.burstCap === 'number' ? ' · 실시간 하루 약 ' + fmtN(n.rtDay || 0) + ' · 오늘 백필 상한 ' + fmtN(n.burstCap) : '');
+    const note = k === 'ankr' && n.pool !== false
+      ? '쉬는 지갑에 들어온 토큰을 10분마다 확인하고(받음 탐지), 옛 기록은 처음 한 번만 채워요 — 최신 기록은 늘 공개 노드로 먼저 받고, 이 키는 받음 탐지·옛 기록·옛 거래 상세에 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.'
+      : n.pool === false
       ? '지갑 토큰·잔고 찾기에만 써요 — 처음 한 번 전부 확인하고, 그 뒤엔 무료 노드로 움직임이 보인 지갑만 다시 물어요(감시·옛 기록은 무료 노드). 하루 몫을 다 쓰면 그날(UTC)은 쉬고 다음 날 이어서 해요. 키는 저장하면 바로 쓰고, 요금제를 바꾸면 수집기가 자동으로 다시 시작해요.'
       : '옛 기록은 처음 한 번만 채우고, 최신 기록은 늘 공개 노드로 먼저 받아요 — 이 키는 옛 기록·옛 거래 상세에만 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.';
-    const fresh = n.burstX > 1 ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 새로 받은 키" style="align-items:center;margin-top:6px">'
+    const fresh = n.burstX > 1 && freshKeySet(st, k) ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 새로 받은 키" style="align-items:center;margin-top:6px">'
       + '<button class="su-chip' + (n.freshSince ? ' on' : '') + '" data-su="nfresh" data-p="' + esc(k) + '" aria-pressed="' + !!n.freshSince + '"' + (busy ? ' disabled' : '') + '>새로 받은 키(지난 사용 없음)</button>'
       + '<span class="cap">' + esc(n.freshSince ? n.freshSince + ' 에 새로 받은 키로 봐요 — 그 전 기록 없는 날은 0(키를 바꿔 저장하면 꺼져요)' : '다른 곳에서 쓰던 키가 아니면 켜세요 — 끄면 기록 없는 지난날을 평소 몫으로 셈(업그레이드 뒤 한 달은 버스트가 거의 없음)') + '</span></div>' : '';
-    const bnote = n.burstX > 1 ? ' 백필·첫 전수 중엔 하루 몫을 ' + n.burstX + '배까지 당겨 써요(최근 31일 합은 월 한도의 ' + n.pct + '% 안 · 감시 몫은 남김).' : '';
+    const bnote = n.burstX > 1 ? ' 백필·첫 전수 중엔 실시간 실측(× 1.5 · 앞으로 30일 몫)만 남기고 하루 몫의 ' + n.burstX + '배(열흘치)까지 당겨 써요 — 최근 31일 합은 월 한도의 ' + n.pct + '% 안 · 실시간이 늘면 백필이 바로 물러나요.' : '';
     return '<div class="cap su-p su-cgplan">' + esc(use) + plan + paid + fresh + '<div class="cap" style="margin-top:4px">' + esc(note + bnote) + '</div></div>';
   }
+  function heliusFreshHTML(st) {
+    if (!freshKeySet(st, 'helius')) return '';
+    const h = st && st.heliusFresh;
+    if (!h || !h.burst) return '';
+    const busy = !!U.busy.nphelius, on = !!h.since;
+    return '<div class="cap su-p su-cgplan"><div class="su-chiprow" role="group" aria-label="Helius 새로 받은 키" style="align-items:center;margin-top:6px">'
+      + '<button class="su-chip' + (on ? ' on' : '') + '" data-su="nfresh" data-p="helius" aria-pressed="' + on + '"' + (busy ? ' disabled' : '') + '>새로 받은 키(지난 사용 없음)</button>'
+      + '<span class="cap">' + esc(on ? h.since + ' 에 새로 받은 키로 봐요 — 그 전 기록 없는 날은 0(키를 바꿔 저장하면 꺼져요)' : '다른 곳에서 쓰던 키가 아니면 켜세요 — 끄면 기록 없는 지난날을 평소 몫으로 셈(업그레이드 뒤 한 달은 버스트가 거의 없음)') + '</span></div></div>';
+  }
   function evmKeyBanner(st) {
-    return etherscanBanner(st) + alchemyBanner(st);
+    return etherscanBanner(st) + alchemyBanner(st) + ankrBanner(st);
   }
   function etherscanBanner(st) {
     if (!st || !st.evmNeedsKeys || !st.explorers.etherscan || st.explorers.etherscan.set) return '';
-    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요해요(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 탐색기로만 받아 느리거나 막힌 체인은 늦게 기록돼요.</div></div></div>';
+    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Etherscan 키가 필요해요(무료)</b><div class="bd">탐색기 키 단계에서 무료 키를 넣으면 거래를 빠르고 빠짐없이 받아요 — 없으면 공개 노드로만 받아 옛 기록이 늦게 채워져요(최신 거래는 바로 보여요).</div></div></div>';
   }
   function alchemyBanner(st) {
     if (!st || !st.evmNeedsAlchemy || !st.explorers.alchemy || st.explorers.alchemy.set) return '';
     return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Alchemy 키가 필요해요(무료)</b><div class="bd">지갑이 주고받은 토큰 전부와 지금 잔고를 찾아 옛 보유 토큰을 빠뜨리지 않게 해요 — 없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만). 거래 수집·감시는 그대로 돌아요.</div></div></div>';
   }
+  function ankrBanner(st) {
+    if (!st || !st.evmNeedsAnkr || !st.explorers.ankr || st.explorers.ankr.set) return '';
+    return '<div class="bnr w" style="margin-top:12px"><div><b>EVM 지갑은 Ankr 키가 필요해요(무료)</b><div class="bd">오래 안 쓴 지갑에 들어온 토큰을 10분마다 확인하고 BSC·Base 옛 기록을 빨리 받아요 — 없으면 공개 노드로만 받아 늦을 수 있어요. 거래 수집·감시는 그대로 돌아요.</div></div></div>';
+  }
   function xpPill(st, k, desc) {
     if (k === 'helius') return st.wallets.some(w => w.kind === 'sol') && st.solNeedsHelius ? pill('w', 'Solana 필수') : pill('g', 'Solana 지갑이 있으면 필수');
     if (k === 'etherscan') return st.evmNeedsKeys ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
     if (k === 'alchemy' && 'evmNeedsAlchemy' in st) return st.evmNeedsAlchemy ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
+    if (k === 'ankr' && 'evmNeedsAnkr' in st) return st.evmNeedsAnkr ? pill('w', 'EVM 필수') : pill('g', 'EVM 지갑이 있으면 필수');
     if (desc) return '<span class="pill g su-xpd">' + esc('선택 · ' + desc) + '</span>';
     return pill('g', k === 'coingecko' ? '선택 · 무료' : '선택');
   }
@@ -558,7 +577,7 @@
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">탐색기 API 키</div><div class="cap su-p">키는 이 서버의 <code>.env</code>(권한 600)에만 저장되고 화면에는 •••• 로만 보여요(값은 다시 표시하지 않음).</div>'
       + evmKeyBanner(st)
-      + ['helius', 'etherscan', 'alchemy', 'coingecko', 'opensea'].concat(NODE_KEYS.filter(k => k !== 'alchemy')).filter(k => st.explorers[k]).map(k => {
+      + ['helius', 'etherscan', 'alchemy', 'ankr', 'coingecko', 'opensea'].concat(NODE_KEYS.filter(k => k !== 'alchemy' && k !== 'ankr')).filter(k => st.explorers[k]).map(k => {
         const g = st.explorers[k], h = XP_HELP[k], open = U.xp === k || (U.xp == null && k === 'helius'), nm = xpName(g.name);
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="xp" data-v="' + k + '" aria-expanded="' + open + '"' + (nm.d ? ' title="' + esc(g.name) + '"' : '') + '><b>' + esc(nm.t) + '</b>'
           + ' ' + xpPill(st, k, nm.d)
@@ -641,8 +660,9 @@
     const exN = EX_ORDER.filter(k => st.exchanges[k].set).length;
     const rows = [['지갑', st.wallets.length ? st.wallets.length + '개 주소' : '없음 — 나중에 설정 탭에서 추가', st.wallets.length > 0],
       ['Helius (Solana)', st.explorers.helius.set ? '저장됨' : (st.wallets.some(w => w.kind === 'sol') ? '필요 — Solana 수집 대기' : '선택'), st.explorers.helius.set],
-      ['Etherscan', st.explorers.etherscan.set ? '저장됨' : (st.evmNeedsKeys ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (blockscout 로 동작)'), st.explorers.etherscan.set],
-    ].concat(st.explorers.alchemy ? [['Alchemy', st.explorers.alchemy.set ? '저장됨' : (st.evmNeedsAlchemy ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (EVM 지갑이 생기면 필요)'), st.explorers.alchemy.set]] : []).concat([
+      ['Etherscan', st.explorers.etherscan.set ? '저장됨' : (st.evmNeedsKeys ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (EVM 지갑이 생기면 필요)'), st.explorers.etherscan.set],
+    ].concat(st.explorers.alchemy ? [['Alchemy', st.explorers.alchemy.set ? '저장됨' : (st.evmNeedsAlchemy ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (EVM 지갑이 생기면 필요)'), st.explorers.alchemy.set]] : []).concat(
+      st.explorers.ankr && 'evmNeedsAnkr' in st ? [['Ankr', st.explorers.ankr.set ? '저장됨' : (st.evmNeedsAnkr ? '필요 — EVM 지갑이 있어요(무료 키)' : '없음 (EVM 지갑이 생기면 필요)'), st.explorers.ankr.set]] : []).concat([
       ['거래소', exN ? exN + '곳 연결' : '없음 (온체인만)', exN > 0], ['텔레그램', st.telegram.connected ? '@' + (st.telegram.bot || '') + ' 연결됨' : '연결 안 함', st.telegram.connected]]);
     return '<div class="su-sec"><div class="su-h">표시</div><div class="cap" style="margin:10px 0 8px">기준 통화</div><div class="opts">' + opt('cur', 'KRW', cur === 'KRW', 'KRW', '업비트 USDT 환산') + opt('cur', 'USD', cur === 'USD', 'USD', '달러 원가 기준') + '</div>'
       + '<div class="cap" style="margin:14px 0 8px">테마</div><div class="opts">' + opt('theme', 'dark', !light, '다크', '기본') + opt('theme', 'light', light, '라이트', '밝은 배경') + '</div></div>'
@@ -697,7 +717,7 @@
       + (needW ? '<div class="su-skip"><button class="link" data-su="later">나중에 할게요 (설정 탭에서 언제든 가능)</button></div>' : '')
       + '</div></div>';
   }
-  const TIER_SHORT = ['지금 주기', '조금 느리게', '1시간마다', '6시간마다', '하루 1회'];
+  const TIER_SHORT = ['지금 주기', '1시간마다'];
   const PROV_NAME = p => p === 'etherscan' ? '이더스캔' : p === 'helius' ? '헬리우스(Solana)' : /^blockscout:/.test(p) ? '블록스카웃 ' + chainName(p.split(':')[1]) : /^rpc:/.test(p) ? '공개 RPC ' + chainName(p.split(':')[1]) : p;
   const fmtN = n => (n == null ? '—' : Math.round(n).toLocaleString('ko-KR'));
   function inSec(ts) { const s = Math.round(ts - Date.now() / 1000); return s <= 60 ? '곧' : s < 3600 ? Math.round(s / 60) + '분 뒤' : s < 86400 ? Math.round(s / 3600) + '시간 뒤' : Math.round(s / 86400) + '일 뒤'; }
@@ -726,7 +746,7 @@
     const T = U.tier || {}, ht = (T.holdText || {})[p.h] || '';
     const HS = { code: '계약·위임', hist: '이력 받는 중', boot: '준비 중', nosent: '확인 중', req: '확인 요청됨', path: '수집 방식상', off: '꺼짐' };
     const sc9 = (T.scopes || {})[p.c] || {}, slow9 = !p.h && !p.e && p.t === 0 && sc9.period && sc9.basePoll && sc9.period > sc9.basePoll * 1.01;
-    const lbl = p.h ? '지금 주기' + (HS[p.h] ? '(' + HS[p.h] + ')' : '') : p.e ? '빈 지갑 · 하루 1회' : (slow9 ? periodTxt(sc9.period) + '마다' : (TIER_SHORT[p.t] || '')) + (p.f ? ' · 옛 기록 채우는 중' : '');
+    const lbl = p.h ? '지금 주기' + (HS[p.h] ? '(' + HS[p.h] + ')' : '') : p.e ? '빈 지갑 · 1시간마다' : (slow9 ? periodTxt(sc9.period) + '마다' : (TIER_SHORT[p.t] || '')) + (p.f ? ' · 옛 기록 채우는 중' : '');
     return '<span class="pill ' + (p.t === 0 ? 'ok' : 'g') + ' sm su-tc pvx" title="' + esc(chainName(p.c) + ' · ' + lbl + (ht ? ' — ' + ht : '') + (p.full ? ' · 마지막 확인 ' + ago(p.full) : '') + (p.f ? ' · 처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요' : '')) + '">' + esc(chainName(p.c)) + ' · ' + esc(lbl) + (p.wake ? ' · 확인 중' : '') + '</span>';
   }
   function tierWHTML(el) {
@@ -759,8 +779,8 @@
     const T = U.tier;
     if (!T) { loadTier(); return '<div class="cap">' + (U.tierErr ? '확인 주기 정보를 못 불러왔어요 · ' + esc(U.tierErr) + ' <button class="link" data-su="tload">다시</button>' : '확인 주기 불러오는 중…') + '</div>'; }
     loadTier();
-    const all = [].concat(...Object.values(T.addrs || {})), cnt = [0, 0, 0, 0, 0];
-    all.forEach(p => { cnt[p.h ? 0 : Math.min(4, p.t)]++; });
+    const all = [].concat(...Object.values(T.addrs || {})), cnt = TIER_SHORT.map(() => 0);
+    all.forEach(p => { cnt[p.h ? 0 : Math.min(TIER_SHORT.length - 1, p.t)]++; });
     const holds = {}; all.filter(p => p.h).forEach(p => { holds[p.h] = (holds[p.h] || 0) + 1; });
     const cap = T.cap || {}, es = T.esToday || {}, hl = T.helToday || {}, sc = Object.values(T.scopes || {}), nF = all.filter(p => p.f).length;
     const gate = sc.some(x => x.gate), str = Math.max(1, ...sc.map(x => x.stretch || 1));
@@ -769,30 +789,32 @@
       + '<div><b class="num">' + fmtN(es.n) + '</b><span>이더스캔 오늘(UTC)</span></div></div>';
     const steps = '<div class="su-tsteps">' + cnt.map((n, i) => '<span class="pill ' + (i === 0 ? 'ok' : 'g') + ' sm">' + TIER_SHORT[i] + ' <b class="num">' + n + '</b></span>').join('') + '</div>'
       + (Object.keys(holds).length ? '<div class="cap">지금 주기 이유 · ' + Object.keys(holds).map(h => esc((T.holdText || {})[h] || h) + ' ' + holds[h]).join(' · ') + '</div>' : '')
-      + ((nF || hl.fillFirst) ? '<div class="cap">옛 기록 채우는 중' + (nF ? ' ' + nF + '곳' : '') + ' — 하루 한도 안에서 옛 기록부터 몰아서 받아요(처음 넣은 지갑은 옛 기록부터 채워서, 첫날은 새 거래 확인이 평소보다 늦을 수 있어요)'
+      + ((nF || hl.fillFirst) ? '<div class="cap">옛 기록 채우는 중' + (nF ? ' ' + nF + '곳' : '') + ' — 하루 한도 안에서 실시간 확인 몫(실측 × 1.25)만 남기고 옛 기록을 몰아서 받아요(실시간이 늘면 옛 기록이 바로 물러나요)'
         + (nF && es.rt != null ? ' · 이더스캔 실시간 확인 몫 하루 ' + fmtN(es.rt) + '콜 · 오늘 남은 옛 기록 몫 ' + fmtN(es.fillLeft || 0) + '콜' : '')
         + (hl.fillFirst && hl.rt != null ? ' · 헬리우스(Solana) 실시간 확인 몫 하루 ' + fmtN(hl.rt) + '크레딧 · 오늘 남은 옛 기록 몫 ' + fmtN(hl.fillLeft || 0) + '크레딧' : '') + '</div>' : '')
       + (hl.pn ? '<div class="cap">Solana 새 거래 확인 = 공개 노드(' + esc(hl.pn.host || 'publicnode') + ') 먼저 · 백업 헬리우스'
         + (hl.pn.hlClosedUntil ? ' — 오늘 헬리우스 한도를 다 써서 ' + kstHM9(hl.pn.hlClosedUntil) + '까지 공개 노드로만 이어 받아요'
           : (hl.pn.ok ? (hl.pn.rate != null ? ' · 최근 응답 ' + Math.round(hl.pn.rate * 100) + '%' : '') + (hl.pn.floorPct != null ? ' · 헬리우스 실시간 몫 하루 ' + hl.pn.floorPct + '%(남는 몫은 옛 기록에)' : '')
             : ' — 지금 공개 노드 응답이 고르지 않아 헬리우스로 확인 중(헬리우스 몫을 더 써요)')) + '</div>' : '')
-      + (all.some(p => p.e) ? '<div class="cap">빈 지갑 ' + all.filter(p => p.e).length + '곳 — 기록이 하나도 없어 활동은 하루 한 번 확인해요(토큰 입금만 오면 주 1회 확인 때 기록 — 시각·수량은 그대로)</div>' : '')
+      + (all.some(p => p.e) ? '<div class="cap">빈 지갑 ' + all.filter(p => p.e).length + '곳 — 기록이 하나도 없어도 10분마다 활동을 보고 1시간마다 탐색기로 확인해요(토큰 입금도 1시간 안에 기록 — 시각·수량은 그대로)</div>' : '')
       + Object.keys(T.scopes || {}).filter(k => { const x = T.scopes[k]; return x && x.period && x.basePoll && x.period > x.basePoll * 1.01; })
         .map(k => { const x = T.scopes[k]; return '<div class="cap">' + esc(chainName(k)) + ' 지갑 ' + fmtN(x.pairs || 0) + '개라 ' + periodTxt(x.period) + '마다 확인해요(하루 한도 안 · 최근에 쓴 지갑 ' + fmtN(x.t0 || 0) + '개 기준)'
           + (k === 'sol' && hl.fillFirst ? ' — 지금은 옛 기록부터 채워서 새 거래 확인이 이보다 늦을 수 있어요' : '') + '</div>'; }).join('')
-      + (T.rpcFb || []).map(x => '<div class="cap">' + esc(chainName(x.c)) + ' — ' + esc(x.text) + '</div>').join('');
+      + (T.rpcFb || []).map(x => '<div class="cap">' + esc(chainName(x.c)) + ' — ' + esc(x.text) + '</div>').join('')
+      + (T.inflow && T.inflow.sec && (T.inflow.rows || []).some(x => x.n) ? '<div class="cap">쉬는 지갑 토큰 받음 확인 ' + periodTxt(T.inflow.sec) + '마다(받은 주소만 바로 탐색기로) · '
+        + T.inflow.rows.filter(x => x.n).map(x => esc(chainName(x.c)) + ' ' + (x.at ? esc(ago(x.at)) : '아직 확인 전') + (x.node ? '(' + esc(x.node) + ')' : '') + (x.ok ? '' : ' — 직전 확인 실패, 곧 다시')).join(' · ') + '</div>' : '');
     const warn = gate ? '<div class="bnr w su-tw2"><div><b>이더스캔 하루 예산(' + T.budgetPct + '%)에 가까워 아껴 쓰는 중</b><div class="bd">지금 주기 주소도 공개 RPC 로 먼저 보고 바뀐 게 있을 때만 이더스캔을 불러요' + (str > 1 ? ' · 확인 간격 ×' + str : '') + ' — 토큰 입금만 조금 늦게(최대 ' + Math.round(10 * str) + '분) 기록돼요</div></div></div>' : '';
     const stale = sc.filter(x => x.stale).length ? '<div class="cap su-badt">수집기 장부가 30분 넘게 갱신되지 않았어요 — 수집기 상태를 확인하세요</div>' : '';
     return '<div class="su-tier pvx">' + tiles + steps + warn + stale
-      + '<div class="su-th">하루 예상 호출 <span class="cap">(지금 등록 상태 · 쉬는 주소는 탐색기 0콜)</span></div>' + budgetRows(T)
-      + '<div class="cap su-tnote">쉬는 주소로 들어온 입금은 그 주소의 느린 확인 때 기록돼요(6개월 넘게 안 쓴 주소 = 최대 약 하루 늦게). 내가 보내면(서명) 바로 지금 주기로 돌아와요.</div>'
+      + '<div class="su-th">하루 예상 호출 <span class="cap">(지금 등록 상태 · 쉬는 주소는 1시간마다 탐색기 확인)</span></div>' + budgetRows(T)
+      + '<div class="cap su-tnote">쉬는 주소(7일 넘게 안 보낸 주소)도 10분마다 잔고를 보고 1시간마다 탐색기로 확인해요 — 들어온 입금은 늦어도 약 1시간 안에 기록돼요(거래소에서 내 지갑으로 보낸 출금이 전송 중이면 그 주소는 10분마다 확인). 내가 보내면(서명) 바로 지금 주기로 돌아와요.</div>'
       + '<div class="su-actions"><button class="btn sm" data-su="tsheet">주소별 확인 주기 (' + fmtN(Object.keys(T.addrs || {}).length) + ')</button><button class="btn sm" data-su="tcheck">모두 지금 확인</button></div></div>';
   }
   function tierSheetHTML() {
     const rows = tierRows();
     return '<div class="su-bg su-tbg" role="dialog" aria-modal="true" aria-labelledby="suTierT"><div class="su-tsheet">'
       + '<div class="su-tsh"><h3 id="suTierT">주소별 확인 주기</h3><button class="btn sm" data-su="tclose" aria-label="닫기">닫기</button></div>'
-      + '<div class="cap su-p pvx">지금 주기 = 매 수집 주기 · 쉬는 주소 = 계단 간격마다 nonce·잔고만 보고(탐색기 0콜) 바뀌면 그때 탐색기로 복구 · 토큰 입금은 받침 확인(6시간, 6개월↑ 하루) 때</div>'
+      + '<div class="cap su-p pvx">지금 주기 = 매 수집 주기 · 쉬는 주소 = 10분마다 잔고만 보고(그 점검은 탐색기 0콜) 바뀌면 그때 탐색기로 복구 · 토큰 입금은 10분마다 따로 확인(받은 주소만 바로 탐색기로) · 탐색기 받침 확인은 1시간마다</div>'
       + '<div class="su-tlist">' + rows.map(r => {
         const rest = r.pairs.some(p => p.t > 0 && !p.h), lf = Math.max(0, ...r.pairs.map(p => p.full || 0));
         return '<div class="su-trow"><div class="su-trm"><b class="pvl"' + (r.w.label ? ' data-pk="w"' : '') + '>' + esc(r.w.label ? suOwn(r.w.label) : '(이름 없음)') + '</b> <span class="num su-tad">' + esc(r.k.length > 14 ? r.k.slice(0, 6) + '…' + r.k.slice(-4) : r.k) + '</span>'
@@ -1159,7 +1181,7 @@
         render(); return;
       }
       clearVals(g); delete U.ack[g]; delete U.needAck[g]; delete U.test[g];
-      toast(grp.name + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요') + (r.apply && r.apply.restart === false ? ' · 재시작 없이 바로 써요' : '')); await refreshStatus();
+      toast(xpName(grp.name).t + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요') + (r.apply && r.apply.restart === false ? ' · 재시작 없이 바로 써요' : ''), false, r.note ? 9000 : 0); await refreshStatus();
     },
     async kdel(el) {
       const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g];
@@ -1169,7 +1191,20 @@
     },
     async nplan(el) { await nodePlanSave(el.getAttribute('data-p'), { plan: el.getAttribute('data-v') }); },
     async nshare(el) { await nodePlanSave(el.getAttribute('data-p'), { share: Number(el.getAttribute('data-v')) }); },
-    async nfresh(el) { const p = el.getAttribute('data-p'), n = U.st && U.st.nodes && U.st.nodes[p]; await nodePlanSave(p, { fresh: !(n && n.freshSince) }); },
+    async nfresh(el) {
+      const p = el.getAttribute('data-p'), n = U.st && U.st.nodes && U.st.nodes[p];
+      if (p === 'helius') {
+        const h = U.st && U.st.heliusFresh;
+        if (!h || U.busy.nphelius) return;
+        U.busy.nphelius = true; render();
+        const r = await api('keys/nodeplan', { provider: 'helius', fresh: !h.since });
+        U.busy.nphelius = false;
+        toast(r.ok ? 'Helius 설정을 바꿨어요 — 재시작 없이 바로 써요' : (r.error || '저장 실패'), !r.ok);
+        await refreshStatus();
+        return;
+      }
+      await nodePlanSave(p, { fresh: !(n && n.freshSince) });
+    },
     async nmonth(el) {
       const p = el.getAttribute('data-p'), raw = draft('nm_' + p).replace(/[,\s]/g, '');
       if (raw && !/^[1-9][0-9]{0,11}$/.test(raw)) { toast('월 한도는 숫자만(쉼표 없이)', true); return; }

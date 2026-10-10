@@ -76,7 +76,7 @@ def fake_discover(chain, wallet, upto=None, cfg=None, env=None, sources=None, sl
 
 def fake_dex(chain, cas, min_reserve=10000.0, sleep=None):
     CALLS["dex"].append(sorted(cas))
-    return {ca: ((True, 50000.0, 1.25, "OLDT") if ca == TB else (False, 12.0, None, None)) for ca in cas}
+    return {ca: ((True, 50000.0, 1.25, "OLDT") if ca == TB else (True, 40000.0, 2.0, "TKA") if ca == TA else (False, 12.0, None, None)) for ca in cas}
 
 
 if td is not None:
@@ -106,7 +106,7 @@ def opening(ca):
 
 bal, n = run_new()
 chk(opening(TB) == 7 * E18, "D1 블록스카웃이 안 준 옛 보유 토큰(발견 출처만 앎) = 같은 블록 잔고로 기초 잔고 앵커", opening(TB))
-chk(opening(TA) == 5 * E18, "D1 블록스카웃 목록 토큰 = 종전 그대로 앵커", opening(TA))
+chk(opening(TA) == 5 * E18, "D1 블록스카웃 목록 토큰(덱스 유동성 있음) = 앵커", opening(TA))
 chk(opening(TS) == 0 and opening(TN) == 0, "D2 발견된 스팸(유동성 없음 · 스캠 이름) = 잔고가 있어도 앵커 안 함", (opening(TS), opening(TN)))
 skip = (bal.get("_disc_skip") or {}).get(W) or {}
 chk(TS in skip and TN in skip and "유동성" in skip.get(TS, "") and "이름" in skip.get(TN, ""), "D2 스팸 사유 기록(유동성 부족 · 스캠 이름)", skip)

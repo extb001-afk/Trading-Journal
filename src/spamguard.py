@@ -17,6 +17,12 @@ for _src, _dst in (
         ("ՍսՏѕՕօԼᏚᎢᎪᎬᎻᏀᏴᏙᎠ", "UUSSOOLSTAEHGBVD"),
         ("∪⊤ƧƊ", "UTSD"),
         ("₮", "T"),
+        ("ⲂⲤⲥⲎⲒⲓⲔⲘⲚⲞⲟⲢⲣⲦⲧⲨⲩⲬⲌⲍⳐ", "BCCHIIKMNOOPPTTYYXZZL"),
+        ("ᏣᏟꮯᏏᏧᏳᏂᎥꭵᎫᏦᏞᎷᏢᎡᏒꮁᏕꮪꮩᎳᏔꮃꮤᎩᎽᏃꮓ", "CCCBDGHIIJKLMPRRRSSVWWWWYYZZ"),
+        ("ᗅᗷᗞᗪᖴᕼᒍᒪᗰᑭᖇᑌᐯᕁ", "ABDDFHJLMPRUVX"),
+        ("ႽჽᲽҺһԚԛԜԝѴѵӏͿϳϜϺ", "SSSHHQQWWVVIJJFM"),
+        ("ᴀʙᴄᴅᴇɢʜɪᴊᴋʟᴍɴᴏᴘʀꜱᴛᴜᴠᴡʏᴢꞮ", "ABCDEGHIJKLMNOPRSTUVWYZI"),
+        ("⋃∨⋁", "UVV"),
 ):
     if len(_src) != len(_dst):
         _dst = _dst.ljust(len(_src), "?")

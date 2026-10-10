@@ -116,7 +116,9 @@ db = {d.get("date") or d.get("d") or d.get("k"): d for d in fb.get("dailySeries"
 key_a = sorted(k for k in da if k)
 before = [k for k in key_a if str(k) < ISO(TA)[(len(ISO(TA)) - len(str(k))):] or (len(str(k)) == len(ISO(TA)) and str(k) < ISO(TA))]
 diff_b = {k: (da[k].get("val"), (db.get(k) or {}).get("val")) for k in before if da[k].get("val") != (db.get(k) or {}).get("val")}
-chk(len(before) >= 3 and not diff_b, f"D3 발견 날 전 일별 값 {len(before)}일 = 앵커 넣기 전과 같음(지난날 무변)", (diff_b, key_a[:3], ISO(TA)))
+up_b = {k: round(float((db.get(k) or {}).get("val") or 0) - float(da[k].get("val") or 0), 2) for k in before}
+chk(len(before) >= 3 and all(abs(v - 1000.0) < 0.5 for v in up_b.values()),
+    f"D3 발견 날 전 일별 값 {len(before)}일 = 앵커 넣기 전 + 1,000 × 그날 $1(원래 있던 보유 — 지난날 곡선 포함 · lpcurve1010 ②)", (up_b, key_a[:3], ISO(TA)))
 last = key_a[-1] if key_a else None
 dv = ((db.get(last) or {}).get("val") or 0) - ((da.get(last) or {}).get("val") or 0) if last else None
 chk(dv is not None and abs(dv - 800) < 1.0, "D3 오늘 값 = +$800(보유 400 × $2 — 음수는 0 으로 가려졌던 몫)", (last, dv))

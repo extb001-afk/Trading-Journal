@@ -42,7 +42,7 @@ def _gj(url: str, timeout: float = 30.0, tries: int = None, sleep=time.sleep):
     for i in range(n9):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+                return json.loads(common.read_capped(r).decode())
         except Exception as e:
             if i + 1 >= n9 or not _gj_retryable(e):
                 raise
@@ -76,7 +76,7 @@ def _rpc(url: str, method: str, params, timeout: float = 25.0, gap: bool = True)
             raise RuntimeError(f"rpc {method}: 헬리우스 하루 예산 보류({bf_engine.HELIUS.last_why()}) — 다음 대사 때 다시")
     import bf_engine as _bfe9
     with (_bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) if gap else urllib.request.urlopen(req, timeout=timeout)) as r:
-        d = json.loads(r.read().decode())
+        d = json.loads(common.read_capped(r).decode())
     if "error" in d:
         raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}")
     if not isinstance(d, dict) or d.get("result") is None:
@@ -422,8 +422,9 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
             cw = {ca for ca in base_w if ca not in excl} | {ca for ca in (bs.get(w) or {}) if ca not in excl}
             ex9 = wx.get(str(w).lower()) or set()
             spec[w] = (set(sw) | ex9) - cw - must.get(str(w).lower(), set())
-            if ex9 - cw - set(sw) - must.get(str(w).lower(), set()):
-                xonly[w] = sorted(ex9 - cw - set(sw) - must.get(str(w).lower(), set()))
+            x9 = (ex9 | {ca for ca in (bs.get(w) or {}) if ca not in excl}) - set(base_w) - set(sw) - must.get(str(w).lower(), set())
+            if x9:
+                xonly[w] = sorted(x9)
             cw |= set(sw) | ex9
             pairs += [(w, ca) for ca in sorted(cw)]
             queried[w] = sorted(cw)

@@ -227,6 +227,8 @@ if callable(na):
 
 import onboarding
 
+_real_node_rpc0 = onboarding._node_rpc
+onboarding._node_rpc = lambda u, m, p, timeout=15.0: "0x10"
 st = onboarding.status()
 check("A10a evmNeedsAlchemy = EVM 지갑 있음", st.get("evmNeedsAlchemy") is True, st.get("evmNeedsAlchemy"))
 check("A10b explorers.alchemy = 미설정", (st.get("explorers") or {}).get("alchemy", {}).get("set") is False, (st.get("explorers") or {}).get("alchemy"))
@@ -277,6 +279,7 @@ def fake_rpc(url, method, params, timeout=15.0):
     return "0x1234"
 
 
+onboarding._node_rpc = _real_node_rpc0
 real_rpc = onboarding._node_rpc
 onboarding._node_rpc = fake_rpc
 try:

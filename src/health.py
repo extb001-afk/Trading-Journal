@@ -636,7 +636,7 @@ def _fill_paced_map(cfg: dict, now: float) -> dict:
         es = float(es9.get("daily_budget") or 80000)
         burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
         return {"evm": bf_engine.es_ledger_rooms(now, es, burst, keep)["fill"] <= 0,
-                "sol": bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg))["fill"] <= 0}
+                "sol": bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg))["fill"] <= 0}
     except Exception:
         return {}
 
@@ -653,7 +653,7 @@ def _pace_note(cfg: dict, now: float, unit: str) -> str:
         keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
         burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
         if unit == "sol":
-            ff = bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg)).get("fillFirst")
+            ff = bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg)).get("fillFirst")
         else:
             ff = bf_engine.es_ledger_rooms(now, float(es9.get("daily_budget") or 80000), burst, keep).get("fillFirst")
     except Exception:
@@ -820,6 +820,17 @@ def _bs_internal_text(chain: str, bs: dict, stall_sec=None):
     return txt
 
 
+def leaf_overflow_text(cur: dict, warn: int = 100_000):
+    try:
+        n = int((cur or {}).get("_leaf_overflow") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if n <= 0:
+        return None
+    t = f"내부 입금 확인 대기 잎 블록 {n:,}개(큐 넘침 — 노드 trace 회복 뒤 자동)"
+    return ("넘침 경고: " + t + " · 추적(trace) 노드 확인 필요") if n >= warn else t
+
+
 def uncollected_text(rt):
     if not isinstance(rt, dict):
         return None
@@ -869,8 +880,12 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
     rpcfb9 = _read(os.path.join(S, "rpc_fallback.json"), {}) or {}
     rpcfb9 = rpcfb9 if isinstance(rpcfb9, dict) else {}
     pn9 = None
+    evm_ch9 = {w.get("chain") for w in ((cfg or {}).get("wallets") or []) if isinstance(w, dict) and w.get("type", "evm") == "evm"}
     for c in sorted(chains):
         if not isinstance(chains[c], dict):
+            continue
+        if c not in evm_ch9:
+            used_hb.update({("evm", c), ("evm", f"{c}:rpclog")})
             continue
         p = os.path.join(S, f"cursor_evm_{c}.json")
         pr = os.path.join(S, f"cursor_rpc_{c}.json")
@@ -931,6 +946,9 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
             else uncollected_text((hb_src.get(("evm", c)) or {}).get("retention"))
         if rt9:
             hex_ = " · ".join(x for x in (hex_, rt9) if x)
+        lo9 = leaf_overflow_text(d) if isinstance(d, dict) else None
+        if lo9:
+            hex_ = " · ".join(x for x in (hex_, lo9) if x)
         bk9h = (hb_src.get(("evm", c)) or {}).get("rpc_bk")
         if isinstance(bk9h, dict):
             t9 = []
@@ -955,6 +973,13 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
             lim9h = (hb_src.get(("evm", c)) or {}).get("rpc_limited")
             if isinstance(lim9h, str) and lim9h:
                 hex_ = " · ".join(x for x in (hex_, f"제한된 백업({lim9h[:80]})") if x)
+            try:
+                import inflow_probe
+                if1 = inflow_probe.health_text(hbs9.get("inflow"), now)
+                if if1:
+                    hex_ = " · ".join(x for x in (hex_, if1) if x)
+            except Exception:
+                pass
         out.append(_source(st, now, f"chain:{c}", "tj-evm", _cname(c), "chain",
                            max(cands) if cands else None, human_err(herr, _cname(c)), hex_))
         out[-1]["err_raw"] = common.redact_urls(common.redact_secret_text(herr, generic=False)) if herr else None
@@ -1030,7 +1055,7 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         hts, herr, hex_ = hbinfo("bsc", "bsc")
         cands = [float(x) for x in (d.get("_synced_at"), hts) if x]
         out.append(_source(st, now, "chain:bsc", "tj-bsc", "BSC", "chain", max(cands) if cands else None, human_err(herr, "BSC"), hex_))
-    if os.path.exists(os.path.join(S, "cursor_sol.json")) or ("sol", "sol") in hb_src:
+    if (os.path.exists(os.path.join(S, "cursor_sol.json")) or ("sol", "sol") in hb_src) and not runner_waiting("sol", SOL_WAIT_WHY, now):
         d = _read(os.path.join(S, "cursor_sol.json"), {}) or {}
         hts, herr, hex_ = hbinfo("sol", "sol")
         cands = [float(x) for x in (d.get("_synced_at"), hts) if x]
@@ -1073,7 +1098,7 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         out.append(_source(st, now, f"ex:{ex}", "tj-exf", EX_NAME.get(ex, ex), "exchange", cur,
                            None, f"{which} 수집 지연" if which else None))
     ub = os.path.join(S, "upbit_balances.json")
-    if os.path.exists(ub):
+    if os.path.exists(ub) and upbit_connected():
         d = _read(ub, {}) or {}
         syp9 = os.path.join(S, "upbit_sync.json")
         sy = _read(syp9, None)
@@ -1150,11 +1175,42 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
     return out
 
 
+def upbit_connected() -> bool:
+    try:
+        import settings_store
+        env9 = {}
+        try:
+            with open(settings_store.ENV_PATH, "r", encoding="utf-8-sig") as f9:
+                for line9 in f9:
+                    kv9 = common.parse_env_line(line9)
+                    if kv9 and kv9[0]:
+                        env9[kv9[0]] = kv9[1]
+        except FileNotFoundError:
+            env9 = {}
+        return bool((os.environ.get("UPBIT_ACCESS") or env9.get("UPBIT_ACCESS")) and (os.environ.get("UPBIT_SECRET") or env9.get("UPBIT_SECRET")))
+    except Exception:
+        return True
+
+
+SOL_WAIT_WHY = ("Helius 키 없음", "Solana 지갑 없음")
+
+
+def runner_waiting(unit: str, whys: tuple, now: float = None) -> bool:
+    rb = _read(os.path.join(common.STATE_DIR, f"runner_{unit}.json"), None)
+    if not isinstance(rb, dict) or rb.get("state") != "waiting" or rb.get("by") == "reload":
+        return False
+    try:
+        age = (time.time() if now is None else float(now)) - float(rb.get("ts"))
+    except (TypeError, ValueError):
+        return False
+    return -60 <= age < 120 and any(str(rb.get("why") or "").startswith(w) for w in whys)
+
+
 def read_heartbeats(cfg: dict = None) -> dict:
     out = {}
     off = set((cfg or {}).get("_disabled_chains") or ())
     evm_wait = False
-    if cfg is not None and off and not any(isinstance(w, dict) and w.get("type", "evm") == "evm" for w in cfg.get("wallets") or []):
+    if cfg is not None and not any(isinstance(w, dict) and w.get("type", "evm") == "evm" for w in cfg.get("wallets") or []):
         rb = _read(os.path.join(common.STATE_DIR, "runner_evm.json"), None)
         evm_wait = (isinstance(rb, dict) and rb.get("state") == "waiting" and rb.get("why") == "EVM 지갑 없음"
                     and isinstance(rb.get("ts"), (int, float)) and 0 <= time.time() - float(rb["ts"]) < 120)
@@ -1162,9 +1218,11 @@ def read_heartbeats(cfg: dict = None) -> dict:
         d = _read(p, None)
         if isinstance(d, dict) and d.get("ts") and d.get("schema") == 1 and isinstance(d.get("sources"), dict):
             unit = str(d.get("unit") or os.path.basename(p)[:-5])
+            if unit == "evm" and evm_wait:
+                continue
+            if unit == "sol" and runner_waiting("sol", SOL_WAIT_WHY):
+                continue
             if unit == "evm" and off:
-                if evm_wait:
-                    continue
                 d = dict(d, sources={k: v for k, v in d["sources"].items() if str(k).split(":", 1)[0] not in off})
             out[unit] = d
     return out
@@ -1530,7 +1588,7 @@ def _short_addr(a: str) -> str:
 
 
 REST_LATE_MARGIN = 900
-REST_LATE_MAX = 26 * 3600
+REST_LATE_MAX = 13 * 3600
 
 
 def tier_rest_map() -> dict:
@@ -2037,7 +2095,9 @@ def collect_keys(cfg: dict, now: float = None) -> dict:
     try:
         import settings_store
         return {"evm": settings_store.needs_etherscan(cfg or {}), "etherscan": bool(settings_store.env_value("TJ_ETHERSCAN_KEY")),
-                "alchemyNeed": settings_store.needs_alchemy(cfg or {}), "alchemy": bool(settings_store.env_value("TJ_ALCHEMY_KEY"))}
+                "alchemyNeed": settings_store.needs_alchemy(cfg or {}), "alchemy": bool(settings_store.env_value("TJ_ALCHEMY_KEY")),
+                "ankrNeed": settings_store.needs_ankr(cfg or {}), "ankr": bool(settings_store.env_value("TJ_ANKR_KEY")),
+                "heliusNeed": settings_store.needs_helius(cfg or {}), "helius": bool(settings_store.env_value("TJ_HELIUS_KEY"))}
     except Exception:
         return {}
 
@@ -2241,7 +2301,7 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         net_bad = net_lvl != "ok"
         add("net:dns", "system", "네트워크 끊김", net_lvl,
             f"{len(net_units)}개 유닛에서 DNS·경로 실패 {run * 5}분째",
-            "맥의 인터넷 연결(와이파이·VPN) 확인 — 복구되면 수집기는 자동으로 따라잡습니다",
+            "이 컴퓨터의 인터넷 연결(와이파이·VPN) 확인 — 복구되면 수집기는 자동으로 따라잡습니다",
             persist=0, resolve=h["resolve_sec"], kind="net")
         chip("네트워크" + (" 끊김" if net_lvl != "ok" else ""))
         checks[-1]["run"] = run
@@ -2410,6 +2470,22 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             ("EVM 지갑이 있는데 Alchemy 키가 없어요 — 지갑이 주고받은 토큰 전부와 지금 잔고를 한 번에 찾지 못해, 옛 보유 토큰 찾기가 약해져요"
              "(탐색기 한 곳만 — 그 탐색기가 막힌 체인은 오래 들고만 있던 토큰을 놓칠 수 있어요). 거래 수집·감시는 그대로 돌아요"),
             "dashboard.alchemy.com/signup 에서 무료 키를 받아 설정 › 연결 · 키 › Alchemy 에 넣으세요(재시작 없이 바로 써요)",
+            persist=0, resolve=60, notify=False, remind=False, kind="key")
+    if kk.get("ankrNeed") and "ankr" in kk and ("tj-evm" in units or "tj-bsc" in units):
+        have = bool(kk.get("ankr"))
+        add("key:ankr", "tj-evm" if "tj-evm" in units else "tj-bsc", "Ankr 키" if have else "Ankr 키가 필요해요(무료)", "ok" if have else "warn",
+            "저장됨 — 쉬는 지갑에 들어온 토큰을 10분마다 확인하고, BSC·Base 옛 기록을 빨리 받아요(무료 한도의 80% 아래)" if have else
+            ("EVM 지갑이 있는데 Ankr 키가 없어요 — 오래 안 쓴 지갑에 들어온 토큰을 무료 공개 노드로만 확인해 늦거나 빠질 수 있고(1시간 확인이 받쳐 줘요), "
+             "BSC·Base 옛 기록도 공개 노드로 천천히 받아요. 거래 수집·감시는 그대로 돌아요"),
+            "ankr.com/rpc 에서 무료 키(Freemium)를 받아 설정 › 연결 · 키 › Ankr 에 넣으세요",
+            persist=0, resolve=60, notify=False, remind=False, kind="key")
+    if kk.get("heliusNeed") and "helius" in kk and "tj-sol" in units:
+        have = bool(kk.get("helius"))
+        add("key:helius", "tj-sol", "Helius 키" if have else "Helius 키가 필요해요(무료)", "ok" if have else "warn",
+            "저장됨 — Solana 지갑 기록을 받아요" if have else
+            ("Solana 지갑이 있는데 Helius 키가 없어요 — Solana 기록 수집은 키를 넣을 때까지 기다려요(이미 받은 기록은 그대로 · "
+             "넣으면 최근 거래부터 바로 받고 빠진 구간도 이어 받아요)"),
+            "dashboard.helius.dev 에서 무료 키를 받아 설정 › 연결 · 키 › Helius 에 넣으세요(넣으면 약 30초 안에 Solana 수집이 저절로 시작돼요)",
             persist=0, resolve=60, notify=False, remind=False, kind="key")
     bf_units = {"evm": "tj-evm", "bsc": "tj-bsc", "sol": "tj-sol", "exf": "tj-exf", "ex": "tj-ex"}
     for bu, items in (obs.get("bf") or {}).items():
@@ -2594,18 +2670,24 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             top = " · ".join(f"{x.get('sym')} {loc_ko(x.get('loc'))} ${abs(float(x.get('usd') or 0)):,.0f}"
                              + ("(재계산 대기)" if x.get("pend") and not all_pd9 else "") for x in top9[:3])
             ph9 = bf_ext_phrase(obs.get("bf"), now) if bad and p_n9 > 0 else ""
+            first9 = False
             if all_pd9:
                 det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 재계산 대기: 과거 기록을 늦게 받은 옛 거래가 이미 맞춰 둔 기초잔고와 겹친 일시 음수"
                         " (그동안 같은 거래의 다른 쪽 — 내 다른 지갑 — 이 그만큼 많게 보일 수 있음) · "
                         + (f"{ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 — 기다리면 됨" if ph9 else "과거 기록 범위 넓히기가 끝나면 원장 자동 재계산이 다시 맞춤"))
                 act9 = ((f"기다리면 됨 — {ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 · " if ph9 else "")
                         + "과거 기록 넓히기·재계산이 끝날 때까지 기다린 뒤에도 남으면 빠진 입금·지갑 등록을 점검 — 진행은 설정 › 과거 데이터 더 가져오기")
+            elif not os.path.exists(os.path.join(common.STATE_DIR, "backfill_done")):
+                first9 = True
+                det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 첫 백필 중: 기초잔고 대사(창 이전 보유 맞추기) 전이라 판 코인이 음수로 보일 수 있음"
+                        " · 체인·거래소별 첫 수집이 끝나 대사가 되면 자동으로 맞춰짐")
+                act9 = "기다리면 됨 — 진행은 화면 위 상태 칩 '과거 N%' · 대사가 끝난 뒤에도 남으면 빠진 입금·지갑 등록·거래소 이력 기간을 점검"
             else:
                 det9 = (f"{n_neg9}곳(마진 차입 제외) · {top} — 보유량은 0 으로 보이지만 원장 결손(누락 입금·원가 이관) 신호"
                         + (f" · 그중 {p_n9}곳 ${abs(p_usd9):,.0f} 은 재계산 대기(늦게 받은 옛 거래 — "
                            + (f"{ph9}가 끝나면 " if ph9 else "") + "자동 재계산이 다시 맞춤)" if p_n9 > 0 else ""))
                 act9 = "대시보드 보유 목록의 음수 위치 확인 — 빠진 입금·지갑 등록·거래소 이력 기간을 점검"
-            add("ledger:neg", "tj-core", (f"원장 음수 보유 ${abs(nusd):,.0f}" + (" · 재계산 대기" if all_pd9 else "")) if bad else "원장 음수 보유",
+            add("ledger:neg", "tj-core", (f"원장 음수 보유 ${abs(nusd):,.0f}" + (" · 재계산 대기" if all_pd9 else " · 첫 백필 중" if first9 else "")) if bad else "원장 음수 보유",
                 "warn" if bad else "ok",
                 det9 if bad else "없음(마진 차입 제외)",
                 act9,
@@ -2995,12 +3077,14 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
         ds9 = bc.get("disc")
         if isinstance(ds9, dict):
             fp9, no9 = int(ds9.get("failPairs") or 0), list(ds9.get("noOld") or [])
-            lvl9 = "warn" if fp9 else "ok"
+            hd9 = int(ds9.get("hold") or 0)
+            lvl9 = "warn" if fp9 or hd9 else "ok"
             det9 = (f"찾은 쌍 {int(ds9.get('done') or 0)}/{int(ds9.get('pairs') or 0)}"
                     + (f" · 발견 실패 {fp9}쌍(" + ", ".join(f"{k} {v}" for k, v in sorted((ds9.get('failBy') or {}).items())) + ")" if fp9 else "")
                     + (f" · 스팸 의심으로 기초 잔고에 안 넣은 토큰 {int(ds9.get('skip') or 0)}" if ds9.get("skip") else "")
+                    + (f" · 판정 대기 토큰 {hd9}(시세 판정 출처 장애 — 다음 대조에 다시)" if hd9 else "")
                     + (" · 이 체인은 옛 보유 확인 불가: " + ", ".join(no9) if no9 else ""))
-            add("balcheck:disc", "tj-web", f"토큰 발견 실패 {fp9}쌍" if fp9 else "토큰 발견", lvl9, det9,
+            add("balcheck:disc", "tj-web", f"토큰 발견 실패 {fp9}쌍" if fp9 else (f"토큰 판정 대기 {hd9}" if hd9 else "토큰 발견"), lvl9, det9,
                 "발견 실패는 다음 대조(1시간)에 다시 · 한도면 다음 날(UTC) · '옛 보유 확인 불가' 체인은 설정 › 노드 키에 Alchemy·Ankr 무료 키를 넣으면 풀려요",
                 persist=0, notify=False, remind=False, kind="balcheck")
     cs = obs.get("chainsweep")
@@ -3015,7 +3099,8 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                   if fs else f"체인 {cs.get('chains')}개 점검 — 발견 없음" + (f" · 활동 게이트 자동 추적 {cs['auto']}쌍" if cs.get("auto") else "")
                   + (f" · 조회 실패 {cs['errors']}개 체인" if cs.get("errors") else ""))
             + (f" · 끈 체인 {cs['off']}건(설정에서 끈 체인 — 알림 없음)" if cs.get("off") else ""),
-            "그 체인을 추적에 추가하거나(속도 측정이 끝나면 활동 지갑은 자동으로 켜져요), 필요 없는 체인·지갑이면 무시 목록(설정 파일)에 넣어 경고에서 뺄 수 있어요",
+            "필요한 체인이면 설정 › 지갑 추가에서 같은 주소에 그 체인을 골라 등록하세요(자동 켜기 chain_sweep.auto_enable 을 켠 설치는 속도 측정 뒤 저절로 켜져요) · "
+            "필요 없는 체인·지갑이면 무시 목록(설정 파일 chain_sweep.ignore)에 넣어 경고에서 뺄 수 있어요",
             persist=0, remind=False, kind="chainsweep")
         chip(f"미추적 체인 {len(fs)}건" if fs else "미추적 체인 없음")
         age = eff_age("chainsweep:stale", float(cs.get("checkedAt") or 0) or None)

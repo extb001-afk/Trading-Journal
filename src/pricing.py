@@ -101,10 +101,27 @@ STABLE_MINTS = {
 MAJOR_CANDLE_SYMS = {"ETH", "BTC", "SOL", "POL", "BNB", "AVAX"}
 
 
+UPBIT_CANDLE_GAP = 0.15
+_UPBIT_PACE = {"next": 0.0}
+_UPBIT_PACE_LOCK = threading.Lock()
+
+
+def _upbit_pace(url: str) -> None:
+    if not str(url).startswith("https://api.upbit.com/v1/candles/"):
+        return
+    with _UPBIT_PACE_LOCK:
+        now9 = time.monotonic()
+        at9 = max(now9, _UPBIT_PACE["next"])
+        _UPBIT_PACE["next"] = at9 + UPBIT_CANDLE_GAP
+    if at9 > now9:
+        time.sleep(at9 - now9)
+
+
 def _gj(url: str, timeout: float = 10.0):
+    _upbit_pace(url)
     req = urllib.request.Request(url, headers=_UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+        return json.loads(common.read_capped(r).decode())
 
 
 class BulkError(RuntimeError):
@@ -603,9 +620,21 @@ class PxCache:
         with self.lock:
             mins = [m for m in mins if str(m) not in self.d["fx"]]
         calls = filled = 0
+        stop = False
+
+        def _rest():
+            with self.lock:
+                return time.time() - float(self.d["neg_ts"].get("_fx", 0) or 0) < self.FX_NEG_SEC
+
+        def _fail():
+            with self.lock:
+                self.d["neg_ts"]["_fx"] = int(time.time())
+                self._dirty += 1
+        if mins and _rest():
+            return {"calls": 0, "filled": 0, "left": len(mins), "done": False}
         from datetime import datetime, timezone
         i = 0
-        while i < len(mins) and calls < max_calls and (deadline is None or time.time() < deadline):
+        while i < len(mins) and calls < max_calls and (deadline is None or time.time() < deadline) and not stop and not _rest():
             end = mins[i] + (self.FX_WIN - 1) * 60_000
             grp = [m for m in mins[i:] if m <= end]
             if grp[-1] < FX_USDT_FIRST_MS:
@@ -618,6 +647,10 @@ class PxCache:
                 arr = None
             calls += 1
             i += len(grp)
+            if not isinstance(arr, list):
+                _fail()
+                stop = True
+                break
             bars = []
             for c in arr or []:
                 try:
@@ -648,7 +681,7 @@ class PxCache:
         with self.lock:
             pre = [m for m in mins[:i] if m < FX_USDT_FIRST_MS + 86_400_000 and str(m) not in self.d["fx"]]
         j = 0
-        while j < len(pre) and calls < max_calls and (deadline is None or time.time() < deadline):
+        while j < len(pre) and calls < max_calls and (deadline is None or time.time() < deadline) and not stop and not _rest():
             start = pre[j]
             end = start + (self.FX_WIN - 31) * 60_000
             grp = [m for m in pre[j:] if m <= end]
@@ -670,7 +703,11 @@ class PxCache:
                         continue
             except Exception:
                 ub, bn = [], []
+                _fail()
+                stop = True
             calls += 2
+            if stop:
+                break
             with self.lock:
                 for m in grp:
                     v = _cross_at(m, ub, bn)
@@ -681,7 +718,22 @@ class PxCache:
             if pace:
                 time.sleep(pace)
         self.maybe_save()
-        return {"calls": calls, "filled": filled, "left": max(0, len(mins) - filled), "done": i >= len(mins) and j >= len(pre)}
+        return {"calls": calls, "filled": filled, "left": max(0, len(mins) - filled), "done": not stop and i >= len(mins) and j >= len(pre)}
+
+    def prefetch_fx_patient(self, ms_list, max_calls: int, deadline: float = None, tries: int = 5, sleep=None) -> dict:
+        sl = sleep or time.sleep
+        tot = {"calls": 0, "filled": 0, "left": 0, "done": False}
+        for k in range(max(1, int(tries))):
+            if k:
+                if deadline is not None and time.time() + self.FX_NEG_SEC + 1 >= deadline:
+                    break
+                sl(self.FX_NEG_SEC + 1)
+            st = self.prefetch_fx(ms_list, max_calls=max(0, int(max_calls) - tot["calls"]), deadline=deadline)
+            tot.update(calls=tot["calls"] + int(st.get("calls") or 0), filled=tot["filled"] + int(st.get("filled") or 0),
+                       left=int(st.get("left") or 0), done=bool(st.get("done")))
+            if tot["done"] or tot["calls"] >= int(max_calls) or (deadline is not None and time.time() >= deadline):
+                break
+        return tot
 
     def prefetch_candles(self, pairs, max_calls: int = 40, deadline: float = None, pace: float = 0.15) -> dict:
         by = {}
@@ -804,7 +856,8 @@ class PxCache:
         with self.lock:
             if fx:
                 self.d["fx"][key] = fx
-                self.d["neg_ts"].pop("_fx", None)
+                if self.d["neg_ts"].get("_fx", 0) == neg:
+                    self.d["neg_ts"].pop("_fx", None)
             else:
                 self.d["neg_ts"]["_fx"] = int(time.time())
             self._dirty += 1
@@ -839,6 +892,10 @@ class PxCache:
                 break
             if i:
                 time.sleep(self.FX_WARM_GAP)
+            with self.lock:
+                neg = self.d["neg_ts"].get("_fx", 0)
+            if time.time() - float(neg or 0) < self.FX_NEG_SEC:
+                break
             to_s = datetime.fromtimestamp(g[-1] / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WARM_SPAN}")
@@ -932,6 +989,76 @@ class PxFetchQueue:
                 self.drain()
             except Exception:
                 time.sleep(5)
+
+
+class FxWarmQueue(PxFetchQueue):
+
+    RETRIES = 2
+    RETRY_SEC = 61.0
+
+    def __init__(self, px: "PxCache", name: str = "fxwarm-worker"):
+        super().__init__(px, name=name)
+        self.busy = False
+
+    def _missing(self, items):
+        with self.px.lock:
+            return [(k, s, m) for k, s, m in items
+                    if not (self.px.d["fx"].get(str(m)) if k == "fx" else self.px.d["candle"].get(f"{s}:{m}"))]
+
+    def drain(self) -> int:
+        with self.lock:
+            items = sorted(self.q, key=lambda x: (x[0], str(x[1] or ""), int(x[2])))
+            self.q.clear()
+            self.busy = bool(items)
+        if not items:
+            return 0
+        t0 = time.time()
+        gap = float(getattr(self.px, "FX_WARM_GAP", 0.15) or 0)
+        try:
+            left = self._missing(items)
+            for attempt in range(self.RETRIES + 1):
+                if attempt:
+                    time.sleep(self.RETRY_SEC)
+                    left = self._missing(left)
+                fx_ms = [m for k, _s, m in left if k == "fx"]
+                for _ in range(64):
+                    try:
+                        if not fx_ms or self.px.fx_warm(fx_ms) <= 0:
+                            break
+                    except Exception:
+                        break
+                    fx_ms = [m for k, _s, m in self._missing([("fx", "", m9) for m9 in fx_ms])]
+                for kind, sym, m in self._missing(left):
+                    try:
+                        if kind == "fx":
+                            self.px.fx_at(m)
+                        elif kind == "c":
+                            self.px.candle_usd(sym, m)
+                    except Exception:
+                        pass
+                    if gap:
+                        time.sleep(gap)
+                left = self._missing(left)
+                if not left:
+                    break
+            self.px.maybe_save()
+            self.stats["done"] += len(items)
+            self.stats["batches"] += 1
+            self.stats["last_s"] = round(time.time() - t0, 2)
+        finally:
+            with self.lock:
+                self.busy = False
+        return len(items)
+
+    def wait_idle(self, timeout: float) -> bool:
+        t_end = time.time() + float(timeout)
+        while True:
+            with self.lock:
+                if not self.q and not self.busy:
+                    return True
+            if time.time() >= t_end:
+                return False
+            time.sleep(0.02)
 
 
 def upbit_krw_markets() -> set:
@@ -1546,7 +1673,7 @@ def okx_dex_prices(creds: dict, pairs: list) -> dict:
         try:
             try:
                 with urllib.request.urlopen(req, timeout=12) as r:
-                    d = json.loads(r.read().decode())
+                    d = json.loads(common.read_capped(r).decode())
             except Exception:
                 continue
             if str(d.get("code")) != "0":

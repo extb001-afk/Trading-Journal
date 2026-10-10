@@ -81,6 +81,28 @@ def net_error_text(e) -> str:
     return "연결하지 못했어요 — 잠시 뒤 다시 시도하고, 계속되면 tj-web 로그를 확인하세요"
 
 
+HTTP_BODY_MAX = 32 * 1024 * 1024
+HTTP_ERR_BODY_MAX = 64 * 1024
+
+
+class ResponseTooLarge(ValueError):
+    pass
+
+
+def read_capped(r, cap: int = None) -> bytes:
+    cap = HTTP_BODY_MAX if cap is None else max(0, int(cap))
+    n9 = cap + 1
+    ln9 = getattr(r, "length", None)
+    if isinstance(ln9, int) and not isinstance(ln9, bool) and ln9 >= 0:
+        if ln9 > cap:
+            raise ResponseTooLarge(f"응답 본문 {ln9:,}바이트가 상한 {cap:,}바이트를 넘음 — 이 요청 실패")
+        n9 = ln9 + 1
+    raw = r.read(n9) or b""
+    if len(raw) > cap:
+        raise ResponseTooLarge(f"응답 본문이 상한 {cap:,}바이트를 넘음 — 이 요청 실패")
+    return raw
+
+
 def read_env_file(path: str = None) -> dict:
     out = {}
     try:
@@ -631,7 +653,7 @@ def gate_decisions(cfg: dict, gate: dict = None, speed: dict = None) -> list:
             d["reason"] = "설정에서 끈 체인"
         elif c in configured:
             if since is None:
-                d["reason"] = "이미 이력이 있는 지갑 — 수동 등록(관점 재파생 절차) 필요"
+                d["reason"] = "이미 이력이 있는 지갑 — 자동으로는 안 켜요 · 설정 › 지갑 추가에서 같은 주소에 이 체인을 고르면 등록"
             else:
                 d["ok"], d["reason"] = True, "새 활동(추적 체인)"
         else:

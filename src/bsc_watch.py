@@ -30,6 +30,9 @@ CALL_SLEEP = 0.25
 _now = time.time
 NONCE_EVERY = 3600
 NONCE_BACKLOG_EVERY = 170
+NONCE_HEAD_EVERY = 45
+NONCE_RECENT_SEC = 7200
+NONCE_OLD_BURST = 300
 NONCE_MAX_FIND = 20
 NONCE_CALL_CAP = 30
 NONCE_PUB_CAP = 400
@@ -44,6 +47,9 @@ NONCE_HINT_KEEP = 7 * 86400
 XIN_EVERY = 3600
 XIN_MAX_NEW = 10
 XIN_NF_MAX = 6
+LANE_SPLIT_SEC = 2 * 3600
+LIVE_SEED_SEC = 3600
+BSC_BLOCK_SEC = 0.45
 _XIN_TXID = re.compile(r"^0x[0-9a-f]{64}$")
 _XIN_NET = re.compile(r"BSC|BEP-?20|SMART|^BNB$", re.I)
 _XIN_NF = re.compile(r"^(?:미확정 tx: .*|(?:rpc )?eth_getTransaction(?:ByHash|Receipt): result null)$")
@@ -280,7 +286,13 @@ class BscWatcher:
         self.logs_fb = {str(u): int(c) for u, c in (bc.get("logs_rpcs_fallback") or {}).items() if int(c) > 0}
         self.canary = None if bc.get("canary") is False else bf_engine.BSC_CANARY
         self.conf_depth = int(bc.get("conf_depth", 20))
-        self.backfill_days = int(bc.get("backfill_days", 120))
+        self.backfill_days = bf_engine.bsc_backfill_days(cfg)
+        self.poll_sec = float(bc.get("poll_sec", 60))
+        self.lanes_cfg = bc.get("lanes")
+        try:
+            self.lane_budget = float(bc["lane_budget_sec"]) if bc.get("lane_budget_sec") is not None else None
+        except (TypeError, ValueError):
+            self.lane_budget = None
         self.wallets = [w.lower() for w in wallets]
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get("bsc") or "").lower() or None
         self.discover_wrap = bc.get("discover_wrap") is not False and bool(self.wrapped_ca)
@@ -713,7 +725,7 @@ class BscWatcher:
     def block_at_ts(self, ts: int, hi: int) -> int:
         return bf_engine.block_at_ts(lambda b: self._block_time(hex(b)), int(ts), 0, int(hi))
 
-    def _health(self, head: int, since: int, ok: bool, err=None):
+    def _health(self, head: int, since: int, ok: bool, err=None, extra=None):
         hb = bf_engine.health("bsc")
         now = time.time()
         prev = getattr(self, "_hb_prev", None)
@@ -733,7 +745,8 @@ class BscWatcher:
                      current_source=common.redact_urls(self.rpc.urls[self.rpc.i]),
                      logs_sources=[common.redact_urls(u) for u in self.logs_rpc.urls],
                      scan_pending=len(sc.get("found") or []) if isinstance(sc, dict) else 0,
-                     synced_at=self.cursor.get("_synced_at"), scan=self.last_scan_metrics or None)
+                     synced_at=self.cursor.get("_synced_at"), scan=self.last_scan_metrics or None,
+                     lanes=(extra or {}).get("lanes"))
         if ok:
             hb.ok("bsc", "bsc_rpc", **facts)
         else:
@@ -760,14 +773,15 @@ class BscWatcher:
             common.atomic_write_json(self.cursor_path, self.cursor)
             log.info("★BSC 과거 창 확장: 블록 %d → %d (%s~)★", tblk, cov, time.strftime("%Y-%m-%d", time.gmtime(target)))
         t0 = time.time()
+        bud = self._side_left()
         if ext["done_to"] < ext["to"]:
-            found, last = self.discover(ext["done_to"] + 1, ext["to"], budget_sec=self.cycle_budget)
+            found, last = self.discover(ext["done_to"] + 1, ext["to"], budget_sec=bud)
             if last > ext["done_to"]:
                 ext["found"] = sorted(set(ext["found"]) | {h for h in found if h not in self.emitted})
                 ext["done_to"] = last
                 common.atomic_write_json(self.cursor_path, self.cursor)
         todo = [h for h in ext["found"] if h not in self.emitted]
-        dets = self.fetch_details(todo, deadline=t0 + self.cycle_budget) if todo else {}
+        dets = self.fetch_details(todo, deadline=t0 + bud) if todo else {}
         order = sorted(todo, key=lambda h: (dets[h]["tx"]["block_number"], h) if isinstance(dets.get(h), dict)
                        else (1 << 62, h))
         n_emit = 0
@@ -812,6 +826,13 @@ class BscWatcher:
             sc = self.cursor.get("_scan")
             fb = int(self.cursor.get("from_block") or 0)
             self.cursor["_neww_top"] = max(fb, int(sc.get("to") or 0)) if isinstance(sc, dict) else fb
+            lv9, ls9 = self.cursor.get("_live"), self.cursor.get("_lscan")
+            if isinstance(lv9, dict) and fb > 0:
+                try:
+                    self.cursor["_neww_top"] = max(int(self.cursor["_neww_top"]), int(lv9.get("done") or 0),
+                                                   int(ls9.get("to") or 0) if isinstance(ls9, dict) else 0)
+                except (TypeError, ValueError):
+                    pass
             dirty = True
         if dirty:
             common.atomic_write_json(self.cursor_path, self.cursor)
@@ -876,15 +897,16 @@ class BscWatcher:
             common.atomic_write_json(self.cursor_path, self.cursor)
             log.info("★BSC 나중 등록 지갑 %d개 이력 백필: 블록 %d → %d (새 지갑 토픽만)★", len(new), lo, top)
         t0 = time.time()
+        bud = self._side_left()
         if job["done_to"] < job["to"]:
-            found, last = self.discover(job["done_to"] + 1, job["to"], budget_sec=self.cycle_budget,
+            found, last = self.discover(job["done_to"] + 1, job["to"], budget_sec=bud,
                                         topics=[_pad_topic(w) for w in job["wallets"]])
             if last > job["done_to"]:
                 job["found"] = sorted(set(job["found"]) | set(found))
                 job["done_to"] = last
                 common.atomic_write_json(self.cursor_path, self.cursor)
         todo = list(job["found"])
-        dets = self.fetch_details(todo, deadline=t0 + self.cycle_budget) if todo else {}
+        dets = self.fetch_details(todo, deadline=t0 + bud) if todo else {}
         order = sorted(todo, key=lambda h: (dets[h]["tx"]["block_number"], h) if isinstance(dets.get(h), dict)
                        else (1 << 62, h))
         sent = set()
@@ -1032,7 +1054,7 @@ class BscWatcher:
             if not (isinstance(lo, list) and len(lo) == 2 and lo[0] == lo_blk):
                 return True
             ta = ws.get("top_at")
-            if not isinstance(ws.get("top"), int) or not isinstance(ta, (int, float)) or now - float(ta) >= NONCE_EVERY:
+            if not isinstance(ws.get("top"), int) or not isinstance(ta, (int, float)) or now - float(ta) >= NONCE_HEAD_EVERY:
                 return True
             try:
                 if int(ws.get("missing") or 0) > 0:
@@ -1043,10 +1065,18 @@ class BscWatcher:
                 return True
         return False
 
-    def _nonce_tops(self, batch_fn, ws_list: list, safe: int, put, one) -> None:
+    def _nonce_tops(self, batch_fn, ws_list: list, safe: int, put, one, can_one=None) -> None:
         if not ws_list:
             return
         bh = hex(int(safe))
+
+        def put_one(w9):
+            if can_one is not None and not can_one():
+                return False
+            r9 = one(w9, bh)
+            if r9 is not None:
+                put(w9, int(r9, 16))
+            return True
         rest = list(ws_list)
         if batch_fn is not None and len(rest) > 1:
             rest = []
@@ -1076,18 +1106,21 @@ class BscWatcher:
                         continue
                     put(w9, n9)
                 for w9 in failed:
-                    put(w9, int(one(w9, bh), 16))
+                    if not put_one(w9):
+                        return
         for w9 in rest:
-            put(w9, int(one(w9, bh), 16))
+            if not put_one(w9):
+                return
 
-    def _nonce_pass(self, head: int) -> int:
+    def _nonce_pass(self, head: int, lo_blk: int = None) -> int:
         st = self._nonce_load()
         now = _now()
         if float(st.get("bo_until") or 0) > now:
             return 0
-        if now - float(st.get("at_w") or 0) < NONCE_BACKLOG_EVERY:
+        if now - float(st.get("at_w") or 0) < NONCE_HEAD_EVERY:
             return 0
-        lo_blk = self.cursor.get("_cov") if isinstance(self.cursor.get("_cov"), int) else self.cursor.get("_bf_start")
+        if lo_blk is None:
+            lo_blk = self.cursor.get("_cov") if isinstance(self.cursor.get("_cov"), int) else self.cursor.get("_bf_start")
         if not isinstance(lo_blk, int) or lo_blk <= 0:
             return 0
         safe = int(head) - self.conf_depth
@@ -1113,6 +1146,13 @@ class BscWatcher:
         pub_rpc = getattr(self, "nonce_pub_rpc", base_rpc)
         cnt = {"arch": 0, "pub": 0, "found": 0, "emit": 0}
         self._nonce_last = cnt
+        try:
+            tok0 = float(st["old_tok"]) if st.get("old_tok") is not None else float(NONCE_OLD_BURST)
+            tat0 = float(st.get("old_tok_at") or now)
+        except (TypeError, ValueError):
+            tok0, tat0 = float(NONCE_OLD_BURST), now
+        old_tok = [min(float(NONCE_OLD_BURST), tok0 + max(0.0, now - tat0) * NONCE_CALL_CAP / float(NONCE_BACKLOG_EVERY))]
+        old_a0 = [None]
         nxt = [0.0]
         blk = [False]
         halt = [None]
@@ -1282,9 +1322,9 @@ class BscWatcher:
                     out[i9] = it["result"]
             return out
 
-        def pub_one(m, p):
+        def pub_one(m, p, archive_ok=True):
             if pub_rpc is None:
-                return self.rpc.call(m, p)
+                return self.rpc.call(m, p) if archive_ok else None
             if not pub_real:
                 pub_charge(1)
                 return pub_rpc.call(m, p)
@@ -1295,6 +1335,8 @@ class BscWatcher:
             except Exception as e:
                 if halt[0] is not None:
                     raise
+                if not archive_ok:
+                    return None
                 log.debug("BSC nonce 확인 — 공개 노드 실패 → 아카이브(계량): %s", _nonce_why(e))
                 return self.rpc.call(m, p)
 
@@ -1418,7 +1460,7 @@ class BscWatcher:
             def hints(v):
                 return [h9 for h9 in (v.ws.get("hint") or []) if isinstance(h9, list) and len(h9) == 2 and isinstance(h9[0], int)]
             def head_due(v):
-                return v.top is None or now - v.top_at >= NONCE_EVERY or any(h9[0] + NONCE_HINT_FAR > v.top for h9 in hints(v))
+                return v.top is None or now - v.top_at >= NONCE_HEAD_EVERY or any(h9[0] + NONCE_HINT_FAR > v.top for h9 in hints(v))
             need = []
             for w, v in views.items():
                 if head_due(v):
@@ -1440,7 +1482,11 @@ class BscWatcher:
                 v.reindex()
             bfn = pub_batch if pub_real else (None if pub_rpc is None or not callable(getattr(pub_rpc, "batch", None))
                                               else (lambda it9: (pub_charge(len(it9)), pub_rpc.batch(it9))[1]))
-            self._nonce_tops(bfn, need, safe, put_top, lambda w9, bh9: pub_one("eth_getTransactionCount", [w9, bh9]))
+            need.sort(key=lambda w9: (views[w9].top is not None, views[w9].top_at))
+            self._nonce_tops(bfn, need, safe, put_top,
+                             lambda w9, bh9: pub_one("eth_getTransactionCount", [w9, bh9],
+                                                     archive_ok=views[w9].top is None or now - views[w9].top_at >= NONCE_EVERY),
+                             can_one=lambda: cnt["arch"] < NONCE_CALL_CAP // 2)
             if halt[0] is not None:
                 raise halt[0]
             for w, v in views.items():
@@ -1479,22 +1525,36 @@ class BscWatcher:
                     v.ws["hint"] = keep
                 else:
                     v.ws.pop("hint", None)
+            rlo = safe - max(1, int(NONCE_RECENT_SEC / self._bsec()))
+            old_ok = old_tok[0] >= NONCE_CALL_CAP / 2.0
             pos = 0
             while act and cnt["found"] < NONCE_MAX_FIND:
                 ivs = {w9: (views[w9].intervals()[0] if not views[w9].skip else []) for w9 in act}
                 live = [w9 for w9 in act if ivs[w9]]
                 if not live:
                     break
-                cand = {w9 for w9 in live if min(z9 - a9 for a9, z9, _d9 in ivs[w9]) <= NONCE_NARROW} or set(live)
+                rec = {w9: [t9 for t9 in ivs[w9] if t9[1] > rlo] for w9 in live}
+                rec = {w9: r9 for w9, r9 in rec.items() if r9}
+                if rec:
+                    pool9, cand = rec, set(rec)
+                elif old_ok:
+                    if old_a0[0] is None:
+                        old_a0[0] = cnt["arch"]
+                    pool9 = ivs
+                    cand = {w9 for w9 in live if min(z9 - a9 for a9, z9, _d9 in ivs[w9]) <= NONCE_NARROW} or set(live)
+                else:
+                    break
                 w = next(act[(pos + j) % len(act)] for j in range(len(act)) if act[(pos + j) % len(act)] in cand)
                 pos = (act.index(w) + 1) % len(act)
-                a9, z9, _d9 = min(ivs[w], key=lambda t9: (t9[1] - t9[0], t9[0]))
+                a9, z9, _d9 = min(pool9[w], key=lambda t9: (t9[1] - t9[0], -t9[0]))
                 last_w = w
                 v = views[w]
                 if z9 - a9 == 1:
                     if NONCE_CALL_CAP - cnt["arch"] < (2 if pend_of(v, z9) else 3):
                         raise _NonceBudget("nonce 확인 아카이브 호출 상한(블록 해결 몫 부족 — 다음 실행)")
                     resolve(v, z9)
+                elif w in rec and a9 < rlo < z9 and rlo not in v.smp:
+                    sample(v, rlo)
                 else:
                     sample(v, (a9 + z9) // 2)
         except _NonceBudget as e:
@@ -1510,6 +1570,8 @@ class BscWatcher:
                     base_rpc.i = base_i
                 except AttributeError:
                     pass
+        st["old_tok"] = round(old_tok[0] - (cnt["arch"] - old_a0[0] if old_a0[0] is not None else 0), 2)
+        st["old_tok_at"] = int(now)
         if blk[0]:
             blocked = True
         if halt[0] is not None:
@@ -1610,7 +1672,7 @@ class BscWatcher:
         finally:
             con.close()
         mine = set(self.wallets)
-        out = []
+        out = {}
         for (pl,) in rows:
             try:
                 p = json.loads(pl)
@@ -1629,8 +1691,9 @@ class BscWatcher:
             addr = str(p.get("address") or "").strip().lower()
             if addr and addr not in mine:
                 continue
-            out.append(tx)
-        return sorted(set(out))
+            t9 = common.iso_epoch(p.get("done_at")) or common.iso_epoch(p.get("created_at")) or 0
+            out[tx] = max(out.get(tx, 0), t9)
+        return sorted(out, key=lambda h: (-out[h], h))
 
     def _xin_pass(self, head: int) -> int:
         try:
@@ -1723,12 +1786,224 @@ class BscWatcher:
         if isinstance(start, int) and head > start:
             self.progress.update("bsc", phase=phase, unit="blocks", done=max(0, since - start),
                                  total=max(1, head - self.conf_depth - start), note=note, flush=flush,
-                                 lag=max(0, head - self.conf_depth - since), scan=self.last_scan_metrics or None)
+                                 lag=max(0, head - self.conf_depth - since), scan=self.last_scan_metrics or None, lanes=None)
         else:
             self.progress.update("bsc", phase=phase, unit="blocks", lag=max(0, head - self.conf_depth - since),
-                                 note=note, flush=flush)
+                                 note=note, flush=flush, lanes=None)
+
+    def _bsec(self) -> float:
+        v = self.__dict__.get("_hb_bsec")
+        try:
+            v = float(v) if v else BSC_BLOCK_SEC
+        except (TypeError, ValueError):
+            v = BSC_BLOCK_SEC
+        return min(10.0, max(0.05, v))
+
+    def _seed_blocks(self) -> int:
+        return max(100, int(LIVE_SEED_SEC / self._bsec()))
+
+    def _lanes_on(self) -> bool:
+        return getattr(self, "lanes_cfg", None) is not False
+
+    def _side_budget(self, tc0: float) -> float:
+        v = getattr(self, "lane_budget", None)
+        if v is not None:
+            return max(0.1, float(v))
+        return max(10.0, min(float(getattr(self, "cycle_budget", 600)), float(getattr(self, "poll_sec", 60)) - (time.time() - tc0) - 5.0))
+
+    def _side_left(self) -> float:
+        tc0 = self.__dict__.get("_tc0")
+        return self._side_budget(tc0) if tc0 else float(getattr(self, "cycle_budget", 600))
+
+    def _set_fb(self, v: int):
+        self.cursor["from_block"] = int(v)
+        lv = self.cursor.get("_live")
+        if isinstance(lv, dict):
+            lv["fb"] = int(v)
+
+    def _lane_open(self, safe: int, why: str) -> bool:
+        if not self._lanes_on():
+            return False
+        fb = int(self.cursor.get("from_block") or 0)
+        seed = self._seed_blocks()
+        l0 = int(safe) - seed
+        if fb <= 0 or l0 <= fb + seed:
+            return False
+        self.cursor["_live"] = {"done": l0, "holes": [[fb, l0]], "why": why, "at": int(time.time()), "start": fb, "fb": fb}
+        self.cursor.pop("_lscan", None)
+        log.info("★BSC 차선 시작(%s): 라이브 = 블록 %d 부터(확정 헤드 %d) · 옛 기록 = %d → %d 옆 차선(남는 예산)★", why, l0 + 1, safe, fb, l0)
+        return True
+
+    def _lane_norm(self) -> bool:
+        lv = self.cursor.get("_live")
+        if not isinstance(lv, dict):
+            if self.cursor.pop("_lscan", None) is not None:
+                common.atomic_write_json(self.cursor_path, self.cursor)
+            return False
+        fb = int(self.cursor.get("from_block") or 0)
+        try:
+            L = int(lv.get("done"))
+            holes = sorted([int(a), int(b)] for a, b in (lv.get("holes") or []))
+            fb_mine = int(lv.get("fb", fb))
+        except (TypeError, ValueError):
+            L, holes, fb_mine = None, [], fb
+        if L is None or fb <= 0 or fb < fb_mine or not self._lanes_on():
+            log.info("BSC 차선 기록 버림(%s) — from_block %d 부터 한 차선", "차선 끔" if not self._lanes_on() else "커서 되감김·기록 이상", fb)
+            self.cursor.pop("_live", None)
+            self.cursor["_lanes_seen"] = int(time.time())
+            self.cursor.pop("_lscan", None)
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            return False
+        out = []
+        for a, b in holes:
+            b = min(b, L)
+            a = max(a, fb)
+            if a < b:
+                out.append([a, b])
+        if not out or fb >= L:
+            self._set_fb(max(fb, L))
+            self.cursor.pop("_live", None)
+            self.cursor["_lanes_seen"] = int(time.time())
+            self.cursor.pop("_lscan", None)
+            log.info("★BSC 옆 차선(옛 기록) 끝 — 한 차선으로 합침(from_block %d)★", int(self.cursor["from_block"]))
+            common.atomic_write_json(self.cursor_path, self.cursor)
+            return False
+        if out[0][0] > fb:
+            self._set_fb(out[0][0])
+        if out != holes or lv.get("fb") != int(self.cursor["from_block"]):
+            lv["holes"] = out
+            lv["fb"] = int(self.cursor["from_block"])
+            common.atomic_write_json(self.cursor_path, self.cursor)
+        return True
+
+    def _lane_scan(self, frm: int, to: int, ckey: str, head: int, budget: float, detail_deadline: float) -> tuple:
+        sc = self.cursor.get(ckey)
+        if isinstance(sc, dict) and int(sc.get("frm", -1)) == frm and int(sc.get("to", 0)) >= frm:
+            found, last_done = set(sc.get("found") or []), int(sc["to"])
+        else:
+            res = self.discover(frm, to, budget_sec=budget)
+            if res is None:
+                return "none", frm - 1
+            found, last_done = res
+            if last_done < frm:
+                return "none", frm - 1
+            self.cursor[ckey] = {"frm": frm, "to": last_done, "found": sorted(h for h in found if h not in self.emitted)}
+            common.atomic_write_json(self.cursor_path, self.cursor)
+        qset = bf_engine.quarantine_map(self.cursor)
+        todo = [h for h in found if h not in self.emitted and h not in qset]
+        dets = self.fetch_details(todo, deadline=detail_deadline) if todo else {}
+        bad9 = [h for h in todo if not isinstance(dets.get(h), dict)]
+        if bad9:
+            gone9 = set(bad9) - set(self._detail_fail_note(bad9, dets))
+            todo = [h for h in todo if h not in gone9]
+        self._detail_fail_clear([h for h in todo if isinstance(dets.get(h), dict)])
+
+        def _blk(h):
+            v = dets.get(h)
+            return (v["tx"]["block_number"], h) if isinstance(v, dict) else (1 << 62, h)
+        ok = True
+        for h in sorted(todo, key=_blk):
+            snap = dets.get(h)
+            if not isinstance(snap, dict):
+                log.warning("detail %s 실패 — %s 체크포인트로 다음 사이클 상세만 재시도: %s", h[:12], ckey, str(snap)[:120])
+                ok = False
+                break
+            try:
+                self.writer.append({"v": 1, "kind": "evm_tx", "chain": "bsc", "txhash": h, "snapshot": snap, "wallets": self.wallets,
+                                    "observed_head": head, "ts": int(time.time())})
+                self.emitted.add(h)
+            except Exception as e:
+                log.error("inbox append 실패 — 커서 미전진: %s", e)
+                ok = False
+                break
+        common.write_json_if_changed(self.meta_path, self.token_meta)
+        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        if not ok:
+            sc9 = self.cursor.get(ckey)
+            if isinstance(sc9, dict):
+                sc9["found"] = sorted(h for h in found if h not in self.emitted)
+                common.atomic_write_json(self.cursor_path, self.cursor)
+            return "detail", frm - 1
+        self.cursor.pop(ckey, None)
+        return ("done" if last_done >= to else "part"), last_done
+
+    def _lanes_cycle(self, head: int, safe: int, tc0: float):
+        lv = self.cursor["_live"]
+        L = int(lv["done"])
+        if (safe - L) * self._bsec() > LANE_SPLIT_SEC:
+            nl = int(safe) - self._seed_blocks()
+            if nl > L:
+                lv["holes"] = list(lv.get("holes") or []) + [[L, nl]]
+                lv["done"] = L = nl
+                self.cursor.pop("_lscan", None)
+                common.atomic_write_json(self.cursor_path, self.cursor)
+                log.info("BSC 라이브 차선이 크게 뒤 — 블록 %d 부터 다시(그 앞 %d블록은 옆 차선)", nl + 1, nl - int(lv["holes"][-1][0]))
+        live_st, live_err = "done", None
+        if L < safe:
+            t0 = time.time()
+            try:
+                live_st, last = self._lane_scan(L + 1, safe, "_lscan", head, self.cycle_budget, t0 + self.cycle_budget + 300)
+            except Exception as e:
+                live_st, last, live_err = "none", L, e
+            if last > L:
+                lv["done"] = L = int(last)
+                common.atomic_write_json(self.cursor_path, self.cursor)
+            if live_st in ("none", "detail") and live_err is None:
+                live_err = RuntimeError("라이브 차선 " + ("상세 실패 — 체크포인트로 재시도" if live_st == "detail" else
+                                                       "한 청크도 못 나감 — " + str((self.last_scan_metrics or {}).get("stop") or "노드 오류")))
+        live_ok = live_st in ("done", "part")
+        if live_ok:
+            self.cursor["head"] = head
+            common.atomic_write_json(self.cursor_path, self.cursor)
+        try:
+            self._xin_pass(head)
+        except Exception as e:
+            log.info("BSC 거래소 출금 txid 확인 실패(다음 기회): %s", common.safe_err(e)[:120])
+        if live_st == "done" and L >= safe:
+            try:
+                hl9 = [int(b9) for _a9, b9 in (self.cursor["_live"].get("holes") or [])]
+                if hl9:
+                    self._nonce_pass(head, lo_blk=max(hl9))
+            except Exception as e:
+                log.info("BSC nonce 확인(라이브 범위) 실패(다음 기회): %s", common.safe_err(e)[:120])
+        live_metrics = dict(self.last_scan_metrics or {})
+        bk_st, bk_err, bk_adv = None, None, 0
+        if self._lane_norm():
+            fb = int(self.cursor["from_block"])
+            hole_end = int(self.cursor["_live"]["holes"][0][1])
+            bud = self._side_budget(tc0)
+            try:
+                bk_st, last = self._lane_scan(fb + 1, hole_end, "_scan", head, bud, time.time() + bud + 60)
+                if last > fb:
+                    bk_adv = int(last) - fb
+                    self._set_fb(last)
+                    common.atomic_write_json(self.cursor_path, self.cursor)
+            except Exception as e:
+                bk_st, bk_err = "none", e
+                log.warning("BSC 옆 차선 실패(다음 사이클 이어서): %s", common.redact_urls(common.safe_err(e))[:160])
+            self._lane_norm()
+        lv = self.cursor.get("_live") if isinstance(self.cursor.get("_live"), dict) else None
+        lanes = None
+        if lv:
+            holes = lv.get("holes") or []
+            start = int(lv.get("start") or self.cursor.get("_bf_start") or self.cursor.get("from_block") or 0)
+            miss = sum(max(0, int(b) - int(a)) for a, b in holes) + max(0, safe - int(lv["done"]))
+            total = max(1, safe - start)
+            stop = (self.last_scan_metrics or {}).get("stop") if bk_st != "done" else None
+            lanes = {"why": lv.get("why"), "back_from": int(self.cursor.get("from_block") or 0), "back_to": int(holes[-1][1]) if holes else None,
+                     "holes": len(holes), "live": int(lv["done"]), "advanced": bk_adv,
+                     "stalled": bool(bk_st in ("none", "detail") or bk_err is not None),
+                     "err": (common.redact_urls(common.safe_err(bk_err))[:160] if bk_err is not None else
+                             (str(stop)[:160] if stop and bk_st in ("none", "detail") else None))}
+            note = None if not lanes["stalled"] else "옛 기록 차선 멈춤 — " + str(lanes["err"] or "노드 오류")[:120]
+            self.progress.update("bsc", phase="scan", unit="blocks", done=max(0, total - miss), total=total, note=note,
+                                 lag=max(0, safe - int(lv["done"])), scan=live_metrics or None, lanes=lanes)
+        else:
+            self._report(head, int(self.cursor.get("from_block") or 0), "live" if live_st == "done" else "scan")
+        self._health(head, L, live_ok, None if live_ok else live_err, extra={"lanes": lanes})
 
     def cycle(self):
+        tc0 = self._tc0 = time.time()
         if self.cursor.pop("_synced_at", None) is not None:
             common.atomic_write_json(self.cursor_path, self.cursor)
         self._seed_wallet_set()
@@ -1748,9 +2023,19 @@ class BscWatcher:
             self.cursor["from_block"] = since
             self.cursor["_bf_start"] = since
             self.cursor["_cov"] = since
+            self._lane_open(safe, "new")
             common.atomic_write_json(self.cursor_path, self.cursor)
             log.info("백필 시작: 블록 %d → %d (%d일, timestamp 탐색)",
                      since, safe, self.backfill_days)
+        lanes9 = self._lane_norm()
+        if not lanes9 and self._lanes_on() and (safe - int(self.cursor.get("from_block") or 0)) * self._bsec() > LANE_SPLIT_SEC:
+            lanes9 = self._lane_open(safe, "lag")
+            if lanes9:
+                common.atomic_write_json(self.cursor_path, self.cursor)
+        if lanes9:
+            self._lanes_cycle(head, safe, tc0)
+            return
+        since = int(self.cursor.get("from_block", 0))
         if since >= safe:
             self._report(head, since, "live")
             self._health(head, since, True)
@@ -1866,4 +2151,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("정지 신호(SIGINT) — 종료")

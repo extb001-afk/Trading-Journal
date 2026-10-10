@@ -48,8 +48,8 @@ def conf(name, spec=SPEC):
 fresh_dir("node_f1", {"reserve.lock": "", f"old.1.aa.json": {"day": DAY, "n": 0, "nh": 0, "proc": "old", "pid": 1, "inst": "aa", "at": 0, "closed": True}})
 conf("node_f1")
 L = B.rpc_day_limits("node_f1")
-check("F1a 업그레이드 직후(지난날 기록 없음) = 지난 30일을 평소 몫으로 봄 → 버스트 없음(평소 80)",
-      L.get("prev") == 30 * 80 and L.get("normal") == 80 and L.get("burst") == 80, L)
+check("F1a 업그레이드 직후(지난날 기록 없음) = 지난 30일을 평소 몫으로 봄 → 버스트 없음(백필 ≤ 평소 80 · burst1010b: 오늘 남은 실시간 몫은 뺌)",
+      L.get("prev") == 30 * 80 and L.get("normal") == 80 and 0 < L.get("burst", 0) <= 80, L)
 hf = os.path.join(ldir("node_f1"), "head_days.hist")
 since = (json.load(open(hf)) if os.path.exists(hf) else {}).get("since")
 check("F1b 첫 설정 때 '기록 시작 날(since)' = 오늘", since == DAY, since)
@@ -74,6 +74,8 @@ check("F1f budget_spec: 무료 = fresh_since(UTC 날 번호) · 유료 = 버스�
 check("F1g plans 기본값엔 fresh_since 칸 없음(종전 모양 그대로)", NK.plans({})["ankr"] == {"plan": "free", "share": 10, "month": None}, NK.plans({})["ankr"])
 
 import onboarding
+
+onboarding._node_rpc = lambda u, m, p, timeout=15.0: "0x10"
 
 r = onboarding._dispatch("keys/nodeplan", {"provider": "ankr", "plan": "free", "share": 10, "month": None, "fresh": True})
 check("F1h '새로 받은 키' 켜기 = fresh_since 오늘", r.get("ok") and NK.plans()["ankr"].get("fresh_since") == TODAY_S and r["nodes"]["ankr"].get("freshSince") == TODAY_S, (r.get("ok"), NK.plans()["ankr"]))
@@ -104,7 +106,7 @@ fresh_dir("node_f2", {"head_days.hist": {"days": {}, "since": DAY - 40}})
 ent = conf("node_f2")
 check("F2a 기록 비었음 = 버스트 240", B.rpc_day_limits("node_f2").get("burst") == 240)
 common.atomic_write_json(os.path.join(ldir("node_f2"), "head_days.hist"), {"days": {str(DAY - 1): {"other.9.zz": [2000, 2000]}}, "since": DAY - 40})
-check("F2b 다른 프로세스가 방금 합친 기록 = 바로 반영(캐시 없음) → 버스트 없음", B.rpc_day_limits("node_f2").get("burst") == 80, B.rpc_day_limits("node_f2"))
+check("F2b 다른 프로세스가 방금 합친 기록 = 바로 반영(캐시 없음) → 버스트 없음", B.rpc_day_limits("node_f2").get("burst") <= 80, B.rpc_day_limits("node_f2"))
 order = []
 m2 = ent["meter"]
 sync0 = m2._sync
@@ -127,7 +129,10 @@ m2._sync = spy_sync
 B._rpc_day_prev_used = spy_prev
 try:
     with B.ledger_burst():
-        B.rpc_day_take("node_f2", "x.bfix.invalid", 20)
+        try:
+            B.rpc_day_take("node_f2", "x.bfix.invalid", 20)
+        except B.NetError:
+            pass
 finally:
     m2._sync = sync0
     B._rpc_day_prev_used = prev0
@@ -142,9 +147,10 @@ with B.ledger_burst():
             B.rpc_day_take("node_f2b", "y.bfix.invalid", 20)
             r2.append("ok")
         except B.NetError as e:
-            r2.append(e.kind)
+            r2.append("burst_only" if getattr(e, "burst_only", False) else e.kind)
 hb = json.load(open(os.path.join(ldir("node_f2b"), "head_days.hist")))
-check("F2d 안 합친 지난날 파일(2,000)을 합친 뒤에도 같은 판정 — 따라잡기여도 평소 80 까지", r2 == ["ok"] * 4 + ["quota"]
+check("F2d 안 합친 지난날 파일(2,000)을 합친 뒤에도 같은 판정 — 따라잡기 = 백필 몫 0(실시간 몫만 남음 · 게이트 유지)", r2 == ["burst_only"] * 5
+      and not B.gate("y.bfix.invalid").is_open()
       and str(DAY - 1) in hb["days"] and not os.path.exists(os.path.join(ldir("node_f2b"), "gone.1.aa.json")), (r2, hb))
 with B._GATES_LOCK:
     B._GATES.clear()
@@ -207,7 +213,7 @@ with B._GATES_LOCK:
 fresh_dir("node_f5", {"head_days.hist": "{깨진 json"})
 ent5 = conf("node_f5")
 L5 = B.rpc_day_limits("node_f5")
-check("F5a 날짜별 기록 손상 = 버스트 끔 · 평소 몫(보수)", L5.get("burst") == 80 and L5.get("normal") == 80, L5)
+check("F5a 날짜별 기록 손상 = 버스트 끔 · 평소 몫(보수 — burst1010b: 백필 ≤ 평소 몫)", L5.get("burst", 99) <= 80 and L5.get("normal") == 80, L5)
 bad = [f for f in os.listdir(ldir("node_f5")) if f.startswith("head_days.hist.bad")]
 check("F5b 손상 파일 보존(이름 바꿔 둠) · 새 기록 = 기록 시작 오늘", len(bad) == 1 and open(os.path.join(ldir("node_f5"), bad[0])).read() == "{깨진 json"
       and json.load(open(os.path.join(ldir("node_f5"), "head_days.hist"))).get("since") == DAY, (bad, os.listdir(ldir("node_f5"))))

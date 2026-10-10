@@ -285,10 +285,10 @@ def http_get(url: str, headers: dict, timeout: int = 20, ex: str = ""):
     req = urllib.request.Request(url, headers=h, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8")), dict(r.headers)
+            return json.loads(common.read_capped(r).decode("utf-8")), dict(r.headers)
     except urllib.error.HTTPError as e:
         try:
-            body = e.read().decode("utf-8", "ignore")[:400]
+            body = e.read(common.HTTP_ERR_BODY_MAX).decode("utf-8", "ignore")[:400]
         except Exception:
             body = ""
         raise ApiError(f"HTTP {e.code}: {body[:200]}", e.code, _is_fatal(e.code, body, ex)) from None

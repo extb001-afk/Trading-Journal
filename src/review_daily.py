@@ -845,7 +845,8 @@ def _asset_moves(f, day_iso) -> dict:
                "flow_usd": _r(d.get("flow") or 0), "trade_usd": _r(a.get("tr") or 0), "other_usd": _r(a.get("rs") or 0)}
         if _att_v2(a):
             out = {"change_usd": out["change_usd"], "market_usd": _r(a.get("ev") or 0),
-                   "realized_usd": _r(a.get("rz") or 0), "flow_usd": out["flow_usd"], "other_usd": _r(a.get("rest") or 0)}
+                   "realized_usd": _r(a.get("rz") or 0), "flow_usd": out["flow_usd"],
+                   "other_usd": _r(float(a.get("rest") or 0) + float(a.get("op") or 0))}
             for k9, a9 in (("lp_fee_usd", "lpf"), ("fx_usd", "kx"), ("unknown_usd", "un")):
                 if abs(float(a.get(a9) or 0)) >= 0.005:
                     out[k9] = _r(a[a9])
@@ -2067,12 +2068,30 @@ def _run_cli(b, prompt, data, label, body=None):
             import shutil
             shutil.rmtree(cwd9, ignore_errors=True)
     if out.returncode != 0:
-        log.warning("리뷰 CLI 실패(%s, rc=%s): %s", label, out.returncode, (out.stderr or "").strip()[:200])
+        raw9 = (out.stderr or "").strip() or (out.stdout or "").strip()
+        why9 = common.redact_secret_text(raw9.splitlines()[0] if raw9 else "")[:300]
+        _GS.last_err = why9
+        log.warning("리뷰 CLI 실패(%s, rc=%s): %s", label, out.returncode, why9[:200])
         return None
+    _GS.last_err = None
     rv = _parse((out.stdout or "").strip())
     if rv is None:
         log.warning("리뷰 응답 파싱 실패(%s): %s", label, (out.stdout or "").strip()[:200])
     return rv
+
+
+def cli_error_text(default: str) -> str:
+    w = str(getattr(_GS, "last_err", None) or "")
+    lw = w.lower()
+    if not w:
+        return default
+    if "disabled claude subscription access" in lw or ("organization" in lw and "disabled" in lw):
+        return "Claude 접근이 막혀 있어요 — 서버에 로그인된 계정의 조직 설정에서 Claude Code 사용이 꺼져 있어요(관리자 설정 또는 서버에서 claude 다시 로그인)"
+    if "not logged in" in lw or "/login" in lw or "invalid api key" in lw or "authentication" in lw or "oauth" in lw:
+        return "Claude 로그인이 필요해요 — 서버에서 claude 로그인(또는 API 키)을 확인하세요"
+    if "usage limit" in lw or "rate limit" in lw or "limit reached" in lw or "overloaded" in lw:
+        return "Claude 사용 한도에 걸렸어요 — 잠시 뒤 다시 평가하세요"
+    return default + " — " + common.redact_secret_text(w)[:120]
 
 
 def _idle_day(data) -> bool:

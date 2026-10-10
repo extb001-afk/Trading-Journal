@@ -114,7 +114,7 @@ def http_get(url: str, timeout: float = 40.0):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
+            return json.loads(common.read_capped(r))
     except urllib.error.HTTPError as e:
         if e.code == 429:
             raise RateLimited(f"429 {url.split('?')[0]}")
@@ -470,7 +470,8 @@ def merge(state: dict, *, resolve, wallet_chains_set: set, known_pairs: set, hel
             kind = "missed" if tracked_chain(bc) else "chain"
             items.append({"addr": addr, "rid": rid, "bc": bc, "sym": t.get("sym") or "?", "amt": _num(t["amt"]), "px": _num(t["px"]),
                           "usd": usd, "proto": "", "pname": "", "kind": kind, "at": int(t.get("_chainoff_at") or fat),
-                          "chain": chain_label(state, rid, chain_names)})
+                          "chain": chain_label(state, rid, chain_names),
+                          "ca": _ca(t, rid)})
         for p in w.get("protocols") or []:
             rid = p.get("chain") or ""
             bc = resolve(rid)

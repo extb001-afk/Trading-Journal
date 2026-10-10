@@ -490,7 +490,7 @@ def _test_group(group: str, v: list) -> dict:
                             {"Content-Type": "application/json"},
                             json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getHealth"}).encode(), "POST", sol=True)
             ok = code == 200 and isinstance(d, dict) and d.get("result") == "ok"
-            return {"ok": ok, "detail": "Helius 응답 정상 (getHealth)" if ok else _err_text(code, d)}
+            return {"ok": ok, "detail": "Helius 응답 정상 (getHealth)" if ok else _err_text(code, d), "http": code}
         if group == "etherscan":
             q = urllib.parse.urlencode({"chainid": 1, "module": "stats", "action": "ethprice", "apikey": v[0]})
             import bf_engine
@@ -503,12 +503,13 @@ def _test_group(group: str, v: list) -> dict:
                 bf_engine.es_dispatch_wait(time.time() + 15)
             code, d = _http(u9)
             ok = isinstance(d, dict) and str(d.get("status")) == "1"
+            bad9 = (not ok and isinstance(d, dict) and "invalid api key" in str(d.get("result") or "").lower())
             return {"ok": ok, "detail": "Etherscan 키 정상" if ok else str((d or {}).get("result") or _err_text(code, d))
-                    if isinstance(d, dict) else _err_text(code, d)}
+                    if isinstance(d, dict) else _err_text(code, d), "http": code, "rejected": bool(bad9)}
         if group == "opensea":
             code, d = _http(_base("opensea", "https://api.opensea.io") + "/api/v2/collections/pudgypenguins/stats", {"x-api-key": v[0]})
             ok = code == 200 and isinstance(d, dict) and isinstance(d.get("total"), dict)
-            return {"ok": ok, "detail": "OpenSea 키 정상 (컬렉션 통계)" if ok else _err_text(code, d)}
+            return {"ok": ok, "detail": "OpenSea 키 정상 (컬렉션 통계)" if ok else _err_text(code, d), "http": code}
         if group == "coingecko":
             r = _cg_probe(v[0])
             if r.get("ok"):
@@ -533,7 +534,7 @@ def _test_group(group: str, v: list) -> dict:
             if code == 200 and isinstance(d, list):
                 return {"ok": True, "detail": f"잔고 조회 성공 · 자산 {len(d)}종"}
             t = _err_text(code, d)
-            return {"ok": False, "detail": t + _ip_hint(t)}
+            return {"ok": False, "detail": t + _ip_hint(t), "http": code}
         if group == "binance":
             base = _base("binance", "https://api.binance.com")
 
@@ -618,7 +619,7 @@ def _test_group(group: str, v: list) -> dict:
             if isinstance(d, dict) and str(d.get("code")) == "200000":
                 return {"ok": True, "detail": f"잔고 조회 성공 · 계정 {len(d.get('data') or [])}개"}
             t = _err_text(code, d)
-            return {"ok": False, "detail": t + _ip_hint(t)}
+            return {"ok": False, "detail": t + _ip_hint(t), "http": code}
         if group == "gate":
             base = _base("gate", "https://api.gateio.ws")
             path = "/api/v4/spot/accounts"
@@ -629,7 +630,7 @@ def _test_group(group: str, v: list) -> dict:
             if code == 200 and isinstance(d, list):
                 return {"ok": True, "detail": f"잔고 조회 성공 · 자산 {len(d)}종"}
             t = _err_text(code, d)
-            return {"ok": False, "detail": t + _ip_hint(t)}
+            return {"ok": False, "detail": t + _ip_hint(t), "http": code}
     except Exception as e:
         log.warning("키 시험 연결 실패(%s): %s", group, scrub(e, v)[:200])
         return {"ok": False, "detail": "연결 실패 — " + net_why(e)}
@@ -929,6 +930,90 @@ def _alchemy_test(env9: dict) -> dict:
     return {"ok": True, "test": {"ok": all(r["ok"] for r in out), "detail": det, "results": out}}
 
 
+SAVE_REJECT_HTTP = (401, 403)
+NODE_REJECT_HTTP = (401, 403, 404)
+SAVE_PROBE = ("helius", "etherscan", "opensea", "upbit", "bithumb", "kucoin", "gate")
+
+
+def _node_save_probe(group: str, got: dict) -> tuple:
+    import nodekeys
+    tgt = []
+    if group == "ankr":
+        k = nodekeys._key(got, nodekeys.ENV_ANKR)
+        tgt = [("Ankr Ethereum", f"https://rpc.ankr.com/eth/{k}")] if k else []
+    elif group == "nodereal":
+        k = nodekeys._key(got, nodekeys.ENV_NODEREAL)
+        tgt = [("NodeReal BSC", f"https://bsc-mainnet.nodereal.io/v1/{k}")] if k else []
+    elif group == "alchemy":
+        net9, nm9 = _alchemy_save_net()
+        u = nodekeys.alchemy_url(net9, env=got)
+        tgt = [("Alchemy " + nm9, u)] if u else []
+    elif group == "quicknode":
+        for env9, ch9, nm9 in ((nodekeys.ENV_QN_BSC, "bsc", "QuickNode BSC"), (nodekeys.ENV_QN_BASE, "base", "QuickNode Base")):
+            u = nodekeys._qn_url(got.get(env9), ch9) if got.get(env9) else ""
+            if u:
+                tgt.append((nm9, u))
+    soft = []
+    rej9 = (401,) if group == "alchemy" else NODE_REJECT_HTTP
+    for nm, u in tgt:
+        try:
+            _node_rpc(u, "eth_blockNumber", [], timeout=12)
+        except Exception as e:
+            if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) in rej9:
+                return "reject", f"{nm} 노드가 이 키를 거부했어요(HTTP {int(e.code)})"
+            if group == "alchemy" and getattr(e, "kind", "") == "http4xx":
+                soft.append(f"{nm} 네트워크가 이 Alchemy 앱에서 꺼져 있을 수 있어요(대시보드 › 앱 › Networks 에서 켜기)")
+                continue
+            soft.append(f"{nm} {_node_err(e)}")
+    return ("unknown", " · ".join(soft)) if soft else ("ok", "")
+
+
+def _alchemy_save_net() -> tuple:
+    try:
+        import token_discovery
+        nets = []
+        for w9 in (ss.read_config_raw().get("wallets") or []):
+            if not isinstance(w9, dict):
+                continue
+            c9 = "bsc" if str(w9.get("type", "evm")) == "bsc_rpc" else str(w9.get("chain") or "").lower() if str(w9.get("type", "evm")) == "evm" else ""
+            n9 = token_discovery.alchemy_net(c9) if c9 else None
+            if n9 and (c9, n9) not in nets:
+                nets.append((c9, n9))
+        for c9, n9 in nets:
+            if c9 == "eth":
+                return n9, "Ethereum"
+        if nets:
+            return nets[0][1], nets[0][0].capitalize()
+    except (Exception, SystemExit):
+        pass
+    return "eth-mainnet", "Ethereum"
+
+
+def _save_probe(group: str, vals: dict) -> tuple:
+    r = test_group(group, vals)
+    if r.get("ok"):
+        return "ok", ""
+    why = scrub(r.get("detail") or "확인 실패", vals.values())
+    if r.get("rejected") or r.get("http") in SAVE_REJECT_HTTP:
+        return "reject", why
+    return "unknown", why
+
+
+def grp_name(g: str) -> str:
+    nm = str((ss.GROUPS.get(g) or {}).get("name") or g)
+    return nm.split(" (")[0]
+
+
+def _iga(word: str) -> str:
+    w = str(word or "").rstrip()
+    if not w:
+        return "가"
+    c = w[-1]
+    if "\uac00" <= c <= "\ud7a3":
+        return "이" if (ord(c) - 0xAC00) % 28 else "가"
+    return "이" if c.lower() in "lmn" else "가"
+
+
 def _recon_late() -> set:
     if not os.path.exists(common.DB_PATH):
         return set()
@@ -1036,8 +1121,10 @@ def status() -> dict:
         "solNeedsHelius": (raw.get("sol") or {}).get("rpc") == "helius",
         "evmNeedsKeys": _evm_needs_keys(raw),
         "evmNeedsAlchemy": _evm_needs_alchemy(raw),
+        "evmNeedsAnkr": _evm_needs_ankr(raw),
         "explorers": _explorers_status(grp),
         "nodes": _nodes_status(),
+        "heliusFresh": _helius_fresh_status(raw),
         "exchanges": exs,
         "telegram": {"connected": tg_set, "bot": tgs.get("bot") if tg_set else None,
                      "chatName": tgs.get("chat_name") if tg_set else None,
@@ -1069,6 +1156,13 @@ def _evm_needs_alchemy(raw) -> bool:
         return False
 
 
+def _evm_needs_ankr(raw) -> bool:
+    try:
+        return ss.needs_ankr(raw)
+    except Exception:
+        return False
+
+
 def _tier_view(raw_path: str) -> dict:
     import urllib.parse as _up
     try:
@@ -1084,6 +1178,11 @@ def _tier_view(raw_path: str) -> dict:
         except Exception:
             cfg = {}
         out = addr_tier.web_view(cfg, add_n=add_n, add_chains=chains)
+        try:
+            import inflow_probe
+            out["inflow"] = inflow_probe.web_view(cfg)
+        except Exception:
+            out["inflow"] = None
         raw = ss.read_config_raw()
         out["cap"] = {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len({ss._addr_key(w) for w in raw.get("wallets") or []})}
         return out
@@ -1113,6 +1212,20 @@ def _nodes_status() -> dict:
         return nodekeys.status()
     except Exception:
         return {}
+
+
+def _helius_fresh_status(raw) -> dict:
+    try:
+        import bf_engine
+        import nodekeys
+        if raw is None:
+            raw = ss.read_config_raw()
+        fx9 = bf_engine.helius_flex(raw if isinstance(raw, dict) else {})
+        np9 = ss.read_settings().get(nodekeys.PLANS_KEY)
+        h9 = np9.get("helius") if isinstance(np9, dict) and isinstance(np9.get("helius"), dict) else {}
+        return {"burst": bool(fx9 and fx9.get("x", 1) > 1), "since": nodekeys._fresh_str(h9.get("fresh_since"))}
+    except Exception:
+        return {"burst": False, "since": None}
 
 
 def _perp_status(raw) -> dict:
@@ -1340,6 +1453,19 @@ def _dispatch(act: str, b: dict) -> dict:
     if act == "keys/nodeplan":
         import nodekeys
         p9 = str(b.get("provider") or "")
+        if p9 == "helius":
+            fh9 = b.get("fresh")
+            if not isinstance(fh9, bool) or any(b.get(k9) is not None for k9 in ("plan", "share", "month")):
+                return {"ok": False, "error": "Helius 는 '새로 받은 키' 켜기·끄기만 됩니다"}
+            with ss.LOCK:
+                cur9 = ss.read_settings()
+                np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
+                h9 = {k: v for k, v in (np9.get("helius") if isinstance(np9.get("helius"), dict) else {}).items() if k != "fresh_since"}
+                if fh9:
+                    h9["fresh_since"] = time.strftime("%Y-%m-%d", time.gmtime())
+                np9["helius"] = h9
+                ss.update_settings(**{nodekeys.PLANS_KEY: np9})
+            return {"ok": True, "heliusFresh": _helius_fresh_status(None), "apply": {"restart": False}}
         if p9 not in nodekeys.PROVIDERS:
             return {"ok": False, "error": "알 수 없는 서비스"}
         plan9, share9, month9 = b.get("plan"), b.get("share"), b.get("month")
@@ -1404,6 +1530,13 @@ def _dispatch(act: str, b: dict) -> dict:
             bad = _node_bad(g, got)
             if bad:
                 return {"ok": False, "error": bad}
+            lim = _limited("save:" + g, 8, 60)
+            if lim:
+                lim["error"] = "저장을 너무 자주 눌렀습니다 — 1분 뒤 다시"
+                return lim
+            pr9, why9 = _node_save_probe(g, got)
+            if pr9 == "reject":
+                return {"ok": False, "error": why9 + " — 저장하지 않았어요(키를 다시 복사해 넣어 주세요)"}
             old9 = ss.read_env()
             chg9 = any(str(old9.get(k) or "").strip() != v for k, v in got.items())
             ss.write_env(got)
@@ -1415,7 +1548,10 @@ def _dispatch(act: str, b: dict) -> dict:
                     if isinstance(np9.get(g), dict) and "fresh_since" in np9[g]:
                         np9[g] = {k: v for k, v in np9[g].items() if k != "fresh_since"}
                         ss.update_settings(**{nodekeys.PLANS_KEY: np9})
-            return {"ok": True, "apply": _node_apply(g, key_change=True)}
+            out9 = {"ok": True, "apply": _node_apply(g, key_change=True)}
+            if pr9 == "unknown":
+                out9["note"] = "연결은 확인하지 못했어요(" + why9 + ") — 잠시 뒤 '연결 테스트'로 다시 확인하세요"
+            return out9
         if act == "keys/save":
             if not all(vals.values()):
                 return {"ok": False, "error": "모든 칸을 채우세요"}
@@ -1428,7 +1564,7 @@ def _dispatch(act: str, b: dict) -> dict:
                 key9 = vals[fields[0]]
                 r9 = _cg_probe(key9, cached=True)
                 if not r9.get("ok") and r9.get("rejected"):
-                    return {"ok": False, "error": "CoinGecko 가 이 키를 받지 않았어요 — 저장하지 않았습니다 (" + scrub(r9.get("detail") or "거부", [key9]) + ")"}
+                    return {"ok": False, "error": "CoinGecko가 이 키를 받지 않았어요 — 저장하지 않았어요(" + scrub(r9.get("detail") or "거부", [key9]) + ")"}
                 ss.write_env(vals)
                 if r9.get("ok"):
                     _cg_record(key9, r9, "save")
@@ -1457,7 +1593,27 @@ def _dispatch(act: str, b: dict) -> dict:
                 blk, rec = perm_gate(g, vals, b.get("readOnlyAck") is True)
                 if blk:
                     return blk
+            note9 = None
+            if g in SAVE_PROBE:
+                lim = _limited("save:" + g, 8, 60)
+                if lim:
+                    lim["error"] = "저장을 너무 자주 눌렀습니다 — 1분 뒤 다시"
+                    return lim
+                pr9, why9 = _save_probe(g, vals)
+                if pr9 == "reject":
+                    return {"ok": False, "error": grp_name(g) + _iga(grp_name(g)) + " 이 키를 받지 않았어요 — 저장하지 않았어요(" + why9 + ")"}
+                if pr9 == "unknown":
+                    note9 = "연결은 확인하지 못했어요(" + why9 + ") — 잠시 뒤 '연결 테스트'로 다시 확인하세요"
+            hchg9 = g == "helius" and any(str(ss.read_env().get(k) or "").strip() != v for k, v in vals.items())
             ss.write_env(vals)
+            if hchg9:
+                import nodekeys
+                with ss.LOCK:
+                    cur9 = ss.read_settings()
+                    np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
+                    if isinstance(np9.get("helius"), dict) and "fresh_since" in np9["helius"]:
+                        np9["helius"] = {k: v for k, v in np9["helius"].items() if k != "fresh_since"}
+                        ss.update_settings(**{nodekeys.PLANS_KEY: np9})
             if rec:
                 _perm_record(g, rec)
             if g in ss.EXCHANGES:
@@ -1466,7 +1622,7 @@ def _dispatch(act: str, b: dict) -> dict:
                     depaddr.request_refresh(g)
                 except Exception:
                     pass
-            return {"ok": True}
+            return {"ok": True, **({"note": note9} if note9 else {})}
         if g in ss.NODE_GROUPS:
             lim = _limited("test:" + g, 5, 60) or _limited("test:any", 20, 600)
             if lim:

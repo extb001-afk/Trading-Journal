@@ -10,6 +10,7 @@ import logging
 import re
 import secrets
 import statistics
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -587,7 +588,14 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
             if res is not None:
                 out = res
         if out is None:
-            return None, "모델 응답을 읽지 못했어요(형식)"
+            rd9 = rd or sys.modules.get("review_daily") or sys.modules.get("__main__")
+            msg9 = "모델 응답을 읽지 못했어요(형식)"
+            if rd9 is not None and hasattr(rd9, "cli_error_text"):
+                try:
+                    msg9 = rd9.cli_error_text(msg9)
+                except Exception:
+                    pass
+            return None, msg9
         rec = dict(out, date=date, sym=sym, fp=fp, at=int(now or time.time()), model=model if model is not None else getattr(rd, "REVIEW_MODEL", ""),
                    pv=rp.BUY_EVAL_VERSION if kind == "buy" else rp.SELL_EVAL_VERSION, calls=calls, venue=inp.get("venue"), src=inp.get("chart_src"),
                    iv=inp.get("chart_iv"), cur=inp.get("cur"), nFills=inp.get("fills_total"),

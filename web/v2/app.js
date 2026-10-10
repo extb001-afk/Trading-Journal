@@ -662,7 +662,7 @@
   function moneyTxt(t) {
     t = String(t == null ? '' : t);
     if (pvOn() && typeof ownScrubM === 'function') t = ownScrubM(t);
-    if (S.rand) return pvNetM(t);
+    if (S.rand) return pvNetM(S.cur === 'USD' ? t : t.replace(/([+\-−]?)\$(?=\d)/g, '$1₩'));
     if (S.cur === 'USD') return t;
     return t.replace(/([+\-−]?)\$([\d,]+(?:\.\d+)?(?:[eE][+\-]?\d+)?)(?![\d])/g, (a, sg, v) => {
       const n = parseFloat(v.replace(/,/g, '')); if (!isFinite(n)) return a;
@@ -1452,6 +1452,7 @@
     D.exBalTs = f.exBalTs && typeof f.exBalTs === 'object' ? f.exBalTs : {};
     D.upbit = !!f.upbitConnected;
     D.backfill = f.backfillProgress || null;
+    D.prov = f.prov && typeof f.prov === 'object' ? f.prov : null;
     const bc = f.balanceCheck;
     D.bfSince = (f.backfillSince && typeof f.backfillSince === 'object') ? f.backfillSince : null;
     D.bc = (bc && typeof bc === 'object') ? { checkedAt: bc.checkedAt, checked: bc.checked, pairs: bc.pairs, capped: bc.capped, unchecked: bc.unchecked != null ? num(bc.unchecked) : null, errors: num(bc.errors), mismatches: arr(bc.mismatches) } : null;
@@ -2495,8 +2496,8 @@
     const wl = arr(st.wallets).length, bf = bfInfo(), pre = preData();
     if (!(wl === 0 || pre || (!st.onboarded && bf && !arr(D.events).length))) return null;
     const solW = arr(st.wallets).some(w => w && w.kind === 'sol'), solNeed = !!st.solNeedsHelius && solW;
-    const K = sxKeys(), xp = st.explorers || {}, needX = !!(st.evmNeedsKeys || st.evmNeedsAlchemy || solNeed);
-    const miss = [st.evmNeedsKeys && !(xp.etherscan || {}).set ? 'Etherscan' : '', st.evmNeedsAlchemy && xp.alchemy && !xp.alchemy.set ? 'Alchemy' : '', solNeed && !(xp.helius || {}).set ? 'Helius' : ''].filter(Boolean);
+    const K = sxKeys(), xp = st.explorers || {}, needX = !!(st.evmNeedsKeys || st.evmNeedsAlchemy || st.evmNeedsAnkr || solNeed);
+    const miss = [st.evmNeedsKeys && !(xp.etherscan || {}).set ? 'Etherscan' : '', st.evmNeedsAlchemy && xp.alchemy && !xp.alchemy.set ? 'Alchemy' : '', st.evmNeedsAnkr && xp.ankr && !xp.ankr.set ? 'Ankr' : '', solNeed && !(xp.helius || {}).set ? 'Helius' : ''].filter(Boolean);
     return { wl, bf, pre, K, needX, miss, tg: !!(st.telegram && st.telegram.connected) };
   }
   const ONB_X = 'tj_v2_onbx';
@@ -2508,7 +2509,7 @@
     const row = (ok, opt, t, d, st) => '<li class="' + (ok ? 'o-ok' : opt ? 'o-opt' : st ? 'o-wait' : 'o-need') + '"><span class="oi" aria-hidden="true">' + (ok ? IC.check.replace('<svg', '<svg width="14" height="14"') : '') + '</span><span class="ot"><b>' + t + '</b><span class="cap">' + d + '</span></span><span class="os">' + (ok ? '완료' : opt ? '선택' : st || '해야 해요') + '</span></li>';
     const collect = !o.wl ? '지갑을 넣으면 수집기가 과거 거래(최근 몇 달)부터 불러와요'
       : o.bf ? '옛 기록 불러오는 중 <b class="num">' + o.bf.pct + '%</b>' + (o.bf.stalled ? ' · 멈춤 — 설정 › 상태에서 확인해요' : '') : o.pre ? '수집기가 첫 수집을 시작하길 기다리는 중이에요' : '첫 수집이 끝났어요';
-    return '<section class="card onb" aria-label="처음 설정" data-su-scope><div class="th"><h2>처음 설정 · 첫 수집</h2><span class="cap">첫 수집이 끝날 때까지 여기 있어요 — 그 전엔 금액이 <span class="pvx">₩0</span> 으로 보여요</span></div>'
+    return '<section class="card onb" aria-label="처음 설정" data-su-scope><div class="th"><h2>처음 설정 · 첫 수집</h2><span class="cap">첫 수집이 끝날 때까지 여기 있어요 — ' + (S.D && S.D.prov ? '보유·총자산은 지금 실제 잔고로 보여요 · 원가·손익·지난날 곡선은 옛 기록을 다 받으면 정확하게 맞춰져요' : '그 전엔 금액이 <span class="pvx">₩0</span> 으로 보여요') + '</span></div>'
       + '<ol class="onbl">'
       + row(o.wl > 0, false, '지갑 등록', o.wl ? '<span class="pvx">' + o.wl + '개</span> 등록됨' : '조회할 지갑 주소를 넣어요(키·시드는 받지 않아요)')
       + row(o.needX ? !o.miss.length : K.xs > 0, !o.needX, '탐색기 키', o.miss.length ? esc(o.miss.join('·')) + ' 키가 있어야 지갑 체인을 읽어요' : K.xn ? K.xs + ' / ' + K.xn + '개 넣음' : '—')
@@ -2611,8 +2612,9 @@
       const fbU = num(a.fb), fb = fbU * kf, foU = fbU - num(at9(fU.realizedByDate));
       const flC = fl - stk, fo = Math.abs(foU) < 0.015 ? 0 : (fbU ? foU * kf : -rzF);
       const fxC = fxl + (rz + lpf + fl + fb) - (rzS + rzF + flC + fo);
-      return { v2: true, isT, delta, mk: ev, hold, xm, ur, gx, rz: rzS, rzf: rzF, fo, fb, rz0: rz, lpf, stk, un, mvd, top, etc, kx: 0, fx: fxC, fl: flC, fl0: fl, tr: 0, fee: num(a.fee) * kf,
-        oth: delta - ev - rz - lpf - fl - fxl - un - fb, np: num(a.np), unp, ap,
+      const op = num(a.op) * kf;
+      return { v2: true, isT, delta, mk: ev, hold, xm, ur, gx, rz: rzS, rzf: rzF, fo, fb, rz0: rz, lpf, stk, un, op, mvd, top, etc, kx: 0, fx: fxC, fl: flC, fl0: fl, tr: 0, fee: num(a.fee) * kf,
+        oth: delta - ev - rz - lpf - fl - fxl - un - fb - op, np: num(a.np), unp, ap,
         xr: num(a.xr) * kf, xca: !!a.xca, rbv: num(a.rbv) * kf };
     }
     const mk = num(a.mk) * kf - (krw ? kx : 0);
@@ -2640,7 +2642,7 @@
   }
   const attSig = (a, v) => Math.abs(v) >= Math.max(1, 0.01 * Math.abs(a.delta));
   const ATT_IT1 = [['fl', '입출금'], ['tr', '매매'], ['fx', '환율']];
-  const ATT_IT2 = [['rz', '현물 실현'], ['rzf', '선물 실현'], ['fl', '입출금'], ['fx', '환율'], ['fo', '선물 미반영'], ['un', '원가 미확인']];
+  const ATT_IT2 = [['rz', '현물 실현'], ['rzf', '선물 실현'], ['fl', '입출금'], ['fx', '환율'], ['fo', '선물 미반영'], ['un', '원가 미확인'], ['op', '기초 잔고 정정']];
   function attItems(a) {
     const out = [];
     let rest = a.oth;
@@ -2681,7 +2683,7 @@
     const w = x => x[0] === '시세' ? (x[1] < 0 ? '시세 하락' : '시세 상승') : x[0] === '입출금' ? (x[1] < 0 ? '출금' : '입금')
       : x[0] === '환율' ? (x[1] < 0 ? '환율 하락' : '환율 상승') : x[0] === '매매' ? '매매 체결 차'
       : x[0] === '실현' || x[0] === '현물 실현' ? '실현 손익' : x[0] === '선물 실현' ? '선물 정산' : x[0] === '선물 미반영' ? '총자산에 안 든 선물 정산'
-      : x[0] === 'LP 수수료' ? 'LP 수수료' : x[0] === '원가 미확인' ? '원가 모르는 매도' : '그 밖 요인';
+      : x[0] === 'LP 수수료' ? 'LP 수수료' : x[0] === '원가 미확인' ? '원가 모르는 매도' : x[0] === '기초 잔고 정정' ? '기초 잔고 정정' : '그 밖 요인';
     const w0 = w(it[0]);
     if (Math.abs(it[0][1]) / tot >= 0.5 || it.length < 2) return '총자산 변동은 ' + w0 + josa(w0, '이', '가') + ' 대부분이다.';
     const w1 = w(it[1]);
@@ -2712,6 +2714,7 @@
       if (big(a.fx)) h += row('환율', a.fx, S.cur === 'USD' ? '원화 예수금의 달러 환산(그날 USDT 종가 차)' : '달러 자산의 원화 환산(그날 USDT 종가 차) · 원화 예수금 포함 · 실현을 체결 시각 환율로 센 차');
       if (big(a.fo)) h += row('선물 미반영', a.fo, '그날 총자산 변화에 아직 안 든 선물 정산 — 선물 지갑 잔고는 거래소 잔고 대사(약 10분마다)가 정산 시각에 넣어요. 마지막 대사 뒤 정산이거나, 예전 방식이 지난날로 넣은 몫이에요. 줄 합을 전일 대비와 맞추려고 빼요');
       if (big(a.un)) h += row('원가 미확인', a.un, '원가를 모르는 코인을 판 금액 − 그날 가격 평가 — 실현·평가로 못 나눠요');
+      if (big(a.op)) h += row('기초 잔고 정정', a.op, '전부터 있던 보유를 이날 원장에 넣음(발견·재점검 기초 잔고 × 그날 가격) — 실제로 들어온 돈이 아니에요');
       const ob = [a.np ? '가격 못 정한 토큰 ' + a.np + '종(그 거래는 0 으로 셈)' : '',
         a.unp && big(a.unp.v) ? '가격 한쪽 없는 코인 ' + a.unp.n + '종 ' + m(a.unp.v, { sign: true, compact: true }) : '',
         big(a.xr) ? (a.xca ? '원장 밖 잔고 이월(≈)→실측 차 ' : '원장 밖 잔고(코인별 기록 없는 몫·LP) ') + m(a.xr, { sign: true, compact: true }) : '',
@@ -2836,7 +2839,7 @@
     const tsub = rbLine();
     const totalCard = '<section class="card total" aria-label="자산 요약"><div class="thd"><div class="tleft">'
       + '<div class="trow"><span class="tlab">총자산 <i id="heroWhen"></i></span>' + wowSlot('dash.total') + '</div><span class="tv num" id="heroBig"' + (cmp ? ' title="' + esc(m(D.total)) + '"' : '') + '>' + N('total', D.total, cmp ? 'mc' : 'm') + '</span>'
-      + '<span class="tchg num" id="heroChg">' + (hw ? '<span class="skl chskl" aria-hidden="true"></span>' : rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + '</section>';
+      + '<span class="tchg num" id="heroChg">' + (hw ? '<span class="skl chskl" aria-hidden="true"></span>' : rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + (D.prov && D.prov.note ? '<div class="cap histcap" role="status">' + esc(D.prov.note) + '</div>' : '') + '</section>';
     const futNet = num((fut.pnlBreak || {}).net != null ? fut.pnlBreak.net : fut.realizedTotal);
     const futOpen = futOk && num(fut.posCount) > 0;
     const futV = !futOk ? '<span class="mut">수집 대기</span>' : futOpen ? '<span class="' + cls(num(fut.upnl)) + '">' + m(num(fut.upnl), { sign: true, compact: true }) + '</span>' : '<span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>';
@@ -3476,8 +3479,8 @@
       if (S.hold.mode === 'wallet' && !L.wallet) return;
       if (S.hold.mode === 'cex' && L.wallet) return;
       const sub = (s.ch && String(s.sub).indexOf(s.ch) === 0) ? s.sub : [s.ch, s.sub].filter(Boolean).join(' · ');
-      locRows.push(S.mobile ? '<div class="kv"><span class="ell">' + (i === 0 ? '<b style="color:var(--text)">' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell">' + esc(sub) + '</div></span><b class="num">' + m(s.value) + '<div class="sub">' + q(s.qty) + '</div></b></div>'
-        : '<tr><td>' + (i === 0 ? '<b>' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell" style="max-width:260px">' + esc(sub) + '</div></td><td class="num">' + q(s.qty) + '</td><td class="num">' + m(s.value) + '</td></tr>');
+      locRows.push(S.mobile ? '<div class="kv"><span class="ell">' + (i === 0 ? '<b style="color:var(--text)">' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell' + (s.tr ? ' trs' : '') + '">' + esc(sub) + '</div></span><b class="num">' + m(s.value) + '<div class="sub">' + q(s.qty) + '</div></b></div>'
+        : '<tr><td>' + (i === 0 ? '<b>' + locH(L.w) + '</b>' : '') + trChip(s.tr, L.w + ' ' + sub) + '<div class="sub ell' + (s.tr ? ' trs' : '') + '" style="max-width:260px">' + esc(sub) + '</div></td><td class="num">' + q(s.qty) + '</td><td class="num">' + m(s.value) + '</td></tr>');
     }));
     const inst = g.insts.filter(i => !i.zero).sort((a, b) => b.value - a.value).slice(0, 12).map(i => {
       const note = (!i.hasCost ? (i.price > 0 ? '<span class="pill w sm">원가 미확인</span>' : '<span class="pill w sm">시세 없음</span>')
@@ -3730,7 +3733,7 @@
     const fiV = x => S.hide ? (S.cur === 'USD' ? '$' + pvW(PVM.usdC) : '₩' + pvW(PVM.krwC)) : S.cur === 'USD' ? m(num(x.krw) / D.rate, { compact: true }) : '₩' + rw(eok(KS(num(x.krw))));
     return '<div class="card box"><div class="row"><h2 class="h2">현금성</h2><div class="sp"></div><b class="num">' + m(D.cashTotal, { compact: true }) + '</b></div><div class="cust">'
       + st.map(g => { const open = S.stOpen.has(g.sym); return '<div class="it" data-anc="cash:' + esc(g.sym) + '"><button data-a="stTog" data-k="' + esc(g.sym) + '" aria-expanded="' + open + '"><div class="top2">' + icon(g.sym, 'xs', { noSym: false }) + '<span>' + esc(g.sym) + trChip(g.tr, '', true) + '</span><span class="sub"' + (g.locs.length > liveL(g).length ? ' title="' + esc('잔고 1센트 미만 ' + (g.locs.length - liveL(g).length) + '곳 제외') + '"' : '') + '>' + liveL(g).length + '곳</span><b class="num" title="' + esc(m(g.value)) + '">' + m(g.value, { compact: true }) + '</b></div></button>'
-        + (open ? clps('st:' + g.sym, '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(l => '<div><span class="ell">' + locH(l.w) + trChip(l.tr, l.w) + ' <span class="mut">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>').join('') + '</div>') : '') + '</div>'; }).join('')
+        + (open ? clps('st:' + g.sym, '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(l => '<div><span class="ell">' + locH(l.w) + trChip(l.tr, l.w) + ' <span class="mut' + (l.tr ? ' trs' : '') + '">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>').join('') + '</div>') : '') + '</div>'; }).join('')
       + fi.map(x => '<div class="it"><div class="top2">' + venueLogo(x.ex) + '<span>' + esc(x.ex) + ' 원화</span><span class="sub">' + esc(x.note || '') + '</span><b class="num" title="' + esc(krw(num(x.krw)) + (S.cur === 'USD' ? ' · ' + m(num(x.krw) / D.rate) : '')) + '">' + fiV(x) + '</b></div></div>').join('')
       + '</div></div>';
   }
@@ -4689,7 +4692,7 @@
   const wkStaleTxt = rv => /실현/.test(String(rv.staleWhy || '')) ? '리뷰 후 실현이 바뀌었어요 · 재생성 대기' : '리뷰 방식이 바뀌었어요 · 재생성 대기';
   const wkSelNow = () => { const w = S.wkSel; return w && w.day === (S.day || S.D.todayKey) ? w : null; };
   const wkOff = () => { S.wkSel = null; S.wkMore = null; };
-  const MATT_K = ['mk', 'rz', 'rzf', 'fo', 'lpf', 'fl', 'fx', 'un', 'tr', 'oth'];
+  const MATT_K = ['mk', 'rz', 'rzf', 'fo', 'lpf', 'fl', 'fx', 'un', 'op', 'tr', 'oth'];
   function monthAtt(ym) {
     const D = S.D, dim = new Date(+ym.slice(0, 4), +ym.slice(5), 0).getDate(), mmP = ym.slice(5, 7) + '-', tISO = isoDay(D.todayKey) || todayISO();
     const o = { n: 0, days: 0, delta: 0, v2: 0, v1: 0, ap: 0 };
@@ -4738,7 +4741,7 @@
     let rest = o.oth;
     if (o.v2) rows.push(['현물 실현', o.rz], ['선물 실현', o.rzf]); else rest += o.rz + o.rzf;
     rows.push(['입출금', o.fl]);
-    [['tr', '매매'], ['fx', '환율'], ['fo', '선물 미반영'], ['un', '원가 미확인']].forEach(p => { if (sig(o[p[0]]) && (p[0] !== 'tr' || o.v1)) rows.push([p[1], o[p[0]]]); else rest += o[p[0]]; });
+    [['tr', '매매'], ['fx', '환율'], ['fo', '선물 미반영'], ['un', '원가 미확인'], ['op', '기초 잔고 정정']].forEach(p => { if (sig(o[p[0]]) && (p[0] !== 'tr' || o.v1)) rows.push([p[1], o[p[0]]]); else rest += o[p[0]]; });
     if (!isZ(rest)) rows.push(['나머지', rest]);
     return rows;
   }
@@ -5734,7 +5737,7 @@
   function trTip(t) {
     const mins = Math.max(1, Math.round((Date.now() / 1000 - num(t.since)) / 60));
     return (t.from || '거래소') + ' → ' + (t.to || '도착지 확인 중') + (t.net ? ' · ' + t.net : '') + ' · ' + (mins < 120 ? mins + '분째' : Math.round(mins / 60) + '시간째')
-      + (t.own ? ' · 내 계정으로 이동 중' : '') + ' — 도착이 기록되면 도착한 곳 보유로 바뀌어요';
+      + (t.own ? ' · 내 계정으로 이동 중' : '') + (t.cover ? ' · 받는 쪽 기록 확인 중' : '') + ' — 도착이 기록되면 도착한 곳 보유로 바뀌어요';
   }
   function trChip(trs, name, inBtn) {
     const l = Array.isArray(trs) ? trs.filter(Boolean) : (trs ? [trs] : []);
@@ -6352,9 +6355,9 @@
   function sxKeys() {
     const st = suSt();
     if (!st) return null;
-    const XO = ['helius', 'etherscan', 'alchemy', 'coingecko', 'opensea'];
+    const XO = ['helius', 'etherscan', 'alchemy', 'ankr', 'coingecko', 'opensea'];
     const NODE = st.nodes && typeof st.nodes === 'object' ? Object.keys(st.nodes) : [];
-    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).filter(k => !NODE.includes(k) || (xp[k] && xp[k].set) || (k === 'alchemy' && st.evmNeedsAlchemy)).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
+    const xp = st.explorers, ex = st.exchanges, xk = Object.keys(xp).filter(k => !NODE.includes(k) || (xp[k] && xp[k].set) || (k === 'alchemy' && st.evmNeedsAlchemy) || (k === 'ankr' && st.evmNeedsAnkr)).sort((a, b) => (XO.indexOf(a) + 1 || 99) - (XO.indexOf(b) + 1 || 99)), ek = Object.keys(ex);
     const empty = xk.filter(k => !(xp[k] && xp[k].set)), exSet = ek.filter(k => ex[k] && ex[k].set), tg = st.telegram || {};
     const P = st.perp || {}, pw = arr(P.wallets), stt = P.state || {};
     const pBad = pw.filter(w => { const s9 = ((stt[w.dex] || {}).accts || {})[w.address] || {}; return s9.err || (stt[w.dex] || {}).wait; }).length;
@@ -6541,7 +6544,7 @@
       + sxIt('sx-wallets-wl', '발신 주소 화이트리스트', '내 다른 지갑 → 스팸 판정 제외', '<span class="sx-val num">' + (wl ? wl.length : '—') + '</span>', { href: '#settings/wallets/whitelist' })
       + sxIt('sx-wallets-names', '추적 안 하는 주소에 이름', '화면 표시용 이름만', '', { href: '#settings/wallets/names' })
       + sxIt('sx-wallets-tok', '토큰 매핑', '컨트랙트 ↔ 거래소 티커 · 읽기 전용', '<span class="sx-val num">' + D.aliases.length + '</span>', { href: '#settings/wallets/tokens' }) + '</div>';
-    const tierCard = '<div class="sx-card" id="sx-wallets-tier">' + sxGrp('확인 주기 · 예상 사용량', '오래 안 쓴 주소는 덜 확인해요 · 내가 보내면 바로 지금 주기') + '<div class="sx-slot sx-tierslot" data-su-slot="tier">' + sxSlotWait() + '</div></div>';
+    const tierCard = '<div class="sx-card" id="sx-wallets-tier">' + sxGrp('확인 주기 · 예상 사용량', '오래 안 쓴 주소도 1시간마다 확인해요 · 내가 보내면 바로 지금 주기') + '<div class="sx-slot sx-tierslot" data-su-slot="tier">' + sxSlotWait() + '</div></div>';
     const chainCard = '<div class="sx-card" id="sx-wallets-chains"><div class="sx-slot sx-chainslot" data-su-slot="chains">' + sxSlotWait() + '</div></div>';
     return big + acts + add + listCard + chainCard + tierCard + mg;
   }
@@ -6805,7 +6808,7 @@
     const openIt = id => () => S.set.open.add(id);
     const xpOpen = k => () => { const u = suU(); if (u) u.xp = k; };
     const exOpen = k => () => { const u = suU(); if (u) u.ex = k; };
-    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['alchemy', 'Alchemy', '알케미 evm 토큰 잔고 찾기 노드 api 키 key 필수 무료 cu'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
+    [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['alchemy', 'Alchemy', '알케미 evm 토큰 잔고 찾기 노드 api 키 key 필수 무료 cu'], ['ankr', 'Ankr', '앵커 evm 받은 토큰 확인 bsc base 옛 기록 노드 api 키 key 필수 무료 크레딧'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
       .forEach(x => add('keys', '', x[1] + ' 키', x[2], '[data-su="xp"][data-v="' + x[0] + '"]', xpOpen(x[0])));
     add('keys', 'exchanges', '거래소 조회 키', '거래소 api 키 key 업비트 바이낸스 조회 전용 read only', '.sx-exslot');
     [['upbit', '업비트'], ['bithumb', '빗썸'], ['binance', '바이낸스 Binance'], ['bybit', '바이빗 Bybit'], ['okx', 'OKX'], ['kucoin', '쿠코인 KuCoin'], ['gate', '게이트 Gate']]
@@ -7174,7 +7177,7 @@
     let t = String(s0 == null ? '' : s0);
     if (pvOn() && typeof ownIn === 'function') t = ownIn(t);
     if (!pvOn() || !/\d/.test(t)) return t;
-    return t.split(/(0x[0-9a-fA-F]{6,40}|[A-Za-z0-9]{3,10}…[A-Za-z0-9]{3,6}|[1-9A-HJ-NP-Za-km-z]{32,44})/).map((x, i) => (i % 2 ? x : x.replace(/\d[\d,.]*/g, () => pvW(PVM.n)))).join('');
+    return t.split(/(0x[0-9a-fA-F]{6,40}|[A-Za-z0-9]{3,10}…[A-Za-z0-9]{3,6}|[1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z]{2,}\s[vV]\d{1,2}(?![\d,.]))/).map((x, i) => (i % 2 ? x : x.replace(/\d[\d,.]*/g, () => pvW(PVM.n)))).join('');
   }
   function pvNameRe() {
     if (!(S.hide || S.rand)) return null;

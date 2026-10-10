@@ -323,7 +323,7 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": common.ua_for(url, "tj-bot/0.1"), "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                d = json.loads(r.read().decode())
+                d = json.loads(common.read_capped(r).decode())
         except Exception:
             return None
         if not isinstance(d, dict) or not isinstance(d.get("items"), list):

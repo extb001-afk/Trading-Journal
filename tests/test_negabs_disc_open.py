@@ -438,8 +438,29 @@ pump(c)
 chk(cand(c, TKU).get("st") == "skip" and not anchors(c, TKU) and total(c, TKU) == -30 * E18 and len(CALLS) == n21,
     "N21 정품 등록 전 = 건너뜀(음수 유지 · 조회 0)", (cand(c, TKU), anchors(c, TKU)))
 import spamguard
-spamguard.set_user_genuine("eth", TKU, "TKU", True)
-common.atomic_write_json(os.path.join(common.STATE_DIR, discopen.REQ_NAME), {"cells": [{"chain": "eth", "wallet": W, "ca": TKU, "retry": True}], "by": "test"})
+c.conn.commit()
+RQ21 = os.path.join(common.STATE_DIR, discopen.REQ_NAME)
+if os.path.exists(RQ21):
+    os.remove(RQ21)
+r21p = subprocess.run([sys.executable, tl, "--genuine", TKU, "--chain", "eth", "--wallet", W], env=env, capture_output=True, text=True, timeout=120)
+spamguard._user_refresh(force=True)
+chk(r21p.returncode == 0 and "정품 등록 가능" in r21p.stdout and not spamguard.is_user_genuine("eth", TKU) and not os.path.exists(RQ21),
+    "N21 --genuine 미리보기 = 가드 판정만(정품 등록·요청 쓰기 0)", (r21p.returncode, r21p.stdout[-300:], r21p.stderr[-300:]))
+r21i = subprocess.run([sys.executable, tl, "--genuine", IMP, "--chain", "eth", "--wallet", W, "--apply"], env=env, capture_output=True, text=True, timeout=120)
+r21t = subprocess.run([sys.executable, tl, "--genuine", TKN, "--chain", "eth", "--wallet", W, "--apply"], env=env, capture_output=True, text=True, timeout=120)
+r21w = subprocess.run([sys.executable, tl, "--genuine", TKU, "--chain", "eth", "--wallet", X, "--apply"], env=env, capture_output=True, text=True, timeout=120)
+r21s = subprocess.run([sys.executable, tl, "--genuine", SPF, "--chain", "eth", "--wallet", W, "--apply"], env=env, capture_output=True, text=True, timeout=120)
+spamguard._user_refresh(force=True)
+chk(r21i.returncode == 1 and "사칭" in r21i.stdout and r21t.returncode == 1 and "음수 칸이 아님" in r21t.stdout and r21w.returncode == 1
+    and r21s.returncode == 1 and "교환·LP" in r21s.stdout
+    and not any(spamguard.is_user_genuine("eth", x9) for x9 in (IMP, TKN, SPF)) and not os.path.exists(RQ21),
+    "N21 --genuine 가드 = 사칭 심볼·음수 아닌 칸·등록 지갑 아님·남이 보낸 그냥 전송(주소 오염 — 등록해도 안 풀림) = 거절(쓰기 0)",
+    (r21i.stdout[-200:], r21t.stdout[-200:], r21w.stdout[-200:], r21s.stdout[-200:]))
+r21a = subprocess.run([sys.executable, tl, "--genuine", TKU, "--chain", "eth", "--wallet", W, "--apply"], env=env, capture_output=True, text=True, timeout=120)
+spamguard._user_refresh(force=True)
+rq21 = common.read_json(RQ21, {}) or {}
+chk(r21a.returncode == 0 and spamguard.is_user_genuine("eth", TKU) and rq21.get("cells") == [{"chain": "eth", "wallet": W, "ca": TKU, "retry": True}],
+    "N21 --genuine --apply = 정품 등록(state/genuine_tokens.json) + 그 칸만 다시 요청(retry)", (r21a.returncode, r21a.stdout[-300:], r21a.stderr[-300:], rq21))
 pump(c)
 chk([int(a9[2]) for a9 in anchors(c, TKU)] == [30 * E18] and total(c, TKU) == 0, "N21 정품 등록 뒤 다시 요청(--retry) = 직전 블록 80 확인 → 앵커 30 · 원장 0", (anchors(c, TKU), cand(c, TKU)))
 

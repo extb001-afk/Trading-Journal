@@ -103,9 +103,10 @@ cur["_bkscan"] = {"frm": 4001, "to": 6000, "ws": [NEW], "found": {}}
 cur["_bkns"] = {NEW: [4000, 0, "0"]}
 w, calls = make(cur)
 r = run(w)
-iv = [(4000, 6000)] + segs(w, calls)
+iv = [(4000, 5000)] + segs(w, calls)
 T.chk(not isinstance(r, dict) and not w._bk_jobs(), "M3 옛 커서 파일로 기동 → 예외 없이 완주", {"r": r, "left": w._bk_jobs()})
-T.chk(calls and calls[0] == (tuple(sorted(OLD)), 5000, 6000), "M3 체크포인트로 지나친 뒤 뒤처진 묶음이 6,000 에서 멈춤", calls[:3])
+T.chk(calls and calls[0] == (tuple(sorted(ALL)), 5000, 7000),
+      "M3 지나친 체크포인트를 묶음 진행점 5,000 에서 끊고 바로 6지갑 한 묶음(bkfix1010 — 종전: 6,000 까지 지나친 뒤 뒤처진 묶음이 멈춤)", calls[:3])
 T.chk(overlap(iv) <= 2000 and all(len(ws) == 6 for ws, c, t in calls[1:]),
       "M3 겹침 ≤ 체크포인트 한 구간 · 그 뒤 한 묶음", {"overlap": overlap(iv), "calls": calls[:4]})
 

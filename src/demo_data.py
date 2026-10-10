@@ -720,23 +720,23 @@ def _tier_books(now: float):
     import addr_tier
     poll = {"eth": 45, "arbitrum": 45, "optimism": 45, "polygon": 45, "sol": 60}
     path = {"eth": "etherscan", "arbitrum": "etherscan", "polygon": "etherscan", "optimism": "blockscout", "sol": "helius"}
-    pairs = [("eth", "evm", 1, 0, None, None, False, 2), ("arbitrum", "evm", 1, 0, None, None, False, 4), ("arbitrum", "evm", 2, 2, None, None, False, 70),
-             ("optimism", "evm", 1, 3, None, None, False, 150), ("polygon", "evm", 2, 0, None, "extend", False, 1), ("sol", "sol", 1, 0, None, None, False, 1)]
+    pairs = [("eth", "evm", 1, 0, None, None, False, 2), ("arbitrum", "evm", 1, 0, None, None, False, 4), ("arbitrum", "evm", 2, 1, None, None, False, 70),
+             ("optimism", "evm", 1, 1, None, None, False, 150), ("polygon", "evm", 2, 0, None, "extend", False, 1), ("sol", "sol", 1, 0, None, None, False, 1)]
     addrs, sums = {}, {}
     for sc, kind, i, t, h, fill, empty, sent_d in pairs:
-        iv = None if t == 0 else (poll[sc] * 5 if t == 1 else 3600 if t == 2 else 21600 if t == 3 else 86400)
+        iv = None if t == 0 else addr_tier.ACT_MAX_SEC
         full = now - rnd_off(sc, i)
         addrs.setdefault(_wkey(kind, i), []).append({"c": sc, "t": t, "h": h, "full": int(full), "sent": int(now - sent_d * 86400),
-                                                     "nextAct": int(full + iv) if iv else None, "nextFull": int(full + 21600) if iv else None,
+                                                     "nextAct": int(full + iv) if iv else None, "nextFull": int(full + addr_tier.BACKSTOP_MAX_SEC) if iv else None,
                                                      "wake": False, "f": fill, "e": empty})
-        s9 = sums.setdefault(sc, {"scope": sc, "path": path[sc], "safe": True, "active": True, "tiers": [0, 0, 0, 0, 0], "holds": {}, "fullPerDay": 0.0,
+        s9 = sums.setdefault(sc, {"scope": sc, "path": path[sc], "safe": True, "active": True, "tiers": [0] * len(addr_tier.TIER_LABELS), "holds": {}, "fullPerDay": 0.0,
                                   "actPerDay": 0.0, "stretch": 1.0, "gate": False, "basePoll": poll[sc], "pairs": 0, "period": poll[sc], "t0": 0,
                                   "filling": 0, "empty": 0, "lastCycle": {}})
         s9["tiers"][t] += 1
         s9["pairs"] += 1
         s9["t0"] += 1 if t == 0 else 0
         s9["filling"] += 1 if fill else 0
-        s9["fullPerDay"] += 86400.0 / poll[sc] if t == 0 else 86400.0 / 21600 + 0.5
+        s9["fullPerDay"] += 86400.0 / poll[sc] if t == 0 else 86400.0 / addr_tier.BACKSTOP_MAX_SEC + 0.5
         s9["actPerDay"] += 0.0 if t == 0 else 86400.0 / iv
     books = {}
     for sc, s9 in sums.items():

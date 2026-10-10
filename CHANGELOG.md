@@ -3,6 +3,81 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-10 (2) — 새 설치본 수집 · 최신 우선
+
+**새 설치본 RPC 차선 · 블록스카웃 첫 경로 금지 · BNB Chain·Solana 최신 먼저 · Ankr 키 필수 · 키 저장 연결 시험 · 쉬는 지갑 1시간 · 토큰 받음 확인 10분 ·
+백필 한도 몰아 쓰기 · 첫 대사 전 지금 잔고 · 전송 중 이중 계상 방지 · trace 늦은 채움 · 지난날 곡선 LP · 거래소 키 나중 추가 · 스팸·사칭 행 · 응답 크기 상한 · AI 실패 사유**
+
+아무것도 없는 새 설치본에서 옛 기록을 다 받기 전까지 최신 입금이 안 보이던 문제를 고친 판이에요 — 이제 모든 수집 경로(Base 같은 RPC 체인·BNB Chain·Solana·탐색기)가
+첫 주기부터 최신 블록을 보고, 옛 기록은 옆 차선에서 남는 한도로 함께 받아요. 옛 구간이 실패해도(노드 시간 초과·429·한도) 최신 쪽은 막히지 않아요.
+지난 판의 알려진 한계 4가지(판정 보류 토큰 · BNB Chain 보류 토큰 대사 · 정품 등록 길 · 직접 조회 응답 크기 상한)도 고쳤어요. 사진은 다시 찍지 않았어요(README '이번 판' 안내).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js` — 유닛을 전부 멈춘 뒤 한꺼번에 시작).
+> 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 · 새 상태 파일 `state/evm_route.json`·`state/inflow_<체인>.json`·`state/prov_bal.json`·`state/cg_ca.json` 은 옛 코드가 읽지 않음).
+> EVM 지갑이 있으면 **Ankr 무료 키**를 넣어 주세요(설정 › 연결·키 — 저장할 때 연결 1콜 확인 · 관련 수집기만 자동 재시작). 없어도 돌지만 설정·상태 패널에 경고가 떠요.
+> 지난날 곡선: LP 를 열었다 닫은 날 · 발견 시점 기초 잔고가 있는 날 · 백필 뒤 처음 넣은 거래소가 있으면 첫 화면 계산 때 그날들을 한 번 다시 계산해요(그날 값·'나머지'가 바뀔 수 있음).
+
+- **새 설치본 RPC 체인 = 최신 먼저** — 처음 받는 Base 등 RPC 체인도 처음부터 라이브 차선(최근 48시간 → 지금 · 작은 걸음부터 늘림) + 옛 구간 뒤 차선으로 받아요 ·
+  라이브 차선이 15분 넘게 뒤처지면 최근 블록을 먼저 엿봐 방출 · 이미 한 줄(단일 차선)로 멈춰 있던 설치본은 자동 전환 · 따라잡는 라이브 걸음·뒤 차선의 trace 실패는 첫 실패에 '나중에 다시'로 넘기고 전진 ·
+  끄기 = `chains.<체인>.rpc_lanes: false`.
+- **블록스카웃을 첫 경로로 쓰지 않음** — 새로 받는 탐색기 체인 순서 = 이더스캔(키 있고 그 체인 지원) → 공개 RPC → 블록스카웃은 최후(2026-10 실측: 여러 체인 블록스카웃 API 403·301) ·
+  체인별 처음 순서는 `state/evm_route.json` 에 고정 · 이미 탐색기로 받던 설치본은 종전 순서 · 이더스캔 키를 지운 체인이 아카이브 없는 공개 노드에서도 멈추지 않고 다시 훑음 · 끄기 = `rpc_first: false`.
+- **BNB Chain·Solana 최신 먼저** — BNB Chain = 최신 블록을 첫 주기부터 · 수집 기간은 옆 차선(기간 = `backfill_months` · 따로 = `bsc.backfill_days` · 끄기 `bsc.lanes: false`) ·
+  로그 없는 내 발신(순수 BNB 송금) 회수 = 최근 2시간 먼저 · 거래소 → 내 BSC 출금 확인 = 최신부터 · 예시 설정 BSC 로그 노드 = 키 없이 옛 구간까지 받는 공개 노드 ·
+  Solana = 새 설치·새 지갑·새 토큰 계정·오래 멈춘 뒤에도 최근 하루(주소마다 가장 새 100건) 먼저, 옛 기록은 사이클마다 60초씩 끊어 이어 받기(다시 읽기 없음).
+- **Ankr 키 필수 · 키 저장 연결 시험** — EVM 지갑이면 Ankr 무료 키 '필수' 표시(경고만 · 막지 않음 · 배너·키 카드·상태 패널) · 모든 키는 저장할 때 읽기 전용 1콜로 확인(서비스가 거부 401·403(노드 키 404) = 저장 안 함 ·
+  연결 실패 = 저장 + 경고) · Helius·업비트 키를 지우면 '동기화 멈춤' 빨강 대신 키 안내(Solana 지갑인데 Helius 키가 처음부터 없으면 그 안내) · 키 저장으로 수집기가 다시 켜질 때 오류 로그에 트레이스백을 안 남김.
+- **쉬는·빈 지갑 확인 최대 1시간 · 토큰 받음 10분** — 7일 안 보낸 지갑 = 지금 주기 · 그 밖(빈 지갑 포함) = 10분 잔고 점검(Multicall3 묶음) + 1시간 탐색기 확인(종전 최대 하루 · 빈 지갑 주 1회 · 하루 한도를 넘으면 간격 자동 늘림) ·
+  탐색기로 받는 체인의 쉬는·빈 지갑에 들어온 토큰은 10분마다 getLogs 로 묶어 확인해 받은 지갑만 깨워요(Ankr 키 → 공개 노드 · Alchemy 안 씀 · 스팸 폭주 막기 · `addr_tier.inflow_sec`, 0 = 끔) · 설정 확인 주기 카드·상태 패널에 마지막 확인.
+- **거래소 → 내 지갑 '전송 중'** — 받는 주소를 도착할 때까지 10분마다 확인 · 받는 쪽 수집이 출금 시각을 덮기 전엔 48시간이 지나도 '나감'으로 바꾸지 않음('받는 쪽 기록 확인 중' · 7일 넘으면 종전).
+- **첫 대사 전 오늘 보유·총자산 = 지금 실제 잔고** — 체인 첫 잔고 대사 전엔 대사와 같은 조회로 1시간마다 지금 잔고를 읽어 원장과의 차이만 오늘 보유에 더해요(보관처 '지금 잔고(옛 기록 받는 중)' ·
+  평가 규칙은 원장과 같음 · 장부 무변) · 곡선 아래 '원가·손익·지난날 곡선은 옛 기록을 다 받으면(진행률·남은 시간) 정확하게 맞춰져요' · 거래소 → 내 지갑 전송 중 수량은 그 차이에서 빼 이중으로 세지 않음
+  (같은 통화 — 네이티브 설정 심볼·검증 스테이블 · 출금 시작 뒤 읽은 잔고만).
+- **백필 때 한도 몰아 쓰기** — 무료 키(Alchemy·Ankr·NodeReal·Helius)는 실시간 실측 × 1.5 만 앞날 몫으로 남기고 하루 몫의 최대 10배(열흘치)까지 백필에(최근 31일 합 ≤ 월 80% · 실시간 호출은 백필에 안 막힘 · 유료 = 종전) ·
+  이더스캔은 옛 기록 중 실시간 몫을 실측 × 1.25(하루 몫의 3~70%)로 · 설정 사용량 줄에 '실시간 하루 약 · 오늘 백필 상한' · Helius 칸에도 '새로 받은 키' 칩(`sol.helius_burst: false` = 끔).
+- **trace 늦은 채움 · 뒤 차선** — 공개 노드 trace 가 실패한 tx 는 내부 이동 없이 먼저 기록하고 '나중에 다시'(사이클당 몇 건 · 2분부터 두 배 · 최대 6시간 간격 · 30일)로 채워요 ·
+  뒤 차선 실패 땐 구간을 반으로 · 체크포인트는 줄인 목표까지만 · 실패한 잎 블록이 사이클마다 바뀌어도 30분 뒤 넘기고 전진(새 설치 Base 가 무기한 멈추던 것) · Base 넓히기 2~3배(추정).
+- **지난날 곡선 · LP · 기초 잔고** — LP 를 열었다 닫은 날 원금을 지갑 수량과 LP 평가로 두 번 세던 것 고침(그날 LP 평가 관측 시각 기준 되감기 · 30일·장기 곡선 공통 · 굳은 날 1회 재계산) ·
+  분해 '원장 밖 잔고(LP)' = LP 평가 − 원금 이동 · 발견·재점검 기초 잔고는 분해 '기초 잔고 정정' 칸으로('나머지'로 새던 것) · 발견 시점 기초 잔고는 원래 있던 보유라 지난날 곡선에도 포함.
+- **거래소 키를 나중에 넣어도** — 백필 완료 뒤 처음 넣은 거래소 키 = 지난 일별값(30일·장기 곡선)에 그 거래소 보유를 1회 반영(키 넣은 날 가짜 수익 계단 없음) ·
+  업비트 없는 설치·거래소만 쓰는 설치도 백필 완료 표식이 생겨요(연결된 해외 거래소 첫 대사까지 기다림 · 첫 백필 중 마감 스냅숏은 굳히지 않음).
+- **스팸·사칭** — 사칭 판정에 콥트·체로키·캐나다 음절·소형 대문자 흉내 글자(106자) · 보낸 내역이 '사칭·스팸'으로 정한 가짜 외부 전송 줄은 기록에서 숨김 목록으로(정상으로 복원한 자산은 빼고) ·
+  수집 기간 전부터 받기만 한(기초 잔고뿐) 토큰은 코인게코에 그 컨트랙트 시세가 있을 때만 평가 · 블록스카웃만 아는 보유 후보도 같은 스팸 필터.
+- **응답 크기 상한 마무리 · 지난 판 한계** — 공통 경로 밖 직접 조회 12곳(솔라나 수집·대사, 시세·OKX 토큰 가격, Rabby, 업비트, 입금 주소, 브릿지·자금 흐름 추적, LP 목록, 세일 매칭, 거래 출처)과
+  코인게코 키 시험도 정상 32MiB · 오류 64KiB · 판정 보류 토큰 1시간 재판정(상태 패널 '토큰 판정 대기 N') · BNB Chain 지갑별 대사는 관측한 토큰만 · `tools/negabs_1010.py --genuine`(정품 등록 + 다시 시도).
+- **AI · 화면** — 영수증 AI 평가가 Claude CLI 자체 실패(조직 접근 끔·로그인 필요·한도)면 '형식' 대신 진짜 사유(키 같은 값은 가림) · README [AI 기능 켜기](README.md#ai-기능-켜기--claude-cli-로그인) ·
+  전송 중 '받는 쪽 기록 확인 중' · 펼친 보유 줄 표 넘침 · 폰 보유 줄 칩 잘림 · 확인 주기 카드·Ankr 칸 문구 · 키 저장 알림 · 그날 카드 분해 라벨 칸 · 상태 패널 음수 보유 '첫 백필 중'·지운 체인 '멈춤' 오경보 없음 ·
+  다른 체인 활동 경고 = 할 일 문구 · 환율 선조회가 쉼을 지키고 실패하면 멈춤 · 빗썸 체결 시각 바로잡기가 원장 반영을 붙잡지 않음.
+
+**함께**
+
+- **문서** — README 처음 표·키 표·`.env.example`·[API_KEYS.md](docs/API_KEYS.md)에 Ankr 필수·키 저장 확인·버스트 열흘치 · 첫 실행 시간(최신 먼저) · 고급 설정(`rpc_first`·`rpc_lanes`·`addr_tier.inflow_sec`·`bsc.lanes`·`sol.live_first_hours`·`sol.helius_burst`) ·
+  [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) 새 설치 경로·Base trace 늦은 채움·Solana · README '알아 둘 것' 알려진 한계.
+- **시험** — 공개 시험 추가: 새 설치 RPC 차선·멈춘 차선 전환·첫 경로 · BSC 라이브 차선·최근 발신 회수 · Solana 최근 먼저 · 쉼 계단·출금 깨움·Ankr 필수 · 토큰 받음 확인 · 버스트 · trace 늦은 채움·잎 실패 ·
+  첫 대사 전 지금 잔고·전송 중 상계 · LP 곡선 · 거래소 키 나중 추가 · 스팸 흉내 글자 · 응답 상한 직접 조회 · 키 순서·러너 종료 · AI 실패 사유 — 전체 4,200건 넘게(파일 120개 넘게).
+
+**English** — Fresh installs now see the newest blocks first on every collection path: RPC chains such as Base start with a live lane (last 48 hours → now, small
+steps that grow) plus a back lane for older history, a stalled single lane switches automatically, BNB Chain gets a live lane with the backfill window in a side lane
+(`backfill_months`; newest log-less BNB sends recovered first), and Solana fetches the last day first (newest 100 per address) and old history in 60-second slices.
+Newly collected explorer chains never start on Blockscout (Etherscan → public RPC → Blockscout last; fixed per chain in `state/evm_route.json`; existing installs keep
+their order). Trace failures on public nodes no longer hold back the newest blocks — the transaction is recorded first and internal transfers are re-traced later
+(backoff up to 6 hours, 30 days). A free **Ankr key** is now shown as required for EVM wallets (warning only) and every key is checked with one read-only call when saved.
+Idle and empty wallets are checked at least hourly (10-minute balance checks, hourly explorer checks) and incoming tokens are detected every 10 minutes via getLogs
+(Ankr → public nodes, `addr_tier.inflow_sec`); a withdrawal from an exchange to your own wallet wakes that address every 10 minutes and is not marked "out" while the
+receiving side has not been collected. Before a chain's first reconciliation, today's holdings and total use the actual current balance (re-read hourly, no double
+counting with in-transit withdrawals); cost, PnL and past curves become exact once old history is in. Free keys may burst up to 10x the daily share during backfill
+while the measured real-time share is kept (rolling 31 days under 80%). Also: LP double counting in past curves, exchange keys added after the backfill are applied to
+past daily values once, Coptic/Cherokee look-alike impersonation and spam rows are hidden, opening-balance-only tokens are valued only with a CoinGecko contract
+price, response size caps on the remaining direct lookups, and real Claude CLI failure reasons in AI evaluations. No rebuild and no data revision.
+
+**알려진 한계(다음 판에)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
+
+- 첫 대사 전엔 원가·손익·지난날 곡선에 수집 기간 이전 보유가 빠져 있어요(오늘 보유·총자산은 지금 잔고로 맞음) · 그 '지금 잔고'는 BNB Chain·Solana 조회 도중 출금이 겹치거나 전송 중 출금과 창 이전 보유가 겹치면 잠깐 덜 보일 수 있어요.
+- 시간당 수백 건씩 로그 없는 BNB 발신을 하는 봇 같은 주소는 BNB Chain 회수가 사이클당 몇 건이라 뒤처져요.
+- Base 등 공개 노드만 쓰는 체인은 trace 노드 한도에 걸리면 내부 이동이 늦게 채워져요(백오프 · 30일) · Alchemy 키만 넣은 설치는 Arbitrum 등의 옛 구간이 느려요(Etherscan·Ankr 권장).
+- 코인 카드 안 기록 줄의 사칭·스팸 줄 · 업비트·빗썸 외 원화 거래소를 나중에 넣을 때 지난 곡선 소급 · 체인 칩 설명 화면은 다음 판에.
+- 토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 같은 상한(32MiB)으로.
+
 ## 2026-10-10 — 옛 보유 토큰 찾기 · Alchemy 키
 
 **옛 보유 토큰 찾기 · 발견 시점 기초 잔고 · Alchemy 키 칸 · 노드 키 버스트 · EVM 체인 표 · 선물 코인 정산 달러 · 외부 응답 크기 상한 ·
@@ -68,12 +143,12 @@ periods only) gives borrowed-and-withdrawn coins a cost at the borrow-time price
 `tools/negabs_1010.py` (preview, then `--apply`) and `tools/bithumb_filltime_1010.py` (re-time old Bithumb limit fills to the last fill). No rebuild and no data revision.
 Only the Settings › keys (explorer keys) screenshot was retaken (Alchemy row); the dashboard LP card position still differs.
 
-**알려진 한계(다음 판에)**
+**알려진 한계(→ 2026-10-10 (2) 판에서 고침)**
 
-- 옛 보유 토큰 찾기에서 판정(DEX 조회)이 잠깐 실패해 '일시 보류'된 토큰 중 시세를 아직 모르는 것은 잔고 대조에서 빠져요 — 그런 토큰을 들고만 있으면 빠진 것을 알려 주지 않을 수 있어요.
-- BNB Chain 지갑별 기초 잔고 대조에서 '일시 보류'된 토큰도 확인한 것으로 남아, 그 토큰의 옛 거래가 늦게 들어오면 기초 잔고로 상쇄될 수 있어요(드묾).
-- 남이 실행한 교환으로 나간, 정품 목록 밖 일반 토큰은 화면에서 정품 등록을 할 수 없어 발견 시점 기초 잔고를 다시 시도(`tools/negabs_1010.py --apply --retry`)해도 건너뛰어요 — 다음 판에 도구에서 등록하는 길을 더해요.
-- 응답 크기 상한은 공통 요청 경로에만 걸려 있어요 — 공통 경로를 거치지 않는 직접 조회(솔라나 수집·대사, 시세·OKX 토큰 가격, Rabby, 업비트, 입금 주소, 브릿지·자금 흐름 추적, LP 목록, 세일 매칭, 거래 출처)는 아직 본문 끝까지 읽어요(이상하게 큰 응답 하나가 그 프로세스 메모리를 쓸 수 있음 — 다음 판에 같은 상한으로).
+- ~~옛 보유 토큰 찾기에서 판정(DEX 조회)이 잠깐 실패해 '일시 보류'된 토큰 중 시세를 아직 모르는 것은 잔고 대조에서 빠져요~~ — **2026-10-10 (2) 판에서 고침**(1시간마다 다시 판정 · 상태 패널 '토큰 판정 대기 N' · [2026-10-10 (2)](#2026-10-10-2--새-설치본-수집--최신-우선)).
+- ~~BNB Chain 지갑별 기초 잔고 대조에서 '일시 보류'된 토큰도 확인한 것으로 남아, 그 토큰의 옛 거래가 늦게 들어오면 기초 잔고로 상쇄될 수 있어요~~ — **2026-10-10 (2) 판에서 고침**(관측한 토큰만 확인으로).
+- ~~남이 실행한 교환으로 나간, 정품 목록 밖 일반 토큰은 화면에서 정품 등록을 할 수 없어 발견 시점 기초 잔고를 다시 시도해도 건너뛰어요~~ — **2026-10-10 (2) 판에서 고침**(`tools/negabs_1010.py --genuine <CA> --chain --wallet` → `--apply`).
+- ~~응답 크기 상한은 공통 요청 경로에만 걸려 있어요 — 공통 경로를 거치지 않는 직접 조회(솔라나 수집·대사, 시세·OKX 토큰 가격, Rabby, 업비트, 입금 주소, 브릿지·자금 흐름 추적, LP 목록, 세일 매칭, 거래 출처)는 아직 본문 끝까지 읽어요~~ — **2026-10-10 (2) 판에서 고침**(직접 조회 12곳도 같은 상한 — 정상 32MiB · 오류 64KiB).
 
 ## 2026-10-09 밤 — 외부 수정 검증 반영
 

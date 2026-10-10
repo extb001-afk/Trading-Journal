@@ -24,6 +24,18 @@ PASS_GAP = 60.0
 MAX_JOBS = 2
 DEFER_MAX = 900
 FINAL = ("done", "none", "skip", "fail", "gone")
+LANE_FAIL_WHY = "과거 블록 상태 없음(대체 조건 미충족)"
+
+
+def _lanes_chain(chain: str) -> bool:
+    try:
+        if chain == "bsc":
+            cur = common.read_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {}) or {}
+            return isinstance(cur.get("_live"), dict) or bool(cur.get("_lanes_seen"))
+        cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {}) or {}
+        return isinstance(cur, dict) and isinstance(cur.get("_handover"), dict)
+    except (SystemExit, TypeError, ValueError):
+        return False
 
 
 def is_disc(sid) -> bool:
@@ -115,6 +127,58 @@ def recon_done(conn, chain: str, w: str, native: bool) -> bool:
     r = conn.execute("SELECT payload FROM raw_observations WHERE obs_id=?", (f"recon:{chain}",)).fetchone()
     d = _jload(r[0] if r else None, {})
     return isinstance(d, dict) and any(str(k).lower() == wl and isinstance(v, dict) for k, v in d.items())
+
+
+def lane_hold(chain: str, w: str, upto: int):
+    sd = common.STATE_DIR
+    upto = int(upto)
+    try:
+        if chain == "bsc":
+            cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {}) or {}
+            fb = int(cur.get("from_block") or 0)
+            if fb >= upto:
+                return None
+            if isinstance(cur.get("_live"), dict):
+                return f"BSC 옛 기록 차선이 그 블록 아래를 아직 다 못 받음(블록 {fb} 까지 — 그 아래 안 받은 입금이 원장에 빠져 있을 수 있음 · 지나가면 다시)"
+            return f"BSC 수집기가 그 블록까지 빈틈없이 아직 안 옴(커서 {fb})"
+        cur = common.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
+    except (SystemExit, TypeError, ValueError):
+        return "수집기 커서를 못 읽음"
+    if not isinstance(cur, dict) or cur.get("_rpc_v") is None:
+        return None
+    wl = str(w).lower()
+    j = cur.get("_bk:" + wl)
+    if isinstance(j, dict):
+        try:
+            d9, t9 = int(j.get("done") or 0), int(j.get("to") or 0)
+        except (TypeError, ValueError):
+            d9, t9 = 0, 1
+        if d9 < t9 and d9 < upto:
+            return f"그 지갑 옛 기록 뒤 차선 진행 중(블록 {d9} 까지 — 그 블록 아래 아직 안 받은 거래가 있을 수 있음 · 차선이 지나가면 다시)"
+    lc = cur.get(wl)
+    if type(lc) is int and lc < upto:
+        return f"수집기 라이브 차선이 그 블록까지 아직 안 옴(커서 {lc})"
+    return None
+
+
+def lane_busy(chain: str):
+    try:
+        if chain == "bsc":
+            cur = common.read_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {}) or {}
+            return "BSC 옛 기록 차선 진행 중" if isinstance(cur.get("_live"), dict) else None
+        cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {}) or {}
+    except (SystemExit, TypeError, ValueError):
+        return None
+    if not isinstance(cur, dict) or cur.get("_rpc_v") is None:
+        return None
+    for k9, j9 in cur.items():
+        if str(k9).startswith("_bk:") and isinstance(j9, dict) and j9.get("why") == "new":
+            try:
+                if int(j9.get("done") or 0) < int(j9.get("to") or 0):
+                    return "새 지갑 옛 기록 뒤 차선 진행 중(동기화 도장 전 — 끝나면 다시)"
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def prewin_pending(conn, chain: str, rows) -> bool:
@@ -261,6 +325,9 @@ def plan_cell(conn, chain: str, w: str, aid: int, prefs=None, my=None) -> dict:
         return {"st": "skip" if "체인 거래가 아님" in fn else "wait", "why": fn}
     if not recon_done(conn, chain, w, native):
         return {"st": "wait", "why": "그 지갑 기초 잔고 대사 미완료"}
+    hold9 = lane_hold(chain, w, int(fn["block"]) - 1)
+    if hold9:
+        return {"st": "wait", "why": hold9}
     oa = observed_after(conn, chain, w, None if native else a[2], fn["block"], fn["ts"])
     if oa:
         return {"st": "skip", "why": ("발견 시점" if SID_TAG in oa else "기초 잔고 대사") + " 관측이 이 거래 뒤 잔고를 이미 봄 — 옛 보유 누락 아님(확인 필요)"}
@@ -474,6 +541,9 @@ class Runner:
         except (SystemExit, TypeError, ValueError):
             return None
 
+    def _lane_hold(self, chain: str, upto: int):
+        return lane_hold(chain, "", upto) if chain == "bsc" else None
+
     def _prefs(self) -> dict:
         try:
             d = common.read_json(os.path.join(common.STATE_DIR, "ui_prefs.json"), {}) or {}
@@ -591,6 +661,17 @@ class Runner:
             if live >= MAX_JOBS:
                 break
             d = _jload(v, None)
+            if isinstance(d, dict) and d.get("st") == "fail" and not d.get("reopened") and str(d.get("why") or "").startswith(LANE_FAIL_WHY) \
+                    and k not in self.jobs:
+                try:
+                    ch9, w9 = k.split(":", 3)[1:3]
+                except ValueError:
+                    ch9 = w9 = None
+                if ch9 and _lanes_chain(ch9) and not lane_busy(ch9) and not lane_hold(ch9, w9, int(self._cursor(ch9, w9) or 0)):
+                    d.update(st="retry", n=0, next=0, reopened=now, why="차선 끝 — 다시 확인")
+                    self._put(k, d)
+                    changed = True
+                    self.log.info("발견 시점 기초 잔고 %s — 차선 때문에 실패로 굳었던 칸 다시 엶", k[len(CAND):])
             if not isinstance(d, dict) or d.get("st") in FINAL or k in self.jobs or int(d.get("next") or 0) > now:
                 continue
             try:
@@ -614,6 +695,12 @@ class Runner:
             if d.get("tx") and d["tx"] != pl["tx"]:
                 d["tx0"] = d["tx"]
             d["tx"] = pl["tx"]
+            hold9 = self._lane_hold(ch, int(pl["block"]) - 1)
+            if hold9:
+                d.update(st="wait", why=hold9, next=now + WAIT_RETRY)
+                self._put(k, d)
+                changed = True
+                continue
             urls = self._urls(ch)
             if not urls:
                 d.update(st="wait", why="RPC 없음", next=now + WAIT_RETRY)
@@ -622,8 +709,9 @@ class Runner:
                 continue
             cur = self._cursor(ch, w)
             fb_ok = bool(cur and cur >= pl["block"] and not moved_after(pl["rows"], pl["block"]) and c._scope_ready(ch))
+            fb_hold = (lane_hold(ch, w, cur) if cur else None) or (lane_busy(ch) if not c._scope_ready(ch) else None)
             job = {"k": k, "ch": ch, "w": w, "aid": aid, "pl": pl, "ev": threading.Event(), "t1": None, "res": None, "err": None,
-                   "fb": cur if fb_ok else None}
+                   "fb": cur if (fb_ok and not fb_hold) else None, "fb_hold": fb_hold}
 
             def _run(job=job, urls=urls):
                 try:
@@ -664,9 +752,14 @@ class Runner:
             if job["err"] is not None:
                 self.jobs.pop(k, None)
                 e = job["err"]
+                if _state_err(e) and job.get("fb_hold"):
+                    d.update(st="wait", why=str(job["fb_hold"]), next=now + WAIT_RETRY)
+                    self._put(k, d)
+                    conn.commit()
+                    continue
                 n9 = int(d.get("n") or 0) + 1
                 fin = n9 >= MAX_TRIES
-                d.update(st="fail" if fin else "retry", n=n9, why=("과거 블록 상태 없음(대체 조건 미충족)" if _state_err(e) else "조회 실패: ")
+                d.update(st="fail" if fin else "retry", n=n9, why=(LANE_FAIL_WHY if _state_err(e) else "조회 실패: ")
                          + ("" if _state_err(e) else common.safe_err(str(e))[:120]),
                          next=now + min(BACKOFF_MAX, BACKOFF0 * (2 ** (n9 - 1))))
                 self._put(k, d)
@@ -682,6 +775,13 @@ class Runner:
                 self._put(k, d)
                 conn.commit()
                 continue
+            hold9 = lane_hold(job["ch"], job["w"], int(job["res"][1]) if job.get("res") else int(job["pl"]["block"]) - 1)
+            if hold9:
+                self.jobs.pop(k, None)
+                d.update(st="retry", why=hold9, next=now + WAIT_RETRY)
+                self._put(k, d)
+                conn.commit()
+                continue
             if c._recon_pending(job["ch"]):
                 continue
             self.jobs.pop(k, None)
@@ -693,6 +793,12 @@ class Runner:
                 conn.commit()
                 continue
             mode, oblk, bal, bts = job["res"]
+            hold9 = self._lane_hold(job["ch"], int(pl["block"]) - 1)
+            if hold9:
+                d.update(st="retry", why=hold9, next=now + WAIT_RETRY)
+                self._put(k, d)
+                conn.commit()
+                continue
             if mode != "arch" and (moved_after(rows, pl["block"]) or not c._scope_ready(job["ch"])):
                 d.update(st="retry", why="대체 조건 해제(B 뒤 이동·수집기 준비)", next=now + WAIT_RETRY)
                 self._put(k, d)
@@ -801,6 +907,10 @@ class Runner:
         if not cur or cur < blk:
             conn.rollback()
             return "wait", f"수집기가 그 블록까지 아직 안 옴(커서 {cur})", ""
+        hold9 = lane_hold(ch, w, blk)
+        if hold9:
+            conn.rollback()
+            return "wait", hold9, ""
         if not (c._scope_ready(ch) or (ca is not None and c._scope_ready_tok(ch))) or c._recon_pending(ch):
             conn.rollback()
             return "wait", "수집기 상세 대기·미소비 거래 있음", ""

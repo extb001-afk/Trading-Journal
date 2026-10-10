@@ -49,6 +49,7 @@ if tool is None or not hasattr(core.Core, "_consume_exf_retime") or not hasattr(
     T.finish()
 
 GJ = []
+GJT = []
 FAIL_MIN = set()
 
 
@@ -58,6 +59,7 @@ def rate(m_ms):
 
 def fake_gj(url, timeout=10.0):
     GJ.append(url)
+    GJT.append(__import__("threading").current_thread().name)
     assert "market=KRW-USDT" in url, url
     q = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&"))
     to = int(datetime.strptime(q["to"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp() * 1000)
@@ -260,10 +262,21 @@ open(os.path.join(common.STATE_DIR, "daily_cache.json"), "w").write("{}")
 obs1 = dict(C.conn.execute("SELECT uuid, observed_at FROM raw_ex WHERE exchange='bithumb' AND revision=1").fetchall())
 FAIL_MIN.add((ep(T8) * 1000 // 60000) * 60000)
 GJ.clear()
+GJT.clear()
+PXQ = C._exf_retime_pxq = pricing.FxWarmQueue(C.px, name="tj-retime-px") if hasattr(pricing, "FxWarmQueue") else None
+if PXQ is not None:
+    PXQ.RETRIES = 0
+C.conn.execute("BEGIN")
+C._consume_record(IR[0])
+C.conn.commit()
+rev0 = sorted(r[0] for r in C.conn.execute("SELECT uuid FROM raw_ex WHERE exchange='bithumb' AND revision=2"))
+chk("MainThread" not in GJT and rev0 == ["bithumb:b2"], "[5] 첫 적용 = core 스레드 바깥 조회 0 · 새 시각 환율이 캐시에 있는 b2(같은 분)만 바로잡음 · 나머지 되돌림", (GJT, rev0))
+chk(PXQ is not None and PXQ.wait_idle(20), "[5] 캐시에 없는 새 시각 환율 = 배경에서 받음")
 C.conn.execute("BEGIN")
 C._consume_record(IR[0])
 C.conn.commit()
 n_gj_apply = len(GJ)
+chk("MainThread" not in GJT, "[5] 다시 적용도 core 스레드 바깥 조회 0", GJT)
 rev = {r[0]: (r[1], json.loads(r[2])) for r in C.conn.execute("SELECT uuid, observed_at, payload FROM raw_ex WHERE exchange='bithumb' AND revision=2")}
 chk(sorted(rev) == ["bithumb:b1", "bithumb:b2", "bithumb:b7"] and all(rev[k][0] == obs1[k] for k in rev)
     and rev["bithumb:b1"][1]["ts"] == ep(T1B) * 1000 and rev["bithumb:b1"][1]["_tj_retime"]["old"] == ep(C1) * 1000
@@ -280,7 +293,7 @@ hd = common.read_json(os.path.join(common.STATE_DIR, common.HIST_DIRTY), {}) or 
 chk(not os.path.exists(os.path.join(common.STATE_DIR, "daily_cache.json")) and hd.get("from") == "2025-11-05",
     "[5] 일별 동결 캐시 삭제 · 장기 곡선 다시 계산 표식 = 가장 이른 옛 날(2025-11-05)부터", hd)
 mk = json.loads(C._meta_get("exf_retime:bithumb") or "{}")
-chk(mk.get("n") == 3 and mk.get("undo") == 1, "[5] meta 표식(바로잡은 3 · 되돌림 1)", mk)
+chk(mk.get("n") == 3 and mk.get("undo") == 4, "[5] meta 표식(바로잡은 3 · 되돌림 4 = 첫 적용 캐시 없음 3 + b8 환율 실패 1)", mk)
 chk(n_gj_apply <= 5, "[5] 환율 = 묶음마다 1콜(4묶음 + 실패 재시도 ≤1)", (n_gj_apply, GJ))
 
 snap = (positions(), {u: legs(IDS[u]) for u in ROWS}, C.conn.execute("SELECT COUNT(*) FROM raw_ex").fetchone()[0])
@@ -299,10 +312,12 @@ C.px.d["neg_ts"].pop("_fx", None)
 with contextlib.redirect_stdout(io.StringIO()):
     rc2 = tool.main(["--base", T.TMP, "--apply"])
 IR2 = inbox_recs()[1:]
-C.conn.execute("BEGIN")
-for r in IR2:
-    C._consume_record(r)
-C.conn.commit()
+for _k in range(2):
+    C.conn.execute("BEGIN")
+    for r in IR2:
+        C._consume_record(r)
+    C.conn.commit()
+    chk(PXQ is not None and PXQ.wait_idle(20), "[7] 배경 조회 끝")
 chk(rc2 == 0 and len(IR2) == 1 and [f["id"] for f in IR2[0]["fills"]] == ["bithumb:b8"] and [x[6] for x in legs(IDS["b8"])] == [ep(T8)] * 3
     and positions() == P0, "[7] 환율 실패로 되돌린 b8 = 다음 --apply 때 반영", (IR2, legs(IDS["b8"])))
 

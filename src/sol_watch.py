@@ -49,6 +49,9 @@ PRIMARY_QUOTA_OPEN = 1800.0
 PRIMARY_RL_OPEN = 60.0
 PARSE_BATCH = 1
 SIG_SPOOL_PAGES = 30
+LIVE_FIRST_HOURS = 24.0
+LIVE_FIRST_N = 100
+OLD_SLICE_SEC = 60.0
 
 HEAD_RPC_DEFAULT = "https://solana-rpc.publicnode.com"
 ARCHIVE_RPC_DEFAULT = "https://api.mainnet-beta.solana.com"
@@ -486,6 +489,9 @@ class Rpc:
             if self.kind() == "fill" and getattr(getattr(self, "_fill", None), "via", None) == "archive":
                 if not bf_engine.HELIUS.take(self.proc, c9, kind="fill"):
                     raise RuntimeError(f"rpc {method}: 헬리우스 옛 기록 몫 없음(아카이브로 받는 중 — 메타는 몫이 나면)")
+            elif bf_engine.HELIUS.window_on():
+                if not bf_engine.HELIUS.take_hard(self.proc, c9, kind=self.kind()):
+                    raise RuntimeError(f"rpc {method}: 헬리우스 월 창 몫 없음({bf_engine.HELIUS.last_why()}) — 다른 노드로")
             else:
                 bf_engine.HELIUS.add(self.proc, c9, kind=self.kind())
         now = time.monotonic()
@@ -502,13 +508,13 @@ class Rpc:
                                               "User-Agent": "tj-bot/0.1"})
         try:
             with bf_engine.sol_open(req, timeout, method, sol=True) as r:
-                d = json.loads(r.read().decode())
+                d = json.loads(common.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 self.rl_seen += 1
                 self.rl_last = True
                 try:
-                    body = (e.read() or b"")[:200].decode("utf-8", "replace").lower()
+                    body = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
                 except Exception:
                     body = ""
                 raise RateLimited(f"HTTP Error 429: Too Many Requests ({method})",
@@ -548,11 +554,11 @@ class Rpc:
                                                                    "User-Agent": "tj-bot/0.1"})
             try:
                 with bf_engine.sol_open(req, timeout) as r:
-                    d = json.loads(r.read().decode())
+                    d = json.loads(common.read_capped(r).decode())
             except urllib.error.HTTPError as e:
                 if e.code == 429 and url == self.url:
                     try:
-                        b9 = (e.read() or b"")[:200].decode("utf-8", "replace").lower()
+                        b9 = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
                     except Exception:
                         b9 = ""
                     self.rl_seen += 1
@@ -732,6 +738,22 @@ class SolWatcher:
         self.batch_sleep = float(sol9.get("batch_sleep_sec", 1.0))
         self.batch_sleep_min = self.batch_sleep
         self.sig_spool_pages = max(1, int(sol9.get("sig_spool_pages", SIG_SPOOL_PAGES)))
+        def _num9(k, d, lo, hi):
+            try:
+                x = float(sol9.get(k, d))
+            except (TypeError, ValueError):
+                x = float(d)
+            return min(hi, max(lo, x)) if x == x else float(d)
+        self.live_first_h = _num9("live_first_hours", LIVE_FIRST_HOURS, 0, 24 * 30)
+        self.live_first_n = int(_num9("live_first_n", LIVE_FIRST_N, 1, SIG_PAGE))
+        self.old_slice = _num9("old_slice_sec", OLD_SLICE_SEC, 0, 86400)
+        self._emit_cur = {}
+        self._emit_seq = 0
+        self._stk_t = {}
+        for k9 in [k9 for k9 in self.cursor if isinstance(k9, str) and k9.startswith(("_hl:", "_fbw:"))]:
+            v9 = self.cursor.get(k9)
+            if not isinstance(v9, dict) or k9.split(":", 1)[1] in self.cursor or v9.get("o") not in self.owners:
+                self.cursor.pop(k9, None)
         self.progress = bf_engine.progress("sol")
         self._rl_log_at = time.time()
         self._rl_log_base = 0
@@ -1536,6 +1558,103 @@ class SolWatcher:
             return False
         return left >= min(est, fresh) - keep
 
+    def _own_of(self, a: str):
+        return a if a in self.owners else self.ata_owner.get(a)
+
+    def _persp_done(self, a: str, r: dict, stake: bool = False) -> bool:
+        q9 = self._emit_cur.get(r["signature"])
+        if q9 is not None and (not stake or q9 > self._stk_t.get(a, 1 << 62)):
+            return True
+        if stake:
+            return False
+        w9 = self.cursor.get("_fbw:" + a)
+        if not isinstance(w9, dict) or w9.get("o") != self._own_of(a):
+            return False
+        s9, sl9 = w9.get("s"), r.get("slot")
+        if isinstance(s9, int) and isinstance(sl9, int) and not isinstance(sl9, bool) and sl9 <= s9:
+            return True
+        c9 = self.__dict__.setdefault("_fbe", {})
+        if a not in c9:
+            c9[a] = set(x for x in (w9.get("e") or ()) if isinstance(x, str))
+        return r["signature"] in c9[a]
+
+    def _live_part(self, a: str, rows: list, now: float) -> set:
+        if self.live_first_h <= 0:
+            return {r["signature"] for r in rows}
+        floor9 = now - self.live_first_h * 3600
+        if a in self.cursor:
+            return {r["signature"] for r in rows if not isinstance(r.get("blockTime"), int) or r["blockTime"] >= floor9}
+        out = set()
+        for r in rows:
+            bt9 = r.get("blockTime")
+            if len(out) >= self.live_first_n or not isinstance(bt9, int) or bt9 < floor9:
+                break
+            out.add(r["signature"])
+        return out
+
+    def _fb_left(self, a: str, rows: list, now: float) -> int:
+        live9 = self._live_part(a, rows, now) if self.live_first_h > 0 else set()
+        return sum(1 for r in rows if r["signature"] not in live9 and not (r["signature"] in self.emitted and self._persp_done(a, r)))
+
+    def _row_done(self, r: dict, re_sigs, cut_all, emit9) -> bool:
+        s9, bt9 = r["signature"], r.get("blockTime")
+        if cut_all and isinstance(bt9, int) and bt9 < cut_all:
+            return True
+        return s9 in self.emitted and (s9 not in re_sigs or s9 in emit9)
+
+    FBW_E_MAX = 500
+
+    def _fbw_note(self, a: str, rows: list, re_sigs, cut_all, emit9, extra=()):
+        o9 = self._own_of(a)
+        if not o9:
+            return
+        done9, unh9 = [], []
+        for r in rows:
+            (done9 if self._row_done(r, re_sigs, cut_all, emit9) else unh9).append(r)
+        w9 = self.cursor.get("_fbw:" + a)
+        w9 = w9 if isinstance(w9, dict) and w9.get("o") == o9 else {}
+        old9 = w9.get("s") if isinstance(w9.get("s"), int) else None
+        s9 = old9
+        if unh9:
+            m9 = min((r.get("slot") if isinstance(r.get("slot"), int) and not isinstance(r.get("slot"), bool) else 0) for r in unh9) - 1
+            if m9 > 0 and (old9 is None or m9 > old9):
+                s9 = m9
+        e9 = [x for x in (w9.get("e") or ()) if isinstance(x, str)]
+        have9 = set(e9)
+        for x in [r["signature"] for r in done9 if r["signature"] in self.emitted and not (isinstance(s9, int) and isinstance(r.get("slot"), int)
+                                                                                        and r["slot"] <= s9)] + [x for x in extra if x in self.emitted]:
+            if x not in have9:
+                have9.add(x)
+                e9.append(x)
+        ent9 = {"o": o9, "s": s9, "e": e9[-self.FBW_E_MAX:]}
+        if ent9 != {"o": o9, "s": old9, "e": [x for x in (w9.get("e") or ()) if isinstance(x, str)]}:
+            self.cursor["_fbw:" + a] = ent9
+            self.__dict__.setdefault("_fbe", {}).pop(a, None)
+
+    def _live_peek(self, a: str, cut, now: float) -> list:
+        hl9 = self.cursor.get("_hl:" + a)
+        hl9 = hl9 if isinstance(hl9, dict) else {}
+        sl9 = hl9.get("slot") if isinstance(hl9.get("slot"), int) and not isinstance(hl9.get("slot"), bool) else None
+        opt = {"limit": self.live_first_n, "commitment": "finalized"}
+        if hl9.get("sig"):
+            opt["until"] = hl9["sig"]
+        h9 = getattr(self.rpc, "hint", None)
+        with (self.rpc.as_kind("head") if callable(getattr(self.rpc, "as_kind", None)) else contextlib.nullcontext()), \
+                (h9(pn=bool(hl9.get("sig")), slot=sl9) if callable(h9) else contextlib.nullcontext()):
+            res = self.rpc.call("getSignaturesForAddress", [a, opt])
+        if not isinstance(res, list):
+            raise RuntimeError(f"getSignaturesForAddress 형식 ({a[:8]})")
+        res = [r for r in res if isinstance(r, dict) and isinstance(r.get("signature"), str)]
+        if hl9.get("sig"):
+            rows = [r for r in res if not (cut and isinstance(r.get("blockTime"), int) and r["blockTime"] < cut)]
+        else:
+            floor9 = max(int(cut or 0), now - self.live_first_h * 3600)
+            rows = [r for r in res if isinstance(r.get("blockTime"), int) and r["blockTime"] >= floor9]
+        top9 = res[0] if res else None
+        self._hl_next[a] = {"o": self._own_of(a), "sig": top9["signature"] if top9 else (hl9.get("sig") or ""),
+                            "slot": top9.get("slot") if top9 else sl9}
+        return rows
+
     def _fb_hold(self, a: str, est):
         self._fb_wait_note(a)
         self._fb_waiting.add(a)
@@ -1559,11 +1678,17 @@ class SolWatcher:
             common.atomic_write_json(self.cursor_path, self.cursor)
         if full or not self._stake_disc_at:
             self._stake_discover()
+        own9 = tuple(self.owners)
+        if own9 != getattr(self, "_own_snap", own9):
+            self._emit_cur.clear()
+        self._own_snap = own9
         newp = {o for o in self.owners if o not in self.cursor}
         newp |= {k[7:] for k in self.cursor if k.startswith("_persp:")}
         for o in newp:
             self.cursor["_persp:" + o] = 1
         stake_reg = self.stake_reg()
+        for s9 in stake_reg:
+            self._stk_t.setdefault(s9, self._emit_seq)
         tb = getattr(self, "_tier", None)
         own_set = full_set = set(self.owners)
         if tb is not None:
@@ -1591,7 +1716,13 @@ class SolWatcher:
             for s9, v9 in stake_reg.items():
                 if not v9.get("gone"):
                     addrs.append(s9)
+        else:
+            in9 = set(addrs)
+            addrs.extend(a for a in sorted(getattr(self, "_unc_prev", ()) or ()) if a not in in9
+                         and ((a in stake_reg and not stake_reg[a].get("gone")) or self._own_of(a) in own_set))
         active_addrs = set(addrs)
+        if not full:
+            addrs.extend(a for a in sorted(getattr(self, "_unc_ret", ()) or ()) if a not in active_addrs and self._own_of(a) in own_set)
         if full:
             addrs.extend(k9[9:] for k9, o9 in list(self.cursor.items())
                          if k9.startswith("_fb_wait:") and o9 in full_set and k9[9:] not in active_addrs and k9[9:] not in self.cursor)
@@ -1611,6 +1742,7 @@ class SolWatcher:
         fb_set = {a for a in dict.fromkeys(addrs) if a not in self.cursor and a not in stake_reg
                   and (a in newp or self.ata_owner.get(a) in newp)}
         fb_pace = bool(fb_set) and self._fb_paced()
+        slice_fb9 = self.old_slice > 0 and self.live_first_h > 0
         fb_resv = 0
         held = []
         hint9 = getattr(self.rpc, "hint", None)
@@ -1620,6 +1752,7 @@ class SolWatcher:
         self._retiring = {a for a in dict.fromkeys(addrs) if a not in active_addrs}
         gate9 = _pn_ok(self.rpc) and _hl_paced(self.rpc)
         defer9 = set()
+        have9 = {}
         for a in dict.fromkeys(addrs):
             if rl_hits >= RATE_LIMIT_MAX:
                 log.warning("429 %d회 — 이번 사이클 나머지 주소 건너뜀(커서 유지)", rl_hits)
@@ -1629,7 +1762,7 @@ class SolWatcher:
             if fb9 and fb_pace:
                 left9 = self.rpc.fill_room() - fb_resv
                 est9 = self._fb_est.get(a)
-                if left9 <= 0 or (est9 and not self._fb_fits(est9, left9)):
+                if left9 <= 0 or (est9 and not slice_fb9 and not self._fb_fits(est9, left9)):
                     self._fb_hold(a, est9)
                     held.append(a)
                     failed_addr = True
@@ -1680,17 +1813,20 @@ class SolWatcher:
                 time.sleep(pace)
             if fb9 and fb_pace:
                 left9 = self.rpc.fill_room() - fb_resv
-                if not self._fb_fits(len(rows), left9):
-                    log.info("%s 첫 백필 서명 %d건 — 오늘 남은 옛 기록 몫 %d 보다 커서 다음 차례(UTC 0시에 몰아서)", a[:8], len(rows), max(0, left9))
-                    self._fb_est[a] = len(rows)
-                    self._fb_hold(a, len(rows))
+                n9 = self._fb_left(a, rows, time.time())
+                if not (left9 > 0 if slice_fb9 else self._fb_fits(n9, left9)):
+                    log.info("%s 첫 백필 서명 %d건 — 오늘 남은 옛 기록 몫 %d 보다 커서 다음 차례(UTC 0시에 몰아서)", a[:8], n9, max(0, left9))
+                    self._fb_est[a] = n9
+                    self._fb_hold(a, n9)
                     held.append(a)
                     failed_addr = True
+                    have9[a] = rows
                     continue
-                fb_resv += len(rows)
+                if not slice_fb9:
+                    fb_resv += n9
                 self._fb_est.pop(a, None)
                 if a in self._fb_waiting:
-                    self.progress.update(f"sol:{a[:8]}", phase="parse", unit="tx", done=0, total=len(rows), note="옛 기록 받는 중")
+                    self.progress.update(f"sol:{a[:8]}", phase="parse", unit="tx", done=0, total=n9, note="옛 기록 받는 중")
             miss9 = self.cursor.get("_pnmiss:" + a)
             if isinstance(miss9, list) and miss9:
                 seen9 = {r["signature"] for r in rows}
@@ -1702,16 +1838,50 @@ class SolWatcher:
         if defer9 and time.time() - float(getattr(self, "_defer_log", 0) or 0) >= 1800:
             self._defer_log = time.time()
             log.info("헬리우스 새 거래 확인 몫 대기 — publicnode 창 밖 주소 %d개(오래 쉰 계단·받침 복구 등)는 다음 주기에(창 안 주소는 그대로 확인)", len(defer9))
+        peek9 = {}
+        self._hl_next = {}
+        if self.live_first_h > 0 and rl_hits < RATE_LIMIT_MAX:
+            for a in dict.fromkeys(addrs):
+                if a in addr_sigs or a in self.cursor or a in stake_reg or a not in active_addrs:
+                    continue
+                if a in have9:
+                    rows9 = have9[a]
+                    live9 = self._live_part(a, rows9, time.time())
+                    peek9[a] = [r for r in rows9 if r["signature"] in live9]
+                    self._hl_next[a] = {"o": self._own_of(a), "sig": rows9[0]["signature"] if rows9 else "",
+                                        "slot": rows9[0].get("slot") if rows9 else None}
+                    continue
+                try:
+                    peek9[a] = self._live_peek(a, self.cutoff_ts, time.time())
+                except Exception as e:
+                    log.debug("%s 최근 서명 엿보기 실패(다음 주기 다시): %s", a[:8], e)
+                time.sleep(pace)
         ordered = []
         seen = set()
-        for a, rows in addr_sigs.items():
+        for a, rows in list(addr_sigs.items()) + list(peek9.items()):
             for r in reversed(rows):
                 s = r["signature"]
                 if s not in seen:
                     seen.add(s)
                     ordered.append(r)
         ordered.sort(key=lambda r: r.get("slot") or 0)
-        re_sigs = {r["signature"] for a in repersp_addrs for r in addr_sigs.get(a, ()) if r["signature"] in self.emitted}
+        now_l9 = time.time()
+        live_s9 = set()
+        for a, rows in addr_sigs.items():
+            live_s9 |= self._live_part(a, rows, now_l9)
+        for rows in peek9.values():
+            live_s9 |= {r["signature"] for r in rows}
+        live_rows9 = [r for r in ordered if r["signature"] in live_s9]
+        old_rows9 = [r for r in ordered if r["signature"] not in live_s9]
+        backlog9 = self.live_first_h > 0 and bool(old_rows9 or len(live_rows9) > self.live_first_n
+                                                   or any(a not in self.cursor for a in list(addr_sigs) + list(peek9)))
+        if backlog9:
+            tops9 = {rows9[0]["signature"] for rows9 in list(addr_sigs.values()) + list(peek9.values()) if rows9}
+            live_rows9.sort(key=lambda r: (r["signature"] not in tops9, -(r.get("slot") or 0)))
+        ordered = live_rows9 + old_rows9
+        re_sigs = {r["signature"] for a in repersp_addrs for r in list(addr_sigs.get(a, ())) + list(peek9.get(a, ()))
+                   if r["signature"] in self.emitted and not ((a in fb_set and self._persp_done(a, r))
+                                                               or (a in stake_reg and self._persp_done(a, r, stake=True)))}
         cut_all = min([self.cutoff_ts] + [int(v.get("t0") or 0) for v in stake_reg.values()]) if self.cutoff_ts else 0
         done_ok = True
         todo = [r["signature"] for r in ordered if (r["signature"] not in self.emitted or r["signature"] in re_sigs) and not (
@@ -1723,6 +1893,10 @@ class SolWatcher:
         pos = 0
         n_done = 0
         big = len(todo) > 50
+        n_lt9 = sum(1 for s9 in todo if s9 in live_s9)
+        t_det9 = time.time()
+        sliced9 = False
+        emit9 = set()
         for r in ordered:
             sig = r["signature"]
             if sig in self.emitted and sig not in re_sigs:
@@ -1733,9 +1907,16 @@ class SolWatcher:
             if sig not in pre:
                 while pos < len(todo) and todo[pos] != sig:
                     pos += 1
-                chunk = todo[pos:pos + self.parse_batch]
+                old9 = pos >= n_lt9
+                if self.old_slice > 0 and (old9 or backlog9) and time.time() - t_det9 >= self.old_slice:
+                    sliced9 = True
+                    break
+                chunk = todo[pos:min(pos + self.parse_batch, len(todo) if old9 else n_lt9)]
                 pos += len(chunk)
-                k9 = "fill" if chunk and all(s9 in fb_sigs9 for s9 in chunk) else "head"
+                k9 = "fill" if chunk and (old9 or self.live_first_h <= 0) and all(s9 in fb_sigs9 for s9 in chunk) else "head"
+                if k9 == "fill" and fb_pace and slice_fb9 and self.rpc.fill_room() <= 0:
+                    sliced9 = True
+                    break
                 tnow9 = time.time()
                 ptx9 = (k9 == "head" and win9 > 0 and bool(chunk)
                         and all(isinstance(bt_of.get(s9), int) and tnow9 - bt_of[s9] <= win9 for s9 in chunk))
@@ -1757,6 +1938,9 @@ class SolWatcher:
             try:
                 self.writer.append(rec)
                 self.emitted.add(sig)
+                self._emit_seq += 1
+                self._emit_cur[sig] = self._emit_seq
+                emit9.add(sig)
                 self._stake_note_tx(rec)
                 if tb is not None:
                     for o9 in {rec.get("fee_payer")} | set(self.__dict__.get("_tier_signers", {}).pop(sig, None) or []):
@@ -1770,10 +1954,22 @@ class SolWatcher:
                 self.progress.update("sol", phase="parse", unit="tx", done=n_done, total=len(todo))
                 common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if big:
-            self.progress.update("sol", phase="parse" if not done_ok else "live", unit="tx", done=n_done,
+            self.progress.update("sol", phase="parse" if (not done_ok or sliced9) else "live", unit="tx", done=n_done,
                                  total=len(todo), flush=True)
-        if done_ok:
+        whole9 = done_ok and not sliced9
+        unc9 = set()
+        if addr_sigs or done_ok:
             for a, rows in addr_sigs.items():
+                if not whole9 and not all(self._row_done(r, re_sigs, cut_all, emit9) for r in rows):
+                    unc9.add(a)
+                    if a not in self.cursor and a not in stake_reg:
+                        self._fb_wait_note(a)
+                    if a in fb_set:
+                        self._fbw_note(a, rows, re_sigs, cut_all, emit9)
+                    continue
+                self.cursor.pop("_hl:" + a, None)
+                self.cursor.pop("_fbw:" + a, None)
+                self.__dict__.setdefault("_fbe", {}).pop(a, None)
                 wait9 = self.cursor.pop("_fb_wait:" + a, None)
                 if self.cursor.pop("_sigbf:" + a, None) is not None:
                     try:
@@ -1807,12 +2003,19 @@ class SolWatcher:
                     self.cursor.setdefault(a, "")
                 if a in t_list:
                     self._vat_save(a)
-            if full and len(addr_sigs) == len(dict.fromkeys(addrs)):
+            if full and whole9 and len(addr_sigs) == len(dict.fromkeys(addrs)):
                 self.cursor["_synced_at"] = int(time.time())
-        if not full and (failed_addr or not done_ok):
+        self._unc_prev = unc9 & active_addrs
+        self._unc_ret = unc9 - active_addrs
+        for a, nx9 in self._hl_next.items():
+            if a not in self.cursor and all(self._row_done(r, re_sigs, cut_all, emit9) for r in peek9.get(a, ())):
+                self.cursor["_hl:" + a] = nx9
+                if a in fb_set and peek9.get(a):
+                    self._fbw_note(a, [], re_sigs, cut_all, emit9, extra=[r["signature"] for r in peek9[a]])
+        if not full and (failed_addr or not done_ok or sliced9):
             self.cursor.pop("_synced_at", None)
         if tb is not None:
-            unq9 = set(dict.fromkeys(addrs)) - set(addr_sigs) - defer9
+            unq9 = (set(dict.fromkeys(addrs)) - set(addr_sigs) - defer9) | unc9
             failed_own = {o for o in own_set if o in unq9 or any(self.ata_owner.get(a) == o for a in unq9)}
             defer_own9 = {o for o in own_set if o in defer9 or any(self.ata_owner.get(a) == o for a in defer9)} - failed_own
             if not done_ok:
@@ -1840,11 +2043,11 @@ class SolWatcher:
         common.write_json_if_changed(self.meta_path, self.mint_meta)
         common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         common.atomic_write_json(self.cursor_path, self.cursor)
-        if full and done_ok:
+        if full and done_ok and not sliced9:
             self._pn_audit()
         self._health_cycle(full, addrs, addr_sigs, fail_list, done_ok, held)
         self._stake_cycle()
-        if full and done_ok and not fail_list:
+        if full and done_ok and not sliced9 and not fail_list:
             try:
                 self._extend([a for a in dict.fromkeys(addrs) if a in active_addrs and a not in stake_reg])
             except Exception as e:
@@ -2300,4 +2503,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("정지 신호(SIGINT) — 종료")

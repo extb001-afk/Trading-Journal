@@ -755,7 +755,7 @@ class Tracer:
                     raise _bfe9.NetError(str(d["error"])[:200], ce9.kind, code=ce9.code)
                 return d.get("result")
             with _bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) as r:
-                d = json.loads(r.read().decode())
+                d = json.loads(_cm9.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             netpace.note_error(url, e)
             raise
@@ -776,7 +776,7 @@ class Tracer:
             raise Paused(str(e))
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+                return json.loads(_cm9.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
                 raise Paused(f"{netpace.host_of(url)} 429")

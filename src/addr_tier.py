@@ -12,11 +12,15 @@ import common
 
 log = logging.getLogger("tj-tier")
 
-DEFAULT_STEPS = [[7, "x1"], [30, "x5"], [90, 3600], [180, 21600], [None, 86400]]
+DEFAULT_STEPS = [[7, "x1"], [None, 600]]
+ACT_MAX_SEC = 600
+BACKSTOP_MAX_SEC = 3600
+MC_CHUNK = 150
+MC_OFF_SEC = 86400
 DEFAULTS = {
     "enabled": True,
     "steps": DEFAULT_STEPS,
-    "backstop_sec": 21600,
+    "backstop_sec": 3600,
     "t0_backstop_sec": 600,
     "probe_max_per_cycle": 60,
     "rest_max_per_cycle": 25,
@@ -24,7 +28,7 @@ DEFAULTS = {
     "budget_pct": 80,
     "period_max_sec": 900,
 }
-TIER_LABELS = ["지금 주기", "조금 느리게", "1시간마다", "6시간마다", "하루 1회"]
+TIER_LABELS = ["지금 주기", "1시간마다"]
 WAKE_EST_T0 = 12.0
 WAKE_EST_REST = 0.5
 STRETCH_MAX = 12.0
@@ -32,8 +36,8 @@ REQ_PATH_NAME = "addr_tier_req.json"
 FILL_ONLY = frozenset({"extend", "extjob", "intfill", "enrich"})
 FILL_PATHS = frozenset({"etherscan", "blockscout"})
 FILL_TEXT = {"extend": "옛 기록 채우는 중", "extjob": "옛 기록 채우는 중", "intfill": "내부 이동 늦게 채우는 중", "enrich": "자세한 내역 보강 중"}
-EMPTY_ACT_SEC = 86400
-EMPTY_BACKSTOP_SEC = 7 * 86400
+EMPTY_ACT_SEC = ACT_MAX_SEC
+EMPTY_BACKSTOP_SEC = BACKSTOP_MAX_SEC
 PERIOD_HEAD_SHARE = 0.8
 
 PATH_SAFE = {
@@ -54,7 +58,7 @@ def settings(cfg: dict) -> dict:
             if k in out and v is not None:
                 out[k] = v
     out["steps"] = parse_steps(out.get("steps"))
-    for k, lo, hi in (("backstop_sec", 600, 7 * 86400), ("t0_backstop_sec", 60, 86400), ("probe_max_per_cycle", 0, 2000), ("rest_max_per_cycle", 1, 5000),
+    for k, lo, hi in (("backstop_sec", 600, BACKSTOP_MAX_SEC), ("t0_backstop_sec", 60, 86400), ("probe_max_per_cycle", 0, 2000), ("rest_max_per_cycle", 1, 5000),
                       ("code_ttl_sec", 3600, 90 * 86400), ("budget_pct", 1, 100), ("period_max_sec", 60, 3600)):
         try:
             out[k] = min(max(int(float(out[k])), lo), hi)
@@ -64,8 +68,7 @@ def settings(cfg: dict) -> dict:
     return out
 
 
-_STEPS_FALLBACK = [(7 * 86400, ("x", 1.0)), (30 * 86400, ("x", 5.0)), (90 * 86400, ("s", 3600.0)),
-                   (180 * 86400, ("s", 21600.0)), (None, ("s", 86400.0))]
+_STEPS_FALLBACK = [(7 * 86400, ("x", 1.0)), (None, ("s", float(ACT_MAX_SEC)))]
 
 
 def parse_steps(v) -> list:
@@ -200,6 +203,8 @@ class TierBook:
         self._req_cache = (None, {})
         self._last_save = 0.0
         self.last_cycle = {}
+        self.mc = None
+        self._mc_off_until = 0.0
 
     def reload_cfg(self, cfg: dict):
         with self.lock:
@@ -321,11 +326,11 @@ class TierBook:
         if why:
             return 0, 0.0, why
         if self.is_empty(w):
-            return len(self.st["steps"]) - 1, float(EMPTY_ACT_SEC), None
+            return len(self.st["steps"]) - 1, float(EMPTY_ACT_SEC) * max(1.0, self.stretch), None
         t = tier_for_idle(self.st["steps"], self.idle_sec(w, now))
         if t == 0:
             return 0, ((self.base_poll * (max(1.0, self.stretch) if self.stretch_act else 1.0)) if self.gate_t0 else 0.0), None
-        return t, interval_of(self.st["steps"], t, self.eff_poll) * max(1.0, self.stretch), None
+        return t, min(interval_of(self.st["steps"], t, self.eff_poll), float(ACT_MAX_SEC)) * max(1.0, self.stretch), None
 
     def is_empty(self, w: str) -> bool:
         e = (self.pairs.get(w) or {}).get("empty")
@@ -357,10 +362,10 @@ class TierBook:
     def backstop_of(self, iv: float, t: int = 1, w: str = None) -> float:
         f = max(1.0, self.stretch)
         if w is not None and self.is_empty(w):
-            return max(float(iv), float(EMPTY_BACKSTOP_SEC))
+            return max(float(iv), float(EMPTY_BACKSTOP_SEC) * f)
         if t == 0:
             return float(self.st["t0_backstop_sec"]) * f
-        return max(float(iv), float(self.st["backstop_sec"]) * f)
+        return max(float(iv), float(min(self.st["backstop_sec"], BACKSTOP_MAX_SEC)) * f)
 
     def anchored(self, p: dict) -> bool:
         a = p.get("act")
@@ -369,6 +374,7 @@ class TierBook:
     def due_list(self, ws, now: float = None) -> tuple:
         now = time.time() if now is None else now
         due, rest, cand = [], [], []
+        need = 0.0
         with self.lock:
             for w in ws:
                 t, iv, why = self.tier(w, now)
@@ -386,13 +392,16 @@ class TierBook:
                 if not self.anchored(p) and not p.get("actFail"):
                     due.append(w)
                     continue
-                over = now - float(p["full"]) - self.backstop_of(iv, t, w) * (1.0 - _jitter(f"{self.scope}:{w}"))
+                bs9 = self.backstop_of(iv, t, w)
+                need += self.base_poll / max(1.0, bs9)
+                over = now - float(p["full"]) - bs9 * (1.0 - _jitter(f"{self.scope}:{w}"))
                 if over >= 0:
                     cand.append((over, w))
                 else:
                     rest.append(w)
             cand.sort(key=lambda x: -x[0])
-            take = {w for _o, w in cand[: self.st["rest_max_per_cycle"]]}
+            cap9 = max(int(self.st["rest_max_per_cycle"]), int(-(-need // 0.8)) + 1 if need > 0 else 0)
+            take = {w for _o, w in cand[:cap9]}
             for _o, w in cand:
                 (due if w in take else rest).append(w)
         order = {w: i for i, w in enumerate(ws)}
@@ -433,9 +442,12 @@ class TierBook:
         if not self.active:
             return []
         out, t0 = [], []
+        n_rest = 0
         for w in self.wallets:
             t, iv, why = self.tier(w, now)
             p = self.pairs.get(w) or {}
+            if not why and iv > 0 and t > 0:
+                n_rest += 1
             if why or iv <= 0 or isinstance(p.get("wake"), dict) or not self.anchored(p):
                 continue
             last = float(p.get("actAt") or (p.get("act") or {}).get("at") or 0)
@@ -443,17 +455,21 @@ class TierBook:
                 (t0 if t == 0 else out).append((now - last, w))
         out.sort(key=lambda x: -x[0])
         t0.sort(key=lambda x: -x[0])
-        return [w for _a, w in t0] + [w for _a, w in out[: self.st["probe_max_per_cycle"]]]
+        cap = max(int(self.st["probe_max_per_cycle"]), -(-int(n_rest * self.base_poll) // ACT_MAX_SEC) + 1 if n_rest else 0)
+        if self.mc and time.time() >= self._mc_off_until:
+            cap = max(cap, MC_CHUNK)
+        return [w for _a, w in t0] + [w for _a, w in out[:cap]]
 
-    def note_activity(self, w: str, nonce: int, bal: int, blk: int):
+    def note_activity(self, w: str, nonce, bal: int, blk: int):
         with self.lock:
             p = self._p(w)
             a = p.get("act") if isinstance(p.get("act"), dict) else None
             p["actAt"] = int(time.time())
             if a is None:
                 return
-            if int(nonce) != int(a.get("n", -1)) or str(int(bal)) != str(a.get("b")):
-                why = "nonce" if int(nonce) > int(a.get("n", -1)) else "balance"
+            n_up = nonce is not None and int(nonce) != int(a.get("n", -1))
+            if n_up or str(int(bal)) != str(a.get("b")):
+                why = "nonce" if (nonce is not None and int(nonce) > int(a.get("n", -1))) else "balance"
                 p["wake"] = {"at": int(time.time()), "blk": int(blk), "why": why}
                 if p.pop("empty", None) is not None:
                     p["emptyOff"] = {"at": int(time.time()), "why": why}
@@ -560,8 +576,13 @@ class TierBook:
             else:
                 full_day += 86400.0 / self.backstop_of(iv, t, w) + (WAKE_EST_T0 if t == 0 else WAKE_EST_REST)
                 act_day += 86400.0 / max(iv, self.base_poll)
+        if self.mc and time.time() >= self._mc_off_until:
+            cyc9 = min(act_day, 86400.0 / max(1.0, self.base_poll))
+            act_calls = cyc9 + max(cyc9, act_day / MC_CHUNK)
+        else:
+            act_calls = act_day * 2.0
         out = {"scope": self.scope, "path": self.path_kind, "safe": self.safe, "active": self.active, "tiers": n,
-               "holds": holds, "fullPerDay": round(full_day, 1), "actPerDay": round(act_day, 1), "stretch": self.stretch,
+               "holds": holds, "fullPerDay": round(full_day, 1), "actPerDay": round(act_day, 1), "actCalls": round(act_calls, 1), "stretch": self.stretch,
                "gate": self.gate_t0, "basePoll": self.base_poll, "pairs": len(self.wallets), "lastCycle": self.last_cycle,
                "period": round(self.own_poll), "t0": sum(1 for w in self.wallets if self.tier(w, now)[1] <= 0
                                                        and self.period_eligible(w, self.hold_reason(w, now), now)),
@@ -569,6 +590,7 @@ class TierBook:
         if self.path_kind in ("helius", "solrpc"):
             out["solCost"] = sol_cost_day(self, now)["helius"]
             out["actPerDay"] = 0.0
+            out["actCalls"] = 0.0
         return out
 
     def save(self, force: bool = False):
@@ -606,6 +628,7 @@ class TierBook:
 
 BOOKS = {}
 ACTIVE_PROC = False
+MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
 RPC_IMPL = None
 
 
@@ -737,9 +760,22 @@ def evm_book(wt, cfg: dict, path: str) -> TierBook:
                 b.pairs.setdefault(w, {})
             b.incomplete = _evm_incomplete(wt, path)
         b.lp = bool(path == "etherscan" and _lp_chain(wt.chain))
+        b.mc = _mc_addr(cfg, wt.chain)
         BOOKS[wt.chain] = b
     start_boot([b])
     return b
+
+
+def _mc_addr(cfg: dict, chain: str):
+    cc = ((cfg or {}).get("chains") or {}).get(chain) if isinstance((cfg or {}).get("chains"), dict) else None
+    if isinstance(cc, dict) and "multicall3" in cc:
+        v = cc.get("multicall3")
+        return str(v).lower() if isinstance(v, str) and len(v) == 42 and v.startswith("0x") else None
+    try:
+        import recon
+        return str(recon.MULTICALL3_BY_CHAIN.get(chain, recon.MULTICALL3)).lower()
+    except Exception:
+        return MULTICALL3
 
 
 def _lp_chain(chain: str) -> bool:
@@ -808,7 +844,28 @@ def evm_activity(wt, tb: TierBook, deadline: float = None) -> int:
         targets = tb.activity_targets()
         if targets and time.time() < deadline:
             head = int(call("eth_blockNumber", []), 16) - int(getattr(wt, "conf_depth", 0) or 0)
-            for w in targets:
+            todo = list(targets)
+            if tb.mc and time.time() >= tb._mc_off_until:
+                import evm_watch
+                done9 = set()
+                for i9 in range(0, len(todo), MC_CHUNK):
+                    if time.time() > deadline:
+                        break
+                    part = todo[i9:i9 + MC_CHUNK]
+                    try:
+                        r9 = call("eth_call", [{"to": tb.mc, "data": evm_watch.RpcChainWatcher._mc_encode(part, tb.mc)}, hex(head)])
+                        bals = evm_watch.RpcChainWatcher._mc_decode(r9, len(part), None)
+                    except Exception as e:
+                        import bf_engine
+                        if isinstance(e, ValueError) or bf_engine.revert_like(e):
+                            tb._mc_off_until = time.time() + MC_OFF_SEC
+                            log.info("%s 활동 점검: Multicall3 응답 이상(%s) — 하루 동안 쌍별 조회", tb.scope, str(e)[:60])
+                        break
+                    for w, bl in zip(part, bals):
+                        tb.note_activity(w, None, bl, head)
+                        done9.add(w)
+                todo = [w for w in todo if w not in done9]
+            for w in todo:
                 if time.time() > deadline:
                     break
                 try:
@@ -1326,7 +1383,7 @@ def estimate(summaries: list, cfg: dict, es_other_day: float = 0.0, extra: list 
         else:
             add(f"{path}:{scope}", fulls * per + 86400.0 / poll)
         if s.get("actPerDay"):
-            add(f"rpc:{scope}", float(s["actPerDay"]) * 2.0)
+            add(f"rpc:{scope}", float(s["actCalls"]) if isinstance(s.get("actCalls"), (int, float)) else float(s["actPerDay"]) * 2.0)
     for scope, path, poll, npairs in extra or []:
         per = per_check_calls(path)
         prov = "etherscan" if path == "etherscan" else "helius" if path == "helius" else f"{path}:{scope}"
@@ -1463,7 +1520,8 @@ def web_view(cfg: dict, add_n: int = 0, add_chains=None, now: float = None) -> d
             full = float(p.get("full") or 0)
             hold = p.get("hold")
             addrs.setdefault(k, []).append({
-                "c": sc, "t": int(p.get("tier") or 0), "h": (str(hold).split(":")[0] if hold else None),
+                "c": sc, "t": min(max(int(p.get("tier") or 0), 0), len(st["steps"]) - 1),
+                "h": (str(hold).split(":")[0] if hold else None),
                 "full": int(full) or None, "sent": p.get("sent"),
                 "nextAct": int(act + iv) if iv and act else None, "nextFull": int(full + bs) if bs and full else None,
                 "wake": bool(p.get("wake")),
@@ -1530,7 +1588,7 @@ def _hl_today(now: float = None) -> dict:
         es9 = (cfg9 or {}).get("etherscan") or {}
         burst9 = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
         keep9 = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
-        r9 = bf_engine.ledger_rooms("helius_budget", b, burst9, keep9, now, floor=bf_engine.helius_head_min(cfg9))
+        r9 = bf_engine.ledger_rooms("helius_budget", b, burst9, keep9, now, floor=bf_engine.helius_head_min(cfg9), flex=bf_engine.helius_flex(cfg9))
         if not r9.get("off"):
             out.update(head=r9["nh"], rt=r9["rt"], fillLeft=max(0, int(r9["fill"])), fillFirst=bool(r9["fillFirst"]))
     except Exception:
@@ -1551,24 +1609,91 @@ def _hl_today(now: float = None) -> dict:
 
 
 _REQ_LOCK = threading.Lock()
+WAKE_GAP_SEC = 600
+
+
+def _req_read() -> dict:
+    try:
+        d = common.read_json(req_path(), {})
+    except SystemExit:
+        d = {}
+    r = d.get("reqs") if isinstance(d, dict) and isinstance(d.get("reqs"), dict) else {}
+    return {k: v for k, v in r.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+
+
+def _req_update(fn, wait: float = 10.0) -> object:
+    import fcntl
+    p = req_path()
+    if not _REQ_LOCK.acquire(timeout=wait):
+        raise TimeoutError("요청 파일 잠금 대기 초과")
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p + ".lock", "a") as lf:
+            t_end = time.monotonic() + wait
+            while True:
+                try:
+                    fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= t_end:
+                        raise TimeoutError("요청 파일 잠금 대기 초과")
+                    time.sleep(0.05)
+            now = int(time.time())
+            reqs = {k: v for k, v in _req_read().items() if now - v < 2 * 86400}
+            res = fn(reqs)
+            if res:
+                if len(reqs) > 2000:
+                    reqs = dict(sorted(reqs.items(), key=lambda kv: -kv[1])[:2000])
+                common.atomic_write_json(p, {"v": 1, "reqs": reqs, "updatedAt": now})
+            return res
+    finally:
+        _REQ_LOCK.release()
 
 
 def request_check(address: str = None) -> dict:
-    with _REQ_LOCK:
-        return _request_check_locked(address)
-
-
-def _request_check_locked(address: str = None) -> dict:
-    now = int(time.time())
-    p = req_path()
-    d = common.read_json(p, {})
-    reqs = dict(d.get("reqs") or {}) if isinstance(d, dict) and isinstance(d.get("reqs"), dict) else {}
-    reqs = {k: v for k, v in reqs.items() if isinstance(v, (int, float)) and now - v < 2 * 86400}
     key = "*" if not address else f"*:{address}"
-    if now - int(reqs.get(key) or 0) < 30:
-        return {"ok": True, "same": True, "key": key}
-    reqs[key] = now
-    if len(reqs) > 2000:
-        reqs = dict(sorted(reqs.items(), key=lambda kv: -kv[1])[:2000])
-    common.atomic_write_json(p, {"v": 1, "reqs": reqs, "updatedAt": now})
-    return {"ok": True, "key": key, "at": now}
+    out = {}
+
+    def fn(reqs):
+        now = int(time.time())
+        if now - int(reqs.get(key) or 0) < 30:
+            out.update(ok=True, same=True, key=key)
+            return False
+        reqs[key] = now
+        out.update(ok=True, key=key, at=now)
+        return True
+    try:
+        _req_update(fn)
+    except TimeoutError:
+        return {"ok": False, "error": "다른 요청을 저장하는 중이에요 — 잠시 뒤 다시 눌러 주세요"}
+    return out
+
+
+def request_wake(items, min_gap: float = WAKE_GAP_SEC) -> dict:
+    want = []
+    for sc, a in items or ():
+        a = str(a or "").strip()
+        if not a:
+            continue
+        if a[:2].lower() == "0x":
+            a = a.lower()
+        k = f"{str(sc or '*')}:{a}"
+        if k not in want:
+            want.append(k)
+    if not want:
+        return {"ok": True, "added": []}
+    now0 = int(time.time())
+    r0 = _req_read()
+    if all(now0 - int(r0.get(k) or 0) < min_gap for k in want):
+        return {"ok": True, "added": [], "same": len(want)}
+
+    def fn(reqs):
+        now = int(time.time())
+        add = [k for k in want if now - int(reqs.get(k) or 0) >= min_gap]
+        for k in add:
+            reqs[k] = now
+        return add
+    try:
+        return {"ok": True, "added": _req_update(fn, wait=2.0) or []}
+    except TimeoutError:
+        return {"ok": False, "added": []}

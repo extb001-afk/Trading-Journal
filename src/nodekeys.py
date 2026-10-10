@@ -8,7 +8,8 @@ import common
 
 SHARES = (10, 25, 50, 80)
 FREE_PCT = 80
-BURST_X = 3
+BURST_X = 10
+FRESH_EXTRA = ("helius",)
 PAID_DEFAULT_SHARE = 10
 PLANS_KEY = "node_plans"
 
@@ -172,11 +173,17 @@ def fresh_day(p: str):
         return None
     if _FRESH_CACHE["key"] != key:
         try:
-            pl = plans()
+            st9 = common.read_json(path, {}) or {}
+            pl = plans(st9 if isinstance(st9, dict) else {})
         except Exception:
             return None
-        _FRESH_CACHE["v"] = {q: (fresh_day_num(v.get("fresh_since")) if v.get("plan") != "paid" and not PROVIDERS[q]["paid_only"] else None)
-                             for q, v in pl.items()}
+        v9 = {q: (fresh_day_num(v.get("fresh_since")) if v.get("plan") != "paid" and not PROVIDERS[q]["paid_only"] else None)
+              for q, v in pl.items()}
+        raw9 = st9.get(PLANS_KEY) if isinstance(st9, dict) and isinstance(st9.get(PLANS_KEY), dict) else {}
+        for q in FRESH_EXTRA:
+            r9 = raw9.get(q) if isinstance(raw9.get(q), dict) else {}
+            v9[q] = fresh_day_num(r9.get("fresh_since"))
+        _FRESH_CACHE["v"] = v9
         _FRESH_CACHE["key"] = key
     return _FRESH_CACHE["v"].get(p)
 
@@ -187,7 +194,8 @@ def budget_spec(p: str, plan: dict) -> dict:
         month, pct = (plan["month"] or meta["free_month"]), plan["share"]
     else:
         month, pct = meta["free_month"], FREE_PCT
-    spec = {"hosts": list(meta["hosts"]), "unit": meta["unit"], "month": int(month), "pct": float(pct)}
+    spec = {"hosts": list(meta["hosts"]), "unit": meta["unit"], "month": int(month), "pct": float(pct),
+            "window": True}
     if plan["plan"] != "paid" and not meta["paid_only"]:
         spec["burst"] = float(BURST_X)
         spec["svc"] = p
@@ -302,4 +310,24 @@ def status(env: dict = None, settings: dict = None) -> dict:
         out[p]["burstX"] = sp.get("burst") or 1
         out[p]["freshSince"] = pl[p].get("fresh_since")
         out[p]["bursting"] = bool(sp.get("burst")) and out[p]["usedToday"] > out[p]["perDay"]
+        if sp.get("burst"):
+            out[p].update(_flex_view(p, sp))
     return out
+
+
+def _flex_view(p: str, sp: dict) -> dict:
+    try:
+        import time as _t
+        import bf_engine
+        now = _t.time()
+        per = float(sp["month"]) / bf_engine.RPC_DAY_MONTH_DAYS
+        n_day = max(1, int(per * float(sp["pct"]) / 100.0))
+        cap = int(float(sp["month"]) * float(sp["pct"]) / 100.0)
+        d = os.path.join(common.quota_dir(), f"rpc_day_node_{p}")
+        L = bf_engine.es_ledger_read(now, d=d)
+        r = bf_engine.node_day_lims(d, now, n_day, float(sp["burst"]), cap, int(L["n"]), int(L["nh"]), fresh_day(p))
+        if r.get("bad"):
+            return {}
+        return {"rtDay": int(r.get("rt") or 0), "burstCap": int(r.get("burst") or 0)}
+    except Exception:
+        return {}

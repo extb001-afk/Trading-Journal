@@ -371,11 +371,18 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
     disc_on = bool(st.get("disc")) and (cfg.get("token_discovery") or {}).get("enabled") is not False
     disc_rr = dict((prev or {}).get("discRr") or {})
     disc_unseen = set()
+    excl_keys = set()
     dstate, disc_due, disc_n, dplan = {}, [], 0, {}
+    dexb9, _mr9 = [0], 0.0
     if disc_on:
         try:
             import token_discovery as _td
             dstate = _td.load_state()
+            dexb9 = [_td.HOLD_DEX_MAX]
+            try:
+                _mr9 = float(((cfg.get("price_guard") or {}).get("min_reserve_usd", _td.DS_MIN_RESERVE)))
+            except (TypeError, ValueError):
+                _mr9 = _td.DS_MIN_RESERVE
         except Exception as e:
             disc_on = False
             errors.append(f"토큰 발견 상태 읽기 실패: {common.safe_err(e)[:60]}")
@@ -409,6 +416,7 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                 seen_ca.add(ca)
                 continue
             if gid in skip_gids:
+                excl_keys.add(f"{ch}:{w}:{ca}")
                 continue
             px = float(live_px.get(gid) or 0)
             if px <= 0:
@@ -423,17 +431,60 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                 seen_ca.add(ca)
         if disc_on:
             led_cas9 = {str(v[2]).lower() for v in rows.values() if v[1] == "token" and v[2]}
+            led_skip9 = {str(v[2]).lower() for v in rows.values() if v[1] == "token" and v[2] and v[5] in skip_gids}
             ent9 = ((dstate.get("pairs") or {}).get(f"{ch}:{w}") or {})
             cand9 = []
+            hold9, led9 = [], []
             for ca9, ss9 in sorted((ent9.get("cas") or {}).items()):
                 m9 = (ent9.get("meta") or {}).get(ca9) or {}
                 sk9 = (ent9.get("skip") or {}).get(ca9)
-                if ca9 in led_cas9 or ca9 in seen_ca or (sk9 is not None and _td.skip_final(sk9)) or not m9.get("px"):
+                if ca9 in seen_ca:
+                    continue
+                if ca9 in led_skip9 or (sk9 is not None and _td.skip_final(sk9)):
+                    excl_keys.add(f"{ch}:{w}:{ca9}")
+                    continue
+                rj9 = bool(sk9 is None and m9.get("dexAt") and m9.get("px"))
+                if sk9 is not None or (rj9 and t0 - float(m9.get("dexAt") or 0) >= _td.PX_MAX_AGE):
+                    hold9.append((ca9, ss9, dict(m9, _stale=True) if sk9 is None else m9))
+                    continue
+                if ca9 in led_cas9:
+                    if rj9:
+                        led9.append((ca9, ss9, m9))
+                    continue
+                if not m9.get("px"):
                     continue
                 ok9, _why9 = _td.static_credible(ch, ca9, ss9, m9)
                 if ok9 is False:
+                    excl_keys.add(f"{ch}:{w}:{ca9}")
                     continue
                 cand9.append((ca9, m9))
+            if hold9 or led9:
+                hc9 = {x9[0] for x9 in hold9}
+                try:
+                    hold9 = _td.rejudge_hold(ch, w, hold9, _mr9, budget=dexb9) if hold9 else []
+                    excl_keys |= {f"{ch}:{w}:{c9}" for c9 in hc9 - {x9[0] for x9 in hold9}}
+                except Exception as e:
+                    hold9 = [(ca9, ss9, {k9: v9 for k9, v9 in m9.items() if k9 != "_stale" and not (k9 == "px" and m9.get("_stale"))})
+                             for ca9, ss9, m9 in hold9]
+                    if len(errors) < 20:
+                        errors.append(f"토큰 재판정 {ch}:{w[:8]}: {common.safe_err(e)[:60]}")
+                for ca9, ss9, m9 in hold9 + led9:
+                    if _td.static_credible(ch, ca9, ss9, m9)[0] is False:
+                        excl_keys.add(f"{ch}:{w}:{ca9}")
+                        continue
+                    if not m9.get("px"):
+                        disc_unseen.add(f"{ch}:{w}:{ca9}")
+                        continue
+                    if ca9 not in led_cas9:
+                        cand9.append((ca9, m9))
+                        continue
+                    row9 = next((v9 for v9 in rows.values() if v9[1] == "token" and str(v9[2] or "").lower() == ca9), None)
+                    if row9 is None or row9[5] in skip_gids:
+                        continue
+                    items.append(("token", ca9, row9[0], int(row9[4]) if row9[4] is not None else m9.get("dec"), float(m9["px"]),
+                                  row9[3] or m9.get("sym") or ca9[:10], row9[5]))
+                    seen_ca.add(ca9)
+                cand9.sort(key=lambda x: x[0])
             per9 = max(0, int(st.get("disc_per_pair") or 0))
             rr9 = None
             dix9 = len(items)
@@ -669,6 +720,9 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             m9.pop("ledgerFixed", None)
             _recheck_carried(m9, led if pr9 in evm_pairs else (led_sol if sol_urls and pr9[0] == "sol" else None), st)
             found.append(m9)
+    if excl_keys:
+        found = [m for m in found if str(m.get("key") or "") not in excl_keys]
+        pending = {k: v for k, v in pending.items() if k not in excl_keys}
     if fresh:
         fr9 = {(c9, str(w9).lower()) for c9, w9 in fresh}
         found = [m for m in found if (m.get("chain"), str(m.get("wallet") or "").lower()) not in fr9]

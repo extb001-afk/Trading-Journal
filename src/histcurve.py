@@ -15,6 +15,8 @@ import xparts
 log = common.setup_logging("tj-web")
 
 KST = timezone(timedelta(hours=9))
+XQ_X_KEYS = {"upbit": ("ku", "ub"), "bithumb": ("kb",)}
+LQ_V = 1
 HIST_V = 1
 FLOW_V = 3
 FIRST_DAY = "2026-01-01"
@@ -326,9 +328,19 @@ def curve_first_day(groups, xsrc, floor_ts, today_iso) -> str:
     return min(day, today_iso)
 
 
+def disc_fp(G) -> str:
+    n, tot, mx = 0, 0.0, 0
+    for g in (G or {}).values():
+        for t9, q9 in ((g.get("disc_tl") or ()) if isinstance(g, dict) else ()):
+            n += 1
+            tot += float(q9)
+            mx = max(mx, int(t9))
+    return f"{n}:{tot:.8f}:{mx}" if n else ""
+
+
 def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, override_px, live_px, pairs, transit,
              extra, daily_rows, daily_cache, stable_syms=None, first_day=None, flow_kit=None, neg_ok=None, xkit=None, rb_days=None,
-             first_floor=None):
+             first_floor=None, xq=None, xq_base=None):
     stable_syms = stable_syms or STABLE_SYMS
     groups = {}
     for gid, g in G.items():
@@ -341,6 +353,8 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
         groups[gid] = dict(group_desc(gid, g, ca_gids, ex_gid, major_gids, override_px, pairs, stable_syms),
                            skip=gid in (skip_gids or ()), lp=float(live_px.get(gid) or 0), hold=float(hq or 0),
                            tl=sorted((int(ts), float(dq)) for ts, dq in tl))
+        if g.get("lp_tl"):
+            groups[gid]["lpt"] = sorted((int(ts), float(dq)) for ts, dq in g["lp_tl"])
         if neg_ok and gid in neg_ok:
             groups[gid]["neg"] = True
     n = len(daily_rows or ())
@@ -383,8 +397,18 @@ def make_kit(today_iso, G, hold_qty, skip_gids, ca_gids, ex_gid, major_gids, ove
         dcv[iso] = [v9, round(v9 * u9) if u9 > 0 else None, ap9, "dc", round(float(c.get("est") or 0) + float(c.get("xc") or 0), 2) if ap9 else 0]
     if not first_day:
         first_day = curve_first_day(groups, xk.get("src"), first_floor, today_iso)
+    lpo = {}
+    for iso9, v9 in ((xk.get("days") or {}).items() if isinstance(xk.get("days"), dict) else ()):
+        try:
+            t9 = xparts.rest_obs_at((v9 or {}).get("p"), day_end(iso9) - 1, (v9 or {}).get("ts"))
+        except (TypeError, ValueError):
+            continue
+        if t9 is not None:
+            lpo[iso9] = t9
     return {
-        "v": HIST_V, "today": today_iso, "first": first_day, "groups": groups,
+        "v": HIST_V, "today": today_iso, "first": first_day, "groups": groups, "lpo": lpo,
+        "dq": disc_fp({gid9: g9 for gid9, g9 in G.items() if gid9 not in (skip_gids or ())}),
+        "xq": xq, "xqb": xq_base if xq_base is not None else xq,
         "transit": [(e["gid"], int(e["ts"]), float(e["qty"])) for e in (transit or ())],
         "xk": xk, "dcv": dcv,
         "daily": rows, "made": time.time(), "fk": flow_kit,
@@ -396,10 +420,12 @@ def rewind(kit, days):
     tr = {}
     for gid, ts, q in kit.get("transit") or ():
         tr.setdefault(gid, []).append((ts, q))
+    lpo = kit.get("lpo") or {}
     out = {}
     for gid, g in kit["groups"].items():
         q = g["hold"]
         tl = g["tl"]
+        lpt = g.get("lpt") or ()
         j = len(tl) - 1
         res = {}
         for e, d in ends:
@@ -407,6 +433,8 @@ def rewind(kit, days):
                 q -= tl[j][1]
                 j -= 1
             qq = q - sum(tq for t9, tq in tr.get(gid, ()) if e < t9)
+            if lpt and d in lpo:
+                qq += sum(dq for t9, dq in lpt if t9 > lpo[d])
             if qq > EPS or (g.get("neg") and qq < -EPS):
                 res[d] = qq
         if res:
@@ -986,6 +1014,8 @@ class HistCurve:
         s = dict(self.st.get("s") or {})
         f = dict(self.st.get("f") or {})
         xs = dict(self.st.get("x") or {})
+        dqd = dict(self.st.get("dqd") or {})
+        xqd = dict(self.st.get("xqd") or {})
         win = set()
         for row9 in kit.get("daily") or ():
             iso, usd, krw, ap, _u, apu = row9[:6]
@@ -999,6 +1029,9 @@ class HistCurve:
             if d.get(iso) != v:
                 d[iso] = v
                 rep["adopted"] += 1
+            dqd[iso] = kit.get("dq") or ""
+            if kit.get("xq") is not None:
+                xqd[iso] = kit["xq"]
         first = kit.get("first") or FIRST_DAY
         oldest = min(win) if win else today
         last_hc = (datetime.strptime(oldest, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1010,6 +1043,52 @@ class HistCurve:
                 xs.pop(iso, None)
             for iso in [k for k in f if k >= dirty9[0] and k not in win and k < today]:
                 f.pop(iso, None)
+        lqfix9 = []
+        lpo9 = kit.get("lpo") or {}
+        kdq9 = kit.get("dq") or ""
+        dcv9 = kit.get("dcv") or {}
+        rr_now9 = ",".join(sorted(str(g9) for g9, v9 in (kit.get("groups") or {}).items() if v9.get("skip")))
+        rr_prev9 = (self.st.get("meta") or {}).get("rr")
+        rr_chg9 = ({int(x9) for x9 in (set(str(rr_prev9).split(",")) ^ set(rr_now9.split(","))) if x9.lstrip("-").isdigit()}
+                   if isinstance(rr_prev9, str) and rr_prev9 != rr_now9 else set())
+        rr_q9 = {}
+        if rr_chg9:
+            out9 = [k9 for k9 in d if k9 not in win and k9 < today]
+            if out9:
+                kit_c9 = dict(kit, groups={g9: v9 for g9, v9 in (kit.get("groups") or {}).items() if g9 in rr_chg9})
+                rr_q9 = rewind(kit_c9, out9)
+        lpt9 = [g9["lpt"] for g9 in (kit.get("groups") or {}).values() if g9.get("lpt") and not g9.get("skip")]
+        kxq9 = kit.get("xq")
+        kxs9 = {e9 for e9 in str(kxq9 or "").split(",") if e9}
+
+        def xq_more9(have9):
+            return kxq9 is not None and bool(kxs9 - {e9 for e9 in str(have9 if have9 is not None else (kit.get("xqb") or "")).split(",") if e9})
+        for iso in sorted(d):
+            r9 = d[iso]
+            if iso in win or iso >= today or not (isinstance(r9, list) and len(r9) >= 4):
+                continue
+            c9 = s.get(iso) if isinstance(s.get(iso), list) else []
+            if r9[3] in ("hc", "hp"):
+                lp_mark9, dq_ok9 = c9[5:6] == [LQ_V], (c9[6] if len(c9) > 6 else "") == kdq9
+                xq_need9 = xq_more9(c9[7] if len(c9) > 7 else None)
+            elif r9[3] == "dc" and iso not in dcv9:
+                lp_mark9, dq_ok9 = False, (dqd.get(iso) or "") == kdq9
+                xq_need9 = xq_more9(xqd.get(iso))
+            else:
+                continue
+            lp_need9 = (not lp_mark9 and iso in lpo9 and any(t9 > lpo9[iso] and abs(dq9) > EPS for tl9 in lpt9 for t9, dq9 in tl9))
+            rr_need9 = any(iso in qd9 for qd9 in rr_q9.values())
+            if lp_need9 or not dq_ok9 or rr_need9 or xq_need9:
+                lqfix9.append(iso)
+        for iso in lqfix9:
+            d.pop(iso, None)
+            s.pop(iso, None)
+            xs.pop(iso, None)
+            dqd.pop(iso, None)
+            xqd.pop(iso, None)
+        if lqfix9:
+            log.warning("장기 곡선: LP 위치 레그·발견 시점 기초 잔고·격리 전환 보정 — 옛 되감기로 동결된 날 %d일(%s~%s) 다시 계산(1회)", len(lqfix9), lqfix9[0], lqfix9[-1])
+        rep["lqfix"] = lqfix9
         rep["vblk"] = 0
         for k9, e9 in list((self.px.get("specs") or {}).items()):
             if not isinstance(e9, dict) or not isinstance(e9.get("p"), dict) or not e9["p"]:
@@ -1107,7 +1186,7 @@ class HistCurve:
                 if not day_final(iso):
                     row = self._row(v9["cov"][0], v9["cov"][1], v9["xr"], self.fx(iso), "hp")
                 d[iso] = row
-                s[iso] = v9["cov"]
+                s[iso] = list(v9["cov"])[:5] + [LQ_V, kit.get("dq") or "", kit.get("xq")]
                 xs[iso] = v9["xr"]
                 rep["computed"] += 1
             if overlap:
@@ -1130,9 +1209,16 @@ class HistCurve:
         self.progress["calls"] = meta["calls"]
         meta.update(pending=bool(self.pending), progress={k9: v9 for k9, v9 in self.progress.items() if k9 != "calls"},
                     flow_pending=bool(self.flow_pending))
+        meta["rr"] = rr_now9
+        for iso in [k9 for k9 in dcv9 if isinstance(d.get(k9), list) and len(d[k9]) >= 4 and d[k9][3] == "dc"]:
+            dqd[iso] = kdq9
+            if kxq9 is not None:
+                xqd[iso] = kxq9
         xs = {k9: v9 for k9, v9 in xs.items() if k9 in d and isinstance(d[k9], list) and len(d[k9]) >= 4 and d[k9][3] in ("hc", "hp")}
         with self.lock:
-            self.st = {"_v": HIST_V, "d": d, "s": s, "f": f, "fv": FLOW_V, "meta": meta, "x": xs}
+            self.st = {"_v": HIST_V, "d": d, "s": s, "f": f, "fv": FLOW_V, "meta": meta, "x": xs,
+                       "dqd": {k9: v9 for k9, v9 in dqd.items() if isinstance(d.get(k9), list) and len(d[k9]) >= 4 and d[k9][3] == "dc"},
+                       "xqd": {k9: v9 for k9, v9 in xqd.items() if isinstance(d.get(k9), list) and len(d[k9]) >= 4 and d[k9][3] == "dc"}}
         common.atomic_write_json(self.path, self.st)
         if rep["fetched"] or rep["calls"] or rep.get("vblk"):
             common.atomic_write_json(self.px_path, self.px)
@@ -1389,7 +1475,7 @@ class HistCurve:
                 redo.append(iso)
                 continue
             xs[iso] = xr
-            s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]]
+            s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]] + cov[5:8]
             d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), r[3])
             n += 1
         if redo:
@@ -1399,7 +1485,7 @@ class HistCurve:
                 cov = s[iso]
                 xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=xs.get(iso), qcache=qc9)
                 xs[iso] = xr
-                s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]]
+                s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]] + cov[5:8]
                 d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), d[iso][3])
                 n += 1
         for iso, row in sorted((kit.get("dcv") or {}).items()):
@@ -1451,7 +1537,25 @@ class HistCurve:
         for iso in days:
             priced, miss, n_miss = acc[iso]
             fx = self.fx(iso)
-            xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=st_x.get(iso), qcache=qc9)
+            old9 = st_x.get(iso)
+            if isinstance(old9, dict) and isinstance(old9.get("p"), dict) and kit.get("xq") is not None:
+                st9 = self.st or {}
+                row9 = (st9.get("d") or {}).get(iso) or []
+                cov9 = (st9.get("s") or {}).get(iso) or []
+                have9 = ((st9.get("xqd") or {}).get(iso) if (isinstance(row9, list) and len(row9) > 3 and row9[3] == "dc")
+                         else (cov9[7] if isinstance(cov9, list) and len(cov9) > 7 else None))
+                if have9 is None:
+                    have9 = kit.get("xqb")
+                nx9 = {e9 for e9 in str(kit["xq"] or "").split(",") if e9} - {e9 for e9 in str(have9 or "").split(",") if e9}
+                if nx9:
+                    pin9 = dict(old9["p"])
+                    for ex9 in nx9:
+                        for key9 in XQ_X_KEYS.get(ex9, ()):
+                            v9 = pin9.get(key9)
+                            if isinstance(v9, (list, tuple)) and len(v9) >= 2 and v9[1] in ("carry", "zero"):
+                                pin9.pop(key9, None)
+                    old9 = dict(old9, p=pin9)
+            xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=old9, qcache=qc9)
             out[iso] = {"row": self._row(priced, miss, xr, fx, "hc"),
                         "cov": [round(priced, 2), round(miss, 2), xr["xc"], n_miss, xr["cut"]], "x": xr["x"], "xr": xr}
         return out

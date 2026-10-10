@@ -31,6 +31,9 @@ AN_PAGES = 5
 LOGS_MAX_CALLS = 600
 JOB_MAX_SEC = 900.0
 RETRY_FAIL_SEC = 6 * 3600
+HOLD_RETRY_SEC = 3600
+HOLD_DEX_MAX = 20
+PX_MAX_AGE = 6 * 3600
 ANKR_ADV_CREDITS = 700
 ALCHEMY_FALLBACK = {"hosts": ["*.g.alchemy.com"], "unit": "cu", "month": 30_000_000, "pct": 80.0, "cu": 26, "cu_heavy": 26,
                     "cu_methods": {"alchemy_getTokenBalances": 20, "eth_getLogs": 60, "eth_call": 26, "eth_getBalance": 20}}
@@ -688,7 +691,7 @@ def static_credible(chain: str, ca: str, srcs, m: dict, strict=None, confirmed=f
     return None, ""
 
 
-def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=time.sleep) -> dict:
+def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=time.sleep, retries: int = 2) -> dict:
     import pricing
     net = pricing.DS_CHAIN.get(chain)
     out = {}
@@ -698,7 +701,7 @@ def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=
     for i in range(0, len(lst), 30):
         batch = lst[i:i + 30]
         try:
-            d = _http(f"https://api.dexscreener.com/tokens/v1/{net}/{','.join(batch)}", retries=2)
+            d = _http(f"https://api.dexscreener.com/tokens/v1/{net}/{','.join(batch)}", retries=retries)
         except SourceFail:
             continue
         if isinstance(d, dict):
@@ -733,6 +736,9 @@ def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=
                 out[a] = (False, 0.0, None, None)
         sleep(0.5)
     return out
+
+
+_DEX_IMPL = dex_check
 
 
 def ledger_genuine(conn, chain: str, strict=None) -> set:
@@ -922,6 +928,122 @@ def skip_final(reason) -> bool:
     return not any(str(reason or "").startswith(t) for t in TRANSIENT_SKIP)
 
 
+def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_MIN_RESERVE, budget: list = None,
+                 now: float = None, dex=None) -> list:
+    import pricing
+    import spamguard
+    now = time.time() if now is None else float(now)
+    its = []
+    for ca, ss, m in items:
+        m = dict(m or {})
+        stale = bool(m.pop("_stale", False))
+        if stale:
+            m.pop("px", None)
+        its.append((ca, ss, m, stale))
+    due = [ca for ca, _s, m, _st in its if now - float(m.get("dexAt") or 0) >= HOLD_RETRY_SEC]
+    if budget is not None and budget[0] <= 0:
+        due = []
+    if not due and not any(st9 for _c, _s, _m, st9 in its):
+        return [(ca, ss, m) for ca, ss, m, _st in its]
+    ds_ok = chain in pricing.DS_CHAIN
+    got = {}
+    if ds_ok and due:
+        fn = dex or dex_check
+        kw = {"retries": 1} if fn is _DEX_IMPL else {}
+        tried = []
+        for i9 in range(0, len(due), 30):
+            if budget is not None and budget[0] <= 0:
+                break
+            part = due[i9:i9 + 30]
+            if budget is not None:
+                budget[0] -= 1
+            tried += part
+            try:
+                g9 = fn(chain, part, min_reserve, **kw) or {}
+            except Exception:
+                g9 = {}
+            got.update(g9)
+            if not g9:
+                if budget is not None:
+                    budget[0] = 0
+                break
+        due = tried
+    res, out = {}, []
+    for ca, ss, m, stale in its:
+        if ca not in due:
+            if stale:
+                res[ca] = ({}, "일시 보류 — 시세 갱신 대기", True)
+            out.append((ca, ss, m))
+            continue
+        upd = {"dexAt": int(now)}
+        g = got.get(ca)
+        ok, why = static_credible(chain, ca, ss, m)
+        syms = [x for x in (m.get("sym"), g[3] if g and len(g) > 3 else None) if x and str(x).strip()]
+        bad = why if ok is False else ""
+        for sy in syms:
+            bad = bad or scam_name(sy) or ("대표 심볼 흉내(정품 주소 아님)" if spamguard.fake_major(sy, [(chain, ca)]) else "")
+        if bad:
+            sk = bad
+        elif ok:
+            sk = None
+        elif not ds_ok:
+            sk = "판정 불가 체인(덱스 미지원) — 정품 목록 밖이라 앵커 안 함"
+        elif g is None:
+            sk = False
+        elif not syms:
+            sk = "심볼 모름 — 앵커 안 함"
+        elif g[0]:
+            sk = None
+        else:
+            sk = "유동성 부족 — 스팸 의심"
+        if g and sk is None:
+            try:
+                px9 = float(g[2] or 0)
+            except (TypeError, ValueError):
+                px9 = 0.0
+            if 0 < px9 < float("inf"):
+                upd["px"] = px9
+            if syms and not m.get("sym"):
+                upd["sym"] = str(syms[0])
+        m.update(upd)
+        if sk is None:
+            try:
+                px8 = float(m.get("px") or 0)
+            except (TypeError, ValueError):
+                px8 = 0.0
+            if not (0 < px8 < float("inf")):
+                sk = False
+        drop = False
+        if sk is False and stale:
+            sk, drop = "일시 보류 — 시세 갱신 대기", True
+        res[ca] = (upd, sk, drop)
+        if sk is None or sk is False or (drop and not skip_final(sk)):
+            out.append((ca, ss, m))
+
+    def _fn(cur, k9=pair_key(chain, wallet), res=res):
+        e9 = (cur.get("pairs") or {}).get(k9)
+        if not isinstance(e9, dict):
+            return cur
+        for ca9, (upd9, sk9, drop9) in res.items():
+            if ca9 not in (e9.get("cas") or {}):
+                continue
+            m9 = e9.setdefault("meta", {}).setdefault(ca9, {})
+            m9.update(upd9)
+            if drop9:
+                m9.pop("px", None)
+            s9 = e9.setdefault("skip", {})
+            if sk9 is None:
+                s9.pop(ca9, None)
+            elif sk9 is not False:
+                s9[ca9] = sk9
+        return cur
+    try:
+        update_state(_fn)
+    except OSError:
+        pass
+    return out
+
+
 def _ok_sources(ext: dict, wl: str) -> list:
     return list(((ext.get("ok") or {}).get(wl) or {}).keys())
 
@@ -931,7 +1053,25 @@ def save_result(chain: str, wallet: str, r: dict, sig: dict, why: str = "", skip
 
     def fn(cur):
         old = (cur.get("pairs") or {}).get(k) or {}
-        e = {"at": int(time.time()), "why": why, "sig": dict(sig or {}), "cas": r.get("cas") or {}, "meta": r.get("meta") or {},
+        cas9, meta9 = dict(r.get("cas") or {}), {k9: dict(v9) for k9, v9 in (r.get("meta") or {}).items() if isinstance(v9, dict)}
+        om9 = old.get("meta") or {}
+        osk9 = old.get("skip") or {}
+        for ca9, ss9 in (old.get("cas") or {}).items():
+            if ca9 in osk9 and skip_final(osk9[ca9]):
+                continue
+            held9 = "recon" in (ss9 or ()) or ca9 in osk9 or bool((om9.get(ca9) or {}).get("dexAt"))
+            if held9 and ca9 not in cas9:
+                cas9[ca9] = list(ss9)
+                meta9[ca9] = dict(om9.get(ca9) or {}, **(meta9.get(ca9) or {}))
+            elif "recon" in (ss9 or ()) and "recon" not in (cas9.get(ca9) or ()):
+                cas9[ca9] = list(cas9.get(ca9) or []) + ["recon"]
+        for ca9 in cas9:
+            o9 = om9.get(ca9) or {}
+            if o9.get("dexAt"):
+                for f9 in ("px", "dexAt"):
+                    if o9.get(f9) is not None and f9 not in (meta9.get(ca9) or {}):
+                        meta9.setdefault(ca9, {})[f9] = o9[f9]
+        e = {"at": int(time.time()), "why": why, "sig": dict(sig or {}), "cas": cas9, "meta": meta9,
              "ok": r.get("ok") or {}, "fail": r.get("fail") or {}, "calls": r.get("calls") or {}, "n": len(r.get("cas") or {})}
         if skip is not None:
             e["skip"] = skip
@@ -945,7 +1085,7 @@ def save_result(chain: str, wallet: str, r: dict, sig: dict, why: str = "", skip
         pass
 
 
-def note_skip(chain: str, skips: dict) -> None:
+def note_skip(chain: str, skips: dict, meta: dict = None) -> None:
     if not skips:
         return
 
@@ -955,6 +1095,11 @@ def note_skip(chain: str, skips: dict) -> None:
             s9 = dict(e.get("skip") or {})
             s9.update(d)
             e["skip"] = dict(list(s9.items())[-500:])
+            for ca9, why9 in d.items():
+                if skip_final(why9) or ca9 in (e.get("cas") or {}) or not CA_RE.match(str(ca9)):
+                    continue
+                e.setdefault("cas", {})[ca9] = ["recon"]
+                e.setdefault("meta", {})[ca9] = dict((meta or {}).get(ca9) or {}, **((e.get("meta") or {}).get(ca9) or {}))
         return cur
     try:
         update_state(fn)
@@ -975,6 +1120,7 @@ def filter_result(bal: dict, prep: dict, ext: dict, dex=None) -> dict:
     meta_all = ext.get("meta") or {}
     src_all = ext.get("src") or {}
     bmeta = bal.get("_meta") if isinstance(bal.get("_meta"), dict) else {}
+    bmeta0 = dict(bmeta)
     keep_why, unknown = {}, {}
     skip = {str(w).lower(): dict(d) for w, d in (bal.pop("_disc_pre_skip", None) or {}).items()}
 
@@ -1092,14 +1238,32 @@ def filter_result(bal: dict, prep: dict, ext: dict, dex=None) -> dict:
     bal["_disc_keep"] = {w: d for w, d in keep_why.items() if d}
     bal["_disc"] = {"status": dict(ext.get("status") or {}), "fail": {w: sorted(f) for w, f in (ext.get("fail") or {}).items()}}
     if skip:
-        note_skip(chain, skip)
+        hm9 = {}
+        for d9 in skip.values():
+            for ca9, why9 in d9.items():
+                if skip_final(why9):
+                    continue
+                m9 = {k9: v9 for k9, v9 in (meta_all.get(ca9) or {}).items() if k9 in ("sym", "dec", "px")}
+                b9 = bmeta0.get(ca9)
+                if isinstance(b9, (tuple, list)) and len(b9) == 2:
+                    if b9[0] and not m9.get("sym"):
+                        m9["sym"] = b9[0]
+                    if b9[1] is not None and m9.get("dec") is None:
+                        m9["dec"] = b9[1]
+                hm9[ca9] = m9
+        note_skip(chain, skip, hm9)
     return bal
 
 
 def summary(cfg: dict = None, state: dict = None, env: dict = None) -> dict:
     st = load_state() if state is None else state
     pairs = st.get("pairs") or {}
+    if cfg is not None:
+        act9 = {pair_key("bsc" if w.get("type") == "bsc_rpc" else w.get("chain"), w.get("address"))
+                for w in cfg.get("wallets") or [] if w.get("type", "evm") in ("evm", "bsc_rpc") and w.get("address")}
+        pairs = {k: e for k, e in pairs.items() if k in act9}
     fb, fp, sk, done = {}, 0, 0, 0
+    hold = 0
     for k, e in pairs.items():
         if not isinstance(e, dict):
             continue
@@ -1111,7 +1275,10 @@ def summary(cfg: dict = None, state: dict = None, env: dict = None) -> dict:
             fp += 1
             for s, v in hard.items():
                 fb[s] = fb.get(s, 0) + 1
-        sk += len(e.get("skip") or {})
+        sk9 = e.get("skip") or {}
+        hd9 = sum(1 for v in sk9.values() if not skip_final(v))
+        sk += len(sk9) - hd9
+        hold += hd9
     chains = {}
     noold = []
     env = _env() if env is None else env
@@ -1123,4 +1290,4 @@ def summary(cfg: dict = None, state: dict = None, env: dict = None) -> dict:
         chains[c] = old_status(c, cfg, env)
         if chains[c] in ("none", "nokey"):
             noold.append(c)
-    return {"pairs": len(pairs), "done": done, "failPairs": fp, "failBy": fb, "skip": sk, "chains": chains, "noOld": sorted(noold)}
+    return {"pairs": len(pairs), "done": done, "failPairs": fp, "failBy": fb, "skip": sk, "hold": hold, "chains": chains, "noOld": sorted(noold)}

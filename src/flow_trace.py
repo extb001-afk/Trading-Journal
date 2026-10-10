@@ -677,7 +677,7 @@ class Scanner:
             except bf_engine.NetError as e:
                 raise xm.Paused("이더스캔 간격 대기 초과 — 다음 주기에 이어서") from e
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
+                return json.loads(common.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
                 raise xm.Paused(f"{netpace.host_of(url)} 429")

@@ -22,13 +22,14 @@ sf = NK.budget_spec("ankr", {"plan": "free", "share": 10, "month": None})
 sp = NK.budget_spec("ankr", {"plan": "paid", "share": 25, "month": 100_000_000})
 sq = NK.budget_spec("quicknode", NK.plans({})["quicknode"])
 sa = NK.budget_spec("alchemy", NK.plans({})["alchemy"])
-check("B1a 무료 = 버스트 배수 3(상수 하나 — nodekeys.BURST_X)", getattr(NK, "BURST_X", None) == 3 and sf.get("burst") == 3 and sa.get("burst") == 3, (sf, sa))
+check("B1a 무료 = 버스트 배수 10(열흘치 · 상수 하나 — nodekeys.BURST_X)", getattr(NK, "BURST_X", None) == 10 and sf.get("burst") == 10 and sa.get("burst") == 10, (sf, sa))
 check("B1b 유료·QuickNode(유료만) = 버스트 없음(남의 키 보호)", "burst" not in sp and "burst" not in sq, (sp, sq))
 
-SPEC = {"hosts": ["*.burst-test.invalid"], "unit": "cu", "month": 3100, "pct": 80.0, "cu": 20, "cu_heavy": 20, "cu_methods": {}, "burst": 3.0}
+SPEC = {"hosts": ["*.burst-test.invalid"], "unit": "cu", "month": 3100, "pct": 80.0, "cu": 20, "cu_heavy": 20, "cu_methods": {}, "burst": 10.0}
 NAME = "node_bt"
 HOST = "rpc.burst-test.invalid"
 DAY = int(time.time() // 86400)
+NOON = DAY * 86400 + 43200
 
 
 def conf(spec=SPEC, name=NAME):
@@ -45,7 +46,7 @@ def seed(days: dict, name=NAME, raw: dict = None):
     os.makedirs(d, exist_ok=True)
     for f in os.listdir(d):
         os.remove(os.path.join(d, f))
-    h = {str(DAY - k): {f"seed.{k}.aa": [v, v]} for k, v in days.items()}
+    h = {str(DAY - k): {f"seed.{k}.aa": (list(v) if isinstance(v, tuple) else [v, v])} for k, v in days.items()}
     common.atomic_write_json(os.path.join(d, "head_days.hist"), {"days": h, "since": DAY - 40})
     for k, v in (raw or {}).items():
         common.atomic_write_json(os.path.join(d, f"old.{k}.bb.json"), {"day": DAY - k, "n": v, "nh": v, "proc": "old", "pid": 1, "inst": "bb", "at": 0, "closed": True})
@@ -60,7 +61,7 @@ def take(units, burst=False, host=HOST):
             B.rpc_day_take(NAME, host, units)
         return "ok"
     except B.NetError as e:
-        return e.kind
+        return "quota_burst_only" if getattr(e, "burst_only", False) else e.kind
 
 
 lim_f = getattr(B, "rpc_day_limits", None)
@@ -70,34 +71,36 @@ if not (callable(lim_f) and callable(getattr(B, "ledger_burst", None))):
 
 seed({})
 conf()
-L = lim_f(NAME)
-check("B2a 기록 없음 = 평소 80 · 버스트 240(평소 × 3) · 상한 2,480", L.get("normal") == 80 and L.get("burst") == 240 and L.get("cap") == 2480 and L.get("prev") == 0, L)
+L = lim_f(NAME, now=NOON)
+check("B2a 기록 없음 = 평소 80 · 버스트 800(평소 × 10) · 상한 2,480", L.get("normal") == 80 and L.get("burst") == 800 and L.get("cap") == 2480 and L.get("prev") == 0, L)
+r2 = [take(20, burst=True) for _ in range(41)]
+check("B2b 따라잡기 호출 = 800 까지(20 × 40) · 41번째 = 백필 몫만 거절", r2 == ["ok"] * 40 + ["quota_burst_only"], r2)
+check("B2c 백필 몫만 다 쓴 거절 = 게이트 안 닫음(실시간 몫 남음)", not B.gate(HOST).is_open())
 r = [take(20) for _ in range(5)]
-check("B2b 평소 호출 = 80 까지(20 × 4) · 5번째 거절(quota)", r == ["ok"] * 4 + ["quota"], r)
-check("B2c 평소 몫만 다 쓴 거절 = 게이트 안 닫음(따라잡기 몫 남음)", not B.gate(HOST).is_open())
-r2 = [take(20, burst=True) for _ in range(9)]
-check("B2d 따라잡기 호출 = 240 까지 더(20 × 8) · 9번째 거절", r2 == ["ok"] * 8 + ["quota"], r2)
-check("B2e 버스트 몫까지 다 쓰면 게이트 닫힘(UTC 자정까지)", B.gate(HOST).is_open())
+check("B2d 그 뒤 평소(실시간) 호출 = 80 까지(20 × 4 — 백필 800 에 안 막힘) · 5번째 거절", r == ["ok"] * 4 + ["quota"], r)
+check("B2e 실시간·백필 몫 둘 다 없으면 게이트 닫힘(UTC 자정까지)", B.gate(HOST).is_open())
 st = B.rpc_day_status().get(NAME) or {}
-check("B2f 장부 = 240 · 화면 상태에 평소·버스트 몫", st.get("used") == 240 and st.get("normal") == 80 and st.get("burst") == 240, st)
+check("B2f 장부 = 880 · 화면 상태에 평소(전체 기준 880)·실시간 실측", st.get("used") == 880 and st.get("normal") == 880 and st.get("rt") is not None, st)
 with B._GATES_LOCK:
     B._GATES.clear()
 
 seed({k: 80 for k in range(1, 26)})
 conf()
-L = lim_f(NAME)
-check("B3 지난 30일 2,000 = 남은 480 < 예비 1,200 → 버스트 없음(평소 80)", L.get("prev") == 2000 and L.get("normal") == 80 and L.get("burst") == 80, L)
-seed({1: 600, 2: 500})
+L = lim_f(NAME, now=NOON)
+check("B3 옛 판 기록 = 실시간으로 봄(하루 몫 다 씀 · 보수) → 백필 = 오늘 남은 실시간 몫 뒤 40(정오) · 평소 80", L.get("prev") == 2000 and L.get("normal") == 80
+      and L.get("burst") == 40 and L.get("rtm") == 80, L)
+seed({1: (0, 1500), 2: (0, 500)})
 conf()
-L = lim_f(NAME)
-check("B4 예비 남김: 지난 30일 1,100 → 버스트 = 2,480 − 1,100 − 1,200 = 180(평소 × 3 보다 작게)", L.get("burst") == 180 and L.get("normal") == 80, L)
-seed({1: 2450})
+L = lim_f(NAME, now=NOON)
+check("B4 앞날 실시간 몫 남김: 28일 뒤 창에 2,000 이 남음 → 2,480 − 2,000 − 28 × 4 − 오늘 남은 2 = 366(× 10 보다 작게)", L.get("burst") == 366 and L.get("normal") == 80, L)
+seed({1: (0, 2450)})
 conf()
-L = lim_f(NAME)
-check("B5a 월 상한 거의 다 씀(2,450) = 평소 몫도 30 으로(연속 31일 합 ≤ 상한)", L.get("normal") == 30 and L.get("burst") == 30, L)
-seed({1: 2600})
+L = lim_f(NAME, now=NOON)
+check("B5a 월 상한 거의 다 씀(2,450 — 앞으로 29일 창에 남음) = 평소 몫도 30 으로(연속 31일 합 ≤ 상한) · 백필 0(앞날 실시간 몫 먼저)",
+      L.get("normal") == 30 and L.get("burst") == 0, L)
+seed({1: (0, 2600)})
 conf()
-L = lim_f(NAME)
+L = lim_f(NAME, now=NOON)
 check("B5b 상한 넘음 = 0(오늘은 쉼)", L.get("normal") == 0 and L.get("burst") == 0, L)
 check("B5c 상한 넘은 날의 평소 호출 = 거절 + 게이트 닫힘", take(20) == "quota" and B.gate(HOST).is_open())
 with B._GATES_LOCK:
@@ -180,6 +183,11 @@ B._open = _fake_open
 try:
     URL = f"https://{HOST}/v1/TESTkey0000000001"
     body = {"jsonrpc": "2.0", "id": 1, "method": "eth_getLogs", "params": []}
+    n9 = 0
+    for _i in range(8):
+        B.rpc_post(URL, body, burst=True)
+        n9 += 1
+    check("B9b rpc_post(burst=True) = 160 보냄(평소 몫 80 을 넘어)", n9 == 8 and len(SENT) == 8, (n9, len(SENT)))
     ok9 = 0
     for _i in range(4):
         B.rpc_post(URL, body)
@@ -189,12 +197,8 @@ try:
         B.rpc_post(URL, body)
     except Exception as e:
         e9 = getattr(e, "net", e)
-    check("B9a 평소 rpc_post = 80 까지(4콜) · 5번째 quota", ok9 == 4 and getattr(e9, "kind", "") == "quota" and len(SENT) == 4, (ok9, repr(e9)[:160]))
-    n9 = 0
-    for _i in range(8):
-        B.rpc_post(URL, body, burst=True)
-        n9 += 1
-    check("B9b rpc_post(burst=True) = 240 까지 더 보냄", n9 == 8 and len(SENT) == 12, (n9, len(SENT)))
+    check("B9a 그 뒤 평소 rpc_post = 실시간 80 까지(4콜 — 백필에 안 막힘) · 5번째 quota", ok9 == 4 and getattr(e9, "kind", "") == "quota" and len(SENT) == 12,
+          (ok9, repr(e9)[:160]))
     seen = {}
 
     def other():
