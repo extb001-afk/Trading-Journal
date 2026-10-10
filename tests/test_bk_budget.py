@@ -623,6 +623,207 @@ try:
     T.chk(all(x >= 1 for x in prog[:5]) and not (wB.cursor.get("_hq") or {}),
           "B18 상세 조회가 예산(10초)을 넘겨도 매 사이클 trace ≥1건 진전 → 큐가 빔(종전 bb612 판: 상세 뒤 마감 검사로 trace 0건 · 매번 같은 상세 반복)",
           {"progress": prog, "left": len(wB.cursor.get("_hq") or {}), "det_calls": stB["det"]})
+
+    rg22 = Rig(W[:1], {})
+    w22 = rg22.w
+    w22.trace_rpcs = ["http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"]
+    for k9 in ("_details", "_trace_internal"):
+        w22.__dict__.pop(k9, None)
+    w22._batch = lambda calls: []
+    w22._rpc_synth_detail = lambda h: {"tx": {"hash": h, "block_number": 7, "from": W[0], "to": "0x" + "55" * 20, "status": "ok", "value": "0",
+                                               "raw_input": "0x12345678" + "00" * 32}, "token_transfers": [], "internal": []}
+    w22._rpc_call = lambda m, p: {"nonce": "0x1", "from": W[0], "to": "0x" + "55" * 20}
+    w22._fill_symbols = lambda snaps: None
+    n22 = {"trace": 0}
+
+    def slow408(url, method, params, **k):
+        n22["trace"] += 1
+        rg22.ft.t += 5.0
+        raise bf_engine.NetError("HTTP Error 408: Request Timeout", "http4xx", code=408)
+    hs22 = ["0x" + f"{0xd0 + i:02x}" * 32 for i in range(20)]
+    real_rpc22 = bf_engine.rpc_call
+    bf_engine.rpc_call = slow408
+    try:
+        t22 = rg22.ft.t
+        o22 = T.safe(w22._details, list(hs22), late=True)
+        dt22, tr22 = rg22.ft.t - t22, n22["trace"]
+        late22 = set(w22.__dict__.get("_trace_late") or ())
+        T.chk(isinstance(o22, dict) and all(isinstance(o22.get(h), dict) for h in hs22) and set(hs22) <= late22,
+              "B19 늦은 채움 문맥: 20건 전부 internal 없이 확정 · 전부 '나중에 다시'(늦은 채움) 표식", {"late": len(set(hs22) & late22)})
+        T.chk(dt22 <= 25 and tr22 <= 4, "B19 첫 tx trace 가 408 로 막히면 남은 tx 는 trace 를 걸지 않음 — 상세 1회 ≈ 1건 몫(종전: tx 마다 노드 2 × callTracer·parity = 20건 × 20초 → 라이브 걸음 7분 고정)",
+              {"sec": dt22, "trace_calls": tr22})
+        n22["trace"] = 0
+        w22.__dict__.pop("_trace_late", None)
+        w22._trace_fail = {}
+        w22._trace_nf, w22._trace_sick_until = 0, 0.0
+        o22b = T.safe(w22._details, list(hs22[:3]), late=False)
+        T.chk(isinstance(o22b, dict) and all(isinstance(o22b.get(h), Exception) for h in hs22[:2]) and n22["trace"] == 8,
+              "B19 헤드 꼬리 걸음(늦은 채움 문맥 아님) = 앞 tx 들은 종전대로 trace 재시도(TRACE_RETRY · 노드 2 × callTracer·parity)", {"trace_calls": n22["trace"]})
+        T.chk(isinstance(o22b, dict) and isinstance(o22b.get(hs22[2]), dict) and hs22[2] in (w22.__dict__.get("_trace_late") or {}),
+              "B19 헤드 꼬리 걸음도 한 상세 호출 안 연속 2번 실패 뒤 남은 tx 는 trace 를 걸지 않고 늦은 채움 표식(baser1011 — 문서2 1-2 ①)",
+              {"t3": type(o22b.get(hs22[2])).__name__ if isinstance(o22b, dict) else o22b})
+    finally:
+        bf_engine.rpc_call = real_rpc22
+
+    def catchup(n_own, live0, cycles):
+        rg = Rig(W[:1], {}, extra={W[0]: live0, "_ns": {W[0]: [live0, 0, "0", 0, "0"]}})
+        w = rg.w
+        for k9 in [k for k in w.cursor if k.startswith("_bk:")]:
+            w.cursor.pop(k9)
+        common.atomic_write_json(CPATH, w.cursor)
+        w.trace_rpcs = ["http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"]
+        span = SAFE - live0
+        txs = {}
+        for i in range(n_own):
+            h = "0x" + f"{0x1000 + i:064x}"
+            txs[h] = {"tx": {"hash": h, "block_number": live0 + 1 + (span * i) // max(1, n_own), "from": W[0], "to": "0x" + "55" * 20, "status": "ok",
+                             "value": "0", "raw_input": "0x12345678" + "00" * 32, "fee": {"value": "0"}}, "token_transfers": [], "internal": []}
+        blk = sorted((v["tx"]["block_number"], h) for h, v in txs.items())
+        for k9 in ("_details", "_trace_internal"):
+            w.__dict__.pop(k9, None)
+        w._scan_logs = lambda ws, c, target, dl: ({h: b9 for b9, h in blk if int(c) < b9 <= int(target)}, int(target), None)
+        w._batch = lambda cl: []
+        w._rpc_synth_detail = lambda h: json.loads(json.dumps(txs[h]))
+        w._rpc_call = lambda m, p: {"nonce": "0x0", "from": W[0], "to": "0x" + "55" * 20}
+        w._fill_symbols = lambda snaps: None
+
+        def st(pairs, strict=False):
+            m = w.__dict__.setdefault("_st_memo", {})
+            for (a9, b9) in pairs:
+                m.setdefault((a9, b9), (sum(1 for bb, _h in blk if bb <= b9), 0))
+            return {p: m[p] for p in pairs}
+        w._states = st
+
+        def slow(url, method, params, **k):
+            rg.ft.t += 5.0
+            raise bf_engine.NetError("HTTP Error 408: Request Timeout", "http4xx", code=408)
+        real9 = bf_engine.rpc_call
+        bf_engine.rpc_call = slow
+        try:
+            t0 = rg.ft.t
+            for i in range(cycles):
+                tc = rg.ft.t
+                T.safe(w.cycle)
+                if int(common.read_json(CPATH, {}).get(W[0]) or 0) >= SAFE:
+                    return i + 1, rg.ft.t - t0, len(w.writer.recs)
+                rg.ft.t = max(rg.ft.t, tc + POLL)
+            return None, rg.ft.t - t0, len(w.writer.recs)
+        finally:
+            bf_engine.rpc_call = real9
+    c20, s20, e20 = catchup(300, SAFE - 86_400, 4)
+    T.chk(c20 == 1 and s20 <= 300 and e20 == 300, "B20 최근 창 86,400블록 · 내 컨트랙트 호출 300건 · trace 노드 408 — 첫 사이클(≤300초)에 헤드 도달 · 300건 방출(종전 14차 판도 같은 입력이면 5,000블록/≈400초 고정 — 몇 시간)",
+          {"cycle": c20, "sec": s20, "emitted": e20})
+    c20b, s20b, e20b = catchup(1, SAFE - 100, 1)
+    T.chk(c20b is None and e20b == 0, "B20 평시 꼬리(헤드 근처 100블록 걸음) = 종전대로 trace 재시도(그 사이클 커서 유지 · 늦은 채움 아님)", {"cycle": c20b, "emitted": e20b})
+
+    rg23 = Rig(W[:1], {}, extra={W[0]: SAFE - 5000, "_ns": {W[0]: [SAFE - 5000, 0, "0", 0, "0"]}})
+    w23 = rg23.w
+    for k9 in [k for k in w23.cursor if k.startswith("_bk:")]:
+        w23.cursor.pop(k9)
+    common.atomic_write_json(CPATH, w23.cursor)
+    w23.trace_rpcs = ["http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"]
+    tx23 = {}
+    for i in range(10):
+        h = "0x" + f"{0x2000 + i:064x}"
+        tx23[h] = {"tx": {"hash": h, "block_number": SAFE - 4000 + i * 100, "from": W[0], "to": "0x" + "55" * 20, "status": "ok", "value": "0",
+                          "raw_input": "0x12345678" + "00" * 32, "fee": {"value": "0"}}, "token_transfers": [], "internal": []}
+    for k9 in ("_details", "_trace_internal"):
+        w23.__dict__.pop(k9, None)
+    w23._batch = lambda cl: []
+    w23._rpc_synth_detail = lambda h: json.loads(json.dumps(tx23[h]))
+    w23._rpc_call = lambda m, p: {"nonce": "0x0", "from": W[0], "to": "0x" + "55" * 20}
+    w23._fill_symbols = lambda snaps: None
+    blk23 = sorted((v["tx"]["block_number"], h) for h, v in tx23.items())
+    w23._scan_logs = lambda ws, c, target, dl: ({h: b9 for b9, h in blk23 if int(c) < b9 <= int(target)}, int(target), None)
+    w23._states = lambda pairs, strict=False: {p: (sum(1 for bb, _h in blk23 if bb <= p[1]), 0) for p in pairs}
+
+    def slow23(url, method, params, **k):
+        rg23.ft.t += 5.0
+        raise bf_engine.NetError("HTTP Error 408: Request Timeout", "http4xx", code=408)
+    real23 = bf_engine.rpc_call
+    bf_engine.rpc_call = slow23
+    try:
+        w23._late_ctx = True
+        T.safe(w23._advance, [W[0]], SAFE - 5000, SAFE, HEAD, rg23.ft.t + 200)
+        w23._late_ctx = False
+    finally:
+        bf_engine.rpc_call = real23
+    d23 = common.read_json(CPATH, {})
+    tl23 = d23.get("_trace_later") or {}
+    T.chk(set(tx23) <= set(tl23) and all(int(tl23[h].get("n") or 0) == 0 and tl23[h].get("sent") for h in tx23),
+          "B21 따라잡는 걸음에서 trace 를 건너뛴 tx 도 전부 늦은 채움 큐에 n=0 · 방출 표식으로 등록(trace=False 함정 없음 · 디스크)", {"in_queue": len(set(tx23) & set(tl23))})
+    T.chk(len(getattr(w23, "_trace_fail", {}) or {}) == 1, "B21 시도 안 한 tx 는 실패 횟수(_trace_fail)를 안 올림(실제로 부른 첫 tx 1건만)", len(getattr(w23, "_trace_fail", {}) or {}))
+    T.chk(getattr(R, "TRACE_LATER_MAX", 0) == 2000, "B21 커서 안 늦은 채움 큐 상한 = 2,000(옛 판 상한 그대로 — 롤백 호환 · 넘는 건 넘침 파일 · 코덱스 ba705 #3)", getattr(R, "TRACE_LATER_MAX", 0))
+    rg24 = Rig(W[:1], {})
+    w24 = rg24.w
+    w24.TRACE_LATER_MAX = 5
+    now24 = int(rg24.ft.t)
+    w24.cursor["_trace_later"] = {f"0xa{i}": {"at": now24 - 1000 + i, "n": (3 if i < 2 else 0), "next": now24 + 999, "blk": 1, "sent": True} for i in range(5)}
+    w24.__dict__["_trace_late"] = {}
+    for j in range(3):
+        hj = f"0xb{j}"
+        w24.__dict__["_trace_late"][hj] = 1
+        w24._trace_later_mark(hj, {"tx": {"hash": hj, "block_number": 2}, "internal": []})
+    tl24 = w24.cursor.get("_trace_later") or {}
+    ovf24 = os.path.join(common.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
+    rows24 = [json.loads(x) for x in open(ovf24, encoding="utf-8")] if os.path.exists(ovf24) else []
+    T.chk(all(f"0xa{i}" in tl24 for i in range(5)) and not any(f"0xb{j}" in tl24 for j in range(3)) and sorted(r["h"] for r in rows24) == ["0xb0", "0xb1", "0xb2"]
+          and all(r.get("sent") for r in rows24),
+          "B21 큐 넘침 = 아무것도 버리지 않음 — 큐 항목 그대로 · 새 항목은 넘침 파일(내구 append · 방출 사실 보존)(baser1011 문서2 B3 · 코덱스 bb620 HIGH)", {"q": sorted(tl24), "file": rows24})
+    T.chk(int(w24.cursor.get("_trace_later_overflow") or 0) == 3 and not w24.cursor.get("_trace_later_dropped"),
+          "B21 넘침 대기 수 커서 기록(_trace_later_overflow — 헬스 사실) · 버린 수 0", {"ovf": w24.cursor.get("_trace_later_overflow"), "drop": w24.cursor.get("_trace_later_dropped")})
+    for i in range(5):
+        w24.cursor["_trace_later"].pop(f"0xa{i}")
+    T.safe(w24._trace_overflow_refill)
+    tl24b = w24.cursor.get("_trace_later") or {}
+    T.chk(sorted(tl24b) == ["0xb0", "0xb1", "0xb2"] and all(tl24b[h].get("sent") and int(tl24b[h].get("n") or 0) == 0 for h in tl24b)
+          and not os.path.exists(ovf24) and not w24.cursor.get("_trace_later_overflow") and sorted((common.read_json(CPATH, {}).get("_trace_later") or {})) == ["0xb0", "0xb1", "0xb2"],
+          "B21 자리가 나면 넘침 파일에서 되살림(방출 사실·시도 0 그대로 · 커서 먼저 내구화 뒤 파일 지움)", {"q": tl24b, "file": os.path.exists(ovf24)})
+    import health
+    ht24 = getattr(health, "trace_later_drop_text", None)
+    T.chk(ht24 is not None and ht24({}) is None and "3" in (ht24({"_trace_later_overflow": 3}) or "") and "경고" not in (ht24({"_trace_later_overflow": 3}) or "")
+          and "경고" in (ht24({"_trace_later_dropped": 2}) or ""),
+          "B21 헬스: 넘침 대기 = 사실 한 줄(경고 아님) · 예전 판이 버린 수가 남아 있으면 경고", [ht24({"_trace_later_overflow": 3}), ht24({"_trace_later_dropped": 2})] if ht24 else None)
+    rg25 = Rig(W[:1], {})
+    w25 = rg25.w
+    now25 = int(rg25.ft.t)
+    w25.cursor["_trace_later"] = {"0xold0": {"at": now25 - 31 * 86400, "n": 0, "next": now25 + 999, "blk": 1, "sent": True},
+                                  "0xold6": {"at": now25 - 31 * 86400, "n": 6, "next": now25 + 999, "blk": 1, "sent": True}}
+    T.safe(w25._trace_later_step, HEAD)
+    tl25 = w25.cursor.get("_trace_later") or {}
+    T.chk("0xold0" in tl25 and "0xold6" not in tl25, "B21 만료(30일) = 5회 이상 시도한 것만 뺌 · 미시도는 남김(종전: 시도 수 무관)", sorted(tl25))
+    rg26 = Rig(W[:1], {})
+    w26 = rg26.w
+    w26.trace_rpcs = ["http://127.0.0.1:9/trA"]
+    for k9 in ("_details", "_trace_internal"):
+        w26.__dict__.pop(k9, None)
+    w26._batch = lambda cl: []
+    h26 = "0x" + "e9" * 32
+    w26._rpc_synth_detail = lambda h: {"tx": {"hash": h, "block_number": 7, "from": W[0], "to": "0x" + "55" * 20, "status": "ok", "value": "0",
+                                               "raw_input": "0x12345678" + "00" * 32}, "token_transfers": [], "internal": []}
+    w26._rpc_call = lambda m, p: {"nonce": "0x0", "from": W[0], "to": "0x" + "55" * 20}
+    w26._fill_symbols = lambda snaps: None
+    w26.__dict__["_trace_late"] = {f"0xp{i}": 1 for i in range(20_001)}
+    real26 = bf_engine.rpc_call
+    bf_engine.rpc_call = slow23
+    try:
+        T.safe(w26._details, [h26], late=True)
+    finally:
+        bf_engine.rpc_call = real26
+    lt26 = w26.__dict__.get("_trace_late") or {}
+    T.chk(h26 in lt26 and "0xp20000" in lt26 and "0xp0" not in lt26 and 10_000 <= len(lt26) <= 20_000,
+          "B21 늦은 채움 표식 2만 넘음 = 오래된 것부터 덜어 냄(방출 전 표식을 통째 지우지 않음 · 종전: clear)", len(lt26))
+    rg27 = Rig(W[:1], {})
+    w27 = rg27.w
+    for k9 in [k for k in w27.cursor if k.startswith("_bk:")]:
+        w27.cursor.pop(k9)
+    now27 = int(rg27.ft.t)
+    w27.cursor["_trace_later"] = {"0x" + f"{0x3000 + i:064x}": {"at": now27 - 60, "n": 0, "next": 0, "blk": 9, "sent": True} for i in range(25)}
+    common.atomic_write_json(CPATH, w27.cursor)
+    w27._trace_internal = lambda h, snap: rg27.ft.t.__class__
+    T.safe(w27.cycle)
+    left27 = len(common.read_json(CPATH, {}).get("_trace_later") or {})
+    T.chk(left27 == 5, "B21 라이브가 꼬리에 붙은 사이클 = 늦은 채움 재시도 20건(30초 안 · 종전 3건)", {"left": left27})
 finally:
     evm_watch.time = real_time
 

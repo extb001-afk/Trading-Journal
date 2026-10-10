@@ -831,6 +831,21 @@ def leaf_overflow_text(cur: dict, warn: int = 100_000):
     return ("넘침 경고: " + t + " · 추적(trace) 노드 확인 필요") if n >= warn else t
 
 
+def trace_later_drop_text(cur: dict, warn: int = 100_000):
+    try:
+        n = int((cur or {}).get("_trace_later_dropped") or 0)
+        o = int((cur or {}).get("_trace_later_overflow") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    out = []
+    if o > 0:
+        t = f"내부 이동 확인 대기 거래 {o:,}건(늦은 채움 큐 넘침 — 노드 trace 회복 뒤 자동)"
+        out.append(("넘침 경고: " + t + " · 추적(trace) 노드 확인 필요") if o >= warn else t)
+    if n > 0:
+        out.append(f"넘침 경고: 늦은 채움(내부 이동 trace) 큐에서 {n:,}건을 뺐어요 — 그 거래의 내부 이동은 미확인 · 추적(trace) 노드 확인 필요")
+    return " · ".join(out) or None
+
+
 def uncollected_text(rt):
     if not isinstance(rt, dict):
         return None
@@ -949,6 +964,9 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         lo9 = leaf_overflow_text(d) if isinstance(d, dict) else None
         if lo9:
             hex_ = " · ".join(x for x in (hex_, lo9) if x)
+        td9 = trace_later_drop_text(d) if isinstance(d, dict) else None
+        if td9:
+            hex_ = " · ".join(x for x in (hex_, td9) if x)
         bk9h = (hb_src.get(("evm", c)) or {}).get("rpc_bk")
         if isinstance(bk9h, dict):
             t9 = []

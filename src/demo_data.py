@@ -387,6 +387,32 @@ def _att(qty_of, paths, i, dv, flow) -> dict:
             "lp": 0.0, "xo": 0.0, "rs": round(dv - mk - flow, 2)}
 
 
+def att_detail(d_from, d_to) -> dict:
+    d = build()
+    f = d["fields"]
+    now = datetime.now(KST)
+    paths = _px_paths(now)
+    qty_of = {c["sym"]: c["qty"] for c in f["coins"] if c.get("price")}
+    ser = f["dailySeries"]
+    days = {}
+    for i, r in enumerate(ser):
+        if not i or not r.get("att"):
+            continue
+        iso = (now - timedelta(days=len(ser) - 1 - i)).strftime("%Y-%m-%d")
+        if not (str(d_from) <= iso <= str(d_to)):
+            continue
+        mk = []
+        for s, q in qty_of.items():
+            p0, p1 = paths[s][i - 1], paths[s][i]
+            v = q * (p1 - p0)
+            if abs(v) >= 0.005 and p0 > 0:
+                mk.append([s.upper(), round(v, 2), round((p1 / p0 - 1) * 100, 2), q, float("%.8g" % p0), float("%.8g" % p1)])
+        mk.sort(key=lambda x: (-abs(x[1]), x[0]))
+        fl = [["원화 출금(은행으로)", round(float(r["flow"]), 2), []]] if abs(float(r.get("flow") or 0)) >= 0.005 else []
+        days[iso] = {"mk": mk, "mkN": len(mk), "xm": [], "kx": [0.0, 0.0, 0.0], "unp": [], "un": [], "op": [], "fb": [], "fl": fl}
+    return {"ok": True, "builtAt": d.get("builtAt"), "days": days}
+
+
 FUT_RATE = 1385.0
 FUT_EXN = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}
 

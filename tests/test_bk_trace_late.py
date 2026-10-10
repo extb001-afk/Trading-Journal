@@ -405,9 +405,20 @@ w._health_cycle = lambda *a, **k: None
 w._advance = spy9(w)
 r9 = T.safe(w.cycle)
 lv9 = [x for x in seen9 if not x[0]]
-T.chk(not isinstance(r9, dict) and len(lv9) >= 2 and all(x[3] for x in lv9[:-1]) and lv9[-1][3] is False and lv9[-1][2] == max(x[2] for x in lv9),
-      "T9 라이브 따라잡는 걸음 = 문맥 켬 · 헤드에 닿는 마지막 걸음 = 끔(평시 꼬리는 종전 재시도)", {"r": r9, "steps": lv9})
+tail9 = max(64, 1440 * getattr(evm_watch.RpcChainWatcher, "LATE_TAIL_SEC", 0) // 86400)
+T.chk(not isinstance(r9, dict) and len(lv9) >= 2 and all(x[3] for x in lv9[:-1]) and lv9[-1][3] is (lv9[-1][2] - lv9[-1][1] > tail9) and lv9[-1][2] == max(x[2] for x in lv9),
+      "T9 라이브 따라잡는 걸음 = 문맥 켬 · 헤드에 닿는 마지막 걸음 = 평시 꼬리 크기면 끔(종전 재시도) · 큰 따라잡기 끝 걸음은 켬", {"r": r9, "steps": lv9, "tail": tail9})
 T.chk(not w.__dict__.get("_late_ctx"), "T9 사이클 뒤 문맥 끔(다른 상세 호출에 새지 않음)", w.__dict__.get("_late_ctx"))
+seen9.clear()
+w, wr, st = make({}, span=16_000, live=9_950)
+w._head = lambda: 10_010
+w._init = lambda safe: None
+w._head_peek = lambda *a, **k: None
+w._health_cycle = lambda *a, **k: None
+w._advance = spy9(w)
+T.safe(w.cycle)
+lv9b = [x for x in seen9 if not x[0]]
+T.chk(len(lv9b) == 1 and lv9b[0][3] is False, "T9 평시 꼬리(헤드 근처 작은 걸음) = 문맥 끔(종전 trace 재시도)", lv9b)
 seen9.clear()
 w, wr, st = make({"_bk:" + a: job(0, 5000, 100_000) for a in W}, span=16_000, live=900_000)
 w._head = lambda: 900_010

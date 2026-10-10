@@ -97,7 +97,8 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
   공개 노드가 막힐 때 빠질 수 있어요(1시간마다 탐색기 확인이 받쳐 줘요). 설정 화면·상태 패널에 경고가 뜨지만 수집은 그대로 돌아요.
 
 - 쓰는 곳: BSC·Base 옛 기록(아카이브 — 한 번에 3천 블록), 같은 키로 토큰 찾기 보조(Advanced API — `rpc.ankr.com/multichain`).
-  최신 기록은 늘 무료 공개 노드가 먼저입니다. BNB Chain 잔고 감시가 기록으로 설명 안 되는 BNB 증가(남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB)를 찾으면
+  최신 기록은 평소 무료 공개 노드가 먼저입니다 — 봇을 오래 끈 뒤·새로 설치한 뒤 최근 구간을 따라잡는 동안만 Base 등 RPC 체인의 잔고·nonce 확인을 키 노드(Ankr·Alchemy 등)에 먼저 보내요
+  (하루 몫 80% 안 · 넘으면 공개 노드로 · 예: 자주 쓰는 지갑 몇 개를 이틀치 따라잡으면 하루 몫의 절반쯤을 한 번). BNB Chain 잔고 감시가 기록으로 설명 안 되는 BNB 증가(남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB)를 찾으면
   그 구간을 옛 블록 잔고로 반씩 좁혀요(입금 한 건에 수십 콜 · 하루 상한 · 평소 0콜) — 키가 없으면 공개 노드가 보관한 최근 블록만 훑어요([수집 한계](COLLECTION_LIMITS.md)).
 - 쉬는 지갑 토큰 받음 확인: 탐색기로 수집하는 체인(Ethereum·Arbitrum·Polygon·Gnosis·Story 등)에서 한동안 안 쓴 지갑·빈 지갑에 토큰이 들어왔는지
   10분마다 한 번 getLogs 로 묶어(지갑 묶음 — 보통 500개씩) 확인하고, 받은 지갑만 바로 탐색기로 기록해요. Ankr 무료 키가 안 여는 체인·키가 없을 때는 무료 공개 노드로
@@ -208,6 +209,9 @@ are built in memory only.
   and **NodeReal** (`TJ_NODEREAL_KEY`): faster BSC/Base archive backfill and old-block balances for the BNB Chain balance watch (finds plain BNB sent to you
   or paid out by contracts — a few dozen calls per deposit, daily cap, zero calls otherwise; without a key only recent blocks are scanned); the
   same Ankr key also backs token discovery (Advanced API, 700 credits per request). Each keyed service has its own daily ledger capped at 80%.
+  While an RPC chain such as Base catches up on recent blocks (after a long stop or on a fresh install), balance/nonce checks go to a keyed node first
+  (Ankr, Alchemy, …; within the daily share, public nodes when it is used up — e.g. two days of catch-up for a few active wallets may use about half of one day's share once);
+  otherwise public nodes come first.
   Ankr also runs the 10-minute "tokens received by resting wallets" check (one batched `eth_getLogs` per chain, recipient topic = your wallets;
   public nodes when the key is missing or the chain is not open on the free plan; never Alchemy — its free getLogs is capped at 10 blocks).
   Config `addr_tier.inflow_sec` (default 600, 0 = off).

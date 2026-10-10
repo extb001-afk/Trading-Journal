@@ -994,6 +994,8 @@ HIST_LATE_PID_K = "hist_late_pid"
 HIST_LATE_KEEP = 32
 HIST_LATE_JOIN_S = 120
 HIST_LATE_TTL_S = 14 * 86400
+HIST_LATE_CLOSE_S = 960
+HIST_LATE_EXCL_SQL = ("NOT (p.source_kind='chain_tx' AND EXISTS (SELECT 1 FROM meta m WHERE m.k = 'ext_prewindow_tx:' || p.source_ns || ':' || p.source_id))")
 
 
 def kst_day0(ts) -> int:
@@ -1042,6 +1044,23 @@ def hist_late_put(conn, ts, now: float = None) -> str:
     conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                  (HIST_LATE_K, json.dumps({"v": 1, "m": ms}, separators=(",", ":"))))
     return iso
+
+
+def hist_late_pw(conn):
+    try:
+        r = conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()
+        return int(r[0] or 0) if r else None
+    except Exception:
+        return None
+
+
+def hist_late_after(conn, pw, t_end) -> bool:
+    try:
+        r = conn.execute("SELECT 1 FROM postings p WHERE p.posting_id > ? AND p.event_ts < ? AND " + HIST_LATE_EXCL_SQL + " LIMIT 1",
+                         (int(pw), int(t_end))).fetchone()
+    except Exception:
+        return False
+    return r is not None
 
 
 EXF_LATE_PFX = "exflate:"

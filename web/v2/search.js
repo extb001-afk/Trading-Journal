@@ -4,7 +4,7 @@
   const API = () => window.__tjSearchApi || null;
   const $ = (s, r) => (r || document).querySelector(s);
   const LS_RECENT = 'tj_v2_srch_recent', LS_SAVED = 'tj_v2_srch_saved';
-  const RECENT_MAX = 8, SAVED_MAX = 12, GROUP_N = 3, GROUP_ALL = 40, SRV_DEBOUNCE = 150, Q_MAX = 120;
+  const RECENT_MAX = 8, SAVED_MAX = 12, GROUP_N = 3, GROUP_ALL = 40, SRV_DEBOUNCE = 150, Q_MAX = 120, SRCH_PG = 20;
   const KINDS = [['sale', '세일 참가'], ['coin', '코인'], ['cycle', '매매일지'], ['outflow', '보낸 내역'], ['tx', '거래·해시'], ['event', '기록'], ['day', '날짜'], ['receipt', '차익 영수증'],
     ['review', '리뷰'], ['memo', '근거 메모'], ['pending', '미매칭'], ['nft', 'NFT'], ['other', '기타 자산'], ['wallet', '지갑'], ['deposit', '입금 주소'], ['setting', '설정']];
   const KL = Object.fromEntries(KINDS);
@@ -805,11 +805,14 @@
     ST.items = items;
     ST.groups = groupOf(items, P2);
     ST.flat = [];
+    if (scope) { const pgS9 = effQ() + '|' + scope; if (ST.pgSig !== pgS9 || !ST.pgK) { ST.pgSig = pgS9; ST.pgK = {}; } }
     ST.groups.forEach(gr => {
       const lim = scope ? gr.items.length : ST.expand === gr.kind ? GROUP_ALL : GROUP_N, sg = srvGroup(gr.kind);
       gr.srvN = sg && sg.n != null ? +sg.n : null;
       gr.srvMore = !!(sg && !sg.end && (sg.more || (gr.srvN != null && srvLoaded(gr.kind) + (+sg.offset || 0) < gr.srvN)));
-      gr.shown = gr.items.slice(0, lim); gr.more = gr.items.length > lim || (!scope && gr.srvMore); gr.shown.forEach(it => ST.flat.push(it));
+      if (scope) srchPgApply(ST.pgK, gr);
+      else gr.shown = gr.items.slice(0, lim);
+      gr.more = gr.items.length > lim || (!scope && gr.srvMore); gr.shown.forEach(it => ST.flat.push(it));
     });
     const sig = effQ() + '|' + scope + '|' + (ST.expand || '');
     if (prevKey && prevSig === sig) { const j = ST.flat.findIndex(it => canonKey(it) === prevKey); if (j >= 0) ST.sel = j; }
@@ -851,6 +854,14 @@
   const srvQueryOf = q => srvParamsOf(q).q;
   const srvGroup = k => (ST.srv && ST.srvQ === effQ() ? arr(ST.srv.groups).find(g => g.kind === k) : null);
   const srvLoaded = k => { const g = srvGroup(k); return g ? arr(g.items).length + arr(ST.srvAdd && ST.srvAdd[k]).length : 0; };
+  function srchPgNext(cur, d, nItems, srvMore) {
+    const c = srchPgClamp(cur, nItems), last = Math.max(0, Math.ceil(nItems / SRCH_PG) - 1), partial = (c + 1) * SRCH_PG > nItems;
+    const pg = d < 0 ? Math.max(0, c - 1) : d > 0 && !partial && c < last ? c + 1 : c;
+    return { pg, load: d > 0 && !!srvMore && (pg + 1) * SRCH_PG >= nItems };
+  }
+  function srchPgClamp(pg, nItems) { return Math.max(0, Math.min(pg | 0, Math.max(0, Math.ceil(nItems / SRCH_PG) - 1))); }
+  function srchPgApply(K, gr) { const p = K[gr.kind] = srchPgClamp(K[gr.kind], gr.items.length); gr.pg = p; gr.shown = gr.items.slice(p * SRCH_PG, p * SRCH_PG + SRCH_PG); return gr; }
+  function srchPgMove(K, groups, kind, d) { const g = groups.find(x => x.kind === kind); if (!g) return null; const r = srchPgNext(g.pg, d, g.items.length, !!g.srvMore); K[kind] = r.pg; return r.load ? kind : null; }
   function srvMore(k) {
     const g = srvGroup(k);
     if (!g || ST.srvMoreBusy || locked()) return;
@@ -1013,10 +1024,14 @@
     const fmtN = n => Number(n).toLocaleString('en-US');
     ST.groups.forEach(g => {
       const tot = Math.max(g.items.length, g.srvN || 0);
-      h += '<div class="tjs-gh">' + esc(KL[g.kind]) + ' <span class="n pvx">' + fmtN(tot) + (tot > g.shown.length ? '<span class="tjs-of"> 중 ' + fmtN(g.shown.length) + '</span>' : '') + '</span><span class="sp"></span>' + (g.more ? '<button type="button" class="tjs-lnk" data-srch="more" data-v="' + g.kind + '">모두 ›</button>' : (ST.expand === g.kind ? '<button type="button" class="tjs-lnk" data-srch="less" data-v="' + g.kind + '">접기</button>' : '')) + '</div>';
+      h += '<div class="tjs-gh" data-gk="' + esc(g.kind) + '">' + esc(KL[g.kind]) + ' <span class="n pvx">' + fmtN(tot) + (tot > g.shown.length ? '<span class="tjs-of"> 중 ' + fmtN(g.shown.length) + '</span>' : '') + '</span><span class="sp"></span>' + (g.more ? '<button type="button" class="tjs-lnk" data-srch="more" data-v="' + g.kind + '">모두 ›</button>' : (ST.expand === g.kind ? '<button type="button" class="tjs-lnk" data-srch="less" data-v="' + g.kind + '">접기</button>' : '')) + '</div>';
       h += '<div class="tjs-sl">' + g.shown.map(it => rowHTML(it, i++)).join('') + '</div>';
       const sc9 = ST.scope !== 'all' ? ST.scope : P.scope;
-      if (sc9 && g.srvMore) h += '<button type="button" class="tjs-moreq tjs-srvmore" data-srch="srvmore" data-v="' + esc(g.kind) + '"' + (ST.srvMoreBusy === g.kind ? ' disabled' : '') + '>' + (ST.srvMoreBusy === g.kind ? '<span class="tjs-spin" aria-hidden="true"></span>' : IX.go) + '<span>더 보기 — <span class="pvx">' + fmtN(g.items.length) + ' / ' + fmtN(tot) + '</span></span><span class="sp"></span>›</button>';
+      if (sc9 && (g.items.length > SRCH_PG || g.srvMore)) {
+        const p9 = g.pg | 0, a9 = p9 * SRCH_PG + 1, b9 = p9 * SRCH_PG + g.shown.length, busy9 = ST.srvMoreBusy === g.kind, nx9 = b9 < g.items.length || g.srvMore;
+        const nav9 = (d, t9, l9, dis) => '<button type="button" class="ubtn upgb" data-srch="pg" data-kind="' + esc(g.kind) + '" data-v="' + d + '"' + (dis ? ' disabled' : '') + ' aria-label="' + esc(KL[g.kind] || '') + ' ' + l9 + '">' + t9 + '</button>';
+        h += '<div class="umore tjs-pgw"><div class="upg" role="group" aria-label="' + esc(KL[g.kind] || '') + ' 쪽 넘기기">' + nav9(-1, '‹ 이전', '이전 쪽', p9 === 0) + '<span class="upgt num pvx" aria-live="polite">' + (busy9 ? '<span class="tjs-spin" aria-hidden="true"></span> ' : '') + fmtN(a9) + '–' + fmtN(b9) + ' <span class="mut">/ ' + fmtN(tot) + '<span class="upgu">건</span></span></span>' + nav9(1, '다음 ›', '다음 쪽', !nx9 || busy9) + '</div></div>';
+      }
       if (g.kind === 'coin' && P.type === 'ticker' && g.items[0] && !ST.scope.match(/cycle|event/)) {
         const s0 = g.items[0].sym;
         h += '<button type="button" class="tjs-moreq" data-srch="filt" data-v="' + esc(String(s0 || '').toUpperCase()) + '">' + IX.filter + '<span><b>' + esc(s0) + '</b> 기록 — 매매일지 전체 기록에서 거르기</span><span class="sp"></span>›</button>';
@@ -1237,6 +1252,14 @@
     else if (k === 'more') { if (ST.q.trim()) { ST.scope = v; ST.sel = 0; paintAll(); srvKick(); refocus(); } }
     else if (k === 'less') { ST.expand = ''; paintAll(); refocus(); }
     else if (k === 'srvmore') { srvMore(v); refocus(); }
+    else if (k === 'pg') {
+      const kind9 = t.getAttribute('data-kind') || '', d9 = +v || 0;
+      const ld9 = srchPgMove(ST.pgK || (ST.pgK = {}), ST.groups, kind9, d9); ST.sel = 0;
+      if (ld9) srvMore(ld9);
+      run(); paintBody();
+      const b9 = ROOT && Array.from(ROOT.querySelectorAll('[data-srch="pg"]:not([disabled])')).find(x => x.getAttribute('data-kind') === kind9 && x.getAttribute('data-v') === String(d9));
+      if (b9) { try { b9.focus({ preventScroll: true }); } catch (e) {  } } else refocus();
+      const sc9 = ROOT && Array.from(ROOT.querySelectorAll('.tjs-gh')).find(x => x.getAttribute('data-gk') === kind9); if (sc9 && sc9.scrollIntoView) sc9.scrollIntoView({ block: 'nearest' }); }
     else if (k === 'pick') { const i = +v; ST.sel = i; const it = ST.flat[i]; if (wide() && !ev.detail) { paintBody(); return; } openItem(it); }
     else if (k === 'again') { const r = v.charAt(0) === 's' ? savedGet()[+v.slice(1)] : recentGet()[+v.slice(1)]; if (r) { ST.q = r.q; ST.sel = 0; if (ST.ask && ST.ask.q !== ST.q) ST.ask = null; paintAll(); srvKick(); askKick(); refocus(); } }
     else if (k === 'unrecent') { const r = recentGet(); r.splice(+v, 1); lsSet(LS_RECENT, r); paintBody(); }

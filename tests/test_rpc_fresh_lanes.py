@@ -16,10 +16,42 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _OP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+class LogicalClock:
+    REQ_COST = 0.005
+
+    def __init__(self):
+        self.t = time.time()
+
+    def time(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += max(0.0, float(s))
+
+    def __getattr__(self, k):
+        return getattr(time, k)
+
+
+LCLK = [None]
+
+
+def logical(fn):
+    ck = LCLK[0] = LogicalClock()
+    ew0, bf0 = evm_watch.time, bf_engine.time
+    evm_watch.time = bf_engine.time = ck
+    try:
+        return fn()
+    finally:
+        evm_watch.time, bf_engine.time = ew0, bf0
+        LCLK[0] = None
+
+
 def _loop_urlopen(url, data=None, timeout=30, *a, **k):
     u = getattr(url, "full_url", url)
     if urllib.parse.urlsplit(str(u)).hostname not in ("127.0.0.1", "localhost"):
         return T._guard_urlopen(url, data, timeout, *a, **k)
+    if LCLK[0] is not None:
+        LCLK[0].t += LogicalClock.REQ_COST
     return _OP.open(url, data=data, timeout=timeout)
 
 
@@ -292,7 +324,7 @@ reset_state()
 wr = Wr()
 w = new_watcher(CFG, wr)
 t0 = time.time()
-r1 = cyc(w)
+r1 = logical(lambda: cyc(w))
 el1 = time.time() - t0
 c1 = cur()
 T.chk(not isinstance(r1, dict), "F1 첫 주기 예외 없음", r1)
@@ -754,7 +786,7 @@ stuck = {"_rpc_v": 1, "_start": S0, W1: CS, W2: CS, "_ns": {W1: [CS, n_cs, str(b
          "_scan": {"frm": CS + 1, "to": CS + 2000, "ws": sorted([W1, W2]), "found": {}}}
 common.atomic_write_json(CP, stuck)
 w5 = new_watcher(CFG, wr5)
-r5 = cyc(w5)
+r5 = logical(lambda: cyc(w5))
 c5 = cur()
 ho5 = c5.get("_handover") if isinstance(c5.get("_handover"), dict) else {}
 j5 = {k[4:]: v for k, v in c5.items() if k.startswith("_bk:")}

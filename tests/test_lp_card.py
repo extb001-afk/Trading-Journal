@@ -9,7 +9,7 @@ import re
 import shutil
 import subprocess
 
-JS = r'''// 대시보드 LP 카드 + 레버리지 · 대출 2줄 — 실제 app.js 블록(normLP · uiMore · LP · 레버리지)을 가짜 의존성으로 돌린다(브라우저·서버·네트워크 없음)
+JS = r'''// 대시보드 LP 카드 + 레버리지 · 대출 2줄 — 실제 app.js 블록(normLP · uiMore·uiPaged(uipage1011 쪽 넘김) · LP · 레버리지)을 가짜 의존성으로 돌린다(브라우저·서버·네트워크 없음)
 import fs from 'node:fs';
 const APP = fs.readFileSync(process.env.TJ_TEST_APP, 'utf8');
 const cut = (a, b) => { const i = APP.indexOf(a), j = i < 0 ? -1 : APP.indexOf(b, i + 1); if (i < 0 || j < 0) throw new Error('블록을 못 찾음: ' + a.slice(0, 50)); return APP.slice(i, j); };
@@ -18,7 +18,7 @@ const B = [cut('  const CHAIN_KO = {', '  function normFlow(f) {'), cut('  const
   cut('  const pxrRaw = v =>', '  function venuesHTML() {'), cut('  function levS() {', '  function oaLoad(force) {')].join('\n');
 const R = [];
 const chk = (ok, msg, d) => R.push([!!ok, msg, ok ? undefined : d]);
-const S = { D: null, mobile: false, hide: false, rand: false, cur: 'USD', uiMore: {}, lpOpen: new Set(), lpClosed: false, justOpened: new Set(), tab: 'dash', drawer: null };
+const S = { D: null, mobile: false, hide: false, rand: false, cur: 'USD', uiMore: {}, uiPg: {}, lpOpen: new Set(), lpClosed: false, justOpened: new Set(), tab: 'dash', drawer: null };
 const K = 2.5;   // 랜덤값 배수(합성)
 const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const num = x => (isFinite(+x) ? +x : 0), arr = x => (Array.isArray(x) ? x : []);
@@ -62,9 +62,9 @@ const CLOSED = [
 ];
 const setD = (live, closed) => { const lps = live.map(F.normLP), cl = closed.map(F.normLP);
   S.D = { lps, lpsClosed: cl, events: [], lpValue: lps.reduce((s, l) => s + num(l.value), 0), lpFees: lps.reduce((s, l) => s + num(l.fees), 0), lpRewards: lps.reduce((s, l) => s + num(l.rewards), 0) }; };
-const reset = () => { S.mobile = false; S.hide = false; S.rand = false; S.uiMore = {}; S.lpOpen = new Set(); S.lpClosed = false; };
+const reset = () => { S.mobile = false; S.hide = false; S.rand = false; S.uiMore = {}; S.uiPg = {}; S.lpOpen = new Set(); S.lpClosed = false; };
 const keysOf = h => [...h.matchAll(/class="lp[rm](?: lpc)?(?: open)?" role="button" tabindex="0" data-a="lpTog" data-k="([^"]+)"/g)].map(x => x[1]);
-const moreBtn = h => { const x = h.match(/data-a="uiMore" data-v="lp:dash"[^>]*>([\s\S]*?)<span class="uchev"/); return x ? x[1].replace(/<[^>]+>/g, '') : null; };
+const moreBtn = h => { const x = h.match(/data-a="uiPgOpen" data-v="lp:dash"[^>]*>([\s\S]*?)<span class="uchev"/); return x ? x[1].replace(/<[^>]+>/g, '') : null; };
 
 if (!F.lpCardHTML) chk(false, 'LP 카드 함수(lpCardHTML) 없음 — 대시보드 LP 카드 시험 못 함');
 else {
@@ -82,9 +82,9 @@ chk(/class="lpr lphd" aria-hidden="true"><span>풀<\/span><span>범위 · 현재
 chk(/data-a="lpClosed" aria-expanded="false"><span class="pvx">종료된 포지션 3개<\/span>/.test(h) && !/lpr lpc/.test(h), "종료 링크 '종료된 포지션 3개'(접힘 = 종료 행 없음)", h.match(/data-a="lpClosed"[^<]*<[^<]*/));
 chk(/범위 이탈/.test(h) && /class="lprng"/.test(h) && /<span class="cap">원가 \$17,500<\/span>/.test(h), '줄 = 범위 상태 칩 + 막대 · 현재 가치 아래 원가');
 chk(/리워드 \$7\.50/.test(h) && /스테이킹/.test(h) && /Aerodrome CL/.test(h), '미청구 아래 리워드 · lpBadge(프로토콜 짧은 이름 · 스테이킹) 유지');
-S.uiMore['lp:dash'] = Infinity; h = F.lpCardHTML();
-chk(keysOf(h).join() === ORDER.join() && /data-a="uiLess" data-v="lp:dash">접기/.test(h), "'N개 더' 누름 = 7개 모두(가치 큰 순) + '접기'", keysOf(h));
-delete S.uiMore['lp:dash'];
+S.uiPg['lp:dash'] = 0; h = F.lpCardHTML();
+chk(keysOf(h).join() === ORDER.join() && /data-a="uiPgClose" data-v="lp:dash"[^>]*><span class="upgxt">접기/.test(h), "'N개 더' 누름 = 7개 모두(가치 큰 순 · 20개 이하 = 한 쪽) + '접기'", keysOf(h));
+delete S.uiPg['lp:dash'];
 S.lpOpen.add('lp:a'); h = F.lpCardHTML();
 chk(/data-k="lp:a" aria-expanded="true">[\s\S]*?<\/div><div class="clps" data-ck="lp:lp:a"><div><div class="lpx">[\s\S]*?LP 이벤트/.test(h), '줄을 누르면(S.lpOpen) 그 줄 바로 아래 제자리 펼침(lpDetail)');
 S.lpOpen.add('lp:f'); h = F.lpCardHTML();
@@ -103,12 +103,12 @@ chk(/card lpk lpone/.test(h) && !/class="lprows"/.test(h) && /운용 중인 포�
 S.lpClosed = true; h = F.lpCardHTML();
 chk(keysOf(h).length === 3, '종료만 · 링크 누름 = 종료 행 3');
 reset(); setD([LIVE[0]], []); h = F.lpCardHTML();
-chk(keysOf(h).length === 1 && !/uiMore/.test(h) && !/가치 큰 순/.test(h) && !/lpClosed/.test(h), '운용 중 1개 = 줄 1 · 더보기·정렬 글·종료 링크 없음');
+chk(keysOf(h).length === 1 && !/uiMore|uiPg/.test(h) && !/가치 큰 순/.test(h) && !/lpClosed/.test(h), '운용 중 1개 = 줄 1 · 더보기·정렬 글·종료 링크 없음');
 setD(LIVE.slice(0, 3), []); h = F.lpCardHTML();
 chk(moreBtn(h) === '1개 더 · USDE / USDC · 합 $490', "3개 = 2줄 + '1개 더 · 이름 · 합'(외 없음)", moreBtn(h));
 // 가리기 · 랜덤값 — 실제 금액 글자 0
-reset(); setD(LIVE, CLOSED); S.lpClosed = true; S.uiMore['lp:dash'] = Infinity; S.lpOpen = new Set(['lp:a', 'lp:x1']);
-const both = () => { S.uiMore['lp:dash'] = Infinity; const a = F.lpCardHTML(); delete S.uiMore['lp:dash']; const b = F.lpCardHTML(); S.uiMore['lp:dash'] = Infinity; return a + b; };   // 펼친 목록 + 접힌 더보기 단추(합)
+reset(); setD(LIVE, CLOSED); S.lpClosed = true; S.uiPg['lp:dash'] = 0; S.lpOpen = new Set(['lp:a', 'lp:x1']);
+const both = () => { S.uiPg['lp:dash'] = 0; const a = F.lpCardHTML(); delete S.uiPg['lp:dash']; const b = F.lpCardHTML(); S.uiPg['lp:dash'] = 0; return a + b; };   // 펼친 목록 + 접힌 더보기 단추(합)
 const plain = both();
 const REAL = ['17,500', '12,480', '12,170', '142', '4,920', '5,010', '61.40', '2,730', '48.20', '1,240', '22.90', '39,850', '305', '9,870', '7.50', '3,000', '35.25', '22.75'];
 chk(REAL.every(t => plain.indexOf(t) >= 0), '대조: 보통 모드엔 합성 금액 글자가 다 보임', REAL.filter(t => plain.indexOf(t) < 0));
@@ -137,13 +137,13 @@ const lrow = (i, o) => Object.assign({ id: 'okx:loan:loan:' + i, kind: 'loan', e
 const levDoc = n => ({ v: 1, rows: Array.from({ length: n }, (_, i) => lrow(i)), counts: { danger: 0, warn: 0, unknown: 0, open: n, unconfirmed: 0 }, tabs: { all: n, fut: 0, margin: 0, loan: n }, exchanges: 5, levTs: 1, dayUsd: 0.05, missing: false, unconfirmed: [], unsupported: [] });
 const setLev = n => { const Ls = F.levS(); Ls.d = levDoc(n); Ls.st = 'ok'; Ls.at = Date.now() + 1e9; Ls.okAt = Date.now() + 1e9; };
 reset(); S.D = { debts: [] };
-const levMore = x => { const y = x.match(/data-a="uiMore" data-v="lev:dash"[^>]*>([\s\S]*?)<span class="uchev"/); return y ? y[1].replace(/<[^>]+>/g, '') : null; };
+const levMore = x => { const y = x.match(/data-a="uiPgOpen" data-v="lev:dash"[^>]*>([\s\S]*?)<span class="uchev"/); return y ? y[1].replace(/<[^>]+>/g, '') : null; };
 for (const [n, rows, lbl] of [[5, 2, '3개 더 · 거래소C 담보대출 · 거래소D 담보대출 외'], [3, 2, '1개 더 · 거래소C 담보대출'], [2, 2, null], [1, 1, null]]) {
   setLev(n); const x = F.levHTML(), k = (x.match(/class="lvr st-/g) || []).length;
   chk(k === rows && levMore(x) === lbl, '레버리지 넓은 화면 ' + n + '개 = 줄 ' + rows + (lbl ? " + '" + lbl + "'" : ' · 더보기 없음'), { k, more: levMore(x) });
 }
-setLev(5); S.uiMore['lev:dash'] = Infinity;
-chk((F.levHTML().match(/class="lvr st-/g) || []).length === 5 && /data-v="lev:dash">접기/.test(F.levHTML()), "레버리지 'N개 더' 누름 = 5줄 + '접기'");
+setLev(5); S.uiPg['lev:dash'] = 0;
+chk((F.levHTML().match(/class="lvr st-/g) || []).length === 5 && /data-a="uiPgClose" data-v="lev:dash"[^>]*><span class="upgxt">접기/.test(F.levHTML()), "레버리지 'N개 더' 누름 = 5줄 + '접기'");
 reset(); S.D = { debts: [] }; S.mobile = true;
 for (const [n, nx, lbl] of [[5, 1, '3개 더 · 거래소C 담보대출 · 거래소D 담보대출 외'], [3, 1, '1개 더 · 거래소C 담보대출'], [2, 1, null], [1, 0, null]]) {
   setLev(n); const x = F.levHTML(), k = (x.match(/class="lvmr"/g) || []).length, mm = x.match(/<span class="lvmm">([\s\S]*?)<\/span><\/span>/);
@@ -164,7 +164,7 @@ vd = app[app.index("  function vDash() {"):app.index("  function histLoad() {")]
 T.chk("lpHTML(" not in vd and "function lpHTML(" not in app, "보유 열·오른쪽 열의 큰 LP 표(lpHTML) 없음 — 보유 표·선물 포지션·보관처는 그대로",
       re.findall(r"lpHTML\([^)]*\)", vd))
 T.chk("futPosHTML()" in vd and "futPosHTML(true)" in vd and "holdingsHTML()" in vd and "venuesHTML()" in vd, "선물 포지션(왼쪽 · 넓은 화면 오른쪽)·보유·보관처 자리 유지")
-T.chk("const LP_TOP = 2;" in app and "rows.slice(0, 2).map(row)" in app and "uiMore('lev:dash', rows.slice(2)" in app, "앞 2개(LP · 레버리지 넓은 화면)")
+T.chk("const LP_TOP = 2;" in app and "rows.slice(0, 2).map(row)" in app and "uiPaged('lev:dash', rows.slice(2)" in app, "앞 2개(LP · 레버리지 넓은 화면)")
 T.chk(".card.lpk{" in css and ".lpr{display:grid;grid-template-columns:250px minmax(0,1fr) 150px 140px 130px" in css
       and "@media (max-width:960px){\n  .lpr{grid-template-columns:minmax(0,1fr) minmax(0,1fr)" in css and ".card.lpk.lpmob{" in css, "칸 CSS = 넓은 화면 5칸 격자 · 960px 이하 두 줄 · 폰 목록")
 T.chk(".lev .lvmore .ubtn,.lpk .lvmore .ubtn{min-height:44px}" in css and ".lpm{display:flex" in css and "min-height:44px;cursor:pointer}" in css, "누르는 칸 44px(더보기 · 폰 줄)")

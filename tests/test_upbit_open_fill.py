@@ -467,7 +467,9 @@ dpx.pop(YISO, None)
 json.dump(dpx, open(os.path.join(S, "daily_px.json"), "w"))
 snap({"KRW": (0, 0), "ETH": (200, 0)}, [])
 b, f = build()
-chk(near(day_val(f, YKEY), 200000) and (b.daily.get(YISO) or {}).get("src") == "live",
-    "H2 낡은 스냅숏 마감 → 다음 날 동결 = $200,000(원장 200 + 그날 마감 원화 0 — 종전 보정 150 이 굳어 $150,000)", (day_val(f, YKEY), (b.daily.get(YISO) or {}).get("src")))
+chk(near(day_val(f, YKEY), 200000) and (b.daily.get(YISO) or {}).get("src") == "partial",
+    "H2 낡은 스냅숏 마감 → 다음 날 동결 = $200,000(원장 200 + 그날 마감 원화 0 — 종전 보정 150 이 굳어 $150,000) · ubfillr1011(부록 A4): 그 스냅숏은 "
+    "미기장 체결이 든 낡은 스냅숏이라 유예(defer) → 그 순간 가격 + 지금 원장 되감기 수량(부분 동결 'partial' — 15차 = 'live')",
+    (day_val(f, YKEY), (b.daily.get(YISO) or {}).get("src")))
 
 T.finish()

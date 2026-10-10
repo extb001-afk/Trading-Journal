@@ -332,13 +332,13 @@
   }
 
   const EX_HELP = {
-    upbit: { url: 'https://upbit.com/mypage/open_api_management', steps: ['업비트 웹 로그인 → 마이페이지 → Open API 관리', '권한은 <b>자산조회</b>만 체크 (주문하기·출금하기·입금하기는 체크하지 마세요)', '허용 IP 주소에 <b>이 서버의 공인 IP</b> 를 입력 (업비트는 IP 등록 필수)', 'Access Key·Secret Key 발급 — Secret 은 한 번만 보이니 바로 붙여넣으세요'], note: '키 유효기간(1년)이 지나면 다시 발급해야 해요.' },
-    bithumb: { url: 'https://www.bithumb.com/react/api-support/management-api', steps: ['빗썸 웹 로그인 → 마이페이지 → API 관리 → <b>API 2.0</b> 키 생성', '권한은 <b>자산조회</b>만 선택 (주문·출금 제외)', '허용 IP 에 이 서버 공인 IP 등록', 'API Key·Secret Key 를 붙여넣기'], note: '구 API(1.0) 키는 지원하지 않아요.' },
+    upbit: { url: 'https://upbit.com/mypage/open_api_management', steps: ['업비트 웹 로그인 → 마이페이지 → Open API 관리', '권한은 <b>자산조회·주문조회·입금조회·출금조회</b>만 체크 (주문하기·출금하기·입금하기는 체크하지 마세요 — 조회 넷은 잔고·체결·입출금 기록을 읽는 데 필요해요)', '허용 IP 주소에 <b>이 서버의 공인 IP</b> 를 입력 (업비트는 IP 등록 필수)', 'Access Key·Secret Key 발급 — Secret 은 한 번만 보이니 바로 붙여넣으세요'], note: '키 유효기간(1년)이 지나면 다시 발급해야 해요.' },
+    bithumb: { url: 'https://www.bithumb.com/react/api-support/management-api', steps: ['빗썸 웹 로그인 → 마이페이지 → API 관리 → <b>API 2.0</b> 키 생성', '권한은 <b>조회</b> 항목만 선택 — 자산·주문·입출금 <b>조회</b>(주문하기·출금하기 제외 · 체결·입출금 기록을 읽는 데 필요해요)', '허용 IP 에 이 서버 공인 IP 등록', 'API Key·Secret Key 를 붙여넣기'], note: '구 API(1.0) 키는 지원하지 않아요.' },
     binance: { url: 'https://www.binance.com/en/my/settings/api-management', steps: ['Account → API Management → Create API → <b>System generated</b>', '권한은 <b>Enable Reading</b> 만 (Spot & Margin Trading·Futures·Withdrawals·Universal Transfer 모두 끔)', 'IP access restrictions → <b>Restrict access to trusted IPs only</b> → 이 서버 공인 IP', 'API Key·Secret Key 붙여넣기'], note: '저장할 때 키 권한을 확인해 거래·출금·이체 권한이 켜져 있으면 저장하지 않아요.' },
     bybit: { url: 'https://www.bybit.com/app/user/api-management', steps: ['Account & Security → API → Create New Key → <b>System-generated API Keys</b>', '<b>API Transaction</b> 대신 <b>Read-Only</b> 선택', 'IP 제한: <b>Only IPs with permissions granted</b> → 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '통합 거래 계정(UTA) 기준으로 조회해요.' },
     okx: { url: 'https://www.okx.com/account/my-api', steps: ['프로필 → API → Create API key', '권한은 <b>Read</b> 만 (Trade·Withdraw 체크 금지)', 'IP 주소 허용 목록에 이 서버 공인 IP', '만들 때 정한 <b>Passphrase</b> 도 함께 입력'], note: 'Passphrase 는 OKX 가 다시 보여주지 않으니 기억해 두세요.' },
     kucoin: { url: 'https://www.kucoin.com/account/api', steps: ['API Management → Create API → API Trading', '권한은 <b>General</b> 만 (Spot·Margin·Futures Trading, Transfer, Withdrawal 끔)', 'IP Restriction → 이 서버 공인 IP', 'API Key·Secret·<b>Passphrase</b> 입력'], note: '' },
-    gate: { url: 'https://www.gate.io/myaccount/api_key_manage', steps: ['API Keys → Create API Key → <b>API v4 Key</b>', '권한: Spot·Wallet 을 <b>Read Only</b> 로 (나머지 끔)', 'IP 화이트리스트에 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '' }
+    gate: { url: 'https://www.gate.io/myaccount/api_key_manage', steps: ['API Keys → Create API Key → <b>API v4 Key</b>', '권한: Spot·Wallet 을 <b>Read Only</b> 로 · 선물 포지션을 보려면 Futures(무기한 계약)도 <b>Read Only</b> (Read Write·출금은 끔)', 'IP 화이트리스트에 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '' }
   };
   const XP_HELP = {
     helius: { url: 'https://dashboard.helius.dev', why: 'Solana 지갑 수집에 필요해요 (무료 플랜으로 충분).', steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
@@ -694,9 +694,9 @@
       + '<div class="cap su-p">덱스에 맡긴 담보·계정 가치는 총자산에 더하지 않아요(표시 전용 — Rabby 가 이미 잡는 경우 이중 계산 방지). 새 주소는 저장 후 15초 안에 수집을 시작하고, 옛 기록은 수집 시작일부터 받을 수 있는 만큼 몇 주기에 나눠 받아요.</div>'
       + '<div class="su-chiprow" role="group" aria-label="퍼프 덱스 고르기" style="margin-bottom:10px">' + chips + '</div>'
       + '<div class="su-form"><input class="field su-grow" data-su-in="p_addr" placeholder="' + esc(d ? d.name + ' 주소 (' + PERP_FMT[d.kind] + ')' : '주소') + '" autocomplete="off" spellcheck="false" aria-label="퍼프 덱스 주소">'
-      + '<input class="field" style="width:170px" data-su-in="p_label" placeholder="이름 (예: 메인)" maxlength="24" aria-label="퍼프 덱스 주소 이름"></div>'
+      + '<span class="su-frow"><input class="field su-plbl" data-su-in="p_label" placeholder="이름 (예: 메인)" maxlength="24" aria-label="퍼프 덱스 주소 이름">'
+      + '<button class="btn pri" data-su="padd"' + (U.busy.padd || !d ? ' disabled' : '') + '>주소 추가</button></span></div>'
       + '<div class="su-vmsg" id="suPvmsg">' + perpVmsg(d, draft('p_addr')) + '</div>'
-      + '<div class="su-actions"><button class="btn pri" data-su="padd"' + (U.busy.padd || !d ? ' disabled' : '') + '>주소 추가</button></div>'
       + list
       + '<div class="cap su-p" style="margin-top:12px">주소만으로는 못 읽는 곳: Aster·Paradex·GRVT·edgeX(덱스 API 키·서명 필요) · Drift(공개 데이터 API 응답 없음) · Vertex(종료). 덱스별로 받는 범위·못 받는 것은 <b>설정 › 수집 한계 › 거래소·체인별 한계 정리 › 퍼프 덱스</b>에 적어 두었어요.</div></div>';
   }
@@ -758,7 +758,13 @@
     const nxt = rest.map(p => p.nextAct).filter(Boolean);
     return '<div class="su-tw pvx"><div class="cap su-twh">확인 주기 · ' + (rest.length ? '쉬는 체인 ' + rest.length + '/' + ps.length + (nxt.length ? ' · 다음 점검 ' + inSec(Math.min(...nxt)) : '') : '모든 체인 지금 주기') + (lastFull ? ' · 마지막 전체 확인 ' + esc(ago(lastFull)) : '') + (ps.some(p => p.f) ? ' · 옛 기록은 뒤에서 채우는 중 — 새 거래는 지금 주기대로 확인해요' : '') + '</div>'
       + '<div class="su-tcs">' + ps.map(pairChip).join('') + '</div>'
-      + (rest.length ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(k) + '">지금 확인</button> <span class="cap">다음 수집 주기에 이 주소를 탐색기로 한 번 확인해요</span>' : '') + '</div>';
+      + '</div>';
+  }
+  function tierWBtnHTML(el) {
+    const T = U.tier, k0 = el && el.getAttribute('data-w') || '';
+    if (!T) return '';
+    const k = /^0x/i.test(k0) ? k0.toLowerCase() : k0, ps = (T.addrs || {})[k] || [];
+    return ps.some(p => p.t > 0 && !p.h) ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(k) + '" title="다음 수집 주기에 이 주소를 탐색기로 한 번 확인해요">지금 확인</button>' : '';
   }
   function budgetRows(T, extra) {
     const b = T.budget || {}, keys = Object.keys(b);
@@ -815,12 +821,12 @@
     return '<div class="su-bg su-tbg" role="dialog" aria-modal="true" aria-labelledby="suTierT"><div class="su-tsheet">'
       + '<div class="su-tsh"><h3 id="suTierT">주소별 확인 주기</h3><button class="btn sm" data-su="tclose" aria-label="닫기">닫기</button></div>'
       + '<div class="cap su-p pvx">지금 주기 = 매 수집 주기 · 쉬는 주소 = 10분마다 잔고만 보고(그 점검은 탐색기 0콜) 바뀌면 그때 탐색기로 복구 · 토큰 입금은 10분마다 따로 확인(받은 주소만 바로 탐색기로) · 탐색기 받침 확인은 1시간마다</div>'
-      + '<div class="su-tlist">' + rows.map(r => {
+      + '<div class="su-tlist">' + suPgSlice(rows, U.tierPg, 20).map(r => {
         const rest = r.pairs.some(p => p.t > 0 && !p.h), lf = Math.max(0, ...r.pairs.map(p => p.full || 0));
         return '<div class="su-trow"><div class="su-trm"><b class="pvl"' + (r.w.label ? ' data-pk="w"' : '') + '>' + esc(r.w.label ? suOwn(r.w.label) : '(이름 없음)') + '</b> <span class="num su-tad">' + esc(r.k.length > 14 ? r.k.slice(0, 6) + '…' + r.k.slice(-4) : r.k) + '</span>'
           + (lf ? '<span class="cap pvx"> · 확인 ' + esc(ago(lf)) + '</span>' : '') + '<div class="su-tcs">' + r.pairs.map(pairChip).join('') + '</div></div>'
           + (rest ? '<button class="btn sm" data-su="tcheck" data-v="' + esc(r.k) + '">지금 확인</button>' : '') + '</div>';
-      }).join('') + '</div></div></div>';
+      }).join('') + '</div>' + suPgBar('tPg', U.tierPg, rows.length, 20, '곳', false) + '</div></div>';
   }
   let tierEl = null;
   function renderTierSheet() {
@@ -869,11 +875,24 @@
   function chSub(r) {
     if (!r.on) return '조회 안 함 · 알림 없음' + (r.offAt ? ' · ' + chDay(r.offAt) + (r.autoOff ? '에 자동으로 끔(활동 없음)' : '에 끔') : '') + ' · 지갑 ' + fmtN(r.wallets) + '개';
     const p = ['지갑 ' + fmtN(r.wallets) + '개' + (r.pollSec ? ' · <b>' + esc(chEvery(r.pollSec)) + '</b> 확인' : '')];
-    if (r.rest) p.push('오래 안 쓴 ' + fmtN(r.rest) + '곳은 쉬어요');
-    if (r.status === 'filling') p.push('옛 기록은 뒤에서 채우는 중 — 새 거래는 지금 주기대로 확인해요');
+    if (r.rest) p.push('쉬는 지갑 ' + fmtN(r.rest) + '곳');
+    if (r.status === 'filling') p.push('옛 기록 채우는 중');
     if (!r.can) p.push(esc(r.why || '여기서 못 꺼요'));
-    else if (r.auto) p.push('활동이 보여 자동으로 켠 체인' + (r.autoNewDays != null ? ' · 끄기 추천은 ' + fmtN(Math.max(1, (U.ch.autoGraceDays || 30) - r.autoNewDays)) + '일 뒤부터' : ''));
+    else if (r.auto) p.push('자동으로 켬' + (r.autoNewDays != null ? ' · 끄기 추천 ' + fmtN(Math.max(1, (U.ch.autoGraceDays || 30) - r.autoNewDays)) + '일 뒤' : ''));
     return p.join(' · ');
+  }
+  function suPgBar(act, p, total, size, unit, fold) {
+    const last = Math.max(0, Math.ceil(total / size) - 1), q = Math.max(0, Math.min(last, p | 0)), a = q * size + 1, b = Math.min(total, a + size - 1);
+    const nav = (d, t, l, dis) => '<button type="button" class="ubtn upgb" data-su="' + act + '" data-v="' + (q + d) + '"' + (dis ? ' disabled' : '') + ' aria-label="' + l + '">' + t + '</button>';
+    const fd = fold ? '<button type="button" class="ubtn upgx" data-su="' + act + '" data-v="-1" aria-label="목록 접기"><span class="upgxt">접기</span><span class="uchev up" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span></button>' : '';
+    if (last === 0 && !fd) return '';
+    return '<div class="umore"><div class="upg" role="group" aria-label="쪽 넘기기">' + (last > 0 ? nav(-1, '‹ 이전', '이전 쪽', q === 0) + '<span class="upgt num pvx" aria-live="polite">' + fmtN(a) + '–' + fmtN(b) + ' <span class="mut">/ ' + fmtN(total) + '<span class="upgu">' + unit + '</span></span></span>' + nav(1, '다음 ›', '다음 쪽', q === last) : '') + fd + '</div></div>';
+  }
+  const suPgSlice = (list, p, size) => { const last = Math.max(0, Math.ceil(list.length / size) - 1), q = Math.max(0, Math.min(last, p | 0)); return list.slice(q * size, q * size + size); };
+  function suPgFocus(act, sel, lbl) {
+    const t = document.querySelector(sel); if (t && t.getBoundingClientRect().top < 60) t.scrollIntoView({ block: 'start' });
+    const bs = Array.from(document.querySelectorAll('[data-su="' + act + '"]:not([disabled])')), b = bs.find(x => x.getAttribute('aria-label') === lbl) || bs[0];
+    if (b) { try { b.focus({ preventScroll: true }); } catch (e) {  } }
   }
   function chRow(r, first) {
     const st = CH_ST[r.status], name = esc(r.name || r.key);
@@ -881,7 +900,7 @@
     const rec = r.recommend ? '<div class="su-chrec">' + '<span class="su-chri">' + CH_REC_IC + '</span><span class="su-chrt"><b>끄는 걸 추천해요</b><span> — 이 체인에서 보낸 거래가 지갑마다 ' + fmtN(U.ch.nonceMax) + '번 이하예요</span></span>'
       + '<span class="su-chrm">가장 많은 지갑도 ' + fmtN(r.maxNonce) + '번' + (r.calls ? ' · 하루 −' + fmtN(r.calls.perDay) + '콜' : '') + (r.big ? ' · <b class="su-chbig">잔고 ' + chMoney(r.usd) + ' 있음</b>' : '') + '</span></div>' : '';
     return '<div class="su-chr' + (r.recommend ? ' rec' : '') + (r.on ? '' : ' off') + (first ? ' first' : '') + '" data-ch="' + esc(r.key) + '"><div class="su-chm"><div class="su-chh"><i class="su-chd" style="background:' + chColor(r.key) + '"></i><b>' + name + '</b>'
-      + (st ? pill(st[0] + ' sm', st[1]) : '') + (r.can ? '' : pill('g sm', CH_LOCK[r.lock] || '끄기 잠금')) + '</div><div class="su-chs">' + chSub(r) + '</div></div>'
+      + (st ? pill(st[0] + ' sm', st[1]) : '') + (r.can ? '' : pill('g sm', CH_LOCK[r.lock] || '끄기 잠금')) + '</div><div class="su-chs" title="' + esc(String(chSub(r)).replace(/<[^>]*>/g, '')) + '">' + chSub(r) + '</div></div>'
       + '<div class="su-chc">' + chSpark(r) + '</div>' + sw + rec + '</div>';
   }
   function chAutoHTML(C, off) {
@@ -918,16 +937,20 @@
     const rows = Array.isArray(C.rows) ? C.rows : [];
     const on = rows.filter(r => r.on), off = rows.filter(r => !r.on);
     const rec = on.filter(r => r.recommend), rest = on.filter(r => !r.recommend).sort((a, b) => (b.sent30 || 0) - (a.sent30 || 0) || (b.wallets || 0) - (a.wallets || 0));
-    const LIM = 6, all = !!U.chAll, shown = all ? rest : rest.slice(0, LIM);
+    const LIM = 6, all = U.chPg != null && U.chPg >= 0, shown = all ? suPgSlice(rest, U.chPg, 10) : rest.slice(0, LIM);
+    const OFFL = 5, offAll = U.chOffPg != null && U.chOffPg >= 0, offShown = offAll ? suPgSlice(off, U.chOffPg, 10) : off.slice(0, OFFL);
     const head = '<div class="su-chtop"><b class="su-cht">체인별 조회</b><span class="su-chmeta">켜짐 ' + fmtN(C.nOn) + ' · 꺼짐 ' + fmtN(C.nOff) + ' · 지갑 ' + fmtN(C.nWallets) + '개</span><span class="sp"></span>'
       + (C.nRec ? pill('w sm su-chrb', '끄기 추천 ' + C.nRec) : '') + '</div>'
-      + '<p class="su-chp">안 쓰는 체인을 끄면 조회·알림이 멈추고 컴퓨터·API 한도를 아껴요. 언제든 다시 켤 수 있어요(켜면 빠진 기간을 이어 받아요).</p>'
+      + '<p class="su-chp">안 쓰는 체인을 끄면 조회·알림이 멈추고 컴퓨터·API 한도를 아껴요. 언제든 다시 켤 수 있어요(켜면 빠진 기간을 이어 받아요).'
+      + (on.some(r => r.rest) ? ' 쉬는 지갑 = 7일 넘게 안 보낸 지갑(10분마다 잔고 · 1시간마다 탐색기 확인).' : '') + (on.some(r => r.status === 'filling') ? ' 옛 기록 채우는 중 = 새 거래는 지금 주기대로 확인하고 옛 기록은 뒤에서 받아요.' : '')
+      + (on.some(r => r.auto && r.can) ? ' 자동으로 켬 = 활동이 보여 켠 체인(켠 뒤 ' + fmtN(C.autoGraceDays || 30) + '일은 끄기 추천 안 함).' : '') + '</p>'
       + chAutoHTML(C, off);
     const steps = Array.isArray(C.pollSteps) && C.pollSteps.length ? '<div class="su-chinfo"><b>확인 주기는 지갑 수에 맞춰 늘어나요</b><div class="su-tsteps">' + C.pollSteps.map(x => pill('g sm', String(x.label || ''))).join('') + '</div></div>' : '';
     const colh = '<div class="su-chr su-chcol" aria-hidden="true"><span class="su-chm">체인 · 상태 · 확인 주기</span><span class="su-chc">최근 30일 보낸 거래</span><span class="su-chsw">조회</span></div>';
     const list = rec.map((r, i) => chRow(r, i === 0)).join('') + shown.map((r, i) => chRow(r, !rec.length && i === 0)).join('')
-      + (rest.length > LIM ? '<div class="su-chmore"><button class="btn sm" data-su="chAll" aria-expanded="' + all + '">' + (all ? '접기' : '다른 체인 ' + fmtN(rest.length - LIM) + '개 더 보기 · 모두 조회 중') + '</button></div>' : '');
-    const offH = off.length ? '<div class="su-choh">꺼 둔 체인 ' + fmtN(off.length) + '<span>조회·알림 멈춤 · 그동안 새 거래·잔고 변화는 안 들어와요 · 다시 켜면 끈 날부터 이어 받아요</span></div>' + off.map((r, i) => chRow(r, i === 0)).join('') : '';
+      + (rest.length > LIM ? '<div class="su-chmore">' + (all ? suPgBar('chPg', U.chPg, rest.length, 10, '개', true) : '<button class="btn sm" data-su="chAll" aria-expanded="false">다른 체인 ' + fmtN(rest.length - LIM) + '개 더 보기 · 모두 조회 중</button>') + '</div>' : '');
+    const offH = off.length ? '<div class="su-choh">꺼 둔 체인 ' + fmtN(off.length) + '<span>조회·알림 멈춤 · 그동안 새 거래·잔고 변화는 안 들어와요 · 다시 켜면 끈 날부터 이어 받아요</span></div>' + offShown.map((r, i) => chRow(r, i === 0)).join('')
+      + (off.length > OFFL ? '<div class="su-chmore">' + (offAll ? suPgBar('chOffPg', U.chOffPg, off.length, 10, '개', true) : '<button class="btn sm" data-su="chOffPg" data-v="0" aria-expanded="false">꺼 둔 체인 ' + fmtN(off.length) + '개 모두 보기</button>') + '</div>' : '') : '';
     const calls = C.callsDay != null ? '<div class="su-chfoot"><div class="su-chfh"><b>하루 예상 호출</b><span class="cap">켜진 체인 ' + fmtN(C.nOn) + '개 · 수집기 장부 기준</span><span class="sp"></span><span class="num">' + fmtN(C.callsDay) + '콜</span></div>'
       + (C.recCallsDay ? '<div class="cap">추천 ' + fmtN(C.nRec) + '개를 끄면 하루 약 ' + fmtN(C.recCallsDay) + '콜 줄어요</div>' : '') + '</div>' : '';
     const swept = C.sweptAt ? '<div class="cap su-chnote">nonce = 하루 한 번 점검 기준(' + esc(ago(C.sweptAt)) + ') · 모르는 지갑(EOA 확인 전·점검 실패·이틀 넘은 값)이 하나라도 있거나, 최근 30일 안에 보낸 거래가 있거나, 옛 기록을 채우는 중이면 추천하지 않아요</div>' : '';
@@ -971,7 +994,7 @@
     await loadChains(true);
   }
   const ipHTML = () => (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>');
-  const SLOTS = { keys: keysHTML, exchanges: exchangesHTML, telegram: tgHTML, wadd: () => walletsHTML(true), perp: perpHTML, apply: applyHTML, ip: ipHTML, tier: tierHTML, tierw: tierWHTML, chains: chainsHTML };
+  const SLOTS = { keys: keysHTML, exchanges: exchangesHTML, telegram: tgHTML, wadd: () => walletsHTML(true), perp: perpHTML, apply: applyHTML, ip: ipHTML, tier: tierHTML, tierw: tierWHTML, tierwbtn: tierWBtnHTML, chains: chainsHTML };
   let wizEl = null, permEl = null;
   function onSettings() { return /^settings(\/|$)/.test((location.hash || '').replace('#', '')); }
   function slotErrHTML() { return '<div class="su-bad" style="padding:8px 0">연결·키 상태를 불러오지 못했어요' + (U.err ? ' · ' + esc(U.err) : '') + ' <button class="link" data-su="retry">다시 시도</button></div>'; }
@@ -1025,7 +1048,7 @@
     stopPoll(); if (U.dpPoll) { clearInterval(U.dpPoll); U.dpPoll = null; }
     U.st = null; U.err = null; U.d = {}; U.test = {}; U.busy = {}; U.dpWait = {}; U.wRes = null; U.wErr = {}; U.perm = null; U.open = false; U.ack = {}; U.needAck = {}; U.ip = '';
     U.tier = null; U.tierErr = ''; U.tierErrN = 0; U.tierErrAt = 0; U.tierSheet = false; if (tierEl) { tierEl.remove(); tierEl = null; }
-    U.ch = null; U.chErr = ''; U.chErrN = 0; U.chErrAt = 0; U.chAll = false;
+    U.ch = null; U.chErr = ''; U.chErrN = 0; U.chErrAt = 0; U.chAll = false; U.chPg = -1; U.chOffPg = -1; U.tierPg = 0;
     Object.assign(U.tg, { phase: 'idle', err: '', bot: null, link: '', start: '', left: 0, tok: '' });
     if (wizEl) { wizEl.remove(); wizEl = null; }
     if (permEl) { permEl.remove(); permEl = null; }
@@ -1092,13 +1115,16 @@
       el.disabled = false;
       setTimeout(() => loadTier(true), 2500);
     },
-    tsheet() { U.tierSheet = true; renderTierSheet(); const b = document.querySelector('#suTier [data-su="tclose"]'); if (b) b.focus(); },
+    tsheet() { U.tierSheet = true; U.tierPg = 0; renderTierSheet(); const b = document.querySelector('#suTier [data-su="tclose"]'); if (b) b.focus(); },
     tclose() { U.tierSheet = false; renderTierSheet(); const b = document.querySelector('[data-su="tsheet"]'); if (b) b.focus(); },
     tload() { U.tierErr = ''; loadTier(true); },
     tpub() { U.tierPub = !U.tierPub; fill(); },
     chTog(el) { const k = el.getAttribute('data-v'), r = U.ch && (U.ch.rows || []).find(x => x.key === k); if (r && r.can) chAsk(r); },
     chLoad() { U.chErr = ''; loadChains(true); },
-    chAll() { U.chAll = !U.chAll; fill(); },
+    chAll() { U.chPg = U.chPg != null && U.chPg >= 0 ? -1 : 0; fill(); },
+    chPg(el) { const v = +el.getAttribute('data-v'), lb = el.getAttribute('aria-label'); U.chPg = v; fill(); if (v >= 0) suPgFocus('chPg', '#sx-wallets-chains', lb); },
+    chOffPg(el) { const v = +el.getAttribute('data-v'), lb = el.getAttribute('aria-label'); U.chOffPg = v; fill(); if (v >= 0) suPgFocus('chOffPg', '#sx-wallets-chains .su-choh', lb); },
+    tPg(el) { const lb = el.getAttribute('aria-label'); U.tierPg = Math.max(0, +el.getAttribute('data-v') || 0); renderTierSheet(); const t = document.querySelector('#suTier .su-tsheet'); if (t) t.scrollTop = 0; suPgFocus('tPg', '#suTier .su-tsh', lb); },
     chAutoTog() { if (U.ch) chAutoSet(U.ch.autoOffOn === false); },
     async wadd() {
       if (U.busy.wadd) return;
@@ -1370,6 +1396,7 @@
     '.su-h{font-size:16px;font-weight:700}',
     '.su-p{margin:4px 0 12px;line-height:1.6}',
     '.su-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
+    '.su-frow{display:flex;gap:8px;align-items:center;flex:0 1 auto;min-width:0} .su-frow .su-plbl{width:170px} @media (max-width:640px){.su-frow{flex:1 1 100%}.su-frow .su-plbl{flex:1;width:auto;min-width:0}}',
     '.su-grow{flex:1;min-width:200px}',
     '.su-vmsg{margin:8px 0 4px;font-size:13px;min-height:20px}',
     '.su-good{color:var(--ok);font-weight:600}',
@@ -1422,8 +1449,8 @@
     '.su-chains{margin-top:8px}',
     '.su-tier{display:flex;flex-direction:column;gap:10px}',
     '.su-ttiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}',
-    '.su-ttiles>div{background:var(--surface2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}',
-    '.su-ttiles b{font-size:18px;line-height:1.2} .su-ttiles span{font-size:12px;color:var(--text2)}',
+    '.su-ttiles>div{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}',
+    '.su-ttiles b{font-size:24px;font-weight:650;letter-spacing:-.03em;line-height:1.2} .su-ttiles span{font-size:12px;color:var(--muted);font-weight:600}',
     '.su-tsteps,.su-tcs{display:flex;gap:6px;flex-wrap:wrap}',
     '.su-tcs{margin:6px 0}',
     '.su-th{font-weight:700;font-size:14px;margin-top:4px}',
@@ -1440,7 +1467,7 @@
     '.su-tlist{margin-top:8px;border-top:1px solid var(--line)}',
     '.su-trow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)} .su-trm{min-width:0;flex:1} .su-tad{font-size:12.5px;color:var(--text2)}',
     '.su-ch{display:flex;flex-direction:column;min-width:0}',
-    '.su-chtop{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap} .su-cht{font-size:15px;font-weight:700} .su-chmeta{font-size:12.5px;color:var(--text2);font-variant-numeric:tabular-nums}',
+    '.su-chtop{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap} .su-cht{font-size:12.5px;font-weight:650;color:var(--muted);letter-spacing:.01em} .su-chmeta{font-size:12.5px;color:var(--text2);font-variant-numeric:tabular-nums}',
     '.su-chtop .sp,.su-chfh .sp,.su-mdh .sp{flex:1}',
     '.su-chp{margin:6px 2px 12px;font-size:13px;line-height:1.55;color:var(--text2)}',
     '.su-chinfo{background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-size:13px;display:flex;flex-direction:column;gap:8px}',
@@ -1466,7 +1493,7 @@
     '.su-chrt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1} .su-chrt b{color:var(--warn);font-weight:650} .su-chrt span{color:var(--text)}',
     '.su-chrm{font-size:12px;color:var(--text2);white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}',
     '.su-chbig{color:var(--warn);font-weight:650}',
-    '.su-chmore{padding:8px 0 2px}',
+    '.su-chmore{padding:8px 0 2px;display:flex;justify-content:center}',
     '.su-choh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--text2);font-weight:650;margin:16px 0 2px} .su-choh span{font-size:12px;font-weight:500;color:var(--muted)}',
     '.su-chfoot{border-top:1px solid var(--line);margin-top:4px;padding:12px 0 4px;display:flex;flex-direction:column;gap:4px} .su-chfh{display:flex;align-items:baseline;gap:8px;font-size:13.5px;flex-wrap:wrap}',
     '.su-chnote{margin-top:8px;line-height:1.55}',
@@ -1477,7 +1504,7 @@
     '.su-mdk{color:var(--text2);white-space:nowrap} .su-mdv{color:var(--text);min-width:0}',
     '.su-mdf{display:block;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line2);font-size:12.5px;color:var(--muted)}',
     '.su-mda{display:block;margin-top:10px;font-size:12.5px;color:var(--text2)}',
-    '@media (max-width:640px){.su-chr{grid-template-columns:minmax(0,1fr) auto 46px;column-gap:10px}.su-chs{white-space:normal}.su-chsp,.su-chdash{display:none}.su-chcol .su-chc{font-size:11px;max-width:64px;white-space:normal;line-height:1.3}.su-chrec{flex-wrap:wrap}.su-chrt{white-space:normal}.su-chrm{flex-basis:100%;white-space:normal;padding-left:23px}.su-chr.rec{margin:4px -8px;padding:10px 8px}}',
+    '@media (max-width:640px){.su-chr{grid-template-columns:minmax(0,1fr) auto 46px;column-gap:10px}.su-chsp,.su-chdash{display:none}.su-chcol .su-chc{font-size:11px;max-width:64px;white-space:normal;line-height:1.3}.su-chrec{flex-wrap:wrap}.su-chrt{white-space:normal}.su-chrm{flex-basis:100%;white-space:normal;padding-left:23px}.su-chr.rec{margin:4px -8px;padding:10px 8px}}',
     '.su-chiprow{display:flex;gap:6px;flex-wrap:wrap}',
     '.su-chip{padding:6px 11px;border-radius:99px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface2);color:var(--text2)}',
     '.su-chip.on{background:var(--accentBg);color:var(--accent);border-color:transparent}',
@@ -1516,7 +1543,7 @@
     '.su-foot{display:flex;gap:8px;align-items:center;margin-top:18px}',
     '.su-skip{text-align:center;margin-top:12px}',
     '.su-demo{position:relative;z-index:31;text-align:center;font-size:12.5px;font-weight:700;padding:5px 12px;background:var(--warnBg);color:var(--warn)}',
-    '@media (max-width:640px){.su-tsheet{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}.su-bpl{columns:1}.su-ttiles b{font-size:16px}}',
+    '@media (max-width:640px){.su-tsheet{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}.su-bpl{columns:1}.su-ttiles b{font-size:22px}}',
     '@media (max-width:640px){.su-perm{border-radius:0;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom));border-width:0 0 0 4px}.su-perm h3{font-size:19px}.su-bg{padding:0}.su-wiz{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom));border:0}.su-step span{display:none}.su-step.on span{display:inline}.su-tgwait{flex-direction:column;align-items:center}.su-sec{padding:16px}.su-grow{min-width:0;flex-basis:100%}.su-form .field[style]{width:100%!important}.su-kbd{display:none}}'
   ].join('\n');
   document.head.appendChild(css);

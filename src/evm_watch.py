@@ -90,6 +90,45 @@ def _dm(kind: str, text: str):
 ES_FALLBACK_STREAK = 3
 
 
+_TRACE_END = object()
+TRACE_DEPTH_MAX = 1024
+TRACE_FAIL_NODES_MAX = 200_000
+
+
+def trace_fail_index(res) -> dict:
+    root = {}
+    n = 0
+    for t in res:
+        if isinstance(t, dict) and t.get("error"):
+            path = t.get("traceAddress") or []
+            if len(path) > TRACE_DEPTH_MAX:
+                raise ValueError("traceAddress 깊이 상한 초과")
+            node = root
+            for x in path:
+                nxt = node.get(x)
+                if nxt is None:
+                    n += 1
+                    if n > TRACE_FAIL_NODES_MAX:
+                        raise ValueError("실패 경로 노드 상한 초과")
+                    nxt = node[x] = {}
+                node = nxt
+            node[_TRACE_END] = True
+    return root
+
+
+def trace_path_failed(index: dict, ta) -> bool:
+    node = index
+    if _TRACE_END in node:
+        return True
+    for x in ta:
+        node = node.get(x)
+        if node is None:
+            return False
+        if _TRACE_END in node:
+            return True
+    return False
+
+
 def es_fallback_watcher(cfg: dict, wt, writer, daily: bool = False, why: str = None):
     why9 = "day" if daily else (why or "es_fail")
     dead9 = ("rpc_first" if evm_route(cfg, wt.chain, decide=False) == "rpc_first" else None) or rpcfb_bs_dead(cfg, wt.chain)
@@ -1472,6 +1511,20 @@ def rpc_handback(wt, target: str):
             hq.setdefault(h9.lower(), 0)
             keep9[h9.lower()] = dict(e9)
             n_tl9 += 1
+    try:
+        with open(os.path.join(common.STATE_DIR, f"trace_later_overflow_{wt.chain}.jsonl"), encoding="utf-8") as f9:
+            for ln9 in f9:
+                try:
+                    r9 = json.loads(ln9)
+                except ValueError:
+                    continue
+                h9 = str((r9 or {}).get("h") or "").lower() if isinstance(r9, dict) else ""
+                if h9.startswith("0x") and h9 not in keep9:
+                    hq.setdefault(h9, 0)
+                    keep9[h9] = {"at": int(r9.get("at") or 0), "n": int(r9.get("n") or 0), "next": 0, "blk": int(r9.get("blk") or 0), "sent": True}
+                    n_tl9 += 1
+    except (OSError, TypeError, ValueError):
+        pass
     if keep9:
         tp9 = os.path.join(common.STATE_DIR, f"trace_later_left_{wt.chain}.json")
         old9 = common.read_json(tp9, {})
@@ -4429,6 +4482,31 @@ class BisectBudget(RuntimeError):
     pass
 
 
+class TraceDeferred(bf_engine.NetError):
+
+    def __init__(self, msg: str = "budget: trace 마감 — 시도 안 함(다음 차례)"):
+        super().__init__(msg, "budget")
+
+
+class _TraceBudget:
+
+    def __init__(self, w, dl):
+        self.w, self.dl = w, dl
+
+    def __enter__(self):
+        self.old = self.w.__dict__.get("_tdl")
+        dl = self.dl if self.old is None or self.dl is None else min(float(self.old), float(self.dl))
+        self.w._tdl = self.old if dl is None else dl
+        return self
+
+    def __exit__(self, *a):
+        if self.old is None:
+            self.w.__dict__.pop("_tdl", None)
+        else:
+            self.w._tdl = self.old
+        return False
+
+
 class ChainDisabled(Exception):
     pass
 
@@ -4767,6 +4845,19 @@ class RpcChainWatcher(RpcSynthMixin):
         ready = [u for u in ok if not bf_engine.gate(u).resting()]
         return (ready + [u for u in ok if u not in ready]) if ok else list(urls)
 
+    def _node_order(self, urls):
+        order = self._order(urls)
+        if not self.__dict__.get("_key_ctx"):
+            return order
+        try:
+            import nodekeys
+            key9 = [u for u in order if nodekeys.is_key_node(u) and not bf_engine.gate(u).is_open() and not bf_engine.gate(u).resting()]
+        except Exception:
+            return order
+        if not key9 or len(key9) == len(order):
+            return order
+        return key9 + [u for u in order if u not in key9]
+
     def _rpc_call(self, method: str, params: list):
         if self._pref is not None:
             k = (method, json.dumps(params, sort_keys=True))
@@ -4786,7 +4877,7 @@ class RpcChainWatcher(RpcSynthMixin):
 
     def _batch(self, calls: list, urls: list = None) -> list:
         last, all_bad = None, None
-        for url in self._order(urls or self.cfg_rpcs):
+        for url in self._node_order(urls or self.cfg_rpcs):
             try:
                 out = []
                 cap = bf_engine.gate(url).batch_cap(40)
@@ -4820,7 +4911,7 @@ class RpcChainWatcher(RpcSynthMixin):
                 calls += [("eth_getTransactionCount", [w, hex(b)]), ("eth_getBalance", [w, hex(b)])]
             got = {}
             last = None
-            order9 = self._order(self.state_rpcs)
+            order9 = self._node_order(self.state_rpcs)
             transient9 = {}
             for url in order9:
                 todo = [p for p in need if p not in got]
@@ -4868,8 +4959,9 @@ class RpcChainWatcher(RpcSynthMixin):
                     raise last
             self._st_memo.update(got)
             if len(self._st_memo) > self.ST_MEMO_MAX:
+                keep9 = set(pairs)
                 for k9 in list(self._st_memo)[:len(self._st_memo) - self.ST_MEMO_KEEP]:
-                    if k9 not in got:
+                    if k9 not in got and k9 not in keep9:
                         self._st_memo.pop(k9, None)
         return {p: self._st_memo[p] for p in pairs}
 
@@ -4984,26 +5076,106 @@ class RpcChainWatcher(RpcSynthMixin):
             finally:
                 self._pref = None
         if self.trace_rpcs and trace:
+            brk9, nbrk9 = None, 0
+            tdl9 = deadline if deadline is not None else (self.__dict__.get("_tdl") or time.time() + self.TRACE_CALL_CAP_SEC)
+            ctx9 = late or bool(self.__dict__.get("_peek_ctx"))
+            nf9 = 0
             for h, snap in list(out.items()):
                 if isinstance(snap, dict) and self._trace_want(h, snap):
+                    if time.time() >= tdl9 or nf9 >= self.TRACE_SICK_N or (ctx9 and self._trace_sick()):
+                        nbrk9 += 1
+                        self._trace_late_add(h)
+                        continue
                     try:
-                        self._trace_internal(h, snap)
+                        if brk9 is not None:
+                            raise brk9
+                        with self._trace_budget(tdl9):
+                            self._trace_internal(h, snap)
+                        nf9 = 0
                     except Exception as e:
+                        if isinstance(e, TraceDeferred):
+                            nbrk9 += 1
+                            self._trace_late_add(h)
+                            continue
+                        if brk9 is None and late and not self._trace_gone(e):
+                            brk9 = e
+                        elif brk9 is not None and e is brk9:
+                            nbrk9 += 1
+                            self._trace_late_add(h)
+                            continue
                         if self._trace_gone(e):
                             log.info("%s trace 불가(과거 상태 없음·미지원) — internal 없이 확정 %s: %s", self.chain, h[:12], common.safe_err(e)[:80])
                             continue
+                        nf9 += 1
                         n9 = self._trace_fail[h] = self._trace_fail.get(h, 0) + 1
                         if n9 < self.TRACE_RETRY and not late:
                             out[h] = RuntimeError(f"trace 실패 {n9}회(재시도): {common.safe_err(e)[:100]}")
                         else:
-                            late9 = self.__dict__.setdefault("_trace_late", set())
-                            if len(late9) > 20000:
-                                late9.clear()
-                            late9.add(h)
+                            self._trace_late_add(h)
                             getattr(log, "info" if late else "warning")("%s trace %d회 실패 — internal 없이 확정 · 나중에 다시(늦은 채움) %s: %s",
                                                                         self.chain, n9, h[:12], common.safe_err(e)[:80])
+            if nbrk9:
+                log.info("%s trace 노드 일시 막힘 — 이 걸음 남은 %d건은 trace 없이 늦은 채움으로(다음 사이클부터 백오프 재시도)", self.chain, nbrk9)
         self._fill_symbols([s for s in out.values() if isinstance(s, dict)])
         return out
+
+    def _trace_late_add(self, h: str) -> None:
+        late9 = self.__dict__.get("_trace_late")
+        if not isinstance(late9, dict):
+            late9 = self._trace_late = dict.fromkeys(late9 or ())
+        late9.pop(h, None)
+        late9[h] = 1
+        if len(late9) > 20000:
+            memo9 = self.__dict__.get("_snap_memo") or {}
+            for k9 in list(late9)[:len(late9) - 15000]:
+                late9.pop(k9, None)
+                memo9.pop(k9, None)
+
+    TRACE_SICK_N = 2
+    TRACE_SICK_SEC = 300
+    TRACE_CALL_CAP_SEC = 120
+    TRACE_MIN_LEFT = 1.0
+    TRACE_FIRST_SEC = 30
+    LEAF_FIRST_SEC = 60
+
+    def _trace_budget(self, dl):
+        return _TraceBudget(self, dl)
+
+    def _trace_kw(self, cap: float):
+        dl = self.__dict__.get("_tdl")
+        if dl is None:
+            return {"timeout": cap, "retries": 1}
+        left = float(dl) - time.time()
+        if left < self.TRACE_MIN_LEFT:
+            return None
+        return {"timeout": min(float(cap), left), "retries": 1, "deadline": bf_engine.time.time() + left, "sem_timeout": left}
+
+    def _trace_sick(self) -> bool:
+        return time.time() < float(self.__dict__.get("_trace_sick_until") or 0)
+
+    @staticmethod
+    def _trace_untried(e) -> bool:
+        return isinstance(e, TraceDeferred) or (isinstance(e, bf_engine.NetError) and (
+            getattr(e, "kind", None) in ("budget", "circuit") or bool(getattr(e, "local", False))))
+
+    def _trace_note(self, ok: bool) -> None:
+        if ok:
+            self._trace_nf = 0
+            if float(self.__dict__.get("_trace_sick_until") or 0):
+                self._trace_sick_until = 0.0
+                log.info("%s trace 노드 회복 — 늦은 채움·엿보기 trace 다시 켬", self.chain)
+            return
+        n9 = self._trace_nf = int(self.__dict__.get("_trace_nf") or 0) + 1
+        if n9 >= self.TRACE_SICK_N:
+            if not self._trace_sick():
+                log.info("%s trace 노드 연속 %d회 실패 — %d초 동안 따라잡기·엿보기 trace 는 바로 늦은 채움(꼬리·보완 작업이 회복 확인)",
+                         self.chain, n9, self.TRACE_SICK_SEC)
+                self._trace_sick_until = time.time() + self.TRACE_SICK_SEC
+
+    @staticmethod
+    def _trace_slow(e) -> bool:
+        m = str(e).lower()
+        return getattr(e, "kind", None) == "timeout" or getattr(e, "code", None) == 408 or "timeout" in m or "timed out" in m
 
     def _prestate(self, h: str, w: str) -> tuple:
         last = None
@@ -5023,22 +5195,47 @@ class RpcChainWatcher(RpcSynthMixin):
         last = None
         errs9 = []
         tr = None
+        pf9 = bool(snap.pop("_trace_parity_first", False))
+        self._trace_mixed = False
+        if pf9:
+            rows9 = self._trace_parity(h, errs9)
+            if rows9 is not None:
+                snap["internal"] = rows9
+                snap["internal_note"] = "trace"
+                self._trace_fail.pop(h, None)
+                self._trace_note(True)
+                return
+        slow9 = set()
         for url in self._trace_nodes(errs9):
+            kw9 = self._trace_kw(30)
+            if kw9 is None:
+                errs9.append(TraceDeferred())
+                break
             try:
-                tr = bf_engine.rpc_call(url, "debug_traceTransaction", [h, {"tracer": "callTracer"}], timeout=30, retries=1)
+                tr = bf_engine.rpc_call(url, "debug_traceTransaction", [h, {"tracer": "callTracer"}], **kw9)
                 break
             except Exception as e:
                 last = e
                 errs9.append(e)
+                if self._trace_slow(e):
+                    slow9.add(url)
         if not isinstance(tr, dict) or not tr.get("type"):
             if tr is not None:
                 errs9.append(RuntimeError("trace 응답 형식 오류"))
-            rows9 = self._trace_parity(h, errs9)
+            rows9 = None if pf9 else self._trace_parity(h, errs9, skip=slow9 if self._trace_sick() else ())
             if rows9 is None:
-                raise self._trace_err(errs9, last) or RuntimeError("trace 응답 형식 오류")
+                e9 = self._trace_err(errs9, last) or RuntimeError("trace 응답 형식 오류")
+                tried9 = tr is not None or any(not self._trace_untried(x) for x in errs9)
+                if not tried9 and errs9:
+                    raise TraceDeferred(f"budget: trace 전송 전 보류 — 다음 차례({common.safe_err(e9)[:60]})")
+                if tried9 and not self._trace_gone(e9):
+                    self._trace_note(False)
+                self._trace_mixed = any(self._trace_untried(x) for x in errs9)
+                raise e9
             snap["internal"] = rows9
             snap["internal_note"] = "trace"
             self._trace_fail.pop(h, None)
+            self._trace_note(True)
             return
         myset = set(self.wallets)
         out = []
@@ -5058,13 +5255,21 @@ class RpcChainWatcher(RpcSynthMixin):
         snap["internal"] = out
         snap["internal_note"] = "trace"
         self._trace_fail.pop(h, None)
+        self._trace_note(True)
 
-    def _trace_parity(self, h: str, errs: list = None):
+    def _trace_parity(self, h: str, errs: list = None, skip=()):
         res = None
         got9 = False
         for url in self._order(self.trace_rpcs):
+            if url in skip:
+                continue
+            kw9 = self._trace_kw(30)
+            if kw9 is None:
+                if errs is not None:
+                    errs.append(TraceDeferred())
+                break
             try:
-                res = bf_engine.rpc_call(url, "trace_transaction", [h], timeout=30, retries=1)
+                res = bf_engine.rpc_call(url, "trace_transaction", [h], **kw9)
                 got9 = True
                 break
             except Exception as e:
@@ -5076,7 +5281,12 @@ class RpcChainWatcher(RpcSynthMixin):
                 errs.append(RuntimeError("trace_transaction 응답 형식 오류"))
             return None
         myset = set(self.wallets)
-        bad = [tuple(t.get("traceAddress") or []) for t in res if isinstance(t, dict) and t.get("error")]
+        try:
+            bad = trace_fail_index(res)
+        except (TypeError, ValueError):
+            if errs is not None:
+                errs.append(RuntimeError("trace_transaction 응답 형식 오류"))
+            return None
         out = []
         for t in res:
             if not isinstance(t, dict):
@@ -5106,7 +5316,14 @@ class RpcChainWatcher(RpcSynthMixin):
                 return None
             f9, t9 = str(f9 or "").lower(), str(t9 or "").lower()
             if v and (f9 in myset or t9 in myset):
-                failed = any(ta[:len(b9)] == b9 for b9 in bad)
+                try:
+                    if len(ta) > TRACE_DEPTH_MAX:
+                        raise ValueError("traceAddress 깊이 상한 초과")
+                    failed = trace_path_failed(bad, ta)
+                except (TypeError, ValueError):
+                    if errs is not None:
+                        errs.append(RuntimeError("trace_transaction 응답 형식 오류"))
+                    return None
                 out.append({"from": f9, "to": t9, "value": str(v), "success": not failed})
         return out
 
@@ -5260,7 +5477,7 @@ class RpcChainWatcher(RpcSynthMixin):
 
     def _state_call(self, method: str, params: list):
         last = None
-        for url in self._order(self.state_rpcs):
+        for url in self._node_order(self.state_rpcs):
             try:
                 return bf_engine.rpc_call(url, method, params, timeout=30, retries=1)
             except Exception as e:
@@ -5350,18 +5567,32 @@ class RpcChainWatcher(RpcSynthMixin):
         errs9 = []
         res = None
         got9 = False
+        sent9 = 0
         for url in self._trace_nodes(errs9):
+            kw9 = self._trace_kw(60)
+            if kw9 is None:
+                errs9.append(TraceDeferred())
+                break
             try:
-                res = bf_engine.rpc_call(url, "debug_traceBlockByNumber", [hex(int(blk)), {"tracer": "callTracer"}], timeout=60, retries=1)
+                res = bf_engine.rpc_call(url, "debug_traceBlockByNumber", [hex(int(blk)), {"tracer": "callTracer"}], **kw9)
+                sent9 += 1
                 got9 = True
                 break
             except Exception as e:
                 last = e
                 errs9.append(e)
+                if not self._trace_untried(e):
+                    sent9 += 1
         if not isinstance(res, list):
             if got9:
                 errs9.append(RuntimeError("블록 trace 응답 형식 오류"))
-            raise self._trace_err(errs9, last) or RuntimeError("블록 trace 응답 형식 오류")
+            if not sent9 and errs9 and all(self._trace_untried(x) for x in errs9):
+                raise TraceDeferred(f"budget: 블록 trace 전송 전 보류 — 다음 차례({common.safe_err(errs9[-1])[:60]})")
+            e9 = self._trace_err(errs9, last) or RuntimeError("블록 trace 응답 형식 오류")
+            if sent9 and not self._trace_gone(e9):
+                self._trace_note(False)
+            raise e9
+        self._trace_note(True)
         myset = set(self.wallets)
         out, unres, nfb9 = {}, [], 0
         hs9 = None
@@ -5490,9 +5721,12 @@ class RpcChainWatcher(RpcSynthMixin):
 
     @classmethod
     def _trace_err(cls, errs: list, last=None):
-        for e in errs or ():
-            if not cls._trace_gone(e):
+        tr9 = [e for e in errs or () if not cls._trace_gone(e)]
+        for e in tr9:
+            if not cls._trace_untried(e):
                 return e
+        if tr9:
+            return tr9[0]
         return last if last is not None else ((errs or [None])[-1])
 
     @staticmethod
@@ -5544,6 +5778,45 @@ class RpcChainWatcher(RpcSynthMixin):
         if not ovf9:
             ll.setdefault(k, {"w": w, "blk": int(y), "at": now, "n": 0, "next": now + self.LEAF_LATER_SEC})
         return False
+
+    def _leaf_prefetch(self, w: str, leaves: list, pool: list, sdl: float, deadline: float) -> tuple:
+        ys = sorted({int(y) for (_x, y, _s1, _s2) in leaves})
+        got = {}
+        try:
+            for i in range(0, len(ys), self.block_batch):
+                if time.time() > sdl:
+                    break
+                part = ys[i:i + self.block_batch]
+                res = self._batch([("eth_getBlockByNumber", [hex(y), True]) for y in part])
+                for y, blk in zip(part, res):
+                    if isinstance(blk, dict) and isinstance(blk.get("transactions"), list):
+                        got[y] = {str(t.get("hash") or "").lower(): y for t in blk["transactions"]
+                                  if isinstance(t, dict) and w in ((t.get("from") or "").lower(), (t.get("to") or "").lower())}
+        except Exception as e:
+            log.info("%s 잎 블록 묶음 스캔 실패(잎마다 종전 경로): %s", self.chain, common.safe_err(e)[:100])
+        if not got:
+            return {}, {}
+        pool_h = {s["tx"]["hash"].lower() for s in pool}
+        q9 = bf_engine.quarantine_map(self.cursor)
+        new = [h for y in ys for h in (got.get(y) or {}) if h and h not in pool_h and h not in q9]
+        dets = {}
+        if new:
+            with self._trace_budget(deadline):
+                dets = self._details(new)
+        return got, dets
+
+    def _leaf_defer(self, w: str, y: int) -> None:
+        ll = self.cursor.setdefault("_leaf_later", {})
+        k = f"{w[:12]}:{int(y)}"
+        if k in ll:
+            return
+        now = int(time.time())
+        if len(ll) >= self.LEAF_LATER_MAX:
+            common.append_durable_jsonl(self._leaf_overflow_path(), {"k": k, "w": w, "blk": int(y), "at": now})
+            self.cursor["_leaf_overflow"] = int(self.cursor.get("_leaf_overflow") or 0) + 1
+            log.info("%s '나중에 다시' 잎 블록 큐 포화(%d) — 잎 %d 넘침 파일로", self.chain, len(ll), int(y))
+            return
+        ll[k] = {"w": w, "blk": int(y), "at": now, "n": 0, "next": now + self.LEAF_LATER_SEC}
 
     LANES_LEAF_HOLD_SEC = 120
     LANES_LEAF_QUIET_SEC = 600
@@ -5618,24 +5891,30 @@ class RpcChainWatcher(RpcSynthMixin):
             log.warning("%s '나중에 다시' 잎 블록 %s — %d일 넘게 못 풂 · 뺌(그 입금 internal 미확인 · 대사 흡수)", self.chain,
                         e9.get("blk") or k9, self.LEAF_LATER_TTL // 86400)
         t9 = time.time()
+        dl9 = t9 + self.LEAF_LATER_STEP_SEC
+        per9 = 1 if self._trace_sick() else self.LEAF_LATER_PER_CYCLE
         for k in sorted(ll, key=lambda x: ll[x].get("next") or 0):
             e = ll.get(k) or {}
-            if done >= self.LEAF_LATER_PER_CYCLE or int(e.get("next") or 0) > now:
+            if done >= per9 or int(e.get("next") or 0) > now:
                 break
-            if done and time.time() - t9 > self.LEAF_LATER_STEP_SEC:
+            if done and time.time() >= dl9:
                 break
+            first9 = not done
             done += 1
             w, y = str(e.get("w") or "").lower(), int(e.get("blk") or 0)
             try:
-                frames, unres9 = self._trace_block(y)
+                with self._trace_budget(max(dl9, time.time() + self.LEAF_FIRST_SEC) if first9 else dl9):
+                    frames, unres9 = self._trace_block(y)
                 cand = [h for h, rows in frames.items() if any((r.get("to") or "").lower() == w and r.get("success") is not False for r in rows)]
                 q9 = bf_engine.quarantine_map(self.cursor)
                 cand = [h for h in cand if h not in q9]
-                dets = self._details(cand, trace=False) if cand else {}
+                dets = self._details(cand, trace=False, deadline=time.time() + 30) if cand else {}
                 bad = [h for h in cand if not isinstance(dets.get(h), dict)]
                 if bad:
                     raise RuntimeError(f"상세 실패 {bad[0][:12]}: {common.safe_err(dets.get(bad[0]))[:80]}")
             except Exception as ex:
+                if isinstance(ex, TraceDeferred):
+                    break
                 if self._trace_gone(ex):
                     ll.pop(k, None)
                     self._note("_native_notes", {"kind": "leaf_later_unsupported", "w": w[:10], "blk": y})
@@ -5780,14 +6059,18 @@ class RpcChainWatcher(RpcSynthMixin):
                 self._state_lag_hold(nk, getattr(e, "blk", last), head, last, c)
                 leaves = None
             if leaves is not None:
+                pre9 = self._leaf_prefetch(w, leaves, pool, max(deadline, time.time() + 60), deadline) if len(leaves) > 1 else ({}, {})
                 for (x, y, s1, s2) in leaves:
-                    got, done9 = self._scan_blocks(y, y, w, max(deadline, time.time() + 60))
+                    got, done9 = (pre9[0][int(y)], True) if int(y) in pre9[0] else self._scan_blocks(y, y, w, max(deadline, time.time() + 60))
                     if not done9:
                         raise RuntimeError(f"잎 블록 {y} 스캔 미완 — 다음 사이클 재시도")
                     q9 = bf_engine.quarantine_map(self.cursor)
                     new = [h for h in got if h not in {s["tx"]["hash"].lower() for s in pool} and h not in q9]
                     if new:
-                        dets = self._details(new)
+                        dets = {h9: pre9[1][h9] for h9 in new if h9 in pre9[1]}
+                        if len(dets) < len(new):
+                            with self._trace_budget(deadline):
+                                dets.update(self._details([h9 for h9 in new if h9 not in dets]))
                         bad = [h for h in new if not isinstance(dets.get(h), dict) and not (h in self.emitted and dets.get(h) is None)]
                         self._detail_fail_clear([h for h in new if isinstance(dets.get(h), dict)])
                         left9 = self._detail_fail_note(bad, dets, blocks={h: y for h in bad}) if bad else []
@@ -5798,14 +6081,23 @@ class RpcChainWatcher(RpcSynthMixin):
                             s8 = dets.get(h9)
                             if h9 in self.emitted and isinstance(s8, dict) and s8.get("internal_note") == "trace" and s8.get("internal"):
                                 self.__dict__.setdefault("_reemit", set()).add(h9)
+                            elif h9 in self.emitted and isinstance(s8, dict) and s8.get("internal_note") != "trace":
+                                self._trace_later_mark(h9, s8)
                     here = [s for s in pool if s["tx"]["block_number"] == y and self._touches(s, w)]
                     o9, n9 = self._implied(here, w)
                     rn, rb = (s2[0] - s1[0]) - o9, (s2[1] - s1[1]) - n9
                     if rn == 0 and rb > 0 and self.trace_rpcs:
-                        if nk == "_bkns" and (time.time() > deadline or f"{w[:12]}:{int(y)}" in (self.cursor.get("_leaf_later") or {})):
+                        dfr9 = False
+                        if nk == "_bkns" and (time.time() > deadline or self._trace_sick() or f"{w[:12]}:{int(y)}" in (self.cursor.get("_leaf_later") or {})):
                             rec9, fail9 = None, True
+                        elif nk in ("_ns", "_peek_ns") and (time.time() > deadline or (
+                                (nk == "_peek_ns" or self.__dict__.get("_late_ctx"))
+                                and (self._trace_sick() or f"{w[:12]}:{int(y)}" in (self.cursor.get("_leaf_later") or {})))):
+                            rec9, fail9 = None, True
+                            dfr9 = nk == "_peek_ns" or bool(self.__dict__.get("_late_ctx"))
                         else:
-                            rec9, fail9 = self._leaf_trace(w, y, pool, got)
+                            with self._trace_budget(deadline):
+                                rec9, fail9 = self._leaf_trace(w, y, pool, got)
                         if rec9:
                             recs.append(rec9)
                         here = [s for s in pool if s["tx"]["block_number"] == y and self._touches(s, w)]
@@ -5815,7 +6107,10 @@ class RpcChainWatcher(RpcSynthMixin):
                             self._leaf_retry(w, y, True, c=c, nk=nk)
                             continue
                         if fail9:
-                            self._leaf_retry(w, y, False, c=c, nk=nk)
+                            if dfr9:
+                                self._leaf_defer(w, y)
+                            else:
+                                self._leaf_retry(w, y, False, c=c, nk=nk)
                             recs.append({"kind": "leaf_deferred", "w": w[:10], "blk": y, "native": str(rb)})
                             continue
                     held9 = self._held_block(y, {s["tx"]["hash"].lower() for s in pool}, got) if (rn == 0 and rb > 0) else []
@@ -6318,6 +6613,7 @@ class RpcChainWatcher(RpcSynthMixin):
         hs = sorted((h for h in found if h not in self.emitted and h not in q9), key=lambda x: (found[x], x))
         dets = self._details(hs, deadline=dl + 30) if hs else {}
         n, bad = 0, None
+        self._trace_later_pre([h for h in hs if isinstance(dets.get(h), dict)], dets)
         for h in hs:
             s9 = dets.get(h)
             if isinstance(s9, dict):
@@ -6328,6 +6624,7 @@ class RpcChainWatcher(RpcSynthMixin):
                 bad = int(found[h]) if bad is None else min(bad, int(found[h]))
         if n:
             common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        self._trace_late_settle([h for h in hs if isinstance(dets.get(h), dict)])
         return n, int(last), bad, dets
 
     def _peek_native(self, ws: list, frm: int, last: int, dets: dict, head: int, dl: float) -> tuple:
@@ -6378,6 +6675,7 @@ class RpcChainWatcher(RpcSynthMixin):
                     continue
                 wd[w] = int(last)
             re9 = set(self._reemit or ())
+            self._trace_later_pre(list(union), union)
             for s9 in sorted(union.values(), key=lambda x: (x["tx"]["block_number"], x["tx"]["hash"])):
                 h = s9["tx"]["hash"].lower()
                 if (h not in self.emitted or h in re9) and any(self._touches(s9, w) for w in self.wallets):
@@ -6398,6 +6696,7 @@ class RpcChainWatcher(RpcSynthMixin):
             self.cursor["_peek_wdone"] = wd
         if n:
             common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        self._trace_late_settle(list(union))
         return ("fail" if failed else ("nostate" if nostate else "ok")), n
 
     @staticmethod
@@ -6554,9 +6853,12 @@ class RpcChainWatcher(RpcSynthMixin):
         pend = common.read_json(pp, {})
         if pend:
             dets = self._details(sorted(h.lower() for h in pend))
+            self._trace_later_pre([h for h in sorted(dets) if isinstance(dets[h], dict)], dets)
             for h in sorted(dets):
                 if isinstance(dets[h], dict) and h not in self.emitted:
                     self._emit(h, dets[h], 0)
+            self._trace_late_settle(list(dets))
+            common.atomic_write_json(self.cursor_path, self.cursor)
             left = {h: v for h, v in pend.items() if not isinstance(dets.get(h.lower()), dict)}
             common.atomic_write_json(self.emitted_path, sorted(self.emitted))
             if self.bk_mode:
@@ -6587,6 +6889,7 @@ class RpcChainWatcher(RpcSynthMixin):
                     got9.append(h9)
             if tl9:
                 self.cursor["_trace_later"] = tl9
+                self._trace_later_trim()
             common.atomic_write_json(self.cursor_path, self.cursor)
             hp9 = os.path.join(common.STATE_DIR, f"hq_left_{self.chain}.json")
             held9 = common.read_json(hp9, {})
@@ -6619,6 +6922,7 @@ class RpcChainWatcher(RpcSynthMixin):
         except Exception as e:
             dets = {h: e for h in due}
         n = 0
+        self._trace_later_pre([h for h in due if isinstance(dets.get(h), dict)], dets)
         for h in due:
             snap = dets.get(h)
             if isinstance(snap, dict):
@@ -6628,6 +6932,7 @@ class RpcChainWatcher(RpcSynthMixin):
                 bf_engine.quarantine_result(self.cursor, h, True, self.chain, "rpc_detail", log)
             else:
                 bf_engine.quarantine_result(self.cursor, h, False, self.chain, "rpc_detail", log, err=snap)
+        self._trace_late_settle(list(due))
         common.atomic_write_json(self.emitted_path, sorted(self.emitted))
         common.atomic_write_json(self.cursor_path, self.cursor)
         return n
@@ -6838,25 +7143,30 @@ class RpcChainWatcher(RpcSynthMixin):
     TRACE_LATER_TTL = 30 * 86400
     TRACE_LATER_MAX = 2000
     TRACE_LATER_PER_CYCLE = 3
+    TRACE_LATER_TAIL_PER = 20
+    TRACE_LATER_TTL_MIN_N = 5
     TRACE_LATER_STEP_SEC = 30
 
     def _trace_later_mark(self, h: str, snap: dict) -> None:
-        late9 = self.__dict__.get("_trace_late") or set()
+        late9 = self.__dict__.get("_trace_late") or {}
         tl = self.cursor.get("_trace_later")
         if snap.get("internal_note") == "trace":
-            late9.discard(h)
+            late9.pop(h, None) if isinstance(late9, dict) else late9.discard(h)
             if isinstance(tl, dict):
                 tl.pop(h, None)
             return
         if h not in late9:
             return
-        late9.discard(h)
+        late9.pop(h, None) if isinstance(late9, dict) else late9.discard(h)
         hq = self.cursor.get("_hq")
         if isinstance(hq, dict) and h in hq:
             return
         if not isinstance(tl, dict):
             tl = self.cursor["_trace_later"] = {}
         if not isinstance(tl.get(h), dict):
+            if len(tl) >= int(self.TRACE_LATER_MAX):
+                self._trace_later_spill(h, snap, True)
+                return
             now = int(time.time())
             try:
                 blk = int((snap.get("tx") or {}).get("block_number") or 0)
@@ -6864,11 +7174,162 @@ class RpcChainWatcher(RpcSynthMixin):
                 blk = 0
             tl[h] = {"at": now, "n": 0, "next": now + self.TRACE_LATER_SEC, "blk": blk}
         tl[h]["sent"] = True
-        for k9 in sorted(tl, key=lambda x: int((tl.get(x) or {}).get("at") or 0) if isinstance(tl.get(x), dict) else 0)[:-self.TRACE_LATER_MAX]:
-            tl.pop(k9, None)
-            self._note("_native_notes", {"kind": "trace_later_drop", "tx": k9[:14]})
 
-    def _trace_later_step(self, head: int) -> int:
+    TRACE_LATER_UNSENT_SEC = 3600
+    TRACE_OVERFLOW_BATCH = 50
+
+    def _trace_overflow_path(self) -> str:
+        return os.path.join(common.STATE_DIR, f"trace_later_overflow_{self.chain}.jsonl")
+
+    def _trace_overflow_read(self) -> list:
+        out = {}
+        try:
+            with open(self._trace_overflow_path(), encoding="utf-8") as f:
+                for ln in f:
+                    try:
+                        e = json.loads(ln)
+                    except ValueError:
+                        continue
+                    h9 = str((e or {}).get("h") or "").lower() if isinstance(e, dict) else ""
+                    if not h9.startswith("0x"):
+                        continue
+                    o9 = out.get(h9)
+                    if o9 is None:
+                        out[h9] = {"h": h9, "at": int(e.get("at") or 0), "n": int(e.get("n") or 0), "blk": int(e.get("blk") or 0), "sent": bool(e.get("sent"))}
+                    else:
+                        o9["sent"] = o9["sent"] or bool(e.get("sent"))
+                        o9["at"] = min(o9["at"], int(e.get("at") or o9["at"]))
+                        o9["n"] = max(o9["n"], int(e.get("n") or 0))
+        except (OSError, TypeError, ValueError):
+            pass
+        return list(out.values())
+
+    def _trace_later_spill(self, h: str, snap: dict, sent: bool) -> None:
+        try:
+            blk = int((snap.get("tx") or {}).get("block_number") or 0)
+        except (TypeError, ValueError, AttributeError):
+            blk = 0
+        common.append_durable_jsonl(self._trace_overflow_path(), {"h": h, "at": int(time.time()), "n": 0, "blk": blk, "sent": bool(sent)})
+        seen9 = self.__dict__.setdefault("_tovf_seen", set())
+        n9 = int(self.cursor.get("_trace_later_overflow") or 0) + (0 if h in seen9 else 1)
+        seen9.add(h)
+        self.cursor["_trace_later_overflow"] = n9
+        (log.warning if n9 == 1 or n9 % 1000 == 0 else log.info)("%s 늦은 채움 큐 포화(%d) — tx %s 넘침 파일로(대기 %d · 버리지 않음)", self.chain,
+                                                                 len(self.cursor.get("_trace_later") or {}), h[:12], n9)
+
+    def _trace_later_trim(self) -> int:
+        tl = self.cursor.get("_trace_later")
+        if not isinstance(tl, dict) or len(tl) <= int(self.TRACE_LATER_MAX):
+            return 0
+        order9 = sorted(tl, key=lambda x: (int((tl.get(x) or {}).get("at") or 0) if isinstance(tl.get(x), dict) else 0, x))
+        out9 = order9[int(self.TRACE_LATER_MAX):]
+        seen9 = self.__dict__.setdefault("_tovf_seen", set())
+        n9 = int(self.cursor.get("_trace_later_overflow") or 0)
+        for h9 in out9:
+            e9 = tl.get(h9) if isinstance(tl.get(h9), dict) else {}
+            common.append_durable_jsonl(self._trace_overflow_path(), {"h": h9, "at": int(e9.get("at") or time.time()), "n": int(e9.get("n") or 0),
+                                                                     "blk": int(e9.get("blk") or 0), "sent": bool(e9.get("sent", True))})
+            if h9 not in seen9:
+                seen9.add(h9)
+                n9 += 1
+        for h9 in out9:
+            tl.pop(h9, None)
+        self.cursor["_trace_later_overflow"] = n9
+        common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+        log.info("%s 늦은 채움 큐 %d건 넘침 파일로(커서 상한 %d · 대기 %d)", self.chain, len(out9), int(self.TRACE_LATER_MAX), n9)
+        return len(out9)
+
+    def _trace_overflow_refill(self) -> int:
+        pth = self._trace_overflow_path()
+        if not self.cursor.get("_trace_later_overflow") and not os.path.exists(pth):
+            return 0
+        tl = self.cursor.get("_trace_later") if isinstance(self.cursor.get("_trace_later"), dict) else {}
+        rows = self._trace_overflow_read()
+        free = int(self.TRACE_LATER_MAX) - len(tl)
+        if rows and free < min(self.TRACE_OVERFLOW_BATCH, len(rows)):
+            return 0
+        take, rest = rows[:max(0, free)], rows[max(0, free):]
+        now = int(time.time())
+        hq9 = self.cursor.get("_hq") if isinstance(self.cursor.get("_hq"), dict) else {}
+        for r in take:
+            if r["h"] in hq9:
+                continue
+            e9 = tl.get(r["h"])
+            if isinstance(e9, dict):
+                e9["sent"] = bool(e9.get("sent", True)) or r["sent"]
+                continue
+            tl[r["h"]] = {"at": int(r["at"] or now), "n": int(r["n"]), "next": now, "blk": int(r["blk"]), "sent": r["sent"]}
+        if tl:
+            self.cursor["_trace_later"] = tl
+        common.atomic_write_json(self.cursor_path, self.cursor)
+        if rest:
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(pth), prefix=".tmp_")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rest))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, pth)
+            self.cursor["_trace_later_overflow"] = len(rest)
+            self._tovf_seen = {r["h"] for r in rest}
+        else:
+            self._tovf_seen = set()
+            try:
+                os.remove(pth)
+            except OSError:
+                pass
+            self.cursor.pop("_trace_later_overflow", None)
+        common.atomic_write_json(self.cursor_path, self.cursor)
+        if take:
+            log.info("%s 넘침 파일 늦은 채움 tx %d건 → 큐(남은 넘침 %d)", self.chain, len(take), len(rest))
+        return len(take)
+
+    def _trace_later_pre(self, hashes, snaps: dict = None) -> int:
+        late9 = self.__dict__.get("_trace_late") or {}
+        if not late9:
+            return 0
+        hq9 = self.cursor.get("_hq") if isinstance(self.cursor.get("_hq"), dict) else {}
+        tl = self.cursor.get("_trace_later") if isinstance(self.cursor.get("_trace_later"), dict) else None
+        now = int(time.time())
+        n9 = 0
+        for h in dict.fromkeys(hashes):
+            s9 = (snaps or {}).get(h)
+            if h not in late9 or h in hq9 or (isinstance(s9, dict) and s9.get("internal_note") == "trace"):
+                continue
+            if tl is None:
+                tl = self.cursor["_trace_later"] = {}
+            if isinstance(tl.get(h), dict):
+                if h in self.emitted:
+                    tl[h]["sent"] = True
+                continue
+            if len(tl) >= int(self.TRACE_LATER_MAX):
+                self._trace_later_spill(h, s9 if isinstance(s9, dict) else {}, h in self.emitted)
+                continue
+            try:
+                blk = int(((s9 or {}).get("tx") or {}).get("block_number") or 0)
+            except (TypeError, ValueError, AttributeError):
+                blk = 0
+            tl[h] = {"at": now, "n": 0, "next": now + self.TRACE_LATER_SEC, "blk": blk, "sent": h in self.emitted}
+            n9 += 1
+        if n9:
+            common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+        return n9
+
+    def _trace_late_settle(self, hashes) -> None:
+        late9 = self.__dict__.get("_trace_late")
+        if not late9:
+            return
+        hs9 = [h for h in dict.fromkeys(hashes) if h in late9]
+        if not hs9:
+            return
+        self._trace_later_pre(hs9)
+        for h in hs9:
+            late9.pop(h, None) if isinstance(late9, dict) else late9.discard(h)
+
+    def _trace_later_step(self, head: int, per: int = None) -> int:
+        self._trace_later_trim()
+        if self.trace_rpcs:
+            self._trace_overflow_refill()
         tl = self.cursor.get("_trace_later")
         if not isinstance(tl, dict) or not tl or not self.trace_rpcs:
             return 0
@@ -6881,35 +7342,47 @@ class RpcChainWatcher(RpcSynthMixin):
         t9 = time.time()
         for h in sorted(tl, key=nxt):
             e = tl.get(h)
+            if isinstance(e, dict) and now - int(e.get("at") or now) > self.TRACE_LATER_TTL and int(e.get("n") or 0) >= self.TRACE_LATER_TTL_MIN_N:
+                tl.pop(h, None)
+                touched = True
+                self._note("_native_notes", {"kind": "trace_later_giveup", "tx": h[:14], "n": int(e.get("n") or 0)})
+                log.warning("%s 늦은 채움 trace %s — %d일 넘게 못 풂 · 뺌(internal 미확인 · 대사 흡수): %s", self.chain, h[:12],
+                            self.TRACE_LATER_TTL // 86400, str(e.get("err") or "")[:80])
+        for h in sorted(tl, key=nxt):
+            e = tl.get(h)
             if not isinstance(e, dict):
                 tl.pop(h, None)
                 touched = True
                 continue
-            if now - int(e.get("at") or now) > self.TRACE_LATER_TTL:
+            if now - int(e.get("at") or now) > self.TRACE_LATER_TTL and int(e.get("n") or 0) >= self.TRACE_LATER_TTL_MIN_N:
                 tl.pop(h, None)
                 touched = True
                 self._note("_native_notes", {"kind": "trace_later_giveup", "tx": h[:14], "n": int(e.get("n") or 0)})
                 log.warning("%s 늦은 채움 trace %s — %d일 넘게 못 풂 · 뺌(internal 미확인 · 대사 흡수): %s", self.chain, h[:12],
                             self.TRACE_LATER_TTL // 86400, str(e.get("err") or "")[:80])
                 continue
-            if done >= self.TRACE_LATER_PER_CYCLE or int(e.get("next") or 0) > now:
+            if done >= (1 if self._trace_sick() else int(per or self.TRACE_LATER_PER_CYCLE)) or int(e.get("next") or 0) > now:
                 break
             if done and time.time() - t9 >= self.TRACE_LATER_STEP_SEC:
                 break
-            if not e.get("sent", True) and h not in self.emitted:
+            if not e.get("sent", True) and h not in self.emitted and now - int(e.get("at") or now) < self.TRACE_LATER_UNSENT_SEC:
                 continue
+            first9 = not done
             done += 1
             touched = True
-            tmp9 = {}
+            tmp9 = {"_trace_parity_first": bool(int(e.get("n") or 0) % 2)}
             try:
-                self._trace_internal(h, tmp9)
+                with self._trace_budget(max(t9 + self.TRACE_LATER_STEP_SEC, time.time() + self.TRACE_FIRST_SEC) if first9 else t9 + self.TRACE_LATER_STEP_SEC):
+                    self._trace_internal(h, tmp9)
                 rows9 = list(tmp9.get("internal") or [])
                 s9 = None
                 if rows9:
-                    s9 = self._details([h], trace=False).get(h)
+                    s9 = self._details([h], trace=False, deadline=time.time() + 30).get(h)
                     if not isinstance(s9, dict):
                         raise s9 if isinstance(s9, Exception) else RuntimeError("상세 없음")
             except Exception as ex:
+                if isinstance(ex, TraceDeferred):
+                    break
                 if self._trace_gone(ex):
                     tl.pop(h, None)
                     self._note("_native_notes", {"kind": "trace_later_unsupported", "tx": h[:14]})
@@ -7016,6 +7489,8 @@ class RpcChainWatcher(RpcSynthMixin):
             else:
                 self.cursor.pop("_st_lag", None)
         n_emit = 0
+        ph9 = {s["tx"]["hash"].lower(): s for s in pool}
+        self._trace_later_pre(list(ph9), ph9)
         for s in sorted(pool, key=lambda s: (s["tx"]["block_number"], s["tx"]["hash"])):
             h = s["tx"]["hash"].lower()
             re9 = self.__dict__.get("_reemit") or set()
@@ -7058,6 +7533,7 @@ class RpcChainWatcher(RpcSynthMixin):
             self.cursor[sk] = rest9
         for h in todo:
             memo9.pop(h, None)
+        self._trace_late_settle(list(ph9) + list(todo))
         common.atomic_write_json(self.cursor_path, self.cursor)
         if n_emit:
             log.info("%s rpc 발견 %d tx 방출 (%s블록 %d→%d, 지갑 %d)", self.chain, n_emit, "옛 구간 " if bk else "", c, last, len(ws))
@@ -7147,6 +7623,7 @@ class RpcChainWatcher(RpcSynthMixin):
     def _span_keep(self, e) -> bool:
         return isinstance(e, HoldError) or self._rate_err(e) or (isinstance(e, BisectBudget) and int(self.__dict__.get("_bis_prog") or 0) > 0)
 
+    LATE_TAIL_SEC = 600
     LIVE_SPAN0 = 5000
     LIVE_SPAN_MIN = 500
 
@@ -7162,6 +7639,14 @@ class RpcChainWatcher(RpcSynthMixin):
             cur9 = common.read_json(self.cursor_path, None)
             if isinstance(cur9, dict):
                 cur9["_lvspan"] = int(span)
+                tl9 = self.cursor.get("_trace_later")
+                if isinstance(tl9, dict) and tl9:
+                    dtl9 = cur9.get("_trace_later") if isinstance(cur9.get("_trace_later"), dict) else {}
+                    add9 = {h: v for h, v in tl9.items() if h not in dtl9}
+                    if add9:
+                        cur9["_trace_later"] = dict(dtl9, **add9)
+                if int(self.cursor.get("_trace_later_overflow") or 0) > int(cur9.get("_trace_later_overflow") or 0):
+                    cur9["_trace_later_overflow"] = int(self.cursor["_trace_later_overflow"])
                 common.atomic_write_json(self.cursor_path, cur9)
                 cur9.pop("_synced_at", None)
                 self.cursor = cur9
@@ -7184,6 +7669,23 @@ class RpcChainWatcher(RpcSynthMixin):
     HQ_DETAIL_CHUNK = 5
     HQ_FAIL_MAX = 5
 
+    def _hq_to_later(self, h: str, snap=None) -> None:
+        tl = self.cursor.get("_trace_later")
+        if not isinstance(tl, dict):
+            tl = self.cursor["_trace_later"] = {}
+        if isinstance(tl.get(h), dict):
+            tl[h]["sent"] = True
+            return
+        if len(tl) >= int(self.TRACE_LATER_MAX):
+            self._trace_later_spill(h, snap if isinstance(snap, dict) else {}, True)
+            return
+        now = int(time.time())
+        try:
+            blk = int(((snap or {}).get("tx") or {}).get("block_number") or 0) if isinstance(snap, dict) else 0
+        except (TypeError, ValueError, AttributeError):
+            blk = 0
+        tl[h] = {"at": now, "n": 0, "next": now + self.TRACE_LATER_SEC, "blk": blk, "sent": True}
+
     def _hq_step(self, head: int, deadline: float) -> int:
         hq = self.cursor.get("_hq")
         if not isinstance(hq, dict) or not hq:
@@ -7195,24 +7697,36 @@ class RpcChainWatcher(RpcSynthMixin):
             keys = [k for k in keys if k > pos9] + [k for k in keys if k <= pos9]
         tried9 = 0
         for i in range(0, len(keys), self.HQ_DETAIL_CHUNK):
-            if tried9 and time.time() >= deadline:
+            if tried9 and (time.time() >= deadline or self._trace_sick()):
                 break
             part = [h for h in keys[i:i + self.HQ_DETAIL_CHUNK] if h in hq]
             if not part:
                 continue
-            dets = self._details(part, deadline=(deadline + 60) if tried9 else None, trace=False)
+            dets = self._details(part, deadline=(deadline + 60) if tried9 else (max(deadline, time.time() + self.TRACE_FIRST_SEC) + 60), trace=False)
             for h in part:
-                if tried9 and time.time() >= deadline:
+                if tried9 and (time.time() >= deadline or self._trace_sick()):
                     break
+                first9 = not tried9
                 tried9 += 1
                 self._hq_pos = h
                 s9 = dets.get(h)
                 err9 = None
                 if isinstance(s9, dict):
                     try:
-                        self._trace_internal(h, s9)
+                        ht9 = self.__dict__.setdefault("_hq_try", {})
+                        s9["_trace_parity_first"] = bool(int(ht9.get(h) or 0) % 2)
+                        with self._trace_budget(max(deadline, time.time() + self.TRACE_FIRST_SEC) if first9 else deadline):
+                            self._trace_internal(h, s9)
+                        s9.pop("_trace_parity_first", None)
+                        ht9.pop(h, None)
                     except Exception as e:
                         err9 = e
+                        s9.pop("_trace_parity_first", None)
+                        if not isinstance(e, TraceDeferred):
+                            ht9 = self.__dict__.setdefault("_hq_try", {})
+                            ht9[h] = int(ht9.get(h) or 0) + 1
+                            if len(ht9) > 20000:
+                                ht9.clear()
                         if self._trace_gone(e):
                             hq.pop(h, None)
                             self._note("_native_notes", {"kind": "hq_untraced", "tx": h[:14]})
@@ -7226,14 +7740,16 @@ class RpcChainWatcher(RpcSynthMixin):
                         continue
                 else:
                     err9 = s9
-                if "예산 소진" in str(err9) or not bf_engine.detail_err_deterministic(err9):
+                mixed9 = isinstance(s9, dict) and bool(self.__dict__.get("_trace_mixed"))
+                if "예산 소진" in str(err9) or mixed9 or not bf_engine.detail_err_deterministic(err9):
                     continue
                 hq[h] = int(hq.get(h) or 0) + 1
                 if hq[h] >= self.HQ_FAIL_MAX:
                     hq.pop(h, None)
-                    self._note("_native_notes", {"kind": "hq_fail", "tx": h[:14], "err": common.safe_err(err9)[:80]})
-                    log.warning("%s 인계 큐 %s 결정적 실패 %d회 — 뺌(internal 미확인 · 대사 흡수): %s", self.chain, h[:12], self.HQ_FAIL_MAX,
-                                common.safe_err(err9)[:100])
+                    self._hq_to_later(h, s9)
+                    self._note("_native_notes", {"kind": "hq_to_later", "tx": h[:14], "err": common.safe_err(err9)[:80]})
+                    log.warning("%s 인계 큐 %s 결정적 실패 %d회 — 늦은 채움으로 넘김(백오프 재시도 · internal 미확인 동안 대사 흡수): %s", self.chain, h[:12],
+                                self.HQ_FAIL_MAX, common.safe_err(err9)[:100])
             common.atomic_write_json(self.emitted_path, sorted(self.emitted))
             common.atomic_write_json(self.cursor_path, self.cursor)
         if n:
@@ -7255,11 +7771,6 @@ class RpcChainWatcher(RpcSynthMixin):
             self._quarantine_retry(head)
         except Exception as e:
             log.info("%s 격리 tx 재시도 실패(다음 사이클): %s", self.chain, str(e)[:120])
-        if self.cursor.get("_leaf_later") or self.cursor.get("_leaf_overflow"):
-            try:
-                self._leaf_later_step(head)
-            except Exception as e:
-                log.info("%s 나중에 다시 잎 블록 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
         t0 = time.time()
         deadline = t0 + self.cycle_budget
         complete = True
@@ -7271,9 +7782,16 @@ class RpcChainWatcher(RpcSynthMixin):
         tgt = min(safe, int(ext9["to"])) if ext9 else safe
         if self.bk_mode and not ext9:
             try:
+                self._peek_ctx = True
                 self._head_peek(head, safe, deadline)
             except Exception as e:
                 log.info("%s 최신 블록 엿보기 실패(라이브 차선이 이어서): %s", self.chain, common.redact_urls(common.safe_err(e))[:120])
+                try:
+                    common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+                except Exception:
+                    pass
+            finally:
+                self._peek_ctx = False
         lspan = self._lv_span()
         lspan0 = lspan
         live_err = None
@@ -7287,7 +7805,8 @@ class RpcChainWatcher(RpcSynthMixin):
                     break
                 t_step = min(int(tgt), int(c) + int(lspan))
                 t1 = time.time()
-                self._late_ctx = t_step < int(tgt)
+                self._late_ctx = t_step < int(tgt) or int(t_step) - int(c) > max(64, int(self.bpd or 43200) * self.LATE_TAIL_SEC // 86400)
+                self._key_ctx = bool(self._late_ctx)
                 try:
                     got = self._advance(ws9, c, t_step, head, live_dl)
                 except StateUnavailable as e:
@@ -7304,6 +7823,7 @@ class RpcChainWatcher(RpcSynthMixin):
                                 " 그대로(보류·한도·진행 중)" if keep9 else "으로 줄여", common.redact_urls(common.safe_err(e))[:140])
                 finally:
                     self._late_ctx = False
+                    self._key_ctx = False
                 if got > c:
                     advanced += got - c
                     if got >= t_step and t_step < tgt and time.time() - t1 < max(5.0, self.cycle_budget / 6.0):
@@ -7321,9 +7841,14 @@ class RpcChainWatcher(RpcSynthMixin):
             complete = False
             if tgt == int(ext9["to"]) and all(int(self.cursor[w]) >= tgt for w in self.wallets if isinstance(self.cursor.get(w), int)):
                 self._since_ext_done()
-        if self.cursor.get("_trace_later"):
+        if self.cursor.get("_leaf_later") or self.cursor.get("_leaf_overflow"):
             try:
-                self._trace_later_step(head)
+                self._leaf_later_step(head)
+            except Exception as e:
+                log.info("%s 나중에 다시 잎 블록 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
+        if self.cursor.get("_trace_later") or self.cursor.get("_trace_later_overflow"):
+            try:
+                self._trace_later_step(head, per=self.TRACE_LATER_TAIL_PER if complete else None)
             except Exception as e:
                 log.info("%s 늦은 채움 trace 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
         bk9 = None

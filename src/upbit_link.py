@@ -810,4 +810,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("정지 신호(SIGINT) — 종료")

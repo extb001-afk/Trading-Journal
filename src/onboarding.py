@@ -1312,6 +1312,9 @@ def handle_get(h, path: str) -> bool:
         h._send(200, {"ok": True, "empty": True, "n": 0, "items": []} if path != "/api/outflow_candidates" else
                 {"ok": True, "empty": True, "total": 0, "totalTok": 0, "totalStable": 0, "shown": 0, "quarN": 0, "cands": []})
         return True
+    if not DEMO and not os.path.exists(common.DB_PATH) and path == "/api/att_detail":
+        h._send(200, {"ok": True, "days": {}})
+        return True
     if path in ("/api/state", "/api/v2/state") and not os.path.exists(common.DB_PATH):
         try:
             cfg = ss.load_config_quiet()
@@ -1745,6 +1748,13 @@ class DemoBuilder:
         if side == "fut":
             return self.fut_chart(iso, sym, iv, venue), "ok"
         return {"ok": False, "error": "데모에는 이 차트가 없어요(합성 데이터)"}, "ok"
+
+    def att_detail(self, d_from, d_to, lite=False):
+        out = demo_data.att_detail(d_from, d_to)
+        if lite:
+            for v in out["days"].values():
+                v["mk"] = [x[:3] for x in v["mk"]]
+        return out
 
     @property
     def _day_idx(self):

@@ -1555,7 +1555,7 @@ class HistCurve:
                     if p9:
                         a9[0] += q * p9
                     else:
-                        a9[1] += q * g["lp"]
+                        a9[1] += abs(q * g["lp"])
                         a9[2] += 1
         out = {}
         for iso in days:

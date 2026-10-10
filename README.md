@@ -71,17 +71,24 @@
 | ![지갑 자세히 — 체인별 확인 주기(지금 주기 · 하루 1회 · 빈 지갑 · 옛 기록 채우는 중)와 '지금 확인'](docs/screenshots/45_settings_wallet_tier.png) | ![확인 주기 · 예상 사용량 — 오래 안 쓴 주소는 덜 확인하고, 탐색기 하루 예상 호출은 공표 한도의 80% 까지(넘으면 간격을 자동으로 늘려요)](docs/screenshots/46_settings_wallet_tier_budget.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-10 (3) · 외부 검토 반영)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-10 (3)](CHANGELOG.md#2026-10-10-3--외부-검토-반영) 에 있어요.
-사진은 다시 찍지 않았어요 — 지금 화면엔 사진에 없는 작은 표시가 더해졌어요: 환율이 대체값·오래된 값이면 상태줄·설정 환율 줄에 '환율 대체값'·'환율 오래됨'(대체값이면 김프 숨김) ·
-거래소에서 빌린 코인이 그 거래소 잔고를 넘으면 보관처 줄 '빌린 몫'과 보유표 끝 '빌린 몫이 잔고를 넘은 코인 N종' · 업비트 잔고가 10분 넘게 늦으면 원화 줄에 '업비트 잔고 N분 전'.
+이번 판(2026-10-11 · 외부 검토 2건 버그 수정 · 목록 정리)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-11](CHANGELOG.md#2026-10-11--외부-검토-2건-버그-수정--목록-정리) 에 있어요.
+사진은 다시 찍지 않았어요(이 판과 지난 판 2026-10-10 (3) 모두) — 지금 화면은 사진과 이렇게 달라요: 긴 목록(보유 코인·사이클·보낸 내역·미매칭·추적 지갑·NFT 등)은 처음 몇 개 뒤
+'N개 모두 보기' → '‹ 이전 · 21–40 / N · 다음 ›' 20개씩 쪽으로 넘어가요(사진 설명의 '50건씩 더 보기'도 지금은 20건씩 쪽) · 변동 분해 줄 끝에 › 가 붙고 누르면 무엇 때문인지 시트가 열려요 ·
+설정 '지갑·주소'는 목록 → 주소 관리 → 체인별 조회 → 확인 주기 순서 · 혼자 한 줄이던 단추는 관련 줄 끝으로 ·
+환율이 대체값·오래된 값이면 상태줄·설정 환율 줄에 '환율 대체값'·'환율 오래됨'(대체값이면 김프 숨김) · 거래소에서 빌린 코인이 그 거래소 잔고를 넘으면 보관처 줄 '빌린 몫'과 보유표 끝 '빌린 몫이 잔고를 넘은 코인 N종' ·
+업비트 잔고가 10분 넘게 늦으면 원화 줄에 '업비트 잔고 N분 전'.
 위 '확인 주기'(45·46)·설정 › 연결·키(탐색기 키) 사진은 2026-10-10 판 화면이라, 지금은 확인 주기가 '지금 주기 · 10분 잔고 점검 · 1시간 탐색기 확인' 으로 짧아졌고 Ankr 칸에 '필수' 표시가 붙어요.
 
-- **업데이트** — [업데이트](#업데이트) 순서대로(전부 멈춘 뒤 한꺼번에 시작) · 재구축·데이터 개정 없음. 거래소에서 빌린 코인이 그 거래소 잔고를 넘어 있으면 업데이트한 날 오늘 총자산이 그 몫만큼 한 번 내려가요(빌린 몫을 이제 실제로 뺌 · 이미 굳은 지난날은 그대로).
-- **총자산이 실제보다 크게 보이던 것** — 거래소 마진·대출로 빌린 코인을 쓰거나 옮긴 몫을 부채 한도 안에서 총자산에서 뺌 · 업비트 지정가 주문이 일부만 체결된 동안 그 수량을 지금 보유에 반영 ·
-  업비트 원화가 10분 넘게 늦어도 빼지 않고 'N분 전'으로(하루까지).
-- **지난 곡선** — 마감 뒤 늦게 들어온 지난 거래가 이미 굳은 지난 일별 값·장기 곡선에도 반영돼요(사건 날부터만 · 그날 가격·환율은 그대로 · '−X 다음 날 +X' 손익 쌍 없음).
-- **수집** — BNB Chain 에 남이 그냥 보낸 BNB·컨트랙트가 보내 준 BNB 를 잔고 감시로 받아요(옛 블록을 좁히는 아카이브 키 = Ankr 무료 키) · EVM 옛 구간 채우기가 느린 추적 하나에 몇 시간씩 멈추던 것 고침.
-- **그 밖** — GoPlus 응답 상한 · 긴급 알림 백오프 · 환율 대체값 표시 · 세일 부분 환불 원가 · OKX 코인 정산 손익 달러 환산 · 파이썬 3.9 응답 읽기 · 옛 기록 채우기 안내 문구 · 지난 판 알려진 한계(GoPlus) 고침.
+- **업데이트** — [업데이트](#업데이트) 순서대로(전부 멈춘 뒤 한꺼번에 시작) · 재구축·데이터 개정 없음. 2026-10-10 (3) 판을 쓰는 동안 봇이 30분 넘게 멈춘 적이 있으면
+  `state/bsc_balw_recheck.json` 에 `{"hours": 48}` 을 두어 그 사이 BNB Chain 에 받은 BNB 를 다시 점검하세요(아카이브 키 필요 · [CHANGELOG](CHANGELOG.md#2026-10-11--외부-검토-2건-버그-수정--목록-정리)).
+- **지난 곡선 · 원가** — 업비트 첫 부분 매수·같은 코인 사고팔기의 원화가 지난날에 맞게 되감겨요 · 업데이트 직후 첫 주기·자정 직전·마지막 화면 스냅숏 뒤에 들어온 늦은 거래도 지난 곡선을 고쳐요 ·
+  세일(CCA) 부분 환불로 돌아온 지급 코인은 입찰 때 원가로.
+- **수집** — BNB Chain 잔고 감시가 봇 정지·노드 장애로 생긴 긴 공백 안의 받은 BNB 도 찾아요 · 공개 trace 노드가 아파도 EVM 따라잡기가 멈추지 않고 미룬 내부 이동 확인을 잃지 않아요
+  (키 노드가 있으면 따라잡는 동안 잔고 확인을 키 노드 먼저).
+- **화면** — 끝없이 길어지던 목록 30곳 넘게 20개씩 쪽 넘김 · 변동 분해 줄을 누르면 코인·거래·입출금·거래소별로 무엇 때문인지(합이 늘 같음) · 어색한 배치·글꼴·폰 누름 영역 정리.
+- **그 밖** — 업비트·해외 거래소 수집기 정지 한 줄 · 긴급 알림 재시도 자격 · 파이썬 3.9 시험 하나 결정론화.
+- 지난 판(2026-10-10 (3)): 거래소 마진·대출 부채 차감 · 업비트 열린 주문 부분 체결 · 늦게 들어온 거래 → 지난 곡선 · BNB Chain 에 그냥 받은 BNB · EVM 옛 구간 예산 · GoPlus 응답 상한 · 환율 대체값 표시 —
+  [CHANGELOG.md › 2026-10-10 (3)](CHANGELOG.md#2026-10-10-3--외부-검토-반영)
 - 지난 판(2026-10-10 (2)): 새 설치본 최신 먼저(RPC 차선·BNB Chain·Solana) · 블록스카웃 첫 경로 금지 · Ankr 필수·키 저장 연결 시험 · 쉬는 지갑 1시간 · 백필 몰아 쓰기 · 첫 대사 전 지금 잔고 —
   [CHANGELOG.md › 2026-10-10 (2)](CHANGELOG.md#2026-10-10-2--새-설치본-수집--최신-우선)
 - 지난 판(2026-10-10): 옛 보유 토큰 찾기 · 발견 시점 기초 잔고 · Alchemy 키 · 노드 키 버스트 · EVM 체인 표 · 선물 코인 정산 달러 · Base 넓히기 —
@@ -547,6 +554,10 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 - **그날 카드** — 그날 총자산 변동을 시세·실현·입출금·환율로 나누고, **시세(평가) 몫은 코인별 표**(전일 수량 × 가격 변화 — 전일 마감가 → 그날 마감가(오늘은 지금 시세) · 변동률 · 기여 금액)로 펼쳐 보여 줍니다.
   30분 체결 막대, 그날 실현 기여, 매매 근거 메모(코인별 한 줄)도 같은 카드에 있습니다.
 - **'M월 한눈에'** — 달력 아래에 그 달 자산 변동 분해(시세·실현·LP 수수료·입출금·환율·나머지)와 실현 상위·하위 5를 한 장으로 보여 줍니다.
+- **변동 분해 줄 → 무엇 때문인지** — 대시보드 '오늘 무엇이 움직였나'·그날 카드·'M월 한눈에'의 분해 줄을 누르면 시트(폰은 아래에서 올라옴)가 열려 그 줄을 이룬 것을 큰 순으로 보여 줍니다 —
+  시세는 코인별(변동률·전일 수량·전일가 → 그날가), 현물 실현은 코인별(누르면 차익 영수증), 선물은 거래소·종목별, 입출금은 건별(상계된 레그), 환율은 몫별,
+  나머지는 이름 붙인 조각(가격 끊김·원장 밖 잔고·반올림 등). 20개씩 넘기고, 맨 아래 합 확인 줄이 늘 위 줄 값과 같아요. 그 달은 항목별/날짜별로 바꿔 볼 수 있어요.
+  금액 숨김·랜덤값 모드에선 상세 금액을 서버에서 받지 않고 큰 항목만 보여요.
 - **원화 입출금** — 업비트·빗썸의 은행 원화 입출금(거래소가 주는 예치금 이용료 같은 내부 지급 포함)이 그날 기록에 한 줄씩 나와요.
   최근 30일은 빗썸 원화 입출금도 그날 카드 '입출금'(순유입)·보관처별 들어옴/나감·자산 변동 분해에 들어가고, 빗썸 원화로 산 코인은 매매로 나눠 보여 줘요
   (장기 곡선의 입출금은 종전대로 업비트만).
@@ -684,7 +695,7 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 - **NFT(표시 전용)** — 보유 자동 발견(크립토펑크 등 표준 이전 NFT 포함), 바닥가·거래량 확인된 컬렉션 자동 추적, 후보·스팸 거르기·지켜보기, 총자산 포함 스위치.
 - **LP** — Uniswap v3/v4·PancakeSwap·SushiSwap·Aerodrome/Velodrome Slipstream·Meteora DLMM 등 포지션 원금·수수료 평가.
 - **손익** — 사이클별 투입·실현·미실현, 차익 영수증(매수·매도 한 차트·점수), 선물 영수증(그날 선물 정산 — 진입·청산 차트), 월/일 실현손익 달력과 매매 근거 메모,
-  전일 대비 분해(시세 몫은 코인별 표), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(참고용 표).
+  전일 대비 분해(시세 몫은 코인별 표 · 줄을 누르면 무엇 때문인지), 'M월 한눈에', 장기 총자산 곡선(1년·전체), 가스·수수료, 신고용 양도차익 명세(참고용 표).
 - **내 매매 돌아보기** — 타임머신 · 자금 흐름 지도 · 팔기 전 미리보기 · 올해 결산 · 계획 지키기 점수 · 매매 습관 · 하루 실현 잔디 · BTC 비교선.
 - **전체 검색** — ⌘K(또는 /)로 코인·주소·해시·날짜·금액·메모·리뷰를 한 번에(필터 문법 `coin:` `chain:` `type:` `after:` `pnl:` `amt:` …, 문장 검색).
 - **옛 보유 토큰 찾기** — 지갑 등록 때 체인별 무료·키 출처 합집합으로 주고받은 모든 토큰을 찾아 같은 블록 잔고로 기초 잔고 · 놓친 토큰은 나갈 때 직전 블록 잔고로 바로잡음([자세히](#옛-보유-토큰-찾기--체인-표)).
@@ -832,15 +843,18 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
   - 코인 카드 안 기록 줄에 사칭·스팸 토큰 줄이 남을 수 있어요 — 기록 목록·보유·총자산에선 빠지니 무시해도 돼요.
   - 업비트·빗썸이 아닌 원화 거래소 키를 백필이 끝난 뒤 처음 넣으면 그 거래소 원화 몫이 지난 곡선에 소급되지 않을 수 있어요 — 넣은 날부터는 맞아요 · 처음 설치할 때 거래소 키를 함께 넣으면 피할 수 있어요.
   - 시간당 수백 건씩 로그 없는 BNB 발신(순수 BNB 송금)을 하는 봇 같은 주소는 BNB Chain 이 그런 발신을 사이클마다 몇 건씩만 되찾아 기록이 뒤처질 수 있어요(최근 발신부터 · 보통 지갑은 해당 없음 · 잔고 대사가 차이를 표시).
-  - Base 처럼 공개 노드만 쓰는 RPC 체인은 내부 이체 확인(trace)이 노드 시간 초과·한도(429)에 걸리면 늦게 채워져요 — 거래는 먼저 기록되고 내부 이동(컨트랙트가 보낸 ETH)은 '나중에 다시'로 점점 길게(최대 6시간 간격 · 30일까지) 다시 추적해 채워요([수집 한계](docs/COLLECTION_LIMITS.md)) · 따로 할 일 없이 기다리면 돼요(무료 키로는 Base 추적을 못 써요).
+  - Base 처럼 공개 노드만 쓰는 RPC 체인은 내부 이체 확인(trace)이 노드 시간 초과·한도(429)에 걸리면 늦게 채워져요 — 거래는 먼저 기록되고 내부 이동(컨트랙트가 보낸 ETH)은 '나중에 다시'로 점점 길게(최대 6시간 간격 · 30일까지) 다시 추적해 채워요([수집 한계](docs/COLLECTION_LIMITS.md) · 미룬 확인은 기록 전에 저장돼 재시작에도 안 잃고, 노드가 연달아 실패하면 5분 동안은 따라잡기가 trace 를 기다리지 않아요) · 따로 할 일 없이 기다리면 돼요(무료 키로는 Base 추적을 못 써요).
   - Alchemy 키만 넣은 설치는 Arbitrum 등 이더스캔 체인의 옛 구간을 공개 노드로 받아 오래 걸려요(최신 거래는 바로) — Etherscan·Ankr 무료 키를 같이 넣으세요. 이더스캔 키를 나중에 지우면 그 체인은 공개 노드로 옮겨 가며 최근 몇 시간을 다시 훑어요(보통 몇 분 · 노드가 잠깐 막히면 그동안 새 거래가 늦을 수 있음).
   - 이더스캔 첫 백필 창 밖에서 늦게 색인된 내부 이체(컨트랙트가 보낸 네이티브 코인) 일부는 자동으로 다시 확인되지 않을 수 있어요(드묾) — 그 지갑 네이티브 수량이 조금 어긋나 보이면 상태 패널의 잔고 대조로 확인하세요.
   - 지갑을 넣을 때 고르는 체인 칩에는 아직 체인마다 어떤 경로로 받는지 설명이 없어요 — [수집 한계](docs/COLLECTION_LIMITS.md) 표를 보세요(다음 판에 화면 설명).
   - 설치·재시작 직후 몇 초 동안 상태 표시줄에 '대시보드 응답 없음' 경고가 잠깐 보일 수 있어요 — 첫 화면 계산이 끝나면 사라져요(새로 고침).
-  - 거래소에서 빌린 코인의 부채는 이 판부터 일별 마감마다 기록해요 — 업데이트 전 날을 다시 계산할 땐 '지금 부채'를 한도로 써서, 그 사이 갚은 빚이 있으면 그날이 빌린 몫만큼 높게 보일 수 있어요 · 업데이트한 날 '오늘 변동'에 빌린 몫만큼 하락이 한 번 보여요.
-  - 업비트 지정가 주문의 부분 체결은 체결 시각을 몰라 '잔고 스냅숏 시각'에 생긴 것으로 봐요 — 업비트 잔고가 10분 넘게 늦는 동안·주문이 끝난 직후 원장 기록 전(몇 초~한 주기)엔 보정이 빠져 총자산이 잠깐 튈 수 있어요(다음 주기에 맞춰짐).
-  - BNB Chain 잔고 감시가 보낸 거래를 못 가린 컨트랙트 BNB(브리지 지급 등)는 그 블록 시각의 기초 잔고(원가 미확인)로 들어가요 — 원가를 알면 직접 넣으세요 · 컨트랙트(스마트) 지갑은 잔고 감시 대상이 아니에요(잔고 대조 알림만) · 이 판 전에 놓친 BNB 는 잔고 대조 부족이 $500·2% 이상일 때만 최근 30일 안에서 찾아요.
-  - 늦게 들어온 지난 거래로 지난 곡선을 다시 계산할 때, 그날 마감 스냅숏에 시세가 없던 코인은 지금 시세 근사로 들어갈 수 있어요 · 옛 기록을 넓히는 동안처럼 늦은 거래가 계속 들어오면 1시간에 한 번 다시 계산해요.
+  - 거래소에서 빌린 코인의 부채는 2026-10-10 (3) 판부터 일별 마감마다 기록해요 — 그 전 날을 다시 계산할 땐 '지금 부채'를 한도로 써서, 그 사이 갚은 빚이 있으면 그날이 빌린 몫만큼 높게 보일 수 있어요 · 그보다 옛 판에서 업데이트한 날 '오늘 변동'에 빌린 몫만큼 하락이 한 번 보여요.
+  - 업비트 지정가 주문의 부분 체결은 체결 시각을 몰라 '잔고 스냅숏 시각'에 생긴 것으로 봐요 — 업비트 잔고가 10분 넘게 늦는 동안·주문이 끝난 직후 원장 기록 전(몇 초~한 주기)엔 보정이 빠져 총자산이 잠깐 튈 수 있어요(다음 주기에 맞춰짐 · 그날 마감엔 안 굳음) · 며칠 열린 주문은 아직 계산 안 된 더 옛날 날(새 설치의 장기 곡선 등)에서 그 체결만큼 어긋날 수 있고, 시세 없는 코인의 첫 매수는 체결 금액만큼 오늘 손실처럼, 원장에 기록된 것보다 많이 판 매도는 그날 이득처럼 보일 수 있어요.
+  - BNB Chain 잔고 감시가 보낸 거래를 못 가린 컨트랙트 BNB(브리지 지급 등)는 그 블록 시각의 기초 잔고(원가 미확인)로 들어가요 — 원가를 알면 직접 넣으세요 · 컨트랙트(스마트) 지갑은 잔고 감시 대상이 아니에요(잔고 대조 알림만) · 2026-10-10 (3) 판 전에 놓친 BNB 는 잔고 대조 부족이 $500·2% 이상일 때만 최근 30일 안에서 찾아요 · 봇 정지·노드 장애로 생긴 긴 공백은 원장 기록으로 다시 설명해 찾지만, 그 구간에 내 발신이 아직 원장에 없으면 기다려요(로그 '미해결 구간 N') · 아카이브 키 없는 설치의 256블록 넘는 공백은 구간 끝 블록 시각의 기초 잔고로 · 공개 노드 없이 아카이브만 넣은 구성은 실행당 6지갑씩이라 지갑이 많으면 감지가 몇 시간 늦어요(놓치진 않음).
+  - 늦게 들어온 지난 거래로 지난 곡선을 다시 계산할 때, 그날 마감 스냅숏에 시세가 없던 코인은 지금 시세 근사로 들어갈 수 있어요 · 옛 기록을 넓히는 동안처럼 늦은 거래가 계속 들어오면 1시간에 한 번 다시 계산해요 · 업데이트 전에 이미 굳은 날은 소급하지 않아요.
+  - 세일(CCA) 입찰을 라우터·도우미 컨트랙트를 거쳐 보냈거나 입찰 송금이 수집 기간 전이면 환불로 돌아온 지급 코인 원가를 잇지 못해요(환불 때 시세 또는 원가 미확인 — 종전 규칙) · 스테이블 환불의 원화 원가는 환불 때 환율이에요.
+  - Ankr 등 키 노드 없이 공개 노드만 쓰면 봇을 오래 끈 뒤·새로 설치한 뒤 Base 따라잡기가 여전히 느려요(걸음의 절반 넘게가 잔고·nonce 확인) — Ankr 무료 키를 넣으세요 · 자주 쓰는 지갑 몇 개를 이틀치 따라잡으면 하루 몫의 절반쯤을 한 번 쓸 수 있고, 그 몫은 실시간 사용으로 잡혀 그날 백필 몰아 쓰기 몫이 줄 수 있어요.
+  - 변동 분해 상세의 시세 코인은 하루 큰 순 400개까지 보여요(나머지는 '그 밖 N종' 한 줄 · 합은 정확) · 입출금은 같은 날 같은 코인 순액 단위예요(거래 한 건씩은 일별 기록 목록).
 
 ## 시험 실행
 
@@ -921,7 +935,10 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Borrowed coins:** `loan_short` in `config.json` — confirmed exchange-loan periods only, e.g. (synthetic) `[{"exchange": "okx", "asset": "ETH", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}]` —
   gives coins borrowed and withdrawn (exchange balance pushed below zero, later refilled on the same exchange) a cost at the borrow-time price; the difference on refill is realized
   (a "대출 상환" row in the statement; display calculation only, with first-seen pricing on — the default; empty = off).
-- **Release notes:** what changed in each release (external review fixes — exchange margin/loan debt subtracted from the total, partial fills of open Upbit orders,
+- **Release notes:** what changed in each release (fixes for two more external reviews — KRW of unbooked Upbit fills rewound in past days, BNB received during a long
+  balance-watch gap recovered, the original cost of coins refunded by a token sale (CCA), late ledger rows at the first cycle and around midnight, an absolute trace
+  deadline with persisted deferrals for EVM catch-up, long lists paged 20 at a time and tap-to-explain asset-change breakdown rows — on 2026-10-11;
+  external review fixes — exchange margin/loan debt subtracted from the total, partial fills of open Upbit orders,
   late transactions re-computing closed past days, plain BNB received on BNB Chain found by a balance watch, an EVM back-lane budget, a GoPlus response cap,
   urgent-alert backoff and fallback-FX notes — on 2026-10-10 (3); newest blocks first on every collection path for fresh installs — RPC side lanes, BNB Chain and Solana —,
   no Blockscout as a first path, a required free Ankr key and a one-call connection check when any key is saved, idle wallets checked at least hourly with
@@ -992,17 +1009,26 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
   exchange other than Upbit/Bithumb added after the backfill finished may not be applied to the past curve (correct from that day — add exchange keys at
   install time to avoid it); bot-like addresses sending hundreds of log-less BNB transfers per hour fall behind on BNB Chain (only a few are recovered per
   cycle, newest first); on public-node-only chains such as Base, internal-transfer traces that time out or hit 429 fill in later (the trade is recorded first,
-  internal ETH is re-traced with backoff up to 6 hours apart for 30 days — no action needed; free keys cannot trace Base); an Alchemy-only install backfills old
+  internal ETH is re-traced with backoff up to 6 hours apart for 30 days; deferred lookups are saved before recording and survive restarts — no action needed; free keys cannot trace Base); an Alchemy-only install backfills old
   Arbitrum/Etherscan-chain history slowly over public nodes (add the free Etherscan and Ankr keys), and removing the Etherscan key later re-scans the last
   few hours on public nodes; a few late-indexed internal transfers outside Etherscan's first backfill window may not be re-checked automatically (rare — check
   the balance reconciliation in the status panel); the chain chips in the add-wallet form do not yet explain how each chain is collected (see
   `docs/COLLECTION_LIMITS.md`); a "dashboard not responding" warning can flash for a few seconds right after install or restart (it clears once the first
-  build finishes). Exchange debt is recorded at each daily close from this release on — recomputing an earlier day uses today's debt (a loan repaid since then
-  makes that day look higher), and the update day shows a one-time drop by the borrowed amount; partial Upbit fills are treated as happening at the balance
+  build finishes). Exchange debt is recorded at each daily close since 2026-10-10 (3) — recomputing an earlier day uses today's debt (a loan repaid since then
+  makes that day look higher), and updating from an older release shows a one-time drop by the borrowed amount; partial Upbit fills are treated as happening at the balance
   snapshot time (the API gives no fill time) and are skipped while the Upbit balance is over 10 minutes old or right after an order completes; contract-sent BNB
   whose sending transaction cannot be identified enters as an opening balance (cost unknown) at that block time, smart-contract wallets are not balance-watched,
-  and BNB missed before this release is searched only for confirmed shortfalls of $500/2% or more within 30 days; recomputing a closed day after a late
-  transaction may value coins that had no price in that day's snapshot at today's price.
+  and BNB missed before 2026-10-10 (3) is searched only for confirmed shortfalls of $500/2% or more within 30 days; recomputing a closed day after a late
+  transaction may value coins that had no price in that day's snapshot at today's price, and days frozen before the update are not back-filled.
+  Upbit open orders still carry no fill time, so an order open for several days can be off by its fill on an older day computed for the first time (e.g. a fresh
+  install's long-range curve), today's value can differ by the fill while the Upbit snapshot is over 10 minutes old (never frozen into the close), a first buy of a
+  coin with no price looks like a loss today and a sell larger than the booked balance looks like a gain that day. A BNB Chain balance-watch gap waits while your own
+  sends in it are not yet in the ledger (log line "미해결 구간 N"); without an archive key a gap over 256 blocks becomes an opening balance at its end block; an
+  archive-only setup (no public node) reads 6 wallets per run, so detection can lag by hours with many wallets. A CCA bid sent through a router/helper contract or before
+  the collection window does not get its refund cost linked (old rule), and stablecoin refunds use the refund-time KRW rate. Without a keyed node (free Ankr key),
+  Base catch-up after a long stop or a fresh install is still slow (balance/nonce bisection is over half of each step); two days of catch-up for a few active wallets may
+  use about half of one day's Ankr share once, counted as real-time use, which can shrink that day's backfill burst. The breakdown detail lists up to 400 coins per day for market moves
+  (the rest as one "N more" row, totals exact) and transfers per coin per day (net), not per transaction.
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
   same command on Python 3.9, 3.11 and 3.13.

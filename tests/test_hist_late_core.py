@@ -99,8 +99,9 @@ n1 = npost(c)
 feed(c, h(2), TL, E18, 1000)
 r2 = c._hist_late_scan()
 check("B 같은 거래 재입력 = 원장 무변 → 표식 무변", r2 is None and npost(c) == n1 and marks(c) == mk1, (r2, npost(c), n1, marks(c)))
-feed(c, h(3), NOW, E18, 1100)
-r3 = c._hist_late_scan()
+TN = common.kst_day0(NOW) + 12 * 3600
+feed(c, h(3), TN, E18, 1100)
+r3 = c._hist_late_scan(now=TN + 300)
 check("B 오늘 시각 거래 = 표식 없음(아직 마감 전)", r3 is None and marks(c) == mk1 and npost(c) > n1, (r3, marks(c)))
 
 BK = common.DB_PATH + ".bk_test"

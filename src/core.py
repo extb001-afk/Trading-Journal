@@ -900,9 +900,11 @@ class Core:
         if not row:
             return None
         oe = self.conn.execute("SELECT event FROM tx_class WHERE chain=? AND txhash=?", (chain, txhash)).fetchone()
-        for p in self.conn.execute("SELECT asset_id, location, qty_base FROM postings WHERE source_kind='chain_tx'"
+        t_old9 = None
+        for p in self.conn.execute("SELECT asset_id, location, qty_base, event_ts FROM postings WHERE source_kind='chain_tx'"
                                    " AND source_ns=? AND source_id=?", (chain, txhash)).fetchall():
             self._bump_position(p["asset_id"], -int(p["qty_base"]), p["location"])
+            t_old9 = int(p["event_ts"]) if t_old9 is None else min(t_old9, int(p["event_ts"]))
         self.conn.execute("DELETE FROM postings WHERE source_kind='chain_tx' AND source_ns=? AND source_id=?", (chain, txhash))
         keep = set()
         for t in self.conn.execute("SELECT transfer_id, state, asset_id FROM transfers WHERE chain_txhash=?", (txhash,)).fetchall():
@@ -912,8 +914,23 @@ class Core:
                 keep.add(t["asset_id"])
         snap = json.loads(row["snapshot"])
         if chain == "sol" and snap.get("kind") == "sol_tx":
-            return self.apply_sol(snap, rederive=((oe["event"] if oe else None), frozenset(keep)))
-        return self.apply(chain, txhash, "", snap, rederive=((oe["event"] if oe else None), frozenset(keep)))
+            ev = self.apply_sol(snap, rederive=((oe["event"] if oe else None), frozenset(keep)))
+        else:
+            ev = self.apply(chain, txhash, "", snap, rederive=((oe["event"] if oe else None), frozenset(keep)))
+        self._hist_late_gone("chain_tx", chain, txhash, t_old9)
+        return ev
+
+    def _hist_late_gone(self, kind: str, ns: str, sid: str, t_old):
+        if t_old is None:
+            return None
+        r9 = self.conn.execute("SELECT MIN(event_ts) FROM postings WHERE source_kind=? AND source_ns=? AND source_id=?", (kind, ns, sid)).fetchone()
+        if r9 and r9[0] is not None and int(r9[0]) <= int(t_old):
+            return None
+        if kind == "chain_tx" and self._meta_get(f"ext_prewindow_tx:{ns}:{sid}") is not None:
+            return None
+        iso = common.hist_late_put(self.conn, int(t_old))
+        log.info("지난 원장 행 삭제(%s %s:%s · 다시 기장 없음) — 지난 곡선 다시 계산 표식: %s 부터", kind, ns, str(sid)[:16], iso)
+        return iso
 
     def outflow_pass(self, force: bool = False):
         if not force and time.time() - getattr(self, "_last_outflow", 0) < 60:
@@ -1635,11 +1652,13 @@ class Core:
         sid = f"recon:sol:stake:{acct}"
         if not acct:
             return "NOOP"
+        t_old9 = None
         if so.get("reopen"):
-            for r9 in self.conn.execute("SELECT posting_id, asset_id, location, qty_base FROM postings WHERE source_kind='opening'"
+            for r9 in self.conn.execute("SELECT posting_id, asset_id, location, qty_base, event_ts FROM postings WHERE source_kind='opening'"
                                         " AND source_id=?", (sid,)).fetchall():
                 self._bump_position(r9["asset_id"], -int(r9["qty_base"]), r9["location"])
                 self.conn.execute("DELETE FROM postings WHERE posting_id=?", (r9["posting_id"],))
+                t_old9 = int(r9["event_ts"]) if t_old9 is None else min(t_old9, int(r9["event_ts"]))
             self.conn.execute(
                 "INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                 (sid + ":reopen", "opening_balance", "sol", json.dumps(so, ensure_ascii=False), int(time.time())))
@@ -1663,6 +1682,7 @@ class Core:
         self.conn.execute(
             "INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
             (sid, "opening_balance", "sol", json.dumps(so, ensure_ascii=False), int(time.time())))
+        self._hist_late_gone("opening", "sol", sid, t_old9)
         self._drop_daily_cache()
         if seq:
             dm("RECON", f"[sol] 스테이크 계정 기초잔고 {int(so.get('lamports') or 0) / 1e9:,.4f} SOL — {acct[:6]}…{acct[-4:]}"
@@ -7338,9 +7358,8 @@ class Core:
         t9 = None
         if cur is not None:
             r = self.conn.execute(
-                "SELECT MIN(p.event_ts) FROM postings p WHERE p.posting_id > ? AND p.posting_id <= ? AND p.event_ts < ?"
-                " AND NOT (p.source_kind='chain_tx' AND EXISTS (SELECT 1 FROM meta m WHERE m.k = 'ext_prewindow_tx:' || p.source_ns || ':' || p.source_id))",
-                (cur, top, common.kst_day0(now))).fetchone()
+                "SELECT MIN(p.event_ts) FROM postings p WHERE p.posting_id > ? AND p.posting_id <= ? AND p.event_ts < ? AND " + common.HIST_LATE_EXCL_SQL,
+                (cur, top, common.kst_day0(now + common.HIST_LATE_CLOSE_S))).fetchone()
             t9 = r[0] if r else None
         self.conn.execute("BEGIN")
         try:
@@ -7351,8 +7370,36 @@ class Core:
             self.conn.rollback()
             raise
         if iso:
-            log.info("늦은 원장 행(posting %d~%d) — 지난 곡선 다시 계산 표식: %s 부터", (cur or 0) + 1, top, iso)
+            if int(t9) >= common.kst_day0(now):
+                log.info("마감 직전 원장 행(posting %d~%d) — 오늘(%s) 마감 스냅숏 지문 표식", (cur or 0) + 1, top, iso)
+            else:
+                log.info("늦은 원장 행(posting %d~%d) — 지난 곡선 다시 계산 표식: %s 부터", (cur or 0) + 1, top, iso)
         return iso
+
+    HL_FENCE_TRIES = 5
+    HL_FENCE_SLEEP = 2.0
+
+    def _hist_late_fence(self) -> str:
+        if self.conn.in_transaction:
+            self.conn.rollback()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            cur = self._meta_get(common.HIST_LATE_PID_K)
+            try:
+                ok9 = cur is not None and int(cur) >= 0
+            except (TypeError, ValueError):
+                ok9 = False
+            if ok9:
+                self.conn.rollback()
+                return "keep"
+            top = int(self.conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()[0] or 0)
+            self.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (common.HIST_LATE_PID_K, str(top)))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        log.info("늦은 원장 행 커서 울타리 초기화: posting %d (이 뒤 기장분부터 지난 곡선 표식 대상 — 그 전 행은 소급 안 함)", top)
+        return "init"
 
     EXT_STREAMS = frozenset(("evm", "sol", "bsc", "ex"))
     EXT_STALL_SEC = 3600
@@ -7941,6 +7988,20 @@ class Core:
         if _mk:
             raise SystemExit("★rebuild_incomplete 마커 감지 — 재파생이 완료되지 않은 원장."
                              " 백업(state/backups/ledger_YYYYMMDD.db)으로 되돌리거나 tools/rebuild2.py 로 다시 계산해 교체한 뒤 기동하라★")
+        for i9 in range(max(1, int(self.HL_FENCE_TRIES))):
+            try:
+                self._hist_late_fence()
+                break
+            except Exception as e:
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                if i9 + 1 >= max(1, int(self.HL_FENCE_TRIES)):
+                    raise SystemExit("★늦은 원장 행 커서 울타리(meta %s) 초기화 실패 — 수집 소비를 시작하지 않음(원장 쓰기 가능 여부 확인 뒤 다시 기동): %s★"
+                                     % (common.HIST_LATE_PID_K, common.safe_err(str(e))[:200]))
+                log.warning("늦은 원장 행 커서 울타리 초기화 실패(%d/%d — 잠시 뒤 다시): %s", i9 + 1, self.HL_FENCE_TRIES, common.safe_err(str(e))[:200])
+                time.sleep(float(self.HL_FENCE_SLEEP))
         streams = (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader),
                    ("ex", self.ex_reader))
         offs = {}

@@ -123,7 +123,64 @@ def resolve(end_ts, src, pinned=None) -> dict:
                 continue
         near = nearest(obs, end_ts, num(now.get("ts")), key)
         v = near[key] if near is not None else now.get(key)
+        if key == "ub":
+            v = ub_pre_fill(v, now.get("ubf"), end_ts, num(near["end"]) if near is not None else num(now.get("ts")))
         out[key] = [_val(key, v), "carry"]
+    if now.get("ubf"):
+        _ub_pin_fill(out, pinned, end_ts, src)
+    return out
+
+
+def _ub_pin_fill(out, pinned, end_ts, src):
+    now = src.get("now") or {}
+    ubf = now.get("ubf")
+    if not (isinstance(ubf, (list, tuple)) and len(ubf) >= 2 and isinstance(ubf[1], dict)):
+        return
+    ts = num(ubf[0])
+    po = (pinned or {}).get("ub")
+    if ts is None or not end_ts < ts or not (isinstance(po, (list, tuple)) and len(po) >= 2 and po[1] == "carry"):
+        return
+    ku = out.get("ku")
+    if not (isinstance(ku, list) and ku[1] == "tl"):
+        return
+    pk = (pinned or {}).get("ku")
+    if isinstance(pk, (list, tuple)) and len(pk) >= 2:
+        if pk[1] in ("snap", "carry") or abs((num(pk[0]) or 0.0) - (num(ku[0]) or 0.0)) <= 1.0:
+            return
+    nub = ub_norm(now.get("ub"))
+    pin = ub_norm(out["ub"][0])
+    for s, d in ubf[1].items():
+        d, s = num(d), str(s).upper()
+        if not d or s not in pin or s not in nub:
+            continue
+        q, post = pin[s][0], nub[s][0]
+        if abs(q - post) > 1e-9 * max(1.0, abs(post)):
+            continue
+        q2 = q - d
+        if q2 <= 1e-12:
+            pin.pop(s)
+        else:
+            pin[s] = [round(q2, 12), round(pin[s][1] * q2 / q, 2)]
+    out["ub"] = [pin, "carry"]
+
+
+def ub_pre_fill(ub, ubf, end_ts, seen_ts):
+    if not (isinstance(ubf, (list, tuple)) and len(ubf) >= 2 and isinstance(ubf[1], dict)):
+        return ub
+    ts = num(ubf[0])
+    if ts is None or not end_ts < ts or seen_ts is None or seen_ts < ts:
+        return ub
+    out = ub_norm(ub)
+    for s, d in ubf[1].items():
+        d, s = num(d), str(s).upper()
+        a = out.get(s)
+        if not d or a is None:
+            continue
+        q = a[0] - d
+        if q <= 1e-12:
+            out.pop(s)
+        else:
+            out[s] = [round(q, 12), round(a[1] * q / a[0], 2)]
     return out
 
 

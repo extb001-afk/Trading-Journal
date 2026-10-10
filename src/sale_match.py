@@ -282,7 +282,14 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
             t_claim = max([int(b.get("claim_ts") or b.get("exit_ts") or 0) for b in bids] or [0])
             lid = f"{chain}:{a}:{owner}"
             senders = {owner, a} | ({tok["addr"]} if rd else set())
+            bid_d = []
+            for b in bids:
+                am9, rf9 = Decimal(b["amount"]), Decimal(b.get("refunded") or 0)
+                bid_d.append({"id": b.get("id"), "bid_tx": str(b.get("bid_tx") or "").lower(), "exit_tx": str(b.get("exit_tx") or "").lower(),
+                              "amount": am9 / (Decimal(10) ** cdec),
+                              "refunded": rf9 / (Decimal(10) ** cdec) if Decimal(0) <= rf9 <= am9 else None})
             lots.append({"id": lid, "chain": chain, "auction": a, "bidder": owner, "bids": len(bids),
+                         "cur_addr": _addr(cur.get("addr")), "bid_d": bid_d,
                          "ratio": ratio if rd else Decimal(1), "filled": filled,
                          "label": str((seed["auctions"].get(f"{chain}:{a}") or {}).get("label") or LABEL),
                          "cur": csym, "paid": paid, "refund": refund, "paid_usd": paid_usd, "refund_usd": refund_usd,

@@ -3,6 +3,95 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-11 — 외부 검토 2건 버그 수정 · 목록 정리
+
+**업비트 미기장 체결 원화 이력 · BNB Chain 잔고 감시 긴 공백 · 세일(CCA) 환불 지급 코인 원가 · 늦은 원장 행 첫 주기·자정 경계 · EVM 따라잡기 trace 마감·영속 보류 ·
+긴 목록 20개씩 쪽 넘김 · 변동 분해 줄 → 무엇 때문인지 · 수집기 정지 한 줄 · 긴급 알림 자격**
+
+지난 판(2026-10-10 (3))을 읽은 외부 검토 두 건이 새로 찾은 버그를 하나씩 공개 시험으로 재현해(고치기 전 실패 → 고친 뒤 통과) 전부 고친 판이에요 —
+업비트 지정가 주문의 첫 부분 매수·같은 코인 사고팔기 동안 어제·지난 곡선이 체결 금액만큼 어긋나던 것, BNB Chain 잔고 감시가 30분 넘게 쉬면 그 사이 받은 BNB 를 버리던 것,
+세일(CCA) 부분 환불로 돌아온 지급 코인이 원래 원가 대신 환불 때 시세로 다시 잡히던 것, 업데이트 직후 첫 주기·자정 직전에 들어온 늦은 거래가 표식 없이 지나가던 것,
+공개 trace 노드가 아플 때 EVM 따라잡기가 멈추고 미룬 내부 이동 확인이 조용히 사라질 수 있던 것. 화면은 끝없이 길어지던 목록을 20개씩 쪽으로 넘기게 정리했고,
+변동 분해 줄을 누르면 무엇 때문인지 보여요. 드문 경우는 아래 알려진 한계에 적었어요. 사진은 다시 찍지 않았어요(README '이번 판' 안내).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js` — 유닛을 전부 멈춘 뒤 한꺼번에 시작 ·
+> 이번에 코드가 바뀐 유닛 = 웹·코어·EVM·BNB Chain·업비트·해외 거래소·알림).
+> 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 · 새로 생기는 칸 — `state/bsc_balw.json` 의 미해결 구간 · EVM 커서의 미룬 trace 선등록 · 대기열이 넘칠 때만 `state/trace_later_overflow_<체인>.jsonl` ·
+> 일별 캐시 마감 스냅숏의 원장 수위 — 은 옛 코드가 읽지 않음).
+> 업데이트 뒤 첫 코어 기동이 첫 수집 전에 원장 메타에 늦은 거래 울타리를 적어요 — 그 뒤 들어온 지난 거래부터 지난 곡선을 고치고, 업데이트 전에 이미 굳은 날은 소급하지 않아요.
+> 2026-10-10 (3) 판을 쓰는 동안 봇이 30분 넘게 멈춘 적이 있으면(정지·노드 장애) BNB Chain 에 그 사이 받은 BNB 를 놓쳤을 수 있어요 — `state/bsc_balw_recheck.json` 에 `{"hours": 48}`(다시 볼 시간 수)을 두면
+> 최근 그만큼을 원장 기록과 옛 블록 잔고로 다시 점검해요(아카이브 키 필요 · 처리하면 파일은 저절로 지워짐).
+> Ankr 무료 키가 있으면 오래 꺼졌다 켜지거나 새로 설치해 최근 구간을 따라잡는 동안만 Base 등 RPC 체인의 잔고·nonce 확인을 키 노드에 먼저 보내요(하루 몫 80% 안 · 넘으면 공개 노드로 · 평소엔 종전처럼 공개 노드 먼저).
+
+- **업비트 미기장 체결의 원화 이력** — 지정가 주문이 끝나기 전(원장 기록 전) 체결된 몫의 원화 현금 이동을 코인 수량 보정과 따로 지난날 원화 되감기에 넣어요 —
+  업비트에 없던 코인의 첫 부분 매수(코인은 업비트 실시간 잔고 행)·같은 코인을 사고팔아 순수량이 0인 체결에서 어제·지난 곡선이 체결 금액만큼 어긋나던 것 고침(30일 곡선·장기 곡선 같은 값 · 수수료 포함) ·
+  그 스냅숏 시각 전 날로 이어 쓰는 업비트 코인은 체결 전 수량으로(이중 계상 없음) · 지난 판이 체결 뒤 수량으로 굳힌 지난날은 업데이트 뒤 한 번 맞춤(그때 부분 체결이 열려 있을 때) ·
+  늦은 거래로 그날 마감 스냅숏을 버리고 다시 계산할 때도 체결 원화를 같은 자리로(몇 번 다시 계산해도 같은 값) · 업비트 잔고가 10분 넘게 낡은 동안 미기장 체결이 있으면 그 스냅숏을 그날 마감 재료로 쓰지 않아요.
+- **BNB Chain 잔고 감시 — 긴 공백 뒤에도** — 봇 정지·노드 장애·되돌리기로 30분 넘게 못 돌았어도 잔고 체크포인트를 버리지 않고 그 공백을 미해결 구간으로 저장해(`state/bsc_balw.json` · 재시작에도 유지)
+  원장 거래로 다시 설명하고, 내 발신 수가 nonce 와 맞을 때 남는 증가를 원래 블록·시각의 실제 거래로 한 번만 기록해요(금액 문턱 없음) · 원장 읽기 실패·예산 소진이면 구간을 그대로 두고 다음에(성공으로 기록 안 함) ·
+  공개 노드 없이 아카이브만 넣은 구성에서 지갑이 13개 이상이면 잔고 감시가 영영 안 돌던 것 · 아카이브가 옛 상태를 못 주면('missing trie node'·빈 응답) 공개 노드로, 세 번 이어지면 기초 잔고 ·
+  한 블록 직접 입금 6건째부터 빠지던 것 · 지난 누락 탐색이 실패해도 하루 미뤄지던 것(10분 뒤 다시) · 지난 판 공백 다시 점검 요청 파일(위 업데이트 상자).
+- **세일(CCA) 부분 환불 — 지급 코인 원가** — 입찰에 보낸 ETH 등이 일부 환불되면, 환불 때 시세로 새로 취득하던 것(최초 인식 시가를 끄면 원가 미확인) 대신 입찰 때 보낸 원가 중 환불 비율만큼을 되돌려요
+  (체인·입찰자·지급 자산·종료 거래가 맞는 환불만 · 확인된 환불량까지 · 한 번만 · 여러 입찰·여러 번 부분 환불은 비례) → 그 코인을 나중에 팔 때 원가·실현손익·양도차익 명세가 맞아요 ·
+  원가가 미확인이던 몫은 미확인 그대로 · 입찰 송금이 무관한 '프로그램 예치 왕복' 짝이 돼 원가가 두 번 돌아오던 것 고침 · 받은 토큰 원가(지난 판 순매입 원가)는 그대로.
+- **늦은 원장 행 — 첫 주기·자정 경계** — 지난 판의 '늦게 들어온 거래 → 지난 곡선 다시 계산'이 놓치던 경계를 막았어요: 업데이트 뒤 첫 주기에 들어온 늦은 거래(코어가 첫 수집 전에 울타리를 먼저 적고 · 못 적으면 수집을 시작하지 않음) ·
+  자정 직전 16분에 기장된 그날 행 · 마지막 화면 스냅숏 뒤~자정 사이에 기장된 행(마감 스냅숏이 같은 읽기의 원장 수위를 함께 저장하고, 그 뒤 그날 행이 기장됐으면 마감 재료로 쓰지 않음) ·
+  그렇게 버린 마감 스냅숏도 그날 마감가는 고정(지금 시세로 바뀌지 않음) · 거래를 지우기만 하고 다시 넣지 않는 원장 경로(다시 분류 뒤 레그 0개 · 스테이킹 재개 0)도 표식 · 장기 곡선 '근사' 몫이 빌린(음수) 보유를 크기로 셈.
+- **EVM 따라잡기 · 내부 이동 추적(trace)** — trace 호출(callTracer·parity 대체·블록 trace)이 절대 마감 하나를 나눠 쓰고, 노드가 연달아 2번 실패하면 5분 동안 따라잡기·엿보기 걸음은 trace 없이 바로 '나중에 다시'로 ·
+  trace 를 미룬 거래는 기록하기 전에 대기열에 저장(재시작·되돌리기에도 회수) · 대기열(2,000건)이 차면 버리지 않고 `state/trace_later_overflow_<체인>.jsonl` 로 내려 두었다 되살림 · 한 번도 시도 못 한 항목은 만료 안 함(30일 만료는 실제로 5번 넘게 시도한 것만) ·
+  해시를 모르는 내부 입금도 지갑·블록 단위로 저장해 나중에 회수 · 보완 작업은 최신 확인 뒤 최소 몫으로(굶지 않게) · 따라잡는 걸음의 잎 블록은 묶어 한 번에 조회 · 키 노드가 있으면 따라잡는 걸음의 잔고·nonce 확인은 키 노드 먼저(위 업데이트 상자).
+- **긴 목록 20개씩 · 화면 다듬기** — 펼치면 페이지가 끝없이 길어지던 목록(보유 코인·사이클·전체 이벤트·최근 30일·보낸 내역·미매칭·추적 지갑·체인별 조회·NFT·계획 점수·서랍 안 표·⌘K 검색 결과 등 30곳 넘게)을
+  처음 N개 → 'N개 모두 보기' → '‹ 이전 · 21–40 / N · 다음 › · 접기' 20개씩 쪽으로(접힌 첫 화면은 그대로 · 검색으로 찾아가면 그 항목이 있는 쪽을 엶 · 거르기·정렬·기간을 바꾸면 첫 쪽) ·
+  혼자 한 줄에 있던 단추·칩을 관련 줄 끝으로 · 줄 끝 '·' 고아·한글 캡션 고정폭 글꼴 정리 · 폰 누름 영역 44px · 설정 '지갑·주소' 순서(목록 → 주소 관리 → 체인별 조회 → 확인 주기) ·
+  연간 잔디 첫 열 잘림 · 폰 달력 'AI' 표시를 점으로 · 좁은 화면 매매일지 탭 줄 칩 '점수'·'결산'.
+- **변동 분해 줄 → 무엇 때문인지** — 대시보드 '오늘 무엇이 움직였나'·그날 카드·'M월 한눈에'의 분해 줄(시세·현물 실현·선물 실현·입출금·환율·선물 미반영·나머지 등)을 누르면 시트가 열려 구성 요소를 큰 순으로 보여요 —
+  시세 = 코인별(변동률·전일 수량·전일가 → 그날가) · 현물 실현 = 코인별(누르면 차익 영수증) · 선물 = 거래소·종목별 · 입출금 = 건별(상계된 레그) · 환율 = 몫별 · 나머지 = 이름 붙인 조각(가격 끊김·원장 밖 잔고·반올림 등) ·
+  20개씩 쪽 · 맨 아래 합 확인(늘 줄 값과 정확히 같음) · 그 달은 항목별/날짜별 · 새 읽기 전용 API `GET /api/att_detail`(빌드 재료로만 · 외부 호출 0) · 금액 숨김·랜덤값에선 상세 원문을 받지 않음 · 총자산·곡선·분해 값은 그대로.
+- **작은 것** — 업비트·해외 거래소 수집기가 pm2 stop·restart 때 트레이스백 대신 한 줄로 끝나요 · 긴급 알림 재시도 대기 판정이 지금 텔레그램 자격으로(자격을 바꾼 직후 실패하면 대기 없이 0.5초마다 다시 보내던 것) ·
+  파이썬 3.9 공개 시험 하나(멈춘 단일 차선의 첫 주기)가 느린 기계에서 실패하던 것을 논리 시계로(판정은 그대로).
+  설정의 거래소 키 안내 정정 — 업비트는 자산·주문·입금·출금 '조회' 넷이 필요(자산조회만 켜면 체결·입출금 기록을 못 읽음) · 빗썸은 조회 항목 · 게이트는 선물 포지션용 Futures Read Only · trace(parity) 응답의 실패 경로 판정이 응답 크기에 비례하도록(아주 큰 응답이 CPU 를 오래 붙잡던 것).
+
+**함께**
+
+- **문서** — [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) BNB Chain '받은 BNB' 줄(긴 공백 뒤에도 · 다시 점검 요청)·Base 줄(연달아 실패하면 5분 · 기록 전 저장 · 실제 5번 시도 뒤 만료) ·
+  [API_KEYS.md](docs/API_KEYS.md) Ankr 따라잡기 · README '이번 판'·일별 기록·알려진 한계.
+- **시험** — 공개 시험 추가: 업비트 미기장 체결 원화 이력(첫 부분 매수·순수량 0·수수료·업그레이드 경로·마감 거절 자정 교차) · BNB Chain 긴 공백(45분 공백·재시작·원장 읽기 실패·예산 소진·아카이브 없음·아카이브 전용·한 블록 6건) ·
+  세일 환불 원가(수집 → 코어 → 화면 빌드 끝까지) · 늦은 행 첫 주기 울타리·자정 경계 · trace 마감·아픈 노드·영속 보류·넘침·되돌리기 · 쪽 넘김 · 변동 분해 상세(서버 합·화면 합) · 수집기 정지 · 긴급 알림 자격 —
+  전체 5,000건 넘게(파일 150개 넘게).
+
+**English · External review fixes and list paging** — Two external reviews of the previous release found new bugs; every one was reproduced as a public test (failing before, passing after) and fixed.
+Upbit: the KRW cash moved by unbooked fills of open limit orders is now rewound in past days independently of the coin adjustment, so a first partial buy of a coin held only on the live balance
+row, or a buy and sell of the same coin with zero net quantity, no longer shifts yesterday and past curves by the filled amount (30-day and long-range curves agree; past days frozen by the previous
+release are corrected once; recomputing a day after its close snapshot is set aside keeps the fill's KRW in place, idempotently), and a stale (10+ minute) snapshot with unbooked fills no longer
+becomes the day's close. BNB Chain balance watch: a pause longer than 30 minutes (bot stopped, node outage, rollback) no longer discards the checkpoint — the gap is kept as a persisted unresolved
+window, re-explained from ledger transactions with a nonce check, and BNB received in it is recorded once at its original block (no amount threshold); archive-only setups with many wallets,
+archives answering "missing trie node", and blocks with more than five direct deposits are handled; installs that ran 2026-10-10 (3) can re-check a past gap with
+`state/bsc_balw_recheck.json` `{"hours": N}`. Token-sale (CCA) partial refunds: the refunded payment coin gets back its original cost share instead of being re-priced at refund time, so later
+sells, realized PnL and the tax export are correct. Late ledger rows: a startup cursor fence is written before the first ingest after an upgrade, rows booked in the last 16 minutes before midnight
+are flagged, and the close snapshot carries the ledger posting watermark and is set aside if anything for that day was booked after it (its close prices stay pinned). EVM RPC catch-up no longer
+stalls on a failing public trace node: trace calls share one absolute deadline, two consecutive failures pause catch-up/peek tracing for 5 minutes, deferred lookups are persisted before
+emission (queue overflow spills to a file, untried items never expire), internal deposits with unknown hashes are kept per wallet and block, and a catch-up step sends balance/nonce checks
+to a keyed node first when one is configured. UI: long lists (holdings, cycles, events, outflows, unmatched, wallets, NFT, drawers, search) page 20 at a time instead of growing the page,
+lone buttons moved onto their rows, 44px touch targets on phones; tapping any row of the asset-change breakdown opens a sheet listing what made it up (per coin, per realized sale,
+per futures venue/symbol, per transfer, FX parts, named remainder pieces), biggest first, 20 per page, adding up exactly to the row (new read-only `GET /api/att_detail`). Also: Upbit and
+foreign-exchange collectors stop with one log line, the urgent-alert backoff compares the current Telegram credentials, and the exchange key guide now lists the Upbit read permissions the bot needs
+(assets, orders, deposits, withdrawals — view only) and Gate futures read-only; parity trace responses are checked in linear time. No rebuild and no data revision.
+
+**알려진 한계(다음 판에)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
+
+- 업비트 열린 주문 응답엔 여전히 체결 시각이 없어 미기장 체결을 '지금 스냅숏 시각'에 생긴 것으로 봐요 — 며칠 열린 주문은 아직 계산 안 된 더 옛날 날(새 설치의 장기 곡선 등)에서 그 체결만큼 어긋날 수 있고,
+  업비트 잔고가 10분 넘게 낡은 동안 오늘 값은 체결 금액만큼 다를 수 있어요(그날 마감엔 안 굳음) · 시세 없는 코인의 첫 매수는 체결 금액만큼 오늘 손실처럼, 원장에 기록된 것보다 많이 판 매도는 그날 이득처럼 보일 수 있어요.
+- BNB Chain 공백 구간에 내 발신이 아직 원장에 안 들어왔으면 그 구간은 기다려요(코어가 멈춰 있으면 계속 미해결 — 로그 '미해결 구간 N') · 아카이브 키 없는 설치의 256블록 넘는 공백은 구간 끝 블록 시각의 기초 잔고(원가 미확인)로 ·
+  공개 노드 없이 아카이브만 넣은 구성은 실행당 6지갑씩이라 지갑이 많으면 감지가 몇 시간 늦어요(놓치진 않음) · 다시 점검 요청은 블록 시간을 추정해 창을 잡아요.
+- 세일(CCA) 입찰을 라우터·도우미 컨트랙트를 거쳐 보냈거나 입찰 송금이 수집 기간 전이면 환불 원가를 잇지 못해요(종전 규칙) · 스테이블 환불의 원화 원가는 환불 때 환율.
+- 늦은 행으로 마감 스냅숏을 버린 날, 그 스냅숏에 시세가 없던 코인은 지금 시세 근사로 들어갈 수 있어요(지난 판과 같음) · 업데이트 전에 이미 굳은 날은 소급하지 않아요.
+- 공개 trace 노드가 아픈 동안(연달아 실패 → 5분) 내부 이동은 몇 분 늦게 원장에 들어와요 · 따라잡기 걸음의 절반 넘게는 잔고·nonce 이분 탐색이라 키 노드 없이 공개 노드만 쓰면 여전히 느려요(Ankr 무료 키 권장 —
+  자주 쓰는 지갑 몇 개를 이틀치 따라잡으면 하루 몫의 절반쯤을 한 번 쓸 수 있고, 그 몫은 실시간 사용으로 잡혀 그날 백필 몰아 쓰기 몫이 줄 수 있어요).
+- RPC 노드가 응답 본문을 아주 느리게 조금씩 보내면(소켓 대기 시간 단위로만 끊겨) trace 의 절대 마감을 넘겨 그 체인 수집이 그만큼 늦어질 수 있어요(유명 공개 노드에선 드묾 · 다음 판에 본문 수신 전체 마감).
+- 변동 분해 상세의 시세 코인은 하루 큰 순 400개까지(나머지는 '그 밖 N종' 한 줄 · 합은 정확) · 입출금은 같은 날 같은 코인 순액 단위(거래 한 건씩은 일별 기록 목록) · '그날 사고판 분'은 한 줄.
+- 지난 판 한계(부채 기록 시작 전 날 · 첫 대사 전 원가·손익 · 로그 없는 BNB 발신 봇 · 못 가린 컨트랙트 BNB 기초 잔고 · Base trace 늦은 채움 · 코인 카드 스팸 줄 · 원화 거래소 나중 추가 · 체인 칩 설명 · OKX MARGIN 단위)는
+  그대로예요 — [2026-10-10 (3)](#2026-10-10-3--외부-검토-반영).
+
 ## 2026-10-10 (3) — 외부 검토 반영
 
 **거래소 마진·대출 부채 차감 · 업비트 열린 주문 부분 체결 · 늦게 들어온 거래 → 지난 곡선 다시 계산 · BNB Chain 에 그냥 받은 BNB · EVM 옛 구간 채우기 예산 ·
@@ -152,7 +241,7 @@ price, response size caps on the remaining direct lookups, and real Claude CLI f
 
 - 첫 대사 전엔 원가·손익·지난날 곡선에 수집 기간 이전 보유가 빠져 있어요(오늘 보유·총자산은 지금 잔고로 맞음) · 그 '지금 잔고'는 BNB Chain·Solana 조회 도중 출금이 겹치거나 전송 중 출금과 창 이전 보유가 겹치면 잠깐 덜 보일 수 있어요.
 - 시간당 수백 건씩 로그 없는 BNB 발신을 하는 봇 같은 주소는 BNB Chain 회수가 사이클당 몇 건이라 뒤처져요.
-- Base 등 공개 노드만 쓰는 체인은 trace 노드 한도에 걸리면 내부 이동이 늦게 채워져요(백오프 · 30일) · Alchemy 키만 넣은 설치는 Arbitrum 등의 옛 구간이 느려요(Etherscan·Ankr 권장).
+- Base 등 공개 노드만 쓰는 체인은 trace 노드 한도에 걸리면 내부 이동이 늦게 채워져요(백오프 · 30일) · Alchemy 키만 넣은 설치는 Arbitrum 등의 옛 구간이 느려요(Etherscan·Ankr 권장). — **2026-10-11 판에서 일부 고침**(trace 노드가 아파도 따라잡기가 멈추지 않고 미룬 확인을 잃지 않음 · 늦게 채워지는 건 그대로 · [2026-10-11](#2026-10-11--외부-검토-2건-버그-수정--목록-정리)).
 - 코인 카드 안 기록 줄의 사칭·스팸 줄 · 업비트·빗썸 외 원화 거래소를 나중에 넣을 때 지난 곡선 소급 · 체인 칩 설명 화면은 다음 판에.
 - ~~토큰 보안 정보(GoPlus) 조회 한 곳은 아직 응답 크기 상한 없이 읽어요(공식 API · 15초 시간 제한) — 다음 판에 같은 상한(32MiB)으로~~ — **2026-10-10 (3) 판에서 고침**(4MiB 상한 · 넘으면 조회 실패로 · [2026-10-10 (3)](#2026-10-10-3--외부-검토-반영)).
 

@@ -271,7 +271,7 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
   const st = { view: null, sm: false, hist: false,
     tm: { series: null, sErr: '', date: '', cache: {}, re: {}, busy: false, err: '', t: 0, cmp: false },
     fl: { cache: {}, per: 'all', err: '', busy: '', sel: -1, L: null },
-    ps: { f: 'all' },
+    ps: { f: 'all', p: 0 },
     sell: { key: '', f: 0.5, saveMsg: '' },
     ye: { i: 0, ratio: false, year: 0 } };
   const LSget = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
@@ -388,8 +388,9 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
     }
     if (k === 'journal.head') {
       const sc = planScore();
-      return '<div class="wowbar" style="margin:0 0 12px"><button type="button" class="wowchip' + (sc.n ? ' hl' : '') + '" data-w="open" data-v="ps">' + ICO.target + '계획 지키기 점수' + (sc.n ? ' <b class="pvx">' + sc.score + '</b>' : '') + '</button>'
-        + '<button type="button" class="wowchip" data-w="open" data-v="ye">' + ICO.star + yearLabel() + '</button></div>';
+      const yl9 = yearLabel(), ym9 = yl9.match(/^(\d{4}년 )(결산)(.*)$/);
+      return '<div class="wowbar" style="margin:0 0 12px"><button type="button" class="wowchip' + (sc.n ? ' hl' : '') + '" data-w="open" data-v="ps" aria-label="계획 지키기 점수' + (sc.n ? ' ' + sc.score : '') + '" title="계획 지키기 점수">' + ICO.target + '<span class="wl9">계획 지키기 </span>점수' + (sc.n ? ' <b class="pvx">' + sc.score + '</b>' : '') + '</button>'
+        + '<button type="button" class="wowchip" data-w="open" data-v="ye" aria-label="' + esc(yl9) + '" title="' + esc(yl9) + '">' + ICO.star + (ym9 ? '<span class="wl9">' + ym9[1] + '</span>' + ym9[2] + (ym9[3] ? '<span class="wl9">' + ym9[3] + '</span>' : '') : yl9) + '</button></div>';
     }
     if (k === 'hold.open' && g && num(g.qty) > 0 && num(g.value) > 0) {
       return '<div class="wowbar" style="margin:0 0 10px"><button type="button" class="wowchip" data-w="sell" data-k="' + esc(g.key) + '">' + ICO.sell + '지금 팔면?</button></div>';
@@ -801,15 +802,18 @@ html{--wfl5:var(--c5)} html:not([data-theme="light"]){--wfl5:#8C94A8}
         + '</div><div class="wps-ax">' + months.map(mm => '<span>' + (+mm.slice(5)) + '월</span>').join('') + '</div></div>';
       const ruleH = '<div class="wcard wrule"><b style="font-size:14px">기본 규칙</b><span class="wnote">목표가·손절선을 안 걸어 둔 매도는 이 규칙으로 판정해요(이 기기에 저장)</span><span class="lb">손절</span><span class="wseg">' + RULE_STOP.map(v => '<button type="button" class="' + (R.stop === v ? 'on' : '') + '" aria-pressed="' + (R.stop === v) + '" data-w="psRule" data-k="stop" data-v="' + v + '">−' + Math.abs(v) + '%</button>').join('') + '</span>'
         + '<span class="lb">목표</span><span class="wseg">' + RULE_TGT.map(v => '<button type="button" class="' + (R.tgt === v ? 'on' : '') + '" aria-pressed="' + (R.tgt === v) + '" data-w="psRule" data-k="tgt" data-v="' + v + '">+' + v + '%</button>').join('') + '</span></div>';
-      const f = st.ps.f, shown = (f === 'all' ? rows : rows.filter(r => r.v === f)).slice(0, 60);
+      const f = st.ps.f, fl9 = f === 'all' ? rows : rows.filter(r => r.v === f), PS = 20, last9 = Math.max(0, Math.ceil(fl9.length / PS) - 1), p9 = st.ps.p = Math.max(0, Math.min(last9, st.ps.p | 0)), shown = fl9.slice(p9 * PS, p9 * PS + PS);
+      const nf9 = v => Number(v).toLocaleString('ko-KR'), pnav = (d, t, l, dis) => '<button type="button" class="ubtn upgb" data-w="psPg" data-v="' + (p9 + d) + '"' + (dis ? ' disabled' : '') + ' aria-label="' + l + '">' + t + '</button>';
+      const pbar = last9 > 0 ? '<div class="umore"><div class="upg" role="group" aria-label="쪽 넘기기">' + pnav(-1, '‹ 이전', '이전 쪽', p9 === 0) + '<span class="upgt num pvx" aria-live="polite">' + nf9(p9 * PS + 1) + '–' + nf9(p9 * PS + shown.length) + ' <span class="mut">/ ' + nf9(fl9.length) + '<span class="upgu">건</span></span></span>' + pnav(1, '다음 ›', '다음 쪽', p9 === last9) + '</div></div>' : '';
       const chips = '<div class="wchips">' + [['all', '전체', rows.length]].concat(Object.keys(VW).map(k => [k, VW[k][0], rows.filter(r => r.v === k).length])).map(c => '<button type="button" class="' + (f === c[0] ? 'on' : '') + '" aria-pressed="' + (f === c[0]) + '" data-w="psF" data-v="' + c[0] + '"' + (c[0] !== 'all' && f !== c[0] ? ' style="color:' + VCOL[c[0]] + '"' : '') + '>' + esc(c[1]) + ' <span class="pvx">' + c[2] + '</span></button>').join('') + '</div>';
       const list = '<div class="wcard" style="padding-top:14px">' + chips + shown.map(r => '<div class="wps-row" data-w="psGo" data-k="' + esc(r.key) + '" role="button" tabindex="0"><span style="min-width:0"><b>' + esc(r.sym) + '</b><small class="pvx">' + esc(md(r.last)) + ' 판</small></span><span class="pl">' + esc(r.plan.t) + '</span><span class="wv ' + r.v + '">' + VW[r.v][0] + '</span><span class="r ' + cls(r.pnl) + '">' + P(r.pnl, 1, true) + '</span></div>').join('')
-        + (rows.length > shown.length && f === 'all' ? '<div class="wnote" style="padding-top:10px">최근 60건만 · 거르기로 좁혀 보세요</div>' : '') + '</div>';
+        + pbar + '</div>';
       return '<div class="wps"><div class="wgrid">' + ring + bars + ruleH + '</div>' + list + '</div>';
     }
   };
   Object.assign(A, {
-    psF: el => { st.ps.f = el.getAttribute('data-v') || 'all'; paint(); },
+    psF: el => { st.ps.f = el.getAttribute('data-v') || 'all'; st.ps.p = 0; paint(); },
+    psPg: el => { st.ps.p = Math.max(0, num(el.getAttribute('data-v'))); paint(); const t = document.querySelector('#wowStage .wps .wchips'); if (t && t.getBoundingClientRect().top < 0) t.scrollIntoView({ block: 'start' }); const b = document.querySelector('#wowStage [data-w="psPg"]:not([disabled])'); if (b) { try { b.focus({ preventScroll: true }); } catch (e) {  } } },
     psRule: el => { const R = rule(); R[el.getAttribute('data-k')] = num(el.getAttribute('data-v')); LSset('tj_v2_planrule', JSON.stringify(R)); paint(); const x = X(); if (x) x.render(); },
     psGo: el => { const k = el.getAttribute('data-k'), x = X(); if (x && k) closeAndGo(() => x.revealAndHighlight('cycle:' + k)); else close(); }
   });

@@ -64,6 +64,7 @@ def deltas(open_orders, booked_map, snap_ts=None) -> dict | None:
         return None
     out = {}
     krw = {}
+    ko = {}
 
     def add(sym, dq, cost_ccy=None, cost=None):
         if sym == "KRW" or dq == 0:
@@ -93,6 +94,8 @@ def deltas(open_orders, booked_map, snap_ts=None) -> dict | None:
             if b.get("uuid") and bt is not None and snap_ts is not None and int(bt) <= int(snap_ts):
                 kl -= (b["funds"] - b["fee"]) if b["side"] == "ask" else -(b["funds"] + b["fee"])
             krw[f["base"]] = krw.get(f["base"], ZERO) + kl
+            if kl:
+                ko.setdefault(f["base"], {})[f["uuid"]] = ko.get(f["base"], {}).get(f["uuid"], ZERO) + kl
         if f["side"] == "bid":
             dqt = -((f["funds"] + f["fee"]) - (b["funds"] + b["fee"]))
             add(f["base"], dv, f["quote"], (f["funds"] + f["fee"]) - (b["funds"] + b["fee"]))
@@ -101,14 +104,22 @@ def deltas(open_orders, booked_map, snap_ts=None) -> dict | None:
             dqt = (f["funds"] - f["fee"]) - (b["funds"] - b["fee"])
             add(f["base"], -dv)
             add(f["quote"], dqt, f["quote"], dqt)
+    for sym, k9 in krw.items():
+        if k9 and sym not in out:
+            out[sym] = {"dq": ZERO, "k": ZERO, "c": {}, "n": 0}
     for sym, e in out.items():
         e["krw"] = krw.get(sym, ZERO)
+        e["ko"] = dict(ko.get(sym) or {})
     for e in out.values():
         if e["k"] > e["dq"]:
             r = (e["dq"] / e["k"]) if (e["k"] > 0 and e["dq"] > 0) else ZERO
             e["k"] = max(e["dq"], ZERO)
             e["c"] = {c: v * r for c, v in e["c"].items()}
     return out
+
+
+def cash_krw(dm) -> Decimal:
+    return sum((e.get("krw") or ZERO for e in (dm or {}).values()), ZERO)
 
 
 def snapshot_deltas(conn, snap, ts_of=None) -> tuple:

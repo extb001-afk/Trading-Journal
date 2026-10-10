@@ -1048,6 +1048,10 @@ def urgent_pass(now=None) -> int:
     if not token or not chat or cursor is None or hold is None:
         return 0
     conn, st = c.get("conn"), c.get("st") or {"days": {}, "counted": {}}
+    if _URG_BACKOFF["until"] > time.time():
+        ft9, fc9 = _tg_creds()
+        if ft9 and fc9:
+            token, chat = ft9, fc9
     if _urg_backoff_wait(token, chat, time.time()):
         return 0
     sent = 0
