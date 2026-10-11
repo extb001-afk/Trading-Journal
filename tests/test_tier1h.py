@@ -10,7 +10,7 @@ import re
 import subprocess
 import time
 
-for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY", "TJ_ALCHEMY_KEY"):
+for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY", "TJ_ALCHEMY_KEY"):
     os.environ.pop(_k, None)
 W1 = "0x" + "1a" * 20
 W2 = "0x" + "2b" * 20
@@ -551,11 +551,12 @@ try:
           and NODE_CALLS[0][0].startswith("https://rpc.ankr.com/eth/"), (r, [(u[:26], m) for u, m in NODE_CALLS]))
     for g, field, val, host in (("alchemy", "TJ_ALCHEMY_KEY", "TESTal_00000000000000000000000007", "eth-mainnet.g.alchemy.com"),
                                 ("nodereal", "TJ_NODEREAL_KEY", "TESTnr_0000000000000001", "bsc-mainnet.nodereal.io"),
-                                ("quicknode", "TJ_QUICKNODE_BSC_KEY", "https://x-y.bsc.quiknode.pro/tok0000000/", "x-y.bsc.quiknode.pro")):
+                                ("quicknode", "TJ_QUICKNODE_KEY", "https://x-y.bsc.quiknode.pro/tok0000000/", "x-y.base-mainnet.quiknode.pro")):
         NODE_CALLS.clear()
         onboarding._node_rpc = node_rpc_err("http4xx", 401)
         r = onboarding._dispatch("keys/save", {"group": g, "values": {field: val}})
-        check(f"C4a {g} 키 401 = 저장 안 함 · 그 노드 1콜", r.get("ok") is False and not ss.read_env().get(field) and len(NODE_CALLS) == 1
+        n9 = 1
+        check(f"C4a {g} 키 401 = 저장 안 함 · 그 노드 {n9}콜", r.get("ok") is False and not ss.read_env().get(field) and len(NODE_CALLS) == n9
               and host in NODE_CALLS[0][0], (r, NODE_CALLS))
         NODE_CALLS.clear()
         onboarding._node_rpc = node_rpc_err("timeout")

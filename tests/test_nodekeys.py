@@ -7,7 +7,7 @@ import _harness as T
 import json
 import os
 
-for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY"):
+for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY"):
     os.environ.pop(_k, None)
 CFG = {"wallets": [{"type": "evm", "chain": "eth", "address": "0x" + "1f" * 20, "label": "시험"}],
        "chains": {"base": {"rpc_logs": ["https://pub-base.invalid"], "rpc_log_span_caps": {"https://pub-base.invalid": 5000}},
@@ -70,15 +70,15 @@ check("K2 받은 주소 = 질의·조각 떼고 호스트 소문자", NK._qn_url
       == "https://fake-one.bsc.quiknode.pro/tok12345/", NK._qn_url("https://Fake-One.BSC.quiknode.pro/tok12345/?a=1#f", "bsc"))
 
 pl0 = NK.plans({})
-check("K3a 기본 = NodeReal·Ankr·Alchemy 무료 · QuickNode 유료 10% · 월 한도 없음",
+check("K3a 기본 = 전부 무료 · 유료 비율 기본 10(QuickNode 80 — qn1011) · 월 한도 없음",
       pl0 == {"nodereal": {"plan": "free", "share": 10, "month": None}, "ankr": {"plan": "free", "share": 10, "month": None},
-              "quicknode": {"plan": "paid", "share": 10, "month": None}, "alchemy": {"plan": "free", "share": 10, "month": None}}, pl0)
+              "quicknode": {"plan": "free", "share": 80, "month": None}, "alchemy": {"plan": "free", "share": 10, "month": None}}, pl0)
 pl1 = NK.plans({"node_plans": {"nodereal": {"plan": "paid", "share": 25, "month": 500_000_000},
                                "ankr": {"plan": "paid", "share": 7, "month": True},
                                "quicknode": {"plan": "free", "share": 50, "month": 1000}}})
 check("K3b 유료 · 비율 25 · 월 한도 그대로", pl1["nodereal"] == {"plan": "paid", "share": 25, "month": 500_000_000}, pl1["nodereal"])
 check("K3c 비율 7(목록 밖) = 10 · 월 한도 True(불리언) = 없음", pl1["ankr"] == {"plan": "paid", "share": 10, "month": None}, pl1["ankr"])
-check("K3d QuickNode 를 무료로 저장해도 = 유료(무료 등급 없음)", pl1["quicknode"]["plan"] == "paid" and pl1["quicknode"]["share"] == 50, pl1["quicknode"])
+check("K3d QuickNode 무료 저장 = 무료 그대로(qn1011 — 무료 플랜 월 1,000만 크레딧)", pl1["quicknode"]["plan"] == "free" and pl1["quicknode"]["share"] == 50, pl1["quicknode"])
 for sh in (True, "25", 0, 100, 81, None, 25.5):
     check(f"K3e 비율 {sh!r} = 기본 10", NK.plans({"node_plans": {"ankr": {"plan": "paid", "share": sh}}})["ankr"]["share"] == 10)
 for mo, exp in ((0, None), (-5, None), (10 ** 12, 10 ** 12), (10 ** 12 + 1, None), (1.5e6, None), ("1000", None), (1, 1)):
@@ -99,7 +99,8 @@ check("K4c 유료 = 이용자 월 한도 × 비율 25", sp["month"] == 500_000_0
 sp = NK.budget_spec("ankr", {"plan": "paid", "share": 50, "month": None})
 check("K4d 유료인데 월 한도 없음 = 무료 월 한도로 보수적", sp["month"] == NK.PROVIDERS["ankr"]["free_month"] and sp["pct"] == 50.0, sp)
 sp = NK.budget_spec("quicknode", NK.plans({})["quicknode"])
-check("K4e QuickNode 기본 = 유료 10% · 요청당 20 · debug/trace 40", sp["pct"] == 10.0 and sp["cu"] == 20 and sp["cu_heavy"] == 40, sp)
+check("K4e QuickNode 기본 = 무료 1,000만 × 80% · 요청당 20 · debug/trace 40 · 버스트(무료)", sp["pct"] == 80.0 and sp["month"] == 10_000_000
+      and sp["cu"] == 20 and sp["cu_heavy"] == 40 and sp.get("burst") == float(NK.BURST_X), sp)
 sp = NK.budget_spec("nodereal", NK.plans({})["nodereal"])
 check("K4f NodeReal 단가 = 일반 25 · getLogs 50 · 무거운 것 50", sp["cu"] == 25 and sp["cu_methods"] == {"eth_getLogs": 50} and sp["cu_heavy"] == 50, sp)
 sp["cu_methods"]["eth_getLogs"] = 1
@@ -121,22 +122,25 @@ cfg = fresh(CFG)
 cfg["bsc"]["logs_rpcs"].append(OLD_NR)
 done = NK.apply(cfg, env=ENV, settings={})
 bc = cfg["bsc"]
-check("K6a 반환 = 붙인 서비스(주소 아님)", done == {"bsc": ["nodereal", "ankr", "quicknode"], "base": ["ankr", "quicknode"]}, done)
-check("K6b BSC 로그 풀 = 종전(공개 노드) 먼저 · 키 노드는 뒤", bc["logs_rpcs"][:2] == ["https://pub-bsc.invalid", OLD_NR]
-      and bc["logs_rpcs"][2:] == [u for _, u in us["bsc"]], bc["logs_rpcs"])
+check("K6a 반환 = 붙인 서비스(주소 아님) · Base trace = QuickNode(qn2)", done == {"bsc": ["nodereal", "ankr", "quicknode"], "base": ["ankr", "quicknode"],
+                                                                    "base_trace": ["quicknode"]}, done)
+LOGU = [u for p_, u in us["bsc"] if p_ != "quicknode"]
+check("K6b BSC 로그 풀 = 종전(공개 노드) 먼저 · 키 노드는 뒤 · QuickNode 는 로그 풀에 없음(qn2 — getLogs 안 씀)", bc["logs_rpcs"][:2] == ["https://pub-bsc.invalid", OLD_NR]
+      and bc["logs_rpcs"][2:] == LOGU and QB not in bc["logs_rpcs"], bc["logs_rpcs"])
 check("K6c BSC 아카이브 = 옛 NodeReal 주소 + 키 노드", bc["archive_rpcs"] == [OLD_NR] + [u for _, u in us["bsc"]], bc["archive_rpcs"])
-check("K6d getLogs 상한 = 서비스별(NodeReal 5만 · Ankr 3천 · QuickNode 1만)",
-      [bc["getlogs_span_caps"][u] for _, u in us["bsc"]] == [50000, 3000, 10000], bc["getlogs_span_caps"])
+check("K6d getLogs 상한 = 서비스별(NodeReal 5만 · Ankr 3천) · QuickNode 칸 없음",
+      [bc["getlogs_span_caps"][u] for u in LOGU] == [50000, 3000] and QB not in bc["getlogs_span_caps"], bc["getlogs_span_caps"])
 check("K6e 상세 노드는 그대로", bc["detail_rpcs"] == CFG["bsc"]["detail_rpcs"], bc.get("detail_rpcs"))
 cb = cfg["chains"]["base"]
-check("K6f Base 로그 = 키 노드 먼저 · 공개 노드 예비", cb["rpc_logs"] == [u for _, u in us["base"]] + ["https://pub-base.invalid"], cb["rpc_logs"])
-check("K6g Base 상한 = 기존 유지 + Ankr 3천 · QuickNode 1만",
-      cb["rpc_log_span_caps"] == {"https://pub-base.invalid": 5000, us["base"][0][1]: 3000, us["base"][1][1]: 10000}, cb["rpc_log_span_caps"])
+check("K6f Base 로그 = 키 노드 먼저 · 공개 노드 예비 · QuickNode 없음", cb["rpc_logs"] == [us["base"][0][1]] + ["https://pub-base.invalid"], cb["rpc_logs"])
+check("K6g Base 상한 = 기존 유지 + Ankr 3천(QuickNode 칸 없음)",
+      cb["rpc_log_span_caps"] == {"https://pub-base.invalid": 5000, us["base"][0][1]: 3000}, cb["rpc_log_span_caps"])
+check("K6g2 Base trace = QuickNode 하나만(내장 drpc 예비 없음 — 오너 '잘하는 API 가 고쳐질 때까지 기다림')", cb.get("trace_rpcs") == [QBa], cb.get("trace_rpcs"))
 check("K6h Base 상태(archive) = 키 노드는 뒤 예비(공개 상태 풀 먼저)", cb["archive_rpcs"][-2:] == [u for _, u in us["base"]]
       and len(cb["archive_rpcs"]) > 2, cb["archive_rpcs"])
 lim = cfg["rpc_day_limits"]
-check("K6i 하루 장부 표 = 서비스 넷 다(무료 80% · QuickNode 유료 10% · Alchemy 는 노드 풀 밖이어도 장부는 있음)",
-      set(lim) == {"node_nodereal", "node_ankr", "node_quicknode", "node_alchemy"} and lim["node_nodereal"]["pct"] == 80.0 and lim["node_quicknode"]["pct"] == 10.0
+check("K6i 하루 장부 표 = 서비스 넷 다(무료 80% · QuickNode 기본 무료 80% · Alchemy 는 노드 풀 밖이어도 장부는 있음)",
+      set(lim) == {"node_nodereal", "node_ankr", "node_quicknode", "node_alchemy"} and lim["node_nodereal"]["pct"] == 80.0 and lim["node_quicknode"]["pct"] == 80.0
       and lim["node_alchemy"]["pct"] == 80.0, lim)
 snap1 = json.dumps(cfg, sort_keys=True)
 NK.apply(cfg, env=ENV, settings={})
@@ -158,7 +162,8 @@ check("K6m 유료 NodeReal = 유료 초당 한도 얹음", cfg4["backfill"]["hos
 cfg5 = fresh(CFG)
 cfg5["backfill"] = {"hosts": {}}
 NK.apply(cfg5, env={NK.ENV_NODEREAL: NR}, settings={})
-check("K6n 무료 NodeReal = 호스트 한도 안 얹음(내장 무료 기준)", cfg5["backfill"]["hosts"] == {}, cfg5["backfill"])
+check("K6n 무료 NodeReal = 호스트 한도 안 얹음(내장 무료 기준 · QuickNode 무료 초당 한도만 — 코덱스 qn801)",
+      list(cfg5["backfill"]["hosts"]) == ["*.quiknode.pro"] and cfg5["backfill"]["hosts"]["*.quiknode.pro"]["call_rate"] == 6.0, cfg5["backfill"])
 cfg6 = {"wallets": [], "chains": {"base": {}}, "bsc": {"logs_rpcs": ["https://pub-bsc.invalid"]}}
 NK.apply(cfg6, env={NK.ENV_ANKR: AK}, settings={})
 rl6 = cfg6["chains"]["base"]["rpc_logs"]
@@ -226,7 +231,7 @@ check("K10d 단가: getLogs 50 + 일반 25 · 메서드 모름 = 가장 비싼 �
 import onboarding
 
 BAD = [({"provider": "nope", "plan": "free", "share": 10}, "알 수 없는 서비스"),
-       ({"provider": "quicknode", "plan": "free", "share": 10}, "QuickNode 무료"),
+       ({"provider": "quicknode", "plan": "gold", "share": 80}, "QuickNode 요금제 이상"),
        ({"provider": "ankr", "plan": "paid", "share": 30}, "비율 30"),
        ({"provider": "ankr", "plan": "paid", "share": True}, "비율 True"),
        ({"provider": "ankr", "plan": "paid", "share": 10, "month": 0}, "월 한도 0"),

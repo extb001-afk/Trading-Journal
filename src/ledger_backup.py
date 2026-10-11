@@ -523,3 +523,172 @@ def swap_in(live: str, new: str, keep_as: str = None, log=None) -> dict:
     os.replace(new, live)
     fsync_dir(d)
     return {"linked": linked, "kept": kept}
+
+
+RELIEF_FAILED_AGE_S = 3 * 86400
+RELIEF_STALE_S = 12 * 3600
+_FAILED_RX = re.compile(r"^state\.failed_hotfixt_(\d{8}_\d{6})(?:_\d+)?$")
+_SHADOW_RX = re.compile(r"^tj_shadow_extrebuild_(\d{8}_\d{6})$")
+
+
+def dev_of(path: str) -> int:
+    return os.stat(path).st_dev
+
+
+def _ts_name(s: str):
+    try:
+        return time.mktime(time.strptime(s, "%Y%m%d_%H%M%S"))
+    except (ValueError, OverflowError):
+        return None
+
+
+def _age(path: str, ts: str, now: float) -> float:
+    t = _ts_name(ts) or 0.0
+    try:
+        t = max(t, os.lstat(path).st_mtime)
+    except OSError:
+        pass
+    return now - t
+
+
+def _gain(paths: list) -> int:
+    seen = {}
+    for p in paths:
+        if not os.path.lexists(p):
+            continue
+        if os.path.isdir(p) and not os.path.islink(p):
+            walk = ((dp, fns) for dp, _dn, fns in os.walk(p))
+            files = (os.path.join(dp, fn) for dp, fns in walk for fn in fns)
+        else:
+            files = (p,)
+        for f in files:
+            try:
+                st = os.lstat(f)
+            except OSError:
+                continue
+            k = (st.st_dev, st.st_ino)
+            e = seen.setdefault(k, [st.st_nlink, 0, st.st_size if not os.path.islink(f) else 0])
+            e[1] += 1
+    return sum(sz for nl, n, sz in seen.values() if n >= nl)
+
+
+def relief_candidates(step: str, db_path: str, home: str = None, now: float = None) -> list:
+    now = time.time() if now is None else now
+    sd = os.path.dirname(os.path.abspath(db_path))
+    base = os.path.basename(db_path)
+    out = []
+    try:
+        names = os.listdir(sd)
+    except OSError:
+        names = []
+    if step == "leftover":
+        rx = re.compile(re.escape(base) + r"\.extnew_(\d{8}_\d{6})$")
+        for n in sorted(names):
+            m = rx.match(n)
+            p = os.path.join(sd, n)
+            if m and os.path.isfile(p) and not os.path.islink(p) and _age(p, m.group(1), now) >= RELIEF_STALE_S:
+                out.append({"name": n, "kind": "extnew", "paths": [p + s for s in ("", "-wal", "-shm", "-journal")], "dir": False})
+        if home and os.path.isdir(home):
+            for n in sorted(os.listdir(home)):
+                m = _SHADOW_RX.match(n)
+                p = os.path.join(home, n)
+                if m and os.path.isdir(p) and not os.path.islink(p) and _age(p, m.group(1), now) >= RELIEF_STALE_S:
+                    out.append({"name": n, "kind": "shadow", "paths": [p], "dir": True, "parent": home, "rx": _SHADOW_RX})
+    elif step == "pre_extrebuild":
+        rx = re.compile(re.escape(base) + r"\.pre_extrebuild_(\d{8}_\d{6})$")
+        pres = sorted(n for n in names if rx.match(n) and os.path.isfile(os.path.join(sd, n)))
+        for n in pres[:-1]:
+            p = os.path.join(sd, n)
+            out.append({"name": n, "kind": "pre_extrebuild", "paths": [p + s for s in ("", "-wal", "-shm")], "dir": False})
+    elif step == "daily":
+        bd = os.path.join(sd, "backups")
+        try:
+            days = sorted(n for n in os.listdir(bd) if _DB_RX.match(n) and os.path.isfile(os.path.join(bd, n)))
+        except OSError:
+            days = []
+        for n in days[:-1]:
+            out.append({"name": "backups/" + n, "kind": "daily", "paths": [os.path.join(bd, n)], "dir": False})
+    elif step == "failed":
+        bdir = os.path.dirname(sd)
+        try:
+            fns = sorted(os.listdir(bdir))
+        except OSError:
+            fns = []
+        for n in fns:
+            m = _FAILED_RX.match(n)
+            p = os.path.join(bdir, n)
+            if not m or os.path.islink(p) or not os.path.isdir(p) or _age(p, m.group(1), now) < RELIEF_FAILED_AGE_S:
+                continue
+            if os.path.isdir(os.path.join(p, "state")) and not os.path.isfile(os.path.join(p, "LEDGER_SWAPPED")):
+                out.append({"name": n, "kind": "failed", "skip": "롤백 교체 미완(state 있고 LEDGER_SWAPPED 없음) — 남김"})
+                continue
+            out.append({"name": n, "kind": "failed", "paths": [p], "dir": True, "parent": bdir, "rx": _FAILED_RX})
+    return out
+
+
+def _remove(c: dict):
+    if c.get("dir"):
+        p = c["paths"][0]
+        rp = os.path.realpath(p)
+        if (os.path.islink(p) or os.path.dirname(rp) != os.path.realpath(c["parent"]) or not c["rx"].match(os.path.basename(rp))):
+            raise OSError("안전 확인 실패(위치·이름·링크)")
+        shutil.rmtree(rp)
+        return
+    for p in c["paths"]:
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+
+
+RELIEF_STEPS = ("leftover", "pre_extrebuild", "daily", "failed")
+
+
+def relieve(db_path: str, short, home: str = None, now: float = None, log=None, rounds: int = 2) -> dict:
+    now = time.time() if now is None else now
+    rec = {"at": int(now), "ok": False, "freed": 0, "removed": [], "skipped": []}
+    skipped = {}
+    try:
+        need = short()
+        for _r in range(max(1, rounds)):
+            did = False
+            for step in RELIEF_STEPS:
+                if not need:
+                    break
+                cands = relief_candidates(step, db_path, home=home, now=now)
+                for c in cands:
+                    if c.get("skip"):
+                        skipped[c["name"]] = c["skip"]
+                        continue
+                    try:
+                        dv = dev_of(c["paths"][0])
+                    except OSError:
+                        continue
+                    if dv not in need:
+                        skipped[c["name"]] = "다른 디스크(모자란 디스크가 아님 — 지워도 도움 안 됨)"
+                        continue
+                    g = _gain(c["paths"])
+                    if g <= 0 or (not c.get("dir") and _gain(c["paths"][:1]) <= 0):
+                        skipped[c["name"]] = "하드 링크(다른 곳과 같은 inode — 지워도 공간이 안 생김)"
+                        continue
+                    try:
+                        _remove(c)
+                    except OSError as e:
+                        skipped[c["name"]] = "지우기 실패: " + common.safe_err(e)[:120]
+                        continue
+                    skipped.pop(c["name"], None)
+                    rec["removed"].append({"name": c["name"], "kind": c["kind"], "bytes": int(g)})
+                    rec["freed"] += int(g)
+                    did = True
+                if cands:
+                    need = short()
+            if not need or not did:
+                break
+        rec["ok"] = not need
+    except Exception as e:
+        skipped["(자동 정리)"] = "오류: " + common.safe_err(e)[:160]
+    rec["skipped"] = [{"name": k, "why": v} for k, v in list(skipped.items())[:20]]
+    if log and rec["removed"]:
+        log.warning("재구축 자동 공간 확보: %d개 지움(≈%.1fGB) — %s%s", len(rec["removed"]), rec["freed"] / 1024 ** 3,
+                    ", ".join(r["name"] for r in rec["removed"][:8]), " …" if len(rec["removed"]) > 8 else "")
+    return rec

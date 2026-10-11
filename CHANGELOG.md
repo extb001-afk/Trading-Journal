@@ -3,6 +3,99 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-11 (2) — 외부 검토 2건 버그 수정 · QuickNode trace · HyperEVM
+
+**업비트 같은 코인 사고팔기 부분 체결 · BNB Chain 같은 블록 입금·긴 공백 복구·지난 누락 복구 차례 · 늦게 온 옛 거래 → 기초 잔고 바로 보정 · 기초 잔고 보정 → 지난 곡선 ·
+세일(CCA) 결제 코인 사용분 손익 · EVM trace 노드 순서·마감 · 재계산 실패 원인·디스크 자동 정리 · QuickNode 멀티체인 키 하나(Base trace) · 노드 키 버스트 자동 · HyperEVM · 화면·수집 응답 상한**
+
+지난 판(2026-10-11)을 읽은 외부 검토 두 건이 새로 찾은 버그를 하나씩 공개 시험으로 재현해(고치기 전 실패 → 고친 뒤 통과) 고친 판이에요 —
+업비트에서 같은 코인 매수·매도 지정가가 함께 부분 체결된 채 두 주문이 서로 다른 날 기록되면 지난날이 체결 금액만큼 어긋나던 것, BNB Chain 의 같은 블록에 직접 입금과 로그 없는 내부 입금이 함께 오면 내부 입금이 사라지던 것,
+대사 뒤에 늦게 들어온 수집 기간 안 옛 거래가 재계산 전까지 기초 잔고와 두 번 잡히던 것, 기초 잔고를 고친 뒤 그보다 옛 지난 곡선이 옛 값으로 남던 것, 세일(CCA) 결제 코인의 실제 사용분 손익이 빠지던 것,
+느린 trace 노드 하나가 Base 따라잡기를 몇 분씩 붙잡던 것. QuickNode 는 멀티체인 키 칸 하나로 바꿔 Base 내부 이동 trace 에(남는 몫은 옛 잔고) 쓰고, HyperEVM 을 이더스캔 무료 키로 받는 체인으로 더했어요.
+드문 경우는 아래 알려진 한계에 적었어요. 사진은 다시 찍지 않았어요(README '이번 판' 안내).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js` — 유닛을 전부 멈춘 뒤 한꺼번에 시작 ·
+> 공통 모듈이 바뀌어 이번엔 모든 유닛).
+> 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 · 새로 생기는 칸 — `state/bsc_balw.json` 의 보류 요청·지갑 순번·복구 대기 표시 · 원장 메타와 `state/ext_rebuild_status.json` 의 재계산 실패 원인 · 일별 캐시의 주문별 원화 몫 — 은 옛 코드가 읽지 않음).
+> 업데이트 전에 이미 굳은 지난날(업비트 같은 코인 사고팔기)은 소급하지 않아요 — 새로 계산하는 날부터 맞아요.
+> QuickNode 를 체인별 칸(옛 `TJ_QUICKNODE_BSC_KEY`·`TJ_QUICKNODE_BASE_KEY`)으로 쓰던 분은 **설정 › 연결·키 › QuickNode** 에 멀티체인 엔드포인트 주소(아무 체인 주소 하나)를 다시 저장하세요 —
+> 옛 칸은 새 칸이 비었을 때만 읽고, 새 칸을 저장하면 지워져요. 같은 칸에서 요금제도 확인하세요(무료 플랜이 생겨 요금제를 고른 적이 없으면 무료로 봐요 · 유료 기본 사용 비율 10% → 80% — 다른 곳과 나눠 쓰는 키면 낮추세요).
+> 재계산 교체 전 원장 보존본은 이제 기본 1개(직전 원장)라 다음 재계산이 끝나면 더 옛 보존본이 정리돼요 — 옛 키 `backfill.rebuild_keep_recent`·`rebuild_keep_oldest` 를 직접 적어 둔 설치는 그 값 그대로예요.
+
+- **업비트 같은 코인 사고팔기 — 부분 체결** — 같은 코인에 매수·매도 지정가를 함께 걸어 둘 다 일부 체결돼 순수량이 0인 채 하루가 넘어가고 두 주문이 서로 다른 날 원장에 기록되면 그 전날·지난 곡선이 체결 금액만큼 어긋나던 것 고침 —
+  순수량 0 묶음은 주문별 원화 몫을 따로 두고(묶음 중 하나라도 그날 마감 전에 기록됐을 때만 주문별로 맞춤), 원화 자가 점검 제외는 순현금이 0 이어도 주문별 미기장 원화 흐름이 있으면 켜요 ·
+  화면 일별 값·저장 일별 캐시·장기 곡선이 같은 값 · 재시작·일별 동결 삭제·다음 날에도 같은 값 · 수수료·반대 방향·도착 순서·낡은 스냅숏·부분 마감도 같은 규칙.
+- **BNB Chain 잔고 감시 — 같은 블록 입금 · 긴 공백 · 지난 누락** — 같은 블록에 직접 입금과 로그 없는 내부 입금(컨트랙트가 보낸 BNB)이 함께 오면 남는 몫을 방금 회수한 직접 입금에 붙여 '내 지갑 → 내 지갑'(순증 0)으로 만들던 것 고침 —
+  남는 몫은 보낸 쪽이 코드 있는 컨트랙트이고 붙인 뒤 순증이 맞을 때만 그 거래에 붙이고, 아니면 그 블록 시각의 기초 잔고(원가 미확인)로 · 그 요청은 직접 입금이 원장에 들어간 뒤에 써요(같은 몫 두 번 방지) ·
+  공백 복구 작업이 블록을 풀어 가는 동안은 160콜에서 끊지 않아요(하루 꺼진 뒤 입금 수십 건도 원래 블록·시각의 실제 거래로 · 실행당·하루 호출 상한은 그대로) ·
+  최신 입금이 계속 와도(그 지갑 자신에게 와도) 대사가 확인한 지난 누락 복구가 몫을 받아 몇 주기 안에 시작해요(가장 오래 기다린 지갑부터 · 최신 작업과 걸음마다 번갈아 · 상태 정보 `balw.hist_wait`).
+- **늦게 온 옛 거래 → 기초 잔고 바로 보정** — 대사(기초 잔고)가 이미 흡수한 수집 기간 안 옛 거래가 대사 뒤에 처음 원장에 들어오면(공개 trace 노드가 아팠다가 회복 · 노드 키를 나중에 넣음 · 탐색기 늦은 색인 · BNB Chain 과거 복구)
+  종전엔 재계산(재구축) 전까지 두 번 셌어요 — 이제 그 거래 효과만큼 기초 잔고를 같은 트랜잭션에서 바로 고쳐요(재구축 결과와 같은 값 · 재구축 대기·손익 승인 요청이 생기지 않음) ·
+  수집 시작일을 앞당겨 들어온 옛 조각 · 수집 시작일을 앞당긴 뒤 아직 재구축이 지나가지 않은 체인 · Solana · 발견 시점 기초 잔고 칸은 종전처럼 재구축으로.
+- **기초 잔고 보정 → 지난 곡선** — 늦은 내부 이동 복구·재기장·나중 등록 지갑 등으로 기초 잔고 행이 바뀌면(수정·삭제·부호·시각 이동) 그 전후 가장 이른 날부터 지난 곡선 표식을 같은 트랜잭션에 남겨요
+  (종전엔 거래 날부터만 → 수집 시작일~거래 전날 장기 곡선이 옛 값) · 화면이 수집 시작일로 소급하는 칸(음수 대사·발견 시점 기초 잔고)은 수집 시작일부터 · 바뀐 게 없으면 표식 없음 · Solana 도 같은 규칙.
+- **세일(CCA) 결제 코인 사용분 손익** — 입찰에 실제로 쓴 몫(입찰 − 환불)을 입찰 종료 시각에 결제 코인 처분으로 기록해요(대가 = 받은 토큰에 준 시장가 원가 · 비용 = 그 몫의 원래 원가) —
+  받은 토큰을 다 판 뒤 실현 합이 현금 증가와 같아요(종전엔 결제 코인 원가와 시장가의 차이가 어느 실현에도 안 들어감) · 일반 스왑과 같은 출력(사이클·보관처 실현·양도차익 명세·스테이블 환차·원가 미확인 몫·영수증·
+  그날 기록 '토큰 세일 대금 지불'·일별 건수·세일 상자 '결제 코인 사용' 줄) · 입찰마다 한 번만 · 원가 미확인·전액 환불·세일 연결 끔이면 종전 · 종료 시각이 이상한 입찰은 그 입찰만 건너뜀 ·
+  세일 토큰 자리수 0 을 18 로 바꾸던 것 고침.
+- **EVM trace 노드 · 따라잡기 마감** — 시간 초과를 낸 trace 노드는 5분 동안 순서 맨 뒤로(느린 첫 노드가 둘째를 굶기던 것) · 남은 예산으로 깎은 짧은 대기의 시간 초과·연결 오류는 노드 실패로 안 셈 ·
+  'missing trie node'·'history has been pruned' 같은 '옛 상태 없음' 응답이면 늦은 채움 항목을 정리 · 아카이브 키 노드가 하루 몫·서킷으로 쉬는 동안 옛 구간(뒤 차선)은 정합 없이 넘기지 않고 다음 사이클까지 기다려요(초기화·최신 수집은 계속) ·
+  잎 블록 선조회·상세 조회가 사이클 마감 하나를 나눠 써요(잎 20개가 모두 408 이면 440초 → 60초) · 뒤 차선 일이 없으면 재시작 때 '과거 창 확장 중' 표식을 남기지 않아 재계산이 재시작마다 1시간씩 밀리지 않아요 ·
+  아주 깊은 callTracer 응답(재귀 한도)·넘침 파일의 깨진 줄 처리.
+- **재계산 실패 원인 · 디스크 자동 정리** — 재계산(재구축) 실패를 원인 코드로 저장해 상태 패널·설정 › 과거 데이터에 보여요(디스크 공간·일시 오류·무결성·포지션 게이트·손익 승인 등) ·
+  시작 전에 디스크가 모자랐던 경우만 두 디스크(임시 사본·원장) 여유를 다시 재어 충분해지면 몇 분 안에 다시 해요(다른 원인은 종전 6 → 12 → 24시간) ·
+  모자라면 먼저 이 프로그램이 만든 옛 파일만 정리(12시간 넘은 죽은 재계산 사본 · 옛 보존본·여분 일일 백업은 최신 1개만 · 3일 지난 롤백 흔적 — 지금 원장·최신 백업·실행 중일 수 있는 사본은 안 건드림 · 모자란 디스크에 있는 것만) ·
+  교체 전 원장 보존본 기본 1개(`backup.keep_pre_rebuild` 1~5) · 옛 보존본은 교체가 끝나고 새 보존본이 확인된 뒤에만 지워요.
+- **QuickNode — 멀티체인 키 하나 · Base trace** — `TJ_QUICKNODE_KEY` 칸 하나에 멀티체인 엔드포인트 주소(아무 체인 주소)를 넣으면 체인별 주소는 봇이 만들어요 · 무료 플랜도 돼요(월 크레딧의 80% · 초당 15 의 80%) · 유료 기본 사용 비율 80% ·
+  잘하는 일에만 써요 — Base 거래의 내부 이동 trace(이 키가 있으면 Base trace 는 이 키 하나 · 실패하거나 하루 몫을 다 쓰면 다른 노드로 새지 않고 오류를 보인 뒤 다음 차례에) + 남는 몫으로 BNB Chain·Base 옛 잔고·nonce 확인 ·
+  블록 훑기(getLogs)엔 안 써요(무료 플랜은 한 번에 5블록) · 키 저장 확인 = Base 1콜 · 연결 테스트 = Base 최근 거래 trace 1건.
+- **노드 키 버스트 — 켤 것 없이 자동** — 무료 노드 키·Helius 의 따라잡기 버스트가 이 봇이 실제로 쓴 양으로 판단해요(사용 기록이 없는 지난날 = 0) — 업데이트·새 키 뒤 한 달쯤 버스트가 거의 없던 것과 '새로 받은 키' 칩을 없앴어요 ·
+  날짜별 사용 기록이 손상돼 버린 적이 있으면 그 전은 종전처럼 평소 몫을 쓴 것으로 셈(보수) · 하루 몫·최근 31일 80%·실시간 예비는 그대로.
+- **HyperEVM** — HyperEVM(체인 999)을 이더스캔 V2 목록으로 받는 체인으로 더했어요 — 이더스캔 무료 키가 있으면 다른 추가 EVM 체인처럼 활동 있는 지갑에서 켤 수 있어요(`chain_sweep` — 기본은 알림만, `auto_enable` 이면 자동 · 키가 없으면 '이더스캔 무료 키 필요' 경고만) ·
+  공개 RPC 는 getLogs 가 1,000블록씩이라 수집에 안 쓰고, 이더스캔이 막히면(하루 몫·장애) 다른 길로 돌지 않고 오류를 보인 채 기다렸다 이어 받아요 · HYPE 시세·탐색기 링크·DEX 시세 망 ·
+  HyperCore 와 오간 이동은 시스템 주소 상대 입출금으로 보여요 · 이더스캔 키를 나중에 지워도 이미 받은 HyperEVM 은 켠 채 수집만 멈춰요(Rabby 잔고와 이중 합산 방지) ·
+  이더스캔 전용 체인이 이더스캔 하루 한도 쉼 동안 EVM 수집기 시작을 막던 것 고침.
+- **화면 · 수집 응답 상한** — 변동 분해 상세를 빌드 색인과 한 객체로 게시(빌드 도중 일부 날이 빠진 응답 없음) · 달러로는 0 이고 원화만 있는 선물 줄 보존(남는 차는 '그 밖 정산') · 값 없는 토큰 목록 20개씩 쪽 ·
+  보유표 Rabby 기준 하위 행이 본행과 같은 쪽(종 수 = 코인 묶음 수) · 분해 시트에서 영수증·코인으로 넘어간 뒤 뒤로 가기가 헛돌던 것 · 보낸 내역 대기 사유를 바꾸면 첫 쪽 ·
+  블록스카웃 상세 목록 누적 상한(200쪽·2만 개·32MB — 넘으면 부분 목록을 완료로 저장하지 않음) · RPC 응답 본문 수신 전체 마감(아주 느리게 흘려 보내는 노드가 trace 마감을 넘기던 것 — 지난 판 알려진 한계 고침).
+
+**함께**
+
+- **문서** — README '이번 판'·키 표·버스트·재구축·알려진 한계 · [API_KEYS.md](docs/API_KEYS.md) QuickNode·HyperEVM·버스트 · [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) HyperEVM 절·Base 줄 · `.env.example` QuickNode 한 칸.
+- **시험** — 공개 시험 추가: 업비트 순수량 0 부분 체결(실제 코어 수집 → 실제 화면 빌드 · 무작위 경계 포함) · BNB Chain 같은 블록 귀속·요청 순서·공백 복구 상한·지난 누락 차례 · 늦은 옛 거래 즉시 흡수(재구축과 같은 값) ·
+  기초 잔고 보정 곡선(실제 코어 → 화면 → 장기 곡선) · 세일 결제 코인 처분·세일 상자 · trace 노드 순서·마감·보류 · 재계산 원인·디스크 정리 · 블록스카웃·본문 수신 상한 · 뒤로 가기·쪽 넘김 · QuickNode 멀티체인 · HyperEVM —
+  전체 5,600건 넘게(파일 169개).
+
+**English · External review fixes, QuickNode trace, HyperEVM** — Two external reviews of the previous release found new bugs; every one was reproduced as a public test (failing before, passing after) and fixed.
+Upbit: buy and sell limit orders on the same coin that both partially fill to a net-zero position no longer shift the previous day and past curves when the two orders are booked on different days
+(per-order KRW share kept for net-zero groups; the KRW self-check exemption now follows any unbooked per-order cash flow). BNB Chain balance watch: a same-block direct deposit plus a log-less internal credit
+no longer collapses into a self-transfer (the residual becomes an opening balance at that block, written only after the direct transaction is in the ledger); gap-recovery jobs that keep resolving blocks are no
+longer cut at 160 calls; historical-shortfall recovery gets a reserved slot and alternates with live work, so it starts under continuous inflow. Core: an in-window old transaction that arrives after the
+reconciliation (a trace node recovered, a node key added later, late explorer indexing) now reduces the absorbing opening balance immediately — the same result as a ledger rebuild — instead of being counted
+twice until a rebuild; opening-balance changes mark past curves from the anchor's date in the same transaction. Token sales (CCA): the actually spent part of each bid (bid − refund) is booked as a disposal of
+the payment coin at the bid's exit time, so a full round trip's realized PnL matches the cash change; sale decimals of 0 are kept. EVM RPC: timed-out trace nodes move to the back for 5 minutes, budget-cut
+timeouts no longer count as node failures, pruned-state errors retire late-fill items, an archive key at rest holds only the back-fill lane, leaf prefetch and detail calls share one cycle deadline, and restarts with
+no back-fill work left no longer delay the rebuild by an hour. Rebuild failures store a cause code; only a pre-check disk shortage retries within minutes once space frees (after cleaning old program-made copies on
+the short volume); one pre-rebuild ledger copy is kept by default, and older ones are removed only after a verified swap. QuickNode: one multichain endpoint (`TJ_QUICKNODE_KEY`; free plan at 80%, paid default 80%)
+used for Base internal-transfer traces and, with what is left, old BNB Chain/Base balances — never for getLogs. Node-key and Helius bursts now count only this bot's recorded use (no "new key" chip). Added HyperEVM
+(chain 999) as an Etherscan-V2-only chain (needs the free Etherscan key; waits instead of falling back). Also: attribution details are published together with their build index, KRW-only futures rows are kept,
+the zero-value token list pages 20 at a time, Rabby sub-rows stay on their parent's page, Back works after the breakdown sheet, Blockscout detail pagination is capped and HTTP response-body download time is
+bounded. No rebuild and no data revision.
+
+**알려진 한계(다음 판에)** — 자세한 설명·피하는 법은 README [알아 둘 것](README.md#알아-둘-것).
+
+- 업비트 같은 코인 주문이 셋 이상 묶여 그중 일부끼리만 상쇄되면 그 몫의 원화가 다음 날로 넘어갈 수 있어요(값은 일관 — 어느 날에 잡히느냐만) · 업데이트 전에 이미 굳은 날은 그대로예요.
+- BNB Chain 같은 블록에 남의 로그 없는 내부 입금이 겹치면 내 컨트랙트 호출 거래에 붙을 수 있어요(금액은 맞음 · 거래 단위 손익 귀속만) · 실행당 호출 상한을 넘는 빈도로 입금이 계속되면 넘친 최신 입금은 기초 잔고(원가 미확인)로 마감돼요(금액 보존) ·
+  지난 누락 복구는 실행(약 1분)마다 지갑 하나씩 시작해요.
+- 아카이브 키 노드가 하루 몫을 다 쓰고 공개 노드가 옛 상태를 못 주는 날엔 EVM 옛 구간 채우기(뒤 차선)만 UTC 자정까지 쉴 수 있어요(최신 수집은 계속) · 상세 마감에 걸린 새 토큰의 심볼은 다음 상세 때까지 빈 칸일 수 있어요.
+- 수집 시작일을 앞당기면 재계산(재구축) 1회는 여전히 필요해요 · Solana·발견 시점 기초 잔고 칸의 늦은 옛 거래도 종전처럼 재구축으로 · 기초 잔고를 고칠 때 수집 시작일부터 장기 곡선을 다시 계산해 계산이 조금 늘어요.
+- 세일(CCA) 결제 코인 처분 시각은 입찰 종료(사용량 확정) 시각이에요(대가는 입찰 시각 시세) · 보낸 내역에서 손으로 '받은 것과 연결'한 참가금은 종전처럼 결제 코인 처분 없이 원가로 이어져요.
+- 재계산이 시작된 뒤 디스크가 가득 찬 경우와 영어가 아닌 OS 오류 문구는 디스크 원인으로 보지 않아 종전 대기(6시간부터)를 따라요.
+- HyperEVM 은 이더스캔 하나에만 기대요(장애 땐 기다림) · HyperCore↔HyperEVM 이동은 Hyperliquid 연결의 입출금과 짝을 잇지 않아요(총자산은 맞음 · 원가 이어 주기 없음) · opBNB·Celo 는 아직 없어요.
+- QuickNode 키를 넣으면 Base trace 는 그 키 하나라, 키가 실패하거나 하루 몫을 다 쓰면 Base 내부 이동 채우기가 회복될 때까지 늦어져요(다른 노드로 우회 안 함 · 거래는 먼저 기록).
+- 지난 판 한계(업비트 체결 시각 · BNB Chain 공백 구간 기다림 · 라우터 경유 CCA 입찰 · 늦은 행 마감 시세 근사 · 키 노드 없는 Base 따라잡기 · 변동 분해 상세 상한 등)는 그대로예요 —
+  [2026-10-11](#2026-10-11--외부-검토-2건-버그-수정--목록-정리).
+
 ## 2026-10-11 — 외부 검토 2건 버그 수정 · 목록 정리
 
 **업비트 미기장 체결 원화 이력 · BNB Chain 잔고 감시 긴 공백 · 세일(CCA) 환불 지급 코인 원가 · 늦은 원장 행 첫 주기·자정 경계 · EVM 따라잡기 trace 마감·영속 보류 ·

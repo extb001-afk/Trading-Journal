@@ -40,6 +40,16 @@ def _dec(x):
         return None
 
 
+def _decimals(v, default=18) -> int:
+    if v is None or isinstance(v, bool):
+        return default
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return default
+    return n if 0 <= n <= 255 else default
+
+
 _SEED = None
 
 
@@ -102,10 +112,7 @@ def _tok(t: dict) -> dict:
     tk = t.get("token") or {}
     tot = t.get("total") or {}
     dec = tk.get("decimals") if tk.get("decimals") is not None else tot.get("decimals")
-    try:
-        dec = int(dec)
-    except (TypeError, ValueError):
-        dec = 18
+    dec = _decimals(dec)
     return {"addr": _addr(tk.get("address_hash") or tk.get("address")), "sym": str(tk.get("symbol") or "?")[:24], "dec": dec,
             "raw": int(tot.get("value") or 0) if str(tot.get("value") or "0").isdigit() else 0,
             "from": _addr(t.get("from")), "to": _addr(t.get("to"))}
@@ -209,7 +216,7 @@ def fetch_owner(get, base, chain, owner, seed, now=None) -> dict:
         if tok:
             rd = seed["redeem"].get(f"{chain}:{tok['addr']}")
             if rd and _addr(rd.get("to")):
-                info["redeem"] = {"to": _addr(rd["to"]), "sym": str(rd.get("sym") or "?"), "decimals": int(rd.get("decimals") or 18),
+                info["redeem"] = {"to": _addr(rd["to"]), "sym": str(rd.get("sym") or "?"), "decimals": _decimals(rd.get("decimals")),
                                   "ratio": str(rd.get("ratio") or "1"), "src": "seed"}
             else:
                 det = _detect_redeem(get, base, owner, tok["addr"])
@@ -253,7 +260,7 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
             if not bids:
                 continue
             cur, tok, rd = inf.get("currency") or {}, inf["token"], inf.get("redeem")
-            cdec, tdec = int(cur.get("dec") or 18), int(tok.get("dec") or 18)
+            cdec, tdec = _decimals(cur.get("dec")), _decimals(tok.get("dec"))
             paid = sum((Decimal(b["amount"]) for b in bids), Decimal(0)) / (Decimal(10) ** cdec)
             refund = sum((Decimal(b.get("refunded") or 0) for b in bids), Decimal(0)) / (Decimal(10) ** cdec)
             filled = sum((Decimal(b.get("filled") or 0) for b in bids), Decimal(0)) / (Decimal(10) ** tdec)
@@ -263,6 +270,7 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
             bad9 = any(not (Decimal(0) <= Decimal(b.get("refunded") or 0) <= Decimal(b["amount"])) for b in bids)
             paid_usd = refund_usd = Decimal(0)
             ok = not bad9
+            bpx9 = {}
             if csym in STABLE_CUR:
                 paid_usd, refund_usd = paid, refund
             else:
@@ -271,6 +279,7 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
                     if not px:
                         ok = False
                         break
+                    bpx9[id(b)] = Decimal(str(px))
                     paid_usd += Decimal(b["amount"]) / (Decimal(10) ** cdec) * Decimal(str(px))
                     refund_usd += Decimal(b.get("refunded") or 0) / (Decimal(10) ** cdec) * Decimal(str(px))
             cost = paid_usd - refund_usd if ok else None
@@ -285,9 +294,14 @@ def build_lots(cache: dict, price_fn=None, off=(), seed=None) -> list:
             bid_d = []
             for b in bids:
                 am9, rf9 = Decimal(b["amount"]), Decimal(b.get("refunded") or 0)
+                use9 = None
+                if cost is not None and Decimal(0) <= rf9 <= am9:
+                    px9 = Decimal(1) if csym in STABLE_CUR else bpx9.get(id(b))
+                    use9 = (am9 - rf9) / (Decimal(10) ** cdec) * px9 if px9 else None
                 bid_d.append({"id": b.get("id"), "bid_tx": str(b.get("bid_tx") or "").lower(), "exit_tx": str(b.get("exit_tx") or "").lower(),
                               "amount": am9 / (Decimal(10) ** cdec),
-                              "refunded": rf9 / (Decimal(10) ** cdec) if Decimal(0) <= rf9 <= am9 else None})
+                              "refunded": rf9 / (Decimal(10) ** cdec) if Decimal(0) <= rf9 <= am9 else None,
+                              "use_usd": use9, "exit_ts": int(b.get("exit_ts") or 0), "bid_ts": int(b.get("bid_ts") or 0)})
             lots.append({"id": lid, "chain": chain, "auction": a, "bidder": owner, "bids": len(bids),
                          "cur_addr": _addr(cur.get("addr")), "bid_d": bid_d,
                          "ratio": ratio if rd else Decimal(1), "filled": filled,
@@ -532,8 +546,8 @@ def heuristic_scan(conn, stable_syms, days=30) -> list:
             ps = [p for p in by_dest.get((r["ch"], tk["from"]), ()) if 0 <= r["ts"] - p["ts"] <= days * 86400]
             if ps:
                 out.append({"chain": r["ch"], "contract": tk["from"], "sym": r["sym"], "in_tx": r["tx"], "in_ts": r["ts"],
-                            "qty": str(Decimal(int(r["q"])) / (Decimal(10) ** int(r["dec"] or 18))),
-                            "paid": [{"sym": p["sym"], "qty": str(Decimal(abs(int(p["q"]))) / (Decimal(10) ** int(p["dec"] or 18))),
+                            "qty": str(Decimal(int(r["q"])) / (Decimal(10) ** _decimals(r["dec"]))),
+                            "paid": [{"sym": p["sym"], "qty": str(Decimal(abs(int(p["q"]))) / (Decimal(10) ** _decimals(p["dec"]))),
                                       "tx": p["tx"], "ts": p["ts"]} for p in ps][:5]})
                 break
     return out

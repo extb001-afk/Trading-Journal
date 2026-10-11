@@ -17,7 +17,8 @@ PROVIDERS = {
     "nodereal": {"name": "NodeReal", "unit": "cu", "free_month": 10_000_000, "cu": 25, "cu_heavy": 50, "cu_methods": {"eth_getLogs": 50},
                  "hosts": ["bsc-mainnet.nodereal.io"], "paid_only": False},
     "ankr": {"name": "Ankr", "unit": "cu", "free_month": 200_000_000, "cu": 200, "cu_prefix": {"ankr_": 700}, "hosts": ["rpc.ankr.com"], "paid_only": False},
-    "quicknode": {"name": "QuickNode", "unit": "cu", "free_month": 10_000_000, "cu": 20, "cu_heavy": 40, "hosts": ["*.quiknode.pro"], "paid_only": True},
+    "quicknode": {"name": "QuickNode", "unit": "cu", "free_month": 10_000_000, "cu": 20, "cu_heavy": 40, "hosts": ["*.quiknode.pro"], "paid_only": False,
+                  "paid_share": 80, "no_logs": True},
     "alchemy": {"name": "Alchemy", "unit": "cu", "free_month": 30_000_000, "cu": 26, "cu_heavy": 80,
                 "cu_methods": {"alchemy_getTokenBalances": 20, "alchemy_getTokenMetadata": 10, "eth_call": 26, "eth_getBalance": 20,
                                "eth_getLogs": 60, "alchemy_getAssetTransfers": 120, "eth_blockNumber": 10, "eth_getTransactionCount": 20,
@@ -28,21 +29,28 @@ PAID_HOST_POLICY = {
     "nodereal": {"bsc-mainnet.nodereal.io": {"rate": 8.0, "burst": 8, "conc": 4, "call_rate": 5.0, "call_burst": 5,
                                              "share": "node_nodereal", "share_rate": 5.0, "share_burst": 5, "share_xproc": True}},
 }
+FREE_HOST_POLICY = {
+    "quicknode": {"*.quiknode.pro": {"call_rate": 6.0, "call_burst": 6, "share_rate": 6.0, "share_burst": 6}},
+}
 UNIT_KO = {"nodereal": "CU", "ankr": "크레딧", "quicknode": "크레딧", "alchemy": "CU"}
 ENV_NODEREAL = "TJ_NODEREAL_KEY"
 ENV_ANKR = "TJ_ANKR_KEY"
 ENV_ALCHEMY = "TJ_ALCHEMY_KEY"
 HOT_KEYS = ("alchemy",)
 NET_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+ENV_QN = "TJ_QUICKNODE_KEY"
 ENV_QN_BSC = "TJ_QUICKNODE_BSC_KEY"
 ENV_QN_BASE = "TJ_QUICKNODE_BASE_KEY"
+QN_NET = {"bsc": "bsc", "base": "base-mainnet"}
+QN_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+QN_TOKEN_RE = re.compile(r"^[A-Za-z0-9]{8,128}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 SPAN = {"nodereal": 50000, "ankr": 3000, "quicknode": 10000}
 
 
 def _env() -> dict:
     out = common.read_env_file()
-    for k in (ENV_NODEREAL, ENV_ANKR, ENV_QN_BSC, ENV_QN_BASE, ENV_ALCHEMY):
+    for k in (ENV_NODEREAL, ENV_ANKR, ENV_QN, ENV_QN_BSC, ENV_QN_BASE, ENV_ALCHEMY):
         if os.environ.get(k):
             out[k] = os.environ[k]
     return out
@@ -102,6 +110,36 @@ def _qn_url(v: str, want: str) -> str:
     return urllib.parse.urlunsplit(("https", h, sp.path or "/", "", ""))
 
 
+def qn_parts(v: str):
+    try:
+        sp = urllib.parse.urlsplit(str(v or "").strip())
+        port = sp.port
+    except ValueError:
+        return None
+    h = (sp.hostname or "").lower()
+    if sp.scheme not in ("https", "wss") or sp.username or sp.password or port is not None or not h.endswith(".quiknode.pro"):
+        return None
+    labs = h.split(".")[:-2]
+    if len(labs) not in (1, 2) or not all(QN_NAME_RE.match(x) for x in labs):
+        return None
+    seg = [x for x in (sp.path or "").split("/") if x]
+    if not seg or not QN_TOKEN_RE.match(seg[0]):
+        return None
+    return labs[0], seg[0]
+
+
+def qn_chain_url(v: str, chain: str) -> str:
+    net = QN_NET.get(chain)
+    pt = qn_parts(v)
+    if not net or not pt:
+        return ""
+    return f"https://{pt[0]}.{net}.quiknode.pro/{pt[1]}/"
+
+
+def qn_multi(env: dict) -> bool:
+    return bool(str((env or {}).get(ENV_QN) or "").strip())
+
+
 def urls(env: dict = None) -> dict:
     env = _env() if env is None else env
     out = {"bsc": [], "base": []}
@@ -112,12 +150,10 @@ def urls(env: dict = None) -> dict:
     if KEY_RE.match(k):
         out["bsc"].append(("ankr", f"https://rpc.ankr.com/bsc/{k}"))
         out["base"].append(("ankr", f"https://rpc.ankr.com/base/{k}"))
-    u = _qn_url(env.get(ENV_QN_BSC), "bsc")
-    if u:
-        out["bsc"].append(("quicknode", u))
-    u = _qn_url(env.get(ENV_QN_BASE), "base")
-    if u:
-        out["base"].append(("quicknode", u))
+    for c in ("bsc", "base"):
+        u = qn_chain_url(env.get(ENV_QN), c) if qn_multi(env) else _qn_url(env.get(ENV_QN_BSC if c == "bsc" else ENV_QN_BASE), c)
+        if u:
+            out[c].append(("quicknode", u))
     return out
 
 
@@ -131,7 +167,7 @@ def plans(settings: dict = None) -> dict:
         plan = r.get("plan") if r.get("plan") in ("free", "paid") else ("paid" if meta["paid_only"] else "free")
         if meta["paid_only"]:
             plan = "paid"
-        share = r.get("share") if r.get("share") in SHARES and not isinstance(r.get("share"), bool) else PAID_DEFAULT_SHARE
+        share = r.get("share") if r.get("share") in SHARES and not isinstance(r.get("share"), bool) else meta.get("paid_share", PAID_DEFAULT_SHARE)
         month = r.get("month")
         month = int(month) if isinstance(month, int) and not isinstance(month, bool) and 0 < month <= 10 ** 12 else None
         out[p] = {"plan": plan, "share": share, "month": month}
@@ -211,6 +247,17 @@ def budget_spec(p: str, plan: dict) -> dict:
     return spec
 
 
+def logs_ok(p: str) -> bool:
+    return not PROVIDERS.get(p, {}).get("no_logs")
+
+
+def trace_url(us: dict, chain: str):
+    for p, u in us.get(chain, []):
+        if p == "quicknode":
+            return u
+    return None
+
+
 def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
     us = urls(env)
     pl = plans(settings)
@@ -221,10 +268,11 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
         if f"node_{p}" not in lim:
             lim[f"node_{p}"] = budget_spec(p, pl[p])
     cfg["rpc_day_limits"] = lim
-    for p, pols in PAID_HOST_POLICY.items():
+    for p, pols, want in ([(p9, v9, "paid") for p9, v9 in PAID_HOST_POLICY.items()]
+                          + [(p9, v9, "free") for p9, v9 in FREE_HOST_POLICY.items()]):
         bf = cfg.get("backfill", {})
         hosts = bf.get("hosts", {}) if isinstance(bf, dict) else None
-        if pl[p]["plan"] != "paid" or not isinstance(hosts, dict):
+        if pl[p]["plan"] != want or not isinstance(hosts, dict):
             continue
         hosts = dict(hosts)
         for h, pol in pols.items():
@@ -236,14 +284,22 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
         arch = [str(u) for u in (bc.get("archive_rpcs") or [u for u in logs if "nodereal" in u])]
         caps = dict(bc.get("getlogs_span_caps") or {})
         for p, u in us["bsc"]:
-            if u not in logs:
-                logs.append(u)
+            if logs_ok(p):
+                if u not in logs:
+                    logs.append(u)
+                caps.setdefault(u, SPAN[p])
             if u not in arch:
                 arch.append(u)
-            caps.setdefault(u, SPAN[p])
             done.setdefault("bsc", []).append(p)
         bc["logs_rpcs"], bc["archive_rpcs"], bc["getlogs_span_caps"] = logs, arch, caps
     cb = (cfg.get("chains") or {}).get("base") if isinstance(cfg.get("chains"), dict) else None
+    tq = trace_url(us, "base")
+    if isinstance(cb, dict) and tq:
+        tr = [str(u) for u in (cb.get("trace_rpcs") or [])] if "trace_rpcs" in cb else []
+        if tq not in tr:
+            tr.insert(0, tq)
+        cb["trace_rpcs"] = tr
+        done["base_trace"] = ["quicknode"]
     if isinstance(cb, dict) and us["base"]:
         rl = [str(u) for u in (cb.get("rpc_logs") or [])]
         if not rl:
@@ -266,6 +322,8 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
             if u not in ar:
                 ar.append(u)
         for p, u in reversed(us["base"]):
+            if not logs_ok(p):
+                continue
             if u not in rl:
                 rl.insert(0, u)
             caps.setdefault(u, SPAN[p])
@@ -286,6 +344,8 @@ def fingerprint() -> str:
     import hashlib
     env = _env()
     vals = [str(env.get(k) or "") for k in (ENV_NODEREAL, ENV_ANKR, ENV_QN_BSC, ENV_QN_BASE)]
+    if qn_multi(env):
+        vals.append(str(env.get(ENV_QN) or ""))
     pl = {q: {k: v for k, v in d.items() if k != "fresh_since"} for q, d in plans().items()}
     return hashlib.sha256(json_dumps([vals, pl]).encode()).hexdigest()[:12]
 
@@ -308,6 +368,7 @@ def status(env: dict = None, settings: dict = None) -> dict:
                   "perDay": int(sp["month"] / 31 * sp["pct"] / 100), "pct": sp["pct"],
                   "usedToday": used_today(p), "pool": meta.get("pool", True)}
         out[p]["burstX"] = sp.get("burst") or 1
+        out[p]["noLogs"] = bool(meta.get("no_logs"))
         out[p]["freshSince"] = pl[p].get("fresh_since")
         out[p]["bursting"] = bool(sp.get("burst")) and out[p]["usedToday"] > out[p]["perDay"]
         if sp.get("burst"):

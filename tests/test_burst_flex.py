@@ -144,7 +144,8 @@ check("X7c 첫날 백필 ≤ 열흘치(10,000) · 첫 31일에 상한의 90% 넘
 
 fresh("node_x8")
 L8 = B.rpc_day_limits("node_x8", now=NOON)
-check("X8 새 설치 · '새로 받은 키' 아님 = 첫날 백필 ≤ 하루 몫(보수) · 실시간 몫 = 하루 몫", 0 < L8.get("burst", 0) <= N and L8.get("normal") == N, L8)
+check("X8 새 설치(칩 안 켬) = qn2: 기록 없는 지난날 = 0 → 첫날부터 버스트(하루 몫 < 백필 ≤ 열흘치) · 실시간 몫 = 하루 몫",
+      N < L8.get("burst", 0) <= 10 * N and L8.get("normal") == N, L8)
 
 PAID = dict(SPEC)
 PAID.pop("burst")
@@ -251,8 +252,8 @@ common.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY 
 ok14 = B._esb_hist_merge_locked(d14, {DAY - 1: {"new.2.bb": [5, 5]}}, DAY, keep=31)
 h14 = json.load(open(os.path.join(d14, "head_days.hist")))
 p14 = B._rpc_day_prev_used(d14, DAY, N)
-check("X14 롤백 판이 합친 날(k31 뒤 기록) → 기록 시작 날을 그 뒤로 = 그 전 기록 없는 날 = 평소 몫(28일 × 1,000 + 25)",
-      ok14 and h14.get("since") == DAY and h14.get("k31") == DAY and p14 == 28 * N + 25, (h14, p14))
+check("X14 롤백 판이 합친 날(k31 뒤 기록) → 기록 시작 날을 그 뒤로 · qn2: 기록 없는 날 = 0(롤백으로 지워졌을 수 있는 날도 — 드문 엣지 감수) → 25",
+      ok14 and h14.get("since") == DAY and h14.get("k31") == DAY and p14 == 25, (h14, p14))
 common.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY - 2): {"x.1.aa": [10, 10]}}, "since": DAY - 40, "k31": DAY - 1})
 B._esb_hist_merge_locked(d14, {DAY - 1: {"x.1.aa": [5, 5]}}, DAY, keep=31)
 h14b = json.load(open(os.path.join(d14, "head_days.hist")))

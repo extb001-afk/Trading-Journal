@@ -146,6 +146,7 @@ class Core:
         self.recon_months = 0.0 if cfg.get("backfill_full_history") \
             else float(cfg.get("backfill_months") or 0)
         self._last_ext_check = 0.0
+        self._ext_born = time.time()
 
     def _win_t0(self, ref_ts=None, section=None) -> int:
         if self.recon_months <= 0:
@@ -6742,23 +6743,12 @@ class Core:
         return out
 
     def _rederive_anchor_safe(self, chain: str, txhash: str, rec: dict):
-        lu9 = rec.get("repair") == "leg_union"
-        t_before = self._tx_hist_ts(chain, txhash) if lu9 else None
-        self._anchor_touch = [] if lu9 else None
-        try:
-            before = self._tx_wallet_sums(chain, txhash)
-            ev = self._maybe_rederive(chain, txhash, rec)
-            self._anchor_absorb(chain, txhash, before)
-            touched = list(self._anchor_touch or [])
-        finally:
-            self._anchor_touch = None
-        if lu9 and ev is not None:
-            ts9 = [t for t in [t_before, self._tx_hist_ts(chain, txhash)] + touched if t is not None]
-            if ts9:
-                try:
-                    log.info("장기 곡선 다시 계산 표식(leg 합집합 재기장 %s): %s 부터", txhash[:14], common.mark_hist_dirty(min(ts9)))
-                except Exception as e:
-                    log.warning("장기 곡선 다시 계산 표식 실패: %s", e)
+        t_before = self._tx_hist_ts(chain, txhash)
+        before = self._tx_wallet_sums(chain, txhash)
+        ev = self._maybe_rederive(chain, txhash, rec)
+        self._anchor_absorb(chain, txhash, before)
+        if ev is not None:
+            self._hist_late_gone("chain_tx", chain, txhash, t_before)
         return ev
 
     def _tx_hist_ts(self, chain: str, txhash: str):
@@ -6769,14 +6759,39 @@ class Core:
         row = self.conn.execute("SELECT snapshot FROM raw_txs WHERE chain=? AND txhash=?", (chain, txhash)).fetchone()
         try:
             snap9 = json.loads(row["snapshot"]) if row else {}
-            return self._ts_of((snap9.get("tx") or {}).get("timestamp")) if isinstance(snap9, dict) else None
+            return self._ts_of(snap9.get("ts") if chain == "sol" else (snap9.get("tx") or {}).get("timestamp")) if isinstance(snap9, dict) else None
         except (TypeError, ValueError, AttributeError):
             return None
 
-    def _anchor_absorb(self, chain: str, txhash: str, before: dict):
+    def _anchor_absorb(self, chain: str, txhash: str, before: dict, plan: list = None):
+        outer9 = self.__dict__.get("_anchor_touch")
+        touch9 = []
+        self._anchor_touch = touch9
+        try:
+            n9, ts9 = self._anchor_absorb_run(chain, txhash, before, plan)
+        finally:
+            self._anchor_touch = outer9
+        if isinstance(outer9, list):
+            outer9.extend(touch9)
+        if touch9 and plan is None:
+            self._hist_anchor_mark(chain, txhash, touch9 + [ts9])
+        return n9
+
+    def _hist_anchor_mark(self, chain: str, txhash: str, tss):
+        t9 = [int(t) for t in (tss or ()) if t is not None]
+        if not t9:
+            return None
+        lo9 = min(t9)
+        if lo9 >= common.kst_day0(time.time() + common.HIST_LATE_CLOSE_S):
+            return None
+        iso = common.hist_late_put(self.conn, lo9)
+        log.info("대사 앵커 보정(%s %s) — 지난 곡선 다시 계산 표식: %s 부터", chain, str(txhash)[:14], iso)
+        return iso
+
+    def _anchor_absorb_run(self, chain: str, txhash: str, before: dict, plan: list = None):
         after = self._tx_wallet_sums(chain, txhash)
         if after == before or self._meta_get(f"ext_prewindow_tx:{chain}:{txhash}"):
-            return 0
+            return 0, None
         n9 = 0
         row = self.conn.execute("SELECT snapshot FROM raw_txs WHERE chain=? AND txhash=?", (chain, txhash)).fetchone()
         try:
@@ -6785,7 +6800,7 @@ class Core:
         except (TypeError, ValueError, AttributeError):
             ts = None
         if ts is None:
-            return 0
+            return 0, None
         blk9 = self._tx_block(chain, txhash)
         T, ws = self._recon_view(chain)
         pay = None
@@ -6829,19 +6844,72 @@ class Core:
             if not sid and loc.count(":") == 2:
                 sid, t9 = discopen.absorbed_by(self.conn, chain, loc, aid, blk9, ts)
             if sid:
-                self._anchor_adjust(chain, sid, t9, aid, loc, -d, txhash)
+                if plan is not None:
+                    plan.append((sid, t9, aid, loc, -d))
+                else:
+                    self._anchor_adjust(chain, sid, t9, aid, loc, -d, txhash)
                 n9 += 1
-        return n9
+        return n9, ts
 
-    def _anchor_adjust(self, chain: str, sid: str, T: int, aid: int, loc: str, comp: int, txhash: str):
-        r = self.conn.execute("SELECT posting_id, qty_base, event_ts FROM postings WHERE source_kind='opening' AND source_ns=? AND source_id=?"
-                              " AND asset_id=? AND location=? ORDER BY leg_seq LIMIT 1", (chain, sid, aid, loc)).fetchone()
+    def _anchor_pos_ts(self, chain: str, sid: str, T: int, loc: str) -> int:
         f9 = self.conn.execute("SELECT min(event_ts) FROM postings WHERE location=? AND source_kind='chain_tx'", (loc,)).fetchone()[0]
         pos_ts = self._win_t0(T, chain)
         if sid != f"recon:{chain}" and f9 is not None:
             pos_ts = min(pos_ts, int(f9) - 1)
         if discopen.is_disc(sid):
             pos_ts = discopen.anchor_at(self.conn, sid) or pos_ts
+        return int(pos_ts)
+
+    def _ext_unmoved(self, chain: str) -> bool:
+        for r in self.conn.execute("SELECT p.source_id, p.qty_base, p.event_ts, o.observed_at FROM postings p"
+                                   " JOIN raw_observations o ON o.obs_id = p.source_id"
+                                   " WHERE p.source_kind='opening' AND p.source_ns=? AND p.source_id >= 'recon:' AND p.source_id < 'recon;'",
+                                   (chain,)).fetchall():
+            try:
+                if int(r["qty_base"]) > 0 and not discopen.is_disc(r["source_id"]) \
+                        and int(r["event_ts"]) > self._win_t0(int(r["observed_at"]), chain) + 86400:
+                    return True
+            except (TypeError, ValueError):
+                return True
+        return False
+
+    def _late_absorb(self, chain: str, txhash: str, ts: int, hits) -> bool:
+        if chain == "sol":
+            return False
+        plan = []
+        self._anchor_absorb(chain, txhash, {}, plan=plan)
+        net9 = self._tx_wallet_sums(chain, txhash)
+        need9 = {(loc9, aid9) for (loc9, aid9) in hits if net9.get((aid9, loc9), 0) != 0}
+        if not plan or not need9 <= {(loc9, aid9) for (_s9, _t9, aid9, loc9, _c9) in plan}:
+            return False
+        if self._ext_unmoved(chain):
+            return False
+        for sid, t9, aid, loc, comp in plan:
+            if discopen.is_disc(sid):
+                return False
+            r = self.conn.execute("SELECT qty_base, event_ts FROM postings WHERE source_kind='opening' AND source_ns=? AND source_id=?"
+                                  " AND asset_id=? AND location=? ORDER BY leg_seq LIMIT 1", (chain, sid, aid, loc)).fetchone()
+            q0 = int(r["qty_base"]) if r else 0
+            if r and q0 > 0 and int(r["event_ts"]) > int(ts):
+                return False
+            if q0 + comp > 0 and q0 <= 0 and self._anchor_pos_ts(chain, sid, t9, loc) > int(ts):
+                return False
+        outer9 = self.__dict__.get("_anchor_touch")
+        touch9 = []
+        self._anchor_touch = touch9
+        try:
+            for sid, t9, aid, loc, comp in plan:
+                self._anchor_adjust(chain, sid, t9, aid, loc, comp, txhash)
+        finally:
+            self._anchor_touch = outer9
+        self._hist_anchor_mark(chain, txhash, touch9 + [ts])
+        log.info("★[%s] %s 대사 뒤 처음 온 창 안 옛 거래 — 기초 잔고 %d칸을 그만큼 즉시 고침(재구축 없이 · 이중 계상 방지)★", chain, txhash[:14], len(plan))
+        return True
+
+    def _anchor_adjust(self, chain: str, sid: str, T: int, aid: int, loc: str, comp: int, txhash: str):
+        r = self.conn.execute("SELECT posting_id, qty_base, event_ts FROM postings WHERE source_kind='opening' AND source_ns=? AND source_id=?"
+                              " AND asset_id=? AND location=? ORDER BY leg_seq LIMIT 1", (chain, sid, aid, loc)).fetchone()
+        pos_ts = self._anchor_pos_ts(chain, sid, T, loc)
         touch9 = getattr(self, "_anchor_touch", None)
         if r:
             q0 = int(r["qty_base"])
@@ -6865,6 +6933,10 @@ class Core:
                 "INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                 " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('opening', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'opening', 'OPENING', ?)",
                 (chain, sid, seq, pos_ts if comp > 0 else int(T), aid, loc, str(comp), CLASSIFIER_VER))
+        if isinstance(touch9, list):
+            disc9 = discopen.is_disc(sid)
+            if (not disc9 and (q0 < 0 or nq < 0)) or (disc9 and (q0 > 0 or nq > 0)):
+                touch9.append(int(self._win_t0(None, chain)))
         self._bump_position(aid, comp, loc)
         log.info("★[%s] %s 재기장 — 대사 앵커(%s) %s 칸 보정 %d → %d (앵커가 흡수한 T 이전 흐름과 이중 계상 방지)★",
                  chain, txhash[:14], sid, loc.split(":", 2)[2][:10], q0, nq)
@@ -7031,9 +7103,12 @@ class Core:
         return legs
 
     def _rederive_sol_anchor_safe(self, rec: dict):
+        t_before = self._tx_hist_ts("sol", rec["txhash"])
         before = self._tx_wallet_sums("sol", rec["txhash"])
         ev = self._maybe_rederive_sol(rec)
         self._anchor_absorb("sol", rec["txhash"], before)
+        if ev is not None:
+            self._hist_late_gone("chain_tx", "sol", rec["txhash"], t_before)
         return ev
 
     def _maybe_rederive_sol(self, rec: dict):
@@ -7316,6 +7391,7 @@ class Core:
             return
         if txhash:
             hit = False
+            hits9 = set()
             blk9 = self._tx_block(chain, txhash)
             for r in self.conn.execute("SELECT DISTINCT p.location, a.kind, a.address, p.asset_id FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
                                        " WHERE p.source_kind='chain_tx' AND p.source_ns=? AND p.source_id=? AND p.location LIKE ?",
@@ -7332,8 +7408,10 @@ class Core:
                         or (dT and ts < dT and r[0].count(":") == 2
                             and discopen.absorbed_by(self.conn, chain, r[0], r[3], blk9, ts)[0] is not None):
                     hit = True
-                    break
+                    hits9.add((r[0], r[3]))
             if not hit:
+                return
+            if self._late_absorb(chain, txhash, ts, hits9):
                 return
         elif not T or ts >= T:
             return
@@ -7404,6 +7482,9 @@ class Core:
     EXT_STREAMS = frozenset(("evm", "sol", "bsc", "ex"))
     EXT_STALL_SEC = 3600
     EXT_RETRY_MAX = 24 * 3600
+    EXT_FAIL_LABEL = ops_requests.REBUILD_FAIL_LABEL
+    EXT_DISK_RETRY_SEC = 300
+    EXT_DISK_BORN_SEC = 900
 
     def _ext_items(self, now: float):
         bcfg = self.cfg.get("backfill") or {}
@@ -7471,12 +7552,12 @@ class Core:
         if now < nb:
             return
         if self._meta_get("ext_rebuild_started_at"):
-            self._ext_record_fail("중단됨(재구축 도중 프로세스 종료)")
+            self._ext_record_fail("중단됨(재구축 도중 프로세스 종료)", "interrupted")
             return
         fail = float(self._meta_get("ext_rebuild_fail_at") or 0)
         nfail = int(self._meta_get("ext_rebuild_fails") or 0)
         wait = min(self.EXT_RETRY_MAX, float(bcfg.get("rebuild_retry_sec") or 6 * 3600) * (2 ** max(0, nfail - 1)))
-        if fail and now - fail < wait:
+        if fail and now - fail < wait and not self._ext_disk_retry_now(now, fail):
             ap9 = common.read_control_json(self.PNL_APPROVE_PATH, None)
             at9 = ops_requests._fin(ap9.get("at")) if isinstance(ap9, dict) else None
             un9 = ops_requests._fin(ap9.get("until")) if isinstance(ap9, dict) else None
@@ -7661,9 +7742,10 @@ class Core:
         self.conn.commit()
         self._ext_status(running=True)
 
-        def fail(msg):
-            n9 = self._ext_record_fail(msg)
-            log.error("★과거 창 확장 재구축 실패 %d회째(원장 무변, 백오프 뒤 재시도): %s★", n9, msg)
+        def fail(msg, code="error", stage="run"):
+            n9 = self._ext_record_fail(msg, code, stage)
+            log.error("★과거 창 확장 재구축 실패 %d회째(원인 %s · 원장 무변, %s): %s★", n9, self.EXT_FAIL_LABEL.get(code, code),
+                      "디스크 여유가 생기면 곧바로 다시" if (code, stage) == ("resource_disk", "precheck") else "백오프 뒤 재시도", msg)
             self._ext_merge_px(os.path.join(shadow, "px_cache_core.json"))
             shutil.rmtree(shadow, ignore_errors=True)
             for p9 in (shadow + ".report.json", tmp):
@@ -7673,14 +7755,10 @@ class Core:
                     pass
 
         try:
-            size = os.path.getsize(live) + (os.path.getsize(live + "-wal") if os.path.exists(live + "-wal") else 0)
             os.makedirs(home, exist_ok=True)
-            free_home = shutil.disk_usage(home).free
-            free_state = shutil.disk_usage(os.path.dirname(live)).free
-            same_fs = os.stat(home).st_dev == os.stat(os.path.dirname(live)).st_dev
-            need_home = 3 * size + (size if same_fs else 0) + (2 << 30)
-            if free_home < need_home or free_state < 1.5 * size:
-                return fail(f"디스크 부족: 여유 {free_home >> 30}GB / 필요 ≈{need_home >> 30}GB (원장 {size >> 20}MB)")
+            ok9, msg9 = self._ext_disk_check(home, live)
+            if not ok9:
+                return fail(msg9, "resource_disk", "precheck")
             os.makedirs(shadow, mode=0o700, exist_ok=True)
             os.chmod(shadow, 0o700)
             log.warning("★과거 창 확장 반영 — 원장 재구축 시작(core 소비 일시 정지 ≈4분): %s★", why)
@@ -7694,21 +7772,22 @@ class Core:
                 r = subprocess.run(args, env=dict(os.environ, TJ_BASE=root), cwd=root, capture_output=True, text=True,
                                    timeout=float(bcfg.get("rebuild_timeout_sec") or 5400))
             except subprocess.TimeoutExpired:
-                return fail("rebuild2 시간 초과")
+                return fail("rebuild2 시간 초과", "timeout")
             if r.returncode:
-                return fail("rebuild2 rc=%d: %s" % (r.returncode, (r.stderr or r.stdout).strip()[-300:]))
+                return fail("rebuild2 rc=%d: %s" % (r.returncode, (r.stderr or r.stdout).strip()[-300:]),
+                            self._ext_rc_code(r.returncode, (r.stderr or "") + (r.stdout or "")))
             new_db = os.path.join(shadow, "ledger.db")
             try:
                 g = subprocess.run([py, os.path.join(root, "tools", "verify_fixc.py"), "gates", new_db,
                                     "--balances", os.path.join(shadow, "upbit_balances.json"), "--live", live], capture_output=True, text=True,
                                    timeout=float(bcfg.get("verify_timeout_sec") or self.EXT_VERIFY_TIMEOUT_SEC))
             except subprocess.TimeoutExpired:
-                return fail("verify_fixc 게이트 시간 초과")
+                return fail("verify_fixc 게이트 시간 초과", "timeout")
             if g.returncode:
-                return fail("게이트 b·c: " + g.stdout.strip()[-300:])
+                return fail("게이트 b·c: " + g.stdout.strip()[-300:], "integrity")
             self._ext_wal_settle(new_db)
             if os.path.exists(new_db + "-wal") and os.path.getsize(new_db + "-wal") > 0:
-                return fail("shadow WAL 미체크포인트")
+                return fail("shadow WAL 미체크포인트", "integrity")
             locked = []
             try:
                 rep9 = json.load(open(shadow + ".report.json", encoding="utf-8"))
@@ -7717,18 +7796,19 @@ class Core:
                 pass
             bad = self._ext_position_gate(new_db, pairs, prefixes, locked=locked)
             if bad:
-                return fail(f"포지션 게이트 {len(bad)}칸: " + " · ".join(bad[:5]))
+                return fail(f"포지션 게이트 {len(bad)}칸: " + " · ".join(bad[:5]), "position_gate")
             if bcfg.get("rebuild_pnl_gate") is not False:
                 pg9 = self._ext_pnl_gate(shadow + ".report.json", bcfg, why)
                 if not pg9["ok"] and not pg9.get("approved"):
-                    return fail("손익 게이트: " + pg9["reason"])
+                    return fail("손익 게이트: " + pg9["reason"], "pnl_approval")
             c2 = sqlite3.connect(new_db)
             try:
                 if c2.execute("PRAGMA quick_check").fetchone()[0] != "ok" or \
                         c2.execute("SELECT 1 FROM meta WHERE k='rebuild_incomplete'").fetchone():
-                    return fail("새 원장 무결성/마커")
+                    return fail("새 원장 무결성/마커", "integrity")
                 c2.execute("DELETE FROM meta WHERE k LIKE 'ext_prewindow:%' OR k LIKE 'ext\\_prewindow\\_tx:%' ESCAPE '\\'"
-                           " OR k IN ('ext_rebuild_fail_at', 'ext_rebuild_fails', 'ext_rebuild_last_error', 'ext_rebuild_started_at')")
+                           " OR k IN ('ext_rebuild_fail_at', 'ext_rebuild_fails', 'ext_rebuild_last_error', 'ext_rebuild_started_at',"
+                           " 'ext_rebuild_fail_code', 'ext_rebuild_fail_stage', 'ext_rebuild_fail_code_at')")
                 c2.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_rebuilt_at', ?)", (str(t_start),))
                 c2.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_rebuilt_why', ?)", (why[:500],))
                 c2.commit()
@@ -7742,16 +7822,19 @@ class Core:
             finally:
                 c3.close()
             if not ok3:
-                return fail("복사본 무결성")
+                return fail("복사본 무결성", "integrity")
         except Exception as e:
-            return fail(f"예외 {type(e).__name__}: {common.safe_err(e)}")
+            import errno
+            full9 = (isinstance(e, OSError) and getattr(e, "errno", None) == errno.ENOSPC) or \
+                (isinstance(e, sqlite3.OperationalError) and "disk is full" in str(e).lower())
+            return fail(f"예외 {type(e).__name__}: {common.safe_err(e)}", "resource_disk" if full9 else "error")
         try:
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except sqlite3.Error:
             pass
         self.conn.close()
         try:
-            kr9, ko9 = self._ext_keep_cfg(bcfg)
+            kr9, ko9 = self._ext_keep_cfg(bcfg, self.cfg.get("backup"))
             self._ext_swap(live, tmp, ts, keep_recent=kr9, keep_oldest=ko9)
         except Exception as e:
             log.critical("★재구축 원장 교체 중 오류 — core 재기동(원장 파일 확인: %s*): %s★", live, e)
@@ -7864,41 +7947,127 @@ class Core:
 
     EXT_STATUS_PATH = os.path.join(common.STATE_DIR, "ext_rebuild_status.json")
 
-    def _ext_record_fail(self, msg: str) -> int:
+    def _ext_record_fail(self, msg: str, code: str = "error", stage: str = "run") -> int:
+        code = code if code in self.EXT_FAIL_LABEL else "error"
         n9 = int(self._meta_get("ext_rebuild_fails") or 0) + 1
-        for k9, v9 in (("ext_rebuild_fail_at", str(int(time.time()))), ("ext_rebuild_fails", str(n9)),
-                       ("ext_rebuild_last_error", str(msg)[:500])):
+        at9 = str(int(time.time()))
+        for k9, v9 in (("ext_rebuild_fail_at", at9), ("ext_rebuild_fails", str(n9)),
+                       ("ext_rebuild_last_error", str(msg)[:500]), ("ext_rebuild_fail_code", code),
+                       ("ext_rebuild_fail_stage", "precheck" if stage == "precheck" else "run"), ("ext_rebuild_fail_code_at", at9)):
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (k9, v9))
         self.conn.execute("DELETE FROM meta WHERE k='ext_rebuild_started_at'")
         self.conn.commit()
         self._ext_status()
         return n9
 
+    def _ext_fail_code(self):
+        fa9 = self._meta_get("ext_rebuild_fail_at")
+        if not self._meta_get("ext_rebuild_fails") or not fa9 or self._meta_get("ext_rebuild_fail_code_at") != fa9:
+            return None, None
+        return self._meta_get("ext_rebuild_fail_code"), self._meta_get("ext_rebuild_fail_stage")
+
+    @staticmethod
+    def _ext_rc_code(rc: int, out: str) -> str:
+        if rc == 2:
+            return "transient_rpc"
+        if rc == 4:
+            return "integrity"
+        t = (out or "").lower()
+        if "no space left on device" in t or "database or disk is full" in t or "[errno 28]" in t:
+            return "resource_disk"
+        return "error"
+
+    EXT_DISK_WHAT = {"same": "작업 폴더·원장 같은 디스크", "work": "재구축 작업 폴더 디스크", "ledger": "원장 디스크"}
+
+    def _ext_disk_plan(self, home: str, live: str) -> dict:
+        import shutil
+        size = os.path.getsize(live) + (os.path.getsize(live + "-wal") if os.path.exists(live + "-wal") else 0)
+        sd = os.path.dirname(os.path.abspath(live))
+        dh, ds = ledger_backup.dev_of(home), ledger_backup.dev_of(sd)
+        need_home = 3 * size + (2 << 30)
+        if dh == ds:
+            rows = [{"dev": dh, "what": "same", "free": int(shutil.disk_usage(home).free), "need": int(need_home + size)}]
+        else:
+            rows = [{"dev": dh, "what": "work", "free": int(shutil.disk_usage(home).free), "need": int(need_home)},
+                    {"dev": ds, "what": "ledger", "free": int(shutil.disk_usage(sd).free), "need": int(1.5 * size)}]
+        return {"size": int(size), "same": dh == ds, "rows": rows, "at": int(time.time())}
+
+    def _ext_disk_check(self, home: str, live: str):
+        def short():
+            p9 = self._ext_disk_plan(home, live)
+            self._ext_disk = p9
+            return {r9["dev"]: r9["need"] - r9["free"] for r9 in p9["rows"] if r9["free"] < r9["need"]}
+        need9 = short()
+        if need9:
+            self._ext_relief = ledger_backup.relieve(live, short, home=home, log=log)
+            need9 = short()
+        if not need9:
+            return True, ""
+        p9 = self._ext_disk
+        r9 = next(x for x in p9["rows"] if x["dev"] in need9)
+        return False, "디스크 부족(자동 정리 뒤에도): 여유 %dGB / 필요 ≈%dGB (%s · 원장 %dMB)" % (
+            r9["free"] >> 30, r9["need"] >> 30, self.EXT_DISK_WHAT.get(r9["what"], r9["what"]), p9["size"] >> 20)
+
+    def _ext_disk_retry_now(self, now: float, fail: float) -> bool:
+        if self._ext_fail_code() != ("resource_disk", "precheck"):
+            return False
+        if now - fail < self.EXT_DISK_RETRY_SEC or now - float(getattr(self, "_ext_born", None) or now) < self.EXT_DISK_BORN_SEC:
+            return False
+        bcfg = self.cfg.get("backfill") or {}
+        home = os.path.expanduser(str(bcfg.get("rebuild_dir") or "~"))
+        try:
+            os.makedirs(home, exist_ok=True)
+            ok9, _msg9 = self._ext_disk_check(home, common.DB_PATH)
+        except Exception as e:
+            log.warning("재구축 디스크 재검사 실패(종전 백오프): %s", common.safe_err(e))
+            return False
+        self._ext_status()
+        if ok9:
+            log.warning("재구축: 지난 실패 = 디스크 부족 → 지금 두 디스크 여유 충분 — 백오프를 기다리지 않고 다시")
+        return ok9
+
+    def _ext_disk_view(self):
+        p9 = getattr(self, "_ext_disk", None)
+        if not isinstance(p9, dict):
+            return None
+        return {"at": p9.get("at"), "same": p9.get("same"), "ledger_mb": int(p9.get("size") or 0) >> 20,
+                "rows": [{"what": r9["what"], "label": self.EXT_DISK_WHAT.get(r9["what"], r9["what"]),
+                          "free_gb": round(r9["free"] / 1024 ** 3, 1), "need_gb": round(r9["need"] / 1024 ** 3, 1)} for r9 in p9.get("rows") or []]}
+
     def _ext_status(self, running: bool = False, rebuilt_at: int = None):
         try:
+            rl9, dk9 = getattr(self, "_ext_relief", None), self._ext_disk_view()
             if rebuilt_at:
                 common.atomic_write_json(self.EXT_STATUS_PATH, {"running": False, "started_at": None, "fails": 0, "fail_at": None,
-                                                                "last_error": None, "rebuilt_at": int(rebuilt_at), "ts": int(time.time())})
+                                                                "last_error": None, "fail_code": None, "fail_label": None, "fail_stage": None,
+                                                                "rebuilt_at": int(rebuilt_at), "relief": rl9, "disk": dk9, "ts": int(time.time())})
                 return
+            fc9, fs9 = self._ext_fail_code()
             d = {"running": bool(running), "started_at": int(float(self._meta_get("ext_rebuild_started_at") or 0)) or None,
                  "fails": int(self._meta_get("ext_rebuild_fails") or 0),
                  "fail_at": int(float(self._meta_get("ext_rebuild_fail_at") or 0)) or None,
                  "last_error": self._meta_get("ext_rebuild_last_error"),
+                 "fail_code": fc9, "fail_label": self.EXT_FAIL_LABEL.get(fc9) if fc9 else None,
+                 "fail_stage": fs9 if fc9 else None,
                  "rebuilt_at": int(float(self._meta_get("ext_rebuilt_at") or 0)) or None,
+                 "relief": rl9, "disk": dk9,
                  "ts": int(time.time())}
             common.atomic_write_json(self.EXT_STATUS_PATH, d)
         except Exception:
             pass
 
-    EXT_KEEP_RECENT = 1
+    EXT_KEEP_RECENT = 0
     EXT_KEEP_REPORTS = 3
 
     @classmethod
-    def _ext_keep_cfg(cls, bcfg: dict):
+    def _ext_keep_cfg(cls, bcfg: dict, kcfg: dict = None):
+        kp = kcfg.get("keep_pre_rebuild") if isinstance(kcfg, dict) else None
+        if isinstance(kp, int) and not isinstance(kp, bool) and 1 <= kp <= 5:
+            return kp - 1, False
         kr = bcfg.get("rebuild_keep_recent") if isinstance(bcfg, dict) else None
         ko = bcfg.get("rebuild_keep_oldest") if isinstance(bcfg, dict) else None
         kr = kr if isinstance(kr, int) and not isinstance(kr, bool) and kr >= 0 else cls.EXT_KEEP_RECENT
-        ko = ko if isinstance(ko, bool) else True
+        ko = ko if isinstance(ko, bool) else False
         return kr, ko
 
     @classmethod
@@ -7918,20 +8087,25 @@ class Core:
         return gone
 
     @classmethod
-    def _ext_swap(cls, live: str, tmp: str, ts: str, keep_recent: int = None, keep_oldest: bool = True):
+    def _ext_swap(cls, live: str, tmp: str, ts: str, keep_recent: int = None, keep_oldest: bool = False):
         d = os.path.dirname(live)
         base = os.path.basename(live) + ".pre_extrebuild_"
         olds = sorted(f9 for f9 in os.listdir(d) if f9.startswith(base) and not f9.endswith(("-wal", "-shm")))
         kr = cls.EXT_KEEP_RECENT if keep_recent is None else max(0, int(keep_recent))
         keep9 = set(olds[:1] if keep_oldest else []) | set(olds[len(olds) - kr:] if kr else [])
         drop = [f9 for f9 in olds if f9 not in keep9]
-        for f9 in drop:
-            for sfx in ("", "-wal", "-shm"):
-                try:
-                    os.remove(os.path.join(d, f9 + sfx))
-                except OSError:
-                    pass
-        ledger_backup.swap_in(live, tmp, live + f".pre_extrebuild_{ts}", log=log)
+        res9 = ledger_backup.swap_in(live, tmp, live + f".pre_extrebuild_{ts}", log=log)
+        kept9 = (res9 or {}).get("kept")
+        ok9, why9 = ledger_backup.ledger_check_light(kept9) if kept9 and os.path.isfile(kept9) else (False, "이번 보존본 없음")
+        if ok9:
+            for f9 in drop:
+                for sfx in ("", "-wal", "-shm"):
+                    try:
+                        os.remove(os.path.join(d, f9 + sfx))
+                    except OSError:
+                        pass
+        elif drop:
+            log.warning("재구축 교체: 이번 보존본 확인 실패(%s) — 옛 보존본 %d개 그대로 둠", why9, len(drop))
         try:
             os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
         except FileNotFoundError:

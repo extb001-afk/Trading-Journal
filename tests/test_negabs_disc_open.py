@@ -336,8 +336,10 @@ c.conn.execute("INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, pa
                ("recon:base", "opening_balance", "base", json.dumps({W: {f"token:{TKQ}": 0}}), TB + 100))
 c.conn.commit()
 c.conn.execute("BEGIN")
+c._late_absorb = lambda *a, **k: False
 c._consume_record({"v": 1, "kind": "evm_tx", "chain": "base", "txhash": h(121), "wallets": [W],
                    "snapshot": snap(h(121), TB, 777, W, TKQ, toks=[(W, X, TKQ, "TKQ", 5 * E18)], fee=10 ** 15)})
+c.__dict__.pop("_late_absorb", None)
 c.conn.execute("DELETE FROM meta WHERE k LIKE 'ext_prewindow%base%'")
 c.conn.commit()
 n12 = len(CALLS)

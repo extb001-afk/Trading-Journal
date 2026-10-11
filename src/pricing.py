@@ -1383,7 +1383,8 @@ GT_NETWORK = {"eth": "eth", "base": "base", "bsc": "bsc", "arbitrum": "arbitrum"
               "monad": "monad", "megaeth": "megaeth", "plasma": "plasma", "xlayer": "x-layer", "kaia": "kaia",
               "fraxtal": "fraxtal", "bob": "bob-network", "somnia": "somnia", "avalanche": "avax",
               "story": "story",
-              "abstract": "abstract"}
+              "abstract": "abstract",
+              "hyperevm": "hyperevm"}
 
 
 _GT_ERR = None
@@ -1526,7 +1527,8 @@ DS_CHAIN = {"eth": "ethereum", "bsc": "bsc", "base": "base", "arbitrum": "arbitr
             "polygon": "polygon", "sol": "solana", "zksync": "zksync", "scroll": "scroll",
             "monad": "monad", "megaeth": "megaeth", "plasma": "plasma", "xlayer": "xlayer", "kaia": "kaia",
             "fraxtal": "fraxtal", "bob": "bob", "story": "story", "somnia": "somnia", "avalanche": "avalanche",
-            "abstract": "abstract"}
+            "abstract": "abstract",
+            "hyperevm": "hyperevm"}
 _DS_ERR = None
 _DS_META = {}
 

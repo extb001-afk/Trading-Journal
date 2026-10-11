@@ -10,12 +10,12 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 | 키(`.env` 이름) | 꼭 필요? | 무료? | 어디에 쓰나 | 없으면 |
 |---|---|---|---|---|
 | `TJ_HELIUS_KEY` | Solana 지갑이 있으면 **필수** | 무료 플랜 | Solana 지갑 옛 기록·토큰·NFT 수집, 새 거래 확인의 백업 | Solana 지갑을 못 받아요 |
-| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 노드(RPC)로 받아요 — 최신 거래는 바로, 옛 기록은 천천히 |
+| `TJ_ETHERSCAN_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 | Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 · HyperEVM(이 키로만 받음) · NFT 자동 발견(블록스카웃이 없는 체인) | 공개 노드(RPC)로 받아요 — 최신 거래는 바로, 옛 기록은 천천히 · HyperEVM 은 안 켜져요 |
 | `TJ_ALCHEMY_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료(월 3,000만 CU) | 지갑이 주고받은 토큰 전부 + 지금 잔고 찾기(오래 들고만 있던 옛 보유 토큰을 빠뜨리지 않게) | 수집은 돌지만 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만) |
 | `TJ_ANKR_KEY` | EVM 지갑이 있으면 **필수**(경고만 · 막지는 않음) | 무료 Freemium | 오래 안 쓴 지갑에 들어온 토큰 10분마다 확인 · BNB Chain·Base 옛 기록(아카이브) 가속 · BNB Chain 에 남이 그냥 보낸 BNB 찾기(옛 블록 잔고) · 토큰 찾기 보조(Advanced API) | 무료 공개 노드로만 — 늦을 수 있어요(1시간 확인이 받쳐 줌) |
 | `TJ_COINGECKO_KEY` | 선택 | Demo 무료 · Pro 유료 | 코인게코 시세 · DEX 토큰 시세 · 원가·차트 시세 · NFT 바닥가 | 전부 무키(공용 무료 한도)로 — 느리고 막히기 쉬워요 |
 | `TJ_OPENSEA_KEY` | 선택 | 무료 신청 | EVM NFT 바닥가 최우선 출처 | 코인게코 NFT 로 |
-| `TJ_NODEREAL_KEY` · `TJ_QUICKNODE_BSC_KEY` · `TJ_QUICKNODE_BASE_KEY` | 선택 | NodeReal 무료 키 · QuickNode 유료 | BNB Chain·Base 옛 기록(아카이브) 노드 — 무료 키는 월 한도의 80%(백필 때 실시간 몫을 남기고 하루 몫의 최대 10배까지 당겨 씀 · 최근 31일 합 80% 안), 유료는 사용 비율(기본 10%) 안에서만 | 공개 노드로 — BNB Chain 은 공개 노드 보관 기간까지만 |
+| `TJ_NODEREAL_KEY` · `TJ_QUICKNODE_KEY` | 선택 | NodeReal 무료 키 · QuickNode 멀티체인 엔드포인트 주소 하나(무료 플랜도 됨 — 월 크레딧·초당 15 의 80% · 유료 기본 80% · Base 내부 이동 trace + 남는 몫으로 옛 잔고 · getLogs 엔 안 씀 · 저장 확인 = Base 1콜 · 연결 시험 = Base trace 1건) | BNB Chain·Base 옛 기록(아카이브) 노드 — 무료 키는 월 한도의 80%(백필 때 실시간 몫을 남기고 하루 몫의 최대 10배까지 당겨 씀 · 최근 31일 합 80% 안), 유료는 사용 비율(기본 10% · QuickNode 80%) 안에서만 | 공개 노드로 — BNB Chain 은 공개 노드 보관 기간까지만 |
 | 거래소 키(업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트) | 선택 | 무료 | 그 거래소 잔고·체결·입출금 | 그 거래소는 안 받아요 |
 | `TJ_TG_TOKEN` · `TJ_TG_CHAT` | 선택 | 무료 | 텔레그램 알림 | 알림 없이 화면만 |
 
@@ -35,7 +35,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 - **하루 몫** = 월 크레딧(무료 100만 · 유료면 `config.json` 의 `sol.helius_monthly_credits`)의 80% ÷ 30(무료 기준 약 2만 6천).
   새 거래 확인 몫(실제 사용량 × 1.25 · 하루 몫의 3~10% — 상한 `sol.helius_head_min_pct`)을 먼저 떼어 두고 나머지는 옛 기록에 써요. 무료 플랜이면 아래
   '따라잡기 버스트'처럼 옛 기록에 하루 몫의 **10배(열흘치)까지** 앞당겨 씁니다(최근 31일 합 ≤ 월 80% · 끄기 = `sol.helius_burst: false` ·
-  새로 받은 키라면 **설정 › 연결·키 › 탐색기 키 › Helius** 의 '새로 받은 키' 칩을 켜세요 — `state/settings.json` 의 `node_plans.helius.fresh_since` · 키를 바꿔 저장하면 꺼져요).
+  이 봇이 실제로 쓴 양으로 판단해 새 키도 켤 것 없이 바로 — 아래 '따라잡기 버스트').
 - 옛 기록 몫을 다 쓰면 옛 구간만 다음 날(UTC 0시 = 한국 오전 9시) 이어 받고, 새 거래 확인은 공개 노드로 계속해요(옛 기록 = Solana 공식 공개 노드 · 공표 한도의 80% 안).
   공개 노드를 끄려면 `sol.head_rpc`·`sol.archive_rpc` 를 `""` 로(그러면 Helius 만 쓰고, 하루 몫이 다 차면 그날 끝까지 쉼).
 
@@ -50,6 +50,8 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 - **하루 몫** = 공표 무료 한도(하루 10만 회)의 80%(8만 회) · 초당 요청은 공표 3회보다 낮은 2회. 옛 기록을 채우는 동안은 오늘 남은 시간의 새 거래 확인 몫
   (실제 사용량 × 1.25 · 하루 몫의 3~70%)만 먼저 떼어 두고 나머지를 옛 기록에 몰아 써요 — 옛 기록이 다 채워지면 새 거래 확인이 하루 몫을 그대로 씁니다.
 - 하루 몫을 다 쓰거나 키가 거부되면 그 체인은 공개 RPC 로 이어 받아요(예전부터 블록스카웃으로 받던 설치는 종전처럼 블록스카웃이 살아 있으면 거기로). 이더스캔이 살아나면 알아서 돌아옵니다.
+- **HyperEVM**(체인 999)은 이더스캔 목록(거래·내부 이동·토큰 이동)만으로 받아요 — 이 키가 있어야 켜지고(없으면 '이더스캔 무료 키 필요' 경고만), 이더스캔이 막히면(하루 몫·장애)
+  공개 RPC 로 돌지 않고 오류를 보인 채 기다렸다 이어 받아요(공개 RPC 의 getLogs 가 한 번에 1,000블록이라 옛 기록을 훑기엔 너무 비쌈). 키를 나중에 지워도 이미 받은 HyperEVM 은 켠 채 수집만 멈춰요.
 
 ## Alchemy — `TJ_ALCHEMY_KEY` (EVM 지갑 토큰·잔고 찾기 — EVM 지갑이 있으면 필수)
 
@@ -79,9 +81,9 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
   실시간 호출은 백필이 하루 몫을 넘겨 써도 막히지 않아요(그날 실시간 몫 = 하루 몫). **최근 31일 합은 늘 월 한도의 80% 안**(서비스의 한 달 주기를
   몰라도 넘지 않게)이라, 크게 몰아 쓴 날이 31일 창에 남아 있는 동안은 백필이 거의 쉬고 실시간만 돌아요.
   유료 키는 버스트 없이 고른 사용 비율 그대로예요. 설정 칸에 '버스트 중'이 보이면 오늘 평소 몫을 넘겨 쓰는 중이라는 뜻이고, '실시간 하루 약 · 오늘 백필 상한'이 함께 보여요.
-  사용 기록이 없는 지난날(이 기능이 생기기 전 · 기록을 시작하기 전)은 평소 몫을 다 썼다고 보수적으로 셉니다 — 그래서 업데이트 뒤 한 달쯤은 버스트가 거의 없어요.
-  키를 새로 받아 처음 넣었다면 그 칸의 **새로 받은 키(지난 사용 없음)** 를 켜세요 — 그 전 날들을 0 으로 보고 바로 버스트를 씁니다(자동으로 켜지지 않아요 ·
-  키를 다른 값으로 바꿔 저장하면 꺼져요). 다른 곳에서 쓰던 키라면 켜지 마세요. 설정 파일 칸 = `state/settings.json` 의 `node_plans.<서비스>.fresh_since`(`YYYY-MM-DD`, UTC).
+  버스트는 **이 봇이 실제로 쓴 양**(하루 장부 기록)만 보고 판단해요 — 사용 기록이 없는 지난날(기록을 시작하기 전)은 0 으로 세서 업데이트·새 키 뒤에도 켤 것 없이 바로 씁니다
+  ('새로 받은 키' 칩은 이제 없어요). 날짜별 사용 기록이 손상돼 버린 적이 있으면 그 전 사용을 모르니 종전처럼 평소 몫을 다 쓴 것으로 보수적으로 셉니다.
+  다른 곳에서도 쓰는 키라면 넘칠 때 서비스가 한도 오류(429 등)를 주고 그날은 물러나요 — 나눠 쓰는 키는 유료 요금제·낮은 사용 비율을 고르세요(유료는 버스트 없음).
 - 단가는 Alchemy 공식 CU 표 그대로 셉니다 — `alchemy_getTokenBalances` 20 · `eth_getBalance` 20 · `eth_call` 26 · `eth_getLogs` 60 · `alchemy_getAssetTransfers` 120 · 그 밖 26.
 - 오늘 쓴 양 / 하루 몫은 설정 › 연결·키 › Alchemy 칸에 보입니다. 유료 요금제라면 같은 칸에서 **유료 키** 를 고르고 월 한도·사용 비율(10·25·50·80%)을 넣으세요.
 
@@ -188,7 +190,7 @@ a key the service refuses (401/403) is not saved; a connection failure saves it 
 Paste keys in **Settings › Connections & keys**; they are stored in `.env` (mode 600), shown masked, and never written to `config.json`, state files or
 screen responses; URLs in error messages, logs and the status panel are reduced to the host name. Each key is sent the way its service requires: request headers
 for exchanges (signed), CoinGecko and OpenSea; the URL key parameter for Helius (`api-key`) and Etherscan (`apikey`); the URL path for the Telegram bot token;
-and the endpoint URL for the node keys (`TJ_ALCHEMY_KEY`, `TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`, `TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY`). URLs that carry a key
+and the endpoint URL for the node keys (`TJ_ALCHEMY_KEY`, `TJ_NODEREAL_KEY`, `TJ_ANKR_KEY`, `TJ_QUICKNODE_KEY` — one multichain endpoint; per-chain URLs are derived from its name and token). URLs that carry a key
 are built in memory only.
 
 - **Helius** (`TJ_HELIUS_KEY`, free plan — https://dashboard.helius.dev): Solana history, tokens and NFT discovery, and backup for new-transaction
@@ -200,7 +202,8 @@ are built in memory only.
   cover Base, which is read from public RPC); NFT discovery where no Blockscout exists. Daily share = 80% of the published 100k/day, at most 2 requests/s;
   while old history is filling, a new-transaction share (measured use × 1.25, 3–70% of the day) is kept and the rest goes to old history. Without the key,
   or when it is refused or the share runs out, that chain continues on public RPC (installs that already used Blockscout keep it if it is up; a fresh install
-  never starts on Blockscout) and returns to Etherscan by itself once Etherscan recovers.
+  never starts on Blockscout) and returns to Etherscan by itself once Etherscan recovers. HyperEVM (chain 999) is collected from Etherscan lists only: it is
+  enabled only with this key and waits (no RPC fallback — public RPC getLogs is capped at 1,000 blocks) while Etherscan is limited or down.
 - **Alchemy** (`TJ_ALCHEMY_KEY`, free 30M CU/month — https://dashboard.alchemy.com/signup): finds every token a wallet ever touched plus current
   balances (`alchemy_getTokenBalances`) so long-held tokens are not missed. Watching and backfill stay on free nodes; Alchemy only helps where no free
   path exists. One full pass at first, then only (wallet, chain) pairs that free signals show as changed. Metered with the official CU table under a
@@ -215,14 +218,19 @@ are built in memory only.
   Ankr also runs the 10-minute "tokens received by resting wallets" check (one batched `eth_getLogs` per chain, recipient topic = your wallets;
   public nodes when the key is missing or the chain is not open on the free plan; never Alchemy — its free getLogs is capped at 10 blocks).
   Config `addr_tier.inflow_sec` (default 600, 0 = off).
-- **Catch-up burst** (free keys only — Alchemy, Ankr, NodeReal, Helius): backfill and first full passes may use up to 10x the normal daily share
+- **QuickNode** (`TJ_QUICKNODE_KEY`, optional, free plan works — https://dashboard.quicknode.com): paste one multichain endpoint URL (any chain); per-chain
+  URLs are derived from it. Used only for what it does well: Base internal-transfer traces (with the key set, Base tracing uses this key alone and waits on
+  failure or when the share runs out) and, with what is left, old BNB Chain/Base balance and nonce checks — never for getLogs (the free plan allows 5 blocks).
+  Free plan = 80% of the monthly credits and of 15 requests/s; paid default share 80%. Saving checks one Base call; the connection test traces one recent Base
+  transaction. Older per-chain fields (`TJ_QUICKNODE_BSC_KEY`, `TJ_QUICKNODE_BASE_KEY`) are read only while the multichain field is empty.
+- **Catch-up burst** (free keys only — Alchemy, Ankr, NodeReal, QuickNode, Helius): backfill and first full passes may use up to 10x the normal daily share
   (ten days' worth). The real-time load measured in the ledger (busiest of the last 7 days, or today's pace) x 1.5 is reserved first for the rest of
   today and for each of the next 30 days; only the remainder goes to backfill, and it shrinks at once when real-time use grows. Real-time calls are never
   blocked by backfill use. The rolling 31-day total always stays under 80% of the monthly limit. Paid keys never burst. Etherscan (daily limit) keeps
   only today's measured real-time share (x 1.25, at least 3% of the day) while backfilling.
-  Past days with no usage record (before this feature recorded them) count as a full normal day, so bursting is rare for about a month after
-  upgrading — unless you mark the key "new key (no past use)" in its settings card (`node_plans.<service>.fresh_since` = `YYYY-MM-DD` in
-  `state/settings.json`; never set automatically, cleared when a different key value is saved).
+  The burst is judged from this bot's own recorded use: past days with no usage record count as zero, so it works right after an update or a new key
+  (there is no "new key" chip any more); if the per-day history was ever found corrupt, earlier days count as a full normal day (conservative).
+  A key shared with other software gets the service's limit error (429 etc.) when it overflows and backs off for the day — choose a paid plan with a low share for shared keys.
 - **CoinGecko** (`TJ_COINGECKO_KEY`, free demo or paid pro — https://www.coingecko.com/en/developers/dashboard, plan auto-detected):
   one key shared by CoinGecko USD prices for coins no exchange priced (Binance → Bybit → CoinGecko order unchanged), DEX token prices
   (CoinGecko on-chain / GeckoTerminal data, pool liquidity included for the thin-pool guard), historical prices for cost basis and charts,

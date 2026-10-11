@@ -339,6 +339,7 @@ EXTRA_CHAINS = {
     "avalanche": ("Avalanche", "AVAX", 43114, "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7"),
     "stable": ("Stable", "USDT", 988, None),
     "abstract": ("Abstract", "ETH", 2741, "0x3439153eb7af838ad19d56e1571fbd09333c2809"),
+    "hyperevm": ("HyperEVM", "HYPE", 999, "0x5555555555555555555555555555555555555555"),
 }
 NATIVE_MIRROR = {"arc": ("0x3600000000000000000000000000000000000000", 10 ** 12),
                  "stable": ("0x779ded0c9e1022225f8e0630b35a9b54be713736", 10 ** 12)}
@@ -637,6 +638,7 @@ def gate_decisions(cfg: dict, gate: dict = None, speed: dict = None) -> list:
     explicit = {(w.get("chain"), str(w.get("address") or "").lower()) for w in cfg.get("wallets") or []
                 if w.get("type", "evm") == "evm"}
     configured = {c for c, cc in chains.items() if isinstance(cc, dict) and not cc.get("_auto")}
+    es9 = {}
     out = []
     for key, ent in sorted(((gate or {}).get("pairs") or {}).items()):
         if not isinstance(ent, dict) or not ent.get("active") or ":" not in key:
@@ -660,11 +662,25 @@ def gate_decisions(cfg: dict, gate: dict = None, speed: dict = None) -> list:
             try:
                 import chaincatalog
                 blk, why = chaincatalog.block_for(c, since is not None, ((speed or {}).get("chains") or {}).get(c))
+                if blk is not None and chaincatalog.es_only(blk) and not _es_key_or_collected(c, es9):
+                    blk, why = None, "이더스캔 무료 키 필요 — 설정 › 연결·키 › Etherscan 에 넣으면 자동으로 켜져요"
             except ImportError:
                 blk, why = None, "카탈로그 없음"
             d["block"], d["ok"], d["reason"] = blk, blk is not None, why
         out.append(d)
     return out
+
+
+def _es_key_or_collected(chain: str, memo: dict) -> bool:
+    if "key" not in memo:
+        memo["key"] = bool(str(read_env_file().get("TJ_ETHERSCAN_KEY") or "").strip())
+    if memo["key"]:
+        return True
+    try:
+        cur = read_json(os.path.join(STATE_DIR, f"cursor_evm_{chain}.json"), {})
+    except (Exception, SystemExit):
+        return True
+    return isinstance(cur, dict) and any(not str(k).startswith("_") for k in cur)
 
 
 def apply_activity_gate(cfg: dict) -> list:

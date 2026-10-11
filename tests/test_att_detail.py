@@ -9,6 +9,7 @@ from _ingest import W, Reader
 import json
 import os
 import time
+import types
 from datetime import datetime, timedelta, timezone
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
@@ -331,4 +332,86 @@ bad9 = [k for k, v in dz.items() if abs(sum(x[1] for x in v["mk"]) - float(iso9[
         or abs(sum(x[1] for x in v["fl"]) - float(iso9[k].get("flow") or 0)) > 0.011]
 chk(o9 and o9[0] == 200 and len(dz) == sum(1 for r in dd if r.get("att")) and not bad9 and any(len(v["mk"]) > 5 for v in dz.values()),
     "데모 빌더: 분해 있는 날 전부 · 코인별 시세 합 = 그날 mk(상위 5 밖 코인 포함) · 원화 출금 = 그날 flow", (o9 and o9[0], len(dz), bad9[:3]))
+
+print("[4] ui17 — 상세·builtAt 원자 게시 · 9999-12-31 · 원화만 남는 선물 행")
+BX = web.StateBuilder()
+BX.skip_gen_check = True
+
+
+def bx_build():
+    try:
+        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+    except FileNotFoundError:
+        pass
+    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    try:
+        return BX._build(conn)["fields"]
+    finally:
+        conn.close()
+
+
+bx_build()
+BX._day_idx = dict(BX._day_idx, builtAt=111)
+old_days = json.dumps((BX.att_detail(lo, hi) or {}).get("days"), sort_keys=True)
+mid = []
+pack0 = web.StateBuilder._att_det_pack
+
+
+def spy(self, *a, **k):
+    if not mid:
+        mid.append(self.att_detail(lo, hi))
+    return pack0(self, *a, **k)
+
+
+BX._att_det_pack = types.MethodType(spy, BX)
+try:
+    bx_build()
+finally:
+    del BX._att_det_pack
+m0 = mid[0] if mid else None
+chk(isinstance(m0, dict) and m0.get("builtAt") == 111 and json.dumps(m0.get("days"), sort_keys=True) == old_days and len(json.loads(old_days)) >= 5,
+    "빌드 도중 요청 = 지난 빌드 builtAt + 그 빌드 상세 전부(종전 = 지난 builtAt + 빈·일부 상세 200)",
+    m0 and (m0.get("builtAt"), len(m0.get("days") or {}), len(json.loads(old_days))))
+af = BX.att_detail(lo, hi)
+chk(af["builtAt"] != 111 and af["builtAt"] == BX._day_idx["builtAt"] and set(af["days"]) == set(BX._day_idx.get("attDet") or {}) and af["days"]
+    and BX._day_idx.get("attDet") is BX._att_det and isinstance(BX._day_idx.get("attFut"), dict),
+    "빌드 끝 = 새 builtAt · 새 상세 · 선물 분해가 한 색인 객체로 함께 게시", (af["builtAt"], len(af["days"]), sorted(BX._day_idx)[:6]))
+attr0 = web.StateBuilder._daily_attrib
+
+
+def attr_fail(self, *a, **k):
+    attr0(self, *a, **k)
+    raise RuntimeError("합성: 분해 끝에서 실패")
+
+
+BX._daily_attrib = types.MethodType(attr_fail, BX)
+try:
+    fz9 = bx_build()
+finally:
+    del BX._daily_attrib
+chk(BX._day_idx.get("attDet") == {} and BX.att_detail(lo, hi)["days"] == {} and not any(r.get("att") for r in fz9.get("dailySeries") or []),
+    "분해가 실패한 빌드 = 빈 상세 게시(곡선 att 없음과 같게 — 실패한 계산의 상세를 내지 않음)", len(BX.att_detail(lo, hi)["days"]))
+bx_build()
+o9 = call("date=9999-12-31", _B(BX))
+chk(o9 and o9[0] == 400, "date=9999-12-31 → 400(500 아님)", o9 and (o9[0], str(o9[1])[:100]))
+try:
+    r9 = BX.att_detail("9999-12-30", "9999-12-31")
+    ok9 = isinstance(r9, dict) and r9.get("days") == {}
+except OverflowError as e9:
+    ok9, r9 = False, repr(e9)
+chk(ok9, "att_detail 직접 9999-12-30~31 = 넘침 없이 빈 날(끝 날 다음 날을 더하지 않음)", r9)
+evz = [(d1, 1, 10000.0, 14_000_000.0, {"ex": "binance", "symbol": "ETHUSDT", "kind": "REALIZED"}),
+       (d1, 2, -10000.0, -13_900_000.0, {"ex": "binance", "symbol": "ETHUSDT", "kind": "REALIZED"}),
+       (d1, 3, 5.0, 7000.0, {"ex": "bybit", "symbol": "SOLUSDT", "kind": "REALIZED"})]
+fz = sb._att_fut_pack(evz, {d1: {}})
+rz9 = (fz.get(d1) or {}).get("rows") or []
+eth9 = [x for x in rz9 if x[2] == "ETHUSDT"]
+chk(eth9 and eth9[0][3] == 0 and eth9[0][4] == 100000 and eth9[0][5] == 2 and abs(sum(x[4] for x in rz9) - sum(e[3] for e in evz)) < 1
+    and [x[2] for x in rz9] == ["SOLUSDT", "ETHUSDT"],
+    "USD 상쇄 0 · 원화 +₩100,000 선물 행 보존(원화 합 = 정산 시각 원화 합 · 큰 USD 순 뒤)", rz9)
+evc = [(d1, i, 1.0 + i, (1.0 + i) * 1400, {"ex": "binance", "symbol": "C%dUSDT" % i, "kind": "REALIZED"}) for i in range(100)] + evz[:2]
+fc = sb._att_fut_pack(evc, {d1: {}})
+mo9 = (fc.get(d1) or {}).get("more")
+chk(len(fc[d1]["rows"]) == 100 and mo9 and mo9[0] == 1 and mo9[1] == 0 and mo9[2] == 100000,
+    "상한 넘는 몫이 원화만 남는 행이어도 more = [1, $0, ₩100,000](화면 '그 밖 1종목' 원화)", mo9)
 T.finish()

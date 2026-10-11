@@ -77,6 +77,17 @@ def recs(wr, h):
     return [r for r in wr.recs if r["txhash"] == h]
 
 
+def ingest(wr):
+    con = sqlite3.connect(common.DB_PATH)
+    for r in wr.recs:
+        sn = r.get("snapshot") or {}
+        con.execute("DELETE FROM raw_txs WHERE chain='bsc' AND txhash=?", (r["txhash"].lower(),))
+        con.execute("INSERT INTO raw_txs (chain, txhash, block, snapshot) VALUES ('bsc', ?, ?, ?)",
+                    (r["txhash"].lower(), (sn.get("tx") or {}).get("block_number"), json.dumps(sn)))
+    con.commit()
+    con.close()
+
+
 def reqs():
     d = common.read_json(REQ, {}) if os.path.exists(REQ) else {}
     return list(d.get("items") or []) if isinstance(d, dict) else []
@@ -178,6 +189,7 @@ run(w, 3)
 s1 = (balw_st().get("w") or {}).get(B.W1, {}).get("cp", [0])[0]
 nb8 = s1 + 3
 sil8 = CH.internal(nb8, B.OTHER, B.ROUTER, B.W1, 2 * E18)
+ingest(wr)
 run(w, 4)
 q8 = reqs()
 T.chk(sil8 not in B.emitted(wr) and len(q8) == 1 and nb8 <= q8[0]["block"] and q8[0]["chain_bal_raw"] == str(CH.balance(B.W1, q8[0]["block"]))
@@ -362,7 +374,8 @@ bw.CALL_SLEEP = 0
 for _ in range(30):
     tick(90, 200)
     B.cycle(w)
-    if not jobs_left():
+    ingest(wr)
+    if not jobs_left() and not balw_st().get("rqp"):
         break
 bw.CALL_SLEEP, bw.BALW_TIME_CAP = cs0, cap0
 e16 = B.emitted(wr)

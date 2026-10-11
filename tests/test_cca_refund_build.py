@@ -193,7 +193,11 @@ def build(prefs=None):
 
 
 def eth_rows(rows):
-    return [r for r in rows if r.get("sym") == "ETH"]
+    return [r for r in rows if r.get("sym") == "ETH" and not str(r.get("ex") or "").startswith("온체인(토큰 세일)")]
+
+
+def pay_rows(rows):
+    return [r for r in rows if r.get("sym") == "ETH" and str(r.get("ex") or "").startswith("온체인(토큰 세일)")]
 
 
 def rz(f, day):
@@ -248,6 +252,8 @@ chk(sale_box(f) and sale_box(f)[0][0] == 1000.0 and sale_box(f)[0][3] == 1000.0,
 chk(acq_disp(er) == [(9.0, 9000.0, 10800.0, False)],
     "C1 환불 ETH 매도 명세 = 수량 9 · 취득 $9,000 · 처분 $10,800 · 최초 인식 시가 표기 없음(종전 취득 $10,800 · 추정 표기)", acq_disp(er))
 chk(rz(f, d(10)) == 1800.0, "C1 ETH 실현 $1,800(종전 $0)", rz(f, d(10)))
+chk(acq_disp(pay_rows(rows)) == [(1.0, 1000.0, 1000.0, False)] and rz(f, d(2)) == 0,
+    "C1 (cca17) 입찰 사용분 1 ETH 처분 행 = 원래 원가 $1,000 · 대가 $1,000(입찰 시세 = 매수가라 실현 0)", [acq_disp(pay_rows(rows)), rz(f, d(2))])
 chk("ETH" not in unv(f), "C1 ETH 원가미상 매도 없음", sorted(unv(f)))
 akr = [r.get("_akr") for r in er]
 chk(len(akr) == 1 and akr[0] is not None and abs(float(akr[0]) - 11_700_000) < 5,

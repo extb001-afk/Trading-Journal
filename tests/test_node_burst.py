@@ -23,7 +23,7 @@ sp = NK.budget_spec("ankr", {"plan": "paid", "share": 25, "month": 100_000_000})
 sq = NK.budget_spec("quicknode", NK.plans({})["quicknode"])
 sa = NK.budget_spec("alchemy", NK.plans({})["alchemy"])
 check("B1a 무료 = 버스트 배수 10(열흘치 · 상수 하나 — nodekeys.BURST_X)", getattr(NK, "BURST_X", None) == 10 and sf.get("burst") == 10 and sa.get("burst") == 10, (sf, sa))
-check("B1b 유료·QuickNode(유료만) = 버스트 없음(남의 키 보호)", "burst" not in sp and "burst" not in sq, (sp, sq))
+check("B1b 유료 = 버스트 없음(남의 키 보호) · QuickNode 기본 = 무료 플랜이라 버스트(qn1011)", "burst" not in sp and sq.get("burst") == float(NK.BURST_X), (sp, sq))
 
 SPEC = {"hosts": ["*.burst-test.invalid"], "unit": "cu", "month": 3100, "pct": 80.0, "cu": 20, "cu_heavy": 20, "cu_methods": {}, "burst": 10.0}
 NAME = "node_bt"

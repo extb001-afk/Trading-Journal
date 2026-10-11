@@ -990,7 +990,8 @@ CG_PLATFORM = {"eth": "ethereum", "bsc": "binance-smart-chain", "base": "base", 
                "optimism": "optimistic-ethereum", "polygon": "polygon-pos", "sol": "solana", "gnosis": "xdai",
                "zksync": "zksync", "avalanche": "avalanche", "berachain": "berachain", "plasma": "plasma",
                "scroll": "scroll", "fraxtal": "fraxtal", "kaia": "kaia", "abstract": "abstract", "monad": "monad",
-               "megaeth": "megaeth", "story": "story", "bob": "bob-network", "xlayer": "x-layer", "robinhood": "robinhood"}
+               "megaeth": "megaeth", "story": "story", "bob": "bob-network", "xlayer": "x-layer", "robinhood": "robinhood",
+               "hyperevm": "hyperevm"}
 CG_MAX_AGE_S = 364 * 86400
 
 
@@ -1095,7 +1096,8 @@ CG_MAP_PAGES = 3
 IDENT_LO, IDENT_HI = 0.5, 2.0
 _CGX_LOCK = threading.Lock()
 KNOWN_CG_ID = {"BTC": "bitcoin", "ETH": "ethereum", "BNB": "binancecoin", "SOL": "solana", "AVAX": "avalanche-2", "OKB": "okb",
-               "XRP": "ripple", "DOGE": "dogecoin", "TRX": "tron", "ADA": "cardano", "POL": "polygon-ecosystem-token"}
+               "XRP": "ripple", "DOGE": "dogecoin", "TRX": "tron", "ADA": "cardano", "POL": "polygon-ecosystem-token",
+               "HYPE": "hyperliquid"}
 
 
 def parse_cg_ex_tickers(d):

@@ -135,7 +135,7 @@ def build(prefs=None):
         f = b._build(conn)["fields"]
     finally:
         conn.close()
-    return f, [r for r in ((b._day_idx or {}).get("tax") or []) if r.get("sym") == "ETH"]
+    return f, [r for r in ((b._day_idx or {}).get("tax") or []) if r.get("sym") == "ETH" and not str(r.get("ex") or "").startswith("온체인(토큰 세일)")]
 
 
 def ad(rows9):

@@ -122,6 +122,10 @@ def cash_krw(dm) -> Decimal:
     return sum((e.get("krw") or ZERO for e in (dm or {}).values()), ZERO)
 
 
+def has_cash_flow(dm) -> bool:
+    return any(k for e in (dm or {}).values() for k in (e.get("ko") or {}).values())
+
+
 def snapshot_deltas(conn, snap, ts_of=None) -> tuple:
     if not isinstance(snap, dict):
         return None, "no_snap"

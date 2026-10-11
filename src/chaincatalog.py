@@ -58,6 +58,12 @@ CATALOG = {
                  " L2BaseToken Transfer 로그 · 가스 = 부트로더 레그(evm_watch.NATIVE_EMITTER + NATIVE_FEE_SINK)",
         "discovery": "rpc", "chain_id": 2741, "rpcs": ["https://api.mainnet.abs.xyz"], "getlogs_span": 5000000,
         "conf_depth": 20, "blocks_per_day": 140000, "poll_sec": _POLL, "alchemy": "abstract-mainnet", "alchemy_tokens": True},
+    "hyperevm": {
+        "_note": "HyperEVM(chainId 999, 작은 블록 약 1s, 가스 = HYPE). 이더스캔 V2(무료 키 · 목록 3종 · tx 마다 따로 부르는 콜 0) — 블록스카웃 없음 · RPC 대체 끔"
+                 "(공개 RPC getLogs 1,000블록 상한 → 상세·잔고용만). HyperCore↔HyperEVM 이동 = 시스템 주소 0x2222…(HYPE)·0x20…(토큰) 상대 일반 이동",
+        "etherscan_chainid": 999, "chain_id": 999, "rpcs": ["https://rpc.hyperliquid.xyz/evm"],
+        "rpc_log_span_caps": {"https://rpc.hyperliquid.xyz/evm": 1000}, "rpc_fallback": False,
+        "conf_depth": 20, "blocks_per_day": 88000, "poll_sec": _POLL, "alchemy": "hyperliquid-mainnet", "alchemy_tokens": True},
 }
 
 _ALCHEMY_TABLE = {
@@ -191,6 +197,12 @@ def native_of(chain: str):
         return (e[2], None) if e else (None, None)
     except ImportError:
         return None, None
+
+
+def es_only(block) -> bool:
+    b = block if isinstance(block, dict) else {}
+    return bool(b.get("etherscan_chainid")) and not b.get("blockscout") and str(b.get("discovery") or "").lower() != "rpc" \
+        and b.get("rpc_fallback") is False
 
 
 def is_block(chain: str) -> bool:

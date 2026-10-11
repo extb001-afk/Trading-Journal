@@ -15,7 +15,8 @@ import chainsweep as CS
 
 W1 = "0x" + "a1" * 20
 W2 = "0x" + "a2" * 20
-OLD_BLOCKS = {"monad", "megaeth", "plasma", "xlayer", "kaia", "fraxtal", "bob", "story", "somnia", "avalanche", "stable", "abstract"}
+OLD_BLOCKS = {"monad", "megaeth", "plasma", "xlayer", "kaia", "fraxtal", "bob", "story", "somnia", "avalanche", "stable", "abstract",
+              "hyperevm"}
 NET_RX = re.compile(r"[a-z0-9]+-mainnet")
 TABLE_ONLY_KEYS = {"_table_only", "_note", "chain_id", "name", "native", "alchemy", "alchemy_tokens", "alchemy_only"}
 
@@ -66,13 +67,13 @@ new9 = ("adi", "anime", "astar", "boba", "citrea", "earnm", "galactica", "gensyn
 T.chk(all(k in CS.SWEEP_CHAINS and CC.alchemy_network(k) for k in new9), "새 Alchemy 체인 17개 = 점검 목록 + alchemy 칸")
 
 T.chk(set(CC.blocks()) == OLD_BLOCKS and all(CC.is_block(k) for k in OLD_BLOCKS) and not CC.is_block("eth") and not CC.is_block("nochain"),
-      "blocks()·is_block = 종전 수집 블록 12개만(표 전용 항목 제외)", sorted(CC.blocks()))
+      "blocks()·is_block = 수집 블록 13개만(종전 12 + hyperevm · 표 전용 항목 제외)", sorted(CC.blocks()))
 b, why = CC.block_for("monad", False, None)
 T.chk(why == "catalog" and b and set(b) == {"_note", "discovery", "chain_id", "rpcs", "rpc_logs", "getlogs_span", "conf_depth", "blocks_per_day",
                                              "poll_sec", "_auto"} and b["rpcs"] == ["https://rpc2.monad.xyz", "https://rpc.monad.xyz"],
       "수집 블록 = 종전 키만(alchemy·alchemy_tokens 를 블록에 싣지 않음)", sorted(b or {}))
 leak = [k for k in OLD_BLOCKS if set(CC.block_for(k, False, None)[0] or {}) & set(CC.TABLE_KEYS)]
-T.chk(not leak, "수집 블록 12개 전부 표 칸 없음", leak)
+T.chk(not leak, "수집 블록 13개 전부 표 칸 없음", leak)
 T.chk("alchemy" in CC.CATALOG["monad"], "떼어 낸 건 사본 — 카탈로그 원본 칸은 그대로")
 b, why = CC.block_for("eth", False, None)
 T.chk(b is None and why.startswith("실측 없음"), "표 전용(점검 목록 체인 eth) = 종전 경로(실측 없음 → 안 켬)", why)

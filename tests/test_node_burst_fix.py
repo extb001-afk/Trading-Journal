@@ -48,15 +48,27 @@ def conf(name, spec=SPEC):
 fresh_dir("node_f1", {"reserve.lock": "", f"old.1.aa.json": {"day": DAY, "n": 0, "nh": 0, "proc": "old", "pid": 1, "inst": "aa", "at": 0, "closed": True}})
 conf("node_f1")
 L = B.rpc_day_limits("node_f1")
-check("F1a 업그레이드 직후(지난날 기록 없음) = 지난 30일을 평소 몫으로 봄 → 버스트 없음(백필 ≤ 평소 80 · burst1010b: 오늘 남은 실시간 몫은 뺌)",
-      L.get("prev") == 30 * 80 and L.get("normal") == 80 and 0 < L.get("burst", 0) <= 80, L)
+check("F1a 업그레이드 직후(지난날 기록 없음) = qn2: 기록 없는 지난날 = 0(실측만 · 오너 10-11) → 바로 버스트(하루 몫 × 배수 안)",
+      L.get("prev") == 0 and L.get("normal") == 80 and 80 < L.get("burst", 0) <= 80 * 3, L)
+B.RPC_DAY_UNKNOWN_ZERO = False
+try:
+    L0 = B.rpc_day_limits("node_f1")
+    check("F1a' 끄면(RPC_DAY_UNKNOWN_ZERO=False) 종전 보수 = 지난 30일을 평소 몫 → 백필 ≤ 평소 80",
+          L0.get("prev") == 30 * 80 and 0 < L0.get("burst", 0) <= 80, L0)
+finally:
+    B.RPC_DAY_UNKNOWN_ZERO = True
 hf = os.path.join(ldir("node_f1"), "head_days.hist")
 since = (json.load(open(hf)) if os.path.exists(hf) else {}).get("since")
 check("F1b 첫 설정 때 '기록 시작 날(since)' = 오늘", since == DAY, since)
 fresh_dir("node_f1b", {"head_days.hist": {"days": {str(DAY - 3): {"x.1.aa": [100, 100]}}, "since": DAY - 5}})
 conf("node_f1b")
 L = B.rpc_day_limits("node_f1b")
-check("F1c 기록 시작(5일 전) 뒤 기록 없는 날 = 0 · 그 전 25일 = 평소 몫 · 기록된 날 = 그 값 → 100 + 25 × 80 = 2,100",
+check("F1c 기록된 날 = 그 값 · 기록 없는 날 = 0(qn2 — 기록 시작 전도) → 100",
+      L.get("prev") == 100, L)
+fresh_dir("node_f1e", {"head_days.hist.bad.1": "{깨진", "head_days.hist": {"days": {str(DAY - 3): {"x.1.aa": [100, 100]}}, "since": DAY - 5}})
+conf("node_f1e")
+L = B.rpc_day_limits("node_f1e")
+check("F1e 날짜별 기록이 손상돼 버린 적 있음(.bad.) = 그 전 사용 모름 → 종전 보수(기록 시작 전 25일 = 평소 몫 → 100 + 25 × 80)",
       L.get("prev") == 100 + 25 * 80, L)
 sp = dict(SPEC, fresh_since=DAY)
 fresh_dir("node_f1d", {"reserve.lock": ""})

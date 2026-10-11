@@ -833,7 +833,10 @@ def _node_apply(group: str, key_change: bool = False) -> dict:
 def _node_bad(group: str, got: dict) -> str:
     import nodekeys
     for k, v in got.items():
-        if k in (nodekeys.ENV_QN_BSC, nodekeys.ENV_QN_BASE):
+        if k == nodekeys.ENV_QN:
+            if not nodekeys.qn_parts(v):
+                return "QuickNode 엔드포인트 주소(https://이름.체인.quiknode.pro/토큰/ — 대시보드 Endpoints 에서 아무 체인 주소 하나)를 그대로 붙여 넣으세요"
+        elif k in (nodekeys.ENV_QN_BSC, nodekeys.ENV_QN_BASE):
             if not nodekeys._qn_url(v, "bsc" if k == nodekeys.ENV_QN_BSC else "base"):
                 return ("BSC" if k == nodekeys.ENV_QN_BSC else "Base") + " 엔드포인트는 https://…quiknode.pro/… 주소(그 체인용)를 그대로 붙여 넣으세요"
         elif not nodekeys.KEY_RE.match(v):
@@ -860,6 +863,8 @@ def _node_test(group: str, got: dict) -> dict:
     env9.update(got)
     if group == "alchemy":
         return _alchemy_test(env9)
+    if group == "quicknode":
+        return _qn_test(env9)
     keys9 = [v for v in got.values() if v] + [env9.get(k, "") for k, _ in ss.GROUPS[group]["fields"]]
     us = nodekeys.urls(env9)
     out = []
@@ -903,6 +908,40 @@ def _node_err(e, auth: str = "인증 실패(키·주소 확인)") -> str:
             auth if kind9 in ("http4xx",) else
             "연결 실패" if kind9 in ("timeout", "conn", "dns", "http5xx", "circuit") or nm9 in ("URLError", "TimeoutError") else
             "응답 오류")
+
+
+def _qn_test(env9: dict) -> dict:
+    import nodekeys
+    us = nodekeys.urls(env9)
+    u = nodekeys.trace_url(us, "base")
+    if not u:
+        return {"ok": False, "error": "시험할 값이 없어요 — QuickNode 엔드포인트 주소를 넣고 시험하세요"}
+    r = {"chain": "base", "ok": False}
+    try:
+        try:
+            cid9 = int(str(_node_rpc(u, "eth_chainId", [])), 16)
+        except (TypeError, ValueError):
+            cid9 = None
+        if cid9 != 8453:
+            r["err"] = f"다른 체인 주소(체인 번호 {cid9 if cid9 is not None else '모름'} — Base 는 8453)"
+        else:
+            head = int(str(_node_rpc(u, "eth_blockNumber", [])), 16)
+            r["head"] = head
+            blk = _node_rpc(u, "eth_getBlockByNumber", [hex(max(1, head - 20)), False])
+            txs = blk.get("transactions") if isinstance(blk, dict) else None
+            h9 = next((t for t in (txs or []) if isinstance(t, str) and len(t) == 66), None)
+            if not h9:
+                r["err"] = "최근 블록에서 tx 를 못 읽음"
+            else:
+                tr9 = _node_rpc(u, "debug_traceTransaction", [h9, {"tracer": "callTracer"}], timeout=20)
+                r["trace"] = isinstance(tr9, dict) and bool(tr9.get("type"))
+                r["ok"] = r["trace"]
+                if not r["trace"]:
+                    r["err"] = "trace 응답 형식 이상"
+    except Exception as e:
+        r["err"] = _node_err(e)
+    det = "Base " + ("최신 블록 OK · 내부 이동 trace 됨 — Base 옛 거래 내부 이동 채우기에만 써요" if r["ok"] else "실패 — " + r.get("err", ""))
+    return {"ok": True, "test": {"ok": r["ok"], "detail": det, "results": [r]}}
 
 
 ALCHEMY_TEST_NETS = (("eth-mainnet", "Ethereum"), ("base-mainnet", "Base"))
@@ -949,22 +988,29 @@ def _node_save_probe(group: str, got: dict) -> tuple:
         u = nodekeys.alchemy_url(net9, env=got)
         tgt = [("Alchemy " + nm9, u)] if u else []
     elif group == "quicknode":
-        for env9, ch9, nm9 in ((nodekeys.ENV_QN_BSC, "bsc", "QuickNode BSC"), (nodekeys.ENV_QN_BASE, "base", "QuickNode Base")):
-            u = nodekeys._qn_url(got.get(env9), ch9) if got.get(env9) else ""
-            if u:
-                tgt.append((nm9, u))
+        u = nodekeys.qn_chain_url(got.get(nodekeys.ENV_QN), "base")
+        if u:
+            tgt.append(("QuickNode Base", u))
     soft = []
+    rejs9 = []
     rej9 = (401,) if group == "alchemy" else NODE_REJECT_HTTP
     for nm, u in tgt:
         try:
             _node_rpc(u, "eth_blockNumber", [], timeout=12)
         except Exception as e:
             if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) in rej9:
+                if group == "quicknode":
+                    rejs9.append(f"{nm} 노드가 이 주소를 거부했어요(HTTP {int(e.code)})")
+                    continue
                 return "reject", f"{nm} 노드가 이 키를 거부했어요(HTTP {int(e.code)})"
             if group == "alchemy" and getattr(e, "kind", "") == "http4xx":
                 soft.append(f"{nm} 네트워크가 이 Alchemy 앱에서 꺼져 있을 수 있어요(대시보드 › 앱 › Networks 에서 켜기)")
                 continue
             soft.append(f"{nm} {_node_err(e)}")
+    if rejs9 and len(rejs9) == len(tgt):
+        return "reject", " · ".join(rejs9)
+    if rejs9:
+        soft = [r9 + " — 멀티체인 엔드포인트인지 확인하세요" for r9 in rejs9] + soft
     return ("unknown", " · ".join(soft)) if soft else ("ok", "")
 
 
@@ -1079,7 +1125,8 @@ def status() -> dict:
     def grp(g):
         fields = [{"key": k, "label": lab, "masked": ss.mask(env.get(k, ""), public=k in ss.PUBLIC_KEY_FIELDS), "set": bool(env.get(k))}
                   for k, lab in g["fields"]]
-        return {"name": g["name"], "set": all(x["set"] for x in fields), "partial": any(x["set"] for x in fields),
+        return {"name": g["name"], "set": all(x["set"] for x in fields),
+                "partial": any(x["set"] for x in fields) or any(bool(env.get(k)) for k in g.get("legacy", ())),
                 "fields": fields}
     runners = ss.runner_status()
     units = {}
@@ -1473,7 +1520,7 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "알 수 없는 서비스"}
         plan9, share9, month9 = b.get("plan"), b.get("share"), b.get("month")
         if plan9 not in ("free", "paid") or (nodekeys.PROVIDERS[p9]["paid_only"] and plan9 != "paid"):
-            return {"ok": False, "error": "요금제는 무료·유료 중 하나(QuickNode 는 유료만)"}
+            return {"ok": False, "error": "요금제는 무료·유료 중 하나"}
         if isinstance(share9, bool) or share9 not in nodekeys.SHARES:
             return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
         if month9 is not None and (isinstance(month9, bool) or not isinstance(month9, int) or not 0 < month9 <= 10 ** 12):
@@ -1506,7 +1553,7 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "알 수 없는 대상"}
         fields = [k for k, _ in ss.GROUPS[g]["fields"]]
         if act == "keys/delete":
-            ss.write_env({k: None for k in fields})
+            ss.write_env({k: None for k in fields + list(ss.GROUPS[g].get("legacy", ()))})
             if g in ss.NODE_GROUPS:
                 return {"ok": True, "apply": _node_apply(g, key_change=True)}
             if g in ss.EXCHANGES:
@@ -1542,7 +1589,7 @@ def _dispatch(act: str, b: dict) -> dict:
                 return {"ok": False, "error": why9 + " — 저장하지 않았어요(키를 다시 복사해 넣어 주세요)"}
             old9 = ss.read_env()
             chg9 = any(str(old9.get(k) or "").strip() != v for k, v in got.items())
-            ss.write_env(got)
+            ss.write_env(dict(got, **{k: None for k in ss.GROUPS[g].get("legacy", ())}))
             if chg9:
                 import nodekeys
                 with ss.LOCK:

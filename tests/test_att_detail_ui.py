@@ -292,6 +292,21 @@ chk(JSON.stringify(F.attItems(a10)) === JSON.stringify(F.attItemsK(a10).map(x =>
   { const DK = JSON.parse(JSON.stringify(DET['2026-10-10'])); DK.fut = DK.fut.slice(0, 2); DK.more = { fut: [1, 5, 7000] };
     const Pk = F.attdParts('10-10', DK), mf = Pk.rzf.find(x => x.l === '그 밖 1종목'), rr = Pk.rzf.find(x => x.rest);
     chk(mf && Math.abs(mf.v * D.rate - 7000) < 1e-6 && (!rr || Math.abs(rr.v * D.rate) < 0.5), "원화: 선물 '그 밖 1종목' = 정산 시각 원화 ₩7,000(그날 환율 환산 아님) · 반올림 끝전 없음", { mf: mf && mf.v * D.rate, rr: rr && rr.v * D.rate }); }
+  // ★ui17(문서1 9절 기여도)★ 원화만 남는 선물(USD 상쇄 0 · ₩10만) — 서버가 실은 행 = 그 원화 · 생략 몫이 USD 0 이어도 원화면 '그 밖' 한 줄 · 큰 차를 '반올림 끝전'이라 부르지 않음
+  { const k0 = D.fut.realizedKrwByDate['2026-10-10'];
+    D.fut.realizedKrwByDate['2026-10-10'] = k0 + 100000;   // 그날 선물 원화 합 = 상쇄된 XRP 몫 ₩10만 포함(USD 합 그대로)
+    const DZ = JSON.parse(JSON.stringify(DET['2026-10-10'])); DZ.fut = [...DZ.fut, ['binance', '바이낸스', 'XRPUSDT', 0, 100000, 2, 0]];
+    const Pz = F.attdParts('10-10', DZ), xr = Pz.rzf.find(x => x.id === 'f:binance:XRPUSDT'), rz0 = Pz.rzf.find(x => x.rest);
+    chk(xr && Math.abs(xr.v * D.rate - 100000) < 1e-6 && (!rz0 || Math.abs(rz0.v * D.rate) < 0.5) && near(sum(Pz.rzf, x => x.v), num(F.attOf('10-10').rzf)),
+      '원화: USD 0 · ₩100,000 선물 행 = 그 줄 ₩100,000 · 남는 차 없음 · 합 = 선물 실현', Pz.rzf.map(x => [x.l, Math.round(x.v * D.rate)]));
+    const DM2 = JSON.parse(JSON.stringify(DET['2026-10-10'])); DM2.more = { fut: [1, 0, 100000] };
+    const Pm2 = F.attdParts('10-10', DM2), mf2 = Pm2.rzf.find(x => x.l === '그 밖 1종목'), rm2 = Pm2.rzf.find(x => x.rest);
+    chk(mf2 && Math.abs(mf2.v * D.rate - 100000) < 1e-6 && (!rm2 || Math.abs(rm2.v * D.rate) < 0.5),
+      "원화: 생략 몫 more.fut = [1, $0, ₩100,000] → '그 밖 1종목' ₩100,000(종전 USD 0 이라 빠지고 '반올림 끝전' ₩100,000)", Pm2.rzf.map(x => [x.l, Math.round(x.v * D.rate)]));
+    const Po = F.attdParts('10-10', DET['2026-10-10']), ro = Po.rzf.find(x => x.rest);   // 옛 서버(그 행을 안 실음) — 남는 ₩10만
+    chk(ro && Math.abs(ro.v * D.rate - 100000) < 1 && ro.l !== '반올림 끝전' && ro.rest === 1,
+      "옛 서버(행 없음): 남는 ₩100,000 = '그 밖 정산'(센트보다 큰 차를 '반올림 끝전'이라 부르지 않음)", ro && [ro.l, Math.round(ro.v * D.rate)]);
+    D.fut.realizedKrwByDate['2026-10-10'] = k0; }
   S.cur = 'USD';
   D.builtAt = 222;
   chk(F.attdCache().at === 222 && !Object.keys(F.attdCache().days).length, '새 빌드(builtAt 바뀜) = 받은 상세 비움(다시 받음)', F.attdCache());

@@ -348,7 +348,7 @@
   };
   XP_HELP.nodereal = { url: 'https://dashboard.nodereal.io', why: '선택 · 무료 키로도 됨 — BSC 옛 기록(아카이브)을 빠르게 받아요(한 번에 5만 블록). 없으면 BSC 옛 기록은 무료 공개 노드로 천천히 받아요(최신 기록은 늘 공개 노드로 바로). Base 는 지원 안 해요.', steps: ['nodereal.io 가입(무료) → Dashboard → Create API Key', 'BSC 엔드포인트 주소 끝의 키만(…/v1/ 뒤) 붙여넣기'] };
   XP_HELP.ankr = { url: 'https://www.ankr.com/rpc/', why: 'EVM 지갑이 있으면 필수(무료 Freemium) — 오래 안 쓴 지갑에 들어온 토큰을 10분마다 빠르게 확인하고, BSC·Base 옛 기록(아카이브)을 키 하나로 받아요(한 번에 3천 블록). 같은 키로 지갑 토큰 찾기도 보조해요(Advanced API). 없으면 무료 공개 노드로만 받아 늦을 수 있어요. 무료 한도의 80% 아래로만 써요. 저장할 때 연결을 한 번 확인해요(키가 거부되면 저장하지 않아요).', steps: ['ankr.com 가입(무료 Freemium) → Projects 에서 API 키', 'rpc.ankr.com/…/ 뒤의 키만 붙여넣기 → 저장(연결 확인 1번)'] };
-  XP_HELP.quicknode = { url: 'https://dashboard.quicknode.com', why: '선택 · 유료만(무료 등급 없음) — 이미 쓰는 유료 엔드포인트가 있으면 체인별 주소를 그대로 넣으세요(BSC·Base 아카이브 · 한 번에 1만 블록). 다른 곳에서 쓰던 키일 수 있어 기본은 월 한도의 10% 만 써요.', steps: ['QuickNode 대시보드 → Endpoints', 'BSC·Base 엔드포인트 주소(https://….quiknode.pro/…/)를 각 칸에 붙여넣기'] };
+  XP_HELP.quicknode = { url: 'https://dashboard.quicknode.com', why: '선택 · 무료 플랜도 돼요(월 1,000만 크레딧의 80% 만 써요) — 멀티체인 엔드포인트 주소 하나만 넣으면 체인별 주소는 알아서 만들어요. 잘하는 일(Base 거래의 내부 이동 trace · 남는 몫으로 옛 잔고)에만 쓰고, 블록 훑기(getLogs)는 그걸 잘하는 다른 노드가 맡아요. 유료 플랜이면 사용 비율을 고를 수 있어요(기본 80%).', steps: ['QuickNode 대시보드 → Endpoints (없으면 Create Endpoint — 멀티체인)', '엔드포인트 주소(https://….quiknode.pro/…/ — 아무 체인 주소 하나)를 붙여넣기'] };
   XP_HELP.alchemy = { url: 'https://dashboard.alchemy.com/signup', why: 'EVM 지갑이 있으면 필수(무료) — 지갑이 한 번이라도 주고받은 토큰 전부와 지금 잔고를 찾아 오래 들고만 있던 토큰도 빠뜨리지 않아요(Base·Ethereum·Arbitrum 등). 없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만). 무료 한도의 80% 아래로만 써요.', steps: ['dashboard.alchemy.com/signup 가입(무료)', 'Create new app → 네트워크는 전부 켠 채로(기본값) → API Key 복사', '키만(https://…/v2/ 뒤의 값) 붙여넣기 → 연결 테스트(Ethereum·Base 1번씩)'] };
   const NODE_KEYS = ['nodereal', 'ankr', 'quicknode', 'alchemy'];
   const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate'];
@@ -504,6 +504,7 @@
       : '';
     return '<div class="cap su-p su-cgplan">등급: <b>' + esc(p.text) + '</b>' + (p.budgetText ? '<br>' + esc(p.budgetText) : '') + sh + '</div>';
   }
+  const FRESH_CHIP = false;
   const freshKeySet = (st, k) => { const g = st && st.explorers && st.explorers[k]; return !!(g && (g.set || g.partial)); };
   function nodePlanHTML(st, k) {
     if (k === 'helius') return heliusFreshHTML(st);
@@ -524,19 +525,21 @@
       + (n.plan === 'paid' ? '월 한도 × ' + n.share + '%' : '무료 한도의 ' + n.pct + '%') + ' = 하루 약 ' + fmtN(n.perDay) + ' ' + unit
       + (typeof n.usedToday === 'number' ? ' · 오늘 쓴 양 ' + fmtN(n.usedToday) + (n.bursting ? ' · 버스트 중' : '') : '')
       + (typeof n.burstCap === 'number' ? ' · 실시간 하루 약 ' + fmtN(n.rtDay || 0) + ' · 오늘 백필 상한 ' + fmtN(n.burstCap) : '');
-    const note = k === 'ankr' && n.pool !== false
+    const note = n.noLogs
+      ? 'Base 거래의 내부 이동(trace)에 먼저 쓰고, 남는 몫으로 BSC·Base 옛 잔고·nonce 확인(따라잡기)에도 써요 — 블록 훑기(getLogs)는 안 써요(그건 공개 노드·Ankr·NodeReal 이 맡아요). trace 가 실패하거나 하루 몫을 다 쓰면 다른 노드로 새지 않고 오류로 보여 준 뒤 다음 차례에 다시 해요. 바꾸면 수집기가 자동으로 다시 시작해요.'
+      : k === 'ankr' && n.pool !== false
       ? '쉬는 지갑에 들어온 토큰을 10분마다 확인하고(받음 탐지), 옛 기록은 처음 한 번만 채워요 — 최신 기록은 늘 공개 노드로 먼저 받고, 이 키는 받음 탐지·옛 기록·옛 거래 상세에 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.'
       : n.pool === false
       ? '지갑 토큰·잔고 찾기에만 써요 — 처음 한 번 전부 확인하고, 그 뒤엔 무료 노드로 움직임이 보인 지갑만 다시 물어요(감시·옛 기록은 무료 노드). 하루 몫을 다 쓰면 그날(UTC)은 쉬고 다음 날 이어서 해요. 키는 저장하면 바로 쓰고, 요금제를 바꾸면 수집기가 자동으로 다시 시작해요.'
       : '옛 기록은 처음 한 번만 채우고, 최신 기록은 늘 공개 노드로 먼저 받아요 — 이 키는 옛 기록·옛 거래 상세에만 써요(진행·남은 시간 = 상단 상태 칩). 바꾸면 수집기가 자동으로 다시 시작해요.';
-    const fresh = n.burstX > 1 && freshKeySet(st, k) ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 새로 받은 키" style="align-items:center;margin-top:6px">'
+    const fresh = FRESH_CHIP && n.burstX > 1 && freshKeySet(st, k) ? '<div class="su-chiprow" role="group" aria-label="' + esc(n.name) + ' 새로 받은 키" style="align-items:center;margin-top:6px">'
       + '<button class="su-chip' + (n.freshSince ? ' on' : '') + '" data-su="nfresh" data-p="' + esc(k) + '" aria-pressed="' + !!n.freshSince + '"' + (busy ? ' disabled' : '') + '>새로 받은 키(지난 사용 없음)</button>'
       + '<span class="cap">' + esc(n.freshSince ? n.freshSince + ' 에 새로 받은 키로 봐요 — 그 전 기록 없는 날은 0(키를 바꿔 저장하면 꺼져요)' : '다른 곳에서 쓰던 키가 아니면 켜세요 — 끄면 기록 없는 지난날을 평소 몫으로 셈(업그레이드 뒤 한 달은 버스트가 거의 없음)') + '</span></div>' : '';
-    const bnote = n.burstX > 1 ? ' 백필·첫 전수 중엔 실시간 실측(× 1.5 · 앞으로 30일 몫)만 남기고 하루 몫의 ' + n.burstX + '배(열흘치)까지 당겨 써요 — 최근 31일 합은 월 한도의 ' + n.pct + '% 안 · 실시간이 늘면 백필이 바로 물러나요.' : '';
+    const bnote = n.burstX > 1 ? ' 백필·첫 전수 중엔 실시간 실측(× 1.5 · 앞으로 30일 몫)만 남기고 하루 몫의 ' + n.burstX + '배(열흘치)까지 당겨 써요 — 이 봇이 실제로 쓴 양으로 판단해 자동(켤 것 없음) · 최근 31일 합은 월 한도의 ' + n.pct + '% 안 · 실시간이 늘면 백필이 바로 물러나요.' : '';
     return '<div class="cap su-p su-cgplan">' + esc(use) + plan + paid + fresh + '<div class="cap" style="margin-top:4px">' + esc(note + bnote) + '</div></div>';
   }
   function heliusFreshHTML(st) {
-    if (!freshKeySet(st, 'helius')) return '';
+    if (!FRESH_CHIP || !freshKeySet(st, 'helius')) return '';
     const h = st && st.heliusFresh;
     if (!h || !h.burst) return '';
     const busy = !!U.busy.nphelius, on = !!h.since;

@@ -2543,11 +2543,20 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     xr = obs.get("extrb")
     if isinstance(xr, dict) and "tj-core" in units:
         nf = int(xr.get("fails") or 0)
-        add("rebuild:ext", "tj-core", f"과거 데이터 재계산 실패 {nf}회" if nf >= 2 else "과거 데이터 재계산",
+        fc9 = xr.get("fail_code") if nf else None
+        lb9 = str(xr.get("fail_label") or fc9 or "")
+        dret9 = fc9 == "resource_disk" and xr.get("fail_stage") == "precheck"
+        dk9 = " · ".join(f"{r9.get('label')} 여유 {r9.get('free_gb')}GB / 필요 ≈{r9.get('need_gb')}GB"
+                         for r9 in ((xr.get("disk") or {}).get("rows") or []) if isinstance(r9, dict)) if fc9 == "resource_disk" else ""
+        add("rebuild:ext", "tj-core", (f"과거 데이터 재계산 실패 {nf}회" + (f" · {lb9}" if lb9 else "")) if nf >= 2 else "과거 데이터 재계산",
             "warn" if nf >= 2 else "ok",
-            (f"마지막 오류: {str(xr.get('last_error') or '')[:160]} · 원장은 그대로, 백오프 뒤 재시도" if nf >= 2
-             else ("재계산 중" if xr.get("running") and now - float(xr.get("started_at") or 0) < 6000 else "정상")),
-            "설정 › '과거 데이터 더 가져오기' 카드의 오류 확인 — 디스크·게이트 사유면 원인 해소 후 기다리면 재시도",
+            ((f"원인: {lb9} · " if lb9 else "") + f"마지막 오류: {str(xr.get('last_error') or '')[:160]}" + (f" · 지금 {dk9}" if dk9 else "")
+             + (" · 원장은 그대로, 디스크 여유가 생기면 5분 안에 자동으로 다시(백오프 안 기다림)" if dret9 else " · 원장은 그대로, 백오프 뒤 재시도")
+             if nf >= 2 else ("재계산 중" if xr.get("running") and now - float(xr.get("started_at") or 0) < 6000 else "정상")),
+            ("디스크 여유 확보 — 재구축 직전 자동 정리(옛 보존본·여분 일일 백업·3일 지난 롤백 흔적)는 이미 함 · 남은 건 배포 백업·다른 파일을 직접 "
+             "정리하거나 config backfill.rebuild_dir 를 여유 있는 디스크로" if fc9 == "resource_disk"
+             else "상태 › 정리 요청 › '재계산 승인'에서 바뀐 값 확인 뒤 승인(무결성·손익 게이트는 자동으로 우회하지 않음)" if fc9 == "pnl_approval"
+             else "설정 › '과거 데이터 더 가져오기' 카드의 오류 확인 — 디스크·게이트 사유면 원인 해소 후 기다리면 재시도"),
             persist=0, resolve=600, remind=False, kind="rebuild")
     pg = obs.get("pnlgate")
     if isinstance(pg, dict) and "tj-core" in units:

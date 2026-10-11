@@ -66,6 +66,7 @@ class Chain:
         self.arch_fail = None
         self.hang = None
         self.kw_seen = []
+        self.code = set()
 
     def ts(self, b):
         return BASE_T + int(b * BSEC)
@@ -178,6 +179,9 @@ class Chain:
             b = self.head if p[1] in ("latest", "pending") else int(p[1], 16)
             return hex(sum(1 for t in self.tx.values() if t["from"] == str(p[0]).lower() and t["blk"] <= b))
         if m == "eth_getCode":
+            a9 = str(p[0]).lower()
+            if a9 in self.code or any(t["to"] == a9 and (t.get("int") or t["logs"] or t.get("mlogs")) for t in self.tx.values()):
+                return "0x6080604052"
             return "0x"
         if m == "eth_getBalance":
             b = self.head if p[1] in ("latest", "pending") else int(p[1], 16)

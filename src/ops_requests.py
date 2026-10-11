@@ -16,6 +16,9 @@ APPROVE_NAME = "rebuild_pnl_approve.json"
 REJ_DIR_NAME = "rebuild_rejected"
 REJ_KEEP = 20
 APPROVE_TTL = 48 * 3600
+REBUILD_FAIL_LABEL = {"resource_disk": "디스크 공간", "transient_rpc": "일시 오류(업비트 대사·수집 미완)", "integrity": "무결성 검사",
+                      "position_gate": "포지션 게이트", "pnl_approval": "손익 승인 대기", "interrupted": "도중 중단", "timeout": "시간 초과",
+                      "error": "그 밖 오류"}
 UNV_GROUP_EPS = 1.0
 POISON_NAME = "poison.jsonl"
 POISON_REQ_NAME = "poison_replay_request.json"

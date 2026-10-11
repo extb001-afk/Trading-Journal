@@ -18,6 +18,7 @@ import common
 UA = "tj-bot/0.1 (personal trade journal)"
 HTTP_MAX_BYTES = 32 * 1024 * 1024
 HTTP_ERR_MAX_BYTES = 64 * 1024
+HTTP_BODY_MAX_SEC = 120.0
 
 
 def _url_host(url) -> str:
@@ -1758,6 +1759,9 @@ def burst_on() -> bool:
     return bool(getattr(_BURST_TL, "on", False))
 
 
+RPC_DAY_UNKNOWN_ZERO = True
+
+
 def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None, rt_out: dict = None, day_out: dict = None):
     lo = today - (RPC_DAY_WINDOW - 1)
     per = {}
@@ -1803,6 +1807,8 @@ def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None
     seen = {day for day, _s in per}
     unk = [day for day in range(lo, today) if day not in seen and not (since is not None and day >= since)
            and not (fresh_day is not None and day < fresh_day)]
+    if RPC_DAY_UNKNOWN_ZERO and not any(f.startswith(ESB_HIST + ".bad.") for f in names):
+        unk = []
     if day_out is not None:
         for (day, _s), v in per.items():
             day_out[day] = day_out.get(day, 0) + max(0, v)
@@ -2186,6 +2192,62 @@ def _open(req, timeout):
     return sol_open(req, timeout)
 
 
+def _resp_sock(r):
+    o = r
+    for _ in range(4):
+        sk = getattr(getattr(o, "raw", None), "_sock", None)
+        if sk is not None:
+            return sk
+        o = getattr(o, "fp", None)
+        if o is None:
+            return None
+    return None
+
+
+def _read_capped(r, n: int, t_end: float = None) -> bytes:
+    rd1 = getattr(r, "read1", None)
+    sk = _resp_sock(r) if t_end is not None else None
+    if sk is None or not callable(rd1):
+        return r.read(n)
+    buf = bytearray()
+    cut9 = threading.Event()
+    tm9 = None
+    if getattr(r, "chunked", False) is True:
+        def _cut():
+            cut9.set()
+            try:
+                sk.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        tm9 = threading.Timer(max(0.0, t_end - time.time()), _cut)
+        tm9.daemon = True
+        tm9.start()
+    try:
+        while len(buf) < n:
+            rem = t_end - time.time()
+            if rem <= 0:
+                raise socket.timeout(f"응답 본문 수신 절대 마감 초과({len(buf):,}바이트 받음)")
+            try:
+                sk.settimeout(rem)
+            except OSError:
+                pass
+            ch = rd1(min(65536, n - len(buf)))
+            if not ch:
+                break
+            buf += ch
+    except Exception as e:
+        if cut9.is_set() or time.time() >= t_end:
+            raise socket.timeout(f"응답 본문 수신 절대 마감 초과({len(buf):,}바이트 받음)") from e
+        raise
+    finally:
+        if tm9 is not None:
+            tm9.cancel()
+            tm9.join(1.0)
+    if cut9.is_set():
+        raise socket.timeout(f"응답 본문 수신 절대 마감 초과({len(buf):,}바이트 받음)")
+    return bytes(buf)
+
+
 ANKR_ADV_GATE = "rpc.ankr.com#adv"
 
 
@@ -2238,6 +2300,7 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             g.sem.release()
             _unsent()
             raise
+        tb9 = None
         try:
             to9 = timeout
             if hard and _left() is not None:
@@ -2255,13 +2318,16 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             if host == "api.etherscan.io":
                 es_dispatch_wait(deadline)
             _stat(host, "calls")
+            tb9 = time.time() + max(float(to9), HTTP_BODY_MAX_SEC)
+            if hard and deadline is not None:
+                tb9 = min(tb9, float(deadline))
             with _open(req, to9) as r:
                 g.observe(getattr(r, "headers", None))
                 n9 = (min(rdu9, HTTP_MAX_BYTES) if rdb9 else HTTP_MAX_BYTES) + 1
                 ln9 = getattr(r, "length", None)
                 if isinstance(ln9, int) and not isinstance(ln9, bool) and ln9 >= 0:
                     n9 = min(n9, ln9 + 1)
-                raw = r.read(n9)
+                raw = _read_capped(r, n9, tb9)
             if rdb9:
                 rpc_day_settle(rd9, len(raw), rdu9, rdd9)
                 rds9 = True
@@ -2285,13 +2351,18 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             bb9 = None
             if rdb9 and rdd9 is not None and not rds9 and isinstance(e, urllib.error.HTTPError):
                 try:
-                    bb9 = e.read(min(rdu9, HTTP_ERR_MAX_BYTES) + 1) or b""
+                    bb9 = _read_capped(e, min(rdu9, HTTP_ERR_MAX_BYTES) + 1, tb9) or b""
                 except Exception:
                     bb9 = None
                 if bb9 is not None and len(bb9) > HTTP_ERR_MAX_BYTES:
                     bb9 = bb9[:HTTP_ERR_MAX_BYTES]
                 elif bb9 is not None:
                     rpc_day_settle(rd9, len(bb9), rdu9, rdd9)
+            elif tb9 is not None and isinstance(e, urllib.error.HTTPError):
+                try:
+                    bb9 = _read_capped(e, HTTP_ERR_MAX_BYTES, tb9) or b""
+                except Exception:
+                    bb9 = b""
             err = classify_exc(e, host, body_bytes=bb9)
             if isinstance(e, urllib.error.HTTPError):
                 g.observe(e.headers)

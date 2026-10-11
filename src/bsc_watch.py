@@ -55,6 +55,8 @@ BALW_DAY_CAP = 3000
 BALW_TIME_CAP = 20.0
 BALW_JOB_CALLS = 160
 BALW_JOB_KEEP = 7 * 86400
+BALW_REQ_WAIT = 6 * 3600
+BALW_JOB_DONE_MAX = 200
 BALW_JOBS_MAX = 20
 BALW_STALE = 1800
 BALW_NOSTATE_N = 3
@@ -2083,24 +2085,92 @@ class BscWatcher:
                             "observed_head": head, "ts": int(time.time()), "via": "balw"})
         self.emitted.add(h)
         cnt["emit"] += 1
+        try:
+            b9 = int((snap.get("tx") or {}).get("block_number"))
+        except (TypeError, ValueError):
+            return
+        rc9 = self.__dict__.setdefault("_balw_recent", {})
+        now9 = _now()
+        rc9[str(h).lower()] = (b9, now9, [w9 for w9 in self.wallets if _touches(snap, w9)])
+        for k9 in [k9 for k9, v9 in rc9.items() if now9 - v9[1] > BALW_REQ_WAIT]:
+            rc9.pop(k9, None)
 
     def _balw_disc_req(self, st: dict, w: str, blk: int, bal: int, ts: int, d: int, why: str, old: bool = False) -> bool:
-        p = os.path.join(common.STATE_DIR, DISC_REQ_NAME)
-        cur = common.read_control_json(p, None)
-        items = list(cur.get("items") or []) if isinstance(cur, dict) and isinstance(cur.get("items"), list) else []
-        if any(isinstance(x, dict) and x.get("chain") == "bsc" and str(x.get("wallet") or "").lower() == w and x.get("block") == int(blk)
-               and x.get("ca") in (None, "", "native") for x in items):
+        it = {"chain": "bsc", "wallet": w, "ca": None, "block": int(blk), "chain_bal_raw": str(int(bal)), "block_ts": int(ts),
+              "diff_raw": str(max(1, int(d))), "spam": False, "symbol": "BNB", "decimals": 18,
+              "sources": ["bsc_balance_watch_old" if old else "bsc_balance_watch"]}
+        pq = st.get("rqp") if isinstance(st.get("rqp"), list) else []
+        if any(isinstance(e, dict) and isinstance(e.get("it"), dict) and e["it"].get("wallet") == w and e["it"].get("block") == int(blk) for e in pq):
             return False
-        items.append({"chain": "bsc", "wallet": w, "ca": None, "block": int(blk), "chain_bal_raw": str(int(bal)), "block_ts": int(ts),
-                      "diff_raw": str(max(1, int(d))), "spam": False, "symbol": "BNB", "decimals": 18,
-                      "sources": ["bsc_balance_watch_old" if old else "bsc_balance_watch"]})
-        common.atomic_write_json(p, {"items": items, "by": "tj-bsc 잔고 감시", "ts": int(time.time())})
+        now9 = _now()
+        rc9 = (self.__dict__.get("_balw_recent") or {}) if self is not None else {}
+        aft = sorted(h for h, v in rc9.items() if v[0] <= int(blk) and w in v[2] and now9 - v[1] <= BALW_REQ_WAIT)
+        miss = []
+        if aft:
+            got = self._balw_ingested(aft)
+            miss = [h for h in aft if got is None or h not in got]
+        if miss:
+            st.setdefault("rqp", []).append({"it": it, "aft": miss, "t": int(now9), "why": why})
+        elif not BscWatcher._balw_req_write(self, [it]):
+            return False
         rq = st.setdefault("reqs", [])
         rq.append([w[:10], int(blk), str(int(d)), why, int(_now())])
         del rq[:-20]
-        log.warning("★BSC 받는 쪽 BNB %s… 블록 %d +%d wei — 어느 거래인지 못 가림(%s) · 원가 미상 기초 잔고 요청(core 가 그 블록 잔고로 다시 재고 기장)★",
-                    w[:10], int(blk), int(d), why)
+        log.warning("★BSC 받는 쪽 BNB %s… 블록 %d +%d wei — 어느 거래인지 못 가림(%s) · 원가 미상 기초 잔고 요청(core 가 그 블록 잔고로 다시 재고 기장)%s★",
+                    w[:10], int(blk), int(d), why, f" — 방금 방출한 거래 {len(miss)}건이 원장에 들어온 뒤" if miss else "")
         return True
+
+    def _balw_req_write(self, items: list) -> bool:
+        p = os.path.join(common.STATE_DIR, DISC_REQ_NAME)
+        cur = common.read_control_json(p, None)
+        have = list(cur.get("items") or []) if isinstance(cur, dict) and isinstance(cur.get("items"), list) else []
+        add = []
+        for it in items:
+            if any(isinstance(x, dict) and x.get("chain") == "bsc" and str(x.get("wallet") or "").lower() == it["wallet"] and x.get("block") == it["block"]
+                   and x.get("ca") in (None, "", "native") for x in have + add):
+                continue
+            add.append(it)
+        if not add:
+            return False
+        common.atomic_write_json(p, {"items": have + add, "by": "tj-bsc 잔고 감시", "ts": int(time.time())})
+        return True
+
+    def _balw_ingested(self, hs: list):
+        if not os.path.exists(common.DB_PATH):
+            return set(hs)
+        import sqlite3
+        try:
+            con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
+            try:
+                return {h for h in hs if con.execute("SELECT 1 FROM raw_txs WHERE chain='bsc' AND txhash=?", (h,)).fetchone()}
+            finally:
+                con.close()
+        except Exception as e:
+            log.debug("BSC 잔고 감시 — 원장 확인 실패: %s", str(e)[:120])
+            return None
+
+    def _balw_req_flush(self, st: dict) -> bool:
+        pq = st.get("rqp")
+        if not isinstance(pq, list) or not pq:
+            return st.pop("rqp", None) is not None
+        got = self._balw_ingested(sorted({h for e in pq if isinstance(e, dict) for h in (e.get("aft") or [])}))
+        now9 = _now()
+        keep, out = [], []
+        for e in pq:
+            if not isinstance(e, dict) or not isinstance(e.get("it"), dict):
+                continue
+            if (got is not None and all(h in got for h in e.get("aft") or [])) or now9 - float(e.get("t") or 0) > BALW_REQ_WAIT:
+                out.append(e["it"])
+            else:
+                keep.append(e)
+        if out:
+            self._balw_req_write(out)
+            log.info("BSC 잔고 감시 — 보류한 기초 잔고 요청 %d건 씀(앞선 거래 원장 반영 확인 또는 %d초 지남)", len(out), BALW_REQ_WAIT)
+        if keep:
+            st["rqp"] = keep
+        else:
+            st.pop("rqp", None)
+        return len(keep) != len(pq)
 
     def _balw_resolve(self, st: dict, w: str, job: dict, y: int, d: int, head: int, cnt: dict):
         self._balw_charge(cnt, 1)
@@ -2115,10 +2185,13 @@ class BscWatcher:
         self.block_ts[hex(y)] = ts9
         idx = st["d"].setdefault(w, {})
         direct = []
+        intx = set()
         for t in txs:
             if not isinstance(t, dict):
                 continue
             h = str(t.get("hash") or "").lower()
+            if h and str(t.get("to") or "").lower() == w:
+                intx.add(h)
             if h and h not in idx and h not in (job.get("xd") or {}) and w in (str(t.get("from") or "").lower(), str(t.get("to") or "").lower()):
                 direct.append(h)
         if direct:
@@ -2148,8 +2221,9 @@ class BscWatcher:
             if d < BALW_DUST:
                 job.setdefault("done", []).append(y)
                 return
-        cands = sorted(h for h, v in idx.items() if v[0] == y)
+        cands = sorted(h for h, v in idx.items() if v[0] == y and h not in intx)
         pick = cands[0] if len(cands) == 1 else None
+        via9 = "cand" if pick else "log"
         if pick is None:
             self._balw_charge(cnt, 1)
             try:
@@ -2168,8 +2242,10 @@ class BscWatcher:
                         hits.add(str(rc.get("transactionHash") or "").lower())
                         break
             hits.discard("")
+            hits -= intx
             pool = (set(cands) & hits) if cands else hits
             pick = next(iter(pool)) if len(pool) == 1 else None
+        why9 = "로그 없는 internal · 단서 거래 없음"
         if pick:
             self._balw_charge(cnt, 3)
             snap = self.fetch_details([pick], deadline=cnt["t_end"]).get(pick)
@@ -2177,19 +2253,49 @@ class BscWatcher:
                 raise _BalwStop("귀속 상세 마감")
             if not isinstance(snap, dict):
                 raise RuntimeError(f"블록 {y} 귀속 상세 실패 {pick[:12]}: {common.safe_err(snap)[:80]}")
-            if (snap.get("tx") or {}).get("status") == "ok":
+            why9 = self._balw_attr_why(snap, w, d, via9, cnt)
+            if not why9:
                 tx9 = snap["tx"]
                 snap = dict(snap, internal=list(snap.get("internal") or []) + [
-                    {"from": str(tx9.get("to") or tx9.get("from") or "").lower(), "to": w, "value": str(int(d)), "success": True, "attr": "balance_delta"}],
+                    {"from": str(tx9.get("to") or "").lower(), "to": w, "value": str(int(d)), "success": True, "attr": "balance_delta"}],
                     internal_note="balance_delta")
                 self._balw_emit(pick, snap, head, cnt)
                 common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
                 common.write_json_if_changed(self.meta_path, self.token_meta)
                 log.info("★BSC 받는 쪽 BNB 회수(잔고 감시 · internal 귀속) %s 블록 %d +%d wei★", pick[:14], y, int(d))
-                job.setdefault("done", []).append(y)
-                return
-        self._balw_disc_req(st, w, y, int(job["s"][str(y)]), ts9, d, "로그 없는 internal · 단서 거래 없음" if not pick else "단서 거래 실패")
+                d = self._balw_f(st, w, job, y) - self._balw_f(st, w, job, y - 1)
+                if d < BALW_DUST:
+                    job.setdefault("done", []).append(y)
+                    return
+                why9 = "귀속 뒤 남은 차액"
+        self._balw_disc_req(st, w, y, int(job["s"][str(y)]), ts9, d, why9)
         job.setdefault("done", []).append(y)
+
+    def _balw_attr_why(self, snap: dict, w: str, d: int, via: str, cnt: dict) -> str:
+        tx9 = snap.get("tx") or {}
+        if tx9.get("status") != "ok":
+            return "단서 거래 실패"
+        src9 = str(tx9.get("to") or "").lower()
+        if not src9 or src9 in {str(x9).lower() for x9 in self.wallets}:
+            return "단서 거래 받는 쪽이 내 지갑(또는 생성)"
+        if via == "cand" and not snap.get("token_transfers") and not snap.get("internal"):
+            memo = self.__dict__.setdefault("_balw_code", set())
+            if src9 not in memo:
+                try:
+                    code9 = self._balw_call(cnt, "eth_getCode", [src9, "latest"], recent=True)
+                except _BalwStop:
+                    raise
+                except Exception as e:
+                    raise RuntimeError(f"단서 거래 받는 쪽 코드 확인 실패: {common.safe_err(e)[:80]}") from None
+                if str(code9 or "0x").lower() in ("0x", "0x0", ""):
+                    return "단서 거래가 코드 없는 주소로 감(internal 불가)"
+                memo.add(src9)
+        r0 = _native_delta(snap, w) if _touches(snap, w) else (0, False)
+        r1 = _native_delta(dict(snap, internal=list(snap.get("internal") or []) + [
+            {"from": src9, "to": w, "value": str(int(d)), "success": True, "attr": "balance_delta"}]), w)
+        if r0 is None or r1 is None or int(r1[0]) - int(r0[0]) != int(d):
+            return "귀속해도 순증이 안 맞음"
+        return ""
 
     def _balw_pubscan(self, st: dict, w: str, job: dict, head: int, cnt: dict):
         x, y, nxt = (int(v9) for v9 in job["scan"])
@@ -2278,62 +2384,113 @@ class BscWatcher:
             self._balw_disc_req(st, w, z, int(job["s"][str(z)]), ts9, rest, why, old=job.get("k") == "hist")
         return True
 
-    def _balw_hist(self, st: dict, eoas: list, cnt: dict):
+    def _balw_hist_cands(self, st: dict, eoas: list, now: float) -> list:
         if isinstance(self.cursor.get("_live"), dict):
-            return
+            return []
         try:
             chk = common.read_json(os.path.join(common.STATE_DIR, "onchain_check.json"), {})
         except SystemExit:
-            return
-        now = _now()
-        lo = self.cursor.get("_cov") if isinstance(self.cursor.get("_cov"), int) else self.cursor.get("_bf_start")
+            return []
+        out, seen, open9 = [], set(), set()
         for m in (chk.get("mismatches") or []) if isinstance(chk, dict) else []:
             if not isinstance(m, dict) or m.get("chain") != "bsc" or m.get("ca") or not m.get("confirmed"):
                 continue
             w = str(m.get("wallet") or "").lower()
-            if w not in eoas:
+            if w not in eoas or w in seen:
                 continue
             try:
                 gap = float(m.get("onchain")) - float(m.get("ledger"))
             except (TypeError, ValueError):
                 continue
+            if gap > 0:
+                open9.add(w)
             ws = st["w"].get(w) or {}
             cp = ws.get("cp")
-            if gap <= 0 or not (isinstance(cp, list) and len(cp) == 3) or ws.get("jobs") or now - float(ws.get("hist_at") or 0) < BALW_HIST_GAP:
+            if (gap <= 0 or not (isinstance(cp, list) and len(cp) == 3) or self._balw_hist_busy(ws)
+                    or now - float(ws.get("hist_at") or 0) < BALW_HIST_GAP):
                 continue
-            ws["hist_at"] = int(now - BALW_HIST_GAP + BALW_HIST_RETRY)
-            z, bz = int(cp[0]), int(cp[1])
+            seen.add(w)
+            out.append((float(ws.get("hist_at") or 0), eoas.index(w), w, gap))
+        for w, ws in st["w"].items():
+            if isinstance(ws, dict) and "hist_wait" in ws and w not in open9:
+                ws.pop("hist_wait", None)
+        return [(w, gap) for _h, _i, w, gap in sorted(out)]
+
+    @staticmethod
+    def _balw_hist_busy(ws: dict) -> bool:
+        return any(isinstance(j, dict) and j.get("k") == "hist" for j in ws.get("jobs") or [])
+
+    @staticmethod
+    def _balw_hist_end(ws: dict):
+        cp = ws.get("cp")
+        try:
+            out = (int(cp[0]), int(cp[1]))
+            for j in ws.get("jobs") or []:
+                if isinstance(j, dict) and isinstance(j.get("a"), int) and int(j["a"]) < out[0]:
+                    out = (int(j["a"]), int((j.get("s") or {})[str(int(j["a"]))]))
+            for u in ws.get("ux") or []:
+                if isinstance(u, dict) and isinstance(u.get("a"), int) and int(u["a"]) < out[0]:
+                    out = (int(u["a"]), int(u["ba"]))
+        except (KeyError, TypeError, ValueError, IndexError):
+            return None
+        return out
+
+    def _balw_hist(self, st: dict, eoas: list, cnt: dict, cands: list = None):
+        now = _now()
+        lo = self.cursor.get("_cov") if isinstance(self.cursor.get("_cov"), int) else self.cursor.get("_bf_start")
+        for w, gap in (cands if cands is not None else self._balw_hist_cands(st, eoas, now)):
+            ws = st["w"].get(w) or {}
+            cp = ws.get("cp")
+            if not (isinstance(cp, list) and len(cp) == 3) or self._balw_hist_busy(ws):
+                continue
+            zb = self._balw_hist_end(ws)
+            if zb is None:
+                continue
+            z, bz = zb
             a = max(int(lo) if isinstance(lo, int) and lo > 0 else 1, z - int(BALW_HIST_DAYS * 86400 / self._bsec()))
             if a >= z:
                 ws["hist_at"] = int(now)
                 continue
-            xd = self._balw_raw_deltas(w, a, z, deadline=cnt["t_end"])
-            if xd is None:
-                continue
-            job = {"k": "hist", "a": a, "z": z, "s": {str(z): str(bz)}, "t0": int(now), "n": 0, "done": [], "xd": xd}
+            ws.setdefault("hist_wait", int(now))
+            retry = int(now - BALW_HIST_GAP + BALW_HIST_RETRY)
             try:
-                job["s"][str(a)] = str(int(self._balw_call(cnt, "eth_getBalance", [w, hex(a)]), 16))
-            except _BalwNoArch as e:
-                if isinstance(e, _BalwNoState):
-                    ws["hist_ns"] = int(ws.get("hist_ns") or 0) + 1
-                    if ws["hist_ns"] < BALW_NOSTATE_N:
-                        continue
+                xd = self._balw_raw_deltas(w, a, z, deadline=cnt["t_end"])
+                if xd is None:
+                    if time.time() < cnt["t_end"]:
+                        ws["hist_at"] = retry
+                    return
+                job = {"k": "hist", "a": a, "z": z, "s": {str(z): str(bz)}, "t0": int(now), "n": 0, "done": [], "xd": xd}
+                try:
+                    job["s"][str(a)] = str(int(self._balw_call(cnt, "eth_getBalance", [w, hex(a)]), 16))
+                except _BalwNoArch as e:
+                    if isinstance(e, _BalwNoState):
+                        ws["hist_ns"] = int(ws.get("hist_ns") or 0) + 1
+                        if ws["hist_ns"] < BALW_NOSTATE_N:
+                            ws["hist_at"] = retry
+                            return
+                    ws.pop("hist_ns", None)
+                    self._balw_charge(cnt, 1)
+                    self._balw_disc_req(st, w, z, bz, self._block_time(hex(z)), int(gap * 10 ** 18), "지난 누락 · 아카이브 없음", old=True)
+                    ws["hist_at"] = int(now)
+                    ws.pop("hist_wait", None)
+                    return
                 ws.pop("hist_ns", None)
-                self._balw_charge(cnt, 1)
-                self._balw_disc_req(st, w, z, bz, self._block_time(hex(z)), int(gap * 10 ** 18), "지난 누락 · 아카이브 없음", old=True)
+                r = self._balw_f(st, w, job, z)
+                log.info("BSC 잔고 감시 %s: 잔고 대조 부족 %.6f BNB — 지난 %d일 창(블록 %d~%d) 설명 안 되는 증가 %d wei", w[:10], gap, BALW_HIST_DAYS, a, z, r)
+                if r < BALW_DUST:
+                    self._balw_charge(cnt, 1)
+                    ts9 = self._block_time(hex(a))
+                    self._balw_disc_req(st, w, a, int(job["s"][str(a)]), ts9, int(gap * 10 ** 18), "지난 누락 · 창 이전(또는 원장 쪽)", old=True)
+                else:
+                    ws.setdefault("jobs", []).append(job)
                 ws["hist_at"] = int(now)
-                continue
-            ws.pop("hist_ns", None)
-            r = self._balw_f(st, w, job, z)
-            log.info("BSC 잔고 감시 %s: 잔고 대조 부족 %.6f BNB — 지난 %d일 창(블록 %d~%d) 설명 안 되는 증가 %d wei", w[:10], gap, BALW_HIST_DAYS, a, z, r)
-            if r < BALW_DUST:
-                self._balw_charge(cnt, 1)
-                ts9 = self._block_time(hex(a))
-                self._balw_disc_req(st, w, a, int(job["s"][str(a)]), ts9, int(gap * 10 ** 18), "지난 누락 · 창 이전(또는 원장 쪽)", old=True)
-                ws["hist_at"] = int(now)
-                continue
-            ws.setdefault("jobs", []).append(job)
-            ws["hist_at"] = int(now)
+                ws.pop("hist_wait", None)
+                return
+            except _BalwStop:
+                raise
+            except Exception:
+                ws["hist_at"] = retry
+                raise
 
     def _balw_raw_deltas(self, w: str, a: int, z: int, deadline: float = None, cache: dict = None):
         if not os.path.exists(common.DB_PATH):
@@ -2400,6 +2557,7 @@ class BscWatcher:
             job["xd"] = xd
         if back:
             job["back"] = True
+            job["o"] = 1
         jobs.append(job)
         log.info("BSC 잔고 감시 %s: 블록 %d~%d 설명 안 되는 BNB 증가 %d wei — 이분 탐색%s", w[:10], a, z, r, (" · " + why) if why else "")
         try:
@@ -2478,9 +2636,9 @@ class BscWatcher:
         self._balw_disc_req(st, w, z, bz, ts9, max(1, int(r)), why)
         return True
 
-    def _balw_rx(self, st: dict, eoas: list, cnt: dict):
+    def _balw_rx(self, st: dict, eoas: list, cnt: dict, limit: int = None):
         p = os.path.join(common.STATE_DIR, BALW_RX_NAME)
-        req = common.read_control_json(p, None) if os.path.exists(p) else None
+        req = common.read_control_json(p, None) if os.path.exists(p) and not cnt.get("rx_take") else None
         now = _now()
         if req is not None:
             since = None
@@ -2518,6 +2676,8 @@ class BscWatcher:
             ws = st["w"].get(w)
             if not isinstance(ws, dict) or not ws.get("rx"):
                 continue
+            if limit is not None and int(cnt.get("rx_n") or 0) >= limit:
+                return
             cp = ws.get("cp")
             if not (isinstance(cp, list) and len(cp) == 3):
                 ws.pop("rx", None)
@@ -2533,7 +2693,8 @@ class BscWatcher:
             xd = self._balw_raw_deltas(w, a, z, deadline=cnt["t_end"])
             if xd is None:
                 return
-            job = {"k": "fwd", "a": a, "z": z, "s": {str(z): str(bz)}, "t0": int(now), "n": 0, "done": [], "xd": xd, "back": True}
+            job = {"k": "fwd", "a": a, "z": z, "s": {str(z): str(bz)}, "t0": int(now), "n": 0, "done": [], "xd": xd, "back": True, "o": 1}
+            cnt["rx_n"] = int(cnt.get("rx_n") or 0) + 1
             try:
                 job["s"][str(a)] = str(int(self._balw_call(cnt, "eth_getBalance", [w, hex(a)]), 16))
             except _BalwNoArch as e:
@@ -2555,6 +2716,10 @@ class BscWatcher:
                 log.info("BSC 잔고 감시 %s: 지난 공백 다시 점검 — 블록 %d~%d 원장으로 다 설명됨", w[:10], a, z)
 
     @staticmethod
+    def _balw_old(job) -> bool:
+        return isinstance(job, dict) and (job.get("k") == "hist" or bool(job.get("o")))
+
+    @staticmethod
     def _balw_back(job) -> bool:
         return isinstance(job, dict) and (job.get("k") == "hist" or bool(job.get("back")))
 
@@ -2566,15 +2731,20 @@ class BscWatcher:
             if not cand:
                 break
             if back:
-                w, job = min(cand, key=lambda t9: (float(t9[1].get("lw") or t9[1].get("t0") or 0), int(t9[1].get("t0") or 0)))
+                old9 = [t9 for t9 in cand if self._balw_old(t9[1])]
+                pool9 = old9 if old9 and len(old9) < len(cand) and cnt.get("bk_last") != "o" else cand
+                w, job = min(pool9, key=lambda t9: (float(t9[1].get("lw") or t9[1].get("t0") or 0), int(t9[1].get("t0") or 0)))
+                cnt["bk_last"] = "o" if self._balw_old(job) else "n"
             else:
-                w, job = max(cand, key=lambda t9: int(t9[1].get("z") or 0))
+                rot9, n9 = int(cnt.get("rot") or 0), max(1, len(eoas))
+                w, job = max(cand, key=lambda t9: (int(t9[1].get("z") or 0), -((eoas.index(t9[0]) - rot9) % n9)))
             jobs = st["w"][w]["jobs"]
             n0 = cnt["n"]
             sc0 = int(cnt.get("scan") or 0)
             x = y = None
             try:
-                if now - float(job.get("t0") or now) > BALW_JOB_KEEP or int(job.get("n") or 0) > BALW_JOB_CALLS:
+                if (now - float(job.get("t0") or now) > BALW_JOB_KEEP
+                        or int(job.get("n") or 0) > BALW_JOB_CALLS + min(BALW_JOB_DONE_MAX, len(job.get("done") or [])) * BALW_CALL_CAP):
                     if self._balw_close(st, w, job, "탐색 상한(시간·호출)", cnt):
                         jobs.remove(job)
                         continue
@@ -2642,6 +2812,8 @@ class BscWatcher:
 
     def _balw_pass(self, head: int, S: int) -> int:
         st = self._balw_load()
+        if st.get("rqp") and self._balw_req_flush(st):
+            self._balw_save()
         now = _now()
         every = BALW_EVERY if getattr(self, "nonce_pub_rpc", None) is not None else BALW_EVERY_ARCH
         if now - float(st.get("at") or 0) < every:
@@ -2651,6 +2823,7 @@ class BscWatcher:
         st["at"] = int(now)
         cnt = {"n": 0, "emit": 0, "jobs": 0, "halt": None, "head": int(head),
                "t_end": time.time() + min(BALW_TIME_CAP, max(3.0, self._side_left() / 2.0))}
+        st["lrr"] = cnt["rot"] = (int(st.get("lrr") or 0) + 1) % 1000003
         nst = self._nonce_load()
         eoas = [w for w in self.wallets if (nst["w"].get(w) or {}).get("kind") == "eoa"]
         stale = prev_at > 0 and now - prev_at > max(BALW_STALE, 2 * every)
@@ -2715,8 +2888,9 @@ class BscWatcher:
                 elif r <= -BALW_DUST:
                     log.info("BSC 잔고 감시 %s: 블록 %d~%d 설명 안 되는 BNB 감소 %d wei(감수 — 귀속 행 과대·위임 코드 등)", w[:10], B0, S, -r)
                 ws["cp"], ws["cp_at"] = [int(S), str(bal), int(non)], int(now)
+            hc9 = [] if resting else self._balw_hist_cands(st, eoas, now)
             if not resting:
-                back9 = os.path.exists(os.path.join(common.STATE_DIR, BALW_RX_NAME)) or any(
+                back9 = bool(hc9) or os.path.exists(os.path.join(common.STATE_DIR, BALW_RX_NAME)) or any(
                     (st["w"].get(w9) or {}).get("ux") or (st["w"].get(w9) or {}).get("rx")
                     or any(self._balw_back(j9) for j9 in (st["w"].get(w9) or {}).get("jobs") or []) for w9 in eoas)
                 if back9:
@@ -2737,9 +2911,10 @@ class BscWatcher:
             self._balw_ux_step(st, eoas, cnt, now, nst)
             if resting:
                 raise _BalwStop("아카이브 쉬는 중 — 공개 잔고 확인·창 평가만")
-            for st9 in (lambda: self._balw_jobs(st, eoas, cnt, head, now, back=True),
-                        lambda: self._balw_rx(st, eoas, cnt),
-                        lambda: self._balw_hist(st, eoas, cnt)):
+            for st9 in (lambda: self._balw_rx(st, eoas, cnt, limit=1),
+                        lambda: self._balw_hist(st, eoas, cnt, hc9),
+                        lambda: self._balw_jobs(st, eoas, cnt, head, now, back=True),
+                        lambda: self._balw_rx(st, eoas, cnt)):
                 try:
                     st9()
                 except _BalwStop as e:
@@ -2777,8 +2952,10 @@ class BscWatcher:
             st["d"][w] = {h: v for h, v in st["d"][w].items() if lo is not None and v[0] > lo}
         jobs_left = sum(len((st["w"].get(w) or {}).get("jobs") or []) for w in st["w"])
         ux_left = sum(len((st["w"].get(w) or {}).get("ux") or []) for w in st["w"])
+        hw9 = [int(now) - int(v9["hist_wait"]) for v9 in st["w"].values() if isinstance(v9, dict) and isinstance(v9.get("hist_wait"), int)]
         self._balw_facts = {"wallets": len(eoas), "jobs": jobs_left, "calls": cnt["n"], "emit": cnt["emit"],
-                            "noarch": getattr(self, "arch_rpc", None) is None, "at": int(now), "ux": ux_left}
+                            "noarch": getattr(self, "arch_rpc", None) is None, "at": int(now), "ux": ux_left,
+                            "hist_wait": len(hw9), "hist_wait_s": max(hw9) if hw9 else 0}
         st["last"] = self._balw_facts
         self._balw_save()
         if cnt.get("rx_take"):
