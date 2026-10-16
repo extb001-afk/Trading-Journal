@@ -57,6 +57,7 @@ def run(extra_cursor=None, cycles=90, fail_pick=None, deposit=False):
     ft = FakeTime()
     real = evm_watch.time
     evm_watch.time = ft
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     try:
         w = evm_watch.RpcChainWatcher(CFG, CH, list(W), Wr())
         w.multicall = None
@@ -96,6 +97,7 @@ def run(extra_cursor=None, cycles=90, fail_pick=None, deposit=False):
         return w, adv_at, st
     finally:
         evm_watch.time = real
+        T.patch_moved("time", evm_watch.time, ("evm_",))
 
 
 def flaky(i, p=0.75, seed=7):

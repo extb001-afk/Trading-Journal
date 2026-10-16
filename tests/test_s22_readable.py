@@ -11,7 +11,7 @@ import _harness as T
 chk = T.chk
 V2 = os.path.join(T.ROOT, "web", "v2")
 rd = lambda n: open(os.path.join(V2, n), encoding="utf-8").read()
-SJ, APP, CSS = rd("setup.js"), rd("app.js"), rd("index.html")
+SJ, APP, CSS = rd("setup.js"), T.app_js(), rd("index.html")
 
 blk = SJ[SJ.index("  const XP_HELP = {"):SJ.index("  const NODE_KEYS = [")]
 keys = ["helius", "etherscan", "opensea", "coingecko", "nodereal", "ankr", "quicknode", "alchemy", "chainnodes"]

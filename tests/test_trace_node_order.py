@@ -52,6 +52,7 @@ class FakeTime:
 FT = FakeTime()
 real_time = evm_watch.time
 evm_watch.time = FT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 real_rpc = bf_engine.rpc_call
 LOG = []
 PLAN = {}
@@ -335,6 +336,7 @@ try:
           "N6 깨진 줄도 해시·나머지 칸은 살림(깨진 칸만 기본값)", rows6.get(h62))
 finally:
     evm_watch.time = real_time
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     bf_engine.rpc_call = real_rpc
 
 T.finish()

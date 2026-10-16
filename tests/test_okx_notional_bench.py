@@ -45,8 +45,11 @@ class _FakeRcpt:
 
 _saved = (EF._okx_get, EF.fut_rcpt, getattr(EF, "PACE", 0))
 EF._okx_get = fake_okx_get
+T.patch_moved("_okx_get", EF._okx_get, ("exf_",))
 EF.fut_rcpt = _FakeRcpt
+T.patch_moved("fut_rcpt", EF.fut_rcpt, ("exf_",))
 EF.PACE = 0
+T.patch_moved("PACE", EF.PACE, ("exf_",))
 poss = None
 try:
     EF._fut_okx({"TJ_OKX_KEY": "k", "TJ_OKX_SECRET": "s", "TJ_OKX_PASSPHRASE": "p"})
@@ -58,6 +61,8 @@ try:
 except Exception as e:
     poss = {"_err": str(e)}
 EF._okx_get, EF.fut_rcpt, EF.PACE = _saved
+for _n9 in ("_okx_get", "fut_rcpt", "PACE"):
+    T.patch_moved(_n9, getattr(EF, _n9), ("exf_",))
 check("N0 수집기(_fut_okx)가 저장한 선물 파일의 포지션 3개", isinstance(poss, dict) and set(poss) == {"BTC-USDT-SWAP", "ETH-USDT-SWAP", "ZZ-USDT-SWAP"}, poss)
 _on = getattr(EF, "_okx_notional", lambda p, pos, g: None)
 if not poss or "BTC-USDT-SWAP" not in poss:
@@ -82,7 +87,7 @@ check("N3 포지션 명목가 = 수집기 명목가 우선($1,800) · 바이낸�
 _sum = getattr(web, "_fut_notional_sum", None)
 check("N3 선물 요약 규모 = 하나라도 모르면 None(화면 '—') · 다 알면 합($6,800)",
       callable(_sum) and _sum(pos9) is None and _sum(pos9[:2]) == 6800.0 and _sum([]) == 0, None)
-_js = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+_js = T.app_js()
 check("N3 화면: 규모·롱/숏 칸이 None 이면 '—'(0 이 아님)", "fut.notional == null ? '—'" in _js and "f.notional != null" in _js
       and "f.longNotional == null ? '—'" in _js and "f.shortNotional == null ? '—'" in _js)
 

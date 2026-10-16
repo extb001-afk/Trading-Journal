@@ -19,92 +19,65 @@ import common
 import health_ack
 
 log = logging.getLogger("tj-alert")
-KST = timezone(timedelta(hours=9))
+from chk_base import (
+    _CHALLENGE_RX,
+    _NON_EVM,
+    _now,
+    _PERMANENT_RX,
+    _read,
+    _READ_FAIL,
+    _sig,
+    _TRANSIENT_RX,
+    _u,
+    BAL_RB_LIVE_SEC,
+    BAL_RB_WHY,
+    BENIGN_DEFAULT,
+    BF_EXT_ORPHAN_SEC,
+    BUCKET,
+    CALC_BUG_SHOW_S,
+    CALC_UNIT,
+    CHAIN_NAME,
+    DEBT_RX,
+    DEFAULTS,
+    EX_NAME,
+    fmt_ago,
+    fmt_ts,
+    FUT_FB_SHOW_S,
+    FUT_PLACE_FRESH_S,
+    FUT_WAIT_FRESH_S,
+    FUT_WAIT_WARN_S,
+    HB_DIR,
+    INT_PROGRESS,
+    INT_STALL_SEC,
+    KST,
+    LINE_RX,
+    NATIVE_SYM,
+    NET_RX,
+    OPTIONAL_UNITS,
+    PACE_GRACE_SEC,
+    PACE_NOTE_FILL,
+    PACE_NOTE_HEAD,
+    PM2_TS_RX,
+    QUIET_EXC,
+    REST_LATE_MARGIN,
+    REST_LATE_MAX,
+    RUNNER_STALE_SEC,
+    SIG_SUB,
+    SNAP_MISS_SHOW_S,
+    SOL_WAIT_WHY,
+    STABLE_USD,
+    TAILSCALE_BINS,
+    TRANSIENT_RX,
+    UNIT_KO,
+    UNITS,
+)
 EVAL_PATH = os.path.join(common.STATE_DIR, "health_eval.json")
 STATUS_PATH = os.path.join(common.STATE_DIR, "health_status.json")
-HB_DIR = os.path.join(common.STATE_DIR, "health")
-UNITS = ["tj-evm", "tj-sol", "tj-bsc", "tj-core", "tj-web", "tj-alert", "tj-review", "tj-ex", "tj-exf"]
-OPTIONAL_UNITS = ["tj-review"]
 _UNIT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 LEVELS = {"ok": 0, "warn": 1, "crit": 2}
-BUCKET = 300
 
-DEFAULTS = {
-    "enabled": True,
-    "interval_sec": 60,
-    "units": UNITS,
-    "ignore_units": [],
-    "optional_units": OPTIONAL_UNITS,
-    "tunnel": {},
-    "heartbeat_url": "",
-    "heartbeat_sec": 300,
-    "rss_warn_mb": {"tj-web": 2200, "*": 600},
-    "checks_off": [],
-    "telegram_min_level": "crit",
-    "remind_hours": 0,
-    "remind_once_sec": 3600,
-    "flap_hold_sec": 900,
-    "tg_min_age_sec": 180,
-    "digest_hour": 9,
-    "hourly_cap": 12,
-    "group_min": 4,
-    "persist_sec": 600,
-    "resolve_sec": 300,
-    "wake_gap_sec": 300,
-    "pm2_bin": None,
-    "log_dir": None,
-    "benign_patterns": [],
-    "t": {
-        "chain_warn": 900, "chain_crit": 2700,
-        "new_chain_crit": 21600,
-        "exchange_warn": 2700, "exchange_crit": 5400,
-        "upbit_warn": 600, "upbit_crit": 1800,
-        "price_warn": 300, "price_crit": 600,
-        "ex_price_warn": 1800, "ex_price_crit": 3600,
-        "dex_price_warn": 1200, "dex_price_crit": 2400,
-        "stake_warn": 1800, "stake_crit": 172800,
-        "hb_warn": 600, "hb_crit": 1800,
-        "proc_persist": 300,
-        "restart_warn_n": 2, "restart_warn_win": 3600,
-        "restart_crit_n": 3, "restart_crit_win": 900,
-        "err_warn_buckets": 4, "err_warn_win": 1800,
-        "err_crit_buckets": 10, "err_crit_win": 3600,
-        "net_warn_run": 2, "net_crit_run": 6,
-        "daily_warn_min": 10, "daily_crit_min": 60,
-        "daily_est_warn_usd": 100,
-        "daily_est_warn_min_usd": 1000,
-        "daily_est_warn_pct": 0.5,
-        "neg_hold_warn_usd": 50, "neg_hold_persist": 7200,
-        "proof_div_min_usd": 500,
-        "review_min": 30,
-        "inbox_warn": 900, "inbox_crit": 1800,
-        "inbox_big": 64 * 1024 * 1024,
-        "disk_warn_gb": 10, "disk_crit_gb": 3,
-        "web_persist": 180,
-        "tailnet_persist": 600,
-        "tg_fail_n": 3, "tg_fail_sec": 600,
-        "tunnel_persist": 300,
-        "rss_persist": 600,
-        "rss_win": 1800,
-        "debt_keep_sec": 7200,
-        "intent_win": 900,
-        "dm_lag_sec": 3600,
-        "balcheck_stale_x": 3,
-        "upbit_pending_warn": 1800, "upbit_pending_crit": 7200,
-        "unreadable_warn_sec": 3600,
-        "partial_tg_sec": 86400,
-        "vanish_sec": 3600,
-        "quota_persist": 21600, "disc_persist": 86400,
-        "recon_hold_warn": 21600, "recon_hold_fresh": 7200,
-    },
-}
 
-CHAIN_NAME = {"eth": "Ethereum", "base": "Base", "arbitrum": "Arbitrum", "optimism": "Optimism",
-              "polygon": "Polygon", "scroll": "Scroll", "zksync": "zkSync", "gnosis": "Gnosis",
-              "robinhood": "Robinhood", "arc": "Arc", "bsc": "BSC", "sol": "Solana"}
 common.fill_chain_table(CHAIN_NAME)
-EX_NAME = {"upbit": "업비트", "binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인",
-           "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "Hyperliquid"}
 
 
 def loc_ko(loc) -> str:
@@ -116,30 +89,6 @@ def loc_ko(loc) -> str:
     if len(p) >= 2 and p[0] == "exchange":
         return EX_NAME.get(p[1], p[1]) + (f" {p[2]}" if len(p) >= 3 and p[2] else "")
     return str(loc or "")
-
-LINE_RX = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[,.]\d+ (DEBUG|INFO|WARNING|ERROR|CRITICAL) (?:\[[^\]]*\] )?(.*)")
-PM2_TS_RX = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?: ")
-BENIGN_DEFAULT = [
-    r"429|Too Many Requests|rate.?limit|max usage",
-    r"indexing[-_ ]status|색인",
-    r"silent-200 실증|저하 방출",
-    r"선물 스냅샷",
-    r"테일넷 IP 미확보|추가 바인딩",
-]
-NET_RX = re.compile(r"nodename nor servname|Name or service not known|Temporary failure in name resolution|"
-                    r"Network is unreachable|No route to host|getaddrinfo failed", re.I)
-TRANSIENT_RX = re.compile(r"timed out|timeout|Connection reset|Remote end closed|Service Unavailable|Bad Gateway|"
-                          r"Gateway Time|HTTP Error 50[0234]|HTTPError 50[0234]|Internal Server Error|"
-                          r"Connection refused|Connection aborted|SSL|EOF occurred|IncompleteRead|"
-                          r"urlopen error", re.I)
-SIG_SUB = [(re.compile(r"0x[0-9a-fA-F]{6,}"), "0x…"), (re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{24,}\b"), "…"),
-           (re.compile(r"\d+(\.\d+)?"), "N")]
-QUIET_EXC = ("KeyboardInterrupt", "SystemExit", "ConnectionResetError", "BrokenPipeError", "ConnectionAbortedError")
-DEBT_RX = re.compile(r"★?(\S+) (\S+) 부채 감지: (\S+) (-?[\d.]+(?:[eE][-+]?\d+)?)")
-
-
-def _now() -> float:
-    return time.time()
 
 
 def settings(cfg: dict) -> dict:
@@ -189,116 +138,43 @@ def settings(cfg: dict) -> dict:
     return out
 
 
-_READ_FAIL = {}
-
-
-def _read(path: str, default=None):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return default
-    except (OSError, ValueError) as e:
-        if os.path.lexists(path):
-            _READ_FAIL[path] = type(e).__name__
-        return default
-
-
-_NON_EVM = ("bsc", "sol")
-
-
-def _unreadable_rules(rel: str):
-    m = re.fullmatch(r"cursor_(?:evm|rpc)_([A-Za-z0-9_.-]+)\.json", rel)
-    if m:
-        return [r"sync:chain:" + re.escape(m.group(1))], {m.group(1)}
-    m = re.fullmatch(r"cursor_(bsc|sol)\.json", rel)
-    if m:
-        return [r"sync:chain:" + m.group(1)], {m.group(1)}
-    m = re.fullmatch(r"health/([A-Za-z0-9_.-]+)\.json", rel)
-    if m:
-        u = m.group(1)
-        un = u if u.startswith("tj-") else "tj-" + u
-        rules = [re.escape("hb:" + un), r"sync:hb:" + re.escape(u) + r":.+"]
-        if u == "evm":
-            return rules + [r"sync:chain:(?!(?:bsc|sol)$).+", r"gaps:evm:.+"], {"*evm"}
-        if u in _NON_EVM:
-            return rules + [r"sync:chain:" + u] + ([r"quota:helius"] if u == "sol" else []), {u}
-        return rules, set()
-    m = re.fullmatch(r"exf_balances_([A-Za-z0-9_.-]+)\.json", rel)
-    if m:
-        return [r"exbal:stale", r"debt:margin"], set()
-    table = {
-        "onchain_check.json": [r"balcheck:(?:mismatch|stale|disc)"],
-        "exf_state.json": [r"sync:ex:(?!upbit$).+"],
-        "exf_active.json": [r"sync:ex:(?!upbit$).+"],
-        "upbit_balances.json": [r"sync:ex:upbit", r"upbit:pending"],
-        "upbit_sync.json": [r"sync:ex:upbit", r"upbit:pending"],
-        "spot.json": [r"sync:price:.+"],
-        "web_diag.json": [r"sync:price:dex", r"goplus:queue", r"ledger:neg", r"price:proof", r"price:unpriced", r"web:build", r"web:buildmode", r"rabby:gap"],
-        "daily_cache.json": [r"daily:close"],
-        "reviews_llm.json": [r"review:daily"],
-        "chain_sweep.json": [r"chainsweep:(?:untracked|stale)"],
-        "chain_activity.json": [r"chainsweep:untracked"],
-        "backups/backup_status.json": [r"backup:age"],
-        "backups/offsite_status.json": [r"offsite:age"],
-        "backfill_status.json": [r"bfstall:.+"],
-        "ext_rebuild_status.json": [r"rebuild:ext"],
-        "tg_cursor.json": [r"tg:dmlag"],
-        "ledger.db": [r"inbox:.+"],
-        "recon_hold.json": [r"ledger:recon_hold:.+"],
-    }
-    return list(table.get(rel, [])), set()
-
-
-def collect_unreadable(st: dict, now: float) -> dict:
-    base = os.path.realpath(common.STATE_DIR)
-    cur = {}
-    for p9, err9 in list(_READ_FAIL.items()):
-        rp9 = os.path.realpath(p9)
-        rel = os.path.relpath(rp9, base) if rp9.startswith(base + os.sep) else os.path.basename(p9)
-        cur[rel] = err9
-    mem = st.setdefault("unreadable", {}) if isinstance(st, dict) else {}
-    for rel in [r9 for r9 in mem if r9 not in cur]:
-        mem.pop(rel, None)
-    for rel in cur:
-        mem.setdefault(rel, now)
-    rules, fch = set(), set()
-    for rel in cur:
-        r9, c9 = _unreadable_rules(rel)
-        rules.update(r9)
-        fch.update(c9)
-    return {"files": cur, "since": {r9: float(mem.get(r9) or now) for r9 in cur}, "rules": sorted(rules), "fail_chains": sorted(fch)}
+from chk_collect import (
+    _intent_entries,
+    _kind_t,
+    _liq_blind_checks,
+    _offsite_obs,
+    _pid_alive,
+    _sweep_scope,
+    _tailnet_ip,
+    _tcp,
+    _unreadable_rules,
+    collect_calcguard,
+    collect_chainsweep,
+    collect_daily_review,
+    collect_debt,
+    collect_disk,
+    collect_dm,
+    collect_exbal,
+    collect_fut_wait,
+    collect_inbox,
+    collect_keys,
+    collect_nonevm_gaps,
+    collect_poison,
+    collect_recon_hold,
+    collect_snap_miss,
+    collect_tunnel,
+    collect_unreadable,
+    collect_web,
+    expected_day,
+    ledger_wait_item,
+    missing_run,
+    run_since,
+    runner_alive,
+)
 
 
 def _held_by(cid: str, rules) -> bool:
     return any(re.fullmatch(rx, cid) for rx in rules or ())
-
-
-def _sig(msg: str) -> str:
-    s = msg
-    for rx, rep in SIG_SUB:
-        s = rx.sub(rep, s)
-    return s[:90]
-
-
-def fmt_ago(sec) -> str:
-    if sec is None:
-        return "—"
-    sec = max(0, int(sec))
-    if sec < 90:
-        return f"{sec}초"
-    if sec < 5400:
-        return f"{sec // 60}분"
-    if sec < 172800:
-        h, m = divmod(sec // 60, 60)
-        return f"{h}시간" + (f" {m}분" if m and h < 10 else "")
-    return f"{sec // 86400}일"
-
-
-def fmt_ts(ts) -> str:
-    if not ts:
-        return "—"
-    return datetime.fromtimestamp(float(ts), KST).strftime("%m-%d %H:%M")
 
 
 BUILD_EX_WHY = {"rebuild": "원장 재구축 중", "swap": "원장 교체 직후"}
@@ -343,1853 +219,79 @@ def build_mode_view(bp, now: float):
             "detail": f"화면 계산 = 별도 프로세스({where}) · {cnt}" + (f" · 연속 실패 {fails}/{fmax}" if fails else "") + last_in}
 
 
-class LogWatch:
-
-    KEEP_SEC = 3 * 3600
-    FIRST_TAIL = 512 * 1024
-    MAX_READ = 4 * 1024 * 1024
-
-    def __init__(self, benign_extra=None, disabled_chains=None):
-        pats = list(BENIGN_DEFAULT) + list(benign_extra or [])
-        for c in disabled_chains or []:
-            pats.append(r"\b" + re.escape(c) + r"\b")
-        self.benign = re.compile("|".join(f"(?:{p})" for p in pats), re.I)
-        self.files = {}
-        self.units = {}
-
-    def _u(self, unit):
-        u = self.units.get(unit)
-        if u is None:
-            u = self.units[unit] = {"last_ts": None, "ev": collections.deque(), "review": None}
-        return u
-
-    def classify(self, level: str, msg: str) -> str:
-        if DEBT_RX.search(msg):
-            return "debt"
-        if level in ("ERROR", "CRITICAL"):
-            if self.benign.search(msg):
-                return "benign"
-            if NET_RX.search(msg):
-                return "net"
-            if TRANSIENT_RX.search(msg):
-                return "transient"
-            return "error"
-        if level == "WARNING":
-            if NET_RX.search(msg):
-                return "net"
-            return "warn"
-        return "info"
-
-    def feed(self, unit: str, line: str, ts_hint: float = None, fstate: dict = None):
-        u = self._u(unit)
-        fs = fstate if fstate is not None else {}
-        line = PM2_TS_RX.sub("", line.rstrip("\n"), count=1)
-        m = LINE_RX.match(line)
-        if m:
-            self._flush_tb(unit, fs)
-            try:
-                ts = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
-            except ValueError:
-                ts = ts_hint or _now()
-            fs["last_ts"] = ts
-            level, msg = m.group(2), m.group(3)
-            u["last_ts"] = max(u["last_ts"] or 0, ts)
-            cls = self.classify(level, msg)
-            if cls == "debt":
-                m9 = DEBT_RX.search(msg)
-                try:
-                    u.setdefault("debt", {})[(m9.group(1), m9.group(2), m9.group(3))] = (ts, float(m9.group(4)))
-                except (ValueError, AttributeError):
-                    pass
-            elif cls != "info":
-                u["ev"].append((ts, cls, _sig(msg), msg[:300]))
-            if unit == "tj-review":
-                self._review(u, ts, msg)
-            return
-        if fs.get("incremental"):
-            ts = ts_hint or _now()
-        elif fs.get("hint_mtime"):
-            ts = fs.get("last_ts")
-        else:
-            ts = fs.get("last_ts") or ts_hint or _now()
-        if line.startswith("Traceback (most recent call last)"):
-            self._flush_tb(unit, fs)
-            fs["tb"] = {"ts": ts, "lines": []}
-            return
-        tb = fs.get("tb")
-        if tb is not None:
-            if line.startswith(" ") or not line.strip():
-                tb["lines"].append(line)
-                return
-            fs["tb"] = None
-            exc = line.strip()
-            if tb["ts"] is not None and not exc.startswith(QUIET_EXC):
-                u["ev"].append((tb["ts"], "crash", _sig(exc), exc[:300]))
-
-    def _flush_tb(self, unit, fs):
-        if fs.get("tb") is not None:
-            fs["tb"] = None
-
-    @staticmethod
-    def _review(u, ts, msg):
-        if "리뷰 생성 완료" in msg:
-            u["review"] = (ts, "ok", msg)
-        elif "claude CLI 없음" in msg:
-            u["review"] = (ts, "off", msg)
-        elif "리뷰" in msg and ("실패" in msg or "파싱" in msg):
-            u["review"] = (ts, "fail", msg)
-
-    def prune(self, now: float):
-        cut = now - self.KEEP_SEC
-        for u in self.units.values():
-            ev = u["ev"]
-            while ev and ev[0][0] < cut:
-                ev.popleft()
-            while len(ev) > 20000:
-                ev.popleft()
-
-    def poll(self, unit_files: dict, now: float):
-        for unit, paths in unit_files.items():
-            for p in paths:
-                try:
-                    st = os.stat(p)
-                except OSError:
-                    continue
-                fs = self.files.get(p)
-                hint = now if fs is not None else st.st_mtime
-                seen = fs is not None
-                if fs is not None:
-                    fs["incremental"] = True
-                if fs is None or fs.get("ino") != st.st_ino or st.st_size < fs.get("off", 0):
-                    start = max(0, st.st_size - self.FIRST_TAIL) if fs is None else 0
-                    fs = self.files[p] = {"ino": st.st_ino, "off": start, "unit": unit, "tb": None,
-                                          "last_ts": None, "skip_partial": start > 0, "incremental": seen,
-                                          "hint_mtime": not seen}
-                if st.st_size <= fs["off"]:
-                    continue
-                if st.st_size - fs["off"] > self.MAX_READ:
-                    fs["off"] = st.st_size - self.MAX_READ
-                    fs["skip_partial"] = True
-                try:
-                    with open(p, "rb") as f:
-                        f.seek(fs["off"])
-                        data = f.read(st.st_size - fs["off"])
-                except OSError:
-                    continue
-                cut = data.rfind(b"\n")
-                if cut < 0:
-                    continue
-                chunk = data[:cut + 1]
-                fs["off"] += cut + 1
-                text = chunk.decode("utf-8", "replace")
-                lines = text.split("\n")
-                if fs.pop("skip_partial", False) and lines:
-                    lines = lines[1:]
-                for ln in lines:
-                    if ln:
-                        self.feed(unit, ln, ts_hint=hint, fstate=fs)
-        self.prune(now)
-
-    def summary(self, unit: str, now: float, t: dict) -> dict:
-        u = self.units.get(unit) or {"last_ts": None, "ev": (), "review": None}
-        w60 = now - 3600
-        err_b, net_b = set(), set()
-        n_err = n_warn = n_tr = n_net = n_crash = 0
-        top = collections.Counter()
-        sample = {}
-        last_crash = None
-        for ts, cls, sig, msg in u["ev"]:
-            if ts < w60 or ts > now + 5:
-                continue
-            b = int(ts // BUCKET)
-            if cls in ("error", "crash"):
-                err_b.add(b)
-                n_err += 1
-                top[sig] += 1
-                sample[sig] = msg
-                if cls == "crash":
-                    n_crash += 1
-                    last_crash = (ts, msg)
-            elif cls == "net":
-                net_b.add(b)
-                n_net += 1
-            elif cls == "transient":
-                n_tr += 1
-            elif cls == "warn":
-                n_warn += 1
-        return {"last_ts": u["last_ts"], "err_buckets": sorted(err_b), "net_buckets": sorted(net_b),
-                "n_err": n_err, "n_warn": n_warn, "n_transient": n_tr, "n_net": n_net, "n_crash": n_crash,
-                "top": [(s, c, sample[s]) for s, c in top.most_common(3)], "last_crash": last_crash,
-                "review": u.get("review")}
+from chk_logs import (
+    _cname,
+    _mem_ts,
+    _pm2_bin,
+    LogWatch,
+    pm2_list,
+    rss_track,
+)
 
 
-def _pm2_bin(h: dict):
-    cands = [h.get("pm2_bin"), shutil.which("pm2"), "/opt/homebrew/bin/pm2", "/usr/local/bin/pm2",
-             os.path.expanduser("~/.npm-global/bin/pm2"), os.path.expanduser("~/.local/bin/pm2")]
-    for c in cands:
-        if c and os.path.exists(c):
-            return c
-    return None
+from chk_sources import (
+    _activity_pairs,
+    _bs_internal_text,
+    _bs_partial_text,
+    _fill_paced_map,
+    _int_stall,
+    _int_track,
+    _pace_note,
+    _source,
+    _transient_err,
+    collect_sources,
+    es_reset_text,
+    fill_paced,
+    fill_slow,
+    human_err,
+    is_challenge,
+    leaf_overflow_text,
+    pace_alive,
+    read_heartbeats,
+    runner_waiting,
+    trace_later_drop_text,
+    uncollected_text,
+    upbit_connected,
+)
 
 
-def pm2_list(h: dict):
-    b = _pm2_bin(h)
-    if not b:
-        return None
-    env = dict(os.environ)
-    env["PATH"] = os.path.dirname(b) + os.pathsep + env.get("PATH", "")
-    try:
-        out = subprocess.run([b, "jlist"], capture_output=True, text=True, timeout=25, env=env)
-        i = out.stdout.find("[")
-        data = json.loads(out.stdout[i:]) if i >= 0 else None
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    if not isinstance(data, list):
-        return None
-    res = {}
-    for p in data:
-        e = p.get("pm2_env") or {}
-        name = p.get("name") or e.get("name")
-        if not name:
-            continue
-        res[name] = {"status": e.get("status"), "restarts": int(e.get("restart_time") or 0),
-                     "pid": p.get("pid"), "uptime": (e.get("pm_uptime") or 0) / 1000.0,
-                     "out": e.get("pm_out_log_path"), "err": e.get("pm_err_log_path"),
-                     "mem": (p.get("monit") or {}).get("memory")}
-    return res
-
-
-def _mem_ts(st: dict, key: str, cur):
-    mem = st.setdefault("mem", {})
-    rec = mem.setdefault(key, {"last": None, "first": None})
-    if cur:
-        rec["last"] = max(float(cur), float(rec["last"] or 0))
-    return rec
-
-
-def _cname(c) -> str:
-    if c in CHAIN_NAME:
-        return CHAIN_NAME[c]
-    try:
-        import chainsweep as _cs9
-        ent = _cs9.SWEEP_CHAINS.get(c)
-        if ent:
-            return ent[0]
-    except Exception:
-        pass
-    return str(c)[:1].upper() + str(c)[1:]
-
-
-_CHALLENGE_RX = re.compile(r"just a moment|cf-mitigated|cf-chl|challenge-platform|attention required", re.I)
-
-
-def is_challenge(msg) -> bool:
-    return bool(msg) and bool(_CHALLENGE_RX.search(str(msg)))
-
-
-def es_reset_text(now: float = None) -> str:
-    now = time.time() if now is None else now
-    return time.strftime("%H:%M", time.localtime((int(now) // 86400 + 1) * 86400 + 300))
-
-
-PACE_GRACE_SEC = 7200
-
-
-def pace_alive(src: dict, now: float):
-    if (src or {}).get("ok") is False:
-        return None
-    try:
-        pa = float((src or {}).get("paced_at") or 0)
-        ls = float((src or {}).get("last_success_ts") or 0)
-    except (TypeError, ValueError):
-        return None
-    if pa <= 0 or now - pa > 600:
-        return None
-    if ls <= 0 or now - ls > PACE_GRACE_SEC:
-        return None
-    return pa
-
-
-def fill_paced(sub: str, budget: float, keep: float = 0.02, now: float = None) -> bool:
-    now = time.time() if now is None else now
-    day = int(now // 86400)
-    n = 0
-    try:
-        d = os.path.join(common.quota_dir(), sub)
-        for f in os.listdir(d):
-            if f.endswith(".json"):
-                j = _read(os.path.join(d, f), None)
-                if isinstance(j, dict) and j.get("day") == day:
-                    n += int(j.get("n") or 0)
-    except (OSError, TypeError, ValueError):
-        return False
-    return n >= budget * ((now % 86400) / 86400.0) - budget * keep
-
-
-def fill_slow(obs: dict, bu: str, key: str, it: dict = None, now: float = None) -> bool:
-    if not (obs.get("fill_paced") or {}).get(bu):
-        return False
-    now = time.time() if now is None else now
-    try:
-        pa9 = float((it or {}).get("paced_at") or 0)
-    except (TypeError, ValueError):
-        pa9 = 0.0
-    if pa9 <= 0 or now - pa9 > 3600:
-        return False
-    ps9 = (((obs.get("hb") or {}).get(bu) or {}).get("sources") or {}).get(str(key).split(":")[0]) or {}
-    if bu == "sol" and ps9.get("primary") == "open":
-        return False
-    return (bu == "evm" and ps9.get("kind") == "etherscan") or (bu == "sol" and bool(ps9.get("helius_budget")))
-
-
-def _fill_paced_map(cfg: dict, now: float) -> dict:
-    try:
-        import bf_engine
-        es9 = (cfg or {}).get("etherscan") or {}
-        if float(es9.get("pace_burst_pct", 4)) >= 100:
-            return {"evm": False, "sol": False}
-        keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
-        es = float(es9.get("daily_budget") or 80000)
-        burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
-        return {"evm": bf_engine.es_ledger_rooms(now, es, burst, keep)["fill"] <= 0,
-                "sol": bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg))["fill"] <= 0}
-    except Exception:
-        return {}
-
-
-PACE_NOTE_FILL = "하루 한도 안에서 천천히 확인 중 — 새 거래 확인 몫을 먼저 떼어 두고 옛 기록은 남는 몫으로 뒤에서 채워요(새 거래 확인이 그 몫보다 많으면 남은 시간에 고르게 나눠 확인)"
-PACE_NOTE_HEAD = "하루 한도 안에서 천천히 확인 중 — 새 거래 확인이 하루 몫보다 많아 남은 시간에 고르게 나눠 확인해요(평소보다 늦을 수 있어요)"
-
-
-def _pace_note(cfg: dict, now: float, unit: str) -> str:
-    ff = None
-    try:
-        import bf_engine
-        es9 = (cfg or {}).get("etherscan") or {}
-        keep = min(50.0, max(0.0, float(es9.get("fill_keep_pct", 2)))) / 100.0
-        burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
-        if unit == "sol":
-            ff = bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg)).get("fillFirst")
-        else:
-            ff = bf_engine.es_ledger_rooms(now, float(es9.get("daily_budget") or 80000), burst, keep).get("fillFirst")
-    except Exception:
-        ff = None
-    return PACE_NOTE_HEAD if ff is False else PACE_NOTE_FILL
-
-
-def human_err(msg, label: str = "") -> str:
-    if not msg:
-        return msg
-    m = common.redact_secret_text(str(msg))
-    if is_challenge(m):
-        return "외부 탐색기가 사람 확인 화면으로 막는 중(HTTP 403 · 우리 쪽 문제 아님)"
-    if _PERMANENT_RX.search(m):
-        return m
-    low = m.lower()
-    who = f"{label} RPC" if label else "RPC"
-    if "-32008" in m or "/minute" in low or "per minute" in low:
-        return f"{who} 분당 한도 — 속도 낮춰 재시도 중"
-    if "-32007" in m or "request limit reached" in low or "per second" in low or "/second" in low:
-        return f"{who} 초당 한도 — 속도 낮춰 재시도 중"
-    if "max usage" in low or "quota" in low:
-        return f"{who} 사용량 한도 소진 — 한도가 풀리면 이어서"
-    if "429" in m or "too many requests" in low or "rate limit" in low:
-        return f"{who} 호출 한도 — 잠시 쉬었다 재시도 중"
-    if "timed out" in low or "timeout" in low or "deadline exceeded" in low:
-        return f"{who} 응답 시간 초과 — 다음 주기 재시도"
-    if "circuit open" in low:
-        return f"{who} 연속 실패로 잠시 쉬는 중"
-    return common.redact_urls(m)
-
-
-_TRANSIENT_RX = re.compile(r"-32007|-32008|/minute|per minute|-32016|-32029|request limit reached|per second|/second|rate limit|too many requests|\b429\b|max usage|"
-                           r"초당 한도|호출 한도|응답 시간 초과|잠시 쉬는 중|circuit open|HTTP Error 5\d\d|http5xx|\b50[0-4]\b|bad gateway|"
-                           r"service unavailable|gateway time-?out|timed? ?out|timeout|deadline exceeded|^conn:|^dns:|"
-                           r"Connection (?:reset|refused|aborted)|Remote end closed|부분 진행\(예산|이분 탐색 예산 소진|스캔 예산 소진", re.I)
-_PERMANENT_RX = re.compile(r"chainid\s*불일치|추적 중지|HTTP(?: Error)?\s*(?!429\b)4\d\d\b|unauthori[sz]ed|forbidden|invalid api key|미구성", re.I)
 NEW_CHAIN_CYCLE_STALE = 1800
 
 
-def _transient_err(err) -> bool:
-    if not err:
-        return True
-    t = str(err)
-    return not _PERMANENT_RX.search(t) and bool(_TRANSIENT_RX.search(t))
-
-
-def _source(st, now, key, unit, label, kind, cur_ts, err=None, extra=None):
-    rec = _mem_ts(st, key, cur_ts)
-    if rec["first"] is None:
-        rec["first"] = now
-    return {"key": key, "unit": unit, "label": label, "kind": kind, "last_success": rec["last"],
-            "first_seen": rec["first"], "err": err, "extra": extra}
-
-
-NATIVE_SYM = {"eth": "ETH", "base": "ETH", "arbitrum": "ETH", "optimism": "ETH", "scroll": "ETH", "zksync": "ETH",
-              "robinhood": "ETH", "arc": "USDC", "polygon": "POL", "gnosis": "xDAI", "bsc": "BNB"}
 common.fill_chain_table(NATIVE_SYM, 1)
 
 
-def _bs_partial_text(chain: str, bs: dict, bs_ts: float, now: float) -> str:
-    lag = bs.get("lag_sec")
-    try:
-        lag = float(lag) if lag is not None else None
-    except (TypeError, ValueError):
-        lag = None
-    if lag is None and bs_ts:
-        lag = now - float(bs_ts)
-    if lag and 5400 <= lag < 172800:
-        h9, m9 = divmod(int(lag) // 60, 60)
-        lag_s = f"{h9}시간" + (f" {m9}분" if m9 else "")
-    else:
-        lag_s = fmt_ago(lag)
-    head = f"블록스카웃 {lag_s} 지연(외부)" if lag else "블록스카웃 응답 대기(외부)"
-    late = f"{NATIVE_SYM.get(chain, '네이티브')} 송금·내부 이동"
-    try:
-        nbf = int(bs.get("wallets_backfilling") or 0)
-    except (TypeError, ValueError):
-        nbf = 0
-    if nbf > 0:
-        ids = [str(x)[:6] for x in (bs.get("backfilling_ids") or []) if x][:3]
-        late += f"과 새 지갑 {nbf}개" + (f"({', '.join(ids)}{'…' if nbf > len(ids) else ''})" if ids else "") + " 기초잔고"
-        late += "는"
-    else:
-        late += "은"
-    tail = (f" · 블록스카웃 마지막 성공 {fmt_ts(bs_ts)}" if bs_ts
-            else f" · 블록스카웃 반영 {fmt_ts(now - lag)}까지" if lag else "")
-    return f"{head} — 토큰 이동은 실시간, {late} 복구 후 자동 반영{tail}"
-
-
-INT_STALL_SEC = 3 * 3600
-INT_PROGRESS = 0.02
-
-
-def _int_track(st: dict, chain: str, bs: dict, now: float):
-    if not isinstance(st, dict) or not isinstance(bs, dict):
-        return None
-    mem = st.setdefault("mem", {})
-    k = f"intidx:{chain}"
-    if bs.get("indexing_state") != "internal":
-        if bs.get("ok") and not bs.get("indexing_unknown") and bs.get("indexing_state") is not None:
-            mem.pop(k, None)
-        return None
-    try:
-        r = round(float(bs.get("internal_ratio")), 4)
-    except (TypeError, ValueError):
-        return None
-    rec = mem.get(k)
-    if not isinstance(rec, dict):
-        rec = None
-    else:
-        try:
-            if "base" not in rec:
-                rec = {"base": float(rec.get("ratio")), "since": float(rec.get("since") or now),
-                       "start": float(rec.get("since") or now)}
-            else:
-                rec = {"base": float(rec["base"]), "since": float(rec.get("since") or now),
-                       "start": float(rec.get("start") or rec.get("since") or now)}
-        except (TypeError, ValueError):
-            rec = None
-    if rec is None:
-        rec = {"base": r, "since": now, "start": now}
-    elif r >= rec["base"] + INT_PROGRESS - 1e-9:
-        rec.update(base=r, since=now)
-    elif r < rec["base"] - 0.2:
-        rec.update(base=r, since=now)
-    mem[k] = rec
-    return {"stall": max(0.0, now - rec["since"]), "below_since": min(rec["start"], now)}
-
-
-def _int_stall(st: dict, chain: str, bs: dict, now: float):
-    tr = _int_track(st, chain, bs, now)
-    return tr["stall"] if tr else None
-
-
-def _bs_internal_text(chain: str, bs: dict, stall_sec=None):
-    if not bs.get("ok"):
-        return None
-    intf = bs.get("int_fill") if isinstance(bs.get("int_fill"), dict) else None
-    nat = NATIVE_SYM.get(chain, "네이티브")
-    if bs.get("indexing_state") == "internal":
-        try:
-            pct = f"{float(bs.get('internal_ratio')) * 100:.0f}%"
-        except (TypeError, ValueError):
-            pct = "미완"
-        if stall_sec is not None and stall_sec >= INT_STALL_SEC:
-            txt = (f"외부 탐색기 색인 {pct}에서 {fmt_ago(stall_sec)}째 정체 — 내부 이동({nat} 전송) 일부 누락 가능"
-                   f" · 거래·토큰 목록은 최신, 색인이 다시 움직여 끝나면 자동으로 채움")
-        else:
-            txt = f"거래·토큰 목록 최신, 내부 이동({nat} 전송 일부)은 외부 탐색기 색인 {pct} 대기 — 끝나면 자동으로 채움"
-        if bs.get("indexing_unknown"):
-            txt += "(색인 상태 조회 실패 — 마지막 관측 유지)"
-    elif intf:
-        txt = f"거래·토큰 목록 최신, 내부 이동({nat} 전송 일부)은 탐색기 색인이 끝나 지금 자동으로 채우는 중"
-    else:
-        return None
-    try:
-        nbf = int(bs.get("wallets_backfilling") or 0)
-    except (TypeError, ValueError):
-        nbf = 0
-    if nbf > 0:
-        ids = [str(x)[:6] for x in (bs.get("backfilling_ids") or []) if x][:3]
-        txt += f" · 새 지갑 {nbf}개" + (f"({', '.join(ids)}{'…' if nbf > len(ids) else ''})" if ids else "") + " 과거 기록 수집 중"
-    return txt
-
-
-def leaf_overflow_text(cur: dict, warn: int = 100_000):
-    try:
-        n = int((cur or {}).get("_leaf_overflow") or 0)
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if n <= 0:
-        return None
-    t = f"내부 입금 확인 대기 잎 블록 {n:,}개(큐 넘침 — 노드 trace 회복 뒤 자동)"
-    return ("넘침 경고: " + t + " · 추적(trace) 노드 확인 필요") if n >= warn else t
-
-
-def trace_later_drop_text(cur: dict, warn: int = 100_000):
-    try:
-        n = int((cur or {}).get("_trace_later_dropped") or 0)
-        o = int((cur or {}).get("_trace_later_overflow") or 0)
-    except (TypeError, ValueError, AttributeError):
-        return None
-    out = []
-    if o > 0:
-        t = f"내부 이동 확인 대기 거래 {o:,}건(늦은 채움 큐 넘침 — 노드 trace 회복 뒤 자동)"
-        out.append(("넘침 경고: " + t + " · 추적(trace) 노드 확인 필요") if o >= warn else t)
-    if n > 0:
-        out.append(f"넘침 경고: 늦은 채움(내부 이동 trace) 큐에서 {n:,}건을 뺐어요 — 그 거래의 내부 이동은 미확인 · 추적(trace) 노드 확인 필요")
-    return " · ".join(out) or None
-
-
-def uncollected_text(rt):
-    if not isinstance(rt, dict):
-        return None
-
-    def _d(t):
-        return datetime.fromtimestamp(float(t), KST).strftime("%Y-%m-%d") \
-            if isinstance(t, (int, float)) and not isinstance(t, bool) and t > 0 else None
-    try:
-        a, b = int(rt.get("from") or 0), int(rt.get("to") or 0)
-    except (TypeError, ValueError):
-        return None
-    if b <= 0:
-        return None
-    da, db = _d(rt.get("from_ts")), _d(rt.get("floor_ts"))
-    per = f"({da or '?'}~{db}" + " 전)" if db else (f"({da}부터)" if da else "")
-    return (f"옛 구간 미수집: 블록 {a:,}~{b:,}{per} — 로그 노드가 보관하지 않아 못 받음 · "
-            "그 앞 보유는 기초 잔고(원가 미확인)로 맞춤")
-
-
-def collect_sources(cfg: dict, st: dict, now: float) -> list:
-    S = common.STATE_DIR
-    out = []
-    chains = (cfg.get("chains") or {}) if cfg else {}
-    hb = read_heartbeats(cfg)
-    hb_src = {}
-    for unit, doc in hb.items():
-        for k, s in ((doc.get("sources") or {}).items()):
-            hb_src[(unit, k)] = s
-    used_hb = set()
-
-    def hbinfo(unit, k):
-        s = hb_src.get((unit, k))
-        if not s:
-            return None, None, None
-        used_hb.add((unit, k))
-        le = s.get("last_error") or {}
-        err = le.get("msg") if s.get("ok") is False else None
-        ex = []
-        if s.get("current_source"):
-            ex.append(str(s["current_source"]))
-        if s.get("lag_sec") is not None:
-            ex.append(f"지연 {fmt_ago(s['lag_sec'])}")
-        elif s.get("lag_blocks") is not None:
-            ex.append(f"{s['lag_blocks']}블록 뒤")
-        return s.get("last_success_ts"), err, " · ".join(ex) or None
-
-    rpcfb9 = _read(os.path.join(S, "rpc_fallback.json"), {}) or {}
-    rpcfb9 = rpcfb9 if isinstance(rpcfb9, dict) else {}
-    pn9 = None
-    evm_ch9 = {w.get("chain") for w in ((cfg or {}).get("wallets") or []) if isinstance(w, dict) and w.get("type", "evm") == "evm"}
-    for c in sorted(chains):
-        if not isinstance(chains[c], dict):
-            continue
-        if c not in evm_ch9:
-            used_hb.update({("evm", c), ("evm", f"{c}:rpclog")})
-            continue
-        p = os.path.join(S, f"cursor_evm_{c}.json")
-        pr = os.path.join(S, f"cursor_rpc_{c}.json")
-        if not chains[c].get("_auto") and not os.path.exists(p) and not os.path.exists(pr) \
-                and ("evm", c) not in hb_src and ("evm", f"{c}:rpclog") not in hb_src:
-            continue
-        cands = []
-        d = _read(p, {}) or {}
-        if d.get("_synced_at"):
-            cands.append(float(d["_synced_at"]))
-        dr = _read(pr, {}) if os.path.exists(pr) else {}
-        if (dr or {}).get("rpc_synced_at"):
-            cands.append(float(dr["rpc_synced_at"]))
-        hts, herr, hex_ = hbinfo("evm", c)
-        if hts:
-            cands.append(float(hts))
-        pa9 = pace_alive(hb_src.get(("evm", c)), now)
-        if pa9:
-            cands.append(pa9)
-            if pn9 is None:
-                pn9 = _pace_note(cfg, now, "evm")
-            hex_ = " · ".join(x for x in (hex_, pn9) if x)
-        esu9 = (hb_src.get(("evm", c)) or {}).get("es_daily_until")
-        if isinstance(esu9, (int, float)) and not isinstance(esu9, bool) and esu9 > now:
-            hex_ = " · ".join(x for x in (hex_, f"이더스캔 하루 한도 쉼 — {time.strftime('%H:%M', time.localtime(float(esu9)))} 저절로 복귀") if x)
-        rts, _rerr, _rex = hbinfo("evm", f"{c}:rpclog")
-        if rts:
-            cands.append(float(rts))
-        partial9 = False
-        pkind9 = None
-        sr9 = hb_src.get(("evm", f"{c}:rpclog")) or {}
-        bs9i = hb_src.get(("evm", c)) or {}
-        itr9 = _int_track(st, c, bs9i, now) if not herr else None
-        int9 = None if herr else _bs_internal_text(c, bs9i, itr9["stall"] if itr9 else None)
-        if rts and sr9.get("ok") and now - float(rts) < 1800:
-            ex9 = []
-            bs_ts9 = max([float(x) for x in (d.get("_synced_at"), hts) if x] or [0])
-            if herr or (hts is None and not d.get("_synced_at")) or (bs_ts9 and now - bs_ts9 > 900):
-                ex9.append(_bs_partial_text(c, hb_src.get(("evm", c)) or {}, bs_ts9, now))
-                partial9, pkind9 = True, "bs_lag"
-            elif int9:
-                ex9.append(int9)
-                partial9, pkind9 = True, "internal"
-            else:
-                ex9.append("RPC 로그 트랙 실시간")
-            nw9 = sr9.get("nw") if isinstance(sr9.get("nw"), dict) else None
-            if nw9:
-                eta9 = nw9.get("eta")
-                ex9.append(f"신규 지갑 백필 {float(nw9.get('pct') or 0):.0f}%" + (f"(남은 {fmt_ago(eta9)})" if eta9 else ""))
-            if partial9 or nw9:
-                herr, hex_ = None, " · ".join(ex9)
-        elif int9:
-            partial9, pkind9, hex_ = True, "internal", int9
-        gs9 = [g for g in ((d or {}).get("_retention_gaps") or []) if isinstance(g, dict)] if isinstance(d, dict) else []
-        rt9 = uncollected_text({"from": min(int(g.get("from") or 0) for g in gs9), "to": max(int(g.get("to") or 0) for g in gs9),
-                                "from_ts": min(gs9, key=lambda g: int(g.get("from") or 0)).get("from_ts"),
-                                "floor_ts": max(gs9, key=lambda g: int(g.get("to") or 0)).get("floor_ts")}) if gs9 \
-            else uncollected_text((hb_src.get(("evm", c)) or {}).get("retention"))
-        if rt9:
-            hex_ = " · ".join(x for x in (hex_, rt9) if x)
-        lo9 = leaf_overflow_text(d) if isinstance(d, dict) else None
-        if lo9:
-            hex_ = " · ".join(x for x in (hex_, lo9) if x)
-        td9 = trace_later_drop_text(d) if isinstance(d, dict) else None
-        if td9:
-            hex_ = " · ".join(x for x in (hex_, td9) if x)
-        bk9h = (hb_src.get(("evm", c)) or {}).get("rpc_bk")
-        if isinstance(bk9h, dict):
-            t9 = []
-            if bk9h.get("new"):
-                t9.append(f"새 지갑 {int(bk9h['new'])}개 과거 기록 수집 중")
-            if bk9h.get("internal"):
-                t9.append(f"지갑 {int(bk9h['internal'])}개 내부 이동(internal) RPC 로 다시 채우는 중")
-            if bk9h.get("extend"):
-                t9.append(f"지갑 {int(bk9h['extend'])}개 과거 창 확장 중")
-            if t9:
-                hex_ = " · ".join(x for x in (hex_, " · ".join(t9) + f"(옛 구간 {float(bk9h.get('pct') or 0):.0f}%)") if x)
-        hbs9 = hb_src.get(("evm", c)) or {}
-        fb9h = hbs9.get("rpc_fb")
-        if "rpc_fb" not in hbs9:
-            r9 = rpcfb9.get(c) if isinstance(rpcfb9.get(c), dict) else {}
-            fb9h = r9 if r9.get("active") and r9.get("text") else None
-        if not (isinstance(fb9h, dict) and fb9h.get("text")):
-            fb9h = None
-        if fb9h:
-            hex_ = " · ".join(x for x in (hex_, str(fb9h["text"])[:200]) if x)
-        else:
-            lim9h = (hb_src.get(("evm", c)) or {}).get("rpc_limited")
-            if isinstance(lim9h, str) and lim9h:
-                hex_ = " · ".join(x for x in (hex_, f"제한된 백업({lim9h[:80]})") if x)
-            try:
-                import inflow_probe
-                if1 = inflow_probe.health_text(hbs9.get("inflow"), now)
-                if if1:
-                    hex_ = " · ".join(x for x in (hex_, if1) if x)
-            except Exception:
-                pass
-        out.append(_source(st, now, f"chain:{c}", "tj-evm", _cname(c), "chain",
-                           max(cands) if cands else None, human_err(herr, _cname(c)), hex_))
-        out[-1]["err_raw"] = common.redact_urls(common.redact_secret_text(herr, generic=False)) if herr else None
-        if rt9:
-            out[-1]["uncollected"] = True
-        if chains[c].get("_auto") and not cands and not out[-1]["last_success"]:
-            acts9 = [float(v.get("activatedAt")) for k9, v in (_activity_pairs() or {}).items()
-                     if str(k9).split(":", 1)[0] == c and isinstance(v, dict) and v.get("active") and v.get("activatedAt")]
-            out[-1]["new_chain"] = min(acts9) if acts9 else out[-1]["first_seen"]
-            lc9 = (hb_src.get(("evm", c)) or {}).get("last_cycle_ts")
-            out[-1]["last_cycle"] = float(lc9) if isinstance(lc9, (int, float)) and not isinstance(lc9, bool) else None
-            mrec9 = st.setdefault("mem", {}).setdefault(f"chain:{c}", {"last": None, "first": None})
-            if out[-1]["last_cycle"] is not None:
-                mrec9["cyc"] = max(out[-1]["last_cycle"], float(mrec9.get("cyc") or 0))
-            elif mrec9.get("cyc"):
-                out[-1]["last_cycle_mem"] = float(mrec9["cyc"])
-            sd9 = (hb.get("evm") or {}).get("started")
-            if out[-1]["last_cycle"] is None and isinstance(sd9, (int, float)) and not isinstance(sd9, bool) \
-                    and float(sd9) > float(out[-1]["new_chain"] or 0) and float(sd9) <= now:
-                out[-1]["restart_at"] = float(sd9)
-        wl9 = {str(w9.get("address") or "").lower() for w9 in (cfg.get("wallets") or [])
-               if isinstance(w9, dict) and w9.get("type", "evm") == "evm" and w9.get("chain") == c
-               and str(w9.get("address") or "").lower().startswith("0x") and len(str(w9.get("address") or "")) == 42}
-        dd9 = d if isinstance(d, dict) else {}
-        cfail9 = p in _READ_FAIL
-        bw9 = set() if cfail9 else {w9 for w9 in wl9 if not isinstance(dd9.get(w9), int) or isinstance(dd9.get(w9), bool)}
-        job9 = dd9.get("_bfjob")
-        if (isinstance(job9, dict) and job9.get("kind") == "extend"
-                and isinstance(job9.get("wallets"), list)):
-            bw9 |= {str(x).lower() for x in job9["wallets"] if str(x).lower() in wl9}
-        if not cfail9:
-            for k9, v9 in dd9.items():
-                w9 = str(k9)[4:].lower() if str(k9).startswith("_bk:") else ""
-                if w9 in wl9 and isinstance(v9, dict) and v9.get("why") == "new":
-                    done9, to9 = v9.get("done"), v9.get("to")
-                    if type(done9) is int and type(to9) is int and done9 < to9:
-                        bw9.add(w9)
-        if chains[c].get("rpc_log_discovery") and common.chain_discovery(c, chains[c]) != "rpc" and isinstance(dr, dict):
-            for k9, v9 in dr.items():
-                w9 = str(k9)[4:].lower() if str(k9).startswith("_nw:") else ""
-                if w9 in wl9 and isinstance(v9, dict):
-                    done9, to9 = v9.get("done"), v9.get("to")
-                    if type(done9) is int and type(to9) is int and done9 < to9:
-                        bw9.add(w9)
-        if bw9:
-            out[-1]["backfill_wallets"] = sorted(bw9)
-        if partial9:
-            out[-1]["partial"] = True
-            bs9 = hb_src.get(("evm", c)) or {}
-            out[-1]["partial_wallets"] = sorted({str(x).lower() for x in list(bs9.get("backfilling_ids") or []) + list(bs9.get("wallets_failing") or [])
-                                                 if x and len(str(x)) >= 6})
-            out[-1]["partial_kind"] = pkind9
-            intf9 = bs9.get("int_fill") if isinstance(bs9.get("int_fill"), dict) else {}
-            if intf9.get("wallets"):
-                out[-1]["partial_native_wallets"] = sorted({str(x).lower() for x in intf9["wallets"] if x and len(str(x)) >= 6})
-        pm9 = st.setdefault("mem", {}) if isinstance(st, dict) else {}
-        if partial9:
-            pr9 = pm9.get(f"partial:{c}")
-            try:
-                ps9 = float(pr9.get("since")) if isinstance(pr9, dict) and pr9.get("since") else None
-            except (TypeError, ValueError):
-                ps9 = None
-            if ps9 is None or ps9 > now:
-                ps9 = now
-            pm9[f"partial:{c}"] = {"since": ps9}
-            if pkind9 == "internal" and itr9:
-                ps9 = min(ps9, float(itr9["below_since"]))
-            out[-1]["partial_since"] = ps9
-        else:
-            pm9.pop(f"partial:{c}", None)
-    if os.path.exists(os.path.join(S, "cursor_bsc.json")) or ("bsc", "bsc") in hb_src:
-        d = _read(os.path.join(S, "cursor_bsc.json"), {}) or {}
-        hts, herr, hex_ = hbinfo("bsc", "bsc")
-        cands = [float(x) for x in (d.get("_synced_at"), hts) if x]
-        out.append(_source(st, now, "chain:bsc", "tj-bsc", "BSC", "chain", max(cands) if cands else None, human_err(herr, "BSC"), hex_))
-    if (os.path.exists(os.path.join(S, "cursor_sol.json")) or ("sol", "sol") in hb_src) and not runner_waiting("sol", SOL_WAIT_WHY, now):
-        d = _read(os.path.join(S, "cursor_sol.json"), {}) or {}
-        hts, herr, hex_ = hbinfo("sol", "sol")
-        cands = [float(x) for x in (d.get("_synced_at"), hts) if x]
-        pa9 = pace_alive(hb_src.get(("sol", "sol")), now)
-        if pa9:
-            cands.append(pa9)
-            hex_ = " · ".join(x for x in (hex_, _pace_note(cfg, now, "sol")) if x)
-        hcu9 = (hb_src.get(("sol", "sol")) or {}).get("helius_daycap_until")
-        if isinstance(hcu9, (int, float)) and not isinstance(hcu9, bool) and hcu9 > now:
-            hex_ = " · ".join(x for x in (hex_, f"헬리우스 하루 한도 쉼 — {time.strftime('%H:%M', time.localtime(float(hcu9)))} 저절로 복귀") if x)
-        out.append(_source(st, now, "chain:sol", "tj-sol", "Solana", "chain", max(cands) if cands else None, human_err(herr, "Solana"), hex_))
-    for (unit, k), s in hb_src.items():
-        if (unit, k) in used_hb or (unit == "evm" and k.endswith(":rpclog")):
-            continue
-        un = unit if unit.startswith("tj-") else f"tj-{unit}"
-        hts, herr, hex_ = hbinfo(unit, k)
-        if unit == "sol" and k == "sol_stake":
-            n9 = s.get("accounts")
-            out.append(_source(st, now, f"hb:{unit}:{k}", un, "Solana 스테이킹", "stake", hts, herr,
-                               (f"계정 {n9}개" if n9 is not None else None)))
-            continue
-        out.append(_source(st, now, f"hb:{unit}:{k}", un, _cname(k), "chain", hts, herr, hex_))
-    exf = _read(os.path.join(S, "exf_state.json"), {}) or {}
-    act9 = _read(os.path.join(S, "exf_active.json"), None)
-    active9 = None
-    if isinstance(act9, dict) and isinstance(act9.get("active"), list):
-        active9 = {str(x) for x in act9["active"] if isinstance(x, str)}
-    for ex, v in sorted(exf.items()):
-        if not isinstance(v, dict):
-            continue
-        if active9 is not None and ex not in active9:
-            continue
-        dw = v.get("backfilled_until")
-        fl = (v.get("fills") or {}).get("backfilled_until")
-        vals = [float(x) for x in (dw, fl) if x]
-        cur = min(vals) if len(vals) == 2 else None
-        which = None
-        if len(vals) == 2 and abs(float(dw) - float(fl)) > 1800:
-            which = "입출금" if float(dw) < float(fl) else "체결"
-        out.append(_source(st, now, f"ex:{ex}", "tj-exf", EX_NAME.get(ex, ex), "exchange", cur,
-                           None, f"{which} 수집 지연" if which else None))
-    ub = os.path.join(S, "upbit_balances.json")
-    if os.path.exists(ub) and upbit_connected():
-        d = _read(ub, {}) or {}
-        syp9 = os.path.join(S, "upbit_sync.json")
-        sy = _read(syp9, None)
-        cur9, err9, ex9 = d.get("ts"), None, None
-        if sy is None and syp9 in _READ_FAIL:
-            cur9, ex9 = None, "완주 기록(upbit_sync.json) 읽기 실패 — 판단 보류"
-        elif isinstance(sy, dict):
-            try:
-                lok9 = float(sy.get("last_ok") or 0) or None
-            except (TypeError, ValueError):
-                lok9 = None
-            try:
-                bts9 = float(d.get("ts") or 0) or None
-            except (TypeError, ValueError):
-                bts9 = None
-            cur9 = min(bts9, lok9) if (bts9 and lok9) else None
-            le9 = sy.get("last_err") if isinstance(sy.get("last_err"), dict) else {}
-            try:
-                if le9.get("msg") and float(le9.get("ts") or 0) > float(lok9 or 0):
-                    err9 = human_err(str(le9["msg"])[:200], "업비트")
-            except (TypeError, ValueError):
-                pass
-            bits9 = [f"잔고 스냅샷 {fmt_ago(now - bts9)} 전" if bts9 else "잔고 스냅샷 없음",
-                     f"체결·입출금 마지막 완주 {fmt_ago(now - lok9)} 전" if lok9 else "체결·입출금 완주 기록 없음"]
-            try:
-                if int(sy.get("track_pending") or 0) > 0:
-                    bits9.append(f"체결 확정 대기 {int(sy['track_pending'])}건")
-            except (TypeError, ValueError):
-                pass
-            ex9 = " · ".join(bits9)
-        out.append(_source(st, now, "ex:upbit", "tj-ex", "업비트", "upbit", cur9, err9, ex9))
-        if isinstance(sy, dict):
-            try:
-                out[-1]["track_pending"] = int(sy.get("track_pending") or 0)
-                out[-1]["pending_since"] = float(sy.get("pending_since") or 0) or None
-            except (TypeError, ValueError):
-                out[-1]["track_pending"], out[-1]["pending_since"] = 0, None
-            out[-1]["pending_block"] = bool(err9) and le9.get("kind") == "pending"
-    sp = _read(os.path.join(S, "spot.json"), None)
-    if isinstance(sp, dict):
-        tk9 = sp.get("tick") if isinstance(sp.get("tick"), dict) else {}
-        ex9 = (f"마지막 한 바퀴 {float(tk9.get('sec') or 0):.0f}초" + (f"(가장 느린 단계: {tk9['slowest']})" if tk9.get("slowest") else "")
-               if tk9.get("sec") and float(tk9["sec"]) > 60 else None)
-        has9 = any(isinstance(sp.get(k9), dict) and sp.get(k9) for k9 in ("usd", "ex_usd", "dex_usd"))
-        wt9 = sp.get("want") if isinstance(sp.get("want"), dict) else None
-        try:
-            need9 = wt9 is None or bool(wt9.get("ex")) or int(wt9.get("dex") or 0) > 0
-        except (TypeError, ValueError):
-            need9 = True
-        if not has9 and need9:
-            ex9 = " · ".join(x for x in (ex9, "받은 시세 없음(바퀴는 돎)") if x)
-        out.append(_source(st, now, "price:spot", "tj-web", "시세 갱신", "price", sp.get("updated") if (has9 or not need9) else None, None, ex9))
-        usd_ts = [float(v) for v in (sp.get("usd_ts") or {}).values() if isinstance(v, (int, float))]
-        if usd_ts:
-            out.append(_source(st, now, "price:global", "tj-web", "글로벌 시세", "price", max(usd_ts)))
-        want = sp.get("want") if isinstance(sp.get("want"), dict) else None
-        dex = [float(v) for v in (sp.get("dex_ts") or {}).values() if isinstance(v, (int, float))]
-        if want is not None and int(want.get("dex") or 0) > 0 and dex:
-            wd = _read(os.path.join(S, "web_diag.json"), None)
-            da = (wd or {}).get("dex_age") if isinstance(wd, dict) else None
-            ts_dex, ex_dex = max(dex), None
-            if isinstance(da, dict) and now - float(wd.get("ts") or 0) < 600 and da.get("p90w") is not None:
-                ts_dex = float(wd["ts"]) - float(da["p90w"])
-                ex_dex = f"보유 평가액 90%가 {fmt_ago(float(da['p90w']))} 안 가격 · 가장 낡은 보유 {fmt_ago(da.get('max'))}"
-            out.append(_source(st, now, "price:dex", "tj-web", "DEX 가격", "dex_price", ts_dex, None, ex_dex))
-        by_ex = {}
-        for k, v in (sp.get("ex_ts") or {}).items():
-            if isinstance(v, (int, float)) and ":" in k:
-                ex = k.split(":", 1)[0]
-                by_ex[ex] = max(by_ex.get(ex, 0), float(v))
-        for ex in sorted(set((want or {}).get("ex") or [])):
-            out.append(_source(st, now, f"price:ex:{ex}", "tj-web", f"{EX_NAME.get(ex, ex)} 시세", "ex_price",
-                               by_ex.get(ex)))
-    return out
-
-
-def upbit_connected() -> bool:
-    try:
-        import settings_store
-        env9 = {}
-        try:
-            with open(settings_store.ENV_PATH, "r", encoding="utf-8-sig") as f9:
-                for line9 in f9:
-                    kv9 = common.parse_env_line(line9)
-                    if kv9 and kv9[0]:
-                        env9[kv9[0]] = kv9[1]
-        except FileNotFoundError:
-            env9 = {}
-        return bool((os.environ.get("UPBIT_ACCESS") or env9.get("UPBIT_ACCESS")) and (os.environ.get("UPBIT_SECRET") or env9.get("UPBIT_SECRET")))
-    except Exception:
-        return True
-
-
-SOL_WAIT_WHY = ("Helius 키 없음", "Solana 지갑 없음")
-
-
-def runner_waiting(unit: str, whys: tuple, now: float = None) -> bool:
-    rb = _read(os.path.join(common.STATE_DIR, f"runner_{unit}.json"), None)
-    if not isinstance(rb, dict) or rb.get("state") != "waiting" or rb.get("by") == "reload":
-        return False
-    try:
-        age = (time.time() if now is None else float(now)) - float(rb.get("ts"))
-    except (TypeError, ValueError):
-        return False
-    return -60 <= age < 120 and any(str(rb.get("why") or "").startswith(w) for w in whys)
-
-
-def read_heartbeats(cfg: dict = None) -> dict:
-    out = {}
-    off = set((cfg or {}).get("_disabled_chains") or ())
-    evm_wait = False
-    if cfg is not None and not any(isinstance(w, dict) and w.get("type", "evm") == "evm" for w in cfg.get("wallets") or []):
-        rb = _read(os.path.join(common.STATE_DIR, "runner_evm.json"), None)
-        evm_wait = (isinstance(rb, dict) and rb.get("state") == "waiting" and rb.get("why") == "EVM 지갑 없음"
-                    and isinstance(rb.get("ts"), (int, float)) and 0 <= time.time() - float(rb["ts"]) < 120)
-    for p in glob.glob(os.path.join(HB_DIR, "*.json")):
-        d = _read(p, None)
-        if isinstance(d, dict) and d.get("ts") and d.get("schema") == 1 and isinstance(d.get("sources"), dict):
-            unit = str(d.get("unit") or os.path.basename(p)[:-5])
-            if unit == "evm" and evm_wait:
-                continue
-            if unit == "sol" and runner_waiting("sol", SOL_WAIT_WHY):
-                continue
-            if unit == "evm" and off:
-                d = dict(d, sources={k: v for k, v in d["sources"].items() if str(k).split(":", 1)[0] not in off})
-            out[unit] = d
-    return out
-
-
-def expected_day(now: float, deadline_min: int):
-    nk = datetime.fromtimestamp(now, KST)
-    back = 1 if nk.hour * 60 + nk.minute >= deadline_min else 2
-    return nk - timedelta(days=back)
-
-
-def run_since(day, run: int, deadline_min: int) -> float:
-    first = day - timedelta(days=max(1, run) - 1) + timedelta(days=1)
-    return datetime(first.year, first.month, first.day, deadline_min // 60, deadline_min % 60, tzinfo=KST).timestamp()
-
-
-def missing_run(keys, day, fmt: str, limit: int = 14) -> int:
-    n = 0
-    while n < limit and (day - timedelta(days=n)).strftime(fmt) not in keys:
-        n += 1
-    return n
-
-
-def collect_daily_review(now: float, logs: LogWatch, h: dict = None) -> tuple:
-    S = common.STATE_DIR
-    t = (h or DEFAULTS)["t"]
-    dc = _read(os.path.join(S, "daily_cache.json"), None)
-    daily = None
-    if isinstance(dc, dict):
-        y = expected_day(now, t["daily_warn_min"])
-        run = missing_run(dc, y, "%Y-%m-%d")
-        daily = {"date": y.strftime("%Y-%m-%d"), "present": y.strftime("%Y-%m-%d") in dc,
-                 "run": run, "since": run_since(y, run, t["daily_warn_min"])}
-        ent9 = dc.get(daily["date"]) if daily["present"] else None
-        if isinstance(ent9, dict):
-            try:
-                est9 = float(ent9.get("est") or 0)
-                val9 = float(ent9.get("val") or 0)
-            except (TypeError, ValueError):
-                est9, val9 = 0.0, 0.0
-            daily.update(src=ent9.get("src"), est=est9, val=val9, pend=ent9.get("pend"), why=ent9.get("why"),
-                         xs=bool(ent9.get("xs")))
-        ra = dc.get("_reset_at")
-        try:
-            ra = float(ra) if ra else None
-        except (TypeError, ValueError):
-            ra = None
-        y_close = datetime(y.year, y.month, y.day, tzinfo=KST).timestamp() + 86400
-        if ra and y_close <= ra and now - ra < float(t.get("daily_heal_sec") or 3 * 3600):
-            daily["healing"] = ra
-    rv = _read(os.path.join(S, "reviews_llm.json"), None)
-    rsum = logs.units.get("tj-review", {}).get("review") if logs else None
-    y = expected_day(now, t["review_min"])
-    rkeys = set()
-    for k9 in (rv or {}) if isinstance(rv, dict) else ():
-        k9 = str(k9)
-        rkeys.add(k9[5:] if len(k9) == 10 and k9[4] == "-" else k9)
-    run = missing_run(rkeys, y, "%m-%d")
-    review = {"date": y.strftime("%m-%d"), "present": isinstance(rv, dict) and y.strftime("%m-%d") in rkeys,
-              "exists": isinstance(rv, dict), "run": run, "since": run_since(y, run, t["review_min"]),
-              "outcome": rsum[1] if rsum else None, "outcome_msg": rsum[2] if rsum else None}
-    if isinstance(rv, dict):
-        nk9 = datetime.fromtimestamp(now, KST)
-        for back9 in range(0, 3):
-            d9 = nk9 - timedelta(days=back9)
-            if d9.date() < y.date():
-                break
-            ent9 = rv.get(d9.strftime("%Y-%m-%d")) or rv.get(d9.strftime("%m-%d"))
-            if isinstance(ent9, dict):
-                review["latest"] = d9.strftime("%m-%d")
-                review["latestTpl"] = ent9.get("model") == "template"
-                break
-    return daily, review
-
-
-def rss_track(st: dict, pm2, now: float, win: float) -> dict:
-    rh = st.setdefault("rss_hist", {})
-    out = {}
-    for u, p in (pm2 or {}).items():
-        mem = (p or {}).get("mem")
-        if not mem:
-            continue
-        ent = rh.get(u) if isinstance(rh.get(u), dict) else None
-        if ent is None or ent.get("pid") != (p or {}).get("pid"):
-            ent = rh[u] = {"pid": (p or {}).get("pid"), "s": []}
-        ent["s"] = [x for x in ent["s"] if isinstance(x, list) and len(x) == 2 and now - float(x[0]) <= win][-240:]
-        ent["s"].append([round(now, 1), round(float(mem) / 1e6, 1)])
-        out[u] = {"min": min(x[1] for x in ent["s"]), "span": now - float(ent["s"][0][0]), "n": len(ent["s"])}
-    for u in [u for u in rh if u not in (pm2 or {})]:
-        rh.pop(u, None)
-    return out
-
-
-def _disc_ents(disc, cfg) -> dict:
-    try:
-        import token_discovery as td9
-        pairs9 = td9.load_state().get("pairs") or {}
-        if cfg is not None:
-            act9 = {td9.pair_key("bsc" if w.get("type") == "bsc_rpc" else w.get("chain"), w.get("address"))
-                    for w in cfg.get("wallets") or [] if w.get("type", "evm") in ("evm", "bsc_rpc") and w.get("address")}
-            pairs9 = {k: e for k, e in pairs9.items() if k in act9}
-        ents9, nf9, nh9 = {}, 0, 0
-        for k9, e9 in pairs9.items():
-            if not isinstance(e9, dict):
-                continue
-            hard9 = list(td9.hard_fails(e9))
-            if hard9:
-                nf9 += 1
-                ents9.update({f"fail:{k9}:{s9}": None for s9 in hard9})
-            for ca9, why9 in (e9.get("skip") or {}).items():
-                if not td9.skip_final(why9):
-                    nh9 += 1
-                    ents9[f"hold:{k9}:{ca9}"] = None
-        if nf9 != int(disc.get("failPairs") or 0) or nh9 != int(disc.get("hold") or 0):
-            return {}
-        return ents9
-    except Exception:
-        return {}
-
-
-def collect_balcheck(cfg: dict = None):
-    p = os.path.join(common.STATE_DIR, "onchain_check.json")
-    d = _read(p, None)
-    if not isinstance(d, dict):
-        return None
-    mm = d.get("mismatches") or []
-    conf = [m for m in mm if m.get("confirmed", True)]
-    top = None
-    if conf:
-        m = max(conf, key=lambda x: abs(float(x.get("diffUsd") or 0)))
-        top = f"{m.get('chain')} {m.get('sym')} 차이 ${abs(float(m.get('diffUsd') or 0)):,.0f}"
-    items = [{"key": m.get("key"), "chain": m.get("chain"), "wallet": str(m.get("wallet") or ""), "sym": m.get("sym"), "ca": m.get("ca"),
-              "diffUsd": float(m.get("diffUsd") or 0), "carried": bool(m.get("carried")),
-              "ledger": m.get("ledger"), "onchain": m.get("onchain"),
-
-              "carriedN": int(m.get("carriedN") or 0), "seenAt": m.get("seenAt"),
-              "firstSeen": m.get("firstSeen")} for m in conf]
-    fixed = [m for m in mm if m.get("ledgerFixed")]
-    return {"checkedAt": d.get("checkedAt"), "confirmed": len(conf), "watch": len(mm) - len(conf) - len(fixed),
-            "resolving": len(fixed),
-            "errors": len(d.get("errors") or []), "top": top, "items": items,
-            "unchecked": d.get("unchecked"), "capped": bool(d.get("capped")), "pairs": d.get("pairs"),
-            "disc": (dict(d["disc"], ackEnts=_disc_ents(d["disc"], cfg)) if isinstance(d.get("disc"), dict) else None)}
+from chk_balance import (
+    _bf_ext_pending,
+    _disc_ents,
+    _fmt_left,
+    _fq,
+    _short_addr,
+    bal_busy_reasons,
+    bal_guess,
+    bal_line,
+    bal_rb_wait,
+    bal_text,
+    balcheck_split,
+    bf_ext_live,
+    bf_ext_open,
+    bf_ext_phrase,
+    collect_bal_busy,
+    collect_balcheck,
+    rb_wait_sentence,
+    rest_late,
+    tier_rest_map,
+)
 
 
 BAL_READY_SEC = 86400
 BAL_BUSY_MAX = 3 * 86400
 
 
-def collect_bal_busy(now: float, extrb=None, bf=None) -> dict:
-    out = {"global": [], "chains": {}, "wallets": {}}
-
-    def addc(ch, why):
-        lst = out["chains"].setdefault(str(ch), [])
-        if why not in lst:
-            lst.append(why)
-    try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
-        try:
-            rows = conn.execute("SELECT k, v FROM meta WHERE k LIKE 'ext_prewindow:%'").fetchall()
-        finally:
-            conn.close()
-        for k, v in rows:
-            try:
-                if int(v) <= 0:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            ch = str(k)[len("ext_prewindow:"):]
-            if re.fullmatch(r"[a-z0-9]{2,20}", ch):
-                addc(ch, "옛 기록을 반영하는 재계산 대기")
-            else:
-                if "재계산 대기" not in out["global"]:
-                    out["global"].append("재계산 대기")
-    except sqlite3.Error:
-        out["unknown"] = True
-    if isinstance(extrb, dict) and extrb.get("running"):
-        out["global"].append("재계산 중")
-    for unit, items in ((bf or {}).items() if isinstance(bf, dict) else ()):
-        if not isinstance(items, dict) or str(unit).startswith("_"):
-            continue
-        for key, it in items.items():
-            if not isinstance(it, dict) or not (str(key).endswith(":extend") or it.get("phase") == "extend") or it.get("phase") == "done":
-                continue
-            try:
-                if now - float(it.get("updated") or 0) > 7 * 86400:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            ch = {"bsc": "bsc", "sol": "sol", "ex": "upbit"}.get(unit) or (str(key).split(":", 1)[0] if unit == "evm" else None)
-            if ch:
-                addc(ch, "과거 기록 범위를 넓히는 중")
-    cb = _read(os.path.join(common.STATE_DIR, "cursor_bsc.json"), None)
-    nw = cb.get("_neww") if isinstance(cb, dict) else None
-    if isinstance(nw, dict):
-        for w in nw.get("wallets") or []:
-            out["wallets"].setdefault(f"bsc|{str(w).lower()}", []).append("새 지갑 과거 기록 수집 중")
-    bn = _read(os.path.join(common.STATE_DIR, "bsc_nonce.json"), None)
-    for w, ws in ((bn.get("w") or {}).items() if isinstance(bn, dict) and isinstance(bn.get("w"), dict) else ()):
-        try:
-            miss = int((ws or {}).get("missing") or 0)
-        except (TypeError, ValueError):
-            continue
-        if miss > 0:
-            out["wallets"].setdefault(f"bsc|{str(w).lower()}", []).append(f"로그 없는 송금 {miss}건 회수 중")
-    return out
-
-
-def bal_busy_reasons(it: dict, bb: dict, sync_bad: dict) -> list:
-    ch = str(it.get("chain") or "")
-    w = str(it.get("wallet") or "")
-    w = w if ch == "sol" else w.lower()
-    out = []
-    for x in list((bb or {}).get("global") or []) + list(((bb or {}).get("chains") or {}).get(ch) or []) \
-            + list(((bb or {}).get("wallets") or {}).get(f"{ch}|{w}") or []):
-        if x not in out:
-            out.append(x)
-    if ch in (sync_bad or {}):
-        out.append(sync_bad[ch])
-    if it.get("carried"):
-        out.append("이번 판에 다시 대조하지 못함(다음 판에 이어서)")
-    return out
-
-
-BAL_RB_WHY = ("옛 기록을 반영하는 재계산 대기", "재계산 대기", "재계산 중")
-
-
-def bal_rb_wait(why) -> bool:
-    return any(w in BAL_RB_WHY for w in (why or ()))
-
-
-def _fmt_left(sec) -> str:
-    sec = max(0, int(sec))
-    if sec < 3600:
-        return f"{max(1, sec // 60)}분"
-    if sec < 86400:
-        h, m = divmod(sec // 60, 60)
-        return f"{h}시간" + (f" {m}분" if m and h < 10 else "")
-    d, h = divmod(sec // 3600, 24)
-    return f"{d}일" + (f" {h}시간" if h else "")
-
-
-def _bf_ext_pending(bf) -> list:
-    def path9(key):
-        ch9, _, rest9 = str(key).partition(":")
-        return (ch9.lower(), rest9 if rest9 in ("extend", "job", "rpc") else None)
-    out = []
-    for unit, items in ((bf or {}).items() if isinstance(bf, dict) else ()):
-        if not isinstance(items, dict) or str(unit).startswith("_"):
-            continue
-        last = {}
-        for key, it in items.items():
-            ch9, p9 = path9(key)
-            if p9 and isinstance(it, dict):
-                try:
-                    u9 = float(it.get("updated") or 0)
-                except (TypeError, ValueError):
-                    u9 = 0.0
-                last[(ch9, p9)] = max(last.get((ch9, p9), 0.0), u9)
-        for key, it in items.items():
-            if not isinstance(it, dict) or not (str(key).endswith(":extend") or it.get("phase") == "extend") or it.get("phase") == "done":
-                continue
-            ch9, p9 = path9(key)
-            if p9 and max(last.get((ch9, q9), -1.0) for q9 in ("extend", "job", "rpc")) > last.get((ch9, p9), 0.0):
-                continue
-            out.append((unit, key, it))
-    return out
-
-
-def bf_ext_phrase(bf, now: float) -> str:
-    acc = {}
-    for unit, key, it in _bf_ext_pending(bf):
-        try:
-            if now - float(it.get("updated") or 0) >= 3 * 3600:
-                continue
-            dn, tt, eta = float(it.get("done") or 0), float(it.get("total") or 0), float(it.get("eta_sec") or 0)
-        except (TypeError, ValueError):
-            continue
-        ch = {"bsc": "bsc", "sol": "sol", "ex": "upbit"}.get(unit) or str(key).split(":", 1)[0]
-        a = acc.setdefault(ch, [0.0, 0.0, 0.0])
-        a[0] += max(0.0, dn)
-        a[1] += max(0.0, tt)
-        a[2] = max(a[2], eta)
-    out = []
-    for ch, (dn, tt, eta) in sorted(acc.items(), key=lambda kv: (-kv[1][2], kv[0])):
-        bits = ([f"지금 {min(99, int(dn * 100 / tt))}%"] if tt > 0 else []) + ([f"약 {_fmt_left(eta)} 남음"] if eta > 0 else [])
-        out.append(f"{CHAIN_NAME.get(ch) or EX_NAME.get(ch) or ch} 과거 기록 넓히기" + (f"({' · '.join(bits)})" if bits else ""))
-    return " · ".join(out[:2]) + (f" 외 {len(out) - 2}개" if len(out) > 2 else "")
-
-
-BAL_RB_LIVE_SEC = 6 * 3600
-
-
-def bf_ext_live(obs: dict, now: float, stall_sec: float = 3600) -> bool:
-    for unit, key, it in _bf_ext_pending((obs or {}).get("bf")):
-        try:
-            upd = float(it.get("updated") or 0)
-            moved = float(it.get("moved_at") or it.get("started") or upd or 0)
-        except (TypeError, ValueError):
-            continue
-        if now - upd < BAL_RB_LIVE_SEC and (now - moved <= float(stall_sec or 3600) or fill_slow(obs, unit, key, it, now)):
-            return True
-    return False
-
-
-BF_EXT_ORPHAN_SEC = 24 * 3600
-
-
-def bf_ext_open(obs: dict, chain=None) -> bool:
-    pre = (str(chain).lower() + ":") if chain else ""
-    now = float((obs or {}).get("now") or time.time())
-    for _u, key, it in _bf_ext_pending((obs or {}).get("bf")):
-        if pre and not str(key).lower().startswith(pre):
-            continue
-        try:
-            if now - float(it.get("updated") or 0) >= BF_EXT_ORPHAN_SEC:
-                continue
-        except (TypeError, ValueError):
-            continue
-        return True
-    return False
-
-
-def rb_wait_sentence(bf, now: float) -> str:
-    ph = bf_ext_phrase(bf, now)
-    return (f"{ph}가 끝나면 원장 자동 재계산으로 사라져요 — 기다리면 됨" if ph
-            else "원장 자동 재계산이 끝나면 사라져요 — 기다리면 됨")
-
-
-def _fq(x) -> str:
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return "?"
-    s9 = f"{v:,.2f}" if abs(v) >= 1000 else f"{v:,.6g}"
-    return s9.replace("-", "−")
-
-
-def bal_guess(it: dict) -> str:
-    try:
-        lq, oq = float(it.get("ledger")), float(it.get("onchain"))
-    except (TypeError, ValueError):
-        return ""
-    if abs(lq) < 1e-12 and oq > 0:
-        return "장부에 이 코인이 아예 없어요 — 들어온 기록을 못 받은 듯해요"
-    if abs(oq) < 1e-12 and lq > 0:
-        return "실제로는 다 빠져나갔어요 — 장부에 없는 출금이 있는 듯해요"
-    if oq > lq:
-        return "실제가 더 많아요 — 장부에 없는 입금(로그 없는 입금·내부 이동 등)이 있는 듯해요"
-    if lq > oq:
-        return "장부가 더 많아요 — 장부에 없는 출금·수수료(로그 없는 송금 등)가 있는 듯해요"
-    return ""
-
-
-def bal_line(it: dict) -> str:
-    ch = it.get("chain")
-    d9 = f"(차이 ${abs(float(it.get('diffUsd') or 0)):,.0f})"
-    qty9 = it.get("ledger") is not None and it.get("onchain") is not None
-    if ch == "upbit":
-        return f"업비트 {it.get('sym')} — " + (f"장부 {_fq(it.get('ledger'))} · 업비트 잔고 {_fq(it.get('onchain'))} {d9}" if qty9 else d9)
-    return (f"{CHAIN_NAME.get(ch, ch)} 지갑 {_short_addr(it.get('wallet'))} 의 {it.get('sym')} — "
-            + (f"장부 {_fq(it.get('ledger'))} · 실제 {_fq(it.get('onchain'))} {d9}" if qty9 else d9))
-
-
-def bal_text(items: list, more: bool = False) -> str:
-    items = sorted(items or [], key=lambda x: -abs(float(x.get("diffUsd") or 0)))
-    n = len(items)
-    lines = [f"🔴 잔고가 장부와 하루 넘게 다른 곳이 {n}곳 더 생겼어요" if more else f"🔴 잔고가 장부와 하루 넘게 달라요 · {n}곳"]
-    stuck = sorted({w9 for x in items for w9 in (x.get("stuck") or [])})
-    if stuck:
-        lines.append("할 일: 기다리기 — " + " · ".join(stuck[:3]) + "이(가) 3일 넘게 안 끝났어요. 상태 패널에서 진행을 확인하세요.")
-        rbw9 = next((str(x["rbw"]) for x in items if x.get("rbw")), "")
-        if rbw9:
-            lines.append(f"  {rbw9}")
-    else:
-        lines.append("할 일: 앱 › 잔고 맞추기에서 이 지갑·코인을 열어 빠진 입출금이 있는지 보세요(장부는 자동으로 고치지 않아요) — 수집·재계산은 다 끝났어요.")
-    for it in items[:5]:
-        lines.append(bal_line(it))
-        g9 = bal_guess(it)
-        if g9:
-            lines.append(f"  짐작: {g9}")
-    if n > 5:
-        lines.append(f"… 외 {n - 5}곳(앱 › 잔고 맞추기)")
-    return "\n".join(lines)
-
-
-def _short_addr(a: str) -> str:
-    a = str(a or "")
-    return a[:6] + "…" + a[-4:] if len(a) > 14 else a
-
-
-REST_LATE_MARGIN = 900
-REST_LATE_MAX = 13 * 3600
-
-
-def tier_rest_map() -> dict:
-    out = {}
-    for f in glob.glob(os.path.join(common.STATE_DIR, "addr_tier_*.json")):
-        if os.path.basename(f) == "addr_tier_req.json":
-            continue
-        d = _read(f, None)
-        if not isinstance(d, dict) or not isinstance(d.get("pairs"), dict) or not d.get("scope"):
-            continue
-        sc = str(d["scope"])
-        for w, p in d["pairs"].items():
-            if isinstance(p, dict) and (int(p.get("tier") or 0) > 0 or p.get("rest") is True) and not p.get("hold"):
-                out.setdefault(sc, {})[w if sc == "sol" else str(w).lower()] = int(p.get("full") or 0)
-    return out
-
-
-def rest_late(it: dict, rest: dict, now: float = None) -> bool:
-    now = time.time() if now is None else now
-    ch = it.get("chain")
-    w = it.get("wallet") or ""
-    w = w if ch == "sol" else str(w).lower()
-    full = (rest.get(ch) or {}).get(w)
-    if full is None:
-        return False
-    try:
-        fs = float(it["firstSeen"])
-    except (KeyError, TypeError, ValueError):
-        return False
-    return full < fs + REST_LATE_MARGIN and 0 <= now - fs < REST_LATE_MAX
-
-
-def balcheck_split(bc: dict, sources) -> tuple:
-    pw, pnw, bfw = {}, {}, {}
-    for s9 in sources or []:
-        k9 = str(s9.get("key") or "")
-        if k9.startswith("chain:") and s9.get("backfill_wallets"):
-            bfw[k9[6:]] = [str(x).lower() for x in s9["backfill_wallets"]]
-        if s9.get("partial") and k9.startswith("chain:"):
-            pw[k9[6:]] = [str(x).lower() for x in (s9.get("partial_wallets") or [])]
-            pnw[k9[6:]] = [str(x).lower() for x in (s9.get("partial_native_wallets") or [])]
-    now9, late9 = [], []
-    try:
-        rest9 = tier_rest_map()
-    except Exception:
-        rest9 = {}
-    for it in bc.get("items") or []:
-        ch, w = it.get("chain"), str(it.get("wallet") or "").lower()
-        if rest9 and rest_late(it, rest9):
-            late9.append(it)
-        elif ch in pw and w and any(p9 and w.startswith(p9) for p9 in pw[ch]):
-            late9.append(it)
-        elif ch in bfw and w and any(p9 and w.startswith(p9) for p9 in bfw[ch]):
-            late9.append(it)
-        elif ch in pnw and w and not it.get("ca") and any(p9 and w.startswith(p9) for p9 in pnw[ch]):
-            late9.append(it)
-        else:
-            now9.append(it)
-    return now9, late9
-
-
 INBOX_NAME = {"evm": "EVM 체인 수집분", "bsc": "BSC 수집분", "sol": "Solana 수집분", "ex": "거래소 수집분"}
 
 
-def _activity_pairs() -> dict:
-    d = _read(os.path.join(common.STATE_DIR, "chain_activity.json"), None)
-    p = d.get("pairs") if isinstance(d, dict) else None
-    return p if isinstance(p, dict) else {}
-
-
-def collect_poison():
-    try:
-        import tsfix
-        return tsfix.status()
-    except (Exception, SystemExit) as e:
-        log.warning("격리 기록 집계 실패: %s", e)
-        return {"error": common.safe_err(e)[:160]}
-
-
-def collect_nonevm_gaps(cfg: dict) -> dict:
-    try:
-        import chain_registry as _reg9
-        chains9 = [c9 for c9 in _reg9.configured_chains(cfg or {}) if _reg9.available(c9)]
-    except Exception:
-        return {}
-    out = {}
-    for c9 in chains9:
-        try:
-            import chain_state as _cst9
-            own9 = _reg9.owners(cfg, c9)
-            st9 = _cst9.ChainState(c9, common.STATE_DIR)
-            gs9 = [g9 for g9 in st9.unresolved_gaps() if g9[1].get("owner") in own9]
-            ids9 = {g9[0] for g9 in gs9}
-            why9 = [str(x.get("why") or "") for x in st9.d["gaps"] if isinstance(x, dict) and str(x.get("id")) in ids9]
-            out[c9] = {"n": len(gs9), "why": why9[-1][:160] if why9 else ""}
-        except (Exception, SystemExit) as e:
-            log.warning("[%s] 수집 상태(상세 누락) 읽기 실패: %s", c9, common.safe_err(e)[:160])
-            out[c9] = None
-    return out
-
-
-def collect_recon_hold(cfg: dict) -> dict:
-    try:
-        import chain_registry as _reg9
-        chains9 = {c9 for c9 in _reg9.configured_chains(cfg or {}) if _reg9.available(c9)}
-    except Exception:
-        return {}
-    if not chains9:
-        return {}
-    d9 = _read(os.path.join(common.STATE_DIR, "recon_hold.json"), {})
-    out = {}
-    for c9, r9 in (d9.items() if isinstance(d9, dict) else ()):
-        if c9 in chains9 and isinstance(r9, dict):
-            try:
-                out[c9] = {"why": str(r9.get("why") or "")[:240], "since": float(r9.get("since")), "at": float(r9.get("at"))}
-            except (TypeError, ValueError):
-                continue
-    return out
-
-
-def _sweep_scope():
-    try:
-        import copy
-        import chainsweep as _cs9
-        cf9 = _read(common.CONFIG_PATH, None)
-        if not isinstance(cf9, dict) or not isinstance(cf9.get("wallets"), list):
-            return set(), {}
-        cf9 = copy.deepcopy(cf9)
-        cf9.setdefault("chains", {})
-        off9 = {}
-        for n, cc in (cf9.get("chains") or {}).items():
-            if isinstance(cc, dict) and not common.chain_enabled(n, cc):
-                co9 = cc.get("_chainoff") if isinstance(cc.get("_chainoff"), dict) else {}
-                try:
-                    off9[n] = float(co9["at"]) if co9.get("auto") is True and co9.get("at") else None
-                except (TypeError, ValueError):
-                    off9[n] = None
-        common.apply_activity_gate(cf9)
-        return {pr for pr in _cs9.wallets(cf9)[2] if pr[0] not in off9}, off9
-    except (Exception, SystemExit):
-        return set(), {}
-
-
-def collect_chainsweep():
-    d = _read(os.path.join(common.STATE_DIR, "chain_sweep.json"), None)
-    if not isinstance(d, dict):
-        return None
-    fs = [f for f in (d.get("findings") or []) if isinstance(f, dict)]
-    joined9, off9 = _sweep_scope()
-    fs = [f for f in fs if (str(f.get("chain") or ""), str(f.get("wallet") or "").lower()) not in joined9]
-    n_off = 0
-    if off9:
-        act9 = _activity_pairs()
-        keep9 = []
-        for f in fs:
-            c9 = str(f.get("chain") or "")
-            if c9 in off9:
-                at9 = off9[c9]
-                a9 = (act9.get(f"{c9}:{str(f.get('wallet') or '').lower()}") or {}).get("activatedAt")
-                try:
-                    new9 = at9 is not None and a9 is not None and float(a9) > at9
-                except (TypeError, ValueError):
-                    new9 = False
-                if not new9:
-                    n_off += 1
-                    continue
-            keep9.append(f)
-        fs = keep9
-    try:
-        import chainsweep as _cs9
-        sp9 = _read(common.BACKFILL_SPEED_PATH, None) or {}
-        cf9 = _read(common.CONFIG_PATH, None) or {}
-        auto9 = bool(((cf9.get("chain_sweep") or {}) if isinstance(cf9, dict) else {}).get("auto_enable") is True)
-        fs = [_cs9.refresh_reason(f, (sp9.get("chains") or {}) if isinstance(sp9, dict) else {}, auto9) for f in fs]
-    except Exception:
-        pass
-    return {"checkedAt": d.get("checkedAt"), "findings": fs, "off": n_off,
-            "auto": len(d.get("autoEnabled") or []), "errors": len(d.get("errors") or []), "chains": len(d.get("chains") or {})}
-
-
-def _offsite_obs(cfg, st: dict = None, now: float = None) -> dict:
-    o = ((cfg or {}).get("backup") or {}).get("offsite") if isinstance((cfg or {}).get("backup"), dict) else None
-    if not (isinstance(o, dict) and o.get("enabled") is True):
-        if isinstance(st, dict):
-            st.pop("offsite_since", None)
-        return None
-    since = None
-    if isinstance(st, dict):
-        since = st.setdefault("offsite_since", float(time.time() if now is None else now))
-    return {"enabled": True, "warn_h": o.get("warn_h") if isinstance(o.get("warn_h"), (int, float)) and not isinstance(o.get("warn_h"), bool) else 36,
-            "since": since, "status": _read(os.path.join(common.STATE_DIR, "backups", "offsite_status.json"), None)}
-
-
-def collect_inbox(st: dict, now: float):
-    mem = st.setdefault("inbox", {})
-    try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
-        try:
-            rows = conn.execute("SELECT stream, seg, off FROM inbox_offsets").fetchall()
-        finally:
-            conn.close()
-    except sqlite3.Error as e:
-        _READ_FAIL[common.DB_PATH] = type(e).__name__
-        if not mem:
-            return None
-        return {s9: {"unknown": True, "err": common.safe_err(e)[:120]} for s9 in sorted(mem)}
-    out = {}
-    for stream, seg, off in rows:
-        d = os.path.join(common.INBOX_DIR, stream)
-        try:
-            segs = sorted(int(f.split(".")[0]) for f in os.listdir(d) if f.endswith(".jsonl"))
-        except OSError:
-            continue
-        backlog = 0
-        for s in segs:
-            try:
-                sz = os.path.getsize(os.path.join(d, f"{s:09d}.jsonl"))
-            except OSError:
-                continue
-            if s > seg:
-                backlog += sz
-            elif s == seg:
-                backlog += max(0, sz - int(off))
-        pos = [int(seg), int(off)]
-        m = mem.get(stream) or {}
-        if m.get("pos") != pos or backlog == 0:
-            m = {"pos": pos, "since": now}
-        out[stream] = {"backlog": backlog, "stalled_since": m["since"] if backlog > 0 else None}
-        mem[stream] = m
-    return out
-
-
-def _tcp(host, port, timeout=3.0) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
-TAILSCALE_BINS = ("tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale",
-                  "/Applications/Tailscale.app/Contents/MacOS/Tailscale")
-
-
-def _tailnet_ip():
-    for b in TAILSCALE_BINS:
-        try:
-            out = subprocess.run([b, "ip", "-4"], capture_output=True, text=True, timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        ip = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
-        return ip if ip.startswith("100.") else ""
-    return None
-
-
-def collect_web(cfg: dict, st: dict, now: float):
-    if os.environ.get("TJ_HEALTH_NO_NET") == "1":
-        return None
-    web = (cfg or {}).get("web") or {}
-    port = int(web.get("port", 8023))
-    lo = _tcp("127.0.0.1", port)
-    mode = web.get("bind", "loopback")
-    res = {"lo": lo, "tail_mode": mode == "tailscale", "tail_ip": None, "ext": None}
-    if mode == "tailscale":
-        cache = st.setdefault("tailcache", {})
-        if now - float(cache.get("at") or 0) > 300:
-            cache.update(at=now, ip=_tailnet_ip())
-        ip = cache.get("ip")
-        res["tail_ip"] = ip
-        if ip:
-            res["ext"] = _tcp(ip, port)
-    return res
-
-
-FUT_WAIT_WARN_S = 3600
-FUT_WAIT_FRESH_S = 2400
-FUT_FB_SHOW_S = 86400
-FUT_PLACE_FRESH_S = 7200
-
-
-def collect_fut_wait(now: float, path: str = None) -> list:
-    d = _read(path or os.path.join(common.STATE_DIR, "exf_fut_wait.json"), None)
-    if not isinstance(d, dict):
-        return []
-    out = []
-    try:
-        fresh = now - float(d.get("ts") or 0) <= FUT_WAIT_FRESH_S
-    except (TypeError, ValueError):
-        fresh = False
-    names = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX"}
-    act = "tj-exf 로그의 '선물 스냅샷' 실패(권한·IP·시간 오차) 확인 — 선물 정산 수집이 되살아나면 대사가 저절로 이어져요"
-    base = {"unit": "tj-core", "action": act, "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "futwait"}
-    w = d.get("wait") if isinstance(d.get("wait"), dict) else {}
-    warn_w = {}
-    for ex, it in sorted(w.items()):
-        if not fresh or not isinstance(it, dict) or it.get("fallback"):
-            continue
-        try:
-            age = now - float(it.get("since") or now)
-        except (TypeError, ValueError):
-            continue
-        if age >= FUT_WAIT_WARN_S:
-            warn_w[str(ex)] = age
-    fb_live = {}
-    for ex, it in sorted(w.items()):
-        if fresh and isinstance(it, dict) and it.get("fallback"):
-            try:
-                fb_live[str(ex)] = float(it.get("since") or now)
-            except (TypeError, ValueError):
-                continue
-    fb_at = {}
-    for x in [x for x in (d.get("fb") or []) if isinstance(x, dict)]:
-        ex = str(x.get("ex") or "")
-        try:
-            at = float(x.get("at") or 0)
-        except (TypeError, ValueError):
-            continue
-        if ex and now - at <= FUT_FB_SHOW_S:
-            fb_at[ex] = max(fb_at.get(ex, 0.0), at)
-    for ex in sorted(set(names) | set(w) | {str(x.get("ex") or "") for x in (d.get("fb") or []) if isinstance(x, dict)} - {""}):
-        nm = names.get(ex, ex)
-        if ex in warn_w:
-            out.append(dict(base, cid=f"futwait:{ex}", title=f"선물 정산 기다리며 {nm} 대사 미룸 {fmt_ago(warn_w[ex])}", level="warn",
-                            detail="선물 정산 파일이 잔고 시각을 아직 못 덮어 그 거래소 잔고 대사를 미루는 중 — 3시간 넘으면 종전 규칙으로 대사"
-                                   "(그 사이 선물 정산은 지난날로 들어갈 수 있음)"))
-        else:
-            out.append(dict(base, cid=f"futwait:{ex}", title=f"{nm} 선물 정산 대기 없음", level="ok", detail="잔고 대사 정상 진행"))
-        if ex in fb_live:
-            out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 못 받아 종전 규칙으로 대사 중 ({fmt_ago(now - fb_live[ex])}째)", level="warn",
-                            detail="선물 정산 파일이 3시간 넘게 잔고를 못 덮어 종전 규칙으로 대사하는 중 — 그 사이 선물 정산은 정산 시각이 아니라 "
-                                   "지난날로 들어갈 수 있어요(원장 합·보유는 맞음 · 이중 계상 없음) · 선물 수집이 되살아나면 저절로 풀려요"))
-        elif ex in fb_at:
-            out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 못 받아 종전 규칙으로 대사 ({fmt_ago(now - fb_at[ex])} 전)", level="warn",
-                            detail="선물 정산 파일이 3시간 넘게 잔고를 못 덮어 종전 규칙으로 대사 — 그 사이 선물 정산은 정산 시각이 아니라 "
-                                   "지난날로 들어갔을 수 있어요(원장 합·보유는 맞음 · 이중 계상 없음)"))
-        else:
-            out.append(dict(base, cid=f"futwait:fb:{ex}", title=f"{nm} 선물 정산 종전 규칙 전환 없음(최근 하루)", level="ok", detail="정상"))
-    try:
-        pfresh = now - float(d.get("ts") or 0) <= FUT_PLACE_FRESH_S
-    except (TypeError, ValueError):
-        pfresh = False
-    pl = d.get("place") if isinstance(d.get("place"), dict) else {}
-    pbase = dict(base, kind="futplace", action="상세 사유는 tj-core 로그 '선물 정산 재배치' · 미리보기 python3 tools/exf_fut_place.py — 선물 정산 수집이 되살아나거나"
-                                                " 원장 백업이 생기면 다음 대사에 저절로 옮겨요(그 전 정산은 옛 배치 그대로 · 합은 맞음)")
-    for ex in sorted(set(names) | {str(k) for k in pl}):
-        nm = names.get(ex, ex)
-        it = pl.get(ex) if pfresh and isinstance(pl.get(ex), dict) else None
-        if it:
-            out.append(dict(pbase, cid=f"futplace:{ex}", title=f"선물 재배치 대기: {nm} — {str(it.get('why') or '사유 모름')[:120]}", level="warn",
-                            detail="지난 대사가 지난날로 보낸 선물 정산을 정산 시각으로 다시 놓는 1회 작업을 이 거래소만 미뤘어요(다른 거래소는 옮김)"))
-        else:
-            out.append(dict(pbase, cid=f"futplace:{ex}", title=f"{nm} 선물 재배치 대기 없음", level="ok", detail="정상"))
-    return out
-
-
-SNAP_MISS_SHOW_S = 7200
-
-
-def collect_snap_miss(now: float, path: str = None) -> list:
-    d = _read(path or os.path.join(common.STATE_DIR, "exf_snap_miss.json"), None)
-    if not isinstance(d, dict) or not isinstance(d.get("ex"), dict):
-        return []
-    names = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "하이퍼리퀴드"}
-    base = {"unit": "tj-exf", "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "snapmiss",
-            "action": "보통 선물·봇 거래가 잦아 10분마다 잔고가 움직이는 계정 — 할 일 없음(총자산이 최대 1시간 늦게 따라와요). 거래가 없는데 이어지면 tj-exf 로그 '잔고 표본 불일치' 확인"}
-    out = []
-    for ex in sorted({str(k) for k in d["ex"]} | {str(x) for x in (d.get("seen") if isinstance(d.get("seen"), list) else [])}):
-        it = d["ex"].get(ex)
-        nm = names.get(ex, ex)
-        try:
-            live = isinstance(it, dict) and it.get("forced") and now - float(it.get("at") or 0) <= SNAP_MISS_SHOW_S
-        except (TypeError, ValueError):
-            live = False
-        if live:
-            out.append(dict(base, cid=f"snapmiss:{ex}", title=f"잔고 표본 계속 다름: {nm} {str(it.get('why') or '').split(' ')[0]}", level="warn",
-                            detail=f"10분마다 받는 잔고 표본이 {int(it.get('n') or 0)}주기째 서로 달라({str(it.get('why') or '')[:60]}) 일치 확인 없이"
-                                   f" 약 1시간마다 반영 중 — 마지막 반영 {fmt_ts(float(it['forced']))}"))
-        else:
-            out.append(dict(base, cid=f"snapmiss:{ex}", title=f"{nm} 잔고 표본 일치", level="ok", detail="정상"))
-    return out
-
-
-def collect_disk():
-    try:
-        du = shutil.disk_usage(common.STATE_DIR)
-        return {"free": du.free, "total": du.total}
-    except OSError:
-        return None
-
-
-def collect_dm(st: dict, now: float, tg_configured: bool):
-    if not tg_configured:
-        st.pop("dm", None)
-        return None
-    cur = _read(os.path.join(common.STATE_DIR, "tg_cursor.json"), {}) or {}
-    lag = 0
-    for fn in ("pending_dm.jsonl", "alerts_web.jsonl", "alerts_fast.jsonl"):
-        p = os.path.join(common.STATE_DIR, fn)
-        try:
-            sz = os.path.getsize(p)
-        except OSError:
-            continue
-        if fn in cur:
-            lag += max(0, sz - int(cur.get(fn) or 0))
-    m = st.setdefault("dm", {"lag": 0, "since": None, "min": None})
-    if lag == 0:
-        m.update(lag=0, since=None, min=None)
-    elif m.get("since") is None or lag < (m.get("min") or 0):
-        m.update(lag=lag, since=now, min=lag)
-    else:
-        m["lag"] = lag
-    return {"lag": lag, "since": m.get("since")}
-
-
-def collect_tunnel(h: dict, pm2):
-    if os.environ.get("TJ_HEALTH_NO_NET") == "1":
-        return None
-    tn = h.get("tunnel") if isinstance(h.get("tunnel"), dict) else {}
-    unit = tn.get("unit") or ""
-    if not unit or (pm2 is not None and unit not in pm2):
-        return None
-    url = tn.get("ready_url") or ""
-    if not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
-        return None
-    import urllib.request
-    try:
-        with urllib.request.urlopen(url, timeout=3) as r:
-            d = json.loads(r.read().decode() or "{}")
-        return {"ok": True, "n": int(d.get("readyConnections") or 0)}
-    except Exception as e:
-        n = None
-        try:
-            n = int(json.loads(e.read().decode()).get("readyConnections") or 0)
-        except Exception:
-            pass
-        return {"ok": False, "n": n or 0, "err": f"{type(e).__name__}: {common.safe_err(e)[:100]}"}
-
-
-STABLE_USD = {"USDT", "USDC", "FDUSD", "BUSD", "DAI", "TUSD", "USD", "USDG", "USDE", "USD1", "RLUSD", "PYUSD", "USDP", "USDS"}
-def collect_exbal(now: float) -> list:
-    out = []
-    for p in sorted(glob.glob(os.path.join(common.STATE_DIR, "exf_balances_*.json"))):
-        ex = os.path.basename(p)[len("exf_balances_"):-5]
-        d = _read(p, None)
-        if not isinstance(d, dict):
-            continue
-        bal = d.get("balances") if isinstance(d.get("balances"), dict) else {}
-        try:
-            krw = float(bal.get("KRW") or 0)
-        except (TypeError, ValueError):
-            krw = 0.0
-        if not bal:
-            continue
-        out.append((ex, max(0.0, now - float(d.get("ts") or 0)), krw))
-    return out
-
-
 DEBT_SRC_KO = {"loan": "담보대출", "margin": "마진", "spot": "현물 음수"}
-
-
-def collect_debt(logs, now: float, h: dict):
-    S = common.STATE_DIR
-    sp9 = _read(os.path.join(S, "spot.json"), {}) or {}
-    exu9 = sp9.get("ex_usd") if isinstance(sp9.get("ex_usd"), dict) else {}
-    ext9 = sp9.get("ex_ts") if isinstance(sp9.get("ex_ts"), dict) else {}
-
-    def px_of(ex, a):
-        k9 = f"{ex}:{a}"
-        try:
-            v9, t9 = float(exu9.get(k9) or 0), float(ext9.get(k9) or 0)
-        except (TypeError, ValueError):
-            return None
-        return v9 if 0 < v9 < float("inf") and 0 <= now - t9 <= 3600 else None
-    out, from_file = {}, set()
-    for p in glob.glob(os.path.join(S, "exf_balances_*.json")):
-        ex = os.path.basename(p)[len("exf_balances_"):-5]
-        d = _read(p, None)
-        if not isinstance(d, dict):
-            continue
-        db = d.get("debts") if isinstance(d.get("debts"), dict) else (d.get("debt") if isinstance(d.get("debt"), dict) else None)
-        if db is not None:
-            from_file.add(ex)
-            loan_q = {}
-            for ln in (d.get("loans") if isinstance(d.get("loans"), list) else ()):
-                for a, q in ((ln.get("debt") or {}).items() if isinstance(ln, dict) and isinstance(ln.get("debt"), dict) else ()):
-                    try:
-                        loan_q[str(a).upper()] = loan_q.get(str(a).upper(), 0.0) + abs(float(q))
-                    except (TypeError, ValueError):
-                        continue
-            for k, v in db.items():
-                items = v.items() if isinstance(v, dict) else [(k, v)]
-                src = k if isinstance(v, dict) else "margin"
-                for a, q in items:
-                    try:
-                        q = -abs(float(q))
-                    except (TypeError, ValueError):
-                        continue
-                    lq = min(loan_q.get(str(a).upper(), 0.0), -q) if not isinstance(v, dict) else 0.0
-                    if lq > 0:
-                        out[(ex, "loan", str(a))] = -lq
-                        q += lq
-                    if q < -1e-12:
-                        out[(ex, src, str(a))] = q
-        for a, q in ((d.get("balances") or {}).items() if isinstance(d.get("balances"), dict) else ()):
-            if isinstance(q, (int, float)) and q < 0:
-                out[(ex, "spot", str(a))] = float(q)
-    u = (logs.units.get("tj-exf") or {}) if logs else {}
-    for (ex, src, a), (ts, v) in (u.get("debt") or {}).items():
-        if ex in from_file or now - ts > float(h["t"].get("debt_keep_sec", 7200)):
-            continue
-        out.setdefault((ex, src, a), v)
-    rows = []
-    for (ex, src, a), q in out.items():
-        pr = 1.0 if a.upper() in STABLE_USD else (px_of(ex, a) or px_of(ex, a.upper()))
-        rows.append((ex, src, a, q, abs(q) * float(pr) if pr else None))
-    rows.sort(key=lambda r: -(r[4] or 0))
-    return rows
-
-
-def _intent_entries(doc) -> list:
-    out = []
-    if not isinstance(doc, dict):
-        return out
-    try:
-        if doc.get("unit") and doc.get("ts"):
-            out.append((str(doc["unit"]), float(doc["ts"]), 1, f"{doc['unit']}:{doc['ts']}", None))
-        for e in doc.get("entries") or []:
-            if isinstance(e, dict) and e.get("unit") and e.get("ts"):
-                out.append((str(e["unit"]), float(e["ts"]), max(1, int(e.get("n") or 1)), f"{e['unit']}:{e['ts']}",
-                            float(e["win"]) if e.get("win") else None))
-    except (TypeError, ValueError):
-        pass
-    return out
-
-
-def _kind_t(kind: str, t: dict):
-    return {"chain": ("chain_warn", "chain_crit"), "exchange": ("exchange_warn", "exchange_crit"),
-            "upbit": ("upbit_warn", "upbit_crit"), "price": ("price_warn", "price_crit"),
-            "ex_price": ("ex_price_warn", "ex_price_crit"), "dex_price": ("dex_price_warn", "dex_price_crit"),
-            "stake": ("stake_warn", "stake_crit")}.get(kind)
 
 
 ACTIONS = {
@@ -2203,17 +305,6 @@ ACTIONS = {
 }
 
 
-def collect_keys(cfg: dict, now: float = None) -> dict:
-    try:
-        import settings_store
-        return {"evm": settings_store.needs_etherscan(cfg or {}), "etherscan": bool(settings_store.env_value("TJ_ETHERSCAN_KEY")),
-                "alchemyNeed": settings_store.needs_alchemy(cfg or {}), "alchemy": bool(settings_store.env_value("TJ_ALCHEMY_KEY")),
-                "ankrNeed": settings_store.needs_ankr(cfg or {}), "ankr": bool(settings_store.env_value("TJ_ANKR_KEY")),
-                "heliusNeed": settings_store.needs_helius(cfg or {}), "helius": bool(settings_store.env_value("TJ_HELIUS_KEY"))}
-    except Exception:
-        return {}
-
-
 def awake_age(now: float, base, sleeps) -> float:
     if base is None:
         return None
@@ -2225,106 +316,20 @@ def awake_age(now: float, base, sleeps) -> float:
     return max(0.0, age)
 
 
-def _liq_blind_checks(add, st9: dict, now: float) -> None:
-    for sec9 in ("venues", "risk"):
-        for k9, v9 in ((st9.get(sec9) if isinstance(st9.get(sec9), dict) else {}) or {}).items():
-            if not isinstance(v9, dict) or "bl" not in v9:
-                continue
-            try:
-                bl9 = int(v9.get("bl") or 0)
-                since9 = float(v9.get("since") or 0) or None
-            except (TypeError, ValueError):
-                continue
-            where9 = str(v9.get("where") or k9)[:60]
-            lvl9 = "crit" if bl9 >= 2 else "warn" if bl9 == 1 else "ok"
-            if lvl9 == "ok":
-                add(f"liq:see:{k9}", "tj-exf", f"청산 감시 · {where9}", "ok", "정상", "", persist=0, resolve=60, notify=False, remind=False, kind="liqblind")
-                continue
-            if v9.get("read"):
-                last9 = f"마지막 정상 {fmt_ts(since9)}({fmt_ago(now - since9)} 전)" if since9 else "마지막 정상 —"
-            elif v9.get("prev_read"):
-                last9 = f"마지막 정상 {fmt_ts(v9['prev_read'])}(재시작 전) · 재시작 뒤 한 번도 못 읽음"
-            else:
-                last9 = "감시 시작 뒤 한 번도 못 읽음"
-            why9 = {"perm": "API 키 권한 오류", "net": "연결 실패·시간 초과", "rl": "거래소 호출 한도"}.get(v9.get("kind"), "")
-            if v9.get("ok") is not False:
-                why9 = "조회 대기(호출 한도·쉼)"
-            det9 = (f"{last9} · 마지막으로 본 위험도: {str(v9.get('worst') or '—')[:120]}"
-                    + (f" · 원인: {why9}" if why9 else "") + (f"({str(v9.get('err'))[:80]})" if v9.get("err") else ""))
-            if bl9 == 1:
-                title9, det9 = f"청산 감시가 {where9} 못 봄", det9 + " · 열린 포지션·대출은 없어요 — 새로 열면 발견이 늦어요"
-            else:
-                title9 = f"청산 감시가 {where9} 못 봄" + (" — 마지막에 위험 구간" if bl9 >= 3 else "")
-            add(f"liq:see:{k9}", "tj-exf", title9, lvl9, det9,
-                "거래소(앱·웹)에서 포지션·대출을 직접 확인 · 권한 오류면 API 키·IP 허용 목록 확인(설정 › 거래소 키) — 텔레그램은 청산 감시가 직접 보내요",
-                since=since9, persist=0, resolve=60, notify=False, remind=False, kind="liqblind")
-
-
 RUNNER_KEYS = ("web", "core", "evm", "sol", "bsc", "ex", "exf", "alert",
                "tron", "sui", "ton", "btc")
-RUNNER_STALE_SEC = 180
 PM2LESS_NO_OK_SEC = 600
 PM2LESS_ALL_SEC = 300
 
 
-def _pid_alive(pid) -> bool:
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except (PermissionError, OSError, TypeError, ValueError):
-        return True
-
-
-def runner_alive(rec, now: float):
-    if not isinstance(rec, dict) or rec.get("by") == "reload":
-        return None
-    try:
-        age = now - float(rec.get("ts"))
-    except (TypeError, ValueError):
-        return None
-    pid = rec.get("pid")
-    alive_pid = _pid_alive(pid) if pid else True
-    if age > RUNNER_STALE_SEC:
-        return False, f"마지막 기록 {fmt_ago(age)} 전" + (" · 프로세스는 있음(멈춤)" if pid and alive_pid else " · 프로세스 없음")
-    if not alive_pid:
-        return False, f"기록 {fmt_ago(age)} 전 · 그 프로세스(pid {pid})가 없음"
-    why = str(rec.get("why") or "")
-    return True, ("대기: " + why[:80] if rec.get("state") == "waiting" and why else "실행 중") + f" · 기록 {fmt_ago(max(0.0, age))} 전 (pm2 없음 — 러너 기록)"
-
-
-def ledger_wait_item(rc, now: float, db_path: str = None):
-    if not isinstance(rc, dict) or rc.get("state") != "waiting" or rc.get("by") == "reload":
-        return None
-    try:
-        if not now - float(rc.get("ts")) < 600:
-            return None
-    except (TypeError, ValueError):
-        return None
-    why = str(rc.get("why") or "")
-    dbp = db_path or common.DB_PATH
-    ev = " · ".join(str(x) for x in (rc.get("evidence") or [])[:4])
-    try:
-        since = int(float(rc.get("since") or rc.get("ts")))
-    except (TypeError, ValueError):
-        since = None
-    if why.startswith("원장 파일 없음") and not os.path.exists(dbp):
-        return {"id": "ledger:missing", "kind": "missing", "title": "원장 파일 없음 — 복구 필요", "since": since,
-                "detail": "예전 원장 흔적: " + ev + " — 빈 원장을 만들지 않고 기다리는 중(수집은 인박스에 쌓임)",
-                "action": "python3 tools/ledger_restore.py list → restore <번호>(미리보기) → --apply · 정말 새로 시작이면 tools/ledger_restore.py new --apply"}
-    if why.startswith("원장이 이 코드보다 새") and os.path.exists(dbp):
-        return {"id": "ledger:newer", "kind": "newer", "title": "원장이 코드보다 새 판 — 코드 업데이트 필요", "since": since,
-                "detail": why[:300] + " — core 를 띄우지 않고 기다리는 중(수집은 인박스에 쌓임)",
-                "action": "README '업데이트' 절대로 코드를 최신으로(git pull → bash tools/setup.sh → 재시작) · 옛 코드를 써야 하면 python3 tools/ledger_restore.py list"}
-    if why.startswith("원장 손상") and os.path.exists(dbp):
-        return {"id": "ledger:corrupt", "kind": "corrupt", "title": "원장 손상 — 복구 필요", "since": since,
-                "detail": "검사 결과: " + (ev or "?") + " — 원장을 열지 않고 기다리는 중(수집은 인박스에 쌓임 · 되돌리면 지금 원장은 보존본으로 남음)",
-                "action": "python3 tools/ledger_restore.py list → restore <번호>(미리보기) → 유닛 정지 → --apply → pm2 start tj-core"}
-    return None
-
-
 def evaluate(obs: dict, h: dict, open_ids=()) -> list:
+    _bs9 = _eval_units(obs, h, open_ids)
+    _eval_feeds(_bs9)
+    _eval_risk(_bs9)
+    return _eval_ops(_bs9)
+
+
+def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
     t = h["t"]
     now = obs["now"]
     sleeps = obs.get("sleeps") or []
@@ -2527,6 +532,29 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
                   if dur9 is not None else "대기 없음"),
             "pm2 logs tj-ex --lines 80 에서 '추적 주문 … 단건 조회 실패' 사유 확인(키 권한·레이트리밋·업비트 점검)",
             since=ps9 if dur9 is not None else None, persist=0, kind="upbit")
+    return dict(locals())
+
+
+def _eval_feeds(_bs9):
+    (ackf, add, checks, chip, down_units, eff_age, h, logs, now, obs, open_ids, pm2, run, t, units,) = (_bs9["ackf"], _bs9["add"], _bs9["checks"], _bs9["chip"], _bs9["down_units"], _bs9["eff_age"], _bs9["h"], _bs9["logs"], _bs9["now"], _bs9["obs"], _bs9["open_ids"], _bs9["pm2"], _bs9["run"], _bs9["t"], _bs9["units"],)
+    if "age" in _bs9:
+        age = _bs9["age"]
+    if "bad9" in _bs9:
+        bad9 = _bs9["bad9"]
+    if "det" in _bs9:
+        det = _bs9["det"]
+    if "lvl" in _bs9:
+        lvl = _bs9["lvl"]
+    if "n9" in _bs9:
+        n9 = _bs9["n9"]
+    if "recent" in _bs9:
+        recent = _bs9["recent"]
+    if "rs9" in _bs9:
+        rs9 = _bs9["rs9"]
+    if "s" in _bs9:
+        s = _bs9["s"]
+    if "u" in _bs9:
+        u = _bs9["u"]
     for unit, doc in (obs.get("hb") or {}).items():
         un = unit if unit.startswith("tj-") else f"tj-{unit}"
         if un not in units:
@@ -2598,6 +626,20 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
              "(탐색기 한 곳만 — 그 탐색기가 막힌 체인은 오래 들고만 있던 토큰을 놓칠 수 있어요). 거래 수집·감시는 그대로 돌아요"),
             "dashboard.alchemy.com/signup 에서 무료 키를 받아 설정 › 연결 · 키 › Alchemy 에 넣으세요(재시작 없이 바로 써요)",
             persist=0, resolve=60, notify=False, remind=False, kind="key")
+    alr9 = kk.get("alchemyRej") if kk.get("alchemy") else None
+    alu9 = "tj-evm" if "tj-evm" in units else "tj-bsc" if "tj-bsc" in units else (units[0] if units else "tj-web")
+    if isinstance(alr9, dict):
+        alw9 = {"month": "월 사용량(CU) 한도를 다 썼어요", "pay": "결제가 필요하다고 거절했어요", "key": "키를 거부했어요"}.get(alr9.get("why"), "요청을 계속 거절해요")
+        add("key:alchemy_rej", alu9, "Alchemy " + ("월 한도 초과" if alr9.get("why") == "month" else "키 거절"), "warn",
+            f"Alchemy 가 {alw9}" + (f"(HTTP {alr9['code']})" if isinstance(alr9.get("code"), int) else "") + f" · {int(alr9.get('n') or 0)}번째 거절 · "
+            "지갑 토큰·잔고 찾기와 Base 옛 내부 이동 보완을 지금 못 해요(거래 수집·감시는 무료 노드로 그대로 돌아요)",
+            ("dashboard.alchemy.com 에서 이번 달 사용량을 확인하세요 — 다음 결제 주기에 저절로 풀리거나, 요금제를 올리거나 다른 키를 설정 › 연결 · 키 › Alchemy 에 넣으면 바로 다시 써요"
+             if alr9.get("why") in ("month", "pay") else
+             "설정 › 연결 · 키 › Alchemy 에서 키를 다시 확인해 넣어 주세요(대시보드에서 키가 지워졌거나 앱이 꺼졌을 수 있어요)"),
+            since=float(alr9.get("first") or alr9.get("since") or now), persist=0, resolve=600, remind=False, kind="key")
+        checks[-1]["tg_force"] = True
+    elif "key:alchemy_rej" in open_ids:
+        add("key:alchemy_rej", alu9, "Alchemy", "ok", "다시 응답해요", persist=0, resolve=600, remind=False, kind="key")
     if kk.get("ankrNeed") and "ankr" in kk and ("tj-evm" in units or "tj-bsc" in units):
         have = bool(kk.get("ankr"))
         add("key:ankr", "tj-evm" if "tj-evm" in units else "tj-bsc", "Ankr 키" if have else "Ankr 키가 필요해요(무료)", "ok" if have else "warn",
@@ -2686,6 +728,8 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
     if "tj-exf" in units:
         for c9 in collect_snap_miss(now):
             add(**c9)
+    for c9 in collect_calcguard(now):
+        add(**c9)
     di = obs.get("decis")
     if isinstance(di, dict) and isinstance(di.get("items"), dict) and "tj-core" in units:
         its = [x for x in di["items"].values() if isinstance(x, dict)]
@@ -3116,6 +1160,47 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             "pm2 logs tj-review — '/api/state 조회 실패' 면 tj-web 접속(루프백) 확인",
             since=r.get("since") if lvl == "crit" else None, persist=0, resolve=0, remind=False, kind="review")
         chip("리뷰 꺼짐(claude CLI 없음)" if lvl == "off" else f"리뷰 {r.get('latest') or r['date'] if lvl == 'ok' else r['date']}" + (" 누락" if lvl == "crit" else ""))
+    _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")
+
+
+def _eval_risk(_bs9):
+    (ackf, add, checks, chip, eff_age, now, obs, t,) = (_bs9["ackf"], _bs9["add"], _bs9["checks"], _bs9["chip"], _bs9["eff_age"], _bs9["now"], _bs9["obs"], _bs9["t"],)
+    if "age" in _bs9:
+        age = _bs9["age"]
+    if "c9" in _bs9:
+        c9 = _bs9["c9"]
+    if "cid" in _bs9:
+        cid = _bs9["cid"]
+    if "cid9" in _bs9:
+        cid9 = _bs9["cid9"]
+    if "crit9" in _bs9:
+        crit9 = _bs9["crit9"]
+    if "det" in _bs9:
+        det = _bs9["det"]
+    if "det9" in _bs9:
+        det9 = _bs9["det9"]
+    if "fc9" in _bs9:
+        fc9 = _bs9["fc9"]
+    if "it" in _bs9:
+        it = _bs9["it"]
+    if "k9" in _bs9:
+        k9 = _bs9["k9"]
+    if "lvl" in _bs9:
+        lvl = _bs9["lvl"]
+    if "lvl9" in _bs9:
+        lvl9 = _bs9["lvl9"]
+    if "mem9" in _bs9:
+        mem9 = _bs9["mem9"]
+    if "old9" in _bs9:
+        old9 = _bs9["old9"]
+    if "rs9" in _bs9:
+        rs9 = _bs9["rs9"]
+    if "ttl" in _bs9:
+        ttl = _bs9["ttl"]
+    if "unk9" in _bs9:
+        unk9 = _bs9["unk9"]
+    if "why9" in _bs9:
+        why9 = _bs9["why9"]
     bc = obs.get("balcheck")
     if bc is not None:
         lvl = "crit" if bc["confirmed"] else "ok"
@@ -3324,6 +1409,31 @@ def evaluate(obs: dict, h: dict, open_ids=()) -> list:
             f"여유 {gb:,.1f}GB ({pct:.1f}%)", "오래된 백업(ledger.db.bak_*)·로그 정리 — 원장 쓰기가 실패하기 전에",
             kind="disk")
         chip(f"디스크 여유 {gb:,.0f}GB")
+    _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")
+
+
+def _eval_ops(_bs9):
+    (add, checks, chip, down_units, eff_age, h, net_bad, now, obs, open_ids, open_units, t,) = (_bs9["add"], _bs9["checks"], _bs9["chip"], _bs9["down_units"], _bs9["eff_age"], _bs9["h"], _bs9["net_bad"], _bs9["now"], _bs9["obs"], _bs9["open_ids"], _bs9["open_units"], _bs9["t"],)
+    if "age" in _bs9:
+        age = _bs9["age"]
+    if "bad" in _bs9:
+        bad = _bs9["bad"]
+    if "c" in _bs9:
+        c = _bs9["c"]
+    if "cid" in _bs9:
+        cid = _bs9["cid"]
+    if "fs" in _bs9:
+        fs = _bs9["fs"]
+    if "lim9" in _bs9:
+        lim9 = _bs9["lim9"]
+    if "lvl" in _bs9:
+        lvl = _bs9["lvl"]
+    if "old9" in _bs9:
+        old9 = _bs9["old9"]
+    if "sn9" in _bs9:
+        sn9 = _bs9["sn9"]
+    if "u9" in _bs9:
+        u9 = _bs9["u9"]
     rl = obs.get("reload")
     if isinstance(rl, dict) and rl.get("level") in ("warn", "ok"):
         try:
@@ -3606,8 +1716,6 @@ def _min_level(h) -> int:
     return LEVELS.get(h.get("telegram_min_level") or "crit", 2)
 
 
-UNIT_KO = {"tj-evm": "이더리움 계열 수집", "tj-sol": "솔라나 수집", "tj-bsc": "BSC 수집", "tj-ex": "업비트 수집", "tj-exf": "해외 거래소 수집",
-           "tj-core": "장부 계산", "tj-web": "화면 서버", "tj-alert": "알림", "tj-review": "AI 복기"}
 _ACT_ROUTINE = "대부분 저절로 풀려요 — 한 시간 넘게 이어지면 한 번 더 알려 드릴게요(원인과 조치는 상태 패널에)."
 _AUTO_KINDS = frozenset({"chain", "exchange", "upbit", "price", "ex_price", "dex_price", "net", "stake", "tunnel"})
 _ACT_MANUAL = "저절로 안 풀릴 수 있어요 — 상태 패널에서 원인과 조치를 확인하세요."
@@ -3684,17 +1792,12 @@ def _txt_resolve(lst, now) -> str:
 
 
 def _act(i) -> str:
-    if bool(i.get("tg_force")) and LEVELS.get(i.get("peak"), 0) < LEVELS["crit"]:
-        return _ACT_SOFT
     k = _kind_of(i)
+    if bool(i.get("tg_force")) and LEVELS.get(i.get("peak"), 0) < LEVELS["crit"]:
+        return _ACT_MANUAL if k == "key" else _ACT_SOFT
     if k == "disk":
         return _ACT_DISK
     return _ACT_ROUTINE if k in _AUTO_KINDS else _ACT_MANUAL
-
-
-def _u(i) -> str:
-    u = str(i.get("unit") or "")
-    return UNIT_KO.get(u) or ("원격 접속" if u.endswith("-tunnel") else u)
 
 
 _PLAIN = (("외부 탐색기(블록스카웃)", "외부 탐색기"), ("대시보드 미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("미매칭 › 잔고 대사", "앱 › 잔고 맞추기"), ("잔고 대사", "잔고 맞추기"),

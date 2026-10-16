@@ -219,5 +219,14 @@ check("K11 원장이 이미 자릿수를 알면(4) 자릿수 없는 레코드도
 TK0 = "41" + "e8" * 20
 feed(N.rec("tron", "c3" * 32, NOW - 3 * DAY, [(A, ("token", TK0, "ZD", 0), 9)]))
 check("K11 자릿수 0 토큰 = 정상 기장(None 과 다름)", ev("c3" * 32) == "TRANSFER_IN")
-check("K11 EVM 원본 기장 경로는 이 검사와 무관(apply_chain_delta 안에서만)", "자릿수 미확인" not in open(os.path.join(T.SRC, "core.py"), encoding="utf-8").read().split("def apply_chain_delta")[0])
+def _k11_src():
+    if not os.path.exists(os.path.join(T.SRC, "core_post.py")):
+        return open(os.path.join(T.SRC, "core.py"), encoding="utf-8").read().split("def apply_chain_delta")[0]
+    parts = [open(os.path.join(T.SRC, f9), encoding="utf-8").read()
+             for f9 in ("core.py", "core_common.py", "core_dec.py", "core_classify.py", "core_outflow.py", "core_lp.py")]
+    parts.append(open(os.path.join(T.SRC, "core_post.py"), encoding="utf-8").read().split("def apply_chain_delta")[0])
+    return "\n".join(parts)
+
+
+check("K11 EVM 원본 기장 경로는 이 검사와 무관(apply_chain_delta 안에서만)", "자릿수 미확인" not in _k11_src())
 T.finish()

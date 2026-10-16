@@ -4,6 +4,7 @@ import hashlib
 import json
 import struct
 import urllib.request
+import calcguard
 
 DLMM_PROG = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
 MGR = "dlmm"
@@ -125,7 +126,8 @@ def extract(tx: dict, mine) -> dict:
             mints = [accs[mi[0]], accs[mi[1]]] if mi and mi[1] < len(accs) else None
             out.append([kind, name, accs[pi], accs[qi] if 0 <= qi < len(accs) else None, bps, mints])
         return {"prog": MGR, "ixs": out} if out else None
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpsol:extract", _cg9)
         return None
 
 
@@ -230,7 +232,8 @@ def _rpc(urls, method, params, timeout=20):
                 d = json.loads(_bfe9.common.read_capped(r).decode())
             if "result" in d:
                 return d["result"]
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpsol:_rpc", _cg9)
             continue
     return None
 
@@ -247,7 +250,8 @@ def _accounts(urls, keys):
             continue
         try:
             out.append((v.get("owner"), base64.b64decode(v["data"][0])))
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpsol:_accounts", _cg9)
             out.append(None)
     return out
 
@@ -370,5 +374,6 @@ def read_dlmm_position(urls, pos_key: str, meta_of=None) -> dict:
                 "fees0": fx / 10 ** d0, "fees1": fy / 10 ** d1, "price": px(pair["active_id"]),
                 "priceLower": px(pos["lower"]), "priceUpper": px(pos["upper"] + 1),
                 "inRange": pos["lower"] <= pair["active_id"] <= pos["upper"], "feesOk": ok, "amountsOk": ok}
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpsol:read_dlmm_position", _cg9)
         return {}

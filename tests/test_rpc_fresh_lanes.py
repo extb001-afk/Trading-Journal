@@ -39,10 +39,12 @@ def logical(fn):
     ck = LCLK[0] = LogicalClock()
     ew0, bf0 = evm_watch.time, bf_engine.time
     evm_watch.time = bf_engine.time = ck
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     try:
         return fn()
     finally:
         evm_watch.time, bf_engine.time = ew0, bf0
+        T.patch_moved("time", evm_watch.time, ("evm_",))
         LCLK[0] = None
 
 
@@ -259,6 +261,7 @@ import bf_engine
 import evm_watch
 
 evm_watch._dm = lambda *a, **k: None
+T.patch_moved("_dm", evm_watch._dm, ("evm_",))
 bf_engine.urllib.request.urlopen = _loop_urlopen
 bf_engine.configure(CFG)
 SD = common.STATE_DIR
@@ -413,6 +416,7 @@ reset_state()
 cfg5 = json.loads(json.dumps(CFG))
 cfg5["chains"]["base"] = ccfg("ret")
 evm_watch.RETENTION_CONFIRM_SEC = 0
+T.patch_moved("RETENTION_CONFIRM_SEC", evm_watch.RETENTION_CONFIRM_SEC, ("evm_",))
 wr5r = Wr()
 w5r = new_watcher(cfg5, wr5r)
 r5r = None
@@ -429,6 +433,7 @@ T.chk(bool(c5r.get("_synced_at")) and H["mid_usdc"] in wr5r.hashes() and H["old_
       "F5 완주 뒤 도장 · 보관 안의 옛 토큰 입금 방출 · 보관 밖 구간 입금은 미수집(기초 잔고 대조가 맞춤 — 종전 규약)",
       {"synced": c5r.get("_synced_at"), "emitted": sorted(h[-6:] for h in wr5r.hashes())})
 evm_watch.RETENTION_CONFIRM_SEC = 1800
+T.patch_moved("RETENTION_CONFIRM_SEC", evm_watch.RETENTION_CONFIRM_SEC, ("evm_",))
 
 reset_state()
 cfg6 = json.loads(json.dumps(CFG))
@@ -698,7 +703,9 @@ def rpc_boom(*a, **k):
 probe = {"bs": (True, None), "rpc": (False, "down")}
 bs0, rp0, cwc0, rwc0 = evm_watch._bs_probe, evm_watch._rpc_probe, evm_watch.ChainWatcher.cycle, evm_watch.RpcChainWatcher.cycle
 evm_watch._bs_probe = lambda cfg9, chain9, w9=None: probe["bs"]
+T.patch_moved("_bs_probe", evm_watch._bs_probe, ("evm_",))
 evm_watch._rpc_probe = lambda cfg9, chain9, w9=None: probe["rpc"]
+T.patch_moved("_rpc_probe", evm_watch._rpc_probe, ("evm_",))
 evm_watch.ChainWatcher.cycle = lambda self: None
 lr0 = evm_watch.RPC_LR_SEC
 try:
@@ -707,6 +714,7 @@ try:
         lp.step()
     T.chk(isinstance(lp.wt, evm_watch.RpcChainWatcher), "L1 RPC 연속 실패가 30분 안 = RPC 그대로 재시도(블록스카웃으로 안 감)", type(lp.wt).__name__)
     evm_watch.RPC_LR_SEC = 0
+    T.patch_moved("RPC_LR_SEC", evm_watch.RPC_LR_SEC, ("evm_",))
     probe["bs"] = (False, "HTTP Error 403")
     evm_watch._RPCFB_MEM["optimism"]["lr_probe_next"] = 0
     lp.wt.cycle = rpc_boom
@@ -776,6 +784,7 @@ try:
 finally:
     evm_watch._bs_probe, evm_watch._rpc_probe, evm_watch.ChainWatcher.cycle, evm_watch.RpcChainWatcher.cycle = bs0, rp0, cwc0, rwc0
     evm_watch.RPC_LR_SEC = lr0
+    T.patch_moved("RPC_LR_SEC", evm_watch.RPC_LR_SEC, ("evm_",))
 
 reset_state()
 wr5 = Wr()

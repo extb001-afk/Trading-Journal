@@ -6,6 +6,7 @@ import time
 
 import common
 import spamguard
+import calcguard
 
 SID_TAG = ":disc:"
 CAND = "negabs_cand:"
@@ -379,10 +380,8 @@ def write_anchor(core, chain: str, w: str, aid: int, ca, diff: int, obs_block: i
             pay[k] = v
     conn.execute("INSERT INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                  (sid, "opening_balance", chain, json.dumps(pay, ensure_ascii=False), int(obs_ts) + 1))
-    conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw,"
-                 " leg_kind, event, classifier_ver) VALUES ('opening', ?, ?, 0, ?, ?, ?, ?, NULL, NULL, 'opening', 'OPENING', ?)",
-                 (chain, sid, int(at_ts), int(aid), loc, str(int(diff)), _ver(core)))
-    core._bump_position(int(aid), int(diff), loc)
+    core._post_leg_strict("opening", chain, sid, 0, int(at_ts), int(aid), loc, int(diff), None, None, "opening", "OPENING",
+                          ver=_ver(core))
     core.__dict__.pop("_disc_t_cache", None)
     return sid
 
@@ -397,6 +396,7 @@ def after_write(at_ts: int, log=None) -> None:
     try:
         common.mark_hist_dirty(int(at_ts))
     except Exception as e:
+        calcguard.swallowed("discopen:after_write", e)
         if log:
             log.warning("발견 시점 기초 잔고: 장기 곡선 표식 실패: %s", e)
 
@@ -752,6 +752,7 @@ class Runner:
             if job["err"] is not None:
                 self.jobs.pop(k, None)
                 e = job["err"]
+                calcguard.swallowed("discopen:Runner._harvest", e)
                 if _state_err(e) and job.get("fb_hold"):
                     d.update(st="wait", why=str(job["fb_hold"]), next=now + WAIT_RETRY)
                     self._put(k, d)
@@ -848,6 +849,7 @@ class Runner:
             try:
                 st, why, sid = self._recheck_one(it, prefs)
             except Exception as e:
+                calcguard.swallowed("discopen:Runner._recheck_request", e)
                 self.core.conn.rollback()
                 st, why, sid = "err", common.safe_err(str(e))[:160], ""
             key = f"{(it or {}).get('chain')}:{str((it or {}).get('wallet') or '').lower()}:{str((it or {}).get('ca') or 'native').lower()}@{(it or {}).get('block')}" \

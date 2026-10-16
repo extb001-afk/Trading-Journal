@@ -33,6 +33,8 @@ import recon
 import token_discovery
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 PF = os.path.join(common.STATE_DIR, "prov_bal.json")
 
 

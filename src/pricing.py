@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import common
+import calcguard
 
 _UA = {"Accept": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"}
 
@@ -185,7 +186,8 @@ def _upbit_code(sym: str) -> str:
         for code, canon in (acct_norm._aliases().get("upbit") or {}).items():
             if canon == sym and code != sym:
                 return code
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("pricing:_upbit_code", _cg9)
         pass
     return sym
 
@@ -240,7 +242,8 @@ def _cg_pts_at(pts, ms):
 def _cg_sym_id(sym):
     try:
         import candles as _cd
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("pricing:_cg_sym_id", _cg9)
         return None
     s9 = str(sym or "").upper()
     if _cd.KNOWN_CG_ID.get(s9):
@@ -263,7 +266,8 @@ def _cg_keyed(url, lane, allow, valid, timeout=15.0):
         return "skip", "allow"
     try:
         import cgkey
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("pricing:_cg_keyed", _cg9)
         return "skip", "import"
     if not cgkey.key():
         return "skip", "nokey"
@@ -305,6 +309,7 @@ def cg_points_day(key, url_base, day0, store=None, keyed=False):
             return None
         pts = []
     except Exception as e:
+        calcguard.swallowed("pricing:cg_points_day", e)
         if getattr(e, "code", None) == 404 and getattr(e, "kind", "") == "http4xx":
             pts = []
         else:
@@ -561,12 +566,14 @@ class PxCache:
                     px = fn(alt9, m)
                 else:
                     px = fn(sym, m)
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.candle_usd", _cg9)
                 px = None
             if not px and alt9 and _name in ("binance", "bybit"):
                 try:
                     px = fn(alt9, m)
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("pricing:PxCache.candle_usd", _cg9)
                     px = None
             if px:
                 ven9 = _name
@@ -598,7 +605,8 @@ class PxCache:
                 if getattr(e, "code", None) not in (400, 404):
                     return None
                 v = None
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.jpy_stable_usd", _cg9)
                 return None
             if v:
                 with self.lock:
@@ -617,7 +625,8 @@ class PxCache:
             try:
                 d = _gj(f"https://api.frankfurter.app/{day}?from=JPY&to=USD")
                 jv = float(((d or {}).get("rates") or {}).get("USD") or 0) or None
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.jpy_stable_usd", _cg9)
                 jv = None
             if jv:
                 with self.lock:
@@ -657,7 +666,8 @@ class PxCache:
             to_s = datetime.fromtimestamp(end / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WIN}")
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.prefetch_fx", _cg9)
                 arr = None
             calls += 1
             i += len(grp)
@@ -715,7 +725,8 @@ class PxCache:
                         bn.append((int(row[0]), float(row[1])))
                     except (TypeError, ValueError, IndexError):
                         continue
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.prefetch_fx", _cg9)
                 ub, bn = [], []
                 _fail()
                 stop = True
@@ -781,7 +792,8 @@ class PxCache:
                         dead[s9] = time.time()
                         break
                     arr = None
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("pricing:PxCache.prefetch_candles", _cg9)
                     arr = None
                 opens = {}
                 for row in arr or []:
@@ -816,7 +828,8 @@ class PxCache:
     def cg_usd_at(self, ts_ms: int, chain: str = None, ca: str = None, keyed: bool = False) -> float | None:
         try:
             import candles as _cd
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("pricing:PxCache.cg_usd_at", _cg9)
             return None
         plat = _cd.CG_PLATFORM.get(chain or "")
         if not plat or not ca:
@@ -865,7 +878,8 @@ class PxCache:
             return None
         try:
             fx = _fx_candle_krw_per_usdt(m)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("pricing:PxCache.fx_at", _cg9)
             fx = None
         with self.lock:
             if fx:
@@ -913,7 +927,8 @@ class PxCache:
             to_s = datetime.fromtimestamp(g[-1] / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WARM_SPAN}")
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxCache.fx_warm", _cg9)
                 arr = None
             if not isinstance(arr, list):
                 with self.lock:
@@ -986,7 +1001,8 @@ class PxFetchQueue:
                     self.px.candle_usd(sym, m)
                 elif kind == "fx":
                     self.px.fx_at(m)
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxFetchQueue.drain", _cg9)
                 pass
         if items:
             self.px.maybe_save()
@@ -1001,7 +1017,8 @@ class PxFetchQueue:
             self.ev.clear()
             try:
                 self.drain()
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:PxFetchQueue._loop", _cg9)
                 time.sleep(5)
 
 
@@ -1039,7 +1056,8 @@ class FxWarmQueue(PxFetchQueue):
                     try:
                         if not fx_ms or self.px.fx_warm(fx_ms) <= 0:
                             break
-                    except Exception:
+                    except Exception as _cg9:
+                        calcguard.swallowed("pricing:FxWarmQueue.drain", _cg9)
                         break
                     fx_ms = [m for k, _s, m in self._missing([("fx", "", m9) for m9 in fx_ms])]
                 for kind, sym, m in self._missing(left):
@@ -1048,7 +1066,8 @@ class FxWarmQueue(PxFetchQueue):
                             self.px.fx_at(m)
                         elif kind == "c":
                             self.px.candle_usd(sym, m)
-                    except Exception:
+                    except Exception as _cg9:
+                        calcguard.swallowed("pricing:FxWarmQueue.drain", _cg9)
                         pass
                     if gap:
                         time.sleep(gap)
@@ -1098,7 +1117,8 @@ def upbit_tickers(markets: list) -> dict:
         mk = ",".join(markets[i:i + 50])
         try:
             arr = _gj(f"https://api.upbit.com/v1/ticker?markets={urllib.parse.quote(mk)}")
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("pricing:upbit_tickers", _cg9)
             continue
         finally:
             time.sleep(0.12)
@@ -1189,7 +1209,8 @@ def upbit_spot_krw(syms: list) -> dict:
         mk = ",".join(f"KRW-{s}" for s in syms[i:i + 50])
         try:
             arr = _gj(f"https://api.upbit.com/v1/ticker?markets={urllib.parse.quote(mk)}")
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("pricing:upbit_spot_krw", _cg9)
             continue
         for t in arr or []:
             try:
@@ -1331,7 +1352,8 @@ def binance_dead_syms(now: float = None) -> frozenset:
     _BN_DEAD["at"] = now
     try:
         arr = _gj("https://api.binance.com/api/v3/ticker/24hr?type=MINI", timeout=20)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("pricing:binance_dead_syms", _cg9)
         return _BN_DEAD["syms"]
     if not isinstance(arr, list):
         return _BN_DEAD["syms"]
@@ -1496,13 +1518,15 @@ def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
             ra = None
             try:
                 ra = (e.headers or {}).get("Retry-After")
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:gt_token_prices_ex", _cg9)
                 pass
             _GT_ERR = ("rate" if e.code == 429 else "http", "gate" if isinstance(e, GtGateWait) else e.code, str(ra or ""))
             if e.code == 429:
                 break
             continue
         except Exception as e:
+            calcguard.swallowed("pricing:gt_token_prices_ex", e)
             _GT_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
             continue
         finally:
@@ -1531,6 +1555,7 @@ def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
                     if e.code != 404:
                         _GT_UNRESOLVED.update(miss9)
                 except Exception as e:
+                    calcguard.swallowed("pricing:gt_token_prices_ex", e)
                     _GT_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
                     _GT_UNRESOLVED.update(miss9)
                 finally:
@@ -1610,6 +1635,7 @@ def ds_token_prices(chain: str, cas: list):
         _DS_ERR = ("rate" if e.code == 429 else "http", e.code, "")
         return {}, {}
     except Exception as e:
+        calcguard.swallowed("pricing:ds_token_prices", e)
         _DS_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
         return {}, {}
     finally:
@@ -1727,7 +1753,8 @@ def okx_dex_prices(creds: dict, pairs: list) -> dict:
             try:
                 with urllib.request.urlopen(req, timeout=12) as r:
                     d = json.loads(common.read_capped(r).decode())
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("pricing:okx_dex_prices", _cg9)
                 continue
             if str(d.get("code")) != "0":
                 continue
@@ -1763,5 +1790,6 @@ def fx_basis_krw_per_usd() -> float | None:
         d = _gj("https://open.er-api.com/v6/latest/USD", timeout=15)
         v = float((d.get("rates") or {}).get("KRW") or 0)
         return v if _fin(v) else None
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("pricing:fx_basis_krw_per_usd", _cg9)
         return None

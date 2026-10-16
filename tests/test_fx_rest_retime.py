@@ -23,6 +23,7 @@ import pricing
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 chk = T.chk
 KST = timezone(timedelta(hours=9))
 MIN = 60_000

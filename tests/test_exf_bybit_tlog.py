@@ -61,9 +61,12 @@ def fake_http(url, headers=None, data=None, method=None, timeout=20):
 
 
 EF.http_json = fake_http
+T.patch_moved("http_json", EF.http_json, ("exf_",))
 EF._gov_prepare = lambda *a, **k: None
+T.patch_moved("_gov_prepare", EF._gov_prepare, ("exf_",))
 EF._CLOCK_ON[0] = False
 EF.PACE = 0
+T.patch_moved("PACE", EF.PACE, ("exf_",))
 _REAL_TIME = time.time
 CLK = [int(_REAL_TIME()) - 20 * 86400]
 time.time = lambda: CLK[0] + 0.25
@@ -208,6 +211,7 @@ chk(any(r["t"] == T_LATE and r["amount"] == -0.07 for r in evs(d)) and d.get("in
 
 print("[L6] 주기 쪽 상한 · 형식 이상 줄")
 EF.BB_TLOG_CALLS_MAX = 2
+T.patch_moved("BB_TLOG_CALLS_MAX", EF.BB_TLOG_CALLS_MAX, ("exf_",))
 base6 = CLK[0] * 1000 + 1000
 B["tl"] += [tl(100 + i, base6 + i * 1000, typ="SETTLEMENT", fund="-0.001", side="Buy") for i in range(130)]
 cov_before = d.get("inc_cov_ts")
@@ -221,6 +225,7 @@ d = run()
 got = sum(1 for r in evs(d) if 100 <= tl_no(r) < 230) if HAS else 0
 chk(got == 130 and d.get("inc_cov_ts") == CLK[0] - 120 and not (d.get("cursor") or {}).get("tlog_pg"), "L6b 다음 주기 같은 창·커서로 이어 끝냄 · 중복 없음", (got, d.get("inc_cov_ts")))
 EF.BB_TLOG_CALLS_MAX = 40
+T.patch_moved("BB_TLOG_CALLS_MAX", EF.BB_TLOG_CALLS_MAX, ("exf_",))
 T_BAD = CLK[0] * 1000 + 2000
 B["tl"] += [tl(300, T_BAD, fee="abc"), tl(301, T_BAD + 1, fee="0.01")]
 cov_before = d.get("inc_cov_ts")
@@ -250,6 +255,8 @@ print("[C] core 대사 — 수집기가 쓴 파일 그대로")
 import core
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 C = core.Core(common.load_config())
 C._quote_usd = lambda q, ts: Decimal(1)
 C.EXF_INIT_PHASE = 5

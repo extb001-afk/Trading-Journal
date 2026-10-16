@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 
 import common
+import calcguard
 
 _UA = {"Accept": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"}
 
@@ -70,7 +71,8 @@ def _rpc(url: str, method: str, params, timeout: float = 25.0, gap: bool = True)
         import bf_engine
         try:
             bf_engine.helius_configure(common.load_config())
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as _cg9:
+            calcguard.swallowed("recon:_rpc", _cg9)
             pass
         if not bf_engine.HELIUS.take("tj-core", 10 if method in ("getProgramAccounts", "getAsset") else 1, kind="must"):
             raise RuntimeError(f"rpc {method}: 헬리우스 하루 예산 보류({bf_engine.HELIUS.last_why()}) — 다음 대사 때 다시")
@@ -182,6 +184,7 @@ def fetch_sol_balances_fast(lanes: list, owners: list, native_url: str = None, w
                 got = [0 if v is None else int(v["lamports"]) for v in vals]
                 break
             except Exception as e:
+                calcguard.swallowed("recon:fetch_sol_balances_fast", e)
                 got, err = None, e
         for j, o in enumerate(chunk):
             if got is None:
@@ -210,6 +213,7 @@ def fetch_sol_balances_fast(lanes: list, owners: list, native_url: str = None, w
                     err9 = None
                     break
                 except Exception as e:
+                    calcguard.swallowed("recon:fetch_sol_balances_fast._work", e)
                     wb9, m9, err9 = {}, {}, e
             with lock:
                 if err9 is not None:
@@ -289,6 +293,7 @@ def _rpc_any(urls: list, method: str, params, check=None, tries: int = None, sle
                 r = _rpc(u, method, params, timeout=timeout)
                 return check(r) if check else r
             except Exception as e:
+                calcguard.swallowed("recon:_rpc_any", e)
                 last = e
                 if _is_exec_err(e):
                     exec_n += 1
@@ -442,7 +447,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
             return True
         try:
             return bool(strict(ca)) if strict else False
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("recon:fetch_evm_rpc_balances.is_strict", _cg9)
             return True
     bs, dfail = {}, {}
     if want_tokens and discover_url:
@@ -455,6 +461,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 dfail[w] = e
         if dfail and len(dfail) == len(wallets):
             raise next(iter(dfail.values()))
+        for e9 in dfail.values():
+            calcguard.swallowed("recon:fetch_evm_rpc_balances", e9)
     head = _rpc_any(urls, "eth_blockNumber", [], check=_hex_int, sleep=sleep)
     if block is None:
         bn = max(0, head - RPC_BLOCK_LAG)

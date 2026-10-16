@@ -516,6 +516,9 @@ except Exception as e9:
     check("C8 web 가져오기", False, e9)
 if web is not None:
     web.time = CLK
+    for _mn9 in [m for m in sys.modules if m.startswith(("view_", "http_", "accounting_"))]:
+        if hasattr(sys.modules[_mn9], "time"):
+            sys.modules[_mn9].time = CLK
     CLK.t = T0
 
     def dkst(days):

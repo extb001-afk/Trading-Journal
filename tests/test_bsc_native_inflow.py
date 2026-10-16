@@ -16,6 +16,7 @@ common = B.common
 E18 = 10 ** 18
 clk = [time.time()]
 bw._now = lambda: clk[0]
+T.patch_moved("_now", bw._now, ("bsc_",))
 REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
 BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
 
@@ -331,6 +332,7 @@ w, wr = fresh()
 run(w, 3)
 cap0 = bw.BALW_TIME_CAP
 bw.BALW_TIME_CAP = 1.0
+T.patch_moved("BALW_TIME_CAP", bw.BALW_TIME_CAP, ("bsc_",))
 CH.hang = {"url": B.DET, "method": "eth_getBalance", "sec": 6}
 CH.kw_seen.clear()
 tick(90, 200)
@@ -347,6 +349,7 @@ pools15 = [getattr(w, k, None) for k in ("rpc", "nonce_pub_rpc", "arch_rpc")]
 T.chk(got15 == 1 and all(p9 is None or "_dl" not in p9.__dict__ for p9 in pools15),
       "N15 다음 주기 최신 토큰 입금 방출 · 감시가 끝나면 노드 마감 풀림(최신 수집·nonce 회수는 종전)", {"cycle": got15})
 bw.BALW_TIME_CAP = cap0
+T.patch_moved("BALW_TIME_CAP", bw.BALW_TIME_CAP, ("bsc_",))
 try:
     r16 = w._balw_raw_deltas(B.W1, 0, 10 ** 9, deadline=time.time() - 1)
     r16b = w._balw_raw_deltas(B.W1, 0, 10 ** 9, deadline=time.time() + 5)
@@ -361,6 +364,7 @@ many16 = [CH.native(s16 + 3, B.OTHER, B.W1, 10 ** 16) for _ in range(128)]
 dust16 = [CH.native(s16 + 4, B.OTHER, B.W1, 10 ** 12) for _ in range(50)]
 cs0, cap0 = bw.CALL_SLEEP, bw.BALW_TIME_CAP
 bw.CALL_SLEEP, bw.BALW_TIME_CAP = 0.25, 1.0
+T.patch_moved("BALW_TIME_CAP", bw.BALW_TIME_CAP, ("bsc_",))
 dts16 = []
 for _ in range(3):
     tick(90, 200)
@@ -378,6 +382,7 @@ for _ in range(30):
     if not jobs_left() and not balw_st().get("rqp"):
         break
 bw.CALL_SLEEP, bw.BALW_TIME_CAP = cs0, cap0
+T.patch_moved("BALW_TIME_CAP", bw.BALW_TIME_CAP, ("bsc_",))
 e16 = B.emitted(wr)
 q16 = reqs()
 ne16 = sum(1 for h in many16 if h in e16)
@@ -428,4 +433,5 @@ T.chk(any(m.get("wallet") == B.W1 and m.get("ca") is None for m in s13b.get("mis
 conn.close()
 
 bw._now = time.time
+T.patch_moved("_now", bw._now, ("bsc_",))
 T.finish()

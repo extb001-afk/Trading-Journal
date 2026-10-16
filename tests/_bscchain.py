@@ -37,6 +37,13 @@ with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
 import common
 import bf_engine
 import bsc_watch
+class _Fwd9(__import__("types").ModuleType):
+    def __setattr__(self, k9, v9):
+        super().__setattr__(k9, v9)
+        for n9, m9 in list(__import__("sys").modules.items()):
+            if n9.startswith("bsc_") and m9 is not None and m9 is not self and k9 in getattr(m9, "__dict__", {}):
+                setattr(m9, k9, v9)
+bsc_watch.__class__ = _Fwd9
 import core
 
 bf_engine.configure(cfg())
@@ -249,6 +256,7 @@ bf_engine.rpc_call = fake_call
 bf_engine.rpc_batch = fake_batch
 bf_engine.http_json = fake_http_json
 bsc_watch.NONCE_ARCH_GAP = 0
+T.patch_moved("NONCE_ARCH_GAP", bsc_watch.NONCE_ARCH_GAP, ("bsc_",))
 
 
 class Wr:

@@ -26,6 +26,8 @@ import core
 import discopen
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 spec = importlib.util.spec_from_file_location("rb2", os.path.join(T.ROOT, "tools", "rebuild2.py"))
 rb2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rb2)

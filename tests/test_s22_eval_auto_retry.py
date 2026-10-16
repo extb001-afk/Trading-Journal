@@ -15,10 +15,10 @@ import types
 from datetime import datetime, timedelta, timezone
 
 WEB = os.path.join(T.SRC, "web.py")
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 
 print("[1] 서버 _receipt_eval_post 자동 가드")
-src = open(WEB, encoding="utf-8").read()
+src = T.web_src()
 tree = ast.parse(src)
 
 
@@ -92,6 +92,8 @@ def run_post(side, body, *, deferred=True, auto_eval=True, old=None, used=0, mem
           "MemoHourly": type("MemoHourly", (Exception,), {}), "log": types.SimpleNamespace(warning=lambda *a: None),
           "StateBuilder": types.SimpleNamespace(_eval_rec=lambda rec, s="sell": {"fp": rec.get("fp")}),
           "_eval_budget_msg": lambda *a: "한도"}
+    ns["web_ctx"] = types.SimpleNamespace(builder=lambda: ns["BUILDER"], day_memo=lambda: ns["DAY_MEMO_REEVAL"],
+                                          memo_driven=lambda *a, **k: ns["memo_driven"](*a, **k))
     exec(compile(ast.fix_missing_locations(ast.Module(body=list(METHODS), type_ignores=[])), WEB, "exec"), ns)
     if deferred:
         ns["_dex_later"](chart, D, "SYN", side, "deferred", listed=False)

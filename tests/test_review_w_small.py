@@ -108,7 +108,7 @@ cache = {}
 for i in range(web.StateBuilder.CHART_CACHE_MAX + 10):
     sb._chart_cache_put(cache, ("k", i), {"i": i})
 ck("W8 캐시 넣기 = 상한 지킴 · 최근 것 남음", len(cache) == web.StateBuilder.CHART_CACHE_MAX and ("k", web.StateBuilder.CHART_CACHE_MAX + 9) in cache, len(cache))
-src = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+src = T.web_src()
 ck("W8 이른 반환 세 곳도 _chart_cache_put", src.count("self._chart_cache_put(cache, ck, out)") >= 3)
 
 import alert_prefs
@@ -134,7 +134,7 @@ for p9 in ("/api/fut_receipt", "/api/receipt_list", "/api/outflow_candidates"):
     h9 = FakeH(p9)
     hit = T.safe(onboarding.handle_get, h9, p9)
     ck(f"W9 원장 없음 = {p9} 빈 응답(빌드 시도 없음)", hit is True and h9.sent and h9.sent[0] == 200 and h9.sent[1].get("empty") is True, (hit, h9.sent))
-src_w = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+src_w = T.web_src()
 ck("W9 POST 본문 RecursionError = 400", "except (ValueError, RecursionError):" in src_w)
 try:
     json.loads("[" * 100000)

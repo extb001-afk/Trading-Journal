@@ -379,6 +379,15 @@ if web is not None:
     web.time = CLK
     web.datetime = FixedDT
     web.SNAPFILE_PATH = os.path.join(common.STATE_DIR, "web_snap_last.bin")
+    for _mn9 in [m for m in sys.modules if m.startswith(("view_", "http_", "accounting_"))]:
+        _m9 = sys.modules[_mn9]
+        if hasattr(_m9, "time"):
+            _m9.time = CLK
+        if hasattr(_m9, "datetime"):
+            _m9.datetime = FixedDT
+    SFM = sys.modules.get("view_snapfile")
+    if SFM is not None:
+        SFM.SNAPFILE_PATH = web.SNAPFILE_PATH
     SP = web.SNAPFILE_PATH
     T5 = T0 + 10 ** 6
     ob = mkstate(random.Random(55), 55)

@@ -170,6 +170,7 @@ chk(n_on - n_off == 6, "A4 추가 호출 = 기동 첫 주기 거래소당 1번�
 chk([e for e in lg_on if e[0] != "bal"] == [e for e in lg_off if e[0] != "bal"], "A4 입출금·체결 수집 순서·횟수 같음")
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)

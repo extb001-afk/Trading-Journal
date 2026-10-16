@@ -321,6 +321,154 @@ def qn_reject_clear() -> bool:
     return bool(had and had[0])
 
 
+ALCH_REJECT_FILE = "alch_reject.json"
+ALCH_REJECT_N = 2
+ALCH_REJECT_SEC = 60
+_ALCH_MONTH_TXT = re.compile(r"monthly capacity|capacity limit exceeded|scaling policy for continued service|monthly (?:compute units?|cu)\b.{0,40}?(?:limit|exceed)"
+                             r"|exceeded (?:your|its) monthly", re.I | re.S)
+_ALCH_SEC_TXT = re.compile(r"per second", re.I)
+ALCH_WHY_KO = {"month": "월 사용량(CU) 한도를 다 썼어요", "pay": "결제가 필요하다고 거절했어요(HTTP 402)", "key": "키를 거부했어요"}
+
+
+def _alch_path() -> str:
+    return os.path.join(common.quota_dir(), ALCH_REJECT_FILE)
+
+
+def _alch_kh_of(k):
+    import hashlib
+    k = str(k or "").strip()
+    return hashlib.sha256(("alchemy|" + k).encode()).hexdigest()[:12] if KEY_RE.match(k) else None
+
+
+def alch_url_kh(url: str):
+    try:
+        sp = urllib.parse.urlsplit(str(url))
+    except ValueError:
+        return None
+    if not (sp.hostname or "").lower().endswith(".g.alchemy.com"):
+        return None
+    pt = [x for x in (sp.path or "").split("/") if x]
+    return _alch_kh_of(pt[1]) if len(pt) >= 2 and pt[0] == "v2" else None
+
+
+def _alch_why(body=None, err=None, text: str = ""):
+    if err is not None:
+        code = getattr(err, "code", None)
+        t9 = str(err) + " " + str(getattr(err, "body", "") or "") + " " + str(text or "")
+        if code == 402:
+            return "pay"
+        if code in (401, 403):
+            return "key"
+        if code == 429 and _ALCH_MONTH_TXT.search(t9) and not _ALCH_SEC_TXT.search(t9):
+            return "month"
+        return None
+    for it in (body if isinstance(body, list) else [body]):
+        e9 = it.get("error") if isinstance(it, dict) else None
+        if e9:
+            t9 = e9 if isinstance(e9, str) else json_dumps(e9)
+            if _ALCH_MONTH_TXT.search(t9) and not _ALCH_SEC_TXT.search(t9):
+                return "month"
+    return None
+
+
+def _alch_read():
+    try:
+        cur = common.read_json(_alch_path(), None)
+    except (Exception, SystemExit):
+        return None
+    return cur if isinstance(cur, dict) and cur.get("kh") else None
+
+
+def _alch_update(fn):
+    import fcntl
+    p = _alch_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".lock", "a") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        cur = _alch_read()
+        new = fn(cur)
+        if new is None:
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        elif new is not cur:
+            common.atomic_write_json(p, new)
+        return new
+
+
+def alch_note(url: str, body=None, err=None, text: str = "") -> None:
+    import logging
+    import time as _t
+    kh = alch_url_kh(url)
+    if not kh:
+        return
+    why = _alch_why(body=body, err=err, text=text)
+    if why is None:
+        if err is not None or not os.path.exists(_alch_path()):
+            return
+        if any(isinstance(it, dict) and it.get("error") for it in (body if isinstance(body, list) else [body])):
+            return
+        if kh != _alch_kh_of(_env().get(ENV_ALCHEMY)):
+            return
+
+        def ok9(cur):
+            if not cur or cur.get("kh") != kh or kh != _alch_kh_of(_env().get(ENV_ALCHEMY)):
+                return cur
+            if cur.get("off"):
+                logging.getLogger("tj").warning("Alchemy 키가 다시 응답 — 거절 표식 지움")
+            return None
+        _alch_update(ok9)
+        return
+    if kh != _alch_kh_of(_env().get(ENV_ALCHEMY)):
+        return
+    now = int(_t.time())
+    code9 = getattr(err, "code", None) if err is not None else None
+
+    def bad9(cur):
+        if kh != _alch_kh_of(_env().get(ENV_ALCHEMY)):
+            return cur
+        r9 = dict(cur) if cur and cur.get("kh") == kh else {"v": 1, "kh": kh, "first": now, "n": 0}
+        r9["n"] = int(r9.get("n") or 0) + 1
+        r9["last"] = now
+        r9["why"] = why
+        if isinstance(code9, int):
+            r9["code"] = code9
+        if not r9.get("off") and r9["n"] >= ALCH_REJECT_N and now - int(r9.get("first") or now) >= ALCH_REJECT_SEC:
+            r9["off"] = True
+            r9["off_at"] = now
+            logging.getLogger("tj").warning("★Alchemy 키가 계속 거절됨 — %s(%s회 · HTTP %s) · 지갑 토큰·잔고 찾기 등 Alchemy 보조가 멈춤(수집은 종전 경로로 계속)★",
+                                            ALCH_WHY_KO.get(why, why), r9["n"], r9.get("code", "-"))
+        return r9
+    _alch_update(bad9)
+
+
+def alch_rejected(env: dict = None):
+    cur = _alch_read()
+    if not cur or not cur.get("off"):
+        return None
+    if cur.get("kh") != _alch_kh_of((_env() if env is None else env).get(ENV_ALCHEMY)):
+        return None
+    try:
+        return {"since": int(cur.get("off_at") or cur.get("first") or 0), "first": int(cur.get("first") or 0), "n": int(cur.get("n") or 0),
+                "why": str(cur.get("why") or ""), "code": cur.get("code") if isinstance(cur.get("code"), int) else None, "last": int(cur.get("last") or 0)}
+    except (TypeError, ValueError):
+        return None
+
+
+def alch_reject_clear() -> bool:
+    had = []
+
+    def clr(cur):
+        had.append(bool(cur and cur.get("off")))
+        return None
+    try:
+        _alch_update(clr)
+    except OSError:
+        return False
+    return bool(had and had[0])
+
+
 def route_fp(chain: str) -> str:
     try:
         env = _env()

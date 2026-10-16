@@ -25,6 +25,7 @@ import web
 assert T.TMP in common.STATE_DIR
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)

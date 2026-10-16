@@ -19,6 +19,7 @@ import core
 
 assert _x.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(common.load_config())
 HOME = os.path.join(_x.TMP, "home_rc")
 os.makedirs(HOME, exist_ok=True)
@@ -130,7 +131,7 @@ c._ext_items = lambda now: ([], [], [])
 c._last_ext_check = 0
 c.ext_rebuild_pass(set(c.EXT_STREAMS))
 check("[K] 도중 중단(시작 표식 남음) = interrupted", meta("ext_rebuild_fail_code") == "interrupted", meta("ext_rebuild_fail_code"))
-src = open(os.path.join(_x.TREE, "src", "core.py"), encoding="utf-8").read()
+src = T.core_src(os.path.join(_x.TREE, "src"))
 i9 = src.find("c2.execute(\"DELETE FROM meta WHERE k LIKE 'ext_prewindow:%'")
 check("[K] 성공 교체 = 실패 횟수·원인 코드·단계도 지움(정적)", i9 > 0 and "'ext_rebuild_fail_code', 'ext_rebuild_fail_stage'" in src[i9:i9 + 600], i9)
 check("[K] 실패 기록이 원인 코드를 받음 — _ext_rebuild 의 fail(...) 호출 전부 코드 지정(정적)",
@@ -260,7 +261,7 @@ v2 = web.StateBuilder._backfill_since_view(fake, c.conn)
 check("[G] 설정 › 과거 데이터: rebuildFailCode·rebuildFailLabel·rebuildDiskRetry(디스크 사전 검사) · 실패 없으면 비움",
       v1.get("rebuildFailCode") == "resource_disk" and v1.get("rebuildFailLabel") == "디스크 공간" and v1.get("rebuildDiskRetry") is True
       and v2.get("rebuildFailCode") is None and v2.get("rebuildDiskRetry") is False, (v1.get("rebuildFailCode"), v1.get("rebuildDiskRetry"), v2.get("rebuildFailCode")))
-js = open(os.path.join(_x.TREE, "web", "v2", "app.js"), encoding="utf-8").read()
+js = T.app_js(_x.TREE)
 check("[G] 화면 문구: 원인 이름 · 디스크면 '여유가 생기면 바로 다시'(정적)", "bs.rebuildFailLabel" in js and "bs.rebuildDiskRetry" in js, "")
 shutil.disk_usage = _real_du
 shutil.rmtree(HOME, ignore_errors=True)

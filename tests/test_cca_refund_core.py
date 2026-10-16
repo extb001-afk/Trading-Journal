@@ -27,6 +27,7 @@ import web
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):

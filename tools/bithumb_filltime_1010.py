@@ -340,7 +340,9 @@ def build_records(stored: dict, st: dict, now: int = None) -> list:
 
 def _code_ready(root: str):
     try:
-        core_src = open(os.path.join(root, "src", "core.py"), encoding="utf-8").read()
+        _sd9 = os.path.join(root, "src")
+        core_src = "\n".join(open(os.path.join(_sd9, f9), encoding="utf-8").read()
+                             for f9 in ["core.py"] + sorted(f for f in os.listdir(_sd9) if f.startswith("core_") and f.endswith(".py")))
         rb_src = open(os.path.join(root, "tools", "rebuild2.py"), encoding="utf-8").read()
     except OSError as e:
         return f"코드 읽기 실패: {e}"

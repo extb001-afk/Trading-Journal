@@ -61,6 +61,7 @@ class Rig:
     def __init__(self, ws, ys, span=8000, st_sec=0.5, tr=None, tr_fail=False, live_dep=False, extra=None):
         self.ft = FakeTime()
         evm_watch.time = self.ft
+        T.patch_moved("time", evm_watch.time, ("evm_",))
         self.ws, self.ys, self.span = list(ws), dict(ys), span
         self.st_sec, self.tr, self.tr_fail, self.live_dep = st_sec, (tr or {}), tr_fail, live_dep
         self.calls = {"states": 0, "trace": 0}
@@ -352,6 +353,7 @@ try:
     common.atomic_write_json(CPATH, cur11)
     ft11 = FakeTime()
     evm_watch.time = ft11
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     w13 = R(CFG, CH, list(W[:2]), Wr())
     w13._block_ts = lambda b: int(GEN + int(b) * 2)
     w13._states = lambda pairs, strict=False: {p: (0, 0) for p in pairs}
@@ -826,6 +828,7 @@ try:
     T.chk(left27 == 5, "B21 라이브가 꼬리에 붙은 사이클 = 늦은 채움 재시도 20건(30초 안 · 종전 3건)", {"left": left27})
 finally:
     evm_watch.time = real_time
+    T.patch_moved("time", evm_watch.time, ("evm_",))
 
 T.finish()
 sys.exit(1 if T.FAILS else 0)

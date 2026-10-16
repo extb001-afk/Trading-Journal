@@ -19,6 +19,8 @@ import core
 import ex_foreign
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
 chk = T.chk
 E8 = 10 ** 8
@@ -41,9 +43,13 @@ def _bn(url, headers=None, *a, **k):
 
 _bn._tj_test_mock = True
 ex_foreign._http_json_err = _bn
+T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
 ex_foreign._gov_prepare = lambda *a, **k: None
+T.patch_moved("_gov_prepare", ex_foreign._gov_prepare, ("exf_",))
 ex_foreign._px_safe = lambda *a, **k: None
+T.patch_moved("_px_safe", ex_foreign._px_safe, ("exf_",))
 ex_foreign.PACE = 0
+T.patch_moved("PACE", ex_foreign.PACE, ("exf_",))
 common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_binance.json"), {"ts": 0, "events": [], "cursor": {"income": (NOW - 3600) * 1000}})
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
 fb = json.load(open(os.path.join(common.STATE_DIR, "futures_binance.json")))
@@ -61,6 +67,7 @@ def _okx(env, path, params=None):
 
 
 ex_foreign._okx_get = _okx
+T.patch_moved("_okx_get", ex_foreign._okx_get, ("exf_",))
 try:
     ex_foreign.bf_engine.SINCE.target = lambda ex: None
 except AttributeError:

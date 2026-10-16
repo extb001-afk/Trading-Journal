@@ -60,6 +60,7 @@ reg.FORCE_AVAILABLE.add("sui")
 c = core.Core(common.load_config())
 c.conn.commit()
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c._drain_stream("sui", dict(c.chain_readers)["sui"], 0, 0)
 c.conn.commit()
 check("S3 수집기 준비", c._scope_ready("sui"), cs.ChainState("sui").status_view())

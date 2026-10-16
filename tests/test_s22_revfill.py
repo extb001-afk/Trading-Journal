@@ -130,7 +130,7 @@ rm(REQ)
 SRV.shutdown()
 SRV.server_close()
 chk(web.REVIEW_FILL_REQ_PATH == rd.FILL_REQ_PATH and web.REVIEW_MANUAL_LOCK == rd.MANUAL_LOCK, "W12 웹·데몬 같은 요청·잠금 파일")
-WSRC = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+WSRC = T.web_src()
 fb_src = WSRC[WSRC.index("def _review_fill_post"):WSRC.index("def _health_ack_post")]
 chk("subprocess" not in fb_src and "claude" not in fb_src.lower().replace("claude 사용량", "") and "review_daily" not in fb_src,
     "W13 웹은 모델·프로세스를 부르지 않음(요청 파일만)")
@@ -335,7 +335,7 @@ chk(re.search(r"with _ManualLock\(\):[^\n]*\n            catch_up\(cfg, sys\.arg
 chk(mn.count("_nap(max(30,") == 2 and "time.sleep(max(30," not in mn, "D16 예약 대기 두 곳 = _nap(같은 시각 · 1분마다 요청 확인)")
 
 print("[U] 화면·README")
-AJ = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+AJ = T.app_js()
 fa = AJ[AJ.index("revFillAll: () =>"):AJ.index("revFill: async el =>")]
 chk('data-a="revFillAll"' in AJ and "'/api/review/fill'" in fa and "confirmAsk(" in fa and "confirm(" not in fa.replace("confirmAsk(", ""),
     "U1 '전체 채우기' 버튼 → 앱 확인창(브라우저 confirm 아님) → POST /api/review/fill")

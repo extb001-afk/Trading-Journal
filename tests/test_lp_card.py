@@ -153,7 +153,7 @@ for (const [ok, msg, d] of R) console.log((ok ? 'PASS ' : 'FAIL ') + msg + (ok |
 console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
 '''
 
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 CSS = os.path.join(T.ROOT, "web", "v2", "index.html")
 app = open(APP, encoding="utf-8").read()
 css = open(CSS, encoding="utf-8").read()

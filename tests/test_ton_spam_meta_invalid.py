@@ -32,6 +32,7 @@ INB = os.path.join(common.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 tw.META_RETRY_SEC = 0
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 INVALID = {"valid": False, "type": "jetton_masters", "extra": {}}
 
 md_bad = {"0:AA": {"is_indexed": True, "token_info": [INVALID]}}

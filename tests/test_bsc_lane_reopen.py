@@ -23,6 +23,7 @@ import bsc_watch
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 E18 = 10 ** 18
 NOW = int(time.time())
 T0 = NOW - 20 * 86400

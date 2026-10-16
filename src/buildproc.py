@@ -46,8 +46,8 @@ SPOT_REPLACE = ("_tp_slots", "token_pairs", "token_prio", "token_skip", "token_s
 SPOT_UNION = ("syms", "ex_want")
 SPOT_KEYED = ("guarded", "_guard_seen", "_guard_logged")
 
-MODSET = (("web", "_PERP_BAD_WARNED"), ("__main__", "_PERP_BAD_WARNED"))
-MODDICT = (("web", "_GSYM_MEMO", 200000), ("__main__", "_GSYM_MEMO", 200000),
+MODSET = (("view_fut", "_PERP_BAD_WARNED"),)
+MODDICT = (("view_common", "_GSYM_MEMO", 200000),
            ("spamguard", "_IMP_MEMO", 100000), ("spamguard", "_CS_MEMO", 200000))
 HASH_MAX_N = 20000
 
@@ -510,6 +510,11 @@ def _child_run(b, conn, shm, wfd):
         gc.disable()
         socks9 = _close_inherited({0, 1, 2, wfd})
         _child_reinit(b)
+        try:
+            import calcguard
+            calcguard.child_reset("build")
+        except Exception:
+            pass
         _warn_new_sqlite()
         b.__dict__["_bp_shm"] = shm
         px = b.px
@@ -628,6 +633,11 @@ def _child_run(b, conn, shm, wfd):
     try:
         sys.stdout.flush()
         sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        import calcguard
+        calcguard.flush_as("build")
     except Exception:
         pass
     os._exit(code)

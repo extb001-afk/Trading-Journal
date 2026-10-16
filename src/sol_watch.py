@@ -36,573 +36,63 @@ PLAIN_PROGRAMS = set(TOKEN_PROGRAMS) | {
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
 }
 SIG_PAGE = 1000
-TX_BATCH_SLEEP = 0.12
+from sol_base import (
+    _check_tx_result,
+    _hl_paced,
+    _host,
+    _PnSkip,
+    _retry_after_sec,
+    ARCHIVE_METHOD_PER10S,
+    ARCHIVE_PER10S,
+    ARCHIVE_RPC_DEFAULT,
+    BUDGET_WARN_PER_HOUR,
+    HEAD_AUDIT_PER_CYCLE,
+    HEAD_GAP_SEC,
+    HEAD_HEALTH_MIN_N,
+    HEAD_HEALTH_PCT,
+    HEAD_HEALTH_SEC,
+    HEAD_KEEP_HOURS,
+    HEAD_LAG_MAX_SLOTS,
+    HEAD_MARGIN_HOURS,
+    HEAD_METHODS,
+    HEAD_RPC_DEFAULT,
+    HEAD_TIMEOUT_SEC,
+    HEAD_TRIP_BASE,
+    HEAD_TRIP_MAX,
+    HEAD_TRIP_STREAK,
+    HL_COST,
+    PRIMARY_QUOTA_OPEN,
+    PRIMARY_RL_OPEN,
+    PRIMARY_TRIP_STREAK,
+    RateLimited,
+    RL_WAIT_MAX,
+    Rpc,
+    SLOT_SEC_EST,
+    SLOTS_PER_EPOCH,
+    STAKE_PROGRAM,
+    STAKE_RWD_EPOCHS_PER_CYCLE,
+    STAKE_RWD_MARGIN_SLOTS,
+    STAKE_RWD_POLL_SEC,
+    stake_state,
+    STAKE_WITHDRAWER_OFFSET,
+    TX_BATCH_SLEEP,
+    U64_MAX,
+)
 RATE_LIMIT_MAX = 5
-BUDGET_WARN_PER_HOUR = 20000
 ADDR_PACE_SEC = 0.25
 ADDR_PACE_MAX = 2.0
 ATA_EVERY_CYCLES = 5
-RL_WAIT_MAX = 30.0
-PRIMARY_TRIP_STREAK = 3
-HL_COST = {"getProgramAccounts": 10, "getAsset": 10, "getAssetBatch": 10, "getAssetsByOwner": 10, "searchAssets": 10}
-PRIMARY_QUOTA_OPEN = 1800.0
-PRIMARY_RL_OPEN = 60.0
 PARSE_BATCH = 1
 SIG_SPOOL_PAGES = 30
 LIVE_FIRST_HOURS = 24.0
 LIVE_FIRST_N = 100
 OLD_SLICE_SEC = 60.0
 
-HEAD_RPC_DEFAULT = "https://solana-rpc.publicnode.com"
-ARCHIVE_RPC_DEFAULT = "https://api.mainnet-beta.solana.com"
-HEAD_KEEP_HOURS = 18.0
-HEAD_MARGIN_HOURS = 6.0
-HEAD_TIMEOUT_SEC = 8.0
-HEAD_GAP_SEC = 0.1
-HEAD_HEALTH_SEC = 1800
-HEAD_HEALTH_PCT = 90.0
-HEAD_HEALTH_MIN_N = 20
-HEAD_TRIP_STREAK = 3
-HEAD_TRIP_BASE = 60.0
-HEAD_TRIP_MAX = 1800.0
-HEAD_LAG_MAX_SLOTS = 150
-HEAD_AUDIT_PER_CYCLE = 3
 HEAD_AUDIT_PAGES = 5
 HEAD_AUDIT_TRIP_SEC = 6 * 3600.0
-ARCHIVE_PER10S = 32
-ARCHIVE_METHOD_PER10S = 8
-HEAD_METHODS = frozenset({"getSignaturesForAddress", "getTransaction", "getSlot", "getEpochInfo", "getAccountInfo", "getBalance",
-                          "getMultipleAccounts", "minimumLedgerSlot", "getFirstAvailableBlock"})
 
-STAKE_PROGRAM = "Stake11111111111111111111111111111111111111"
 JITO_TIP_DIST = "4R3gSG8BpU4t19KYj8CfnbtRpnT8gtk4dvTHxVRwc2r7"
-STAKE_WITHDRAWER_OFFSET = 44
 STAKE_EVERY_SEC = 3600
-STAKE_RWD_POLL_SEC = 600
-STAKE_RWD_MARGIN_SLOTS = 9000
-STAKE_RWD_EPOCHS_PER_CYCLE = 8
-SLOTS_PER_EPOCH = 432000
-SLOT_SEC_EST = 0.4
-U64_MAX = 18446744073709551615
-
-
-class RateLimited(RuntimeError):
-
-    def __init__(self, msg: str, retry_after=None, quota: bool = False):
-        super().__init__(msg)
-        self.retry_after = retry_after
-        self.quota = quota
-
-
-def _host(u) -> str:
-    return bf_engine._host_norm(u) if u else ""
-
-
-class _PnSkip(RuntimeError):
-    pass
-
-
-def _retry_after_sec(v):
-    if not v:
-        return None
-    try:
-        return max(0.0, float(v))
-    except (TypeError, ValueError):
-        pass
-    try:
-        from email.utils import parsedate_to_datetime
-        return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
-    except Exception:
-        return None
-
-
-class Rpc:
-    def __init__(self, cfg: dict):
-        key = os.environ.get("TJ_HELIUS_KEY", "")
-        if not key:
-            key = common.read_env_file().get("TJ_HELIUS_KEY", "")
-        sol = cfg.get("sol", {})
-        if sol.get("rpc") == "helius":
-            if not key:
-                raise SystemExit("TJ_HELIUS_KEY 없음 (.env) — fail-closed")
-            self.url = f"https://mainnet.helius-rpc.com/?api-key={key}"
-        else:
-            self.url = sol.get("rpc") or sol.get("rpc_fallback")
-        self.fallback = sol.get("rpc_fallback")
-        self.fallbacks = []
-        for u in [self.fallback] + list(sol.get("rpc_fallbacks") or []):
-            if u and u != self.url and u not in self.fallbacks:
-                self.fallbacks.append(u)
-        self.calls = deque()
-        self.rl_streak = 0
-        self.rl_seen = 0
-        self.rl_last = False
-        self.last_src = None
-        self.last_url = None
-        self.primary_open_until = 0.0
-        self.primary_open_n = 0
-        self.quota_open = float(sol.get("quota_open_sec", PRIMARY_QUOTA_OPEN))
-        self.metered = bf_engine.is_helius_rpc(sol)
-        self.proc = "tj-sol"
-        self._kind = threading.local()
-        def _f(k, d, lo, hi):
-            try:
-                v = sol.get(k)
-                x = float(d if v is None else v)
-            except (TypeError, ValueError):
-                x = float(d)
-            return min(hi, max(lo, x)) if x == x else float(d)
-        hu = sol.get("head_rpc", HEAD_RPC_DEFAULT)
-        self.head_url = str(hu).strip() if (self.metered and isinstance(hu, str) and hu.strip().startswith("http")) else None
-        if self.head_url and _host(self.head_url) == _host(self.url):
-            self.head_url = None
-        au = sol.get("archive_rpc", ARCHIVE_RPC_DEFAULT)
-        self.archive_url = str(au).strip() if (self.metered and isinstance(au, str) and au.strip().startswith("http")) else None
-        if self.archive_url and _host(self.archive_url) in (_host(self.url), _host(self.head_url)):
-            self.archive_url = None
-        bf_engine.sol_meter_configure(cfg)
-        self.head_window = 3600.0 * (_f("head_rpc_keep_hours", HEAD_KEEP_HOURS, 1, 240) - _f("head_rpc_margin_hours", HEAD_MARGIN_HOURS, 0, 240))
-        self.head_timeout = _f("head_rpc_timeout_sec", HEAD_TIMEOUT_SEC, 1, 60)
-        self.head_gap = _f("head_rpc_gap_ms", HEAD_GAP_SEC * 1000, 0, 10000) / 1000.0
-        self.head_health_sec = 60.0 * _f("head_rpc_health_min", HEAD_HEALTH_SEC / 60, 1, 1440)
-        self.head_health_pct = _f("head_rpc_health_pct", HEAD_HEALTH_PCT, 1, 100)
-        self.head_health_n = int(_f("head_rpc_health_n", HEAD_HEALTH_MIN_N, 1, 10000))
-        self.head_lag_max = int(_f("head_rpc_lag_slots", HEAD_LAG_MAX_SLOTS, 10, 100000))
-        self.head_audit_n = int(_f("head_rpc_audit_per_cycle", HEAD_AUDIT_PER_CYCLE, 0, 50))
-        self.archive_gap = 10.0 / _f("archive_rpc_per10s", ARCHIVE_PER10S, 1, 1000)
-        self.archive_method_gap = 10.0 / _f("archive_rpc_method_per10s", ARCHIVE_METHOD_PER10S, 1, 1000)
-        self._hint = threading.local()
-        self._fill = threading.local()
-        self._pn_hist = deque()
-        self._pn_streak = 0
-        self._pn_open_until = 0.0
-        self._pn_open_n = 0
-        self._pn_why = ""
-        self._pn_gen = 0
-        self.pn_n = {"ok": 0, "fail": 0, "audit_ok": 0, "audit_miss": 0}
-        self.pn_lag = None
-        self.hl_closed_until = 0.0
-        self._ar_pause_until = 0.0
-        self._pn_nf = {}
-
-    @contextlib.contextmanager
-    def hint(self, **kw):
-        prev = getattr(self._hint, "v", None)
-        self._hint.v = dict(prev or {}, **kw)
-        try:
-            yield
-        finally:
-            self._hint.v = prev
-
-    @contextlib.contextmanager
-    def fill_scope(self):
-        prev = getattr(self._fill, "via", None)
-        try:
-            yield
-        finally:
-            self._fill.via = prev
-
-    def set_fill_via(self, via):
-        self._fill.via = via
-
-    def hl_closed(self) -> bool:
-        return float(getattr(self, "hl_closed_until", 0) or 0) > time.time()
-
-    def hl_close_until(self, ts: float):
-        self.hl_closed_until = float(ts)
-
-    def hl_open(self):
-        self.hl_closed_until = 0.0
-
-    def can_continue_capped(self) -> bool:
-        return bool(self.metered and (self.head_url or self.archive_url))
-
-    def pn_open(self) -> bool:
-        return float(getattr(self, "_pn_open_until", 0) or 0) > time.time()
-
-    def _pn_note(self, ok: bool, why: str = "", trip: bool = False):
-        now = time.time()
-        self._pn_hist.append((now, bool(ok)))
-        while self._pn_hist and self._pn_hist[0][0] < now - self.head_health_sec:
-            self._pn_hist.popleft()
-        if ok:
-            self.pn_n["ok"] += 1
-            self._pn_streak = 0
-            self._pn_open_n = 0
-            return
-        self.pn_n["fail"] += 1
-        self._pn_streak += 1
-        self._pn_why = common.redact_urls(str(why))[:160]
-        if trip or self._pn_streak >= HEAD_TRIP_STREAK:
-            self.pn_fault(why, min(HEAD_TRIP_BASE * (2 ** self._pn_open_n), HEAD_TRIP_MAX))
-            self._pn_open_n += 1
-
-    def pn_fault(self, why: str, dur: float):
-        self._pn_open_until = max(self._pn_open_until, time.time() + float(dur))
-        self._pn_gen = int(getattr(self, "_pn_gen", 0) or 0) + 1
-        self._pn_streak = 0
-        self._pn_why = common.redact_urls(str(why))[:160]
-        log.warning("공개 노드(publicnode) %.0f분 쉼 — 새 거래 확인은 헬리우스로: %s", dur / 60, self._pn_why)
-
-    def pn_state(self) -> dict:
-        now = time.time()
-        while self._pn_hist and self._pn_hist[0][0] < now - self.head_health_sec:
-            self._pn_hist.popleft()
-        n = len(self._pn_hist)
-        okn = sum(1 for _t, o in self._pn_hist if o)
-        rate = (okn / n) if n else None
-        opn = self.pn_open()
-        healthy = bool(self.head_url) and not opn and n >= self.head_health_n and rate is not None and rate * 100.0 >= self.head_health_pct
-        return {"on": bool(self.head_url), "healthy": healthy, "rate": rate, "n": n, "open_until": self._pn_open_until if opn else None,
-                "why": self._pn_why or None, "host": common.redact_urls(self.head_url) if self.head_url else None, "lag": self.pn_lag}
-
-    def pn_ok(self) -> bool:
-        if not getattr(self, "head_url", None) or float(getattr(self, "head_window", 0) or 0) <= 0 or self.pn_open():
-            return False
-        self.pn_state()
-        t9 = float(getattr(self, "_pn_open_until", 0) or 0)
-        h9 = [o for t, o in self._pn_hist if t >= t9]
-        n9 = len(h9)
-        return not (n9 >= self.head_health_n and sum(1 for o in h9 if o) * 100.0 < self.head_health_pct * n9)
-
-    def fill_route(self):
-        if not self.metered:
-            return "helius"
-        if not self.hl_closed() and not self.primary_open() and bf_engine.HELIUS.room("fill", proc=self.proc) > 0:
-            return "helius"
-        if self.archive_url and time.time() >= self._ar_pause_until:
-            return "archive"
-        return None
-
-    def _pn_usable(self, method: str, params, hint: dict) -> bool:
-        if not self.head_url or self.pn_open() or method not in HEAD_METHODS:
-            return False
-        if method == "getSignaturesForAddress":
-            opt = params[1] if isinstance(params, (list, tuple)) and len(params) > 1 and isinstance(params[1], dict) else {}
-            if not hint.get("pn"):
-                return False
-            if opt.get("before") and not opt.get("until"):
-                return False
-            return True
-        if method == "getTransaction":
-            return bool(hint.get("pn_tx"))
-        return True
-
-    def _routes(self, method: str, params) -> list:
-        hint = getattr(getattr(self, "_hint", None), "v", None) or {}
-        hl_ok = not self.primary_open() and not self.hl_closed()
-        prim = [(self.url, "primary")] if hl_ok else []
-        if hint.get("only") == "primary":
-            return prim
-        if not getattr(self, "metered", False):
-            return prim + [(u, "fallback") for u in self.fallbacks]
-        hh, ah, ph = _host(self.head_url), _host(self.archive_url), _host(self.url)
-        fbs, seen9 = [], {ph}
-        for u in list(self.fallbacks) + ([self.archive_url] if self.archive_url else []):
-            h9 = _host(u)
-            if u and h9 not in seen9:
-                seen9.add(h9)
-                fbs.append((u, "fallback"))
-        if ah and time.time() < self._ar_pause_until:
-            fbs = [x for x in fbs if _host(x[0]) != ah]
-        if self.kind() == "fill":
-            fbs = [x for x in fbs if _host(x[0]) != hh]
-            if getattr(self._fill, "via", None) == "archive":
-                if method == "getAsset":
-                    return prim
-                return [x for x in fbs if _host(x[0]) == ah][:1]
-            return prim + fbs
-        if method in ("getSignaturesForAddress", "getTokenAccountsByOwner"):
-            fbs = [x for x in fbs if _host(x[0]) != hh]
-        if self._pn_usable(method, params, hint):
-            return [(self.head_url, "head")] + prim + [x for x in fbs if _host(x[0]) != hh]
-        return prim + fbs
-
-    def _pn_sigs(self, url: str, params, timeout, hint: dict):
-        a = params[0]
-        opt = dict(params[1]) if len(params) > 1 and isinstance(params[1], dict) else {}
-        until, us = opt.get("until"), hint.get("slot")
-        slot_ok = isinstance(us, int) and not isinstance(us, bool)
-        if not (until and slot_ok and self._pn_nf.get(a) == until):
-            try:
-                return self._call(url, "getSignaturesForAddress", [a, opt] if len(params) > 1 else params, timeout)
-            except RuntimeError as e:
-                s9 = str(e)
-                if not until or not ("-32020" in s9 or "not found" in s9.lower()):
-                    raise
-                if not slot_ok:
-                    raise _PnSkip(f"커서를 못 찾음(-32020) · 커서 슬롯 모름 — 헬리우스로") from e
-                if len(self._pn_nf) > 5000:
-                    self._pn_nf.clear()
-                self._pn_nf[a] = until
-        opt.pop("until", None)
-        rows = self._call(url, "getSignaturesForAddress", [a, opt], timeout)
-        if not isinstance(rows, list):
-            return rows
-        return [x for x in rows if not isinstance(x, dict) or not isinstance(x.get("slot"), int)
-                or x["slot"] > us or (x["slot"] == us and x.get("signature") != until)]
-
-    def _head_check(self, method: str, r, hint: dict):
-        if method == "getSignaturesForAddress":
-            if not isinstance(r, list):
-                return "서명 목록 형식"
-            us9 = hint.get("slot")
-            last = None
-            for x in r:
-                if not isinstance(x, dict) or not isinstance(x.get("signature"), str) or not isinstance(x.get("slot"), int) or isinstance(x.get("slot"), bool):
-                    return "서명 항목 형식"
-                if last is not None and x["slot"] > last:
-                    return "서명 순서(최신→과거 아님)"
-                last = x["slot"]
-                if isinstance(us9, int) and not isinstance(us9, bool) and x["slot"] < us9:
-                    return f"커서 슬롯 {us9} 보다 옛 서명(커서를 못 찾음 = 색인 구멍)"
-            return None
-        if method in ("getSlot", "minimumLedgerSlot", "getFirstAvailableBlock"):
-            return None if isinstance(r, int) and not isinstance(r, bool) else "슬롯 형식"
-        return None
-
-    def kind(self) -> str:
-        return getattr(getattr(self, "_kind", None), "v", "head")
-
-    @contextlib.contextmanager
-    def as_kind(self, k: str):
-        prev = self.kind()
-        self._kind.v = k
-        try:
-            yield
-        finally:
-            self._kind.v = prev
-
-    def _trip_primary(self, e: "RateLimited"):
-        dur = self.quota_open if e.quota else min(PRIMARY_RL_OPEN * (2 ** self.primary_open_n), self.quota_open)
-        self.primary_open_until = time.time() + dur
-        self.primary_open_n += 1
-        log.warning("주 RPC %s — %.0f분간 폴백 RPC 직행 (%s)", "쿼터 소진(max usage)" if e.quota else
-                    f"연속 429 {self.rl_streak}회", dur / 60, str(e)[:80])
-
-    def primary_open(self) -> bool:
-        return self.primary_open_until > time.time()
-
-    def _rl_wait(self, e: "RateLimited") -> float:
-        ra = e.retry_after
-        if ra is None:
-            ra = min(2.0 ** self.rl_streak, RL_WAIT_MAX)
-        return min(max(ra, 0.5), RL_WAIT_MAX)
-
-    def call(self, method: str, params, timeout=25):
-        self.rl_last = False
-        self.last_src = None
-        self.last_url = None
-        r = self._call_any(method, params, timeout)
-        return r
-
-    def day_capped(self) -> bool:
-        return bool(self.metered) and bf_engine.HELIUS.day_capped()
-
-    def fill_ok(self) -> bool:
-        return self.fill_route() is not None
-
-    def fill_room(self) -> int:
-        if not self.metered:
-            return 1 << 30
-        return bf_engine.HELIUS.room("fill", proc=self.proc)
-
-    def _call_any(self, method: str, params, timeout=25):
-        hint = getattr(getattr(self, "_hint", None), "v", None) or {}
-        routes = self._routes(method, params)
-        e_head = e_prim = e_fb = None
-        tried_fb = False
-        if not any(r9 == "primary" for _u9, r9 in routes):
-            if self.primary_open():
-                e_prim = RuntimeError(f"주 RPC 차단 중(쿼터/429) — {self.primary_open_until - time.time():.0f}s 남음")
-            elif self.hl_closed():
-                e_prim = RuntimeError(f"헬리우스 하루 예산 소진 — {time.strftime('%H:%M', time.localtime(self.hl_closed_until))} 까지 공개 노드로")
-        for url, role in routes:
-            if role == "head":
-                try:
-                    if method == "getSignaturesForAddress":
-                        r = self._pn_sigs(url, params, min(timeout, self.head_timeout), hint)
-                    else:
-                        r = self._call(url, method, params, min(timeout, self.head_timeout))
-                    bad = self._head_check(method, r, hint)
-                    if bad:
-                        raise RuntimeError(f"공개 노드 응답 이상 — {bad}")
-                    self._pn_note(True)
-                    self.last_src, self.last_url = "head", url
-                    return r
-                except RateLimited as e:
-                    self._pn_note(False, f"429 ({method})", trip=True)
-                    e_head = e
-                except _PnSkip as e:
-                    e_head = e
-                except Exception as e:
-                    if "-32015" not in str(e):
-                        self._pn_note(False, f"{method}: {e}")
-                    e_head = e
-                continue
-            if role == "primary":
-                try:
-                    r = self._call(url, method, params, timeout)
-                    self.last_src, self.last_url = "primary", url
-                    return r
-                except RateLimited as e:
-                    self.rl_streak += 1
-                    if e.quota or self.rl_streak >= PRIMARY_TRIP_STREAK:
-                        self._trip_primary(e)
-                        e_prim = e
-                    else:
-                        time.sleep(self._rl_wait(e))
-                        try:
-                            r = self._call(url, method, params, timeout)
-                            self.last_src, self.last_url = "primary", url
-                            return r
-                        except RateLimited as e2:
-                            self.rl_streak += 1
-                            if e2.quota or self.rl_streak >= PRIMARY_TRIP_STREAK:
-                                self._trip_primary(e2)
-                            e_prim = e2
-                        except Exception as e2:
-                            e_prim = e2
-                except Exception as e:
-                    e_prim = e
-                continue
-            if method == "getAsset":
-                break
-            tried_fb = True
-            try:
-                r = self._call(url, method, params, timeout)
-                self.last_src, self.last_url = "fallback", url
-                return r
-            except RateLimited as e:
-                if getattr(self, "archive_url", None) and _host(url) == _host(self.archive_url):
-                    self._ar_pause_until = time.time() + min(max(float(e.retry_after or 0), 30.0), 600.0)
-                e_fb = e
-            except Exception as e:
-                e_fb = e
-        if tried_fb and e_fb is not None:
-            raise e_fb
-        raise e_prim or e_head or e_fb or RuntimeError(f"rpc {method}: 쓸 수 있는 RPC 없음")
-
-    def _call(self, url: str, method: str, params, timeout=25):
-        if url == self.url and self.metered:
-            c9 = HL_COST.get(method, 1)
-            if self.kind() == "fill" and getattr(getattr(self, "_fill", None), "via", None) == "archive":
-                if not bf_engine.HELIUS.take(self.proc, c9, kind="fill"):
-                    raise RuntimeError(f"rpc {method}: 헬리우스 옛 기록 몫 없음(아카이브로 받는 중 — 메타는 몫이 나면)")
-            elif bf_engine.HELIUS.window_on():
-                if not bf_engine.HELIUS.take_hard(self.proc, c9, kind=self.kind()):
-                    raise RuntimeError(f"rpc {method}: 헬리우스 월 창 몫 없음({bf_engine.HELIUS.last_why()}) — 다른 노드로")
-            else:
-                bf_engine.HELIUS.add(self.proc, c9, kind=self.kind())
-        now = time.monotonic()
-        self.calls.append(now)
-        hour_ago = now - 3600
-        while self.calls and self.calls[0] <= hour_ago:
-            self.calls.popleft()
-        n_hour = len(self.calls)
-        if n_hour == BUDGET_WARN_PER_HOUR:
-            log.error("★RPC 예산 경보: 최근 1시간 %d콜 — 한도 소진 위험", n_hour)
-        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-        req = urllib.request.Request(url, data=body,
-                                     headers={"Content-Type": "application/json",
-                                              "User-Agent": "tj-bot/0.1"})
-        try:
-            with bf_engine.sol_open(req, timeout, method, sol=True) as r:
-                d = json.loads(common.read_capped(r).decode())
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                self.rl_seen += 1
-                self.rl_last = True
-                try:
-                    body = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
-                except Exception:
-                    body = ""
-                raise RateLimited(f"HTTP Error 429: Too Many Requests ({method})",
-                                  _retry_after_sec(e.headers.get("Retry-After") if e.headers else None),
-                                  quota=("max usage" in body or "quota" in body or "credits" in body)) from e
-            raise
-        if url == self.url:
-            self.rl_streak = 0
-        if "error" in d:
-            raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}")
-        if d.get("result") is None:
-            raise RuntimeError(f"rpc {method}: result null")
-        if method == "getTransaction":
-            _check_tx_result(d["result"])
-        return d.get("result")
-
-    def batch(self, method: str, params_list: list, timeout=30) -> list:
-        body = json.dumps([{"jsonrpc": "2.0", "id": i, "method": method, "params": p}
-                           for i, p in enumerate(params_list)]).encode()
-        urls = [u for u, _r in self._routes(method, params_list[0] if params_list else [])] if hasattr(self, "_hint") else \
-            (([] if self.primary_open() else [self.url]) + list(self.fallbacks))
-        last = None
-        for url in urls:
-            if True:
-                out = []
-                for p9 in params_list:
-                    try:
-                        out.append(self._call(url, method, p9, timeout))
-                    except Exception as e9:
-                        out.append(e9)
-                return out
-            if url == self.url and self.metered:
-                bf_engine.HELIUS.add(self.proc, len(params_list) * HL_COST.get(method, 1), kind=self.kind())
-            now = time.monotonic()
-            self.calls.append(now)
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
-                                                                   "User-Agent": "tj-bot/0.1"})
-            try:
-                with bf_engine.sol_open(req, timeout) as r:
-                    d = json.loads(common.read_capped(r).decode())
-            except urllib.error.HTTPError as e:
-                if e.code == 429 and url == self.url:
-                    try:
-                        b9 = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
-                    except Exception:
-                        b9 = ""
-                    self.rl_seen += 1
-                    self._trip_primary(RateLimited("HTTP Error 429 (batch)", quota="max usage" in b9 or "quota" in b9))
-                last = e
-                continue
-            except Exception as e:
-                last = e
-                continue
-            if not isinstance(d, list):
-                last = RuntimeError(f"batch 응답 형식 오류: {str(d)[:100]}")
-                continue
-            out = [RuntimeError("batch 항목 누락") for _ in params_list]
-            for it in d:
-                try:
-                    i = int(it.get("id"))
-                except (TypeError, ValueError, AttributeError):
-                    continue
-                if not 0 <= i < len(params_list):
-                    continue
-                if it.get("error"):
-                    out[i] = RuntimeError(f"rpc {method}: {common.redact_secret_text(str(it['error']))}")
-                elif it.get("result") is None:
-                    out[i] = RuntimeError(f"rpc {method}: result null")
-                else:
-                    try:
-                        if method == "getTransaction":
-                            _check_tx_result(it["result"])
-                        out[i] = it["result"]
-                    except Exception as e9:
-                        out[i] = e9
-            return out
-        raise last if last else RuntimeError("batch: RPC 없음")
-
-
-def _check_tx_result(result):
-    tx9 = result if isinstance(result, dict) else {}
-    meta9 = tx9.get("meta")
-    keys9 = ((tx9.get("transaction") or {}).get("message") or {}).get("accountKeys")
-    if (not isinstance(meta9, dict) or meta9.get("fee") is None or "err" not in meta9
-            or not isinstance(keys9, list) or not keys9
-            or any(not isinstance(meta9.get(k), list) or len(meta9[k]) != len(keys9)
-                   for k in ("preBalances", "postBalances"))):
-        raise RuntimeError("rpc getTransaction: 실행 메타/잔고 불완전 — 부분 결과 거부")
 
 
 _STAKE_IX_KEYS = {
@@ -698,19 +188,10 @@ def ata_owner_of(acct: str, mint, owners, program=None):
     return None
 
 
-def stake_state(act, deact, epoch) -> str:
-    try:
-        act, deact, epoch = int(act), int(deact), int(epoch)
-    except (TypeError, ValueError):
-        return "undelegated"
-    if deact != U64_MAX and deact < epoch:
-        return "inactive"
-    if deact != U64_MAX:
-        return "deactivating"
-    return "activating" if act >= epoch else "active"
+from sol_stake import StakeMixin
 
 
-class SolWatcher:
+class SolWatcher(StakeMixin):
     def __init__(self, cfg: dict, wallets: list, writer: SegmentWriter):
         self.cfg = cfg
         self.rpc = Rpc(cfg)
@@ -792,12 +273,6 @@ class SolWatcher:
             return
         self.cursor["_vat:" + a] = {"t": int(t9), "c": self.cursor.get(a) or ""}
 
-    def stake_reg(self) -> dict:
-        return {k[5:]: v for k, v in self.cursor.items() if k.startswith("_stk:") and isinstance(v, dict)}
-
-    def _stake_t0(self) -> int:
-        vals = [v for v in (self.cutoff_ts, bf_engine.SINCE.target("sol")) if v]
-        return int(min(vals)) if vals else 0
 
     def list_atas(self, owner: str) -> list:
         out = []
@@ -1191,83 +666,6 @@ class SolWatcher:
             out["lp"] = lp9
         return out
 
-    def _stake_hl_ok(self, need: int, what: str) -> bool:
-        if not _hl_paced(self.rpc):
-            return True
-        room9 = bf_engine.HELIUS.room("head", proc=self.rpc.proc)
-        if room9 >= need:
-            return True
-        self._stake_paced_at = time.time()
-        if time.time() - float(getattr(self, "_stake_paced_log", 0) or 0) >= 1800:
-            self._stake_paced_log = time.time()
-            log.info("스테이킹 %s — 헬리우스 실시간 몫 대기(필요 %d · 지금 여유 %d) · 다음 주기에(실패 아님)", what, need, room9)
-        return False
-
-    def _stake_discover(self, force: bool = False) -> bool:
-        if not self.stake_on:
-            return False
-        now = time.time()
-        if not force and self._stake_disc_at and now - self._stake_disc_at < self.stake_every:
-            return True
-        if not force and now < getattr(self, "_stake_retry_at", 0):
-            return False
-        if not self._stake_hl_ok(int(HL_COST.get("getProgramAccounts", 10)) * len(self.owners), "계정 발견"):
-            return False
-        try:
-            ei = self.rpc.call("getEpochInfo", [{"commitment": "finalized"}])
-            self._epoch = {"epoch": int(ei["epoch"]), "slotIndex": int(ei["slotIndex"]),
-                           "absoluteSlot": int(ei["absoluteSlot"]), "ts": int(now)}
-            found = {}
-            for w in self.owners:
-                res = self.rpc.call("getProgramAccounts", [STAKE_PROGRAM, {
-                    "encoding": "jsonParsed", "commitment": "finalized",
-                    "filters": [{"memcmp": {"offset": STAKE_WITHDRAWER_OFFSET, "bytes": w}}]}])
-                time.sleep(TX_BATCH_SLEEP)
-                for it in res or []:
-                    pk = it.get("pubkey")
-                    acc = it.get("account") or {}
-                    info = (((acc.get("data") or {}).get("parsed") or {}).get("info") or {})
-                    auth = ((info.get("meta") or {}).get("authorized") or {})
-                    if not pk or auth.get("withdrawer") != w:
-                        continue
-                    dl = ((info.get("stake") or {}).get("delegation") or {})
-                    found[pk] = {"w": w, "lamports": int(acc.get("lamports") or 0),
-                                 "stake": int(dl.get("stake") or 0), "voter": dl.get("voter"),
-                                 "act": dl.get("activationEpoch"), "deact": dl.get("deactivationEpoch"),
-                                 "rent": int((info.get("meta") or {}).get("rentExemptReserve") or 0),
-                                 "staker": auth.get("staker"),
-                                 "state": stake_state(dl.get("activationEpoch"), dl.get("deactivationEpoch"),
-                                                      self._epoch["epoch"])}
-        except Exception as e:
-            self._stake_err = common.safe_err(e)[:160]
-            self._stake_retry_at = now + 300
-            log.info("스테이크 계정 발견 실패(5분 뒤 재시도): %s", e)
-            return False
-        t0 = self._stake_t0()
-        for s, v in found.items():
-            k = "_stk:" + s
-            ent = self.cursor.get(k)
-            if not isinstance(ent, dict):
-                self.cursor[k] = {"w": v["w"], "t0": t0, "rwd_next": None, "first": None, "open": False}
-                log.info("★스테이크 계정 발견 %s (지갑 %s, %.4f SOL, 검증인 %s) — 창 %s 부터 추적★", s[:8], v["w"][:8],
-                         v["lamports"] / 1e9, (v["voter"] or "?")[:8], time.strftime("%Y-%m-%d", time.gmtime(t0)))
-            elif ent.pop("gone", None) is not None:
-                pass
-        for s, ent in self.stake_reg().items():
-            if s not in found and not ent.get("gone"):
-                ent["gone"] = int(now)
-        prev = self.stake_snap.get("accounts") or {}
-        for s, ent in self.stake_reg().items():
-            if s not in found and s in prev:
-                found[s] = dict(prev[s], lamports=0, stake=0, state="closed", w=ent.get("w"))
-        for s, v in found.items():
-            v["ledger_ready"] = bool((self.cursor.get("_stk:" + s) or {}).get("open"))
-        self.stake_snap = {"ts": int(now), "epoch": self._epoch, "accounts": found}
-        common.atomic_write_json(self.stake_path, self.stake_snap)
-        common.atomic_write_json(self.cursor_path, self.cursor)
-        self._stake_disc_at = now
-        self._stake_err = None
-        return True
 
     def _block_time(self, slot: int) -> int:
         if slot in self._bt_cache:
@@ -1278,251 +676,6 @@ class SolWatcher:
         self._bt_cache[slot] = bt
         return bt
 
-    def _stake_note_first(self, s: str, slot, pre) -> None:
-        ent = self.cursor.get("_stk:" + s)
-        if not isinstance(ent, dict) or (ent.get("open") and not ent.get("reopen_pending")) or slot is None or pre is None:
-            return
-        f = ent.get("first")
-        if not f or int(slot) < int(f[0]):
-            ent["first"] = [int(slot), int(pre)]
-
-    def _stake_rewards(self) -> bool:
-        reg = self.stake_reg()
-        if not self.stake_on or not reg:
-            return True
-        now = time.time()
-        if not self._epoch or now - self._epoch["ts"] >= STAKE_RWD_POLL_SEC:
-            ei = self.rpc.call("getEpochInfo", [{"commitment": "finalized"}])
-            self._epoch = {"epoch": int(ei["epoch"]), "slotIndex": int(ei["slotIndex"]),
-                           "absoluteSlot": int(ei["absoluteSlot"]), "ts": int(now)}
-        cur = self._epoch["epoch"]
-        last = cur - 1 if self._epoch["slotIndex"] >= STAKE_RWD_MARGIN_SLOTS else cur - 2
-        acc = (self.stake_snap.get("accounts") or {})
-        for s, ent in reg.items():
-            if ent.get("rwd_next") is None:
-                t0 = int(ent.get("t0") or 0)
-                act = (acc.get(s) or {}).get("act")
-                try:
-                    act = int(act)
-                except (TypeError, ValueError):
-                    act = None
-                if t0:
-                    lag = int((now - t0) / (SLOTS_PER_EPOCH * SLOT_SEC_EST)) + 3
-                    e0 = max(cur - lag, act if act is not None else 0)
-                else:
-                    e0 = act if act is not None else cur - 1
-                ent["rwd_next"] = int(e0)
-        n = 0
-        while n < STAKE_RWD_EPOCHS_PER_CYCLE:
-            todo = {s: e for s, e in ((s, int(v.get("rwd_next"))) for s, v in reg.items()
-                                      if not (v.get("gone") and v.get("open") and not v.get("reopen_pending"))) if e <= last}
-            if not todo:
-                break
-            e = min(todo.values())
-            addrs = sorted(s for s, e9 in todo.items() if e9 == e)
-            if not self._stake_hl_ok(1 + len(addrs), "보상 조회"):
-                break
-            res = self.rpc.call("getInflationReward", [addrs, {"epoch": e, "commitment": "finalized"}])
-            if not isinstance(res, list) or len(res) != len(addrs):
-                raise RuntimeError(f"getInflationReward 응답 형식 오류(epoch {e})")
-            for s, r in zip(addrs, res):
-                ent = reg[s]
-                if r and int(r.get("amount") or 0) > 0:
-                    slot9 = int(r["effectiveSlot"])
-                    bt = self._block_time(slot9)
-                    if bt >= int(ent.get("t0") or 0):
-                        txh = f"stakerwd:{s}:{e}"
-                        if txh not in self.emitted:
-                            amt = int(r["amount"])
-                            self.writer.append({
-                                "v": 1, "kind": "sol_tx", "chain": "sol", "txhash": txh, "slot": slot9, "ts": bt,
-                                "fee_lamports": 0, "fee_payer_mine": False, "fee_payer": None, "wallets": self.owners,
-                                "deltas": [{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(amt),
-                                            "owner": f"{ent['w']}:stake:{s}"}],
-                                "counterparties": [], "has_program": True, "err": False,
-                                "stake_reward": {"kind": "epoch", "epoch": e, "commission": r.get("commission"),
-                                                 "post_balance": int(r.get("postBalance") or 0),
-                                                 "voter": (acc.get(s) or {}).get("voter")}})
-                            self.emitted.add(txh)
-                        self._stake_note_first(s, slot9, int(r.get("postBalance") or 0) - int(r["amount"]))
-                ent["rwd_next"] = e + 1
-            n += 1
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
-            time.sleep(TX_BATCH_SLEEP)
-        return all(int(v.get("rwd_next")) > last for v in reg.values()
-                   if not (v.get("gone") and v.get("open") and not v.get("reopen_pending")))
-
-    def _stake_note_tx(self, rec: dict) -> None:
-        for s9, w9 in (rec.get("stake_new") or {}).items():
-            if not isinstance(self.cursor.get("_stk:" + s9), dict):
-                self.cursor["_stk:" + s9] = {"w": w9, "t0": self._stake_t0(), "rwd_next": None, "first": None, "open": False}
-                log.info("★스테이크 계정 발견(tx) %s (지갑 %s)★", s9[:8], w9[:8])
-        for s9, pre9 in (rec.get("stake_pre") or {}).items():
-            self._stake_note_first(s9, rec.get("slot"), pre9)
-
-    def _stake_open(self, caught_up: bool) -> None:
-        if not caught_up:
-            return
-        acc = self.stake_snap.get("accounts") or {}
-        for s, ent in self.stake_reg().items():
-            if ent.get("open") or s not in self.cursor:
-                continue
-            f = ent.get("first")
-            if f:
-                lam = int(f[1])
-            elif s in acc and acc[s].get("state") != "closed":
-                lam = int(acc[s].get("lamports") or 0)
-            else:
-                continue
-            txh = f"stakeopen:{s}"
-            if lam > 0 and txh not in self.emitted:
-                self.writer.append({
-                    "v": 1, "kind": "sol_tx", "chain": "sol", "txhash": txh, "slot": None,
-                    "ts": int(ent.get("t0") or 0) or int(time.time()),
-                    "fee_lamports": 0, "fee_payer_mine": False, "fee_payer": None, "wallets": self.owners,
-                    "deltas": [{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(lam),
-                                "owner": f"{ent['w']}:stake:{s}"}],
-                    "counterparties": [], "has_program": True, "err": False,
-                    "stake_open": {"acct": s, "wallet": ent["w"], "lamports": lam,
-                                   "first_slot": f[0] if f else None}})
-                self.emitted.add(txh)
-                log.info("★스테이크 기초잔고 %s %.6f SOL (창 %s)★", s[:8], lam / 1e9,
-                         time.strftime("%Y-%m-%d", time.gmtime(int(ent.get("t0") or 0))))
-            ent["open"] = True
-            if s in acc:
-                acc[s]["ledger_ready"] = True
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
-        if self.stake_snap:
-            common.atomic_write_json(self.stake_path, self.stake_snap)
-
-    def _stake_sigs_between(self, s: str, lo: int, hi: int):
-        out, before = [], None
-        for _p in range(50):
-            opt = {"limit": 1000, "commitment": "finalized"}
-            if before:
-                opt["before"] = before
-            res = self.rpc.call("getSignaturesForAddress", [s, opt])
-            if not isinstance(res, list):
-                raise RuntimeError(f"getSignaturesForAddress 형식 오류({s[:8]})")
-            stop = False
-            for r in res:
-                bt = r.get("blockTime")
-                if bt is None:
-                    raise RuntimeError(f"서명 blockTime 없음({s[:8]})")
-                if int(bt) < lo:
-                    stop = True
-                    break
-                if int(bt) < hi and not r.get("err"):
-                    out.append(r["signature"])
-            if stop:
-                return list(reversed(out))
-            if len(res) < 1000:
-                if not self._end_ok(res):
-                    raise RuntimeError(f"스테이크 {s[:8]} 서명 — 폴백 RPC 의 짧은 페이지(이력 끝 미확인) · 다음 주기")
-                return list(reversed(out))
-            before = res[-1]["signature"]
-        raise RuntimeError(f"스테이크 서명 50쪽 상한({s[:8]})")
-
-    def _stake_reopen(self, caught_up=None) -> None:
-        tgt = bf_engine.SINCE.target("sol")
-        if not tgt:
-            return
-        tgt = int(tgt)
-        changed = False
-        acc = self.stake_snap.get("accounts") or {}
-        for s, ent in self.stake_reg().items():
-            if caught_up is None:
-                if not ent.get("open") or ent.get("reopen_pending") or int(ent.get("t0") or 0) <= tgt + 60:
-                    continue
-                if not self._stake_hl_ok(1, "기초잔고 재산정"):
-                    break
-                old_t0 = int(ent.get("t0") or 0)
-                first = ent.get("first") if isinstance(ent.get("first"), list) else None
-                n_emit = 0
-                for sig in self._stake_sigs_between(s, tgt, old_t0):
-                    rec = self.parse_tx(sig)
-                    if not isinstance(rec, dict):
-                        raise RuntimeError(f"스테이크 tx 파싱 실패 {sig[:10]}")
-                    pre9 = (rec.get("stake_pre") or {}).get(s)
-                    if pre9 is not None and rec.get("slot") is not None and (not first or int(rec["slot"]) < int(first[0])):
-                        first = [int(rec["slot"]), int(pre9)]
-                    if sig not in self.emitted:
-                        self.writer.append(rec)
-                        self.emitted.add(sig)
-                        n_emit += 1
-                    time.sleep(TX_BATCH_SLEEP)
-                ent.update(t0=tgt, rwd_next=None, first=first, reopen_pending=True, reopen_from=old_t0)
-                changed = True
-                log.warning("★스테이크 기초잔고 재산정 시작 %s: 창 %s → %s · 옛 구간 tx 방출 %d(보상 따라잡은 뒤 기초잔고 확정)★", s[:8],
-                            time.strftime("%Y-%m-%d", time.gmtime(old_t0)), time.strftime("%Y-%m-%d", time.gmtime(tgt)), n_emit)
-                continue
-            if not caught_up or not ent.get("reopen_pending"):
-                continue
-            first = ent.get("first")
-            if first:
-                lam = int(first[1])
-            elif s in acc and acc[s].get("state") != "closed":
-                lam = int(acc[s].get("lamports") or 0)
-            else:
-                continue
-            new_t0 = int(ent["t0"])
-            txh = f"stakeopen:{s}:{new_t0}"
-            if txh not in self.emitted:
-                self.writer.append({
-                    "v": 1, "kind": "sol_tx", "chain": "sol", "txhash": txh, "slot": None, "ts": new_t0,
-                    "fee_lamports": 0, "fee_payer_mine": False, "fee_payer": None, "wallets": self.owners,
-                    "deltas": ([{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(lam),
-                                 "owner": f"{ent['w']}:stake:{s}"}] if lam > 0 else []),
-                    "counterparties": [], "has_program": True, "err": False,
-                    "stake_open": {"acct": s, "wallet": ent["w"], "lamports": lam, "first_slot": first[0] if first else None,
-                                   "reopen": True, "t0": new_t0, "prev_t0": int(ent.get("reopen_from") or 0)}})
-                self.emitted.add(txh)
-            log.warning("★스테이크 기초잔고 재산정 %s: 창 %s → %s · %.6f SOL(과거 창 확장)★", s[:8],
-                        time.strftime("%Y-%m-%d", time.gmtime(int(ent.get("reopen_from") or 0))),
-                        time.strftime("%Y-%m-%d", time.gmtime(new_t0)), lam / 1e9)
-            ent.pop("reopen_pending", None)
-            ent.pop("reopen_from", None)
-            changed = True
-        if changed:
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
-
-    def _stake_cycle(self) -> None:
-        if not self.stake_on:
-            return
-        hb = bf_engine.health("sol")
-        try:
-            self._stake_reopen()
-            caught = self._stake_rewards()
-            self._stake_reopen(caught_up=caught)
-            self._stake_open(caught)
-            self._stake_err = None if self._stake_disc_at else self._stake_err
-        except Exception as e:
-            caught = False
-            self._stake_err = common.safe_err(e)[:160]
-            log.info("스테이킹 보상 단계 실패(다음 주기): %s", e)
-        reg = self.stake_reg()
-        now = time.time()
-        disc_age = now - self._stake_disc_at if self._stake_disc_at else None
-        facts = dict(accounts=len([1 for v in reg.values() if not v.get("gone")]),
-                     discovered_at=int(self._stake_disc_at) or None, snapshot_ts=self.stake_snap.get("ts"),
-                     epoch=(self._epoch or {}).get("epoch"),
-                     rewards_next_epoch=min((int(v["rwd_next"]) for v in reg.values() if v.get("rwd_next") is not None),
-                                            default=None),
-                     rewards_caught_up=bool(caught), opened=sum(1 for v in reg.values() if v.get("open")),
-                     staked_sol=round(sum(int(v.get("lamports") or 0) for v in (self.stake_snap.get("accounts") or {}).values()) / 1e9, 6))
-        pz9 = float(getattr(self, "_stake_paced_at", 0) or 0)
-        if pz9 and now - pz9 <= 600:
-            facts["paced_at"] = int(pz9)
-        if not self._stake_err and pz9 and now - pz9 <= 600:
-            hb.ok("sol_stake", "stake", **facts)
-        elif self._stake_err or disc_age is None or disc_age > 3 * self.stake_every:
-            hb.fail("sol_stake", RuntimeError(self._stake_err or "스테이크 계정 발견 스냅샷 오래됨"), "stake", **facts)
-        else:
-            hb.ok("sol_stake", "stake", **facts)
-        hb.flush()
 
     def _rl_summary(self):
         now = time.time()
@@ -2385,12 +1538,6 @@ class SolWatcher:
             hb.fail("sol", RuntimeError("; ".join(f"{a}: {e}" for a, e in fail_list[:3]) or
                                         ("tx 파싱/방출 실패" if not done_ok else "부분 조회")), "sol_rpc", **facts)
         hb.flush()
-
-
-def _hl_paced(rpc) -> bool:
-    m9 = bf_engine.HELIUS
-    return bool(getattr(rpc, "metered", False)) and not (callable(getattr(rpc, "hl_closed", None)) and rpc.hl_closed()) \
-        and bool(getattr(m9, "fill_first", False)) and float(getattr(m9, "burst", 1.0)) < 1.0
 
 
 def _pn_ok(rpc) -> bool:

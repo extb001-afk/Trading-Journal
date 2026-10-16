@@ -23,6 +23,7 @@ import bsc_watch
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 E18 = 10 ** 18
 DAY = 86400
 NOW = int(time.time())

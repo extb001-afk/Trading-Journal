@@ -48,6 +48,7 @@ col = SW.SuiCollector(SW.make_adapter(cfg), w, st, {A, B}, page_budget={"latest"
 col.cycle()
 reg.FORCE_AVAILABLE.add("sui")
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 
 
 def mk_core():

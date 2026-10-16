@@ -39,6 +39,7 @@ CHAIN_KO = {"sol": "솔라나", "eth": "이더리움", "bsc": "BSC", "base": "Ba
 NATIVE = {"sol": "SOL", "eth": "ETH", "base": "ETH", "arbitrum": "ETH", "optimism": "ETH", "scroll": "ETH", "zksync": "ETH",
           "bsc": "BNB", "polygon": "POL", "gnosis": "XDAI", "robinhood": "ETH", "arc": "USDC"}
 import common as _cm9
+import calcguard
 _cm9.fill_chain_table(CHAIN_KO)
 _cm9.fill_chain_table(NATIVE, 1)
 WRAPPED = {"eth": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "base": "0x4200000000000000000000000000000000000006",
@@ -797,6 +798,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer._sol", e)
                 err = e
         raise RuntimeError(f"sol {method}: {err}")
 
@@ -823,6 +825,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer._evm", e)
                 err = e
                 errs.append(e)
         ex = RuntimeError(f"{chain} {method}: {err}")
@@ -864,6 +867,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer.ws_op", e)
                 self.log(f"wormholescan {short(txh)}: {e}")
                 if _definitive(e):
                     self.c["ws"][k] = []
@@ -884,6 +888,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer.debridge", e)
                 self.log(f"debridge {short(txh)}: {e}")
                 if _definitive(e):
                     self.c["ws"][k] = []
@@ -900,6 +905,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer.relay", e)
                 self.log(f"relay {short(txh)}: {e}")
                 if _definitive(e):
                     self.c["ws"][k] = []
@@ -923,6 +929,7 @@ class Tracer:
             except Budget:
                 raise
             except Exception as e:
+                calcguard.swallowed("xchain_match:Tracer.ccip", e)
                 self.log(f"ccip {short(txh)}: {e}")
                 if _definitive(e):
                     self.c["ws"][k] = []
@@ -986,7 +993,8 @@ class Tracer:
             return 1.0
         try:
             return self.px.candle_usd("BNB" if sym == "BNB" else sym, int(ts) * 1000)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("xchain_match:Tracer.native_px", _cg9)
             return None
 
     def _span(self, chain):
@@ -1140,7 +1148,8 @@ class Tracer:
                     if norm(h9) != ctx and Hn[2:] in str(snap9 or "").lower():
                         sib = True
                         break
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("xchain_match:Tracer._same_block_prior", _cg9)
                 sib = False
         if not sib:
             return out
@@ -1663,6 +1672,7 @@ class Tracer:
         except Budget:
             e["status"] = "budget"
         except Exception as ex:
+            calcguard.swallowed("xchain_match:Tracer.trace_send", ex)
             e["status"] = "error"
             e["err"] = _cm9.safe_err(ex)[:200]
         self.c["snd"][k] = e
@@ -1712,6 +1722,7 @@ class Tracer:
         except Budget:
             e["status"] = "budget"
         except Exception as ex:
+            calcguard.swallowed("xchain_match:Tracer.trace", ex)
             e["status"] = "error"
             e["err"] = _cm9.safe_err(ex)[:200]
         e["path"] = path[:12]
@@ -1774,7 +1785,8 @@ def _stable_cas(chain):
     try:
         import pricing
         return (pricing.STABLE_CAS.get(chain) or {}).keys()
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:_stable_cas", _cg9)
         return ()
 
 
@@ -1782,7 +1794,8 @@ def _init_mints():
     try:
         import pricing
         _STABLE_MINTS.update(pricing.STABLE_MINTS.keys())
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:_init_mints", _cg9)
         _STABLE_MINTS.update({"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"})
 
 
@@ -1809,7 +1822,8 @@ def anchors_from_state(state_dir, conn, cfg):
     try:
         for (a,) in conn.execute("SELECT address FROM exchange_addresses WHERE memo IS NULL OR memo=''"):
             put(a, "deposit")
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:anchors_from_state", _cg9)
         pass
     dep, wd = set(), set()
     try:
@@ -1820,7 +1834,8 @@ def anchors_from_state(state_dir, conn, cfg):
                 continue
             if tx:
                 (dep if kind == "deposit" else wd).add(tx)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:anchors_from_state", _cg9)
         pass
     try:
         with open(os.path.join(state_dir, "tx_origin_cache.json"), encoding="utf-8") as f:
@@ -1854,7 +1869,8 @@ def exchange_addrs_from_state(state_dir, conn, cfg):
     try:
         for (a,) in conn.execute("SELECT address FROM exchange_addresses"):
             put(a)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:exchange_addrs_from_state", _cg9)
         pass
     wd = set()
     try:
@@ -1865,7 +1881,8 @@ def exchange_addrs_from_state(state_dir, conn, cfg):
                 continue
             if tx:
                 wd.add(tx)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("xchain_match:exchange_addrs_from_state", _cg9)
         pass
     try:
         with open(os.path.join(state_dir, "tx_origin_cache.json"), encoding="utf-8") as f:

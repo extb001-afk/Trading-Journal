@@ -62,6 +62,7 @@ check("D1 수집기 준비(창 안 거래 없음)", st.ready({A}), st.status_vie
 c = core.Core(common.load_config())
 c.conn.commit()
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c._nonevm_adapters = {"tron": TW.make_adapter(common.load_config()), "sui": None, "ton": None}
 
 

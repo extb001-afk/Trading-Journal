@@ -19,6 +19,7 @@ import ledger_backup as LB
 
 assert _x.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(common.load_config())
 S = common.STATE_DIR
 BASE = os.path.dirname(S)
@@ -357,7 +358,7 @@ check("[S] 보존 수 설정: 기본 (0, False) · backup.keep_pre_rebuild N = �
       ks["기본"] == (0, False) and ks["keep_pre_rebuild=3"] == (2, False) and ks["keep_pre_rebuild=1"] == (0, False)
       and ks["새 키가 옛 키보다 먼저"] == (1, False) and ks["옛 키 명시 존중"] == (2, True)
       and ks["잘못된 값(0·6·문자·True)"] == [(0, False)] * 4, ks)
-src = open(os.path.join(_x.TREE, "src", "core.py"), encoding="utf-8").read()
+src = T.core_src(os.path.join(_x.TREE, "src"))
 check("[S] 재구축 교체가 backup 설정을 넘김(정적)", 'self._ext_keep_cfg(bcfg, self.cfg.get("backup"))' in src, "")
 clear()
 done()

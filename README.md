@@ -7,6 +7,11 @@
 
 *English summary is at the bottom — [English](#english).*
 
+> **원가 계산 방식 = 이동평균(평균 단가 · 선입선출 아님)** — 금액은 모두 달러로 계산하고, 원화는 업비트 USDT 원화 시세로 바꿔 보여 줘요.
+> 평단 = 남은 원가 ÷ 원가를 아는 수량이에요(체인 기본 코인·정품 스테이블은 체인을 넘어 한 평단, 그 밖 토큰은 컨트랙트마다, 거래소 보유는 거래소·코인마다).
+> 내 지갑·거래소 사이 이동은 손익이 없고 출발지 평단 원가를 그대로 들고 가요. 원가를 모르는 수량은 기본으로 처음 생긴 날 시가로 추정('추정' 표시)하고,
+> 그 값도 없으면 평단에서 빼 두었다가 팔리면 '원가 미확인'으로 보여요. 실현 손익·신고용 명세도 이 평단 기준이에요 — 자세히는 [원가 · 손익 계산 방식](#원가--손익-계산-방식).
+
 ![대시보드 — 총자산·전일 대비 분해·총자산 곡선 · 금액은 랜덤값](docs/screenshots/01_dashboard_top.png)<br><sub>금액은 랜덤값</sub>
 
 **목차** — [처음 시작하면 이것부터](#처음-시작하면-이것부터) · [화면 미리보기](#화면-미리보기) · [변경 내역(CHANGELOG)](CHANGELOG.md)
@@ -17,7 +22,7 @@
   [기타 자산](#기타-자산--증권사-연결은-미검증) · [NFT](#nft-보유--바닥가) · [Hyperliquid](#hyperliquid--현물--무기한--스테이킹) · [시세 출처](#시세-출처--동명-코인-거르기) ·
   [일별 기록](#일별-기록--그날-카드--m월-한눈에) · [백필·재구축](#백필--재구축--재백필) · [백업·복구](#백업--복구) ·
   [업데이트](#업데이트) · [멈추기·지우기](#멈추기--지우기)
-- 참고: [기능 요약](#기능-요약) · [구조](#구조) · [보안·데이터](#보안--데이터) · [고급 설정(환경변수·설정 키)](#고급-설정) · [알아 둘 것](#알아-둘-것) · [시험 실행](#시험-실행) · [라이선스](#라이선스)
+- 참고: [원가 · 손익 계산 방식](#원가--손익-계산-방식) · [기능 요약](#기능-요약) · [구조](#구조) · [보안·데이터](#보안--데이터) · [고급 설정(환경변수·설정 키)](#고급-설정) · [알아 둘 것](#알아-둘-것) · [시험 실행](#시험-실행) · [라이선스](#라이선스)
 
 ---
 
@@ -73,7 +78,7 @@
 | ![변동 분해 시트 — 전일 대비 줄을 누르면 무엇 때문인지 · 금액은 랜덤값](docs/screenshots/62_change_breakdown_sheet.png)<br><sub>금액은 랜덤값</sub> | ![수집 한계 — 거래소·체인별로 받는 범위와 못 받는 것(긴 이유는 접힘)](docs/screenshots/63_settings_collection_limits.png) |
 | ![체인별 조회 — 체인마다 조회 켜기·끄기 스위치, 보낸 거래가 지갑마다 10번 이하면 '끄는 걸 추천해요', 지갑 수에 맞춘 확인 주기·하루 예상 호출·꺼 둔 체인](docs/screenshots/48_settings_chains.png) | |
 
-이번 판(2026-10-13 (2) · 양도차익 명세 '수수료로 쓴 코인' 하루 한 줄)은 [CHANGELOG.md › 2026-10-13 (2)](CHANGELOG.md#2026-10-13-2--양도차익-명세-수수료로-쓴-코인-하루-한-줄), 그 전 판(2026-10-13 · '안 팔았다면' 비교선 잠시 숨김)은 [CHANGELOG.md › 2026-10-13](CHANGELOG.md#2026-10-13--안-팔았다면-비교선-잠시-숨김), 그 앞 판(2026-10-12 (7) · 외부 재검수 잔여 2건 — 빗썸 첫 대사 전 코인 · Solana 스테이크 조회 실패·순서 · 최초 잔고 30분 안내)은 [CHANGELOG.md › 2026-10-12 (7)](CHANGELOG.md#2026-10-12-7--외부-재검수-잔여-2건빗썸-첫-대사-전-코인--solana-스테이크-조회-실패순서--최초-잔고-30분-안내), 그보다 앞 판(2026-10-12 (6) · 외부 검수 표시 정합성 3건)은 [CHANGELOG.md › 2026-10-12 (6)](CHANGELOG.md#2026-10-12-6--외부-검수-표시-정합성-3건빗썸-부분-체결--첫-대사-전-전송-중--solana-스테이크) 에 있어요.
+이번 판(2026-10-16 · 거래소 서브계정 키 · Alchemy 한도 초과 알림 · 내부 구조 정리)은 [CHANGELOG.md › 2026-10-16](CHANGELOG.md#2026-10-16--거래소-서브계정-키--alchemy-한도-초과-알림--내부-구조-정리), 그 전 판(2026-10-13 (2) · 양도차익 명세 '수수료로 쓴 코인' 하루 한 줄)은 [CHANGELOG.md › 2026-10-13 (2)](CHANGELOG.md#2026-10-13-2--양도차익-명세-수수료로-쓴-코인-하루-한-줄), 그 전 판(2026-10-13 · '안 팔았다면' 비교선 잠시 숨김)은 [CHANGELOG.md › 2026-10-13](CHANGELOG.md#2026-10-13--안-팔았다면-비교선-잠시-숨김), 그 앞 판(2026-10-12 (7) · 외부 재검수 잔여 2건 — 빗썸 첫 대사 전 코인 · Solana 스테이크 조회 실패·순서 · 최초 잔고 30분 안내)은 [CHANGELOG.md › 2026-10-12 (7)](CHANGELOG.md#2026-10-12-7--외부-재검수-잔여-2건빗썸-첫-대사-전-코인--solana-스테이크-조회-실패순서--최초-잔고-30분-안내), 그보다 앞 판(2026-10-12 (6) · 외부 검수 표시 정합성 3건)은 [CHANGELOG.md › 2026-10-12 (6)](CHANGELOG.md#2026-10-12-6--외부-검수-표시-정합성-3건빗썸-부분-체결--첫-대사-전-전송-중--solana-스테이크) 에 있어요.
 바로 전 판(2026-10-12 (5) · 새 설치 지금 총자산 몇 분 안 · 빗썸 원화 예수금 · Alchemy 속도 칸)에 더해진 것 — 자세한 설명은 [CHANGELOG.md › 2026-10-12 (5)](CHANGELOG.md#2026-10-12-5--새-설치-지금-총자산-몇-분-안--빗썸-원화-예수금--alchemy-속도-칸) 에 있어요.
 사진은 이번 판(2026-10-12 (5)) 화면으로 다시 찍었어요(금액 랜덤값 모드 · 가짜 주소) — 화면이 바뀐 20장(대시보드·매매일지·일별 기록·명세·가스·긴 곡선·상태 패널·모바일·타임머신·결산·보관처 서랍·변동 분해 시트 등)은 새로, 나머지는 지난 판(2026-10-12 (3)) 화면 그대로예요.
 
@@ -568,7 +573,8 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 
 ## 시세 출처 · 동명 코인 거르기
 
-- **달러 시세 순서 = 바이낸스 → 바이빗 → 코인게코.** 원화 마켓이 없는 업비트·빗썸 보유 코인, 원가(매수 시점 1분봉), 장기 곡선·그날 마감가가 이 순서를 씁니다.
+- **달러 시세 순서 = 바이낸스 → 바이빗 → 코인게코.** 원화 마켓이 없는 업비트·빗썸 보유 코인, 원가(매수 시점 1분봉), 장기 곡선·그날 마감가가 이 순서를 씁니다
+  (원가용 1분봉만 바이빗 다음에 업비트 원화 1분봉 ÷ 그 분 환율도 봐요 — 업비트 원화 마켓에만 있는 코인).
 - **원화 환율(업비트 USDT 원화 호가)** 은 받은 시각과 함께 둡니다. 1시간 넘게 못 받으면 화면 숫자는 마지막 값으로 보이되(상태줄·설정 환율 줄에 '환율 오래됨' · 고정 대체값이면 '환율 대체값' + 김프 숨김) 그날 마감은 미루고, 그날은 그 시각 1분봉 환율로 닫습니다(고정 대체값은 마감·곡선에 저장하지 않음).
 - **업비트·빗썸의 USDT·BTC 마켓 시세는 쓰지 않습니다**(거래가 얇아 튀는 일이 잦음). 원화 마켓 시세와 원화 환산용 업비트 KRW-USDT 는 그대로 씁니다.
 - **동명 코인 거르기** — 같은 티커라도 다른 코인일 수 있어, 코인게코 매핑이 다른 코인이라고 하거나 기준가와 0.5~2배 넘게 어긋나면 그 거래소 시세를 버리고 사유를 남깁니다.
@@ -731,6 +737,7 @@ Bitcoin 공개 디스크립터·xpub 로 돈을 옮길 수는 없지만 HD 지�
   하루 몫은 옛 기록 채우기가 먼저 쓰고, 탐색기가 막히면 그 체인을 공개 RPC 로 이어 받습니다(Base 는 공개 RPC 전용 · Solana 새 거래는 공개 노드 먼저).
 - **거래소 연결(선택)** — 업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트. 입금·출금·체결·잔고(마진·Earn·선물 손익 포함)를 읽어
   "지갑 → 거래소 입금 → 매도" 흐름을 한 사이클로 묶고 원가를 이어 줍니다. 원화 입출금도 따로 보여 줍니다.
+  바이낸스·바이빗·OKX·쿠코인·게이트는 **서브계정 키**도 넣을 수 있어요(거래소마다 5개까지 · 같은 거래소로 합쳐 세고 기록 줄에 `· 서브1` 딱지).
 - **퍼프 덱스(선택)** — 주소만으로 공개 조회되는 곳(Hyperliquid·GMX 등)의 포지션·정산. **Hyperliquid** 는 현물·무기한 현금·스테이킹까지 원장·대사(선택).
 - **NFT(표시 전용)** — 보유 자동 발견(크립토펑크 등 표준 이전 NFT 포함), 바닥가·거래량 확인된 컬렉션 자동 추적, 후보·스팸 거르기·지켜보기, 총자산 포함 스위치.
 - **LP** — Uniswap v3/v4·PancakeSwap·SushiSwap·Aerodrome/Velodrome Slipstream·Meteora DLMM 등 포지션 원금·수수료 평가.
@@ -740,10 +747,99 @@ Bitcoin 공개 디스크립터·xpub 로 돈을 옮길 수는 없지만 HD 지�
 - **전체 검색** — ⌘K(또는 /)로 코인·주소·해시·날짜·금액·메모·리뷰를 한 번에(필터 문법 `coin:` `chain:` `type:` `after:` `pnl:` `amt:` …, 문장 검색).
 - **옛 보유 토큰 찾기** — 지갑 등록 때 체인별 무료·키 출처 합집합으로 주고받은 모든 토큰을 찾아 같은 블록 잔고로 기초 잔고 · 놓친 토큰은 나갈 때 직전 블록 잔고로 바로잡음([자세히](#옛-보유-토큰-찾기--체인-표)).
 - **상태 패널·알림** — 수집기·외부 API 지연, 온체인 잔고 상시 대조(불일치 알림), 원장 정기 백업 상태, 텔레그램 알림 3등급(즉시 · 하루 요약 · 시스템).
-- **가격** — 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외), 거래소 보유분은 그 거래소 원화 시세, 달러 시세는 바이낸스 → 바이빗 → 코인게코
+- **가격** — 토큰은 그 체인의 DEX 실가(얇은 풀의 비정상 가격은 평가 제외), 거래소 보유분은 그 거래소 시세(업비트·빗썸 = 원화 마켓 · 해외 거래소 = 그 거래소 달러 시세 · 다른 거래소 값으로 대신하지 않음), 달러 시세는 바이낸스 → 바이빗 → 코인게코
   (업비트·빗썸 USDT·BTC 마켓은 쓰지 않음 · 동명 코인 거르기), 원화 환산은 업비트 KRW-USDT. 금액 랜덤값·가리기 모드로 화면 공유도 안전하게.
 - **AI(선택, 기본 꺼짐)** — 일간·주간 리뷰(`TJ_ENABLE_REVIEW=1 pm2 start ecosystem.config.js` 로 `tj-review` 유닛 추가)와
   영수증 AI 매수·매도 평가(`config.json` 의 `review.*_eval_daily_max` 를 0 보다 크게). 둘 다 내 컴퓨터의 `claude` CLI 로 요약을 보냅니다.
+
+## 원가 · 손익 계산 방식
+
+원가·손익은 모두 **달러(USD)로 계산**하고, 원화는 업비트 USDT 원화 시세(김프 포함)로 바꿔 보여 줘요.
+원장에는 거래마다 그 시각 달러 시가만 적어 두고, 평단·실현·명세는 화면을 만들 때마다 원장을 처음부터 다시 재생해 계산해요 —
+아래 설정을 바꾸면 지난 숫자도 새 규칙으로 다시 계산되고, 원장 자체는 바뀌지 않아요.
+
+### 평단 — 이동평균(선입선출 아님)
+
+- **평단 = 남은 원가 합 ÷ 원가를 아는 수량.** 살 때마다 원가·수량이 더해져 평단이 다시 잡히고, 팔면 `평단 × 판 수량` 만큼 원가가 빠져요(남은 평단은 그대로).
+- **실현 손익 = 판 금액 − 평단 × 판 수량** (수수료·가스는 아래 표).
+- **평단을 함께 쓰는 묶음**
+  - ETH·SOL·BNB 같은 체인 기본 코인 = 체인이 달라도 한 묶음(그 체인 공식 랩 토큰 WETH 등 포함)
+  - 정품 목록의 스테이블(USDT·USDC 등) = 이름별 한 묶음
+  - 그 밖 토큰 = 체인·컨트랙트마다 따로 · 거래소 보유 = 거래소·코인마다 따로(업비트 BTC 와 바이낸스 BTC 는 평단이 따로)
+  - 보유표는 같은 이름을 한 줄로 모아 보여 주고, 줄을 펼치면 보관처별 평단이 보여요.
+- **같은 거래 안**(스왑 등)에서는 파는 쪽을 그 거래 전 평단으로 먼저 계산한 뒤 산 쪽을 반영해요.
+- **같은 초**에 겹친 거래는 블록 번호·블록 안 순번·거래소 체결 시각(밀리초)·체결 번호로 순서를 정하고, 그래도 모르면 보유가 모자라지 않는 순서로 재생해요.
+
+> 예(합성 값) — ETH 1개를 $2,000, 1개를 $3,000 에 사면 평단 $2,500. 1개를 $3,500 에 팔면 실현 +$1,000, 남은 1개 평단은 그대로 $2,500.
+
+### 내 지갑 · 거래소 사이 이동
+
+- 이동은 매매가 아니라 손익이 없어요. 보낸 수량은 **출발지 평단 원가를 그대로 들고 가고**, 도착지에 같은 코인이 이미 있으면 둘이 섞여 도착지 평단이 다시 잡혀요.
+- 짝 찾기 — 거래소 입금·출금은 txid(없으면 수량·시간·입금 주소), 브리지는 출발·도착 수량(98~102%)·시간. 그래서 '지갑에서 산 코인 → 거래소 입금 → 매도'가 산 값 기준으로 계산돼요.
+- 짝을 못 찾은 도착은 아래 '원가를 모를 때'로 가요. 보낼 때는 원가를 모르는 수량이 먼저 나가요(도착에서도 원가 미확인 그대로).
+
+### 수수료 · 가스
+
+| 무엇 | 반영 |
+|---|---|
+| 거래소 매수 수수료 | 산 코인 원가에 더함(업비트는 체결 원화에 이미 포함) |
+| 거래소 매도 수수료 | 그 매도의 실현에서 뺌 |
+| 스왑 매수 가스 · 스왑 매도 가스 | 산 코인 원가에 더함 · 그 매도의 실현에서 뺌 |
+| 매매 아닌 가스(승인·전송·실패·브리지·LP) | 그날 실현에서 '가스(매매 외)'로 뺌 |
+| 거래소 출금 수수료 · 브리지 수수료 | 그 시각 시가를 그날 비용으로 뺌 |
+| 수수료로 나간 코인 자체 | (그 시각 시가 − 평단) × 수량 = 처분 손익(명세 '수수료로 쓴 코인') |
+
+- **설정 › 원가 계산 › 가스를 원가·실현에 반영**(기본 켬 · `config.json` 의 `gas_in_cost`)을 끄면 가스·출금·브리지 수수료 금액은 '가스·수수료' 탭에 따로 보이기만 해요.
+  거래소 체결 수수료와 수수료 코인 처분 손익은 켜든 끄든 그대로예요.
+
+### 원화
+
+- 업비트 원화 마켓 매수 원가 = (체결 원화 + 수수료) ÷ 그 분 업비트 KRW-USDT, 매도 금액 = (체결 원화 − 수수료) ÷ 같은 환율.
+- **실현 손익의 원화 = 달러 실현 × 판 시각 환율.** 그 코인을 전부 원화 마켓에서 샀다면 원화 실현 = 받은 원화 − 낸 원화.
+- 지금 보유·총자산·미실현의 원화는 지금 환율이에요.
+- 정품 스테이블은 원가·평가 모두 **액면 $1**(시세가 흔들려도 $1). 원화로 산 USDT 의 원화 환차손익은 명세의 '스테이블 환차손익' 줄에만 들어가요.
+- 은행 ↔ 거래소 원화 입출금은 손익이 아니에요(일별 기록 '원화 입출금').
+
+### 원가를 모를 때 — 기초 잔고 · 에어드랍 · 출처 모르는 입금
+
+- **기본 = 최초 인식 시가(추정)** — 그 수량이 장부에 처음 생긴 날 시가를 원가로 잡아요(수집 시작 전 보유는 수집 시작일 · 받은 날 판 몫은 판 값). 한 번 잡은 값은 고정이고 명세·카드에 '추정'으로 보여요.
+  보냈다가 돌아온 코인(보낼 때 원가를 이어받음) · 확인 안 된 토큰 · 나중에 판 값의 10배 넘는 시세 · 그날 시세 없음은 매기지 않아요.
+- 그래도 모르는 수량은 **평단에서 빼고** 따로 들고 있어요. 팔 때는 원가 아는 수량부터 떼고, 모르는 몫의 매도는 실현에서 빠져 **'원가 미확인'**(미매칭 탭)으로 남아요.
+- **미매칭 › 원가 미확인 항목** — '원가 적용'(개당 달러) · '당시 시세로 추정' · '손익 0 처리'(누른 때까지의 매도를 매수가 = 매도가로).
+- **설정 › 원가 계산** — 최초 인식 시가(기본 켬 · `config.json` 의 `first_seen_px`) · 평균가 대체(기본 끔 — 켜면 그 종목 평균 매수가로, 이때 최초 인식 시가는 쉼) · 지정한 원가 되돌리기.
+- 우선순위 = 직접 넣은 원가 > 손익 0 처리 > 평균가 대체 > 최초 인식 시가 > 원가 미확인.
+
+> 예(합성 값) — 평단 $2,500 짜리 1 ETH 에 기초 잔고 0.5 ETH(수집 시작일 시가 $2,800)가 있으면 평단 = ($2,500 + $1,400) ÷ 1.5 = $2,600.
+> 최초 인식 시가를 끄면 0.5 는 원가 미확인 — 1.2 ETH 를 $3,000 에 팔면 1개 몫 실현 +$500, 나머지 0.2개($600)는 '원가 미확인'.
+
+### 미실현 · 총자산
+
+- **미실현 = (지금 시세 − 평단) × 원가 아는 보유 수량.** 원가 미확인 보유는 총자산엔 들고 미실현엔 안 들어요.
+- 시세 — 거래소 보유는 그 거래소 시세, 체인 기본 코인은 거래소 시세, 토큰은 그 체인 DEX 가격([시세 출처](#시세-출처--동명-코인-거르기)).
+  보유 평가가 풀 유동성보다 크거나 믿을 시세가 없으면 평가 0('값 없는 토큰')이라 총자산·손익에서 빠져요.
+- **총자산 = 스테이블 + 코인(수량 × 지금 시세) + 원화 예수금 + LP(평가 + 미청구 수수료·보상) − 거래소에서 빌린 몫 − Rabby 차입.**
+  선물 열린 포지션의 미실현은 넣지 않아요. 기타 자산 탭의 '전체 순자산' = 총자산 + 기타 자산 − 부채(+ NFT, 켰을 때).
+- 전일 대비 = 시세(평가) + 실현 매매 + LP 수수료 + 입출금 + 환율 + 원가 모름 + 나머지.
+
+### 선물 · LP · 스테이킹 · 대출
+
+- **선물·퍼프** — 거래소가 준 정산(실현 손익 · 수수료 · 펀딩)을 정산 시각에 그대로 써요(평단 계산 없음 · 코인 정산은 정산 시각 시세로 달러). 그날 '총 실현' = 현물 + 선물.
+- **LP** — 예치는 이동(원가 그대로). 회수 때 다른 코인으로 바뀌어 나오면 그 시각 시가와 원금 원가의 차가 실현, 받은 수수료·리워드는 받은 시각 시가로 실현이에요.
+- **스테이킹 보상**(Solana) — 받은 시각 시가로 실현(소득)하고, 그 값이 그 코인 원가예요.
+- **대출** — 거래소에서 빌린 몫은 음수 보유로 총자산에서 빼고, 이자는 잔고 감소(실현 밖)예요. 빌려서 출금해 판 코인은 `loan_short`(기본 꺼짐)를 보세요.
+
+### 양도차익 명세 — 참고용
+
+- 매도 한 건마다 취득가액 = 평단 × 수량, 양도가액 = 판 금액, 수수료 열 = 매도 수수료·가스.
+- 원화 양도가액 = 판 시각 환율 · 원화 취득가액 = 산 때 원화(원화 마켓은 낸 원화, 그 밖은 산 시각 환율)의 이동평균 — 기록이 없으면 판 시각 환율.
+- 원가 미확인 매도는 명세에서 빠지고, 추정(최초 인식 시가 · 평균가 대체 · 손익 0 처리) 행은 표시가 붙어요.
+- **이동평균 기준이라 선입선출·개별 지정으로 신고하면 숫자가 달라요.** 기본공제·시행 전 보유분 취득가 특례 같은 세법 규칙도 반영하지 않았어요 — 실제 신고는 거래소 공식 내역과 세무 전문가 확인을 따르세요.
+
+### 숫자를 믿을 수 있게
+
+- 원본(raw)은 그대로 보관하고 원가·손익은 그때마다 다시 계산해요 — 원장 재계산은 [백필 · 재구축](#백필--재구축--재백필).
+- 계산 중 코드 실수 꼴 오류가 나면 화면은 계속 돌되 상태 패널에 빨강 **'계산 코드 오류를 삼킴 — 숫자가 틀렸을 수 있음'** 과 텔레그램이 와요.
+- 알려진 한계 — 수수료로 확인되지 않은 이동 수량 차이(도착이 조금 적음)는 그 몫 원가가 손익 없이 빠지고, 같은 블록 순서·메이커 리베이트 등은 [알아 둘 것](#알아-둘-것)에 있어요.
 
 ## 구조
 
@@ -759,8 +855,8 @@ Bitcoin 공개 디스크립터·xpub 로 돈을 옮길 수는 없지만 HD 지�
 | `tj-evm` · `tj-sol` · `tj-bsc` | 지갑 수집기(EVM·Solana·BNB Chain) → `state/inbox/` |
 | `tj-tron` · `tj-sui` · `tj-ton` · `tj-btc` | 새 체인 지갑 수집기(Tron·Sui·TON·Bitcoin) → `state/inbox/<체인>` — 그 체인 지갑이 없으면 대기(자식 안 띄움) |
 | `tj-ex` · `tj-exf` | 업비트 / 해외 거래소(+퍼프 덱스) 수집 |
-| `tj-core` | 원장 쓰기(유일한 쓰기 주체) — 분류·원가·손익 |
-| `tj-web` | 화면·설정 API·가격·잔고 대조·기타 자산·알림 생산 (127.0.0.1:8023) |
+| `tj-core` | 원장 쓰기(유일한 쓰기 주체) — 분류 · 거래마다 그 시각 시가 기록(평단·실현·명세는 `tj-web` 이 원장을 재생해 계산) |
+| `tj-web` | 화면·설정 API·원가·손익 계산(원장 재생)·가격·잔고 대조·기타 자산·알림 생산 (127.0.0.1:8023) |
 | `tj-alert` | 텔레그램 발송 — 종류별 켜기·끄기·조용한 시간 적용 |
 | `tj-review` | (선택) AI 일간·주간 리뷰 |
 
@@ -980,6 +1076,11 @@ shows cost basis, realized/unrealized PnL, a daily PnL calendar with per-day tra
 a long-range net-worth curve, an "other assets" tab (real estate, stocks, gold, cash, debt), a capital-gains statement (reference only), bridge/transfer
 tracking and a review queue for unknown-cost inflows and spam tokens. The UI is Korean and times are KST.
 
+**Cost basis = moving weighted average (WAC), not FIFO.** One average cost per asset group (`known cost ÷ known quantity`); within a single transaction the
+disposal leg is valued at the pre-transaction average before the acquisition leg updates it; moves between your own wallets/exchanges keep the average;
+quantities with unknown cost are kept outside the average and flagged as unknown cost when sold. Realized PnL and the capital-gains
+statement use this average.
+
 - **Requirements:** macOS or Linux, Python 3.9+ (standard library only). Node.js + pm2 optional (recommended for auto-restart).
 - **Always-on server:** use a fixed-IP Linux box (Ubuntu 24.04; 2–4 cores, 4–8 GB RAM — add 4 GB swap on 4 GB, 40–80 GB SSD) and whitelist that IP on your exchange API keys. Keep the web UI bound to 127.0.0.1; open it with `ssh -L 8023:127.0.0.1:8023 user@server` or an HTTPS tunnel/reverse proxy with login on — never expose the port directly.
   On Linux with 2+ cores the screen build runs in a forked tj-web child; with 4+ cores that child is pinned to the highest-numbered core and every other
@@ -1034,7 +1135,19 @@ tracking and a review queue for unknown-cost inflows and spam tokens. The UI is 
 - **Borrowed coins:** `loan_short` in `config.json` — confirmed exchange-loan periods only, e.g. (synthetic) `[{"exchange": "okx", "asset": "ETH", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}]` —
   gives coins borrowed and withdrawn (exchange balance pushed below zero, later refilled on the same exchange) a cost at the borrow-time price; the difference on refill is realized
   (a "대출 상환" row in the statement; display calculation only, with first-seen pricing on — the default; empty = off).
-- **Release notes:** what changed in each release (the tax statement's "coin spent as a fee" disposals shown as one row per day and coin — amounts are the per-fill sums, display only, `pm2 restart tj-web` — on 2026-10-13 (2); the "never sold" comparison line hidden until sold coins get current prices — display only, `pm2 restart tj-web` — on 2026-10-13; two remaining first-reconciliation display fixes from a re-review — Bithumb coin quantity with partial fills across a snapshot, Solana stake read before the wallet and a failed re-read skips that round — plus an "allow about 30 minutes for initial balances" note on 2026-10-12 (7); three display fixes from an external review — Bithumb KRW with partial fills across a balance snapshot, transfers in flight to an exchange before its first reconciliation, Solana stake accounts re-read with current balances — on 2026-10-12 (6); a fresh install shows today's total from current balances within minutes — exchange balances read first, exchange and all-chain on-chain current balances before the first reconciliation, no double-counted transfers in flight, Bithumb KRW rolled forward from its snapshot, a 20 CU Alchemy gate slot, 20 screenshots retaken on this release (the rest are from 2026-10-12 (3)) — on 2026-10-12 (5); the spot-realized gas line renamed "가스(매매 외)" (gas, non-trading) with a dimmed reference line below it
+- **How cost and PnL are calculated** (details in Korean under [원가 · 손익 계산 방식](#원가--손익-계산-방식)). Everything is computed in USD; KRW figures use Upbit's KRW-USDT price (kimchi premium included).
+  The ledger stores each leg's USD price at that moment; averages, realized PnL and the statement are recomputed from the ledger on every build.
+  - **Average cost (moving weighted average, not FIFO)** per asset group: a chain's native coin (plus its official wrapped token) is one group across chains,
+    each whitelisted stablecoin is one group by name, other tokens are per contract, and exchange balances are per exchange and coin. Realized = proceeds − average × quantity sold.
+  - Within one transaction the sell leg uses the pre-trade average; same-second trades are ordered by block/tx position or fill time.
+  - Moves between your own wallets and exchanges carry the departing average cost (no PnL); the destination re-averages if it already holds that coin.
+  - Fees: exchange buy fees and swap-buy gas add to cost; sell fees and swap-sell gas reduce that sale's PnL; non-trading gas and withdrawal/bridge fees are
+    that day's expense (switch "gas into cost/PnL", default on). A coin spent as a fee is a disposal at market price.
+  - Unknown-cost quantities (pre-window balances, airdrops, unmatched deposits) are priced at the first-seen day's price by default (marked as estimates);
+    otherwise they stay outside the average and their sales show as "unknown cost". Manual cost, break-even and average-price fallback (off by default) are in the UI.
+  - Unrealized = (price − average) × quantity with known cost. Futures use exchange-reported realized PnL, fees and funding; LP fees and staking rewards are income at receipt-time price.
+  - Stablecoins are valued at $1. Realized KRW = USD PnL × the sell-time rate. The capital-gains statement uses the same average (KRW cost at buy-time rates) and is reference only.
+- **Release notes:** what changed in each release (exchange sub-account keys for Binance, Bybit, OKX, KuCoin and Gate counted as the same exchange with a "서브N" tag, a one-time alert when Alchemy keeps refusing the key (monthly capacity, 402, 401/403), unexpected calculation errors shown in red on the status panel instead of being swallowed, a new "how costs and P&L are calculated" section, and an internal restructuring into smaller modules verified to give identical results — all units restart, no rebuild — on 2026-10-16; the tax statement's "coin spent as a fee" disposals shown as one row per day and coin — amounts are the per-fill sums, display only, `pm2 restart tj-web` — on 2026-10-13 (2); the "never sold" comparison line hidden until sold coins get current prices — display only, `pm2 restart tj-web` — on 2026-10-13; two remaining first-reconciliation display fixes from a re-review — Bithumb coin quantity with partial fills across a snapshot, Solana stake read before the wallet and a failed re-read skips that round — plus an "allow about 30 minutes for initial balances" note on 2026-10-12 (7); three display fixes from an external review — Bithumb KRW with partial fills across a balance snapshot, transfers in flight to an exchange before its first reconciliation, Solana stake accounts re-read with current balances — on 2026-10-12 (6); a fresh install shows today's total from current balances within minutes — exchange balances read first, exchange and all-chain on-chain current balances before the first reconciliation, no double-counted transfers in flight, Bithumb KRW rolled forward from its snapshot, a 20 CU Alchemy gate slot, 20 screenshots retaken on this release (the rest are from 2026-10-12 (3)) — on 2026-10-12 (5); the spot-realized gas line renamed "가스(매매 외)" (gas, non-trading) with a dimmed reference line below it
   for the day's trading gas and fees, already in cost basis (buys) or PnL (sells) and outside the sum — display only, `pm2 restart tj-web` after `git pull`, screenshots are from 2026-10-12 (3) — on 2026-10-12 (4); a screen polish pass — one number font, unified titles and colors, long explanations folded into one line
   plus "자세히", no jump-to-top when tapping lower settings rows —, an exchange-retention warning when fetching older history, an AI review "fill all" button and small
   external-review fixes — deferred receipt evaluations, no redirects on authenticated requests, tightened `state/` and `.env` permissions, prefetch of today's receipts

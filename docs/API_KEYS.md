@@ -93,6 +93,10 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 - 단가는 Alchemy 공식 CU 표 그대로 셉니다 — `alchemy_getTokenBalances` 20 · `eth_getBalance` 20 · `eth_call` 26 · `eth_getLogs` 60 · `alchemy_getAssetTransfers` 120 · 그 밖 26.
 - 오늘 쓴 양 / 하루 몫은 설정 › 연결·키 › Alchemy 칸에 보입니다. 유료 요금제라면 같은 칸에서 **유료 키** 를 고르고 월 한도·사용 비율(10·25·50·80%)을 넣으세요.
 
+**한도 초과·키 거절 알림**: Alchemy 가 월 용량 초과('Monthly capacity limit exceeded')·결제 필요(402)·키 거부(401·403)로 성공 없이 계속(2번 이상 · 첫 거절부터 1분 넘게) 거절하면
+상태 패널에 주의('Alchemy 월 한도 초과' 또는 'Alchemy 키 거절')가 뜨고 텔레그램이 한 번 와요(조용한 시간이면 끝난 뒤 · 다시 성공하면 풀렸다는 알림 한 번).
+초당 한도(429)·서버 오류(5xx)·시간 초과 같은 잠깐 실패는 세지 않아요. 키 값은 로그·상태 패널·알림 어디에도 남기지 않아요.
+
 **없으면**: 수집·감시는 그대로 돌지만 옛 보유 토큰 찾기가 약해집니다(탐색기 한 곳만 — 그 탐색기가 막힌 체인은 오래 들고만 있던 토큰을 놓칠 수 있어요).
 설정 화면·상태 패널에 경고가 뜹니다.
 
@@ -180,6 +184,10 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 - 쓰는 곳: 그 거래소의 잔고·체결·입출금(무엇을 어디까지 받는지는 [COLLECTION_LIMITS.md](COLLECTION_LIMITS.md)).
 - 바이낸스·바이빗·OKX 는 같은 조회 키로 선물 손익과 선물 영수증의 진입·청산 가격도 받습니다(추가 권한 필요 없음 · 바이낸스만 선물 체결 내역을 조금 더 부름 — 공표 한도 80% 안).
 - 거래소 공개 시세(달러·원화 시세)는 키 없이 받습니다.
+- **서브계정 키(선택 · 바이낸스·바이빗·OKX·쿠코인·게이트 · 거래소마다 1~5개)** — 메인 키 이름 가운데에 `SUB<번호>_` 를 넣은 이름이에요
+  (예: `TJ_BYBIT_SUB1_KEY` · `TJ_BYBIT_SUB1_SECRET` · OKX·쿠코인은 `…_SUB1_PASSPHRASE` 도). 설정 › 연결·키 › 거래소 칸의 **서브계정 키 추가**로 넣으면
+  메인 키와 같은 권한 확인·연결 시험을 거쳐요. 서브 몫은 **같은 거래소로 합쳐** 잔고·체결·입출금·선물을 세고, 화면 기록 줄에만 `· 서브1` 딱지가 붙어요.
+  메인 키가 있어야 서브 키를 써요 · 바이빗·OKX 서브는 입금 주소를 거래소가 주지 않아 입금 주소 목록에는 메인만 보여요.
 
 ## 텔레그램 — `TJ_TG_TOKEN` · `TJ_TG_CHAT`
 
@@ -220,6 +228,12 @@ are built in memory only.
   keyless drpc times out on heavy transactions): only blocks older than 1 hour, and only when all trace nodes said the history is gone, the block is older
   than 30 days, or the deferred retry failed twice — one `alchemy_getAssetTransfers` call (category `internal`, 120 CU) per block, never for live polling.
   Without the key those transactions keep only light traces (drpc) and the totals are matched by balance reconciliation.
+- **Alchemy rejections**: when Alchemy keeps refusing the key (monthly capacity exceeded, 402 payment required, or 401/403 key refused — at least twice and
+  for over a minute with no success in between), the status panel shows a warning and Telegram sends one alert (after quiet hours; one more when it recovers).
+  Short failures (per-second 429, 5xx, timeouts) are not counted. The key itself is never written to logs, the status panel or alerts.
+- **Exchange sub-accounts** (optional — Binance, Bybit, OKX, KuCoin, Gate; up to 5 per exchange): name the keys like the main key with `SUB<n>_` inserted
+  (`TJ_BYBIT_SUB1_KEY`, `TJ_BYBIT_SUB1_SECRET`, plus `…_SUB1_PASSPHRASE` for OKX/KuCoin) or use **Add sub-account key** in Settings. Sub-accounts are counted as
+  the same exchange (balances, fills, transfers, futures); rows only get a `· 서브1` (sub 1) tag. A main key is required.
 - **Ankr** (`TJ_ANKR_KEY`, free Freemium — https://www.ankr.com/rpc/ — required for EVM wallets: 10-minute incoming-token checks for idle wallets)
   and **NodeReal** (`TJ_NODEREAL_KEY`): faster BSC/Base archive backfill and old-block balances for the BNB Chain balance watch (finds plain BNB sent to you
   or paid out by contracts — a few dozen calls per deposit, daily cap, zero calls otherwise; without a key only recent blocks are scanned); the

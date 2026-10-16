@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 
 import common
+import calcguard
 
 UA = "tj-bot/0.1 (personal trade journal)"
 HTTP_MAX_BYTES = 32 * 1024 * 1024
@@ -57,7 +58,8 @@ def retry_after_sec(v):
     try:
         from email.utils import parsedate_to_datetime
         return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:retry_after_sec", _cg9)
         return None
 
 
@@ -247,7 +249,8 @@ def _fail_class_one(x, block, head) -> str:
             h9 = None
             try:
                 h9 = head() if callable(head) else head
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("bf_engine:_fail_class_one", _cg9)
                 h9 = None
             if block is None or h9 is None:
                 return "transient"
@@ -307,7 +310,8 @@ def classify_exc(e: BaseException, host: str = None, body_bytes: bytes = None) -
         try:
             rb9 = (body_bytes if body_bytes is not None else e.read(HTTP_ERR_MAX_BYTES)) or b""
             body = rb9[:300].decode("utf-8", "replace")
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:classify_exc", _cg9)
             pass
         ra = retry_after_sec(e.headers.get("Retry-After") if e.headers else None)
         msg = f"HTTP Error {code}: {e.reason}" + (f" ({body.strip()[:120]})" if body.strip() else "")
@@ -874,7 +878,8 @@ def _esb_sync_locked(d: str, proc: str, now: float):
                 continue
             try:
                 j = common.read_json(os.path.join(d, f), {})
-            except (Exception, SystemExit):
+            except (Exception, SystemExit) as _cg9:
+                calcguard.swallowed("bf_engine:_esb_sync_locked", _cg9)
                 continue
             if not isinstance(j, dict):
                 continue
@@ -985,7 +990,8 @@ def es_ledger_read(now: float = None, d: str = None) -> dict:
             if f.endswith(".json"):
                 try:
                     j = common.read_json(os.path.join(d, f), {})
-                except (Exception, SystemExit):
+                except (Exception, SystemExit) as _cg9:
+                    calcguard.swallowed("bf_engine:es_ledger_read", _cg9)
                     continue
                 if isinstance(j, dict) and j.get("day") == day:
                     n += int(j.get("n") or 0)
@@ -1056,7 +1062,8 @@ def es_budget_flush(closed: bool = False):
 def _esb_atexit():
     try:
         es_budget_flush(closed=True)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_esb_atexit", _cg9)
         pass
 
 
@@ -1151,7 +1158,8 @@ class DayMeter:
                     continue
                 try:
                     j = common.read_json(os.path.join(d, f), None)
-                except (Exception, SystemExit):
+                except (Exception, SystemExit) as _cg9:
+                    calcguard.swallowed("bf_engine:DayMeter._sync", _cg9)
                     j = None
                 if not isinstance(j, dict):
                     ok = False
@@ -1214,7 +1222,8 @@ class DayMeter:
             try:
                 import nodekeys
                 fd9 = nodekeys.fresh_day(str(self.fresh_svc))
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("bf_engine:DayMeter.eff_budget", _cg9)
                 fd9 = None
         used, head = self.st["n"] + self.st["others"], self.st["nh"] + self.st["others_h"]
         try:
@@ -1398,7 +1407,8 @@ def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = Non
             m9.month_cap, m9.flex_x, m9.fresh_svc = int(flex["cap"]), float(flex["x"]), "helius" if sub == "helius_budget" else None
             m9.st.update(day=int(now // 86400), n=int(L["n"]), nh=int(L["nh"]))
             eb9 = m9.eff_budget(now)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:ledger_rooms", _cg9)
             eb9 = None
     fa9 = es_fill_active(L["fq"], now)
     if eb9 is None:
@@ -1593,7 +1603,8 @@ def _sol_meter_ensure():
         _SOL_METER_SET[0] = True
         try:
             sol_meter_configure(common.load_config())
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as _cg9:
+            calcguard.swallowed("bf_engine:_sol_meter_ensure", _cg9)
             pass
 
 
@@ -1679,7 +1690,8 @@ def helius_flex(cfg: dict):
         try:
             import nodekeys
             x = max(1.0, float(nodekeys.BURST_X))
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:helius_flex", _cg9)
             x = 1.0
     return {"cap": int(m * pct / 100.0), "x": x}
 
@@ -1687,7 +1699,8 @@ def helius_flex(cfg: dict):
 def _hl_atexit():
     try:
         HELIUS.flush(closed=True)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_hl_atexit", _cg9)
         pass
 
 
@@ -1895,7 +1908,8 @@ def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None
             if isinstance(day, int) and lo <= day < today:
                 per[(day, f[:-5])] = max(per.get((day, f[:-5]), 0), int(j.get("n") or 0))
                 perh[(day, f[:-5])] = max(perh.get((day, f[:-5]), 0), min(int(j.get("n") or 0), _esb_rec_head(j)))
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as _cg9:
+            calcguard.swallowed("bf_engine:_rpc_day_prev_used", _cg9)
             continue
     if rt_out is not None:
         for (day, _s), v in perh.items():
@@ -1960,7 +1974,8 @@ def _rpc_day_lims(ent: dict, now: float, live: bool = False) -> dict:
         try:
             import nodekeys
             fd9 = nodekeys.fresh_day(str(ent["spec"]["svc"]))
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:_rpc_day_lims", _cg9)
             pass
     try:
         cap = int(float(ent["spec"]["month"]) * float(ent.get("pct") or 80.0) / 100.0)
@@ -2056,7 +2071,8 @@ def rpc_day_settle(name: str, actual: int, reserved: int, day):
         return
     try:
         ent["meter"].add(ent["meter"].proc or _RPC_DAY_PROC, delta, now=now)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:rpc_day_settle", _cg9)
         pass
 
 
@@ -2067,7 +2083,8 @@ def rpc_day_status() -> dict:
     for name, ent in ents.items():
         try:
             used, bud = ent["meter"].used()
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:rpc_day_status", _cg9)
             used, bud = 0, ent["meter"].budget
         out[name] = {"used": int(used), "budget": int(bud), "unit": ent["spec"].get("unit"), "refused": int(ent.get("refused") or 0)}
         if _burst_x(ent["spec"]):
@@ -2075,7 +2092,8 @@ def rpc_day_status() -> dict:
                 l9 = rpc_day_limits(name)
                 out[name].update(normal=l9.get("normal"), burst=l9.get("burst"), cap=l9.get("cap"), prev=l9.get("prev"),
                                   rt=l9.get("rt"), rtm=l9.get("rtm"), room=l9.get("room"))
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("bf_engine:rpc_day_status", _cg9)
                 pass
     return out
 
@@ -2086,7 +2104,8 @@ def _rpc_day_atexit():
     for ent in ents:
         try:
             ent["meter"].flush(closed=True)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:_rpc_day_atexit", _cg9)
             pass
 
 
@@ -2195,7 +2214,8 @@ def configure(cfg: dict):
     try:
         import nodesel
         nodesel.configure(cfg)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:configure", _cg9)
         pass
     bf = (cfg or {}).get("backfill") or {}
     _POLICY_OVERRIDES.clear()
@@ -2381,8 +2401,17 @@ def _qn_note(host: str, body=None, err=None) -> None:
     try:
         import nodekeys
         nodekeys.qn_note(host, body=body, err=err)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_qn_note", _cg9)
         pass
+
+
+def _alch_note(url: str, body=None, err=None, text: str = "") -> None:
+    try:
+        import nodekeys
+        nodekeys.alch_note(url, body=body, err=err, text=text)
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_alch_note", _cg9)
 
 
 def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout: float = 25.0,
@@ -2469,6 +2498,8 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
                 raise NetError(f"payload: JSON 파싱 불가 ({str(e)[:60]})", "payload", host=host)
             if host.endswith(".quiknode.pro"):
                 _qn_note(host, body=d)
+            elif host.endswith(".g.alchemy.com"):
+                _alch_note(url, body=d)
             g.success()
             return d, None
         except CircuitOpen:
@@ -2478,7 +2509,8 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             if rdb9 and rdd9 is not None and not rds9 and isinstance(e, urllib.error.HTTPError):
                 try:
                     bb9 = _read_capped(e, min(rdu9, HTTP_ERR_MAX_BYTES) + 1, tb9, to9) or b""
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("bf_engine:http_request", _cg9)
                     bb9 = None
                 if bb9 is not None and len(bb9) > HTTP_ERR_MAX_BYTES:
                     bb9 = bb9[:HTTP_ERR_MAX_BYTES]
@@ -2487,11 +2519,14 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             elif tb9 is not None and isinstance(e, urllib.error.HTTPError):
                 try:
                     bb9 = _read_capped(e, HTTP_ERR_MAX_BYTES, tb9, to9) or b""
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("bf_engine:http_request", _cg9)
                     bb9 = b""
             err = classify_exc(e, host, body_bytes=bb9)
             if host.endswith(".quiknode.pro"):
                 _qn_note(host, err=err)
+            elif host.endswith(".g.alchemy.com"):
+                _alch_note(url, err=err, text=(bb9[:HTTP_ERR_MAX_BYTES].decode("utf-8", "replace") if bb9 else ""))
             if isinstance(e, urllib.error.HTTPError):
                 g.observe(e.headers)
             _stat(host, err.kind)
@@ -2532,7 +2567,8 @@ def _rpc_cfg_ensure():
             return
         try:
             configure(common.load_config())
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as _cg9:
+            calcguard.swallowed("bf_engine:_rpc_cfg_ensure", _cg9)
             _CONFIGURED[0] = True
 
 
@@ -2552,7 +2588,8 @@ def rpc_post(url: str, body, *, timeout: float = 25.0, ua: str = None, retries: 
 def _ns_mark():
     try:
         _NS[0].mark_dispatch() if _NS[0] else None
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_ns_mark", _cg9)
         pass
 
 
@@ -2562,7 +2599,8 @@ def _ns_begin():
             import nodesel
             _NS[0] = nodesel
         return _NS[0].begin()
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_ns_begin", _cg9)
         return None
 
 
@@ -2571,7 +2609,8 @@ def _ns_end(url, methods, cost, t0, err=None):
         return
     try:
         _NS[0].end(url, methods, cost, t0, err)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("bf_engine:_ns_end", _cg9)
         pass
 
 
@@ -2658,7 +2697,8 @@ def _ns_batch_err(d):
     if d and all(errs):
         try:
             return classify_rpc_error(errs[0])
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:_ns_batch_err", _cg9)
             return NetError("rpc", "rpc")
     return None
 
@@ -3005,6 +3045,7 @@ def canary_check(url: str, canary: dict, *, timeout: float = 25.0, prio: str = "
         res = total == int(canary["expect"])
         why = f"{total}/{canary['expect']}건"
     except Exception as e:
+        calcguard.swallowed("bf_engine:canary_check", e)
         res, why = None, f"오류 {common.safe_err(e)[:80]}"
     with _CANARY_LOCK:
         _CANARY[url] = (res, now, why)
@@ -3180,7 +3221,8 @@ class LogScanner:
             if moved and on_advance:
                 try:
                     on_advance(st["last"], dict(st["found"]))
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("bf_engine:LogScanner.scan.advance_locked", _cg9)
                     pass
 
         old_below = to - self.recent_blocks
@@ -3319,6 +3361,7 @@ class LogScanner:
                         advance_locked()
                         cv.notify_all()
                 except Exception as e:
+                    calcguard.swallowed("bf_engine:LogScanner.scan.worker", e)
                     err = classify_exc(e) if not isinstance(e, NetError) else e
                     with cv:
                         inflight.discard((a, b))
@@ -3504,7 +3547,8 @@ class Progress:
                     return len(drop)
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:Progress.prune", _cg9)
             return 0
 
     def flush(self):
@@ -3529,7 +3573,8 @@ class Progress:
                     common.atomic_write_json(self.path, cur)
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:Progress.flush", _cg9)
             pass
 
 
@@ -3653,7 +3698,8 @@ class Health:
                "sources": src, "net": net}
         try:
             common.atomic_write_json(self.path, doc)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("bf_engine:Health.flush", _cg9)
             pass
 
 

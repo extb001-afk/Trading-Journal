@@ -20,6 +20,7 @@ import core
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
 LOG = core.Core.EXF_REVERT_LOG
 chk = T.chk
@@ -354,8 +355,11 @@ def _fake(url, headers=None, *a, **k):
 
 _fake._tj_test_mock = True
 ex_foreign._http_json_err = _fake
+T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
 ex_foreign._gov_prepare = lambda *a, **k: None
+T.patch_moved("_gov_prepare", ex_foreign._gov_prepare, ("exf_",))
 ex_foreign.PACE = 0
+T.patch_moved("PACE", ex_foreign.PACE, ("exf_",))
 common.atomic_write_json(FB, {"ts": 0, "events": [], "cursor": {"income": T0K}})
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
 fk = json.load(open(FB))
@@ -388,6 +392,7 @@ def _fake2(url, headers=None, *a, **k):
 
 _fake2._tj_test_mock = True
 ex_foreign._http_json_err = _fake2
+T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
 chk(abs(json.load(open(FB))["ts"] - time.time()) < 60, "K9b 끝까지 받음(마지막 쪽 1000건 미만) = 파일 ts = 지금(종전)", json.load(open(FB))["ts"])
 with open(FB, "w", encoding="utf-8") as fh:

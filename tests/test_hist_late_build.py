@@ -25,6 +25,7 @@ import web
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
@@ -66,6 +67,9 @@ web.pricing._gj = lambda url, timeout=10.0: None
 web.pricing.PxCache.fx_at = lambda self, ms: 1400.0
 open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
 web.HL_SETTLE_S = 0
+for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:
+    if hasattr(sys.modules[_mn9], "HL_SETTLE_S"):
+        sys.modules[_mn9].HL_SETTLE_S = 0
 
 
 def build(no_marks=False):

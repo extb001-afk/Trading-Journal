@@ -26,6 +26,7 @@ import web
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 try:
     import discopen
 except ImportError as e:

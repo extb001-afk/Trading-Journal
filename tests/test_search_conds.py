@@ -19,12 +19,12 @@ chk = T.chk
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime(2026, 10, 6, 1, 0, tzinfo=KST)
-WSRC = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+WSRC = T.web_src()
 
 m9 = re.search(r"^\s*_nopid9 = (lambda e9: .*?)(?:\s+#.*)?$", WSRC, re.M)
 nopid = eval(m9.group(1)) if m9 else None
 keys = set(re.findall(r'\["events"\]\[-1\]\["(_\w+)"\]', WSRC))
-keys |= set(re.findall(r'"(_ts|_pid)": ', WSRC[WSRC.find("def ev(flow, ts, k, d, q, a, tx"):][:1500]))
+keys |= set(re.findall(r'"(_ts|_pid)": ', WSRC[re.search(r"def ev\((?:cpx, )?flow, ts, k, d, q, a, tx", WSRC).start():][:1500]))
 keys |= set(re.findall(r'pos_hid9\.append\(dict\(e9, [^)]*?(_\w+)=', WSRC))
 keys |= set(re.findall(r'e0\["(_\w+)"\] = ', WSRC))
 ALLOW = {"_ts", "_gid", "_pay", "_conv"}

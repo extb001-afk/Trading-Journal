@@ -154,6 +154,7 @@ def run_fixed(fixed_s, scan_s, cycles=4, n_w=6):
     ft = FakeTime()
     real = evm_watch.time
     evm_watch.time = ft
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     try:
         w.multicall = "0x" + "ca" * 20
 
@@ -174,6 +175,7 @@ def run_fixed(fixed_s, scan_s, cycles=4, n_w=6):
             w._bk_step(10 ** 8, ft.t + 20.0)
     finally:
         evm_watch.time = real
+        T.patch_moved("time", evm_watch.time, ("evm_",))
     return [t - c for _ws, c, t in calls], w
 
 

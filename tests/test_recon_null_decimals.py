@@ -22,6 +22,7 @@ import recon
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 chk = T.chk
 TOK6 = "0x" + "c6" * 20
 TOKP = "0x" + "c7" * 20

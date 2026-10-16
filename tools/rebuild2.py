@@ -1589,6 +1589,9 @@ def main():
 
     core_mod.PRICE_BATCH = max(core_mod.PRICE_BATCH,
                                conn.execute("SELECT count(*) FROM postings").fetchone()[0])
+    for _mn9 in [m9 for m9 in sys.modules if m9.startswith("core_")]:
+        if hasattr(sys.modules[_mn9], "PRICE_BATCH"):
+            sys.modules[_mn9].PRICE_BATCH = core_mod.PRICE_BATCH
     _cached_fx_at = c.px.fx_at
 
     def _offline_fx_scan(ts_ms):

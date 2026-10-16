@@ -20,6 +20,7 @@ import db as dbm
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 chk = T.chk
 NOW = int(time.time())
 T_OLD = NOW - 20 * 86400

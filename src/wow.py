@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import common
+import calcguard
 
 KST = timezone(timedelta(hours=9))
 _ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -54,7 +55,8 @@ def px_by_sym() -> dict:
     for i, p in enumerate(_px_files()):
         try:
             d = common.read_json(p, {}) if os.path.exists(p) else {}
-        except (SystemExit, Exception):
+        except (SystemExit, Exception) as _cg9:
+            calcguard.swallowed("wow:px_by_sym", _cg9)
             d = {}
         if not isinstance(d, dict):
             continue
@@ -94,13 +96,15 @@ def px_by_key() -> dict:
     for i, p in enumerate(_px_files()):
         try:
             d = common.read_json(p, {}) if os.path.exists(p) else {}
-        except (SystemExit, Exception):
+        except (SystemExit, Exception) as _cg9:
+            calcguard.swallowed("wow:px_by_key", _cg9)
             d = {}
         src = ((d.get("specs") if i == 0 else d.get("s")) or {}) if isinstance(d, dict) else {}
         raw.append(src if isinstance(src, dict) else {})
     try:
         import histcurve as hc
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("wow:px_by_key", _cg9)
         hc = None
     out = {}
     for sp in set(raw[0]) | set(raw[1] if len(raw) > 1 else {}):
@@ -112,7 +116,8 @@ def px_by_key() -> dict:
         if hc is not None:
             try:
                 blk = hc.blocked_union(*ents) | hc.map_blocked(sp)
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("wow:px_by_key", _cg9)
                 blk = hc.blocked_union(*ents)
         pm = {}
         for e in ents:
@@ -283,7 +288,8 @@ def _spec_of_gid(kit, gid):
     try:
         import histcurve
         sp = histcurve.spec_of(g)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("wow:_spec_of_gid", _cg9)
         return None
     if sp == "ov":
         try:
@@ -349,7 +355,8 @@ def _lots(idx, since_iso, today_iso, excl):
     try:
         import histcurve
         kit = getattr(histcurve.HIST, "kit", None)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("wow:_lots", _cg9)
         kit = None
     sells = _sells(idx, since_iso, excl)
     quar, skip9 = _quar_sets(idx, kit)
@@ -478,7 +485,8 @@ def _hist_mod():
     try:
         import histcurve
         return histcurve.HIST
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("wow:_hist_mod", _cg9)
         return None
 
 

@@ -16,6 +16,7 @@ import core
 import ops_requests as O
 assert _x.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(common.load_config())
 S = common.STATE_DIR
 APV = os.path.join(S, "rebuild_pnl_approve.json")
@@ -188,6 +189,8 @@ check("[8] rebuild2.cost_lost keys_sha(전체 칸 집합 · 칸 바뀌면 다름
       and cl8b.get("keys_sha") != cl8["keys_sha"] and cl8["n"] == 12, (cl8.get("keys_sha"), cl8b.get("keys_sha")))
 u8r = rebuild2._unv_all({"_diag": {"unv_all": {"rows": 2, "proceeds": 30.0, "by": {"7": 10.0, "9": 20.0}}}}, [], float)
 check("[8] _unv_all 이 그룹별 by 를 넘김", u8r.get("by") == {"7": 10.0, "9": 20.0}, u8r)
-wsrc = open(os.path.join(_x.TREE, "src", "web.py"), encoding="utf-8").read()
+_sd9 = os.path.join(_x.TREE, "src")
+wsrc = "\n".join(open(os.path.join(_sd9, f9), encoding="utf-8").read()
+                 for f9 in ["web.py"] + sorted(f for f in os.listdir(_sd9) if f.startswith(("view_", "http_", "accounting_")) and f.endswith(".py")))
 check("[8] web diag unv_all 에 그룹별 by(정적)", '"by": {str(' in wsrc[wsrc.find('diag_out["unv_all"]'):wsrc.find('diag_out["unv_all"]') + 400], "")
 done()

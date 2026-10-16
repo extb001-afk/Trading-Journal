@@ -122,6 +122,34 @@ def auth_urlopen(req, timeout=20):
     return _AUTH_OPENER[0].open(req, timeout=timeout)
 
 
+SUB_EXCHANGES = ("binance", "bybit", "okx", "kucoin", "gate")
+SUB_MAX = 5
+
+
+def sub_key_names(ex: str, n: int, need) -> list:
+    p9 = f"TJ_{str(ex).upper()}_"
+    return [p9 + f"SUB{int(n)}_" + k[len(p9):] if str(k).startswith(p9) else k for k in need]
+
+
+def exchange_accounts(env: dict, ex: str, need) -> list:
+    need = tuple(need or ())
+    env = env or {}
+    if not need or not all(env.get(k) for k in need):
+        return []
+    out = [("", env)]
+    if ex not in SUB_EXCHANGES:
+        return out
+    for n in range(1, SUB_MAX + 1):
+        names = sub_key_names(ex, n, need)
+        if not all(env.get(k) for k in names):
+            continue
+        e9 = dict(env)
+        for k, k2 in zip(need, names):
+            e9[k] = env[k2]
+        out.append((f"s{n}", e9))
+    return out
+
+
 def read_env_file(path: str = None) -> dict:
     out = {}
     try:

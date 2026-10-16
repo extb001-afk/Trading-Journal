@@ -31,6 +31,8 @@ import recon
 import token_discovery
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 PF = os.path.join(common.STATE_DIR, "prov_bal.json")
 NOW = time.time()
 
@@ -43,7 +45,7 @@ _real_fast_sol = recon.fetch_sol_balances
 recon.fetch_sol_balances_fast = lambda lanes, ws, native_url=None, **k: {"per_wallet": {w: {("native", None): 5 * 10 ** 8} for w in ws}, "_meta": {}}
 recon.fetch_sol_balances = lambda url, ws: {"per_wallet": {w: {("native", None): 5 * 10 ** 8} for w in ws}, "_meta": {}}
 _real_stake_live = core.Core._prov_sol_stake_live
-core.Core._prov_sol_stake_live = staticmethod(lambda url, pks, native_url=None: {pk: {PK1: 200 * 10 ** 9}.get(pk, 0) for pk in pks})
+T.patch_cls_attr(core.Core, "_prov_sol_stake_live", staticmethod(lambda url, pks, native_url=None: {pk: {PK1: 200 * 10 ** 9}.get(pk, 0) for pk in pks}))
 SP = os.path.join(common.STATE_DIR, "sol_stake.json")
 json.dump({"ts": int(NOW - 600), "accounts": {
     PK1: {"w": SW, "lamports": 200 * 10 ** 9, "state": "active"},
@@ -65,7 +67,7 @@ got_l = c._recon_fetch_plan("sol", "sol", [SW], None, latest=True)()
 got_r = c._recon_fetch_plan("sol", "sol", [SW], None)()
 check("B2 임시 잔고 조회(latest) = 스테이크 포함 · 대사 경로(latest 아님) = 종전 조회 그대로(지갑만)",
       f"{SW}:stake:{PK1}" in got_l["per_wallet"] and list(got_r["per_wallet"]) == [SW], (got_l, got_r))
-core.Core._prov_sol_stake_live = _real_stake_live
+T.patch_cls_attr(core.Core, "_prov_sol_stake_live", _real_stake_live)
 pk9 = core.Core._prov_pack(r1, "chain", NOW - 5, req=[SW], t1=NOW - 4, kind="sol")
 LOC_S = f"wallet:sol:{SW}:stake:{PK1}"
 led9 = {LOC_S: {11: Decimal("150")}}

@@ -28,6 +28,8 @@ except ImportError:
     td = None
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 chk = T.chk
 TA = "0x" + "a1" * 20
 TB = "0x" + "a2" * 20

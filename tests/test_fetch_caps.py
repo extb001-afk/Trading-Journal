@@ -48,6 +48,7 @@ http0 = evm_watch.http_json
 def run(mode, **kw):
     del CALLS[:]
     evm_watch.http_json = fake_pages(mode, **kw)
+    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
     try:
         return w._fetch_all_items("/api/v2/transactions/0xabc/token-transfers"), None
     except KeyboardInterrupt as e:
@@ -56,6 +57,7 @@ def run(mode, **kw):
         return None, e
     finally:
         evm_watch.http_json = http0
+        T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
 
 
 out, err = run("finite")
@@ -82,6 +84,7 @@ def fake_bigcur(url, prio="fg", deadline=None, retries=None, breaker_5xx=True):
 fake_bigcur._tj_test_mock = True
 del CALLS[:]
 evm_watch.http_json = fake_bigcur
+T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
 try:
     w._fetch_all_items("/api/v2/transactions/0xabc/internal-transactions")
     err = None
@@ -91,6 +94,7 @@ except Exception as e:
     err = e
 finally:
     evm_watch.http_json = http0
+    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
     del w.BS_DETAIL_MAX_BYTES
 chk(CAP is not None and isinstance(err, CAP) and len(CALLS) <= 6 and "바이트" in str(err),
     "항목 0 · 큰 커서(200KB씩)만 = 바이트 상한(시험 1MB)에 걸림 — 커서도 셈(코덱스 ui904 · 종전 200쪽까지 커서 40MB 보관)", (type(err).__name__, len(CALLS), str(err)[:100]))
@@ -106,6 +110,7 @@ def fake_detail(url, prio="fg", deadline=None, retries=None, breaker_5xx=True):
 fake_detail._tj_test_mock = True
 del CALLS[:]
 evm_watch.http_json = fake_detail
+T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
 try:
     snap, e9 = w.fetch_detail("0xabc"), None
 except KeyboardInterrupt as e:
@@ -114,6 +119,7 @@ except Exception as e:
     snap, e9 = None, e
 finally:
     evm_watch.http_json = http0
+    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
 chk(snap is None and CAP is not None and isinstance(e9, CAP), "fetch_detail: 토큰 이동 목록 상한 초과 = 예외(부분 목록으로 완전 상세 안 만듦)", (type(e9).__name__, str(e9)[:100]))
 w.enrich = {"0xabc": 0}
 w._enrich_5xx = {}

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 
 chk = T.chk
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 src = open(APP, encoding="utf-8").read() if os.path.exists(APP) else ""
 chk(bool(src), "app.js 있음", APP)
 chk("D.rateSrc =" in src and re.search(r"D\.rateLive = D\.rateSrc === 'live'", src) is not None,

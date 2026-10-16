@@ -25,6 +25,7 @@ import ex_foreign as XF
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 chk = T.chk
 KST = timezone(timedelta(hours=9))
 
@@ -216,6 +217,7 @@ chk(st["keep"] == {"b3": "market", "b6": "fill"}, "[2] 시장가·이미 체결 
 chk(set(st["bad"]) == {"b5", "b9"} and "수량" in st["bad"]["b5"]["why"] and "시간대" in st["bad"]["b9"]["why"] and st["nf"].get("b4") == 3,
     "[2] 검사 실패 = 수량 합 다름(b5)·시간대 없는 시각(b9) · 404 3번 포기(b4)", (st["bad"], st["nf"]))
 XF.PACE = 0
+T.patch_moved("PACE", XF.PACE, ("exf_",))
 rt = XF._bithumb_retime(lambda p, q: json.loads(json.dumps(RESP[q["uuid"]])), [dict(fills[0])], {"b1": ROWS["b1"]}, {}, None)
 chk(rt[0]["ts"] == st["got"]["b1"]["ts"], "[2] X12(_bithumb_retime)와 같은 시각", (rt[0]["ts"], st["got"]["b1"]))
 tool.save_progress(PROG, st)

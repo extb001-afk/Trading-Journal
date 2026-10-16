@@ -10,6 +10,7 @@ chk = T.chk
 OLD = ("옛 기록부터 채워서", "평소보다 늦을 수 있어요(첫날", "첫날은 새 거래 확인이 평소보다 늦을", "첫날 새 거래 확인이 평소보다 늦을", "이보다 늦을 수 있어요")
 files = {"setup.js": os.path.join(T.ROOT, "web", "v2", "setup.js"), "health.py": os.path.join(T.SRC, "health.py")}
 txt = {k: open(p, encoding="utf-8").read() if os.path.exists(p) else "" for k, p in files.items()}
+txt["health.py"] = T.mod_src("health", "chk_")
 hits = {k: [o for o in OLD if o in v] for k, v in txt.items()}
 chk(all(txt.values()) and not any(hits.values()), "W1 옛 문구 계열 0(설정 화면·헬스)", hits)
 import health

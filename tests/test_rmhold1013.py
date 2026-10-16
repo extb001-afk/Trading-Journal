@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 app = open(APP, encoding="utf-8").read()
 
 print("[1] 정적")

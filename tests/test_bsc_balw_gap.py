@@ -17,6 +17,7 @@ E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
+T.patch_moved("_now", bw._now, ("bsc_",))
 REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
 BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
 GAP_SEC, GAP_BLK = 2700, 6000
@@ -224,12 +225,14 @@ dep4b = CH.native(nb4b, B.OTHER, B.W1, E17)
 tick(GAP_SEC, GAP_BLK)
 cap0 = bw.BALW_DAY_CAP
 bw.BALW_DAY_CAP = 0
+T.patch_moved("BALW_DAY_CAP", bw.BALW_DAY_CAP, ("bsc_",))
 w = mk(wr)
 run(w, 4)
 jb4 = (wst().get("jobs") or [{}])[0]
 T.chk(dep4b not in B.emitted(wr) and not reqs() and jobs_left() == 1 and int(jb4.get("a") or 0) == int(cp4b[0]),
       "G4b 예산 소진 동안 = 공백 구간 작업 보존(옛 체크포인트부터) · 방출·요청 0", {"w": wst(), "req": reqs()})
 bw.BALW_DAY_CAP = cap0
+T.patch_moved("BALW_DAY_CAP", bw.BALW_DAY_CAP, ("bsc_",))
 w = mk(wr)
 run(w, 6)
 chk_one(wr, dep4b, nb4b, E17, "G4b 회복 뒤 ·")
@@ -810,4 +813,5 @@ T.chk(all(len(recs(wr, h)) == 1 and recs(wr, h)[0].get("via") == "balw" for h in
       {"emitted": sum(1 for h in many9 if h in B.emitted(wr)), "req": reqs()})
 
 bw._now = time.time
+T.patch_moved("_now", bw._now, ("bsc_",))
 T.finish()

@@ -6,6 +6,7 @@ import urllib.request
 
 import common
 import lpdec
+import calcguard
 
 SEL = {k: lpdec.selector(k) for k in (
     "getPoolAndPositionInfo(uint256)", "getPositionLiquidity(uint256)", "getSlot0(bytes32)",
@@ -32,7 +33,8 @@ def _rpcs(cfg: dict, chain: str) -> list:
         try:
             from evm_watch import RpcSynthMixin
             out = list(RpcSynthMixin.RPC_DEFAULT.get(chain) or [])
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpchain:_rpcs", _cg9)
             out = []
     return out
 
@@ -47,7 +49,8 @@ def eth_call(cfg: dict, chain: str, to: str, data: str, timeout: int = 10):
             res = d.get("result") if isinstance(d, dict) else None
             if isinstance(res, str) and res.startswith("0x") and len(res) > 2:
                 return res[2:]
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpchain:eth_call", _cg9)
             continue
     return None
 
@@ -85,7 +88,8 @@ def _str_ret(h) -> str:
             return ""
         ln = int(h[off:off + 64], 16) * 2
         return bytes.fromhex(h[off + 64:off + 64 + ln]).decode(errors="replace")
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpchain:_str_ret", _cg9)
         return ""
 
 
@@ -213,7 +217,8 @@ def read_v3(cfg: dict, chain: str, mgr: str, meta: dict, token_id: int) -> dict:
             in1 = (g1 - below1 - above1) % M256
             fees0 += ((in0 - fg0_last) % M256) * liq // Q128
             fees1 += ((in1 - fg1_last) % M256) * liq // Q128
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpchain:read_v3", _cg9)
             fees_ok = False
     m0, m1 = token_meta(cfg, chain, t0), token_meta(cfg, chain, t1)
     a0, a1 = amounts_from_liquidity(liq, sqrt_p, tl, tu)
@@ -262,7 +267,8 @@ def read_v2(cfg: dict, chain: str, pair: str, units: int, wallet=None, gauge=Non
         if gauge and wallet:
             out.update(read_stake_reward(cfg, chain, gauge, None, wallet))
         return out
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpchain:read_v2", _cg9)
         return {}
 
 
@@ -288,7 +294,8 @@ def read_stake_reward(cfg: dict, chain: str, staker: str, token_id=None, wallet=
             return {}
         m = token_meta(cfg, chain, rt)
         return {"rewardAmount": _w(h, 0) / 10 ** m["decimals"], "rewardToken": rt, "rewardSym": m["symbol"]}
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpchain:read_stake_reward", _cg9)
         return {}
 
 
@@ -299,7 +306,8 @@ def read_position(cfg: dict, chain: str, mgr: str, token_id: int) -> dict:
             return read_v4(cfg, chain, mgr, meta, token_id)
         if meta.get("proto") in ("uni_v3", "slipstream"):
             return read_v3(cfg, chain, mgr, meta, token_id)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpchain:read_position", _cg9)
         return {}
     return {}
 
@@ -324,7 +332,8 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
             req = urllib.request.Request(url, headers={"User-Agent": common.ua_for(url, "tj-bot/0.1"), "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 d = json.loads(common.read_capped(r).decode())
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("lpchain:list_wallet_positions", _cg9)
             return None
         if not isinstance(d, dict) or not isinstance(d.get("items"), list):
             return None

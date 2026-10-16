@@ -383,7 +383,7 @@ o1 = {"ok": True, "autoEval": True}
 web.StateBuilder._dex_later(o1, "2026-10-01", "ABC", "sell", None, listed=False)
 chk("2026-10-01|ABC|sell" in sellchart.dex_later_read() and "dexLater" not in o1,
     "C1 다른 보기(1분봉·판 뒤 6시간·다른 장소 칩)는 목록을 건드리지 않음(기본 보기의 '나중에 채움'을 지우지 않게)")
-src_w = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+src_w = T.web_src()
 chk('listed=(iv == "5m" and after == "1h" and not venue)' in src_w and 'listed=(iv == "5m" and not venue and not bvenue)' in src_w,
     "C1 목록 = 미리 받기와 같은 기본 보기에서만")
 o2 = {"ok": True, "autoEval": True}
@@ -446,7 +446,7 @@ with candles.chart_mode("fg"):
     h_fg = sb.receipt_chart(D2, "AAA", cache_only=True)
 chk(h_bg is None and isinstance(h_fg, dict) and h_fg.get("dexLater") == "deferred", "C4 응답 캐시의 대체 봉 본문 = 화면은 그대로 · 미리 받기는 다시 받음", (h_bg, h_fg))
 
-js = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+js = T.app_js()
 chk("' 봉 대신 '" in js and "오늘 몫 소진 — DEX 봉은 나중에 채움" in js and js.count("rcFbTxt(") >= 3 and js.count("rcLaterTxt(") >= 2,
     "C5 화면 = '… 봉 대신 …' + '오늘 몫 소진 — DEX 봉은 나중에 채움'(매도·매수 출처 줄)")
 chk("chart_prewarm_per_day" in open(T.README, encoding="utf-8").read(), "C5 README = config 키 설명")

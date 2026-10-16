@@ -22,6 +22,7 @@ import xparts
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 S = common.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))

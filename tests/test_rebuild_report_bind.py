@@ -15,6 +15,7 @@ import common
 import core
 assert _x.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(common.load_config())
 S = common.STATE_DIR
 REJ = os.path.join(S, "rebuild_rejected")

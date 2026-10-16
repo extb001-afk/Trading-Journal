@@ -545,11 +545,18 @@
       + '<input class="field" type="password" autocomplete="off" spellcheck="false" data-su-in="k_' + esc(f.key) + '" placeholder="' + (f.set ? '바꾸려면 새 값 입력 (비우면 저장된 값 유지)' : esc(f.label) + ' 붙여넣기') + '" aria-label="' + esc(g.name + ' ' + f.label) + '"></label>').join('') + '</div>'
       + permHTML(gk, g)
       + '<div class="su-actions"><button class="btn" data-su="ktest" data-v="' + gk + '"' + (U.busy['t' + gk] ? ' disabled' : '') + '>' + (U.busy['t' + gk] ? '확인 중…' : '연결 테스트') + '</button>'
-      + '<button class="btn pri" data-su="ksave" data-v="' + gk + '"' + (U.busy['s' + gk] ? ' disabled' : needAck(gk) && !U.ack[gk] ? ' disabled title="\'조회 권한만 켰음\'을 먼저 체크하세요"' : '') + '>' + (U.busy['s' + gk] ? (U.st.exchanges && U.st.exchanges[gk] ? '권한 확인 중…' : '확인 중…') : '저장') + '</button>' + (g.partial ? '<button class="btn danger" data-su="kdel" data-v="' + gk + '">삭제</button>' : '') + '</div>' + tr;
+      + '<button class="btn pri" data-su="ksave" data-v="' + gk + '"' + (U.busy['s' + gk] ? ' disabled' : needAck(gk) && !U.ack[gk] ? ' disabled title="\'조회 권한만 켰음\'을 먼저 체크하세요"' : '') + '>' + (U.busy['s' + gk] ? (exOf(gk) ? '권한 확인 중…' : '확인 중…') : '저장') + '</button>' + (g.partial ? '<button class="btn danger" data-su="kdel" data-v="' + gk + '">삭제</button>' : '') + '</div>' + tr;
   }
-  const needAck = gk => { const ex = U.st && U.st.exchanges && U.st.exchanges[gk]; return !!ex && !ex.permCheck; };
+  function subOf(gk) {
+    const xs = (U.st && U.st.exchanges) || {};
+    for (const k in xs) { const e = xs[k]; const hit = (e.subs || []).find(x => x.group === gk) || (e.subNext && e.subNext.group === gk ? e.subNext : null); if (hit) return hit; }
+    return null;
+  }
+  const exOf = gk => (U.st && U.st.exchanges && U.st.exchanges[gk]) || subOf(gk);
+  const grpOf = gk => (U.st.explorers && U.st.explorers[gk]) || exOf(gk);
+  const needAck = gk => { const ex = exOf(gk); return !!ex && !ex.permCheck; };
   function permHTML(gk, g) {
-    const ex = U.st.exchanges && U.st.exchanges[gk];
+    const ex = exOf(gk);
     if (!ex) return '';
     const on = !!U.ack[gk];
     const saved = ex.perm && ex.perm.how ? '<div class="cap su-permnote">저장된 키 · ' + (ex.perm.how === 'api' ? '<span class="oktxt">조회 전용 자동 확인됨</span>' : '조회 전용 본인 확인') + (ex.perm.at ? ' <span class="num">' + esc(ago(ex.perm.at)) + '</span>' : '') + ' · <b>연결 테스트</b>(빈 칸)로 다시 검사할 수 있어요</div>' : '';
@@ -710,6 +717,19 @@
     return '<div class="su-dep"><div style="min-width:0"><span>' + head + '</span><span class="cap">' + when + '</span>' + st9 + '</div><span class="sp"></span>'
       + (keySet ? '<button class="btn sm" data-su="dprefresh" data-v="' + esc(k) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? '갱신 중' : '새로고침') + '</button>' : '') + '</div>';
   }
+  function subsHTML(k, g) {
+    if (!g.subs && !g.subNext) return '';
+    const rows = (g.subs || []).map(x => {
+      const o = U.subOpen === x.group;
+      return '<div class="su-acc' + (o ? ' open' : '') + '" style="margin-top:8px"><button class="su-acch" data-su="subx" data-v="' + esc(x.group) + '" aria-expanded="' + o + '"><b>' + esc(x.name) + '</b><span class="sp"></span>' + pill(x.set ? 'ok' : 'w', x.set ? '연결됨' : '일부 입력') + '</button>'
+        + (o ? '<div class="su-accb">' + fieldsHTML(x.group, x, '') + '</div>' : '') + '</div>';
+    }).join('');
+    const nx = g.subNext, on = nx && U.subOpen === nx.group;
+    const add = nx ? (on ? '<div class="su-acc open" style="margin-top:8px"><button class="su-acch" data-su="subx" data-v="' + esc(nx.group) + '" aria-expanded="true"><b>' + esc(nx.name) + ' 키 추가</b><span class="sp"></span>' + pill('g', '새로') + '</button><div class="su-accb">' + fieldsHTML(nx.group, nx, '') + '</div></div>'
+      : '<div style="margin-top:8px"><button class="btn sm" data-su="subx" data-v="' + esc(nx.group) + '"' + (g.set ? '' : ' disabled title="메인 계정 키를 먼저 저장하세요"') + '>+ 서브계정 키 추가</button></div>') : '';
+    return '<div class="su-subs" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px"><b>서브계정</b><div class="cap su-p">서브계정이 있으면 그 계정의 API 키도 넣으세요(조회 전용 · 서브계정마다 따로 발급). 서브계정 거래·입출금·잔고는 <b>' + esc(g.name) + ' 하나로 합쳐서</b> 보여요 — 기록 줄에 \'서브1\' 같은 딱지만 붙어요. 메인↔서브 이동은 손익 없이 내 계정 안 이동으로 처리돼요.</div>'
+      + rows + add + '</div>';
+  }
   function exchangesHTML() {
     const st = U.st;
     return '<div class="su-sec"><div class="su-h">거래소 API (선택 · 조회 전용)</div><div class="cap su-p">입금·체결·잔고를 가져와 온체인 전송과 짝지어 원가를 이어 줘요. <b>조회(읽기) 권한만</b> 켠 키를 쓰세요 — 이 봇은 주문·출금 API 를 호출하지 않아요.</div>'
@@ -717,9 +737,10 @@
       + '<div class="su-ipbox"><div style="min-width:0"><b>이 서버의 공인 IP</b><div class="cap">거래소 키의 IP 화이트리스트에 넣을 값</div></div><span class="sp"></span>' + (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>') + '</div>'
       + EX_ORDER.map(k => {
         const g = st.exchanges[k], h = EX_HELP[k], open = U.ex === k;
-        return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="ex" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b><span class="sp"></span>' + pill(g.set ? 'ok' : g.partial ? 'w' : 'g', g.set ? '연결됨' : g.partial ? '일부 입력' : '미설정') + '</button>'
+        const nSub = (g.subs || []).filter(x => x.set).length;
+        return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="ex" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>' + (nSub ? '<span class="cap num" style="margin-left:6px">+ 서브 ' + nSub + '</span>' : '') + '<span class="sp"></span>' + pill(g.set ? 'ok' : g.partial ? 'w' : 'g', g.set ? '연결됨' : g.partial ? '일부 입력' : '미설정') + '</button>'
           + depRowHTML(k, (st.depaddr || {})[k], g.set)
-          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작돼요(재시작 불필요)</div>') + '</div>' : '') + '</div>';
+          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작돼요(재시작 불필요)</div>') + subsHTML(k, g) + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }
   function tgHTML() {
@@ -1190,11 +1211,11 @@
   }
   function stopPoll() { if (U.tg.poll) clearInterval(U.tg.poll); U.tg.poll = null; }
   function groupVals(g) {
-    const grp = U.st.explorers[g] || U.st.exchanges[g], vals = {};
+    const grp = grpOf(g), vals = {};
     grp.fields.forEach(f => { vals[f.key] = (draft('k_' + f.key) || '').trim(); });
     return vals;
   }
-  function clearVals(g) { const grp = U.st.explorers[g] || U.st.exchanges[g]; grp.fields.forEach(f => { delete U.d['k_' + f.key]; }); }
+  function clearVals(g) { const grp = grpOf(g); grp.fields.forEach(f => { delete U.d['k_' + f.key]; }); }
   async function waddMany(an) {
     if (an.secret) { toast(W_SECRET[an.secret], true); return; }
     if (!an.save.length) { toast(an.items.some(x => x.st === 'bad') ? '오류 난 주소를 고쳐 주세요' : '새로 추가할 주소가 없어요 (모두 이미 등록됨·중복)', true); return; }
@@ -1319,6 +1340,7 @@
     chainNone() { U.chains.clear(); render(); },
     xp(el) { const k = el.getAttribute('data-v'); U.xp = (U.xp === k || (U.xp == null && k === 'helius')) ? '' : k; render(); },
     ex(el) { const k = el.getAttribute('data-v'); U.ex = U.ex === k ? null : k; render(); },
+    subx(el) { const k = el.getAttribute('data-v'); U.subOpen = U.subOpen === k ? null : k; render(); },
     async ktest(el) {
       const g = el.getAttribute('data-v');
       U.busy['t' + g] = true; delete U.test[g]; render();
@@ -1330,7 +1352,7 @@
       render();
     },
     async ksave(el) {
-      const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g], vals = groupVals(g);
+      const g = el.getAttribute('data-v'), grp = grpOf(g), vals = groupVals(g);
       const node = NODE_KEYS.indexOf(g) >= 0;
       if (node ? grp.fields.every(f => !vals[f.key]) : grp.fields.some(f => !vals[f.key])) { toast(node ? '값을 넣으세요' : grp.partial ? '바꾸려면 모든 칸을 새로 입력하세요' : '모든 칸을 채우세요', true); return; }
       if (needAck(g) && !U.ack[g]) { toast("'조회 권한만 켰음'을 먼저 체크하세요", true); return; }
@@ -1347,7 +1369,7 @@
       toast(xpName(grp.name).t + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요') + (r.apply && r.apply.restart === false ? ' · 재시작 없이 바로 써요' : ''), false, r.note ? 9000 : 0); await refreshStatus();
     },
     async kdel(el) {
-      const g = el.getAttribute('data-v'), grp = U.st.explorers[g] || U.st.exchanges[g];
+      const g = el.getAttribute('data-v'), grp = grpOf(g);
       if (!window.confirm(grp.name + ' 키를 이 서버에서 지울까요?')) return;
       const r = await api('keys/delete', { group: g });
       delete U.test[g]; delete U.ack[g]; delete U.needAck[g]; toast(r.ok ? '삭제했어요' : (r.error || '삭제 실패'), !r.ok); await refreshStatus();

@@ -435,13 +435,14 @@ def _perm_result(danger, note=""):
 def perm_block_info(group: str, danger: list) -> dict:
     kinds = [x["kind"] for x in danger]
     what = "·".join(n for k, n in (("trade", "거래"), ("withdraw", "출금"), ("transfer", "이체"), ("other", "기타")) if k in kinds)
-    return {"group": group, "name": ss.EXCHANGES[group]["name"], "danger": danger, "kinds": sorted(set(kinds)),
-            "title": f"{ss.EXCHANGES[group]['name']} 키에 {what} 권한이 켜져 있습니다", "why": PERM_WHY,
-            "fix": PERM_FIX.get(group, [])}
+    nm9 = ss.GROUPS[group]["name"]
+    return {"group": group, "name": nm9, "danger": danger, "kinds": sorted(set(kinds)),
+            "title": f"{nm9} 키에 {what} 권한이 켜져 있습니다", "why": PERM_WHY,
+            "fix": PERM_FIX.get(ss.base_ex(group) or group, [])}
 
 
 def perm_gate(group: str, vals: dict, ack: bool):
-    if group in PERM_VERIFIABLE:
+    if ss.base_ex(group) in PERM_VERIFIABLE:
         r = test_group(group, vals)
         p = r.get("perm") or {}
         if p.get("checked") and p.get("danger"):
@@ -468,10 +469,11 @@ def test_group(group: str, vals: dict) -> dict:
     v = [vals.get(k, "") for k in fk]
     if not all(v):
         return {"ok": False, "detail": "모든 칸을 채워야 테스트할 수 있습니다"}
-    r = _test_group(group, v)
-    if group in ss.EXCHANGES and "perm" not in r:
-        r["perm"] = {"checked": False, "danger": [], "unsupported": group not in PERM_VERIFIABLE,
-                     "note": PERM_NOT_CHECKABLE if group not in PERM_VERIFIABLE else "연결 테스트가 실패해 키 권한을 확인하지 못했습니다"}
+    bx9 = ss.base_ex(group)
+    r = _test_group(bx9 or group, v)
+    if bx9 and "perm" not in r:
+        r["perm"] = {"checked": False, "danger": [], "unsupported": bx9 not in PERM_VERIFIABLE,
+                     "note": PERM_NOT_CHECKABLE if bx9 not in PERM_VERIFIABLE else "연결 테스트가 실패해 키 권한을 확인하지 못했습니다"}
     return r
 
 
@@ -968,6 +970,14 @@ def _qn_clear() -> bool:
         return False
 
 
+def _alch_clear() -> bool:
+    try:
+        import nodekeys
+        return nodekeys.alch_reject_clear()
+    except Exception:
+        return False
+
+
 def _cn_rpc(u: str, method: str, params: list, timeout: float = 15.0):
     try:
         return _node_rpc(u, method, params, timeout=timeout)
@@ -1246,6 +1256,20 @@ def status() -> dict:
         exs[k]["permCheck"] = k in PERM_VERIFIABLE
         rec = kp.get(k)
         exs[k]["perm"] = {"how": rec.get("how"), "at": rec.get("at")} if isinstance(rec, dict) and exs[k]["set"] else None
+    for gk9, g9 in ss.SUB_GROUPS.items():
+        e9 = exs.get(g9["base"])
+        if e9 is None:
+            continue
+        s9 = grp(g9)
+        rec = kp.get(gk9)
+        s9.update(group=gk9, n=g9["sub"], permCheck=g9["base"] in PERM_VERIFIABLE,
+                  perm={"how": rec.get("how"), "at": rec.get("at")} if isinstance(rec, dict) and s9["set"] else None)
+        e9.setdefault("subs", [])
+        if s9["set"] or s9["partial"]:
+            e9["subs"].append(s9)
+        elif "subNext" not in e9:
+            e9["subNext"] = {"group": gk9, "n": g9["sub"], "name": g9["name"], "fields": s9["fields"], "set": False, "partial": False,
+                             "permCheck": g9["base"] in PERM_VERIFIABLE, "perm": None}
     dep = demo_data.depaddr_status() if DEMO else _depaddr_status(env)
     if DEMO:
         for k in dep:
@@ -1671,9 +1695,11 @@ def _dispatch(act: str, b: dict) -> dict:
             ss.write_env({k: None for k in fields + list(ss.GROUPS[g].get("legacy", ()))})
             if g == "quicknode":
                 _qn_clear()
+            elif g == "alchemy":
+                _alch_clear()
             if g in ss.NODE_GROUPS:
                 return {"ok": True, "apply": _node_apply(g, key_change=True)}
-            if g in ss.EXCHANGES:
+            if ss.base_ex(g):
                 _perm_record(g, None)
             if g == "coingecko":
                 _CG_PROBE.clear()
@@ -1712,6 +1738,8 @@ def _dispatch(act: str, b: dict) -> dict:
             ss.write_env(dict(got, **{k: None for k in ss.GROUPS[g].get("legacy", ())}))
             if g == "quicknode" and (chg9 or pr9 == "ok"):
                 _qn_clear()
+            elif g == "alchemy" and pr9 == "ok":
+                _alch_clear()
             if chg9:
                 import nodekeys
                 with ss.LOCK:
@@ -1757,8 +1785,8 @@ def _dispatch(act: str, b: dict) -> dict:
                 else:
                     note9 = {"note": "코인게코 연결을 확인하지 못해 등급(데모·프로)은 첫 조회 때 자동으로 판별해요 — " + scrub(r9.get("detail") or "", [key9])}
                 return {"ok": True, "cg": st9, **note9}
-            if g in ss.EXCHANGES:
-                lim = _limited("save:" + g, 8, 60) if g in PERM_VERIFIABLE else None
+            if ss.base_ex(g):
+                lim = _limited("save:" + g, 8, 60) if ss.base_ex(g) in PERM_VERIFIABLE else None
                 if lim:
                     lim["error"] = "저장을 너무 자주 눌렀습니다 — 1분 뒤 다시"
                     return lim
@@ -1766,7 +1794,7 @@ def _dispatch(act: str, b: dict) -> dict:
                 if blk:
                     return blk
             note9 = None
-            if g in SAVE_PROBE:
+            if g in SAVE_PROBE or ss.base_ex(g) in SAVE_PROBE:
                 lim = _limited("save:" + g, 8, 60)
                 if lim:
                     lim["error"] = "저장을 너무 자주 눌렀습니다 — 1분 뒤 다시"
@@ -1788,10 +1816,10 @@ def _dispatch(act: str, b: dict) -> dict:
                         ss.update_settings(**{nodekeys.PLANS_KEY: np9})
             if rec:
                 _perm_record(g, rec)
-            if g in ss.EXCHANGES:
+            if ss.base_ex(g):
                 try:
                     import depaddr
-                    depaddr.request_refresh(g)
+                    depaddr.request_refresh(ss.base_ex(g))
                 except Exception:
                     pass
             return {"ok": True, **({"note": note9} if note9 else {})}

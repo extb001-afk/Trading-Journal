@@ -20,6 +20,7 @@ import upbit_link as UL
 
 chk = T.chk
 XF.PACE = 0
+T.patch_moved("PACE", XF.PACE, ("exf_",))
 UL.time.sleep = lambda *_a, **_k: None
 HAS = hasattr(XF, "_CLOCK_ON")
 KST = timezone(timedelta(hours=9))
@@ -230,8 +231,11 @@ def _bn(url, headers=None, *a, **k):
 
 _bn._tj_test_mock = True
 XF._http_json_err = _bn
+T.patch_moved("_http_json_err", XF._http_json_err, ("exf_",))
 XF._gov_prepare = lambda *a, **k: None
+T.patch_moved("_gov_prepare", XF._gov_prepare, ("exf_",))
 XF._px_safe = lambda *a, **k: None
+T.patch_moved("_px_safe", XF._px_safe, ("exf_",))
 common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_binance.json"), {"ts": 0, "events": [], "cursor": {"income": T0}})
 r, e = _run(lambda: XF._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"}))
 fb = common.read_json(os.path.join(common.STATE_DIR, "futures_binance.json"), {})
@@ -278,6 +282,7 @@ def _kc(url, headers=None, *a, **k):
 
 _kc._tj_test_mock = True
 XF.http_json = _kc
+T.patch_moved("http_json", XF.http_json, ("exf_",))
 st = {}
 r, e = _run(lambda: XF.fills_kucoin(ENV, st, NOW - 3 * 86400, NOW))
 r = r or []

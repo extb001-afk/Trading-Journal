@@ -78,6 +78,8 @@ _env(None)
 import core
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"chains": {"eth": {"blockscout": "https://eth.example.invalid", "conf_depth": 12, "blocks_per_day": 7200}},
                "wallets": [], "backfill_months": 1}, f)
@@ -140,7 +142,7 @@ chk(common.chain_discovery("base", (ex.get("chains") or {}).get("base") or {}) =
     "D7 예시 Base = RPC 전용(안내에 적힘 · 블록스카웃 주소는 보조)", bnote[:80])
 chk("blockscout 로 동작" not in SJ, "D8 설정 요약 줄 이더스캔 없음 = 'blockscout 로 동작' 아님(새 설치본은 블록스카웃 첫 경로 금지)")
 chk("공개 탐색기로만 받아" not in SJ, "D9 이더스캔 키 경고 = '공개 탐색기로만' 아님(키 없는 새 설치본 = 공개 노드)")
-chk("맥의 인터넷" not in open(os.path.join(T.SRC, "health.py"), encoding="utf-8").read(), "H1 네트워크 끊김 안내 = '이 컴퓨터'(리눅스 설치본도)")
+chk("맥의 인터넷" not in T.mod_src("health", "chk_"), "H1 네트워크 끊김 안내 = '이 컴퓨터'(리눅스 설치본도)")
 chk("Helius·Etherscan 키와 노드 키" in AK and "never in URLs" not in AK, "D10 API_KEYS 키 전송 안내 = 구현대로(Helius·Etherscan·노드 키 = 요청 주소 · 코덱스 mo510 RECORD)")
 m9 = re.search(r"- \*\*알려진 한계\(이번 판\)\*\*[^\n]*\n((?:  - [^\n]*\n)+)", RD)
 chk(m9 is not None and len(m9.group(1).strip().splitlines()) >= 6 and "**Known limitations (this release):**" in RD,

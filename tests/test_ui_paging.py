@@ -10,9 +10,9 @@ import shutil
 import subprocess
 
 V2 = os.path.join(T.ROOT, "web", "v2")
-APP = os.path.join(V2, "app.js")
+APP = T.app_js_path()
 rd = lambda n: open(os.path.join(V2, n), encoding="utf-8").read()
-app, setup, wow, css = rd("app.js"), rd("setup.js"), rd("wow.js"), rd("index.html")
+app, setup, wow, css = T.app_js(), rd("setup.js"), rd("wow.js"), rd("index.html")
 search_js = rd("search.js")
 SEARCH = os.path.join(V2, "search.js")
 

@@ -222,6 +222,7 @@ chk(not wt2.writer.recs, "D 재기동 뒤 사이클 = 다시 안 나감(커서·
 
 import core
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(cd)
 
 

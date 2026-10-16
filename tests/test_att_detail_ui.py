@@ -338,7 +338,7 @@ chk(JSON.stringify(F.attItems(a10)) === JSON.stringify(F.attItemsK(a10).map(x =>
 })();
 '''
 
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 CSS = os.path.join(T.ROOT, "web", "v2", "index.html")
 app = open(APP, encoding="utf-8").read()
 css = open(CSS, encoding="utf-8").read()

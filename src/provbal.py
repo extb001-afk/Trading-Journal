@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 import chain_registry
 import common
 import pricing
+import calcguard
 
 FILE = "prov_bal.json"
 
@@ -13,7 +14,8 @@ FILE = "prov_bal.json"
 def load(state_dir: str = None) -> dict:
     try:
         d = common.read_json(os.path.join(state_dir or common.STATE_DIR, FILE), {})
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as _cg9:
+        calcguard.swallowed("provbal:load", _cg9)
         d = {}
     return d if isinstance(d, dict) else {}
 

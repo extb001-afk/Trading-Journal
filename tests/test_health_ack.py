@@ -90,7 +90,7 @@ fx = T.safe(getattr(web, "unpriced_facts", None) or (lambda w: None), ws)
 fx = fx if isinstance(fx, list) else []
 chk(any(x.get("sym") == "ELEVEN" and x.get("ent") == "arbitrum:0x" + "0b" * 20 for x in fx) and len(fx) == 11,
     "D2 11번째 새 자산(원가 $999)이 판정 재료에 남음 · 자산 신원(ent) 실림 · $1 미만 먼지는 뺌", [x.get("sym") for x in fx])
-wsrc = open(os.path.join(T.SRC, "web.py"), encoding="utf-8").read()
+wsrc = T.web_src()
 chk('"unpriced_held": diag_out["unpriced_held"]' not in wsrc and '"unpriced_held": unpriced_facts(unpriced_w)' in wsrc,
     "D2b 생산 경로: web_diag(헬스 입력)는 전체 재료 · 화면 진단(_diag)의 상위 10개 미리보기와 분리")
 cs2 = health.evaluate(obs_of(NOW, webdiag=wd(NOW, unpriced=fx)), HS)

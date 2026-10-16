@@ -19,6 +19,7 @@ import ledger_restore as LR
 
 assert _x.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 c = core.Core(common.load_config())
 S = common.STATE_DIR
 LIVE = common.DB_PATH

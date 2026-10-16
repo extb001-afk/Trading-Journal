@@ -60,6 +60,7 @@ FT = FakeTime()
 real_time = evm_watch.time
 real_rpc, real_batch = bf_engine.rpc_call, bf_engine.rpc_batch
 evm_watch.time = FT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 MODE = {"detail": "408", "nodes408": set()}
 CALLS = []
 
@@ -238,6 +239,7 @@ try:
 
     bf_engine.rpc_batch, bf_engine.rpc_call = real_batch, real_rpc
     evm_watch.time = real_time
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     try:
         w4 = mk()
         g4 = bf_engine.gate(URL)
@@ -264,6 +266,7 @@ try:
               {"sec": round(el4, 2), "alive": th.is_alive(), "err": str(res4.get("err"))[:80]})
     finally:
         evm_watch.time = FT
+        T.patch_moved("time", evm_watch.time, ("evm_",))
         bf_engine.rpc_batch, bf_engine.rpc_call = fake_batch, fake_call
 
     SMODE = {"key": "local", "pub_old": "pruned"}
@@ -444,6 +447,7 @@ try:
           "P6 뒤 차선이 끝나 'live' 가 되면 '재기동 — 뒤 차선 이어서' 메모를 지움(종전: live 인데 메모가 남아 헬스 상세에 보임)", {k: it6d.get(k) for k in ("phase", "note")})
 finally:
     evm_watch.time = real_time
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     bf_engine.rpc_call, bf_engine.rpc_batch = real_rpc, real_batch
 
 T.finish()

@@ -56,6 +56,7 @@ class FakeTime:
 FT = FakeTime()
 real_time = evm_watch.time
 evm_watch.time = FT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 real_rpc, real_batch = bf_engine.rpc_call, bf_engine.rpc_batch
 LOG = []
 PLAN = {}
@@ -967,6 +968,7 @@ try:
         bf_engine.rpc_batch = real_b20
 finally:
     evm_watch.time = real_time
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     bf_engine.rpc_call, bf_engine.rpc_batch = real_rpc, real_batch
 
 T.finish()

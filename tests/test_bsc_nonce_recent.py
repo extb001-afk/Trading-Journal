@@ -13,6 +13,7 @@ CH = B.CH
 common = B.common
 clk = [time.time()]
 bw._now = lambda: clk[0]
+T.patch_moved("_now", bw._now, ("bsc_",))
 
 
 def tick(sec, blocks):
@@ -165,4 +166,5 @@ T.chk(got6 is not None and got6 <= 15, "R6 공개 노드 계속 실패 · EOA 60
       {"got_at_cycle": got6, "arch_per_run": archs6[:15]})
 
 bw._now = time.time
+T.patch_moved("_now", bw._now, ("bsc_",))
 T.finish()

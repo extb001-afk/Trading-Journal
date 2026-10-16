@@ -499,7 +499,7 @@ check("C1e EVM 지갑 + Ankr 키 없음 = 주의 카드(알림 아님) · 설정
 c2 = kcard(dict(kk, ankr=True))
 check("C1f Ankr 키 있음 = 정상", c2 and c2["level"] == "ok", c2)
 check("C1g EVM 지갑 없음·옛 서버 관측(칸 없음) = 카드 없음", kcard(dict(kk, ankrNeed=False)) is None and kcard({"evm": True, "etherscan": True}) is None)
-AJ = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+AJ = T.app_js()
 HJ = open(os.path.join(T.ROOT, "web", "v2", "health.js"), encoding="utf-8").read()
 check("C2a setup.js Ankr 배너·필수 배지·요약 줄", "function ankrBanner" in SJ and "evmNeedsAnkr" in SJ and "k === 'ankr'" in SJ, "")
 check("C2b app.js 처음 설정 안내·빈 키에 Ankr", "evmNeedsAnkr" in AJ and "'Ankr'" in AJ, "")

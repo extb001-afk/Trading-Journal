@@ -17,6 +17,7 @@ E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
+T.patch_moved("_now", bw._now, ("bsc_",))
 REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
 BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
 CHK = os.path.join(common.STATE_DIR, "onchain_check.json")

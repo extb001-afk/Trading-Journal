@@ -29,6 +29,7 @@ import acct_norm
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 pricing._gj = lambda *a, **k: None
 pricing.PxCache.candle_usd = lambda *a, **k: None
 pricing.PxCache.fx_at = lambda *a, **k: 1400.0

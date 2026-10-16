@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal, InvalidOperation
+import calcguard
 
 ZERO = Decimal(0)
 
@@ -53,7 +54,8 @@ def booked(conn, uuids, ts_of=None) -> dict:
             if f is not None and ts_of is not None:
                 try:
                     f["ts"] = ts_of(pl)
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("ubfill:booked", _cg9)
                     f["ts"] = None
             out[str(r[0])] = f if f is not None else False
     return out

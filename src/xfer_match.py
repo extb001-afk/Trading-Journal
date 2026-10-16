@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from outflow_match import _hash_family, canon_sym, norm_txid
+import calcguard
 
 WINDOW = 6 * 3600
 WINDOW_ADDR = 48 * 3600
@@ -130,7 +131,8 @@ def _match(withdraws, deposits, onchain_txids=frozenset(), linked_dep_uuids=froz
         if dest_of is not None and w.get("address"):
             try:
                 dest = dest_of(w) or None
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("xfer_match:_match", _cg9)
                 dest = None
         W.append((w, t, ts, canon_sym(w.get("currency")), dest))
     for d in deposits:
@@ -247,7 +249,8 @@ def hop_candidates(withdraws, deposits, dest_of=None, own_wallets=frozenset()):
         try:
             if dest_of is not None and dest_of(w):
                 continue
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("xfer_match:hop_candidates", _cg9)
             continue
         wts = _ts(w.get("created_at")) or _ts(w.get("done_at"))
         ws = canon_sym(w.get("currency"))

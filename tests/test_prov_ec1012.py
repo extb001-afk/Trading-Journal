@@ -23,6 +23,8 @@ import btc_watch as bw
 from inbox import SegmentWriter
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 ZPUB84 = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
 D = bd.descriptor_from_xpub(ZPUB84)
 P = bd.plan_from_descriptor(D)
@@ -125,7 +127,7 @@ def fake_plan(chain, kind, ws, mode=None, latest=False):
 
 import recon
 recon.fetch_sol_balances_fast = lambda lanes, ws, native_url=None, **k: {"per_wallet": {w: {("native", None): 5} for w in ws}, "_meta": {}}
-core.Core._prov_sol_stake_live = staticmethod(lambda url, pks, native_url=None: {pk: 7 for pk in pks})
+T.patch_cls_attr(core.Core, "_prov_sol_stake_live", staticmethod(lambda url, pks, native_url=None: {pk: 7 for pk in pks}))
 c._recon_fetch_plan = fake_plan
 if os.path.exists(SP):
     os.remove(SP)

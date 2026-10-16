@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import common
+import calcguard
 
 log = logging.getLogger("tj-web")
 
@@ -96,7 +97,8 @@ def dex_later_mark(date, sym, side, why) -> bool:
             it.pop(k, None)
         try:
             common.atomic_write_json(DEX_LATER_PATH, {"v": 1, "items": it})
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("sellchart:dex_later_mark", _cg9)
             _DL["items"] = None
             return False
         return True
@@ -504,7 +506,8 @@ class EvalStore:
                 b["at"] = int(time.time())
                 try:
                     common.atomic_write_json(self.budget_path, b)
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("sellchart:EvalStore.budget_take", _cg9)
                     return False
                 return True
             finally:
@@ -634,7 +637,8 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
             if rd9 is not None and hasattr(rd9, "cli_error_text"):
                 try:
                     msg9 = rd9.cli_error_text(msg9)
-                except Exception:
+                except Exception as _cg9:
+                    calcguard.swallowed("sellchart:run_eval", _cg9)
                     pass
             return None, msg9
         rec = dict(out, date=date, sym=sym, fp=fp, at=int(now or time.time()), model=model if model is not None else getattr(rd, "REVIEW_MODEL", ""),

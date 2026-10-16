@@ -1,6 +1,7 @@
 """Liquidity-position decoding helpers."""
 import json
 import os
+import calcguard
 
 _RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
        0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
@@ -155,7 +156,8 @@ def _decode_calls(b: bytes, depth: int) -> list:
             tid = _u(data, 0) if (name != "MINT" and len(data) >= 32) else None
             liq = _u(data, 32) if (name == "DECREASE" and len(data) >= 64) else None
             out.append((name, tid, liq))
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("lpdec:_decode_calls", _cg9)
         return out
     return out
 

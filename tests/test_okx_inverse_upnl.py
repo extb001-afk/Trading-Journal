@@ -22,9 +22,13 @@ print("[O1] 수집기")
 import ex_foreign as XF
 CAP = {}
 XF._okx_get = lambda env, path, params=None: [dict(INV), dict(LIN)] if path == "/api/v5/account/positions" else []
+T.patch_moved("_okx_get", XF._okx_get, ("exf_",))
 XF._fut_write = lambda ex, wallet, poss, ev, cur: CAP.update(poss=poss)
+T.patch_moved("_fut_write", XF._fut_write, ("exf_",))
 XF._px_safe = lambda ex, fn: None
+T.patch_moved("_px_safe", XF._px_safe, ("exf_",))
 XF.PACE = 0
+T.patch_moved("PACE", XF.PACE, ("exf_",))
 try:
     XF.bf_engine.SINCE.target = lambda ex: None
 except Exception:
@@ -89,7 +93,7 @@ inv_l = [u for k, u in lv.items() if "BTC-USD-SWAP" in k]
 chk(inv_l and abs(inv_l[0] - 2000.0) < 0.01, "O5 레버리지 화면 = 같은 포지션 $2,000(settle 칸이 생겨도 이중 환산 없음)", lv)
 
 print("[O6] 화면")
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 src9 = open(APP, encoding="utf-8").read() if os.path.exists(APP) else ""
 chk(src9 and "m(num(p.upnl)" not in src9 and "m(num(fut.upnl)" not in src9 and "m(num(f.upnl)" not in src9 and src9.count("upnlH(") >= 5,
     "O6 선물 평가손익 칸 5곳 = null 이면 '—'(사유 툴팁) — 0 으로 그리지 않음", src9.count("upnlH("))

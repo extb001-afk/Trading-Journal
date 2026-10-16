@@ -40,10 +40,23 @@ EXCHANGES = {
                                           ("TJ_KUCOIN_PASSPHRASE", "Passphrase")]},
     "gate": {"name": "게이트", "fields": [("TJ_GATE_KEY", "API Key"), ("TJ_GATE_SECRET", "Secret Key")]},
 }
+SUB_GROUPS = {f"{ex}_sub{n}": {"name": f"{EXCHANGES[ex]['name']} 서브{n}", "base": ex, "sub": n,
+                               "fields": [(k2, lab) for (k, lab), k2 in zip(EXCHANGES[ex]["fields"],
+                                                                         common.sub_key_names(ex, n, [k for k, _l in EXCHANGES[ex]["fields"]]))]}
+              for ex in common.SUB_EXCHANGES for n in range(1, common.SUB_MAX + 1)}
+
+
+def base_ex(group: str):
+    if group in EXCHANGES:
+        return group
+    g9 = SUB_GROUPS.get(group)
+    return g9["base"] if g9 else None
+
+
 TG_TOKEN, TG_CHAT = "TJ_TG_TOKEN", "TJ_TG_CHAT"
-GROUPS = dict(EXPLORERS, **EXCHANGES)
+GROUPS = dict(EXPLORERS, **EXCHANGES, **SUB_GROUPS)
 SECRET_KEYS = {f for g in GROUPS.values() for f, _ in g["fields"]} | {TG_TOKEN, TG_CHAT}
-PUBLIC_KEY_FIELDS = frozenset(g["fields"][0][0] for g in EXCHANGES.values())
+PUBLIC_KEY_FIELDS = frozenset(g["fields"][0][0] for g in list(EXCHANGES.values()) + list(SUB_GROUPS.values()))
 
 _KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _VAL_RE = re.compile(r"^[\x21-\x7e]{1,512}$")

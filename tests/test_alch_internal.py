@@ -543,6 +543,7 @@ cfg0 = list(w.cfg_rpcs)
 w.cfg_rpcs = ["http://127.0.0.1:9/r1", "http://127.0.0.1:9/r2", "http://127.0.0.1:9/r3"]
 fresh()
 evm_watch.time = FT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 bf_engine.rpc_batch = _slow_batch
 try:
     with w._trace_budget(_RT.time() + 2):
@@ -553,6 +554,7 @@ try:
             e9 = e
 finally:
     evm_watch.time = _RT
+    T.patch_moved("time", evm_watch.time, ("evm_",))
     bf_engine.rpc_batch = _rb0
     w.cfg_rpcs = cfg0
 cap9 = w.ALCH_CALL_SEC

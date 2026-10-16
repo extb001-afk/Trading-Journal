@@ -19,6 +19,7 @@ import core
 
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
 import exf_fut_place

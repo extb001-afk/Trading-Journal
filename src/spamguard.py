@@ -5,6 +5,7 @@ import re
 import threading
 import time
 import unicodedata
+import calcguard
 
 MAJORS = {"USDT", "USDC", "USDG", "DAI", "BUSD", "FDUSD", "PYUSD", "USD1", "USDE", "USDS", "TUSD", "USDP",
           "USDT0", "ETH", "WETH", "BTC", "WBTC", "SOL", "WSOL", "BNB", "WBNB", "POL", "MATIC", "ARB", "OP", "AVAX", "TRX", "XRP"}
@@ -255,7 +256,8 @@ def user_path():
     try:
         import common
         return os.path.join(common.STATE_DIR, USER_FILE)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("spamguard:user_path", _cg9)
         return None
 
 
@@ -373,7 +375,8 @@ def _genuine():
                 for ch, m in tab.items():
                     s |= {(ch, a.lower()) for a in m}
             s |= {("sol", a) for a in pricing.STABLE_MINTS}
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("spamguard:_genuine", _cg9)
             pass
         _GEN = s
     return _GEN
@@ -475,7 +478,8 @@ def tx_scam_reason(conn, chain, txh, my, price_guard=None):
             sg = conn.execute("SELECT COALESCE(json_extract(snapshot, '$.tx.from.hash'), json_extract(snapshot, '$.tx.from')),"
                               " json_extract(snapshot, '$.tx.fee.value'), json_extract(snapshot, '$.tx.raw_input')"
                               " FROM raw_txs WHERE chain=? AND txhash=? AND json_valid(snapshot)", (ch, t)).fetchone()
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("spamguard:tx_scam_reason", _cg9)
         return None
     mine = bool(sg) and signer_mine(sg[0], sg[1], sg[2], my)
     why = None
@@ -535,7 +539,8 @@ def spot_liquid(chain, ca, price_guard=None):
         st = os.stat(p)
     except FileNotFoundError:
         return False
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("spamguard:spot_liquid", _cg9)
         return None
     sig = (p, st.st_mtime_ns, st.st_size)
     if _SPOT["sig"] != sig:

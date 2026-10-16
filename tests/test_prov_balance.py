@@ -263,6 +263,7 @@ check("P6 방식 'wallet' 칸(대사 끝난 체인의 새 지갑) = 안 씀(라�
 
 import core
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 os.remove(os.path.join(common.STATE_DIR, "prov_bal.json"))
 c = core.Core(common.load_config())
 c.conn.execute("DELETE FROM meta WHERE k IN ('recon_done_eth')")

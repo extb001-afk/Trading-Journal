@@ -11,7 +11,7 @@ import shutil
 import subprocess
 
 chk = T.chk
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 src = open(APP, encoding="utf-8").read() if os.path.exists(APP) else ""
 chk(bool(src), "app.js 있음", APP)
 blk = src.split("  function saleBox(p) {", 1)[1].split("\n  }\n", 1)[0] if "  function saleBox(p) {" in src else ""

@@ -50,8 +50,11 @@ def fake_http(url, headers=None, data=None, method=None, timeout=20):
 
 
 EF.http_json = fake_http
+T.patch_moved("http_json", EF.http_json, ("exf_",))
 EF._gov_prepare = lambda *a, **k: None
+T.patch_moved("_gov_prepare", EF._gov_prepare, ("exf_",))
 EF.PACE = 0
+T.patch_moved("PACE", EF.PACE, ("exf_",))
 UNI_P = os.path.join(common.STATE_DIR, "exf_bybit_symbols.json")
 
 
@@ -139,6 +142,8 @@ chk(ok5, "S5 과거 창 확장이 보류한 체결을 정본 체결 상태에 �
 import core
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 c = core.Core(common.load_config())
 c._quote_usd = lambda q, ts: Decimal(1)
 c.px.fx_at = lambda ms: 1380.0

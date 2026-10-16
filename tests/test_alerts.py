@@ -360,7 +360,7 @@ q4, t4q = quotes("USDC", 0.985, ("binance", "okx"), 60, N1)
 r = safe(AW.prod_depeg, {"out": dp_out([{"sym": "USDC", "qty": 50000.0, "price": 1.0}]), "spot": {"ex_usd": q4, "ex_ts": t4q}}, REC, {}, N1, None, True)
 check("R11 들고 있는 코인 · 신선한 두 곳 시세로 1.5% 이탈 = 알림(밤에도)", kinds(r) == ["DEPEG"] and AP.decide(REC, "depeg", N1, None, "DEPEG") == "send", texts(r))
 
-app = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+app = T.app_js()
 hjs = open(os.path.join(T.ROOT, "web", "v2", "health.js"), encoding="utf-8").read()
 rd = open(T.README, encoding="utf-8").read()
 check("R12 이전 배너: 옛 '추천'의 급등락 꺼짐 · 조용한 시간에도 목표가·디페그·큰 출금이 바로", "급등락 알림은 이제 꺼져 있어요" in app
@@ -368,7 +368,7 @@ check("R12 이전 배너: 옛 '추천'의 급등락 꺼짐 · 조용한 시간�
 check("R12 상태 패널 '6시간마다 리마인드' 없음", "6시간마다 리마인드" not in hjs)
 check("R12 README '처음 7일' 동작 없음 · 조용한 시간 = 급등락만", "처음 7일은 동기화" not in rd and "급등락만 모았다가" in rd)
 
-wsrc = open(os.path.join(SRC, "web.py"), encoding="utf-8").read()
+wsrc = T.web_src()
 check("R13 빌드가 재료(flowev.collect)를 만들고 감시기 입력에 'flows'로 넘김(화면 게시본엔 안 실음)", "self._flow_ev = flowev.collect(" in wsrc
       and '"flows": b9.__dict__.get("_flow_ev")' in wsrc and '"flowEv"' not in wsrc)
 check("R13 큰 출금·도착 확인이 켜져 있으면 낡은 빌드(5분+ · 입력 바뀜)에 백그라운드 재빌드 1번(기다리지 않음)", "_flow_fresh_kick(now)" in wsrc and "def _flow_fresh_kick" in wsrc)

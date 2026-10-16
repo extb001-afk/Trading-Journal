@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 import outflow_match as OM
+import calcguard
 
 WINDOW = 48 * 3600
 EXP_NORMAL = 30 * 60
@@ -297,7 +298,8 @@ def classify(rows, ctx, transit=(), of_rows=(), of_match=None, of_bridge=None, d
         if k9 not in _lst:
             try:
                 _lst[k9] = bool(deposit_exchange(k9[0], k9[1]))
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("flowev:classify.listed", _cg9)
                 _lst[k9] = False
         return _lst[k9]
 

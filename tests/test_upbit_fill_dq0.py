@@ -36,7 +36,11 @@ import xparts
 
 web.datetime = _FDT
 histcurve.datetime = _FDT
+for _mn9 in [m for m in sys.modules if m.startswith(("view_", "http_", "accounting_"))]:
+    if hasattr(sys.modules[_mn9], "datetime"):
+        sys.modules[_mn9].datetime = _FDT
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):

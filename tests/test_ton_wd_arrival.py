@@ -26,6 +26,8 @@ import ton_watch as tw
 import _ton_fake as F
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 DAY = 86400
 NOW = int(time.time())
 TON = 10 ** 9

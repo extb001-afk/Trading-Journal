@@ -19,6 +19,7 @@ json.dump(cfg, open(os.path.join(T.TMP, "config.json"), "w"))
 import core
 assert T.TMP in common.STATE_DIR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 B, R = "0x" + "b2" * 20, "0x" + "c3" * 20
 TKA, TKB = "0x" + "a" * 40, "0x" + "b" * 40
 TS = 1790000500

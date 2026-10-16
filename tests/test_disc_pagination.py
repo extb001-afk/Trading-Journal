@@ -13,6 +13,7 @@ import bf_engine
 try:
     import evm_watch
     evm_watch.es_daily_left = lambda *a, **k: 0
+    T.patch_moved("es_daily_left", evm_watch.es_daily_left, ("evm_",))
 except Exception:
     evm_watch = None
 

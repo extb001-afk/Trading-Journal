@@ -18,6 +18,8 @@ import common
 import core
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 E18 = 10 ** 18
 NOW = int(time.time())
 RT = "0x" + "e5" * 20

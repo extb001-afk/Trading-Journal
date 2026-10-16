@@ -53,6 +53,7 @@ def details(hs):
 
 w.fetch_details = details
 bsc_watch._now = lambda: 1_800_000_000.0
+T.patch_moved("_now", bsc_watch._now, ("bsc_",))
 w._xin_pass(5000)
 T.chk(NEW in seen and len(seen) == bsc_watch.XIN_MAX_NEW, f"X2 한 번 실행({bsc_watch.XIN_MAX_NEW}건) 안에 방금 출금 확인", seen[:3])
 T.finish()

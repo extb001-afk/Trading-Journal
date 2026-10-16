@@ -13,6 +13,7 @@ import core
 
 chk = T.chk
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 W = "0x" + "a1" * 20
 cfg = {"chains": {"eth": {"blockscout": "https://eth.example.invalid", "conf_depth": 12, "blocks_per_day": 7200}},
        "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "t"}], "backfill_months": 1}

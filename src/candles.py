@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import bf_engine
 import common
+import calcguard
 
 KST = timezone(timedelta(hours=9))
 CACHE_DIR = os.path.join(common.STATE_DIR, "candles")
@@ -204,7 +205,8 @@ def _keyless_room(host, deadline=None):
     if mode == "fg":
         try:
             w = bf_engine.gate_wait(host)
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("candles:_keyless_room", _cg9)
             w = 0.0
         return ("deferred", DEFER_NOTE) if w > FG_DEFER_WAIT_S else None
     if mode != "bg":
@@ -240,7 +242,8 @@ def _bg_key_ok() -> bool:
             return False
         _pm, pd = nft.cg_key_windows(rec, b, share)
         return int(b.cg_usage().get("total") or 0) + 1 <= int(pd) * BG_KEY_FRAC
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("candles:_bg_key_ok", _cg9)
         return False
 
 
@@ -297,7 +300,8 @@ def _keyed(url, lane, allow, valid, deadline):
         return "skip", "allow"
     try:
         import cgkey
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("candles:_keyed", _cg9)
         return "skip", "import"
     if not cgkey.key():
         return "skip", "nokey"
@@ -545,7 +549,8 @@ def _cache_store(path, key, out, why, note, complete, now):
 def _cache_put(path, obj):
     try:
         common.atomic_write_json(path, obj)
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("candles:_cache_put", _cg9)
         pass
 
 

@@ -178,6 +178,6 @@ check("G6 스테이블(tk st)·다른 거래처 글자는 묶지 않음", len(we
       and len(web._tax_fee_merge([g6[0], dict(g6[1], ex="바이낸스 대출 상환(빌린 코인 · 빌린 시각 시가로 정산)")])) == 2)
 
 print("[G5] 화면")
-app = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+app = T.app_js()
 check("G5 체결 상세 줄: n > 1 이면 'N건 묶음'", "(num(r.n) > 1 ? ' · ' + nf('ko-KR').format(num(r.n)) + '건 묶음' : '')" in app)
 T.finish()

@@ -192,6 +192,7 @@ bf_engine.rpc_call = fake_call
 bf_engine.rpc_batch = fake_batch
 bf_engine.http_json = fake_http_json
 bsc_watch.NONCE_ARCH_GAP = 0
+T.patch_moved("NONCE_ARCH_GAP", bsc_watch.NONCE_ARCH_GAP, ("bsc_",))
 
 
 class Wr:
@@ -455,6 +456,7 @@ for _ in range(80):
         break
 off = [0.0]
 bsc_watch._now = lambda: time.time() + off[0]
+T.patch_moved("_now", bsc_watch._now, ("bsc_",))
 for _ in range(6):
     off[0] += 400
     CH.head += 10
@@ -462,6 +464,7 @@ for _ in range(6):
     if hs_old in emitted(wr12):
         break
 bsc_watch._now = time.time
+T.patch_moved("_now", bsc_watch._now, ("bsc_",))
 T.chk(not isinstance(cur().get("_live"), dict) and hs_old in emitted(wr12), "N12 차선 끝 뒤 기본 하한으로 옛 구간 발신도 회수",
       {"live": cur().get("_live"), "n": len(wr12.recs)})
 T.chk(len(emitted(wr12)) == len(set(emitted(wr12))), "N12 같은 tx 두 번 방출 0")

@@ -223,6 +223,9 @@ pricing._gj = _no_price
 PX = {"ETH": 2000.0, "BTC": 60000.0, "WETH": 2000.0, "WBTC": 60000.0}
 acct_norm.FxBook.candle = lambda self, sym, ts: PX.get(str(sym or "").upper())
 web._fx_candle_near = lambda fxb, sym, ts, within_s=3600: PX.get(str(sym or "").upper())
+for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:
+    if hasattr(sys.modules[_mn9], "_fx_candle_near"):
+        sys.modules[_mn9]._fx_candle_near = web._fx_candle_near
 web.Spot.dex_pending = lambda self, c, ca: False
 web.Spot.ex_pending = lambda self, ex: False
 web.Spot.price = lambda self, sym, *a, **k: None

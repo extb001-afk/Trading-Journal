@@ -159,7 +159,18 @@ def _rkey(r) -> tuple:
             norm_addr(r["address"]), str(r.get("tag") or "").strip())
 
 
-def merge(store: dict, ex: str, observed: list, now: int, api_seen: bool = True) -> dict:
+SUB_NO_DEPOSIT = ("okx", "bybit")
+
+
+def _mk(ex: str, acct: str = "") -> str:
+    return ex if not acct else f"{ex}~{acct}"
+
+
+def _rmeta(r: dict, exmeta: dict) -> dict:
+    return (exmeta or {}).get(_mk(r.get("exchange"), r.get("acct") or "")) or {}
+
+
+def merge(store: dict, ex: str, observed: list, now: int, api_seen: bool = True, acct: str = "") -> dict:
     idx = {_rkey(r): r for r in store["records"]}
     added = updated = 0
     for o in observed:
@@ -186,6 +197,8 @@ def merge(store: dict, ex: str, observed: list, now: int, api_seen: bool = True)
         if cur is None:
             rec.update({"chain": chain_of(rec["network"], rec["currency"], a), "first_seen": now, "last_seen": now,
                         "sources": [src]})
+            if acct:
+                rec["acct"] = acct
             if src != "history":
                 rec["last_seen_api"] = now
             store["records"].append(rec)
@@ -818,7 +831,7 @@ def _key_fp(ex, env) -> str:
 
 
 def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bool = False,
-            now: int | None = None, pace: float | None = None) -> dict:
+            now: int | None = None, pace: float | None = None, acct: str = "") -> dict:
     now = int(now or time.time())
     cl = Client(ex, env, pace)
     res = {"exchange": ex, "reason": reason, "ok": False, "added": 0, "calls": 0, "errors": [], "hist": None}
@@ -827,7 +840,7 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
         if not store["records"] and not store.get("imported"):
             _import_compat(store, now)
             store["imported"] = now
-        meta = store["exchanges"].setdefault(ex, {})
+        meta = store["exchanges"].setdefault(_mk(ex, acct), {})
         meta["running"] = now
         save_store(store)
     obs, checked, errs = [], set(), []
@@ -897,11 +910,11 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
     res["calls"] = cl.calls
     with _LOCK:
         store2 = load_store()
-        meta2 = store2["exchanges"].setdefault(ex, {})
+        meta2 = store2["exchanges"].setdefault(_mk(ex, acct), {})
         for k in ("hist_from", "hist_until", "hist_pairs"):
             if k in meta and fatal is None:
                 meta2[k] = meta[k]
-        m = merge(store2, ex, obs, now) if obs else {"added": 0, "updated": 0}
+        m = merge(store2, ex, obs, now, acct=acct) if obs else {"added": 0, "updated": 0}
         res["added"] = m["added"]
         meta2.pop("running", None)
         meta2["last_attempt"] = now
@@ -927,7 +940,7 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
             meta2["next_try"] = now + BACKOFF[min(fc, len(BACKOFF)) - 1]
             meta2["last_error"] = fatal
             res["errors"].append(fatal)
-        meta2["count"] = sum(1 for r in store2["records"] if r["exchange"] == ex)
+        meta2["count"] = sum(1 for r in store2["records"] if r["exchange"] == ex and (r.get("acct") or "") == acct)
         save_store(store2)
         try:
             write_compat(store2, ex, now)
@@ -936,7 +949,7 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
     res["errors"] += errs[:5]
     res["hist"] = hist_note
     lvl = logging.INFO if fatal is None else logging.WARNING
-    log.log(lvl, "입금주소 %s(%s): %s · 관측 %d · 신규 %d · 총 %d · 콜 %d%s", ex, reason,
+    log.log(lvl, "입금주소 %s(%s): %s · 관측 %d · 신규 %d · 총 %d · 콜 %d%s", _mk(ex, acct), reason,
             "성공" if fatal is None else "실패(기존 보존) " + fatal[:120], len(obs), res["added"],
             meta2["count"], cl.calls, f" · 개별 오류 {len(errs)}" if errs else "")
     return res
@@ -970,8 +983,8 @@ def _requests() -> dict:
     return r if isinstance(r, dict) else {}
 
 
-def due(ex: str, env: dict, store: dict, now: int, cand_cache: dict):
-    meta = store["exchanges"].get(ex) or {}
+def due(ex: str, env: dict, store: dict, now: int, cand_cache: dict, acct: str = ""):
+    meta = store["exchanges"].get(_mk(ex, acct)) or {}
     req = float(_requests().get(ex) or 0)
     if int(meta.get("next_try") or 0) > now:
         return None
@@ -983,8 +996,8 @@ def due(ex: str, env: dict, store: dict, now: int, cand_cache: dict):
         return ("daily", None, False, 0)
     if int(_NOTIFY.get(ex) or 0) > int(meta.get("last_attempt") or 0):
         return ("new_deposit", None, True, 0)
-    if now - int(cand_cache.get(ex, 0)) >= CAND_EVERY:
-        cand_cache[ex] = now
+    if now - int(cand_cache.get(_mk(ex, acct), 0)) >= CAND_EVERY:
+        cand_cache[_mk(ex, acct)] = now
         c = candidates(ex, store)
         pool = _pool(ex, c)
         new = pool - set(meta.get("checked") or [])
@@ -1002,14 +1015,13 @@ def tick(env_fn, cand_cache: dict) -> list:
     out = []
     env = env_fn() or {}
     now = int(time.time())
-    for ex in EXCHANGES:
-        if not all(env.get(k) for k in NEED[ex]):
-            continue
+    for ex, acct, env_a in [(ex, t9, e9) for ex in EXCHANGES for t9, e9 in common.exchange_accounts(env, ex, NEED[ex])
+                            if not (t9 and ex in SUB_NO_DEPOSIT)]:
         try:
             store = load_store()
-            d = due(ex, env, store, now, cand_cache)
+            d = due(ex, env_a, store, now, cand_cache, acct=acct)
         except Exception as e:
-            log.warning("입금주소 %s 판정 실패: %s", ex, common.redact_secret_text(repr(e))[:120])
+            log.warning("입금주소 %s 판정 실패: %s", _mk(ex, acct), common.redact_secret_text(repr(e))[:120])
             continue
         if not d:
             continue
@@ -1022,11 +1034,11 @@ def tick(env_fn, cand_cache: dict) -> list:
                 m["hist_pairs"] = sorted({tuple(p) for p in m.get("hist_pairs") or []} | set(c["pairs"]))
                 m["hist_pairs"] = [list(p) for p in m["hist_pairs"]]
                 save_store(st)
-        r = refresh(ex, env, reason, only=only, hist_only=hist_only)
+        r = refresh(ex, env_a, reason, only=only, hist_only=hist_only, acct=acct)
         if req_ts:
             with _LOCK:
                 st = load_store()
-                st["exchanges"].setdefault(ex, {})["req_done"] = req_ts
+                st["exchanges"].setdefault(_mk(ex, acct), {})["req_done"] = req_ts
                 save_store(st)
         out.append(r)
     return out
@@ -1162,7 +1174,7 @@ def lookup_all(chain, address, tag=None, currency=None, include_manual=True) -> 
             match, sc = "address", 1
         if currency and str(r.get("currency") or "").upper() == str(currency).upper():
             sc += 0.5
-        cur = "manual" in (r.get("sources") or []) or _is_current(r, exmeta.get(r["exchange"]))
+        cur = "manual" in (r.get("sources") or []) or _is_current(r, _rmeta(r, exmeta))
         sc += 0.2 if cur else 0
         out.append((sc, {"exchange": r["exchange"], "currency": r.get("currency") or "", "network": r.get("network") or "",
                          "chain": rc, "address": r["address"], "tag": rt, "match": match,
@@ -1220,7 +1232,7 @@ def summary(env: dict | None = None) -> dict:
         running = m.get("running")
         out[ex] = {"count": len(recs), "addresses": len({norm_addr(r["address"]) for r in recs}),
                    "currencies": len({r.get("currency") for r in recs}),
-                   "current": sum(1 for r in recs if _is_current(r, m)),
+                   "current": sum(1 for r in recs if _is_current(r, _rmeta(r, st["exchanges"]))),
                    "fromHistory": sum(1 for r in recs if "history" in (r.get("sources") or [])),
                    "lastRefresh": m.get("last_ok"), "lastFull": m.get("last_full"),
                    "lastError": common.redact_secret_text(m.get("last_error")),

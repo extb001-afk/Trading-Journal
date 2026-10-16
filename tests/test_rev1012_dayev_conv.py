@@ -69,7 +69,7 @@ for trial in range(300):
             bad.append(("krw", trial, lim))
 chk(not bad, "P2 무작위 300 × limit 5종: 페이지 합집합 = 비페이지 · 중복 0", bad[:8])
 
-src = open(os.path.join(T.ROOT, "web", "v2", "app.js"), encoding="utf-8").read()
+src = T.app_js()
 m = re.search(r"async function fetchDayEvents\(q\) \{(.*?)\n  \}\n", src, re.S)
 body = m.group(1) if m else ""
 chk("arr(j.conv).concat(arr(j.krw))" in body and "arr(j.events).concat(cv)" in body, "P3 화면이 응답의 conv·krw 를 목록에 합침", bool(m))

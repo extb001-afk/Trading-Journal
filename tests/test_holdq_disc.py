@@ -23,6 +23,8 @@ import recon
 import token_discovery as td
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 chk = T.chk
 E18 = 10 ** 18
 NOW = int(time.time())

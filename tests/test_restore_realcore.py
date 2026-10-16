@@ -23,6 +23,7 @@ import inbox
 import ledger_backup as lb
 import ledger_restore as LR
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 
 
 class _Clock:
@@ -37,6 +38,7 @@ class _Clock:
 
 CLK = _Clock()
 core.time = CLK
+T.patch_moved("time", CLK, prefixes=("core_",))
 S = common.STATE_DIR
 NOW = int(_rt.time())
 T_BK = NOW - 3 * 86400

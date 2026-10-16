@@ -18,6 +18,7 @@ E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
+T.patch_moved("_now", bw._now, ("bsc_",))
 REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
 BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
 OTHER2 = "0x" + "b3" * 20
@@ -290,6 +291,7 @@ cfg_c["bsc"] = {"detail_rpcs": ["https://bscrpc.invalid"], "logs_rpcs": []}
 cfg_c.setdefault("native_symbol", {})["bsc"] = "BNB"
 json.dump(cfg_c, open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8"))
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 T0 = int(time.time()) - 20 * 86400
 common.atomic_write_json(B.CPATH, {"from_block": nb1 + 50, "head": nb1 + 70, "_cov": 100, "_bf_start": 100, "_wallets": [B.W1],
                                    "_synced_at": int(time.time()) + 3600})

@@ -155,6 +155,7 @@ T.chk(r[0] == "ok" and r[1][0] == 401 and isinstance(r[1][1], dict), "R3 onboard
 
 _c0, _l0, _x0 = common.HTTP_BODY_MAX, liq_watch.MAX_BYTES, ex_foreign.HTTP_MAX_BYTES
 common.HTTP_BODY_MAX, liq_watch.MAX_BYTES, ex_foreign.HTTP_MAX_BYTES = 1000, 1000, 1000
+T.patch_moved("HTTP_MAX_BYTES", ex_foreign.HTTP_MAX_BYTES, ("exf_",))
 r = dp("/big")
 T.chk(r[0] == "exc", "R4 depaddr 크기 상한 그대로(실패)", repr(r)[:200])
 r = lq("/big")
@@ -164,6 +165,7 @@ T.chk(r[0] == "exc" and isinstance(r[1], common.ResponseTooLarge), "R4 upbit 크
 r = xf("/big")
 T.chk(r[0] == "exc", "R4 ex_foreign 크기 상한 그대로(실패)", repr(r)[:200])
 common.HTTP_BODY_MAX, liq_watch.MAX_BYTES, ex_foreign.HTTP_MAX_BYTES = _c0, _l0, _x0
+T.patch_moved("HTTP_MAX_BYTES", ex_foreign.HTTP_MAX_BYTES, ("exf_",))
 
 GAPS = []
 _gap0 = bf_engine.rpc_gap

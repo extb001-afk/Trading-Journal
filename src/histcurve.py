@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 import candles
 import common
 import xparts
+import calcguard
 
 log = common.setup_logging("tj-web")
 
@@ -488,7 +489,8 @@ def valid_addr(chain, a) -> bool:
 def off_chains_now() -> set:
     try:
         cfg = common.read_json(common.CONFIG_PATH, {}) or {}
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as _cg9:
+        calcguard.swallowed("histcurve:off_chains_now", _cg9)
         return set()
     ch = cfg.get("chains") if isinstance(cfg.get("chains"), dict) else {}
     return {c for c, cc in ch.items() if isinstance(cc, dict) and not common.chain_enabled(c, cc)}
@@ -997,6 +999,7 @@ class HistCurve:
             try:
                 self.run_once(kit)
             except Exception as e:
+                calcguard.swallowed("histcurve:HistCurve.worker", e)
                 log.warning("장기 곡선 계산 실패(다음에 다시): %s", e)
 
     def run_once(self, kit, cap=None, overlap=False, now=None) -> dict:
@@ -1303,6 +1306,7 @@ class HistCurve:
         try:
             res = fn(fk, todo, dpx, flow_fx) or {}
         except Exception as e:
+            calcguard.swallowed("histcurve:HistCurve._flows", e)
             self.flow_fails += 1
             self.flow_pending = True
             log.warning("장기 곡선 입출금 계산 실패(%d회): %s", self.flow_fails, e)
@@ -1315,6 +1319,7 @@ class HistCurve:
                 import rabby
                 rbn9 = rabby.day_new(rabby.load_state(os.path.join(common.STATE_DIR, rabby.DAILY_NAME)), dc9, today)
             except Exception as e9:
+                calcguard.swallowed("histcurve:HistCurve._flows", e9)
                 log.warning("장기 곡선 입출금: Rabby 첫 반영 읽기 실패(원장 순유입만): %s", e9)
                 rbn9 = {}
             for iso, nv9 in rbn9.items():
@@ -1738,6 +1743,7 @@ class DayClose:
         try:
             self.map_recheck()
         except Exception as e9:
+            calcguard.swallowed("histcurve:DayClose.resolver", e9)
             log.warning("그날 마감가: 매핑 재확인 실패(다음에): %s", e9)
 
         def spec9(gid):
@@ -1774,6 +1780,7 @@ class DayClose:
             try:
                 self.run_once()
             except Exception as e:
+                calcguard.swallowed("histcurve:DayClose.worker", e)
                 log.warning("그날 마감가 받기 실패(다음에 다시): %s", e)
 
     def _run_old(self, items, o, fxo, now, rep):
@@ -2054,6 +2061,7 @@ def migrate_px1004(dc=None, hist=None, now=None, backup=_px1004_backup, mark=Non
     try:
         bak = backup(files9, ts) if backup else []
     except Exception as e9:
+        calcguard.swallowed("histcurve:migrate_px1004", e9)
         log.warning("px1004: 이관 전 백업 실패 — 이번 기동은 안 바꿈: %s", e9)
         return None
     rep = {"dc": bad_dc, "hist": bad_h, "from": first, "bak": bak}

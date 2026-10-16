@@ -438,7 +438,7 @@ if NEW:
     ix5 = {D1: [(ts_of(D1, "15:00"), "pos", ev(ts_of(D1, "15:00"), "ETH", "온체인 매도", "Base · 정산액 산정 중", a="—", _tax=None), ("gETH", "ETH", "Base"))]}
     dd = si.docs_events(ix5, {"gETH": {D1: 28.0}}, CN, D1)
     chk(dd and dd[0]["pnl"] is None, "D2 n5 정산액 미상 매도(_tax None) = 손익 없음(그날 실현 28 붙이지 않음)", dd and dd[0]["pnl"])
-    wsrc = open(os.path.join(SRC, "web.py"), encoding="utf-8").read()
+    wsrc = T.web_src()
     i9 = wsrc.find('· 정산액 산정 중"')
     chk(i9 > 0 and '["_tax"] = None' in wsrc[i9:i9 + 600], "D2 n5 web.py 정산액 산정 중 매도 기록에 _tax=None", i9)
 else:

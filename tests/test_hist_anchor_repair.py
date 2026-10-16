@@ -22,6 +22,8 @@ import common
 import core
 
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
+
 KST = timezone(timedelta(hours=9))
 DAY = 86400
 E18 = 10 ** 18

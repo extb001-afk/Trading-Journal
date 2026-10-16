@@ -61,6 +61,7 @@ def _mk_ft():
 
 FT = _mk_ft()
 evm_watch.time = FT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 bf_engine.time = FT
 AI.time = FT
 
@@ -903,6 +904,7 @@ w = mk()
 check("Z1 키 값이 기록·커서에 없음", AKEY not in json.dumps(w.cursor, ensure_ascii=False) and AKEY not in json.dumps(WR.recs, ensure_ascii=False))
 check("Z2 바깥 연결 시도 0", not T.NET_TRIES, T.NET_TRIES)
 evm_watch.time = _RT
+T.patch_moved("time", evm_watch.time, ("evm_",))
 bf_engine.time = _RT
 AI.time = _RT
 T.finish()

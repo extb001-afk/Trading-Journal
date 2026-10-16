@@ -31,6 +31,7 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(A)}]
 json.dump(cfg, open(CFG_PATH, "w"))
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 
 ch = F.Chain()
 srv = F.Server(ch).start()

@@ -81,6 +81,9 @@ def _vf_spy(vflow, real_loc, venue_w, today_kst):
 
 
 web._venue_flows30 = _vf_spy
+for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:
+    if hasattr(sys.modules[_mn9], "_venue_flows30"):
+        sys.modules[_mn9]._venue_flows30 = _vf_spy
 web.BUILDER = b = web.StateBuilder()
 try:
     st = b.build()
@@ -115,7 +118,7 @@ check("H5 보관처 이름 = 보유 줄 이름(원장 키 조각 없음)", vn ==
 st_txt = json.dumps(st, ensure_ascii=False, default=str)
 check("H4 디스크립터·xpub 원문이 화면 상태에 없음", N.BTC_XPUB[4:40] not in st_txt)
 
-APP = os.path.join(T.ROOT, "web", "v2", "app.js")
+APP = T.app_js_path()
 src = open(APP, encoding="utf-8").read()
 m1 = re.search(r"^  const VN_FAM = .*$", src, re.M)
 m2 = re.search(r"^    const fam9 = .*\n    const kindTxt = .*$", src, re.M)

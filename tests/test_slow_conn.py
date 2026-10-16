@@ -358,7 +358,7 @@ s9.shutdown()
 s9.server_close()
 web.log.removeHandler(cap)
 web.log.setLevel(lv0)
-wsrc = open(web.__file__, encoding="utf-8").read()
+wsrc = T.web_src()
 fns = {n.name: n for n in ast.walk(ast.parse(wsrc)) if isinstance(n, ast.FunctionDef) and n.name in ("do_GET", "do_POST")}
 ck("NC2⑤ do_GET·do_POST 둘 다 같은 끊김 처리(_gone_or_500)",
    all(any(isinstance(x, ast.Attribute) and x.attr == "_gone_or_500" for x in ast.walk(fns.get(k) or ast.parse(""))) for k in ("do_GET", "do_POST")))

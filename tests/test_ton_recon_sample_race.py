@@ -28,6 +28,7 @@ CFG_PATH = os.path.join(T.TMP, "config.json")
 INB = os.path.join(common.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 core.dm = lambda *a, **k: None
+T.patch_moved("dm", core.dm)
 
 
 def set_wallets(*keys):

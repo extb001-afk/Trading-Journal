@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 
 import common
+import calcguard
 
 log = logging.getLogger("tj-web")
 KST = timezone(timedelta(hours=9))
@@ -212,6 +213,7 @@ def tm(iso: str, hist=None, daily=None, fields=None, conn=None, chain_names=None
             comp = hist._compute(kit, [iso], qty).get(iso) or {}
             specs = (hist.px or {}).get("specs") or {}
         except Exception as e:
+            calcguard.swallowed("wow2:tm", e)
             log.warning("타임머신 곡선 계산 실패: %s", type(e).__name__)
             return {"ok": False, "error": "장기 곡선을 준비 중이에요 — 잠시 뒤 다시"}
         G = kit.get("groups") or {}
@@ -546,7 +548,8 @@ def _valuer(hist):
     pm_cache, g_cache = {}, {}
     try:
         import histcurve
-    except Exception:
+    except Exception as _cg9:
+        calcguard.swallowed("wow2:_valuer", _cg9)
         histcurve = None
 
     def grp(gid):
@@ -574,7 +577,8 @@ def _valuer(hist):
         if pm is None:
             try:
                 pm = histcurve.pmap_of(hist._clean(sp, specs), upto)
-            except Exception:
+            except Exception as _cg9:
+                calcguard.swallowed("wow2:_valuer.price", _cg9)
                 pm = {}
             pm_cache[sp] = pm
         p = _f(pm.get(datetime.fromtimestamp(int(ts), KST).strftime("%Y-%m-%d")))
@@ -1221,7 +1225,8 @@ def ask_llm(q: str, today: datetime, chains: list, runner=None, timeout=45) -> d
     if runner is None:
         try:
             import review_daily as rd
-        except Exception:
+        except Exception as _cg9:
+            calcguard.swallowed("wow2:ask_llm", _cg9)
             return None
         b = rd.claude_bin()
         if not b:
