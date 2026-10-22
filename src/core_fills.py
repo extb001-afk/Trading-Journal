@@ -1,5 +1,5 @@
 import acct_norm
-import common
+import histmark, logs, timeutil
 import json
 import pricing
 import time
@@ -7,7 +7,7 @@ from core_common import CLASSIFIER_VER
 from decimal import Decimal
 from decimal import InvalidOperation
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -16,7 +16,7 @@ class FillsMixin:
 
     @staticmethod
     def _iso_ts(s):
-        return common.iso_epoch(s)
+        return timeutil.iso_epoch(s)
 
     def _fill_group_asset(self, base_sym: str, ts: int):
         return self._upbit_asset(base_sym)
@@ -136,10 +136,10 @@ class FillsMixin:
                 n_ok += 1
             self.conn.execute("RELEASE order_trades")
         if n_moved:
-            self._drop_daily_cache()
+            self._inval_daily()
             try:
-                log.info("장기 곡선 다시 계산 표식: %s 부터", common.mark_hist_dirty(t_min))
-            except Exception as e:
+                log.info("장기 곡선 다시 계산 표식: %s 부터", histmark.mark_hist_dirty(t_min))
+            except Exception as e:   # noqa: BLE001 [optional]
                 calcguard.swallowed("core_fills:FillsMixin._consume_order_trades", e)
                 log.warning("장기 곡선 다시 계산 표식 실패: %s", e)
         log.info("[ex] 업비트 옛 주문 체결 목록 채우기: 원본 개정 %d (시각 재기장 %d) · 건너뜀 %d %s", n_ok, n_moved, n_skip,
@@ -164,9 +164,9 @@ class FillsMixin:
                     q.add(pend)
                     log.info("체결 시각 바로잡기: 캐시에 없는 환율·시세 %d개 = 배경에서 받는 중(원장 반영은 기다리지 않음 · 못 바로잡은 체결은 몇 분 뒤 --apply 다시)",
                              len(pend))
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [optional]
                     calcguard.swallowed("core_fills:FillsMixin._consume_exf_retime", e)
-                    log.warning("체결 시각 바로잡기: 배경 조회 시작 실패: %s", common.safe_err(e)[:120])
+                    log.warning("체결 시각 바로잡기: 배경 조회 시작 실패: %s", logs.safe_err(e)[:120])
 
     def _consume_exf_retime_cached(self, rec: dict):
         ex = str(rec.get("exchange") or "")
@@ -257,10 +257,10 @@ class FillsMixin:
                 n_ok += 1
             self.conn.execute("RELEASE exf_retime")
         if t_min is not None:
-            self._drop_daily_cache()
+            self._inval_daily()
             try:
-                log.info("장기 곡선 다시 계산 표식: %s 부터", common.mark_hist_dirty(t_min))
-            except Exception as e:
+                log.info("장기 곡선 다시 계산 표식: %s 부터", histmark.mark_hist_dirty(t_min))
+            except Exception as e:   # noqa: BLE001 [optional]
                 calcguard.swallowed("core_fills:FillsMixin._consume_exf_retime_cached", e)
                 log.warning("장기 곡선 다시 계산 표식 실패: %s", e)
         if n_ok or n_undo or n_skip:

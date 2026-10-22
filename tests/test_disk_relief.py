@@ -2,31 +2,30 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _gate as _x
-from _gate import check, done
-import collections
-import json
-import os
-import shutil
-import subprocess
-import sqlite3
-import time
-import common
-import core
-import db as dbm
-import ledger_backup as LB
+import _harness as T  # noqa: E402,F401
+import _gate as _x  # noqa: E402
+from _gate import check, done  # noqa: E402
+import collections  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import ledger_backup as LB  # noqa: E402
 
-assert _x.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-c = core.Core(common.load_config())
-S = common.STATE_DIR
+assert _x.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+c = core.Core(config.load_config())
+S = paths.STATE_DIR
 BASE = os.path.dirname(S)
 HOME = os.path.join(_x.TMP, "home_rb")
 os.makedirs(HOME, exist_ok=True)
 c.cfg.setdefault("backfill", {})["rebuild_dir"] = HOME
-LIVE = common.DB_PATH
+LIVE = paths.DB_PATH
 MB = 1 << 20
 GB = 1 << 30
 OLD = time.time() - 5 * 86400
@@ -294,7 +293,7 @@ def mkdb(path, tag):
 
 
 def tag(path):
-    cx = sqlite3.connect(common.sqlite_ro_uri(path, immutable=True), uri=True)
+    cx = sqlite3.connect(paths.sqlite_ro_uri(path, immutable=True), uri=True)
     try:
         return cx.execute("SELECT v FROM meta WHERE k='tag'").fetchone()[0]
     finally:

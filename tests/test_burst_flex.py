@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import bf_engine as B
-import nodekeys as NK
+import paths, statefile  # noqa: E402
+import bf_engine as B  # noqa: E402
+import nodekeys as NK  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -27,7 +27,7 @@ CAP = 31000
 
 
 def ldir(name):
-    return os.path.join(common.quota_dir(), f"rpc_day_{name}")
+    return os.path.join(paths.quota_dir(), f"rpc_day_{name}")
 
 
 def fresh(name, days: dict = None, since: int = None, files: dict = None, spec=None):
@@ -37,9 +37,9 @@ def fresh(name, days: dict = None, since: int = None, files: dict = None, spec=N
         os.remove(os.path.join(d, f))
     if days is not None or since is not None:
         h = {str(DAY - k): {f"seed.{k}.aa": [int(v[0]), int(v[1])]} for k, v in (days or {}).items()}
-        common.atomic_write_json(os.path.join(d, "head_days.hist"), {"days": h, "since": DAY - 40 if since is None else since})
+        statefile.atomic_write_json(os.path.join(d, "head_days.hist"), {"days": h, "since": DAY - 40 if since is None else since})
     for f, body in (files or {}).items():
-        common.atomic_write_json(os.path.join(d, f), body)
+        statefile.atomic_write_json(os.path.join(d, f), body)
     with B._RPC_DAY_LOCK:
         B._RPC_DAY.pop(name, None)
     B.rpc_day_configure({"rpc_day_limits": {name: dict(spec or SPEC)}})
@@ -90,7 +90,7 @@ check("X4b 실시간 700/일(× 1.5 = 하루 몫) = 백필 500 으로 물러남(
 
 fresh("node_x5", days={})
 L0 = B.rpc_day_limits("node_x5", now=NOON)
-common.atomic_write_json(os.path.join(ldir("node_x5"), "rt.1.cc.json"), {"day": DAY, "n": 300, "nh": 300, "proc": "rt", "pid": 1, "inst": "cc", "at": 0})
+statefile.atomic_write_json(os.path.join(ldir("node_x5"), "rt.1.cc.json"), {"day": DAY, "n": 300, "nh": 300, "proc": "rt", "pid": 1, "inst": "cc", "at": 0})
 L1 = B.rpc_day_limits("node_x5", now=NOON)
 check("X5 오늘 실시간 0 → 300(정오 · 하루 600 꼴) = 백필 상한 10,000 → 3,550(바로 물러남)", L0.get("burst") == 10 * N and L1.get("burst") == 3550, (L0, L1))
 
@@ -221,12 +221,12 @@ check("X11d 하루 모의: 실시간 1.5만 중 거절 ≤ 2%(종전 = 실시간
 print("X11d 숫자(실시간 받음·거절·옛 기록):", got11, ref11, fill11)
 
 hfx = getattr(B, "helius_flex", None)
-check("X12a helius_flex: 무료 = 월 상한 80만 · 배수 10 · 유료(월 500만) = 400만 · 배수 1 · 끔(helius_burst false) = 배수 1(창은 셈 — 코덱스 bu465)",
+check("X12a helius_flex: 무료 = 월 상한 80만 · 배수 10 · 유료(월 500만) = 400만 · 배수 1 · 끔(helius_burst false) = 배수 1(창은 셈)",
       callable(hfx) and hfx({}) == {"cap": 800000, "x": 10.0} and hfx({"sol": {"helius_monthly_credits": 5_000_000}}) == {"cap": 4000000, "x": 1.0}
       and hfx({"sol": {"helius_burst": False}}) == {"cap": 800000, "x": 1.0}, hfx({}) if callable(hfx) else None)
-d12 = os.path.join(common.quota_dir(), "hl_flex_t")
+d12 = os.path.join(paths.quota_dir(), "hl_flex_t")
 os.makedirs(d12, exist_ok=True)
-common.atomic_write_json(os.path.join(d12, "head_days.hist"), {"days": {}, "since": DAY - 40})
+statefile.atomic_write_json(os.path.join(d12, "head_days.hist"), {"days": {}, "since": DAY - 40})
 m12 = B.DayMeter("hl_flex_t", N, fill_first=True)
 if hasattr(m12, "month_cap"):
     m12.month_cap, m12.flex_x, m12.hist_keep = CAP, X, 31
@@ -245,16 +245,16 @@ except TypeError as e:
 check("X12d 화면 판정(ledger_rooms flex) = 수집기와 같은 하루 상한(평소 예산보다 큼)", lr.get("dayCap", 0) > N and lr.get("fillCap") == m12.eff_budget(t12 + 300)[1]
       if hasattr(m12, "eff_budget") else False, lr)
 
-d14 = os.path.join(common.quota_dir(), "hl_rb_t")
+d14 = os.path.join(paths.quota_dir(), "hl_rb_t")
 os.makedirs(d14, exist_ok=True)
-common.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY - 2): {"old.1.aa": [10, 10]}, str(DAY - 1): {"old.1.aa": [10, 10]}},
+statefile.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY - 2): {"old.1.aa": [10, 10]}, str(DAY - 1): {"old.1.aa": [10, 10]}},
                                                                "since": DAY - 40, "k31": DAY - 10})
 ok14 = B._esb_hist_merge_locked(d14, {DAY - 1: {"new.2.bb": [5, 5]}}, DAY, keep=31)
 h14 = json.load(open(os.path.join(d14, "head_days.hist")))
 p14 = B._rpc_day_prev_used(d14, DAY, N)
 check("X14 롤백 판이 합친 날(k31 뒤 기록) → 기록 시작 날을 그 뒤로 · qn2: 기록 없는 날 = 0(롤백으로 지워졌을 수 있는 날도 — 드문 엣지 감수) → 25",
       ok14 and h14.get("since") == DAY and h14.get("k31") == DAY and p14 == 25, (h14, p14))
-common.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY - 2): {"x.1.aa": [10, 10]}}, "since": DAY - 40, "k31": DAY - 1})
+statefile.atomic_write_json(os.path.join(d14, "head_days.hist"), {"days": {str(DAY - 2): {"x.1.aa": [10, 10]}}, "since": DAY - 40, "k31": DAY - 1})
 B._esb_hist_merge_locked(d14, {DAY - 1: {"x.1.aa": [5, 5]}}, DAY, keep=31)
 h14b = json.load(open(os.path.join(d14, "head_days.hist")))
 check("X14b 평소(31일 판만 합침) = 기록 시작 날 그대로", h14b.get("since") == DAY - 40 and h14b.get("k31") == DAY, h14b)

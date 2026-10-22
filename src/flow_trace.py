@@ -11,7 +11,8 @@ from decimal import Decimal, InvalidOperation
 
 import bf_engine
 import netpace
-import common
+import config, logs, net_http, textutil  # noqa: E402
+import fsio  # noqa: E402
 import xchain_match as xm
 import spamguard
 
@@ -39,7 +40,7 @@ RPCWIN_SENDS = 4
 BS403_SEC = 86400
 ES_UNSUP_SEC = 7 * 86400
 ES_UNSUP_RE = re.compile(r"not supported|unsupported chain|upgrade your api plan|not available (?:on|for) (?:the )?free|free api access|chain.*not.*(?:supported|available)", re.I)
-BS_BLOCKED = common.BS_BLOCKED
+BS_BLOCKED = config.BS_BLOCKED
 SOL_SPEND_MIN = Decimal("0.02")
 DUST_USD = 1.0
 HID_KEEP = 30
@@ -85,9 +86,9 @@ def is_burn(a) -> bool:
 
 def _stable_map():
     try:
-        import pricing
-        return ({c: {norm(k): v for k, v in m.items()} for c, m in pricing.STABLE_CAS.items()}, dict(pricing.STABLE_MINTS))
-    except Exception:
+        import token_tables
+        return ({c: {norm(k): v for k, v in m.items()} for c, m in token_tables.STABLE_CAS.items()}, dict(token_tables.STABLE_MINTS))
+    except Exception:  # noqa: BLE001 [fallback]
         return ({}, {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT"})
 
 
@@ -115,10 +116,7 @@ def load_cache(state_dir):
 
 def save_cache(state_dir, cache):
     p = os.path.join(state_dir, CACHE_NAME)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, separators=(",", ":"), default=str)
-    os.replace(tmp, p)
+    fsio.atomic_write_json(p, cache, ensure_ascii=False, separators=(",", ":"), default=str, mode=None, fsync=False, dir_fsync=False, makedirs=False)
 
 
 def fingerprint(row) -> str:
@@ -365,7 +363,7 @@ def log_legs(H, logs, dec_of, sym_of, ts_of):
         if H not in (f, t):
             continue
         try:
-            v = common.log_word0(lg.get("data") or "0x0")
+            v = textutil.log_word0(lg.get("data") or "0x0")
         except ValueError:
             continue
         tok = norm(lg.get("address"))
@@ -397,7 +395,7 @@ class Scanner:
                         cc9["rpc_logs"] = list(nd9.get("logs") or cc9.get("rpcs") or [])
                 chains9[ch9] = cc9
             cfg = dict(cfg, chains=chains9)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         memo = cache.setdefault("_memo", {})
         for k in ("etx", "blk", "dec"):
@@ -425,10 +423,10 @@ class Scanner:
         memo = self.c.setdefault("_memo", {}).setdefault("pxday", {})
         try:
             with self.px.lock:
-                hit = (self.px.d.get("candle") or {}).get(f"{sym}:{ms}")
+                hit = getattr(self.px, "_cget", (self.px.d.get("candle") or {}).get)(f"{sym}:{ms}")
             if hit:
                 return float(hit), False
-            if memo.get(day):
+            if memo.get(day) and sym not in getattr(self.px, "_flat_syms", ()):
                 return float(memo[day]), True
             na9 = getattr(self.px, "neg_active", None)
             if na9(sym) if na9 else (time.time() - float((self.px.d.get("neg_ts") or {}).get(sym, 0) or 0) < self.px.NEG_TTL):
@@ -442,7 +440,7 @@ class Scanner:
             self.t.calls += self.CANDLE_RESERVE
             p = self.px.candle_usd(sym, ms)
             time.sleep(self.t.sleep)
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             return None, False
         if p:
             if len(memo) > 3000:
@@ -579,7 +577,7 @@ class Scanner:
         ent.setdefault("bal", {})["sol"] = {"t": now, "items": bal}
 
     def _bs(self, chain):
-        if chain in BS_BLOCKED or common.chain_discovery(chain, (self.cfg.get("chains") or {}).get(chain)) == "rpc":
+        if chain in BS_BLOCKED or config.chain_discovery(chain, (self.cfg.get("chains") or {}).get(chain)) == "rpc":
             return ""
         return self.t._bs(chain)
 
@@ -591,7 +589,7 @@ class Scanner:
         try:
             import settings_store
             return str(settings_store.env_value("TJ_ETHERSCAN_KEY") or "").strip()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return ""
 
     def _es_unsup(self, chain) -> bool:
@@ -631,7 +629,7 @@ class Scanner:
                 spans9 = [min(span, int(caps9.get(u) or span)) for u in self.t._evm_urls(chain, logs=True)]
                 if spans9:
                     span = max(1, max(spans9))
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
             wins = max(1, min(RPCWIN_MAX_WINDOWS, int(math.ceil(RPCWIN_COVER_SEC / max(1.0, span * spb)))))
             self.scan_rpcwin(ent, cand, chain, span, wins, RPCWIN_SENDS, spb)
@@ -659,14 +657,14 @@ class Scanner:
             raise xm.Paused("이더스캔 한도 — 다음 주기에 이어서")
         if ES_UNSUP_RE.search(msg):
             raise EsUnsupported("이더스캔이 이 체인을 지원하지 않음(요금제)")
-        raise RuntimeError("이더스캔 응답 오류: " + common.safe_err(msg)[:120])
+        raise RuntimeError("이더스캔 응답 오류: " + logs.safe_err(msg)[:120])
 
     def _es_http(self, url, timeout=30):
         t = self.t
         if t.calls >= t.budget:
             raise xm.Budget()
         t.calls += 1
-        req = urllib.request.Request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
+        req = net_http.request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
         try:
             netpace.wait(url)
         except netpace.Cooldown as e:
@@ -676,8 +674,8 @@ class Scanner:
                 bf_engine.es_dispatch_wait(time.time() + 60)
             except bf_engine.NetError as e:
                 raise xm.Paused("이더스캔 간격 대기 초과 — 다음 주기에 이어서") from e
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(common.read_capped(r).decode())
+            with net_http.urlopen(req, timeout=timeout) as r:
+                return json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
                 raise xm.Paused(f"{netpace.host_of(url)} 429")
@@ -738,7 +736,7 @@ class Scanner:
                 q = Decimal(int(r or "0x0", 16)) / (Decimal(10) ** self.t.decimals(chain, tok))
             except xm.Budget:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 [isolate]
                 continue
             if q > 0:
                 bal.append({"chain": chain, "token": tok, "sym": self.sym_of(chain, tok) or short(tok), "qty": str(q)})
@@ -813,7 +811,7 @@ class Scanner:
             return self.t.decimals(chain, tok)
         except xm.Budget:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             return 18
 
     def scan_bsc(self, ent, cand):
@@ -900,7 +898,7 @@ def run_once(cfg, state_dir, cands, budget=40, log=None, px=None, sleep=0.35, sy
     cache = load_cache(state_dir)
     done = []
     off9 = set((cfg or {}).get("_disabled_chains") or ())
-    off9.update(c9 for c9, cc9 in ((cfg or {}).get("chains") or {}).items() if isinstance(cc9, dict) and not common.chain_enabled(c9, cc9))
+    off9.update(c9 for c9, cc9 in ((cfg or {}).get("chains") or {}).items() if isinstance(cc9, dict) and not config.chain_enabled(c9, cc9))
     for cand in cands[:limit]:
         a = cand["dest"]
         if off9 and off9.intersection(cand.get("chains") or ()):
@@ -925,12 +923,12 @@ def run_once(cfg, state_dir, cands, budget=40, log=None, px=None, sleep=0.35, sy
             st = "partial" if capped else "ok"
         except xm.Paused as e:
             st = "paused"
-            ent["err"] = common.safe_err(e)[:200]
+            ent["err"] = logs.safe_err(e)[:200]
         except xm.Budget:
             st = "partial" if int(ent.get("calls") or 0) + sc.calls >= PER_DEST_CALLS else "budget"
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             st = "error"
-            ent["err"] = common.safe_err(e)[:200]
+            ent["err"] = logs.safe_err(e)[:200]
             (log or (lambda *a: None))(f"flow-trace {short(a)}: {e}")
         ent["calls"] = int(ent.get("calls") or 0) + sc.calls
         ent["status"] = st

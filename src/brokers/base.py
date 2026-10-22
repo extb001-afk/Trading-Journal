@@ -8,6 +8,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import logs
+
 UNVERIFIED = "미검증 — 공개 문서만 보고 작성, 실제 계정으로 시험 안 함(완벽하지 않음)"
 UA = "tj-bot/0.1 (personal trade journal; read-only holdings)"
 
@@ -52,7 +54,7 @@ def default_http(method: str, url: str, headers: dict | None = None, body=None, 
     except urllib.error.HTTPError as e:
         raw = e.read(256 * 1024) if hasattr(e, "read") else b""
         st, rh = e.code, {k.lower(): v for k, v in (e.headers or {}).items()}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         raise BrokerError("증권사 서버에 연결하지 못했어요(%s)" % type(e).__name__) from None
     try:
         j = json.loads(raw.decode("utf-8")) if raw else None
@@ -91,11 +93,7 @@ def redact(text, cfg: dict) -> str:
         elif isinstance(o, str) and len(o) >= 4:
             vals.append(o)
     walk(cfg or {})
-    for v in sorted(set(vals), key=len, reverse=True):
-        t = t.replace(v, "***")
-        if "-" in v:
-            t = t.replace(v.replace("-", ""), "***")
-    return t[:300]
+    return logs.redact_secret_text(t, generic=False, extra=vals, extra_min=4, dashless=True)[:300]
 
 
 class Adapter:

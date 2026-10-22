@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
-from datetime import datetime, timedelta, timezone
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 W = "0x" + "ab" * 20
 WL = f"wallet:base:{W}"
@@ -21,10 +21,10 @@ json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 os.environ["TJ_REPLAY_DEBUG"] = "1"
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -39,7 +39,7 @@ def iso(ts):
     return datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC = {}
 
@@ -127,11 +127,11 @@ for (a, loc), qb in pos.items():
                 (a, loc, format(qb / 10 ** DEC[a], ".12f")))
 con.commit()
 con.close()
-json.dump({"fallback_avg": True}, open(os.path.join(common.STATE_DIR, "ui_prefs.json"), "w"))
+json.dump({"fallback_avg": True}, open(os.path.join(paths.STATE_DIR, "ui_prefs.json"), "w"))
 
-import acct_norm
-import pricing
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 PRICE_TRIES = []
 

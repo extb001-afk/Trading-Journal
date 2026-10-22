@@ -2,11 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import shutil
-import subprocess
+import os  # noqa: E402
+import subprocess  # noqa: E402
 
 APP = T.app_js_path()
 app = open(APP, encoding="utf-8").read()
@@ -15,7 +14,7 @@ print("[1] 정적")
 i9 = app.find("  function holdingsHTML() {")
 hb = app[i9:app.find("\n  }\n", i9)] if i9 >= 0 else ""
 T.chk("uiPgSlice('hold', rows)" in hb and "uiPgBar('hold', rows.length," in hb and "uiPgUnits(" not in hb,
-      "rev1012: 보유표 쪽 넘김 = 줄 단위(하위 행도 한 줄 · 종전 ui17 묶음 단위 = 하위 행 있는 쪽이 길어져 쪽 바 위치가 바뀜)", hb[:120])
+      "보유표 쪽 넘김 = 줄 단위(하위 행도 한 줄 · 종전 묶음 단위 = 하위 행 있는 쪽이 길어져 쪽 바 위치가 바뀜)", hb[:120])
 T.chk("uiPgUnits" not in app, "묶음 쪽 도우미(uiPgUnits — 보유표만 썼음) 없음")
 
 print("[2] 화면 함수(node)")
@@ -80,10 +79,8 @@ try {
 for (const [ok, msg, d] of R) console.log((ok ? 'PASS ' : 'FAIL ') + msg + (ok ? '' : ' — ' + JSON.stringify(d).slice(0, 600)));
 console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
 '''
-NODE = shutil.which("node")
-if not NODE:
-    print("SKIP node 없음 — 화면 함수 동작 시험 건너뜀")
-else:
+NODE = T.node_bin("화면 함수 동작 시험")
+if NODE:
     env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
     env["TJ_TEST_APP"] = APP
     p = subprocess.run([NODE, "--input-type=module", "-"], input=JS, env=env, cwd=T.TMP, capture_output=True, text=True, encoding="utf-8", timeout=120)

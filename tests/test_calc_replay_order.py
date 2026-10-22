@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import db as dbm
-import web
+import db as dbm  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 D = Decimal
@@ -107,9 +107,9 @@ chk(bp([dep(1, 1, 1000, tx="0xdep")], [arr(10, 2, 999), arr(11, 3, 500, tx="0xid
     "O4 id 연결(프로토콜) = 수량 무관 그 도착")
 chk(bp([dep(1, 1, 1000, chain="base", tx="0xd1"), dep(2, 2, 1000, chain="eth", tx="0xd2")],
        [arr(10, 3, 999, bridge=True, tx="0xa1"), arr(11, 4, 999, chain="sol", tx="0xa2")], {("arbitrum", "0xa1"): ("eth", "0xd2")}) == {10: 2, 11: 1},
-    "O4 (od309 ①) 다른 출발에 id 로 연결된 도착은 앞선 출발의 수량 짝이 가로채지 못함 — id 짝 먼저 확정")
+    "O4 다른 출발에 id 로 연결된 도착은 앞선 출발의 수량 짝이 가로채지 못함 — id 짝 먼저 확정")
 chk(bp([dep(1, 1, 1000, tx="0xd1")], [arr(10, 2, 999, tx="0xa1")], {("arbitrum", "0xa1"): ("optimism", "0xelse")}) == {},
-    "O4 (od309 ①) 원장 밖·다른 출발(보낸 내역 등)에 id 로 연결된 도착 = 수량 짝 후보 아님")
+    "O4 원장 밖·다른 출발(보낸 내역 등)에 id 로 연결된 도착 = 수량 짝 후보 아님")
 chk(bp([dep(1, 1, 100)], [arr(10, 2, 93)]) == {10: 1}, "O4 수수료 7% 소액 · 양방향 유일 → 짝")
 chk(bp([dep(1, 1, 100), dep(2, 2, 100, ts=1200)], [arr(10, 3, 93, 1300)]) == {}, "O4 수수료 큰 소액인데 출발 후보 둘 = 짝 없음(모호)")
 chk(bp([dep(1, 1, 100)], [arr(10, 2, 93), arr(11, 3, 50)]) == {}, "O4 수수료 큰 소액인데 도착 후보 둘 = 짝 없음(모호)")

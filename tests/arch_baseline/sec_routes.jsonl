@@ -1,0 +1,138 @@
+{"_doc": "G1 test_sec_route_matrix 선언 표 — 라우트별 로그인·CSRF 토큰 종류·Origin·내부 토큰·로그인 꺼짐 규칙(관측과 같아야 함). 3막에서 바꾸면 이 줄을 새 관측으로(약해지는 변경 = FAIL)"}
+{"r": "EXT /api/v1/accounts", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v2/collections/pudgypenguins/stats", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v3", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v3/account", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v3/brokerage/accounts", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v3/brokerage/key_permissions", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v4/spot/accounts", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v5/account/balance", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "EXT /api/v5/account/config", "note": "바깥 API 주소(응답 모듈 안 문자열 — 우리 라우트 아님)"}
+{"r": "GET /", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/alert_prefs", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/att_detail", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/auth/status", "auth": "open", "internal": true, "proxy_off": 403}
+{"r": "GET /api/bench", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/coverage_limits", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/curve_hist", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/day_events", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/fut_receipt", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/futures", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/habits", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/health", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/leverage", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/nft", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/ops", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/other_assets", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/other_assets/quote", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/outflow_candidates", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/receipt", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/receipt_chart", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/receipt_eval", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/receipt_list", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/search", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/search/ask", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/setup/chains", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/setup/status", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/setup/tier", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/state", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/tax_rows", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/v2/part", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/v2/state", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/wallet_reload", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/wow/flows", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/wow/tm", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /classic", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /futures", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /index.html", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /login", "auth": "open", "internal": true, "proxy_off": 403}
+{"r": "GET /support.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/app.css", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/app.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/fonts/plex.css", "auth": "open", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/health.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/index.html", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/login.css", "auth": "open", "internal": true, "proxy_off": 403, "note": "8-3 로그인 화면 CSS(login.html <style> 글 그대로 · 공개 정적 파일 — login.js 와 같은 공개 범위 · 비밀 0)"}
+{"r": "GET /v2/login.js", "auth": "open", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/mods.css", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/salelink.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/search.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/setup.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_daily.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_dash.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_jrnl.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_other.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_out.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_rcpt.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tab_set.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/tjdom.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/wow.css", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/wow.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "POST /api/alert_prefs", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/alert_test", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/auth/logout_all", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/auth/password", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/auth/setup", "auth": "open", "csrf": "none", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/backfill_request", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/chain_auto_off", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/cost_override", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/day_memo", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/dust_threshold", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/fallback_avg", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/first_seen_px", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/flow_register", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/gas_in_cost", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/genuine_token", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/health/ack", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/health/restore", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ignore", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ignore_bulk", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/login", "auth": "open", "csrf": "none", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/logout", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/nft/prefs", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/offchain_self", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ops/decimals_resolve", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ops/poison_replay", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ops/rebuild_approve", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ops/rebuild_cancel", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/other_assets/delete", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/other_assets/save", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/outflow_resolve", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/plan", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/receipt_eval", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/review/fill", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/review_fill", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/review_len", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/review_pause", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/risk_override", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/sale_link", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/chain_wallets/add", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/chain_wallets/label", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/chain_wallets/remove", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/chains/set", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/depaddr/refresh", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/finish", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/keys/cgshare", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/keys/delete", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/keys/nodeplan", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/keys/save", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/keys/test", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/perp/add", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/perp/remove", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/prefs", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/public_ip", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/telegram/disconnect", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/telegram/manual", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/telegram/poll", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/telegram/test", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/telegram/validate", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/wallets/add", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/wallets/add_many", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/wallets/check_now", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/wallets/label", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/setup/wallets/remove", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/src_whitelist", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/wallet_alias", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/wd_dest_register", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/xfer_link", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}

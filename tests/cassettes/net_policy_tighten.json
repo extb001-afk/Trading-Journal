@@ -1,0 +1,1094 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=net_policy_tighten · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "net_policy_tighten",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [
+  "policy_cgkey",
+  "policy_exkey",
+  "policy_internal"
+ ],
+ "requests": 32,
+ "interactions": [
+  {
+   "key": "GET https://rabby-t-rfc1918.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-rfc1918.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-rfc1918.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-rfc1918.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://10.255.0.5/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-rfc1918.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-rfc1918.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-rfc1918.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-rfc1918.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://10.255.0.5/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-rfc1918.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-rfc1918.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-rfc1918.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-rfc1918.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://10.255.0.5/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-loop4.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-loop4.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-loop4.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-loop4.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://127.0.0.1/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-loop4.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-loop4.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-loop4.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-loop4.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://127.0.0.1/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-loop4.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-loop4.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-loop4.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-loop4.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://127.0.0.1/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-loop6.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-loop6.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-loop6.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-loop6.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::1]/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-loop6.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-loop6.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-loop6.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-loop6.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::1]/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-loop6.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-loop6.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-loop6.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-loop6.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::1]/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-meta.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-meta.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-meta.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-meta.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/rabby/latest/meta-data"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-meta.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-meta.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-meta.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-meta.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/bfe/latest/meta-data"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-meta.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-meta.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-meta.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-meta.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/sol_open/latest/meta-data"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-cgnat.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-cgnat.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-cgnat.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-cgnat.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://100.64.1.1/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-cgnat.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-cgnat.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-cgnat.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-cgnat.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://100.64.1.1/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-cgnat.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-cgnat.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-cgnat.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-cgnat.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://100.64.1.1/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-dnsprv.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-dnsprv.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-dnsprv.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-dnsprv.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://inner-rabby.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-dnsprv.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-dnsprv.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-dnsprv.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-dnsprv.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://inner-bfe.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-dnsprv.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-dnsprv.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-dnsprv.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-dnsprv.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://inner-sol-open.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-mapped.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-mapped.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-mapped.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-mapped.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::ffff:127.0.0.1]/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-mapped.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-mapped.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-mapped.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-mapped.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::ffff:127.0.0.1]/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-mapped.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-mapped.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-mapped.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-mapped.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://[::ffff:127.0.0.1]/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-t-zero.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-t-zero.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-t-zero.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-t-zero.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://0.0.0.0/rabby/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-t-zero.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-t-zero.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-t-zero.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-t-zero.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://0.0.0.0/bfe/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-t-zero.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-t-zero.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-t-zero.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-t-zero.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://0.0.0.0/sol_open/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://race-rabby.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://race-rabby.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "race-rabby.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "race-rabby.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/rabby/race"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://race-bfe.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://race-bfe.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "race-bfe.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "race-bfe.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/bfe/race"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://race-sol-open.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://race-sol-open.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "race-sol-open.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "race-sol-open.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://169.254.169.254/sol_open/race"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://rabby-mixed.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://rabby-mixed.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "rabby-mixed.policy.invalid",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "rabby-mixed.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://mixed-rabby.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://bfe-mixed.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://bfe-mixed.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "bfe-mixed.policy.invalid",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "bfe-mixed.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://mixed-bfe.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET https://sol-open-mixed.policy.invalid/start",
+   "req": {
+    "method": "GET",
+    "url": "https://sol-open-mixed.policy.invalid/start"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-open-mixed.policy.invalid",
+    "user-agent": "tj-policy-test/1",
+    "accept": "application/json",
+    ":timeout": "7",
+    ":tls": "검증",
+    ":sni": "sol-open-mixed.policy.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "https://mixed-sol-open.policy.invalid/t"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET http://127.0.0.1:8090/api/rd/start?to=loop",
+   "req": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8090/api/rd/start?to=loop"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "127.0.0.1:8090",
+    "user-agent": "Python-urllib/<판>",
+    "x-tj-internal": "<secret:policy_internal>",
+    ":timeout": "7"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://127.0.0.1:8090/api/rd/next"
+     ]
+    ],
+    "text": ""
+   }
+  },
+  {
+   "key": "GET http://127.0.0.1:8090/api/rd/start?to=out",
+   "req": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8090/api/rd/start?to=out"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "127.0.0.1:8090",
+    "user-agent": "Python-urllib/<판>",
+    "x-tj-internal": "<secret:policy_internal>",
+    ":timeout": "7"
+   },
+   "auth": {},
+   "resp": {
+    "status": 302,
+    "headers": [
+     [
+      "Location",
+      "http://evil.policy.invalid/api/rd/leak"
+     ]
+    ],
+    "text": ""
+   }
+  }
+ ],
+ "addr_mode": "preserve",
+ "dns": {
+  "inner-rabby.policy.invalid": [
+   "10.255.0.6"
+  ],
+  "race-rabby.policy.invalid": {
+   "seq": [
+    [
+     "9.9.9.60"
+    ],
+    [
+     "10.255.0.7"
+    ]
+   ]
+  },
+  "mixed-rabby.policy.invalid": [
+   "9.9.9.70",
+   "10.255.0.8"
+  ],
+  "inner-bfe.policy.invalid": [
+   "10.255.0.6"
+  ],
+  "race-bfe.policy.invalid": {
+   "seq": [
+    [
+     "9.9.9.61"
+    ],
+    [
+     "10.255.0.7"
+    ]
+   ]
+  },
+  "mixed-bfe.policy.invalid": [
+   "9.9.9.71",
+   "10.255.0.8"
+  ],
+  "inner-sol-open.policy.invalid": [
+   "10.255.0.6"
+  ],
+  "race-sol-open.policy.invalid": {
+   "seq": [
+    [
+     "9.9.9.62"
+    ],
+    [
+     "10.255.0.7"
+    ]
+   ]
+  },
+  "mixed-sol-open.policy.invalid": [
+   "9.9.9.72",
+   "10.255.0.8"
+  ]
+ },
+ "conn_events": {},
+ "conn_log": [
+  [
+   "rabby-t-rfc1918.policy.invalid:443",
+   "ok",
+   "1.1.1.1"
+  ],
+  [
+   "bfe-t-rfc1918.policy.invalid:443",
+   "ok",
+   "1.1.1.2"
+  ],
+  [
+   "sol-open-t-rfc1918.policy.invalid:443",
+   "ok",
+   "1.1.1.3"
+  ],
+  [
+   "rabby-t-loop4.policy.invalid:443",
+   "ok",
+   "1.1.1.4"
+  ],
+  [
+   "bfe-t-loop4.policy.invalid:443",
+   "ok",
+   "1.1.1.5"
+  ],
+  [
+   "sol-open-t-loop4.policy.invalid:443",
+   "ok",
+   "1.1.1.6"
+  ],
+  [
+   "rabby-t-loop6.policy.invalid:443",
+   "ok",
+   "1.1.1.7"
+  ],
+  [
+   "bfe-t-loop6.policy.invalid:443",
+   "ok",
+   "1.1.1.8"
+  ],
+  [
+   "sol-open-t-loop6.policy.invalid:443",
+   "ok",
+   "1.1.1.9"
+  ],
+  [
+   "rabby-t-meta.policy.invalid:443",
+   "ok",
+   "1.1.1.10"
+  ],
+  [
+   "bfe-t-meta.policy.invalid:443",
+   "ok",
+   "1.1.1.11"
+  ],
+  [
+   "sol-open-t-meta.policy.invalid:443",
+   "ok",
+   "1.1.1.12"
+  ],
+  [
+   "rabby-t-cgnat.policy.invalid:443",
+   "ok",
+   "1.1.1.13"
+  ],
+  [
+   "bfe-t-cgnat.policy.invalid:443",
+   "ok",
+   "1.1.1.14"
+  ],
+  [
+   "sol-open-t-cgnat.policy.invalid:443",
+   "ok",
+   "1.1.1.15"
+  ],
+  [
+   "rabby-t-dnsprv.policy.invalid:443",
+   "ok",
+   "1.1.1.16"
+  ],
+  [
+   "bfe-t-dnsprv.policy.invalid:443",
+   "ok",
+   "1.1.1.17"
+  ],
+  [
+   "sol-open-t-dnsprv.policy.invalid:443",
+   "ok",
+   "1.1.1.18"
+  ],
+  [
+   "rabby-t-mapped.policy.invalid:443",
+   "ok",
+   "1.1.1.19"
+  ],
+  [
+   "bfe-t-mapped.policy.invalid:443",
+   "ok",
+   "1.1.1.20"
+  ],
+  [
+   "sol-open-t-mapped.policy.invalid:443",
+   "ok",
+   "1.1.1.21"
+  ],
+  [
+   "rabby-t-zero.policy.invalid:443",
+   "ok",
+   "1.1.1.22"
+  ],
+  [
+   "bfe-t-zero.policy.invalid:443",
+   "ok",
+   "1.1.1.23"
+  ],
+  [
+   "sol-open-t-zero.policy.invalid:443",
+   "ok",
+   "1.1.1.24"
+  ],
+  [
+   "race-rabby.policy.invalid:443",
+   "ok",
+   "9.9.9.60"
+  ],
+  [
+   "race-bfe.policy.invalid:443",
+   "ok",
+   "9.9.9.61"
+  ],
+  [
+   "race-sol-open.policy.invalid:443",
+   "ok",
+   "9.9.9.62"
+  ],
+  [
+   "rabby-mixed.policy.invalid:443",
+   "ok",
+   "1.1.1.25"
+  ],
+  [
+   "bfe-mixed.policy.invalid:443",
+   "ok",
+   "1.1.1.26"
+  ],
+  [
+   "sol-open-mixed.policy.invalid:443",
+   "ok",
+   "1.1.1.27"
+  ],
+  [
+   "127.0.0.1:8090",
+   "ok",
+   "127.0.0.1"
+  ],
+  [
+   "127.0.0.1:8090",
+   "ok",
+   "127.0.0.1"
+  ]
+ ]
+}

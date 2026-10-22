@@ -1,4 +1,5 @@
 from __future__ import annotations
+import accounting_basis
 import accounting_books
 import accounting_cp
 import accounting_ctx
@@ -18,7 +19,7 @@ import acct_norm
 import bf_engine
 import bisect
 import buychart
-import common
+import histmark, logs, paths, statefile
 import depaddr
 import flow_trace
 import flowev
@@ -49,12 +50,10 @@ from view_common import DISC_OPEN_KO
 from view_common import DISC_OPEN_KO_UNK
 from view_common import EPS
 from view_common import EX_CANDLE_SYMS
-from view_common import GOPLUS_PATH
-from view_common import KST
+from timeutil import KST
 from view_common import LP_CONV_MIN_USD
 from view_common import OF_BASIS_KO
 from view_common import OF_NATIVE_SYMS
-from view_common import SALE_PATH
 from view_common import STABLE_GROUPS
 from view_common import SUB_SID_RE
 from view_common import _ex_stable_sym
@@ -85,22 +84,148 @@ from view_txkey import _ton_hash_uids
 from view_txkey import _txk
 from view_txkey import _wd_txk
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
 
+def _sell_pre(fl, evs, *, sell_wm):
+    w = sell_wm.get(id(fl))
+    if w is None or w[0] is not fl or w[1] is not evs:
+        return 0, 0
+    first, last, n = w[2], w[3], w[4]
+    for k in range(len(evs) - n + 1):
+        if evs[k] is first:
+            return (k, n) if evs[k + n - 1] is last else (0, 0)
+    return 0, 0
+
+
+def _sell_mark(fl, *, sell_wm):
+    evs = fl["events"]
+    if evs:
+        sell_wm[id(fl)] = (fl, evs, evs[0], evs[-1], len(evs))
+    else:
+        sell_wm.pop(id(fl), None)
+
+
+def _load_exf_loans_debts(ex_loan, ex_debt):
+    for ex in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb", "coinbase"):
+        bp = paths.state(f"exf_balances_{ex}.json")
+        if not os.path.exists(bp):
+            continue
+        bd = statefile.read_json(bp, {}) or {}
+        for ln in (bd.get("loans") if isinstance(bd.get("loans"), list) else ()):
+            if isinstance(ln, dict) and isinstance(ln.get("debt"), dict):
+                for s in ln["debt"]:
+                    ex_loan.setdefault(f"{ex}:recon", {})[str(s).upper()] = str(ln.get("label") or "담보대출")
+        dd = bd.get("debts")
+        for s, v in (dd.items() if isinstance(dd, dict) else ()):
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                continue
+            if fv < 0:
+                ex_debt.setdefault(f"{ex}:recon", {})[str(s).upper()] = Decimal(str(fv))
+
+
+def _index_exf_deposits(conn, offc_dep, dep_net, fx_dep_tx, fx_dep_uid_tx):
+    for rf in conn.execute(
+            "SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
+            " AND exchange != 'upbit'"
+            " GROUP BY exchange, uuid HAVING revision = MAX(revision)").fetchall():
+        try:
+            pw = json.loads(rf["payload"])
+        except json.JSONDecodeError:
+            continue
+        t = str(pw.get("txid") or "")
+        if _offc_tx(t):
+            offc_dep.add((rf["exchange"], rf["uuid"]))
+        if t and str(pw.get("network") or pw.get("net_type") or "").strip():
+            dep_net[t.lower()] = (str(pw.get("network") or pw.get("net_type")).strip(), pw.get("currency"))
+        if t and str(pw.get("state") or "").upper() == "ACCEPTED":
+            t9n = _txk(t)
+            fx_dep_tx[t9n] = rf["exchange"]
+            fx_dep_uid_tx[rf["uuid"]] = t9n
+
+
+def _index_upbit_deposits(conn, dep_net, up_dep_uid_tx, up_dep_uid_ts):
+    for rf in conn.execute(
+            "SELECT uuid, payload FROM raw_ex WHERE kind='deposit' AND exchange='upbit'"
+            " GROUP BY uuid HAVING revision = MAX(revision)").fetchall():
+        try:
+            pw = json.loads(rf["payload"])
+        except json.JSONDecodeError:
+            continue
+        t = str(pw.get("txid") or "")
+        if t and str(pw.get("net_type") or pw.get("network") or "").strip():
+            dep_net[t.lower()] = (str(pw.get("net_type") or pw.get("network")).strip(), pw.get("currency"))
+        if t and str(pw.get("state") or "").upper() == "ACCEPTED":
+            up_dep_uid_tx[rf["uuid"]] = _txk(t)
+            try:
+                up_dep_uid_ts[rf["uuid"]] = datetime.fromisoformat(str(pw.get("done_at") or pw.get("created_at"))).timestamp()
+            except (ValueError, TypeError):
+                pass
+
+
+def _collect_of_deposits(conn, offc_on, offc_dep, origin_cache, of_deps, wallet_label):
+    for rf in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
+                           " GROUP BY exchange, uuid HAVING revision = MAX(revision)").fetchall():
+        if rf["exchange"] in offc_on and (rf["exchange"], rf["uuid"]) in offc_dep:
+            continue
+        try:
+            pw = json.loads(rf["payload"])
+            if str(pw.get("state") or "").upper() != "ACCEPTED":
+                continue
+            ts0 = None
+            for k0 in ("created_at", "done_at"):
+                if pw.get(k0):
+                    ts0 = int(datetime.fromisoformat(str(pw[k0]).replace("Z", "+00:00")).timestamp())
+                    break
+            amt0 = Decimal(str(pw.get("amount") or 0))
+        except (ValueError, TypeError, InvalidOperation):
+            continue
+        t0 = str(pw.get("txid") or "")
+        oc0 = origin_cache.get(t0) or origin_cache.get(t0.lower()) or {}
+        of0 = oc0.get("from") if isinstance(oc0, dict) else None
+        of0 = (of0.lower() if str(of0).startswith("0x") else of0) if of0 else None
+        of_deps.append({"ex": rf["exchange"], "uuid": rf["uuid"], "cur": pw.get("currency") or "", "amt": amt0, "ts": ts0,
+                        "txn": outflow_match.norm_txid(t0), "origin_from": of0,
+                        "origin_mine": bool(of0) and of0.lower() in wallet_label})
+
+
+def _load_position_rows(conn, lp_pos_rows, pos_rows, G, by_symloc):
+    for row in conn.execute("SELECT group_id, location, qty_norm FROM positions").fetchall():
+        try:
+            qn0 = Decimal(row["qty_norm"])
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if (row["location"] or "").startswith("lp:"):
+            lp_pos_rows.append((row["group_id"], row["location"], qn0))
+            continue
+        if (row["location"] or "").startswith("out:"):
+            continue
+        d0 = {"gid": row["group_id"], "location": row["location"] or "", "qty": qn0}
+        pos_rows.append(d0)
+        if d0["location"].startswith("exchange:"):
+            sym0 = ((G.get(d0["gid"]) or {}).get("sym") or "").upper()
+            if sym0:
+                by_symloc.setdefault((sym0, d0["location"]), []).append(d0)
+
+
 class ReplayMixin:
 
-    def _build_replay(self, conn) -> dict:
+    def _build_replay(self, conn) -> accounting_books.ReplayResult:
         _bs9 = self._replay_prep(conn)
         self._replay_rt(_bs9)
         self._replay_links(_bs9)
         self._replay_main(_bs9)
+        rr = accounting_books.ReplayResult.from_scope(_bs9)
         if calcguard.strict():
-            accounting_books.check_aliases(_bs9["books"], _bs9, "replay")
-            accounting_ctx.check_ctx(_bs9["ctx"], _bs9, "replay")
-        return _bs9
+            accounting_books.check_rr(rr, _bs9, "replay", accounting_ctx.check_replay)
+            if not isinstance(rr._cb, accounting_basis.StrictCostBasis):
+                raise AssertionError("원가 장부(cb)가 StrictCostBasis 아님(replay) — 엄격 빌드의 원가 칸 그림자 검사 빠짐")
+            rr._cb.check(rr.G, "replay")
+        return rr
 
     def _replay_prep(self, conn) -> dict:
         if not self.skip_gen_check:
@@ -125,6 +250,8 @@ class ReplayMixin:
             gas_on = self.cfg.get("gas_in_cost", True)
         gas_on = bool(gas_on)
         books = accounting_books.Books()
+        px = accounting_ctx.ReplayParts(sb=self, books=books)
+        cb = px.cb = accounting_basis.StrictCostBasis() if calcguard.strict() else accounting_basis.CostBasis()
         gas_applied = books.gas_applied
         gas_expense = books.gas_expense
         ex_fee = books.ex_fee
@@ -163,9 +290,8 @@ class ReplayMixin:
 
         fee_day = books.fee_day
 
-        fbx = accounting_fee.FeeBook(sb=self, books=books, kst_fmt=kst_fmt)
+        fbx = px.fbx = accounting_fee.FeeBook(sb=self, books=books, kst_fmt=kst_fmt, cb=cb)
         fee_day_add = fbx.fee_day_add
-
         ex_fee_add = fbx.ex_fee_add
         wd_fee, wd_fee_m = books.wd_fee, books.wd_fee_m
 
@@ -180,7 +306,6 @@ class ReplayMixin:
             except (TypeError, ValueError, OverflowError):
                 return None
             return t9 if t9 is not None and 0 < t9 < 1e11 else None
-
         be_cap_of = accounting_util.be_cap_of
         cost_be = {k9: dict({"until": be_until(k9[1:])},
                             **({"qty": str(be_cap_of(cost_be[k9]))} if be_cap_of(cost_be[k9]) is not None else {}))
@@ -189,7 +314,6 @@ class ReplayMixin:
                    and be_until(k9[1:]) is not None}
         be_cap = {k9[1:]: be_cap_of(v9) for k9, v9 in cost_be.items()}
         be_used = {}
-
         def be_take(gid9, ts9, q9):
             u9 = be_until(gid9)
             if u9 is None or ts9 > u9:
@@ -216,31 +340,16 @@ class ReplayMixin:
                 except (IndexError, ValueError):
                     continue
                 exf_first[r9["source_ns"]] = min(exf_first.get(r9["source_ns"], b9), b9)
+        for ex9, b9 in (conn.execute("SELECT ex, min(bts) FROM exf_adj_tomb GROUP BY ex").fetchall() if conn.execute("SELECT 1 FROM sqlite_master WHERE name='exf_adj_tomb'").fetchone() else ()):
+            exf_first[f"{ex9}:recon"] = min(exf_first.get(f"{ex9}:recon", int(b9)), int(b9))
         exf_open_span = float(self.cfg.get("backfill_months") or 5) * 30 * 86400
         ex_debt9 = {}
         ex_loan9 = {}
-        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb"):
-            bp9 = os.path.join(common.STATE_DIR, f"exf_balances_{ex9}.json")
-            if not os.path.exists(bp9):
-                continue
-            bd9 = common.read_json(bp9, {}) or {}
-            for ln9 in (bd9.get("loans") if isinstance(bd9.get("loans"), list) else ()):
-                if isinstance(ln9, dict) and isinstance(ln9.get("debt"), dict):
-                    for s9 in ln9["debt"]:
-                        ex_loan9.setdefault(f"{ex9}:recon", {})[str(s9).upper()] = str(ln9.get("label") or "담보대출")
-            dd9 = bd9.get("debts")
-            for s9, v9 in (dd9.items() if isinstance(dd9, dict) else ()):
-                try:
-                    fv9 = float(v9)
-                except (TypeError, ValueError):
-                    continue
-                if fv9 < 0:
-                    ex_debt9.setdefault(f"{ex9}:recon", {})[str(s9).upper()] = Decimal(str(fv9))
-
+        _load_exf_loans_debts(ex_loan9, ex_debt9)
         def exf_kind(r9):
             if r9["event"] != "EXF_ADJUST":
                 return None
-            if common.exf_is_fut(r9["event"], r9["source_ns"]):
+            if histmark.exf_is_fut(r9["event"], r9["source_ns"]):
                 return "fix"
             try:
                 b9 = int(str(r9["source_id"]).rsplit(":", 1)[1])
@@ -249,7 +358,6 @@ class ReplayMixin:
             if int(r9["event_ts"]) <= b9 - exf_open_span + 86400:
                 return "open"
             return "init" if b9 <= exf_first.get(r9["source_ns"], b9) + 72 * 3600 else "fix"
-
         G = {}
         gas_by_chain = books.gas_by_chain
         gas_by_month = books.gas_by_month
@@ -269,7 +377,7 @@ class ReplayMixin:
         fx_wd = {}
         fx_uid_tx = {}
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX",
-                   "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+                   "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
         wd_raw9 = {}
         fbx.wd_raw9 = wd_raw9
         offc_wd, offc_dep = set(), set()
@@ -277,43 +385,15 @@ class ReplayMixin:
         offc_pool = {}
         offc_st = {}
 
-        def offc_s(ex9):
-            return offc_st.setdefault(ex9, {"wdN": 0, "wdCost": Decimal(0), "wdUnkQty": Decimal(0), "depN": 0, "inhN": 0,
-                                            "inhCost": Decimal(0), "inhQty": Decimal(0), "inhUnkQty": Decimal(0),
-                                            "excessQty": Decimal(0), "excessN": 0, "syms": set(),
-                                            "wdCostStable": Decimal(0), "inhCostStable": Decimal(0), "bySym": {}, "byAddr": {},
-                                            "exclN": 0, "exclCost": Decimal(0)})
-
         def offc_self_wd(ex9, uid9):
             return (ex9 in offc_on and (ex9, uid9) in offc_wd
                     and not (offc_wd_addr.get((ex9, uid9)) and offc_wd_addr[(ex9, uid9)] in offc_excl.get(ex9, ())))
 
-        def offc_addr_add(ex9, uid9, cost9):
-            a9 = offc_wd_addr.get((ex9, uid9)) or ""
-            b9 = offc_s(ex9)["byAddr"].setdefault(a9, [0, Decimal(0)])
-            b9[0] += 1
-            b9[1] += cost9
-            if a9 and a9 in offc_excl.get(ex9, ()) and ex9 in offc_on:
-                offc_s(ex9)["exclN"] += 1
-                offc_s(ex9)["exclCost"] += cost9
-
-        def offc_add(ex9, sym9, stable9, wd=None, dep=False, inh=None):
-            s9 = offc_s(ex9)
-            b9 = s9["bySym"].setdefault(sym9, {"wdN": 0, "wdCost": Decimal(0), "depN": 0, "inhN": 0, "inhCost": Decimal(0), "stable": bool(stable9)})
-            if wd is not None:
-                b9["wdN"] += 1
-                b9["wdCost"] += wd
-                if stable9:
-                    s9["wdCostStable"] += wd
-            if dep:
-                b9["depN"] += 1
-            if inh is not None:
-                b9["inhN"] += 1
-                b9["inhCost"] += inh
-                if stable9:
-                    s9["inhCostStable"] += inh
-
-        ofx = accounting_offc.OffcView(fx_name=fx_name, offc_ans=offc_ans, offc_excl=offc_excl, offc_on=offc_on, offc_pool=offc_pool, offc_s=offc_s, offc_st=offc_st)
+        offcin = accounting_ctx.OffcIn(fx_name=fx_name, offc_ans=offc_ans, offc_excl=offc_excl, offc_on=offc_on, offc_pool=offc_pool, offc_st=offc_st, offc_wd_addr=offc_wd_addr)
+        ofx = px.ofx = accounting_offc.OffcView(offcin=offcin)
+        offc_s = ofx.offc_s
+        offc_addr_add = ofx.offc_addr_add
+        offc_add = ofx.offc_add
         offc_summary = ofx.offc_summary
         ton_h2u9 = _ton_hash_uids(conn)
         for rf in conn.execute(
@@ -337,31 +417,15 @@ class ReplayMixin:
             for u9h, t9h in self._hl_bridge_links(conn, wd_raw9).items():
                 fx_uid_tx[u9h] = _txk(t9h)
                 fx_wd[_txk(t9h)] = fx_name.get("hyperliquid", "Hyperliquid")
-        except Exception as e9h:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9h)
-            log.warning("Hyperliquid 출금 ↔ 지갑 도착 연결 실패(이번 빌드 생략): %s", common.safe_err(e9h)[:160])
+        except Exception as e9h:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[u9h]", e9h)
+            log.warning("Hyperliquid 출금 ↔ 지갑 도착 연결 실패(이번 빌드 생략): %s", logs.safe_err(e9h)[:160])
         fx_transit = {}
         wd_tr = []
         fx_dep_tx = {}
         fx_dep_uid_tx = {}
         dep_net9 = {}
-        for rf in conn.execute(
-                "SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
-                " AND exchange != 'upbit'"
-                " GROUP BY exchange, uuid HAVING revision = MAX(revision)").fetchall():
-            try:
-                pw = json.loads(rf["payload"])
-            except json.JSONDecodeError:
-                continue
-            t9 = str(pw.get("txid") or "")
-            if _offc_tx(t9):
-                offc_dep.add((rf["exchange"], rf["uuid"]))
-            if t9 and str(pw.get("network") or pw.get("net_type") or "").strip():
-                dep_net9[t9.lower()] = (str(pw.get("network") or pw.get("net_type")).strip(), pw.get("currency"))
-            if t9 and str(pw.get("state") or "").upper() == "ACCEPTED":
-                t9n = _txk(t9)
-                fx_dep_tx[t9n] = rf["exchange"]
-                fx_dep_uid_tx[rf["uuid"]] = t9n
+        _index_exf_deposits(conn, offc_dep, dep_net9, fx_dep_tx, fx_dep_uid_tx)
         diag = {"ex_out_cost": Decimal(0), "ex_out_n": 0, "ex_dep_inh_cost": Decimal(0), "ex_dep_inh_n": 0,
                 "ex_dep_unlinked_n": 0, "ex_transit_unused_cost": Decimal(0),
                 "ex_dep_fee_resid_cost": Decimal(0),
@@ -382,7 +446,7 @@ class ReplayMixin:
                 continue
             if t9x:
                 exf_dep_tx[(rf9["exchange"], rf9["uuid"])] = t9x
-        origin_cache = common.read_json(os.path.join(common.STATE_DIR, "tx_origin_cache.json"), {})
+        origin_cache = statefile.read_json(paths.state("tx_origin_cache.json"), {})
         origin_pending = set()
         now_oc = int(time.time())
 
@@ -393,17 +457,16 @@ class ReplayMixin:
         snap_cache = {}
         raw_chains9 = [r9[0] for r9 in conn.execute("SELECT DISTINCT chain FROM raw_txs").fetchall()]
         fx_tab, web_candle9 = _px_tables(self.px)
-
-        fxb = acct_norm.FxBook(fx_tab, os.path.join(common.STATE_DIR, "px_cache_core.json"), self.spot.rate or None,
+        fxb = acct_norm.FxBook(fx_tab, paths.state("px_cache_core.json"), self.spot.rate or None,
                                web_candle=web_candle9)
         fbx.fxb = fxb
-        ctx = accounting_ctx.ReplayCtx(conn=conn, prefs=prefs, fb_on=fb_on, fs_pref=fs_pref, fs_on=fs_on, gas_on=gas_on, offc_on=offc_on,
+        ctx = px.ctx = accounting_ctx.ReplayCtx(conn=conn, prefs=prefs, fb_on=fb_on, fs_pref=fs_pref, fs_on=fs_on, gas_on=gas_on, offc_on=offc_on,
                                        offc_ans=offc_ans, offc_excl=offc_excl, now=now, today_kst=today_kst, fxb=fxb)
         realized_krw_by_date = books.realized_krw_by_date
         fee_disp, fee_acq = {}, {}
-        fee_diag = {"n": 0, "usd_cost": Decimal(0), "usd_realized": Decimal(0), "usd_unv": Decimal(0), "no_px": 0}
+        fee_diag = {"n": 0, "usd_cost": Decimal(0), "usd_realized": Decimal(0), "usd_unv": Decimal(0), "no_px": 0, "wd_no_px": 0}
 
-        kpx = accounting_krw.KrwPools(fxb=fxb, krw_mkt=krw_mkt, up_mkt=up_mkt, fx_name=fx_name)
+        kpx = px.kpx = accounting_krw.KrwPools(fxb=fxb, krw_mkt=krw_mkt, up_mkt=up_mkt, fx_name=fx_name)
         krw_of = kpx.krw_of
 
         _AK_TRADE = frozenset(("EX_BUY", "EX_SELL", "EXF_BUY", "EXF_SELL", "SWAP"))
@@ -422,7 +485,7 @@ class ReplayMixin:
             except (KeyError, IndexError, TypeError, ValueError):
                 return None
 
-        unx = accounting_unk.UnkBook(sb=self, cost_ov=cost_ov, fs_on=fs_on, krw_of=krw_of)
+        unx = px.unx = accounting_unk.UnkBook(sb=self, cost_ov=cost_ov, fs_on=fs_on, krw_of=krw_of, cb=cb)
         apply_ov = unx.apply_ov
 
         fs_sum = {"n": 0, "q": Decimal(0), "usd": Decimal(0), "miss": 0, "miss_q": {}, "src": {}, "rows": 0, "real": Decimal(0),
@@ -461,66 +524,36 @@ class ReplayMixin:
             k9 = f"{r9['source_ns']}|{r9['source_id']}|{r9['leg_seq']}|{r9['asset_id']}"
             return k9 if (r9["group_id"] or -r9["asset_id"]) == g9["gid"] else f"{k9}|g{g9['gid']}"
 
-        fsx = accounting_fs.FirstSeen(sb=self, conn=conn, fs_sum=fs_sum, fs_aux=fs_aux, rows=rows, fs_kit=fs_kit, fs_spec9=fs_spec9, fs_floor9=fs_floor9, fs_lo9=fs_lo9, fs_memo=fs_memo, fs_need=fs_need, fxb=fxb, now=now, krw_of=krw_of, fs_last=fs_last, fs_sales=fs_sales, ret_kit=ret_kit, ret_pool=ret_pool, be_until=be_until, kst_fmt=kst_fmt, fs_pin=fs_pin, fs_pin_new=fs_pin_new, fs_pref=fs_pref, fx_wd=fx_wd, fs_okc=fs_okc, fs_pkey=fs_pkey)
+        fsin = accounting_ctx.FsIn(conn=conn, fs_aux=fs_aux, fs_kit=fs_kit, fs_spec=fs_spec9, fs_floor=fs_floor9, fs_lo=fs_lo9, fs_memo=fs_memo, fs_need=fs_need, fs_sales=fs_sales, ret_kit=ret_kit, ret_pool=ret_pool, fs_pin=fs_pin, fs_pin_new=fs_pin_new, fs_pref=fs_pref, fx_wd=fx_wd, fs_okc=fs_okc)
+        fsx = px.fsx = accounting_fs.FirstSeen(px, rows=rows, be_until=be_until, fs_pkey=fs_pkey, fsin=fsin)
         fs_hold = fsx.fs_hold
-
         fs_sale_idx = fsx.fs_sale_idx
-
         fs_sameday = fsx.fs_sameday
-
         fs_ok_ca = fsx.fs_ok_ca
-
         fs_senders = fsx.fs_senders
-
         fs_ret = fsx.fs_ret
-
         fs_spec = fsx.fs_spec
-
         fs_px = fsx.fs_px
-
         fs_flow = fsx.fs_flow
-
         fs_why = fsx.fs_why
         unx.fs_why = fs_why
-
         fs_conv = fsx.fs_conv
         unx.fs_conv = fs_conv
-
         fs_st = fsx.fs_st
-
         fs_mark = fsx.fs_mark
         fbx.fs_mark = fs_mark
-
         note_unk = unx.note_unk
         fsx.note_unk = note_unk
-
         oc_names9 = set(self._origin_chain_names())
-
         def _net_na(k9):
             h9 = dep_net9.get(k9)
             if not h9:
                 return ""
             return h9[0] if depaddr.chain_of(h9[0], h9[1]) not in oc_names9 else ""
-
-        orx = accounting_origin.OriginLookup(_net_na=_net_na, conn=conn, oc_fresh=oc_fresh, origin_cache=origin_cache, origin_pending=origin_pending, raw_chains9=raw_chains9, snap_cache=snap_cache)
+        originin = accounting_ctx.OriginIn(conn=conn, origin_cache=origin_cache, raw_chains=raw_chains9, snap_cache=snap_cache)
+        orx = px.orx = accounting_origin.OriginLookup(_net_na=_net_na, oc_fresh=oc_fresh, origin_pending=origin_pending, originin=originin)
         resolve_origin = orx.resolve_origin
-
-        for rf in conn.execute(
-                "SELECT uuid, payload FROM raw_ex WHERE kind='deposit' AND exchange='upbit'"
-                " GROUP BY uuid HAVING revision = MAX(revision)").fetchall():
-            try:
-                pw = json.loads(rf["payload"])
-            except json.JSONDecodeError:
-                continue
-            t9 = str(pw.get("txid") or "")
-            if t9 and str(pw.get("net_type") or pw.get("network") or "").strip():
-                dep_net9[t9.lower()] = (str(pw.get("net_type") or pw.get("network")).strip(), pw.get("currency"))
-            if t9 and str(pw.get("state") or "").upper() == "ACCEPTED":
-                up_dep_uid_tx[rf["uuid"]] = _txk(t9)
-                try:
-                    up_dep_uid_ts[rf["uuid"]] = datetime.fromisoformat(str(pw.get("done_at") or pw.get("created_at"))).timestamp()
-                except (ValueError, TypeError):
-                    pass
+        _index_upbit_deposits(conn, dep_net9, up_dep_uid_tx, up_dep_uid_ts)
         fxdep_transit = {}
         ub_wd_tx = set()
         fsx.ub_wd_tx = ub_wd_tx
@@ -535,13 +568,13 @@ class ReplayMixin:
             t9 = str(pw.get("txid") or "")
             if t9:
                 ub_wd_tx.add(_txk(t9))
-        xc_cache = xchain_match.load_cache(common.STATE_DIR)
+        xc_cache = xchain_match.load_cache(paths.STATE_DIR)
         xc_ext = frozenset(xchain_match.norm(a9) for a9, v9 in self.outflow_decisions().items()
                            if isinstance(v9, dict) and v9.get("verdict") == "external")
         xc_off = frozenset(xchain_match.norm(t9) for t9 in (prefs.get("xchain_off") or []))
         xc_transit = xchain_match.transit_for(rows, xc_cache, xc_off, xc_ext)
         xc_stable = frozenset(r0["group_id"] for r0 in rows if (r0["gname"] or "") in STABLE_GROUPS and r0["group_id"] is not None)
-        xc_cands = xchain_match.send_candidates(rows, xc_cache, xchain_match.load_seed(common.BASE_DIR)) + \
+        xc_cands = xchain_match.send_candidates(rows, xc_cache, xchain_match.load_seed(paths.BASE_DIR)) + \
             xchain_match.candidates(rows, xc_cache, frozenset(set(fx_wd) | ub_wd_tx), xc_stable)
         xc_off9 = set(self.cfg.get("_disabled_chains") or ())
         if xc_off9:
@@ -584,17 +617,13 @@ class ReplayMixin:
         def gstate(row):
             gid = row["group_id"] or -row["asset_id"]
             if gid not in G:
-                G[gid] = {
-                    "gid": gid, "sym": self._gsym(row), "chains": set(),
-                    "is_stable": ((row["gname"] or "") in STABLE_GROUPS
-                                  or (row["kind"] == "exchange_currency"
-                                      and _ex_stable_sym(row["symbol"]))),
-                    "is_fiat": (row["kind"] == "exchange_currency"
-                                and (row["symbol"] or "").upper() in ("KRW",)),
-                    "qty_known": Decimal(0), "cost": Decimal(0), "qty_unknown": Decimal(0),
-                    "realized": Decimal(0), "flows": [], "cur": None, "transit": Decimal(0),
-                    "qty_timeline": [],
-                }
+                G[gid] = cb.new_group(
+                    gid, self._gsym(row),
+                    is_stable=((row["gname"] or "") in STABLE_GROUPS
+                               or (row["kind"] == "exchange_currency"
+                                   and _ex_stable_sym(row["symbol"]))),
+                    is_fiat=(row["kind"] == "exchange_currency"
+                             and (row["symbol"] or "").upper() in ("KRW",)))
             return G[gid]
 
         krw_mix = [Decimal(0)]
@@ -626,7 +655,7 @@ class ReplayMixin:
 
         cp_pool = accounting_util.cp_pool
 
-        cpx = accounting_cp.CostPools(G=G, kst_fmt=kst_fmt, _ak=_ak, krw_mix=krw_mix, consume_krw=consume_krw, krw_last=krw_last, oa_last=oa_last, oa_take=oa_take, CP_EMIT_MAX=CP_EMIT_MAX, cp_last=cp_last, cp_ev=cp_ev, cp_pool=cp_pool)
+        cpx = px.cpx = accounting_cp.CostPools(px, G=G, _ak=_ak, oa_last=oa_last, CP_EMIT_MAX=CP_EMIT_MAX, cp_last=cp_last)
         cp_add = cpx.cp_add
         fsx.cp_add = cp_add
 
@@ -921,7 +950,7 @@ class ReplayMixin:
         if "r" in _lk9:
             r = _lk9["r"]
 
-        lp_mgrs = lpdec.lp_managers(common.BASE_DIR)
+        lp_mgrs = lpdec.lp_managers(paths.BASE_DIR)
         lp_by_tx, lp_meta_by, _lk9 = accounting_index.lp_index(conn)
         if "ch9" in _lk9:
             ch9 = _lk9["ch9"]
@@ -945,12 +974,12 @@ class ReplayMixin:
         lp_events = books.lp_events
         lp_dep_seen = set()
 
-        lpx = accounting_lp.LpBook(sb=self, _ak=_ak, _un=_un, consume_krw=consume_krw, cp_emit=cp_emit, cp_sync=cp_sync, cp_take=cp_take, cur_lab=cur_lab, cur_row=cur_row, cur_src=cur_src, ev=ev, flow_of=flow_of, fxb=fxb, gstate=gstate, krw_of=krw_of, lp_by_tx=lp_by_tx, lp_dep_seen=lp_dep_seen, lp_events=lp_events, lp_meta_by=lp_meta_by, lp_mgrs=lp_mgrs, lp_tx_rows=lp_tx_rows, lpb=lpb, note_unk=note_unk, realized_by_date=realized_by_date, realized_krw_by_date=realized_krw_by_date, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows)
+        fns = accounting_ctx.ReplayFns(be_take=be_take, ak=_ak, extra_ev=extra_ev, cv_label=cv_label, unk_tag=unk_tag)
+        lpin = accounting_ctx.LpIn(lp_by_tx=lp_by_tx, lp_dep_seen=lp_dep_seen, lp_meta_by=lp_meta_by, lp_mgrs=lp_mgrs, lp_tx_rows=lp_tx_rows, lpb=lpb)
+        lpx = px.lpx = accounting_lp.LpBook(px, _un=_un, gstate=gstate, lpin=lpin, fns=fns)
         lp_bucket = lpx.lp_bucket
-
         lp_label = accounting_util.lp_label
         lpx.lp_label = lp_label
-
         lp_event = lpx.lp_event
 
         lp_move = lpx.lp_move
@@ -978,20 +1007,6 @@ class ReplayMixin:
 
     def _replay_rt(self, _bs9):
         (conn, diag, ever_in, fx_dep_uid_tx, fx_wd, of_noauto, offc_dep, offc_on, origin_cache, rows, rt_pair, ub_wd_tx, uuid2txh, wallet_label, xc_cache,) = (_bs9["ctx"].conn, _bs9["diag"], _bs9["ever_in"], _bs9["fx_dep_uid_tx"], _bs9["fx_wd"], _bs9["of_noauto"], _bs9["offc_dep"], _bs9["ctx"].offc_on, _bs9["origin_cache"], _bs9["rows"], _bs9["rt_pair"], _bs9["ub_wd_tx"], _bs9["uuid2txh"], _bs9["wallet_label"], _bs9["xc_cache"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "gid0" in _bs9:
-            gid0 = _bs9["gid0"]
-        if "loc0" in _bs9:
-            loc0 = _bs9["loc0"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "pw" in _bs9:
-            pw = _bs9["pw"]
-        if "r0" in _bs9:
-            r0 = _bs9["r0"]
-        if "rf" in _bs9:
-            rf = _bs9["rf"]
         rt_same = self._rt_same_dest(conn, rt_pair)
         of_sends, of_arr, of_comp = [], [], []
         for r0 in rows:
@@ -1026,36 +1041,14 @@ class ReplayMixin:
                 x0 = conn.execute("SELECT json_extract(snapshot, '$.tx.raw_input'), COALESCE(json_extract(snapshot, '$.tx.to.hash'),"
                                   " json_extract(snapshot, '$.tx.to')), json_extract(snapshot, '$.tx.fee.value') FROM raw_txs"
                                   " WHERE chain=? AND txhash=? AND json_valid(snapshot)", (s0["chain"], s0["txh"])).fetchone()
-            except Exception as _cg9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", _cg9)
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[x0]", _cg9)
                 x0 = None
             if x0 and str(x0[0] or "")[:10].lower() == outflow_match.OFT_SEND_SEL and not spamguard.snapshot_synth(x0[2], x0[0]) \
                     and str(x0[1] or "").lower() not in ("", s0.get("ca") or ""):
                 s0["oft"] = True
         of_deps = []
-        for rf in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
-                               " GROUP BY exchange, uuid HAVING revision = MAX(revision)").fetchall():
-            if rf["exchange"] in offc_on and (rf["exchange"], rf["uuid"]) in offc_dep:
-                continue
-            try:
-                pw = json.loads(rf["payload"])
-                if str(pw.get("state") or "").upper() != "ACCEPTED":
-                    continue
-                ts0 = None
-                for k0 in ("created_at", "done_at"):
-                    if pw.get(k0):
-                        ts0 = int(datetime.fromisoformat(str(pw[k0]).replace("Z", "+00:00")).timestamp())
-                        break
-                amt0 = Decimal(str(pw.get("amount") or 0))
-            except (ValueError, TypeError, InvalidOperation):
-                continue
-            t0 = str(pw.get("txid") or "")
-            oc0 = origin_cache.get(t0) or origin_cache.get(t0.lower()) or {}
-            of0 = oc0.get("from") if isinstance(oc0, dict) else None
-            of0 = (of0.lower() if str(of0).startswith("0x") else of0) if of0 else None
-            of_deps.append({"ex": rf["exchange"], "uuid": rf["uuid"], "cur": pw.get("currency") or "", "amt": amt0, "ts": ts0,
-                            "txn": outflow_match.norm_txid(t0), "origin_from": of0,
-                            "origin_mine": bool(of0) and of0.lower() in wallet_label})
+        _collect_of_deposits(conn, offc_on, offc_dep, origin_cache, of_deps, wallet_label)
         self._of_deps_origin = {}
         for d0 in of_deps:
             if d0.get("origin_from") and not d0.get("origin_mine"):
@@ -1080,9 +1073,9 @@ class ReplayMixin:
         priced_gid |= {r0["group_id"] or -r0["asset_id"] for r0 in conn.execute(
             "SELECT asset_id, group_id FROM assets WHERE confirmed=1").fetchall()}
         try:
-            gp9 = common.read_json(GOPLUS_PATH, {}) if os.path.exists(GOPLUS_PATH) else {}
-        except BaseException as _cg9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", _cg9)
+            gp9 = statefile.read_json(paths.state("goplus_cache.json"), {}) if os.path.exists(paths.state("goplus_cache.json")) else {}
+        except BaseException as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[gp9]", _cg9)
             gp9 = {}
         for a0 in of_arr:
             strong9 = bool(((gp9.get(a0["ca"]) or {}).get("risk") or {}).get("strong")) if isinstance(gp9, dict) else False
@@ -1101,6 +1094,8 @@ class ReplayMixin:
                     of_bridge.pop(used9[a9["key"]], None)
                 of_bridge[p9] = a9
                 used9[a9["key"]] = p9
+                if bs9 == "id":
+                    a9["id_link"] = True
                 of_bridge_amb.pop(p9, None)
                 diag["xc_link_n"] += 1
         br_transit = {}
@@ -1124,35 +1119,11 @@ class ReplayMixin:
             _bs9.pop("_cg9", None)
 
     def _replay_links(self, _bs9):
-        (_of_uids, _qfmt, _ro, _un, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, conn, consume_krw, cp_add_map, cp_emit, cp_merge, cp_take, cur_lab, cur_row, cur_src, diag, ev, fee_gain, flow_of, fs_last, fs_mark, fs_on, fs_rec, fs_sales, fs_sum, fx_dep_tx, fx_name, fx_uid_tx, fxb, gstate, krw_last, krw_mix, krw_of, krw_stl, note_unk, now, oa_last, oa_take, ob, oc_fresh, of_bridge, of_chain, of_match, offc_self_wd, offc_sold, origin_cache, origin_pending, prefs, realized_by_date, realized_by_loc, realized_krw_by_date, ret_pool, rows, rt_out, rt_pair, stable_fx_mark, sw9, tax_krw_acq, tax_rows, unk_tag, unverified, up_dep_by_tx, uuid2txh, wd_raw9, wd_tr, xc_transit,) = (_bs9["_of_uids"], _bs9["_qfmt"], _bs9["_ro"], _bs9["_un"], _bs9["arr_tx_chain"], _bs9["backfill_t0"], _bs9["be_done"], _bs9["be_take"], _bs9["be_tax"], _bs9["ctx"].conn, _bs9["consume_krw"], _bs9["cp_add_map"], _bs9["cp_emit"], _bs9["cp_merge"], _bs9["cp_take"], _bs9["cur_lab"], _bs9["cur_row"], _bs9["cur_src"], _bs9["diag"], _bs9["ev"], _bs9["fee_gain"], _bs9["flow_of"], _bs9["fs_last"], _bs9["fs_mark"], _bs9["ctx"].fs_on, _bs9["fs_rec"], _bs9["fs_sales"], _bs9["fs_sum"], _bs9["fx_dep_tx"], _bs9["fx_name"], _bs9["fx_uid_tx"], _bs9["ctx"].fxb, _bs9["gstate"], _bs9["krw_last"], _bs9["krw_mix"], _bs9["krw_of"], _bs9["krw_stl"], _bs9["note_unk"], _bs9["ctx"].now, _bs9["oa_last"], _bs9["oa_take"], _bs9["ob"], _bs9["oc_fresh"], _bs9["of_bridge"], _bs9["of_chain"], _bs9["of_match"], _bs9["offc_self_wd"], _bs9["offc_sold"], _bs9["origin_cache"], _bs9["origin_pending"], _bs9["ctx"].prefs, _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["ret_pool"], _bs9["rows"], _bs9["rt_out"], _bs9["rt_pair"], _bs9["stable_fx_mark"], _bs9["sw9"], _bs9["tax_krw_acq"], _bs9["tax_rows"], _bs9["unk_tag"], _bs9["unverified"], _bs9["up_dep_by_tx"], _bs9["uuid2txh"], _bs9["wd_raw9"], _bs9["wd_tr"], _bs9["xc_transit"],)
-        if "a0" in _bs9:
-            a0 = _bs9["a0"]
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "b9" in _bs9:
-            b9 = _bs9["b9"]
-        if "d0" in _bs9:
-            d0 = _bs9["d0"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "k0" in _bs9:
-            k0 = _bs9["k0"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "lk9" in _bs9:
-            lk9 = _bs9["lk9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "r" in _bs9:
-            r = _bs9["r"]
-        if "r0" in _bs9:
-            r0 = _bs9["r0"]
-        if "s9" in _bs9:
-            s9 = _bs9["s9"]
-        if "t9" in _bs9:
-            t9 = _bs9["t9"]
-        if "x0" in _bs9:
-            x0 = _bs9["x0"]
+        (_of_uids, _qfmt, _ro, _un, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, conn, cp_merge, cur_lab, cur_row, cur_src, diag, flow_of, fs_last, fs_on, fs_sales, fs_sum, fx_dep_tx, fx_name, fx_uid_tx, fxb, gstate, krw_last, krw_mix, krw_stl, now, oa_last, oa_take, ob, oc_fresh, of_bridge, of_chain, of_match, offc_self_wd, offc_sold, origin_cache, origin_pending, prefs, realized_by_date, realized_by_loc, realized_krw_by_date, ret_pool, rows, rt_out, rt_pair, stable_fx_mark, sw9, tax_rows, unk_tag, unverified, up_dep_by_tx, uuid2txh, wd_raw9, wd_tr, xc_transit, cpx, fbx, fsx, kpx, unx, px, fns, cb,) = (_bs9["_of_uids"], _bs9["_qfmt"], _bs9["_ro"], _bs9["_un"], _bs9["arr_tx_chain"], _bs9["backfill_t0"], _bs9["be_done"], _bs9["be_take"], _bs9["be_tax"], _bs9["ctx"].conn, _bs9["cp_merge"], _bs9["cur_lab"], _bs9["cur_row"], _bs9["cur_src"], _bs9["diag"], _bs9["flow_of"], _bs9["fs_last"], _bs9["ctx"].fs_on, _bs9["fs_sales"], _bs9["fs_sum"], _bs9["fx_dep_tx"], _bs9["fx_name"], _bs9["fx_uid_tx"], _bs9["ctx"].fxb, _bs9["gstate"], _bs9["krw_last"], _bs9["krw_mix"], _bs9["krw_stl"], _bs9["ctx"].now, _bs9["oa_last"], _bs9["oa_take"], _bs9["ob"], _bs9["oc_fresh"], _bs9["of_bridge"], _bs9["of_chain"], _bs9["of_match"], _bs9["offc_self_wd"], _bs9["offc_sold"], _bs9["origin_cache"], _bs9["origin_pending"], _bs9["ctx"].prefs, _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["ret_pool"], _bs9["rows"], _bs9["rt_out"], _bs9["rt_pair"], _bs9["stable_fx_mark"], _bs9["sw9"], _bs9["tax_rows"], _bs9["unk_tag"], _bs9["unverified"], _bs9["up_dep_by_tx"], _bs9["uuid2txh"], _bs9["wd_raw9"], _bs9["wd_tr"], _bs9["xc_transit"], _bs9["cpx"], _bs9["fbx"], _bs9["fsx"], _bs9["kpx"], _bs9["unx"], _bs9["px"], _bs9["fns"], _bs9["cb"],)
+        (consume_krw, cp_add_map, cp_emit, cp_take, ev, fee_gain, fs_mark, fs_rec, krw_of, note_unk, tax_krw_acq,) = (kpx.consume_krw, cpx.cp_add_map, cpx.cp_emit, cpx.cp_take, cpx.ev, fbx.fee_gain, fsx.fs_mark, fsx.fs_rec, kpx.krw_of, unx.note_unk, fbx.tax_krw_acq,)
+        if calcguard.strict():
+            accounting_books.check_pool_aliases(_bs9, "consume_krw cp_add_map cp_emit cp_take ev fee_gain fs_mark fs_rec krw_of note_unk tax_krw_acq", (consume_krw, cp_add_map, cp_emit, cp_take, ev, fee_gain, fs_mark, fs_rec, krw_of, note_unk, tax_krw_acq,), "links")
+        x0: object
         xf_links = self._xfer_links(conn, of_chain, set(uuid2txh) | {u0 for m0 in of_match.values() for u0 in _of_uids(m0)}, prefs,
                                     origin_cache, origin_pending)
         for xl9 in xf_links.values():
@@ -1162,7 +1133,7 @@ class ReplayMixin:
         def _sale_px(sym9, ts9):
             try:
                 return float(self.px.candle_usd(sym9, int(ts9) * 1000) or 0) or None
-            except Exception as _cg9:
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_b_replay:ReplayMixin._build_replay._sale_px", _cg9)
                 return None
         sale_lots = []
@@ -1170,13 +1141,13 @@ class ReplayMixin:
         own_dep9 = set()
         try:
             of_man = self._of_manual_resolve(rows)
-        except Exception as e:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[of_man]", e)
             log.warning("보낸 내역 수동 연결 풀이 실패(이번 빌드 미적용): %s", e)
             of_man = {"dests": {}, "pids": set(), "dup": set(), "claims": {}}
             self._of_claims = {}
         try:
-            sale_lots = sale_match.build_lots(common.read_json(SALE_PATH, {}) or {}, _sale_px, prefs.get("sale_link_off") or ())
+            sale_lots = sale_match.build_lots(statefile.read_json(paths.state("sale_bids.json"), {}) or {}, _sale_px, prefs.get("sale_link_off") or ())
             my9 = {str(w9.get("address") or "").lower() for w9 in self._hist_wallets() if isinstance(w9, dict)}
             sale_in, sale_need = sale_match.collect_inflows(conn, sale_lots, origin_cache, my9)
             own_dep9 = set(uuid2txh) | set(xf_links) | {u0 for m0 in of_match.values() for u0 in _of_uids(m0)}
@@ -1186,15 +1157,15 @@ class ReplayMixin:
                        and x9["pid"] not in of_man["pids"]]
             sale_links = sale_match.match(sale_lots, sale_in)
             origin_pending |= {t9 for t9 in sale_need if not oc_fresh(t9)}
-        except Exception as e:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[sale_lots]", e)
             log.warning("토큰 세일 연결 계산 실패(이번 빌드 미적용): %s", e)
             sale_lots, sale_links = [], {}
         sale_lot_by = {l9["id"]: l9 for l9 in sale_lots}
         try:
             of_lots9, of_links9 = self._of_manual_lots(conn, of_man, krw_of, own_dep9, rt_pair)
-        except Exception as e:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[of_lots9]", e)
             log.warning("보낸 내역 수동 연결 원가 계산 실패(이번 빌드 미적용): %s", e)
             of_lots9, of_links9 = {}, {}
             self._of_man_state = {}
@@ -1221,8 +1192,8 @@ class ReplayMixin:
                     if qd0 <= 0 or qa0 <= 0 or abs(qa0 - exp0) > max(qa0, exp0) * Decimal("0.000001"):
                         continue
                     redeem_tx[k0] = {"disp": d0[0]["posting_id"], "acq": a0[0]["posting_id"], "ratio": pr0["ratio"], "carry": None}
-        except Exception as e:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[rpairs9]", e)
             log.warning("세일 영수증 교환 판정 실패(이번 빌드 미적용): %s", e)
             redeem_tx = {}
         diag["sale_redeem_n"] = len(redeem_tx)
@@ -1243,15 +1214,15 @@ class ReplayMixin:
                 sale_rf_bid.setdefault((l9["chain"], b9["bid_tx"]), []).append(e9)
                 sale_rf_exit.setdefault((l9["chain"], b9["exit_tx"]), []).append(e9)
         try:
-            for s9 in sale_match.build_settlements(common.read_json(SALE_PATH, {}) or {}, prefs.get("sale_link_off") or (), {l9["id"] for l9 in sale_lots}):
+            for s9 in sale_match.build_settlements(statefile.read_json(paths.state("sale_bids.json"), {}) or {}, prefs.get("sale_link_off") or (), {l9["id"] for l9 in sale_lots}):
                 for b9 in s9["bid_d"]:
                     e9 = {"lot": s9["id"], "id": b9.get("id"), "owner": s9["bidder"], "auction": s9["auction"], "cur": s9.get("cur_addr") or "",
                           "amt": b9["amount"], "ref": b9["refunded"], "used": Decimal(0), "pool": None, "solo": True}
                     sale_rf_bid.setdefault((s9["chain"], b9["bid_tx"]), []).append(e9)
                     sale_rf_exit.setdefault((s9["chain"], b9["exit_tx"]), []).append(e9)
-        except Exception as e:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e)
-            log.warning("토큰 세일 정산(로트 없는 경매) 색인 실패(이번 빌드 미적용): %s", common.safe_err(e)[:160])
+        except Exception as e:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[build_settlements]", e)
+            log.warning("토큰 세일 정산(로트 없는 경매) 색인 실패(이번 빌드 미적용): %s", logs.safe_err(e)[:160])
         diag["sale_refund_n"], diag["sale_refund_q"], diag["sale_refund_cost"] = 0, Decimal(0), Decimal(0)
         sale_pay_bid, sale_pay_q, sale_pay_seq = {}, [], [0]
         for l9 in sale_lots:
@@ -1272,8 +1243,8 @@ class ReplayMixin:
                     continue
                 try:
                     rx9 = Decimal(str(fxb.rate_at(xt9)))
-                except Exception as _cg9:
-                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [isolate]
+                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[rx9]", _cg9)
                     continue
                 kb9 = l9.setdefault("_pay_basis", {"usd": Decimal(0), "krw": Decimal(0)})
                 kb9["usd"] += b9["use_usd"]
@@ -1305,9 +1276,9 @@ class ReplayMixin:
         of_applied = {}
         of_cands = {}
 
-        slx = accounting_sale.SaleBook(sb=self, _ro=_ro, _un=_un, arr_tx_chain=arr_tx_chain, be_done=be_done, be_take=be_take, be_tax=be_tax, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_merge=cp_merge, cur_lab=cur_lab, cur_row=cur_row, cur_src=cur_src, diag=diag, ev=ev, flow_of=flow_of, fs_last=fs_last, fs_mark=fs_mark, fs_rec=fs_rec, fx_dep_tx=fx_dep_tx, fx_name=fx_name, fxb=fxb, krw_last=krw_last, krw_mix=krw_mix, krw_of=krw_of, krw_stl=krw_stl, note_unk=note_unk, oa_last=oa_last, ob=ob, of_applied=of_applied, of_cands=of_cands, offc_sold=offc_sold, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, ret_pool=ret_pool, rt_out=rt_out, sale_links=sale_links, sale_lot_by=sale_lot_by, sale_pay_bid=sale_pay_bid, sale_pay_q=sale_pay_q, sale_pay_seq=sale_pay_seq, sale_rf_bid=sale_rf_bid, sale_rf_exit=sale_rf_exit, sale_used=sale_used, stable_fx_mark=stable_fx_mark, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, wd_raw9=wd_raw9, wd_tr=wd_tr, xf_wd9=xf_wd9)
+        salein = accounting_ctx.SaleIn(ro=_ro, arr_tx_chain=arr_tx_chain, be_done=be_done, be_tax=be_tax, diag=diag, fx_dep_tx=fx_dep_tx, ob=ob, of_applied=of_applied, of_cands=of_cands, rt_out=rt_out, sale_links=sale_links, sale_lot_by=sale_lot_by, sale_pay_bid=sale_pay_bid, sale_pay_q=sale_pay_q, sale_pay_seq=sale_pay_seq, sale_rf_bid=sale_rf_bid, sale_rf_exit=sale_rf_exit, sale_used=sale_used, unverified=unverified, up_dep_by_tx=up_dep_by_tx, wd_tr=wd_tr, xf_wd=xf_wd9)
+        slx = px.slx = accounting_sale.SaleBook(px, _un=_un, salein=salein, fns=fns)
         of_cand = slx.of_cand
-
         of_finalize = slx.of_finalize
 
         sale_book = slx.sale_book
@@ -1339,7 +1310,7 @@ class ReplayMixin:
 
         loan_wd, loan_fill, loan_fsum, loan_px, lf_pend, loan_unp = {}, {}, {}, {}, [], {}
 
-        lnx = accounting_loan.LoanBook(_qfmt=_qfmt, consume_krw=consume_krw, cp_emit=cp_emit, cp_take=cp_take, cur_row=cur_row, cur_src=cur_src, ev=ev, fee_gain=fee_gain, flow_of=flow_of, fs_sales=fs_sales, fs_sum=fs_sum, fx_name=fx_name, krw_mix=krw_mix, krw_stl=krw_stl, lf_pend=lf_pend, loan_px=loan_px, oa_take=oa_take, tax_rows=tax_rows)
+        lnx = px.lnx = accounting_loan.LoanBook(px, _qfmt=_qfmt, lf_pend=lf_pend, loan_px=loan_px)
         loan_settle = lnx.loan_settle
 
         loan_win = _loan_windows(self.cfg.get("loan_short"))
@@ -1357,8 +1328,9 @@ class ReplayMixin:
                             _ex_stable_sym(r["symbol"]) or (r["symbol"] or "").upper() == "KRW")):
                         continue
                     lk9, ev9 = r["leg_kind"], r["event"]
-                    k9 = ("wd" if lk9 == "move_out" and ev9 in ("EXF_WITHDRAW", "EX_WITHDRAW")
-                          and not (ev9 == "EXF_WITHDRAW" and offc_self_wd(l9.split(":")[1], r["source_id"]))
+                    k9 = ("wd" if (lk9 == "move_out" and ev9 in ("EXF_WITHDRAW", "EX_WITHDRAW")
+                                   and not (ev9 == "EXF_WITHDRAW" and offc_self_wd(l9.split(":")[1], r["source_id"])))
+                          or (lk9 == "disp" and ev9 == "EXF_SELL")
                           else "in" if lk9 in ("move_in", "acq") else "x")
                     kk9 = (r["group_id"] or -r["asset_id"], l9)
                     lsym9.setdefault(kk9, s9)
@@ -1369,9 +1341,9 @@ class ReplayMixin:
                     return bool(s9) and any(f9 <= t_wd9 and t_fill9 <= e9 for f9, e9 in (loan_win.get(s9, []) + loan_win.get((s9[0], "*"), [])))
                 loan_wd, loan_fill = _loan_plan(it9, allow=_lw_ok)
                 loan_fsum = {p9: sum((x9[1] for x9 in v9), Decimal(0)) for p9, v9 in loan_fill.items()}
-            except Exception as e9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-                log.warning("거래소 대출(공매도) 원가 계획 실패(이번 빌드 종전): %s", common.safe_err(e9)[:160])
+            except Exception as e9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[it9]", e9)
+                log.warning("거래소 대출(공매도) 원가 계획 실패(이번 빌드 종전): %s", logs.safe_err(e9)[:160])
                 loan_wd, loan_fill, loan_fsum = {}, {}, {}
         fs_sum["loan"] = {"wd": len(loan_wd), "fill": len(loan_fill), "q": float(sum(loan_wd.values(), Decimal(0))), "priced": 0, "settled": 0,
                           "v0": 0.0, "gain": 0.0}
@@ -1408,7 +1380,7 @@ class ReplayMixin:
                 continue
             d_w = -st_w[1]
             win_cut_d[gid_w] = (d_w, st_w[2])
-            g_w["qty_unknown"] += d_w
+            cb.add_unknown(g_w, d_w)
             g_w["_wc"] = True
             note_unk(g_w, backfill_t0, "창 이전 보유분 · 창 절단 추정(원가 없음)", d_w, "", chain9=r["chain"] or "?", fs9=0)
 
@@ -1426,116 +1398,31 @@ class ReplayMixin:
             _bs9.pop("e9", None)
 
     def _replay_main(self, _bs9):
-        (G, _of_uids, _qfmt, _ro, _un, arr_groups, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, br_arr9, br_fee_add, br_transit, bridge_dep_ts, bridge_outs, conn, consume, consume_krw, conv_cp, cp_add, cp_add_map, cp_emit, cp_ev, cp_last, cp_merge, cp_sync, cp_take, cp_xc, credited_txh, cur_lab, cur_row, cur_src, cv_label, diag, ev, ever_in, ex_debt9, ex_fee_add, ex_loan9, ex_transit, exf_dep_tx, exf_kind, extra_ev, extra_events, fee_acq, fee_day_add, fee_diag, fee_disp, fee_expense, fee_gain, fee_unit, flow_of, fs_in, fs_mark, fs_on, fs_rbd, fs_rec, fs_ret, fs_sales, fs_st, fs_sum, fx_dep_tx, fx_dep_uid_tx, fx_name, fx_transit, fx_uid_tx, fx_wd, fxb, fxdep_transit, gas_applied, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, gstate, in_note, krw_inh, krw_last, krw_mix, krw_mkt, krw_of, krw_rec, krw_stl, krw_took, kst_fmt, lf_pend, loan_fill, loan_px, loan_settle, loan_unp, loan_wd, lp_done, lp_move, lp_tx, mv_note, my_all9, my_evm9, noproc, nopx_carry, nopx_swap, note_unk, now, oa_last, oa_take, ob, of_bridge, of_cand, of_chain, of_dec9, of_match, of_noauto, of_pay_on, of_pay_take, of_wd_take, offc_add, offc_addr_add, offc_dep, offc_on, offc_pool, offc_s, offc_self_wd, offc_sold, offc_wd, pay_pid, qn_all9, realized_by_date, realized_by_loc, realized_krw_by_date, redeem_tx, ret_pool, rows, rt_back, rt_out, rt_pair, rt_same, rt_transit, sale_bid9, sale_book, sale_links, sale_lot_by, sale_pay_flush, sale_pay_q, sale_pay_take, sale_refund, sale_rf_bid, sale_rf_exit, sale_rf_load, spoof_keys, st_flow_in, stable_fx_mark, stake_inc, stake_rwd, stl_add, stl_carry, stl_in, stl_krw_mkt, stl_out, stl_src, stl_use, sw9, swap_dep, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, swap_recv, swap_wd_pre, tax_krw_acq, tax_rows, to_dest9, today_kst, ton_h2u9, tx_group, ub_wd_shown, ub_wd_tx, unk_tag, unverified, up_dep_by_tx, up_dep_uid_ts, up_dep_uid_tx, up_fee, up_mkt, up_win_t0, uuid2txh, wbal9, wd_fee_add, wd_fee_q, wd_raw9, wd_tr, win_cut_d, xc_barr, xc_links, xc_transit, xc_used, xf_links,) = (_bs9["G"], _bs9["_of_uids"], _bs9["_qfmt"], _bs9["_ro"], _bs9["_un"], _bs9["arr_groups"], _bs9["arr_tx_chain"], _bs9["backfill_t0"], _bs9["be_done"], _bs9["be_take"], _bs9["be_tax"], _bs9["br_arr9"], _bs9["br_fee_add"], _bs9["br_transit"], _bs9["bridge_dep_ts"], _bs9["bridge_outs"], _bs9["ctx"].conn, _bs9["consume"], _bs9["consume_krw"], _bs9["conv_cp"], _bs9["cp_add"], _bs9["cp_add_map"], _bs9["cp_emit"], _bs9["cp_ev"], _bs9["cp_last"], _bs9["cp_merge"], _bs9["cp_sync"], _bs9["cp_take"], _bs9["cp_xc"], _bs9["credited_txh"], _bs9["cur_lab"], _bs9["cur_row"], _bs9["cur_src"], _bs9["cv_label"], _bs9["diag"], _bs9["ev"], _bs9["ever_in"], _bs9["ex_debt9"], _bs9["ex_fee_add"], _bs9["ex_loan9"], _bs9["ex_transit"], _bs9["exf_dep_tx"], _bs9["exf_kind"], _bs9["extra_ev"], _bs9["extra_events"], _bs9["fee_acq"], _bs9["fee_day_add"], _bs9["fee_diag"], _bs9["fee_disp"], _bs9["fee_expense"], _bs9["fee_gain"], _bs9["fee_unit"], _bs9["flow_of"], _bs9["fs_in"], _bs9["fs_mark"], _bs9["ctx"].fs_on, _bs9["fs_rbd"], _bs9["fs_rec"], _bs9["fs_ret"], _bs9["fs_sales"], _bs9["fs_st"], _bs9["fs_sum"], _bs9["fx_dep_tx"], _bs9["fx_dep_uid_tx"], _bs9["fx_name"], _bs9["fx_transit"], _bs9["fx_uid_tx"], _bs9["fx_wd"], _bs9["ctx"].fxb, _bs9["fxdep_transit"], _bs9["gas_applied"], _bs9["gas_by_chain"], _bs9["gas_by_month"], _bs9["gas_expense"], _bs9["gas_nopx"], _bs9["ctx"].gas_on, _bs9["gstate"], _bs9["in_note"], _bs9["krw_inh"], _bs9["krw_last"], _bs9["krw_mix"], _bs9["krw_mkt"], _bs9["krw_of"], _bs9["krw_rec"], _bs9["krw_stl"], _bs9["krw_took"], _bs9["kst_fmt"], _bs9["lf_pend"], _bs9["loan_fill"], _bs9["loan_px"], _bs9["loan_settle"], _bs9["loan_unp"], _bs9["loan_wd"], _bs9["lp_done"], _bs9["lp_move"], _bs9["lp_tx"], _bs9["mv_note"], _bs9["my_all9"], _bs9["my_evm9"], _bs9["noproc"], _bs9["nopx_carry"], _bs9["nopx_swap"], _bs9["note_unk"], _bs9["ctx"].now, _bs9["oa_last"], _bs9["oa_take"], _bs9["ob"], _bs9["of_bridge"], _bs9["of_cand"], _bs9["of_chain"], _bs9["of_dec9"], _bs9["of_match"], _bs9["of_noauto"], _bs9["of_pay_on"], _bs9["of_pay_take"], _bs9["of_wd_take"], _bs9["offc_add"], _bs9["offc_addr_add"], _bs9["offc_dep"], _bs9["ctx"].offc_on, _bs9["offc_pool"], _bs9["offc_s"], _bs9["offc_self_wd"], _bs9["offc_sold"], _bs9["offc_wd"], _bs9["pay_pid"], _bs9["qn_all9"], _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["redeem_tx"], _bs9["ret_pool"], _bs9["rows"], _bs9["rt_back"], _bs9["rt_out"], _bs9["rt_pair"], _bs9["rt_same"], _bs9["rt_transit"], _bs9["sale_bid9"], _bs9["sale_book"], _bs9["sale_links"], _bs9["sale_lot_by"], _bs9["sale_pay_flush"], _bs9["sale_pay_q"], _bs9["sale_pay_take"], _bs9["sale_refund"], _bs9["sale_rf_bid"], _bs9["sale_rf_exit"], _bs9["sale_rf_load"], _bs9["spoof_keys"], _bs9["st_flow_in"], _bs9["stable_fx_mark"], _bs9["stake_inc"], _bs9["stake_rwd"], _bs9["stl_add"], _bs9["stl_carry"], _bs9["stl_in"], _bs9["stl_krw_mkt"], _bs9["stl_out"], _bs9["stl_src"], _bs9["stl_use"], _bs9["sw9"], _bs9["swap_dep"], _bs9["swap_fill"], _bs9["swap_fill_est"], _bs9["swap_fill_zero"], _bs9["swap_gas"], _bs9["swap_pay"], _bs9["swap_recv"], _bs9["swap_wd_pre"], _bs9["tax_krw_acq"], _bs9["tax_rows"], _bs9["to_dest9"], _bs9["ctx"].today_kst, _bs9["ton_h2u9"], _bs9["tx_group"], _bs9["ub_wd_shown"], _bs9["ub_wd_tx"], _bs9["unk_tag"], _bs9["unverified"], _bs9["up_dep_by_tx"], _bs9["up_dep_uid_ts"], _bs9["up_dep_uid_tx"], _bs9["up_fee"], _bs9["up_mkt"], _bs9["up_win_t0"], _bs9["uuid2txh"], _bs9["wbal9"], _bs9["wd_fee_add"], _bs9["wd_fee_q"], _bs9["wd_raw9"], _bs9["wd_tr"], _bs9["win_cut_d"], _bs9["xc_barr"], _bs9["xc_links"], _bs9["xc_transit"], _bs9["xc_used"], _bs9["xf_links"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "bd9" in _bs9:
-            bd9 = _bs9["bd9"]
-        if "c9" in _bs9:
-            c9 = _bs9["c9"]
-        if "cp9" in _bs9:
-            cp9 = _bs9["cp9"]
-        if "d0" in _bs9:
-            d0 = _bs9["d0"]
-        if "d9" in _bs9:
-            d9 = _bs9["d9"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "est9" in _bs9:
-            est9 = _bs9["est9"]
-        if "ev9" in _bs9:
-            ev9 = _bs9["ev9"]
-        if "ex9" in _bs9:
-            ex9 = _bs9["ex9"]
-        if "fv9" in _bs9:
-            fv9 = _bs9["fv9"]
-        if "fx9" in _bs9:
-            fx9 = _bs9["fx9"]
-        if "g9" in _bs9:
-            g9 = _bs9["g9"]
-        if "g_w" in _bs9:
-            g_w = _bs9["g_w"]
-        if "gid_w" in _bs9:
-            gid_w = _bs9["gid_w"]
-        if "gp9" in _bs9:
-            gp9 = _bs9["gp9"]
-        if "it9" in _bs9:
-            it9 = _bs9["it9"]
-        if "k0" in _bs9:
-            k0 = _bs9["k0"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "ks9" in _bs9:
-            ks9 = _bs9["ks9"]
-        if "l9" in _bs9:
-            l9 = _bs9["l9"]
-        if "lk9" in _bs9:
-            lk9 = _bs9["lk9"]
-        if "ln9" in _bs9:
-            ln9 = _bs9["ln9"]
-        if "loc0" in _bs9:
-            loc0 = _bs9["loc0"]
-        if "mk9" in _bs9:
-            mk9 = _bs9["mk9"]
-        if "o9" in _bs9:
-            o9 = _bs9["o9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "q9" in _bs9:
-            q9 = _bs9["q9"]
-        if "qn0" in _bs9:
-            qn0 = _bs9["qn0"]
+        (G, _of_uids, _qfmt, _ro, _un, arr_groups, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, br_arr9, br_transit, bridge_dep_ts, bridge_outs, conn, conv_cp, cp_ev, cp_last, cp_merge, credited_txh, cur_lab, cur_row, cur_src, cv_label, diag, ever_in, ex_debt9, ex_loan9, ex_transit, exf_dep_tx, exf_kind, extra_ev, extra_events, fee_acq, fee_diag, fee_disp, flow_of, fs_in, fs_on, fs_rbd, fs_sales, fs_sum, fx_dep_tx, fx_dep_uid_tx, fx_name, fx_transit, fx_uid_tx, fx_wd, fxb, fxdep_transit, gas_applied, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, gstate, in_note, krw_last, krw_mix, krw_mkt, krw_stl, kst_fmt, lf_pend, loan_fill, loan_px, loan_unp, loan_wd, lp_done, mv_note, my_all9, my_evm9, noproc, nopx_carry, nopx_swap, now, oa_last, oa_take, ob, of_bridge, of_chain, of_dec9, of_match, of_noauto, of_pay_on, offc_add, offc_addr_add, offc_dep, offc_on, offc_pool, offc_s, offc_self_wd, offc_sold, offc_wd, pay_pid, qn_all9, realized_by_date, realized_by_loc, realized_krw_by_date, redeem_tx, ret_pool, rows, rt_back, rt_out, rt_pair, rt_same, rt_transit, sale_bid9, sale_links, sale_lot_by, sale_pay_q, sale_rf_bid, sale_rf_exit, spoof_keys, st_flow_in, stable_fx_mark, stake_inc, stake_rwd, sw9, swap_dep, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, swap_recv, swap_wd_pre, tax_rows, to_dest9, today_kst, ton_h2u9, tx_group, ub_wd_shown, ub_wd_tx, unk_tag, unverified, up_dep_by_tx, up_dep_uid_ts, up_dep_uid_tx, up_fee, up_mkt, up_win_t0, uuid2txh, wbal9, wd_raw9, wd_tr, win_cut_d, xc_barr, xc_links, xc_transit, xc_used, xf_links, gp9, cpx, fbx, fsx, kpx, lnx, lpx, slx, unx, px, fns, cb,) = (_bs9["G"], _bs9["_of_uids"], _bs9["_qfmt"], _bs9["_ro"], _bs9["_un"], _bs9["arr_groups"], _bs9["arr_tx_chain"], _bs9["backfill_t0"], _bs9["be_done"], _bs9["be_take"], _bs9["be_tax"], _bs9["br_arr9"], _bs9["br_transit"], _bs9["bridge_dep_ts"], _bs9["bridge_outs"], _bs9["ctx"].conn, _bs9["conv_cp"], _bs9["cp_ev"], _bs9["cp_last"], _bs9["cp_merge"], _bs9["credited_txh"], _bs9["cur_lab"], _bs9["cur_row"], _bs9["cur_src"], _bs9["cv_label"], _bs9["diag"], _bs9["ever_in"], _bs9["ex_debt9"], _bs9["ex_loan9"], _bs9["ex_transit"], _bs9["exf_dep_tx"], _bs9["exf_kind"], _bs9["extra_ev"], _bs9["extra_events"], _bs9["fee_acq"], _bs9["fee_diag"], _bs9["fee_disp"], _bs9["flow_of"], _bs9["fs_in"], _bs9["ctx"].fs_on, _bs9["fs_rbd"], _bs9["fs_sales"], _bs9["fs_sum"], _bs9["fx_dep_tx"], _bs9["fx_dep_uid_tx"], _bs9["fx_name"], _bs9["fx_transit"], _bs9["fx_uid_tx"], _bs9["fx_wd"], _bs9["ctx"].fxb, _bs9["fxdep_transit"], _bs9["gas_applied"], _bs9["gas_by_chain"], _bs9["gas_by_month"], _bs9["gas_expense"], _bs9["gas_nopx"], _bs9["ctx"].gas_on, _bs9["gstate"], _bs9["in_note"], _bs9["krw_last"], _bs9["krw_mix"], _bs9["krw_mkt"], _bs9["krw_stl"], _bs9["kst_fmt"], _bs9["lf_pend"], _bs9["loan_fill"], _bs9["loan_px"], _bs9["loan_unp"], _bs9["loan_wd"], _bs9["lp_done"], _bs9["mv_note"], _bs9["my_all9"], _bs9["my_evm9"], _bs9["noproc"], _bs9["nopx_carry"], _bs9["nopx_swap"], _bs9["ctx"].now, _bs9["oa_last"], _bs9["oa_take"], _bs9["ob"], _bs9["of_bridge"], _bs9["of_chain"], _bs9["of_dec9"], _bs9["of_match"], _bs9["of_noauto"], _bs9["of_pay_on"], _bs9["offc_add"], _bs9["offc_addr_add"], _bs9["offc_dep"], _bs9["ctx"].offc_on, _bs9["offc_pool"], _bs9["offc_s"], _bs9["offc_self_wd"], _bs9["offc_sold"], _bs9["offc_wd"], _bs9["pay_pid"], _bs9["qn_all9"], _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["redeem_tx"], _bs9["ret_pool"], _bs9["rows"], _bs9["rt_back"], _bs9["rt_out"], _bs9["rt_pair"], _bs9["rt_same"], _bs9["rt_transit"], _bs9["sale_bid9"], _bs9["sale_links"], _bs9["sale_lot_by"], _bs9["sale_pay_q"], _bs9["sale_rf_bid"], _bs9["sale_rf_exit"], _bs9["spoof_keys"], _bs9["st_flow_in"], _bs9["stable_fx_mark"], _bs9["stake_inc"], _bs9["stake_rwd"], _bs9["sw9"], _bs9["swap_dep"], _bs9["swap_fill"], _bs9["swap_fill_est"], _bs9["swap_fill_zero"], _bs9["swap_gas"], _bs9["swap_pay"], _bs9["swap_recv"], _bs9["swap_wd_pre"], _bs9["tax_rows"], _bs9["to_dest9"], _bs9["ctx"].today_kst, _bs9["ton_h2u9"], _bs9["tx_group"], _bs9["ub_wd_shown"], _bs9["ub_wd_tx"], _bs9["unk_tag"], _bs9["unverified"], _bs9["up_dep_by_tx"], _bs9["up_dep_uid_ts"], _bs9["up_dep_uid_tx"], _bs9["up_fee"], _bs9["up_mkt"], _bs9["up_win_t0"], _bs9["uuid2txh"], _bs9["wbal9"], _bs9["wd_raw9"], _bs9["wd_tr"], _bs9["win_cut_d"], _bs9["xc_barr"], _bs9["xc_links"], _bs9["xc_transit"], _bs9["xc_used"], _bs9["xf_links"], _bs9["gp9"], _bs9["cpx"], _bs9["fbx"], _bs9["fsx"], _bs9["kpx"], _bs9["lnx"], _bs9["lpx"], _bs9["slx"], _bs9["unx"], _bs9["px"], _bs9["fns"], _bs9["cb"],)
+        (br_fee_add, consume, consume_krw, cp_add, cp_add_map, cp_emit, cp_sync, cp_take, cp_xc, ev, ex_fee_add, fee_day_add, fee_expense, fee_gain, fee_unit, fs_mark, fs_rec, fs_ret, fs_st, krw_inh, krw_of, krw_rec, krw_took, loan_settle, lp_move, lp_tx, note_unk, of_cand, of_pay_take, of_wd_take, sale_book, sale_pay_flush, sale_pay_take, sale_refund, sale_rf_load, stl_add, stl_carry, stl_in, stl_krw_mkt, stl_out, stl_src, stl_use, tax_krw_acq, wd_fee_add, wd_fee_q,) = (fbx.br_fee_add, cpx.consume, kpx.consume_krw, cpx.cp_add, cpx.cp_add_map, cpx.cp_emit, cpx.cp_sync, cpx.cp_take, cpx.cp_xc, cpx.ev, fbx.ex_fee_add, fbx.fee_day_add, fbx.fee_expense, fbx.fee_gain, fbx.fee_unit, fsx.fs_mark, fsx.fs_rec, fsx.fs_ret, fsx.fs_st, kpx.krw_inh, kpx.krw_of, kpx.krw_rec, kpx.krw_took, lnx.loan_settle, lpx.lp_move, lpx.lp_tx, unx.note_unk, slx.of_cand, slx.of_pay_take, slx.of_wd_take, slx.sale_book, slx.sale_pay_flush, slx.sale_pay_take, slx.sale_refund, slx.sale_rf_load, kpx.stl_add, kpx.stl_carry, kpx.stl_in, kpx.stl_krw_mkt, kpx.stl_out, kpx.stl_src, kpx.stl_use, fbx.tax_krw_acq, fbx.wd_fee_add, fbx.wd_fee_q,)
+        if calcguard.strict():
+            accounting_books.check_pool_aliases(_bs9, "br_fee_add consume consume_krw cp_add cp_add_map cp_emit cp_sync cp_take cp_xc ev ex_fee_add fee_day_add fee_expense fee_gain fee_unit fs_mark fs_rec fs_ret fs_st krw_inh krw_of krw_rec krw_took loan_settle lp_move lp_tx note_unk of_cand of_pay_take of_wd_take sale_book sale_pay_flush sale_pay_take sale_refund sale_rf_load stl_add stl_carry stl_in stl_krw_mkt stl_out stl_src stl_use tax_krw_acq wd_fee_add wd_fee_q", (br_fee_add, consume, consume_krw, cp_add, cp_add_map, cp_emit, cp_sync, cp_take, cp_xc, ev, ex_fee_add, fee_day_add, fee_expense, fee_gain, fee_unit, fs_mark, fs_rec, fs_ret, fs_st, krw_inh, krw_of, krw_rec, krw_took, loan_settle, lp_move, lp_tx, note_unk, of_cand, of_pay_take, of_wd_take, sale_book, sale_pay_flush, sale_pay_take, sale_refund, sale_rf_load, stl_add, stl_carry, stl_in, stl_krw_mkt, stl_out, stl_src, stl_use, tax_krw_acq, wd_fee_add, wd_fee_q,), "main")
+        fx9: object
+        ks9: object
+        l9: object
+        ln9: object
+        mk9: object
         if "r" in _bs9:
             r = _bs9["r"]
-        if "r9" in _bs9:
-            r9 = _bs9["r9"]
-        if "s9" in _bs9:
-            s9 = _bs9["s9"]
-        if "sg9" in _bs9:
-            sg9 = _bs9["sg9"]
-        if "strong9" in _bs9:
-            strong9 = _bs9["strong9"]
-        if "sv9" in _bs9:
-            sv9 = _bs9["sv9"]
-        if "sym0" in _bs9:
-            sym0 = _bs9["sym0"]
-        if "t0" in _bs9:
-            t0 = _bs9["t0"]
-        if "t9" in _bs9:
-            t9 = _bs9["t9"]
-        if "u9" in _bs9:
-            u9 = _bs9["u9"]
-        if "v9" in _bs9:
-            v9 = _bs9["v9"]
+        sg9: object
+        sv9: object
+        u9: object
         signer9 = self._signer_map(conn, rows)
-
-        omx = accounting_outmove.OutMove(sb=self, _ro=_ro, _un=_un, br_transit=br_transit, consume=consume, cp_last=cp_last, cp_merge=cp_merge, cv_label=cv_label, diag=diag, ev=ev, ever_in=ever_in, ex_transit=ex_transit, extra_ev=extra_ev, extra_events=extra_events, fs_on=fs_on, fs_rec=fs_rec, fx_dep_tx=fx_dep_tx, fx_name=fx_name, fxdep_transit=fxdep_transit, krw_rec=krw_rec, krw_took=krw_took, mv_note=mv_note, my_all9=my_all9, now=now, ob=ob, of_bridge=of_bridge, of_dec9=of_dec9, of_match=of_match, of_noauto=of_noauto, of_pay_on=of_pay_on, of_pay_take=of_pay_take, ret_pool=ret_pool, rt_back=rt_back, rt_out=rt_out, rt_same=rt_same, rt_transit=rt_transit, sale_bid9=sale_bid9, sale_lot_by=sale_lot_by, sale_pay_take=sale_pay_take, sale_rf_bid=sale_rf_bid, sale_rf_load=sale_rf_load, signer9=signer9, stl_out=stl_out, up_dep_by_tx=up_dep_by_tx, up_dep_uid_ts=up_dep_uid_ts, up_win_t0=up_win_t0)
+        movein = accounting_ctx.MoveIn(ro=_ro, br_transit=br_transit, ever_in=ever_in, ex_transit=ex_transit, fxdep_transit=fxdep_transit, my_all=my_all9, of_bridge=of_bridge, of_dec=of_dec9, of_match=of_match, of_noauto=of_noauto, rt_back=rt_back, rt_same=rt_same, rt_transit=rt_transit, sale_bid=sale_bid9, signer=signer9, up_dep_uid_ts=up_dep_uid_ts, up_win_t0=up_win_t0)
+        omx = px.omx = accounting_outmove.OutMove(px, _un=_un, movein=movein, fns=fns)
         out_move = omx.out_move
-
         pid_row = {}
         sell_wm = {}
-
-        def sell_pre(fl9, evs9):
-            w9 = sell_wm.get(id(fl9))
-            if w9 is None or w9[0] is not fl9 or w9[1] is not evs9:
-                return 0, 0
-            f9, l9, n9 = w9[2], w9[3], w9[4]
-            for k9 in range(len(evs9) - n9 + 1):
-                if evs9[k9] is f9:
-                    return (k9, n9) if evs9[k9 + n9 - 1] is l9 else (0, 0)
-            return 0, 0
-
-        def sell_mark(fl9):
-            evs9 = fl9["events"]
-            if evs9:
-                sell_wm[id(fl9)] = (fl9, evs9, evs9[0], evs9[-1], len(evs9))
-            else:
-                sell_wm.pop(id(fl9), None)
-
         bo_pid = {}
         br_plan = {}
         br_amb = {}
         br_sum = {}
+        br_natfee = set()
         self._br_early = None
         try:
             br_deps9, br_arrs9 = [], []
@@ -1554,8 +1441,10 @@ class ReplayMixin:
                     br_deps9.append({"pid": r9["posting_id"], "ord": o9, "sym": self._gsym(r9), "qty": -self._norm(r9), "ts": int(r9["event_ts"]),
                                      "chain": r9["chain"] or "?", "addr": str(r9["address"] or "").lower(),
                                      "link": (r9["source_ns"], xchain_match.norm(t9))})
+                    br_deps9[-1]["nat"] = (r9["kind"] or "") == "native"
                 elif lk9 == "acq" and ev9 in ("TRANSFER_IN", "PROGRAM_IN") and r9["cost_usd"] is None and int(r9["qty_base"]) > 0:
-                    if (r9["gname"] or "") in STABLE_GROUPS or (r9["kind"] == "exchange_currency" and _ex_stable_sym(r9["symbol"])):
+                    if ((r9["gname"] or "") in STABLE_GROUPS or (r9["kind"] == "exchange_currency" and _ex_stable_sym(r9["symbol"]))) \
+                            and (r9["source_ns"], xchain_match.norm(str(r9["source_id"] or ""))) not in links9:
                         continue
                     t9 = str(r9["source_id"] or "")
                     p9 = r9["posting_id"]
@@ -1569,6 +1458,11 @@ class ReplayMixin:
                                      "link": (r9["source_ns"], xchain_match.norm(t9)),
                                      "spam": strong9 or bool(spamguard.impostor_of(r9["symbol"])),
                                      "bridge": (r9["source_ns"], xchain_match.norm(t9)) in xc_barr})
+            tok_links = {d9["link"] for d9 in br_deps9 if not d9.get("nat")}
+            br_natfee = {d9["pid"] for d9 in br_deps9 if d9.get("nat") and d9["link"] in tok_links}
+            if br_natfee:
+                nat_linked = {(links9[a9["link"]], a9["sym"]) for a9 in br_arrs9 if a9["link"] in links9}
+                br_natfee = {d9["pid"] for d9 in br_deps9 if d9["pid"] in br_natfee and (d9["link"], d9["sym"]) not in nat_linked}
             if br_deps9 and br_arrs9:
                 br_plan = _bridge_plan(br_deps9, br_arrs9, links9, br_amb)
                 ba9 = {a9["pid"]: a9 for a9 in br_arrs9}
@@ -1582,16 +1476,16 @@ class ReplayMixin:
                         rows = _ord_splice(rows, mv9)
                     self._br_early = (len(early9), len(mv9), kept9)
             self._br_plan_n = len(br_plan)
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-            log.warning("브릿지 도착 짝 계산 실패(이번 빌드 대체 매칭 없음): %s", common.safe_err(e9)[:160])
-            br_plan, br_amb, br_sum = {}, {}, {}
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[br_deps9#1]", e9)
+            log.warning("브릿지 도착 짝 계산 실패(이번 빌드 대체 매칭 없음): %s", logs.safe_err(e9)[:160])
+            br_plan, br_amb, br_sum, br_natfee = {}, {}, {}, set()
         self._disc_back = disc_bk9 = set()
         try:
             balw_disc9 = {r9[0] for r9 in conn.execute("SELECT obs_id FROM raw_observations WHERE obs_id LIKE 'recon:%:disc:%'"
                                                         " AND instr(payload, ?) > 0", ('"bsc_balance_watch"',))}
-        except Exception as _cg9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[br_deps9#2]", _cg9)
             balw_disc9 = set()
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
         F9: object; _rl9: object; arr_gid: object; chg9f: object; cv9: object; cvk9: object; d5: object; d6: object
@@ -1616,11 +1510,11 @@ class ReplayMixin:
             at9 = "대사 시각" if ts >= rb9 - 60 else ("원장이 처음 모자란 때로 당김" if q > 0 else "잔고가 남던 구간 시작으로 당김")
             hl9 = xk9 == "fix" and (r["source_ns"] or "") == "hyperliquid:recon" and (r["symbol"] or "").upper() in _hl_cash_syms()
             hl_lab9 = "Hyperliquid 무기한 손익·펀딩 정산 (그 대사 구간 합 — 대사 시각)"
-            fut9 = common.exf_is_fut(evk, r["source_ns"])
+            fut9 = histmark.exf_is_fut(evk, r["source_ns"])
             fut_lab9 = "선물 정산 · 실현 손익·수수료·펀딩 (선물 지갑 잔고 — 정산 시각)"
             disc_b9 = disc9 and q > 0 and not _scam_name(r["symbol"]) and str(r["source_id"] or "") not in balw_disc9
             t_tl9 = min(ts, backfill_t0) if (back_o or disc_b9) else ts
-            g["qty_timeline"].append((t_tl9, q))
+            cb.snapshot(g, t_tl9, q)
             if disc_b9 or (disc9 and q > 0 and str(r["source_id"] or "") in balw_disc9):
                 g.setdefault("disc_tl", []).append((ts, q))
             if disc_b9:
@@ -1629,11 +1523,10 @@ class ReplayMixin:
                 g.setdefault("open_tl", []).append((t_tl9, q))
             if q > 0:
                 if g["is_stable"]:
-                    g["qty_known"] += q
-                    g["cost"] += q
+                    cb.acquire(g, q, q)
                     fs_st(g, ts, q, chain)
                 else:
-                    g["qty_unknown"] += q
+                    cb.add_unknown(g, q)
                     if late9:
                         note_unk(g, ts, "늦게 찾은 과거 체결 상쇄 유입(원가 없음)", q, "", chain9=chain)
                     elif evk in ("EXF_ADJUST", "EX_ADJUST"):
@@ -1658,7 +1551,26 @@ class ReplayMixin:
                              + (DISC_OPEN_KO if disc9 else "기초 잔고 (백필 창 이전 보유분)"),
                              _recon_q(q), "—", txh, vq=q)
             else:
-                consume(g, -q, cp=False)
+                is_int = not g.get("is_fiat") and histmark.exf_is_debt_int(evk, r["leg_seq"], r["source_ns"], r["source_id"])
+                is_futfee = fut9 and not g["is_stable"] and not g.get("is_fiat")
+                u9o = None
+                if is_int or is_futfee:
+                    u9o = Decimal(1) if g["is_stable"] else None
+                    if u9o is None:
+                        cp9o = _fx_candle_near(fxb, g["sym"], ts)
+                        u9o = Decimal(str(cp9o)) if cp9o else (g["cost"] / g["qty_known"] if g["qty_known"] > EPS else None)
+                    if u9o is not None and u9o <= 0:
+                        u9o = None
+                if u9o is None:
+                    consume(g, -q, cp=False)
+                else:
+                    ex9o = (r["location"] or "").split(":")[-1]
+                    if is_int and gas_on:
+                        fee_expense((-q) * u9o, ts, dkey, "LOAN_INT", fx_name.get(ex9o, ex9o))
+                    mc_o, mk_o, mu_o = consume(g, -q)
+                    fee_gain(g, u9o, mk_o, mc_o, ts, dkey, chain, krw_last[0], mix9=krw_mix[0], stl9=krw_stl[0],
+                             cmp9=cp_emit(cp_last[0], mu_o, mk_o + mu_o, mc_o),
+                             lab9="대출 이자로 쓴 코인(처분)" if is_int else "선물 정산 수수료로 쓴 코인(처분)")
                 if late9:
                     extra_ev(ts, g, "전송", f"{cur_lab[0] or CHAIN_NAME.get(chain, chain)} · {type(self).LATE_OFFSET_KO}",
                              _recon_q(q), "—", txh, vq=q)
@@ -1669,7 +1581,7 @@ class ReplayMixin:
                         rb9 = int(str(r["source_id"]).rsplit(":", 1)[1])
                     except (IndexError, ValueError):
                         rb9 = ts
-                    if common.exf_is_debt_int(evk, r["leg_seq"], r["source_ns"], r["source_id"]):
+                    if histmark.exf_is_debt_int(evk, r["leg_seq"], r["source_ns"], r["source_id"]):
                         lab9 = f"{ln9 + ' 이자' if ln9 else '마진 차입 이자'} · 부채 이자 누적 {_recon_q(-q)} (비용 — 총자산에서 뺌, 대사 시각)"
                     elif db9 is not None and -db9 * Decimal("0.5") <= -q <= -db9 * Decimal("1.01") + EPS:
                         if ts < rb9 - 60:
@@ -1695,15 +1607,13 @@ class ReplayMixin:
             fq9w = -q
             unit9w = Decimal(1) if g["is_stable"] else None
             if unit9w is None and not g.get("is_fiat"):
-                cp9w = fxb.candle(g["sym"], ts)
+                cp9w = _fx_candle_near(fxb, g["sym"], ts)
                 if cp9w:
                     unit9w = Decimal(str(cp9w))
             if unit9w is None and g["qty_known"] > EPS:
                 unit9w = g["cost"] / g["qty_known"]
-            if unit9w is None and (g["sym"] or "").upper() in pricing.MAJOR_CANDLE_SYMS:
-                sp9w = self.spot.price(g["sym"])
-                if sp9w:
-                    unit9w = Decimal(str(sp9w))
+            if unit9w is None and fq9w > 0:
+                fee_diag["wd_no_px"] += 1
             usd9w = fq9w * unit9w if (unit9w is not None and fq9w > 0) else Decimal(0)
             wd_fee_add((r["location"] or "").split(":")[-1], usd9w, ts)
             if gas_on and usd9w > 0:
@@ -1724,7 +1634,7 @@ class ReplayMixin:
             if fw9:
                 fee_gain(g, unit9w, mkw9, mcw9, ts, dkey, chain, krw_last[0], mix9=krw_mix[0], stl9=krw_stl[0],
                          cmp9=cp_emit(cp_last[0], _muw9, mkw9 + _muw9, mcw9))
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             return
 
         def _h_gas():
@@ -1766,13 +1676,13 @@ class ReplayMixin:
             if fg9:
                 fee_gain(g, usd / (-q), mkg9, mcg9, ts, dkey, chain, krw_last[0], mix9=krw_mix[0], stl9=krw_stl[0],
                          cmp9=cp_emit(cp_last[0], _mug9, mkg9 + _mug9, mcg9))
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             return
 
         def _h_ex_deposit():
             nonlocal d5, e2, ikr7, inh7, old9, sc7, st7, take7
             g.setdefault("ex_dep", set()).add("upbit")
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             txh2 = uuid2txh.get(r["source_id"])
             all5 = ex_transit.get(txh2, []) if txh2 else []
             syms5 = {acct_norm.canon(e2.get("raw_sym", "")) for e2 in all5}
@@ -1819,9 +1729,9 @@ class ReplayMixin:
                     e2["used"] = True
                     if e2.get("gid") in G:
                         G[e2["gid"]]["risk_allow"] = True
-                    g["qty_known"] += e2["known"] * ratio5
+                    cb.add_known(g, e2["known"] * ratio5)
                     cp_add_map(g, e2.get("_cmp"), ratio5)
-                    g["qty_unknown"] += e2["unknown"] * ratio5
+                    cb.add_unknown(g, e2["unknown"] * ratio5)
                     note_unk(g, ts, "업비트 입금 · 내 지갑 출금 승계(원가 없음)", e2["unknown"] * ratio5, txh2, ex9="upbit", up_gid=e2.get("gid"), unc9=Decimal(0), fs9=0)
                     inh5 += e2["cost"] * ratio5
                     ikr5 += krw_inh(e2, e2["cost"] * ratio5, ts)
@@ -1829,9 +1739,9 @@ class ReplayMixin:
                     kk5s += (e2.get("kk") or Decimal(0)) * ratio5
                     fk5s += (e2.get("fk") or Decimal(0)) * ratio5
                     diag["ex_dep_fee_resid_cost"] += e2["cost"] * (Decimal(1) - ratio5)
-                g["qty_unknown"] += max(Decimal(0), q - tot_e)
+                cb.add_unknown(g, max(Decimal(0), q - tot_e))
                 note_unk(g, ts, "업비트 입금 초과분(원가 없음)", max(Decimal(0), q - tot_e), txh2 or r["source_id"], ex9="upbit", unc9=Decimal(0))
-                g["cost"] += inh5
+                cb.add_cost(g, inh5)
                 diag["ex_dep_inh_cost"] += inh5
                 diag["ex_dep_inh_n"] += 1
                 flow5 = flow_of(g, ts, chain)
@@ -1855,12 +1765,12 @@ class ReplayMixin:
                 lnk5 = [(sp9, float(sc7) * w9) for sp9, w9 in e7u.get("_src", ())]
                 if e7u.get("oa"):
                     g["oa"] = (g.get("oa") or Decimal(0)) + e7u["oa"] * sc7
-                g["qty_known"] += e7u["known"] * sc7
+                cb.add_known(g, e7u["known"] * sc7)
                 cp_add_map(g, e7u.get("_cmp"), sc7)
-                g["qty_unknown"] += e7u["unknown"] * sc7 + (q - take7)
+                cb.add_unknown(g, e7u["unknown"] * sc7 + (q - take7))
                 note_unk(g, ts, "업비트 입금 · 해외거래소 출금 승계 잔여(원가 없음)", e7u["unknown"] * sc7 + (q - take7), up_dep_uid_tx.get(r["source_id"]) or r["source_id"], ex9="upbit", unc9=q - take7, fs9=q - take7,
                          up_gid=e7u.get("gid"), via9=f"{fx_name.get(e7u.get('ex'), e7u.get('ex'))} 출금 승계 (그 거래소 {e7u.get('sym')} 의 원가 미상분)")
-                g["cost"] += inh7
+                cb.add_cost(g, inh7)
                 flow5 = flow_of(g, ts, chain)
                 flow5["bought"] += take7
                 ikr7 = krw_inh(e7u, inh7, ts)
@@ -1886,8 +1796,7 @@ class ReplayMixin:
                   and sale_book(g, r, q, ts, chain, up_dep_uid_tx.get(r["source_id"]) or r["source_id"])):
                 d5 = "업비트 입금 완료 · 토큰 세일 원가 (입찰 지갑에서 직접 입금)"
             elif g["is_stable"]:
-                g["qty_known"] += q
-                g["cost"] += q
+                cb.acquire(g, q, q)
                 fs_st(g, ts, q, chain)
                 d5 = "업비트 입금 완료 (스테이블 액면)"
             elif (up_dep_uid_tx.get(r["source_id"]) or "").startswith("swap_") and \
@@ -1900,9 +1809,9 @@ class ReplayMixin:
                     e9s["left"] = Decimal(0)
                     kq9s = q * min(Decimal(1), e9s["known"] / e9s["qty"])
                     c9s = e9s["cost"] * sc9s
-                    g["qty_known"] += kq9s
-                    g["qty_unknown"] += q - kq9s
-                    g["cost"] += c9s
+                    cb.add_known(g, kq9s)
+                    cb.add_unknown(g, q - kq9s)
+                    cb.add_cost(g, c9s)
                     fl9s = flow_of(g, ts, chain)
                     fl9s["bought"] += q
                     fl9s["cost"] += c9s
@@ -1910,14 +1819,14 @@ class ReplayMixin:
                     note_unk(g, ts, f"업비트 토큰 전환 입금 · {old9['sym']} → {g['sym']} (구 토큰 원가 없음)", q - kq9s, t9s, ex9="upbit", fs9=0,
                              up_gid=old9["gid"], unc9=Decimal(0), via9=f"업비트 토큰 전환 ({old9['sym']} 출금)")
                 else:
-                    g["qty_unknown"] += q
+                    cb.add_unknown(g, q)
                     note_unk(g, ts, f"업비트 토큰 전환 입금 · {old9['sym']} → {g['sym']} (구 토큰 원가 없음)", q, t9s, ex9="upbit", fs9=0,
                              up_gid=old9["gid"], via9=f"업비트 토큰 전환 ({old9['sym']} 출금)")
                     lst9s = g.get("unk_src") or []
                     swap_dep[t9s] = {"g": g, "q": q, "ent": lst9s[-1] if lst9s and lst9s[-1].get("ref") == t9s else None}
                 d5 = f"업비트 토큰 전환 입금 ({old9['sym']} → {g['sym']} · 구 토큰 원가 승계)"
             else:
-                g["qty_unknown"] += q
+                cb.add_unknown(g, q)
                 note_unk(g, ts, "업비트 입금(원가 없음 · 링크 없음)", q, up_dep_uid_tx.get(r["source_id"]) or r["source_id"], ex9="upbit")
                 diag["ex_dep_unlinked_n"] += 1
                 d5 = "업비트 입금 완료 (원가 미상)"
@@ -1929,9 +1838,31 @@ class ReplayMixin:
                     g["cur"]["events"][-1]["_lnk"] = lnk5
             return
 
+        def _short_fee(tr, left_before, took, grp, t, exk, tid):
+            rem = left_before - took
+            if rem <= EPS or took < left_before * Decimal("0.98") or tr["qty"] <= 0:
+                return
+            if tid and any(o["leg_kind"] == "move_in" and o["event"] == "EXF_DEPOSIT" and (o["group_id"] or -o["asset_id"]) == grp["gid"]
+                           and fx_dep_uid_tx.get(o["source_id"]) == tid for o in rows[n9i:]):
+                return
+            share = rem / tr["qty"]
+            rcost = tr["cost"] * share
+            rknown = min(rem, tr["known"] * share)
+            unit = fee_unit(grp, t, rcost / rknown if rknown > EPS else None)
+            if unit is None or unit <= 0:
+                return
+            tr["left"] = max(Decimal(0), tr["left"] - rem)
+            wd_fee_add(exk, rem * unit, t)
+            if gas_on:
+                fee_expense(rem * unit, t, dkey, "EXF_WD_FEE", fx_name.get(exk, exk))
+            if rknown > EPS:
+                rkrw = tr["krw"] * share if (tr.get("krw") is not None and not grp["is_stable"]) else None
+                fee_gain(grp, unit, rknown, rcost, t, dkey, chain, rkrw)
+            diag["arr_short_n"] = diag.get("arr_short_n", 0) + 1
+
         def _h_exf_deposit():
             nonlocal d6, ikr7, inh7, l9, sc7, sc9, so9, st7, take7, tk9
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             ex6 = (r["location"] or "").split(":")[-1]
             g.setdefault("ex_dep", set()).add(ex6)
             offc_pk9, offc_av9 = None, Decimal(0)
@@ -1969,12 +1900,13 @@ class ReplayMixin:
             if e6 and e6["left"] > 0 and q <= e6["left"] * Decimal("1.02"):
                 take6 = min(q, e6["left"])
                 e6["left"] -= take6
+                lb6 = take6 + e6["left"]
                 sc6 = take6 / e6["qty"] if e6["qty"] > 0 else Decimal(1)
                 lnk6 = [(sp9, float(sc6) * w9) for sp9, w9 in e6.get("_src", ())]
                 inh6 = e6["cost"] * sc6
-                g["qty_known"] += e6["known"] * sc6
+                cb.add_known(g, e6["known"] * sc6)
                 cp_add_map(g, e6.get("_cmp"), sc6)
-                g["qty_unknown"] += e6["unknown"] * sc6 + (q - take6)
+                cb.add_unknown(g, e6["unknown"] * sc6 + (q - take6))
                 unc6 = None
                 if g["is_stable"]:
                     st_flow_in(g, e6, sc6, ts, chain)
@@ -1987,24 +1919,26 @@ class ReplayMixin:
                     in_note(flow6, "내 지갑", take6, inh6, ts, cost_krw=ikr6)
                     unc6 = q - take6
                 note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금 · 내 지갑 출금 승계(원가 없음)", e6["unknown"] * sc6 + (q - take6), t6, ex9=ex6, up_gid=e6.get("gid"), unc9=unc6, fs9=q - take6)
-                g["cost"] += inh6
+                cb.add_cost(g, inh6)
+                _short_fee(e6, lb6, take6, g, ts, ex6, t6)
                 d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 · 원가 승계 (${float(inh6):,.2f})"
                 diag["exf_dep_inh_cost"] += inh6
                 diag["exf_dep_inh_n"] += 1
             elif e7 and e7["left"] > 0 and q <= e7["left"] * Decimal("1.02"):
                 take7 = min(q, e7["left"])
                 e7["left"] -= take7
+                lb7 = take7 + e7["left"]
                 sc7 = take7 / e7["qty"] if e7["qty"] > 0 else Decimal(1)
                 inh7 = e7["cost"] * sc7
                 lnk6 = [(sp9, float(sc7) * w9) for sp9, w9 in e7.get("_src", ())]
                 if e7.get("oa"):
                     g["oa"] = (g.get("oa") or Decimal(0)) + e7["oa"] * sc7
-                g["qty_known"] += e7["known"] * sc7
+                cb.add_known(g, e7["known"] * sc7)
                 cp_add_map(g, e7.get("_cmp"), sc7)
-                g["qty_unknown"] += e7["unknown"] * sc7 + (q - take7)
+                cb.add_unknown(g, e7["unknown"] * sc7 + (q - take7))
                 note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금 · 출금 승계 잔여(원가 없음)", e7["unknown"] * sc7 + (q - take7), exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"], ex9=ex6, unc9=q - take7, fs9=q - take7,
                          up_gid=e7.get("gid"), via9=f"{fx_name.get(e7.get('ex'), e7.get('ex'))} 출금 승계 (그 거래소 {e7.get('sym')} 의 원가 미상분)")
-                g["cost"] += inh7
+                cb.add_cost(g, inh7)
                 flow7 = flow_of(g, ts, chain)
                 flow7["bought"] += take7
                 ikr7 = krw_inh(e7, inh7, ts)
@@ -2016,6 +1950,7 @@ class ReplayMixin:
                 else:
                     flow7["cost"] += inh7
                     flow7["cost_krw"] += ikr7
+                _short_fee(e7, lb7, take7, g, ts, e7.get("ex") or ex6, t6)
                 st7 = e7.pop("story", None)
                 if st7:
                     flow7["events"][:0] = st7
@@ -2064,25 +1999,28 @@ class ReplayMixin:
                     so9["excessQty"] += need6
                     so9["excessN"] += 1
                 if g["is_stable"]:
-                    g["qty_known"] += q
-                    g["cost"] += q
-                    if kcs6 > EPS and ck6 > EPS and take6 > EPS:
+                    fq6 = q - kk6
+                    cb.add_known(g, q)
+                    cb.add_cost(g, ck6 + fq6)
+                    fs_st(g, ts, fq6, chain)
+                    if kcs6 > EPS and take6 > EPS:
                         fl6o = flow_of(g, ts, chain)
-                        fl6o["cost"] += min(take6, take6 * kcs6 / ck6)
+                        fl6o["cost"] += kcs6
                         fl6o["cost_krw"] += kks6
-                        stl_in(fl6o, {"_stl": [[x9[0], x9[1], x9[2] * float(take6 / ck6)] + x9[3:] for x9 in stl6]}, Decimal(1))
-                        fs_in(fl6o, {"fk": fks6}, take6 / ck6)
-                    so9["inhCost"] += take6
-                    offc_add(ex6, g["sym"], True, inh=take6)
-                    d6 = f"{exn6} 입금 완료 · 내 다른 {exn6} 계정에서 돌아옴(오프체인 · 내 계정으로 가정 · 스테이블 액면)"
+                        stl_in(fl6o, {"_stl": stl6}, Decimal(1))
+                        fs_in(fl6o, {"fk": fks6}, Decimal(1))
+                    so9["inhCost"] += ck6 + (take6 - kk6)
+                    offc_add(ex6, g["sym"], True, inh=ck6 + (take6 - kk6))
+                    d6 = (f"{exn6} 입금 완료 · 내 다른 {exn6} 계정에서 돌아옴(오프체인 · 내 계정으로 가정 · 원가 이어받음 ${float(ck6 + fq6):,.2f})"
+                          + (f" · 초과 {_qfmt(need6)}개 액면" if need6 > EPS else ""))
                 else:
                     so9["inhCost"] += ck6
                     offc_add(ex6, g["sym"], False, inh=ck6)
                     g["oa"] = (g.get("oa") or Decimal(0)) + kk6
                     cp_add_map(g, cmp6, 1.0)
-                    g["qty_known"] += kk6
-                    g["qty_unknown"] += uu6 + need6
-                    g["cost"] += ck6
+                    cb.add_known(g, kk6)
+                    cb.add_unknown(g, uu6 + need6)
+                    cb.add_cost(g, ck6)
                     flow6 = flow_of(g, ts, chain)
                     flow6["bought"] += take6
                     flow6["cost"] += ck6
@@ -2094,12 +2032,11 @@ class ReplayMixin:
                     d6 = (f"{exn6} 입금 완료 · 내 다른 {exn6} 계정에서 돌아옴(오프체인 · 내 계정으로 가정 · 원가 이어받음 ${float(ck6):,.2f})"
                           + (f" · 초과 {_qfmt(need6)}개 원가 미상" if need6 > EPS else ""))
             elif g["is_stable"]:
-                g["qty_known"] += q
-                g["cost"] += q
+                cb.acquire(g, q, q)
                 fs_st(g, ts, q, chain)
                 d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 (스테이블 액면)"
             else:
-                g["qty_unknown"] += q
+                cb.add_unknown(g, q)
                 note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금(원가 없음 · 링크 없음)", q, exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"], ex9=ex6)
                 d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 (원가 미상)"
             if g["is_stable"] or not g["cur"]:
@@ -2125,7 +2062,7 @@ class ReplayMixin:
                     kc2r, kk2r = krw_rec(mc2)
                     fk2r = fs_rec()
                     stl2r = stl_out(kc2r)
-                    g["qty_timeline"].append((ts, q))
+                    cb.snapshot(g, ts, q)
                     ex_transit.setdefault(txh, []).append(
                         {"gid": g["gid"], "sym": g["sym"], "qty": -q, "cost": mc2, "krw": kr2, "kc": kc2r, "kk": kk2r, "fk": fk2r, "_stl": stl2r,
                          "known": mk2, "unknown": mu2 + max(Decimal(0), (-q) - (mk2 + mu2)),
@@ -2149,7 +2086,7 @@ class ReplayMixin:
                     mkrwo = krw_took(mco, ts)
                     kco, kko = krw_rec(mco)
                     fko = fs_rec()
-                    g["qty_timeline"].append((ts, q))
+                    cb.snapshot(g, ts, q)
                     fl_wd9 = g["cur"]
                     offc_pool.setdefault((ex9o, acct_norm.canon(g["sym"], ex9o)), []).append(
                         {"ts": int(ts), "qty": -q, "left": -q, "cost": mco, "cost_krw": mkrwo, "kc": kco, "kk": kko, "fk": fko, "_stl": stl_out(kco), "known": mko,
@@ -2184,7 +2121,7 @@ class ReplayMixin:
                           else f"{fx_name.get(ex9w, ex9w)} 출금 (txid 없음 · 원가 소실)")
                     lb9 = loan_wd.get(r["posting_id"]) if loan_wd else None
                     if lb9:
-                        g["qty_unknown"] += lb9
+                        cb.add_unknown(g, lb9)
                         k09, c09 = g["qty_known"], g["cost"]
                         note_unk(g, ts, f"{fx_name.get(ex9w, ex9w)} 대출로 빌린 코인(출금 · 그 시각 시가 추정)", lb9, t4 or "", ex9=ex9w, chain9=chain, unc9=lb9)
                         if g["qty_known"] - k09 > EPS:
@@ -2201,7 +2138,7 @@ class ReplayMixin:
                     stl4r = stl_out(kc4r)
                     oa4 = oa_last[0]
                     pk4 = (krw_last[0], krw_mix[0], krw_stl[0]) if of_pay_on else None
-                    g["qty_timeline"].append((ts, q))
+                    cb.snapshot(g, ts, q)
                     nq4 = -q
                     fq4 = wd_fee_q(ex9w, r["source_id"], evk, -q) if not (sw9 or str(t4 or "").startswith("swap_")) else Decimal(0)
                     if fq4 > 0:
@@ -2243,9 +2180,9 @@ class ReplayMixin:
                         if pk4 is not None:
                             try:
                                 of_wd_take(g, r, nq4, -q, mc4, mk4, pk4, fk4r, oa4, cp_o4, ts, ex9w, t4)
-                            except Exception as e9:
-                                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-                                log.warning("수동 참가금 출금 처분 재료 실패(종전 경로): %s", common.safe_err(e9)[:160])
+                            except Exception as e9:   # noqa: BLE001 [optional]
+                                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[blk]", e9)
+                                log.warning("수동 참가금 출금 처분 재료 실패(종전 경로): %s", logs.safe_err(e9)[:160])
                     if g["cur"] is not None:
                         g["cur"]["moved_qty"] += nq4
                         g["cur"]["moved_cost"] += mc4
@@ -2264,9 +2201,7 @@ class ReplayMixin:
                         mv9 = min(want9, g2["qty_unknown"])
                         c9 = mc4 * (mv9 / want9) if want9 > 0 else Decimal(0)
                         if mv9 > 0:
-                            g2["qty_unknown"] -= mv9
-                            g2["qty_known"] += mv9
-                            g2["cost"] += c9
+                            cb.convert(g2, mv9, c9)
                             fl9 = flow_of(g2, ts, chain)
                             fl9["bought"] += mv9
                             fl9["cost"] += c9
@@ -2298,7 +2233,7 @@ class ReplayMixin:
                         e4["unknown"] += mu4 + max(Decimal(0), nq4 - (mk4 + mu4))
                         if g["cur"] is not None:
                             evs4w = g["cur"]["events"]
-                            k4w, n4w = sell_pre(g["cur"], evs4w)
+                            k4w, n4w = _sell_pre(g["cur"], evs4w, sell_wm=sell_wm)
                             hd4w, tl4w = evs4w[:k4w], evs4w[k4w + n4w:]
                             mv4 = [e9 for e9 in hd4w if "매도" not in str(e9.get("k") or "")] + [e9 for e9 in tl4w if "매도" not in str(e9.get("k") or "")]
                             if mv4:
@@ -2308,7 +2243,7 @@ class ReplayMixin:
                                 e4["story_flow"] = g["cur"]
                                 g["cur"]["events"] = ([e9 for e9 in hd4w if "매도" in str(e9.get("k") or "")] + evs4w[k4w:k4w + n4w]
                                                       + [e9 for e9 in tl4w if "매도" in str(e9.get("k") or "")])
-                            sell_mark(g["cur"])
+                            _sell_mark(g["cur"], sell_wm=sell_wm)
                             if g["qty_known"] + g["qty_unknown"] <= Decimal("0.000001"):
                                 g["cur"] = None
                 elif evk in ("BRIDGE", "TRANSFER_OUT_EX") and \
@@ -2321,7 +2256,7 @@ class ReplayMixin:
                     kr5 = krw_took(mc5, ts)
                     kc5r, kk5r = krw_rec(mc5)
                     fk5r = fs_rec()
-                    g["qty_timeline"].append((ts, q))
+                    cb.snapshot(g, ts, q)
                     t5 = (txh or "").lower() if (txh or "").startswith("0x") else txh
                     e5 = fxdep_transit.setdefault(
                         (t5, g["sym"]), {"qty": Decimal(0), "cost": Decimal(0),
@@ -2348,7 +2283,7 @@ class ReplayMixin:
                 elif evk == "BRIDGE" and (nopx_swap.get((r["source_ns"], txh)) or {}).get("rcpt"):
                     nx9 = nopx_swap[(r["source_ns"], txh)]
                     mc3, mk3, mu3 = consume(g, -q)
-                    g["qty_timeline"].append((ts, q))
+                    cb.snapshot(g, ts, q)
                     cy9 = nopx_carry.setdefault((r["source_ns"], txh), {"q": Decimal(0), "mc": Decimal(0), "mk": Decimal(0), "krw": Decimal(0),
                                                                          "sym": g["sym"], "src": []})
                     cy9["q"] += -q
@@ -2366,9 +2301,21 @@ class ReplayMixin:
                     k2, d2 = "전송", f"{CHAIN_NAME.get(chain, chain)} → 브릿지 · 위치 이동(손익 없음)"
                     mc3, mk3, mu3 = consume(g, -q)
                     cp_o3 = cp_last[0]
-                    g["qty_timeline"].append((ts, q))
+                    kc3r, kk3r = krw_rec(mc3)
+                    cb.snapshot(g, ts, q)
                     sq3 = -q
                     sa3 = br_sum.get(r["posting_id"])
+                    if sa3 is None and r["posting_id"] in br_natfee:
+                        u3n = fee_unit(g, ts, (mc3 / mk3) if mk3 > EPS else None)
+                        if u3n is not None:
+                            br_fee_add(chain, (-q) * u3n, ts)
+                            if gas_on:
+                                fee_expense((-q) * u3n, ts, dkey, "BRIDGE_FEE", CHAIN_NAME.get(chain, chain))
+                            fee_gain(g, u3n, mk3, mc3, ts, dkey, chain, krw_last[0], mix9=krw_mix[0], stl9=krw_stl[0],
+                                     cmp9=cp_emit(cp_o3, mu3, mk3 + mu3, mc3) if cp_o3 else None, fs9=fs_rec())
+                            d2 += f" · 메시징 수수료 {_qfmt(-q)} {g['sym']}(도착 짝 없음 — 비용)"
+                            mc3, mk3, mu3, sq3, cp_o3 = Decimal(0), Decimal(0), Decimal(0), Decimal(0), None
+                            kc3r = kk3r = Decimal(0)
                     if sa3 is not None and (-q) * BR_UNIQ_LO <= sa3 < -q:
                         fq3 = -q - sa3
                         s3 = fq3 / (-q)
@@ -2380,6 +2327,7 @@ class ReplayMixin:
                                  if krw_stl[0] else None)
                         fcmp3 = cp_emit(cp_merge({}, cp_o3, float(s3)), mu3 * s3, fmk3 + mu3 * s3, fmc3) if cp_o3 else None
                         mc3, mk3, mu3 = mc3 - fmc3, mk3 - fmk3, mu3 * (1 - s3)
+                        kc3r, kk3r = kc3r * (1 - s3), kk3r * (1 - s3)
                         cp_o3 = cp_merge({}, cp_o3, float(1 - s3)) if cp_o3 else cp_o3
                         sq3 = sa3
                         u3f = fee_unit(g, ts, (fmc3 / fmk3) if fmk3 > EPS else None)
@@ -2390,7 +2338,7 @@ class ReplayMixin:
                             fee_gain(g, u3f, fmk3, fmc3, ts, dkey, chain, fkr3, mix9=fmix3, stl9=fstl3, cmp9=fcmp3, fs9=ffs3)
                         d2 += f" · 브릿지 수수료 {_qfmt(fq3)} {g['sym']}"
                     bridge_outs.append({"sym": g["sym"], "qty": sq3, "ts": ts, "_src": [(r["posting_id"], 1.0)], "_cmp": cp_merge({}, cp_o3),
-                                        "cost": mc3, "known": mk3,
+                                        "cost": mc3, "known": mk3, "kc": kc3r, "kk": kk3r,
                                         "unknown": mu3 + max(Decimal(0), sq3 - (mk3 + mu3)),
                                         "left": sq3,
                                         "gid": r["group_id"] or -r["asset_id"], "chain": chain, "pid": r["posting_id"]})
@@ -2415,12 +2363,14 @@ class ReplayMixin:
 
         def _h_stake_reward():
             nonlocal st9
-            g["qty_timeline"].append((ts, q))
+            ex_income = str(r["location"] or "").startswith("exchange:")
+            cb.snapshot(g, ts, q)
             st9 = stake_rwd.setdefault(r["location"] or "", [Decimal(0), Decimal(0)])
             st9[0] += q
             if cost is not None:
-                g["qty_known"] += q
-                g["cost"] += cost
+                cb.acquire(g, q, cost)
+                if ex_income and g["is_stable"]:
+                    fs_st(g, ts, q, chain)
                 st9[1] += cost
                 dk9s = acct_norm.iso_day(ts)
                 rt9s = fxb.rate_at(ts)
@@ -2429,8 +2379,13 @@ class ReplayMixin:
                 si9 = stake_inc.setdefault(dk9s, {}).setdefault(g["sym"], [Decimal(0), Decimal(0), 0, 0.0])
                 si9[0] += cost; si9[1] += q; si9[2] += 1; si9[3] += float(cost) * rt9s
             else:
-                g["qty_unknown"] += q
-                note_unk(g, ts, "솔라나 스테이킹 보상 · 시가 대기(원가 없음)", q, txh, chain9=chain, fs9=0)
+                cb.add_unknown(g, q)
+                note_unk(g, ts, ("거래소 지급(배당·에어드랍·Earn 이자) · 시가 없음(원가 없음)" if ex_income else "솔라나 스테이킹 보상 · 시가 대기(원가 없음)"),
+                         q, "" if ex_income else txh, chain9=chain, fs9=0)
+            if ex_income:
+                extra_ev(ts, g, "전송", f"{cur_lab[0] or '거래소'} · 지급 내역(배당·에어드랍·런치풀·Earn 이자 — 받은 시각 시가 = 소득)",
+                         f"{q:,.6f}".rstrip("0").rstrip("."), f"${float(cost):,.2f}" if cost is not None else "—", "")
+                return
             mev9 = not (r["source_id"] or "").startswith("stakerwd:")
             ep9 = "" if mev9 else (r["source_id"] or "").rsplit(":", 1)[-1]
             extra_ev(ts, g, "전송", f"{CHAIN_NAME.get(chain, chain)} · 스테이킹 보상"
@@ -2439,20 +2394,62 @@ class ReplayMixin:
                      txh if mev9 else "")
             return
 
+        def _stable_bridge_in(link, grp, row, qty_in, t, chain_, tx):
+            src = G.get(link.get("gid"))
+            if src is None:
+                return False
+            if (src.get("is_stable") and not link.get("_cv") and link is br_transit.get(row["posting_id"])
+                    and not link.get("id_link")):
+                return False
+            took = min(qty_in, link["left"])
+            if took <= EPS:
+                return False
+            link["left"] -= took
+            share = took / link["qty"] if link["qty"] > 0 else Decimal(1)
+            inh = link["cost"] * share
+            kshare = share
+            if link is br_transit.get(row["posting_id"]) and link["left"] > 0 and took >= link["qty"] * BR_UNIQ_LO:
+                inh = link["cost"] * (took + link["left"]) / link["qty"]
+                kshare = (took + link["left"]) / link["qty"]
+                link["left"] = Decimal(0)
+            kq = min(took, link.get("known", link["qty"]) * share)
+            grp["risk_allow"] = True
+            if src.get("is_stable") and not link.get("_cv"):
+                cb.add_known(grp, qty_in)
+                cb.add_cost(grp, inh + (qty_in - kq))
+                st_flow_in(grp, link, kshare, t, chain_)
+                fs_st(grp, t, qty_in - kq, chain_)
+                diag["st_br_inh_n"] = diag.get("st_br_inh_n", 0) + 1
+                extra_ev(t, grp, "전송", f"{CHAIN_NAME.get(chain_, chain_)} 브릿지 도착 · 원가 이관 (${float(inh + (qty_in - kq)):,.2f})",
+                         f"{qty_in:,.4f}".rstrip("0").rstrip("."), "—", tx)
+                return True
+            ratio = Decimal(str((link.get("_cv") or {}).get("ratio") or 1))
+            dep_known = kq / ratio if ratio > 0 else kq
+            mck = (link["krw"] * inh / link["cost"] if (link.get("krw") is not None and link["cost"] > 0 and not src.get("is_stable"))
+                   else None)
+            gain = (fee_gain(src, ratio, dep_known, inh, t, acct_norm.iso_day(t), chain_, mck,
+                             lab9="브릿지 전환(다른 자산 도착 · 스테이블 수령 = 매도)") if dep_known > EPS else Decimal(0))
+            cb.acquire(grp, qty_in, qty_in)
+            fs_st(grp, t, qty_in, chain_)
+            diag["st_br_cv_n"] = diag.get("st_br_cv_n", 0) + 1
+            extra_ev(t, grp, "전송", f"{CHAIN_NAME.get(chain_, chain_)} 브릿지 도착 · {src['sym']} → {grp['sym']} 전환(= {src['sym']} 매도 · 실현 "
+                     f"{'+' if gain >= 0 else '−'}${abs(float(gain)):,.2f})", f"{qty_in:,.4f}".rstrip("0").rstrip("."), "—", tx)
+            return True
+
         def _h_acq():
             nonlocal arr_gid, c9, cv9, cvk9, cy9, e4, ex9, ex_fee9, flow, fx9
             nonlocal k9, kg9, mc9, mk9, mu9, nx9, rd9, rt9, sc9, sg9
             nonlocal sh9, sv9, take9, td9, u9
             flow = flow_of(g, ts, chain)
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             rd9 = redeem_tx.get((r["source_ns"], txh))
             if rd9 and rd9["acq"] == r["posting_id"] and rd9["carry"] is not None:
                 mc9, mk9, mu9 = rd9["carry"]
                 k9 = min(q, mk9 * rd9["ratio"])
                 u9 = q - k9
-                g["qty_known"] += k9
-                g["qty_unknown"] += u9
-                g["cost"] += mc9
+                cb.add_known(g, k9)
+                cb.add_unknown(g, u9)
+                cb.add_cost(g, mc9)
                 if u9 > EPS:
                     note_unk(g, ts, "세일 영수증 교환 · 승계(원가 없음)", u9, txh, chain9=chain, fs9=0)
                 g["risk_allow"] = True
@@ -2481,9 +2478,9 @@ class ReplayMixin:
                 if g["is_stable"] or zv9g:
                     k9 = q
                 c9 = cy9["mc"] * sh9
-                g["qty_known"] += k9
-                g["qty_unknown"] += q - k9
-                g["cost"] += c9
+                cb.add_known(g, k9)
+                cb.add_unknown(g, q - k9)
+                cb.add_cost(g, c9)
                 if q - k9 > EPS:
                     note_unk(g, ts, f"스왑(양쪽 시세 없음) {cy9['sym']} → {g['sym']} · 승계(원가 없음)", q - k9, txh, chain9=chain, fs9=0)
                 flow["bought"] += k9
@@ -2503,11 +2500,11 @@ class ReplayMixin:
                 sc9 = q / xc9["qty"]
                 cov9 = min(q, xc9["cov"] * sc9)
                 inh9 = xc9["cost"] * sc9
-                g["qty_known"] += cov9
-                g["qty_unknown"] += q - cov9
+                cb.add_known(g, cov9)
+                cb.add_unknown(g, q - cov9)
                 if q - cov9 > 0:
                     note_unk(g, ts, f"{xc9['label']} · 일부 원가 미상", q - cov9, txh, chain9=chain, fs9=0)
-                g["cost"] += inh9
+                cb.add_cost(g, inh9)
                 g["risk_allow"] = True
                 flow["bought"] += cov9
                 flow["cost"] += inh9
@@ -2523,18 +2520,33 @@ class ReplayMixin:
             if cost is None:
                 linked = None
                 take = Decimal(0)
-                rk9 = rt_pair.get((r["source_ns"], txh)) if (evk == "PROGRAM_IN" and not g["is_stable"]) else None
+                rk9 = (rt_pair.get((r["source_ns"], txh)) if evk == "PROGRAM_IN" and not (g["is_stable"] and (
+                    fx_wd.get(txh) or fx_wd.get((txh or "").lower()) or txh in ub_wd_tx or (txh or "").lower() in ub_wd_tx)) else None)
                 rt9 = rt_transit.get((rk9[0], rk9[1], g["gid"])) if rk9 else None
+                if rt9 and rt9["left"] > 0 and q <= rt9["left"] * Decimal("1.005") and g["is_stable"]:
+                    take9 = min(q, rt9["left"])
+                    rt9["left"] -= take9
+                    sc9 = take9 / rt9["qty"] if rt9["qty"] > 0 else Decimal(1)
+                    inh9 = rt9["cost"] * sc9
+                    kq9s = min(take9, rt9["known"] * sc9)
+                    cb.add_known(g, q)
+                    cb.add_cost(g, inh9 + (q - kq9s))
+                    st_flow_in(g, rt9, sc9, ts, chain)
+                    fs_st(g, ts, q - kq9s, chain)
+                    g["risk_allow"] = True
+                    extra_ev(ts, g, "전송", f"{CHAIN_NAME.get(chain, chain)} 프로그램 예치 복귀 · 원가 복원 (${float(inh9 + (q - kq9s)):,.2f})",
+                             f"{q:,.4f}".rstrip("0").rstrip("."), "—", txh)
+                    return
                 if rt9 and rt9["left"] > 0 and q <= rt9["left"] * Decimal("1.005"):
                     take9 = min(q, rt9["left"])
                     rt9["left"] -= take9
                     sc9 = take9 / rt9["qty"] if rt9["qty"] > 0 else Decimal(1)
                     inh9 = rt9["cost"] * sc9
-                    g["qty_known"] += rt9["known"] * sc9
+                    cb.add_known(g, rt9["known"] * sc9)
                     cp_add_map(g, rt9.get("_cmp"), sc9)
-                    g["qty_unknown"] += rt9["unknown"] * sc9 + (q - take9)
+                    cb.add_unknown(g, rt9["unknown"] * sc9 + (q - take9))
                     note_unk(g, ts, "프로그램 예치 복귀 · 승계(원가 없음)", rt9["unknown"] * sc9 + (q - take9), txh, chain9=chain, unc9=q - take9, fs9=q - take9)
-                    g["cost"] += inh9
+                    cb.add_cost(g, inh9)
                     g["risk_allow"] = True
                     flow["bought"] += take9
                     flow["cost"] += inh9
@@ -2556,6 +2568,15 @@ class ReplayMixin:
                         linked = bo9
                         take = min(q, bo9["left"])
                 if g["is_stable"] and evk in ("TRANSFER_IN", "PROGRAM_IN"):
+                    lk9s = br_transit.get(r["posting_id"])
+                    if not (lk9s and lk9s["left"] > 0):
+                        lk9s = bo_pid.get(br_plan.get(r["posting_id"]))
+                        if not (lk9s is not None and lk9s["sym"] == g["sym"] and lk9s.get("left", Decimal(0)) > 0
+                                and lk9s.get("chain") != chain):
+                            lk9s = None
+                    if lk9s is not None and _stable_bridge_in(lk9s, g, r, q, ts, chain, txh):
+                        return
+                if g["is_stable"] and evk in ("TRANSFER_IN", "PROGRAM_IN"):
                     e4s = fx_transit.get(txh) or fx_transit.get((txh or "").lower())
                     if e4s and (e4s.get("ambiguous") or not (G.get(e4s.get("gid")) or {}).get("is_stable")
                                 or (len(arr_groups.get((r["source_ns"], txh), ())) > 1 and e4s.get("sym") != g["sym"])):
@@ -2569,8 +2590,8 @@ class ReplayMixin:
                         kq4 = min(take4, e4s["known"] * sc4)
                         if e4s.get("oa"):
                             g["oa"] = (g.get("oa") or Decimal(0)) + e4s["oa"] * sc4
-                        g["qty_known"] += q
-                        g["cost"] += inh_c4 + (q - kq4)
+                        cb.add_known(g, q)
+                        cb.add_cost(g, inh_c4 + (q - kq4))
                         st_flow_in(g, e4s, sc4, ts, chain)
                         diag["st_wd_inh_n"] = diag.get("st_wd_inh_n", 0) + 1
                         diag["st_wd_inh_gap"] = diag.get("st_wd_inh_gap", Decimal(0)) + (inh_c4 - kq4)
@@ -2592,11 +2613,11 @@ class ReplayMixin:
                         inh_c4 = e4["cost"] * sc4
                         if e4.get("oa"):
                             g["oa"] = (g.get("oa") or Decimal(0)) + e4["oa"] * sc4
-                        g["qty_known"] += e4["known"] * sc4
+                        cb.add_known(g, e4["known"] * sc4)
                         cp_add_map(g, e4.get("_cmp"), sc4)
-                        g["qty_unknown"] += e4["unknown"] * sc4 + (q - take4)
+                        cb.add_unknown(g, e4["unknown"] * sc4 + (q - take4))
                         note_unk(g, ts, "거래소 출금 도착 · 승계(원가 없음)", e4["unknown"] * sc4 + (q - take4), txh, chain9=chain, up_gid=e4.get("gid"), unc9=q - take4, fs9=q - take4)
-                        g["cost"] += inh_c4
+                        cb.add_cost(g, inh_c4)
                         flow = flow_of(g, ts, chain)
                         flow["bought"] += take4
                         flow["cost"] += inh_c4
@@ -2625,7 +2646,7 @@ class ReplayMixin:
                             and take >= linked["qty"] * BR_UNIQ_LO):
                         inh_cost = linked["cost"] * (take + linked["left"]) / linked["qty"]
                         linked["left"] = Decimal(0)
-                    g["qty_known"] += linked.get("known", linked["qty"]) * scale
+                    cb.add_known(g, linked.get("known", linked["qty"]) * scale)
                     cv9 = linked.get("_cv")
                     if cv9 and linked.get("_cmp"):
                         cvk9 = ("cv", r["posting_id"], g["gid"])
@@ -2633,9 +2654,9 @@ class ReplayMixin:
                                sum(v9[1] for v9 in linked["_cmp"].values()) * float(scale))
                     else:
                         cp_add_map(g, linked.get("_cmp"), scale)
-                    g["qty_unknown"] += linked.get("unknown", Decimal(0)) * scale + (q - take)
+                    cb.add_unknown(g, linked.get("unknown", Decimal(0)) * scale + (q - take))
                     note_unk(g, ts, "브릿지 도착 · 승계(원가 없음)", linked.get("unknown", Decimal(0)) * scale + (q - take), txh, chain9=chain, up_gid=linked.get("gid"), fs9=q - take)
-                    g["cost"] += inh_cost
+                    cb.add_cost(g, inh_cost)
                     flow = flow_of(g, ts, chain)
                     ev(flow, ts, "전송",
                        f"{CHAIN_NAME.get(chain, chain)} 브릿지 도착 · 원가 이관"
@@ -2653,17 +2674,18 @@ class ReplayMixin:
                         and sale_book(g, r, q, ts, chain, txh)):
                     return
                 ret9 = None
-                if sale_rf_exit and not g["is_stable"] and not g.get("is_fiat") and evk in ("TRANSFER_IN", "PROGRAM_IN"):
-                    ret9 = sale_refund(g, r, q, ts, chain, txh, flow)
+                rf_face = [Decimal(0)]
+                if sale_rf_exit and not g.get("is_fiat") and evk in ("TRANSFER_IN", "PROGRAM_IN"):
+                    ret9 = sale_refund(g, r, q, ts, chain, txh, flow, rf_face)
                 if g["is_stable"]:
-                    g["qty_known"] += q
-                    g["cost"] += q
-                    fs_st(g, ts, q, chain)
+                    if ret9 is None:
+                        cb.acquire(g, q, q)
+                    fs_st(g, ts, q if ret9 is None else rf_face[0], chain)
                 elif ret9 is None:
                     if fs_on and evk in ("TRANSFER_IN", "PROGRAM_IN") and not g.get("is_fiat") and r["posting_id"] not in br_amb:
                         ret9 = fs_ret(g, ts, q, chain, txh, flow)
                     if ret9 is None:
-                        g["qty_unknown"] += q
+                        cb.add_unknown(g, q)
                         if r["posting_id"] in br_amb:
                             note_unk(g, ts, f"{CHAIN_NAME.get(chain, chain)} 브릿지 도착 후보 여러 개(컨트랙트 다름 · 원가 연결 보류 — 진짜 도착이면 원가 지정)",
                                      q, r["source_id"], chain9=chain, fs9=0)
@@ -2699,17 +2721,16 @@ class ReplayMixin:
                               if evk == "PROGRAM_IN"
                               else f"{CHAIN_NAME.get(chain, chain)} 외부 유입 (원가 미상)")
                     if g["is_stable"]:
-                        extra_ev(ts, g, "전송", d3, qs2, "—", txh)
+                        extra_ev(ts, g, "전송", d3 + (ret9 or ""), qs2, "—", txh)
                     else:
                         ev(flow, ts, "전송", d3 + (ret9 or ""), qs2, "—", txh)
                 else:
-                    g["qty_known"] += 0
+                    cb.add_known(g, 0)
                     ev(flow, ts, "온체인 매수",
                        f"{CHAIN_NAME.get(chain, chain)} · 스왑 (원가 산정 중)",
                        f"{q:,.4f}".rstrip("0").rstrip("."), "—", txh)
             else:
-                g["qty_known"] += q
-                g["cost"] += cost
+                cb.acquire(g, q, cost)
                 flow["bought"] += q
                 flow["cost"] += cost
                 k9acq = krw_of(cost, ts, r)
@@ -2721,7 +2742,7 @@ class ReplayMixin:
                 sg9 = swap_gas.get((r["source_ns"], txh)) if (gas_on and evk == "SWAP") else None
                 if sg9 and not sg9["done"] and sg9["sell"] is None and sg9["buy"] == g["gid"] and sg9["usd"] > 0:
                     sg9["done"] = True
-                    g["cost"] += sg9["usd"]
+                    cb.add_cost(g, sg9["usd"])
                     flow["cost"] += sg9["usd"]
                     flow["cost_krw"] += krw_of(sg9["usd"], ts, r)
                     gas_applied["buy"] += sg9["usd"]
@@ -2753,7 +2774,7 @@ class ReplayMixin:
             nonlocal _rl9, cv9, cy9, ex_fee9, flow, fu9, kg9, ks9, mc9, mk9
             nonlocal mu9, np9, nx9, qty, rd9, sg9, take9, u
             qty = -q
-            g["qty_timeline"].append((ts, q))
+            cb.snapshot(g, ts, q)
             if g.get("is_fiat"):
                 consume(g, qty, cp=False)
                 if evk == "EXF_SELL":
@@ -2795,6 +2816,18 @@ class ReplayMixin:
                 if g["qty_known"] + g["qty_unknown"] <= Decimal("0.000001"):
                     g["cur"] = None
                 return
+            lb9s = loan_wd.get(r["posting_id"]) if (loan_wd and evk == "EXF_SELL") else None
+            if lb9s:
+                ex9s = (r["location"] or "").split(":")[-1]
+                cb.add_unknown(g, lb9s)
+                k09s, c09s = g["qty_known"], g["cost"]
+                note_unk(g, ts, f"{fx_name.get(ex9s, ex9s)} 대출로 빌린 코인(바로 매도 · 그 시각 시가 추정)", lb9s, txh or "", ex9=ex9s, chain9=chain, unc9=lb9s)
+                if g["qty_known"] - k09s > EPS:
+                    loan_px[r["posting_id"]] = (g["cost"] - c09s) / (g["qty_known"] - k09s)
+                    fs_sum["loan"]["priced"] += 1
+                else:
+                    loan_unp[g["gid"]] = loan_unp.get(g["gid"], [Decimal(0), int(ts)])
+                    loan_unp[g["gid"]][0] += lb9s
             flow = g["cur"] or flow_of(g, ts, chain)
             is_pay9 = r["posting_id"] in pay_pid
             if is_pay9:
@@ -2816,30 +2849,28 @@ class ReplayMixin:
                         take9 = min(short, dn["qty_known"] + dn["qty_unknown"])
                         bc, bk, bu = consume(dn, take9)
                         cp_dn9 = cp_last[0]
-                        dn["qty_timeline"].append((ts, -take9))
+                        cb.snapshot(dn, ts, -take9)
                         if dn["qty_known"] + dn["qty_unknown"] <= Decimal("0.000001"):
                             dn["cur"] = None
-                        g["qty_known"] += bk
+                        cb.add_known(g, bk)
                         cp_add_map(g, cp_dn9, 1.0)
-                        g["qty_unknown"] += bu
+                        cb.add_unknown(g, bu)
                         note_unk(g, ts, "동일 심볼 원장 정정 · 기증자 승계(원가 없음)", bu, txh, chain9=chain, up_gid=dn.get("gid"), fs9=0)
-                        g["cost"] += bc
+                        cb.add_cost(g, bc)
                         ev(flow, ts, "전송",
                            "동일 심볼 원장 정정 · 브릿지 인스턴스에서 원가 이관"
                            f" (${float(bc):,.2f})",
                            f"{take9:,.4f}".rstrip("0").rstrip("."), "—", txh)
             from_known = min(qty, g["qty_known"])
             from_unknown = qty - from_known
-            wac = (g["cost"] / g["qty_known"]) if g["qty_known"] > EPS else Decimal(0)
+            wac = cb.wac(g)
             consumed_cost = wac * from_known
             consumed_cost_krw = consume_krw(g, consumed_cost)
             mix9s = krw_mix[0]
             stl9s = krw_stl[0]
             oa9 = oa_take(g, from_known)
             cmp9s = cp_emit(cp_take(g, from_known, consumed_cost), from_unknown, qty, consumed_cost)
-            g["qty_known"] -= from_known
-            g["cost"] -= consumed_cost
-            g["qty_unknown"] = max(Decimal(0), g["qty_unknown"] - from_unknown)
+            cb.release(g, from_known, consumed_cost, from_unknown)
             if cost is not None:
                 is_ex = evk in ("EX_SELL", "EXF_SELL")
                 ex_label = "업비트"
@@ -2852,7 +2883,7 @@ class ReplayMixin:
                 if from_known > 0:
                     proceeds_known = cost * from_known / qty if qty > 0 else Decimal(0)
                     pnl = proceeds_known - consumed_cost
-                    g["realized"] += pnl
+                    cb.realize(g, pnl)
                     flow["realized"] += pnl
                     if is_pay9:
                         flow["pay_real"] = flow.get("pay_real", Decimal(0)) + pnl
@@ -2950,7 +2981,7 @@ class ReplayMixin:
                     Gk9 = G9 * from_known / qty if (qty > 0 and tax9 is not None) else Decimal(0)
                     Gu9 = G9 - Gk9 if u is not None else Decimal(0)
                     if Gk9 > 0:
-                        g["realized"] -= Gk9
+                        cb.unrealize(g, Gk9)
                         flow["realized"] -= Gk9
                         flow["rbd"][dkey] = flow["rbd"].get(dkey, Decimal(0)) - Gk9
                         flow["rbdk"][dkey] = flow["rbdk"].get(dkey, 0.0) - float(Gk9) * rate_s
@@ -3029,24 +3060,20 @@ class ReplayMixin:
             if unit9 is None and g["is_stable"]:
                 unit9 = Decimal(1)
             if unit9 is None and not g.get("is_fiat"):
-                cp9 = fxb.candle(g["sym"], ts)
+                cp9 = _fx_candle_near(fxb, g["sym"], ts)
                 if cp9:
                     unit9 = Decimal(str(cp9))
             if unit9 is None and g["qty_known"] > EPS:
                 unit9 = g["cost"] / g["qty_known"]
-            if unit9 is None and (g["sym"] or "").upper() in pricing.MAJOR_CANDLE_SYMS:
-                sp9 = self.spot.price(g["sym"])
-                if sp9:
-                    unit9 = Decimal(str(sp9))
-            F9 = fq9 * unit9 if (unit9 is not None and fq9 > 0) else Decimal(0)
+            F9 = fq9 * unit9 if (unit9 is not None and fq9 != 0) else Decimal(0)
             if unit9 is None and fq9 > 0:
                 fee_diag["no_px"] += 1
-            if F9 > 0 and (a9f or d9f):
+            if F9 != 0 and (a9f or d9f):
                 fee_diag["n"] += 1
                 if a9f and not a9f["g"]["is_stable"] and not a9f["g"].get("is_fiat"):
                     chg9f = True
                     ga9 = a9f["g"]
-                    ga9["cost"] += F9
+                    cb.add_cost(ga9, F9)
                     a9f["flow"]["cost"] += F9
                     a9f["flow"]["cost_krw"] += krw_of(F9, ts, a9f["row"])
                     if k9f in krw_mkt:
@@ -3055,7 +3082,7 @@ class ReplayMixin:
                 elif a9f and a9f["g"]["is_stable"] and d9f and d9f.get("fiat"):
                     chg9f = True
                     ga9 = a9f["g"]
-                    ga9["cost"] += F9
+                    cb.add_cost(ga9, F9)
                     a9f["flow"]["cost"] += F9
                     a9f["flow"]["cost_krw"] += krw_of(F9, ts, a9f["row"])
                     fee_diag["usd_cost"] += F9
@@ -3065,8 +3092,8 @@ class ReplayMixin:
                     sh9 = (d9f["fk"] / d9f["qty"]) if d9f["qty"] > 0 else Decimal(1)
                     Fk9, Fu9 = F9 * sh9, F9 - F9 * sh9
                     fl9f, dk9f = d9f["flow"], d9f["dkey"]
-                    if Fk9 > 0:
-                        d9f["g"]["realized"] -= Fk9
+                    if Fk9 != 0:
+                        cb.unrealize(d9f["g"], Fk9)
                         fl9f["realized"] -= Fk9
                         fl9f["rbd"][dk9f] = fl9f["rbd"].get(dk9f, Decimal(0)) - Fk9
                         fl9f["rbdk"][dk9f] = fl9f["rbdk"].get(dk9f, 0.0) - float(Fk9) * rt9f
@@ -3077,7 +3104,7 @@ class ReplayMixin:
                         if d9f["tax"] is not None:
                             _tax_add(d9f["tax"], "fee", Fk9)
                         fee_diag["usd_realized"] += Fk9
-                    if Fu9 > 0 and d9f["u"] is not None:
+                    if Fu9 != 0 and d9f["u"] is not None:
                         d9f["u"]["proceeds"] -= Fu9
                         d9f["ud"]["proceeds"] -= Fu9
                         d9f["fu9"][1] -= Fu9
@@ -3189,11 +3216,30 @@ class ReplayMixin:
                 _h_exf_fee()
             if lk == "gas" and evk == "EXF_FEE":
                 ex_fee_add((r["location"] or "").split(":")[-1], F9, ts)
+                if q > 0:
+                    if unit9 is None:
+                        kb_rb, cb_rb = g["qty_known"], g["cost"]
+                        cb.add_unknown(g, q)
+                        note_unk(g, ts, f"{fx_name.get((r['location'] or '').split(':')[-1], (r['location'] or '').split(':')[-1])} 체결 수수료 환급(리베이트)"
+                                 " · 시세 없음(원가 없음)", q, txh, ex9=(r["location"] or "").split(":")[-1])
+                        dk_rb, dc_rb = g["qty_known"] - kb_rb, g["cost"] - cb_rb
+                        if dk_rb > EPS and dc_rb > 0:
+                            fee_gain(g, dc_rb / dk_rb, dk_rb, Decimal(0), ts, dkey, chain, lab9="체결 수수료 환급(리베이트 · 지정·인식 원가 = 소득)")
+                    else:
+                        cb.acquire(g, q, q * unit9)
+                        if g["is_stable"]:
+                            fs_st(g, ts, q * unit9, chain)
+                        else:
+                            st_flow_in(g, {"kc": q * unit9, "kk": krw_of(q * unit9, ts)}, Decimal(1), ts, chain)
+                        if not chg9f:
+                            fee_gain(g, unit9, q, Decimal(0), ts, dkey, chain, lab9="체결 수수료 환급(리베이트 · 짝 체결 없음 = 소득)")
+                    cb.snapshot(g, ts, q)
+                    continue
                 mcf9, mkf9, _muf9 = consume(g, -q, cp=bool(chg9f))
                 if chg9f:
                     fee_gain(g, unit9, mkf9, mcf9, ts, dkey, chain, krw_last[0], mix9=krw_mix[0], stl9=krw_stl[0],
                              cmp9=cp_emit(cp_last[0], _muf9, mkf9 + _muf9, mcf9))
-                g["qty_timeline"].append((ts, q))
+                cb.snapshot(g, ts, q)
                 continue
             if lk == "gas":
                 _h_gas()
@@ -3276,9 +3322,9 @@ class ReplayMixin:
         pvc_cs9, pvc_xs9 = {}, {}
         try:
             pvc_cs9, pvc_xs9 = self._prov_seen(conn, exb9)
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-            log.warning("첫 대사 전 잔고 관측 시각 읽기 실패(전송 중 종전대로): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[pvc_cs9]", e9)
+            log.warning("첫 대사 전 잔고 관측 시각 읽기 실패(전송 중 종전대로): %s", logs.safe_err(e9)[:160])
         uncred_gid = {}
         dep_tr9 = []
         uncred_fx = {}
@@ -3322,8 +3368,8 @@ class ReplayMixin:
                                                skip_deps=frozenset(uuid2txh) | frozenset(
                                                    u9 for m9 in of_match.values() for u9 in _of_uids(m9))
                                                | frozenset(u9 for e9, u9 in offc_dep if e9 in offc_on))
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[wdt_all]", e9)
             log.warning("거래소 출금 전송 중 판정 실패(종전대로 즉시 차감): %s", e9)
             wdt_all = []
         self._wd_transit_wake(wdt_all)
@@ -3346,26 +3392,10 @@ class ReplayMixin:
                 e9["ev"]["d"] = f"{e9['src']} 출금 → " + (f"{e9['dst']} " if e9.get("dst") else "") + "전송 중 (도착 확인 대기)"
         if self.KEEP_DIAG:
             self._wd_transit_last = wdt_all
-
         pos_rows = []
         by_symloc = {}
         lp_pos_rows = []
-        for row in conn.execute("SELECT group_id, location, qty_norm FROM positions").fetchall():
-            try:
-                qn0 = Decimal(row["qty_norm"])
-            except (InvalidOperation, TypeError, ValueError):
-                continue
-            if (row["location"] or "").startswith("lp:"):
-                lp_pos_rows.append((row["group_id"], row["location"], qn0))
-                continue
-            if (row["location"] or "").startswith("out:"):
-                continue
-            d0 = {"gid": row["group_id"], "location": row["location"] or "", "qty": qn0}
-            pos_rows.append(d0)
-            if d0["location"].startswith("exchange:"):
-                sym0 = ((G.get(d0["gid"]) or {}).get("sym") or "").upper()
-                if sym0:
-                    by_symloc.setdefault((sym0, d0["location"]), []).append(d0)
+        _load_position_rows(conn, lp_pos_rows, pos_rows, G, by_symloc)
         ex_resid9 = {}
         for key0, rows0 in by_symloc.items():
             neg0 = sum((-r["qty"] for r in rows0 if r["qty"] < 0), Decimal(0))
@@ -3414,9 +3444,9 @@ class ReplayMixin:
         pv_its9 = []
         try:
             pv_its9 = self._prov_items(conn)
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-            log.warning("지금 잔고(첫 대사 전) 읽기 실패(원장 숫자만): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[pv_its9]", e9)
+            log.warning("지금 잔고(첫 대사 전) 읽기 실패(원장 숫자만): %s", logs.safe_err(e9)[:160])
         if pv_its9:
             nsym9 = dict(self.cfg.get("native_symbol") or {})
             pv_its9 = provbal.net_pending(pv_its9, wdt_all, chain_of=depaddr.chain_of, norm=xfer_match.norm_addr,
@@ -3424,9 +3454,9 @@ class ReplayMixin:
         xp_its9 = []
         try:
             xp_its9 = self._exf_prov_items(conn, exb9)
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-            log.warning("거래소 지금 잔고(첫 대사 전) 읽기 실패(원장 숫자만): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[xp_its9]", e9)
+            log.warning("거래소 지금 잔고(첫 대사 전) 읽기 실패(원장 숫자만): %s", logs.safe_err(e9)[:160])
         pv_adj9 = {}
         pv_unk9 = []
         xp_unk9 = []
@@ -3504,15 +3534,15 @@ class ReplayMixin:
         upbit_transit_gids = {
             e2["gid"] for lst in ex_transit.values() for e2 in lst
             if not e2["credited"] and not e2["used"]}
-        ub_path9 = os.path.join(common.STATE_DIR, "upbit_balances.json")
+        ub_path9 = paths.state("upbit_balances.json")
         ub_snap9 = None
         uf_dl9, uf_kc9, self._ub_fill_info = {}, {}, {"why": "none", "n": 0, "ts": 0}
         try:
-            ub_snap9 = common.read_json(ub_path9, {}) if os.path.exists(ub_path9) else {}
+            ub_snap9 = statefile.read_json(ub_path9, {}) if os.path.exists(ub_path9) else {}
             pos_disp9, uf_dl9, uf_kc9, self._ub_fill_info = self._ub_fill_view(conn, ub_snap9, pos_disp9, G, upbit_transit_gids, now)
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-            log.warning("업비트 미체결 주문 체결분 보정 실패(원장 수량 그대로): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[ub_snap9]", e9)
+            log.warning("업비트 미체결 주문 체결분 보정 실패(원장 수량 그대로): %s", logs.safe_err(e9)[:160])
         for gid9, (k9, c9) in uf_kc9.items():
             uncred_known[gid9] = uncred_known.get(gid9, Decimal(0)) + k9
             uncred_cost[gid9] = uncred_cost.get(gid9, Decimal(0)) + c9

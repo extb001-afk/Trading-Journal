@@ -1,6 +1,6 @@
 import acct_norm
 import json
-import pricing
+import pricing, token_tables
 import random
 import spamguard
 import sqlite3
@@ -18,7 +18,7 @@ from decimal import Decimal
 from decimal import InvalidOperation
 from decimal import localcontext
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -37,12 +37,12 @@ class PricingMixin:
                 return 1.0
             return self.px.candle_usd(sym, ts * 1000) if sym else None
         if kind == "token" and ca:
-            st = pricing.STABLE_CAS.get(chain, {}).get(ca)
+            st = token_tables.STABLE_CAS.get(chain, {}).get(ca)
             if chain == "sol" and not st:
-                st = pricing.STABLE_MINTS.get(ca)
+                st = token_tables.STABLE_MINTS.get(ca)
             if st:
                 return 1.0
-            jst = pricing.JPY_STABLE_CAS.get(chain, {}).get(ca)
+            jst = token_tables.JPY_STABLE_CAS.get(chain, {}).get(ca)
             if jst:
                 return self.px.jpy_stable_usd(jst, ts * 1000)
             if ca == self.wrapped.get(chain):
@@ -62,13 +62,15 @@ class PricingMixin:
         return None
 
     def _is_stable_aid(self, aid: int) -> bool:
-        r = self.conn.execute("SELECT kind, chain, address FROM assets WHERE asset_id=?",
+        r = self.conn.execute("SELECT kind, chain, address, symbol FROM assets WHERE asset_id=?",
                               (aid,)).fetchone()
+        if r and r["kind"] == "native":
+            return (r["symbol"] or "").upper() in pricing.DOLLAR_NATIVES
         if not r or r["kind"] != "token" or not r["address"]:
             return False
-        if pricing.STABLE_CAS.get(r["chain"], {}).get(r["address"]):
+        if token_tables.STABLE_CAS.get(r["chain"], {}).get(r["address"]):
             return True
-        return r["chain"] == "sol" and r["address"] in pricing.STABLE_MINTS
+        return r["chain"] == "sol" and r["address"] in token_tables.STABLE_MINTS
 
     OUT_PX_BAND = (Decimal("0.2"), Decimal("5"))
 
@@ -77,8 +79,8 @@ class PricingMixin:
         if not r or r["kind"] != "token" or not r["address"]:
             return False
         ch, ca = r["chain"], r["address"]
-        if pricing.STABLE_CAS.get(ch, {}).get(ca) or (ch == "sol" and ca in pricing.STABLE_MINTS) \
-                or pricing.JPY_STABLE_CAS.get(ch, {}).get(ca) or ca == self.wrapped.get(ch):
+        if token_tables.STABLE_CAS.get(ch, {}).get(ca) or (ch == "sol" and ca in token_tables.STABLE_MINTS) \
+                or token_tables.JPY_STABLE_CAS.get(ch, {}).get(ca) or ca == self.wrapped.get(ch):
             return False
         return not spamguard.is_genuine(ch, ca)
 
@@ -95,7 +97,7 @@ class PricingMixin:
             if sym and ts_ms is not None and hasattr(self.px, "candle_venue"):
                 try:
                     ven9 = self.px.candle_venue(sym, ts_ms)
-                except Exception as _cg9:
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("core_pricing:PricingMixin._sym_px_verdict", _cg9)
                     ven9 = None
             vex9 = {"upbit_krw": "upbit"}.get(ven9, ven9)
@@ -137,7 +139,7 @@ class PricingMixin:
         try:
             import candles as _cd
             return _cd.cg_ids(ex, sym, fetch=False) or set()
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_pricing:PricingMixin._cg_venue_ids", _cg9)
             return set()
 
@@ -266,7 +268,7 @@ class PricingMixin:
                 u = self._own_unit_cost(aid)
                 if u and lo <= Decimal(str(r["cost_usd"])) / q9 / u <= hi:
                     continue
-                self.conn.execute("UPDATE postings SET cost_usd=NULL, cost_krw=NULL WHERE posting_id=?", (r["posting_id"],))
+                self._leg_sql("_out_px_band_fix_once.1", (r["posting_id"],))
                 changed.append((int(r["posting_id"]), r["source_ns"], r["source_id"], int(aid), str(r["cost_usd"])))
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('px_out_band_r', ?)", (f"{int(time.time())}:{len(changed)}",))
             self.conn.commit()
@@ -355,9 +357,8 @@ class PricingMixin:
                     continue
             except (TypeError, ValueError):
                 pass
-            cur9 = self.conn.execute(
-                "UPDATE postings SET cost_usd=?, cost_krw=? WHERE posting_id=?"
-                " AND (cost_usd IS NULL OR (event='SWAP' AND leg_kind IN ('disp','acq')))",
+            cur9 = self._leg_sql(
+                "_price_tx.1",
                 (repr(usd), repr(usd * fx) if fx else None, pid))
             n9 += max(0, cur9.rowcount or 0)
         self.conn.commit()
@@ -403,8 +404,8 @@ class PricingMixin:
             sym = sym or self.native_sym.get(chain, "")
             return None if sym in pricing.DOLLAR_NATIVES else (sym or None)
         if kind == "token" and ca:
-            if pricing.STABLE_CAS.get(chain, {}).get(ca) or (chain == "sol" and pricing.STABLE_MINTS.get(ca)) \
-                    or pricing.JPY_STABLE_CAS.get(chain, {}).get(ca):
+            if token_tables.STABLE_CAS.get(chain, {}).get(ca) or (chain == "sol" and token_tables.STABLE_MINTS.get(ca)) \
+                    or token_tables.JPY_STABLE_CAS.get(chain, {}).get(ca):
                 return None
             if ca == self.wrapped.get(chain):
                 return self.native_sym.get(chain, "ETH")
@@ -473,8 +474,7 @@ class PricingMixin:
                     krw9 = repr(float(r["cost_usd"]) * fx)
                 except (TypeError, ValueError):
                     continue
-                self.conn.execute("UPDATE postings SET cost_krw=? WHERE posting_id=? AND cost_krw IS NULL AND cost_usd=?",
-                                  (krw9, r["posting_id"], r["cost_usd"]))
+                self._leg_sql("krw_fill_pass.1", (krw9, r["posting_id"], r["cost_usd"]))
                 n9 += 1
         self.conn.commit()
         if n9 or st9["calls"]:
@@ -507,8 +507,8 @@ class PricingMixin:
             rows = (cand[i9:] + cand[:i9])[:PRICE_BULK_BATCH]
             try:
                 self._px_prefetch(rows, time.time() + PRICE_BULK_BUDGET)
-            except Exception as e:
-                calcguard.swallowed("core_pricing:PricingMixin.price_pass", e)
+            except Exception as e:   # noqa: BLE001 [optional]
+                calcguard.swallowed("core_pricing:PricingMixin.price_pass[_px_prefetch]", e)
                 log.warning("가격 선조회 실패(단건 조회로 계속): %s", e)
         else:
             rows = random.sample(cand, PRICE_BATCH) if len(cand) > PRICE_BATCH else cand
@@ -527,8 +527,8 @@ class PricingMixin:
                     d9 = min(PRICE_BACKOFF_MAX, max(PRICE_BACKOFF_MIN, boff.get(k9, (0, 0))[1] * 2))
                     boff[k9] = (time.time() + d9, d9)
                 done += 1
-            except Exception as e:
-                calcguard.swallowed("core_pricing:PricingMixin.price_pass", e)
+            except Exception as e:  # noqa: BLE001 [isolate]
+                calcguard.swallowed("core_pricing:PricingMixin.price_pass[_price_tx]", e)
                 self.conn.rollback()
                 log.warning("가격패스 %s %s 실패(다음 주기 재시도): %s", r["chain"], r["txhash"][:12], e)
         if len(boff) > 50000:
@@ -549,8 +549,7 @@ class PricingMixin:
                     usd = float(r["cost_krw"]) / fx
                 except (TypeError, ValueError):
                     continue
-                self.conn.execute("UPDATE postings SET cost_usd=? WHERE posting_id=?"
-                                  " AND cost_usd IS NULL", (repr(usd), r["posting_id"]))
+                self._leg_sql("price_pass.1", (repr(usd), r["posting_id"]))
                 ex_done += 1
         exf_rows = self.conn.execute(
             "SELECT DISTINCT source_ns, source_id, event_ts FROM postings"
@@ -571,15 +570,14 @@ class PricingMixin:
                 px99 = Decimal(str(f9.get("price") or "0"))
             except (json.JSONDecodeError, ArithmeticError):
                 continue
-            qu9 = self._quote_usd(str(f9.get("quote") or ""), int(r["event_ts"]))
+            qu9 = self.svc_exf._quote_usd(str(f9.get("quote") or ""), int(r["event_ts"]))
             time.sleep(0.1)
             if qu9 is None or qty9 <= 0 or px99 <= 0:
                 continue
             usd9 = float(qty9 * px99 * qu9)
             fx99 = self.px.fx_at(int(r["event_ts"]) * 1000)
-            self.conn.execute(
-                "UPDATE postings SET cost_usd=?, cost_krw=? WHERE source_ns=? AND source_id=?"
-                " AND leg_seq IN (0, 1) AND cost_usd IS NULL",
+            self._leg_sql(
+                "price_pass.2",
                 (repr(usd9), repr(usd9 * fx99) if fx99 else None,
                  r["source_ns"], r["source_id"]))
             exf_done += 1
@@ -606,18 +604,17 @@ class PricingMixin:
                 o9 = json.loads(raw9["payload"]) if raw9 else None
             except json.JSONDecodeError:
                 o9 = None
-            p9 = self._upbit_quote_fill_legs(o9) if isinstance(o9, dict) else None
+            p9 = self.svc_exf._upbit_quote_fill_legs(o9) if isinstance(o9, dict) else None
             if p9 is None:
                 continue
-            qu9 = self._quote_usd(p9[1], p9[4])
+            qu9 = self.svc_exf._quote_usd(p9[1], p9[4])
             time.sleep(0.1)
             if qu9 is None:
                 continue
             usd9 = float(Decimal(abs(p9[3])) / (Decimal(10) ** 8) * qu9)
             fx99 = self.px.fx_at(p9[4] * 1000)
-            self.conn.execute(
-                "UPDATE postings SET cost_usd=?, cost_krw=? WHERE source_ns='upbit:order' AND source_id=?"
-                " AND leg_seq IN (0, 1) AND cost_usd IS NULL",
+            self._leg_sql(
+                "_price_upbit_quote_fills.1",
                 (repr(usd9), repr(usd9 * fx99) if fx99 else None, r["source_id"]))
             n9 += 1
         return n9

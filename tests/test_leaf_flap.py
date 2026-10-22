@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import inspect
-import json
-import os
-import time
+import inspect  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 W = ["0x" + f"{0xc0 + i:02x}" * 20 for i in range(2)]
@@ -16,12 +16,12 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
 C0, TGT = 51_240_000, 51_888_500
 LEAVES = [51_888_466, 51_888_472, 51_888_474, 51_888_479, 51_888_481]
 
@@ -52,8 +52,8 @@ def run(extra_cursor=None, cycles=90, fail_pick=None, deposit=False):
     cur = {"_rpc_v": 1, "_start": C0}
     cur.update({w: C0 for w in W})
     cur.update(extra_cursor or {})
-    common.atomic_write_json(CPATH, cur)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json"), [])
+    statefile.atomic_write_json(CPATH, cur)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json"), [])
     ft = FakeTime()
     real = evm_watch.time
     evm_watch.time = ft
@@ -89,7 +89,7 @@ def run(extra_cursor=None, cycles=90, fail_pick=None, deposit=False):
                 got = w._advance(list(W), C0, TGT, TGT + 10, ft.t + 15)
             except RuntimeError:
                 got = C0
-                w.cursor = common.read_json(CPATH, {})
+                w.cursor = statefile.read_json(CPATH, {})
             if got > C0:
                 adv_at = i
                 break
@@ -113,7 +113,7 @@ w, adv_at, st = run()
 T.chk(adv_at is not None and adv_at <= 40, "F1 실패 잎이 사이클마다 바뀌어도 ≈30분 안에 커서 전진(종전: 90분 넘게 정지 — 잎마다 계수 다시 시작)",
       {"advanced_cycle": adv_at, "fails": st["fails"][:12]})
 T.chk(adv_at is not None and adv_at >= 29, "F2 한도(30분) 전엔 종전대로 커서 유지 — 너무 일찍 넘기지 않음", adv_at)
-d = common.read_json(CPATH, {})
+d = statefile.read_json(CPATH, {})
 T.chk(adv_at is not None and all(int(d.get(x) or 0) == TGT for x in W), "F2 전진 = 두 지갑 커서 TGT", {x[:6]: d.get(x) for x in W})
 ll = d.get("_leaf_later") or {}
 T.chk(ll and all(isinstance(v, dict) and v.get("w") == W[0] and int(v.get("blk") or 0) in LEAVES for v in ll.values()),
@@ -126,21 +126,21 @@ T.chk(adv_same is not None and 29 <= adv_same <= 40, "F2 같은 잎만 계속 �
 old = {f"{W[0][:12]}:{y}": [2, 1_800_000_000 - 100] for y in LEAVES[:2]}
 old[f"{W[1][:12]}:123"] = [1, 1_800_000_000 - 90_000]
 w, adv3, st3 = run(extra_cursor={"_leaf_fail": dict(old)})
-d3 = common.read_json(CPATH, {})
+d3 = statefile.read_json(CPATH, {})
 T.chk(adv3 is not None and adv3 <= 40, "F3 옛 키(지갑:블록)가 있어도 기동·전진 정상", adv3)
 T.chk(not any(k in (d3.get("_leaf_fail") or {}) for k in old), "F3 옛 키는 성공 잎·24시간 정리로 사라짐", d3.get("_leaf_fail"))
 
-OVF = os.path.join(common.STATE_DIR, f"leaf_later_overflow_{CH}.jsonl")
+OVF = os.path.join(paths.STATE_DIR, f"leaf_later_overflow_{CH}.jsonl")
 full = {f"{W[1][:12]}:{100 + i}": {"w": W[1], "blk": 100 + i, "at": 1_799_000_000 + i, "n": 1, "next": 1_900_000_000} for i in range(evm_watch.RpcChainWatcher.LEAF_LATER_MAX)}
 if os.path.exists(OVF):
     os.remove(OVF)
 w, adv4, st4 = run(extra_cursor={"_leaf_later": dict(full)}, cycles=45, deposit=True)
-d4 = common.read_json(CPATH, {})
+d4 = statefile.read_json(CPATH, {})
 ll4 = d4.get("_leaf_later") or {}
 T.chk(all(k in ll4 for k in full), "F4 큐가 꽉 차도 기존 '나중에 다시' 잎을 잘라 버리지 않음(종전: 오래된 것부터 무음 삭제 → internal 입금 영구 누락)",
       {"kept": sum(1 for k in full if k in ll4), "of": len(full)})
 T.chk(adv4 is not None and adv4 <= 40 and all(int(d4.get(x) or 0) == TGT for x in W),
-      "F4 포화여도 커서 전진(≈30분 한도 그대로) — 옛 잎 실패가 라이브 꼬리를 붙잡지 않음(bk471 판: 무기한 유지)", {"adv": adv4})
+      "F4 포화여도 커서 전진(≈30분 한도 그대로) — 옛 잎 실패가 라이브 꼬리를 붙잡지 않음(종전 판: 무기한 유지)", {"adv": adv4})
 T.chk(HNEW in [r.get("txhash") for r in w.writer.recs], "F4 그 걸음의 최신 입금 tx 방출(포화가 최신 방출을 막지 않음)", len(w.writer.recs))
 ov4 = []
 if os.path.exists(OVF):
@@ -212,7 +212,7 @@ with open(OVF, "w", encoding="utf-8") as f9:
     f9.write(json.dumps({"k": f"{W[0][:12]}:7777", "w": W[0], "blk": 7777, "at": 5}) + "\n")
 w7.cursor["_leaf_overflow"] = 1
 r7 = T.safe(evm_watch.rpc_handback, w7, "blockscout")
-d7 = common.read_json(CPATH, {})
+d7 = statefile.read_json(CPATH, {})
 left7 = d7.get("_leaf_later_left") or {}
 T.chk(not isinstance(r7, dict) and any(int(v.get("blk") or 0) == 7777 for v in left7.values())
       and any(r.get("kind") == "leaf" and r.get("to_block") == 7777 for r in ((d7.get("_ext_internal_pending") or {}).get("ranges") or []))
@@ -222,27 +222,27 @@ T.chk(not isinstance(r7, dict) and any(int(v.get("blk") or 0) == 7777 for v in l
 CB = "zbs"
 CFG["chains"][CB] = {"discovery": "explorer", "chain_id": 16662, "rpcs": ["http://127.0.0.1:9/rpc"], "blockscout": "http://127.0.0.1:9/bs",
                      "etherscan_chainid": 16662, "conf_depth": 10, "blocks_per_day": 43200, "poll_sec": 60, "cycle_budget_sec": 15}
-CPB = os.path.join(common.STATE_DIR, f"cursor_evm_{CB}.json")
-OVB = os.path.join(common.STATE_DIR, f"leaf_later_overflow_{CB}.jsonl")
+CPB = os.path.join(paths.STATE_DIR, f"cursor_evm_{CB}.json")
+OVB = os.path.join(paths.STATE_DIR, f"leaf_later_overflow_{CB}.jsonl")
 HTL9 = "0x" + "7a" * 32
 for tgt9 in ("blockscout", "etherscan"):
-    for p9 in (OVB, os.path.join(common.STATE_DIR, f"enrich_{CB}.json"), os.path.join(common.STATE_DIR, f"hq_left_{CB}.json"),
-               os.path.join(common.STATE_DIR, f"trace_later_left_{CB}.json")):
+    for p9 in (OVB, os.path.join(paths.STATE_DIR, f"enrich_{CB}.json"), os.path.join(paths.STATE_DIR, f"hq_left_{CB}.json"),
+               os.path.join(paths.STATE_DIR, f"trace_later_left_{CB}.json")):
         if os.path.exists(p9):
             os.remove(p9)
-    common.atomic_write_json(CPB, {"_rpc_v": 1, "_start": 1000, W[0]: 900_000, W[1]: 900_000,
+    statefile.atomic_write_json(CPB, {"_rpc_v": 1, "_start": 1000, W[0]: 900_000, W[1]: 900_000,
                                    "_leaf_later": {f"{W[0][:12]}:6000": {"w": W[0], "blk": 6000, "at": 1, "n": 1, "next": 2}},
                                    "_trace_later": {HTL9: {"at": 1, "n": 1, "next": 2, "blk": 6100, "sent": True}}, "_leaf_overflow": 1})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"emitted_evm_{CB}.json"), [])
-    common.append_durable_jsonl(OVB, {"k": f"{W[1][:12]}:7777", "w": W[1], "blk": 7777, "at": 5})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"emitted_evm_{CB}.json"), [])
+    statefile.append_durable_jsonl(OVB, {"k": f"{W[1][:12]}:7777", "w": W[1], "blk": 7777, "at": 5})
     wt9 = evm_watch.RpcChainWatcher(CFG, CB, list(W), Wr())
     wt9.fb_info = {"src": tgt9, "why": "시험"}
     if tgt9 == "blockscout":
-        mk9 = lambda c9, ch9, ad9: evm_watch.ChainWatcher(c9, ch9, ad9, Wr())
+        mk9 = lambda c9, ch9, ad9: evm_watch.ChainWatcher(c9, ch9, ad9, Wr())   # noqa: E731
     else:
-        mk9 = lambda c9, ch9, ad9: evm_watch.EtherscanWatcher(c9, ch9, ad9, Wr(), 16662, "TESTKEY0123")
+        mk9 = lambda c9, ch9, ad9: evm_watch.EtherscanWatcher(c9, ch9, ad9, Wr(), 16662, "TESTKEY0123")   # noqa: E731
     nw9 = T.safe(evm_watch.rpcfb_try_return, CFG, wt9, mk9, "TESTKEY0123")
-    d9 = common.read_json(CPB, {})
+    d9 = statefile.read_json(CPB, {})
     left9 = d9.get("_leaf_later_left") or {}
     rng9 = (d9.get("_ext_internal_pending") or {}).get("ranges") or []
     T.chk(not isinstance(nw9, dict) and type(nw9).__name__ == ("ChainWatcher" if tgt9 == "blockscout" else "EtherscanWatcher"),
@@ -254,14 +254,14 @@ for tgt9 in ("blockscout", "etherscan"):
     if tgt9 == "blockscout":
         T.chk(any(r.get("kind") == "leaf" and r.get("to_block") == 7777 for r in rng9), "F9 blockscout: 넘침 잎 = 그 지갑 internal 재훑기 구간(leaf)",
               [(r.get("kind"), r.get("to_block")) for r in rng9])
-        T.chk(HTL9 in (common.read_json(os.path.join(common.STATE_DIR, f"enrich_{CB}.json"), {}) or {}), "F9 blockscout: 늦은 채움(_trace_later) = enrich 로(같은 경로)")
+        T.chk(HTL9 in (statefile.read_json(os.path.join(paths.STATE_DIR, f"enrich_{CB}.json"), {}) or {}), "F9 blockscout: 늦은 채움(_trace_later) = enrich 로(같은 경로)")
     else:
         T.chk(W[1] not in d9 and W[0] not in d9, "F9 etherscan: 넘침 잎 지갑도 첫 백필(커서 지움 — 목록 3종이 internal 까지 완전)", sorted(k[:6] for k in d9 if not k.startswith("_")))
-        T.chk(HTL9 in (common.read_json(os.path.join(common.STATE_DIR, f"hq_left_{CB}.json"), {}) or {}), "F9 etherscan: 늦은 채움(_trace_later) = hq_left 보관(같은 경로)")
-    T.chk(HTL9 in (common.read_json(os.path.join(common.STATE_DIR, f"trace_later_left_{CB}.json"), {}) or {}),
+        T.chk(HTL9 in (statefile.read_json(os.path.join(paths.STATE_DIR, f"hq_left_{CB}.json"), {}) or {}), "F9 etherscan: 늦은 채움(_trace_later) = hq_left 보관(같은 경로)")
+    T.chk(HTL9 in (statefile.read_json(os.path.join(paths.STATE_DIR, f"trace_later_left_{CB}.json"), {}) or {}),
           f"F9 {tgt9}: 늦은 채움 원본 표식 보관(trace_later_left — 다시 RPC 면 되살림)")
 
-import health
+import health  # noqa: E402
 
 tx8 = getattr(health, "leaf_overflow_text", None)
 T.chk(tx8 is not None and tx8({}) is None and "3" in (tx8({"_leaf_overflow": 3}) or "")

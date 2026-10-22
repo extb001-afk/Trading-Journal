@@ -6,16 +6,16 @@ import os
 import re
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 import candles
-import common
+import config, histmark, logs, paths, statefile
 import xparts
-import calcguard
+import calcguard  # noqa: E402
 
-log = common.setup_logging("tj-web")
+log = logs.setup_logging("tj-web")
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 XQ_X_KEYS = {"upbit": ("ku", "ub"), "bithumb": ("kb",)}
 LQ_V = 1
 HIST_V = 1
@@ -34,7 +34,7 @@ FFILL_MIN_DENSITY = 0.5
 STABLE_SYMS = {"USDT", "USDC", "DAI", "BUSD", "USDG", "USDE", "CUSD", "USD1", "NUSD", "USDM"}
 GLOBAL_USD = ("binance", "bybit")
 SYM_ORDER = tuple((v9, "USDT") for v9 in GLOBAL_USD) + (("coingecko", None), ("upbit", "KRW"), ("bithumb", "KRW"))
-EX_QUOTE = {"upbit": "KRW", "bithumb": "KRW", "binance": "USDT", "bybit": "USDT", "okx": "USDT", "gate": "USDT", "kucoin": "USDT"}
+EX_QUOTE = {"upbit": "KRW", "bithumb": "KRW", "binance": "USDT", "bybit": "USDT", "okx": "USDT", "gate": "USDT", "kucoin": "USDT", "coinbase": "USD"}
 PX1004_V = 1
 RETRY_S = 12 * 3600
 IDP_RETRY_S = RETRY_S
@@ -488,12 +488,12 @@ def valid_addr(chain, a) -> bool:
 
 def off_chains_now() -> set:
     try:
-        cfg = common.read_json(common.CONFIG_PATH, {}) or {}
-    except (Exception, SystemExit) as _cg9:
+        cfg = statefile.read_json(paths.CONFIG_PATH, {}) or {}
+    except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("histcurve:off_chains_now", _cg9)
         return set()
     ch = cfg.get("chains") if isinstance(cfg.get("chains"), dict) else {}
-    return {c for c, cc in ch.items() if isinstance(cc, dict) and not common.chain_enabled(c, cc)}
+    return {c for c, cc in ch.items() if isinstance(cc, dict) and not config.chain_enabled(c, cc)}
 
 
 def spec_off(k, off) -> bool:
@@ -773,6 +773,9 @@ def fetch_entry(k, lo, hi, now, need=None, fx_get=None, prev=None, xref=None, bl
             for v in GLOBAL_USD:
                 map_verdict(v, b, v0)
         r = candles.fetch_cex(v0, b, q0, "1d", t0, t1, now=now)
+        if v0 == "coinbase" and r.why == "no_market":
+            q0 = "USDC"
+            r = candles.fetch_cex(v0, b, q0, "1d", t0, t1, now=now)
         if r.ok:
             take(r.candles, conv=(q0 == "KRW") or None, label=f"{v0}:{candles.market_name(v0, b, q0)}")
             own9.update({iso: v9 for iso, v9 in p.items()})
@@ -896,8 +899,8 @@ def xref_fn(k, stores):
 
 class HistCurve:
     def __init__(self, path=None, px_path=None, run_calls=RUN_CALLS, gap=RUN_GAP_S):
-        self.path = path or os.path.join(common.STATE_DIR, "curve_hist.json")
-        self.px_path = px_path or os.path.join(common.STATE_DIR, "curve_hist_px.json")
+        self.path = path or paths.state("curve_hist.json")
+        self.px_path = px_path or paths.state("curve_hist_px.json")
         self.run_calls = run_calls
         self.gap = gap
         self.lock = threading.Lock()
@@ -907,7 +910,7 @@ class HistCurve:
         self.last_offer = 0.0
         self.last_run = None
         self.flow_fn = None
-        st = common.read_json(self.path, None) if os.path.exists(self.path) else None
+        st = statefile.read_json(self.path, None) if os.path.exists(self.path) else None
         self.st = st if isinstance(st, dict) and st.get("_v") == HIST_V else {"_v": HIST_V, "d": {}, "s": {}, "meta": {}}
         if isinstance(st, dict) and st.get("_v") != HIST_V:
             self.st["d"] = {k: v for k, v in (st.get("d") or {}).items() if isinstance(v, list) and len(v) >= 4 and v[3] == "dc"}
@@ -917,7 +920,7 @@ class HistCurve:
         if fv_new9:
             f9 = {k: v for k, v in f9.items() if isinstance(v, list) and len(v) >= 4 and v[3] == "dc"}
         self.st["f"], self.st["fv"] = f9, FLOW_V
-        px = common.read_json(self.px_path, None) if os.path.exists(self.px_path) else None
+        px = statefile.read_json(self.px_path, None) if os.path.exists(self.px_path) else None
         self.px = px if isinstance(px, dict) and px.get("_v") == 1 else {"_v": 1, "specs": {}, "fx": None}
         m9 = self.st.get("meta") or {}
         self.pending = bool(m9.get("pending", True))
@@ -929,7 +932,7 @@ class HistCurve:
 
     def _dirty_marks(self):
         try:
-            cur = common.read_json(os.path.join(common.STATE_DIR, common.HIST_DIRTY), None)
+            cur = statefile.read_json(paths.state(histmark.HIST_DIRTY), None)
         except SystemExit:
             return []
         return [m for m in ((cur or {}).get("marks") or []) if isinstance(m, list) and len(m) >= 3] if isinstance(cur, dict) else []
@@ -959,7 +962,7 @@ class HistCurve:
                 return None
             left = [m for m in (cur.get("marks") or []) if isinstance(m, list) and len(m) >= 3 and int(m[0]) not in seqs]
             return dict(cur, marks=left, **{"from": min(m[1] for m in left)}) if left else None
-        common.hist_dirty_update(upd)
+        histmark.hist_dirty_update(upd)
 
     def need(self, today_iso, now=None) -> bool:
         now = time.time() if now is None else now
@@ -998,7 +1001,7 @@ class HistCurve:
                 continue
             try:
                 self.run_once(kit)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 calcguard.swallowed("histcurve:HistCurve.worker", e)
                 log.warning("장기 곡선 계산 실패(다음에 다시): %s", e)
 
@@ -1115,7 +1118,7 @@ class HistCurve:
             ds9 = sorted(served_days(e9, flip9))
             if ds9:
                 t9 = int(datetime.strptime(min(ds9), "%Y-%m-%d").replace(tzinfo=KST, hour=12).timestamp())
-                (getattr(self, "mark", None) or common.mark_hist_dirty)(t9)
+                (getattr(self, "mark", None) or histmark.mark_hist_dirty)(t9)
                 log.warning("장기 곡선: %s 막힌 거래소 바뀜 %s — %s 부터 다시 계산 표식", k9, sorted(flip9), min(ds9))
             self._note_dc(k9, set(ds9), flip9)
             if (ub9 - vb9) & (map_blocked(k9) - set(e9.get("blk") or ())) and ds9:
@@ -1234,9 +1237,9 @@ class HistCurve:
             self.st = {"_v": HIST_V, "d": d, "s": s, "f": f, "fv": FLOW_V, "meta": meta, "x": xs,
                        "dqd": {k9: v9 for k9, v9 in dqd.items() if isinstance(d.get(k9), list) and len(d[k9]) >= 4 and d[k9][3] == "dc"},
                        "xqd": {k9: v9 for k9, v9 in xqd.items() if isinstance(d.get(k9), list) and len(d[k9]) >= 4 and d[k9][3] == "dc"}}
-        common.atomic_write_json(self.path, self.st)
+        statefile.atomic_write_json(self.path, self.st)
         if rep["fetched"] or rep["calls"] or rep.get("vblk"):
-            common.atomic_write_json(self.px_path, self.px)
+            statefile.atomic_write_json(self.px_path, self.px)
         if dirty9:
             self._dirty_done(dirty9[1])
             log.warning("장기 곡선: 원장 지난 시각 변경 표식 — %s 부터 창 밖 동결 날 다시 계산(%d일)", dirty9[0], rep["computed"])
@@ -1305,8 +1308,8 @@ class HistCurve:
             return self.fx(iso)
         try:
             res = fn(fk, todo, dpx, flow_fx) or {}
-        except Exception as e:
-            calcguard.swallowed("histcurve:HistCurve._flows", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("histcurve:HistCurve._flows[res]", e)
             self.flow_fails += 1
             self.flow_pending = True
             log.warning("장기 곡선 입출금 계산 실패(%d회): %s", self.flow_fails, e)
@@ -1317,9 +1320,9 @@ class HistCurve:
         if dc9:
             try:
                 import rabby
-                rbn9 = rabby.day_new(rabby.load_state(os.path.join(common.STATE_DIR, rabby.DAILY_NAME)), dc9, today)
-            except Exception as e9:
-                calcguard.swallowed("histcurve:HistCurve._flows", e9)
+                rbn9 = rabby.day_new(rabby.load_state(paths.state(rabby.DAILY_NAME)), dc9, today)
+            except Exception as e9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("histcurve:HistCurve._flows[blk]", e9)
                 log.warning("장기 곡선 입출금: Rabby 첫 반영 읽기 실패(원장 순유입만): %s", e9)
                 rbn9 = {}
             for iso, nv9 in rbn9.items():
@@ -1372,7 +1375,7 @@ class HistCurve:
         self.px["specs"][k] = e9
         if chg9:
             t9 = int(datetime.strptime(min(chg9), "%Y-%m-%d").replace(tzinfo=KST, hour=12).timestamp())
-            (getattr(self, "mark", None) or common.mark_hist_dirty)(t9)
+            (getattr(self, "mark", None) or histmark.mark_hist_dirty)(t9)
             log.warning("장기 곡선: %s 그날 값·출처 바뀜 %d일 — %s 부터 다시 계산 표식", k, len(chg9), min(chg9))
         self._note_dc(k, set(chg9), set(e9.get("blk") or ()) ^ set(prev.get("blk") or ()))
 
@@ -1648,13 +1651,13 @@ def _final(e) -> bool:
 
 class DayClose:
     def __init__(self, path=None, hist=None, run_calls=DC_RUN_CALLS, gap=DC_GAP_S, day_calls=DC_DAY_CALLS):
-        self.path = path or os.path.join(common.STATE_DIR, "daily_close_px.json")
+        self.path = path or paths.state("daily_close_px.json")
         self.hist = hist
         self.run_calls, self.gap, self.day_calls = run_calls, gap, day_calls
         self.lock = threading.Lock()
         self.run_lock = threading.Lock()
         self.ev = threading.Event()
-        st = common.read_json(self.path, None) if os.path.exists(self.path) else None
+        st = statefile.read_json(self.path, None) if os.path.exists(self.path) else None
         self.st = st if isinstance(st, dict) and st.get("_v") == 1 else {"_v": 1, "s": {}, "fx": None, "calls": []}
         self.want = {}
         self.want_old = {}
@@ -1742,7 +1745,7 @@ class DayClose:
         now = time.time() if now is None else now
         try:
             self.map_recheck()
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [optional]
             calcguard.swallowed("histcurve:DayClose.resolver", e9)
             log.warning("그날 마감가: 매핑 재확인 실패(다음에): %s", e9)
 
@@ -1779,7 +1782,7 @@ class DayClose:
                 continue
             try:
                 self.run_once()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 calcguard.swallowed("histcurve:DayClose.worker", e)
                 log.warning("그날 마감가 받기 실패(다음에 다시): %s", e)
 
@@ -1976,7 +1979,7 @@ class DayClose:
             rep["old_left"] = len(self.want_old)
         if rep["fetched"] or rep["calls"]:
             with self.lock:
-                common.atomic_write_json(self.path, self.st)
+                statefile.atomic_write_json(self.path, self.st)
         rep["by_host_calls"] = candles.CALLS["n"] - n0
         self.last_run = rep
         log.info("그날 마감가: 받은 출처 %d · HTTP 시도 %d · 풀린 요청 %d · 남은 요청 %d", rep["fetched"], rep["calls"], rep["resolved"], rep["left"])
@@ -2016,13 +2019,13 @@ class DayClose:
             st9["chg"] = chg9
             self.st = st9
             self.gen += 1
-            common.atomic_write_json(self.path, self.st)
+            statefile.atomic_write_json(self.path, self.st)
         log.warning("그날 마감가 변경 기록(장기 곡선 쪽 동명 차단·대체): %s %d일(%s~)", spec, len(days), days[0])
         return len(days)
 
     def _mark_dirty(self, iso):
         t9 = int(datetime.strptime(iso, "%Y-%m-%d").replace(tzinfo=KST, hour=12).timestamp())
-        (getattr(self, "mark", None) or common.mark_hist_dirty)(t9)
+        (getattr(self, "mark", None) or histmark.mark_hist_dirty)(t9)
         log.warning("동명 차단·동일성 확인 뒤 장기 곡선 다시 계산 표식: %s 부터", iso)
 
     def lookup_state(self, spec, iso, now):
@@ -2056,11 +2059,11 @@ def migrate_px1004(dc=None, hist=None, now=None, backup=_px1004_backup, mark=Non
     if not bad_dc and not bad_h and not hpend0:
         return None
     first = min((min(hs[k]["p"]) for k in bad_h if isinstance(hs[k].get("p"), dict) and hs[k]["p"]), default=None) or m0.get("hfrom")
-    dirty_p = os.path.join(common.STATE_DIR, common.HIST_DIRTY)
+    dirty_p = paths.state(histmark.HIST_DIRTY)
     files9 = [dc.path] + ([hist.px_path] if bad_h else []) + ([dirty_p] if (bad_h or hpend0) and first and os.path.exists(dirty_p) else [])
     try:
         bak = backup(files9, ts) if backup else []
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("histcurve:migrate_px1004", e9)
         log.warning("px1004: 이관 전 백업 실패 — 이번 기동은 안 바꿈: %s", e9)
         return None
@@ -2083,17 +2086,17 @@ def migrate_px1004(dc=None, hist=None, now=None, backup=_px1004_backup, mark=Non
                 dc.st = dict(dc.st, s=s9, px1004=rec9, chg=chg9)
                 dc.gen += 1
                 dc._ff = {}
-            common.atomic_write_json(dc.path, dc.st)
+            statefile.atomic_write_json(dc.path, dc.st)
     save_dc(hpend9)
     if hpend9:
         if first:
             t9 = int(datetime.strptime(first, "%Y-%m-%d").replace(tzinfo=KST, hour=12).timestamp())
-            (mark or common.mark_hist_dirty)(t9)
+            (mark or histmark.mark_hist_dirty)(t9)
         with hist.run_lock:
             with hist.lock:
                 for k in hpend9:
                     hist.px["specs"].pop(k, None)
-            common.atomic_write_json(hist.px_path, hist.px)
+            statefile.atomic_write_json(hist.px_path, hist.px)
         save_dc(None)
     log.warning("px1004: 새 규칙 밖 출처(업비트·빗썸 USDT·BTC · OKX·게이트·쿠코인 대체) 시세 저장본 지움 — 그날 마감가 %d개 %s · 장기 곡선 %d개(다시 계산 %s 부터) · 백업 %s",
                 len(bad_dc), bad_dc[:12], len(hpend9), first, bak)

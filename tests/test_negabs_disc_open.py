@@ -2,24 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import sqlite3
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 try:
-    import discopen
+    import discopen  # noqa: E402
 except ImportError as e:
     chk(False, "발견 시점 기초 잔고 모듈(src/discopen.py) 있음", repr(e))
     T.finish()
@@ -88,21 +87,21 @@ discopen.fetch_at = fake_fetch
 
 def pump(c, n=60):
     for _ in range(n):
-        r = c._negabs_runner()
+        r = c.svc_recon._negabs_runner()
         r.last = 0.0
-        c.negabs_pass()
+        c.svc_recon.negabs_pass()
         if not any(not j["ev"].is_set() for j in r.jobs.values()) and not r.jobs:
             return
         time.sleep(0.02)
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 c.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?)", (f"wrecon_done:eth:{W}", str(T0)))
 c.conn.execute("INSERT INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                (f"recon:eth:{W}", "opening_balance", "eth", json.dumps({W: {"native:None": 0}, "_source": "rpc", "_block": 900, "_q": []}), T0))
 c.conn.commit()
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_eth.json"), {W: 5000, "_synced_at": NOW + 3600})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_eth.json"), {W: 5000, "_synced_at": NOW + 3600})
 feed(c, h(1), snap(h(1), T0 + 100, 1500, X, W, value=2 * E18, data="0x"))
 c.conn.commit()
 PRE = os.path.join(T.TMP, "ledger_before_deploy.db")
@@ -116,6 +115,10 @@ FAKE[(TKN, 1999)] = (1000 * E18, T1 - 12)
 feed(c, h(11), snap(h(11), T1, 2000, W, TKN, toks=[(W, X, TKN, "TKN", 600 * E18)], fee=10 ** 15))
 chk(total(c, TKN) == -600 * E18 and cand(c, TKN).get("st") == "new" and cand(c, TKN).get("tx") == h(11),
     "N1 전제: 원장 −600 · 후보(meta negabs_cand) = 그 tx", (total(c, TKN), cand(c, TKN)))
+import calcguard  # noqa: E402
+import core_common  # noqa: E402
+dT0 = c.svc_recon._disc_max_t("eth")
+cg0 = calcguard.snapshot()
 pump(c)
 an = anchors(c, TKN)
 sid1 = discopen.sid_of("eth", W, TKN, 1999)
@@ -130,6 +133,15 @@ chk(ob and ob[0] == "opening_balance" and ob[2] == T1 - 11 and pl1.get("_block")
 chk(cand(c, TKN).get("st") == "done" and CALLS.count((TKN, 1999)) == 1, "N1 후보 상태 done · 조회 1번", (cand(c, TKN), CALLS))
 pr = c.conn.execute("SELECT cost_usd, leg_kind, event FROM postings WHERE source_id=?", (sid1,)).fetchone()
 chk(pr and pr[0] is None and pr[1] == "opening" and pr[2] == "OPENING", "N1 원가 NULL · opening/OPENING(대사 앵커 규약)", pr and tuple(pr))
+cv1 = c.conn.execute("SELECT classifier_ver FROM postings WHERE source_id=?", (sid1,)).fetchone()
+chk(cv1 and cv1[0] == core_common.CLASSIFIER_VER != 3 and discopen._ver(c.svc_recon) == core_common.CLASSIFIER_VER,
+    "N1s 앵커 classifier_ver = CLASSIFIER_VER(Runner 가 받은 서비스의 모듈 core_svc 속성 · 3 아님)", cv1 and cv1[0])
+cg1 = calcguard.snapshot()
+chk({k: v["n"] for k, v in cg1.items() if v["n"] != (cg0.get(k) or {}).get("n")} == {}, "N1s 후보 → 조회 → 앵커 길 calcguard 삼킴 0",
+    {k: v["n"] for k, v in cg1.items() if v["n"] != (cg0.get(k) or {}).get("n")})
+dT1 = c.svc_recon._disc_max_t("eth")
+chk(dT0 == 0 and dT1 == T1 - 11 and c.svc_recon.__dict__["_disc_t_cache"]["eth"] == dT1 and c.svc_recon._negabs_runner().core is c.svc_recon,
+    "N1s 앵커 뒤 _disc_max_t = 새 T(관측 T · discopen 이 지운 사전 = 서비스 사전 · Runner.core = 서비스)", (dT0, dT1))
 
 print("[N2] 조회 실패 = 음수 유지")
 T2 = T1 + DAY
@@ -143,7 +155,7 @@ for _ in range(discopen.MAX_TRIES + 2):
     if d9.get("st") == "fail":
         break
     d9["next"] = 0
-    c._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, TK2)), d9)
+    c.svc_recon._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, TK2)), d9)
     c.conn.commit()
     pump(c)
 chk(cand(c, TK2).get("st") == "fail" and cand(c, TK2).get("n") == discopen.MAX_TRIES and total(c, TK2) == -100 * E18,
@@ -194,13 +206,13 @@ print("[N5] 재시작 멱등")
 n5, a5 = len(CALLS), anchors(c)
 p5 = {(r[0], r[1]): r[2] for r in c.conn.execute("SELECT group_id, location, qty_norm FROM positions")}
 c.conn.commit()
-c2 = core.Core(common.load_config())
+c2 = core.Core(config.load_config())
 pump(c2)
 feed(c2, h(11), snap(h(11), T1, 2000, W, TKN, toks=[(W, X, TKN, "TKN", 600 * E18)], fee=10 ** 15))
 pump(c2)
 p5b = {(r[0], r[1]): r[2] for r in c2.conn.execute("SELECT group_id, location, qty_norm FROM positions")}
 chk(anchors(c2) == a5 and len(CALLS) == n5 and p5b == p5, "N5 새 core(재시작) — 앵커·조회 수·포지션 그대로", (len(anchors(c2)), len(a5), CALLS[n5:]))
-ra = c2._negabs_runner()
+ra = c2.svc_recon._negabs_runner()
 sid9 = discopen.write_anchor(c2, "eth", W, aid_of(c2, TKN), TKN, 5, 1999, T1 - 12, T1 - 1, 1000 * E18, "neg_tx")
 c2.conn.commit()
 chk(sid9 == "" and anchors(c2) == a5, "N5 같은 관측 다시 쓰기 = 무변(멱등)", sid9)
@@ -208,7 +220,7 @@ c.conn.close()
 c = c2
 
 print("[N7] rebuild2(재파생 + 앵커 재계산) 뒤 같은 결과")
-import importlib.util
+import importlib.util  # noqa: E402
 spec = importlib.util.spec_from_file_location("rb2", os.path.join(T.ROOT, "tools", "rebuild2.py"))
 rb2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rb2)
@@ -227,12 +239,12 @@ def shadow_rebuild(tag, mutate=None):
         m9.commit()
         m9.close()
     anc = [tuple(r) for r in sqlite3.connect(bp).execute(rb2.ANCHOR_SQL).fetchall()]
-    old9 = common.DB_PATH
-    common.DB_PATH = sp
+    old9 = paths.DB_PATH
+    paths.DB_PATH = sp
     try:
-        sc = core.Core(common.load_config())
+        sc = core.Core(config.load_config())
     finally:
-        common.DB_PATH = old9
+        paths.DB_PATH = old9
     for t9 in rb2.DERIVED_TABLES:
         sc.conn.execute(f"DELETE FROM {t9}")
     sc.conn.commit()
@@ -287,9 +299,9 @@ def it(ca, blk, cbal, led, spam=False, **kw):
 
 items = [it(TK9, 4000, 250 * E18, 0), it(TKA, 4000, 7 * E18, 0, spam=True), it(TKN, 4000, 100 * E18, 400 * E18),
          it(TK2, 4000, 50 * E18, -100 * E18), it(TK9, 6000, 260 * E18, 0)]
-common.atomic_write_json(os.path.join(common.STATE_DIR, discopen.RECHK_REQ_NAME), {"items": items, "by": "test"})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, discopen.RECHK_REQ_NAME), {"items": items, "by": "test"})
 pump(c)
-res = (common.read_json(os.path.join(common.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {}
+res = (statefile.read_json(os.path.join(paths.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {}
 st9 = {k.split(":")[2]: v.get("st") for k, v in res.items()}
 a9 = anchors(c, TK9)
 chk(len(a9) == 1 and int(a9[0][2]) == 250 * E18 and a9[0][1] == T9 and a9[0][0] == discopen.sid_of("eth", W, TK9, 4000) and total(c, TK9) == 250 * E18,
@@ -306,11 +318,11 @@ FAKE[(TK4, 2799)] = (90 * E18, T6 + 7200)
 feed(c, h(91), snap(h(91), T6 + 7200 + 12, 2800, W, TK4, toks=[(W, X, TK4, "TKD", 40 * E18)], fee=10 ** 15))
 os.environ.pop("TJ_NEGABS")
 c.conn.commit()
-c._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, TK4)), {"st": "gone"})
+c.svc_recon._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, TK4)), {"st": "gone"})
 c.conn.commit()
 env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_") or k.startswith("TJ_TEST_")}
 env.update(TJ_BASE=T.TMP, PYTHONDONTWRITEBYTECODE="1")
-tl = os.path.join(T.ROOT, "tools", "negabs_1010.py")
+tl = os.path.join(T.ROOT, "tools", "negabs.py")
 r1 = subprocess.run([sys.executable, tl, "--json"], env=env, capture_output=True, text=True, timeout=120)
 try:
     pv = json.loads(r1.stdout)
@@ -319,9 +331,9 @@ except ValueError:
 pvd = {(x.get("ca") or "native"): x.get("plan") for x in pv}
 chk(r1.returncode == 0 and pvd.get(TK4) == "go" and pvd.get(IMP) == "skip" and pvd.get(SPF) == "skip" and pvd.get(TK2) == "go",
     "N10 미리보기 = 음수 칸과 가드 판정(TKD go · 사칭·가짜 skip)", (r1.returncode, pvd, r1.stderr[-300:]))
-chk(not os.path.exists(os.path.join(common.STATE_DIR, discopen.REQ_NAME)), "N10 미리보기는 요청 파일을 안 씀", None)
+chk(not os.path.exists(os.path.join(paths.STATE_DIR, discopen.REQ_NAME)), "N10 미리보기는 요청 파일을 안 씀", None)
 r2 = subprocess.run([sys.executable, tl, "--apply"], env=env, capture_output=True, text=True, timeout=120)
-rq = common.read_json(os.path.join(common.STATE_DIR, discopen.REQ_NAME), {}) or {}
+rq = statefile.read_json(os.path.join(paths.STATE_DIR, discopen.REQ_NAME), {}) or {}
 chk(r2.returncode == 0 and any(x.get("ca") == TK4 for x in rq.get("cells") or []), "N10 --apply = state/negabs_request.json", (r2.stdout[-300:], rq))
 pump(c)
 a10 = anchors(c, TK4)
@@ -390,10 +402,10 @@ pump(c)
 chk(total(c, WETH) == int(0.3 * E18) and len(anchors(c, WETH)) == 1, "N14 직전 블록 0.5 확인 → 앵커 0.5 · 원장 0.3", (total(c, WETH), anchors(c, WETH)))
 
 print("[N15] (코덱스 na438 ③) 재점검 결과를 최신→과거 순으로 적용해도 같은 보유분 중복 없음")
-common.atomic_write_json(os.path.join(common.STATE_DIR, discopen.RECHK_REQ_NAME),
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, discopen.RECHK_REQ_NAME),
                          {"items": [it(TK9, 3500, 250 * E18, 0, block_ts=T9 - 1000)], "by": "test"})
 pump(c)
-res15 = (common.read_json(os.path.join(common.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {}
+res15 = (statefile.read_json(os.path.join(paths.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {}
 st15 = {k.split(":")[2]: v.get("st") for k, v in res15.items()}
 chk(st15.get(f"{TK9}@3500") == "list" and len(anchors(c, TK9)) == 1 and total(c, TK9) == 250 * E18,
     "N15 같은 칸에 더 늦은 블록(4000) 발견 앵커가 있으면 이른 블록(3500) 결과는 목록만 — 합 250 그대로(종전 500)", (st15, total(c, TK9)))
@@ -440,9 +452,9 @@ n21 = len(CALLS)
 pump(c)
 chk(cand(c, TKU).get("st") == "skip" and not anchors(c, TKU) and total(c, TKU) == -30 * E18 and len(CALLS) == n21,
     "N21 정품 등록 전 = 건너뜀(음수 유지 · 조회 0)", (cand(c, TKU), anchors(c, TKU)))
-import spamguard
+import spamguard  # noqa: E402
 c.conn.commit()
-RQ21 = os.path.join(common.STATE_DIR, discopen.REQ_NAME)
+RQ21 = os.path.join(paths.STATE_DIR, discopen.REQ_NAME)
 if os.path.exists(RQ21):
     os.remove(RQ21)
 r21p = subprocess.run([sys.executable, tl, "--genuine", TKU, "--chain", "eth", "--wallet", W], env=env, capture_output=True, text=True, timeout=120)
@@ -461,7 +473,7 @@ chk(r21i.returncode == 1 and "사칭" in r21i.stdout and r21t.returncode == 1 an
     (r21i.stdout[-200:], r21t.stdout[-200:], r21w.stdout[-200:], r21s.stdout[-200:]))
 r21a = subprocess.run([sys.executable, tl, "--genuine", TKU, "--chain", "eth", "--wallet", W, "--apply"], env=env, capture_output=True, text=True, timeout=120)
 spamguard._user_refresh(force=True)
-rq21 = common.read_json(RQ21, {}) or {}
+rq21 = statefile.read_json(RQ21, {}) or {}
 chk(r21a.returncode == 0 and spamguard.is_user_genuine("eth", TKU) and rq21.get("cells") == [{"chain": "eth", "wallet": W, "ca": TKU, "retry": True}],
     "N21 --genuine --apply = 정품 등록(state/genuine_tokens.json) + 그 칸만 다시 요청(retry)", (r21a.returncode, r21a.stdout[-300:], r21a.stderr[-300:], rq21))
 pump(c)
@@ -536,18 +548,18 @@ sc.conn.close()
 
 print("[N19] (보안 na438 5·7) 재점검 적용 — 상세 대기 있으면 'wait' 로 요청에 남김 · 풀리면 적용 · 처리 중 새 요청 합침")
 TKW, TKV = "0x" + "d7" * 20, "0x" + "d8" * 20
-PD = os.path.join(common.STATE_DIR, "pending_detail_eth.json")
-common.atomic_write_json(PD, {h(999): {"w": W}})
-RQ = os.path.join(common.STATE_DIR, discopen.RECHK_REQ_NAME)
-common.atomic_write_json(RQ, {"items": [it(TKW, 4100, 9 * E18, 0, block_ts=T9 + 100)], "by": "test"})
+PD = os.path.join(paths.STATE_DIR, "pending_detail_eth.json")
+statefile.atomic_write_json(PD, {h(999): {"w": W}})
+RQ = os.path.join(paths.STATE_DIR, discopen.RECHK_REQ_NAME)
+statefile.atomic_write_json(RQ, {"items": [it(TKW, 4100, 9 * E18, 0, block_ts=T9 + 100)], "by": "test"})
 pump(c)
-pend19 = common.read_json(RQ + ".processing", {}) or {}
+pend19 = statefile.read_json(RQ + ".processing", {}) or {}
 keys19 = [(x.get("ca"), x.get("block")) for x in pend19.get("items") or []]
 chk(not anchors(c, TKW) and (TKW, 4100) in keys19 and not os.path.exists(RQ), "N19 상세 대기(pending_detail) = 기장 안 함 · 항목은 .processing 에 남음(종전 = 버림)", keys19)
-common.atomic_write_json(RQ, {"items": [it(TKV, 4100, 3 * E18, 0, block_ts=T9 + 100)], "by": "test2"})
+statefile.atomic_write_json(RQ, {"items": [it(TKV, 4100, 3 * E18, 0, block_ts=T9 + 100)], "by": "test2"})
 os.remove(PD)
 pump(c)
-pend19b = common.read_json(RQ + ".processing", {}) or {}
+pend19b = statefile.read_json(RQ + ".processing", {}) or {}
 keys19b = [(x.get("ca"), x.get("block")) for x in pend19b.get("items") or []]
 chk([int(a[2]) for a in anchors(c, TKW)] == [9 * E18] and [int(a[2]) for a in anchors(c, TKV)] == [3 * E18]
     and (TKW, 4100) not in keys19b and (TKV, 4100) not in keys19b and not os.path.exists(RQ),
@@ -556,15 +568,15 @@ chk([int(a[2]) for a in anchors(c, TKW)] == [9 * E18] and [int(a[2]) for a in an
 print("[N11] 롤백(--ledger = 배포 직전 원장으로 교체)")
 c.conn.close()
 for sfx in ("", "-wal", "-shm"):
-    if os.path.exists(common.DB_PATH + sfx):
-        os.remove(common.DB_PATH + sfx)
+    if os.path.exists(paths.DB_PATH + sfx):
+        os.remove(paths.DB_PATH + sfx)
 _s = sqlite3.connect(PRE)
-_d = sqlite3.connect(common.DB_PATH)
+_d = sqlite3.connect(paths.DB_PATH)
 _s.backup(_d)
 _s.close()
 _d.close()
 n11 = len(CALLS)
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 pump(c)
 left = (c.conn.execute("SELECT count(*) FROM postings WHERE source_id LIKE 'recon:%:disc:%'").fetchone()[0],
         c.conn.execute("SELECT count(*) FROM raw_observations WHERE obs_id LIKE 'recon:%:disc:%'").fetchone()[0],

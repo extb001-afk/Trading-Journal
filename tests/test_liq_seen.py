@@ -2,27 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import os
-import time
-import urllib.parse
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
 
 for k in ("TJ_TG_TOKEN", "TJ_TG_CHAT"):
     os.environ.pop(k, None)
 S = os.path.join(H.TMP, "state")
 CFG = os.path.join(H.TMP, "config.json")
-import common
-import alert_prefs as AP
-import liq_watch as LW
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
+import liq_watch as LW  # noqa: E402
 
 
 def check(name, ok, detail=""):
     H.chk(bool(ok), name, None if ok else str(detail)[:700])
 
 
-common.atomic_write_json(CFG, {})
-common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+statefile.atomic_write_json(CFG, {})
+statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
 T = [1_800_000_000.0]
 MODE = {"bn": "ok", "hl": "ok"}
 MARK = {}
@@ -102,7 +102,7 @@ def near(xs):
 
 
 def vstat(name="binance", sec="venues"):
-    return ((common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get(sec) or {}).get(name) or {}
+    return ((statefile.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get(sec) or {}).get(name) or {}
 
 
 def long_at(dist_pct, liq=50000.0):
@@ -182,7 +182,7 @@ check("S9 포지션 없는 곳 타임아웃 1시간 → 1통(문장 '연결이 �
 
 reset()
 A1, A2 = "0x" + "ab" * 20, "0x" + "cd" * 20
-common.atomic_write_json(CFG, {"perp_wallets": [{"dex": "hyperliquid", "address": A1, "label": "a"}, {"dex": "hyperliquid", "address": A2, "label": "b"}]})
+statefile.atomic_write_json(CFG, {"perp_wallets": [{"dex": "hyperliquid", "address": A1, "label": "a"}, {"dex": "hyperliquid", "address": A2, "label": "b"}]})
 time.sleep(0.01)
 w = mk({k: v for k, v in ENV.items() if not k.startswith("TJ_BINANCE")})
 run(w, 20)
@@ -193,7 +193,7 @@ check("S10 하이퍼리퀴드 주소 2개 · 공개 API 1시간 장애 → 1통(
 MODE["hl"] = "ok"
 a = run(w, 30)
 check("S10 … 회복 = ✅ 1통(묶인 주소는 조용히)", len(blind(a)) == 1 and blind(a)[0]["text"].startswith("✅"), heads(a))
-common.atomic_write_json(CFG, {})
+statefile.atomic_write_json(CFG, {})
 time.sleep(0.01)
 
 reset()

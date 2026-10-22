@@ -2,18 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, Writer, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, Writer, Reader  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import core
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+import config, paths  # noqa: E402
+import core  # noqa: E402
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
 B, R = "0x" + "b2" * 20, "0x" + "c3" * 20
 TKA, TKB = "0x" + "a" * 40, "0x" + "b" * 40
 TS = 1790000500
@@ -47,7 +46,7 @@ def toks(c, h):
         " AND p.location LIKE 'wallet:eth:%'", (h,)).fetchall())
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 CASES = [
     ("es", [(TKB, 2)], "es", [(TKA, 1)], [(TKA, 1), (TKB, 2)]),
@@ -75,7 +74,7 @@ c.conn.close()
 
 json.dump({"chains": {}, "wallets": [{"type": "evm", "chain": "bsc", "address": W}], "native_symbol": {"bsc": "BNB"},
            "bsc": {"logs_rpcs": ["https://l.invalid"], "detail_rpcs": ["https://d.invalid"]}}, open(os.path.join(T.TMP, "config.json"), "w"))
-import bsc_watch
+import bsc_watch  # noqa: E402
 W2 = "0x" + "e5" * 20
 H1, H2 = "0x" + "11" * 32, "0x" + "22" * 32
 MODE = {H1: "blocknull", H2: "ok"}
@@ -101,8 +100,8 @@ def mk(wallets):
     w.conf_depth = 20
     w.cursor = {"_cov": 1000, "from_block": 3000}
     w.emitted = set()
-    w.emitted_path = os.path.join(common.STATE_DIR, "emitted_bsc.json")
-    w.meta_path = os.path.join(common.STATE_DIR, "bsc_token_meta.json")
+    w.emitted_path = os.path.join(paths.STATE_DIR, "emitted_bsc.json")
+    w.meta_path = os.path.join(paths.STATE_DIR, "bsc_token_meta.json")
     w.token_meta = {}
     w.writer = Writer()
     w.fetch_details = details
@@ -111,13 +110,12 @@ def mk(wallets):
 
 
 now = [1_800_000_000.0]
-bsc_watch._now = lambda: now[0]
-T.patch_moved("_now", bsc_watch._now, ("bsc_",))
+T.patch_moved("_now", lambda: now[0], ("bsc_",))
 wb = mk([W])
 for _ in range(bsc_watch.XIN_NF_MAX + 3):
     wb._xin_pass(3100)
     now[0] += 3700
-st = json.load(open(os.path.join(common.STATE_DIR, "bsc_xin.json")))
+st = json.load(open(os.path.join(paths.STATE_DIR, "bsc_xin.json")))
 check("[X1] 블록 시각 null = nf 아님(retry) · 상한 넘어도 계속 후보", st["tx"][H1]["r"] == "retry", st["tx"][H1])
 MODE[H1] = "ok"
 wb._xin_pass(3100)
@@ -126,7 +124,7 @@ check("[X1] 노드 회복 = 방출", H1 in {r["txhash"] for r in wb.writer.recs}
 check("[X2] 전제: 받는 주소가 아직 등록 안 된 지갑 = not_direct", st["tx"][H2]["r"] == "not_direct", st["tx"][H2])
 MODE[H2] = "txnull"
 st["tx"][H2] = {"r": "retry", "n": 0}
-json.dump(st, open(os.path.join(common.STATE_DIR, "bsc_xin.json"), "w"))
+json.dump(st, open(os.path.join(paths.STATE_DIR, "bsc_xin.json"), "w"))
 for k in range(bsc_watch.XIN_NF_MAX - 1):
     wb._xin_pass(3100)
     now[0] += 3700
@@ -136,15 +134,15 @@ now[0] += 3700
 MODE[H2] = "txnull"
 wb._xin_pass(3100)
 now[0] += 3700
-m2 = json.load(open(os.path.join(common.STATE_DIR, "bsc_xin.json")))["tx"][H2]
+m2 = json.load(open(os.path.join(paths.STATE_DIR, "bsc_xin.json")))["tx"][H2]
 check("[X1] 연속 부재만 셈(다른 오류 뒤 nf_n=1) · 아직 후보", m2.get("r") == "nf" and m2.get("nf_n") == 1, m2)
 MODE[H2] = "ok"
-st = json.load(open(os.path.join(common.STATE_DIR, "bsc_xin.json")))
+st = json.load(open(os.path.join(paths.STATE_DIR, "bsc_xin.json")))
 st["tx"][H2] = {"r": "not_direct", "blk": 2000}
-json.dump(st, open(os.path.join(common.STATE_DIR, "bsc_xin.json"), "w"))
+json.dump(st, open(os.path.join(paths.STATE_DIR, "bsc_xin.json"), "w"))
 wb2 = mk([W, W2])
 wb2.emitted = {H1}
 wb2._xin_pass(3100)
 check("[X2] 지갑 새로 등록 = not_direct 다시 조회 → 방출", H2 in {r["txhash"] for r in wb2.writer.recs},
-      json.load(open(os.path.join(common.STATE_DIR, "bsc_xin.json")))["tx"].get(H2))
+      json.load(open(os.path.join(paths.STATE_DIR, "bsc_xin.json")))["tx"].get(H2))
 T.finish()

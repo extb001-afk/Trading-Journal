@@ -5,7 +5,7 @@ import re
 import threading
 import time
 import unicodedata
-import calcguard
+import calcguard  # noqa: E402
 
 MAJORS = {"USDT", "USDC", "USDG", "DAI", "BUSD", "FDUSD", "PYUSD", "USD1", "USDE", "USDS", "TUSD", "USDP",
           "USDT0", "ETH", "WETH", "BTC", "WBTC", "SOL", "WSOL", "BNB", "WBNB", "POL", "MATIC", "ARB", "OP", "AVAX", "TRX", "XRP"}
@@ -233,8 +233,8 @@ GENUINE_CAS = {
     },
 }
 try:
-    import common as _common
-    for _ch9, _m9 in _common.EXTRA_CHAINS.items():
+    import chaincatalog
+    for _ch9, _m9 in chaincatalog.EXTRA_CHAINS.items():
         if _m9[3]:
             GENUINE_CAS.setdefault(_ch9, {}).setdefault(_m9[3].lower(), "W" + _m9[1])
 except ImportError:
@@ -254,9 +254,9 @@ _USER_LOCK = threading.Lock()
 
 def user_path():
     try:
-        import common
-        return os.path.join(common.STATE_DIR, USER_FILE)
-    except Exception as _cg9:
+        import paths
+        return paths.state(USER_FILE)
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("spamguard:user_path", _cg9)
         return None
 
@@ -324,7 +324,7 @@ def is_user_genuine(chain, ca) -> bool:
 
 
 def set_user_genuine(chain, ca, sym, on: bool) -> bool:
-    import common
+    import statefile
     p = user_path()
     ch, a = _norm_ca(chain, ca)
     with _USER_LOCK:
@@ -353,7 +353,7 @@ def set_user_genuine(chain, ca, sym, on: bool) -> bool:
             d[ch] = m
         else:
             d.pop(ch, None)
-        common.atomic_write_json(p, d)
+        statefile.atomic_write_json(p, d)
     _user_refresh(force=True)
     return True
 
@@ -370,12 +370,12 @@ def _genuine():
         for ch, m in GENUINE_CAS.items():
             s |= {(ch, a if ch == "sol" else a.lower()) for a in m}
         try:
-            import pricing
-            for tab in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS):
+            import token_tables
+            for tab in (token_tables.STABLE_CAS, token_tables.JPY_STABLE_CAS):
                 for ch, m in tab.items():
                     s |= {(ch, a.lower()) for a in m}
-            s |= {("sol", a) for a in pricing.STABLE_MINTS}
-        except Exception as _cg9:
+            s |= {("sol", a) for a in token_tables.STABLE_MINTS}
+        except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("spamguard:_genuine", _cg9)
             pass
         _GEN = s
@@ -478,7 +478,7 @@ def tx_scam_reason(conn, chain, txh, my, price_guard=None):
             sg = conn.execute("SELECT COALESCE(json_extract(snapshot, '$.tx.from.hash'), json_extract(snapshot, '$.tx.from')),"
                               " json_extract(snapshot, '$.tx.fee.value'), json_extract(snapshot, '$.tx.raw_input')"
                               " FROM raw_txs WHERE chain=? AND txhash=? AND json_valid(snapshot)", (ch, t)).fetchone()
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("spamguard:tx_scam_reason", _cg9)
         return None
     mine = bool(sg) and signer_mine(sg[0], sg[1], sg[2], my)
@@ -534,12 +534,12 @@ _SPOT = {"sig": None, "d": None}
 
 def spot_liquid(chain, ca, price_guard=None):
     try:
-        import common
-        p = os.path.join(common.STATE_DIR, SPOT_FILE)
+        import paths
+        p = paths.state(SPOT_FILE)
         st = os.stat(p)
     except FileNotFoundError:
         return False
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("spamguard:spot_liquid", _cg9)
         return None
     sig = (p, st.st_mtime_ns, st.st_size)

@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import copy
-import json
-import os
-import time
-import urllib.parse
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
 
 for k in ("TJ_TG_TOKEN", "TJ_TG_CHAT"):
     os.environ.pop(k, None)
 S = os.path.join(H.TMP, "state")
 CFG = os.path.join(H.TMP, "config.json")
-import common
-import alert_prefs as AP
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -27,16 +27,16 @@ try:
 except ImportError as e:
     check("G0 청산 빠른 감시 모듈(liq_watch) 있음", False, e)
     H.finish()
-import alert_watch as AW
+import alert_watch as AW  # noqa: E402
 
 
 def wcfg(d):
-    common.atomic_write_json(CFG, d)
+    statefile.atomic_write_json(CFG, d)
     time.sleep(0.01)
 
 
 def wprefs(doc):
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: doc})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: doc})
     time.sleep(0.01)
 
 
@@ -122,7 +122,7 @@ def router(method, url, headers=None, body=None, timeout=6.0):
             if not W.bn_margin:
                 return 200, hd, {"marginLevel": "999", "userAssets": []}
             m = copy.deepcopy(W.bn_margin)
-            px = lambda a: 1.0 if a == "USDT" else W.spot[("binance", a)]
+            px = lambda a: 1.0 if a == "USDT" else W.spot[("binance", a)]   # noqa: E731
             av = sum((float(x["free"]) + float(x["locked"])) * px(x["asset"]) for x in m["userAssets"])
             lv = sum((float(x["borrowed"]) + float(x["interest"])) * px(x["asset"]) for x in m["userAssets"])
             m["marginLevel"] = str(av / lv if lv else 999)
@@ -347,8 +347,8 @@ run(w, 40)
 
 ADDR = "0x" + "ab" * 20
 wcfg({"perp_wallets": [{"dex": "hyperliquid", "address": ADDR, "label": "t"}]})
-import perp_dex
-ADDR = perp_dex.configured(common.read_json(CFG, {}))["hyperliquid"][0]["address"]
+import perp_dex  # noqa: E402
+ADDR = perp_dex.configured(statefile.read_json(CFG, {}))["hyperliquid"][0]["address"]
 tH = T[0]
 run(w, 30)
 hc = [c for c in calls("api.hyperliquid.xyz", since=tH)]
@@ -466,11 +466,11 @@ except ValueError:
     DYN = None
 if DYN:
     wcfg({"perp_wallets": [{"dex": "dydx", "address": DYN, "label": "d"}]})
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
         {"symbol": "BTC-USD", "side": "LONG", "qty": 1, "mark": 60000.0, "liq": 55000.0, "acct": DYN}], "accts": {DYN: {"ts": int(T[0])}}})
     got = run(w, 2)
     check("S1 10분 수집 파일(dYdX) 포지션 8.3% → 🔴 1통", len(got) == 1 and "BTC-USD 롱" in got[0]["text"], [x["text"][:40] for x in got])
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [], "accts": {DYN: {"ts": int(T[0])}}})
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [], "accts": {DYN: {"ts": int(T[0])}}})
     got = run(w, 2)
     k9 = next((k for k in w.st["fut"] if k.startswith("dydx:BTC-USD")), None)
     a9 = (w.st["fut"].get(k9) or {}).get("absent")
@@ -486,7 +486,7 @@ LEVP = os.path.join(S, "leverage.json")
 
 
 def wlev(items, products, ts=None):
-    common.atomic_write_json(LEVP, {"v": 1, "ts": int(ts or T[0]), "cycle_sec": 600, "fresh_sec": 1320, "products": products, "items": items})
+    statefile.atomic_write_json(LEVP, {"v": 1, "ts": int(ts or T[0]), "cycle_sec": 600, "fresh_sec": 1320, "products": products, "items": items})
     time.sleep(0.01)
 
 
@@ -711,7 +711,7 @@ run(w, 1)
 if DYN:
     wcfg({"perp_wallets": [{"dex": "dydx", "address": DYN, "label": "d"}]})
     def dyf(mark, age, pos=True):
-        common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0] - age), "positions": ([
+        statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0] - age), "positions": ([
             {"symbol": "QD-USD", "side": "LONG", "qty": 1, "mark": mark, "liq": 55000.0, "acct": DYN}] if pos else []),
             "accts": {DYN: {"ts": int(T[0] - age)}}})
         time.sleep(0.01)
@@ -746,19 +746,19 @@ run(w, 2)
 
 if DYN:
     wcfg({"perp_wallets": [{"dex": "dydx", "address": DYN, "label": "d"}]})
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
         {"symbol": "QE-USD", "side": "LONG", "qty": 1, "mark": 60000.0, "liq": 55000.0, "acct": DYN}], "accts": {DYN: {"ts": int(T[0])}}})
     got = run(w, 2)
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "accts": {DYN: {"ts": int(T[0])}}})
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "accts": {DYN: {"ts": int(T[0])}}})
     got2 = run(w, 3)
     check("Q10 10분 파일 positions 칸 누락(주소 성공 시각은 신선) = 닫힘 ✅ 없음", len(got) == 1 and not got2, ([x["text"][:30] for x in got], [x["text"][:30] for x in got2]))
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [], "accts": {DYN: {"ts": int(T[0])}}})
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [], "accts": {DYN: {"ts": int(T[0])}}})
     run(w, 2)
     wcfg({})
     os.remove(os.path.join(S, "futures_dydx.json"))
 wlev([gate_loan(0.75)], [dict(p, measured_at=int(T[0])) for p in PR])
 got = run(w, 2)
-common.atomic_write_json(LEVP, {"v": 1, "ts": int(T[0]), "fresh_sec": 1320, "products": [dict(p, measured_at=int(T[0])) for p in PR]})
+statefile.atomic_write_json(LEVP, {"v": 1, "ts": int(T[0]), "fresh_sec": 1320, "products": [dict(p, measured_at=int(T[0])) for p in PR]})
 time.sleep(0.01)
 got2 = run(w, 3)
 check("Q10 lev 파일 items 칸 누락(상품 ok) = '빚 없어짐' ✅ 없음", len(got) == 1 and not got2, ([x["text"][:30] for x in got], [x["text"][:30] for x in got2]))
@@ -767,8 +767,8 @@ run(w, 2)
 os.remove(LEVP)
 run(w, 2)
 
-import perp_dex as PD
-import hl_spot as HS
+import perp_dex as PD  # noqa: E402
+import hl_spot as HS  # noqa: E402
 rlq = {}
 _pd0, _pdh0, _hs0 = PD._http_default, PD.HTTP, HS.HTTP
 hits = []
@@ -791,7 +791,7 @@ n_h = len(hits)
 try:
     HS.HTTP("https://api.hyperliquid.xyz/info", {"type": "x"})
     r8 = "호출함"
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     r8 = type(e).__name__
 check("Q8 기존 수집기 429 → 공유 지도에 기록(빠른 감시도 쉼) · 그 동안 현물 수집기 호출 0(429 로 즉시 실패)", rec > 30 and len(hits) == n_h and r8 == "HLError", (rec, len(hits), r8))
 PD._http_default, PD.HTTP, HS.HTTP = _pd0, _pdh0, _hs0
@@ -799,7 +799,7 @@ PD._http_default, PD.HTTP, HS.HTTP = _pd0, _pdh0, _hs0
 with_http({"/api/v5/market/ticker": {"code": "50011", "msg": "Too Many Requests", "data": []}})
 try:
     w.call("okx", "okx_tick", "okx_tick", "GET", "https://www.okx.com/api/v5/market/ticker?instId=ETH-USDT")
-except Exception:
+except Exception:   # noqa: BLE001
     pass
 n0 = len(W.calls)
 try:
@@ -873,7 +873,7 @@ if DYN:
     wcfg({"perp_wallets": [{"dex": "dydx", "address": DYN, "label": "d"}]})
     dyf(60000.0, 0)
     got = run(w, 2)
-    common.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
+    statefile.atomic_write_json(os.path.join(S, "futures_dydx.json"), {"ts": int(T[0]), "positions": [
         {"symbol": "QD-USD", "qty": 1, "mark": 60000.0, "liq": 55000.0, "acct": DYN}], "accts": {DYN: {"ts": int(T[0])}}})
     got2 = run(w, 3)
     kq = [k for k in w.st["fut"] if k.startswith("dydx:QD-USD")]
@@ -901,7 +901,7 @@ W.mark[("binance", "R6USDT")] = 100.0
 run(w, 8)
 w.st["fut"]["binance:R6USDT:LONG:lev"] = {"st": 1, "d1": 8.0, "at": int(T[0]), "name": "R6USDT 롱", "ex": "binance",
                                          "levsrc": ["binance", "futures_linear", "USDT"]}
-common.append_durable_jsonl(os.path.join(S, AP.FAST_QUEUE), {"ts": int(T[0]), "kind": "LIQ_NEAR", "text": "🔴 R6", "key": "binance:R6USDT:LONG:lev",
+statefile.append_durable_jsonl(os.path.join(S, AP.FAST_QUEUE), {"ts": int(T[0]), "kind": "LIQ_NEAR", "text": "🔴 R6", "key": "binance:R6USDT:LONG:lev",
                                                             "lw": {"k": "binance:R6USDT:LONG:lev", "g": "fut", "st": 1, "d1": 8.0}})
 wlev([], [{"ex": "binance", "product": "futures_linear", "status": "ok", "measured_at": int(T[0])}])
 got = run(w, 8)
@@ -922,12 +922,12 @@ os.remove(LEVP)
 run(w, 2)
 w.save(T[0], force=True)
 
-stf = common.read_json(os.path.join(S, LW.STATE_NAME), {})
+stf = statefile.read_json(os.path.join(S, LW.STATE_NAME), {})
 blob = json.dumps(stf) + open(os.path.join(S, AP.FAST_QUEUE), encoding="utf-8").read()
 check("Z1 상태 파일(liq_watch.json) = 판 시각·켜짐·곳별 상태(헬스 '청산 빠른 감시 멈춤' 재료) · health/ 하트비트 파일은 안 만듦(되돌림 뒤 거짓 경보 방지)",
       stf.get("status", {}).get("on") is True and abs(stf.get("ts", 0) - T[0]) <= 31 and not os.path.exists(os.path.join(S, "health", "exf.json")), (list(stf), stf.get("ts"), T[0]))
 check("Z2 상태·긴급 줄에 키 값 없음", not any(ENV[k] in blob for k in ENV if k.endswith(("KEY", "SECRET", "PASSPHRASE"))))
-import health as HH
+import health as HH  # noqa: E402
 hset = HH.settings({})
 base_obs = {"now": T[0], "pm2": {u: {"status": "online", "restarts": 0, "pid": 1} for u in hset["units"]}}
 

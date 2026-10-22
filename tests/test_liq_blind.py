@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import json
-import os
-import time
-import urllib.parse
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
 
 for k in ("TJ_TG_TOKEN", "TJ_TG_CHAT"):
     os.environ.pop(k, None)
 S = os.path.join(H.TMP, "state")
 CFG = os.path.join(H.TMP, "config.json")
-import common
-import alert_prefs as AP
-import liq_watch as LW
-import health as HH
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
+import liq_watch as LW  # noqa: E402
+import health as HH  # noqa: E402
 
 PRH = getattr(LW, "PERM_RETRY_HELD", 300)
 
@@ -26,12 +26,12 @@ def check(name, ok, detail=""):
 
 
 def wcfg(d):
-    common.atomic_write_json(CFG, d)
+    statefile.atomic_write_json(CFG, d)
     time.sleep(0.01)
 
 
 def wprefs(doc):
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: doc})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: doc})
     time.sleep(0.01)
 
 
@@ -177,7 +177,7 @@ for mode, lbl in (("401", "401 한 번"), ("timeout", "타임아웃 지속")):
     b5 = blind(a5)
     check(f"N4 [{lbl}] 다시 보이면 ✅ '다시 보고 있어요' 1통(무음 · resolved)", len(b5) == 1 and b5[0]["text"].startswith("✅ 청산 감시가 바이낸스 선물을 다시 보고 있어요")
           and b5[0].get("resolved") and "동안 못 봤어요" in b5[0]["text"], [x["text"] for x in b5])
-    sf = common.read_json(os.path.join(S, LW.STATE_NAME), {})
+    sf = statefile.read_json(os.path.join(S, LW.STATE_NAME), {})
     v9 = ((sf.get("status") or {}).get("venues") or {}).get("binance") or {}
     check(f"N4 [{lbl}] 복구 뒤 상태 파일 bl 0 · 못 봄 기억 없음", v9.get("bl") == 0 and not (sf.get("blind") or {}), (v9, sf.get("blind")))
 
@@ -193,7 +193,7 @@ a2 = run(w, 20)
 check("N5 마지막에 위험 구간(8% · 알림 보냄)인 포지션을 못 봄 → 2분 전엔 0 · 2분 넘으면 긴급 1통(5분 안 기다림)",
       len(near(a0)) == 1 and not blind(a1) and len(blind(a2)) == 1 and "(긴급)" in blind(a2)[0]["text"]
       and 120 <= blind(a2)[0]["ts"] - ok_at <= 122, (heads(a0), heads(a1), heads(a2)))
-sf = common.read_json(os.path.join(S, LW.STATE_NAME), {})
+sf = statefile.read_json(os.path.join(S, LW.STATE_NAME), {})
 v9 = ((sf.get("status") or {}).get("venues") or {}).get("binance") or {}
 check("N5 상태 파일 = bl 3 · since(마지막 정상) · 곳 이름 · 마지막으로 본 위험도", v9.get("bl") == 3 and v9.get("since") and v9.get("where") == "바이낸스 선물"
       and "BTCUSDT 롱 청산가까지 8.0%" in str(v9.get("worst")), v9)
@@ -233,9 +233,9 @@ j9 = w.jobs["acct:binance"]
 check("K2 들고 있는 것 없는 곳이라도 읽은 적 있으면 권한 오류 = 5분 뒤 다시(NB1 — 종전 6시간 · 한 번도 못 읽은 곳만 6시간: test_liq_seen S6)",
       0 < j9["until"] - T[0] <= 300, j9["until"] - T[0])
 a = run(w, 320)
-st5 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
+st5 = (statefile.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
 a += run(w, 300)
-st9 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
+st9 = (statefile.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
 check("K2 … 텔레그램 0(1시간 뒤 1통 — test_liq_seen S1) · 5분엔 bl 0 · 10분 넘으면 bl 1(NB1 — 읽은 적 있는 곳의 권한 오류 = 연결 오류처럼 주황)",
       not a and st5.get("bl") == 0 and st9.get("bl") == 1,
       (heads(a), st5, st9))
@@ -244,9 +244,9 @@ w = mk()
 run(w, 10)
 MODE["pos"] = "timeout"
 a = run(w, 320)
-st5 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
+st5 = (statefile.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
 a += run(w, 300)
-st9 = (common.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
+st9 = (statefile.read_json(os.path.join(S, LW.STATE_NAME), {}).get("status") or {}).get("venues", {}).get("binance") or {}
 check("K2 들고 있는 것 없는 곳 타임아웃 지속 → 텔레그램 0 · 5분엔 bl 0 · 10분 넘으면 bl 1(주황 — 새 포지션 발견이 늦음)",
       not a and st5.get("bl") == 0 and st9.get("bl") == 1, (heads(a), st5, st9))
 reset()

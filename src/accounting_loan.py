@@ -2,31 +2,33 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import accounting_util
 from view_common import EPS
 from view_fspin import FS_EX
 
 
 class LoanBook:
 
-    def __init__(lnx, _qfmt, consume_krw, cp_emit, cp_take, cur_row, cur_src, ev, fee_gain, flow_of, fs_sales, fs_sum, fx_name, krw_mix, krw_stl, lf_pend, loan_px, oa_take, tax_rows):
+    def __init__(lnx, px, *, _qfmt, lf_pend, loan_px):
         lnx._qfmt = _qfmt
-        lnx.consume_krw = consume_krw
-        lnx.cp_emit = cp_emit
-        lnx.cp_take = cp_take
-        lnx.cur_row = cur_row
-        lnx.cur_src = cur_src
-        lnx.ev = ev
-        lnx.fee_gain = fee_gain
-        lnx.flow_of = flow_of
-        lnx.fs_sales = fs_sales
-        lnx.fs_sum = fs_sum
-        lnx.fx_name = fx_name
-        lnx.krw_mix = krw_mix
-        lnx.krw_stl = krw_stl
+        lnx.consume_krw = px.kpx.consume_krw
+        lnx.cp_emit = px.cpx.cp_emit
+        lnx.cp_take = px.cpx.cp_take
+        lnx.cur_row = px.cpx.cur_row
+        lnx.cur_src = px.cpx.cur_src
+        lnx.ev = px.cpx.ev
+        lnx.fee_gain = px.fbx.fee_gain
+        lnx.flow_of = px.fbx.flow_of
+        lnx.fs_sales = px.fsx.fs_sales
+        lnx.fs_sum = px.unx.fs_sum
+        lnx.fx_name = px.ofx.fx_name
+        lnx.krw_mix = px.kpx.krw_mix
+        lnx.krw_stl = px.kpx.krw_stl
         lnx.lf_pend = lf_pend
         lnx.loan_px = loan_px
-        lnx.oa_take = oa_take
-        lnx.tax_rows = tax_rows
+        lnx.oa_take = accounting_util.oa_take
+        lnx.tax_rows = px.books.tax_rows
+        lnx.cb = px.cb
 
     def loan_settle(lnx):
         for g9, lf9, ts9, dk9, ch9, tx9, loc9, _k9, row9 in lnx.lf_pend:
@@ -40,9 +42,9 @@ class LoanBook:
             mix9, stl9 = lnx.krw_mix[0], lnx.krw_stl[0]
             lnx.oa_take(g9, fk9)
             cmp9 = lnx.cp_emit(lnx.cp_take(g9, fk9, mc9), qp9 - fk9, qp9, mc9)
-            g9["qty_known"] -= fk9
-            g9["cost"] -= mc9
-            g9["qty_unknown"] = max(Decimal(0), g9["qty_unknown"] - (qp9 - fk9))
+            lnx.cb.sub_known(g9, fk9)
+            lnx.cb.sub_cost(g9, mc9)
+            lnx.cb.floor_sub_unknown(g9, qp9 - fk9)
             ex9 = loc9.split(":")[1] if loc9.count(":") >= 1 else loc9
             n0 = len(lnx.tax_rows)
             gain9 = lnx.fee_gain(g9, unit9, fk9, mc9, ts9, dk9, ch9, mck9, mix9=mix9, stl9=stl9, cmp9=cmp9,

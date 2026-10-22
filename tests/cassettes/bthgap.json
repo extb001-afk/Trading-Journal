@@ -1,0 +1,2959 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=bthgap · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "bthgap",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [],
+ "requests": 82,
+ "interactions": [
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1540",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1540",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 500,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "5000"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "5600",
+     "message": "점검"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {}
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "5600"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1540",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1540",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "4200",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1540",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "4200",
+       "units_traded_24H": "0"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://www.okx.com/api/v5/market/tickers?instType=SPOT",
+   "req": {
+    "method": "GET",
+    "url": "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "www.okx.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "www.okx.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": "0",
+     "data": [
+      {
+       "instId": "AAA-USDT",
+       "last": "1.0",
+       "vol24h": "100"
+      },
+      {
+       "instId": "BBB-USDT",
+       "last": "2.0",
+       "vol24h": "100"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://www.okx.com/api/v5/market/tickers?instType=SPOT",
+   "req": {
+    "method": "GET",
+    "url": "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "www.okx.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "www.okx.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": "0",
+     "data": [
+      {
+       "instId": "AAA-USDT",
+       "last": "1.0",
+       "vol24h": "100"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "CCC": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "CCC": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "0"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "CCC": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "DDD": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "EEE": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "0"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "5600"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "5600"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "4200",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "CCC": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "DDD": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "EEE": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://open.er-api.com/v6/latest/USD",
+   "req": {
+    "method": "GET",
+    "url": "https://open.er-api.com/v6/latest/USD"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "open.er-api.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "open.er-api.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "result": "success",
+     "rates": {
+      "KRW": 1390.0
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/market/all",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/market/all"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-BTC"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "AAA": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "BBB": {
+       "closing_price": "2800",
+       "units_traded_24H": "0"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orderbook?markets=KRW-USDT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orderbook?markets=KRW-USDT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "market": "KRW-USDT",
+      "orderbook_units": [
+       {
+        "ask_price": 1400.0,
+        "bid_price": 1399.0
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bithumb.com/public/ticker/ALL_KRW",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bithumb.com/public/ticker/ALL_KRW"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bithumb.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bithumb.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": "0000",
+     "data": {
+      "BBB": {
+       "closing_price": "4200",
+       "units_traded_24H": "12.5"
+      },
+      "CCC": {
+       "closing_price": "1400",
+       "units_traded_24H": "12.5"
+      },
+      "date": "1760000000000"
+     }
+    }
+   }
+  }
+ ]
+}

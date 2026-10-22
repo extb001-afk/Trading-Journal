@@ -13,41 +13,30 @@ import uuid as uuid_mod
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acct_norm
-import common
+import config, envfile, ex_sign, logs, net_http, paths, runtime, statefile, timeutil
+import db as dbm
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
-import unit_beat
+    runtime.cpu_reserve_apply()
+import unit_beat  # noqa: E402
 import bf_engine
 from inbox import SegmentWriter
 
-log = common.setup_logging("tj-ex")
+log = logs.setup_logging("tj-ex")
 
 API = "https://api.upbit.com"
 POLL_SEC = 60
-BAL_PATH = os.path.join(common.STATE_DIR, "upbit_balances.json")
 
 
 def _env():
-    return common.read_env_file()
-
-
-def _b64url(b: bytes) -> str:
-    import base64
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    return envfile.read_env_file()
 
 
 def _jwt(access: str, secret: str, query: dict | None) -> str:
-    import hmac
-    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     payload = {"access_key": access, "nonce": str(uuid_mod.uuid4())}
     if query:
-        qs = "&".join(f"{k}={v}" for k, v in query.items())
-        payload["query_hash"] = hashlib.sha512(qs.encode()).hexdigest()
+        payload["query_hash"] = ex_sign.query_hash(query)
         payload["query_hash_alg"] = "SHA512"
-    body = _b64url(json.dumps(payload).encode())
-    sig = _b64url(hmac.new(secret.encode(), f"{header}.{body}".encode(),
-                           hashlib.sha256).digest())
-    return f"{header}.{body}.{sig}"
+    return ex_sign.jwt_hs256(payload, secret)
 
 
 _BACKOFF_CODES = (401, 403, 429)
@@ -57,7 +46,7 @@ def _note_backoff(up, e) -> bool:
     if getattr(e, "code", None) in _BACKOFF_CODES:
         try:
             up._backoff_err = e
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         return True
     return False
@@ -71,10 +60,10 @@ class Upbit:
 
     def get(self, path: str, query: dict | None = None):
         url = API + path + (("?" + urllib.parse.urlencode(query, doseq=True)) if query else "")
-        req = urllib.request.Request(url, headers={
+        req = net_http.request(url, headers={
             "Authorization": f"Bearer {_jwt(self.access, self.secret, query)}",
             "Accept": "application/json", "User-Agent": "tj-bot/0.1"})
-        with common.auth_urlopen(req, timeout=20) as r:
+        with net_http.auth_urlopen(req, timeout=20) as r:
             rem = r.headers.get("Remaining-Req") or ""
             for part in rem.split(";"):
                 part = part.strip()
@@ -83,7 +72,7 @@ class Upbit:
                         self.remaining_min = int(part[4:])
                     except ValueError:
                         pass
-            return json.loads(common.read_capped(r).decode())
+            return json.loads(net_http.read_capped(r).decode())
 
 
 def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60, stop=None) -> list:
@@ -118,12 +107,9 @@ def _paged(up: "Upbit", path: str, months: float = 5, max_pages: int = 60, stop=
     return out
 
 
-ORDERS_STATE = os.path.join(common.STATE_DIR, "upbit_orders_state.json")
-
-
 def _iso(ts: float) -> str:
-    from datetime import datetime, timezone, timedelta
-    return datetime.fromtimestamp(ts, timezone(timedelta(hours=9))).strftime("%Y-%m-%dT%H:%M:%S+09:00")
+    from datetime import datetime
+    return datetime.fromtimestamp(ts, timeutil.KST).strftime("%Y-%m-%dT%H:%M:%S+09:00")
 
 
 def _sweep(up: "Upbit", start: float, stop: float, seen: set):
@@ -143,7 +129,7 @@ def _sweep(up: "Upbit", start: float, stop: float, seen: set):
                                "limit": 1000})
                 if not isinstance(rows, list):
                     raise ValueError(f"orders/closed 응답 형식 오류({type(rows).__name__}) — 창 진행 보류")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 if not _note_backoff(up, e):
                     log.warning("orders %s %s 실패(다음 사이클 재시도): %s", state, _iso(cur)[:10], e)
                 window_ok = False
@@ -209,17 +195,16 @@ def _with_funds(o: dict) -> dict:
 
 
 def _recon_marker():
-    import sqlite3
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return 0
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=5)
         try:
             r = c.execute("SELECT v FROM meta WHERE k='recon_done_upbit'").fetchone()
         finally:
             c.close()
         return int(float(r[0])) if r and r[0] else 0
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         log.warning("대사 도장 읽기 실패(재스윕 회수분 판단 보류): %s", e)
         return None
 
@@ -252,7 +237,7 @@ def _resolve_tracked(up: "Upbit", track: dict, seen: set, rows: dict) -> list:
                 continue
             log.warning("추적 주문 %s 단건 조회 실패(다음 사이클 재시도): %s", u, e)
             continue
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [isolate]
             log.warning("추적 주문 %s 단건 조회 실패(다음 사이클 재시도): %s", u, e)
             continue
         finally:
@@ -309,7 +294,7 @@ def _resolve_tracked(up: "Upbit", track: dict, seen: set, rows: dict) -> list:
 
 
 def fetch_orders(up: "Upbit", months: float, open_now: list | None = None):
-    st = common.read_json(ORDERS_STATE, {}) if os.path.exists(ORDERS_STATE) else {}
+    st = statefile.read_json(paths.state("upbit_orders_state.json"), {}) if os.path.exists(paths.state("upbit_orders_state.json")) else {}
     seen = set(st.get("uuids") or [])
     track = st.get("open_track") if isinstance(st.get("open_track"), dict) else {}
     track = {str(k): dict(v) if isinstance(v, dict) else {} for k, v in track.items()}
@@ -370,7 +355,7 @@ def _open_orders(up: "Upbit", max_pages: int = 20):
             if len(rows) < 100:
                 return out
             time.sleep(0.15)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         if not _note_backoff(up, e):
             log.warning("미체결 주문 조회 실패(이번 잔고 스냅샷엔 생략): %s", e)
         return None
@@ -395,7 +380,7 @@ _TFILL_KEEP = ("uuid", "market", "side", "state", "ord_type", "executed_volume",
 
 def _kst_day(ts):
     try:
-        return time.strftime("%Y-%m-%d", time.gmtime(float(ts) + 9 * 3600))
+        return timeutil.kst_day(ts)
     except (TypeError, ValueError):
         return None
 
@@ -418,11 +403,10 @@ def _tfill_add(state: dict, orders) -> int:
 
 
 def _tfill_done(uuids):
-    import sqlite3
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return None
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=5)
         try:
             out = {}
             for u in uuids:
@@ -435,7 +419,7 @@ def _tfill_done(uuids):
             return out
         finally:
             c.close()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("체결 시각 채우기 확인(원장 읽기) 실패 — 다음 주기: %s", e)
         return None
 
@@ -479,7 +463,7 @@ def _tfill_pass(up: "Upbit", writer, state: dict) -> int:
                 continue
             ent["n"] = int(ent.get("n") or 0) + 1
             continue
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             ent["n"] = int(ent.get("n") or 0) + 1
             log.warning("체결 시각 채우기 %s 단건 조회 실패(다음 주기 재시도): %s", u[:12], repr(e)[:120])
             continue
@@ -657,14 +641,14 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
     time.sleep(0.2)
     oo2 = _open_orders(up) if oo1 is not None else None
     open_ok = oo1 is not None and oo2 is not None
-    prev9 = common.read_json(ORDERS_STATE, {}) if os.path.exists(ORDERS_STATE) else {}
+    prev9 = statefile.read_json(paths.state("upbit_orders_state.json"), {}) if os.path.exists(paths.state("upbit_orders_state.json")) else {}
     if prev9.get("complete"):
         prev9["complete"] = False
-        common.atomic_write_json(ORDERS_STATE, prev9)
+        statefile.atomic_write_json(paths.state("upbit_orders_state.json"), prev9)
     snap = {"ts": int(time.time()), "accounts": accounts}
     if oo1 is not None and oo2 is not None and _oo_sig(oo1) == _oo_sig(oo2):
         snap["open_orders"] = oo2
-    common.atomic_write_json(BAL_PATH, snap)
+    statefile.atomic_write_json(paths.state("upbit_balances.json"), snap)
     time.sleep(0.2)
     target = bf_engine.SINCE.target("upbit")
     m_eff = max(months, (time.time() - target) / (30 * 86400)) if target else months
@@ -688,16 +672,16 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
                        "ts": int(time.time()), "orders": orders})
     try:
         _tfill_pass(up, writer, next_state)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [boundary]
         log.warning("체결 시각 채우기 실패(다음 주기 재시도): %s", repr(e)[:140])
     next_state["complete"] = bool(open_ok and sweep_ok and not next_state.get("track_pending"))
-    common.atomic_write_json(ORDERS_STATE, next_state)
+    statefile.atomic_write_json(paths.state("upbit_orders_state.json"), next_state)
     pend = int(next_state.get("track_pending") or 0)
     now9 = int(time.time())
     try:
-        prev9 = common.read_json(SYNC_PATH, {}) if os.path.exists(SYNC_PATH) else {}
+        prev9 = statefile.read_json(paths.state("upbit_sync.json"), {}) if os.path.exists(paths.state("upbit_sync.json")) else {}
         ps9 = int(prev9.get("pending_since") or 0) if isinstance(prev9, dict) else 0
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         ps9 = 0
     ps9 = (ps9 or now9) if pend else None
     stuck = bool(pend and now9 - ps9 >= PENDING_MAX)
@@ -717,7 +701,6 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
 
 
 _SYNC_N = [0]
-SYNC_PATH = os.path.join(common.STATE_DIR, "upbit_sync.json")
 
 
 PENDING_MAX = 7200
@@ -725,10 +708,10 @@ PENDING_MAX = 7200
 
 def _sync_note(ok: bool, err=None, kind=None, **extra) -> None:
     try:
-        d = common.read_json(SYNC_PATH, {}) if os.path.exists(SYNC_PATH) else {}
+        d = statefile.read_json(paths.state("upbit_sync.json"), {}) if os.path.exists(paths.state("upbit_sync.json")) else {}
         if not isinstance(d, dict):
             d = {}
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         d = {}
     try:
         now = int(time.time())
@@ -736,12 +719,12 @@ def _sync_note(ok: bool, err=None, kind=None, **extra) -> None:
         if ok:
             d["last_ok"] = now
         if err:
-            d["last_err"] = {"ts": now, "msg": common.safe_err(err)[:200], "kind": kind or "cycle"}
+            d["last_err"] = {"ts": now, "msg": logs.safe_err(err)[:200], "kind": kind or "cycle"}
         for k, v in extra.items():
             d[k] = v
-        common.atomic_write_json(SYNC_PATH, d)
-    except Exception as e:
-        log.warning("업비트 동기화 상태 기록 실패(무시): %s", common.safe_err(e)[:120])
+        statefile.atomic_write_json(paths.state("upbit_sync.json"), d)
+    except Exception as e:   # noqa: BLE001 [optional]
+        log.warning("업비트 동기화 상태 기록 실패(무시): %s", logs.safe_err(e)[:120])
 
 
 def _ensure_client(up, a, s):
@@ -757,18 +740,18 @@ def _cycle_once(up, writer, months: float, bo: "_Backoff", poll: int) -> int:
         if up._backoff_err is not None:
             raise up._backoff_err
         return bo.ok(poll)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         wait9, loud9 = bo.fail(e, poll)
         if loud9:
             log.warning("동기화 실패(%s초 뒤 재시도): %s", wait9, e)
-        _sync_note(ok=False, err=f"동기화 실패: {common.safe_err(e)[:160]}")
+        _sync_note(ok=False, err=f"동기화 실패: {logs.safe_err(e)[:160]}")
         return wait9
 
 
 def main():
-    common.ensure_dirs()
+    paths.ensure_dirs()
     unit_beat.start("ex")
-    writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
+    writer = SegmentWriter(os.path.join(paths.INBOX_DIR, "ex"))
     warned = False
     up = None
     bo = _Backoff()
@@ -789,14 +772,14 @@ def main():
         poll9 = POLL_SEC
         months = 5
         try:
-            cfg = common.load_config()
-            poll9 = common.upbit_poll_sec(cfg)
+            cfg = config.load_config()
+            poll9 = config.upbit_poll_sec(cfg)
             months = (0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 5)) or 5
             wait9 = _cycle_once(up, writer, months, bo, poll9)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             wait9, _l9 = bo.fail(e, poll9)
             log.warning("동기화 실패(다음 주기 재시도): %s", e)
-            _sync_note(ok=False, err=f"동기화 실패: {common.safe_err(e)[:160]}")
+            _sync_note(ok=False, err=f"동기화 실패: {logs.safe_err(e)[:160]}")
         end9 = time.time() + (wait9 if wait9 is not None else poll9)
         while True:
             left9 = end9 - time.time()

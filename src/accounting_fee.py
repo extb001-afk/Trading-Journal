@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pricing
 from view_common import EPS
 from view_common import _f
+from view_misc import fx_candle_near
 
 
 class FeeBook:
 
-    def __init__(fbx, sb, books, kst_fmt):
+    def __init__(fbx, sb, books, kst_fmt, cb):
         fbx.sb = sb
         fbx.realized_by_loc = books.realized_by_loc
         fbx.realized_krw_by_date = books.realized_krw_by_date
@@ -24,6 +24,7 @@ class FeeBook:
         fbx.wd_fee = books.wd_fee
         fbx.wd_fee_m = books.wd_fee_m
         fbx.kst_fmt = kst_fmt
+        fbx.cb = cb
 
     def tax_krw_acq(fbx, tax9, g, flow, cc9, cck9, rate_s, dkey, venue_loc=None, mix9=None):
         if g["is_stable"]:
@@ -56,17 +57,13 @@ class FeeBook:
         if g9["is_stable"]:
             return Decimal(1)
         if not g9.get("is_fiat"):
-            c9 = fbx.fxb.candle(g9["sym"], ts9)
+            c9 = fx_candle_near(fbx.fxb, g9["sym"], ts9)
             if c9:
                 return Decimal(str(c9))
         if wac9 is not None and wac9 > 0:
             return wac9
         if g9["qty_known"] > EPS:
             return g9["cost"] / g9["qty_known"]
-        if (g9["sym"] or "").upper() in pricing.MAJOR_CANDLE_SYMS:
-            s9 = fbx.sb.spot.price(g9["sym"])
-            if s9:
-                return Decimal(str(s9))
         return None
 
     def fee_expense(fbx, usd9, ts9, dkey9, kind9, where9):
@@ -146,7 +143,7 @@ class FeeBook:
         gain9 = unit9 * mk9 - mc9
         rt9, rs9 = fbx.fxb.rate_src(ts9)
         fl9 = g9["cur"] or fbx.flow_of(g9, ts9, chain9)
-        g9["realized"] += gain9
+        fbx.cb.realize(g9, gain9)
         fl9["realized"] += gain9
         fl9["rbd"][dkey9] = fl9["rbd"].get(dkey9, Decimal(0)) + gain9
         fl9["rbdk"][dkey9] = fl9["rbdk"].get(dkey9, 0.0) + float(gain9) * rt9

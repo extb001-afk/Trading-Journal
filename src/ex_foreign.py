@@ -1,11 +1,9 @@
 """Collectors for global exchanges (Binance, Bybit, OKX, KuCoin, Gate)."""
 from __future__ import annotations
-
 import base64
 import email.utils
 import functools
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -20,15 +18,17 @@ import uuid as uuidlib
 from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import acct_norm, config, envfile, paths, runtime, statefile  # noqa: E402
+import cgplan, settings_store  # noqa: E402
+import logs  # noqa: E402
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
-import unit_beat
-import bf_engine
-import calendar
-import depaddr
-from inbox import SegmentWriter
-from exf_net import (
+    runtime.cpu_reserve_apply()
+import unit_beat  # noqa: E402
+import bf_engine  # noqa: E402
+import calendar  # noqa: E402
+import depaddr  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
+from exf_net import (  # noqa: F401
     _acct,
     _ACCT_TL,
     _add_to,
@@ -39,74 +39,39 @@ from exf_net import (
     _BAL_SRC_HAD_PATH,
     _BAL_SRC_OFF,
     _balance_rows,
-    _BN_W_API,
     _BN_W_FAPI,
-    _BN_W_SAPI,
-    _BN_W_UID,
     _CLOCK,
-    _CLOCK_ERR,
-    _clock_fetch,
-    _CLOCK_LOCK,
     _CLOCK_ON,
-    _clock_parse,
-    _clock_retry,
-    _clock_save,
-    _clock_seen,
-    _clock_sync,
-    _COOL_LOCK,
     _COOL_MAPS,
     _COOL_ON,
     _cool_path,
-    _cool_save,
     _CoolMap,
     _cv_fill,
-    _debt_add,
-    _DEBT_SEEN,
-    _debt_warn,
     _DENY_SIGS,
     _DEP_DENIED,
-    _dstr,
-    _earn_amount,
     _err_body,
     _FUT_MULTI,
-    _fut_opt,
     _fut_path,
-    _fut_req,
     _fut_write,
-    _gov_admit,
     _gov_buckets,
-    _gov_headers,
     _GOV_HOLD,
-    _GOV_LOCK,
     _gov_prepare,
     _GOV_Q,
-    _gov_route,
-    _gov_wait_for,
-    _has_time,
     _http_json_err,
     _HTTP_JSON_IMPL,
-    _HTTP_TL,
-    _int_or,
     _invalidate_balance_snapshot,
     _is_time_fix,
-    _iso,
     _iso_epoch,
-    _KC_MGMT,
-    _KC_W,
     _keep_view,
     _LATE_CYC,
     _late_tag,
-    _loan_add,
-    _loan_amt,
     _mark_seen,
     _PartialConvertRows,
     _POLL_HINT,
     _px_safe,
-    _read_capped,
     _recon_hold,
     _recon_hold_clear,
     _rl_check,
-    _rl_hit,
     _rl_key,
     _RL_OFF,
     _rows_to_emit,
@@ -116,25 +81,14 @@ from exf_net import (
     _WD_OFF,
     _WD_TOUCH,
     _xm,
-    BN_UNI_RETRY,
-    BN_UNI_TTL,
-    CLOCK_ERR_GAP,
-    CLOCK_FAIL_GAP,
-    CLOCK_HOST,
     CLOCK_MAX_OFF_MS,
     CLOCK_PATH_NAME,
     CLOCK_SRC,
-    CLOCK_TTL,
-    CLOCK_WARN_MS,
     COOL_PATH_NAME,
-    CV_QUOTE_PREF,
     DAY,
     DENY_COOL_SEC,
     ERR_BODY_MAX,
     fut_rcpt,
-    GOV_BN_HDR,
-    GOV_BUCKETS,
-    GOV_MAX_WAIT,
     http_json,
     HTTP_MAX_BYTES,
     HTTP_MAX_BYTES_PATH,
@@ -144,17 +98,10 @@ from exf_net import (
     PEND_FINAL,
     POLL_SEC,
     PX_BN_FAIL_MAX,
-    PX_BN_REPLAN_MS,
     PX_CALLS_MAX,
-    QUOTES,
     RateLimited,
-    RECON_HOLD_CAP,
     ResponseTooLarge,
     SEEN_NOTIME,
-    SignatureExpired,
-    split_pair,
-    STATE_PATH,
-    UA,
 )
 
 log = logging.getLogger("tj-exf")
@@ -167,17 +114,18 @@ _exf_err = logging.StreamHandler(sys.stderr)
 _exf_err.setLevel(logging.WARNING)
 _exf_err.setFormatter(_exf_fmt)
 logging.basicConfig(level=logging.INFO, handlers=[_exf_out, _exf_err])
-common.add_secret_filter([_exf_out, _exf_err])
+logs.add_secret_filter([_exf_out, _exf_err])
+logs.install_excepthook()
 
 _quiet_n = {}
 
 
 def _env() -> dict:
-    return common.read_env_file()
+    return envfile.read_env_file()
 
 
-SUB_EX = common.SUB_EXCHANGES
-SUB_MAX = common.SUB_MAX
+SUB_EX = envfile.SUB_EXCHANGES
+SUB_MAX = envfile.SUB_MAX
 
 
 class _acct_ctx:
@@ -195,11 +143,11 @@ class _acct_ctx:
         return False
 
 
-sub_key_names = common.sub_key_names
+sub_key_names = envfile.sub_key_names
 
 
 def acct_envs(env: dict, ex: str, need=None) -> list:
-    return common.exchange_accounts(env, ex, need or (FETCHERS.get(ex) or (None, ()))[1])
+    return [a for a in envfile.exchange_accounts(env, ex, need or (FETCHERS.get(ex) or (None, ()))[1]) if (ex, a[0]) not in _IDENT_BAD]
 
 
 def sub_tags(env: dict, ex: str) -> list:
@@ -216,6 +164,84 @@ def acct_state(state: dict, ex: str, tag: str, now: int = None) -> dict:
     if not isinstance(st, dict):
         st = a9[tag] = {"seen": {}, "backfilled_until": 0, "dest_bf": int(now or time.time()), "added": int(now or time.time())}
     return st
+
+
+def acct_ident(state: dict, ex: str, tag: str, key: str, kperm: dict, now: int) -> bool:
+    subs = state.setdefault(ex, {"seen": {}, "backfilled_until": 0}).setdefault("accts", {})
+    kfp = cgplan.kfp(key)
+    rec = kperm.get(f"{ex}_sub{tag[1:]}") if isinstance(kperm, dict) else None
+    uid = str(rec["uid"]) if isinstance(rec, dict) and rec.get("uid") and rec.get("kfp") == kfp else None
+    uid = uid if uid and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", uid) else None
+    backs = [t for t, v in sorted(subs.items()) if t.startswith(tag + "@") and isinstance(v, dict)
+             and ((uid and str(v.get("uid") or "") == uid) or (v.get("kfp") == kfp and not (uid and v.get("uid") and str(v["uid"]) != uid)))]
+    back_tag = backs[0] if backs else None
+    cur = subs.get(tag)
+    if isinstance(cur, dict):
+        if uid and cur.get("uid"):
+            same = str(cur["uid"]) == uid
+        else:
+            same = bool(uid) or not cur.get("kfp") or cur["kfp"] == kfp
+        if same and not back_tag:
+            new = dict(cur, kfp=kfp, **({"uid": uid} if uid and not cur.get("uid") else {}))
+            if new == cur:
+                return False
+            cur.update(new)
+            return True
+    ops = []
+    if isinstance(cur, dict) and not same:
+        old_tag = f"{tag}@u{cur['uid']}" if cur.get("uid") else f"{tag}@k{cur['kfp']}"
+        subs[old_tag] = cur
+        ops.append([tag, old_tag])
+        log.warning("%s 서브 칸 %s 에 다른 계정 키 — 옛 계정 상태는 %s 로 물려 두고(마지막 잔고 0 아니면 대사 보류) 새 계정은 처음부터 받음", ex, tag, old_tag)
+    if back_tag:
+        ops.append([back_tag, tag])
+    for extra in backs[1:]:
+        ops.append([extra, tag, "rows"])
+        del subs[extra]
+    subs[tag] = subs.pop(back_tag) if back_tag else {"seen": {}, "backfilled_until": 0, "dest_bf": int(now), "added": int(now)}
+    subs[tag].update({"kfp": kfp, **({"uid": uid} if uid else {})})
+    if ops:
+        state[ex].setdefault("fut_retag", []).extend(ops)
+    return True
+
+
+def _fut_retag_pending(state: dict, ex: str) -> None:
+    todo = state.get(ex, {}).get("fut_retag") if isinstance(state.get(ex), dict) else None
+    while isinstance(todo, list) and todo:
+        op = list(todo[0])
+        _fut_retag(ex, op[0], op[1], raw=op[2:] != ["rows"])
+        todo.pop(0)
+        if not todo:
+            state[ex].pop("fut_retag", None)
+        try:
+            _save_state(state)
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
+            todo.insert(0, op)
+            state[ex]["fut_retag"] = todo
+            raise
+
+
+_IDENT_BAD = set()
+
+
+def _ident_ok(state: dict, ex: str, acct: tuple, need, kperm: dict, now: int) -> bool:
+    tag, env_a = acct
+    if not tag:
+        return True
+    try:
+        if acct_ident(state, ex, tag, env_a.get(need[0]), kperm, now):
+            _save_state(state)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
+        _IDENT_BAD.add((ex, tag))
+        log.warning("%s[%s] 서브 계정 정체 확인 실패(이번 주기 빼냄 · 그 거래소 잔고 승격 보류): %s", ex, tag, _xm(repr(e))[:140])
+        return False
+    try:
+        _fut_retag_pending(state, ex)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
+        ops = state.get(ex, {}).get("fut_retag") or [[tag, tag]]
+        _IDENT_BAD.update((ex, str(t).split("@")[0]) for op in ops for t in op[:2])
+        log.warning("%s 서브 선물 딱지 옮기기 실패(%s · 대기 칸 이번 주기 빼냄): %s", ex, [op[:2] for op in ops], _xm(repr(e))[:140])
+    return (ex, tag) not in _IDENT_BAD
 
 
 def acct_vstate(state: dict, ex: str, tag: str, now: int = None) -> _AcctState:
@@ -265,9 +291,9 @@ class _AcctWriter:
 
 
 def _clock_restore() -> int:
-    p9 = os.path.join(common.STATE_DIR, CLOCK_PATH_NAME)
+    p9 = paths.state(CLOCK_PATH_NAME)
     try:
-        d = common.read_json(p9, {}) if os.path.exists(p9) else {}
+        d = statefile.read_json(p9, {}) if os.path.exists(p9) else {}
     except SystemExit:
         d = {}
     n = 0
@@ -283,96 +309,58 @@ def _clock_restore() -> int:
     return n
 
 
-from exf_okx import (
+from exf_okx import (  # noqa: F401
     _bal_okx,
     _fut_okx,
     _okx_fills_floor,
     _okx_get,
     _okx_notional,
-    _okx_ts,
-    _OKX_WD_FAIL,
     _px_okx,
     convert_okx,
     fetch_okx,
     fills_okx,
-    PX_OKX_BF_V,
-    PX_OKX_CT_MAX,
 )
 
 
 DEST_FIELDS = ("address", "tag", "network")
 
 
-from exf_binance import (
+from exf_binance import (  # noqa: F401
     _bal_binance,
     _binance_caller,
     _binance_signed,
-    _bn_amt,
-    _BN_DEP_FAIL,
     _bn_deriv_get,
-    _bn_inv_load,
     _bn_split,
-    _bn_sym,
-    _bn_total_check,
-    _BN_TOTAL_WARNED,
     _BN_UNI,
-    _bn_universe,
-    _BN_WD_FAIL,
     _fut_binance,
     _px_binance,
     binance_fills_t0,
-    BINANCE_QUOTES,
     BN_FIRST_SWEEP_SEC,
-    BN_IDLE_SEC,
-    BN_INCOME_MS_PAGES,
-    BN_INVALID_RECHECK,
-    BN_LATE_MARGIN,
-    BN_RECENT_SEC,
-    BN_SWEEP_SEC,
     BN_UNI_NAME,
     convert_binance,
     convert_binance_dust,
+    dividend_binance,
     fetch_binance,
     fills_binance,
     fills_binance_replay,
 )
-from exf_bybit import (
+from exf_bybit import (  # noqa: F401
     _bal_bybit,
-    _bb_fill,
     _bb_hold_keep,
-    _bb_num,
-    _bb_split,
-    _bb_tlog_events,
-    _bb_tlog_pass,
-    _bb_tlog_window,
     _BB_UNI,
-    _bb_universe,
-    _BB_WD_FAIL,
     _bybit_get,
     _bybit_internal_rows,
     _fut_bybit,
-    _px_bb_window,
     _px_bybit,
-    _px_bybit_exec,
-    BB_HOLD_MAX,
     BB_INT_DENY,
-    BB_TLOG_CALLS_MAX,
-    BB_TLOG_LAG_MS,
-    BB_TLOG_OFF_MS,
-    BB_TLOG_OVERLAP_MS,
-    BB_TLOG_QUIET_MS,
     BB_TLOG_TYPES,
-    BB_UNI_NAME,
-    BB_UNI_URL,
     convert_bybit,
     fetch_bybit,
     fills_bybit,
     PX_BB_EX_OFF_MS,
-    PX_BB_EX_PAD_MS,
 )
-from exf_gate import (
+from exf_gate import (  # noqa: F401
     _bal_gate,
-    _GATE_FAIL,
     _gate_get,
     _gate_range,
     convert_gate,
@@ -402,7 +390,7 @@ def bybit_internal_pass(env: dict, state: dict, writer, now: int, window: int) -
     t0 = max(lo_want, min(int(now - 7 * DAY), int(it.get("until") or lo_want))) if hist_done else lo_want
     try:
         rows = _bybit_internal_rows(env, t0, now)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         msg = _xm(repr(e))[:200]
         if any(k in msg for k in _DENY_SIGS + BB_INT_DENY):
             _WD_OFF[_ak("bybit") + ":internal"] = time.time() + DENY_COOL_SEC
@@ -431,22 +419,20 @@ def bybit_internal_pass(env: dict, state: dict, writer, now: int, window: int) -
     return "ok"
 
 
-from exf_kucoin import (
+from exf_coinbase import (  # noqa: F401
+    bal_coinbase,
+    convert_coinbase,
+    fetch_coinbase,
+    fills_coinbase,
+)
+from exf_kucoin import (  # noqa: F401
     _bal_kucoin,
-    _kc_ctx_symbol,
-    _kc_hf_transient,
-    _kucoin_call,
     _kucoin_fut_get,
     _kucoin_get,
-    _kucoin_hf_pass,
-    _kucoin_hf_window,
     _kucoin_pub_get,
     convert_kucoin,
     fetch_kucoin,
     fills_kucoin,
-    KC_HF_DENY,
-    KC_HF_FILL_PAGES,
-    KC_HF_LEDGER_PAGES,
 )
 
 
@@ -487,37 +473,19 @@ def _dep_hold_update(ex: str, st: dict, dep_t0: int):
         st.pop("dep_hold", None)
 
 
-from exf_bithumb import (
+from exf_bithumb import (  # noqa: F401
     _bal_bithumb,
     _BITHUMB_ASC_CACHE,
-    _bithumb_asc_page,
-    _bithumb_asc_pager,
-    _bithumb_asc_start,
     _bithumb_caller,
-    _bithumb_cashlegs,
     _bithumb_ext_fills,
     _bithumb_ext_part,
     _bithumb_fill,
     _bithumb_get,
-    _BITHUMB_KRW_DENY,
-    _bithumb_open,
-    _bithumb_orders_asc,
     _bithumb_orders_state,
-    _bithumb_reg_catchup,
     _bithumb_retime,
     _bithumb_row_ts,
     _bithumb_track,
-    _BithumbBudget,
-    _BithumbDeep,
-    BITHUMB_ASC_CACHE_SEC,
-    BITHUMB_ASC_SCAN_MAX,
-    BITHUMB_EXT_STATES,
-    BITHUMB_KRW_ST,
-    BITHUMB_NOTFOUND_DROP,
     BITHUMB_REG_BUDGET,
-    BITHUMB_RESOLVE_MAX,
-    BITHUMB_RT_KEEP,
-    BITHUMB_TRACK_MIN_AGE,
     fetch_bithumb,
     fetch_bithumb_krw,
     fills_bithumb,
@@ -525,12 +493,13 @@ from exf_bithumb import (
 
 
 FETCHERS = {
-    "binance": (fetch_binance, ("TJ_BINANCE_KEY", "TJ_BINANCE_SECRET")),
-    "bybit": (fetch_bybit, ("TJ_BYBIT_KEY", "TJ_BYBIT_SECRET")),
-    "okx": (fetch_okx, ("TJ_OKX_KEY", "TJ_OKX_SECRET", "TJ_OKX_PASSPHRASE")),
-    "kucoin": (fetch_kucoin, ("TJ_KUCOIN_KEY", "TJ_KUCOIN_SECRET", "TJ_KUCOIN_PASSPHRASE")),
-    "gate": (fetch_gate, ("TJ_GATE_KEY", "TJ_GATE_SECRET")),
-    "bithumb": (fetch_bithumb, ("TJ_BITHUMB_KEY", "TJ_BITHUMB_SECRET")),
+    "binance": (fetch_binance, envfile.EX_KEYS["binance"]),
+    "bybit": (fetch_bybit, envfile.EX_KEYS["bybit"]),
+    "okx": (fetch_okx, envfile.EX_KEYS["okx"]),
+    "kucoin": (fetch_kucoin, envfile.EX_KEYS["kucoin"]),
+    "gate": (fetch_gate, envfile.EX_KEYS["gate"]),
+    "bithumb": (fetch_bithumb, envfile.EX_KEYS["bithumb"]),
+    "coinbase": (fetch_coinbase, envfile.EX_KEYS["coinbase"]),
 }
 
 
@@ -542,7 +511,7 @@ def bn_gap_step(env, st: dict, ext: dict, stop_at: int, now: int, deadline: floa
         save()
     try:
         fin = FILL_REPLAY["binance"](env, st.get("fills") or {}, gp, deadline, emit, save)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         ext["fills_err"] = _xm(repr(e))[:160]
         save()
         return False
@@ -559,9 +528,10 @@ CV_DENY = ("retCode=10005", "retCode=10003", "retCode=10004", "okx 50120", "okx 
 
 
 CONVERT_FETCHERS = {"binance": convert_binance, "okx": convert_okx, "bybit": convert_bybit,
-                    "kucoin": convert_kucoin, "gate": convert_gate}
-CONVERT_EXTRA = {"binance": (("dust", convert_binance_dust),)}
-CONVERT_LABEL = {"cv": "간편전환", "cv_dust": "소액 자산 BNB 전환"}
+                    "kucoin": convert_kucoin, "gate": convert_gate, "coinbase": convert_coinbase}
+CONVERT_EXTRA = {"binance": (("dust", convert_binance_dust), ("div", dividend_binance))}
+CONVERT_LABEL = {"cv": "간편전환", "cv_dust": "소액 자산 BNB 전환", "cv_div": "배당·에어드랍·Earn 이자 지급 내역"}
+_DIV_OFF = [False]
 CV_RETRY_SEC = 1800
 DUST_IDLE_SEC = 24 * 3600
 
@@ -572,6 +542,9 @@ def convert_rows(ex, env, fst: dict, now: int, window: int) -> list:
     if fn is not None:
         out += _convert_src(ex, "cv", fn, env, fst, now, window)
     for key9, fn9 in CONVERT_EXTRA.get(ex, ()):
+        if key9 == "div" and _DIV_OFF[0]:
+            _recon_hold_clear(fst, "cv:cv_div")
+            continue
         out += _convert_src(ex, "cv_" + key9, fn9, env, fst, now, window)
     if ex == "binance" and out:
         fst["extra_bases"] = sorted(set(fst.get("extra_bases") or []) | {f["base"] for f in out if f.get("base")}
@@ -603,7 +576,7 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
     except RateLimited:
         _recon_hold(fst, hk9, now, f"{label} 조회 레이트 제한")
         return []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         msg = _xm(repr(e))[:200]
         deny = any(k in msg for k in _DENY_SIGS + CV_DENY)
         cv["off_until"] = time.time() + (DENY_COOL_SEC if deny else CV_RETRY_SEC)
@@ -645,7 +618,7 @@ def _convert_src(ex, key, fn, env, fst: dict, now: int, window: int) -> list:
 def _cool_restore():
     now = time.time()
     try:
-        d = common.read_json(_cool_path(), {}) if os.path.exists(_cool_path()) else {}
+        d = statefile.read_json(_cool_path(), {}) if os.path.exists(_cool_path()) else {}
     except SystemExit:
         d = {}
     n = 0
@@ -668,12 +641,12 @@ def _cool_restore():
 
 
 BAL_FETCHERS = {"binance": _bal_binance, "bybit": _bal_bybit, "okx": _bal_okx,
-                "kucoin": _bal_kucoin, "gate": _bal_gate, "bithumb": _bal_bithumb}
+                "kucoin": _bal_kucoin, "gate": _bal_gate, "bithumb": _bal_bithumb, "coinbase": bal_coinbase}
 
 
 FILL_FETCHERS = {
     "binance": fills_binance, "bybit": fills_bybit, "okx": fills_okx,
-    "kucoin": fills_kucoin, "gate": fills_gate, "bithumb": fills_bithumb,
+    "kucoin": fills_kucoin, "gate": fills_gate, "bithumb": fills_bithumb, "coinbase": fills_coinbase,
 }
 FILL_REPLAY = {"binance": fills_binance_replay}
 
@@ -774,12 +747,12 @@ def pending_recheck_pass(env: dict, state: dict, writer, now: int, window: int, 
                     try:
                         rows_d += _bybit_internal_rows(env, int(a9), int(min(b9, now)))
                         int_ok = True if int_ok is None else int_ok
-                    except Exception as e9:
+                    except Exception as e9:   # noqa: BLE001 [fallback]
                         int_ok = False
                         if any(k in _xm(repr(e9)) for k in _DENY_SIGS + BB_INT_DENY):
                             _WD_OFF[_ak("bybit") + ":internal"] = time.time() + DENY_COOL_SEC
                         log.warning("bybit 내부 입금 상태 재확인 실패(그 행만 다음 회): %s", _xm(repr(e9))[:120])
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             rc["err"] = _xm(repr(e))[:160]
             _save_state(state)
             log.warning("%s 비종결 입출금 재확인 실패(6시간 뒤 다시): %s", ex, rc["err"])
@@ -843,7 +816,7 @@ def dest_backfill_pass(env: dict, state: dict, writer, now: int, window: int, fe
             lo = min(lo, int(ext["wd_from"]))
         try:
             w_rows, _d = fn(env, lo, now)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [isolate]
             n9 = int(fail9.get("n") or 0) + 1
             wait9 = min(12 * 3600, 1800 * (2 ** (n9 - 1)))
             st["dest_bf_fail"] = {"n": n9, "next": int(now + wait9)}
@@ -884,7 +857,7 @@ def krw_backfill_pass(env: dict, state: dict, writer, now: int, window: int) -> 
         return "done"
     try:
         w_rows, d_rows = fetch_bithumb_krw(env, lo, now, require_complete=True)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         log.warning("bithumb 원화 입출금 소급 실패(다음 주기): %s", repr(e)[:140])
         return "error"
     seen, seen_txids, seen_dest = st["seen"], st.setdefault("seen_txids", {}), st.setdefault("seen_dest", {})
@@ -908,7 +881,6 @@ SNAP_AGREE_REL = 1e-4
 SNAP_AGREE_ABS = 1e-6
 _SNAP_MISS = {}
 SNAP_MISS_CAP = 6
-SNAP_MISS_PATH = os.path.join(common.STATE_DIR, "exf_snap_miss.json")
 _SNAP_MISS_ST = {}
 
 
@@ -923,7 +895,8 @@ def _wd_inflight(rows, now: int) -> list:
     return out
 
 
-def _snap_flat(snap: dict):
+def _snap_flat(snap: dict, ex: str = ""):
+    off_fiat = acct_norm.ex_off_ledger(ex)
     out = {}
     for fld, pfx in (("balances", ""), ("debts", "부채 ")):
         d = snap.get(fld) if isinstance(snap, dict) else None
@@ -933,7 +906,7 @@ def _snap_flat(snap: dict):
             return None
         for k, v in d.items():
             ku = str(k).upper()
-            if ku in ("KRW", "USD"):
+            if ku in off_fiat:
                 continue
             try:
                 fv = float(v)
@@ -945,8 +918,8 @@ def _snap_flat(snap: dict):
     return out
 
 
-def _snap_agree(a: dict, b: dict):
-    fa, fb = _snap_flat(a), _snap_flat(b)
+def _snap_agree(a: dict, b: dict, ex: str = ""):
+    fa, fb = _snap_flat(a, ex), _snap_flat(b, ex)
     if fa is None or fb is None:
         return False, "형식 오류"
     pa, pb = (a or {}).get("fut_part"), (b or {}).get("fut_part")
@@ -971,9 +944,9 @@ def _snap_agree(a: dict, b: dict):
 def _snap_miss_save():
     try:
         _SNAP_MISS_ST["seen"] = set(_SNAP_MISS_ST.get("seen") or ()) | set(_SNAP_MISS_ST.get("ex") or {})
-        common.atomic_write_json(SNAP_MISS_PATH, {"v": 1, "ts": int(time.time()), "ex": _SNAP_MISS_ST.get("ex") or {},
+        statefile.atomic_write_json(paths.state("exf_snap_miss.json"), {"v": 1, "ts": int(time.time()), "ex": _SNAP_MISS_ST.get("ex") or {},
                                                   "seen": sorted(_SNAP_MISS_ST["seen"])})
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("잔고 표본 불일치 상태 쓰기 실패: %s", repr(e)[:120])
 
 
@@ -981,13 +954,13 @@ def _snap_promote_ok(ex, prevp, snap9, now=None):
     now = int(time.time() if now is None else now)
     if "ex" not in _SNAP_MISS_ST:
         try:
-            d9 = common.read_json(SNAP_MISS_PATH, {}) or {}
-        except (Exception, SystemExit):
+            d9 = statefile.read_json(paths.state("exf_snap_miss.json"), {}) or {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             d9 = {}
         _SNAP_MISS_ST["ex"] = {str(k): v for k, v in ((d9.get("ex") if isinstance(d9.get("ex"), dict) else {}) or {}).items() if isinstance(v, dict)}
         _SNAP_MISS_ST["seen"] = {str(x) for x in (d9.get("seen") if isinstance(d9.get("seen"), list) else [])}
     st9 = _SNAP_MISS_ST["ex"]
-    agree9, why9 = _snap_agree(prevp, snap9)
+    agree9, why9 = _snap_agree(prevp, snap9, ex)
     if agree9:
         _SNAP_MISS.pop(ex, None)
         if st9.pop(ex, None) is not None:
@@ -1018,10 +991,10 @@ _CV_OFF = _CoolMap("cv")
 def _fut_merge(ex, tags, denied=()):
     docs9 = []
     for tag in tags:
-        p9 = os.path.join(common.STATE_DIR, f"futraw_{ex}_{tag or 'main'}.json")
+        p9 = paths.state(f"futraw_{ex}_{tag or 'main'}.json")
         try:
-            d9 = common.read_json(p9, None) if os.path.exists(p9) else None
-        except (Exception, SystemExit):
+            d9 = statefile.read_json(p9, None) if os.path.exists(p9) else None
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             log.warning("%s 선물 계정 원본 읽기 실패(%s) — 정본 갱신 보류", ex, tag or "main")
             return
         if isinstance(d9, dict) and d9.get("ts"):
@@ -1030,16 +1003,10 @@ def _fut_merge(ex, tags, denied=()):
         return
     evs9, seen9, pos9 = [], set(), []
     try:
-        prev9 = common.read_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), {}) or {}
-    except (Exception, SystemExit):
+        prev9 = statefile.read_json(paths.state(f"futures_{ex}.json"), {}) or {}
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         log.warning("%s 선물 정본 읽기 실패 — 합치기 보류", ex)
         return
-    for r9 in (prev9.get("events") if isinstance(prev9, dict) else None) or []:
-        if isinstance(r9, dict) and r9.get("acct") and r9["acct"] not in tags:
-            u9 = (r9["acct"], r9.get("uid") or f"{r9.get('t')}:{r9.get('kind')}:{r9.get('amount')}:{r9.get('symbol')}")
-            if u9 not in seen9:
-                seen9.add(u9)
-                evs9.append(r9)
     bal9, bal_ok9, note9 = 0.0, True, None
     for tag, d9 in docs9:
         for r9 in d9.get("events") or []:
@@ -1059,6 +1026,12 @@ def _fut_merge(ex, tags, denied=()):
             bal9 += float(b9)
         elif b9 is not None:
             bal_ok9 = False
+    for prev_row in (prev9.get("events") if isinstance(prev9, dict) else None) or []:
+        if isinstance(prev_row, dict):
+            key = (prev_row.get("acct") or "", prev_row.get("uid") or f"{prev_row.get('t')}:{prev_row.get('kind')}:{prev_row.get('amount')}:{prev_row.get('symbol')}")
+            if key not in seen9:
+                seen9.add(key)
+                evs9.append(prev_row)
     nums9 = [isinstance((d9.get("wallet") or {}).get("balance"), (int, float)) for _t, d9 in docs9]
     wallet9 = {"balance": round(bal9, 8) if any(nums9) and bal_ok9 else None, "note": note9}
     ts9 = min(int(d9.get("ts") or 0) for _t, d9 in docs9)
@@ -1072,22 +1045,43 @@ def _fut_merge(ex, tags, denied=()):
             "cursor": main9.get("cursor"), "accts": [t9 or "main" for t9, _d in docs9]}
     if cov9 < ts9:
         out9["inc_cov_ts"] = cov9
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), out9)
+    statefile.atomic_write_json(paths.state(f"futures_{ex}.json"), out9)
+
+
+def _fut_retag(ex, old, new, raw=True):
+    can = paths.state(f"futures_{ex}.json")
+    doc = statefile.read_json(can, {}) if os.path.exists(can) else {}
+    if isinstance(doc, dict) and any(isinstance(r, dict) and r.get("acct") == old for r in doc.get("events") or []):
+        have = {r.get("uid") for r in doc.get("events") or [] if isinstance(r, dict) and r.get("acct") == new and r.get("uid")}
+        evs = [dict(r, acct=new) if isinstance(r, dict) and r.get("acct") == old else r for r in doc.get("events") or []
+               if not (isinstance(r, dict) and r.get("acct") == old and r.get("uid") in have)]
+        statefile.atomic_write_json(can, dict(doc, events=evs, positions=[q for q in doc.get("positions") or [] if not (isinstance(q, dict) and q.get("acct") == old)]))
+    src = paths.state(f"futraw_{ex}_{old}.json")
+    if os.path.exists(src):
+        if raw:
+            statefile.atomic_write_json(paths.state(f"futraw_{ex}_{new}.json"), statefile.read_json(src, {}))
+        os.remove(src)
 
 
 def _fut_seed_main(ex):
-    raw9 = os.path.join(common.STATE_DIR, f"futraw_{ex}_main.json")
-    can9 = os.path.join(common.STATE_DIR, f"futures_{ex}.json")
-    if os.path.exists(raw9) or not os.path.exists(can9):
+    raw9 = paths.state(f"futraw_{ex}_main.json")
+    can9 = paths.state(f"futures_{ex}.json")
+    if not os.path.exists(can9):
         return
-    d9 = common.read_json(can9, {}) or {}
+    d9 = statefile.read_json(can9, {}) or {}
     if not isinstance(d9, dict):
+        return
+    old_raw = statefile.read_json(raw9, {}) if os.path.exists(raw9) else None
+    if isinstance(old_raw, dict) and ("accts" in d9 or int(d9.get("ts") or 0) < int(old_raw.get("ts") or 0)):
         return
     d9 = dict(d9)
     d9["events"] = [r for r in d9.get("events") or [] if isinstance(r, dict) and not r.get("acct")]
+    have = {r.get("uid") for r in d9["events"] if r.get("uid")}
+    d9["events"] = sorted(d9["events"] + [r for r in (old_raw or {}).get("events") or [] if isinstance(r, dict) and r.get("uid") and r["uid"] not in have],
+                          key=lambda r: r.get("t") or 0)
     d9["positions"] = [q for q in d9.get("positions") or [] if isinstance(q, dict) and not q.get("acct")]
     d9.pop("accts", None)
-    common.atomic_write_json(raw9, d9)
+    statefile.atomic_write_json(raw9, d9)
 
 
 def futures_snapshot_all(env):
@@ -1103,7 +1097,7 @@ def futures_snapshot_all(env):
         try:
             if multi9:
                 _fut_seed_main(ex)
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
             log.warning("%s 선물 여러 계정 모드 준비 실패(다음 주기): %s", ex, _xm(repr(e))[:140])
             _FUT_MULTI[ex] = False
             continue
@@ -1116,7 +1110,7 @@ def futures_snapshot_all(env):
                     continue
                 try:
                     fn(env_a)
-                except (Exception, SystemExit) as e:
+                except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
                     msg = _xm(repr(e))
                     if any(k in msg for k in ("HTTP 401", "HTTP 403", "HTTPError 401",
                                               "HTTPError 403", '"code":-2015', '"code":-1002')):
@@ -1129,7 +1123,7 @@ def futures_snapshot_all(env):
         if multi9:
             try:
                 _fut_merge(ex, [t9 for t9, _e in accts9], denied=denied9)
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
                 log.warning("%s 선물 계정 합치기 실패(다음 주기): %s", ex, _xm(repr(e))[:140])
 
 
@@ -1140,7 +1134,7 @@ def _lev_body(fn, rl_host=None):
         except urllib.error.HTTPError as e:
             try:
                 body = _err_body(e)[:300]
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 body = ""
             if rl_host and e.code == 403 and "too frequent" in body.lower():
                 k9 = _rl_key(rl_host)
@@ -1169,8 +1163,8 @@ def leverage_pass(env, cfg=None):
     if isinstance(xc9, dict) and xc9.get("leverage") is False:
         return None
     import leverage
-    doc = leverage.collect(env, leverage_getters(env), now=int(time.time()), cycle_sec=common.exf_poll_sec(cfg),
-                           fresh_sec=common.exf_fresh_sec(cfg), pace=lambda: time.sleep(PACE), log=log, cfg=cfg)
+    doc = leverage.collect(env, leverage_getters(env), now=int(time.time()), cycle_sec=config.exf_poll_sec(cfg),
+                           fresh_sec=config.exf_fresh_sec(cfg), pace=lambda: time.sleep(PACE), log=log, cfg=cfg)
     leverage.write(doc)
     bad = [f"{p['ex']}:{p['product']}={p['status']}" for p in doc["products"] if p["status"] in ("error", "rate_limited")]
     if bad:
@@ -1258,7 +1252,7 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                 except RuntimeError:
                     if i9 == 2:
                         raise
-            common.atomic_write_json(STATE_PATH, snap9)
+            statefile.atomic_write_json(paths.state("exf_state.json"), snap9)
 
     def one(ex, target=target):
         with _acct_ctx(tag_x):
@@ -1293,7 +1287,7 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
             a, b = max(int(target), int(ext["wd_from"]) - EXT_CHUNK), int(ext["wd_from"])
             try:
                 w_rows, d_rows = fn(env, a, b)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 ext["wd_err"] = _xm(repr(e))[:160]
                 break
             seen, seen_txids, seen_dest = st["seen"], st.setdefault("seen_txids", {}), st.setdefault("seen_dest", {})
@@ -1340,7 +1334,7 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                 ext["n_emit"] = int(ext.get("n_emit") or 0) + len(rows)
             try:
                 fin = FILL_REPLAY["binance"](env, st.get("fills") or {}, rp, deadline, _emit, _save)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 ext["fills_err"] = _xm(repr(e))[:160]
                 fin = False
             if fin:
@@ -1372,7 +1366,7 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                     ext["n_emit"] = int(ext.get("n_emit") or 0) + len(rows)
                 try:
                     fin = _bithumb_ext_fills(_bithumb_caller(env), st.get("fills") or {}, ext, a, b, deadline, _emit_bt, _save)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     ext["fills_err"] = _xm(repr(e))[:160]
                     _save()
                     break
@@ -1385,12 +1379,15 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                 ext.pop("fills_err", None)
                 _save()
                 continue
+            overlap_s = 1 if b < hi0 else 0
+            edge_prev = ext.get("fills_edge") if isinstance(ext.get("fills_edge"), dict) else {}
+            edge_skip = set(edge_prev.get("ids") or []) if int(edge_prev.get("b") or -1) == b else set()
             try:
                 cp9 = json.loads(json.dumps(st.get("fills") or {}))
-                rows = FILL_FETCHERS[ex](env, cp9, a, b)
+                rows = FILL_FETCHERS[ex](env, cp9, a, b + overlap_s)
                 if _bb_hold_keep(st, cp9):
                     _save()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 ext["fills_err"] = _xm(repr(e))[:160]
                 days9, kind9 = _fills_limit_kind(repr(e))
                 sl9 = ext.get("fills_soft_limit") if isinstance(ext.get("fills_soft_limit"), dict) else {}
@@ -1411,7 +1408,9 @@ def extension_pass(env: dict, state: dict, writer, target: int, now: int, window
                         _save()
                         continue
                 break
-            rows = [f for f in rows if a * 1000 <= int(f.get("ts") or 0) <= b * 1000]
+            hi_ms = b * 1000 + (999 if overlap_s else 0)
+            rows = [f for f in rows if a * 1000 <= int(f.get("ts") or 0) <= hi_ms and str(f.get("id")) not in edge_skip]
+            ext["fills_edge"] = {"b": int(a), "ids": sorted({str(f.get("id")) for f in rows if int(f.get("ts") or 0) < (a + 1) * 1000})}
             if rows:
                 _invalidate_balance_snapshot(ex)
                 with wlock:
@@ -1487,7 +1486,7 @@ def sub_passes(env: dict, state: dict, cw, now: int, window: int) -> dict:
                 for nm9, f9 in jobs:
                     try:
                         out[f"{ex}[{tag}]:{nm9}"] = f9()
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [isolate]
                         log.warning("%s[%s] %s 실패(다음 주기): %s", ex, tag, nm9, _xm(repr(e))[:160])
     return out
 
@@ -1499,7 +1498,7 @@ def sub_extension_pass(env: dict, state: dict, writer, target: int, now: int, wi
             with _acct_ctx(tag):
                 try:
                     extension_pass(env_a, vst, _AcctWriter(writer, ex, tag, vst[ex]), target, now, window)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.warning("%s[%s] 과거 창 확장 실패(다음 주기): %s", ex, tag, _xm(repr(e))[:160])
 
 
@@ -1519,6 +1518,42 @@ def acct_wait(st: dict, accts: list) -> list:
         if not wd9 or not (s9.get("fills") or {}).get("backfilled_until"):
             out.append(tag)
     return out
+
+
+def _lb_nonzero(lb: dict) -> bool:
+    for part in (lb.get("b"), lb.get("d")):
+        if part and not isinstance(part, dict):
+            return True
+        for qty in (part or {}).values():
+            try:
+                if float(qty) != 0:
+                    return True
+            except (TypeError, ValueError):
+                return True
+    return False
+
+
+def acct_held(ex: str, state: dict, accts: list, loud: bool = False) -> list:
+    exst = state.get(ex) if isinstance(state.get(ex), dict) else {}
+    subs = exst.get("accts")
+    active = {tag for tag, _env in accts}
+    held, dropped = [], False
+    for tag, sub in sorted((subs or {}).items()) if isinstance(subs, dict) else ():
+        if not tag or tag in active or not isinstance(sub, dict) or not isinstance(sub.get("last_bal"), dict):
+            continue
+        if _lb_nonzero(sub["last_bal"]):
+            held.append(tag)
+        else:
+            del sub["last_bal"]
+            dropped = True
+    if held != (exst.get("sub_held") or []):
+        exst["sub_held"] = held
+        dropped = True
+    if dropped:
+        _save_state(state)
+    if held and loud:
+        log.warning("%s 서브 키 제외됨(%s) — 마지막 잔고가 0 이 아니라 잔고 대사 보류(표시용만 · 같은 계정 키를 다시 넣으면 풀림)", ex, ",".join(held))
+    return held
 
 
 def _bal_all(ex: str, accts: list, st: dict = None):
@@ -1560,7 +1595,7 @@ def _bal_all(ex: str, accts: list, st: dict = None):
             out.debts[k] = out.debts.get(k, 0) + float(v)
         out.sources += [str(x) for x in (lb9.get("src") or [f"{tag}:spot"])]
         if _quiet_n.get(ex, 0) % 10 == 1:
-            log.warning("%s 서브계정 %s 키가 설정에 없음 — 마지막 잔고(%s)를 그대로 더함(지운 키의 돈이 사라진 것으로 보정하지 않게) · 다시 넣으면 이어서 받음",
+            log.warning("%s 서브계정 %s 키가 설정에 없음 — 마지막 잔고(%s)를 표시용 합에만 더하고 잔고 대사 보류 · 다시 넣으면 이어서 받음",
                         ex, tag, time.strftime("%Y-%m-%d %H:%M", time.localtime(int(lb9.get("ts") or 0))))
     return out
 
@@ -1575,10 +1610,10 @@ def balance_prefetch(env: dict, cyc: int, fetchers=None) -> dict:
             continue
         try:
             snap9 = _view_snap(_bal_all(ex, acct_envs(env, ex, need)))
-            common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json.view"), snap9)
+            statefile.atomic_write_json(paths.state(f"exf_balances_{ex}.json.view"), snap9)
             out[ex] = "ok"
             log.info("%s: 잔고 %d종 먼저 읽음(표시용 — 옛 기록 수집 전)", ex, len(snap9["balances"]))
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
             out[ex] = _xm(repr(e))[:160]
             log.info("%s 잔고 먼저 읽기 실패(주기 끝에 다시): %s", ex, out[ex][:120])
     return out
@@ -1588,55 +1623,57 @@ def _hl_on(cfg) -> bool:
     try:
         import hl_spot
         return bool(hl_spot.addresses(cfg))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
 def main():
-    common.cpu_reserve_apply()
-    common.ensure_dirs()
+    runtime.cpu_reserve_apply()
+    paths.ensure_dirs()
     unit_beat.start("exf")
-    writer = SegmentWriter(os.path.join(common.INBOX_DIR, "ex"))
-    n9 = common.scrub_secret_file(STATE_PATH)
+    writer = SegmentWriter(os.path.join(paths.INBOX_DIR, "ex"))
+    n9 = logs.scrub_secret_file(paths.state("exf_state.json"))
     if n9:
         log.info("exf_state: 수정 전 오류 문구 %d칸 비밀값 가림", n9)
-    state = common.read_json(STATE_PATH, {})
+    state = statefile.read_json(paths.state("exf_state.json"), {})
     _cool_restore()
     _clock_restore()
     depaddr.start_background(_env)
     try:
         import perp_dex
         perp_dex.start_background()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [boundary]
         log.warning("퍼프 덱스 수집 스레드 시작 실패(거래소 수집은 계속): %s", repr(e)[:160])
     try:
         import liq_watch
         liq_watch.start_background(_env, _RL_OFF)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [boundary]
         log.warning("청산 빠른 감시 스레드 시작 실패(거래소 수집은 계속): %s", repr(e)[:160])
     cyc9 = 0
     while True:
         env = _env()
-        cfg = common.load_config()
-        poll9 = common.exf_poll_sec(cfg)
+        kperm = settings_store.read_settings().get("key_perm") or {}
+        cfg = config.load_config()
+        poll9 = config.exf_poll_sec(cfg)
         _POLL_HINT[0] = poll9
+        _DIV_OFF[0] = not config.exf_binance_dividends(cfg)
         months = 0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 5)
         window = int((months or 5) * 30 * DAY)
         now = int(time.time())
         hl_on9 = _hl_on(cfg)
         try:
-            common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_active.json"),
+            statefile.atomic_write_json(paths.state("exf_active.json"),
                                      {"v": 1, "ts": now, "active": sorted([ex for ex, (_f9, need) in FETCHERS.items()
                                                                            if all(env.get(k) for k in need)] + (["hyperliquid"] if hl_on9 else [])
                                                                           + [f"{ex}~{t9}" for ex, (_f9, need) in FETCHERS.items()
                                                                              for t9 in sub_tags(env, ex)])})
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("연결 거래소 목록 기록 실패(무시): %s", repr(e)[:120])
         _LATE_CYC["id"], _LATE_CYC["ex"] = f"c{now}:{uuidlib.uuid4().hex[:10]}", set()
         cyc9 += 1
         try:
             balance_prefetch(env, cyc9)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("잔고 먼저 읽기 실패(종전 순서로 계속): %s", repr(e)[:160])
         if hl_on9:
             try:
@@ -1644,7 +1681,7 @@ def main():
                 m9 = hl_spot.prefetch_view(cfg, poll=poll9)
                 if m9.startswith("ok"):
                     log.info("hyperliquid: 잔고 먼저 읽음(표시용 — 옛 기록 수집 전): %s", m9)
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
                 log.info("hyperliquid 잔고 먼저 읽기 실패(주기 끝 수집은 그대로): %s", repr(e)[:160])
         cw = _CycleWriter(writer, state)
         for ex, (fn, need) in FETCHERS.items():
@@ -1653,8 +1690,9 @@ def main():
             st = state.setdefault(ex, {"seen": {}, "backfilled_until": 0})
             _quiet_n[ex] = _quiet_n.get(ex, 0) + 1
             loud9 = _quiet_n[ex] % 10 == 1
-            accts9 = acct_envs(env, ex, need)
-            agg_ok9, agg_new9, agg_fly9, agg_rl9, agg_trk9 = True, 0, [], False, False
+            _IDENT_BAD.difference_update({k for k in _IDENT_BAD if k[0] == ex})
+            accts9 = [a for a in acct_envs(env, ex, need) if _ident_ok(state, ex, a, need, kperm, now)]
+            agg_ok9, agg_new9, agg_fly9, agg_rl9, agg_trk9 = not any(k[0] == ex for k in _IDENT_BAD), 0, [], False, False
             for tag9, env_a in accts9:
                 with _acct_ctx(tag9):
                     st_a = st if not tag9 else acct_state(state, ex, tag9, now)
@@ -1665,7 +1703,7 @@ def main():
                     wd_ok = True
                     try:
                         w_rows, d_rows = fn(env_a, t0, now, dep_t0=dep_t0) if ex == "gate" else fn(env_a, t0, now)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [isolate]
                         w_rows, d_rows = [], []
                         wd_ok = False
                         if tag9 and _sub_denied(_xm(repr(e))):
@@ -1745,7 +1783,7 @@ def main():
                             log.info("%s 잔고 승격 보류(부가 수집 미완 — %s): 받은 체결·커서는 반영, 다음 주기 다시", exl9, str(hold9)[:200])
                         if partial9:
                             log.info("%s 체결 부분 주기(받은 몫·커서 보존, 백필 도장·잔고 승격 보류 — 다음 주기에 이어서): %s", exl9, partial9)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [isolate]
                         fills_rl = isinstance(e, RateLimited)
                         log.warning("%s 체결 수집 실패(다음 주기 재시도): %s", exl9, repr(e)[:140])
                         try:
@@ -1756,7 +1794,7 @@ def main():
                                 if bd9:
                                     st_a["fills"]["bn_dirty"] = sorted(bd9)
                                 _save_state(state)
-                        except Exception as e9:
+                        except Exception as e9:  # noqa: BLE001 [isolate]
                             log.warning("%s 체결 후보 통화 보존 실패: %s", exl9, repr(e9)[:120])
                     agg_ok9 = agg_ok9 and fills_ok
                     agg_new9 += fills_new
@@ -1767,17 +1805,18 @@ def main():
             wait9 = acct_wait(st, accts9)
             if wait9 and loud9:
                 log.info("%s 서브계정 %s 이력 받는 중 — 잔고 대사 보류(다 받으면 메인+서브 합으로)", ex, ",".join(wait9))
-            bp9 = os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json")
+            held_subs = acct_held(ex, state, accts9, loud9)
+            bp9 = paths.state(f"exf_balances_{ex}.json")
             pend_bp = bp9 + ".pending"
             try:
                 if wd_fly9 and fills_ok and not fills_new and loud9:
                     log.info("%s 진행 중 출금 %d건(종결 전) — 잔고 승격 보류(출금 기장 전 잔고로 대사 금지)", ex, len(wd_fly9))
-                if not fills_ok or fills_new or wd_fly9 or agg_trk9 or wait9:
+                if not fills_ok or fills_new or wd_fly9 or agg_trk9 or wait9 or held_subs:
                     _keep_view(bp9, pend_bp)
                     for p9 in (bp9, pend_bp):
                         if os.path.exists(p9):
                             os.remove(p9)
-                    if (not fills_ok or (wd_fly9 and not fills_new) or wait9) and not fills_rl:
+                    if (not fills_ok or (wd_fly9 and not fills_new) or wait9 or held_subs) and not fills_rl:
                         try:
                             bal9 = _bal_all(ex, accts9, st)
                             if st.get("accts"):
@@ -1789,16 +1828,16 @@ def main():
                                 snap9["sources"] = sorted(set(bal9.sources))
                             if getattr(bal9, "loans", None):
                                 snap9["loans"] = list(bal9.loans)
-                            common.atomic_write_json(bp9 + ".view", snap9)
+                            statefile.atomic_write_json(bp9 + ".view", snap9)
                             _VIEW_CYC[ex] = cyc9
-                        except (Exception, SystemExit) as e9v:
+                        except (Exception, SystemExit) as e9v:   # noqa: BLE001 [isolate]
                             if loud9:
                                 log.info("%s 표시용 잔고 갱신 생략(체결 실패 주기): %s", ex, _xm(repr(e9v))[:120])
                 else:
                     bal9 = _bal_all(ex, accts9, st)
                     if st.get("accts"):
                         _save_state(state)
-                    prevp = common.read_json(pend_bp, {})
+                    prevp = statefile.read_json(pend_bp, {})
                     prev_balances = prevp.get("balances")
                     snap9 = {"ts": int(time.time()), "balances": dict(bal9)}
                     if isinstance(getattr(bal9, "debts", None), dict):
@@ -1812,47 +1851,47 @@ def main():
                     if isinstance(prev_balances, dict) and (prev_balances or not bal9):
                         agree9, why9 = _snap_promote_ok(ex, prevp, snap9)
                         if agree9:
-                            common.atomic_write_json(bp9, prevp)
+                            statefile.atomic_write_json(bp9, prevp)
                             if loud9:
                                 log.info("%s: 잔고 스냅샷 승격 (%d종)%s", ex, len(prev_balances), " — 일치 확인 없이(연속 불일치 상한)" if agree9 == "forced" else "")
-                    common.atomic_write_json(pend_bp, snap9)
-                    common.atomic_write_json(bp9 + ".view", snap9)
+                    statefile.atomic_write_json(pend_bp, snap9)
+                    statefile.atomic_write_json(bp9 + ".view", snap9)
                     _VIEW_CYC[ex] = cyc9
                     if loud9:
                         log.info("%s: 잔고 %d종 (pending)", ex, len(bal9))
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
                 log.warning("%s 잔고·주소 수집 실패(다음 주기): %s", ex, repr(e)[:140])
         if hl_on9:
             try:
                 import hl_spot
                 msg9 = hl_spot.run_pass(state, cw, cfg, now=now, save=lambda: _save_state(state))
                 (log.info if msg9.startswith(("ok", "off", "대기")) else log.warning)("hyperliquid 현물: %s", msg9)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.warning("hyperliquid 현물 수집 실패(다음 주기): %s", repr(e)[:160])
         try:
             dest_backfill_pass(env, state, cw, now, window)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("출금 목적지 소급 실패(다음 주기): %s", repr(e)[:160])
         try:
             krw_backfill_pass(env, state, cw, now, window)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("빗썸 원화 입출금 소급 실패(다음 주기): %s", repr(e)[:160])
         try:
             bybit_internal_pass(env, state, cw, now, window)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("바이비트 내부 입금 패스 실패(다음 주기): %s", repr(e)[:160])
         try:
             pending_recheck_pass(env, state, cw, now, window)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("비종결 입출금 재확인 실패(다음 주기): %s", repr(e)[:160])
         try:
             sub_passes(env, state, cw, now, window)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("서브계정 부가 패스 실패(다음 주기): %s", repr(e)[:160])
         for ex9 in sorted(_LATE_CYC["ex"]):
             try:
                 writer.append({"v": 1, "kind": "exf_late_cycle", "exchange": ex9, "ts": int(time.time()), "lc": _LATE_CYC["id"]})
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("%s 늦은 행 주기 끝 표시 실패(core 는 1시간 뒤 흡수): %s", ex9, repr(e)[:120])
         _LATE_CYC["id"], _LATE_CYC["ex"] = None, set()
         target9 = ext_trigger_target(now, window)
@@ -1861,18 +1900,18 @@ def main():
             t_ext = time.time()
             try:
                 extension_pass(env, state, writer, int(target9), now, window)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [boundary]
                 log.warning("과거 창 확장 실패(다음 주기): %s", repr(e)[:160])
             try:
                 sub_extension_pass(env, state, writer, int(target9), now, window)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.warning("서브계정 과거 창 확장 실패(다음 주기): %s", repr(e)[:160])
             ext_sec = time.time() - t_ext
         futures_snapshot_all(env)
         try:
             leverage_pass(env, cfg)
-        except Exception as e:
-            log.warning("레버리지·대출 스냅숏 실패(다음 주기): %s", common.safe_err(repr(e))[:160])
+        except Exception as e:   # noqa: BLE001 [boundary]
+            log.warning("레버리지·대출 스냅숏 실패(다음 주기): %s", logs.safe_err(repr(e))[:160])
         active = any(all(env.get(k) for k in need) for _, need in FETCHERS.values()) or hl_on9
         time.sleep(max(60.0, poll9 - ext_sec) if active else 60)
 

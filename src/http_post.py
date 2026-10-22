@@ -1,11 +1,11 @@
 from __future__ import annotations
 import alert_prefs
 import alert_watch
-import common
+import logs, paths, statefile
+import csrf_gate
 import day_memo
 import health
 import health_ack
-import hmac
 import onboarding
 import ops_requests
 import os
@@ -25,12 +25,10 @@ from http_state import _OPS_RL_LOCK
 from http_state import _eval_budget_msg
 from view_alerts import _append_alert
 from view_builder import StateBuilder
-from view_common import KST
-from view_common import PREFS_PATH
+from timeutil import KST
 from view_evals import BUY_EVALS
 from view_evals import DAY_MEMOS
 from view_evals import SELL_EVALS
-from view_review import REVIEW_FILL_REQ_PATH
 from view_review import review_fill_req_view
 from view_review import review_manual_busy
 from view_review import review_pause_eff
@@ -87,16 +85,16 @@ class PostMixin:
             return self._send(200, {"ok": True, "msg": "이미 요청했어요 — 1분 안에 시작해요"})
         try:
             since9 = (web_ctx.bcall("_backfill_since_view") or {}).get("windowStart")
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             since9 = None
         if not (isinstance(since9, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", since9)):
             m9 = float(((getattr(web_ctx.builder(), "cfg", None) or {}).get("backfill_months")) or 5)
             since9 = datetime.fromtimestamp(now9 - m9 * 30 * 86400, KST).strftime("%Y-%m-%d")
         try:
-            common.atomic_write_json(REVIEW_FILL_REQ_PATH, {"since": since9, "weekly": True, "at": int(now9), "by": "web"})
-            os.chmod(REVIEW_FILL_REQ_PATH, 0o600)
+            statefile.atomic_write_json(paths.state("review_fill_request.json"), {"since": since9, "weekly": True, "at": int(now9), "by": "web"})
+            os.chmod(paths.state("review_fill_request.json"), 0o600)
         except OSError as e:
-            return self._send(500, {"ok": False, "error": "요청 파일을 쓰지 못했어요 · " + common.safe_err(str(e))[:120]})
+            return self._send(500, {"ok": False, "error": "요청 파일을 쓰지 못했어요 · " + logs.safe_err(str(e))[:120]})
         log.warning("AI 리뷰 전체 채우기 요청 — %s 부터(tj-review 가 처리)", since9)
         if not web_ctx.bcall("mpatch", {"review"}) and hasattr(web_ctx.builder(), "lock"):
             with web_ctx.builder().lock:
@@ -127,11 +125,9 @@ class PostMixin:
         if not onboarding.origin_ok(self, required=True):
             self._send(403, {"ok": False, "error": origin_err})
             return False
-        tok = self.headers.get("X-TJ-CSRF") or ""
         try:
-            import settings_store
-            good = bool(tok) and hmac.compare_digest(tok, settings_store.csrf_token())
-        except Exception:
+            good = csrf_gate.check(self)
+        except Exception:  # noqa: BLE001 [fallback]
             good = False
         if not good:
             self._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
@@ -151,7 +147,7 @@ class PostMixin:
         if isinstance(old9, dict) and old9.get("v") != alert_prefs.SCHEMA and "alert_prefs_v1" not in prefs:
             prefs["alert_prefs_v1"] = old9
         prefs[alert_prefs.PREF_KEY] = doc9
-        common.atomic_write_json(PREFS_PATH, prefs)
+        statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
         log.info("알림 설정 저장: %s", alert_prefs.match_preset(doc9))
         self._send(200, web_ctx.alert_view(prefs))
 
@@ -191,7 +187,7 @@ class PostMixin:
             try:
                 d9 = other_assets.load_store()
             except other_assets.StoreError as e9:
-                return self._send(503, {"ok": False, "error": common.safe_err(e9)})
+                return self._send(503, {"ok": False, "error": logs.safe_err(e9)})
             if path.endswith("/delete"):
                 ok9, err9 = other_assets.apply_delete(d9, body.get("id"))
                 if not ok9:
@@ -204,7 +200,7 @@ class PostMixin:
             other_assets.save_store(d9)
         try:
             q9.apply_quotes()
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [optional]
             log.warning("기타 자산 평가 반영 실패: %s", type(e9).__name__)
         if it9.get("auto"):
             q9.wake.set()
@@ -276,7 +272,7 @@ class PostMixin:
                     ST.errors[k9] = {"at": int(time.time()), "error": e9}
             except MemoHourly:
                 ST.errors[k9] = {"at": int(time.time()), "error": web_ctx.day_memo().HOURLY_MSG.format(n=web_ctx.day_memo().HOURLY_MAX)}
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [boundary]
                 log.warning("%s 평가 실패(%s): %s", side_ko, k9, e9)
                 ST.errors[k9] = {"at": int(time.time()), "error": "평가 중 오류"}
             finally:
@@ -339,11 +335,11 @@ class PostMixin:
         try:
             rec9 = DAY_MEMOS.put(d9, s9, m9)
         except day_memo.Corrupt as e:
-            return self._send(503, {"ok": False, "error": f"근거 메모 파일을 읽지 못해 저장하지 않았어요({common.safe_err(e)})"})
+            return self._send(503, {"ok": False, "error": f"근거 메모 파일을 읽지 못해 저장하지 않았어요({logs.safe_err(e)})"})
         except day_memo.TooBig as e:
-            return self._send(413, {"ok": False, "error": common.safe_err(e)})
+            return self._send(413, {"ok": False, "error": logs.safe_err(e)})
         except day_memo.Full as e:
-            return self._send(409, {"ok": False, "error": common.safe_err(e)})
+            return self._send(409, {"ok": False, "error": logs.safe_err(e)})
         web_ctx.builder().purge_memo_charts(d9, s9)
         if not web_ctx.bcall("mpatch", {"day_memo"}):
             if web_ctx.builder().__dict__.get("_snapfile_on"):

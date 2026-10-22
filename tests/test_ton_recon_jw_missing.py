@@ -2,30 +2,30 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
 TON = 10 ** 9
 A, J, M, X = F.K("51"), F.K("d1"), F.K("e1"), F.K("99")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(A)}]
@@ -39,7 +39,7 @@ ch.tx(J, NOW - 399 * DAY, in_msg={"src": F.K("d9"), "val": 1, "op": tw.OP_INTERN
 ch.jbal[J] = 5_000_000
 
 st = cs.ChainState("ton")
-ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
 ad.page = 3
 col = cw.Collector(ad, SegmentWriter(INB), st, {A})
 for _i in range(3):
@@ -50,9 +50,9 @@ check("JM1 수집기가 J 검증(ok · master M) · ready", jw.get("ok") is True
 
 
 def mk_core():
-    c9 = core.Core(common.load_config())
+    c9 = core.Core(config.load_config())
     c9.conn.commit()
-    c9._nonevm_adapters = {"ton": tw.TonAdapter(common.load_config(), client=srv.client())}
+    c9.svc_recon._nonevm_adapters = {"ton": tw.TonAdapter(config.load_config(), client=srv.client())}
     return c9
 
 
@@ -76,8 +76,8 @@ def jet(c9, kind="opening"):
 
 
 def recon(c9):
-    c9._last_recon = 0
-    c9.recon_pass({"ton"})
+    c9.svc_recon._last_recon = 0
+    c9.svc_recon.recon_pass({"ton"})
 
 
 c = mk_core()
@@ -87,7 +87,7 @@ check("JM1 원장에 그 제톤 token 칸 없음(창 이전 보유만)", has_ass
 
 jw0 = list(ch.jw)
 ch.jw = []
-rb = tw.TonAdapter(common.load_config(), client=srv.client())
+rb = tw.TonAdapter(config.load_config(), client=srv.client())
 b = rb.fetch_balances({A}, None, tokens={})
 check("JM2 원장 token 없음 + 검증된 J 가 목록에 없음 = 미관측 + 보류(jetton_wallet_missing)",
       b["_complete"] is False and "jetton_wallet_missing" in (b.get("_why") or []) and M in (b["_unobserved"].get(A) or []),

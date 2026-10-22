@@ -4,7 +4,7 @@ import random
 import time
 import re
 import urllib.request
-import common
+import logs, net_http, paths, statefile
 import bf_engine
 from evm_base import UA
 from evm_synth import RpcSynthMixin
@@ -41,12 +41,12 @@ class RpcLogDiscovery(RpcSynthMixin):
         self.writer = writer
         self.bs = bs_watcher
         self.cfg_rpcs = cc.get("rpcs")
-        self.rpc_meta_path = os.path.join(common.STATE_DIR, f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = common.read_json(self.rpc_meta_path, {})
-        self.state_path = os.path.join(common.STATE_DIR, f"cursor_rpc_{chain}.json")
-        self.st = common.read_json(self.state_path, {})
-        self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_rpc_{chain}.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
+        self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
+        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.state_path = paths.state(f"cursor_rpc_{chain}.json")
+        self.st = statefile.read_json(self.state_path, {})
+        self.emitted_path = paths.state(f"emitted_rpc_{chain}.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
         self.span = min(max(int(self.st.get("span") or self.SPAN_INIT), self.SPAN_MIN),
                         self.SPAN_MAX)
         self.ep = {}
@@ -59,7 +59,7 @@ class RpcLogDiscovery(RpcSynthMixin):
     def _one(self, url: str, method: str, params: list, timeout: int = 25):
         d = bf_engine.http_json(
             url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
-            headers={"User-Agent": common.ua_for(url, UA)}, timeout=timeout, retries=1, rpc_methods=(method,))
+            headers={"User-Agent": net_http.ua_for(url, UA)}, timeout=timeout, retries=1, rpc_methods=(method,))
         if not isinstance(d, dict):
             raise RuntimeError(f"rpc-error None: 응답 형식 오류 ({type(d).__name__})")
         if "error" in d:
@@ -107,14 +107,14 @@ class RpcLogDiscovery(RpcSynthMixin):
                     cid = int(self._one(url, "eth_chainId", [], timeout=10), 16)
                     if cid != self.chain_id:
                         log.error("★%s rpclog %s chainId 불일치(%d≠%d) — 영구 제외★",
-                                  self.chain, common.redact_urls(url), cid, self.chain_id)
+                                  self.chain, logs.redact_urls(url), cid, self.chain_id)
                         s["fail_until"] = now + 86400 * 365
                         continue
                     s["ok"] = True
                 if now - s["head_ts"] > self.HEAD_TTL or s["head"] < need_to:
                     s["head"] = int(self._one(url, "eth_blockNumber", [], timeout=10), 16)
                     s["head_ts"] = time.time()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 self._trip(url, e)
                 continue
             if s["head"] >= need_to:
@@ -131,6 +131,8 @@ class RpcLogDiscovery(RpcSynthMixin):
                                "topics": topics}])
             if not isinstance(rows, list):
                 raise RuntimeError(f"getLogs 비정상 result: {type(rows).__name__} (빈 배열 아님) — 무응답")
+            if len(rows) in bf_engine.SILENT_ROW_CAPS:
+                raise RuntimeError(f"getLogs {len(rows)}행 = 알려진 결과 상한 — 잘림 의심 range({frm}-{to})")
             for lg in rows:
                 h = (lg.get("transactionHash") or "").lower()
                 if not h:
@@ -240,7 +242,7 @@ class RpcLogDiscovery(RpcSynthMixin):
                 to = min(frm + min(self.span, cap) - 1, int(ck["to"]))
                 try:
                     found = self._chunk_logs(url, frm, to, pads)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     self._on_logs_err(url, e)
                     continue
                 self._ep_state(url)["streak"] += 1
@@ -297,15 +299,15 @@ class RpcLogDiscovery(RpcSynthMixin):
                 continue
             try:
                 snap = self._rpc_synth_detail(h)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 if self.synth_fail_count(self.emit_fail, h, e) is None:
                     log.debug("%s rpclog %s 합성 보류(게이트·장부 거절): %s", self.chain, h[:12], str(e)[:120])
                     continue
                 if self.emit_fail[h] > self.EMIT_FAIL_MAX:
-                    common.append_durable_jsonl(
-                        os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+                    statefile.append_durable_jsonl(
+                        paths.state("pending_poison.jsonl"),
                         {"ts": int(time.time()), "chain": self.chain, "txhash": h,
-                         "src": "rpc_log", "err": common.safe_err(e)[:200]})
+                         "src": "rpc_log", "err": logs.safe_err(e)[:200]})
                     del buf[h]
                     self.emit_fail.pop(h, None)
                     log.error("★%s rpclog %s 합성 %d회 초과 — 포이즌 격리★",
@@ -319,7 +321,7 @@ class RpcLogDiscovery(RpcSynthMixin):
                    "observed_head": head, "ts": int(time.time())}
             try:
                 self.writer.append(rec)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("%s rpclog inbox append 실패(버퍼 유지): %s", self.chain, e)
                 break
             self.emitted.add(h)
@@ -332,7 +334,7 @@ class RpcLogDiscovery(RpcSynthMixin):
         url0 = self._ready_ep(1)
         if url0 is None:
             self.st.pop("rpc_synced_at", None)
-            common.atomic_write_json(self.state_path, self.st)
+            statefile.atomic_write_json(self.state_path, self.st)
             n9 = bf_engine.health("evm").fail(f"{self.chain}:rpclog", RuntimeError("가용 엔드포인트 없음"), "rpclog",
                                               cursor=self.st.get("from_block"))
             lv = bf_engine.LogDebounce.level(n9)
@@ -351,7 +353,7 @@ class RpcLogDiscovery(RpcSynthMixin):
                 self.st["from_block"] = max(0, safe - int(self.backfill_months * 30 * self.bpd))
             log.info("★%s rpclog 커서 초기화 → %d (safe %d)★",
                      self.chain, self.st["from_block"], safe)
-            common.atomic_write_json(self.state_path, self.st)
+            statefile.atomic_write_json(self.state_path, self.st)
         self._nw_walk()
         cur = int(self.st["from_block"])
         complete = True
@@ -374,7 +376,7 @@ class RpcLogDiscovery(RpcSynthMixin):
                     break
                 try:
                     found = self._chunk_logs(url, cur + 1, to, self.pads)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     self._on_logs_err(url, e)
                     continue
                 s = self._ep_state(url)
@@ -398,8 +400,8 @@ class RpcLogDiscovery(RpcSynthMixin):
         self.st["mode"] = self.mode
         self.st["span"] = self.span
         bs_min = self._bs_min_cursor()
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.state_path, self.st)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.state_path, self.st)
         eps9 = {urllib.parse.urlsplit(u).hostname: {"head": st9.get("head"), "open": st9.get("fail_until", 0) > time.time()}
                 for u, st9 in self.ep.items()}
         (bf_engine.health("evm").ok if cursor_ok else bf_engine.health("evm").fail)(

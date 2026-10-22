@@ -8,7 +8,7 @@ from decimal import InvalidOperation
 
 import acct_norm
 import calcguard
-import common
+import logs
 import histcurve
 import rawtx_cache
 import spamguard
@@ -27,33 +27,34 @@ log = logging.getLogger('tj-web')
 
 class FirstSeen:
 
-    def __init__(fsx, sb, conn, fs_sum, fs_aux, rows, fs_kit, fs_spec9, fs_floor9, fs_lo9, fs_memo, fs_need, fxb, now, krw_of, fs_last, fs_sales, ret_kit, ret_pool, be_until, kst_fmt, fs_pin, fs_pin_new, fs_pref, fx_wd, fs_okc, fs_pkey):
-        fsx.sb = sb
-        fsx.conn = conn
-        fsx.fs_sum = fs_sum
-        fsx.fs_aux = fs_aux
+    def __init__(fsx, px, *, rows, be_until, fs_pkey, fsin):
+        fsx.sb = px.sb
+        fsx.conn = fsin.conn
+        fsx.fs_sum = px.unx.fs_sum
+        fsx.fs_aux = fsin.fs_aux
         fsx.rows = rows
-        fsx.fs_kit = fs_kit
-        fsx.fs_spec9 = fs_spec9
-        fsx.fs_floor9 = fs_floor9
-        fsx.fs_lo9 = fs_lo9
-        fsx.fs_memo = fs_memo
-        fsx.fs_need = fs_need
-        fsx.fxb = fxb
-        fsx.now = now
-        fsx.krw_of = krw_of
-        fsx.fs_last = fs_last
-        fsx.fs_sales = fs_sales
-        fsx.ret_kit = ret_kit
-        fsx.ret_pool = ret_pool
+        fsx.fs_kit = fsin.fs_kit
+        fsx.fs_spec9 = fsin.fs_spec
+        fsx.fs_floor9 = fsin.fs_floor
+        fsx.fs_lo9 = fsin.fs_lo
+        fsx.fs_memo = fsin.fs_memo
+        fsx.fs_need = fsin.fs_need
+        fsx.fxb = px.fbx.fxb
+        fsx.now = px.ctx.now
+        fsx.krw_of = px.kpx.krw_of
+        fsx.fs_last = px.kpx.fs_last
+        fsx.fs_sales = fsin.fs_sales
+        fsx.ret_kit = fsin.ret_kit
+        fsx.ret_pool = fsin.ret_pool
         fsx.be_until = be_until
-        fsx.kst_fmt = kst_fmt
-        fsx.fs_pin = fs_pin
-        fsx.fs_pin_new = fs_pin_new
-        fsx.fs_pref = fs_pref
-        fsx.fx_wd = fx_wd
-        fsx.fs_okc = fs_okc
+        fsx.kst_fmt = px.fbx.kst_fmt
+        fsx.fs_pin = fsin.fs_pin
+        fsx.fs_pin_new = fsin.fs_pin_new
+        fsx.fs_pref = fsin.fs_pref
+        fsx.fx_wd = fsin.fx_wd
+        fsx.fs_okc = fsin.fs_okc
         fsx.fs_pkey = fs_pkey
+        fsx.cb = px.cb
 
     def fs_hold(fsx, g9, why9, q9):
         if q9 > EPS:
@@ -104,9 +105,9 @@ class FirstSeen:
                 for d9, ks9 in fsx.sb._inflow_senders(fsx.conn, dests9).items():
                     for k9 in ks9:
                         frm9.setdefault((k9[0], k9[1]), set()).add(d9)
-            except Exception as e9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_senders", e9)
-                log.warning("돌아온 코인 발신자 색인 실패: %s", common.safe_err(e9)[:160])
+            except Exception as e9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_senders[d9]", e9)
+                log.warning("돌아온 코인 발신자 색인 실패: %s", logs.safe_err(e9)[:160])
             fsx.ret_kit["from"] = frm9
             fsx.ret_kit["snd"] = {}
         k9 = (chain9, txh9)
@@ -137,9 +138,9 @@ class FirstSeen:
                             except (TypeError, ValueError):
                                 pass
                         out9 = {a7 for a7 in s7 if a7 and a7 not in mine9} or None
-        except Exception as e9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_senders", e9)
-            log.warning("돌아온 코인 발신자 판정 실패(%s): %s", chain9, common.safe_err(e9)[:120])
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_senders[inf9]", e9)
+            log.warning("돌아온 코인 발신자 판정 실패(%s): %s", chain9, logs.safe_err(e9)[:120])
             out9 = None
         fsx.ret_kit["snd"][k9] = out9
         return out9
@@ -178,7 +179,7 @@ class FirstSeen:
         try:
             sp9 = histcurve.spec_of(histcurve.group_desc(gid9, g9, {gid9} if ca9 else set(), fsx.fs_kit["ex"], {gid9} if maj9 else set(),
                                                          fsx.fs_kit["ov"], fsx.fs_kit["pairs"], STABLE_GROUPS))
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_spec", _cg9)
             sp9 = None
         fsx.fs_spec9[gid9] = sp9
@@ -199,7 +200,7 @@ class FirstSeen:
         if k9 not in fsx.fs_memo:
             try:
                 fsx.fs_memo[k9] = histcurve.DAYCLOSE.lookup(sp9, iso9, fsx.now, 0.0, ask=fsx.fs_lo9 <= iso9)
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.fs_px", _cg9)
                 fsx.fs_memo[k9] = (None, "err")
         p9, st9 = fsx.fs_memo[k9]
@@ -276,7 +277,7 @@ class FirstSeen:
             return None
         snd9 = fsx.fs_senders(chain9, txh9)
         if snd9 is None:
-            g9["qty_unknown"] += q9
+            fsx.cb.add_unknown(g9, q9)
             fsx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입(원가 없음 · 보냈던 코인이 돌아온 것인지 확인 못 함 — 최초 인식 시가 보류)",
                      q9, txh9, chain9=chain9, fs9=0)
             fsx.fs_hold(g9, "ret", q9)
@@ -315,9 +316,9 @@ class FirstSeen:
             if rem9 <= EPS:
                 break
         took9 = q9 - rem9
-        g9["qty_known"] += kn9
-        g9["cost"] += inh9
-        g9["qty_unknown"] += un9 + rem9
+        fsx.cb.add_known(g9, kn9)
+        fsx.cb.add_cost(g9, inh9)
+        fsx.cb.add_unknown(g9, un9 + rem9)
         flow9["bought"] += took9
         flow9["cost"] += inh9
         flow9["cost_krw"] += kr9
@@ -378,9 +379,9 @@ class FirstSeen:
         if src9 == "sameday":
             fsx.fs_sum["sd"] += 1
         unit_d = Decimal(str(px9))
-        g9["qty_unknown"] -= take
-        g9["qty_known"] += take
-        g9["cost"] += take * unit_d
+        fsx.cb.sub_unknown(g9, take)
+        fsx.cb.add_known(g9, take)
+        fsx.cb.add_cost(g9, take * unit_d)
         fsx.cp_add(g9, ("fs", g9["gid"]), take, take * unit_d)
         unc_d = dq9 if unc9 is None else max(Decimal(0), min(dq9, Decimal(str(unc9))))
         pend9 = (ts9, take, unit_d, take * unc_d / dq9 if dq9 > 0 else Decimal(0))

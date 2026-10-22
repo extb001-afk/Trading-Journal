@@ -1,5 +1,6 @@
 import bf_engine
-import common
+import logs, paths, statefile
+import fsio
 import json
 import os
 import time
@@ -68,12 +69,12 @@ class RpcLaterMixin:
             keep9 = now - int(lh.get("since") or now) < self.LANES_LEAF_HOLD_SEC
             lh["held"] = bool(keep9)
         if keep9:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             raise HoldError(f"잎 블록 {y} trace·상세 일시 실패 {n9}회 — 커서 유지(다음 사이클)")
         ll = self.cursor.setdefault("_leaf_later", {})
         ovf9 = k not in ll and len(ll) >= self.LEAF_LATER_MAX
         if ovf9:
-            common.append_durable_jsonl(self._leaf_overflow_path(), {"k": k, "w": w, "blk": int(y), "at": now})
+            statefile.append_durable_jsonl(self._leaf_overflow_path(), {"k": k, "w": w, "blk": int(y), "at": now})
             no9 = int(self.cursor.get("_leaf_overflow") or 0) + 1
             self.cursor["_leaf_overflow"] = no9
             getattr(log, "warning" if no9 >= self.LEAF_OVERFLOW_WARN or no9 == 1 else "info")(
@@ -99,8 +100,8 @@ class RpcLaterMixin:
                     if isinstance(blk, dict) and isinstance(blk.get("transactions"), list):
                         got[y] = {str(t.get("hash") or "").lower(): y for t in blk["transactions"]
                                   if isinstance(t, dict) and w in ((t.get("from") or "").lower(), (t.get("to") or "").lower())}
-        except Exception as e:
-            log.info("%s 잎 블록 묶음 스캔 실패(잎마다 종전 경로): %s", self.chain, common.safe_err(e)[:100])
+        except Exception as e:  # noqa: BLE001 [optional]
+            log.info("%s 잎 블록 묶음 스캔 실패(잎마다 종전 경로): %s", self.chain, logs.safe_err(e)[:100])
         if not got:
             return {}, {}
         pool_h = {s["tx"]["hash"].lower() for s in pool}
@@ -119,7 +120,7 @@ class RpcLaterMixin:
             return
         now = int(time.time())
         if len(ll) >= self.LEAF_LATER_MAX:
-            common.append_durable_jsonl(self._leaf_overflow_path(), {"k": k, "w": w, "blk": int(y), "at": now})
+            statefile.append_durable_jsonl(self._leaf_overflow_path(), {"k": k, "w": w, "blk": int(y), "at": now})
             self.cursor["_leaf_overflow"] = int(self.cursor.get("_leaf_overflow") or 0) + 1
             log.info("%s '나중에 다시' 잎 블록 큐 포화(%d) — 잎 %d 넘침 파일로", self.chain, len(ll), int(y))
             return
@@ -140,13 +141,7 @@ class RpcLaterMixin:
     def _leaf_overflow_write(self, rows: list) -> None:
         pth = self._leaf_overflow_path()
         if rows:
-            import tempfile
-            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(pth), prefix=".tmp_")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, pth)
+            fsio.atomic_write_text(pth, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), dir_fsync=False, makedirs=False)
             self.cursor["_leaf_overflow"] = len(rows)
         else:
             try:
@@ -167,9 +162,9 @@ class RpcLaterMixin:
         take, rest = rows[:max(0, free)], rows[max(0, free):]
         for r in take:
             ll[r["k"]] = {"w": r["w"], "blk": int(r["blk"]), "at": int(r.get("at") or now), "n": 0, "next": now}
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         self._leaf_overflow_write(rest)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if take:
             log.info("%s 넘침 파일 잎 %d개 → '나중에 다시' 큐(남은 넘침 %d)", self.chain, len(take), len(rest))
         return len(take)
@@ -225,12 +220,12 @@ class RpcLaterMixin:
             else:
                 why9 = "alchemy_never_tried"
         try:
-            common.append_durable_jsonl(os.path.join(common.STATE_DIR, f"leaf_later_unresolved_{self.chain}.jsonl"),
+            statefile.append_durable_jsonl(paths.state(f"leaf_later_unresolved_{self.chain}.jsonl"),
                                         {"chain": self.chain, "k": k, "w": str(e.get("w") or "").lower(), "blk": _int_or(e.get("blk"), 0),
                                          "at": _int_or(e.get("at"), 0), "n": _int_or(e.get("n"), 0), "stg": self._leaf_stg_get(e),
                                          "err": str(e.get("err") or "")[:80], "why": why9, "ts": int(now)})
-        except Exception as x9:
-            log.warning("%s '나중에 다시' 잎 %s 보관 실패 — 큐 유지: %s", self.chain, k, common.safe_err(x9)[:80])
+        except Exception as x9:  # noqa: BLE001 [probe]
+            log.warning("%s '나중에 다시' 잎 %s 보관 실패 — 큐 유지: %s", self.chain, k, logs.safe_err(x9)[:80])
             return False
         self._note("_native_notes", {"kind": "leaf_later_archived", "w": str(e.get("w") or "")[:10], "blk": _int_or(e.get("blk"), 0)})
         return True
@@ -280,8 +275,8 @@ class RpcLaterMixin:
                 dets = self._details(cand, trace=False, deadline=time.time() + 30) if cand else {}
                 bad = [h for h in cand if not isinstance(dets.get(h), dict)]
                 if bad:
-                    raise RuntimeError(f"상세 실패 {bad[0][:12]}: {common.safe_err(dets.get(bad[0]))[:80]}")
-            except Exception as ex:
+                    raise RuntimeError(f"상세 실패 {bad[0][:12]}: {logs.safe_err(dets.get(bad[0]))[:80]}")
+            except Exception as ex:  # noqa: BLE001 [isolate]
                 self._leaf_stg_put(e, st9, lc9, sent9)
                 if isinstance(ex, TraceDeferred) or "예산 소진" in str(ex):
                     e["dfr"] = now
@@ -292,7 +287,7 @@ class RpcLaterMixin:
                 else:
                     e["n"] = int(e.get("n") or 0) + 1
                     e["next"] = now + min(7200, self.LEAF_LATER_SEC * (2 ** min(e["n"], 4)))
-                    e["err"] = common.safe_err(ex)[:80]
+                    e["err"] = logs.safe_err(ex)[:80]
                 continue
             for h in cand:
                 s9 = dets[h]
@@ -310,8 +305,8 @@ class RpcLaterMixin:
             ll.pop(k, None)
             self._note("_native_notes", {"kind": "leaf_later_done", "w": w[:10], "blk": y, "found": len(cand)})
         if done or gone9:
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         if n_emit:
             log.info("%s 나중에 다시 잎 블록 — internal 입금 tx %d건 방출", self.chain, n_emit)
         return n_emit
@@ -363,7 +358,7 @@ class RpcLaterMixin:
     TRACE_OVERFLOW_BATCH = 50
 
     def _trace_overflow_path(self) -> str:
-        return os.path.join(common.STATE_DIR, f"trace_later_overflow_{self.chain}.jsonl")
+        return paths.state(f"trace_later_overflow_{self.chain}.jsonl")
 
     def _trace_overflow_read(self) -> list:
         out = {}
@@ -394,7 +389,7 @@ class RpcLaterMixin:
             blk = int((snap.get("tx") or {}).get("block_number") or 0)
         except (TypeError, ValueError, AttributeError):
             blk = 0
-        common.append_durable_jsonl(self._trace_overflow_path(), {"h": h, "at": int(time.time()), "n": 0, "blk": blk, "sent": bool(sent)})
+        statefile.append_durable_jsonl(self._trace_overflow_path(), {"h": h, "at": int(time.time()), "n": 0, "blk": blk, "sent": bool(sent)})
         seen9 = self.__dict__.setdefault("_tovf_seen", set())
         n9 = int(self.cursor.get("_trace_later_overflow") or 0) + (0 if h in seen9 else 1)
         seen9.add(h)
@@ -412,7 +407,7 @@ class RpcLaterMixin:
         n9 = int(self.cursor.get("_trace_later_overflow") or 0)
         for h9 in out9:
             e9 = tl.get(h9) if isinstance(tl.get(h9), dict) else {}
-            common.append_durable_jsonl(self._trace_overflow_path(), {"h": h9, "at": int(e9.get("at") or time.time()), "n": int(e9.get("n") or 0),
+            statefile.append_durable_jsonl(self._trace_overflow_path(), {"h": h9, "at": int(e9.get("at") or time.time()), "n": int(e9.get("n") or 0),
                                                                      "blk": int(e9.get("blk") or 0), "sent": bool(e9.get("sent", True))})
             if h9 not in seen9:
                 seen9.add(h9)
@@ -420,7 +415,7 @@ class RpcLaterMixin:
         for h9 in out9:
             tl.pop(h9, None)
         self.cursor["_trace_later_overflow"] = n9
-        common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+        statefile.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
         log.info("%s 늦은 채움 큐 %d건 넘침 파일로(커서 상한 %d · 대기 %d)", self.chain, len(out9), int(self.TRACE_LATER_MAX), n9)
         return len(out9)
 
@@ -446,15 +441,9 @@ class RpcLaterMixin:
             tl[r["h"]] = {"at": int(r["at"] or now), "n": int(r["n"]), "next": now, "blk": int(r["blk"]), "sent": r["sent"]}
         if tl:
             self.cursor["_trace_later"] = tl
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if rest:
-            import tempfile
-            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(pth), prefix=".tmp_")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rest))
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, pth)
+            fsio.atomic_write_text(pth, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rest), dir_fsync=False, makedirs=False)
             self.cursor["_trace_later_overflow"] = len(rest)
             self._tovf_seen = {r["h"] for r in rest}
         else:
@@ -464,7 +453,7 @@ class RpcLaterMixin:
             except OSError:
                 pass
             self.cursor.pop("_trace_later_overflow", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if take:
             log.info("%s 넘침 파일 늦은 채움 tx %d건 → 큐(남은 넘침 %d)", self.chain, len(take), len(rest))
         return len(take)
@@ -497,7 +486,7 @@ class RpcLaterMixin:
             tl[h] = {"at": now, "n": 0, "next": now + self.TRACE_LATER_SEC, "blk": blk, "sent": h in self.emitted}
             n9 += 1
         if n9:
-            common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+            statefile.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
         return n9
 
     def _trace_late_settle(self, hashes) -> None:
@@ -528,11 +517,11 @@ class RpcLaterMixin:
             else:
                 why9 = "alchemy_never_tried"
         try:
-            common.append_durable_jsonl(os.path.join(common.STATE_DIR, f"trace_later_unresolved_{self.chain}.jsonl"),
+            statefile.append_durable_jsonl(paths.state(f"trace_later_unresolved_{self.chain}.jsonl"),
                                         {"chain": self.chain, "h": h, "blk": _int_or(e.get("blk"), 0), "at": _int_or(e.get("at"), 0), "n": _int_or(e.get("n"), 0),
                                          "stg": self._trace_stg_get(e), "err": str(e.get("err") or "")[:80], "why": why9, "ts": int(now)})
-        except Exception as x9:
-            log.warning("%s 늦은 채움 trace %s 보관 실패 — 큐 유지: %s", self.chain, h[:12], common.safe_err(x9)[:80])
+        except Exception as x9:  # noqa: BLE001 [probe]
+            log.warning("%s 늦은 채움 trace %s 보관 실패 — 큐 유지: %s", self.chain, h[:12], logs.safe_err(x9)[:80])
             return False
         self._note("_native_notes", {"kind": "trace_later_archived", "tx": h[:14]})
         return True
@@ -604,7 +593,7 @@ class RpcLaterMixin:
                     s9 = self._details([h], trace=False, deadline=time.time() + 30).get(h)
                     if not isinstance(s9, dict):
                         raise s9 if isinstance(s9, Exception) else RuntimeError("상세 없음")
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 [isolate]
                 self._trace_stg_put(e, st9, sent9)
                 if isinstance(ex, TraceDeferred) or "예산 소진" in str(ex):
                     e["dfr"] = now
@@ -615,7 +604,7 @@ class RpcLaterMixin:
                 else:
                     e["n"] = int(e.get("n") or 0) + 1
                     e["next"] = now + min(self.TRACE_LATER_MAX_SEC, self.TRACE_LATER_SEC * (2 ** min(e["n"], 8)))
-                    e["err"] = common.safe_err(ex)[:80]
+                    e["err"] = logs.safe_err(ex)[:80]
                 continue
             if s9 is not None:
                 s9["internal"] = rows9
@@ -630,8 +619,8 @@ class RpcLaterMixin:
         if not tl:
             self.cursor.pop("_trace_later", None)
         if touched:
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         if n_emit:
             log.info("%s 늦은 채움 trace — internal %d건 다시 방출(남은 %d)", self.chain, n_emit, len(tl))
         return n_emit
@@ -701,7 +690,7 @@ class RpcLaterMixin:
                         s9.pop("_trace_parity_first", None)
                         ht9.pop(h, None)
                         hs9.pop(h, None)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [fallback]
                         err9 = e
                         s9.pop("_trace_parity_first", None)
                         s9.pop("_trace_stg", None)
@@ -732,11 +721,11 @@ class RpcLaterMixin:
                 if hq[h] >= self.HQ_FAIL_MAX:
                     hq.pop(h, None)
                     self._hq_to_later(h, s9)
-                    self._note("_native_notes", {"kind": "hq_to_later", "tx": h[:14], "err": common.safe_err(err9)[:80]})
+                    self._note("_native_notes", {"kind": "hq_to_later", "tx": h[:14], "err": logs.safe_err(err9)[:80]})
                     log.warning("%s 인계 큐 %s 결정적 실패 %d회 — 늦은 채움으로 넘김(백오프 재시도 · internal 미확인 동안 대사 흡수): %s", self.chain, h[:12],
-                                self.HQ_FAIL_MAX, common.safe_err(err9)[:100])
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+                                self.HQ_FAIL_MAX, logs.safe_err(err9)[:100])
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         if n:
             log.info("%s 인계 큐 internal 채움 %d건 방출(남은 %d)", self.chain, n, len(hq))
         return n

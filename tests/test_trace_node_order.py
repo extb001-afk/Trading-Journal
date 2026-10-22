@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 W0 = "0x" + "e0" * 20
@@ -18,15 +18,15 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": W0, "label": "w"}]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
 R = evm_watch.RpcChainWatcher
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
-EPATH = os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json")
-TOVF = os.path.join(common.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
+EPATH = os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json")
+TOVF = os.path.join(paths.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
 HEAD = 60_000_000
 X = "0x" + "77" * 20
 RT = "0x" + "55" * 20
@@ -149,8 +149,8 @@ def mk(trace=(TA, TB), tl=None):
     cur = {"_rpc_v": 1, "_start": 0}
     if tl:
         cur["_trace_later"] = tl
-    common.atomic_write_json(CPATH, cur)
-    common.atomic_write_json(EPATH, sorted(tl or {}))
+    statefile.atomic_write_json(CPATH, cur)
+    statefile.atomic_write_json(EPATH, sorted(tl or {}))
     if os.path.exists(TOVF):
         os.remove(TOVF)
     w = R(CFG, CH, [W0], Wr())

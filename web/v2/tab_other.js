@@ -1,9 +1,10 @@
 'use strict';
 (window.__tjTabs = window.__tjTabs || {}).other = function (X) {
   const {
-    $, A, ago, arr, CHAIN_KO, cls, clsP, clsV, drawerHist, errTxt, esc, exLinked, exLogo, fmtTs, IC, isISO, LS, m, mN, nf, num, onUnauthorized, pad2,
-    pctS, post, prTxt, PVM, pvMoney, pvOn, pvW, px, q, rate, renderAuto, renderOverlay, renderView, rw, S, sparkSVG, sum, sxGo, toast, todayISO,
-    trimZeros, UI_SHEETS, uiCell, uiDate, uiFold, uiPaged, uiPgBar, uiPgReveal, uiPgS, uiPgSlice, uiPick, uiRe, uiSheetClose, uiSheetOpen, vib
+    $, A, ago, arr, CHAIN_KO, cls, clsP, clsV, drawerHist, errTxt, esc, exLinked, exLogo, fmtTs, IC, isISO, LS, m, mN, nf, num,
+    onUnauthorized, pad2, pctS, post, prTxt, PVM, pvMoney, pvOn, pvW, px, q, rate, renderAuto, renderOverlay, renderView, rw, S, sparkSVG,
+    sum, sxGo, sync, toast, todayISO, trimZeros, UI_SHEETS, uiCell, uiDate, uiFold, uiPaged, uiPgBar, uiPgReveal, uiPgS, uiPgSlice, uiPick,
+    uiRe, uiSheetClose, uiSheetOpen, vib
   } = X;
   const OA_CATS = [['realestate', '부동산', 'var(--c1)'], ['stock', '주식', 'var(--c2)'], ['gold', '금', 'var(--c3)'], ['car', '자동차', 'var(--c4)'],
     ['cash', '현금', 'var(--muted)'], ['etc', '기타', 'var(--ext)'], ['debt', '부채', '']];
@@ -213,17 +214,19 @@
   });
   function oaLoad(force) {
     const O = S.oa;
-    if (O.st === 'loading' || O.st === 'none') return;
+    if (O.st === 'none') return; if (O.st === 'loading') { if (force) O.again = true; return; }
     if (!force && O.at && Date.now() - O.at < 60000) return;
+    const st0 = O.st, stale = sync.rd(O); let used = false;
     O.st = 'loading';
     fetch('/api/other_assets', { cache: 'no-store' }).then(r => {
       if (r.status === 401) { onUnauthorized(); throw new Error('HTTP 401'); }
-      if (r.status === 404) { O.st = 'none'; O.d = null; return null; }
-      return r.json().then(j => { if (!j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); O.d = j; O.st = 'ok'; O.err = ''; if (arr(j.items).length) O.had = true; });
-    }).catch(e => { O.st = 'err'; O.d = null; O.err = (e && e.message) || String(e); })
-      .then(() => { O.at = Date.now(); if (S.D && (S.tab === 'other' || S.tab === 'dash' || S.tab === 'settings')) (S.tab === 'dash' ? renderAuto : renderView)(); });
+      if (stale()) return null;
+      if (r.status === 404) { O.st = 'none'; O.d = null; used = true; return null; }
+      return r.json().then(j => { if (stale()) return; if (!j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); O.d = j; O.st = 'ok'; O.err = ''; used = true; if (arr(j.items).length) O.had = true; });
+    }).catch(e => { if (stale()) return; O.st = 'err'; O.d = null; O.err = (e && e.message) || String(e); used = true; })
+      .then(() => { if (used) O.at = Date.now(); else if (O.st === 'loading') O.st = st0; const again = O.again; O.again = false; if (again && !O.pend && O.st !== 'none') oaLoad(true); if (S.D && (S.tab === 'other' || S.tab === 'dash' || S.tab === 'settings')) (S.tab === 'dash' ? renderAuto : renderView)(); });
   }
-  const oaNeed = ms => { if (S.oa.st !== 'loading' && S.oa.st !== 'none' && (!S.oa.at || Date.now() - S.oa.at > (ms || 60000))) oaLoad(true); };
+  const oaNeed = ms => { if (S.oa.st !== 'loading' && S.oa.st !== 'none' && !S.oa.pend && (!S.oa.at || Date.now() - S.oa.at > (ms || 60000))) oaLoad(true); };
   function oaDate(d, o) {
     if (!isISO(d)) return '—';
     if (d === todayISO()) {
@@ -326,7 +329,7 @@
           + '<label class="oalab" for="oaDate">평가일</label>' + uiDate('oa:date', S.drafts['oa:date'], { id: 'oaDate', label: '평가일', max: todayISO() }))
       + '<label class="oalab" for="oaMemo">메모</label><input id="oaMemo" class="field" data-pr="1" autocomplete="off" data-draft="oa:memo" maxlength="300" placeholder="예) KB시세 기준 · 키움 해외주식" value="' + dv('memo') + '">'
       + (brk ? '<div class="cap" style="margin-top:6px">' + esc((ed.bname || ed.broker) + '에서 가져온 항목 — 수량·코드는 다음 동기화가 덮어써요 · ' + OA_UNVER) + '</div>' : '')
-      + '<div class="oabtns">' + (ed ? '<button class="btn" data-a="oaDel">' + (S.oa.delArm === ed.id ? '정말 삭제' : '삭제') + '</button>' : '') + (ed ? '<button class="btn ghost" data-a="oaNew">새로 추가</button>' : '') + '<button class="btn pri" data-a="oaSave"' + (S.oa.busy ? ' disabled' : '') + '>저장</button></div></section>';
+      + '<div class="oabtns">' + (ed ? '<button class="btn" data-a="oaDel"' + (S.oa.busy ? ' disabled' : '') + '>' + (S.oa.delArm === ed.id ? '정말 삭제' : '삭제') + '</button>' : '') + (ed ? '<button class="btn ghost" data-a="oaNew">새로 추가</button>' : '') + '<button class="btn pri" data-a="oaSave"' + (S.oa.busy ? ' disabled' : '') + '>저장</button></div></section>';
   }
   function oaHist() {
     const o = oaItems().find(x => x.id === S.oa.sel) || oaItems()[0];
@@ -420,17 +423,21 @@
     if (!auto) { body.value = vv === '' ? null : +vv; body.date = dr('date') || todayISO(); }
     if (!body.name) { toast('이름을 넣어 주세요', true); return; }
     if ((body.qty != null && !isFinite(body.qty)) || (body.value != null && !isFinite(body.value))) { toast('수량·평가금액은 숫자로 넣어 주세요', true); return; }
+    const sn = oaSnap(F), done = sync.wr(S.oa);
     S.oa.busy = true; oaRe();
     const d = await post('/api/other_assets/save', body, F.id ? '고쳤어요 · 이전 값은 기록으로 남아요' : '추가했어요');
-    S.oa.busy = false;
-    if (d) { S.oa.sel = d.id; oaFormReset(); if (S.sheet && S.sheet.k === 'oa') uiSheetClose(); S.oa.at = 0; oaLoad(true); } else oaRe();
+    done(); S.oa.busy = false;
+    if (d) { S.oa.sel = d.id; if (S.oa.form === F && oaSnap(F) === sn) { oaFormReset(); if (S.sheet && S.sheet.k === 'oa') uiSheetClose(); } else if (S.oa.form === F && !F.id) F.id = d.id; S.oa.at = 0; oaLoad(true); } else oaRe();
   }
+  const oaSnap = F => JSON.stringify([F.cat, F.cur, F.unit, ...['name', 'ticker', 'qty', 'value', 'date', 'memo'].map(k => S.drafts['oa:' + k])]);
   async function oaDel() {
     const F = S.oa.form;
-    if (!F.id) return;
+    if (!F.id || S.oa.busy) return;
     if (S.oa.delArm !== F.id) { S.oa.delArm = F.id; oaRe(); return; }
+    const done = sync.wr(S.oa); S.oa.busy = true; oaRe();
     const d = await post('/api/other_assets/delete', { id: F.id }, '지웠어요');
-    if (d) { if (S.oa.sel === F.id) S.oa.sel = null; oaFormReset(); if (S.sheet && S.sheet.k === 'oa') uiSheetClose(); S.oa.at = 0; oaLoad(true); } else oaRe();
+    done(); S.oa.busy = false;
+    if (d) { if (S.oa.sel === F.id) S.oa.sel = null; if (S.oa.form === F || (S.oa.form && S.oa.form.id === F.id)) { oaFormReset(); if (S.sheet && S.sheet.k === 'oa') uiSheetClose(); } S.oa.at = 0; oaLoad(true); } else oaRe();
   }
   function oaDashLine() {
     oaNeed(300000);
@@ -446,7 +453,7 @@
     const bl = arr(S.oa.d && S.oa.d.brokers);
     const rows = bl.length ? bl.map(b => '<div class="srow"><span class="dot' + (b.enabled ? (b.status && b.status.ok === false ? ' w' : '') : ' off') + '"></span><div style="min-width:0;flex:1"><b>' + esc(b.name) + '</b> <span class="pill w sm" title="' + esc(b.note || OA_UNVER) + '">미검증(실험 안 함)</span>'
       + '<div class="cap">' + (b.enabled ? (b.status && b.status.at ? (b.status.ok ? '마지막 동기화 ' + esc(fmtTs(b.status.at)) + ' · <span class="pvx">' + num(b.status.n) + '종목</span>' : '동기화 실패 · ' + esc(errTxt(b.status.err || ''))) : '켜짐 · 첫 동기화 대기') : '꺼짐') + (b.configured ? '' : ' · 설정 필드: ' + esc(arr(b.fields).join(', '))) + '</div></div>'
-      + (b.docs ? '<a class="link" href="' + esc(b.docs) + '" target="_blank" rel="noopener noreferrer">문서</a>' : '') + '</div>').join('') : '<div class="cap">' + (S.oa.st === 'none' ? '이 서버는 아직 지원하지 않아요' : S.oa.st === 'err' ? '불러오지 못했어요 · ' + esc(errTxt(S.oa.err)) : '불러오는 중…') + '</div>';
+      + (b.docs ? '<a class="link" href="' + esc(TJDOM.safeUrl(b.docs)) + '" target="_blank" rel="noopener noreferrer">문서</a>' : '') + '</div>').join('') : '<div class="cap">' + (S.oa.st === 'none' ? '이 서버는 아직 지원하지 않아요' : S.oa.st === 'err' ? '불러오지 못했어요 · ' + esc(errTxt(S.oa.err)) : '불러오는 중…') + '</div>';
     return rows + '<div class="cap sx-note">주문 기능 없음 · ' + esc(OA_UNVER) + ' · 필드는 src/brokers/README.md · 키·토큰은 화면·로그·저장 파일에 남지 않아요</div>';
   }
   Object.assign(A, {
@@ -480,9 +487,7 @@
     if (!force && N.at && Date.now() - N.at < 60000) return;
     N.inflight = true;
     if (!N.d) N.st = 'loading';
-    const v0 = N.ver || 0, busy0 = (N.pend || 0) > 0;
-    const stale = () => busy0 || (N.ver || 0) !== v0 || (N.pend || 0) > 0;
-    let used = false;
+    const stale = sync.rd(N); let used = false;
     fetch('/api/nft', { cache: 'no-store' }).then(r => {
       if (r.status === 401) { onUnauthorized(); throw new Error('HTTP 401'); }
       if (stale()) return null;
@@ -498,7 +503,7 @@
       });
   }
   function nftSet(j) { const N = S.nft; N.d = j; N.st = 'ok'; N.err = ''; N.inc = j.include_in_total === true; N.at = Date.now(); }
-  const nftNeed = ms => { const N = S.nft; if (!N.inflight && N.st !== 'none' && (!N.at || Date.now() - N.at > (ms || 60000))) nftLoad(true); };
+  const nftNeed = ms => { const N = S.nft; if (!N.inflight && !N.pend && N.st !== 'none' && (!N.at || Date.now() - N.at > (ms || 60000))) nftLoad(true); };
   function nftIncl() {
     const N = S.nft;
     if (N.st === 'none' || !N.inc) return { on: false, usd: 0, pend: 0, err: false };
@@ -610,9 +615,9 @@
       + (N.hidOpen ? '<div class="nftsl">' + uiPaged('nfth', hid, x => '<div class="nftsi" data-anc="nft:' + esc(x.key) + '"><span class="nftsn">' + esc(x.name) + '</span><span class="nfts">' + esc(nftCh(x.chain)) + '</span><span class="sp"></span><button class="btn sm" data-a="nftOp" data-op="unhide" data-k="' + esc(x.key) + '">다시 보기</button></div>', { unit: '개' }) + '</div>' : '') + '</section>' : '';
     const srcs = d.sources || {}, uns = arr(sc.unsupported).map(u => nftCh(u.chain)).filter(Boolean), cg = srcs.coingecko || {};
     const osk = !!(srcs.opensea && srcs.opensea.key), cgPl = cg.plan === 'pro' ? '프로' : '데모', cgTxt = '코인게코 NFT(' + (cg.key ? (cg.key_bad ? cgPl + ' 키 거부 — 무키로 조회 중' : cgPl + ' 키') : '무키 — 무료 데모 키를 넣으면 빨라져요') + ')';
-    const noteT = '바닥가 출처: 솔라나 = 매직에덴(1시간마다) · EVM = ' + (osk ? '오픈시(키 있음 · 최우선 · 추적 15분 · 그 밖 6시간마다) → ' + cgTxt : cgTxt + ' · 오픈시 키를 넣으면 오픈시를 최우선으로 써서 NFT 추적이 더 원활해요(설정 › 연결·키)')
+    const noteT = '바닥가 출처: 솔라나 = 매직에덴(1시간마다) · EVM = ' + (osk ? '오픈시만(추적 15분 · 나머지 6시간) · 그 밖 체인 ' + cgTxt : cgTxt + ' · 오픈시 키를 넣으면 오픈시를 먼저 써서 NFT 추적이 더 원활해요(설정 › 연결·키)')
       + (uns.length ? ' · ' + uns.join('·') + ' NFT 는 무료 탐색기 API 미지원이라 제외' : '') + ' · 이미지는 외부 주소라 기본 숨김(머리글자 표시)';
-    const note = '<div class="nftnote" title="' + esc(noteT) + '">바닥가 출처: 솔라나 = 매직에덴 · EVM = ' + (osk ? '오픈시 → ' : '') + '코인게코' + (cg.key && cg.key_bad ? '(' + cgPl + ' 키 거부 — 무키로 조회 중)' : '') + (osk ? '' : ' · 오픈시 키를 넣으면 더 원활해요') + '</div>';
+    const note = '<div class="nftnote" title="' + esc(noteT) + '">바닥가 출처: 솔라나 = 매직에덴 · EVM = ' + (osk ? '오픈시 · 그 밖 체인 ' : '') + '코인게코' + (cg.key && cg.key_bad ? '(' + cgPl + ' 키 거부 — 무키로 조회 중)' : '') + (osk ? '' : ' · 오픈시 키를 넣으면 더 원활해요') + '</div>';
     return '<div class="nftw">' + nftNotice(d) + sumC + trC + caC + spC + hiC + note + '</div>';
   }
   function nftNotice(d) {
@@ -635,10 +640,10 @@
   async function nftPost(body, msg) {
     const N = S.nft;
     if (N.busy) return null;
-    N.busy = true; N.ver = (N.ver || 0) + 1; N.pend = (N.pend || 0) + 1; uiRe();
+    N.busy = true; const done = sync.wr(N); uiRe();
     let d = null;
-    try { d = await post('/api/nft/prefs', body, msg); } finally { N.pend = Math.max(0, (N.pend || 0) - 1); N.busy = false; }
-    if (d) { N.ver = (N.ver || 0) + 1; nftSet(d); }
+    try { d = await post('/api/nft/prefs', body, msg); } finally { done(); N.busy = false; }
+    if (d) nftSet(d);
     else if (!N.pend) { N.at = 0; nftLoad(true); }
     uiRe();
     return d;
@@ -652,8 +657,8 @@
     nftWatch: async () => {
       const b = nftWatchBody(S.drafts['nft:watch'], S.drafts['nft:wch'] || 'eth');
       if (!b) { toast('컬렉션 주소(0x…·솔라나)나 매직에덴·오픈시 링크를 넣어 주세요', true); return; }
-      const d = await nftPost(b, '지켜보기에 넣었어요 — 바닥가는 곧 받아요');
-      if (d) { delete S.drafts['nft:watch']; const i = $('#nftWatch'); if (i) i.value = ''; if (S.sheet && S.sheet.k === 'nftw') uiSheetClose(); }
+      const sn = sync.snap(S.drafts, ['nft:watch']), ch = S.drafts['nft:wch'], sh = S.sheet, d = await nftPost(b, '지켜보기에 넣었어요 — 바닥가는 곧 받아요');
+      if (d && S.drafts['nft:wch'] === ch && S.sheet === sh && !sync.done(S.drafts, sn)) { const i = $('#nftWatch'); if (i) i.value = ''; if (S.sheet && S.sheet.k === 'nftw') uiSheetClose(); }
     },
     nftWatchOpen: el => uiSheetOpen('nftw', 'add', '지켜보기 추가', el),
     nftSpam: () => { S.nft.spamOpen = !S.nft.spamOpen; renderView(); },

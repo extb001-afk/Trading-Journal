@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-from decimal import Decimal
+from decimal import Decimal  # noqa: E402
 
-import sale_match
+import sale_match  # noqa: E402
 
 chk = T.chk
 A, OWN, TOK, USDC = "0x" + "a1" * 20, "0x" + "b1" * 20, "0x" + "c1" * 20, "0x" + "d1" * 20

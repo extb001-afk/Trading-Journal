@@ -138,6 +138,127 @@ for _k, (_nm, _cid, _sym, _net, _tok, _only) in _ALCHEMY_TABLE.items():
             CATALOG[_k]["alchemy_only"] = True
 TABLE_KEYS = ("_table_only", "name", "native", "alchemy", "alchemy_tokens", "alchemy_only")
 
+SWEEP_CHAINS = {
+    "eth": ("Ethereum", 1, "ETH", ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"], 23),
+    "base": ("Base", 8453, "ETH", ["https://mainnet.base.org"], 10),
+    "arbitrum": ("Arbitrum", 42161, "ETH", ["https://arb1.arbitrum.io/rpc"], 23),
+    "optimism": ("Optimism", 10, "ETH", ["https://mainnet.optimism.io"], 10),
+    "polygon": ("Polygon", 137, "POL", ["https://polygon-bor-rpc.publicnode.com"], 23),
+    "scroll": ("Scroll", 534352, "ETH", ["https://scroll-rpc.publicnode.com"], 23),
+    "zksync": ("zkSync", 324, "ETH", ["https://mainnet.era.zksync.io"], 23),
+    "gnosis": ("Gnosis", 100, "XDAI", ["https://rpc.gnosischain.com"], 23),
+    "bsc": ("BSC", 56, "BNB", ["https://bsc-dataseed.bnbchain.org", "https://bsc-dataseed1.bnbchain.org"], 23),
+    "robinhood": ("Robinhood", 4663, "ETH", ["https://rpc.mainnet.chain.robinhood.com"], 23),
+    "arc": ("Arc", 5042, "USDC", ["https://rpc.mainnet.arc.io"], 10),
+    "monad": ("Monad", 143, "MON", ["https://rpc.monad.xyz", "https://rpc2.monad.xyz"], 23),
+    "megaeth": ("MegaETH", 4326, "ETH", ["https://mainnet.megaeth.com/rpc"], 23),
+    "plasma": ("Plasma", 9745, "XPL", ["https://rpc.plasma.to"], 23),
+    "xlayer": ("X Layer", 196, "OKB", ["https://rpc.xlayer.tech", "https://xlayerrpc.okx.com"], 10),
+    "stable": ("Stable", 988, "USDT0", ["https://rpc.stable.xyz"], 23),
+    "hyperevm": ("HyperEVM", 999, "HYPE", ["https://rpc.hyperliquid.xyz/evm"], 20),
+    "sonic": ("Sonic", 146, "S", ["https://rpc.soniclabs.com"], 23),
+    "unichain": ("Unichain", 130, "ETH", ["https://mainnet.unichain.org"], 10),
+    "linea": ("Linea", 59144, "ETH", ["https://rpc.linea.build"], 23),
+    "blast": ("Blast", 81457, "ETH", ["https://rpc.blast.io"], 23),
+    "mantle": ("Mantle", 5000, "MNT", ["https://rpc.mantle.xyz"], 23),
+    "berachain": ("Berachain", 80094, "BERA", ["https://rpc.berachain.com"], 23),
+    "sei": ("Sei", 1329, "SEI", ["https://evm-rpc.sei-apis.com"], 23),
+    "abstract": ("Abstract", 2741, "ETH", ["https://api.mainnet.abs.xyz"], 23),
+    "ink": ("Ink", 57073, "ETH", ["https://rpc-gel.inkonchain.com", "https://rpc-qnd.inkonchain.com"], 23),
+    "soneium": ("Soneium", 1868, "ETH", ["https://rpc.soneium.org"], 20),
+    "worldchain": ("World Chain", 480, "ETH", ["https://worldchain-mainnet.g.alchemy.com/public"], 23),
+    "celo": ("Celo", 42220, "CELO", ["https://forno.celo.org"], 23),
+    "mode": ("Mode", 34443, "ETH", ["https://mainnet.mode.network"], 23),
+    "taiko": ("Taiko", 167000, "ETH", ["https://rpc.mainnet.taiko.xyz"], 23),
+    "polygon_zkevm": ("Polygon zkEVM", 1101, "ETH", ["https://zkevm-rpc.com"], 23),
+    "fantom": ("Fantom", 250, "FTM", ["https://rpcapi.fantom.network"], 23),
+    "avalanche": ("Avalanche", 43114, "AVAX", ["https://api.avax.network/ext/bc/C/rpc"], 23),
+    "cronos": ("Cronos", 25, "CRO", ["https://evm.cronos.org"], 10),
+    "kaia": ("Kaia", 8217, "KAIA", ["https://public-en.node.kaia.io"], 23),
+    "core": ("Core", 1116, "CORE", ["https://rpc.coredao.org"], 23),
+    "metis": ("Metis", 1088, "METIS", ["https://andromeda.metis.io/?owner=1088"], 23),
+    "moonbeam": ("Moonbeam", 1284, "GLMR", ["https://moonbeam.drpc.org"], 3),
+    "aurora": ("Aurora", 1313161554, "ETH", ["https://mainnet.aurora.dev"], 23),
+    "fraxtal": ("Fraxtal", 252, "FRAX", ["https://rpc.frax.com"], 23),
+    "lisk": ("Lisk", 1135, "ETH", ["https://rpc.api.lisk.com"], 23),
+    "zora": ("Zora", 7777777, "ETH", ["https://rpc.zora.energy"], 23),
+    "opbnb": ("opBNB", 204, "BNB", ["https://opbnb-mainnet-rpc.bnbchain.org"], 23),
+    "manta": ("Manta Pacific", 169, "ETH", ["https://pacific-rpc.manta.network/http"], 23),
+    "kava": ("Kava", 2222, "KAVA", ["https://evm.kava.io"], 23),
+    "rootstock": ("Rootstock", 30, "RBTC", ["https://public-node.rsk.co"], 23),
+    "flare": ("Flare", 14, "FLR", ["https://flare-api.flare.network/ext/C/rpc"], 23),
+    "story": ("Story", 1514, "IP", ["https://mainnet.storyrpc.io"], 23),
+    "plume": ("Plume", 98866, "PLUME", ["https://rpc.plume.org"], 23),
+    "katana": ("Katana", 747474, "ETH", ["https://rpc.katana.network"], 23),
+    "arbitrum_nova": ("Arbitrum Nova", 42170, "ETH", ["https://nova.arbitrum.io/rpc"], 23),
+    "apechain": ("ApeChain", 33139, "APE", ["https://rpc.apechain.com/http"], 23),
+    "ronin": ("Ronin", 2020, "RON", ["https://api.roninchain.com/rpc"], 1),
+    "bob": ("BOB", 60808, "ETH", ["https://rpc.gobob.xyz"], 23),
+    "hemi": ("Hemi", 43111, "ETH", ["https://rpc.hemi.network/rpc"], 23),
+    "somnia": ("Somnia", 5031, "SOMI", ["https://api.infra.mainnet.somnia.network"], 23),
+    "zerog": ("0G", 16661, "0G", ["https://evmrpc.0g.ai"], 23),
+    "etherlink": ("Etherlink", 42793, "XTZ", ["https://node.mainnet.etherlink.com"], 10),
+    "morph": ("Morph", 2818, "ETH", ["https://rpc.morphl2.io"], 23),
+    "sophon": ("Sophon", 50104, "SOPH", ["https://rpc.sophon.xyz"], 23),
+    "lens": ("Lens", 232, "GHO", ["https://rpc.lens.xyz"], 23),
+    "flow_evm": ("Flow EVM", 747, "FLOW", ["https://mainnet.evm.nodes.onflow.org"], 23),
+    "conflux": ("Conflux eSpace", 1030, "CFX", ["https://evm.confluxrpc.com"], 23),
+    "injective": ("Injective EVM", 1776, "INJ", ["https://sentry.evm-rpc.injective.network"], 23),
+    "swell": ("Swellchain", 1923, "ETH", ["https://swell.drpc.org"], 3),
+    "shape": ("Shape", 360, "ETH", ["https://mainnet.shape.network"], 23),
+    "adi": ("ADI Chain", 36900, "ADI", ["https://rpc.adifoundation.ai"], 23),
+    "anime": ("Animechain", 69000, "ANIME", ["https://public-rpc.anime.xyz"], 10),
+    "astar": ("Astar", 592, "ASTR", ["https://evm.astar.network"], 23),
+    "boba": ("Boba", 288, "ETH", ["https://mainnet.boba.network"], 10),
+    "citrea": ("Citrea", 4114, "cBTC", ["https://rpc.mainnet.citrea.xyz"], 23),
+    "earnm": ("EARNM", 32766, "EARNM", ["https://earnm-mainnet.g.alchemy.com/public"], 23),
+    "galactica": ("Galactica", 613419, "GNET", ["https://galactica-mainnet.g.alchemy.com/public"], 23),
+    "gensyn": ("Gensyn", 685689, "ETH", ["https://gensyn-mainnet.g.alchemy.com/public"], 23),
+    "humanity": ("Humanity", 6985385, "H", ["https://humanity-mainnet.g.alchemy.com/public"], 23),
+    "mythos": ("Mythos", 42018, "ETH", ["https://mythos-mainnet.g.alchemy.com/public"], 23),
+    "rise": ("RISE", 4153, "ETH", ["https://rpc.risechain.com"], 23),
+    "settlus": ("Settlus", 5371, "ETH", ["https://settlus-mainnet.g.alchemy.com/public"], 23),
+    "superseed": ("Superseed", 5330, "ETH", ["https://mainnet.superseed.xyz"], 23),
+    "worldmobile": ("World Mobile Chain", 869, "WMTX", ["https://worldmobilechain-mainnet.g.alchemy.com/public"], 23),
+    "zetachain": ("ZetaChain", 7000, "ZETA", ["https://zetachain-mainnet.g.allthatnode.com/archive/evm", "https://zeta-chain.drpc.org"], 23),
+    "pharos": ("Pharos", 1672, "PROS", ["https://rpc.pharos.xyz"], 23),
+    "jovay": ("Jovay", 5734951, "ETH", ["https://rpc.jovay.io"], 23),
+}
+
+DEFAULT_NATIVE_SYMBOL = {"arc": "USDC"}
+
+EXTRA_CHAINS = {
+    "monad": ("Monad", "MON", 143, "0x3bd359c1119da7da1d913d1c4d2b7c461115433a"),
+    "megaeth": ("MegaETH", "ETH", 4326, "0x4200000000000000000000000000000000000006"),
+    "plasma": ("Plasma", "XPL", 9745, "0x6100e367285b01f48d07953803a2d8dca5d19873"),
+    "xlayer": ("X Layer", "OKB", 196, "0xe538905cf8410324e03a5a23c1c177a474d59b2b"),
+    "kaia": ("Kaia", "KAIA", 8217, "0x19aac5f612f524b754ca7e7c41cbfa2e981a4432"),
+    "fraxtal": ("Fraxtal", "FRAX", 252, "0xfc00000000000000000000000000000000000002"),
+    "bob": ("BOB", "ETH", 60808, "0x4200000000000000000000000000000000000006"),
+    "story": ("Story", "IP", 1514, "0x1514000000000000000000000000000000000000"),
+    "somnia": ("Somnia", "SOMI", 5031, "0x046ede9564a72571df6f5e44d0405360c0f4dcab"),
+    "avalanche": ("Avalanche", "AVAX", 43114, "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7"),
+    "stable": ("Stable", "USDT", 988, None),
+    "abstract": ("Abstract", "ETH", 2741, "0x3439153eb7af838ad19d56e1571fbd09333c2809"),
+    "hyperevm": ("HyperEVM", "HYPE", 999, "0x5555555555555555555555555555555555555555"),
+}
+NATIVE_MIRROR = {"arc": ("0x3600000000000000000000000000000000000000", 10 ** 12),
+                 "stable": ("0x779ded0c9e1022225f8e0630b35a9b54be713736", 10 ** 12)}
+NATIVE_ALIAS_TOKEN = {"polygon": "0x0000000000000000000000000000000000001010",
+                      "celo": "0x471ece3750da237f93b8e339c536989b8978a438",
+                      "metis": "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0000"}
+
+
+def not_token_cas(chain: str) -> set:
+    out = {str(x[0]).lower() for x in (NATIVE_MIRROR.get(chain), ZK_STACK.get(chain)) if x}
+    if NATIVE_ALIAS_TOKEN.get(chain):
+        out.add(NATIVE_ALIAS_TOKEN[chain])
+    return out
+
+
+ZK_STACK = {"zksync": ("0x000000000000000000000000000000000000800a", "0x0000000000000000000000000000000000008001"),
+            "abstract": ("0x000000000000000000000000000000000000800a", "0x0000000000000000000000000000000000008001")}
+
 
 AUTO_WINDOW_CALLS = 3000
 
@@ -166,11 +287,7 @@ def block_for(chain: str, since_known: bool, speed: dict = None):
             b.pop(k9, None)
         b["_auto"] = "catalog"
         return b, "catalog"
-    try:
-        import chainsweep
-    except ImportError:
-        return None, "chainsweep 없음"
-    ent = chainsweep.SWEEP_CHAINS.get(chain)
+    ent = SWEEP_CHAINS.get(chain)
     if not ent:
         return None, "점검 목록에 없는 체인"
     sp = speed or {}
@@ -188,12 +305,10 @@ def block_for(chain: str, since_known: bool, speed: dict = None):
 
 def native_of(chain: str):
     try:
-        import common
-        if chain in common.EXTRA_CHAINS:
-            m = common.EXTRA_CHAINS[chain]
+        if chain in EXTRA_CHAINS:
+            m = EXTRA_CHAINS[chain]
             return m[1], m[3]
-        import chainsweep
-        e = chainsweep.SWEEP_CHAINS.get(chain)
+        e = SWEEP_CHAINS.get(chain)
         return (e[2], None) if e else (None, None)
     except ImportError:
         return None, None
@@ -225,9 +340,9 @@ def alchemy_tokens(chain: str) -> bool:
 
 def chain_table() -> dict:
     try:
-        import common
-        d = common.seed_json("coverage/evm_chains.json", {}) or {}
-    except (Exception, SystemExit):
+        import seeds
+        d = seeds.seed_json("coverage/evm_chains.json", {}) or {}
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return {}
     ch = d.get("chains") if isinstance(d, dict) else None
     return ch if isinstance(ch, dict) else {}

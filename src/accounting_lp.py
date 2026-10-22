@@ -7,41 +7,52 @@ import acct_norm
 import lpdec
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
+from timeutil import KST
 from view_common import LP_CONV_MIN_USD
 from view_common import _f
 
 
+def _lp_small(x, *, rent, lpx):
+    if int(x["asset_id"]) in rent:
+        return True
+    if x["cost_usd"] is not None:
+        return abs(Decimal(x["cost_usd"])) < LP_CONV_MIN_USD
+    gx = lpx.gstate(x)
+    wac = lpx.cb.wac_or_none(gx)
+    return wac is not None and wac * (-lpx.sb._norm(x)) < LP_CONV_MIN_USD
+
+
 class LpBook:
 
-    def __init__(lpx, sb, _ak, _un, consume_krw, cp_emit, cp_sync, cp_take, cur_lab, cur_row, cur_src, ev, flow_of, fxb, gstate, krw_of, lp_by_tx, lp_dep_seen, lp_events, lp_meta_by, lp_mgrs, lp_tx_rows, lpb, note_unk, realized_by_date, realized_krw_by_date, tax_krw_acq, tax_rows):
-        lpx.sb = sb
-        lpx._ak = _ak
+    def __init__(lpx, px, *, _un, gstate, lpin, fns):
+        lpx.sb = px.sb
+        lpx._ak = fns.ak
         lpx._un = _un
-        lpx.consume_krw = consume_krw
-        lpx.cp_emit = cp_emit
-        lpx.cp_sync = cp_sync
-        lpx.cp_take = cp_take
-        lpx.cur_lab = cur_lab
-        lpx.cur_row = cur_row
-        lpx.cur_src = cur_src
-        lpx.ev = ev
-        lpx.flow_of = flow_of
-        lpx.fxb = fxb
+        lpx.consume_krw = px.kpx.consume_krw
+        lpx.cp_emit = px.cpx.cp_emit
+        lpx.cp_sync = px.cpx.cp_sync
+        lpx.cp_take = px.cpx.cp_take
+        lpx.cur_lab = px.fbx.cur_lab
+        lpx.cur_row = px.cpx.cur_row
+        lpx.cur_src = px.cpx.cur_src
+        lpx.ev = px.cpx.ev
+        lpx.flow_of = px.fbx.flow_of
+        lpx.fxb = px.fbx.fxb
         lpx.gstate = gstate
-        lpx.krw_of = krw_of
-        lpx.lp_by_tx = lp_by_tx
-        lpx.lp_dep_seen = lp_dep_seen
-        lpx.lp_events = lp_events
-        lpx.lp_meta_by = lp_meta_by
-        lpx.lp_mgrs = lp_mgrs
-        lpx.lp_tx_rows = lp_tx_rows
-        lpx.lpb = lpb
-        lpx.note_unk = note_unk
-        lpx.realized_by_date = realized_by_date
-        lpx.realized_krw_by_date = realized_krw_by_date
-        lpx.tax_krw_acq = tax_krw_acq
-        lpx.tax_rows = tax_rows
+        lpx.krw_of = px.kpx.krw_of
+        lpx.lp_by_tx = lpin.lp_by_tx
+        lpx.lp_dep_seen = lpin.lp_dep_seen
+        lpx.lp_events = px.books.lp_events
+        lpx.lp_meta_by = lpin.lp_meta_by
+        lpx.lp_mgrs = lpin.lp_mgrs
+        lpx.lp_tx_rows = lpin.lp_tx_rows
+        lpx.lpb = lpin.lpb
+        lpx.note_unk = px.unx.note_unk
+        lpx.realized_by_date = px.books.realized_by_date
+        lpx.realized_krw_by_date = px.books.realized_krw_by_date
+        lpx.tax_krw_acq = px.fbx.tax_krw_acq
+        lpx.tax_rows = px.books.tax_rows
+        lpx.cb = px.cb
 
     def lp_bucket(lpx, loc9, chain9, ts9):
         b9 = lpx.lpb.get(loc9)
@@ -106,15 +117,7 @@ class LpBook:
         b9 = lpx.lp_bucket(home, chain9, ts9)
         rent9 = {int(a) for a in (lpi9.get("rent_aids") or []) if str(a).lstrip("-").isdigit()}
 
-        def lp_small(x):
-            if int(x["asset_id"]) in rent9:
-                return True
-            if x["cost_usd"] is not None:
-                return abs(Decimal(x["cost_usd"])) < LP_CONV_MIN_USD
-            gx = lpx.gstate(x)
-            wac = (gx["cost"] / gx["qty_known"]) if gx["qty_known"] > EPS else None
-            return wac is not None and wac * (-lpx.sb._norm(x)) < LP_CONV_MIN_USD
-        conv9 = [x for x in disp9 if not lp_small(x)]
+        conv9 = [x for x in disp9 if not _lp_small(x, rent=rent9, lpx=lpx)]
         rent_only = bool(disp9) and not conv9
         B = Decimal(0); w_all = Decimal(0); w_known = Decimal(0); conv_txt = []
         dinfo = []
@@ -124,13 +127,12 @@ class LpBook:
             if qx <= 0:
                 continue
             fk = min(qx, gx["qty_known"]); fu = qx - fk
-            wac = (gx["cost"] / gx["qty_known"]) if gx["qty_known"] > EPS else Decimal(0)
+            wac = lpx.cb.wac(gx)
             bk = wac * fk
             krw9 = lpx.consume_krw(gx, bk)
             cp9x = lpx.cp_take(gx, fk, bk)
-            gx["qty_known"] -= fk; gx["cost"] -= bk
-            gx["qty_unknown"] = max(Decimal(0), gx["qty_unknown"] - fu)
-            gx["qty_timeline"].append((ts9, -qx))
+            lpx.cb.release(gx, fk, bk, fu)
+            lpx.cb.snapshot(gx, ts9, -qx)
             mv = Decimal(x["cost_usd"]) if x["cost_usd"] is not None else None
             wt = mv if (mv is not None and mv > 0) else (bk if bk > 0 else qx)
             B += bk; w_all += wt; w_known += wt * (fk / qx)
@@ -213,7 +215,7 @@ class LpBook:
                 pnl9 = pi - ci
                 st_real9 += pnl9
                 rate9, rsrc9 = lpx.fxb.rate_src(ts9)
-                gx["realized"] += pnl9
+                lpx.cb.realize(gx, pnl9)
                 fl9["realized"] += pnl9
                 fl9["rbd"][dkey9] = fl9["rbd"].get(dkey9, Decimal(0)) + pnl9
                 fl9["rbdk"][dkey9] = fl9["rbdk"].get(dkey9, 0.0) + float(pnl9) * rate9
@@ -222,7 +224,7 @@ class LpBook:
                 lpx.realized_krw_by_date[dkey9] = lpx.realized_krw_by_date.get(dkey9, 0) + float(pnl9) * rate9
                 tax9 = {"sold": dkey9, "sym": gx["sym"], "ticker": gx["sym"], "ex": "유동성(DEX LP) · 스테이블 전환",
                         "qty": _f(qi, 4), "acq": _f(ci, 2), "disp": _f(pi, 2), "fee": 0, "rate": round(rate9, 4), "rateSrc": rsrc9,
-                        "_acq": float(ci), "_disp": float(pi)}
+                        "_acq": float(ci), "_disp": float(pi), "_qty": float(qi)}
                 lpx.tax_krw_acq(tax9, gx, fl9, ci, ki, rate9, dkey9)
                 lpx.tax_rows.append(tax9)
                 fl9["sold"] += qi
@@ -254,16 +256,16 @@ class LpBook:
             if qx <= 0:
                 continue
             lpx.cp_sync(gx)
-            gx["qty_timeline"].append((ts9, qx))
+            lpx.cb.snapshot(gx, ts9, qx)
             gx["risk_allow"] = True
             flow = lpx.flow_of(gx, ts9, chain9)
             qsx = f"{float(qx):,.4f}".rstrip("0").rstrip(".")
             b9["acq"][gx["sym"]] = b9["acq"].get(gx["sym"], Decimal(0)) + qx
             if no_dep:
                 if gx["is_stable"]:
-                    gx["qty_known"] += qx; gx["cost"] += qx
+                    lpx.cb.acquire(gx, qx, qx)
                 else:
-                    gx["qty_unknown"] += qx
+                    lpx.cb.add_unknown(gx, qx)
                     cr9 = lpx.cur_row[0]
                     lpx.cur_row[0] = x
                     try:
@@ -278,12 +280,16 @@ class LpBook:
             c = cost_of.get(x["posting_id"], Decimal(0))
             kq = qx * k9 if disp9 else qx
             uq = qx - kq
-            gx["qty_known"] += kq; gx["cost"] += c
+            lpx.cb.acquire(gx, kq, c)
             if uq > EPS:
-                gx["qty_unknown"] += uq
+                lpx.cb.add_unknown(gx, uq)
                 lpx.note_unk(gx, ts9, f"LP 전환 취득 · 원가미상 원금분 · {lpx.lp_label(b9)}", uq, txh9, chain9=chain9, fs9=0)
             flow["bought"] += qx; flow["cost"] += c
-            flow["cost_krw"] += lpx.krw_of(c, ts9, x)
+            if disp9 and not gx["is_stable"] and B > 0:
+                flow["cost_krw"] += sum(((d["krw"] if (d["krw"] is not None and not d["g"]["is_stable"]) else lpx.krw_of(d["bk"], ts9))
+                                         for d in dinfo), Decimal(0)) * c / B
+            else:
+                flow["cost_krw"] += lpx.krw_of(c, ts9, x)
             rw9 = bool(lpi9.get("via")) and not disp9
             rn9 = (not disp9) and int(x["asset_id"]) in rent9
             how = ("스테이블 수령 · 액면 원가(스테이블로 바뀐 전환 원금 = 매도 실현)" if (disp9 and sale9 and gx["is_stable"]) else

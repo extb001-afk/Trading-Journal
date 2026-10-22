@@ -171,7 +171,7 @@
       const flC = fl - stk, fo = Math.abs(foU) < 0.015 ? 0 : (fbU ? foU * kf : -rzF);
       const fxC = fxl + (rz + lpf + fl + fb) - (rzS + rzF + flC + fo);
       const op = num(a.op) * kf;
-      return { v2: true, isT, delta, mk: ev, hold, xm, ur, gx, rz: rzS, rzf: rzF, fo, fb, rz0: rz, lpf, stk, un, op, mvd, top, etc, kx: 0, fx: fxC, fl: flC, fl0: fl, tr: 0, fee: num(a.fee) * kf,
+      return { v2: true, k, isT, delta, mk: ev, hold, xm, ur, gx, rz: rzS, rzf: rzF, fo, fb, rz0: rz, lpf, stk, un, op, mvd, top, etc, kx: 0, fx: fxC, fl: flC, fl0: fl, tr: 0, fee: num(a.fee) * kf,
         oth: delta - ev - rz - lpf - fl - fxl - un - fb - op, np: num(a.np), unp, ap,
         xr: num(a.xr) * kf, xca: !!a.xca, rbv: num(a.rbv) * kf };
     }
@@ -223,7 +223,8 @@
     const V = v => html ? '<span class="' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</span>' : m(v, { sign: true, compact: true });
     const one = t => esc(t.sym) + (t.pct != null ? ' ' + pctS(t.pct, 1) : '') + ' ' + V(t.v);
     const bits = shown.map(one);
-    if (mv) bits.push(html ? '<span class="amvd" title="' + esc(ATT_MVD_TIP) + '">사고판 분(→실현) ' + V(mv) + '</span>' : '사고판 분(→실현) ' + V(mv));
+    const mvB = '<button type="button" class="amvd" data-a="attdOpen" data-v="' + esc('d|' + a.k + '|ur') + '" aria-haspopup="dialog"';
+    if (mv) bits.push(html ? mvB + ' title="' + esc(ATT_MVD_TIP) + '">사고판 분(→실현) ' + V(mv) + '</button>' : '사고판 분(→실현) ' + V(mv));
     if (bits.length && Math.abs(rest) >= 0.5) bits.push('기타 ' + m(rest, { sign: true, compact: true }));
     if (html) return bits.map((x, i) => '<span class="nw">' + (i ? '· ' : '') + x + '</span>').join(' ');
     return bits.join(' · ');
@@ -255,7 +256,7 @@
   function attDetail(a, k, noCoins) {
     const D = S.D, x = D.dayMap.get(k) || {};
     const row = (l, v, sub) => '<div class="ar"><span class="al">' + l + '</span><b class="num ' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</b>' + (sub ? '<span class="as">' + sub + '</span>' : '') + '</div>';
-    const srow = (l, v) => '<div class="ar sub"><span class="al mut">' + l + '</span><span></span><b class="num ' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</b></div>';
+    const srow = (l, v, at) => '<' + (at ? 'button type="button" ' + at : 'div') + ' class="ar sub"><span class="al mut">' + l + '</span><span></span><b class="num ' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</b></' + (at ? 'button' : 'div') + '>';
     const mx = Math.max.apply(null, a.top.map(t => Math.abs(t.v)).concat([1e-9]));
     const coins = noCoins ? '' : a.top.map(t => '<div class="ar sub"><span class="al">' + icon(t.sym, 'xs', D.symLogo[t.sym.toUpperCase()] || {}) + esc(t.sym) + (t.pct != null ? ' <span class="mut">' + pctS(t.pct, 2) + '</span>' : '') + '</span><span class="cb2"><i class="' + (t.v >= 0 ? 'p' : 'n') + '" style="width:' + Math.max(3, Math.abs(t.v) / mx * 100).toFixed(1) + '%"></i></span><b class="num ' + cls(t.v) + '">' + m(t.v, { sign: true, compact: true }) + '</b></div>').join('')
       + (a.etc.n && !noCoins ? srow('기타 ' + a.etc.n + '종', a.etc.v) : '');
@@ -266,7 +267,7 @@
       let h = '<div class="attd">' + row('시세 (평가)', a.mk, '전일 보유 코인 × 가격 변화(그날 마감가) + 원장 밖 코인 + 그날 사고판 분 — 팔아서 확정된 몫은 아래 실현에')
         + coins
         + (big(a.xm) ? srow('원장 밖 코인(업비트 미매칭)', a.xm) : '')
-        + (big(a.ur) ? srow('그날 사고판 분', a.ur) : '')
+        + (big(a.ur) ? srow('그날 사고판 분', a.ur, 'data-a="attdOpen" data-v="' + esc('d|' + k + '|ur') + '" aria-haspopup="dialog"') : '')
         + (big(a.gx) ? srow('같은 코인 가격 묶음 차', a.gx) : '');
       if (attMvd(a)) h += '<div class="ar sub amvdn"><span class="as">그날 사고판 분 ' + m(a.mvd, { sign: true, compact: true }) + ' — 판 코인에 쌓여 있던 평가 ' + (a.mvd < 0 ? '이익' : '손실') + '이 팔면서 시세에서 ' + (a.mvd < 0 ? '빠지고' : '더해지고') + ' 실현 줄로 옮겨간 몫이 들어 있어요(그날 산 코인의 마감까지 평가 변화 포함 · 자리만 옮긴 돈)</span></div>';
       else if (big(a.ur)) h += '<div class="ar sub amvdn"><span class="as">그날 사고판 분 = 판 코인의 평가 손익이 실현으로 옮겨가며 빠지는 몫 + 그날 산 코인의 마감까지 평가 변화</span></div>';
@@ -507,19 +508,19 @@
     const mv = tbl ? tbl + '<div class="axtg">' + tog + '</div>' : shown.length ? '<div class="amv"><span class="cap">많이 움직인 코인</span>' + shown.map(t => '<span class="mchip" title="' + esc(t.sym + ' 시세 기여 ' + m(t.v, { sign: true })) + '">' + icon(t.sym, 'xs', S.D.symLogo[t.sym.toUpperCase()] || {}) + esc(t.sym) + ' <span class="num ' + cls(t.pct != null ? t.pct : t.v) + '">' + (t.pct != null ? pctS(t.pct, 1) : m(t.v, { sign: true, compact: true })) + '</span></span>').join('') + '<span class="sp"></span>' + tog + '</div>' : '<div class="amv"><span class="sp"></span>' + tog + '</div>';
     return '<div class="attl ' + (dash ? 'hatt ' : '') + 'abox"' + ' title="' + esc(attLine(a, 5, false)) + '">' + (a.ap ? '<div class="cap">≈ 근사 — 시세 기록 없는 자산은 추정가라 시세 기여가 0</div>' : '') + bars + mv + '</div>' + (open ? attDetail(a, k, !!tbl) : '');
   }
-  const ATTD_LBL = { mk: '시세', rz: '현물 실현', rzf: '선물 실현', fl: '입출금', fx: '환율', fo: '선물 미반영', un: '원가 미확인', op: '기초 잔고 정정', tr: '매매', oth: '나머지' };
+  const ATTD_LBL = { mk: '시세', rz: '현물 실현', rzf: '선물 실현', fl: '입출금', fx: '환율', fo: '선물 미반영', un: '원가 미확인', op: '기초 잔고 정정', tr: '매매', oth: '나머지', ur: '사고판 분(→실현)' };
   const ATTD_PG = 20;
   const L0 = v => esc(v);
   const ATTD_ICO = { fl: 'send', krw: 'bank', usd: 'coin', cvt: 'scale', fut: 'scale', lp: 'layers', gas: 'fuel', rest: 'info', unp: 'alert', mv: 'undo', grp: 'layers', rb: 'wallet', stk: 'coin', day: 'cal', fold: 'layers' };
-  const ATTD_NOUN = { mk: '코인·몫', rz: '코인·LP', rzf: '종목', fl: '이동', fx: '몫', fo: '거래소', un: '코인', op: '코인', tr: '몫', oth: '몫' };
-  const ATTD_NEED = { mk: 1, rzf: 1, fl: 1, fx: 1, fo: 1, un: 1, op: 1, oth: 1 };
+  const ATTD_NOUN = { mk: '코인·몫', rz: '코인·LP', rzf: '종목', fl: '이동', fx: '몫', fo: '거래소', un: '코인', op: '코인', tr: '몫', oth: '몫', ur: '몫' };
+  const ATTD_NEED = { mk: 1, rzf: 1, fl: 1, fx: 1, fo: 1, un: 1, op: 1, oth: 1, ur: 1 };
   function attdWhat(key, isT) {
     return ({ mk: isT ? '전일 보유 코인 × 가격 변화(전일 마감 → 지금) + 원장 밖 코인 + 그날 사고판 분' : '전일 보유 코인 × 가격 변화(그날 마감가) + 원장 밖 코인 + 그날 사고판 분',
       rz: '그날 판 것의 원가 대비 손익(LP 수수료·스테이킹 보상 포함) — 위 칸 총 실현의 현물 몫', rzf: '그날 선물 정산(정산 + 수수료 + 펀딩) — 위 칸 총 실현의 선물 몫',
       fl: '밖에서 들어오고 나간 돈 — 내 지갑·거래소끼리 이동은 서로 지움', fx: S.cur === 'USD' ? '원화 예수금의 달러 환산 몫(그날 USDT 종가 차)' : '달러 자산·원화 예수금의 환율 몫 + 실현을 체결 시각 환율로 센 차',
       fo: '그날 총자산 변화에 아직 안 든 선물 정산 — 줄 합을 전일 대비와 맞추려고 빼요', un: '원가를 모르는 코인을 판 금액 − 그날 가격 평가(실현·평가로 못 나눔)',
       op: '전부터 있던 보유를 이날 원장에 넣음(발견·재점검 기초 잔고 × 그날 가격) — 실제로 들어온 돈 아님', tr: '마감가 대비 체결 차(수수료·가스 포함)',
-      oth: '다른 줄로 설명되지 않는 몫 — 이름 붙은 몫 · 작아서 합친 줄 · 근사·반올림' })[key] || '';
+      oth: '다른 줄로 설명되지 않는 몫 — 이름 붙은 몫 · 작아서 합친 줄 · 근사·반올림', ur: '그날 사고판 코인별 — 실현으로 옮겨간 평가 손익 + 그날 산 코인 평가 변화' })[key] || '';
   }
   function attdPurge() { S.attdC = null; S.attdGen = (S.attdGen || 0) + 1; }
   function attdCache() { const D = S.D, c = S.attdC; return c && c.at === D.builtAt ? c : (S.attdC = { at: D.builtAt, days: {}, st: {} }); }
@@ -548,6 +549,27 @@
     if (d !== 0 && isFinite(d)) out.push(attdIt('_rest', tiny ? '반올림 끝전' : restL, d, { s: tiny ? esc('항목마다 센트로 반올림한 차') : (restS || ''), rest: tiny ? 2 : 1, ico: 'rest' }));
     return out;
   }
+  function attdUr(dt, a, kf, more) {
+    const du = dt && dt.ur && typeof dt.ur === 'object' ? dt.ur : null, out = [];
+    if (du) arr(du.rows).forEach(c => { if (Array.isArray(c) && c[0] != null) out.push(attdIt('u:' + c[0], String(c[0]), num(c[6]) * kf,
+      { sym: String(c[0]), s: attdUrSub(c, kf), a: 'attdUx', av: 'u:' + c[0] })); });
+    if (du) more(out, 'ur', '종');
+    if (du && num(du.fee)) out.push(attdIt('u:_fee', '수수료·가스 레그', num(du.fee) * kf, { ico: 'gas', s: esc('그날 쓴 수수료·가스(그날 가격)') }));
+    if (du && num(du.lp)) out.push(attdIt('u:_lp', 'LP 예치·회수 레그', num(du.lp) * kf, { ico: 'lp', s: esc('LP 에 넣고 뺀 원금(그날 가격)') }));
+    return attdFit(out, a.ur, du ? '그 밖(스테이블·원화 체결·LP 실현)' : '코인별로 나누지 못한 몫',
+      esc(du ? '스테이블 환전 차익·원화 체결 환율 차·LP 회수 실현·스테이킹 보상' : '서버를 업데이트하면 코인별로 보여요'));
+  }
+  function attdUrSub(c, kf) {
+    const M = v => m(num(v) * kf, { compact: true }), Mx = v => m(num(v) * kf, { sign: true, compact: true }), b = [];
+    const nz = v => Math.abs(num(v)) >= 0.005, [sl, by, rz, mo, mn, , cn, uk] = [1, 2, 3, 4, 5, 6, 7, 8].map(i => num(c[i]));
+    const co = sl - uk - rz, bt = [nz(by) ? '산 돈 ' + M(by) : '', nz(cn) ? '그중 판 것 원가 ' + M(cn) : ''];
+    if (nz(sl)) b.push('판 돈 ' + M(sl) + (nz(uk) ? ' − 원가 모름 ' + M(uk) : '') + ' − 원가 ' + M(co) + ' = 실현 ' + Mx(rz));
+    else if (nz(rz)) b.push('실현 ' + Mx(rz));
+    if (nz(by) || nz(mn)) b.push('그날 산 몫: ' + bt.concat(['마감까지 평가 변화 ' + Mx(mn)]).filter(Boolean).join(' · '));
+    const ot = [nz(co - cn) ? '판 것 원가 ' + M(co - cn) : '', nz(mo) ? '평가 이동 ' + Mx(mo) : ''].filter(Boolean);
+    if (ot.length) b.push('이미 평가에 있던 몫(실현으로 이동): ' + ot.join(' · '));
+    return b.concat(['이 코인이 사고판 분에 주는 값 ' + Mx(c[6])]).join('<br>');
+  }
   function attdParts(k, det) {
     const D = S.D, x = D && D.dayMap.get(k), a = x ? attOf(k) : null;
     if (!a) return null;
@@ -565,7 +587,7 @@
     if (a.v2) {
       if (dt && Array.isArray(dt.xm) && dt.xm.length) dt.xm.forEach(c => { if (Array.isArray(c)) mk.push(attdIt('x:' + c[0], String(c[0]) + ' · 원장 밖', num(c[1]) * kf, { sym: String(c[0]), s: L('업비트 미매칭 코인 — 전일 수량 × 개당 가격 변화') })); });
       else if (a.xm) mk.push(attdIt('xm', '원장 밖 코인(업비트 미매칭)', a.xm, { ico: 'grp' }));
-      if (a.ur) mk.push(attdIt('ur', '그날 사고판 분' + (attMvd(a) ? '(→실현)' : ''), a.ur, { ico: 'mv', s: L('판 코인의 평가 손익이 실현 줄로 옮겨간 몫 + 그날 산 코인의 마감까지 평가 변화') }));
+      if (a.ur) mk.push(attdIt('ur', '그날 사고판 분' + (attMvd(a) ? '(→실현)' : ''), a.ur, { ico: 'mv', s: L('판 코인의 평가 손익이 실현 줄로 옮겨간 몫 + 그날 산 코인의 마감까지 평가 변화') + ' · 누르면 코인별', a: 'attdGo', av: 'd|' + k + '|ur' }));
       if (a.gx) mk.push(attdIt('gx', '같은 코인 가격 묶음 차', a.gx, { ico: 'grp', s: L('같은 코인을 체인·거래소마다 조금 다른 값에 매긴 차') }));
       if (num(raw.fpx)) mk.push(attdIt('fpx', '입출금 기준가 교정', num(raw.fpx) * kf, { ico: 'fl', s: L('입출금 줄은 교정 전 가격 · 평가는 지금 고정가로 센 차') }));
     } else if (!krw && num(raw.kx)) mk.push(attdIt('kx', '원화 예수금 달러 환산', num(raw.kx) * kf, { ico: 'krw' }));
@@ -574,6 +596,7 @@
     more(mk, 'mk', '종'); more(mk, 'xm', '종(원장 밖)');
     const mkMore = !mo.mk && dt && num(dt.mkN) > arr(dt.mk).length ? num(dt.mkN) - arr(dt.mk).length : 0;
     P.mk = attdFit(mk, a.mk, mkMore ? '그 밖 ' + mkMore + '종' : '그 밖(반올림·기준가)', L(mkMore ? '목록에 안 실은 작은 코인들의 기여 합' : '코인별 반올림·기준가 차'));
+    P.ur = attdUr(dt, a, kf, more);
     const rz = [], rzf = [], fo = [];
     if (a.v2) {
       dayContrib(iso).filter(r => !r.fut).forEach(r => { const v = KV(r.v, r.vk), sy = String(r.sym);
@@ -705,7 +728,7 @@
     return ctx.keys.map(k => { const a = attOf(k), v = sum(cs, c => num(a && a[c]));
       return attdIt('d:' + k, heroDayLbl(k), v, { ico: 'day', a: 'attdGo', av: 'd|' + k + '|' + (row.key === 'oth' ? 'oth' : row.key), s: '누르면 그날 ' + esc(row.l) + ' 상세' }); }).filter(x => x.v);
   }
-  const attdParse = v => { const p = String(v || '').split('|'); return p.length === 3 && (p[0] === 'd' || p[0] === 'm') && ATTD_LBL[p[2]] ? { mode: p[0], at: p[1], key: p[2] } : null; };
+  const attdParse = v => { const p = String(v || '').split('|'); return p.length === 3 && (p[0] === 'd' || (p[0] === 'm' && p[2] !== 'ur')) && ATTD_LBL[p[2]] ? { mode: p[0], at: p[1], key: p[2] } : null; };
   function attdTitle(q) {
     const lb = q.mode === 'm' && q.key === 'mk' ? '시세 변동' : ATTD_LBL[q.key];
     if (q.mode === 'm') return lb + ' · ' + (+q.at.slice(5, 7)) + '월';
@@ -769,7 +792,7 @@
     const tabs = '<div class="adtabs" role="tablist" aria-label="분해 줄">' + rows.map(r => '<button type="button" role="tab" class="chip' + (r.key === q.key ? ' a' : '') + '" aria-selected="' + (r.key === q.key) + '" data-a="attdGo" data-v="' + esc(q.mode + '|' + q.at + '|' + r.key) + '">' + esc(r.l) + '</button>').join('')
       + (row.extra ? '<button type="button" role="tab" class="chip a" aria-selected="true">' + esc(row.l) + '</button>' : '') + '</div>';
     const wh9 = attdWhat(q.key, isT);
-    const sumH = '<div class="adsum"><b class="num ' + clsV(row.v) + '"' + (S.hide || S.rand ? '' : ' title="' + esc(attdMoney(row.v)) + '"') + '>' + m(row.v, { sign: true, compact: true }) + '</b><span class="cap">' + head + (row.extra ? ' · 작아서 나머지에 합친 줄' : '')
+    const sumH = '<div class="adsum"><b class="num ' + clsV(row.v) + '"' + (S.hide || S.rand ? '' : ' title="' + esc(attdMoney(row.v)) + '"') + '>' + m(row.v, { sign: true, compact: true }) + '</b><span class="cap">' + head + (row.extra ? (q.key === 'ur' ? ' · 시세 안의 줄' : ' · 작아서 나머지에 합친 줄') : '')
       + (wh9 ? '<span class="ell" style="display:block" title="' + esc(wh9) + '">' + esc(wh9) + '</span>' : '') + '</span></div>';
     const byDay = q.mode === 'm' && U.view === 'day';
     const seg = q.mode === 'm' ? '<div class="seg adseg" role="group" aria-label="보기">' + [['it', '항목별'], ['day', '날짜별']].map(x => '<button type="button" data-a="attdView" data-v="' + x[0] + '" class="' + ((byDay ? 'day' : 'it') === x[0] ? 'on' : '') + '" aria-pressed="' + ((byDay ? 'day' : 'it') === x[0]) + '">' + x[1] + '</button>').join('') + '</div>' : '';
@@ -793,10 +816,10 @@
       const ic = it.sym ? icon(it.sym, 'xs', D.symLogo[String(it.sym).toUpperCase()] || {}) : '<span class="ic xs adi" aria-hidden="true">' + String(IC[ATTD_ICO[it.ico]] || IC.info).replace('<svg', '<svg width="12" height="12"') + '</span>';
       const cs = q.mode === 'd' && q.key === 'mk' && it.id.indexOf('c:') === 0 ? attdCoinSub(it, isT) : '', sub = cs && it.s ? cs + ' · ' + it.s : cs || it.s;
       const w = Math.min(100, Math.max(3, Math.abs(it.v) / mx * 100)).toFixed(1);
-      const inner = ic + '<span class="adn"><span class="adt">' + esc(it.l) + '</span>' + (sub ? '<span class="ads">' + sub + '</span>' : '') + '</span>'
+      const inner = ic + '<span class="adn"><span class="adt">' + esc(it.l) + '</span>' + (sub ? '<span class="ads' + (it.id === U.ux ? ' open' : '') + '">' + sub + '</span>' : '') + '</span>'
         + '<span class="cb2" aria-hidden="true"><i class="' + (it.v >= 0 ? 'p' : 'n') + '" style="width:' + w + '%"></i></span><b class="num ' + clsV(it.v) + '">' + attdMoney(it.v) + '</b>'
         + (it.a ? IC.right.replace('<svg', '<svg class="adcv" width="14" height="14"') : '<span></span>');
-      return it.a ? '<button type="button" class="adr" data-a="' + esc(it.a) + '" data-v="' + esc(it.av) + '">' + inner + '</button>' : '<div class="adr"' + (it.ref ? ' style="opacity:.6"' : '') + '>' + inner + '</div>';
+      return it.a ? '<button type="button" class="adr" data-a="' + esc(it.a) + '" data-v="' + esc(it.av) + '"' + (it.a === 'attdUx' ? ' aria-expanded="' + (it.id === U.ux) + '"' : '') + '>' + inner + '</button>' : '<div class="adr"' + (it.ref ? ' style="opacity:.6"' : '') + '>' + inner + '</div>';
     };
     let list = '';
     vis.slice(lo, hi).forEach((it, i) => {
@@ -824,6 +847,7 @@
       attdRc: el => { uiSheetCloseThen(() => A.receipt(el)); },
       attdLp: el => { uiSheetCloseThen(() => A.lpGo(el)); },
       attdFr: el => { const v = String(el.dataset.v || ''), i = v.indexOf('|'); uiSheetCloseThen(() => openFutRcpt(i > 0 ? v.slice(0, i) : v, i > 0 ? v.slice(i + 1) : '')); },
+      attdUx: el => { const U = S.attdUI, v = String(el.dataset.v || ''); if (!U) return; U.ux = U.ux === v ? '' : v; renderOverlay(); },
       attdCoin: el => { const s = String(el.dataset.v || ''); uiSheetCloseThen(() => { if (s) Promise.resolve(revealAndHighlight('coin:' + s)).then(ok => { if (!ok) toast(s + ' — 지금 보유 목록에 없는 코인이에요(판 코인·값 없는 토큰)'); }); }); },
     };
   }
@@ -1093,17 +1117,17 @@
       if (orig.title != null) big.setAttribute('title', (p.ap > 0 ? '≈ ' : '') + m(p.val));
       if (when) when.textContent = '· ' + (d9 => /^\d{4}-\d{2}-\d{2}$/.test(d9) ? (+d9.slice(5, 7)) + '월 ' + (+d9.slice(8)) + '일' : d9)(String(isoDay(p.date) || p.date)) + (p.dow ? ' (' + p.dow + ')' : '');
       const fl9 = p.date === S.D.todayKey ? S.D._todayFlow : dayFlowV(p.row), ft9 = p.date === S.D.todayKey ? S.D._todayFlowTop : (p.row || {}).flowTop;
-      chg.innerHTML = (p.delta != null ? '<span class="' + (isStep || isSplit ? 'mut' : cls(p.delta)) + '">전일 대비 ' + m(p.delta, { sign: true }) + (isSplit && fl9 != null ? ' <small>' + (attOf(p.date) ? '<span class="nw">· 입출금 ' + m(num(fl9), { sign: true, compact: true }) + '</span>' : flowSplit(p.delta, fl9, ft9, true)) + '</small>' : (isStep ? ' <small>· 입출금 포함</small>' : '')) + '</span>' : '<span class="mut">첫날</span>')
+      TJDOM.set(chg, (p.delta != null ? '<span class="' + (isStep || isSplit ? 'mut' : cls(p.delta)) + '">전일 대비 ' + m(p.delta, { sign: true }) + (isSplit && fl9 != null ? ' <small>' + (attOf(p.date) ? '<span class="nw">· 입출금 ' + m(num(fl9), { sign: true, compact: true }) + '</span>' : flowSplit(p.delta, fl9, ft9, true)) + '</small>' : (isStep ? ' <small>· 입출금 포함</small>' : '')) + '</span>' : '<span class="mut">첫날</span>')
         + (u.usdt ? '<span class="hov">USDT ₩' + nf('ko-KR').format(num(u.usdt)) + (u.kimp != null ? ' · 김프 ' + pctS(num(u.kimp), 2) : '') + '</span>' : '')
-        + (p.ap > 0 ? '<span class="hov">근사 · 추정 평가 ' + m(p.ap, { compact: true }) + ' 포함</span>' : '');
+        + (p.ap > 0 ? '<span class="hov">근사 · 추정 평가 ' + m(p.ap, { compact: true }) + ' 포함</span>' : ''));
       if (c.bench) {
         const bb9 = c.bench.btc && c.bench.btc[i], bh9 = c.bench.hold && c.bench.hold[i];
-        chg.insertAdjacentHTML('beforeend', (bb9 != null ? ' <span class="hov bhov btc">BTC 만 ' + m(bb9, { compact: true }) + '</span>' : '') + (bh9 != null ? ' <span class="hov bhov hold">안 팔았다면 ' + m(bh9, { compact: true }) + '</span>' : ''));
+        TJDOM.insert(chg, 'beforeend', (bb9 != null ? ' <span class="hov bhov btc">BTC 만 ' + m(bb9, { compact: true }) + '</span>' : '') + (bh9 != null ? ' <span class="hov bhov hold">안 팔았다면 ' + m(bh9, { compact: true }) + '</span>' : ''));
       }
     };
     const hide = () => {
       guide.classList.add('hidden'); dot.classList.add('hidden');
-      if (orig) { big.innerHTML = orig.big; chg.innerHTML = orig.chg; if (orig.title != null) big.setAttribute('title', orig.title); orig = null; }
+      if (orig) { TJDOM.set(big, orig.big); TJDOM.set(chg, orig.chg); if (orig.title != null) big.setAttribute('title', orig.title); orig = null; }
       if (when) when.textContent = '';
     };
     el.addEventListener('mousemove', show);
@@ -1576,7 +1600,7 @@
     if (v.kind !== 'wallet' || !M.chains.length) return '';
     const anyL = M.chains.some(c => vnExpl(c.ch, M.chAddr[c.ch]));
     const rows = M.chains.map(c => { const u = vnExpl(c.ch, M.chAddr[c.ch]);
-      const nm = u ? '<a class="ell vnchn" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + esc(c.ch) + '</a>' : '<span class="ell vnchn">' + esc(c.ch) + '</span>';
+      const nm = u ? '<a class="ell vnchn" href="' + esc(TJDOM.safeUrl(u)) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + esc(c.ch) + '</a>' : '<span class="ell vnchn">' + esc(c.ch) + '</span>';
       return '<div class="it vnch"><div class="top2">' + nm + '<b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>' + vnBar(c.pct) + '</div>'; }).join('');
     const ad = M.addrs.map(a => '<div class="vnad"><span class="mono">' + esc(short(a)) + '</span><span class="sp"></span>' + copyBtn(a) + '</div>').join('');
     return '<section class="vnsec"><div class="vnh"><b>체인별</b>' + (anyL ? '<span class="cap">이름 누르면 탐색기</span>' : '') + '</div><div class="cust vnl">' + rows + '</div>' + (ad ? '<div class="vnads">' + ad + '</div>' : '') + '</section>';

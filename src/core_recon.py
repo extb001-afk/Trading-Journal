@@ -2,12 +2,14 @@ import bf_engine
 import chain_event
 import chain_registry
 import chain_state
-import common
+import chaincatalog, config, envfile, logs, paths, statefile
 import discopen
+import fsio
 import json
 import os
-import pricing
+import token_tables
 import recon
+import recon_adj
 import spamguard
 import threading
 import time
@@ -15,7 +17,7 @@ import token_discovery
 from core_common import CLASSIFIER_VER
 from core_common import dm
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -25,7 +27,7 @@ class ReconMixin:
     def _sol_rpc_url(self):
         key = os.environ.get("TJ_HELIUS_KEY", "")
         if not key:
-            key = common.read_env_file().get("TJ_HELIUS_KEY", "")
+            key = envfile.read_env_file().get("TJ_HELIUS_KEY", "")
         sol = self.cfg.get("sol", {})
         if sol.get("rpc") == "helius" and key:
             return f"https://mainnet.helius-rpc.com/?api-key={key}"
@@ -39,19 +41,19 @@ class ReconMixin:
             return False
 
     def _scope_ready(self, scope: str) -> bool:
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
         if chain_registry.is_nonevm(scope):
             return chain_state.ChainState(scope, sd).ready(self.chain_owners.get(scope, set()))
         if scope == "sol":
-            cur = common.read_json(os.path.join(sd, "cursor_sol.json"), {})
+            cur = statefile.read_json(os.path.join(sd, "cursor_sol.json"), {})
             return self._synced(cur) and all(o in cur for o in self.sol_wallets)
         if scope == "bsc":
-            cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {})
+            cur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {})
             head, frm = int(cur.get("head") or 0), int(cur.get("from_block") or 0)
             return self._synced(cur) and head > 0 and frm > 0 and head - frm < 3000
-        cur = common.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
-        pend = common.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
-        enr = common.read_json(os.path.join(sd, f"enrich_{scope}.json"), {})
+        cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
+        pend = statefile.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
+        enr = statefile.read_json(os.path.join(sd, f"enrich_{scope}.json"), {})
         return self._synced(cur) and not pend and not enr \
             and all(w in cur for w in self.my_wallets.get(scope, set()))
 
@@ -60,11 +62,11 @@ class ReconMixin:
             return False
         if self._scope_ready(scope):
             return True
-        sd = common.STATE_DIR
-        cur = common.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
+        sd = paths.STATE_DIR
+        cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
         if not (isinstance(cur.get("_ext_internal_pending"), dict) or isinstance(cur.get("_ext_internal_lag"), dict)):
             return False
-        pend = common.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
+        pend = statefile.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
         return self._synced(cur, key="_synced_tok_at") and not pend \
             and all(w in cur for w in self.my_wallets.get(scope, set()))
 
@@ -74,7 +76,7 @@ class ReconMixin:
         if scope in ("sol", "bsc"):
             return False
         cc = (self.cfg.get("chains") or {}).get(scope) or {}
-        if common.chain_discovery(scope, cc) == "rpc":
+        if config.chain_discovery(scope, cc) == "rpc":
             return False
         try:
             hrs = float(self.cfg.get("recon_native_stall_hours", self.NATX_STALL_HOURS))
@@ -82,7 +84,7 @@ class ReconMixin:
             hrs = self.NATX_STALL_HOURS
         if hrs <= 0 or self._scope_ready(scope) or not self._scope_ready_tok(scope):
             return False
-        cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{scope}.json"), {})
+        cur = statefile.read_json(paths.state(f"cursor_evm_{scope}.json"), {})
         since = cur.get("_int_lag_since")
         if not isinstance(cur.get("_ext_internal_lag"), dict) or not isinstance(since, int) or isinstance(since, bool):
             return False
@@ -124,10 +126,10 @@ class ReconMixin:
 
     def _rpc_recon_reset(self):
         for c, cc in (self.cfg.get("chains") or {}).items():
-            if common.chain_discovery(c, cc) != "rpc" or not self._meta_get(f"recon_done_{c}") \
+            if config.chain_discovery(c, cc) != "rpc" or not self._meta_get(f"recon_done_{c}") \
                     or self._meta_get(f"recon_reset_rpc_{c}"):
                 continue
-            cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{c}.json"), {})
+            cur = statefile.read_json(paths.state(f"cursor_evm_{c}.json"), {})
             if not cur.get("_rpc_v") or not self._scope_ready(c):
                 continue
             n_open = self.conn.execute("SELECT count(*) FROM postings WHERE source_kind='opening' AND source_id=?",
@@ -140,7 +142,7 @@ class ReconMixin:
             self.conn.execute("DELETE FROM meta WHERE k=?", (f"recon_done_{c}",))
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (f"recon_reset_rpc_{c}", str(int(time.time()))))
             self.conn.commit()
-            self.__dict__.get("_recon_cache", {}).pop(c, None)
+            self._recon_view_drop(c)
             log.warning("★%s RPC 백필 완료 → 탐색기 시절 대사 도장 해제, 온체인 잔고로 재대사★", c)
 
     def _nonevm_adapter(self, chain: str):
@@ -152,9 +154,9 @@ class ReconMixin:
                     import importlib
                     mk = getattr(importlib.import_module(chain_registry.spec(chain).module), "make_adapter", None)
                     ad = mk(self.cfg) if callable(mk) else None
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("core_recon:ReconMixin._nonevm_adapter", e)
-                    log.warning("[%s] 수집기 어댑터 만들기 실패(대사 없음): %s", chain, common.safe_err(e)[:160])
+                    log.warning("[%s] 수집기 어댑터 만들기 실패(대사 없음): %s", chain, logs.safe_err(e)[:160])
                     ad = None
             cache[chain] = ad
         return cache[chain]
@@ -162,7 +164,7 @@ class ReconMixin:
     SUI_GAP_CHECK_MAX = 8
 
     def _sui_recon_guard(self, chain: str):
-        st9 = chain_state.ChainState(chain, common.STATE_DIR)
+        st9 = chain_state.ChainState(chain, paths.STATE_DIR)
         pend = sorted(str(s9) for s9 in st9.d["pending"])
         gaps = st9.unresolved_gaps()
         fp = json.dumps([pend, sorted([s9, str(r9.get("owner")), sorted(o9)] for s9, r9, o9 in gaps)])
@@ -203,7 +205,7 @@ class ReconMixin:
                             raise RuntimeError("gap 거래 상세 없음")
                         v9 = chain_event.validate(rec9)
                         hit9 = any(o9 == w9 and d9 for o9, _k9, d9, _m9 in v9["deltas"]) or any(p9 == w9 and f9 for p9, f9 in v9["fees"])
-                    except Exception as _cg9:
+                    except Exception as _cg9:   # noqa: BLE001 [fallback]
                         calcguard.swallowed("core_recon:ReconMixin._nonevm_fetch_plan.run", _cg9)
                         hit9 = True
                     if hit9:
@@ -298,21 +300,24 @@ class ReconMixin:
             rpcs8 = list(self.cfg["bsc"]["detail_rpcs"])
             if latest:
                 own8 = self._disc_own_cas("bsc", wallets)
-                sw8 = {str(k).lower(): str(v) for tab9 in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS) for k, v in (tab9.get("bsc") or {}).items()}
+                sw8 = {str(k).lower(): str(v) for tab9 in (token_tables.STABLE_CAS, token_tables.JPY_STABLE_CAS) for k, v in (tab9.get("bsc") or {}).items()}
                 st8 = self._recon_strict_fn("bsc")
                 cas8 = {str(k).lower(): v for k, v in cas.items()}
                 px8 = self._disc_prep("bsc", "bsc", wallets, st8) if mode != "fast" else None
                 return lambda: self._prov_fastx("bsc", px8, lambda **x9: self._prov_fast_fetch(
-                    "bsc", rpcs8, wallets, cas8, discover_url=None, multicall=recon.MULTICALL3, wallet_cas=own8, block=None, strict=st8, sweep=sw8, **x9),
+                    "bsc", rpcs8, wallets, cas8, discover_url=None, multicall=token_tables.MULTICALL3, wallet_cas=own8, block=None, strict=st8, sweep=sw8, **x9),
                     full=mode != "fastx")
             prep8 = self._disc_prep("bsc", "bsc", wallets, self._recon_strict_fn("bsc"))
-            if prep8 is None:
-                return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas)
             own8 = self._disc_own_cas("bsc", wallets)
+            if prep8 is None:
+                st8 = self._recon_strict_fn("bsc")
+                wc8 = {str(w).lower(): {str(ca).lower() for ca in cas if str(ca).lower() in own8.get(str(w).lower(), set()) or st8(ca)}
+                       for w in wallets}
+                return lambda: recon.fetch_bsc_balances(rpcs8, wallets, cas, wallet_cas=wc8)
             return lambda: token_discovery.bsc_fetch(rpcs8, wallets, cas, own8, prep8)
         cc9 = self.cfg["chains"][chain]
-        rpc_only9 = common.chain_discovery(chain, cc9) == "rpc"
-        bsoff9 = common.bs_blocked(chain, cc9)
+        rpc_only9 = config.chain_discovery(chain, cc9) == "rpc"
+        bsoff9 = config.bs_blocked(chain, cc9)
         fast9 = bool(latest and mode in ("fast", "fastx"))
         base9 = None if (rpc_only9 or bsoff9 or fast9 or not cc9.get("blockscout")) else str(cc9["blockscout"]).rstrip("/")
         from evm_watch import RpcSynthMixin as _RS
@@ -339,7 +344,7 @@ class ReconMixin:
                 cas.setdefault(ca9, m9)
         must = {str(w).lower(): set(rt9) for w in wallets}
         strict9 = self._recon_strict_fn(chain)
-        cur9 = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {})
+        cur9 = statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {})
         try:
             blk9 = min(int(cur9.get(w, cur9.get(str(w).lower()))) for w in wallets)
         except (TypeError, ValueError):
@@ -356,12 +361,12 @@ class ReconMixin:
             parts = str(r[0] or "").split(":")
             if len(parts) == 3 and parts[2].lower() in wcas and r[1]:
                 wcas[parts[2].lower()].add(str(r[1]).lower())
-        excl = {x[0] for x in (common.NATIVE_MIRROR.get(chain), common.ZK_STACK.get(chain)) if x}
-        mc9 = recon.MULTICALL3_BY_CHAIN.get(chain, recon.MULTICALL3)
+        excl = chaincatalog.not_token_cas(chain)
+        mc9 = token_tables.MULTICALL3_BY_CHAIN.get(chain, token_tables.MULTICALL3)
         nat9 = mode in ("nat", "natx")
         sweep9 = None
         if (bsoff9 or fast9) and not nat9:
-            sweep9 = {str(k).lower(): str(v) for tab9 in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS) for k, v in (tab9.get(chain) or {}).items()}
+            sweep9 = {str(k).lower(): str(v) for tab9 in (token_tables.STABLE_CAS, token_tables.JPY_STABLE_CAS) for k, v in (tab9.get(chain) or {}).items()}
         prep9 = None if (nat9 or fast9) else self._disc_prep(chain, "evm", wallets, strict9)
 
         if fast9:
@@ -402,8 +407,8 @@ class ReconMixin:
     @staticmethod
     def _prov_sol_fetch(url, wallets: list, stake_path: str = None, now: float = None, native_url: str = None) -> dict:
         try:
-            sd = common.read_json(stake_path or os.path.join(common.STATE_DIR, "sol_stake.json"), {}) or {}
-        except (Exception, SystemExit) as _cg9:
+            sd = statefile.read_json(stake_path or paths.state("sol_stake.json"), {}) or {}
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_recon:ReconMixin._prov_sol_fetch", _cg9)
             sd = {}
         try:
@@ -451,9 +456,9 @@ class ReconMixin:
                         raise RuntimeError("getMultipleAccounts value 형식 오류")
                     got = [0 if v is None else int(v["lamports"]) for v in vals]
                     break
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     calcguard.swallowed("core_recon:ReconMixin._prov_sol_stake_live", e)
-                    log.info("SOL 스테이크 지금 잔고 조회 실패(계정 %d개 · 다음 차선 → 끝내 실패면 이 바퀴 SOL 임시 잔고 실패): %s", len(chunk), common.safe_err(e)[:80])
+                    log.info("SOL 스테이크 지금 잔고 조회 실패(계정 %d개 · 다음 차선 → 끝내 실패면 이 바퀴 SOL 임시 잔고 실패): %s", len(chunk), logs.safe_err(e)[:80])
             if got is None:
                 return None
             out.update(zip(chunk, got))
@@ -469,7 +474,7 @@ class ReconMixin:
             return r
         blk = hex(int(r["_block"]))
         mc = kw.get("multicall") if r.get("_multicall") else None
-        if mc and chain not in common.ZK_STACK and chain not in common.NATIVE_MIRROR:
+        if mc and chain not in chaincatalog.ZK_STACK and chain not in chaincatalog.NATIVE_MIRROR:
             items = [(("nat", w), mc, "4d2301cc" + str(w).lower().replace("0x", "").rjust(64, "0")) for w in todo]
             got = recon._mc_call(urls, blk, items, mc)
             for w in todo:
@@ -490,9 +495,9 @@ class ReconMixin:
             return None
         try:
             return token_discovery.recon_prep(self.conn, self.cfg, chain, list(wallets), strict, kind=kind)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_recon:ReconMixin._disc_prep", e)
-            log.warning("recon %s 토큰 발견 재료 실패(종전 목록으로): %s", chain, common.safe_err(e)[:120])
+            log.warning("recon %s 토큰 발견 재료 실패(종전 목록으로): %s", chain, logs.safe_err(e)[:120])
             return None
 
     def _disc_own_cas(self, chain: str, wallets: list) -> dict:
@@ -524,8 +529,8 @@ class ReconMixin:
 
     def _recon_strict_fn(self, chain: str):
         spamguard.is_genuine(chain, "0x0")
-        st9 = {str(k).lower() for k in (pricing.STABLE_CAS.get(chain) or {})}
-        jp9 = {str(k).lower() for k in (pricing.JPY_STABLE_CAS.get(chain) or {})}
+        st9 = {str(k).lower() for k in (token_tables.STABLE_CAS.get(chain) or {})}
+        jp9 = {str(k).lower() for k in (token_tables.JPY_STABLE_CAS.get(chain) or {})}
         wr9 = str(self.wrapped.get(chain) or "").lower()
 
         def strict(ca, chain=chain):
@@ -685,7 +690,7 @@ class ReconMixin:
 
     def _recon_pending_chains(self):
         out = set()
-        for stream, reader in (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader)) + tuple(self.__dict__.get("chain_readers") or ()):
+        for stream, reader in (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader)) + tuple(getattr(self, "chain_readers", None) or ()):
             row = self.conn.execute("SELECT seg, off FROM inbox_offsets WHERE stream=?", (stream,)).fetchone()
             seg, off = (row["seg"], row["off"]) if row else (1, 0)
             batch, _, _ = reader.read_batch(seg, off, max_records=self.RECON_PENDING_SCAN)
@@ -747,8 +752,9 @@ class ReconMixin:
             def _run(job=job, fn=fn):
                 try:
                     job["bal"] = fn()
-                except BaseException as e:
+                except BaseException as e:   # noqa: BLE001 [fallback]
                     job["err"] = e
+                    calcguard.swallowed("core_recon:ReconMixin._recon_bal._run", e)
                 finally:
                     job["t1"] = time.time()
                     job["ev"].set()
@@ -784,7 +790,7 @@ class ReconMixin:
         sui9 = kind == "nonevm" and chain == "sui" and mode == "new"
         if not (self._scope_ready_tok(chain) if mode == "tok" else
                 self._scope_ready_natx(chain) if mode == "natx" else
-                chain_state.ChainState(chain, common.STATE_DIR).ready(set(wl)) if sui9 else self._scope_ready(chain)):
+                chain_state.ChainState(chain, paths.STATE_DIR).ready(set(wl)) if sui9 else self._scope_ready(chain)):
             log.info("%s 보류 — 조회 중 수집기 준비 상태 해제(동기 도장·상세 큐)", label)
             return None
         if sui9 and (job["bal"] if isinstance(job["bal"], dict) else {}).get("_sui_fp") != self._sui_recon_guard(chain)[2]:
@@ -817,15 +823,15 @@ class ReconMixin:
         return job["bal"]
 
     def _wallet_backfilled(self, chain: str, kind: str, w: str) -> bool:
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
         if kind == "nonevm":
             return chain_state.ChainState(chain, sd).owner_done(w)
         if kind == "bsc":
-            cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {})
+            cur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {})
             return w in {str(x).lower() for x in (cur.get("_wallets") or [])} and not cur.get("_neww")
         if kind == "sol":
-            return w in common.read_json(os.path.join(sd, "cursor_sol.json"), {})
-        return w in common.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {})
+            return w in statefile.read_json(os.path.join(sd, "cursor_sol.json"), {})
+        return w in statefile.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {})
 
     def _recon_new_wallets(self, chain: str, kind: str, stream: str, drained: set, cutoff_ts: int, start: bool = True):
         T, ws = self._recon_view(chain)
@@ -839,7 +845,7 @@ class ReconMixin:
         jobs = self.__dict__.get("_recon_jobs", {})
         full_ok = self._scope_ready(chain)
         if kind == "nonevm" and chain == "sui" and not full_ok:
-            st9 = chain_state.ChainState(chain, common.STATE_DIR)
+            st9 = chain_state.ChainState(chain, paths.STATE_DIR)
             full_ok = st9.ready({w for w in cands() if st9.owner_done(w)})
         done = 0
         for mode in ("new", "nat"):
@@ -925,6 +931,7 @@ class ReconMixin:
                     (sid, "opening_balance", chain, json.dumps(pay9, ensure_ascii=False), now9))
                 for seq, (aid, diff) in enumerate(sorted(legs)):
                     self._post_leg_strict('opening', chain, sid, seq, pos_ts if diff > 0 else now9, aid, loc, diff, None, None, 'opening', 'OPENING')
+                    recon_adj.note(self.conn, "K2", ('opening', chain, sid, seq), "pre_window" if diff > 0 else "untracked_out", mode=mode)
                 mk9 = f"wrecon_tok:{chain}:{w}" if mode == "tok" else f"wrecon_done:{chain}:{w}"
                 self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (mk9, str(now9)))
                 if mode == "natx":
@@ -935,17 +942,15 @@ class ReconMixin:
                          {"tok": "(토큰만 — 네이티브는 내부 이동 색인 뒤)", "nat": "(네이티브)",
                           "natx": "(네이티브 — 탐색기 내부 이동 색인 장기 정체: RPC 블록 잔고로 임시 대사, 색인 완료 뒤 자동 보정)"}.get(mode, ""),
                          len(legs))
+            if nlegs:
+                self._inval_daily()
             self.conn.commit()
         except Exception:
             self.conn.rollback()
             raise
         if done:
-            self.__dict__.get("_recon_cache", {}).pop(chain, None)
+            self._recon_view_drop(chain)
         if nlegs:
-            try:
-                os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
-            except FileNotFoundError:
-                pass
             dm("RECON", f"[{chain}] 새 지갑 기초잔고 대사 완료" + {"tok": "(토큰만 — 네이티브는 내부 이동 색인 완료 뒤)",
                                                               "nat": "(네이티브)",
                                                               "natx": "(네이티브 — 탐색기 내부 이동 색인 장기 정체라 RPC 잔고로 임시 맞춤, "
@@ -958,7 +963,7 @@ class ReconMixin:
     def _gate_reload(self):
         now9 = time.time()
         sig9 = []
-        for p9 in (common.ACTIVITY_GATE_PATH, common.BACKFILL_SPEED_PATH):
+        for p9 in (paths.ACTIVITY_GATE_PATH, paths.BACKFILL_SPEED_PATH):
             try:
                 st9 = os.stat(p9)
                 sig9.append((st9.st_mtime_ns, st9.st_size))
@@ -968,9 +973,9 @@ class ReconMixin:
             return 0
         self._gate_at = now9
         self._gate_sig = sig9
-        if not os.path.exists(common.ACTIVITY_GATE_PATH):
+        if not os.path.exists(paths.ACTIVITY_GATE_PATH):
             return 0
-        cfg2 = common.load_config()
+        cfg2 = config.load_config()
         added = []
         for w in cfg2.get("wallets") or []:
             if w.get("type", "evm") != "evm":
@@ -1013,9 +1018,9 @@ class ReconMixin:
             return 0
         try:
             return self._negabs_runner().note(chain, txhash)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_recon:ReconMixin._negabs_note", e)
-            log.warning("발견 시점 기초 잔고 후보 기록 실패(무시 — 도구로 다시 찾음) %s: %s", txhash[:14], common.safe_err(str(e))[:160])
+            log.warning("발견 시점 기초 잔고 후보 기록 실패(무시 — 도구로 다시 찾음) %s: %s", txhash[:14], logs.safe_err(str(e))[:160])
             return 0
 
     def negabs_pass(self, drained=frozenset()) -> int:
@@ -1038,7 +1043,7 @@ class ReconMixin:
             self._last_recon = time.time()
             try:
                 self._rpc_recon_reset()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("core_recon:ReconMixin.recon_pass", e)
                 self.conn.rollback()
                 log.warning("RPC 재대사 점검 실패(다음 주기): %s", e)
@@ -1056,7 +1061,7 @@ class ReconMixin:
 
     def _recon_hold_set(self, chain: str, why) -> None:
         try:
-            p9 = os.path.join(common.STATE_DIR, self.RECON_HOLD_FILE)
+            p9 = paths.state(self.RECON_HOLD_FILE)
             try:
                 with open(p9, "r", encoding="utf-8") as f:
                     cur = json.load(f)
@@ -1077,11 +1082,11 @@ class ReconMixin:
                     since9 = int(o9.get("since") or now9) if keep9 else now9
                 except (TypeError, ValueError):
                     since9 = now9
-                cur[chain] = {"why": common.safe_err(why)[:240], "since": since9, "at": now9}
-            common.atomic_write_json(p9, cur)
-        except Exception as e:
+                cur[chain] = {"why": logs.safe_err(why)[:240], "since": since9, "at": now9}
+            statefile.atomic_write_json(p9, cur)
+        except Exception as e:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_recon:ReconMixin._recon_hold_set", e)
-            log.warning("[%s] 대사 보류 기록 실패(무시): %s", chain, common.safe_err(e)[:160])
+            log.warning("[%s] 대사 보류 기록 실패(무시): %s", chain, logs.safe_err(e)[:160])
 
     def _recon_pass_scopes(self, drained: set, start: bool, jobs: dict):
         scopes = []
@@ -1121,8 +1126,8 @@ class ReconMixin:
                     continue
                 try:
                     self._recon_new_wallets(chain, kind, stream, drained, cutoff_ts, start=start)
-                except Exception as e:
-                    calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes", e)
+                except Exception as e:  # noqa: BLE001 [isolate]
+                    calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes[_recon_new_wallets#1]", e)
                     self.conn.rollback()
                     log.warning("recon %s 새 지갑 대사 실패(다음 주기): %s", chain, e)
                 continue
@@ -1130,10 +1135,10 @@ class ReconMixin:
                     and ((chain, "new") in jobs or (start and not self._scope_ready(chain))):
                 try:
                     self._recon_new_wallets(chain, kind, stream, drained, cutoff_ts, start=start)
-                except Exception as e:
-                    calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes", e)
+                except Exception as e:  # noqa: BLE001 [isolate]
+                    calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes[_recon_new_wallets#2]", e)
                     self.conn.rollback()
-                    log.warning("recon %s 지갑별 대사 보류·실패(다음 주기): %s", chain, common.safe_err(e)[:200])
+                    log.warning("recon %s 지갑별 대사 보류·실패(다음 주기): %s", chain, logs.safe_err(e)[:200])
                     self._recon_hold_set(chain, e)
                 continue
             if (chain, "chain") not in jobs:
@@ -1143,8 +1148,8 @@ class ReconMixin:
                 bal = self._recon_bal(chain, kind, "chain", sorted(self.chain_owners.get(chain, set())) if kind == "nonevm"
                                       else sorted(self.my_wallets.get(chain, set())) if kind != "sol"
                                       else sorted(self.sol_wallets))
-            except Exception as e:
-                calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes", e)
+            except Exception as e:  # noqa: BLE001 [isolate]
+                calcguard.swallowed("core_recon:ReconMixin._recon_pass_scopes[bal]", e)
                 log.warning("recon %s 잔고조회 실패(다음 주기 재시도): %s", chain, e)
                 if kind == "nonevm":
                     self._recon_hold_set(chain, e)
@@ -1199,6 +1204,7 @@ class ReconMixin:
                     ev_ts = cutoff_ts if diff > 0 else t_obs
                     loc = f"wallet:{chain}:{w}" if w else f"wallet:{chain}"
                     self._post_leg_strict('opening', chain, f'recon:{chain}', seq, ev_ts, aid, loc, diff, None, None, 'opening', 'OPENING')
+                    recon_adj.note(self.conn, "K1", ('opening', chain, f'recon:{chain}', seq), "pre_window" if diff > 0 else "untracked_out")
                 self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)",
                                   (f"recon_done_{chain}", str(t_obs)))
                 self.conn.commit()
@@ -1209,7 +1215,7 @@ class ReconMixin:
             except Exception:
                 self.conn.rollback()
                 raise
-        marker = os.path.join(common.STATE_DIR, "backfill_done")
+        marker = paths.state("backfill_done")
         if not os.path.exists(marker):
             all_done = all(self._meta_get(f"recon_done_{c}") for c, _ in scopes)
             if not self._meta_get("recon_done_upbit") and self._upbit_keys():
@@ -1218,7 +1224,6 @@ class ReconMixin:
             if all_done and any(not self._meta_get(f"recon_done_exf_{ex9}") for ex9 in exf9):
                 all_done = False
             if all_done and (scopes or (self._upbit_keys() or exf9)):
-                with open(marker, "w") as f:
-                    f.write(repr(time.time()))
+                fsio.atomic_write_text(marker, repr(time.time()), mode=None, fsync=False, dir_fsync=False, makedirs=False)
                 log.info("★백필 완료 마커 생성 — 일별 스냅샷 동결 시작★")
                 dm("BACKFILL_DONE", "전 체인 백필+기초잔고 대사 완료 — 일별 스냅샷 동결 시작")

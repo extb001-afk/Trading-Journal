@@ -12,7 +12,7 @@ import time
 import uuid as uuidlib
 from decimal import Decimal, InvalidOperation
 
-import common
+import logs, paths, statefile
 
 log = logging.getLogger("tj-exf")
 
@@ -98,7 +98,7 @@ def addresses(cfg) -> list:
     try:
         import perp_dex
         lst = [a["address"].lower() for a in (perp_dex.configured(cfg).get(VENUE) or [])]
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return []
     ex = {str(x).lower() for x in (settings(cfg).get("spot_exclude") or []) if isinstance(x, str)}
     out = []
@@ -111,12 +111,12 @@ def addresses(cfg) -> list:
 def known_addresses(cfg, state=None) -> set:
     out = set(addresses(cfg))
     try:
-        st = state if state is not None else (common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {}) or {})
+        st = state if state is not None else (statefile.read_json(paths.state("exf_state.json"), {}) or {})
         hs = st.get(VENUE) if isinstance(st, dict) else None
         if isinstance(hs, dict):
             out |= {a for a in (hs.get("ever") or []) if isinstance(a, str) and re.fullmatch(r"0x[0-9a-f]{40}", a)}
             out |= {a for a in (hs.get("hl") or {}) if isinstance(a, str) and re.fullmatch(r"0x[0-9a-f]{40}", a)}
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [optional]
         pass
     return out
 
@@ -130,7 +130,7 @@ def window_t0(cfg, now=None) -> int:
     try:
         import bf_engine
         vals = [v for v in (bf_engine.SINCE.target(None), bf_engine.SINCE.target(VENUE)) if v]
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         vals = []
     return int(min([t] + [int(v) for v in vals]))
 
@@ -206,7 +206,7 @@ def _gate_fail(e, now=None):
     else:
         wait = float(min(BACKOFF_MAX, 60 * 2 ** min(10, _GATE["fail"] - 1)))
     _GATE["until"] = now + wait
-    _GATE["why"] = common.safe_err(e)[:160]
+    _GATE["why"] = logs.safe_err(e)[:160]
     return wait
 
 
@@ -267,8 +267,8 @@ def daily_candles(key, t0, t1, now=None, budget=30.0):
         return candles.Result(candles=rows or None, why=None if rows else "no_data", calls=1)
     except Budget:
         return candles.Result(why="budget", note="Hyperliquid 무게 예산")
-    except Exception as e:
-        return candles.Result(why="net", note=common.safe_err(e)[:120])
+    except Exception as e:   # noqa: BLE001 [fallback]
+        return candles.Result(why="net", note=logs.safe_err(e)[:120])
 
 
 def _dec(v):
@@ -317,7 +317,7 @@ def _ms_ok(t, now_ms=None) -> bool:
 
 
 def meta_path() -> str:
-    return os.path.join(common.STATE_DIR, "hl_spot_meta.json")
+    return paths.state("hl_spot_meta.json")
 
 
 PINNED = {"USDC": 0, "PURR": 1, "HYPE": 150, "UBTC": 197, "UETH": 221, "USDE": 235, "USOL": 254, "USDT0": 268, "UFART": 269,
@@ -410,8 +410,8 @@ def load_meta(deadline=None, now=None, force=False, fetch=True) -> Meta:
         return m
     if not force:
         try:
-            d = common.read_json(meta_path(), {}) if os.path.exists(meta_path()) else {}
-        except (Exception, SystemExit):
+            d = statefile.read_json(meta_path(), {}) if os.path.exists(meta_path()) else {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             d = {}
         if isinstance(d, dict) and d.get("raw") and now - float(d.get("ts") or 0) < META_TTL:
             m2 = Meta(d["raw"], d.get("ts"))
@@ -430,11 +430,11 @@ def load_meta(deadline=None, now=None, force=False, fetch=True) -> Meta:
     if force:
         _META["forced"] = now
     try:
-        common.atomic_write_json(meta_path(), {"v": 1, "ts": int(now), "raw": {"tokens": [
+        statefile.atomic_write_json(meta_path(), {"v": 1, "ts": int(now), "raw": {"tokens": [
             {"name": t.get("name"), "index": t.get("index"), "tokenId": t.get("tokenId")} for t in raw.get("tokens") or [] if isinstance(t, dict)],
             "universe": [{"name": u.get("name"), "index": u.get("index"), "tokens": u.get("tokens")}
                          for u in raw.get("universe") or [] if isinstance(u, dict)]}})
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("HL spotMeta 캐시 저장 실패: %s", repr(e)[:120])
     return m3
 
@@ -791,7 +791,7 @@ def asc_fetch(fetch, st, t0_ms, page_full, handle, t_of):
 
 
 def bal_path() -> str:
-    return os.path.join(common.STATE_DIR, f"exf_balances_{VENUE}.json")
+    return paths.state(f"exf_balances_{VENUE}.json")
 
 
 def _keep_view():
@@ -800,16 +800,16 @@ def _keep_view():
         best = None
         for p9 in (bp, bp + ".pending"):
             if os.path.exists(p9):
-                d9 = common.read_json(p9, {})
+                d9 = statefile.read_json(p9, {})
                 if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
                     if best is None or float(d9.get("ts") or 0) > float(best.get("ts") or 0):
                         best = d9
         if best is None:
             return
-        cur9 = common.read_json(bp + ".view", {}) if os.path.exists(bp + ".view") else {}
+        cur9 = statefile.read_json(bp + ".view", {}) if os.path.exists(bp + ".view") else {}
         if not isinstance(cur9, dict) or float(best.get("ts") or 0) >= float(cur9.get("ts") or 0):
-            common.atomic_write_json(bp + ".view", best)
-    except (Exception, SystemExit) as e:
+            statefile.atomic_write_json(bp + ".view", best)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [optional]
         log.warning("HL 잔고 표시 사본 보존 실패: %s", repr(e)[:120])
 
 
@@ -936,7 +936,7 @@ def _pre_one(addr: str, meta, deadline) -> dict:
             tot = sum(((_dec(ds.get(k)) or Decimal(0)) for k in ("delegated", "undelegated", "totalPendingWithdrawal")), Decimal(0))
             if tot > 0:
                 out["HYPE"] = out.get("HYPE", Decimal(0)) + tot
-    except (Budget, ValueError, OSError, HLError) as e:
+    except (Budget, ValueError, OSError, HLError) as e:   # noqa: BLE001
         log.info("hyperliquid 먼저 읽기: %s 부가 칸 생략(현물만): %s", _a8(addr), repr(e)[:80])
     return out
 
@@ -950,8 +950,8 @@ def prefetch_view(cfg: dict, poll: float = 600, now=None, budget: float = 60.0) 
     newest = 0.0
     for suf in ("", ".pending", ".view"):
         try:
-            d = common.read_json(bp + suf, {}) if os.path.exists(bp + suf) else {}
-        except (Exception, SystemExit):
+            d = statefile.read_json(bp + suf, {}) if os.path.exists(bp + suf) else {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             d = {}
         if isinstance(d, dict) and isinstance(d.get("balances"), dict):
             newest = max(newest, float(d.get("ts") or 0))
@@ -967,7 +967,7 @@ def prefetch_view(cfg: dict, poll: float = 600, now=None, budget: float = 60.0) 
         srcs += [f"spot:{_a8(a)}"]
     snap = {"ts": int(CLOCK()), "balances": {k: float(v) for k, v in sorted(bal.items()) if v != 0}, "sources": sorted(set(srcs)),
             "addrs": len(addrs), "pre": 1}
-    common.atomic_write_json(bp + ".view", snap)
+    statefile.atomic_write_json(bp + ".view", snap)
     return f"ok {len(snap['balances'])}종"
 
 
@@ -1002,10 +1002,10 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
     except Budget:
         invalidate_balance()
         return "예산 소진(spotMeta)"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         w = _gate_fail(e)
         invalidate_balance()
-        log.warning("HL spotMeta 실패 → %d초 대기: %s", int(w), common.safe_err(e)[:120])
+        log.warning("HL spotMeta 실패 → %d초 대기: %s", int(w), logs.safe_err(e)[:120])
         return "실패(spotMeta)"
     tracked = set(addrs)
 
@@ -1121,11 +1121,11 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
                 http_err = e
                 stop_at = a
                 break
-            log.warning("HL %s… 수집 실패(이 주소만 — 다음 주기 같은 지점부터): %s", a[:6], common.safe_err(e)[:140])
+            log.warning("HL %s… 수집 실패(이 주소만 — 다음 주기 같은 지점부터): %s", a[:6], logs.safe_err(e)[:140])
             continue
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             ok_all = False
-            log.warning("HL %s… 수집 실패(이 주소만 — 다음 주기 같은 지점부터): %s", a[:6], common.safe_err(e)[:140])
+            log.warning("HL %s… 수집 실패(이 주소만 — 다음 주기 같은 지점부터): %s", a[:6], logs.safe_err(e)[:140])
             continue
         ast["led_done"], ast["fil_done"] = bool(d1), bool(d2)
         if not (d1 and d2):
@@ -1152,10 +1152,10 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
                 http_err = e
                 stop_at = a
                 break
-            bal_why.append(f"{a[:6]}…: {common.safe_err(e)[:80]}")
-        except Exception as e:
+            bal_why.append(f"{a[:6]}…: {logs.safe_err(e)[:80]}")
+        except Exception as e:   # noqa: BLE001 [fallback]
             work[a] = (ast, a_deps, a_wds, a_fills, None, None, a_uids)
-            bal_why.append(f"{a[:6]}…: {common.safe_err(e)[:80]}")
+            bal_why.append(f"{a[:6]}…: {logs.safe_err(e)[:80]}")
     if stop_at is not None:
         hs["rr"] = addrs.index(stop_at)
     deps = [r for v in work.values() for r in v[1]]
@@ -1165,9 +1165,9 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
     moved = bool(deps or wds or fills or uids)
     streams_done = (ok_all and http_err is None and len(work) == len(addrs)
                     and all(v[0].get("led_done") and v[0].get("fil_done") for v in work.values()))
-    stg_path = os.path.join(common.STATE_DIR, "hl_late_stage.json")
+    stg_path = paths.state("hl_late_stage.json")
     try:
-        stg = common.read_json(stg_path, {}) if os.path.exists(stg_path) else {}
+        stg = statefile.read_json(stg_path, {}) if os.path.exists(stg_path) else {}
     except SystemExit:
         stg = {}
     stg_rows = stg.get("rows") if isinstance(stg.get("rows"), dict) else {}
@@ -1192,7 +1192,7 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
             fills += [r for k, r in (v9.get("f") or {}).items() if k not in have]
         stg_rows, stg_dirty = {}, True
     if stg_dirty and stg_rows:
-        common.atomic_write_json(stg_path, {"v": 1, "rows": stg_rows})
+        statefile.atomic_write_json(stg_path, {"v": 1, "rows": stg_rows})
     if deps or wds or fills:
         invalidate_balance()
         both = [("d", r) for r in deps] + [("w", r) for r in wds]
@@ -1270,25 +1270,25 @@ def run_pass(state: dict, writer, cfg: dict, now=None, save=None, budget=None) -
         if moved or not complete or held:
             invalidate_balance()
             if snap is not None:
-                common.atomic_write_json(bp + ".view", snap)
+                statefile.atomic_write_json(bp + ".view", snap)
         else:
-            prev = common.read_json(bp + ".pending", {}) if os.path.exists(bp + ".pending") else {}
+            prev = statefile.read_json(bp + ".pending", {}) if os.path.exists(bp + ".pending") else {}
             pb = prev.get("balances") if isinstance(prev, dict) else None
             if isinstance(pb, dict) and (pb or not snap["balances"]) and sorted(prev.get("sources") or []) == snap["sources"]:
-                common.atomic_write_json(bp, prev)
-            common.atomic_write_json(bp + ".pending", snap)
-            common.atomic_write_json(bp + ".view", snap)
+                statefile.atomic_write_json(bp, prev)
+            statefile.atomic_write_json(bp + ".pending", snap)
+            statefile.atomic_write_json(bp + ".view", snap)
             for a in addrs:
                 per[a]["bal_at"] = snap["ts"]
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [optional]
         log.warning("HL 잔고 스냅숏 기록 실패: %s", repr(e)[:140])
     try:
-        cp9 = os.path.join(common.STATE_DIR, "hl_cash_syms.json")
-        have9 = set((common.read_json(cp9, {}) or {}).get("syms") or []) if os.path.exists(cp9) else set()
+        cp9 = paths.state("hl_cash_syms.json")
+        have9 = set((statefile.read_json(cp9, {}) or {}).get("syms") or []) if os.path.exists(cp9) else set()
         want9 = have9 | {"USDC"} | {c for v in per.values() for c in (v.get("cash_syms") or [])}
         if want9 != have9:
-            common.atomic_write_json(cp9, {"v": 1, "syms": sorted(want9)})
-    except (Exception, SystemExit) as e:
+            statefile.atomic_write_json(cp9, {"v": 1, "syms": sorted(want9)})
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [optional]
         log.warning("HL 담보 기호 기록 실패: %s", repr(e)[:120])
     if save:
         save()

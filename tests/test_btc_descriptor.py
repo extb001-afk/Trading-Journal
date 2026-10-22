@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import os
+import hashlib  # noqa: E402
+import os  # noqa: E402
 
-import address_codec as ac
-import btc_descriptor as bd
+import address_codec as ac  # noqa: E402
+import btc_descriptor as bd  # noqa: E402
 
 def ck(msg, ok, extra=None):
     T.chk(ok, msg, extra)

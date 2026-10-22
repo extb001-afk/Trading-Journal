@@ -116,6 +116,17 @@
     "account_earliest_seen": null,
     "reason_ko": "최근 기록 반환 확인. 오래된 기록의 한도는 미확인"
    },
+   "dividend": {
+    "endpoint": "GET /sapi/v1/asset/assetDividend (limit ≤500 · 시간창)",
+    "bot_uses": true,
+    "bot_ref": "exf_binance.py:dividend_binance(89일 조각 · 꽉 찬 창은 반으로)",
+    "doc_limit": "limit 최대 500 · 창·보존 한도(unverified)",
+    "doc_url": "https://developers.binance.com/docs/wallet/asset/assets-divided-record",
+    "rejected_before": null,
+    "verified_earliest": null,
+    "account_earliest_seen": null,
+    "reason_ko": "배당·에어드랍·런치풀·Earn 이자 지급 내역 — 받은 시각 시가로 소득 기록(실측 전 · 보존 한도 미확인)"
+   },
    "earn": {
     "endpoint": "GET /sapi/v1/simple-earn/flexible/history/subscriptionRecord (창 ≤30일)",
     "bot_uses": false,

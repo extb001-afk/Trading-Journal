@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import shutil
-import sqlite3
-import threading
-import time
-import types
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import sqlite3  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import types  # noqa: E402
 
 LOGS = "http://127.0.0.1:9/logs"
 DET = "http://127.0.0.1:9/detail"
@@ -37,14 +37,15 @@ def cfg(**bsc):
 
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(cfg(), f)
-import common
-import bf_engine
-import bsc_watch
-import core
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import bsc_watch  # noqa: E402
+import core  # noqa: E402
+import core_recon  # noqa: E402
 
 bf_engine.configure(cfg())
 bsc_watch.CALL_SLEEP = 0
-CPATH = os.path.join(common.STATE_DIR, "cursor_bsc.json")
+CPATH = os.path.join(paths.STATE_DIR, "cursor_bsc.json")
 
 
 def pad(a):
@@ -191,8 +192,7 @@ fake_http_json._tj_test_mock = True
 bf_engine.rpc_call = fake_call
 bf_engine.rpc_batch = fake_batch
 bf_engine.http_json = fake_http_json
-bsc_watch.NONCE_ARCH_GAP = 0
-T.patch_moved("NONCE_ARCH_GAP", bsc_watch.NONCE_ARCH_GAP, ("bsc_",))
+T.patch_moved("NONCE_ARCH_GAP", 0, ("bsc_",))
 
 
 class Wr:
@@ -204,8 +204,8 @@ class Wr:
 
 
 def reset_state():
-    shutil.rmtree(common.STATE_DIR, ignore_errors=True)
-    os.makedirs(common.STATE_DIR, exist_ok=True)
+    shutil.rmtree(paths.STATE_DIR, ignore_errors=True)
+    os.makedirs(paths.STATE_DIR, exist_ok=True)
     bf_engine._PROGRESS.clear()
     with bf_engine._EP_HEADS_LOCK:
         bf_engine._EP_HEADS.clear()
@@ -213,7 +213,7 @@ def reset_state():
 
 
 def exch_withdraw(txid, to):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
                 " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
     con.execute("CREATE TABLE IF NOT EXISTS raw_txs (chain TEXT, txhash TEXT, block INTEGER, snapshot TEXT)")
@@ -233,12 +233,12 @@ def emitted(wr):
 
 
 def scope_ready():
-    stub = types.SimpleNamespace(_synced=core.Core._synced, sol_wallets=set(), my_wallets={})
-    return core.Core._scope_ready(stub, "bsc")
+    stub = types.SimpleNamespace(_synced=core_recon.ReconMixin._synced, sol_wallets=set(), my_wallets={})
+    return core_recon.ReconMixin._scope_ready(stub, "bsc")
 
 
 def cur():
-    return common.read_json(CPATH, {})
+    return statefile.read_json(CPATH, {})
 
 
 def cycle(w):
@@ -271,7 +271,7 @@ T.chk(int(lv.get("done") or 0) >= H0 - 20, "N1 라이브 차선 = 확정 헤드�
 T.chk(isinstance(c1.get("from_block"), int) and abs(int(c1["from_block"]) - win_blk) < 5000, "N1 옛 차선 커서 = 창 시작(150일 — 개월 설정 5 × 30)",
       {"from_block": c1.get("from_block"), "win": win_blk})
 T.chk("_synced_at" not in c1 and not scope_ready(), "N1 옛 차선 끝나기 전 = 도장 없음 · core 대사 준비 거짓")
-hb = (common.read_json(os.path.join(common.STATE_DIR, "health", "bsc.json"), {}).get("sources") or {}).get("bsc") or {}
+hb = (statefile.read_json(os.path.join(paths.STATE_DIR, "health", "bsc.json"), {}).get("sources") or {}).get("bsc") or {}
 T.chk(hb.get("ok") is True and int(hb.get("lag_blocks") or 0) < 100, "N1 하트비트 = 최신 성공(옛 차선 실패는 사실로만)",
       {k: hb.get(k) for k in ("ok", "lag_blocks", "lanes")})
 T.chk(isinstance(hb.get("lanes"), dict) and hb["lanes"].get("stalled"), "N1 하트비트에 옛 차선 멈춤 사실", hb.get("lanes"))
@@ -308,7 +308,7 @@ T.chk(scope_ready(), "N3 합친 뒤 한 주기 = 도장 · core 대사 준비", 
 
 reset_state()
 mid_fb = H0 - 20_000_000
-common.atomic_write_json(CPATH, {"from_block": mid_fb, "_bf_start": win_blk, "_cov": win_blk, "head": H0 - 1_000_000,
+statefile.atomic_write_json(CPATH, {"from_block": mid_fb, "_bf_start": win_blk, "_cov": win_blk, "head": H0 - 1_000_000,
                                  "_wallets": sorted([W1, W2])})
 CH.mode, CH.old_below = "slow", H0 - 100_000
 CH.head = H0 + 2000
@@ -324,7 +324,7 @@ T.chk("_synced_at" not in c4 and not scope_ready(), "N4 전환 중 도장 없음
 
 reset_state()
 CH.head = H0 + 5000
-common.atomic_write_json(CPATH, {"from_block": CH.head - 20 - 60, "head": CH.head - 60, "_cov": win_blk, "_wallets": sorted([W1, W2])})
+statefile.atomic_write_json(CPATH, {"from_block": CH.head - 20 - 60, "head": CH.head - 60, "_cov": win_blk, "_wallets": sorted([W1, W2])})
 hn5 = CH.transfer(CH.head - 30, USD, OTHER, W1, 10 ** 18)
 wr5 = Wr()
 w = mk(wr=wr5)
@@ -368,7 +368,7 @@ c7 = cur()
 L7 = int((c7.get("_live") or {}).get("done") or 0)
 c7["from_block"] = L7 + 5
 c7.pop("_scan", None)
-common.atomic_write_json(CPATH, c7)
+statefile.atomic_write_json(CPATH, c7)
 w = mk(wr=wr7)
 CH.head += 100
 cycle(w)
@@ -383,7 +383,7 @@ cycle(w)
 c7c = cur()
 fb7 = int(c7c["from_block"])
 c7c["from_block"] = fb7 - 7000
-common.atomic_write_json(CPATH, c7c)
+statefile.atomic_write_json(CPATH, c7c)
 w = mk(wr=Wr())
 cycle(w)
 c7d = cur()
@@ -411,7 +411,7 @@ w = mk(wr=wr10)
 cycle(w)
 c10 = cur()
 ls10 = c10.get("_lscan") if isinstance(c10.get("_lscan"), dict) else {}
-hb = (common.read_json(os.path.join(common.STATE_DIR, "health", "bsc.json"), {}).get("sources") or {}).get("bsc") or {}
+hb = (statefile.read_json(os.path.join(paths.STATE_DIR, "health", "bsc.json"), {}).get("sources") or {}).get("bsc") or {}
 T.chk(hb10 in (ls10.get("found") or []) and hb10 not in emitted(wr10) and hb.get("ok") is False,
       "N10 상세 실패 = 라이브 체크포인트에 남김 · 방출 안 함 · 하트비트 실패", {"lscan": ls10, "ok": hb.get("ok")})
 CH.bad_rc.clear()
@@ -444,7 +444,7 @@ exch_withdraw("0x" + "f" * 64, W2)
 wr12 = Wr()
 w = mk(wr=wr12)
 cycle(w)
-nst = common.read_json(os.path.join(common.STATE_DIR, "bsc_nonce.json"), {})
+nst = statefile.read_json(os.path.join(paths.STATE_DIR, "bsc_nonce.json"), {})
 recs12 = {r["txhash"]: r for r in wr12.recs}
 T.chk(hs_new in recs12 and recs12[hs_new].get("via") == "nonce", "N12 차선 중 라이브 범위 순수 BNB 발신 = 첫 주기에 회수(nonce)",
       {"emitted": len(recs12), "w": {k[:6]: {kk: v.get(kk) for kk in ("lo", "top", "missing")} for k, v in (nst.get("w") or {}).items()}})
@@ -455,16 +455,14 @@ for _ in range(80):
     if not isinstance(cur().get("_live"), dict):
         break
 off = [0.0]
-bsc_watch._now = lambda: time.time() + off[0]
-T.patch_moved("_now", bsc_watch._now, ("bsc_",))
+T.patch_moved("_now", lambda: time.time() + off[0], ("bsc_",))
 for _ in range(6):
     off[0] += 400
     CH.head += 10
     cycle(w)
     if hs_old in emitted(wr12):
         break
-bsc_watch._now = time.time
-T.patch_moved("_now", bsc_watch._now, ("bsc_",))
+T.patch_moved("_now", time.time, ("bsc_",))
 T.chk(not isinstance(cur().get("_live"), dict) and hs_old in emitted(wr12), "N12 차선 끝 뒤 기본 하한으로 옛 구간 발신도 회수",
       {"live": cur().get("_live"), "n": len(wr12.recs)})
 T.chk(len(emitted(wr12)) == len(set(emitted(wr12))), "N12 같은 tx 두 번 방출 0")

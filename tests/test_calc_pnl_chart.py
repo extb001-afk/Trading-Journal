@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
+import os  # noqa: E402
 
 os.environ["TJ_TG_API"] = "http://127.0.0.1:9/never"
-import tinychart
-import alert_watch
-import alert_bot
+import tinychart  # noqa: E402
+import alert_watch  # noqa: E402
+import alert_bot  # noqa: E402
 
 chk = T.chk
 
@@ -52,14 +52,14 @@ rec = {"v": 2, "preset": "recommended", "cats": {}, "th": {}, "quiet": {"on": Fa
 try:
     import alert_prefs as AP
     rec = AP.load() if hasattr(AP, "load") else rec
-except Exception:
+except Exception:   # noqa: BLE001
     pass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta  # noqa: E402
 D9 = datetime(2026, 10, 6, 9, 30, tzinfo=timezone(timedelta(hours=9))).timestamp()
 dg = {"items": [{"cat": "pnl", "kind": "PNL_DAILY", "text": "x", "ts": D9, "d": dict(alert_watch.pnl_data(out, "KRW"), iso="2026-10-06")}], "n": {}}
 try:
     txt, curve, cur = alert_bot.compose_digest(dg, rec, D9, None, {})
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     txt, curve, cur = None, None, repr(e)
 chk(isinstance(curve, list) and len(curve) == 3 and all(isinstance(c, list) and len(c) == 2 for c in curve), "요약 그림 재료 = [값, 순유입] 쌍(세 값 재료)", curve)
 dg_old = {"items": [{"cat": "pnl", "kind": "PNL_DAILY", "text": "x", "ts": D9, "d": {"iso": "2026-10-06", "cur": "KRW", "realized": 1.0, "delta": 1.0, "sells": 1, "top": [],

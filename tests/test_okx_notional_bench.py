@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump({}, f)
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import ex_foreign as EF
+assert T.TMP in paths.STATE_DIR
+import ex_foreign as EF  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -44,25 +44,21 @@ class _FakeRcpt:
 
 
 _saved = (EF._okx_get, EF.fut_rcpt, getattr(EF, "PACE", 0))
-EF._okx_get = fake_okx_get
-T.patch_moved("_okx_get", EF._okx_get, ("exf_",))
-EF.fut_rcpt = _FakeRcpt
-T.patch_moved("fut_rcpt", EF.fut_rcpt, ("exf_",))
-EF.PACE = 0
-T.patch_moved("PACE", EF.PACE, ("exf_",))
+T.patch_moved("_okx_get", fake_okx_get, ("exf_", "ex_foreign"))
+T.patch_moved("fut_rcpt", _FakeRcpt, ("exf_", "ex_foreign"))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
 poss = None
 try:
     EF._fut_okx({"TJ_OKX_KEY": "k", "TJ_OKX_SECRET": "s", "TJ_OKX_PASSPHRASE": "p"})
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     print("참고: _fut_okx 뒤쪽 예외", type(e).__name__, str(e)[:120])
 try:
-    d = common.read_json(os.path.join(common.STATE_DIR, "futures_okx.json"), {})
+    d = statefile.read_json(os.path.join(paths.STATE_DIR, "futures_okx.json"), {})
     poss = {p["symbol"]: p for p in d.get("positions") or []}
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     poss = {"_err": str(e)}
-EF._okx_get, EF.fut_rcpt, EF.PACE = _saved
-for _n9 in ("_okx_get", "fut_rcpt", "PACE"):
-    T.patch_moved(_n9, getattr(EF, _n9), ("exf_",))
+for _n9, _v9 in zip(("_okx_get", "fut_rcpt", "PACE"), _saved):
+    T.patch_moved(_n9, _v9, ("exf_", "ex_foreign"))
 check("N0 수집기(_fut_okx)가 저장한 선물 파일의 포지션 3개", isinstance(poss, dict) and set(poss) == {"BTC-USDT-SWAP", "ETH-USDT-SWAP", "ZZ-USDT-SWAP"}, poss)
 _on = getattr(EF, "_okx_notional", lambda p, pos, g: None)
 if not poss or "BTC-USDT-SWAP" not in poss:
@@ -74,7 +70,7 @@ check("N2 순수 함수 — 음수 notionalUsd 는 절댓값 · 0·문자·비�
       _on({"notionalUsd": "-120"}, 1, lambda i: None) == 120 and _on({"notionalUsd": "0", "markPx": "10", "instId": "A"}, 2, lambda i: 0.5) == 10
       and _on({"notionalUsd": "inf", "markPx": "x", "instId": "A"}, 2, lambda i: 0.5) is None and hasattr(EF, "_okx_notional"))
 
-import web
+import web  # noqa: E402
 
 pos9 = [{"ex": "okx", "symbol": "BTC-USDT-SWAP", "side": "LONG", "qty": 3, "mark": 60000.0, "notional": 1800.0},
         {"ex": "binance", "symbol": "ETHUSDT", "side": "SHORT", "qty": 2, "mark": 2500.0},
@@ -91,7 +87,7 @@ _js = T.app_js()
 check("N3 화면: 규모·롱/숏 칸이 None 이면 '—'(0 이 아님)", "fut.notional == null ? '—'" in _js and "f.notional != null" in _js
       and "f.longNotional == null ? '—'" in _js and "f.shortNotional == null ? '—'" in _js)
 
-con = sqlite3.connect(common.DB_PATH)
+con = sqlite3.connect(paths.DB_PATH)
 con.executescript("""
 CREATE TABLE IF NOT EXISTS asset_groups (group_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, norm_decimals INTEGER NOT NULL DEFAULT 18);
 CREATE TABLE IF NOT EXISTS assets (asset_id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, chain TEXT, address TEXT, symbol TEXT, decimals INTEGER,
@@ -104,7 +100,7 @@ con.execute("INSERT INTO assets (asset_id, kind, chain, address, symbol, hidden,
 con.execute("INSERT INTO assets (asset_id, kind, chain, address, symbol, hidden, group_id) VALUES (501, 'exchange_currency', NULL, 'c', 'ETH', 0, 7)")
 con.commit()
 con.close()
-common.atomic_write_json(web.DAILY_PX_PATH, {"_v": 1,
+statefile.atomic_write_json(paths.state("daily_px.json"), {"_v": 1,
                                              "2026-09-01": {"p": {"501": 60000.0, "502": 60100.0, "503": 99999999.0, "7": 2500.0}},
                                              "2026-09-02": {"p": {"502": 61000.0}},
                                              "2026-09-03": {"p": {"7": 2500.0, "8": 61000.0}}})

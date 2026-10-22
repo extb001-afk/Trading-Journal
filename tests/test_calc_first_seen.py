@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 
 chk = T.chk
@@ -31,7 +31,7 @@ DAY = 86400
 W = int((datetime.fromtimestamp(NOW, KST).replace(hour=9, minute=0, second=0, microsecond=0) - timedelta(days=140)).timestamp())
 R = NOW - 12 * DAY
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 A, G = {}, {}
 for sym in ("AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "BTC", "USDT", "RRR"):
     c.execute("INSERT INTO asset_groups (name) VALUES (?)", (sym,))
@@ -106,20 +106,20 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 px = {"AAA": 9.9, "BBB": 9.9, "CCC": 9.9, "DDD": 9.9, "EEE": 9.9, "FFF": 9.9, "BTC": 70000.0, "USDT": 1.0, "RRR": 1.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1400.0, "ex_usd": {f"upbit:{k}": v for k, v in px.items()}, "ex_ts": {f"upbit:{k}": NOW for k in px}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1400.0, "ex_usd": {f"upbit:{k}": v for k, v in px.items()}, "ex_ts": {f"upbit:{k}": NOW for k in px}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 
 
 def build(prefs):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **prefs))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **prefs))
     del CALLS[:]
     b = web.StateBuilder()
     b.skip_gen_check = True
     m7 = (T7 * 1000 // 60_000) * 60_000
     b.px.d.setdefault("candle", {})[f"BTC:{m7}"] = 50000.0
     b.px.d.setdefault("fx", {})[str((T8 * 1000 // 60_000) * 60_000)] = 1300.0
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -180,7 +180,7 @@ chk(abs(sum(v[0] for v in fsr.values()) - float(fs.get("real") or 0)) < 0.05, "�
 gg = by_sym(rows, "GGG")
 d12 = ISO(W + 3 * DAY)
 chk(len(gg) == 1 and abs(float(gg[0].get("_fee", gg[0].get("fee")) or 0) - 1) < 1e-6 and rz(f, "GGG") == 49.0 and abs(fsr.get(d12, [0])[0] - 49) < 0.01,
-    "F12(fs322 ①) 체결 수수료 1 USDT 뒤 실제 실현 $49 = 머리 '이 중 추정' $49(수수료 전 $50 아님)", [gg, rz(f, "GGG"), fsr.get(d12)])
+    "F12 체결 수수료 1 USDT 뒤 실제 실현 $49 = 머리 '이 중 추정' $49(수수료 전 $50 아님)", [gg, rz(f, "GGG"), fsr.get(d12)])
 pg = [p for p in f.get("positions") or [] if p.get("sym") == "GGG"]
 chk(pg and (pg[0].get("fsEst") or {}).get("real") == 49.0, "F12 카드 fsEst.real = $49(수수료 뒤)", pg[:1])
 chk(not [r for r in f.get("taxRows") or [] if any(k.startswith("_") for k in r)], "응답 명세 행에 '_' 내부 칸 없음")

@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import glob
-import json
-import os
-import threading
-import time
-import urllib.parse
-import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
+import urllib.request  # noqa: E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
 _OP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -256,15 +256,14 @@ CFG = {"backfill_months": 1, "chains": {"base": ccfg()},
        "native_symbol": {"base": "ETH"}, "backfill": {"hosts": {"127.0.0.1": {"rate": 5000, "burst": 5000, "conc": 8}}}}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
-evm_watch._dm = lambda *a, **k: None
-T.patch_moved("_dm", evm_watch._dm, ("evm_",))
+T.patch_moved("_dm", lambda *a, **k: None, ("evm_",))
 bf_engine.urllib.request.urlopen = _loop_urlopen
 bf_engine.configure(CFG)
-SD = common.STATE_DIR
+SD = paths.STATE_DIR
 CP = os.path.join(SD, "cursor_evm_base.json")
 
 START_EXPECT = HEAD0 - 30 * 43200
@@ -320,7 +319,7 @@ def cyc(w):
 
 
 def cur():
-    return common.read_json(CP, {})
+    return statefile.read_json(CP, {})
 
 
 reset_state()
@@ -344,7 +343,7 @@ L1 = int(ho1.get("live") or 0)
 T.chk(all(int(j["to"]) == L1 for j in jobs1.values()) and L1 == (HEAD0 - 10) - 86_400 and int(c1.get("_start") or 0) < L1,
       "F1 라이브 시작 = safe − 최근 창(48시간 = 86,400블록) · 뒤 차선 = 창 시작 → 라이브 시작", {"live": L1, "start": c1.get("_start"), "jobs": jobs1})
 T.chk(all(int(c1.get(x) or 0) >= HEAD0 - 2000 for x in (W1, W2)),
-      "F1 라이브 커서가 첫 주기에 최근 입금 블록을 지남(fixa1010: 걸음을 나눠 · 뒤 차선 몫을 남기며 — 최신은 엿보기)", {x[:6]: c1.get(x) for x in (W1, W2)})
+      "F1 라이브 커서가 첫 주기에 최근 입금 블록을 지남(걸음을 나눠 · 뒤 차선 몫을 남기며 — 최신은 엿보기)", {x[:6]: c1.get(x) for x in (W1, W2)})
 T.chk(set((c1.get("_ns") or {})) == {W1, W2} and set((c1.get("_bkns") or {})) <= {W1, W2},
       "F1 라이브 기준점(_ns) 두 지갑 · 뒤 차선 기준점(_bkns)", {"ns": sorted(c1.get("_ns") or {}), "bkns": sorted(c1.get("_bkns") or {})})
 T.chk(not c1.get("_synced_at"), "F2 뒤 차선 new 가 남은 동안 동기화 도장 없음(종전 단일 차선과 같음 — core 가 기초 잔고를 아직 대사하지 않게)", c1.get("_synced_at"))
@@ -381,9 +380,9 @@ ho3 = c3.get("_handover") if isinstance(c3.get("_handover"), dict) else {}
 T.chk(not isinstance(r3, dict) and H["recent_usdc"] in wr3.hashes(),
       "F3 비아카이브 노드(기준점 없음) — 멈추지 않고 첫 주기에 최근 USDC 입금 방출", {"r": r3, "emitted": sorted(h[-6:] for h in wr3.hashes()), "ho": ho3})
 T.chk(ho3.get("from") == "fresh" and ho3.get("nobase") == [0, 2] and HEAD0 - 3000 <= int(ho3.get("live") or 0) <= HEAD0 - 2900,
-      "F3 (코덱스 ln472) 비아카이브 = 라이브 시작을 상태 보관 구간(최근 3,000블록)으로 옮겨 라이브 기준점 있음 · 그 앞은 뒤 차선(기준점 없음 = 감수)", ho3)
+      "F3 비아카이브 = 라이브 시작을 상태 보관 구간(최근 3,000블록)으로 옮겨 라이브 기준점 있음 · 그 앞은 뒤 차선(기준점 없음 = 감수)", ho3)
 T.chk(H["fresh_nat"] in wr3.hashes(),
-      "F3 ★(코덱스 ln472 HIGH) 상태 보관 구간 안 로그 없는 ETH 입금(17분 전) = 첫 주기 방출 — 기초 잔고로 흡수하지 않음★(수정 전 = 첫 확인 지점 safe 를 기준점으로 삼아 흡수)",
+      "F3 상태 보관 구간 안 로그 없는 ETH 입금(17분 전) = 첫 주기 방출 — 기초 잔고로 흡수하지 않음★(수정 전 = 첫 확인 지점 safe 를 기준점으로 삼아 흡수)",
       sorted(h[-6:] for h in wr3.hashes()))
 T.chk(H["sweep_usdc"] in wr3.hashes() and not c3.get("_sweep"),
       "F3 최근 창 앞부분(상태 보관 밖 · 라이브 시작 앞) 토큰 입금 = 로그만으로 첫 주기 먼저 방출(_sweep · 끝나면 지움)", {"sweep": c3.get("_sweep"),
@@ -399,7 +398,7 @@ for _ in range(80):
         break
 rec3t = [r for r in wr3t.recs if r["txhash"] == H["bk_mixed"]]
 T.chk(rec3t and any((it.get("to") or "").lower() == W1 and int(it.get("value") or 0) == E18 // 20 for it in (rec3t[-1]["snapshot"].get("internal") or [])),
-      "F3 ★(코덱스 ln472 HIGH) 기준점 없는 뒤 차선(비아카이브)의 남의 tx 토큰+ETH 입금 = trace 해서 ETH 레그까지 방출★(수정 전 = 'own' trace 라 ETH 레그 유실)",
+      "F3 기준점 없는 뒤 차선(비아카이브)의 남의 tx 토큰+ETH 입금 = trace 해서 ETH 레그까지 방출★(수정 전 = 'own' trace 라 ETH 레그 유실)",
       {"r": r3t if isinstance(r3t, dict) else None, "recs": [(r.get("repair"), r["snapshot"].get("internal")) for r in rec3t]})
 
 reset_state()
@@ -415,8 +414,7 @@ T.chk(not isinstance(r4, dict) and not c4.get("_handover") and not any(k.startsw
 reset_state()
 cfg5 = json.loads(json.dumps(CFG))
 cfg5["chains"]["base"] = ccfg("ret")
-evm_watch.RETENTION_CONFIRM_SEC = 0
-T.patch_moved("RETENTION_CONFIRM_SEC", evm_watch.RETENTION_CONFIRM_SEC, ("evm_",))
+T.patch_moved("RETENTION_CONFIRM_SEC", 0, ("evm_",))
 wr5r = Wr()
 w5r = new_watcher(cfg5, wr5r)
 r5r = None
@@ -432,8 +430,7 @@ T.chk(H["recent_usdc"] in wr5r.hashes() and not w5r._bk_jobs() and g5 and int(g5
 T.chk(bool(c5r.get("_synced_at")) and H["mid_usdc"] in wr5r.hashes() and H["old_usdc"] not in wr5r.hashes(),
       "F5 완주 뒤 도장 · 보관 안의 옛 토큰 입금 방출 · 보관 밖 구간 입금은 미수집(기초 잔고 대조가 맞춤 — 종전 규약)",
       {"synced": c5r.get("_synced_at"), "emitted": sorted(h[-6:] for h in wr5r.hashes())})
-evm_watch.RETENTION_CONFIRM_SEC = 1800
-T.patch_moved("RETENTION_CONFIRM_SEC", evm_watch.RETENTION_CONFIRM_SEC, ("evm_",))
+T.patch_moved("RETENTION_CONFIRM_SEC", 1800, ("evm_",))
 
 reset_state()
 cfg6 = json.loads(json.dumps(CFG))
@@ -491,7 +488,7 @@ T.chk(not isinstance(rp, dict) and min(int(cp1.get(x) or 0) for x in (W1, W2)) <
 T.chk(H["newest"] in wrp.hashes(), "P1 ★그래도 첫 주기에 최신 블록(2분 전) 입금 방출★ — 최신 블록 엿보기(라이브 차선보다 먼저)",
       {"emitted": sorted(h[-6:] for h in wrp.hashes()), "peek_to": cp1.get("_peek_to")})
 T.chk(type(cp1.get("_peek_to")) is int and cp1["_peek_to"] == HEAD0 - 10, "P1 엿보기 끝 = safe(커서 _peek_to)", cp1.get("_peek_to"))
-T.chk(H["newest_nat"] in wrp.hashes(), "P1 ★(코덱스 ln472 HIGH) 1분 전 로그 없는 ETH 입금도 첫 주기 방출 — 엿보기 네이티브 정합(이분 탐색 → 잎 블록)★",
+T.chk(H["newest_nat"] in wrp.hashes(), "P1 1분 전 로그 없는 ETH 입금도 첫 주기 방출 — 엿보기 네이티브 정합(이분 탐색 → 잎 블록)★",
       sorted(h[-6:] for h in wrp.hashes()))
 CH.head = HEAD0 + 60
 hp2 = CH.add(HEAD0 + 40, X, USDC, logs=[{"address": USDC, "topics": [TRANSFER, pad(X), pad(W1)], "data": hex(123_456)}], gas=50_000, inp="0xa9059cbb")
@@ -640,7 +637,7 @@ finally:
     evm_watch.RpcChainWatcher._advance = adv0
 
 reset_state()
-common.atomic_write_json(CP, {W1: START_EXPECT + 1000, W2: START_EXPECT + 1000, "_cov:" + W1: START_EXPECT, "_cov:" + W2: START_EXPECT, "_synced_at": 1})
+statefile.atomic_write_json(CP, {W1: START_EXPECT + 1000, W2: START_EXPECT + 1000, "_cov:" + W1: START_EXPECT, "_cov:" + W2: START_EXPECT, "_synced_at": 1})
 cfg2p = json.loads(json.dumps(CFG))
 cfg2p["chains"]["base"] = ccfg(cycle_budget_sec=1.0)
 wr2p = Wr()
@@ -660,7 +657,7 @@ for node9, nm9 in (("arch", "아카이브"), ("nonarch", "비아카이브")):
     cfg3p["chains"]["base"] = ccfg(node9)
     n1, b1 = CH.state(W1, HEAD0 - 10)
     n2, b2 = CH.state(W2, HEAD0 - 10)
-    common.atomic_write_json(CP, {"_rpc_v": 1, "_start": START_EXPECT, W1: HEAD0 - 10, W2: HEAD0 - 10, "_ns": {W1: [HEAD0 - 10, n1, str(b1), 0, "0"],
+    statefile.atomic_write_json(CP, {"_rpc_v": 1, "_start": START_EXPECT, W1: HEAD0 - 10, W2: HEAD0 - 10, "_ns": {W1: [HEAD0 - 10, n1, str(b1), 0, "0"],
                                                                                                          W2: [HEAD0 - 10, n2, str(b2), 0, "0"]},
                                   "_handover": {"from": "fresh", "at": 1, "live": HEAD0 - 10, "start": START_EXPECT}, "_xcurs": {}})
     CH.head = HEAD0 + 20
@@ -793,7 +790,7 @@ CS = S0 + 50_000
 n_cs, b_cs = CH.state(W1, CS)
 stuck = {"_rpc_v": 1, "_start": S0, W1: CS, W2: CS, "_ns": {W1: [CS, n_cs, str(b_cs), 0, "0"]}, "_xcurs": {},
          "_scan": {"frm": CS + 1, "to": CS + 2000, "ws": sorted([W1, W2]), "found": {}}}
-common.atomic_write_json(CP, stuck)
+statefile.atomic_write_json(CP, stuck)
 w5 = new_watcher(CFG, wr5)
 r5 = logical(lambda: cyc(w5))
 c5 = cur()
@@ -808,7 +805,7 @@ T.chk(ho5.get("from") == "stall" and set(j5) == {W1, W2} and all(int(j["from"]) 
 T.chk((c5.get("_bkns") or {}).get(W1) == stuck["_ns"][W1] or any(int(j["done"]) > CS for j in j5.values()),
       "S1 종전 기준점(_ns) = 뒤 차선 기준점(_bkns)으로 옮김(옛 구간 정합 이어감)", {"bkns": c5.get("_bkns"), "jobs": j5})
 pre9 = glob.glob(CP + ".pre_lanes_*")
-T.chk(len(pre9) == 1 and common.read_json(pre9[0], {}).get(W1) == CS, "S1 전환 전 커서 보존본 .pre_lanes_* (원본 그대로)", [os.path.basename(x) for x in pre9])
+T.chk(len(pre9) == 1 and statefile.read_json(pre9[0], {}).get(W1) == CS, "S1 전환 전 커서 보존본 .pre_lanes_* (원본 그대로)", [os.path.basename(x) for x in pre9])
 w6 = new_watcher(CFG, wr5)
 r6 = cyc(w6)
 c6 = cur()
@@ -817,7 +814,7 @@ T.chk(not isinstance(r6, dict) and (c6.get("_handover") or {}).get("at") == ho5.
 
 reset_state()
 near = {"_rpc_v": 1, "_start": START_EXPECT, W1: HEAD0 - 10 - 5_000, W2: HEAD0 - 10 - 5_000, "_xcurs": {}}
-common.atomic_write_json(CP, near)
+statefile.atomic_write_json(CP, near)
 w7 = new_watcher(CFG, Wr())
 r7 = cyc(w7)
 c7 = cur()
@@ -826,7 +823,7 @@ T.chk(not isinstance(r7, dict) and not c7.get("_handover") and not glob.glob(CP 
 reset_state()
 ext = {"_rpc_v": 1, "_start": S0, W1: S0 + 10, W2: S0 + 10, "_xcurs": {},
        "_since_ext": {"from": S0, "to": S0 + 100_000, "at": 1, "live": {W1: HEAD0 - 10, W2: HEAD0 - 10}, "ns": {}}}
-common.atomic_write_json(CP, ext)
+statefile.atomic_write_json(CP, ext)
 w8 = new_watcher(CFG, Wr())
 T.safe(getattr(w8, "_lanes_unstall", lambda s: None), HEAD0 - 10)
 T.chk(not cur().get("_handover"), "S2 과거 창 확장 중(_since_ext — 일부러 뒤로 감) = 전환 안 함", cur().get("_handover"))
@@ -843,7 +840,7 @@ RC = {"backfill_months": 1, "chains": {
 op = evm_watch.build_watcher(RC, "optimism", [W1], Wr(), "")
 T.chk(isinstance(op, evm_watch.RpcChainWatcher) and not getattr(op, "fb_info", None),
       "R1 ★새 설치본 optimism(블록스카웃 칸 · 이더스캔 키 없음) = RPC 우선(블록스카웃 워처 아님)★", type(op).__name__)
-rt = common.read_json(os.path.join(SD, "evm_route.json"), {})
+rt = statefile.read_json(os.path.join(SD, "evm_route.json"), {})
 T.chk((rt.get("optimism") or {}).get("route") == "rpc_first", "R1 state/evm_route.json 에 rpc_first 고정", rt)
 e1 = evm_watch.build_watcher(RC, "eth", [W1], Wr(), "SYNTHKEY")
 T.chk(isinstance(e1, evm_watch.EtherscanWatcher), "R2 이더스캔 키 + 이더스캔 지원 체인 = 이더스캔 먼저(종전과 같음)", type(e1).__name__)
@@ -853,15 +850,15 @@ T.chk(isinstance(nw, evm_watch.RpcChainWatcher) and (evm_watch.rpcfb_get("eth") 
 e0 = evm_watch.build_watcher(RC, "eth", [W1], Wr(), "")
 T.chk(isinstance(e0, (evm_watch.RpcChainWatcher,)) and not isinstance(e0, evm_watch.ChainWatcher),
       "R2 이더스캔 키 없는 eth = 블록스카웃이 아니라 RPC", type(e0).__name__)
-common.atomic_write_json(os.path.join(SD, "cursor_evm_zksync.json"), {W1: 72_000_000, "_cov:" + W1: 70_000_000, "_synced_at": 1})
+statefile.atomic_write_json(os.path.join(SD, "cursor_evm_zksync.json"), {W1: 72_000_000, "_cov:" + W1: 70_000_000, "_synced_at": 1})
 zk = evm_watch.build_watcher(RC, "zksync", [W1], Wr(), "")
-T.chk(isinstance(zk, evm_watch.ChainWatcher) and (common.read_json(os.path.join(SD, "evm_route.json"), {}).get("zksync") or {}).get("route") == "legacy",
+T.chk(isinstance(zk, evm_watch.ChainWatcher) and (statefile.read_json(os.path.join(SD, "evm_route.json"), {}).get("zksync") or {}).get("route") == "legacy",
       "R3 탐색기 시절 커서가 있는 기존 설치본(zksync 블록스카웃 정상) = 종전 순서 유지 · legacy 고정", type(zk).__name__)
 sm = evm_watch.build_watcher(RC, "somnia", [W1], Wr(), "")
 T.chk(isinstance(sm, evm_watch.ChainWatcher), "R3 RPC 노드 표에 없는 체인(공개 RPC 수집 미검증) = 종전(블록스카웃)", type(sm).__name__)
 gn = evm_watch.build_watcher(RC, "gnosis", [W1], Wr(), "")
 T.chk(isinstance(gn, evm_watch.ChainWatcher), "R3 discovery: explorer 명시 = 종전(블록스카웃)", type(gn).__name__)
-common.atomic_write_json(os.path.join(SD, "cursor_evm_zksync.json"), {})
+statefile.atomic_write_json(os.path.join(SD, "cursor_evm_zksync.json"), {})
 zk2 = evm_watch.build_watcher(RC, "zksync", [W1], Wr(), "")
 T.chk(isinstance(zk2, evm_watch.ChainWatcher), "R3 한 번 정한 순서는 고정(커서를 지워도 legacy 유지)", type(zk2).__name__)
 

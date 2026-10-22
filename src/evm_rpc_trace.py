@@ -1,5 +1,5 @@
 import bf_engine
-import common
+import logs
 import hashlib
 import time
 from evm_base import TRACE_DEPTH_MAX
@@ -73,7 +73,7 @@ class RpcTraceMixin:
             if not nodesel.enabled():
                 return order9
             return nodesel.demote_public(self.chain, "trace", order9)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return order9
 
     @staticmethod
@@ -115,7 +115,7 @@ class RpcTraceMixin:
                 r = bf_engine.rpc_call(url, "debug_traceTransaction", [h, {"tracer": "prestateTracer"}], timeout=30, retries=1)
                 e = {k.lower(): v for k, v in (r or {}).items()}.get(w) or {}
                 return int(e.get("nonce") or 0), int(e.get("balance") or "0x0", 16)
-            except Exception as e9:
+            except Exception as e9:  # noqa: BLE001 [fallback]
                 last = e9
         raise last if last else RuntimeError("trace 미구성")
 
@@ -156,7 +156,7 @@ class RpcTraceMixin:
             try:
                 tr = bf_engine.rpc_call(url, "debug_traceTransaction", [h, {"tracer": "callTracer"}], **kw9)
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 e = self._trace_fail_one(url, e, kw9, 30)
                 last = e
                 errs9.append(e)
@@ -172,10 +172,10 @@ class RpcTraceMixin:
                 e9 = self._trace_err(errs9, last) or RuntimeError("trace 응답 형식 오류")
                 tried9 = tr is not None or any(not self._trace_untried(x) for x in errs9)
                 if not tried9 and errs9:
-                    raise TraceDeferred(f"budget: trace 전송 전 보류 — 다음 차례({common.safe_err(e9)[:60]})")
+                    raise TraceDeferred(f"budget: trace 전송 전 보류 — 다음 차례({logs.safe_err(e9)[:60]})")
                 try:
                     al9, ae9 = self._alch_tx(h, snap, errs9, an9, ab9), None
-                except Exception as x9:
+                except Exception as x9:  # noqa: BLE001 [fallback]
                     al9, ae9 = None, x9
                 if al9 is not None:
                     snap["internal"] = al9
@@ -232,7 +232,7 @@ class RpcTraceMixin:
                 res = bf_engine.rpc_call(url, "trace_transaction", [h], **kw9)
                 got9 = True
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 e = self._trace_fail_one(url, e, kw9, 30)
                 if errs is not None:
                     errs.append(e)
@@ -304,7 +304,7 @@ class RpcTraceMixin:
             a9 = int(self.__dict__.get("_alch_sent") or 0)
             try:
                 fr9 = self._alch_frames(blk, [TraceStaged()], an9)
-            except Exception as x9:
+            except Exception as x9:  # noqa: BLE001
                 if int(self.__dict__.get("_alch_sent") or 0) > a9 and getattr(x9, "kind", None) not in ("budget", "receipt"):
                     lc9["rc_next"] = True
                 raise
@@ -325,7 +325,7 @@ class RpcTraceMixin:
                 sent9 += 1
                 got9 = True
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 e = self._trace_fail_one(url, e, kw9, 60)
                 last = e
                 errs9.append(e)
@@ -341,11 +341,11 @@ class RpcTraceMixin:
                 if isinstance(lc9, dict):
                     lc9.setdefault("obs", set()).add(self._trace_nid(url))
             if not sent9 and errs9 and all(self._trace_untried(x) for x in errs9):
-                raise TraceDeferred(f"budget: 블록 trace 전송 전 보류 — 다음 차례({common.safe_err(errs9[-1])[:60]})")
+                raise TraceDeferred(f"budget: 블록 trace 전송 전 보류 — 다음 차례({logs.safe_err(errs9[-1])[:60]})")
             e9 = self._trace_err(errs9, last) or RuntimeError("블록 trace 응답 형식 오류")
             try:
                 fr9, ae9 = self._alch_frames(blk, errs9, an9), None
-            except Exception as x9:
+            except Exception as x9:  # noqa: BLE001 [fallback]
                 fr9, ae9 = None, x9
             if fr9 is not None:
                 return fr9, []
@@ -363,8 +363,8 @@ class RpcTraceMixin:
             try:
                 hs9 = [str(x if isinstance(x, str) else (x or {}).get("hash") or "").lower()
                        for x in (self._rpc_call("eth_getBlockByNumber", [hex(int(blk)), False]) or {}).get("transactions") or []]
-            except Exception as e:
-                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 블록 tx 목록 실패: {common.safe_err(e)[:80]}")
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 블록 tx 목록 실패: {logs.safe_err(e)[:80]}")
             if len(hs9) != len(res) or not all(hs9):
                 raise RuntimeError(f"블록 trace 항목 txHash 없음 — 개수 불일치 {len(res)} ≠ {len(hs9)}")
         for k9, it in enumerate(res):
@@ -380,9 +380,9 @@ class RpcTraceMixin:
                     self._trace_internal(h9, tmp9)
                     if tmp9.get("internal"):
                         out[h9] = tmp9["internal"]
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     unres.append(h9)
-                    log.info("%s 블록 %d trace 항목 %s 실패(단건도 실패 — 재시도): %s", self.chain, blk, h9[:12], common.safe_err(e)[:80])
+                    log.info("%s 블록 %d trace 항목 %s 실패(단건도 실패 — 재시도): %s", self.chain, blk, h9[:12], logs.safe_err(e)[:80])
                 continue
             rows = []
 
@@ -459,7 +459,7 @@ class RpcTraceMixin:
         try:
             import alch_internal
             return alch_internal.url_for(self.chain)
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             return None
 
     def _alch_eligible(self, errs, blk, n=0) -> bool:
@@ -526,10 +526,10 @@ class RpcTraceMixin:
         try:
             with self._rpc_budget(time.time() + self._alch_kw()["timeout"]):
                 res = self._batch([("eth_getTransactionReceipt", [h]) for h in hs])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if self._trace_untried(e) or "예산 소진" in str(e):
                 raise TraceDeferred("budget: Alchemy 보완 영수증 — 마감(다음 차례)")
-            raise alch_internal.AlchFail("receipt", common.safe_err(e)[:80])
+            raise alch_internal.AlchFail("receipt", logs.safe_err(e)[:80])
         out = {}
         for h, r in zip(hs, res):
             try:

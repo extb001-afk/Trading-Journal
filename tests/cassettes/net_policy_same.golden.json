@@ -1,0 +1,547 @@
+{
+ "_doc": "합성 데이터 — net_policy_same 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "net_policy_same",
+ "golden": {
+  "cap": {
+   "bfe": {
+    "exc": "NetError",
+    "kind": "range"
+   },
+   "bfe_key": {
+    "exc": "NetError",
+    "kind": "range"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 0
+   },
+   "onboarding": {
+    "ret": [
+     200,
+     "                                                                                                                                                                                                                                                                                                            "
+    ]
+   },
+   "rabby": {
+    "exc": "ResponseTooLarge"
+   },
+   "sol_open": {
+    "exc": "ResponseTooLarge"
+   }
+  },
+  "dnsflap": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-dnsflap.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-dnsflap.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 0
+   },
+   "onboarding": {
+    "exc": "URLError(gaierror)"
+   },
+   "rabby": {
+    "exc": "URLError(gaierror)"
+   },
+   "sol_open": {
+    "exc": "URLError(gaierror)"
+   }
+  },
+  "h429": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-h429.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-h429.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 429
+   },
+   "onboarding": {
+    "ret": [
+     429,
+     {
+      "err": "rate"
+     }
+    ]
+   },
+   "rabby": {
+    "exc": "RateLimited"
+   },
+   "sol_open": {
+    "code": 429,
+    "exc": "HTTPError",
+    "status": 429
+   }
+  },
+  "h503": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-h503.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-h503.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 503
+   },
+   "onboarding": {
+    "ret": [
+     503,
+     {
+      "err": "busy"
+     }
+    ]
+   },
+   "rabby": {
+    "code": 503,
+    "exc": "HTTPError",
+    "status": 503
+   },
+   "sol_open": {
+    "code": 503,
+    "exc": "HTTPError",
+    "status": 503
+   }
+  },
+  "multi": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-multi.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-multi.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "ret": [
+     {
+      "at": "depaddr-multi.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     {
+      "Connection": "close",
+      "Content-Length": "59",
+      "Content-Type": "application/json"
+     }
+    ]
+   },
+   "onboarding": {
+    "ret": [
+     200,
+     {
+      "at": "onboarding-multi.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     }
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "rabby-multi.policy.invalid/start",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "sol-open-multi.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://sol-open-multi.policy.invalid/start"
+    }
+   }
+  },
+  "post302": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "dst.policy.invalid/bfe/post302",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 302,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "onboarding": {
+    "ret": [
+     302,
+     null
+    ]
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "dst.policy.invalid/sol_open/post302",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://dst.policy.invalid/sol_open/post302"
+    }
+   }
+  },
+  "private": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "127.0.0.1/bfe/next",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 302,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 302
+   },
+   "onboarding": {
+    "ret": [
+     302,
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "127.0.0.1/rabby/next",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "127.0.0.1/sol_open/next",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "http://127.0.0.1:3002/sol_open/next"
+    }
+   }
+  },
+  "r301": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "dst.policy.invalid/bfe/r301",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 301,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 301
+   },
+   "onboarding": {
+    "ret": [
+     301,
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "dst.policy.invalid/rabby/r301",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "dst.policy.invalid/sol_open/r301",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://dst.policy.invalid/sol_open/r301"
+    }
+   }
+  },
+  "r302": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "dst.policy.invalid/bfe/r302",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 302,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 302
+   },
+   "onboarding": {
+    "ret": [
+     302,
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "dst.policy.invalid/rabby/r302",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "dst.policy.invalid/sol_open/r302",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://dst.policy.invalid/sol_open/r302"
+    }
+   }
+  },
+  "r303": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "dst.policy.invalid/bfe/r303",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 303,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 303
+   },
+   "onboarding": {
+    "ret": [
+     303,
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "dst.policy.invalid/rabby/r303",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "dst.policy.invalid/sol_open/r303",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://dst.policy.invalid/sol_open/r303"
+    }
+   }
+  },
+  "r307": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "dst.policy.invalid/bfe/r307",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "code": 307,
+    "exc": "NetError",
+    "kind": "http4xx"
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 307
+   },
+   "onboarding": {
+    "ret": [
+     307,
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "dst.policy.invalid/rabby/r307",
+     "m": "GET",
+     "n": 1
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "dst.policy.invalid/sol_open/r307",
+      "m": "GET",
+      "n": 1
+     },
+     "status": 200,
+     "url": "https://dst.policy.invalid/sol_open/r307"
+    }
+   }
+  },
+  "refused": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-refused.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-refused.policy.invalid/start",
+      "m": "GET",
+      "n": 1
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 0
+   },
+   "onboarding": {
+    "exc": "URLError(ConnectionRefusedError)"
+   },
+   "rabby": {
+    "exc": "URLError(ConnectionRefusedError)"
+   },
+   "sol_open": {
+    "exc": "URLError(ConnectionRefusedError)"
+   }
+  },
+  "rtimeout": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "bfe-rtimeout.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "bfe_key": {
+    "ret": [
+     {
+      "at": "bfe-key-rtimeout.policy.invalid/start",
+      "m": "GET",
+      "n": 2
+     },
+     null
+    ]
+   },
+   "depaddr": {
+    "exc": "ApiError",
+    "status": 0
+   },
+   "onboarding": {
+    "exc": "timeout"
+   },
+   "rabby": {
+    "exc": "timeout"
+   },
+   "sol_open": {
+    "exc": "timeout"
+   }
+  }
+ }
+}

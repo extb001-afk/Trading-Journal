@@ -1,0 +1,666 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=sol_rpc · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "sol_rpc",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [
+  "sol_key"
+ ],
+ "requests": 10,
+ "interactions": [
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #aa6e9f0fe7c5a4d3",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getTokenAccountsByOwner",
+     "params": [
+      "so1wa11et99999999999999999999999999999999999",
+      {
+       "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+      },
+      {
+       "encoding": "jsonParsed"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "context": {
+       "slot": 300000500
+      },
+      "value": [
+       {
+        "pubkey": "so1ata88888888888888888888888888888888888888",
+        "account": {
+         "lamports": 2039280,
+         "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #cc61bc713d44f5e8",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getTokenAccountsByOwner",
+     "params": [
+      "so1wa11et99999999999999999999999999999999999",
+      {
+       "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+      },
+      {
+       "encoding": "jsonParsed"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "context": {
+       "slot": 300000500
+      },
+      "value": []
+     }
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #1ddd0fd4cf3c55d8",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getSignaturesForAddress",
+     "params": [
+      "so1wa11et99999999999999999999999999999999999",
+      {
+       "limit": 1000,
+       "commitment": "finalized"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": [
+      {
+       "signature": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1",
+       "slot": 300000000,
+       "blockTime": 1759992800,
+       "err": null,
+       "confirmationStatus": "finalized"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #da901b110e3d188c",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getSignaturesForAddress",
+     "params": [
+      "so1ata88888888888888888888888888888888888888",
+      {
+       "limit": 1000,
+       "commitment": "finalized"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": [
+      {
+       "signature": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+       "slot": 300000100,
+       "blockTime": 1759996400,
+       "err": null,
+       "confirmationStatus": "finalized"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #1dd17f7fceca683b",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getTransaction",
+     "params": [
+      "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+      {
+       "encoding": "jsonParsed",
+       "commitment": "finalized",
+       "maxSupportedTransactionVersion": 1
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "slot": 300000100,
+      "blockTime": 1759996400,
+      "meta": {
+       "err": null,
+       "fee": 5000,
+       "preBalances": [
+        1000000000,
+        2039280
+       ],
+       "postBalances": [
+        999995000,
+        2039280
+       ],
+       "preTokenBalances": [
+        {
+         "accountIndex": 1,
+         "mint": "so1mint7777777777777777777777777777777777777",
+         "owner": "so1wa11et99999999999999999999999999999999999",
+         "uiTokenAmount": {
+          "amount": "0",
+          "decimals": 6
+         }
+        }
+       ],
+       "postTokenBalances": [
+        {
+         "accountIndex": 1,
+         "mint": "so1mint7777777777777777777777777777777777777",
+         "owner": "so1wa11et99999999999999999999999999999999999",
+         "uiTokenAmount": {
+          "amount": "4000000",
+          "decimals": 6
+         }
+        }
+       ],
+       "innerInstructions": []
+      },
+      "transaction": {
+       "signatures": [
+        "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2"
+       ],
+       "message": {
+        "accountKeys": [
+         {
+          "pubkey": "so1xch66666666666666666666666666666666666666",
+          "signer": true,
+          "writable": true
+         },
+         {
+          "pubkey": "so1ata88888888888888888888888888888888888888",
+          "signer": false,
+          "writable": true
+         }
+        ],
+        "instructions": [
+         {
+          "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "program": "spl-token"
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #2dc90c5968f04fda",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getAsset",
+     "params": {
+      "id": "so1mint7777777777777777777777777777777777777"
+     }
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "id": "so1mint7777777777777777777777777777777777777",
+      "content": {
+       "metadata": {
+        "symbol": "TSTS",
+        "name": "Test Sol Token"
+       }
+      },
+      "token_info": {
+       "decimals": 6,
+       "symbol": "TSTS"
+      }
+     }
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #69d8e8c418586a61",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getTransaction",
+     "params": [
+      "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1",
+      {
+       "encoding": "jsonParsed",
+       "commitment": "finalized",
+       "maxSupportedTransactionVersion": 1
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "slot": 300000000,
+      "blockTime": 1759992800,
+      "meta": {
+       "err": null,
+       "fee": 5000,
+       "preBalances": [
+        5000000000,
+        1000000000
+       ],
+       "postBalances": [
+        4899995000,
+        1100000000
+       ],
+       "preTokenBalances": [],
+       "postTokenBalances": [],
+       "innerInstructions": []
+      },
+      "transaction": {
+       "signatures": [
+        "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1"
+       ],
+       "message": {
+        "accountKeys": [
+         {
+          "pubkey": "so1xch66666666666666666666666666666666666666",
+          "signer": true,
+          "writable": true
+         },
+         {
+          "pubkey": "so1wa11et99999999999999999999999999999999999",
+          "signer": false,
+          "writable": true
+         }
+        ],
+        "instructions": [
+         {
+          "programId": "11111111111111111111111111111111",
+          "program": "system",
+          "parsed": {
+           "type": "transfer",
+           "info": {
+            "source": "so1xch66666666666666666666666666666666666666",
+            "destination": "so1wa11et99999999999999999999999999999999999",
+            "lamports": 100000000
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #0d75a0a237169d71",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getSlot",
+     "params": [
+      {
+       "commitment": "finalized"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": 300000500
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #b3718411dbd370d6",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getSignaturesForAddress",
+     "params": [
+      "so1wa11et99999999999999999999999999999999999",
+      {
+       "limit": 1000,
+       "commitment": "finalized",
+       "until": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1"
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": [
+      {
+       "signature": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3",
+       "slot": 300000400,
+       "blockTime": 1759999400,
+       "err": null,
+       "confirmationStatus": "finalized"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "POST https://sol-node.cassette.invalid/?api-key=<secret:sol_key> #a3abfd21eb9d1c00",
+   "req": {
+    "method": "POST",
+    "url": "https://sol-node.cassette.invalid/?api-key=<secret:sol_key>",
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "getTransaction",
+     "params": [
+      "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3",
+      {
+       "encoding": "jsonParsed",
+       "commitment": "finalized",
+       "maxSupportedTransactionVersion": 1
+      }
+     ]
+    }
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "sol-node.cassette.invalid",
+    "content-type": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "25",
+    ":tls": "검증",
+    ":sni": "sol-node.cassette.invalid"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "result": {
+      "slot": 300000400,
+      "blockTime": 1759999400,
+      "meta": {
+       "err": null,
+       "fee": 5000,
+       "preBalances": [
+        5000000000,
+        1000000000
+       ],
+       "postBalances": [
+        4949995000,
+        1050000000
+       ],
+       "preTokenBalances": [],
+       "postTokenBalances": [],
+       "innerInstructions": []
+      },
+      "transaction": {
+       "signatures": [
+        "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3"
+       ],
+       "message": {
+        "accountKeys": [
+         {
+          "pubkey": "so1xch66666666666666666666666666666666666666",
+          "signer": true,
+          "writable": true
+         },
+         {
+          "pubkey": "so1wa11et99999999999999999999999999999999999",
+          "signer": false,
+          "writable": true
+         }
+        ],
+        "instructions": [
+         {
+          "programId": "11111111111111111111111111111111",
+          "program": "system",
+          "parsed": {
+           "type": "transfer",
+           "info": {
+            "source": "so1xch66666666666666666666666666666666666666",
+            "destination": "so1wa11et99999999999999999999999999999999999",
+            "lamports": 50000000
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

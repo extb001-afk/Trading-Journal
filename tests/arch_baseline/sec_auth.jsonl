@@ -1,0 +1,1 @@
+{"_doc": "3막 인증 알려진 구멍(A0 재현) — '묶음:구멍'(test_sec_auth_holes 머리글 표). 고치면 --update-lower 로 빠짐: a1 = A1b 등록 기기 · a2 = A2 세션 CSRF · a3 = A3 설정 쓰기 터널 우회 · a4 = A4 Tailscale 헤더 · a6 = A6 __Host- 쿠키"}

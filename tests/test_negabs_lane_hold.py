@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import discopen
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import discopen  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 E18 = 10 ** 18
 DAY = 86400
 NOW = int(time.time())
 X = "0x" + "b7" * 20
 TKA, TKB, TKC, TKD = ("0x" + c * 20 for c in ("a1", "a2", "a3", "a4"))
 T0 = NOW - 20 * DAY
-CP = os.path.join(common.STATE_DIR, "cursor_evm_eth.json")
+CP = os.path.join(paths.STATE_DIR, "cursor_evm_eth.json")
 
 
 def h(n):
@@ -80,9 +79,9 @@ discopen.fetch_at = fake_fetch
 
 def pump(c, n=60):
     for _ in range(n):
-        r = c._negabs_runner()
+        r = c.svc_recon._negabs_runner()
         r.last = 0.0
-        c.negabs_pass()
+        c.svc_recon.negabs_pass()
         if not r.jobs:
             return
         time.sleep(0.02)
@@ -95,17 +94,17 @@ def lanes_cursor(live, job=None, synced=True):
         cur["_bk:" + W] = job
     if synced:
         cur["_synced_at"] = NOW + 3600
-    common.atomic_write_json(CP, cur)
+    statefile.atomic_write_json(CP, cur)
 
 
 def unhold(c, ca):
     d9 = cand(c, ca)
     d9["next"] = 0
-    c._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, ca)), d9)
+    c.svc_recon._negabs_runner()._put(discopen.cand_key("eth", W, aid_of(c, ca)), d9)
     c.conn.commit()
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?)", (f"wrecon_done:eth:{W}", str(T0)))
 c.conn.execute("INSERT INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                (f"recon:eth:{W}", "opening_balance", "eth", json.dumps({W: {"native:None": 0}, "_source": "rpc", "_block": 900, "_q": []}), T0))
@@ -155,7 +154,7 @@ feed(c, h(51), snap(h(51), T5, 3500, X, W, toks=[(X, W, TKD, "TKD", 5 * E18)]))
 lanes_cursor(5000, {"from": 100, "to": 4500, "done": 3000, "why": "internal"})
 it = {"chain": "eth", "wallet": W, "ca": TKD, "symbol": "TKD", "decimals": 18, "block": 3600, "block_ts": T5 + 60, "chain_bal_raw": str(9 * E18),
       "diff_raw": str(4 * E18), "spam": False, "sources": ["synthetic"]}
-r5 = c._negabs_runner()
+r5 = c.svc_recon._negabs_runner()
 st5, why5, _s = r5._recheck_one(dict(it), {})
 chk(st5 == "wait" and "뒤 차선" in why5 and not anchors(c, TKD),
     "H5 ★재점검 적용 — 동기화 도장이 있어도 그 지갑 뒤 차선이 그 블록 아래를 덜 받음(done 3000 < 3600) = 대기★(수정 전 = 적용)", (st5, why5))
@@ -201,7 +200,7 @@ FAKE[(TKG, 5000)] = (15 * E18, T9 + 3600)
 lanes_cursor(5000, {"from": 100, "to": 4800, "done": 2500, "why": "internal"})
 feed(c, h(91), snap(h(91), T9, 2300, W, TKG, toks=[(W, X, TKG, "TKG", 5 * E18)]))
 kg = discopen.cand_key("eth", W, aid_of(c, TKG))
-c._negabs_runner()._put(kg, {"st": "fail", "n": discopen.MAX_TRIES, "why": discopen.LANE_FAIL_WHY, "tx": h(91), "at": NOW, "next": 0})
+c.svc_recon._negabs_runner()._put(kg, {"st": "fail", "n": discopen.MAX_TRIES, "why": discopen.LANE_FAIL_WHY, "tx": h(91), "at": NOW, "next": 0})
 c.conn.commit()
 pump(c)
 chk(cand(c, TKG).get("st") == "fail" and not anchors(c, TKG), "H8 (옛 'fail' 칸) 차선이 아직이면 그대로", cand(c, TKG))
@@ -210,18 +209,18 @@ pump(c)
 pump(c)
 chk(len(anchors(c, TKG)) == 1 and cand(c, TKG).get("reopened"), "H8 ★옛 코드가 차선 때문에 'fail' 로 굳힌 칸 = 차선이 끝나면 1회 다시 열어 앵커★", (cand(c, TKG), anchors(c, TKG)))
 
-common.atomic_write_json(CP, {W: 5000, "_synced_at": NOW + 3600})
+statefile.atomic_write_json(CP, {W: 5000, "_synced_at": NOW + 3600})
 chk(discopen.lane_hold("eth", W, 4000) is None, "H6 탐색기 커서(블록스카웃·이더스캔 모양) = 종전 판정(대기 아님)")
 lanes_cursor(5000, {"from": 100, "to": 4000, "done": 4000, "why": "internal"})
 chk(discopen.lane_hold("eth", W, 3999) is None, "H6 뒤 차선 일이 이미 그 블록을 지남(done = to) = 대기 아님")
 lanes_cursor(5000, {"from": 3000, "to": 4000, "done": 3000, "why": "new"})
 chk(discopen.lane_hold("eth", W, 2999) is None and discopen.lane_hold("eth", W, 3500),
     "H6 뒤 차선 구간이 그 블록 뒤에서 시작(멈춘 차선 전환 — 그 아래는 이미 받음) = 대기 아님 · 구간 안 = 대기")
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {"from_block": 6000, "_live": {"done": 9000, "holes": [[6000, 7000]], "fb": 6000}})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_bsc.json"), {"from_block": 6000, "_live": {"done": 9000, "holes": [[6000, 7000]], "fb": 6000}})
 chk(discopen.lane_hold("bsc", W, 6500) and discopen.lane_hold("bsc", W, 8000),
     "H6 BSC 옆 차선 빈 구간(6,000→7,000)이 그 블록 아래에서 시작 = 대기")
-chk(discopen.lane_hold("bsc", W, 5000) is None, "H6 ★BSC 빈 구간이 그 블록 '뒤'에만 있음 = 대기 아님(진짜 옛 보유 앵커를 영구 보류하지 않음 · 코덱스 bs487 규칙)★")
+chk(discopen.lane_hold("bsc", W, 5000) is None, "H6 ★BSC 빈 구간이 그 블록 '뒤'에만 있음 = 대기 아님(진짜 옛 보유 앵커를 영구 보류하지 않음)★")
 chk(discopen.lane_hold("bsc", W, 9500), "H6 BSC 라이브 차선 끝(9,000)이 그 블록 앞 = 대기")
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {"from_block": 9000})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_bsc.json"), {"from_block": 9000})
 chk(discopen.lane_hold("bsc", W, 9500) and discopen.lane_hold("bsc", W, 8000) is None, "H6 BSC 빈틈없이 받은 끝 앞 = 대기 · 지나감 = 대기 아님")
 T.finish()

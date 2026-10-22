@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402,F401
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
@@ -28,7 +28,7 @@ M, M0, MF = F.K("a1"), F.K("a2"), F.K("a3")
 WA, WB, WX, WZ, WF = F.K("b1"), F.K("b2"), F.K("b9"), F.K("b3"), F.K("bf")
 TON = 10 ** 9
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 
 
@@ -37,7 +37,7 @@ def set_wallets(*keys):
     cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(k, bounceable=(i % 2 == 0))} for i, k in enumerate(keys)]
     cfg["exchange_addresses"] = [{"exchange": "upbit", "chain": "ton", "address": ac.ton_friendly(EX, bounceable=True)}]
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 cfg = set_wallets(A)
@@ -48,7 +48,7 @@ W = SegmentWriter(INB)
 
 def mk(owners, st=None, page=3):
     st = st or cs.ChainState("ton")
-    ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+    ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
     ad.page = page
     return ad, st, cw.Collector(ad, W, st, set(owners), page_budget={"latest": 10, "history": 20},
                                 detail_budget={"latest": 200, "history": 500})
@@ -127,7 +127,7 @@ check("F4 보존식 어긋남 = 수수료 미확정(None) · 순변화는 실제
 
 ad, st, col = mk({A})
 r = col.cycle()
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 drain()
 check("C0 첫 주기: 7건 방출 · 대기 0 · 동기화 도장", len(inbox()) == 7 and r["left"] == 0 and st.d.get("synced_at"), (r, len(inbox())))
@@ -207,7 +207,7 @@ for i in range(25):
     ch2.add_jetton(SP, F.K("%02x" % (0x60 + i)), F.K("%02x" % (0x80 + i)), symbol="SPAM%d" % i, decimals="9")
 os.makedirs(os.path.join(T.TMP, "st2"), exist_ok=True)
 st2 = cs.ChainState("ton", os.path.join(T.TMP, "st2"))
-ad2 = tw.TonAdapter(common.load_config(), client=srv2.client(), state=st2)
+ad2 = tw.TonAdapter(config.load_config(), client=srv2.client(), state=st2)
 ad2.discover_page(SP, {"owner": SP, "lane": "latest"}, None)
 n1 = sum(1 for v in st2.d["ton"]["jw"].values())
 ad2.discover_page(SP, {"owner": SP, "lane": "latest"}, None)
@@ -393,8 +393,8 @@ again = {(r["source_id"], r["leg_seq"], r["asset_id"], r["location"], r["qty_bas
          for r in c.conn.execute("SELECT * FROM postings WHERE source_kind='chain_tx' AND source_ns='ton'")}
 check("K1 재구축(원본 재생) = 라이브와 같은 레그 · 지갑 합 = 체인 잔고", again == live and lsum(A) == ch.bal[A] and lsum(A, "TKA") == ch.jbal[WA],
       (len(live), len(again), sorted(live ^ again)[:4]))
-check("H5 poison 0(계약 위반·모순 재방출 없음)", not os.path.exists(os.path.join(common.STATE_DIR, "poison.jsonl")),
-      open(os.path.join(common.STATE_DIR, "poison.jsonl")).read()[:600] if os.path.exists(os.path.join(common.STATE_DIR, "poison.jsonl")) else "")
+check("H5 poison 0(계약 위반·모순 재방출 없음)", not os.path.exists(os.path.join(paths.STATE_DIR, "poison.jsonl")),
+      open(os.path.join(paths.STATE_DIR, "poison.jsonl")).read()[:600] if os.path.exists(os.path.join(paths.STATE_DIR, "poison.jsonl")) else "")
 srv.stop()
 reg.FORCE_AVAILABLE.clear()
 T.finish()

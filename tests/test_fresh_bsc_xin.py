@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
 
-import common
-import bsc_watch
+import paths  # noqa: E402
+import bsc_watch  # noqa: E402
 
 W = "0x" + "a1" * 20
-con = sqlite3.connect(common.DB_PATH)
+con = sqlite3.connect(paths.DB_PATH)
 con.execute("CREATE TABLE raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
             " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
 
@@ -43,7 +43,7 @@ seen = []
 w.conf_depth = 20
 w.cursor = {"_cov": 1000, "from_block": 3000}
 w.emitted = set()
-w.emitted_path = os.path.join(common.STATE_DIR, "emitted_bsc.json")
+w.emitted_path = os.path.join(paths.STATE_DIR, "emitted_bsc.json")
 
 
 def details(hs):
@@ -52,8 +52,7 @@ def details(hs):
 
 
 w.fetch_details = details
-bsc_watch._now = lambda: 1_800_000_000.0
-T.patch_moved("_now", bsc_watch._now, ("bsc_",))
+T.patch_moved("_now", lambda: 1_800_000_000.0, ("bsc_",))
 w._xin_pass(5000)
 T.chk(NEW in seen and len(seen) == bsc_watch.XIN_MAX_NEW, f"X2 한 번 실행({bsc_watch.XIN_MAX_NEW}건) 안에 방금 출금 확인", seen[:3])
 T.finish()

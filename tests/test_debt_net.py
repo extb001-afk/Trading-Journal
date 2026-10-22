@@ -2,30 +2,29 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
+assert T.TMP in paths.STATE_DIR
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
@@ -34,13 +33,13 @@ KST = timezone(timedelta(hours=9))
 NOW = int(time.time())
 DAY = 86400
 E8 = 10 ** 8
-C = core.Core(common.load_config())
-C._quote_usd = lambda q, ts: Decimal(1)
+C = core.Core(config.load_config())
+C.svc_exf._quote_usd = lambda q, ts: Decimal(1)
 SEQ = {"n": 0}
 
 
 def post(ex, t, sym, qty, ev="EXF_DEPOSIT", lk="move_in", sid=None):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     qb = int(Decimal(str(qty)) * E8)
     SEQ["n"] += 1
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw,"
@@ -97,16 +96,16 @@ BAL = {
 
 def write_bal(bal=BAL, ts=None):
     for ex, d in bal.items():
-        common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"), dict(d, ts=int(ts or time.time()), sources=["spot"]))
+        statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"exf_balances_{ex}.json"), dict(d, ts=int(ts or time.time()), sources=["spot"]))
 
 
 write_bal(ts=NOW - 30)
 st = {ex: {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}} for ex in ("bybit", "gate", "kucoin", "okx", "binance")}
-common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
 n_adj0 = C.conn.execute("SELECT COUNT(*) FROM postings WHERE event='EXF_ADJUST'").fetchone()[0]
 C._drain_at = NOW + 5
-C._last_exfrecon = 0
-C.exf_recon_pass({"ex"})
+C.svc_exf._last_exfrecon = 0
+C.svc_exf.exf_recon_pass({"ex"})
 adj = C.conn.execute("SELECT a.symbol, p.location, p.qty_base FROM postings p JOIN assets a USING(asset_id) WHERE p.event='EXF_ADJUST'").fetchall()
 adj_by = {(r[1], r[0]): Decimal(int(r[2])) / E8 for r in adj}
 chk(all(k[1] in ("ZZZ", "NNN", "QQQ") for k in adj_by),
@@ -121,7 +120,7 @@ C.conn.close()
 px = {"BTC": 60000.0, "ETH": 3000.0, "NNN": 10.0, "QQQ": 2.0, "ZZZ": 1.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
            "fx_basis": 1400.0, "ex_usd": {f"{e}:{k}": v for k, v in px.items() for e in ("bybit", "binance", "okx", "gate", "kucoin")},
-           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("bybit", "binance", "okx", "gate", "kucoin")}}, open(web.SPOT_PATH, "w"))
+           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("bybit", "binance", "okx", "gate", "kucoin")}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing.PxCache.fx_at = lambda self, ms: 1400.0
 web.pricing._gj = lambda url, timeout=10.0: None
@@ -137,21 +136,21 @@ def _dc_lookup(spec, iso, now=None, w=0.0, ask=True, old=False):
 
 histcurve.DAYCLOSE.lookup = _dc_lookup
 histcurve.DAYCLOSE.lookup._tj_test_mock = True
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
-with open(os.path.join(common.STATE_DIR, "backfill_done"), "w") as f0:
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
+with open(os.path.join(paths.STATE_DIR, "backfill_done"), "w") as f0:
     f0.write(str(NOW - 40 * DAY))
 
 
 def build(b=None, fresh=False):
     if fresh:
-        for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+        for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
             try:
                 os.remove(p9)
             except FileNotFoundError:
                 pass
     b = b or web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b, b._build(conn)
     finally:
@@ -205,7 +204,7 @@ chk(any(d.get("kind") == "loan" and abs(float(d["qty"]) + 3000) < 1e-6 for d in 
 pos = [p for p in (f.get("_positionsAll") or f.get("positions") or []) if p.get("sym") == "NNN"]
 chk(all(float(p.get("held") or 0) >= 0 for p in pos), "보유 카드 보유량은 음수로 안 내려감(차입 몫은 보유 아님 — 종전 그대로)", [(p.get("held"), p.get("status")) for p in pos])
 
-dpx = common.read_json(web.DAILY_PX_PATH, {}) or {}
+dpx = statefile.read_json(paths.state("daily_px.json"), {}) or {}
 d_after = datetime.fromtimestamp(T_BUY + 2 * DAY, KST).strftime("%Y-%m-%d")
 d_before = datetime.fromtimestamp(T_DEP - 2 * DAY, KST).strftime("%Y-%m-%d")
 row_a = next((r for r in ds if r.get("date") == d_after[5:]), None)
@@ -215,7 +214,7 @@ est_a = float((row_a or {}).get("est") or 0)
 chk(abs(est_a - (15000 + 6000 + 6 + 10)) < 0.01, "H1 근사 몫 = 크기 합(BTC 15,000 + ETH 6,000 + 차입 NNN 6 + QQQ 10 — 음수가 근사 표시를 깎지 않음)", row_a)
 row_b = next((r for r in ds if r.get("date") == d_before[5:]), None)
 chk(row_b is not None and abs(float(row_b["val"]) - 12.99) < 0.01, "P 첫 입금 전 날 = 버린 음수 몫만(12.99 · 종전 = 차입 몫까지 $9,500 넘게)", row_b)
-C = core.Core(common.load_config())
+C = core.Core(config.load_config())
 T_SELL = NOW - DAY
 post("bybit", T_SELL, "BTC", "-0.25", "EXF_SELL", "disp")
 post("bybit", T_SELL, "USDT", 15000, "EXF_BUY", "acq")
@@ -225,7 +224,7 @@ C.conn.close()
 BAL2 = dict(BAL, bybit={"balances": {"USDT": 10700.0}, "debts": {"QQQ": -5.0}}, gate={"balances": {}, "debts": {}}, kucoin={"balances": {}, "debts": {}})
 write_bal(BAL2)
 try:
-    os.remove(web.DAILY_PATH)
+    os.remove(paths.state("daily_cache.json"))
 except FileNotFoundError:
     pass
 KITS = {}
@@ -238,7 +237,7 @@ ds2 = f2.get("dailySeries") or []
 row_a2 = next((r for r in ds2 if r.get("date") == d_after[5:]), None)
 chk(row_a2 and abs(float(row_a2["val"]) - EXP) < 0.01, "P 갚은 뒤 무효화 재계산 = 차입 중이던 날 그날 부채 기록으로 같은 값", [row_a2, EXP])
 chk(abs(float(ds2[-1]["val"]) - tot(f2)) < 0.01 and abs(tot(f2) - EXP) < 0.01, "P 오늘 = 판 돈 10,700 + 나머지(순자산 그대로 $15,984)", [ds2[-1], tot(f2)])
-cdb = dbm.open_db(common.DB_PATH, readonly=True)
+cdb = dbm.open_db(paths.DB_PATH, readonly=True)
 GID = {a: cdb.execute("SELECT group_id FROM assets WHERE lower(address)=?", (a.lower(),)).fetchone()[0] for a in ("bybit:USDT", "gate:USDT")}
 cdb.close()
 kit = KITS["fn"]() if KITS.get("fn") else {}
@@ -249,20 +248,20 @@ chk(d_after in (kit.get("dbt") or {}) and abs(((rq.get(GID["bybit:USDT"]) or {})
 kit0 = dict(kit, dbt={k9: v9 for k9, v9 in (kit.get("dbt") or {}).items() if k9 != d_after})
 rq0 = histcurve.rewind(kit0, [d_after]) if kit else {}
 chk(kit and not (rq0.get(GID["bybit:USDT"]) or {}).get(d_after), "H2 (대조) 그날 기록이 없으면 지금 부채(없음) 기준 = 그 음수 버림(기록 시작 전 날의 한계)", rq0.get(GID["bybit:USDT"]))
-dpx2 = common.read_json(web.DAILY_PX_PATH, {}) or {}
+dpx2 = statefile.read_json(paths.state("daily_px.json"), {}) or {}
 dpx2.get("_dbt", {}).pop(d_after, None)
 dpx2.setdefault("_dbt", {})["2001-01-02"] = {"1": 1.0}
-common.atomic_write_json(web.DAILY_PX_PATH, dpx2)
+statefile.atomic_write_json(paths.state("daily_px.json"), dpx2)
 try:
-    os.remove(web.DAILY_PATH)
+    os.remove(paths.state("daily_cache.json"))
 except FileNotFoundError:
     pass
 b2b, out2b = build()
 row_a3 = next((r for r in (out2b["fields"].get("dailySeries") or []) if r.get("date") == d_after[5:]), None)
 chk(row_a3 and abs(float(row_a3["val"]) - (EXP + 9300)) < 0.01,
     "P (대조 · 감수) 그날 기록이 없으면 지금 부채 기준 = 갚은 차입(바이빗 4,300 · 게이트 5,000)을 버려 그날 +9,300(기록 시작 전 날의 한계)", [row_a3, EXP + 9300])
-chk("2001-01-02" in ((common.read_json(web.DAILY_PX_PATH, {}) or {}).get("_dbt") or {}), "H2 오래된 부채 기록 = daily_px 정리(45일)에 안 지워짐(장기 곡선 재료)",
-    sorted(((common.read_json(web.DAILY_PX_PATH, {}) or {}).get("_dbt") or {}))[:3])
+chk("2001-01-02" in ((statefile.read_json(paths.state("daily_px.json"), {}) or {}).get("_dbt") or {}), "H2 오래된 부채 기록 = daily_px 정리(45일)에 안 지워짐(장기 곡선 재료)",
+    sorted(((statefile.read_json(paths.state("daily_px.json"), {}) or {}).get("_dbt") or {}))[:3])
 write_bal()
 
 DCP["NNN"] = 30.0

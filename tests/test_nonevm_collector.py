@@ -2,28 +2,28 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 
 NOW = int(time.time())
 A, B = N.OWN["tron"]
 X = N.EXT["tron"]
-SD = common.STATE_DIR
-INB = os.path.join(common.INBOX_DIR, "tron")
+SD = paths.STATE_DIR
+INB = os.path.join(paths.INBOX_DIR, "tron")
 CFG_PATH = os.path.join(T.TMP, "config.json")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}]
@@ -116,7 +116,7 @@ col.cycle()
 n_e02 = uids_in_inbox().count("e02" + "0" * 61)
 check("W3 append 뒤 죽음 → 다시 보냄(인박스 2번)", n_e02 == 2, n_e02)
 reg.FORCE_AVAILABLE.add("tron")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = dict(c.chain_readers)["tron"]
 c._drain_stream("tron", rd, 1, 0)
@@ -207,7 +207,7 @@ class ResumeAdapter(FakeAdapter):
         return {"t": max(int(self.lane_safe(owner, lane).get("t", 0)), getattr(self, "_seen", 0))}
 
 
-import shutil
+import shutil  # noqa: E402
 for f9 in ("cursor_tron.json", "emitted_tron.json"):
     if os.path.exists(os.path.join(SD, f9)):
         os.remove(os.path.join(SD, f9))

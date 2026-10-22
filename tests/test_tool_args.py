@@ -2,10 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import subprocess
+import os  # noqa: E402
+import subprocess  # noqa: E402
 
 chk = T.chk
 FAKE = os.path.join(T.TMP, "pm2")
@@ -40,7 +40,7 @@ chk(rc == 2 and "--apply" in out, "A5 exf_fut_place.py --expect 는 --apply 와 
 for name in ("exf_fut_place.py", "latefix_move.py"):
     rc, out = tool(name, "--apply")
     chk(rc == 1 and "원장 없음" in out, f"A8 {name} 원장 없는 곳에 --apply = 거부(빈 원장을 만들지 않음)", out[-200:])
-import sqlite3
+import sqlite3  # noqa: E402
 sqlite3.connect(os.path.join(T.TMP, "state", "ledger.db")).close()
 st0 = sorted(os.listdir(os.path.join(T.TMP, "state")))
 pm2(True)

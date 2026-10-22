@@ -5,11 +5,11 @@ import bisect
 import heapq
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import sellchart
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 CLUSTER_GAP_S = 3 * 3600
 PRE_B = 3600
 POST_B = 3600

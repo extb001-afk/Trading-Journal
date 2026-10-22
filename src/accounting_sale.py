@@ -5,77 +5,83 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
+import accounting_util
 import acct_norm
 import calcguard
-import common
+import logs
 import sale_match
 import xfer_match
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
+from timeutil import KST
 from view_common import OF_NATIVE_SYMS
 from view_common import _f
 
 log = logging.getLogger('tj-web')
 
 
+def _fits(x0, xe):
+    return not isinstance(xe, dict) or (x0[7] == xe.get("asset") and x0[8] == (None if xe.get("qb") is None else str(xe.get("qb"))))
+
+
 class SaleBook:
 
-    def __init__(slx, sb, _ro, _un, arr_tx_chain, be_done, be_take, be_tax, cp_add_map, cp_emit, cp_merge, cur_lab, cur_row, cur_src, diag, ev, flow_of, fs_last, fs_mark, fs_rec, fx_dep_tx, fx_name, fxb, krw_last, krw_mix, krw_of, krw_stl, note_unk, oa_last, ob, of_applied, of_cands, offc_sold, realized_by_date, realized_by_loc, realized_krw_by_date, ret_pool, rt_out, sale_links, sale_lot_by, sale_pay_bid, sale_pay_q, sale_pay_seq, sale_rf_bid, sale_rf_exit, sale_used, stable_fx_mark, tax_krw_acq, tax_rows, unk_tag, unverified, up_dep_by_tx, wd_raw9, wd_tr, xf_wd9):
-        slx.sb = sb
-        slx._ro = _ro
+    def __init__(slx, px, *, _un, salein, fns):
+        slx.sb = px.sb
+        slx._ro = salein.ro
         slx._un = _un
-        slx.arr_tx_chain = arr_tx_chain
-        slx.be_done = be_done
-        slx.be_take = be_take
-        slx.be_tax = be_tax
-        slx.cp_add_map = cp_add_map
-        slx.cp_emit = cp_emit
-        slx.cp_merge = cp_merge
-        slx.cur_lab = cur_lab
-        slx.cur_row = cur_row
-        slx.cur_src = cur_src
-        slx.diag = diag
-        slx.ev = ev
-        slx.flow_of = flow_of
-        slx.fs_last = fs_last
-        slx.fs_mark = fs_mark
-        slx.fs_rec = fs_rec
-        slx.fx_dep_tx = fx_dep_tx
-        slx.fx_name = fx_name
-        slx.fxb = fxb
-        slx.krw_last = krw_last
-        slx.krw_mix = krw_mix
-        slx.krw_of = krw_of
-        slx.krw_stl = krw_stl
-        slx.note_unk = note_unk
-        slx.oa_last = oa_last
-        slx.ob = ob
-        slx.of_applied = of_applied
-        slx.of_cands = of_cands
-        slx.offc_sold = offc_sold
-        slx.realized_by_date = realized_by_date
-        slx.realized_by_loc = realized_by_loc
-        slx.realized_krw_by_date = realized_krw_by_date
-        slx.ret_pool = ret_pool
-        slx.rt_out = rt_out
-        slx.sale_links = sale_links
-        slx.sale_lot_by = sale_lot_by
-        slx.sale_pay_bid = sale_pay_bid
-        slx.sale_pay_q = sale_pay_q
-        slx.sale_pay_seq = sale_pay_seq
-        slx.sale_rf_bid = sale_rf_bid
-        slx.sale_rf_exit = sale_rf_exit
-        slx.sale_used = sale_used
-        slx.stable_fx_mark = stable_fx_mark
-        slx.tax_krw_acq = tax_krw_acq
-        slx.tax_rows = tax_rows
-        slx.unk_tag = unk_tag
-        slx.unverified = unverified
-        slx.up_dep_by_tx = up_dep_by_tx
-        slx.wd_raw9 = wd_raw9
-        slx.wd_tr = wd_tr
-        slx.xf_wd9 = xf_wd9
+        slx.arr_tx_chain = salein.arr_tx_chain
+        slx.be_done = salein.be_done
+        slx.be_take = fns.be_take
+        slx.be_tax = salein.be_tax
+        slx.cp_add_map = px.cpx.cp_add_map
+        slx.cp_emit = px.cpx.cp_emit
+        slx.cp_merge = accounting_util.cp_merge
+        slx.cur_lab = px.fbx.cur_lab
+        slx.cur_row = px.cpx.cur_row
+        slx.cur_src = px.cpx.cur_src
+        slx.diag = salein.diag
+        slx.ev = px.cpx.ev
+        slx.flow_of = px.fbx.flow_of
+        slx.fs_last = px.kpx.fs_last
+        slx.fs_mark = px.fsx.fs_mark
+        slx.fs_rec = px.fsx.fs_rec
+        slx.fx_dep_tx = salein.fx_dep_tx
+        slx.fx_name = px.ofx.fx_name
+        slx.fxb = px.fbx.fxb
+        slx.krw_last = px.kpx.krw_last
+        slx.krw_mix = px.kpx.krw_mix
+        slx.krw_of = px.kpx.krw_of
+        slx.krw_stl = px.kpx.krw_stl
+        slx.note_unk = px.unx.note_unk
+        slx.oa_last = px.cpx.oa_last
+        slx.ob = salein.ob
+        slx.of_applied = salein.of_applied
+        slx.of_cands = salein.of_cands
+        slx.offc_sold = px.ofx.offc_sold
+        slx.realized_by_date = px.books.realized_by_date
+        slx.realized_by_loc = px.books.realized_by_loc
+        slx.realized_krw_by_date = px.books.realized_krw_by_date
+        slx.ret_pool = px.fsx.ret_pool
+        slx.rt_out = salein.rt_out
+        slx.sale_links = salein.sale_links
+        slx.sale_lot_by = salein.sale_lot_by
+        slx.sale_pay_bid = salein.sale_pay_bid
+        slx.sale_pay_q = salein.sale_pay_q
+        slx.sale_pay_seq = salein.sale_pay_seq
+        slx.sale_rf_bid = salein.sale_rf_bid
+        slx.sale_rf_exit = salein.sale_rf_exit
+        slx.sale_used = salein.sale_used
+        slx.stable_fx_mark = accounting_util.stable_fx_mark
+        slx.tax_krw_acq = px.fbx.tax_krw_acq
+        slx.tax_rows = px.books.tax_rows
+        slx.unk_tag = fns.unk_tag
+        slx.unverified = salein.unverified
+        slx.up_dep_by_tx = salein.up_dep_by_tx
+        slx.wd_raw9 = px.fbx.wd_raw9
+        slx.wd_tr = salein.wd_tr
+        slx.xf_wd9 = salein.xf_wd
+        slx.cb = px.cb
 
     def of_cand(slx, r9, g9, q9, ts9, ref9, own9=False):
         try:
@@ -87,7 +93,7 @@ class SaleBook:
                             "stable": bool(g9["is_stable"]), "where": slx.cur_src[0] or "", "chain": r9["chain"] or "",
                             "ref": str(ref9 or ""), "ev": r9["event"], "gid": g9["gid"],
                             "sale": bool(sl9 and not sl9.get("manual")), "asset": slx.sb._of_asset(r9), "qb": str(r9["qty_base"])}
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_cand", _cg9)
             pass
         return False
@@ -110,8 +116,8 @@ class SaleBook:
             else:
                 try:
                     px0 = float(slx.sb.px.candle_usd(str(w0["sym"] or ""), int(w0["ts"]) * 1000) or 0) if n0 else 0.0
-                except Exception as _cg9:
-                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_finalize", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_finalize[px0]", _cg9)
                     px0 = 0.0
                 u0 = Decimal(w0["qty"]) * Decimal(str(px0)) if px0 > 0 else None
             t0 = str(w0.get("txid") or "")
@@ -121,16 +127,14 @@ class SaleBook:
                          slx.sb._wd_key(w0["ex"], w0["uuid"]), None, None, sw0))
         by_key9 = {x0[6]: x0 for x0 in snd9 if x0[6]}
 
-        def fits9(x0, xe):
-            return not isinstance(xe, dict) or (x0[7] == xe.get("asset") and x0[8] == (None if xe.get("qb") is None else str(xe.get("qb"))))
         excl9, miss9 = set(), False
         for xe in lot9.get("excl", ()):
             ke = str(xe.get("key") if isinstance(xe, dict) else xe)
-            if ke in by_key9 and fits9(by_key9[ke], xe):
+            if ke in by_key9 and _fits(by_key9[ke], xe):
                 excl9.add(ke)
                 continue
             c0 = [x0 for x0 in snd9 if isinstance(xe, dict) and x0[6] and ke.count("|") >= 3 and x0[6].rsplit("|", 1)[0] == ke.rsplit("|", 1)[0]
-                  and fits9(x0, xe)]
+                  and _fits(x0, xe)]
             if len(c0) == 1:
                 excl9.add(c0[0][6])
             else:
@@ -172,10 +176,10 @@ class SaleBook:
             try:
                 slx.of_pay_plan(lot9, [x0 for x0 in snd9 if x0[0] <= lot9["t_first"] and x0[6] not in excl9
                                    and (by9.get(x0[1]) or {}).get("held", Decimal(0)) > EPS], paid9)
-            except Exception as e9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_finalize", e9)
+            except Exception as e9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_finalize[of_pay_plan]", e9)
                 lot9["pay_hold"] = "error"
-                log.warning("수동 참가금 결제 코인 처분 실패(종전 경로): %s", common.safe_err(e9)[:160])
+                log.warning("수동 참가금 결제 코인 처분 실패(종전 경로): %s", logs.safe_err(e9)[:160])
         return fin9
 
     def sale_book(slx, g9, r9, q9, ts9, chain9, ref9):
@@ -195,9 +199,9 @@ class SaleBook:
             sl9["unit_krw"] = fin9[3] * sl9["wsh"] / sl9["qty"] if sl9["qty"] > 0 else Decimal(0)
         take9 = min(q9, sl9["take"])
         c9 = take9 * sl9["unit"]
-        g9["qty_known"] += take9
-        g9["cost"] += c9
-        g9["qty_unknown"] += q9 - take9
+        slx.cb.add_known(g9, take9)
+        slx.cb.add_cost(g9, c9)
+        slx.cb.add_unknown(g9, q9 - take9)
         slx.note_unk(g9, ts9, "토큰 세일 · 로트 잔량 초과분(원가 없음)", q9 - take9, ref9, chain9=chain9)
         g9["risk_allow"] = True
         fl9 = slx.flow_of(g9, ts9, chain9)
@@ -219,7 +223,7 @@ class SaleBook:
                                "ref": str(ref9 or ""), "where": slx.cur_src[0]})
         return take9, c9
 
-    def sale_refund(slx, g9, r9, q9, ts9, chain9, txh9, flow9):
+    def sale_refund(slx, g9, r9, q9, ts9, chain9, txh9, flow9, face_out: list | None = None):
         loc9 = str(r9["location"] or "")
         if q9 <= EPS or not loc9.startswith("wallet:"):
             return None
@@ -234,6 +238,7 @@ class SaleBook:
         if took9 <= EPS:
             return None
         inh9 = kn9 = un9 = kr9 = Decimal(0)
+        krec_usd = krec_krw = Decimal(0)
         for e9 in cs9:
             p9 = e9["pool"]
             tk9 = took9 * min(e9["ref"] - e9["used"], p9["left"]) / room9
@@ -244,25 +249,35 @@ class SaleBook:
             kn9 += p9["known"] * sc9
             un9 += p9["unknown"] * sc9
             kr9 += p9["krw"] * sc9
+            krec_usd += p9.get("kc", Decimal(0)) * sc9
+            krec_krw += p9.get("kk", Decimal(0)) * sc9
             slx.cp_add_map(g9, p9.get("_cmp"), float(sc9))
             e9["used"] += tk9
             e9["bc"] = e9.get("bc", Decimal(0)) + p9["cost"] * sc9
             p9["left"] -= tk9
         rem9 = q9 - took9
-        g9["qty_known"] += kn9
-        g9["cost"] += inh9
-        g9["qty_unknown"] += un9 + rem9
+        is_st = bool(g9.get("is_stable"))
+        if is_st:
+            face_q = un9 + rem9
+            slx.cb.add_known(g9, kn9 + face_q)
+            slx.cb.add_cost(g9, inh9 + face_q)
+            if face_out is not None:
+                face_out[0] += face_q
+        else:
+            slx.cb.add_known(g9, kn9)
+            slx.cb.add_cost(g9, inh9)
+            slx.cb.add_unknown(g9, un9 + rem9)
+            flow9["bought"] += took9
         g9["risk_allow"] = True
-        flow9["bought"] += took9
-        flow9["cost"] += inh9
-        flow9["cost_krw"] += kr9
-        if un9 + rem9 > EPS:
+        flow9["cost"] += krec_usd if is_st else inh9
+        flow9["cost_krw"] += krec_krw if is_st else kr9
+        if not is_st and un9 + rem9 > EPS:
             slx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 토큰 세일 환불(입찰 때부터 원가 미상 몫 · 확인 환불량 초과분)",
                      un9 + rem9, txh9, chain9=chain9, unc9=rem9, fs9=rem9)
         slx.diag["sale_refund_n"] += 1
         slx.diag["sale_refund_q"] += took9
         slx.diag["sale_refund_cost"] += inh9
-        return f" · 토큰 세일 환불 · 입찰 원가 복원 (${float(inh9):,.2f})"
+        return f" · 토큰 세일 환불 · 입찰 원가 복원 (${float(inh9 + (face_q if is_st else 0)):,.2f})"
 
     def sale_pay_take(slx, r9, g9, q9, ts9, chain9, txh9, dest9, mc9, mk9, cmp9):
         if q9 <= EPS:
@@ -301,9 +316,9 @@ class SaleBook:
             _t9, _n9, k9 = slx.sale_pay_q.pop(0)
             try:
                 slx.sale_pay_emit(slx.sale_pay_q_d.pop(k9))
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.sale_pay_flush", e9)
-                log.warning("토큰 세일 사용분 처분 출력 실패: %s", common.safe_err(e9)[:160])
+                log.warning("토큰 세일 사용분 처분 출력 실패: %s", logs.safe_err(e9)[:160])
 
     def sale_pay_emit(slx, e9):
         g9, ts9, q9 = e9["g"], e9["ts"], e9["q"]
@@ -333,7 +348,7 @@ class SaleBook:
             if kn9 > 0:
                 pk9 = pr9 * kn9 / q9
                 pnl9 = pk9 - cc9
-                g9["realized"] += pnl9
+                slx.cb.realize(g9, pnl9)
                 fl9["realized"] += pnl9
                 fl9["pay_real"] = fl9.get("pay_real", Decimal(0)) + pnl9
                 fl9["rbd"][dk9] = fl9["rbd"].get(dk9, Decimal(0)) + pnl9
@@ -518,11 +533,15 @@ class SaleBook:
             return False
         am9s = sum((e9["amt"] for e9 in rb9s), Decimal(0))
         un9s = mu9 + max(Decimal(0), q9 - (mk9 + mu9))
+        krec_usd = (mc9 - slx.krw_mix[0]) if slx.krw_last[0] is not None else Decimal(0)
+        krec_krw = slx.krw_last[0] if slx.krw_last[0] is not None else Decimal(0)
         for e9 in rb9s:
             sh9 = e9["amt"] / am9s if am9s > 0 else Decimal(1) / len(rb9s)
             p9 = e9["pool"] = e9["pool"] or {"qty": Decimal(0), "cost": Decimal(0), "known": Decimal(0), "unknown": Decimal(0),
                                              "krw": Decimal(0), "left": Decimal(0), "_cmp": {}}
             p9["qty"] += q9 * sh9; p9["left"] += q9 * sh9; p9["cost"] += mc9 * sh9; p9["known"] += mk9 * sh9
             p9["unknown"] += un9s * sh9; p9["krw"] += kr9 * sh9
+            p9["kc"] = p9.get("kc", Decimal(0)) + krec_usd * sh9
+            p9["kk"] = p9.get("kk", Decimal(0)) + krec_krw * sh9
             p9["_cmp"] = slx.cp_merge(p9["_cmp"], cp_o9, float(sh9))
         return True

@@ -6,14 +6,13 @@ import logging
 import os
 import statistics
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import alert_prefs as AP
-import common
+import num_parse, paths, statefile
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 log = logging.getLogger("tj-web")
-STATE_PATH = os.path.join(common.STATE_DIR, "alert_watch.json")
 COOL = 6 * 3600
 LP_HYST = 600
 LP_COOL = 3600
@@ -24,18 +23,14 @@ BUILD_MAX_AGE = 6 * 3600
 LIVE_PX_AGE = 900
 PNL_FRESH = 90 * 60
 PNL_WAIT = 2 * 3600
-EX_KEY = {"바이낸스": "binance", "업비트": "upbit", "바이빗": "bybit", "게이트": "gate", "빗썸": "bithumb", "쿠코인": "kucoin", "OKX": "okx"}
+EX_KEY = {"바이낸스": "binance", "업비트": "upbit", "바이빗": "bybit", "게이트": "gate", "빗썸": "bithumb", "쿠코인": "kucoin", "OKX": "okx", "코인베이스": "coinbase"}
 GLOBAL_EX = ("binance", "bybit", "okx", "gate", "kucoin")
 EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "gate": "게이트", "kucoin": "쿠코인", "bithumb": "빗썸", "upbit": "업비트",
-         "hyperliquid": "하이퍼리퀴드", "lighter": "라이터", "aster": "애스터"}
+         "hyperliquid": "하이퍼리퀴드", "lighter": "라이터", "aster": "애스터", "coinbase": "코인베이스"}
 
 
 def _f(v):
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return None
-    return x if x == x and x not in (float("inf"), float("-inf")) else None
+    return num_parse.to_float(v)
 
 
 def money(usd, cur="KRW", rate=None, sign=False) -> str:
@@ -89,9 +84,7 @@ def _md(iso: str) -> str:
 
 
 def _alert(kind, text, **kw):
-    d = {"ts": int(time.time()), "kind": kind, "cat": AP.cat_of(kind), "text": text}
-    d.update(kw)
-    return d
+    return AP.alert_line(kind, text, **kw)
 
 
 def _link(inp, tab) -> str:
@@ -101,14 +94,14 @@ def _link(inp, tab) -> str:
 
 def load_state() -> dict:
     try:
-        st = common.read_json(STATE_PATH, {}) or {}
-    except (Exception, SystemExit):
+        st = statefile.read_json(paths.state("alert_watch.json"), {}) or {}
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         st = {}
     return st if isinstance(st, dict) else {}
 
 
 def save_state(st: dict) -> None:
-    common.atomic_write_json(STATE_PATH, st)
+    statefile.atomic_write_json(paths.state("alert_watch.json"), st)
 
 
 def pnl_text(out, cur="KRW") -> str | None:
@@ -135,11 +128,11 @@ def pnl_text(out, cur="KRW") -> str | None:
         delta = val * rate - (pk if pk is not None else pval * rate)
         fx = (pval * rate - pk if pk is not None else 0.0) + kx * rate
         parts = [("시세", (mk or 0.0) * rate), ("입출금", flow * rate), ("환율", fx)]
-        to_txt = lambda w, s=True: money(w / rate, cur, rate, s)
+        to_txt = lambda w, s=True: money(w / rate, cur, rate, s)   # noqa: E731
     else:
         delta = val - pval
         parts = [("시세", mk or 0.0), ("입출금", flow), ("환율", kx)]
-        to_txt = lambda u, s=True: money(u, "USD", None, s)
+        to_txt = lambda u, s=True: money(u, "USD", None, s)   # noqa: E731
     etc = delta - sum(p[1] for p in parts)
     rz = _f((f.get("realizedByDate") or {}).get(iso)) or 0.0
     fut = _f(((f.get("futures") or {}).get("realizedByDate") or {}).get(iso)) or 0.0
@@ -239,7 +232,7 @@ def pnl_data(out, cur="KRW") -> dict | None:
             sells = 0
         return {"iso": iso, "cur": "KRW" if krw else "USD", "realized": round(rz * k, 2), "delta": round(delta, 2) if delta is not None else None,
                 "sells": sells, "top": top, "curve": curve}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -354,7 +347,7 @@ def _total_usd(f) -> float:
         ds = [r for r in (f.get("dailySeries") or []) if isinstance(r, dict)]
         if ds and _f(ds[-1].get("val")):
             return float(ds[-1]["val"])
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     t = 0.0
     for k9 in ("coins", "stables"):
@@ -834,7 +827,7 @@ def step(inp: dict, doc: dict, st: dict, now: float = None, conn=None, log=None)
     for key, fn in PRODUCERS:
         try:
             out += fn(inp, doc, st, now, conn, AP.effective(doc, key, now, conn))
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             if log:
                 log.warning("알림 생산자 %s 실패(다음 판): %s", key, e)
     return out

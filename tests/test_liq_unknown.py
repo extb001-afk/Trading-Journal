@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import json
-import os
-import time
-import urllib.parse
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 os.environ["TJ_TG_API"] = "http://127.0.0.1:9/never"
@@ -19,9 +19,9 @@ with open(CFG, "w") as f:
     json.dump({}, f)
 with open(os.path.join(H.TMP, ".env"), "w") as f:
     f.write("TJ_TG_TOKEN=000000:fake-test-token\nTJ_TG_CHAT=12345\n")
-import common
-import alert_prefs as AP
-import liq_watch as LW
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
+import liq_watch as LW  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -29,11 +29,11 @@ def check(name, ok, detail=""):
 
 
 def wcfg(d):
-    common.atomic_write_json(CFG, d)
+    statefile.atomic_write_json(CFG, d)
     time.sleep(0.01)
 
 
-common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
 T = [1_800_000_000.0]
 
 
@@ -201,7 +201,7 @@ levd = {"v": 1, "ts": int(T[0]), "cycle_sec": 600, "fresh_sec": 1320,
         "items": [{"id": "binance:loan:loan:USDT-BNB", "ex": "binance", "product": "loan", "scope": "loan", "key": "USDT-BNB", "label": "바이낸스 담보대출 USDT←BNB",
                    "measured_at": int(T[0]), "stale": False,
                    "metrics": {"ltv": {"v": 0.79, "unit": "frac", "risk": "up", "call": 0.75, "liq": 0.83, "thr_src": "api:t", "src": "t"}}}]}
-common.atomic_write_json(os.path.join(S, "leverage.json"), levd)
+statefile.atomic_write_json(os.path.join(S, "leverage.json"), levd)
 got = run(w, 3)
 for k in ("TJ_BINANCE_KEY", "TJ_BINANCE_SECRET"):
     env.pop(k)
@@ -219,7 +219,7 @@ levd["items"] = [{"id": "binance:futures_linear:position:N3USDT:LONG", "ex": "bi
                   "label": "N3USDT 롱", "measured_at": int(T[0]), "stale": False, "metrics": {},
                   "position": {"symbol": "N3USDT", "side": "LONG", "qty": 1, "mark": 100.0, "liq": 92.0, "leverage": 5, "settle": "USDT"}}]
 levd["products"] = [dict(p, measured_at=int(T[0])) for p in levd["products"]]
-common.atomic_write_json(os.path.join(S, "leverage.json"), levd)
+statefile.atomic_write_json(os.path.join(S, "leverage.json"), levd)
 got += run(w, 3)
 for k in ("TJ_BINANCE_KEY", "TJ_BINANCE_SECRET"):
     env.pop(k)
@@ -253,7 +253,7 @@ A1, A2 = "0x" + "b2" * 20, "0x" + "c3" * 20
 
 
 def lighter(pos_on, accts):
-    common.atomic_write_json(os.path.join(S, "futures_lighter.json"), {
+    statefile.atomic_write_json(os.path.join(S, "futures_lighter.json"), {
         "ts": int(T[0]), "positions": [{"symbol": "N5", "side": "LONG", "qty": 1, "mark": 100.0, "liq": 93.0, "acct": A2}] if pos_on else [],
         "accts": {a: {"ts": int(T[0])} for a in accts}})
     time.sleep(0.01)
@@ -283,11 +283,11 @@ W.mark["N6USDT"] = 100.0
 got = run(w, 8)
 d0 = AP.preset_doc("rec")
 d0["cats"]["liq"] = "off"
-common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d0})
+statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d0})
 time.sleep(0.01)
 got2 = run(w, 5)
 mem_off = sorted(w.st["fut"])
-common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
 time.sleep(0.01)
 got3 = run(w, 8)
 check("N6 '청산 근접'을 껐다 켜면 — 꺼진 동안 기억을 비우고, 다시 켠 뒤 지금 위험을 처음처럼 🔴 1통(꺼진 동안 풀렸다 다시 위험해져도 놓치지 않음)",
@@ -337,7 +337,7 @@ n1 = len([c for c in W.calls if c[2] == "/sapi/v2/loan/flexible/collateral/data"
 check("N8 담보 임계를 못 받은 값(모름)은 6시간 굳히지 않고 10분 뒤 다시 받음", n1 == n0 + 1 and (w.thr.get("BNB") or (None,))[0] == 0.75, (n0, n1, w.thr.get("BNB")))
 W.bn_loans = []
 
-import alert_bot as ab
+import alert_bot as ab  # noqa: E402
 
 FQ = AP.FAST_QUEUE
 
@@ -348,7 +348,7 @@ def b_setup():
             os.remove(os.path.join(S, fn))
         except FileNotFoundError:
             pass
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
     wcfg({})
 
 
@@ -356,7 +356,7 @@ def prefs_liq(on):
     d = AP.preset_doc("rec")
     if not on:
         d["cats"]["liq"] = "off"
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d})
     time.sleep(0.01)
 
 

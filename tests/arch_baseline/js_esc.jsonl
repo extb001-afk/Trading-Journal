@@ -1,0 +1,5 @@
+{"_doc": "코드 속 값이 정확히 '&amp;' 인 문자열·템플릿 리터럴 수 = HTML 이스케이프 구현 수(목표 전체 1벌).", "checked_with": "파이썬 토크나이저 측정 · acorn 8.16.0 · node v25.9.0 대조 일치", "kind": "max", "spec": "js_esc"}
+{"key": "web/futures.html", "n": 1}
+{"key": "web/index.html", "n": 1}
+{"key": "web/v2/tjdom.js", "n": 1}
+{"key": "web/v2/wow.js", "n": 1}

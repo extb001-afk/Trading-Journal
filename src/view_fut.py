@@ -1,10 +1,9 @@
 from __future__ import annotations
 import bisect
-import math
 import os
 import re
 import time
-import common
+import num_parse, paths
 import histcurve
 import acct_norm
 from view_common import DAYCLOSE_ON
@@ -15,13 +14,14 @@ import logging
 
 log = logging.getLogger('tj-web')
 from datetime import datetime
-from view_common import KST
-import calcguard
+from timeutil import KST
+import calcguard  # noqa: E402
 
 try:
     import perp_dex
     PERP_NAMES = dict(perp_dex.NAMES)
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [fallback]
+    calcguard.swallowed("view_fut:<module>[perp_dex]", e_cg)
     perp_dex, PERP_NAMES = None, {}
 
 FUT_CEX = ("binance", "bybit", "okx")
@@ -42,11 +42,7 @@ FUT_T_MIN_MS = 1420070400000
 
 
 def _fin(v):
-    try:
-        x = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return x if math.isfinite(x) else None
+    return num_parse.to_float(v, catch_overflow=True)
 
 
 def _fut_notional(p):
@@ -85,7 +81,7 @@ def _fut_upnl_usd(p, price_fn):
         return u9, None
     try:
         px9 = _fin(price_fn(s9)) if price_fn else None
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_fut:_fut_upnl_usd", _cg9)
         px9 = None
     if not px9 or px9 <= 0:
@@ -194,7 +190,7 @@ def _fut_candle_past(fxb, sym, t_ms, within_s):
 
 def _fut_fxb(px, spot):
     fx9, c9 = _px_tables(px)
-    return acct_norm.FxBook(fx9, os.path.join(common.STATE_DIR, "px_cache_core.json"), getattr(spot, "rate", None) or None, web_candle=c9)
+    return acct_norm.FxBook(fx9, paths.state("px_cache_core.json"), getattr(spot, "rate", None) or None, web_candle=c9)
 
 
 def fut_px_at(fxb, spot_fn, now=None):
@@ -216,7 +212,7 @@ def fut_px_at(fxb, spot_fn, now=None):
             if not p9 and DAYCLOSE_ON:
                 try:
                     p9 = histcurve.DAYCLOSE.lookup("sym:" + histcurve.base_sym(s9), acct_norm.iso_day(t9 // 1000), now, 0.0, ask=False)[0]
-                except Exception as _cg9:
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_fut:fut_px_at.f9", _cg9)
                     p9 = None
             if not p9:

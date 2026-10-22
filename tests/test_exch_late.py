@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import histcurve
-import web
-import xparts
+import histcurve  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -67,7 +67,7 @@ def unit_builder():
 
 
 def reset_files():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
 
@@ -126,7 +126,7 @@ def setup(b):
             pin_old(b, m9, d9)
             b.daily[iso(m9, d9)] = old_entry()
     b.daily[iso(10, 6)]["src"] = "live"
-    json.dump(b.daily, open(web.DAILY_PATH, "w"))
+    json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 
 
 reset_files()
@@ -142,12 +142,12 @@ chk(all((b.daily.get(iso(10, d9)) or {}).get("xq") == "upbit" for d9 in range(1,
 chk(((b.daily_px.get(iso(10, 5)) or {}).get("xv") or {}).get("p", {}).get("ku") == [1.4e6, "tl"], "X1 키 없을 때 정한 업비트 원화 이월 0 → 원화 이력으로 다시(tl)",
     ((b.daily_px.get(iso(10, 5)) or {}).get("xv") or {}).get("p"))
 b.daily[iso(10, 5)]["val"] = 103001.0
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 v2 = run(b, now_ts=NOW + 60)
 chk(close(v2.get("10-05"), 103001), "X2 두 번째 빌드 = 다시 계산 없음(1회)", v2.get("10-05"))
 b.daily[iso(10, 5)] = old_entry()
 pin_old(b, 10, 5)
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 v2b = run(b, now_ts=NOW + 120)
 chk(close(v2b.get("10-05"), 103000), "X2 롤백 뒤 옛 코드가 다시 굳힌 날 = 새 코드 첫 빌드에 다시 103,000", v2b.get("10-05"))
 reset_files()
@@ -192,7 +192,7 @@ v6b = run(b, now_ts=NOW + 60, x=mkx(NOW + 60, ub={"QQQ": [10.0, 200.0]}))
 v6c = run(b, now_ts=NOW + 120, x=mkx(NOW + 120, ub={"QQQ": [10.0, 300.0]}))
 chk(close(v6a.get("10-05"), 103100) and close(v6b.get("10-05"), 103100) and close(v6c.get("10-05"), 103100)
     and ((b.daily_px.get(iso(10, 5)) or {}).get("xv") or {}).get("xq") == "upbit",
-    "X6 fc505: 지난날(10/5) = 처음 다시 정한 미매칭 이월 $100 그대로 — 다음 빌드들(지금 $200·$300)에도 무변 · 구성요소 지문 유지(수정 전 빌드마다 지금 값으로)",
+    "X6 지난날(10/5) = 처음 다시 정한 미매칭 이월 $100 그대로 — 다음 빌드들(지금 $200·$300)에도 무변 · 구성요소 지문 유지(수정 전 빌드마다 지금 값으로)",
     (v6a.get("10-05"), v6b.get("10-05"), v6c.get("10-05"), ((b.daily_px.get(iso(10, 5)) or {}).get("xv") or {}).get("xq")))
 
 reset_files()
@@ -212,7 +212,7 @@ pre9 = {"_v": histcurve.HIST_V, "d": {iso(8, 20): hrow(100000), iso(8, 21): hrow
         "s": {iso(8, 20): [100000.0, 0.0, 0.0, 0, 0.0], iso(8, 21): [102000.0, 0.0, 0.0, 0, 0.0, 1, "", "upbit"]},
         "x": {k9: {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(k9) - 1} for k9 in (iso(8, 20), iso(8, 21))},
         "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pth9, pre9)
+statefile.atomic_write_json(pth9, pre9)
 HX = histcurve.HistCurve(path=pth9, px_path=pxp9)
 kw9 = {"xq": "upbit", "xq_base": ""} if "xq" in histcurve.make_kit.__code__.co_varnames else {}
 kitX = histcurve.make_kit("2026-10-10", G, HOLD, set(), set(), {}, set(), {}, {}, {}, [], mkx(NOW), ser4, b.daily, xkit=copy.deepcopy(b.__dict__.get("_x_kit")), **kw9)
@@ -235,7 +235,7 @@ X7 = mkx(NOW, dep=E(7, 1, 10, 0, 0))
 ser7 = b._daily_series(G, D(10, 10), {}, {}, ca_gids=set(), ex_gids=set(), skip_gids=set(), pending_gids=set(), hold_qty=dict(HOLD),
                        extra=copy.deepcopy(X7), extra_ok=True, now_ts=NOW, **({"xq": "upbit", "xq_base": ""} if XQ else {}))
 pth7, pxp7 = os.path.join(S, "chX7.json"), os.path.join(S, "chX7_px.json")
-common.atomic_write_json(pth7, {"_v": histcurve.HIST_V, "d": {iso(8, 20): hrow(100000)}, "s": {iso(8, 20): [100000.0, 0.0, 0.0, 0, 0.0]},
+statefile.atomic_write_json(pth7, {"_v": histcurve.HIST_V, "d": {iso(8, 20): hrow(100000)}, "s": {iso(8, 20): [100000.0, 0.0, 0.0, 0, 0.0]},
                                 "x": {iso(8, 20): {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(iso(8, 20)) - 1}},
                                 "meta": {"pending": False, "flow_pending": False}})
 H7 = histcurve.HistCurve(path=pth7, px_path=pxp7)
@@ -243,7 +243,7 @@ H7.px["fx"] = HX.px["fx"]
 kit7 = histcurve.make_kit("2026-10-10", G, HOLD, set(), set(), {}, set(), {}, {}, {}, [], X7, ser7, b.daily, xkit=copy.deepcopy(b.__dict__.get("_x_kit")), **kw9)
 H7.run_once(kit7, cap=0, now=NOW)
 chk(close(((H7.st.get("d") or {}).get(iso(8, 20)) or [None])[0], 102500),
-    "X7 fc505: 장기 곡선 8/20(보관 45일 밖 · 키 없을 때 원화 이월 0 고정) = 다시 계산에서 원화 이력 ₩1.4M(7/1 입금) 포함 102,500(수정 전 101,500)",
+    "X7 장기 곡선 8/20(보관 45일 밖 · 키 없을 때 원화 이월 0 고정) = 다시 계산에서 원화 이력 ₩1.4M(7/1 입금) 포함 102,500(수정 전 101,500)",
     ((H7.st.get("d") or {}).get(iso(8, 20)), ((H7.st.get("x") or {}).get(iso(8, 20)) or {}).get("p")))
 
 reset_files()

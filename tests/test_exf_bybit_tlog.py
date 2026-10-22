@@ -2,31 +2,31 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-import urllib.parse
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
+import config, paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import ex_foreign as EF
-import fut_rcpt
+assert T.TMP in paths.STATE_DIR
+import ex_foreign as EF  # noqa: E402
+import fut_rcpt  # noqa: E402
 
 chk = T.chk
 DAY_MS = 86400 * 1000
 MIN_MS = 60 * 1000
 ENV = {"TJ_BYBIT_KEY": "k", "TJ_BYBIT_SECRET": "s"}
 B = {"pos": [], "cp": [], "tl": [], "tl_err": None, "calls": []}
-FP = os.path.join(common.STATE_DIR, "futures_bybit.json")
+FP = os.path.join(paths.STATE_DIR, "futures_bybit.json")
 HAS = hasattr(EF, "BB_TLOG_TYPES")
 
 
@@ -60,13 +60,10 @@ def fake_http(url, headers=None, data=None, method=None, timeout=20):
     raise AssertionError("예상 밖 경로 " + u.path)
 
 
-EF.http_json = fake_http
-T.patch_moved("http_json", EF.http_json, ("exf_",))
-EF._gov_prepare = lambda *a, **k: None
-T.patch_moved("_gov_prepare", EF._gov_prepare, ("exf_",))
+T.patch_moved("http_json", fake_http, ("exf_", "ex_foreign"))
+T.patch_moved("_gov_prepare", lambda *a, **k: None, ("exf_", "ex_foreign"))
 EF._CLOCK_ON[0] = False
-EF.PACE = 0
-T.patch_moved("PACE", EF.PACE, ("exf_",))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
 _REAL_TIME = time.time
 CLK = [int(_REAL_TIME()) - 20 * 86400]
 time.time = lambda: CLK[0] + 0.25
@@ -131,7 +128,7 @@ CLK[0] += 600
 B["pos"] = [{"symbol": "ZZZUSDT", "side": "Buy", "size": "10", "avgPrice": "1.0", "leverage": "5", "positionValue": "10", "markPrice": "1.0",
              "unrealisedPnl": "0", "liqPrice": "", "positionIM": "2", "positionMM": "0.1", "createdTime": "1", "updatedTime": "1"}]
 d = run()
-chk(HAS and "tlog_from" not in (d.get("cursor") or {}), "L2a2 미청산 linear 포지션 있음 = 전환 미룸(코덱스 it455 — 전환 전 진입 수수료가 사라지지 않게)", d.get("cursor"))
+chk(HAS and "tlog_from" not in (d.get("cursor") or {}), "L2a2 미청산 linear 포지션 있음 = 전환 미룸(전환 전 진입 수수료가 사라지지 않게)", d.get("cursor"))
 B["pos"] = []
 CLK[0] += 600
 TSW = CLK[0] * 1000 + 250
@@ -210,8 +207,7 @@ d = run()
 chk(any(r["t"] == T_LATE and r["amount"] == -0.07 for r in evs(d)) and d.get("inc_cov_ts") == CLK[0] - 120, "L5b 다음 주기 이어 받음 · 덮은 시각 회복", d.get("inc_cov_ts"))
 
 print("[L6] 주기 쪽 상한 · 형식 이상 줄")
-EF.BB_TLOG_CALLS_MAX = 2
-T.patch_moved("BB_TLOG_CALLS_MAX", EF.BB_TLOG_CALLS_MAX, ("exf_",))
+T.patch_moved("BB_TLOG_CALLS_MAX", 2, ("exf_", "ex_foreign"))
 base6 = CLK[0] * 1000 + 1000
 B["tl"] += [tl(100 + i, base6 + i * 1000, typ="SETTLEMENT", fund="-0.001", side="Buy") for i in range(130)]
 cov_before = d.get("inc_cov_ts")
@@ -224,8 +220,7 @@ CLK[0] += 600
 d = run()
 got = sum(1 for r in evs(d) if 100 <= tl_no(r) < 230) if HAS else 0
 chk(got == 130 and d.get("inc_cov_ts") == CLK[0] - 120 and not (d.get("cursor") or {}).get("tlog_pg"), "L6b 다음 주기 같은 창·커서로 이어 끝냄 · 중복 없음", (got, d.get("inc_cov_ts")))
-EF.BB_TLOG_CALLS_MAX = 40
-T.patch_moved("BB_TLOG_CALLS_MAX", EF.BB_TLOG_CALLS_MAX, ("exf_",))
+T.patch_moved("BB_TLOG_CALLS_MAX", 40, ("exf_", "ex_foreign"))
 T_BAD = CLK[0] * 1000 + 2000
 B["tl"] += [tl(300, T_BAD, fee="abc"), tl(301, T_BAD + 1, fee="0.01")]
 cov_before = d.get("inc_cov_ts")
@@ -252,14 +247,13 @@ chk(got == 60 and d.get("inc_cov_ts") == CLK[0] - 120, "L7b 다음 주기 = 60�
 time.time = _REAL_TIME
 
 print("[C] core 대사 — 수집기가 쓴 파일 그대로")
-import core
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
-C = core.Core(common.load_config())
-C._quote_usd = lambda q, ts: Decimal(1)
-C.EXF_INIT_PHASE = 5
+C = core.Core(config.load_config())
+C.svc_exf._quote_usd = lambda q, ts: Decimal(1)
+C.svc_exf.EXF_INIT_PHASE = 5
 E8 = 10 ** 8
 NOW = int(_REAL_TIME())
 SEQ = {"t": NOW - 1700}
@@ -276,7 +270,7 @@ def tick_min():
 
 
 def post(t, qty):
-    aid = C._exf_asset("bybit", "USDT")
+    aid = C.svc_exf._exf_asset("bybit", "USDT")
     qb = int(Decimal(str(qty)) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                    " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange','bybit:deposit',?,0,?,?,'exchange:bybit',?,NULL,NULL,'move_in','EXF_DEPOSIT',?)",
@@ -287,13 +281,13 @@ def post(t, qty):
 
 def recon(bal):
     bts = tick()
-    st = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+    st = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_state.json"), {})
     st.setdefault("bybit", {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_balances_bybit.json"), {"ts": bts, "balances": {"USDT": bal}, "sources": []})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_balances_bybit.json"), {"ts": bts, "balances": {"USDT": bal}, "sources": []})
     C._drain_at = bts + 5
-    C._last_exfrecon = 0
-    C.exf_recon_pass({"ex"})
+    C.svc_exf._last_exfrecon = 0
+    C.svc_exf.exf_recon_pass({"ex"})
     return bts
 
 
@@ -309,7 +303,7 @@ def total():
 
 
 def collect():
-    C.__dict__.pop("_exf_fut_cache", None)
+    C.svc_exf.__dict__.pop("_exf_fut_cache", None)
     B["calls"].clear()
     EF._fut_bybit(ENV)
 
@@ -319,7 +313,7 @@ for p9 in (FP, fut_rcpt.px_path("bybit")):
         os.remove(p9)
 B.update(pos=[], cp=[], tl=[], tl_err=None)
 TSW2 = (SEQ["t"] - 600) * 1000
-common.atomic_write_json(FP, {"ts": SEQ["t"] - 600, "events": [], "positions": [], "wallet": {}, "cursor": {"tlog_from": TSW2, "tlog": TSW2, "closed_pnl": TSW2}})
+statefile.atomic_write_json(FP, {"ts": SEQ["t"] - 600, "events": [], "positions": [], "wallet": {}, "cursor": {"tlog_from": TSW2, "tlog": TSW2, "closed_pnl": TSW2}})
 t0 = tick()
 post(t0, 1000)
 collect()

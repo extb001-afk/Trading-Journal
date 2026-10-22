@@ -1,5 +1,7 @@
 import bf_engine
-import common
+import logs, paths, statefile
+import db as dbm
+import fsio
 import json
 import ledger_backup
 import ops_requests
@@ -11,7 +13,7 @@ import time
 from decimal import Decimal
 from decimal import localcontext
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -102,7 +104,7 @@ class ExtMixin:
         nfail = int(self._meta_get("ext_rebuild_fails") or 0)
         wait = min(self.EXT_RETRY_MAX, float(bcfg.get("rebuild_retry_sec") or 6 * 3600) * (2 ** max(0, nfail - 1)))
         if fail and now - fail < wait and not self._ext_disk_retry_now(now, fail):
-            ap9 = common.read_control_json(self.PNL_APPROVE_PATH, None)
+            ap9 = statefile.read_control_json(self.PNL_APPROVE_PATH, None)
             at9 = ops_requests._fin(ap9.get("at")) if isinstance(ap9, dict) else None
             un9 = ops_requests._fin(ap9.get("until")) if isinstance(ap9, dict) else None
             fresh9 = (at9 is not None and un9 is not None and fail < at9 <= now + 60 and now < un9 <= now + ops_requests.APPROVE_TTL + 600
@@ -139,7 +141,7 @@ class ExtMixin:
 
     def _ext_position_gate(self, new_db: str, pairs: set, prefixes: set, locked=()):
         live = self._positions(self.conn)
-        c = sqlite3.connect(common.sqlite_ro_uri(new_db, immutable=True), uri=True)
+        c = dbm.connect(paths.sqlite_ro_uri(new_db, immutable=True), uri=True)
         try:
             new = self._positions(c)
             return self._ext_position_gate_cmp(live, new, c, pairs, prefixes, locked)
@@ -212,7 +214,7 @@ class ExtMixin:
             qb = Decimal(b[0]) if b else Decimal(0)
             tol = self.QTY_TOL + abs(qa) * Decimal("1e-12")
             if k[1] == "exchange:upbit":
-                tol = max(tol, self.EX_RECON_TOL)
+                tol = max(tol, self.svc_exf.EX_RECON_TOL)
             if not touched and abs(qa - qb) > tol:
                 n9 = self._ext_persp_exempt(c, k, qa, qb)
                 if n9:
@@ -252,13 +254,13 @@ class ExtMixin:
             return True
         c9 = None
         try:
-            c9 = sqlite3.connect(path, timeout=10)
+            c9 = dbm.connect(path, timeout=10)
             busy, nlog, ncp = c9.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
             if busy or (nlog >= 0 and ncp != nlog):
                 log.warning("재구축 shadow WAL 체크포인트 미완(busy=%s log=%s done=%s)", busy, nlog, ncp)
                 return False
         except sqlite3.Error as e:
-            log.warning("재구축 shadow WAL 정리 실패: %s", common.safe_err(e))
+            log.warning("재구축 shadow WAL 정리 실패: %s", logs.safe_err(e))
             return False
         finally:
             if c9 is not None:
@@ -275,8 +277,8 @@ class ExtMixin:
         ts = time.strftime("%Y%m%d_%H%M%S")
         home = os.path.expanduser(str(bcfg.get("rebuild_dir") or "~"))
         shadow = os.path.join(home, f"tj_shadow_extrebuild_{ts}")
-        root = common.BASE_DIR
-        live = common.DB_PATH
+        root = paths.BASE_DIR
+        live = paths.DB_PATH
         tmp = live + f".extnew_{ts}"
         why = ", ".join([("토큰 자리수(decimals) 채움" if c == "decimals_fix" else f"{c} 창 밖 {n}건") for c, n in sorted(need.items())] + ex_done) or "?"
         if self.conn.in_transaction:
@@ -345,34 +347,36 @@ class ExtMixin:
                 pg9 = self._ext_pnl_gate(shadow + ".report.json", bcfg, why)
                 if not pg9["ok"] and not pg9.get("approved"):
                     return fail("손익 게이트: " + pg9["reason"], "pnl_approval")
-            c2 = sqlite3.connect(new_db)
+            c2 = dbm.connect(new_db)
             try:
                 if c2.execute("PRAGMA quick_check").fetchone()[0] != "ok" or \
                         c2.execute("SELECT 1 FROM meta WHERE k='rebuild_incomplete'").fetchone():
                     return fail("새 원장 무결성/마커", "integrity")
-                c2.execute("DELETE FROM meta WHERE k LIKE 'ext_prewindow:%' OR k LIKE 'ext\\_prewindow\\_tx:%' ESCAPE '\\'"
+                c2.execute("DELETE FROM meta WHERE k LIKE 'ext\\_prewindow:%' ESCAPE '\\' OR k LIKE 'ext\\_prewindow\\_tx:%' ESCAPE '\\'"
                            " OR k IN ('ext_rebuild_fail_at', 'ext_rebuild_fails', 'ext_rebuild_last_error', 'ext_rebuild_started_at',"
                            " 'ext_rebuild_fail_code', 'ext_rebuild_fail_stage', 'ext_rebuild_fail_code_at')")
                 c2.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_rebuilt_at', ?)", (str(t_start),))
                 c2.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_rebuilt_why', ?)", (why[:500],))
+                dbm.renew_ledger_epoch(c2)
+                dbm.bump_daily_inval(c2)
                 c2.commit()
             finally:
                 c2.close()
             self._ext_merge_px(os.path.join(shadow, "px_cache_core.json"))
             shutil.copyfile(new_db, tmp)
-            c3 = sqlite3.connect(common.sqlite_ro_uri(tmp, immutable=True), uri=True)
+            c3 = dbm.connect(paths.sqlite_ro_uri(tmp, immutable=True), uri=True)
             try:
                 ok3 = c3.execute("PRAGMA quick_check").fetchone()[0] == "ok"
             finally:
                 c3.close()
             if not ok3:
                 return fail("복사본 무결성", "integrity")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             calcguard.swallowed("core_ext:ExtMixin._ext_rebuild", e)
             import errno
             full9 = (isinstance(e, OSError) and getattr(e, "errno", None) == errno.ENOSPC) or \
                 (isinstance(e, sqlite3.OperationalError) and "disk is full" in str(e).lower())
-            return fail(f"예외 {type(e).__name__}: {common.safe_err(e)}", "resource_disk" if full9 else "error")
+            return fail(f"예외 {type(e).__name__}: {logs.safe_err(e)}", "resource_disk" if full9 else "error")
         try:
             self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except sqlite3.Error:
@@ -393,21 +397,39 @@ class ExtMixin:
         log.warning("★과거 창 확장 반영 완료 — 원장 교체(이전 원장 %s), core 재기동★", os.path.basename(live) + f".pre_extrebuild_{ts}")
         self._ext_status(rebuilt_at=t_start)
         try:
-            common.atomic_write_json(os.path.join(common.STATE_DIR, "intentional_restart.json"),
-                                     {"unit": "tj-core", "ts": int(time.time()), "reason": "ext_rebuild"})
+            self._ext_mark_intent()
         except OSError:
             pass
         import logging
         try:
-            keep = sqlite3.connect(live)
+            keep = dbm.connect(live)
             keep.execute("SELECT count(*) FROM meta").fetchone()
         except sqlite3.Error:
             pass
+        calcguard.flush()
         logging.shutdown()
         os._exit(0)
 
+    @staticmethod
+    def _ext_mark_intent() -> None:
+        path = paths.state("intentional_restart.json")
+
+        def load(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    d = json.load(f)
+                return d if isinstance(d, dict) else {}
+            except (OSError, ValueError):
+                return {}
+
+        def mark(cur):
+            d = {"entries": cur["entries"]} if "entries" in cur else {}
+            d.update(unit="tj-core", ts=int(time.time()), reason="ext_rebuild")
+            return d
+        fsio.locked_update_json(path, mark, load=load, write=statefile.atomic_write_json)
+
     def _ext_merge_px(self, path: str) -> int:
-        d9 = common.read_json(path, None)
+        d9 = statefile.read_json(path, None)
         if not isinstance(d9, dict):
             return 0
         n = 0
@@ -427,14 +449,14 @@ class ExtMixin:
             if n:
                 self.px.flush()
                 log.info("재구축 shadow 시세 %d개를 라이브 원가 캐시에 합침(px_cache_core.json)", n)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_ext:ExtMixin._ext_merge_px", e)
-            log.warning("재구축 shadow 시세 합치기 실패: %s", common.safe_err(e))
+            log.warning("재구축 shadow 시세 합치기 실패: %s", logs.safe_err(e))
         return n
 
-    PNL_GATE_PATH = os.path.join(common.STATE_DIR, "rebuild_pnl_gate.json")
+    PNL_GATE_PATH = paths.StatePath("rebuild_pnl_gate.json")
 
-    PNL_APPROVE_PATH = os.path.join(common.STATE_DIR, "rebuild_pnl_approve.json")
+    PNL_APPROVE_PATH = paths.StatePath("rebuild_pnl_approve.json")
 
     def _ext_pnl_gate(self, report_path: str, bcfg: dict, why: str) -> dict:
         tol_usd, tol_pct = ops_requests.tol_of(bcfg)
@@ -453,7 +475,7 @@ class ExtMixin:
                 sha9, name9 = ops_requests.preserve_report(report_path)
             except OSError as e:
                 sha9, name9 = None, None
-                log.warning("재구축 손익 게이트: 거부 보고서 보존 실패(승인 불가 — 다음 재계산에서 다시): %s", common.safe_err(e))
+                log.warning("재구축 손익 게이트: 거부 보고서 보존 실패(승인 불가 — 다음 재계산에서 다시): %s", logs.safe_err(e))
             out["report_sha"], out["report_file"] = sha9, name9
             if sha9:
                 ok9, note9, asha9 = ops_requests.approval_check(ev, tol_usd, tol_pct)
@@ -468,7 +490,7 @@ class ExtMixin:
         elif out["months"] == [] and not out["reason"]:
             log.info("재구축 손익 게이트 통과 — 월별 실현·원가미상·열린 원가 차이 임계 이내")
         try:
-            common.atomic_write_json(self.PNL_GATE_PATH, out)
+            statefile.atomic_write_json(self.PNL_GATE_PATH, out)
         except OSError:
             pass
         return out
@@ -480,21 +502,21 @@ class ExtMixin:
     EXT_UPBIT_FRESH_SEC = 30
 
     def _ext_wait_upbit_complete(self):
-        p = os.path.join(common.STATE_DIR, "upbit_orders_state.json")
+        p = paths.state("upbit_orders_state.json")
         if not os.path.exists(p):
             return
         t0 = time.time()
         while time.time() - t0 < self.EXT_UPBIT_WAIT_SEC:
             try:
                 fresh = time.time() - os.path.getmtime(p) <= self.EXT_UPBIT_FRESH_SEC
-                if fresh and (common.read_json(p, {}) or {}).get("complete"):
+                if fresh and (statefile.read_json(p, {}) or {}).get("complete"):
                     return
             except (OSError, ValueError):
                 pass
             time.sleep(1)
         log.info("재구축: 업비트 체결 완주 도장을 %d초 안에 못 봄 — 그대로 진행(rebuild2 가 판정)", self.EXT_UPBIT_WAIT_SEC)
 
-    EXT_STATUS_PATH = os.path.join(common.STATE_DIR, "ext_rebuild_status.json")
+    EXT_STATUS_PATH = paths.StatePath("ext_rebuild_status.json")
 
     def _ext_record_fail(self, msg: str, code: str = "error", stage: str = "run") -> int:
         code = code if code in self.EXT_FAIL_LABEL else "error"
@@ -566,10 +588,10 @@ class ExtMixin:
         home = os.path.expanduser(str(bcfg.get("rebuild_dir") or "~"))
         try:
             os.makedirs(home, exist_ok=True)
-            ok9, _msg9 = self._ext_disk_check(home, common.DB_PATH)
-        except Exception as e:
+            ok9, _msg9 = self._ext_disk_check(home, paths.DB_PATH)
+        except Exception as e:  # noqa: BLE001 [fallback]
             calcguard.swallowed("core_ext:ExtMixin._ext_disk_retry_now", e)
-            log.warning("재구축 디스크 재검사 실패(종전 백오프): %s", common.safe_err(e))
+            log.warning("재구축 디스크 재검사 실패(종전 백오프): %s", logs.safe_err(e))
             return False
         self._ext_status()
         if ok9:
@@ -588,7 +610,7 @@ class ExtMixin:
         try:
             rl9, dk9 = getattr(self, "_ext_relief", None), self._ext_disk_view()
             if rebuilt_at:
-                common.atomic_write_json(self.EXT_STATUS_PATH, {"running": False, "started_at": None, "fails": 0, "fail_at": None,
+                statefile.atomic_write_json(self.EXT_STATUS_PATH, {"running": False, "started_at": None, "fails": 0, "fail_at": None,
                                                                 "last_error": None, "fail_code": None, "fail_label": None, "fail_stage": None,
                                                                 "rebuilt_at": int(rebuilt_at), "relief": rl9, "disk": dk9, "ts": int(time.time())})
                 return
@@ -602,8 +624,8 @@ class ExtMixin:
                  "rebuilt_at": int(float(self._meta_get("ext_rebuilt_at") or 0)) or None,
                  "relief": rl9, "disk": dk9,
                  "ts": int(time.time())}
-            common.atomic_write_json(self.EXT_STATUS_PATH, d)
-        except Exception as _cg9:
+            statefile.atomic_write_json(self.EXT_STATUS_PATH, d)
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("core_ext:ExtMixin._ext_status", _cg9)
             pass
 

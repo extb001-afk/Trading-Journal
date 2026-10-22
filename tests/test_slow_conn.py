@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import ast
-import json
-import os
-import select
-import socket
-import threading
-import time
+import ast  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import select  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 try:
@@ -21,7 +21,7 @@ try:
         resource.setrlimit(resource.RLIMIT_NOFILE, (want9, hd9))
 except (ImportError, ValueError, OSError):
     pass
-import web
+import web  # noqa: E402
 
 
 def ck(name, cond, extra=None):
@@ -297,7 +297,7 @@ ck("NC2③ 루프백 판정(127.x · ::1 · ::ffff:127.x = 루프백 · 사설·
    and not any(web.QuietHTTPServer._loopback(a) for a in ("100.64.1.2", "192.168.0.7", "10.0.0.1", "::ffff:10.0.0.1", "", None))
    if hasattr(web.QuietHTTPServer, "_loopback") else False)
 
-import onboarding
+import onboarding  # noqa: E402
 src = open(onboarding.__file__, encoding="utf-8").read()
 fn = next((n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "demo_main"), None)
 names = []
@@ -308,7 +308,7 @@ for n in (ast.walk(fn) if fn else ()):
 ck("NC2④ 데모 서버 = QuietHTTPServer(전역 상한·IP당 상한·헤더 마감 · 종전 = ThreadingHTTPServer 상한 없음)",
    "QuietHTTPServer" in names and "ThreadingHTTPServer" not in names, names)
 
-import logging
+import logging  # noqa: E402
 
 
 class Cap(logging.Handler):

@@ -2,33 +2,32 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import core
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 W = "0x" + "a1" * 20
 cfg = {"chains": {"eth": {"blockscout": "https://eth.example.invalid", "conf_depth": 12, "blocks_per_day": 7200}},
        "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "t"}], "backfill_months": 1}
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(cfg, f)
-MARK = os.path.join(common.STATE_DIR, "backfill_done")
+MARK = os.path.join(paths.STATE_DIR, "backfill_done")
 
 
 def env(keys: bool, extra: str = ""):
-    with open(common.ENV_PATH, "w", encoding="utf-8") as f:
+    with open(paths.ENV_PATH, "w", encoding="utf-8") as f:
         f.write(("UPBIT_ACCESS=synthetic-access\nUPBIT_SECRET=synthetic-secret\n" if keys else "TJ_ETHERSCAN_KEY=\n") + extra)
 
 
 def run(c):
-    c._recon_pass_scopes(set(), False, {})
+    c.svc_recon._recon_pass_scopes(set(), False, {})
     return os.path.exists(MARK)
 
 
@@ -43,7 +42,7 @@ def reset(c, eth_done: bool, up_done: bool):
     c.conn.commit()
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 
 env(False)
@@ -72,8 +71,8 @@ reset(c, True, False)
 chk(run(c), "F7c 키 칸 일부만(시크릿 없음) = 연결 아님 → 기다리지 않음")
 env(False)
 
-import sqlite3
-import web
+import sqlite3  # noqa: E402
+import web  # noqa: E402
 
 
 class Fake:
@@ -85,7 +84,7 @@ class Fake:
 
 if os.path.exists(MARK):
     os.remove(MARK)
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_eth.json"), {W: 123})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_eth.json"), {W: 123})
 mc = sqlite3.connect(":memory:")
 mc.execute("CREATE TABLE meta (k TEXT, v TEXT)")
 env(False)

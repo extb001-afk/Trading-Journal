@@ -12,9 +12,11 @@ from decimal import Decimal
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
-import common
-import core
-from exf_fix_place import _core_stopped, _planner, _ro
+import histmark, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
+import ledger_lock  # noqa: E402
+from exf_fix_place import _core_stopped, _planner, _ro  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 
@@ -60,14 +62,14 @@ def _print(plan, curs):
 def _undo_load(path):
     with open(path, encoding="utf-8") as fh:
         d = json.load(fh)
-    if not isinstance(d, dict) or d.get("v") != core.Core.EXF_FUT_V or not isinstance(d.get("plan"), list):
-        raise ValueError(f"이 세대(v{core.Core.EXF_FUT_V})의 되돌리기 자료가 아님")
+    if not isinstance(d, dict) or d.get("v") != core_svc.ExfService.EXF_FUT_V or not isinstance(d.get("plan"), list):
+        raise ValueError(f"이 세대(v{core_svc.ExfService.EXF_FUT_V})의 되돌리기 자료가 아님")
     plan = [m for m in d["plan"] if isinstance(m, dict) and m.get("cands")]
     if not plan:
         raise ValueError("되돌릴 통화가 없는 자료")
     for m in plan:
         ex = m.get("ex")
-        if ex not in core.Core.EXF_FUT_EX or m.get("loc") != f"exchange:{ex}" or not isinstance(m.get("aid"), int):
+        if ex not in core_svc.ExfService.EXF_FUT_EX or m.get("loc") != f"exchange:{ex}" or not isinstance(m.get("aid"), int):
             raise ValueError(f"자료의 거래소·위치·자산이 잘못됨: {ex} {m.get('loc')}")
         for k in ("del", "upd", "ins", "fut"):
             if not isinstance(m.get(k), list) or not all(isinstance(o, dict) for o in m[k]):
@@ -85,7 +87,7 @@ def _undo(path):
     except (OSError, TypeError, ValueError, KeyError) as e:
         print(f"거부: 되돌리기 자료 오류 — {e}")
         return 1
-    conn = sqlite3.connect(common.DB_PATH, timeout=30)
+    conn = sqlite3.connect(paths.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     c = _planner(conn)
     conn.execute("BEGIN IMMEDIATE")
@@ -97,14 +99,14 @@ def _undo(path):
             raise ValueError("원장의 이관 세대 표식이 자료와 다름(이미 되돌렸거나 다른 원장)")
         if int(mark9[2]) != len(plan) or len({(m["ex"], m["sym"]) for m in plan}) != len(plan):
             raise ValueError(f"자료의 통화 수({len(plan)})가 원장 표식의 적용 통화 수({mark9[2]})와 다름 — 불완전 자료")
-        with open(os.path.join(common.STATE_DIR, f"exf_fut_place_v{d['v']}.json"), encoding="utf-8") as fh:
+        with open(os.path.join(paths.STATE_DIR, f"exf_fut_place_v{d['v']}.json"), encoding="utf-8") as fh:
             if json.load(fh) != d:
                 raise ValueError("이 원장의 정본 되돌리기 자료(state/exf_fut_place_v%s.json)와 내용이 다름" % d["v"])
         locs = sorted({m["loc"] for m in plan})
         led0, pos0 = _snap(conn, locs)
         for m in plan:
             ex, loc = m["ex"], m["loc"]
-            for ns9, lst9 in ((f"{ex}:recon", m["ins"]), (f"{ex}:{common.EXF_FUT_NS}", m["fut"])):
+            for ns9, lst9 in ((f"{ex}:recon", m["ins"]), (f"{ex}:{histmark.EXF_FUT_NS}", m["fut"])):
                 for o in lst9:
                     r9 = conn.execute("SELECT posting_id, event_ts, qty_base, asset_id, location, event FROM postings WHERE source_kind='exchange'"
                                       " AND source_ns=? AND source_id=? AND leg_seq=?", (ns9, o["sid"], int(o["leg"]))).fetchone()
@@ -112,7 +114,7 @@ def _undo(path):
                             or r9["event"] != "EXF_ADJUST" or int(r9["asset_id"]) != int(o.get("aid") or m["aid"])):
                         raise ValueError(f"지금 원장이 재배치 뒤 모양과 다름: {ns9} {o['sid']} L{o['leg']}")
                     conn.execute("DELETE FROM postings WHERE posting_id=?", (int(r9["posting_id"]),))
-                    c._bump_position(int(r9["asset_id"]), -int(o["qb"]), loc)
+                    c.core._bump_position(int(r9["asset_id"]), -int(o["qb"]), loc)
             for o in m["upd"]:
                 r9 = conn.execute("SELECT posting_id, event_ts, qty_base, source_ns, source_id, leg_seq, location, asset_id FROM postings"
                                   " WHERE posting_id=?", (int(o["pid"]),)).fetchone()
@@ -121,14 +123,14 @@ def _undo(path):
                         or int(r9["asset_id"]) != int(m["aid"])):
                     raise ValueError(f"지금 원장이 재배치 뒤 모양과 다름: {o['sid']} L{o['leg']}")
                 conn.execute("UPDATE postings SET event_ts=?, qty_base=? WHERE posting_id=?", (int(o["ts"]), str(o["qb"]), int(o["pid"])))
-                c._bump_position(int(m["aid"]), int(o["qb"]) - int(o["qb_new"]), loc)
+                c.core._bump_position(int(m["aid"]), int(o["qb"]) - int(o["qb_new"]), loc)
             for o in m["del"]:
                 conn.execute(
                     "INSERT INTO postings (posting_id, source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                     " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES (?, 'exchange', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'opening',"
                     " 'EXF_ADJUST', ?)", (int(o["pid"]), f"{ex}:recon", o["sid"], int(o["leg"]), int(o["ts"]), int(o["aid"]), loc, str(o["qb"]),
                                           int(o.get("cv") or core.CLASSIFIER_VER)))
-                c._bump_position(int(o["aid"]), int(o["qb"]), loc)
+                c.core._bump_position(int(o["aid"]), int(o["qb"]), loc)
         led1, pos1 = _snap(conn, locs)
         bad_l = sorted(k for k in set(led0) | set(led1) if led0.get(k, 0) != led1.get(k, 0))
         bad_p = sorted(k for k in set(pos0) | set(pos1) if Decimal(str(pos0.get(k) or 0)) != Decimal(str(pos1.get(k) or 0)))
@@ -139,13 +141,13 @@ def _undo(path):
             ex, sym = m["ex"], m["sym"]
             for b9 in (m["tomb_new"] if isinstance(m.get("tomb_new"), list) else m["cands"]):
                 if not isinstance(m.get("tomb_new"), list):
-                    has9 = any(not common.exf_is_debt_int("EXF_ADJUST", int(r9[0]), f"{ex}:recon", f"exfrecon:{sym}:{int(b9)}") for r9 in conn.execute(
+                    has9 = any(not histmark.exf_is_debt_int("EXF_ADJUST", int(r9[0]), f"{ex}:recon", f"exfrecon:{sym}:{int(b9)}") for r9 in conn.execute(
                         "SELECT leg_seq FROM postings WHERE source_kind='exchange' AND source_ns=? AND source_id=? AND location=? AND event='EXF_ADJUST'",
                         (f"{ex}:recon", f"exfrecon:{sym}:{int(b9)}", m["loc"])))
                     if not has9:
                         continue
                 nt9 += conn.execute("DELETE FROM exf_adj_tomb WHERE ex=? AND sym=? AND bts=?", (ex, sym, int(b9))).rowcount
-        conn.execute("DELETE FROM meta WHERE k LIKE 'exf\\_fut\\_cur\\_%' ESCAPE '\\' OR k=?", (core.Core.EXF_FUT_WAIT_META,))
+        conn.execute("DELETE FROM meta WHERE k LIKE 'exf\\_fut\\_cur\\_%' ESCAPE '\\' OR k=?", (core_svc.ExfService.EXF_FUT_WAIT_META,))
         conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_place_v', ?)", (f"{d['v']}:undone:{int(time.time())}",))
         conn.commit()
     except Exception as e:
@@ -153,11 +155,11 @@ def _undo(path):
         print(f"거부: 되돌림 전체 취소(원장·표식 무변) — {e} · 정본 롤백 = 원장 백업 복원")
         return 1
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
     ts9 = [m["t_from"] for m in plan if m.get("t_from") is not None]
-    hd = common.mark_hist_dirty(min(ts9)) if ts9 else None
+    hd = histmark.mark_hist_dirty(min(ts9)) if ts9 else None
     print(f"되돌림 {len(plan)} 통화 · 지운 대사 경계 {nt9}줄 삭제 · meta exf_fut_place_v = '{d['v']}:undone:…'(자동 적용 금지 — 다시 하려면 --apply)"
           f" · exf_fut_cur_* 삭제 · daily_cache 무효화 · 장기 곡선 표식 {hd}")
     return 0
@@ -166,8 +168,8 @@ def _undo(path):
 def _out_ok(out):
     dst = os.path.abspath(out)
     real = os.path.realpath(dst)
-    st = os.path.realpath(common.STATE_DIR)
-    if os.path.commonpath([real, st]) == st or real in {os.path.realpath(common.CONFIG_PATH), os.path.realpath(common.ENV_PATH)}:
+    st = os.path.realpath(paths.STATE_DIR)
+    if os.path.commonpath([real, st]) == st or real in {os.path.realpath(paths.CONFIG_PATH), os.path.realpath(paths.ENV_PATH)}:
         raise ValueError(f"state·설정 경로는 출력으로 못 씀({real})")
     if os.path.lexists(dst):
         try:
@@ -192,13 +194,13 @@ def _snap(conn, locs):
 
 
 def _backup(conn):
-    bd = os.path.join(common.STATE_DIR, "backups")
+    bd = os.path.join(paths.STATE_DIR, "backups")
     os.makedirs(bd, exist_ok=True)
-    size = os.path.getsize(common.DB_PATH) + (os.path.getsize(common.DB_PATH + "-wal") if os.path.exists(common.DB_PATH + "-wal") else 0)
+    size = os.path.getsize(paths.DB_PATH) + (os.path.getsize(paths.DB_PATH + "-wal") if os.path.exists(paths.DB_PATH + "-wal") else 0)
     free = shutil.disk_usage(bd).free
     if free < size * 1.2:
         raise ValueError(f"디스크 여유 {free / 1024 ** 3:.1f}GB < 원장×1.2 {size * 1.2 / 1024 ** 3:.1f}GB — 공간을 비우거나, 따로 백업을 떴으면 --no-backup")
-    dst = os.path.join(bd, f"ledger_pre_futplace_v{core.Core.EXF_FUT_V}_{time.strftime('%Y%m%d_%H%M%S')}.db")
+    dst = os.path.join(bd, f"ledger_pre_futplace_v{core_svc.ExfService.EXF_FUT_V}_{time.strftime('%Y%m%d_%H%M%S')}.db")
     tmp = dst + ".tmp"
     fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
     os.close(fd)
@@ -235,17 +237,56 @@ def _args(argv):
     return a
 
 
+def _apply(a, expect):
+    conn = sqlite3.connect(paths.DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    c = _planner(conn)
+    before = c._meta_get("exf_fut_place_v")
+    sc, pend = c._exf_fut_place_scope()
+    locs = sorted({f"exchange:{ex}" for ex in core_svc.ExfService.EXF_FUT_EX})
+    if sc != "done":
+        pl0, _cu = c._exf_fut_place_plan(only=pend)
+        if any(m.get("cands") for m in pl0) and not a.no_backup:
+            try:
+                bk = _backup(conn)
+            except (OSError, ValueError, sqlite3.Error) as e:
+                print(f"거부: 적용 전 원장 백업 실패 — {e} · 원장 무변")
+                return 1
+            print(f"적용 전 원장 백업: {bk}")
+    led0, pos0 = _snap(conn, locs)
+    res = c._exf_fut_place_once(expect=expect, redo=True)
+    after = c._meta_get("exf_fut_place_v")
+    if res is False:
+        print("거부: 잠금 안에서 다시 세운 계획이 --expect 와 다름(원장이 그 사이 바뀜) — 원장 무변")
+        return 1
+    sc1, pend1 = c._exf_fut_place_scope()
+    if res is None and sc1 not in ("done", "partial"):
+        print("실패: 적용 안 됨(로그 참고) — 원장 무변")
+        return 1
+    led1, pos1 = _snap(conn, locs)
+    bad_l = sorted(k for k in set(led0) | set(led1) if led0.get(k, 0) != led1.get(k, 0))
+    bad_p = sorted(k for k in set(pos0) | set(pos1) if pos0.get(k) != pos1.get(k)
+                   and not (Decimal(str(pos0.get(k) or 0)) == Decimal(str(pos1.get(k) or 0))))
+    if bad_l or bad_p:
+        print(f"★일치 검사 실패 — 원장 합 다름 {bad_l[:10]} · positions 다름 {bad_p[:10]} (적용은 끝남 — 배포 도구는 중단·원장까지 롤백)★")
+        return 1
+    print(f"적용: meta exf_fut_place_v {before} → {after} · 일치 검사 통과(거래소 위치 {len(locs)}곳 · 원장 합 {len(led1)}칸 · positions {len(pos1)}칸 무변)"
+          + (f" · ★대기 거래소 {','.join(sorted(pend1))}(다음 대사에 core 가 그 거래소만 다시)★" if sc1 == "partial" else ""))
+    return 0
+
+
 def main(argv=None):
     a = _args(sys.argv[1:] if argv is None else argv)
     out = a.json
-    if not os.path.isfile(common.DB_PATH):
-        print(f"거부: 원장 없음({common.DB_PATH}) — TJ_BASE 확인(빈 원장을 만들지 않음)")
+    if not os.path.isfile(paths.DB_PATH):
+        print(f"거부: 원장 없음({paths.DB_PATH}) — TJ_BASE 확인(빈 원장을 만들지 않음)")
         return 1
     if a.undo:
         if not _core_stopped():
             print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함(우회 옵션 없음)")
             return 1
-        return _undo(a.undo)
+        with ledger_lock.hold(paths.DB_PATH, who="exf_fut_place --undo"):
+            return _undo(a.undo)
     if a.apply:
         if not _core_stopped():
             print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함(우회 옵션 없음)")
@@ -264,41 +305,8 @@ def main(argv=None):
         if expect is not None and any(m.get("err") for m in expect):
             print("거부: 검토한 계획에 계획 못 세운 통화가 있음(미리보기 종료 코드 1) — 원장 무변")
             return 1
-        conn = sqlite3.connect(common.DB_PATH, timeout=30)
-        conn.row_factory = sqlite3.Row
-        c = _planner(conn)
-        before = c._meta_get("exf_fut_place_v")
-        sc, pend = c._exf_fut_place_scope()
-        locs = sorted({f"exchange:{ex}" for ex in core.Core.EXF_FUT_EX})
-        if sc != "done":
-            pl0, _cu = c._exf_fut_place_plan(only=pend)
-            if any(m.get("cands") for m in pl0) and not a.no_backup:
-                try:
-                    bk = _backup(conn)
-                except (OSError, ValueError, sqlite3.Error) as e:
-                    print(f"거부: 적용 전 원장 백업 실패 — {e} · 원장 무변")
-                    return 1
-                print(f"적용 전 원장 백업: {bk}")
-        led0, pos0 = _snap(conn, locs)
-        res = c._exf_fut_place_once(expect=expect, redo=True)
-        after = c._meta_get("exf_fut_place_v")
-        if res is False:
-            print("거부: 잠금 안에서 다시 세운 계획이 --expect 와 다름(원장이 그 사이 바뀜) — 원장 무변")
-            return 1
-        sc1, pend1 = c._exf_fut_place_scope()
-        if res is None and sc1 not in ("done", "partial"):
-            print("실패: 적용 안 됨(로그 참고) — 원장 무변")
-            return 1
-        led1, pos1 = _snap(conn, locs)
-        bad_l = sorted(k for k in set(led0) | set(led1) if led0.get(k, 0) != led1.get(k, 0))
-        bad_p = sorted(k for k in set(pos0) | set(pos1) if pos0.get(k) != pos1.get(k)
-                       and not (Decimal(str(pos0.get(k) or 0)) == Decimal(str(pos1.get(k) or 0))))
-        if bad_l or bad_p:
-            print(f"★일치 검사 실패 — 원장 합 다름 {bad_l[:10]} · positions 다름 {bad_p[:10]} (적용은 끝남 — 배포 도구는 중단·원장까지 롤백)★")
-            return 1
-        print(f"적용: meta exf_fut_place_v {before} → {after} · 일치 검사 통과(거래소 위치 {len(locs)}곳 · 원장 합 {len(led1)}칸 · positions {len(pos1)}칸 무변)"
-              + (f" · ★대기 거래소 {','.join(sorted(pend1))}(다음 대사에 core 가 그 거래소만 다시)★" if sc1 == "partial" else ""))
-        return 0
+        with ledger_lock.hold(paths.DB_PATH, who="exf_fut_place --apply"):
+            return _apply(a, expect)
     if out:
         try:
             _out_ok(out)
@@ -319,7 +327,7 @@ def main(argv=None):
     if out:
         try:
             _out_ok(out)
-            common.atomic_write_json(os.path.abspath(out), {"plan": plan, "curs": curs})
+            statefile.atomic_write_json(os.path.abspath(out), {"plan": plan, "curs": curs})
         except (OSError, ValueError) as e:
             print(f"거부: --json 출력 경로 — {e}")
             return 1

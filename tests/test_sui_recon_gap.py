@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
-import _suifake as F
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
+import _suifake as F  # noqa: E402
 
-import importlib.util
-import json
-import os
-import sqlite3
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 try:
-    import sui_watch as SW
+    import sui_watch as SW  # noqa: E402
 except ImportError:
-    import _wip_sui_watch as SW
+    import _wip_sui_watch as SW  # noqa: E402
 
 DAY = 86400
 A, B = N.OWN["sui"]
@@ -47,8 +47,8 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "sui", "address": A}, {"chain": "sui", "address": B}]
 cfg["nonevm"] = {"sui": {"graphql_url": URL, "retries": 1}}
 json.dump(cfg, open(CFG_PATH, "w"))
-cfg = common.load_config()
-w = SegmentWriter(os.path.join(common.INBOX_DIR, "sui"))
+cfg = config.load_config()
+w = SegmentWriter(os.path.join(paths.INBOX_DIR, "sui"))
 
 
 def col_for():
@@ -73,9 +73,9 @@ check("G0 A = gap(메타 없음) · 상세 완료 경계 없음 · 준비 아님
 check("G0 B = 준비 · 체인 전체(A·B)는 준비 아님", st.ready({B}) and not st.ready({A, B}), st.d["status"].get(B))
 
 reg.FORCE_AVAILABLE.add("sui")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
-c._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
+c.svc_recon._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
 rd = dict(c.chain_readers)["sui"]
 c._drain_stream("sui", rd, 0, 0)
 c.conn.commit()
@@ -84,8 +84,8 @@ LA, LB = reg.make_location("sui", A), reg.make_location("sui", B)
 
 def recon():
     ch.tip += 20
-    c._last_recon = 0
-    c.recon_pass({"sui"})
+    c.svc_recon._last_recon = 0
+    c.svc_recon.recon_pass({"sui"})
 
 
 def sum_at(loc, kind=None):
@@ -127,7 +127,7 @@ recon()
 check("H3 다른 지갑 상세 대기 남음 = B 대사 보류", not b_done(), sum_at(LB, "opening"))
 edit_state(lambda s: s.d["pending"].pop(D_S, None))
 
-ad4 = c._nonevm_adapters["sui"]
+ad4 = c.svc_recon._nonevm_adapters["sui"]
 orig_fb = ad4.fetch_balances
 
 
@@ -189,13 +189,13 @@ def copy_core(tag):
         d9 = sqlite3.connect(p9)
         c.conn.backup(d9)
         d9.close()
-    old9 = common.DB_PATH
-    common.DB_PATH = sp
+    old9 = paths.DB_PATH
+    paths.DB_PATH = sp
     try:
-        sc = core.Core(common.load_config())
+        sc = core.Core(config.load_config())
     finally:
-        common.DB_PATH = old9
-    sc._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
+        paths.DB_PATH = old9
+    sc.svc_recon._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
     return bp, sc
 
 
@@ -247,16 +247,16 @@ sc.conn.execute("DELETE FROM meta WHERE k LIKE 'recon_done_%'")
 sc.conn.commit()
 check("GR rebuild 재생 직후 = B 합 2(앵커 없음)", lsum(sc.conn, LB) == 2 * E9, lsum(sc.conn, LB))
 ch.tip += 20
-sc._last_recon = 0
-sc.recon_pass({"sui"})
+sc.svc_recon._last_recon = 0
+sc.svc_recon.recon_pass({"sui"})
 check("GR rebuild 뒤 다시 대사 = B 합 7 · A 합 3(이중 계상 없음)", lsum(sc.conn, LB) == 7 * E9 and lsum(sc.conn, LA) == 3 * E9,
       (lsum(sc.conn, LB), lsum(sc.conn, LA), b_anchors(sc.conn)))
 sc.conn.close()
 bp, sc = copy_core("rs")
 pos0 = {tuple(r) for r in c.conn.execute("SELECT * FROM positions")}
 ch.tip += 20
-sc._last_recon = 0
-sc.recon_pass({"sui"})
+sc.svc_recon._last_recon = 0
+sc.svc_recon.recon_pass({"sui"})
 check("GR 재시작 뒤 대사 주기 = B 합 7 · 앵커 무변 · 보유(positions) 그대로", lsum(sc.conn, LB) == 7 * E9 and b_anchors(sc.conn) == ba0
       and {tuple(r) for r in sc.conn.execute("SELECT * FROM positions")} == pos0, (lsum(sc.conn, LB), b_anchors(sc.conn)))
 sc.conn.close()

@@ -2,35 +2,35 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
-import time
-import urllib.parse
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 KEY = "TESTankrKEY0000000001"
 os.environ["TJ_ANKR_KEY"] = KEY
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import addr_tier as AT
+assert T.TMP in paths.STATE_DIR
+import addr_tier as AT  # noqa: E402
 try:
-    import inflow_probe as IP
+    import inflow_probe as IP  # noqa: E402
 except ImportError as e:
     T.chk(False, f"inflow_probe 모듈 있음: {e}")
     T.finish()
-import evm_watch as EW
-import bf_engine as B
+import evm_watch as EW  # noqa: E402
+import bf_engine as B  # noqa: E402
 
 
 def check(n, c, d=""):
     T.chk(bool(c), n, None if c else str(d)[:900])
 
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 TRANSFER = IP.TRANSFER
 ALCH = "https://eth-mainnet.g.alchemy.com/v2/ALCHtestKEY00000001"
 CFG = {"chains": {"eth": {"blockscout": "https://eth.invalid", "rpcs": ["https://eth-detail.invalid"], "rpc_logs": [ALCH], "conf_depth": 12},
@@ -154,7 +154,7 @@ check("I1b 깨움 = 'token_in' · 받은 블록 · 활동 아님(sent·계단 �
 check("I1c 안 받은 쉬는 쌍 = 쉼(깨움 없음)", W2 not in (wt.due or []) and not tb.pairs[W2].get("wake"), (wt.due, tb.pairs[W2].get("wake")))
 check("I1d 지금 주기 쌍은 깨움 표식 없음(어차피 매 주기 탐색기)", not tb.pairs[W3].get("wake"), tb.pairs[W3].get("wake"))
 check("I1e 깨움 모양 = 종전 TierBook.wake 와 같음(at·blk·why — 옛 코드로 되돌려도 그대로 읽힘)", set((p1.get("wake") or {}).keys()) == {"at", "blk", "why"}, p1.get("wake"))
-st1 = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+st1 = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
 check("I1f 커서 = 답한 노드 head − 확정 깊이(1188) · 상태 파일", st1.get("blk") == 1188 and st1.get("ok") is True and st1.get("node") == "Ankr", st1)
 
 hosts = [c[0] for c in NET.calls]
@@ -179,7 +179,7 @@ NET.calls.clear()
 NET.heads = {"rpc.ankr.com": 1100, "rpc.mevblocker.io": 1300}
 NET.logs = [log20(W2, 1150)]
 r = IP.tick(CFG, FW(tb), now=NOW)
-st = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+st = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
 check("I3a 뒤처진 노드(head 1100) = 커서 1088 까지만 · 그 너머 받음 아직 안 깨움", st.get("blk") == 1088 and not tb.pairs[W2].get("wake"), (st, r))
 NET.heads["rpc.ankr.com"] = 1300
 NET.calls.clear()
@@ -189,14 +189,14 @@ check("I3b 다음 바퀴 = 1089 부터(빈틈 없음) → 1150 받음 깨움", g
 
 tb = mkbook([W1], rest=(W1,))
 st0 = {"blk": 1100, "carry": {}}
-common.atomic_write_json(os.path.join(S, "inflow_eth.json"), st0)
+statefile.atomic_write_json(os.path.join(S, "inflow_eth.json"), st0)
 IP._MEM.pop("eth", None)
 NET.heads = {"rpc.ankr.com": 1300, "rpc.mevblocker.io": 1300, "gateway.tenderly.co": 1300, "eth.drpc.org": 1300}
 for h in NET.heads:
     NET.fail[(h, "eth_getLogs")] = "HTTP Error 500: boom"
 NET.calls.clear()
 r = IP.tick(CFG, FW(tb), now=NOW)
-st = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+st = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
 check("I4a 모든 노드 실패 = 커서 그대로 · ok 거짓", st.get("blk") == 1100 and st.get("ok") is False, st)
 NET.fail.clear()
 NET.calls.clear()
@@ -206,7 +206,7 @@ for u in list(IP._MEM["eth"]["cool"]):
 r = IP.tick(CFG, FW(tb), now=NOW + IP.FAIL_RETRY_SEC + 1)
 g = NET.gl()
 check("I4c 3분 뒤 = 같은 구간(1101)부터 다시 · 성공", r is not None and g and int(g[0][3][0]["fromBlock"], 16) == 1101
-      and common.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == 1288, (g[:1], r))
+      and statefile.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == 1288, (g[:1], r))
 
 tb = mkbook([W1], rest=(W1,))
 NET.calls.clear()
@@ -219,7 +219,7 @@ NET.calls.clear()
 IP.tick(CFG, FW(tb), now=NOW + 601)
 check("I5b 6시간 안 = Ankr 안 부름(공개 노드)", NET.calls and not any(c[0] == "rpc.ankr.com" for c in NET.calls), [c[0] for c in NET.calls])
 
-con = sqlite3.connect(common.DB_PATH)
+con = sqlite3.connect(paths.DB_PATH)
 con.execute("CREATE TABLE IF NOT EXISTS assets (asset_id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, chain TEXT, address TEXT, symbol TEXT,"
             " decimals INTEGER, confirmed INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0, group_id INTEGER, UNIQUE (kind, chain, address))")
 CA_SPAM, CA_OK, CA_NEW = "0x" + "5a" * 20, "0x" + "5b" * 20, "0x" + "5c" * 20
@@ -274,7 +274,7 @@ NET.calls.clear()
 r = IP.tick(CFG, FW(tb), now=NOW)
 g = NET.gl("rpc.ankr.com")
 spans = [int(c[3][0]["toBlock"], 16) - int(c[3][0]["fromBlock"], 16) + 1 for c in g]
-st = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+st = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
 safe = 1_000_000 - 12
 check("I10a 최신 상한(3,000 × 8)만 · 요청마다 3,000 이하 · 묶음 8 × 토픽 2",
       len(g) == 16 and max(spans) <= 3000 and int(g[0][3][0]["fromBlock"], 16) == safe - 24000 + 1 and st.get("blk") == safe, (len(g), max(spans or [0]), st.get("blk")))
@@ -288,7 +288,7 @@ NET.logs = []
 NET.calls.clear()
 IP.tick(CFG, FW(tb), now=NOW)
 g = NET.gl("rpc.ankr.com")
-check("I11a 묶음 크기 = 체인 노드 공통 최소(Ankr 1,000 · 공개 500 → 500 · 1,200 → 3묶음 × 토픽 2 — 진행점을 노드끼리 이어 쓰게 · 코덱스 in474)",
+check("I11a 묶음 크기 = 체인 노드 공통 최소(Ankr 1,000 · 공개 500 → 500 · 1,200 → 3묶음 × 토픽 2 — 진행점을 노드끼리 이어 쓰게)",
       len(g) == 6 and max(len(c[3][0]["topics"][2] if c[3][0]["topics"][0] == TRANSFER else c[3][0]["topics"][3]) for c in g) == 500, len(g))
 os.environ.pop("TJ_ANKR_KEY")
 os.remove(os.path.join(S, "inflow_eth.json"))
@@ -303,9 +303,9 @@ tb = mkbook([W1, W2], rest=(W1, W2))
 NET.logs = [log1155(W1, 1150), log721(W2, 1160)]
 r = IP.tick(CFG, FW(tb), now=NOW)
 check("I12 ERC-1155 TransferSingle(topic3) · ERC-721(토픽 4개) = 깨움", tb.pairs[W1].get("wake", {}).get("blk") == 1150 and tb.pairs[W2].get("wake", {}).get("blk") == 1160, r)
-disk = (common.read_json(os.path.join(S, "addr_tier_eth.json"), {}).get("pairs") or {})
+disk = (statefile.read_json(os.path.join(S, "addr_tier_eth.json"), {}).get("pairs") or {})
 check("I12b 깨움 = 커서보다 먼저 장부 파일에(크래시 틈 없음)", (disk.get(W1) or {}).get("wake", {}).get("why") == "token_in"
-      and common.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == NET.heads["rpc.ankr.com"] - 12, (disk.get(W1) or {}).get("wake"))
+      and statefile.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == NET.heads["rpc.ankr.com"] - 12, (disk.get(W1) or {}).get("wake"))
 
 tb = mkbook([W1], rest=(W1,))
 NET.logs = []
@@ -343,7 +343,7 @@ IP.tick(CFG, FW(tb), now=NOW + 601)
 g = NET.gl()
 check("I15 재시작 = 상태 파일 커서(1288)에서 이어서(1289부터)", g and int(g[0][3][0]["fromBlock"], 16) == 1289, g[:1])
 
-import nodekeys as NK
+import nodekeys as NK  # noqa: E402
 
 B.rpc_day_configure({"rpc_day_limits": {"node_ankr": NK.budget_spec("ankr", NK.plans({})["ankr"])}})
 
@@ -417,7 +417,7 @@ check("I18b 헬스 문구 = '쉬는 지갑 토큰 받음 확인 N분 전(Ankr)' 
       and "실패" in IP.health_text(dict(f9, ok=False), now=NOW + 700), IP.health_text(f9, now=NOW + 901))
 check("I18c 다른 체인 상태 파일(설정에 없는 체인) = 화면에서 뺌", all(x["c"] in CFG["chains"] for x in IP.web_view(CFG)["rows"]))
 
-import threading
+import threading  # noqa: E402
 
 tb = mkbook([W1], rest=(W1,), full_blk=100000)
 IP._mem("eth")["st"]["blk"] = 100000
@@ -427,7 +427,7 @@ for h in NET.heads:
     NET.fail[(h, "eth_getLogs")] = "HTTP Error 500: boom"
 NET.calls.clear()
 IP.tick(CFG, FW(tb), now=NOW)
-st = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+st = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
 check("R1a 모든 노드 getLogs 실패(마지막 = 작은 상한 예비 노드) = 커서 100000 그대로 · 건너뜀 0", st.get("blk") == 100000 and not st.get("skipped")
       and any(c[0] == "eth.drpc.org" for c in NET.gl()), {k: st.get(k) for k in ("blk", "skipped", "err")})
 NET.fail.clear()
@@ -516,7 +516,7 @@ blks, ticks, first_woke = [], 0, None
 for k in range(12):
     r = IP.tick(CFG32, FW(tb), now=NOW + k * (IP.FAIL_RETRY_SEC + 1), deadline=time.time() + 0.45)
     ticks += 1
-    stk = common.read_json(os.path.join(S, "inflow_eth.json"), {})
+    stk = statefile.read_json(os.path.join(S, "inflow_eth.json"), {})
     blks.append(stk.get("blk"))
     if first_woke is None:
         first_woke = bool(tb.pairs[MANY2[0]].get("wake"))
@@ -627,8 +627,8 @@ IP.tick(CFG32, FW(tb), now=NOW + IP.FAIL_RETRY_SEC + 1)
 ga = NET.gl("rpc.ankr.com")
 first_w = ("0x" + ga[0][3][0]["topics"][2][0][-40:]) if ga and ga[0][3][0]["topics"][0] == TRANSFER else None
 check("R3b 다음 바퀴 = 진행점(묶음 5 · 조회 10)부터 이어서 그 구간 끝까지 · 마지막 묶음 받음 깨움",
-      first_w == MANY2[5 * 32] and common.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == 1288
-      and (tb.pairs[MANY2[-1]].get("wake") or {}).get("blk") == 1270, (first_w, len(ga), common.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk")))
+      first_w == MANY2[5 * 32] and statefile.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk") == 1288
+      and (tb.pairs[MANY2[-1]].get("wake") or {}).get("blk") == 1270, (first_w, len(ga), statefile.read_json(os.path.join(S, "inflow_eth.json"), {}).get("blk")))
 
 for where in ("eth_blockNumber", "eth_getLogs"):
     tb = mkbook([W1], rest=(W1,))

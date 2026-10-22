@@ -16,10 +16,11 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-import common
+import address_codec
+import logs, net_http, num_parse, paths, statefile
 try:
     import fut_rcpt
-except Exception:
+except Exception:   # noqa: BLE001 [optional]
     fut_rcpt = None
 
 log = logging.getLogger("tj-exf")
@@ -80,8 +81,7 @@ def validate_address(dex: str, addr: str):
         if not _bech32_ok(a, "dydx"):
             raise ValueError("dYdX 주소 체크섬이 맞지 않습니다 — 원문을 다시 복사하세요")
         return a.lower(), "dYdX 주소 확인됨"
-    import settings_store as ss
-    k2, norm, note = ss.validate_address(a)
+    k2, norm, note = address_codec.validate_address(a)
     if kind == "evm" and k2 != "evm":
         raise ValueError(f"{NAMES[dex]} 은 0x… EVM 주소를 씁니다")
     if kind == "sol" and k2 != "sol":
@@ -141,7 +141,7 @@ def configured(cfg: dict) -> dict:
 
 
 def fut_path(dex: str) -> str:
-    return os.path.join(common.STATE_DIR, f"futures_{dex}.json")
+    return paths.state(f"futures_{dex}.json")
 
 
 class PerpHTTPError(RuntimeError):
@@ -159,9 +159,9 @@ def _http_default(url, body=None, timeout=15):
     h = {"User-Agent": UA, "Accept": "application/json", "Accept-Encoding": "gzip"}
     if data is not None:
         h["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=h, method="POST" if data is not None else "GET")
+    req = net_http.request(url, data=data, headers=h, method="POST" if data is not None else "GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with net_http.urlopen(req, timeout=timeout) as r:
             raw = r.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError(f"퍼프 응답 크기 초과(>{MAX_BYTES // 1048576}MB)")
@@ -176,7 +176,7 @@ def _http_default(url, body=None, timeout=15):
         ra = e.headers.get("Retry-After") if e.headers else None
         try:
             txt = e.read(512).decode("utf-8", "replace")
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             txt = ""
         raise PerpHTTPError(e.code, re.sub(r"\s+", " ", _txt(txt))[:160], ra) from None
 
@@ -209,7 +209,7 @@ def _gate_fail(dex, e, now=None):
         else:
             wait = min(BACKOFF_MAX, 60 * 2 ** min(20, g["fail"] - 1))
         g["until"] = now + wait
-        g["why"] = common.safe_err(e)[:160]
+        g["why"] = logs.safe_err(e)[:160]
         return wait
 
 
@@ -263,11 +263,8 @@ class Ctx:
 
 
 def _f(v, d=0.0):
-    try:
-        x = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return d
-    return x if math.isfinite(x) and abs(x) <= 1e15 else d
+    x = num_parse.to_float(v, catch_overflow=True)
+    return x if x is not None and abs(x) <= 1e15 else d
 
 
 class Unknown(ValueError):
@@ -296,11 +293,7 @@ def _req_num(row, field, what):
 
 
 def _big(v, d=0.0):
-    try:
-        x = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return d
-    return x if math.isfinite(x) else d
+    return num_parse.to_float(v, d, catch_overflow=True)
 
 
 def _dec(v):
@@ -374,6 +367,9 @@ def desc_pages(ctx, st, key, fetch, pos_of, t_of, handle, limit, open_floor=None
             before = min(ps)
         if done and newest is not None:
             s["top"] = max(top, newest)
+    if s.get("top") is None and s.get("bf_done"):
+        s["bf_done"] = False
+        s.pop("bf", None)
     if s.get("bf_done") and int(s.get("bf_floor") or 0) <= ctx.t0:
         return
     if s.get("bf_done"):
@@ -419,6 +415,9 @@ def page_pages(ctx, st, key, fetch_page, pos_of, t_of, handle, limit):
                 break
         if done:
             s["top"] = newest
+    if s.get("top") is None and s.get("bf_done"):
+        s["bf_done"] = False
+        s.pop("bf_page", None)
     if s.get("bf_done") and int(s.get("bf_floor") or 0) <= ctx.t0:
         return
     s["bf_done"] = False
@@ -624,7 +623,7 @@ def fetch_dydx(ctx, addr, st, add):
         if e.code in (401, 403, 429):
             raise
         info9["mmr"] = None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         info9["mmr"] = None
     prev_h = st.get("open_h") or {}
     for n in subs:
@@ -657,7 +656,7 @@ def fetch_dydx(ctx, addr, st, add):
             _ev(add, _iso_ms(r.get("createdAt")), _usd(r.get("ticker")), "FUNDING", _f(r.get("payment")),
                 f"dy:{addr}:{n}:fd:{r.get('createdAtHeight')}:{r.get('ticker')}")
 
-        h_of = lambda x: int(_f(x.get("createdAtHeight"), 0))
+        h_of = lambda x: int(_f(x.get("createdAtHeight"), 0))   # noqa: E731
         fl = [int(v) for v in (prev_h.get(str(n)), open_h.get(str(n))) if v is not None]
         desc_pages(ctx, st, f"s{n}:pos", pager("perpetualPositions", "positions"), h_of,
                    lambda x: _iso_ms(x.get("closedAt") or x.get("createdAt")), on_pos, 1000, open_floor=min(fl) if fl else None, full=True)
@@ -734,7 +733,7 @@ def fetch_lighter(ctx, addr, st, add):
         accs.append((idx, cur, syms))
     info = {"equity": eq, "maint": mm, "mmr": _acct_mmr(mpairs)}
     ctx.pos(addr, poss, info)
-    ts_of = lambda t: int(t.get("timestamp") or 0)
+    ts_of = lambda t: int(t.get("timestamp") or 0)   # noqa: E731
 
     for idx, cur, syms in accs:
         sst = st.setdefault(f"a{idx}", {})
@@ -919,8 +918,7 @@ def _gmx_meta(ctx, ch):
 
 
 def fetch_gmx(ctx, addr, st, add):
-    import settings_store as ss
-    acc = ss.to_checksum(addr)
+    acc = address_codec.to_checksum(addr)
     poss = []
     metas = {}
     for ch, (sq, _rest) in GMX_CHAINS.items():
@@ -1010,7 +1008,7 @@ def fetch_pacifica(ctx, addr, st, add):
         if e.code in (401, 403, 429):
             raise
         acc = None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         acc = None
     if isinstance(acc, dict):
         info.update({"equity": _f(acc.get("account_equity")), "maint": _f(acc.get("cross_mmr")),
@@ -1038,7 +1036,7 @@ def fetch_pacifica(ctx, addr, st, add):
 
     for path, key, h in (("trades/history", "trades", on_tr), ("funding/history", "funding", on_fd)):
         s, top, fetch = cur_pager(path, key)
-        hid = lambda x: int(_f(x.get("history_id")))
+        hid = lambda x: int(_f(x.get("history_id")))   # noqa: E731
         if top is not None:
             cursor, newest, done = None, None, False
             for _ in range(MAX_PAGES):
@@ -1143,7 +1141,7 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
     now = int(now or time.time())
     path = fut_path(dex)
     try:
-        old = common.read_json(path, {})
+        old = statefile.read_json(path, {})
     except SystemExit:
         log.warning("%s 퍼프 스냅숏 손상 — 새로 받습니다", dex)
         old = {}
@@ -1168,8 +1166,8 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
                     "next": {k: int(v) for k, v in n9.items() if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
                              and abs(v) < 1e15} if isinstance(n9, dict) else {}}
             pxl = []
-        except Exception as e9:
-            log.warning("%s 가격 옆 파일 커서 읽기 실패(이번 주기 가격 보강 건너뜀 · 정산 무관): %s", dex, common.safe_err(e9)[:120])
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            log.warning("%s 가격 옆 파일 커서 읽기 실패(이번 주기 가격 보강 건너뜀 · 정산 무관): %s", dex, logs.safe_err(e9)[:120])
             pxl, pxbf = None, None
     for a in accts:
         ctx = Ctx(dex, t0_ms, now, budget=share, cache=cache)
@@ -1225,8 +1223,8 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
             if e.code in (401, 403, 429):
                 http_err = e
             new_ev, st = [], cursor.get(addr) or {}
-        except Exception as e:
-            m["err"] = _txt(type(e).__name__ + ": " + common.safe_err(e), 160)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            m["err"] = _txt(type(e).__name__ + ": " + logs.safe_err(e), 160)
             if not _keep_got(ctx, addr, m, poss, now, e):
                 poss += [p for p in pos_old if p.get("acct") == addr]
                 last_err = e
@@ -1249,17 +1247,17 @@ def snapshot_dex(dex, accts, t0_ms, now=None, note=None):
         log.warning("%s 퍼프 정산 이벤트 %d건 (파일 비대) — 보존 유지", dex, len(ev))
     out = {"v": FILE_VER, "ts": now if ok_any else int(old.get("ts") or 0), "dex": dex, "wallet": wallet, "positions": poss,
            "events": ev, "cursor": cursor, "accts": ameta}
-    common.atomic_write_json(path, out)
+    statefile.atomic_write_json(path, out)
     if pxl is not None:
         try:
             _hl_px_backfill(px_ok, cursor, pxl, pxbf, t0_ms, now)
-        except Exception as e9:
-            log.info("hyperliquid 가격 옆 파일 과거 채움 다음 주기로(정산 무관): %s", common.safe_err(e9)[:120])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            log.info("hyperliquid 가격 옆 파일 과거 채움 다음 주기로(정산 무관): %s", logs.safe_err(e9)[:120])
         try:
             fut_rcpt.update(dex, pxl, now * 1000, cursor={"bf_done": sorted(pxbf["done"] & set(want)), "bf_next": {k: v for k, v in pxbf["next"].items() if k in want}},
                             keep=lambda r: r.get("acct") in want)
-        except (Exception, SystemExit) as e9:
-            log.warning("%s 가격 옆 파일 저장 실패(정산 무관): %s", dex, common.safe_err(e9)[:120])
+        except (Exception, SystemExit) as e9:   # noqa: BLE001 [optional]
+            log.warning("%s 가격 옆 파일 저장 실패(정산 무관): %s", dex, logs.safe_err(e9)[:120])
     if http_err is not None:
         raise http_err
     if not ok_any and last_err is not None:
@@ -1271,7 +1269,7 @@ def _t0_ms(cfg, now=None):
     try:
         import bf_engine
         t = bf_engine.effective_backfill_t0(cfg, now)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         months = float((cfg or {}).get("backfill_months") or 5)
         t = (now or time.time()) - months * 30 * 86400
     return int(max(0, t) * 1000)
@@ -1314,9 +1312,9 @@ def snapshot_all(cfg=None, now=None):
             _gate_ok(dex)
             errs = sum(1 for m in out["accts"].values() if m.get("err"))
             return dex, f"ok 콜 {n} · 이벤트 {len(out['events'])} · 포지션 {len(out['positions'])}" + (f" · 주소 오류 {errs}" if errs else "")
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
             w = _gate_fail(dex, e)
-            return dex, f"실패 → {int(w)}초 대기: {common.safe_err(e)[:120]}"
+            return dex, f"실패 → {int(w)}초 대기: {logs.safe_err(e)[:120]}"
     todo = [d for d in DEXES if d in conf]
     if not todo:
         return res
@@ -1334,14 +1332,14 @@ def _note(dex, cfg):
         import hl_spot
         if hl_spot.addresses(cfg):
             return "현금(USDC)은 Hyperliquid 잔고로 총자산 반영(현물 수집 주소) · 미실현 손익은 표시 전용"
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return None
 
 
 def _read_cfg():
     try:
-        with open(common.CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(paths.CONFIG_PATH, "r", encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else None
     except (OSError, ValueError):
@@ -1373,7 +1371,7 @@ def start_background():
                     if configured(cfg) or last_fp is not None:
                         snapshot_all(cfg)
                     last_fp, next_at = fp, time.time() + POLL_SEC
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.warning("퍼프 덱스 수집 주기 실패(다음 주기): %s", repr(e)[:160])
                 next_at = time.time() + POLL_SEC
             time.sleep(TICK_SEC)
@@ -1385,7 +1383,7 @@ def status(cfg=None) -> dict:
     out = {}
     for dex, lst in conf.items():
         try:
-            d = common.read_json(fut_path(dex), {})
+            d = statefile.read_json(fut_path(dex), {})
         except SystemExit:
             d = {}
         ac = d.get("accts") or {}

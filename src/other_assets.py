@@ -15,13 +15,12 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-import common
+import net_http, paths
+import fsio
 
 log = logging.getLogger("tj-web")
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 SCHEMA = 1
-STORE_PATH = os.path.join(common.STATE_DIR, "other_assets.json")
-PX_PATH = os.path.join(common.STATE_DIR, "other_assets_px.json")
 STORE_LOCK = threading.RLock()
 
 CATS = {"realestate": "부동산", "stock": "주식", "gold": "금", "car": "자동차", "cash": "현금", "etc": "기타", "debt": "부채"}
@@ -73,31 +72,10 @@ def _jsafe(o):
 
 
 def atomic_write(path: str, obj) -> None:
-    d = os.path.dirname(path)
-    os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, ".tmp_oa_%s_%s" % (os.getpid(), secrets.token_hex(4)))
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-        try:
-            dfd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError:
-            pass
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+        fsio.atomic_write_json(path, obj, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except fsio.DirSyncError:
+        pass
 
 
 def empty_store() -> dict:
@@ -105,7 +83,7 @@ def empty_store() -> dict:
 
 
 def load_store(path: str | None = None) -> dict:
-    path = path or STORE_PATH
+    path = path or paths.state("other_assets.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -162,12 +140,12 @@ def _item_bad(x) -> str | None:
 def save_store(d: dict, path: str | None = None) -> None:
     d["v"] = SCHEMA
     d["updated"] = int(_now())
-    atomic_write(path or STORE_PATH, d)
+    atomic_write(path or paths.state("other_assets.json"), d)
 
 
 def load_px(path: str | None = None) -> dict:
     try:
-        with open(path or PX_PATH, "r", encoding="utf-8") as f:
+        with open(path or paths.state("other_assets_px.json"), "r", encoding="utf-8") as f:
             d = json.load(f)
         if isinstance(d, dict) and isinstance(d.get("q"), dict):
             return d
@@ -374,13 +352,13 @@ def yh_url(sym: str, rng: str) -> str:
 
 
 def default_http_get(url: str, timeout: float = 12.0):
-    req = urllib.request.Request(url, headers={"User-Agent": YH_UA, "Accept": "application/json"})
+    req = net_http.request(url, headers={"User-Agent": YH_UA, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with net_http.urlopen(req, timeout=timeout) as r:
             return r.status, r.read(2 * 1024 * 1024)
     except urllib.error.HTTPError as e:
         return e.code, b""
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0, b""
 
 
@@ -399,7 +377,7 @@ def _day(ts, off):
 def parse_chart(body: bytes):
     try:
         return _parse_chart(body)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -468,8 +446,8 @@ class Quoter:
         self.paxg_fn = paxg_fn or (lambda: None)
         self.cfg_fn = cfg_fn or (lambda: {})
         self.http_json = http_json
-        self.store_path = store_path or STORE_PATH
-        self.px_path = px_path or PX_PATH
+        self.store_path = store_path or paths.state("other_assets.json")
+        self.px_path = px_path or paths.state("other_assets_px.json")
         self.px = load_px(self.px_path)
         self.px_lock = threading.RLock()
         self.call_lock = threading.Lock()
@@ -595,7 +573,7 @@ class Quoter:
         for sym in cands:
             try:
                 q, err, st = self.fetch_sym(sym, "1y")
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 q, err, st = None, "시세 처리 실패(%s)" % type(e).__name__, 0
             if q:
                 self._rec(sym, q, err, "1y")
@@ -610,7 +588,7 @@ class Quoter:
     def gold_px(self):
         try:
             p = self.paxg_fn()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             p = None
         if _px(p) is not None:
             return float(p), "PAXG", int(self.now())
@@ -664,7 +642,7 @@ class Quoter:
                 rng = "1y" if now - float(c.get("closes_at") or 0) > CLOSES_EVERY else "5d"
                 try:
                     q, err, st = self.fetch_sym(sym, rng)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     q, err, st = None, "시세 처리 실패(%s)" % type(e).__name__, 0
                 done += 1
                 self._rec(sym, q, err, rng)
@@ -856,7 +834,7 @@ class Quoter:
             save_store(d, self.store_path)
         try:
             self.apply_quotes()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             _warn("증권사 동기화 뒤 평가 반영 실패: %s", type(e).__name__)
         return True
 
@@ -867,11 +845,11 @@ class Quoter:
             every = max(300.0, float(cfg.get("quote_every_sec") or 900))
             try:
                 self.cycle()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("기타 자산 시세 바퀴 실패: %s", type(e).__name__)
             try:
                 self.broker_cycle()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("증권사 동기화 바퀴 실패: %s", type(e).__name__)
             self.wake.wait(every)
             self.wake.clear()
@@ -881,7 +859,7 @@ def _warn(fmt, *a):
     try:
         if log:
             log.warning(fmt, *a)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 
@@ -990,7 +968,7 @@ def view(d: dict, q: Quoter | None, rate: float, brokers_cfg: dict | None = None
     try:
         from brokers import broker_list
         bl = broker_list(brokers_cfg or {}, (q.bst if q else {}) or d.get("bst") or {})
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         bl = []
     ver = hashlib.sha1(json.dumps([d.get("updated"), rate, [(o["id"], o["value"], (o.get("quote") or {}).get("at")) for o in out]],
                                   default=str).encode()).hexdigest()[:12]

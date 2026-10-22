@@ -1,5 +1,5 @@
 from __future__ import annotations
-import common
+import acct_norm, histmark, paths, statefile, view_attur
 import histcurve
 import os
 import time
@@ -10,15 +10,13 @@ from decimal import Decimal
 from decimal import InvalidOperation
 from view_common import DAILY_LIVE_WIN
 from view_common import DAILY_LQ_V
-from view_common import DAILY_PATH
 from view_common import DAILY_PX_KEEP
-from view_common import DAILY_PX_PATH
 from view_common import DAILY_V
 from view_common import DC_SMALL_USD
 from view_common import EPS
 from view_common import HL_MAXWAIT_S
 from view_common import HL_SETTLE_S
-from view_common import KST
+from timeutil import KST
 from view_common import STABLE_GROUPS
 from view_common import _f
 from view_misc import _px_took
@@ -29,7 +27,7 @@ from view_pxfix import _migrate_px_blocks
 from view_pxfix import _px1004_reset
 from view_pxfix import _pxfix_backup
 from view_pxfix import _reprice_now_days
-from view_regroup import _daily_reset
+from view_regroup import daily_inval_apply
 from view_regroup import _relabel_daily_gids
 from view_txkey import _txk
 from view_xv import XQ_X_KEYS
@@ -42,9 +40,223 @@ from view_xv import _xv_ob
 from view_xv import _xv_obs_parts
 from view_xv import _xv_parts
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _fpx(ck, gid, *, dpx, gsrc, today_iso, live_px):
+    e = dpx.get(ck) or {}
+    sid = str(gid)
+    cur = float((e.get("p") or {}).get(sid) or 0)
+    gsrc[(ck, gid)] = e
+    if not cur and ck < today_iso:
+        pk = (datetime.strptime(ck, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        cur = float(((dpx.get(pk) or {}).get("p") or {}).get(sid) or 0)
+        if cur:
+            e = dpx.get(pk) or {}
+            gsrc[(ck, gid)] = e
+    elif not cur:
+        cur = float(live_px.get(gid) or 0)
+    b = (e.get("fp") or {}).get(sid)
+    return (float(b) if b else cur), cur
+
+
+def _wset(ck, *, tiso, now, sb):
+    if ck == tiso:
+        return now
+    c = (getattr(sb, "daily", None) or {}).get(ck)
+    w = c.get("wdt") if isinstance(c, dict) else None
+    return w if isinstance(w, dict) else {}
+
+
+def _add(ck, grp, lbl, usd, *, keys, acc_k):
+    if ck not in keys:
+        return
+    a = acc_k.setdefault(ck, {}).setdefault(grp, {})
+    a[lbl] = a.get(lbl, 0.0) + usd
+
+
+def _bands(ck, gm, bases):
+    par = {g0: g0 for g0 in gm}
+
+    def root(g0):
+        while par[g0] != g0:
+            par[g0] = par[par[g0]]
+            g0 = par[g0]
+        return g0
+    for pm in bases:
+        cl = []
+        for gid in sorted((g0 for g0 in gm if pm(g0) > 0), key=lambda g0: (pm(g0), g0)):
+            if cl and pm(gid) <= cl[-1][0] * 1.2:
+                cl[-1][1].append(gid)
+            else:
+                cl.append([pm(gid), [gid]])
+        for _p, gs in cl:
+            for g0 in gs[1:]:
+                par[root(g0)] = root(gs[0])
+    out = {}
+    for g0 in sorted(gm):
+        out.setdefault(root(g0), []).append(g0)
+    return list(out.values())
+
+
+def _ref(gm, gs):
+    return max(gs, key=lambda g0: (sum(abs(v) for v in gm[g0].values()), -g0))
+
+
+def _sroot(i, *, sup):
+    while sup[i] != i:
+        sup[i] = sup[sup[i]]
+        i = sup[i]
+    return i
+
+
+def _day_ts(ck):
+    d = datetime.strptime(ck, "%Y-%m-%d").replace(tzinfo=KST)
+    return d.timestamp(), d.replace(hour=23, minute=59, second=59).timestamp()
+
+
+def _rate_of(row, *, keys, today_ck, rate_now):
+    if keys.get(row.get("date")) == today_ck:
+        return rate_now
+    u = row.get("usdt")
+    return float(u) if u else None
+
+
+def _gsum(g, *, skip9s):
+    return sum(float(v) for k, v in (g or {}).items() if k not in skip9s)
+
+
+def _xu_px(xu):
+    out = {}
+    for s, a in (xu.items() if isinstance(xu, dict) else ()):
+        try:
+            q, u = float(a[0]), float(a[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if q > 0 and u >= 0:
+            out[str(s).upper()] = (q, u / q)
+    return out
+
+
+def _fnum(v):
+    try:
+        return float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _xu_of(v):
+    out = {}
+    for s, a in (v.items() if isinstance(v, dict) else ()):
+        try:
+            q, u = float(a[0]), float(a[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if q > 0 and u >= 0:
+            out[str(s).upper()] = (q, u)
+    return out
+
+
+def _frozen_ub_cut(c, end_ts, added, *, ub_tl, G, xu_cut):
+    only = {g for g in added if g in ub_tl and g in G}
+    if not only or not c.get("xu"):
+        return 0.0
+    cut, rest, _p = xu_cut(c["xu"], end_ts, only)
+    if cut <= 0:
+        return 0.0
+    c["val"] = _f(Decimal(str(c["val"])) - Decimal(str(cut)), 2) or 0
+    c["x"] = round(float(c.get("x") or 0) - cut, 2)
+    if c.get("xc"):
+        xc = float(c["xc"]) - cut
+        if xc >= 1:
+            c["xc"] = round(xc, 2)
+        else:
+            c.pop("xc", None)
+    if rest:
+        c["xu"] = rest
+    else:
+        c.pop("xu", None)
+    log.info("일별 동결 항목: 새로 소급한 업비트 원장 그룹 %s — 원장 밖 잔고 x 에서 %.2f 뺌(이중 계상 방지)", sorted(only), cut)
+    return cut
+
+
+def _led_old(lg, ts, *, lg_now):
+    if not lg_now:
+        return False
+    try:
+        return int(float(lg)) != lg_now if lg is not None else float(ts or 0) < lg_now
+    except (TypeError, ValueError):
+        return True
+
+
+def _wdt_at(end_ts, *, tr_by):
+    return {u: [g, float(q)] for g, lst in tr_by.items() for t, q, u in lst if t <= end_ts}
+
+
+def _lp_after(gid, to_ms, *, lp_tls):
+    s = Decimal(0)
+    for ts, dq in reversed(lp_tls.get(gid, ())):
+        if ts * 1000 <= to_ms:
+            break
+        s += dq
+    return s
+
+
+def _lp_obs_set(end_ts, parts, ts=None, *, lp_to):
+    to = xparts.rest_obs_at(parts, end_ts, ts)
+    k = int(end_ts * 1000)
+    if to is None:
+        lp_to.pop(k, None)
+    else:
+        lp_to[k] = int(to * 1000)
+
+
+def _lp_moved_after(to_ms, *, lp_tls, skip_gids):
+    for g, tl in lp_tls.items():
+        if skip_gids and g in skip_gids:
+            continue
+        for ts, dq in reversed(tl):
+            if ts * 1000 <= to_ms:
+                break
+            if abs(dq) > EPS:
+                return True
+    return False
+
+
+def _xq_new(have, *, xq):
+    return {e for e in str(xq or "").split(",") if e} - {e for e in str(have or "").split(",") if e}
+
+
+def _pxfix_key(*, day_close, today_kst, now_ts, dpx, sb):
+    return (getattr(day_close, "gen", None), today_kst.strftime("%Y-%m-%d"), int(now_ts // 3600),
+            sum(len(e.get("p") or {}) - len(e.get("k") or {}) - len(e.get("dcn") or ())
+                for k, e in dpx.items() if not k.startswith("_") and isinstance(e, dict)),
+            sum(len(c.get("g") or ()) for k, c in sb.daily.items() if not k.startswith("_") and isinstance(c, dict)))
+
+
+def _live_allow(c):
+    if c.get("src") != "live":
+        return None
+    return {str(x) for x in (c.get("z") or ())}
+
+
+def _krw_close(ck, *, dpx, krw_at):
+    xv = (dpx.get(ck) or {}).get("xv")
+    p = _xv_parts(xv) if isinstance(xv, dict) and xv.get("v") == xparts.GEN else None
+    if p and any(k in p for k in xparts.KRW):
+        return sum(float((p.get(k) or (0,))[0] or 0) for k in xparts.KRW)
+    return krw_at(_day_ts(ck)[1])
+
+
+def _krw_sum(lst, ck):
+    a, b = _day_ts(ck)
+    return float(sum((d for t, d in lst if a <= t <= b), Decimal(0)))
+
+
+def _xu_keep(v):
+    return {s: [round(q, 12), round(u, 2)] for s, (q, u) in _xu_of(v).items()}
 
 
 class DailyMixin:
@@ -52,7 +264,7 @@ class DailyMixin:
     def _hist_flow_kit(self, G, skip_gids, offc_ids, transit, rate_now, today_iso, daily) -> dict:
         try:
             return self._hist_flow_kit_x(G, skip_gids, offc_ids, transit, rate_now, today_iso, daily)
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_daily:DailyMixin._hist_flow_kit", e9)
             log.warning("장기 곡선 입출금 재료 실패: %s", e9)
             return None
@@ -97,33 +309,15 @@ class DailyMixin:
         acc = {}
         gpx = {}
         gpxc = {}
-
         gsrc9 = {}
         held9 = {}
         held_ext9 = set()
-
         def hold9(ck9, sym9, gid9, lbl9, q9, is_ext9):
             h9 = held9.setdefault((ck9, str(sym9).upper()), {}).setdefault(gid9, {})
             h9[lbl9] = h9.get(lbl9, Decimal(0)) + q9
             if is_ext9:
                 held_ext9.add(lbl9)
         nofx9 = {}
-
-        def fpx9(ck9, gid9):
-            e9 = dpx.get(ck9) or {}
-            sid9 = str(gid9)
-            cur9 = float((e9.get("p") or {}).get(sid9) or 0)
-            gsrc9[(ck9, gid9)] = e9
-            if not cur9 and ck9 < today_iso9:
-                pk9 = (datetime.strptime(ck9, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-                cur9 = float(((dpx.get(pk9) or {}).get("p") or {}).get(sid9) or 0)
-                if cur9:
-                    e9 = dpx.get(pk9) or {}
-                    gsrc9[(ck9, gid9)] = e9
-            elif not cur9:
-                cur9 = float(live_px.get(gid9) or 0)
-            b9 = (e9.get("fp") or {}).get(sid9)
-            return (float(b9) if b9 else cur9), cur9
         ext9 = set()
         sale_tx9 = getattr(self, "_sale_send_tx", None) or set()
         arr_tx9 = set()
@@ -142,9 +336,9 @@ class DailyMixin:
                 " AND p.location NOT LIKE 'out:%' AND p.location NOT LIKE 'lp:%'", (int(lo_ts),)):
             if ev9 in self.FLOW_SKIP_EV or lk9 in ("fee", "gas") or gid9 in skip_gids:
                 continue
-            if common.exf_is_debt_int(ev9, lseq9, ns9, sid9):
+            if histmark.exf_is_debt_int(ev9, lseq9, ns9, sid9):
                 continue
-            if common.exf_is_fut(ev9, ns9):
+            if histmark.exf_is_fut(ev9, ns9):
                 continue
             g9 = G.get(gid9)
             if not g9 or g9.get("is_fiat"):
@@ -155,7 +349,7 @@ class DailyMixin:
             if g9.get("is_stable"):
                 px9 = pxc9 = 1.0
             else:
-                px9, pxc9 = fpx9(ck9, gid9)
+                px9, pxc9 = _fpx(ck9, gid9, dpx=dpx, gsrc=gsrc9, today_iso=today_iso9, live_px=live_px)
             try:
                 q9 = Decimal(int(qb9)) / (Decimal(10) ** int(dec9 if dec9 is not None else 18))
             except (TypeError, ValueError, InvalidOperation):
@@ -199,16 +393,9 @@ class DailyMixin:
             st9 = {str(e9["uuid"]): e9.get("state") for e9 in transit}
             now9 = {str(e9["uuid"]): [e9["gid"], float(e9["qty"])] for e9 in transit if e9.get("state") == "pending"}
             tiso9 = today_kst.strftime("%Y-%m-%d")
-
-            def wset9(ck9):
-                if ck9 == tiso9:
-                    return now9
-                c9 = (getattr(self, "daily", None) or {}).get(ck9)
-                w9 = c9.get("wdt") if isinstance(c9, dict) else None
-                return w9 if isinstance(w9, dict) else {}
             for ck9 in sorted(keys):
                 pk9 = (datetime.strptime(ck9, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-                cur9, prv9 = wset9(ck9), wset9(pk9)
+                cur9, prv9 = _wset(ck9, tiso=tiso9, now=now9, sb=self), _wset(pk9, tiso=tiso9, now=now9, sb=self)
                 for u9, v9, sg9 in [(u9, v9, 1) for u9, v9 in cur9.items() if u9 not in prv9] + \
                                    [(u9, v9, -1) for u9, v9 in prv9.items() if u9 not in cur9]:
                     try:
@@ -218,7 +405,7 @@ class DailyMixin:
                     g9 = G.get(gid9)
                     if not g9 or g9.get("is_fiat") or gid9 in skip_gids:
                         continue
-                    px9, pxc9 = (1.0, 1.0) if g9.get("is_stable") else fpx9(ck9, gid9)
+                    px9, pxc9 = (1.0, 1.0) if g9.get("is_stable") else _fpx(ck9, gid9, dpx=dpx, gsrc=gsrc9, today_iso=today_iso9, live_px=live_px)
                     sym9 = g9.get("sym") or "?"
                     if not px9:
                         if ck9 < today_iso9:
@@ -234,7 +421,6 @@ class DailyMixin:
                     a9[lbl9] = a9.get(lbl9, Decimal(0)) + q9
                     gpx.setdefault((ck9, gid9), px9)
                     gpxc.setdefault((ck9, gid9), pxc9)
-
         for (ck9, su9), gh9 in sorted(held9.items()):
             gm9 = (acc.get(ck9) or {}).get(su9) or {}
             if not gm9:
@@ -255,12 +441,6 @@ class DailyMixin:
                 gpx[(ck9, gid9)] = gpx[(ck9, ref9g)]
                 gpxc[(ck9, gid9)] = gpxc[(ck9, ref9g)]
                 gsrc9[(ck9, gid9)] = {}
-
-        def add(ck9, grp9, lbl9, usd9):
-            if ck9 not in keys:
-                return
-            a9 = acc_k.setdefault(ck9, {}).setdefault(grp9, {})
-            a9[lbl9] = a9.get(lbl9, 0.0) + usd9
         try:
             for ex9, ts9, k9, int9 in type(self)._krw_bank_moves(conn, ("upbit", "bithumb")):
                 up9 = ex9 == "upbit"
@@ -279,46 +459,22 @@ class DailyMixin:
                     if not fxr9:
                         _px_took(self.px)
                         self._flow_nf.add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"))
-                    fx9 = float(fxr9 or rate_now or self.spot.rate or 1384)
+                    fx9 = float(fxr9 or rate_now or self.spot.rate or acct_norm.DEFAULT_KRW_USD)
                 if up9:
-                    add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), "krw:" + ("int" if int9 else "in" if k9 > 0 else "out"),
-                        "업비트 원화 지급(예치금 이용료 등·은행 아님)" if int9 else "원화 입금(은행에서)" if k9 > 0 else "원화 출금(은행으로)", k9 / fx9)
+                    _add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), "krw:" + ("int" if int9 else "in" if k9 > 0 else "out"),
+                        "업비트 원화 지급(예치금 이용료 등·은행 아님)" if int9 else "원화 입금(은행에서)" if k9 > 0 else "원화 출금(은행으로)", k9 / fx9, keys=keys, acc_k=acc_k)
                 else:
-                    add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), f"krw:{ex9}:" + ("int" if int9 else "in" if k9 > 0 else "out"),
-                        "빗썸 원화 지급(거래소 내부·은행 아님)" if int9 else "빗썸 원화 입금(은행에서)" if k9 > 0 else "빗썸 원화 출금(은행으로)", k9 / fx9)
+                    _add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), f"krw:{ex9}:" + ("int" if int9 else "in" if k9 > 0 else "out"),
+                        "빗썸 원화 지급(거래소 내부·은행 아님)" if int9 else "빗썸 원화 입금(은행에서)" if k9 > 0 else "빗썸 원화 출금(은행으로)", k9 / fx9, keys=keys, acc_k=acc_k)
                 if vflow9 is not None and k9 and datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d") in keys:
                     vf9 = vflow9.setdefault(f"exchange:{ex9}", [0.0, 0.0])
                     vf9[0 if k9 > 0 else 1] += abs(k9 / fx9)
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             if hist9:
                 raise
+            calcguard.swallowed("view_daily:DailyMixin._daily_flows[krw_bank]", e9)
             vflow9 = None
             log.warning("일별 순유입: 원화 입출금(업비트·빗썸) 조회 실패: %s", e9)
-        def bands9(ck9, gm9, bases9):
-            par9 = {g0: g0 for g0 in gm9}
-
-            def root9(g0):
-                while par9[g0] != g0:
-                    par9[g0] = par9[par9[g0]]
-                    g0 = par9[g0]
-                return g0
-            for pm9 in bases9:
-                cl9 = []
-                for gid9 in sorted((g0 for g0 in gm9 if pm9(g0) > 0), key=lambda g0: (pm9(g0), g0)):
-                    if cl9 and pm9(gid9) <= cl9[-1][0] * 1.2:
-                        cl9[-1][1].append(gid9)
-                    else:
-                        cl9.append([pm9(gid9), [gid9]])
-                for _p9, gs9 in cl9:
-                    for g0 in gs9[1:]:
-                        par9[root9(g0)] = root9(gs9[0])
-            out9 = {}
-            for g0 in sorted(gm9):
-                out9.setdefault(root9(g0), []).append(g0)
-            return list(out9.values())
-
-        def ref9(gm9, gs9):
-            return max(gs9, key=lambda g0: (sum(abs(v) for v in gm9[g0].values()), -g0))
         out = {}
         fpd9 = {}
         fdet9 = None
@@ -331,46 +487,39 @@ class DailyMixin:
             dlt9 = 0.0
             for sym9, gm9 in (acc.get(ck9) or {}).items():
                 e_ck9 = dpx.get(ck9) or {}
-
                 def lp9(g0, ck9=ck9, e_ck9=e_ck9):
                     src9 = gsrc9.get((ck9, g0), e_ck9)
                     lpm9 = src9.get("lp") if isinstance(src9.get("lp"), dict) else {}
                     return float(lpm9.get(str(g0)) or gpx[(ck9, g0)])
-                cl_d9 = bands9(ck9, gm9, (lambda g0: gpx[(ck9, g0)],))
+                cl_d9 = _bands(ck9, gm9, (lambda g0: gpx[(ck9, g0)],))
                 has_int9 = [any(l9 not in ext9 and v9 for g0 in gs9 for l9, v9 in gm9[g0].items()) for gs9 in cl_d9]
                 sup9 = list(range(len(cl_d9)))
                 if sum(has_int9) >= 2:
                     of9 = {g0: i9 for i9, gs9 in enumerate(cl_d9) for g0 in gs9}
-
-                    def sroot9(i9):
-                        while sup9[i9] != i9:
-                            sup9[i9] = sup9[sup9[i9]]
-                            i9 = sup9[i9]
-                        return i9
                     int_gm9 = {g0: gm9[g0] for g0 in gm9 if any(l9 not in ext9 and v9 for l9, v9 in gm9[g0].items())}
-                    for gs9 in bands9(ck9, int_gm9, (lambda g0: gpxc[(ck9, g0)], lp9)):
+                    for gs9 in _bands(ck9, int_gm9, (lambda g0: gpxc[(ck9, g0)], lp9)):
                         ids9 = sorted({of9[g0] for g0 in gs9 if has_int9[of9[g0]]})
                         for i9 in ids9[1:]:
-                            sup9[sroot9(i9)] = sroot9(ids9[0])
-                    sup9 = [sroot9(i9) for i9 in range(len(cl_d9))]
+                            sup9[_sroot(i9, sup=sup9)] = _sroot(ids9[0], sup=sup9)
+                    sup9 = [_sroot(i9, sup=sup9) for i9 in range(len(cl_d9))]
                 cur9 = 0.0
-                for gs9 in bands9(ck9, gm9, (lambda g0: gpxc[(ck9, g0)],)):
-                    cur9 += float(sum((v for g0 in gs9 for v in gm9[g0].values()), Decimal(0))) * gpxc[(ck9, ref9(gm9, gs9))]
+                for gs9 in _bands(ck9, gm9, (lambda g0: gpxc[(ck9, g0)],)):
+                    cur9 += float(sum((v for g0 in gs9 for v in gm9[g0].values()), Decimal(0))) * gpxc[(ck9, _ref(gm9, gs9))]
                 shown9 = 0.0
                 for r9 in sorted(set(sup9)):
                     mem9 = [i9 for i9 in range(len(cl_d9)) if sup9[i9] == r9]
                     allg9 = [g0 for i9 in mem9 for g0 in cl_d9[i9]]
-                    pi9 = gpx[(ck9, ref9(gm9, allg9))]
+                    pi9 = gpx[(ck9, _ref(gm9, allg9))]
                     lv9 = {}
                     for i9 in mem9:
-                        pe9 = gpx[(ck9, ref9(gm9, cl_d9[i9]))]
+                        pe9 = gpx[(ck9, _ref(gm9, cl_d9[i9]))]
                         for g0 in cl_d9[i9]:
                             for l9, v9 in gm9[g0].items():
                                 px9 = pe9 if (len(mem9) == 1 or l9 in ext9) else pi9
                                 lv9[l9] = lv9.get(l9, 0.0) + float(v9) * px9
                     if len(mem9) == 1:
                         gs9 = cl_d9[mem9[0]]
-                        n9 = float(sum((v for g0 in gs9 for v in gm9[g0].values()), Decimal(0))) * gpx[(ck9, ref9(gm9, gs9))]
+                        n9 = float(sum((v for g0 in gs9 for v in gm9[g0].values()), Decimal(0))) * gpx[(ck9, _ref(gm9, gs9))]
                     else:
                         n9 = sum(lv9.values())
                     tot9 += n9
@@ -408,9 +557,8 @@ class DailyMixin:
         try:
             self._att_by_today = by_today
             self._att_det_new = det_all
-        except Exception as _cg9:
-            calcguard.swallowed("view_daily:DailyMixin._daily_attrib", _cg9)
-            pass
+        except Exception as _cg9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_daily:DailyMixin._daily_attrib[_att_by_today]", _cg9)
         if len(daily) < 2 or not src:
             return {}
         extra = extra or {}
@@ -421,16 +569,11 @@ class DailyMixin:
         ck_set = set(keys.values())
         today_ck = today_kst.strftime("%Y-%m-%d")
         skip9s = {str(x) for x in (skip_gids or ())}
-        rate_now = float(extra.get("rate") or self.spot.rate or 1384)
+        rate_now = float(extra.get("rate") or self.spot.rate or acct_norm.DEFAULT_KRW_USD)
         dpx = self.daily_px or {}
-
-        def day_ts(ck9):
-            d9 = datetime.strptime(ck9, "%Y-%m-%d").replace(tzinfo=KST)
-            return d9.timestamp(), d9.replace(hour=23, minute=59, second=59).timestamp()
-
         legs = {}
         mv9 = {}
-        lo_ts = day_ts(min(ck_set))[0]
+        lo_ts = _day_ts(min(ck_set))[0]
         dbi9 = {}
         fb9 = {}
         fbx9 = {}
@@ -447,13 +590,14 @@ class DailyMixin:
                 " FROM postings p JOIN assets a ON a.asset_id = p.asset_id WHERE p.event_ts >= ?"
                 " AND p.location NOT LIKE 'out:%'")
         try:
-            rows9 = conn.execute(sql9.format(", p.leg_seq, p.source_ns, p.source_id"), (int(lo_ts),)).fetchall()
-        except Exception as e9:
+            rows9 = conn.execute(sql9.format(", p.leg_seq, p.source_ns, p.source_id, p.cost_usd"), (int(lo_ts),)).fetchall()
+        except Exception as e9:   # noqa: BLE001 [fallback]
             if "no such column" not in str(e9):
                 raise
-            rows9 = [tuple(r9) + (None, None, None) for r9 in conn.execute(sql9.format(""), (int(lo_ts),))]
+            calcguard.swallowed("view_daily:DailyMixin._daily_attrib[old_cols]", e9)
+            rows9 = [tuple(r9) + (None, None, None, None) for r9 in conn.execute(sql9.format(""), (int(lo_ts),))]
         krwf9 = {}
-        for ts9, qb9, dec9, gid9, ev9, lk9, loc9, lseq9, ns9, sid9 in rows9:
+        for ts9, qb9, dec9, gid9, ev9, lk9, loc9, lseq9, ns9, sid9, _cost_usd in rows9:
             if gid9 in skip_gids:
                 continue
             g9 = G.get(gid9)
@@ -471,7 +615,7 @@ class DailyMixin:
             if not g9:
                 continue
             is_lp9 = str(loc9 or "").startswith("lp:")
-            if common.exf_is_fut(ev9, ns9):
+            if histmark.exf_is_fut(ev9, ns9):
                 ck9 = datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d")
                 if ck9 in ck_set:
                     try:
@@ -486,7 +630,7 @@ class DailyMixin:
                     m9 = mv9.setdefault(ck9, {}).setdefault(gid9, {})
                     m9[ev9] = m9.get(ev9, Decimal(0)) + q9
                 continue
-            int9 = common.exf_is_debt_int(ev9, lseq9, ns9, sid9)
+            int9 = histmark.exf_is_debt_int(ev9, lseq9, ns9, sid9)
             if lk9 in ("fee", "gas") or int9:
                 slot9 = 1
             elif ev9 in self.ATT_TRADE_EV:
@@ -522,59 +666,20 @@ class DailyMixin:
         tlo9 = tc9[2] if tlo_ok9 else []
         try:
             krwb9 = [(t9, k9) for _e9, t9, k9, _i9 in type(self)._krw_bank_moves(conn, ("bithumb",))]
-        except Exception as e9:
-            calcguard.swallowed("view_daily:DailyMixin._daily_attrib", e9)
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_daily:DailyMixin._daily_attrib[krwb9]", e9)
             log.debug("자산 변동 분해: 빗썸 원화 입출금 조회 실패(종전대로): %s", e9)
             krwb9 = []
         krw_up_now = float(extra.get("krw_up") or 0)
         krw_other_now = float(extra.get("krw_other") or 0)
         has_krw9 = "krw_up" in extra
-
         def krw_at(end9):
             if tl9 is None:
                 return krw_up_now + krw_other_now
             k9 = Decimal(str(krw_up_now)) - sum((d9 for t9, d9 in tl9 if t9 > end9), Decimal(0))
             return (float(max(k9, Decimal(0))) if k9 >= Decimal(-1000) else krw_up_now) + krw_other_now
-
-        def krw_close(ck9):
-            xv9 = (dpx.get(ck9) or {}).get("xv")
-            p9 = _xv_parts(xv9) if isinstance(xv9, dict) and xv9.get("v") == xparts.GEN else None
-            if p9 and any(k9 in p9 for k9 in xparts.KRW):
-                return sum(float((p9.get(k9) or (0,))[0] or 0) for k9 in xparts.KRW)
-            return krw_at(day_ts(ck9)[1])
-
-        def krw_sum(lst9, ck9):
-            a9, b9 = day_ts(ck9)
-            return float(sum((d9 for t9, d9 in lst9 if a9 <= t9 <= b9), Decimal(0)))
-
-        def rate_of(row9):
-            if keys.get(row9.get("date")) == today_ck:
-                return rate_now
-            u9 = row9.get("usdt")
-            return float(u9) if u9 else None
-
-        def gsum(g9):
-            return sum(float(v9) for k9, v9 in (g9 or {}).items() if k9 not in skip9s)
-
-        def xu_px(xu9):
-            out9 = {}
-            for s9, a9 in (xu9.items() if isinstance(xu9, dict) else ()):
-                try:
-                    q9, u9 = float(a9[0]), float(a9[1])
-                except (TypeError, ValueError, IndexError, KeyError):
-                    continue
-                if q9 > 0 and u9 >= 0:
-                    out9[str(s9).upper()] = (q9, u9 / q9)
-            return out9
-
-        def fnum(v9):
-            try:
-                return float(v9) if v9 is not None else 0.0
-            except (TypeError, ValueError):
-                return 0.0
-
         real = real if isinstance(real, dict) else None
-        out = {}
+        out, ur_build = {}, view_attur.UrBuild(rows9, G, frozenset(skip_gids or ()), self.ATT_TRADE_EV, self.ATT_DET_CAP)
         for i9 in range(1, len(daily)):
             rd, rp9 = daily[i9], daily[i9 - 1]
             ckd, ckp = keys.get(rd.get("date")), keys.get(rp9.get("date"))
@@ -583,11 +688,10 @@ class DailyMixin:
                 continue
             gd, pdx = sd[0], sd[1] or {}
             gp, ppx = sp[0], sp[1] or {}
-            ud, up9 = rate_of(rd), rate_of(rp9)
+            ud, up9 = _rate_of(rd, keys=keys, today_ck=today_ck, rate_now=rate_now), _rate_of(rp9, keys=keys, today_ck=today_ck, rate_now=rate_now)
             is_today9 = ckd == today_ck
             by9, base9 = {}, {}
             det9 = {}
-
             def moved9(gid9, ck9=ckd):
                 return gid9 in (legs.get(ck9) or {}) or gid9 in (mv9.get(ck9) or {}) or gid9 in (opn9.get(ck9) or {})
             unp_n, unp_v = 0, 0.0
@@ -632,11 +736,11 @@ class DailyMixin:
                     unpl9.append((str(g9.get("sym") or "?").upper(), float(vd9), "new"))
             kx = 0.0
             if has_krw9 and ud and up9 and ud != up9:
-                kx = krw_close(ckp) * (1 / ud - 1 / up9)
+                kx = _krw_close(ckp, dpx=dpx, krw_at=krw_at) * (1 / ud - 1 / up9)
             kx0 = kx
             fxat9 = getattr(getattr(self, "px", None), "fx_at", None)
             if tlo_ok9 and ud and callable(fxat9):
-                a9, b9 = day_ts(ckd)
+                a9, b9 = _day_ts(ckd)
                 o9 = {}
                 for t9, d9 in tlo9:
                     if a9 <= t9 <= b9:
@@ -647,14 +751,14 @@ class DailyMixin:
                     if o9.get((t9, d9)):
                         o9[(t9, d9)] -= 1
                         continue
-                    fx9 = float(fxat9(int(t9 * 1000)) or rate_now or 1384)
+                    fx9 = float(fxat9(int(t9 * 1000)) or rate_now or acct_norm.DEFAULT_KRW_USD)
                     kx += float(d9) * (1 / ud - 1 / fx9)
             kxa9 = kx
             if has_krw9 and krwb9 and ud and callable(fxat9):
-                a9, b9 = day_ts(ckd)
+                a9, b9 = _day_ts(ckd)
                 for t9, d9 in krwb9:
                     if a9 <= t9 <= b9:
-                        fx9 = float(fxat9(int(t9 * 1000)) or rate_now or 1384)
+                        fx9 = float(fxat9(int(t9 * 1000)) or rate_now or acct_norm.DEFAULT_KRW_USD)
                         kx += float(d9) * (1 / ud - 1 / fx9)
             mk = sum(by9.values()) + kx
             dfx9 = (dpx.get(ckd) or {}).get("p") or {}
@@ -673,22 +777,20 @@ class DailyMixin:
                 sid9 = str(gid9)
                 if g9.get("is_stable") or g9.get("is_fiat") or sid9 in skip9s or not g9:
                     continue
-                p9 = fnum(pdx.get(sid9)) or fnum(ppx.get(sid9)) or fnum(dfx9.get(sid9))
+                p9 = _fnum(pdx.get(sid9)) or _fnum(ppx.get(sid9)) or _fnum(dfx9.get(sid9))
                 if not p9 and is_today9:
-                    p9 = fnum(live_px.get(gid9))
+                    p9 = _fnum(live_px.get(gid9))
                 if p9 > 0:
                     own9[gid9] = p9
-                elif gid9 in lg9 and fnum(live_px.get(gid9)) > 0:
-                    cand9[gid9] = fnum(live_px.get(gid9))
-
+                elif gid9 in lg9 and _fnum(live_px.get(gid9)) > 0:
+                    cand9[gid9] = _fnum(live_px.get(gid9))
             def wt9(gid9):
                 m9 = mvd9.get(gid9) or {}
                 l9 = lg9.get(gid9) or ()
                 return (float(sum((abs(v9) for v9 in m9.values()), Decimal(0))), float(sum((abs(v9) for v9 in l9), Decimal(0))),
-                        abs(fnum(gd.get(str(gid9)))) + abs(fnum(gp.get(str(gid9)))), -gid9)
-            by_sym9 = {}
-            for gid9, p9 in own9.items():
-                by_sym9.setdefault(str((G.get(gid9) or {}).get("sym") or "?").upper(), []).append(gid9)
+                        abs(_fnum(gd.get(str(gid9)))) + abs(_fnum(gp.get(str(gid9)))), -gid9)
+            prev_only = view_attur.prev_only(own9, pdx, ppx, moved9, G, mvd9, type(self).FLOW_INT_EV) - view_attur.day_excl(ckd, opn9, fb9, dbi9, real)
+            by_sym9 = view_attur.by_symbol(own9, G, set())
             leg_px9 = {}
             bands9 = {}
             for sym9, gs9 in by_sym9.items():
@@ -704,6 +806,7 @@ class DailyMixin:
                         leg_px9[gid9] = own9[ref9]
                 bands9[sym9] = [(own9[max(gs0, key=wt9)], gs0) for _p9, gs0 in cl9]
             lo9, hi9 = type(self).ATT_NOPX_BAND
+            leg_px9.update(view_attur.prev_band_px(prev_only, own9, bands9, live_px if is_today9 else None, G, (lo9, hi9), pdx))
             for gid9, lv9 in cand9.items():
                 sym9 = str((G.get(gid9) or {}).get("sym") or "?").upper()
                 fit9 = [bp9 for bp9, _g in bands9.get(sym9) or () if lo9 <= lv9 / bp9 <= hi9]
@@ -715,8 +818,8 @@ class DailyMixin:
                 if not lp9 or abs(lp9 - p9) <= 1e-15 * max(p9, 1.0):
                     continue
                 sid9 = str(gid9)
-                gdv9, gpv9 = fnum(gd.get(sid9)), fnum(gp.get(sid9))
-                pd9, pp9 = fnum(pdx.get(sid9)), fnum(ppx.get(sid9))
+                gdv9, gpv9 = _fnum(gd.get(sid9)), _fnum(gp.get(sid9))
+                pd9, pp9 = _fnum(pdx.get(sid9)), _fnum(ppx.get(sid9))
                 if gdv9 and gpv9:
                     if not (pd9 and pp9):
                         continue
@@ -728,7 +831,7 @@ class DailyMixin:
                 elif gpv9:
                     if not pp9:
                         continue
-                    b9, po9 = -gpv9, pp9
+                    b9, po9 = view_attur.prev_out(gid9, gpv9, pp9, prev_only, is_today9, mvd9, type(self).FLOW_INT_EV), pp9
                 else:
                     continue
                 gx += b9 * (1 - lp9 / po9)
@@ -747,19 +850,19 @@ class DailyMixin:
                 tall += float(qt9 + qf9 + ql9 + qx9) * px9
             ord9 = dep9 = 0.0
             if tl9 is not None and ud:
-                ord9 = krw_sum(tlo9, ckd) / ud
-                dep9 = krw_sum(tl9, ckd) / ud - ord9
+                ord9 = _krw_sum(tlo9, ckd) / ud
+                dep9 = _krw_sum(tl9, ckd) / ud - ord9
             ordb9 = depb9 = 0.0
             if ud:
                 ordb9 = float(krwf9.get(ckd) or 0) / ud
-                lob9, hib9 = day_ts(ckd)
+                lob9, hib9 = _day_ts(ckd)
                 depb9 = sum(k9 for t9, k9 in krwb9 if lob9 <= t9 <= hib9) / ud
             tr += ord9 + ordb9
             tall += ord9 + ordb9
             dv = float(rd.get("val") or 0) - float(rp9.get("val") or 0)
             fl = float(rd.get("flow") or 0)
             rs = dv - mk - fl - tr
-            dx = (float(rd.get("val") or 0) - gsum(gd)) - (float(rp9.get("val") or 0) - gsum(gp))
+            dx = (float(rd.get("val") or 0) - _gsum(gd, skip9s=skip9s)) - (float(rp9.get("val") or 0) - _gsum(gp, skip9s=skip9s))
             xo = dx - ord9 - dep9 - ordb9 - depb9 - kx0
             mv = sorted(((s9, v9) for s9, v9 in by9.items() if abs(v9) >= 0.005), key=lambda kv: (-abs(kv[1]), kv[0]))
             top = [[s9, round(v9 / base9[s9] * 100, 2) if base9.get(s9) else None, round(v9, 2)] for s9, v9 in mv[:self.ATT_TOP]]
@@ -771,18 +874,18 @@ class DailyMixin:
             if top and det9:
                 try:
                     tx9 = self._att_topx(top, det9, ckd, ckp, dpx, today_ck, src, px_src)
-                except Exception as ex9:
-                    calcguard.swallowed("view_daily:DailyMixin._daily_attrib", ex9)
+                except Exception as ex9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("view_daily:DailyMixin._daily_attrib[tx9]", ex9)
                     log.debug("자산 변동 분해 코인별 재료(topx) 실패 %s: %s", ckd, ex9)
                     tx9 = None
                 if tx9:
                     a9["topx"] = tx9
             if real is not None:
-                xp9, xd9 = xu_px(sp[2] if len(sp) > 2 else None), xu_px(sd[2] if len(sd) > 2 else None)
+                xp9, xd9 = _xu_px(sp[2] if len(sp) > 2 else None), _xu_px(sd[2] if len(sd) > 2 else None)
                 xm = sum(q9 * (xd9[s9][1] - pu9) for s9, (q9, pu9) in xp9.items() if s9 in xd9)
-                rbd9 = fnum((real.get("rbd") or {}).get(ckd))
-                lpf = fnum((real.get("lpf") or {}).get(ckd))
-                stk = fnum((real.get("stk") or {}).get(ckd))
+                rbd9 = _fnum((real.get("rbd") or {}).get(ckd))
+                lpf = _fnum((real.get("lpf") or {}).get(ckd))
+                stk = _fnum((real.get("stk") or {}).get(ckd))
                 rz = rbd9 - lpf - stk
                 un = 0.0
                 for gid9, (uq9, upr9) in ((real.get("unv") or {}).get(ckd) or {}).items():
@@ -809,18 +912,18 @@ class DailyMixin:
                     a9["fpx"] = round(fpx9, 2)
                 if np9:
                     a9["np"] = np9
-                rbd9, rbp9 = fnum(rd.get("rb")), fnum(rp9.get("rb"))
-                rbv9 = (rbd9 - rbp9) - fnum(rd.get("rbNew"))
+                rbd9, rbp9 = _fnum(rd.get("rb")), _fnum(rp9.get("rb"))
+                rbv9 = (rbd9 - rbp9) - _fnum(rd.get("rbNew"))
                 lpcd9, lpcp9 = (getattr(self, "_daily_lpc", None) or {}).get(ckd) or {}, (getattr(self, "_daily_lpc", None) or {}).get(ckp) or {}
                 lpcv9 = 0.0
                 for gid9 in set(lpcd9) | set(lpcp9):
                     if gid9 in skip_gids:
                         continue
                     lpcv9 += (lpcd9.get(gid9, 0.0) - lpcp9.get(gid9, 0.0)) * (1.0 if (G.get(gid9) or {}).get("is_stable") else own9.get(gid9, 0.0))
-                xr9 = xo - xm - (rbd9 - rbp9) + lpcv9 - (fnum(rd.get("pv")) - fnum(rp9.get("pv")))
+                xr9 = xo - xm - (rbd9 - rbp9) + lpcv9 - (_fnum(rd.get("pv")) - _fnum(rp9.get("pv")))
                 if abs(xr9) >= 0.005:
                     a9["xr"] = round(xr9, 2)
-                    if fnum(rd.get("xc")) >= 1 or fnum(rp9.get("xc")) >= 1:
+                    if _fnum(rd.get("xc")) >= 1 or _fnum(rp9.get("xc")) >= 1:
                         a9["xca"] = 1
                 if abs(rbv9) >= 0.005:
                     a9["rbv"] = round(rbv9, 2)
@@ -830,11 +933,12 @@ class DailyMixin:
                     a9["dbi"] = round(dbv9, 2)
             try:
                 det_all[ckd] = self._att_det_pack(rd, by9, base9, det9, unpl9, (kx0, kxa9 - kx0, kx - kxa9),
-                                                  xu_px(sp[2] if len(sp) > 2 else None), xu_px(sd[2] if len(sd) > 2 else None),
+                                                  _xu_px(sp[2] if len(sp) > 2 else None), _xu_px(sd[2] if len(sd) > 2 else None),
                                                   ((real or {}).get("unv") or {}).get(ckd) or {}, opn9.get(ckd) or {},
                                                   fbx9.get(ckd) or {}, leg_px9, G, skip_gids, ckd)
-            except Exception as ex9:
-                calcguard.swallowed("view_daily:DailyMixin._daily_attrib", ex9)
+                view_attur.attach(det_all[ckd], ur_build, ckd, a9, lg9, leg_px9, real)
+            except Exception as ex9:   # noqa: BLE001 [isolate]
+                calcguard.swallowed("view_daily:DailyMixin._daily_attrib[float]", ex9)
                 log.debug("자산 변동 분해 상세 재료 실패 %s: %s", ckd, ex9)
             out[rd.get("date")] = a9
         return out
@@ -848,9 +952,9 @@ class DailyMixin:
         return lst[:n]
 
     def _att_det_pack(self, rd, by9, base9, det9, unpl9, kxp9, xp9, xd9, unv9, opn9, fbx9, leg_px9, G, skip_gids, ckd) -> dict:
-        r2 = lambda v: round(float(v), 2)
-        sym_of = lambda g: str((G.get(g) or {}).get("sym") or "?").upper()
-        px_of = lambda g: 1.0 if (G.get(g) or {}).get("is_stable") else float(leg_px9.get(g, 0.0))
+        r2 = lambda v: round(float(v), 2)   # noqa: E731
+        sym_of = lambda g: str((G.get(g) or {}).get("sym") or "?").upper()   # noqa: E731
+        px_of = lambda g: 1.0 if (G.get(g) or {}).get("is_stable") else float(leg_px9.get(g, 0.0))   # noqa: E731
         mk = []
         for s9, v9 in sorted(by9.items(), key=lambda kv: (-abs(kv[1]), kv[0])):
             if abs(v9) < 0.005:
@@ -876,7 +980,6 @@ class DailyMixin:
             acc9[k9] = acc9.get(k9, 0.0) + float(v9)
         out["unp"] = self._att_cap(sorted(([k9[0], r2(v9), k9[1]] for k9, v9 in acc9.items() if abs(v9) >= 0.005), key=lambda x: (-abs(x[1]), x[0])),
                                    self.ATT_DET_CAP, "unp", more)
-
         def by_sym(pairs):
             a9 = {}
             for s9, v9 in pairs:
@@ -899,7 +1002,6 @@ class DailyMixin:
 
     def _att_topx(self, top, det, ckd, ckp, dpx, today_ck, src, px_src=None) -> list:
         X = float(self.ATT_SPIKE)
-
         def px_of(ck9):
             e9 = src.get(ck9)
             p9 = e9[1] if isinstance(e9, (tuple, list)) and len(e9) > 1 else None
@@ -930,7 +1032,7 @@ class DailyMixin:
             if (ck9, sid9) not in memo9:
                 try:
                     memo9[(ck9, sid9)] = self._att_dc_src(px_src(int(sid9)), ck9)
-                except Exception as _cg9:
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_daily:DailyMixin._att_topx.src_of", _cg9)
                     memo9[(ck9, sid9)] = None
             return memo9[(ck9, sid9)]
@@ -1039,14 +1141,12 @@ class DailyMixin:
                     hit9 = True
             if hit9:
                 today9[s9] = [round(v9 / b9 * 100, 2) if b9 else None, round(v9, 2)]
-
         def fpos(v9):
             try:
                 v9 = float(v9)
             except (TypeError, ValueError):
                 return None
             return float(f"{v9:.8g}") if v9 > 0 and v9 == v9 and v9 != float("inf") else None
-
         days9 = [(today_kst - timedelta(days=i9)).strftime("%Y-%m-%d") for i9 in range(6, 0, -1)]
         spark9 = {}
         for s9, gid9 in main9.items():
@@ -1071,8 +1171,8 @@ class DailyMixin:
         try:
             if not conn.execute("SELECT 1 FROM meta WHERE k='exf_debt_redate_t'").fetchone():
                 return None
-            d9 = common.read_json(os.path.join(common.STATE_DIR, "exf_debt_redate_t.json"), {}) or {}
-        except (Exception, SystemExit) as _cg9:
+            d9 = statefile.read_json(paths.state("exf_debt_redate_t.json"), {}) or {}
+        except (Exception, SystemExit) as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("view_daily:DailyMixin._debt_redate_moves", _cg9)
             return None
         out = []
@@ -1114,7 +1214,6 @@ class DailyMixin:
         td = today_kst.strftime("%Y-%m-%d")
         lo = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
         out = {"dpx": 0, "daily": 0, "mig": []}
-
         def isday(k9):
             k9 = str(k9)
             return len(k9) == 10 and k9[4] == "-" and lo <= k9 < td
@@ -1304,7 +1403,7 @@ class DailyMixin:
                       ex_gids=None, pending_gids=None,
                       hold_qty=None, extra=None, extra_ok=True, now_ts=None, native_c=None, debt_moves=None, transit=None, dep_transit=None,
                       stable_aliases=None, day_close=None, neg_ok=None, led_gen=None, xq=None, xq_base=None, debt_neg=None, hist_late=None,
-                      led_pw=None, late_after=None) -> list:
+                      led_pw=None, late_after=None, inval=None) -> list:
         lo_bind9 = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
         bound9, legacy9 = _bind_px_blocks(self.daily, self.daily_px, lo_bind9)
         if legacy9:
@@ -1338,24 +1437,9 @@ class DailyMixin:
         for gid9 in ub_tl9:
             if gid9 in G:
                 ub_sym9.setdefault(str(G[gid9].get("sym") or "").upper(), []).append(gid9)
-
-        def xu_of(v9):
-            out9 = {}
-            for s9, a9 in (v9.items() if isinstance(v9, dict) else ()):
-                try:
-                    q9, u9 = float(a9[0]), float(a9[1])
-                except (TypeError, ValueError, IndexError, KeyError):
-                    continue
-                if q9 > 0 and u9 >= 0:
-                    out9[str(s9).upper()] = (q9, u9)
-            return out9
-
-        def xu_keep(v9):
-            return {s9: [round(q9, 12), round(u9, 2)] for s9, (q9, u9) in xu_of(v9).items()}
-
         def xu_cut(v9, end_ts9, only=None):
             cut9, rest9, px9 = 0.0, {}, {}
-            for s9, (q9, u9) in xu_of(v9).items():
+            for s9, (q9, u9) in _xu_of(v9).items():
                 qu9 = Decimal(0)
                 for gid9 in ub_sym9.get(s9, ()):
                     if only is not None and gid9 not in only:
@@ -1376,29 +1460,7 @@ class DailyMixin:
                 else:
                     rest9[s9] = [round(q9, 12), round(u9, 2)]
             return cut9, rest9, px9
-
-        def frozen_ub_cut(c9, end_ts9, added9):
-            only9 = {g9 for g9 in added9 if g9 in ub_tl9 and g9 in G}
-            if not only9 or not c9.get("xu"):
-                return 0.0
-            cut9, rest9, _p9 = xu_cut(c9["xu"], end_ts9, only9)
-            if cut9 <= 0:
-                return 0.0
-            c9["val"] = _f(Decimal(str(c9["val"])) - Decimal(str(cut9)), 2) or 0
-            c9["x"] = round(float(c9.get("x") or 0) - cut9, 2)
-            if c9.get("xc"):
-                xc9 = float(c9["xc"]) - cut9
-                if xc9 >= 1:
-                    c9["xc"] = round(xc9, 2)
-                else:
-                    c9.pop("xc", None)
-            if rest9:
-                c9["xu"] = rest9
-            else:
-                c9.pop("xu", None)
-            log.info("일별 동결 항목: 새로 소급한 업비트 원장 그룹 %s — 원장 밖 잔고 x 에서 %.2f 뺌(이중 계상 방지)", sorted(only9), cut9)
-            return cut9
-        rate_now = float(extra.get("rate") or self.spot.rate or 1384)
+        rate_now = float(extra.get("rate") or self.spot.rate or acct_norm.DEFAULT_KRW_USD)
         up_tl = extra.get("krw_up_tl")
         now_ts = time.time() if now_ts is None else float(now_ts)
         now_ms = int(now_ts * 1000)
@@ -1407,20 +1469,19 @@ class DailyMixin:
         self._daily_att_src = att_src9
         nf9 = set()
         self._daily_nf = nf9
-        frozen_ok = os.path.exists(os.path.join(common.STATE_DIR, "backfill_done"))
+        frozen_ok = os.path.exists(paths.state("backfill_done"))
         bf_at9 = 0.0
         if frozen_ok:
             try:
-                with open(os.path.join(common.STATE_DIR, "backfill_done"), encoding="utf-8") as f9:
+                with open(paths.state("backfill_done"), encoding="utf-8") as f9:
                     bf_at9 = float(f9.read(64).strip() or 0)
             except (OSError, ValueError):
                 bf_at9 = 0.0
-        meta_keys = ("_v", "_risk_rev", "_live", "_live_ok", "_reset_at")
+        meta_keys = ("_v", "_risk_rev", "_live", "_live_ok", "_reset_at", "_inval")
         xsrc9 = self._x_src_of(extra, now_ts)
         xpass9 = self._x_pass(xsrc9, self.daily_px, self.daily, today_kst, rate_now, run=hold_qty is not None and frozen_ok)
         pinned9 = xpass9["dpx"]
-        if not os.path.exists(DAILY_PATH) and any(k not in meta_keys for k in self.daily):
-            self.daily = _daily_reset(self.daily, today_kst)
+        self.daily, stamp_moved = daily_inval_apply(self.daily, inval, today_kst, not os.path.exists(paths.state("daily_cache.json")), meta_keys)
         if not any(k not in meta_keys for k in self.daily) and not self.daily.get("_reset_at"):
             self.daily["_reset_at"] = int(time.time())
         rev9 = ",".join(str(x) for x in sorted(skip_gids or ()))
@@ -1429,6 +1490,8 @@ class DailyMixin:
             kept9 = {"_v": DAILY_V, "_risk_rev": rev9}
             if self.daily.get("_reset_at"):
                 kept9["_reset_at"] = self.daily["_reset_at"]
+            if self.daily.get("_inval") is not None:
+                kept9["_inval"] = self.daily["_inval"]
             for lk9 in ("_live", "_live_ok"):
                 if isinstance(self.daily.get(lk9), dict):
                     kept9[lk9] = self.daily[lk9]
@@ -1446,23 +1509,14 @@ class DailyMixin:
             self.daily = kept9
             log.info("격리 집합 변경 — 동결 과거일 %d일은 그룹별 마감값으로 재산출, 구형식 %d일은 재계산", n_re, n_drop)
             if frozen_ok:
-                common.atomic_write_json(DAILY_PATH, self.daily)
+                statefile.atomic_write_json(paths.state("daily_cache.json"), self.daily)
         lg_now9 = int(led_gen or 0)
-
-        def led_old(lg9, ts9):
-            if not lg_now9:
-                return False
-            try:
-                return int(float(lg9)) != lg_now9 if lg9 is not None else float(ts9 or 0) < lg_now9
-            except (TypeError, ValueError):
-                return True
-
         old9 = set()
         if lg_now9 and hold_qty is not None and frozen_ok:
             lo9, td9 = (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"), today_kst.strftime("%Y-%m-%d")
             old9 = {ck9 for ck9, c9 in self.daily.items()
                     if not str(ck9).startswith("_") and isinstance(c9, dict) and lo9 <= str(ck9) < td9
-                    and c9.get("src") == "live" and c9.get("snap") and led_old(c9.get("lg"), c9.get("snap"))}
+                    and c9.get("src") == "live" and c9.get("snap") and _led_old(c9.get("lg"), c9.get("snap"), lg_now=lg_now9)}
             if old9 and self.__dict__.get("_led_old_logged") != (lg_now9, tuple(sorted(old9))):
                 self._led_old_logged = (lg_now9, tuple(sorted(old9)))
                 log.warning("일별: 원장 교체(세대 %s) 전 마감 스냅샷으로 동결된 날 %s — 지금 원장 수량으로 다시 계산(가격·x 는 그날 고정값)",
@@ -1474,6 +1528,7 @@ class DailyMixin:
             tl = sorted(g["qty_timeline"])
             timelines[gid] = tl
         changed = bool(relabeled9 or migrated9 or xpass9["daily"] or self.__dict__.get("_daily_dirty"))
+        changed = changed or stamp_moved
         px_changed = bool(pinned9 or relabeled9 or bound9 or migrated9 or self.__dict__.get("_dpx_dirty"))
         dpx = self.daily_px
         stable_gids9 = sorted(gid for gid, g in G.items() if g.get("is_stable") and not g.get("is_fiat"))
@@ -1481,49 +1536,25 @@ class DailyMixin:
         neg9 = sorted(g9 for g9 in (neg_ok or ()) if g9 in G)
         stable_rev9 = stable_base9 + ("|n:" + ",".join(str(x) for x in neg9) if neg9 else "")
         dbt_now9 = {str(g9): round(float(q9), 8) for g9, q9 in sorted((debt_neg or {}).items()) if g9 in G and q9 > 0}
-
         def dbt_day(ck9, *sns9):
             for v9 in ((dpx.get("_dbt") or {}).get(ck9),) + tuple((s9 or {}).get("dbt") for s9 in sns9):
                 if isinstance(v9, dict):
                     return v9
             return dbt_now9
-
         tr_by9 = {}
         for e9 in (transit or ()):
             tr_by9.setdefault(e9["gid"], []).append((int(e9["ts"]), Decimal(e9["qty"]), str(e9["uuid"])))
         dtr_by9 = {}
         for e9 in (dep_transit or ()):
             dtr_by9.setdefault(e9["gid"], []).append((int(e9["ts"]), Decimal(e9["qty"])))
-
-        def wdt_at(end_ts9):
-            return {u9: [g9, float(q9)] for g9, lst9 in tr_by9.items() for t9, q9, u9 in lst9 if t9 <= end_ts9}
-
         lp_tls9 = {gid: sorted(g["lp_tl"]) for gid, g in G.items() if g.get("lp_tl")}
         lp_to9 = {}
-
-        def lp_after(gid9, to_ms9):
-            s9 = Decimal(0)
-            for ts9, dq9 in reversed(lp_tls9.get(gid9, ())):
-                if ts9 * 1000 <= to_ms9:
-                    break
-                s9 += dq9
-            return s9
-
-        def lp_obs_set(end_ts9, parts9, ts9=None):
-            to9 = xparts.rest_obs_at(parts9, end_ts9, ts9)
-            k9 = int(end_ts9 * 1000)
-            if to9 is None:
-                lp_to9.pop(k9, None)
-            else:
-                lp_to9[k9] = int(to9 * 1000)
-
         if lp_tls9 and hold_qty is not None:
             for i9 in range(1, max(30, DAILY_PX_KEEP + 1)):
                 d9 = today_kst - timedelta(days=i9)
                 e9x = (self.daily_px.get(d9.strftime("%Y-%m-%d")) or {}).get("xv")
                 if isinstance(e9x, dict) and e9x.get("v") == xparts.GEN:
-                    lp_obs_set(d9.replace(hour=23, minute=59, second=59, microsecond=0).timestamp(), _xv_parts(e9x), e9x.get("ts"))
-
+                    _lp_obs_set(d9.replace(hour=23, minute=59, second=59, microsecond=0).timestamp(), _xv_parts(e9x), e9x.get("ts"), lp_to=lp_to9)
         def qty_at(gid9, end_ms9):
             q9 = hold_qty.get(gid9, Decimal(0))
             if end_ms9 < now_ms:
@@ -1538,21 +1569,9 @@ class DailyMixin:
                     if end_ms9 < t9 * 1000:
                         q9 -= tq9
                 if gid9 in lp_tls9 and end_ms9 in lp_to9:
-                    q9 += lp_after(gid9, lp_to9[end_ms9])
+                    q9 += _lp_after(gid9, lp_to9[end_ms9], lp_tls=lp_tls9)
             return q9
-
         lpfix9 = set()
-
-        def lp_moved_after(to_ms9):
-            for g9, tl9 in lp_tls9.items():
-                if skip_gids and g9 in skip_gids:
-                    continue
-                for ts9, dq9 in reversed(tl9):
-                    if ts9 * 1000 <= to_ms9:
-                        break
-                    if abs(dq9) > EPS:
-                        return True
-            return False
         dfp9 = histcurve.disc_fp(G) if hold_qty is not None else ""
         xq9 = xq if (xq is not None and hold_qty is not None) else None
         xqb9 = None
@@ -1563,9 +1582,6 @@ class DailyMixin:
                 self.daily_px["_xqb"] = st9x
                 px_changed = True
             xqb9 = str(st9x.get("xq") or "")
-
-        def xq_new(have9):
-            return {e9 for e9 in str(xq9 or "").split(",") if e9} - {e9 for e9 in str(have9 or "").split(",") if e9}
         n_xq9 = 0
         if hold_qty is not None and frozen_ok:
             lo9q, td9q = (today_kst - timedelta(days=max(29, DAILY_PX_KEEP))).strftime("%Y-%m-%d"), today_kst.strftime("%Y-%m-%d")
@@ -1574,7 +1590,7 @@ class DailyMixin:
                 if str(ck9).startswith("_") or not isinstance(c9, dict) or not (lo9q <= str(ck9) < td9q):
                     continue
                 if xq9 is not None:
-                    nx9 = xq_new(c9.get("xq", xqb9))
+                    nx9 = _xq_new(c9.get("xq", xqb9), xq=xq9)
                     if nx9:
                         lpfix9.add(ck9)
                         n_xq9 += 1
@@ -1592,7 +1608,7 @@ class DailyMixin:
                             e9q = int(datetime.strptime(str(ck9), "%Y-%m-%d").replace(tzinfo=today_kst.tzinfo, hour=23, minute=59, second=59).timestamp() * 1000)
                         except ValueError:
                             continue
-                        if e9q in lp_to9 and lp_moved_after(lp_to9[e9q]):
+                        if e9q in lp_to9 and _lp_moved_after(lp_to9[e9q], lp_tls=lp_tls9, skip_gids=skip_gids):
                             lpfix9.add(ck9)
                             continue
                     c9["lq"] = DAILY_LQ_V
@@ -1609,7 +1625,6 @@ class DailyMixin:
         hl9 = [m for m in (hist_late or ()) if isinstance(m, (list, tuple)) and len(m) >= 4] if hold_qty is not None else []
         hq_now9 = max((int(m[0]) for m in hl9), default=0)
         pw_memo9 = {}
-
         def pw_late9(sn9, end9):
             if late_after is None or hold_qty is None:
                 return False
@@ -1623,7 +1638,7 @@ class DailyMixin:
             if k9 not in pw_memo9:
                 try:
                     pw_memo9[k9] = bool(late_after(pw9, int(end9) + 1))
-                except Exception as e9:
+                except Exception as e9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_daily:DailyMixin._daily_series.pw_late9", e9)
                     log.warning("일별: 마감 스냅숏 원장 수위 검사 실패(표식 검사만): %s", e9)
                     pw_memo9[k9] = False
@@ -1660,8 +1675,8 @@ class DailyMixin:
                 if min9 < (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"):
                     try:
                         t9h = int(datetime.strptime(min9, "%Y-%m-%d").replace(tzinfo=today_kst.tzinfo, hour=12).timestamp())
-                        log.info("장기 곡선 다시 계산 표식(늦은 원장 행): %s 부터", common.mark_hist_dirty(t9h))
-                    except Exception as e9:
+                        log.info("장기 곡선 다시 계산 표식(늦은 원장 행): %s 부터", histmark.mark_hist_dirty(t9h))
+                    except Exception as e9:   # noqa: BLE001 [fallback]
                         calcguard.swallowed("view_daily:DailyMixin._daily_series", e9)
                         log.warning("장기 곡선 다시 계산 표식(늦은 원장 행) 실패: %s", e9)
                         new9 = []
@@ -1674,7 +1689,7 @@ class DailyMixin:
                 xv9 = e9.get("xv") if isinstance(e9, dict) and not str(ck9).startswith("_") and str(ck9) >= lo9x else None
                 if not (isinstance(xv9, dict) and isinstance(xv9.get("p"), dict)):
                     continue
-                nx9 = xq_new(xv9.get("xq", xqb9))
+                nx9 = _xq_new(xv9.get("xq", xqb9), xq=xq9)
                 redo9 = not (frozen_ok and isinstance(self.daily.get(ck9), dict)) or ck9 in old9
                 for ex9 in (sorted(nx9) if redo9 else ()):
                     for key9 in XQ_X_KEYS.get(ex9, ()):
@@ -1684,7 +1699,6 @@ class DailyMixin:
                 if xv9.get("xq") != xq9:
                     xv9["xq"] = xq9
                     px_changed = True
-
         for gid9 in sorted(native_c or ()):
             if gid9 not in G:
                 continue
@@ -1737,20 +1751,14 @@ class DailyMixin:
                 changed = changed or r10["changed"]
                 px_changed = True
                 log.warning("일별: px1004 업비트·빗썸 USDT·BTC 마켓 그날 마감가 %d개 근사로 되돌림 — 총자산 차 %+.2f · 새 순서로 다시 받는다", r10["n"], r10["dv"])
-
-            def pxfix_key9():
-                return (getattr(day_close, "gen", None), today_kst.strftime("%Y-%m-%d"), int(now_ts // 3600),
-                        sum(len(e9.get("p") or {}) - len(e9.get("k") or {}) - len(e9.get("dcn") or ())
-                            for k9, e9 in dpx.items() if not k9.startswith("_") and isinstance(e9, dict)),
-                        sum(len(c9.get("g") or ()) for k9, c9 in self.daily.items() if not k9.startswith("_") and isinstance(c9, dict)))
-            if self.__dict__.get("_pxfix_key") != pxfix_key9():
+            if self.__dict__.get("_pxfix_key") != _pxfix_key(day_close=day_close, today_kst=today_kst, now_ts=now_ts, dpx=dpx, sb=self):
                 r9 = _reprice_now_days(self.daily, dpx, G, today_kst.strftime("%Y-%m-%d"), now_ts, day_close, skip_gids)
                 self._pxfix_last = r9
                 if r9["changed"]:
                     changed = True
                 if r9["px_changed"]:
                     px_changed = True
-                self._pxfix_key = pxfix_key9()
+                self._pxfix_key = _pxfix_key(day_close=day_close, today_kst=today_kst, now_ts=now_ts, dpx=dpx, sb=self)
                 if r9["rep"] or r9["fin"]:
                     log.info("일별: 그날 마감가 재평가 %d · 근사 확정 %d · 대기 %d · 총자산 차 %+.2f", r9["rep"], r9["fin"], r9["pend"], r9["dv"])
         drd_all9 = {m9["pid"]: 0 for m9 in (debt_moves or ())}
@@ -1801,18 +1809,12 @@ class DailyMixin:
                           and not G[gid9].get("is_stable") and not G[gid9].get("is_fiat") and (live_px.get(gid9) or 0) > 0)
         bf_rev9 = ",".join(str(x) for x in bf_gids9)
         bf_seen9 = self.__dict__.setdefault("_px_bf_seen", {})
-
-        def live_allow(c9):
-            if c9.get("src") != "live":
-                return None
-            return {str(x9) for x9 in (c9.get("z") or ())}
-
         def px_backfill(ck9, d9, c9):
             sn9 = bf_seen9.get(ck9)
             if sn9 and sn9[0] == bf_rev9 and sn9[1] is c9:
                 return False
             bf_seen9[ck9] = (bf_rev9, c9)
-            allow9 = live_allow(c9)
+            allow9 = _live_allow(c9)
             if allow9 is not None and not allow9:
                 return False
             end_ms9 = int(d9.replace(hour=23, minute=59, second=59, microsecond=0).timestamp() * 1000)
@@ -1881,7 +1883,7 @@ class DailyMixin:
                 c9["val"] = _f(Decimal(str(c9["val"])) + add9, 2) or 0
             if est9 >= 1:
                 c9["est"] = round(float(c9.get("est") or 0) + float(est9), 2)
-            frozen_ub_cut(c9, end_ms9 / 1000, added9)
+            _frozen_ub_cut(c9, end_ms9 / 1000, added9, ub_tl=ub_tl9, G=G, xu_cut=xu_cut)
             c9["src9"] = "px_backfill"
             log.info("일별 %s: 늦게 가격이 생긴 그룹 %d개 소급 %+.2f (근사 %.2f)", ck9, n9, float(add9), float(est9))
             return True
@@ -1901,7 +1903,7 @@ class DailyMixin:
                 if hold_qty is not None and isinstance(c.get("g"), dict) and (c.get("st") != stable_rev9 or z_st9):
                     end_ms9 = int(d.replace(hour=23, minute=59, second=59, microsecond=0).timestamp() * 1000)
                     add9 = Decimal(0)
-                    allow_st9 = live_allow(c)
+                    allow_st9 = _live_allow(c)
                     added_st9 = []
                     only_neg9 = c.get("st") != stable_rev9 and str(c.get("st") or "").split("|n:", 1)[0] == stable_base9
                     for gid9 in stable_gids9:
@@ -1924,7 +1926,7 @@ class DailyMixin:
                     if add9:
                         c["val"] = _f(Decimal(str(c["val"])) + add9, 2) or 0
                         c["src9"] = "stable_backfill"
-                    frozen_ub_cut(c, end_ms9 / 1000, added_st9)
+                    _frozen_ub_cut(c, end_ms9 / 1000, added_st9, ub_tl=ub_tl9, G=G, xu_cut=xu_cut)
                     c["st"] = stable_rev9
                     changed = True
                 if hold_qty is not None and isinstance(c.get("g"), dict) and bf_gids9 and px_backfill(ck, d, c):
@@ -1950,11 +1952,11 @@ class DailyMixin:
                     if (sn9 and sn9.get("date") == ck and isinstance(sn9.get("g"), dict)
                             and float(sn9.get("ts") or 0) >= end_ts - DAILY_LIVE_WIN):
                         if not sn9.get("defer"):
-                            gen9 = led_old(sn9.get("lg"), sn9.get("ts"))
+                            gen9 = _led_old(sn9.get("lg"), sn9.get("ts"), lg_now=lg_now9) or bool(sn9.get("led_other"))
                             late9 = (any(m[1] <= ck and int(m[0]) > int(sn9.get("hq") or 0) for m in hl9)
                                      or pw_late9(sn9, end_ts))
                             if (gen9 or sn9.get("dq", "") != dfp9
-                                    or (xq9 is not None and xq_new(sn9.get("xq", xqb9)))
+                                    or (xq9 is not None and _xq_new(sn9.get("xq", xqb9), xq=xq9))
                                     or float(sn9.get("ts") or 0) < bf_at9
                                     or late9):
                                 old1 = True
@@ -1987,7 +1989,7 @@ class DailyMixin:
                         xs_fx9 = self.px.fx_at(int(end_ts) * 1000) or rate_now
                 xs_p9 = _xv_parts(_xv_disk(xs_p9, None, "snap"))
                 if lp_tls9:
-                    lp_obs_set(end_ts, xs_p9, snap1.get("ts"))
+                    _lp_obs_set(end_ts, xs_p9, snap1.get("ts"), lp_to=lp_to9)
                 xs_raw9 = round(xparts.total_usd(xs_p9, xs_fx9), 2)
                 xs = float(snap1.get("x") or 0)
                 if abs(xs_raw9 - xs) >= 0.005:
@@ -2013,7 +2015,7 @@ class DailyMixin:
                     xc_sn9 = xparts.carry_usd(xs_p9, xs_fx9)
                     if xc_sn9 >= 1:
                         self.daily[ck]["xc"] = round(xc_sn9, 2)
-                    xu9s = xu_keep(xu_sn9)
+                    xu9s = _xu_keep(xu_sn9)
                     if xu9s:
                         self.daily[ck]["xu"] = xu9s
                     if snap1.get("z"):
@@ -2070,7 +2072,7 @@ class DailyMixin:
                 xp9, xfx9, xhow9, xmeta9 = self._x_day(ck, end_ts, part1, old_sn1, live_snap, fixed, seed_x, xsrc9, rate_now)
                 xp9 = _xv_parts(_xv_disk(xp9, None, xhow9))
                 if lp_tls9:
-                    lp_obs_set(end_ts, xp9, (xmeta9 or {}).get("ts"))
+                    _lp_obs_set(end_ts, xp9, (xmeta9 or {}).get("ts"), lp_to=lp_to9)
             xu_src9 = {s9: list(a9) for s9, a9 in xp9["ub"][0].items()} if xp9 and xp9.get("ub") and xp9["ub"][0] else None
             xcut9, xrest9, ubpx9 = xu_cut(xu_src9, end_ts) if xu_src9 else (0.0, {}, {})
             if part1 is not None:
@@ -2260,7 +2262,7 @@ class DailyMixin:
                 if xq9 is not None:
                     self.daily["_live"]["xq"] = xq9
                 if ubs_now:
-                    self.daily["_live"]["xu"] = xu_keep(ubs_now)
+                    self.daily["_live"]["xu"] = _xu_keep(ubs_now)
                 xv9 = _xv_checked(extra.get("xv"), round(x_day, 2))
                 if xv9 is not None:
                     xv9["ts"] = int(now_ts)
@@ -2280,7 +2282,7 @@ class DailyMixin:
                     self.daily["_live"]["fxt"] = int(self.spot.rate_ts)
                 if debt_moves is not None:
                     self.daily["_live"]["drd"] = sorted(drd_all9)
-                wdt9 = wdt_at(now_ts)
+                wdt9 = _wdt_at(now_ts, tr_by=tr_by9)
                 if wdt9:
                     self.daily["_live"]["wdt"] = wdt9
                 in_win9 = now_ts >= end_ts - DAILY_LIVE_WIN
@@ -2303,10 +2305,10 @@ class DailyMixin:
                     self.daily[ck]["xu"] = xrest9
                 if xcut9:
                     self.daily[ck]["x0"] = round(x_raw9, 2)
-                    self.daily[ck]["xu0"] = xu_keep(xu_src9)
+                    self.daily[ck]["xu0"] = _xu_keep(xu_src9)
                 if debt_moves is not None:
                     self.daily[ck]["drd"] = dict(drd_all9)
-                wdt9 = wdt_at(end_ts)
+                wdt9 = _wdt_at(end_ts, tr_by=tr_by9)
                 if wdt9:
                     self.daily[ck]["wdt"] = wdt9
                 if (dpx.get(ck) or {}).pop("partial", None) is not None:
@@ -2342,7 +2344,7 @@ class DailyMixin:
                             e9["xc"] = round(xc_raw9, 2)
                         else:
                             e9.pop("xc", None)
-                        xu9p = xu_keep(xu_src9) if xu_src9 else {}
+                        xu9p = _xu_keep(xu_src9) if xu_src9 else {}
                         if xu9p:
                             e9["xu"] = xu9p
                         else:
@@ -2367,7 +2369,7 @@ class DailyMixin:
             to9 = lp_to9.get(int(d9.replace(hour=23, minute=59, second=59, microsecond=0).timestamp() * 1000))
             if to9 is None:
                 continue
-            c9 = {g9: float(v9) for g9 in lp_tls9 for v9 in (lp_after(g9, to9),) if abs(v9) > EPS}
+            c9 = {g9: float(v9) for g9 in lp_tls9 for v9 in (_lp_after(g9, to9, lp_tls=lp_tls9),) if abs(v9) > EPS}
             if c9:
                 lpc9[d9.strftime("%Y-%m-%d")] = c9
         self._daily_lpc = lpc9
@@ -2378,13 +2380,13 @@ class DailyMixin:
         if px_changed and frozen_ok:
             self._dpx_dirty = True
         if changed:
-            common.atomic_write_json(DAILY_PATH, self.daily)
+            statefile.atomic_write_json(paths.state("daily_cache.json"), self.daily)
             self._daily_dirty = False
         if px_changed and frozen_ok:
             lo9 = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
             for k9 in [k9 for k9 in dpx if not k9.startswith("_") and k9 < lo9]:
                 dpx.pop(k9, None)
-            common.atomic_write_json(DAILY_PX_PATH, dpx)
+            statefile.atomic_write_json(paths.state("daily_px.json"), dpx)
             self._dpx_dirty = False
         self.px.flush()
         return days[-30:]

@@ -1,0 +1,16 @@
+{"_doc": "G1 CSP 알려진 약점(8막에서 고치면 목록에서 빠짐) · csp_source = 지시어·출처 전체(새 출처 = FAIL · 줄면 안내)"}
+{"m": "csp_source", "k": "base-uri 'none'", "n": 1}
+{"m": "csp_source", "k": "connect-src 'self'", "n": 1}
+{"m": "csp_source", "k": "default-src 'self'", "n": 1}
+{"m": "csp_source", "k": "font-src 'self'", "n": 1}
+{"m": "csp_source", "k": "font-src data:", "n": 1}
+{"m": "csp_source", "k": "form-action 'self'", "n": 1}
+{"m": "csp_source", "k": "frame-ancestors 'none'", "n": 1}
+{"m": "csp_source", "k": "img-src 'self'", "n": 1}
+{"m": "csp_source", "k": "img-src blob:", "n": 1}
+{"m": "csp_source", "k": "img-src data:", "n": 1}
+{"m": "csp_source", "k": "object-src 'none'", "n": 1}
+{"m": "csp_source", "k": "require-trusted-types-for 'script'", "n": 1}
+{"m": "csp_source", "k": "script-src 'self'", "n": 1}
+{"m": "csp_source", "k": "style-src 'self'", "n": 1}
+{"m": "csp_source", "k": "trusted-types tj-html", "n": 1}

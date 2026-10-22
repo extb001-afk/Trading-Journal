@@ -1,7 +1,7 @@
 import json
 import os
 import time
-import common
+import paths
 import logging
 
 log = logging.getLogger('tj-core')
@@ -12,9 +12,6 @@ class MissingTs(ValueError):
 
 
 CLASSIFIER_VER = 5
-
-
-DM_PATH = os.path.join(common.STATE_DIR, "pending_dm.jsonl")
 
 
 DM_RECENT_SEC = 6 * 3600
@@ -51,7 +48,7 @@ def dm(kind: str, text: str, payload=None, event_ts=None):
     if event_ts is not None and time.time() - event_ts > DM_RECENT_SEC:
         log.info("DM스킵(과거분)[%s] %s", kind, text)
         return
-    fd = os.open(DM_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    fd = os.open(paths.state("pending_dm.jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
         if os.fstat(fd).st_mode & 0o077:
             os.fchmod(fd, 0o600)

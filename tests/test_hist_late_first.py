@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, SOLW
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, SOLW  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
@@ -16,17 +16,16 @@ json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_cha
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5, "sol": {"rpcs": ["https://solrpc.invalid"]}},
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import acct_norm
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import config, histmark, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
@@ -80,8 +79,8 @@ class _Stop(Exception):
 
 def one_cycle(c, evm=(), sol=()):
     c.reader, c.sol_reader, c.bsc_reader, c.ex_reader = Once(evm), Once(sol), Once(), Once()
-    c.recon_pass = lambda drained: None
-    c.prov_pass = lambda: None
+    c.svc_recon.recon_pass = lambda drained: None
+    c.svc_recon.prov_pass = lambda: None
     calls = []
 
     def stop(*a, **k):
@@ -108,12 +107,11 @@ def fake_lookup(spec, iso, now=None, w=0.0, ask=True, old=False):
 fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 json.dump({"usd": dict(PX), "usd_ts": {k: NOW for k in PX}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: PX.get(str(sym).upper())
 web.pricing._gj = lambda url, timeout=10.0: None
 web.pricing.PxCache.fx_at = lambda self, ms: 1400.0
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
-web.HL_SETTLE_S = 0
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:
     if hasattr(sys.modules[_mn9], "HL_SETTLE_S"):
         sys.modules[_mn9].HL_SETTLE_S = 0
@@ -122,7 +120,7 @@ for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accou
 def build():
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -138,7 +136,7 @@ def pnl(ser):
     return {k: round(float(ser[k]["val"]) - float(ser[p]["val"]) - float(ser[k].get("flow") or 0), 2) for p, k in zip(ks, ks[1:])}
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c._drain_stream("evm", Once([erec(h(1), T0, 1500, 2 * E18)]), 0, 0)
 c._drain_stream("sol", Once([srec("S" + "1" * 87, T0 + 60, 30 * 10 ** 9)]), 0, 0)
 c.conn.commit()
@@ -146,21 +144,21 @@ fa = build()
 sa = series(fa)
 ky = ISO(NOW - DAY)[5:]
 chk(abs(float(sa[ky]["val"]) - 7000) < 1, "준비: 지난 곡선 동결 = 2 ETH × 2,000 + 30 SOL × 100 = 7,000", sa.get(ky))
-c.conn.execute("DELETE FROM meta WHERE k=?", (common.HIST_LATE_PID_K,))
+c.conn.execute("DELETE FROM meta WHERE k=?", (histmark.HIST_LATE_PID_K,))
 c.conn.commit()
 pid_before = c.conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()[0]
-import sqlite3
-BK0 = common.DB_PATH + ".bk_old"
+import sqlite3  # noqa: E402
+BK0 = paths.DB_PATH + ".bk_old"
 _b0 = sqlite3.connect(BK0)
 c.conn.backup(_b0)
 _b0.close()
 c.conn.close()
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 st = one_cycle(c, evm=[erec(h(2), TL, 2000, E18)], sol=[srec("S" + "2" * 87, TS, 10 * 10 ** 9)])
 n_new = c.conn.execute("SELECT COUNT(*) FROM postings WHERE posting_id > ?", (pid_before,)).fetchone()[0]
-mk = common.hist_late_read(c.conn)
-cur = c._meta_get(common.HIST_LATE_PID_K)
+mk = histmark.hist_late_read(c.conn)
+cur = c._meta_get(histmark.HIST_LATE_PID_K)
 chk(st == [1] and n_new >= 2, "G1 실제 run 한 바퀴가 늦은 두 거래를 기장하고 바퀴 끝까지 감", (st, n_new))
 chk(len(mk) == 1 and mk[0][1] == ISO(TS), "G1 첫 주기 늦은 거래 = 표식(가장 이른 날 = SOL 8일 전) — 종전: 커서만(표식 없음)", (mk, ISO(TS)))
 chk(cur is not None and int(cur) == c.conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()[0],
@@ -175,63 +173,63 @@ chk(abs(float(sb[ks8]["val"]) - 8000) < 1 and abs(float(sb[ks5]["val"]) - 10000)
     "G1 다음 빌드 = SOL 날~ 8,000 · EVM 날~어제 10,000 · 사건 전 날 7,000 그대로", (sb[kb8]["val"], sb[ks8]["val"], sb[ks5]["val"], sb[ky]["val"]))
 chk(all(abs(v) < 1 for v in pb.values()), "G1 손익 쌍(사건 날 −X / 오늘 +X) 없음 — 날별 (값 변화 − 순유입) = 0", {k: v for k, v in pb.items() if abs(v) >= 1})
 
-dc9 = common.read_json(web.DAILY_PATH, {})
+dc9 = statefile.read_json(paths.state("daily_cache.json"), {})
 kmid = ISO(NOW - 3 * DAY)
 dc9[kmid]["val"] = 10001.0
-json.dump(dc9, open(web.DAILY_PATH, "w"))
+json.dump(dc9, open(paths.state("daily_cache.json"), "w"))
 fc = build()
 chk(abs(float(series(fc)[kmid[5:]]["val"]) - 10001) < 0.01, "G2 그다음 빌드 = 손 안 댐(같은 날 반복 없음)", series(fc)[kmid[5:]]["val"])
 c.conn.close()
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 st2 = one_cycle(c)
-mk2 = common.hist_late_read(c.conn)
-cur2 = c._meta_get(common.HIST_LATE_PID_K)
+mk2 = histmark.hist_late_read(c.conn)
+cur2 = c._meta_get(histmark.HIST_LATE_PID_K)
 fd = build()
 chk(st2 == [1] and mk2 == mk and cur2 == cur and abs(float(series(fd)[kmid[5:]]["val"]) - 10001) < 0.01,
     "G2 재시작(새 행 없는 run 바퀴) = 커서·표식 그대로 · 다시 계산 없음", (st2, mk2, cur2, cur))
 
-chk(all(m[1] >= ISO(TS) for m in mk2), "G3 배포 전부터 있던 20일 전 행 = 표식 대상 아님(소급 안 함 · 15차 결정 유지)", mk2)
+chk(all(m[1] >= ISO(TS) for m in mk2), "G3 배포 전부터 있던 20일 전 행 = 표식 대상 아님(소급 안 함 · 종전 결정 유지)", mk2)
 
-BK1 = common.DB_PATH + ".bk_new"
+BK1 = paths.DB_PATH + ".bk_new"
 _b1 = sqlite3.connect(BK1)
 c.conn.backup(_b1)
 _b1.close()
-cur_new = c._meta_get(common.HIST_LATE_PID_K)
-mk_new = common.hist_late_read(c.conn)
+cur_new = c._meta_get(histmark.HIST_LATE_PID_K)
+mk_new = histmark.hist_late_read(c.conn)
 c.conn.close()
 
 
 def restore(src9):
     for sfx in ("-wal", "-shm"):
-        if os.path.exists(common.DB_PATH + sfx):
-            os.remove(common.DB_PATH + sfx)
+        if os.path.exists(paths.DB_PATH + sfx):
+            os.remove(paths.DB_PATH + sfx)
     _s9 = sqlite3.connect(src9)
-    _d9 = sqlite3.connect(common.DB_PATH)
+    _d9 = sqlite3.connect(paths.DB_PATH)
     _s9.backup(_d9)
     _d9.close()
     _s9.close()
 
 
 restore(BK0)
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 st5 = one_cycle(c)
-cur5 = c._meta_get(common.HIST_LATE_PID_K)
-chk(st5 == [1] and cur5 is not None and int(cur5) == pid_before and common.hist_late_read(c.conn) == [],
-    "G5 커서 없는 옛 백업으로 되돌린 뒤 기동 = 울타리 = 그 원장 MAX(소급 표식 없음)", (cur5, pid_before, common.hist_late_read(c.conn)))
+cur5 = c._meta_get(histmark.HIST_LATE_PID_K)
+chk(st5 == [1] and cur5 is not None and int(cur5) == pid_before and histmark.hist_late_read(c.conn) == [],
+    "G5 커서 없는 옛 백업으로 되돌린 뒤 기동 = 울타리 = 그 원장 MAX(소급 표식 없음)", (cur5, pid_before, histmark.hist_late_read(c.conn)))
 c.conn.close()
 restore(BK1)
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 one_cycle(c, evm=[erec(h(3), NOW - 2 * DAY, 2500, E18)])
-mk5 = common.hist_late_read(c.conn)
+mk5 = histmark.hist_late_read(c.conn)
 id_new = max((m[0] for m in mk_new), default=0)
-chk(int(c._meta_get(common.HIST_LATE_PID_K)) > int(cur_new) and any(m[0] > id_new and m[1] <= ISO(NOW - 2 * DAY) for m in mk5),
+chk(int(c._meta_get(histmark.HIST_LATE_PID_K)) > int(cur_new) and any(m[0] > id_new and m[1] <= ISO(NOW - 2 * DAY) for m in mk5),
     "G5 울타리 있는 백업 = 그 커서 그대로 이어 첫 주기 늦은 거래(2일 전) 표식(새 id · 그 날 이하 — 2분 안 표식은 합침)", (cur_new, mk_new, mk5))
 for p9 in (BK0, BK1):
     os.remove(p9)
 
 bw = web.StateBuilder()
 bw.skip_gen_check = True
-cw = dbm.open_db(common.DB_PATH, readonly=True)
+cw = dbm.open_db(paths.DB_PATH, readonly=True)
 try:
     bw._build(cw)
 finally:

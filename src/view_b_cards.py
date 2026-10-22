@@ -1,8 +1,9 @@
 from __future__ import annotations
+import accounting_util
 import acct_norm
 import cgca
 import chain_registry
-import common
+import chaincatalog, config, logs, paths, seeds, statefile
 import exprov
 import os
 import provbal
@@ -15,10 +16,7 @@ from decimal import Decimal
 from view_common import CHAIN_NAME
 from view_common import EPS
 from view_common import EX_CANDLE_SYMS
-from view_common import GOPLUS_PATH
-from view_common import KST
-from view_common import LP_POS_PATH
-from view_common import RABBY_PATH
+from timeutil import KST
 from view_common import STABLE_GROUPS
 from view_common import _ex_stable_sym
 from view_common import _f
@@ -26,92 +24,149 @@ from view_misc import STAKE_STATE_KO
 from view_misc import _px_recent
 from view_misc import _px_took
 from view_misc import _sol_stake_accounts
-from view_pending import unpriced_ent
+from view_pending import merge_scoped, unpriced_ent, unpriced_pairs
 from view_spot import Spot
 from view_text import _scam_name
 from view_text import _short_addr
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _pre_mkt(sym, *, sb):
+    return bool(sb.spot.upbit_krw) and (sym not in sb.spot.upbit_krw and sym not in sb.spot.upbit_alt or _pre_listed(sym, sb=sb))
+
+
+def _pre_listed(sym, *, sb):
+    sp = sb.spot
+    return sym in sp.upbit_krw and sym in (getattr(sp, "upbit_answered", None) or ()) and f"upbit:{sym}" not in sp.ex_ts
+
+
+def _cex_px_for(gid, *, cex_proof, sb):
+    for ex, cur in cex_proof.get(gid) or ():
+        p = sb.spot.ex_price(ex, cur)
+        if p:
+            return float(p), ex, cur
+    return 0.0, None, None
+
+
+def _gp_info(gid12, *, gid_pairs_all, gp_cache):
+    worst12 = None
+    for ch12, ca12 in gid_pairs_all.get(gid12, []):
+        ent12 = (gp_cache.get(f"{ch12}:{(ca12 or '').lower()}") or {}).get("risk")
+        if ent12:
+            if ent12.get("strong"):
+                return ent12
+            worst12 = worst12 or ent12
+    return worst12
+
+
+def _wdisp(ch, wa, *, disp):
+    if not chain_registry.is_nonevm(ch):
+        return wa
+    d = disp.get((ch, wa))
+    if d is not None:
+        return d or None
+    if ch == "btc":
+        return None
+    try:
+        return chain_registry.display_owner(ch, wa) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _meta_sym(gid, *, gid_pairs, sb):
+    for ch, ca in gid_pairs.get(gid) or ():
+        m = sb.spot.token_meta.get(f"{ch}:{ca}")
+        s = spamguard.clean((m or ["", ""])[0]).strip()
+        if not s or len(s) > 20 or s.upper() in ("TOKEN", "?") or s.upper() in STABLE_GROUPS:
+            continue
+        if _scam_name(s) or spamguard.major_of(s) or spamguard.impostor_of(s) or spamguard.odd_symbol(s):
+            continue
+        return s
+    return None
+
+
+def _glob_age(sym, *, sb):
+    ts = sb.spot.usd_ts.get(sym)
+    return (time.time() - float(ts)) if ts else None
+
+
+def _ref_px(sym, own, *, sb, fx_name):
+    vals = sorted((float(p), ex) for ex in sb.CEX_PX_ORDER if ex != own
+                   for p in (sb.spot.ex_price(ex, sym),) if p)
+    if not vals:
+        return None
+    n = len(vals)
+    med = vals[n // 2][0] if n % 2 else (vals[n // 2 - 1][0] + vals[n // 2][0]) / 2
+    return {"px": med, "srcs": [fx_name.get(e, e) for _v, e in vals], "note": "다른 거래소 참고가(동일 코인 미확인)"}
+
+
+def _liq_real(gid12, *, cex_proof, sb, gid_pairs_all):
+    if _cex_px_for(gid12, cex_proof=cex_proof, sb=sb)[0]:
+        return True
+    for ch12, ca12 in gid_pairs_all.get(gid12, []):
+        k12 = (ca12 or "").lower() if ch12 != "sol" else ca12
+        rv12 = sb.spot.dex_reserve(ch12, k12)
+        if rv12 is not None and rv12 >= sb.spot.min_reserve_usd and sb.spot.dex_price(ch12, k12):
+            return True
+    return False
+
+
+def _add_gas_card(gas_expense, positions, tax_rows):
+    if gas_expense:
+        gx_rbd = {k: round(-float(v[0]), 2) for k, v in sorted(gas_expense.items())}
+        gx_o = min(int(datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=KST).timestamp()) for k in gas_expense)
+        positions.append({
+            "realizedByDay": gx_rbd, "actByDay": {}, "unvByDay": {},
+            "realizedKrwByDay": {k: round(-v[2]) for k, v in sorted(gas_expense.items())},
+            "_gid": None, "kind": "gas", "unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
+            "soldProceeds": 0, "avgSell": 0, "avgKrw": 0, "avgSellKrw": 0, "costKrw": 0, "soldProceedsKrw": 0,
+            "key": "sgas", "sym": "가스 비용", "chain": "매매 외 가스(실패·승인·전송·브릿지·LP)",
+            "status": "종료", "held": 0, "bought": 0, "movedQty": 0, "movedCost": 0, "soldQty": 0,
+            "avg": 0, "cost": 0, "realized": round(-float(sum(v[0] for v in gas_expense.values())), 2), "unreal": 0,
+            "opened": datetime.fromtimestamp(gx_o, KST).strftime("%m-%d"), "_ots": gx_o,
+            "fee": f"${float(sum(v[0] for v in gas_expense.values())):,.2f}",
+            "realizedKrw": round(-sum(v[2] for v in gas_expense.values())),
+            "steps": ["가스 비용"], "events": []})
+        for k, v in sorted(gas_expense.items()):
+            tax_rows.append({"sold": k, "sym": "가스", "ticker": "GAS", "ex": "기타 비용(가스)", "qty": 0, "acq": 0, "disp": 0,
+                             "fee": _f(v[0], 2), "rate": round(v[2] / float(v[0]), 4) if v[0] > 0 else 0,
+                             "_fee": float(v[0]), "tx": v[1]})
+
+
+def _add_stake_card(stake_inc, positions, tax_rows):
+    if stake_inc:
+        sk_rbd = {k: round(float(sum(v[0] for v in d.values())), 2) for k, d in sorted(stake_inc.items())}
+        sk_o = min(int(datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=KST).timestamp()) for k in stake_inc)
+        sk_syms = sorted({s for d in stake_inc.values() for s in d})
+        positions.append({
+            "realizedByDay": sk_rbd, "actByDay": {}, "unvByDay": {},
+            "realizedKrwByDay": {k: round(sum(v[3] for v in d.values())) for k, d in sorted(stake_inc.items())},
+            "rwdByDay": {k: sum(v[2] for v in d.values()) for k, d in sorted(stake_inc.items())},
+            "_gid": None, "kind": "stake", "unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
+            "soldProceeds": 0, "avgSell": 0, "avgKrw": 0, "avgSellKrw": 0, "costKrw": 0, "soldProceedsKrw": 0,
+            "key": "sstake", "sym": "스테이킹 보상", "chain": " · ".join(sk_syms) + " 스테이킹(에폭 보상·MEV 팁)",
+            "status": "종료", "held": 0, "bought": 0, "movedQty": 0, "movedCost": 0, "soldQty": 0,
+            "avg": 0, "cost": 0, "realized": round(float(sum(v[0] for d in stake_inc.values() for v in d.values())), 2), "unreal": 0,
+            "opened": datetime.fromtimestamp(sk_o, KST).strftime("%m-%d"), "_ots": sk_o, "fee": "$0.00",
+            "realizedKrw": round(sum(v[3] for d in stake_inc.values() for v in d.values())),
+            "steps": ["스테이킹 보상"], "events": []})
+        for k, d in sorted(stake_inc.items()):
+            for s, v in sorted(d.items()):
+                tax_rows.append({"sold": k, "sym": s, "ticker": s, "ex": "스테이킹 보상", "tk": "inc", "qty": _f(float(v[1]), 6), "acq": 0,
+                                 "disp": _f(float(v[0]), 2), "fee": 0,
+                                 "rate": round(v[3] / float(v[0]), 4) if v[0] > 0 else 0,
+                                 "_acq": 0.0, "_disp": float(v[0]), "tx": v[2]})
 
 
 class CardsMixin:
 
     def _build_cards(self, _bs9):
         (G, conn, debt_neg9, debt_take9, ex_gid, fb_cov9, fb_on, fs_on, fx_name, fx_transit, fxb, gas_expense, gid_pairs, hl_neg, led_by_gid, led_upbit_gids, live, locs_by_gid, lp_pos_rows, my_all9, now, pid_row, prefs, price_groups, pv_dl9, pv_unk9, realized_by_date, realized_krw_by_date, signer9, spoof_keys, stake_inc, stake_rwd, tax_rows, tok_pairs9, ub_snap9, uf_dl9, uncred_cost, uncred_fx, uncred_gid, uncred_known, unv_fb9, unverified, upbit_transit_gids, wdt_gid, xp_unk9,) = (_bs9["G"], _bs9["ctx"].conn, _bs9["debt_neg9"], _bs9["debt_take9"], _bs9["ex_gid"], _bs9["fb_cov9"], _bs9["ctx"].fb_on, _bs9["ctx"].fs_on, _bs9["fx_name"], _bs9["fx_transit"], _bs9["ctx"].fxb, _bs9["gas_expense"], _bs9["gid_pairs"], _bs9["hl_neg"], _bs9["led_by_gid"], _bs9["led_upbit_gids"], _bs9["live"], _bs9["locs_by_gid"], _bs9["lp_pos_rows"], _bs9["my_all9"], _bs9["ctx"].now, _bs9["pid_row"], _bs9["ctx"].prefs, _bs9["price_groups"], _bs9["pv_dl9"], _bs9["pv_unk9"], _bs9["realized_by_date"], _bs9["realized_krw_by_date"], _bs9["signer9"], _bs9["spoof_keys"], _bs9["stake_inc"], _bs9["stake_rwd"], _bs9["tax_rows"], _bs9["tok_pairs9"], _bs9["ub_snap9"], _bs9["uf_dl9"], _bs9["uncred_cost"], _bs9["uncred_fx"], _bs9["uncred_gid"], _bs9["uncred_known"], _bs9["unv_fb9"], _bs9["unverified"], _bs9["upbit_transit_gids"], _bs9["wdt_gid"], _bs9["xp_unk9"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "ag9" in _bs9:
-            ag9 = _bs9["ag9"]
-        if "c9" in _bs9:
-            c9 = _bs9["c9"]
-        if "ca9" in _bs9:
-            ca9 = _bs9["ca9"]
-        if "cap9" in _bs9:
-            cap9 = _bs9["cap9"]
-        if "ch9" in _bs9:
-            ch9 = _bs9["ch9"]
-        if "d9" in _bs9:
-            d9 = _bs9["d9"]
-        if "dk9" in _bs9:
-            dk9 = _bs9["dk9"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "ex9" in _bs9:
-            ex9 = _bs9["ex9"]
-        if "g" in _bs9:
-            g = _bs9["g"]
-        if "g9" in _bs9:
-            g9 = _bs9["g9"]
-        if "gid" in _bs9:
-            gid = _bs9["gid"]
-        if "gid9" in _bs9:
-            gid9 = _bs9["gid9"]
-        if "gk9" in _bs9:
-            gk9 = _bs9["gk9"]
-        if "held9" in _bs9:
-            held9 = _bs9["held9"]
-        if "hl9" in _bs9:
-            hl9 = _bs9["hl9"]
-        if "it9" in _bs9:
-            it9 = _bs9["it9"]
-        if "k2" in _bs9:
-            k2 = _bs9["k2"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "kd9" in _bs9:
-            kd9 = _bs9["kd9"]
-        if "l9" in _bs9:
-            l9 = _bs9["l9"]
-        if "loc9" in _bs9:
-            loc9 = _bs9["loc9"]
-        if "m9" in _bs9:
-            m9 = _bs9["m9"]
-        if "o9" in _bs9:
-            o9 = _bs9["o9"]
-        if "og9" in _bs9:
-            og9 = _bs9["og9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "qty" in _bs9:
-            qty = _bs9["qty"]
-        if "r9" in _bs9:
-            r9 = _bs9["r9"]
-        if "rf9" in _bs9:
-            rf9 = _bs9["rf9"]
-        if "row" in _bs9:
-            row = _bs9["row"]
-        if "s9" in _bs9:
-            s9 = _bs9["s9"]
-        if "u9" in _bs9:
-            u9 = _bs9["u9"]
-        if "v9" in _bs9:
-            v9 = _bs9["v9"]
         cex_proof = self._cex_proof(conn)
         self.spot.want_ex({ex9 for gid9, lst9 in cex_proof.items() if gid9 in gid_pairs for ex9, _c9 in lst9})
-        def pre_mkt9(sym9):
-            return bool(self.spot.upbit_krw) and sym9 not in self.spot.upbit_krw and sym9 not in self.spot.upbit_alt
         exk9 = {}
         for gid9, ex9 in ex_gid.items():
             s9 = acct_norm.canon((G.get(gid9) or {}).get("sym"), ex9) if ex9 == "upbit" else None
@@ -125,21 +180,13 @@ class CardsMixin:
                 for xg9 in (exk9.get(acct_norm.canon(cur9, ex9)) or ()) if ex9 == "upbit" else ():
                     if og9 not in pre_og9.setdefault(xg9, []):
                         pre_og9[xg9].append(og9)
-        pre_want9 = [xg9 for xg9 in pre_og9 if xg9 in price_groups and pre_mkt9(price_groups[xg9]["sym"])
+        pre_want9 = [xg9 for xg9 in pre_og9 if xg9 in price_groups and _pre_mkt(price_groups[xg9]["sym"], sb=self)
                      and not self.spot.ex_price("upbit", price_groups[xg9]["sym"])]
         self.spot.want_tokens([p9 for xg9 in pre_want9 for og9 in pre_og9[xg9] for p9 in tok_pairs9.get(og9) or ()], slot="expre")
         self.spot.want_ex({ex9 for xg9 in pre_want9 for og9 in pre_og9[xg9] for ex9, _c9 in cex_proof.get(og9) or ()})
-
-        def cex_px_for(gid9):
-            for ex9, cur9 in cex_proof.get(gid9) or ():
-                p9 = self.spot.ex_price(ex9, cur9)
-                if p9:
-                    return float(p9), ex9, cur9
-            return 0.0, None, None
-
         overrides9 = prefs.get("risk_overrides") or {}
         wl9 = {str(a).lower() for a in (prefs.get("src_whitelist") or []) if a}
-        gp_cache9 = common.read_json(GOPLUS_PATH, {}) if os.path.exists(GOPLUS_PATH) else {}
+        gp_cache9 = statefile.read_json(paths.state("goplus_cache.json"), {}) if os.path.exists(paths.state("goplus_cache.json")) else {}
         gid_pairs_all = {}
         for r12 in conn.execute("SELECT group_id, chain, address FROM assets"
                                 " WHERE kind='token' AND address IS NOT NULL"
@@ -156,17 +203,6 @@ class CardsMixin:
                 for chp9, cap9 in gid_pairs_all.get(gidp9, []):
                     if chp9 != "sol" and cap9:
                         proven_ca9.setdefault(cap9.lower(), set()).add(chp9)
-
-        def gp_info9(gid12):
-            worst12 = None
-            for ch12, ca12 in gid_pairs_all.get(gid12, []):
-                ent12 = (gp_cache9.get(f"{ch12}:{(ca12 or '').lower()}") or {}).get("risk")
-                if ent12:
-                    if ent12.get("strong"):
-                        return ent12
-                    worst12 = worst12 or ent12
-            return worst12
-
         quarantined = set()
         airdrop_only = set()
         open_cg9 = set()
@@ -179,7 +215,7 @@ class CardsMixin:
                 return None
             if any(g12.get(k9) for k9 in ("px_seen", "ex_seen", "mv_seen", "risk_allow", "risk_allow_bridge", "risk_airdrop_signed", "risk_airdrop")):
                 return None
-            if any(spamguard.is_genuine(ch12, ca12) or spamguard.is_user_genuine(ch12, ca12) for ch12, ca12 in prs12) or cex_px_for(gid12)[0]:
+            if any(spamguard.is_genuine(ch12, ca12) or spamguard.is_user_genuine(ch12, ca12) for ch12, ca12 in prs12) or _cex_px_for(gid12, cex_proof=cex_proof, sb=self)[0]:
                 return None
             q12 = sum(float(dq12) for _t12, dq12 in g12.get("qty_timeline") or ())
             st12 = None
@@ -200,23 +236,12 @@ class CardsMixin:
             return st12
         goplus_want9 = set()
         unv9 = set()
-
-        def liq_real9(gid12):
-            if cex_px_for(gid12)[0]:
-                return True
-            for ch12, ca12 in gid_pairs_all.get(gid12, []):
-                k12 = (ca12 or "").lower() if ch12 != "sol" else ca12
-                rv12 = self.spot.dex_reserve(ch12, k12)
-                if rv12 is not None and rv12 >= self.spot.min_reserve_usd and self.spot.dex_price(ch12, k12):
-                    return True
-            return False
         real_sym9 = {}
         for gid9r, g9r in G.items():
             if g9r.get("px_seen") or g9r.get("ex_seen"):
                 sk9r = acct_norm.canon(spamguard.clean(g9r.get("sym") or ""))
                 if sk9r:
                     real_sym9.setdefault(sk9r, set()).add(gid9r)
-
         def fake_ticker9(gid12, g12):
             if gid12 not in gid_pairs_all or gid12 in native_gids9 or g12.get("is_stable") or g12.get("is_fiat") or not g12.get("sent_n"):
                 return None
@@ -232,7 +257,7 @@ class CardsMixin:
             sk9 = acct_norm.canon(sym9f)
             if not sk9 or re.fullmatch(r"TOKEN|NATIVE:.*|\?", sk9) or not (real_sym9.get(sk9, set()) - {gid12}):
                 return None
-            if cex_px_for(gid12)[0] or any(ch12 != "sol" and (proven_ca9.get((ca12 or "").lower()) or set())
+            if _cex_px_for(gid12, cex_proof=cex_proof, sb=self)[0] or any(ch12 != "sol" and (proven_ca9.get((ca12 or "").lower()) or set())
                                            for ch12, ca12 in gid_pairs_all.get(gid12, [])):
                 return None
             if any(self.spot.dex_price(ch12, (ca12 or "").lower() if ch12 != "sol" else ca12)
@@ -243,10 +268,10 @@ class CardsMixin:
             ov12 = overrides9.get(f"g{gid12}")
             why12 = self._impostor_reason(
                 g12, gid12 in gid_pairs_all, gid_pairs_all.get(gid12), gid12 in native_gids9,
-                priced=not g12.get("spoof_soft") or bool(cex_px_for(gid12)[0])
+                priced=not g12.get("spoof_soft") or bool(_cex_px_for(gid12, cex_proof=cex_proof, sb=self)[0])
                 or any(self.spot.dex_price(ch12, (ca12 or "").lower() if ch12 != "sol" else ca12)
                        for ch12, ca12 in gid_pairs_all.get(gid12, [])),
-                liquid=lambda gid12=gid12: liq_real9(gid12)) \
+                liquid=lambda gid12=gid12: _liq_real(gid12, cex_proof=cex_proof, sb=self, gid_pairs_all=gid_pairs_all)) \
                 if ov12 not in ("visible", "spam") else None
             if not why12 and ov12 not in ("visible", "spam"):
                 why12 = fake_ticker9(gid12, g12)
@@ -277,7 +302,7 @@ class CardsMixin:
                 continue
             if g12.get("risk_allow_bridge"):
                 goplus_want9.update(gid_pairs_all.get(gid12, []))
-                gpb12 = gp_info9(gid12)
+                gpb12 = _gp_info(gid12, gid_pairs_all=gid_pairs_all, gp_cache=gp_cache9)
                 if not (gpb12 and gpb12.get("strong")):
                     continue
                 g12["risk_reason"] = f"브릿지 매칭 자산 · 고플러스 {gpb12['label']}"
@@ -285,13 +310,13 @@ class CardsMixin:
                 continue
             airdrop12 = bool(g12.get("risk_airdrop"))
             if not airdrop12 and g12.get("risk_airdrop_signed"):
-                liq12 = bool(cex_px_for(gid12)[0]) or any(
+                liq12 = bool(_cex_px_for(gid12, cex_proof=cex_proof, sb=self)[0]) or any(
                     self.spot.dex_price(ch12, (ca12 or "").lower() if ch12 != "sol" else ca12)
                     and (self.spot.dex_reserve(ch12, (ca12 or "").lower() if ch12 != "sol" else ca12) or 0) >= self.spot.min_reserve_usd
                     for ch12, ca12 in gid_pairs_all.get(gid12, []))
                 if liq12:
                     goplus_want9.update(gid_pairs_all.get(gid12, []))
-                    gps12 = gp_info9(gid12)
+                    gps12 = _gp_info(gid12, gid_pairs_all=gid_pairs_all, gp_cache=gp_cache9)
                     if gps12 and gps12.get("strong"):
                         g12["risk_reason"] = f"내 서명 수령 · 고플러스 {gps12['label']}"
                         quarantined.add(gid12)
@@ -305,7 +330,7 @@ class CardsMixin:
             if any(ch12 != "sol" and (proven_ca9.get((ca12 or "").lower()) or set()) - {ch12}
                    for ch12, ca12 in gid_pairs_all.get(gid12, [])):
                 continue
-            gp12 = gp_info9(gid12)
+            gp12 = _gp_info(gid12, gid_pairs_all=gid_pairs_all, gp_cache=gp_cache9)
             goplus_want9.update(gid_pairs_all.get(gid12, []))
             if airdrop12 and not (gp12 and gp12.get("strong")) and any(spamguard.is_user_genuine(ch12, ca12) for ch12, ca12 in gid_pairs_all.get(gid12, [])):
                 airdrop12 = False
@@ -350,25 +375,9 @@ class CardsMixin:
                     override_px[row["group_id"]] = float(v)
                 except (TypeError, ValueError):
                     pass
-
         aliases = prefs.get("aliases") or {}
         stake_meta = _sol_stake_accounts()
-
         disp9 = {(cw["chain"], cw["key"]): cw["disp"] for cw in self._chain_disp_wallets(self.cfg)}
-
-        def wdisp9(ch, wa):
-            if not chain_registry.is_nonevm(ch):
-                return wa
-            d9 = disp9.get((ch, wa))
-            if d9 is not None:
-                return d9 or None
-            if ch == "btc":
-                return None
-            try:
-                return chain_registry.display_owner(ch, wa) or None
-            except (TypeError, ValueError):
-                return None
-
         def locs_for(gid, uncred=Decimal(0), ubq=Decimal(0)):
             outl = []
             for row in locs_by_gid.get(gid, []):
@@ -409,7 +418,7 @@ class CardsMixin:
                         outl[-1].update(sub=outl[-1]["sub"] + " · 지금 잔고(옛 기록 받는 중)", pv=1)
                     continue
                 if wa:
-                    wd9 = wdisp9(ch, wa)
+                    wd9 = _wdisp(ch, wa, disp=disp9)
                     label = aliases.get(wa) or self.addr_label.get(wa) or (wd9 or wa)[:8]
                     short = f"{wd9[:6]}…{wd9[-4:]}" if wd9 else ""
                     outl.append({"w": label if str(label).rstrip().endswith("지갑") else f"{label} 지갑", "ch": CHAIN_NAME.get(ch, ch),
@@ -449,7 +458,7 @@ class CardsMixin:
             wa = parts[2] if len(parts) >= 3 and parts[2] else None
             if not wa:
                 return "SOL 지갑" if ch == "sol" else "EVM 지갑"
-            label = aliases.get(wa) or self.addr_label.get(wa) or (wdisp9(ch, wa) or wa)[:8]
+            label = aliases.get(wa) or self.addr_label.get(wa) or (_wdisp(ch, wa, disp=disp9) or wa)[:8]
             if len(parts) >= 5 and parts[3] == "stake":
                 return f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"
             return label if str(label).rstrip().endswith("지갑") else f"{label} 지갑"
@@ -457,10 +466,10 @@ class CardsMixin:
         ub_coins = {}
         ub2 = {}
         xv_up_coin9 = None
-        ub_path2 = os.path.join(common.STATE_DIR, "upbit_balances.json")
+        ub_path2 = paths.state("upbit_balances.json")
         if os.path.exists(ub_path2):
-            ub2 = ub_snap9 if ub_snap9 is not None else common.read_json(ub_path2, {})
-            if time.time() - (ub2.get("ts") or 0) < common.upbit_fresh_sec(self.cfg):
+            ub2 = ub_snap9 if ub_snap9 is not None else statefile.read_json(ub_path2, {})
+            if time.time() - (ub2.get("ts") or 0) < config.upbit_fresh_sec(self.cfg):
                 xv_up_coin9 = float(ub2.get("ts") or 0)
                 for acc in ub2.get("accounts") or []:
                     cur3 = str(acc.get("currency") or "")
@@ -472,7 +481,6 @@ class CardsMixin:
                         continue
                     if q3 > 0:
                         ub_coins[cur3.upper()] = ub_coins.get(cur3.upper(), 0) + q3
-
         stables, coins = [], []
         unpriced = []
         unpriced_w = []
@@ -484,33 +492,7 @@ class CardsMixin:
         px_wait9 = self._px_wait_gids = set()
         proof_div9 = []
         meta_want9 = set()
-
-        def meta_sym9(gid9):
-            for ch9, ca9 in gid_pairs.get(gid9) or ():
-                m9 = self.spot.token_meta.get(f"{ch9}:{ca9}")
-                s9 = spamguard.clean((m9 or ["", ""])[0]).strip()
-                if not s9 or len(s9) > 20 or s9.upper() in ("TOKEN", "?") or s9.upper() in STABLE_GROUPS:
-                    continue
-                if _scam_name(s9) or spamguard.major_of(s9) or spamguard.impostor_of(s9) or spamguard.odd_symbol(s9):
-                    continue
-                return s9
-            return None
-
-        def glob_age9(sym9):
-            ts9 = self.spot.usd_ts.get(sym9)
-            return (time.time() - float(ts9)) if ts9 else None
-
-        def ref_px9(sym9, own9):
-            vals9 = sorted((float(p9), ex9) for ex9 in self.CEX_PX_ORDER if ex9 != own9
-                           for p9 in (self.spot.ex_price(ex9, sym9),) if p9)
-            if not vals9:
-                return None
-            n9 = len(vals9)
-            med9 = vals9[n9 // 2][0] if n9 % 2 else (vals9[n9 // 2 - 1][0] + vals9[n9 // 2][0]) / 2
-            return {"px": med9, "srcs": [fx_name.get(e9, e9) for _v9, e9 in vals9], "note": "다른 거래소 참고가(동일 코인 미확인)"}
-
         pre_used9 = self._px_pre_gids = {}
-
         def pre_px9(xg9, sym9, qty9):
             ogs9 = pre_og9.get(xg9) or ()
             for og9 in ogs9:
@@ -525,7 +507,7 @@ class CardsMixin:
                     vs9.append((ex9, float(p9), self.spot.ex_age(ex9, sym9)))
             gp9 = self.spot.price(sym9)
             if gp9 and gp9 > 0 and not any(e9 == "binance" for e9, _p9, _a9 in vs9):
-                vs9.append(("글로벌", float(gp9), glob_age9(sym9)))
+                vs9.append(("글로벌", float(gp9), _glob_age(sym9, sb=self)))
             if not ogs9:
                 for ex9, p9, a9 in vs9:
                     n9 = sum(1 for _e9, q9, _a9 in vs9 if max(p9, q9) / min(p9, q9) <= self.PRE_DIVERGE)
@@ -560,6 +542,7 @@ class CardsMixin:
                 return dval9[0], "dex:" + self.spot.dex_src.get(f"{k9[0]}:{k9[1]}", "gecko"), self.spot.dex_age(*k9), k9, 0
             return 0.0, None, None, None, 0
 
+        invck9 = accounting_util.Invariants()
         for gid, g in sorted(price_groups.items(), key=lambda kv: kv[1]["sym"]):
             sym = g["sym"]
             uncred = uncred_gid.get(gid, Decimal(0))
@@ -570,6 +553,8 @@ class CardsMixin:
             k_all = g["qty_known"] + uncred_known.get(gid, Decimal(0))
             c_all = g["cost"] + uncred_cost.get(gid, Decimal(0))
             avg = float(c_all / k_all) if k_all > EPS else 0
+            if not g.get("is_fiat"):
+                invck9.check(gid, sym, qty_dec, k_all, c_all)
             if g["is_stable"]:
                 if gid not in live:
                     continue
@@ -582,7 +567,7 @@ class CardsMixin:
                 continue
             dex_px = 0
             dex_key = None
-            cex_px, cex_ex, cex_cur = cex_px_for(gid) if gid not in ex_gid else (0.0, None, None)
+            cex_px, cex_ex, cex_cur = _cex_px_for(gid, cex_proof=cex_proof, sb=self) if gid not in ex_gid else (0.0, None, None)
             if cex_px:
                 cex_px_pairs.update(gid_pairs.get(gid, []))
             for ch2, ca2 in gid_pairs.get(gid, []):
@@ -614,14 +599,14 @@ class CardsMixin:
                                                                or (sym in self.spot.upbit_alt
                                                                    and sym not in (getattr(self.spot, "upbit_alt_miss", None) or ()))))):
                     pending_gids.add(gid)
-                if not px and ex_gid[gid] == "upbit" and gid not in pending_gids and pre_mkt9(sym):
+                if not px and ex_gid[gid] == "upbit" and (gid not in pending_gids or _pre_listed(sym, sb=self)) and _pre_mkt(sym, sb=self):
                     pp9, ps9, pa9, pk9, pn9 = pre_px9(gid, sym, qty)
                     if pp9:
                         px, src9, age9 = pp9, ps9, pa9
                         pre_used9[gid] = (ps9, pk9, pp9, pn9)
             elif gid in native_kind9 and has_ca and self.spot.price(sym):
                 px = self.spot.price(sym)
-                src9, age9 = "cex:글로벌", glob_age9(sym)
+                src9, age9 = "cex:글로벌", _glob_age(sym, sb=self)
             elif cex_px:
                 px = cex_px
                 src9 = f"cex:{fx_name.get(cex_ex, cex_ex)}"
@@ -640,14 +625,15 @@ class CardsMixin:
                     ms9 = {"WETH": "ETH", "WBTC": "BTC", "WBNB": "BNB", "WSOL": "SOL", "WPOL": "POL"}.get(m9p, m9p)
                     px = self.spot.price(ms9) or 0
                     if px:
-                        src9, age9 = "cex:글로벌", glob_age9(ms9)
+                        src9, age9 = "cex:글로벌", _glob_age(ms9, sb=self)
                 if not px and gid in open_cg9:
                     for ch2, ca2 in gid_pairs.get(gid, []):
                         k2 = (ca2 or "").lower() if ch2 != "sol" else ca2
                         cg_px_want9.add((ch2, k2))
-                        cp2 = cgca.price(ch2, k2, now=self.spot.off_at.get(ch2) if ch2 in self.spot.off_chains else None)
+                        off2 = ch2 in self.spot.off_chains
+                        cp2 = cgca.price_at(ch2, k2, now=self.spot.off_at.get(ch2) if off2 else None)
                         if cp2:
-                            px, src9, age9 = cp2, "coingecko", None
+                            px, src9, age9 = cp2[0], "coingecko", (None if off2 else max(0.0, now - cp2[1]))
                             break
                 if not px and any(self.spot.dex_pending(ch2, ca2) for ch2, ca2 in gid_pairs.get(gid, [])):
                     pending_gids.add(gid)
@@ -655,7 +641,7 @@ class CardsMixin:
                 px = 0
             else:
                 px = self.spot.price(sym) or 0
-                src9, age9 = "cex:글로벌", glob_age9(sym)
+                src9, age9 = "cex:글로벌", _glob_age(sym, sb=self)
                 if not px:
                     px = _px_recent(self.px, sym, int(now * 1000)) or 0
                     if _px_took(self.px):
@@ -688,7 +674,7 @@ class CardsMixin:
             dsym9 = None
             if sym == "TOKEN" and gid_pairs.get(gid):
                 meta_want9.update(gid_pairs[gid])
-                dsym9 = meta_sym9(gid)
+                dsym9 = _meta_sym(gid, gid_pairs=gid_pairs, sb=self)
             row = {"key": f"g{gid}", "sym": dsym9 or sym,
                    "name": (dsym9 or sym) + (" · " + "/".join(sorted(CHAIN_NAME.get(c, c) for c in g["chains"]))),
                    "qty": qty, "price": px, "avg": avg,
@@ -719,7 +705,7 @@ class CardsMixin:
             if dsym9:
                 row["symSrc"] = "dexscreener"
             if not px and qty > 0 and gid in ex_gid:
-                rf9 = ref_px9(sym, ex_gid[gid])
+                rf9 = _ref_px(sym, ex_gid[gid], sb=self, fx_name=fx_name)
                 if rf9:
                     row["pxRef"] = rf9
             if not px and qty > 0 and gid not in unv9:
@@ -750,9 +736,9 @@ class CardsMixin:
         pv_unk_px9 = []
         try:
             pv_unk_px9 = self._prov_price(pv_unk9, now, cg_want9, cg_px_want9, hold_prio)
-        except Exception as e9:
-            calcguard.swallowed("view_b_cards:CardsMixin._build_cards", e9)
-            log.warning("지금 잔고(첫 대사 전) 평가 실패(원장 숫자만): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_cards:CardsMixin._build_cards[pv_unk_px9]", e9)
+            log.warning("지금 잔고(첫 대사 전) 평가 실패(원장 숫자만): %s", logs.safe_err(e9)[:160])
         xp_unk_px9 = []
         if xp_unk9:
             self.spot.want_ex({it9["ex"] for it9 in xp_unk9})
@@ -810,7 +796,7 @@ class CardsMixin:
                     if ag9 is not None:
                         entry["pxAge"] = int(max(0, ag9))
                 if not entry["price"]:
-                    rf9 = ref_px9(cur4, "upbit")
+                    rf9 = _ref_px(cur4, "upbit", sb=self, fx_name=fx_name)
                     if rf9:
                         entry["pxRef"] = rf9
                 coins.append(entry)
@@ -823,12 +809,11 @@ class CardsMixin:
         rb_view, rb_debts = None, []
         rb_pairs9 = set()
         try:
-            rb_st = rabby.load_state(RABBY_PATH)
+            rb_st = rabby.load_state(paths.state("rabby_portfolio.json"))
             if (rb_st.get("wallets") or {}):
-                known9 = set()
-                for ch9, ad9, kd9 in conn.execute("SELECT chain, address, kind FROM assets"):
-                    known9.add((ch9, rabby.ZERO if kd9 == "native" else str(ad9 or "").lower()))
-                for ch9, (mca9, _sc9) in common.NATIVE_MIRROR.items():
+                known9 = {(ch9, rabby.ZERO if kd9 == "native" else str(ad9 or "").lower()) for ch9, ad9, kd9 in conn.execute("SELECT chain, address, kind FROM assets")}
+                nopx_by_wallet = unpriced_pairs(coins, gid_pairs_all, locs_by_gid, seeds.seed_json("zero_value_companions.json", {}, base_dir=paths.BASE_DIR), set(override_px))
+                for ch9, (mca9, _sc9) in chaincatalog.NATIVE_MIRROR.items():
                     known9.add((ch9, mca9))
                 held9 = set()
                 priced9 = {}
@@ -851,7 +836,7 @@ class CardsMixin:
                     held9.add(k9)
                     priced9.setdefault(k9, []).append((str(it9["sym"] or "").upper(), float(it9["qty"]) * float(px9)))
                 lp_ids9 = set()
-                lpf9 = common.read_json(LP_POS_PATH, {}) or {}
+                lpf9 = statefile.read_json(paths.state("lp_positions.json"), {}) or {}
                 for loc9 in list((lpf9.get("positions") or {}).keys()) + [l9 for _g9, l9, _q9 in lp_pos_rows]:
                     p9 = str(loc9).split(":")
                     if len(p9) >= 4:
@@ -874,10 +859,10 @@ class CardsMixin:
                 try:
                     import hl_spot
                     hl9 = hl_spot.known_addresses(self.cfg)
-                except Exception as _cg9:
-                    calcguard.swallowed("view_b_cards:CardsMixin._build_cards", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("view_b_cards:CardsMixin._build_cards[override_pxrowgroup_id]", _cg9)
                     hl9 = set()
-                rb_view = rabby.merge(rb_st, resolve=rabby.chain_resolver(self.cfg, rb_st),
+                rb_view = merge_scoped(rabby.merge, nopx_by_wallet, rb_st, resolve=rabby.chain_resolver(self.cfg, rb_st),
                                       wallet_chains_set=rabby.wallet_chains(self.cfg), known_pairs=known9, held_chains=held9,
                                       lp_ids=lp_ids9, priced_held=priced9, spam_fn=rb_spam9, labels=labels9,
                                       chain_names=CHAIN_NAME, now=now, min_usd=rabby.settings(self.cfg)["min_usd"],
@@ -892,8 +877,8 @@ class CardsMixin:
                 rb_view["state"] = {"backoffUntil": rb_st.get("backoffUntil"), "lastErr": rb_st.get("lastErr"),
                                     "calls": rb_st.get("calls"), "enabled": rabby.settings(self.cfg)["enabled"],
                                     "minUsd": rabby.settings(self.cfg)["min_wallet_usd"]}
-        except Exception as e9:
-            calcguard.swallowed("view_b_cards:CardsMixin._build_cards", e9)
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_cards:CardsMixin._build_cards[rb_st]", e9)
             log.warning("Rabby 보강 실패(봇 숫자만 표시): %s", e9)
             rb_view, rb_debts = None, []
         rb_net = round((rb_view or {}).get("onlyUsd", 0.0) + sum(d9["usd"] for d9 in rb_debts), 2)
@@ -946,12 +931,11 @@ class CardsMixin:
                         c9 = pv9["chains"].setdefault(ch9, {"usd": 0.0, "n": 0})
                         c9["usd"] = round(c9["usd"] + v9["usd"], 2)
                         c9["n"] += v9["n"]
-        except Exception as e9:
-            calcguard.swallowed("view_b_cards:CardsMixin._build_cards", e9)
-            log.warning("지금 잔고(첫 대사 전) 집계 실패: %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_cards:CardsMixin._build_cards[pv_dl9]", e9)
+            log.warning("지금 잔고(첫 대사 전) 집계 실패: %s", logs.safe_err(e9)[:160])
         pv9["usd"] = round(pv9["usd"], 2)
         self._prov_view = pv9
-
         grp4r = {}
         for e4r in fx_transit.values():
             st4r, fl4r = e4r.get("story"), e4r.get("story_flow")
@@ -963,7 +947,6 @@ class CardsMixin:
             for st4r in reversed(sts4r):
                 cat4r += st4r
             fl4r["events"] = sorted(cat4r + fl4r["events"], key=lambda e9: (e9.get("_ts") or 0, e9["t"]))
-
         d9j = prefs.get("dust_usd")
         try:
             dust_ev = 1.0 if d9j is None else max(0.0, float(d9j or 0))
@@ -971,7 +954,6 @@ class CardsMixin:
             dust_ev = 1.0
         xfer_k9 = ("전송", "외부 전송", "입금 확인")
         stab_sym9 = set(STABLE_GROUPS) | {"FDUSD", "TUSD", "USDP", "PYUSD", "USD1", "USDS", "USD", "RLUSD"}
-
         def ev_usd(r9, g9):
             qn = abs(float(self._norm(r9)))
             if g9.get("is_stable"):
@@ -988,7 +970,6 @@ class CardsMixin:
             if px9:
                 return max(qn * float(px9), then9 or 0.0)
             return then9
-
         def ev_hide(e9):
             r9 = pid_row.get(e9.get("_pid"))
             if r9 is not None:
@@ -1018,13 +999,11 @@ class CardsMixin:
                 if not (s9 and spamguard.signer_mine(*s9, my_all9)):
                     return "scam", f"주소 오염 의심 초소액 수령 (${usd9:.4f})"
             return "dust", f"소액 ${usd9:,.2f} (기준 ${dust_ev:g} 미만)"
-
         pos_hid9 = []
-
         disp9 = {}
         for gid9, g9 in G.items():
             if g9.get("sym") == "TOKEN" and gid9 not in quarantined and gid_pairs.get(gid9):
-                s9 = meta_sym9(gid9)
+                s9 = _meta_sym(gid9, gid_pairs=gid_pairs, sb=self)
                 if s9:
                     disp9[gid9] = s9
         positions = []
@@ -1053,7 +1032,7 @@ class CardsMixin:
                         a9 = sbd_s.setdefault(d9, [0, 0]); a9[1] += 1
                     for d9 in fl.get("pay_dates") or ():
                         pbd_s[d9] = pbd_s.get(d9, 0) + 1
-                rbd_s = {k9: round(v9, 2) for k9, v9 in sorted(rbd_s.items()) if abs(v9) >= 0.005}
+                rbd_s = {k9: round(v9, 2) for k9, v9 in sorted(rbd_s.items()) if abs(v9) >= 0.005 or abs(rbdk_s.get(k9, 0.0)) >= 0.5}
                 if not (rbd_s or ubd_s):
                     continue
                 o9 = min(fl["opened"] for fl in g["flows"])
@@ -1211,47 +1190,8 @@ class CardsMixin:
                     positions[-1]["fsEst"] = {"cost": _f(fl.get("fs_c", Decimal(0)), 2) or 0, "qty": _f(fl.get("fs_q", Decimal(0)), 6) or 0,
                                               "real": round(float(fl.get("fs_rz") or 0), 2)}
                 pos_ev_full.append((positions[-1]["key"], positions[-1]["sym"], positions[-1]["chain"], fl["events"]))
-        if gas_expense:
-            gx_rbd = {k9: round(-float(v9[0]), 2) for k9, v9 in sorted(gas_expense.items())}
-            gx_o = min(int(datetime.strptime(k9, "%Y-%m-%d").replace(tzinfo=KST).timestamp()) for k9 in gas_expense)
-            positions.append({
-                "realizedByDay": gx_rbd, "actByDay": {}, "unvByDay": {},
-                "realizedKrwByDay": {k9: round(-v9[2]) for k9, v9 in sorted(gas_expense.items())},
-                "_gid": None, "kind": "gas", "unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
-                "soldProceeds": 0, "avgSell": 0, "avgKrw": 0, "avgSellKrw": 0, "costKrw": 0, "soldProceedsKrw": 0,
-                "key": "sgas", "sym": "가스 비용", "chain": "매매 외 가스(실패·승인·전송·브릿지·LP)",
-                "status": "종료", "held": 0, "bought": 0, "movedQty": 0, "movedCost": 0, "soldQty": 0,
-                "avg": 0, "cost": 0, "realized": round(-float(sum(v9[0] for v9 in gas_expense.values())), 2), "unreal": 0,
-                "opened": datetime.fromtimestamp(gx_o, KST).strftime("%m-%d"), "_ots": gx_o,
-                "fee": f"${float(sum(v9[0] for v9 in gas_expense.values())):,.2f}",
-                "realizedKrw": round(-sum(v9[2] for v9 in gas_expense.values())),
-                "steps": ["가스 비용"], "events": []})
-            for k9, v9 in sorted(gas_expense.items()):
-                tax_rows.append({"sold": k9, "sym": "가스", "ticker": "GAS", "ex": "기타 비용(가스)", "qty": 0, "acq": 0, "disp": 0,
-                                 "fee": _f(v9[0], 2), "rate": round(v9[2] / float(v9[0]), 4) if v9[0] > 0 else 0,
-                                 "_fee": float(v9[0]), "tx": v9[1]})
-        if stake_inc:
-            sk_rbd = {k9: round(float(sum(v9[0] for v9 in d9.values())), 2) for k9, d9 in sorted(stake_inc.items())}
-            sk_o = min(int(datetime.strptime(k9, "%Y-%m-%d").replace(tzinfo=KST).timestamp()) for k9 in stake_inc)
-            sk_syms = sorted({s9 for d9 in stake_inc.values() for s9 in d9})
-            positions.append({
-                "realizedByDay": sk_rbd, "actByDay": {}, "unvByDay": {},
-                "realizedKrwByDay": {k9: round(sum(v9[3] for v9 in d9.values())) for k9, d9 in sorted(stake_inc.items())},
-                "rwdByDay": {k9: sum(v9[2] for v9 in d9.values()) for k9, d9 in sorted(stake_inc.items())},
-                "_gid": None, "kind": "stake", "unknownQty": 0, "fbAvg": 0, "fbCost": 0, "unvQty": 0, "unvProceeds": 0, "realizedFb": 0,
-                "soldProceeds": 0, "avgSell": 0, "avgKrw": 0, "avgSellKrw": 0, "costKrw": 0, "soldProceedsKrw": 0,
-                "key": "sstake", "sym": "스테이킹 보상", "chain": " · ".join(sk_syms) + " 스테이킹(에폭 보상·MEV 팁)",
-                "status": "종료", "held": 0, "bought": 0, "movedQty": 0, "movedCost": 0, "soldQty": 0,
-                "avg": 0, "cost": 0, "realized": round(float(sum(v9[0] for d9 in stake_inc.values() for v9 in d9.values())), 2), "unreal": 0,
-                "opened": datetime.fromtimestamp(sk_o, KST).strftime("%m-%d"), "_ots": sk_o, "fee": "$0.00",
-                "realizedKrw": round(sum(v9[3] for d9 in stake_inc.values() for v9 in d9.values())),
-                "steps": ["스테이킹 보상"], "events": []})
-            for k9, d9 in sorted(stake_inc.items()):
-                for s9, v9 in sorted(d9.items()):
-                    tax_rows.append({"sold": k9, "sym": s9, "ticker": s9, "ex": "스테이킹 보상", "tk": "inc", "qty": _f(float(v9[1]), 6), "acq": 0,
-                                     "disp": _f(float(v9[0]), 2), "fee": 0,
-                                     "rate": round(v9[3] / float(v9[0]), 4) if v9[0] > 0 else 0,
-                                     "_acq": 0.0, "_disp": float(v9[0]), "tx": v9[2]})
+        _add_gas_card(gas_expense, positions, tax_rows)
+        _add_stake_card(stake_inc, positions, tax_rows)
         positions.sort(key=lambda p: (not p.get("_act"), -p["_ots"]))
         _pos_all_dbg = positions if os.environ.get("TJ_REPLAY_DEBUG") == "1" else None
         head9 = positions[:400]
@@ -1268,7 +1208,6 @@ class CardsMixin:
         if _pos_all_dbg is None:
             for p9 in positions:
                 p9.pop("_gid", None)
-
         ca_all = {r10["group_id"] for r10 in conn.execute(
             "SELECT DISTINCT group_id FROM assets WHERE kind='token'"
             " AND address IS NOT NULL AND group_id IS NOT NULL").fetchall()}
@@ -1291,6 +1230,6 @@ class CardsMixin:
             if (m9 and m9 == str(g9["sym"]).upper() and "USD" not in m9 and m9 != "DAI"
                     and not g9.get("is_stable") and not g9.get("is_fiat")):
                 ex_c9.add(gid9)
-
         self._ph("cex_proof·prices")
+        invck9.to_diag(_bs9["diag"])
         _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")

@@ -1,0 +1,1053 @@
+{
+ "_doc": "9막 9-0 ⑤ inbox 계약 표(tools/refactor/inbox_kinds.py freeze) — test_inbox_kinds 가 지금 표와 대조(한 칸이라도 다르면 실패 · 갱신 = freeze + 사유 커밋 · 9-4 뒤엔 계약 모듈 대조로 바뀜)",
+ "appended": [
+  {
+   "file": "src/chk_collect.py",
+   "func": "collect_web",
+   "key": "ext",
+   "n": 1
+  },
+  {
+   "file": "src/core_exf_late.py",
+   "func": "ExfLateMixin._exf_late_flush",
+   "key": "lc",
+   "n": 1
+  },
+  {
+   "file": "src/exf_net.py",
+   "func": "_late_tag",
+   "key": "lc",
+   "n": 1
+  },
+  {
+   "file": "src/evm_bscout.py",
+   "func": "ChainWatcher.emit",
+   "key": "repair",
+   "n": 1
+  },
+  {
+   "file": "src/evm_es.py",
+   "func": "EtherscanWatcher._es_extend",
+   "key": "repair",
+   "n": 1
+  },
+  {
+   "file": "src/evm_rpcw.py",
+   "func": "RpcChainWatcher._emit",
+   "key": "repair",
+   "n": 1
+  },
+  {
+   "file": "src/sol_watch.py",
+   "func": "SolWatcher.cycle",
+   "key": "repersp",
+   "n": 1
+  },
+  {
+   "file": "src/sol_watch.py",
+   "func": "sol_quarantine_retry",
+   "key": "repersp",
+   "n": 1
+  },
+  {
+   "file": "src/tsfix.py",
+   "func": "repair",
+   "key": "ts_fix",
+   "n": 1
+  }
+ ],
+ "consumers": {
+  "_corrupt": {
+   "handler": "core_inbox.py:_consume_record 분기",
+   "opaque": [],
+   "reads": [
+    "raw"
+   ],
+   "via": []
+  },
+  "chain_delta_tx": {
+   "handler": "core_post.py:PostMixin._consume_chain_delta",
+   "opaque": [
+    "call:chain_event.merge_ok",
+    "call:chain_event.to_core",
+    "call:chain_event.validate",
+    "call:json.dumps"
+   ],
+   "reads": [
+    "chain",
+    "finality",
+    "order",
+    "owners",
+    "ts",
+    "tx_uid",
+    "txhash"
+   ],
+   "via": [
+    "core_post.py:PostMixin.apply_chain_delta"
+   ]
+  },
+  "evm_tx": {
+   "handler": "core_inbox.py:_consume_record 분기",
+   "opaque": [],
+   "reads": [
+    "chain",
+    "repair",
+    "snapshot",
+    "ts_fix",
+    "txhash",
+    "wallets"
+   ],
+   "via": [
+    "core_snap.py:SnapMixin._rederive_anchor_safe",
+    "core_snap.py:SnapMixin._maybe_rederive"
+   ]
+  },
+  "ex_fills": {
+   "handler": "core_fills.py:FillsMixin._consume_fills",
+   "opaque": [],
+   "reads": [
+    "orders"
+   ],
+   "via": []
+  },
+  "ex_order_trades": {
+   "handler": "core_fills.py:FillsMixin._consume_order_trades",
+   "opaque": [],
+   "reads": [
+    "orders",
+    "src",
+    "ts"
+   ],
+   "via": []
+  },
+  "ex_snapshot": {
+   "handler": "core_upbit.py:UpbitMixin._consume_ex",
+   "opaque": [],
+   "reads": [
+    "deposits",
+    "exchange",
+    "lb",
+    "lbi",
+    "lbn",
+    "lc",
+    "withdraws"
+   ],
+   "via": [
+    "core_exf_late.py:ExfLateMixin._late_stage"
+   ]
+  },
+  "exf_fill_retime": {
+   "handler": "core_fills.py:FillsMixin._consume_exf_retime",
+   "opaque": [],
+   "reads": [
+    "exchange",
+    "fills",
+    "src",
+    "ts"
+   ],
+   "via": [
+    "core_fills.py:FillsMixin._consume_exf_retime_cached"
+   ]
+  },
+  "exf_fills": {
+   "handler": "core_exf.py:ExfMixin._consume_exf_fills",
+   "opaque": [],
+   "reads": [
+    "exchange",
+    "fills",
+    "lb",
+    "lbi",
+    "lbn",
+    "lc"
+   ],
+   "via": [
+    "core_exf_late.py:ExfLateMixin._late_stage"
+   ]
+  },
+  "exf_late_cycle": {
+   "handler": "core_exf_late.py:ExfLateMixin._late_cycle_done",
+   "opaque": [],
+   "reads": [
+    "exchange",
+    "lc"
+   ],
+   "via": []
+  },
+  "sol_tx": {
+   "handler": "core_inbox.py:_consume_record 분기",
+   "opaque": [
+    "call:dict",
+    "call:json.dumps",
+    "call:lpsol.lp_detect"
+   ],
+   "reads": [
+    "counterparties",
+    "deltas",
+    "err",
+    "fee_lamports",
+    "fee_payer",
+    "fee_payer_mine",
+    "has_program",
+    "repersp",
+    "slot",
+    "stake_open",
+    "stake_reward",
+    "ts",
+    "ts_fix",
+    "txhash",
+    "wallets"
+   ],
+   "via": [
+    "core_post.py:PostMixin.apply_sol",
+    "core_post.py:PostMixin._post_stake_open",
+    "core_snap.py:SnapMixin._tsfix_sol",
+    "core_snap.py:SnapMixin._rederive_sol_anchor_safe",
+    "core_snap.py:SnapMixin._maybe_rederive_sol"
+   ]
+  }
+ },
+ "kinds": [
+  "evm_tx",
+  "sol_tx",
+  "chain_delta_tx",
+  "ex_snapshot",
+  "ex_fills",
+  "ex_order_trades",
+  "exf_fill_retime",
+  "exf_fills",
+  "exf_late_cycle",
+  "_corrupt"
+ ],
+ "producers": {
+  "_corrupt": [
+   {
+    "file": "src/inbox.py",
+    "func": "SegmentReader.read_batch",
+    "keys": [
+     "kind",
+     "raw",
+     "raw_hex"
+    ],
+    "n": 1
+   }
+  ],
+  "chain_delta_tx": [
+   {
+    "file": "src/btc_watch.py",
+    "func": "BtcAdapter._normalize",
+    "keys": [
+     "chain",
+     "classification",
+     "completeness",
+     "deltas",
+     "execution",
+     "fees",
+     "finality",
+     "kind",
+     "movements",
+     "network",
+     "order",
+     "owners",
+     "ownership_version",
+     "source",
+     "ts",
+     "tx_uid",
+     "txhash",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/sui_watch.py",
+    "func": "SuiAdapter.normalize",
+    "keys": [
+     "chain",
+     "classification",
+     "completeness",
+     "deltas",
+     "execution",
+     "fees",
+     "finality",
+     "kind",
+     "movements",
+     "network",
+     "order",
+     "owners",
+     "ownership_version",
+     "source",
+     "ts",
+     "tx_uid",
+     "txhash",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ton_watch.py",
+    "func": "TonAdapter._build",
+    "keys": [
+     "chain",
+     "classification",
+     "completeness",
+     "deltas",
+     "execution",
+     "fees",
+     "finality",
+     "kind",
+     "movements",
+     "network",
+     "order",
+     "owners",
+     "ownership_version",
+     "source",
+     "ts",
+     "tx_uid",
+     "txhash",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/tron_watch.py",
+    "func": "TronAdapter.fetch_and_normalize",
+    "keys": [
+     "chain",
+     "classification",
+     "completeness",
+     "deltas",
+     "execution",
+     "fees",
+     "finality",
+     "kind",
+     "movements",
+     "network",
+     "order",
+     "owners",
+     "ownership_version",
+     "source",
+     "tron",
+     "ts",
+     "tx_uid",
+     "txhash",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "evm_tx": [
+   {
+    "file": "src/bsc_balw.py",
+    "func": "BalwMixin._balw_emit",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "via",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_nonce.py",
+    "func": "NonceMixin._nonce_pass.resolve",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "via",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_nonce.py",
+    "func": "NonceMixin._xin_pass",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "via",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_watch.py",
+    "func": "BscWatcher._extend",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_watch.py",
+    "func": "BscWatcher._lane_scan",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_watch.py",
+    "func": "BscWatcher._new_wallet_pass",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_watch.py",
+    "func": "BscWatcher._quarantine_retry",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/bsc_watch.py",
+    "func": "BscWatcher.cycle",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_bscout.py",
+    "func": "ChainWatcher.emit",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_es.py",
+    "func": "EtherscanWatcher._es_cycle",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "repair",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_es.py",
+    "func": "EtherscanWatcher._es_cycle",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_es.py",
+    "func": "EtherscanWatcher._es_extend",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_es.py",
+    "func": "EtherscanWatcher._legacy_pending",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_logdisc.py",
+    "func": "RpcLogDiscovery._drain_buffer",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/evm_rpcw.py",
+    "func": "RpcChainWatcher._emit",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "tools/repair_partial_legs.py",
+    "func": "build_records",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "repair",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "tools/repair_synth_nft.py",
+    "func": "plan",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "repair",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "tools/repair_wrap_legs.py",
+    "func": "main",
+    "keys": [
+     "chain",
+     "kind",
+     "observed_head",
+     "repair",
+     "snapshot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   }
+  ],
+  "ex_fills": [
+   {
+    "file": "src/upbit_link.py",
+    "func": "cycle",
+    "keys": [
+     "exchange",
+     "kind",
+     "orders",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "ex_order_trades": [
+   {
+    "file": "src/upbit_link.py",
+    "func": "_tfill_pass",
+    "keys": [
+     "exchange",
+     "kind",
+     "orders",
+     "src",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "tools/upbit_trades_fill.py",
+    "func": "build_records",
+    "keys": [
+     "exchange",
+     "kind",
+     "orders",
+     "src",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "ex_snapshot": [
+   {
+    "file": "src/ex_foreign.py",
+    "func": "bybit_internal_pass",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "lb",
+     "lbi",
+     "lbn",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "dest_backfill_pass",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "extension_pass.one_",
+    "keys": [
+     "deposits",
+     "exchange",
+     "ext",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "krw_backfill_pass",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "main",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "pending_recheck_pass",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "lb",
+     "lbi",
+     "lbn",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/hl_spot.py",
+    "func": "run_pass",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/upbit_link.py",
+    "func": "cycle",
+    "keys": [
+     "deposits",
+     "exchange",
+     "kind",
+     "ts",
+     "v",
+     "withdraws"
+    ],
+    "n": 1
+   }
+  ],
+  "exf_fill_retime": [
+   {
+    "file": "tools/bithumb_filltime.py",
+    "func": "build_records",
+    "keys": [
+     "exchange",
+     "fills",
+     "kind",
+     "src",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "exf_fills": [
+   {
+    "file": "src/ex_foreign.py",
+    "func": "extension_pass.one_",
+    "keys": [
+     "exchange",
+     "ext",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "extension_pass.one_._emit",
+    "keys": [
+     "exchange",
+     "ext",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "extension_pass.one_._emit_bt",
+    "keys": [
+     "exchange",
+     "ext",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "extension_pass.one_._emit_g",
+    "keys": [
+     "exchange",
+     "ext",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/ex_foreign.py",
+    "func": "main",
+    "keys": [
+     "exchange",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/hl_spot.py",
+    "func": "run_pass",
+    "keys": [
+     "exchange",
+     "fills",
+     "kind",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "exf_late_cycle": [
+   {
+    "file": "src/ex_foreign.py",
+    "func": "main",
+    "keys": [
+     "exchange",
+     "kind",
+     "lc",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/hl_spot.py",
+    "func": "run_pass",
+    "keys": [
+     "exchange",
+     "kind",
+     "lc",
+     "ts",
+     "v"
+    ],
+    "n": 1
+   }
+  ],
+  "sol_tx": [
+   {
+    "file": "src/sol_stake.py",
+    "func": "StakeMixin._stake_open",
+    "keys": [
+     "chain",
+     "counterparties",
+     "deltas",
+     "err",
+     "fee_lamports",
+     "fee_payer",
+     "fee_payer_mine",
+     "has_program",
+     "kind",
+     "slot",
+     "stake_open",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/sol_stake.py",
+    "func": "StakeMixin._stake_reopen",
+    "keys": [
+     "chain",
+     "counterparties",
+     "deltas",
+     "err",
+     "fee_lamports",
+     "fee_payer",
+     "fee_payer_mine",
+     "has_program",
+     "kind",
+     "slot",
+     "stake_open",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/sol_stake.py",
+    "func": "StakeMixin._stake_rewards",
+    "keys": [
+     "chain",
+     "counterparties",
+     "deltas",
+     "err",
+     "fee_lamports",
+     "fee_payer",
+     "fee_payer_mine",
+     "has_program",
+     "kind",
+     "slot",
+     "stake_reward",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   },
+   {
+    "file": "src/sol_watch.py",
+    "func": "SolWatcher._parse_result",
+    "keys": [
+     "chain",
+     "counterparties",
+     "deltas",
+     "err",
+     "fee_lamports",
+     "fee_payer",
+     "fee_payer_mine",
+     "has_program",
+     "kind",
+     "slot",
+     "ts",
+     "txhash",
+     "v",
+     "wallets"
+    ],
+    "n": 1
+   }
+  ]
+ },
+ "summary": {
+  "_corrupt": {
+   "dicts": 1,
+   "sites": 1
+  },
+  "chain_delta_tx": {
+   "dicts": 4,
+   "sites": 4
+  },
+  "evm_tx": {
+   "dicts": 18,
+   "sites": 17
+  },
+  "ex_fills": {
+   "dicts": 1,
+   "sites": 1
+  },
+  "ex_order_trades": {
+   "dicts": 2,
+   "sites": 2
+  },
+  "ex_snapshot": {
+   "dicts": 8,
+   "sites": 8
+  },
+  "exf_fill_retime": {
+   "dicts": 1,
+   "sites": 1
+  },
+  "exf_fills": {
+   "dicts": 6,
+   "sites": 6
+  },
+  "exf_late_cycle": {
+   "dicts": 2,
+   "sites": 2
+  },
+  "sol_tx": {
+   "dicts": 4,
+   "sites": 4
+  }
+ },
+ "v": {
+  "_corrupt": [],
+  "chain_delta_tx": [
+   "1",
+   "chain_event.VERSION"
+  ],
+  "evm_tx": [
+   "1"
+  ],
+  "ex_fills": [
+   "1"
+  ],
+  "ex_order_trades": [
+   "1"
+  ],
+  "ex_snapshot": [
+   "1"
+  ],
+  "exf_fill_retime": [
+   "1"
+  ],
+  "exf_fills": [
+   "1"
+  ],
+  "exf_late_cycle": [
+   "1"
+  ],
+  "sol_tx": [
+   "1"
+  ]
+ }
+}

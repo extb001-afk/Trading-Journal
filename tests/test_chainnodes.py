@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import os
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.error  # noqa: E402
 
 W0 = "0x" + "e0" * 20
 RT = "0x" + "55" * 20
@@ -18,14 +18,15 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths, statefile  # noqa: E402
+import logs  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import bf_engine
-import evm_watch
-import nodekeys as NK
-import onboarding
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -60,7 +61,7 @@ for v, why in (("http://base-mainnet.chainnodes.org/" + KEY, "http"), ("https://
 check("N1c 주소 = Base 주소(키 포함 — 메모리에서만)", NK.cn_url({NK.ENV_CN: CN}) == CN and NK.cn_url({NK.ENV_CN: KEY}) == CN and NK.cn_url({}) is None)
 
 c0, d0 = applied({})
-check("N2a 키 없음 = 16차 그대로(trace_rpcs 안 만듦 · 수집기 해석 = 내장 drpc · 정책 안 얹음)", "trace_rpcs" not in c0["chains"]["base"] and "base_trace" not in d0
+check("N2a 키 없음 = 종전 그대로(trace_rpcs 안 만듦 · 수집기 해석 = 내장 drpc · 정책 안 얹음)", "trace_rpcs" not in c0["chains"]["base"] and "base_trace" not in d0
       and evm_watch.rpc_nodes(c0, "base")["trace"] == DRPC and "*.chainnodes.org" not in json.dumps(c0.get("backfill") or {}), (c0, d0))
 c1, d1 = applied({NK.ENV_CN: KEY})
 pools9 = json.dumps({k: v for k, v in c1["chains"]["base"].items() if k != "trace_rpcs"}) + json.dumps(c1["bsc"])
@@ -75,7 +76,7 @@ check("N2d Chainnodes + QuickNode + Ankr = [Chainnodes, QuickNode, drpc] · Ankr
 cu = json.loads(json.dumps(CFG))
 cu["chains"]["base"]["trace_rpcs"] = ["https://my-trace.invalid"]
 c3, _d3 = applied({NK.ENV_CN: KEY, NK.ENV_QN: QETH}, cu)
-check("N2e 이용자 trace_rpcs = 그대로 앞 → Chainnodes → QuickNode(이용자 목록이 16차 기본이라 drpc 안 붙음)",
+check("N2e 이용자 trace_rpcs = 그대로 앞 → Chainnodes → QuickNode(이용자 목록이 기본이라 drpc 안 붙음)",
       c3["chains"]["base"]["trace_rpcs"] == ["https://my-trace.invalid", CN, QBASE], c3["chains"]["base"]["trace_rpcs"])
 ce = json.loads(json.dumps(CFG))
 ce["chains"]["base"]["trace_rpcs"] = []
@@ -97,7 +98,7 @@ c7, d7 = applied({NK.ENV_CN: KEY}, nobase)
 check("N2j Base 칸 없는 설정 = 아무것도 안 붙음(KeyError 없음)", "base" not in c7["chains"] and "base_trace" not in d7, (c7, d7))
 ss.write_env({NK.ENV_QN: QETH, NK.ENV_CN: KEY})
 NK._QN_SLOT["at"] = -1e18
-common.atomic_write_json(NK._qn_path(), {"v": 1, "kh": NK.qn_kh(), "hosts": {NK.qn_chain_url(QETH, "base").split("/")[2]: {"first": 1, "n": 5, "off": True, "off_at": 2, "code": 401}}})
+statefile.atomic_write_json(NK._qn_path(), {"v": 1, "kh": NK.qn_kh(), "hosts": {NK.qn_chain_url(QETH, "base").split("/")[2]: {"first": 1, "n": 5, "off": True, "off_at": 2, "code": 401}}})
 c8, d8 = applied(None)
 check("N2k QuickNode 가 거부로 빠짐 = [Chainnodes, drpc]", c8["chains"]["base"]["trace_rpcs"] == [CN] + DRPC and d8.get("base_trace") == ["chainnodes"], c8["chains"]["base"])
 NK.qn_reject_clear()
@@ -113,8 +114,8 @@ st = NK.status(env={NK.ENV_CN: KEY}, settings={})["chainnodes"]
 check("N3c 화면 상태 = Base · '요청' · trace 전용 · 하루 몫 = 1,250만/31 × 80% · 키·주소 없음", st["chains"] == ["base"] and st["unitKo"] == "요청" and st.get("traceOnly") is True
       and st["perDay"] == int(12_500_000 / 31 * 0.8) and KEY not in json.dumps(st) and "chainnodes.org" not in json.dumps(st), st)
 check("N3d 키 없음 = 쓰는 체인 없음", NK.status(env={}, settings={})["chainnodes"]["chains"] == [])
-if os.path.exists(common.ENV_PATH):
-    os.remove(common.ENV_PATH)
+if os.path.exists(paths.ENV_PATH):
+    os.remove(paths.ENV_PATH)
 fp0 = NK.fingerprint()
 ss.write_env({NK.ENV_CN: KEY})
 fp1 = NK.fingerprint()
@@ -123,7 +124,7 @@ fp2 = NK.fingerprint()
 ss.write_env({NK.ENV_CN: None})
 check("N3e 지문 = 키 넣음·바꿈 = 바뀜(수집기 재시작) · 지움 = 종전 그대로", fp0 != fp1 and fp1 != fp2 and NK.fingerprint() == fp0, (fp0, fp1, fp2))
 ss.write_env({NK.ENV_CN: KEY})
-common._SECRET_CACHE["sig"] = None
+logs._SECRET_CACHE["sig"] = None
 e9 = bf_engine.NetError(f"conn: 연결 실패 {CN} (url={CN})", "conn")
 check("N3f 오류 문구에 키 없음(.env 비밀값 가림)", KEY not in str(e9) and KEY[:13] not in str(e9), str(e9))
 check("N3g 노드 키 판정(호스트만)", NK.is_key_node(CN) and not NK.is_key_node("https://chainnodes.org.evil.invalid/x"))
@@ -188,7 +189,7 @@ def err_of(url, method="debug_traceTransaction"):
     try:
         bf_engine.rpc_call(url, method, ["0x" + "ab" * 32, {"tracer": "callTracer"}], retries=1, timeout=5)
         return None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return e
 
 
@@ -246,7 +247,7 @@ def run(plan):
     try:
         w._trace_internal("0x" + "ab" * 32, snap)
         return snap, None
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001
         return snap, e9
 
 
@@ -259,7 +260,7 @@ check("N5b Chainnodes 한도 = 같은 호출에서 QuickNode 로 완료 · drpc 
 snap, err = run({HCN: ("rpcerr", GAP), QH: ("http", 401, "")})
 check("N5c Chainnodes 이력 밖 + QuickNode 거부 = drpc 로 완료", err is None and snap.get("internal") and [h for h, _m in HITS][:3] == [HCN, QH, DH], (snap, err, HITS))
 snap, err = run({HCN: ("rpcerr", GAP), QH: ("rpcerr", GONE), DH: ("rpcerr", GONE)})
-check("N5d 전부 이력 밖·과거 상태 없음 = 종전 '영영 못 줌'(_trace_gone · 16차 drpc 단독과 같은 판정) · 내부 이동 안 채움", err is not None and TG(err)
+check("N5d 전부 이력 밖·과거 상태 없음 = 종전 '영영 못 줌'(_trace_gone · 종전 drpc 단독과 같은 판정) · 내부 이동 안 채움", err is not None and TG(err)
       and "internal" not in snap, (snap, err))
 snap, err = run({HCN: ("rpcerr", GAP), QH: ("rpcerr", GONE), DH: ("http", 408, '{"message":"Request timeout on the free tier"}')})
 check("N5e 이력 밖 + 다른 노드 일시(408) = 일시(큐 유지 — 영영 못 줌 아님)", err is not None and not TG(err) and "internal" not in snap, (snap, str(err)))
@@ -335,7 +336,7 @@ try:
 finally:
     onboarding._node_rpc = real
 
-import time as _tm
+import time as _tm  # noqa: E402
 fresh_gates()
 pad9 = "x" * 320
 SCRIPT[HCN] = ("http", 429, json.dumps({"error": "rate limited", "detail": pad9, "backoff_seconds": 100}))
@@ -435,9 +436,8 @@ check("N7a 화면 = 설정 칸 안내·NODE_KEYS(QuickNode 앞)·trace 전용 �
       and "n.traceOnly" in js and "Chainnodes 필수" not in js)
 check("N7b 설정 칸 = 노드 키 그룹 · 이름 = 무료 Core·Base trace · 필수 아님", "chainnodes" in ss.NODE_GROUPS and "무료 Core" in ss.GROUPS["chainnodes"]["name"]
       and "필수" not in ss.GROUPS["chainnodes"]["name"] and [k for k, _l in ss.GROUPS["chainnodes"]["fields"]] == [NK.ENV_CN])
-root = os.path.abspath(os.path.join(T.HERE, ".."))
 for fn in (".env.example", "README.md", os.path.join("docs", "API_KEYS.md")):
-    tx = open(os.path.join(root, fn), encoding="utf-8").read()
+    tx = T.doc_text(fn)
     check(f"N7c {fn} = TJ_CHAINNODES_KEY · 1,250만 · Base trace", "TJ_CHAINNODES_KEY" in tx and "1,250만" in tx and "trace" in tx)
 src9 = open(os.path.join(T.SRC, "onboarding.py"), encoding="utf-8").read()
 check("N7d 필수 판정 없음(evmNeedsChainnodes 없음)", "NeedsChainnodes" not in src9 and "needs_chainnodes" not in src9)

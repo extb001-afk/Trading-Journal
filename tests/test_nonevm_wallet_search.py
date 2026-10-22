@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check, Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import address_codec as ac
-import btc_descriptor
-import chain_registry as reg
-import common
-import core
+import address_codec as ac  # noqa: E402
+import btc_descriptor  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
 
 TS = 1_700_000_000
 TR1, TR2 = N.OWN["tron"]
@@ -40,7 +40,7 @@ CW = [{"chain": "tron", "address": TR1_D, "label": "AuditTronOne"},
       {"chain": "btc", "mode": "descriptor", "descriptor": DESC, "label": "AuditBtcHd"}]
 cfg["chain_wallets"] = CW
 json.dump(cfg, open(CFG_PATH, "w"))
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 
 
 def feed(stream, recs):
@@ -63,10 +63,10 @@ n_led = c.conn.execute("SELECT COUNT(DISTINCT source_id) FROM postings WHERE sou
 check("전제: 새 체인 원장 거래 8건", n_led == 8, n_led)
 c.conn.close()
 
-import acct_norm
-import pricing
-import search_index as si
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import search_index as si  # noqa: E402
+import web  # noqa: E402
 
 
 def _no_price(url, *a, **k):
@@ -88,12 +88,12 @@ def build_and_index():
     web.BUILDER = b = web.StateBuilder()
     try:
         st = b.build()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         import traceback
         traceback.print_exc()
         st = {"_exc": f"{type(e).__name__}: {e}"}
     if "ix" not in IX:
-        IX["ix"] = si.Indexer(state_fn=None, chain_names=web.CHAIN_NAME, path=SPATH, ledger_path=common.DB_PATH, sleep=lambda s9: None)
+        IX["ix"] = si.Indexer(state_fn=None, chain_names=web.CHAIN_NAME, path=SPATH, ledger_path=paths.DB_PATH, sleep=lambda s9: None)
     ixr = IX["ix"]
     ixr.state_fn = lambda: (st, getattr(b, "_day_idx", None))
     ixr.tick()

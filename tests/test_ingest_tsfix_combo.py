@@ -2,24 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, SOLW
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, SOLW  # noqa: E402
 
-import itertools
-import json
-import os
+import itertools  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
+import config, paths, statefile  # noqa: E402
 W1 = "0x" + "e7" * 20
 SOLW2 = "So2" + "2" * 41
 cfg = json.load(open(os.path.join(T.TMP, "config.json")))
 cfg["wallets"] += [{"type": "evm", "chain": "eth", "address": W1}, {"type": "sol", "address": SOLW2}]
 json.dump(cfg, open(os.path.join(T.TMP, "config.json"), "w"))
-import core
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+import core  # noqa: E402
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
 B, R = "0x" + "b2" * 20, "0x" + "c3" * 20
 TKA, TKB = "0x" + "a" * 40, "0x" + "b" * 40
 TS = 1790000500
@@ -75,13 +74,13 @@ def legs_of(c, ns, h):
 
 
 def done_ok(pid):
-    d = common.read_json(os.path.join(common.STATE_DIR, "poison_replayed.json"), {}) or {}
+    d = statefile.read_json(os.path.join(paths.STATE_DIR, "poison_replayed.json"), {}) or {}
     return bool((d.get(pid) or {}).get("ok"))
 
 
 def poison_has(pid):
     try:
-        lines = open(os.path.join(common.STATE_DIR, "poison.jsonl"), encoding="utf-8").read().splitlines()
+        lines = open(os.path.join(paths.STATE_DIR, "poison.jsonl"), encoding="utf-8").read().splitlines()
     except FileNotFoundError:
         return False
     for ln in lines:
@@ -91,7 +90,7 @@ def poison_has(pid):
     return False
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 assert W1.lower() in c.my_wallets.get("eth", set()), c.my_wallets
 
@@ -167,7 +166,7 @@ c._drain_stream("evm", Reader([{"v": 1, "kind": "evm_tx", "chain": "eth", "txhas
 fixR = {"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": hR, "wallets": [W], "snapshot": snap("es", hR, [L2R]), "ts": 2,
         "ts_fix": {"poison_ids": ["rorig0000000001"], "src": "block_ts", "block": 500}}
 c._drain_stream("evm", Reader([fixR]), 0, 0)
-_pz = os.path.join(common.STATE_DIR, "poison.jsonl")
+_pz = os.path.join(paths.STATE_DIR, "poison.jsonl")
 held = [json.loads(x) for x in open(_pz, encoding="utf-8").read().splitlines()] if os.path.exists(_pz) else []
 held = [e for e in held if (e.get("rec") or {}).get("txhash") == hR]
 check("[R] 모순 보강본 = 격리 파일에 사유와 함께 보존", len(held) == 1 and "레그 유실 위험" in held[0].get("err", ""), held[:1])
@@ -175,7 +174,7 @@ if held:
     rid = core.Core.poison_id(held[0])
     json.dump({"ids": [rid]}, open(c.POISON_REQ_PATH, "w"))
     c.poison_replay_pass()
-    d9 = common.read_json(c.POISON_DONE_PATH, {})
+    d9 = statefile.read_json(c.POISON_DONE_PATH, {})
     check("[R] 저장본 그대로 재시도 = 또 실패 기록 · 원래 id 미해소", (d9.get(rid) or {}).get("ok") is False and not done_ok("rorig0000000001"), d9.get(rid))
     c.conn.execute("UPDATE raw_txs SET snapshot=? WHERE chain='eth' AND txhash=?", (json.dumps(snap("full", hR, [L1, L2R])), hR))
     c.conn.commit()

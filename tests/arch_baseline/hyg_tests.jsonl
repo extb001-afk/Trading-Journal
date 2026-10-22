@@ -1,0 +1,254 @@
+{"_doc": "public/tests 파일별 위생 지표 상한(정의 = _arch_hyg 머리) — exempt 줄 = 소스 문자열 검사를 세지 않는 정적 분석(lint) 시험(총괄 승인).", "kind": "max", "spec": "hyg_tests"}
+{"exempt": "_arch_codemap.py", "why": "건축 도구(CODEMAP 생성기) — src 원문을 읽어 재는 것이 목적"}
+{"key": "_bscchain.py", "patch_attr": 5, "patch_call": 2}
+{"key": "_cassette.py", "patch_attr": 10}
+{"key": "_cassette_clock.py", "patch_attr": 13}
+{"key": "_cassette_wire.py", "patch_attr": 17}
+{"key": "_harness.py", "str_checks": 8, "str_neg": 3, "patch_attr": 5, "patch_call": 3}
+{"key": "_sec_lint.py", "str_checks": 1}
+{"key": "_suifake.py", "patch_attr": 1}
+{"key": "test_ai_cli_error.py", "patch_attr": 9}
+{"key": "test_ai_inject_canary.py", "patch_attr": 1}
+{"key": "test_alch_fair.py", "patch_attr": 7, "patch_call": 2}
+{"key": "test_alch_gate_cu.py", "patch_attr": 4}
+{"key": "test_alch_internal.py", "patch_attr": 9, "patch_call": 2}
+{"key": "test_alch_internal_core.py", "patch_call": 1}
+{"key": "test_alch_reject.py", "str_checks": 2, "patch_attr": 5}
+{"key": "test_alch_starve.py", "patch_attr": 7, "patch_call": 2}
+{"key": "test_alchemy_key.py", "str_checks": 5, "patch_attr": 10}
+{"key": "test_alert_urgent_backoff.py", "patch_attr": 16}
+{"key": "test_alert_urgent_creds.py", "patch_attr": 5}
+{"key": "test_alerts.py", "str_checks": 12, "str_neg": 3, "patch_attr": 19}
+{"key": "test_appjs_tabs.py", "str_checks": 32, "str_neg": 5, "patch_attr": 2}
+{"key": "test_att_detail.py", "patch_attr": 6, "patch_call": 2}
+{"key": "test_att_detail_ui.py", "str_checks": 4}
+{"key": "test_att_opening_build.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_auth_no_redirect.py", "patch_attr": 9, "patch_call": 2}
+{"key": "test_binance_cv_window.py", "patch_call": 4}
+{"key": "test_binance_margin_pairs.py", "patch_call": 4}
+{"key": "test_bithumb_filltime.py", "patch_attr": 3, "patch_call": 2}
+{"key": "test_bithumb_track_row.py", "patch_call": 4}
+{"key": "test_bk_budget.py", "patch_attr": 17, "patch_call": 3}
+{"key": "test_bk_merge.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_bn_dividend_web.py", "patch_attr": 2}
+{"key": "test_bsc_balw_attr.py", "patch_call": 2}
+{"key": "test_bsc_balw_curve.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_bsc_balw_gap.py", "patch_attr": 4, "patch_call": 4}
+{"key": "test_bsc_balw_restore.py", "patch_call": 1}
+{"key": "test_bsc_balw_sched.py", "patch_call": 1}
+{"key": "test_bsc_lane_reopen.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_bsc_lanes_negabs.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_bsc_live_lanes.py", "patch_attr": 4, "patch_call": 3}
+{"key": "test_bsc_native_inflow.py", "patch_attr": 2, "patch_call": 6}
+{"key": "test_bsc_native_inflow_core.py", "patch_call": 1}
+{"key": "test_bsc_nonce_recent.py", "patch_attr": 2, "patch_call": 2}
+{"key": "test_btc_failover.py", "patch_attr": 2}
+{"key": "test_buildproc.py", "patch_attr": 8}
+{"key": "test_burst_flex.py", "str_checks": 3, "patch_attr": 2}
+{"key": "test_calc_bench_habits.py", "patch_attr": 1}
+{"key": "test_calc_bridge_swap.py", "patch_attr": 5}
+{"key": "test_calc_fee_cost.py", "patch_attr": 5}
+{"key": "test_calc_fee_gas_off.py", "patch_attr": 5}
+{"key": "test_calc_first_seen.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_calc_first_seen_guard.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_calc_flow_map.py", "patch_attr": 4}
+{"key": "test_calc_flow_map_wdfee.py", "patch_attr": 4}
+{"key": "test_calc_loan_short.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_calc_old_px.py", "patch_attr": 6}
+{"key": "test_calc_quarantine.py", "patch_attr": 5}
+{"key": "test_calc_swap_carry_nm.py", "patch_attr": 7}
+{"key": "test_calc_vbusdc_stable.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_calcguard.py", "str_checks": 1, "patch_attr": 9}
+{"key": "test_cassette_evm.py", "patch_attr": 1}
+{"key": "test_cassette_exf.py", "patch_attr": 3}
+{"key": "test_cassette_frame.py", "patch_attr": 2}
+{"key": "test_cassette_sol.py", "patch_attr": 1}
+{"key": "test_cca_pay_build.py", "patch_attr": 8, "patch_call": 1}
+{"key": "test_cca_refund_build.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_cca_refund_core.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_cca_salebox_ui.py", "str_checks": 6}
+{"key": "test_cca_settle_build.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_chain_hyperevm.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_chain_table.py", "str_checks": 2}
+{"key": "test_chainnodes.py", "str_checks": 9, "str_neg": 3, "patch_attr": 16}
+{"key": "test_chainoff.py", "patch_attr": 28}
+{"key": "test_chainoff_auto_alert.py", "patch_attr": 1}
+{"key": "test_chart_prewarm.py", "str_checks": 9, "patch_attr": 26}
+{"key": "test_core_fp_nonevm_keys.py", "patch_attr": 2}
+{"key": "test_core_writer_lock.py", "patch_attr": 2}
+{"key": "test_cost_paths.py", "patch_attr": 1}
+{"key": "test_curve_hold_hidden.py", "str_checks": 11, "str_neg": 3}
+{"key": "test_curve_px_start.py", "patch_attr": 1}
+{"key": "test_daily_inval_race.py", "patch_attr": 11, "patch_call": 2}
+{"key": "test_data_rev.py", "patch_attr": 12}
+{"key": "test_day_events_limit.py", "patch_attr": 1}
+{"key": "test_day_events_page_conv.py", "str_checks": 4}
+{"key": "test_debt_net.py", "patch_attr": 8, "patch_call": 2}
+{"key": "test_deploy_units.py", "str_checks": 16}
+{"key": "test_deptr_curve.py", "str_checks": 5}
+{"key": "test_disc_pagination.py", "patch_attr": 14, "patch_call": 1}
+{"key": "test_disk_relief.py", "str_checks": 1, "patch_attr": 7, "patch_call": 1}
+{"key": "test_exbal_prefetch.py", "patch_attr": 13, "patch_call": 4}
+{"key": "test_exbal_prov_edges.py", "patch_attr": 15, "patch_call": 2}
+{"key": "test_exchange_subaccounts.py", "str_checks": 8, "patch_attr": 14, "patch_call": 8}
+{"key": "test_exf_bybit_split.py", "patch_call": 4}
+{"key": "test_exf_bybit_tlog.py", "patch_attr": 2, "patch_call": 6}
+{"key": "test_exf_clock_fills.py", "patch_attr": 9, "patch_call": 5}
+{"key": "test_exf_wdfee_new_ex.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_fetch_caps.py", "patch_attr": 7, "patch_call": 6}
+{"key": "test_fork_build.py", "patch_attr": 7, "patch_call": 1}
+{"key": "test_fresh_bsc_xin.py", "patch_call": 1}
+{"key": "test_fresh_cg_open.py", "patch_attr": 21}
+{"key": "test_fresh_marker.py", "patch_call": 1}
+{"key": "test_fsio.py", "patch_attr": 19, "patch_call": 1}
+{"key": "test_fsio_sites.py", "patch_attr": 14}
+{"key": "test_fut_asset.py", "patch_attr": 2, "patch_call": 6}
+{"key": "test_fut_coinpx.py", "patch_attr": 3}
+{"key": "test_fut_first_floor.py", "patch_attr": 2, "patch_call": 6}
+{"key": "test_fut_place_undo.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_fut_rcpt.py", "patch_attr": 2}
+{"key": "test_futrecon.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_futrecon_guard.py", "patch_attr": 1, "patch_call": 5}
+{"key": "test_fx_rest_retime.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_fx_src_ui.py", "str_checks": 7}
+{"key": "test_goplus_cap.py", "patch_attr": 2}
+{"key": "test_harness_net.py", "str_checks": 1}
+{"key": "test_health_ack.py", "str_checks": 9, "str_neg": 2, "patch_attr": 1}
+{"key": "test_health_ack_longid.py", "patch_attr": 1}
+{"key": "test_helius_burst_window.py", "patch_attr": 2}
+{"key": "test_hist_anchor_curve.py", "patch_attr": 7, "patch_call": 2}
+{"key": "test_hist_anchor_repair.py", "patch_attr": 2, "patch_call": 1}
+{"key": "test_hist_late_build.py", "patch_attr": 8, "patch_call": 2}
+{"key": "test_hist_late_close.py", "patch_call": 1}
+{"key": "test_hist_late_core.py", "str_checks": 1, "patch_call": 1}
+{"key": "test_hist_late_first.py", "patch_attr": 8, "patch_call": 2}
+{"key": "test_holdq_disc.py", "patch_attr": 18, "patch_call": 1}
+{"key": "test_http_auth.py", "patch_attr": 4}
+{"key": "test_http_cap.py", "patch_attr": 19}
+{"key": "test_http_cap_direct.py", "patch_attr": 15}
+{"key": "test_http_idle.py", "patch_attr": 14, "patch_call": 1}
+{"key": "test_inflow_probe.py", "patch_attr": 21}
+{"key": "test_ingest_tsfix.py", "patch_call": 2}
+{"key": "test_ingest_tsfix_combo.py", "patch_call": 1}
+{"key": "test_key_header_redirect.py", "str_checks": 1, "patch_attr": 2}
+{"key": "test_keyseq_sigint.py", "str_checks": 1}
+{"key": "test_late_absorb.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_leaf_flap.py", "patch_attr": 2, "patch_call": 2}
+{"key": "test_ledger_corrupt.py", "patch_attr": 17}
+{"key": "test_ledger_layer.py", "patch_call": 1}
+{"key": "test_ledger_restore.py", "patch_attr": 27}
+{"key": "test_ledger_swap_crash.py", "patch_attr": 2}
+{"key": "test_leverage_errors.py", "patch_attr": 4}
+{"key": "test_leverage_view.py", "str_checks": 2}
+{"key": "test_liq_blind.py", "patch_attr": 1}
+{"key": "test_liq_seen.py", "patch_attr": 1}
+{"key": "test_liq_send.py", "patch_attr": 10}
+{"key": "test_liq_unknown.py", "patch_attr": 14}
+{"key": "test_liq_watch.py", "patch_attr": 13}
+{"key": "test_lp_card.py", "str_checks": 13, "str_neg": 2}
+{"key": "test_lp_curve_build.py", "patch_attr": 6, "patch_call": 2}
+{"key": "test_lp_new_fast.py", "patch_attr": 9}
+{"key": "test_manual_sale_pay_build.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_mop_finish.py", "str_checks": 19, "str_neg": 7, "patch_attr": 3, "patch_call": 1}
+{"key": "test_negabs_disc_open.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_negabs_lane_hold.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_negabs_web.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_nft.py", "patch_attr": 4}
+{"key": "test_node_burst.py", "str_checks": 1, "patch_attr": 4}
+{"key": "test_node_burst_fix.py", "str_checks": 1, "patch_attr": 7}
+{"key": "test_node_select.py", "patch_attr": 4}
+{"key": "test_nonevm_audit_web.py", "patch_attr": 5}
+{"key": "test_nonevm_core.py", "str_checks": 1, "str_neg": 1}
+{"key": "test_nonevm_gap_hold.py", "patch_attr": 1}
+{"key": "test_nonevm_gap_requeue.py", "patch_attr": 4}
+{"key": "test_nonevm_hold_locs.py", "str_checks": 2, "patch_attr": 6}
+{"key": "test_nonevm_integ.py", "str_checks": 11, "str_neg": 1}
+{"key": "test_nonevm_recon_decimals.py", "patch_attr": 2, "patch_call": 1}
+{"key": "test_nonevm_register.py", "patch_attr": 1}
+{"key": "test_nonevm_wallet_search.py", "patch_attr": 5}
+{"key": "test_nonevm_web.py", "patch_attr": 5}
+{"key": "test_offsite_backup.py", "patch_attr": 17}
+{"key": "test_okx_inverse_upnl.py", "str_checks": 5, "str_neg": 3, "patch_attr": 2, "patch_call": 4}
+{"key": "test_okx_notional_bench.py", "str_checks": 4, "patch_call": 4}
+{"key": "test_okx_ts_boundary.py", "patch_call": 4}
+{"key": "test_own_reclass_anchor.py", "patch_attr": 5, "patch_call": 1}
+{"key": "test_plan_stale.py", "patch_attr": 3}
+{"key": "test_prewarm_and_gates.py", "patch_attr": 12}
+{"key": "test_privacy_defaults.py", "str_checks": 8, "str_neg": 1, "patch_attr": 6, "patch_call": 1}
+{"key": "test_prov_balance.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_prov_cover_chains.py", "patch_attr": 6, "patch_call": 1}
+{"key": "test_prov_cover_stake.py", "patch_attr": 13, "patch_call": 3}
+{"key": "test_prov_nonevm_latest.py", "patch_attr": 1, "patch_call": 2}
+{"key": "test_px_cg_simple_age.py", "patch_attr": 5}
+{"key": "test_px_fx_guard.py", "patch_attr": 8, "patch_call": 1}
+{"key": "test_px_gt_gate.py", "patch_attr": 6}
+{"key": "test_px_neg_recent.py", "patch_attr": 3}
+{"key": "test_px_ton_gram.py", "patch_attr": 11}
+{"key": "test_qn_multichain.py", "str_checks": 8, "str_neg": 3, "patch_attr": 7}
+{"key": "test_qn_optional.py", "str_checks": 15, "str_neg": 7, "patch_attr": 8}
+{"key": "test_rebuild_approve_bind.py", "patch_call": 1}
+{"key": "test_rebuild_cause.py", "str_checks": 5, "str_neg": 1, "patch_attr": 4, "patch_call": 3}
+{"key": "test_rebuild_report_bind.py", "patch_call": 1}
+{"key": "test_recon_null_decimals.py", "patch_attr": 4, "patch_call": 1}
+{"key": "test_relief_protect.py", "patch_attr": 5, "patch_call": 1}
+{"key": "test_reload_new_chains.py", "patch_attr": 4}
+{"key": "test_restore_realcore.py", "patch_attr": 1, "patch_call": 2}
+{"key": "test_review_fill_all.py", "str_checks": 34, "str_neg": 8, "patch_attr": 19}
+{"key": "test_review_w_small.py", "str_checks": 5, "str_neg": 1}
+{"key": "test_rotate_logs.py", "str_checks": 4, "str_neg": 1}
+{"key": "test_rpc_deadline_hold.py", "patch_attr": 16, "patch_call": 5}
+{"key": "test_rpc_fresh_lanes.py", "patch_attr": 21, "patch_call": 9}
+{"key": "test_rpc_read_len.py", "patch_attr": 15}
+{"key": "test_same_block_order.py", "patch_attr": 6, "patch_call": 2}
+{"key": "test_search.py", "str_checks": 2}
+{"key": "test_search_conds.py", "str_checks": 13, "patch_attr": 6}
+{"key": "test_search_parse.py", "patch_attr": 2}
+{"key": "test_search_wallet_long.py", "patch_attr": 5}
+{"key": "test_sec_login_freeze.py", "str_checks": 2, "patch_attr": 8}
+{"key": "test_sec_net_policy.py", "patch_attr": 2}
+{"key": "test_sec_route_matrix.py", "patch_attr": 5}
+{"key": "test_secret_canary.py", "str_checks": 1, "patch_attr": 4}
+{"key": "test_settings_readable.py", "str_checks": 29, "str_neg": 6}
+{"key": "test_sign_clock.py", "patch_attr": 2}
+{"key": "test_sign_sites.py", "patch_call": 1}
+{"key": "test_silent_failures.py", "patch_attr": 1, "patch_call": 2}
+{"key": "test_snapshot_cross_fills.py", "patch_attr": 12, "patch_call": 2}
+{"key": "test_sol_live_first.py", "patch_attr": 5}
+{"key": "test_sol_progress_prune.py", "str_checks": 8, "patch_attr": 1}
+{"key": "test_spam_lookalike_rows.py", "patch_attr": 4}
+{"key": "test_spam_major_check.py", "patch_attr": 4}
+{"key": "test_stab_lint.py", "str_checks": 2}
+{"key": "test_state_perm_tighten.py", "patch_attr": 9}
+{"key": "test_sui_collect.py", "patch_attr": 2}
+{"key": "test_sui_recon_decimals_hold.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_sui_recon_first_opening.py", "patch_call": 1}
+{"key": "test_sui_recon_gap.py", "patch_attr": 2}
+{"key": "test_sui_recon_sum_hold.py", "patch_call": 1}
+{"key": "test_tax_fee_coin_rows.py", "str_checks": 1, "patch_attr": 7}
+{"key": "test_tax_stable_fs_move.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_tax_stable_fx.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_tier1h.py", "str_checks": 13, "str_neg": 1, "patch_attr": 13}
+{"key": "test_token_discovery.py", "patch_attr": 34, "patch_call": 1}
+{"key": "test_ton_gap_recon_hold.py", "patch_attr": 1}
+{"key": "test_ton_recon_jw_fp.py", "patch_call": 1}
+{"key": "test_ton_recon_sample_race.py", "patch_call": 1}
+{"key": "test_ton_review.py", "patch_attr": 3}
+{"key": "test_ton_spam_meta_invalid.py", "patch_attr": 1, "patch_call": 1}
+{"key": "test_ton_wd_arrival.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_trace_defer.py", "patch_attr": 13, "patch_call": 3}
+{"key": "test_trace_node_order.py", "patch_attr": 4, "patch_call": 2}
+{"key": "test_transfer_log_data.py", "patch_attr": 3}
+{"key": "test_tron_recon.py", "patch_attr": 3}
+{"key": "test_tron_watch.py", "patch_attr": 3}
+{"key": "test_ui_back_paging.py", "str_checks": 15, "str_neg": 3}
+{"key": "test_ui_hold_pg_rows.py", "str_checks": 6, "str_neg": 2}
+{"key": "test_ui_hs_exp_axis.py", "str_checks": 2}
+{"key": "test_ui_paging.py", "str_checks": 99, "str_neg": 17}
+{"key": "test_unit_sigint_quiet.py", "str_checks": 3, "str_neg": 1}
+{"key": "test_unknown_tx.py", "patch_attr": 5}
+{"key": "test_upbit_fill_dq0.py", "patch_attr": 8, "patch_call": 2}
+{"key": "test_upbit_fill_hist.py", "patch_attr": 6, "patch_call": 1}
+{"key": "test_upbit_open_fill.py", "patch_attr": 3, "patch_call": 1}
+{"key": "test_websnap.py", "patch_attr": 3}
+{"key": "test_xss_lint.py", "str_checks": 3}
+{"key": "test_xv_snap.py", "patch_attr": 3, "patch_call": 1}

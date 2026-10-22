@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 B, C = "0x" + "b7" * 20, "0x" + "c7" * 20
 AUC, TKN = "0x" + "a7" * 20, "0x" + "d7" * 20
@@ -18,12 +18,12 @@ USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 json.dump({"chains": {}, "wallets": [{"chain": "eth", "address": B, "label": "B"}, {"chain": "eth", "address": C, "label": "C"}],
            "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import sale_match
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import sale_match  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
@@ -82,12 +82,12 @@ web.pricing._gj = lambda url, timeout=10.0: None
 histcurve.DAYCLOSE.lookup = fake_lookup
 spot = {"ETH": 2000.0, "USDT": 1.0, "USDC": 1.0}
 json.dump({"usd": spot, "usd_ts": {k: NOW for k in spot}, "rate": 1300.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 
 
 class L:
     def __init__(self):
-        p = common.DB_PATH
+        p = paths.DB_PATH
         for sfx in ("", "-wal", "-shm"):
             if os.path.exists(p + sfx):
                 os.remove(p + sfx)
@@ -172,17 +172,17 @@ def cache(bids, token=None, cur=None):
     json.dump({"owners": {f"eth:{B}": {"t": NOW, "chain": "eth", "owner": B, "bids": bl,
                                          "auctions": {AUC: {"ok": True, "why": "seed", "currency": cur,
                                                             "token": {"addr": TKN, "sym": "TKN", "dec": 18} if token else None}}}}},
-              open(web.SALE_PATH, "w"))
+              open(paths.state("sale_bids.json"), "w"))
 
 
 BLD = [None]
 
 
 def build(prefs=None):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **(prefs or {})))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **(prefs or {})))
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -211,7 +211,7 @@ def pay_rows(rows):
 def reset():
     PX["ETH"] = [(0, 1000.0)]
     NO_PX_BEFORE[0] = 0
-    pin9 = getattr(web, "FS_PIN_PATH", os.path.join(common.STATE_DIR, "first_seen_px.json"))
+    pin9 = paths.state("first_seen_px.json")
     if os.path.exists(pin9):
         os.remove(pin9)
 
@@ -303,7 +303,7 @@ chk((f4b.get("_diag") or {}).get("sale_refund_n") == 0, "S4b ETH 입찰인데 �
 
 full_refund()
 lg = L.__new__(L)
-lg.c = dbm.open_db(common.DB_PATH)
+lg.c = dbm.open_db(paths.DB_PATH)
 lg.A = {"eth": (lg.c.execute("SELECT asset_id FROM assets WHERE kind='native'").fetchone()[0], 18)}
 lg.A["usdt"] = (lg.c.execute("SELECT asset_id FROM assets WHERE symbol='USDT'").fetchone()[0], 6)
 lg.n = 90

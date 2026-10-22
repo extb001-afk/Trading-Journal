@@ -56,7 +56,7 @@ def _tax_summary(rows, today):
             if fk9 is not None:
                 fee_days.add(fk9)
         acq9, disp9, fee9 = (float(r.get("_" + k9, r.get(k9)) or 0) for k9 in ("acq", "disp", "fee"))
-        a[1] += float(r.get("qty") or 0); a[2] += acq9
+        a[1] += float(r.get("_qty", r.get("qty")) or 0); a[2] += acq9
         a[3] += disp9; a[4] += fee9
         rt = float(r.get("rate") or 0)
         ak9 = r.get("_akr", r.get("akr"))

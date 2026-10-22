@@ -8,7 +8,8 @@ import threading
 import time
 import urllib.parse
 
-import common
+import config, envfile, logs, paths, seeds, statefile
+import bf_engine
 
 STATE_NAME = "token_discovery.json"
 SEED_NAME = "coverage/token_sources.json"
@@ -57,7 +58,7 @@ class SourceFail(RuntimeError):
 def sources_table(base: str = None) -> dict:
     if base is None and _SEED["d"] is not None:
         return _SEED["d"]
-    d = common.seed_json(SEED_NAME, {}, base_dir=base) or {}
+    d = seeds.seed_json(SEED_NAME, {}, base_dir=base) or {}
     d = d if isinstance(d, dict) else {}
     if base is None:
         _SEED["d"] = d
@@ -72,8 +73,8 @@ def chain_row(chain: str) -> dict:
 def _env() -> dict:
     out = {}
     try:
-        out = dict(common.read_env_file())
-    except Exception:
+        out = dict(envfile.read_env_file())
+    except Exception:   # noqa: BLE001 [fallback]
         out = {}
     for k in (ENV_ALCHEMY, ENV_ANKR, ENV_ES):
         if os.environ.get(k):
@@ -92,7 +93,7 @@ def alchemy_net(chain: str):
         n = n or (chaincatalog.CATALOG.get(chain) or {}).get("alchemy")
         if n:
             return str(n)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return chain_row(chain).get("alchemy") or None
 
@@ -108,7 +109,7 @@ def alchemy_url(chain: str, env: dict = None):
             if callable(f):
                 u = f(net)
                 return u or None
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         env = _env()
     k = str(env.get(ENV_ALCHEMY) or "").strip()
@@ -123,7 +124,7 @@ def ankr_url(env: dict = None):
             if callable(f):
                 u = f()
                 return u or None
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         env = _env()
     k = str(env.get(ENV_ANKR) or "").strip()
@@ -148,7 +149,7 @@ def blockscout_base(chain: str, cfg: dict = None):
     if isinstance(v, str) and v.startswith("https://"):
         return v.rstrip("/")
     cc = _cc(cfg, chain)
-    if cc.get("blockscout") and not common.bs_blocked(chain, cc) and common.chain_discovery(chain, cc) != "rpc":
+    if cc.get("blockscout") and not config.bs_blocked(chain, cc) and config.chain_discovery(chain, cc) != "rpc":
         return str(cc["blockscout"]).rstrip("/")
     return None
 
@@ -167,7 +168,8 @@ def plan(chain: str, cfg: dict = None, env: dict = None, logs: bool = True) -> l
         out.append("alchemy")
     if row.get("ankr") and ankr_url(env):
         out.append("ankr")
-    out.append("rabby")
+    if _rabby_on(cfg):
+        out.append("rabby")
     cc = _cc(cfg, chain)
     if logs and chain != "bsc" and logs_span(chain, cfg) and (cc.get("rpc_logs") or cc.get("rpcs")):
         out.append("logs")
@@ -192,8 +194,8 @@ def logs_span(chain: str, cfg: dict = None):
     cc = _cc(cfg, chain)
     sp = None
     try:
-        sp = ((common.read_json(common.BACKFILL_SPEED_PATH, {}) or {}).get("chains") or {}).get(chain, {}).get("getLogsSpan")
-    except (Exception, SystemExit):
+        sp = ((statefile.read_json(paths.BACKFILL_SPEED_PATH, {}) or {}).get("chains") or {}).get(chain, {}).get("getLogsSpan")
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         sp = None
     best = None
     for v in (cc.get("getlogs_span"), sp, chain_row(chain).get("logs_span")):
@@ -206,7 +208,7 @@ def logs_span(chain: str, cfg: dict = None):
 
 
 def state_path(state_dir: str = None) -> str:
-    return os.path.join(state_dir or common.STATE_DIR, STATE_NAME)
+    return os.path.join(state_dir or paths.STATE_DIR, STATE_NAME)
 
 
 def load_state(state_dir: str = None) -> dict:
@@ -227,7 +229,7 @@ def update_state(fn, state_dir: str = None) -> dict:
         cur.setdefault("pairs", {})
         new = fn(cur) or cur
         new["updatedAt"] = int(time.time())
-        common.atomic_write_json(p, new)
+        statefile.atomic_write_json(p, new)
         return new
 
 
@@ -258,7 +260,7 @@ def need_refresh(ent: dict, sig: dict, now: float = None, srcs=None) -> tuple:
         return True, "retry"
     done = set((ent.get("ok") or {}).keys()) | set(fail.keys())
     for s in srcs or ():
-        if s in INDEX_SOURCES and s not in done:
+        if (s in INDEX_SOURCES or s == "rabby") and s not in done:
             return True, f"new:{s}"
     return False, "cache"
 
@@ -313,7 +315,7 @@ def run_sources(srcs, why) -> list:
 
 
 def _clean(msg: str, env: dict = None) -> str:
-    t = common.redact_secret_text(common.redact_urls(str(msg or "")))
+    t = logs.redact_secret_text(logs.redact_urls(str(msg or "")))
     for v in (env if env is not None else _env()).values():
         v = str(v or "")
         if len(v) >= 8:
@@ -349,7 +351,7 @@ def _http(url: str, **kw):
         return bf_engine.http_json(url, **kw)
     except bf_engine.NetError as e:
         k = "quota" if e.kind in ("quota", "budget") else ("http" if str(e.kind).startswith("http") else "net")
-        raise SourceFail(k, common.redact_urls(str(e))[:120]) from e
+        raise SourceFail(k, logs.redact_urls(str(e))[:120]) from e
 
 
 def es_cursor(old, upto) -> dict:
@@ -449,7 +451,7 @@ def _es_like(base_url: str, params: dict, upto, out: dict, meta: dict, src: str,
                     raise SourceFail("quota", msg[:80])
                 if "api key" in low:
                     raise SourceFail("key", "키 거부")
-                raise SourceFail("error", common.redact_urls(msg)[:80])
+                raise SourceFail("error", logs.redact_urls(msg)[:80])
         if not isinstance(res, list):
             raise SourceFail("error", "result 형식")
         blks, prev = [], None
@@ -555,7 +557,7 @@ def _ensure_ledger(host: str, fallback: dict = None, method_cu=None) -> bool:
     import bf_engine
     try:
         bf_engine._rpc_cfg_ensure()
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     name = bf_engine._rpc_day_of(host)
     if name:
@@ -570,8 +572,8 @@ def _ensure_ledger(host: str, fallback: dict = None, method_cu=None) -> bool:
     if not fallback:
         return False
     try:
-        cfg = common.load_config()
-    except (Exception, SystemExit):
+        cfg = config.load_config()
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         cfg = {}
     lim = dict(cfg.get("rpc_day_limits") or {}) if isinstance(cfg.get("rpc_day_limits"), dict) else {}
     lim.setdefault("node_alchemy", dict(fallback))
@@ -588,7 +590,7 @@ def _rpc_json(url: str, body: dict):
     except (bf_engine.NetError, getattr(bf_engine, "RpcTransportError", bf_engine.NetError)) as e:
         kd = str(getattr(e, "kind", "") or "")
         k = "quota" if kd in ("quota", "budget") else ("http" if kd.startswith("http") else "net")
-        raise SourceFail(k, common.redact_secret_text(common.redact_urls(str(e)))[:120].replace(host, "<host>")) from e
+        raise SourceFail(k, logs.redact_secret_text(logs.redact_urls(str(e)))[:120].replace(host, "<host>")) from e
 
 
 def src_alchemy(chain: str, wallet: str, url: str, sleep=time.sleep, out=None, meta=None) -> int:
@@ -669,12 +671,22 @@ def src_ankr(chain: str, wallet: str, url: str, sleep=time.sleep, out=None, meta
     raise SourceFail("partial", f"{AN_PAGES}쪽 상한")
 
 
-def src_rabby(chain: str, wallet: str, cfg: dict = None, out=None, meta=None) -> int:
+def _rabby_on(cfg: dict) -> bool:
     try:
         import rabby
-        st = rabby.load_state(os.path.join(common.STATE_DIR, rabby.STATE_NAME))
+        return rabby.enabled(cfg or {})
+    except Exception:   # noqa: BLE001 [fallback]
+        return False
+
+
+def src_rabby(chain: str, wallet: str, cfg: dict = None, out=None, meta=None) -> int:
+    if not _rabby_on(cfg):
+        return 0
+    try:
+        import rabby
+        st = rabby.load_state(paths.state(rabby.STATE_NAME))
         res = rabby.chain_resolver(cfg or {}, st)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0
     w = ((st.get("wallets") or {}).get(str(wallet).lower()) or (st.get("wallets") or {}).get(wallet) or {})
     toks = list(w.get("tokens") or [])
@@ -701,7 +713,7 @@ def src_logs(chain: str, wallet: str, cfg: dict = None, upto=None, max_calls: in
         try:
             from evm_watch import RpcSynthMixin
             urls = list(RpcSynthMixin.RPC_DEFAULT.get(chain) or [])
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             urls = []
     if not span or not urls:
         raise SourceFail("unsupported", "로그 구간·RPC 모름")
@@ -725,14 +737,19 @@ def src_logs(chain: str, wallet: str, cfg: dict = None, upto=None, max_calls: in
             if calls > max_calls * 2:
                 raise SourceFail("slow", "구간 줄이다 상한")
             try:
-                logs = recon._rpc_any(urls, "eth_getLogs", [{"fromBlock": hex(a), "toBlock": hex(b), "topics": topics}], tries=2, sleep=sleep)
-            except Exception as e:
+                hits = recon._rpc_any(urls, "eth_getLogs", [{"fromBlock": hex(a), "toBlock": hex(b), "topics": topics}], tries=2, sleep=sleep)
+            except Exception as e:   # noqa: BLE001
                 low = str(e).lower()
                 if sp > 100 and any(x in low for x in ("range", "limit", "too many", "exceed", "10000", "block range", "query returned")):
                     sp = max(100, sp // 2)
                     continue
-                raise SourceFail("net", common.redact_urls(str(e))[:100]) from e
-            for lg in logs if isinstance(logs, list) else []:
+                raise SourceFail("net", logs.redact_urls(str(e))[:100]) from e
+            if isinstance(hits, list) and len(hits) in bf_engine.SILENT_ROW_CAPS:
+                if sp > 100:
+                    sp = max(100, sp // 2)
+                    continue
+                raise SourceFail("partial", f"getLogs {len(hits)}행 = 결과 상한 — 잘림 의심")
+            for lg in hits if isinstance(hits, list) else []:
                 if isinstance(lg, dict) and len(lg.get("topics") or []) == 3:
                     _add(out, meta, lg.get("address"), "logs")
             a = b + 1
@@ -747,7 +764,7 @@ def discover(chain: str, wallet: str, *, upto=None, cfg: dict = None, env: dict 
         try:
             import bf_engine
             cm = getattr(bf_engine, "ledger_burst", None)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             cm = None
     with (cm() if callable(cm) else contextlib.nullcontext()):
         return _discover(chain, wallet, upto=upto, cfg=cfg, env=env, sources=sources, logs_max_calls=logs_max_calls, sleep=sleep, deadline=deadline)
@@ -764,7 +781,7 @@ def _discover(chain: str, wallet: str, *, upto=None, cfg: dict = None, env: dict
     if any(s in ES_LIKE for s in srcs):
         try:
             ent0 = entry(chain, w)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             ent0 = {}
     for s in srcs:
         if s == "logs":
@@ -803,8 +820,8 @@ def _discover(chain: str, wallet: str, *, upto=None, cfg: dict = None, env: dict
             fail[s] = _clean(f"{e.kind}: {str(e)[len(e.kind) + 2:]}")
             if e.kind in ("partial", "more", "cap"):
                 ok[s] = len(one)
-        except Exception as e:
-            fail[s] = _clean("error: " + common.safe_err(e))
+        except Exception as e:   # noqa: BLE001 [fallback]
+            fail[s] = _clean("error: " + logs.safe_err(e))
         for ca, ss in one.items():
             cas.setdefault(ca, set()).update(ss)
     if "logs" in srcs and not any(s in ok for s in INDEX_SOURCES):
@@ -815,8 +832,8 @@ def _discover(chain: str, wallet: str, *, upto=None, cfg: dict = None, env: dict
             ok["logs"] = len(one)
         except SourceFail as e:
             fail["logs"] = _clean(f"{e.kind}: {str(e)[len(e.kind) + 2:]}")
-        except Exception as e:
-            fail["logs"] = _clean("error: " + common.safe_err(e))
+        except Exception as e:   # noqa: BLE001 [fallback]
+            fail["logs"] = _clean("error: " + logs.safe_err(e))
         for ca, ss in one.items():
             cas.setdefault(ca, set()).update(ss)
     out = {"cas": {k: sorted(v) for k, v in cas.items()}, "meta": {k: v for k, v in meta.items() if k in cas},
@@ -845,7 +862,7 @@ def static_credible(chain: str, ca: str, srcs, m: dict, strict=None, confirmed=f
     try:
         if strict is not None and strict(ca):
             return True, "정품 목록"
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     sym = m.get("sym")
     why = scam_name(sym)
@@ -865,8 +882,8 @@ def static_credible(chain: str, ca: str, srcs, m: dict, strict=None, confirmed=f
 
 
 def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=time.sleep, retries: int = 2) -> dict:
-    import pricing
-    net = pricing.DS_CHAIN.get(chain)
+    import token_tables
+    net = token_tables.DS_CHAIN.get(chain)
     out = {}
     if not net:
         return out
@@ -915,14 +932,14 @@ _DEX_IMPL = dex_check
 
 
 def ledger_genuine(conn, chain: str, strict=None) -> set:
-    import pricing
+    import token_tables
     import spamguard
     out = set()
     for r in conn.execute("SELECT address FROM assets WHERE chain=? AND kind='token' AND confirmed=1 AND address IS NOT NULL", (chain,)).fetchall():
         a = str(r[0]).lower()
         if CA_RE.match(a):
             out.add(a)
-    for tab in (pricing.STABLE_CAS, pricing.JPY_STABLE_CAS, spamguard.GENUINE_CAS):
+    for tab in (token_tables.STABLE_CAS, token_tables.JPY_STABLE_CAS, spamguard.GENUINE_CAS):
         out |= {str(k).lower() for k in (tab.get(chain) or {}) if CA_RE.match(str(k).lower())}
     return out
 
@@ -951,7 +968,9 @@ def recon_prep(conn, cfg: dict, chain: str, wallets: list, strict=None, kind: st
         mr = float(pg.get("min_reserve_usd", DS_MIN_RESERVE))
     except (TypeError, ValueError):
         mr = DS_MIN_RESERVE
-    return {"chain": chain, "kind": kind, "cfg": {"chains": {chain: dict(_cc(cfg, chain))}}, "confirmed": conf, "genuine": gen,
+    rb9 = (cfg or {}).get("rabby") if isinstance(cfg, dict) else None
+    return {"chain": chain, "kind": kind, "cfg": dict({"chains": {chain: dict(_cc(cfg, chain))}}, **({"rabby": dict(rb9)} if isinstance(rb9, dict) else {})),
+            "confirmed": conf, "genuine": gen,
             "sigs": sigs, "ents": ents, "strict": strict, "min_reserve": mr, "off": False}
 
 
@@ -1035,8 +1054,8 @@ def fast_extra(prep: dict, deadline: float = None, discover_fn=None) -> dict:
             break
         try:
             r = dfn(chain, w, cfg=prep.get("cfg") or {}, env=env, sources=["alchemy"], deadline=dl)
-        except Exception as e:
-            out["fail"][w] = {"alchemy": _clean("error: " + common.safe_err(e))}
+        except Exception as e:   # noqa: BLE001 [isolate]
+            out["fail"][w] = {"alchemy": _clean("error: " + logs.safe_err(e))}
             continue
         meta = r.get("meta") or {}
         if r.get("fail"):
@@ -1069,9 +1088,9 @@ def _wstatus(ok9: dict, fail: dict, es: dict) -> str:
 def recon_extra_safe(prep: dict, upto=None, **kw) -> dict:
     try:
         return recon_extra(prep, upto=upto, **kw)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         import logging
-        logging.getLogger("tj-core").warning("토큰 발견 실패(종전 목록으로 대사): %s", common.safe_err(e)[:160])
+        logging.getLogger("tj-core").warning("토큰 발견 실패(종전 목록으로 대사): %s", logs.safe_err(e)[:160])
         return {"extra": {}, "meta": {}, "src": {}, "status": {}, "fail": {"*": {"disc": "error"}}}
 
 
@@ -1146,7 +1165,7 @@ def _decimals(rpcs: list, ca: str):
         r = recon._rpc_any(list(rpcs), "eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"], tries=2)
     except recon.RpcExecFail:
         return None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return "transient"
     if not isinstance(r, str) or not r.startswith("0x") or len(r) != 66:
         return None
@@ -1163,7 +1182,7 @@ def skip_final(reason) -> bool:
 
 def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_MIN_RESERVE, budget: list = None,
                  now: float = None, dex=None) -> list:
-    import pricing
+    import token_tables
     import spamguard
     now = time.time() if now is None else float(now)
     its = []
@@ -1178,7 +1197,7 @@ def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_M
         due = []
     if not due and not any(st9 for _c, _s, _m, st9 in its):
         return [(ca, ss, m) for ca, ss, m, _st in its]
-    ds_ok = chain in pricing.DS_CHAIN
+    ds_ok = chain in token_tables.DS_CHAIN
     got = {}
     if ds_ok and due:
         fn = dex or dex_check
@@ -1193,7 +1212,7 @@ def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_M
             tried += part
             try:
                 g9 = fn(chain, part, min_reserve, **kw) or {}
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 g9 = {}
             got.update(g9)
             if not g9:
@@ -1416,7 +1435,7 @@ def filter_result(bal: dict, prep: dict, ext: dict, dex=None, keep_pending: bool
                 continue
             try:
                 gen9 = bool(strict(ca)) if strict is not None else False
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 gen9 = False
             if gen9:
                 keep_why.setdefault(wl, {})[ca] = "정품 목록"
@@ -1434,14 +1453,14 @@ def filter_result(bal: dict, prep: dict, ext: dict, dex=None, keep_pending: bool
                 keep_why.setdefault(wl, {})[ca] = why
             else:
                 unknown.setdefault(ca, {"ws": [], "cred": why if ok else ""})["ws"].append(w)
-    import pricing
-    ds_ok = chain in pricing.DS_CHAIN
+    import token_tables
+    ds_ok = chain in token_tables.DS_CHAIN
     if unknown:
         got = {}
         if ds_ok:
             try:
                 got = (dex or dex_check)(chain, sorted(unknown), prep.get("min_reserve") or DS_MIN_RESERVE)
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 got = {}
         for ca, u9 in unknown.items():
             g = got.get(ca)

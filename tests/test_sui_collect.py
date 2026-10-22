@@ -2,27 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
-import _suifake as F
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
+import _suifake as F  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_event
-import chain_registry as reg
-import chain_state as cs
-import address_codec as ac
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 try:
-    import sui_watch as SW
+    import sui_watch as SW  # noqa: E402
 except ImportError:
-    import _wip_sui_watch as SW
+    import _wip_sui_watch as SW  # noqa: E402
 
 DAY = 86400
 A, B = N.OWN["sui"]
@@ -69,8 +69,8 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "sui", "address": A}]
 cfg["nonevm"] = {"sui": {"graphql_url": URL, "retries": 1}}
 json.dump(cfg, open(CFG_PATH, "w"))
-cfg = common.load_config()
-INB = os.path.join(common.INBOX_DIR, "sui")
+cfg = config.load_config()
+INB = os.path.join(paths.INBOX_DIR, "sui")
 w = SegmentWriter(INB)
 PB = {"latest": 5, "history": 20}
 DB = {"latest": 100, "history": 500}
@@ -160,7 +160,7 @@ check("U4 같은 심볼 'USDC' 가짜 = 다른 원장 키", reg.asset_key("sui",
       and ids[FAKE]["asset"]["symbol"] == "USDC")
 
 reg.FORCE_AVAILABLE.add("sui")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = dict(c.chain_readers)["sui"]
 

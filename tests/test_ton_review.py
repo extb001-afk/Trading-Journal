@@ -2,31 +2,31 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
 TON = 10 ** 9
 X = F.K("99")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 
 
@@ -34,7 +34,7 @@ def set_wallets(*keys):
     cfg = json.load(open(CFG_PATH))
     cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(k)} for k in keys]
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 ch = F.Chain()
@@ -46,7 +46,7 @@ def mk(owners, sd=None, page=3):
     if sd:
         os.makedirs(sd, exist_ok=True)
     st = cs.ChainState("ton", sd)
-    ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+    ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
     ad.page = page
     return ad, st, cw.Collector(ad, W, st, set(owners), page_budget={"latest": 10, "history": 20}, detail_budget={"latest": 200, "history": 500})
 
@@ -113,7 +113,7 @@ j2 = ch.recv(j1, 0, WB1, NOW - 4 * DAY + 5, tf=0)
 ch.jbal[WA1], ch.jbal[WB1] = 43_000_000, 7_000_000
 SD1 = os.path.join(T.TMP, "sd1")
 set_wallets(B1)
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 ad, st1, col = mk({B1}, SD1)
 col.cycle()
@@ -147,7 +147,7 @@ drain()
 dec_row = c.conn.execute("SELECT decimals FROM assets WHERE chain='ton' AND address=?", (MD,)).fetchone()
 check("X2 자릿수 모르는 제톤 = 기장 보류(원장에 자산·수량 없음 · 18 로 안 씀)", uid_of(dt) not in emitted_uids() and dec_row is None,
       (uid_of(dt) in emitted_uids(), dict(dec_row) if dec_row else None))
-bal2 = tw.TonAdapter(common.load_config(), client=srv.client()).fetch_balances({D1}, None)
+bal2 = tw.TonAdapter(config.load_config(), client=srv.client()).fetch_balances({D1}, None)
 check("X2 대사: 자릿수 모르는 제톤 잔고 = 관측 못 함 + 보류", not bal2["_complete"] and MD in (bal2["_unobserved"].get(D1) or []), (bal2.get("_why"), bal2["_unobserved"]))
 ch.masters[MD] = ({"decimals": "6"}, {"valid": True, "type": "jetton_masters", "symbol": "DD", "extra": {}})
 due_now(st2)
@@ -176,7 +176,7 @@ check("X2 검증 직후 메타 조회 실패 → 다음 차례 다시 조회 →
       re2 and re2[-1]["deltas"][0]["asset"]["decimals"] == 6 and re2[-1]["deltas"][0]["asset"]["symbol"] == "EE" and lsum(E2, "EE") == 2_000_000,
       re2[-1]["deltas"] if re2 else None)
 
-rb = tw.TonAdapter(common.load_config(), client=srv.client())
+rb = tw.TonAdapter(config.load_config(), client=srv.client())
 ok3 = rb.fetch_balances({E2}, None)
 ch.jw_patch[WE2] = {"balance": None}
 b3 = rb.fetch_balances({E2}, None)
@@ -301,7 +301,7 @@ check("X9 더 느리게는 허용(2초)", tw.TonClient({"min_interval_sec": 2}, 
 SD11 = os.path.join(T.TMP, "sd11")
 os.makedirs(SD11, exist_ok=True)
 st11 = cs.ChainState("ton", SD11)
-ad11 = tw.TonAdapter(common.load_config(), client=srv.client(), state=st11)
+ad11 = tw.TonAdapter(config.load_config(), client=srv.client(), state=st11)
 
 
 def P11(b, lt):
@@ -322,7 +322,7 @@ st11.mark_emitted("s2", u11(c11), [c11[2]])
 check("X11 받는 줄 둘이 각자 나감 = 첫 줄이 뿌리 · 다른 방출 줄은 뺌(이중 기장 없음)", ad11._rebase([r11, b11, c11], None)[0] == [b11, r11])
 st11.mark_emitted("s3", u11(r11), [r11[2]])
 check("X11 뿌리도 이미 나감 = 뿌리 그대로 · 방출된 받는 줄은 뺌", ad11._rebase([r11, b11, c11], None)[0] == [r11])
-check("X10 poison 0", not os.path.exists(os.path.join(common.STATE_DIR, "poison.jsonl")))
+check("X10 poison 0", not os.path.exists(os.path.join(paths.STATE_DIR, "poison.jsonl")))
 srv.stop()
 reg.FORCE_AVAILABLE.clear()
 T.finish()

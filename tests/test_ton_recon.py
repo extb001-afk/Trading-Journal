@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
@@ -28,7 +28,7 @@ A, X = F.K("31"), F.K("99")
 M, MN, MF = F.K("a1"), F.K("a4"), F.K("a3")
 WA, WN, WF = F.K("b1"), F.K("b4"), F.K("bf")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(A)}]
@@ -46,18 +46,18 @@ ch.jbal[WA] = 9_000_000
 ch.jbal[WF] = 10 ** 15
 W = SegmentWriter(INB)
 st = cs.ChainState("ton")
-ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
 ad.page = 3
 col = cw.Collector(ad, W, st, {A})
 for _i in range(2):
     col.cycle()
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = SegmentReader(INB)
 c._drain_stream("ton", rd, 1, 0)
 c.conn.commit()
 
-rb = tw.TonAdapter(common.load_config(), client=srv.client())
+rb = tw.TonAdapter(config.load_config(), client=srv.client())
 bal = rb.fetch_balances({A}, None, tokens={A: [M]})
 v = ce.validate_balances(bal, "ton", {A})
 check("V1 완전한 결과 · 공통 계약 통과", bal["_complete"] and v["ok"], (bal.get("_why"), v["why"]))
@@ -119,14 +119,14 @@ def wsum(sym):
     return int(r["s"] or 0)
 
 
-c._nonevm_adapters = {"ton": rb}
+c.svc_recon._nonevm_adapters = {"ton": rb}
 col.cycle()
 c._drain_stream("ton", rd, *[(r9["seg"], r9["off"]) for r9 in c.conn.execute("SELECT seg, off FROM inbox_offsets WHERE stream='ton'")][0])
 c.conn.commit()
-check("V7 준비(동기화 도장 + 백필 완료 + 대기 0)", c._scope_ready("ton"), st.status_view())
+check("V7 준비(동기화 도장 + 백필 완료 + 대기 0)", c.svc_recon._scope_ready("ton"), st.status_view())
 led_before = wsum("TON")
-c._last_recon = 0
-c.recon_pass({"ton"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"ton"})
 op = openings()
 check("V7 대사 완료 도장", bool(c._meta_get("recon_done_ton")), op)
 check("V7 기초 잔고 = 체인 잔고 − 원장(창 밖 옛 유입 50 TON − 수수료) · 제톤 기초 0",
@@ -136,9 +136,9 @@ ch.tx(WA, NOW - 10, in_msg={"src": F.K("b9"), "val": 1, "op": tw.OP_INTERNAL_TRA
 ch.jbal[WA] += 2_000_000
 c.conn.execute("DELETE FROM meta WHERE k='recon_done_ton'")
 c.conn.commit()
-c._last_recon = 0
+c.svc_recon._last_recon = 0
 op0 = openings()
-c.recon_pass({"ton"})
+c.svc_recon.recon_pass({"ton"})
 check("V7 경합 중(제톤 지갑만 앞섬) 대사 = 보류 · 기초 잔고 그대로(유령 보정 없음)", openings() == op0 and not any(s == "TKA" for s, _q in openings()), openings())
 srv.stop()
 reg.FORCE_AVAILABLE.clear()

@@ -1,4 +1,6 @@
-import common
+import paths, statefile
+import fsio
+import json
 import os
 import sqlite3
 import time
@@ -7,15 +9,26 @@ import logging
 log = logging.getLogger('tj-core')
 
 
+def _read_soft(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except (OSError, ValueError) as e:
+        log.warning("캐시·표시 파일 손상 — 없는 것으로 보고 계속: %s: %s", os.path.basename(path), str(e)[:120])
+        return default
+
+
 class DecMixin:
 
-    DEC_ISSUES_PATH = os.path.join(common.STATE_DIR, "asset_decimals_issues.json")
+    DEC_ISSUES_PATH = paths.StatePath("asset_decimals_issues.json")
 
     def _meta_dec(self, chain, ca):
         if not chain or not ca:
             return None
         name = "bsc_token_meta.json" if chain == "bsc" else f"rpc_token_meta_{chain}.json"
-        p = os.path.join(common.STATE_DIR, name)
+        p = paths.state(name)
         cache = self.__dict__.setdefault("_meta_dec_cache", {})
         try:
             mt = os.path.getmtime(p)
@@ -23,7 +36,7 @@ class DecMixin:
             return None
         ent = cache.get(name)
         if not ent or ent[0] != mt:
-            raw = common.read_json(p, {}) or {}
+            raw = _read_soft(p, {}) or {}
             m9 = {}
             if isinstance(raw, dict):
                 for k, v in raw.items():
@@ -45,7 +58,8 @@ class DecMixin:
         log.warning("자산 decimals %s: #%s %s %s 저장=%s 관측=%s%s", kind, aid, (r["chain"] if r else "?"), (r["symbol"] if r else "?"), stored, seen,
                     " — 이미 기장된 자산이라 다음 재구축에서 채움" if kind == "pending" else " — 덮지 않음(확인 필요)")
         try:
-            d = common.read_json(self.DEC_ISSUES_PATH, {}) or {}
+            d = _read_soft(self.DEC_ISSUES_PATH, {}) or {}
+            d = d if isinstance(d, dict) else {}
             it = d.setdefault("items", {})
             prev9 = it.get(str(aid)) if isinstance(it.get(str(aid)), dict) else {}
             if kind == "conflict" and prev9.get("kind") == "resolve" and prev9.get("stored") == stored and prev9.get("seen") == seen:
@@ -53,7 +67,7 @@ class DecMixin:
             it[str(aid)] = {"kind": kind, "chain": r["chain"] if r else None, "address": r["address"] if r else None,
                             "symbol": r["symbol"] if r else None, "stored": stored, "seen": seen, "ts": int(time.time())}
             d["ts"] = int(time.time())
-            common.atomic_write_json(self.DEC_ISSUES_PATH, d)
+            statefile.atomic_write_json(self.DEC_ISSUES_PATH, d)
         except (OSError, ValueError, TypeError):
             pass
 
@@ -89,7 +103,7 @@ class DecMixin:
 
     def _dec_issues_prune(self) -> None:
         try:
-            d = common.read_json(self.DEC_ISSUES_PATH, None)
+            d = _read_soft(self.DEC_ISSUES_PATH, None)
             if not isinstance(d, dict) or not isinstance(d.get("items"), dict):
                 return
             keep = {}
@@ -100,7 +114,7 @@ class DecMixin:
                 keep[k] = it
             if len(keep) != len(d["items"]):
                 d["items"], d["ts"] = keep, int(time.time())
-                common.atomic_write_json(self.DEC_ISSUES_PATH, d)
+                statefile.atomic_write_json(self.DEC_ISSUES_PATH, d)
             if not any((it or {}).get("kind") in ("pending", "resolve") for it in keep.values()):
                 self.conn.execute("DELETE FROM meta WHERE k='ext_prewindow:decimals_fix'")
             else:
@@ -110,7 +124,7 @@ class DecMixin:
 
     def _dec_pending_pairs(self) -> set:
         out = set()
-        d = common.read_json(self.DEC_ISSUES_PATH, None)
+        d = _read_soft(self.DEC_ISSUES_PATH, None)
         if not isinstance(d, dict):
             return out
         for k, it in (d.get("items") or {}).items():
@@ -125,22 +139,27 @@ class DecMixin:
                 continue
         return out
 
-    DEC_REQ_PATH = os.path.join(common.STATE_DIR, "decimals_resolve_request.json")
+    DEC_REQ_PATH = paths.StatePath("decimals_resolve_request.json")
 
-    DEC_RES_PATH = os.path.join(common.STATE_DIR, "decimals_resolve_result.json")
+    DEC_RES_PATH = paths.StatePath("decimals_resolve_result.json")
 
     def decimals_resolve_pass(self) -> int:
-        req = common.read_control_json(self.DEC_REQ_PATH, None)
+        req = statefile.read_control_json(self.DEC_REQ_PATH, None)
         if req is None:
             return 0
-        try:
-            os.remove(self.DEC_REQ_PATH)
-        except OSError:
-            pass
+        claimed = fsio.claim(self.DEC_REQ_PATH)
+        taken = statefile.read_control_json(claimed, None) if claimed else None
+        if claimed:
+            try:
+                os.remove(claimed)
+            except OSError:
+                pass
+        if taken is not None:
+            req = taken
         items = req.get("items") if isinstance(req, dict) and isinstance(req.get("items"), dict) else {}
-        res = common.read_json(self.DEC_RES_PATH, {}) or {}
+        res = statefile.read_json(self.DEC_RES_PATH, {}) or {}
         res = res if isinstance(res, dict) else {}
-        d = common.read_json(self.DEC_ISSUES_PATH, {}) or {}
+        d = _read_soft(self.DEC_ISSUES_PATH, {}) or {}
         its = d.setdefault("items", {}) if isinstance(d, dict) else {}
         n = 0
         for k, v in items.items():
@@ -170,12 +189,12 @@ class DecMixin:
             n += 1
         if n:
             d["ts"] = int(time.time())
-            common.atomic_write_json(self.DEC_ISSUES_PATH, d)
+            statefile.atomic_write_json(self.DEC_ISSUES_PATH, d)
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('ext_prewindow:decimals_fix', '1')")
             self.conn.commit()
             log.warning("자리수 해결 요청 %d건 접수 — 다음 자동 재구축에서 관측값으로 다시 기장(손익 게이트 그대로)", n)
         try:
-            common.atomic_write_json(self.DEC_RES_PATH, res)
+            statefile.atomic_write_json(self.DEC_RES_PATH, res)
         except OSError:
             pass
         return n

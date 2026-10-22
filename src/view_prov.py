@@ -2,12 +2,12 @@ from __future__ import annotations
 import acct_norm
 import cgca
 import chain_registry
-import common
+import config, logs, paths, statefile
 import depaddr
 import exprov
 import json
 import os
-import pricing
+import token_tables
 import provbal
 import spamguard
 import ubfill
@@ -19,7 +19,7 @@ from view_common import CHAIN_NAME
 from view_common import STABLE_GROUPS
 from view_text import _scam_name
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -92,7 +92,7 @@ class ProvMixin:
         exb = type(self)._hl_bal_view(exb)
         if not exb:
             return []
-        done9 = {str(r[0]) for r in conn.execute("SELECT k FROM meta WHERE k LIKE 'recon_done_exf_%'")}
+        done9 = {str(r[0]) for r in conn.execute("SELECT k FROM meta WHERE k LIKE 'recon\\_done\\_exf\\_%' ESCAPE '\\'")}
         if all(f"recon_done_exf_{e9}" in done9 for e9 in exb):
             return []
 
@@ -163,7 +163,7 @@ class ProvMixin:
         out, rev = {}, {}
         try:
             rows = conn.execute("SELECT uuid, revision, payload FROM raw_ex WHERE exchange=? AND kind='trade' AND payload LIKE '%cashlegs%'", (ex,)).fetchall()
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_prov:ProvMixin._exf_trade_legs", _cg9)
             return out
         for u9, r9, pl9 in rows:
@@ -199,11 +199,11 @@ class ProvMixin:
     @staticmethod
     def _hl_bal_view(exb) -> dict:
         exb = dict(exb or {})
-        bph9 = os.path.join(common.STATE_DIR, "exf_balances_hyperliquid.json")
+        bph9 = paths.state("exf_balances_hyperliquid.json")
         for c9 in (bph9, bph9 + ".pending", bph9 + ".view"):
             try:
-                d9 = common.read_json(c9, {}) if os.path.exists(c9) else {}
-            except (Exception, SystemExit) as _cg9:
+                d9 = statefile.read_json(c9, {}) if os.path.exists(c9) else {}
+            except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_prov:ProvMixin._hl_bal_view", _cg9)
                 d9 = {}
             if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
@@ -214,7 +214,7 @@ class ProvMixin:
     def _prov_seen(self, conn, exb) -> tuple:
         cs, xs = {}, {}
         self._prov_xblk = {}
-        done9 = {str(r[0]) for r in conn.execute("SELECT k FROM meta WHERE k LIKE 'recon_done_%'")}
+        done9 = {str(r[0]) for r in conn.execute("SELECT k FROM meta WHERE k LIKE 'recon\\_done\\_%' ESCAPE '\\'")}
         nsym9 = dict(self.cfg.get("native_symbol") or {})
         for ch9, ent9 in sorted((provbal.load() or {}).items()):
             if not isinstance(ent9, dict) or ent9.get("mode") != "chain" or f"recon_done_{ch9}" in done9:
@@ -239,7 +239,7 @@ class ProvMixin:
                         if u9:
                             un9.add(u9)
                     if ch9 == "sol" and "q" not in wb9:
-                        un9 |= {str(v9).upper() for v9 in pricing.STABLE_MINTS.values()}
+                        un9 |= {str(v9).upper() for v9 in token_tables.STABLE_MINTS.values()}
                 cs[(ch9, xfer_match.norm_addr(w9))] = (seen9, frozenset(un9))
         for ex9, (_p9, d9) in sorted((type(self)._hl_bal_view(exb) or {}).items()):
             if f"recon_done_exf_{ex9}" in done9 or not isinstance(d9, dict):
@@ -252,10 +252,10 @@ class ProvMixin:
                 xs[ex9] = t9
                 try:
                     self._prov_xblk[ex9] = exprov.blocked(type(self)._exf_prov_ledger(conn, ex9, t9))
-                except Exception as e9:
+                except Exception as e9:   # noqa: BLE001 [isolate]
                     calcguard.swallowed("view_prov:ProvMixin._prov_seen", e9)
                     xs.pop(ex9, None)
-                    log.warning("첫 대사 전 거래소 보류 심볼 계산 실패(%s — 전송 중 그대로): %s", ex9, common.safe_err(e9)[:120])
+                    log.warning("첫 대사 전 거래소 보류 심볼 계산 실패(%s — 전송 중 그대로): %s", ex9, logs.safe_err(e9)[:120])
         return cs, xs
 
     def _prov_price(self, its, now, cg_want, cg_px_want, hold_prio) -> list:
@@ -283,7 +283,7 @@ class ProvMixin:
             it["addr"] = k9
             q9 = tot9.get((ch9, k9), q9)
             sym9 = str(it["sym"] or "")
-            if pricing.STABLE_CAS.get(ch9, {}).get(k9) or (ch9 == "sol" and pricing.STABLE_MINTS.get(k9)):
+            if token_tables.STABLE_CAS.get(ch9, {}).get(k9) or (ch9 == "sol" and token_tables.STABLE_MINTS.get(k9)):
                 it["stable"] = True
                 out.append((it, 1.0, None))
                 continue
@@ -342,7 +342,7 @@ class ProvMixin:
         pv = self.__dict__.get("_prov_view") or {}
         if not pv.get("n"):
             return None
-        fxn9 = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "Hyperliquid"}
+        fxn9 = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
         names = [CHAIN_NAME.get(c, c) for c in sorted(pv.get("chains") or {}) if not str(c).startswith("exchange:")]
         exn9 = [fxn9.get(str(c)[9:], str(c)[9:]) for c in sorted(pv.get("chains") or {}) if str(c).startswith("exchange:")]
         jobs = {str(j.get("chain") or ""): j for j in ((bfp or {}).get("jobs") or []) if isinstance(j, dict)}
@@ -365,7 +365,7 @@ class ProvMixin:
                 return acct_norm.fill_ts(pl) or datetime.fromisoformat(str(pl["created_at"])).timestamp()
             except (ValueError, TypeError, KeyError):
                 return None
-        if not (now - float(snap.get("ts") or 0) < common.upbit_fresh_sec(self.cfg)):
+        if not (now - float(snap.get("ts") or 0) < config.upbit_fresh_sec(self.cfg)):
             info["why"] = "stale"
             if now - float(snap.get("ts") or 0) < self.UB_KRW_KEEP_SEC:
                 dm9, _w9 = ubfill.snapshot_deltas(conn, snap, ts_of9)

@@ -3,6 +3,72 @@
 판마다 더해진 것과 바뀐 동작이에요. 지금 쓰는 법은 [README.md](README.md), 화면 사진은 README 의 '화면 미리보기'에 있어요.
 업데이트는 README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`) 하세요.
 
+## 2026-10-22 — 코인베이스 · 바이낸스 배당 · 설명 안 된 보정 감시 · 외부 검수 버그 수정 · 내부 구조 정리
+
+**코인베이스 거래소와 바이낸스 배당·에어드랍 지급 내역을 받고, 실잔고 대사가 메운 '설명 안 된 보정'을 상태 패널에 보여요 — 외부·자체 검수에서 나온 버그를 고치고, 코드·문서 구조를 정리했어요(구조 정리 몫은 숫자 그대로)**
+
+외부 검수 한 건과 자체 검수의 지적을 하나씩 재현해 고친 판이에요. 지운 서브계정 잔고가 거짓 대사를 만들던 것, 백업 복구가 거래소 수집 위치를 되감지 않던 것, 네이티브 잔고를 그대로 비추는 시스템 토큰 때문에 네이티브가 두 번 잡히던 것, 스테이블 원가가 추정 짝으로 넘어가던 것 등이에요.
+그동안 큰 파일을 맡은 일별로 나누고 README 를 `docs/` 로 나눴어요. 이 정리는 단계마다 원장 사본으로 결과를 대조해 차이가 0 이었어요.
+사진은 다시 찍지 않았어요 — 지금 화면은 코인 로고 대신 글자 아이콘이고, 곡선 범례에 '안 팔았다면' 칩이 없고, 설정 요약의 거래소 수가 코인베이스를 더해 8곳이에요([화면 미리보기](docs/SCREENS.md#화면-미리보기) 안내).
+
+> **업데이트** — README [업데이트](README.md#업데이트) 순서대로 하세요. 모든 유닛이 다시 켜져요(`pm2 start ecosystem.config.js` · 유닛 수는 그대로). 재구축·데이터 개정은 없어요.
+> **HTTPS 로 여는 경우(터널·리버스 프록시)는 업데이트 뒤 한 번 다시 로그인**해야 해요. 로그인 쿠키 이름이 `__Host-tj_session`(등록 기기 쿠키 `__Host-tj_device`)으로 바뀌어 옛 쿠키를 읽지 않아요. `http://127.0.0.1` 로 여는 경우는 그대로예요.
+> 문서가 나뉘었어요. README 엔 처음 안내와 [문서 지도](README.md#문서-지도)만 남고, 설치·기능·설정·운영·화면·보안은 `docs/` 의 파일로 옮겼어요(내용은 그대로 · 지난 항목의 README 링크도 새 자리로 고침 · 알려진 한계 목록은 [docs/OPERATIONS.md › 알려진 한계](docs/OPERATIONS.md#알려진-한계)).
+> 원가 규칙 고침(아래 '원가')과 바이낸스 배당 반영 때문에 실현·미실현 손익이 조금 바뀔 수 있어요(수량·총자산 수량은 그대로).
+> 서버 밖 백업(`backup.offsite` · 기본 꺼짐)을 쓰면, 이제 묶음 목록에 열쇠 서명(HMAC)이 붙어요. 열쇠 `state/backups/offsite_auth.key` 사본을 서버 밖에 보관하세요(`offsite_backup.py auth-key --export <파일>`). 서명 없는 옛 묶음을 열 때는 `--allow-unsigned` 를 붙여요.
+> 되돌릴 땐 업데이트 전 백업으로 되돌리는 게 가장 안전해요. 이 판은 원장에 새 종류의 기록(바이낸스 배당 소득 · 코인베이스 · 보정 이유)을 넣어요.
+
+- **코인베이스(새 거래소)** — CDP API 키(ECDSA · **View 권한만**)로 잔고·현물 체결·입금·출금·송금·간편 전환·USDC 리워드·토큰 세일을 받아요. 공개 시세·일봉도 써요.
+  설정 › 거래소 › 코인베이스 두 칸(키 이름 · 비밀키 PEM 통째로)에 붙여넣거나 `.env` 의 `TJ_COINBASE_KEY_NAME`·`TJ_COINBASE_SECRET` 에 넣으면 돼요. 저장할 때 Trade·Transfer 권한이 켜진 키는 거부해요.
+  키 받는 법은 [코인베이스 키](docs/API_KEYS.md#코인베이스-키-cdp-api-키--조회-전용), 받는 범위·못 받는 것은 [수집 한계 › 코인베이스](docs/COLLECTION_LIMITS.md#코인베이스)에 있어요. 코인베이스 사용자끼리 보낸 송금은 체인 txid 가 없어 지갑과 잇지 못하고, 선물·국제 계정은 받지 않아요.
+- **바이낸스 배당·에어드랍·런치풀·Earn 이자** — 같은 조회 키로 지급 내역을 받아 받은 시각 시가로 소득을 적어요(스테이킹 보상과 같은 규약 · 추가 권한 필요 없음 · 주기마다 1콜).
+  지급 뒤 잔고 대사가 이미 메운 몫은 그 보정 줄을 소득 줄로 바꿔요(두 번 세지 않음). 나중 대사가 지급 앞 시각으로 찍은 보정도 지급 시각 이후에 만든 것이면 바꿔요.
+  토큰 교환·개명 분배는 빼요(잔고 대사). 끄려면 `config.json` 에 `exf.binance_dividends: false` 를 넣으세요([수집 한계 › 바이낸스](docs/COLLECTION_LIMITS.md#바이낸스)).
+- **설명 안 된 보정 감시(새)** — 실잔고 대사가 원장과의 차이를 메운 보정 줄마다 이유를 기록하고, 규칙으로 설명되는지 판정해요. 규칙은 스팸·$1 미만·부채 이자·선물 정산·늦은 행 상쇄·14일 안 ±상쇄 쌍·창 시작 기초 잔고·알려진 미수집 같은 것이에요.
+  상태 패널 '보정 감시'의 **빨강**은 버그 꼴이에요(금액 무관 · 텔레그램). 창보다 이른 원장 행을 되받는 기초 잔고, 네이티브 잔고와 수량이 같은 토큰, 같은 칸에서 하루 3쌍 이상 ±로 뒤집히는 것이 여기에 들어요.
+  **노랑**은 7일 안 한 줄 $500 이상이거나 그 장소 평가액의 2% 이상일 때예요. 7일 합이 $1,000 이상이면 텔레그램이 한 번 와요.
+  해외 거래소 대사 알림은 이제 설명 안 된 보정만 금액과 함께 보내요. 빨강 줄의 원인 글은 버그 꼴 문구만 써요(미수집 안내가 섞이지 않음). 감시는 원장 값을 바꾸지 않아요.
+  이전 판이 이미 넣은 이 꼴의 보정 줄은 저절로 고쳐지지 않고 빨강으로 보여요([보정 감시](docs/OPERATIONS.md#보정-감시--설명-안-된-보정)).
+- **거래소 서브계정** — 지운 서브계정의 마지막 잔고가 거짓 대사 보정을 만들던 것을 고쳤어요. 그 몫이 0 이면 기록을 지우고, 아니면 그 거래소 대사를 보류하고 패널에 보여요.
+  같은 서브 칸에 다른 계정 키를 넣으면 계정 UID·키 지문으로 다른 계정으로 알아보고 이력을 따로 받아요. 이전 판에 저장한 칸은 처음 바꿀 때 지금 계정으로 봐요.
+  계정 모드 전환 중에 선물 정산 이력이 줄던 것도 고쳤어요. 업비트 잔고 경합은 1분 뒤 다시 확인해요.
+- **백업 · 복구** — `tools/ledger_restore.py` 로 되돌리면 서브계정·거래소 수집 위치도 백업 시점으로 되감아, 그 사이 기록을 다시 받아요.
+  같은 분에 다시 한 백업이 정상 복구 지점을 덮던 것을 고쳤어요. 서버 밖 백업은 원격 마지막 묶음보다 원장이 크게 작거나 자료 시각이 이르면, 보내기·회전을 멈춰 정상 묶음을 지우지 않아요(맞으면 `run --force --allow-regress`).
+- **거래소 수집 경계** — OKX 초 경계 쪽에서 체결을 놓치던 것, 수집 기간 시작보다 이른 입출금 행이 들어오던 것(이제 버림), 선물 첫 조회 창의 거래소별 보존 한도, 바이낸스 마진 페어, 빗썸 경계를 고쳤어요.
+- **체인** — Polygon 의 POL 토큰 주소·Celo GoldToken·Metis 토큰처럼 네이티브 잔고를 그대로 보여 주는 시스템 토큰을 토큰으로 세어 네이티브가 두 번 잡히던 것을 고쳤어요. 이제 토큰 대사·발견에서 빼요.
+  Solana 에서 읽지 못하는 거래는 격리하고, 그 계정의 새 스테이크 기초 잔고는 보류해요.
+  지갑 등록 때 상식 검사를 해요. 컨트랙트 주소이거나 잔고가 비상식적으로 크면 확인을 받고 저장해요(노드 실패는 막지 않고 경고만).
+- **가격** — 거래량 0 인 평평한 봉 시세는 쓰지 않아요. 수수료·이자의 시가는 그 시각 ±1시간 봉으로 잡아요. 과거 출금 수수료의 그 시각 시가를 모르면 이제 지금 시세로 대신하지 않아요(비용 0 · 수량만).
+  업비트 개시 전 마켓 때문에 입금 코인 평가가 0 이 되거나, 같은 묶음의 다른 코인 시세가 멈추던 것을 고쳤어요.
+  원화 마켓이 없는 코인의 대체 가격은 24시간 거래대금이 가장 큰 거래소를 써요. 거래소끼리 1.5배 넘게 다르면 상태 패널에 주황으로 떠요.
+  얇은 풀 시세가 확인값의 5배 넘게 튀면 거르고, 한 거래소가 답하지 않아도 다른 거래소 시세는 늦어지지 않아요. 오픈시 키가 있으면 오픈시가 지원하는 체인의 NFT 바닥가는 오픈시만 써요.
+- **원가** — CCA 환급·브리지에서 스테이블 원가가 추정 짝으로 넘어가던 것을 고쳤어요. 이제 짝이 ID 로 확정된 경우만 원가를 넘겨요. 수수료 리베이트를 실현에 넣고, 이자·브리지 수수료 처리도 바로잡았어요.
+  자산 변동 분해의 '나머지'가 크게 나오던 것을 고쳤고, '사고판 분(→실현)'을 누르면 코인별 상세(판 돈 − 원가 = 실현 · 그날 산 몫 · 기존 보유 몫)가 보여요.
+- **화면** — 계획 저장이 저장 안 한 메모·새 입력을 지우던 것을 고쳤어요. 기타 자산 저장 응답이 다른 자산 폼을 지우거나 늦은 조회가 최신 화면을 덮던 것, 로그인이 풀린(401) 뒤 민감한 확인 창이 남던 것도 고쳤어요.
+- **보안 · 개인정보** — 화면 보안 정책(CSP)을 이제 강제해요. 스크립트는 같은 출처 파일과 해시로 고정한 인라인만 · Trusted Types · 이미지·연결은 같은 출처만이에요.
+  **코인 로고는 받지 않아요**(글자 아이콘만 · 외부 요청 0 · `web.token_logos` 는 효과 없음). **Rabby 지갑 보강은 기본 꺼짐**이에요(`rabby.enabled: true` 로 켜면 내 EVM 주소가 외부로 나가요 · 켠 경우 평가가 크게 다른 지갑은 하루마다 다시 조회).
+  세션 CSRF 를 쓰고, 등록 기기는 로그인 시도를 따로 세어요(밖에서 전역 잠금을 채워도 주인은 로그인돼요). 키 헤더를 실은 요청은 리다이렉트를 따라가지 않아요.
+- **설정 점검 · 계산 감시** — 기동 때 `config.json` 을 선언표와 대조해, 모르는 키·형이 다른 값을 로그 경고 한 줄로 알려요(키 이름·이유만 · 값은 종전처럼 씀 · 지우지 않음 · [고급 설정](docs/CONFIG.md#고급-설정)).
+  돈 계산 경로에서 넘긴 예외에는 이유 코드를 달았어요. 계산 오류 감시에 의심 꼴 노랑을 더했어요.
+- **내부 구조 정리(동작 그대로)** — 공용 모듈 `src/common.py` 를 맡은 일별(`paths`·`timeutil`·`envfile`·`statefile`·`net_http`·`chaincatalog`·`token_tables` 등)로 나누고 지웠어요.
+  원장 엔진의 큰 묶음은 서비스 객체(거래소·대사·시세)로 바꿨어요. 원가 쓰기, 원장 쓰기 SQL, 수집기 기록 계약, 서명 공식, 전송 끝단을 각각 한 곳으로 모았어요.
+  화면은 DOM 쓰기를 `tjdom.js` 한 곳에 모으고, CSS 를 `app.css`·`mods.css`·`wow.css`·`login.css` 로 나눴어요. 쓰기 요청(POST)은 경로 표 하나로 처리해요.
+  옮기는 동안 단계마다 원장 사본으로 빌드 결과·원장 재생·화면(픽셀)을 대조했어요(차이 0).
+
+**함께**
+
+- **문서** — README → `docs/`([설치](docs/INSTALL.md) · [기능](docs/FEATURES.md) · [설정](docs/CONFIG.md) · [운영](docs/OPERATIONS.md) · [화면](docs/SCREENS.md) · [보안](docs/SECURITY_DATA.md) · [English](docs/README_EN.md)).
+  설정 선언표는 코드에서 자동 생성돼요. 코인베이스 키, 바이낸스 배당, 서버 밖 백업 열쇠 안내를 더했어요.
+- **시험** — 공개 시험 파일 이름을 기능별로 바꿨어요(예 `test_s22_readable.py` → `test_settings_readable.py` · `test_s22_eval_auto_retry.py` → `test_receipt_eval_auto.py`).
+  재현 시험·경합 시험·불변식 시험을 더했어요(공개 시험 467파일).
+
+**English** — Coinbase support: a CDP API key (ECDSA, View only — keys with Trade/Transfer are refused) reads balances, spot fills, deposits/withdrawals, conversions, USDC rewards and token sales.
+Binance dividends, airdrops, Launchpool and Earn interest come from the payout history and are booked as income at the time's price. Balance-reconciliation adjustments that already covered a payout are replaced, not double counted.
+A new "unexplained adjustment" monitor records why each reconciliation adjustment was made. The status panel shows bug-shaped ones in red (pre-window rows, tokens mirroring the native balance, repeated flips) and large unexplained ones in yellow, with Telegram for red and for $1,000 or more in 7 days.
+Fixes from an external review and our own review cover: deleted or reused sub-account slots, restore rewinding exchange cursors, OKX second-boundary pages, native-mirror system tokens (Polygon POL, Celo, Metis), stablecoin cost carried by guessed matches, fee rebates, zero-volume candles, and form-save races in the UI.
+Over HTTPS the login cookies are now `__Host-` prefixed, so you sign in once more after updating. CSP is enforced, coin logos are no longer fetched (letter icons), and the Rabby lookup is off by default.
+README is split into `docs/` (known limitations moved to `docs/OPERATIONS.md`). Test files are renamed by feature. The internal restructuring was verified against ledger replays (no differences). All units restart; no rebuild or data revision. Screenshots were not retaken.
+
 ## 2026-10-16 — 거래소 서브계정 키 · Alchemy 한도 초과 알림 · 내부 구조 정리
 
 **해외 거래소 서브계정을 같은 거래소로 합쳐 세고, Alchemy 키가 계속 거절되면 알려요 — 계산 결과는 그대로(코드 구조만 정리)**
@@ -19,7 +85,7 @@
 - **숫자 계산 오류를 조용히 넘기지 않아요** — 원가·손익·잔고 계산 중 코드 실수 꼴의 오류(이름·형식 오류 등)가 나면, 화면은 계속 돌되 상태 패널에 빨강
   '계산 코드 오류를 삼킴 — 숫자가 틀렸을 수 있음'(어느 계산이 몇 번)으로 보이고 텔레그램이 와요. 데이터 이상으로 넘어간 예외는 상태 패널 정보 줄(하루 안 · 알림 없음)에 세어 보여요.
   해외 거래소 체결 중 형식이 이상한 것(수량 0·방향 모름·시각 없음)은 원본은 그대로 보관하고, 기장에서 빠진 것을 로그와 그 정보 줄에 남겨요(종전 = 말없이 빠짐).
-- **원가 계산 방식 안내** — README 맨 위와 새 절 [원가 · 손익 계산 방식](README.md#원가--손익-계산-방식)에 평단(이동평균)·실현·미실현·수수료·원화 환산·원가 미확인을 정리했어요.
+- **원가 계산 방식 안내** — README 맨 위와 새 절 [원가 · 손익 계산 방식](docs/FEATURES.md#원가--손익-계산-방식)에 평단(이동평균)·실현·미실현·수수료·원화 환산·원가 미확인을 정리했어요.
   쓰면서 맞지 않던 설명을 바로잡았어요 — 평단 묶음은 '같은 코인이면 하나'가 아니라 체인 기본 코인(공식 랩 토큰 포함)·정품 스테이블만 체인을 넘어 한 묶음이고,
   그 밖 토큰은 컨트랙트마다, 거래소 보유는 거래소·코인마다 따로예요(명세 › 원가 방식 도움말 문구도 같이 고침 · 계산은 그대로).
 - **내부 구조 정리(동작 그대로)** — 큰 파일들을 맡은 일별 모듈로 나눴어요: 화면(`web/v2/app.js` → 공용 뼈대 + 화면 파일 `tab_*.js` 7개),
@@ -212,7 +278,7 @@ README 사진은 이번 판 화면으로 모두 새로 찍었어요(새 사진 4
 
 **함께**
 
-- **문서** — README 사진 전부 새로(새 4장)·'최근 판에 더해진 것' 목록·'이번 판'·[백필 · 재구축](README.md#백필--재구축--재백필) 첫 줄(기본 5개월 · 과거 데이터 더 가져오기 · 거래소 보존 한도)·AI 리뷰 '전체 채우기'·알려진 한계·English.
+- **문서** — README 사진 전부 새로(새 4장)·'최근 판에 더해진 것' 목록·'이번 판'·[백필 · 재구축](docs/OPERATIONS.md#백필--재구축--재백필) 첫 줄(기본 5개월 · 과거 데이터 더 가져오기 · 거래소 보존 한도)·AI 리뷰 '전체 채우기'·알려진 한계·English.
 - **시험** — 공개 시험 추가: 인증 요청 리다이렉트 · 폴더·`.env` 권한 · 전체 채우기(예약 루프를 막지 않음·날짜 기준) · 영수증 자동 평가 거절·재시도 · 미리 받기 오늘 영수증·`bg=1` 내부만·비활성 체인 로그·Base 기본 속도 ·
   긴 설명 한 줄 화면 — 전체 8,100건 넘게(파일 253개).
 
@@ -263,7 +329,7 @@ Tron·Sui·TON·Bitcoin 의 거래 상세를 장애 동안 못 받으면 그 거
 > 업데이트 뒤 상태 패널에 새로 보일 수 있는 것 — '수집 유닛 없음'(새 체인 지갑이 있는데 그 유닛이 pm2 목록에 없음 → `pm2 start ecosystem.config.js && pm2 save`) · '<체인> 기초잔고 대사 보류'(6시간 넘게) ·
 > 자동으로 끈 체인의 '미추적 체인에 잔고/활동'(업데이트 뒤 새로 들어온 자금부터) · 반대로 USD·USDE·RLUSD·USDP·USDS 마진 부채의 '값 모름' 주의는 사라져요.
 > **영수증 차트 봉 미리 받기는 기본 꺼짐**이에요 — 켜려면 `config.json` 의 `"review": {"chart_prewarm_per_day": 150}`(최대 300) 뒤 `pm2 restart tj-review`
-> (AI 리뷰 유닛 `tj-review` 를 켠 설치만 — README [AI 기능 켜기](README.md#ai-기능-켜기--claude-cli-로그인)).
+> (AI 리뷰 유닛 `tj-review` 를 켠 설치만 — README [AI 기능 켜기](docs/FEATURES.md#ai-기능-켜기--claude-cli-로그인)).
 
 - **영수증 차트 — 봉 미리 받기(선택) · DEX 봉은 나중에 채움** — `config.json` 의 `review.chart_prewarm_per_day`(기본 0 = 꺼짐 · 최대 300)를 켜면 AI 리뷰 유닛(`tj-review`)이 켜질 때와 하루 회차마다
   영수증 차트 봉을 하루 그 수만큼 한가할 때 미리 받아 영구 저장해요(영수증 한쪽 = 1 · 모델 호출 없음) — 보존 기한이 짧은 봉부터(키 없는 GeckoTerminal DEX 봉 약 180일) · 이미 받은 것은 다시 안 부름 ·
@@ -544,7 +610,7 @@ No rebuild and no data revision; stop everything and run `pm2 start ecosystem.co
   실현손익·남은 원가가 어긋난 채로 남을 수 있어요(보유 수량은 맞음 · 자동 고침 없음 · 블록스카웃 상세로 받은 거래는 원래 순번이 있어 해당 없음).
 - 빗썸 지정가 주문이 일부만 체결된 채 열려 있다가 취소되면, 잠깐(다음 대사까지 — 기본 조회 간격이면 약 20분) 그 코인 보유가 실제보다 많게 보일 수 있어요 — 저절로 맞춰져요.
 - 원장 복원 도구(`tools/ledger_restore.py`)로 백업 이후 새 코인이 생긴 원장을 되돌리면, 손으로 넣은 코인별 원가(수동 원가)가 다른 코인에 붙을 수 있어요 — 복원 뒤 설정의 수동 원가를 다시 확인하세요 ·
-  이 도구가 찍는 pm2 멈추기·켜기 안내엔 새 체인 유닛(`tj-tron`·`tj-sui`·`tj-ton`·`tj-btc`)이 빠져 있어요 — README [백업 · 복구](README.md#백업--복구)의 명령을 쓰세요(다음 판).
+  이 도구가 찍는 pm2 멈추기·켜기 안내엔 새 체인 유닛(`tj-tron`·`tj-sui`·`tj-ton`·`tj-btc`)이 빠져 있어요 — README [백업 · 복구](docs/OPERATIONS.md#백업--복구)의 명령을 쓰세요(다음 판).
 - QuickNode 체험 끝·크레딧 소진의 실제 응답 꼴은 실측하지 못해 HTTP 401·402·403·404 와 문구로 판정해요(다른 꼴이면 일시 실패로 재시도) · 같은 키를 유료로 바꿨으면 연결 테스트를 눌러야 다시 써요 ·
   호출이 드문 설치는 거부 판정까지 수십 분 걸릴 수 있어요(그동안 trace 는 다음 노드) · Chainnodes 키 거부는 자동으로 빼지 않아 trace 마다 1콜씩 버려요 · Chainnodes 냉각은 프로세스마다 따로예요.
 - 지난 판 한계(업비트 3주문 이상 부분 상쇄 · BNB Chain 제3자 내부 입금 겹침 · 아카이브 키가 쉬는 날 옛 구간 채우기 · 창 넓힘 재구축 · CCA 처분 시각 · 도중 디스크 가득 · HyperEVM 이더스캔 의존 등)는 그대로예요 —
@@ -852,7 +918,7 @@ No rebuild and no data revision.
   수집 기간 전부터 받기만 한(기초 잔고뿐) 토큰은 코인게코에 그 컨트랙트 시세가 있을 때만 평가 · 블록스카웃만 아는 보유 후보도 같은 스팸 필터.
 - **응답 크기 상한 마무리 · 지난 판 한계** — 공통 경로 밖 직접 조회 12곳(솔라나 수집·대사, 시세·OKX 토큰 가격, Rabby, 업비트, 입금 주소, 브릿지·자금 흐름 추적, LP 목록, 세일 매칭, 거래 출처)과
   코인게코 키 시험도 정상 32MiB · 오류 64KiB · 판정 보류 토큰 1시간 재판정(상태 패널 '토큰 판정 대기 N') · BNB Chain 지갑별 대사는 관측한 토큰만 · `tools/negabs_1010.py --genuine`(정품 등록 + 다시 시도).
-- **AI · 화면** — 영수증 AI 평가가 Claude CLI 자체 실패(조직 접근 끔·로그인 필요·한도)면 '형식' 대신 진짜 사유(키 같은 값은 가림) · README [AI 기능 켜기](README.md#ai-기능-켜기--claude-cli-로그인) ·
+- **AI · 화면** — 영수증 AI 평가가 Claude CLI 자체 실패(조직 접근 끔·로그인 필요·한도)면 '형식' 대신 진짜 사유(키 같은 값은 가림) · README [AI 기능 켜기](docs/FEATURES.md#ai-기능-켜기--claude-cli-로그인) ·
   전송 중 '받는 쪽 기록 확인 중' · 펼친 보유 줄 표 넘침 · 폰 보유 줄 칩 잘림 · 확인 주기 카드·Ankr 칸 문구 · 키 저장 알림 · 그날 카드 분해 라벨 칸 · 상태 패널 음수 보유 '첫 백필 중'·지운 체인 '멈춤' 오경보 없음 ·
   다른 체인 활동 경고 = 할 일 문구 · 환율 선조회가 쉼을 지키고 실패하면 멈춤 · 빗썸 체결 시각 바로잡기가 원장 반영을 붙잡지 않음.
 
@@ -897,7 +963,7 @@ Base 과거 기록 넓히기 · 바이빗 선물 수수료·펀딩 · 빌린 코
 > **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`). 재구축·데이터 개정은 없어요(코드만 되돌려도 돼요 —
 > 단 아래 1회 도구를 `--apply` 로 적용했다면 되돌릴 때 적용 전 백업으로).
 > EVM 지갑이 있으면 **Alchemy 무료 키**를 넣어 주세요(설정 › 연결·키 — 저장하면 바로 쓰고 재시작 없음). 없어도 돌지만 옛 보유 토큰 찾기가 약해지고 설정·상태 패널에 경고가 떠요.
-> 이미 등록한 지갑은 잔고 대조가 한 번에 20쌍(지갑, 체인)씩 천천히 첫 발견을 돌려요(지갑이 많으면 하루쯤). 한 번에 점검하려면 README [옛 보유 토큰 찾기 · 체인 표](README.md#옛-보유-토큰-찾기--체인-표).
+> 이미 등록한 지갑은 잔고 대조가 한 번에 20쌍(지갑, 체인)씩 천천히 첫 발견을 돌려요(지갑이 많으면 하루쯤). 한 번에 점검하려면 README [옛 보유 토큰 찾기 · 체인 표](docs/FEATURES.md#옛-보유-토큰-찾기--체인-표).
 
 - **옛 보유 토큰 찾기** — 지갑을 등록할 때(기초 잔고 대조) 체인마다 되는 출처를 합쳐(이더스캔·루트스캔·블록스카웃·Alchemy·Ankr·Rabby 포트폴리오·RPC 로그 훑기 + 원장의 정품 토큰)
   그 지갑이 한 번이라도 주고받은 토큰을 모두 찾고, 같은 블록 잔고로 기초 잔고를 맞춰요 · 스팸 의심 토큰은 넣지 않아요 · 키 쓰는 API 는 처음 1번 + 그 지갑에 새 거래·잔고 변화가 보일 때만
@@ -930,7 +996,7 @@ Base 과거 기록 넓히기 · 바이빗 선물 수수료·펀딩 · 빌린 코
 
 **함께**
 
-- **문서** — README 처음 표·키 표에 Alchemy · [옛 보유 토큰 찾기 · 체인 표](README.md#옛-보유-토큰-찾기--체인-표) 절 · 1회 도구 3개·`loan_short`·`token_discovery`·`negabs_enabled` ·
+- **문서** — README 처음 표·키 표에 Alchemy · [옛 보유 토큰 찾기 · 체인 표](docs/FEATURES.md#옛-보유-토큰-찾기--체인-표) 절 · 1회 도구 3개·`loan_short`·`token_discovery`·`negabs_enabled` ·
   `.env.example` 에 `TJ_ALCHEMY_KEY` · [API_KEYS.md](docs/API_KEYS.md) Alchemy·Ankr·버스트 · [COLLECTION_LIMITS.md](docs/COLLECTION_LIMITS.md) '옛 보유 토큰 찾기' 줄·바이빗 선물 수수료·펀딩.
 - **시험** — 공개 시험 추가: 토큰 발견·잔고 대조 · 발견 시점 기초 잔고(재구축·멱등 포함)·화면 문구 · Alchemy 키·노드 장부·버스트 · EVM 체인 표 · 코인 정산 선물 달러 · 응답 크기 상한 ·
   Base 묶음 합치기 · 바이빗 거래 내역 · 빌린 코인 원가 · 빗썸 체결 시각 — 전체 3,200건 넘게(파일 90개).
@@ -968,7 +1034,7 @@ Only the Settings › keys (explorer keys) screenshot was retaken (Alchemy row);
 > **업데이트** — README [업데이트](README.md#업데이트) 순서대로(멈추기 → 백업 확인 → `git pull` → `bash tools/setup.sh` → `pm2 start ecosystem.config.js`). 재구축은 필요 없어요.
 > 이 판부터 설정 맨 아래에 버전(`VERSION`)이 보이고, 원장에 **데이터 개정 번호**(`meta` 의 `data_rev`)를 적어요 — 이 판 = 데이터 개정 1(선물 정산 재배치를 적용할 때 기록).
 > 이 번호를 모르는 예전 판 코드는 그 칸을 무시하므로, 이 판에서 되돌릴 때는 코드만 되돌리면 돼요. 최초 인식 시가 안전장치·수수료 규약·원가 넘기기 정리로 실현손익·명세 숫자가 조금 바뀔 수 있어요.
-> 수집기 쪽 고침(BSC 매도 대금 · 빗썸 과거 지정가 체결 시각)은 새로 받는 거래부터예요. 이미 원장에 있는 분류 보류 거래의 잔고 변화는 재구축([백필 · 재구축](README.md#백필--재구축--재백필)) 때 들어가요.
+> 수집기 쪽 고침(BSC 매도 대금 · 빗썸 과거 지정가 체결 시각)은 새로 받는 거래부터예요. 이미 원장에 있는 분류 보류 거래의 잔고 변화는 재구축([백필 · 재구축](docs/OPERATIONS.md#백필--재구축--재백필)) 때 들어가요.
 
 **1차 — 새 지적 · 먼저 고칠 것**
 
@@ -1089,7 +1155,7 @@ transactions. Screenshots unchanged (the LP card position differs from them).
   장기 곡선 순유입에 빗썸 원화 입출금도 넣고, 기록과 실제 잔고가 크게 어긋난 구간은 가까운 실측값을 써요. 누락 레그 재기장·원장 복구 뒤에는 곡선을 다시 계산해요.
 - **서버 밖 둘째 백업 · 복구** — 원장 파일이 없는데 예전 원장 흔적(백업·수집 기록)이 있으면 빈 원장을 만들지 않고 기다리며 복구를 안내해요(상태 패널 '원장 파일 없음 — 복구 필요').
   원장 교체는 원자적으로, 수집기 기록(`state/inbox/`)은 읽은 뒤에도 8일 남겨요. 새 도구 `tools/ledger_restore.py`(백업 목록·검사·되돌리기·그 사이 수집분 다시 받기)와
-  `tools/offsite_backup.py`(압축 원장 사본을 다른 컴퓨터로 · sha256 확인 · 밖으로 ssh 를 못 나가면 outbox 모드 · 기본 꺼짐) — README [백업 · 복구](README.md#백업--복구).
+  `tools/offsite_backup.py`(압축 원장 사본을 다른 컴퓨터로 · sha256 확인 · 밖으로 ssh 를 못 나가면 outbox 모드 · 기본 꺼짐) — README [백업 · 복구](docs/OPERATIONS.md#백업--복구).
   정기 백업이 3일 넘게 없으면 상태 패널 빨강 + 텔레그램.
 - **청산 감시** — 거래소 조회가 막혀도 마지막 값으로 위험 알림을 보내고, '청산 감시가 <곳>을 못 보고 있어요' 알림·상태 패널 빨강 · 청산가 도달은 늘 한 번 더 ·
   위험 구간이면 1시간마다 다시(`alerts.liq_repeat_min` · 0 = 끔) · 벗어났다 다시 들어오면 다시 알림 · OKX 선물 명목가에 계약 단가 반영 · BTC 비교선이 일별 가격을 제대로 찾음.
@@ -1225,7 +1291,7 @@ ledger holdings caused by a running history extension are explained, and restart
   보낸 내역, 보유 코인 '오늘 변동'·'7일 추이', '오늘 무엇이 움직였나', 코인마다 다른 가격 이력(타임머신)을 합성 데이터로 보여 줘요.
 - **시험·CI** — GitHub Actions 가 Python 3.9 · 3.11 · 3.13 에서 전체 파일 문법 검사(`py_compile`)와 시험을 돌리고, HTTP 로그인 시험(쿠키 없이 401 · 다른 Host 421 ·
   CSRF 없이 403 · 연속 실패 잠금 429)을 더했어요.
-- **문서** — README 목차, [고급 설정](README.md#고급-설정)(환경변수·설정 키), 브라우저가 직접 부르는 외부 주소(글꼴·로고 · Cloudflare 분석), 자동 재구축 임시 사본 위치.
+- **문서** — README 목차, [고급 설정](docs/CONFIG.md#고급-설정)(환경변수·설정 키), 브라우저가 직접 부르는 외부 주소(글꼴·로고 · Cloudflare 분석), 자동 재구축 임시 사본 위치.
 
 **English** — External review fixes (evening of 2026-10-08). Futures receipts: Binance closes now get prices (settlements matched to fills by the second) and OKX one-way (net) accounts get
 price rows (the last 3 months are fetched once more); entry times follow the running position (partial closes; reversals and zero-PnL closes are
@@ -1324,7 +1390,7 @@ then that DEX price; Upbit-credited coins without a chain record need 2+ exchang
   하루 한도는 쉼이 끝나면 · 깜빡이지 않게 최소 30분은 머묾). 상태 패널과 확인 주기 카드에 '이더스캔 대신 RPC 로 확인 중(이유)'이 한 줄 보이고,
   텔레그램으로는 보내지 않아요. 하루·월 한도가 있는 무료 노드는 공표 한도의 80% 까지만 세어 쓰고, 넘으면 그 노드는 UTC 자정까지 쉬고 다음 노드로 넘어가요.
   끄려면 `config.json` 에 `"rpc_fallback": false`(전체) 또는 `chains.<체인>.rpc_fallback: false`(그 체인만).
-- **빗썸 원화 입출금도 일별 기록에** — 은행 ↔ 빗썸 원화 입출금이 그날 기록·그날 카드 '입출금'(순유입)·자산 변동 분해에 들어가요(전에는 업비트만). [README › 일별 기록](README.md#일별-기록--그날-카드--m월-한눈에)
+- **빗썸 원화 입출금도 일별 기록에** — 은행 ↔ 빗썸 원화 입출금이 그날 기록·그날 카드 '입출금'(순유입)·자산 변동 분해에 들어가요(전에는 업비트만). [README › 일별 기록](docs/FEATURES.md#일별-기록--그날-카드--m월-한눈에)
 - **미매칭엔 할 일만** — '기초 잔고 대사 완료' 같은 알림이 미매칭 › 기타 보류에 빈 '—' 줄로 쌓이던 것을 뺐어요(미매칭 배지 수도 그만큼 줄어요).
 
 **English** — A holding-place drawer (share of total, coin ring, 30-day in/out, chains, coins), buy dots traced back through
@@ -1351,7 +1417,7 @@ monthly quota, paid at a usage share, 10% by default), and the Rabby portfolio c
 ## 2026-10-05
 
 - **전체 검색**(⌘K · /)과 **내 매매 돌아보기**(타임머신 · 자금 흐름 지도 · 팔기 전 미리보기 · 올해 결산 · 계획 지키기 점수 · 매매 습관 · 하루 실현 잔디 · BTC 비교선 · 안 팔았다면) —
-  README [화면 미리보기 › 새로 생긴 것](README.md#새로-생긴-것--내-매매를-다르게-보는-화면).
-- **텔레그램 알림 3등급**(즉시 · 하루 요약 · 시스템) — README [텔레그램 알림 설정](README.md#텔레그램-알림-설정).
+  README [화면 미리보기 › 새로 생긴 것](docs/SCREENS.md#새로-생긴-것--내-매매를-다르게-보는-화면).
+- **텔레그램 알림 3등급**(즉시 · 하루 요약 · 시스템) — README [텔레그램 알림 설정](docs/FEATURES.md#텔레그램-알림-설정).
 - 수집기·원장 단단하게, 비공개 원격 접속 흔적 제거, 로그인·프록시 경로 강화(로그인 기본 켜짐 — README '처음 시작하면 이것부터'의 업데이트 안내).
 - 첫 공개판.

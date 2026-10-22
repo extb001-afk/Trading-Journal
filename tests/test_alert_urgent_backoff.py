@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import io
-import json
-import os
-import time
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 os.environ["TJ_TG_API"] = "http://127.0.0.1:9/never"
@@ -24,9 +24,10 @@ def set_env(chat):
 
 
 set_env("12345")
-import common
-import alert_prefs as AP
-import alert_bot as ab
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
+import alert_bot as ab  # noqa: E402
+import paths  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -82,7 +83,7 @@ def setup_urgent(n=1):
     with open(os.path.join(S, FQ), "w", encoding="utf-8") as f:
         for i in range(n):
             f.write(json.dumps({"ts": int(CLK[0]), "kind": "LIQ_NEAR", "cat": "liq", "text": "🔴 긴급 %d\n증거금을 넣으세요." % i}, ensure_ascii=False) + "\n")
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
     cursor = {"alerts_web.jsonl": 0, "pending_dm.jsonl": 0, FQ: 0}
     ab._URG.update(token="000000:fake-test-token", chat="12345", cursor=cursor, doc=AP.load(), conn=None,
                    st=ab.load_stats(), hold=ab.load_hold(), prefs_m=None)
@@ -219,7 +220,7 @@ check("R2 429 오류 본문 = 상한+1 까지만 읽고(종전 e.read() 끝까�
 ab._TG_WAIT_UNTIL[0] = 0.0
 ab.urllib.request.urlopen = _mock_open
 
-CP = ab.CURSOR_PATH
+CP = paths.state("tg_cursor.json")
 
 
 class _Stop(Exception):

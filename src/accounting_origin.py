@@ -3,14 +3,14 @@ from __future__ import annotations
 
 class OriginLookup:
 
-    def __init__(orx, _net_na, conn, oc_fresh, origin_cache, origin_pending, raw_chains9, snap_cache):
+    def __init__(orx, *, _net_na, oc_fresh, origin_pending, originin):
         orx._net_na = _net_na
-        orx.conn = conn
+        orx.conn = originin.conn
         orx.oc_fresh = oc_fresh
-        orx.origin_cache = origin_cache
+        orx.origin_cache = originin.origin_cache
         orx.origin_pending = origin_pending
-        orx.raw_chains9 = raw_chains9
-        orx.snap_cache = snap_cache
+        orx.raw_chains9 = originin.raw_chains
+        orx.snap_cache = originin.snap_cache
 
     def resolve_origin(orx, x):
         ref = str(x.get("ref") or "")

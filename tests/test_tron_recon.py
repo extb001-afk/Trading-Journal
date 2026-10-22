@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import bf_engine
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import chain_event as ce
-import address_codec as ac
-from inbox import SegmentWriter
-import _tronfake as F
-import tron_watch as TW
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import bf_engine  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import chain_event as ce  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
+import _tronfake as F  # noqa: E402
+import tron_watch as TW  # noqa: E402
 
 fake = F.FakeTron()
 F.install_loop_open(bf_engine, T)
@@ -56,7 +56,7 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}]
 cfg["nonevm"] = {"tron": {"api": fake.base, "rps": 1000, "retries": 1}}
 json.dump(cfg, open(CFG_PATH, "w"))
-ad = TW.make_adapter(common.load_config())
+ad = TW.make_adapter(config.load_config())
 
 bal = ad.fetch_balances({A}, None, tokens={A: [USDT, TK, BAD]})
 pw = bal["per_wallet"].get(A) or {}
@@ -128,24 +128,24 @@ fake.call("%064x" % 0x62, NOW - 9 * DAY, X, USDT, logs=[(USDT, X, A, 1_000_000)]
 fake.transfer("%064x" % 0x63, NOW - 30_000, X, A, 2_000_000, blk=fake.head[0] + 3)
 st = cs.ChainState("tron")
 ad.state = st
-col = cw.Collector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, "tron")), st, {A})
+col = cw.Collector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, "tron")), st, {A})
 col.cycle()
 check("RB7 수집 주기 끝 = 대사 준비(동기화·상세 완료·대기 0)", st.ready({A}), (st.d.get("synced_at"), st.d["status"].get(A), list(st.d["pending"])))
 fake.txs = [t for t in fake.txs if t["txid"] != "%064x" % 0x63]
 reg.FORCE_AVAILABLE.add("tron")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = dict(c.chain_readers)["tron"]
-c._recon_onchain("tron", {"per_wallet": {A: {("native", None): 1}}})
+c.svc_recon._recon_onchain("tron", {"per_wallet": {A: {("native", None): 1}}})
 nat8 = c.conn.execute("SELECT symbol, decimals FROM assets WHERE chain='tron' AND kind='native'").fetchone()
 check("RB8 대사가 먼저 만든 Tron 네이티브 자산 = 기호 TRX(레지스트리 · 'TRON' 아님) · 6자리", nat8 and nat8["symbol"] == "TRX" and nat8["decimals"] == 6,
       dict(nat8) if nat8 else None)
 c.conn.commit()
 c._drain_stream("tron", rd, 1, 0)
 c.conn.commit()
-check("RB7 core 어댑터 = Tron 수집기 make_adapter", isinstance(c._nonevm_adapter("tron"), TW.TronAdapter))
-c._last_recon = 0
-c.recon_pass({"tron"})
+check("RB7 core 어댑터 = Tron 수집기 make_adapter", isinstance(c.svc_recon._nonevm_adapter("tron"), TW.TronAdapter))
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 op = {(r["address"] or "native", int(r["q"])) for r in c.conn.execute(
     "SELECT a.address, p.qty_base AS q FROM postings p JOIN assets a ON a.asset_id=p.asset_id WHERE p.source_kind='opening'")}
 check("RB7 대사 완료 도장", bool(c._meta_get("recon_done_tron")))

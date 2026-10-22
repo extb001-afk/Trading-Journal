@@ -1,0 +1,6 @@
+{"k":"_keys","m":"*","q":"*","v":["layer.violations"]}
+{"k":"layer.violations","m":"hl_spot","q":"candles","f":"수집기→candles","v":1}
+{"k":"layer.violations","m":"nodekeys","q":"evm_watch","f":"기반→evm_watch","v":1}
+{"k":"layer.violations","m":"token_discovery","q":"recon","f":"수집기→recon","v":1}
+{"k":"layer.violations","m":"view_detail","q":"review_daily","f":"화면·계산→review_daily","v":1}
+{"k":"layer.violations","m":"view_outflows","q":"wallet_register","f":"화면·계산→wallet_register","v":1}

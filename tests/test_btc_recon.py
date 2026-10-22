@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _btcfake as BF
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _btcfake as BF  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import address_codec as ac
-import btc_descriptor as bd
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import btc_watch as bw
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import address_codec as ac  # noqa: E402
+import btc_descriptor as bd  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import btc_watch as bw  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 
 ZPUB84 = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
 D = bd.descriptor_from_xpub(ZPUB84)
@@ -28,7 +28,7 @@ W2ADDR = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr"
 X0, X1 = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA", "1J3J6EvPrv8q6AC3VCjWV45Uf3nssNMRtH"
 BTC = 10 ** 8
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "btc")
+INB = os.path.join(paths.INBOX_DIR, "btc")
 
 
 def R(i):
@@ -44,7 +44,7 @@ cfg0["chain_wallets"] = [{"chain": "btc", "mode": "descriptor", "descriptor": D,
                          {"chain": "btc", "mode": "address", "address": W2ADDR, "label": "one"}]
 cfg0["nonevm"] = BF.cfg_nonevm()
 json.dump(cfg0, open(CFG_PATH, "w"))
-cfg = common.load_config()
+cfg = config.load_config()
 HD = ac.btc_wallet_id(D)
 W2 = sorted(reg.owners(cfg, "btc") - {HD})[0]
 OWN = {HD, W2}
@@ -147,7 +147,7 @@ check("Q3 대사 확정 경계 첫 블록 높이 ≠ 요청 = 예외 + 그 제�
       isinstance(r, dict) and "_exc" in r and (adw.es.bad.get("bnd") or (0,))[0] == 1 and "tip" not in adw.es.bad, (r, adw.es.bad))
 
 reg.FORCE_AVAILABLE.add("btc")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
@@ -182,15 +182,15 @@ up2 = receive(R(4), 40_000_000)
 fc.mine([up2])
 for _i in range(2):
     col.cycle()
-c._nonevm_adapters = {"btc": bw.BtcAdapter(c.cfg, transport=fc.transport)}
-check("Q4 (전제) 수집기 준비(도장 신선·백필 완료·대기 0)", c._scope_ready("btc"))
-c._last_recon = 0
-c.recon_pass({"btc"})
+c.svc_recon._nonevm_adapters = {"btc": bw.BtcAdapter(c.cfg, transport=fc.transport)}
+check("Q4 (전제) 수집기 준비(도장 신선·백필 완료·대기 0)", c.svc_recon._scope_ready("btc"))
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"btc"})
 if not c._meta_get("recon_done_btc"):
     for _i in range(40):
         time.sleep(0.05)
-        c._last_recon = 0
-        c.recon_pass({"btc"})
+        c.svc_recon._last_recon = 0
+        c.svc_recon.recon_pass({"btc"})
         if c._meta_get("recon_done_btc"):
             break
 check("Q4 대사 완료 도장", bool(c._meta_get("recon_done_btc")))

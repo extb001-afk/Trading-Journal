@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import sqlite3
-from datetime import datetime, timedelta
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 
-import histcurve
-import wow2
+import histcurve  # noqa: E402
+import wow2  # noqa: E402
 
 chk = T.chk
 TMP = T.TMP
 
 NOW = datetime.now(wow2.KST)
-TS = lambda n, h=12: int((NOW - timedelta(days=n)).replace(hour=h, minute=0, second=0, microsecond=0).timestamp())
-D = lambda n: (NOW - timedelta(days=n)).strftime("%Y-%m-%d")
+TS = lambda n, h=12: int((NOW - timedelta(days=n)).replace(hour=h, minute=0, second=0, microsecond=0).timestamp())  # noqa: E731
+D = lambda n: (NOW - timedelta(days=n)).strftime("%Y-%m-%d")  # noqa: E731
 W1 = "0x" + "b2" * 20
 DB = os.path.join(TMP, "ledger.db")
 c = sqlite3.connect(DB)

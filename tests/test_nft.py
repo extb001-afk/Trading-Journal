@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import nft
+import nft  # noqa: E402
 
 
 def check(name, ok, d=""):
@@ -17,7 +17,7 @@ def check(name, ok, d=""):
 def guard(name, fn):
     try:
         return fn()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         check(name + " (예외)", False, repr(e))
         return None
 
@@ -54,7 +54,7 @@ W1, W2, EXT = "0x" + "11" * 20, "0x" + "22" * 20, "0x" + "9e" * 20
 BS = "https://eth.bs.test"
 CFG = {"wallets": [{"address": W1, "type": "evm", "chain": "eth", "label": "w1"}, {"address": W2, "type": "evm", "chain": "eth", "label": "w2"}],
        "chains": {"eth": {"blockscout": BS}}, "nft": {"enabled": True}}
-K = lambda ca, p: f"eth:{ca}/p{p}"
+K = lambda ca, p: f"eth:{ca}/p{p}"   # noqa: E731
 
 TOK = {
     W1: [(V1, "7000001", "Seven #1"), (V1, "7000002", "Seven #2"), (V1, "7000003", "Seven #3"), (V1, "9000010", "Nine #10"),
@@ -165,7 +165,7 @@ try:
     cnt = {k: (row_of(v, k)[1] or {}).get("count") for k in (K(V1, 7), K(V1, 9), K(V1, 12), K(V0, 0), K(FLEX, 600))}
     check("A7 화면 개수(지갑 합산) p7=4 · p9=4 · p12=1 · V0 p0=1 · FLEX p600=1", cnt == {K(V1, 7): 4, K(V1, 9): 4, K(V1, 12): 1, K(V0, 0): 1, K(FLEX, 600): 1}, cnt)
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -246,7 +246,7 @@ try:
     tot = (v.get("totals") or {})
     check("B''4 합계에 9.9(다른 값) 없음", all(abs(((row_of(v, k)[1] or {}).get("value") or {}).get("native", 0) - 9.9 * 4) > 1e-6 for k in (K(V1, 9),)), tot)
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -278,7 +278,7 @@ try:
     due = [k for k, _c in (guard("C due3", lambda: Tc.due_fp()) or [])]
     check("C8 사용자 숨김 = 플랫폼이어도 안 부름", K(FLEX, 600) not in due, due)
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -339,14 +339,14 @@ try:
     check("D7 키 교체 = 실패 매핑 한 번 다시 확인 → 시세 회복", rd.n_end("/contract/0x" + "a1" * 20) == 2 and (Td2.fp["fp"].get(KA) or {}).get("native") == 0.7,
           rd.calls[n3:])
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
     print("[E] 거래 뜸 — 90일 안 = 자동·총자산 · 90~365일 = 자동·총자산 제외 · 365일+ = 후보 · 믿을 근거(내가 산 것·플랫폼·정상으로) 없으면 후보")
     NOW = 1791000000.0
     colX = {"chain": "eth", "ca": "0x" + "e1" * 20, "name": "Thin Coll", "rep": "ok"}
-    rec = lambda **kw: dict({"src": "os", "native": 0.1, "sym": "ETH", "vol24": 0.0, "vol7": 0.0, "sales24": 0, "sales7": 0, "sales30": 0, "at": NOW}, **kw)
+    rec = lambda **kw: dict({"src": "os", "native": 0.1, "sym": "ETH", "vol24": 0.0, "vol7": 0.0, "sales24": 0, "sales7": 0, "sales30": 0, "at": NOW}, **kw)   # noqa: E731
     bought = {"kind": "bought"}
     check("E1 30일 체결 3건 + 산 것 = 자동 thin", nft.classify(colX, rec(sales30=3), bought, now=NOW) == ("auto", "thin"),
           guard("E1", lambda: nft.classify(colX, rec(sales30=3), bought, now=NOW)))
@@ -401,7 +401,7 @@ try:
     guard("E17", lambda: Tl._fp_os_slug("busy-x", "eth:0x" + "f2" * 20))
     check("E17 30일 체결 있음 = 이벤트 안 부름", rl.n("events/collection/busy-x") == 0, rl.calls)
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -440,7 +440,7 @@ try:
     Tf.urgent.clear()
     check("F8 오픈시 예산 = 시간당 450(공표 600/h 의 80% 안 · 설정 시험 몫 남김)", nft.BUDGET["opensea"] == (450, 3600), nft.BUDGET["opensea"])
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -563,7 +563,7 @@ try:
           (e, Tu.urgent))
 
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -599,10 +599,10 @@ try:
         docs = search_index.docs_nft(Ti.view(CFG))
         hit = [d for d in docs if d.get("anc") == "nft:" + K(V1, 7)]
         check("I8 검색 색인: 시리즈 이름 'Seven' · 찾아가기 표식 nft:eth:<계약>/p7", hit and hit[0].get("title") == "Seven", hit)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         check("I8 검색 색인", False, repr(e))
 
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 try:
@@ -672,7 +672,7 @@ try:
     check("R5a 보유 없는 시리즈 관심 = 이름 'Art Blocks #400' · 탐색기 링크 ?a=조회 토큰 · series 표시", e5 is None and (w5 or {}).get("name") == "Art Blocks #400"
           and ((w5 or {}).get("links") or {}).get("explorer", "").endswith("?a=400000123") and ((w5 or {}).get("series") or {}).get("proj") == 400, w5)
     check("R5b 보유 없는 일반 관심 = 이름 = 붙인 이름", e6 is None and (w6 or {}).get("name") == "내 관심 컬렉션", (e6, (w6 or {}).get("name")))
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 
@@ -747,7 +747,7 @@ try:
               and row_of(v4b, K(V1, 12))[0] != "hidden" and row_of(v4b, K(V1, 7))[0] == "hidden", (row_of(v4b, K(V1, 12))[0], row_of(v4b, K(V1, 7))[0]))
     finally:
         nft.MAX_PREF_KEYS = cap0
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 
@@ -817,7 +817,7 @@ try:
     T7.scan()
     r9 = T7._acq_ser(BS, W1, V1, "7000001", {W1, W2}, "ETH")
     check("P7 다른 토큰·token_id 없는 전송 = 안 씀 → 경위 unknown · 거래 조회 0콜", r9 == {"kind": "unknown"} and r7.n("/transactions/0x") == 0, (r9, r7.calls[-3:]))
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 
@@ -842,7 +842,7 @@ try:
         o = Tp.fetch_fp(K(V1, 7), Tp.hold["cols"][K(V1, 7)])
         f = (Tp.fp.get("fp") or {}).get(K(V1, 7)) or {}
         return Tp, rp, o, f
-    ev = lambda **kw: dict({"event_type": "sale", "event_timestamp": NOW - 20 * DAY, "quantity": 1, "nft": {"collection": "seven-by-a"},
+    ev = lambda **kw: dict({"event_type": "sale", "event_timestamp": NOW - 20 * DAY, "quantity": 1, "nft": {"collection": "seven-by-a"},  # noqa: E731
                             "payment": {"quantity": "40000000000000000", "decimals": 18, "symbol": "ETH"}}, **kw)
     for nm9, evs in (("othercoll", [ev(nft={"collection": "other"})]), ("nocoll", [ev(nft={})]), ("badts", [ev(event_timestamp="x", closing_date=None)]),
                      ("badqty", [ev(payment={"quantity": "-1", "decimals": 18, "symbol": "ETH"})]), ("nosym", [ev(payment={"quantity": "1", "decimals": 18})]),
@@ -865,7 +865,7 @@ try:
         check(f"O2 시리즈 토큰 {nm9} = {want}" + (" · 매핑·부정 캐시 없음 · 직전 유지" if want == "err" else " · 실패 매핑(키 지문)"),
               o == want and ((want == "err" and mp9 is None and f.get("native") == 1.4) or (want == "none" and (mp9 or {}).get("os") == "" and (mp9 or {}).get("okf"))), (o, mp9, f))
     rg2 = Router()
-    kx = lambda x: "eth:0x" + x * 20
+    kx = lambda x: "eth:0x" + x * 20   # noqa: E731
     rg2.on("api.opensea.io/api/v2/chain/ethereum/contract/0x" + "c1" * 20, (200, {}))
     rg2.on("api.opensea.io/api/v2/chain/ethereum/contract/0x" + "c2" * 20, (200, {"address": "0x" + "c2" * 20, "collection": None}))
     rg2.on("api.coingecko.com/api/v3/nfts/ethereum/contract/0x" + "c3" * 20, (200, {}))
@@ -956,14 +956,14 @@ try:
     _s, rt = row_of(v6, kt)
     check("O5 근거 없는 마지막 체결가(직접 추적) = 평가·추이 없음 · 근거 있는 것만 합계", (ru or {}).get("value") is None and not (ru or {}).get("series7")
           and abs(((v6.get("totals") or {}).get("usd") or 0) - 0.04 * 2700) < 1e-6, ((ru or {}).get("value"), (rt or {}).get("value"), v6.get("totals")))
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 
 try:
     print("[N] 경계 사례 — 출처 없음·키 없음(zkSync 등) · 매직에덴 민트 검증 · 비 ETH 최근 체결 · 오픈시 계약·코인게코·매직에덴 통계 응답 검증 · 옛 빈 심볼 재확인")
     CLOCK[0] = NOW
-    neg_of = lambda T9, k9: (T9.fp.get("neg") or {}).get(k9)
+    neg_of = lambda T9, k9: (T9.fp.get("neg") or {}).get(k9)  # noqa: E731
     for nm9, ch9, ca9, env9 in (("zksync_nokey", "zksync", "0x" + "d1" * 20, {}), ("scroll_nosrc", "scroll", "0x" + "d2" * 20, {"TJ_OPENSEA_KEY": "OSKEY-A"}),
                                 ("eth_badca", "eth", "0xzz", {})):
         rn = Router()
@@ -1084,7 +1084,7 @@ try:
         f9 = T6n.fp["fp"].get(k9) or {}
         ok9 = (o == "err" and f9.get("native") == 0.9 and neg_of(T6n, k9) is None) if want == "err" else (o == "none" and neg_of(T6n, k9) is not None)
         check(f"N6 매직에덴 통계 {desc} = {want}", ok9, (o, f9))
-except Exception as _e:
+except Exception as _e:  # noqa: BLE001
     import traceback as _tb
     check('절 실행(예외)', False, _tb.format_exc()[-600:])
 

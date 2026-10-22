@@ -1,0 +1,12 @@
+{"_doc": "G1 XSS 카나리아 알려진 구멍 — esc:<단위::이름>:<sq|bidi|url_scheme> · render:<도우미>:<exec_markup|js_url|bidi>. 고쳐지면 --update-lower 로 빠짐(새 구멍 = FAIL)"}
+{"m": "known_hole", "k": "esc:tjdom.js::esc:bidi", "n": 1}
+{"m": "known_hole", "k": "esc:tjdom.js::esc:url_scheme", "n": 1}
+{"m": "known_hole", "k": "esc:wow.js::xml:bidi", "n": 1}
+{"m": "known_hole", "k": "esc:wow.js::xml:sq", "n": 1}
+{"m": "known_hole", "k": "esc:wow.js::xml:url_scheme", "n": 1}
+{"m": "known_hole", "k": "render:app.icon:bidi", "n": 1}
+{"m": "known_hole", "k": "render:app.toast:bidi", "n": 1}
+{"m": "known_hole", "k": "render:salelink.xl:bidi", "n": 1}
+{"m": "known_hole", "k": "render:search.actBtn:bidi", "n": 1}
+{"m": "known_hole", "k": "render:search.mark:bidi", "n": 1}
+{"m": "known_hole", "k": "render:tab_out.exLink:bidi", "n": 1}

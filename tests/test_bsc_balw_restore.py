@@ -2,31 +2,31 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _bscchain as B
+import _harness as T  # noqa: E402
+import _bscchain as B  # noqa: E402
 
-import json
-import os
-import shutil
-import sqlite3
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
 
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-import db as dbm
-import ledger_restore as LR
+import db as dbm  # noqa: E402
+import ledger_restore as LR  # noqa: E402
 
 bw = B.bsc_watch
 CH = B.CH
-common = B.common
+import paths, statefile  # noqa: E402
 E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
 T.patch_moved("_now", bw._now, ("bsc_",))
-REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
-BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
-RX = os.path.join(common.STATE_DIR, getattr(bw, "BALW_RX_NAME", "bsc_balw_recheck.json"))
-BK = os.path.join(common.STATE_DIR, "backups", "ledger_20990101.db")
+REQ = os.path.join(paths.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
+BALW = os.path.join(paths.STATE_DIR, "bsc_balw.json")
+RX = os.path.join(paths.STATE_DIR, getattr(bw, "BALW_RX_NAME", "bsc_balw_recheck.json"))
+BK = os.path.join(paths.STATE_DIR, "backups", "ledger_20990101.db")
 
 
 def tick(sec, blocks):
@@ -40,7 +40,7 @@ def gates_reset():
 
 
 def setup_db():
-    con = dbm.open_db(common.DB_PATH)
+    con = dbm.open_db(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY, created_at INTEGER)")
     con.commit()
     con.close()
@@ -57,7 +57,7 @@ def fresh(arch=True, wallets=None):
     B.reset_state()
     gates_reset()
     setup_db()
-    common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+    statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                        "_wallets": sorted(ws)})
     wr = B.Wr()
     w = mk(wr, arch=arch, wallets=ws)
@@ -70,7 +70,7 @@ def mk(wr, arch=True, wallets=None):
 
 
 def ingest(wr):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     for r in wr.recs:
         sn = r.get("snapshot") or {}
         b9 = (sn.get("tx") or {}).get("block_number")
@@ -94,12 +94,12 @@ def recs(wr, h):
 
 
 def reqs():
-    d = common.read_json(REQ, {}) if os.path.exists(REQ) else {}
+    d = statefile.read_json(REQ, {}) if os.path.exists(REQ) else {}
     return list(d.get("items") or []) if isinstance(d, dict) else []
 
 
 def balw_st():
-    return common.read_json(BALW, {}) if os.path.exists(BALW) else {}
+    return statefile.read_json(BALW, {}) if os.path.exists(BALW) else {}
 
 
 def wst(w9=None):
@@ -119,7 +119,7 @@ def bd_attr(wr):
 
 
 def in_ledger(h):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     try:
         return con.execute("SELECT count(*) FROM raw_txs WHERE chain='bsc' AND txhash=?", (h.lower(),)).fetchone()[0]
     finally:
@@ -131,7 +131,7 @@ def backup(seg=5, off=100):
     for p9 in (BK, BK + "-wal", BK + "-shm"):
         if os.path.exists(p9):
             os.remove(p9)
-    s = sqlite3.connect(common.DB_PATH)
+    s = sqlite3.connect(paths.DB_PATH)
     d = sqlite3.connect(BK)
     s.backup(d)
     d.execute("PRAGMA journal_mode=DELETE").fetchone()
@@ -143,8 +143,8 @@ def backup(seg=5, off=100):
 
 
 def restore():
-    p = LR.plan(BK, now=int(clk[0]), state_dir=common.STATE_DIR)
-    LR.apply(p, proc_check=False, state_dir=common.STATE_DIR, log=lambda *a, **k: None)
+    p = LR.plan(BK, now=int(clk[0]), state_dir=paths.STATE_DIR)
+    LR.apply(p, proc_check=False, state_dir=paths.STATE_DIR, log=lambda *a, **k: None)
     return p
 
 
@@ -171,7 +171,7 @@ T.chk(len(recs(wr0, dep1)) == 1 and in_ledger(dep1) == 1 and cp1 > nb1 and not r
       "RS1 전제: 복구 전 잔고 감시가 수신을 찾아 방출·원장 반영 · 체크포인트가 수신 뒤", {"n": len(recs(wr0, dep1)), "cp": cp1, "nb": nb1, "req": reqs()})
 clk[0] += 600
 p1 = restore()
-T.chk(p1["rewind"] == ["bsc"] and in_ledger(dep1) == 0 and dep1 not in (common.read_json(os.path.join(common.STATE_DIR, "emitted_bsc.json"), []) or []),
+T.chk(p1["rewind"] == ["bsc"] and in_ledger(dep1) == 0 and dep1 not in (statefile.read_json(os.path.join(paths.STATE_DIR, "emitted_bsc.json"), []) or []),
       "RS1 전제: 복구 = BSC 되감기(인박스 부족) · 원장에서 수신 사라짐 · 방출 기록에서도 지움", {"rewind": p1["rewind"], "notes": p1["notes"]})
 wr1 = B.Wr()
 w1 = mk(wr1)
@@ -187,7 +187,7 @@ run(w1, wr1, 5)
 T.chk(len(recs(wr1, dep1)) == 1, "RS1 뒤 주기 — 같은 수신 다시 방출 0")
 
 
-common.atomic_write_json(RX, {"hours": 3})
+statefile.atomic_write_json(RX, {"hours": 3})
 run(w1, wr1, 8)
 T.chk(len(recs(wr1, dep1)) == 1 and not reqs() and not os.path.exists(RX) and jobs_left() == 0,
       "RS7 회수 뒤 운영자 다시 점검(3시간) = 다시 방출·요청 0", {"n": len(recs(wr1, dep1)), "req": reqs(), "w": wst()})
@@ -270,13 +270,13 @@ T.chk(all(emit4[w9] + req4[w9] == 30 * E17 for w9 in (B.W1, B.W2)) and jobs_left
 dep5, nb5, _wr, cp5 = scenario()
 clk[0] += 600
 p5 = restore()
-fb5 = common.read_json(B.CPATH, {}).get("from_block")
+fb5 = statefile.read_json(B.CPATH, {}).get("from_block")
 CH.mode, CH.old_below = "429", int(fb5) + 50_000
 wr5 = B.Wr()
 w5 = mk(wr5)
 run(w5, wr5, 6)
 rs5 = wst().get("rs") or {}
-T.chk(isinstance(common.read_json(B.CPATH, {}).get("_live"), dict) and rs5.get("z") == cp5 and not wst().get("ux") and not recs(wr5, dep5)
+T.chk(isinstance(statefile.read_json(B.CPATH, {}).get("_live"), dict) and rs5.get("z") == cp5 and not wst().get("ux") and not recs(wr5, dep5)
       and ((balw_st().get("last") or {}).get("rs") == 2),
       "RS5a 옛 차선 중 = 다시 점검 구간 보존(미해결 구간·작업으로 서둘러 안 넘김 · 하트비트 rs 2) · 방출 0", {"rs": rs5, "cp": cp5, "last": balw_st().get("last")})
 w5 = mk(wr5)
@@ -301,7 +301,7 @@ ws6["jobs"] = [{"k": "hist", "a": ja6, "z": nb6 - 140_000, "s": {str(ja6): "1", 
 ws6["ux"] = [{"a": nb6 - 120_000, "ba": "1", "na": 0, "z": nb6 - 110_000, "bz": "2", "nz": 0, "t0": int(clk[0]), "why": "공백"}]
 st6["rqp"] = [{"it": {"chain": "bsc", "wallet": B.W1, "block": nb6, "chain_bal_raw": "1", "block_ts": 1, "diff_raw": str(2 * E17)}, "aft": ["0x" + "9" * 64], "t": int(clk[0])}]
 st6["d"][B.W1] = {"0x" + "8" * 64: [nb6, str(2 * E17), 0]}
-common.atomic_write_json(BALW, st6)
+statefile.atomic_write_json(BALW, st6)
 clk[0] += 600
 p6 = restore()
 rs6 = wst().get("rs") or {}
@@ -341,16 +341,16 @@ st_p = {"v": 1, "w": {B.W1: {"cp": [1000, "5", 2], "cp_at": 1, "jobs": [{"a": 70
         "d": {B.W1: {"0xaa": [950, "1", 0], "0xbb": [1100, "1", 0], "0xcc": [1100, "1", 0]}, WX: {"0xaa": [500, "1", 0], "0xcc": [500, "1", 0]}},
         "rqp": [{"it": {"wallet": B.W1, "block": 990}}, {"it": {"wallet": "0x" + "a8" * 20, "block": 990}}]}
 B.reset_state()
-common.atomic_write_json(BALW, st_p)
+statefile.atomic_write_json(BALW, st_p)
 nt = []
-out = LR._plan_bsc_balw(common.STATE_DIR, {"0xaa", "0xbb"}, 900, 77, nt)
+out = LR._plan_bsc_balw(paths.STATE_DIR, {"0xaa", "0xbb"}, 900, 77, nt)
 T.chk(out["w"][B.W1]["rs"] == {"a": 650, "z": 1000, "bz": "5", "nz": 2, "t0": 77} and "jobs" not in out["w"][B.W1] and "ux" not in out["w"][B.W1]
       and out["w"][B.W2]["rs"]["a"] == 900 and "rs" not in out["w"][WX]
       and out["d"][B.W1] == {"0xbb": [1100, "1", 0]} and out["d"][WX] == {"0xaa": [500, "1", 0]}
       and [e["it"]["wallet"] for e in out["rqp"]] == ["0x" + "a8" * 20] and nt and "2개 지갑" in nt[0],
       "P1 계획: 시작 = min(되감은 커서·작업·미해결·지난 복구 구간) · 끝 = 체크포인트 · 체크포인트가 되감기 앞인 지갑 무변 · 색인 = 구간 밖·백업에 있는 것만 · 보류 요청 정리",
       {"out": out, "notes": nt})
-T.chk(LR._plan_bsc_balw(common.STATE_DIR, set(), 900, 77, []) is not None and LR._plan_bsc_balw(os.path.join(common.STATE_DIR, "없음"), set(), 900, 77, []) is None,
+T.chk(LR._plan_bsc_balw(paths.STATE_DIR, set(), 900, 77, []) is not None and LR._plan_bsc_balw(os.path.join(paths.STATE_DIR, "없음"), set(), 900, 77, []) is None,
       "P1 상태 파일 없음 = 계획 없음(새 설치)")
 
 T.finish()

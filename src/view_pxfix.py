@@ -5,12 +5,11 @@ from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 import histcurve
-from view_common import DAILY_PATH
-from view_common import DAILY_PX_PATH
+import paths
 from view_common import DC_SMALL_USD
 from view_common import _f
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -18,7 +17,7 @@ log = logging.getLogger('tj-web')
 def _pxfix_backup(ts) -> list:
     import shutil
     out = []
-    for src9 in (DAILY_PX_PATH, DAILY_PATH):
+    for src9 in (paths.state("daily_px.json"), paths.state("daily_cache.json")):
         if os.path.exists(src9):
             dst9 = f"{src9}.bak_pxfix_{int(ts)}"
             shutil.copy2(src9, dst9)
@@ -156,7 +155,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
         ts9 = int(now_ts)
         try:
             out["bak"] = backup(ts9) if backup else []
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_pxfix:_reprice_now_days", e9)
             log.warning("pxfix: 이관 전 백업 실패 — 이번 빌드는 재평가 안 함: %s", e9)
             return out
@@ -209,7 +208,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
 def _px1004_backup(ts) -> list:
     import shutil
     out = []
-    for src9 in (DAILY_PX_PATH, DAILY_PATH):
+    for src9 in (paths.state("daily_px.json"), paths.state("daily_cache.json")):
         if os.path.exists(src9):
             dst9 = f"{src9}.bak_px1004_{int(ts)}"
             shutil.copy2(src9, dst9)
@@ -261,7 +260,7 @@ def _px1004_reset(daily, dpx, G, today_iso, day_close, live_px=None, skip_gids=N
         ts9 = int(time.time() if now_ts is None else now_ts)
         try:
             out["bak"] = backup(ts9) if backup else []
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_pxfix:_px1004_reset", e9)
             log.warning("px1004: 되돌리기 전 백업 실패 — 이번 빌드는 안 바꿈: %s", e9)
             return out

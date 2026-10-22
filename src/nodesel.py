@@ -6,7 +6,7 @@ import threading
 import time
 import urllib.parse
 
-import common
+import paths, statefile
 
 ROLES = ("head", "logs", "state", "detail", "trace")
 _STATE_M = frozenset(("eth_getBalance", "eth_getTransactionCount", "eth_call", "eth_getCode", "eth_getStorageAt", "eth_getProof"))
@@ -131,7 +131,7 @@ def is_key(url) -> bool:
     try:
         import nodekeys
         return bool(nodekeys.is_key_node(url))
-    except Exception:
+    except Exception:   # noqa: BLE001 [probe]
         return False
 
 
@@ -164,7 +164,7 @@ def _err_kind(err) -> str:
 def end(url, methods, cost: int, t0: float, err=None):
     try:
         _record(url, methods, cost, t0, getattr(_TL, "disp", None), clock(), err)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 
@@ -172,7 +172,7 @@ def _mode() -> str:
     try:
         import bf_engine
         return "bf" if bf_engine.burst_on() else "rt"
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return "rt"
 
 
@@ -276,7 +276,7 @@ def _ready(u) -> bool:
         import bf_engine
         g = bf_engine.gate(u)
         return not g.is_open() and not g.resting()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return True
 
 
@@ -411,7 +411,7 @@ def snapshot(now: float = None) -> dict:
             try:
                 import bf_engine
                 r["ledger"] = bf_engine._rpc_day_of(_host(u)) or None
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
         dem = [{"chain": ch, "role": role, "prov": provider_of(u)[0], "since": round(now - d["at"], 1)} for (ch, role, u), d in _DEM.items()]
         bf = {ch: {k: (round(v, 1) if isinstance(v, float) else v) for k, v in b.items() if k in ("mode", "eta", "rem")} for ch, b in _BF.items()}
@@ -438,8 +438,8 @@ def _maybe_flush(force: bool = False):
         proc = bf_engine._RPC_DAY_PROC
         snap = snapshot(now)
         snap["proc"], snap["updated"] = proc, int(time.time())
-        common.atomic_write_json(os.path.join(common.quota_dir(), "node_stats", f"{proc}.json"), snap)
-    except Exception:
+        statefile.atomic_write_json(os.path.join(paths.quota_dir(), "node_stats", f"{proc}.json"), snap)
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 

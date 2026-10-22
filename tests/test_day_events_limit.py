@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
+import os  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
-import web
+import web  # noqa: E402
 
 
 def ck(name, cond, extra=None):

@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, SOLW, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, SOLW, Reader  # noqa: E402
 
-import inspect
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import inspect  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import core
+import config, histmark, paths, timeutil  # noqa: E402
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 KST = timezone(timedelta(hours=9))
 DAY = 86400
 E18 = 10 ** 18
 NOW = int(time.time())
 X = "0x" + "b7" * 20
-if not (hasattr(common, "hist_late_put") and hasattr(core.Core, "_hist_late_scan")):
+if not (hasattr(histmark, "hist_late_put") and hasattr(core.Core, "_hist_late_scan")):
     check("늦은 원장 행 표식 장치(common.hist_late_put · core._hist_late_scan) 있음", False, "없음")
     T.finish()
 
@@ -47,49 +46,49 @@ def feed(c, hx, ts, value=E18, blk=1000):
 
 
 def marks(c):
-    return common.hist_late_read(c.conn)
+    return histmark.hist_late_read(c.conn)
 
 
 def npost(c):
     return c.conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0]
 
 
-import sqlite3
+import sqlite3  # noqa: E402
 m0 = sqlite3.connect(":memory:")
 m0.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
 t0 = 1_800_000_000
-common.hist_late_put(m0, t0 - 5 * DAY, now=t0)
-common.hist_late_put(m0, t0 - 9 * DAY, now=t0 + 60)
-a1 = common.hist_late_read(m0)
+histmark.hist_late_put(m0, t0 - 5 * DAY, now=t0)
+histmark.hist_late_put(m0, t0 - 9 * DAY, now=t0 + 60)
+a1 = histmark.hist_late_read(m0)
 check("A 2분 안 늦은 행 = 한 표식 · 날 = 최솟값 · id 올림", len(a1) == 1 and a1[0][1] == iso(t0 - 9 * DAY) and a1[0][0] >= (t0 + 60) * 1000 and a1[0][2] == t0,
       a1)
-common.hist_late_put(m0, t0 - 2 * DAY, now=t0 + 200)
-a2 = common.hist_late_read(m0)
+histmark.hist_late_put(m0, t0 - 2 * DAY, now=t0 + 200)
+a2 = histmark.hist_late_read(m0)
 check("A 처음 뒤 2분 넘으면 새 표식(앞 표식 id 고정)", len(a2) == 2 and a2[0] == a1[0] and a2[1][1] == iso(t0 - 2 * DAY) and a2[1][0] > a2[0][0], a2)
 for i in range(40):
-    common.hist_late_put(m0, t0 - (20 + i) * DAY, now=t0 + 1000 + i * 300)
-a3 = common.hist_late_read(m0)
+    histmark.hist_late_put(m0, t0 - (20 + i) * DAY, now=t0 + 1000 + i * 300)
+a3 = histmark.hist_late_read(m0)
 ids3 = [m[0] for m in a3]
 check("A 개수 상한 32 — 넘치면 가장 오래된 둘을 접음(가장 이른 날 보존 · id 오름차순)",
-      len(a3) == common.HIST_LATE_KEEP and ids3 == sorted(ids3) and min(m[1] for m in a3) == iso(t0 - 59 * DAY) and a3[0][1] <= iso(t0 - 9 * DAY)
+      len(a3) == histmark.HIST_LATE_KEEP and ids3 == sorted(ids3) and min(m[1] for m in a3) == iso(t0 - 59 * DAY) and a3[0][1] <= iso(t0 - 9 * DAY)
       and a3[-1][0] == max(m[0] for m in a3), (len(a3), a3[:2]))
-common.hist_late_put(m0, t0 - DAY, now=t0 + common.HIST_LATE_TTL_S + 20000)
-a4 = common.hist_late_read(m0)
-check("A 마지막 시각이 14일 지난 표식은 정리(새 표식 + 그 안의 것만)", all(t0 + common.HIST_LATE_TTL_S + 20000 - m[3] < common.HIST_LATE_TTL_S for m in a4), a4[:3])
+histmark.hist_late_put(m0, t0 - DAY, now=t0 + histmark.HIST_LATE_TTL_S + 20000)
+a4 = histmark.hist_late_read(m0)
+check("A 마지막 시각이 14일 지난 표식은 정리(새 표식 + 그 안의 것만)", all(t0 + histmark.HIST_LATE_TTL_S + 20000 - m[3] < histmark.HIST_LATE_TTL_S for m in a4), a4[:3])
 m1 = sqlite3.connect(":memory:")
 m1.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
-m1.execute("INSERT INTO meta VALUES (?, ?)", (common.HIST_LATE_K, json.dumps({"v": 1, "m": [[(t0 + 99999) * 1000, "2026-01-01", t0, t0]]})))
-common.hist_late_put(m1, t0 - DAY, now=t0 + 500)
-a5 = common.hist_late_read(m1)
+m1.execute("INSERT INTO meta VALUES (?, ?)", (histmark.HIST_LATE_K, json.dumps({"v": 1, "m": [[(t0 + 99999) * 1000, "2026-01-01", t0, t0]]})))
+histmark.hist_late_put(m1, t0 - DAY, now=t0 + 500)
+a5 = histmark.hist_late_read(m1)
 check("A id 는 뒤로 안 감(시계가 돌아가도 직전 id + 1 이상)", a5[-1][0] > (t0 + 99999) * 1000, a5)
-m1.execute("UPDATE meta SET v='{not json' WHERE k=?", (common.HIST_LATE_K,))
-check("A 손상 표식 = 표식 없음(읽기 [])", common.hist_late_read(m1) == [], common.hist_late_read(m1))
+m1.execute("UPDATE meta SET v='{not json' WHERE k=?", (histmark.HIST_LATE_K,))
+check("A 손상 표식 = 표식 없음(읽기 [])", histmark.hist_late_read(m1) == [], histmark.hist_late_read(m1))
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 feed(c, h(1), NOW - 40 * DAY, 3 * E18, 900)
 r0 = c._hist_late_scan()
-cur0 = c._meta_get(common.HIST_LATE_PID_K)
+cur0 = c._meta_get(histmark.HIST_LATE_PID_K)
 check("B 첫 실행 = 커서만(이미 있던 40일 전 행 = 표식 없음)", r0 is None and marks(c) == [] and cur0 is not None and int(cur0) == c.conn.execute(
     "SELECT MAX(posting_id) FROM postings").fetchone()[0], (r0, marks(c), cur0))
 TL = NOW - 5 * DAY
@@ -101,12 +100,12 @@ n1 = npost(c)
 feed(c, h(2), TL, E18, 1000)
 r2 = c._hist_late_scan()
 check("B 같은 거래 재입력 = 원장 무변 → 표식 무변", r2 is None and npost(c) == n1 and marks(c) == mk1, (r2, npost(c), n1, marks(c)))
-TN = common.kst_day0(NOW) + 12 * 3600
+TN = timeutil.kst_day0(NOW) + 12 * 3600
 feed(c, h(3), TN, E18, 1100)
 r3 = c._hist_late_scan(now=TN + 300)
 check("B 오늘 시각 거래 = 표식 없음(아직 마감 전)", r3 is None and marks(c) == mk1 and npost(c) > n1, (r3, marks(c)))
 
-BK = common.DB_PATH + ".bk_test"
+BK = paths.DB_PATH + ".bk_test"
 _bk = sqlite3.connect(BK)
 c.conn.backup(_bk)
 _bk.close()
@@ -117,13 +116,13 @@ c.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?)", (f"ext_prewindow_tx:eth:
 c.conn.commit()
 time.sleep(0)
 r4 = c._hist_late_scan(now=NOW + 300)
-check("C 재구축 대기 표식(대사 앵커가 흡수한 옛 조각) tx = 표식 없음 · 커서는 전진", r4 is None and marks(c) == mk1 and int(c._meta_get(common.HIST_LATE_PID_K)) == c.conn.execute(
+check("C 재구축 대기 표식(대사 앵커가 흡수한 옛 조각) tx = 표식 없음 · 커서는 전진", r4 is None and marks(c) == mk1 and int(c._meta_get(histmark.HIST_LATE_PID_K)) == c.conn.execute(
     "SELECT MAX(posting_id) FROM postings").fetchone()[0], (r4, marks(c)))
 
 T7 = NOW - 7 * DAY
 feed(c, h(5), T7, E18, 1300)
 c.conn.close()
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 r5 = c._hist_late_scan(now=NOW + 400)
 mk5 = marks(c)
@@ -161,12 +160,12 @@ check("E 소비 루프 한 바퀴마다 부름(예외는 로그 — 커서 그�
 last_id = marks(c)[-1][0]
 c.conn.close()
 
-import shutil
+import shutil  # noqa: E402
 for sfx in ("-wal", "-shm"):
-    if os.path.exists(common.DB_PATH + sfx):
-        os.remove(common.DB_PATH + sfx)
-shutil.copyfile(BK, common.DB_PATH)
-c = core.Core(common.load_config())
+    if os.path.exists(paths.DB_PATH + sfx):
+        os.remove(paths.DB_PATH + sfx)
+shutil.copyfile(BK, paths.DB_PATH)
+c = core.Core(config.load_config())
 c.conn.commit()
 mkF = marks(c)
 rF0 = c._hist_late_scan(now=NOW + 4000)

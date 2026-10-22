@@ -2,10 +2,12 @@ from __future__ import annotations
 import addr_ai
 import balcheck
 import buildproc
-import common
+import config, paths, statefile
 import histcurve
+import json
 import netpace
 import os
+import px_alt
 import spamguard
 import time
 import xfer_match
@@ -16,9 +18,7 @@ from view_common import CHAIN_NAME
 from view_common import DAYCLOSE_ON
 from view_common import GOPLUS_STATUS
 from view_common import GOPLUS_T0
-from view_common import KST
-from view_common import SALE_PATH
-from view_common import WEB_DIAG_PATH
+from timeutil import KST
 from view_common import _f
 from view_hero import _ago_ko
 from view_misc import _dec_or0
@@ -29,7 +29,6 @@ from view_offc import _offc_tx
 from view_pending import NEG_DIAG_MIN_USD
 from view_pending import dust_usd_eff
 from view_pending import unpriced_facts
-from view_review import REVIEW_PROGRESS_PATH
 from view_review import review_fill_req_view
 from view_review import review_len_eff
 from view_review import review_pause_eff
@@ -38,69 +37,71 @@ from view_tax import _tax_fee_merge
 from view_tax import _tax_stable_fx
 from view_tax import _tax_summary
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _tally_unknown_wd(wd_rows, fx_transit, unk):
+    for w in wd_rows:
+        if w["cls"] != "unknown":
+            continue
+        e = fx_transit.get(w["txid"]) if w["txid"] else None
+        u = unk.setdefault(w["addr"], {"address": w["addr"], "n": 0, "costUsd": 0.0, "costKnown": 0, "syms": set(), "exchanges": set(),
+                                          "networks": set(), "first": w["ts"], "last": w["ts"], "sentToMine": 0, "walletTx": 0, "hop": 0,
+                                          "offcN": 0})
+        u["n"] += 1
+        if _offc_tx(w["txid"]):
+            u["offcN"] += 1
+        if e and e.get("qty") and not e.get("ambiguous"):
+            q = _dec_or0(w["qty"])
+            u["costUsd"] += float(e["cost"] * (q / e["qty"])) if e["qty"] > 0 else 0.0
+            u["costKnown"] += 1
+        u["syms"].add(w["sym"]); u["exchanges"].add(w["ex"])
+        if w["network"]:
+            u["networks"].add(w["network"])
+        u["first"] = min(u["first"], w["ts"]); u["last"] = max(u["last"], w["ts"])
+
+
+def _enrich_unknown_wd(unk, origin_cache, sb, conn, G, unverified):
+    if unk:
+        for t, oc in (origin_cache or {}).items():
+            f = xfer_match.norm_addr((oc or {}).get("from"))
+            if f in unk:
+                unk[f]["sentToMine"] += 1
+        for xl in (getattr(sb, "_xfer_links_last", None) or {}).values():
+            if xl.get("via") in unk:
+                unk[xl["via"]]["hop"] += 1
+        for f, n in sb._raw_from_counts(conn).items():
+            if f in unk:
+                unk[f]["walletTx"] += n
+        for gid, g in G.items():
+            srcs = g.get("unk_src") or []
+            u = unverified.get(gid)
+            if not srcs or not u or float(u["proceeds"]) < 1.0:
+                continue
+            by = {}
+            for x in srcs:
+                f = x.get("from") or ((origin_cache or {}).get(str(x.get("ref") or "").lower()) or {}).get("from")
+                f = xfer_match.norm_addr(f) if f else None
+                if f in unk and not x.get("via"):
+                    by[f] = by.get(f, 0.0) + float(x["qty"])
+            tot = sum(float(x["qty"]) for x in srcs)
+            for a, q in by.items():
+                r = unk[a].setdefault("_res", {})
+                r[g.get("sym") or "?"] = r.get(g.get("sym") or "?", 0.0) + float(u["proceeds"]) * min(1.0, q / tot if tot > 0 else 0.0)
+        for u in unk.values():
+            r = u.pop("_res", None) or {}
+            if r:
+                u["resolveUsd"] = round(sum(r.values()), 2)
+                u["resolveSyms"] = [[s, round(v, 2)] for s, v in sorted(r.items(), key=lambda kv: -kv[1])[:6]]
 
 
 class TailMixin:
 
     def _build_tail(self, _bs9):
-        (G, _pos_all_dbg, acts_md9, bal_src9, be_done, be_until, chain_wallet_rows, coins, conn, cost_be, cost_decided_rows, cost_ov, daily, day_acts, day_ix, day_memos9, day_memos_err9, deposit_rows, diag, ev_hid9, ev_main9, ev_wd9, ex_debts, ex_fee_m, ex_gid, ex_transit, exfee_lab, extra_events_hidden, extra_events_out, fb_on, fee_day, fee_diag, fiats, fs_floor9, fs_on, fs_pref, fs_rbd, fs_sum, fut, fx_name, fx_transit, gas_by_month, gas_expense, gas_list, guard_held9, hid_kind_n9, live_px, lp_events_out, lpb, lps_closed, lps_out, lps_pending, n_wd_hid9, neg_hold, now, oc_fresh, of_tot, offc_summary, offc_wd_addr, origin_cache, origin_pending, outflows_out, outflows_pending, pendings, plan_memos, plans_out, pos_cut9, positions, prefs, quarantined, rb_debts, rb_recon, rb_view, realized_by_date, realized_by_loc, realized_krw_by_date, realized_month, review_realized, sale_links, sale_lots, sale_rf_bid, sale_used, src_chips, stables, stake_inc, tax_gas, tax_rows, today_kst, ub2, unpriced_w, unverified, venue_w, vflow_loc9, wallet_rows, wd_fee_m, wdfee_lab, xc_cands, xc_used,) = (_bs9["G"], _bs9["_pos_all_dbg"], _bs9["acts_md9"], _bs9["bal_src9"], _bs9["be_done"], _bs9["be_until"], _bs9["chain_wallet_rows"], _bs9["coins"], _bs9["ctx"].conn, _bs9["cost_be"], _bs9["cost_decided_rows"], _bs9["cost_ov"], _bs9["daily"], _bs9["day_acts"], _bs9["day_ix"], _bs9["day_memos9"], _bs9["day_memos_err9"], _bs9["deposit_rows"], _bs9["diag"], _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["ex_debts"], _bs9["ex_fee_m"], _bs9["ex_gid"], _bs9["ex_transit"], _bs9["exfee_lab"], _bs9["extra_events_hidden"], _bs9["extra_events_out"], _bs9["ctx"].fb_on, _bs9["fee_day"], _bs9["fee_diag"], _bs9["fiats"], _bs9["fs_floor9"], _bs9["ctx"].fs_on, _bs9["ctx"].fs_pref, _bs9["fs_rbd"], _bs9["fs_sum"], _bs9["fut"], _bs9["fx_name"], _bs9["fx_transit"], _bs9["gas_by_month"], _bs9["gas_expense"], _bs9["gas_list"], _bs9["guard_held9"], _bs9["hid_kind_n9"], _bs9["live_px"], _bs9["lp_events_out"], _bs9["lpb"], _bs9["lps_closed"], _bs9["lps_out"], _bs9["lps_pending"], _bs9["n_wd_hid9"], _bs9["neg_hold"], _bs9["ctx"].now, _bs9["oc_fresh"], _bs9["of_tot"], _bs9["offc_summary"], _bs9["offc_wd_addr"], _bs9["origin_cache"], _bs9["origin_pending"], _bs9["outflows_out"], _bs9["outflows_pending"], _bs9["pendings"], _bs9["plan_memos"], _bs9["plans_out"], _bs9["pos_cut9"], _bs9["positions"], _bs9["ctx"].prefs, _bs9["quarantined"], _bs9["rb_debts"], _bs9["rb_recon"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["realized_month"], _bs9["review_realized"], _bs9["sale_links"], _bs9["sale_lots"], _bs9["sale_rf_bid"], _bs9["sale_used"], _bs9["src_chips"], _bs9["stables"], _bs9["stake_inc"], _bs9["tax_gas"], _bs9["tax_rows"], _bs9["ctx"].today_kst, _bs9["ub2"], _bs9["unpriced_w"], _bs9["unverified"], _bs9["venue_w"], _bs9["vflow_loc9"], _bs9["wallet_rows"], _bs9["wd_fee_m"], _bs9["wdfee_lab"], _bs9["xc_cands"], _bs9["xc_used"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "bd9" in _bs9:
-            bd9 = _bs9["bd9"]
-        if "c9" in _bs9:
-            c9 = _bs9["c9"]
-        if "d9" in _bs9:
-            d9 = _bs9["d9"]
-        if "e" in _bs9:
-            e = _bs9["e"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "ex9" in _bs9:
-            ex9 = _bs9["ex9"]
-        if "f9" in _bs9:
-            f9 = _bs9["f9"]
-        if "g9" in _bs9:
-            g9 = _bs9["g9"]
-        if "gid9" in _bs9:
-            gid9 = _bs9["gid9"]
-        if "hold_today9" in _bs9:
-            hold_today9 = _bs9["hold_today9"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "l9" in _bs9:
-            l9 = _bs9["l9"]
-        if "lst9" in _bs9:
-            lst9 = _bs9["lst9"]
-        if "n9" in _bs9:
-            n9 = _bs9["n9"]
-        if "oc9" in _bs9:
-            oc9 = _bs9["oc9"]
-        if "px9" in _bs9:
-            px9 = _bs9["px9"]
-        if "q9" in _bs9:
-            q9 = _bs9["q9"]
-        if "r9" in _bs9:
-            r9 = _bs9["r9"]
-        if "spark7_9" in _bs9:
-            spark7_9 = _bs9["spark7_9"]
-        if "sym9" in _bs9:
-            sym9 = _bs9["sym9"]
-        if "u9" in _bs9:
-            u9 = _bs9["u9"]
-        if "v9" in _bs9:
-            v9 = _bs9["v9"]
-        if "w9" in _bs9:
-            w9 = _bs9["w9"]
-        if "wdt_all" in _bs9:
-            wdt_all = _bs9["wdt_all"]
-        if "x9" in _bs9:
-            x9 = _bs9["x9"]
-        if "xl9" in _bs9:
-            xl9 = _bs9["xl9"]
+        (G, _pos_all_dbg, acts_md9, bal_src9, be_done, be_until, chain_wallet_rows, coins, conn, cost_be, cost_decided_rows, cost_ov, daily, day_acts, day_ix, day_memos9, day_memos_err9, deposit_rows, diag, ev_hid9, ev_main9, ev_wd9, ex_debts, ex_fee_m, ex_gid, ex_transit, exfee_lab, extra_events_hidden, extra_events_out, fb_on, fee_day, fee_diag, fiats, fs_floor9, fs_on, fs_pref, fs_rbd, fs_sum, fut, fx_name, fx_transit, gas_by_month, gas_expense, gas_list, guard_held9, hid_kind_n9, live_px, lp_events_out, lpb, lps_closed, lps_out, lps_pending, n_wd_hid9, neg_hold, now, oc_fresh, of_tot, offc_summary, offc_wd_addr, origin_cache, origin_pending, outflows_out, outflows_pending, pendings, plan_memos, plans_out, pos_cut9, positions, prefs, quarantined, rb_debts, rb_recon, rb_view, realized_by_date, realized_by_loc, realized_krw_by_date, realized_month, review_realized, sale_links, sale_lots, sale_rf_bid, sale_used, src_chips, stables, stake_inc, tax_gas, tax_rows, today_kst, ub2, unpriced_w, unverified, venue_w, vflow_loc9, wallet_rows, wd_fee_m, wdfee_lab, xc_cands, xc_used, hold_today9, spark7_9, wdt_all,) = (_bs9["G"], _bs9["_pos_all_dbg"], _bs9["acts_md9"], _bs9["bal_src9"], _bs9["be_done"], _bs9["be_until"], _bs9["chain_wallet_rows"], _bs9["coins"], _bs9["ctx"].conn, _bs9["cost_be"], _bs9["cost_decided_rows"], _bs9["cost_ov"], _bs9["daily"], _bs9["day_acts"], _bs9["day_ix"], _bs9["day_memos9"], _bs9["day_memos_err9"], _bs9["deposit_rows"], _bs9["diag"], _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["ex_debts"], _bs9["ex_fee_m"], _bs9["ex_gid"], _bs9["ex_transit"], _bs9["exfee_lab"], _bs9["extra_events_hidden"], _bs9["extra_events_out"], _bs9["ctx"].fb_on, _bs9["fee_day"], _bs9["fee_diag"], _bs9["fiats"], _bs9["fs_floor9"], _bs9["ctx"].fs_on, _bs9["ctx"].fs_pref, _bs9["fs_rbd"], _bs9["fs_sum"], _bs9["fut"], _bs9["fx_name"], _bs9["fx_transit"], _bs9["gas_by_month"], _bs9["gas_expense"], _bs9["gas_list"], _bs9["guard_held9"], _bs9["hid_kind_n9"], _bs9["live_px"], _bs9["lp_events_out"], _bs9["lpb"], _bs9["lps_closed"], _bs9["lps_out"], _bs9["lps_pending"], _bs9["n_wd_hid9"], _bs9["neg_hold"], _bs9["ctx"].now, _bs9["oc_fresh"], _bs9["of_tot"], _bs9["offc_summary"], _bs9["offc_wd_addr"], _bs9["origin_cache"], _bs9["origin_pending"], _bs9["outflows_out"], _bs9["outflows_pending"], _bs9["pendings"], _bs9["plan_memos"], _bs9["plans_out"], _bs9["pos_cut9"], _bs9["positions"], _bs9["ctx"].prefs, _bs9["quarantined"], _bs9["rb_debts"], _bs9["rb_recon"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["realized_month"], _bs9["review_realized"], _bs9["sale_links"], _bs9["sale_lots"], _bs9["sale_rf_bid"], _bs9["sale_used"], _bs9["src_chips"], _bs9["stables"], _bs9["stake_inc"], _bs9["tax_gas"], _bs9["tax_rows"], _bs9["ctx"].today_kst, _bs9["ub2"], _bs9["unpriced_w"], _bs9["unverified"], _bs9["venue_w"], _bs9["vflow_loc9"], _bs9["wallet_rows"], _bs9["wd_fee_m"], _bs9["wdfee_lab"], _bs9["xc_cands"], _bs9["xc_used"], _bs9["hold_today9"], _bs9["spark7_9"], _bs9["wdt_all"],)
+        d9: object
         reviews = self._auto_reviews(daily, review_realized, acts_md9)
         reviews_weekly = self._merge_llm_reviews(reviews, day_ix, realized_by_date, fut.get("realizedByDate") or {},
                                                  today_kst.strftime("%Y-%m-%d"),
@@ -112,11 +113,11 @@ class TailMixin:
                 rdays9 = sorted({str(k9) for src9 in (realized_by_date, fut.get("realizedByDate") or {}) for k9, v9 in src9.items()
                                  if len(str(k9)) == 10 and abs(float(v9 or 0)) >= 0.5})
                 drv9 = {rv9["iso"]: rv9 for rv9 in reviews.values() if isinstance(rv9, dict) and rv9.get("iso") and isinstance(rv9.get("fp"), dict)}
-                review_prog = review_progress.view(REVIEW_PROGRESS_PATH, drv9, reviews_weekly, rdays9, today_kst.strftime("%Y-%m-%d"),
+                review_prog = review_progress.view(paths.state("review_progress.json"), drv9, reviews_weekly, rdays9, today_kst.strftime("%Y-%m-%d"),
                                                    prefs.get("review_fill"))
                 review_prog["fillReq"] = review_fill_req_view()
-            except Exception as e:
-                calcguard.swallowed("view_b_tail:TailMixin._build_tail", e)
+            except Exception as e:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_tail:TailMixin._build_tail[rdays9]", e)
                 log.warning("AI 리뷰 진행 상황 읽기 실패(표시 생략): %s", e)
 
         coin_dex = coin_cex = 0.0
@@ -167,68 +168,21 @@ class TailMixin:
                                  "n": bd9.get("n") or 0, "untilT": datetime.fromtimestamp(be_until(gid9), KST).strftime("%m-%d %H:%M")})
         wd_rows9 = getattr(self, "_wd_dest_rows", None) or []
         unk9 = {}
-        for w9 in wd_rows9:
-            if w9["cls"] != "unknown":
-                continue
-            e9 = fx_transit.get(w9["txid"]) if w9["txid"] else None
-            u9 = unk9.setdefault(w9["addr"], {"address": w9["addr"], "n": 0, "costUsd": 0.0, "costKnown": 0, "syms": set(), "exchanges": set(),
-                                              "networks": set(), "first": w9["ts"], "last": w9["ts"], "sentToMine": 0, "walletTx": 0, "hop": 0,
-                                              "offcN": 0})
-            u9["n"] += 1
-            if _offc_tx(w9["txid"]):
-                u9["offcN"] += 1
-            if e9 and e9.get("qty") and not e9.get("ambiguous"):
-                q9 = _dec_or0(w9["qty"])
-                u9["costUsd"] += float(e9["cost"] * (q9 / e9["qty"])) if e9["qty"] > 0 else 0.0
-                u9["costKnown"] += 1
-            u9["syms"].add(w9["sym"]); u9["exchanges"].add(w9["ex"])
-            if w9["network"]:
-                u9["networks"].add(w9["network"])
-            u9["first"] = min(u9["first"], w9["ts"]); u9["last"] = max(u9["last"], w9["ts"])
-        if unk9:
-            for t9, oc9 in (origin_cache or {}).items():
-                f9 = xfer_match.norm_addr((oc9 or {}).get("from"))
-                if f9 in unk9:
-                    unk9[f9]["sentToMine"] += 1
-            for xl9 in (getattr(self, "_xfer_links_last", None) or {}).values():
-                if xl9.get("via") in unk9:
-                    unk9[xl9["via"]]["hop"] += 1
-            for f9, n9 in self._raw_from_counts(conn).items():
-                if f9 in unk9:
-                    unk9[f9]["walletTx"] += n9
-            for gid9, g9 in G.items():
-                srcs9 = g9.get("unk_src") or []
-                u9 = unverified.get(gid9)
-                if not srcs9 or not u9 or float(u9["proceeds"]) < 1.0:
-                    continue
-                by9 = {}
-                for x9 in srcs9:
-                    f9 = x9.get("from") or ((origin_cache or {}).get(str(x9.get("ref") or "").lower()) or {}).get("from")
-                    f9 = xfer_match.norm_addr(f9) if f9 else None
-                    if f9 in unk9 and not x9.get("via"):
-                        by9[f9] = by9.get(f9, 0.0) + float(x9["qty"])
-                tot9 = sum(float(x9["qty"]) for x9 in srcs9)
-                for a9, q9 in by9.items():
-                    r9 = unk9[a9].setdefault("_res", {})
-                    r9[g9.get("sym") or "?"] = r9.get(g9.get("sym") or "?", 0.0) + float(u9["proceeds"]) * min(1.0, q9 / tot9 if tot9 > 0 else 0.0)
-            for u9 in unk9.values():
-                r9 = u9.pop("_res", None) or {}
-                if r9:
-                    u9["resolveUsd"] = round(sum(r9.values()), 2)
-                    u9["resolveSyms"] = [[s9, round(v9, 2)] for s9, v9 in sorted(r9.items(), key=lambda kv: -kv[1])[:6]]
+        _tally_unknown_wd(wd_rows9, fx_transit, unk9)
+        _enrich_unknown_wd(unk9, origin_cache, self, conn, G, unverified)
         wd_dest_unknown = sorted(({**u9, "syms": sorted(u9["syms"])[:12], "exchanges": sorted(u9["exchanges"]), "networks": sorted(u9["networks"])[:8],
                                    "costUsd": round(u9["costUsd"], 2), "strong": bool(u9["sentToMine"] or u9["walletTx"] or u9["hop"])}
                                   for u9 in unk9.values()), key=lambda u9: (not u9["strong"], -(u9.get("resolveUsd") or 0), -u9["costUsd"], -u9["n"]))
         self._wd_dest_unknown = {u9["address"]: u9 for u9 in wd_dest_unknown}
         try:
             self._attach_flows(conn, outflows_out, live_px, G)
-        except Exception as e:
-            calcguard.swallowed("view_b_tail:TailMixin._build_tail", e)
+        except Exception as e:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_tail:TailMixin._build_tail[_attach_flows]", e)
             log.warning("flow 붙이기 실패: %s", e)
         try:
             self._addr_ai_targets = addr_ai.attach(outflows_out, pendings, self.cfg)
-        except Exception as e:
-            calcguard.swallowed("view_b_tail:TailMixin._build_tail", e)
+        except Exception as e:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_tail:TailMixin._build_tail[_addr_ai_targets]", e)
             log.warning("AI 주소 의견 붙이기 실패: %s", type(e).__name__)
         cls_n9 = {}
         for w9 in wd_rows9:
@@ -262,7 +216,7 @@ class TailMixin:
         diag_out["sale_lots"] = len(sale_lots)
         diag_out["sale_links"] = len(sale_links)
         diag_out["sale_cost_usd"] = round(float(sum((u9["cost"] for u9 in sale_used.values()), Decimal(0))), 2)
-        diag_out["sale_heuristic"] = len((common.read_json(SALE_PATH, {}) or {}).get("heuristic") or [])
+        diag_out["sale_heuristic"] = len((statefile.read_json(paths.state("sale_bids.json"), {}) or {}).get("heuristic") or [])
         diag_out["workers"] = sorted(n9 for n9 in self._thread_names() if n9.endswith("-worker"))
         diag_out["net_pace"] = netpace.stats()
         diag_out["proof_diverge"] = list(self.spot.proof_div)
@@ -280,6 +234,14 @@ class TailMixin:
             if ex9 and (c9.get("qty") or 0) > 0 and not c9.get("price") and sym9 in (self.spot.ex_dead_syms.get(ex9) or ()):
                 dead_held9.append({"ex": ex9, "sym": sym9, "qty": c9["qty"], "ref": (c9.get("pxRef") or {}).get("px")})
         diag_out["ex_dead_held"] = dead_held9
+        try:
+            with open(paths.state("recon_adj.json"), encoding="utf-8") as fh_adj:
+                adj_doc = json.load(fh_adj)
+        except (OSError, ValueError):
+            adj_doc = None
+        adj_une = adj_doc.get("unexplained") if isinstance(adj_doc, dict) else None
+        if isinstance(adj_une, dict) and isinstance(adj_doc.get("by_class"), dict):
+            diag_out.update({"adj_unexplained_usd": adj_une.get("usd"), "adj_by_class": adj_doc["by_class"]})
         diag_out["unpriced_held"] = [{"sym": w9["sym"], "where": w9["where"], "qty": w9["qty"], "cost": round(w9["cost"], 2), "ref": round(w9["ref"], 2)}
                                      for w9 in sorted(unpriced_w, key=lambda w9: -max(w9["cost"], w9["ref"]))[:10]
                                      if max(w9["cost"], w9["ref"]) >= 1]
@@ -300,6 +262,7 @@ class TailMixin:
                        "top": [{k9: n9[k9] for k9 in ("sym", "loc", "usd")} | ({"pend": True} if n9.get("pend") else {}) for n9 in neg_nd9[:3]],
                        "pend": {"n": len(neg_pd9), "usd": round(sum(n9["usd"] for n9 in neg_pd9), 2)}},
                "proof_div": list(self.spot.proof_div), "ex_dead": dict(self.spot.ex_dead), "ex_dead_held": dead_held9,
+               "alt_spread": px_alt.held_spread(getattr(self.spot, "alt_spread", None) or {}, coins, ex_gid, G, set(self.spot.upbit_alt) - set(self.spot.upbit_krw)),
                "unpriced_held": unpriced_facts(unpriced_w),
                "gt": dict(self.spot.gt_stat), "ds": dict(self.spot.ds_stat), "goplus": dict(GOPLUS_STATUS, started=int(GOPLUS_T0)),
                "dex_age": {"n": len(dex_rows9), "usd": round(dex_tot9, 2), "p90w": p90w9,
@@ -315,7 +278,7 @@ class TailMixin:
         diag_out["dex_age"] = wd9["dex_age"]
         if time.time() - self.__dict__.get("_wdiag_at", 0) >= 60:
             try:
-                common.atomic_write_json(WEB_DIAG_PATH, wd9)
+                statefile.atomic_write_json(paths.state("web_diag.json"), wd9)
                 self._wdiag_at = time.time()
             except OSError as e9:
                 log.warning("web_diag.json 쓰기 실패: %s", e9)
@@ -343,6 +306,7 @@ class TailMixin:
             "outflows": outflows_out, "outflowsPending": outflows_pending, "outflowsTotals": of_tot,
             "walletAuto": bool(self.__dict__.get("_of_auto_reload")),
             "saleCandAlert": prefs.get("sale_cand_alert") is not False,
+            "tokenLogos": config.token_logos_on(self.cfg),
             "krwFlows": self._krw_flows(conn),
             "transits": [dict(self._transit_loc(e9, now)["tr"], sym=e9["sym"], qty=float(e9["qty"]), key=f"g{e9['gid']}")
                          for e9 in wdt_all if e9["state"] == "pending"],
@@ -377,7 +341,7 @@ class TailMixin:
             "usdtByDate": {d["date"]: {"usdt": d["usdt"], "kimp": d["kimp"]} for d in daily},
             "lastScan": self._last_scan_str(),
             "upbitConnected": (bool(ub2)
-                               and time.time() - (ub2.get("ts") or 0) < common.upbit_fresh_sec(self.cfg)),
+                               and time.time() - (ub2.get("ts") or 0) < config.upbit_fresh_sec(self.cfg)),
             "srcChips": src_chips, "walletRows": wallet_rows,
             "chainWalletRows": chain_wallet_rows,
             "venueFlows30": _venue_flows30(vflow_loc9, realized_by_loc, venue_w, today_kst),
@@ -454,8 +418,8 @@ class TailMixin:
             fields["_fsDbg"] = {k9: (v9 if not isinstance(v9, Decimal) else float(v9)) for k9, v9 in fs_sum.items()}
         try:
             spamguard.annotate(fields)
-        except Exception as e9:
-            calcguard.swallowed("view_b_tail:TailMixin._build_tail", e9)
+        except Exception as e9:  # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_tail:TailMixin._build_tail[annotate]", e9)
             log.warning("심볼 정리 실패(무시): %s", e9)
         return {"fields": fields, "todayKey": today_kst.strftime("%m-%d"), "todayIso": today_kst.strftime("%Y-%m-%d"),
                 "realizedMonth": round(realized_month, 2), "builtAt": int(now)}

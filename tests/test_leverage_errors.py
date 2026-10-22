@@ -2,18 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
 
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
-import leverage as L
-import perp_dex as PD
+import paths, statefile  # noqa: E402
+import leverage as L  # noqa: E402
+import perp_dex as PD  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
+assert T.TMP in paths.STATE_DIR
 NOW = 1_800_000_000
 
 
@@ -159,7 +159,7 @@ def getters(ex, over=None):
 def run(ex, over=None, prev=None, now=NOW):
     e9 = {k: v for k, v in ENV.items() if k in L.NEED[ex]}
     if prev is not None:
-        common.atomic_write_json(L.path(), prev)
+        statefile.atomic_write_json(L.path(), prev)
     elif os.path.exists(L.path()):
         os.remove(L.path())
     return L.collect(e9, {ex: getters(ex, over)}, now=now, cycle_sec=600, fresh_sec=1800)
@@ -325,9 +325,9 @@ print("[P] 퍼프 덱스 6곳 — 목록·행·수량 누락 = 주소 실패(직
 PD.SLEEP = lambda s: None
 for k in PD.DEXES:
     PD.DEXES[k]["pace"] = 0.0
-import hl_spot as _HL
+import hl_spot as _HL  # noqa: E402
 _HL.GOV = _HL.Gov(cap=10 ** 9, pace=0)
-import re
+import re  # noqa: E402
 
 EVM = "0x" + "12" * 20
 SOL = "So11111111111111111111111111111111111111112"
@@ -353,7 +353,7 @@ class PRouter:
 
 def seed(dex, addr):
     pos = {"symbol": "ETH-USD", "side": "LONG", "qty": 1.0, "entry": 100.0, "mark": 100.0, "upnl": 0.0, "leverage": 5.0, "liq": 50.0, "acct": addr}
-    common.atomic_write_json(PD.fut_path(dex), {"v": PD.FILE_VER, "ts": OLD_TS, "dex": dex, "wallet": {}, "positions": [pos], "events": [],
+    statefile.atomic_write_json(PD.fut_path(dex), {"v": PD.FILE_VER, "ts": OLD_TS, "dex": dex, "wallet": {}, "positions": [pos], "events": [],
                                                  "cursor": {}, "accts": {addr: {"label": "a", "ts": OLD_TS}}})
 
 
@@ -394,8 +394,8 @@ for dex, addr, name, rules in PCASES:
     PD.HTTP = PRouter(rules + EMPTY_HIST)
     try:
         out, _ = PD.snapshot_dex(dex, [{"address": addr, "label": "a"}], T0, NOW)
-    except Exception as e:
-        out = common.read_json(PD.fut_path(dex), {})
+    except Exception as e:   # noqa: BLE001
+        out = statefile.read_json(PD.fut_path(dex), {})
         _ = e
     m = (out.get("accts") or {}).get(addr) or {}
     ok9 = bool(m.get("err")) and m.get("ts") == OLD_TS and len(out.get("positions") or []) == 1 and out["positions"][0]["qty"] == 1.0 and out.get("ts") == OLD_TS
@@ -418,21 +418,21 @@ for dex, addr, name, rules in PZERO:
     PD.HTTP = PRouter(rules + EMPTY_HIST)
     try:
         out, _ = PD.snapshot_dex(dex, [{"address": addr, "label": "a"}], T0, NOW)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         out = {"accts": {addr: {"err": repr(e)}}}
     m = (out.get("accts") or {}).get(addr) or {}
     check(f"{dex}: {name} → 성공 · ts 갱신 · 포지션 0", not m.get("err") and m.get("ts") == NOW and out.get("positions") == [], (m, out.get("positions")))
 
 print("[C] 소비 쪽(liq_watch · lev_view) — error 상품 = '모름'")
 d_err = run("okx", {"/api/v5/account/positions": mut(O["/api/v5/account/positions"], lambda d: d[0].pop("pos"))}, prev=GOOD["okx"], now=NOW + 600)
-import liq_watch as LW
+import liq_watch as LW  # noqa: E402
 lf = LW.lev_fresh(d_err, NOW + 610)
 prod_ok, _ = LW.Watcher._lev_prod(lf)
 pos_items = [i for i in lf["items"] if i["ex"] == "okx" and i["product"] == "futures_linear"]
 check("liq_watch: 오류 상품은 prod_ok 밖(닫힘·잊기·해소 근거 아님)", ("okx", "futures_linear") not in prod_ok and ("okx", "unified") in prod_ok, sorted(prod_ok))
 check("liq_watch: 승계 줄 fresh=False(진입 알림·해소 모두 막힘)", pos_items and all(i["fresh"] is False for i in pos_items), pos_items)
 check("liq_watch: _lev_ok 통과(형식 정상 — 파일 전체를 '모름'으로 만들지 않음)", LW._lev_ok(lf))
-import lev_view
+import lev_view  # noqa: E402
 L.write(d_err)
 v = lev_view.build(L.read_state(NOW + 610), {}, lambda s: 1.0, 10.0, None, NOW + 610)
 unc = {(u["ex"], u["product"]) for u in v["unconfirmed"]}

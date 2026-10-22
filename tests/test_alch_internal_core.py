@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, Reader  # noqa: E402
 
-import glob
-import json
-import os
-import time
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 json.dump({"chains": {"base": {"discovery": "rpc", "chain_id": 8453, "conf_depth": 10, "blocks_per_day": 43200, "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "base", "address": W}], "native_symbol": {"base": "ETH"}, "backfill_months": 5},
           open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
+import config, paths  # noqa: E402
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 E18 = 10 ** 18
 NOW = int(time.time())
 RT = "0x" + "e5" * 20
-SD = common.STATE_DIR
+SD = paths.STATE_DIR
 TS = NOW - 60 * 86400
 
 
@@ -41,7 +40,7 @@ def reset():
 
 
 def new_core():
-    c = core.Core(common.load_config())
+    c = core.Core(config.load_config())
     c.conn.commit()
     return c
 

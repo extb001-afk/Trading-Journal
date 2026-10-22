@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import address_codec as ac
-import chain_registry as reg
-import os
+import address_codec as ac  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import os  # noqa: E402
 
 chk = T.chk
 
@@ -116,7 +116,7 @@ chk(reg.owners(cfg, "tron") == {k1} and reg.ownership_version(cfg, "tron") != re
 chk(reg.wallets({}) == [] and reg.wallets({"chain_wallets": "x"}) == [], "C6 칸 없음·형식 깨짐 = 빈 목록(기존 설치 그대로)")
 chk(all(reg.available(c) == os.path.isfile(os.path.join(T.SRC, reg.spec(c).module + ".py")) for c in reg.CHAINS),
     "C6 수집기 파일(src/<체인>_watch.py)이 있는 체인만 사용 가능 · 없으면 준비 중(등록·유닛 대기)")
-chk(not any(c.provider == "quicknode" for c in reg.CAPABILITIES), "C6 QuickNode 후보 없음(오너 10-11 결정)")
+chk(not any(c.provider == "quicknode" for c in reg.CAPABILITIES), "C6 QuickNode 후보 없음(오너 결정)")
 chk(not any(c.provider == "ankr" for c in reg.capabilities("btc")), "C6 Ankr BTC Blockbook(Premium) 무료 경로 제외")
 chk(any(c.role == "address_history" and "xpub API 아님" in c.note for c in reg.capabilities("btc")), "C6 Esplora = 주소 API(xpub 파생 로컬)")
 chk(all(reg.make_location(c, k).count(":") == 2 for c, k in (("tron", k1), ("ton", kt), ("btc", w1), ("sui", "0x" + "ab" * 32))),

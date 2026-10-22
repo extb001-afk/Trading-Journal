@@ -1,0 +1,194 @@
+{
+ "_doc": "합성 데이터 — bthgap 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "bthgap",
+ "golden": {
+  "out": {
+   "b1": [
+    1.0,
+    2.0,
+    true,
+    false
+   ],
+   "b10": [
+    "bithumb:AAA",
+    "bithumb:CCC"
+   ],
+   "b10_cut": [
+    "bithumb:AAA",
+    "bithumb:CCC",
+    "bithumb:DDD",
+    "bithumb:EEE"
+   ],
+   "b11": [
+    1.0,
+    null,
+    false
+   ],
+   "b12": [
+    2.0,
+    true
+   ],
+   "b13": [
+    false,
+    null
+   ],
+   "b14": [
+    2.0,
+    null,
+    2.0,
+    true
+   ],
+   "b15": [
+    [],
+    1.0,
+    null
+   ],
+   "b16": [
+    [
+     "bithumb:AAA"
+    ],
+    [],
+    null
+   ],
+   "b17": 1.0,
+   "b17_race": [
+    1.0,
+    true
+   ],
+   "b2": [
+    1.1,
+    2.0,
+    true,
+    2.0,
+    600
+   ],
+   "b3": [
+    2.0,
+    true,
+    2.0,
+    true
+   ],
+   "b4": [
+    false,
+    false,
+    false
+   ],
+   "b5": [
+    [
+     "HTTP 500",
+     true
+    ],
+    [
+     "status 오류",
+     true
+    ],
+    [
+     "빈 data",
+     true
+    ]
+   ],
+   "b5_first": [
+    true,
+    {}
+   ],
+   "b6": [
+    3.0,
+    true
+   ],
+   "b7": [
+    false,
+    true
+   ],
+   "b8_cut": [
+    "bithumb:AAA",
+    "bithumb:BBB",
+    "bithumb:CCC"
+   ],
+   "b8_okx": [
+    "okx:AAA"
+   ],
+   "b9": [
+    1.1,
+    true,
+    [
+     "dex_res",
+     "dex_res_ts",
+     "dex_src",
+     "dex_ts",
+     "dex_usd",
+     "ds",
+     "ex_alt_src",
+     "ex_dead",
+     "ex_ts",
+     "ex_usd",
+     "fx_basis",
+     "fx_basis_ts",
+     "gt",
+     "guarded",
+     "meta",
+     "proof_div",
+     "rate",
+     "rate_ts",
+     "tick",
+     "upbit_alt",
+     "upbit_krw",
+     "updated",
+     "usd",
+     "usd_ts",
+     "want"
+    ]
+   ],
+   "cap": 21600
+  },
+  "state": {
+   "spot.json": {
+    "dex_res": {},
+    "dex_res_ts": {},
+    "dex_src": {},
+    "dex_ts": {},
+    "dex_usd": {},
+    "ds": {},
+    "ex_alt_src": {},
+    "ex_dead": {
+     "bithumb": 0
+    },
+    "ex_ts": {
+     "bithumb:AAA": 1759999700,
+     "bithumb:BBB": 1760000000,
+     "bithumb:CCC": 1760000000
+    },
+    "ex_usd": {
+     "bithumb:AAA": 1.1,
+     "bithumb:BBB": 3.0,
+     "bithumb:CCC": 1.0
+    },
+    "fx_basis": 1390.0,
+    "fx_basis_ts": 1760000000,
+    "gt": {},
+    "guarded": {},
+    "meta": {},
+    "proof_div": [],
+    "rate": 1400.0,
+    "rate_ts": 1760000000,
+    "tick": {
+     "sec": 0.0,
+     "slowest": "환율·마켓"
+    },
+    "upbit_alt": {},
+    "upbit_krw": [
+     "BTC"
+    ],
+    "updated": 1760000000,
+    "usd": {},
+    "usd_ts": {},
+    "want": {
+     "dex": 0,
+     "ex": [
+      "bithumb"
+     ]
+    }
+   }
+  }
+ }
+}

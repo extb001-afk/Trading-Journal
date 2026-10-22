@@ -3,21 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 import os
 import re
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import chain_registry
-import common
+import config, num_parse, paths, statefile
 import sellchart
+import ai_cli
 import xchain_match as xm
 
 log = logging.getLogger("tj-web")
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 
 PV = "aiaddr-2"
 STORE_NAME = "addr_ai.json"
@@ -84,7 +84,7 @@ def settings(cfg) -> dict:
 
 def _off_chains(cfg) -> set:
     off = set((cfg or {}).get("_disabled_chains") or ())
-    off.update(c for c, cc in ((cfg or {}).get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(c, cc))
+    off.update(c for c, cc in ((cfg or {}).get("chains") or {}).items() if isinstance(cc, dict) and not config.chain_enabled(c, cc))
     return off
 
 
@@ -183,13 +183,7 @@ def scrub(s, n=120) -> str:
 
 
 def _num(x):
-    if x is None or isinstance(x, bool):
-        return None
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return v if math.isfinite(v) else None
+    return num_parse.to_float(x, allow_bool=False)
 
 
 BANDS = ("1달러 미만", "100달러 미만", "100~1천 달러", "1천~1만 달러", "1만~10만 달러", "10만 달러 이상")
@@ -235,9 +229,8 @@ def qband(x) -> str:
 
 
 def cband(n) -> str | None:
-    try:
-        v = int(n)
-    except (TypeError, ValueError):
+    v = num_parse.to_int(n)
+    if v is None:
         return None
     return "0" if v <= 0 else "1~9" if v < 10 else "10~99" if v < 100 else "100~999" if v < 1000 else "1천~9999" if v < 10000 else "1만 이상"
 
@@ -353,7 +346,7 @@ def targets(rows, max_n=100) -> list:
 class Store:
 
     def __init__(self, state_dir=None):
-        sd = state_dir or common.STATE_DIR
+        sd = state_dir or paths.STATE_DIR
         self.path = os.path.join(sd, STORE_NAME)
         self.mu = threading.Lock()
         self.model = sellchart.EvalStore(sd)
@@ -391,8 +384,8 @@ class Store:
                 for k in sorted(d["err"], key=lambda k: int((d["err"][k] or {}).get("at") or 0))[:len(d["err"]) - STORE_KEEP]:
                     d["err"].pop(k, None)
             try:
-                common.atomic_write_json(self.path, d)
-            except Exception as e:
+                statefile.atomic_write_json(self.path, d)
+            except Exception as e:   # noqa: BLE001 [fallback]
                 log.warning("AI 주소 의견 저장 실패: %s", type(e).__name__)
                 return False
             return True
@@ -459,7 +452,7 @@ def _date(ts):
 def probe_evm(t, cfg, chain, addr, known):
     a = addr.lower()
     cc = ((cfg.get("chains") or {}).get(chain) or {}) if chain != "bsc" else {}
-    bs = t._bs(chain) if (chain != "bsc" and common.chain_discovery(chain, cc) != "rpc") else ""
+    bs = t._bs(chain) if (chain != "bsc" and config.chain_discovery(chain, cc) != "rpc") else ""
     res = {"chain": tag(chain, 24) or "(기타)"}
     try:
         if bs:
@@ -549,7 +542,7 @@ def probe_evm(t, cfg, chain, addr, known):
         res["partial"] = "탐색기 쉼"
     except xm.Budget:
         res["partial"] = "조회 한도"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         res["partial"] = "조회 실패"
         log.info("AI 주소 의견 온체인 조회 일부 실패(%s): %s", chain, type(e).__name__)
     return res
@@ -592,7 +585,7 @@ def probe_sol(t, addr, known):
                              "newest": _date(max(bts)) if bts else "", "oldest_in_page": _date(min(bts)) if bts else ""}
     except xm.Budget:
         res["partial"] = "조회 한도"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         res["partial"] = "조회 실패"
         log.info("AI 주소 의견 솔라나 조회 일부 실패: %s", type(e).__name__)
     return res
@@ -604,7 +597,7 @@ def probe(t, cfg, tg, known) -> list:
     out = []
     cs = (cfg.get("chains") or {})
     evm = [c for c in tg["chains"] if c != "sol"]
-    evm.sort(key=lambda c: 0 if (c != "bsc" and (cs.get(c) or {}).get("blockscout") and common.chain_discovery(c, cs.get(c)) != "rpc") else 1)
+    evm.sort(key=lambda c: 0 if (c != "bsc" and (cs.get(c) or {}).get("blockscout") and config.chain_discovery(c, cs.get(c)) != "rpc") else 1)
     for ch in evm[:2]:
         if t.calls >= t.budget:
             break
@@ -699,7 +692,7 @@ def rule_rec(tg, now):
     try:
         import flow_trace
         burn = flow_trace.is_burn(tg["addr"])
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         burn = False
     if not burn:
         return None
@@ -709,9 +702,8 @@ def rule_rec(tg, now):
 
 def _by_default() -> str:
     try:
-        import review_daily as rd
-        return model_label(getattr(rd, "REVIEW_MODEL", ""))
-    except Exception:
+        return model_label(getattr(ai_cli, "REVIEW_MODEL", ""))
+    except Exception:   # noqa: BLE001 [fallback]
         return "AI"
 
 
@@ -781,8 +773,7 @@ def cli_bin(binfn=None, now=None):
         if STATUS["cli"] is not None and now - STATUS["cli_at"] < 3600:
             return STATUS["cli_bin"]
     if binfn is None:
-        import review_daily as rd
-        binfn = rd.claude_bin
+        binfn = ai_cli.claude_bin
     b = binfn()
     with _ST_MU:
         STATUS.update(cli=bool(b), cli_at=now, cli_bin=b)
@@ -855,15 +846,15 @@ def run_once(b, store=None, now=None, runner=None, binfn=None, tracer=None, mode
         return "nocli"
     try:
         known = b._known_addrs()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return "noknown"
     known = dict(known or {})
     try:
-        for w in common.history_wallets(b.cfg):
+        for w in config.history_wallets(b.cfg):
             a9 = str((w or {}).get("address") or "")
             if a9:
                 known.setdefault(a9.lower() if a9.startswith("0x") else a9, []).append(("my_wallet", ""))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     ccap = s["chain_calls_day"]
     take = (lambda: st.chain.budget_take(day, ccap, "c")) if ccap > 0 else (lambda: False)
@@ -876,10 +867,7 @@ def run_once(b, store=None, now=None, runner=None, binfn=None, tracer=None, mode
     inp = guard_input({"item": pick["facts"], "onchain": oc, "address_type": "Solana" if pick["fam"] == "sol" else "EVM"})
     nonce = secrets.token_hex(8)
     prompt, body = build_prompt(inp, nonce)
-    rd = None
-    if runner is None or model is None:
-        import review_daily as rd
-    run = runner or (lambda b9, p9, body9: rd._run_cli(b9, p9, None, "주소 의견", body=body9))
+    run = runner or (lambda b9, p9, body9: ai_cli.invoke(b9, p9 + body9, "주소 의견"))
     gate = eval_gate(sd)
     if gate is None:
         return "busy"
@@ -894,7 +882,7 @@ def run_once(b, store=None, now=None, runner=None, binfn=None, tracer=None, mode
             return "limit"
         try:
             rv = run(bp, prompt, body)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             rv = None
             log.warning("AI 주소 의견 실행 실패: %s", type(e).__name__)
     finally:
@@ -904,7 +892,7 @@ def run_once(b, store=None, now=None, runner=None, binfn=None, tracer=None, mode
         st.note_err(pick["key"], pick["fp"], "모델 응답 형식", now)
         b.soft_invalidate(kick=False)
         return "fail"
-    rec = dict(res, fp=pick["fp"], pv=PV, at=int(now), model=model if model is not None else getattr(rd, "REVIEW_MODEL", ""),
+    rec = dict(res, fp=pick["fp"], pv=PV, at=int(now), model=model if model is not None else getattr(ai_cli, "REVIEW_MODEL", ""),
                calls=int(t.calls), chains=[x.get("chain") for x in oc])
     if not st.put(pick["key"], rec):
         return "fail"
@@ -921,7 +909,7 @@ def worker_loop(b, sleep=time.sleep):
                 STATUS["last"], STATUS["last_at"] = r, int(time.time())
             if r in ("made", "fail"):
                 log.info("AI 주소 의견: %s", r)
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
             log.warning("addr-ai-worker 실패(다음 주기): %s", type(e).__name__)
         sleep(settings(b.cfg)["interval_sec"])
 

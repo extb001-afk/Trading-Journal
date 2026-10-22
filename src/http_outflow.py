@@ -1,11 +1,12 @@
 from __future__ import annotations
 import bf_engine
-import common
+import logs, paths, statefile
 import copy
 import depaddr
 import os
 import re
 import salelink
+import settings_store
 import time
 import urllib.request
 import web_ctx
@@ -13,8 +14,7 @@ import xchain_match
 import xfer_match
 from datetime import datetime
 from view_builder import StateBuilder
-from view_common import KST
-from view_common import PREFS_PATH
+from timeutil import KST
 import logging
 
 log = logging.getLogger('tj-web')
@@ -24,13 +24,13 @@ class OutflowMixin:
 
     EX_KEYS = {"업비트": "upbit", "바이낸스": "binance", "바이빗": "bybit", "okx": "okx", "쿠코인": "kucoin",
                "게이트": "gate", "게이트아이오": "gate", "gate.io": "gate", "빗썸": "bithumb",
-               "하이퍼리퀴드": "hyperliquid", "Hyperliquid": "hyperliquid"}
+               "하이퍼리퀴드": "hyperliquid", "Hyperliquid": "hyperliquid", "코인베이스": "coinbase", "Coinbase": "coinbase"}
 
     @classmethod
     def _exchange_key(cls, v) -> str:
         s = str(v or "").strip()
         k = s.lower()
-        if k in {"upbit", "binance", "bybit", "okx", "kucoin", "gate", "bithumb", "hyperliquid"}:
+        if k in {"upbit", "binance", "bybit", "okx", "kucoin", "gate", "bithumb", "hyperliquid", "coinbase"}:
             return k
         return cls.EX_KEYS.get(s) or cls.EX_KEYS.get(k) or s
 
@@ -49,20 +49,39 @@ class OutflowMixin:
         if len(alias) > 40 or any(ord(c) < 32 for c in alias):
             return self._send(400, {"ok": False, "error": "지갑 이름은 40자 이내 한 줄"})
         chains = sorted({c9 for c9 in (depaddr.chain_of(n9, None, a) for n9 in (u9.get("networks") or [])) if c9})
+        import wallet_register
         if not chains:
-            chains = ["sol"] if not a.startswith("0x") else ["eth", "bsc", "base", "arbitrum"]
+            chains, bad_reply = self._reg_chains_pick(a, body)
+            if bad_reply:
+                return self._send(*bad_reply)
         try:
-            import wallet_register
-            reg = wallet_register.register_wallet(a, chains, alias or f"{a[:6]}…{a[-4:]}", source="exchange_withdraw", idempotent=True)
+            reg = wallet_register.register_wallet(a, chains, alias or f"{a[:6]}…{a[-4:]}", source="exchange_withdraw", idempotent=True,
+                                                  confirm=body.get("confirm") is True)
+        except wallet_register.NeedConfirm as e:
+            return self._send(409, {"ok": False, "needConfirm": True, "error": str(e)})
         except (ValueError, OSError) as e:
             if isinstance(e, OSError):
                 return self._send(400, {"ok": False, "error": "지갑 등록 실패: 설정 파일을 읽거나 저장할 수 없습니다"})
-            return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {common.safe_err(e)}"})
+            return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {logs.safe_err(e)}"})
         with web_ctx.builder().lock:
             web_ctx.builder().cache = None
         web_ctx.builder().kick_refresh()
         apply9 = reg.get("apply") or {}
-        return self._send(200, {"ok": True, "address": a, "chains": reg.get("chains") or chains, "restartNeeded": not apply9.get("runner")})
+        return self._send(200, {"ok": True, "address": a, "chains": reg.get("chains") or chains, "restartNeeded": not apply9.get("runner"),
+                                "warn": reg.get("warn") or ""})
+
+    def _reg_chains_pick(self, a: str, body: dict):
+        if not a.startswith("0x"):
+            return ["sol"], None
+        allowed_chains = [k for k, _n in settings_store.evm_chains(settings_store.read_config_raw())]
+        body_chains = body.get("chains")
+        if isinstance(body_chains, list) and 0 < len(body_chains) <= 12 and all(isinstance(c, str) and c in allowed_chains for c in body_chains):
+            return sorted(set(body_chains)), None
+        if body_chains is not None:
+            return None, (400, {"ok": False, "error": "chains 는 고를 수 있는 EVM 체인 이름 배열(1~12)"})
+        suggest = [c for c in ("eth", "bsc", "base", "arbitrum") if c in allowed_chains] or allowed_chains[:4]
+        return None, (409, {"ok": False, "needChains": True, "chains": suggest, "options": allowed_chains,
+                            "error": "어느 체인의 지갑인지 몰라요 — 등록할 체인을 확인해 주세요"})
 
     def _flow_register(self, body: dict):
         if not self._write_guard():
@@ -81,22 +100,27 @@ class OutflowMixin:
         if len(alias) > 24 or any(ord(c) < 32 for c in alias):
             return self._send(400, {"ok": False, "error": "지갑 이름은 24자 이내 한 줄"})
         chains = sorted(c9 for c9 in (u9.get("chains") or ()) if isinstance(c9, str) and re.fullmatch(r"[a-z0-9_-]{1,24}", c9))
+        import wallet_register
         if not chains:
-            chains = ["sol"] if not a.startswith("0x") else ["eth", "bsc", "base", "arbitrum"]
+            chains, bad_reply = self._reg_chains_pick(a, body)
+            if bad_reply:
+                return self._send(*bad_reply)
         try:
-            import wallet_register
-            reg = wallet_register.register_wallet(a, chains, alias or f"{a[:6]}…{a[-4:]}", source="flow_trace", idempotent=True)
+            reg = wallet_register.register_wallet(a, chains, alias or f"{a[:6]}…{a[-4:]}", source="flow_trace", idempotent=True,
+                                                  confirm=body.get("confirm") is True)
+        except wallet_register.NeedConfirm as e:
+            return self._send(409, {"ok": False, "needConfirm": True, "error": str(e)})
         except (ValueError, OSError) as e:
             if isinstance(e, OSError):
                 return self._send(400, {"ok": False, "error": "지갑 등록 실패: 설정 파일을 읽거나 저장할 수 없습니다"})
-            return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {common.safe_err(e)}"})
+            return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {logs.safe_err(e)}"})
         log.info("flow_register: %s %s (목적지 %s)", a, chains, ",".join(sorted(u9.get("dests") or ()))[:200])
         with web_ctx.builder().lock:
             web_ctx.builder().cache = None
         web_ctx.builder().kick_refresh()
         apply9 = reg.get("apply") or {}
         return self._send(200, {"ok": True, "address": a, "chains": reg.get("chains") or chains, "restartNeeded": not apply9.get("runner"),
-                                "note": reg.get("note") or ""})
+                                "note": reg.get("note") or "", "warn": reg.get("warn") or ""})
 
     def _outflow_resolve(self, body: dict):
         if not self._write_guard():
@@ -108,7 +132,7 @@ class OutflowMixin:
                 return self._send(400, {"ok": False, "error": "on 은 true/false"})
             pr9 = web_ctx.builder().prefs()
             pr9["sale_cand_alert"] = bool(body["on"])
-            common.atomic_write_json(PREFS_PATH, pr9)
+            statefile.atomic_write_json(paths.state("ui_prefs.json"), pr9)
             with web_ctx.builder().lock:
                 web_ctx.builder().cache = None
             return self._send(200, {"ok": True, "on": pr9["sale_cand_alert"]})
@@ -151,8 +175,8 @@ class OutflowMixin:
             nx9 = _cr9.key_parse(a)
             if nx9 and (nx9[0] not in _cr9.SPECS or not set(chains) <= {nx9[0]} or nx9[1].startswith("bw")):
                 nx9 = None
+            import wallet_register
             try:
-                import wallet_register
                 if nx9:
                     try:
                         r9 = wallet_register.register_chain_wallet(nx9[0], address=_cr9.display_owner(*nx9), label=alias[:24], source="outflow")
@@ -162,11 +186,13 @@ class OutflowMixin:
                             raise
                         reg = {"chains": [nx9[0]], "apply": wallet_register.apply_info(), "note": "이미 등록된 주소·체인"}
                 else:
-                    reg = wallet_register.register_wallet(a, chains, alias, source="outflow", idempotent=True)
+                    reg = wallet_register.register_wallet(a, chains, alias, source="outflow", idempotent=True, confirm=body.get("confirm") is True)
+            except wallet_register.NeedConfirm as e:
+                return self._send(409, {"ok": False, "needConfirm": True, "error": str(e)})
             except (ValueError, OSError) as e:
                 if isinstance(e, OSError):
                     return self._send(400, {"ok": False, "error": "지갑 등록 실패: 설정 파일을 읽거나 저장할 수 없습니다"})
-                return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {common.safe_err(e)}"})
+                return self._send(400, {"ok": False, "error": f"지갑 등록 실패: {logs.safe_err(e)}"})
             ent.update({"alias": alias, "chains": reg.get("chains") or chains})
             apply9 = reg.get("apply") or {}
             restart = not apply9.get("runner")
@@ -180,7 +206,7 @@ class OutflowMixin:
             if cat not in StateBuilder.OUTFLOW_CATEGORIES:
                 return self._send(400, {"ok": False, "error": "category 는 " + " | ".join(StateBuilder.OUTFLOW_CATEGORIES)})
             ent["category"] = cat
-        d = common.read_json(web_ctx.builder().OUTFLOW_PATH, {}) if os.path.exists(web_ctx.builder().OUTFLOW_PATH) else {}
+        d = statefile.read_json(web_ctx.builder().OUTFLOW_PATH, {}) if os.path.exists(web_ctx.builder().OUTFLOW_PATH) else {}
         if not isinstance(d, dict):
             d = {}
         decs = d.setdefault("decisions", {})
@@ -218,7 +244,7 @@ class OutflowMixin:
             decs[a] = ent
         d["version"] = 1
         d["updated"] = int(time.time())
-        common.atomic_write_json(web_ctx.builder().OUTFLOW_PATH, d)
+        statefile.atomic_write_json(web_ctx.builder().OUTFLOW_PATH, d)
         self._of_after_save(a, old9, decs.get(a))
         return self._send(200, {"ok": True, "address": a, "decision": decs.get(a), "row": web_ctx.bcall("of_row_patch", a, decs.get(a), old9),
                                 "restartNeeded": restart, "apply": apply9,
@@ -234,7 +260,7 @@ class OutflowMixin:
         if dests is None:
             web_ctx.builder().build()
             dests = getattr(web_ctx.builder(), "_outflow_dests", None) or {}
-        d = common.read_json(web_ctx.builder().OUTFLOW_PATH, {}) if os.path.exists(web_ctx.builder().OUTFLOW_PATH) else {}
+        d = statefile.read_json(web_ctx.builder().OUTFLOW_PATH, {}) if os.path.exists(web_ctx.builder().OUTFLOW_PATH) else {}
         if not isinstance(d, dict):
             d = {}
         decs = d.setdefault("decisions", {})
@@ -362,7 +388,7 @@ class OutflowMixin:
             decs[a] = ent
         d["version"] = 1
         d["updated"] = now9
-        common.atomic_write_json(web_ctx.builder().OUTFLOW_PATH, d)
+        statefile.atomic_write_json(web_ctx.builder().OUTFLOW_PATH, d)
         self._of_after_save(a, old9, ent)
         return self._send(200, {"ok": True, "address": a, "decision": ent, "row": web_ctx.bcall("of_row_patch", a, ent, old9)})
 
@@ -371,7 +397,7 @@ class OutflowMixin:
             try:
                 if salelink.dest_name(a, old if isinstance(old, dict) else {}) != salelink.dest_name(a, new if isinstance(new, dict) else {}):
                     web_ctx.builder().soft_invalidate()
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 web_ctx.builder().soft_invalidate()
             return
         with web_ctx.builder().lock:
@@ -437,14 +463,14 @@ class OutflowMixin:
         if not self._write_guard(origin_err="출처(Origin) 확인 실패"):
             return
         path = StateBuilder.BF_REQ_PATH
-        cur = common.read_json(path, {}) if os.path.exists(path) else {}
+        cur = statefile.read_json(path, {}) if os.path.exists(path) else {}
         if not isinstance(cur, dict):
             cur = {}
         if body.get("clear"):
             if os.path.exists(path):
                 os.remove(path)
             return self._send(200, {"ok": True, "request": {}})
-        secs = set(web_ctx.builder()._backfill_since_view()["sections"]) | {"okx", "binance", "bybit", "kucoin", "gate", "bithumb"}
+        secs = set(web_ctx.builder()._backfill_since_view()["sections"]) | {"okx", "binance", "bybit", "kucoin", "gate", "bithumb", "coinbase"}
         today = datetime.now(KST).strftime("%Y-%m-%d")
 
         def _d(v):
@@ -473,9 +499,9 @@ class OutflowMixin:
             if not new.get("since") and not new.get("per"):
                 raise ValueError("since 또는 per 필요")
         except ValueError as e:
-            return self._send(400, {"ok": False, "error": common.safe_err(e)})
+            return self._send(400, {"ok": False, "error": logs.safe_err(e)})
         new["updated"] = int(time.time())
-        common.atomic_write_json(path, new)
+        statefile.atomic_write_json(path, new)
         with web_ctx.builder().lock:
             web_ctx.builder().cache = None
         return self._send(200, {"ok": True, "request": new,

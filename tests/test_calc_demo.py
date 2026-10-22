@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # noqa: E402
 
-import demo_data
-import wow
-import wow2
-import onboarding
+import demo_data  # noqa: E402
+import wow  # noqa: E402
+import wow2  # noqa: E402
+import onboarding  # noqa: E402
 
 chk = T.chk
 

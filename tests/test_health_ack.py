@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import http.client
-import json
-import os
-import threading
-import time
+import http.client  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import health_ack
+import paths, statefile  # noqa: E402
+import health  # noqa: E402
+import health_ack  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = time.time()
 UNITS = ["tj-core", "tj-web", "tj-exf", "tj-sol"]
 HS = health.settings({"health": {"units": UNITS}})
@@ -48,7 +48,7 @@ def run(st, now, **wkw):
     ob = obs_of(now, webdiag=wd(now, **wkw))
     cs = health.evaluate(ob, HS, open_ids={k: v.get("unit") for k, v in (st.get("incidents") or {}).items()})
     health.step(st, cs, now, HS)
-    common.atomic_write_json(health.STATUS_PATH, health.build_status(st, ob, cs, now, HS))
+    statefile.atomic_write_json(paths.state("health_status.json"), health.build_status(st, ob, cs, now, HS))
     return cs
 
 
@@ -82,7 +82,7 @@ chk(vis(vv, "price:unpriced"), "D1b 화면(/api/health)에서도 보이는 주�
 chk(health.known_note("price:unpriced", "warn", "x", T2 - 10 * 86400, T2) is None, "D1c 열흘 된 '시세 없는 실보유'도 시간만으로 known 아님")
 
 print("[D2] 판정 재료 = 전체 + 자산 신원")
-import web
+import web  # noqa: E402
 ws = [{"sym": f"T{i}", "qty": 1.0, "cost": 2000.0 + i, "ref": 0.0, "where": "지갑", "ent": f"eth:0x{i:040x}"} for i in range(10)]
 ws.append({"sym": "ELEVEN", "qty": 1.0, "cost": 999.0, "ref": 0.0, "where": "지갑", "ent": "arbitrum:0x" + "0b" * 20})
 ws.append({"sym": "DUST", "qty": 1.0, "cost": 0.4, "ref": 0.0, "where": "지갑", "ent": "eth:0x" + "0d" * 20})
@@ -187,7 +187,7 @@ v = health.web_view(TA + 303)
 chk(vis(v, "price:unpriced") and v.get("ackErr"), "A10 닫은 기록 손상 = 아무것도 숨기지 않음 + 안내", v.get("ackErr"))
 r3 = apx("price:unpriced", (x.get("ack") or {}).get("fp"), TA + 304)
 chk(r3[0] is False and open(health_ack.path()).read() == "{깨짐", "A10b 손상 파일 = 닫기 거절 · 덮어쓰지 않음", r3)
-common.atomic_write_json(health_ack.path(), {"v": 99, "items": {"price:unpriced": {"ents": {}}}})
+statefile.atomic_write_json(health_ack.path(), {"v": 99, "items": {"price:unpriced": {"ents": {}}}})
 chk(vis(health.web_view(TA + 305), "price:unpriced"), "A10c 모르는 판(v99) = 숨기지 않음")
 if os.path.exists(health_ack.path()):
     os.remove(health_ack.path())
@@ -210,7 +210,7 @@ def tg_round(st, now, fs, plan_it=True):
     ev = health.step(st, cs, now, HT)
     if plan_it:
         health.plan(st, ev, now, HT, True)
-    common.atomic_write_json(health.STATUS_PATH, health.build_status(st, ob, cs, now, HT))
+    statefile.atomic_write_json(paths.state("health_status.json"), health.build_status(st, ob, cs, now, HT))
 
 
 def opens_of(st):
@@ -243,7 +243,7 @@ health.plan(st3, [], NOW + 63, HT, False)
 st3.pop("digest_date", None)
 health.plan(st3, [], NOW + 64, HT, True)
 chk(any(o.get("kind") == "digest" for o in st3.get("outbox") or []), "T3b (대조) 안 닫은 주의 = 하루 요약에 실림", st3.get("outbox"))
-import alert_bot
+import alert_bot  # noqa: E402
 p5 = T.safe(alert_bot._open_problems, st3)
 chk(isinstance(p5, list) and any("미추적 체인" in t for t in p5), "T5 (대조) tj-alert 하루 요약 재료에 안 닫은 주의 있음", p5)
 x = item(health.web_view(NOW + 65), "chainsweep:untracked") or {}
@@ -320,8 +320,8 @@ EXB = os.path.join(S, "exf_balances_okx.json")
 
 
 def debt_rows(spot, debts):
-    common.atomic_write_json(SP, spot)
-    common.atomic_write_json(EXB, {"debts": debts})
+    statefile.atomic_write_json(SP, spot)
+    statefile.atomic_write_json(EXB, {"debts": debts})
     r9 = T.safe(health.collect_debt, None, NOW, HS)
     os.remove(SP)
     os.remove(EXB)
@@ -339,14 +339,14 @@ chk(rk3 and rk3[0][4] is None, "K1c 그 거래소 시세가 1시간 넘게 낡�
 rk4 = debt_rows({"usd": {}, "ex_usd": {}, "ex_ts": {}}, {"USDT": -500})
 chk(rk4 and abs(float(rk4[0][4] or 0) - 500.0) < 1e-6, "K1d 스테이블 부채 = $1 그대로(정보)", rk4)
 
-import token_discovery as TD
+import token_discovery as TD  # noqa: E402
 WA, WB = "0x" + "aa" * 20, "0x" + "bb" * 20
 CFGD = {"wallets": [{"type": "evm", "chain": "eth", "address": WA}, {"type": "evm", "chain": "base", "address": WB}]}
 
 
 def disc_round(pairs):
-    common.atomic_write_json(TD.state_path(), {"pairs": pairs})
-    common.atomic_write_json(os.path.join(S, "onchain_check.json"), {"checkedAt": NOW, "mismatches": [], "disc": TD.summary(CFGD, {"pairs": pairs}, {})})
+    statefile.atomic_write_json(TD.state_path(), {"pairs": pairs})
+    statefile.atomic_write_json(os.path.join(S, "onchain_check.json"), {"checkedAt": NOW, "mismatches": [], "disc": TD.summary(CFGD, {"pairs": pairs}, {})})
     try:
         b9 = health.collect_balcheck(CFGD)
     except TypeError:
@@ -368,7 +368,7 @@ dk = health_ack.load()[0]
 k2d = disc_round({TD.pair_key("eth", WA): {"at": NOW, "skip": {"0x" + "c1" * 20: "일시 보류 — 덱스 판정 장애", "0x" + "c2" * 20: "일시 보류 — 덱스 판정 장애"}}})
 chk(k2d.get("level") == "warn" and health_ack.state(dk, "balcheck:disc", "warn", k2d.get("ack") or {}) != "acked",
     "K2b 판정 대기 토큰이 새로 늘면 다시 보임(토큰 단위)", (k2c.get("ack"), k2d.get("ack")))
-common.atomic_write_json(os.path.join(S, "onchain_check.json"), {"checkedAt": NOW, "mismatches": [],
+statefile.atomic_write_json(os.path.join(S, "onchain_check.json"), {"checkedAt": NOW, "mismatches": [],
                                                                   "disc": dict(TD.summary(CFGD, {"pairs": PA}, {}), failPairs=5)})
 try:
     b9 = health.collect_balcheck(CFGD)
@@ -467,15 +467,15 @@ if os.path.exists(health_ack.path()):
     os.remove(health_ack.path())
 
 print("[H] HTTP — 출처·CSRF · 409 · 바로 반영")
-from http.server import ThreadingHTTPServer
-import onboarding
-import settings_store as ss
+from http.server import ThreadingHTTPServer  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss  # noqa: E402
 with open(os.path.join(T.ROOT, "config.example.json"), encoding="utf-8") as f:
     CFG = json.load(f)
 CFG["wallets"], CFG["exchange_addresses"] = [], []
 CFG["web"] = {"port": 8023, "bind": "loopback", "login": {"enabled": False}}
 CFG.setdefault("balance_check", {})["enabled"] = False
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(CFG, f, ensure_ascii=False)
 web.BUILDER = onboarding.DemoBuilder()
 SRV = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)

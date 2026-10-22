@@ -5,12 +5,12 @@ import threading
 import time
 import urllib.parse
 
-import common
+import logs, paths, statefile
 
 FILE = "cg_ca.json"
 TTL_POS = 7 * 86400
 TTL_NEG = 3 * 86400
-PX_FRESH = 6 * 3600
+PX_USE_MAX = 24 * 3600
 PX_EVERY = 3600
 PER_TICK = 3
 GAP = 8.0
@@ -30,7 +30,7 @@ class _KeyLater(Exception):
 
 
 def _path() -> str:
-    return os.path.join(common.STATE_DIR, FILE)
+    return paths.state(FILE)
 
 
 def key_of(chain, ca) -> str:
@@ -43,8 +43,8 @@ def _entries() -> dict:
     if _ST["e"] is None:
         e9 = {}
         try:
-            d = common.read_json(_path(), {}) or {}
-        except (Exception, SystemExit):
+            d = statefile.read_json(_path(), {}) or {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             d = {}
         for k, v in ((d.get("e") or {}).items() if isinstance(d, dict) else ()):
             if isinstance(v, list) and len(v) == 2 and isinstance(v[0], (int, float)) and (v[1] is None or isinstance(v[1], (int, float))):
@@ -65,11 +65,16 @@ def status(chain, ca):
 
 
 def price(chain, ca, now=None):
+    v = price_at(chain, ca, now)
+    return v[0] if v else None
+
+
+def price_at(chain: str, ca: str, now: float = None):
     now = time.time() if now is None else now
     with _LOCK:
         v = _entries().get(key_of(chain, ca))
-    if v and v[1] and now - v[0] <= PX_FRESH:
-        return float(v[1])
+    if v and v[1] and now - v[0] <= PX_USE_MAX:
+        return float(v[1]), float(v[0])
     return None
 
 
@@ -77,7 +82,7 @@ def want(pairs_usd: dict, px_pairs=()):
     try:
         import candles
         plat = candles.CG_PLATFORM
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         plat = {}
     w9 = {}
     for p, usd in (pairs_usd or {}).items():
@@ -134,7 +139,7 @@ def _fetch(chain: str, ca: str, lane: str = "past"):
     try:
         import cgkey
         has_key = bool(cgkey.key())
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         has_key = False
     if has_key and _key_day(time.time()) >= KEY_DAY_MAX:
         raise _KeyLater("하루 상한")
@@ -182,9 +187,9 @@ def tick(now=None, budget_sec: float = 30.0) -> int:
             _ST["kwait"][lane9] = time.time() + KEY_WAIT
             _ST["err"] = f"키 몫 대기({lane9}): " + str(e)[:80]
             continue
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             _ST["backoff"] = time.time() + ERR_BACKOFF
-            _ST["err"] = common.safe_err(e)[:160]
+            _ST["err"] = logs.safe_err(e)[:160]
             break
         with _LOCK:
             e9 = _entries()
@@ -211,8 +216,8 @@ def loop():
             n9 = tick()
             if n9:
                 lg.info("코인게코 컨트랙트 시세 확인 %d개(창 이전 기초잔고 토큰 평가 관문)", n9)
-        except Exception as e:
-            lg.warning("코인게코 컨트랙트 시세 확인 실패(다음 바퀴): %s", common.safe_err(e)[:120])
+        except Exception as e:   # noqa: BLE001 [boundary]
+            lg.warning("코인게코 컨트랙트 시세 확인 실패(다음 바퀴): %s", logs.safe_err(e)[:120])
         time.sleep(LOOP_SEC)
 
 
@@ -223,7 +228,7 @@ def save():
         doc = {"v": 1, "e": {k: v for k, v in _ST["e"].items()}, "kd": _ST.get("kd")}
         _ST["dirty"] = False
     try:
-        common.atomic_write_json(_path(), doc)
+        statefile.atomic_write_json(_path(), doc)
     except OSError:
         with _LOCK:
             _ST["dirty"] = True

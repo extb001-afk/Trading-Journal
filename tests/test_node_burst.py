@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import threading
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
-import common
-import bf_engine as B
-import nodekeys as NK
+import paths, statefile  # noqa: E402
+import bf_engine as B  # noqa: E402
+import nodekeys as NK  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -23,7 +23,7 @@ sp = NK.budget_spec("ankr", {"plan": "paid", "share": 25, "month": 100_000_000})
 sq = NK.budget_spec("quicknode", NK.plans({})["quicknode"])
 sa = NK.budget_spec("alchemy", NK.plans({})["alchemy"])
 check("B1a 무료 = 버스트 배수 10(열흘치 · 상수 하나 — nodekeys.BURST_X)", getattr(NK, "BURST_X", None) == 10 and sf.get("burst") == 10 and sa.get("burst") == 10, (sf, sa))
-check("B1b 유료 = 버스트 없음(남의 키 보호) · QuickNode 기본 = 무료 플랜이라 버스트(qn1011)", "burst" not in sp and sq.get("burst") == float(NK.BURST_X), (sp, sq))
+check("B1b 유료 = 버스트 없음(남의 키 보호) · QuickNode 기본 = 무료 플랜이라 버스트", "burst" not in sp and sq.get("burst") == float(NK.BURST_X), (sp, sq))
 
 SPEC = {"hosts": ["*.burst-test.invalid"], "unit": "cu", "month": 3100, "pct": 80.0, "cu": 20, "cu_heavy": 20, "cu_methods": {}, "burst": 10.0}
 NAME = "node_bt"
@@ -38,7 +38,7 @@ def conf(spec=SPEC, name=NAME):
 
 
 def ldir(name=NAME):
-    return os.path.join(common.quota_dir(), f"rpc_day_{name}")
+    return os.path.join(paths.quota_dir(), f"rpc_day_{name}")
 
 
 def seed(days: dict, name=NAME, raw: dict = None):
@@ -47,9 +47,9 @@ def seed(days: dict, name=NAME, raw: dict = None):
     for f in os.listdir(d):
         os.remove(os.path.join(d, f))
     h = {str(DAY - k): {f"seed.{k}.aa": (list(v) if isinstance(v, tuple) else [v, v])} for k, v in days.items()}
-    common.atomic_write_json(os.path.join(d, "head_days.hist"), {"days": h, "since": DAY - 40})
+    statefile.atomic_write_json(os.path.join(d, "head_days.hist"), {"days": h, "since": DAY - 40})
     for k, v in (raw or {}).items():
-        common.atomic_write_json(os.path.join(d, f"old.{k}.bb.json"), {"day": DAY - k, "n": v, "nh": v, "proc": "old", "pid": 1, "inst": "bb", "at": 0, "closed": True})
+        statefile.atomic_write_json(os.path.join(d, f"old.{k}.bb.json"), {"day": DAY - k, "n": v, "nh": v, "proc": "old", "pid": 1, "inst": "bb", "at": 0, "closed": True})
 
 
 def take(units, burst=False, host=HOST):
@@ -110,7 +110,7 @@ seed({31: 999, 30: 7, 1: 5}, raw={2: 11, 0: 13})
 d6 = ldir()
 h6 = json.load(open(os.path.join(d6, "head_days.hist")))
 h6["days"][str(DAY - 2)] = {"old.2.bb": [11, 11]}
-common.atomic_write_json(os.path.join(d6, "head_days.hist"), h6)
+statefile.atomic_write_json(os.path.join(d6, "head_days.hist"), h6)
 conf()
 L = lim_f(NAME)
 check("B6 창 = 지난 30일(31일 전 999 · 오늘 파일 13 안 셈) · 안 합친 지난날 파일 셈 · 같은 생애 중복 없음 = 7 + 11 + 5 = 23", L.get("prev") == 23, L)
@@ -118,7 +118,7 @@ check("B6 창 = 지난 30일(31일 전 999 · 오늘 파일 13 안 셈) · 안 �
 seed({})
 NM7 = "node_bt7"
 os.makedirs(ldir(NM7), exist_ok=True)
-common.atomic_write_json(os.path.join(ldir(NM7), "head_days.hist"), {"days": {}, "since": DAY - 40})
+statefile.atomic_write_json(os.path.join(ldir(NM7), "head_days.hist"), {"days": {}, "since": DAY - 40})
 B.rpc_day_configure({"rpc_day_limits": {NM7: dict(SPEC)}})
 m7 = B._RPC_DAY[NM7]["meter"]
 t0 = (DAY - 3) * 86400 + 100
@@ -195,7 +195,7 @@ try:
     e9 = None
     try:
         B.rpc_post(URL, body)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         e9 = getattr(e, "net", e)
     check("B9a 그 뒤 평소 rpc_post = 실시간 80 까지(4콜 — 백필에 안 막힘) · 5번째 quota", ok9 == 4 and getattr(e9, "kind", "") == "quota" and len(SENT) == 12,
           (ok9, repr(e9)[:160]))
@@ -238,15 +238,15 @@ try:
 finally:
     B.rpc_call = real_rc
 
-d11 = os.path.join(common.quota_dir(), "rpc_day_node_alchemy")
+d11 = os.path.join(paths.quota_dir(), "rpc_day_node_alchemy")
 os.makedirs(d11, exist_ok=True)
 for f in os.listdir(d11):
     os.remove(os.path.join(d11, f))
 per = NK.status(env={}, settings={})["alchemy"]["perDay"]
-common.atomic_write_json(os.path.join(d11, "x.1.cc.json"), {"day": DAY, "n": per + 1, "nh": per + 1})
+statefile.atomic_write_json(os.path.join(d11, "x.1.cc.json"), {"day": DAY, "n": per + 1, "nh": per + 1})
 st11 = NK.status(env={}, settings={})["alchemy"]
 check("B11a 오늘 쓴 양 > 평소 몫 = bursting", st11.get("bursting") is True and st11.get("usedToday") == per + 1, st11)
-common.atomic_write_json(os.path.join(d11, "x.1.cc.json"), {"day": DAY, "n": 5, "nh": 5})
+statefile.atomic_write_json(os.path.join(d11, "x.1.cc.json"), {"day": DAY, "n": 5, "nh": 5})
 check("B11b 평소 = bursting 아님", NK.status(env={}, settings={})["alchemy"].get("bursting") is False)
 with open(os.path.join(T.ROOT, "web", "v2", "setup.js"), encoding="utf-8") as f:
     check("B11c 설정 화면 '버스트 중' 표시", "버스트 중" in f.read())

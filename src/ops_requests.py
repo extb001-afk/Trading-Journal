@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import shutil
-import sqlite3
 import time
 
-import common
+import logs, num_parse, paths, statefile
+import db as dbm
+import fsio
 
 GATE_NAME = "rebuild_pnl_gate.json"
 APPROVE_NAME = "rebuild_pnl_approve.json"
@@ -30,7 +30,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _p(name: str) -> str:
-    return os.path.join(common.STATE_DIR, name)
+    return paths.state(name)
 
 
 def _safe_read(path: str, default=None):
@@ -74,11 +74,7 @@ def appr_tol(ap, tol_usd: float, tol_pct: float) -> tuple:
 def _fin(v):
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return f if math.isfinite(f) else None
+    return num_parse.to_float(v, catch_overflow=True)
 
 
 def _num_map(d) -> dict | None:
@@ -336,20 +332,8 @@ def preserve_report(report_path: str) -> tuple:
         return sha, os.path.basename(have)
     name = time.strftime("%Y%m%d_%H%M%S") + f"_{sha[:16]}.report.json"
     dst = os.path.join(d, name)
-    tmp = dst + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as f, open(report_path, "rb") as src:
-            shutil.copyfileobj(src, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, dst)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    with fsio.atomic_open(dst, binary=True, dir_fsync=False, makedirs=False) as f, open(report_path, "rb") as src:
+        shutil.copyfileobj(src, f)
     if file_sha(dst) != sha:
         try:
             os.remove(dst)
@@ -383,7 +367,7 @@ def _prune_rejected(keep_name: str = ""):
 
 def approval_check(new_ev: dict, tol_usd: float, tol_pct: float, now: float = None) -> tuple:
     now = time.time() if now is None else now
-    ap = common.read_control_json(_p(APPROVE_NAME), None)
+    ap = statefile.read_control_json(_p(APPROVE_NAME), None)
     if not isinstance(ap, dict):
         return False, "", None
     until = _fin(ap.get("until"))
@@ -445,7 +429,7 @@ def approve(report_sha: str, by: str, now: float = None) -> tuple:
     miss9 = report_missing(rp9)
     if miss9 is None or miss9:
         return False, ("보류된 보고서에 빠진 재료가 있어 승인할 수 없어요(" + ", ".join(miss9 or ["읽기 실패"]) + ") — 재계산 보고서가 온전해야 승인할 수 있어요")
-    common.atomic_write_json(_p(APPROVE_NAME), {"report_sha": want, "until": int(now) + APPROVE_TTL, "at": int(now), "by": str(by)[:40],
+    statefile.atomic_write_json(_p(APPROVE_NAME), {"report_sha": want, "until": int(now) + APPROVE_TTL, "at": int(now), "by": str(by)[:40],
                                                 "gate_ts": g.get("ts"), "tol": g.get("tol") if isinstance(g.get("tol"), list) else None})
     return True, "승인함 — 이 결과와 같은 다음 재계산 1회(48시간 안)를 교체합니다"
 
@@ -481,9 +465,9 @@ def poison_entries(limit: int = 200) -> list:
                 ref = rec.get("txhash") or rec.get("hash") or ((rec.get("tx") or {}).get("hash") if isinstance(rec.get("tx"), dict) else None) \
                     or rec.get("exchange") or rec.get("chain") or ""
                 by[pid] = {"id": pid, "ts": int(e.get("ts") or 0), "kind": str(rec.get("kind") or "?")[:24], "chain": str(rec.get("chain") or "")[:16],
-                           "ref": str(ref)[:20], "err": common.safe_err(str(e.get("err") or ""))[:160],
+                           "ref": str(ref)[:20], "err": logs.safe_err(str(e.get("err") or ""))[:160],
                            "corrupt": rec.get("kind") == "_corrupt",
-                           "state": "성공" if st.get("ok") else ("실패" if st else "대기"), "rerr": common.safe_err(str(st.get("err") or ""))[:120]}
+                           "state": "성공" if st.get("ok") else ("실패" if st else "대기"), "rerr": logs.safe_err(str(st.get("err") or ""))[:120]}
     except OSError:
         pass
     out = sorted(by.values(), key=lambda x: -x["ts"])
@@ -509,20 +493,15 @@ def poison_request(ids=None, all_=False, by: str = "") -> tuple:
 
 
 def _poison_req_write(all_: bool, ids: list, by: str) -> int:
-    import fcntl
     path = _p(POISON_REQ_NAME)
-    with open(path + ".lock", "a+") as lk:
-        fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
-        try:
-            prev = _safe_read(path, None)
-            if isinstance(prev, dict):
-                if prev.get("all") is True:
-                    all_ = True
-                elif not all_:
-                    ids = list(dict.fromkeys([str(x) for x in (prev.get("ids") or []) if isinstance(x, str)] + list(ids)))[:5000]
-            common.atomic_write_json(path, {"all": bool(all_), "ids": [] if all_ else ids, "ts": int(time.time()), "by": str(by)[:40]})
-        finally:
-            fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+    with fsio.locked(path):
+        prev = _safe_read(path, None)
+        if isinstance(prev, dict):
+            if prev.get("all") is True:
+                all_ = True
+            elif not all_:
+                ids = list(dict.fromkeys([str(x) for x in (prev.get("ids") or []) if isinstance(x, str)] + list(ids)))[:5000]
+        statefile.atomic_write_json(path, {"all": bool(all_), "ids": [] if all_ else ids, "ts": int(time.time()), "by": str(by)[:40]})
     return 0 if all_ else len(ids)
 
 
@@ -554,9 +533,9 @@ def decimals_items() -> list:
 
 
 def _ledger_decimals(aid: int):
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return "nodb"
-    c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
+    c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=10)
     try:
         r = c.execute("SELECT decimals, chain, address FROM assets WHERE asset_id=?", (int(aid),)).fetchone()
     finally:
@@ -587,10 +566,11 @@ def decimals_request(aid, stored, seen, by: str = "") -> tuple:
     why = decimals_check(aid, stored, seen)
     if why:
         return False, why
-    cur = _safe_read(_p(DEC_REQ_NAME), None)
-    items = cur.get("items") if isinstance(cur, dict) and isinstance(cur.get("items"), dict) else {}
-    items[str(aid)] = {"stored": stored, "seen": seen, "at": int(time.time()), "by": str(by)[:40]}
-    common.atomic_write_json(_p(DEC_REQ_NAME), {"items": items, "ts": int(time.time())})
+    with fsio.locked(_p(DEC_REQ_NAME)):
+        cur = _safe_read(_p(DEC_REQ_NAME), None)
+        items = cur.get("items") if isinstance(cur, dict) and isinstance(cur.get("items"), dict) else {}
+        items[str(aid)] = {"stored": stored, "seen": seen, "at": int(time.time()), "by": str(by)[:40]}
+        statefile.atomic_write_json(_p(DEC_REQ_NAME), {"items": items, "ts": int(time.time())})
     return True, "요청함 — tj-core 가 확인 뒤 다음 자동 재계산에서 관측값으로 다시 기장합니다(손익이 바뀌면 승인 필요)"
 
 

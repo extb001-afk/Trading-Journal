@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-from datetime import datetime
+from datetime import datetime  # noqa: E402
 
-import wow2
+import wow2  # noqa: E402
 
 chk = H.chk
 T = datetime(2026, 10, 6, 12, 0, tzinfo=wow2.KST)
@@ -17,7 +17,7 @@ def R(q):
 
 
 r = R("작년 12월 ETH 매도")
-chk(r["filters"].get("after") == "2025-12-01" and r["filters"].get("before") == "2025-12-31", "작년 12월 = 2025-12-01~12-31(작년 전체 아님)", r["filters"])
+chk(r["filters"].get("after") == "2025-12-01" and r["filters"].get("before") == "2025-12-31", "작년 12월 = 2025-12-01~2025-12-31(작년 전체 아님)", r["filters"])
 chk(r["filters"].get("type") == "sell" and r["filters"].get("coin") == "ETH", "작년 12월 ETH 매도: 종류 매도 · 코인 ETH", r["filters"])
 chk(r["text"] == "", "작년 12월 ETH 매도: 글자 검색어 없음('12월'·'매' 안 남음)", r["text"])
 r = R("작년 3월 BTC 손실")

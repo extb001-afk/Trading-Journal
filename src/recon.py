@@ -10,8 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import common
-import calcguard
+import config, logs, net_http
+import calcguard  # noqa: E402
+import token_tables
 
 _UA = {"Accept": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"}
 
@@ -38,15 +39,16 @@ def _gj_retryable(e) -> bool:
 
 
 def _gj(url: str, timeout: float = 30.0, tries: int = None, sleep=time.sleep):
-    req = urllib.request.Request(url, headers=dict(_UA, **{"User-Agent": common.ua_for(url, _UA["User-Agent"])}))
+    req = net_http.request(url, headers=dict(_UA, **{"User-Agent": net_http.ua_for(url, _UA["User-Agent"])}))
     n9 = GJ_TRIES if tries is None else max(1, int(tries))
     for i in range(n9):
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(common.read_capped(r).decode())
-        except Exception as e:
+            with net_http.urlopen(req, timeout=timeout) as r:
+                return json.loads(net_http.read_capped(r).decode())
+        except Exception as e:   # noqa: BLE001 [fallback]
             if i + 1 >= n9 or not _gj_retryable(e):
                 raise
+            calcguard.swallowed("recon:_gj", e)
             sleep(_gj_wait(i, e))
 
 
@@ -58,29 +60,29 @@ def _rpc(url: str, method: str, params, timeout: float = 25.0, gap: bool = True)
             raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
         if "error" in d:
             ce9 = _bfe8.classify_rpc_error(d["error"])
-            raise _bfe8.NetError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}", ce9.kind, code=ce9.code)
+            raise _bfe8.NetError(f"rpc {method}: {logs.redact_secret_text(str(d['error']))}", ce9.kind, code=ce9.code)
         if d.get("result") is None:
             raise RuntimeError(f"rpc {method}: result 누락")
         return d["result"]
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json",
-                                          "User-Agent": common.ua_for(url, "tj-bot/0.1")})
+    req = net_http.request(url, data=body,
+                           headers={"Content-Type": "application/json",
+                                    "User-Agent": net_http.ua_for(url, "tj-bot/0.1")})
     h9 = (urllib.parse.urlsplit(url).hostname or "").lower()
     if h9 == "helius-rpc.com" or h9.endswith(".helius-rpc.com"):
         import bf_engine
         try:
-            bf_engine.helius_configure(common.load_config())
-        except (Exception, SystemExit) as _cg9:
+            bf_engine.helius_configure(config.load_config())
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("recon:_rpc", _cg9)
             pass
         if not bf_engine.HELIUS.take("tj-core", 10 if method in ("getProgramAccounts", "getAsset") else 1, kind="must"):
             raise RuntimeError(f"rpc {method}: 헬리우스 하루 예산 보류({bf_engine.HELIUS.last_why()}) — 다음 대사 때 다시")
     import bf_engine as _bfe9
-    with (_bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) if gap else urllib.request.urlopen(req, timeout=timeout)) as r:
-        d = json.loads(common.read_capped(r).decode())
+    with (_bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) if gap else net_http.urlopen(req, timeout=timeout)) as r:
+        d = json.loads(net_http.read_capped(r).decode())
     if "error" in d:
-        raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}")
+        raise RuntimeError(f"rpc {method}: {logs.redact_secret_text(str(d['error']))}")
     if not isinstance(d, dict) or d.get("result") is None:
         raise RuntimeError(f"rpc {method}: result 누락")
     return d["result"]
@@ -183,12 +185,12 @@ def fetch_sol_balances_fast(lanes: list, owners: list, native_url: str = None, w
                     raise RuntimeError("getMultipleAccounts value 형식 오류")
                 got = [0 if v is None else int(v["lamports"]) for v in vals]
                 break
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("recon:fetch_sol_balances_fast", e)
                 got, err = None, e
         for j, o in enumerate(chunk):
             if got is None:
-                bad[o] = f"네이티브 조회 실패: {common.safe_err(err)[:80]}"
+                bad[o] = f"네이티브 조회 실패: {logs.safe_err(err)[:80]}"
             elif got[j] < 0:
                 bad[o] = "네이티브 음수"
             else:
@@ -212,12 +214,12 @@ def fetch_sol_balances_fast(lanes: list, owners: list, native_url: str = None, w
                     _sol_tok_rows(_rpc(u, "getTokenAccountsByOwner", [o, {"programId": prog}, {"encoding": "jsonParsed"}]), wb9, m9)
                     err9 = None
                     break
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("recon:fetch_sol_balances_fast._work", e)
                     wb9, m9, err9 = {}, {}, e
             with lock:
                 if err9 is not None:
-                    bad[o] = f"토큰 조회 실패: {common.safe_err(err9)[:80]}"
+                    bad[o] = f"토큰 조회 실패: {logs.safe_err(err9)[:80]}"
                     continue
                 for k9, v9 in wb9.items():
                     per[o][k9] = per[o].get(k9, 0) + v9
@@ -234,7 +236,7 @@ def fetch_sol_balances_fast(lanes: list, owners: list, native_url: str = None, w
             "_hold": {o: [why] for o, why in bad.items()}}
 
 
-def fetch_bsc_balances(rpc_urls: list, wallets: list, token_cas: dict) -> dict:
+def fetch_bsc_balances(rpc_urls: list, wallets: list, token_cas: dict, wallet_cas: dict = None) -> dict:
     url = rpc_urls[0]
     per = {}
     meta = {}
@@ -243,7 +245,10 @@ def fetch_bsc_balances(rpc_urls: list, wallets: list, token_cas: dict) -> dict:
         wb = per.setdefault(w, {})
         wz = zero.setdefault(w, [])
         wb[("native", None)] = int(_rpc(url, "eth_getBalance", [w, "latest"]), 16)
+        ask_cas = None if wallet_cas is None else {str(x).lower() for x in (wallet_cas.get(str(w).lower()) or ())}
         for ca in token_cas:
+            if ask_cas is not None and str(ca).lower() not in ask_cas:
+                continue
             data = "0x70a08231" + w.lower().replace("0x", "").rjust(64, "0")
             try:
                 r = _rpc(url, "eth_call", [{"to": ca, "data": data}, "latest"])
@@ -263,8 +268,6 @@ def fetch_bsc_balances(rpc_urls: list, wallets: list, token_cas: dict) -> dict:
     return {"per_wallet": per, "_meta": meta, "_zero": zero}
 
 
-MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
-MULTICALL3_BY_CHAIN = {"zksync": "0xf9cda624fbc7e059355ce98a31693d299facd963"}
 MC_CHUNK = 150
 RPC_BLOCK_LAG = 2
 _SEL_AGG3 = "82ad56cb"
@@ -292,16 +295,16 @@ def _rpc_any(urls: list, method: str, params, check=None, tries: int = None, sle
             try:
                 r = _rpc(u, method, params, timeout=timeout)
                 return check(r) if check else r
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("recon:_rpc_any", e)
                 last = e
                 if _is_exec_err(e):
                     exec_n += 1
         if exec_n:
-            raise RpcExecFail(f"rpc {method}: 실행 오류 — {common.redact_urls(str(last))[:160]}")
+            raise RpcExecFail(f"rpc {method}: 실행 오류 — {logs.redact_urls(str(last))[:160]}")
         if i + 1 < n9:
             sleep(_gj_wait(i, last))
-    raise RuntimeError(f"rpc {method}: 전 엔드포인트 실패 — {common.redact_urls(str(last))[:160]}")
+    raise RuntimeError(f"rpc {method}: 전 엔드포인트 실패 — {logs.redact_urls(str(last))[:160]}")
 
 
 def _hex_int(x) -> int:
@@ -428,7 +431,7 @@ def _bs_token_list(base_url: str, w: str) -> dict:
 
 def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, discover_url: str = None,
                            must: dict = None, exclude=(), want_native: bool = True, want_tokens: bool = True,
-                           multicall: str = MULTICALL3, wallet_cas: dict = None, block: int = None, strict=None,
+                           multicall: str = token_tables.MULTICALL3, wallet_cas: dict = None, block: int = None, strict=None,
                            sweep: dict = None, wallet_extra: dict = None, sleep=time.sleep) -> dict:
     urls = [u for u in (rpc_urls or []) if u]
     if not urls:
@@ -447,7 +450,7 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
             return True
         try:
             return bool(strict(ca)) if strict else False
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("recon:fetch_evm_rpc_balances.is_strict", _cg9)
             return True
     bs, dfail = {}, {}
@@ -457,7 +460,8 @@ def fetch_evm_rpc_balances(rpc_urls: list, wallets: list, token_cas: dict, *, di
                 sleep(BS_PACE)
             try:
                 bs[w] = _bs_token_list(discover_url, w)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("recon:fetch_evm_rpc_balances[discover]", e)
                 dfail[w] = e
         if dfail and len(dfail) == len(wallets):
             raise next(iter(dfail.values()))

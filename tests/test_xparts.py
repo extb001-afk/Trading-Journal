@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import calendar
+import calendar  # noqa: E402
 
-import xparts
-from xparts import carry_usd, krw_at, migrate_legacy, resolve, total_usd, tl_bad, ub_cut, upgrade_obs
+import xparts  # noqa: E402
+from xparts import carry_usd, krw_at, migrate_legacy, resolve, total_usd, tl_bad, ub_cut, upgrade_obs  # noqa: E402
 
 chk = T.chk
 FX = 1400.0
@@ -32,39 +32,39 @@ def near(got, want, tol=0.01):
 
 
 s1 = src_of(rest=10000.0, tl_kb=[(E(3, 1) - 3600, 14e6), (E(10, 1) - 3600, -14e6)], first={"rest": E(1, 1) - 86400, "kb": E(3, 1) - 3600})
-chk(near(total_usd(resolve(E(2, 1), s1), FX), 10000), "R cs313 2/1 = LP 만", total_usd(resolve(E(2, 1), s1), FX))
-chk(near(total_usd(resolve(E(5, 1), s1), FX), 20000), "R cs313 5/1 = LP + 빗썸", total_usd(resolve(E(5, 1), s1), FX))
-chk(near(total_usd(resolve(E(9, 28), s1), FX), 20000), "R cs313 9/28 = LP + 빗썸", total_usd(resolve(E(9, 28), s1), FX))
-chk(near(total_usd(resolve(E(10, 5), s1), FX), 10000), "R cs313 10/5 = LP 만", total_usd(resolve(E(10, 5), s1), FX))
+chk(near(total_usd(resolve(E(2, 1), s1), FX), 10000), "R 2/1 = LP 만", total_usd(resolve(E(2, 1), s1), FX))
+chk(near(total_usd(resolve(E(5, 1), s1), FX), 20000), "R 5/1 = LP + 빗썸", total_usd(resolve(E(5, 1), s1), FX))
+chk(near(total_usd(resolve(E(9, 28), s1), FX), 20000), "R 9/28 = LP + 빗썸", total_usd(resolve(E(9, 28), s1), FX))
+chk(near(total_usd(resolve(E(10, 5), s1), FX), 10000), "R 10/5 = LP 만", total_usd(resolve(E(10, 5), s1), FX))
 
 s2 = src_of(rest=1500.0)
 m2 = migrate_legacy(E(9, 20), 100.0, "live", FX, None, s2)
-chk(near(total_usd(m2["p"], FX), 100), "R cs317 실제 마감 보존", m2)
-chk(near(total_usd(resolve(E(9, 20), s2, pinned=m2["p"]), FX), 100), "R cs317 실제 마감 보존(다시 resolve)", None)
-chk(all(v[1] == "snap" for v in m2["p"].values()), "R cs317 쪼갠 구성요소 = 전부 관측(snap — 다시 매기지 않음)", m2["p"])
+chk(near(total_usd(m2["p"], FX), 100), "R 실제 마감 보존", m2)
+chk(near(total_usd(resolve(E(9, 20), s2, pinned=m2["p"]), FX), 100), "R 실제 마감 보존(다시 resolve)", None)
+chk(all(v[1] == "snap" for v in m2["p"].values()), "R 쪼갠 구성요소 = 전부 관측(snap — 다시 매기지 않음)", m2["p"])
 
 s3 = src_of(kb=14e6, rest=10000.0, tl_kb=None)
 frozen = resolve(E(9, 30), s3)
-chk(near(total_usd(frozen, FX), 20000), "R cs317 동결 값", frozen)
+chk(near(total_usd(frozen, FX), 20000), "R 동결 값", frozen)
 s3["now"]["rest"] = 12000.0
-chk(near(total_usd(resolve(E(9, 30), s3, pinned=frozen), FX), 20000), "R cs317 LP 바뀌어도 동결 유지", None)
-chk(near(total_usd(resolve(E(9, 30), s3, pinned=resolve(E(9, 30), s3, pinned=frozen)), FX), 20000), "R cs317 캐시 무효화(다시 resolve) 뒤에도", None)
+chk(near(total_usd(resolve(E(9, 30), s3, pinned=frozen), FX), 20000), "R LP 바뀌어도 동결 유지", None)
+chk(near(total_usd(resolve(E(9, 30), s3, pinned=resolve(E(9, 30), s3, pinned=frozen)), FX), 20000), "R 캐시 무효화(다시 resolve) 뒤에도", None)
 
 s4 = src_of(kb=14e6, ub={"QQQ": [1000.0, 2000.0]}, tl_kb=None)
 p4 = resolve(E(9, 30), s4)
-chk(near(100 + total_usd(p4, FX), 12100), "R cs321 매칭 전", total_usd(p4, FX))
+chk(near(100 + total_usd(p4, FX), 12100), "R 매칭 전", total_usd(p4, FX))
 LED = {"QQQ": [(7, [(E(9, 1), 1000.0)])]}
 cut4, left4 = ub_cut(p4["ub"][0], E(9, 30), LED, lambda gid: 1000.0)
-chk(near((100 + 1000 * 2.0) + total_usd(p4, FX) - cut4, 12100) and left4 == {}, "R cs321 매칭 후 = 원장 평가 + x − 빼기(이중 계상 없음)", (cut4, left4))
+chk(near((100 + 1000 * 2.0) + total_usd(p4, FX) - cut4, 12100) and left4 == {}, "R 매칭 후 = 원장 평가 + x − 빼기(이중 계상 없음)", (cut4, left4))
 cut4b, left4b = ub_cut(p4["ub"][0], E(8, 30), LED, lambda gid: 0.0)
-chk(cut4b == 0.0 and left4b == {"QQQ": [1000.0, 2000.0]}, "R cs321 원장이 아직 안 세는 날 = 빼지 않음", (cut4b, left4b))
+chk(cut4b == 0.0 and left4b == {"QQQ": [1000.0, 2000.0]}, "R 원장이 아직 안 세는 날 = 빼지 않음", (cut4b, left4b))
 
 s5 = src_of(ku=28e6, kb=14e6)
 m5 = migrate_legacy(E(9, 10), 20000.0, "live", FX, None, s5)
-chk(near(total_usd(m5["p"], FX), 30000) and m5["p"]["kb"] == [14e6, "tl"], "R cs321 옛 마감 + 빗썸 추가(출처 tl)", m5)
+chk(near(total_usd(m5["p"], FX), 30000) and m5["p"]["kb"] == [14e6, "tl"], "R 옛 마감 + 빗썸 추가(출처 tl)", m5)
 s5["obs"] = {"2026-09-10": {"end": E(9, 10), "rest": m5["p"]["rest"][0]}}
-chk(near(total_usd(resolve(E(9, 9), s5), FX), 30000), "R cs321 장기 곡선 9/9 = 30,000", total_usd(resolve(E(9, 9), s5), FX))
-chk(near(total_usd(resolve(E(9, 9), s5), FX) - total_usd(m5["p"], FX), 0), "R cs321 경계 차 0", None)
+chk(near(total_usd(resolve(E(9, 9), s5), FX), 30000), "R 장기 곡선 9/9 = 30,000", total_usd(resolve(E(9, 9), s5), FX))
+chk(near(total_usd(resolve(E(9, 9), s5), FX) - total_usd(m5["p"], FX), 0), "R 경계 차 0", None)
 chk(near(total_usd(migrate_legacy(E(9, 10), 20000.0, "live", FX, None, s5)["p"], FX), total_usd(m5["p"], FX)), "R 이관 멱등(두 번 = 같은 값)", None)
 
 s6 = src_of(kb=50e6, rest=20000.0, tl_kb=[(E(9, 15), 50e6)], first={"kb": E(9, 15), "rest": E(10, 1)})

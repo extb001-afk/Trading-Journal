@@ -2,23 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _cassette_clock  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime as _dt, timedelta as _td
-from decimal import Decimal
+_cassette_clock.shift("12:00:00")
+import _harness as T  # noqa: E402
 
-import common
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td  # noqa: E402
+from decimal import Decimal  # noqa: E402
+
+import histmark, paths, statefile  # noqa: E402
 
 CFG = os.path.join(os.environ["TJ_BASE"], "config.json")
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(CFG, "w"))
-import db as dbm
-import histcurve
-import netpace
-import web
-import xparts
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
@@ -26,7 +29,7 @@ for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_f
         setattr(web.StateBuilder, _m, lambda self: None)
 netpace.wait = lambda url, now=None, sleep=None: None
 web.pricing._gj = lambda url, timeout=10.0: None
-S = common.STATE_DIR
+S = paths.STATE_DIR
 FX = 1400.0
 DAY = 86400
 NOW = int(time.time())
@@ -40,15 +43,15 @@ YISO, YKEY = YD.strftime("%Y-%m-%d"), YD.strftime("%m-%d")
 YEND = YD.replace(hour=23, minute=59, second=59, microsecond=0).timestamp()
 
 json.dump({"usd": PX, "usd_ts": {k: NOW for k in PX}, "rate": FX, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
 open(os.path.join(S, "backfill_done"), "w").write("1")
 
 
 def _wipe():
     for sfx in ("", "-wal", "-shm"):
-        if os.path.exists(common.DB_PATH + sfx):
-            os.remove(common.DB_PATH + sfx)
+        if os.path.exists(paths.DB_PATH + sfx):
+            os.remove(paths.DB_PATH + sfx)
     for fn in ("daily_cache.json", "daily_px.json"):
         if os.path.exists(os.path.join(S, fn)):
             os.remove(os.path.join(S, fn))
@@ -89,7 +92,7 @@ def _pos_add(c, gid, loc, dq):
 
 def ledger(upbit=None, upbit_closed=None, wallet_eth=None):
     _wipe()
-    c = dbm.open_db(common.DB_PATH)
+    c = dbm.open_db(paths.DB_PATH)
     gid = {}
     for sym, q in sorted((upbit or {}).items()):
         aid = _ex_asset(c, sym)
@@ -114,7 +117,7 @@ def ledger(upbit=None, upbit_closed=None, wallet_eth=None):
 
 
 def book(uu, side, vol, funds, created_ts, fill_ts=None, fee=0):
-    c = dbm.open_db(common.DB_PATH)
+    c = dbm.open_db(paths.DB_PATH)
     pl = {"uuid": uu, "market": "KRW-ETH", "side": side, "state": "done", "ord_type": "limit", "price": "1400000", "volume": str(vol),
           "executed_volume": str(vol), "executed_funds": str(funds), "paid_fee": str(fee),
           "created_at": _dt.fromtimestamp(created_ts, web.KST).isoformat()}
@@ -131,7 +134,7 @@ def book(uu, side, vol, funds, created_ts, fill_ts=None, fee=0):
 
 
 def snap(accounts, orders=(), age=0):
-    common.atomic_write_json(UP, {"ts": int(time.time()) - age, "open_orders": list(orders),
+    statefile.atomic_write_json(UP, {"ts": int(time.time()) - age, "open_orders": list(orders),
                                   "accounts": [{"currency": k, "balance": str(v[0]), "locked": str(v[1])} for k, v in accounts.items()]})
 
 
@@ -153,7 +156,7 @@ def build_on(b):
         b.spot.ex_usd[f"upbit:{k}"] = v
         b.spot.ex_ts[f"upbit:{k}"] = t
     histcurve.HIST.kit = None
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -324,7 +327,7 @@ chk(near(day_val(f), 200000) and near(today_val(f), 200000) and near(total(f), 2
     (day_val(f), today_val(f), total(f)))
 kit_checks("G", b, f, 200000, 0, ["USDT"])
 
-import ubfill
+import ubfill  # noqa: E402
 D9 = Decimal
 if not (hasattr(ubfill, "cash_krw") and hasattr(xparts, "ub_pre_fill")):
     chk(False, "U ubfill.cash_krw · xparts.ub_pre_fill 없음(수정 전 코드)")
@@ -361,8 +364,8 @@ for tag, setup, s0, s1, want_y, want_t in (
     b = new_builder()
     f = build_on(b)
     res["캐시 삭제"] = (day_val(f), today_val(f), bad_ku(b))
-    c9 = dbm.open_db(common.DB_PATH)
-    common.hist_late_put(c9, YEND - 3600)
+    c9 = dbm.open_db(paths.DB_PATH)
+    histmark.hist_late_put(c9, YEND - 3600)
     c9.commit()
     c9.close()
     f = build_on(b)
@@ -455,28 +458,28 @@ if hasattr(xparts, "_ub_pin_fill"):
     src9 = {"now": {"ts": 2000.0, "ku": 0.0, "ub": {"ETH": [50.0, 50000.0]}, "ubf": [1000, {"ETH": 50.0}]}, "base": {"ku": [0.0, 1000.0]},
             "tl": {"ku": [(1000, -70000000.0)]}, "first": {}}
     pin9 = {"ku": [0.0, "tl"], "ub": [{"ETH": [50.0, 50000.0]}, "carry"]}
-    chk(xparts.resolve(500, src9, pin9)["ub"] == [{}, "carry"], "U ub701: 고정 이월(체결 뒤 50) + 원화가 이번에 체결 전으로 = 그 심볼 체결 전(0)")
+    chk(xparts.resolve(500, src9, pin9)["ub"] == [{}, "carry"], "U 고정 이월(체결 뒤 50) + 원화가 이번에 체결 전으로 = 그 심볼 체결 전(0)")
     chk(xparts.resolve(500, src9, dict(pin9, ku=[70000000.0, "tl"]))["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"],
-        "U ub701: 고정 원화와 이번 되감기 값이 같음(새 코드가 이미 맞춘 날) = 그대로")
-    chk(xparts.resolve(500, src9, dict(pin9, ku=[0.0, "snap"]))["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U ub701: 원화가 그날 관측(snap) = 그대로")
-    chk(xparts.resolve(1500, src9, pin9)["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U ub701: 스냅숏 시각 뒤 날 = 그대로")
-    chk(xparts.resolve(500, dict(src9, now=dict(src9["now"], ubf=None)), pin9)["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U ub701: 미기장 체결 없음 = 그대로")
-    chk(xparts.resolve(500, src9, dict(pin9, ub=[{"ETH": [50.0, 50000.0]}, "snap"]))["ub"] == [{"ETH": [50.0, 50000.0]}, "snap"], "U ub701: 관측(snap) ub = 그대로")
+        "U 고정 원화와 이번 되감기 값이 같음(새 코드가 이미 맞춘 날) = 그대로")
+    chk(xparts.resolve(500, src9, dict(pin9, ku=[0.0, "snap"]))["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U 원화가 그날 관측(snap) = 그대로")
+    chk(xparts.resolve(1500, src9, pin9)["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U 스냅숏 시각 뒤 날 = 그대로")
+    chk(xparts.resolve(500, dict(src9, now=dict(src9["now"], ubf=None)), pin9)["ub"] == [{"ETH": [50.0, 50000.0]}, "carry"], "U 미기장 체결 없음 = 그대로")
+    chk(xparts.resolve(500, src9, dict(pin9, ub=[{"ETH": [50.0, 50000.0]}, "snap"]))["ub"] == [{"ETH": [50.0, 50000.0]}, "snap"], "U 관측(snap) ub = 그대로")
     src7 = {"now": {"ts": 200000.0, "ub": {"ETH": [80.0, 80000.0]}, "ubf": [199970, {"ETH": 50.0}]}, "base": {"ku": [70000000.0, 199970.0]},
             "tl": {"ku": [(199970, -70000000.0)]}, "obs": {"old": {"end": 13600.0, "ub": {"ETH": [10.0, 10000.0]}}}, "first": {}}
     r7 = xparts.resolve(100000, src7, {"ku": [70000000.0, "tl"], "ub": [{"ETH": [30.0, 30000.0]}, "carry"]})
     chk(r7["ub"] == [{"ETH": [30.0, 30000.0]}, "carry"] and r7["ku"] == [140000000.0, "tl"],
-        "U ub707: 옛 관측(ETH 10)이 있어도 체결 전 수량(30)으로 고정된 이월은 그대로($130,000 유지 · 종전 10 으로 덮어 $110,000)", r7)
+        "U 옛 관측(ETH 10)이 있어도 체결 전 수량(30)으로 고정된 이월은 그대로($130,000 유지 · 종전 10 으로 덮어 $110,000)", r7)
     r7 = xparts.resolve(100000, src7, {"ku": [70000000.0, "tl"], "ub": [{"ETH": [80.0, 80000.0]}, "carry"]})
     chk(r7["ub"] == [{"ETH": [30.0, 30000.0]}, "carry"],
-        "U ub707: 체결 뒤 수량(80)으로 고정된 이월 = 고정 수량 − 체결 몫(30 · 평가 단가 유지) — 옛 관측(10)을 쓰지 않음", r7)
+        "U 체결 뒤 수량(80)으로 고정된 이월 = 고정 수량 − 체결 몫(30 · 평가 단가 유지) — 옛 관측(10)을 쓰지 않음", r7)
     r7 = xparts.resolve(100000, src7, {"ku": [70000000.0, "tl"], "ub": [{"ETH": [60.0, 60000.0]}, "carry"]})
-    chk(r7["ub"] == [{"ETH": [60.0, 60000.0]}, "carry"], "U ub707: 체결 전·뒤 어느 쪽도 아닌 고정 이월(60) = 그대로", r7)
+    chk(r7["ub"] == [{"ETH": [60.0, 60000.0]}, "carry"], "U 체결 전·뒤 어느 쪽도 아닌 고정 이월(60) = 그대로", r7)
     src8 = dict(src7, now=dict(src7["now"], ub={"SOL": [500.0, 50000.0]}, ubf=[199970, {"SOL": -500.0}]), tl={"ku": [(199970, 70000000.0)]})
     r8 = xparts.resolve(100000, src8, {"ku": [70000000.0, "tl"], "ub": [{"SOL": [500.0, 50000.0]}, "carry"]})
-    chk(r8["ub"] == [{"SOL": [1000.0, 100000.0]}, "carry"], "U ub707: 매도 — 체결 뒤(500)로 고정된 이월 = 500 − (−500) = 1,000", r8)
+    chk(r8["ub"] == [{"SOL": [1000.0, 100000.0]}, "carry"], "U 매도 — 체결 뒤(500)로 고정된 이월 = 500 − (−500) = 1,000", r8)
 else:
-    chk(False, "U ub701: xparts._ub_pin_fill 없음(수정 전 코드)")
+    chk(False, "U xparts._ub_pin_fill 없음(수정 전 코드)")
 
 def move_live_to_yesterday(b9, sec_before_end):
     lv9 = dict(b9.daily.get("_live") or {})
@@ -495,7 +498,7 @@ def move_live_to_yesterday(b9, sec_before_end):
 
 
 def late_xrp(ts9, q9=1000):
-    c9 = dbm.open_db(common.DB_PATH)
+    c9 = dbm.open_db(paths.DB_PATH)
     _post(c9, "latexrp", ts9, _ex_asset(c9, "XRP"), "exchange:upbit", q9, 8, q9 * PX["XRP"], "acq")
     _pos_add(c9, _grp(c9, "XRP"), "exchange:upbit", q9)
     c9.commit()
@@ -544,7 +547,7 @@ it2.append(("다음 빌드", day_val(f), (b.daily.get(YISO) or {}).get("src")))
 chk(all(near(v9, 200000) for _n9, v9, _s9 in it2), "IT2 받아들여 동결된 체결 뒤 마감 → 무효화 뒤 고정 구성요소로 다시 계산 = 어제 $200,000 그대로(종전 $150,000)", it2)
 
 def book_cancel(uu, vol, exe, funds, created_ts, fill_ts):
-    c9 = dbm.open_db(common.DB_PATH)
+    c9 = dbm.open_db(paths.DB_PATH)
     pl9 = {"uuid": uu, "market": "KRW-ETH", "side": "bid", "state": "cancel", "ord_type": "limit", "price": "1400000", "volume": str(vol),
            "executed_volume": str(exe), "executed_funds": str(funds), "paid_fee": "0", "created_at": _dt.fromtimestamp(created_ts, web.KST).isoformat(),
            "trades": [{"created_at": _dt.fromtimestamp(fill_ts, web.KST).isoformat(), "volume": str(exe), "funds": str(funds)}]}
@@ -671,6 +674,6 @@ chk(not (b.daily.get("_live") or {}).get("defer"), "S8 낡은 스냅숏이라도
 snap({"KRW": (0, 50 * KRW1), "ETH": (150, 0)}, [order("s8", "bid", 100, 50, 50 * KRW1)], age=30)
 b = new_builder()
 f = build_on(b)
-chk(not (b.daily.get("_live") or {}).get("defer"), "S8 신선한 스냅숏 + 미기장 체결 = 유예 안 함(같은 스냅숏 보정 — 15차 그대로)", (b.daily.get("_live") or {}).get("defer"))
+chk(not (b.daily.get("_live") or {}).get("defer"), "S8 신선한 스냅숏 + 미기장 체결 = 유예 안 함(같은 스냅숏 보정 — 종전 그대로)", (b.daily.get("_live") or {}).get("defer"))
 
 T.finish()

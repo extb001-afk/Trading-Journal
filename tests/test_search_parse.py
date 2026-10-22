@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import search_index as si
-from _search_samples import SAMPLES
+import search_index as si  # noqa: E402
+from _search_samples import SAMPLES  # noqa: E402
 
 chk = T.chk
 
@@ -66,7 +66,7 @@ with IXO.tx() as c9:
 def SO(q, **kw):
     try:
         return si.search(q, today=TODAY, path=OP, budget_s=5, **kw)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return {"_exc": f"{type(e).__name__}: {e}"}
 
 
@@ -136,7 +136,7 @@ with IXW.tx() as c9:
 def SW(q, **kw):
     try:
         return si.search(q, today=TODAY, path=WP, budget_s=5, limit=50, **kw)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return {"_exc": f"{type(e).__name__}: {e}"}
 
 

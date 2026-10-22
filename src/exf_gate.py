@@ -1,8 +1,8 @@
 from __future__ import annotations
 import hashlib
-import hmac
 import time
 import urllib.request
+import ex_sign
 from exf_net import DAY
 from exf_net import PACE
 from exf_net import _Bal
@@ -37,8 +37,7 @@ def fetch_gate(env, t0: int, t1: int, dep_t0: int = None):
         qs = urllib.parse.urlencode(params)
         ts = str(_srv_ms("api.gateio.ws") // 1000)
         body_hash = hashlib.sha512(b"").hexdigest()
-        payload = f"GET\n{path}\n{qs}\n{body_hash}\n{ts}"
-        sig = hmac.new(sec.encode(), payload.encode(), hashlib.sha512).hexdigest()
+        sig = ex_sign.gate_sign(sec, "GET", path, qs, body_hash, ts)
         return http_json(f"https://api.gateio.ws{path}?{qs}",
                          {"KEY": key, "Timestamp": ts, "SIGN": sig})
 
@@ -103,8 +102,7 @@ def fills_gate(env, st, t0: int, t1: int):
         ts = str(_srv_ms("api.gateio.ws") // 1000)
         body_hash = hashlib.sha512(b"").hexdigest()
         path = "/api/v4/spot/my_trades"
-        payload = f"GET\n{path}\n{qs}\n{body_hash}\n{ts}"
-        sig = hmac.new(sec.encode(), payload.encode(), hashlib.sha512).hexdigest()
+        sig = ex_sign.gate_sign(sec, "GET", path, qs, body_hash, ts)
         return http_json(f"https://api.gateio.ws{path}?{qs}",
                          {"KEY": key, "Timestamp": ts, "SIGN": sig})
 
@@ -170,8 +168,7 @@ def _gate_get(env, path, params=None):
     qs = urllib.parse.urlencode(params or {})
     ts = str(_srv_ms("api.gateio.ws") // 1000)
     bh = hashlib.sha512(b"").hexdigest()
-    sig = hmac.new(sec.encode(), f"GET\n{path}\n{qs}\n{bh}\n{ts}".encode(),
-                   hashlib.sha512).hexdigest()
+    sig = ex_sign.gate_sign(sec, "GET", path, qs, bh, ts)
     return http_json(f"https://api.gateio.ws{path}" + (f"?{qs}" if qs else ""),
                      {"KEY": key, "Timestamp": ts, "SIGN": sig})
 

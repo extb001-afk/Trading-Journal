@@ -43,7 +43,7 @@
   };
   const lsGet = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {  } };
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = TJDOM.esc;
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
   const arr = v => (Array.isArray(v) ? v : []);
   const pvOn = () => { const a = API(); return !!(a && a.pvOn()); };
@@ -113,9 +113,10 @@
   const EX_ALIAS = { upbit: 'upbit', 업비트: 'upbit', bithumb: 'bithumb', 빗썸: 'bithumb', binance: 'binance', 바이낸스: 'binance', bybit: 'bybit', 바이빗: 'bybit', okx: 'okx',
     kucoin: 'kucoin', 쿠코인: 'kucoin', gate: 'gate', 'gate.io': 'gate', gateio: 'gate', 게이트: 'gate', hyperliquid: 'hyperliquid', 하이퍼리퀴드: 'hyperliquid', bitget: 'bitget',
     coinone: 'coinone', 코인원: 'coinone', korbit: 'korbit', 코빗: 'korbit', mexc: 'mexc', htx: 'htx', huobi: 'htx',
-    오케이엑스: 'okx', 게이트아이오: 'gate', 비트겟: 'bitget', 후오비: 'htx' };
+    오케이엑스: 'okx', 게이트아이오: 'gate', 비트겟: 'bitget', 후오비: 'htx',
+    coinbase: 'coinbase', 코인베이스: 'coinbase' };
   const EX_KO = { upbit: '업비트', bithumb: '빗썸', binance: '바이낸스', bybit: '바이빗', okx: 'OKX', kucoin: '쿠코인', gate: '게이트', hyperliquid: 'Hyperliquid', bitget: 'Bitget',
-    coinone: '코인원', korbit: '코빗', mexc: 'MEXC', htx: 'HTX' };
+    coinone: '코인원', korbit: '코빗', mexc: 'MEXC', htx: 'HTX', coinbase: '코인베이스' };
   const KO_AL = { 비트코인: 'BTC', 이더리움: 'ETH', 솔라나: 'SOL', 리플: 'XRP', 테더: 'USDT', 유에스디코인: 'USDC', 바이낸스코인: 'BNB', 도지코인: 'DOGE', 도지: 'DOGE', 에이다: 'ADA',
     카르다노: 'ADA', 트론: 'TRX', 아발란체: 'AVAX', 체인링크: 'LINK', 폴카닷: 'DOT', 폴리곤: 'POL', 라이트코인: 'LTC', 비트코인캐시: 'BCH', 시바이누: 'SHIB', 유니스왑: 'UNI',
     니어: 'NEAR', 앱토스: 'APT', 수이: 'SUI', 아비트럼: 'ARB', 옵티미즘: 'OP', 스텔라루멘: 'XLM', 이더리움클래식: 'ETC', 코스모스: 'ATOM', 페페: 'PEPE', 톤코인: 'TON', 헤데라: 'HBAR',
@@ -938,7 +939,7 @@
     ROOT = document.createElement('div');
     ROOT.id = 'tjSearch';
     ROOT.className = 'tjs-root';
-    ROOT.innerHTML = '<div class="tjs-dim" data-srch="close"></div><div class="tjs-box" role="dialog" aria-modal="true" aria-label="전체 검색"><div class="tjs-head"></div><div class="tjs-meta"></div><div class="tjs-body"><div class="tjs-list" role="listbox" aria-label="검색 결과"></div><div class="tjs-pv" aria-live="polite"></div></div><div class="tjs-keys"></div></div>';
+    TJDOM.set(ROOT, '<div class="tjs-dim" data-srch="close"></div><div class="tjs-box" role="dialog" aria-modal="true" aria-label="전체 검색"><div class="tjs-head"></div><div class="tjs-meta"></div><div class="tjs-body"><div class="tjs-list" role="listbox" aria-label="검색 결과"></div><div class="tjs-pv" aria-live="polite"></div></div><div class="tjs-keys"></div></div>');
     document.body.appendChild(ROOT);
     return ROOT;
   }
@@ -948,9 +949,9 @@
     const saved = savedGet().some(x => x.q === ST.q.trim());
     const ph = '코인 · 주소 · 해시 · 날짜 · 설정' + (wide() ? ' — 예: sol · 0x1234 · 10/2 · coin:ETH after:2026-09' : '');
     if (!inp) {
-      h.innerHTML = '<label class="tjs-in">' + ((a && a.IC.search) || '') + '<input id="tjsQ" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="tjsList" aria-autocomplete="list" aria-label="전체 검색" maxlength="' + Q_MAX + '" placeholder="' + esc(ph) + '">'
+      TJDOM.set(h, '<label class="tjs-in">' + ((a && a.IC.search) || '') + '<input id="tjsQ" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="tjsList" aria-autocomplete="list" aria-label="전체 검색" maxlength="' + Q_MAX + '" placeholder="' + esc(ph) + '">'
         + '<span class="tjs-askb" hidden>' + IX.spark + '<span class="t">문장으로 찾기</span></span><button type="button" class="tjs-star" data-srch="save" aria-label="이 검색 저장">' + IX.star + '</button><button type="button" class="tjs-x" data-srch="clear" aria-label="지우기">' + IX.x + '</button>'
-        + (wide() ? '<span class="tjs-cnt"></span><kbd class="tjs-kk">Esc</kbd>' : '') + '</label>' + (wide() ? '' : '<button type="button" class="tjs-close" data-srch="close">닫기</button>');
+        + (wide() ? '<span class="tjs-cnt"></span><kbd class="tjs-kk">Esc</kbd>' : '') + '</label>' + (wide() ? '' : '<button type="button" class="tjs-close" data-srch="close">닫기</button>'));
       const i2 = $('#tjsQ', R);
       i2.value = ST.q;
       i2.addEventListener('input', () => { ST.q = i2.value; ST.sel = 0; ST.expand = ''; ST.copyArm = -1; ST.kbd = false; if (ST.ask && ST.ask.q !== ST.q) ST.ask = null; run(); srvKick(); askKick(); paintBody(); });
@@ -986,9 +987,9 @@
     const scopes = q ? [['all', '전체', ST.groups.reduce((t, g) => t + gN(g), 0)]].concat(ST.groups.map(g => [g.kind, KL[g.kind], gN(g)])) : SCOPE0.map(s => [s[0], s[1], null]);
     if (q && ST.scope !== 'all' && !counts[ST.scope]) scopes.push([ST.scope, KL[ST.scope], 0]);
     h += '<div class="tjs-scopes" role="tablist" aria-label="찾을 종류">' + scopes.map(s => '<button type="button" role="tab" class="tjs-chip' + (ST.scope === s[0] ? ' on' : '') + '" aria-selected="' + (ST.scope === s[0]) + '" data-srch="scope" data-v="' + s[0] + '">' + esc(s[1]) + (s[2] != null ? ' <small class="pvx">' + Number(s[2]).toLocaleString('en-US') + '</small>' : '') + '</button>').join('') + '</div>';
-    mt.innerHTML = h;
+    TJDOM.set(mt, h);
     const cnt = $('.tjs-cnt', R);
-    if (cnt) cnt.innerHTML = q ? pvx(ST.groups.reduce((t, g) => t + gN(g), 0).toLocaleString('en-US') + '개') + (ST.srvBusy ? ' <span class="tjs-spin" aria-hidden="true"></span>' : '') : '';
+    if (cnt) TJDOM.set(cnt, q ? pvx(ST.groups.reduce((t, g) => t + gN(g), 0).toLocaleString('en-US') + '개') + (ST.srvBusy ? ' <span class="tjs-spin" aria-hidden="true"></span>' : '') : '');
   }
   function rowHTML(it, i) {
     const sel = i === ST.sel && (wide() || ST.kbd);
@@ -1020,7 +1021,7 @@
     const R = ensureRoot(), L = $('.tjs-list', R), q = ST.q.trim(), a = API(), P = ST.P || parseQ(ST.q);
     L.id = 'tjsList';
     paintMeta();
-    if (!q) { L.innerHTML = emptyHTML(); paintPv(); keysPaint(); logos(); return; }
+    if (!q) { TJDOM.set(L, emptyHTML()); paintPv(); keysPaint(); logos(); return; }
     let h = '';
     const exact = (P.type === 'hex' || P.type === 'b58') && P.hex.length >= 10 ? ST.flat.find(it => (it.addr && String(it.addr).toLowerCase() === P.hex.toLowerCase()) || (it.tx && String(it.tx).toLowerCase() === P.hex.toLowerCase())) : null;
     let i = 0;
@@ -1050,7 +1051,7 @@
     else if (srvFail && ST.flat.length) h += '<div class="tjs-tip tjs-warn">전체 기록 검색이 실패했어요 — 받아 둔 화면 데이터에서만 찾았어요(더 있을 수 있어요)</div>';
     if (srvPart && ST.flat.length) h += '<div class="tjs-tip tjs-warn">시간이 모자라 <b>일부만</b> 찾았어요 — 조건을 더 넣으면 다 찾아요</div>';
     if (srvOk && ST.srv.upgrading) h += '<div class="tjs-tip"><span class="tjs-spin" aria-hidden="true"></span> 검색 색인을 새 형식으로 바꾸는 중 — 잠시 일부만 나올 수 있어요</div>';
-    L.innerHTML = h;
+    TJDOM.set(L, h);
     paintPv();
     keysPaint();
     paintHead();
@@ -1059,16 +1060,16 @@
   }
   const logos = () => { const a = API(); if (a && a.hydrateLogos) { try { a.hydrateLogos(); } catch (e) {  } } };
   function actBtn(x, v, pri) {
-    if (x.ext) return '<a class="btn sm' + (pri ? ' pri' : '') + '" href="' + esc(x.ext) + '" target="_blank" rel="noopener noreferrer">' + esc(x.t) + ' ↗</a>';
+    if (x.ext) return '<a class="btn sm' + (pri ? ' pri' : '') + '" href="' + esc(TJDOM.safeUrl(x.ext)) + '" target="_blank" rel="noopener noreferrer">' + esc(x.t) + ' ↗</a>';
     const armed = x.copy && ST.copyArm === v;
     return '<button type="button" class="btn sm' + (pri ? ' pri' : '') + '" data-srch="act" data-v="' + v + '">' + esc(armed ? '한 번 더 누르면 복사' : x.t) + '</button>';
   }
   function paintPv() {
     const R = ensureRoot(), V = $('.tjs-pv', R), a = API();
     V._it = null; V._acts = null;
-    if (!wide()) { V.innerHTML = ''; return; }
+    if (!wide()) { TJDOM.clear(V); return; }
     const it = ST.q.trim() ? ST.flat[ST.sel] : null;
-    if (!it || !a) { V.innerHTML = '<div class="tjs-pv0">' + IX.spark + '<b>' + (ST.q.trim() ? '결과를 고르면 여기서 미리 봐요' : '찾고 싶은 걸 넣어 보세요') + '</b><span>↑↓ 로 고르고 ↵ 로 그 화면 그 자리로</span></div>'; return; }
+    if (!it || !a) { TJDOM.set(V, '<div class="tjs-pv0">' + IX.spark + '<b>' + (ST.q.trim() ? '결과를 고르면 여기서 미리 봐요' : '찾고 싶은 걸 넣어 보세요') + '</b><span>↑↓ 로 고르고 ↵ 로 그 화면 그 자리로</span></div>'); return; }
     const m = a.m, kv = (k, v) => '<div><span>' + k + '</span><b>' + v + '</b></div>';
     let h = '<div class="tjs-pt">' + kindIcon(it.kind, it) + '<div><b>' + it.title + '</b><span>' + esc(KL[it.kind]) + '</span></div></div>';
     if (it.kind === 'coin' && it.g) {
@@ -1081,9 +1082,9 @@
         + kv('돌려받음', m(num(r.returnedUsd), { compact: true })) + kv('전송', pvx(num(r.count) + '건')) + '</div><div class="tjs-chs">' + arr(r.chainNames).slice(0, 4).map(c => '<span class="pill g sm">' + esc(c) + '</span>').join(' ') + '</div>';
     } else if (it.sub) h += '<div class="tjs-pvsub">' + it.sub + '</div>' + (it.rt ? '<div class="tjs-pvrt">' + it.rt + '</div>' : '');
     const acts = [{ t: openLabel(it), go: () => openItem(it), k: '↵' }].concat(it.alt ? [Object.assign({ k: KMOD + '↵' }, it.alt)] : []).concat(arr(it.acts));
-    h += '<div class="tjs-pacts">' + acts.map((x, k) => (x.ext ? '<a class="tjs-pa" href="' + esc(x.ext) + '" target="_blank" rel="noopener noreferrer"><span>' + esc(x.t) + ' ↗</span><span class="sp"></span></a>'
+    h += '<div class="tjs-pacts">' + acts.map((x, k) => (x.ext ? '<a class="tjs-pa" href="' + esc(TJDOM.safeUrl(x.ext)) + '" target="_blank" rel="noopener noreferrer"><span>' + esc(x.t) + ' ↗</span><span class="sp"></span></a>'
       : '<button type="button" class="tjs-pa' + (k === 0 ? ' pri' : '') + '" data-srch="pact" data-v="' + k + '"><span>' + esc(x.copy && ST.copyArm === 'p' + k ? '한 번 더 누르면 복사' : x.t) + '</span>' + (x.sub ? '<small>' + esc(x.sub) + '</small>' : '') + '<span class="sp"></span>' + (x.k ? '<kbd class="tjs-kk">' + esc(x.k) + '</kbd>' : '') + '</button>')).join('') + '</div>';
-    V.innerHTML = h;
+    TJDOM.set(V, h);
     V._acts = acts; V._it = it;
   }
   const openLabel = it => ({ coin: '대시보드 보유 코인에서 열기', cycle: '매매일지 사이클 열기', outflow: '보낸 내역에서 열기', sale: '보낸 내역 세일 참가금 보기', tx: '그날 기록에서 열기', event: '그날 기록에서 열기', day: '일별에서 열기',
@@ -1091,9 +1092,9 @@
     deposit: '입금 주소 열기', setting: '그 설정으로 가기' }[it.kind] || '열기');
   function keysPaint() {
     const R = ensureRoot(), K = $('.tjs-keys', R);
-    if (!wide()) { K.innerHTML = ''; return; }
+    if (!wide()) { TJDOM.clear(K); return; }
     const kk = s => '<kbd class="tjs-kk">' + s + '</kbd>';
-    K.innerHTML = '<span>' + kk('↑') + kk('↓') + ' 이동</span><span>' + kk('↵') + ' 열기</span><span>' + kk(KMOD + '↵') + ' 다른 화면으로</span><span>' + kk('Tab') + ' 종류 바꾸기</span><span>' + kk('Esc') + ' 닫기</span><span class="sp"></span><span>' + kk('/') + ' 또는 ' + kk(KMOD + 'K') + ' 로 열기</span>';
+    TJDOM.set(K, '<span>' + kk('↑') + kk('↓') + ' 이동</span><span>' + kk('↵') + ' 열기</span><span>' + kk(KMOD + '↵') + ' 다른 화면으로</span><span>' + kk('Tab') + ' 종류 바꾸기</span><span>' + kk('Esc') + ' 닫기</span><span class="sp"></span><span>' + kk('/') + ' 또는 ' + kk(KMOD + 'K') + ' 로 열기</span>');
   }
   function paintAll() { run(); paintHead(); paintBody(); }
 
@@ -1101,7 +1102,7 @@
     const a = API();
     if (!a || locked()) { if (typeof q === 'string' && a && a.S && !a.S.locked) ST.pend = { q, scope: scope || 'all' }; return; }
     pvGuard();
-    ensureRoot(); addCss();
+    ensureRoot();
     if (typeof q === 'string') { ST.q = q.slice(0, Q_MAX); ST.sel = 0; ST.expand = ''; }
     if (scope) ST.scope = scope;
     if (!ST.open) {
@@ -1130,7 +1131,7 @@
     ST.ctl = null; ST.srv = null; ST.srvQ = ''; ST.srvPv = null; ST.srvBusy = false; ST.srvErr = ''; ST.items = []; ST.flat = []; ST.groups = []; ST.P = null;
     ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.gen = (ST.gen || 0) + 1;
     ST.ask = null; ST.askBusy = ''; ASK_CACHE.clear(); ST.q = ''; ST.sel = 0; ST.expand = ''; wipeQ();
-    if (ROOT) { ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) e.innerHTML = ''; }); const i = ROOT.querySelector('#tjsQ'); if (i) i.value = ''; }
+    if (ROOT) { ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) TJDOM.clear(e); }); const i = ROOT.querySelector('#tjsQ'); if (i) i.value = ''; }
     hideBack(); ST.back = null;
     return true;
   }
@@ -1142,7 +1143,7 @@
     ST.srvAdd = {}; ST.srvMoreReq = null; ST.srvMoreBusy = ''; ST.gen = (ST.gen || 0) + 1;
     ST.ask = null; ST.askBusy = ''; ST.q = ''; ST.after = null; ST.pend = null; ST.srvPv = null; ASK_CACHE.clear(); wipeQ();
     hideBack(); ST.back = null;
-    if (ROOT) ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) e.innerHTML = ''; });
+    if (ROOT) ['.tjs-list', '.tjs-pv', '.tjs-meta'].forEach(sel => { const e = ROOT.querySelector(sel); if (e) TJDOM.clear(e); });
     const i = ROOT && ROOT.querySelector('#tjsQ'); if (i) i.value = '';
   }
   function close(viaPop) {
@@ -1218,7 +1219,7 @@
     const el = document.createElement('div');
     el.id = 'tjsBack'; el.className = 'tjs-back'; el.setAttribute('role', 'status');
     const qShow = pvOn() ? nameMask(q) : q;
-    el.innerHTML = ((API() && API().IC.search) || '') + '<span class="tjs-bt">검색 ‘' + esc(qShow.length > 24 ? qShow.slice(0, 24) + '…' : qShow) + '’ 에서 열림</span><span class="sp"></span><button type="button" data-srch="reopen">결과로 ‹</button><button type="button" class="x" data-srch="unback" aria-label="닫기">' + IX.x + '</button>';
+    TJDOM.set(el, ((API() && API().IC.search) || '') + '<span class="tjs-bt">검색 ‘' + esc(qShow.length > 24 ? qShow.slice(0, 24) + '…' : qShow) + '’ 에서 열림</span><span class="sp"></span><button type="button" data-srch="reopen">결과로 ‹</button><button type="button" class="x" data-srch="unback" aria-label="닫기">' + IX.x + '</button>');
     backEl = el;
     ST.back = { q, sc, at: Date.now(), hc: 0 };
     const B = document.getElementById('banners');
@@ -1361,7 +1362,7 @@
     if (top && !document.getElementById('srchBtn')) {
       const b = document.createElement('button');
       b.type = 'button'; b.id = 'srchBtn'; b.className = 'tjs-spill'; b.setAttribute('data-srch', 'open'); b.setAttribute('aria-label', '전체 검색 (' + KMOD + '+K)');
-      b.innerHTML = ((a && a.IC.search) || '') + '<span class="t">검색</span><span class="sp"></span><kbd class="tjs-kk">' + (isMac ? '⌘K' : 'Ctrl K') + '</kbd>';
+      TJDOM.set(b, ((a && a.IC.search) || '') + '<span class="t">검색</span><span class="sp"></span><kbd class="tjs-kk">' + (isMac ? '⌘K' : 'Ctrl K') + '</kbd>');
       const st = document.getElementById('status');
       top.insertBefore(b, st || null);
     }
@@ -1374,7 +1375,7 @@
         if (!anchor) return;
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'iconbtn srchb'; b.setAttribute('data-srch', 'open'); b.setAttribute('aria-label', '전체 검색');
-        b.innerHTML = (a && a.IC.search) || '';
+        TJDOM.set(b, (a && a.IC.search) || '');
         mt.insertBefore(b, anchor);
       };
       put();
@@ -1382,126 +1383,6 @@
     }
   }
 
-  function addCss() {
-    if (document.getElementById('tjsCss')) return;
-    const s = document.createElement('style');
-    s.id = 'tjsCss';
-    s.textContent = CSS;
-    document.head.appendChild(s);
-  }
-  const CSS = [
-    'html.tjs-on{overflow:hidden}',
-    '.tjs-root{display:none;position:fixed;inset:0;z-index:90}',
-    '.tjs-root.open{display:block}',
-    '.tjs-root [hidden]{display:none!important}',
-    '.tjs-dim{position:absolute;inset:0;background:var(--dim);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);animation:tjsFade .16s var(--ease)}',
-    '.tjs-box{position:absolute;left:50%;top:84px;transform:translateX(-50%);width:min(860px,calc(100vw - 48px));max-height:calc(100vh - 120px);background:var(--surface);border:1px solid var(--line2);border-radius:16px;box-shadow:var(--pop);display:flex;flex-direction:column;overflow:hidden;animation:tjsIn .2s var(--ease)}',
-    '@keyframes tjsIn{from{opacity:0;transform:translate(-50%,-8px) scale(.985)}to{opacity:1;transform:translate(-50%,0)}}',
-    '@keyframes tjsFade{from{opacity:0}to{opacity:1}}',
-    '.tjs-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}',
-    '.tjs-in{flex:1;display:flex;align-items:center;gap:10px;min-width:0;height:44px;padding:0 6px 0 10px;border-radius:12px;background:var(--surface2);border:1.5px solid var(--accent);box-shadow:0 0 0 3px var(--accentBg);cursor:text}',
-    '.tjs-in>svg{width:19px;height:19px;color:var(--muted);flex:none}',
-    '.tjs-in input{flex:1;min-width:0;height:100%;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:16px;font-weight:600;letter-spacing:-.01em;-webkit-appearance:none;appearance:none}',
-    '.tjs-in input::placeholder{color:var(--faint);font-weight:500}',
-    '.tjs-in input::-webkit-search-cancel-button{display:none}',
-    '.tjs-x,.tjs-star{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:var(--muted);background:var(--surface3);border:0;flex:none;cursor:pointer}',
-    '.tjs-star{background:transparent}.tjs-star.on{color:var(--warn)}.tjs-star.on svg{fill:currentColor}',
-    '.tjs-x svg{width:13px;height:13px}.tjs-star svg{width:17px;height:17px}',
-    '.tjs-cnt{font-size:12.5px;color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}',
-    '.tjs-close{font-size:15px;font-weight:700;color:var(--accent);background:none;border:0;padding:10px 4px;cursor:pointer;white-space:nowrap}',
-    '.tjs-kk{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text2);background:var(--surface3);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:0 5px;line-height:1.6;white-space:nowrap}',
-    '.tjs-meta{padding:0 14px}',
-    '.tjs-hide{display:flex;align-items:center;gap:8px;margin:10px 0 0;padding:8px 12px;border-radius:10px;background:var(--warnBg);color:var(--warn);font-size:12.5px;font-weight:650}',
-    '.tjs-hide svg{width:16px;height:16px;flex:none}',
-    '.tjs-askb{flex:none;height:26px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--c4) 16%,transparent);color:var(--c4);font-size:12px;font-weight:650;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.tjs-askb svg{width:13px;height:13px}.tjs-askb.busy svg{animation:tjsSpin 1.2s linear infinite}',
-    '.tjs-ask{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px -14px 0;padding:10px 14px;background:var(--surface2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}',
-    '.tjs-asklab{font-size:12.5px;color:var(--muted)}.tjs-ask .sp{flex:1}',
-    '.tjs-ac{height:30px;padding:0 6px 0 12px;border-radius:999px;background:var(--segOn);font-family:var(--mono);font-size:12.5px;display:inline-flex;align-items:center;gap:6px;color:var(--text)}.tjs-ac.txt{font-family:inherit;padding-right:12px;color:var(--text2)}',
-    '.tjs-ac button{border:0;background:transparent;color:var(--muted);padding:0;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;cursor:pointer}.tjs-ac button:hover{background:var(--surface3);color:var(--text)}.tjs-ac svg{width:12px;height:12px}',
-    '.tjs-asksave{height:30px;padding:0 12px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--text2);font-size:12.5px;font-weight:650;cursor:pointer;white-space:nowrap}.tjs-asksave:hover{color:var(--text);border-color:var(--text2)}',
-    '.tjs-asknote{font-size:12px;color:var(--faint);flex-basis:100%;text-align:right}.tjs-askecho{flex-basis:100%;font-size:12.5px;color:var(--text2)}',
-    '@media (max-width:640px){.tjs-asknote{display:none}.tjs-ask{margin-top:6px}.tjs-askb{width:26px;padding:0;justify-content:center}.tjs-askb .t{display:none}}',
-    '.tjs-fchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px}.tjs-fchips>svg{width:15px;height:15px;color:var(--accent)}',
-    '.tjs-fc{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 6px 0 10px;border-radius:99px;border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);background:var(--accentBg);color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer}',
-    '.tjs-fc svg{width:12px;height:12px}.tjs-fc .sr,.tjs-root .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}',
-    '.tjs-scopes{display:flex;gap:6px;padding:10px 0;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line);margin:0 -14px;padding-left:14px;padding-right:14px}',
-    '.tjs-scopes::-webkit-scrollbar{display:none}',
-    '.tjs-chip{flex:none;height:32px;display:inline-flex;align-items:center;gap:5px;padding:0 12px;border-radius:99px;background:var(--surface2);border:1px solid var(--line);color:var(--text2);font-size:13px;font-weight:650;cursor:pointer;white-space:nowrap}',
-    '.tjs-chip small{color:var(--faint);font-weight:650}',
-    '.tjs-chip.on{background:var(--accentBg);border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--accent)}.tjs-chip.on small{color:var(--accent)}',
-    '.tjs-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 320px}',
-    '.tjs-list{overflow-y:auto;padding:2px 12px 14px;min-height:0;overscroll-behavior:contain}',
-    '.tjs-pv{border-left:1px solid var(--line);background:var(--surface2);padding:16px;overflow-y:auto;min-height:0}',
-    '.tjs-gh{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:750;color:var(--muted);margin:14px 4px 6px}.tjs-gh .n{color:var(--faint);font-weight:650}.tjs-gh .sp{flex:1}',
-    '.tjs-lnk{background:none;border:0;color:var(--accent);font-size:12.5px;font-weight:700;cursor:pointer;padding:4px 2px}',
-    '.tjs-sl{border-radius:14px;background:var(--surface);border:1px solid var(--line);padding:2px 6px}',
-    '.tjs-r{display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:10px;min-width:0;cursor:pointer;position:relative;transition:background .12s}',
-    '.tjs-r+.tjs-r{box-shadow:0 -1px 0 var(--line)}',
-    '.tjs-r:hover{background:var(--surface2)}',
-    '.tjs-r.sel{background:var(--accentBg);box-shadow:none}.tjs-r.sel+.tjs-r{box-shadow:none}',
-    '.tjs-r.spam{opacity:.6}',
-    '.tjs-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;flex:none;background:var(--surface2);color:var(--text2);border:1px solid var(--line)}',
-    '.tjs-ic svg{width:16px;height:16px}.tjs-ic.star{color:var(--warn)}',
-    '.tjs-cic{flex:none;display:grid;place-items:center;width:32px;height:32px}',
-    '.tjs-tx{flex:1;min-width:0}',
-    '.tjs-tx>b{display:block;font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}',
-    '.tjs-tx>b .pill{margin-left:6px}',
-    '.tjs-tx>span{display:block;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}',
-    '.tjs-root mark{background:transparent;color:var(--accent);font-weight:800}',
-    '.tjs-mono{font-family:var(--mono);font-size:.93em;font-weight:650}.tjs-mut{color:var(--muted);font-weight:500}',
-    '.tjs-kb{display:inline-block;font-size:11px;font-weight:750;padding:0 6px;border-radius:5px;background:var(--surface3);color:var(--text2);line-height:1.6;vertical-align:1px}',
-    '.tjs-rt{text-align:right;flex:none;max-width:46%;display:flex;flex-direction:column;align-items:flex-end}.tjs-rt>b{display:flex;align-items:baseline;justify-content:flex-end;font-family:var(--mono);font-size:13px;font-weight:650;white-space:nowrap}.tjs-rt>span{display:block;font-size:11.5px;color:var(--muted);white-space:nowrap}',
-    '.tjs-rt .up{color:var(--up)}.tjs-rt .down{color:var(--down)}.tjs-rt .aprx{display:inline;color:var(--faint);font-weight:500}',
-    '.tjs-mask{font-family:var(--mono);letter-spacing:.06em;color:var(--muted)}',
-    '.tjs-go{font-size:11.5px;color:var(--faint);font-weight:700;white-space:nowrap;flex:none}',
-    '.tjs-kbd{flex:none;display:grid;place-items:center;width:24px;height:22px;border-radius:6px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);color:var(--accent)}.tjs-kbd svg{width:13px;height:13px}',
-    '.tjs-rx{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--faint);background:none;border:0;cursor:pointer}.tjs-rx svg{width:14px;height:14px}.tjs-rx:hover{color:var(--text);background:var(--surface3)}',
-    '.tjs-moreq{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:12px;border:1px dashed var(--line2);margin-top:8px;font-size:13px;color:var(--text2);background:none;cursor:pointer;text-align:left}',
-    '.tjs-moreq svg{width:16px;height:16px;color:var(--accent);flex:none}.tjs-moreq .sp{flex:1}',
-    '.tjs-tip{font-size:12px;color:var(--muted);line-height:1.65;padding:10px 12px;border-radius:12px;background:var(--surface2);margin-top:12px}.tjs-tip b{color:var(--text2)}',
-    '.tjs-tip code{font-family:var(--mono);font-size:11.5px;background:var(--surface3);padding:0 4px;border-radius:4px;color:var(--text2)}',
-    '.tjs-tip.tjs-warn{background:var(--warnBg);color:var(--warn)}.tjs-tip.tjs-warn b{color:inherit}.tjs-ign{margin-top:10px}.tjs-gh .n .tjs-of{color:var(--faint);font-weight:600}',
-    '.tjs-srvmore[disabled]{opacity:.6;cursor:default}',
-    '.tjs-none{display:flex;flex-direction:column;gap:4px;padding:28px 12px;text-align:center;color:var(--muted);font-size:13px}.tjs-none b{color:var(--text);font-size:14.5px}',
-    '.tjs-exact{border-radius:14px;background:var(--surface);border:1px solid var(--line);padding:12px}.tjs-exh{font-size:14px;font-weight:700;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.tjs-acts{display:flex;flex-wrap:wrap;gap:6px}',
-    '.tjs-pv0{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;color:var(--muted);font-size:12.5px;padding:60px 12px}.tjs-pv0 svg{width:28px;height:28px;color:var(--accent);opacity:.8}.tjs-pv0 b{color:var(--text2);font-size:14px}',
-    '.tjs-pt{display:flex;align-items:center;gap:10px}.tjs-pt>div{min-width:0}.tjs-pt b{display:block;font-size:17px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tjs-pt span{font-size:12px;color:var(--muted)}',
-    '.tjs-big{font-size:26px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin-top:12px}',
-    '.tjs-kvs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.tjs-kvs>div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0}',
-    '.tjs-kvs span{font-size:11.5px;color:var(--muted);display:block;font-weight:600}.tjs-kvs b{font-size:14px;font-variant-numeric:tabular-nums;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-    '.tjs-kvs .up{color:var(--up)}.tjs-kvs .down{color:var(--down)}',
-    '.tjs-chs{margin-top:10px;display:flex;flex-wrap:wrap;gap:4px}',
-    '.tjs-pvsub{margin-top:12px;font-size:13px;color:var(--text2);line-height:1.6}.tjs-pvrt{margin-top:8px}.tjs-pvrt .tjs-rt{text-align:left;max-width:none}.tjs-pvrt .tjs-rt b{font-size:18px}',
-    '.tjs-pacts{display:flex;flex-direction:column;gap:6px;margin-top:16px}',
-    '.tjs-pa{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;background:var(--surface);border:1px solid var(--line);font-size:13px;font-weight:650;color:var(--text2);cursor:pointer;text-align:left;text-decoration:none}',
-    '.tjs-pa small{font-size:11px;color:var(--faint);font-weight:600}.tjs-pa .sp{flex:1}.tjs-pa:hover{border-color:var(--line2);color:var(--text)}',
-    '.tjs-pa.pri{background:var(--accentBg);border-color:transparent;color:var(--accent)}',
-    '.tjs-keys{display:flex;gap:14px;align-items:center;padding:9px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);background:var(--surface)}',
-    '.tjs-keys span{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}.tjs-keys .sp{flex:1}',
-    '.tjs-spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);display:inline-block;animation:tjsSpin .8s linear infinite;vertical-align:-2px}',
-    '@keyframes tjsSpin{to{transform:rotate(360deg)}}',
-    '.tjs-spill{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 8px 0 11px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;white-space:nowrap;min-width:132px;cursor:pointer;flex:none;transition:border-color .15s,color .15s}',
-    '.tjs-spill:hover{border-color:var(--accent);color:var(--text)}.tjs-spill svg{width:16px;height:16px}.tjs-spill .sp{flex:1}',
-    '@media (max-width:1360px){.tjs-spill{min-width:0}.tjs-spill .t,.tjs-spill .sp{display:none}}',
-    '@media (max-width:1100px){.tjs-spill{width:36px;padding:0;justify-content:center;gap:0}.tjs-spill .tjs-kk{display:none}}',
-    '.m-top .srchb{color:var(--text)}',
-    '@media (max-width:440px){.m-top .logo .ltx{display:none}}',
-    '.tjs-back{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-radius:10px;background:var(--accentBg);color:var(--accent);font-size:13px;font-weight:700;min-width:0;animation:tjsFade .2s var(--ease)}',
-    '.tjs-back>svg{width:15px;height:15px;flex:none}.tjs-back .tjs-bt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.tjs-back .sp{flex:1;min-width:6px}',
-    '.tjs-back button{background:none;border:0;color:var(--accent);font:inherit;font-weight:750;cursor:pointer;padding:4px 6px;white-space:nowrap}.tjs-back button.x{color:var(--muted);display:grid;place-items:center}.tjs-back button.x svg{width:14px;height:14px}',
-    '@media (max-width:640px){',
-    '  .tjs-box{left:0;top:0;transform:none;width:100%;height:100%;max-height:none;border-radius:0;border:0;animation:tjsUp .22s var(--ease)}',
-    '  @keyframes tjsUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}',
-    '  .tjs-head{padding:max(10px,env(safe-area-inset-top)) 14px 8px;border-bottom:0}',
-    '  .tjs-body{grid-template-columns:1fr}.tjs-pv{display:none}',
-    '  .tjs-list{padding:0 14px calc(24px + env(safe-area-inset-bottom))}',
-    '  .tjs-r{padding:10px 6px;min-height:52px}',
-    '  .tjs-keys{display:none}',
-    '  .tjs-chip{height:34px}',
-    '}',
-    '@media (prefers-reduced-motion:reduce){.tjs-box,.tjs-dim,.tjs-back{animation:none}}'
-  ].join('\n');
 
   function watchSig() {
     const a = API();
@@ -1512,7 +1393,6 @@
   }
   function boot() {
     if (!API()) { setTimeout(boot, 50); return; }
-    addCss();
     mountHeader();
     document.addEventListener('click', onClick, true);
     window.addEventListener('keydown', onKey, true);

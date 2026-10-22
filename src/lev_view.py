@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import math
 import re
+
+import num_parse
 
 EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "hyperliquid": "하이퍼리퀴드",
          "dydx": "dYdX", "lighter": "Lighter", "gmx": "GMX", "jupiter": "Jupiter", "pacifica": "Pacifica"}
@@ -20,13 +21,7 @@ QUOTE_RX = re.compile(r"[-_/]?(USDT|USDC|USD|BUSD|FDUSD)(?:[-_]?(SWAP|PERP|M)|[-
 
 
 def _f(x):
-    if x is None or isinstance(x, bool):
-        return None
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return v if math.isfinite(v) else None
+    return num_parse.to_float(x, allow_bool=False)
 
 
 def base_of(sym) -> str:
@@ -63,7 +58,7 @@ def _year_rate(rate, period):
 
 def _risk_space(m):
     v, call, liq, warn = _f(m.get("v")), _f(m.get("call")), _f(m.get("liq")), _f(m.get("warn"))
-    inv = lambda x: (1.0 / x) if x and x > 0 else None
+    inv = lambda x: (1.0 / x) if x and x > 0 else None   # noqa: E731
     if m.get("inf"):
         return (0.0, inv(call), inv(liq), inv(warn)) if m.get("risk") == "down" else (0.0, call, liq, warn)
     if v is None:
@@ -419,7 +414,7 @@ def build(lev: dict, futs: dict, price, th_liq_pct: float = 10.0, liq_mem: dict 
     th = max(0.001, float(th_liq_pct or 10.0) / 100.0)
     prods = [p for p in (lev.get("products") or []) if isinstance(p, dict)]
     pmap = {(p.get("ex"), p.get("product")): p for p in prods}
-    ok = lambda ex, pr: (pmap.get((ex, pr)) or {}).get("status_eff") == "ok"
+    ok = lambda ex, pr: (pmap.get((ex, pr)) or {}).get("status_eff") == "ok"   # noqa: E731
     rows = []
     acct_mm, acct_mm_at = {}, {}
     lev_pos = {}

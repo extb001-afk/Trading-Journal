@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import os
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.error  # noqa: E402
 
 CFG = {"wallets": [{"type": "evm", "chain": "base", "address": "0x" + "1f" * 20, "label": "시험"},
                    {"type": "bsc_rpc", "address": "0x" + "2e" * 20, "label": "시험2"}],
@@ -17,14 +17,14 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import bf_engine
-import evm_watch
-import nodekeys as NK
-import onboarding
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss, runner_fp  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -104,29 +104,29 @@ def call(url):
     try:
         bf_engine.rpc_call(url, "debug_traceTransaction", ["0x" + "ab" * 32, {"tracer": "callTracer"}], retries=1, timeout=5)
         return "ok"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return getattr(e, "kind", type(e).__name__)
 
 
 def rec():
-    return common.read_json(NK._qn_path(), None)
+    return statefile.read_json(NK._qn_path(), None)
 
 
 def set_first(host, ago):
     r = rec()
     r["hosts"][host]["first"] = int(r["hosts"][host]["first"]) - ago
-    common.atomic_write_json(NK._qn_path(), r)
+    statefile.atomic_write_json(NK._qn_path(), r)
 
 
 def fps():
     cfg9 = ss.load_config_quiet()
-    return {u: ss.unit_inputs(u, cfg9)[2] for u in ("evm", "bsc", "core", "web")}
+    return {u: runner_fp.unit_inputs(u, cfg9)[2] for u in ("evm", "bsc", "core", "web")}
 
 
 for nm9, env9 in (("키 없음", {}), ("Ankr 키만", {NK.ENV_ANKR: "TESTankr0000000000000001"})):
     c = applied(env9)
     nd = evm_watch.rpc_nodes(c, "base")
-    check(f"O1 {nm9} = Base trace 내장 drpc(16차 그대로) · QuickNode 없음", nd["trace"] == DRPC and not has_qn(c) and "trace_rpcs" not in c["chains"]["base"],
+    check(f"O1 {nm9} = Base trace 내장 drpc(종전 그대로) · QuickNode 없음", nd["trace"] == DRPC and not has_qn(c) and "trace_rpcs" not in c["chains"]["base"],
           (nd["trace"], c["chains"]["base"]))
 check("O1c 키 없음 = 거부 표식 없어도·있어도 urls 에 QuickNode 없음", not any(p == "quicknode" for v in NK.urls({}).values() for p, _u in v))
 
@@ -134,7 +134,7 @@ ss.write_env({NK.ENV_QN: ETH})
 reset_slot()
 c = applied()
 nd = evm_watch.rpc_nodes(c, "base")
-check("O2 키 있음 = Base trace QuickNode 먼저(뒤 16차 기본 drpc — cn18) · BSC·Base 상태 예비 · 로그 풀엔 없음", nd["trace"] == [QBASE] + DRPC and c["chains"]["base"]["archive_rpcs"][-1] == QBASE
+check("O2 키 있음 = Base trace QuickNode 먼저(뒤 기본 drpc) · BSC·Base 상태 예비 · 로그 풀엔 없음", nd["trace"] == [QBASE] + DRPC and c["chains"]["base"]["archive_rpcs"][-1] == QBASE
       and c["bsc"]["archive_rpcs"][-1] == QBSC and QBASE not in c["chains"]["base"]["rpc_logs"] and QBSC not in c["bsc"]["logs_rpcs"], (nd["trace"], c))
 FP0 = fps()
 
@@ -260,7 +260,7 @@ try:
     for _ in range(3):
         call(QBASE)
     r = onboarding._dispatch("keys/delete", {"group": "quicknode"})
-    check("O7f 삭제 = 표식 지움 · 키 없음 = 16차 경로", r.get("ok") is True and rec() is None and evm_watch.rpc_nodes(applied(), "base")["trace"] == DRPC, (r, rec()))
+    check("O7f 삭제 = 표식 지움 · 키 없음 = 종전 경로", r.get("ok") is True and rec() is None and evm_watch.rpc_nodes(applied(), "base")["trace"] == DRPC, (r, rec()))
 
     def rpc_402(u, m, p, timeout=15.0):
         raise bf_engine.NetError("시험 오류", "http4xx", code=402)
@@ -280,9 +280,8 @@ check("O8b 요금제 칩 '1개월 체험' · '키 거부됨' 표시 · QuickNode
       and "k === 'quicknode'" in js and "QuickNode 필수" not in js)
 nm9 = ss.GROUPS["quicknode"]["name"]
 check("O8c 설정 칸 이름 = 유료나 1개월 무료 체험 · '무료 플랜' 없음", "1개월 무료 체험" in nm9 and "무료 플랜" not in nm9 and "필수" not in nm9, nm9)
-root = os.path.abspath(os.path.join(T.HERE, ".."))
 for fn in (".env.example", "README.md", os.path.join("docs", "API_KEYS.md")):
-    tx = open(os.path.join(root, fn), encoding="utf-8").read()
+    tx = T.doc_text(fn)
     check(f"O8d {fn} = QuickNode 1개월 무료 체험·상시 무료 없음(무료 플랜도 됨 문구 없음)", "1개월 무료 체험" in tx and "무료 플랜도 됨" not in tx)
 src9 = open(os.path.join(T.SRC, "onboarding.py"), encoding="utf-8").read()
 check("O8e 설정 상태에 QuickNode 필수 판정 없음(needs_quicknode·evmNeedsQuickNode 없음)", "needs_quicknode" not in src9 and "NeedsQuick" not in src9 and "NeedsQuick" not in js)

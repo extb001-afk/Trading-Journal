@@ -1,10 +1,10 @@
-import acct_norm
 import calcguard
-import common
+import acct_norm, histmark, paths, statefile
 import db as dbm
 import json
 import os
 import re
+import recon_adj
 import sqlite3
 import time
 from core_common import CLASSIFIER_VER
@@ -247,7 +247,7 @@ class ExfFutMixin:
                  "f_sum": str(sum(Decimal(int(f9["qb"])) for f9 in fut) / scale), "late": late_mv}, last9)
 
     def _exf_fut_late_place(self, ex: str, sym: str, base: dict, state: dict, repl: set, aid: int, scale: Decimal) -> list:
-        if sym in self.EXF_FIX_SKIP:
+        if sym in acct_norm.ex_off_ledger(ex):
             return []
         out, bnds9 = [], None
         for k in sorted(list(state)):
@@ -344,7 +344,7 @@ class ExfFutMixin:
                 from9 = None
             hi9 = done9 if from9 is None else min(done9, from9)
             _fts, evs9 = self._exf_fut_events(ex)
-            if _fts is None and not os.path.exists(os.path.join(common.STATE_DIR, f"futures_{ex}.json")):
+            if _fts is None and not os.path.exists(paths.state(f"futures_{ex}.json")):
                 continue
             if not _fts or int(_fts) < hi9:
                 plan.append({"ex": ex, "sym": "*", "err": f"선물 정산 파일이 없거나 손상·낡음(파일 {_fts} < 마지막 대사 {hi9})", "skip": []})
@@ -352,7 +352,7 @@ class ExfFutMixin:
             first9 = self._exf_first_bts(ex) if evs9 else None
             for sym in sorted(evs9):
                 fb9 = {b9 for (s9,) in self.conn.execute("SELECT DISTINCT source_id FROM postings WHERE source_ns=? AND event='EXF_ADJUST'"
-                                                           " AND source_id LIKE ?", (f"{ex}:{common.EXF_FUT_NS}", f"exfrecon:{sym}:%"))
+                                                           " AND source_id LIKE ?", (f"{ex}:{histmark.EXF_FUT_NS}", f"exfrecon:{sym}:%"))
                        for b9 in (self._exf_bts(s9),) if b9 is not None}
                 m9, last9 = self._exf_fut_plan_sym(ex, sym, evs9[sym], log9, hi9, first9, fb9, cur_ok=(hi9 == done9))
                 if m9:
@@ -378,13 +378,15 @@ class ExfFutMixin:
                 tot9 -= int(o["qb"])
             for o in m["upd"]:
                 self._amend_leg(o["pid"], int(m["aid"]), loc, int(o["qb_new"]) - int(o["qb"]), qb_new=o["qb_new"], ts=int(o["ts_new"]))
+                recon_adj.note_fix(self.conn, "K7f", o["pid"], "fut_replace")
                 tot9 += int(o["qb_new"]) - int(o["qb"])
-            for ns9, lst9 in ((f"{ex}:recon", m["ins"]), (f"{ex}:{common.EXF_FUT_NS}", m["fut"])):
+            for ns9, lst9 in ((f"{ex}:recon", m["ins"]), (f"{ex}:{histmark.EXF_FUT_NS}", m["fut"])):
                 for o in lst9:
                     if not self._post_leg("exchange", ns9, o["sid"], int(o["leg"]), int(o["ts"]), int(o.get("aid") or m["aid"]), loc,
                                           o["qb"], None, None, "opening", "EXF_ADJUST"):
                         raise ValueError(f"재배치 줄 충돌 {ns9} {o['sid']} leg {o['leg']}")
                     tot9 += int(o["qb"])
+                    recon_adj.note(self.conn, "K7f", ("exchange", ns9, o["sid"], int(o["leg"])), "fut_replace")
             if tot9 != 0:
                 raise ValueError(f"재배치 합 불일치 {ex} {sym}: {tot9}")
             for b9 in m["cands"]:
@@ -415,11 +417,11 @@ class ExfFutMixin:
 
     def _exf_fut_backup_ok(self):
         try:
-            st9 = common.read_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"), {}) or {}
+            st9 = statefile.read_json(paths.state("backups", "backup_status.json"), {}) or {}
             p9 = str(st9.get("last_path") or "")
             if time.time() - float(st9.get("last_ok") or 0) <= self.EXF_FUT_BACKUP_MAX_AGE and p9 and os.path.isfile(p9):
                 return p9
-        except (Exception, SystemExit) as _cg9:
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_exf:ExfMixin._exf_fut_backup_ok", _cg9)
             pass
         return None
@@ -468,7 +470,7 @@ class ExfFutMixin:
                     "SELECT 1 FROM exf_adj_tomb WHERE ex=? AND sym=? AND bts=?", (m["ex"], m["sym"], int(b9))).fetchone() is None]
             keep9 = [m for m in plan if m["ex"] not in errx]
             n_prev = 0
-            undo_p9 = os.path.join(common.STATE_DIR, f"exf_fut_place_v{self.EXF_FUT_V}.json")
+            undo_p9 = paths.state(f"exf_fut_place_v{self.EXF_FUT_V}.json")
             if sc == "partial":
                 try:
                     n_prev = int(str(self._meta_get("exf_fut_place_v") or "").split(":")[2])
@@ -477,14 +479,16 @@ class ExfFutMixin:
             if act9:
                 prev9 = None
                 if sc == "partial" and n_prev:
-                    prev9 = common.read_json(undo_p9, None)
+                    prev9 = statefile.read_json(undo_p9, None)
                     if not (isinstance(prev9, dict) and prev9.get("v") == self.EXF_FUT_V and isinstance(prev9.get("plan"), list)):
                         raise ValueError("앞 회차 되돌리기 자료가 없거나 다름 — 이어 붙일 수 없음")
                 cu9 = {k9: v9 for k9, v9 in curs.items() if k9 not in errx}
-                common.atomic_write_json(undo_p9, {"ts": int(time.time()), "v": self.EXF_FUT_V,
+                statefile.atomic_write_json(undo_p9, {"ts": int(time.time()), "v": self.EXF_FUT_V,
                                                    "plan": (prev9["plan"] if prev9 else []) + keep9,
                                                    "curs": dict((prev9 or {}).get("curs") or {}, **cu9)})
             n = self._exf_fut_place_apply(act9) if act9 else 0
+            if n:
+                self._exf_hist_touch(min((m["t_from"] for m in act9 if m.get("t_from") is not None), default=None))
             for ex9 in okx9:
                 d9 = self._meta_get(f"recon_done_exf_{ex9}")
                 if self._meta_get(f"exf_fut_cur_{ex9}") is None:
@@ -500,7 +504,7 @@ class ExfFutMixin:
             else:
                 self.conn.execute("DELETE FROM meta WHERE k=?", (self.EXF_FUT_WAIT_META,))
             self.conn.commit()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_exf:ExfMixin._exf_fut_place_once", e)
             self.conn.rollback()
             log.error("선물 정산 재배치 보류(되돌림 · 다음 대사에 다시): %s", e)
@@ -517,7 +521,6 @@ class ExfFutMixin:
             log.warning("★선물 정산 재배치 — 거래소 %s 는 대기(나머지는 옮김 · 다음 대사에 그 거래소만 다시): %s★", ",".join(sorted(errx)),
                         "; ".join(f"{k} {v}" for k, v in sorted(errx.items())[:4]))
         if n:
-            self._exf_hist_touch(min(m["t_from"] for m in act9 if m.get("t_from") is not None))
             log.warning("★선물 정산 재배치 %d개 통화(대사 %d건 — 지난날 소급·되돌림 → 정산 시각) — 원장 합 무변, 지난 곡선 무효화%s★", n,
                         sum(len(m["cands"]) for m in act9), f" · 적용 전 원장 백업 {bk9}" if bk9 else "")
             self._exf_hist_flush()
@@ -559,7 +562,7 @@ class ExfFutMixin:
         return any(str(x9).rsplit(":", 1)[-1] == "futures" for x9 in (src9 or ()))
 
     def _exf_fut_events(self, ex: str):
-        p9 = os.path.join(common.STATE_DIR, f"futures_{ex}.json")
+        p9 = paths.state(f"futures_{ex}.json")
         try:
             mt9 = os.path.getmtime(p9)
         except OSError:
@@ -569,8 +572,8 @@ class ExfFutMixin:
         if c9 and c9[0] == mt9:
             return c9[1], c9[2]
         try:
-            d9 = common.read_json(p9, {}) or {}
-        except (Exception, SystemExit) as e9:
+            d9 = statefile.read_json(p9, {}) or {}
+        except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_exf:ExfMixin._exf_fut_events", e9)
             log.warning("%s 선물 정산 파일 읽기 실패: %s", ex, e9)
             return 0, {}
@@ -681,7 +684,7 @@ class ExfFutMixin:
             self._exf_fut_wait_save()
         return False
 
-    EXF_FUT_WAIT_PATH = os.path.join(common.STATE_DIR, "exf_fut_wait.json")
+    EXF_FUT_WAIT_PATH = paths.StatePath("exf_fut_wait.json")
 
     def _exf_fut_wait_boot(self) -> bool:
         if self.__dict__.get("_exf_fut_wait_init"):
@@ -689,11 +692,11 @@ class ExfFutMixin:
         self._exf_fut_wait_init = True
         w9 = self.__dict__.setdefault("_exf_fut_wait", {})
         try:
-            old9 = common.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
+            old9 = statefile.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
             for e9, it9 in ((old9.get("wait") if isinstance(old9.get("wait"), dict) else {}) or {}).items():
                 if e9 in self.EXF_FUT_EX and isinstance(it9, dict) and isinstance(it9.get("since"), int) and not isinstance(it9.get("since"), bool):
                     w9.setdefault(e9, [int(it9["since"]), 0, bool(it9.get("fallback"))])
-        except (Exception, SystemExit) as e9:
+        except (Exception, SystemExit) as e9:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_exf:ExfMixin._exf_fut_wait_boot", e9)
             log.warning("선물 대사 대기 표식 읽기 실패(처음부터): %s", e9)
         return True
@@ -710,7 +713,7 @@ class ExfFutMixin:
             fb9 = list(self.__dict__.get("_exf_fut_fb") or [])
             old9 = None
             if not fb9 or self.__dict__.get("_exf_fut_place_wait") is None:
-                old9 = common.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
+                old9 = statefile.read_json(self.EXF_FUT_WAIT_PATH, {}) or {}
             if not fb9:
                 fb9 = [x for x in (old9.get("fb") or []) if isinstance(x, dict)][-10:]
                 self._exf_fut_fb = fb9
@@ -720,9 +723,9 @@ class ExfFutMixin:
             else:
                 ps9 = self.__dict__.get("_exf_fut_place_since") or {}
                 pl9 = {e9: {"why": why9, "since": int(ps9.get(e9) or time.time())} for e9, why9 in pw9.items()}
-            common.atomic_write_json(self.EXF_FUT_WAIT_PATH, {"v": 1, "ts": int(time.time()), "fb": fb9, "place": pl9,
+            statefile.atomic_write_json(self.EXF_FUT_WAIT_PATH, {"v": 1, "ts": int(time.time()), "fb": fb9, "place": pl9,
                                                              "wait": {e9: {"since": int(t9[0]), "fallback": bool(t9[2])} for e9, t9 in w9.items()}})
-        except (Exception, SystemExit) as e9:
+        except (Exception, SystemExit) as e9:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_exf:ExfMixin._exf_fut_wait_save", e9)
             log.warning("선물 대사 대기 표식 쓰기 실패: %s", e9)
 
@@ -746,8 +749,9 @@ class ExfFutMixin:
         today9 = acct_norm.iso_day(time.time())
         got9 = 0
         for seq9, (ts9, qb9) in enumerate(self._exf_fut_legs(lst, scale9)):
-            if self._post_leg('exchange', f'{ex}:{common.EXF_FUT_NS}', f'exfrecon:{sym}:{int(bts)}', seq9, int(ts9), int(aid), loc9, qb9, None, None, 'opening', 'EXF_ADJUST'):
+            if self._post_leg('exchange', f'{ex}:{histmark.EXF_FUT_NS}', f'exfrecon:{sym}:{int(bts)}', seq9, int(ts9), int(aid), loc9, qb9, None, None, 'opening', 'EXF_ADJUST'):
                 got9 += qb9
+                recon_adj.note(self.conn, "K8", ('exchange', f'{ex}:{histmark.EXF_FUT_NS}', f'exfrecon:{sym}:{int(bts)}', seq9), "futpnl")
                 if acct_norm.iso_day(ts9) < today9:
                     self._exf_hist_touch(ts9)
         return Decimal(got9) / scale9

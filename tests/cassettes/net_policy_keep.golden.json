@@ -1,0 +1,62 @@
+{
+ "_doc": "합성 데이터 — net_policy_keep 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "net_policy_keep",
+ "golden": {
+  "flap1": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "flap1-bfe.policy.invalid/t",
+      "m": "GET"
+     },
+     null
+    ]
+   },
+   "rabby": {
+    "exc": "URLError(gaierror)"
+   },
+   "recon_gj": {
+    "ret": {
+     "at": "flap1-gj.policy.invalid/t",
+     "m": "GET"
+    }
+   },
+   "sol_open": {
+    "exc": "URLError(gaierror)"
+   }
+  },
+  "gj5": {
+   "code": 302,
+   "exc": "HTTPError",
+   "status": 302
+  },
+  "multi": {
+   "bfe": {
+    "ret": [
+     {
+      "at": "two-bfe.policy.invalid/t",
+      "m": "GET"
+     },
+     null
+    ]
+   },
+   "rabby": {
+    "ret": {
+     "at": "two-rabby.policy.invalid/t",
+     "m": "GET"
+    }
+   },
+   "sol_open": {
+    "ret": {
+     "body": {
+      "at": "two-sol-open.policy.invalid/t",
+      "m": "GET"
+     },
+     "status": 200,
+     "url": "https://two-sol-open.policy.invalid/t"
+    }
+   }
+  }
+ }
+}

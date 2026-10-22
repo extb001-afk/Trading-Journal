@@ -1,6 +1,6 @@
 'use strict';
 (function () {
-  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = TJDOM.esc;
   const $ = (s, r) => (r || document).querySelector(s);
   const suOwn = t => { const a = window.__tjSearchApi; try { return a && typeof a.ownNm === 'function' ? a.ownNm(t, 'w') : String(t); } catch (e) { return String(t); } };
   const LS = {
@@ -305,16 +305,14 @@
     return r;
   }
   function qrEncode(text) {
-    const bytes = Array.from(new TextEncoder().encode(text));
-    let ver = 0;
+    const bytes = Array.from(new TextEncoder().encode(text)); let ver = 0;
     for (let v = 1; v <= 10; v++) {
       const cap = Math.floor(qrRawModules(v) / 8) - QR_ECC_M[v] * QR_BLK_M[v];
       if (4 + (v < 10 ? 8 : 16) + bytes.length * 8 <= cap * 8) { ver = v; break; }
     }
     if (!ver) throw new Error('QR 로 담기엔 긴 텍스트');
     const size = ver * 4 + 17, dataCap = Math.floor(qrRawModules(ver) / 8) - QR_ECC_M[ver] * QR_BLK_M[ver];
-    const bits = [];
-    const put = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    const bits = []; const put = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
     put(4, 4); put(bytes.length, ver < 10 ? 8 : 16); bytes.forEach(b => put(b, 8));
     put(0, Math.min(4, dataCap * 8 - bits.length)); put(0, (8 - bits.length % 8) % 8);
     const data = [];
@@ -328,8 +326,7 @@
       if (i < nShort) dat.push(-1);
       blocks.push(dat.concat(ecc));
     }
-    const cw = [];
-    for (let i = 0; i < blocks[0].length; i++) blocks.forEach(b => { if (b[i] !== -1) cw.push(b[i]); });
+    const cw = []; for (let i = 0; i < blocks[0].length; i++) blocks.forEach(b => { if (b[i] !== -1) cw.push(b[i]); });
     const mod = [], fn = [];
     for (let y = 0; y < size; y++) { mod.push(new Array(size).fill(false)); fn.push(new Array(size).fill(false)); }
     const setF = (x, y, d) => { mod[y][x] = d; fn[y][x] = true; };
@@ -374,6 +371,10 @@
         if (!fn[y][x] && i < cw.length * 8) { mod[y][x] = ((cw[i >>> 3] >>> (7 - (i & 7))) & 1) !== 0; i++; }
       }
     }
+    qrMask(size, mod, fn, drawFormat);
+    return mod;
+  }
+  function qrMask(size, mod, fn, drawFormat) {
     const MASKS = [(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, x => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
       (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => x * y % 2 + x * y % 3 === 0,
       (x, y) => (x * y % 2 + x * y % 3) % 2 === 0, (x, y) => ((x + y) % 2 + x * y % 3) % 2 === 0];
@@ -395,7 +396,6 @@
     let best = 0, bestP = Infinity;
     for (let m = 0; m < 8; m++) { applyMask(m); drawFormat(m); const p = penalty(); if (p < bestP) { bestP = p; best = m; } applyMask(m); }
     applyMask(best); drawFormat(best);
-    return mod;
   }
   function qrSVG(text, px) {
     const m = qrEncode(text), n = m.length, q = 4, tot = n + q * 2;
@@ -411,12 +411,21 @@
     bybit: { url: 'https://www.bybit.com/app/user/api-management', steps: ['Account & Security → API → Create New Key → <b>System-generated API Keys</b>', '<b>API Transaction</b> 대신 <b>Read-Only</b> 선택', 'IP 제한: <b>Only IPs with permissions granted</b> → 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '통합 거래 계정(UTA) 기준으로 조회해요.' },
     okx: { url: 'https://www.okx.com/account/my-api', steps: ['프로필 → API → Create API key', '권한은 <b>Read</b> 만 (Trade·Withdraw 체크 금지)', 'IP 주소 허용 목록에 이 서버 공인 IP', '만들 때 정한 <b>Passphrase</b> 도 함께 입력'], note: 'Passphrase 는 OKX 가 다시 보여주지 않으니 기억해 두세요.' },
     kucoin: { url: 'https://www.kucoin.com/account/api', steps: ['API Management → Create API → API Trading', '권한은 <b>General</b> 만 (Spot·Margin·Futures Trading, Transfer, Withdrawal 끔)', 'IP Restriction → 이 서버 공인 IP', 'API Key·Secret·<b>Passphrase</b> 입력'], note: '' },
-    gate: { url: 'https://www.gate.io/myaccount/api_key_manage', steps: ['API Keys → Create API Key → <b>API v4 Key</b>', '권한: Spot·Wallet 을 <b>Read Only</b> 로 · 선물 포지션을 보려면 Futures(무기한 계약)도 <b>Read Only</b> (Read Write·출금은 끔)', 'IP 화이트리스트에 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '' }
+    gate: { url: 'https://www.gate.io/myaccount/api_key_manage', steps: ['API Keys → Create API Key → <b>API v4 Key</b>', '권한: Spot·Wallet 을 <b>Read Only</b> 로 · 선물 포지션을 보려면 Futures(무기한 계약)도 <b>Read Only</b> (Read Write·출금은 끔)', 'IP 화이트리스트에 이 서버 공인 IP', 'API Key·Secret 붙여넣기'], note: '' },
+    coinbase: {
+      url: 'https://portal.cdp.coinbase.com/projects/api-keys',
+      steps: ['coinbase.com 로그인 → 설정 → API → <b>Coinbase Developer Platform</b>(CDP) → API Keys → <b>Secret API Keys</b> → Create API key',
+        '권한(API restrictions)은 <b>View</b> 만 체크 — Trade·Transfer 는 끔 · 포트폴리오 = Default',
+        '<b>Advanced settings → Signature algorithm = ECDSA</b>(기본 Ed25519 는 코인베이스 거래 API 가 받지 않아요)',
+        'IP allowlist 에 이 서버 공인 IP',
+        '만든 직후 보이는 <b>API key name</b>(organizations/…/apiKeys/…)과 <b>Private key</b>(BEGIN EC PRIVATE KEY 줄부터 끝까지) 붙여넣기'],
+      note: '저장할 때 키 권한을 확인해 Trade·Transfer 가 켜져 있으면 저장하지 않아요. 비밀키는 한 번만 보이니 JSON 다운로드도 받아 두세요.'
+    }
   };
   const XP_HELP = {
     helius: { url: 'https://dashboard.helius.dev', need: 'Solana 지갑이 있으면 필수', cost: '무료', cap: 'Solana 지갑 수집에 필요해요 — 무료 플랜으로 충분해요', more: [], steps: ['dashboard.helius.dev 가입(무료)', 'API Keys 에서 키 복사 → 붙여넣기'] },
     etherscan: { url: 'https://etherscan.io/myapikey', need: 'EVM 지갑이 있으면 필수', cost: '무료', cap: 'Ethereum·Arbitrum·Polygon 거래를 빠르고 빠짐없이 받아요', more: ['없으면 공개 노드로만 받아 옛 기록이 늦게 채워져요 — 최신 거래는 바로 보여요'], steps: ['etherscan.io 가입(무료) → API Keys → Add', '키 하나로 여러 체인 조회(V2) — 붙여넣기'] },
-    opensea: { url: 'https://docs.opensea.io/reference/api-keys', need: '선택 · 추천', cost: '무료', cap: 'NFT 바닥가를 오픈시에서 먼저 받아 작은 컬렉션까지 원활해요', more: ['기타 자산 › NFT 의 EVM 바닥가에 가장 먼저 써요', '없으면 코인게코(무료 데모 키 권장)', '미검증 — 키 없이 공개 문서만 보고 연결했어요'], steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
+    opensea: { url: 'https://docs.opensea.io/reference/api-keys', need: '선택 · 추천', cost: '무료', cap: 'NFT 바닥가를 오픈시에서 받아 작은 컬렉션까지 원활해요', more: ['오픈시 체인 NFT 바닥가는 오픈시만(코인게코 안 씀)', '그 밖 체인·키 없으면 코인게코', '미검증 — 키 없이 공개 문서만 보고 연결했어요'], steps: ['opensea.io 계정 → API 키 신청(무료)', '받은 키 붙여넣기'] },
     coingecko: { url: 'https://www.coingecko.com/en/developers/dashboard', head: '시세·차트·NFT 바닥가 — 데모·프로 자동 판별', need: '선택', cost: '무료 · 유료도 됨', cap: '시세·차트·원가·NFT 바닥가를 키 한도로 받아 더 빠르고 덜 막혀요', more: ['코인게코 시세·DEX 토큰 시세·차트·원가 시세·NFT 바닥가에 써요', '바이낸스·바이빗 가격이 있는 코인은 그대로 거래소 가격', '키 몫이 모자라거나 실패하면 그 조회만 무료(무키)로', '키 없으면 공용 무료 한도 — NFT 바닥가는 몇 시간 걸릴 수 있어요', '유료(Pro) 키도 그대로 넣으면 데모·프로를 자동으로 알아봐요', '프로는 다른 곳과 같이 쓰는 키일 수 있어 플랜 한도의 10%만 써요(기본 · 25·50·80% 로 바꿀 수 있음)', '재시작 없이 바로 써요'], steps: ['coingecko.com 무료 가입 → Developers Dashboard', '+ Add New Key 로 Demo 키 만들기(무료) — 유료 플랜 키(Pro)가 있으면 그 키를 넣어도 돼요', '받은 키(CG-…) 붙여넣기 → 저장하면 데모·프로 자동 판별'] }
   };
   XP_HELP.nodereal = { url: 'https://dashboard.nodereal.io', need: '선택', cost: '무료 키로도 됨', cap: 'BSC 옛 기록을 빠르게 받아요(한 번에 5만 블록)', more: ['없으면 BSC 옛 기록은 무료 공개 노드로 천천히 받아요', '최신 기록은 늘 공개 노드로 바로 받아요', 'Base 는 지원 안 해요'], steps: ['nodereal.io 가입(무료) → Dashboard → Create API Key', 'BSC 엔드포인트 주소 끝의 키만(…/v1/ 뒤) 붙여넣기'] };
@@ -425,7 +434,7 @@
   XP_HELP.alchemy = { url: 'https://dashboard.alchemy.com/signup', need: 'EVM 지갑이 있으면 필수', cost: '무료', cap: '지갑이 주고받은 토큰 전부와 지금 잔고를 찾아 옛 보유 토큰도 빠뜨리지 않아요', more: ['Base·Ethereum·Arbitrum 등', '없으면 옛 보유 토큰 찾기가 약해져요(탐색기 한 곳만)', '무료 한도의 80% 아래로만 써요'], steps: ['dashboard.alchemy.com/signup 가입(무료)', 'Create new app → 네트워크는 전부 켠 채로(기본값) → API Key 복사', '키만(https://…/v2/ 뒤의 값) 붙여넣기 → 연결 테스트(Ethereum·Base 1번씩)'] };
   XP_HELP.chainnodes = { url: 'https://www.chainnodes.org/', head: '무료 월 1,250만 요청 · Base 내부 이동', need: '선택', cost: '무료', cap: 'Base 거래의 내부 이동 확인에 가장 먼저 써요', more: ['무료 Core = 월 1,250만 요청 · 초당 25', '최근 약 한 달 반 거래까지 — 그보다 옛 거래는 다음 노드가 맡아요', '블록 훑기·잔고에는 안 써요', '사용 한도 = 월 한도의 80% · 걸리면 잠깐 쉬고 다음 노드로 넘겨요'], steps: ['chainnodes.org 에서 무료 Core 가입', '대시보드의 API 키(또는 Base 주소 https://base-mainnet.chainnodes.org/…)를 복사 → 붙여넣기(주소를 넣으면 키만 저장해요)'] };
   const NODE_KEYS = ['nodereal', 'ankr', 'chainnodes', 'quicknode', 'alchemy'];
-  const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate'];
+  const EX_ORDER = ['upbit', 'bithumb', 'binance', 'bybit', 'okx', 'kucoin', 'gate', 'coinbase'];
   const STEPS = [{ k: 'wallets', t: '지갑' }, { k: 'keys', t: '탐색기 키' }, { k: 'exchanges', t: '거래소' }, { k: 'telegram', t: '텔레그램' }, { k: 'finish', t: '표시·완료' }];
   const UNIT_KO = { evm: 'EVM 수집기', sol: 'Solana 수집기', bsc: 'BSC 수집기', core: '원장(core)', web: '웹' };
   const UNIT_NX = { tron: 'Tron 수집기', sui: 'Sui 수집기', ton: 'TON 수집기', btc: 'Bitcoin 수집기' };
@@ -440,15 +449,19 @@
   };
 
   const isLocked = () => !!(U.locked || (window.TJ && typeof window.TJ.isLocked === 'function' && window.TJ.isLocked()));
+  const WG = {};
   async function load() {
     if (isLocked()) return;
+    const my = U.ldN = (U.ldN | 0) + 1, sy = window.TJ && window.TJ.sync, stale = sy ? sy.rd(WG) : () => false, need = !U.st || !U.st.csrf;
     try {
       const r = await fetch('/api/setup/status', { cache: 'no-store' });
       if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) return;
       const d = await r.json();
       if (isLocked()) return;
+      if (my < (U.ldOk | 0)) return;
+      if (!need && stale()) { if (WG.pend) U.ldAgain = true; else setTimeout(refreshStatus, 0); return; }
       if (!r.ok || !d.ok) throw new Error(d.error || 'HTTP ' + r.status);
-      U.st = d; U.err = null;
+      U.ldOk = my; U.ldAgain = false; U.st = d; U.err = null;
       if (d.telegram && d.telegram.pending && U.tg.phase === 'idle') {
         Object.assign(U.tg, { phase: 'wait', bot: { username: d.telegram.pending.bot }, link: d.telegram.pending.link, start: d.telegram.pending.start });
         startPoll();
@@ -460,6 +473,10 @@
   }
   async function api(action, body) {
     if (isLocked()) return { ok: false, error: '잠겼어요 — 다시 로그인해 주세요' };
+    const sy = window.TJ && window.TJ.sync, done = sy ? sy.wr(WG) : () => {};
+    try { return await apiRaw(action, body); } finally { done(); if (!WG.pend && U.ldAgain) { U.ldAgain = false; refreshStatus(); } }
+  }
+  async function apiRaw(action, body) {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!U.st || !U.st.csrf) await load();
       let r, d;
@@ -479,8 +496,8 @@
   }
   function toast(msg, err, ms) {
     const t = $('#toast'); if (!t) return;
-    t.innerHTML = '<div class="toast' + (err ? ' e' : '') + '">' + esc(msg) + '</div>';
-    clearTimeout(toast._t); toast._t = setTimeout(() => { t.innerHTML = ''; }, ms || (err ? 4600 : 2600));
+    TJDOM.set(t, '<div class="toast' + (err ? ' e' : '') + '">' + esc(msg) + '</div>');
+    clearTimeout(toast._t); toast._t = setTimeout(() => { TJDOM.clear(t); }, ms || (err ? 4600 : 2600));
   }
   const draft = (k, v) => { if (v === undefined) return U.d[k] || ''; U.d[k] = v; };
 
@@ -531,12 +548,13 @@
   async function nodePlanSave(p, patch) {
     const n = U.st && U.st.nodes && U.st.nodes[p];
     if (!n || U.busy['np' + p]) return;
-    const body = Object.assign({ provider: p, plan: n.plan, share: n.share, month: n.month == null ? null : n.month }, patch);
+    const body = Object.assign({ provider: p }, patch);
     U.busy['np' + p] = true; render();
     const r = await api('keys/nodeplan', body);
     U.busy['np' + p] = false;
     toast(r.ok ? n.name + (r.apply && r.apply.restart === false ? ' 설정을 바꿨어요 — 재시작 없이 바로 써요' : ' 사용 한도를 바꿨어요 — 수집기가 곧 다시 시작해요') : (r.error || '저장 실패'), !r.ok);
     await refreshStatus();
+    return r;
   }
   function fieldsHTML(gk, g, help) {
     const t = U.test[gk];
@@ -577,7 +595,7 @@
       + '<div class="su-permsec"><b>켜져 있는 권한</b><ul>' + (p.danger || []).map(d => '<li><span class="pill e sm">' + esc(PERM_KIND[d.kind] || d.kind) + '</span> ' + esc(d.label) + '</li>').join('') + '</ul></div>'
       + '<div class="su-permsec"><b>왜 위험한가요</b><p id="suPermD">' + esc(p.why || '') + '</p></div>'
       + '<div class="su-permsec"><b>조회 전용 키로 다시 만드는 법</b><ol>' + (p.fix || []).map(x => '<li>' + esc(x) + '</li>').join('') + '</ol>'
-      + (h.url ? '<a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(p.name || '') + ' API 관리 페이지 ↗</a>' : '') + '</div>'
+      + (h.url ? '<a href="' + esc(TJDOM.safeUrl(h.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(p.name || '') + ' API 관리 페이지 ↗</a>' : '') + '</div>'
       + (p.stored ? '<div class="cap su-p">봇은 이 키로 조회만 하지만, 새로 만든 조회 전용 키를 저장하면 지금 키를 대체해요. 대체한 뒤 거래소에서 옛 키를 꼭 삭제하세요.</div>' : '')
       + '<div class="su-foot"><span class="sp"></span><button class="btn pri" data-su="permClose">알겠어요 — 조회 전용 키로 다시 넣을게요</button></div>'
       + '</div></div>';
@@ -696,7 +714,7 @@
           + ' ' + xpPill(st, k, (h && h.head) || nm.d)
           + '<span class="sp"></span>' + (st.nodes && st.nodes[k] && st.nodes[k].rejected ? pill('w', '키 거부됨') : pill(g.set ? 'ok' : 'g', g.set ? '저장됨' + (g.plan && g.plan.plan ? ' · ' + (g.plan.plan === 'pro' ? '프로' : '데모') : '') : '미설정')) + '</button>'
           + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<div class="su-chiprow su-xpbadge">' + pill(/필수/.test(h.need) ? 'w' : 'g', h.need) + pill(/^무료/.test(h.cost) ? 'ok' : 'a', h.cost) + '</div>'
-            + '<div class="cap su-p su-xpcap pvx">' + esc(h.cap) + ' <a href="' + h.url + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div>'
+            + '<div class="cap su-p su-xpcap pvx">' + esc(h.cap) + ' <a href="' + esc(TJDOM.safeUrl(h.url)) + '" target="_blank" rel="noopener noreferrer">발급 페이지 ↗</a></div>'
             + cgPlanHTML(g) + nodePlanHTML(st, k) + nodeOrderHTML(st, k) + suMore('xp:' + k, h.more.map(esc).concat(nodeMoreLines(st, k)), '', 'pvx')
             + '<ol class="su-ol">' + h.steps.map(s => '<li>' + esc(s) + '</li>').join('') + '</ol>') + '</div>' : '') + '</div>';
       }).join('') + '</div>';
@@ -707,7 +725,7 @@
     return s < 60 ? '방금 전' : s < 3600 ? Math.floor(s / 60) + '분 전' : s < 86400 ? Math.floor(s / 3600) + '시간 전' : Math.floor(s / 86400) + '일 전';
   }
   function depRowHTML(k, dp, keySet) {
-    if (!dp && !keySet) return '';
+    if ((!dp && !keySet) || k === 'coinbase') return '';
     dp = dp || {};
     const busy = dp.running || dp.requested || U.dpWait[k];
     const head = dp.count ? '입금 주소 <b class="num">' + esc(dp.count) + '</b>개' + (dp.addresses && dp.addresses !== dp.count ? ' <span class="cap">(주소 ' + esc(dp.addresses) + '종 · 통화 ' + esc(dp.currencies) + '개)</span>' : '')
@@ -735,12 +753,12 @@
     return '<div class="su-sec"><div class="su-h">거래소 API (선택 · 조회 전용)</div><div class="cap su-p">입금·체결·잔고를 가져와 온체인 전송과 짝지어 원가를 이어 줘요. <b>조회(읽기) 권한만</b> 켠 키를 쓰세요 — 이 봇은 주문·출금 API 를 호출하지 않아요.</div>'
       + '<div class="cap su-p">키를 저장하면 <b>내 계정 입금 주소</b>를 자동으로 모아요(첫 수집 즉시 · 하루 1회 · 새 코인·네트워크가 생기면 바로). 이 주소들로 보낸 전송은 거래소 입금으로 자동 인식하고, 거래소가 주소를 바꿔도 옛 주소는 지우지 않아요.</div>'
       + '<div class="su-ipbox"><div style="min-width:0"><b>이 서버의 공인 IP</b><div class="cap">거래소 키의 IP 화이트리스트에 넣을 값</div></div><span class="sp"></span>' + (U.ip ? '<code class="num">' + esc(U.ip) + '</code><button class="btn sm" data-su="copy" data-v="' + esc(U.ip) + '">복사</button>' : '<button class="btn sm" data-su="ip">확인</button>') + '</div>'
-      + EX_ORDER.map(k => {
+      + EX_ORDER.filter(k => st.exchanges[k]).map(k => {
         const g = st.exchanges[k], h = EX_HELP[k], open = U.ex === k;
         const nSub = (g.subs || []).filter(x => x.set).length;
         return '<div class="su-acc' + (open ? ' open' : '') + '"><button class="su-acch" data-su="ex" data-v="' + k + '" aria-expanded="' + open + '"><b>' + esc(g.name) + '</b>' + (nSub ? '<span class="cap num" style="margin-left:6px">+ 서브 ' + nSub + '</span>' : '') + '<span class="sp"></span>' + pill(g.set ? 'ok' : g.partial ? 'w' : 'g', g.set ? '연결됨' : g.partial ? '일부 입력' : '미설정') + '</button>'
           + depRowHTML(k, (st.depaddr || {})[k], g.set)
-          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + h.url + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작돼요(재시작 불필요)</div>') + subsHTML(k, g) + '</div>' : '') + '</div>';
+          + (open ? '<div class="su-accb">' + fieldsHTML(k, g, '<ol class="su-ol">' + h.steps.map(s => '<li>' + s + '</li>').join('') + '</ol>' + (h.note ? '<div class="cap su-p">' + esc(h.note) + '</div>' : '') + '<div class="cap su-p"><a href="' + esc(TJDOM.safeUrl(h.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(g.name) + ' API 관리 페이지 ↗</a> · 저장하면 1분 안에 동기화가 시작돼요(재시작 불필요)</div>') + subsHTML(k, g) + '</div>' : '') + '</div>';
       }).join('') + '</div>';
   }
   function tgHTML() {
@@ -758,7 +776,7 @@
       else body = '<div class="su-tgwait"><div class="su-qrbox">' + (T.link ? qrSVG(T.link, 176) : '') + '<div class="cap" style="text-align:center;margin-top:6px">휴대폰 카메라로 스캔</div></div>'
         + '<div style="min-width:0;flex:1"><div class="su-h" style="margin:0 0 6px">봇 <span class="num">@' + (T.bot && T.bot.username ? '<span class="pvl" data-pk="w">' + esc(suOwn(T.bot.username)) + '</span>' : '') + '</span> 에게 /start 를 보내세요</div>'
         + '<ol class="su-ol"><li>아래 버튼(또는 QR)으로 텔레그램에서 봇을 열어요</li><li><b>시작(Start)</b> 을 누르면 이 화면이 자동으로 채팅을 찾아요</li><li>찾으면 테스트 메시지를 보내고 저장해요</li></ol>'
-        + '<div class="su-actions" style="margin-top:10px"><a class="btn pri" href="' + esc(T.link) + '" target="_blank" rel="noopener noreferrer">텔레그램에서 열기</a><button class="btn" data-su="copy" data-v="' + esc(T.start) + '">명령 복사: <span class="num">' + esc(T.start) + '</span></button></div>'
+        + '<div class="su-actions" style="margin-top:10px"><a class="btn pri" href="' + esc(TJDOM.safeUrl(T.link)) + '" target="_blank" rel="noopener noreferrer">텔레그램에서 열기</a><button class="btn" data-su="copy" data-v="' + esc(T.start) + '">명령 복사: <span class="num">' + esc(T.start) + '</span></button></div>'
         + '<div class="su-wait"><span class="su-spin" aria-hidden="true"></span>/start 기다리는 중 · <span class="num">' + mm + ':' + (ss < 10 ? '0' : '') + ss + '</span> 남음</div>'
         + (T.err ? '<div class="su-bad" style="margin-top:8px">' + esc(T.err) + '</div>' : '')
         + '<div style="margin-top:10px"><button class="link" data-su="tgman">' + (T.manual ? '직접 입력 닫기' : 'chat_id 를 직접 입력할래요') + '</button> · <button class="link" data-su="tgcancel">다른 토큰으로</button></div>'
@@ -789,7 +807,7 @@
   function finishHTML() {
     const st = U.st, cur = draft('cur') || st.prefs.currency || 'KRW', light = document.documentElement.getAttribute('data-theme') === 'light';
     const opt = (a, v, on, t, s) => '<button class="opt2' + (on ? ' on' : '') + '" data-su="' + a + '" data-v="' + v + '" aria-pressed="' + on + '"><b>' + t + '</b><span>' + s + '</span></button>';
-    const exN = EX_ORDER.filter(k => st.exchanges[k].set).length;
+    const exN = EX_ORDER.filter(k => st.exchanges[k] && st.exchanges[k].set).length;
     const nW = st.wallets.length + (st.chainWallets || []).length;
     const rows = [['지갑', nW ? nW + '개 주소' : '없음 — 나중에 설정 탭에서 추가', nW > 0],
       ['Helius (Solana)', st.explorers.helius.set ? '저장됨' : (st.wallets.some(w => w.kind === 'sol') ? '필요 — Solana 수집 대기' : '선택'), st.explorers.helius.set],
@@ -968,7 +986,7 @@
     if (U.tierSheet && U.tier) {
       if (!tierEl) { tierEl = document.createElement('div'); tierEl.id = 'suTier'; document.body.appendChild(tierEl); }
       const tb0 = tierEl.querySelector('.su-bg'), tbY = tb0 ? tb0.scrollTop : 0;
-      tierEl.innerHTML = tierSheetHTML();
+      TJDOM.set(tierEl, tierSheetHTML());
       if (tbY) { const tb1 = tierEl.querySelector('.su-bg'); if (tb1) tb1.scrollTop = tbY; }
       document.documentElement.classList.add('su-lock');
     } else if (tierEl) { tierEl.remove(); tierEl = null; if (!U.open && !U.perm) document.documentElement.classList.remove('su-lock'); }
@@ -1053,10 +1071,14 @@
     fill();
     let ok = false, err = '';
     try {
-      if (!U.st || !U.st.csrf) await load();
-      const r = await fetch('/api/chain_auto_off', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-TJ-CSRF': (U.st && U.st.csrf) || '' }, body: JSON.stringify({ on }) });
-      if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) { U.chAutoBusy = false; return; }
-      let d = null; try { d = await r.json(); } catch (e) { d = null; }
+      let r, d;
+      for (let n = 0; n < 2; n++) {
+        if (n || !U.st || !U.st.csrf) await load();
+        r = await fetch('/api/chain_auto_off', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-TJ-CSRF': (U.st && U.st.csrf) || '' }, body: JSON.stringify({ on }) });
+        if (r.status === 401 && typeof window.__tjLoginCheck === 'function' && window.__tjLoginCheck(r)) { U.chAutoBusy = false; return; }
+        d = null; try { d = await r.json(); } catch (e) { d = null; }
+        if (!(r.status === 403 && d && /CSRF/.test(d.error || ''))) break;
+      }
       ok = !!(r.ok && d && d.ok);
       err = (d && d.error) || ('HTTP ' + r.status);
     } catch (e) { err = '서버 연결 실패'; }
@@ -1138,8 +1160,8 @@
     if (isLocked()) return;
     const els = document.querySelectorAll('[data-su-slot]');
     if (!els.length) return;
-    if (!U.st) { if (U.err) els.forEach(el => { el.innerHTML = slotErrHTML(); }); return; }
-    els.forEach(el => { const f = SLOTS[el.getAttribute('data-su-slot')]; if (f) el.innerHTML = U.open ? '' : f(el); });
+    if (!U.st) { if (U.err) els.forEach(el => { TJDOM.set(el, slotErrHTML()); }); return; }
+    els.forEach(el => { const f = SLOTS[el.getAttribute('data-su-slot')]; if (f) TJDOM.set(el, U.open ? '' : f(el)); });
     document.querySelectorAll('[data-su-slot] [data-su-in]').forEach(el => { const k = el.getAttribute('data-su-in'); if (U.d[k] != null) el.value = U.d[k]; });
     document.querySelectorAll('[data-su-slot] textarea[data-su-in]').forEach(autoGrow);
   }
@@ -1152,7 +1174,7 @@
       const fresh = !wizEl;
       if (fresh) { U.retFocus = ae9 && ae9 !== document.body ? ae9 : null; wizEl = document.createElement('div'); wizEl.id = 'suWizard'; document.body.appendChild(wizEl); }
       const bg0 = !fresh && wizEl.__step === U.step ? wizEl.querySelector('.su-bg') : null, bgY = bg0 ? bg0.scrollTop : 0;
-      wizEl.innerHTML = wizardHTML(); wizEl.__step = U.step;
+      TJDOM.set(wizEl, wizardHTML()); wizEl.__step = U.step;
       if (bgY) { const bg1 = wizEl.querySelector('.su-bg'); if (bg1) bg1.scrollTop = bgY; }
       document.documentElement.classList.add('su-lock');
       if (!keepFocus && !(U.perm)) {
@@ -1173,7 +1195,7 @@
     if (keepFocus) { const el = $('[data-su-in="' + keepFocus + '"]'); if (el) { el.focus({ preventScroll: true }); try { el.setSelectionRange(pos, pos); } catch (e) {  } } }
     if (U.perm) {
       if (!permEl) { permEl = document.createElement('div'); permEl.id = 'suPerm'; document.body.appendChild(permEl); }
-      permEl.innerHTML = permModalHTML();
+      TJDOM.set(permEl, permModalHTML());
       document.documentElement.classList.add('su-lock');
       const b = permEl.querySelector('[data-su="permClose"]'); if (b && !permEl.contains(document.activeElement)) b.focus();
     } else if (permEl) { permEl.remove(); permEl = null; if (!U.open) document.documentElement.classList.remove('su-lock'); }
@@ -1190,7 +1212,7 @@
     Object.assign(U.tg, { phase: 'idle', err: '', bot: null, link: '', start: '', left: 0, tok: '' });
     if (wizEl) { wizEl.remove(); wizEl = null; }
     if (permEl) { permEl.remove(); permEl = null; }
-    document.querySelectorAll('[data-su-slot]').forEach(el => { el.innerHTML = ''; });
+    document.querySelectorAll('[data-su-slot]').forEach(el => { TJDOM.clear(el); });
     document.documentElement.classList.remove('su-lock');
   }
 
@@ -1222,11 +1244,17 @@
     if (an.needChain) { toast('EVM 체인을 하나 이상 고르세요', true); return; }
     const send = an.save.slice(0, MAX_BATCH), later = an.save.slice(MAX_BATCH).map(x => x.t);
     U.busy.wadd = true; render();
-    const r = await api('wallets/add_many', { addresses: send.map(x => x.t), chains: Array.from(U.chains) });
+    U.wConf = U.wConf || new Set();
+    const ts = send.map(x => x.t);
+    const r = await api('wallets/add_many', { addresses: ts, chains: Array.from(U.chains), confirm: ts.filter(t => U.wConf.has(t)) });
     U.busy.wadd = false;
     if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
     const res = Array.isArray(r.results) ? r.results : [], failed = {};
     res.forEach(x => { if (x.status === 'invalid' || x.status === 'error') failed[x.input] = x.error || '저장 안 됨'; });
+    res.filter(x => x.status === 'confirm').forEach(x => {
+      failed[x.input] = (x.error || '확인이 필요해요') + ' — 맞으면 [추가]를 한 번 더 누르세요';
+      U.wConf.add(x.input);
+    });
     const added = res.filter(x => x.status === 'added');
     const keep = an.items.filter(x => x.st === 'bad' || (failed[x.t] != null && x.st !== 'dup')).map(x => x.t).concat(later);
     U.wErr = failed;
@@ -1273,12 +1301,17 @@
       if (!chk) { toast(x0 ? x0.err : '주소를 입력하세요', true); return; }
       const label = draft('w_label').trim() || (chk.kind === 'sol' ? 'Solana' : '지갑') + ' ' + ((U.st.wallets.length || 0) + 1);
       U.busy.wadd = true; render();
-      const r = await api('wallets/add', { address: chk.addr, label, chains: chk.kind === 'sol' ? [] : Array.from(U.chains) });
+      const wb = { address: chk.addr, label, chains: chk.kind === 'sol' ? [] : Array.from(U.chains) };
+      let r = await api('wallets/add', wb);
+      const ask = r.needConfirm && window.confirm((r.error || '') + '\n\n그래도 내 지갑으로 추가할까요?');
+      if (!r.ok && ask) r = await api('wallets/add', Object.assign({ confirm: true }, wb));
       U.busy.wadd = false;
       if (!r.ok) { toast(r.error || '추가 실패', true); render(); return; }
       delete U.d.w_addr; delete U.d.w_label; U.wRes = null; U.wErr = {};
       if (r.added && r.added.address) markNew([r.added.address]);
-      toast('추가됨 · ' + suOwn(label) + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러와요');
+      const wn = r.added && r.added.warn;
+      const msg = '추가됨 · ' + suOwn(label) + ' — 수집기가 곧 최근 ' + U.st.backfillMonths + '개월 거래를 불러와요';
+      toast(msg + (wn ? ' · ' + wn : ''), false, wn ? 6500 : undefined);
       await refreshStatus();
       if (window.__tj && window.__tj.refresh) window.__tj.refresh();
     },
@@ -1357,6 +1390,7 @@
       if (node ? grp.fields.every(f => !vals[f.key]) : grp.fields.some(f => !vals[f.key])) { toast(node ? '값을 넣으세요' : grp.partial ? '바꾸려면 모든 칸을 새로 입력하세요' : '모든 칸을 채우세요', true); return; }
       if (needAck(g) && !U.ack[g]) { toast("'조회 권한만 켰음'을 먼저 체크하세요", true); return; }
       U.busy['s' + g] = true; render();
+      const sy = window.TJ && window.TJ.sync, sn = sy ? sy.snap(U.d, grp.fields.map(f => 'k_' + f.key)) : null;
       const r = await api('keys/save', { group: g, values: vals, readOnlyAck: !!U.ack[g] });
       U.busy['s' + g] = false;
       if (!r.ok) {
@@ -1365,7 +1399,7 @@
         else toast(r.error || '저장 실패', true);
         render(); return;
       }
-      clearVals(g); delete U.ack[g]; delete U.needAck[g]; delete U.test[g];
+      if (sn) sy.done(U.d, sn); else clearVals(g); delete U.ack[g]; delete U.needAck[g]; delete U.test[g];
       toast(xpName(grp.name).t + ' 저장됨' + (r.cg && r.cg.plan ? ' · ' + r.cg.text : '') + (r.note ? ' · ' + r.note : ' · 값은 다시 표시되지 않아요') + (r.apply && r.apply.restart === false ? ' · 재시작 없이 바로 써요' : ''), false, r.note ? 9000 : 0); await refreshStatus();
     },
     async kdel(el) {
@@ -1393,8 +1427,9 @@
     async nmonth(el) {
       const p = el.getAttribute('data-p'), raw = draft('nm_' + p).replace(/[,\s]/g, '');
       if (raw && !/^[1-9][0-9]{0,11}$/.test(raw)) { toast('월 한도는 숫자만(쉼표 없이)', true); return; }
-      await nodePlanSave(p, { month: raw ? Number(raw) : null });
-      delete U.d['nm_' + p];
+      const sy = window.TJ && window.TJ.sync, sn = sy ? sy.snap(U.d, ['nm_' + p]) : null;
+      const r = await nodePlanSave(p, { month: raw ? Number(raw) : null });
+      if (r && r.ok) { if (sn) sy.done(U.d, sn); else delete U.d['nm_' + p]; }
     },
     async cgshare(el) {
       const v = Number(el.getAttribute('data-v'));
@@ -1503,14 +1538,14 @@
     U.d[k] = t.value;
     if (k === 'w_addr') {
       const an = wAnalyze(t.value), m = $('#suVmsg'), ch = $('#suChains'), lb = $('#suWLabel'), b = $('#suWadd'), wb = wBtn(an);
-      if (m) m.innerHTML = wMsgHTML(an);
+      if (m) TJDOM.set(m, wMsgHTML(an));
       if (ch) ch.classList.toggle('hidden', an.onlySol);
       if (lb) lb.classList.toggle('hidden', an.multi);
       if (b) { b.textContent = wb.t; b.disabled = wb.dis; }
       if (U.wRes) { U.wRes = null; const wr = $('.su-wres'); if (wr) wr.remove(); }
       autoGrow(t);
     }
-    if (k === 'p_addr') { const m = $('#suPvmsg'); if (m) m.innerHTML = perpVmsg(perpDex(), t.value); }
+    if (k === 'p_addr') { const m = $('#suPvmsg'); if (m) TJDOM.set(m, perpVmsg(perpDex(), t.value)); }
   });
   document.addEventListener('keydown', ev => {
     const t = ev.target, k = t.getAttribute && t.getAttribute('data-su-in');
@@ -1536,177 +1571,6 @@
   window.addEventListener('hashchange', render);
   setInterval(() => { if (!document.hidden && (U.open || onSettings()) && !(document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-su-in'))) refreshStatus(); }, 20000);
 
-  const css = document.createElement('style');
-  css.textContent = [
-    'html.su-lock,html.su-lock body{overflow:hidden}',
-    '.su-bg{position:fixed;inset:0;z-index:80;background:var(--dim);display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}',
-    '.su-wiz{width:780px;max-width:100%;background:var(--bg);border:1px solid var(--line2);border-radius:22px;box-shadow:var(--pop);padding:22px 26px 20px}',
-    '.su-wiz:focus{outline:none}',
-    '.su-top{display:flex;align-items:center;gap:10px}',
-    '.su-intro{margin:10px 0 16px;line-height:1.6}',
-    '.su-steps{display:flex;gap:6px;margin-bottom:18px;overflow-x:auto;scrollbar-width:none}',
-    '.su-steps::-webkit-scrollbar{display:none}',
-    '.su-step{display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:12px;font-size:14px;font-weight:600;color:var(--muted);white-space:nowrap;border:1px solid transparent}',
-    '.su-step i{font-style:normal;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;background:var(--surface2);border:1px solid var(--line)}',
-    '.su-step.on{color:var(--text);background:var(--surface);border-color:var(--line)}',
-    '.su-step.on i{background:var(--accent);color:var(--bg);border-color:var(--accent)}',
-    '.su-step.done i{background:var(--okBg);color:var(--ok);border-color:transparent}',
-    '.su-body{display:flex;flex-direction:column;gap:14px}',
-    '.su-sec{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;min-width:0}',
-    '.su-h{font-size:16px;font-weight:700}',
-    '.su-p{margin:4px 0 12px;line-height:1.6}',
-    '.su-form{display:flex;gap:8px;align-items:center;flex-wrap:wrap}',
-    '.su-frow{display:flex;gap:8px;align-items:center;flex:0 1 auto;min-width:0} .su-frow .su-plbl{width:170px} @media (max-width:640px){.su-frow{flex:1 1 100%}.su-frow .su-plbl{flex:1;width:auto;min-width:0}}',
-    '.su-grow{flex:1;min-width:200px}',
-    '.su-vmsg{margin:8px 0 4px;font-size:13px;min-height:20px}',
-    '.su-good{color:var(--ok);font-weight:600}',
-    '.su-bad{color:var(--danger);font-weight:600;font-size:13.5px}',
-    '.su-warnline{color:var(--warn);font-size:13px;margin-top:4px;line-height:1.55}',
-    '.su-permbox{margin-top:12px;display:flex;flex-direction:column;gap:8px}',
-    '.su-permnote{line-height:1.6}',
-    '.su-ack{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);font-size:13.5px;line-height:1.55;color:var(--text)}',
-    '.su-ack i{flex:none;width:18px;height:18px;margin-top:1px;border-radius:5px;border:2px solid var(--line2);background:var(--bg)}',
-    '.su-ack.on{border-color:var(--ok);background:var(--okBg)}',
-    '.su-ack.on i{border-color:var(--ok);background:var(--ok);box-shadow:inset 0 0 0 3px var(--bg)}',
-    '.su-ack:focus-visible{outline:2px solid var(--accent);outline-offset:2px}',
-    '.su-permbg{z-index:95;align-items:center}',
-    '.su-perm{width:600px;max-width:100%;background:var(--bg);border:2px solid var(--danger);border-radius:22px;box-shadow:var(--pop);padding:24px 26px 20px}',
-    '.su-permhead{display:flex;gap:14px;align-items:flex-start;color:var(--danger);padding-bottom:14px;border-bottom:1px solid var(--line)}',
-    '.su-permhead svg{flex:none}',
-    '.su-permkick{font-size:13px;font-weight:700;letter-spacing:.02em}',
-    '.su-perm h3{margin:4px 0 0;font-size:22px;line-height:1.35;color:var(--danger);font-weight:800}',
-    '.su-permsec{margin-top:14px;font-size:14px;line-height:1.65}',
-    '.su-permsec>b{display:block;margin-bottom:4px}',
-    '.su-permsec p{margin:0;color:var(--text2)}',
-    '.su-permsec ul{list-style:none;margin:0;padding:10px 12px;border-radius:12px;background:var(--dangerBg)}',
-    '.su-permsec li{margin:3px 0}',
-    '.su-permsec ol{margin:4px 0 8px 20px;color:var(--text2)}',
-    '.su-wform{align-items:flex-start}',
-    'textarea.field.su-ta{height:38px;min-height:38px;max-height:240px;padding:8px 12px;line-height:20px;resize:none;font-family:inherit;display:block;overflow-y:auto;word-break:break-all;color:var(--text)}',
-    '.su-warnt{color:var(--warn);font-weight:600}',
-    '.su-badt{color:var(--danger);font-weight:600}',
-    '.su-mnote{display:flex;gap:8px;align-items:center;padding:8px 12px;border-radius:10px;background:var(--accentBg);color:var(--text);font-size:13.5px;font-weight:600;margin-bottom:8px}',
-    '.su-mnote svg{flex:none;color:var(--accent)}',
-    '.su-prev{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:12px;max-height:320px;overflow-y:auto;background:var(--bg)}',
-    '.su-pi{display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-top:1px solid var(--line);font-size:13px;min-width:0}',
-    '.su-pi:first-child{border-top:0}',
-    '.su-pic{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px;background:var(--surface2);color:var(--muted)}',
-    '.su-pi.ok .su-pic,.su-pi.more .su-pic{background:var(--okBg);color:var(--ok)}',
-    '.su-pi.warn .su-pic{background:var(--warnBg);color:var(--warn)}',
-    '.su-pi.bad .su-pic{background:var(--dangerBg);color:var(--danger)}',
-    '.su-pi.have .su-pa,.su-pi.dup .su-pa{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line2)}',
-    '.su-pib{min-width:0;flex:1}',
-    '.su-pa{font-size:12.5px;word-break:break-all;color:var(--text)}',
-    '.su-pis{font-size:12.5px;color:var(--text2);margin-top:2px;line-height:1.5}',
-    '.su-pi.bad .su-pis,.su-pise{color:var(--danger);font-weight:600}',
-    '.su-pi.warn .su-pis{color:var(--warn)}',
-    '.su-psum{margin-top:8px;font-size:12.5px;color:var(--text2);line-height:1.6}',
-    '.su-kbd{font-size:12px}',
-    '.su-wres{margin-top:12px;padding:10px 14px;border-radius:12px;background:var(--okBg);font-size:13.5px;line-height:1.6;min-width:0}',
-    '.su-wres.none{background:var(--surface2)}',
-    '.su-wfail{margin:6px 0 2px 18px;padding:0;font-size:12.5px;color:var(--danger);word-break:break-all}',
-    '.su-row.new{background:var(--accentBg);border-radius:12px;padding:12px;margin-top:6px;border-bottom-color:transparent}',
-    '.su-chains{margin-top:8px}',
-    '.su-tier{display:flex;flex-direction:column;gap:10px}',
-    '.su-ttiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}',
-    '.su-ttiles>div{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}',
-    '.su-ttiles b{font-size:24px;font-weight:650;letter-spacing:-.03em;line-height:1.2} .su-ttiles span{font-size:12px;color:var(--muted);font-weight:600}',
-    '.su-tsteps,.su-tcs{display:flex;gap:6px;flex-wrap:wrap}',
-    '.su-tcs{margin:6px 0}',
-    '.su-th{font-weight:700;font-size:14px;margin-top:4px}',
-    '.su-brow{padding:8px 0;border-bottom:1px solid var(--line)}',
-    '.su-brh{display:flex;justify-content:space-between;gap:8px;font-size:13.5px;flex-wrap:wrap}',
-    '.su-bbar{position:relative;height:8px;border-radius:99px;background:var(--surface2);margin:6px 0 4px;overflow:hidden}',
-    '.su-bbar i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--accent)} .su-bbar i.o{background:var(--danger)}',
-    '.su-bbar s{position:absolute;top:0;bottom:0;width:2px;background:var(--text2);opacity:.55}',
-    '.su-bpub{line-height:1.6} .su-bpl{margin:4px 0 0 18px;padding:0;font-size:12.5px;color:var(--text2);columns:2}',
-    '.su-tnote{line-height:1.6}',
-    '.su-tw{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)} .su-twh{line-height:1.5}',
-    '.su-tsheet{width:640px;max-width:100%;background:var(--bg);border-radius:22px;box-shadow:var(--pop);padding:20px 22px}',
-    '.su-tsh{display:flex;justify-content:space-between;align-items:center;gap:10px} .su-tsh h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em}',
-    '.su-tlist{margin-top:8px;border-top:1px solid var(--line)}',
-    '.su-trow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)} .su-trm{min-width:0;flex:1} .su-tad{font-size:12.5px;color:var(--text2)}',
-    '.su-ch{display:flex;flex-direction:column;min-width:0}',
-    '.su-chtop{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap} .su-cht{font-size:12.5px;font-weight:650;color:var(--muted);letter-spacing:.01em} .su-chmeta{font-size:12.5px;color:var(--text2);font-variant-numeric:tabular-nums}',
-    '.su-chtop .sp,.su-chfh .sp,.su-mdh .sp{flex:1}',
-    '.su-chp{margin:6px 2px 12px;font-size:13px;line-height:1.55;color:var(--text2)}',
-    '.su-chinfo{background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px;font-size:13px;display:flex;flex-direction:column;gap:8px}',
-    '.su-chr{display:grid;grid-template-columns:minmax(0,1fr) 128px 46px;column-gap:18px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}',
-    '.su-chr.first,.su-chcol+.su-chr{border-top-color:transparent}',
-    '.su-chcol{padding:10px 0 6px;border-top:0;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--muted)} .su-chcol .su-chm{padding-left:18px} .su-chcol .su-chc,.su-chcol .su-chsw{text-align:right}',
-    '.su-chr.rec{background:color-mix(in srgb,var(--warn) 6.5%,transparent);border-radius:12px;padding:10px 12px;margin:4px -12px;border-top-color:transparent}',
-    '.su-chr.rec+.su-chr{border-top-color:transparent}',
-    '.su-chm{min-width:0} .su-chh{display:flex;align-items:center;gap:8px;min-width:0} .su-chh b{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    '.su-chd{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}',
-    '.su-chs{font-size:12.5px;line-height:1.45;color:var(--text2);margin-top:2px;padding-left:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .su-chs b{color:var(--text);font-weight:600}',
-    '.su-chr.off .su-chh b{color:var(--text2)} .su-chr.off .su-chd{opacity:.35} .su-chr.off .su-chs{color:var(--muted)}',
-    '.su-chc{display:flex;flex-direction:column;align-items:flex-end;gap:3px;min-width:0}',
-    '.su-chsp{display:flex;align-items:flex-end;gap:3px;height:20px} .su-chsp i{width:4px;border-radius:1.5px;opacity:.85} .su-chsp i.z{height:2px;background:var(--line2);opacity:1;border-radius:1px}',
-    '.su-chdash{width:102px;height:20px;border-bottom:1px dashed var(--line2);display:block;box-sizing:border-box;margin-bottom:-10px}',
-    '.su-chn{font-size:12px;line-height:1.5;color:var(--muted);font-variant-numeric:tabular-nums}',
-    '.su-chr .sw2{justify-self:end}',
-    '.su-chauto{display:flex;align-items:center;gap:14px;background:var(--surface2);border-radius:12px;padding:12px 14px;margin:0 0 10px;min-width:0}',
-    '.su-cham{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px;font-size:13px;line-height:1.5} .su-cham b{font-size:13.5px;font-weight:650;color:var(--text)} .su-cham span{color:var(--text2)} .su-cham .su-chaon{color:var(--warn)}',
-    '.su-chauto .sw2{position:relative;flex:none} .su-chauto .sw2::before{content:"";position:absolute;inset:-9px -4px}',
-    '.su-chrec{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;line-height:1.5;min-width:0}',
-    '.su-chri{color:var(--warn);display:grid;place-items:center;flex:none}',
-    '.su-chrt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1} .su-chrt b{color:var(--warn);font-weight:650} .su-chrt span{color:var(--text)}',
-    '.su-chrm{font-size:12px;color:var(--text2);white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}',
-    '.su-chbig{color:var(--warn);font-weight:650}',
-    '.su-chmore{padding:8px 0 2px;display:flex;justify-content:center}',
-    '.su-choh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--text2);font-weight:650;margin:16px 0 2px} .su-choh span{font-size:12px;font-weight:500;color:var(--muted)}',
-    '.su-chfoot{border-top:1px solid var(--line);margin-top:4px;padding:12px 0 4px;display:flex;flex-direction:column;gap:4px} .su-chfh{display:flex;align-items:baseline;gap:8px;font-size:13.5px;flex-wrap:wrap}',
-    '.su-chnote{margin-top:8px;line-height:1.55}',
-    '.su-md{display:block} .su-mdp{display:block;line-height:1.65}',
-    '.su-mdc{display:block;margin-top:14px;background:var(--surface2);border-radius:12px;padding:12px 14px;color:var(--text)}',
-    '.su-mdh{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .su-mdh b{font-size:14px;font-weight:600}',
-    '.su-mdg{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:5px 14px;margin-top:10px;font-size:13px;line-height:1.5;font-variant-numeric:tabular-nums}',
-    '.su-mdk{color:var(--text2);white-space:nowrap} .su-mdv{color:var(--text);min-width:0}',
-    '.su-mdf{display:block;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line2);font-size:12.5px;color:var(--muted)}',
-    '.su-mda{display:block;margin-top:10px;font-size:12.5px;color:var(--text2)}',
-    '@media (max-width:640px){.su-chr{grid-template-columns:minmax(0,1fr) auto 46px;column-gap:10px}.su-chsp,.su-chdash{display:none}.su-chcol .su-chc{font-size:11px;max-width:64px;white-space:normal;line-height:1.3}.su-chrec{flex-wrap:wrap}.su-chrt{white-space:normal}.su-chrm{flex-basis:100%;white-space:normal;padding-left:23px}.su-chr.rec{margin:4px -8px;padding:10px 8px}}',
-    '.su-chiprow{display:flex;gap:6px;flex-wrap:wrap}',
-    '.su-chip{padding:6px 11px;border-radius:99px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface2);color:var(--text2);flex:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}',
-    '.su-chip.on{background:var(--accentBg);color:var(--accent);border-color:transparent}',
-    '.su-chip.on::before{content:"✓ ";font-weight:700}',
-    '.su-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}',
-    '.su-list{margin-top:14px;border-top:1px solid var(--line)}',
-    '.su-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}',
-    '.su-addr{font-size:12.5px;color:var(--text2);word-break:break-all;margin:2px 0}',
-    '.su-acc{border:1px solid var(--line);border-radius:14px;margin-top:10px;background:var(--surface)}',
-    '.su-acch{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:13px 16px;font-size:14.5px;flex-wrap:wrap}',
-    '.su-accb{padding:0 16px 16px;border-top:1px solid var(--line)}',
-    '.su-ol{margin:10px 0 6px 20px;font-size:13.5px;color:var(--text2);line-height:1.75}',
-    '.su-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}',
-    '.su-fl{display:flex;flex-direction:column;gap:5px;min-width:0}',
-    '.su-fl .field{width:100%}',
-    '.su-test{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13.5px;line-height:1.55}',
-    '.su-test.ok{background:var(--okBg);color:var(--ok)} .su-test.bad{background:var(--dangerBg);color:var(--danger)}',
-    '.su-dep{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 16px 12px;font-size:13.5px}',
-    '.su-dep .cap{font-size:12.5px}',
-    '.su-ipbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface2);border-radius:12px;padding:10px 14px;margin-bottom:4px}',
-    '.su-tgwait{display:flex;gap:20px;align-items:flex-start;margin-top:6px}',
-    '.su-qrbox{flex:none;background:#fff;border-radius:14px;padding:8px}',
-    '.su-qr{display:block}',
-    'html.pvh .su-tgwait .su-qrbox,html.pvh .su-tgwait .su-actions{display:none}',
-    '.su-wait{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13.5px;color:var(--text2)}',
-    '.su-spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:suspin .9s linear infinite}',
-    '@keyframes suspin{to{transform:rotate(360deg)}}',
-    '@media (prefers-reduced-motion:reduce){.su-spin{animation:none}}',
-    '.su-tgdone{display:flex;gap:12px;align-items:flex-start;margin-top:6px}',
-    '.su-apply{margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--surface2);font-size:14px}',
-    '.su-units{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:10px}',
-    '.su-unit{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between}',
-    '.su-unit .cap{flex-basis:100%;font-size:12px}',
-    '.su-code{font-size:12.5px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;word-break:break-all}',
-    'code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em}',
-    '.su-foot{display:flex;gap:8px;align-items:center;margin-top:18px}',
-    '.su-skip{text-align:center;margin-top:12px}',
-    '.su-demo{position:relative;z-index:31;text-align:center;font-size:12.5px;font-weight:700;padding:5px 12px;background:var(--warnBg);color:var(--warn)}',
-    '@media (max-width:640px){.su-tsheet{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}.su-bpl{columns:1}.su-ttiles b{font-size:22px}}',
-    '@media (max-width:640px){.su-perm{border-radius:0;min-height:100%;padding:18px 16px calc(24px + env(safe-area-inset-bottom));border-width:0 0 0 4px}.su-perm h3{font-size:19px}.su-bg{padding:0}.su-wiz{border-radius:0;min-height:100%;padding:16px 16px calc(24px + env(safe-area-inset-bottom));border:0}.su-step span{display:none}.su-step.on span{display:inline}.su-tgwait{flex-direction:column;align-items:center}.su-sec{padding:16px}.su-grow{min-width:0;flex-basis:100%}.su-form .field[style]{width:100%!important}.su-kbd{display:none}}'
-  ].join('\n');
-  document.head.appendChild(css);
 
   (async function init() {
     await load();

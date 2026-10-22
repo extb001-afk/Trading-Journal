@@ -1,10 +1,11 @@
 from __future__ import annotations
+from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 from view_common import DAILY_V
 from view_common import STABLE_GROUPS
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -30,6 +31,30 @@ def _daily_reset(daily: dict, today_kst) -> dict:
     return out
 
 
+def daily_inval_apply(daily: dict, inval: tuple | None, today_kst: datetime, file_gone: bool, meta_keys: tuple) -> tuple:
+    if inval is None:
+        if file_gone and any(k not in meta_keys for k in daily):
+            daily = _daily_reset(daily, today_kst)
+        return daily, False
+    epoch, seq = inval
+    stamp = f"{epoch}:{'' if seq is None else seq}" if (epoch or seq is not None) else None
+    old = daily.get("_inval")
+    stale = old != stamp and not (old is None and seq is None)
+    if (stale or file_gone) and any(k not in meta_keys for k in daily):
+        if stale:
+            log.info("일별: 원장 무효화 표식 바뀜(%s → %s) — 동결한 지난날 다시 계산", old, stamp)
+        daily = _daily_reset(daily, today_kst)
+    if stale and old is not None and str(old).partition(":")[0] != epoch:
+        for k in ("_live", "_live_ok"):
+            if isinstance(daily.get(k), dict):
+                daily[k] = dict(daily[k], led_other=1)
+    if stamp is None:
+        daily.pop("_inval", None)
+    else:
+        daily["_inval"] = stamp
+    return daily, old != stamp
+
+
 def _stable_regroup_aliases(conn) -> dict:
     try:
         cur9 = {int(r[0]): int(r[1]) for r in conn.execute(
@@ -45,7 +70,7 @@ def _stable_regroup_aliases(conn) -> dict:
             if sep9 and aid9.isdigit() and int(aid9) in cur9 and cur9[int(aid9)] != int(gid9):
                 out[str(gid9)] = str(cur9[int(aid9)])
         return out
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_regroup:_stable_regroup_aliases", e)
         log.warning("스테이블 재그룹 별칭 조회 실패: %s", e)
         return {}

@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, Writer, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, Writer, Reader  # noqa: E402
 
-import copy
-import json
-import os
-import time
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 _cfg = copy.deepcopy(_ingest.CFG)
@@ -18,18 +18,17 @@ _cfg["wallets"] = [x for x in _cfg["wallets"] if x.get("chain") == "base"] + [{"
 _cfg["chains"] = {"base": _cfg["chains"]["base"]}
 json.dump(_cfg, open(os.environ["TJ_CONFIG"], "w"))
 
-import common
-import core
-import evm_watch
-import bsc_watch
-import web
-import db as dbm
-import pricing
-import acct_norm
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import evm_watch  # noqa: E402
+import bsc_watch  # noqa: E402
+import web  # noqa: E402
+import db as dbm  # noqa: E402
+import pricing  # noqa: E402
+import acct_norm  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
 pricing._gj = lambda *a, **k: None
 pricing.PxCache.candle_usd = lambda *a, **k: None
 pricing.PxCache.fx_at = lambda *a, **k: 1400.0
@@ -116,21 +115,21 @@ check("E1 RPC 합성 토큰 전송 log_index = 그 로그 번호(정수)",
       lis[BUY1] == [0, 1] and lis[SELL1] == [10, 11] and lis[SELL2] == [0, 1] and lis[BUY2] == [10, 11], lis)
 for s in sorted(snaps.values(), key=lambda s: (s["tx"]["block_number"], s["tx"]["hash"])):
     wr._emit(s["tx"]["hash"], s, B2 + 20)
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c._drain_stream("evm", Reader(wr.writer.recs), 0, 0)
-check("E1 격리(poison) 0", not os.path.exists(os.path.join(common.STATE_DIR, "poison.jsonl")))
+check("E1 격리(poison) 0", not os.path.exists(os.path.join(paths.STATE_DIR, "poison.jsonl")))
 for ca, sym in ((USDC, "USDC"), (TKA, "TKA"), (TKB, "TKB")):
     c.conn.execute("UPDATE assets SET symbol=? WHERE address=?", (sym, ca))
 c.conn.commit()
 for h in ALL:
-    c._price_tx("base", h)
+    c.svc_price._price_tx("base", h)
 c.conn.commit()
 
 
 def build():
     b = web.StateBuilder()
     b.skip_gen_check = True
-    con = dbm.open_db(common.DB_PATH, readonly=True)
+    con = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         rows = b._replay_order(con, b._load(con))
         order = {t9: list(dict.fromkeys(r["source_id"] for r in rows if r["event_ts"] == t9)) for t9 in (T0, T2)}
@@ -167,7 +166,7 @@ for s in sorted(snaps2.values(), key=lambda s: (s["tx"]["block_number"], s["tx"]
 c._drain_stream("evm", Reader(wr2.writer.recs), 0, 0)
 check("E3 같은 tx 재수신 = 원장(postings)·원본(raw_txs) 무변", ledger(c.conn) == led0)
 c.conn.close()
-c2 = core.Core(common.load_config())
+c2 = core.Core(config.load_config())
 c2._drain_stream("evm", Reader(wr2.writer.recs), 0, 0)
 check("E3 core 재시작 뒤 재수신 = 원장·원본 무변", ledger(c2.conn) == led0)
 r2 = build()
@@ -339,7 +338,7 @@ for t9 in old_rpc["token_transfers"]:
 check("D1 RPC 합성도 같음(복수 로그 · 같은 키 반복 횟수 보존)", core.Core._merge_list_snaps(old_rpc, sm) == old_rpc
       and not core.Core._legs_grow(old_rpc, sm) and core.Core._legs_cover(old_rpc, sm) and core.Core._legs_cover(sm, old_rpc))
 
-c3 = core.Core(common.load_config())
+c3 = core.Core(config.load_config())
 
 
 def es_tok(h, legs, with_li):

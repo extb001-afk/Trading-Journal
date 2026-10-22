@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import candles
-import histcurve as H
+import candles  # noqa: E402
+import histcurve as H  # noqa: E402
 
 chk = T.chk
 KST = timezone(timedelta(hours=9))
 NOW = time.time()
-iso = lambda d: (datetime.fromtimestamp(NOW, KST) - timedelta(days=d)).strftime("%Y-%m-%d")
+iso = lambda d: (datetime.fromtimestamp(NOW, KST) - timedelta(days=d)).strftime("%Y-%m-%d")   # noqa: E731
 OLD1, OLD2, RECENT, OLD3 = iso(200), iso(150), iso(10), iso(250)
 CALLS = []
 FAIL = set()
@@ -128,7 +128,7 @@ os9 = dc.old_status()
 chk(os9["specs"] == 1 and os9["days"] == 2 and os9["done"] >= 1, "O6 진행 상태 = 남은 코인 1 · 날 2 · 받아 둔 출처 ≥ 1", os9)
 dc.kick(NOW + 10_000)
 chk(dc.ev.is_set(), "O6 옛날 요청만 있어도 배경 작업을 깨운다")
-import buildproc
+import buildproc  # noqa: E402
 DCg = H.DAYCLOSE
 DCg.want_old.clear()
 hs = buildproc._hist_begin()
@@ -147,9 +147,9 @@ del CALLS[:]
 dc._run(60, NOW)
 p8, _ = dc.lookup("ex:upbit:YYY", OLD3, NOW, 0.0, old=True)
 chk(any(k == "fx" for k, _a, _b in CALLS) and p8 == 2.5 and (dc.st.get("fxo") or {}).get("lo", "9999") <= OLD3 and (dc.st.get("fxo") or {}).get("hi", "") >= OLD1,
-    "O8(fs323 ①) fxo 범위 밖 날 → 환율 범위 넓혀 다시 받고(전 범위 유지) 시세까지", [CALLS, p8, {k: (dc.st.get("fxo") or {}).get(k) for k in ("lo", "hi")}])
+    "O8 fxo 범위 밖 날 → 환율 범위 넓혀 다시 받고(전 범위 유지) 시세까지", [CALLS, p8, {k: (dc.st.get("fxo") or {}).get(k) for k in ("lo", "hi")}])
 
-import hl_spot
+import hl_spot  # noqa: E402
 HLN = []
 
 
@@ -168,12 +168,12 @@ n0 = candles.CALLS["n"]
 rep9 = dc._run(60, NOW)
 H.fetch_entry = fake_entry
 chk(len(HLN) == H.DC_OLD_RUN_CALLS // HLC and candles.CALLS["n"] - n0 == len(HLN) * HLC and rep9["calls"] == len(HLN) * HLC,
-    f"O9(fs323 ②) HL 일봉 = 한 번에 {HLC}씩 같은 예산·장부 → 실행 상한 {H.DC_OLD_RUN_CALLS} 안({H.DC_OLD_RUN_CALLS // HLC}개)", [len(HLN), candles.CALLS["n"] - n0, rep9])
+    f"O9 HL 일봉 = 한 번에 {HLC}씩 같은 예산·장부 → 실행 상한 {H.DC_OLD_RUN_CALLS} 안({H.DC_OLD_RUN_CALLS // HLC}개)", [len(HLN), candles.CALLS["n"] - n0, rep9])
 
 dc, fh = mk()
 dc.lookup("ca:eth:0x99", OLD1, NOW, 0.0, old=True)
 fh.px["specs"]["ca:eth:0x99"] = {"st": "ok", "lo": OLD1, "hi": OLD1, "p": {OLD1: 4.0}, "src": ["coingecko:x"], "at": int(NOW)}
 del CALLS[:]
 dc._run(60, NOW)
-chk(not [c for c in CALLS if c[0] == "ca:eth:0x99"] and "ca:eth:0x99" not in dc.want_old, "O10(fs323 ③) 장기 곡선이 이미 받은 날 = 호출 없이 요청 지움", [CALLS, dc.want_old])
+chk(not [c for c in CALLS if c[0] == "ca:eth:0x99"] and "ca:eth:0x99" not in dc.want_old, "O10 장기 곡선이 이미 받은 날 = 호출 없이 요청 지움", [CALLS, dc.want_old])
 T.finish()

@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import time
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import web
+import paths, statefile  # noqa: E402
+import health  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = time.time()
 UNITS = ["tj-core", "tj-web", "tj-exf"]
 HS = health.settings({"health": {"units": UNITS}})
@@ -34,8 +34,8 @@ def case(debts):
     for f in os.listdir(S):
         if f.startswith("exf_balances_") or f == "spot.json":
             os.remove(os.path.join(S, f))
-    common.atomic_write_json(os.path.join(S, "spot.json"), {"ex_usd": {}, "ex_ts": {}})
-    common.atomic_write_json(os.path.join(S, "exf_balances_bybit.json"), {"ts": NOW, "balances": {}, "debts": debts})
+    statefile.atomic_write_json(os.path.join(S, "spot.json"), {"ex_usd": {}, "ex_ts": {}})
+    statefile.atomic_write_json(os.path.join(S, "exf_balances_bybit.json"), {"ts": NOW, "balances": {}, "debts": debts})
     rows = health.collect_debt(L(), NOW, HS)
     c = {x["id"]: x for x in health.evaluate(obs_of(NOW, debt=rows), HS)}.get("debt:margin") or {}
     return rows, c

@@ -13,8 +13,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import common
-import calcguard
+import config, logs, net_http, num_parse, paths, statefile
+import calcguard  # noqa: E402
 
 UA = "tj-bot/0.1 (personal trade journal)"
 HTTP_MAX_BYTES = 32 * 1024 * 1024
@@ -32,7 +32,7 @@ def _url_host(url) -> str:
 class NetError(RuntimeError):
 
     def __init__(self, msg: str, kind: str, code=None, retry_after=None, cap=None, host=None, earliest=None):
-        super().__init__(common.redact_secret_text(msg))
+        super().__init__(logs.redact_secret_text(msg))
         self.kind = kind
         self.code = code
         self.retry_after = retry_after
@@ -58,7 +58,7 @@ def retry_after_sec(v):
     try:
         from email.utils import parsedate_to_datetime
         return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("bf_engine:retry_after_sec", _cg9)
         return None
 
@@ -249,7 +249,7 @@ def _fail_class_one(x, block, head) -> str:
             h9 = None
             try:
                 h9 = head() if callable(head) else head
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("bf_engine:_fail_class_one", _cg9)
                 h9 = None
             if block is None or h9 is None:
@@ -310,7 +310,7 @@ def classify_exc(e: BaseException, host: str = None, body_bytes: bytes = None) -
         try:
             rb9 = (body_bytes if body_bytes is not None else e.read(HTTP_ERR_MAX_BYTES)) or b""
             body = rb9[:300].decode("utf-8", "replace")
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("bf_engine:classify_exc", _cg9)
             pass
         ra = retry_after_sec(e.headers.get("Retry-After") if e.headers else None)
@@ -328,7 +328,7 @@ def classify_exc(e: BaseException, host: str = None, body_bytes: bytes = None) -
                 e9.host = host
                 return e9
         e4 = NetError(msg, "http4xx", code=code, host=host)
-        e4.body = common.redact_secret_text(body, generic=False) if body else ""
+        e4.body = logs.redact_secret_text(body, generic=False) if body else ""
         return e4
     s = str(e)
     if isinstance(e, (socket.timeout, TimeoutError)) or "timed out" in s:
@@ -412,11 +412,8 @@ CN_COOL_MAX = 3600.0
 
 
 def _pol_num(v, default, typ, lo, hi):
-    try:
-        x = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    if x != x or x in (float("inf"), float("-inf")):
+    x = num_parse.to_float(v, catch_overflow=True)
+    if x is None:
         return default
     return typ(min(hi, max(lo, x)))
 
@@ -461,7 +458,7 @@ class _XprocSharedBucket(_SharedBucket):
     def _io(self, cost: int, take: bool) -> float:
         with self.lock:
             try:
-                d = os.path.join(common.quota_dir(), "rpc_gap")
+                d = os.path.join(paths.quota_dir(), "rpc_gap")
                 os.makedirs(d, exist_ok=True)
                 fd = os.open(os.path.join(d, re.sub(r"[^a-z0-9_]", "_", self.name)[:40] + ".bucket"), os.O_RDWR | os.O_CREAT, 0o600)
             except OSError as e:
@@ -730,7 +727,7 @@ _ESB_LOCK = threading.Lock()
 
 
 def _esb_dir() -> str:
-    return os.path.join(common.quota_dir(), "es_budget")
+    return os.path.join(paths.quota_dir(), "es_budget")
 
 
 _ESB_INST = os.urandom(4).hex()
@@ -824,7 +821,7 @@ def _esb_hist_merge_locked(d: str, add: dict, today: int, keep: int = None) -> b
                 cur[stem] = [max(o0, int(nh)), max(o1, int(n))]
         for k in [k for k in days if not str(k).lstrip("-").isdigit() or int(k) < today - (ESB_HIST_KEEP_DAYS if keep is None else int(keep))]:
             days.pop(k, None)
-        common.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, days=days) if keep is not None else {"days": days})
+        statefile.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, days=days) if keep is not None else {"days": days})
         return True
     except (OSError, TypeError, ValueError):
         return False
@@ -869,7 +866,7 @@ def _esb_sync_locked(d: str, proc: str, now: float):
         rec9 = {"day": _ESB["day"], "n": _ESB["n"], "nh": _ESB["nh"], "fq": int(_ESB["fq"]), "proc": proc, "pid": os.getpid(), "inst": _ESB_INST, "at": int(now)}
         if _ESB.get("closed"):
             rec9["closed"] = True
-        common.atomic_write_json(os.path.join(d, me), rec9)
+        statefile.atomic_write_json(os.path.join(d, me), rec9)
         _ESB["flushed"] = _ESB["n"]
         tot = toth = fq9 = 0
         old9 = {}
@@ -877,8 +874,8 @@ def _esb_sync_locked(d: str, proc: str, now: float):
             if not f.endswith(".json") or f == me:
                 continue
             try:
-                j = common.read_json(os.path.join(d, f), {})
-            except (Exception, SystemExit) as _cg9:
+                j = statefile.read_json(os.path.join(d, f), {})
+            except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("bf_engine:_esb_sync_locked", _cg9)
                 continue
             if not isinstance(j, dict):
@@ -989,8 +986,8 @@ def es_ledger_read(now: float = None, d: str = None) -> dict:
         for f in os.listdir(d):
             if f.endswith(".json"):
                 try:
-                    j = common.read_json(os.path.join(d, f), {})
-                except (Exception, SystemExit) as _cg9:
+                    j = statefile.read_json(os.path.join(d, f), {})
+                except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [isolate]
                     calcguard.swallowed("bf_engine:es_ledger_read", _cg9)
                     continue
                 if isinstance(j, dict) and j.get("day") == day:
@@ -1062,7 +1059,7 @@ def es_budget_flush(closed: bool = False):
 def _esb_atexit():
     try:
         es_budget_flush(closed=True)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:_esb_atexit", _cg9)
         pass
 
@@ -1125,7 +1122,7 @@ class DayMeter:
         return max(int(self.hist_keep or 0), ESB_HIST_KEEP_DAYS)
 
     def _dir(self) -> str:
-        return os.path.join(common.quota_dir(), self.sub)
+        return os.path.join(paths.quota_dir(), self.sub)
 
     def keep_credits(self) -> int:
         return int(self.budget * max(self.keep, ES_FILL_KEEP_MIN))
@@ -1148,7 +1145,7 @@ class DayMeter:
                 rec9["hm"] = round(float(self.head_min), 5)
             if self.st.get("closed"):
                 rec9["closed"] = True
-            common.atomic_write_json(os.path.join(d, me), rec9)
+            statefile.atomic_write_json(os.path.join(d, me), rec9)
             self.st["flushed"] = self.st["n"]
             tot = toth = fq9 = 0
             hm9 = None
@@ -1157,8 +1154,8 @@ class DayMeter:
                 if not f.endswith(".json") or f == me:
                     continue
                 try:
-                    j = common.read_json(os.path.join(d, f), None)
-                except (Exception, SystemExit) as _cg9:
+                    j = statefile.read_json(os.path.join(d, f), None)
+                except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("bf_engine:DayMeter._sync", _cg9)
                     j = None
                 if not isinstance(j, dict):
@@ -1222,7 +1219,7 @@ class DayMeter:
             try:
                 import nodekeys
                 fd9 = nodekeys.fresh_day(str(self.fresh_svc))
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("bf_engine:DayMeter.eff_budget", _cg9)
                 fd9 = None
         used, head = self.st["n"] + self.st["others"], self.st["nh"] + self.st["others_h"]
@@ -1397,7 +1394,7 @@ class DayMeter:
 
 def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = None, now: float = None, floor: float = None, flex: dict = None) -> dict:
     now = time.time() if now is None else now
-    d9 = os.path.join(common.quota_dir(), sub)
+    d9 = os.path.join(paths.quota_dir(), sub)
     L = es_ledger_read(now, d=d9)
     fl = L["hm"] if L.get("hm") is not None else floor
     eb9 = None
@@ -1407,7 +1404,7 @@ def ledger_rooms(sub: str, budget: float, burst: float = None, keep: float = Non
             m9.month_cap, m9.flex_x, m9.fresh_svc = int(flex["cap"]), float(flex["x"]), "helius" if sub == "helius_budget" else None
             m9.st.update(day=int(now // 86400), n=int(L["n"]), nh=int(L["nh"]))
             eb9 = m9.eff_budget(now)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("bf_engine:ledger_rooms", _cg9)
             eb9 = None
     fa9 = es_fill_active(L["fq"], now)
@@ -1476,7 +1473,7 @@ def host_gap_wait(host: str, method: str = None, gap: float = 0.0, method_gap: f
     key = re.sub(r"[^A-Za-z0-9_.-]", "_", str(host or "x"))[:80] or "x"
     with _HG_LOCAL:
         try:
-            d = os.path.join(common.quota_dir(), "rpc_gap")
+            d = os.path.join(paths.quota_dir(), "rpc_gap")
             os.makedirs(d, exist_ok=True)
             fd = os.open(os.path.join(d, key + ".slot"), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as e:
@@ -1602,8 +1599,8 @@ def _sol_meter_ensure():
     if not _SOL_METER_SET[0]:
         _SOL_METER_SET[0] = True
         try:
-            sol_meter_configure(common.load_config())
-        except (Exception, SystemExit) as _cg9:
+            sol_meter_configure(config.load_config())
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("bf_engine:_sol_meter_ensure", _cg9)
             pass
 
@@ -1645,8 +1642,8 @@ def sol_open(req, timeout, method: str = None, deadline: float = None, sol: bool
         for m9 in ([method] if method else _rpc_methods_of(getattr(req, "data", None))):
             rpc_gap(url, m9, deadline, sol=sol)
     if no_redirect:
-        return common.auth_urlopen(req, timeout=timeout)
-    return urllib.request.urlopen(req, timeout=timeout)
+        return net_http.auth_urlopen(req, timeout=timeout)
+    return net_http.urlopen(req, timeout=timeout)
 
 
 def is_helius_rpc(sol_cfg: dict) -> bool:
@@ -1690,7 +1687,7 @@ def helius_flex(cfg: dict):
         try:
             import nodekeys
             x = max(1.0, float(nodekeys.BURST_X))
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("bf_engine:helius_flex", _cg9)
             x = 1.0
     return {"cap": int(m * pct / 100.0), "x": x}
@@ -1699,7 +1696,7 @@ def helius_flex(cfg: dict):
 def _hl_atexit():
     try:
         HELIUS.flush(closed=True)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [cleanup]
         calcguard.swallowed("bf_engine:_hl_atexit", _cg9)
         pass
 
@@ -1829,7 +1826,7 @@ def _hist_since_ensure(d: str, today: int):
                 if st9 == "bad":
                     _hist_keep_bad(d)
                     h = {"days": {}}
-                common.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, since=int(today)))
+                statefile.atomic_write_json(os.path.join(d, ESB_HIST), dict(h, since=int(today)))
             finally:
                 fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
     except OSError:
@@ -1903,12 +1900,12 @@ def _rpc_day_prev_used(d: str, today: int, n_day: int = 0, fresh_day: int = None
         if not f.endswith(".json"):
             continue
         try:
-            j = common.read_json(os.path.join(d, f), None)
+            j = statefile.read_json(os.path.join(d, f), None)
             day = j.get("day") if isinstance(j, dict) else None
             if isinstance(day, int) and lo <= day < today:
                 per[(day, f[:-5])] = max(per.get((day, f[:-5]), 0), int(j.get("n") or 0))
                 perh[(day, f[:-5])] = max(perh.get((day, f[:-5]), 0), min(int(j.get("n") or 0), _esb_rec_head(j)))
-        except (Exception, SystemExit) as _cg9:
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [isolate]
             calcguard.swallowed("bf_engine:_rpc_day_prev_used", _cg9)
             continue
     if rt_out is not None:
@@ -1974,7 +1971,7 @@ def _rpc_day_lims(ent: dict, now: float, live: bool = False) -> dict:
         try:
             import nodekeys
             fd9 = nodekeys.fresh_day(str(ent["spec"]["svc"]))
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("bf_engine:_rpc_day_lims", _cg9)
             pass
     try:
@@ -2071,7 +2068,7 @@ def rpc_day_settle(name: str, actual: int, reserved: int, day):
         return
     try:
         ent["meter"].add(ent["meter"].proc or _RPC_DAY_PROC, delta, now=now)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:rpc_day_settle", _cg9)
         pass
 
@@ -2083,8 +2080,8 @@ def rpc_day_status() -> dict:
     for name, ent in ents.items():
         try:
             used, bud = ent["meter"].used()
-        except Exception as _cg9:
-            calcguard.swallowed("bf_engine:rpc_day_status", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("bf_engine:rpc_day_status[used]", _cg9)
             used, bud = 0, ent["meter"].budget
         out[name] = {"used": int(used), "budget": int(bud), "unit": ent["spec"].get("unit"), "refused": int(ent.get("refused") or 0)}
         if _burst_x(ent["spec"]):
@@ -2092,8 +2089,8 @@ def rpc_day_status() -> dict:
                 l9 = rpc_day_limits(name)
                 out[name].update(normal=l9.get("normal"), burst=l9.get("burst"), cap=l9.get("cap"), prev=l9.get("prev"),
                                   rt=l9.get("rt"), rtm=l9.get("rtm"), room=l9.get("room"))
-            except Exception as _cg9:
-                calcguard.swallowed("bf_engine:rpc_day_status", _cg9)
+            except Exception as _cg9:   # noqa: BLE001 [isolate]
+                calcguard.swallowed("bf_engine:rpc_day_status[l9]", _cg9)
                 pass
     return out
 
@@ -2104,7 +2101,7 @@ def _rpc_day_atexit():
     for ent in ents:
         try:
             ent["meter"].flush(closed=True)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [cleanup]
             calcguard.swallowed("bf_engine:_rpc_day_atexit", _cg9)
             pass
 
@@ -2214,7 +2211,7 @@ def configure(cfg: dict):
     try:
         import nodesel
         nodesel.configure(cfg)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:configure", _cg9)
         pass
     bf = (cfg or {}).get("backfill") or {}
@@ -2309,9 +2306,19 @@ def _backoff(i: int, base: float = 1.0, cap: float = 20.0) -> float:
 RETRYABLE = ("http429", "http5xx", "timeout", "conn", "dns", "payload")
 
 
+_KEY_HDR_RX = re.compile(r"(api[_-]?key|apikey|token|secret|authorization|passphrase)", re.I)
+
+
+def has_key_header(req) -> bool:
+    try:
+        return any(_KEY_HDR_RX.search(k or "") for k, _v in req.header_items())
+    except AttributeError:
+        return False
+
+
 def _open(req, timeout):
     _ns_mark()
-    return sol_open(req, timeout)
+    return sol_open(req, timeout, no_redirect=has_key_header(req))
 
 
 def _resp_sock(r):
@@ -2367,7 +2374,7 @@ def _read_capped(r, n: int, t_end: float = None, idle: float = None) -> bytes:
             if not ch:
                 break
             buf += ch
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         if cut9.is_set() or time.time() >= t_end:
             raise socket.timeout(f"응답 본문 수신 절대 마감 초과({len(buf):,}바이트 받음)") from e
         raise
@@ -2401,7 +2408,7 @@ def _qn_note(host: str, body=None, err=None) -> None:
     try:
         import nodekeys
         nodekeys.qn_note(host, body=body, err=err)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:_qn_note", _cg9)
         pass
 
@@ -2410,7 +2417,7 @@ def _alch_note(url: str, body=None, err=None, text: str = "") -> None:
     try:
         import nodekeys
         nodekeys.alch_note(url, body=body, err=err, text=text)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:_alch_note", _cg9)
 
 
@@ -2463,11 +2470,11 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
                     rds9 = True
                     raise NetError(f"budget: {host} 요청 마감 지남", "budget", host=host)
                 to9 = min(float(timeout), l9)
-            h = {"User-Agent": common.ua_for(url, ua), "Accept": "application/json"}
+            h = {"User-Agent": net_http.ua_for(url, ua), "Accept": "application/json"}
             if data is not None:
                 h["Content-Type"] = "application/json"
             h.update(headers or {})
-            req = urllib.request.Request(url, data=data, headers=h)
+            req = net_http.request(url, data=data, headers=h)
             if host == "api.etherscan.io":
                 es_dispatch_wait(deadline)
             _stat(host, "calls")
@@ -2504,13 +2511,13 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             return d, None
         except CircuitOpen:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             bb9 = None
             if rdb9 and rdd9 is not None and not rds9 and isinstance(e, urllib.error.HTTPError):
                 try:
                     bb9 = _read_capped(e, min(rdu9, HTTP_ERR_MAX_BYTES) + 1, tb9, to9) or b""
-                except Exception as _cg9:
-                    calcguard.swallowed("bf_engine:http_request", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("bf_engine:http_request[bb9#1]", _cg9)
                     bb9 = None
                 if bb9 is not None and len(bb9) > HTTP_ERR_MAX_BYTES:
                     bb9 = bb9[:HTTP_ERR_MAX_BYTES]
@@ -2519,8 +2526,8 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             elif tb9 is not None and isinstance(e, urllib.error.HTTPError):
                 try:
                     bb9 = _read_capped(e, HTTP_ERR_MAX_BYTES, tb9, to9) or b""
-                except Exception as _cg9:
-                    calcguard.swallowed("bf_engine:http_request", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("bf_engine:http_request[bb9#2]", _cg9)
                     bb9 = b""
             err = classify_exc(e, host, body_bytes=bb9)
             if host.endswith(".quiknode.pro"):
@@ -2566,8 +2573,8 @@ def _rpc_cfg_ensure():
         if _CONFIGURED[0]:
             return
         try:
-            configure(common.load_config())
-        except (Exception, SystemExit) as _cg9:
+            configure(config.load_config())
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("bf_engine:_rpc_cfg_ensure", _cg9)
             _CONFIGURED[0] = True
 
@@ -2588,7 +2595,7 @@ def rpc_post(url: str, body, *, timeout: float = 25.0, ua: str = None, retries: 
 def _ns_mark():
     try:
         _NS[0].mark_dispatch() if _NS[0] else None
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:_ns_mark", _cg9)
         pass
 
@@ -2599,7 +2606,7 @@ def _ns_begin():
             import nodesel
             _NS[0] = nodesel
         return _NS[0].begin()
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("bf_engine:_ns_begin", _cg9)
         return None
 
@@ -2609,7 +2616,7 @@ def _ns_end(url, methods, cost, t0, err=None):
         return
     try:
         _NS[0].end(url, methods, cost, t0, err)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("bf_engine:_ns_end", _cg9)
         pass
 
@@ -2697,7 +2704,7 @@ def _ns_batch_err(d):
     if d and all(errs):
         try:
             return classify_rpc_error(errs[0])
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("bf_engine:_ns_batch_err", _cg9)
             return NetError("rpc", "rpc")
     return None
@@ -2787,8 +2794,8 @@ class NoDecRegistry:
 
     def __init__(self, chain: str, log=None):
         self.chain = chain
-        self.path = os.path.join(common.STATE_DIR, f"token_nodec_{chain}.json")
-        self.d = common.read_json(self.path, {}) or {}
+        self.path = paths.state(f"token_nodec_{chain}.json")
+        self.d = statefile.read_json(self.path, {}) or {}
         self.log = log
         self._lock = threading.Lock()
 
@@ -2806,7 +2813,7 @@ class NoDecRegistry:
             if newly:
                 e["perm"] = now
             try:
-                common.atomic_write_json(self.path, self.d)
+                statefile.atomic_write_json(self.path, self.d)
             except OSError:
                 pass
         if newly and self.log:
@@ -2821,7 +2828,7 @@ class NoDecRegistry:
             with self._lock:
                 self.d.pop(ca, None)
                 try:
-                    common.atomic_write_json(self.path, self.d)
+                    statefile.atomic_write_json(self.path, self.d)
                 except OSError:
                     pass
 
@@ -2835,11 +2842,11 @@ class NoDecRegistry:
             sk.append(h)
             del sk[:-200]
             try:
-                common.atomic_write_json(self.path, self.d)
+                statefile.atomic_write_json(self.path, self.d)
             except OSError:
                 pass
         try:
-            common.append_durable_jsonl(os.path.join(common.STATE_DIR, self.SKIP_LOG),
+            statefile.append_durable_jsonl(paths.state(self.SKIP_LOG),
                                         {"ts": int(time.time()), "chain": self.chain, "txhash": h, "token": ca,
                                          "from": str(frm or "").lower(), "to": str(to or "").lower(), "value": str(value),
                                          "why": (self.d.get(ca) or {}).get("why")})
@@ -2901,8 +2908,8 @@ def detail_fail_note(cursor: dict, bad: list, dets: dict, chain: str, src: str, 
                 seen.add(h)
         fm[h] = [n9, t9]
         if n9 >= DETAIL_FAIL_MAX and now - int(t9) >= DETAIL_FAIL_SEC:
-            err9 = common.safe_err(e)[:200]
-            common.append_durable_jsonl(os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+            err9 = logs.safe_err(e)[:200]
+            statefile.append_durable_jsonl(paths.state("pending_poison.jsonl"),
                                         {"ts": now, "chain": chain, "txhash": h, "src": src, "n": n9, "err": err9})
             q[h] = {"at": now, "next": now + QUAR_RETRY_SEC, "n": 0, "err": err9[:120]}
             if blocks and blocks.get(h) is not None:
@@ -2942,7 +2949,7 @@ def quarantine_result(cursor: dict, h: str, ok: bool, chain: str, src: str, log=
             rel[h] = int(e9["blk"])
             for k9 in list(rel)[:-500]:
                 rel.pop(k9, None)
-        common.append_durable_jsonl(os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+        statefile.append_durable_jsonl(paths.state("pending_poison.jsonl"),
                                     {"ts": now, "chain": chain, "txhash": h, "src": src, "released": True})
         if log:
             log.warning("★%s 격리 tx %s 재시도 성공 — 방출·격리 해제★", chain, h[:12])
@@ -2950,7 +2957,7 @@ def quarantine_result(cursor: dict, h: str, ok: bool, chain: str, src: str, log=
         q[h]["next"] = now + QUAR_RETRY_SEC
         q[h]["n"] = int(q[h].get("n") or 0) + 1
         if err is not None:
-            q[h]["err"] = common.safe_err(err)[:120]
+            q[h]["err"] = logs.safe_err(err)[:120]
 
 
 _NODEC = {}
@@ -2960,7 +2967,7 @@ _NODEC_LOCK = threading.Lock()
 def nodec_registry(chain: str, log=None) -> "NoDecRegistry":
     with _NODEC_LOCK:
         r = _NODEC.get(chain)
-        if r is None or r.path != os.path.join(common.STATE_DIR, f"token_nodec_{chain}.json"):
+        if r is None or r.path != paths.state(f"token_nodec_{chain}.json"):
             r = _NODEC[chain] = NoDecRegistry(chain, log)
         return r
 
@@ -3044,9 +3051,9 @@ def canary_check(url: str, canary: dict, *, timeout: float = 25.0, prio: str = "
             a = b + 1
         res = total == int(canary["expect"])
         why = f"{total}/{canary['expect']}건"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         calcguard.swallowed("bf_engine:canary_check", e)
-        res, why = None, f"오류 {common.safe_err(e)[:80]}"
+        res, why = None, f"오류 {logs.safe_err(e)[:80]}"
     with _CANARY_LOCK:
         _CANARY[url] = (res, now, why)
     return res, why
@@ -3221,7 +3228,7 @@ class LogScanner:
             if moved and on_advance:
                 try:
                     on_advance(st["last"], dict(st["found"]))
-                except Exception as _cg9:
+                except Exception as _cg9:  # noqa: BLE001 [optional]
                     calcguard.swallowed("bf_engine:LogScanner.scan.advance_locked", _cg9)
                     pass
 
@@ -3313,10 +3320,11 @@ class LogScanner:
                         try:
                             hh = self._known_head(url, b)
                             self.head_fail[url] = 0
-                        except Exception as e9:
+                        except Exception as e9:  # noqa: BLE001 [fallback]
                             self.head_fail[url] = self.head_fail.get(url, 0) + 1
                             if self.head_fail[url] < 3:
                                 raise
+                            calcguard.swallowed("bf_engine:LogScanner.scan.worker[head]", e9)
                             self.head_off.add(url)
                             _EP_HEAD_OFF[url] = time.time() + EP_HEAD_OFF_SEC
                             if self.log:
@@ -3360,7 +3368,7 @@ class LogScanner:
                         self._soft_ok(url, b - a + 1)
                         advance_locked()
                         cv.notify_all()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     calcguard.swallowed("bf_engine:LogScanner.scan.worker", e)
                     err = classify_exc(e) if not isinstance(e, NetError) else e
                     with cv:
@@ -3382,7 +3390,7 @@ class LogScanner:
                                 else:
                                     requeue([[a, mid], [mid + 1, b]])
                             else:
-                                st["stop"] = common.redact_secret_text(f"{_url_host(url)} 최소 구간({self.min_span})도 거부: {err}")
+                                st["stop"] = logs.redact_secret_text(f"{_url_host(url)} 최소 구간({self.min_span})도 거부: {err}")
                         elif err.kind == "timeout" and (b - a + 1) > self.min_span:
                             mid = (a + b) // 2
                             self.metrics["halved"] += 1
@@ -3462,7 +3470,7 @@ class Progress:
 
     def __init__(self, unit: str, min_interval: float = 5.0):
         self.unit = unit
-        self.path = os.path.join(common.STATE_DIR, STATUS_FILE)
+        self.path = paths.state(STATUS_FILE)
         self.min_interval = min_interval
         self.items = {}
         self._hist = {}
@@ -3501,7 +3509,7 @@ class Progress:
                 for k, v in errors.items():
                     e[k] = e.get(k, 0) + int(v)
             if note is not None:
-                it["note"] = common.redact_urls(common.redact_secret_text(str(note), generic=False))[:200]
+                it["note"] = logs.redact_urls(logs.redact_secret_text(logs.redact_urls(str(note)), generic=False))[:200]
             it.update(extra)
             it["updated"] = int(now)
             if "moved_at" not in it or (done is not None and done != prev_done) or (phase is not None and phase != prev_phase):
@@ -3543,11 +3551,11 @@ class Progress:
                     for k in drop:
                         sec.pop(k, None)
                     cur["_updated"] = int(time.time())
-                    common.atomic_write_json(self.path, cur)
+                    statefile.atomic_write_json(self.path, cur)
                     return len(drop)
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("bf_engine:Progress.prune", _cg9)
             return 0
 
@@ -3568,23 +3576,23 @@ class Progress:
                     except (FileNotFoundError, ValueError):
                         cur = {}
                     cur[self.unit] = mine
-                    cur, _n9 = common.scrub_secrets(cur, ("note",))
+                    cur, _n9 = logs.scrub_secrets(cur, ("note",))
                     cur["_updated"] = int(time.time())
-                    common.atomic_write_json(self.path, cur)
+                    statefile.atomic_write_json(self.path, cur)
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("bf_engine:Progress.flush", _cg9)
             pass
 
 
 def scrub_status_file() -> int:
-    path = os.path.join(common.STATE_DIR, STATUS_FILE)
+    path = paths.state(STATUS_FILE)
     try:
         with open(path + ".lock", "a+") as lk:
             fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
             try:
-                return common.scrub_secret_file(path, ("note",))
+                return logs.scrub_secret_file(path, ("note",))
             finally:
                 fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
     except OSError:
@@ -3593,7 +3601,7 @@ def scrub_status_file() -> int:
 
 def read_status() -> dict:
     try:
-        with open(os.path.join(common.STATE_DIR, STATUS_FILE), "r", encoding="utf-8") as f:
+        with open(paths.state(STATUS_FILE), "r", encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except (FileNotFoundError, ValueError, OSError):
@@ -3631,7 +3639,7 @@ class Health:
 
     def __init__(self, unit: str):
         self.unit = unit
-        self.path = os.path.join(common.STATE_DIR, HEALTH_DIR, f"{unit}.json")
+        self.path = paths.state(HEALTH_DIR, f"{unit}.json")
         self.lock = threading.Lock()
         self.src = {}
         self.started = int(time.time())
@@ -3648,7 +3656,7 @@ class Health:
             s = self._s(key, kind)
             for k, v in kv.items():
                 if isinstance(v, str):
-                    v = common.redact_secret_text(v, generic=False)
+                    v = logs.redact_secret_text(v, generic=False)
                 s[k] = v
             if s.get("head_ts"):
                 try:
@@ -3680,7 +3688,7 @@ class Health:
             s["last_cycle_ts"] = now
             s["consecutive_failures"] = int(s.get("consecutive_failures") or 0) + 1
             ek = getattr(err, "kind", None) or type(err).__name__
-            s["last_error"] = {"ts": now, "kind": ek, "msg": common.redact_secret_text(str(err))[:300]}
+            s["last_error"] = {"ts": now, "kind": ek, "msg": logs.redact_secret_text(str(err))[:300]}
             n = s["consecutive_failures"]
         self.facts(key, kind, **kv)
         return n
@@ -3697,8 +3705,8 @@ class Health:
                "started": self.started, "ok": all(v.get("ok") is not False for v in src.values()) if src else None,
                "sources": src, "net": net}
         try:
-            common.atomic_write_json(self.path, doc)
-        except Exception as _cg9:
+            statefile.atomic_write_json(self.path, doc)
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("bf_engine:Health.flush", _cg9)
             pass
 
@@ -3784,15 +3792,15 @@ class _SinceSource:
         return ((cfg.get("exchanges") or {}).get(section)) or {}
 
     def target(self, section: str = None):
-        cfg = self._load(common.CONFIG_PATH)
-        req = self._load(os.path.join(common.STATE_DIR, "backfill_request.json"))
+        cfg = self._load(paths.CONFIG_PATH)
+        req = self._load(paths.state("backfill_request.json"))
         vals = [parse_date_ts(cfg.get("backfill_since")), parse_date_ts(self._section(cfg, section).get("backfill_since")),
                 parse_date_ts(req.get("since")), parse_date_ts((req.get("per") or {}).get(section) if section else None)]
         vals = [v for v in vals if v]
         return min(vals) if vals else None
 
     def covered_hint(self, section: str = None):
-        cfg = self._load(common.CONFIG_PATH)
+        cfg = self._load(paths.CONFIG_PATH)
         v = parse_date_ts(self._section(cfg, section).get("covered_since")) or parse_date_ts(cfg.get("backfill_covered_since"))
         return v
 

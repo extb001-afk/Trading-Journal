@@ -168,15 +168,17 @@ class SegmentReader:
         keep_s = self.retain_sec()
         now = time.time() if now is None else now
         kept = 0
+        cut = False
         for s in sorted((x for x in segs if x < active and x < consumed_seg), reverse=True):
             p = self._path(s)
             try:
                 st = os.stat(p)
             except OSError:
                 continue
-            if keep_s > 0 and now - st.st_mtime < keep_s and kept + st.st_size <= RETAIN_MAX_BYTES:
+            if not cut and keep_s > 0 and now - st.st_mtime < keep_s and kept + st.st_size <= RETAIN_MAX_BYTES:
                 kept += st.st_size
                 continue
+            cut = True
             try:
                 os.unlink(p)
             except OSError:

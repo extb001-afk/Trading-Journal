@@ -17,7 +17,7 @@
   };
   const J_SORTS = [['recent', '최근 활동'], ['value', '평가금액'], ['cost', '원가'], ['realized', '실현'], ['unreal', '평가손익']];
   const J_FIRST = 15, J_STEP = 40;
-  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = TJDOM.esc;
   const isAirQ = h => /^실매수 이력 없는 에어드랍 유입/.test(String(h || '')) && !/확증|허니팟|매도 불가|가짜 토큰/.test(String(h || ''));
   const impChip = x => (x && x.imp) ? ' <span class="pill e sm" title="' + esc(x.imp) + ' 흉내 — 사칭 토큰">사칭</span>' : '';
   const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -29,13 +29,15 @@
   const short = a => { const s = String(a || ''); return s.length > 14 ? s.slice(0, 6) + '…' + s.slice(-4) : s; };
   const shortL = a => { const s = String(a || ''); return s.length > 24 ? s.slice(0, 12) + '…' + s.slice(-10) : s; };
 
-  const EX_ORDER = ['upbit', 'binance', 'bybit', 'okx', 'kucoin', 'gate', 'bithumb', 'hyperliquid'];
-  const EX_NAMES = { upbit: '업비트', binance: '바이낸스', bybit: '바이빗', okx: 'OKX', kucoin: '쿠코인', gate: '게이트', bithumb: '빗썸' };
+  const EX_ORDER = ['upbit', 'binance', 'bybit', 'okx', 'kucoin', 'gate', 'bithumb', 'coinbase',
+    'hyperliquid'];
+  const EX_NAMES = { upbit: '업비트', binance: '바이낸스', bybit: '바이빗', okx: 'OKX', kucoin: '쿠코인', gate: '게이트', bithumb: '빗썸',
+    coinbase: '코인베이스' };
   const DEX_NAMES = { hyperliquid: 'Hyperliquid', dydx: 'dYdX', lighter: 'Lighter', gmx: 'GMX', jupiter: 'Jupiter', pacifica: 'Pacifica' };
   Object.assign(EX_NAMES, DEX_NAMES);
   const isDex = k => Object.prototype.hasOwnProperty.call(DEX_NAMES, k);
   const EX_BRAND = { upbit: ['#0A3A8C', 'U'], binance: ['#F0B90B', 'B', '#1E2026'], bybit: ['#17181E', 'By'], okx: ['#0B0B0B', 'OK'],
-    kucoin: ['#1BA27A', 'K', '#1E2026'], gate: ['#2354E6', 'G'], bithumb: ['#F37321', 'B', '#1E2026'],
+    kucoin: ['#1BA27A', 'K', '#1E2026'], gate: ['#2354E6', 'G'], bithumb: ['#F37321', 'B', '#1E2026'], coinbase: ['#0052FF', 'Cb'],
     hyperliquid: ['#97FCE4', 'HL', '#0B2520'], dydx: ['#5B57F0', 'dY'], lighter: ['#E9E9EF', 'Li', '#16161C'], gmx: ['#2D42FC', 'GX'],
     jupiter: ['#C7F284', 'J', '#1B2A12'], pacifica: ['#5AC8FA', 'P', '#0B2330'] };
   const EX_BY_KO = {}; Object.keys(EX_NAMES).forEach(k => { EX_BY_KO[EX_NAMES[k]] = k; });
@@ -233,6 +235,12 @@
   const UI_PICK = {};
   S.uiDateYm = {};
   const uiRe = () => { renderView(); if (S.sheet || S.drawer) renderOverlay(); };
+  const sync = {
+    snap: (st, keys) => { const o = {}; keys.forEach(k => { o[k] = st[k]; }); return o; },
+    done: (st, sn) => Object.keys(sn).reduce((n, k) => { if (st[k] === sn[k]) delete st[k]; else if (st[k] != null) n++; return n; }, 0),
+    rd: L => { const v0 = L.ver | 0, p0 = (L.pend | 0) > 0; return () => !!S.locked || p0 || (L.ver | 0) !== v0 || (L.pend | 0) > 0; },
+    wr: L => { L.ver = (L.ver | 0) + 1; L.pend = (L.pend | 0) + 1; let on = true; return () => { if (on) { on = false; L.pend = Math.max(0, (L.pend | 0) - 1); L.ver = (L.ver | 0) + 1; } }; }
+  };
   const uiPopBox = (title, inner, cls) => (S.mobile ? '<div class="sheet-bg" data-a="uiPopClose"></div>' : '') + '<div class="pop upop' + (cls ? ' ' + cls : '') + '" role="dialog" aria-label="' + esc(title) + '"><div class="ptl">' + esc(title) + '</div>' + inner + '</div>';
   function uiPick(key, opts, cur, label, o) {
     o = o || {};
@@ -547,14 +555,15 @@
     });
   }
   const dayEvs = k => dayFull(k) || S.D.evByDay.get(k) || [];
-  const PX_STALE = 1800;
+  const PX_STALE = 1800, pxAgeLim = i => (i.pxSrc === 'coingecko' ? 7200 : PX_STALE);
+  const pxStaleOf = i => (i.pxSrc.startsWith('dex:') || i.pxSrc === 'coingecko') && i.pxAge != null && i.pxAge > pxAgeLim(i);
   const ageTxt = s => s < 3600 ? Math.max(1, Math.floor(s / 60)) + '분 전' : Math.floor(s / 3600) + '시간 전';
-  const PX_SRC = { gecko: 'DEX(게코)', dexscreener: 'DEX(덱스스크리너)', okx: 'DEX(OKX)' };
+  const PX_SRC = { gecko: 'DEX(게코)', dexscreener: 'DEX(덱스스크리너)', okx: 'DEX(OKX)', coingecko: '코인게코' };
   const pxSrcTxt = i => {
     if (!i.pxSrc) return '';
     if (i.pxSrc === 'rabby') return 'Rabby 기준' + (i.pxAge != null ? ' · ' + ageTxt(Math.max(60, i.pxAge)) : '');
-    const p9 = i.pxSrc.split(':'), lab = p9[0] === 'cex' ? (p9.slice(1).join(':') + ' 시세') : (PX_SRC[p9[1]] || 'DEX');
-    return (i.pxPre ? '거래 시작 전 · ' : '') + lab + (i.pxPreN ? ' · ' + i.pxPreN + '곳 일치' : '') + (i.pxAge != null && i.pxAge > PX_STALE ? ' · ≈ ' + ageTxt(i.pxAge) : '');
+    const p9 = i.pxSrc.split(':'), lab = p9[0] === 'cex' ? (p9.slice(1).join(':') + ' 시세') : p9[0] === 'coingecko' ? PX_SRC.coingecko : (PX_SRC[p9[1]] || 'DEX');
+    return (i.pxPre ? '거래 시작 전 · ' : '') + lab + (i.pxPreN ? ' · ' + i.pxPreN + '곳 일치' : '') + (i.pxAge != null && i.pxAge > pxAgeLim(i) ? ' · ≈ ' + ageTxt(i.pxAge) : '');
   };
   const rbChip = g => g && g.rabby ? ' <span class="pill a sm rbchip" title="봇이 추적하지 않는 보유예요 — Rabby(DeBank 데이터)가 이 지갑에 있다고 본 수량·USD 로 총자산에 더했어요(원가·손익 추적 밖). 봇이 그 체인·토큰을 추적하면 자동으로 봇 숫자로 바뀌어요">Rabby 기준 · ' + ago(g.rabby) + '</span>' : '';
   const staleChip = g => g.staleAge && g.staleVal >= g.value * 0.1 ? ' <span class="pill w sm" title="DEX 가격이 ' + ageTxt(g.staleAge) + ' 값이에요 — 조회가 밀려 마지막 가격으로 평가 중(6시간 넘으면 평가 제외)">≈ ' + ageTxt(g.staleAge) + '</span>' : '';
@@ -817,18 +826,8 @@
   };
   const chainOf = name => { const s = String(name || ''); const i = s.indexOf(' · '); const c = i >= 0 ? s.slice(i + 3) : ''; return c === '?' ? '' : c; };
 
-  const SPOT_SYMS = new Set('$pac 0xbtc 1inch 2give aave abt act actn ada add adx ae aeon aeur agi agrs aion algo amb amp ampl ankr ant ape apex appc ardr arg ark arn arnx ary ast atlas atm atom audr aury auto avax aywa bab bal band bat bay bcbc bcc bcd bch bcio bcn bco bcpt bdl beam bela bix blcn blk block blz bnb bnt bnty booty bos bpt bq brd bsd bsv btc btcd btch btcp btcz btdx btg btm bts btt btx burst bze call cc cdn cdt cenz chain chat chips chsb chz cix clam cloak cmm cmt cnd cnx cny cob colx comp coqui cred crpt crv crw cs ctr ctxc cvc d dai dash dat data dbc dcn dcr deez dent dew dgb dgd dlt dnt dock doge dot drgn drop dta dth dtr ebst eca edg edo edoge ela elec elf elix ella emb emc emc2 eng enj entrp eon eop eos eqli equa etc eth ethos etn etp eur evx exmo exp fair fct fida fil fjc fldc flo flux fsn ftc fuel fun game gas gbp gbx gbyte generic gin glxt gmr gmt gno gnt gold grc grin grs grt gsc gto gup gusd gvt gxs gzr hight hns hodl hot hpb hsr ht html huc husd hush icn icp icx ignis ilk ink ins ion iop iost iotx iq itc jnt jpy kcs kin klown kmd knc krb ksm lbc lend leo link lkk loom lpt lrc lsk ltc lun maid mana matic max mcap mco mda mds med meetone mft miota mith mkr mln mnx mnz moac mod mona msr mth mtl music mzc nano nas nav ncash ndz nebl neo neos neu nexo ngc nio nkn nlc2 nlg nmc nmr npxs ntbc nuls nxs nxt oax ok omg omni one ong ont oot ost ox oxt oxy part pasc pasl pax paxg pay payx pink pirl pivx plr poa poe polis poly pot powr ppc ppp ppt pre prl pungo pura qash qiwi qlc qnt qrl qsp qtum r rads rap ray rcn rdd rdn ren rep repv2 req rhoc ric rise rlc rpx rub rvn ryo safe safemoon sai salt san sand sbd sberbank sc ser shift sib sin skl sky slr sls smart sngls snm snt snx soc sol spacehbit spank sphtx srn stak start steem storj storm stox stq strat stx sub sumo sushi sys taas tau tbx tel ten tern tgch theta tix tkn tks tnb tnc tnt tomo tpay trig trtl trx tusd tzc ubq uma uni unity usd usdc usdt utk veri vet via vib vibe vivo vrc vrsc vtc vtho wabi wan waves wax wbtc wgr wicc wings wpr wtc x xas xbc xbp xby xcp xdn xem xin xlm xmcc xmg xmo xmr xmy xp xpa xpm xpr xrp xsg xtz xuc xvc xvg xzc yfi yoyow zcl zec zel zen zest zil zilla zrx'.split(' '));
   const TW = { eth: 'ethereum', base: 'base', arbitrum: 'arbitrum', optimism: 'optimism', polygon: 'polygon', bsc: 'smartchain', sol: 'solana', scroll: 'scroll', zksync: 'zksync', gnosis: 'xdai', avalanche: 'avalanchec', kaia: 'klaytn' };
   const CHAIN_KEY = { Ethereum: 'eth', Base: 'base', Arbitrum: 'arbitrum', Optimism: 'optimism', Polygon: 'polygon', BSC: 'bsc', Solana: 'sol', Scroll: 'scroll', zkSync: 'zksync', Gnosis: 'gnosis', Monad: 'monad', MegaETH: 'megaeth', Plasma: 'plasma', 'X Layer': 'xlayer', Kaia: 'kaia', Fraxtal: 'fraxtal', BOB: 'bob', Story: 'story', Somnia: 'somnia', Avalanche: 'avalanche' };
-  const CHAIN_SPOT = { eth: 'eth', sol: 'sol', bsc: 'bnb', polygon: 'matic' };
-  const CDN = 'https://cdn.jsdelivr.net/gh/';
-  const spotUrl = s => CDN + 'spothq/cryptocurrency-icons@master/svg/color/' + s + '.svg';
-  const LOGO = {
-    fail: (() => { try { const o = JSON.parse(LS.get('tj_logo_fail') || '{}'); const t = Date.now(); Object.keys(o).forEach(k => { if (t - o[k] > 7 * 864e5) delete o[k]; }); return o; } catch (e) { return {}; } })(),
-    lists: {}, loading: {},
-    bad(u) { return !!this.fail[u]; },
-    mark(u) { this.fail[u] = Date.now(); LS.set('tj_logo_fail', JSON.stringify(this.fail)); }
-  };
   function symColor(sym) {
     let h = 0; const s = String(sym || '?');
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -855,57 +854,7 @@
     return '<span class="exl" style="background:' + b[0] + (b[2] ? ';color:' + b[2] : '') + '" title="' + esc(title || EX_NAMES[key] || key) + '" aria-hidden="true">' + b[1] + '</span>';
   }
   const venueLogo = name => { const n = String(name || ''); const k = EX_BY_KO[n] || EX_BY_KO[n.replace(/ .*$/, '')]; return k ? exLogo(k) : '<span class="exl w" aria-hidden="true">' + IC.wallet + '</span>'; };
-  function twList(ck) {
-    if (LOGO.lists[ck] || LOGO.loading[ck]) return LOGO.lists[ck] || null;
-    LOGO.loading[ck] = fetch(CDN + 'trustwallet/assets@master/blockchains/' + TW[ck] + '/tokenlist.json').then(r => r.ok ? r.json() : null).then(d => {
-      const m9 = new Map();
-      arr(d && d.tokens).forEach(t => { if (t && t.address) m9.set(String(t.address).toLowerCase(), t.address); });
-      LOGO.lists[ck] = m9; hydrateLogos();
-    }).catch(() => { LOGO.lists[ck] = new Map(); });
-    return null;
-  }
-  function logoCands(img) {
-    const [ca, sym] = String(img.getAttribute('data-lg') || '').split('|');
-    const out = [];
-    if (ca) {
-      const i = ca.indexOf(':'), ck = ca.slice(0, i), addr = ca.slice(i + 1);
-      if (TW[ck]) {
-        const l = twList(ck);
-        if (l === null) return null;
-        const cs = l.get(addr.toLowerCase());
-        if (cs) out.push(CDN + 'trustwallet/assets@master/blockchains/' + TW[ck] + '/assets/' + cs + '/logo.png');
-      }
-    }
-    if (sym && SPOT_SYMS.has(sym)) out.push(spotUrl(sym));
-    return out.filter(u => !LOGO.bad(u));
-  }
-  let hydT = 0;
-  const logosOff = () => LS.get('tj_v2_nologo') === '1';
-  function hydrateLogos() {
-    if (logosOff()) return;
-    cancelAnimationFrame(hydT);
-    hydT = requestAnimationFrame(() => {
-      document.querySelectorAll('img.lg:not([src]):not([data-none])').forEach(img => {
-        const c = logoCands(img);
-        if (c === null) return;
-        if (!c.length) { img.setAttribute('data-none', '1'); return; }
-        img.src = c[0];
-      });
-      document.querySelectorAll('.cb img:not([src])').forEach(img => {
-        const k = img.getAttribute('data-cbk');
-        const u = CHAIN_SPOT[k] ? spotUrl(CHAIN_SPOT[k]) : CDN + 'trustwallet/assets@master/blockchains/' + TW[k] + '/info/logo.png';
-        if (!LOGO.bad(u)) img.src = u;
-      });
-    });
-  }
-  document.addEventListener('load', ev => { const t = ev.target; if (t && t.tagName === 'IMG' && t.parentNode && (t.classList.contains('lg') || t.parentNode.classList.contains('cb'))) t.parentNode.classList.add('ld'); }, true);
-  document.addEventListener('error', ev => {
-    const t = ev.target;
-    if (!t || t.tagName !== 'IMG' || !t.src) return;
-    LOGO.mark(t.src);
-    if (t.classList.contains('lg')) { const c = logoCands(t) || []; if (c.length) t.src = c[0]; else t.remove(); }
-    else if (t.parentNode && t.parentNode.classList.contains('cb')) t.remove();
-  }, true);
+  function hydrateLogos() {  }
 
   function mvDest(p) {
     const mt = arr(p.movedTo).filter(x => Array.isArray(x) && num(x[1]) > 0);
@@ -1207,7 +1156,13 @@
     D.total = D.stableTotal + D.coinTotal + D.fiatTotal + D.lpTotal + D.rbDebt;
     D.rbValue = sum(coins.filter(c => c && c.rabby), c => num(c.qty) * num(c.price));
     D.coinDex = num(f.coinDexUsd); D.coinCex = num(f.coinCexUsd);
-
+    const { G, twinKey } = deriveCoinRows(D, coins);
+    deriveCoinGroups(D, f, coins, G); deriveCashVenues(D, stables, coins, fiats, lps); deriveCycles(D, f, twinKey);
+    deriveLpCycles(D, f); deriveRealized(D, f); deriveDaily(D, f); derivePending(D, f); deriveSent(D, f); deriveMisc(D, f, coins);
+    deriveCurve(D);
+    return D;
+  }
+  function deriveCoinRows(D, coins) {
     const G = new Map();
     D.priceOf = {}; D.unkInst = []; D.instOf = {};
     const TWIN_X = 1.5, twinKey = {};
@@ -1246,7 +1201,7 @@
       const inst = { key: c.key, sym, name: c.name, chain: chainOf(c.name), ck: c.ck, ca: c.ca, genU: !!c.genU, qty, price, avg, kq, fbQty: num(c.fbQty), fbCost: fbc, cost, pnl, value, unkQty, hasCost,
         pxSrc: String(c.pxSrc || ''), pxAge: c.pxAge != null ? num(c.pxAge) : null, pxPre: !!c.pxPre, pxPreN: num(c.pxPreN), rabby: rb };
       if (rb) { g.rabby = g.rabby ? Math.min(g.rabby, num(rb.at)) : num(rb.at); g.rbValue = (g.rbValue || 0) + value; if (c.rbKind != null) g.rbKind = String(c.rbKind || ''); }
-      if (inst.pxSrc.startsWith('dex:') && inst.pxAge != null && inst.pxAge > PX_STALE && value > 0) { g.staleAge = Math.max(g.staleAge || 0, inst.pxAge); g.staleVal = (g.staleVal || 0) + value; }
+      if (pxStaleOf(inst) && value > 0) { g.staleAge = Math.max(g.staleAge || 0, inst.pxAge); g.staleVal = (g.staleVal || 0) + value; }
       g.insts.push(inst); g.keys.push(c.key); D.instOf[c.key] = inst;
       if (qty > 0 && !(price > 0) && pricedK.has(k)) { inst.zero = true; return; }
       g.value += value; g.qty += qty; g.cost += cost; g.pnl += pnl; g.unkVal += unkQty * price; g.unkQty += unkQty;
@@ -1263,6 +1218,9 @@
         if (wallet) g.wValue += lv; else g.xValue += lv;
       });
     });
+    return { G, twinKey };
+  }
+  function deriveCoinGroups(D, f, coins, G) {
     D.groups = Array.from(G.values()).map(g => {
       g.roi = g.cost > 0 ? g.pnl / g.cost * 100 : null;
       g.unkPct = g.value > 0 ? g.unkVal / g.value : (g.unkQty > 0 ? 1 : 0);
@@ -1300,7 +1258,8 @@
       return Array.from(c.entries()).map(([k, n]) => k + (n > 1 ? ' ×' + n : '')); })();
     D.upN = Math.max(0, D.unpriced.length - zg.length);
     D.symLogo = {}; D.groups.forEach(g => { D.symLogo[g.key] = g.logo; });
-
+  }
+  function deriveCashVenues(D, stables, coins, fiats, lps) {
     const SG = new Map();
     stables.forEach(s => {
       const k = String(s.sym || '?').toUpperCase();
@@ -1310,7 +1269,6 @@
         g.locs.push({ w: l.w, sub: l.sub, qty: num(l.qty), value: num(l.qty) * num(s.price), tr }); });
     });
     D.stableGroups = Array.from(SG.values()).sort((a, b) => b.value - a.value);
-
     const V = new Map();
     const addV = (name, kind, sub, sym, qtyLabel, usd, ch) => {
       let v = V.get(name); if (!v) { v = { name, kind, sub, total: 0, items: [] }; V.set(name, v); }
@@ -1325,7 +1283,8 @@
     lps.filter(l => l.state !== 'closed').forEach(l => addV(l.protocol || 'LP', 'lp', l.chain + ' · 풀 컨트랙트', l.pool, l.stateLabel, num(l.value) + num(l.fees) + num(l.rewards), l.chain));
     D.venues = Array.from(V.values()).sort((a, b) => b.total - a.total);
     D.exN = D.venues.filter(v => v.kind === 'cex').length;
-
+  }
+  function deriveCycles(D, f, twinKey) {
     D.positions = arr(f.positions);
     D.plans = (f.plans && typeof f.plans === 'object') ? f.plans : {};
     D.plansMemoOk = !!(f.planMemos && typeof f.planMemos === 'object');
@@ -1381,10 +1340,12 @@
         const i = D.instOf[k], pr = i ? i.price : 0;
         if (!(pr > 0)) { unpQ += h; return; }
         const lv = h * pr; v += lv; any = true;
-        if (i.pxSrc.startsWith('dex:') && i.pxAge != null && i.pxAge > PX_STALE) { stV += lv; age = Math.max(age, i.pxAge); }
+        if (pxStaleOf(i)) { stV += lv; age = Math.max(age, i.pxAge); }
       });
       if (any) p._now = { v, stale: stV > 0 && stV >= v * 0.1 ? age : 0, unpQ };
     });
+  }
+  function deriveLpCycles(D, f) {
     const lpR = arr(f.lpsClosed).filter(l => l && typeof l === 'object').concat(arr(f.lpsPending).filter(l => l && Object.keys(l.realizedByDay || {}).length)).map(normLP).filter(Boolean);
     D.lpName = new Map();
     D.lps.concat(arr(f.lpsClosed).concat(arr(f.lpsPending)).map(normLP).filter(Boolean)).forEach(l => {
@@ -1407,7 +1368,8 @@
     });
     buildEvents(D, f);
     D.dayActs = (f.dayActs && typeof f.dayActs === 'object') ? f.dayActs : null;
-
+  }
+  function deriveRealized(D, f) {
     D.fut = (f.futures && typeof f.futures === 'object') ? f.futures : {};
     D.realized = {}; D.realizedK = {};
     const mdIn = k => { if (!isYMD(k)) return String(k); const md = String(k).slice(5, 10); return ymOf(md) === String(k).slice(0, 7) ? md : null; };
@@ -1446,7 +1408,8 @@
     D.taxStableFx = f.taxStableFx && typeof f.taxStableFx === 'object' && !Array.isArray(f.taxStableFx) ? f.taxStableFx : null;
     D.taxFull = Array.isArray(f.taxSummary);
     D.taxN = num(f.taxRowsTotal) || arr(f.taxRows).length;
-
+  }
+  function deriveDaily(D, f) {
     D.daily = arr(f.dailySeries).map((x, i, a) => Object.assign({}, x, { val: num(x.val), delta: i > 0 ? num(x.val) - num(a[i - 1].val) : null,
       valKrw: x.valKrw != null && isFinite(+x.valKrw) ? num(x.valKrw) : null }));
     D.daily.forEach((x, i) => { x._prev = i > 0 ? D.daily[i - 1] : null; });
@@ -1454,7 +1417,8 @@
     D.dayMap = new Map(D.daily.map(x => [x.date, x]));
     D.usdt = f.usdtByDate || {};
     D.reviews = (f.reviews && typeof f.reviews === 'object') ? f.reviews : {};
-
+  }
+  function derivePending(D, f) {
     D.pendings = optHas('ign') ? arr(f.pendings).filter(p => !(p && optOf('ign', String(p.key)))) : arr(f.pendings);
     D.pendings.forEach(p => { p._cat = pcat(p); });
     D.pendVis = D.pendings.filter(p => !p.hide);
@@ -1470,11 +1434,11 @@
     const unkListed = new Set(D.unkhRows.map(p => String(p.ckey || p.gkey || '')).filter(Boolean));
     const unkRest = D.unkInst.filter(x => !unkListed.has(x.key));
     D.unkRestUsd = sum(unkRest, x => x.usd); D.unkRestN = new Set(unkRest.filter(x => x.usd >= 0.005).map(x => x.sym.toUpperCase())).size;
-
+  }
+  function deriveSent(D, f) {
     D.xferLinks = optLinks(arr(f.xferLinks), 'xfer', 'dep'); D.saleLinks = optLinks(arr(f.saleLinks), 'sale', 'lot'); D.wdDest = arr(f.wdDestUnknown); D.wdDestN = f.wdDestUnknownTotal != null ? num(f.wdDestUnknownTotal) : D.wdDest.length; D.wdDestStats = (f.wdDestStats && typeof f.wdDestStats === 'object') ? f.wdDestStats : {};
     deriveOF(D, f);
     D.saleAlert = f.saleCandAlert !== false;
-
     D.wallets = optHas('alias') ? arr(f.walletRows).map(w => { const p = w && optOf('alias', String(w.key || w.addr || '')); return p ? Object.assign({}, w, p, { _opt: true }) : w; }) : arr(f.walletRows); D.deposits = arr(f.depositRows); D.aliases = arr(f.aliasRows); D.srcChips = arr(f.srcChips);
     D.walletAlias = (f.walletAlias && typeof f.walletAlias === 'object') ? f.walletAlias : {};
     D.costOv = arr(f.costOverrideRows);
@@ -1493,6 +1457,8 @@
     D.dustUsd = num(f.dustUsd); D.hasDust = typeof f.dustUsd === 'number' && isFinite(f.dustUsd);
     D.whitelist = Array.isArray(f.srcWhitelist) ? f.srcWhitelist.map(String) : null;
     D.gasByChain = arr(f.gasByChain); D.gasByMonth = (f.gasByMonth && typeof f.gasByMonth === 'object') ? f.gasByMonth : null;
+  }
+  function deriveMisc(D, f, coins) {
     D.taxGas = (f.taxGas && typeof f.taxGas === 'object') ? f.taxGas : null;
     D.todayBy = (f.todayByCoin && typeof f.todayByCoin === 'object') ? f.todayByCoin : null;
     D.spark7 = (f.spark7 && typeof f.spark7 === 'object') ? f.spark7 : null;
@@ -1526,6 +1492,8 @@
       const hit = coins.find(c => c.ca && String(c.ca).toLowerCase() === ca.toLowerCase());
       return { key: k, chain: CHAIN_KO[ch] || ch, ca, sym: hit ? hit.sym : '', reason: String(pg[k] == null ? '' : pg[k]) };
     });
+  }
+  function deriveCurve(D) {
     D.hasFlow = D.daily.some(x => x.flow != null);
     D.flowBig = (fl, base) => Math.abs(num(fl)) >= Math.max(500, 0.005 * Math.abs(num(base)));
     D.daily.forEach((x, i) => { if (x.flow != null && x.delta != null) x.mkt = x.delta - num(x.flow); });
@@ -1540,7 +1508,6 @@
     D._todayStep = D._today != null && (D._todayFlow != null ? D.flowBig(D._todayFlow, pv.val) : pv && pv.val && Math.abs(D._today / pv.val) > 0.2);
     D._todayAp = !!pv && num(pv.ap) > 0;
     D._todaySplit = D._today != null && D._todayFlow != null && (D._todayStep || D.flowSplitOk(D._todayFlow, D._today));
-    return D;
   }
 
   const PCATS = {
@@ -1641,13 +1608,15 @@
   }
   function lockOut(why) {
     S.locked = true; S.lockWhy = why === 'logoutFail' ? 'logoutFail' : 'logout';
+    lockClear(); lockPanels(); renderLocked();
+  }
+  function lockClear() {
     S.data = null; S.D = null; S.ver = ''; S.cached = false; S.dirty = false; S.parts = null; S.idbParts = null; S.partsFull = false;
     S.feedFull = null; S.dayFull = {}; S.rcpt = null; S.rcptX = {}; S.rcptB = {}; S.rcptE = {}; S.fut = null; S.jLast = null; S.drafts = {};
-    if (S.oa) S.oa.d = null;
+    if (S.oa) { S.oa.d = null; S.oa.lk = null; }
+    if (S.nft) S.nft.d = null;
     S.al = null; if (S.hist) S.hist.days = [];
-    S.drawer = null; S.modal = null; S.pop = null; S.err = '401'; S.errCode = 401;
-    lockPanels();
-    renderLocked();
+    S.drawer = null; S.modal = null; S.pop = null; S.sheet = null; S.err = '401'; S.errCode = 401;
   }
   function lockPanels() {
     try { const su = window.__tjSetup; if (su && typeof su.lock === 'function') su.lock(); } catch (e) {  }
@@ -1678,7 +1647,7 @@
     if (S.locked) return;
     S.locked = true; S.lockWhy = '401';
     clearCache();
-    S.data = null; S.D = null; S.ver = ''; S.cached = false; S.err = '401'; S.errCode = 401;
+    lockClear();
     lockPanels();
     renderLocked();
   }
@@ -1972,22 +1941,34 @@
     if (!S.urlPeriod) { const lp = LS.get('tj_v2_period'); S.g.period = lp && lp !== 'custom' && PERIODS.some(x => x.k === lp) ? lp : 'thismonth'; }
   }
 
-  async function csrf() {
-    try { const st = window.__tjSetup && window.__tjSetup.U && window.__tjSetup.U.st; if (st && st.csrf) return st.csrf; } catch (e) {  }
-    if (S.csrf) return S.csrf;
+  async function csrf(force) {
+    try { const st = window.__tjSetup && window.__tjSetup.U && window.__tjSetup.U.st; if (st && force) st.csrf = ''; else if (st && st.csrf) return st.csrf; } catch (e) {  }
+    if (force) S.csrf = ''; else if (S.csrf) return S.csrf;
     try { const r = await fetch('/api/setup/status', { cache: 'no-store' }); if (r.ok) { const j = await r.json(); S.csrf = (j && j.csrf) || ''; } } catch (e) { S.csrf = ''; }
+    if (!S.csrf) try { const r = await fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' }), j = r.ok ? await r.json() : null; S.csrf = (j && j.ok && j.enabled && j.authed && typeof j.csrf === 'string' && j.csrf) || ''; } catch (e) { S.csrf = ''; }
     return S.csrf || '';
   }
   async function post(path, body, okMsg) {
     const oe = optFor(path, body);
     try {
-      const tok = await csrf();
-      const hd = { 'Content-Type': 'application/json' };
-      if (tok) hd['X-TJ-CSRF'] = tok;
-      const r = await fetch(path, { method: 'POST', headers: hd, body: JSON.stringify(body) });
-      if (r.status === 401) { optFail(oe); onUnauthorized(); return null; }
-      let d = null;
-      try { d = await r.json(); } catch (e) { d = null; }
+      let r, d;
+      for (let n = 0; n < 2; n++) {
+        const tok = await csrf(n > 0), hd = { 'Content-Type': 'application/json' };
+        if (tok) hd['X-TJ-CSRF'] = tok;
+        r = await fetch(path, { method: 'POST', headers: hd, body: JSON.stringify(body) });
+        if (r.status === 401) { optFail(oe); onUnauthorized(); return null; }
+        try { d = await r.json(); } catch (e) { d = null; } if (S.locked) { optFail(oe); return null; }
+        if (!(r.status === 403 && d && /CSRF/.test(d.error || ''))) break;
+      }
+      const ch = d && d.needChains && !Array.isArray(body.chains) && arr(d.chains).length;
+      if (d && !d.ok && ((d.needConfirm && !body.confirm) || ch)) {
+        optFail(oe);
+        const nb = Object.assign({}, body, ch ? { chains: arr(d.chains) } : { confirm: true });
+        const chs = ch ? '\n체인: ' + arr(d.chains).map(c => CHAIN_KO[c] || c).join(' · ') : '';
+        confirmAsk({ title: ch ? '이 체인들로 등록할까요?' : '정말 내 지갑인가요?', danger: !ch, ok: ch ? '이 체인으로 등록' : '그래도 등록',
+          body: String(d.error || '') + chs, run: () => post(path, nb, okMsg) });
+        return null;
+      }
       if (!r.ok || !d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
       optOk(oe, d);
       if (okMsg) toast(typeof okMsg === 'function' ? okMsg(d) : okMsg);
@@ -2191,7 +2172,7 @@
       }
     }
     R.card = true;
-    try { $('#view').innerHTML = rescueCard(); $('#view').__h = ''; } catch (e3) {  }
+    try { TJDOM.set($('#view'), rescueCard()); $('#view').__h = ''; } catch (e3) { rescueText(); }
   }
   const hideUnknown = () => { try { window.localStorage.getItem('tj_v2_hide'); return false; } catch (e) { return true; } };
   const errTxt = t => (S.hide || S.rand || hideUnknown()) ? String(t == null ? '' : t).replace(/\d[\d,.]*/g, '•••') : String(t == null ? '' : t);
@@ -2207,6 +2188,24 @@
       + '<div style="margin:6px 0 16px">이 브라우저에 남은 화면 설정이 맞지 않을 수 있어요. 아래 버튼으로 설정(테마·금액 가리기 제외)과 저장된 화면을 지우고 다시 열 수 있어요.</div>'
       + '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn pri" data-a="resetPrefs">설정 초기화하고 다시 열기</button><button class="btn" data-a="reloadPage">다시 시도</button></div>'
       + '<details class="errd" style="margin-top:14px;font-size:12.5px" open><summary>오류 내용</summary><div class="cap" style="white-space:pre-wrap;text-align:left">' + esc(errTxt((R.where ? '[' + R.where + '] ' : '') + (R.msg || ''))) + '</div></details></div>';
+  }
+  function rescueText() {
+    try {
+      const R = S.rescue || {}, v = $('#view');
+      const n = (t, c, x, st) => {
+        const e = document.createElement(t); if (c) e.className = c; if (x) e.textContent = x; if (st) e.style.cssText = st; return e;
+      };
+      const card = n('div', 'card empty', '', 'margin-top:40px');
+      const row = n('div', '', '', 'display:flex;gap:8px;justify-content:center;flex-wrap:wrap');
+      const b1 = n('button', 'btn pri', '설정 초기화하고 다시 열기'), b2 = n('button', 'btn', '다시 시도');
+      const det = n('details', 'errd', '', 'margin-top:14px;font-size:12.5px');
+      const msg = errTxt((R.where ? '[' + R.where + '] ' : '') + (R.msg || ''));
+      b1.dataset.a = 'resetPrefs'; b2.dataset.a = 'reloadPage'; row.append(b1, b2); card.setAttribute('role', 'alert'); det.open = true;
+      det.append(n('summary', '', '오류 내용'), n('div', 'cap', msg, 'white-space:pre-wrap;text-align:left'));
+      const tx = '이 브라우저에 남은 화면 설정이 맞지 않을 수 있어요. 아래 버튼으로 설정(테마·금액 가리기 제외)과 저장된 화면을 지우고 다시 열 수 있어요.';
+      card.append(n('b', '', '화면을 그리지 못했어요'), n('div', '', tx, 'margin:6px 0 16px'), row, det);
+      v.replaceChildren(card); v.__h = '';
+    } catch (e4) {  }
   }
   function renderViewRaw() {
     const t0 = performance.now();
@@ -2228,7 +2227,7 @@
     const dpF = dpFocusKey();
     const fk = dpF ? null : focusKey(v);
     const ks = {}; v.querySelectorAll('[data-ks]').forEach(e => { ks[e.getAttribute('data-ks')] = [e.scrollTop, e.scrollLeft]; });
-    v.innerHTML = html; v.__h = html;
+    TJDOM.set(v, html); v.__h = html;
     v.querySelectorAll('[data-ks]').forEach(e => { const k = ks[e.getAttribute('data-ks')]; if (k) { e.scrollTop = k[0]; e.scrollLeft = k[1]; } });
     v.querySelectorAll('.hmw').forEach(e => { const k9 = ks[e.getAttribute('data-ks')]; hmAlign(e); e.scrollLeft = k9 ? k9[1] : e.scrollWidth; });
     if (fk) focusBack(v, fk);
@@ -2423,32 +2422,32 @@
   const ledgerBnrSig = () => { try { const T9 = window.TJHealth, h9 = T9 && typeof T9.summary === 'function' ? T9.summary() : null; return JSON.stringify([h9 && h9.ledger, h9 && h9.monitorOff]); } catch (e) { return ''; } };
   function renderChrome() {
     const D = S.D;
-    $('#tabs').innerHTML = TABS.map(t => '<a class="tab' + (S.tab === t.k ? ' on' : '') + '" href="#' + t.k + '"' + (S.tab === t.k ? ' aria-current="page"' : '') + '>' + t.label + tabBadge(t.k) + '</a>').join('');
+    TJDOM.set($('#tabs'), TABS.map(t => '<a class="tab' + (S.tab === t.k ? ' on' : '') + '" href="#' + t.k + '"' + (S.tab === t.k ? ' aria-current="page"' : '') + '>' + esc(t.label) + tabBadge(t.k) + '</a>').join(''));
     { const tb = $('#tabs'), on = tb && $('.tab.on', tb);
       if (on && tb.scrollWidth > tb.clientWidth + 1) { const r = on.getBoundingClientRect(), R = tb.getBoundingClientRect(); if (r.left < R.left || r.right > R.right) tb.scrollLeft += (r.left + r.right) / 2 - (R.left + R.right) / 2; } }
-    $('#status').innerHTML = statusHTML(false);
-    $('#curSeg').innerHTML = ['KRW', 'USD'].map(c => '<button data-a="cur" data-v="' + c + '" class="' + (S.cur === c ? 'on' : '') + '" aria-pressed="' + (S.cur === c) + '">' + (c === 'KRW' ? '원화' : '달러') + '</button>').join('');
+    TJDOM.set($('#status'), statusHTML(false));
+    TJDOM.set($('#curSeg'), ['KRW', 'USD'].map(c => '<button data-a="cur" data-v="' + c + '" class="' + (S.cur === c ? 'on' : '') + '" aria-pressed="' + (S.cur === c) + '">' + (c === 'KRW' ? '원화' : '달러') + '</button>').join(''));
     const light = document.documentElement.getAttribute('data-theme') === 'light';
-    $('#themeBtn').innerHTML = light ? IC.moon : IC.sun;
-    { const hb = $('#hideBtn'); if (hb) { hb.innerHTML = S.hide ? IC.eyeoff : IC.eye; hb.classList.toggle('on', S.hide); hb.setAttribute('aria-pressed', String(S.hide));
+    TJDOM.set($('#themeBtn'), light ? IC.moon : IC.sun);
+    { const hb = $('#hideBtn'); if (hb) { TJDOM.set(hb, S.hide ? IC.eyeoff : IC.eye); hb.classList.toggle('on', S.hide); hb.setAttribute('aria-pressed', String(S.hide));
       hb.setAttribute('aria-label', S.hide ? '금액 보이기' : '금액 가리기'); hb.setAttribute('title', (S.hide ? '금액 보이기' : '금액 가리기') + ' (Shift+H)'); } }
-    { const rb = $('#randBtn'); if (rb) { rb.innerHTML = IC.dice; rb.classList.toggle('on', S.rand); rb.setAttribute('aria-pressed', String(S.rand)); rb.setAttribute('aria-label', '금액 랜덤값'); rb.setAttribute('title', S.rand ? '금액 랜덤값 끄기' : '금액 랜덤값'); } }
+    { const rb = $('#randBtn'); if (rb) { TJDOM.set(rb, IC.dice); rb.classList.toggle('on', S.rand); rb.setAttribute('aria-pressed', String(S.rand)); rb.setAttribute('aria-label', '금액 랜덤값'); rb.setAttribute('title', S.rand ? '금액 랜덤값 끄기' : '금액 랜덤값'); } }
     $('#themeBtn').setAttribute('title', light ? '다크 테마로' : '라이트 테마로');
     const tdisc = D && (D._todayStep || D._todaySplit);
     const tot = D ? '<div class="mtot num"><b>' + m(D.total, { compact: true }) + '</b>' + (D._today != null ? '<span class="' + (tdisc ? 'mut' : cls(todayD())) + '"' + (tdisc || D._todayAp ? ' title="' + esc((tdisc ? (D._todayFlow != null ? flowTip(D._todayFlow, D._todayFlowTop) : '입출금 포함') : '') + (D._todayAp ? ' · 전일 마감이 근사(≈)' : '')) + '"' : '') + '>오늘 ' + (D._todayAp ? '≈ ' : '') + m(todayD(), { sign: true, compact: true }) + '</span>' : '') + '</div>' : '';
-    $('#mtop').innerHTML = '<a class="logo" href="#dash" aria-label="온체인 매매일지 — 대시보드"><span class="lmark">' + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v16M12 3v18M18 6v12"/><rect x="4" y="8" width="4" height="7" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="9" rx="1" fill="currentColor"/><rect x="16" y="9" width="4" height="6" rx="1" fill="currentColor"/></svg></span><span class="ltx"><span class="lw1">온체인 </span>매매일지</span></a>'
+    TJDOM.set($('#mtop'), '<a class="logo" href="#dash" aria-label="온체인 매매일지 — 대시보드"><span class="lmark">' + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4v16M12 3v18M18 6v12"/><rect x="4" y="8" width="4" height="7" rx="1" fill="currentColor"/><rect x="10" y="6" width="4" height="9" rx="1" fill="currentColor"/><rect x="16" y="9" width="4" height="6" rx="1" fill="currentColor"/></svg></span><span class="ltx"><span class="lw1">온체인 </span>매매일지</span></a>'
       + tot + '<span class="sp"></span>' + (window.TJHealth ? '' : statusHTML(true))
       + '<button class="iconbtn hideb' + (S.hide ? ' on' : '') + '" data-a="hideToggle" aria-pressed="' + S.hide + '" aria-label="' + (S.hide ? '금액 보이기' : '금액 가리기') + '">' + (S.hide ? IC.eyeoff : IC.eye) + '</button>'
       + mDispHTML()
-      + '<a class="iconbtn" href="#settings" aria-label="설정"' + (S.tab === 'settings' ? ' aria-current="page" style="color:var(--text);border-color:var(--line2)"' : '') + '>' + IC.gear + '</a>';
-    $('#tabbar').innerHTML = TABS.filter(t => t.k !== 'settings').map(t => '<a href="#' + t.k + '" class="' + (S.tab === t.k ? 'on' : '') + '"' + (S.tab === t.k ? ' aria-current="page"' : '') + '>' + IC.tab[t.k] + t.short + tabBadge(t.k) + '</a>').join('');
+      + '<a class="iconbtn" href="#settings" aria-label="설정"' + (S.tab === 'settings' ? ' aria-current="page" style="color:var(--text);border-color:var(--line2)"' : '') + '>' + IC.gear + '</a>');
+    TJDOM.set($('#tabbar'), TABS.filter(t => t.k !== 'settings').map(t => '<a href="#' + t.k + '" class="' + (S.tab === t.k ? 'on' : '') + '"' + (S.tab === t.k ? ' aria-current="page"' : '') + '>' + IC.tab[t.k] + t.short + tabBadge(t.k) + '</a>').join(''));
     let b = '';
     if (S.err && S.D && S.errCode !== 401) b += '<div class="bnr e"><div><b>서버와 연결이 끊겼어요</b> — ' + (S.lastOk ? fmtTs(S.lastOk / 1000).slice(6) + ' 에 받은 값을 보여주는 중' : S.cached ? '이 기기에 저장된 마지막 화면' + (S.savedAt ? '(' + fmtTs(S.savedAt / 1000) + ')' : '') + '을 보여주는 중' : '') + '<details><summary>자세히</summary>' + esc(errTxt(S.err)) + '</details></div><button class="btn sm" data-a="reload">다시 시도</button></div>';
     b += ledgerBnrHTML();
     const fsN = D && D.firstSeen;
     if (fsN && fsN.on && fsN.eff !== false && !fsN.note && !S.fsNoteX && num(fsN.n) > 0) b += '<div class="bnr w pvx" role="status"><div><b>원가 모르는 ' + nf('ko-KR').format(num(fsN.n)) + '건을 최초 인식 시가로 추정했어요</b> — 설정에서 끌 수 있어요<div class="bd">원가를 모르던 수량의 원가를 그 수량이 장부에 처음 생긴 날 시가로 잡아 손익·명세에 넣었어요(\'추정\' 표시)</div></div><a class="btn sm" href="#settings/cost">설정</a><button class="btn sm" data-a="fsNoteX">닫기</button></div>';
-    $('#banners').innerHTML = b;
-    $('#bf').innerHTML = window.TJHealth ? '' : bfHTML(D && D.backfill);
+    TJDOM.set($('#banners'), b);
+    TJDOM.set($('#bf'), window.TJHealth ? '' : bfHTML(D && D.backfill));
     bfPad();
     if (window.TJHealth) window.TJHealth.chrome(S.mobile);
     fitTop();
@@ -2602,7 +2601,7 @@
     sxWide, unmarkNewWallet, vSettings, __late: tjLate_set
   } = tjTab('set', {
     $, ago, alLoad, arr, CHAIN_KO, clearCache, DUST_OPTS, errTxt, esc, EX_NAMES, exLogo, fmtTs, fxNote, hs, IC, isISO, KST_MS, lockOut, logError,
-    logosOff, LS, m, MK_RE, mN, nf, num, ofAuto, onbHidden, onUnauthorized, pad2, pctS, plainT, prTxt, PV_PROT, PVM, pvm, pvOn, pvW, px, q, render,
+    LS, m, MK_RE, mN, nf, num, ofAuto, onbHidden, onUnauthorized, pad2, pctS, plainT, prTxt, PV_PROT, PVM, pvm, pvOn, pvW, px, q, render,
     renderView, revTxt, rkFix, S, scanText, short, sum, sv, sxAlertsBody, syncUrl, taxTip, thSys, toast, uiDate, uiFold, uiPaged, uiPageSize, uiPgBar,
     uiPgReveal, uiPgS, uiPgSlice, uiPick, venueLogo
   });
@@ -2660,6 +2659,7 @@
         + (md.list ? '<div class="cap num" style="max-height:260px;overflow:auto;margin-top:10px;line-height:1.8;white-space:pre-line">' + esc(md.list) + '</div>' : '')
         + '<div class="ft">' + (md.info ? '<button class="btn pri" data-a="modalCancel">닫기</button>' : '<button class="btn" data-a="modalCancel">취소</button><button class="btn ' + (md.danger ? 'solid-danger' : 'pri') + (md.pvx ? ' pvx' : '') + '" data-a="modalOk">' + esc(md.ok || '확인') + '</button>') + '</div></div></div>';
     }
+    if (S.locked) h = '';
     const ov = $('#overlay');
     const had = ov.getAttribute('data-k') || '';
     const ae = document.activeElement, fa = ae && ov.contains(ae) && ae.getAttribute ? ae.getAttribute('data-a') : null, fv = fa ? ae.getAttribute('data-v') : null, fk = fa ? ae.getAttribute('data-k') : null;
@@ -2673,7 +2673,7 @@
       ovAfter(h); return;
     }
     const hx = had === key ? ovScrollKeep(ov) : null, fpath = had === key && ae && ov.contains(ae) && ae !== ov ? ovPath(ov, ae) : null;
-    ov.innerHTML = h;
+    TJDOM.set(ov, h);
     ov.__h = h;
     if (hx) ovScrollBack(ov, hx);
     ov.querySelectorAll('input[data-draft]').forEach(el => { const k9 = el.getAttribute('data-draft'); if (S.drafts[k9] != null) el.value = S.drafts[k9]; });
@@ -2728,8 +2728,8 @@
   let toastT = null;
   function toast(msg, err, ms) {
     clearTimeout(toastT);
-    $('#toast').innerHTML = '<div class="toast' + (err ? ' e' : '') + '">' + esc(err ? errTxt(msg) : msg) + '</div>';
-    toastT = setTimeout(() => { $('#toast').innerHTML = ''; }, ms || (err ? 4200 : 2600));
+    TJDOM.set($('#toast'), '<div class="toast' + (err ? ' e' : '') + '">' + esc(err ? errTxt(msg) : msg) + '</div>');
+    toastT = setTimeout(() => { TJDOM.clear($('#toast')); }, ms || (err ? 4200 : 2600));
   }
   function futFxNote(netUsd) {
     const D = S.D;
@@ -2850,8 +2850,9 @@
     S.dust = v; S.hold.showDust = false;
     LS.set('tj_dust', String(v));
     render();
-    csrf().then(tok => fetch('/api/dust_threshold', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, tok ? { 'X-TJ-CSRF': tok } : {}), body: JSON.stringify({ usd: v }) }))
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+    const go = n => csrf(n).then(tok => fetch('/api/dust_threshold', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, tok ? { 'X-TJ-CSRF': tok } : {}), body: JSON.stringify({ usd: v }) }))
+      .then(r => n || r.status !== 403 ? r : r.clone().json().then(d => /CSRF/.test((d && d.error) || '') ? go(true) : r, () => r));
+    go(false).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
       .then(d => { if (!d || !d.ok) throw new Error((d && d.error) || '저장 거부'); toast('소액 기준 ' + (v ? '$' + v : '전체 표시') + ' · 저장했어요'); refresh(); })
       .catch(e => toast('지금 화면에만 적용했어요(서버 저장 실패 — 새로 고치면 서버 값) · ' + e.message, true));
   }
@@ -2865,7 +2866,8 @@
       if (nt == null || ns == null) okMsg = '저장했어요 · 목표·손절을 모두 채워야 감시해요';
       else if (!(isFinite(nt) && isFinite(ns) && 0 < ns && ns < nt)) { toast('손절선은 0보다 크고 목표가보다 낮아야 해요 · 저장하지 않았어요', true); return; }
     }
-    post('/api/plan', body, okMsg).then(d => { if (d) { delete S.drafts['t:' + key]; delete S.drafts['s:' + key]; delete S.drafts['m:' + key]; if (S.planSnap) delete S.planSnap[key]; render(); renderOverlay(); } });
+    const sn = sync.snap(S.drafts, [['target', 't:'], ['stop', 's:'], ['memo', 'm:']].filter(x => x[0] in body).map(x => x[1] + key));
+    post('/api/plan', body, okMsg).then(d => { if (d) { sync.done(S.drafts, sn); if (S.planSnap && ('target' in body || 'stop' in body) && S.drafts['t:' + key] == null && S.drafts['s:' + key] == null) delete S.planSnap[key]; render(); renderOverlay(); } });
   }
   function saveAlias(key, val, cur) {
     const next = String(val == null ? '' : val).trim();
@@ -2880,7 +2882,8 @@
     const raw = draft('cu:' + k).replace(/,/g, '');
     const n = Number(raw);
     if (!raw || !isFinite(n) || !(n > 0)) { toast('단가는 0보다 큰 숫자여야 해요', true); return; }
-    post('/api/cost_override', { key: p.gkey, mode: 'unit', value: n }, '원가를 적용했어요 · 평가·손익을 다시 계산해요').then(d => { if (d) delete S.drafts['cu:' + k]; });
+    const sn = sync.snap(S.drafts, ['cu:' + k]);
+    post('/api/cost_override', { key: p.gkey, mode: 'unit', value: n }, '원가를 적용했어요 · 평가·손익을 다시 계산해요').then(d => { if (d) sync.done(S.drafts, sn); });
   }
   function ignoreKeys(keys, label) {
     const ks = keys.filter(Boolean);
@@ -2951,7 +2954,7 @@
     authLogout: () => authLogout(false),
     authLogoutAll: () => { if (window.confirm('이 기기를 포함한 모든 기기에서 로그아웃할까요? 다시 쓰려면 비밀번호로 로그인해야 해요.')) authLogout(true); },
     authRetry: () => { authLoad(true); renderView(); },
-    resetPrefs: () => { resetPrefs(); clearCache().then(() => { location.replace(location.pathname + '#dash'); location.reload(); }); },
+    resetPrefs: () => { resetPrefs(); clearCache().then(() => { location.replace(TJDOM.safeUrl(location.pathname + '#dash')); location.reload(); }); },
     theme: () => { const light = document.documentElement.getAttribute('data-theme') === 'light'; A.themeSet(null, light ? 'dark' : 'light'); },
     themeSet: (el, v) => { v = typeof v === 'string' ? v : el.dataset.v; LS.set('tj_v2_theme', v === 'system' ? 'system' : v); v = themeOf(v); document.documentElement.setAttribute('data-theme', v); const mt = $('meta[name=theme-color]'); if (mt) mt.setAttribute('content', v === 'light' ? '#F3F4F7' : '#0B0D11'); render(); },
     scheme: el => { const g = el.dataset.v === 'global'; if (g) document.documentElement.setAttribute('data-scheme', 'global'); else document.documentElement.removeAttribute('data-scheme'); LS.set('tj_v2_scheme', g ? 'global' : 'kr'); render(); },
@@ -2967,9 +2970,8 @@
     },
     rkClear: () => { delete S.drafts.rk; LS.del('tj_v2_rk'); rkApply(); toast('랜덤값 배수 고정을 풀었어요 — 열 때마다 무작위'); },
     pgSize: el => { const v = el && el.dataset && el.dataset.v === '20' ? 20 : 10; if (v === uiPageSize()) return; S.pgSz = v; LS.set('tj_v2_pgsize', String(v)); uiPgReset(''); if (S.attdUI) S.attdUI.pg = 0; toast('긴 목록을 ' + v + '개씩 보여 줘요'); render(); },
-    logoToggle: () => { LS.set('tj_v2_nologo', logosOff() ? '0' : '1'); toast(logosOff() ? '토큰 로고 끔 — 외부 요청 없음(지금 떠 있는 로고는 새로고침하면 사라져요)' : '토큰 로고 켬'); render(); if (!logosOff()) hydrateLogos(); },
     tipShow: el => toast(String(el.dataset.v || ''), false, 6000),
-    bfMin: () => { S.bfMin = !S.bfMin; SS.set('tj_v2_bfmin', S.bfMin ? '1' : '0'); $('#bf').innerHTML = bfHTML(S.D && S.D.backfill); bfPad(); const b = $('#bf [data-a=bfMin]'); if (b) b.focus({ preventScroll: true }); },
+    bfMin: () => { S.bfMin = !S.bfMin; SS.set('tj_v2_bfmin', S.bfMin ? '1' : '0'); TJDOM.set($('#bf'), bfHTML(S.D && S.D.backfill)); bfPad(); const b = $('#bf [data-a=bfMin]'); if (b) b.focus({ preventScroll: true }); },
     habRetry: () => habLoad(true),
     mDisp: el => uiSheetOpen('mdisp', '', '표시', el),
     mDispGo: () => { uiSheetClose(true); location.hash = '#settings/display'; },
@@ -3142,26 +3144,30 @@
     dmSheet: el => { const iso = el.dataset.v; if (!isISO(iso)) return; uiSheetOpen('dmemo', iso, (+iso.slice(5, 7)) + '/' + (+iso.slice(8, 10)) + ' 그날 매매 근거', el); },
     dmSave: el => {
       const k = el.dataset.k || '', iso = k.slice(0, 10), sym = k.slice(11);
-      if (!isISO(iso) || !dmSym(sym) || dmSym(sym) !== sym || S.dm.busy) return;
+      if (!isISO(iso) || !dmSym(sym) || dmSym(sym) !== sym) return;
+      const B = S.dm.busyK || (S.dm.busyK = {});
+      if (B[k]) { toast('그 코인 근거를 저장하는 중이에요 — 끝나면 다시 눌러 주세요'); return; }
       const c = dmGet(iso, sym), dv = S.drafts['dm:' + k], v = String(dv == null ? (c ? c.memo : '') : dv).trim();
       if (v.length > DM_MAX) { toast('근거는 ' + DM_MAX + '자까지예요', true); return; }
       if (!v && !c) { toast('근거를 적어 주세요', true); return; }
-      S.dm.busy = true;
+      B[k] = true;
+      const sn = sync.snap(S.drafts, ['dm:' + k]);
       post('/api/day_memo', { date: iso, sym, memo: v }, d => d.changed === false ? '바뀐 내용이 없어요' : !v ? '근거를 지웠어요' : d.reeval ? '근거를 저장했어요 · 그 영수증 AI 평가를 새 근거로 다시 만들어요' : '근거를 저장했어요')
         .then(d => {
-          S.dm.busy = false;
+          delete B[k];
           if (!d) return;
           S.dm.local = Object.assign({}, S.dm.local, { [k]: { memo: String(d.memo || ''), at: num(d.at) || Math.floor(Date.now() / 1000) } });
-          delete S.drafts['dm:' + k];
-          if (S.dm.ed === k) S.dm.ed = null;
-          const ae = document.activeElement; if (ae && ae.blur && ae.getAttribute && ae.getAttribute('data-draft') === 'dm:' + k) ae.blur();
+          if (!sync.done(S.drafts, sn)) {
+            if (S.dm.ed === k) S.dm.ed = null;
+            const ae = document.activeElement; if (ae && ae.getAttribute && ae.getAttribute('data-draft') === 'dm:' + k) ae.blur();
+          }
           const R = S.rcpt;
           if (d.changed !== false && S.drawer === 'rcpt' && R && R.iso === iso && (dmSym(R.csym || R.sym) === sym || dmSym(R.sym) === sym)) {
             if (S.rcptE) { delete S.rcptE[rcSK(R)]; delete S.rcptE[rcSK(R, 'buy')]; }
             setTimeout(() => { if (S.rcpt === R && rcOn(R)) { rcLoad(true); rcbLoad(true); } }, 600);
           }
           renderView(); renderOverlay();
-        }, () => { S.dm.busy = false; });
+        }, () => { delete B[k]; });
     },
     rcptDmDay: () => { const R = S.rcpt; if (!R) return; wkOff(); S.day = R.iso.slice(5); S.calYM = R.iso.slice(0, 7); closeDrawer(true);
       const go = () => setTimeout(() => { const c = document.querySelector('#view .dmemo'); if (c) c.scrollIntoView({ block: 'center' }); }, 80);
@@ -3255,7 +3261,8 @@
       if (a) { const n = $('.ofmemo.ed input'); if (n) { n.focus(); try { n.setSelectionRange(n.value.length, n.value.length); } catch (e) {  } } } },
     ofMemoSave: el => { const a = el.dataset.k, r0 = ofByAddr(a), v = String(S.drafts['ofm:' + a] == null ? (r0 && !S.of.memoEd ? r0.memo : '') : S.drafts['ofm:' + a]).trim();
       if (v.length > 200) { toast('메모는 200자까지예요', true); return; }
-      post('/api/outflow_resolve', { address: a, op: 'memo', memo: v }, v ? '메모를 저장했어요' : '메모를 지웠어요').then(d => { if (d) { S.of.memoEd = null; delete S.drafts['ofm:' + a]; renderView(); } }); },
+      const sn = sync.snap(S.drafts, ['ofm:' + a]);
+      post('/api/outflow_resolve', { address: a, op: 'memo', memo: v }, v ? '메모를 저장했어요' : '메모를 지웠어요').then(d => { if (d) { if (!sync.done(S.drafts, sn) && S.of.memoEd === a) S.of.memoEd = null; renderView(); } }); },
     ofLkOpen: el => { const a = el.dataset.k; S.of.lk = { a, sel: new Map() }; delete S.drafts.oflq; ofLkLoad(a); renderView(); },
     ofLkClose: () => { S.of.lk = null; renderView(); },
     ofLkTog: el => { const a = el.dataset.v; if (a && (!S.of.lk || S.of.lk.a !== a)) S.of.lk = { a, sel: new Map() };
@@ -3341,16 +3348,17 @@
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d || '')) { toast('시작 날짜를 고르세요', true); return; }
       const body = sec ? { per: { [sec]: d } } : { since: d };
       confirmAsk({ title: (sec ? ((({ eth: 'Ethereum', base: 'Base', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon', bsc: 'BNB Chain', sol: 'Solana', upbit: '업비트' })[sec]) || sec) + ' ' : '') + d + '부터 가져올까요?', body: '옛 구간만 추가로 받아요. 끝나면 원장을 자동으로 다시 계산해요(몇 분 동안 새 거래 반영이 잠시 멈춤).', ok: '가져오기',
-        run: () => post('/api/backfill_request', body, '요청했어요 · 진행 상황은 이 카드에 표시돼요').then(r => { if (r) { delete S.drafts.bfDate; renderView(); } }) });
+        run: () => { const sn = sync.snap(S.drafts, ['bfDate']); post('/api/backfill_request', body, '요청했어요 · 진행 상황은 이 카드에 표시돼요').then(r => { if (r) { sync.done(S.drafts, sn); renderView(); } }); } });
     },
     addAlias: () => {
       const addr = draft('naddr'), alias = draft('nalias');
       if (!addr) { toast('주소를 입력하세요', true); return; }
       if (!alias) { toast('표시 이름을 입력하세요', true); return; }
-      post('/api/wallet_alias', { address: addr, alias }, '이름을 저장했어요').then(d => { if (d) { delete S.drafts.naddr; delete S.drafts.nalias; renderView(); } });
+      const sn = sync.snap(S.drafts, ['naddr', 'nalias']);
+      post('/api/wallet_alias', { address: addr, alias }, '이름을 저장했어요').then(d => { if (d) { sync.done(S.drafts, sn); renderView(); } });
     },
     covRetry: () => { S.cov = null; renderView(); },
-    wlAdd: () => { const a = draft('wl'); if (!a) { toast('주소를 입력하세요', true); return; } post('/api/src_whitelist', { address: a }, '화이트리스트에 추가했어요').then(d => { if (d) { S.wl = arr(d.whitelist); delete S.drafts.wl; renderView(); } }); },
+    wlAdd: () => { const a = draft('wl'), sn = sync.snap(S.drafts, ['wl']); if (!a) { toast('주소를 입력하세요', true); return; } post('/api/src_whitelist', { address: a }, '화이트리스트에 추가했어요').then(d => { if (d) { S.wl = arr(d.whitelist); sync.done(S.drafts, sn); renderView(); } }); },
     wlRemove: el => { const a = el.dataset.v || draft('wl'); if (!a) return; confirmAsk({ title: '화이트리스트에서 뺄까요?', body: short(a) + ' 에서 온 토큰이 다시 스팸 판정 대상이 돼요.', ok: '제거', danger: true, run: () => post('/api/src_whitelist', { address: a, remove: true }, '화이트리스트에서 뺐어요').then(d => { if (d) { S.wl = arr(d.whitelist); renderView(); } }) }); },
     copy: el => copyText(el.dataset.v),
     modalOk: () => { const md = S.modal; S.modal = null; renderOverlay(); if (md && typeof md.run === 'function') md.run(); },
@@ -3365,9 +3373,10 @@
   const {
     brokersBody, levDrawer, levHTML, nftLoad, oaDashLine, oaItems, oaNameTxt, oaNeed, oaTot, oaV, vOther
   } = tjTab('other', {
-    $, A, ago, arr, CHAIN_KO, cls, clsP, clsV, drawerHist, errTxt, esc, exLinked, exLogo, fmtTs, IC, isISO, LS, m, mN, nf, num, onUnauthorized, pad2,
-    pctS, post, prTxt, PVM, pvMoney, pvOn, pvW, px, q, rate, renderAuto, renderOverlay, renderView, rw, S, sparkSVG, sum, sxGo, toast, todayISO,
-    trimZeros, UI_SHEETS, uiCell, uiDate, uiFold, uiPaged, uiPgBar, uiPgReveal, uiPgS, uiPgSlice, uiPick, uiRe, uiSheetClose, uiSheetOpen, vib
+    $, A, ago, arr, CHAIN_KO, cls, clsP, clsV, drawerHist, errTxt, esc, exLinked, exLogo, fmtTs, IC, isISO, LS, m, mN, nf, num,
+    onUnauthorized, pad2, pctS, post, prTxt, PVM, pvMoney, pvOn, pvW, px, q, rate, renderAuto, renderOverlay, renderView, rw, S, sparkSVG,
+    sum, sxGo, sync, toast, todayISO, trimZeros, UI_SHEETS, uiCell, uiDate, uiFold, uiPaged, uiPgBar, uiPgReveal, uiPgS, uiPgSlice, uiPick,
+    uiRe, uiSheetClose, uiSheetOpen, vib
   });
   tjLate_dash({ levHTML, oaDashLine });
   tjLate_set({ brokersBody, oaNeed });
@@ -3974,7 +3983,7 @@
     if (!S.rand) { if (wm) wm.remove(); return; }
     if (wm) return;
     wm = document.createElement('div'); wm.id = 'randWm'; wm.className = 'randwm'; wm.setAttribute('aria-hidden', 'true');
-    wm.innerHTML = '<span>랜덤값</span><span>랜덤값</span><span>랜덤값</span><span>랜덤값</span>';
+    TJDOM.set(wm, '<span>랜덤값</span><span>랜덤값</span><span>랜덤값</span><span>랜덤값</span>');
     document.body.appendChild(wm);
   }
   function pvStripAmt(t) {
@@ -4010,11 +4019,11 @@
     rvOwnInputs(document.body);
     const wow9 = window.TJWow; if (wow9 && typeof wow9.onPv === 'function') { try { wow9.onPv(); } catch (e) {  } }
     const hl9 = window.TJHealth; if (hl9 && hl9._state && (hl9._state.open || hl9._state.pop) && typeof hl9.repaint === 'function') { try { hl9.repaint(); } catch (e) {  } }
-    if (S.hide || S.rand) document.querySelectorAll('.sx-usd').forEach(el => { if (!el.querySelector('.pv')) el.innerHTML = '<span class="pv">' + PVM.usd + '</span>'; });
-    if (S.hide || S.rand) document.querySelectorAll('.prt').forEach(el => { if (!el.querySelector('.pv')) el.innerHTML = '<span class="pv">' + PR_FAKE + '</span>'; });
+    if (S.hide || S.rand) document.querySelectorAll('.sx-usd').forEach(el => { if (!el.querySelector('.pv')) TJDOM.set(el, '<span class="pv">' + PVM.usd + '</span>'); });
+    if (S.hide || S.rand) document.querySelectorAll('.prt').forEach(el => { if (!el.querySelector('.pv')) TJDOM.set(el, '<span class="pv">' + PR_FAKE + '</span>'); });
     if (S.hide || S.rand) document.querySelectorAll('.aib').forEach(el => { if (el.textContent !== AI_HIDE) el.textContent = AI_HIDE; });
     if (S.hide || S.rand) document.querySelectorAll('.aib-l').forEach(el => { el.textContent = '가림'; });
-    if (S.hide || S.rand) document.querySelectorAll('.pvm').forEach(el => { const t9 = String(el.textContent || '').trim(), sg = /^[+−-]/.test(t9) ? t9.charAt(0) : ''; el.innerHTML = sg + pvMoney('', true).replace(PV_RE, '<span class="pv">$1</span>'); });
+    if (S.hide || S.rand) document.querySelectorAll('.pvm').forEach(el => { const t9 = String(el.textContent || '').trim(), sg = /^[+−-]/.test(t9) ? t9.charAt(0) : ''; TJDOM.set(el, sg + pvMoney('', true).replace(PV_RE, '<span class="pv">$1</span>')); });
     if (S.hide || S.rand) document.querySelectorAll('[data-pvt]').forEach(el => { const v9 = el.getAttribute('title'); if (v9) el.setAttribute('title', pvNet(v9.replace(PV_RE, '$1').replace(RS_RE, '$1')).replace(PV_RE, '$1')); });
     rvLinks();
     if (S.hide || S.rand) LS.del('tj_v2_srch_recent');
@@ -4025,7 +4034,7 @@
     const v = $('#view');
     if (!v || !v.querySelector('.oamain') || !S.oa.d) return;
     const t = document.createElement('div');
-    t.innerHTML = vOther();
+    TJDOM.set(t, vOther());
     ['.oak', '.oamain', '.oahist'].forEach(sel => { const a = v.querySelector(sel), b = t.querySelector(sel); if (a && b) a.replaceWith(b); });
   }
   function setHide(on) {
@@ -4146,7 +4155,7 @@
   try { if (!S.D && S.tab === 'dash' && $('#tjHero')) renderChrome(); else render(); }
   catch (e) { logError('[tj] 첫 그리기 실패', e); }
   setTimeout(() => { if (S.D && S.viewOk) return; if (S.rescue && S.rescue.card) return;
-    const b = $('#banners'); if (b && !$('#tjSlow')) b.insertAdjacentHTML('afterbegin', '<div class="card" id="tjSlow" role="status" style="padding:12px 16px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>화면을 여는 데 오래 걸리고 있어요' + (S.err ? ' · ' + esc(errTxt(S.err).slice(0, 80)) : '') + '</span><button class="btn sm" data-a="reloadPage">다시 시도</button><button class="btn sm" data-a="resetPrefs">설정 초기화하고 다시 열기</button></div>'); }, 25000);
+    const b = $('#banners'); if (b && !$('#tjSlow')) TJDOM.insert(b, 'afterbegin', '<div class="card" id="tjSlow" role="status" style="padding:12px 16px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>화면을 여는 데 오래 걸리고 있어요' + (S.err ? ' · ' + esc(errTxt(S.err).slice(0, 80)) : '') + '</span><button class="btn sm" data-a="reloadPage">다시 시도</button><button class="btn sm" data-a="resetPrefs">설정 초기화하고 다시 열기</button></div>'); }, 25000);
   pvRoot();
   if (S.rand) clearCache();
   if (S.hide || S.rand) pvFix(document.body);
@@ -4154,6 +4163,7 @@
   setInterval(() => { if (!document.hidden) refresh(false, null, true); }, POLL_MS);
   setInterval(() => { if (!document.hidden && !S.locked && (RLW.size || arr(S.D && S.D.of).some(x => x.applyWait))) rlFetch(false); }, 5000);
   window.TJ = { clearCache: clearCache, onUnauthorized: onUnauthorized, isLocked: () => !!S.locked, pgSize: uiPageSize,
+    sync,
     bfInfo: () => (S.locked ? null : bfInfo()),
     revealAndHighlight: revealAndHighlight,
     ext: { S, m, esc, num, arr, nf, q, px, pxC, short, fmtTs, isoDay, todayISO, pvOn, cls, pctS, IC, LS, toast, post, render, renderView, gMatch, KV, pvStripAmt,

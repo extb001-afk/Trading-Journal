@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import os
-import re
-import threading
-import time
-import urllib.error
-import urllib.request
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
 
-import common
-import bf_engine as B
-import netpace
+import net_http, paths, statefile  # noqa: E402
+import bf_engine as B  # noqa: E402
+import netpace  # noqa: E402
 
 chk = T.chk
 READS = []
@@ -69,7 +69,7 @@ B.urllib.request.urlopen = _uo
 B.sol_open = _sol_open
 B.es_dispatch_wait = lambda *a, **k: None
 netpace.interval_for = lambda h: 0.0
-common.HTTP_BODY_MAX = CAP
+net_http.HTTP_BODY_MAX = CAP
 
 
 def pad(d, n):
@@ -87,7 +87,7 @@ def bounded(reads, cap=CAP):
 def run(fn, *a, **k):
     try:
         return fn(*a, **k), None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return None, f"{type(e).__name__}: {e}"
 
 
@@ -95,13 +95,13 @@ def too_large(err):
     return bool(err) and "ResponseTooLarge" in err
 
 
-print("[0] common.read_capped")
-RT = getattr(common, "ResponseTooLarge", None)
-rc = getattr(common, "read_capped", None)
+print("[0] net_http.read_capped")
+RT = getattr(net_http, "ResponseTooLarge", None)
+rc = getattr(net_http, "read_capped", None)
 chk(RT is not None and issubclass(RT, ValueError) and callable(rc),
-    "C0 common.read_capped · ResponseTooLarge(ValueError — 깨진 JSON 과 같은 '응답 형식 오류' 처리) 있음", (RT, rc))
-chk(getattr(common, "HTTP_ERR_BODY_MAX", None) == B.HTTP_ERR_MAX_BYTES and B.HTTP_MAX_BYTES == 32 * 1024 * 1024,
-    "C1 상한 값 = 공통 요청 경로(bf_engine)와 같음(오류 본문 64KiB · 정상 32MiB)", (getattr(common, "HTTP_ERR_BODY_MAX", None), B.HTTP_ERR_MAX_BYTES))
+    "C0 net_http.read_capped · ResponseTooLarge(ValueError — 깨진 JSON 과 같은 '응답 형식 오류' 처리) 있음", (RT, rc))
+chk(getattr(net_http, "HTTP_ERR_BODY_MAX", None) == B.HTTP_ERR_MAX_BYTES and B.HTTP_MAX_BYTES == 32 * 1024 * 1024,
+    "C1 상한 값 = 공통 요청 경로(bf_engine)와 같음(오류 본문 64KiB · 정상 32MiB)", (getattr(net_http, "HTTP_ERR_BODY_MAX", None), B.HTTP_ERR_MAX_BYTES))
 if callable(rc) and RT is not None:
     READS.clear()
     chk(rc(_Resp(b"a" * CAP)) == b"a" * CAP and READS == [CAP + 1], "C2 정확히 상한 = 통과 · 읽기는 상한+1 에서 끊음", READS)
@@ -120,10 +120,10 @@ if callable(rc) and RT is not None:
     READS.clear()
     r9, e9 = run(rc, _Resp(b"f" * 100), cap=50)
     chk(r9 is None and too_large(e9) and READS == [51], "C7 cap 인자 = 그 상한", (READS, e9))
-    common.HTTP_BODY_MAX = 32 * 1024 * 1024
+    net_http.HTTP_BODY_MAX = 32 * 1024 * 1024
     READS.clear()
     chk(rc(_Resp(b"{}")) == b"{}" and READS == [32 * 1024 * 1024 + 1], "C8 기본 상한 = 32MiB(+1 에서 끊음)", READS)
-    common.HTTP_BODY_MAX = CAP
+    net_http.HTTP_BODY_MAX = CAP
 
 
 def case(tag, label, call, small_ok, big_ok, small_body, big_body):
@@ -141,8 +141,8 @@ def case(tag, label, call, small_ok, big_ok, small_body, big_body):
 
 
 print("[1] sol_watch 솔라나 수집")
-import sol_watch
-import collections
+import sol_watch  # noqa: E402
+import collections  # noqa: E402
 
 
 class _SolSelf:
@@ -178,7 +178,7 @@ chk(e9 is not None and "429" in e9 and READS == [ECAP], "S2 sol_watch 429 오류
 B.sol_open = _sol_open
 
 print("[2] recon 잔고 대사")
-import recon
+import recon  # noqa: E402
 case("R1", "recon._gj(블록스카웃 보유 목록)", lambda: recon._gj("https://bs-r.example.invalid/api", tries=3, sleep=lambda s: None),
      lambda r, e: r == {"items": []} and e is None, lambda r, e: r is None and too_large(e) and len(CALLS) == 1,
      b'{"items": []}', pad({"items": []}, BIG_N))
@@ -190,7 +190,7 @@ case("R3", "recon._rpc(솔라나 · sol_open)", lambda: recon._rpc("https://sol-
      b'{"jsonrpc":"2.0","id":1,"result":{"value":5}}', pad({"jsonrpc": "2.0", "id": 1, "result": {"value": 5}}, BIG_N))
 
 print("[3] xchain_match 브릿지 추적")
-import xchain_match
+import xchain_match  # noqa: E402
 
 
 class _TrSelf:
@@ -208,7 +208,7 @@ case("X2", "xchain Tracer._get(탐색기)", lambda: xchain_match.Tracer._get(tr,
      b'{"items": []}', pad({"items": []}, BIG_N))
 
 print("[4] flow_trace 자금 흐름 추적(이더스캔)")
-import flow_trace
+import flow_trace  # noqa: E402
 
 
 class _EsSelf:
@@ -220,7 +220,7 @@ case("F1", "flow_trace Scanner._es_http", lambda: flow_trace.Scanner._es_http(_E
      b'{"status":"1","result":[]}', pad({"status": "1", "result": []}, BIG_N))
 
 print("[5] lpchain LP 목록(블록스카웃 NFT)")
-import lpchain
+import lpchain  # noqa: E402
 lpchain.lpdec.lp_managers = lambda bd: {"base": {"0x" + "ab" * 20: {}}}
 cfg_lp = {"chains": {"base": {"blockscout": "https://bs-lp.example.invalid"}}}
 item = {"token": {"address": "0x" + "ab" * 20}, "id": "7"}
@@ -229,19 +229,19 @@ case("L1", "lpchain.list_wallet_positions", lambda: lpchain.list_wallet_position
      json.dumps({"items": [item], "next_page_params": None}).encode(), pad({"items": [item], "next_page_params": None}, BIG_N))
 
 print("[6] lpsol 솔라나 LP 계정")
-import lpsol
+import lpsol  # noqa: E402
 case("P1", "lpsol._rpc", lambda: lpsol._rpc(["https://sol-lp.example.invalid/"], "getMultipleAccounts", [[], {}]),
      lambda r, e: r == {"value": []}, lambda r, e: r is None and e is None,
      b'{"jsonrpc":"2.0","id":1,"result":{"value":[]}}', pad({"jsonrpc": "2.0", "id": 1, "result": {"value": []}}, BIG_N))
 
 print("[7] sale_match 세일 매칭")
-import sale_match
+import sale_match  # noqa: E402
 case("M1", "sale_match.http_get_json", lambda: sale_match.http_get_json("https://bs-sm.example.invalid/api?module=logs"),
      lambda r, e: r == {"status": "1", "result": []} and e is None, lambda r, e: r is None and too_large(e),
      b'{"status":"1","result":[]}', pad({"status": "1", "result": []}, BIG_N))
 
 print("[8] pricing 시세")
-import pricing
+import pricing  # noqa: E402
 case("Q1", "pricing._gj", lambda: pricing._gj("https://px.example.invalid/v1"),
      lambda r, e: r == {"rates": {"KRW": 1}} and e is None, lambda r, e: r is None and too_large(e),
      b'{"rates":{"KRW":1}}', pad({"rates": {"KRW": 1}}, BIG_N))
@@ -255,20 +255,20 @@ case("Q2", "pricing.okx_dex_prices(OKX 토큰 가격)", lambda: pricing.okx_dex_
      json.dumps(okx_ok).encode(), pad(okx_ok, BIG_N))
 
 print("[9] rabby 지갑 조회")
-import rabby
+import rabby  # noqa: E402
 case("B1", "rabby.http_get", lambda: rabby.http_get("https://rb.example.invalid/v1/user/total_balance?id=x"),
      lambda r, e: r == {"total_usd_value": 1} and e is None, lambda r, e: r is None and too_large(e),
      b'{"total_usd_value":1}', pad({"total_usd_value": 1}, BIG_N))
 
 print("[10] upbit_link 업비트")
-import upbit_link
+import upbit_link  # noqa: E402
 up = upbit_link.Upbit("synthetic-access", "synthetic-secret")
 case("U1", "upbit_link.Upbit.get", lambda: up.get("/v1/accounts"),
      lambda r, e: r == [] and e is None, lambda r, e: r is None and too_large(e),
      b"[]", json.dumps([{"pad": "x" * BIG_N}]).encode())
 
 print("[11] depaddr 입금 주소")
-import depaddr
+import depaddr  # noqa: E402
 case("D1", "depaddr.http_get", lambda: depaddr.http_get("https://ex-d.example.invalid/api/v1/x", {}),
      lambda r, e: isinstance(r, tuple) and r[0] == {"ok": 1} and e is None,
      lambda r, e: r is None and bool(e) and "ApiError" in e and "ResponseTooLarge" in e,
@@ -287,7 +287,7 @@ chk(e9 is not None and "HTTP 400" in e9 and READS == [ECAP], "D2 depaddr HTTP �
 B.urllib.request.urlopen = _uo
 
 print("[12] web 거래 출처(_origin_worker)")
-import web
+import web  # noqa: E402
 
 
 class _Stop(BaseException):
@@ -331,9 +331,9 @@ def _origin_once():
             pass
     finally:
         time.sleep = _sleep0
-    c = common.read_json(os.path.join(common.STATE_DIR, "tx_origin_cache.json"), {})
+    c = statefile.read_json(os.path.join(paths.STATE_DIR, "tx_origin_cache.json"), {})
     try:
-        os.remove(os.path.join(common.STATE_DIR, "tx_origin_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "tx_origin_cache.json"))
     except OSError:
         pass
     return c.get("0x" + "77" * 32) or {}

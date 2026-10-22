@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
-import _suifake as F
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
+import _suifake as F  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import core
-import chain_event
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 try:
-    import sui_watch as SW
+    import sui_watch as SW  # noqa: E402
 except ImportError:
-    import _wip_sui_watch as SW
+    import _wip_sui_watch as SW  # noqa: E402
 
 DAY = 86400
 A, B = N.OWN["sui"]
@@ -56,7 +56,7 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "sui", "address": A}, {"chain": "sui", "address": B}]
 cfg["nonevm"] = {"sui": {"graphql_url": URL, "retries": 1}}
 json.dump(cfg, open(CFG_PATH, "w"))
-cfg = common.load_config()
+cfg = config.load_config()
 ad = SW.make_adapter(cfg)
 K = {t: reg.asset_key("sui", "token", t) for t in (USDC, OLDT, NEWT, NOMETA, ADDRB, BAD)}
 
@@ -101,15 +101,15 @@ for kind in ("http429", "http500", "gqlerr", "partial", "badjson"):
     check(f"V4 잔고 조회 {kind} = 예외(빈 결과·0 잔고 아님)", r5 != "returned", r5)
 ch.inject = {}
 
-w = SegmentWriter(os.path.join(common.INBOX_DIR, "sui"))
+w = SegmentWriter(os.path.join(paths.INBOX_DIR, "sui"))
 st = cs.ChainState("sui")
 col = SW.SuiCollector(SW.make_adapter(cfg), w, st, {A, B}, page_budget={"latest": 5, "history": 20}, detail_budget={"latest": 100, "history": 500})
 reg.FORCE_AVAILABLE.add("sui")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
-c._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
-c._last_recon = 0
-c.recon_pass({"sui"})
+c.svc_recon._nonevm_adapters = {"sui": SW.make_adapter(cfg)}
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"sui"})
 check("V6 수집기 상태 없음(준비 안 됨) = 대사 안 함", not c._meta_get("recon_done_sui"))
 col.cycle()
 sv = cs.ChainState("sui").status_view()
@@ -118,18 +118,18 @@ rd = dict(c.chain_readers)["sui"]
 c._drain_stream("sui", rd, 0, 0)
 c.conn.commit()
 check("V6 원장 3건", c.conn.execute("SELECT COUNT(*) FROM raw_txs WHERE chain='sui'").fetchone()[0] == 3)
-check("V6 수집기 준비(동기화 도장·전 지갑 완료·대기 0)", c._scope_ready("sui"))
+check("V6 수집기 준비(동기화 도장·전 지갑 완료·대기 0)", c.svc_recon._scope_ready("sui"))
 ch.tip += 20
-c._last_recon = 0
-c.recon_pass({"sui"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"sui"})
 check("V6 R3 후속: 잔고 있는 자릿수 모르는 새 코인(NOMETA 777) = 대사 보류(도장 없음 · 다음 주기 다시)", not c._meta_get("recon_done_sui"))
 ch.bal[A] = [r9 if r9[0] != NOMETA else (NOMETA, 0, 0, None) for r9 in ch.bal[A]]
-c._last_recon = 0
-c.recon_pass({"sui"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"sui"})
 check("V6 S19 6.4: 합계 불일치 새 코인(BAD) 남음 = 여전히 보류(도장 없음 · 회복 뒤 다시)", not c._meta_get("recon_done_sui"))
 ch.bal[A] = [r9 if r9[0] != BAD else (BAD, 50, 40, 10) for r9 in ch.bal[A]]
-c._last_recon = 0
-c.recon_pass({"sui"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"sui"})
 LA = reg.make_location("sui", A)
 
 

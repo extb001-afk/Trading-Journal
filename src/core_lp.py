@@ -92,7 +92,7 @@ class LpMixin:
         if ("g", chain) in cache:
             return cache[("g", chain)]
         out = cache[("g", chain)] = {}
-        for r in self.conn.execute("SELECT detail FROM tx_class WHERE chain=? AND event LIKE 'LP_%' AND detail LIKE '%stake%'",
+        for r in self.conn.execute("SELECT detail FROM tx_class WHERE chain=? AND event LIKE 'LP\\_%' ESCAPE '\\' AND detail LIKE '%stake%'",
                                    (chain,)).fetchall():
             try:
                 lp = (json.loads(r["detail"] or "{}") or {}).get("lp") or {}
@@ -167,7 +167,7 @@ class LpMixin:
         if ("t", chain) in cache:
             return cache[("t", chain)]
         out = cache[("t", chain)] = {}
-        for r in self.conn.execute("SELECT detail FROM tx_class WHERE chain=? AND event LIKE 'LP_%' AND detail LIKE '%\"v2\"%'",
+        for r in self.conn.execute("SELECT detail FROM tx_class WHERE chain=? AND event LIKE 'LP\\_%' ESCAPE '\\' AND detail LIKE '%\"v2\"%'",
                                    (chain,)).fetchall():
             try:
                 lp = (json.loads(r["detail"] or "{}") or {}).get("lp") or {}

@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import time
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import ledger_backup as lb
-import unit_beat
+import paths, statefile  # noqa: E402
+import health  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import unit_beat  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = time.time()
 
 
@@ -21,7 +21,7 @@ def ck(name, cond, extra=None):
 
 
 def wj(name, obj):
-    common.atomic_write_json(os.path.join(S, name), obj)
+    statefile.atomic_write_json(os.path.join(S, name), obj)
 
 
 def rm(name):
@@ -72,7 +72,7 @@ c5 = health.compact(health.web_view(NOW))
 ck("[3] 원장 대기 없음 = 앱 상태 요약 키 종전 그대로(5개)", sorted(c5) == ["crit", "overall", "stale", "updatedAt", "warn"], c5)
 
 wj("runner_core.json", {"unit": "core", "pid": 1, "ts": int(NOW) - 5, "state": "waiting", "why": lb.CORRUPT_WHY, "evidence": ["빠른 검사(quick_check) 실패: x"]})
-open(common.DB_PATH, "wb").close()
+open(paths.DB_PATH, "wb").close()
 v6 = health.web_view(NOW)
 ck("[4] 원장 손상 대기 = 열린 문제 맨 앞 '원장 손상 — 복구 필요' · 배너 재료", v6["open"][0]["id"] == "ledger:corrupt" and (v6.get("ledgerWait") or {}).get("kind") == "corrupt"
    and v6["overall"] == "crit", (v6["open"][:1], v6.get("ledgerWait")))

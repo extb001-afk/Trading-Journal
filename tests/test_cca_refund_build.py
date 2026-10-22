@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 B, C = "0x" + "b3" * 20, "0x" + "c3" * 20
 AUC, TKN = "0x" + "a5" * 20, "0x" + "d5" * 20
@@ -18,11 +18,11 @@ USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 json.dump({"chains": {}, "wallets": [{"chain": "eth", "address": B, "label": "B"}, {"chain": "eth", "address": C, "label": "C"}],
            "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 chk = T.chk
@@ -82,12 +82,12 @@ web.pricing._gj = lambda url, timeout=10.0: None
 histcurve.DAYCLOSE.lookup = fake_lookup
 spot = {"ETH": 2000.0, "USDT": 1.0, "USDC": 1.0}
 json.dump({"usd": spot, "usd_ts": {k: NOW for k in spot}, "rate": 1300.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 
 
 class L:
     def __init__(self):
-        p = common.DB_PATH
+        p = paths.DB_PATH
         for sfx in ("", "-wal", "-shm"):
             if os.path.exists(p + sfx):
                 os.remove(p + sfx)
@@ -177,14 +177,14 @@ def cache(bids, cur=None):
           for i, a, btx, bts, r, etx, ets, f in bids]
     json.dump({"owners": {f"eth:{B}": {"t": NOW, "chain": "eth", "owner": B, "bids": bl,
                                          "auctions": {AUC: {"ok": True, "why": "seed", "currency": cur, "token": {"addr": TKN, "sym": "TKN", "dec": 18}}}}}},
-              open(web.SALE_PATH, "w"))
+              open(paths.state("sale_bids.json"), "w"))
 
 
 def build(prefs=None):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **(prefs or {})))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **(prefs or {})))
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -220,7 +220,7 @@ def acq_disp(rows):
 def reset_px():
     PX["ETH"] = [(0, 1000.0)]
     NO_PX_BEFORE[0] = 0
-    pin9 = getattr(web, "FS_PIN_PATH", os.path.join(common.STATE_DIR, "first_seen_px.json"))
+    pin9 = paths.state("first_seen_px.json")
     if os.path.exists(pin9):
         os.remove(pin9)
 
@@ -248,12 +248,12 @@ base_ledger()
 f, rows = build()
 er = eth_rows(rows)
 chk(sale_box(f) and sale_box(f)[0][0] == 1000.0 and sale_box(f)[0][3] == 1000.0,
-    "C1 취득 토큰 원가 $1,000(15차 순매입 원가 그대로 · 입찰 시세 × 실제로 쓴 1 ETH)", sale_box(f))
+    "C1 취득 토큰 원가 $1,000(종전 순매입 원가 그대로 · 입찰 시세 × 실제로 쓴 1 ETH)", sale_box(f))
 chk(acq_disp(er) == [(9.0, 9000.0, 10800.0, False)],
     "C1 환불 ETH 매도 명세 = 수량 9 · 취득 $9,000 · 처분 $10,800 · 최초 인식 시가 표기 없음(종전 취득 $10,800 · 추정 표기)", acq_disp(er))
 chk(rz(f, d(10)) == 1800.0, "C1 ETH 실현 $1,800(종전 $0)", rz(f, d(10)))
 chk(acq_disp(pay_rows(rows)) == [(1.0, 1000.0, 1000.0, False)] and rz(f, d(2)) == 0,
-    "C1 (cca17) 입찰 사용분 1 ETH 처분 행 = 원래 원가 $1,000 · 대가 $1,000(입찰 시세 = 매수가라 실현 0)", [acq_disp(pay_rows(rows)), rz(f, d(2))])
+    "C1 입찰 사용분 1 ETH 처분 행 = 원래 원가 $1,000 · 대가 $1,000(입찰 시세 = 매수가라 실현 0)", [acq_disp(pay_rows(rows)), rz(f, d(2))])
 chk("ETH" not in unv(f), "C1 ETH 원가미상 매도 없음", sorted(unv(f)))
 akr = [r.get("_akr") for r in er]
 chk(len(akr) == 1 and akr[0] is not None and abs(float(akr[0]) - 11_700_000) < 5,
@@ -302,7 +302,7 @@ cache([(1, 5, h64(0x111), d(1), 4, h64(0x211), d(4), 100), (2, 5, h64(0x112), d(
 f5, rows5 = build()
 chk(acq_disp(eth_rows(rows5)) == [(5.0, 6000.0, 7500.0, False)] and rz(f5, d(10)) == 1500.0,
     "C5 여러 입찰 = 입찰별 보낸 원가 비례(4/5 × $5,000 + 1/5 × $10,000 = $6,000) · 실현 $1,500", [acq_disp(eth_rows(rows5)), rz(f5, d(10))])
-chk(sale_box(f5) and sale_box(f5)[0][0] == 1000.0 + 4 * 2000.0, "C5 토큰 원가 = (5−4)×$1,000 + (5−1)×$2,000 = $9,000(15차 그대로)", sale_box(f5))
+chk(sale_box(f5) and sale_box(f5)[0][0] == 1000.0 + 4 * 2000.0, "C5 토큰 원가 = (5−4)×$1,000 + (5−1)×$2,000 = $9,000(종전 그대로)", sale_box(f5))
 
 lg = L()
 lg.fund_usdt(d(-1), 30000)
@@ -345,7 +345,7 @@ chk(sorted(unv(f7b)) == ["ETH"] and acq_disp(eth_rows(rows7b)) == [(6.0, 6000.0,
 
 base_ledger()
 lg = L.__new__(L)
-lg.c = dbm.open_db(common.DB_PATH)
+lg.c = dbm.open_db(paths.DB_PATH)
 lg.A = {"eth": (lg.c.execute("SELECT asset_id FROM assets WHERE kind='native'").fetchone()[0], 18)}
 lg.A["usdt"] = (lg.c.execute("SELECT asset_id FROM assets WHERE symbol='USDT'").fetchone()[0], 6)
 lg.n = 90
@@ -360,7 +360,7 @@ chk(acq_disp(eth_rows(rows8)) == [(9.0, 9000.0, 10800.0, False)] and acq_disp(et
 
 base_ledger(bid_px_missing=True)
 f9, rows9 = build()
-chk(sale_box(f9) and sale_box(f9)[0][0] is None, "C9 입찰 시각 시세 없음 = 토큰 원가 미확인(지어내지 않음 · 15차)", sale_box(f9))
+chk(sale_box(f9) and sale_box(f9)[0][0] is None, "C9 입찰 시각 시세 없음 = 토큰 원가 미확인(지어내지 않음)", sale_box(f9))
 chk(acq_disp(eth_rows(rows9)) == [(9.0, 9000.0, 10800.0, False)] and rz(f9, d(10)) == 1800.0,
     "C9 그래도 환불 ETH 원가 = 원장 원가 $9,000 · 실현 $1,800", [acq_disp(eth_rows(rows9)), rz(f9, d(10))])
 
@@ -382,7 +382,7 @@ chk(not eth_rows(rows10) and "ETH" in unv(f10) and rz(f10, d(10)) == 0,
 
 base_ledger()
 lg = L.__new__(L)
-lg.c = dbm.open_db(common.DB_PATH)
+lg.c = dbm.open_db(paths.DB_PATH)
 lg.c.execute("UPDATE postings SET location=? WHERE source_id=? AND leg_kind='acq'", (f"wallet:eth:{C}", EXIT))
 lg.c.commit()
 lg.c.close()
@@ -435,10 +435,10 @@ cache([(1, 10000, BID, d(1), 9000, EXIT, d(2), 1000)], {"addr": USDC, "sym": "US
 f12, _r12 = build()
 chk(sale_box(f12) and sale_box(f12)[0][0] == 1000.0, "C12 스테이블 세일 토큰 원가 $1,000(종전)", sale_box(f12))
 
-import sale_match
+import sale_match  # noqa: E402
 SEED = {"factories": set(), "chains": ["eth"], "auctions": {}, "redeem": {}}
 cache([(1, 10, BID, d(1), 9, EXIT, d(2), 1000), (2, 5, h64(0x102), d(1), 6, h64(0x202), d(2), 100)])
-lu = sale_match.build_lots(json.load(open(web.SALE_PATH)), lambda s9, t9: 1000.0, (), SEED)
+lu = sale_match.build_lots(json.load(open(paths.state("sale_bids.json"))), lambda s9, t9: 1000.0, (), SEED)
 bd = sorted(((b9["bid_tx"], b9["exit_tx"], b9["amount"], b9["refunded"]) for b9 in (lu[0].get("bid_d") or [])), key=str) if lu else []
 chk(len(lu) == 1 and lu[0].get("cur_addr") == "" and bd == sorted([(BID, EXIT, Decimal(10), Decimal(9)), (h64(0x102), h64(0x202), Decimal(5), None)], key=str),
     "U1 입찰별 재료 = 입찰 tx · 종료 tx · 입찰량 · 확인 환불량(환불 > 입찰 = None — 연결 안 함) · 네이티브 지급 = cur_addr ''", [lu[:1] and lu[0].get("cur_addr"), bd])

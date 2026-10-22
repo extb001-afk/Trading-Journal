@@ -1,7 +1,8 @@
 import bisect
 import calcguard
-import common
+import acct_norm, histmark, num_parse, paths, seeds, statefile
 import json
+import recon_adj
 import os
 import sqlite3
 import time
@@ -25,12 +26,12 @@ class ExfLateMixin:
             return self._exf_lfm
         out = set()
         try:
-            names = [n for n in os.listdir(common.STATE_DIR) if n.startswith("latefix_move_undo_") and n.endswith(".json")]
+            names = [n for n in os.listdir(paths.STATE_DIR) if n.startswith("latefix_move_undo_") and n.endswith(".json")]
         except OSError:
             names = []
         for n9 in names:
             try:
-                for m9 in json.load(open(os.path.join(common.STATE_DIR, n9), encoding="utf-8")) or []:
+                for m9 in json.load(open(os.path.join(paths.STATE_DIR, n9), encoding="utf-8")) or []:
                     if isinstance(m9, dict) and m9.get("ex") and m9.get("sym") and m9.get("bts") is not None:
                         out.add((str(m9["ex"]), str(m9["sym"]).upper(), int(m9["bts"])))
             except (OSError, ValueError, TypeError):
@@ -188,7 +189,7 @@ class ExfLateMixin:
         n = 0
         for sym, lst in sorted(deltas.items()):
             rows = [r for r in self._exf_adj_rows(ex, sym)
-                    if not common.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id"))]
+                    if not histmark.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id"))]
             bts_all = self._exf_bounds_q(self.conn, ex, sym)
             per, grp = {}, {}
             for ts9, amt in lst:
@@ -219,7 +220,7 @@ class ExfLateMixin:
                                  b9 or "없음(그 뒤 보정 대사 없음)", format(left9, "f"))
         return n
 
-    EXF_LATE_PFX = common.EXF_LATE_PFX
+    EXF_LATE_PFX = histmark.EXF_LATE_PFX
 
     EXF_LATE_GAP_S = 6 * 3600
 
@@ -236,7 +237,7 @@ class ExfLateMixin:
                 "SELECT p.source_id, p.leg_seq FROM postings p JOIN assets a ON a.asset_id=p.asset_id"
                 " WHERE p.source_ns=? AND p.event='EXF_ADJUST' AND p.location=? AND upper(a.symbol)=?",
                 (f"{ex}:recon", f"exchange:{ex}", str(sym).upper())).fetchall():
-            if common.exf_is_debt_int("EXF_ADJUST", r[1], f"{ex}:recon", r[0]):
+            if histmark.exf_is_debt_int("EXF_ADJUST", r[1], f"{ex}:recon", r[0]):
                 continue
             b9 = cls._exf_bts(r[0])
             if b9 is not None:
@@ -300,7 +301,7 @@ class ExfLateMixin:
 
     def _exf_late_offset(self, ex: str, sym: str, lst: list, amt: Decimal, rem_s: Decimal, b9, what: str) -> Decimal:
         sym = str(sym).upper()
-        if sym in self.EXF_FIX_SKIP or abs(rem_s) <= self.EXF_TOL or not lst:
+        if sym in acct_norm.ex_off_ledger(ex) or abs(rem_s) <= self.EXF_TOL or not lst:
             return rem_s
         cl9 = self._exf_late_clusters(lst)
         if abs(abs(rem_s) - abs(amt)) <= self.EXF_TOL:
@@ -343,6 +344,7 @@ class ExfLateMixin:
                                      (f"{ex}:recon", sid)).fetchone()
             seq9 = 0 if row9 is None or row9[0] is None else int(row9[0]) + 1
             self._post_leg_strict('exchange', f'{ex}:recon', sid, seq9, t_off, aid, loc, qb, None, None, 'opening', 'EXF_ADJUST')
+            recon_adj.note(self.conn, "K9", ('exchange', f'{ex}:recon', sid, seq9), "exflate", what=str(what))
             self._exf_hist_touch(t_off)
             left += Decimal(qb) / scale
             log.info("%s %s %s: 대사 %s 구간 늦은 변화 %s 를 그 직후(%d)에 상쇄 %s — 되돌릴 보정이 없어(같은 돈 두 번 안 잡히게)", ex, what, sym,
@@ -350,10 +352,10 @@ class ExfLateMixin:
         return left
 
     def _exf_hist_touch(self, ts):
+        self._inval_seq()
         self._exf_hist_dirty = True
-        try:
-            t9 = int(ts)
-        except (TypeError, ValueError):
+        t9 = num_parse.to_int(ts)
+        if t9 is None:
             return
         cur9 = getattr(self, "_exf_hist_from", None)
         self._exf_hist_from = t9 if cur9 is None else min(cur9, t9)
@@ -362,15 +364,15 @@ class ExfLateMixin:
         if getattr(self, "_exf_hist_dirty", False):
             self._exf_hist_dirty = False
             try:
-                os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+                os.remove(paths.state("daily_cache.json"))
             except FileNotFoundError:
                 pass
             t9 = getattr(self, "_exf_hist_from", None)
             self._exf_hist_from = None
             if t9 is not None:
                 try:
-                    log.info("장기 곡선 다시 계산 표식: %s 부터", common.mark_hist_dirty(t9))
-                except Exception as e:
+                    log.info("장기 곡선 다시 계산 표식: %s 부터", histmark.mark_hist_dirty(t9))
+                except Exception as e:   # noqa: BLE001 [optional]
                     calcguard.swallowed("core_exf:ExfMixin._exf_hist_flush", e)
                     log.warning("장기 곡선 다시 계산 표식 실패: %s", e)
 
@@ -420,19 +422,21 @@ class ExfLateMixin:
                         break
                 if t_new <= t_old:
                     continue
-                self.conn.execute("UPDATE postings SET event_ts=? WHERE posting_id=?", (int(t_new), pid))
+                self._leg_sql("_exf_redate_once.1", (int(t_new), pid))
                 ev[pid][0] = int(t_new)
                 moves.append([pid, int(t_old), int(t_new)])
                 moved += 1
         if moves:
             try:
-                common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_redate_m.json"),
+                statefile.atomic_write_json(paths.state("exf_redate_m.json"),
                                          {"ts": int(time.time()), "moves": moves})
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("core_exf:ExfMixin._exf_redate_once", e)
                 self.conn.rollback()
                 log.error("해외 대사 보정 재배치 보류 — 되돌리기 자료 쓰기 실패: %s", e)
                 return
+        if moved:
+            self._inval_seq()
         self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_redate_m', ?)", (f"{int(time.time())}:{moved}",))
         self.conn.commit()
         if moved:
@@ -476,9 +480,9 @@ class ExfLateMixin:
         if self._meta_get("exf_debt_redate_t"):
             return
         try:
-            seed = common.seed_json("debt_first_seen_t.json", {}, base_dir=common.BASE_DIR, strict=True)
-        except (Exception, SystemExit) as _cg9:
-            calcguard.swallowed("core_exf:ExfMixin._exf_debt_redate_once", _cg9)
+            seed = seeds.seed_json("debt_first_seen_t.json", {}, base_dir=paths.BASE_DIR, strict=True)
+        except (Exception, SystemExit) as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("core_exf:ExfMixin._exf_debt_redate_once[seed]", _cg9)
             seed = {}
         if not isinstance(seed, dict) or not any(isinstance(v9, dict) and v9 for v9 in seed.values()):
             return
@@ -536,19 +540,16 @@ class ExfLateMixin:
                               "rest_qty_base": str(qb_rest)})
         if moves:
             try:
-                common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_debt_redate_t.json"), {"ts": int(time.time()), "moves": moves})
-            except Exception as e:
-                calcguard.swallowed("core_exf:ExfMixin._exf_debt_redate_once", e)
+                statefile.atomic_write_json(paths.state("exf_debt_redate_t.json"), {"ts": int(time.time()), "moves": moves})
+            except Exception as e:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("core_exf:ExfMixin._exf_debt_redate_once[atomic_write_json]", e)
                 log.error("기존 부채 소급 보류 — 되돌리기 자료 쓰기 실패: %s", e)
                 return
             for m in moves:
-                self.conn.execute("UPDATE postings SET event_ts=?, qty_base=? WHERE posting_id=?",
-                                  (m["new_ts"], m["new_qty_base"], m["posting_id"]))
+                self._leg_sql("_exf_debt_redate_once.1", (m["new_ts"], m["new_qty_base"], m["posting_id"]))
                 if int(m["rest_qty_base"]) != 0:
-                    self.conn.execute(
-                        "INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
-                        " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange', ?, ?, 2, ?, ?, ?, ?, NULL, NULL, 'opening',"
-                        " 'EXF_ADJUST', ?)",
+                    self._leg_sql(
+                        "_exf_debt_redate_once.2",
                         (f"{m['ex']}:recon", m["source_id"], m["old_ts"], m["asset_id"], f"exchange:{m['ex']}", m["rest_qty_base"], CLASSIFIER_VER))
         self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_debt_redate_t', ?)", (f"{int(time.time())}:{len(moves)}",))
         self.conn.commit()

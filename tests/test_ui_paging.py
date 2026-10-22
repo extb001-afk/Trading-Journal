@@ -2,17 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import re
-import shutil
-import subprocess
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 V2 = os.path.join(T.ROOT, "web", "v2")
 APP = T.app_js_path()
-rd = lambda n: open(os.path.join(V2, n), encoding="utf-8").read()
-app, setup, wow, css = T.app_js(), rd("setup.js"), rd("wow.js"), rd("index.html")
+rd = lambda n: open(os.path.join(V2, n), encoding="utf-8").read()  # noqa: E731
+app, setup, wow, css = T.app_js(), rd("setup.js"), rd("wow.js"), T.v2_css()
 search_js = rd("search.js")
 SEARCH = os.path.join(V2, "search.js")
 
@@ -50,14 +49,14 @@ for k in ("'ofp'", "'ofh'", "'ug:hid'", "'ug:' + p._cat", "'jcy'", "'evdays'", "
     T.chk("uiPgReveal(" + k in app, "검색 찾아가기 = 그 항목이 있는 쪽 열기 " + k)
 OLD_ACTS = ("holdMore", "holdLess", "venueAll", "venueCoinAll", "jMore", "evMore", "evLess", "nftMore", "sxWalAll", "bestMore", "uiMore", "uiLess")
 left = [a for a in OLD_ACTS if re.search(r"\n    " + a + r": (?:el|\(\)) =>", app)]
-T.chk("const U_FIRST" not in app and "U_FIRST, U_STEP" not in app and not left, "pg19: 미매칭 앞 8줄(U_FIRST)·옛 '모두 보기'·'더 보기' 열기/접기 동작(holdMore·jMore·sxWalAll·uiMore …) 없음", left)
+T.chk("const U_FIRST" not in app and "U_FIRST, U_STEP" not in app and not left, "미매칭 앞 8줄(U_FIRST)·옛 '모두 보기'·'더 보기' 열기/접기 동작(holdMore·jMore·sxWalAll·uiMore …) 없음", left)
 T.chk("const jSig = [S.j.q, S.j.status, S.j.sort, S.g.period, S.g.from, S.g.to, S.src.mode, S.src.key]" in app,
-      "up708 MEDIUM: 사이클 목록 쪽 초기화 서명에 직접 지정 기간(S.g.from/to) — custom 기간을 바꾸면 첫 쪽으로")
+      "사이클 목록 쪽 초기화 서명에 직접 지정 기간(S.g.from/to) — custom 기간을 바꾸면 첫 쪽으로")
 T.chk("uiPgReveal('hold', holdPgHit(k))" in app and "!r.sub && r.g.key === k" not in app,
-      "up708 HIGH: ⌘K 보유 찾아가기 = Rabby 보강 하위 행(sub)도 대상(종전 !r.sub 가 대상 자체를 뺌)")
+      "⌘K 보유 찾아가기 = Rabby 보강 하위 행(sub)도 대상(종전 !r.sub 가 대상 자체를 뺌)")
 T.chk("function srchPgNext(" in search_js and "function srchPgClamp(" in search_js and "srchPgApply(ST.pgK, gr)" in search_js and "ST.pg " not in search_js
       and 'data-srch="pg" data-kind="' in search_js and "srchPgMove(ST.pgK || (ST.pgK = {}), ST.groups, kind9, d9)" in search_js,
-      "up708·up713 HIGH: 검색 쪽 넘김 = 덜 찬 쪽에서 '다음'은 그 쪽을 마저 받음(건너뛰기 없음) · 쪽 번호는 받은 결과 수로 고침 · 묶음(kind)별 쪽·추가 받기 · 누른 묶음만")
+      "검색 쪽 넘김 = 덜 찬 쪽에서 '다음'은 그 쪽을 마저 받음(건너뛰기 없음) · 쪽 번호는 받은 결과 수로 고침 · 묶음(kind)별 쪽·추가 받기 · 누른 묶음만")
 T.chk("uiPgReset('ug:')" in app and "uiPgReset('ofh')" in app and "uiPgReset('jcy')" in app and "uiPgReset('evdays')" in app and "uiPgReset('hold')" in app,
       "거르기·검색·정렬이 바뀌면 그 목록 첫 쪽으로(미매칭 검색 · 보낸 내역 거르기 · 사이클 · 전체 이벤트 · 보유 정렬·구분)")
 T.chk("const PS = suPgSize(20), shown = suPgSlice(rest, U.chPg, PS), offShown = suPgSlice(off, U.chOffPg, PS);" in setup
@@ -66,8 +65,8 @@ T.chk("const PS = suPgSize(20), shown = suPgSlice(rest, U.chPg, PS), offShown = 
       "설정 › 체인별 조회(다른 체인·꺼 둔 체인 = 바로 설정 쪽 크기씩) · 주소별 확인 주기 시트(설정 쪽 크기)")
 T.chk('data-su="chAll"' not in setup and "chAll()" not in setup and 'data-v="-1"' not in setup and "모두 보기</button>" not in setup and "더 보기 · 모두 조회 중" not in setup
       and "U.chPg = 0; U.chOffPg = 0;" in setup,
-      "pg19: 체인 목록 '다른 체인 N개 더 보기'·'꺼 둔 체인 N개 모두 보기'·'접기'(-1) 없음 · 초기화 = 첫 쪽(종전 -1 = 접힘)")
-T.chk(".su-chmore{padding:8px 0 2px;display:flex;justify-content:center}" in setup, "체인 더 보기·쪽 바 = 가운데")
+      "체인 목록 '다른 체인 N개 더 보기'·'꺼 둔 체인 N개 모두 보기'·'접기'(-1) 없음 · 초기화 = 첫 쪽(종전 -1 = 접힘)")
+T.chk(".su-chmore{padding:8px 0 2px;display:flex;justify-content:center}" in css, "체인 더 보기·쪽 바 = 가운데")
 T.chk('data-w="psPg"' in wow and ".slice(0, 60)" not in wow and "PS = wPgSize()" in wow and "if (st.ps.sz !== v) { st.ps.sz = v; st.ps.p = 0; }" in wow,
       "계획 점수 목록(종전 최근 60건 한 번에) = 설정 쪽 크기씩 쪽 · 크기가 바뀌면 첫 쪽")
 print("[1a] 정적 — pg19 '모두 보기' 없애고 바로 다음(오너 10-12)")
@@ -109,18 +108,18 @@ def calls(src, name):
 bad = [("uiPgSlice", ln, a[:4]) for ln, a in calls(app, "uiPgSlice") if len(a) != 2]
 bad += [("uiPgBar", ln, a[:4]) for ln, a in calls(app, "uiPgBar") if not 2 <= len(a) <= 3]
 bad += [("uiPaged", ln, [x[:30] for x in a[:5]]) for ln, a in calls(app, "uiPaged") if not 3 <= len(a) <= 4 or re.match(r"^\d", a[2])]
-T.chk(not bad, "pg19: 쪽 넘김 도우미 호출 = 앞 n개·목록별 크기 숫자 인자 없음(uiPgSlice(key, items) · uiPgBar(key, total, o) · uiPaged(key, items, row, o))", bad[:6])
+T.chk(not bad, "쪽 넘김 도우미 호출 = 앞 n개·목록별 크기 숫자 인자 없음(uiPgSlice(key, items) · uiPgBar(key, total, o) · uiPaged(key, items, row, o))", bad[:6])
 opts = [(ln, a[3]) for ln, a in calls(app, "uiPaged") if len(a) == 4]
 lab = [ln for ln, o in opts if re.search(r"\blabel\s*:", o)]
 T.chk(not lab and not [ln for ln, a in calls(app, "uiPgBar") if len(a) == 3 and re.search(r"\blabel\s*:", a[2])],
-      "pg19: 닫힌 단추 글자(label — 'N개 모두 보기'·'그 밖 N종'·'이날 N건 모두 보기' …) 넘기는 호출 없음", lab)
+      "닫힌 단추 글자(label — 'N개 모두 보기'·'그 밖 N종'·'이날 N건 모두 보기' …) 넘기는 호출 없음", lab)
 more_keys = sorted(set(re.findall(r"uiPaged\('([^']+)'", "\n".join(app.split("\n")[ln - 1] for ln, o in opts if re.search(r"\bmore\s*:", o)))))
-T.chk(more_keys == ["lev:dash", "lp:dash"], "카드 'N개 더'(o.more — 누르기 전 단추) = 대시보드 LP·레버리지 두 곳만(오너 10-09 '2개만 보여주고 더보기' · 오너 확인 필요로 남김)", more_keys)
+T.chk(more_keys == ["lev:dash", "lp:dash"], "카드 'N개 더'(o.more — 누르기 전 단추) = 대시보드 LP·레버리지 두 곳만(오너 '2개만 보여주고 더보기' · 오너 확인 필요로 남김)", more_keys)
 T.chk(app.count('data-a="uiPgOpen"') == 1 and app.count('data-a="uiPgClose"') == 1 and "const fold = o.fold ?" in app and "fold: !!o.more" in app,
       "uiPgOpen 단추 = uiPaged o.more 한 곳 · 접기(uiPgClose) = o.fold(카드 펼침)일 때만 — 긴 목록 쪽 바엔 접기 없음")
 OLD_FRAG = ("u + ' 모두 보기'", "종 모두 보기' + IC.right", "곳 모두 보기</button>", 'data-a="holdMore"', 'data-a="uiPgOpen" data-v="venue"', "'개 모두 보기')",
             "건 모두 보기 <span", "묶음 모두 보기 <span", "칸</span> 모두 보기", "개 모두 보기</span> — ", "건 모두 보기' })", "'<span class=\"pvx\">그 밖 '")
-T.chk(not [x for x in OLD_FRAG if x in app], "pg19: 손 만든 '모두 보기'(보유 '나머지 N종 · 합계 | N종 모두 보기' · 보관처 'N곳 모두 보기' · 그 밖 N종 …) 코드 없음",
+T.chk(not [x for x in OLD_FRAG if x in app], "손 만든 '모두 보기'(보유 '나머지 N종 · 합계 | N종 모두 보기' · 보관처 'N곳 모두 보기' · 그 밖 N종 …) 코드 없음",
       [x for x in OLD_FRAG if x in app])
 allv = sorted(re.findall(r'data-a="(\w+)"[^>]*>모두 보기</button>', app))
 T.chk(allv == ["go", "toggleDust"], "남은 '모두 보기' 단추 = 다른 화면 링크(정리할 것 → 미매칭)·소액 숨김 토글만(쪽 넘김 아님 · 범위 밖)", allv)
@@ -131,7 +130,7 @@ T.chk("const uiPageSize = () => { if (S.pgSz !== 10 && S.pgSz !== 20) { let v = 
       "공통 getter = 이 기기 저장값(tj_v2_pgsize) '20' 만 20 · 그 밖 10 · 저장소 막힘 = 10(try)")
 T.chk(app.count("const size = uiPageSize(), P = uiPgS()") == 2 and "function uiPgSlice(key, items) {" in app and "function uiPgBar(key, total, o) {" in app
       and "function uiPaged(key, items, row, o) {" in app and "uiPgN" not in app,
-      "pg19: uiPgSlice·uiPgBar = 설정 쪽 크기 그대로(앞 n개·목록별 크기 인자 없음 · uiPaged 는 uiPgSlice 를 씀 — slice·bar·찾아가기 같은 값)")
+      "uiPgSlice·uiPgBar = 설정 쪽 크기 그대로(앞 n개·목록별 크기 인자 없음 · uiPaged 는 uiPgSlice 를 씀 — slice·bar·찾아가기 같은 값)")
 for frag, what in (("const pgH = uiPgSlice('hold', rows), shown = ", "보유 코인(앞 12·15줄 + 나머지 N종 · 합계 | 모두 보기 없음 · rev1012 줄 단위)"),
                    ("(pz.last > 0 ?", "값 없는 토큰 앵커"), ("(pg9.last > 0 ?", "숨긴 이벤트 앵커"),
                    ("(pgT.last > 0 ?", "NFT 추적 중 앵커"), ("(pgJ.last > 0 ?", "사이클 목록 앵커"),
@@ -353,10 +352,8 @@ chk(idx(h).join() === '20,21,22,23,24,25,26,27,28,29' && /21–30/.test(h), 'sFo
 for (const [ok, msg, d] of R) console.log((ok ? 'PASS ' : 'FAIL ') + msg + (ok ? '' : ' — ' + JSON.stringify(d)));
 console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
 '''
-NODE = shutil.which("node")
-if not NODE:
-    print("SKIP node 없음 — 화면 함수 동작 시험 건너뜀")
-else:
+NODE = T.node_bin("화면 함수 동작 시험")
+if NODE:
     env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
     env["TJ_TEST_APP"] = APP
     env["TJ_TEST_SEARCH"] = SEARCH

@@ -112,3 +112,34 @@ def lp_label(b9):
     if t9 is not None:
         return f"{b9['name']} #{lpsol.short(str(t9)) if not str(t9).startswith('0x') else str(t9)[:6] + '…' + str(t9)[-4:]}"
     return f"{b9['name']} (포지션 번호 미상)"
+
+
+class Invariants:
+    KINDS = ("known_gt_held", "cost_neg", "cost_no_qty")
+    MAX_EX = 12
+
+    def __init__(self):
+        self.n = {k: 0 for k in self.KINDS}
+        self.ex = []
+
+    def check(self, gid, sym, held, k_all, c_all):
+        try:
+            tol = Decimal("1e-6") * max(abs(held), Decimal(1))
+            if k_all > held + tol and k_all > EPS:
+                self._hit("known_gt_held", gid, sym, held, k_all, c_all)
+            if c_all < Decimal("-0.01"):
+                self._hit("cost_neg", gid, sym, held, k_all, c_all)
+            if k_all <= EPS and c_all > Decimal("0.01"):
+                self._hit("cost_no_qty", gid, sym, held, k_all, c_all)
+        except (TypeError, ArithmeticError):
+            pass
+
+    def _hit(self, kind, gid, sym, held, k_all, c_all):
+        self.n[kind] += 1
+        self.ex.append({"k": kind, "gid": gid, "sym": str(sym)[:24], "held": float(held), "known": float(k_all), "cost": round(float(c_all), 2)})
+
+    def to_diag(self, diag):
+        for k in self.KINDS:
+            diag["inv_" + k] = self.n[k]
+        self.ex.sort(key=lambda e: -abs(e["known"] - e["held"]))
+        diag["inv_ex"] = self.ex[:self.MAX_EX]

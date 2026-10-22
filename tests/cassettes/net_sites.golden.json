@@ -1,0 +1,278 @@
+{
+ "_doc": "합성 데이터 — net_sites 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "net_sites",
+ "golden": {
+  "sites": {
+   "alert_bot::send_message": {
+    "n": 1,
+    "ret": [
+     true,
+     11,
+     null
+    ]
+   },
+   "alert_bot::send_photo": {
+    "n": 1,
+    "ret": [
+     true,
+     12,
+     null
+    ]
+   },
+   "bf_engine::http_request": {
+    "n": 1,
+    "ret": {
+     "ok": 1
+    }
+   },
+   "bf_engine::http_request[key]": {
+    "n": 1,
+    "ret": {
+     "gecko_says": "pong"
+    }
+   },
+   "bf_engine::sol_open": {
+    "n": 1,
+    "ret": {
+     "ok": 2
+    }
+   },
+   "brokers.base::default_http": {
+    "n": 1,
+    "ret": [
+     200,
+     {
+      "acct": "T-1"
+     },
+     {
+      "connection": "close",
+      "content-length": "14",
+      "content-type": "application/json"
+     }
+    ]
+   },
+   "chk_collect::collect_tunnel": {
+    "n": 1,
+    "ret": {
+     "n": 4,
+     "ok": true
+    }
+   },
+   "depaddr::http_get": {
+    "n": 1,
+    "ret": [
+     {
+      "address": "0x«a1*20»",
+      "coin": "TSTA",
+      "tag": ""
+     },
+     {
+      "Connection": "close",
+      "Content-Length": "79",
+      "Content-Type": "application/json"
+     }
+    ]
+   },
+   "exf_net::_clock_fetch": {
+    "n": 1,
+    "ret": [
+     0,
+     0
+    ]
+   },
+   "exf_net::http_json": {
+    "n": 1,
+    "ret": {
+     "result": {
+      "list": []
+     },
+     "retCode": 0,
+     "retMsg": "OK"
+    }
+   },
+   "flow_trace::Scanner._es_http": {
+    "n": 1,
+    "ret": {
+     "message": "OK",
+     "result": [],
+     "status": "1"
+    }
+   },
+   "health::Monitor.heartbeat._go": {
+    "n": 1,
+    "ret": {
+     "busy": false,
+     "sent": true
+    }
+   },
+   "liq_watch::_http_default": {
+    "n": 1,
+    "ret": [
+     200,
+     {
+      "connection": "close",
+      "content-length": "2",
+      "content-type": "application/json"
+     },
+     []
+    ]
+   },
+   "lpchain::list_wallet_positions": {
+    "n": 1,
+    "ret": [
+     [
+      "0x«c3*20»",
+      7
+     ]
+    ]
+   },
+   "lpsol::_rpc": {
+    "n": 1,
+    "ret": 321
+   },
+   "onboarding::_http": {
+    "n": 1,
+    "ret": [
+     200,
+     {
+      "ok": true
+     }
+    ]
+   },
+   "other_assets::default_http_get": {
+    "n": 1,
+    "ret": [
+     200,
+     "{\"chart\":{\"result\":[{\"meta\":{\"symbol\":\"TSTA\",\"regularMarketPrice\":3.25}}],\"error\":null}}"
+    ]
+   },
+   "perp_dex::_http_default": {
+    "n": 1,
+    "ret": {
+     "universe": []
+    }
+   },
+   "pricing::_gj": {
+    "n": 1,
+    "ret": {
+     "price": "2.5",
+     "symbol": "TSTAUSDT"
+    }
+   },
+   "pricing::okx_dex_prices": {
+    "n": 1,
+    "ret": {}
+   },
+   "rabby::http_get": {
+    "n": 1,
+    "ret": {
+     "total_usd_value": 12.5
+    }
+   },
+   "recon::_gj": {
+    "n": 1,
+    "ret": {
+     "coin_balance": "1000"
+    }
+   },
+   "recon::_rpc": {
+    "n": 1,
+    "ret": {
+     "value": 5
+    }
+   },
+   "recon::_rpc[direct]": {
+    "n": 1,
+    "ret": {
+     "value": 5
+    }
+   },
+   "review_daily::_get_json": {
+    "n": 1,
+    "ret": {
+     "internal": true,
+     "ok": true
+    }
+   },
+   "sale_match::http_get_json": {
+    "n": 1,
+    "ret": {
+     "message": "OK",
+     "result": [],
+     "status": "1"
+    }
+   },
+   "sol_base::Rpc._call": {
+    "n": 1,
+    "ret": 321
+   },
+   "sol_base::Rpc.batch": {
+    "n": 2,
+    "ret": [
+     {
+      "value": 5
+     },
+     {
+      "value": 5
+     }
+    ]
+   },
+   "ton_watch::TonClient.req": {
+    "n": 1,
+    "ret": {
+     "last": {
+      "seqno": 1
+     },
+     "ok": true
+    }
+   },
+   "ton_watch::TonClient.req[key]": {
+    "n": 1,
+    "ret": {
+     "last": {
+      "seqno": 1
+     },
+     "ok": true
+    }
+   },
+   "upbit_link::Upbit.get": {
+    "n": 1,
+    "ret": []
+   },
+   "view_workers::WorkersMixin._origin_worker": {
+    "n": 1,
+    "ret": {
+     "0x«d4*32»": {
+      "chain": "base",
+      "from": "0x«a1*20»",
+      "t": 1760000060,
+      "to": "0x«b2*20»"
+     }
+    }
+   },
+   "web::_goplus_fetch": {
+    "n": 1,
+    "ret": {
+     "code": 1,
+     "message": "OK",
+     "result": {}
+    }
+   },
+   "xchain_match::Tracer._get": {
+    "n": 1,
+    "ret": {
+     "operations": []
+    }
+   },
+   "xchain_match::Tracer._post": {
+    "n": 1,
+    "ret": {
+     "value": [
+      null
+     ]
+    }
+   }
+  }
+ }
+}

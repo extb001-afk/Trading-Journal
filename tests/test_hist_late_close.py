@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, SOLW, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, SOLW, Reader  # noqa: E402
 
-import copy
-import inspect
-import json
-import os
-import sqlite3
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import inspect  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
-import core
-import histcurve
-import web
-import xparts
+import config, histmark, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import histcurve  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-S = common.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -67,12 +66,12 @@ XV = {"v": xparts.GEN, "p": {"ku": [0.0, "snap"], "kb": [0.0, "snap"], "ub": [{}
 
 def unit_builder(load=False):
     if not load:
-        for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH, os.path.join(S, common.HIST_DIRTY)):
+        for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json"), os.path.join(S, histmark.HIST_DIRTY)):
             if os.path.exists(p9):
                 os.remove(p9)
     b = object.__new__(web.StateBuilder)
-    b.daily = common.read_json(web.DAILY_PATH, None) if load else {"_v": web.DAILY_V, "_risk_rev": ""}
-    b.daily_px = common.read_json(web.DAILY_PX_PATH, None) if load else {"_v": 1}
+    b.daily = statefile.read_json(paths.state("daily_cache.json"), None) if load else {"_v": web.DAILY_V, "_risk_rev": ""}
+    b.daily_px = statefile.read_json(paths.state("daily_px.json"), None) if load else {"_v": 1}
     b._daily_seed = {}
     b._upbit_krw_tl = None
     b.spot = FakeSpot()
@@ -97,7 +96,7 @@ def setup(b, tkn=False, pin_y=False):
         if tkn:
             g9["2"] = 2000.0
         b.daily[k9] = {"val": float(sum(g9.values())), "usdt": FX, "kimp": None, "g": g9, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
-    json.dump(b.daily, open(web.DAILY_PATH, "w"))
+    json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 
 
 def snap(ts, usdc=100000.0, tkn=None, hq=None, pw=None, lg=None):
@@ -120,7 +119,7 @@ def snap(ts, usdc=100000.0, tkn=None, hq=None, pw=None, lg=None):
 def put_snap(b, sn9):
     b.daily["_live_ok"] = dict(sn9)
     b.daily["_live"] = dict(sn9)
-    json.dump(b.daily, open(web.DAILY_PATH, "w"))
+    json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 
 
 def mkG(moves, tkn_moves=None):
@@ -139,7 +138,7 @@ def series(b, G, hq, marks, now_ts=NOW, tkn_now=2.0, pw_fn=None, led_gen=None):
     kw = {"hist_late": copy.deepcopy(marks)}
     if HAS_PW:
         kw["late_after"] = pw_fn
-        kw["led_pw"] = common.hist_late_pw(c.conn)
+        kw["led_pw"] = histmark.hist_late_pw(c.conn)
     if led_gen is not None:
         kw["led_gen"] = led_gen
     out = b._daily_series(G, TODAY, {}, {2: tkn_now}, ca_gids={2}, ex_gids=set(), skip_gids=set(), pending_gids=set(),
@@ -151,7 +150,7 @@ def close(a, b9, tol=0.01):
     return a is not None and b9 is not None and abs(float(a) - float(b9)) < tol
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 _n = [0]
 
@@ -160,7 +159,7 @@ def reset_ledger():
     c.conn.execute("BEGIN")
     for t9 in ("postings", "tx_class", "transfers", "positions", "raw_txs"):
         c.conn.execute(f"DELETE FROM {t9}")
-    c.conn.execute("DELETE FROM meta WHERE k IN (?, ?)", (common.HIST_LATE_K, common.HIST_LATE_PID_K))
+    c.conn.execute("DELETE FROM meta WHERE k IN (?, ?)", (histmark.HIST_LATE_K, histmark.HIST_LATE_PID_K))
     c.conn.commit()
     if hasattr(c, "_hist_late_fence"):
         c._hist_late_fence()
@@ -182,11 +181,11 @@ def pw_now():
 
 
 def pw_fn(pw9, t9):
-    return common.hist_late_after(c.conn, pw9, t9) if hasattr(common, "hist_late_after") else False
+    return histmark.hist_late_after(c.conn, pw9, t9) if hasattr(histmark, "hist_late_after") else False
 
 
 def marks():
-    return common.hist_late_read(c.conn)
+    return histmark.hist_late_read(c.conn)
 
 
 def hqmax():
@@ -219,7 +218,7 @@ for mv, (du, dt, fl, want, gain) in MOVES.items():
                 f"C1 {lab}: 어제 마감 = {want:,.0f}(마감 전 스냅숏 값 아님) · 손익(값 변화 − 순유입) 10/9 = 실제 {gain:,.0f} · 10/10 = 0(−X/+X 쌍 없음) · 자정 뒤 스캔 표식 없음",
                 (v1.get("10-08"), v1.get("10-09"), v1.get("10-10"), e1.get("src"), pn, r_a, r_b, marks()))
             b.daily[Y]["val"] = want + 1
-            json.dump(b.daily, open(web.DAILY_PATH, "w"))
+            json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
             v2 = series(b, G, hq, marks(), now_ts=NOW + 60, pw_fn=pw_fn)
             b3 = unit_builder(load=True)
             v3 = series(b3, G, hq, marks(), now_ts=NOW + 120, pw_fn=pw_fn)
@@ -231,7 +230,7 @@ b = unit_builder()
 setup(b)
 put_snap(b, snap(E(10, 9, 23, 59, 20), pw=pw_now()))
 post(E(10, 9, 23, 59, 50))
-c.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (common.HIST_LATE_PID_K, str(pw_now())))
+c.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (histmark.HIST_LATE_PID_K, str(pw_now())))
 c.conn.commit()
 G, hq = mkG([(E(10, 9, 23, 59, 50), 50000)])
 v1 = series(b, G, hq, marks(), pw_fn=pw_fn)
@@ -262,7 +261,7 @@ reset_ledger()
 b = unit_builder()
 setup(b)
 b.daily[Y] = {"val": 100000.0, "usdt": FX, "kimp": None, "g": {"1": 100000.0}, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 post(E(10, 10, 23, 55, 0))
 r3b = c._hist_late_scan(now=E(10, 10, 23, 55, 5))
 G, hq = mkG([])
@@ -326,7 +325,7 @@ chk(r6b is None and len(marks()) == 1, "C6 자정 33분 전 행·스캔 = 표식
 post(D0 - 100)
 r6c = c._hist_late_scan(now=D0 + 30)
 chk(r6c == Y, "C6 자정 뒤 스캔 = 종전대로 지난날 표식", r6c)
-chk(getattr(common, "HIST_LATE_CLOSE_S", 0) >= web.DAILY_LIVE_WIN + 60, "C6 마감 직전 표식 창 ≥ 웹 마감 창(DAILY_LIVE_WIN) + 60초", (getattr(common, "HIST_LATE_CLOSE_S", None), web.DAILY_LIVE_WIN))
+chk(getattr(histmark, "HIST_LATE_CLOSE_S", 0) >= web.DAILY_LIVE_WIN + 60, "C6 마감 직전 표식 창 ≥ 웹 마감 창(DAILY_LIVE_WIN) + 60초", (getattr(histmark, "HIST_LATE_CLOSE_S", None), web.DAILY_LIVE_WIN))
 
 has_f = hasattr(core.Core, "_hist_late_fence")
 chk(has_f, "C7 커서 울타리(_hist_late_fence) 있음", "없음")
@@ -334,19 +333,19 @@ if has_f:
     reset_ledger()
     post(E(10, 1, 12, 0, 0))
     post(E(10, 2, 12, 0, 0))
-    c.conn.execute("UPDATE meta SET v='1' WHERE k=?", (common.HIST_LATE_PID_K,))
+    c.conn.execute("UPDATE meta SET v='1' WHERE k=?", (histmark.HIST_LATE_PID_K,))
     c.conn.commit()
     k7 = c._hist_late_fence()
-    chk(k7 == "keep" and c._meta_get(common.HIST_LATE_PID_K) == "1", "C7 유효한 커서 = 그대로(재시작 · 더 최신 울타리를 MAX 로 덮지 않음)", (k7, c._meta_get(common.HIST_LATE_PID_K)))
+    chk(k7 == "keep" and c._meta_get(histmark.HIST_LATE_PID_K) == "1", "C7 유효한 커서 = 그대로(재시작 · 더 최신 울타리를 MAX 로 덮지 않음)", (k7, c._meta_get(histmark.HIST_LATE_PID_K)))
     for bad in (None, "abc", "-5"):
         if bad is None:
-            c.conn.execute("DELETE FROM meta WHERE k=?", (common.HIST_LATE_PID_K,))
+            c.conn.execute("DELETE FROM meta WHERE k=?", (histmark.HIST_LATE_PID_K,))
         else:
-            c.conn.execute("UPDATE meta SET v=? WHERE k=?", (bad, common.HIST_LATE_PID_K))
+            c.conn.execute("UPDATE meta SET v=? WHERE k=?", (bad, histmark.HIST_LATE_PID_K))
         c.conn.commit()
         k7b = c._hist_late_fence()
-        chk(k7b == "init" and int(c._meta_get(common.HIST_LATE_PID_K)) == pw_now(), f"C7 커서 {bad!r} = 지금 MAX 로 초기화", (k7b, c._meta_get(common.HIST_LATE_PID_K)))
-    c2 = core.Core(common.load_config())
+        chk(k7b == "init" and int(c._meta_get(histmark.HIST_LATE_PID_K)) == pw_now(), f"C7 커서 {bad!r} = 지금 MAX 로 초기화", (k7b, c._meta_get(histmark.HIST_LATE_PID_K)))
+    c2 = core.Core(config.load_config())
     c2.HL_FENCE_SLEEP = 0
     drained = []
     c2._drain_stream = lambda *a, **k: drained.append(1) or (1, 0, 0)
@@ -362,7 +361,7 @@ if has_f:
     chk(ex7 is not None and not drained, "C7 울타리가 끝내 실패 = 수집 소비를 시작하지 않고 멈춤(울타리 없이 넘어가면 그 주기 늦은 행이 지나감)", (ex7, drained))
     c2.conn.close()
 
-import time as _time
+import time as _time  # noqa: E402
 RN = int(_time.time())
 
 

@@ -39,10 +39,6 @@ def memo_driven(*a, **k):
     return _REG["memo_driven"](*a, **k)
 
 
-def v2_csp(*a, **k):
-    return _REG["v2_csp"](*a, **k)
-
-
 def alert_view(*a, **k):
     return _REG["alert_view"](*a, **k)
 

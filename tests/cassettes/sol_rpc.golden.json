@@ -1,0 +1,195 @@
+{
+ "_doc": "합성 데이터 — sol_rpc 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "sol_rpc",
+ "golden": {
+  "cursor_sol.json": {
+   "_cov_sig:so1ata88888888888888888888888888888888888888": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+   "_cov_sig:so1wa11et99999999999999999999999999999999999": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1",
+   "_cov_ts:so1ata88888888888888888888888888888888888888": 1747040000,
+   "_cov_ts:so1wa11et99999999999999999999999999999999999": 1747040000,
+   "_slot:so1ata88888888888888888888888888888888888888": 300000100,
+   "_slot:so1wa11et99999999999999999999999999999999999": 300000400,
+   "_synced_at": 1760000001,
+   "_vat:so1ata88888888888888888888888888888888888888": {
+    "c": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+    "t": 1760000000
+   },
+   "_vat:so1wa11et99999999999999999999999999999999999": {
+    "c": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3",
+    "t": 1760000061
+   },
+   "so1ata88888888888888888888888888888888888888": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+   "so1wa11et99999999999999999999999999999999999": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3"
+  },
+  "emitted_sol.json": [
+   "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1",
+   "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+   "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3"
+  ],
+  "health/sol.json": {
+   "net": {},
+   "ok": true,
+   "pid": "<pid>",
+   "schema": 1,
+   "sources": {
+    "sol": {
+     "addresses": 1,
+     "addresses_failed": 0,
+     "archive_rpc": null,
+     "consecutive_failed_cycles": 0,
+     "consecutive_failures": 0,
+     "current_source": "sol-node.cassette.invalid",
+     "fill_wait": 0,
+     "full_cycle": false,
+     "head": 300000500,
+     "head_rpc": null,
+     "head_rpc_audit": {
+      "audit_miss": 0,
+      "audit_ok": 0,
+      "fail": 0,
+      "ok": 0
+     },
+     "head_rpc_lag": null,
+     "head_rpc_n": 0,
+     "head_rpc_ok": false,
+     "head_rpc_on": false,
+     "head_rpc_open_until": null,
+     "head_rpc_rate": null,
+     "head_rpc_why": null,
+     "helius_budget": null,
+     "helius_closed_until": null,
+     "helius_daycap_until": null,
+     "helius_head_min": null,
+     "helius_used": null,
+     "kind": "sol_rpc",
+     "last_cycle_ts": 1760000061,
+     "last_error": null,
+     "last_success_ts": 1760000061,
+     "newest_sig_block_time": 1759999400,
+     "ok": true,
+     "pn_unverified": 0,
+     "primary": "ok",
+     "primary_open_until": null,
+     "rl_429_total": 0,
+     "spooling": [],
+     "synced_at": 1760000001
+    }
+   },
+   "started": 1760000001,
+   "ts": 1760000061,
+   "unit": "sol"
+  },
+  "helius_budget/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "inbox/sol/000000001.jsonl": [
+   {
+    "chain": "sol",
+    "counterparties": [],
+    "deltas": [
+     {
+      "asset": "so1mint7777777777777777777777777777777777777",
+      "decimals": 6,
+      "delta": "4000000",
+      "owner": "so1wa11et99999999999999999999999999999999999",
+      "symbol": "TSTS"
+     }
+    ],
+    "err": false,
+    "fee_lamports": 5000,
+    "fee_payer": "so1xch66666666666666666666666666666666666666",
+    "fee_payer_mine": false,
+    "has_program": false,
+    "kind": "sol_tx",
+    "slot": 300000100,
+    "ts": 1759996400,
+    "txhash": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa2",
+    "v": 1,
+    "wallets": [
+     "so1wa11et99999999999999999999999999999999999"
+    ]
+   },
+   {
+    "chain": "sol",
+    "counterparties": [
+     "so1xch66666666666666666666666666666666666666"
+    ],
+    "deltas": [
+     {
+      "asset": "native",
+      "decimals": 9,
+      "delta": "100000000",
+      "owner": "so1wa11et99999999999999999999999999999999999",
+      "symbol": "SOL"
+     }
+    ],
+    "err": false,
+    "fee_lamports": 5000,
+    "fee_payer": "so1xch66666666666666666666666666666666666666",
+    "fee_payer_mine": false,
+    "has_program": false,
+    "kind": "sol_tx",
+    "slot": 300000000,
+    "ts": 1759992800,
+    "txhash": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa1",
+    "v": 1,
+    "wallets": [
+     "so1wa11et99999999999999999999999999999999999"
+    ]
+   },
+   {
+    "chain": "sol",
+    "counterparties": [
+     "so1xch66666666666666666666666666666666666666"
+    ],
+    "deltas": [
+     {
+      "asset": "native",
+      "decimals": 9,
+      "delta": "50000000",
+      "owner": "so1wa11et99999999999999999999999999999999999",
+      "symbol": "SOL"
+     }
+    ],
+    "err": false,
+    "fee_lamports": 5000,
+    "fee_payer": "so1xch66666666666666666666666666666666666666",
+    "fee_payer_mine": false,
+    "has_program": false,
+    "kind": "sol_tx",
+    "slot": 300000400,
+    "ts": 1759999400,
+    "txhash": "55555555555555555555555555555555555555555555555555555555555555555555555555555555sigaaaa3",
+    "v": 1,
+    "wallets": [
+     "so1wa11et99999999999999999999999999999999999"
+    ]
+   }
+  ],
+  "rpc_day_node_alchemy/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_ankr/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_chainnodes/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_nodereal/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_quicknode/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_gap/sol-node.cassette.invalid.slot": [
+   "{\"*\": 1760000061.7204995}"
+  ],
+  "sol_mint_meta.json": {
+   "so1mint7777777777777777777777777777777777777": [
+    "TSTS",
+    6
+   ]
+  }
+ }
+}

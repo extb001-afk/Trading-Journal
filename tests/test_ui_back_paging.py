@@ -2,11 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import shutil
-import subprocess
+import os  # noqa: E402
+import subprocess  # noqa: E402
 
 APP = T.app_js_path()
 app = open(APP, encoding="utf-8").read()
@@ -14,7 +13,7 @@ app = open(APP, encoding="utf-8").read()
 print("[1] 정적")
 i9 = app.find("    ofWaitGo: () => {")
 ow = app[i9:app.find("\n", i9)] if i9 >= 0 else ""
-T.chk("uiPgReset('ofh')" in ow and "S.uiMore" not in app, "ofWaitGo(세일 참가금만 보기) = 정리 내역 쪽 처음으로(UI_PICK.ofReason 과 같게) · pg19: 옛 앞 n개 상태(S.uiMore) 없음", ow[:200])
+T.chk("uiPgReset('ofh')" in ow and "S.uiMore" not in app, "ofWaitGo(세일 참가금만 보기) = 정리 내역 쪽 처음으로(UI_PICK.ofReason 과 같게) · 옛 앞 n개 상태(S.uiMore) 없음", ow[:200])
 for k in ("attdRc", "attdLp", "attdFr", "attdCoin"):
     j9 = app.find("      " + k + ": el => {")
     ln = app[j9:app.find("\n", j9)] if j9 >= 0 else ""
@@ -129,10 +128,8 @@ const tick = () => new Promise(r => setTimeout(r, 20));
   console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
 })().catch(e => { console.log('FAIL 실행 오류 ' + (e && e.stack || e)); console.log('RESULT 0/1'); });
 '''
-NODE = shutil.which("node")
-if not NODE:
-    print("SKIP node 없음 — 화면 함수 동작 시험 건너뜀")
-else:
+NODE = T.node_bin("화면 함수 동작 시험")
+if NODE:
     env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
     env["TJ_TEST_APP"] = APP
     p = subprocess.run([NODE, "--input-type=module", "-"], input=JS, env=env, cwd=T.TMP, capture_output=True, text=True, encoding="utf-8", timeout=120)

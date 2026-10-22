@@ -9,8 +9,9 @@ import urllib.error
 import urllib.request
 from decimal import Decimal, InvalidOperation
 
+import num_parse
 import netpace
-import common
+import net_http  # noqa: E402
 
 T_BID_SUBMITTED = "0x650baad5cd8ca09b8f580be220fa04ce2ba905a041f764b6a3fe2c848eb70540"
 T_BID_EXITED = "0x054fe6469466a0b4d2a6ae4b100e5f9c494c958f04b4000f44d470088dd97930"
@@ -33,11 +34,7 @@ def _addr(x) -> str:
 
 
 def _dec(x):
-    try:
-        d = Decimal(str(x))
-        return d if d.is_finite() else None
-    except (InvalidOperation, ValueError, TypeError):
-        return None
+    return num_parse.to_dec(x)
 
 
 def _decimals(v, default=18) -> int:
@@ -58,8 +55,8 @@ def load_seed(base_dir=None) -> dict:
     if _SEED is not None and base_dir is None:
         return _SEED
     bd = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    import common
-    raw = common.seed_json("sale_contracts.json", {}, base_dir=bd)
+    import seeds
+    raw = seeds.seed_json("sale_contracts.json", {}, base_dir=bd)
     raw = raw if isinstance(raw, dict) else {}
     seed = {"factories": {_addr(a) for a in (raw.get("cca_factories") or []) if _addr(a)},
             "chains": [str(c) for c in (raw.get("chains") or ["eth", "base", "arbitrum"])],
@@ -71,11 +68,11 @@ def load_seed(base_dir=None) -> dict:
 
 
 def http_get_json(url: str, timeout: float = 25):
-    req = urllib.request.Request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
+    req = net_http.request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
     netpace.wait(url)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(common.read_capped(r).decode())
+        with net_http.urlopen(req, timeout=timeout) as r:
+            d = json.loads(net_http.read_capped(r).decode())
     except urllib.error.HTTPError as e:
         netpace.note_error(url, e)
         raise

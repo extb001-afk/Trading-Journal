@@ -1,13 +1,11 @@
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
 import json
 import time
 import urllib.request
 import uuid as uuidlib
 from decimal import Decimal
 from decimal import InvalidOperation
+import ex_sign
 from exf_net import PACE
 from exf_net import _Bal
 from exf_net import _balance_rows
@@ -30,16 +28,9 @@ def fetch_bithumb(env, t0: int, t1: int):
         payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
                    "timestamp": _srv_ms("api.bithumb.com")}
         if params:
-            raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
-            payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
+            payload["query_hash"] = ex_sign.query_hash(params)
             payload["query_hash_alg"] = "SHA512"
-
-        def b64u(b):
-            return base64.urlsafe_b64encode(b).rstrip(b"=")
-        h = b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-        p = b64u(json.dumps(payload).encode())
-        sgn = b64u(hmac.new(sec.encode(), h + b"." + p, hashlib.sha256).digest())
-        tok = (h + b"." + p + b"." + sgn).decode()
+        tok = ex_sign.jwt_hs256(payload, sec)
         qs = urllib.parse.urlencode(params) if params else ""
         url = f"https://api.bithumb.com{path}" + (f"?{qs}" if qs else "")
         return http_json(url, {"Authorization": f"Bearer {tok}"})
@@ -156,16 +147,9 @@ def _bithumb_caller(env):
         payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
                    "timestamp": _srv_ms("api.bithumb.com")}
         if params:
-            raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
-            payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
+            payload["query_hash"] = ex_sign.query_hash(params)
             payload["query_hash_alg"] = "SHA512"
-
-        def b64u(b):
-            return base64.urlsafe_b64encode(b).rstrip(b"=")
-        h = b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-        p = b64u(json.dumps(payload).encode())
-        sgn = b64u(hmac.new(sec.encode(), h + b"." + p, hashlib.sha256).digest())
-        tok = (h + b"." + p + b"." + sgn).decode()
+        tok = ex_sign.jwt_hs256(payload, sec)
         qs = urllib.parse.urlencode(params) if params else ""
         return http_json(f"https://api.bithumb.com{path}" + (f"?{qs}" if qs else ""),
                          {"Authorization": f"Bearer {tok}"})
@@ -213,6 +197,7 @@ BITHUMB_RESOLVE_MAX = 40
 
 
 BITHUMB_NOTFOUND_DROP = 3
+BITHUMB_TRACK_ROW_KEYS = ("uuid", "market", "side", "ord_type", "state", "price", "avg_price", "executed_volume", "executed_funds", "paid_fee", "created_at")
 
 
 def _bithumb_open(call, max_pages: int = 20):
@@ -226,7 +211,7 @@ def _bithumb_open(call, max_pages: int = 20):
             if len(rows) < 100:
                 return out
             time.sleep(PACE)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         log.warning("bithumb 미체결 주문 조회 실패(이번 추적 판정 보류): %s", repr(e)[:140])
         return None
     return None
@@ -243,9 +228,10 @@ def _bithumb_track(call, st, fills, raw, now):
         if f["id"] in fseen:
             keep.append(f)
             continue
-        if u in track or f["ts"] / 1000.0 < now - BITHUMB_TRACK_MIN_AGE:
+        if u in track or (f["ts"] / 1000.0 < now - BITHUMB_TRACK_MIN_AGE and (fseen or st.get("backfilled_until"))):
             r9 = raw.get(u) or {}
             ent = track.setdefault(u, {"c": r9.get("created_at"), "m": r9.get("market")})
+            ent["row"] = {k: r9[k] for k in BITHUMB_TRACK_ROW_KEYS if r9.get(k) is not None} or ent.get("row")
             ent["closed"] = True
         else:
             keep.append(f)
@@ -279,7 +265,7 @@ def _bithumb_track(call, st, fills, raw, now):
             if e.code == 404:
                 ent["nf"] = int(ent.get("nf") or 0) + 1
                 if ent["nf"] >= BITHUMB_NOTFOUND_DROP:
-                    r9 = raw.get(u)
+                    r9 = raw.get(u) or ent.get("row")
                     if r9:
                         try:
                             out.append(_bithumb_fill(r9, None))
@@ -292,7 +278,7 @@ def _bithumb_track(call, st, fills, raw, now):
                 continue
             log.warning("bithumb 추적 주문 %s 단건 조회 실패(다음 주기 재시도): %s", u, repr(e)[:120])
             continue
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [isolate]
             log.warning("bithumb 추적 주문 %s 단건 조회 실패(다음 주기 재시도): %s", u, repr(e)[:120])
             continue
         finally:
@@ -314,7 +300,7 @@ def _bithumb_track(call, st, fills, raw, now):
             log.warning("bithumb 추적 주문 %s 체결수량 파싱 실패 — 다음 주기 재시도", u)
             continue
         if ev > 0:
-            merged = dict(raw.get(u) or {})
+            merged = dict(raw.get(u) or ent.get("row") or {})
             merged.update(o)
             if merged.get("executed_funds") in (None, "") and isinstance(o.get("trades"), list) and o["trades"]:
                 try:
@@ -714,16 +700,9 @@ def _bithumb_get(env, path, params=None):
     payload = {"access_key": key, "nonce": str(uuidlib.uuid4()),
                "timestamp": _srv_ms("api.bithumb.com")}
     if params:
-        raw_qs = "&".join(f"{k}={v}" for k, v in params.items())
-        payload["query_hash"] = hashlib.sha512(raw_qs.encode()).hexdigest()
+        payload["query_hash"] = ex_sign.query_hash(params)
         payload["query_hash_alg"] = "SHA512"
-
-    def b64u(b):
-        return base64.urlsafe_b64encode(b).rstrip(b"=")
-    h = b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    p = b64u(json.dumps(payload).encode())
-    s = b64u(hmac.new(sec.encode(), h + b"." + p, hashlib.sha256).digest())
-    tok = (h + b"." + p + b"." + s).decode()
+    tok = ex_sign.jwt_hs256(payload, sec)
     qs = urllib.parse.urlencode(params) if params else ""
     return http_json(f"https://api.bithumb.com{path}" + (f"?{qs}" if qs else ""),
                      {"Authorization": f"Bearer {tok}"})

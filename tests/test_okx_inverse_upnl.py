@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 with open(os.path.join(T.TMP, "config.json"), "w") as f:
     json.dump({"chains": {}, "wallets": []}, f)
-import common
+import paths, statefile  # noqa: E402
 
 chk = T.chk
 INV = {"instType": "SWAP", "instId": "BTC-USD-SWAP", "ccy": "BTC", "pos": "200", "posSide": "long", "avgPx": "55000", "markPx": "60000",
@@ -19,19 +19,15 @@ LIN = {"instType": "SWAP", "instId": "BTC-USDT-SWAP", "ccy": "USDT", "pos": "10"
        "upl": "120", "lever": "10", "liqPx": "50000", "notionalUsd": "6000"}
 
 print("[O1] 수집기")
-import ex_foreign as XF
+import ex_foreign as XF  # noqa: E402
 CAP = {}
-XF._okx_get = lambda env, path, params=None: [dict(INV), dict(LIN)] if path == "/api/v5/account/positions" else []
-T.patch_moved("_okx_get", XF._okx_get, ("exf_",))
-XF._fut_write = lambda ex, wallet, poss, ev, cur: CAP.update(poss=poss)
-T.patch_moved("_fut_write", XF._fut_write, ("exf_",))
-XF._px_safe = lambda ex, fn: None
-T.patch_moved("_px_safe", XF._px_safe, ("exf_",))
-XF.PACE = 0
-T.patch_moved("PACE", XF.PACE, ("exf_",))
+T.patch_moved("_okx_get", lambda env, path, params=None: [dict(INV), dict(LIN)] if path == "/api/v5/account/positions" else [], ("exf_", "ex_foreign"))
+T.patch_moved("_fut_write", lambda ex, wallet, poss, ev, cur: CAP.update(poss=poss), ("exf_", "ex_foreign"))
+T.patch_moved("_px_safe", lambda ex, fn: None, ("exf_", "ex_foreign"))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
 try:
     XF.bf_engine.SINCE.target = lambda ex: None
-except Exception:
+except Exception:   # noqa: BLE001
     pass
 T.safe(XF._fut_okx, {})
 P = {p["symbol"]: p for p in CAP.get("poss") or []}
@@ -40,12 +36,12 @@ chk(P.get("BTC-USD-SWAP", {}).get("settle") == "BTC" and P.get("BTC-USDT-SWAP", 
     "O1 수집기: settle(BTC·USDT)·instType 보존 · upl 원래 단위(코인) 그대로", CAP.get("poss"))
 
 print("[O2~O4] web")
-import web
+import web  # noqa: E402
 now = time.time()
 
 
 def write_okx(poss):
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_okx.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "futures_okx.json"),
                              {"ts": int(now), "wallet": {"balance": None}, "positions": poss, "events": []})
 
 
@@ -78,15 +74,15 @@ chk(pv == {"BTC-USD-SWAP": 600.0, "ETH-USD-261226": -1500.0, "BTC-USDT-SWAP": 7.
     "O4 옛 스냅숏: X-USD-SWAP·X-USD-YYMMDD = 코인 정산(× 시세) · USDT 상품 = 그대로", pv)
 
 print("[O5] lev_view")
-import lev_view
+import lev_view  # noqa: E402
 write_okx(CAP.get("poss") or [])
-fut9 = {"okx": common.read_json(os.path.join(common.STATE_DIR, "futures_okx.json"), {})}
+fut9 = {"okx": statefile.read_json(os.path.join(paths.STATE_DIR, "futures_okx.json"), {})}
 rows = []
 try:
     out9 = lev_view.build({"items": []}, fut9, lambda s: 60000.0 if str(s).upper() == "BTC" else (1.0 if str(s).upper() in ("USDT", "USDC") else None),
                           10.0, None, now)
     rows = [r for r in out9.get("rows") or [] if isinstance(r, dict)]
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     rows = [{"err": repr(e)}]
 lv = {str(r.get("symbol") or r.get("sym") or r.get("id")): r.get("upnlUsd") for r in rows}
 inv_l = [u for k, u in lv.items() if "BTC-USD-SWAP" in k]

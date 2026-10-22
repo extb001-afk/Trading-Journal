@@ -4,9 +4,10 @@ import math
 import urllib.parse
 import urllib.request
 
-import common
+import address_codec
+import net_http, paths
 import lpdec
-import calcguard
+import calcguard  # noqa: E402
 
 SEL = {k: lpdec.selector(k) for k in (
     "getPoolAndPositionInfo(uint256)", "getPositionLiquidity(uint256)", "getSlot0(bytes32)",
@@ -33,7 +34,7 @@ def _rpcs(cfg: dict, chain: str) -> list:
         try:
             from evm_watch import RpcSynthMixin
             out = list(RpcSynthMixin.RPC_DEFAULT.get(chain) or [])
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("lpchain:_rpcs", _cg9)
             out = []
     return out
@@ -49,7 +50,7 @@ def eth_call(cfg: dict, chain: str, to: str, data: str, timeout: int = 10):
             res = d.get("result") if isinstance(d, dict) else None
             if isinstance(res, str) and res.startswith("0x") and len(res) > 2:
                 return res[2:]
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [isolate]
             calcguard.swallowed("lpchain:eth_call", _cg9)
             continue
     return None
@@ -88,7 +89,7 @@ def _str_ret(h) -> str:
             return ""
         ln = int(h[off:off + 64], 16) * 2
         return bytes.fromhex(h[off + 64:off + 64 + ln]).decode(errors="replace")
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpchain:_str_ret", _cg9)
         return ""
 
@@ -143,7 +144,7 @@ def read_v4(cfg: dict, chain: str, mgr: str, meta: dict, token_id: int) -> dict:
         return {}
     c0, c1, fee, tsp, hooks, info = _addr(h, 0), _addr(h, 1), _w(h, 2), _s24(_w(h, 3)), _addr(h, 4), _w(h, 5)
     tl, tu = _s24(info >> 8), _s24(info >> 32)
-    pool_id = lpdec.keccak256(bytes.fromhex(h[:5 * 64]))
+    pool_id = address_codec.keccak256(bytes.fromhex(h[:5 * 64]))
     lh = eth_call(cfg, chain, mgr, SEL["getPositionLiquidity(uint256)"] + _enc_int(token_id))
     if not lh or len(lh) < 64:
         return {}
@@ -217,7 +218,7 @@ def read_v3(cfg: dict, chain: str, mgr: str, meta: dict, token_id: int) -> dict:
             in1 = (g1 - below1 - above1) % M256
             fees0 += ((in0 - fg0_last) % M256) * liq // Q128
             fees1 += ((in1 - fg1_last) % M256) * liq // Q128
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("lpchain:read_v3", _cg9)
             fees_ok = False
     m0, m1 = token_meta(cfg, chain, t0), token_meta(cfg, chain, t1)
@@ -267,7 +268,7 @@ def read_v2(cfg: dict, chain: str, pair: str, units: int, wallet=None, gauge=Non
         if gauge and wallet:
             out.update(read_stake_reward(cfg, chain, gauge, None, wallet))
         return out
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpchain:read_v2", _cg9)
         return {}
 
@@ -275,7 +276,7 @@ def read_v2(cfg: dict, chain: str, pair: str, units: int, wallet=None, gauge=Non
 def read_stake_reward(cfg: dict, chain: str, staker: str, token_id=None, wallet=None) -> dict:
     try:
         st = str(staker or "").lower()
-        meta = (lpdec.lp_managers(common.BASE_DIR).get(chain) or {}).get(st) or {}
+        meta = (lpdec.lp_managers(paths.BASE_DIR).get(chain) or {}).get(st) or {}
         if meta.get("proto") == "stake":
             if token_id is None:
                 return {}
@@ -294,19 +295,19 @@ def read_stake_reward(cfg: dict, chain: str, staker: str, token_id=None, wallet=
             return {}
         m = token_meta(cfg, chain, rt)
         return {"rewardAmount": _w(h, 0) / 10 ** m["decimals"], "rewardToken": rt, "rewardSym": m["symbol"]}
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpchain:read_stake_reward", _cg9)
         return {}
 
 
 def read_position(cfg: dict, chain: str, mgr: str, token_id: int) -> dict:
-    meta = (lpdec.lp_managers(common.BASE_DIR).get(chain) or {}).get(mgr.lower()) or {}
+    meta = (lpdec.lp_managers(paths.BASE_DIR).get(chain) or {}).get(mgr.lower()) or {}
     try:
         if meta.get("proto") == "uni_v4":
             return read_v4(cfg, chain, mgr, meta, token_id)
         if meta.get("proto") in ("uni_v3", "slipstream"):
             return read_v3(cfg, chain, mgr, meta, token_id)
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpchain:read_position", _cg9)
         return {}
     return {}
@@ -322,17 +323,17 @@ NFT_PAGES_MAX = 200
 
 def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20) -> list:
     base = ((cfg.get("chains") or {}).get(chain) or {}).get("blockscout")
-    mgrs = lpdec.lp_managers(common.BASE_DIR).get(chain) or {}
+    mgrs = lpdec.lp_managers(paths.BASE_DIR).get(chain) or {}
     if not base or not mgrs:
         return []
     url0 = f"{str(base).rstrip('/')}/api/v2/addresses/{wallet}/nft?type=ERC-721"
     url, out, seen = url0, [], set()
     for _page in range(NFT_PAGES_MAX):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": common.ua_for(url, "tj-bot/0.1"), "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                d = json.loads(common.read_capped(r).decode())
-        except Exception as _cg9:
+            req = net_http.request(url, headers={"User-Agent": net_http.ua_for(url, "tj-bot/0.1"), "Accept": "application/json"})
+            with net_http.urlopen(req, timeout=timeout) as r:
+                d = json.loads(net_http.read_capped(r).decode())
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("lpchain:list_wallet_positions", _cg9)
             return None
         if not isinstance(d, dict) or not isinstance(d.get("items"), list):

@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import os
-import threading
-import time
-import urllib.error
-from datetime import datetime, timedelta, timezone
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import pricing
+import paths  # noqa: E402
+import core  # noqa: E402
+import pricing  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
 chk = T.chk
 KST = timezone(timedelta(hours=9))
 MIN = 60_000
@@ -159,21 +158,21 @@ chk(st4b.get("done") and all(vals4b) and SL == [PX.FX_NEG_SEC + 1] and st4b.get(
 C = core.Core(json.load(open(os.path.join(T.TMP, "config.json"))))
 KM = ep(2025, 12, 22, 10, 0)
 C.conn.execute("BEGIN")
-aid = C._exf_asset("bithumb", "ZZZ")
+aid = C.svc_exf._exf_asset("bithumb", "ZZZ")
 C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event,"
                " classifier_ver) VALUES ('exchange','bithumb:trade','bithumb:kf',0,?,?,'exchange:bithumb','100000000','10.0',NULL,'acq','EXF_BUY',?)",
                (KM // 1000, aid, core.CLASSIFIER_VER))
 C.conn.commit()
 rest_on(C.px)
 GJ.clear()
-C._last_krw_fill = 0
-C.krw_fill_pass()
+C.svc_price._last_krw_fill = 0
+C.svc_price.krw_fill_pass()
 kf = C.conn.execute("SELECT cost_krw FROM postings WHERE source_id='bithumb:kf'").fetchone()[0]
-chk(not GJ and kf is None and not (C.__dict__.get("_krw_fill_fail") or {}), "[5] 원화 원가 채움 = 쉼 중 0콜 · 1시간 쉼으로 적지 않음",
-    (calls(), C.__dict__.get("_krw_fill_fail")))
+chk(not GJ and kf is None and not (C.svc_price.__dict__.get("_krw_fill_fail") or {}), "[5] 원화 원가 채움 = 쉼 중 0콜 · 1시간 쉼으로 적지 않음",
+    (calls(), C.svc_price.__dict__.get("_krw_fill_fail")))
 rest_off(C.px)
-C._last_krw_fill = 0
-C.krw_fill_pass()
+C.svc_price._last_krw_fill = 0
+C.svc_price.krw_fill_pass()
 kf = C.conn.execute("SELECT cost_krw FROM postings WHERE source_id='bithumb:kf'").fetchone()[0]
 chk(kf == repr(10.0 * rate(KM)), "[5] 쉼 끝 = 채움(종전 식)", kf)
 
@@ -184,7 +183,7 @@ FILLS = [{"id": "bithumb:r1", "qty": "2", "price": "100", "ts": T_OLD["r1"], "ba
          {"id": "bithumb:r3", "qty": "3", "price": "100", "ts": T_OLD["r3"], "base": "BBB", "quote": "KRW", "side": "buy", "fee": "0.15", "fee_ccy": "KRW"},
          {"id": "bithumb:u1", "qty": "4", "price": "2.5", "ts": T_OLD["u1"], "base": "CCC", "quote": "USDT", "side": "buy", "fee": "0", "fee_ccy": ""}]
 C.conn.execute("BEGIN")
-C._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": FILLS})
+C.svc_exf._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": FILLS})
 C.conn.commit()
 
 
@@ -217,7 +216,7 @@ def apply_rec(rec):
 
 
 def queue_idle(timeout=20.0):
-    q = C.__dict__.get("_exf_retime_pxq")
+    q = C.svc_exf.__dict__.get("_exf_retime_pxq")
     w = getattr(q, "wait_idle", None)
     return bool(w and w(timeout))
 
@@ -263,24 +262,24 @@ chk(mk.get("n") == 4 and mk.get("undo") == 3, "[7] meta 누적(바로잡음 4 ·
 C.conn.execute("BEGIN")
 C.conn.execute("INSERT INTO raw_ex (exchange, kind, uuid, revision, payload, observed_at) VALUES ('bithumb','trade','bithumb:e1',1,?,1)",
                (json.dumps(dict(FILLS[0], id="bithumb:e1")),))
-C._post_exf_fill("bithumb", dict(FILLS[0], id="bithumb:e1"))
+C.svc_exf._post_exf_fill("bithumb", dict(FILLS[0], id="bithumb:e1"))
 C.conn.commit()
-real_post = C._post_exf_fill
+real_post = C.svc_exf._post_exf_fill
 
 
 def boom(*a, **k):
     raise RuntimeError("가짜 처리 오류")
 
 
-C._post_exf_fill = boom
+C.svc_exf._post_exf_fill = boom
 exc9 = None
 C.conn.execute("BEGIN")
 try:
-    C._consume_exf_retime({"exchange": "bithumb", "ts": 1, "fills": [{"id": "bithumb:e1", "ts_old": T_OLD["r1"], "ts": T_NEW["r1"] + 7 * 86_400_000}]})
+    C.svc_exf._consume_exf_retime({"exchange": "bithumb", "ts": 1, "fills": [{"id": "bithumb:e1", "ts_old": T_OLD["r1"], "ts": T_NEW["r1"] + 7 * 86_400_000}]})
 except RuntimeError as e:
     exc9 = e
 C.conn.rollback()
-C._post_exf_fill = real_post
+C.svc_exf._post_exf_fill = real_post
 chk(exc9 is not None and nb_off(), "[9] 처리 중 예외(격리 경로)여도 비차단 모드 풀림", repr(exc9))
 mf = (T_NEW["r1"] // MIN) * MIN + 3 * 86_400_000
 GJ.clear()
@@ -290,12 +289,12 @@ chk(fa == rate(mf) and calls("MainThread"), "[9] 그 뒤 core 스레드 fx_at = 
 T10 = ep(2025, 12, 10, 9, 0)
 T10N = ep(2025, 12, 12, 15, 0)
 C.conn.execute("BEGIN")
-C._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": [
+C.svc_exf._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": [
     {"id": "bithumb:z1", "qty": "1", "price": "500", "ts": T10, "base": "DDD", "quote": "KRW", "side": "buy", "fee": "0", "fee_ccy": ""}]})
 C.conn.commit()
 z0 = legs("z1")
 REC10 = {"v": 1, "kind": "exf_fill_retime", "exchange": "bithumb", "ts": int(time.time()), "src": "test", "fills": [{"id": "bithumb:z1", "ts_old": T10, "ts": T10N}]}
-q0 = C.__dict__.get("_exf_retime_pxq")
+q0 = C.svc_exf.__dict__.get("_exf_retime_pxq")
 if q0 is not None and hasattr(q0, "RETRY_SEC"):
     q0.RETRY_SEC = 0.6
 GJ.clear()

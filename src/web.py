@@ -1,12 +1,8 @@
 """tj-web: dashboard HTTP server and state builder."""
 from __future__ import annotations
-
-import base64
 import gzip
-import hashlib
 import bisect
 import copy
-import hmac
 import json
 import math
 import os
@@ -23,11 +19,12 @@ from decimal import Decimal, InvalidOperation, getcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, net_http, paths, runtime, statefile, timeutil
+import logs
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
-    _SQLITE_MEMSTAT_OFF = common.sqlite_memstatus_off()
-import web_ctx
+    runtime.cpu_reserve_apply()
+    _SQLITE_MEMSTAT_OFF = runtime.sqlite_memstatus_off()
+import web_ctx  # noqa: E402
 import db as dbm
 import pricing
 import balcheck
@@ -41,6 +38,7 @@ import depaddr
 import onboarding
 import demo_data
 import login_auth
+import reqclass
 import lpdec
 import lpchain
 import lpsol
@@ -77,54 +75,35 @@ import alert_prefs
 import alert_watch
 import flowev
 import addr_ai
-from view_review import (
-    REVIEW_FILL_REQ_PATH,
+from view_review import (  # noqa: F401
     review_fill_req_view,
     review_len_eff,
-    review_len_key,
     REVIEW_LEN_KEYS,
     review_manual_busy,
-    REVIEW_MANUAL_LOCK,
     review_pause_eff,
     review_progress,
-    REVIEW_PROGRESS_PATH,
     REVIEW_PV,
-    REVIEW_WPV,
 )
 
 
-from view_fut import (
-    _fin,
+from view_fut import (  # noqa: F401
     _fut_by_date_ex,
-    _fut_candle_past,
     _fut_fxb,
     _fut_notional,
     _fut_notional_sum,
-    _fut_settle,
-    _FUT_SYM_RE,
-    _fut_upnl_usd,
-    _FUT_USD_SETTLE,
     _PERP_BAD_WARNED,
-    _pnum,
     FUT_CEX,
     fut_ev_usd,
-    FUT_FEE_SYM,
     fut_px_at,
-    FUT_PX_FAR_S,
-    FUT_PX_NEAR_S,
     fut_sym,
-    FUT_T_MIN_MS,
     perp_active,
-    PERP_AMT_MAX,
-    perp_dex,
     perp_filter,
     PERP_KEYS,
     PERP_NAMES,
-    PERP_NUM_MAX,
 )
 try:
     import fut_rcpt
-except Exception:
+except Exception:   # noqa: BLE001 [optional]
     fut_rcpt = None
 
 
@@ -135,14 +114,14 @@ def futures_api_payload():
     pxf9 = None
     try:
         on9 = perp_active() or {}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         on9 = {}
     for ex9 in FUT_CEX + tuple(k9 for k9 in PERP_KEYS if k9 in on9):
-        fp9 = os.path.join(common.STATE_DIR, f"futures_{ex9}.json")
+        fp9 = paths.state(f"futures_{ex9}.json")
         if not os.path.exists(fp9):
             continue
         try:
-            d9 = common.read_json(fp9, {})
+            d9 = statefile.read_json(fp9, {})
         except SystemExit:
             continue
         if ex9 not in on9 and isinstance(d9, dict) and isinstance(d9.get("events"), list) and any(isinstance(r9, dict) and r9.get("asset") for r9 in d9["events"]):
@@ -162,26 +141,26 @@ def leverage_api_payload(now=None):
     futs9 = {}
     try:
         on9 = perp_active() or {}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         on9 = {}
     for ex9 in FUT_CEX + tuple(k9 for k9 in PERP_KEYS if k9 in on9):
-        fp9 = os.path.join(common.STATE_DIR, f"futures_{ex9}.json")
+        fp9 = paths.state(f"futures_{ex9}.json")
         if not os.path.exists(fp9):
             continue
         try:
-            d9 = common.read_json(fp9, {})
+            d9 = statefile.read_json(fp9, {})
         except SystemExit:
             continue
         if isinstance(d9, dict):
             futs9[ex9] = perp_filter(d9, on9[ex9], now9, ex9) if ex9 in on9 else d9
     try:
         th9 = float(((alert_prefs.load(BUILDER.prefs()) or {}).get("th") or {}).get("liq_pct") or 10)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         th9 = 10.0
-    lm9, lp9 = None, os.path.join(common.STATE_DIR, "liq_watch.json")
+    lm9, lp9 = None, paths.state("liq_watch.json")
     if os.path.exists(lp9):
         try:
-            lm9 = common.read_json(lp9, None)
+            lm9 = statefile.read_json(lp9, None)
         except SystemExit:
             lm9 = None
     syms9 = set()
@@ -204,66 +183,33 @@ def leverage_api_payload(now=None):
     return lev_view.build(lev9, futs9, price9, th9, lm9, now9)
 
 
-log = common.setup_logging("tj-web")
+log = logs.setup_logging("tj-web")
 getcontext().prec = 60
 
-from view_common import (
+from timeutil import KST
+from view_common import (  # noqa: F401
     _ex_stable_sym,
-    _f,
-    _GSYM_MEMO,
-    _hl_cash_syms,
     _px_tables,
-    BUILD_EX_N,
     BUILD_HIST_N,
     CHAIN_NAME,
     DAILY_LIVE_WIN,
     DAILY_LQ_V,
-    DAILY_PATH,
     DAILY_PX_KEEP,
-    DAILY_PX_PATH,
-    DAILY_PX_SEED,
     DAILY_V,
     DAYCLOSE_ON,
     DC_LATE_S,
     DC_RETRY_S,
     DC_SMALL_USD,
     DISC_OPEN_KO,
-    DISC_OPEN_KO_UNK,
-    DM_PATH,
     EPS,
     EX_CANDLE_SYMS,
     EX_STABLE_SYMS,
-    EXT_RB_STATUS_PATH,
-    GOPLUS_PATH,
     GOPLUS_STATUS,
-    GOPLUS_T0,
     HL_MAXWAIT_S,
-    HL_SETTLE_S,
-    KST,
-    LP_CLOSED_SEC,
-    LP_CONV_MIN_USD,
-    LP_NEW_POLL_SEC,
     LP_OPEN_SEC,
-    LP_POS_PATH,
-    OF_BASIS_KO,
-    OF_NATIVE_SYMS,
-    PREFS_PATH,
-    RABBY_DAILY_PATH,
-    RABBY_PATH,
-    SALE_PATH,
-    SALE_SEC,
     STABLE_GROUPS,
-    SUB_SID_RE,
-    SUB_TAG_RE,
-    TRANSIT_ASK_DAYS,
-    TRANSIT_COVER_MARGIN_S,
-    TRANSIT_COVER_MAX_H,
-    TRANSIT_DEFAULT_H,
-    TRANSIT_NET_H,
-    TRANSIT_OWN_H,
-    WEB_DIAG_PATH,
 )
-from http_assets import (
+from http_assets import (  # noqa: F401
     _asset,
     _ASSETS,
     _ASSETS_LOCK,
@@ -279,7 +225,7 @@ from http_assets import (
 )
 
 
-from view_text import (
+from view_text import (  # noqa: F401
     _GP_KO,
     _human_dm,
     _INVISIBLE,
@@ -291,21 +237,16 @@ from view_text import (
     _short_addr,
     _usd_txt,
 )
-from view_pending import (
+from view_pending import (  # noqa: F401
     _classify_pendings,
     _of_linked_txs,
-    _PEND_GAP,
-    _PEND_WHY_UNKNOWN,
-    _tx_norm,
     dust_usd_eff,
-    NEG_DIAG_MIN_USD,
     unpriced_ent,
     unpriced_facts,
-    UNPRICED_FACTS_MAX,
 )
 
 
-from view_snapfile import (
+from view_snapfile import (  # noqa: F401
     _aged_last_scan,
     _code_sig,
     _LASTSCAN_KEY,
@@ -319,11 +260,10 @@ from view_snapfile import (
     _snapfile_sig,
     SNAPFILE_EVERY,
     SNAPFILE_MAX_AGE,
-    SNAPFILE_PATH,
 )
 
 
-from view_hero import (
+from view_hero import (  # noqa: F401
     _ago_ko,
     _HERO_HTML,
     _HERO_HTML_LOCK,
@@ -338,7 +278,7 @@ def _wallet_reload_view() -> dict:
         import wallet_register as _wr9
         alive9 = _wr9.auto_reload_alive()
         return {"ok": True, "auto": bool(_wr9.apply_info().get("runner")), "addrs": sorted(_wr9.pending_addrs()) if alive9 else []}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {"ok": True, "auto": False, "addrs": []}
 
 
@@ -352,7 +292,7 @@ def _mats_ready(path) -> bool:
     return True if r9 is None else bool(r9)
 
 
-from view_regroup import (
+from view_regroup import (  # noqa: F401
     _daily_krw,
     _daily_reset,
     _relabel_daily_gids,
@@ -360,7 +300,7 @@ from view_regroup import (
 )
 
 
-from view_tax import (
+from view_tax import (  # noqa: F401
     _tax_add,
     _tax_fee_key,
     _tax_fee_merge,
@@ -375,7 +315,7 @@ def chain_auto_off_save(prefs: dict, body: dict):
     if not isinstance(on9, bool):
         return 400, {"ok": False, "error": "on 은 true/false"}
     prefs["chain_auto_off"] = {"on": on9, "at": int(time.time())}
-    common.atomic_write_json(PREFS_PATH, prefs)
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
     return 200, {"ok": True, "on": on9}
 
 
@@ -393,39 +333,33 @@ def snapshot_refresher():
                     and b.inputs_changed(snap, now):
                 b.kick_refresh()
             last9 = None
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
             if str(e) != last9:
                 log.warning("스냅샷 갱신기 오류(계속): %s", e)
                 last9 = str(e)
 
 
 PREFS_LOCK = threading.Lock()
-from http_state import (
-    _ALERT_TEST_LOCK,
+from http_state import (  # noqa: F401
     _ALERT_TEST_T,
-    _eval_budget_msg,
-    _OPS_RL,
-    _OPS_RL_LOCK,
-    ALERT_TEST_HOURLY,
     MemoHourly,
 )
 
 
-from view_evals import (
+from view_evals import (  # noqa: F401
     BUY_EVALS,
     DAY_MEMOS,
     SELL_EVALS,
 )
-from view_spot import (
+from view_spot import (  # noqa: F401
     _alt_src_of,
     _alt_src_stale,
     _cg_key_set,
     _px1004_spot_filter,
     PX1004_ALT_OK,
     Spot,
-    SPOT_PATH,
 )
-from view_misc import (
+from view_misc import (  # noqa: F401
     _BuildObsolete,
     _cfg_file_sig,
     _dec_or0,
@@ -439,22 +373,20 @@ from view_misc import (
     _venue_flows30,
     build_stats,
     HIST_NF,
-    SOL_STAKE_PATH,
     STAKE_STATE_KO,
 )
 
 
-from view_fspin import (
+from view_fspin import (  # noqa: F401
     _fs_pin_load,
     _fs_pin_save,
     FS_CAP_X,
     FS_EX,
     FS_HOLD_KO,
-    FS_PIN_PATH,
 )
 
 
-from view_pxfix import (
+from view_pxfix import (  # noqa: F401
     _bind_px_blocks,
     _capture_px_blocks,
     _migrate_px_blocks,
@@ -467,7 +399,7 @@ from view_pxfix import (
 )
 
 
-from view_xv import (
+from view_xv import (  # noqa: F401
     _ufc_ku,
     _x_end,
     _x_sync_entry,
@@ -487,14 +419,13 @@ GOPLUS_CHAIN_ID = {"eth": "1", "bsc": "56", "base": "8453", "optimism": "10",
                    "arbitrum": "42161", "polygon": "137", "gnosis": "100",
                    "scroll": "534352", "zksync": "324", "robinhood": "4663"}
 GOPLUS_TTL = 7 * 86400
-GOPLUS_STATUS_PATH = os.path.join(common.STATE_DIR, "goplus_status.json")
 GOPLUS_FAIL_RETRY = 3600
 GOPLUS_LIMIT_SEC = 300
 GOPLUS_LOG_EVERY = 600
 GOPLUS_PERM_N = 3
 
 
-from view_txkey import (
+from view_txkey import (  # noqa: F401
     _B64URL_32_TX,
     _HEX64_TX,
     _ton_hash_uids,
@@ -503,7 +434,7 @@ from view_txkey import (
 )
 
 
-from view_order import (
+from view_order import (  # noqa: F401
     _ord_auth_before,
     _ord_cash,
     _ord_feasible,
@@ -520,7 +451,7 @@ from view_order import (
 )
 
 
-from view_plans import (
+from view_plans import (  # noqa: F401
     _bridge_plan,
     _loan_plan,
     _loan_windows,
@@ -534,7 +465,7 @@ from view_plans import (
 )
 
 
-from view_offc import (
+from view_offc import (  # noqa: F401
     _offc_answered,
     _offc_excl,
     _offc_on,
@@ -544,8 +475,8 @@ from view_offc import (
 )
 
 
-import view_builder
-from view_builder import (
+import view_builder  # noqa: E402
+from view_builder import (  # noqa: F401
     StateBuilder,
 )
 
@@ -585,7 +516,7 @@ def _recent_px_gids(b9, now=None) -> set:
     out = set()
     try:
         now = time.time() if now is None else now
-        lo9 = time.strftime("%Y-%m-%d", time.gmtime(now + 9 * 3600 - AUTO_OFF_PX_DAYS * 86400))
+        lo9 = timeutil.kst_day(now, AUTO_OFF_PX_DAYS)
         srcs9 = [v9 for k9, v9 in (getattr(b9, "daily_px", None) or {}).items() if isinstance(k9, str) and k9[:1].isdigit() and k9 >= lo9]
         lv9 = (getattr(b9, "daily", None) or {}).get("_live")
         if isinstance(lv9, dict):
@@ -600,7 +531,7 @@ def _recent_px_gids(b9, now=None) -> set:
                         out.add(str(g9))
                 except (TypeError, ValueError):
                     continue
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return set()
     return out
 
@@ -611,7 +542,7 @@ def _chain_auto_off_info():
         return None
     try:
         last9 = b9.latest(0) if b9.__dict__.get("_built_sig") != b9._input_sig() else b9.__dict__.get("_last_out")
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return None
     f9 = last9.get("fields") if isinstance(last9, dict) and isinstance(last9.get("fields"), dict) else last9
     if not isinstance(f9, dict):
@@ -664,11 +595,11 @@ def _chain_auto_off_info():
         for it9 in (_nft_tracker().view() or {}).get("tracked") or []:
             if isinstance(it9, dict) and it9.get("chain") and not it9.get("hidden"):
                 add9(str(it9["chain"]), (it9.get("value") or {}).get("usd") if isinstance(it9.get("value"), dict) else None)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
     try:
         lim9 = min(100.0, dust_usd_eff(b9.prefs()))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         lim9 = 50.0
     return {"lim": lim9, "chains": out}
 
@@ -686,14 +617,14 @@ class _SearchPool:
     def _spawn(self):
         return subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_worker.py")],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, bufsize=0,
-                                cwd=common.BASE_DIR, env=dict(os.environ))
+                                cwd=paths.BASE_DIR, env=dict(os.environ))
 
     @staticmethod
     def _kill(p):
         try:
             p.kill()
             p.wait(timeout=5)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
 
     def run(self, req: dict):
@@ -743,7 +674,7 @@ class _SearchPool:
                 self.idle.append(p)
             p = None
             return out9.get("body") if isinstance(out9, dict) and out9.get("ok") else None
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("검색 일꾼 실패(직접 검색으로): %s", type(e).__name__)
             self.off_until = time.time() + 60
             return None
@@ -758,14 +689,14 @@ BUILDER: StateBuilder = None
 web_ctx.register(builder=lambda: BUILDER, bcall=_bcall)
 web_ctx.register(day_memo=lambda: DAY_MEMO_REEVAL, search_pool=lambda: SEARCH_POOL,
                  nft_tracker=lambda *a, **k: _nft_tracker(*a, **k), oa_quoter=lambda *a, **k: _oa_quoter(*a, **k),
-                 oa_rate=lambda *a, **k: _oa_rate(*a, **k), memo_driven=lambda *a, **k: memo_driven(*a, **k), v2_csp=lambda *a, **k: _v2_csp(*a, **k))
+                 oa_rate=lambda *a, **k: _oa_rate(*a, **k), memo_driven=lambda *a, **k: memo_driven(*a, **k))
 web_ctx.register(alert_view=lambda *a, **k: _alert_view(*a, **k), tg_connected=lambda *a, **k: _tg_connected(*a, **k))
 web_ctx.register(
     mats_ready=lambda *a, **k: _mats_ready(*a, **k), wallet_reload_view=lambda *a, **k: _wallet_reload_view(*a, **k),
     registered_wallet_keys=lambda *a, **k: _registered_wallet_keys(*a, **k), bench_series=lambda *a, **k: bench_series(*a, **k),
     chain_auto_off_save=lambda *a, **k: chain_auto_off_save(*a, **k), coverage_refresh=lambda *a, **k: coverage_refresh(*a, **k),
     futures_api_payload=lambda *a, **k: futures_api_payload(*a, **k), leverage_api_payload=lambda *a, **k: leverage_api_payload(*a, **k),
-    prefs_lock=lambda: PREFS_LOCK, coverage_path=lambda: COVERAGE_PATH, alias_max=lambda: ALIAS_MAX, ignored_max=lambda: IGNORED_MAX,
+    prefs_lock=lambda: PREFS_LOCK, coverage_path=lambda: paths.state(coverage_limits.OUT_NAME), alias_max=lambda: ALIAS_MAX, ignored_max=lambda: IGNORED_MAX,
     plans_max=lambda: PLANS_MAX, src_wl_max=lambda: SRC_WL_MAX, alias_addr_re=lambda: _ALIAS_ADDR_RE)
 OA_Q: "other_assets.Quoter | None" = None
 
@@ -914,7 +845,7 @@ class DayMemoReeval:
                 continue
             try:
                 self.run_key(k, force=force)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.warning("근거 메모 뒤 AI 평가 다시 실패(%s): %s", k, e)
             finally:
                 with self.mu:
@@ -1011,7 +942,7 @@ def memo_driven(date, sym, inp, side):
     st9 = BUY_EVALS if side == "buy" else SELL_EVALS
     try:
         return sy if any(r9.get("memoUsed") for r9 in st9.get(date, sym)) else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -1038,49 +969,26 @@ PROXY_SEC_HEADERS = (("Cloudflare-CDN-Cache-Control", "no-store"), ("Vary", "Coo
                      ("Cross-Origin-Opener-Policy", "same-origin"), ("Cross-Origin-Resource-Policy", "same-origin"),
                      ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()"))
 HSTS = ("Strict-Transport-Security", "max-age=31536000")
-_V2_CSP = {}
-
-
-def _v2_csp(raw: bytes, key: str) -> str:
-    c = _V2_CSP.get(key)
-    if c:
-        return c
-    hs = []
-    for m9 in re.finditer(rb"<script(?P<a>[^>]*)>(?P<b>.*?)</script>", raw, re.S):
-        a9 = m9.group("a")
-        if re.search(rb"\bsrc\s*=", a9) or re.search(rb"type\s*=\s*[\"']application/json", a9):
-            continue
-        hs.append("'sha256-" + base64.b64encode(hashlib.sha256(m9.group("b")).digest()).decode() + "'")
-    c = ("default-src 'self'; script-src 'self' " + " ".join(dict.fromkeys(hs)) + "; "
-         "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "
-         "img-src 'self' data: blob: https:; connect-src 'self' https://cdn.jsdelivr.net; "
-         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-    _V2_CSP.clear()
-    _V2_CSP[key] = c
-    return c
-
-
 _BENCH = {"sig": None, "at": 0.0, "body": None}
 _BENCH_LOCK = threading.Lock()
 
 
 def _bench_btc_ids() -> set:
-    import sqlite3
     try:
-        c9 = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
+        c9 = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=5)
         try:
             return {str(r[0]) for r in c9.execute("SELECT DISTINCT group_id FROM assets WHERE upper(symbol)='BTC' AND group_id IS NOT NULL "
                                                     "AND COALESCE(hidden, 0) = 0")}
         finally:
             c9.close()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return set()
 
 
 def bench_series() -> dict:
-    hp = os.path.join(common.STATE_DIR, "curve_hist_px.json")
+    hp = paths.state("curve_hist_px.json")
     sig = []
-    for p9 in (hp, DAILY_PX_PATH):
+    for p9 in (hp, paths.state("daily_px.json")):
         try:
             st9 = os.stat(p9)
             sig.append((p9, st9.st_mtime_ns, st9.st_size))
@@ -1094,7 +1002,7 @@ def bench_series() -> dict:
             return body
     px, n_hist, n_day = {}, 0, 0
     try:
-        h9 = common.read_json(hp, {}) if os.path.exists(hp) else {}
+        h9 = statefile.read_json(hp, {}) if os.path.exists(hp) else {}
         sp9 = ((h9.get("specs") or {}).get("sym:BTC") or {}).get("p") or {}
         for d9, v9 in sp9.items():
             try:
@@ -1104,12 +1012,12 @@ def bench_series() -> dict:
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(d9)) and math.isfinite(f9) and f9 > 0:
                 px[d9] = f9
                 n_hist += 1
-    except (SystemExit, Exception):
+    except (SystemExit, Exception):   # noqa: BLE001 [optional]
         pass
     ids = _bench_btc_ids()
     if ids:
         try:
-            dp9 = common.read_json(DAILY_PX_PATH, {}) if os.path.exists(DAILY_PX_PATH) else {}
+            dp9 = statefile.read_json(paths.state("daily_px.json"), {}) if os.path.exists(paths.state("daily_px.json")) else {}
             for d9, row9 in dp9.items():
                 if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(d9)) or not isinstance(row9, dict):
                     continue
@@ -1118,7 +1026,7 @@ def bench_series() -> dict:
                 if vs:
                     px[d9] = vs[len(vs) // 2]
                     n_day += 1
-        except (SystemExit, Exception):
+        except (SystemExit, Exception):   # noqa: BLE001 [optional]
             pass
     body = {"ok": True, "sym": "BTC", "px": dict(sorted(px.items())), "src": {"hist": n_hist, "daily": n_day}}
     with _BENCH_LOCK:
@@ -1136,7 +1044,7 @@ def _bench_now():
             v9 = ex9.get(k9)
             if isinstance(v9, (int, float)) and math.isfinite(v9) and v9 > 1000:
                 return float(v9)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return None
 
@@ -1190,8 +1098,8 @@ def _sw_exit():
             sys.setswitchinterval(_SW_BASE)
 
 
-import io as _io
-import socket as _socket
+import io as _io  # noqa: E402
+import socket as _socket  # noqa: E402
 
 HDR_DEADLINE_SEC = 10
 
@@ -1216,16 +1124,16 @@ class _HdrClockReader(_io.RawIOBase):
         return h.connection.recv_into(b)
 
 
-from http_outflow import OutflowMixin
+from http_outflow import OutflowMixin  # noqa: E402
 
 
-from http_get import GetMixin
+from http_get import GetMixin  # noqa: E402
 
 
-from http_post import PostMixin
+from http_post import PostMixin  # noqa: E402
 
 
-from http_route import RouteMixin
+from http_route import RouteMixin  # noqa: E402
 
 
 class Handler(RouteMixin, PostMixin, GetMixin, OutflowMixin, BaseHTTPRequestHandler):
@@ -1294,7 +1202,7 @@ class Handler(RouteMixin, PostMixin, GetMixin, OutflowMixin, BaseHTTPRequestHand
     def send_error(self, code, message=None, explain=None):
         try:
             short = self.responses.get(code, ("error",))[0]
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             short = "error"
         body = json.dumps({"error": short}).encode()
         self.close_connection = True
@@ -1330,12 +1238,12 @@ class Handler(RouteMixin, PostMixin, GetMixin, OutflowMixin, BaseHTTPRequestHand
 
     def _proxy_headers(self):
         try:
-            px = login_auth.proxied(self)
-        except Exception:
+            px = reqclass.proxied(self)
+        except Exception:   # noqa: BLE001 [fallback]
             px = True
         if not px:
             return False, ()
-        return True, PROXY_SEC_HEADERS + ((HSTS,) if login_auth.proxied_https(self) else ())
+        return True, PROXY_SEC_HEADERS + ((HSTS,) if reqclass.proxied_https(self) else ())
 
     def _send_bytes(self, code, raw, gzb=None, ctype="application/json; charset=utf-8", etag=None,
                     cache="no-store", extra=()):
@@ -1395,9 +1303,8 @@ class Handler(RouteMixin, PostMixin, GetMixin, OutflowMixin, BaseHTTPRequestHand
         self._send(400, {"error": "GET 요청에 본문을 실을 수 없습니다"})
         return True
 
-
     def _method_not_allowed(self):
-        login_auth.mark_conn(self)
+        reqclass.mark_conn(self)
         self.close_connection = True
         self._send_bytes(405, b'{"error": "method not allowed"}', extra=(("Allow", "GET, POST"),))
 
@@ -1446,12 +1353,9 @@ def bind_host(cfg) -> str:
     return h or "127.0.0.1"
 
 
-from view_alerts import (
+from view_alerts import (  # noqa: F401
     _append_alert,
-    ALERTS_LOCK,
-    ALERTS_PATH,
 )
-ALERTS_SENT_PATH = os.path.join(common.STATE_DIR, "alerts_sent_web.json")
 
 
 ALERT_WATCH_EVERY = 60
@@ -1462,7 +1366,7 @@ def _tg_connected() -> bool:
     try:
         import settings_store
         return bool(settings_store.env_value(settings_store.TG_TOKEN) and settings_store.env_value(settings_store.TG_CHAT))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -1478,7 +1382,7 @@ def _alert_view(prefs) -> dict:
         extra["oaAuto"] = sum(1 for x in (d9.get("items") or []) if isinstance(x, dict) and x.get("auto") in ("stock", "gold"))
         bc9 = (getattr(BUILDER, "cfg", None) or {}).get("brokers")
         extra["oaBrokers"] = sum(1 for v9 in (bc9 or {}).values() if isinstance(v9, dict) and v9.get("enabled") is True) if isinstance(bc9, dict) else 0
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         extra["oaAuto"] = extra["oaBrokers"] = 0
     return alert_prefs.view(prefs, tg_connected=_tg_connected(), extra=extra)
 
@@ -1499,7 +1403,7 @@ def _alert_link_daily() -> str:
         u9 = public_url(getattr(BUILDER, "cfg", None))
         if u9:
             return f"보기: {u9}/v2/#daily"
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return "보기: 일별 기록 탭"
 
@@ -1520,16 +1424,16 @@ def _alert_watch_inputs(doc, conn, now):
                     or any(isinstance(v9, dict) and v9.get("enabled") is True for v9 in ((getattr(b9, "cfg", None) or {}).get("brokers") or {}).values()):
                 bc9 = (getattr(b9, "cfg", None) or {}).get("brokers")
                 oa9 = other_assets.view(d9, _oa_quoter(), _oa_rate(), bc9 if isinstance(bc9, dict) else {})
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             oa9 = None
     try:
         import settings_store
         cur9 = "USD" if (settings_store.read_settings() or {}).get("currency") == "USD" else "KRW"
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         cur9 = "KRW"
     try:
         pub9 = public_url(getattr(b9, "cfg", None))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         pub9 = ""
     return {"out": out9, "spot": spot9, "futures": fut9, "oa": oa9, "cur": cur9, "link_daily": _alert_link_daily(), "pub": pub9,
             "flows": b9.__dict__.get("_flow_ev")}
@@ -1551,7 +1455,7 @@ def _flow_fresh_kick(now):
         if snap9 is None or now - float(snap9.at) >= ALERT_FLOW_FRESH:
             if snap9 is None or getattr(b9, "_built_sig", None) is None or b9._input_sig() != b9._built_sig:
                 b9.kick_refresh()
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [optional]
         log.warning("큰 출금 재료 재빌드 요청 실패(다음 판): %s", e9)
 
 
@@ -1605,12 +1509,11 @@ def alert_watch_loop():
             if got or time.time() - last_save >= ALERT_WATCH_SAVE:
                 alert_watch.save_state(st)
                 last_save = time.time()
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
             log.warning("새 알림 생산자 실패(다음 판): %s", e)
         time.sleep(ALERT_WATCH_EVERY)
 
 
-COVERAGE_PATH = os.path.join(common.STATE_DIR, coverage_limits.OUT_NAME)
 COVERAGE_EVERY = 24 * 3600
 _COV_LOCK = threading.Lock()
 
@@ -1622,7 +1525,7 @@ def coverage_refresh():
         d = coverage_limits.write()
         log.info("수집 한계 갱신: 소스 %d · 한계 %d", len(d.get("sources") or []), len(d.get("unavailable") or []))
         return True
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:  # noqa: BLE001 [fallback]
         log.warning("수집 한계 생성 실패(다음 주기): %s", e)
         return False
     finally:
@@ -1633,7 +1536,7 @@ def coverage_loop():
     time.sleep(300)
     while True:
         try:
-            age = time.time() - os.path.getmtime(COVERAGE_PATH) if os.path.exists(COVERAGE_PATH) else None
+            age = time.time() - os.path.getmtime(paths.state(coverage_limits.OUT_NAME)) if os.path.exists(paths.state(coverage_limits.OUT_NAME)) else None
         except OSError:
             age = None
         if age is None or age >= COVERAGE_EVERY - 60:
@@ -1657,7 +1560,7 @@ def _balcheck_defer_keys(state: dict) -> set:
             except (TypeError, ValueError):
                 pass
         return out9
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         log.warning("잔고 대조 지연 대기 판정 실패(DM 은 종전대로): %s", e)
         return set()
 
@@ -1668,7 +1571,7 @@ def _hist_flows(fk, days, dpx, fx_day) -> dict:
     sh9.daily_px = {}
     sh9._flow_px_delta = {}
     today9 = datetime.strptime(fk.get("today") or datetime.now(KST).strftime("%Y-%m-%d"), "%Y-%m-%d").replace(tzinfo=KST)
-    conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+    conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return StateBuilder._daily_flows(sh9, conn9, None, fk.get("G") or {}, today9, {}, fk.get("skip") or frozenset(), fk.get("rate"),
                                          transit=fk.get("transit") or [], offc_ids=fk.get("offc") or frozenset(),
@@ -1687,9 +1590,9 @@ def balcheck_loop():
         if st9.get("enabled"):
             try:
                 (BUILDER.latest(600) if hasattr(BUILDER, "latest") else BUILDER.build())
-                prev = common.read_json(balcheck.STATUS_PATH, {}) \
-                    if os.path.exists(balcheck.STATUS_PATH) else {}
-                conn = dbm.open_db(common.DB_PATH, readonly=True)
+                prev = statefile.read_json(paths.state("onchain_check.json"), {}) \
+                    if os.path.exists(paths.state("onchain_check.json")) else {}
+                conn = dbm.open_db(paths.DB_PATH, readonly=True)
                 try:
                     state = balcheck.run_once(BUILDER.cfg, conn,
                                               dict(getattr(BUILDER, "_live_px", {}) or {}),
@@ -1698,19 +1601,19 @@ def balcheck_loop():
                     conn.close()
                 new_alerts = balcheck.finalize(state, _balcheck_defer_keys(state))
                 if new_alerts:
-                    common.atomic_write_json(balcheck.STATUS_PATH, state)
+                    statefile.atomic_write_json(paths.state("onchain_check.json"), state)
                     _append_alert({"ts": int(time.time()), "kind": "BALANCE_MISMATCH",
                                    "text": balcheck.alert_text(new_alerts),
                                    "keys": sorted({str(m.get("key")) for m in new_alerts if m.get("key")})})
                     log.warning("온체인 잔고 불일치 알림 적재: %d건", len(new_alerts))
                 else:
-                    common.atomic_write_json(balcheck.STATUS_PATH, state)
+                    statefile.atomic_write_json(paths.state("onchain_check.json"), state)
                 log.info("온체인 잔고 대조: %d항목·%d콜·불일치 %d(확정 %d)%s%s", state["checked"], state["calls"],
                          len(state["mismatches"]), sum(1 for m in state["mismatches"] if m.get("confirmed")),
                          " · 호출 상한 도달(부분)" if state["capped"] else "",
                          f" · 오류 {len(state['errors'])}" if state["errors"] else "")
                 BUILDER.soft_invalidate()
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:  # noqa: BLE001 [boundary]
                 log.warning("온체인 잔고 대조 실패(다음 주기): %s", e)
         try:
             iv = max(600, int(st9.get("interval_sec") or 3600))
@@ -1724,7 +1627,7 @@ def chainsweep_more_wallets(prev: dict, cfg: dict, now: float = None) -> bool:
         n9 = len(chainsweep.wallets(cfg or {})[0])
         at9 = float((prev or {}).get("checkedAt") or 0)
         return bool(prev) and n9 > int((prev or {}).get("wallets") or 0) and (time.time() if now is None else now) - at9 >= 600
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -1746,24 +1649,24 @@ def chainsweep_loop():
             if not sp_once and st9.get("enabled"):
                 sp_once = True
                 try:
-                    cfg9 = common.load_config()
-                    gate9 = common.read_json(common.ACTIVITY_GATE_PATH, {}) or {}
+                    cfg9 = config.load_config()
+                    gate9 = statefile.read_json(paths.ACTIVITY_GATE_PATH, {}) or {}
                     if chainsweep.missing_speed(cfg9, gate9):
                         chainsweep.speed_tick(cfg9, gate9)
-                except (Exception, SystemExit) as e:
+                except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
                     log.warning("체인 백필 속도 실측(빠진 체인) 실패(다음 점검 때): %s", e)
             time.sleep(min(wait, iv))
             continue
         if st9.get("enabled"):
             try:
-                cfg9 = common.load_config()
+                cfg9 = config.load_config()
                 try:
                     bn9 = pricing.binance_spot_usdt()
-                except Exception:
+                except Exception:   # noqa: BLE001 [fallback]
                     bn9 = {}
                 spot9 = dict(getattr(BUILDER.spot, "usd", {}) or {})
                 led9 = set()
-                conn = dbm.open_db(common.DB_PATH, readonly=True)
+                conn = dbm.open_db(paths.DB_PATH, readonly=True)
                 try:
                     for r9 in conn.execute("SELECT DISTINCT location FROM postings WHERE location LIKE 'wallet:%'"):
                         p9 = str(r9[0] or "").split(":")
@@ -1771,11 +1674,11 @@ def chainsweep_loop():
                             led9.add((p9[1], p9[2].lower()))
                 finally:
                     conn.close()
-                gate9 = common.read_json(common.ACTIVITY_GATE_PATH, {}) or {}
+                gate9 = statefile.read_json(paths.ACTIVITY_GATE_PATH, {}) or {}
                 res = chainsweep.run_once(cfg9, price_fn=lambda sym: bn9.get(sym) or spot9.get(sym), gate=gate9, ledger_pairs=led9)
-                common.atomic_write_json(common.ACTIVITY_GATE_PATH, gate9)
+                statefile.atomic_write_json(paths.ACTIVITY_GATE_PATH, gate9)
                 prev_auto = {(f["chain"], f["wallet"]) for f in (prev.get("autoEnabled") or [])}
-                common.atomic_write_json(chainsweep.STATUS_PATH, common.scrub_secrets(res)[0])
+                statefile.atomic_write_json(paths.state("chain_sweep.json"), logs.scrub_secrets(res)[0])
                 log.info("미추적 체인 점검: 체인 %d·지갑 %d·JSON-RPC %d(HTTP %d)·오류 %d · 자동 켬 %d · 경고 %d%s", len(res["chains"]), res["wallets"],
                          res["calls"], res["http"], len(res["errors"]), len(res["autoEnabled"]), len(res["findings"]),
                          (" — " + " / ".join(chainsweep.finding_text(f) for f in res["findings"][:5])) if res["findings"] else "")
@@ -1786,10 +1689,10 @@ def chainsweep_loop():
                                            + "\n".join("· " + chainsweep.finding_text(f) for f in new_auto[:10])})
                 try:
                     chainsweep.speed_tick(cfg9, gate9)
-                except (Exception, SystemExit) as e:
+                except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
                     log.warning("체인 백필 속도 실측 실패(다음 판): %s", e)
                 _chain_auto_off()
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:  # noqa: BLE001 [boundary]
                 log.warning("미추적 체인 점검 실패(1시간 뒤 재시도): %s", e)
                 time.sleep(3600)
                 continue
@@ -1800,8 +1703,8 @@ def _chain_auto_off():
     try:
         import chainoff
         off9 = chainoff.auto_off()
-    except (Exception, SystemExit) as e:
-        log.warning("체인 자동 끄기 실패(다음 점검 때): %s", common.safe_err(e)[:160])
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
+        log.warning("체인 자동 끄기 실패(다음 점검 때): %s", logs.safe_err(e)[:160])
         return []
     if off9:
         log.info("체인 자동 끔(활동 없음 — 추천 조건): %s", ", ".join(off9))
@@ -1815,11 +1718,11 @@ GOPLUS_BODY_MAX = 4 << 20
 
 
 def _goplus_fetch(cid, ca_l):
-    req = urllib.request.Request(
+    req = net_http.request(
         f"https://api.gopluslabs.io/api/v1/token_security/{cid}?contract_addresses={ca_l}",
         headers={"User-Agent": "tj-bot/0.1", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(common.read_capped(r, GOPLUS_BODY_MAX).decode())
+    with net_http.urlopen(req, timeout=15) as r:
+        return json.loads(net_http.read_capped(r, GOPLUS_BODY_MAX).decode())
 
 
 def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
@@ -1862,7 +1765,7 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
     want = [p for p in want if p and p[0] not in off9]
     if not want:
         return 0
-    cache = common.read_json(GOPLUS_PATH, {}) if os.path.exists(GOPLUS_PATH) else {}
+    cache = statefile.read_json(paths.state("goplus_cache.json"), {}) if os.path.exists(paths.state("goplus_cache.json")) else {}
     new9, exp9, deferred = [], [], 0
     seen9 = set()
     for ch, ca in want:
@@ -1900,15 +1803,15 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
             note(f"HTTP {e.code}", f"{key} — 이 CA 만 1시간 뒤 재시도")
             sleep(6.7)
             continue
-        except common.ResponseTooLarge as e:
+        except net_http.ResponseTooLarge as e:
             fail_until[key] = now + GOPLUS_FAIL_RETRY
-            note("응답 큼", f"{common.safe_err(e)[:60]} ({key}) — 이 CA 만 1시간 뒤 재시도")
+            note("응답 큼", f"{logs.safe_err(e)[:60]} ({key}) — 이 CA 만 1시간 뒤 재시도")
             sleep(6.7)
             continue
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             fail_until[key] = now + GOPLUS_FAIL_RETRY
             state["net_fail"] = state.get("net_fail", 0) + 1
-            note("연결", f"{type(e).__name__}: {common.safe_err(e)[:60]} ({key})")
+            note("연결", f"{type(e).__name__}: {logs.safe_err(e)[:60]} ({key})")
             if state["net_fail"] >= 3:
                 state["net_fail"] = 0
                 break
@@ -1948,7 +1851,7 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
         changed = True
         sleep(6.7)
     if changed:
-        common.atomic_write_json(GOPLUS_PATH, cache)
+        statefile.atomic_write_json(paths.state("goplus_cache.json"), cache)
         BUILDER.soft_invalidate()
     for k9 in [k9 for k9, t9 in fail_until.items() if t9 <= now - GOPLUS_FAIL_RETRY]:
         fail_until.pop(k9, None)
@@ -1957,8 +1860,8 @@ def goplus_round(state: dict, now: float = None, fetch=None, sleep=None) -> int:
 
 def goplus_state_load(path=None) -> dict:
     try:
-        d = common.read_json(path or GOPLUS_STATUS_PATH, {}) if os.path.exists(path or GOPLUS_STATUS_PATH) else {}
-    except (Exception, SystemExit):
+        d = statefile.read_json(path or paths.state("goplus_status.json"), {}) if os.path.exists(path or paths.state("goplus_status.json")) else {}
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         d = {}
     st = {}
     if isinstance(d, dict):
@@ -1990,9 +1893,9 @@ def goplus_loop():
             doc9 = goplus_status_doc(state)
             st9 = json.dumps(doc9, sort_keys=True)
             if st9 != last_st:
-                common.atomic_write_json(GOPLUS_STATUS_PATH, doc9)
+                statefile.atomic_write_json(paths.state("goplus_status.json"), doc9)
                 last_st = st9
-        except (Exception, SystemExit) as e:
+        except (Exception, SystemExit) as e:  # noqa: BLE001 [boundary]
             log.warning("goplus loop 오류(다음 주기): %s", e)
         time.sleep(60)
 
@@ -2026,7 +1929,7 @@ def plan_monitor_loop():
             st = BUILDER.latest(90) if hasattr(BUILDER, "latest") else BUILDER.build()
             coins = {c["key"]: c for c in st["fields"]["coins"]}
             plans = st["fields"]["plans"]
-            sent = common.read_json(ALERTS_SENT_PATH, {}) if os.path.exists(ALERTS_SENT_PATH) else {}
+            sent = statefile.read_json(paths.state("alerts_sent_web.json"), {}) if os.path.exists(paths.state("alerts_sent_web.json")) else {}
             today = datetime.now(KST).strftime("%Y-%m-%d")
             changed = False
             for key, pl in plans.items():
@@ -2056,8 +1959,8 @@ def plan_monitor_loop():
                     changed = True
                     log.info("가격알림 적재: %s", text)
             if changed:
-                common.atomic_write_json(ALERTS_SENT_PATH, sent)
-        except (Exception, SystemExit) as e:
+                statefile.atomic_write_json(paths.state("alerts_sent_web.json"), sent)
+        except (Exception, SystemExit) as e:  # noqa: BLE001 [boundary]
             log.warning("plan monitor 실패(다음 주기): %s", e)
 
 
@@ -2073,22 +1976,22 @@ def ext_bind_step(cfg, port: int, ext: dict):
             try:
                 ext["srv"].shutdown()
                 ext["srv"].server_close()
-            except Exception:
+            except Exception:  # noqa: BLE001 [optional]
                 pass
             ext.update(srv=None, host=None, thread=None)
         if want and ext["srv"] is None:
             try:
                 srv2 = QuietHTTPServer((want, port), Handler)
             except OSError as e:
-                if ext.get("bind_err") != common.safe_err(e):
+                if ext.get("bind_err") != logs.safe_err(e):
                     log.warning("추가 바인딩 실패(%s:%d, 60초 뒤 재시도): %s", want, port, e)
-                    ext["bind_err"] = common.safe_err(e)
+                    ext["bind_err"] = logs.safe_err(e)
             else:
                 t2 = threading.Thread(target=srv2.serve_forever, daemon=True, name="http-ext")
                 t2.start()
                 ext.update(srv=srv2, host=want, thread=t2, bind_err=None)
                 log.info("가동: http://%s:%d (%s)", want, port, why)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [optional]
         log.warning("바인딩 감시 오류(다음 주기): %s", e)
 
 
@@ -2160,7 +2063,7 @@ class QuietHTTPServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
             return
-        super().handle_error(request, client_address)
+        logs.print_request_error(client_address)
 
 
 def _login_startup_warnings(cfg):
@@ -2179,7 +2082,7 @@ def _login_startup_warnings(cfg):
         elif ext9 and not tail9 and not ((web9.get("login") or {}).get("secure_cookie") is True if isinstance(web9.get("login"), dict) else False):
             log.warning("웹 로그인 켜짐 · 사설 IP(%s) 바인딩은 HTTP 라 비밀번호·로그인 쿠키가 같은 네트워크에 암호화 없이 오가요 — "
                         "테일넷(bind \"tailscale\")이나 HTTPS 리버스 프록시를 쓰세요(bind=%s)", ext9, mode9)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("로그인 상태 안내 실패: %s", type(e).__name__)
 
 
@@ -2200,19 +2103,19 @@ def main():
     global BUILDER
     if onboarding.demo_main(sys.modules[__name__]):
         return
-    common.ensure_dirs()
+    paths.ensure_dirs()
     ms9 = globals().get("_SQLITE_MEMSTAT_OFF")
     if ms9 is not None:
         log.info("SQLite 메모리 통계 %s — %s(빌드 자식 교착 방지 — fork 순간 다른 스레드가 쥔 전역 뮤텍스)",
                  "끔" if ms9 is True else ("끄기 시도함 · 적용 확인 불가" if ms9 == "unverified" else "못 끔(종전 — 교착이면 다시 fork)"),
-                 common.SQLITE_MEMSTAT_WHY[0] or "-")
+                 runtime.SQLITE_MEMSTAT_WHY[0] or "-")
     try:
         buildproc.sweep_tmp()
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [boundary]
         log.warning("임시 파일 정리 실패: %s", type(e9).__name__)
-    if common.tighten_config_mode():
+    if paths.tighten_config_mode():
         log.info("config.json 권한을 본인만 읽게(0600) 좁혔어요 — 증권사 비밀값이 들어갈 수 있는 파일이에요")
-    cfg = common.load_config()
+    cfg = config.load_config()
     bf_engine.configure(cfg)
     try:
         tp9, cp9 = str(os.environ.get("TJ_PORT") or "").strip(), int((cfg.get("web") or {}).get("port", 8023))
@@ -2221,16 +2124,16 @@ def main():
     except (TypeError, ValueError):
         pass
     try:
-        n9 = (common.scrub_secret_file(COVERAGE_PATH) + bf_engine.scrub_status_file()
-              + common.scrub_secret_file(chainsweep.STATUS_PATH))
+        n9 = (logs.scrub_secret_file(paths.state(coverage_limits.OUT_NAME)) + bf_engine.scrub_status_file()
+              + logs.scrub_secret_file(paths.state("chain_sweep.json")))
         if n9:
             log.info("수정 전 상태 문구 %d칸 비밀값 가림(수집 한계·백필 진행)", n9)
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [boundary]
         log.warning("상태 문구 비밀값 정리 실패(서빙 때 가림): %s", type(e9).__name__)
     try:
         histcurve.migrate_px1004()
-    except Exception as e9:
-        log.warning("px1004 이관 실패(다음 기동에 다시): %s", common.safe_err(e9)[:160])
+    except Exception as e9:   # noqa: BLE001 [boundary]
+        log.warning("px1004 이관 실패(다음 기동에 다시): %s", logs.safe_err(e9)[:160])
     login_auth.init(cfg)
     BUILDER = StateBuilder()
     import chainoff

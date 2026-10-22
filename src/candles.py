@@ -9,14 +9,14 @@ import re
 import threading
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import bf_engine
-import common
-import calcguard
+import logs, num_parse, paths, statefile
+import calcguard  # noqa: E402
 
-KST = timezone(timedelta(hours=9))
-CACHE_DIR = os.path.join(common.STATE_DIR, "candles")
+from timeutil import KST
+CACHE_DIR = paths.state("candles")
 IV_SEC = {"1m": 60, "5m": 300, "1h": 3600, "1d": 86400}
 MAX_PAGES = 12
 CLOSED_AFTER_S = 3600
@@ -38,6 +38,7 @@ HOST_POLICY = {
     "www.okx.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.gateio.ws": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.kucoin.com": {"rate": 4.0, "burst": 4, "conc": 2},
+    "api.coinbase.com": {"rate": 4.0, "burst": 4, "conc": 2},
     "api.coingecko.com": {"rate": 0.1, "burst": 1, "conc": 1},
 }
 for _h, _p in HOST_POLICY.items():
@@ -54,14 +55,15 @@ DS_CHAIN = {"eth": "ethereum", "bsc": "bsc", "base": "base", "arbitrum": "arbitr
             "bob": "bob", "story": "story", "somnia": "somnia", "avalanche": "avalanche", "abstract": "abstract",
             "robinhood": "robinhood"}
 try:
-    import pricing as _px
+    import pricing as _px, token_tables
     GT_NETWORK.update(getattr(_px, "GT_NETWORK", {}) or {})
-    DS_CHAIN.update(getattr(_px, "DS_CHAIN", {}) or {})
-except Exception:
+    DS_CHAIN.update(getattr(token_tables, "DS_CHAIN", {}) or {})
+except Exception as e_cg:   # noqa: BLE001 [optional]
+    calcguard.swallowed("candles:<module>[pricing_tables]", e_cg)
     pass
 
 VENUE_KO = {"upbit": "업비트", "bithumb": "빗썸", "binance": "바이낸스", "binance_futures": "바이낸스 선물", "bybit": "바이빗", "bybit_linear": "바이빗 선물",
-            "okx": "OKX", "gate": "게이트", "kucoin": "쿠코인", "dex": "DEX"}
+            "okx": "OKX", "gate": "게이트", "kucoin": "쿠코인", "coinbase": "코인베이스", "dex": "DEX"}
 CHAIN_KO = {"eth": "Ethereum", "bsc": "BSC", "base": "Base", "sol": "Solana", "arbitrum": "Arbitrum", "polygon": "Polygon",
             "optimism": "Optimism", "zksync": "zkSync", "megaeth": "MegaETH", "robinhood": "Robinhood"}
 
@@ -205,7 +207,7 @@ def _keyless_room(host, deadline=None):
     if mode == "fg":
         try:
             w = bf_engine.gate_wait(host)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("candles:_keyless_room", _cg9)
             w = 0.0
         return ("deferred", DEFER_NOTE) if w > FG_DEFER_WAIT_S else None
@@ -242,7 +244,7 @@ def _bg_key_ok() -> bool:
             return False
         _pm, pd = nft.cg_key_windows(rec, b, share)
         return int(b.cg_usage().get("total") or 0) + 1 <= int(pd) * BG_KEY_FRAC
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [probe]
         calcguard.swallowed("candles:_bg_key_ok", _cg9)
         return False
 
@@ -300,7 +302,7 @@ def _keyed(url, lane, allow, valid, deadline):
         return "skip", "allow"
     try:
         import cgkey
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("candles:_keyed", _cg9)
         return "skip", "import"
     if not cgkey.key():
@@ -323,11 +325,7 @@ def _keyed(url, lane, allow, valid, deadline):
 
 
 def _f(x):
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return v if v == v and v not in (float("inf"), float("-inf")) else None
+    return num_parse.to_float(x)
 
 
 def _row(t, o, h, l, c, v):
@@ -424,6 +422,19 @@ def parse_kucoin(d):
     return out
 
 
+def parse_coinbase(d: object):
+    rows = d.get("candles") if isinstance(d, dict) else None
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for r in rows:
+        if isinstance(r, dict) and r.get("start") not in (None, ""):
+            x = _row(int(float(r["start"])), r.get("open"), r.get("high"), r.get("low"), r.get("close"), r.get("volume"))
+            if x:
+                out.append(x)
+    return out
+
+
 def parse_gt(d):
     try:
         rows = d["data"]["attributes"]["ohlcv_list"]
@@ -481,7 +492,7 @@ def market_name(venue, base, quote):
         return f"{q}-{b}"
     if venue in ("binance", "binance_futures", "bybit", "bybit_linear"):
         return f"{b}{q}"
-    if venue in ("okx", "kucoin"):
+    if venue in ("okx", "kucoin", "coinbase"):
         return f"{b}-{q}"
     if venue == "gate":
         return f"{b}_{q}"
@@ -548,8 +559,8 @@ def _cache_store(path, key, out, why, note, complete, now):
 
 def _cache_put(path, obj):
     try:
-        common.atomic_write_json(path, obj)
-    except Exception as _cg9:
+        statefile.atomic_write_json(path, obj)
+    except Exception as _cg9:   # noqa: BLE001 [optional]
         calcguard.swallowed("candles:_cache_put", _cg9)
         pass
 
@@ -587,7 +598,7 @@ def _iso_kst(ts):
 
 
 PAGE_N = {"upbit": 200, "bithumb": 200, "binance": 1000, "binance_futures": 1000, "bybit": 1000, "bybit_linear": 1000, "okx": 100,
-          "gate": 900, "kucoin": 1500, "dex": 1000}
+          "gate": 900, "kucoin": 1500, "coinbase": 300, "dex": 1000}
 
 
 def _page_url(venue, mk, iv, a, b):
@@ -620,6 +631,10 @@ def _page_url(venue, mk, iv, a, b):
         typ = {"1m": "1min", "5m": "5min", "1h": "1hour", "1d": "1day"}[iv]
         return (f"https://api.kucoin.com/api/v1/market/candles?type={typ}&symbol={q(mk)}&startAt={a}&endAt={b - 1}",
                 parse_kucoin)
+    if venue == "coinbase":
+        g = {"1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "1h": "ONE_HOUR", "1d": "ONE_DAY"}[iv]
+        return (f"https://api.coinbase.com/api/v3/brokerage/market/products/{q(mk)}/candles?start={a}&end={b - 1}&granularity={g}",
+                parse_coinbase)
     raise ValueError(venue)
 
 
@@ -635,7 +650,7 @@ def _no_market(venue, err=None, body=None):
             return code == 400 and ("invalid symbol" in msg or "-1121" in msg)
         if venue == "gate":
             return code in (400, 404) and ("invalid_currency" in msg or "currency_pair" in msg or "not found" in msg)
-        if venue == "kucoin":
+        if venue in ("kucoin", "coinbase"):
             return code in (400, 404)
         if venue == "okx":
             return code == 400 and ("51001" in msg or "doesn't exist" in msg)
@@ -654,6 +669,12 @@ def _no_market(venue, err=None, body=None):
         if venue == "kucoin":
             return str(body.get("code")) in ("400100", "900001")
     return False
+
+
+def _day_live(rows, iv):
+    if iv != "1d" or not rows:
+        return rows
+    return [r for r in rows if isinstance(r, list) and len(r) >= 6 and r[5] and r[5] > 0]
 
 
 def banned_market(venue, quote) -> bool:
@@ -679,7 +700,8 @@ def fetch_cex(venue, base, quote, iv, t0, t1, now=None):
     if closed:
         c = _cache_get(cp)
         if _cache_ok(c, now):
-            return Result(candles=c["candles"] or None, why=None if c["candles"] else (c.get("why") or "no_data"),
+            kept = _day_live(c["candles"], iv)
+            return Result(candles=kept or None, why=None if kept else (c.get("why") or "no_data"),
                           note=c.get("note"), cached=True)
     if venue == "gate" and (now - t0) / s > GATE_MAX_POINTS:
         return Result(why="too_old", note=f"게이트 {iv} 봉은 최근 {int(GATE_MAX_POINTS * s / 86400)}일까지만(공개 API 한도)")
@@ -703,7 +725,7 @@ def fetch_cex(venue, base, quote, iv, t0, t1, now=None):
                 if _no_market(venue, err=e):
                     neg_put(nk, "no_market")
                     return Result(why="no_market", note=f"{VENUE_KO.get(venue, venue)} {mk} 마켓 없음", calls=calls)
-                return Result(why="net", note=f"{VENUE_KO.get(venue, venue)} 봉 조회 실패({getattr(e, 'kind', '?')}: {common.safe_err(e)[:80]})",
+                return Result(why="net", note=f"{VENUE_KO.get(venue, venue)} 봉 조회 실패({getattr(e, 'kind', '?')}: {logs.safe_err(e)[:80]})",
                               calls=calls)
             got = parser(d)
             if got is None:
@@ -717,8 +739,8 @@ def fetch_cex(venue, base, quote, iv, t0, t1, now=None):
             else:
                 b = a
     except BudgetExceeded as e:
-        return Result(why="budget", note=common.safe_err(e), calls=calls)
-    out = norm(rows, t0, t1)
+        return Result(why="budget", note=logs.safe_err(e), calls=calls)
+    out = _day_live(norm(rows, t0, t1), iv)
     complete = b <= t0
     why = None if out else "no_data"
     note = None if out else f"{VENUE_KO.get(venue, venue)} {mk} 그 구간 봉 없음(보존 기간 밖·상장 전·거래 없음)"
@@ -850,7 +872,7 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True)
                 if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) == 404:
                     neg_put(nk, "no_market")
                     return Result(why="no_market", note="GeckoTerminal 풀 없음", calls=calls)
-                return Result(why="net", note=f"GeckoTerminal 조회 실패({getattr(e, 'kind', '?')}: {common.safe_err(e)[:80]})", calls=calls)
+                return Result(why="net", note=f"GeckoTerminal 조회 실패({getattr(e, 'kind', '?')}: {logs.safe_err(e)[:80]})", calls=calls)
             got = parse_gt(d)
             if got is None:
                 return Result(why="bad", note=f"GeckoTerminal 응답 형식 이상: {str(d)[:100]}", calls=calls)
@@ -867,7 +889,7 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True)
                 break
             b = oldest - 1
     except BudgetExceeded as e:
-        return Result(why="budget", note=common.safe_err(e), calls=calls)
+        return Result(why="budget", note=logs.safe_err(e), calls=calls)
     out = norm(rows, t0, t1)
     why = None if out else "no_data"
     note = None if out else "GeckoTerminal 그 구간 봉 없음(무료 API 과거 한도·풀 생성 전·거래 없음)"
@@ -1200,7 +1222,7 @@ def fetch_cg(chain, token, t0, t1, now=None, keyed=True):
                 dl9 = max(dl9, time.time() + 30)
             d = _get(url, deadline=dl9, inline_wait=60.0, **({"single": True} if chart_mode_now() == "bg" else {}))
     except BudgetExceeded as e:
-        return Result(why="budget", note=common.safe_err(e))
+        return Result(why="budget", note=logs.safe_err(e))
     except bf_engine.NetError as e:
         if _bg_mark_429("api.coingecko.com", e):
             return Result(why="bg_stop", note=BG_STOP_NOTE, calls=1)
@@ -1210,8 +1232,8 @@ def fetch_cg(chain, token, t0, t1, now=None, keyed=True):
             neg_put(nk, "no_market", ttl=7 * 86400)
             return Result(why="no_market", note="코인게코 미추적 토큰", calls=1)
         if getattr(e, "code", None) == 401:
-            return Result(why="too_old", note=f"코인게코 무키 API 한도({common.safe_err(e)[:80]})", calls=1)
-        return Result(why="net", note=f"코인게코 조회 실패({getattr(e, 'kind', '?')}: {common.safe_err(e)[:80]})", calls=1)
+            return Result(why="too_old", note=f"코인게코 무키 API 한도({logs.safe_err(e)[:80]})", calls=1)
+        return Result(why="net", note=f"코인게코 조회 실패({getattr(e, 'kind', '?')}: {logs.safe_err(e)[:80]})", calls=1)
     got = parse_cg_range(d)
     if got is None:
         return Result(why="bad", note=f"코인게코 응답 형식 이상: {str(d)[:100]}", calls=1)
@@ -1379,7 +1401,7 @@ def fetch_cg_id(cid, t0, t1, now=None, keyed=True):
                 dl9 = max(dl9, time.time() + 30)
             d = _get(url, deadline=dl9, inline_wait=60.0, **({"single": True} if chart_mode_now() == "bg" else {}))
     except BudgetExceeded as e:
-        return Result(why="budget", note=common.safe_err(e))
+        return Result(why="budget", note=logs.safe_err(e))
     except bf_engine.NetError as e:
         if _bg_mark_429("api.coingecko.com", e):
             return Result(why="bg_stop", note=BG_STOP_NOTE, calls=1)
@@ -1388,7 +1410,7 @@ def fetch_cg_id(cid, t0, t1, now=None, keyed=True):
         if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) == 404:
             neg_put(nk, "no_market", ttl=7 * 86400)
             return Result(why="no_market", note="코인게코 id 없음", calls=1)
-        return Result(why="net", note=f"코인게코 조회 실패({getattr(e, 'kind', '?')}: {common.safe_err(e)[:80]})", calls=1)
+        return Result(why="net", note=f"코인게코 조회 실패({getattr(e, 'kind', '?')}: {logs.safe_err(e)[:80]})", calls=1)
     got = parse_cg_range(d)
     if got is None:
         return Result(why="bad", note=f"코인게코 응답 형식 이상: {str(d)[:100]}", calls=1)
@@ -1412,7 +1434,7 @@ def _cg_error_body(d) -> bool:
     return er9 is not None and not (isinstance(er9, dict) and "usd" in er9)
 
 
-def cg_simple_usd(ids, now=None, ttl=600, fail=None, keyed=False, key_only=False):
+def cg_simple_usd(ids, now=None, ttl=600, fail=None, keyed=False, key_only=False, at: dict = None):
     now = now or time.time()
     ids = sorted({str(i) for i in ids or () if i and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,99}", str(i))})
     want = [i for i in ids if not (i in _CG_SIMPLE and now - _CG_SIMPLE[i][0] < ttl)]
@@ -1425,7 +1447,7 @@ def cg_simple_usd(ids, now=None, ttl=600, fail=None, keyed=False, key_only=False
             elif kind9 == "err":
                 d = None
             elif key_only:
-                return _cg_simple_have(ids, now, ttl)
+                return _cg_simple_have(ids, now, ttl, at)
             else:
                 d = _get(u9, deadline=time.time() + 30, inline_wait=10.0)
         except (BudgetExceeded, bf_engine.NetError):
@@ -1440,12 +1462,15 @@ def cg_simple_usd(ids, now=None, ttl=600, fail=None, keyed=False, key_only=False
                 _CG_SIMPLE[i] = (now, v)
             elif isinstance(d, dict):
                 _CG_SIMPLE[i] = (now, None)
-    return _cg_simple_have(ids, now, ttl)
+    return _cg_simple_have(ids, now, ttl, at)
 
 
-def _cg_simple_have(ids, now, ttl):
+def _cg_simple_have(ids, now, ttl, at=None):
     lim = max(float(ttl or 0), CG_SIMPLE_MAX_AGE_S)
-    return {i: _CG_SIMPLE[i][1] for i in ids if i in _CG_SIMPLE and _CG_SIMPLE[i][1] and now - _CG_SIMPLE[i][0] <= lim}
+    out = {i: _CG_SIMPLE[i] for i in ids if i in _CG_SIMPLE and _CG_SIMPLE[i][1] and now - _CG_SIMPLE[i][0] <= lim}
+    if at is not None:
+        at.update({i: e[0] for i, e in out.items()})
+    return {i: e[1] for i, e in out.items()}
 
 
 def fetch_cg_id_hourly(cid, t0, t1, now=None):

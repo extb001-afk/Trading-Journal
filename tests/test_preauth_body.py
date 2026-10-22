@@ -2,19 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import ast
-import json
-import os
-import socket
-import threading
-import time
+import ast  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
-import web
-import login_auth
-import settings_store as ss
+import web  # noqa: E402
+import login_auth  # noqa: E402
 
 
 def ck(name, cond, extra=None):
@@ -110,7 +109,7 @@ ck("NC2+② 정상 로그인(본문 한 번에) = 200 + 세션 쿠키", code == 
 big = json.dumps(["a" * 1000] * 200).encode()
 c = socket.create_connection(("127.0.0.1", port), timeout=10)
 t0 = time.monotonic()
-c.sendall(head("/api/__synthetic__", len(big), f"Cookie: tj_session={tok}\r\nX-TJ-CSRF: {ss.csrf_token()}\r\n"))
+c.sendall(head("/api/__synthetic__", len(big), f"Cookie: tj_session={tok}\r\nX-TJ-CSRF: {login_auth._sess_csrf(tok)}\r\n"))
 step = len(big) // 20 + 1
 for i in range(0, len(big), step):
     time.sleep(0.75)

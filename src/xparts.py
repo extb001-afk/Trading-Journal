@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import num_parse
 
 GEN = 2
 KEYS = ("ku", "kb", "ub", "rest")
@@ -13,13 +13,7 @@ REST_SEEN_USD = 1.0
 
 
 def num(v):
-    if isinstance(v, bool) or v is None:
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
+    return num_parse.to_float(v, allow_bool=False)
 
 
 def ub_norm(v) -> dict:

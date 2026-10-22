@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import time
-import urllib.error
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
 
-import pricing
+import pricing  # noqa: E402
 
 chk = T.chk
 real_time = time.time

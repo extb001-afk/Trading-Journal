@@ -1,0 +1,200 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=px_coinbase · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "px_coinbase",
+ "clock": {
+  "now": 1760000404.8999987,
+  "tick": 0.0
+ },
+ "secrets": [],
+ "requests": 3,
+ "interactions": [
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/market/products?product_type=SPOT",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/market/products?product_type=SPOT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "products": [
+      {
+       "product_id": "BTC-USD",
+       "price": "60000.5",
+       "volume_24h": "1200",
+       "approximate_quote_24h_volume": "7.2e7",
+       "base_currency_id": "BTC",
+       "quote_currency_id": "USD",
+       "status": "online",
+       "trading_disabled": false,
+       "is_disabled": false
+      },
+      {
+       "product_id": "BTC-USDC",
+       "price": "59990",
+       "volume_24h": "10",
+       "base_currency_id": "BTC",
+       "quote_currency_id": "USDC",
+       "status": "online",
+       "trading_disabled": false
+      },
+      {
+       "product_id": "MON-USDC",
+       "price": "0.045",
+       "volume_24h": "900000",
+       "base_currency_id": "MON",
+       "quote_currency_id": "USDC",
+       "status": "online",
+       "trading_disabled": false
+      }
+     ],
+     "num_products": 7,
+     "pagination": {
+      "has_next": true,
+      "next_cursor": "p2"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/market/products?product_type=SPOT&cursor=p2",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/market/products?product_type=SPOT&cursor=p2"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "products": [
+      {
+       "product_id": "OLD-USD",
+       "price": "1.5",
+       "volume_24h": "5",
+       "base_currency_id": "OLD",
+       "quote_currency_id": "USD",
+       "status": "delisted",
+       "trading_disabled": true
+      },
+      {
+       "product_id": "ETH-BTC",
+       "price": "0.05",
+       "volume_24h": "5",
+       "base_currency_id": "ETH",
+       "quote_currency_id": "BTC",
+       "status": "online"
+      },
+      {
+       "product_id": "DEAD-USD",
+       "price": "2",
+       "volume_24h": "0",
+       "base_currency_id": "DEAD",
+       "quote_currency_id": "USD",
+       "status": "online"
+      },
+      {
+       "product_id": "MON-USD",
+       "price": "0.0452",
+       "volume_24h": "800000",
+       "base_currency_id": "MON",
+       "quote_currency_id": "USD",
+       "status": "online",
+       "trading_disabled": false
+      }
+     ],
+     "num_products": 7,
+     "pagination": {
+      "has_next": false,
+      "next_cursor": ""
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/market/products/MON-USD/candles?start=1759708800&end=1760054399&granularity=ONE_DAY",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/market/products/MON-USD/candles?start=1759708800&end=1760054399&granularity=ONE_DAY"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "candles": [
+      {
+       "start": "1759968000",
+       "low": "0.04",
+       "high": "0.05",
+       "open": "0.045",
+       "close": "0.04",
+       "volume": "1000"
+      },
+      {
+       "start": "1759881600",
+       "low": "0.04",
+       "high": "0.05",
+       "open": "0.045",
+       "close": "0.041",
+       "volume": "1000"
+      },
+      {
+       "start": "1759795200",
+       "low": "0.04",
+       "high": "0.05",
+       "open": "0.045",
+       "close": "0.042",
+       "volume": "1000"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

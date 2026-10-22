@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import re
-import subprocess
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("TJ_") or k.startswith("TJ_TEST_")}

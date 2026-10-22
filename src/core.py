@@ -11,11 +11,11 @@ import time
 from decimal import Decimal, localcontext, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, histmark, logs, paths, runtime, seeds
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
+    runtime.cpu_reserve_apply()
 import db as dbm
-import pricing
+import pricing, token_tables
 import acct_norm
 import spamguard
 import recon
@@ -24,6 +24,8 @@ import lpdec
 import lpsol
 import bf_engine
 import ledger_backup
+import recon_adj
+import ledger_lock
 import ops_requests
 import discopen
 import chain_registry
@@ -31,13 +33,12 @@ import chain_event
 import chain_state
 from inbox import SegmentReader
 
-log = common.setup_logging("tj-core")
+log = logs.setup_logging("tj-core")
 
 
-from core_common import (
+from core_common import (  # noqa: F401
     CLASSIFIER_VER,
     dm,
-    DM_PATH,
     DM_RECENT_SEC,
     KRW_FILL_CALLS,
     KRW_FILL_SEC,
@@ -52,72 +53,54 @@ from core_common import (
 )
 
 
-from core_dec import DecMixin
+from core_dec import DecMixin  # noqa: E402
 
 
-from core_classify import ClassifyMixin
+from core_classify import ClassifyMixin  # noqa: E402
 
 
-from core_outflow import OutflowMixin
+from core_outflow import OutflowMixin  # noqa: E402
 
 
-from core_lp import LpMixin
+from core_lp import LpMixin  # noqa: E402
 
 
-from core_post import PostMixin
+from core_post import PostMixin  # noqa: E402
 
 
-from core_pricing import PricingMixin
+import core_svc  # noqa: E402
 
 
-from core_upbit_recon import UpbitReconMixin
+from core_snap import SnapMixin  # noqa: E402
 
 
-from core_recon import ReconMixin
+from core_inbox import InboxMixin  # noqa: E402
 
 
-from core_prov import ProvMixin
+from core_late import LateMixin  # noqa: E402
 
 
-from core_upbit import UpbitMixin
+from core_ext import ExtMixin  # noqa: E402
+import calcguard, migrate  # noqa: E402
 
 
-from core_exf import ExfMixin
-
-
-from core_fills import FillsMixin
-
-
-from core_snap import SnapMixin
-
-
-from core_inbox import InboxMixin
-
-
-from core_late import LateMixin
-
-
-from core_ext import ExtMixin
-import calcguard
-
-
-class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, UpbitMixin, ProvMixin, ReconMixin, UpbitReconMixin, PricingMixin, PostMixin, LpMixin, OutflowMixin, ClassifyMixin, DecMixin):
+class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, OutflowMixin, ClassifyMixin, DecMixin):
     LEDGER_GEN = 2
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
         if dbm.SCHEMA_VERSION != self.LEDGER_GEN:
             raise SystemExit(f"★db.py 세대({dbm.SCHEMA_VERSION}) ≠ core 세대({self.LEDGER_GEN}) — 배포 파일 혼합, 기동 금지★")
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             if os.environ.get("TJ_ALLOW_NEW_LEDGER") != "1":
-                raise SystemExit(f"★원장 파일 없음: {common.DB_PATH} — 백업에서 되돌리기: python3 tools/ledger_restore.py list"
+                raise SystemExit(f"★원장 파일 없음: {paths.DB_PATH} — 백업에서 되돌리기: python3 tools/ledger_restore.py list"
                                  f" (정말 새 원장이면 TJ_ALLOW_NEW_LEDGER=1 명시)★")
         else:
             _ro9 = None
-            for _uri9 in (common.sqlite_ro_uri(common.DB_PATH), common.sqlite_ro_uri(common.DB_PATH, immutable=True), None):
+            for _uri9 in (paths.sqlite_ro_uri(paths.DB_PATH), paths.sqlite_ro_uri(paths.DB_PATH, immutable=True), None):
                 try:
-                    _ro9 = (sqlite3.connect(_uri9, uri=True, timeout=10) if _uri9
-                            else sqlite3.connect(common.DB_PATH, timeout=10))
+                    _ro9 = (dbm.connect(_uri9, uri=True, timeout=10) if _uri9
+                            else dbm.connect(paths.DB_PATH, timeout=10))
                     _ro9.execute("SELECT 1").fetchone()
                     break
                 except sqlite3.OperationalError:
@@ -125,7 +108,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                         _ro9.close()
                     _ro9 = None
             if _ro9 is None:
-                raise SystemExit(f"★원장 열기 실패(세대 검사 불가): {common.DB_PATH}★")
+                raise SystemExit(f"★원장 열기 실패(세대 검사 불가): {paths.DB_PATH}★")
             try:
                 _has = _ro9.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
                 _v9 = _ro9.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone() if _has else None
@@ -136,7 +119,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
             if _v9 is not None and int(_v9[0]) != self.LEDGER_GEN:
                 raise SystemExit(f"★DB 세대({_v9[0]}) ≠ core 세대({self.LEDGER_GEN}) — canonical 마이그레이션"
                                  f"({self._cutover_hint()}) 없이 이 코드로 기동 금지★")
-        self.conn = dbm.open_db(common.DB_PATH)
+        self.conn = dbm.open_db(paths.DB_PATH)
         if dbm.SCHEMA_VERSION != self.LEDGER_GEN:
             raise SystemExit(f"★db.py 세대({dbm.SCHEMA_VERSION}) ≠ core 세대({self.LEDGER_GEN}) — 배포 파일 혼합, 기동 금지★")
         ver = self.conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
@@ -145,7 +128,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                              f"({self._cutover_hint()}) 없이 이 코드로 기동 금지★")
         self.conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('exf_wd_fee_since', ?)", (str(int(time.time())),))
         self.conn.commit()
-        self.wd_fee_since = int(self.conn.execute("SELECT v FROM meta WHERE k='exf_wd_fee_since'").fetchone()["v"])
+        self.svc_exf = core_svc.ExfService(self, int(self.conn.execute("SELECT v FROM meta WHERE k='exf_wd_fee_since'").fetchone()["v"]))
         self.native_sym = cfg.get("native_symbol", {})
         self.my_wallets = {}
         self.sol_wallets = set()
@@ -173,20 +156,19 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                 self.my_wallets.setdefault(w["chain"], set()).add(str(w["address"]).lower())
         self.wrapped = {k.lower(): v.lower() for k, v in cfg.get("wrapped_native", {}).items()}
         self.bridges = self._load_seed("bridge_contracts.json")
-        self.lp_mgrs = lpdec.lp_managers(common.BASE_DIR)
+        self.lp_mgrs = lpdec.lp_managers(paths.BASE_DIR)
         self._load_exchange_addrs(cfg)
         self._dec_startup()
         self.conn.commit()
-        self.reader = SegmentReader(os.path.join(common.INBOX_DIR, "evm"))
-        self.sol_reader = SegmentReader(os.path.join(common.INBOX_DIR, "sol"))
-        self.bsc_reader = SegmentReader(os.path.join(common.INBOX_DIR, "bsc"))
-        self.ex_reader = SegmentReader(os.path.join(common.INBOX_DIR, "ex"))
-        self.chain_readers = [(c9, SegmentReader(os.path.join(common.INBOX_DIR, chain_registry.spec(c9).stream)))
-                              for c9 in sorted(set(self.chain_owners) | set(chain_registry.present_streams(common.INBOX_DIR, common.STATE_DIR)))]
-        self.px = pricing.PxCache(os.path.join(common.STATE_DIR, "px_cache_core.json"), track_legacy=True)
-        self._last_price_pass = 0.0
-        self._px_skip = (None, "[]")
-        self._last_recon = 0.0
+        self.reader = SegmentReader(os.path.join(paths.INBOX_DIR, "evm"))
+        self.sol_reader = SegmentReader(os.path.join(paths.INBOX_DIR, "sol"))
+        self.bsc_reader = SegmentReader(os.path.join(paths.INBOX_DIR, "bsc"))
+        self.ex_reader = SegmentReader(os.path.join(paths.INBOX_DIR, "ex"))
+        self.chain_readers = [(c9, SegmentReader(os.path.join(paths.INBOX_DIR, chain_registry.spec(c9).stream)))
+                              for c9 in sorted(set(self.chain_owners) | set(chain_registry.present_streams(paths.INBOX_DIR, paths.STATE_DIR)))]
+        self.px = pricing.PxCache(paths.state("px_cache_core.json"), track_legacy=True)
+        self.svc_price = core_svc.PriceService(self)
+        self.svc_recon = core_svc.ReconService(self)
         self.recon_months = 0.0 if cfg.get("backfill_full_history") \
             else float(cfg.get("backfill_months") or 0)
         self._last_ext_check = 0.0
@@ -201,7 +183,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
         return int(min([t] + vals))
 
     def _load_seed(self, name: str) -> set:
-        data = common.seed_json(name, [], base_dir=common.BASE_DIR, strict=True)
+        data = seeds.seed_json(name, [], base_dir=paths.BASE_DIR, strict=True)
         return {a.lower() for a in data}
 
     def _load_exchange_addrs(self, cfg: dict):
@@ -268,9 +250,9 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
         if kind == "native":
             name = sym or f"native:{chain}"
         elif kind == "token" and ca:
-            st = pricing.STABLE_CAS.get(chain, {}).get(ca)
+            st = token_tables.STABLE_CAS.get(chain, {}).get(ca)
             if chain == "sol" and not st:
-                st = pricing.STABLE_MINTS.get(ca)
+                st = token_tables.STABLE_MINTS.get(ca)
             if st:
                 name = st
             elif ca == self.wrapped.get(chain):
@@ -297,7 +279,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
     def _ext_swap(cls, live: str, tmp: str, ts: str, keep_recent: int = None, keep_oldest: bool = False):
         d = os.path.dirname(live)
         base = os.path.basename(live) + ".pre_extrebuild_"
-        olds = sorted(f9 for f9 in os.listdir(d) if f9.startswith(base) and not f9.endswith(("-wal", "-shm")))
+        olds = sorted(f9 for f9 in os.listdir(d) if f9.startswith(base) and not f9.endswith(("-wal", "-shm", "-journal")))
         kr = cls.EXT_KEEP_RECENT if keep_recent is None else max(0, int(keep_recent))
         keep9 = set(olds[:1] if keep_oldest else []) | set(olds[len(olds) - kr:] if kr else [])
         drop = [f9 for f9 in olds if f9 not in keep9]
@@ -307,7 +289,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
         ok9 = st9 == "valid"
         if ok9:
             for f9 in drop:
-                for sfx in ("", "-wal", "-shm"):
+                for sfx in ("", "-wal", "-shm", "-journal"):
                     try:
                         os.remove(os.path.join(d, f9 + sfx))
                     except OSError:
@@ -315,7 +297,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
         elif drop:
             log.warning("재구축 교체: 이번 보존본 확인 실패(%s) — 옛 보존본 %d개 그대로 둠", why9, len(drop))
         try:
-            os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+            os.remove(paths.state("daily_cache.json"))
         except FileNotFoundError:
             pass
 
@@ -325,7 +307,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                 "SELECT a.asset_id, a.chain, a.address, a.group_id, g.name FROM assets a LEFT JOIN asset_groups g"
                 " ON g.group_id=a.group_id WHERE a.kind='token' AND a.address IS NOT NULL").fetchall():
             ca = r["address"]
-            want = pricing.STABLE_CAS.get(r["chain"], {}).get(ca) or (pricing.STABLE_MINTS.get(ca) if r["chain"] == "sol" else None)
+            want = token_tables.STABLE_CAS.get(r["chain"], {}).get(ca) or (token_tables.STABLE_MINTS.get(ca) if r["chain"] == "sol" else None)
             if not want or r["name"] == want or r["group_id"] is None:
                 continue
             others = self.conn.execute("SELECT count(*) FROM assets WHERE group_id=? AND asset_id!=?",
@@ -345,12 +327,10 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                     with localcontext() as ctx:
                         ctx.prec = 100
                         vals = [format(Decimal(cur[i]) + Decimal(p[i + 1]), "f") for i in range(3)]
-                    self.conn.execute("UPDATE positions SET qty_norm=?, qty_unknown_norm=?, cost_alloc_usd=? WHERE group_id=? AND location=?",
-                                      (*vals, tgt, p["location"]))
+                    self._leg_sql("_stable_regroup.1", (*vals, tgt, p["location"]))
                 else:
-                    self.conn.execute("INSERT INTO positions (group_id, location, qty_norm, qty_unknown_norm, cost_alloc_usd) VALUES (?,?,?,?,?)",
-                                      (tgt, p["location"], p["qty_norm"], p["qty_unknown_norm"], p["cost_alloc_usd"]))
-            self.conn.execute("DELETE FROM positions WHERE group_id=?", (old,))
+                    self._leg_sql("_stable_regroup.2", (tgt, p["location"], p["qty_norm"], p["qty_unknown_norm"], p["cost_alloc_usd"]))
+            self._leg_sql("_stable_regroup.3", (old,))
             moved.append(f"{r['chain']}:{ca[:10]} {r['name']}→{want}(g{old}→g{tgt})")
         if moved:
             self.conn.commit()
@@ -359,14 +339,14 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
 
     @staticmethod
     def _cutover_hint() -> str:
-        return common.tool_ref("cutover_c.sh", "이 설치엔 컷오버 도구가 없어요 — 같은 세대 코드로 되돌리거나 원장 백업 state/backups/ledger_YYYYMMDD.db 사용")
+        return paths.tool_ref("cutover_c.sh", "이 설치엔 컷오버 도구가 없어요 — 같은 세대 코드로 되돌리거나 원장 백업 state/backups/ledger_YYYYMMDD.db 사용")
 
     def run(self):
         _mk = self._meta_get("rebuild_incomplete")
         if _mk and str(_mk).startswith("cutover_c_ex_drain:"):
             raise SystemExit("★컷오버 drain 마커 감지(%s) — 세대 1 복귀라면 %s 를 rc 0 으로 완주한 뒤 기동,"
-                             " 세대 2 라면 컷오버가 미완(%s)★" % (_mk, common.tool_ref("repost_orders_gen1.py", "주문 재기장 도구(운영자 전용 — 이 설치에 없음)"),
-                                                          common.tool_ref("rollback_c.sh", "원장 백업 state/backups/ledger_YYYYMMDD.db 로 되돌리기")))
+                             " 세대 2 라면 컷오버가 미완(%s)★" % (_mk, paths.tool_ref("repost_orders_gen1.py", "주문 재기장 도구(운영자 전용 — 이 설치에 없음)"),
+                                                          paths.tool_ref("rollback_c.sh", "원장 백업 state/backups/ledger_YYYYMMDD.db 로 되돌리기")))
         if _mk:
             raise SystemExit("★rebuild_incomplete 마커 감지 — 재파생이 완료되지 않은 원장."
                              " 백업(state/backups/ledger_YYYYMMDD.db)으로 되돌리거나 tools/rebuild2.py 로 다시 계산해 교체한 뒤 기동하라★")
@@ -374,16 +354,16 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
             try:
                 self._hist_late_fence()
                 break
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 try:
                     self.conn.rollback()
-                except Exception as _cg9:
-                    calcguard.swallowed("core:Core.run", _cg9)
+                except Exception as _cg9:   # noqa: BLE001 [cleanup]
+                    calcguard.swallowed("core:Core.run[rollback#1]", _cg9)
                     pass
                 if i9 + 1 >= max(1, int(self.HL_FENCE_TRIES)):
                     raise SystemExit("★늦은 원장 행 커서 울타리(meta %s) 초기화 실패 — 수집 소비를 시작하지 않음(원장 쓰기 가능 여부 확인 뒤 다시 기동): %s★"
-                                     % (common.HIST_LATE_PID_K, common.safe_err(str(e))[:200]))
-                log.warning("늦은 원장 행 커서 울타리 초기화 실패(%d/%d — 잠시 뒤 다시): %s", i9 + 1, self.HL_FENCE_TRIES, common.safe_err(str(e))[:200])
+                                     % (histmark.HIST_LATE_PID_K, logs.safe_err(str(e))[:200]))
+                log.warning("늦은 원장 행 커서 울타리 초기화 실패(%d/%d — 잠시 뒤 다시): %s", i9 + 1, self.HL_FENCE_TRIES, logs.safe_err(str(e))[:200])
                 time.sleep(float(self.HL_FENCE_SLEEP))
         streams = (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader),
                    ("ex", self.ex_reader)) + tuple(self.chain_readers)
@@ -395,28 +375,11 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
         log.info("가동: inbox %s", {s: offs[s] for s, _ in streams})
         try:
             self._stable_regroup()
-        except Exception as e:
-            calcguard.swallowed("core:Core.run", e)
+        except Exception as e:  # noqa: BLE001 [boundary]
+            calcguard.swallowed("core:Core.run[_stable_regroup]", e)
             self.conn.rollback()
             log.error("스테이블 재그룹 실패(원장 무변, 다음 기동 재시도): %s", e)
-        try:
-            self._reclass_plain_xfer_once()
-        except Exception as e:
-            calcguard.swallowed("core:Core.run", e)
-            self.conn.rollback()
-            log.error("평범한 전송 재분류 실패(원장 무변, 다음 기동 재시도): %s", e)
-        try:
-            self._reclass_added_lp_mgrs_once()
-        except Exception as e:
-            calcguard.swallowed("core:Core.run", e)
-            self.conn.rollback()
-            log.error("새 LP 관리자 재분류 실패(원장 무변, 다음 기동 재시도): %s", e)
-        try:
-            self._out_px_band_fix_once()
-        except Exception as e:
-            calcguard.swallowed("core:Core.run", e)
-            self.conn.rollback()
-            log.error("보낸 내역 시가 되돌림 실패(원장 무변, 다음 기동 재시도): %s", e)
+        migrate.startup(self)
         while True:
             n = 0
             drained = set()
@@ -430,106 +393,107 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
             if "ex" in drained:
                 self._drain_at = time.time()
                 try:
-                    self._exf_late_flush()
-                except Exception as e:
-                    calcguard.swallowed("core:Core.run", e)
+                    self.svc_exf._exf_late_flush()
+                except Exception as e:  # noqa: BLE001 [boundary]
+                    calcguard.swallowed("core:Core.run[_exf_late_flush]", e)
                     self.conn.rollback()
-                    log.error("늦은 행 순액 흡수 실패(대기표 유지 · 다음 주기): %s", common.safe_err(e)[:200])
+                    log.error("늦은 행 순액 흡수 실패(대기표 유지 · 다음 주기): %s", logs.safe_err(e)[:200])
             try:
-                self.price_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_price.price_pass()
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[price_pass]", e)
                 self.conn.rollback()
                 log.error("가격패스 실패(다음 주기): %s", e)
             try:
-                self.krw_fill_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_price.krw_fill_pass()
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[krw_fill_pass]", e)
                 self.conn.rollback()
                 log.error("원화 원가 채움 실패(다음 주기): %s", e)
             try:
-                self.deposit_rematch_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_exf.deposit_rematch_pass()
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[deposit_rematch_pass]", e)
                 self.conn.rollback()
                 log.error("입금 재대사 실패(다음 주기): %s", e)
             try:
-                self.exchange_recon_pass(drained)
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_exf.exchange_recon_pass(drained)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[exchange_recon_pass]", e)
                 self.conn.rollback()
                 log.error("거래소 대사 실패(다음 주기): %s", e)
             try:
-                self.exf_recon_pass(drained)
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_exf.exf_recon_pass(drained)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[exf_recon_pass]", e)
                 self.conn.rollback()
                 log.error("해외거래소 대사 실패(다음 주기): %s", e)
             try:
                 self.outflow_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[outflow_pass]", e)
                 self.conn.rollback()
                 log.error("보낸 내역 판정 반영 실패(다음 주기): %s", e)
             try:
                 self.poison_replay_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[poison_replay_pass]", e)
                 self.conn.rollback()
                 log.error("격리 레코드 재처리 실패(다음 주기): %s", e)
             try:
                 self.decimals_resolve_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[decimals_resolve_pass]", e)
                 self.conn.rollback()
                 log.error("자리수 해결 요청 처리 실패(다음 주기): %s", e)
             try:
                 self.ext_rebuild_pass(drained)
             except SystemExit:
                 raise
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[ext_rebuild_pass]", e)
                 try:
                     self.conn.rollback()
-                except Exception as _cg9:
-                    calcguard.swallowed("core:Core.run", _cg9)
+                except Exception as _cg9:  # noqa: BLE001 [cleanup]
+                    calcguard.swallowed("core:Core.run[rollback#2]", _cg9)
                     pass
                 log.error("과거 창 확장 재구축 점검 실패(다음 주기): %s", e)
             try:
-                self._gate_reload()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_recon._gate_reload()
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[_gate_reload]", e)
                 self.conn.rollback()
                 log.error("활동 게이트 반영 실패(다음 주기): %s", e)
             try:
-                self.recon_pass(drained)
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_recon.recon_pass(drained)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[recon_pass]", e)
                 self.conn.rollback()
                 log.error("recon_pass 실패(다음 주기 재시도): %s", e)
             try:
-                self.prov_pass()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_recon.prov_pass()
+            except Exception as e:   # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[prov_pass]", e)
                 self.conn.rollback()
-                log.warning("임시 잔고 처리 실패(다음 주기): %s", common.safe_err(str(e))[:200])
+                log.warning("임시 잔고 처리 실패(다음 주기): %s", logs.safe_err(str(e))[:200])
             try:
-                self.negabs_pass(drained)
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+                self.svc_recon.negabs_pass(drained)
+            except Exception as e:  # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[negabs_pass]", e)
                 self.conn.rollback()
-                log.error("발견 시점 기초 잔고 처리 실패(다음 주기): %s", common.safe_err(str(e))[:200])
+                log.error("발견 시점 기초 잔고 처리 실패(다음 주기): %s", logs.safe_err(str(e))[:200])
             try:
                 self._hist_late_scan()
-            except Exception as e:
-                calcguard.swallowed("core:Core.run", e)
+            except Exception as e:   # noqa: BLE001 [boundary]
+                calcguard.swallowed("core:Core.run[_hist_late_scan]", e)
                 try:
                     self.conn.rollback()
-                except Exception as _cg9:
-                    calcguard.swallowed("core:Core.run", _cg9)
+                except Exception as _cg9:  # noqa: BLE001 [cleanup]
+                    calcguard.swallowed("core:Core.run[rollback#3]", _cg9)
                     pass
-                log.warning("늦은 원장 행 표식 실패(다음 주기): %s", common.safe_err(str(e))[:200])
+                log.warning("늦은 원장 행 표식 실패(다음 주기): %s", logs.safe_err(str(e))[:200])
             ledger_backup.tick(log)
+            recon_adj.tick(self.conn, self._win_t0, log)
             if self.conn.in_transaction:
                 log.error("★패스 종료 후 트랜잭션 잔류 — 방어 롤백 (누수 경로 추적 필요)★")
                 self.conn.rollback()
@@ -537,9 +501,25 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, FillsMixin, ExfMixin, Upb
                 time.sleep(3)
 
 
+_WRITER_LOCK = {}
+
+
+def writer_lock(db_path):
+    try:
+        fd = ledger_lock.acquire(db_path, who="tj-core")
+    except ledger_lock.LedgerBusy:
+        log.warning("★다른 원장 작성자(tj-core·원장 도구·복원)가 쓰는 중(%s 잠김) — 그쪽이 끝날 때까지 대기(원장 작성자는 하나만)★", ledger_lock.LOCK_NAME)
+        fd = ledger_lock.acquire(db_path, who="tj-core", wait=True)
+        log.info("원장 잠금 획득 — 시작")
+    _WRITER_LOCK["fd"] = fd
+    return fd
+
+
 def main():
-    common.ensure_dirs()
-    cfg = common.load_config()
+    paths.ensure_dirs()
+    runtime.parent_watch_start()
+    writer_lock(paths.DB_PATH)
+    cfg = config.load_config()
     Core(cfg).run()
 
 
@@ -552,5 +532,5 @@ if __name__ == "__main__":
         if not ledger_backup.corrupt_error(e):
             raise
         log.critical("★%s — %s · 백업에서 되돌리기: python3 tools/ledger_restore.py list → restore <백업> --apply★",
-                     ledger_backup.CORRUPT_WHY, common.safe_err(e)[:160])
+                     ledger_backup.CORRUPT_WHY, logs.safe_err(e)[:160])
         sys.exit(3)

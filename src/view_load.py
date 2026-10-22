@@ -1,12 +1,11 @@
 from __future__ import annotations
 import bisect
-import common
+import logs, paths, statefile
 import json
 import os
 import re
 from decimal import Decimal
 from view_common import CHAIN_NAME
-from view_common import PREFS_PATH
 from view_common import STABLE_GROUPS
 from view_common import SUB_SID_RE
 from view_common import _GSYM_MEMO
@@ -21,7 +20,7 @@ from view_txkey import _ton_hash_uids
 from view_txkey import _txk
 from view_txkey import _wd_txk
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -29,8 +28,8 @@ log = logging.getLogger('tj-web')
 class LoadMixin:
 
     def prefs(self):
-        return common.read_json(PREFS_PATH, {"plans": {}, "ignored": []}) \
-            if os.path.exists(PREFS_PATH) else {"plans": {}, "ignored": []}
+        return statefile.read_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []}) \
+            if os.path.exists(paths.state("ui_prefs.json")) else {"plans": {}, "ignored": []}
 
     def _load(self, conn):
         rows = conn.execute(
@@ -40,7 +39,7 @@ class LoadMixin:
             " FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
             " LEFT JOIN asset_groups g ON g.group_id = a.group_id"
             " ORDER BY p.event_ts, p.source_ns, p.source_id,"
-            " CASE p.leg_kind WHEN 'disp' THEN 0 WHEN 'acq' THEN 1 ELSE 2 END, p.leg_seq").fetchall()
+            " CASE p.leg_kind WHEN 'disp' THEN 0 WHEN 'acq' THEN 1 ELSE 2 END, p.leg_seq, p.posting_id").fetchall()
         return rows
 
     def _drop_cancelled_openings(self, rows):
@@ -113,7 +112,7 @@ class LoadMixin:
                     pt9 = [pt9[0]] + pt9[2:]
                 mk9, no9 = (pt9[1], int(pt9[2])) if len(pt9) == 3 and pt9[2].isdigit() else ("", None)
                 return ("x", ex9, ms9, mk9, no9)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_load:LoadMixin._ord_key", _cg9)
             return None
         return None
@@ -121,6 +120,7 @@ class LoadMixin:
     def _replay_order(self, conn, rows):
         diag = {"tieRuns": 0, "tieMoved": 0, "wdMoved": 0, "arrMoved": 0, "wdKept": 0}
         self._ord_diag = diag
+        self._ord_far = []
         n = len(rows)
         if n < 2:
             return rows
@@ -198,9 +198,9 @@ class LoadMixin:
                     wd[(f"{ex9}:withdraw", u9)] = (ex9, t9)
                 elif k9 == "deposit" and str(st9 or "").upper() == "ACCEPTED":
                     dep[(f"{ex9}:deposit", u9)] = (ex9, t9)
-        except Exception as e9:
-            calcguard.swallowed("view_load:LoadMixin._ord_wd_first", e9)
-            log.warning("출금·도착 순서 색인 실패(이번 빌드 종전 순서): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_load:LoadMixin._ord_wd_first[ex9]", e9)
+            log.warning("출금·도착 순서 색인 실패(이번 빌드 종전 순서): %s", logs.safe_err(e9)[:160])
             return rows
         if not wd:
             return rows
@@ -213,9 +213,9 @@ class LoadMixin:
                                 " AND source_ns IN (%s)" % ",".join("?" * len(exns9)), exns9).fetchall()
             cand_c = conn.execute("SELECT source_ns, source_id, event_ts FROM postings WHERE source_kind = 'chain_tx' AND leg_kind = 'acq'"
                                   " AND event IN ('TRANSFER_IN', 'PROGRAM_IN')").fetchall()
-        except Exception as e9:
-            calcguard.swallowed("view_load:LoadMixin._ord_wd_first", e9)
-            log.warning("출금·도착 순서 후보 조회 실패(이번 빌드 종전 순서): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_load:LoadMixin._ord_wd_first[cand]", e9)
+            log.warning("출금·도착 순서 후보 조회 실패(이번 빌드 종전 순서): %s", logs.safe_err(e9)[:160])
             return rows
         wts = {}
         arr = []
@@ -234,12 +234,16 @@ class LoadMixin:
                 seen9.add((ns9, sid9))
                 arr.append((ns9, sid9, int(t9), tk9, None))
         pairs = []
+        far = []
         for ns9, sid9, at9, t9, aex9 in arr:
             for wns9, wu9, wex9 in wd_tx[t9]:
                 wt9 = wts.get((wns9, wu9))
+                if wt9 is not None and wex9 != aex9 and at9 + ORD_GAP_SEC < wt9 <= at9 + 30 * 86400:
+                    far.append((ns9, sid9, at9, wex9, wt9, t9))
                 if wt9 is None or wex9 == aex9 or not (at9 <= wt9 <= at9 + ORD_GAP_SEC):
                     continue
                 pairs.append(((ns9, sid9, at9), (wns9, wu9, wt9)))
+        self._ord_far = far
         if not pairs:
             return rows
 
@@ -304,7 +308,7 @@ class LoadMixin:
                         " WHERE p.source_kind='chain_tx' AND p.source_ns=? AND p.source_id=?", (parts[1], parts[2])).fetchall():
                     if g9 is not None:
                         out.add((int(g9), loc9))
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_load:LoadMixin._prewin_pairs", e9)
             log.warning("재계산 대기 표식 읽기 실패(원장 음수 보유 문구 구분 없이): %s", type(e9).__name__)
             return set()

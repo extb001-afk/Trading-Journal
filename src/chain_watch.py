@@ -5,10 +5,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import chain_event
-import chain_registry as reg
-import chain_state
+import config, logs, paths  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state  # noqa: E402
 
 LANES = ("latest", "history")
 
@@ -55,7 +55,7 @@ class Collector:
                     items, nxt = self.ad.discover_page(o, q, cur)
                 except Transient as e:
                     self.errors += 1
-                    self._say("[%s] %s 발견 일시 실패(다음 주기): %s", self.ad.chain, key, common.safe_err(e)[:120])
+                    self._say("[%s] %s 발견 일시 실패(다음 주기): %s", self.ad.chain, key, logs.safe_err(e)[:120])
                     break
                 added += self.st.pending_upsert([(it["stable_id"], dict(it, owner=o, lane=lane)) for it in items or ()])
                 if nxt is None:
@@ -77,7 +77,7 @@ class Collector:
                 rec = self.ad.fetch_and_normalize(ref, set(self.owners))
             except Transient as e:
                 self.errors += 1
-                self.st.reschedule(sid, "일시 실패: " + common.safe_err(e)[:100])
+                self.st.reschedule(sid, "일시 실패: " + logs.safe_err(e)[:100])
                 continue
             if rec is None:
                 self.st.reschedule(sid, "미확정·상세 미완")
@@ -114,9 +114,9 @@ class Collector:
 
 def main(chain: str, make_adapter, poll_default: int = 60):
     from inbox import SegmentWriter
-    log = common.setup_logging("tj-" + chain)
-    common.ensure_dirs()
-    cfg = common.load_config()
+    log = logs.setup_logging("tj-" + chain)
+    paths.ensure_dirs()
+    cfg = config.load_config()
     owners = reg.owners(cfg, chain)
     if not owners:
         raise SystemExit(f"추적할 {reg.display_name(chain)} 지갑이 없음 — config chain_wallets 확인")
@@ -124,7 +124,7 @@ def main(chain: str, make_adapter, poll_default: int = 60):
     st = chain_state.ChainState(chain)
     st.drop_owner(owners)
     st.save()
-    col = Collector(make_adapter(cfg), SegmentWriter(os.path.join(common.INBOX_DIR, sp.stream)), st, owners, log=log)
+    col = Collector(make_adapter(cfg), SegmentWriter(os.path.join(paths.INBOX_DIR, sp.stream)), st, owners, log=log)
     poll = int(((cfg.get(reg.CFG_CHAIN_KEY) or {}).get(chain) or {}).get("poll_sec", poll_default)) if isinstance(cfg.get(reg.CFG_CHAIN_KEY), dict) else poll_default
     log.info("가동: %s %d지갑, %d초 주기", sp.name, len(owners), poll)
     try:
@@ -133,8 +133,8 @@ def main(chain: str, make_adapter, poll_default: int = 60):
             try:
                 r = col.cycle()
                 log.info("[%s] 주기: %s", chain, r)
-            except Exception as e:
-                log.warning("[%s] 주기 실패(다음 주기): %s", chain, common.safe_err(e)[:200])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("[%s] 주기 실패(다음 주기): %s", chain, logs.safe_err(e)[:200])
             time.sleep(max(5.0, poll - (time.time() - t0)))
     except KeyboardInterrupt:
         log.info("정지 신호(SIGINT) — 종료")

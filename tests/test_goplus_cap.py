@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import types
+import json  # noqa: E402
+import os  # noqa: E402
+import types  # noqa: E402
 
-import common
-import web
+import net_http, paths, statefile  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 READS = []
@@ -61,18 +61,18 @@ READS.clear()
 err = None
 try:
     web._goplus_fetch("8453", CA)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     err = e
-chk(isinstance(err, common.ResponseTooLarge) and READS == [], "G1 큰 길이를 밝힌 응답 = 본문 읽기 전에 실패(종전: 끝까지 읽음)", (repr(err)[:120], READS[:3]))
+chk(isinstance(err, net_http.ResponseTooLarge) and READS == [], "G1 큰 길이를 밝힌 응답 = 본문 읽기 전에 실패(종전: 끝까지 읽음)", (repr(err)[:120], READS[:3]))
 
 RESP["v"] = _Resp(big, length=None)
 READS.clear()
 err = None
 try:
     web._goplus_fetch("8453", CA)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     err = e
-chk(isinstance(err, common.ResponseTooLarge) and READS == [CAP + 1], "G2 길이 없는 큰 응답 = 상한+1 까지만 읽고 실패", (repr(err)[:120], READS[:3]))
+chk(isinstance(err, net_http.ResponseTooLarge) and READS == [CAP + 1], "G2 길이 없는 큰 응답 = 상한+1 까지만 읽고 실패", (repr(err)[:120], READS[:3]))
 
 small = json.dumps({"code": 1, "message": "OK", "result": {CA: {"is_honeypot": "0"}}}).encode()
 RESP["v"] = _Resp(small)
@@ -91,13 +91,13 @@ print("[R] goplus_round")
 key = f"base:{CA}"
 NOW = 2_000_000_000.0
 old = {key: {"ts": int(NOW - web.GOPLUS_TTL - 10), "risk": {"strong": True, "label": "스캠 확증 is_honeypot"}}}
-common.atomic_write_json(web.GOPLUS_PATH, old)
+statefile.atomic_write_json(paths.state("goplus_cache.json"), old)
 web.BUILDER = types.SimpleNamespace(_goplus_want=[("base", CA)], cfg={}, soft_invalidate=lambda *a, **k: None)
 web.GOPLUS_STATUS["limitedUntil"] = 0
 RESP["v"] = _Resp(big, length=None)
 st = {}
 n = T.safe(web.goplus_round, st, NOW, None, lambda s: None)
-after = common.read_json(web.GOPLUS_PATH, {})
+after = statefile.read_json(paths.state("goplus_cache.json"), {})
 chk(n == 1 and after == old and st.get("fail_until", {}).get(key) == NOW + web.GOPLUS_FAIL_RETRY and not st.get("net_fail"),
     "G5 상한 넘는 응답 = 위험 캐시 보존 · 그 CA 만 1시간 뒤 · 망 장애 계수 안 올림", (n, after == old, st))
 chk(T.NET_TRIES == [], "G6 바깥 연결 0", T.NET_TRIES)

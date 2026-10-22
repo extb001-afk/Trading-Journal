@@ -4,7 +4,7 @@ import os
 import time
 import re
 import urllib.request
-import common
+import logs, paths, statefile
 import lpdec
 import bf_engine
 import tsfix
@@ -23,6 +23,7 @@ from evm_base import es_daily_left
 from evm_base import es_daily_trip
 from evm_base import es_is_daily_limit
 from evm_base import http_json
+from evm_base import new_view_wallets
 from evm_base import rpc_handback
 from evm_synth import RpcSynthMixin
 import logging
@@ -41,8 +42,8 @@ class EtherscanWatcher(RpcSynthMixin):
         self.key = key
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.cfg_rpcs = cfg["chains"][chain].get("rpcs")
-        self.rpc_meta_path = os.path.join(common.STATE_DIR, f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = common.read_json(self.rpc_meta_path, {})
+        self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
+        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
         self.conf_depth = int(cfg["chains"][chain].get("conf_depth", 12))
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
@@ -58,16 +59,13 @@ class EtherscanWatcher(RpcSynthMixin):
         self.wallets = [w.lower() for w in wallets]
         self.wallet_since = bf_engine.wallet_since_map(cfg, chain)
         self.writer = writer
-        self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
-        self.cursor = common.read_json(self.cursor_path, {})
+        self.cursor_path = paths.state(f"cursor_evm_{chain}.json")
+        self.cursor = statefile.read_json(self.cursor_path, {})
         if self.cursor.get("_rpc_v") is not None:
             rpc_handback(self, "etherscan")
-        self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_evm_{chain}.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
-        _prev_w = {k for k in self.cursor if not k.startswith("_")}
-        if _prev_w and not set(self.wallets).issubset(_prev_w) and self.emitted:
-            log.warning("%s 새 관점 지갑 감지 — emitted %d건 초기화(재방출 허용)", chain, len(self.emitted))
-            self.emitted.clear()
+        self.emitted_path = paths.state(f"emitted_evm_{chain}.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
+        new_view_wallets(self)
         self.pending_detail = {}
         self.progress = bf_engine.progress("evm")
         self._tier = addr_tier.evm_book(self, cfg, "etherscan")
@@ -171,7 +169,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 return b
         except (EtherscanKeyError, EtherscanPaced):
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [optional]
             log.warning("%s getblocknobytime 실패 → RPC 탐색: %s", self.chain, str(e)[:100])
         return RpcSynthMixin.window_start_block(self, safe_now, months, bpd)
 
@@ -182,7 +180,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 return b
         except (EtherscanKeyError, EtherscanPaced):
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 [optional]
             pass
         return bf_engine.block_at_ts(self._block_ts, int(ts), 0, int(getattr(self, "_max_head", 0) or self.head_block()))
 
@@ -192,7 +190,7 @@ class EtherscanWatcher(RpcSynthMixin):
         except EtherscanPaced as e:
             try:
                 return bf_engine.block_at_ts(self._block_ts, int(ts), 0, int(head))
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001
                 bf_engine.es_pace_room("fill")
                 raise EtherscanPaced(f"확장 목표 블록 — 이더스캔 몫 막힘 · RPC 탐색 실패({str(e9)[:80]}) — 옛 기록 수요만 등록") from e
 
@@ -227,7 +225,7 @@ class EtherscanWatcher(RpcSynthMixin):
             return
         t0 = time.time()
         tasks = []
-        _mg9 = lpdec.lp_managers(common.BASE_DIR).get(self.chain) or {}
+        _mg9 = lpdec.lp_managers(paths.BASE_DIR).get(self.chain) or {}
         acts9 = ("txlist", "tokentx", "txlistinternal") + (("tokennfttx",) if _mg9 else ())
         for w, c in need.items():
             lo, hi = tblk + 1, c
@@ -258,7 +256,7 @@ class EtherscanWatcher(RpcSynthMixin):
                     raise
                 except EtherscanPaced as e:
                     res[key] = e
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     res[key] = e
         errs = [k for k, v in res.items() if isinstance(v, Exception)]
         self.progress.update(f"{self.chain}:extend", phase="extend", unit="tasks", done=len(tasks) - len(errs),
@@ -283,7 +281,7 @@ class EtherscanWatcher(RpcSynthMixin):
             snap = self._snapshot(ent)
             if snap is None or not self._ent_block(ent):
                 log.warning("%s 확장 %s 파싱 불능 — 커버 하한 보류", self.chain, h[:12])
-                common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+                statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
                 return
             rec9 = {"v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": h, "snapshot": snap,
                     "wallets": self.wallets, "observed_head": head, "ts": int(time.time())}
@@ -292,10 +290,10 @@ class EtherscanWatcher(RpcSynthMixin):
             self.writer.append(rec9)
             self.emitted.add(h)
             n_emit += 1
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
         for w in need:
             self.cursor["_cov:" + w] = int(tblk)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         self.progress.finish(f"{self.chain}:extend", note=f"확장 {len(need)}지갑 {n_emit}tx {time.time() - t0:.0f}초")
         log.info("★%s 과거 창 확장 완료 [etherscan]: 지갑 %d, 방출 %d, 조각 %d, %.0f초 → 하한 블록 %d★", self.chain,
                  len(need), n_emit, len(tasks), time.time() - t0, tblk)
@@ -410,7 +408,7 @@ class EtherscanWatcher(RpcSynthMixin):
         return _ES_WMEM.setdefault(self.chain, {"cost": {}, "next": None})
 
     def _es_wneed(self, w) -> int:
-        n9 = int(addr_tier.per_check_calls("etherscan", bool(lpdec.lp_managers(common.BASE_DIR).get(self.chain))))
+        n9 = int(addr_tier.per_check_calls("etherscan", bool(lpdec.lp_managers(paths.BASE_DIR).get(self.chain))))
         return max(n9, int(self._es_mem()["cost"].get(w, 0)))
 
     def _es_q_room(self, own: int, start: bool) -> bool:
@@ -461,16 +459,16 @@ class EtherscanWatcher(RpcSynthMixin):
                         tb.note_sent(addr_tier.sent_from(snap9), addr_tier.snap_ts(snap9))
                 del pend9[h9]
                 log.info("%s 구 pending %s RPC 합성 해소", self.chain, h9[:12])
-            except Exception as e9:
+            except Exception as e9:  # noqa: BLE001 [fallback]
                 failures9 = self.synth_fail_count(pend9, h9, e9)
                 if failures9 is None:
                     log.debug("%s 구 pending %s 보류(게이트·장부 거절 — 횟수 안 셈): %s", self.chain, h9[:12], str(e9)[:120])
                     continue
                 if failures9 > 200:
-                    common.append_durable_jsonl(
-                        os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+                    statefile.append_durable_jsonl(
+                        paths.state("pending_poison.jsonl"),
                         {"ts": int(time.time()), "chain": self.chain,
-                         "txhash": h9, "err": common.safe_err(e9)[:200]})
+                         "txhash": h9, "err": logs.safe_err(e9)[:200]})
                     del pend9[h9]
                     log.error("★%s 구 pending %s 200회 초과 — 포이즌 격리★",
                               self.chain, h9[:12])
@@ -491,7 +489,7 @@ class EtherscanWatcher(RpcSynthMixin):
         tb = getattr(self, "_tier", None)
         rest_set = set()
         if tb is not None:
-            lp9 = common.read_json(os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"), {})
+            lp9 = statefile.read_json(paths.state(f"pending_detail_{self.chain}.json"), {})
             self._tier_legacy_pend = lp9 if isinstance(lp9, dict) else {}
             addr_tier.tier_prune(self)
             addr_tier.evm_activity(self, tb)
@@ -559,7 +557,7 @@ class EtherscanWatcher(RpcSynthMixin):
                             paced_w += 1
                             continue
                         self.cursor["_bfes:" + w] = {"since": since, "t0": int(time.time())}
-                        common.atomic_write_json(self.cursor_path, self.cursor)
+                        statefile.atomic_write_json(self.cursor_path, self.cursor)
                     log.info("%s %g개월 한도 백필 시작 [etherscan] (%d → %d)",
                              w[:10], float(self.backfill_months), since, safe)
                 else:
@@ -588,7 +586,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 txs = self._list_all("txlist", w, frm, safe)
                 tts = self._list_all("tokentx", w, frm, safe)
                 its = self._list_all("txlistinternal", w, frm, safe)
-                _mg9 = lpdec.lp_managers(common.BASE_DIR).get(self.chain) or {}
+                _mg9 = lpdec.lp_managers(paths.BASE_DIR).get(self.chain) or {}
                 if _mg9:
                     tts = tts + [r9 for r9 in self._list_all("tokennfttx", w, frm, safe)
                                  if str(r9.get("contractAddress") or "").lower() in _mg9]
@@ -603,7 +601,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 continue
             except EtherscanKeyError:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.warning("%s etherscan 수집 실패(다음 사이클): %s", w[:10], e)
                 cycle_ok = False
                 failed_w += 1
@@ -668,7 +666,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 int_seen[h] = [blk, self._leg_marks(ent)]
                 if tb is not None and ent["tx"]:
                     tb.note_sent(str(ent["tx"].get("from") or "").lower(), snap["tx"].get("timestamp"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 bad_w |= set(per_wallet)
                 cycle_ok = False
@@ -689,7 +687,7 @@ class EtherscanWatcher(RpcSynthMixin):
                                     "observed_head": head, "ts": int(time.time()), "repair": "leg_union"})
                 if tb is not None and ent["tx"]:
                     tb.note_sent(str(ent["tx"].get("from") or "").lower(), snap["tx"].get("timestamp"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패(internal 늦은 색인 재방출) — 커서 미전진: %s", e)
                 bad_w |= set(per_wallet)
                 cycle_ok = False
@@ -725,12 +723,12 @@ class EtherscanWatcher(RpcSynthMixin):
                         tb.note_full(w, int(self.cursor[w]))
         if tb is not None:
             self._tier_fail = (getattr(self, "_tier_fail", set()) - (set(per_wallet) - bad_w)) | set(fail_since) | (bad_w & set(per_wallet))
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-        pp9 = os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json")
-        pend9 = common.read_json(pp9, {})
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        pp9 = paths.state(f"pending_detail_{self.chain}.json")
+        pend9 = statefile.read_json(pp9, {})
         if pend9:
             self._legacy_pending(pend9, safe, tb)
-            common.atomic_write_json(pp9, pend9)
+            statefile.atomic_write_json(pp9, pend9)
             if tb is not None:
                 self._tier_legacy_pend = dict(pend9)
         if tried_w and failed_w == tried_w:
@@ -740,7 +738,7 @@ class EtherscanWatcher(RpcSynthMixin):
             self.cursor["_synced_at"] = int(time.time())
         else:
             self.cursor.pop("_synced_at", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if tb is not None:
             addr_tier.evm_baselines(self, tb, list(per_wallet))
             if cycle_ok:
@@ -757,7 +755,7 @@ class EtherscanWatcher(RpcSynthMixin):
     def _es_has_rows(self, w: str, blk: int):
         self._es_kind = "aux"
         try:
-            acts = ["tokentx"] + (["tokennfttx"] if lpdec.lp_managers(common.BASE_DIR).get(self.chain) else [])
+            acts = ["tokentx"] + (["tokennfttx"] if lpdec.lp_managers(paths.BASE_DIR).get(self.chain) else [])
             for act in acts:
                 rows = self._es({"module": "account", "action": act, "address": w, "startblock": 0, "endblock": int(blk),
                                  "page": 1, "offset": 1, "sort": "asc"})
@@ -776,7 +774,7 @@ class EtherscanWatcher(RpcSynthMixin):
             raise
         except EtherscanPaced as e:
             log.debug("%s 과거 창 확장 — 페이싱으로 다음 주기: %s", self.chain, e)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [optional]
             log.info("%s 과거 창 확장 예외(다음 사이클): %s", self.chain, e)
         finally:
             self._es_kind = "head"
@@ -805,7 +803,7 @@ class EtherscanWatcher(RpcSynthMixin):
             v = tsfix.block_ts(self, self._ent_block(ent) or 0)
             hold.clear(h9)
             return v
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             if hold.hold(h9):
                 log.warning("etherscan %s 시각 없음 · 블록 시각 조회 실패 — 보류(커서 유지 · 다음 사이클): %s", h9[:12], str(e)[:100])
                 return None
@@ -863,7 +861,7 @@ class EtherscanWatcher(RpcSynthMixin):
                 dec9 = self._rpc_token_dec(wr)
             except bf_engine.TokenNoDecimals:
                 return []
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [fallback]
                 log.warning("etherscan %s 랩드 네이티브 %s 자릿수 조회 실패 — 보류: %s", str(t.get("hash"))[:12], wr[:10], str(e9)[:100])
                 return None
         return [{"from": a, "to": b, "token": {"address": wr, "symbol": sym9, "decimals": dec9, "type": "ERC-20"},
@@ -926,7 +924,7 @@ class EtherscanWatcher(RpcSynthMixin):
                     except bf_engine.TokenNoDecimals:
                         self._nodec_reg().skip(tx["hash"], ca9, r.get("from"), r.get("to"), v9)
                         continue
-                    except Exception as e9:
+                    except Exception as e9:   # noqa: BLE001 [fallback]
                         log.warning("etherscan %s 토큰 %s 자릿수 미상(빈 tokenDecimal) · RPC 조회 실패 — 보류: %s", str(tx.get("hash"))[:12],
                                     ca9[:10], str(e9)[:100])
                         return None

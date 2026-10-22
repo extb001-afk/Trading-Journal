@@ -2,38 +2,37 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import base64
-import glob
-import json
-import os
-import shutil
-import time
-from decimal import Decimal
+import base64  # noqa: E402
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
-import core
-import db as dbm
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 DAY = 86400
 NOW = int(time.time())
 TON = 10 ** 9
 X = F.K("99")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 
 ch = F.Chain()
@@ -52,12 +51,12 @@ def set_wallet(k):
     cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(k)}]
     cfg["wallets"] = []
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 def mk_core():
-    c9 = core.Core(common.load_config())
-    c9._quote_usd = lambda q, ts: Decimal(1) if str(q).upper() in ("USDT", "USDC") else None
+    c9 = core.Core(config.load_config())
+    c9.svc_exf._quote_usd = lambda q, ts: Decimal(1) if str(q).upper() in ("USDT", "USDC") else None
     c9.px.fx_at = lambda ms: 1400.0
     return c9
 
@@ -75,7 +74,7 @@ def drain(c9):
 
 
 def fresh():
-    for p in glob.glob(common.DB_PATH + "*"):
+    for p in glob.glob(paths.DB_PATH + "*"):
         os.remove(p)
     shutil.rmtree(INB, ignore_errors=True)
     os.makedirs(INB, exist_ok=True)
@@ -86,13 +85,13 @@ def scenario(owner, txid_of, wd_late=False, restart=False, net="TON"):
     set_wallet(owner)
     c = mk_core()
     t0 = (NOW - 600 if owner == A1 else NOW - 3 * DAY) - 7200
-    c._consume_ex({"exchange": "binance", "deposits": [{"uuid": "binance:d1", "currency": "USDT", "amount": "1000", "txid": "0x" + "d1" * 32,
+    c.svc_exf._consume_ex({"exchange": "binance", "deposits": [{"uuid": "binance:d1", "currency": "USDT", "amount": "1000", "txid": "0x" + "d1" * 32,
                                                          "state": "ACCEPTED", "created_at": iso(t0), "done_at": iso(t0)}]})
-    c._consume_exf_fills({"exchange": "binance", "fills": [{"id": "binance:TONUSDT:1", "ts": (t0 + 600) * 1000, "base": "TON", "quote": "USDT",
+    c.svc_exf._consume_exf_fills({"exchange": "binance", "fills": [{"id": "binance:TONUSDT:1", "ts": (t0 + 600) * 1000, "base": "TON", "quote": "USDT",
                                                              "side": "buy", "price": "10", "qty": "100", "fee": "0", "fee_ccy": "TON"}]})
     c.conn.commit()
     st = cs.ChainState("ton", os.path.join(T.TMP, "sd_" + str(time.time_ns())))
-    ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+    ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
     col = cw.Collector(ad, SegmentWriter(INB), st, {owner}, page_budget={"latest": 10, "history": 20},
                        detail_budget={"latest": 200, "history": 500})
     col.cycle()
@@ -104,7 +103,7 @@ def scenario(owner, txid_of, wd_late=False, restart=False, net="TON"):
          "address": ac.ton_friendly(owner), "created_at": iso(wts), "done_at": iso(wts + 30)}
     if net:
         w["network"] = net
-    c._consume_ex({"exchange": "binance", "withdraws": [w]})
+    c.svc_exf._consume_ex({"exchange": "binance", "withdraws": [w]})
     c.conn.commit()
     drain(c)
     if restart:
@@ -115,8 +114,8 @@ def scenario(owner, txid_of, wd_late=False, restart=False, net="TON"):
     return rec
 
 
-import netpace
-import web
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
@@ -131,11 +130,11 @@ web.pricing.PxCache.candle_usd = lambda self, sym, ms: _px.get(str(sym).upper())
 def view(first_seen=False):
     spot = {"usd": _px, "usd_ts": {k: NOW for k in _px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
             "fx_basis": 1400.0, "ex_usd": {"binance:TON": 15.0, "binance:USDT": 1.0}, "ex_ts": {"binance:TON": NOW, "binance:USDT": NOW}}
-    json.dump(spot, open(web.SPOT_PATH, "w"))
-    common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": [], "first_seen_px": bool(first_seen)})
+    json.dump(spot, open(paths.state("spot.json"), "w"))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": [], "first_seen_px": bool(first_seen)})
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         out = b._build(conn)
     finally:

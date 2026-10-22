@@ -2,29 +2,29 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 
 def S(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return f"예외:{type(e).__name__}"
 
 
@@ -33,7 +33,7 @@ NOW = int(time.time())
 TON = 10 ** 9
 X = F.K("99")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 tw.META_RETRY_SEC = 0
 
@@ -42,7 +42,7 @@ def set_wallets(*keys):
     cfg = json.load(open(CFG_PATH))
     cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(k)} for k in keys]
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 ch = F.Chain()
@@ -67,7 +67,7 @@ SID = uid_of(dt)
 set_wallets(D)
 W = SegmentWriter(INB)
 st = cs.ChainState("ton")
-ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
 ad.page = 3
 col = cw.Collector(ad, W, st, {D}, page_budget={"latest": 10, "history": 20}, detail_budget={"latest": 200, "history": 500})
 col.cycle()
@@ -86,10 +86,10 @@ col.cycle()
 check("TG1 메타 회복(자릿수 6) · 그래도 gap 거래는 원장에 없음(자동 재기장 없음)", (st.d.get("ton") or {}).get("meta", {}).get(MD, {}).get("decimals") == 6
       and not st.emitted(SID), (st.d.get("ton") or {}).get("meta", {}).get(MD))
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
-rb = tw.TonAdapter(common.load_config(), client=srv.client())
-c._nonevm_adapters = {"ton": rb}
+rb = tw.TonAdapter(config.load_config(), client=srv.client())
+c.svc_recon._nonevm_adapters = {"ton": rb}
 
 
 def drain():
@@ -112,8 +112,8 @@ def jet(kind):
 
 
 drain()
-c._last_recon = 0
-c.recon_pass({"ton"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"ton"})
 st = cs.ChainState("ton")
 check("TG1 test_ton_gap_recon_hold: gap 미해소 = 대사 보류 — 제톤 5,000,000 이 opening 으로 흡수되지 않음", jet("opening") == 0, jet("opening"))
 check("TG1 recon_done_ton 없음 · ready 거짓 · 화면 complete 거짓", not c._meta_get("recon_done_ton") and not st.ready({D})
@@ -123,13 +123,13 @@ g = [x for x in st.d["gaps"] if x["id"] == SID][-1]
 st.pending_upsert([(SID, g["ref"])])
 st.d["pending"][SID]["next"] = 0
 st.save()
-ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
 ad.page = 3
 col = cw.Collector(ad, W, st, {D}, page_budget={"latest": 10, "history": 20}, detail_budget={"latest": 200, "history": 500})
 col.cycle()
 drain()
-c._last_recon = 0
-c.recon_pass({"ton"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"ton"})
 st = cs.ChainState("ton")
 check("TG1 복구 뒤 기장 = chain_tx +5,000,000 · 제톤 opening 0 · gap 이력 1건 유지 · 완료 도장",
       jet("chain") == 5_000_000 and jet("opening") == 0 and len(st.d["gaps"]) == 1 and st.ready({D}) and bool(c._meta_get("recon_done_ton")),
@@ -152,7 +152,7 @@ set_wallets(D, A1, B1)
 SD2 = os.path.join(T.TMP, "sd2")
 os.makedirs(SD2, exist_ok=True)
 st2 = cs.ChainState("ton", SD2)
-ad2 = tw.TonAdapter(common.load_config(), client=srv.client(), state=st2)
+ad2 = tw.TonAdapter(config.load_config(), client=srv.client(), state=st2)
 ad2.page = 3
 _lk = ad2._lookup
 ad2._lookup = lambda h, d: None if d == "out" else _lk(h, d)

@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import io
-import json
-import os
-import types
-import urllib.error
+import copy  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import types  # noqa: E402
+import urllib.error  # noqa: E402
 
 W0 = "0x" + "e0" * 20
 W1 = "0x" + "e1" * 20
@@ -22,13 +22,13 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import alch_internal as AI
-import bf_engine
-import evm_watch
-import nodekeys as NK
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import alch_internal as AI  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
+import nodekeys as NK  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -223,7 +223,7 @@ def setup(w9, h, blk=OLD, at=None, n=0, stg=None, emit=True):
     for k9 in ("_alch_memo", "_trace_slow_until", "_trace_sick_until", "_trace_nf"):
         w9.__dict__.pop(k9, None)
     WR.recs.clear()
-    common.atomic_write_json(w9.cursor_path, w9.cursor)
+    statefile.atomic_write_json(w9.cursor_path, w9.cursor)
 
 
 def al_hits(hs=None):
@@ -278,7 +278,7 @@ def setup_tl(w9, items):
     for k9 in ("_alch_memo", "_trace_slow_until", "_trace_sick_until", "_trace_nf"):
         w9.__dict__.pop(k9, None)
     WR.recs.clear()
-    common.atomic_write_json(w9.cursor_path, w9.cursor)
+    statefile.atomic_write_json(w9.cursor_path, w9.cursor)
 
 
 def tl_cycle(w9):
@@ -401,7 +401,7 @@ def setup_ll(w9, items):
     for k9 in ("_alch_memo", "_trace_slow_until", "_trace_sick_until", "_trace_nf"):
         w9.__dict__.pop(k9, None)
     WR.recs.clear()
-    common.atomic_write_json(w9.cursor_path, w9.cursor)
+    statefile.atomic_write_json(w9.cursor_path, w9.cursor)
     return ks
 
 
@@ -542,7 +542,7 @@ fresh()
 o5 = lcycle(w, kL)
 check("F5a 31일·8회 · Alchemy 실제 0회 = 지우지 않고 trace 차례(leaf_later_giveup 없음)",
       o5["trace"] and not any(n.get("kind") == "leaf_later_giveup" for n in w.cursor.get("_native_notes") or []), (o5, w.cursor.get("_native_notes")))
-LARCH = os.path.join(common.STATE_DIR, "leaf_later_unresolved_base.jsonl")
+LARCH = os.path.join(paths.STATE_DIR, "leaf_later_unresolved_base.jsonl")
 os.makedirs(LARCH, exist_ok=True)
 fresh()
 (kL,) = setup_ll(w, [(W1, OLD, 1, None, 9, now() - 61 * DAY)])
@@ -602,7 +602,7 @@ check("F6c 키 없음 · 노드 전부 실패 기록 = 종전 trace 경로(Alche
       and o6["e"].get("n") == 3, o6)
 w = mk()
 
-TARCH = os.path.join(common.STATE_DIR, "trace_later_unresolved_base.jsonl")
+TARCH = os.path.join(paths.STATE_DIR, "trace_later_unresolved_base.jsonl")
 
 
 def arch_rows(p):
@@ -671,7 +671,7 @@ setup_tl(w, [(H7, OLD, 1, {"v": 1, "ct": NIDS, "pa": NIDS, "al": 1}, 8)])
 w.cursor["_trace_later"][H7]["at"] = int(now() - 31 * DAY)
 try:
     o7f = tl_cycle(w)
-except Exception as x9:
+except Exception as x9:  # noqa: BLE001
     o7f = {"exc": repr(x9)}
 check("F7f 늦은 채움 보관 쓰기 실패 = 큐 유지(예외 없음 · 지우지 않음)", "exc" not in o7f and isinstance(ent(w, H7), dict), o7f)
 os.rmdir(TARCH)
@@ -831,7 +831,7 @@ for k9 in ("_alch_memo", "_trace_slow_until", "_trace_sick_until", "_trace_nf"):
     w.__dict__.pop(k9, None)
 WR.recs.clear()
 w._leaf_retry(W1, OLD, False, c=OLD - 100, nk="_bkns")
-common.atomic_write_json(w.cursor_path, w.cursor)
+statefile.atomic_write_json(w.cursor_path, w.cursor)
 (kN,) = list(w.cursor["_leaf_later"])
 atN = lent(w, kN)["at"]
 adv(601.0)

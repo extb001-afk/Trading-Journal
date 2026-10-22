@@ -1,0 +1,1616 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=exf_coinbase_win · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "exf_coinbase_win",
+ "clock": {
+  "now": 1760000003.849999,
+  "tick": 0.0
+ },
+ "secrets": [
+  "cb_name",
+  "cb_secret"
+ ],
+ "requests": 23,
+ "interactions": [
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000123,
+       "iss": "cdp",
+       "nbf": 1760000003,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "w-btc",
+       "balance": {
+        "amount": "1.00",
+        "currency": "BTC"
+       },
+       "type": "wallet"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000123,
+       "iss": "cdp",
+       "nbf": 1760000003,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0071"
+     },
+     "data": [
+      {
+       "id": "tx-0071",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.10000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-10-08T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c1»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000124,
+       "iss": "cdp",
+       "nbf": 1760000004,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0072"
+     },
+     "data": [
+      {
+       "id": "tx-0072",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.20000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-29T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c2»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0072",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0072"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000124,
+       "iss": "cdp",
+       "nbf": 1760000004,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "tx-0073",
+       "type": "send",
+       "status": "pending",
+       "amount": {
+        "amount": "-0.05000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-19T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "pending",
+        "hash": "0x«0*62+c3»",
+        "name": "bitcoin"
+       },
+       "to": {
+        "resource": "bitcoin_address",
+        "address": "bc1qcassette2222222222222222222222222222"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000524,
+       "iss": "cdp",
+       "nbf": 1760000404,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "w-btc",
+       "balance": {
+        "amount": "1.10",
+        "currency": "BTC"
+       },
+       "type": "wallet"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000524,
+       "iss": "cdp",
+       "nbf": 1760000404,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0071"
+     },
+     "data": [
+      {
+       "id": "tx-0071",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.10000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-10-08T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c1»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000524,
+       "iss": "cdp",
+       "nbf": 1760000404,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0072"
+     },
+     "data": [
+      {
+       "id": "tx-0072",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.20000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-29T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c2»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000524,
+       "iss": "cdp",
+       "nbf": 1760000404,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "w-btc",
+       "balance": {
+        "amount": "1.10",
+        "currency": "BTC"
+       },
+       "type": "wallet"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000524,
+       "iss": "cdp",
+       "nbf": 1760000404,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0071"
+     },
+     "data": [
+      {
+       "id": "tx-0071",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.10000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-10-08T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c1»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000525,
+       "iss": "cdp",
+       "nbf": 1760000405,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0072"
+     },
+     "data": [
+      {
+       "id": "tx-0072",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.20000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-29T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c2»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0072",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0072"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000525,
+       "iss": "cdp",
+       "nbf": 1760000405,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "tx-0073",
+       "type": "send",
+       "status": "pending",
+       "amount": {
+        "amount": "-0.05000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-19T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "pending",
+        "hash": "0x«0*62+c3»",
+        "name": "bitcoin"
+       },
+       "to": {
+        "resource": "bitcoin_address",
+        "address": "bc1qcassette2222222222222222222222222222"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000925,
+       "iss": "cdp",
+       "nbf": 1760000805,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "w-btc",
+       "balance": {
+        "amount": "1.10",
+        "currency": "BTC"
+       },
+       "type": "wallet"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000925,
+       "iss": "cdp",
+       "nbf": 1760000805,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0071"
+     },
+     "data": [
+      {
+       "id": "tx-0071",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.10000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-10-08T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c1»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000925,
+       "iss": "cdp",
+       "nbf": 1760000805,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0072"
+     },
+     "data": [
+      {
+       "id": "tx-0072",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.20000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-29T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c2»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>-2",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000925,
+       "iss": "cdp",
+       "nbf": 1760000805,
+       "sub": "<secret:cb_name>-2",
+       "uri": "GET api.coinbase.com/v2/accounts"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": null
+     },
+     "data": [
+      {
+       "id": "w-btc",
+       "balance": {
+        "amount": "1.10",
+        "currency": "BTC"
+       },
+       "type": "wallet"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>-2",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000925,
+       "iss": "cdp",
+       "nbf": 1760000805,
+       "sub": "<secret:cb_name>-2",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0071"
+     },
+     "data": [
+      {
+       "id": "tx-0071",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.10000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-10-08T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c1»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/v2/accounts/w-btc/transactions?limit=100&order=desc&starting_after=tx-0071"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>-2",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>-2",
+       "uri": "GET api.coinbase.com/v2/accounts/w-btc/transactions"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "pagination": {
+      "next_uri": "/v2/accounts/w-btc/transactions?limit=100&starting_after=tx-0072"
+     },
+     "data": [
+      {
+       "id": "tx-0072",
+       "type": "receive",
+       "status": "completed",
+       "amount": {
+        "amount": "0.20000000",
+        "currency": "BTC"
+       },
+       "native_amount": {
+        "amount": "0",
+        "currency": "USD"
+       },
+       "created_at": "2025-09-29T08:53:20.123456Z",
+       "resource": "transaction",
+       "network": {
+        "status": "confirmed",
+        "hash": "0x«0*62+c2»",
+        "name": "bitcoin"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-w1",
+       "trade_id": "te-w1",
+       "order_id": "oe-w1",
+       "trade_time": "2025-10-08T23:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-08T23:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      }
+     ],
+     "cursor": "c1"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100&cursor=c1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100&cursor=c1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-w2",
+       "trade_id": "te-w2",
+       "order_id": "oe-w2",
+       "trade_time": "2025-10-09T00:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-09T00:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      }
+     ],
+     "cursor": "c2"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T00:53:21Z&limit=100",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-08T22:53:20Z&end_sequence_timestamp=2025-10-09T00:53:21Z&limit=100"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-w1",
+       "trade_id": "te-w1",
+       "order_id": "oe-w1",
+       "trade_time": "2025-10-08T23:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-08T23:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      },
+      {
+       "entry_id": "e-s22",
+       "trade_id": "te-s22",
+       "order_id": "oe-s22",
+       "trade_time": "2025-10-09T01:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60100",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-09T01:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "SELL"
+      }
+     ],
+     "cursor": ""
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-09T00:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-09T00:53:20Z&end_sequence_timestamp=2025-10-09T02:53:20Z&limit=100"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-w1",
+       "trade_id": "te-w1",
+       "order_id": "oe-w1",
+       "trade_time": "2025-10-08T23:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-08T23:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      },
+      {
+       "entry_id": "e-s00",
+       "trade_id": "te-s00",
+       "order_id": "oe-s00",
+       "trade_time": "2025-10-09T01:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60100",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-09T01:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "SELL"
+      }
+     ],
+     "cursor": ""
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-07T06:53:20Z&end_sequence_timestamp=2025-10-07T07:53:20Z&limit=100",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-07T06:53:20Z&end_sequence_timestamp=2025-10-07T07:53:20Z&limit=100"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-r0",
+       "trade_id": "te-r0",
+       "order_id": "oe-r0",
+       "trade_time": "2025-10-07T06:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-07T06:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      }
+     ],
+     "cursor": "zz"
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-07T06:53:20Z&end_sequence_timestamp=2025-10-07T07:53:20Z&limit=100&cursor=zz",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coinbase.com/api/v3/brokerage/orders/historical/fills?start_sequence_timestamp=2025-10-07T06:53:20Z&end_sequence_timestamp=2025-10-07T07:53:20Z&limit=100&cursor=zz"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coinbase.com",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coinbase.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "ES256",
+       "kid": "<secret:cb_name>",
+       "nonce": "<nonce>",
+       "typ": "JWT"
+      },
+      "claims": {
+       "exp": 1760000926,
+       "iss": "cdp",
+       "nbf": 1760000806,
+       "sub": "<secret:cb_name>",
+       "uri": "GET api.coinbase.com/api/v3/brokerage/orders/historical/fills"
+      },
+      "signed_by": "cb_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "fills": [
+      {
+       "entry_id": "e-r2",
+       "trade_id": "te-r2",
+       "order_id": "oe-r2",
+       "trade_time": "2025-10-07T06:53:20.123456Z",
+       "trade_type": "FILL",
+       "price": "60000",
+       "size": "0.01",
+       "commission": "0.1",
+       "product_id": "BTC-USD",
+       "sequence_timestamp": "2025-10-07T06:53:20.123456Z",
+       "liquidity_indicator": "TAKER",
+       "size_in_quote": false,
+       "user_id": "u1",
+       "side": "BUY"
+      }
+     ],
+     "cursor": "zz"
+    }
+   }
+  }
+ ]
+}

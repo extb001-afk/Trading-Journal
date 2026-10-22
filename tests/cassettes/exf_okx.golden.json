@@ -1,0 +1,195 @@
+{
+ "_doc": "합성 데이터 — exf_okx 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "exf_okx",
+ "golden": {
+  "exf_active.json": {
+   "active": [
+    "okx"
+   ],
+   "ts": 1760000000,
+   "v": 1
+  },
+  "exf_balance_sources.json": {
+   "okx:loan": false,
+   "okx:savings": false,
+   "okx:staking": false
+  },
+  "exf_balances_okx.json.view": [
+   "{\"ts\":1760000001,\"balances\":{\"USDT\":910.5,\"ETH\":0.6},\"debts\":{},\"sources\":[\"loan\",\"savings\",\"staking\"]}"
+  ],
+  "exf_clock.json": {
+   "ex": {
+    "okx": {
+     "at": 1760000000.0,
+     "off": 0,
+     "rtt": 0
+    }
+   },
+   "v": 1
+  },
+  "exf_state.json": {
+   "okx": {
+    "backfilled_until": 1760000000,
+    "dest_bf": 1760000000,
+    "fills": {
+     "backfilled_until": 1760000000,
+     "cv": {
+      "bf": 1760000000,
+      "until": 1760000000
+     },
+     "extra_bases": [
+      "ETH",
+      "USDT"
+     ],
+     "seen": {
+      "okx:501": 1759913600000,
+      "okx:502": 1759917200000,
+      "okx:cv:cv-301": 1759982000000
+     }
+    },
+    "pend_rc": {
+     "at": 1760000000
+    },
+    "pend_scan": 1760000000,
+    "pend_ts": {},
+    "seen": {
+     "okx:701": "ACCEPTED",
+     "okx:901": "DONE"
+    },
+    "seen_dest": {
+     "okx:901": true
+    },
+    "seen_txids": {
+     "okx:701": true,
+     "okx:901": true
+    }
+   }
+  },
+  "futures_okx.json": {
+   "cursor": {
+    "bills": 1760000004549,
+    "hist_lo": 1751331600000
+   },
+   "events": [],
+   "positions": [],
+   "ts": 1760000004,
+   "wallet": {
+    "balance": null,
+    "note": "트레이딩 계정에 포함 — 잔고는 현물 집계에"
+   }
+  },
+  "futures_px_okx.json": {
+   "cursor": {
+    "bf_done": true,
+    "bf_v": 3,
+    "ct_miss": {}
+   },
+   "rows": [],
+   "ts": 1760000004,
+   "v": 1
+  },
+  "inbox/ex/000000001.jsonl": [
+   {
+    "deposits": [
+     {
+      "amount": "0.5",
+      "created_at": "2025-10-06T08:53:20+00:00",
+      "currency": "ETH",
+      "done_at": "2025-10-06T08:53:20+00:00",
+      "fee": "0",
+      "network": "ETH-ERC20",
+      "state": "ACCEPTED",
+      "txid": "0x«0*58+de9051»",
+      "uuid": "okx:701"
+     }
+    ],
+    "exchange": "okx",
+    "kind": "ex_snapshot",
+    "ts": 1760000000,
+    "v": 1,
+    "withdraws": [
+     {
+      "address": "0x«e5*20»",
+      "amount": "100",
+      "created_at": "2025-10-07T08:53:20+00:00",
+      "currency": "USDT",
+      "done_at": "2025-10-07T08:53:20+00:00",
+      "fee": "1",
+      "network": "USDT-ERC20",
+      "state": "DONE",
+      "txid": "0x«0*57+a11ce01»",
+      "uuid": "okx:901"
+     }
+    ]
+   },
+   {
+    "exchange": "okx",
+    "fills": [
+     {
+      "base": "ETH",
+      "fee": "0.13",
+      "fee_ccy": "USDT",
+      "id": "okx:502",
+      "price": "2600.25",
+      "qty": "0.05",
+      "quote": "USDT",
+      "side": "sell",
+      "ts": 1759917200000
+     },
+     {
+      "base": "ETH",
+      "fee": "0.00015",
+      "fee_ccy": "ETH",
+      "id": "okx:501",
+      "price": "2500.5",
+      "qty": "0.15",
+      "quote": "USDT",
+      "side": "buy",
+      "ts": 1759913600000
+     },
+     {
+      "base": "ETH",
+      "cv": {
+       "from": "USDT",
+       "from_amt": "25.5",
+       "to": "ETH",
+       "to_amt": "0.01"
+      },
+      "fee": "0",
+      "fee_ccy": "",
+      "id": "okx:cv:cv-301",
+      "price": "2550",
+      "qty": "0.01",
+      "quote": "USDT",
+      "side": "buy",
+      "src": "convert",
+      "ts": 1759982000000
+     }
+    ],
+    "kind": "exf_fills",
+    "lb": "okx:1760000000:000000025e",
+    "lbi": 0,
+    "lbn": 1,
+    "lc": "c1760000000:000000015e",
+    "ts": 1760000000,
+    "v": 1
+   },
+   {
+    "exchange": "okx",
+    "kind": "exf_late_cycle",
+    "lc": "c1760000000:000000015e",
+    "ts": 1760000004,
+    "v": 1
+   }
+  ],
+  "runner_exf.json": {
+   "direct": true,
+   "pid": "<pid>",
+   "state": "running",
+   "ts": 1760000000,
+   "unit": "exf",
+   "why": ""
+  }
+ }
+}

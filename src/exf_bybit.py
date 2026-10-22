@@ -1,11 +1,8 @@
 from __future__ import annotations
-import hashlib
-import hmac
 import os
 import time
 import urllib.request
-import common
-import bf_engine
+import ex_sign, paths, statefile
 from exf_net import BN_UNI_RETRY
 from exf_net import BN_UNI_TTL
 from exf_net import DAY
@@ -34,6 +31,7 @@ from exf_net import _recon_hold_clear
 from exf_net import _srv_ms
 from exf_net import _sub_bal
 from exf_net import _xm
+from exf_net import fut_first_t0
 from exf_net import fut_rcpt
 from exf_net import http_json
 from exf_net import norm_fill
@@ -56,7 +54,7 @@ def fetch_bybit(env, t0: int, t1: int):
         qs = urllib.parse.urlencode(params)
         ts = str(_srv_ms("api.bybit.com"))
         recv = "10000"
-        sig = hmac.new(sec.encode(), (ts + key + recv + qs).encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.bybit_sign(sec, ts, key, recv, qs)
         d = http_json(f"https://api.bybit.com{path}?{qs}",
                       {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                        "X-BAPI-RECV-WINDOW": recv, "X-BAPI-SIGN": sig})
@@ -164,11 +162,11 @@ _BB_UNI = {"ts": 0.0, "fail": 0.0, "sym": None, "path": None}
 
 def _bb_universe(now: float, need: bool = False):
     u = _BB_UNI
-    p = os.path.join(common.STATE_DIR, BB_UNI_NAME)
+    p = paths.state(BB_UNI_NAME)
     if u.get("path") != p:
         u.update(ts=0.0, fail=0.0, sym=None, path=p)
         try:
-            d = common.read_json(p, {}) if os.path.exists(p) else {}
+            d = statefile.read_json(p, {}) if os.path.exists(p) else {}
         except SystemExit:
             d = {}
         sy = d.get("symbols") if isinstance(d, dict) else None
@@ -203,9 +201,9 @@ def _bb_universe(now: float, need: bool = False):
             if not sym:
                 raise RuntimeError("instruments-info 종목 0")
             u["sym"], u["ts"] = dict(u["sym"] or {}, **sym), float(now)
-            common.atomic_write_json(p, {"ts": int(now), "symbols": {k: list(v) for k, v in u["sym"].items()}})
+            statefile.atomic_write_json(p, {"ts": int(now), "symbols": {k: list(v) for k, v in u["sym"].items()}})
             log.info("bybit 종목 목록 갱신: %d개(이번 응답 %d)", len(u["sym"]), len(sym))
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             u["fail"] = float(now)
             log.warning("bybit instruments-info 갱신 실패(%s · 1시간 뒤 재시도): %s",
                         "직전 목록 사용" if u["sym"] else "종전 주요 쿼트로", _xm(repr(e))[:140])
@@ -244,7 +242,7 @@ def fills_bybit(env, st, t0: int, t1: int):
         qs = urllib.parse.urlencode(params)
         ts = str(_srv_ms("api.bybit.com"))
         recv = "10000"
-        sig = hmac.new(sec.encode(), (ts + key + recv + qs).encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.bybit_sign(sec, ts, key, recv, qs)
         d = http_json(f"https://api.bybit.com/v5/execution/list?{qs}",
                       {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                        "X-BAPI-RECV-WINDOW": recv, "X-BAPI-SIGN": sig})
@@ -355,7 +353,7 @@ def convert_bybit(env, t0: int, t1: int):
                 break
             if len(ts9) >= 2 and ts9[0] >= ts9[-1] and ts9[-1] < t0 * 1000:
                 break
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [isolate]
         errs.append(_xm(repr(e))[:160])
     try:
         cursor, seen_c = "", set()
@@ -395,7 +393,7 @@ def convert_bybit(env, t0: int, t1: int):
             if cursor in seen_c:
                 raise RuntimeError("bybit order-record 커서 순환")
             seen_c.add(cursor)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [isolate]
         errs.append(_xm(repr(e))[:160])
     if len(errs) == 2:
         raise RuntimeError("bybit 전환 두 경로 모두 실패: " + " | ".join(errs))
@@ -413,7 +411,7 @@ def _bybit_get(env, path, params):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
     qs = urllib.parse.urlencode(params or {})
     ts = str(_srv_ms("api.bybit.com"))
-    sig = hmac.new(sec.encode(), (ts + key + "10000" + qs).encode(), hashlib.sha256).hexdigest()
+    sig = ex_sign.bybit_sign(sec, ts, key, "10000", qs)
     d = http_json(f"https://api.bybit.com{path}" + (f"?{qs}" if qs else ""),
                   {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                    "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig})
@@ -428,7 +426,7 @@ def _bal_bybit(env):
     key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
     q = "accountType=UNIFIED"
     ts = str(_srv_ms("api.bybit.com"))
-    sig = hmac.new(sec.encode(), (ts + key + "10000" + q).encode(), hashlib.sha256).hexdigest()
+    sig = ex_sign.bybit_sign(sec, ts, key, "10000", q)
     d = http_json(f"https://api.bybit.com/v5/account/wallet-balance?{q}",
                   {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                    "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig})
@@ -446,8 +444,7 @@ def _bal_bybit(env):
     _gov_prepare("api.bybit.com", "/v5/asset/transfer/query-account-coins-balance")
     q2 = "accountType=FUND"
     ts2 = str(_srv_ms("api.bybit.com"))
-    sig2 = hmac.new(sec.encode(), (ts2 + key + "10000" + q2).encode(),
-                    hashlib.sha256).hexdigest()
+    sig2 = ex_sign.bybit_sign(sec, ts2, key, "10000", q2)
     d2 = http_json(f"https://api.bybit.com/v5/asset/transfer/query-account-coins-balance?{q2}",
                    {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts2,
                     "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig2})
@@ -633,7 +630,7 @@ def _bb_tlog_pass(bcall, cur0, ev, seen, now_ms):
                         break
         except RateLimited:
             return cur, None, []
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             cur["tlog_off"] = now_ms + BB_TLOG_OFF_MS
             log.warning("bybit 거래 내역(transaction-log) 조회 실패 — 선물 수수료·펀딩은 종전처럼 청산 시각(6시간 뒤 다시): %s", _xm(repr(e9))[:160])
             return cur, None, []
@@ -667,7 +664,7 @@ def _bb_tlog_pass(bcall, cur0, ev, seen, now_ms):
             done9 = max(done9, e9)
             s9 = e9
         cur.pop("tlog_err", None)
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [fallback]
         if now_ms - (_fut_opt(cur.get("tlog_err")) or 0) >= 3600 * 1000:
             cur["tlog_err"] = now_ms
             log.warning("bybit 거래 내역(transaction-log) 수집 실패 — 선물 정산 %s 까지만(다음 주기 다시): %s",
@@ -684,8 +681,7 @@ def _fut_bybit(env):
         _gov_prepare("api.bybit.com", path)
         qs = urllib.parse.urlencode(q)
         ts = str(_srv_ms("api.bybit.com"))
-        sig = hmac.new(sec.encode(), (ts + key + "10000" + qs).encode(),
-                       hashlib.sha256).hexdigest()
+        sig = ex_sign.bybit_sign(sec, ts, key, "10000", qs)
         d = http_json(f"https://api.bybit.com{path}?{qs}",
                       {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts,
                        "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig})
@@ -721,7 +717,7 @@ def _fut_bybit(env):
         cur9 = result.get("nextPageCursor")
         return rows, (cur9 if isinstance(cur9, str) else "")
 
-    st = common.read_json(_fut_path("bybit"), {})
+    st = statefile.read_json(_fut_path("bybit"), {})
     poss = []
     for p in bpages("/v5/position/list", {"category": "linear", "settleCoin": "USDT"}):
         if not isinstance(p, dict):
@@ -772,8 +768,8 @@ def _fut_bybit(env):
             _cp_take(c)
         s_ms = e_ms
     hist_lo = (st.get("cursor") or {}).get("hist_lo")
-    tg9 = bf_engine.SINCE.target("bybit")
-    if tg9:
+    tg9 = fut_first_t0("bybit", now_ms / 1000)
+    if tg9 is not None:
         want9 = max(int(tg9) * 1000, now_ms - 729 * DAY * 1000)
         if not (isinstance(hist_lo, (int, float)) and hist_lo <= want9):
             bb_t9 = [int(r.get("t") or 0) for r in ev if str(r.get("uid") or "").startswith("bb:")]
@@ -790,7 +786,7 @@ def _fut_bybit(env):
                     _cp_take(c)
                 hist_lo = want9
                 log.info("bybit 선물 과거 청산손익 채움 %s~ · %d건", time.strftime("%Y-%m-%d", time.gmtime(want9 / 1000)), len(add9))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [optional]
                 log.warning("bybit 선물 과거 청산손익 채움 실패(다음 주기 재시도): %s", str(e)[:160])
     _fut_write("bybit", {"balance": None, "note": "통합계좌에 포함 — 잔고는 현물 집계에"},
                poss, ev, dict({"closed_pnl": now_ms}, **({"hist_lo": hist_lo} if hist_lo else {}), **tlc9),
@@ -904,7 +900,7 @@ def _px_bybit(bpage, raw, ev, now_ms, tl=None):
                 cur.pop("ex_off", None)
             except RateLimited:
                 raise
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [fallback]
                 cur["ex_off"] = now_ms + PX_BB_EX_OFF_MS
                 log.warning("bybit 선물 진입 체결 조회 실패(6시간 뒤 다시 · 정산 무관): %s", _xm(repr(e9))[:160])
     finally:

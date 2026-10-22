@@ -7,6 +7,8 @@ import re
 import time
 from datetime import datetime, timezone
 
+import num_parse
+
 PLANS = ("demo", "pro")
 ROOT = {"demo": "https://api.coingecko.com/api/v3", "pro": "https://pro-api.coingecko.com/api/v3"}
 HDR = {"demo": "x-cg-demo-api-key", "pro": "x-cg-pro-api-key"}
@@ -86,7 +88,7 @@ def error_of(body) -> tuple:
 def wrong_root(body) -> bool:
     try:
         code, msg = error_of(body)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
     if code in WRONG_ROOT_CODES:
         return True
@@ -115,11 +117,8 @@ def _num(v):
             return None
     if not isinstance(v, (int, float, str)):
         return None
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(x) or x < 0 or x >= 1e13:
+    x = num_parse.to_float(v)
+    if x is None or x < 0 or x >= 1e13:
         return None
     return x
 
@@ -210,9 +209,8 @@ def budget(rec, now=None, share=None, ours=None) -> dict:
 
 
 def man(n) -> str:
-    try:
-        n = int(n)
-    except (TypeError, ValueError):
+    n = num_parse.to_int(n)
+    if n is None:
         return "?"
     if n >= 10000:
         v = n / 10000.0
@@ -222,9 +220,8 @@ def man(n) -> str:
 
 
 def approx(n) -> str:
-    try:
-        n = int(n)
-    except (TypeError, ValueError):
+    n = num_parse.to_int(n)
+    if n is None:
         return "?"
     if n >= 1000:
         p = 10 ** (len(str(n)) - 2)
@@ -286,7 +283,7 @@ def probe(key: str, http, base=None, prefer=None, want_info: bool = True, reserv
                     "wrong_root": any(t["wrong_root"] for t in tries)}
         try:
             code, d = http(root + "/ping", {hdr: key})
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             code, d = 0, None
         calls += 1
         if code == 200 and isinstance(d, dict) and "gecko_says" in d and not wrong_root(d):
@@ -296,7 +293,7 @@ def probe(key: str, http, base=None, prefer=None, want_info: bool = True, reserv
             elif plan == "pro" and want_info:
                 try:
                     c2, d2 = http(root + "/key", {hdr: key})
-                except Exception:
+                except Exception:   # noqa: BLE001 [fallback]
                     c2, d2 = 0, None
                 out["calls"] = calls + 1
                 info = parse_key_info(d2) if c2 == 200 else None
@@ -350,7 +347,7 @@ class Store:
         import settings_store as ss
         try:
             return norm_share(ss.read_settings().get(SHARE_KEY))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return DEFAULT_SHARE
 
     def set_share(self, v) -> int:

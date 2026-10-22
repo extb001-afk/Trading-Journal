@@ -2,25 +2,25 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import sqlite3
-import subprocess
-import time
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
-import common
-import db as dbm
-import health
-import unit_runner as U
-import version
+import paths  # noqa: E402
+import db as dbm  # noqa: E402
+import health  # noqa: E402
+import unit_runner as U  # noqa: E402
+import version  # noqa: E402
 
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-import ledger_restore as LR
+import ledger_restore as LR  # noqa: E402
 
-LIVE = common.DB_PATH
+LIVE = paths.DB_PATH
 
 
 def ck(name, cond, extra=None):

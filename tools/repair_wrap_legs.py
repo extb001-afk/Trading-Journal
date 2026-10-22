@@ -79,7 +79,7 @@ def main(argv=None) -> int:
     os.environ["TJ_BASE"] = base
     os.environ.pop("TJ_CONFIG", None)
     sys.path.insert(0, os.path.join(HERE, "..", "src"))
-    import common
+    import paths
     cfg = json.load(open(os.path.join(base, "config.json"), encoding="utf-8"))
     conn = sqlite3.connect(f"file:{os.path.join(base, 'state', 'ledger.db')}?mode=ro", uri=True)
     try:
@@ -106,7 +106,7 @@ def main(argv=None) -> int:
         print(f"--apply: inbox/evm 레코드 {len(found)}개 예정 — 실제로 하려면 --yes")
         return 0
     import inbox
-    w = inbox.SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
+    w = inbox.SegmentWriter(os.path.join(paths.INBOX_DIR, "evm"))
     for f in found:
         w.append({"v": 1, "kind": "evm_tx", "chain": f["chain"], "txhash": f["txhash"], "snapshot": f["snapshot"], "wallets": f["wallets"],
                   "observed_head": 0, "ts": int(time.time()), "repair": "leg_union"})

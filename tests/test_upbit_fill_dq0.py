@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 KST = _tz(_td(hours=9))
 _REAL = time.time
@@ -23,31 +23,30 @@ class _FDT(_dt):
         return _dt.fromtimestamp(CLK[0], tz)
 
 
-import common
+import config, histmark, paths, statefile  # noqa: E402
 
 CFG = os.path.join(os.environ["TJ_BASE"], "config.json")
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(CFG, "w"))
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
-import xparts
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 web.datetime = _FDT
 histcurve.datetime = _FDT
 for _mn9 in [m for m in sys.modules if m.startswith(("view_", "http_", "accounting_"))]:
     if hasattr(sys.modules[_mn9], "datetime"):
         sys.modules[_mn9].datetime = _FDT
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
 netpace.wait = lambda url, now=None, sleep=None: None
 web.pricing._gj = lambda url, timeout=10.0: None
-S = common.STATE_DIR
+S = paths.STATE_DIR
 FX = 1400.0
 DAY = 86400
 UP = os.path.join(S, "upbit_balances.json")
@@ -76,17 +75,17 @@ open(os.path.join(S, "backfill_done"), "w").write("1")
 
 def _spot():
     json.dump({"usd": PX, "usd_ts": {k: int(CLK[0]) for k in PX}, "rate": FX, "updated": int(CLK[0]), "dex_usd": {}, "dex_ts": {}, "dex_res": {},
-               "dex_res_ts": {}, "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+               "dex_res_ts": {}, "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 
 
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
 
 
 def _wipe():
     for sfx in ("", "-wal", "-shm"):
-        if os.path.exists(common.DB_PATH + sfx):
-            os.remove(common.DB_PATH + sfx)
-    for fn in ("daily_cache.json", "daily_px.json", common.HIST_DIRTY):
+        if os.path.exists(paths.DB_PATH + sfx):
+            os.remove(paths.DB_PATH + sfx)
+    for fn in ("daily_cache.json", "daily_px.json", histmark.HIST_DIRTY):
         if os.path.exists(os.path.join(S, fn)):
             os.remove(os.path.join(S, fn))
 
@@ -101,11 +100,11 @@ def _post(c, sid, ts, aid, qty, cost_usd):
 def ledger(eth=100, closed=False):
     _wipe()
     clock(at(-20, 9))
-    dbm.open_db(common.DB_PATH).close()
-    C = core.Core(common.load_config())
+    dbm.open_db(paths.DB_PATH).close()
+    C = core.Core(config.load_config())
     C.px.fx_at = lambda ms: FX
     C.conn.execute("BEGIN")
-    aid = C._upbit_asset("ETH")
+    aid = C.svc_exf._upbit_asset("ETH")
     _post(C.conn, "initETH", at(-20, 9), aid, eth, eth * PX["ETH"])
     C._bump_position(aid, eth * 10 ** 8, "exchange:upbit")
     if closed:
@@ -117,7 +116,7 @@ def ledger(eth=100, closed=False):
 
 
 def snap(ts, accounts, orders=()):
-    common.atomic_write_json(UP, {"ts": int(ts), "open_orders": list(orders),
+    statefile.atomic_write_json(UP, {"ts": int(ts), "open_orders": list(orders),
                                   "accounts": [{"currency": k, "balance": str(v[0]), "locked": str(v[1])} for k, v in accounts.items()]})
 
 
@@ -139,7 +138,7 @@ def fin(uu, side, vol, state, trades, fee=0, created=None):
 
 def consume(C, orders):
     C.conn.execute("BEGIN")
-    C._consume_fills({"orders": list(orders)})
+    C.svc_exf._consume_fills({"orders": list(orders)})
     C.conn.commit()
     return C._hist_late_scan(now=CLK[0])
 
@@ -161,7 +160,7 @@ def build_on(b, ts):
     b.spot.rate = FX
     b.spot.rate_ts = int(ts)
     histcurve.HIST.kit = None
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -259,10 +258,10 @@ def rebuild_views(b, t0):
     b2 = new_builder()
     f = build_on(b2, t0 + 120)
     rows.append(view(b2, f, "새 빌더(재시작)"))
-    dc = json.load(open(web.DAILY_PATH))
+    dc = json.load(open(paths.state("daily_cache.json")))
     for k9 in (DISO, DM1):
         dc.pop(k9, None)
-    json.dump(dc, open(web.DAILY_PATH, "w"))
+    json.dump(dc, open(paths.state("daily_cache.json"), "w"))
     b3 = new_builder()
     f = build_on(b3, t0 + 180)
     rows.append(view(b3, f, "일별 동결 삭제 뒤"))
@@ -292,10 +291,10 @@ for mid, prior in ((True, False), (False, False), (True, True), (False, True)):
     b2 = new_builder()
     f = build_on(b2, at(1, 9, 2))
     rows.append(view(b2, f, "새 빌더(재시작)"))
-    dc = json.load(open(web.DAILY_PATH))
+    dc = json.load(open(paths.state("daily_cache.json")))
     for k9 in (DISO, DM1):
         dc.pop(k9, None)
-    json.dump(dc, open(web.DAILY_PATH, "w"))
+    json.dump(dc, open(paths.state("daily_cache.json"), "w"))
     b3 = new_builder()
     f = build_on(b3, at(1, 9, 3))
     rows.append(view(b3, f, "일별 동결 삭제 뒤"))
@@ -310,7 +309,7 @@ for mid, prior in ((True, False), (False, False), (True, True), (False, True)):
 
 def late_xrp(C, ts, q=1000):
     C.conn.execute("BEGIN")
-    aid = C._upbit_asset("XRP")
+    aid = C.svc_exf._upbit_asset("XRP")
     _post(C.conn, f"latexrp{int(ts)}", ts, aid, q, q * PX["XRP"])
     C._bump_position(aid, q * 10 ** 8, "exchange:upbit")
     C.conn.commit()
@@ -451,10 +450,10 @@ chk(rows_ok(rows) and r0[3] == 1 and not r0[1], "X11 낡은 D 스냅숏(순수�
 
 
 def _defer(b9):
-    dc9 = json.load(open(web.DAILY_PATH))
+    dc9 = json.load(open(paths.state("daily_cache.json")))
     dc9["_live"] = dict(dc9["_live"], defer=True)
     dc9.pop("_live_ok", None)
-    json.dump(dc9, open(web.DAILY_PATH, "w"))
+    json.dump(dc9, open(paths.state("daily_cache.json"), "w"))
     b9.daily = dc9
 
 
@@ -463,19 +462,19 @@ rows, r0, b12 = scen("X12", ACC_MID, ORD_MID, [
     (at(1, 0, 0, 30), "build", (200000, 200000, 200000)),
     (at(1, 8, 0, 30), "consume", [FIN_B, FIN_S]),
     (at(1, 8, 59, 50), "snap", ACC_END, [])], (200000, 200000, 200000), mid=False, pre=_defer)
-xv12 = (json.load(open(web.DAILY_PX_PATH)).get(DISO) or {}).get("xv") or {}
+xv12 = (json.load(open(paths.state("daily_px.json"))).get(DISO) or {}).get("xv") or {}
 chk(rows_ok(rows) and rows[0][3] is not None and xv12.get("ufz") == {"ETH": {"b1": -70000000.0, "s1": 70000000.0}},
     "X12 유예 마감 → 부분 동결(고정값에 ufz 보관) → 기장 뒤 D·D−1·지금 $200,000", (xv12.get("ufz"), rows))
 
 
 def _strip(b9):
-    dc9 = json.load(open(web.DAILY_PATH))
+    dc9 = json.load(open(paths.state("daily_cache.json")))
     for k9 in ("_live", "_live_ok"):
         if isinstance((dc9.get(k9) or {}).get("xv"), dict):
             dc9[k9]["xv"]["ufz"] = {"ETH": {"b1": "x", "s1": None}} if k9 == "_live" else None
             if dc9[k9]["xv"]["ufz"] is None:
                 dc9[k9]["xv"].pop("ufz")
-    json.dump(dc9, open(web.DAILY_PATH, "w"))
+    json.dump(dc9, open(paths.state("daily_cache.json"), "w"))
     b9.daily = dc9
 
 
@@ -494,22 +493,22 @@ consume(C, [FIN_B, S14_bare])
 snap(at(1, 8, 59, 50), {"KRW": (100 * KRW1, 0), "ETH": (100, 0)})
 f = build_on(b, at(1, 9))
 x14a = view(b, f, "옛 원본(생성 시각 D) 기장 뒤")
-xv14a = (json.load(open(web.DAILY_PX_PATH)).get(DISO) or {}).get("xv") or {}
+xv14a = (json.load(open(paths.state("daily_px.json"))).get(DISO) or {}).get("xv") or {}
 clock(at(1, 9, 10))
 C.conn.execute("BEGIN")
-r14 = C._consume_order_trades({"orders": [dict(S14)], "ts": int(CLK[0]), "src": "test"})
+r14 = C.svc_exf._consume_order_trades({"orders": [dict(S14)], "ts": int(CLK[0]), "src": "test"})
 C.conn.commit()
 C._hist_late_scan(now=CLK[0])
 snap(at(1, 9, 19, 50), {"KRW": (100 * KRW1, 0), "ETH": (100, 0)})
 rows, _b = rebuild_views(b, at(1, 9, 20))
-xv14 = (json.load(open(web.DAILY_PX_PATH)).get(DISO) or {}).get("xv") or {}
+xv14 = (json.load(open(paths.state("daily_px.json"))).get(DISO) or {}).get("xv") or {}
 C.conn.close()
 chk(r14.get("moved") == 1 and xv14a.get("ku0") is not None and all_ok(rows, 200000, 200000, 200000)
     and near(((xv14.get("p") or {}).get("ku") or [0])[0], 100 * KRW1),
     "X14 묶음 켜 맞춘 뒤 다시 기장으로 꺼짐 = 원본 관측 원화로 되돌림 · D·D−1·지금 $200,000(맞춘 값 고정 잔재 없음)",
     (r14, x14a, xv14a.get("ku0"), (xv14a.get("p") or {}).get("ku"), (xv14.get("p") or {}).get("ku"), rows))
 
-import random
+import random  # noqa: E402
 
 rng = random.Random(1011)
 bad_r, n_r = [], 0
@@ -555,7 +554,7 @@ for i_r in range(36):
 chk(not bad_r, f"R 무작위 {n_r}개(체결량·완료/취소/열림·자정 뒤 동결·D−1 관측·무관한 늦은 행) = D·D−1·지금 늘 일치(±체결 금액 없음 · 원화 불신 없음)",
     bad_r[:4])
 
-import ubfill
+import ubfill  # noqa: E402
 
 dz = ubfill.deltas([oo("a", "bid", 100, 50, 50 * KRW1), oo("b", "ask", 100, 50, 50 * KRW1)], {}, at(0, 23))
 d0 = ubfill.deltas([oo("a", "bid", 100, 0, 0), oo("b", "ask", 100, 0, 0)], {}, at(0, 23))

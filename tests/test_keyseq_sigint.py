@@ -2,10 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import ast
-import os
+import ast  # noqa: E402
+import os  # noqa: E402
 
 
 def main_block(path):
@@ -38,7 +38,7 @@ def run_block(code, exc):
     try:
         exec(code, ns)
         return None, lg.lines
-    except BaseException as e:
+    except BaseException as e:   # noqa: BLE001
         return type(e).__name__, lg.lines
 
 

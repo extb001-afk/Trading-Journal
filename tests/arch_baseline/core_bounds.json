@@ -1,0 +1,94 @@
+{
+ "_doc": "9막 Core 묶음 경계 표(정의 = public/tests/_core_bounds.py 머리 · 판정 = test_core_bounds · 갱신 = tools/refactor/core_bounds.py --update-lower — 줄어든 것만). classes·runtime·tm_recv·services·duty = 사람이 정하는 칸(9-1~9-3 이 서비스 클래스로 고침) · 나머지 = 도구가 씀.",
+ "classes": {
+  "ClassifyMixin": "CORE",
+  "Core": "CORE",
+  "DecMixin": "CORE",
+  "ExfFutMixin": "EXF",
+  "ExfLateMixin": "EXF",
+  "ExfMixin": "EXF",
+  "ExtMixin": "CORE",
+  "FillsMixin": "EXF",
+  "InboxMixin": "CORE",
+  "LateMixin": "CORE",
+  "LpMixin": "CORE",
+  "MissingTs": "OTHER",
+  "OutflowMixin": "CORE",
+  "PostMixin": "CORE",
+  "PricingMixin": "PRICING",
+  "ProvMixin": "RECON",
+  "ReconMixin": "RECON",
+  "SnapMixin": "CORE",
+  "UpbitMixin": "EXF",
+  "UpbitReconMixin": "EXF",
+  "ExfService": "EXF",
+  "ReconService": "RECON",
+  "PriceService": "PRICING"
+ },
+ "runtime": {
+  "CORE": "Core",
+  "EXF": "ExfService",
+  "PRICING": "PriceService",
+  "RECON": "ReconService"
+ },
+ "tm_recv": {
+  "tools/rebuild2.py:core_mod_ver": "Core"
+ },
+ "services": [
+  "ExfService",
+  "ReconService",
+  "PriceService"
+ ],
+ "ports": {
+  "ExfService": ["_amend_leg", "_drain_at", "_inval_daily", "_inval_seq", "_leg_sql", "_meta_get", "_post_leg", "_post_leg_strict", "_unpost_source", "_win_t0", "asset_id", "cfg", "conn", "px", "recon_months"],
+  "PriceService": ["_leg_sql", "_meta_get", "_norm", "cfg", "conn", "native_sym", "px", "svc_exf", "wrapped"],
+  "ReconService": ["_group_of", "_inval_daily", "_meta_dec", "_meta_get", "_post_leg_strict", "_recon_view", "_recon_view_drop", "_win_t0", "asset_id", "bsc_reader", "cfg", "chain_owners", "chain_readers", "conn", "my_wallets", "native_sym", "reader", "recon_months", "sol_reader", "sol_wallets", "wrapped"]
+ },
+ "duty": {
+  "EXF": ["_drain_at", "wd_fee_since"],
+  "PRICING": ["_last_price_pass", "_px_skip"],
+  "RECON": ["_last_recon", "chain_owners", "chain_readers"]
+ },
+ "edges": {
+  "EXF>CORE": ["_amend_leg", "_inval_daily", "_inval_seq", "_leg_sql", "_meta_get", "_post_leg", "_post_leg_strict", "_unpost_source", "_win_t0", "asset_id"],
+  "PRICING>CORE": ["_leg_sql", "_meta_get", "_norm"],
+  "RECON>CORE": ["_group_of", "_inval_daily", "_meta_dec", "_meta_get", "_post_leg_strict", "_recon_view", "_recon_view_drop", "_win_t0", "asset_id"]
+ },
+ "state": {
+  "_drain_at": ["CORE", "EXF"],
+  "bsc_reader": ["CORE", "RECON"],
+  "cfg": ["CORE", "EXF", "PRICING", "RECON"],
+  "chain_owners": ["CORE", "RECON"],
+  "chain_readers": ["CORE", "RECON"],
+  "conn": ["CORE", "EXF", "PRICING", "RECON"],
+  "my_wallets": ["CORE", "RECON"],
+  "native_sym": ["CORE", "PRICING", "RECON"],
+  "px": ["CORE", "EXF", "PRICING"],
+  "reader": ["CORE", "RECON"],
+  "recon_months": ["CORE", "EXF", "RECON"],
+  "sol_reader": ["CORE", "RECON"],
+  "sol_wallets": ["CORE", "RECON"],
+  "svc_exf": ["CORE", "PRICING"],
+  "wrapped": ["CORE", "PRICING", "RECON"]
+ },
+ "core_init_only": [],
+ "bypass": [],
+ "getattr_core": [
+  ["core_exf.py", "ExfMixin.exf_recon_pass", "getattr", "_drain_at"],
+  ["core_prov.py", "ProvMixin._prov_targets", "getattr", "chain_owners"],
+  ["core_prov.py", "ProvMixin._streams_have_data", "getattr", "chain_readers"],
+  ["core_recon.py", "ReconMixin._recon_pending_chains", "getattr", "chain_readers"]
+ ],
+ "opaque": [],
+ "modfunc": [],
+ "self_pass": [
+  {"arg": 0, "callee": "core_svc.ExfService", "dict_keys": [], "group": "CORE", "module": "core_svc", "names": ["_amend_leg", "_inval_daily", "_inval_seq", "_leg_sql", "_meta_get", "_post_leg", "_post_leg_strict", "_unpost_source", "_win_t0", "asset_id"], "site": "core.py:Core.__init__", "type_module": [], "unresolved": []},
+  {"arg": 0, "callee": "core_svc.PriceService", "dict_keys": [], "group": "CORE", "module": "core_svc", "names": ["_leg_sql", "_meta_get", "_norm"], "site": "core.py:Core.__init__", "type_module": [], "unresolved": []},
+  {"arg": 0, "callee": "core_svc.ReconService", "dict_keys": [], "group": "CORE", "module": "core_svc", "names": ["_group_of", "_inval_daily", "_meta_dec", "_meta_get", "_post_leg_strict", "_recon_view", "_recon_view_drop", "_win_t0", "asset_id"], "site": "core.py:Core.__init__", "type_module": [], "unresolved": []},
+  {"arg": 0, "callee": "migrate.startup", "dict_keys": [], "group": "CORE", "module": "migrate", "names": ["_reclass_added_lp_mgrs_once", "_reclass_plain_xfer_once", "conn", "svc_price"], "site": "core.py:Core.run", "type_module": [], "unresolved": []},
+  {"arg": 0, "callee": "discopen.Runner", "dict_keys": ["_disc_t_cache"], "group": "RECON", "module": "discopen", "names": ["_group_of", "_post_leg_strict", "_recon_pending", "_scope_ready", "_scope_ready_tok", "asset_id", "cfg", "conn", "my_wallets", "native_sym"], "site": "core_recon.py:ReconMixin._negabs_runner", "type_module": [["_ver", "CLASSIFIER_VER"]], "unresolved": []}
+ ],
+ "type_module_tools": [
+  ["tools/rebuild2.py", "core_mod_ver", "CLASSIFIER_VER"]
+ ]
+}

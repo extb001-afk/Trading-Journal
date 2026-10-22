@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from .base import Adapter as _Base, BrokerError, fnum, ERR_BODY
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 
 
 class Adapter(_Base):

@@ -2,18 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import os
+import os  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import types
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import types  # noqa: E402
 
-import common
-import bf_engine
-import sol_watch
+import paths  # noqa: E402
+import bf_engine  # noqa: E402
+import sol_watch  # noqa: E402
 
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -26,7 +26,7 @@ def ad(p8, n):
 def setup(name):
     sd = os.path.join(T.TMP, name, "state")
     os.makedirs(sd, exist_ok=True)
-    common.rebase_state(sd)
+    paths.rebase_state(sd)
     bf_engine._PROGRESS.clear()
     return sd
 
@@ -94,7 +94,7 @@ wj(cp, cur)
 spool = os.path.join(sd, "solspool_" + A2 + ".jsonl")
 with open(spool, "w", encoding="utf-8") as f:
     f.write('{"signature": "s1"}\n')
-k8 = lambda a: "sol:" + a[:8]
+k8 = lambda a: "sol:" + a[:8]  # noqa: E731
 SOL = {
     "sol": it("live", done=520, total=520),
     k8(O1): it("sigs", done=2), k8(O1) + ":extend": it("done"),
@@ -105,7 +105,9 @@ DROP = {"sol", k8(O1), k8(O1) + ":extend", k8(A1), k8(S1), k8(R1), "sol:" + Z, "
 bs = os.path.join(sd, "backfill_status.json")
 wj(bs, {"sol": SOL, "evm": EVM, "bsc": {"bsc": it("live")}, "_updated": 1})
 h_cur, h_sp = sha(cp), sha(spool)
-sol_watch.Rpc = lambda c9: types.SimpleNamespace()
+for _mn9 in [m9 for m9 in sys.modules if m9.startswith("sol_")]:
+    if hasattr(sys.modules[_mn9], "Rpc"):
+        sys.modules[_mn9].Rpc = lambda c9: types.SimpleNamespace()
 cfg = {"wallets": [{"type": "sol", "chain": "sol", "address": o} for o in (O1, O2)], "backfill_months": 5,
        "sol": {"rpc": "https://sol-rpc.mock.invalid", "stake": False, "addr_pace_sec": 0}}
 wt = sol_watch.SolWatcher(cfg, [O1, O2], types.SimpleNamespace(append=lambda r: None))

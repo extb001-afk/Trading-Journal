@@ -1,13 +1,12 @@
 import chain_registry
-import common
+import chaincatalog, paths, timeutil
 import json
 import lpdec
-import os
 import time
 from core_common import MissingTs
 from core_common import dm
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -100,7 +99,7 @@ class ClassifyMixin:
                 if (tok.get("type") or "ERC-20") != "ERC-20":
                     continue
                 ca = tok.get("address") or tok.get("address_hash")
-                if not ca:
+                if not ca or str(ca).lower() == chaincatalog.NATIVE_ALIAS_TOKEN.get(chain):
                     continue
                 total = tt.get("total") or {}
                 try:
@@ -128,7 +127,7 @@ class ClassifyMixin:
             add(mint_to, native_aid, mint)
         ts = tx.get("timestamp")
         if isinstance(ts, str):
-            ts = common.iso_epoch(ts)
+            ts = timeutil.iso_epoch(ts)
         if ts is None or (isinstance(ts, (int, float)) and ts <= 0):
             log.warning("시각 없는 tx 거부: %s %s timestamp=%r", chain, (tx.get("hash") or "?")[:14], tx.get("timestamp"))
             raise MissingTs(f"{chain} tx 시각 없음: {tx.get('timestamp')!r}")
@@ -140,7 +139,7 @@ class ClassifyMixin:
 
     @staticmethod
     def _zk_norm(chain: str, snap: dict) -> dict:
-        zk = common.ZK_STACK.get(chain)
+        zk = chaincatalog.ZK_STACK.get(chain)
         if not zk or not isinstance(snap, dict) or snap.get("internal_note") == "zk_base_token" or not snap.get("tx"):
             return snap
         base, boot = zk
@@ -343,9 +342,7 @@ class ClassifyMixin:
                     " AND source_ns=? AND source_id=? AND leg_kind='gas' AND cost_usd IS NOT NULL", (r["chain"], r["txhash"])).fetchall()}
                 ev = self._rederive_tx_anchor_safe(r["chain"], r["txhash"])
                 for (aid9, loc9, qb9), (cu9, ck9) in gas9.items():
-                    self.conn.execute("UPDATE postings SET cost_usd=?, cost_krw=? WHERE source_kind='chain_tx' AND source_ns=?"
-                                      " AND source_id=? AND leg_kind='gas' AND asset_id=? AND location=? AND qty_base=?"
-                                      " AND cost_usd IS NULL", (cu9, ck9, r["chain"], r["txhash"], aid9, loc9, qb9))
+                    self._leg_sql("_reclass_plain_xfer_once.1", (cu9, ck9, r["chain"], r["txhash"], aid9, loc9, qb9))
                 done.append((r["chain"], r["txhash"], ev))
                 n += 1
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('reclass_q_plainxfer', ?)", (f"{int(time.time())}:{n}",))
@@ -394,14 +391,14 @@ class ClassifyMixin:
                     if ts9 is None:
                         try:
                             ts9 = self.deltas(ch, snap)[4]
-                        except Exception as _cg9:
+                        except Exception as _cg9:  # noqa: BLE001 [fallback]
                             calcguard.swallowed("core_classify:ClassifyMixin._reclass_added_lp_mgrs_once", _cg9)
                             ts9 = 0
                     items.append((int(ts9 or 0), r["txhash"], r["event"]))
                 if miss9:
                     log.warning("새 LP 관리자 %s:%s — v3 예치 유동성 힌트 없는 tx %d건(%s…) · 재분류 보류(%s)",
                                 ch, addr[:10], len(miss9), miss9[0][:12],
-                                ((common.tool_ref("backfill_gap.py", "") + " nft-enrich/import 먼저") if common.tool_ref("backfill_gap.py", "")
+                                ((paths.tool_ref("backfill_gap.py", "") + " nft-enrich/import 먼저") if paths.tool_ref("backfill_gap.py", "")
                                  else "보강 도구가 이 설치엔 없음 — 보류 유지(장부는 그대로)"))
                     continue
                 for _ts9, h, old_ev in sorted(items):
@@ -410,22 +407,18 @@ class ClassifyMixin:
                         " AND source_ns=? AND source_id=? AND leg_kind='gas' AND cost_usd IS NOT NULL", (ch, h)).fetchall()}
                     ev = self._rederive_tx_anchor_safe(ch, h)
                     for (aid9, loc9, qb9), (cu9, ck9) in gas9.items():
-                        self.conn.execute("UPDATE postings SET cost_usd=?, cost_krw=? WHERE source_kind='chain_tx' AND source_ns=?"
-                                          " AND source_id=? AND leg_kind='gas' AND asset_id=? AND location=? AND qty_base=?"
-                                          " AND cost_usd IS NULL", (cu9, ck9, ch, h, aid9, loc9, qb9))
+                        self._leg_sql("_reclass_added_lp_mgrs_once.1", (cu9, ck9, ch, h, aid9, loc9, qb9))
                     if ev != old_ev:
                         changed[f"{old_ev}→{ev}"] = changed.get(f"{old_ev}→{ev}", 0) + 1
                     n += 1
                 self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)",
                                   (f"reclass_lp_mgr:{ch}:{addr}", f"{int(time.time())}:{len(items)}"))
+            if changed:
+                self._inval_daily()
             self.conn.commit()
         except Exception:
             self.conn.rollback()
             raise
         if changed:
-            try:
-                os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
-            except FileNotFoundError:
-                pass
             log.warning("★새 LP 관리자 %s — 저장된 tx %d건 재분류 %s★", ", ".join(f"{c}:{a[:10]}" for c, a in todo), n, changed)
         return n

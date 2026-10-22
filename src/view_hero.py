@@ -2,10 +2,11 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
-from view_common import KST
+from timeutil import KST
+import acct_norm
 import websnap
 import logging
-import calcguard
+import calcguard  # noqa: E402
 log = logging.getLogger('tj-web')
 
 _HERO_HTML = {}
@@ -25,7 +26,7 @@ def _hero_ok(b, snap) -> bool:
             return False
         tk = (getattr(snap, "hero", None) or {}).get("todayKey")
         return tk == datetime.now(KST).strftime("%m-%d")
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [probe]
         calcguard.swallowed("view_hero:_hero_ok", _cg9)
         return False
 
@@ -33,7 +34,7 @@ def _hero_ok(b, snap) -> bool:
 def _hero_summary(out):
     f = out.get("fields") or {}
     n = lambda v: float(v) if isinstance(v, (int, float)) and v == v else 0.0
-    rate = n(f.get("rate")) or 1384.0
+    rate = n(f.get("rate")) or acct_norm.DEFAULT_KRW_USD
     total = sum(n(x.get("qty")) * n(x.get("price")) for x in (f.get("stables") or []))
     total += sum(n(x.get("qty")) * n(x.get("price")) for x in (f.get("coins") or []))
     total += sum(n(x.get("krw")) / rate for x in (f.get("fiats") or []))
@@ -108,13 +109,13 @@ def _publish_snap(pub, gen, out=None):
     snap9 = websnap.Snap(pub, gen)
     try:
         snap9.hero = _hero_summary(out if out is not None else pub)
-    except Exception as e:
-        calcguard.swallowed("view_hero:_publish_snap", e)
+    except Exception as e:   # noqa: BLE001 [optional]
+        calcguard.swallowed("view_hero:_publish_snap[hero]", e)
         log.warning("hero 요약 실패(무시): %s", e)
     try:
         websnap.attach_slim(snap9, pub)
-    except Exception as e:
-        calcguard.swallowed("view_hero:_publish_snap", e)
+    except Exception as e:   # noqa: BLE001 [fallback]
+        calcguard.swallowed("view_hero:_publish_snap[attach_slim]", e)
         snap9.slim_gz = snap9.parts_gz = None
         log.warning("가벼운 상태 만들기 실패(무시): %s", e)
     return snap9

@@ -6,8 +6,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
+import fsio
 import chain_registry
 import netpace
 
@@ -38,10 +39,11 @@ CHAIN_KO = {"sol": "솔라나", "eth": "이더리움", "bsc": "BSC", "base": "Ba
             "polygon": "Polygon", "scroll": "Scroll", "zksync": "zkSync", "gnosis": "Gnosis", "robinhood": "Robinhood", "arc": "Arc"}
 NATIVE = {"sol": "SOL", "eth": "ETH", "base": "ETH", "arbitrum": "ETH", "optimism": "ETH", "scroll": "ETH", "zksync": "ETH",
           "bsc": "BNB", "polygon": "POL", "gnosis": "XDAI", "robinhood": "ETH", "arc": "USDC"}
-import common as _cm9
-import calcguard
-_cm9.fill_chain_table(CHAIN_KO)
-_cm9.fill_chain_table(NATIVE, 1)
+import config, logs, net_http, num_parse, paths, textutil   # noqa: E402
+import db as dbm
+import calcguard  # noqa: E402
+config.fill_chain_table(CHAIN_KO)
+config.fill_chain_table(NATIVE, 1)
 WRAPPED = {"eth": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "base": "0x4200000000000000000000000000000000000006",
            "optimism": "0x4200000000000000000000000000000000000006", "arbitrum": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
            "bsc": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "polygon": "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"}
@@ -54,11 +56,7 @@ WINDOW_BRIDGE = 6 * 3600
 
 
 def D(x) -> Decimal:
-    try:
-        d = Decimal(str(x))
-        return d if d.is_finite() else Decimal(0)
-    except (InvalidOperation, ValueError, TypeError):
-        return Decimal(0)
+    return num_parse.to_dec(x, Decimal(0))
 
 
 def norm(a) -> str:
@@ -76,9 +74,9 @@ def short(a) -> str:
 
 
 def load_seed(base_dir):
-    import common as _cm8
+    import seeds
     bd = base_dir if os.path.exists(os.path.join(base_dir, "seed", "xchain_bridges.json")) else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    s = _cm8.seed_json("xchain_bridges.json", {}, base_dir=bd)
+    s = seeds.seed_json("xchain_bridges.json", {}, base_dir=bd)
     s = s if isinstance(s, dict) else {}
     s["evm_contracts"] = {norm(k): v for k, v in (s.get("evm_contracts") or {}).items()}
     s["solvers"] = {norm(k): v for k, v in (s.get("solvers") or {}).items()}
@@ -217,7 +215,7 @@ def evm_owner_deltas(cr, owner):
         f = "0x" + lg["t"][1][26:]
         to = "0x" + lg["t"][2][26:]
         try:
-            v = _cm9.log_word0(lg["d"])
+            v = textutil.log_word0(lg["d"])
         except ValueError:
             continue
         if f == owner:
@@ -728,7 +726,7 @@ class Tracer:
         self.budget, self.sleep, self.log = budget, sleep, log or (lambda *a: None)
         self.calls = 0
         self.skip_gids = frozenset(skip_gids or ())
-        self.mine = {norm(w.get("address")) for w in _cm9.history_wallets(cfg) if w.get("address")}
+        self.mine = {norm(w.get("address")) for w in config.history_wallets(cfg) if w.get("address")}
         self.anchors = {norm(a): v for a, v in (anchors or {}).items() if a and norm(a) not in self.mine}
         self.cex = {norm(a) for a in (cex or ()) if a} - self.mine
         sol = cfg.get("sol") or {}
@@ -742,7 +740,7 @@ class Tracer:
             raise Budget()
         self.calls += 1
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"})
+        req = net_http.request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"})
         netpace.wait(url)
         try:
             import bf_engine as _bfe9
@@ -761,7 +759,7 @@ class Tracer:
                     raise _bfe9.NetError(str(d["error"])[:200], ce9.kind, code=ce9.code)
                 return d.get("result")
             with _bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) as r:
-                d = json.loads(_cm9.read_capped(r).decode())
+                d = json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             netpace.note_error(url, e)
             raise
@@ -775,14 +773,14 @@ class Tracer:
         if self.calls >= self.budget:
             raise Budget()
         self.calls += 1
-        req = urllib.request.Request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
+        req = net_http.request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
         try:
             netpace.wait(url)
         except netpace.Cooldown as e:
             raise Paused(str(e))
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(_cm9.read_capped(r).decode())
+            with net_http.urlopen(req, timeout=timeout) as r:
+                return json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
                 raise Paused(f"{netpace.host_of(url)} 429")
@@ -797,7 +795,7 @@ class Tracer:
                 return self._post(u, method, params)
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer._sol", e)
                 err = e
         raise RuntimeError(f"sol {method}: {err}")
@@ -824,7 +822,7 @@ class Tracer:
                 return r
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer._evm", e)
                 err = e
                 errs.append(e)
@@ -866,7 +864,7 @@ class Tracer:
                 self.c["ws"][k] = [parse_ws_op(o, self.seed) for o in ops]
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer.ws_op", e)
                 self.log(f"wormholescan {short(txh)}: {e}")
                 if _definitive(e):
@@ -887,7 +885,7 @@ class Tracer:
                 self.c["ws"][k] = res
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer.debridge", e)
                 self.log(f"debridge {short(txh)}: {e}")
                 if _definitive(e):
@@ -904,7 +902,7 @@ class Tracer:
                 self.c["ws"][k] = [parse_relay_req(r, self.seed) for r in (d.get("requests") or [])]
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer.relay", e)
                 self.log(f"relay {short(txh)}: {e}")
                 if _definitive(e):
@@ -928,7 +926,7 @@ class Tracer:
                                    for m in ids]
             except Budget:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer.ccip", e)
                 self.log(f"ccip {short(txh)}: {e}")
                 if _definitive(e):
@@ -993,7 +991,7 @@ class Tracer:
             return 1.0
         try:
             return self.px.candle_usd("BNB" if sym == "BNB" else sym, int(ts) * 1000)
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("xchain_match:Tracer.native_px", _cg9)
             return None
 
@@ -1064,7 +1062,7 @@ class Tracer:
         tp = [TR, None, topic] if kind == "to" else [TR, topic, None]
         lg = self._evm(chain, "eth_getLogs", [{"address": token, "fromBlock": hex(lo), "toBlock": hex(hi), "topics": tp}], logs=True) or []
         for x in reversed(lg):
-            row = {"block": int(x["blockNumber"], 16), "tx": norm(x["transactionHash"]), "qty": str(D(_cm9.log_word0(x["data"])) / (Decimal(10) ** dec))}
+            row = {"block": int(x["blockNumber"], 16), "tx": norm(x["transactionHash"]), "qty": str(D(textutil.log_word0(x["data"])) / (Decimal(10) ** dec))}
             if kind == "to":
                 row["from"] = "0x" + x["topics"][1][26:]
             else:
@@ -1148,7 +1146,7 @@ class Tracer:
                     if norm(h9) != ctx and Hn[2:] in str(snap9 or "").lower():
                         sib = True
                         break
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("xchain_match:Tracer._same_block_prior", _cg9)
                 sib = False
         if not sib:
@@ -1166,7 +1164,7 @@ class Tracer:
                 try:
                     rows.append({"ti": int(x.get("transactionIndex") or "0x0", 16), "li": int(x.get("logIndex") or "0x0", 16),
                                  "tx": norm(x.get("transactionHash")), "to": "0x" + x["topics"][2][26:],
-                                 "qty": str(D(_cm9.log_word0(x.get("data") or "0x0")) / (Decimal(10) ** dec))})
+                                 "qty": str(D(textutil.log_word0(x.get("data") or "0x0")) / (Decimal(10) ** dec))})
                 except (KeyError, IndexError, TypeError, ValueError):
                     continue
             rows.sort(key=lambda r: (r["ti"], r["li"]))
@@ -1209,7 +1207,8 @@ class Tracer:
                                                     hex(int(before_block) - 1)])
             except Budget:
                 raise
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("xchain_match:Tracer._hop_opening[balance_before]", e9)
                 if _fail_class(e9, block=int(before_block) - 1, head=lambda: self._head(chain)) == "transient":
                     raise Paused(f"창 앞 잔고 조회 일시 실패 — 다음에 다시({chain} {short(H)}): {str(e9)[:120]}") from e9
                 return None
@@ -1375,7 +1374,8 @@ class Tracer:
             code = str(self._evm(chain, "eth_getCode", [a, "latest"]) or "0x").lower()
         except Budget:
             raise
-        except Exception as ex:
+        except Exception as ex:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("xchain_match:Tracer._busy_or_contract", ex)
             self.log(f"acct {chain} {short(a)}: {ex}")
             if _fail_class(ex) == "transient":
                 raise Paused(f"계정 조회 일시 실패 — 다음에 다시({chain} {short(a)}): {str(ex)[:120]}") from ex
@@ -1668,13 +1668,13 @@ class Tracer:
             e["n"] = n
         except Paused as ex:
             e["status"] = "paused"
-            e["err"] = _cm9.safe_err(ex)[:200]
+            e["err"] = logs.safe_err(ex)[:200]
         except Budget:
             e["status"] = "budget"
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001 [fallback]
             calcguard.swallowed("xchain_match:Tracer.trace_send", ex)
             e["status"] = "error"
-            e["err"] = _cm9.safe_err(ex)[:200]
+            e["err"] = logs.safe_err(ex)[:200]
         self.c["snd"][k] = e
         return e
 
@@ -1718,13 +1718,13 @@ class Tracer:
                     self._finish_hop(e, H, lambda: self._evm_holder_lots(chain, H, tok, cr["block"], qty, 2, path, cur=(tx, W)), qty, chain)
         except Paused as ex:
             e["status"] = "paused"
-            e["err"] = _cm9.safe_err(ex)[:200]
+            e["err"] = logs.safe_err(ex)[:200]
         except Budget:
             e["status"] = "budget"
-        except Exception as ex:
+        except Exception as ex:   # noqa: BLE001 [fallback]
             calcguard.swallowed("xchain_match:Tracer.trace", ex)
             e["status"] = "error"
-            e["err"] = _cm9.safe_err(ex)[:200]
+            e["err"] = logs.safe_err(ex)[:200]
         e["path"] = path[:12]
         prev = self.c["arr"].get(k)
         if (isinstance(prev, dict) and prev.get("status") == "ok" and (prev.get("stale") or prev.get("reverify"))
@@ -1783,18 +1783,18 @@ _STABLE_MINTS = set()
 
 def _stable_cas(chain):
     try:
-        import pricing
-        return (pricing.STABLE_CAS.get(chain) or {}).keys()
-    except Exception as _cg9:
+        import token_tables
+        return (token_tables.STABLE_CAS.get(chain) or {}).keys()
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("xchain_match:_stable_cas", _cg9)
         return ()
 
 
 def _init_mints():
     try:
-        import pricing
-        _STABLE_MINTS.update(pricing.STABLE_MINTS.keys())
-    except Exception as _cg9:
+        import token_tables
+        _STABLE_MINTS.update(token_tables.STABLE_MINTS.keys())
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("xchain_match:_init_mints", _cg9)
         _STABLE_MINTS.update({"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"})
 
@@ -1822,8 +1822,8 @@ def anchors_from_state(state_dir, conn, cfg):
     try:
         for (a,) in conn.execute("SELECT address FROM exchange_addresses WHERE memo IS NULL OR memo=''"):
             put(a, "deposit")
-    except Exception as _cg9:
-        calcguard.swallowed("xchain_match:anchors_from_state", _cg9)
+    except Exception as _cg9:  # noqa: BLE001 [optional]
+        calcguard.swallowed("xchain_match:anchors_from_state[for]", _cg9)
         pass
     dep, wd = set(), set()
     try:
@@ -1834,8 +1834,8 @@ def anchors_from_state(state_dir, conn, cfg):
                 continue
             if tx:
                 (dep if kind == "deposit" else wd).add(tx)
-    except Exception as _cg9:
-        calcguard.swallowed("xchain_match:anchors_from_state", _cg9)
+    except Exception as _cg9:  # noqa: BLE001 [optional]
+        calcguard.swallowed("xchain_match:anchors_from_state[kind]", _cg9)
         pass
     try:
         with open(os.path.join(state_dir, "tx_origin_cache.json"), encoding="utf-8") as f:
@@ -1869,8 +1869,8 @@ def exchange_addrs_from_state(state_dir, conn, cfg):
     try:
         for (a,) in conn.execute("SELECT address FROM exchange_addresses"):
             put(a)
-    except Exception as _cg9:
-        calcguard.swallowed("xchain_match:exchange_addrs_from_state", _cg9)
+    except Exception as _cg9:  # noqa: BLE001 [optional]
+        calcguard.swallowed("xchain_match:exchange_addrs_from_state[for#1]", _cg9)
         pass
     wd = set()
     try:
@@ -1881,8 +1881,8 @@ def exchange_addrs_from_state(state_dir, conn, cfg):
                 continue
             if tx:
                 wd.add(tx)
-    except Exception as _cg9:
-        calcguard.swallowed("xchain_match:exchange_addrs_from_state", _cg9)
+    except Exception as _cg9:  # noqa: BLE001 [optional]
+        calcguard.swallowed("xchain_match:exchange_addrs_from_state[for#2]", _cg9)
         pass
     try:
         with open(os.path.join(state_dir, "tx_origin_cache.json"), encoding="utf-8") as f:
@@ -1896,10 +1896,9 @@ def exchange_addrs_from_state(state_dir, conn, cfg):
 
 
 def run_once(cfg, state_dir, db_path, base_dir, rows_cands, limit=1, budget=300, log=None, px=None, sleep=0.35, skip_gids=None):
-    import sqlite3
     cache = load_cache(state_dir)
     seed = load_seed(base_dir)
-    conn = sqlite3.connect(_cm9.sqlite_ro_uri(db_path), uri=True, timeout=10)
+    conn = dbm.connect(paths.sqlite_ro_uri(db_path), uri=True, timeout=10)
     done = []
     try:
         anchors = anchors_from_state(state_dir, conn, cfg)
@@ -1916,53 +1915,4 @@ def run_once(cfg, state_dir, db_path, base_dir, rows_cands, limit=1, budget=300,
 
 def _save(state_dir, cache):
     p = os.path.join(state_dir, CACHE_NAME)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, separators=(",", ":"), default=str)
-    os.replace(tmp, p)
-
-
-def _cli():
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import common
-    import db as dbm
-    import pricing
-    cfg = common.read_json(common.CONFIG_PATH, {})
-    cache = load_cache(common.STATE_DIR)
-    if len(sys.argv) > 1 and sys.argv[1] == "show":
-        for k, e in sorted(cache["snd"].items(), key=lambda kv: -float(kv[1].get("t") or 0)):
-            print("send", e.get("status"), k[:90], e.get("n"), e.get("err") or "")
-        for k, e in sorted(cache["arr"].items(), key=lambda kv: -float(kv[1].get("t") or 0)):
-            print(e.get("status"), k[:90], e.get("sym"), e.get("qty"), e.get("cost"), e.get("label"), e.get("err") or "")
-        return
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
-    import web
-    b = web.StateBuilder.__new__(web.StateBuilder)
-    rows = web.StateBuilder._load(b, conn)
-    stab = {r[0] for r in conn.execute("SELECT group_id FROM asset_groups WHERE name IN ('USDT','USDC','DAI','USDE','USDG','FDUSD','BUSD','USD1','PYUSD')")}
-    ex = set()
-    for (p,) in conn.execute("SELECT payload FROM raw_ex WHERE kind='withdraw'"):
-        try:
-            t = str(json.loads(p).get("txid") or "")
-        except ValueError:
-            continue
-        if t:
-            ex.add(t)
-            ex.add(t.lower())
-    conn.close()
-    cands = send_candidates(rows, cache, load_seed(common.BASE_DIR)) + candidates(rows, cache, frozenset(ex), frozenset(stab))
-    if "--key" in sys.argv:
-        kk = sys.argv[sys.argv.index("--key") + 1]
-        cands = [c for c in cands if kk in c["key"]]
-    lim = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else 1
-    bud = int(sys.argv[sys.argv.index("--budget") + 1]) if "--budget" in sys.argv else 300
-    print(f"후보 {len(cands)}건 · 이번 {min(lim, len(cands))}건")
-    px = pricing.PxCache(os.path.join(common.STATE_DIR, "xchain_px_cache.json"))
-    for r in run_once(cfg, common.STATE_DIR, common.DB_PATH, common.BASE_DIR, cands, limit=lim, budget=bud,
-                      log=lambda m: print("  ·", m), px=px):
-        print(r)
-    px.flush()
-
-
-if __name__ == "__main__":
-    _cli()
+    fsio.atomic_write_json(p, cache, ensure_ascii=False, separators=(",", ":"), default=str, mode=None, fsync=False, dir_fsync=False, makedirs=False)

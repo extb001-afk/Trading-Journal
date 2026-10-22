@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import urllib.error  # noqa: E402
 
-import bf_engine as B
+import bf_engine as B  # noqa: E402
 
 chk = T.chk
 READS = []

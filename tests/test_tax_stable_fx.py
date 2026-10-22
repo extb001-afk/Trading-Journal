@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import db as dbm
-import netpace
-import web
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
@@ -28,7 +28,7 @@ D0 = int((datetime.fromtimestamp(NOW, KST).replace(hour=12, minute=0, second=0, 
 DAY = 86400
 FEE = Decimal("0.0005")
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 A = {}
 for ex, sym in (("upbit", "USDT"), ("bithumb", "USDT"), ("bithumb", "KRW"), ("bithumb", "BTC")):
     if not c.execute("SELECT 1 FROM asset_groups WHERE name=?", (sym,)).fetchone():
@@ -64,13 +64,13 @@ c.close()
 px = {"USDT": 1.0, "BTC": 115000.0, "KRW": 1 / 1400.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
            "fx_basis": 1400.0, "ex_usd": {f"{e}:{k}": v for k, v in px.items() for e in ("upbit", "bithumb")},
-           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("upbit", "bithumb")}}, open(web.SPOT_PATH, "w"))
+           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("upbit", "bithumb")}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: px.get(str(sym).upper())
 web.pricing._gj = lambda url, timeout=10.0: None
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
 b = web.StateBuilder()
 b.skip_gen_check = True
-conn = dbm.open_db(common.DB_PATH, readonly=True)
+conn = dbm.open_db(paths.DB_PATH, readonly=True)
 try:
     f = b._build(conn)["fields"]
 finally:

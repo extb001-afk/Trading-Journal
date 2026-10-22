@@ -2,28 +2,21 @@ from __future__ import annotations
 import json
 import os
 import time
-import common
-import calcguard
+import paths
+import calcguard  # noqa: E402
 
 try:
     from review_prompt import LEN_KEYS as REVIEW_LEN_KEYS, len_key as review_len_key
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [fallback]
+    calcguard.swallowed("view_review:<module>[len_keys]", e_cg)
     REVIEW_LEN_KEYS, review_len_key = (), None
 
 
 try:
     import review_progress
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [optional]
+    calcguard.swallowed("view_review:<module>[review_progress]", e_cg)
     review_progress = None
-
-
-REVIEW_PROGRESS_PATH = os.path.join(common.STATE_DIR, "review_progress.json")
-
-
-REVIEW_FILL_REQ_PATH = os.path.join(common.STATE_DIR, "review_fill_request.json")
-
-
-REVIEW_MANUAL_LOCK = os.path.join(common.STATE_DIR, "review_catchup_manual.lock")
 
 
 def review_pause_eff(prefs) -> dict:
@@ -33,7 +26,7 @@ def review_pause_eff(prefs) -> dict:
 
 def review_fill_req_view():
     try:
-        with open(REVIEW_FILL_REQ_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("review_fill_request.json"), "r", encoding="utf-8") as f9:
             d9 = json.load(f9)
     except (OSError, ValueError):
         return None
@@ -42,7 +35,7 @@ def review_fill_req_view():
 
 def review_manual_busy() -> bool:
     try:
-        with open(REVIEW_MANUAL_LOCK, "r", encoding="utf-8") as f9:
+        with open(paths.state("review_catchup_manual.lock"), "r", encoding="utf-8") as f9:
             d9 = json.load(f9)
         pid9, ts9 = int(d9.get("pid") or 0), float(d9.get("ts") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
@@ -60,9 +53,11 @@ def review_len_eff(prefs) -> dict:
 
 try:
     from review_prompt import PROMPT_VERSION as REVIEW_PV
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [optional]
+    calcguard.swallowed("view_review:<module>[prompt_version]", e_cg)
     REVIEW_PV = None
 try:
     from review_prompt import WEEKLY_PROMPT_VERSION as REVIEW_WPV
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [fallback]
+    calcguard.swallowed("view_review:<module>[weekly_version]", e_cg)
     REVIEW_WPV = REVIEW_PV

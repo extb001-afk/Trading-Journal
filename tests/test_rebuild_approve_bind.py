@@ -2,23 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _gate as _x
-from _gate import check, done
-import glob
-import json
-import math
-import os
-import subprocess
-import time
-import common
-import core
-import ops_requests as O
-assert _x.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-c = core.Core(common.load_config())
-S = common.STATE_DIR
+import _harness as T  # noqa: E402,F401
+import _gate as _x  # noqa: E402
+from _gate import check, done  # noqa: E402
+import glob  # noqa: E402
+import json  # noqa: E402
+import math  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import ops_requests as O  # noqa: E402
+assert _x.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+c = core.Core(config.load_config())
+S = paths.STATE_DIR
 APV = os.path.join(S, "rebuild_pnl_approve.json")
 GATE = os.path.join(S, "rebuild_pnl_gate.json")
 BASE = {"realized_by_month_baseline": {}, "realized_by_month_shadow": {}, "unverified_baseline": {"sum": 0, "rows": 0, "by": {}},
@@ -131,7 +130,7 @@ for nm, until in (("기준(정상)", apv["until"]), ("NaN", float("nan")), ("inf
     try:
         st6 = O.status()
         r6[nm + ":status"] = isinstance(st6, dict)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         r6[nm + ":status"] = repr(e)
 check("[6] until 정상 = 승인 · NaN·inf·상한 넘음·문자 = 승인 아님", ok6 and r6["기준(정상)"] is True and not any(r6[k] for k in ("NaN", "inf", "상한 넘음", "문자")), r6)
 check("[6] status() 가 이상한 기한에 죽지 않음", all(r6[k] is True for k in r6 if k.endswith(":status")), r6)
@@ -174,8 +173,8 @@ r9 = {"정상": pass9(base9), "at inf": pass9(dict(base9, at=float("inf"))), "at
 check("[9] 정상 승인만 재시도 · at inf/NaN/미래 · until 상한 넘음/inf = 재시도 안 함", r9["정상"] and not any(v for k, v in r9.items() if k != "정상"), r9)
 clear_apv()
 
-import rebuild2
-import sqlite3
+import rebuild2  # noqa: E402
+import sqlite3  # noqa: E402
 a8, b8 = sqlite3.connect(":memory:"), sqlite3.connect(":memory:")
 for cx in (a8, b8):
     cx.execute("CREATE TABLE postings (source_kind, source_ns, source_id, leg_seq, leg_kind, event, cost_usd, asset_id)")

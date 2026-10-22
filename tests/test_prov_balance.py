@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
 
 W = "0x" + "ab" * 20
 W2 = "0x" + "cd" * 20
@@ -22,10 +22,10 @@ CFG = {"wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
-import common
+import config, paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -36,7 +36,7 @@ def h(tag):
     return "0x" + hashlib.sha256(tag.encode()).hexdigest()
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC, GID = {}, {}
 
@@ -125,11 +125,11 @@ PROV = {"eth": {"mode": "chain", "at": AT, "t1": AT, "block": 123, "bts": BTS, "
     W2: {"tok": {CA["thn2"]: [str(15_000 * E18), "THN2", 18]}, "q": [CA["thn2"]]}}}}
 json.dump({"v": 1, "e": {f"eth:{CA['nocg']}": [AT, None], f"eth:{CA['new']}": [AT, 1.5], f"eth:{CA['new2']}": [AT, 3.0],
                          f"eth:{CA['cgonly']}": [AT, 0.5], f"eth:{CA['anewx']}": [AT, 1.0], f"eth:{WBTC}": [AT, 60000.0]}},
-          open(os.path.join(common.STATE_DIR, "cg_ca.json"), "w"))
+          open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
 
-import pricing
-import cgca
-import web
+import pricing, token_tables  # noqa: E402
+import cgca  # noqa: E402
+import web  # noqa: E402
 
 cgca.reset_for_tests()
 pricing._gj = lambda url, *a, **k: (_ for _ in ()).throw(OSError("시험: 시세 받기 없음"))
@@ -144,8 +144,8 @@ RB = {"wallets": {W: {"fetchedAt": NOW - 60, "total": 50000, "tokens": [
     {"id": ca("e8"), "chain": "eth", "sym": "RBONLY", "amt": 10, "px": 2.0, "v": True}],
     "protocols": [{"chain": "eth", "proto": "lend", "pname": "Lend", "items": [
         {"name": "Lending", "pool": ca("f1"), "ctrl": ca("f2"), "idx": "", "assets": [{"sym": "NEWX", "amt": 100, "px": 1.0, "v": True}]}]}]}}}
-json.dump(RB, open(os.path.join(common.STATE_DIR, "rabby_portfolio.json"), "w"))
-json.dump({"fallback_avg": True}, open(os.path.join(common.STATE_DIR, "ui_prefs.json"), "w"))
+json.dump(RB, open(os.path.join(paths.STATE_DIR, "rabby_portfolio.json"), "w"))
+json.dump({"fallback_avg": True}, open(os.path.join(paths.STATE_DIR, "ui_prefs.json"), "w"))
 
 
 def builder():
@@ -174,7 +174,7 @@ b0, f0 = build()
 check("빌드(종전) 성공", bool(f0))
 T0 = total_of(f0)
 c0 = {str(c["key"]): c for c in (f0.get("coins") or [])}
-json.dump(PROV, open(os.path.join(common.STATE_DIR, "prov_bal.json"), "w"))
+json.dump(PROV, open(os.path.join(paths.STATE_DIR, "prov_bal.json"), "w"))
 b1, f1 = build()
 check("빌드(지금 잔고 있음) 성공", bool(f1))
 coins = {str(c["key"]): c for c in (f1.get("coins") or [])}
@@ -246,8 +246,8 @@ note = str((f1.get("prov") or {}).get("note") or "")
 check("P7 안내 = 원가·손익·지난날 곡선은 옛 기록을 다 받으면 정확하게", "정확하게 맞춰져요" in note and "원가·손익·지난날 곡선" in note and "Ethereum" in note, note)
 loc_pv = [l9 for l9 in (ck.get("locs") or []) if l9.get("pv")]
 check("P1 보관처 줄 = '지금 잔고(옛 기록 받는 중)' 표시", loc_pv and "지금 잔고(옛 기록 받는 중)" in str(loc_pv[0].get("sub")), ck.get("locs"))
-import sqlite3
-c9 = sqlite3.connect(os.path.join(common.STATE_DIR, "ledger.db"))
+import sqlite3  # noqa: E402
+c9 = sqlite3.connect(os.path.join(paths.STATE_DIR, "ledger.db"))
 check("P8 장부 무변(빌드가 원장에 안 씀)", c9.execute("SELECT count(*) FROM postings").fetchone()[0] == N_POST)
 c9.execute("INSERT INTO meta (k, v) VALUES ('recon_done_eth', ?)", (str(NOW),))
 c9.commit()
@@ -257,19 +257,19 @@ f0n = {k: (v.get("qty"), v.get("price")) for k, v in c0.items()}
 f2n = {str(k["key"]): (k.get("qty"), k.get("price")) for k in (f2.get("coins") or [])}
 check("P5 대사 끝 = 지금 잔고 몫 0(원장 숫자만 · 보유 행 종전과 같음)", abs(total_of(f2) - T0) < 0.05 and not f2.get("prov") and f2n == f0n, (total_of(f2), T0, f2.get("prov")))
 PROVW = {"eth": {"mode": "wallet", "at": AT, "wallets": {W2: {"native": str(E18)}}}}
-json.dump(PROVW, open(os.path.join(common.STATE_DIR, "prov_bal.json"), "w"))
+json.dump(PROVW, open(os.path.join(paths.STATE_DIR, "prov_bal.json"), "w"))
 b3, f3 = build()
 check("P6 방식 'wallet' 칸(대사 끝난 체인의 새 지갑) = 안 씀(라이브 영향 0)", abs(total_of(f3) - T0) < 0.05 and not f3.get("prov"), (total_of(f3), T0))
 
-import core
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-os.remove(os.path.join(common.STATE_DIR, "prov_bal.json"))
-c = core.Core(common.load_config())
+import core  # noqa: E402
+import core_prov  # noqa: E402
+T.patch_moved("dm", lambda *a, **k: None)
+os.remove(os.path.join(paths.STATE_DIR, "prov_bal.json"))
+c = core.Core(config.load_config())
 c.conn.execute("DELETE FROM meta WHERE k IN ('recon_done_eth')")
 c.conn.commit()
 c.my_wallets.setdefault("eth", set()).add(W2)
-check("K1 첫 대사 전 대상 = (eth, chain, [W, W2])", c._prov_targets() == [("eth", "evm", "chain", sorted([W, W2]))], c._prov_targets())
+check("K1 첫 대사 전 대상 = (eth, chain, [W, W2])", c.svc_recon._prov_targets() == [("eth", "evm", "chain", sorted([W, W2]))], c.svc_recon._prov_targets())
 calls = []
 BAL = {"per_wallet": {W: {("native", None): 3 * E18, ("token", CA["new"]): 0, ("token", CA["known"]): 25 * E18}},
        "_meta": {CA["known"]: ("KNOWN", 18)}, "_block": 999, "_source": "rpc", "_queried": {W: [CA["known"], CA["new"], CA["zero"]]},
@@ -283,17 +283,17 @@ def fake_plan(chain, kind, ws, mode=None, latest=False):
 
 def drain():
     for _ in range(100):
-        if all(j["ev"].is_set() for j in c._prov_jobs.values()):
+        if all(j["ev"].is_set() for j in c.svc_recon._prov_jobs.values()):
             return
         time.sleep(0.02)
 
 
-c._recon_fetch_plan = fake_plan
-c.prov_pass()
+c.svc_recon._recon_fetch_plan = fake_plan
+c.svc_recon.prov_pass()
 drain()
-c._prov_last = 0
-c.prov_pass()
-pf = json.load(open(os.path.join(common.STATE_DIR, "prov_bal.json")))
+c.svc_recon._prov_last = 0
+c.svc_recon.prov_pass()
+pf = json.load(open(os.path.join(paths.STATE_DIR, "prov_bal.json")))
 we = (pf.get("eth") or {}).get("wallets", {}).get(W) or {}
 check("K1 prov_pass = 지금 블록 조회(latest) · 파일 = 네이티브·토큰(0 잔고 포함) · 조회 범위·관측 불가 · 보류 지갑 뺌",
       calls and calls[0][4] is True and pf.get("eth", {}).get("mode") == "chain" and we.get("native") == str(3 * E18)
@@ -302,39 +302,39 @@ check("K1 prov_pass = 지금 블록 조회(latest) · 파일 = 네이티브·토
       and set(pf["eth"]["wallets"]) == {W} and pf["eth"].get("req") == sorted([W, W2]), (calls, pf))
 n_calls = len(calls)
 for _ in range(3):
-    c._prov_last = 0
-    c.prov_pass()
+    c.svc_recon._prov_last = 0
+    c.svc_recon.prov_pass()
     drain()
-check("K1 (코덱스 pr513) 보류 지갑이 있어도 1시간 안 다시 안 물음", len(calls) == n_calls, (n_calls, len(calls)))
+check("K1 보류 지갑이 있어도 1시간 안 다시 안 물음", len(calls) == n_calls, (n_calls, len(calls)))
 check("K1 장부 무변(prov_pass 가 원장에 안 씀)", c.conn.execute("SELECT count(*) FROM postings").fetchone()[0] == N_POST)
 c.conn.execute("INSERT INTO meta (k, v) VALUES ('recon_done_eth', '1')")
 c.conn.commit()
-c._prov_last = 0
-c.prov_pass()
-check("K1 대사 끝 = 그 체인 칸 지움", "eth" not in json.load(open(os.path.join(common.STATE_DIR, "prov_bal.json"))))
+c.svc_recon._prov_last = 0
+c.svc_recon.prov_pass()
+check("K1 대사 끝 = 그 체인 칸 지움", "eth" not in json.load(open(os.path.join(paths.STATE_DIR, "prov_bal.json"))))
 W3 = "0x" + "ef" * 20
 c.my_wallets.setdefault("eth", set()).add(W3)
-check("K1 대사 뒤 새 지갑 = 대상 아님(라이브 영향 0 — 지갑별 대사가 채움)", c._prov_targets() == [], c._prov_targets())
+check("K1 대사 뒤 새 지갑 = 대상 아님(라이브 영향 0 — 지갑별 대사가 채움)", c.svc_recon._prov_targets() == [], c.svc_recon._prov_targets())
 BSCB = {"per_wallet": {W: {("native", None): 5, ("token", CA["known"]): 7}}, "_meta": {}, "_zero": {W: [CA["zero"]]}}
-pk_b = core.Core._prov_pack(BSCB, "chain", 100, req=[W], t1=130, kind="bsc")
-pk_s = core.Core._prov_pack({"per_wallet": {W: {("native", None): 5, ("token", "Mint1111"): 7}}}, "chain", 100, kind="sol")
-pk_r = core.Core._prov_pack(dict(BAL, _block_ts=1234), "chain", 100, t1=150, kind="evm")
-check("K1 (코덱스 pr517) BSC = 물은 토큰(양수·0)만 조회 범위 · SOL = 전부(범위 없음) · RPC = 블록·블록 시각 · 요청·받은 시각",
+pk_b = core_prov.ProvMixin._prov_pack(BSCB, "chain", 100, req=[W], t1=130, kind="bsc")
+pk_s = core_prov.ProvMixin._prov_pack({"per_wallet": {W: {("native", None): 5, ("token", "Mint1111"): 7}}}, "chain", 100, kind="sol")
+pk_r = core_prov.ProvMixin._prov_pack(dict(BAL, _block_ts=1234), "chain", 100, t1=150, kind="evm")
+check("K1 BSC = 물은 토큰(양수·0)만 조회 범위 · SOL = 전부(범위 없음) · RPC = 블록·블록 시각 · 요청·받은 시각",
       pk_b["wallets"][W].get("q") == sorted([CA["known"], CA["zero"]]) and "q" not in pk_s["wallets"][W]
       and pk_r.get("block") == 999 and pk_r.get("bts") == 1234 and pk_r.get("at") == 100 and pk_r.get("t1") == 150
       and "block" not in pk_b and pk_b.get("t1") == 130, (pk_b, pk_s, pk_r))
 c.recon_months = 0
-c._prov_last = 0
-c.prov_pass()
-check("K1 전체 이력 모드(대사 안 함) = 임시 표시 안 함(파일 지움)", not os.path.exists(os.path.join(common.STATE_DIR, "prov_bal.json")))
+c.svc_recon._prov_last = 0
+c.svc_recon.prov_pass()
+check("K1 전체 이력 모드(대사 안 함) = 임시 표시 안 함(파일 지움)", not os.path.exists(os.path.join(paths.STATE_DIR, "prov_bal.json")))
 
-import provbal
-import depaddr
-import xfer_match
-from decimal import Decimal as D
+import provbal  # noqa: E402
+import depaddr  # noqa: E402
+import xfer_match  # noqa: E402
+from decimal import Decimal as D  # noqa: E402
 
 USDC_BASE = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
-check("P19 준비: Base USDC 가 검증 스테이블 표에 있음", pricing.STABLE_CAS.get("base", {}).get(USDC_BASE) == "USDC")
+check("P19 준비: Base USDC 가 검증 스테이블 표에 있음", token_tables.STABLE_CAS.get("base", {}).get(USDC_BASE) == "USDC")
 GX, GC = 900, 7
 
 
@@ -361,7 +361,7 @@ check("P19 원장이 모르는 자산(그룹 없음 — 새 설치 첫 수집 �
 r19n = net([pit("base", W, 3, "2", kind="native", sym="ETH")], [pend("BASE", W, "2", sym="ETH", gid=901)])
 check("P19 네이티브 = 심볼(ETH)로 맞춤", r19n == [], r19n)
 r19t = net([pit("base", W, GC, "8800", seen=900)], [pend("BASE", W, "8800", start=1000)])
-check("P19 (tl526 보안) 잔고 관측이 출금 시작 전 = 그 잔고엔 출금이 없음 → 안 뺌", len(r19t) == 1 and r19t[0]["qty"] == D("8800"), r19t)
+check("P19 잔고 관측이 출금 시작 전 = 그 잔고엔 출금이 없음 → 안 뺌", len(r19t) == 1 and r19t[0]["qty"] == D("8800"), r19t)
 r19s = net([pit("base", W, 55, "8800", addr="0x" + "99" * 20)], [pend("BASE", W, "8800")])
 check("P19 심볼만 USDC 인 비정품 토큰(사칭 가능) = 통화로 안 맞춤(그룹도 다름 → 안 뺌)", len(r19s) == 1 and r19s[0]["qty"] == D("8800"), r19s)
 r19g = net([pit("base", W, 55, "300", addr="0x" + "99" * 20, sym="FOO")], [pend("BASE", W, "300", sym="FOO", gid=55)])
@@ -388,15 +388,15 @@ check("P19 이상한 항목(수량 글자·음수·NaN·필드 없음·None) = �
 NSYM = {"base": "ETH", "sol": "SOL", "bsc": "BNB"}
 itq = provbal.items({"base": {"mode": "chain", "at": 2000, "bts": 2000, "wallets": {W: {"native": "2000000000000000000"}}}},
                     done_chain=lambda c: False, asset_of=lambda c, k, a: None, ledger=lambda loc, ent: ({}, set()), ainfo=lambda a: None)
-check("P19 (tl528) 준비: 원장에 네이티브 자산이 아직 없음 = 임시 항목 심볼 '?' · 그룹 없음", itq and itq[0]["sym"] == "?" and itq[0]["gid"] is None, itq)
+check("P19 준비: 원장에 네이티브 자산이 아직 없음 = 임시 항목 심볼 '?' · 그룹 없음", itq and itq[0]["sym"] == "?" and itq[0]["gid"] is None, itq)
 r19q = provbal.net_pending(itq, [pend("BASE", W, "2", sym="ETH", gid=901)], chain_of=depaddr.chain_of, norm=xfer_match.norm_addr,
                            native_sym=lambda c: NSYM.get(c))
-check("P19 (tl528) 원장에 없는 네이티브도 설정 심볼(ETH)로 출금 2 ETH 와 상계 → 0(종전: '?' 라 4 ETH)", r19q == [], r19q)
+check("P19 원장에 없는 네이티브도 설정 심볼(ETH)로 출금 2 ETH 와 상계 → 0(종전: '?' 라 4 ETH)", r19q == [], r19q)
 r19q2 = provbal.net_pending(itq, [pend("BASE", W, "2", sym="ETH", gid=901)], chain_of=depaddr.chain_of, norm=xfer_match.norm_addr)
-check("P19 (tl528) 설정 심볼 없이 '?' 면 통화 모름 = 안 뺌(오탐 없음)", len(r19q2) == 1, r19q2)
+check("P19 설정 심볼 없이 '?' 면 통화 모름 = 안 뺌(오탐 없음)", len(r19q2) == 1, r19q2)
 r19q3 = provbal.net_pending([pit("bsc", W, None, "1", kind="native", sym="?")], [pend("BSC", W, "1", sym="ETH", gid=902)],
                             chain_of=depaddr.chain_of, norm=xfer_match.norm_addr, native_sym=lambda c: NSYM.get(c))
-check("P19 (tl528) 다른 네이티브(BSC = BNB ≠ ETH 출금) = 안 뺌", len(r19q3) == 1, r19q3)
+check("P19 다른 네이티브(BSC = BNB ≠ ETH 출금) = 안 뺌", len(r19q3) == 1, r19q3)
 it19 = provbal.items({"base": {"mode": "chain", "at": 100, "t1": 130, "bts": 120, "wallets": {W: {"native": "1000000000000000000"}}}},
                      done_chain=lambda c: False, asset_of=lambda c, k, a: (1, 3, "ETH", 18), ledger=lambda loc, ent: ({}, set()), ainfo=lambda a: None)
 check("P19 임시 항목에 잔고가 가리키는 시각(seen = 블록 시각 우선)", it19 and it19[0].get("seen") == 120, it19)

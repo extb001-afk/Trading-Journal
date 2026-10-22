@@ -1,4 +1,4 @@
-import _harness as T
+import _harness as T  # noqa: F401
 
 OWN = {
     "tron": ["41" + "11" * 20, "41" + "12" * 20],

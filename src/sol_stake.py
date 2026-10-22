@@ -1,6 +1,6 @@
 from __future__ import annotations
 import bf_engine
-import common
+import logs, statefile
 import time
 from sol_base import HL_COST
 from sol_base import SLOTS_PER_EPOCH
@@ -74,8 +74,8 @@ class StakeMixin:
                                  "staker": auth.get("staker"),
                                  "state": stake_state(dl.get("activationEpoch"), dl.get("deactivationEpoch"),
                                                       self._epoch["epoch"])}
-        except Exception as e:
-            self._stake_err = common.safe_err(e)[:160]
+        except Exception as e:  # noqa: BLE001 [fallback]
+            self._stake_err = logs.safe_err(e)[:160]
             self._stake_retry_at = now + 300
             log.info("스테이크 계정 발견 실패(5분 뒤 재시도): %s", e)
             return False
@@ -99,8 +99,8 @@ class StakeMixin:
         for s, v in found.items():
             v["ledger_ready"] = bool((self.cursor.get("_stk:" + s) or {}).get("open"))
         self.stake_snap = {"ts": int(now), "epoch": self._epoch, "accounts": found}
-        common.atomic_write_json(self.stake_path, self.stake_snap)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.stake_path, self.stake_snap)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         self._stake_disc_at = now
         self._stake_err = None
         return True
@@ -174,8 +174,8 @@ class StakeMixin:
                         self._stake_note_first(s, slot9, int(r.get("postBalance") or 0) - int(r["amount"]))
                 ent["rwd_next"] = e + 1
             n += 1
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             time.sleep(TX_BATCH_SLEEP)
         return all(int(v.get("rwd_next")) > last for v in reg.values()
                    if not (v.get("gone") and v.get("open") and not v.get("reopen_pending")))
@@ -189,7 +189,7 @@ class StakeMixin:
             self._stake_note_first(s9, rec.get("slot"), pre9)
 
     def _stake_open(self, caught_up: bool) -> None:
-        if not caught_up:
+        if not caught_up or self.cursor.get("_quarantine"):
             return
         acc = self.stake_snap.get("accounts") or {}
         for s, ent in self.stake_reg().items():
@@ -219,10 +219,10 @@ class StakeMixin:
             ent["open"] = True
             if s in acc:
                 acc[s]["ledger_ready"] = True
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if self.stake_snap:
-            common.atomic_write_json(self.stake_path, self.stake_snap)
+            statefile.atomic_write_json(self.stake_path, self.stake_snap)
 
     def _stake_sigs_between(self, s: str, lo: int, hi: int):
         out, before = [], None
@@ -313,8 +313,8 @@ class StakeMixin:
             ent.pop("reopen_from", None)
             changed = True
         if changed:
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _stake_cycle(self) -> None:
         if not self.stake_on:
@@ -326,9 +326,9 @@ class StakeMixin:
             self._stake_reopen(caught_up=caught)
             self._stake_open(caught)
             self._stake_err = None if self._stake_disc_at else self._stake_err
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             caught = False
-            self._stake_err = common.safe_err(e)[:160]
+            self._stake_err = logs.safe_err(e)[:160]
             log.info("스테이킹 보상 단계 실패(다음 주기): %s", e)
         reg = self.stake_reg()
         now = time.time()

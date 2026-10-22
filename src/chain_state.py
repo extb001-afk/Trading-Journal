@@ -4,7 +4,7 @@ import os
 import time
 
 import chain_registry as reg
-import common
+import paths, statefile
 
 MAX_TRIES = 12
 BACKOFF_MIN, BACKOFF_MAX = 30, 6 * 3600
@@ -16,20 +16,20 @@ class ChainState:
     def __init__(self, chain: str, state_dir: str = None):
         self.spec = reg.spec(chain)
         self.chain = chain
-        sd = state_dir or common.STATE_DIR
+        sd = state_dir or paths.STATE_DIR
         self.path = os.path.join(sd, self.spec.cursor_file)
         self.emitted_path = os.path.join(sd, self.spec.emitted_file)
-        d = common.read_json(self.path, None)
+        d = statefile.read_json(self.path, None)
         self.d = d if isinstance(d, dict) and d.get("v") == 1 else {"v": 1, "lanes": {}, "pending": {}, "gaps": [], "status": {}}
         for k, dv in (("lanes", {}), ("pending", {}), ("gaps", []), ("status", {})):
             if not isinstance(self.d.get(k), type(dv)):
                 self.d[k] = dv
-        e = common.read_json(self.emitted_path, None)
+        e = statefile.read_json(self.emitted_path, None)
         self.em = e if isinstance(e, dict) and isinstance(e.get("uids"), dict) else {"v": 1, "uids": {}}
         self._em_dirty = False
 
     def save(self) -> None:
-        common.atomic_write_json(self.path, self.d)
+        statefile.atomic_write_json(self.path, self.d)
         if self._em_dirty:
             u = self.em["uids"]
             if len(u) > EMITTED_KEEP:
@@ -39,7 +39,7 @@ class ChainState:
             if isinstance(r9, dict) and len(r9) > EMITTED_KEEP:
                 for k in sorted(r9, key=lambda x: (r9[x].get("t") if isinstance(r9[x], dict) else 0) or 0)[:len(r9) - EMITTED_KEEP]:
                     r9.pop(k, None)
-            common.atomic_write_json(self.emitted_path, self.em)
+            statefile.atomic_write_json(self.emitted_path, self.em)
             self._em_dirty = False
 
     def lane(self, lane: str) -> dict:

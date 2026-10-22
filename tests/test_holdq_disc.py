@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
@@ -17,13 +17,12 @@ CFG = {"chains": {"eth": {"blockscout": "https://bs.invalid", "rpcs": ["https://
        "wallets": [{"type": "evm", "chain": "eth", "address": W}, {"type": "bsc_rpc", "chain": "bsc", "address": W}],
        "native_symbol": {"eth": "ETH", "bsc": "BNB"}, "backfill_months": 5, "bsc": {"detail_rpcs": ["https://bscrpc.invalid"]}}
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import recon
-import token_discovery as td
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import recon  # noqa: E402
+import token_discovery as td  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 chk = T.chk
 E18 = 10 ** 18
@@ -33,7 +32,7 @@ NOW = int(time.time())
 def _try(fn, label):
     try:
         fn()
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001
         chk(False, label + " — 실행 실패", repr(e)[:200])
 
 
@@ -83,10 +82,10 @@ td.discover = lambda chain, wallet, upto=None, cfg=None, env=None, sources=None,
     "cas": {XE: ["etherscan"]}, "meta": {XE: {"sym": "EXT", "dec": 18}}, "ok": {s: 1 for s in (sources or ["etherscan"])}, "fail": {}, "calls": {}}
 td.dex_check = fake_dex
 
-c = core.Core(common.load_config())
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_eth.json"), {W: 900})
-c._wallet_backfilled = lambda *a: True
-c._recon_quiet = lambda *a: True
+c = core.Core(config.load_config())
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_eth.json"), {W: 900})
+c.svc_recon._wallet_backfilled = lambda *a: True
+c.svc_recon._recon_quiet = lambda *a: True
 c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_done_eth', '1')")
 c.conn.commit()
 
@@ -98,10 +97,10 @@ def opening(chain, ca, w=W):
 
 
 print("[H1] (3) 블록스카웃 보유 목록 후보 = 스팸 앵커 필터")
-bal1 = c._recon_fetch_plan("eth", "evm", [W], "new")()
-c._recon_bal = lambda chain, kind, md, wallets, bal=bal1: bal
-c._wrecon_run("eth", "evm", "evm", set(), 1780000000, True, "new", [W])
-c.__dict__.pop("_recon_bal", None)
+bal1 = c.svc_recon._recon_fetch_plan("eth", "evm", [W], "new")()
+c.svc_recon._recon_bal = lambda chain, kind, md, wallets, bal=bal1: bal
+c.svc_recon._wrecon_run("eth", "evm", "evm", set(), 1780000000, True, "new", [W])
+c.svc_recon.__dict__.pop("_recon_bal", None)
 sk1 = (bal1.get("_disc_skip") or {}).get(W) or {}
 chk(opening("eth", XS) == 0 and opening("eth", XN) == 0,
     "H1 블록스카웃 목록에만 있는 원장 밖 스팸(유동성 없음 · 스캠 이름) = 잔고가 있어도 기초 잔고 안 함(종전 = 그대로 opening)",
@@ -115,13 +114,13 @@ pay1 = json.loads(c.conn.execute("SELECT payload FROM raw_observations WHERE obs
 chk(f"token:{XS}" not in pay1.get(W, {}) and pay1.get(W, {}).get(f"token:{XL}") == BAL[XL],
     "H1 관측 payload = 스팸 칸 없음 · 정상 칸 그대로(rebuild2 재료)", sorted(pay1.get(W, {})))
 c.cfg["token_discovery"] = {"enabled": False}
-bal1b = c._recon_fetch_plan("eth", "evm", [W], "new")()
+bal1b = c.svc_recon._recon_fetch_plan("eth", "evm", [W], "new")()
 chk(("token", XS) in ((bal1b.get("per_wallet") or {}).get(W) or {}), "H1 발견 끔 = 종전 그대로(블록스카웃 목록 그대로 조회 · 필터 없음)",
     sorted(str(k[1])[:6] for k in ((bal1b.get("per_wallet") or {}).get(W) or {})))
 c.cfg.pop("token_discovery", None)
 
 print("[H2] (4) 잔고 대조 — 일시 보류(덱스 장애) 토큰 다시 판정")
-import balcheck
+import balcheck  # noqa: E402
 
 HX, HY, HZ, HW = "0x" + "e1" * 20, "0x" + "e2" * 20, "0x" + "e3" * 20, "0x" + "e4" * 20
 HOLD = "일시 보류 — 판정 출처 장애"
@@ -160,12 +159,12 @@ def fake_rpc(u, method, params, timeout=25.0, gap=True):
 recon._rpc = fake_rpc
 balcheck.time.sleep = lambda s: None
 td.discover = lambda *a, **k: {"cas": {}, "meta": {}, "ok": {x: 0 for x in (k.get("sources") or [])}, "fail": {}, "calls": {}}
-cfg2 = dict(common.load_config(), backfill_months=0)
+cfg2 = dict(config.load_config(), backfill_months=0)
 cfg2["wallets"] = [{"type": "evm", "chain": "eth", "address": W}]
 s2 = {}
 try:
     s2 = balcheck.run_once(cfg2, c.conn, {}, set(), {})
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     chk(False, "H2 잔고 대조 실행", repr(e)[:200])
 mm2 = {m.get("ca"): m for m in s2.get("mismatches") or []}
 chk(HX in mm2 and mm2[HX]["onchain"] == 1000.0 and mm2[HX]["ledger"] == 0.0 and mm2[HX]["diffUsd"] == 3000.0,
@@ -183,7 +182,7 @@ n2 = len(DEX2)
 s2b = {}
 try:
     s2b = balcheck.run_once(cfg2, c.conn, {}, set(), s2)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     chk(False, "H2 두 번째 판", repr(e)[:200])
 chk(len(DEX2) == n2 and any(m.get("ca") == HX for m in s2b.get("mismatches") or []),
     "H2 1시간 안 두 번째 판 = 덱스 0콜(보류 HZ 다시 안 물음) · HX 는 보통 후보로 계속 대조", (DEX2[n2:], [m.get("ca", "")[:6] for m in s2b.get("mismatches") or []]))
@@ -192,7 +191,7 @@ td.dex_check = lambda chain, cas, min_reserve=10000.0, sleep=None: DEX2.append(s
 s2c = {}
 try:
     s2c = balcheck.run_once(cfg2, c.conn, {}, set(), s2b)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     chk(False, "H2 세 번째 판", repr(e)[:200])
 chk(DEX2[n2:] == [[HZ]] and any(m.get("ca") == HZ for m in s2c.get("mismatches") or []) and (s2c.get("disc") or {}).get("hold") == 0,
     "H2 간격 지나면 다시 판정(그 토큰만) · 덱스 복구 = 대조 · 판정 대기 0", (DEX2[n2:], (s2c.get("disc") or {}).get("hold")))
@@ -215,7 +214,7 @@ def _h2_unit():
         and str((e9.get("skip") or {}).get(HY, "")).startswith("일시 보류"),
         "H2 덱스 전면 장애 = 이번 판 재판정 멈춤(1콜) · 정적으로 믿을 만하고 가격 아는 것(Ankr 정품 목록)은 보류 풂 · 나머지 보류 유지", (b9, calls9, e9.get("skip")))
     chk(str((e9.get("skip") or {}).get(HW, "")).startswith("일시 보류"),
-        "R1 (hq462) 정적으로 믿을 만해도 가격을 모르면 보류 유지(대조·재판정·판정 대기 경고가 사라지지 않게)", (e9.get("skip") or {}).get(HW))
+        "R1 정적으로 믿을 만해도 가격을 모르면 보류 유지(대조·재판정·판정 대기 경고가 사라지지 않게)", (e9.get("skip") or {}).get(HW))
     r9b = td.rejudge_hold("eth", W + "2", [(HZ, ["etherscan"], {"sym": "HOLDZ"})], 10000.0, budget=b9, now=NOW, dex=boom)
     chk(len(calls9) == 1 and [x[0] for x in r9b] == [HZ], "H2 예산 0 = 덱스 0콜 · 그대로 돌려줌(다음 판)", calls9)
 
@@ -288,9 +287,9 @@ def _h3():
     chk(anc(BB) == [], "H3 대사 뒤 유입 = 흡수 대상 아님(종전 그대로)", anc(BB))
     n9 = c._anchor_absorb("bsc", h1, c._tx_wallet_sums("bsc", h1))
     chk(n9 == 0 and anc(BB) == [] and anc(BA) == [-3 * E18], "H3 멱등 — 같은 재기장 다시 = 보정 0", (n9, anc(BB), anc(BA)))
-    c2 = core.Core(common.load_config())
-    chk(c2._obs_tok_observed(f"recon:bsc:{W}", W, BB) is False and c2._obs_tok_observed(f"recon:bsc:{W}", W, BA) is True
-        and c2._obs_tok_observed(f"recon:bsc:{W}", W.upper().replace("0X", "0x"), BC.upper().replace("0X", "0x")) is True,
+    c2 = core.Core(config.load_config())
+    chk(c2.svc_recon._obs_tok_observed(f"recon:bsc:{W}", W, BB) is False and c2.svc_recon._obs_tok_observed(f"recon:bsc:{W}", W, BA) is True
+        and c2.svc_recon._obs_tok_observed(f"recon:bsc:{W}", W.upper().replace("0X", "0x"), BC.upper().replace("0X", "0x")) is True,
         "H3 재시작 뒤 같은 판정(키 없음 = 미관측 · 0 키 = 관측 · 대소문자 무관)", "")
     h5 = "0x" + "%064x" % 0x35
     snap5 = {"tx": {"hash": h5, "from": X, "to": W, "timestamp": TB - 7200, "block_number": 99, "status": "ok"}}

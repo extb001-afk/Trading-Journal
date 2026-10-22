@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import io
-import json
-import os
-import types
-import urllib.error
+import copy  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import types  # noqa: E402
+import urllib.error  # noqa: E402
 
 W0 = "0x" + "e0" * 20
 W1 = "0x" + "e1" * 20
@@ -22,13 +22,13 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import alch_internal as AI
-import bf_engine
-import evm_watch
-import nodekeys as NK
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import alch_internal as AI  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
+import nodekeys as NK  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -203,7 +203,7 @@ def setup(w9, h, blk=OLD, at=None, n=0, stg=None, emit=True):
     for k9 in ("_alch_memo", "_trace_slow_until", "_trace_sick_until", "_trace_nf"):
         w9.__dict__.pop(k9, None)
     WR.recs.clear()
-    common.atomic_write_json(w9.cursor_path, w9.cursor)
+    statefile.atomic_write_json(w9.cursor_path, w9.cursor)
 
 
 def al_hits(hs=None):
@@ -300,7 +300,7 @@ H3b = hx(0x5302)
 fresh()
 setup(w, H3b, at=now() - 61 * DAY, n=9)
 o9 = cycle(w, H3b)
-arch = os.path.join(common.STATE_DIR, "trace_later_unresolved_base.jsonl")
+arch = os.path.join(paths.STATE_DIR, "trace_later_unresolved_base.jsonl")
 rows9 = []
 if os.path.exists(arch):
     with open(arch, encoding="utf-8") as f:

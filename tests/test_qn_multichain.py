@@ -2,10 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
 CFG = {"wallets": [{"type": "evm", "chain": "eth", "address": "0x" + "1f" * 20, "label": "시험"}],
        "chains": {"base": {"rpc_logs": ["https://pub-base.invalid"], "rpc_log_span_caps": {"https://pub-base.invalid": 5000}}},
@@ -14,13 +14,13 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import bf_engine
-import nodekeys as NK
-import onboarding
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import bf_engine  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -74,15 +74,15 @@ check("Q3e apply(qn2) = 로그 풀엔 안 붙임(BSC·Base · getLogs 안 씀) �
 cfgt = json.loads(json.dumps(CFG))
 cfgt["chains"]["base"]["trace_rpcs"] = ["https://my-trace.invalid"]
 NK.apply(cfgt, env={NK.ENV_QN: ETH}, settings={})
-check("Q3e2 이용자가 config 에 trace_rpcs 를 적었으면 그 목록 그대로 앞 · 뒤에 QuickNode(cn18 순서 — 이용자 목록 = 16차 기본이라 drpc 안 붙음)",
+check("Q3e2 이용자가 config 에 trace_rpcs 를 적었으면 그 목록 그대로 앞 · 뒤에 QuickNode(순서 — 이용자 목록 = 기본이라 drpc 안 붙음)",
       cfgt["chains"]["base"]["trace_rpcs"] == ["https://my-trace.invalid", QBASE],
       cfgt["chains"]["base"]["trace_rpcs"])
 cfgn = json.loads(json.dumps(CFG))
 NK.apply(cfgn, env={}, settings={})
 check("Q3e3 키 없음 = trace_rpcs 안 만듦(내장 drpc 그대로)", "trace_rpcs" not in cfgn["chains"]["base"], cfgn["chains"]["base"])
-import evm_watch
+import evm_watch  # noqa: E402
 nd = evm_watch.rpc_nodes(cfg, "base")
-check("Q3e4 수집기 노드 해석: trace = QuickNode → 내장 drpc(cn18) · 로그 = QuickNode 없음 · 상태 = 뒤 예비", nd["trace"] == [QBASE, "https://base.drpc.org"] and QBASE not in nd["logs"]
+check("Q3e4 수집기 노드 해석: trace = QuickNode → 내장 drpc · 로그 = QuickNode 없음 · 상태 = 뒤 예비", nd["trace"] == [QBASE, "https://base.drpc.org"] and QBASE not in nd["logs"]
       and QBASE in nd["state"], nd)
 bf_engine.rpc_day_configure({"rpc_day_limits": cfg["rpc_day_limits"]})
 check("Q3f 만든 주소는 하루 장부 node_quicknode 로 계량", bf_engine._rpc_day_of("fake-name.base-mainnet.quiknode.pro") == "node_quicknode")
@@ -120,8 +120,8 @@ st = NK.status(env={NK.ENV_QN: ETH}, settings={})
 check("Q4e 화면 상태 = 유료만 아님 · 쓰는 체인 BSC·Base · 키·주소 없음", st["quicknode"]["paidOnly"] is False and st["quicknode"]["chains"] == ["bsc", "base"]
       and TOK not in json.dumps(st) and "quiknode.pro" not in json.dumps(st), st["quicknode"])
 
-if os.path.exists(common.ENV_PATH):
-    os.remove(common.ENV_PATH)
+if os.path.exists(paths.ENV_PATH):
+    os.remove(paths.ENV_PATH)
 fp0 = NK.fingerprint()
 ss.write_env({NK.ENV_QN: ETH})
 fp1 = NK.fingerprint()

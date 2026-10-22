@@ -1,10 +1,10 @@
-import common
+import envfile, logs, paths, statefile
 import os
 import threading
 import time
 import token_discovery
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -13,19 +13,19 @@ class ProvMixin:
 
     @staticmethod
     def _upbit_keys() -> bool:
-        e9 = common.read_env_file()
+        e9 = envfile.read_env_file()
         return bool(e9.get("UPBIT_ACCESS") and e9.get("UPBIT_SECRET"))
 
     def _exf_connected(self) -> list:
         import settings_store
-        e9 = common.read_env_file()
+        e9 = envfile.read_env_file()
         out = [ex9 for ex9, sp9 in settings_store.EXCHANGES.items()
                if ex9 != "upbit" and all(e9.get(k9) for k9, _l9 in sp9.get("fields") or ())]
         try:
             import hl_spot
             if hl_spot.addresses(self.cfg):
                 out.append("hyperliquid")
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("core_prov:ProvMixin._exf_connected", _cg9)
             pass
         return out
@@ -47,7 +47,7 @@ class ProvMixin:
             return False
         try:
             return bool(token_discovery.alchemy_net(chain) and token_discovery.alchemy_url(chain))
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [probe]
             calcguard.swallowed("core_prov:ProvMixin._prov_alch_ok", _cg9)
             return False
 
@@ -57,7 +57,7 @@ class ProvMixin:
             scopes.append(("sol", "sol"))
         if any(w.get("type") == "bsc_rpc" for w in self.cfg["wallets"]):
             scopes.append(("bsc", "bsc"))
-        for c9 in sorted(self.__dict__.get("chain_owners") or {}):
+        for c9 in sorted(getattr(self, "chain_owners", None) or {}):
             if self.chain_owners[c9] and self._nonevm_adapter(c9) is not None:
                 scopes.append((c9, "nonevm"))
         out = []
@@ -120,15 +120,15 @@ class ProvMixin:
         if now - float(self.__dict__.get("_prov_last") or 0) < self.PROV_TICK and not done9:
             return
         self._prov_last = now
-        p = os.path.join(common.STATE_DIR, self.PROV_FILE)
+        p = paths.state(self.PROV_FILE)
         if self.recon_months <= 0:
             if os.path.exists(p):
                 os.remove(p)
             return
         try:
-            st = common.read_json(p, {})
-        except (Exception, SystemExit) as _cg9:
-            calcguard.swallowed("core_prov:ProvMixin.prov_pass", _cg9)
+            st = statefile.read_json(p, {})
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("core_prov:ProvMixin.prov_pass[st#1]", _cg9)
             st = {}
         st = st if isinstance(st, dict) else {}
         tg = {c: (k, m, ws) for c, k, m, ws in self._prov_targets()}
@@ -152,8 +152,8 @@ class ProvMixin:
                     st[c]["fast"] = 3
                 changed = True
             elif job["err"] is not None:
-                calcguard.swallowed("core_prov:ProvMixin.prov_pass", job["err"])
-                log.info("임시 잔고 %s 조회 실패(다음 바퀴): %s", c, common.safe_err(job["err"])[:120])
+                calcguard.swallowed("core_prov:ProvMixin.prov_pass[st#2]", job["err"])
+                log.info("임시 잔고 %s 조회 실패(다음 바퀴): %s", c, logs.safe_err(job["err"])[:120])
         def _fresh(c, ws):
             ent = st.get(c)
             return isinstance(ent, dict) and ent.get("mode") == tg[c][1] \
@@ -163,11 +163,11 @@ class ProvMixin:
         sst9 = 0
         if any(k9 == "sol" for k9, _m9, _w9 in tg.values()):
             try:
-                sd9 = common.read_json(os.path.join(common.STATE_DIR, "sol_stake.json"), {}) or {}
+                sd9 = statefile.read_json(paths.state("sol_stake.json"), {}) or {}
                 t9 = int(float(sd9.get("ts") or 0)) if isinstance(sd9.get("accounts"), dict) else 0
                 sst9 = t9 if now - t9 <= 3 * 3600 else 0
-            except (Exception, SystemExit) as _cg9:
-                calcguard.swallowed("core_prov:ProvMixin.prov_pass", _cg9)
+            except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("core_prov:ProvMixin.prov_pass[sd9]", _cg9)
                 sst9 = 0
         def _rank(c, ws):
             return (self.PROV_ORDER.index(c) if c in self.PROV_ORDER else len(self.PROV_ORDER), -len(ws), c)
@@ -197,28 +197,29 @@ class ProvMixin:
                 continue
             try:
                 fn = self._recon_fetch_plan(c, kind, ws, {1: "fast", 2: "fastx"}.get(fast9), latest=True)
-            except Exception as e:
-                calcguard.swallowed("core_prov:ProvMixin.prov_pass", e)
-                log.info("임시 잔고 %s 조회 준비 실패(다음 바퀴): %s", c, common.safe_err(e)[:120])
+            except Exception as e:   # noqa: BLE001 [isolate]
+                calcguard.swallowed("core_prov:ProvMixin.prov_pass[fn]", e)
+                log.info("임시 잔고 %s 조회 준비 실패(다음 바퀴): %s", c, logs.safe_err(e)[:120])
                 continue
             job = {"wallets": ws, "mode": mode, "t0": now, "bal": None, "err": None, "ev": threading.Event(), "fast": fast9, "par": first9 or stake9, "lane": lane9}
 
             def _run(job=job, fn=fn):
                 try:
                     job["bal"] = fn()
-                except BaseException as e:
+                except BaseException as e:   # noqa: BLE001 [fallback]
                     job["err"] = e
+                    calcguard.swallowed("core_prov:ProvMixin.prov_pass._run", e)
                 finally:
                     job["t1"] = time.time()
                     job["ev"].set()
             jobs[c] = job
             threading.Thread(target=_run, name=f"tj-prov-{c}", daemon=True).start()
         if changed:
-            common.atomic_write_json(p, st)
+            statefile.atomic_write_json(p, st)
 
     def _streams_have_data(self) -> bool:
         for stream, reader in (("evm", self.reader), ("sol", self.sol_reader),
-                               ("bsc", self.bsc_reader)) + tuple(self.__dict__.get("chain_readers") or ()):
+                               ("bsc", self.bsc_reader)) + tuple(getattr(self, "chain_readers", None) or ()):
             row = self.conn.execute(
                 "SELECT seg, off FROM inbox_offsets WHERE stream=?", (stream,)).fetchone()
             seg, off = (row["seg"], row["off"]) if row else (1, 0)

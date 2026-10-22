@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import time
-import urllib.error
+import time  # noqa: E402
+import urllib.error  # noqa: E402
 
-import bf_engine
-import candles
-import pricing
+import bf_engine  # noqa: E402
+import candles  # noqa: E402,F401
+import pricing  # noqa: E402
 
 chk = T.chk
 HOST = "api.geckoterminal.com"
@@ -44,9 +44,9 @@ def reset_gate():
         g.tokens = g.burst
     if g.share is not None:
         import os
-        import common
+        import paths
         try:
-            os.remove(os.path.join(common.quota_dir(), "rpc_gap", "gt_free.bucket"))
+            os.remove(os.path.join(paths.quota_dir(), "rpc_gap", "gt_free.bucket"))
         except OSError:
             pass
     return g
@@ -93,7 +93,7 @@ if isinstance(g.share, bf_engine._XprocSharedBucket):
     b = other.try_take(1)
     chk(a == 0 and b > 0, "G4 한쪽이 쓴 몫을 다른 프로세스가 본다(기다려야 함)", (a, b))
 
-import web
+import web  # noqa: E402
 sp = web.Spot()
 g = reset_gate()
 with g.lock:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -14,7 +12,8 @@ import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
-import common
+import envfile, ex_sign, logs, net_http, num_parse, paths, statefile, timeutil
+import exf_net
 import alert_prefs as AP
 
 log = logging.getLogger("tj-exf")
@@ -65,9 +64,8 @@ STABLES = frozenset({"USDT", "USDC", "FDUSD", "BUSD", "DAI", "TUSD", "USDP", "US
 EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "hyperliquid": "하이퍼리퀴드", "dydx": "dYdX", "lighter": "라이터",
          "gmx": "GMX", "jupiter": "Jupiter", "pacifica": "Pacifica"}
 FAST_EX = ("binance", "bybit", "okx")
-NEED_KEYS = {"binance": ("TJ_BINANCE_KEY", "TJ_BINANCE_SECRET"), "bybit": ("TJ_BYBIT_KEY", "TJ_BYBIT_SECRET"),
-             "okx": ("TJ_OKX_KEY", "TJ_OKX_SECRET", "TJ_OKX_PASSPHRASE")}
-LEV_KEYS = dict(NEED_KEYS, kucoin=("TJ_KUCOIN_KEY", "TJ_KUCOIN_SECRET", "TJ_KUCOIN_PASSPHRASE"), gate=("TJ_GATE_KEY", "TJ_GATE_SECRET"))
+NEED_KEYS = {ex: envfile.EX_KEYS[ex] for ex in FAST_EX}
+LEV_KEYS = dict(NEED_KEYS, kucoin=envfile.EX_KEYS["kucoin"], gate=envfile.EX_KEYS["gate"])
 TJ_DEFAULT = "tj:default-0.8"
 THR_TAIL = {"doc": "기준: 거래소 공식 문서", "tj": "기준: tj-bot 기본(거래소가 마진콜 기준을 주지 않음)"}
 DOC_BYBIT_LOAN = ("doc:https://www.bybit.com/en/help-center/article/Introduction-to-Crypto-Loans "
@@ -99,11 +97,7 @@ RL_CODES = {"binance": {-1003}, "bybit": {10006, 10018}, "okx": {50011, 50061}}
 
 
 def _f(v):
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return None
-    return x if x == x and abs(x) != float("inf") else None
+    return num_parse.to_float(v)
 
 
 def _num_req(row, field, signed=False, what=""):
@@ -161,7 +155,7 @@ def ago_ko(sec) -> str:
 
 
 def hm_kst(ts) -> str:
-    return time.strftime("%H:%M", time.gmtime(float(ts or 0) + 9 * 3600))
+    return timeutil.kst_hm(ts or 0)
 
 
 def _eul(w) -> str:
@@ -186,14 +180,14 @@ def repeat_sec(cfg) -> float:
 
 class HttpErr(Exception):
     def __init__(self, status, body="", headers=None):
-        super().__init__(f"HTTP {status} {common.safe_err(body)[:160]}")
+        super().__init__(f"HTTP {status} {logs.safe_err(body)[:160]}")
         self.status, self.body, self.headers = status, body or "", headers or {}
 
 
 class ApiErr(Exception):
 
     def __init__(self, ex, code, msg=""):
-        super().__init__(f"{ex} {code} {common.safe_err(str(msg))[:120]}")
+        super().__init__(f"{ex} {code} {logs.safe_err(str(msg))[:120]}")
         self.ex, self.code = ex, code
 
 
@@ -207,9 +201,9 @@ def _http_default(method, url, headers=None, body=None, timeout=6.0):
     if data is not None:
         h["Content-Type"] = "application/json"
     h.update(headers or {})
-    req = urllib.request.Request(url, data=data, headers=h, method=method)
+    req = net_http.request(url, data=data, headers=h, method=method)
     try:
-        with common.auth_urlopen(req, timeout=timeout) as r:
+        with net_http.auth_urlopen(req, timeout=timeout) as r:
             raw = r.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError("응답 크기 초과")
@@ -218,7 +212,7 @@ def _http_default(method, url, headers=None, body=None, timeout=6.0):
         hd = {k.lower(): v for k, v in (e.headers.items() if e.headers else [])}
         try:
             txt = e.read(2048).decode("utf-8", "replace")
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             txt = ""
         raise HttpErr(e.code, txt[:400], hd) from None
 
@@ -278,7 +272,7 @@ class _FileCache:
                     raise ValueError("JSON 객체 아님")
                 self.val = v
             except (OSError, ValueError) as e:
-                log.warning("청산 감시 설정 파일 읽기 실패(마지막 정상 값 유지): %s · %s", os.path.basename(p), common.safe_err(e)[:80])
+                log.warning("청산 감시 설정 파일 읽기 실패(마지막 정상 값 유지): %s · %s", os.path.basename(p), logs.safe_err(e)[:80])
         return self.val
 
 
@@ -762,8 +756,8 @@ class Watcher:
         self.sync = sync
         self.pool = None if sync else ThreadPoolExecutor(max_workers=workers, thread_name_prefix="liqw")
         self.lim = _Lim()
-        self.cfg_c = _FileCache(lambda: common.CONFIG_PATH, {})
-        self.prefs_c = _FileCache(lambda: AP.PREFS_PATH, {})
+        self.cfg_c = _FileCache(lambda: paths.CONFIG_PATH, {})
+        self.prefs_c = _FileCache(lambda: paths.state("ui_prefs.json"), {})
         self.jobs = {}
         self.v = {}
         self.risk = {}
@@ -780,13 +774,13 @@ class Watcher:
         self.st = self._load()
         self.dirty = False
         self.last_save = 0.0
-        self.qpath = os.path.join(common.STATE_DIR, AP.FAST_QUEUE)
+        self.qpath = paths.state(AP.FAST_QUEUE)
         self._reconcile()
 
     def _load(self):
         try:
-            d = common.read_json(os.path.join(common.STATE_DIR, STATE_NAME), {}) or {}
-        except (Exception, SystemExit):
+            d = statefile.read_json(paths.state(STATE_NAME), {}) or {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             log.warning("청산 감시 기억 파일 손상 — 새로 시작(알림 줄 기록으로 되살림)")
             d = {}
         d = d if isinstance(d, dict) else {}
@@ -857,10 +851,10 @@ class Watcher:
             return
         st = dict(self.st, ts=int(now), status=self.status(now))
         try:
-            common.atomic_write_json(os.path.join(common.STATE_DIR, STATE_NAME), st)
+            statefile.atomic_write_json(paths.state(STATE_NAME), st)
             self.dirty, self.last_save = False, now
-        except Exception as e:
-            log.warning("청산 감시 기억 저장 실패(다음 판): %s", common.safe_err(e)[:120])
+        except Exception as e:   # noqa: BLE001 [optional]
+            log.warning("청산 감시 기억 저장 실패(다음 판): %s", logs.safe_err(e)[:120])
 
     def status(self, now) -> dict:
         ven = {}
@@ -943,7 +937,7 @@ class Watcher:
             return False, "꺼짐(config alerts.liq_fast)"
         try:
             doc = AP.load(self.prefs_c.get())
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             doc = AP.default_doc()
         if not AP.effective(doc, "liq", now):
             return False, "꺼짐(알림 설정 '청산 근접')"
@@ -957,7 +951,7 @@ class Watcher:
     def th(self):
         try:
             return float(AP.load(self.prefs_c.get())["th"]["liq_pct"])
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return float(AP.REC_TH["liq_pct"])
 
     def call(self, ex, kind, bucket, method, url, headers=None, body=None, w=1, timeout=6.0):
@@ -1014,18 +1008,18 @@ class Watcher:
 
     def bn_get(self, env, host, path, params=None, kind="bn_fapi", bucket=None, w=5):
         q = dict(params or {})
-        q["timestamp"] = int(time.time() * 1000)
+        q["timestamp"] = exf_net.sign_ms("binance")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
-        sig = hmac.new(env["TJ_BINANCE_SECRET"].encode(), qs.encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.binance_sign(env["TJ_BINANCE_SECRET"], qs)
         return self.call("binance", kind, bucket or kind, "GET", f"https://{host}{path}?{qs}&signature={sig}",
                          {"X-MBX-APIKEY": env["TJ_BINANCE_KEY"]}, w=w)
 
     def bybit_get(self, env, path, params):
         qs = urllib.parse.urlencode(params)
-        ts = str(int(time.time() * 1000))
+        ts = str(exf_net.sign_ms("bybit"))
         key, sec = env["TJ_BYBIT_KEY"], env["TJ_BYBIT_SECRET"]
-        sig = hmac.new(sec.encode(), (ts + key + "10000" + qs).encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.bybit_sign(sec, ts, key, "10000", qs)
         d = self.call("bybit", "bybit_ip", "bybit_ip", "GET", f"https://api.bybit.com{path}?{qs}",
                       {"X-BAPI-API-KEY": key, "X-BAPI-TIMESTAMP": ts, "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig})
         if not isinstance(d, dict) or d.get("retCode") != 0:
@@ -1035,8 +1029,8 @@ class Watcher:
     def okx_get(self, env, path, params, kind, bucket=None):
         qs = urllib.parse.urlencode(params or {})
         full = path + ("?" + qs if qs else "")
-        ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int(time.time() * 1000) % 1000:03d}Z"
-        sig = base64.b64encode(hmac.new(env["TJ_OKX_SECRET"].encode(), (ts + "GET" + full).encode(), hashlib.sha256).digest()).decode()
+        ts = exf_net.iso_ms(exf_net.sign_ms("okx"))
+        sig = ex_sign.okx_sign(env["TJ_OKX_SECRET"], ts, "GET", full)
         d = self.call("okx", kind, bucket or kind, "GET", "https://www.okx.com" + full,
                       {"OK-ACCESS-KEY": env["TJ_OKX_KEY"], "OK-ACCESS-SIGN": sig, "OK-ACCESS-TIMESTAMP": ts,
                        "OK-ACCESS-PASSPHRASE": env["TJ_OKX_PASSPHRASE"]})
@@ -1301,8 +1295,8 @@ class Watcher:
         if syms:
             try:
                 got = self.fetch_spot(ex9, syms)
-            except Exception as e:
-                log.info("청산 감시 %s 담보 시세 실패(거래소 값만 씀): %s", src, common.safe_err(e)[:120])
+            except Exception as e:   # noqa: BLE001 [optional]
+                log.info("청산 감시 %s 담보 시세 실패(거래소 값만 씀): %s", src, logs.safe_err(e)[:120])
         for it in items:
             it["_px0"] = {c["ccy"]: got[c["ccy"]][0] for c in (it.get("collateral") or []) + (it.get("debt") or [])
                           if c.get("ccy") in got and got[c["ccy"]][1] - now <= PX0_LAG}
@@ -1406,7 +1400,7 @@ class Watcher:
             j["until"] = now + min(10.0, 2.0 * 2 ** min(3, j["fails"] - 1))
         else:
             j["until"] = now + min(60.0, 5.0 * 2 ** min(4, j["fails"] - 1))
-        msg = common.safe_err(e)[:160]
+        msg = logs.safe_err(e)[:160]
         if j["fails"] in (1, 5) or kind == "perm":
             log.warning("청산 감시 %s 조회 실패(%s — 마지막 값 유지, 없음으로 보지 않음): %s", name, kind, msg)
         return kind, msg
@@ -1649,7 +1643,7 @@ class Watcher:
             except Wait:
                 j["due"] = now + 1.0
                 continue
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 self._apply_err(name, e, now)
                 continue
             j["fails"] = 0
@@ -1828,14 +1822,14 @@ class Watcher:
         try:
             import perp_dex
             return {d: a for d, a in perp_dex.configured(self.cfg_c.get()).items() if d != "hyperliquid"}
-        except Exception as e:
-            log.warning("청산 감시 퍼프 덱스 설정 읽기 실패(이번 판 느린 감시·정리 건너뜀): %s", common.safe_err(e)[:100])
+        except Exception as e:   # noqa: BLE001 [fallback]
+            log.warning("청산 감시 퍼프 덱스 설정 읽기 실패(이번 판 느린 감시·정리 건너뜀): %s", logs.safe_err(e)[:100])
             return None
 
     def _slow_file(self, dex):
         c = self.__dict__.setdefault("_slow_c", {})
         if dex not in c:
-            c[dex] = _FileCache(lambda dex=dex: os.path.join(common.STATE_DIR, f"futures_{dex}.json"), {})
+            c[dex] = _FileCache(lambda dex=dex: paths.state(f"futures_{dex}.json"), {})
         return c[dex].get()
 
     def _rows_risk(self, now):
@@ -1908,7 +1902,7 @@ class Watcher:
         return prod_ok, prod_at
 
     def _lev(self, now):
-        c = self.__dict__.setdefault("_lev_c", _FileCache(lambda: os.path.join(common.STATE_DIR, "leverage.json"), {}))
+        c = self.__dict__.setdefault("_lev_c", _FileCache(lambda: paths.state("leverage.json"), {}))
         return lev_fresh(c.get(), now)
 
     def _rows_lev_pos(self, now):
@@ -2004,12 +1998,12 @@ class Watcher:
                 d = {"ts": int(now), "kind": kind, "cat": AP.cat_of(kind), "text": text, "key": meta["k"], "lw": meta}
                 if meta.get("st") == 0:
                     d["resolved"] = True
-                common.append_durable_jsonl(self.qpath, d)
+                statefile.append_durable_jsonl(self.qpath, d)
                 out.append(d)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             self.st.clear()
             self.st.update(snap)
-            log.warning("청산 감시 긴급 줄 적재 실패(다음 판 다시): %s", common.safe_err(e)[:120])
+            log.warning("청산 감시 긴급 줄 적재 실패(다음 판 다시): %s", logs.safe_err(e)[:120])
             return out
         self.dirty = True
         log.info("청산 감시 알림 %d건: %s", len(out), ", ".join(f"{d['kind']}:{d['lw'].get('st')}" for d in out))
@@ -2056,8 +2050,8 @@ class Watcher:
         try:
             import perp_dex
             hl = [a["address"] for a in perp_dex.configured(cfg).get("hyperliquid") or []]
-        except Exception as e:
-            log.warning("청산 감시 하이퍼리퀴드 설정 읽기 실패(이번 판 건너뜀): %s", common.safe_err(e)[:100])
+        except Exception as e:   # noqa: BLE001 [fallback]
+            log.warning("청산 감시 하이퍼리퀴드 설정 읽기 실패(이번 판 건너뜀): %s", logs.safe_err(e)[:100])
             return None
         for vk in [k for k in self.v if k.startswith("hl:") and k[3:] not in hl]:
             self.v.pop(vk, None)
@@ -2146,10 +2140,7 @@ def _vk_of(key) -> str:
 
 
 def _int(v):
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
+    return num_parse.to_int(v)
 
 
 def _key_sig(env, ex):
@@ -2176,7 +2167,7 @@ class _Done:
     def __init__(self, fn):
         try:
             self._r, self._e = fn(), None
-        except BaseException as e:
+        except BaseException as e:   # noqa: BLE001 [fallback]
             self._r, self._e = None, e
 
     def done(self):
@@ -2197,7 +2188,7 @@ def _share_hl_rl(rl_map, clock=time.time):
         return False
     try:
         import perp_dex
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
     orig = perp_dex._http_default
     if getattr(orig, "_liq_shared", False):
@@ -2234,8 +2225,8 @@ def start_background(env_fn, rl_map=None):
     w = Watcher(env_fn=env_fn, rl_map=rl_map)
     try:
         _share_hl_rl(rl_map)
-    except Exception as e:
-        log.warning("하이퍼리퀴드 백오프 공유 설정 실패: %s", common.safe_err(e)[:120])
+    except Exception as e:   # noqa: BLE001 [optional]
+        log.warning("하이퍼리퀴드 백오프 공유 설정 실패: %s", logs.safe_err(e)[:120])
 
     pause = threading.Event()
 
@@ -2244,8 +2235,8 @@ def start_background(env_fn, rl_map=None):
             t0 = time.time()
             try:
                 w.step(t0)
-            except Exception as e:
-                log.warning("청산 빠른 감시 판 실패(다음 판): %s", common.safe_err(e)[:160])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("청산 빠른 감시 판 실패(다음 판): %s", logs.safe_err(e)[:160])
             pause.wait(max(0.05, TICK - (time.time() - t0)))
     threading.Thread(target=loop, name="liq-watch", daemon=True).start()
     return w

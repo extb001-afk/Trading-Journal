@@ -2,25 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _gate as _x
-from _gate import check, done
-import collections
-import errno
-import json
-import os
-import shutil
-import sqlite3
-import subprocess
-import time
-import types
-import common
-import core
+import _harness as T  # noqa: E402,F401
+import _gate as _x  # noqa: E402
+from _gate import check, done  # noqa: E402
+import collections  # noqa: E402
+import errno  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+import types  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
 
-assert _x.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-c = core.Core(common.load_config())
+assert _x.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+c = core.Core(config.load_config())
 HOME = os.path.join(_x.TMP, "home_rc")
 os.makedirs(HOME, exist_ok=True)
 c.cfg.setdefault("backfill", {})["rebuild_dir"] = HOME
@@ -42,7 +41,7 @@ def meta(k):
 
 def status():
     try:
-        return json.load(open(os.path.join(common.STATE_DIR, "ext_rebuild_status.json"), encoding="utf-8"))
+        return json.load(open(os.path.join(paths.STATE_DIR, "ext_rebuild_status.json"), encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -132,7 +131,7 @@ c._last_ext_check = 0
 c.ext_rebuild_pass(set(c.EXT_STREAMS))
 check("[K] 도중 중단(시작 표식 남음) = interrupted", meta("ext_rebuild_fail_code") == "interrupted", meta("ext_rebuild_fail_code"))
 src = T.core_src(os.path.join(_x.TREE, "src"))
-i9 = src.find("c2.execute(\"DELETE FROM meta WHERE k LIKE 'ext_prewindow:%'")
+i9 = src.find("c2.execute(\"DELETE FROM meta WHERE k LIKE 'ext\\\\_prewindow:%' ESCAPE '\\\\'")
 check("[K] 성공 교체 = 실패 횟수·원인 코드·단계도 지움(정적)", i9 > 0 and "'ext_rebuild_fail_code', 'ext_rebuild_fail_stage'" in src[i9:i9 + 600], i9)
 check("[K] 실패 기록이 원인 코드를 받음 — _ext_rebuild 의 fail(...) 호출 전부 코드 지정(정적)",
       all(("fail(" + q) not in src for q in ('"rebuild2 시간 초과")', '"게이트 b·c: " + g.stdout.strip()[-300:])', '"shadow WAL 미체크포인트")',
@@ -208,8 +207,8 @@ c.conn.commit()
 ok_l1 = pass_now(350, shift_code=False)
 c._ext_status()
 st_l = status()
-fake0 = types.SimpleNamespace(cfg=c.cfg, BF_REQ_PATH=os.path.join(common.STATE_DIR, "backfill_request.json"))
-import web
+fake0 = types.SimpleNamespace(cfg=c.cfg, BF_REQ_PATH=os.path.join(paths.STATE_DIR, "backfill_request.json"))
+import web  # noqa: E402
 
 v_l = web.StateBuilder._backfill_since_view(fake0, c.conn)
 check("[L] 새 코드의 디스크 실패 = 짧은 재시도 됨(대조)", ok_l0 is True, ok_l0)
@@ -221,7 +220,7 @@ run([])
 check("[L] 다시 새 코드가 실패를 기록하면 원인 코드 정상", c._ext_fail_code() == ("resource_disk", "precheck"), c._ext_fail_code())
 
 os.environ["TJ_HEALTH"] = "0"
-import health as H
+import health as H  # noqa: E402
 
 NOW = time.time()
 UNITS = ["tj-core", "tj-web", "tj-alert"]
@@ -254,7 +253,7 @@ check("[G] 헬스: 옛 상태 파일(원인 코드 없음) = 종전 제목·문�
 reset()
 DISK["free"] = 1 << 20
 run([])
-fake = types.SimpleNamespace(cfg=c.cfg, BF_REQ_PATH=os.path.join(common.STATE_DIR, "backfill_request.json"))
+fake = types.SimpleNamespace(cfg=c.cfg, BF_REQ_PATH=os.path.join(paths.STATE_DIR, "backfill_request.json"))
 v1 = web.StateBuilder._backfill_since_view(fake, c.conn)
 reset()
 v2 = web.StateBuilder._backfill_since_view(fake, c.conn)

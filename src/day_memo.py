@@ -9,7 +9,7 @@ import time
 import unicodedata
 from datetime import datetime
 
-import common
+import paths, statefile
 
 VERSION = 1
 MEMO_MAX = 500
@@ -23,7 +23,7 @@ _MEMO_BAD = re.compile(r"[\x00-\x1f\x7f\u2028\u2029\u202a-\u202e\u2066-\u2069\uf
 
 
 def default_path() -> str:
-    return os.path.join(common.STATE_DIR, "day_memos.json")
+    return paths.state("day_memos.json")
 
 
 def norm_date(d):
@@ -158,7 +158,7 @@ class Store:
             size = len(json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
             if size > WRITE_MAX_BYTES:
                 raise TooBig(f"근거 메모 파일 용량 한도({WRITE_MAX_BYTES // (1024 * 1024)}MB) — 옛 메모를 줄이거나 지운 뒤 다시")
-            common.atomic_write_json(self.path, doc)
+            statefile.atomic_write_json(self.path, doc)
             try:
                 os.chmod(self.path, 0o600)
             except OSError:

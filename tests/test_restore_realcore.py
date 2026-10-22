@@ -2,28 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W  # noqa: E402
 
-import json
-import os
-import sqlite3
-import time as _rt
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time as _rt  # noqa: E402
 
-import common
+import config, paths, statefile  # noqa: E402
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-cfg9 = json.load(open(common.CONFIG_PATH, encoding="utf-8"))
+cfg9 = json.load(open(paths.CONFIG_PATH, encoding="utf-8"))
 cfg9["chains"]["arbitrum"] = {"blockscout": "https://bs3.invalid", "conf_depth": 12, "blocks_per_day": 345600, "rpcs": ["https://rpc3.invalid"]}
 cfg9["wallets"].append({"type": "evm", "chain": "arbitrum", "address": W})
-json.dump(cfg9, open(common.CONFIG_PATH, "w", encoding="utf-8"))
+json.dump(cfg9, open(paths.CONFIG_PATH, "w", encoding="utf-8"))
 
-import core
-import inbox
-import ledger_backup as lb
-import ledger_restore as LR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+import core  # noqa: E402
+import inbox  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import ledger_restore as LR  # noqa: E402
+T.patch_moved("dm", lambda *a, **k: None)
 
 
 class _Clock:
@@ -39,7 +38,7 @@ class _Clock:
 CLK = _Clock()
 core.time = CLK
 T.patch_moved("time", CLK, prefixes=("core_",))
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = int(_rt.time())
 T_BK = NOW - 3 * 86400
 B, R, TK = "0x" + "b2" * 20, "0x" + "c3" * 20, "0x" + "a" * 40
@@ -55,8 +54,8 @@ def rec(i, blk, ts):
     return h, {"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": h, "wallets": [W], "snapshot": snap, "ts": ts}
 
 
-wr = inbox.SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
-c = core.Core(common.load_config())
+wr = inbox.SegmentWriter(os.path.join(paths.INBOX_DIR, "evm"))
+c = core.Core(config.load_config())
 c.conn.commit()
 hashes = []
 
@@ -78,7 +77,7 @@ ingest(2, 1100, T_BK - 14 * 3600)
 ingest(3, 1200, T_BK - 2 * 3600)
 ingest(4, 1250, T_BK)
 c.conn.commit()
-st9 = lb.run_once(db_path=common.DB_PATH, now=T_BK)
+st9 = lb.run_once(db_path=paths.DB_PATH, now=T_BK)
 BK = st9.get("last_path")
 check("(전제) 정기 백업 생성(ledger_backup.run_once — 실제 경로)", BK and os.path.exists(BK), st9)
 ingest(5, 1300, T_BK + 86400)
@@ -86,14 +85,14 @@ ingest(6, 1400, NOW - 3600)
 c.conn.close()
 wr.close()
 
-b9 = sqlite3.connect(common.sqlite_ro_uri(BK, immutable=True), uri=True)
+b9 = sqlite3.connect(paths.sqlite_ro_uri(BK, immutable=True), uri=True)
 eth9 = b9.execute("SELECT count(*), sum(ts IS NULL), max(block) FROM raw_txs WHERE chain='eth'").fetchone()
 ing9 = b9.execute("SELECT max(ingested_at) FROM raw_txs").fetchone()[0]
 b9.close()
 check("[1] 실제 Core 가 기장한 eth 줄 = ts 비어 있음(4줄 모두 NULL)", eth9 == (4, 4, 1250), eth9)
 check("[1] 백업 데이터 시각 = 마지막으로 들어온 시각", ing9 == T_BK, (ing9, T_BK))
 
-ibd = os.path.join(common.INBOX_DIR, "evm")
+ibd = os.path.join(paths.INBOX_DIR, "evm")
 for n in os.listdir(ibd):
     if n.endswith(".jsonl"):
         os.remove(os.path.join(ibd, n))
@@ -104,7 +103,7 @@ OLD_ARB = 9_000_000
 
 
 def wj(name, obj):
-    common.atomic_write_json(os.path.join(S, name), obj)
+    statefile.atomic_write_json(os.path.join(S, name), obj)
 
 
 wj("cursor_evm_eth.json", {"_rpc_v": 3, "_start": 900, W: 5000, "_ns": {W: {"n": 1}}, "_cov:" + W: 900, "_synced_at": NOW})
@@ -151,7 +150,7 @@ check("[4] 저장소에 없는 도구(backfill_gap.py)를 안내하지 않음", 
 pend6 = rj("pending_detail_eth.json") if os.path.exists(os.path.join(S, "pending_detail_eth.json")) else {}
 check("[6] RPC 트랙 = 백업 뒤 방출한 2건이 해시 재수집 큐에", sorted(pend6) == sorted(h.lower() for h in hashes[4:]), pend6)
 check("[6] 탐색기 트랙(base)은 창 처음부터 다시 훑으므로 큐 없음", not os.path.exists(os.path.join(S, "pending_detail_base.json")))
-import evm_watch
+import evm_watch  # noqa: E402
 rw = evm_watch.RpcChainWatcher.__new__(evm_watch.RpcChainWatcher)
 rw.chain, rw.cursor, rw.lanes_cfg = "eth", {}, None
 rw.emitted = set(rj("emitted_evm_eth.json"))
@@ -169,7 +168,7 @@ check("[6] 수집기(RpcChainWatcher._legacy_queues)가 큐의 해시를 다시 
 evm_watch.RpcChainWatcher._legacy_queues(rw)
 check("[6] 두 번째 사이클 = 다시 안 보냄(방출 기록)", len(got6) == 2, got6)
 
-import json as _js
+import json as _js  # noqa: E402
 S7 = os.path.join(T.TMP, "st7")
 os.makedirs(S7)
 CTR = "0x" + "c7" * 20
@@ -233,14 +232,14 @@ check("[7] 단일 차선(rpc_lanes false — 기본 trace 전부)은 인계 큐�
       (f8.get("cursor_evm_eth.json") or {}).get("_hq"))
 n9 = []
 f9 = LR.plan_evm(S8, B7, n9, cut=T_BK - 12 * 3600, now=NOW, cfg={"chains": {"eth": {"blocks_per_day": 7200, "rpc_lanes": False, "rpc_trace": "own"}}})
-check("[7] op410 단일 차선 + rpc_trace=own = 인계 큐 안 늘림 · ★ 안내(외부발 internal 입금 · rpc_trace 를 지우거나 all 로)",
+check("[7] 단일 차선 + rpc_trace=own = 인계 큐 안 늘림 · ★ 안내(외부발 internal 입금 · rpc_trace 를 지우거나 all 로)",
       not (f9.get("cursor_evm_eth.json") or {}).get("_hq") and any(x.startswith("★cursor_evm_eth") and "rpc_trace" in x and "internal" in x for x in n9), n9)
 f10 = LR.plan_evm(S8, B7, [], cut=T_BK - 12 * 3600, now=NOW, cfg={"chains": {"eth": {"blocks_per_day": 7200, "rpc_trace": "own"}}})
-check("[7] op410 인계 차선 + rpc_trace=own 명시 = 인계 큐에 등록(_hq_step 이 도는 구성)",
+check("[7] 인계 차선 + rpc_trace=own 명시 = 인계 큐에 등록(_hq_step 이 도는 구성)",
       sorted((f10.get("cursor_evm_eth.json") or {}).get("_hq") or {}) == sorted(h.lower() for h in hashes[4:]), (f10.get("cursor_evm_eth.json") or {}).get("_hq"))
 
-c2 = core.Core(common.load_config())
-wr2 = inbox.SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
+c2 = core.Core(config.load_config())
+wr2 = inbox.SegmentWriter(os.path.join(paths.INBOX_DIR, "evm"))
 for i, blk, at in ((5, 1300, T_BK + 86400), (6, 1400, NOW - 3600), (3, 1200, T_BK - 2 * 3600)):
     wr2.append(rec(i, blk, at - 600)[1])
 row = c2.conn.execute("SELECT seg, off FROM inbox_offsets WHERE stream='evm'").fetchone()

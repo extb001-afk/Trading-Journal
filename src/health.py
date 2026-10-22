@@ -13,71 +13,42 @@ import sqlite3
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
-import common
+import config, logs, net_http, paths, statefile
+import fsio
 import health_ack
 
 log = logging.getLogger("tj-alert")
-from chk_base import (
-    _CHALLENGE_RX,
+from chk_base import (  # noqa: F401
     _NON_EVM,
     _now,
-    _PERMANENT_RX,
     _read,
     _READ_FAIL,
-    _sig,
-    _TRANSIENT_RX,
     _u,
-    BAL_RB_LIVE_SEC,
-    BAL_RB_WHY,
     BENIGN_DEFAULT,
-    BF_EXT_ORPHAN_SEC,
     BUCKET,
-    CALC_BUG_SHOW_S,
-    CALC_UNIT,
     CHAIN_NAME,
-    DEBT_RX,
     DEFAULTS,
     EX_NAME,
     fmt_ago,
     fmt_ts,
     FUT_FB_SHOW_S,
-    FUT_PLACE_FRESH_S,
     FUT_WAIT_FRESH_S,
-    FUT_WAIT_WARN_S,
-    HB_DIR,
-    INT_PROGRESS,
-    INT_STALL_SEC,
     KST,
-    LINE_RX,
     NATIVE_SYM,
-    NET_RX,
     OPTIONAL_UNITS,
-    PACE_GRACE_SEC,
     PACE_NOTE_FILL,
-    PACE_NOTE_HEAD,
-    PM2_TS_RX,
-    QUIET_EXC,
-    REST_LATE_MARGIN,
     REST_LATE_MAX,
-    RUNNER_STALE_SEC,
-    SIG_SUB,
-    SNAP_MISS_SHOW_S,
-    SOL_WAIT_WHY,
     STABLE_USD,
-    TAILSCALE_BINS,
-    TRANSIENT_RX,
-    UNIT_KO,
     UNITS,
 )
-EVAL_PATH = os.path.join(common.STATE_DIR, "health_eval.json")
-STATUS_PATH = os.path.join(common.STATE_DIR, "health_status.json")
 _UNIT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 LEVELS = {"ok": 0, "warn": 1, "crit": 2}
 
 
-common.fill_chain_table(CHAIN_NAME)
+config.fill_chain_table(CHAIN_NAME)
 
 
 def loc_ko(loc) -> str:
@@ -100,7 +71,7 @@ def settings(cfg: dict) -> dict:
         elif k in out:
             out[k] = v
     ut9 = user.get("t") if isinstance(user.get("t"), dict) else {}
-    ep9, up9 = common.exf_poll_sec(cfg), common.upbit_poll_sec(cfg)
+    ep9, up9 = config.exf_poll_sec(cfg), config.upbit_poll_sec(cfg)
     for k9, v9 in (("exchange_warn", int(4.5 * ep9)), ("exchange_crit", 9 * ep9), ("upbit_warn", 4 * up9), ("upbit_crit", 12 * up9)):
         if k9 not in ut9 and v9 > float(out["t"][k9]):
             out["t"][k9] = v9
@@ -126,7 +97,7 @@ def settings(cfg: dict) -> dict:
                 if u9 not in (out.get("optional_units") or []):
                     out["optional_units"] = list(out.get("optional_units") or []) + [u9]
                 out.setdefault("chain_units", []).append(u9)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     out["bf_stall_sec"] = float(((cfg or {}).get("backfill") or {}).get("stall_sec") or 3600)
     hb = out.get("heartbeat_url")
@@ -138,15 +109,12 @@ def settings(cfg: dict) -> dict:
     return out
 
 
-from chk_collect import (
+from chk_collect import (  # noqa: F401
     _intent_entries,
     _kind_t,
     _liq_blind_checks,
     _offsite_obs,
-    _pid_alive,
-    _sweep_scope,
     _tailnet_ip,
-    _tcp,
     _unreadable_rules,
     collect_calcguard,
     collect_chainsweep,
@@ -219,25 +187,22 @@ def build_mode_view(bp, now: float):
             "detail": f"화면 계산 = 별도 프로세스({where}) · {cnt}" + (f" · 연속 실패 {fails}/{fmax}" if fails else "") + last_in}
 
 
-from chk_logs import (
+from chk_logs import (  # noqa: F401
     _cname,
     _mem_ts,
-    _pm2_bin,
     LogWatch,
     pm2_list,
     rss_track,
 )
 
 
-from chk_sources import (
-    _activity_pairs,
+from chk_sources import (  # noqa: F401
     _bs_internal_text,
     _bs_partial_text,
     _fill_paced_map,
     _int_stall,
     _int_track,
     _pace_note,
-    _source,
     _transient_err,
     collect_sources,
     es_reset_text,
@@ -248,7 +213,6 @@ from chk_sources import (
     leaf_overflow_text,
     pace_alive,
     read_heartbeats,
-    runner_waiting,
     trace_later_drop_text,
     uncollected_text,
     upbit_connected,
@@ -258,22 +222,16 @@ from chk_sources import (
 NEW_CHAIN_CYCLE_STALE = 1800
 
 
-common.fill_chain_table(NATIVE_SYM, 1)
+config.fill_chain_table(NATIVE_SYM, 1)
 
 
-from chk_balance import (
-    _bf_ext_pending,
-    _disc_ents,
+from chk_balance import (  # noqa: F401
     _fmt_left,
-    _fq,
     _short_addr,
     bal_busy_reasons,
-    bal_guess,
-    bal_line,
     bal_rb_wait,
     bal_text,
     balcheck_split,
-    bf_ext_live,
     bf_ext_open,
     bf_ext_phrase,
     collect_bal_busy,
@@ -340,8 +298,8 @@ def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
 
     def add(cid, unit, title, level, detail="", action="", since=None, persist=None, resolve=None,
             notify=True, remind=True, kind=None):
-        detail = common.redact_secret_text(detail, generic=False) if isinstance(detail, str) else detail
-        action = common.redact_secret_text(action, generic=False) if isinstance(action, str) else action
+        detail = logs.redact_secret_text(detail, generic=False) if isinstance(detail, str) else detail
+        action = logs.redact_secret_text(action, generic=False) if isinstance(action, str) else action
         checks.append({"id": cid, "unit": unit, "title": title, "level": level, "detail": detail, "action": action,
                        "since": since, "persist": h["persist_sec"] if persist is None else persist,
                        "resolve": h["resolve_sec"] if resolve is None else resolve,
@@ -411,10 +369,10 @@ def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
         lvl = "crit" if n15 >= t["restart_crit_n"] else "warn" if (len(rs) >= t["restart_warn_n"] and recent) else "ok"
         add(f"restart:{u}", u, "재시작 반복" if lvl != "ok" else "재시작", lvl, det,
             f"pm2 logs {u} --err --lines 80 으로 예외 확인", persist=0, kind="restart")
-    logs = obs.get("logs") or {}
-    net_units = {u for u, s in logs.items() if any(b >= int(now // BUCKET) - 1 for b in s.get("net_buckets", []))}
+    ulog = obs.get("logs") or {}
+    net_units = {u for u, s in ulog.items() if any(b >= int(now // BUCKET) - 1 for b in s.get("net_buckets", []))}
     allb = set()
-    for s in logs.values():
+    for s in ulog.values():
         allb.update(s.get("net_buckets", []))
     run = 0
     b = int(now // BUCKET)
@@ -423,16 +381,21 @@ def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
     while b in allb:
         run += 1
         b -= 1
+    net_hosts = set()
+    for net_unit in net_units:
+        for host in (ulog.get(net_unit) or {}).get("net_hosts") or ["?"]:
+            net_hosts.add("?" + net_unit if host == "?" else host)
     net_bad = None
-    if logs:
+    if ulog:
         net_lvl = "ok"
-        if len(net_units) >= 2 and run >= t["net_crit_run"]:
+        if len(net_units) >= 2 and len(net_hosts) >= 2 and run >= t["net_crit_run"]:
             net_lvl = "crit"
-        elif len(net_units) >= 2 and run >= t["net_warn_run"]:
+        elif len(net_units) >= 2 and len(net_hosts) >= 2 and run >= t["net_warn_run"]:
             net_lvl = "warn"
         net_bad = net_lvl != "ok"
         add("net:dns", "system", "네트워크 끊김", net_lvl,
-            f"{len(net_units)}개 유닛에서 DNS·경로 실패 {run * 5}분째",
+            f"{len(net_units)}개 유닛에서 DNS·경로 실패 {run * 5}분째"
+            + (f" · 실패 호스트 {len(net_hosts)}개" if net_units else ""),
             "이 컴퓨터의 인터넷 연결(와이파이·VPN) 확인 — 복구되면 수집기는 자동으로 따라잡습니다",
             persist=0, resolve=h["resolve_sec"], kind="net")
         chip("네트워크" + (" 끊김" if net_lvl != "ok" else ""))
@@ -535,8 +498,15 @@ def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
     return dict(locals())
 
 
+def _safe_ts(v) -> str:
+    try:
+        return fmt_ts(float(v)) if not isinstance(v, bool) else "?"
+    except (TypeError, ValueError, OverflowError, OSError):
+        return "?"
+
+
 def _eval_feeds(_bs9):
-    (ackf, add, checks, chip, down_units, eff_age, h, logs, now, obs, open_ids, pm2, run, t, units,) = (_bs9["ackf"], _bs9["add"], _bs9["checks"], _bs9["chip"], _bs9["down_units"], _bs9["eff_age"], _bs9["h"], _bs9["logs"], _bs9["now"], _bs9["obs"], _bs9["open_ids"], _bs9["pm2"], _bs9["run"], _bs9["t"], _bs9["units"],)
+    (ackf, add, checks, chip, down_units, eff_age, h, logs, now, obs, open_ids, pm2, run, t, units,) = (_bs9["ackf"], _bs9["add"], _bs9["checks"], _bs9["chip"], _bs9["down_units"], _bs9["eff_age"], _bs9["h"], _bs9["ulog"], _bs9["now"], _bs9["obs"], _bs9["open_ids"], _bs9["pm2"], _bs9["run"], _bs9["t"], _bs9["units"],)
     if "age" in _bs9:
         age = _bs9["age"]
     if "bad9" in _bs9:
@@ -610,6 +580,13 @@ def _eval_feeds(_bs9):
                 f"새 거래 확인 = 공개 노드({host9}) 먼저 · 백업 헬리우스" + (f" · 최근 응답 {round(float(rate9) * 100)}%" if isinstance(rate9, (int, float)) else ""),
                 "저절로 다시 써요(연속 실패 = 1분부터 길게 쉼 · 대조에서 누락이 보이면 6시간) — 오래 이어지면 설정 sol.head_rpc 로 다른 노드를 지정하거나 \"\"(끔)로 헬리우스만 쓰세요",
                 persist=float(t.get("quota_persist") or 21600), resolve=600, notify=False, remind=False, kind="quota")
+    if ssrc and "tj-sol" in units and (int(ssrc.get("quarantined") or 0) > 0 or "sol:poison" in open_ids):
+        n_quar = int(ssrc.get("quarantined") or 0)
+        add("sol:poison", "tj-sol", f"Solana 못 읽는 거래 {n_quar}건 격리" if n_quar else "Solana 격리 거래", "warn" if n_quar else "ok",
+            "노드가 6시간 넘게 내용을 못 준 거래(서명)를 빼고 나머지를 계속 받아요 — 그 거래는 아직 장부에 없고 하루마다 다시 읽어 봐요"
+            if n_quar else "격리했던 거래를 다 읽었어요",
+            "그대로 두면 하루마다 다시 시도해요 · 목록 = state/pending_poison.jsonl(chain sol) — 오래 남으면 그 거래를 탐색기에서 확인하세요",
+            persist=0, resolve=600, remind=False)
     kk = obs.get("keys") or {}
     if kk.get("evm") and "tj-evm" in units and "etherscan" in kk:
         have = bool(kk.get("etherscan"))
@@ -768,7 +745,7 @@ def _eval_feeds(_bs9):
         try:
             import chain_registry as _reg9
             nm9 = _reg9.display_name(c9)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             nm9 = c9
         why9 = str(g9.get("why") or "") if isinstance(g9, dict) else ""
         add(cid9, u9, f"{nm9} 거래 상세 누락 {n9}건" if n9 else f"{nm9} 거래 상세 누락",
@@ -787,7 +764,7 @@ def _eval_feeds(_bs9):
         try:
             import chain_registry as _reg9
             nm9 = _reg9.display_name(c9)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             nm9 = c9
         add(cid9, "tj-core", f"{nm9} 기초잔고 대사 보류" if long9 else f"{nm9} 기초잔고 대사",
             "warn" if long9 else "ok",
@@ -849,6 +826,13 @@ def _eval_feeds(_bs9):
             (det9 + " — 총자산엔 마지막 값 사용") if old9 else "잔고 스냅샷 신선",
             "pm2 logs tj-exf 에서 잔고 조회 실패 사유 확인(키 권한·허용 IP·점검) — 총자산은 마지막 잔고로 계속 표시",
             persist=0, resolve=600, notify=False, remind=False, kind="exbal")
+    adj_doc = obs.get("recon_adj") if isinstance(obs.get("recon_adj"), dict) else {}
+    adj_ck = adj_doc.get("check") if "tj-core" in units and isinstance(adj_doc.get("check"), dict) and adj_doc["check"].get("title") else None
+    if adj_ck:
+        add("ledger:adj", "tj-core", str(adj_ck["title"]), adj_ck.get("level"), str(adj_ck.get("detail") or ""), str(adj_ck.get("action") or ""), persist=0, resolve=600,
+            notify=adj_ck.get("level") == "crit" or bool(adj_ck.get("tg")), remind=False, kind="ledger")
+        if adj_ck.get("tg") and adj_ck.get("level") == "warn":
+            checks[-1]["tg_force"] = True
     wd = obs.get("webdiag")
     if isinstance(wd, dict) and "tj-web" in units:
         wd_age9 = now - float(wd.get("ts") or 0)
@@ -898,7 +882,7 @@ def _eval_feeds(_bs9):
                         + (f"{ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 — 기다리면 됨" if ph9 else "과거 기록 범위 넓히기가 끝나면 원장 자동 재계산이 다시 맞춤"))
                 act9 = ((f"기다리면 됨 — {ph9}가 끝나면 원장 자동 재계산이 다시 맞춤 · " if ph9 else "")
                         + "과거 기록 넓히기·재계산이 끝날 때까지 기다린 뒤에도 남으면 빠진 입금·지갑 등록을 점검 — 진행은 설정 › 과거 데이터 더 가져오기")
-            elif not os.path.exists(os.path.join(common.STATE_DIR, "backfill_done")):
+            elif not os.path.exists(paths.state("backfill_done")):
                 first9 = True
                 det9 = (f"{n_neg9}곳(거래소 차입 몫 제외 — 총자산에서 차감됨) · {top} — 첫 백필 중: 기초잔고 대사(창 이전 보유 맞추기) 전이라 판 코인이 음수로 보일 수 있음"
                         " · 체인·거래소별 첫 수집이 끝나 대사가 되면 자동으로 맞춰짐")
@@ -915,13 +899,16 @@ def _eval_feeds(_bs9):
                 persist=float(t.get("neg_hold_persist") or 7200), resolve=600, notify=False, remind=False, kind="ledger")
         pdv = [x for x in (wd.get("proof_div") or []) if isinstance(x, dict)
                and float(x.get("usd") or 0) >= float(t.get("proof_div_min_usd") or 500)]
-        add("price:proof", "tj-web", f"거래소 시세·DEX 괴리 {len(pdv)}건" if pdv else "거래소 시세·DEX 교차검증", "warn" if pdv else "ok",
-            " · ".join(f"{x.get('sym')} {x.get('ex')} ${float(x.get('cex') or 0):,.4g} vs DEX ${float(x.get('dex') or 0):,.4g}"
-                       f"({float(x.get('diff') or 0) * 100:+.0f}%, 보유 ${float(x.get('usd') or 0):,.0f})" for x in pdv[:3]) if pdv
-            else "보유 $500 이상 괴리 없음",
-            "입출금으로 증명한 거래소 시세가 DEX 와 20% 넘게 다름 — 그 거래소 페어가 다른 코인인지·DEX 풀이 이상한지 확인",
+        spr = [x for x in (wd.get("alt_spread") or []) if isinstance(x, dict) and float(x.get("usd") or 0) >= float(t.get("proof_div_min_usd") or 500)]
+        add("price:proof", "tj-web", " · ".join(([f"거래소 시세·DEX 괴리 {len(pdv)}건"] if pdv else []) + ([f"거래소 간 시세 괴리 {len(spr)}건"] if spr else []))
+            or "거래소 시세·DEX 교차검증", "warn" if pdv or spr else "ok",
+            " · ".join([f"{x.get('sym')} {x.get('ex')} ${float(x.get('cex') or 0):,.4g} vs DEX ${float(x.get('dex') or 0):,.4g}"
+                        f"({float(x.get('diff') or 0) * 100:+.0f}%, 보유 ${float(x.get('usd') or 0):,.0f})" for x in pdv[:3]] + [str(x.get('text') or x.get('sym')) for x in spr[:3]])
+            or "보유 $500 이상 괴리 없음",
+            " · ".join((["입출금으로 증명한 거래소 시세가 DEX 와 20% 넘게 다름 — 그 거래소 페어가 다른 코인인지·DEX 풀이 이상한지 확인"] if pdv or not spr else [])
+                       + (["업비트 비원화 코인의 거래소별 시세가 크게 다름 — 평가는 24h 거래대금 최대 거래소 값(거래대금 모르면 바이낸스 → 바이빗 순서) · 따로 노는 마켓인지 확인"] if spr else [])),
             persist=1800, resolve=600, notify=False, remind=False, kind="price")
-        ackf({f"{x.get('ex')}:{x.get('pair') or x.get('sym')}": x.get("usd") for x in pdv})
+        ackf({f"{x.get('ex')}:{x.get('pair') or x.get('sym')}": x.get("usd") for x in pdv} | {f"spread:{x.get('sym')}": x.get("usd") for x in spr})
         uph = [x for x in (wd.get("unpriced_held") or []) if isinstance(x, dict)
                and max(float(x.get("cost") or 0), float(x.get("ref") or 0)) >= float(t.get("unpriced_warn_usd") or 500)]
         edh = [x for x in (wd.get("ex_dead_held") or []) if isinstance(x, dict)]
@@ -1061,6 +1048,16 @@ def _eval_feeds(_bs9):
             "crit" if crit_o9 else "warn" if bad9 else "ok", det9,
             "python3 tools/offsite_backup.py status · test(연결 확인) · run --force — 원격 키·폴더·여유 공간 확인",
             persist=0, resolve=600, notify=crit_o9, remind=crit_o9, kind="backup")
+        if "kid_changed_at" in os9:
+            add("offsite:kid", "tj-core", "서버 밖 백업 열쇠 바뀜", "warn",
+                f"kid {os9.get('kid_prev') or '?'} → {os9.get('kid') or '?'}({_safe_ts(os9['kid_changed_at'])}) — 그 전 묶음은 옛 열쇠로만 열려요"
+                " · 서버 밖에 둔 열쇠 사본의 kid 와 대조",
+                "잃은 열쇠면 사본을 state/backups/offsite_auth.key 로 되돌림 · 새 열쇠가 맞으면 python3 tools/offsite_backup.py auth-key --export <파일>"
+                "(사본 보관 — 그러면 풀림)", persist=0, resolve=600, kind="key")
+            checks[-1]["tg_force"] = True
+        elif "offsite:kid" in open_ids:
+            add("offsite:kid", "tj-core", "서버 밖 백업 열쇠", "ok" if os9.get("kid") else None,
+                "새 열쇠 사본 보관됨" if os9.get("kid") else "상태 파일을 못 읽어 판단 보류", persist=0, resolve=600, kind="key")
     lw9 = ledger_wait_item((obs.get("runner") or {}).get("core"), now)
     if lw9:
         add(lw9["id"], "tj-core", lw9["title"], "crit", lw9["detail"], lw9["action"], since=lw9.get("since"), persist=0, resolve=60, kind="backup")
@@ -1448,7 +1445,7 @@ def _eval_ops(_bs9):
     wb = obs.get("web")
     if wb:
         add("web:loopback", "tj-web", "대시보드 응답 없음" if not wb["lo"] else "대시보드 응답",
-            "crit" if not wb["lo"] else "ok", "127.0.0.1 포트 연결 " + ("실패" if not wb["lo"] else "정상"),
+            "crit" if not wb["lo"] else "ok", "127.0.0.1 HTTP 응답 " + ("없음(3초 — 연결만 되고 요청을 처리 못 함 포함)" if not wb["lo"] else "정상"),
             "pm2 restart tj-web — 반복되면 pm2 logs tj-web", persist=t["web_persist"], kind="web")
         chip("대시보드 응답" + (" 없음" if not wb["lo"] else ""))
         if wb.get("tail_mode"):
@@ -1583,7 +1580,7 @@ def step(st: dict, checks: list, now: float, h: dict) -> list:
     seen = set()
     for c in checks:
         if isinstance(c.get("detail"), str):
-            c = dict(c, detail=common.redact_secret_text(c["detail"], generic=False))
+            c = dict(c, detail=logs.redact_secret_text(c["detail"], generic=False))
         cid = c["id"]
         seen.add(cid)
         r = cs.setdefault(cid, {"nb": 0, "nc": 0, "no": 0, "bad_since": None, "crit_since": None, "ok_since": None})
@@ -1670,7 +1667,7 @@ def step(st: dict, checks: list, now: float, h: dict) -> list:
             if lvl in ("ok", "off") and r["no"] >= 2 and now - r["ok_since"] >= c["resolve"]:
                 _bal_dm_forget(st, i)
                 i["resolved"] = now
-                i["resolved_detail"] = common.redact_secret_text(c["detail"], generic=False) if isinstance(c["detail"], str) else c["detail"]
+                i["resolved_detail"] = logs.redact_secret_text(c["detail"], generic=False) if isinstance(c["detail"], str) else c["detail"]
                 events.append(("resolve", i))
                 del inc[cid]
                 hist = st.setdefault("history", [])
@@ -1702,7 +1699,7 @@ def step(st: dict, checks: list, now: float, h: dict) -> list:
 def ack_doc():
     try:
         return health_ack.load()[0]
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -1754,7 +1751,7 @@ def _stall_on(now: float = None) -> bool:
     try:
         import alert_prefs as _ap9
         return bool(_ap9.effective(_ap9.load(), "stall", now))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -1882,7 +1879,7 @@ def _quiet_until(now: float):
     try:
         import alert_prefs as _ap9
         return _ap9.quiet_until(_ap9.load(), now)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -1942,7 +1939,7 @@ def plan(st: dict, events: list, now: float, h: dict, tg_configured: bool):
     r = _plan_raw(st, events, now, h, tg_configured)
     for o in st.get("outbox") or []:
         if isinstance(o, dict) and isinstance(o.get("text"), str):
-            o["text"] = plain_text(common.redact_secret_text(o["text"], generic=False))
+            o["text"] = plain_text(logs.redact_secret_text(o["text"], generic=False))
     return r
 
 
@@ -2096,7 +2093,7 @@ def _plan_raw(st: dict, events: list, now: float, h: dict, tg_configured: bool):
     rh = 0.0 if float(h.get("remind_once_sec") or 0) > 0 else float(h.get("remind_hours") or 0) * 3600
     cand = [i for i in inc.values() if rh > 0 and i.get("announced") and i.get("remind", True) and eligible(i)
             and i.get("level") == "crit" and not any(o["kind"] == "remind" and i["id"] in o["incs"] for o in ob)]
-    age = lambda i: now - float(i.get("last_notified") or i["announced"])
+    age = lambda i: now - float(i.get("last_notified") or i["announced"])   # noqa: E731
     if any(age(i) >= rh for i in cand):
         due = sorted([i for i in cand if age(i) >= rh / 2], key=lambda i: i["opened"])
         for i in due:
@@ -2175,7 +2172,7 @@ def _normalize_legacy(ob: list, by_id: dict, now: float, h: dict) -> int:
             continue
         try:
             new9 = _rebuild_legacy(o, src9, now, h)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             log.warning("옛 알림 대기열 항목 다시 만들기 실패(그대로 둠): %s", e)
             _tag(o, src9 if len(_by_cat(src9)) < 2 else [])
             continue
@@ -2216,7 +2213,7 @@ def _rebuild_legacy(o: dict, src9: list, now: float, h: dict) -> list:
             else:
                 r9 = [dict(i, resolved=i.get("resolved") or now) for i in b]
                 it.update(text=(msg_flap(r9[0], now) if o["kind"] == "flap" else _txt_resolve(r9, now)), reply=(None if o["kind"] == "flap" else b[0].get("msg_id")))
-            it["text"] = plain_text(common.redact_secret_text(it["text"], generic=False))
+            it["text"] = plain_text(logs.redact_secret_text(it["text"], generic=False))
             new9.append(_tag(it, b))
     return new9
 
@@ -2235,7 +2232,7 @@ def _normalize_legacy_safe(st: dict, now: float, h: dict) -> int:
             if isinstance(hv9, dict) and isinstance(hv9.get("i"), dict) and hv9["i"].get("id"):
                 by_id.setdefault(hv9["i"]["id"], hv9["i"])
         return _normalize_legacy(ob, by_id, now, h)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("옛 알림 대기열 다시 만들기 실패(그대로 둠): %s", e)
         return 0
 
@@ -2279,7 +2276,7 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
         if gate is not None:
             try:
                 go = bool(gate(gk9 or o["kind"], o["text"]))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 log.warning("알림 설정 관문 실패(보냄): %s", e)
                 go = True
             if not go:
@@ -2324,7 +2321,8 @@ def deliver(st: dict, send_fn, now: float, h: dict, gate=None) -> int:
     return n
 
 
-EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid",
+         "coinbase": "코인베이스"}
 KNOWN_UNPRICED_AGE = 24 * 3600
 
 
@@ -2398,11 +2396,11 @@ def build_status(st: dict, obs: dict, checks: list, now: float, h: dict) -> dict
 
 def web_view(now: float = None) -> dict:
     now = now or _now()
-    d = _read(STATUS_PATH, None)
+    d = _read(paths.state("health_status.json"), None)
     if isinstance(d, dict):
-        d = common.scrub_secrets(d)[0]
+        d = logs.scrub_secrets(d)[0]
     if not isinstance(d, dict):
-        off9 = os.environ.get("TJ_DEMO") != "1" and not (runner_alive(_read(os.path.join(common.STATE_DIR, "runner_alert.json"), None), now) or (False,))[0]
+        off9 = os.environ.get("TJ_DEMO") != "1" and not (runner_alive(_read(paths.state("runner_alert.json"), None), now) or (False,))[0]
         d = {"v": 1, "overall": "unknown", "updatedAt": None, "open": [], "resolved": [], "watching": [], "units": [],
              "note": ("감시 유닛(tj-alert)이 꺼져 있어요 — 원장·백업·수집 문제를 화면·텔레그램으로 알려 주지 못해요(켜기: pm2 start tj-alert · pm2 없이: python3 src/alert_bot.py)"
                       if off9 else "아직 상태 점검 결과가 없어요 — 감시 프로그램(tj-alert)이 첫 점검 전이에요")}
@@ -2444,7 +2442,7 @@ def _ack_offer(check: str, ents) -> str:
 def _ack_overlay(d: dict) -> dict:
     try:
         doc, err = health_ack.load()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         doc, err = None, f"닫은 주의 기록을 못 읽어요({type(e).__name__})"
     d = dict(d)
     op9 = []
@@ -2487,7 +2485,7 @@ def ack_apply(check, fp, now: float = None):
     now = now or _now()
     if not isinstance(check, str) or check not in health_ack.ACKABLE or not isinstance(fp, str) or len(fp) != 16:
         return False, "닫을 수 없는 항목이에요"
-    d = _read(STATUS_PATH, None)
+    d = _read(paths.state("health_status.json"), None)
     it = next((x for x in ((d if isinstance(d, dict) else {}).get("open") or []) if isinstance(x, dict) and x.get("check") == check), None)
     ents = (it or {}).get("ackEnts")
     if not isinstance(ents, dict) or not ents or (it or {}).get("level") != "warn":
@@ -2497,14 +2495,14 @@ def ack_apply(check, fp, now: float = None):
     if (not v9 or v9["fp"] != fp or sorted(v9["ents"]) != sorted(health_ack.norm_ents(ents))
             or not health_ack.covered({"ents": v9["ents"]}, "warn", ents)):
         return False, "그 사이 내용이 바뀌었어요(새 코인·지갑·금액 크게 늚 등) — 새로고침해서 확인한 뒤 다시 닫아 주세요"
-    return health_ack.ack(check, "warn", ents, common.redact_secret_text(str(it.get("title") or ""), generic=False),
-                          common.redact_secret_text(str(it.get("detail") or ""), generic=False), now)
+    return health_ack.ack(check, "warn", ents, logs.redact_secret_text(str(it.get("title") or ""), generic=False),
+                          logs.redact_secret_text(str(it.get("detail") or ""), generic=False), now)
 
 
 def _with_ledger_wait(d: dict, now: float) -> dict:
     try:
-        lw = ledger_wait_item(_read(os.path.join(common.STATE_DIR, "runner_core.json"), None), now)
-    except Exception:
+        lw = ledger_wait_item(_read(paths.state("runner_core.json"), None), now)
+    except Exception:   # noqa: BLE001 [fallback]
         lw = None
     if not lw:
         return d
@@ -2542,21 +2540,67 @@ def note_send(ok: bool, err: str = None, now: float = None):
         TG_STATS["consec_fail"] += 1
         TG_STATS["last_fail"] = now
         TG_STATS["fail_since"] = TG_STATS["fail_since"] or now
-        TG_STATS["last_error"] = common.redact_secret_text(err or "")[:160] or None
+        TG_STATS["last_error"] = logs.redact_secret_text(err or "")[:160] or None
 
 
-def note_wake(st: dict, now: float, h: dict):
+WAKE_CAP_SEC = 1800
+
+
+def _suspend_clock():
+    try:
+        if hasattr(time, "CLOCK_BOOTTIME"):
+            bt, mo = time.clock_gettime(time.CLOCK_BOOTTIME), time.clock_gettime(time.CLOCK_MONOTONIC)
+            return [round((time.time() - bt) / 60.0), max(0.0, bt - mo)]
+        if hasattr(time, "CLOCK_UPTIME_RAW"):
+            mo, up = time.clock_gettime(time.CLOCK_MONOTONIC), time.clock_gettime(time.CLOCK_UPTIME_RAW)
+            return [round((time.time() - mo) / 60.0), max(0.0, mo - up)]
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def note_wake(st: dict, now: float, h: dict, clock: Callable | None = None):
     last = float(st.get("last_eval") or 0)
+    cur = (clock or _suspend_clock)()
+    prev = st.get("susp")
     if not last or now - last > h["wake_gap_sec"]:
         st["wake_at"] = now
         if last:
-            st["sleeps"] = [x for x in (st.get("sleeps") or []) if now - x[1] < 8 * 86400] + [[last, now]]
+            gap = now - last
+            slept = 0.0
+            if cur and isinstance(prev, list) and len(prev) == 2:
+                try:
+                    slept = gap if abs(float(cur[0]) - float(prev[0])) > 2 else max(0.0, float(cur[1]) - float(prev[1]))
+                except (TypeError, ValueError):
+                    slept = 0.0
+            slept = min(gap, slept)
+            allow = min(gap - slept, WAKE_CAP_SEC)
+            spans = ([[last, last + allow]] if allow > 0 else []) + ([[now - slept, now]] if slept > 0 else [])
+            st["sleeps"] = [x for x in (st.get("sleeps") or []) if now - x[1] < 8 * 86400] + spans
         for r in (st.get("checks") or {}).values():
             if r.get("bad_since"):
                 r.update(bad_since=now, nb=0)
             if r.get("crit_since"):
                 r.update(crit_since=now, nc=0)
+    if cur:
+        st["susp"] = [cur[0], round(float(cur[1]), 1)]
     st["last_eval"] = now
+
+
+def _intent_prune(intent_path: str, done: set, used_all: set, now: float) -> None:
+
+    def upd(cur):
+        ci = _intent_entries(cur if isinstance(cur, dict) else {})
+        dn = set(done) | {e[3] for e in ci if now - e[1] > max(3600, e[4] or 0) or e[3] in used_all}
+        if not any(e[3] in dn for e in ci):
+            return fsio.UNCHANGED
+        if all(e[3] in dn for e in ci):
+            return fsio.DELETE
+        return {"entries": [dict({"unit": e[0], "ts": e[1], "n": e[2]}, **({"win": e[4]} if e[4] else {})) for e in ci if e[3] not in dn]}
+    try:
+        fsio.locked_update_json(intent_path, upd, load=lambda p: _read(p, {}) or {}, write=statefile.atomic_write_json)
+    except OSError:
+        pass
 
 
 class Monitor:
@@ -2564,14 +2608,14 @@ class Monitor:
     def __init__(self, cfg: dict = None, probes: dict = None):
         self.cfg = cfg
         self.probes = probes or {}
-        self.st = _read(EVAL_PATH, {}) or {}
-        self.st, n9 = common.scrub_secrets(self.st)
+        self.st = _read(paths.state("health_eval.json"), {}) or {}
+        self.st, n9 = logs.scrub_secrets(self.st)
         if n9:
             try:
-                common.atomic_write_json(EVAL_PATH, self.st)
+                statefile.atomic_write_json(paths.state("health_eval.json"), self.st)
             except OSError:
                 pass
-        common.scrub_secret_file(STATUS_PATH)
+        logs.scrub_secret_file(paths.state("health_status.json"))
         self.logs = None
         self.last = 0.0
         self.interval = DEFAULTS["interval_sec"]
@@ -2587,11 +2631,10 @@ class Monitor:
 
         def _go():
             try:
-                import urllib.request
-                req = urllib.request.Request(url, headers={"User-Agent": "tj-bot-health/1"})
-                with (opener.open if opener else urllib.request.urlopen)(req, timeout=10) as r:
+                req = net_http.request(url, headers={"User-Agent": "tj-bot-health/1"})
+                with (opener.open if opener else net_http.urlopen)(req, timeout=10) as r:
                     r.read(256)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.debug("헬스 하트비트 실패(%s)", type(e).__name__)
             finally:
                 self.hb_busy = False
@@ -2603,8 +2646,8 @@ class Monitor:
         if self.cfg is not None:
             return self.cfg
         try:
-            return common.load_config()
-        except (Exception, SystemExit):
+            return config.load_config()
+        except (Exception, SystemExit):  # noqa: BLE001 [fallback]
             return {}
 
     def due(self, now: float = None) -> bool:
@@ -2615,16 +2658,17 @@ class Monitor:
         _READ_FAIL.clear()
         pm2 = pr["pm2"]() if "pm2" in pr else pm2_list(h)
         if self.logs is None:
-            self.logs = LogWatch(h.get("benign_patterns"), (cfg or {}).get("_disabled_chains") or sorted(common.DEFAULT_DISABLED_CHAINS))
+            self.logs = LogWatch(h.get("benign_patterns"), (cfg or {}).get("_disabled_chains") or sorted(config.DEFAULT_DISABLED_CHAINS))
         ld = h.get("log_dir") or os.path.join(os.environ.get("PM2_HOME") or os.path.expanduser("~/.pm2"), "logs")
+        skip_default_logs = pm2 is None and h.get("pm2_foreign") and not h.get("log_dir")
         files = {}
         for u in h["units"]:
             p = (pm2 or {}).get(u) or {}
             files[u] = [x for x in (p.get("out"), p.get("err")) if x] or \
-                [os.path.join(ld, f"{u}-out.log"), os.path.join(ld, f"{u}-error.log")]
+                ([] if skip_default_logs else [os.path.join(ld, f"{u}-out.log"), os.path.join(ld, f"{u}-error.log")])
         self.logs.poll(files, now)
         rmem = st.setdefault("restarts", {})
-        intent_path = os.path.join(common.STATE_DIR, "intentional_restart.json")
+        intent_path = paths.state("intentional_restart.json")
         intent_doc = _read(intent_path, {}) or {}
         intents = _intent_entries(intent_doc)
         used_now = set()
@@ -2655,18 +2699,8 @@ class Monitor:
             done = {e[3] for e in intents if e[3] in used_now or now - e[1] > max(3600, e[4] or 0)}
             used_all = {k9 for m9 in rmem.values() for k9 in (m9.get("intent_used") or [])}
             done |= {e[3] for e in intents if e[3] in used_all}
-            if all(e[3] in done for e in intents):
-                try:
-                    os.remove(intent_path)
-                except OSError:
-                    pass
-            elif done:
-                keep = [dict({"unit": e[0], "ts": e[1], "n": e[2]}, **({"win": e[4]} if e[4] else {}))
-                        for e in intents if e[3] not in done]
-                try:
-                    common.atomic_write_json(intent_path, {"entries": keep})
-                except OSError:
-                    pass
+            if done:
+                _intent_prune(intent_path, done, used_all, now)
         daily, review = collect_daily_review(now, self.logs, h)
         obs = {"now": now, "pm2": pm2,
                 "tunnel": pr["tunnel"]() if "tunnel" in pr else collect_tunnel(h, pm2),
@@ -2677,27 +2711,28 @@ class Monitor:
                 "intent_active": intent_active,
                 "logs": {u: self.logs.summary(u, now, h["t"]) for u in h["units"]},
                 "sources": collect_sources(cfg, st, now),
-                "bf": _read(os.path.join(common.STATE_DIR, "backfill_status.json"), {}) or {},
+                "bf": _read(paths.state("backfill_status.json"), {}) or {},
                 "fill_paced": _fill_paced_map(cfg, now),
-                "extrb": _read(os.path.join(common.STATE_DIR, "ext_rebuild_status.json"), None),
-                "decis": _read(os.path.join(common.STATE_DIR, "asset_decimals_issues.json"), None),
+                "extrb": _read(paths.state("ext_rebuild_status.json"), None),
+                "decis": _read(paths.state("asset_decimals_issues.json"), None),
                 "poison": collect_poison(),
                 "nonevm_gaps": collect_nonevm_gaps(cfg),
                 "recon_hold": collect_recon_hold(cfg),
-                "pnlgate": _read(os.path.join(common.STATE_DIR, "rebuild_pnl_gate.json"), None),
-                "liqw": _read(os.path.join(common.STATE_DIR, "liq_watch.json"), None),
+                "pnlgate": _read(paths.state("rebuild_pnl_gate.json"), None),
+                "liqw": _read(paths.state("liq_watch.json"), None),
                 "hb": read_heartbeats(cfg),
                 "daily": daily, "review": review,
-                "webdiag": _read(os.path.join(common.STATE_DIR, "web_diag.json"), None),
-                "backup": _read(os.path.join(common.STATE_DIR, "backups", "backup_status.json"), None),
+                "webdiag": _read(paths.state("web_diag.json"), None),
+                "recon_adj": _read(paths.state("recon_adj.json"), None),
+                "backup": _read(paths.state("backups", "backup_status.json"), None),
                 "offsite": _offsite_obs(cfg, st, now),
                 "rss": rss_track(st, pm2, now, float((h.get("t") or {}).get("rss_win") or 1800)),
                 "balcheck": collect_balcheck(cfg),
                 "chainsweep": collect_chainsweep(),
                 "inbox": pr["inbox"]() if "inbox" in pr else collect_inbox(st, now),
                 "disk": pr["disk"]() if "disk" in pr else collect_disk(),
-                "reload": _read(os.path.join(common.STATE_DIR, "health_reload.json"), None),
-                "runner": {u9: _read(os.path.join(common.STATE_DIR, f"runner_{u9}.json"), None) for u9 in RUNNER_KEYS},
+                "reload": _read(paths.state("health_reload.json"), None),
+                "runner": {u9: _read(paths.state(f"runner_{u9}.json"), None) for u9 in RUNNER_KEYS},
                 "web": pr["web"]() if "web" in pr else collect_web(cfg, st, now),
                 "tg": dict(TG_STATS, configured=bool(tg_configured)),
                 "dm": collect_dm(st, now, bool(tg_configured))}
@@ -2736,8 +2771,8 @@ class Monitor:
             deliver(st, send_fn, now, h, gate)
         status = build_status(st, obs, checks, now, h)
         try:
-            common.atomic_write_json(EVAL_PATH, st)
-            common.atomic_write_json(STATUS_PATH, status)
+            statefile.atomic_write_json(paths.state("health_eval.json"), st)
+            statefile.atomic_write_json(paths.state("health_status.json"), status)
         except OSError as e:
             log.warning("헬스 상태 저장 실패: %s", e)
         self.obs, self.checks = obs, checks

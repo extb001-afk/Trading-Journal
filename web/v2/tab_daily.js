@@ -418,7 +418,7 @@
     v.querySelectorAll('.dmemo .dmr[data-k]').forEach(r => {
       if (r.querySelector('input')) return;
       const k = r.getAttribute('data-k') || '', c = dmGet(k.slice(0, 10), k.slice(11)), t = r.querySelector('.dmt');
-      if (t && c) t.outerHTML = dmTxt(c.memo);
+      if (t && c) TJDOM.replace(t, dmTxt(c.memo));
     });
   }
   function reviewHTML() {

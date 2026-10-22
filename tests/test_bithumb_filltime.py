@@ -2,30 +2,30 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import contextlib
-import importlib.util
-import io
-import json
-import os
-import urllib.error
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import contextlib  # noqa: E402
+import importlib.util  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.error  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import pricing
-import ex_foreign as XF
+import histmark, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
+import pricing  # noqa: E402
+import ex_foreign as XF  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
 chk = T.chk
 KST = timezone(timedelta(hours=9))
 
@@ -40,13 +40,13 @@ def _load(name, rel):
     return m
 
 
-tool = _load("bithumb_filltime_1010", "tools/bithumb_filltime_1010.py")
+tool = _load("bithumb_filltime", "tools/bithumb_filltime.py")
 rb2 = _load("rb2_bthfill", "tools/rebuild2.py")
-chk(tool is not None, "[0] 도구 tools/bithumb_filltime_1010.py 있음")
-chk(hasattr(core.Core, "_consume_exf_retime"), "[0] core 처리기 _consume_exf_retime 있음")
+chk(tool is not None, "[0] 도구 tools/bithumb_filltime.py 있음")
+chk(hasattr(core_svc.ExfService, "_consume_exf_retime"), "[0] core 처리기 _consume_exf_retime 있음")
 chk(rb2 is not None and hasattr(rb2, "exf_trade_rows"), "[0] rebuild2.exf_trade_rows(체결 원본 최신 revision) 있음")
 chk(hasattr(pricing.PxCache, "fx_warm"), "[0] 환율 미리 받기 PxCache.fx_warm 있음")
-if tool is None or not hasattr(core.Core, "_consume_exf_retime") or not hasattr(rb2, "exf_trade_rows"):
+if tool is None or not hasattr(core_svc.ExfService, "_consume_exf_retime") or not hasattr(rb2, "exf_trade_rows"):
     T.finish()
 
 GJ = []
@@ -127,8 +127,8 @@ for u, r in ROWS.items():
     ts9 = ep(T6) * 1000 if u == "b6" else XF._bithumb_row_ts(r, None) * 1000
     fills.append(XF._bithumb_fill(r, ts9))
 C.conn.execute("BEGIN")
-C._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": fills})
-aaa = C._exf_asset("bithumb", "AAA")
+C.svc_exf._consume_exf_fills({"v": 1, "kind": "exf_fills", "exchange": "bithumb", "ts": 1, "fills": fills})
+aaa = C.svc_exf._exf_asset("bithumb", "AAA")
 BTS = ep(kiso(2025, 11, 6, 12, 0))
 C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event,"
                " classifier_ver) VALUES ('exchange','bithumb:recon',?,0,?,?,'exchange:bithumb','0',NULL,NULL,'opening','EXF_ADJUST',?)",
@@ -151,7 +151,7 @@ L0 = {u: legs(IDS[u]) for u in ROWS}
 P0 = positions()
 chk(L0["b1"][0][6] == ep(C1) and L0["b6"][0][6] == ep(T6), "[전] 지정가 b1 = 생성 시각 기장(재현) · b6 = 이미 체결 시각", (L0["b1"][:1], L0["b6"][:1]))
 
-ro = __import__("sqlite3").connect(common.sqlite_ro_uri(common.DB_PATH), uri=True)
+ro = __import__("sqlite3").connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True)
 S, n_done = tool.targets(ro)
 REC = tool.recon_times(ro)
 chk(sorted(S) == sorted(ROWS) and n_done == 0 and S["b1"]["ts"] == ep(C1) * 1000 and S["b1"]["qty"] == "2", "[1] 대상 9건 · 이미 바로잡음 0 · 원장 요약", sorted(S))
@@ -190,7 +190,7 @@ def mkcall(fail_at=None):
     return call
 
 
-PROG = os.path.join(common.STATE_DIR, tool.PROGRESS)
+PROG = os.path.join(paths.STATE_DIR, tool.PROGRESS)
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
     rcf = tool.main(["--base", T.TMP, "--fetch"])
@@ -216,8 +216,7 @@ chk(set(st["got"]) == {"b1", "b2", "b7", "b8"} and st["got"]["b1"]["ts"] == ep(T
 chk(st["keep"] == {"b3": "market", "b6": "fill"}, "[2] 시장가·이미 체결 시각 = 그대로(조회는 했지만 바꾸지 않음)", st["keep"])
 chk(set(st["bad"]) == {"b5", "b9"} and "수량" in st["bad"]["b5"]["why"] and "시간대" in st["bad"]["b9"]["why"] and st["nf"].get("b4") == 3,
     "[2] 검사 실패 = 수량 합 다름(b5)·시간대 없는 시각(b9) · 404 3번 포기(b4)", (st["bad"], st["nf"]))
-XF.PACE = 0
-T.patch_moved("PACE", XF.PACE, ("exf_",))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
 rt = XF._bithumb_retime(lambda p, q: json.loads(json.dumps(RESP[q["uuid"]])), [dict(fills[0])], {"b1": ROWS["b1"]}, {}, None)
 chk(rt[0]["ts"] == st["got"]["b1"]["ts"], "[2] X12(_bithumb_retime)와 같은 시각", (rt[0]["ts"], st["got"]["b1"]))
 tool.save_progress(PROG, st)
@@ -233,7 +232,7 @@ chk(mo["2025-11"]["n"] == 7 and mo["2025-11"]["chg"] == 3 and mo["2025-11"]["day
     and mo["2025-12"]["krw_day"] == Decimal(400), "[3] 월별(옛 시각 기준 한국 달)", mo)
 ro.close()
 
-inbox_dir = os.path.join(common.INBOX_DIR, "ex")
+inbox_dir = os.path.join(paths.INBOX_DIR, "ex")
 
 
 def inbox_recs():
@@ -260,12 +259,12 @@ chk(rc1 == 0 and len(IR) == 1 and IR[0]["kind"] == "exf_fill_retime" and IR[0]["
     and [f["id"] for f in IR[0]["fills"]] == ["bithumb:b2", "bithumb:b1", "bithumb:b7", "bithumb:b8"],
     "[4] --apply = inbox 'exf_fill_retime' 1개 · 바뀌는 4건만 · 새 시각 순", IR)
 
-open(os.path.join(common.STATE_DIR, "daily_cache.json"), "w").write("{}")
+open(os.path.join(paths.STATE_DIR, "daily_cache.json"), "w").write("{}")
 obs1 = dict(C.conn.execute("SELECT uuid, observed_at FROM raw_ex WHERE exchange='bithumb' AND revision=1").fetchall())
 FAIL_MIN.add((ep(T8) * 1000 // 60000) * 60000)
 GJ.clear()
 GJT.clear()
-PXQ = C._exf_retime_pxq = pricing.FxWarmQueue(C.px, name="tj-retime-px") if hasattr(pricing, "FxWarmQueue") else None
+PXQ = C.svc_exf._exf_retime_pxq = pricing.FxWarmQueue(C.px, name="tj-retime-px") if hasattr(pricing, "FxWarmQueue") else None
 if PXQ is not None:
     PXQ.RETRIES = 0
 C.conn.execute("BEGIN")
@@ -291,8 +290,8 @@ chk([x[6] for x in l1] == [ep(T1B)] * 3 and [x[:6] for x in l1] == [x[:6] for x 
 chk([x[6] for x in l7] == [ep(T7)] * 3 and datetime.fromtimestamp(l7[0][6], KST).strftime("%Y-%m-%d") == "2025-12-01",
     "[5] b7 = 다음 달 첫날(한국 날짜)로", l7)
 chk(all(legs(IDS[u]) == L0[u] for u in ("b3", "b4", "b5", "b6", "b8", "b9")) and positions() == P0, "[5] 그 밖 체결 그대로 · 포지션 합 불변", positions())
-hd = common.read_json(os.path.join(common.STATE_DIR, common.HIST_DIRTY), {}) or {}
-chk(not os.path.exists(os.path.join(common.STATE_DIR, "daily_cache.json")) and hd.get("from") == "2025-11-05",
+hd = statefile.read_json(os.path.join(paths.STATE_DIR, histmark.HIST_DIRTY), {}) or {}
+chk(not os.path.exists(os.path.join(paths.STATE_DIR, "daily_cache.json")) and hd.get("from") == "2025-11-05",
     "[5] 일별 동결 캐시 삭제 · 장기 곡선 다시 계산 표식 = 가장 이른 옛 날(2025-11-05)부터", hd)
 mk = json.loads(C._meta_get("exf_retime:bithumb") or "{}")
 chk(mk.get("n") == 3 and mk.get("undo") == 4, "[5] meta 표식(바로잡은 3 · 되돌림 4 = 첫 적용 캐시 없음 3 + b8 환율 실패 1)", mk)
@@ -329,18 +328,18 @@ for r in C.conn.execute("SELECT asset_id, location, qty_base FROM postings WHERE
     C._bump_position(r[0], -int(r[2]), r[1])
 C.conn.execute("DELETE FROM postings WHERE source_kind='exchange' AND source_ns='bithumb:trade'")
 for t in rb2.exf_trade_rows(C.conn):
-    C._post_exf_fill(t["exchange"], json.loads(t["payload"]))
+    C.svc_exf._post_exf_fill(t["exchange"], json.loads(t["payload"]))
 reb = {u: legs(IDS[u]) for u in ROWS}
 pos_reb = positions()
 C.conn.execute("DELETE FROM postings WHERE source_kind='exchange' AND source_ns='bithumb:trade'")
 for t in C.conn.execute("SELECT exchange, payload FROM raw_ex WHERE kind='trade' AND exchange != 'upbit' ORDER BY observed_at, exchange, uuid, revision").fetchall():
-    C._post_exf_fill(t["exchange"], json.loads(t["payload"]))
+    C.svc_exf._post_exf_fill(t["exchange"], json.loads(t["payload"]))
 old_way = {u: legs(IDS[u]) for u in ROWS}
 C.conn.rollback()
 chk(reb == live and pos_reb == P0, "[8] 재구축(최신 revision) = 같은 시각·레그·원가 · 포지션 불변", {u: (reb[u][:1], live[u][:1]) for u in ROWS if reb[u] != live[u]})
 chk(old_way["b1"][0][6] == ep(C1) and old_way["b1"] != live["b1"], "[8] (재현) 종전 SQL = 첫 revision 이 자리를 먼저 차지 → 옛 생성 시각으로 되돌아감", old_way["b1"][:1])
 
-ro = __import__("sqlite3").connect(common.sqlite_ro_uri(common.DB_PATH), uri=True)
+ro = __import__("sqlite3").connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True)
 S2, n_done2 = tool.targets(ro)
 ro.close()
 buf = io.StringIO()

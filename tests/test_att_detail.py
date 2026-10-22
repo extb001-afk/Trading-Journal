@@ -2,32 +2,31 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
-import types
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import types  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import acct_norm
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
@@ -59,9 +58,9 @@ def feed(c, hx, s):
     c._drain_stream("evm", Reader([{"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": hx, "wallets": [W], "snapshot": s, "ts": 1}]), 0, 0)
 
 
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 os.environ["TJ_NEGABS"] = "0"
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 feed(c, h(1), snap(h(1), T0, 1500, X, W, value=2 * E18, data="0x"))
 feed(c, h(2), snap(h(2), TA, 2000, W, TKN, toks=[(W, X, TKN, "TKN", 600 * E18)], fee=10 ** 15))
 feed(c, h(3), snap(h(3), TB, 2500, W, TKS, toks=[(W, X, TKS, "TKS", 300 * E18)], fee=10 ** 15))
@@ -84,10 +83,10 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 k9, k9s = f"eth:{TKN}", f"eth:{TKS}"
 json.dump({"usd": {"ETH": 2000.0}, "usd_ts": {"ETH": NOW}, "rate": 1400.0, "updated": NOW, "dex_usd": {k9: 2.0, k9s: 3.0}, "dex_ts": {k9: NOW, k9s: NOW},
-           "dex_res": {k9: 1e6, k9s: 1e6}, "dex_res_ts": {k9: NOW, k9s: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "dex_res": {k9: 1e6, k9s: 1e6}, "dex_res_ts": {k9: NOW, k9s: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
-import discopen
+import discopen  # noqa: E402
 aid = c.conn.execute("SELECT asset_id FROM assets WHERE address=?", (TKN,)).fetchone()[0]
 discopen.write_anchor(c, "eth", W, aid, TKN, 1000 * E18, 1999, TA - 12, TA - 1, 1000 * E18, "neg_tx", {"_tx": h(2)})
 aids = c.conn.execute("SELECT asset_id FROM assets WHERE address=?", (TKS,)).fetchone()[0]
@@ -97,13 +96,13 @@ c.conn.commit()
 
 def build():
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
     global BB
     b = BB = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -133,7 +132,7 @@ for r in ser:
         continue
     n_det += 1
     mk = d.get("mk") or []
-    tol = lambda n: 0.006 * (n + 1) + 1e-9
+    tol = lambda n: 0.006 * (n + 1) + 1e-9   # noqa: E731
     s_mk = sum(x[1] for x in mk)
     if abs(s_mk - (float(a["mk"]) - float(a.get("kx") or 0))) > tol(len(mk)):
         bad.append((iso, "mk", s_mk, a["mk"], a.get("kx")))
@@ -259,12 +258,12 @@ class FakeH:
         self.out = (code, body)
 
 
-def call(q, builder):
+def call(q, builder, send="_send_att_detail"):
     old = web.BUILDER
     web.BUILDER = builder
     try:
         hh = FakeH()
-        web.Handler._send_att_detail(hh, q)
+        getattr(web.Handler, send)(hh, q)
         return hh.out
     finally:
         web.BUILDER = old
@@ -322,8 +321,8 @@ o9 = call("date=2026-10-08", _BigKo(sb))
 chk(nch9 < 6_000_000 < nby9 and o9[0] == 413, "한글 심볼: 글자 %d < 6MB < 바이트 %d → 413(바이트로 검사)" % (nch9, nby9), o9 and o9[0])
 o9 = call("date=2026-10-08", bw)
 chk(o9[0] == 200 and isinstance(o9[1], bytes) and json.loads(o9[1].decode())["days"].get(d1), "200 = 검사한 UTF-8 바이트 그대로 전송(다시 직렬화 없음)", type(o9[1]).__name__)
-import onboarding
-import demo_data
+import onboarding  # noqa: E402
+import demo_data  # noqa: E402
 db9 = onboarding.DemoBuilder(web)
 dd = demo_data.build()["fields"]["dailySeries"]
 t9 = datetime.now(KST)
@@ -334,6 +333,14 @@ bad9 = [k for k, v in dz.items() if abs(sum(x[1] for x in v["mk"]) - float(iso9[
         or abs(sum(x[1] for x in v["fl"]) - float(iso9[k].get("flow") or 0)) > 0.011]
 chk(o9 and o9[0] == 200 and len(dz) == sum(1 for r in dd if r.get("att")) and not bad9 and any(len(v["mk"]) > 5 for v in dz.values()),
     "데모 빌더: 분해 있는 날 전부 · 코인별 시세 합 = 그날 mk(상위 5 밖 코인 포함) · 원화 출금 = 그날 flow", (o9 and o9[0], len(dz), bad9[:3]))
+try:
+    o10 = call("from=2026-01-01&to=2026-12-31", db9, "_send_receipt_list")
+except Exception as e10:   # noqa: BLE001
+    o10 = (500, repr(e10))
+b10 = o10[1] if o10 and isinstance(o10[1], dict) else (json.loads(o10[1].decode()) if o10 and isinstance(o10[1], bytes) else {})
+chk(o10 and o10[0] == 200 and b10.get("ok") is True and b10.get("items") == [] and b10.get("n") == 0
+    and b10.get("from") == "2026-01-01" and b10.get("to") == "2026-12-31" and "builtAt" in b10,
+    "데모 빌더 /api/receipt_list = 빈 목록 200(500 아님 · 실서버와 같은 키)", o10)
 
 print("[4] ui17 — 상세·builtAt 원자 게시 · 9999-12-31 · 원화만 남는 선물 행")
 BX = web.StateBuilder()
@@ -342,10 +349,10 @@ BX.skip_gen_check = True
 
 def bx_build():
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return BX._build(conn)["fields"]
     finally:

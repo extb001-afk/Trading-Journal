@@ -3,7 +3,7 @@ import json
 import os
 import time
 import urllib.request
-import common
+import config, logs, paths, statefile
 import bf_engine
 from evm_base import BisectBudget
 from evm_base import ChainDisabled
@@ -23,6 +23,7 @@ from evm_base import _WALK_END
 from evm_base import _int_or
 from evm_base import leaf_overflow_path
 from evm_base import leaf_overflow_read
+from evm_base import new_view_wallets
 from evm_base import retention_summary
 from evm_base import trace_fail_index
 from evm_base import trace_path_failed
@@ -117,7 +118,7 @@ def rpc_nodes(cfg: dict, chain: str) -> dict:
         c9 = [x for x in (_cap_num(cfgcaps.get(u)), _cap_num(tcaps.get(u)), logs_cap_host(u)) if x]
         return min(c9) if c9 else None
     detail = list(cc.get("rpcs") or t.get("detail") or R.RPC_DEFAULT.get(chain) or [])
-    if common.chain_discovery(chain, cc) == "rpc":
+    if config.chain_discovery(chain, cc) == "rpc":
         logs = list(cc.get("rpc_logs") or detail)
         state = list(dict.fromkeys(list(cc.get("archive_rpcs") or []) + detail))
     else:
@@ -153,13 +154,13 @@ def rpc_nodes(cfg: dict, chain: str) -> dict:
             "mc_l1_block": bool(cc["multicall3_l1_block"] if "multicall3_l1_block" in cc else t.get("mc_l1_block"))}
 
 
-from evm_rpc_trace import RpcTraceMixin
+from evm_rpc_trace import RpcTraceMixin  # noqa: E402
 
 
-from evm_rpc_later import RpcLaterMixin
+from evm_rpc_later import RpcLaterMixin  # noqa: E402
 
 
-from evm_rpc_native import RpcNativeMixin
+from evm_rpc_native import RpcNativeMixin  # noqa: E402
 
 
 class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixin):
@@ -265,7 +266,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             import nodesel
             nodesel.register(chain, self.cfg_rpcs, self.logs_rpcs, self.state_rpcs, self.trace_rpcs)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         self.start_block = int(cc.get("start_block") or 0)
         if cc.get("rps"):
@@ -294,15 +295,11 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self.trace_mode = str(cc.get("rpc_trace") or "").lower() or None
         self.bk_span = max(1000, int(cc.get("rpc_backfill_span", 200_000)))
         self.block_trace = bool(cc.get("rpc_block_trace", True))
-        self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
-        self.cursor = common.read_json(self.cursor_path, {})
-        self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_evm_{chain}.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
-        _prev_w = {k for k in self.cursor if not k.startswith("_")}
-        if _prev_w and not set(self.wallets).issubset(_prev_w) and self.emitted:
-            log.warning("%s 새 관점 지갑 감지 — emitted %d건 초기화(재방출 허용)", chain, len(self.emitted))
-            self.emitted.clear()
-            common.atomic_write_json(self.emitted_path, [])
+        self.cursor_path = paths.state(f"cursor_evm_{chain}.json")
+        self.cursor = statefile.read_json(self.cursor_path, {})
+        self.emitted_path = paths.state(f"emitted_evm_{chain}.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
+        new_view_wallets(self)
         self.since = {}
         for w9 in cfg.get("wallets") or []:
             a9 = str(w9.get("address") or "").lower()
@@ -313,10 +310,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 except (TypeError, ValueError, IndexError):
                     continue
         self.pending_detail = {}
-        self.rpc_meta_path = os.path.join(common.STATE_DIR, f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = common.read_json(self.rpc_meta_path, {})
-        self.sym_path = os.path.join(common.STATE_DIR, f"rpc_token_sym_{chain}.json")
-        self.sym = common.read_json(self.sym_path, {})
+        self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
+        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.sym_path = paths.state(f"rpc_token_sym_{chain}.json")
+        self.sym = statefile.read_json(self.sym_path, {})
         self.progress = bf_engine.progress("evm")
         try:
             jobs9 = self._bk_jobs()
@@ -345,7 +342,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             import nodekeys
             key9 = [u for u in order if nodekeys.is_key_node(u) and not bf_engine.gate(u).is_open() and not bf_engine.gate(u).resting()]
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return order
         if not key9 or len(key9) == len(order):
             return order
@@ -355,7 +352,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             import nodesel
             return nodesel.via(self.chain)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return ""
 
     def _sel_lane(self, remaining):
@@ -363,7 +360,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             import nodesel
             it9 = self.progress.items.get(f"{self.chain}:rpc") or {}
             nodesel.lane_eta(self.chain, it9.get("eta_sec") if remaining else 0, remaining)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
 
     def _sel_order(self, urls, order):
@@ -376,7 +373,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 nodesel.shadow(self.chain, role9, "bf" if bf9 else "rt", order, new9)
                 return order
             return new9
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return order
 
     def _rpc_call(self, method: str, params: list):
@@ -391,7 +388,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 raise self._rpc_budget_err(last)
             try:
                 r = bf_engine.rpc_call(url, method, params, allow_null=True, **kw9)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 last = e
                 continue
             if r is not None:
@@ -416,7 +413,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
     @staticmethod
     def _rpc_budget_err(last=None):
         return bf_engine.NetError("budget: 상세 예산 소진 — 다음 사이클(마감 지나 다음 노드·조각 시작 안 함)"
-                                  + (f" · 앞 노드: {common.safe_err(last)[:60]}" if last is not None else ""), "budget")
+                                  + (f" · 앞 노드: {logs.safe_err(last)[:60]}" if last is not None else ""), "budget")
 
     def _batch(self, calls: list, urls: list = None) -> list:
         last, all_bad = None, None
@@ -435,7 +432,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                     all_bad = out
                     continue
                 return out
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
         if all_bad is not None:
             return all_bad
@@ -474,7 +471,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                     cap = bf_engine.gate(url).batch_cap(40)
                     for i in range(0, len(cl), cap):
                         res += bf_engine.rpc_batch(url, cl[i:i + cap], timeout=30, retries=1)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     last = e
                     if refused9 is None and self._refused(e):
                         refused9 = e
@@ -507,7 +504,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                     kind = getattr(last, "kind", None)
                     if (kind == "pruned" or last is None) and refused9 is not None and self.__dict__.get("_e4_ctx") and not self._near_head(p[1]):
                         raise HoldError(f"{self.chain} 블록 {p[1]} 상태 — 아카이브(키) 노드가 한도·서킷으로 쉬는 중이라 미확인(커서 유지 · 다음 사이클): "
-                                        f"{common.safe_err(refused9)[:100]}")
+                                        f"{logs.safe_err(refused9)[:100]}")
                     if kind == "pruned" or last is None:
                         e9 = StateUnavailable(f"{self.chain} 블록 {p[1]} 상태 없음(비아카이브): {str(last)[:120]}")
                         e9.blk = int(p[1])
@@ -532,7 +529,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             import nodekeys
             off9 = [u for u in self.state_rpcs if u not in order9 and nodekeys.is_key_node(u)]
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return None
         if not off9:
             return None
@@ -657,7 +654,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 if dc:
                     for (m, p), r in zip(dc, self._batch(dc)):
                         put(m, p, r)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.info("%s 상세 배치 실패 → 단건 경로: %s", self.chain, str(e)[:100])
             self._pref = pref
             try:
@@ -676,7 +673,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                                            "from": (tx.get("from") or "").lower(), "to": (tx.get("to") or "").lower(),
                                            "block": snap["tx"]["block_number"]}
                         out[h] = snap
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [fallback]
                         out[h] = e
             finally:
                 self._pref = None
@@ -706,7 +703,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                         with self._trace_budget(tdl9):
                             self._trace_internal(h, snap)
                         nf9 = 0
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [fallback]
                         if isinstance(e, TraceDeferred):
                             nbrk9 += 1
                             self._trace_late_add(h)
@@ -718,16 +715,16 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                             self._trace_late_add(h)
                             continue
                         if self._trace_gone(e):
-                            log.info("%s trace 불가(과거 상태 없음·미지원) — internal 없이 확정 %s: %s", self.chain, h[:12], common.safe_err(e)[:80])
+                            log.info("%s trace 불가(과거 상태 없음·미지원) — internal 없이 확정 %s: %s", self.chain, h[:12], logs.safe_err(e)[:80])
                             continue
                         nf9 += 1
                         n9 = self._trace_fail[h] = self._trace_fail.get(h, 0) + 1
                         if n9 < self.TRACE_RETRY and not late:
-                            out[h] = RuntimeError(f"trace 실패 {n9}회(재시도): {common.safe_err(e)[:100]}")
+                            out[h] = RuntimeError(f"trace 실패 {n9}회(재시도): {logs.safe_err(e)[:100]}")
                         else:
                             self._trace_late_add(h)
                             getattr(log, "info" if late else "warning")("%s trace %d회 실패 — internal 없이 확정 · 나중에 다시(늦은 채움) %s: %s",
-                                                                        self.chain, n9, h[:12], common.safe_err(e)[:80])
+                                                                        self.chain, n9, h[:12], logs.safe_err(e)[:80])
             if nbrk9:
                 log.info("%s trace 노드 일시 막힘 — 이 걸음 남은 %d건은 trace 없이 늦은 채움으로(다음 사이클부터 백오프 재시도)", self.chain, nbrk9)
 
@@ -761,8 +758,8 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 for ca, r in zip(need, self._batch(calls)):
                     if not isinstance(r, Exception):
                         self.sym[ca] = (self._dec_symbol(r) or "")[:16]
-                common.atomic_write_json(self.sym_path, self.sym)
-            except Exception as e:
+                statefile.atomic_write_json(self.sym_path, self.sym)
+            except Exception as e:  # noqa: BLE001 [optional]
                 log.info("%s 토큰 심볼 조회 실패(무시): %s", self.chain, str(e)[:80])
         for s in snaps:
             for tt in s.get("token_transfers") or []:
@@ -808,7 +805,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         ws = [w for w in self.wallets if isinstance(self.cursor.get(w), int)]
         if new >= old or not ws:
             self.cursor["_since_seen"] = int(s9)
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             return
         sk9 = self.cursor.get("_since_skip")
         if isinstance(sk9, dict) and sk9.get("target") == int(s9) and time.time() - float(sk9.get("at") or 0) < 6 * 3600:
@@ -816,17 +813,17 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             st0 = self._states([(w, new) for w in ws])
         except StateUnavailable as e:
-            st0, err9 = {}, common.safe_err(e)[:120]
+            st0, err9 = {}, logs.safe_err(e)[:120]
         else:
             err9 = None if all((w, new) in st0 for w in ws) else "일부 지갑 상태 누락"
         if err9:
             self.cursor["_since_skip"] = {"target": int(s9), "at": int(time.time()), "err": err9}
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.warning("%s 과거 창 확장 보류(시작 블록 %d 상태 조회 불가 — 아카이브 노드 필요, 6시간 뒤 재시도): %s", self.chain, new, err9)
             return
         self.cursor.pop("_since_skip", None)
         ts9 = time.strftime("%Y%m%d_%H%M%S")
-        common.atomic_write_json(self.cursor_path + f".pre_since_{ts9}", self.cursor)
+        statefile.atomic_write_json(self.cursor_path + f".pre_since_{ts9}", self.cursor)
         ns = self.cursor.setdefault("_ns", {})
         self.cursor["_since_ext"] = {"from": int(new), "to": old, "at": int(time.time()),
                                      "live": {w: int(self.cursor[w]) for w in ws}, "ns": {w: ns.get(w) for w in ws}}
@@ -840,7 +837,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self.cursor.pop("_scan", None)
         self.cursor["_start"] = int(new)
         self.cursor["_since_seen"] = int(s9)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         log.warning("★%s 과거 창 확장(backfill_since %s): 앞 구간 블록 %d → %d 만 훑음(지갑 %d · 보존본 .pre_since_%s)★",
                     self.chain, time.strftime("%Y-%m-%d", time.gmtime(s9)), new, old, len(ws), ts9)
 
@@ -852,7 +849,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         ws = [w for w in self.wallets if isinstance(self.cursor.get(w), int)]
         if new >= old or not ws:
             self.cursor["_since_seen"] = int(s9)
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             return
         sk9 = self.cursor.get("_since_skip")
         if isinstance(sk9, dict) and sk9.get("target") == int(s9) and time.time() - float(sk9.get("at") or 0) < 6 * 3600:
@@ -861,10 +858,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             b0 = self._baselines(ws, new)
             err9 = None if all(w in b0 for w in ws) else "일부 지갑 상태 누락"
         except StateUnavailable as e:
-            b0, err9 = {}, common.safe_err(e)[:120]
+            b0, err9 = {}, logs.safe_err(e)[:120]
         if err9:
             self.cursor["_since_skip"] = {"target": int(s9), "at": int(time.time()), "err": err9}
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.warning("%s 과거 창 확장 보류(시작 블록 %d 상태 조회 불가, 6시간 뒤 재시도): %s", self.chain, new, err9)
             return
         self.cursor.pop("_since_skip", None)
@@ -878,7 +875,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             bkns[w] = b0[w]
         self.cursor["_start"] = int(new)
         self.cursor["_since_seen"] = int(s9)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         log.warning("★%s 과거 창 확장(backfill_since %s): 앞 구간 블록 %d → %d 를 뒤 차선으로(지갑 %d · 라이브 꼬리는 계속)★",
                     self.chain, time.strftime("%Y-%m-%d", time.gmtime(s9)), new, old, len(ws))
 
@@ -894,7 +891,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 ns[w] = b9
         self.cursor.pop("_since_ext", None)
         self.cursor.pop("_scan", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         log.info("%s 과거 창 확장(앞 구간 %d → %d) 완주 — 지갑 커서 복원", self.chain, int(ext9.get("from") or 0), int(ext9.get("to") or 0))
 
 
@@ -993,10 +990,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             if why and bk_from < to9:
                 jobs[w] = {"from": bk_from, "to": int(to9), "done": bk_from, "why": why}
         hq = {}
-        hqp9 = os.path.join(common.STATE_DIR, f"hq_left_{self.chain}.json")
-        for k9 in list((common.read_json(hqp9, {}) or {}).keys()) \
-                + list((common.read_json(os.path.join(common.STATE_DIR, f"enrich_{self.chain}.json"), {}) or {}).keys()) \
-                + list((common.read_json(os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"), {}) or {}).keys()) \
+        hqp9 = paths.state(f"hq_left_{self.chain}.json")
+        for k9 in list((statefile.read_json(hqp9, {}) or {}).keys()) \
+                + list((statefile.read_json(paths.state(f"enrich_{self.chain}.json"), {}) or {}).keys()) \
+                + list((statefile.read_json(paths.state(f"pending_detail_{self.chain}.json"), {}) or {}).keys()) \
                 + [h for h in (ipm.get("hashes") or []) if isinstance(h, str)] + list((ipm.get("items") or {}).keys()):
             if isinstance(k9, str) and k9.startswith("0x"):
                 hq[k9.lower()] = 0
@@ -1023,10 +1020,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         bp = self.cursor_path + ".explorer_legacy"
         if os.path.exists(bp):
             bp += time.strftime("_%Y%m%d_%H%M%S")
-        common.atomic_write_json(bp, old)
+        statefile.atomic_write_json(bp, old)
         if self.emitted:
             self.emitted.clear()
-            common.atomic_write_json(self.emitted_path, [])
+            statefile.atomic_write_json(self.emitted_path, [])
         cur = {"_rpc_v": self.VERSION, "_start": int(start), "_ns": ns, "_bkns": bkns,
                "_handover": {"from": "explorer" if curs else ("rescan" if xcurs9 else "fresh"), "at": int(time.time()), "live": int(live), "start": int(start),
                              "bk_from": int(bk_from), "overlap": ov, "adopted": len(curs), "new": sum(1 for j in jobs.values() if j["why"] == "new"),
@@ -1042,7 +1039,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 self.cursor = cur
                 self._sweep_add(live0, live)
         for k9, v9 in old.items():
-            if str(k9).startswith("_cov:") or k9 in ("_quarantine", "_detail_fail", "_q_released"):
+            if str(k9).startswith("_cov:") or k9 in ("_quarantine", "_detail_fail", "_q_released", "_wallets"):
                 cur[k9] = v9
         if isinstance(old.get("_quarantine_left"), dict):
             q9 = cur["_quarantine"] if isinstance(cur.get("_quarantine"), dict) else cur.setdefault("_quarantine", {})
@@ -1067,11 +1064,11 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if bf_engine.SINCE.target(self.chain):
             cur["_since_seen"] = int(bf_engine.SINCE.target(self.chain))
         self.cursor = cur
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if hq:
-            common.atomic_write_json(os.path.join(common.STATE_DIR, f"enrich_{self.chain}.json"), {})
+            statefile.atomic_write_json(paths.state(f"enrich_{self.chain}.json"), {})
             if os.path.exists(hqp9):
-                common.atomic_write_json(hqp9, {})
+                statefile.atomic_write_json(hqp9, {})
         if fresh:
             log.warning("★%s RPC 차선 모드로 시작(%s) — 라이브 = 블록 %d 부터(최근 창 · safe %d) · 옛 구간 %d → %d 는 뒤 차선(지갑 %d)★", self.chain,
                         cur["_handover"]["from"], live, safe, bk_from, live, len(jobs))
@@ -1135,7 +1132,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 dirty = True
                 log.info("%s 최근 창 앞부분 로그 입금 먼저 받기 끝(블록 → %d)", self.chain, t9)
         if dirty:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         return n
 
     def _peek_logs(self, frm: int, to: int, dl: float, head: int) -> tuple:
@@ -1157,7 +1154,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             else:
                 bad = int(found[h]) if bad is None else min(bad, int(found[h]))
         if n:
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
         self._trace_late_settle([h for h in hs if isinstance(dets.get(h), dict)])
         return n, int(last), bad, dets
 
@@ -1173,8 +1170,8 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         try:
             for st9 in sorted({v for v in starts.values() if v is not None}):
                 base.update(self._baselines([w for w in ws if starts[w] == st9], st9))
-        except Exception as e:
-            log.info("%s 엿보기 네이티브 기준점 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:100])
+        except Exception as e:  # noqa: BLE001 [fallback]
+            log.info("%s 엿보기 네이티브 기준점 실패(다음 사이클): %s", self.chain, logs.safe_err(e)[:100])
             return "fail", 0
         todo = [w for w in ws if starts[w] is not None and w in base]
         nostate = [w for w in ws if starts[w] is not None and w not in base]
@@ -1196,10 +1193,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 pw = [s9 for s9 in union.values() if int((s9.get("tx") or {}).get("block_number") or 0) > int(starts[w])]
                 try:
                     self._native(w, int(starts[w]), int(last), pw, dl + 30, nk="_peek_ns", head=head)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     failed.append(w)
                     log.info("%s 엿보기 네이티브 정합 %s… 보류(다음 사이클 · 다른 지갑은 계속): %s", self.chain, w[:10],
-                             common.redact_urls(common.safe_err(e))[:100])
+                             logs.redact_urls(logs.safe_err(e))[:100])
                     self._peek_union(union, pw)
                     continue
                 self._peek_union(union, pw)
@@ -1229,7 +1226,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if wd:
             self.cursor["_peek_wdone"] = wd
         if n:
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
         self._trace_late_settle(list(union))
         return ("fail" if failed else ("nostate" if nostate else "ok")), n
 
@@ -1274,7 +1271,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             return
         ts9 = time.strftime("%Y%m%d_%H%M%S")
         bp = self.cursor_path + f".pre_lanes_{ts9}"
-        common.atomic_write_json(bp, self.cursor)
+        statefile.atomic_write_json(bp, self.cursor)
         cur = self.cursor
         ns = cur.setdefault("_ns", {})
         bkns = cur.setdefault("_bkns", {})
@@ -1300,7 +1297,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         cur["_handover"] = {"from": "stall", "at": int(time.time()), "live": int(live), "start": start, "bk_from": min(c0s), "overlap": 0,
                             "adopted": 0, "new": len(behind), "internal": 0, "extend": 0, "hq": 0, "src_min": None, "src_max": None, "curs": {},
                             "nobase": [len(set(behind) - set(b0)), 0], "backup": os.path.basename(bp)}
-        common.atomic_write_json(self.cursor_path, cur)
+        statefile.atomic_write_json(self.cursor_path, cur)
         log.warning("★%s 단일 차선 → 차선 모드 전환: 지갑 %d개(커서 %d~%d)가 최근 창보다 뒤 — 라이브 = 블록 %d 부터 · 옛 구간은 뒤 차선(보존본 %s)★",
                     self.chain, len(behind), min(c0s), max(c0s), live, os.path.basename(bp))
 
@@ -1316,20 +1313,20 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             else:
                 old = {k: v for k, v in self.cursor.items()}
                 if old:
-                    common.atomic_write_json(self.cursor_path + ".explorer_legacy", old)
+                    statefile.atomic_write_json(self.cursor_path + ".explorer_legacy", old)
                 start = self._window_start(safe)
                 self.cursor = {"_rpc_v": self.VERSION, "_start": int(start)}
                 xc9 = {k: v for k, v in old.items() if not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool)}
                 self.cursor["_xcurs"] = xc9
                 if bf_engine.SINCE.target(self.chain):
                     self.cursor["_since_seen"] = int(bf_engine.SINCE.target(self.chain))
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 log.info("★%s RPC 전용 추적 초기화 — 창 시작 블록 %d (safe %d, 종전 커서는 .explorer_legacy)★",
                          self.chain, start, safe)
         else:
             self._lanes_unstall(safe)
         if "_xcurs" not in self.cursor and not isinstance(self.cursor.get("_handover"), dict):
-            lg9 = common.read_json(self.cursor_path + ".explorer_legacy", {})
+            lg9 = statefile.read_json(self.cursor_path + ".explorer_legacy", {})
             self.cursor["_xcurs"] = {k: v for k, v in (lg9.items() if isinstance(lg9, dict) else ())
                                      if not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool)}
         start = int(self.cursor["_start"])
@@ -1362,7 +1359,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                     self.cursor["_bk:" + w] = {"from": start, "to": live, "done": start, "why": "new"}
                     if w in bb:
                         bkns[w] = bb[w]
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.warning("★%s 새 지갑 %d개 합류 — 라이브 %d 부터 · 옛 구간 %d → %d 는 뒤 차선★", self.chain, len(new_ws), live, start, live)
             new_ws = []
         st0 = {}
@@ -1382,9 +1379,9 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self._legacy_queues()
 
     def _legacy_queues(self):
-        pp = os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json")
-        ep = os.path.join(common.STATE_DIR, f"enrich_{self.chain}.json")
-        pend = common.read_json(pp, {})
+        pp = paths.state(f"pending_detail_{self.chain}.json")
+        ep = paths.state(f"enrich_{self.chain}.json")
+        pend = statefile.read_json(pp, {})
         if pend:
             dets = self._details(sorted(h.lower() for h in pend))
             self._trace_later_pre([h for h in sorted(dets) if isinstance(dets[h], dict)], dets)
@@ -1392,26 +1389,26 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 if isinstance(dets[h], dict) and h not in self.emitted:
                     self._emit(h, dets[h], 0)
             self._trace_late_settle(list(dets))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             left = {h: v for h, v in pend.items() if not isinstance(dets.get(h.lower()), dict)}
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
             if self.bk_mode:
-                common.atomic_write_json(self.cursor_path, self.cursor)
-            common.atomic_write_json(pp, left)
-        enr = common.read_json(ep, {})
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(pp, left)
+        enr = statefile.read_json(ep, {})
         if enr:
             if self.bk_mode:
                 hq = self.cursor.setdefault("_hq", {})
                 for h in enr:
                     if isinstance(h, str) and h.startswith("0x"):
                         hq.setdefault(h.lower(), 0)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 log.warning("%s 탐색기 enrich 큐 %d건 → 인계 큐(_hq — RPC trace 로 internal 채움)로 옮기고 비움", self.chain, len(enr))
             else:
                 log.warning("%s 탐색기 enrich 큐 잔존 — RPC 경로는 네이티브 정합으로 대체, 큐 비움", self.chain)
-            common.atomic_write_json(ep, {})
-        tp9 = os.path.join(common.STATE_DIR, f"trace_later_left_{self.chain}.json")
-        tll = common.read_json(tp9, {})
+            statefile.atomic_write_json(ep, {})
+        tp9 = paths.state(f"trace_later_left_{self.chain}.json")
+        tll = statefile.read_json(tp9, {})
         if isinstance(tll, dict) and tll:
             hq9 = self.cursor.get("_hq") if isinstance(self.cursor.get("_hq"), dict) else {}
             tl9 = self.cursor.get("_trace_later") if isinstance(self.cursor.get("_trace_later"), dict) else {}
@@ -1424,12 +1421,12 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             if tl9:
                 self.cursor["_trace_later"] = tl9
                 self._trace_later_trim()
-            common.atomic_write_json(self.cursor_path, self.cursor)
-            hp9 = os.path.join(common.STATE_DIR, f"hq_left_{self.chain}.json")
-            held9 = common.read_json(hp9, {})
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
+            hp9 = paths.state(f"hq_left_{self.chain}.json")
+            held9 = statefile.read_json(hp9, {})
             if isinstance(held9, dict) and any(h in held9 for h in got9):
-                common.atomic_write_json(hp9, {h: v for h, v in held9.items() if h not in got9})
-            common.atomic_write_json(tp9, {})
+                statefile.atomic_write_json(hp9, {h: v for h, v in held9.items() if h not in got9})
+            statefile.atomic_write_json(tp9, {})
             log.warning("%s 되돌림 전 늦은 채움 trace %d건 되살림(_trace_later · 인계 큐에 든 %d건은 _hq 몫)", self.chain, len(got9), len(tll) - len(got9))
 
 
@@ -1453,7 +1450,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             return 0
         try:
             dets = self._details(due)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             dets = {h: e for h in due}
         n = 0
         self._trace_later_pre([h for h in due if isinstance(dets.get(h), dict)], dets)
@@ -1467,8 +1464,8 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             else:
                 bf_engine.quarantine_result(self.cursor, h, False, self.chain, "rpc_detail", log, err=snap)
         self._trace_late_settle(list(due))
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         return n
 
     def _retention_check(self, ws: list, c: int, target: int, f9: int) -> int:
@@ -1489,13 +1486,13 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         else:
             try:
                 ts9 = int(self._block_ts(int(cd["floor"])))
-            except Exception as e:
-                why = f"보관 시작 블록 시각 조회 실패({common.safe_err(e)[:60]}) — 다음 사이클"
+            except Exception as e:  # noqa: BLE001 [fallback]
+                why = f"보관 시작 블록 시각 조회 실패({logs.safe_err(e)[:60]}) — 다음 사이클"
             if ts9 is not None and now - ts9 < RETENTION_MIN_AGE_SEC:
                 why = (f"보관 시작이 {time.strftime('%Y-%m-%d %H:%M', time.localtime(ts9))}로 너무 최근 — 노드 이상일 수 있어 자동으로 "
                        "건너뛰지 않음(사람 확인)")
         if why:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             msg9 = f"노드 보관 범위 밖(블록 {int(c) + 1}~{int(cd['floor']) - 1}, 첫 보관 블록 {cd['floor']}) — {why}"
             if isinstance(self.last_scan_metrics, dict):
                 self.last_scan_metrics["stop"] = msg9
@@ -1521,11 +1518,11 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         cands[k] = cd
         self.cursor["_bk_retention_cand"] = cands
         if cd["n"] < RETENTION_CONFIRM_N or now - float(cd.get("first") or now) < RETENTION_CONFIRM_SEC:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             return
         ts9 = int(self._block_ts(int(cd["floor"])))
         if now - ts9 < RETENTION_MIN_AGE_SEC:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.warning("%s 뒤 차선 노드 보관 밖(블록 %d~) — 보관 시작이 너무 최근이라 자동으로 넘기지 않음(사람 확인)", self.chain, int(cd["floor"]))
             return
         st0 = {}
@@ -1559,7 +1556,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if not cands:
             self.cursor.pop("_bk_retention_cand", None)
         self.cursor.pop("_bkscan", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         log.warning("★%s 뒤 차선 — 로그 노드 보관 밖 옛 구간 = 미수집 범위로 기록하고 넘어감: 블록 %d~%d · 지갑 %d(완주 %d) — 그 앞 보유는 기초 잔고 대조★",
                     self.chain, c9 + 1, int(cd["floor"]) - 1, len(ws), len(fin))
 
@@ -1567,7 +1564,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         def _ts(b):
             try:
                 return int(self._block_ts(int(b)))
-            except Exception:
+            except Exception:  # noqa: BLE001 [fallback]
                 return None
         if floor_ts is None:
             floor_ts = _ts(to + 1)
@@ -1599,7 +1596,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             else:
                 ns.pop(w, None)
         self.cursor.pop("_scan", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         log.warning("★%s 로그 노드 보관 밖 옛 구간 = 미수집 범위로 기록하고 넘어감: 블록 %d~%d%s · 지갑 %d(네이티브 새 기준점 %d) — "
                     "그 앞 보유는 잔고 대조(기초 잔고)로 맞춤★", self.chain, c + 1, to,
                     f"(~{time.strftime('%Y-%m-%d', time.localtime(floor_ts))} 이전)" if floor_ts else "", len(ws), nb)
@@ -1623,7 +1620,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             try:
                 import nodekeys
                 key9 = [u for u in prim0 if nodekeys.is_key_node(u)]
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 key9 = []
             if key9 and len(key9) < len(prim0):
                 prim0 = [u for u in prim0 if u not in key9]
@@ -1697,7 +1694,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 return c
             self.cursor[sk] = {"frm": c + 1, "to": last, "ws": sorted(ws),
                                "found": {h: b for h, b in found.items() if h not in self.emitted}}
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         qset = bf_engine.quarantine_map(self.cursor)
         todo = [h for h in found if h not in self.emitted and h not in qset]
         memo9 = self.__dict__.setdefault("_snap_memo", {})
@@ -1766,7 +1763,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             self._emit(h, s, head)
             re9.discard(h)
             n_emit += 1
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
         nm = self.cursor.setdefault("_nonces", {})
         for s in pool:
             m9 = self._txmeta.get(s["tx"]["hash"].lower())
@@ -1801,7 +1798,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         for h in todo:
             memo9.pop(h, None)
         self._trace_late_settle(list(ph9) + list(todo))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if n_emit:
             log.info("%s rpc 발견 %d tx 방출 (%s블록 %d→%d, 지갑 %d)", self.chain, n_emit, "옛 구간 " if bk else "", c, last, len(ws))
         return last
@@ -1877,7 +1874,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 log.info("%s 뒤 차선 상태 조회 불가(다음 사이클): %s", self.chain, e)
             except Exception as e9:
                 if self._span_keep(e9):
-                    log.info("%s 뒤 차선 걸음 유지(%d블록 — %s): %s", self.chain, span, type(e9).__name__, common.redact_urls(common.safe_err(e9))[:100])
+                    log.info("%s 뒤 차선 걸음 유지(%d블록 — %s): %s", self.chain, span, type(e9).__name__, logs.redact_urls(logs.safe_err(e9))[:100])
                 else:
                     self._bkspan_persist(max(2000, span // 2))
                     self._bk_cut_t = time.time()
@@ -1922,7 +1919,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
 
     def _lv_span_persist(self, span: int) -> None:
         try:
-            cur9 = common.read_json(self.cursor_path, None)
+            cur9 = statefile.read_json(self.cursor_path, None)
             if isinstance(cur9, dict):
                 cur9["_lvspan"] = int(span)
                 tl9 = self.cursor.get("_trace_later")
@@ -1933,23 +1930,23 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                         cur9["_trace_later"] = dict(dtl9, **add9)
                 if int(self.cursor.get("_trace_later_overflow") or 0) > int(cur9.get("_trace_later_overflow") or 0):
                     cur9["_trace_later_overflow"] = int(self.cursor["_trace_later_overflow"])
-                common.atomic_write_json(self.cursor_path, cur9)
+                statefile.atomic_write_json(self.cursor_path, cur9)
                 cur9.pop("_synced_at", None)
                 self.cursor = cur9
                 return
-        except Exception as e:
-            log.info("%s 라이브 걸음 저장 실패(무시): %s", self.chain, common.safe_err(e)[:80])
+        except Exception as e:  # noqa: BLE001 [optional]
+            log.info("%s 라이브 걸음 저장 실패(무시): %s", self.chain, logs.safe_err(e)[:80])
         self.cursor["_lvspan"] = int(span)
 
     def _bkspan_persist(self, span: int) -> None:
         self.cursor["_bkspan"] = int(span)
         try:
-            cur9 = common.read_json(self.cursor_path, None)
+            cur9 = statefile.read_json(self.cursor_path, None)
             if isinstance(cur9, dict):
                 cur9["_bkspan"] = int(span)
-                common.atomic_write_json(self.cursor_path, cur9)
-        except Exception as e:
-            log.info("%s 뒤 차선 구간 저장 실패(무시): %s", self.chain, common.safe_err(e)[:80])
+                statefile.atomic_write_json(self.cursor_path, cur9)
+        except Exception as e:  # noqa: BLE001 [optional]
+            log.info("%s 뒤 차선 구간 저장 실패(무시): %s", self.chain, logs.safe_err(e)[:80])
 
     HQ_BATCH = 20
 
@@ -1957,7 +1954,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
     def cycle(self):
         tc0 = time.time()
         if self.cursor.pop("_synced_at", None) is not None:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         self._st_memo_trim()
         self._bal_memo = {}
         self._df_seen = set()
@@ -1967,7 +1964,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self._init(safe)
         try:
             self._quarantine_retry(head)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.info("%s 격리 tx 재시도 실패(다음 사이클): %s", self.chain, str(e)[:120])
         t0 = time.time()
         deadline = t0 + self.cycle_budget
@@ -1982,11 +1979,11 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             try:
                 self._peek_ctx = True
                 self._head_peek(head, safe, deadline)
-            except Exception as e:
-                log.info("%s 최신 블록 엿보기 실패(라이브 차선이 이어서): %s", self.chain, common.redact_urls(common.safe_err(e))[:120])
+            except Exception as e:  # noqa: BLE001 [boundary]
+                log.info("%s 최신 블록 엿보기 실패(라이브 차선이 이어서): %s", self.chain, logs.redact_urls(logs.safe_err(e))[:120])
                 try:
-                    common.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
-                except Exception:
+                    statefile.atomic_write_json(self.cursor_path, {k: v for k, v in self.cursor.items() if k != "_peek_ns"})
+                except Exception:   # noqa: BLE001 [optional]
                     pass
             finally:
                 self._peek_ctx = False
@@ -2018,7 +2015,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                         lspan = max(self.LIVE_SPAN_MIN, int(lspan) // 2)
                     self._lv_span_persist(lspan)
                     log.warning("%s 라이브 걸음 실패(블록 %d → %d) — 걸음 %d블록%s 다음에(다른 묶음·뒤 차선은 계속): %s", self.chain, c, t_step, lspan,
-                                " 그대로(보류·한도·진행 중)" if keep9 else "으로 줄여", common.redact_urls(common.safe_err(e))[:140])
+                                " 그대로(보류·한도·진행 중)" if keep9 else "으로 줄여", logs.redact_urls(logs.safe_err(e))[:140])
                 finally:
                     self._late_ctx = False
                     self._key_ctx = False
@@ -2042,13 +2039,13 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if self.cursor.get("_leaf_later") or self.cursor.get("_leaf_overflow"):
             try:
                 self._leaf_later_step(head)
-            except Exception as e:
-                log.info("%s 나중에 다시 잎 블록 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
+            except Exception as e:  # noqa: BLE001 [boundary]
+                log.info("%s 나중에 다시 잎 블록 재시도 실패(다음 사이클): %s", self.chain, logs.safe_err(e)[:120])
         if self.cursor.get("_trace_later") or self.cursor.get("_trace_later_overflow"):
             try:
                 self._trace_later_step(head, per=self.TRACE_LATER_TAIL_PER if complete else None)
-            except Exception as e:
-                log.info("%s 늦은 채움 trace 재시도 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
+            except Exception as e:  # noqa: BLE001 [boundary]
+                log.info("%s 늦은 채움 trace 재시도 실패(다음 사이클): %s", self.chain, logs.safe_err(e)[:120])
         bk9 = None
         if self.bk_mode and (self._bk_jobs() or self.cursor.get("_hq")):
             bud9 = self.bk_budget if self.bk_budget is not None else max(10.0, self.poll_sec - (time.time() - tc0) - 5.0)
@@ -2059,23 +2056,23 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 try:
                     with bf_engine.ledger_burst():
                         bk_adv, bk_stall = self._bk_step(head, bk_dl)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     bk_stall = True
-                    log.warning("%s 뒤 차선 실패(다음 사이클 이어서): %s", self.chain, common.redact_urls(common.safe_err(e))[:160])
+                    log.warning("%s 뒤 차선 실패(다음 사이클 이어서): %s", self.chain, logs.redact_urls(logs.safe_err(e))[:160])
                     try:
-                        cur9 = common.read_json(self.cursor_path, {})
+                        cur9 = statefile.read_json(self.cursor_path, {})
                         for k9 in [k for k in self.cursor if k.startswith("_bk:") or k in ("_bkns", "_bkscan", "_hq", "_bkspan")]:
                             if k9 in cur9:
                                 self.cursor[k9] = cur9[k9]
                             else:
                                 self.cursor.pop(k9, None)
-                    except Exception:
+                    except Exception:  # noqa: BLE001 [optional]
                         pass
             if bk_stall and isinstance(self.__dict__.get("_scan_floor"), tuple):
                 try:
                     self._bk_retention()
-                except Exception as e:
-                    log.info("%s 뒤 차선 보관 밖 판정 실패(다음 사이클): %s", self.chain, common.safe_err(e)[:120])
+                except Exception as e:  # noqa: BLE001 [boundary]
+                    log.info("%s 뒤 차선 보관 밖 판정 실패(다음 사이클): %s", self.chain, logs.safe_err(e)[:120])
             jobs9 = self._bk_jobs()
             if jobs9 or self.cursor.get("_hq"):
                 dn9, tot9 = self._bk_lane(jobs9) if jobs9 else (0, 0)
@@ -2095,8 +2092,8 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             self.cursor["_synced_at"] = int(time.time())
         if len(self._txmeta) > 50000:
             self._txmeta.clear()
-        common.atomic_write_json(self.cursor_path, self.cursor)
-        common.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
         if bk9 is not None and self._bk_jobs():
             dn9, tt9 = self._bk_lane(self._bk_jobs())
             self.progress.update(f"{self.chain}:rpc", phase="extend", unit="blocks", done=dn9, total=tt9,
@@ -2133,6 +2130,6 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if live_err is not None and advanced == 0:
             try:
                 live_err._tj_health_counted = True
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
             raise live_err

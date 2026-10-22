@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 NEW = "0x" + "e1" * 20
@@ -17,13 +17,13 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in ALL]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
-SPATH = os.path.join(common.STATE_DIR, bf_engine.STATUS_FILE)
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
+SPATH = os.path.join(paths.STATE_DIR, bf_engine.STATUS_FILE)
 
 
 class Wr:
@@ -41,7 +41,7 @@ def make(cursor, span=2000, bk_span=2000):
     cur.update({w: 900_000 for w in ALL})
     cur.update(cursor)
     cur.setdefault("_bkspan", span)
-    common.atomic_write_json(CPATH, cur)
+    statefile.atomic_write_json(CPATH, cur)
     w = evm_watch.RpcChainWatcher(CFG, CH, list(ALL), Wr())
     w.bk_span = bk_span
     w.multicall = None
@@ -106,7 +106,7 @@ r = run(w)
 iv = [(4000, 5000)] + segs(w, calls)
 T.chk(not isinstance(r, dict) and not w._bk_jobs(), "M3 옛 커서 파일로 기동 → 예외 없이 완주", {"r": r, "left": w._bk_jobs()})
 T.chk(calls and calls[0] == (tuple(sorted(ALL)), 5000, 7000),
-      "M3 지나친 체크포인트를 묶음 진행점 5,000 에서 끊고 바로 6지갑 한 묶음(bkfix1010 — 종전: 6,000 까지 지나친 뒤 뒤처진 묶음이 멈춤)", calls[:3])
+      "M3 지나친 체크포인트를 묶음 진행점 5,000 에서 끊고 바로 6지갑 한 묶음(종전: 6,000 까지 지나친 뒤 뒤처진 묶음이 멈춤)", calls[:3])
 T.chk(overlap(iv) <= 2000 and all(len(ws) == 6 for ws, c, t in calls[1:]),
       "M3 겹침 ≤ 체크포인트 한 구간 · 그 뒤 한 묶음", {"overlap": overlap(iv), "calls": calls[:4]})
 
@@ -134,7 +134,7 @@ T.chk(T.safe(evm_watch.RpcChainWatcher._bk_lane, {NEW: job(0, 0, 0)}) == (0, 1),
 lane2 = T.safe(evm_watch.RpcChainWatcher._bk_lane, {OLD[0]: job(100, 50, 200), OLD[1]: job(300, 400, 500)})
 T.chk(lane2 == (100, 300), "M5 진행점이 시작보다 앞(깨진 값) = 시작으로 · 떨어진 구간은 따로 셈(전체 100+200 · 남은 100+100)", lane2)
 w, calls = make({**{"_bk:" + a: job(0, 5000, 20_000) for a in OLD}, "_bk:" + NEW: job(0, 1000, 21_000, "new")})
-it = (common.read_json(SPATH, {}).get("evm") or {}).get(f"{CH}:rpc") or {}
+it = (statefile.read_json(SPATH, {}).get("evm") or {}).get(f"{CH}:rpc") or {}
 T.chk(it.get("phase") == "extend" and it.get("done") == 1000 and it.get("total") == 21_000, "M5 재기동 표시 = 같은 차선 블록(1,000 / 21,000)", it)
 
 class FakeTime:

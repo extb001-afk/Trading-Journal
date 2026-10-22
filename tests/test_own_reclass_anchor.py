@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, Reader  # noqa: E402
 
-import glob
-import importlib.util
-import io
-import json
-import os
-import sqlite3
-import time
-from contextlib import redirect_stdout
-from datetime import datetime, timedelta, timezone
+import glob  # noqa: E402
+import importlib.util  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+from contextlib import redirect_stdout  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 W2 = "0x" + "a2" * 20
 W3 = "0x" + "a3" * 20
@@ -28,13 +28,13 @@ def write_cfg(ws):
 
 
 write_cfg([W])
-import common
-import core
+import config, histmark, paths  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
-core.Core._price_tx = lambda self, *a, **k: None
+core_svc.PriceService._price_tx = lambda self, *a, **k: None
 spec = importlib.util.spec_from_file_location("rb2", os.path.join(T.ROOT, "tools", "rebuild2.py"))
 rb2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rb2)
@@ -45,7 +45,7 @@ E6 = 10 ** 6
 NOW = int(time.time())
 X = "0x" + "b7" * 20
 USDC = "0x" + "c6" * 20
-SD = common.STATE_DIR
+SD = paths.STATE_DIR
 OUTF = os.path.join(SD, "outflow_decisions.json")
 TS_IN, TS_OUT = NOW - 120 * DAY, NOW - 100 * DAY
 
@@ -66,7 +66,7 @@ def reset(ws=(W,)):
 
 
 def new_core():
-    c = core.Core(common.load_config())
+    c = core.Core(config.load_config())
     c.conn.commit()
     return c
 
@@ -89,13 +89,13 @@ def age_ingest(c, sec=7200):
 
 
 def recon_full(c, per):
-    c._scope_ready = lambda s: True
-    c._recon_quiet = lambda *a: True
-    c._recon_bal = lambda chain, kind, mode, wallets: ({"per_wallet": per[chain]} if chain in per else None)
-    c._last_recon = 0
-    c.recon_pass(set())
+    c.svc_recon._scope_ready = lambda s: True
+    c.svc_recon._recon_quiet = lambda *a: True
+    c.svc_recon._recon_bal = lambda chain, kind, mode, wallets: ({"per_wallet": per[chain]} if chain in per else None)
+    c.svc_recon._last_recon = 0
+    c.svc_recon.recon_pass(set())
     for k9 in ("_scope_ready", "_recon_quiet", "_recon_bal"):
-        c.__dict__.pop(k9, None)
+        c.svc_recon.__dict__.pop(k9, None)
     c.conn.commit()
     c.__dict__.pop("_recon_cache", None)
 
@@ -103,12 +103,12 @@ def recon_full(c, per):
 def wrecon(c, w, bal, extra=None):
     b9 = {"per_wallet": {w: bal}}
     b9.update(extra or {})
-    c._recon_bal = lambda chain, kind, md, wallets: b9
-    c._wallet_backfilled = lambda *a: True
-    c._recon_quiet = lambda *a: True
-    c._wrecon_run("eth", "evm", "evm", set(), c._win_t0(None, "eth"), True, "new", [w])
+    c.svc_recon._recon_bal = lambda chain, kind, md, wallets: b9
+    c.svc_recon._wallet_backfilled = lambda *a: True
+    c.svc_recon._recon_quiet = lambda *a: True
+    c.svc_recon._wrecon_run("eth", "evm", "evm", set(), c._win_t0(None, "eth"), True, "new", [w])
     for k9 in ("_recon_bal", "_wallet_backfilled", "_recon_quiet"):
-        c.__dict__.pop(k9, None)
+        c.svc_recon.__dict__.pop(k9, None)
     c.conn.commit()
 
 
@@ -144,7 +144,7 @@ def outs(conn, w):
 
 
 def min_mark(c):
-    m9 = common.hist_late_read(c.conn)
+    m9 = histmark.hist_late_read(c.conn)
     return min(m[1] for m in m9) if m9 else None
 
 
@@ -158,12 +158,12 @@ def shadow(c, tag):
         c.conn.backup(d9)
         d9.close()
     anc = [tuple(r) for r in sqlite3.connect(bp).execute(rb2.ANCHOR_SQL).fetchall()]
-    old9 = common.DB_PATH
-    common.DB_PATH = sp
+    old9 = paths.DB_PATH
+    paths.DB_PATH = sp
     try:
-        sc = core.Core(common.load_config())
+        sc = core.Core(config.load_config())
     finally:
-        common.DB_PATH = old9
+        paths.DB_PATH = old9
     for t9 in rb2.DERIVED_TABLES:
         sc.conn.execute(f"DELETE FROM {t9}")
     sc.conn.commit()
@@ -216,13 +216,13 @@ check("O1 ★받는 지갑 기초 잔고 10 → 0(행 삭제)★ · 보유 캐�
 check("O1 보낸 쪽 W 무변(0.999 · 기초 잔고 없음)", cell(c.conn, A, W) == 11 * E18 - 10 * E18 - FEE and anchors(c.conn, W) == [],
       (cell(c.conn, A, W), anchors(c.conn, W)))
 check("O1 지난 곡선 다시 계산 표식 = 고친 기초 잔고 날(창 시작 쪽 — 같은 트랜잭션)", min_mark(c) is not None and min_mark(c) <= iso(c._win_t0(wt, "eth")),
-      (common.hist_late_read(c.conn), iso(c._win_t0(wt, "eth"))))
+      (histmark.hist_late_read(c.conn), iso(c._win_t0(wt, "eth"))))
 
 n0 = c.conn.execute("SELECT COUNT(*), MAX(posting_id) FROM postings").fetchone()
-mk0 = common.hist_late_read(c.conn)
+mk0 = histmark.hist_late_read(c.conn)
 c.outflow_pass(force=True)
 check("O2 같은 판정 반복 = 원장·표식 무변", tuple(c.conn.execute("SELECT COUNT(*), MAX(posting_id) FROM postings").fetchone()) == tuple(n0)
-      and common.hist_late_read(c.conn) == mk0 and cell(c.conn, A, W2) == 10 * E18, (cell(c.conn, A, W2),))
+      and histmark.hist_late_read(c.conn) == mk0 and cell(c.conn, A, W2) == 10 * E18, (cell(c.conn, A, W2),))
 c.conn.close()
 c = new_core()
 c.outflow_pass(force=True)
@@ -263,22 +263,22 @@ c = new_core()
 base(c)
 write_cfg([W, W2])
 own([W2])
-json.dump({"v": 1, "pairs": {}}, open(common.ACTIVITY_GATE_PATH, "w"))
+json.dump({"v": 1, "pairs": {}}, open(paths.ACTIVITY_GATE_PATH, "w"))
 c._last_outflow = 0
 c.outflow_pass()
 check("O5 (전제) 옛 core = own:0 도장(아직 W2 모름 · 재기장 없음)", str(c._meta_get(f"outflow_applied:{W2}")).startswith("own:0") and outs(c.conn, W2) == 10 * E18,
       (c._meta_get(f"outflow_applied:{W2}"), outs(c.conn, W2)))
-c._gate_at = 0
-added = c._gate_reload()
+c.svc_recon._gate_at = 0
+added = c.svc_recon._gate_reload()
 check("O5 (전제) 활동 게이트 hot-add = W2 합류(재기동 없이)", added == 1 and W2 in c.my_wallets.get("eth", set()), (added, c.my_wallets))
-c._scope_ready = lambda s: True
-c._wallet_backfilled = lambda *a: True
-c._recon_quiet = lambda *a: True
-c._recon_bal = lambda chain, kind, md, wallets: {"per_wallet": {W2: {("native", None): 10 * E18}}}
-c._last_recon = 0
-c.recon_pass(set())
+c.svc_recon._scope_ready = lambda s: True
+c.svc_recon._wallet_backfilled = lambda *a: True
+c.svc_recon._recon_quiet = lambda *a: True
+c.svc_recon._recon_bal = lambda chain, kind, md, wallets: {"per_wallet": {W2: {("native", None): 10 * E18}}}
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass(set())
 for k9 in ("_scope_ready", "_wallet_backfilled", "_recon_quiet", "_recon_bal"):
-    c.__dict__.pop(k9, None)
+    c.svc_recon.__dict__.pop(k9, None)
 check("O5 (전제) 대사가 먼저 = W2 기초 잔고 10", [a[2] for a in anchors(c.conn, W2)] == [10 * E18], anchors(c.conn, W2))
 c._last_outflow = time.time() - 61
 c.outflow_pass()
@@ -362,8 +362,8 @@ c = new_core()
 wrecon(c, W2, {("native", None): 10 * E18})
 A = aid_native(c)
 own([W2])
-snap9 = (cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), outs(c.conn, W2), common.hist_late_read(c.conn), c._meta_get(f"outflow_applied:{W2}"))
-real_put = common.hist_late_put
+snap9 = (cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), outs(c.conn, W2), histmark.hist_late_read(c.conn), c._meta_get(f"outflow_applied:{W2}"))
+real_put = histmark.hist_late_put
 
 
 def boom(conn, ts, now=None):
@@ -371,16 +371,16 @@ def boom(conn, ts, now=None):
     raise RuntimeError("시험: 표식 쓴 직후 예외")
 
 
-common.hist_late_put = boom
+histmark.hist_late_put = boom
 err = None
 try:
     c.outflow_pass(force=True)
 except RuntimeError as e:
     err = e
 finally:
-    common.hist_late_put = real_put
+    histmark.hist_late_put = real_put
 check("O9 ★예외 = 롤백 — 받는 레그·기초 잔고·보유 캐시·out:·표식·적용 도장 모두 그대로★", err is not None and
-      (cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), outs(c.conn, W2), common.hist_late_read(c.conn), c._meta_get(f"outflow_applied:{W2}")) == snap9,
+      (cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), outs(c.conn, W2), histmark.hist_late_read(c.conn), c._meta_get(f"outflow_applied:{W2}")) == snap9,
       (err, snap9, cell(c.conn, A, W2), anchors(c.conn, W2)))
 c.outflow_pass(force=True)
 check("O9 다음 패스 = 정상(W2 10 · 기초 잔고 없음)", cell(c.conn, A, W2) == 10 * E18 and anchors(c.conn, W2) == [], (cell(c.conn, A, W2), anchors(c.conn, W2)))
@@ -401,7 +401,7 @@ check("O10 점검 = 대상 1칸(W2 ETH · 차이 = 받은 10) · 쓰기 0", [(r[
 rep = c.own_overlap_repair(apply=True)
 check("O10 ★복구 = W2 10 · 기초 잔고 10 → 0 · 보유 캐시 10 · 지난 곡선 표식★", [r["action"] for r in rep] == ["fix"] and cell(c.conn, A, W2) == 10 * E18
       and anchors(c.conn, W2) == [] and abs(pos(c, A, W2) - 10) < 1e-9 and min_mark(c) is not None and not c.conn.in_transaction,
-      (rep, cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), common.hist_late_read(c.conn)))
+      (rep, cell(c.conn, A, W2), anchors(c.conn, W2), pos(c, A, W2), histmark.hist_late_read(c.conn)))
 n1 = c.conn.execute("SELECT COUNT(*), MAX(posting_id) FROM postings").fetchone()
 rep2 = c.own_overlap_repair(apply=True)
 check("O10 ★두 번째 = 무변(대상 칸 = 정상 'ok')★", [r["action"] for r in rep2] == ["ok"] and tuple(c.conn.execute("SELECT COUNT(*), MAX(posting_id) FROM postings").fetchone()) == tuple(n1)
@@ -493,7 +493,7 @@ write_cfg([W, W2, W9])
 
 
 def w9_rows(path=None):
-    c9 = sqlite3.connect(path or common.DB_PATH)
+    c9 = sqlite3.connect(path or paths.DB_PATH)
     try:
         return c9.execute("SELECT COUNT(*) FROM wallets WHERE address=?", (W9,)).fetchone()[0]
     finally:
@@ -510,7 +510,7 @@ with redirect_stdout(io.StringIO()):
     rc14b = rpo.main(["--apply"])
 bk14 = [p9 for p9 in glob.glob(os.path.join(SD, "ledger.db.pre_ownfix_*")) if not p9.endswith(("-wal", "-shm", "-journal"))]
 check("O14 ★--apply 백업 = 실행 직전 원장(생성자 등록 전 · W2 20)★ · 적용 = 10", rc14b == 0 and len(bk14) == 1 and w9_rows(bk14[0]) == 0
-      and cell(sqlite3.connect(bk14[0]), A, W2) == 20 * E18 and cell(sqlite3.connect(common.DB_PATH), A, W2) == 10 * E18, (rc14b, bk14))
+      and cell(sqlite3.connect(bk14[0]), A, W2) == 20 * E18 and cell(sqlite3.connect(paths.DB_PATH), A, W2) == 10 * E18, (rc14b, bk14))
 write_cfg([W, W2])
 
 reset()

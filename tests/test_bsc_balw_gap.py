@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _bscchain as B
+import _harness as T  # noqa: E402
+import _bscchain as B  # noqa: E402
 
-import json
-import os
-import sqlite3
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
 
 bw = B.bsc_watch
 CH = B.CH
-common = B.common
+import paths, statefile  # noqa: E402
 E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
 T.patch_moved("_now", bw._now, ("bsc_",))
-REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
-BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
+REQ = os.path.join(paths.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
+BALW = os.path.join(paths.STATE_DIR, "bsc_balw.json")
 GAP_SEC, GAP_BLK = 2700, 6000
 
 
@@ -29,7 +29,7 @@ def tick(sec, blocks):
 
 
 def setup_db():
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
                 " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
     con.execute("CREATE TABLE IF NOT EXISTS raw_txs (chain TEXT, txhash TEXT, block INTEGER, snapshot TEXT, PRIMARY KEY (chain, txhash))")
@@ -53,7 +53,7 @@ def fresh(arch=True, wallets=None, c=None):
     B.reset_state()
     gates_reset()
     setup_db()
-    common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+    statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                        "_wallets": sorted(ws)})
     wr = B.Wr()
     w = bw.BscWatcher(c or (B.cfg(archive_rpcs=[B.ARCH]) if arch else B.cfg()), list(ws), wr)
@@ -78,12 +78,12 @@ def recs(wr, h):
 
 
 def reqs():
-    d = common.read_json(REQ, {}) if os.path.exists(REQ) else {}
+    d = statefile.read_json(REQ, {}) if os.path.exists(REQ) else {}
     return list(d.get("items") or []) if isinstance(d, dict) else []
 
 
 def balw_st():
-    return common.read_json(BALW, {}) if os.path.exists(BALW) else {}
+    return statefile.read_json(BALW, {}) if os.path.exists(BALW) else {}
 
 
 def wst(w9=None):
@@ -99,7 +99,7 @@ def bd_attr(wr):
 
 
 def ingest(wr):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     for r in wr.recs:
         sn = r.get("snapshot") or {}
         b9 = (sn.get("tx") or {}).get("block_number")
@@ -379,7 +379,7 @@ w, wr = fresh()
 CH.tx.clear()
 old_h1 = CH.native(CH.head - 400_000, B.OTHER, B.W1, 9 * E18)
 run(w, 2)
-common.atomic_write_json(os.path.join(common.STATE_DIR, "onchain_check.json"),
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "onchain_check.json"),
                          {"mismatches": [{"key": f"bsc:{B.W1}:native", "chain": "bsc", "wallet": B.W1, "ca": None, "sym": "BNB",
                                           "ledger": 1.0, "onchain": 10.0, "confirmed": True}]})
 bw.BscWatcher._balw_raw_deltas = lambda self, *a, **k: None
@@ -396,7 +396,7 @@ for k in range(12):
 T.chk(got_h1 is not None and len(recs(wr, old_h1)) == 1 and recs(wr, old_h1)[0].get("via") == "balw",
       "H1 원장 회복 뒤 몇 분 안에 다시 탐색 → 놓친 입금 방출(종전 = '탐색함'으로 기록돼 하루 뒤)", {"cycle": got_h1, "hist_at": wst().get("hist_at"), "now": clk[0]})
 
-RX = os.path.join(common.STATE_DIR, getattr(bw, "BALW_RX_NAME", "bsc_balw_recheck.json"))
+RX = os.path.join(paths.STATE_DIR, getattr(bw, "BALW_RX_NAME", "bsc_balw_recheck.json"))
 for arch_r in (True, False):
     w, wr = fresh(arch=arch_r)
     run(w, 3)
@@ -412,7 +412,7 @@ for arch_r in (True, False):
         bw.BscWatcher._balw_ux_add = ua0
     run(w, 3)
     T.chk(depr not in B.emitted(wr) and not reqs(), f"R1 전제(아카이브 {arch_r}): 옛 코드가 덮어쓴 체크포인트 = 그 사이 입금 안 보임")
-    common.atomic_write_json(RX, {"hours": 2})
+    statefile.atomic_write_json(RX, {"hours": 2})
     run(w, 6)
     if arch_r:
         chk_one(wr, depr, nbr, E17, "R1 요청 파일(최근 2시간 다시 점검) →")
@@ -449,7 +449,7 @@ cpk = (s_k["w"][B.W1])["cp"]
 segs = [{"a": cpk[0] - 3000 + 100 * i, "ba": str(cpk[1]), "na": 1, "z": cpk[0] - 3000 + 100 * i + 50, "bz": str(cpk[1]), "nz": 2,
          "t0": int(clk[0]), "why": "시험"} for i in range(int(bw.BALW_JOBS_MAX) + 1)]
 s_k["w"][B.W1]["ux"] = segs
-common.atomic_write_json(BALW, s_k)
+statefile.atomic_write_json(BALW, s_k)
 w._balw_st = None
 run(w, 1)
 uxk = wst().get("ux") or []
@@ -531,7 +531,7 @@ for raw_k5 in ('{"hours": 1e309}', '{"hours": true}', '{"since": 1e20}', '{"hour
     nk5 = CH.head + 5
     dk5 = CH.native(nk5, B.OTHER, B.W1, E17)
     run(w, 4)
-    bad5 = [f9 for f9 in os.listdir(common.STATE_DIR) if f9.startswith(os.path.basename(RX) + ".bad")]
+    bad5 = [f9 for f9 in os.listdir(paths.STATE_DIR) if f9.startswith(os.path.basename(RX) + ".bad")]
     T.chk(not os.path.exists(RX) and bad5 and not wst().get("rx") and len(recs(wr, dk5)) == 1,
           f"K5 요청 {raw_k5} = .bad 로 옮김 · 다시 점검 안 함 · 잔고 감시 계속(새 입금 1)", {"rx": os.path.exists(RX), "bad": bad5, "n": len(recs(wr, dk5))})
 
@@ -558,7 +558,7 @@ T.chk(all(len(recs(wr, h)) == 1 for h in d_m1) and not [q for q in reqs() if q["
 
 w, wr = fresh(arch=False)
 run(w, 3)
-common.atomic_write_json(os.path.join(common.STATE_DIR, "onchain_check.json"),
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "onchain_check.json"),
                          {"mismatches": [{"key": f"bsc:{B.W2}:native", "chain": "bsc", "wallet": B.W2, "ca": None, "sym": "BNB",
                                           "ledger": 1.0, "onchain": 2.0, "confirmed": True}]})
 d_m2 = []
@@ -586,7 +586,7 @@ mk_job = lambda a9, z9: {"k": "fwd", "a": a9, "z": z9, "s": {str(a9): str(CH.bal
                          "t0": int(clk[0]) - 600 + (0 if a9 < lim_m3 else 60), "n": 0, "done": [], "back": True}
 s_m3 = balw_st()
 s_m3["w"][B.W1]["jobs"] = [mk_job(CH.head - 5600 - 40, CH.head - 5600 + 4000), mk_job(CH.head - 700 - 30, CH.head - 700 + 30)]
-common.atomic_write_json(BALW, s_m3)
+statefile.atomic_write_json(BALW, s_m3)
 w._balw_st = None
 ans_m3 = CH.answer
 CH.answer = lambda url, m, p: ({"_err": {"code": -32603, "message": "internal error (synthetic)"}}
@@ -604,7 +604,7 @@ def craft_jobs(w9, spans):
     s9 = balw_st()
     s9["w"][w9]["jobs"] = [{"k": "fwd", "a": a9, "z": z9, "s": {str(a9): str(CH.balance(w9, a9)), str(z9): str(CH.balance(w9, z9))},
                             "t0": int(clk[0]) - 600, "n": 0, "done": [], "back": True} for a9, z9 in spans]
-    common.atomic_write_json(BALW, s9)
+    statefile.atomic_write_json(BALW, s9)
 
 
 w, wr = fresh()
@@ -687,7 +687,7 @@ run(w, 5, sec=900, blocks=2000)
 craft_jobs(B.W1, [(h_q1 - 6000 - 32, h_q1 - 6000 + 32)])
 s_q1 = balw_st()
 s_q1["w"][B.W1]["jobs"][0]["lw"] = clk[0] - 100
-common.atomic_write_json(BALW, s_q1)
+statefile.atomic_write_json(BALW, s_q1)
 w._balw_st = None
 got_q1 = None
 for k in range(12):
@@ -713,7 +713,7 @@ s_q2 = balw_st()
 for i, j9 in enumerate(s_q2["w"][B.W1]["jobs"]):
     j9["lw"] = clk[0] - 1000 + i
 s_q2["w"][B.W2]["jobs"][0]["lw"] = clk[0] - 500
-common.atomic_write_json(BALW, s_q2)
+statefile.atomic_write_json(BALW, s_q2)
 w._balw_st = None
 lim_q2 = h_q2 - 5000
 ans_q2 = CH.answer
@@ -792,7 +792,7 @@ CH.answer = pruned_arch("pruned")
 w, wr = fresh()
 CH.native(CH.head - 400_000, B.OTHER, B.W1, 9 * E18)
 run(w, 2)
-common.atomic_write_json(os.path.join(common.STATE_DIR, "onchain_check.json"),
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "onchain_check.json"),
                          {"mismatches": [{"key": f"bsc:{B.W1}:native", "chain": "bsc", "wallet": B.W1, "ca": None, "sym": "BNB",
                                           "ledger": 1.0, "onchain": 10.0, "confirmed": True}]})
 run(w, 2, sec=700)

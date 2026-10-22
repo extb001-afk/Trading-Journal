@@ -1,0 +1,312 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=pxcgat · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "pxcgat",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [],
+ "requests": 8,
+ "interactions": [
+  {
+   "key": "GET https://api.bybit.com/v5/market/tickers?category=spot",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/tickers?category=spot"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "category": "spot",
+      "list": [
+       {
+        "symbol": "BTCUSDT",
+        "lastPrice": "60000",
+        "volume24h": "1",
+        "turnover24h": "60000"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coingecko.com/api/v3/simple/price?ids=humacoin&vs_currencies=usd",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=humacoin&vs_currencies=usd"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coingecko.com",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coingecko.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "humacoin": {
+      "usd": 0.05
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/tickers?category=spot",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/tickers?category=spot"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "category": "spot",
+      "list": [
+       {
+        "symbol": "BTCUSDT",
+        "lastPrice": "60000",
+        "volume24h": "1",
+        "turnover24h": "60000"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.coingecko.com/api/v3/simple/price?ids=humacoin&vs_currencies=usd",
+   "req": {
+    "method": "GET",
+    "url": "https://api.coingecko.com/api/v3/simple/price?ids=humacoin&vs_currencies=usd"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.coingecko.com",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.coingecko.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 429,
+    "headers": [
+     [
+      "Retry-After",
+      "120"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "status": {
+      "error_code": 429,
+      "error_message": "rate limited"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/tickers?category=spot",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/tickers?category=spot"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "15",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "category": "spot",
+      "list": [
+       {
+        "symbol": "BTCUSDT",
+        "lastPrice": "60000",
+        "volume24h": "1",
+        "turnover24h": "60000"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://www.okx.com/api/v5/market/tickers?instType=SPOT",
+   "req": {
+    "method": "GET",
+    "url": "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "www.okx.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "www.okx.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": "0",
+     "data": [
+      {
+       "instId": "BTC-USDT",
+       "last": "60000",
+       "vol24h": "1",
+       "volCcy24h": "60000"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "key": "GET https://api.gateio.ws/api/v4/spot/tickers",
+   "req": {
+    "method": "GET",
+    "url": "https://api.gateio.ws/api/v4/spot/tickers"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.gateio.ws",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.gateio.ws"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency_pair": "BTC_USDT",
+      "last": "60000",
+      "quote_volume": "60000"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.kucoin.com/api/v1/market/allTickers",
+   "req": {
+    "method": "GET",
+    "url": "https://api.kucoin.com/api/v1/market/allTickers"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.kucoin.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.kucoin.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": "200000",
+     "data": {
+      "ticker": [
+       {
+        "symbol": "BTC-USDT",
+        "last": "60000",
+        "vol": "1",
+        "volValue": "60000"
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

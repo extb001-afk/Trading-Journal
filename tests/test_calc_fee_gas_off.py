@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
-from datetime import datetime, timedelta, timezone
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 W = "0x" + "cd" * 20
 WL = f"wallet:base:{W}"
@@ -22,10 +22,10 @@ json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 os.environ["TJ_REPLAY_DEBUG"] = "1"
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -40,7 +40,7 @@ def iso(ts):
     return datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC = {}
 
@@ -126,9 +126,9 @@ for (a, loc), qb in pos.items():
 con.commit()
 con.close()
 
-import acct_norm
-import pricing
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 pricing._gj = lambda url, *a, **k: (_ for _ in ()).throw(OSError("시험: 시세 받기 없음"))
 PX = {"ETH": 3500.0, "BNB": 600.0, "XETH": 3500.0}
@@ -138,7 +138,7 @@ web.Spot.ex_pending = lambda self, ex: False
 
 
 def build(gas_on):
-    common.atomic_write_json(web.PREFS_PATH, {"gas_in_cost": gas_on, "first_seen_px": False})
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), {"gas_in_cost": gas_on, "first_seen_px": False})
     b = web.StateBuilder()
     web.BUILDER = b
     st = T.safe(b.build)
@@ -217,10 +217,10 @@ check("끔 실현 − 따로 둔 비용(가스 $335 + 출금 수수료 $76) = �
 for f9, t9 in ((fon, "켬"), (foff, "끔")):
     fa9 = f9.get("feeAllByDate") or {}
     tab9 = round(sum(float(g.get("spot") or 0) for g in f9.get("gasByChain") or []), 2)
-    check(f"{t9} fee1012 feeAllByDate 합 = 가스·수수료 탭 전체 합(스위치 무관)", fa9 and abs(sum(float(v[0]) for v in fa9.values()) - tab9) <= 0.05, (fa9, tab9))
-    check(f"{t9} fee1012 G2 그날 = 스왑 가스 $35(매매분 — 그날 '가스 비용' 줄엔 없음)", abs(float((fa9.get(iso(D2)) or [0])[0]) - 35) <= 0.05, fa9.get(iso(D2)))
-    check(f"{t9} fee1012 원화 = 양수 · USD 와 짝", all(len(v) == 2 and float(v[1]) > 0 for v in fa9.values()), fa9)
+    check(f"{t9} feeAllByDate 합 = 가스·수수료 탭 전체 합(스위치 무관)", fa9 and abs(sum(float(v[0]) for v in fa9.values()) - tab9) <= 0.05, (fa9, tab9))
+    check(f"{t9} G2 그날 = 스왑 가스 $35(매매분 — 그날 '가스 비용' 줄엔 없음)", abs(float((fa9.get(iso(D2)) or [0])[0]) - 35) <= 0.05, fa9.get(iso(D2)))
+    check(f"{t9} 원화 = 양수 · USD 와 짝", all(len(v) == 2 and float(v[1]) > 0 for v in fa9.values()), fa9)
 gx9 = fon.get("gasExpenseByDate") or {}
-check("켬 fee1012 그날 전부 ≥ 그날 '가스 비용'(매매 외 가스 ⊂ 전부)",
+check("켬 그날 전부 ≥ 그날 '가스 비용'(매매 외 가스 ⊂ 전부)",
       all(float((fon.get("feeAllByDate") or {}).get(k9, [0])[0]) + 0.01 >= float(v9[0]) for k9, v9 in gx9.items()), [gx9, fon.get("feeAllByDate")])
 T.finish()

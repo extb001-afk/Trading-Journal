@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 W = "0x" + "a1" * 20
 json.dump({"chains": {}, "wallets": [{"chain": "katana", "address": W}], "backfill_months": 5},
           open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import core
-import db as dbm
-import netpace
-import pricing
-import spamguard
-import web
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import token_tables  # noqa: E402
+import spamguard  # noqa: E402
+import web  # noqa: E402
 
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 chk = T.chk
@@ -35,7 +35,7 @@ NOW = int(time.time())
 DAY = 86400
 T1 = int((datetime.fromtimestamp(NOW, KST).replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=40)).timestamp())
 
-KAT_KV = {ca: s for ca, s in (pricing.STABLE_CAS.get("katana") or {}).items()}
+KAT_KV = {ca: s for ca, s in (token_tables.STABLE_CAS.get("katana") or {}).items()}
 VB = next((ca for ca, s in KAT_KV.items() if s == "USDC"), "0x" + "0" * 38 + "01")
 SHAM = "0x" + "5b" * 20
 KAT = "0x" + "7a" * 20
@@ -50,7 +50,7 @@ def mkey(t):
 
 
 chk(KAT_KV.get(VB) == "USDC" and len(KAT_KV) == 1, "[1] STABLE_CAS katana = vbUSDC 하나 → 그룹 'USDC'", KAT_KV)
-names = {v for m in pricing.STABLE_CAS.values() for v in m.values()} | set(pricing.STABLE_MINTS.values())
+names = {v for m in token_tables.STABLE_CAS.values() for v in m.values()} | set(token_tables.STABLE_MINTS.values())
 chk(names <= web.STABLE_GROUPS, "[1] 모든 화이트리스트 그룹명 ⊂ web.STABLE_GROUPS", names - web.STABLE_GROUPS)
 chk(spamguard.is_genuine("katana", VB) and not spamguard.is_genuine("katana", SHAM) and not spamguard.is_genuine("eth", VB),
     "[1] 정품 = katana 정식 주소만(사칭 주소·다른 체인의 같은 주소 아님)")
@@ -71,18 +71,19 @@ cpath = os.path.join(os.environ["TJ_BASE"], "state", "core_t.db")
 cc = dbm.open_db(cpath)
 C = core.Core.__new__(core.Core)
 C.conn, C.wrapped, C.native_sym, C.px = cc, {}, {"katana": "ETH"}, _Px()
-C._sym_px_verdict = lambda aid, px, sym=None, ts_ms=None: "ok"
+core.core_svc.attach(C)
+C.svc_price._sym_px_verdict = lambda aid, px, sym=None, ts_ms=None: "ok"
 a_vb = C.asset_id("token", "katana", VB, "vbUSDC", 6)
 a_sh = C.asset_id("token", "katana", SHAM, "vbUSDC", 6)
 a_eth = C.asset_id("token", "eth", VB, "vbUSDC", 6)
 a_kat = C.asset_id("token", "katana", KAT, "KAT", 18)
-gname = lambda g: cc.execute("SELECT name FROM asset_groups WHERE group_id=?", (g,)).fetchone()[0]
+gname = lambda g: cc.execute("SELECT name FROM asset_groups WHERE group_id=?", (g,)).fetchone()[0]  # noqa: E731
 g_vb, g_sh, g_eth = C._group_of(a_vb), C._group_of(a_sh), C._group_of(a_eth)
-chk(gname(g_vb) == "USDC" and C._is_stable_aid(a_vb), "[2] 정식 vbUSDC → 'USDC' 그룹 · 검증 스테이블", gname(g_vb))
+chk(gname(g_vb) == "USDC" and C.svc_price._is_stable_aid(a_vb), "[2] 정식 vbUSDC → 'USDC' 그룹 · 검증 스테이블", gname(g_vb))
 del _Px.calls[:]
-chk(C._leg_px(a_vb, T1) == 1.0 and not _Px.calls, "[2] 정식 vbUSDC 단가 = 1.0(시세 조회 없음)", _Px.calls)
-chk(gname(g_sh).startswith("VBUSDC#") and not C._is_stable_aid(a_sh), "[2] 사칭 vbUSDC(다른 주소) = 인스턴스 그룹 · 스테이블 아님", gname(g_sh))
-chk(gname(g_eth).startswith("VBUSDC#") and not C._is_stable_aid(a_eth), "[2] 다른 체인의 같은 주소 = 인스턴스 그룹 · 스테이블 아님", gname(g_eth))
+chk(C.svc_price._leg_px(a_vb, T1) == 1.0 and not _Px.calls, "[2] 정식 vbUSDC 단가 = 1.0(시세 조회 없음)", _Px.calls)
+chk(gname(g_sh).startswith("VBUSDC#") and not C.svc_price._is_stable_aid(a_sh), "[2] 사칭 vbUSDC(다른 주소) = 인스턴스 그룹 · 스테이블 아님", gname(g_sh))
+chk(gname(g_eth).startswith("VBUSDC#") and not C.svc_price._is_stable_aid(a_eth), "[2] 다른 체인의 같은 주소 = 인스턴스 그룹 · 스테이블 아님", gname(g_eth))
 
 cc.execute("INSERT OR IGNORE INTO asset_groups (name) VALUES (?)", (f"VBUSDC#{a_vb}",))
 g_old = cc.execute("SELECT group_id FROM asset_groups WHERE name=?", (f"VBUSDC#{a_vb}",)).fetchone()[0]
@@ -102,12 +103,12 @@ for seq, aid, q, lk in ((0, a_vb, str(-5000 * 10 ** 6), "disp"), (1, a_kat, str(
                " cost_krw, leg_kind, event, classifier_ver) VALUES ('chain_tx','katana',?,?,?,?,?,?,NULL,NULL,?,'SWAP',3)",
                (SW, seq, T1, aid, f"wallet:katana:{W}", q, lk))
 cc.commit()
-C._price_tx("katana", SW)
+C.svc_price._price_tx("katana", SW)
 cs = [float(r[0]) if r[0] is not None else None for r in cc.execute("SELECT cost_usd FROM postings WHERE source_id=? ORDER BY leg_seq", (SW,))]
 chk(cs == [5000.0, 5000.0], "[2] 값 없는 vbUSDC 5천 → KAT 2,500 스왑 = 양쪽 $5,000(유출측 액면 · KAT 시세 $2.15 × 2,500 = $5,375 아님)", cs)
 cc.close()
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 A = {}
 
 
@@ -166,18 +167,18 @@ c.commit()
 c.close()
 px = {"USDT": 1.0, "USDC": 1.0, "BTC": 100000.0, "KAT": 2.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1400.0, "ex_usd": {f"binance:{k}": v for k, v in px.items()}, "ex_ts": {f"binance:{k}": NOW for k in px}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1400.0, "ex_usd": {f"binance:{k}": v for k, v in px.items()}, "ex_ts": {f"binance:{k}": NOW for k in px}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 
 
 def build():
-    common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
     b = web.StateBuilder()
     b.skip_gen_check = True
     fx9 = b.px.d.setdefault("fx", {})
     fx9[mkey(T1)] = 1300.0
     fx9[mkey(TB)] = 1420.0
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -208,9 +209,10 @@ k0 = rz(f0, "KAT")
 chk(abs(k0 - 225.0) < 0.01 and v0 is not None and not isinstance(v0, list) and v0.get("tk") != "st" and str(v0.get("ex") or "").endswith(FS_EX),
     "[3] 전(재현): vbUSDC 원가 미확인 → 최초 인식 시가(같은 날 매도 단가 $1.075) · KAT 실현 +$225 · 명세 코인 표", (k0, v0))
 
-conn9 = dbm.open_db(common.DB_PATH)
+conn9 = dbm.open_db(paths.DB_PATH)
 C2 = core.Core.__new__(core.Core)
 C2.conn, C2.wrapped, C2.native_sym, C2.px = conn9, {}, {"katana": "ETH"}, _Px()
+core.core_svc.attach(C2)
 moved = C2._stable_regroup()
 conn9.close()
 f1, rows1 = build()

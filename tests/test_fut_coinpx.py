@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-import threading
-import time
-import types
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import types  # noqa: E402
 
 json.dump({"chains": {}, "wallets": []}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import acct_norm
-import fut_rcpt
-import web
+import paths, statefile  # noqa: E402
+import acct_norm  # noqa: E402
+import fut_rcpt  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 NOW = int(time.time())
@@ -38,10 +38,10 @@ FB = [{"t": T1, "symbol": "AAAUSDT", "kind": "REALIZED", "amount": 5.0, "uid": "
       {"t": T4, "symbol": "AAAUSDT", "kind": "FEE", "amount": -0.02, "uid": "b5", "asset": "BNB"}]
 FO = [{"t": T2, "symbol": "BTC-USD-SWAP", "kind": "REALIZED", "amount": 0.01, "uid": "ok:x1:p", "asset": "BTC"},
       {"t": T2, "symbol": "BTC-USD-SWAP", "kind": "FEE", "amount": -0.0001, "uid": "ok:x1:f", "asset": "BTC"}]
-common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_binance.json"), {"ts": NOW, "events": FB, "positions": []})
-common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_okx.json"), {"ts": NOW, "events": FO, "positions": []})
-CORE = os.path.join(common.STATE_DIR, "px_cache_core.json")
-common.atomic_write_json(CORE, {"candle": {f"BTC:{mn(S2)}": 61000.0}, "fx": {}})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "futures_binance.json"), {"ts": NOW, "events": FB, "positions": []})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "futures_okx.json"), {"ts": NOW, "events": FO, "positions": []})
+CORE = os.path.join(paths.STATE_DIR, "px_cache_core.json")
+statefile.atomic_write_json(CORE, {"candle": {f"BTC:{mn(S2)}": 61000.0}, "fx": {}})
 PX = types.SimpleNamespace(lock=threading.Lock(), d={"fx": {}, "candle": {
     f"BNB:{mn(S1)}": 500.0,
     f"BNB:{mn(S3) - 2 * 3600 * 1000}": 450.0,
@@ -136,7 +136,7 @@ chk(abs(e1["amount"] - 600.0) < 1e-9 and e2["amount"] == -0.5 and e3["amount"] =
     and abs(e5["amount"] + 14.0) < 1e-9 and e5.get("px_est") is True and "px_est" not in e1,
     "N1 숫자 시세(종전 호출 모양) = 그대로 · 스테이블·자산 없는 옛 이벤트 = 그대로 · 시세 모름 = 뺌 · (시세, 추정) 모양 = px_est", (e1, e2, e3, e4, e5))
 print("[C] 그날 마감가 저장본(캐시만 · 요청 기록 없음)")
-import histcurve
+import histcurve  # noqa: E402
 S5 = NOW - 40 * 86400 - 4 * 3600
 PX.d["candle"][f"BNB:{mn(S5) - 3 * 86400 * 1000}"] = 410.0
 seen = []

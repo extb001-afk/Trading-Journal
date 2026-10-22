@@ -1,11 +1,9 @@
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
 import json
 import re
 import time
 import urllib.request
+import ex_sign
 from exf_net import DAY
 from exf_net import DENY_COOL_SEC
 from exf_net import PACE
@@ -39,10 +37,8 @@ def fetch_kucoin(env, t0: int, t1: int):
     def call(path_with_qs):
         _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
         ts = str(_srv_ms("api.kucoin.com"))
-        sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
-                                        hashlib.sha256).digest()).decode()
-        pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
-                                            hashlib.sha256).digest()).decode()
+        sig = ex_sign.kucoin_sign(sec, ts, "GET", path_with_qs)
+        pph_sig = ex_sign.kucoin_passphrase(sec, pph)
         d = http_json("https://api.kucoin.com" + path_with_qs,
                       {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                        "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})
@@ -91,10 +87,8 @@ def fills_kucoin(env, st, t0: int, t1: int):
     def call(path_with_qs):
         _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
         ts = str(_srv_ms("api.kucoin.com"))
-        sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
-                                        hashlib.sha256).digest()).decode()
-        pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
-                                            hashlib.sha256).digest()).decode()
+        sig = ex_sign.kucoin_sign(sec, ts, "GET", path_with_qs)
+        pph_sig = ex_sign.kucoin_passphrase(sec, pph)
         d = http_json("https://api.kucoin.com" + path_with_qs,
                       {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                        "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})
@@ -234,7 +228,7 @@ def _kucoin_hf_pass(call, st, t0: int, t1: int, classic: list) -> list:
         if regular:
             st["kc_hf_gap"] = h0
         raise
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [fallback]
         msg9 = _xm(repr(e9))
         if isinstance(e9, urllib.error.HTTPError):
             msg9 += " " + _xm(_err_body(e9)[:200])
@@ -280,8 +274,8 @@ def _kucoin_call(env, path_with_qs):
     _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
     ts = str(_srv_ms("api.kucoin.com"))
-    sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(), hashlib.sha256).digest()).decode()
-    pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(), hashlib.sha256).digest()).decode()
+    sig = ex_sign.kucoin_sign(sec, ts, "GET", path_with_qs)
+    pph_sig = ex_sign.kucoin_passphrase(sec, pph)
     d = http_json("https://api.kucoin.com" + path_with_qs,
                   {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                    "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})
@@ -328,10 +322,8 @@ def _kucoin_get(env, path_with_qs):
     _gov_prepare("api.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
     ts = str(_srv_ms("api.kucoin.com"))
-    sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(),
-                                    hashlib.sha256).digest()).decode()
-    pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(),
-                                        hashlib.sha256).digest()).decode()
+    sig = ex_sign.kucoin_sign(sec, ts, "GET", path_with_qs)
+    pph_sig = ex_sign.kucoin_passphrase(sec, pph)
     d = http_json("https://api.kucoin.com" + path_with_qs,
                   {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                    "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})
@@ -376,8 +368,8 @@ def _kucoin_fut_get(env, path_with_qs):
     _gov_prepare("api-futures.kucoin.com", path_with_qs.split("?", 1)[0])
     key, sec, pph = env["TJ_KUCOIN_KEY"], env["TJ_KUCOIN_SECRET"], env["TJ_KUCOIN_PASSPHRASE"]
     ts = str(_srv_ms("api-futures.kucoin.com"))
-    sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + path_with_qs).encode(), hashlib.sha256).digest()).decode()
-    pph_sig = base64.b64encode(hmac.new(sec.encode(), pph.encode(), hashlib.sha256).digest()).decode()
+    sig = ex_sign.kucoin_sign(sec, ts, "GET", path_with_qs)
+    pph_sig = ex_sign.kucoin_passphrase(sec, pph)
     d = http_json("https://api-futures.kucoin.com" + path_with_qs,
                   {"KC-API-KEY": key, "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                    "KC-API-PASSPHRASE": pph_sig, "KC-API-KEY-VERSION": "2"})

@@ -1,12 +1,13 @@
 from __future__ import annotations
+import base64
 import hashlib
 import os
 import re
 import threading
-import common
+import paths
 import websnap
 
-WEB_DIR = os.path.join(common.BASE_DIR, "web")
+WEB_DIR = os.path.join(paths.BASE_DIR, "web")
 
 
 UI_DEFAULT = "v2"
@@ -20,7 +21,11 @@ _V2_FILES = {"index.html": "text/html; charset=utf-8",
              "health.js": "application/javascript; charset=utf-8",
              "search.js": "application/javascript; charset=utf-8",
              "salelink.js": "application/javascript; charset=utf-8",
-             "wow.js": "application/javascript; charset=utf-8"}
+             "wow.js": "application/javascript; charset=utf-8",
+             "tjdom.js": "application/javascript; charset=utf-8",
+             "app.css": "text/css; charset=utf-8",
+             "mods.css": "text/css; charset=utf-8",
+             "wow.css": "text/css; charset=utf-8"}
 
 
 _V2_TABS = ("tab_other.js", "tab_rcpt.js", "tab_dash.js", "tab_jrnl.js", "tab_daily.js", "tab_out.js", "tab_set.js")
@@ -59,7 +64,10 @@ _ASSETS_LOCK = threading.Lock()
 _V2_JS_RE = re.compile(rb'<script src="/v2/app\.js"></script>')
 
 
-_V2_VER_JS = ("health.js", "search.js", "wow.js", "setup.js") + _V2_TABS
+_V2_VER_JS = ("tjdom.js", "health.js", "search.js", "wow.js", "setup.js") + _V2_TABS
+
+
+_V2_VER_CSS = ("app.css", "mods.css", "wow.css")
 
 
 def _asset(fpath: str) -> dict:
@@ -68,7 +76,7 @@ def _asset(fpath: str) -> dict:
     font_css = os.path.join(V2_FONT_DIR, "plex.css")
     if v2_index:
         deps.append(os.path.join(V2_DIR, "app.js"))
-        deps += [os.path.join(V2_DIR, n) for n in _V2_VER_JS]
+        deps += [os.path.join(V2_DIR, n) for n in _V2_VER_JS + _V2_VER_CSS]
         if os.path.isfile(font_css):
             deps.append(font_css)
     key = tuple((os.stat(d).st_mtime_ns, os.stat(d).st_size) for d in deps)
@@ -84,6 +92,9 @@ def _asset(fpath: str) -> dict:
         for n9 in _V2_VER_JS:
             a9 = _asset(os.path.join(V2_DIR, n9))
             raw = raw.replace(b'<script src="/v2/' + n9.encode() + b'"></script>', b'<script src="/v2/' + n9.encode() + b'?v=' + a9["hash"].encode() + b'"></script>', 1)
+        for css_name in _V2_VER_CSS:
+            link_head = b'<link rel="stylesheet" href="/v2/' + css_name.encode()
+            raw = raw.replace(link_head + b'"', link_head + b'?v=' + _asset(os.path.join(V2_DIR, css_name))["hash"].encode() + b'"', 1)
         if deps[-1] == font_css:
             fv9 = _asset(font_css)["hash"].encode()
             raw = re.sub(rb"(['\"])/v2/fonts/plex\.css\1", lambda m9: m9.group(1) + b"/v2/fonts/plex.css?v=" + fv9 + m9.group(1), raw, count=1)
@@ -92,3 +103,35 @@ def _asset(fpath: str) -> dict:
     with _ASSETS_LOCK:
         _ASSETS[fpath] = (key, a)
     return a
+
+
+CSP_STAGE = "enforce"
+
+
+CSP_HEADERS = ("Content-Security-Policy", "Content-Security-Policy-Report-Only")
+
+
+_V2_CSP = {}
+
+
+def v2_csp(raw: bytes, key: str, stage: str | None = None) -> tuple:
+    stage = stage or CSP_STAGE
+    c = _V2_CSP.get((key, stage))
+    if c:
+        return c
+    hs = []
+    for tag in re.finditer(rb"<script(?P<a>[^>]*)>(?P<b>.*?)</script>", raw, re.S):
+        attrs = tag.group("a")
+        if re.search(rb"\bsrc\s*=", attrs) or re.search(rb"type\s*=\s*[\"']application/json", attrs):
+            continue
+        hs.append("'sha256-" + base64.b64encode(hashlib.sha256(tag.group("b")).digest()).decode() + "'")
+    ss = "default-src 'self'; script-src 'self' " + " ".join(dict.fromkeys(hs)) + "; "
+    now = (ss + "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "
+           "img-src 'self' data: blob: https:; connect-src 'self' https://cdn.jsdelivr.net; "
+           "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+    strict = (ss + "style-src 'self'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; "
+              "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types tj-html")
+    c = (strict, None) if stage == "enforce" else (now, strict)
+    _V2_CSP.clear()
+    _V2_CSP[(key, stage)] = c
+    return c

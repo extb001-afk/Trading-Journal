@@ -1,6 +1,7 @@
-import common
+import config, paths, statefile
 import json
 import os
+import recon_adj
 import time
 from core_common import CLASSIFIER_VER
 from core_common import dm
@@ -86,18 +87,19 @@ class UpbitReconMixin:
                 time.time() - getattr(self, "_last_exrecon", 0) < 300:
             return
         self._last_exrecon = time.time()
-        st_p = os.path.join(common.STATE_DIR, "upbit_orders_state.json")
-        bal_p = os.path.join(common.STATE_DIR, "upbit_balances.json")
-        st = common.read_json(st_p, {}) if os.path.exists(st_p) else {}
-        bal = common.read_json(bal_p, {}) if os.path.exists(bal_p) else {}
+        st_p = paths.state("upbit_orders_state.json")
+        bal_p = paths.state("upbit_balances.json")
+        st = statefile.read_json(st_p, {}) if os.path.exists(st_p) else {}
+        bal = statefile.read_json(bal_p, {}) if os.path.exists(bal_p) else {}
         if not st.get("complete") or "ex" not in drained:
             return
         if time.time() - float(st.get("backfilled_until") or 0) > 8 * 86400:
             return
-        if time.time() - (bal.get("ts") or 0) > common.upbit_fresh_sec(self.cfg):
+        if time.time() - (bal.get("ts") or 0) > config.upbit_fresh_sec(self.cfg):
             return
         inflight = set()
         last_obs = 0
+        edge = 0
         for r_if in self.conn.execute(
                 "SELECT r.kind, r.payload, r.observed_at FROM raw_ex r JOIN"
                 " (SELECT exchange, kind, uuid, max(revision) AS revision FROM raw_ex WHERE exchange='upbit'"
@@ -109,12 +111,18 @@ class UpbitReconMixin:
             except (json.JSONDecodeError, TypeError):
                 continue
             st_if = str(p_if.get("state") or "").upper()
+            if st_if in self.EX_TERMINAL_STATES:
+                edge = max([edge] + [min(self._iso_ts(p_if.get(k_if)) or 0, int(r_if["observed_at"] or 0)) for k_if in ("created_at", "done_at")])
             if st_if and st_if not in self.EX_TERMINAL_STATES:
                 inflight.add(str(p_if.get("currency") or "").upper())
             elif st_if in ("DONE", "ACCEPTED") and not self._iso_ts(p_if.get("created_at") or p_if.get("done_at")):
                 inflight.add(str(p_if.get("currency") or "").upper())
         if last_obs - int(bal.get("ts") or 0) > 120:
             log.info("거래소 잔고 대사 보류 — 잔고 스냅샷(%d)이 마지막 원본 동기화(%d)보다 오래됨", int(bal.get("ts") or 0), last_obs)
+            return
+        if edge and edge >= int(bal.get("ts") or 0) - 30:
+            log.info("거래소 잔고 대사 보류 — 잔고 스냅샷(%d) 무렵·뒤에 끝난 입출금(%d) — 다음 스냅샷으로", int(bal.get("ts") or 0), int(edge))
+            self._last_exrecon = time.time() - 240
             return
         actual = {}
         locked_now = set(inflight)
@@ -208,6 +216,7 @@ class UpbitReconMixin:
                 continue
             ev_ts9 = self._win_t0(anchor_ts, "upbit") if (qb > 0 and self.recon_months > 0) else anchor_ts
             if self._post_leg('exchange', 'upbit:recon', f'exrecon:{sym}:{anchor_ts}', 0, ev_ts9, main_aid, 'exchange:upbit', qb, None, None, 'opening', 'EX_ADJUST'):
+                recon_adj.note(self.conn, "K10", ('exchange', 'upbit:recon', f'exrecon:{sym}:{anchor_ts}', 0), "pos_window_start" if ev_ts9 != anchor_ts else ("untracked_out" if qb < 0 else "later_in"))
                 n_adj += 1
         if n_locked_skip:
             self.conn.commit()

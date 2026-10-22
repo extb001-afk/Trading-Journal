@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import shutil
-import subprocess
-import time
+import os  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
 ROT = os.path.join(T.ROOT, "tools", "rotate_logs.sh")
 SETUP = next((p for p in (os.path.join(T.ROOT, "tools", "setup.sh"), os.path.join(T.ROOT, "public", "tools", "setup.sh")) if os.path.isfile(p)), None)

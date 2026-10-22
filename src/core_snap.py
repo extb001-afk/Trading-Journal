@@ -1,8 +1,8 @@
 import chain_event
-import common
+import chaincatalog, histmark, timeutil
 import discopen
+import recon_adj
 import json
-import os
 import time
 from core_common import CLASSIFIER_VER
 from core_common import dm
@@ -346,9 +346,9 @@ class SnapMixin:
         if not t9:
             return None
         lo9 = min(t9)
-        if lo9 >= common.kst_day0(time.time() + common.HIST_LATE_CLOSE_S):
+        if lo9 >= timeutil.kst_day0(time.time() + histmark.HIST_LATE_CLOSE_S):
             return None
-        iso = common.hist_late_put(self.conn, lo9)
+        iso = histmark.hist_late_put(self.conn, lo9)
         log.info("대사 앵커 보정(%s %s) — 지난 곡선 다시 계산 표식: %s 부터", chain, str(txhash)[:14], iso)
         return iso
 
@@ -366,7 +366,7 @@ class SnapMixin:
             ts = None
         if ts is None:
             return 0, None
-        blk9 = self._tx_block(chain, txhash)
+        blk9 = self.svc_recon._tx_block(chain, txhash)
         T, ws = self._recon_view(chain)
         pay = None
         wtimes = None
@@ -376,7 +376,7 @@ class SnapMixin:
                 continue
             w = loc.split(":", 2)[2].lower()
             sid = t9 = None
-            if T and w in ws and self._absorbed(f"recon:{chain}", ts, T, blk9):
+            if T and w in ws and self.svc_recon._absorbed(f"recon:{chain}", ts, T, blk9):
                 if chain == "bsc":
                     if pay is None:
                         r9 = self.conn.execute("SELECT payload FROM raw_observations WHERE obs_id=?", (f"recon:{chain}",)).fetchone()
@@ -393,18 +393,18 @@ class SnapMixin:
                     sid, t9 = f"recon:{chain}", int(T)
             else:
                 if wtimes is None:
-                    wtimes = self._wrecon_times(chain)
+                    wtimes = self.svc_recon._wrecon_times(chain)
                 wt3 = wtimes.get(w)
                 if wt3:
                     is_nat = bool(self.conn.execute("SELECT 1 FROM assets WHERE asset_id=? AND kind='native'", (aid,)).fetchone())
                     wt = wt3[1] if is_nat else wt3[0]
                     w_sid = loc.split(":", 2)[2] if chain == "sol" else w
                     sid9 = f"recon:{chain}:{w_sid}" + (":native" if (is_nat and wt3[2]) else "")
-                    if wt and self._absorbed(sid9, ts, wt, blk9):
+                    if wt and self.svc_recon._absorbed(sid9, ts, wt, blk9):
                         sid, t9 = sid9, wt
             if sid:
                 a9 = self.conn.execute("SELECT kind, address FROM assets WHERE asset_id=?", (aid,)).fetchone()
-                if a9 and a9[0] == "token" and not self._obs_tok_observed(sid, w, a9[1]):
+                if a9 and a9[0] == "token" and not self.svc_recon._obs_tok_observed(sid, w, a9[1]):
                     sid = None
             if not sid and loc.count(":") == 2:
                 sid, t9 = discopen.absorbed_by(self.conn, chain, loc, aid, blk9, ts)
@@ -486,6 +486,7 @@ class SnapMixin:
             else:
                 ets = int(r["event_ts"]) if (nq > 0) == (q0 > 0) else (pos_ts if nq > 0 else int(T))
                 self._amend_leg(r["posting_id"], aid, loc, comp, qb_new=nq, ts=ets)
+                recon_adj.note_fix(self.conn, "K4", r["posting_id"], "anchor_readjust")
                 if isinstance(touch9, list):
                     touch9.append(int(ets))
         else:
@@ -496,6 +497,7 @@ class SnapMixin:
                                     " AND source_id=?", (chain, sid)).fetchone()[0] + 1
             self._post_leg_strict("opening", chain, sid, seq, pos_ts if comp > 0 else int(T), aid, loc, comp,
                                   None, None, "opening", "OPENING")
+            recon_adj.note(self.conn, "K4", ("opening", chain, sid, seq), "anchor_readjust", tx=str(txhash)[:18])
         if isinstance(touch9, list):
             disc9 = discopen.is_disc(sid)
             if (not disc9 and (q0 < 0 or nq < 0)) or (disc9 and (q0 > 0 or nq > 0)):
@@ -515,7 +517,7 @@ class SnapMixin:
                     continue
                 mine = self.my_wallets.get(ch) or set()
                 T_full, ws_full = self._recon_view(ch)
-                wtimes = self._wrecon_times(ch)
+                wtimes = self.svc_recon._wrecon_times(ch)
                 pre9 = {r[0].split(":", 2)[2] for r in self.conn.execute(
                     "SELECT k FROM meta WHERE k >= ? AND k < ?", (f"ext_prewindow_tx:{ch}:", f"ext_prewindow_tx:{ch};")).fetchall()}
                 for a in applied:
@@ -539,7 +541,7 @@ class SnapMixin:
                     for sid, T, scope in sids:
                         R, R_all, t_rx = {}, {}, {}
                         for p in rx:
-                            if p["source_id"] in pre9 or not self._absorbed(sid, int(p["event_ts"]), T, p["block"]):
+                            if p["source_id"] in pre9 or not self.svc_recon._absorbed(sid, int(p["event_ts"]), T, p["block"]):
                                 continue
                             R_all[p["asset_id"]] = R_all.get(p["asset_id"], 0) + int(p["qty_base"])
                             t_rx[p["asset_id"]] = min(t_rx.get(p["asset_id"], int(p["event_ts"])), int(p["event_ts"]))
@@ -569,7 +571,7 @@ class SnapMixin:
                             if (scope == "token" and is_nat) or (scope == "native" and not is_nat):
                                 continue
                             key = "native:none" if is_nat else f"token:{str((a9['address'] if a9 else '') or '').lower()}"
-                            if key not in wp or (not is_nat and not self._obs_tok_observed(sid, a, a9["address"])):
+                            if key not in wp or (not is_nat and not self.svc_recon._obs_tok_observed(sid, a, a9["address"])):
                                 continue
                             v9 = wp[key]
                             try:
@@ -589,7 +591,7 @@ class SnapMixin:
                                 if q["source_kind"] == "opening" and qb:
                                     other9 = True
                                 if q["source_kind"] == "chain_tx":
-                                    if q["source_id"] not in pre9 and self._absorbed(sid, int(q["event_ts"]), T, q["block"]):
+                                    if q["source_id"] not in pre9 and self.svc_recon._absorbed(sid, int(q["event_ts"]), T, q["block"]):
                                         F += qb
                                 elif int(q["event_ts"]) < T:
                                     F += qb
@@ -622,7 +624,7 @@ class SnapMixin:
         return out
 
     def _rpc_touch(self, chain: str, txhash: str, old_snap: dict, new_u: dict, q_new: str, rpc_old: bool):
-        if q_new != "rpc_basic" or rpc_old or common.ZK_STACK.get(chain):
+        if q_new != "rpc_basic" or rpc_old or chaincatalog.ZK_STACK.get(chain):
             return
         keys = {self._leg_row_key(k9, r) for k9 in ("token_transfers", "internal") for r in new_u.get(k9) or [] if isinstance(r, dict)}
         marked = dict(self._via_mark(old_snap, keys) if keys else old_snap, **{self.RPC_SEEN: True})
@@ -649,7 +651,7 @@ class SnapMixin:
         q_old, q_new = self._snap_quality(old_snap), self._snap_quality(new_snap)
         es_list_new = self._es_list(new_snap)
         new_u = new_snap
-        if common.ZK_STACK.get(chain) and old_snap.get("internal_note") == "zk_base_token" \
+        if chaincatalog.ZK_STACK.get(chain) and old_snap.get("internal_note") == "zk_base_token" \
                 and new_snap.get("internal_note") != "zk_base_token" and new_snap.get("tx"):
             ctx9 = (old_snap.get("tx") or new_snap.get("tx")) if es_list_new else new_snap.get("tx")
             new_u = dict(self._zk_norm(chain, dict(new_snap, tx=ctx9)), tx=new_snap.get("tx"))
@@ -666,7 +668,7 @@ class SnapMixin:
         tsf9 = isinstance(rec.get("ts_fix"), dict)
         if tsf9:
             act9 = self._tsfix_plan(old_snap, new_u)
-            if common.ZK_STACK.get(chain):
+            if chaincatalog.ZK_STACK.get(chain):
                 cand9 = new_snap if act9 == "promote" else (self._snap_merge(old_snap, new_u) if act9 == "union" else old_snap)
                 zo9, zn9, zc9 = self._zk_norm(chain, old_snap), self._zk_norm(chain, new_u), self._zk_norm(chain, cand9)
                 if not (self._legs_cover(zc9, zo9) and self._legs_cover(zc9, zn9) and self._tx_legs(zc9) >= self._tx_legs(zo9) | self._tx_legs(zn9)):
@@ -701,7 +703,7 @@ class SnapMixin:
                 and new_snap.get("internal_note") in ("trace", "balance_delta") and (new_u.get("internal") or [])
                 and self._internal_grows(old_snap, new_u)):
             merge_list = True
-        if (not tsf9 and not promote and not merge_list and rpc9 and not common.ZK_STACK.get(chain)) and self._legs_grow(old_snap, new_u):
+        if (not tsf9 and not promote and not merge_list and rpc9 and not chaincatalog.ZK_STACK.get(chain)) and self._legs_grow(old_snap, new_u):
             merge_list = True
         if rpc9 and merge_list and not promote and not add_w and not tsf9 and self._snap_merge(old_snap, new_u) == old_snap:
             self._rpc_touch(chain, txhash, old_snap, new_u, q_new, rpc_old)
@@ -725,7 +727,7 @@ class SnapMixin:
         if promote:
             if "_lp_liq" in old_snap and "_lp_liq" not in new_snap:
                 new_snap = dict(new_snap, _lp_liq=old_snap["_lp_liq"])
-            if not tsf9 and not common.ZK_STACK.get(chain) and (q_old == "rpc_basic" or bd_any or rpc_old):
+            if not tsf9 and not chaincatalog.ZK_STACK.get(chain) and (q_old == "rpc_basic" or bd_any or rpc_old):
                 new_snap = self._promote_keep(old_snap, new_snap)
             if rpc9:
                 new_snap = dict(new_snap, **{self.RPC_SEEN: True})
@@ -752,10 +754,7 @@ class SnapMixin:
             snap_use = old_snap
             self._rpc_touch(chain, txhash, old_snap, new_u, q_new, rpc_old)
         ev = self.apply(chain, txhash, "", snap_use, rederive=(old_ev, keep))
-        try:
-            os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
-        except FileNotFoundError:
-            pass
+        self._inval_daily()
         why = ("상세 승격" if promote else ("새 관점 " + ",".join(a[:10] for a in sorted(add_w))) if add_w
                else "누락 leg 복구") + (" · leg 합집합" if merge_list else "")
         log.info("★[%s] %s 재파생(%s): %s→%s (기존 legs %d 역적용)★",
@@ -809,7 +808,7 @@ class SnapMixin:
         self.conn.execute("UPDATE raw_txs SET snapshot=?, wallets=?, ingested_at=? WHERE chain='sol' AND txhash=?",
                           (json.dumps(rec2, ensure_ascii=False), json.dumps(rec2.get("wallets", [])), int(time.time()), txhash))
         ev = self.apply_sol(rec2, rederive=(old_ev, frozenset(keep)))
-        self._drop_daily_cache()
+        self._inval_daily()
         new_o = sorted({o for o, _a, _d in ln - lo})
         log.info("★[sol] %s 재파생(새 관점 %s): %s→%s (기존 legs %d 역적용)★", txhash[:14],
                  ",".join(o[:10] for o in new_o), old_ev, ev, n_old)

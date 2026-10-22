@@ -2,31 +2,30 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
-import core
-import db as dbm
-import discopen
-import histcurve
-import netpace
-import web
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import discopen  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
@@ -49,9 +48,9 @@ def feed(c, hx, s):
     c._drain_stream("evm", Reader([{"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": hx, "wallets": [W], "snapshot": s, "ts": 1}]), 0, 0)
 
 
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 os.environ["TJ_NEGABS"] = "0"
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 feed(c, h(1), {"tx": {"hash": h(1), "from": X, "to": W, "value": str(2 * E18), "fee": {"value": "0"}, "status": "ok", "raw_input": "0x",
                       "timestamp": T0, "block_number": 1500, "block_hash": "0x" + "d" * 64}, "token_transfers": [], "internal": []})
 c.conn.commit()
@@ -76,20 +75,20 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 dex = {f"eth:{TKN}": 2.0, f"eth:{TKC}": 3.0, f"eth:{TKO}": 5.0, "eth:0x" + "e5" * 20: 7.0}
 json.dump({"usd": {"ETH": 2000.0}, "usd_ts": {"ETH": NOW}, "rate": 1400.0, "updated": NOW, "dex_usd": dex, "dex_ts": {k: NOW for k in dex},
-           "dex_res": {k: 1e6 for k in dex}, "dex_res_ts": {k: NOW for k in dex}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "dex_res": {k: 1e6 for k in dex}, "dex_res_ts": {k: NOW for k in dex}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 
 
 def build():
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
     global BB
     b = BB = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -139,10 +138,10 @@ tY = int(end_y) - 29 * 60
 sY = discopen.write_anchor(c, "eth", W, aY, TKY, 10 * E18, 2100, tY, tY, 10 * E18, "token_recheck", {"_sources": ["bsc_balance_watch"], "_diff_raw": str(10 * E18)})
 c.conn.commit()
 try:
-    os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+    os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
 except FileNotFoundError:
     pass
-conn4 = dbm.open_db(common.DB_PATH, readonly=True)
+conn4 = dbm.open_db(paths.DB_PATH, readonly=True)
 try:
     fb4 = BB._build(conn4)["fields"]
 finally:

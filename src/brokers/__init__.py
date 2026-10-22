@@ -24,7 +24,7 @@ def run_sync(key: str, cfg: dict, http=None, now=None) -> dict:
     except BrokerError as e:
         toks = [t[0] for t in list(Adapter._tokens.values()) if isinstance(t, tuple) and t and isinstance(t[0], str)]
         return {"ok": False, "at": at, "err": redact(str(e), {"cfg": cfg, "tok": toks})}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         return {"ok": False, "at": at, "err": "응답 해석 실패(%s) — 문서와 실제가 다를 수 있어요(미검증)" % type(e).__name__}
     pos = [p for p in (r.get("positions") or []) if isinstance(p, dict)]
     cash = [c for c in (r.get("cash") or []) if isinstance(c, dict)]

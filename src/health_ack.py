@@ -5,7 +5,7 @@ import json
 import os
 import threading
 
-import common
+import paths, statefile
 
 NAME = "health_ack.json"
 V = 1
@@ -20,7 +20,7 @@ _LOCK = threading.Lock()
 
 
 def path() -> str:
-    return os.path.join(common.STATE_DIR, NAME)
+    return paths.state(NAME)
 
 
 def _sha(s: str) -> str:
@@ -135,7 +135,7 @@ def _locked(fn):
             return False, err
         ok, msg, new = fn(doc)
         if ok and new is not None:
-            common.atomic_write_json(p, new)
+            statefile.atomic_write_json(p, new)
         return ok, msg
 
 

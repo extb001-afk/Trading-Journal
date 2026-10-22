@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import bf_engine
-import candles
-import pricing
-import web
+import bf_engine  # noqa: E402
+import candles  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 CG = {"n": 0, "ok": True, "px": 10.0}

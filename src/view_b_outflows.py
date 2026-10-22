@@ -6,37 +6,25 @@ from view_common import _f
 from view_misc import _rate_state
 from view_xv import XV_V
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _ofc_cp(dst, src):
+    if len(dst) != len(src) or any(c.get("t") != s.get("t") or c.get("k") != s.get("k") or c.get("tx") != s.get("tx") for c, s in zip(dst, src)):
+        return
+    for c, s in zip(dst, src):
+        if s.get("ofc"):
+            c["ofc"] = dict(s["ofc"])
+        else:
+            c.pop("ofc", None)
 
 
 class OutflowsBuildMixin:
 
     def _build_outflows(self, _bs9):
-        (G, _k9, _nopid9, ask9, conn, ev_hid9, ev_main9, ev_wd9, extra_events, extra_events_hidden, extra_events_out, fiats, hid_kind_n9, live_px, lp_total, lps_pending, n_wd_hid9, now, ob, overrides9, pendings, pos_ev_full, positions, quarantined, rate_fx, ub2, up_fresh9, x_fiat, x_ub, x_ubs, xv_krw9, xv_up_coin9, xv_up_krw9, xv_up_krw_st9,) = (_bs9["G"], _bs9["_k9"], _bs9["_nopid9"], _bs9["ask9"], _bs9["ctx"].conn, _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["extra_events"], _bs9["extra_events_hidden"], _bs9["extra_events_out"], _bs9["fiats"], _bs9["hid_kind_n9"], _bs9["live_px"], _bs9["lp_total"], _bs9["lps_pending"], _bs9["n_wd_hid9"], _bs9["ctx"].now, _bs9["ob"], _bs9["overrides9"], _bs9["pendings"], _bs9["pos_ev_full"], _bs9["positions"], _bs9["quarantined"], _bs9["rate_fx"], _bs9["ub2"], _bs9["up_fresh9"], _bs9["x_fiat"], _bs9["x_ub"], _bs9["x_ubs"], _bs9["xv_krw9"], _bs9["xv_up_coin9"], _bs9["xv_up_krw9"], _bs9["xv_up_krw_st9"],)
-        if "cp9" in _bs9:
-            cp9 = _bs9["cp9"]
-        if "dust_ev" in _bs9:
-            dust_ev = _bs9["dust_ev"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "h9" in _bs9:
-            h9 = _bs9["h9"]
-        if "mv9" in _bs9:
-            mv9 = _bs9["mv9"]
-        if "o9" in _bs9:
-            o9 = _bs9["o9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "rt9" in _bs9:
-            rt9 = _bs9["rt9"]
-        if "st9" in _bs9:
-            st9 = _bs9["st9"]
-        if "wdt_all" in _bs9:
-            wdt_all = _bs9["wdt_all"]
-        if "x9" in _bs9:
-            x9 = _bs9["x9"]
+        (G, _k9, _nopid9, ask9, conn, ev_hid9, ev_main9, ev_wd9, extra_events, extra_events_hidden, extra_events_out, fiats, hid_kind_n9, live_px, lp_total, lps_pending, n_wd_hid9, now, ob, overrides9, pendings, pos_ev_full, positions, quarantined, rate_fx, ub2, up_fresh9, x_fiat, x_ub, x_ubs, xv_krw9, xv_up_coin9, xv_up_krw9, xv_up_krw_st9, dust_ev, wdt_all,) = (_bs9["G"], _bs9["_k9"], _bs9["_nopid9"], _bs9["ask9"], _bs9["ctx"].conn, _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["extra_events"], _bs9["extra_events_hidden"], _bs9["extra_events_out"], _bs9["fiats"], _bs9["hid_kind_n9"], _bs9["live_px"], _bs9["lp_total"], _bs9["lps_pending"], _bs9["n_wd_hid9"], _bs9["ctx"].now, _bs9["ob"], _bs9["overrides9"], _bs9["pendings"], _bs9["pos_ev_full"], _bs9["positions"], _bs9["quarantined"], _bs9["rate_fx"], _bs9["ub2"], _bs9["up_fresh9"], _bs9["x_fiat"], _bs9["x_ub"], _bs9["x_ubs"], _bs9["xv_krw9"], _bs9["xv_up_coin9"], _bs9["xv_up_krw9"], _bs9["xv_up_krw_st9"], _bs9["dust_ev"], _bs9["wdt_all"],)
         outflows_out, outflows_pending, of_tot = self._outflows(
             conn, ob, live_px, G, frozenset(quarantined), dust_ev,
             exwd=[e9 for e9 in wdt_all if e9["state"] == "out" and e9["ts"] >= ask9])
@@ -73,23 +61,15 @@ class OutflowsBuildMixin:
                     x9 = sug9.get(e9.get("_pid"))
                     if x9 and "매도" not in str(e9.get("k") or ""):
                         e9["ofc"] = dict(x9)
-            def _ofc_cp9(dst9, src9):
-                if len(dst9) != len(src9) or any(c9.get("t") != s9.get("t") or c9.get("k") != s9.get("k") or c9.get("tx") != s9.get("tx") for c9, s9 in zip(dst9, src9)):
-                    return
-                for c9, s9 in zip(dst9, src9):
-                    if s9.get("ofc"):
-                        c9["ofc"] = dict(s9["ofc"])
-                    else:
-                        c9.pop("ofc", None)
             src_ev9 = {k0: evs0 for k0, _s0, _c0, evs0 in pos_ev_full}
             for p9 in positions:
                 cp9 = p9.get("events")
                 if cp9 and p9.get("key") in src_ev9:
-                    _ofc_cp9(cp9, src_ev9[p9["key"]][-len(cp9):])
-            _ofc_cp9(extra_events_out, sorted(sorted(ev_main9, key=_k9)[-150:] + sorted(ev_wd9, key=_k9)[-150:], key=_k9))
-            _ofc_cp9(extra_events_hidden, sorted(ev_hid9, key=_k9)[-150:])
-        except Exception as e9:
-            calcguard.swallowed("view_b_outflows:OutflowsBuildMixin._build_outflows", e9)
+                    _ofc_cp(cp9, src_ev9[p9["key"]][-len(cp9):])
+            _ofc_cp(extra_events_out, sorted(sorted(ev_main9, key=_k9)[-150:] + sorted(ev_wd9, key=_k9)[-150:], key=_k9))
+            _ofc_cp(extra_events_hidden, sorted(ev_hid9, key=_k9)[-150:])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_outflows:OutflowsBuildMixin._build_outflows[st9#1]", e9)
             log.debug("세일 연결 제안 표식 실패: %s", e9)
         for p9 in pendings:
             h9 = (getattr(self, "_of_untracked_hint", None) or {}).get(acct_norm.canon(p9.get("sym")))
@@ -137,8 +117,8 @@ class OutflowsBuildMixin:
         xtra9["xv"] = xv9
         try:
             xtra9["xsrc"] = self._x_src(conn, ub2, xv_krw9, x_ubs if xv_up_coin9 is not None else None, lp_total, rate_fx, now)
-        except Exception as e9:
-            calcguard.swallowed("view_b_outflows:OutflowsBuildMixin._build_outflows", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_outflows:OutflowsBuildMixin._build_outflows[st9#2]", e9)
             log.warning("원장 밖 금액 규칙 재료 실패(지난날 = 지금 값 이월): %s", e9)
         self._ph("outflows")
         _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")

@@ -8,17 +8,18 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import logs, paths, runtime, statefile  # noqa: E402
+import db as dbm
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
-import settings_store as ss
-import ledger_backup
+    runtime.cpu_reserve_apply()
+import settings_store as ss, runner_fp  # noqa: E402
+import ledger_backup  # noqa: E402
 
 SCRIPTS = {"evm": "evm_watch.py", "sol": "sol_watch.py", "bsc": "bsc_watch.py", "core": "core.py", "web": "web.py"}
 try:
-    import chain_registry as _reg
+    import chain_registry as _reg  # noqa: E402
     SCRIPTS.update({c: _reg.SPECS[c].module + ".py" for c in _reg.CHAINS})
-except Exception:
+except Exception:   # noqa: BLE001 [optional]
     pass
 CHECK_SEC = float(os.environ.get("TJ_RUNNER_CHECK_SEC", "15"))
 SETTLE_SEC = float(os.environ.get("TJ_RUNNER_SETTLE_SEC", "10"))
@@ -29,13 +30,14 @@ MEM_FLOOR_MB = 256
 MEM_CHECK_N = 2
 MEM_KEEP_S = 86400
 
-log = common.setup_logging("tj-runner")
+log = logs.setup_logging("tj-runner")
 NO_LEDGER_WHY = "원장 파일 없음 — 백업에서 되돌리기 필요(python3 tools/ledger_restore.py list)"
 CORRUPT_WHY = ledger_backup.CORRUPT_WHY
 FAST_FAIL_S = 300
 DEEP_RECHECK_S = 1800
 CORE_CORRUPT_RC = 3
 _stop = {"sig": None}
+_live = {"p": None}
 _MEM = {"restarts": [], "last": None, "rss_mb": None, "max_mb": 0}
 
 
@@ -44,13 +46,13 @@ def max_mb(unit, env=None, cfg=None) -> int:
     cands = [os.environ.get(key)]
     try:
         cands.append((env if env is not None else ss.read_env()).get(key))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     try:
         rc = cfg if cfg is not None else ss.read_config_raw()
         mm = (rc.get("runner") or {}).get("max_mb") if isinstance(rc, dict) and isinstance(rc.get("runner"), dict) else None
         cands.append(mm.get(unit) if isinstance(mm, dict) else None)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     for v in cands:
         if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
@@ -91,7 +93,7 @@ def _mem_view(now=None):
 def _evaluate(unit):
     try:
         cfg = ss.load_config_quiet()
-    except BaseException as e:
+    except BaseException as e:           # noqa: BLE001 [fallback]
         if isinstance(e, FileNotFoundError):
             return False, "config.json 없음 — bash tools/setup.sh 로 만드세요", "err"
         if isinstance(e, ValueError) and hasattr(e, "lineno"):
@@ -99,7 +101,7 @@ def _evaluate(unit):
         if isinstance(e, PermissionError):
             return False, "config.json 을 읽을 권한이 없어요 — 파일 소유자를 확인하세요", "err"
         return False, f"config.json 읽기 실패: {type(e).__name__} — 필수 항목(wallets 등)을 확인하세요", "err"
-    return ss.unit_inputs(unit, cfg)
+    return runner_fp.unit_inputs(unit, cfg)
 
 
 def _beat(unit, **kw):
@@ -107,9 +109,9 @@ def _beat(unit, **kw):
         mv9 = _mem_view()
         if mv9 is not None:
             kw["mem"] = mv9
-        common.atomic_write_json(os.path.join(common.STATE_DIR, f"runner_{unit}.json"),
+        statefile.atomic_write_json(paths.state(f"runner_{unit}.json"),
                                  dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())))
-    except Exception:
+    except Exception:  # noqa: BLE001 [optional]
         pass
 
 
@@ -123,22 +125,20 @@ def _ledger_ident(path):
 
 def _data_rev_refusal(path):
     try:
-        import sqlite3
-        import db as dbm
-        c = sqlite3.connect(common.sqlite_ro_uri(path), uri=True, timeout=5)
+        c = dbm.connect(paths.sqlite_ro_uri(path), uri=True, timeout=5)
         try:
             return dbm.data_rev_refusal(c)
         finally:
             c.close()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
 def _secure_state_dir():
     try:
-        m9 = os.stat(common.STATE_DIR).st_mode & 0o777
+        m9 = os.stat(paths.STATE_DIR).st_mode & 0o777
         if m9 & 0o077:
-            os.chmod(common.STATE_DIR, 0o700)
+            os.chmod(paths.STATE_DIR, 0o700)
             log.info("state/ 권한 %o → 700(본인만)", m9)
     except OSError:
         pass
@@ -169,10 +169,19 @@ def _on_signal(sig, _frm):
 
 
 def main():
+    try:
+        _main()
+    finally:
+        p9 = _live["p"]
+        if p9 is not None and p9.poll() is None:
+            _stop_child(p9)
+
+
+def _main():
     unit = sys.argv[1] if len(sys.argv) > 1 else ""
     if unit not in SCRIPTS:
         raise SystemExit("사용법: unit_runner.py " + "|".join(SCRIPTS))
-    common.ensure_dirs()
+    paths.ensure_dirs()
     _secure_state_dir()
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
@@ -195,14 +204,15 @@ def main():
         last_why = None
         env = dict(os.environ)
         env.setdefault("PYTHONUNBUFFERED", "1")
-        if unit == "core" and not os.path.exists(common.DB_PATH):
+        env["TJ_RUNNER_PID"] = str(os.getpid())
+        if unit == "core" and not os.path.exists(paths.DB_PATH):
             ev9 = ledger_backup.prior_ledger_evidence()
             if ev9 and not ledger_backup.new_ledger_ok(consume=True):
                 why9 = NO_LEDGER_WHY
                 if not no_ledger_logged:
                     log.error("[core] 원장 파일 없음(%s) — 예전 원장 흔적이 있어 빈 원장을 만들지 않고 기다려요: %s. "
                               "백업에서 되돌리기: python3 tools/ledger_restore.py list → restore <백업> --apply "
-                              "· 정말 새 원장으로 시작: python3 tools/ledger_restore.py new --apply", common.DB_PATH, " · ".join(ev9))
+                              "· 정말 새 원장으로 시작: python3 tools/ledger_restore.py new --apply", paths.DB_PATH, " · ".join(ev9))
                     no_ledger_logged = True
                 _beat(unit, state="waiting", why=why9, fp=fp, evidence=ev9[:6], since=wait_since.setdefault(why9, int(time.time())))
                 _sleep(CHECK_SEC)
@@ -210,11 +220,11 @@ def main():
             env["TJ_ALLOW_NEW_LEDGER"] = "1"
             log.info("[core] 원장 없음 — %s 빈 원장 생성 허용", "새 원장 허용 표식으로" if ev9 else "첫 설치로 보고")
         elif unit == "core":
-            id9 = _ledger_ident(common.DB_PATH)
+            id9 = _ledger_ident(paths.DB_PATH)
             if corrupt is not None and corrupt[0] != id9:
                 log.info("[core] 원장 파일이 바뀜(복구 등) — 다시 검사")
                 corrupt = None
-            dr9 = _data_rev_refusal(common.DB_PATH)
+            dr9 = _data_rev_refusal(paths.DB_PATH)
             if dr9:
                 if dr9 != wait_since.get("data_rev_logged"):
                     log.error("[core] %s", dr9)
@@ -223,9 +233,9 @@ def main():
                 _sleep(CHECK_SEC)
                 continue
             if corrupt is None:
-                ok9, why9 = ledger_backup.ledger_check_light(common.DB_PATH)
+                ok9, why9 = ledger_backup.ledger_check_light(paths.DB_PATH)
                 if ok9 and (id9 or (0, 0, 0))[1] <= ledger_backup.DEEP_PRESTART_MAX:
-                    ok9, why9 = ledger_backup.ledger_check_deep(common.DB_PATH)
+                    ok9, why9 = ledger_backup.ledger_check_deep(paths.DB_PATH)
                     deep_at[(id9 or (0,))[0]] = time.time()
                 if not ok9:
                     corrupt = (id9, why9)
@@ -238,6 +248,7 @@ def main():
         wait_since.clear()
         log.info("[%s] 시작 (설정 지문 %s)", unit, fp)
         p = subprocess.Popen([sys.executable, script], env=env)
+        _live["p"] = p
         started = time.time()
         _beat(unit, state="running", why="", fp=fp, child=p.pid)
         reason = None
@@ -283,18 +294,18 @@ def main():
             _stop_child(p)
             backoff = 5.0
             continue
-        if unit == "core" and p.returncode not in (0, None) and os.path.exists(common.DB_PATH) \
+        if unit == "core" and p.returncode not in (0, None) and os.path.exists(paths.DB_PATH) \
                 and (p.returncode == CORE_CORRUPT_RC or time.time() - started < FAST_FAIL_S):
-            id9 = _ledger_ident(common.DB_PATH)
+            id9 = _ledger_ident(paths.DB_PATH)
             k9 = (id9 or (0,))[0]
             if p.returncode == CORE_CORRUPT_RC or time.time() - deep_at.get(k9, 0) >= DEEP_RECHECK_S:
                 deep_at[k9] = time.time()
                 log.info("[core] 빨리 멈춤(rc=%s) — 원장 검사(quick_check) 중…", p.returncode)
-                ok9, why9 = ledger_backup.ledger_check_light(common.DB_PATH)
+                ok9, why9 = ledger_backup.ledger_check_light(paths.DB_PATH)
                 if ok9:
-                    ok9, why9 = ledger_backup.ledger_check_deep(common.DB_PATH)
+                    ok9, why9 = ledger_backup.ledger_check_deep(paths.DB_PATH)
                 if not ok9:
-                    corrupt = (_ledger_ident(common.DB_PATH), why9)
+                    corrupt = (_ledger_ident(paths.DB_PATH), why9)
                     log.error("[core] %s — %s. 다시 띄우지 않고 기다려요: python3 tools/ledger_restore.py list → restore <백업> --apply",
                               CORRUPT_WHY, why9)
                     _beat(unit, state="waiting", why=CORRUPT_WHY, fp=fp, evidence=[why9][:6], since=wait_since.setdefault(CORRUPT_WHY, int(time.time())))

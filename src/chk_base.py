@@ -4,14 +4,9 @@ import os
 import re
 import time
 from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
-import common
+import paths
 
-KST = timezone(timedelta(hours=9))
-
-
-HB_DIR = os.path.join(common.STATE_DIR, "health")
+from timeutil import KST
 
 
 UNITS = ["tj-evm", "tj-sol", "tj-bsc", "tj-core", "tj-web", "tj-alert", "tj-review", "tj-ex", "tj-exf"]

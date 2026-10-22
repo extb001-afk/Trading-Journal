@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _btcfake as BF
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _btcfake as BF  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import address_codec as ac
-import btc_descriptor as bd
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import btc_watch as bw
-from inbox import SegmentWriter
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import address_codec as ac  # noqa: E402
+import btc_descriptor as bd  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import btc_watch as bw  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 
 ZPUB84 = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
 D = bd.descriptor_from_xpub(ZPUB84)
@@ -38,7 +38,7 @@ W2ADDR = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr"
 X0, X1 = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA", "1J3J6EvPrv8q6AC3VCjWV45Uf3nssNMRtH"
 X2 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "btc")
+INB = os.path.join(paths.INBOX_DIR, "btc")
 BTC = 10 ** 8
 
 
@@ -47,7 +47,7 @@ def set_cfg(wallets, **kw):
     cfg["chain_wallets"] = wallets
     cfg["nonevm"] = BF.cfg_nonevm(**kw)
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 WALLETS = [{"chain": "btc", "mode": "descriptor", "descriptor": D, "label": "hd"},
@@ -145,7 +145,7 @@ check("H1 사용자 range_end 60 = gap 밖 R50 거래도 찾음", a6 in recs(), 
 cfg = set_cfg([dict(WALLETS[0], range_end=60), WALLETS[1]])
 
 reg.FORCE_AVAILABLE.add("btc")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
@@ -360,12 +360,12 @@ check("H12 창 밖 시각 거래는 안 보냄", pre not in recs() and oldtx in 
 cfg_w = json.load(open(CFG_PATH))
 cfg_w["backfill_months"] = 12
 json.dump(cfg_w, open(CFG_PATH, "w"))
-cfg = common.load_config()
+cfg = config.load_config()
 ad, st, col = new_col(cfg)
 run(col, 12)
 check("H12 창을 넓히면 옛 거래를 나중에 보냄", pre in recs())
 
-blob = open(os.path.join(common.STATE_DIR, "cursor_btc.json")).read() + json.dumps(inbox())
+blob = open(os.path.join(paths.STATE_DIR, "cursor_btc.json")).read() + json.dumps(inbox())
 check("H13 상태·인박스에 xpub·디스크립터 원문 없음", ZPUB84[:20] not in blob and "xpub" not in blob and D.split("#")[1] not in blob)
 cfg_d = set_cfg([dict(WALLETS[0], range_end=60), {"chain": "btc", "mode": "address", "address": R(0), "label": "dup"}],
                 reorg_ack=hold["from_height"])
@@ -393,7 +393,7 @@ ud = [x["tx_uid"] for x in wd.recs]
 check("H13 중복 스크립트 = 같은 거래를 두 지갑 관점으로 거듭 보내지 않음(HD 지갑 1번)", len(ud) == len(set(ud)) and all(x["owners"] == [HD] or HD in x["owners"]
       for x in wd.recs if x["tx_uid"] == a1), (len(ud), len(set(ud))))
 
-import tempfile
+import tempfile  # noqa: E402
 tmp50 = tempfile.mkdtemp(dir=T.TMP)
 fc.page = 50
 st50 = cs.ChainState("btc", state_dir=tmp50)
@@ -428,9 +428,9 @@ n_gone = ad.prune_wallets(reg.owners(cfg, "btc"))
 check("H14 지갑 빼면 그 발견 상태 정리(원장·방출 기록은 그대로)", n_gone == 1 and W3 not in ad.sb["wallets"], n_gone)
 
 st.save()
-raw9 = json.load(open(os.path.join(common.STATE_DIR, "cursor_btc.json")))
+raw9 = json.load(open(os.path.join(paths.STATE_DIR, "cursor_btc.json")))
 raw9["btc"]["v"] = 0
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_btc.json"), raw9)
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_btc.json"), raw9)
 n9 = len(inbox())
 ad, st, col = new_col(cfg)
 run(col, 12)

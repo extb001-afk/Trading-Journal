@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
+
+import acct_norm
+import num_parse
 
 SKIP_SYMS = ("KRW", "USD")
 
 
 def _num(v) -> Decimal | None:
-    try:
-        d = Decimal(str(v))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
-    return d if d.is_finite() else None
+    return num_parse.to_dec(v)
 
 
-def actual_of(snap: dict) -> dict:
+def actual_of(snap: dict, ex: str = "") -> dict:
+    skip_syms = acct_norm.ex_off_ledger(ex) if ex else SKIP_SYMS
     out = {}
     bal = snap.get("balances") if isinstance(snap, dict) else None
     if not isinstance(bal, dict):
@@ -21,14 +21,14 @@ def actual_of(snap: dict) -> dict:
     for k, v in bal.items():
         s = str(k).upper()
         d = _num(v)
-        if s in SKIP_SYMS or d is None:
+        if s in skip_syms or d is None:
             continue
         out[s] = out.get(s, Decimal(0)) + d
     debts = snap.get("debts") if isinstance(snap.get("debts"), dict) else {}
     for k, v in debts.items():
         s = str(k).upper()
         d = _num(v)
-        if s in SKIP_SYMS or d is None or d >= 0:
+        if s in skip_syms or d is None or d >= 0:
             continue
         out[s] = out.get(s, Decimal(0)) + d
     return out
@@ -45,13 +45,13 @@ def items(exb: dict, *, done, ledger) -> list:
             continue
         if bts <= 0:
             continue
-        act = actual_of(snap)
+        act = actual_of(snap, ex)
         lr = ledger(ex, bts)
         led, amb = lr[0] or {}, set(lr[1] or ())
         tot = (lr[2] or {}) if len(lr) > 2 else {}
         loc = f"exchange:{ex}"
         for sym in sorted(set(act) | set(led)):
-            if sym in amb or sym in SKIP_SYMS:
+            if sym in amb or sym in acct_norm.ex_off_ledger(ex):
                 continue
             per = led.get(sym) or {}
             if any(v is None for v in per.values()):

@@ -4,11 +4,9 @@ from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
-import common
+import num_parse, paths, statefile
 import bisect
-import calcguard
-
-SOL_STAKE_PATH = os.path.join(common.STATE_DIR, "sol_stake.json")
+import calcguard  # noqa: E402
 
 
 STAKE_STATE_KO = {"activating": "스테이킹 활성화 대기", "active": "스테이킹 중", "deactivating": "스테이킹 해제 중",
@@ -17,10 +15,10 @@ STAKE_STATE_KO = {"activating": "스테이킹 활성화 대기", "active": "스�
 
 def _sol_stake_accounts() -> dict:
     try:
-        d = common.read_json(SOL_STAKE_PATH, {}) or {}
+        d = statefile.read_json(paths.state("sol_stake.json"), {}) or {}
         acc = d.get("accounts") or {}
         return acc if isinstance(acc, dict) else {}
-    except (Exception, SystemExit) as _cg9:
+    except (Exception, SystemExit) as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("view_misc:_sol_stake_accounts", _cg9)
         return {}
 
@@ -88,11 +86,7 @@ def _px_recent(px, sym, ms):
 
 
 def _dec_or0(x) -> Decimal:
-    try:
-        d9 = Decimal(str(x))
-        return d9 if d9.is_finite() else Decimal(0)
-    except (InvalidOperation, ValueError, TypeError):
-        return Decimal(0)
+    return num_parse.to_dec(x, Decimal(0))
 
 
 class _BuildObsolete(Exception):
@@ -100,9 +94,13 @@ class _BuildObsolete(Exception):
 
 
 def _fx_candle_near(fxb, sym, ts, within_s=3600):
-    if not fxb.candle(sym, ts):
+    c0 = fxb.candle(sym, ts)
+    if not c0:
         return None
-    ks, pts = fxb._csym[str(sym or "").upper()]
+    idx = getattr(fxb, "_csym", {}).get(str(sym or "").upper())
+    if idx is None:
+        return c0
+    ks, pts = idx
     m = (int(ts) * 1000 // 60_000) * 60_000
     if m in pts:
         return pts[m]
@@ -114,6 +112,9 @@ def _fx_candle_near(fxb, sym, ts, within_s=3600):
             if d <= int(within_s) * 1000 and (best is None or d < best[0]):
                 best = (d, ks[i])
     return pts[best[1]] if best else None
+
+
+fx_candle_near = _fx_candle_near
 
 
 def _venue_flows30(vflow, real_loc, venue_w, today_kst):
@@ -155,7 +156,7 @@ def build_stats(hist) -> dict:
 
 def _cfg_file_sig():
     try:
-        st9 = os.stat(common.CONFIG_PATH)
+        st9 = os.stat(paths.CONFIG_PATH)
         return (st9.st_mtime_ns, st9.st_size)
     except OSError:
         return None

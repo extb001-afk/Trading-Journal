@@ -17,16 +17,16 @@ class KrwPools:
     def krw_of(kpx, usd, ts9, row9=None):
         try:
             usd = Decimal(usd)
-        except Exception as _cg9:
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of", _cg9)
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of[usd]", _cg9)
             return Decimal(0)
         if row9 is not None and row9["cost_krw"] is not None and row9["cost_usd"] is not None:
             try:
                 cu9 = Decimal(row9["cost_usd"])
                 if cu9 > 0:
                     return usd * Decimal(row9["cost_krw"]) / cu9
-            except Exception as _cg9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of[cu9]", _cg9)
                 pass
         return usd * Decimal(str(kpx.fxb.rate_at(ts9)))
 

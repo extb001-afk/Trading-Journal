@@ -124,7 +124,7 @@
       + (!S.D.hasSrc ? '<div class="sep"></div><div class="cap" style="padding:4px 10px">소스 표시가 없는 데이터라 필터가 비어 보일 수 있어요</div>' : ''));
   }
   function periodPop() {
-    return popBox('기간', PERIODS.map(p => '<button class="opt' + (S.g.period === p.k ? ' on' : '') + '" data-a="setPeriod" data-v="' + p.k + '">' + p.label + (p.k === 'custom' && S.g.period === 'custom' ? ' <span class="cap">' + esc(periodName()) + '</span>' : '') + optCk + '</button>').join(''));
+    return popBox('기간', PERIODS.map(p => '<button class="opt' + (S.g.period === p.k ? ' on' : '') + '" data-a="setPeriod" data-v="' + p.k + '">' + esc(p.label) + (p.k === 'custom' && S.g.period === 'custom' ? ' <span class="cap">' + esc(periodName()) + '</span>' : '') + optCk + '</button>').join(''));
   }
   function rangePop() {
     if (!S.rp.ym) S.rp.ym = (isISO(S.g.to) ? S.g.to : todayISO()).slice(0, 7);
@@ -664,7 +664,7 @@
     const tc = op => '<svg class="tc' + (op ? ' o' : '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
     const r6 = (a, b, c, d, e, f2, extra, attrs) => '<div class="tax-r ' + extra + '"' + (attrs || '') + '><span class="ell">' + a + '</span><span class="hm">' + b + '</span><span class="hm">' + c + '</span><span class="hm">' + d + '</span><span>' + wbrN(e) + '</span><span>' + wbrN(f2) + '</span></div>';
     const unit = kind === 'inc' || kind === 'fut' ? '건' : '행', cols = o.cols;
-    return '<div class="card' + (kind === 'spot' ? '' : ' taxx') + '"><div class="tblhead"><h2 class="h2">' + o.title + '</h2><span class="cap">' + o.cap + '</span></div>'
+    return '<div class="card' + (kind === 'spot' ? '' : ' taxx') + '"><div class="tblhead"><h2 class="h2">' + esc(o.title) + '</h2><span class="cap">' + o.cap + '</span></div>'
       + r6(cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], 'h')
       + groups.map(g => {
         const open = S.taxOpen.has(g.key);

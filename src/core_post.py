@@ -1,14 +1,17 @@
 import chain_event
 import chain_registry
-import common
+import paths
+import db as dbm
 import json
 import lpdec
 import lpsol
+import recon_adj
 import os
 import time
 from core_common import CLASSIFIER_VER
 from core_common import MissingTs
 from core_common import dm
+from core_post_cols import LEG_SQL
 from decimal import Decimal
 from decimal import localcontext
 import logging
@@ -145,7 +148,7 @@ class PostMixin:
         for r in self.conn.execute(
                 "SELECT t.txhash, t.event, t.detail, (SELECT min(p.event_ts) FROM postings p WHERE p.source_kind='chain_tx'"
                 "  AND p.source_ns=t.chain AND p.source_id=t.txhash) AS ets"
-                " FROM tx_class t WHERE t.chain=? AND t.event LIKE 'LP_%' AND t.txhash != ?", (chain, txhash)).fetchall():
+                " FROM tx_class t WHERE t.chain=? AND t.event LIKE 'LP\\_%' ESCAPE '\\' AND t.txhash != ?", (chain, txhash)).fetchall():
             if r["ets"] is None or (int(r["ets"]), r["txhash"]) <= (int(ts), txhash):
                 continue
             try:
@@ -225,6 +228,9 @@ class PostMixin:
             self._bump_position(p["asset_id"], -int(p["qty_base"]), p["location"])
         self.conn.execute("DELETE FROM postings WHERE source_kind=? AND source_ns=? AND source_id=?", (kind, ns, sid))
         return rows
+
+    def _leg_sql(self, name: str, params: tuple):
+        return self.conn.execute(LEG_SQL[name], params)
 
     def _bump_position(self, aid: int, v: int, loc: str) -> None:
         grp = self._group_of(aid)
@@ -322,10 +328,11 @@ class PostMixin:
             ex_hint = None
         else:
             event, ex_hint = "NOOP", None
+        ev = self._post_event("sol", txhash, event, deltas, perw, gas, gas_w, ts, ex_hint,
+                              dest={"to": None, "cps": sorted(cps)[:4]}, rederive=rederive)
         if event == "STAKE_REWARD" and ts < time.time() - 86400:
-            self._drop_daily_cache()
-        return self._post_event("sol", txhash, event, deltas, perw, gas, gas_w, ts, ex_hint,
-                                dest={"to": None, "cps": sorted(cps)[:4]}, rederive=rederive)
+            self._inval_daily()
+        return ev
 
     def apply_chain_delta(self, rec: dict, rederive=None):
         c = chain_event.to_core(rec)
@@ -437,16 +444,22 @@ class PostMixin:
         ev = self.apply_chain_delta(rec, rederive=(old_ev, frozenset(keep)))
         self._anchor_absorb(chain, uid, before)
         self._hist_late_gone("chain_tx", chain, uid, t_before)
-        self._drop_daily_cache()
+        self._inval_daily()
         log.info("★[%s] %s 재파생(새 관점): %s→%s★", chain, uid[:14], old_ev, ev)
         if ev != old_ev:
             dm("REDERIVE", f"[{chain}] 새 관점으로 분류 변경 {old_ev}→{ev} tx {rec.get('txhash')}", {"chain": chain, "txhash": uid})
         return ev
 
-    @staticmethod
-    def _drop_daily_cache():
+    def _inval_seq(self) -> None:
+        own = not self.conn.in_transaction
+        dbm.bump_daily_inval(self.conn)
+        if own:
+            self.conn.commit()
+
+    def _inval_daily(self) -> None:
+        self._inval_seq()
         try:
-            os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+            os.remove(paths.state("daily_cache.json"))
         except FileNotFoundError:
             pass
 
@@ -476,12 +489,13 @@ class PostMixin:
                 continue
             loc = f"wallet:sol:{d['owner']}"
             self._post_leg_strict('opening', 'sol', sid, seq, ts, aid, loc, v, None, None, 'opening', 'OPENING')
+            recon_adj.note(self.conn, "K5", ('opening', 'sol', sid, seq), "stake_open")
             seq += 1
         self.conn.execute(
             "INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
             (sid, "opening_balance", "sol", json.dumps(so, ensure_ascii=False), int(time.time())))
         self._hist_late_gone("opening", "sol", sid, t_old9)
-        self._drop_daily_cache()
+        self._inval_daily()
         if seq:
             dm("RECON", f"[sol] 스테이크 계정 기초잔고 {int(so.get('lamports') or 0) / 1e9:,.4f} SOL — {acct[:6]}…{acct[-4:]}"
                         f" (지갑 {str(so.get('wallet') or '')[:6]}…, 창 시작 기준)")

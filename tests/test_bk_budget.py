@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 N = 5
@@ -19,14 +19,14 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
 R = evm_watch.RpcChainWatcher
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
-EPATH = os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
+EPATH = os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json")
 HEAD = 60_000_000
 SAFE = HEAD - 10
 B0 = 40_000_000
@@ -74,8 +74,8 @@ class Rig:
             cur["_bk:" + w] = {"from": B0, "to": B0 + span, "done": B0, "why": "new"}
             cur["_bkns"][w] = [B0, 0, "0", 0, "0"]
         cur.update(extra or {})
-        common.atomic_write_json(CPATH, cur)
-        common.atomic_write_json(EPATH, [])
+        statefile.atomic_write_json(CPATH, cur)
+        statefile.atomic_write_json(EPATH, [])
         w = self.w = R(CFG, CH, list(self.ws), Wr())
         w.multicall = None
         w.trace_rpcs = ["http://127.0.0.1:9/trace"]
@@ -128,7 +128,7 @@ class Rig:
         return None
 
     def disk(self):
-        return common.read_json(CPATH, {})
+        return statefile.read_json(CPATH, {})
 
 
 real_time = evm_watch.time
@@ -178,7 +178,7 @@ try:
         rg5 = Rig(W[:1], {}, span=8000, extra={W[0]: SAFE - 3000, "_lvspan": lv, "_ns": {W[0]: [SAFE - 3000, 0, "0", 0, "0"]}})
         for k9 in [k for k in rg5.w.cursor if k.startswith("_bk:")]:
             rg5.w.cursor.pop(k9)
-        common.atomic_write_json(CPATH, rg5.w.cursor)
+        statefile.atomic_write_json(CPATH, rg5.w.cursor)
 
         def adv(ws, c, target, head, deadline, bk=False):
             err_fn(rg5.w, c)
@@ -321,7 +321,7 @@ try:
     T.chk("old" not in ll10 and "new" in ll10, "B9 30일 넘은 잎 = 뺌 · 그 안 = 그대로(종전: 만료 없음)", sorted(ll10))
     T.chk(any(r.get("kind") == "leaf_later_giveup" and int(r.get("blk") or 0) == 21 for r in (w10.cursor.get("_native_notes") or [])),
           "B9 뺀 잎 = 기록(leaf_later_giveup)", [r.get("kind") for r in (w10.cursor.get("_native_notes") or [])])
-    T.chk(int((common.read_json(CPATH, {}).get("_leaf_later") or {}).get("old", {}).get("n") or -1) == -1, "B9 디스크에도 반영", None)
+    T.chk(int((statefile.read_json(CPATH, {}).get("_leaf_later") or {}).get("old", {}).get("n") or -1) == -1, "B9 디스크에도 반영", None)
 
     rg11 = Rig(W[:1], {})
     w11 = rg11.w
@@ -345,12 +345,12 @@ try:
 
     GEN = 1_700_000_000
     S0 = 50_000_000
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "backfill_request.json"), {"since": "2026-01-01"})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "backfill_request.json"), {"since": "2026-01-01"})
     cur11 = {"_rpc_v": 1, "_start": S0, "_ns": {}}
     for w in W[:2]:
         cur11[w] = SAFE
         cur11["_ns"][w] = [SAFE, 0, "0", 0, "0"]
-    common.atomic_write_json(CPATH, cur11)
+    statefile.atomic_write_json(CPATH, cur11)
     ft11 = FakeTime()
     evm_watch.time = ft11
     T.patch_moved("time", evm_watch.time, ("evm_",))
@@ -360,7 +360,7 @@ try:
     s9 = bf_engine.SINCE.target(CH)
     T.chk(bool(s9) and w13._window_start(SAFE) < S0, "B11 준비: 확장 목표가 지금 창 시작보다 이름", {"s9": s9, "ws": w13._window_start(SAFE)})
     T.safe(w13._since_reinit, SAFE)
-    d13 = common.read_json(CPATH, {})
+    d13 = statefile.read_json(CPATH, {})
     T.chk(all(int(d13.get(w) or 0) == SAFE for w in W[:2]) and not isinstance(d13.get("_since_ext"), dict),
           "B11 단일 차선 설치의 과거 창 확장 = 최신 커서를 되감지 않음(종전: 전 지갑 커서를 새 시작으로 — 옛 구간 다 훑을 때까지 최신 멈춤)",
           {"curs": [d13.get(w) for w in W[:2]], "since_ext": d13.get("_since_ext")})
@@ -368,12 +368,12 @@ try:
           and isinstance(d13.get("_handover"), dict) and d13["_handover"].get("from") == "extend" and w13.bk_mode,
           "B11 앞 구간 = 뒤 차선 작업(why=extend · 끝 = 옛 창 시작) · 차선 모드 전환(_handover from=extend)",
           {k: v for k, v in d13.items() if k.startswith("_bk") or k == "_handover"})
-    os.remove(os.path.join(common.STATE_DIR, "backfill_request.json"))
+    os.remove(os.path.join(paths.STATE_DIR, "backfill_request.json"))
 
     rg14 = Rig(W[:1], {}, span=8000)
     w14 = rg14.w
     w14.cursor["_bk:" + W[0]] = {"from": B0, "to": B0 + 10_000_000, "done": B0, "why": "new"}
-    common.atomic_write_json(CPATH, w14.cursor)
+    statefile.atomic_write_json(CPATH, w14.cursor)
     mode = {"fail": True}
 
     def adv14(ws, c, target, head, deadline, bk=False):
@@ -387,14 +387,14 @@ try:
         return int(target)
     w14._advance = adv14
     T.safe(w14.cycle)
-    sp1 = int(common.read_json(CPATH, {}).get("_bkspan") or 0)
+    sp1 = int(statefile.read_json(CPATH, {}).get("_bkspan") or 0)
     mode["fail"] = False
     rg14.ft.t += POLL
     T.safe(w14.cycle)
-    sp2 = int(common.read_json(CPATH, {}).get("_bkspan") or 0)
+    sp2 = int(statefile.read_json(CPATH, {}).get("_bkspan") or 0)
     rg14.ft.t += 700
     T.safe(w14.cycle)
-    sp3 = int(common.read_json(CPATH, {}).get("_bkspan") or 0)
+    sp3 = int(statefile.read_json(CPATH, {}).get("_bkspan") or 0)
     T.chk(sp1 == 4000 and sp2 == 4000, "B12 줄인 뒤 10분 안 빠른 걸음 = 그대로(종전: 바로 두 배 → 다음 바쁜 구간에서 또 소진)", {"cut": sp1, "next": sp2})
     T.chk(sp3 > 4000, "B12 유예(10분) 지나면 다시 늘림", sp3)
 
@@ -416,7 +416,7 @@ try:
         return out
     w15._details = det15
     T.safe(w15.cycle)
-    sp15 = int(common.read_json(CPATH, {}).get("_bkspan") or 0)
+    sp15 = int(statefile.read_json(CPATH, {}).get("_bkspan") or 0)
     T.chk(sp15 == 8000, "B13 상세 일부를 새로 받은 무전진(나머지 예산 소진 — 받은 상세는 메모로 이어 씀) = 걸음 유지(종전: 반감)", sp15)
     rg15.ft.t += POLL
     T.safe(w15.cycle)
@@ -432,7 +432,7 @@ try:
     T.chk(r16b is False and any(int((v or {}).get("blk") or 0) == 778 for v in (w16.cursor.get("_leaf_later") or {}).values()),
           "B14 뒤 차선 = 첫 실패에 바로 '나중에 다시'(종전: 10회·30분 보류 예외)", r16b)
     cur17 = {"_rpc_v": 1, "_start": 0, W[0]: SAFE - 9000, "_ns": {W[0]: [SAFE - 9000, 0, "0", 0, "0"]}}
-    common.atomic_write_json(CPATH, cur17)
+    statefile.atomic_write_json(CPATH, cur17)
     w17 = R(CFG, CH, list(W[:1]), Wr())
     w17._late_ctx = True
     r17 = T.safe(w17._leaf_retry, W[0], 779, False, c=SAFE - 9000, nk="_ns")
@@ -548,7 +548,7 @@ try:
     for k9 in [k for k in w20.cursor if k.startswith("_bk:")]:
         w20.cursor.pop(k9)
     w20.cursor["_hq"] = {"0x" + f"{0xa0 + i:02x}" * 32: 0 for i in range(20)}
-    common.atomic_write_json(CPATH, w20.cursor)
+    statefile.atomic_write_json(CPATH, w20.cursor)
     n20 = {"trace": 0}
 
     def slow_trace(h, snap):
@@ -586,7 +586,7 @@ try:
             w.cursor.pop(k9)
         hs = ["0x" + f"{0xc0 + i:02x}" * 32 for i in range(n)]
         w.cursor["_hq"] = {h: 0 for h in hs}
-        common.atomic_write_json(CPATH, w.cursor)
+        statefile.atomic_write_json(CPATH, w.cursor)
         st = {"trace": [], "det": 0}
 
         def det(hl, deadline=None, trace=True, **k):
@@ -613,7 +613,7 @@ try:
         rgA.ft.t += POLL
     leftA = sorted(wA.cursor.get("_hq") or {})
     T.chk(leftA == [hsA[0]] and {r.get("txhash") for r in wA.writer.recs} >= set(hsA[1:]),
-          "B18 맨 앞 항목이 매번 60초 뒤 408 이어도 몇 사이클 안에 뒤 항목 전부 처리(재개 위치 — 종전 bb612 판: 같은 앞 항목만 되풀이 · 뒤 항목 영구 정체)",
+          "B18 맨 앞 항목이 매번 60초 뒤 408 이어도 몇 사이클 안에 뒤 항목 전부 처리(재개 위치 — 종전 판: 같은 앞 항목만 되풀이 · 뒤 항목 영구 정체)",
           {"left": len(leftA), "emitted": len(wA.writer.recs), "traced": len(stA["trace"])})
     rgB, wB, hsB, stB = hq_rig(det_sec=12.0)
     prog = []
@@ -623,7 +623,7 @@ try:
         prog.append(b0 - len(wB.cursor.get("_hq") or {}))
         rgB.ft.t += POLL
     T.chk(all(x >= 1 for x in prog[:5]) and not (wB.cursor.get("_hq") or {}),
-          "B18 상세 조회가 예산(10초)을 넘겨도 매 사이클 trace ≥1건 진전 → 큐가 빔(종전 bb612 판: 상세 뒤 마감 검사로 trace 0건 · 매번 같은 상세 반복)",
+          "B18 상세 조회가 예산(10초)을 넘겨도 매 사이클 trace ≥1건 진전 → 큐가 빔(종전 판: 상세 뒤 마감 검사로 trace 0건 · 매번 같은 상세 반복)",
           {"progress": prog, "left": len(wB.cursor.get("_hq") or {}), "det_calls": stB["det"]})
 
     rg22 = Rig(W[:1], {})
@@ -662,7 +662,7 @@ try:
         T.chk(isinstance(o22b, dict) and all(isinstance(o22b.get(h), Exception) for h in hs22[:2]) and n22["trace"] == 8,
               "B19 헤드 꼬리 걸음(늦은 채움 문맥 아님) = 앞 tx 들은 종전대로 trace 재시도(TRACE_RETRY · 노드 2 × callTracer·parity)", {"trace_calls": n22["trace"]})
         T.chk(isinstance(o22b, dict) and isinstance(o22b.get(hs22[2]), dict) and hs22[2] in (w22.__dict__.get("_trace_late") or {}),
-              "B19 헤드 꼬리 걸음도 한 상세 호출 안 연속 2번 실패 뒤 남은 tx 는 trace 를 걸지 않고 늦은 채움 표식(baser1011 — 문서2 1-2 ①)",
+              "B19 헤드 꼬리 걸음도 한 상세 호출 안 연속 2번 실패 뒤 남은 tx 는 trace 를 걸지 않고 늦은 채움 표식(문서2 1-2 ①)",
               {"t3": type(o22b.get(hs22[2])).__name__ if isinstance(o22b, dict) else o22b})
     finally:
         bf_engine.rpc_call = real_rpc22
@@ -672,7 +672,7 @@ try:
         w = rg.w
         for k9 in [k for k in w.cursor if k.startswith("_bk:")]:
             w.cursor.pop(k9)
-        common.atomic_write_json(CPATH, w.cursor)
+        statefile.atomic_write_json(CPATH, w.cursor)
         w.trace_rpcs = ["http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"]
         span = SAFE - live0
         txs = {}
@@ -706,14 +706,14 @@ try:
             for i in range(cycles):
                 tc = rg.ft.t
                 T.safe(w.cycle)
-                if int(common.read_json(CPATH, {}).get(W[0]) or 0) >= SAFE:
+                if int(statefile.read_json(CPATH, {}).get(W[0]) or 0) >= SAFE:
                     return i + 1, rg.ft.t - t0, len(w.writer.recs)
                 rg.ft.t = max(rg.ft.t, tc + POLL)
             return None, rg.ft.t - t0, len(w.writer.recs)
         finally:
             bf_engine.rpc_call = real9
     c20, s20, e20 = catchup(300, SAFE - 86_400, 4)
-    T.chk(c20 == 1 and s20 <= 300 and e20 == 300, "B20 최근 창 86,400블록 · 내 컨트랙트 호출 300건 · trace 노드 408 — 첫 사이클(≤300초)에 헤드 도달 · 300건 방출(종전 14차 판도 같은 입력이면 5,000블록/≈400초 고정 — 몇 시간)",
+    T.chk(c20 == 1 and s20 <= 300 and e20 == 300, "B20 최근 창 86,400블록 · 내 컨트랙트 호출 300건 · trace 노드 408 — 첫 사이클(≤300초)에 헤드 도달 · 300건 방출(종전 판도 같은 입력이면 5,000블록/≈400초 고정 — 몇 시간)",
           {"cycle": c20, "sec": s20, "emitted": e20})
     c20b, s20b, e20b = catchup(1, SAFE - 100, 1)
     T.chk(c20b is None and e20b == 0, "B20 평시 꼬리(헤드 근처 100블록 걸음) = 종전대로 trace 재시도(그 사이클 커서 유지 · 늦은 채움 아님)", {"cycle": c20b, "emitted": e20b})
@@ -722,7 +722,7 @@ try:
     w23 = rg23.w
     for k9 in [k for k in w23.cursor if k.startswith("_bk:")]:
         w23.cursor.pop(k9)
-    common.atomic_write_json(CPATH, w23.cursor)
+    statefile.atomic_write_json(CPATH, w23.cursor)
     w23.trace_rpcs = ["http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"]
     tx23 = {}
     for i in range(10):
@@ -750,12 +750,12 @@ try:
         w23._late_ctx = False
     finally:
         bf_engine.rpc_call = real23
-    d23 = common.read_json(CPATH, {})
+    d23 = statefile.read_json(CPATH, {})
     tl23 = d23.get("_trace_later") or {}
     T.chk(set(tx23) <= set(tl23) and all(int(tl23[h].get("n") or 0) == 0 and tl23[h].get("sent") for h in tx23),
           "B21 따라잡는 걸음에서 trace 를 건너뛴 tx 도 전부 늦은 채움 큐에 n=0 · 방출 표식으로 등록(trace=False 함정 없음 · 디스크)", {"in_queue": len(set(tx23) & set(tl23))})
     T.chk(len(getattr(w23, "_trace_fail", {}) or {}) == 1, "B21 시도 안 한 tx 는 실패 횟수(_trace_fail)를 안 올림(실제로 부른 첫 tx 1건만)", len(getattr(w23, "_trace_fail", {}) or {}))
-    T.chk(getattr(R, "TRACE_LATER_MAX", 0) == 2000, "B21 커서 안 늦은 채움 큐 상한 = 2,000(옛 판 상한 그대로 — 롤백 호환 · 넘는 건 넘침 파일 · 코덱스 ba705 #3)", getattr(R, "TRACE_LATER_MAX", 0))
+    T.chk(getattr(R, "TRACE_LATER_MAX", 0) == 2000, "B21 커서 안 늦은 채움 큐 상한 = 2,000(옛 판 상한 그대로 — 롤백 호환 · 넘는 건 넘침 파일)", getattr(R, "TRACE_LATER_MAX", 0))
     rg24 = Rig(W[:1], {})
     w24 = rg24.w
     w24.TRACE_LATER_MAX = 5
@@ -767,11 +767,11 @@ try:
         w24.__dict__["_trace_late"][hj] = 1
         w24._trace_later_mark(hj, {"tx": {"hash": hj, "block_number": 2}, "internal": []})
     tl24 = w24.cursor.get("_trace_later") or {}
-    ovf24 = os.path.join(common.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
+    ovf24 = os.path.join(paths.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
     rows24 = [json.loads(x) for x in open(ovf24, encoding="utf-8")] if os.path.exists(ovf24) else []
     T.chk(all(f"0xa{i}" in tl24 for i in range(5)) and not any(f"0xb{j}" in tl24 for j in range(3)) and sorted(r["h"] for r in rows24) == ["0xb0", "0xb1", "0xb2"]
           and all(r.get("sent") for r in rows24),
-          "B21 큐 넘침 = 아무것도 버리지 않음 — 큐 항목 그대로 · 새 항목은 넘침 파일(내구 append · 방출 사실 보존)(baser1011 문서2 B3 · 코덱스 bb620 HIGH)", {"q": sorted(tl24), "file": rows24})
+          "B21 큐 넘침 = 아무것도 버리지 않음 — 큐 항목 그대로 · 새 항목은 넘침 파일(내구 append · 방출 사실 보존)(문서2 B3)", {"q": sorted(tl24), "file": rows24})
     T.chk(int(w24.cursor.get("_trace_later_overflow") or 0) == 3 and not w24.cursor.get("_trace_later_dropped"),
           "B21 넘침 대기 수 커서 기록(_trace_later_overflow — 헬스 사실) · 버린 수 0", {"ovf": w24.cursor.get("_trace_later_overflow"), "drop": w24.cursor.get("_trace_later_dropped")})
     for i in range(5):
@@ -779,9 +779,9 @@ try:
     T.safe(w24._trace_overflow_refill)
     tl24b = w24.cursor.get("_trace_later") or {}
     T.chk(sorted(tl24b) == ["0xb0", "0xb1", "0xb2"] and all(tl24b[h].get("sent") and int(tl24b[h].get("n") or 0) == 0 for h in tl24b)
-          and not os.path.exists(ovf24) and not w24.cursor.get("_trace_later_overflow") and sorted((common.read_json(CPATH, {}).get("_trace_later") or {})) == ["0xb0", "0xb1", "0xb2"],
+          and not os.path.exists(ovf24) and not w24.cursor.get("_trace_later_overflow") and sorted((statefile.read_json(CPATH, {}).get("_trace_later") or {})) == ["0xb0", "0xb1", "0xb2"],
           "B21 자리가 나면 넘침 파일에서 되살림(방출 사실·시도 0 그대로 · 커서 먼저 내구화 뒤 파일 지움)", {"q": tl24b, "file": os.path.exists(ovf24)})
-    import health
+    import health  # noqa: E402
     ht24 = getattr(health, "trace_later_drop_text", None)
     T.chk(ht24 is not None and ht24({}) is None and "3" in (ht24({"_trace_later_overflow": 3}) or "") and "경고" not in (ht24({"_trace_later_overflow": 3}) or "")
           and "경고" in (ht24({"_trace_later_dropped": 2}) or ""),
@@ -821,10 +821,10 @@ try:
         w27.cursor.pop(k9)
     now27 = int(rg27.ft.t)
     w27.cursor["_trace_later"] = {"0x" + f"{0x3000 + i:064x}": {"at": now27 - 60, "n": 0, "next": 0, "blk": 9, "sent": True} for i in range(25)}
-    common.atomic_write_json(CPATH, w27.cursor)
+    statefile.atomic_write_json(CPATH, w27.cursor)
     w27._trace_internal = lambda h, snap: rg27.ft.t.__class__
     T.safe(w27.cycle)
-    left27 = len(common.read_json(CPATH, {}).get("_trace_later") or {})
+    left27 = len(statefile.read_json(CPATH, {}).get("_trace_later") or {})
     T.chk(left27 == 5, "B21 라이브가 꼬리에 붙은 사이클 = 늦은 채움 재시도 20건(30초 안 · 종전 3건)", {"left": left27})
 finally:
     evm_watch.time = real_time

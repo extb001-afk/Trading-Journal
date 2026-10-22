@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 os.environ["TJ_TG_API"] = "http://127.0.0.1:9/never"
@@ -15,9 +15,9 @@ with open(os.path.join(H.TMP, "config.json"), "w") as f:
     json.dump({}, f)
 with open(os.path.join(H.TMP, ".env"), "w") as f:
     f.write("TJ_TG_TOKEN=000000:fake-test-token\nTJ_TG_CHAT=12345\nTJ_TG_API=http://127.0.0.1:9/never\n")
-import common
-import alert_prefs as AP
-import alert_bot as ab
+import statefile  # noqa: E402
+import alert_prefs as AP  # noqa: E402
+import alert_bot as ab  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -36,8 +36,8 @@ def setup(lines):
     with open(os.path.join(S, "alerts_web.jsonl"), "w", encoding="utf-8") as f:
         for d in lines:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
-    common.atomic_write_json(os.path.join(H.TMP, "config.json"), {})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: AP.preset_doc("rec")})
+    statefile.atomic_write_json(os.path.join(H.TMP, "config.json"), {})
 
 
 def run_chunk(turn_off):
@@ -78,11 +78,11 @@ def run_chunk(turn_off):
 def off_cat():
     d = AP.preset_doc("rec")
     d["cats"]["liq"] = "off"
-    common.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d})
+    statefile.atomic_write_json(os.path.join(S, "ui_prefs.json"), {AP.PREF_KEY: d})
 
 
 def off_cfg():
-    common.atomic_write_json(os.path.join(H.TMP, "config.json"), {"alerts": {"liq_fast": False}})
+    statefile.atomic_write_json(os.path.join(H.TMP, "config.json"), {"alerts": {"liq_fast": False}})
 
 
 sent, cur, size = run_chunk(off_cat)

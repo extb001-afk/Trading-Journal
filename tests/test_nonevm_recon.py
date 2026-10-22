@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check, Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import address_codec as ac
+import config  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import address_codec as ac  # noqa: E402
 
 NOW = int(time.time())
 DAY = 86400
@@ -27,9 +27,9 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}]
 json.dump(cfg, open(CFG_PATH, "w"))
 reg.FORCE_AVAILABLE.add("tron")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
-c._nonevm_adapters = {"tron": None}
+c.svc_recon._nonevm_adapters = {"tron": None}
 LA = reg.make_location("tron", A)
 
 
@@ -40,14 +40,14 @@ def feed(rec):
 def scopes():
     jobs = {}
     sc = []
-    c._recon_bal = lambda chain, kind, mode, wallets: sc.append((chain, kind)) or None
-    c._scope_ready = lambda scope: True
-    c._recon_quiet = lambda *a: True
+    c.svc_recon._recon_bal = lambda chain, kind, mode, wallets: sc.append((chain, kind)) or None
+    c.svc_recon._scope_ready = lambda scope: True
+    c.svc_recon._recon_quiet = lambda *a: True
     try:
-        c._recon_pass_scopes(set(), True, jobs)
+        c.svc_recon._recon_pass_scopes(set(), True, jobs)
     finally:
         for k9 in ("_recon_bal", "_scope_ready", "_recon_quiet"):
-            c.__dict__.pop(k9, None)
+            c.svc_recon.__dict__.pop(k9, None)
     return sc
 
 
@@ -87,33 +87,33 @@ class FakeAdapter(reg.ChainAdapter):
 
 
 ad = FakeAdapter({})
-c._nonevm_adapters = {"tron": ad}
+c.svc_recon._nonevm_adapters = {"tron": ad}
 check("N0 어댑터 있으면 스코프 (tron, nonevm)", ("tron", "nonevm") in scopes())
 
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("N1 동기화 도장 없음 = 대사 안 함", not c._meta_get("recon_done_tron") and not ad.calls)
 st = cs.ChainState("tron")
 st.set_status(A, requested_from=0, details_complete_through=NOW)
 st.pending_upsert([("p1", {"owner": A})])
 st.mark_synced()
-check("N1 대기 남음 = 준비 안 됨", not c._scope_ready("tron"))
+check("N1 대기 남음 = 준비 안 됨", not c.svc_recon._scope_ready("tron"))
 st.mark_emitted("p1", "c1" * 32)
 st.save()
-check("N1 도장 신선 + 백필 완료 + 대기 0 = 준비", c._scope_ready("tron"))
+check("N1 도장 신선 + 백필 완료 + 대기 0 = 준비", c.svc_recon._scope_ready("tron"))
 
 ad.mode = "partial"
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("N4 부분 결과 = 보류(기초 잔고·도장 없음)", not c._meta_get("recon_done_tron") and not openings(), openings())
 ad.mode = "missing"
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("N4 지갑 빠진 결과 = 보류", not c._meta_get("recon_done_tron") and not openings())
 
 ad.mode = "full"
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("N2 대사 완료 도장", bool(c._meta_get("recon_done_tron")))
 check("N2 어댑터에 원장 토큰 키 전달(지갑별)", ad.calls[-1][1] == {A: sorted([N.TOK["tron"], "41" + "b2" * 20])}, ad.calls[-1])
 op = openings()

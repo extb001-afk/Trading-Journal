@@ -2,26 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import threading
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import bf_engine
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import _tronfake as F
-import tron_watch as TW
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
+import bf_engine  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import _tronfake as F  # noqa: E402
+import tron_watch as TW  # noqa: E402
 
 A, B = N.OWN["tron"]
 X = N.EXT["tron"]
@@ -30,7 +31,7 @@ X = N.EXT["tron"]
 def S(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return f"예외:{type(e).__name__}"
 
 SDU = os.path.join(T.TMP, "unit")
@@ -126,14 +127,14 @@ def set_wallets(*keys):
     cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(k)} for k in keys]
     cfg["nonevm"] = {"tron": {"api": fake.base, "rps": 1000, "retries": 1}}
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 set_wallets(A)
-INB = os.path.join(common.INBOX_DIR, "tron")
+INB = os.path.join(paths.INBOX_DIR, "tron")
 W = SegmentWriter(INB)
 st = cs.ChainState("tron")
-ad = TW.make_adapter(common.load_config())
+ad = TW.make_adapter(config.load_config())
 ad.state = st
 col = cw.Collector(ad, W, st, {A})
 
@@ -160,12 +161,12 @@ run_until_gap(col, st, T1)
 check("G5 실제 MAX_TRIES 뒤 gap 1 · 대기 0 · 동기화 도장", len(st.d["gaps"]) == 1 and not st.d["pending"] and st.d.get("synced_at"),
       (st.d["gaps"], st.d["pending"]))
 reg.FORCE_AVAILABLE.add("tron")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
 def drain(c, chain="tron"):
-    rd = SegmentReader(os.path.join(common.INBOX_DIR, chain))
+    rd = SegmentReader(os.path.join(paths.INBOX_DIR, chain))
     for _i in range(50):
         row = c.conn.execute("SELECT seg, off FROM inbox_offsets WHERE stream=?", (chain,)).fetchone()
         seg, off = (row["seg"], row["off"]) if row else (1, 0)
@@ -184,17 +185,17 @@ def openings(c, w=None):
 
 
 drain(c)
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 st = cs.ChainState("tron")
 check("G5 test_tron_gap_recon_hold: 상세 복구 전 = opening 없음(12 TRX 전량 흡수 안 함)", not openings(c), openings(c))
 check("G5 상세 복구 전 = recon_done_tron 없음 · ready 거짓 · owner_done 거짓 · 화면 complete 거짓",
       not c._meta_get("recon_done_tron") and not st.ready({A}) and not st.owner_done(A) and st.status_view()[A]["complete"] is False,
       (c._meta_get("recon_done_tron"), st.ready({A}), st.owner_done(A)))
 c.conn.close()
-c = core.Core(common.load_config())
-c._last_recon = 0
-c.recon_pass({"tron"})
+c = core.Core(config.load_config())
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("G3 core 재시작 뒤에도 같은 보류(opening·도장 없음)", not openings(c) and not c._meta_get("recon_done_tron"), openings(c))
 
 fake.noinfo.discard(T1)
@@ -208,7 +209,7 @@ st = cs.ChainState("tron")
 check("G5 회복 뒤 기장 · gap 해소(이력 1건은 남음) · 준비", st.emitted(T1) and st.ready({A}) and len(st.d["gaps"]) == 1, (st.d["gaps"], st.d["pending"]))
 
 gate = threading.Event()
-real_ad = c._nonevm_adapter("tron")
+real_ad = c.svc_recon._nonevm_adapter("tron")
 
 
 class SlowAd:
@@ -217,29 +218,29 @@ class SlowAd:
         return real_ad.fetch_balances(owners, boundary, tokens=tokens)
 
 
-c._nonevm_adapters = {"tron": SlowAd()}
-c.RECON_WAIT_SEC = 0.05
-c._last_recon = 0
-c.recon_pass({"tron"})
-started = ("tron", "chain") in c.__dict__.get("_recon_jobs", {})
+c.svc_recon._nonevm_adapters = {"tron": SlowAd()}
+c.svc_recon.RECON_WAIT_SEC = 0.05
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
+started = ("tron", "chain") in c.svc_recon.__dict__.get("_recon_jobs", {})
 GX = "%064x" % 0x7f
 st = cs.ChainState("tron")
 st.d["gaps"].append({"id": GX, "ref": {"owner": A, "lane": "latest"}, "why": "조회 중 새 gap(합성)", "tries": cs.MAX_TRIES, "at": int(time.time())})
 st.save()
 gate.set()
 time.sleep(0.5)
-c._last_recon = time.time()
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = time.time()
+c.svc_recon.recon_pass({"tron"})
 check("G7 test_nonevm_gap_change_during_recon: 조회 시작됨 → 조회 중 gap 생김 → 수확 폐기(opening·도장 없음)",
-      started and not openings(c) and not c._meta_get("recon_done_tron") and ("tron", "chain") not in c.__dict__.get("_recon_jobs", {}),
+      started and not openings(c) and not c._meta_get("recon_done_tron") and ("tron", "chain") not in c.svc_recon.__dict__.get("_recon_jobs", {}),
       (started, openings(c), c._meta_get("recon_done_tron")))
 st = cs.ChainState("tron")
 st.d["gaps"] = [g for g in st.d["gaps"] if g["id"] != GX]
 st.save()
-c._nonevm_adapters = {"tron": real_ad}
-c.RECON_WAIT_SEC = core.Core.RECON_WAIT_SEC
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._nonevm_adapters = {"tron": real_ad}
+c.svc_recon.RECON_WAIT_SEC = core_svc.ReconService.RECON_WAIT_SEC
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("G5 해소 뒤 대사 = opening 7 TRX(창 이전 실제 보유) · 완료 도장", openings(c) == {("native", reg.make_location("tron", A), 7_000_000)}
       and bool(c._meta_get("recon_done_tron")), openings(c))
 
@@ -264,8 +265,8 @@ st = cs.ChainState("tron")
 check("G8 준비 상태: B 백필 끝 · 대기 0 · A 의 새 gap(T3) 미해소", st.owner_done(B) and not st.d["pending"]
       and S(lambda: [g[0] for g in st.unresolved_gaps()]) == [T3] and [g["id"] for g in st.d["gaps"]].count(T3) == 1,
       (st.status_view(), S(lambda: st.unresolved_gaps()), list(st.d["pending"])))
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("G8 test_nonevm_gap_other_wallet: 다른 지갑(A) 미해소 gap = 영향 불명 → 새 지갑 B 기초 잔고 보류", not openings(c, B)
       and not c._meta_get(f"wrecon_done:tron:{B}"), openings(c, B))
 fake.noinfo.discard(T3)
@@ -274,8 +275,8 @@ col = cw.Collector(ad, W, st, {A, B})
 ad.state = st
 col.cycle()
 drain(c)
-c._last_recon = 0
-c.recon_pass({"tron"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"tron"})
 check("G8 A 의 gap 해소 뒤 B 기초 잔고 4 TRX 진행", openings(c, B) == {("native", reg.make_location("tron", B), 4_000_000)}
       and bool(c._meta_get(f"wrecon_done:tron:{B}")), openings(c, B))
 reg.FORCE_AVAILABLE.clear()

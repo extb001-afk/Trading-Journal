@@ -1,0 +1,9 @@
+{"_doc": "원화 환율 고정 대체값 1384 를 숫자로 다시 쓴 자리(JS 숫자 토큰 + src·tools 파이썬 NUMBER 토큰) — 목표 = 상수 1(서버 → 화면).", "checked_with": "파이썬 토크나이저 측정 · acorn 8.16.0 · node v25.9.0 대조 일치", "kind": "max", "spec": "js_1384"}
+{"key": "src/acct_norm.py", "n": 1}
+{"key": "src/view_b_tail.py", "n": 2}
+{"key": "web/index.html", "n": 1}
+{"key": "web/v2/app.js", "n": 3}
+{"key": "web/v2/index.html", "n": 1}
+{"key": "web/v2/search.js", "n": 4}
+{"key": "web/v2/tab_daily.js", "n": 1}
+{"key": "web/v2/wow.js", "n": 1}

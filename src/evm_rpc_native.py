@@ -1,5 +1,5 @@
 import bf_engine
-import common
+import logs, statefile
 import time
 from evm_base import BisectBudget
 from evm_base import HoldError
@@ -73,7 +73,7 @@ class RpcNativeMixin:
                 try:
                     res = self._batch(calls)
                     break
-                except Exception as e9:
+                except Exception as e9:  # noqa: BLE001 [fallback]
                     if k9 == 5 or time.time() + 20 > deadline:
                         raise
                     log.info("%s 블록 스캔 %d-%d 일시 실패(%s) — 20초 뒤 재시도", self.chain, rng[0], rng[1], str(e9)[:60])
@@ -137,7 +137,7 @@ class RpcNativeMixin:
         for url in self._node_order(self.state_rpcs):
             try:
                 return bf_engine.rpc_call(url, method, params, timeout=30, retries=1)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
         raise last if last else RuntimeError("rpc 미구성")
 
@@ -189,20 +189,20 @@ class RpcNativeMixin:
             try:
                 r = self._state_call("eth_call", [{"to": self.multicall, "data": self._mc_encode(part, self.multicall)}, hex(int(blk))])
                 bals = self._mc_decode(r, len(part), None if getattr(self, "mc_l1_block", False) else blk)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 if (isinstance(e, ValueError) and "multicall 블록" not in str(e)) or bf_engine.revert_like(e):
                     log.warning("%s Multicall3 묶음 안 됨(%s) — 지갑별 nonce·잔고 조회로(config chains.%s.multicall3 로 주소 지정 가능)", self.chain,
-                                common.safe_err(e)[:80], self.chain)
+                                logs.safe_err(e)[:80], self.chain)
                     self.multicall = None
                 elif self._rate_err(e):
                     self._mc_rate = e
-                    log.info("%s Multicall3 잔고 묶음 한도 거절(다음 사이클): %s", self.chain, common.safe_err(e)[:100])
+                    log.info("%s Multicall3 잔고 묶음 한도 거절(다음 사이클): %s", self.chain, logs.safe_err(e)[:100])
                 else:
-                    log.info("%s Multicall3 잔고 묶음 일시 실패(지갑별 조회로): %s", self.chain, common.safe_err(e)[:100])
+                    log.info("%s Multicall3 잔고 묶음 일시 실패(지갑별 조회로): %s", self.chain, logs.safe_err(e)[:100])
                 return n9
             try:
                 nres = self._batch([("eth_getTransactionCount", [w, hex(int(blk))]) for w in part], self.state_rpcs)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 nres = [e] * len(part)
             rl9 = next((x for x in nres if self._rate_err(x)), None)
             if rl9 is not None:
@@ -229,10 +229,10 @@ class RpcNativeMixin:
                     n_tr += 1
                     if s9["tx"]["hash"].lower() in self.emitted and s9.get("internal"):
                         self.__dict__.setdefault("_reemit", set()).add(s9["tx"]["hash"].lower())
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     if not self._trace_gone(e):
                         fail_h.add(s9["tx"]["hash"].lower())
-                    log.info("%s 잎 블록 %d trace 실패: %s", self.chain, y, common.safe_err(e)[:80])
+                    log.info("%s 잎 블록 %d trace 실패: %s", self.chain, y, logs.safe_err(e)[:80])
         if self.block_trace:
             unres9 = []
             try:
@@ -249,10 +249,10 @@ class RpcNativeMixin:
                     n_tr += 1
                     if h9 in self.emitted and s9["internal"]:
                         self.__dict__.setdefault("_reemit", set()).add(h9)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 frames = {}
                 failed = failed or not self._trace_gone(e)
-                log.info("%s 잎 블록 %d 블록 trace 실패: %s", self.chain, y, common.safe_err(e)[:80])
+                log.info("%s 잎 블록 %d 블록 trace 실패: %s", self.chain, y, logs.safe_err(e)[:80])
             pool_h = {s["tx"]["hash"].lower() for s in pool}
             q9 = bf_engine.quarantine_map(self.cursor)
             cand = [h for h, rows in frames.items() if h not in pool_h and h not in q9 and h not in got
@@ -300,9 +300,9 @@ class RpcNativeMixin:
         if n9 < self.STATE_LAG_N or now - t9 < self.STATE_LAG_SEC:
             sl[k9] = {"n": n9, "t": t9, "blk": int(blk), "to": None if last is None else int(last)}
             self.cursor["_st_lag"] = sl
-            cur9 = common.read_json(self.cursor_path, {})
+            cur9 = statefile.read_json(self.cursor_path, {})
             cur9["_st_lag"] = dict(self._st_lag_map(cur9.get("_st_lag")), **{k9: sl[k9]})
-            common.atomic_write_json(self.cursor_path, cur9)
+            statefile.atomic_write_json(self.cursor_path, cur9)
             raise HoldError(f"블록 {blk} 상태 없음 — 헤드 {head} 근처라 노드 뒤처짐으로 봄({n9}회) · 커서 유지(다음 사이클 재시도)")
         sl.pop(k9, None)
         sl["*"] = {"off": now + self.STATE_LAG_OFF_SEC, "n": n9}
@@ -547,8 +547,8 @@ class RpcNativeMixin:
                 try:
                     pre = self._prestate(first[1], w)
                     rec["pre_first_own"] = {"blk": first[0], "nonce": pre[0], "balance": str(pre[1])}
-                except Exception as e:
-                    rec["pre_first_own"] = {"err": common.safe_err(e)[:80]}
+                except Exception as e:  # noqa: BLE001 [fallback]
+                    rec["pre_first_own"] = {"err": logs.safe_err(e)[:80]}
             recs.append(rec)
         elif added:
             recs.append({"kind": "gap_resolved", "w": w[:10], "from": int(ns[0]), "to": last, "added": added})

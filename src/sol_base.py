@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import urllib.request
-import common
+import envfile, logs, net_http
 import bf_engine
 import logging
 
@@ -135,7 +135,7 @@ def _retry_after_sec(v):
     try:
         from email.utils import parsedate_to_datetime
         return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
-    except Exception:
+    except Exception:  # noqa: BLE001 [fallback]
         return None
 
 
@@ -143,7 +143,7 @@ class Rpc:
     def __init__(self, cfg: dict):
         key = os.environ.get("TJ_HELIUS_KEY", "")
         if not key:
-            key = common.read_env_file().get("TJ_HELIUS_KEY", "")
+            key = envfile.read_env_file().get("TJ_HELIUS_KEY", "")
         sol = cfg.get("sol", {})
         if sol.get("rpc") == "helius":
             if not key:
@@ -255,7 +255,7 @@ class Rpc:
             return
         self.pn_n["fail"] += 1
         self._pn_streak += 1
-        self._pn_why = common.redact_urls(str(why))[:160]
+        self._pn_why = logs.redact_urls(str(why))[:160]
         if trip or self._pn_streak >= HEAD_TRIP_STREAK:
             self.pn_fault(why, min(HEAD_TRIP_BASE * (2 ** self._pn_open_n), HEAD_TRIP_MAX))
             self._pn_open_n += 1
@@ -264,7 +264,7 @@ class Rpc:
         self._pn_open_until = max(self._pn_open_until, time.time() + float(dur))
         self._pn_gen = int(getattr(self, "_pn_gen", 0) or 0) + 1
         self._pn_streak = 0
-        self._pn_why = common.redact_urls(str(why))[:160]
+        self._pn_why = logs.redact_urls(str(why))[:160]
         log.warning("공개 노드(publicnode) %.0f분 쉼 — 새 거래 확인은 헬리우스로: %s", dur / 60, self._pn_why)
 
     def pn_state(self) -> dict:
@@ -277,7 +277,7 @@ class Rpc:
         opn = self.pn_open()
         healthy = bool(self.head_url) and not opn and n >= self.head_health_n and rate is not None and rate * 100.0 >= self.head_health_pct
         return {"on": bool(self.head_url), "healthy": healthy, "rate": rate, "n": n, "open_until": self._pn_open_until if opn else None,
-                "why": self._pn_why or None, "host": common.redact_urls(self.head_url) if self.head_url else None, "lag": self.pn_lag}
+                "why": self._pn_why or None, "host": logs.redact_urls(self.head_url) if self.head_url else None, "lag": self.pn_lag}
 
     def pn_ok(self) -> bool:
         if not getattr(self, "head_url", None) or float(getattr(self, "head_window", 0) or 0) <= 0 or self.pn_open():
@@ -458,7 +458,7 @@ class Rpc:
                     e_head = e
                 except _PnSkip as e:
                     e_head = e
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     if "-32015" not in str(e):
                         self._pn_note(False, f"{method}: {e}")
                     e_head = e
@@ -484,9 +484,9 @@ class Rpc:
                             if e2.quota or self.rl_streak >= PRIMARY_TRIP_STREAK:
                                 self._trip_primary(e2)
                             e_prim = e2
-                        except Exception as e2:
+                        except Exception as e2:  # noqa: BLE001 [fallback]
                             e_prim = e2
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     e_prim = e
                 continue
             if method == "getAsset":
@@ -500,7 +500,7 @@ class Rpc:
                 if getattr(self, "archive_url", None) and _host(url) == _host(self.archive_url):
                     self._ar_pause_until = time.time() + min(max(float(e.retry_after or 0), 30.0), 600.0)
                 e_fb = e
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 e_fb = e
         if tried_fb and e_fb is not None:
             raise e_fb
@@ -526,19 +526,19 @@ class Rpc:
         if n_hour == BUDGET_WARN_PER_HOUR:
             log.error("★RPC 예산 경보: 최근 1시간 %d콜 — 한도 소진 위험", n_hour)
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-        req = urllib.request.Request(url, data=body,
-                                     headers={"Content-Type": "application/json",
-                                              "User-Agent": "tj-bot/0.1"})
+        req = net_http.request(url, data=body,
+                               headers={"Content-Type": "application/json",
+                                        "User-Agent": "tj-bot/0.1"})
         try:
             with bf_engine.sol_open(req, timeout, method, sol=True) as r:
-                d = json.loads(common.read_capped(r).decode())
+                d = json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 self.rl_seen += 1
                 self.rl_last = True
                 try:
-                    body = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
-                except Exception:
+                    body = (e.read(net_http.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
+                except Exception:  # noqa: BLE001 [fallback]
                     body = ""
                 raise RateLimited(f"HTTP Error 429: Too Many Requests ({method})",
                                   _retry_after_sec(e.headers.get("Retry-After") if e.headers else None),
@@ -547,7 +547,7 @@ class Rpc:
         if url == self.url:
             self.rl_streak = 0
         if "error" in d:
-            raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))}")
+            raise RuntimeError(f"rpc {method}: {logs.redact_secret_text(str(d['error']))}")
         if d.get("result") is None:
             raise RuntimeError(f"rpc {method}: result null")
         if method == "getTransaction":
@@ -566,29 +566,29 @@ class Rpc:
                 for p9 in params_list:
                     try:
                         out.append(self._call(url, method, p9, timeout))
-                    except Exception as e9:
+                    except Exception as e9:   # noqa: BLE001 [isolate]
                         out.append(e9)
                 return out
             if url == self.url and self.metered:
                 bf_engine.HELIUS.add(self.proc, len(params_list) * HL_COST.get(method, 1), kind=self.kind())
             now = time.monotonic()
             self.calls.append(now)
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json",
-                                                                   "User-Agent": "tj-bot/0.1"})
+            req = net_http.request(url, data=body, headers={"Content-Type": "application/json",
+                                                             "User-Agent": "tj-bot/0.1"})
             try:
                 with bf_engine.sol_open(req, timeout) as r:
-                    d = json.loads(common.read_capped(r).decode())
+                    d = json.loads(net_http.read_capped(r).decode())
             except urllib.error.HTTPError as e:
                 if e.code == 429 and url == self.url:
                     try:
-                        b9 = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
-                    except Exception:
+                        b9 = (e.read(net_http.HTTP_ERR_BODY_MAX) or b"")[:200].decode("utf-8", "replace").lower()
+                    except Exception:  # noqa: BLE001 [fallback]
                         b9 = ""
                     self.rl_seen += 1
                     self._trip_primary(RateLimited("HTTP Error 429 (batch)", quota="max usage" in b9 or "quota" in b9))
                 last = e
                 continue
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 last = e
                 continue
             if not isinstance(d, list):
@@ -603,7 +603,7 @@ class Rpc:
                 if not 0 <= i < len(params_list):
                     continue
                 if it.get("error"):
-                    out[i] = RuntimeError(f"rpc {method}: {common.redact_secret_text(str(it['error']))}")
+                    out[i] = RuntimeError(f"rpc {method}: {logs.redact_secret_text(str(it['error']))}")
                 elif it.get("result") is None:
                     out[i] = RuntimeError(f"rpc {method}: result null")
                 else:
@@ -611,7 +611,7 @@ class Rpc:
                         if method == "getTransaction":
                             _check_tx_result(it["result"])
                         out[i] = it["result"]
-                    except Exception as e9:
+                    except Exception as e9:  # noqa: BLE001 [fallback]
                         out[i] = e9
             return out
         raise last if last else RuntimeError("batch: RPC 없음")

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import math
 import os
 import time
 
-import common
+import calcguard, logs, num_parse, paths, statefile
 
 NAME = "leverage.json"
 V = 1
@@ -84,17 +83,9 @@ RATE_SIGS = ("HTTP 429", "HTTP 418", "retCode=10006", "okx 50011", "429000", "To
 
 
 def num(x):
-    if x is None or isinstance(x, bool):
-        return None
     if isinstance(x, str):
         x = x.strip()
-        if not x:
-            return None
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return v if math.isfinite(v) else None
+    return num_parse.to_float(x, allow_bool=False)
 
 
 def pos(x):
@@ -274,7 +265,7 @@ def item(ex, product, scope, key, label, now, metrics=None, debt=None, collatera
 
 
 def classify(e) -> tuple:
-    msg = common.safe_err(repr(e))[:200]
+    msg = logs.safe_err(repr(e))[:200]
     if type(e).__name__ == "RateLimited" or any(s in msg for s in RATE_SIGS):
         return "rate_limited", msg
     if any(s in msg for s in NOT_OPENED_SIGS):
@@ -389,7 +380,8 @@ class Run:
             d = cache_proj(key, fn())
             self.cache[key] = {"at": self.now, "d": d}
             return d, self.now
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("leverage:Run.cached", e)
             if isinstance(c, dict) and self.now - at < CACHE_KEEP:
                 return c.get("d"), at
             self.cache[key] = {"at": 0, "fail_at": self.now, "d": None, "err": classify(e)[1][:120]}
@@ -436,7 +428,8 @@ class Run:
             its = [x for x in (r or []) if x]
             self.items.extend(its)
             return self._row(ex, product, "ok", endpoints, note=note, n=len(its), measured_at=self.now)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("leverage:Run.run", e)
             st, msg = classify(e)
             retry = None
             if st == "no_permission":
@@ -788,7 +781,8 @@ def bybit(run: Run, g: dict, now: int):
                     pi9 = split.get(d9["ccy"])
                     if pi9 and abs(pi9[0] + pi9[1] - d9["total"]) <= max(1e-6, 1e-3 * d9["total"]):
                         d9["principal"], d9["interest"] = pi9[0], pi9[1]
-            except Exception:
+            except Exception as e_cg:   # noqa: BLE001 [optional]
+                calcguard.swallowed("leverage:bybit.loan", e_cg)
                 pass
         call9, liq9, src9 = bybit_loan_thr(run.cfg)
         m = {"ltv": metric(num(res.get("ltv")), "frac", "up", call=call9, liq=liq9, thr_src=src9,
@@ -919,7 +913,8 @@ def okx(run: Run, g: dict, now: int):
                 try:
                     run.pace()
                     hist = g["get"]("/api/v5/finance/flexible-loan/loan-history", {"limit": "100"})
-                except Exception:
+                except Exception as e_cg:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("leverage:okx.loan", e_cg)
                     hist = None
                 rate, isum = {}, {}
                 for x in (ia if isinstance(ia, list) else []):
@@ -1309,13 +1304,14 @@ ALL_PRODUCTS = {
 
 
 def path() -> str:
-    return os.path.join(common.STATE_DIR, NAME)
+    return paths.state(NAME)
 
 
 def load_prev() -> dict:
     try:
-        d = common.read_json(path(), {})
-    except (SystemExit, Exception):
+        d = statefile.read_json(path(), {})
+    except (SystemExit, Exception) as e_cg:   # noqa: BLE001 [fallback]
+        calcguard.swallowed("leverage:load_prev", e_cg)
         return {}
     return d if isinstance(d, dict) and d.get("v") == V else {}
 
@@ -1331,7 +1327,8 @@ def collect(env: dict, getters: dict, now: int = None, cycle_sec: int = 600, fre
         n0 = len(run.products)
         try:
             COLLECTORS[ex](run, getters[ex], now)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("leverage:collect", e)
             st, msg = classify(e)
             done = {p["product"] for p in run.products[n0:]}
             for prod in ALL_PRODUCTS[ex]:
@@ -1343,14 +1340,15 @@ def collect(env: dict, getters: dict, now: int = None, cycle_sec: int = 600, fre
 
 
 def write(doc: dict) -> None:
-    common.atomic_write_json(path(), doc)
+    statefile.atomic_write_json(path(), doc)
 
 
 def read_state(now: float = None, p: str = None) -> dict:
     now = float(now if now is not None else time.time())
     try:
-        d = common.read_json(p or path(), None)
-    except (SystemExit, Exception):
+        d = statefile.read_json(p or path(), None)
+    except (SystemExit, Exception) as e_cg:   # noqa: BLE001 [fallback]
+        calcguard.swallowed("leverage:read_state", e_cg)
         d = None
     if not isinstance(d, dict) or d.get("v") != V:
         return {"v": V, "missing": True, "products": [], "items": []}

@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import web
-import xparts
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 MARK = os.path.join(S, "backfill_done")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -81,7 +81,7 @@ SN = {"date": iso(10, 9), "ts": E(10, 9, 23, 58, 0), "val": 2000.0, "usdt": FX, 
 
 
 def run(mark_txt, pin_p=True, live=2.0, sn_ts=None):
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
     with open(MARK, "w") as f:

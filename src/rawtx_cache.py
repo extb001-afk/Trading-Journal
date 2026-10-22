@@ -8,6 +8,8 @@ import re
 import threading
 import time
 
+import fsio
+
 log = logging.getLogger("tj")
 
 FILE = "web_rawtx_cache.json"
@@ -124,7 +126,7 @@ class RawTxCache:
     def log_present(conn) -> bool:
         try:
             n = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE name IN (?, ?, ?)", LOG_OBJS).fetchone()[0]
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return False
         return int(n) == len(LOG_OBJS)
 
@@ -161,7 +163,7 @@ class RawTxCache:
             mx = self._log_max(conn)
             r = conn.execute("SELECT rowid, chain, txhash FROM raw_txs ORDER BY rowid DESC LIMIT 1").fetchone()
             self._fp = {"rid": int(r[0]), "key": _k(r[1], r[2])} if r else {}
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("raw_txs 교체 기록 조회 실패 — 캐시 처음부터: %s", e)
             self._reset_all()
             self.tracking = self.persist = False
@@ -202,7 +204,7 @@ class RawTxCache:
                                            (ch, *part)).fetchall():
                         cache[(ch, r9[0])] = (r9[1], r9[2], r9[3])
                         self.dirty = True
-                except Exception as e9:
+                except Exception as e9:   # noqa: BLE001 [isolate]
                     log.warning("서명자 조회 실패(가짜 전송 판정 생략): %s", e9)
         return cache
 
@@ -225,7 +227,7 @@ class RawTxCache:
         try:
             return conn.execute("SELECT txhash, CASE WHEN octet_length(snapshot) <= ? THEN snapshot END, octet_length(snapshot)"
                                 " FROM raw_txs WHERE chain=? AND txhash IN (" + ",".join("?" * len(part)) + ")", (BIG, ch, *part)).fetchall()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return [(r[0], r[1], None) for r in conn.execute(
                 "SELECT txhash, snapshot FROM raw_txs WHERE chain=? AND txhash IN (" + ",".join("?" * len(part)) + ")", (ch, *part))]
 
@@ -349,7 +351,7 @@ class RawTxCache:
                 if gen == self.gen:
                     self._from_new = (gen, seq, by)
             log.info("발신자 건수 첫 계산(배경): %d행 %.1f초", len(by), time.time() - t0)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("발신자 건수 첫 계산 실패(다음 빌드에 다시): %s", e)
         finally:
             with self._from_lock:
@@ -450,7 +452,7 @@ class RawTxCache:
             self.stats["load"] = f"ok {time.time() - t0:.2f}s"
             log.info("웹 raw_txs 캐시 불러옴: 서명자 %d · 유입 %d · 발신자 %s행 (%.2f초)", len(self.signer), len(self.infl),
                      len(self.from_by) if self.from_by is not None else "-", time.time() - t0)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("웹 raw_txs 캐시 불러오기 실패 — 다시 계산: %s", e)
             self._reset_all()
             self.stats["load"] = "error"
@@ -469,19 +471,10 @@ class RawTxCache:
             d["infl_mine"] = self._mine_sig(self.infl_mine)
         if self.from_by is not None:
             d["from"] = {str(rid): [f, ks] for rid, (f, ks) in self.from_by.items()}
-        tmp = self.path + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.path)
+            fsio.atomic_write_json(self.path, d, ensure_ascii=False, separators=(",", ":"), mode=None, dir_fsync=False, makedirs=False)
         except (OSError, TypeError, ValueError) as e:
             log.warning("웹 raw_txs 캐시 저장 실패(다음에 다시): %s", e)
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
             return False
         self.dirty = False
         self.saved_at = time.time()

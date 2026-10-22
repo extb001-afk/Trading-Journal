@@ -372,7 +372,7 @@ class SnapStore:
             d = diff(a, cur_obj)
             body = dumps({"v": cur.ver, "b": since, "d": d})
             out = gz(body) if len(body) < len(cur.raw) else None
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             out = None
         with self.lock:
             if self.cur is cur:

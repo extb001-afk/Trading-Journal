@@ -10,7 +10,8 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
-import common
+import config, paths  # noqa: E402
+import ledger_lock  # noqa: E402
 
 
 USAGE = """사용(독스트링이 지워진 공개판에서도 보이게 — 상수):
@@ -32,7 +33,7 @@ def _core_running():
         if not apps:
             return None
         return any((p.get("pm2_env") or {}).get("status") != "stopped" for p in apps)
-    except Exception:
+    except Exception:   # noqa: BLE001
         return None
 
 
@@ -44,9 +45,9 @@ def _fmt(q, dec):
 
 
 def _backup(conn) -> str:
-    dst = os.path.join(common.STATE_DIR, "ledger.db.pre_ownfix_" + time.strftime("%Y%m%d_%H%M%S"))
-    need = os.path.getsize(common.DB_PATH) + (os.path.getsize(common.DB_PATH + "-wal") if os.path.exists(common.DB_PATH + "-wal") else 0)
-    if shutil.disk_usage(common.STATE_DIR).free < need * 1.2 + 64 * 1024 * 1024:
+    dst = os.path.join(paths.STATE_DIR, "ledger.db.pre_ownfix_" + time.strftime("%Y%m%d_%H%M%S"))
+    need = os.path.getsize(paths.DB_PATH) + (os.path.getsize(paths.DB_PATH + "-wal") if os.path.exists(paths.DB_PATH + "-wal") else 0)
+    if shutil.disk_usage(paths.STATE_DIR).free < need * 1.2 + 64 * 1024 * 1024:
         raise SystemExit(f"★백업 공간 부족(필요 ≈{need / 1e9:.2f}GB) — 중단(원장 무변)★")
     d9 = sqlite3.connect(dst)
     try:
@@ -63,7 +64,7 @@ def _ro_core(core_mod, cfg):
     conn = None
     for imm in (False, True):
         try:
-            conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH, immutable=imm), uri=True, timeout=30)
+            conn = sqlite3.connect(paths.sqlite_ro_uri(paths.DB_PATH, immutable=imm), uri=True, timeout=30)
             conn.execute("SELECT 1 FROM meta LIMIT 1").fetchall()
             break
         except sqlite3.Error:
@@ -82,6 +83,8 @@ def _ro_core(core_mod, cfg):
     for w in cfg.get("_disabled_wallets") or []:
         if isinstance(w, dict) and w.get("type", "evm") == "evm" and w.get("chain") and str(w.get("address") or "").startswith("0x"):
             c.my_wallets.setdefault(w["chain"], set()).add(str(w["address"]).lower())
+    import core_svc
+    core_svc.attach(c)
     return c
 
 
@@ -93,15 +96,20 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--force", action="store_true", help="tj-core 가동 여부 판정 불가일 때만(정지를 직접 확인한 뒤)")
     a = ap.parse_args(argv)
-    if not os.path.exists(common.DB_PATH):
-        print("원장 없음: " + common.DB_PATH)
+    if not os.path.exists(paths.DB_PATH):
+        print("원장 없음: " + paths.DB_PATH)
         return 1
     running = _core_running()
     if running or (running is None and not a.force):
         print("★tj-core 가 가동 중이거나 판정 불가 — 정지 뒤 실행(판정 불가면 정지 확인 후 --force)★")
         return 1
+    with ledger_lock.hold_if(a.apply, paths.DB_PATH, who="repair_own_overlap --apply"):
+        return _run(a)
+
+
+def _run(a) -> int:
     import core as core_mod
-    cfg = common.load_config()
+    cfg = config.load_config()
     c = _ro_core(core_mod, cfg)
     try:
         if c._meta_get("ext_rebuild_started_at"):

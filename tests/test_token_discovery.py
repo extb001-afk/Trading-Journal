@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import importlib.util
-import json
-import os
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
@@ -19,16 +19,15 @@ CFG = {"chains": {"eth": {"blockscout": "https://bs.invalid", "rpcs": ["https://
                    {"type": "bsc_rpc", "chain": "bsc", "address": W2}],
        "native_symbol": {"eth": "ETH", "bsc": "BNB"}, "backfill_months": 5, "bsc": {"detail_rpcs": ["https://bscrpc.invalid"]}}
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import recon
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import recon  # noqa: E402
 try:
-    import token_discovery as td
+    import token_discovery as td  # noqa: E402
 except ImportError:
     td = None
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 chk = T.chk
 TA = "0x" + "a1" * 20
@@ -84,19 +83,19 @@ def fake_dex(chain, cas, min_reserve=10000.0, sleep=None):
 if td is not None:
     td.discover = fake_discover
     td.dex_check = fake_dex
-c = core.Core(common.load_config())
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_eth.json"), {W: 900})
-c._wallet_backfilled = lambda *a: True
-c._recon_quiet = lambda *a: True
+c = core.Core(config.load_config())
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_eth.json"), {W: 900})
+c.svc_recon._wallet_backfilled = lambda *a: True
+c.svc_recon._recon_quiet = lambda *a: True
 c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_done_eth', '1')")
 c.conn.commit()
 
 
 def run_new(mode="new"):
-    bal = c._recon_fetch_plan("eth", "evm", [W], mode)()
-    c._recon_bal = lambda chain, kind, md, wallets, bal=bal: bal
-    n = c._wrecon_run("eth", "evm", "evm", set(), 1780000000, True, mode, [W])
-    c.__dict__.pop("_recon_bal", None)
+    bal = c.svc_recon._recon_fetch_plan("eth", "evm", [W], mode)()
+    c.svc_recon._recon_bal = lambda chain, kind, md, wallets, bal=bal: bal
+    n = c.svc_recon._wrecon_run("eth", "evm", "evm", set(), 1780000000, True, mode, [W])
+    c.svc_recon.__dict__.pop("_recon_bal", None)
     return bal, n
 
 
@@ -125,7 +124,7 @@ chk(pay.get(W, {}).get(f"token:{TB}") == 7 * E18 and f"{W}:{TB}" in (pay.get("_q
     {k: v for k, v in pay.items() if k != W})
 n_open = c.conn.execute("SELECT count(*) FROM postings WHERE source_kind='opening'").fetchone()[0]
 if td is not None:
-    c._recon_new_wallets("eth", "evm", "evm", set(), 1780000000)
+    c.svc_recon._recon_new_wallets("eth", "evm", "evm", set(), 1780000000)
 n_open2 = c.conn.execute("SELECT count(*) FROM postings WHERE source_kind='opening'").fetchone()[0]
 chk(n_open2 == n_open, "D10 같은 지갑 두 번째 = 새 앵커 0(wrecon_done 도장 — 멱등)", (n_open, n_open2))
 
@@ -172,7 +171,7 @@ chk(td.need_refresh(ent, {"txn": ent["sig"]["txn"], "txts": ent["sig"]["txts"]})
     and td.need_refresh(ent, {"txn": ent["sig"]["txn"] + 1})[1] == "changed:txn", "D5 need_refresh 신호 비교", ent.get("sig"))
 chk(td.need_refresh(ent, {}, srcs=["alchemy"])[1] == "new:alchemy", "D5 새로 넣은 키(그때 안 쓴 출처) = 그 쌍 1회 다시", td.need_refresh(ent, {}, srcs=["alchemy"]))
 
-import bf_engine
+import bf_engine  # noqa: E402
 old_b = bf_engine.ES_DAILY_BUDGET
 bf_engine.ES_DAILY_BUDGET = 0
 n_net = len(T.NET_TRIES)
@@ -223,7 +222,7 @@ def fake_bsc(rpcs, wallets, cas):
 recon.fetch_bsc_balances = fake_bsc
 td.discover = lambda *a, **k: {"cas": {}, "meta": {}, "ok": {"rabby": 0}, "fail": {}, "calls": {}}
 td.update_state(lambda cur: {"v": 1, "pairs": {}})
-bb = c._recon_fetch_plan("bsc", "bsc", [W])()
+bb = c.svc_recon._recon_fetch_plan("bsc", "bsc", [W])()
 chk(seen_b and TX in seen_b[0][1] and TO in seen_b[0][1], "D7 색인 발견 없음 = 종전처럼 원장 BSC 토큰 전체를 물음", seen_b)
 pw = (bb.get("per_wallet") or {}).get(W) or {}
 chk(("token", TO) in pw and ("token", TX) not in pw, "D7 그 지갑 원장 토큰 = 그대로 · 다른 지갑 원장에만 있는(유동성 없는) 토큰 = 앵커 안 함", sorted(k[1][:6] for k in pw if k[0] == "token"))
@@ -231,11 +230,11 @@ chk(TX in ((bb.get("_disc_skip") or {}).get(W) or {}), "D7 차단 사유 기록"
 td.discover = lambda *a, **k: {"cas": {TB: ["alchemy"]}, "meta": {TB: {"sym": "OLDT", "dec": 18}}, "ok": {"alchemy": 1}, "fail": {}, "calls": {"alchemy": 1}}
 td.update_state(lambda cur: {"v": 1, "pairs": {}})
 seen_b.clear()
-c._recon_fetch_plan("bsc", "bsc", [W])()
+c.svc_recon._recon_fetch_plan("bsc", "bsc", [W])()
 chk(seen_b and TX not in seen_b[0][1] and TO in seen_b[0][1] and TB in seen_b[0][1],
     "D7 색인 발견이 되면 = 그 지갑 원장 ∪ 발견 ∪ 원장 정품만(스팸 대량 질문 줄임)", seen_b)
 
-import balcheck
+import balcheck  # noqa: E402
 TD8 = "0x" + "d1" * 20
 td.update_state(lambda cur: {"v": 1, "pairs": {f"eth:{W}": {"at": 1, "sig": {"txn": 0, "txts": 0}, "cas": {TD8: ["ankr"]},
                                                             "meta": {TD8: {"sym": "DISC", "dec": 18, "wl": True, "px": 2.0}},
@@ -257,7 +256,7 @@ recon._rpc = fake_rpc
 balcheck.time.sleep = lambda s: None
 d_calls = []
 td.discover = lambda *a, **k: d_calls.append(a) or {"cas": {}, "meta": {}, "ok": {x: 0 for x in (k.get("sources") or [])}, "fail": {}, "calls": {}}
-cfg8 = dict(common.load_config(), backfill_months=0)
+cfg8 = dict(config.load_config(), backfill_months=0)
 cfg8["wallets"] = [{"type": "evm", "chain": "eth", "address": W}]
 st8 = balcheck.run_once(cfg8, c.conn, {}, set(), {})
 mm = [m for m in st8.get("mismatches") or [] if m.get("ca") == TD8]
@@ -277,7 +276,7 @@ recon._rpc = fake_rpc2
 balcheck.run_once(cfg8, c.conn, {}, set(), st8b)
 chk(len(d_calls) == 1, "D8 네이티브 잔고 바뀜(무료 신호) = 그 쌍만 발견 다시(1회)", len(d_calls))
 
-import coverage_limits
+import coverage_limits  # noqa: E402
 t9 = coverage_limits.api_limits_table(T.ROOT)
 rows9 = {c9["id"]: c9["rows"] for c9 in (t9 or {}).get("chains") or []}
 ob = [r for r in rows9.get("base", []) if r.get("kind", "").startswith("옛 보유")]
@@ -288,7 +287,7 @@ sm = td.summary({"wallets": [{"type": "evm", "chain": "base", "address": W}, {"t
                  "chains": {"base": {}, "eth": {}}}, env={})
 chk("base" in sm["noOld"] and "eth" not in sm["noOld"], "D9 상태 요약 = 옛 보유 확인 불가 체인(키 없음) 목록", sm)
 
-spec = importlib.util.spec_from_file_location("token_recheck", os.path.join(T.ROOT, "tools", "token_recheck_1010.py"))
+spec = importlib.util.spec_from_file_location("token_recheck", os.path.join(T.ROOT, "tools", "token_recheck.py"))
 tr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tr)
 TC = "0x" + "f1" * 20
@@ -306,7 +305,7 @@ for h9, blk9 in (("0x" + "a0" * 32, 800), ("0x" + "a1" * 32, 950), ("0x" + "e1" 
 c.conn.commit()
 sums, _m, unk = tr.ledger_at(c.conn, "eth", W2, 900)
 chk(sums.get(TC) == 2 * E18 and unk == 0, "D11 원장 합 = 그 블록 이하 기장만(core._posted_sums_at 기준)", (sums.get(TC), unk))
-common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_eth.json"), {W: 900, W2: 900})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_eth.json"), {W: 900, W2: 900})
 recon._rpc_any = fake_rpc_any
 recon._mc_call = fake_mc
 BAL[TC] = 3 * E18
@@ -320,7 +319,7 @@ class _A:
     logs_max_calls = 10
 
 
-res = tr.run_pair(common, td, recon, c.cfg, c.conn, "eth", W2, _A(), {}, {})
+res = tr.run_pair(td, recon, c.cfg, c.conn, "eth", W2, _A(), {}, {})
 rows = {r["ca"]: r for r in res["rows"]}
 KEYS = {"chain", "wallet", "ca", "symbol", "decimals", "block", "chain_bal_raw", "ledger_raw", "diff_raw", "spam", "sources"}
 chk(rows and all(set(r) == KEYS for r in rows.values()), "D11 JSON 줄 형식 = 약속한 키 그대로", [sorted(r) for r in rows.values()][:1])
@@ -329,14 +328,14 @@ chk(rows.get(TB, {}).get("diff_raw") == 7 * E18 and rows[TB]["spam"] is False an
 chk(rows.get(TS, {}).get("spam") is True, "D11 유동성 없는 발견 토큰 = 스팸 표시", rows.get(TS))
 chk(rows.get(TC, {}).get("ledger_raw") == 2 * E18 and rows[TC]["chain_bal_raw"] == 3 * E18 and rows[TC]["diff_raw"] == E18
     and "ledger_wallet" in rows[TC]["sources"], "D11 원장 토큰 = 블록 900 이하 합(2)과 체인(3) 비교", rows.get(TC))
-res2 = tr.run_pair(common, td, recon, c.cfg, c.conn, "eth", W2, _A(), {}, {}, explain_on=True)
+res2 = tr.run_pair(td, recon, c.cfg, c.conn, "eth", W2, _A(), {}, {}, explain_on=True)
 chk("onc_all" in res2["usd"] and res2["usd"]["diff_cred"] > 0 and res2["usd"]["diff_spam"] == 0,
     "D11 설명 지갑 = 체인 실잔고 평가 · 토큰 차이 달러(믿을 만한 것만 · 스팸 값 없음)", res2["usd"])
 json.dump({"wallets": {W2: {"total": 900.0, "chains": [{"id": "eth", "cid": 1, "usd": 800.0}, {"id": "xyzchain", "cid": 999999, "usd": 100.0}],
                             "tokens": [], "protocols": [{"proto": "p1", "pname": "합성 스테이킹", "chain": "eth",
                                                          "items": [{"a": 300.0, "d": 0.0, "assets": [], "debts": []}]}]}}},
-          open(os.path.join(common.STATE_DIR, "rabby_portfolio.json"), "w"))
-ex = "\n".join(tr.explain(common, c.cfg, {("eth", W2): res2}, [W2]))
+          open(os.path.join(paths.STATE_DIR, "rabby_portfolio.json"), "w"))
+ex = "\n".join(tr.explain(c.cfg, {("eth", W2): res2}, [W2]))
 chk("프로토콜·스테이킹 $300" in ex and "지갑 토큰 $500" in ex and "토큰으로 설명되는 몫" in ex and "봇 미추적 체인" in ex,
     "D11 Rabby 설명 = 프로토콜·스테이킹 몫(토큰 아님) / 토큰으로 설명되는 몫 / 봇 미추적 체인 따로", ex)
 n_net = len(T.NET_TRIES)
@@ -456,7 +455,7 @@ def _d20():
     seq20 = []
 
 
-    def fake_pair(common_, td_, recon_, cfg_, conn_, chain, w, a, env, dex_cache, explain_on=False):
+    def fake_pair(td_, recon_, cfg_, conn_, chain, w, a, env, dex_cache, explain_on=False):
         seq20.append((chain, w))
         bad = (chain, w) == ("eth", W)
         return {"chain": chain, "wallet": w, "block": 900, "rows": [], "table": [], "native": None, "usd": {}, "stop": None, "err": None,
@@ -465,21 +464,21 @@ def _d20():
 
     _rp = tr.run_pair
     tr.run_pair = fake_pair
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {"head": 900})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_bsc.json"), {"head": 900})
     tr.main(["--quiet", "--go", "--progress", PRG, "--out", os.path.join(T.TMP, "o20.jsonl")])
-    pg = common.read_json(PRG, {})
+    pg = statefile.read_json(PRG, {})
     chk(f"eth:{W}" not in (pg.get("done") or {}) and f"eth:{W}" in (pg.get("retry") or {}) and f"bsc:{W}" in (pg.get("done") or {}),
         "D20 출처 실패(HTTP 503) 쌍 = done 아님 · retry 사유 · 종결 실패만인 쌍 = done(#9)", (sorted(pg.get("done") or {}), pg.get("retry")))
     seq20.clear()
     tr.main(["--quiet", "--go", "--only-failed", "--progress", PRG, "--out", os.path.join(T.TMP, "o20.jsonl")])
     chk(seq20 == [("eth", W)], "D20 --only-failed = 실패 쌍만 다시", seq20)
-    common.atomic_write_json(PRG, {"done": {f"bsc:{W}": 1, f"eth:{W}": 1}, "res": {f"eth:{W}": {"err": "잔고 조회 실패: x"}, f"bsc:{W}": {}}})
-    chk(tr.done_keys(common.read_json(PRG, {})) == {f"bsc:{W}"}, "D20 옛 진행 파일 — done 인데 오류 표시 = 다시 할 쌍(호환)", tr.done_keys(common.read_json(PRG, {})))
+    statefile.atomic_write_json(PRG, {"done": {f"bsc:{W}": 1, f"eth:{W}": 1}, "res": {f"eth:{W}": {"err": "잔고 조회 실패: x"}, f"bsc:{W}": {}}})
+    chk(tr.done_keys(statefile.read_json(PRG, {})) == {f"bsc:{W}"}, "D20 옛 진행 파일 — done 인데 오류 표시 = 다시 할 쌍(호환)", tr.done_keys(statefile.read_json(PRG, {})))
     tr.run_pair = _rp
 
 
 def _d21():
-    import contextlib
+    import contextlib  # noqa: E402
     used21 = []
 
 
@@ -527,7 +526,7 @@ b23 = td.bsc_fetch(["https://bscrpc.invalid"], [W], {BO: ("OWNB", 18)}, {W: {BO}
 skip23 = ((td.load_state().get("pairs") or {}).get(f"bsc:{W}") or {}).get("skip") or {}
 pw23 = b23["per_wallet"].get(W) or {}
 chk(not (b23.get("_hold") or {}).get(W) and ("token", BO) in pw23 and ("token", B3) not in pw23 and str(skip23.get(B3, "")).startswith("일시 보류"),
-    "D22 BSC 소수 조회 일시 실패 = 그 토큰만 이번 대사에서 뺌('일시 보류') · 지갑 보류 없음 · 나머지 칸 앵커(dc447)", (b23.get("_hold"), skip23, sorted(pw23)))
+    "D22 BSC 소수 조회 일시 실패 = 그 토큰만 이번 대사에서 뺌('일시 보류') · 지갑 보류 없음 · 나머지 칸 앵커", (b23.get("_hold"), skip23, sorted(pw23)))
 
 
 def rpc_dec_once(urls, method, params, check=None, tries=None, sleep=None, timeout=25.0):
@@ -541,13 +540,13 @@ calls23.clear()
 recon._rpc_any = rpc_dec_once
 b24 = td.bsc_fetch(["https://bscrpc.invalid"], [W, W3], {}, {W: set(), W3: set()}, dict(PR, chain="bsc"), fetch=fake_bsc3)
 chk(b24["_meta"].get(B3) == ("BTHR", 6) and ("token", B3) in (b24["per_wallet"].get(W) or {}) and ("token", B3) in (b24["per_wallet"].get(W3) or {})
-    and len(calls23) == 1, "D23 같은 새 토큰 두 지갑 — 앞에서 확인한 소수 6 재사용(다시 안 물음 · None 으로 안 덮음)(dc445 #2)", (b24["_meta"].get(B3), len(calls23)))
+    and len(calls23) == 1, "D23 같은 새 토큰 두 지갑 — 앞에서 확인한 소수 6 재사용(다시 안 물음 · None 으로 안 덮음)", (b24["_meta"].get(B3), len(calls23)))
 calls23.clear()
 recon._rpc_any = rpc_transient
 b27 = td.bsc_fetch(["https://bscrpc.invalid"], [W3], {}, {W3: set()}, dict(PR, chain="bsc"), fetch=fake_bsc3)
 chk(b27["_meta"].get(B3) == ("BTHR", 6) and ("token", B3) in (b27["per_wallet"].get(W3) or {}) and not calls23
     and ((td.load_state().get("dec") or {}).get("bsc") or {}).get(B3) == 6,
-    "D27 확인된 BSC 소수 = 상태 파일 캐시 — 다음 주기(노드 장애 중)에도 재사용 · decimals() 0콜(dc447 ②)", (b27["_meta"].get(B3), len(calls23)))
+    "D27 확인된 BSC 소수 = 상태 파일 캐시 — 다음 주기(노드 장애 중)에도 재사용 · decimals() 0콜", (b27["_meta"].get(B3), len(calls23)))
 td.recon_extra_safe = _rx2
 recon._rpc_any = fake_rpc_any
 X5 = "0x" + "75" * 20
@@ -556,7 +555,7 @@ b25 = td.filter_result(fbal([X1, X5]), PR, {"meta": {X1: {"sym": "PLAIN"}, X5: {
 sk25 = (b25.get("_disc_skip") or {}).get(W) or {}
 chk(not (b25.get("_hold") or {}).get(W) and ("token", X5) in b25["per_wallet"][W] and ("token", X1) not in b25["per_wallet"][W]
     and str(sk25.get(X1, "")).startswith("일시 보류") and X1 not in ((b25.get("_queried") or {}).get(W) or []),
-    "D24 덱스스크리너 장애 = 그 토큰만 미관측('일시 보류') · 지갑 보류 없음 · 믿을 만한 나머지는 앵커(dc447)", (b25.get("_hold"), sk25))
+    "D24 덱스스크리너 장애 = 그 토큰만 미관측('일시 보류') · 지갑 보류 없음 · 믿을 만한 나머지는 앵커", (b25.get("_hold"), sk25))
 X6, X7 = "0x" + "76" * 20, "0x" + "77" * 20
 dex26 = []
 b26 = td.filter_result(fbal([X6, X7]), dict(PR, chain="zzchain", strict=lambda ca: ca == X7),
@@ -565,7 +564,7 @@ b26 = td.filter_result(fbal([X6, X7]), dict(PR, chain="zzchain", strict=lambda c
 sk26 = (b26.get("_disc_skip") or {}).get(W) or {}
 chk(not (b26.get("_hold") or {}).get(W) and ("token", X7) in b26["per_wallet"][W] and ("token", X6) not in b26["per_wallet"][W]
     and "판정 불가" in sk26.get(X6, "") and td.skip_final(sk26.get(X6, "")) and not dex26,
-    "D26 덱스 판정 미지원 체인 = 대사 완료(지갑 보류 없음) · 정품만 앵커 · 나머지 최종 skip(일시 아님)(dc447)", (b26.get("_hold"), sk26, dex26))
+    "D26 덱스 판정 미지원 체인 = 대사 완료(지갑 보류 없음) · 정품만 앵커 · 나머지 최종 skip(일시 아님)", (b26.get("_hold"), sk26, dex26))
 _sf = getattr(td, "skip_final", None)
 chk(callable(_sf) and _sf("유동성 부족 — 스팸 의심") and not _sf("일시 보류 — 판정 출처 장애"), "D24 skip 결정성 판정", "")
 
@@ -587,18 +586,18 @@ def fake_rpc25(u, method, params, timeout=25.0, gap=True):
 recon._rpc = fake_rpc25
 td.discover = lambda *a, **k: {"cas": {}, "meta": {}, "ok": {x: 0 for x in (k.get("sources") or [])}, "fail": {}, "calls": {}}
 s25 = balcheck.run_once(cfg8, c.conn, {}, set(), {})
-chk(TK[0] in seen25 and TK[1] not in seen25, "D25 일시 사유('일시 보류') skip = 계속 대조 · 결정적 사유(유동성 부족) = 제외(dc445 #1)",
+chk(TK[0] in seen25 and TK[1] not in seen25, "D25 일시 사유('일시 보류') skip = 계속 대조 · 결정적 사유(유동성 부족) = 제외",
     [t[:6] for t in seen25 if t in TK])
-n_stable = len([1 for _ in (__import__("pricing").STABLE_CAS.get("eth") or {})])
+n_stable = len([1 for _ in (__import__("token_tables").STABLE_CAS.get("eth") or {})])
 cfg25 = dict(cfg8, balance_check={"max_calls": 1 + n_stable + 1})
 seen25.clear()
 s25b = balcheck.run_once(cfg25, c.conn, {}, set(), {})
 done25 = [t for t in seen25 if t in TK]
 rr25 = (s25b.get("discRr") or {}).get(f"eth:{W}")
-chk(len(done25) == 1 and rr25 == 1, "D25 호출 상한 도중 = 커서는 실제로 조회한 1개만큼(남은 후보는 다음 판 먼저)(dc445 #3)", (len(done25), rr25))
+chk(len(done25) == 1 and rr25 == 1, "D25 호출 상한 도중 = 커서는 실제로 조회한 1개만큼(남은 후보는 다음 판 먼저)", (len(done25), rr25))
 
-import pricing as _pricing
-USDC_E = sorted(_pricing.STABLE_CAS.get("eth") or {})[0].lower()
+import token_tables  # noqa: E402
+USDC_E = sorted(token_tables.STABLE_CAS.get("eth") or {})[0].lower()
 TK2 = ["0x" + ("%02x" % (0xe0 + i)) * 20 for i in range(2)]
 td.update_state(lambda cur: {"v": 1, "pairs": {f"eth:{W}": {"at": 1, "sig": {"txn": 0, "txts": 0, "nat": "5"},
                                                             "cas": {t: ["ankr"] for t in TK2 + [USDC_E]},
@@ -608,13 +607,13 @@ td.update_state(lambda cur: {"v": 1, "pairs": {f"eth:{W}": {"at": 1, "sig": {"tx
 seen25.clear()
 s28 = balcheck.run_once(cfg8, c.conn, {}, set(), {})
 chk(seen25.count(USDC_E) == 1 and (s28.get("discRr") or {}).get(f"eth:{W}") == 0 and all(t in seen25 for t in TK2),
-    "D28 원장 밖 스테이블 = 발견 후보와 중복 조회 없음 · 커서 = 발견 후보 2개만 집계(dc447 ③)", (seen25.count(USDC_E), (s28.get("discRr") or {}).get(f"eth:{W}")))
+    "D28 원장 밖 스테이블 = 발견 후보와 중복 조회 없음 · 커서 = 발견 후보 2개만 집계", (seen25.count(USDC_E), (s28.get("discRr") or {}).get(f"eth:{W}")))
 
 
 def _try(fn, label):
     try:
         fn()
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001
         chk(False, label + " — 실행 실패", repr(e)[:160])
 
 

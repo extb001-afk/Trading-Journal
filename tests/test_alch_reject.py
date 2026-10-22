@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import io
-import json
-import os
-import time
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
 
-import common
-import bf_engine
-import health
-import nodekeys as NK
-import onboarding
-import settings_store as ss
+import statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import health  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -45,7 +45,7 @@ ss.write_env({NK.ENV_ALCHEMY: KEY})
 
 
 def rec():
-    return common.read_json(NK._alch_path(), None)
+    return statefile.read_json(NK._alch_path(), None)
 
 
 def wipe():
@@ -80,7 +80,7 @@ NK.alch_note(URL, err=NE(429, "HTTP Error 429"), text=MONTH)
 check("A2b 두 번이어도 첫 거절에서 60초 안 = off 아님", not (rec() or {}).get("off"), rec())
 d = rec()
 d["first"] = int(time.time()) - NK.ALCH_REJECT_SEC - 5
-common.atomic_write_json(NK._alch_path(), d)
+statefile.atomic_write_json(NK._alch_path(), d)
 NK.alch_note(URL, err=NE(429, "HTTP Error 429"), text=MONTH)
 r = rec()
 rj = NK.alch_rejected()
@@ -140,7 +140,7 @@ def call(url):
     try:
         bf_engine.rpc_call(url, "eth_blockNumber", [], retries=1, timeout=5)
         return "ok"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return getattr(e, "kind", type(e).__name__)
 
 
@@ -168,21 +168,21 @@ check("A3f 200 성공 = 지움", k3 == "ok" and rec() is None, (k3, rec()))
 print("[A4] 키 바꿈 · 저장·삭제")
 wipe()
 off = {"v": 1, "kh": NK.alch_url_kh(URL), "first": int(time.time()) - 999, "n": 5, "last": int(time.time()), "why": "month", "code": 429, "off": True, "off_at": int(time.time()) - 900}
-common.atomic_write_json(NK._alch_path(), off)
+statefile.atomic_write_json(NK._alch_path(), off)
 check("A4a 지금 키의 off 표식 = 화면에 보임", NK.alch_rejected() is not None)
 ss.write_env({NK.ENV_ALCHEMY: KEY2})
 check("A4b 키를 바꾸면 옛 표식 안 보임", NK.alch_rejected() is None)
 ss.write_env({NK.ENV_ALCHEMY: KEY})
 check("A4c 다른 키(KEY2) 성공은 KEY 표식을 안 지움", (NK.alch_note(f"https://eth-mainnet.g.alchemy.com/v2/{KEY2}", body={"result": "0x1"}) or True) and rec() is not None)
 check("A4d alch_reject_clear = 지움 · off 였으면 True", NK.alch_reject_clear() is True and rec() is None)
-common.atomic_write_json(NK._alch_path(), off)
+statefile.atomic_write_json(NK._alch_path(), off)
 check("A4e onboarding._alch_clear(키 삭제·저장 확인 통과 때 부름) = 지움", onboarding._alch_clear() is True and rec() is None)
 src_on = open(os.path.join(T.SRC, "onboarding.py"), encoding="utf-8").read()
 check("A4f 저장 확인 통과·키 삭제 자리에서 _alch_clear 호출", src_on.count("_alch_clear()") >= 2 and 'g == "alchemy" and pr9 == "ok"' in src_on)
 
 print("[A6] 코덱스 rfalch 회귀")
 wipe()
-common.atomic_write_json(NK._alch_path(), off)
+statefile.atomic_write_json(NK._alch_path(), off)
 for b9 in ({"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}},
            {"jsonrpc": "2.0", "id": 1, "error": {"code": 429, "message": "Your app has exceeded its compute units per second capacity."}},
            [{"id": 1, "result": "0x1"}, {"id": 2, "error": {"code": -32000, "message": "header not found"}}]):
@@ -193,7 +193,7 @@ NK.alch_note(URL, err=NE(429, "HTTP Error 429"), text=MONTH)
 NK.alch_note(URL, body={"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}})
 check("A6b 계수 중 200 실행 오류 = 계수 그대로(초기화 안 함)", (rec() or {}).get("n") == 1, rec())
 wipe()
-common.atomic_write_json(NK._alch_path(), off)
+statefile.atomic_write_json(NK._alch_path(), off)
 U2 = f"https://eth-mainnet.g.alchemy.com/v2/{KEY2}"
 NK.alch_note(U2, err=NE(401, "HTTP Error 401"))
 NK.alch_note(U2, err=NE(402, "HTTP Error 402"))
@@ -224,14 +224,14 @@ def env_switch():
     return {NK.ENV_ALCHEMY: KEY if len(calls9) == 1 else KEY2}
 
 
-common.atomic_write_json(NK._alch_path(), new_off)
+statefile.atomic_write_json(NK._alch_path(), new_off)
 NK._env = env_switch
 NK.alch_note(URL, err=NE(401, "HTTP Error 401"))
 NK._env = _env0
 r9 = rec()
 check("A7a 옛 키 늦은 401 = 새 키 표식 그대로(덮어쓰지 않음)", r9 and r9.get("kh") == NK.alch_url_kh(U2) and r9.get("n") == 5 and r9.get("off"), r9)
 calls9.clear()
-common.atomic_write_json(NK._alch_path(), dict(off))
+statefile.atomic_write_json(NK._alch_path(), dict(off))
 NK._env = env_switch
 NK.alch_note(URL, body={"jsonrpc": "2.0", "id": 1, "result": "0x1"})
 NK._env = _env0
@@ -292,8 +292,8 @@ c2 = [c for c in cs if c["id"] == "key:alchemy_rej"]
 check("A5i 키 거부 = 'Alchemy 키 거절' · 할 일 = 설정에서 키 확인", c2 and c2[0]["title"] == "Alchemy 키 거절" and "설정" in c2[0]["action"], c2)
 cs = health.evaluate(dict(obs_of(T0, REJ), keys={"alchemy": False, "alchemyRej": REJ}), HS, open_ids={})
 check("A5j 키 없음 = 칸 없음(지운 키의 남은 표식)", not [c for c in cs if c["id"] == "key:alchemy_rej"])
-import chk_collect
-common.atomic_write_json(NK._alch_path(), off)
+import chk_collect  # noqa: E402
+statefile.atomic_write_json(NK._alch_path(), off)
 kk = chk_collect.collect_keys({"wallets": []})
 check("A5k collect_keys = alchemyRej {why·n} (값·지문 없음)", isinstance(kk.get("alchemyRej"), dict) and kk["alchemyRej"]["why"] == "month"
       and "kh" not in kk["alchemyRej"] and KEY not in json.dumps(kk), kk)

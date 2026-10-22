@@ -2,6 +2,7 @@ import atexit
 import json
 import os
 import shutil
+import signal
 import socket
 import sys
 import tempfile
@@ -14,9 +15,9 @@ def _find_root():
     env = os.environ.get("TJ_TEST_ROOT")
     cands = [env] if env else [os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]
     for c in cands:
-        if c and os.path.isfile(os.path.join(c, "src", "common.py")):
+        if c and os.path.isfile(os.path.join(c, "src", "version.py")):
             return os.path.abspath(c)
-    raise SystemExit("tests: src/common.py 를 찾지 못했어요 — TJ_TEST_ROOT=<src 가 든 폴더> 로 지정하세요")
+    raise SystemExit("tests: src/version.py(뿌리 표식)를 찾지 못했어요 — TJ_TEST_ROOT=<src 가 든 폴더> 로 지정하세요")
 
 
 ROOT = _find_root()
@@ -46,7 +47,7 @@ def patch_cls_attr(cls, name, value):
             setattr(b, name, value)
 
 
-def patch_moved(name, value, prefixes=("core_", "view_", "http_", "accounting_")):
+def patch_moved(name, value, prefixes=("core_", "view_", "http_", "accounting_", "fsio")):
     for mn, m in list(sys.modules.items()):
         if mn.startswith(prefixes) and m is not None and hasattr(m, name):
             setattr(m, name, value)
@@ -110,6 +111,11 @@ def app_js_path(root: str = None) -> str:
     return _APP_JS_TMP[r]
 
 
+def v2_css(root: str = None) -> str:
+    v2 = os.path.join(root or ROOT, "web", "v2")
+    return "".join(open(os.path.join(v2, n), encoding="utf-8").read() for n in ("app.css", "mods.css", "wow.css"))
+
+
 def web_src() -> str:
     names = ["web.py"] + sorted(f for f in os.listdir(SRC) if f.startswith(("view_", "http_", "accounting_")) and f.endswith(".py"))
     parts = []
@@ -122,6 +128,24 @@ def web_src() -> str:
 
 if not os.path.isfile(README):
     README = os.path.join(ROOT, "README.md")
+
+README_PARTS = ("docs/SCREENS.md", "docs/INSTALL.md", "docs/FEATURES.md", "docs/OPERATIONS.md", "docs/CONFIG.md",
+                "docs/SECURITY_DATA.md", "docs/README_EN.md")
+
+
+def doc_text(name: str = "README.md", base: str = None) -> str:
+    base = base or os.path.dirname(README)
+    with open(os.path.join(base, name), encoding="utf-8") as f:
+        parts = [f.read()]
+    if os.path.normpath(name) != "README.md":
+        return parts[0]
+    have = [rel for rel in README_PARTS if os.path.isfile(os.path.join(base, rel))]
+    if have and len(have) != len(README_PARTS):
+        raise FileNotFoundError("README 나눈 문서 일부 없음: " + ", ".join(sorted(set(README_PARTS) - set(have))))
+    for rel in have:
+        with open(os.path.join(base, rel), encoding="utf-8") as f:
+            parts.append(f.read())
+    return "\n".join(parts)
 
 for _k in [k for k in os.environ if k.startswith("TJ_") and not k.startswith("TJ_TEST_")]:
     del os.environ[_k]
@@ -179,9 +203,13 @@ def _guard_urlopen(url, *a, **k):
     raise OSError("시험: 바깥 연결 차단")
 
 
-import urllib.request
+import urllib.request  # noqa: E402
 urllib.request.urlopen = _guard_urlopen
 sys.path.insert(0, SRC)
+
+def sigint_default():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
 
 PASS = 0
 FAILS = []
@@ -201,10 +229,36 @@ def chk(ok, msg, extra=None):
         print("FAIL " + msg + tail, flush=True)
 
 
+REQUIRE_NODE = os.environ.get("TJ_TEST_REQUIRE_NODE") == "1"
+
+
+def node_path():
+    return shutil.which("node")
+
+
+def node_required(alias=False):
+    return REQUIRE_NODE or bool(alias)
+
+
+def node_unusable(what, why, required=None):
+    if node_required() if required is None else required:
+        chk(False, "%s — %s 못 돌림(TJ_TEST_REQUIRE_NODE=1)" % (why, what))
+    else:
+        print("SKIP %s — %s 건너뜀" % (why, what), flush=True)
+
+
+def node_bin(what, required=None):
+    n = node_path()
+    if n:
+        return n
+    node_unusable(what, "node 없음", required)
+    return None
+
+
 def safe(fn, *a, **kw):
     try:
         return fn(*a, **kw)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return {"_exc": f"{type(e).__name__}: {e}"}
 
 

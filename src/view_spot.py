@@ -2,18 +2,16 @@ from __future__ import annotations
 import os
 import threading
 import time
-import common
-import pricing
+import envfile, logs, paths, statefile
+import dex_jump, pricing, px_alt, token_tables
 import candles
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
-SPOT_PATH = os.path.join(common.STATE_DIR, "spot.json")
 
-
-PX1004_ALT_OK = ("binance", "bybit", "coingecko")
+PX1004_ALT_OK = ("binance", "bybit", "okx", "gate", "kucoin", "coingecko")
 
 
 def _alt_src_of(why) -> str:
@@ -23,7 +21,7 @@ def _alt_src_of(why) -> str:
 
 def _alt_src_stale(holder, sym, src, cid=None, now=None) -> bool:
     v9, _, id9 = str(src or "").partition(":")
-    if v9 in ("binance", "bybit"):
+    if v9 in PX1004_ALT_OK[:-1]:
         return candles.same_coin(holder, v9, sym, now=now, fetch=False)[0] is False
     if v9 == "coingecko" and id9:
         cur9 = cid if cid is not None else candles.holder_cg_id(holder, sym, now=now, fetch=False)
@@ -55,9 +53,46 @@ def _cg_key_set() -> bool:
     try:
         import cgkey
         return bool(cgkey.key())
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_spot:_cg_key_set", _cg9)
         return False
+
+
+GAP_CARRY_SEC = {"bithumb": 6 * 3600}
+
+
+def _gap_drop(ex, old, ex_ts, dead, now, whole) -> list:
+    cap = GAP_CARRY_SEC.get(ex)
+    return [k for k in old if (cap and k.split(":", 1)[1] in (dead or ())) or (whole and (
+            not cap or not (isinstance(ex_ts.get(k), (int, float)) and abs(now - ex_ts[k]) <= cap)))]
+
+
+def _gap_apply(sp, ex, got, now) -> None:
+    old = [k for k in sp.ex_usd if k.startswith(ex + ":") and k[len(ex) + 1:] not in got]
+    whole = len(got) * 2 >= len(got) + len(old)
+    drop = set(_gap_drop(ex, old, sp.ex_ts, sp.ex_dead_syms.get(ex), now, whole))
+    for k in drop:
+        sp.ex_usd.pop(k, None)
+        sp.ex_ts.pop(k, None)
+    prev = sp.__dict__.get("_gap_keys") or frozenset()
+    keep = {k for k in old if k not in drop and (k in prev or (whole and ex in GAP_CARRY_SEC))}
+    sp._gap_keys = frozenset({k for k in prev if not k.startswith(ex + ":")} | keep)
+
+
+class _TickSkip(OSError):
+    pass
+
+
+def _ex_call(sp, ex, fn, *a):
+    dead = sp.__dict__.setdefault("_tick_to", set())
+    if ex in dead:
+        raise _TickSkip(f"{ex} 이번 바퀴 시간 초과 — 남은 호출 건너뜀(다음 바퀴 다시)")
+    try:
+        return fn(*a)
+    except Exception as err:
+        if pricing.timed_out(err):
+            dead.add(ex)
+        raise
 
 
 class Spot:
@@ -93,7 +128,7 @@ class Spot:
     DS_BACKOFF_SEC = 180
 
     def __init__(self):
-        d = common.read_json(SPOT_PATH, {}) if os.path.exists(SPOT_PATH) else {}
+        d = statefile.read_json(paths.state("spot.json"), {}) if os.path.exists(paths.state("spot.json")) else {}
         self.usd = d.get("usd", {})
         self.usd_ts = d.get("usd_ts", {})
         self.dex_usd = d.get("dex_usd", {})
@@ -160,8 +195,8 @@ class Spot:
         self.upbit_alt_why = {}
         self.updated = d.get("updated") or 0
         self.syms = set()
-        self._fx_at = 0
-        self._mk_at = 0
+        self._fx_at = self._mk_at = 0
+        self.jump = dex_jump.Guard(paths.state("dex_jump.json"))
         self.lock = threading.Lock()
 
     def want(self, syms):
@@ -197,13 +232,13 @@ class Spot:
 
     def ex_price(self, ex, sym):
         k = f"{ex}:{sym}"
-        if time.time() - self.ex_ts.get(k, 0) > self.STALE_SEC:
+        if max(self.STALE_SEC, GAP_CARRY_SEC.get(ex, 0) if k in (self.__dict__.get("_gap_keys") or ()) else 0) < time.time() - self.ex_ts.get(k, 0):
             return None
         return self.ex_usd.get(k)
 
     @staticmethod
     def _okx_creds():
-        e9 = common.read_env_file()
+        e9 = envfile.read_env_file()
         creds = {k: e9.get(n, "") for k, n in (("key", "TJ_OKX_KEY"), ("secret", "TJ_OKX_SECRET"), ("passphrase", "TJ_OKX_PASSPHRASE"))}
         return creds if all(creds.get(k) for k in ("key", "secret", "passphrase")) else None
 
@@ -248,8 +283,7 @@ class Spot:
         ts = self.dex_ts.get(key, 0)
         if self.off_at.get(chain, time.time()) - ts > self.dex_max_age:
             return None
-        px = self.dex_usd.get(key)
-        res = self.dex_reserve(chain, ca)
+        px, res = self.dex_usd.get(key), self.dex_reserve(chain, ca)
         if px and res is not None and res < self.min_reserve_usd:
             self._guard_note(key, f"풀 유동성 ${res:,.2f} < ${self.min_reserve_usd:,.0f} (가격 ${px:,.6g})")
             return 0.0
@@ -261,9 +295,10 @@ class Spot:
             if not self._dex_agree(chain, key, px):
                 self._guard_note(key, f"유동성 미상 — 다른 출처 확인 없음(미검증 · 가격 ${px:,.6g})")
                 return 0.0
-        if px and key in self.guarded and self.guarded[key].startswith(("풀 유동성", "유동성 미상")):
-            self._guard_note(key, None)
-        return px
+        why = self.jump.held(key, px, ts) if res is not None else None
+        if px and (why or key in self.guarded and self.guarded[key].startswith(("풀 유동성", "유동성 미상", "시세 급변"))):
+            self._guard_note(key, why)
+        return 0.0 if why else px
 
     def _dex_agree(self, chain, key, px):
         alt = self.dex_alt.get(key) or {}
@@ -305,7 +340,7 @@ class Spot:
             t0 = time.time()
             try:
                 self.tick()
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
                 calcguard.swallowed("view_spot:Spot.loop", e)
                 log.warning("spot tick 실패: %s", e)
             time.sleep(max(5.0, 30.0 - (time.time() - t0)))
@@ -360,7 +395,7 @@ class Spot:
             skip = set(self.token_skip)
         cand = []
         for (ch, ca), v in prio.items():
-            if (ch, ca) in skip or not pricing.DS_CHAIN.get(ch):
+            if (ch, ca) in skip or not token_tables.DS_CHAIN.get(ch):
                 continue
             k = f"{ch}:{ca}"
             if now - self.dex_ts.get(k, 0) <= self.DS_AFTER_SEC or now - self._ds_polled.get(k, 0) < self.DS_RETRY_SEC:
@@ -405,8 +440,8 @@ class Spot:
                 self._alt_note(k, "dexscreener", px, now)
                 got_n += 1
                 if ca in res and now - self._res_gecko_ts.get(k, 0) > self.RESERVE_STALE_SEC:
-                    self.dex_res[k] = res[ca]
-                    self.dex_res_ts[k] = int(now)
+                    self.dex_res[k], self.dex_res_ts[k] = res[ca], int(now)
+                self.jump.note(k, px, self.dex_reserve(ch, ca), self.min_reserve_usd, now)
         meta_calls = 0
         if not limited and calls < self.DS_MAX_BATCHES:
             with self.lock:
@@ -414,7 +449,7 @@ class Spot:
             mcand = {}
             for ch, ca in mw:
                 k = f"{ch}:{ca}"
-                if k in self.token_meta or not pricing.DS_CHAIN.get(ch) or now - self._meta_polled.get(k, 0) < 6 * 3600:
+                if k in self.token_meta or not token_tables.DS_CHAIN.get(ch) or now - self._meta_polled.get(k, 0) < 6 * 3600:
                     continue
                 mcand.setdefault(ch, []).append(ca)
             for ch, cas9 in sorted(mcand.items()):
@@ -479,15 +514,15 @@ class Spot:
             err = pricing.gt_take_error()
             unres9 = pricing.gt_take_unresolved()
             t_got = int(now)
+            for ca, rv in res.items():
+                self.dex_res[f"{ch}:{ca}"], self.dex_res_ts[f"{ch}:{ca}"], self._res_gecko_ts[f"{ch}:{ca}"] = rv, t_got, t_got
+                self.jump.note(f"{ch}:{ca}", None, rv, self.min_reserve_usd, t_got)
             for ca, px in got.items():
                 self.dex_usd[f"{ch}:{ca}"] = px
                 self.dex_ts[f"{ch}:{ca}"] = t_got
                 self.dex_src[f"{ch}:{ca}"] = "gecko"
                 self._alt_note(f"{ch}:{ca}", "gecko", px, t_got)
-            for ca, rv in res.items():
-                self.dex_res[f"{ch}:{ca}"] = rv
-                self.dex_res_ts[f"{ch}:{ca}"] = t_got
-                self._res_gecko_ts[f"{ch}:{ca}"] = t_got
+                self.jump.note(f"{ch}:{ca}", px, self.dex_reserve(ch, ca), self.min_reserve_usd, t_got)
             if err is None or got or res:
                 ok += 1
             else:
@@ -553,7 +588,7 @@ class Spot:
                             "floor": round(self._gt_floor, 1) if now - self._gt_429_at < self.GT_FLOOR_SEC else 0,
                             "guardSlow": n_guard9}
 
-    def _upbit_alt_global(self, syms, bn, now, fresh_s=120, reuse_s=300):
+    def _upbit_alt_global(self, syms, bn, now, fresh_s=120, reuse_s=300, at=None):
         cache9 = self.__dict__.setdefault("_alt_books", {})
         fail9 = self.__dict__.setdefault("_alt_fail", {})
         books9 = {"binance": bn or {}}
@@ -569,11 +604,11 @@ class Spot:
                       if k9.startswith(ex + ":") and now - float(self.ex_ts.get(k9) or 0) < reuse_s} or None
             if d9 is None and now - fail9.get(ex, 0) >= fresh_s:
                 try:
-                    d9 = pricing.ex_spot_usd(ex, self.rate) or {}
+                    d9 = _ex_call(self, ex, pricing.ex_spot_usd, ex, self.rate) or {}
                     cache9[ex] = (now, d9)
-                except Exception as e9:
+                except Exception as e9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_spot:Spot._upbit_alt_global.book", e9)
-                    log.warning("업비트 비원화 코인 달러 시세: %s 벌크 조회 실패(다음): %s", ex, common.safe_err(e9)[:120])
+                    log.warning("업비트 비원화 코인 달러 시세: %s 벌크 조회 실패(다음): %s", ex, logs.safe_err(e9)[:120])
                     fail9[ex] = now
                     d9 = None
             if d9 is None:
@@ -583,12 +618,13 @@ class Spot:
             return d9
         ids9 = {s9: candles.holder_cg_id("upbit", s9, now=now, fetch=False) for s9 in syms}
         cgp9 = {}
+        cg_at = {}
 
         def cg_px():
             if "_done" not in cgp9:
                 cgp9["_done"] = True
                 cf9 = []
-                cgp9.update(candles.cg_simple_usd([i9 for i9 in ids9.values() if i9], now=now, fail=cf9))
+                cgp9.update(candles.cg_simple_usd([i9 for i9 in ids9.values() if i9], now=now, fail=cf9, at=cg_at))
                 if cf9:
                     failed9.add("coingecko")
             return cgp9
@@ -611,22 +647,25 @@ class Spot:
         if miss9 and "_done" not in cgp9:
             cgp9["_done"] = True
             cf9 = []
-            cgp9.update(candles.cg_simple_usd([i9 for i9 in ids9.values() if i9], now=now, fail=cf9, keyed=True))
+            cgp9.update(candles.cg_simple_usd([i9 for i9 in ids9.values() if i9], now=now, fail=cf9, keyed=True, at=cg_at))
             if cf9:
                 failed9.add("coingecko")
         elif miss9 and "coingecko" in failed9 and _cg_key_set():
             need9 = sorted({ids9[s9] for s9 in miss9 if not cgp9.get(ids9[s9])})
             if need9:
-                cgp9.update(candles.cg_simple_usd(need9, now=now, keyed=True, key_only=True))
+                cgp9.update(candles.cg_simple_usd(need9, now=now, keyed=True, key_only=True, at=cg_at))
         for s9 in miss9:
             v9 = cg_px().get(ids9[s9])
             if v9:
                 out9[s9] = (float(v9), f"coingecko {ids9[s9]}")
+                if at is not None and ids9[s9] in cg_at:
+                    at[s9] = cg_at[ids9[s9]]
+        fail_before, (out9, self.alt_spread) = frozenset(failed9), px_alt.pick(syms, book, now, (ident, lambda s: ref(s) if "_done" in cgp9 else None, lambda ex: ex in failed9 or (ex == "binance" and not bn)), out9)
         for s9 in out9:
             ex9 = out9[s9][1].split(" ", 1)[0]
-            vok9[s9] = ex9 == "coingecko" or (ex9 in ("binance", "bybit") and ident(s9, ex9)[0] is True)
+            vok9[s9] = ex9 == "coingecko" or (ex9 in px_alt.ALT_EXS and ident(s9, ex9)[0] is True)
         src9 = self.__dict__.setdefault("upbit_alt_src", {})
-        nm9 = {"binance": "바이낸스", "bybit": "바이빗", "coingecko": "코인게코"}
+        nm9 = dict(candles.VENUE_KO, coingecko="코인게코")
         for s9, (v9, why9) in out9.items():
             lab9 = nm9.get(why9.split(" ", 1)[0], why9.split(" ", 1)[0]) + " · 업비트 비원화"
             src9[s9] = lab9 + (f" (제외: {'; '.join(notes9[s9])[:120]})" if notes9.get(s9) else "")
@@ -639,7 +678,7 @@ class Spot:
                 self.ex_ts.pop(f"upbit:{s9}", None)
                 alt9.pop(s9, None)
                 vok9.pop(s9, None)
-        self.upbit_alt_miss = {s9 for s9 in syms if s9 not in out9} if not failed9 and bn else set()
+        self.upbit_alt_miss = {s9 for s9 in syms if s9 not in out9} if not fail_before and bn else set()
         for s9 in self.upbit_alt_miss:
             self.upbit_alt_why[s9] = "바이낸스·바이빗·코인게코 시세 없음" + (f" (제외: {'; '.join(notes9[s9])[:120]})" if notes9.get(s9) else "")
             src9.pop(s9, None)
@@ -651,7 +690,7 @@ class Spot:
 
     def _hl_px(self, now):
         import hl_spot
-        hl9 = hl_spot.fetch_book(now)
+        hl9 = hl_spot.fetch_book(now, deadline=hl_spot.CLOCK() + 30)
         cache9 = self.__dict__.setdefault("_alt_books", {})
 
         def book(ex):
@@ -668,10 +707,10 @@ class Spot:
                 if d9:
                     return d9
             try:
-                d9 = (pricing.binance_spot_usdt() if ex == "binance" else pricing.ex_spot_usd(ex, self.rate)) or {}
-            except Exception as e9:
+                d9 = (_ex_call(self, ex, pricing.binance_spot_usdt) if ex == "binance" else _ex_call(self, ex, pricing.ex_spot_usd, ex, self.rate)) or {}
+            except Exception as e9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_spot:Spot._hl_px.book", e9)
-                log.warning("Hyperliquid 같은 코인 시세: %s 벌크 조회 실패(다음): %s", ex, common.safe_err(e9)[:120])
+                log.warning("Hyperliquid 같은 코인 시세: %s 벌크 조회 실패(다음): %s", ex, logs.safe_err(e9)[:120])
                 d9 = {}
             cache9[ex] = (now, d9)
             return d9
@@ -692,10 +731,11 @@ class Spot:
     def tick(self):
         now = time.time()
         self._laps, self._lap_at = [], now
+        self._tick_to = set()
         try:
-            rate = pricing.usdt_krw_ask()
-        except Exception as e:
-            calcguard.swallowed("view_spot:Spot.tick", e)
+            rate = _ex_call(self, "upbit", pricing.usdt_krw_ask)
+        except Exception as e:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_spot:Spot.tick[rate]", e)
             log.warning("업비트 환율 조회 실패(마지막 값 유지): %s", e)
             rate = None
         if rate:
@@ -709,7 +749,7 @@ class Spot:
                 self._fx_at = now
         if now - self._mk_at > 3600:
             try:
-                mk9 = pricing.upbit_markets()
+                mk9 = _ex_call(self, "upbit", pricing.upbit_markets)
                 self.upbit_krw = mk9.get("KRW", set())
                 alt9 = {}
                 for q9 in ("BTC", "USDT"):
@@ -718,8 +758,8 @@ class Spot:
                             alt9.setdefault(b9, set()).add(q9)
                 self.upbit_alt = alt9
                 self._mk_at = now
-            except Exception as _cg9:
-                calcguard.swallowed("view_spot:Spot.tick", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [optional]
+                calcguard.swallowed("view_spot:Spot.tick[mk9]", _cg9)
                 pass
         self._lap("환율·마켓")
         with self.lock:
@@ -727,9 +767,9 @@ class Spot:
         if syms:
             usd = {}
             try:
-                bn = pricing.binance_spot_usdt()
-            except Exception as _cg9:
-                calcguard.swallowed("view_spot:Spot.tick", _cg9)
+                bn = _ex_call(self, "binance", pricing.binance_spot_usdt)
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_spot:Spot.tick[bn]", _cg9)
                 bn = {}
             if bn:
                 self._bn_book = (now, bn)
@@ -740,18 +780,20 @@ class Spot:
                     usd[s] = bn[pricing.NATIVE_EX_TICKER.get(s, s)]
             up_syms = [s for s in syms if s in self.upbit_krw]
             if up_syms and self.rate:
-                krw = pricing.upbit_spot_krw(up_syms)
+                krw = pricing.upbit_spot_krw(up_syms, dead=self._tick_to, answered=(answered := set()), seen={s for s in up_syms if f"upbit:{s}" in self.ex_ts})
                 for s, v in krw.items():
                     if s not in usd and s not in pricing.NATIVE_EX_TICKER:
                         usd[s] = v / self.rate
                     self.ex_usd[f"upbit:{s}"] = v / self.rate
                     self.ex_ts[f"upbit:{s}"] = int(now)
                     self.ex_alt_src.pop(s, None)
+                self.__dict__.setdefault("upbit_answered", set()).update(answered)
             alt_syms = [s for s in syms if s in self.upbit_alt and s not in self.upbit_krw]
             if alt_syms:
-                for s, (v, why) in self._upbit_alt_global(alt_syms, bn, now).items():
+                alt_at = {}
+                for s, (v, why) in self._upbit_alt_global(alt_syms, bn, now, at=alt_at).items():
                     self.ex_usd[f"upbit:{s}"] = v
-                    self.ex_ts[f"upbit:{s}"] = int(now)
+                    self.ex_ts[f"upbit:{s}"] = int(alt_at.get(s, now))
                     self.upbit_alt_why[s] = why
                     self.ex_alt_src[s] = _alt_src_of(why)
             self.usd.update(usd)
@@ -770,9 +812,9 @@ class Spot:
                 continue
             self._ex_at[ex1] = now
             try:
-                got1 = self._hl_px(now) if ex1 == "hyperliquid" else pricing.ex_spot_usd(ex1, self.rate)
-            except Exception as e1:
-                calcguard.swallowed("view_spot:Spot.tick", e1)
+                got1 = self._hl_px(now) if ex1 == "hyperliquid" else _ex_call(self, ex1, pricing.ex_spot_usd, ex1, self.rate)
+            except Exception as e1:  # noqa: BLE001 [isolate]
+                calcguard.swallowed("view_spot:Spot.tick[got1]", e1)
                 log.warning("%s 거래소 시세 조회 실패: %s", ex1, e1)
                 continue
             for s1, v1 in got1.items():
@@ -780,11 +822,8 @@ class Spot:
                 self.ex_ts[f"{ex1}:{s1}"] = int(now)
             self.ex_dead[ex1] = int(pricing.EX_DEAD.get(ex1) or 0)
             self.ex_dead_syms[ex1] = set(pricing.EX_DEAD_SYMS.get(ex1) or ())
-            old1 = [k1 for k1 in self.ex_usd if k1.startswith(ex1 + ":") and k1[len(ex1) + 1:] not in got1]
-            if got1 and len(got1) * 2 >= len(got1) + len(old1):
-                for k1 in old1:
-                    self.ex_usd.pop(k1, None)
-                    self.ex_ts.pop(k1, None)
+            if got1 or self.ex_dead_syms[ex1]:
+                _gap_apply(self, ex1, got1, now)
             if got1:
                 with self.lock:
                     self._ex_done.add(ex1)
@@ -806,10 +845,10 @@ class Spot:
             if targets:
                 got2 = pricing.okx_dex_prices(creds, sorted(targets))
                 for (ch, ca), px in got2.items():
-                    self.dex_usd[f"{ch}:{ca}"] = px
-                    self.dex_ts[f"{ch}:{ca}"] = int(now)
+                    self.dex_usd[f"{ch}:{ca}"], self.dex_ts[f"{ch}:{ca}"] = px, int(now)
                     self.dex_src[f"{ch}:{ca}"] = "okx"
                     self._alt_note(f"{ch}:{ca}", "okx", px, now)
+                    self.jump.note(f"{ch}:{ca}", px, self.dex_reserve(ch, ca), self.min_reserve_usd, now)
                 if not self._okx_fullscan_done:
                     self._okx_fullscan_tries += 1
                     if got2 or self._okx_fullscan_tries >= 3:
@@ -823,7 +862,7 @@ class Spot:
         for k9 in [k9 for k9 in list(self.guarded) if now - self._guard_seen.get(k9, 0) > 6 * 3600]:
             self.guarded.pop(k9, None)
             self._guard_logged.pop(k9, None)
-        common.atomic_write_json(SPOT_PATH, {
+        statefile.atomic_write_json(paths.state("spot.json"), {
             "guarded": dict(self.guarded),
             "gt": dict(self.gt_stat),
             "ds": dict(self.ds_stat),

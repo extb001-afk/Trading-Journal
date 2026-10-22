@@ -1,10 +1,10 @@
 import chain_registry
-import common
+import histmark, paths
 import json
 import os
 import time
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
@@ -81,7 +81,7 @@ class OutflowMixin:
                     legs.append(("move_in", aid, left, f"out:{chain}:{to9}"))
         return legs
 
-    OUTFLOW_PATH = os.path.join(common.STATE_DIR, "outflow_decisions.json")
+    OUTFLOW_PATH = paths.StatePath("outflow_decisions.json")
 
     def _outflow_decisions(self) -> dict:
         try:
@@ -158,7 +158,7 @@ class OutflowMixin:
             return None
         if kind == "chain_tx" and self._meta_get(f"ext_prewindow_tx:{ns}:{sid}") is not None:
             return None
-        iso = common.hist_late_put(self.conn, int(t_old))
+        iso = histmark.hist_late_put(self.conn, int(t_old))
         log.info("지난 원장 행 삭제(%s %s:%s · 다시 기장 없음) — 지난 곡선 다시 계산 표식: %s 부터", kind, ns, str(sid)[:16], iso)
         return iso
 
@@ -170,7 +170,6 @@ class OutflowMixin:
         changed = self.outflow_sync_exchange_rows()
         addrs = set(dec) | changed | {r["k"][len("outflow_applied:"):] for r in self.conn.execute(
             "SELECT k FROM meta WHERE k LIKE 'outflow_applied:%'").fetchall()}
-        n_tx = 0
         for a in sorted(addrs):
             v = dec.get(a) if isinstance(dec.get(a), dict) else {}
             verdict = v.get("verdict") or "clear"
@@ -205,7 +204,8 @@ class OutflowMixin:
             try:
                 for ch9, h9 in sorted(txs):
                     self._rederive_tx_anchor_safe(ch9, h9)
-                    n_tx += 1
+                if txs:
+                    self._inval_daily()
                 self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (k, sig))
                 self.conn.commit()
             except Exception:
@@ -213,14 +213,9 @@ class OutflowMixin:
                 raise
             for ch9, h9 in sorted(txs):
                 try:
-                    self._price_tx(ch9, h9)
-                except Exception as e:
+                    self.svc_price._price_tx(ch9, h9)
+                except Exception as e:  # noqa: BLE001 [isolate]
                     calcguard.swallowed("core_outflow:OutflowMixin.outflow_pass", e)
                     self.conn.rollback()
                     log.warning("보낸 내역 재기장 가격 %s %s 실패(가격패스가 재시도): %s", ch9, h9[:12], e)
             log.info("★보낸 내역 판정 반영: %s → %s (tx %d건 재분류)★", a[:12], verdict, len(txs))
-        if n_tx:
-            try:
-                os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
-            except FileNotFoundError:
-                pass

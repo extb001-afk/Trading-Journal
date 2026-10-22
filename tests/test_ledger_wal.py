@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import sqlite3
-import subprocess
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
 
-import core
+import core  # noqa: E402
 
 P = os.path.join(T.TMP, "ledger.db")
 

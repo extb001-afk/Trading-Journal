@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import signal
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
-import buildproc as bp
-import common
+import buildproc as bp  # noqa: E402
+import runtime  # noqa: E402
 
 
 def ck(name, cond, extra=None):
@@ -137,20 +137,20 @@ class Lib:
         self.sqlite3_libversion = Fn(lambda: v)
 
 
-import sqlite3
-ck("같은 라이브러리(파이썬 연결 뒤 다시 설정 = MISUSE 21 · 통계 0 · 버전 같음) = 끔(확인)", common._memstatus_apply(Lib([0, 21])) is True
-   and "확인" in common.SQLITE_MEMSTAT_WHY[0])
-ck("다른 사본(파이썬 연결이 그 사본을 초기화하지 않음 = 다시 설정 0) = 못 끔 · 사유", common._memstatus_apply(Lib([0, 0])) is False
-   and "다른 SQLite" in common.SQLITE_MEMSTAT_WHY[0], common.SQLITE_MEMSTAT_WHY[0])
-ck("통계가 여전히 셈(memory_used > 0) = 못 끔", common._memstatus_apply(Lib([0, 21], used=4096)) is False and "여전히" in common.SQLITE_MEMSTAT_WHY[0])
-ck("버전 다름 = 못 끔", common._memstatus_apply(Lib([0, 21], ver="3.0.0")) is False and "버전" in common.SQLITE_MEMSTAT_WHY[0])
-ck("이미 초기화(MISUSE) + 파이썬 sqlite3 이미 있음 = 못 끔(되돌리지 않음)", common._memstatus_apply(Lib([21])) is False and "거부" in common.SQLITE_MEMSTAT_WHY[0])
-ck("확인 도구가 없음 = '확인 불가'(끔이라고 적지 않음)", common._memstatus_apply(Lib([0, 21], has_used=False)) == "unverified"
-   and "확인 불가" in common.SQLITE_MEMSTAT_WHY[0])
+import sqlite3  # noqa: E402,F401
+ck("같은 라이브러리(파이썬 연결 뒤 다시 설정 = MISUSE 21 · 통계 0 · 버전 같음) = 끔(확인)", runtime._memstatus_apply(Lib([0, 21])) is True
+   and "확인" in runtime.SQLITE_MEMSTAT_WHY[0])
+ck("다른 사본(파이썬 연결이 그 사본을 초기화하지 않음 = 다시 설정 0) = 못 끔 · 사유", runtime._memstatus_apply(Lib([0, 0])) is False
+   and "다른 SQLite" in runtime.SQLITE_MEMSTAT_WHY[0], runtime.SQLITE_MEMSTAT_WHY[0])
+ck("통계가 여전히 셈(memory_used > 0) = 못 끔", runtime._memstatus_apply(Lib([0, 21], used=4096)) is False and "여전히" in runtime.SQLITE_MEMSTAT_WHY[0])
+ck("버전 다름 = 못 끔", runtime._memstatus_apply(Lib([0, 21], ver="3.0.0")) is False and "버전" in runtime.SQLITE_MEMSTAT_WHY[0])
+ck("이미 초기화(MISUSE) + 파이썬 sqlite3 이미 있음 = 못 끔(되돌리지 않음)", runtime._memstatus_apply(Lib([21])) is False and "거부" in runtime.SQLITE_MEMSTAT_WHY[0])
+ck("확인 도구가 없음 = '확인 불가'(끔이라고 적지 않음)", runtime._memstatus_apply(Lib([0, 21], has_used=False)) == "unverified"
+   and "확인 불가" in runtime.SQLITE_MEMSTAT_WHY[0])
 if not sys.platform.startswith("linux"):
-    ck("리눅스 아님 = 해당 없음(None — 자식 빌드를 안 씀)", common.sqlite_memstatus_off() is None)
-code = ("import json,sys;sys.path.insert(0,sys.argv[1]);import common;lib,src=common._sqlite_lib();r=common._memstatus_apply(lib);"
-        "print(json.dumps([r,src,common.SQLITE_MEMSTAT_WHY[0]]))")
+    ck("리눅스 아님 = 해당 없음(None — 자식 빌드를 안 씀)", runtime.sqlite_memstatus_off() is None)
+code = ("import json,sys;sys.path.insert(0,sys.argv[1]);import runtime;lib,src=runtime._sqlite_lib();r=runtime._memstatus_apply(lib);"
+        "print(json.dumps([r,src,runtime.SQLITE_MEMSTAT_WHY[0]]))")
 pr = subprocess.run([sys.executable, "-c", code, T.SRC], capture_output=True, text=True, timeout=60,
                     env={k: v for k, v in os.environ.items() if not k.startswith("TJ_")} | {"TJ_BASE": T.TMP})
 try:

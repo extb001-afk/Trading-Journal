@@ -2,25 +2,25 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _btcfake as BF
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _btcfake as BF  # noqa: E402
 
-import collections
-import copy
-import json
-import os
-import tempfile
-import types
+import collections  # noqa: E402
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import tempfile  # noqa: E402
+import types  # noqa: E402
 
-import common
-import address_codec as ac
-import bf_engine
-import btc_descriptor as bd
-import chain_registry as reg
-import chain_state as cs
-import btc_watch as bw
+import config  # noqa: E402
+import address_codec as ac  # noqa: E402
+import bf_engine  # noqa: E402
+import btc_descriptor as bd  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import btc_watch as bw  # noqa: E402
 
 ZPUB84 = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
 D = bd.descriptor_from_xpub(ZPUB84)
@@ -46,7 +46,7 @@ def mkcfg(**kw):
     cfg["chain_wallets"] = [{"chain": "btc", "mode": "descriptor", "descriptor": D}, {"chain": "btc", "mode": "address", "address": W2ADDR}]
     cfg["nonevm"] = BF.cfg_nonevm(**kw)
     json.dump(cfg, open(CFG_PATH, "w"))
-    return common.load_config()
+    return config.load_config()
 
 
 cfg = mkcfg()

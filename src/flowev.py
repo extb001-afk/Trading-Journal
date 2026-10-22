@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+import num_parse
 import outflow_match as OM
-import calcguard
+import calcguard  # noqa: E402
 
 WINDOW = 48 * 3600
 EXP_NORMAL = 30 * 60
@@ -15,7 +16,7 @@ EV_ADJ = ("EX_ADJUST", "EXF_ADJUST", "OPENING")
 EV_SEND = ("TRANSFER_OUT", "TRANSFER_OUT_EX", "TRANSFER_SELF", "BRIDGE")
 EV_ALL = EV_SEND + EV_IN + EV_DEP + EV_ADJ
 EX_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트",
-         "hyperliquid": "하이퍼리퀴드"}
+         "hyperliquid": "하이퍼리퀴드", "coinbase": "코인베이스"}
 
 
 def txk(t) -> str:
@@ -24,11 +25,7 @@ def txk(t) -> str:
 
 
 def _d(v):
-    try:
-        x = Decimal(str(v))
-        return x if x.is_finite() else None
-    except (InvalidOperation, ValueError, TypeError):
-        return None
+    return num_parse.to_dec(v)
 
 
 def short(a) -> str:
@@ -298,7 +295,7 @@ def classify(rows, ctx, transit=(), of_rows=(), of_match=None, of_bridge=None, d
         if k9 not in _lst:
             try:
                 _lst[k9] = bool(deposit_exchange(k9[0], k9[1]))
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("flowev:classify.listed", _cg9)
                 _lst[k9] = False
         return _lst[k9]

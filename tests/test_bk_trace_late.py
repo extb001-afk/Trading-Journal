@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-import time
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 W = ["0x" + f"{0xb0 + i:02x}" * 20 for i in range(3)]
@@ -17,12 +17,12 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
 
 
 def hx(n):
@@ -52,8 +52,8 @@ def make(cursor, span=16_000, bk_span=200_000, live=900_000):
     cur.update({w: live for w in W})
     cur.update(cursor)
     cur.setdefault("_bkspan", span)
-    common.atomic_write_json(CPATH, cur)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json"), [])
+    statefile.atomic_write_json(CPATH, cur)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json"), [])
     wr = Wr()
     w = evm_watch.RpcChainWatcher(CFG, CH, list(W), wr)
     w.bk_span = bk_span
@@ -94,11 +94,11 @@ def make(cursor, span=16_000, bk_span=200_000, live=900_000):
 
 
 def disk():
-    return common.read_json(CPATH, {})
+    return statefile.read_json(CPATH, {})
 
 
 def restore_like_cycle(w):
-    cur9 = common.read_json(w.cursor_path, {})
+    cur9 = statefile.read_json(w.cursor_path, {})
     for k9 in [k for k in w.cursor if k.startswith("_bk:") or k in ("_bkns", "_bkscan", "_hq", "_bkspan")]:
         if k9 in cur9:
             w.cursor[k9] = cur9[k9]
@@ -299,12 +299,12 @@ T.chk(w.cursor.get("_bkspan") == 8000 and disk().get("_bkspan") == 8000, "T4 뒤
 
 HT5 = hx(0x501)
 NEWW = "0x" + "e7" * 20
-common.atomic_write_json(CPATH, {"_rpc_v": 1, "_start": 0, **{a: 900_000 for a in W},
+statefile.atomic_write_json(CPATH, {"_rpc_v": 1, "_start": 0, **{a: 900_000 for a in W},
                                  "_trace_later": {HT5: {"at": now - 60, "n": 0, "next": 0, "blk": 800, "sent": True}}})
-common.atomic_write_json(os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json"), [HT5])
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json"), [HT5])
 wr5 = Wr()
 w5 = evm_watch.RpcChainWatcher(CFG, CH, list(W) + [NEWW], wr5)
-T.chk(not w5.emitted and common.read_json(os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json"), None) == [], "T5 준비: 새 지갑 합류 = emitted 초기화(종전 규약)")
+T.chk(not w5.emitted and statefile.read_json(os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json"), None) == [], "T5 준비: 새 지갑 합류 = emitted 초기화(종전 규약)")
 w5.trace_rpcs = ["http://127.0.0.1:9/trace"]
 w5._batch = lambda calls: (_ for _ in ()).throw(RuntimeError("시험: 배치 없음"))
 w5._rpc_synth_detail = lambda h: snap_of(h, 800)
@@ -318,7 +318,7 @@ def tr5(h, snap):
 
 w5._trace_internal = tr5
 n5 = T.safe(w5._trace_later_step, 500)
-T.chk(n5 == 1 and [x["txhash"] for x in wr5.recs] == [HT5] and HT5 not in (common.read_json(CPATH, {}).get("_trace_later") or {}),
+T.chk(n5 == 1 and [x["txhash"] for x in wr5.recs] == [HT5] and HT5 not in (statefile.read_json(CPATH, {}).get("_trace_later") or {}),
       "T5 emitted 가 비어도 표식의 '방출됨' 사실로 늦은 채움 진행(종전: emitted 에 없어 30일 뒤 표식만 삭제)", {"n": n5, "recs": [x["txhash"][-4:] for x in wr5.recs]})
 w6, wr6, st6 = make({}, span=16_000)
 st6["trace_fn"] = fail408
@@ -331,24 +331,24 @@ w6._emit(H6, s6, 60)
 T.chk((w6.cursor.get("_trace_later") or {}).get(H6, {}).get("sent") is True, "T5 표식에 방출 사실(sent) 기록", (w6.cursor.get("_trace_later") or {}).get(H6))
 
 HQ6, TL6 = hx(0x611), hx(0x612)
-EP = os.path.join(common.STATE_DIR, f"enrich_{CH}.json")
-HP = os.path.join(common.STATE_DIR, f"hq_left_{CH}.json")
+EP = os.path.join(paths.STATE_DIR, f"enrich_{CH}.json")
+HP = os.path.join(paths.STATE_DIR, f"hq_left_{CH}.json")
 for tgt in ("blockscout", "etherscan"):
     for p9 in (EP, HP):
         if os.path.exists(p9):
             os.remove(p9)
     w7, wr7, st7 = make({"_hq": {HQ6: 0}, "_trace_later": {TL6: {"at": now - 60, "n": 1, "next": now + 99, "blk": 70, "sent": True}}}, span=16_000)
     r7 = T.safe(evm_watch.rpc_handback, w7, tgt)
-    got7 = common.read_json(EP if tgt == "blockscout" else HP, {}) or {}
+    got7 = statefile.read_json(EP if tgt == "blockscout" else HP, {}) or {}
     T.chk(not isinstance(r7, dict) and HQ6 in got7 and TL6 in got7,
           f"T6 {tgt} 되돌림 = 인계 큐(_hq) + 늦은 채움(_trace_later) 둘 다 " + ("enrich 로" if tgt == "blockscout" else "hq_left 보관(다시 RPC = _hq 로 되살림)")
           + "(종전: _trace_later 버림)", {"r": r7, "got": sorted(k[-4:] for k in got7)})
-    T.chk(int((common.read_json(CPATH, {}).get("_handback") or {}).get("trace_later") or 0) == 1, f"T6 {tgt} 되돌림 기록에 늦은 채움 수",
-          common.read_json(CPATH, {}).get("_handback"))
+    T.chk(int((statefile.read_json(CPATH, {}).get("_handback") or {}).get("trace_later") or 0) == 1, f"T6 {tgt} 되돌림 기록에 늦은 채움 수",
+          statefile.read_json(CPATH, {}).get("_handback"))
 
 HT7, HQ7 = hx(0x701), hx(0x702)
 for tgt in ("etherscan", "blockscout"):
-    for p9 in (EP, HP, os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json")):
+    for p9 in (EP, HP, os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json")):
         if os.path.exists(p9):
             os.remove(p9)
     w8, wr8, st8 = make({"_trace_later": {HT7: {"at": now - 60, "n": 2, "next": now + 500, "blk": 70, "sent": True}}}, span=16_000)
@@ -360,17 +360,17 @@ for tgt in ("etherscan", "blockscout"):
     w9._states = lambda *a, **k: {}
     w9.trace_rpcs = ["http://127.0.0.1:9/trace"]
     r9 = T.safe(w9._init, 900_000)
-    tl9 = (common.read_json(CPATH, {}).get("_trace_later") or {}).get(HT7)
+    tl9 = (statefile.read_json(CPATH, {}).get("_trace_later") or {}).get(HT7)
     T.chk(not isinstance(r9, dict) and isinstance(tl9, dict) and tl9.get("n") == 2 and tl9.get("sent") is True,
           f"T7 {tgt} 되돌림 → rescan 으로 RPC 복귀 = 늦은 채움 표식 되살림(백오프 그대로)(종전: 보관분 유실)", {"r": r9, "tl": tl9})
-    T.chk(not (common.read_json(os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json"), {}) or {})
-          and HT7 not in (common.read_json(HP, {}) or {}), f"T7 {tgt} 되살린 뒤 보관 파일·hq_left 에서 그 해시 정리(두 번 일 안 함)",
-          {"left": common.read_json(os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json"), {}), "hq_left": common.read_json(HP, {})})
+    T.chk(not (statefile.read_json(os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json"), {}) or {})
+          and HT7 not in (statefile.read_json(HP, {}) or {}), f"T7 {tgt} 되살린 뒤 보관 파일·hq_left 에서 그 해시 정리(두 번 일 안 함)",
+          {"left": statefile.read_json(os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json"), {}), "hq_left": statefile.read_json(HP, {})})
 w10, _wr10, _st10 = make({"_hq": {HQ7: 0}}, span=16_000)
-common.atomic_write_json(os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json"),
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json"),
                          {HQ7: {"at": now - 60, "n": 0, "next": 0, "blk": 71, "sent": True}, HT7: {"at": now - 60, "n": 0, "next": 0, "blk": 72, "sent": True}})
 T.safe(w10._legacy_queues)
-d10 = common.read_json(CPATH, {})
+d10 = statefile.read_json(CPATH, {})
 T.chk(HQ7 not in (d10.get("_trace_later") or {}) and HT7 in (d10.get("_trace_later") or {}) and HQ7 in (d10.get("_hq") or {}),
       "T7 인계 큐(_hq)에 이미 있는 해시는 _hq_step 몫 — 늦은 채움엔 나머지만", {"tl": sorted(k[-4:] for k in d10.get("_trace_later") or {})})
 

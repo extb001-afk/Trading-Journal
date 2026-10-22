@@ -4,8 +4,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import search_index
+import logs  # noqa: E402
+import search_index  # noqa: E402
 
 
 def main():
@@ -13,7 +13,8 @@ def main():
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s [tj-web 검색 일꾼] %(message)s", stream=sys.stderr)
-    common.add_secret_filter()
+    logs.add_secret_filter()
+    logs.install_excepthook()
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -26,11 +27,11 @@ def main():
                                        limit=req.get("limit") or None, after=req.get("after") or None,
                                        before=req.get("before") or None, offset=req.get("offset") or None, krw=req.get("krw") or None)
             out = {"ok": True, "body": body}
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             out = {"ok": False, "err": type(e).__name__}
         try:
             line9 = json.dumps(out, default=str)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             line9 = json.dumps({"ok": False, "err": type(e).__name__})
         out_f.write(line9 + "\n")
         out_f.flush()

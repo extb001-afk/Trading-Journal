@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY", "TJ_ALCHEMY_KEY"):
     os.environ.pop(_k, None)
@@ -17,12 +17,13 @@ CFG = {"wallets": [{"type": "evm", "chain": "base", "address": W_EVM, "label": "
 CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
+import config, paths  # noqa: E402
+import logs  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import bf_engine
-import nodekeys as NK
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import bf_engine  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -34,7 +35,7 @@ def fresh(o):
 
 
 def write_env(text):
-    with open(common.ENV_PATH, "w", encoding="utf-8") as f:
+    with open(paths.ENV_PATH, "w", encoding="utf-8") as f:
         f.write(text)
 
 
@@ -49,7 +50,7 @@ check("A1b 공식 CU 단가(getTokenBalances 20 · getTokenMetadata 10 · eth_ca
       cm.get("alchemy_getTokenBalances") == 20 and cm.get("alchemy_getTokenMetadata") == 10 and cm.get("eth_call") == 26
       and cm.get("eth_getBalance") == 20 and cm.get("eth_getLogs") == 60 and cm.get("alchemy_getAssetTransfers") == 120 and pa.get("cu") == 26, (cm, pa.get("cu")))
 check("A1c 호스트 = *.g.alchemy.com · .env 이름 TJ_ALCHEMY_KEY(비밀값 가림 이름)",
-      pa.get("hosts") == ["*.g.alchemy.com"] and getattr(NK, "ENV_ALCHEMY", None) == "TJ_ALCHEMY_KEY" and common._secret_name("TJ_ALCHEMY_KEY"), pa)
+      pa.get("hosts") == ["*.g.alchemy.com"] and getattr(NK, "ENV_ALCHEMY", None) == "TJ_ALCHEMY_KEY" and logs._secret_name("TJ_ALCHEMY_KEY"), pa)
 sp = NK.budget_spec("alchemy", NK.plans({})["alchemy"]) if "alchemy" in NK.PROVIDERS else {}
 check("A1d 기본 = 무료 80% 하루 장부(무료 월 한도 × 80%)", sp.get("month") == 30_000_000 and sp.get("pct") == 80.0 and sp.get("hosts") == ["*.g.alchemy.com"], sp)
 sp2 = NK.budget_spec("alchemy", {"plan": "paid", "share": 25, "month": 100_000_000}) if "alchemy" in NK.PROVIDERS else {}
@@ -58,8 +59,8 @@ check("A1e 유료 = 이용자 월 한도 × 비율(기존 비율 규칙)", sp2.g
 au = getattr(NK, "alchemy_url", None)
 check("A2a 헬퍼 alchemy_url 있음", callable(au))
 if callable(au):
-    if os.path.exists(common.ENV_PATH):
-        os.remove(common.ENV_PATH)
+    if os.path.exists(paths.ENV_PATH):
+        os.remove(paths.ENV_PATH)
     check("A2b 키 없음 = None", au("base-mainnet") is None)
     write_env(f"# 시험\nTJ_ALCHEMY_KEY={AL}\n")
     check("A2c 키 → https://{net}.g.alchemy.com/v2/{키}", au("base-mainnet") == f"https://base-mainnet.g.alchemy.com/v2/{AL}"
@@ -73,7 +74,7 @@ if callable(au):
         check(f"A2f 형식 이상 키 {bad[:10]!r} = None", au("eth-mainnet") is None)
     write_env(f"TJ_ALCHEMY_KEY={AL}\n")
     u1 = au("eth-mainnet")
-    os.remove(common.ENV_PATH)
+    os.remove(paths.ENV_PATH)
     check("A2g 부를 때마다 .env 를 읽음(저장·삭제가 재시작 없이 먹음)", u1 and au("eth-mainnet") is None)
     os.environ["TJ_ALCHEMY_KEY"] = AL
     try:
@@ -89,7 +90,7 @@ if callable(am):
     check("A3c Ankr 키 → https://rpc.ankr.com/multichain/{키}", am() == f"https://rpc.ankr.com/multichain/{AK}", am())
     write_env("TJ_ANKR_KEY=bad key\n")
     check("A3d 형식 이상 = None", am() is None)
-    os.remove(common.ENV_PATH)
+    os.remove(paths.ENV_PATH)
 
 ENV = {"TJ_ALCHEMY_KEY": AL}
 check("A4a urls() = Alchemy 없음(BSC·Base 노드 풀 무변)", NK.urls(ENV) == {"bsc": [], "base": []}, NK.urls(ENV))
@@ -100,9 +101,9 @@ check("A4b apply = 노드 풀에 Alchemy 주소 0 · 붙인 서비스 없음", "
 check("A4c 장부 표 node_alchemy = 무료 80%", (cfg.get("rpc_day_limits") or {}).get("node_alchemy", {}).get("pct") == 80.0, cfg.get("rpc_day_limits"))
 check("A4d Base·BSC 로그 풀 그대로", cfg["chains"]["base"]["rpc_logs"] == CFG["chains"]["base"]["rpc_logs"] and cfg["bsc"]["logs_rpcs"] == CFG["bsc"]["logs_rpcs"], cfg)
 write_env(f"TJ_ALCHEMY_KEY={AL}\nTJ_ANKR_KEY={AK}\n")
-lc = common.load_config()
+lc = config.load_config()
 check("A4e load_config(Ankr+Alchemy 키) = Ankr 만 풀에 · Alchemy 주소·키 없음", AL not in json.dumps(lc) and any("rpc.ankr.com/base/" in u for u in lc["chains"]["base"]["rpc_logs"]), lc["chains"]["base"])
-os.remove(common.ENV_PATH)
+os.remove(paths.ENV_PATH)
 
 pl = NK.plans({})
 bf_engine.rpc_day_configure({"rpc_day_limits": {f"node_{p}": NK.budget_spec(p, pl[p]) for p in NK.PROVIDERS}})
@@ -119,7 +120,7 @@ check("A5d 단가: getTokenBalances 20 · +eth_getBalance = 40 · getLogs 60 · 
 check("A5e 다른 장부 단가 무변(NodeReal getLogs 50 + 일반 25 · Ankr 200)",
       U("node_nodereal", ["eth_getLogs", "eth_call"]) == 75 and U("node_ankr", ["eth_call"]) == 200 and U("node_ankr", None) == 200)
 pol = bf_engine._policy_for("base-mainnet.g.alchemy.com")
-check("A5f 초당 한도 = 무료 300 CU/s·15rps 의 80% 아래(exbal1012 칸 = 20 CU: 공유 버킷 1초 창 (버스트 + 초당) × 20CU ≤ 240 · 칸 ≥ 요청 → 요청 ≤ 12) · 계정 합산 공유 버킷(프로세스 합산)",
+check("A5f 초당 한도 = 무료 300 CU/s·15rps 의 80% 아래(칸 = 20 CU: 공유 버킷 1초 창 (버스트 + 초당) × 20CU ≤ 240 · 칸 ≥ 요청 → 요청 ≤ 12) · 계정 합산 공유 버킷(프로세스 합산)",
       pol.get("call_rate") and (pol["share_burst"] + pol["share_rate"]) * 20 <= 240 and (pol["share_burst"] + pol["share_rate"]) <= 12
       and min(pol["call_cost"].values()) >= 1 and pol.get("share") == "node_alchemy" and pol.get("share_xproc") is True, pol)
 
@@ -167,7 +168,7 @@ try:
         try:
             bf_engine.rpc_post(URL, body, retries=1)
             ok_n += 1
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             err = e
             break
     net = getattr(err, "net", err)
@@ -212,7 +213,7 @@ ss.update_settings(node_plans={"alchemy": {"plan": "paid", "share": 25, "month":
 fp2 = NK.fingerprint()
 check("A8c Alchemy 요금제 바꿈 = 지문 바뀜(하루 장부는 기동 때)", fp2 != fp1, (fp1, fp2))
 ss.update_settings(node_plans={})
-os.remove(common.ENV_PATH)
+os.remove(paths.ENV_PATH)
 
 check("A9a Alchemy 키 칸(EXPLORERS · NODE_GROUPS · 필드 TJ_ALCHEMY_KEY)", "alchemy" in ss.NODE_GROUPS and ss.EXPLORERS.get("alchemy", {}).get("fields") == [("TJ_ALCHEMY_KEY", "API Key")]
       and "TJ_ALCHEMY_KEY" in ss.SECRET_KEYS, ss.EXPLORERS.get("alchemy"))
@@ -225,7 +226,7 @@ if callable(na):
           na({"wallets": [{"type": "sol", "address": "So1aNaAddr3ss111111111111111111111111111111"}]}) is False and na({}) is False
           and na({"wallets": "x"}) is False and na(None) is False and na({"wallets": [None, {"type": "evm"}]}) is False)
 
-import onboarding
+import onboarding  # noqa: E402
 
 _real_node_rpc0 = onboarding._node_rpc
 onboarding._node_rpc = lambda u, m, p, timeout=15.0: "0x10"
@@ -237,10 +238,9 @@ check("A10c 노드 상태 = 하루 몫 774,193 · 오늘 쓴 양 숫자 · 쓰�
       na10.get("perDay") == int(30_000_000 / 31 * 80 / 100) and isinstance(na10.get("usedToday"), int) and na10.get("chains") == [], na10)
 check("A10d 다른 노드도 오늘 쓴 양", all(isinstance(v.get("usedToday"), int) for v in (st.get("nodes") or {}).values()), st.get("nodes"))
 
-RL = os.path.join(common.STATE_DIR, "wallet_reload.json")
-import wallet_register
+import wallet_register  # noqa: E402
 
-RL = getattr(wallet_register, "RELOAD_PATH", RL)
+RL = paths.state("wallet_reload.json")
 
 
 def reload_n():
@@ -321,7 +321,7 @@ u1 = NK.used_today("alchemy")
 check("A12f 키 확인 2콜 = 실제 계량 경로에서 eth_blockNumber 10 CU × 2 = 20(메서드 단가 · 종전 240)",
       len(SENT) == 2 and u1 - u0 == 20 and (tr5.get("test") or {}).get("ok"), (len(SENT), u1 - u0, tr5))
 
-import health
+import health  # noqa: E402
 
 kk = health.collect_keys(CFG)
 check("A13a collect_keys = alchemy 필요·없음(값 없음)", kk.get("alchemyNeed") is True and kk.get("alchemy") is False and AL not in json.dumps(kk), kk)
@@ -352,7 +352,7 @@ def rd(p):
         return ""
 
 
-readme, apik, envx = rd(T.README), rd(os.path.join(PUB, "docs", "API_KEYS.md")), rd(os.path.join(PUB, ".env.example"))
+readme, apik, envx = T.doc_text("README.md"), rd(os.path.join(PUB, "docs", "API_KEYS.md")), rd(os.path.join(PUB, ".env.example"))
 for nm, txt9 in (("README", readme), ("API_KEYS", apik)):
     check(f"A14a {nm}: TJ_ALCHEMY_KEY · TJ_ANKR_KEY · 받는 곳(dashboard.alchemy.com/signup · ankr.com/rpc) · 80%",
           all(s in txt9 for s in ("TJ_ALCHEMY_KEY", "TJ_ANKR_KEY", "dashboard.alchemy.com/signup", "ankr.com/rpc", "80%")))

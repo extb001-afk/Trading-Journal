@@ -2,7 +2,7 @@ import os
 import threading
 import time
 
-import common
+import paths, statefile
 
 BEAT_SEC = 30
 _started = set()
@@ -10,14 +10,14 @@ _lock = threading.Lock()
 
 
 def path(unit: str) -> str:
-    return os.path.join(common.STATE_DIR, f"runner_{unit}.json")
+    return paths.state(f"runner_{unit}.json")
 
 
 def beat_once(unit: str, now: float = None) -> None:
     try:
-        common.atomic_write_json(path(unit), {"unit": unit, "pid": os.getpid(), "ts": int(time.time() if now is None else now),
+        statefile.atomic_write_json(path(unit), {"unit": unit, "pid": os.getpid(), "ts": int(time.time() if now is None else now),
                                               "state": "running", "why": "", "direct": True})
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 

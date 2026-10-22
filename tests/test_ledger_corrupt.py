@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import random
-import shutil
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import random  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
-import common
-import db as dbm
-import health
-import ledger_backup as lb
-import unit_runner as U
+import paths  # noqa: E402
+import db as dbm  # noqa: E402
+import health  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import unit_runner as U  # noqa: E402
 
-S = common.STATE_DIR
-LIVE = common.DB_PATH
+S = paths.STATE_DIR
+LIVE = paths.DB_PATH
 
 
 def ck(name, cond, extra=None):

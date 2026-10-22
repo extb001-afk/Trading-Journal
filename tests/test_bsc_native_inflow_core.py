@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CFG = json.load(open(os.path.join(T.TMP, "config.json"), encoding="utf-8"))
 CFG["wallets"].append({"type": "bsc_rpc", "chain": "bsc", "address": W})
@@ -16,14 +16,13 @@ CFG["bsc"] = {"detail_rpcs": ["https://bscrpc.invalid"], "logs_rpcs": []}
 CFG.setdefault("native_symbol", {})["bsc"] = "BNB"
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8"))
 
-import common
-import core
-import discopen
-import bsc_watch
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import discopen  # noqa: E402
+import bsc_watch  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 E18 = 10 ** 18
 DAY = 86400
 NOW = int(time.time())
@@ -31,7 +30,7 @@ X = "0x" + "b7" * 20
 CTR = "0x" + "c9" * 20
 TKB = "0x" + "c1" * 20
 T0 = NOW - 20 * DAY
-CPATH = os.path.join(common.STATE_DIR, "cursor_bsc.json")
+CPATH = os.path.join(paths.STATE_DIR, "cursor_bsc.json")
 
 
 def h(n):
@@ -61,16 +60,16 @@ def bnb(c):
 
 def pump(c, n=30):
     for _ in range(n):
-        r = c._negabs_runner()
+        r = c.svc_recon._negabs_runner()
         r.last = 0.0
-        c.negabs_pass()
+        c.svc_recon.negabs_pass()
         if not r.jobs:
             return
         time.sleep(0.02)
 
 
-common.atomic_write_json(CPATH, {"from_block": 2990, "head": 3000, "_cov": 100, "_bf_start": 100, "_wallets": [W], "_synced_at": NOW + 3600})
-c = core.Core(common.load_config())
+statefile.atomic_write_json(CPATH, {"from_block": 2990, "head": 3000, "_cov": 100, "_bf_start": 100, "_wallets": [W], "_synced_at": NOW + 3600})
+c = core.Core(config.load_config())
 c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_done_bsc', ?)", (str(T0),))
 c.conn.execute("INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                ("recon:bsc", "opening_balance", "bsc", json.dumps({W: {"native:None": 0}}), T0))
@@ -120,13 +119,13 @@ print("[K4] 단서 없는 internal → 기초 잔고 요청")
 T4 = T3 + DAY
 led4 = bnb(c)
 ok4 = bsc_watch.BscWatcher._balw_disc_req(None, {}, W, 2500, led4 + 4 * E18, T4, 4 * E18, "시험")
-q4 = (common.read_json(os.path.join(common.STATE_DIR, discopen.RECHK_REQ_NAME), {}) or {}).get("items") or []
+q4 = (statefile.read_json(os.path.join(paths.STATE_DIR, discopen.RECHK_REQ_NAME), {}) or {}).get("items") or []
 chk(ok4 and len(q4) == 1 and q4[0]["ca"] is None and q4[0]["block"] == 2500, "K4 요청 파일 = 네이티브 한 줄(core 재점검 요청 규약)", q4)
 chk(not bsc_watch.BscWatcher._balw_disc_req(None, {}, W, 2500, led4 + 4 * E18, T4, 4 * E18, "시험"), "K4 같은 블록 요청 두 번 안 넣음")
 pump(c)
 sid4 = discopen.sid_of("bsc", W, None, 2500)
 an4 = [tuple(r) for r in c.conn.execute("SELECT source_id, event_ts, qty_base FROM postings WHERE source_kind='opening' AND source_id=?", (sid4,))]
-res4 = ((common.read_json(os.path.join(common.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {})
+res4 = ((statefile.read_json(os.path.join(paths.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {})
 chk(len(an4) == 1 and an4[0][1] == T4 and int(an4[0][2]) == 4 * E18 and bnb(c) == led4 + 4 * E18,
     "K4 core = 그 블록 시각에 발견 시점 기초 잔고 +4(원가 미상) · 원장 = 그 블록 잔고", (an4, res4, bnb(c) - led4))
 bsc_watch.BscWatcher._balw_disc_req(None, {}, W, 2500, led4 + 4 * E18, T4, 4 * E18, "시험")

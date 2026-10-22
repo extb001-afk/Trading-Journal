@@ -2,32 +2,31 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import acct_norm
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 try:
-    import discopen
+    import discopen  # noqa: E402
 except ImportError as e:
     chk(False, "발견 시점 기초 잔고 모듈(src/discopen.py) 있음", repr(e))
     T.finish()
@@ -61,7 +60,7 @@ def feed(c, hx, s):
 
 
 os.environ["TJ_NEGABS"] = "0"
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 feed(c, h(1), snap(h(1), T0, 1500, X, W, value=2 * E18, data="0x"))
 feed(c, h(2), snap(h(2), TA, 2000, W, TKN, toks=[(W, X, TKN, "TKN", 600 * E18)], fee=10 ** 15))
 c.conn.commit()
@@ -81,19 +80,19 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 k9 = f"eth:{TKN}"
 json.dump({"usd": {"ETH": 2000.0}, "usd_ts": {"ETH": NOW}, "rate": 1400.0, "updated": NOW, "dex_usd": {k9: 2.0}, "dex_ts": {k9: NOW},
-           "dex_res": {k9: 1e6}, "dex_res_ts": {k9: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "dex_res": {k9: 1e6}, "dex_res_ts": {k9: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 
 
 def build():
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -119,7 +118,7 @@ before = [k for k in key_a if str(k) < ISO(TA)[(len(ISO(TA)) - len(str(k))):] or
 diff_b = {k: (da[k].get("val"), (db.get(k) or {}).get("val")) for k in before if da[k].get("val") != (db.get(k) or {}).get("val")}
 up_b = {k: round(float((db.get(k) or {}).get("val") or 0) - float(da[k].get("val") or 0), 2) for k in before}
 chk(len(before) >= 3 and all(abs(v - 1000.0) < 0.5 for v in up_b.values()),
-    f"D3 발견 날 전 일별 값 {len(before)}일 = 앵커 넣기 전 + 1,000 × 그날 $1(원래 있던 보유 — 지난날 곡선 포함 · lpcurve1010 ②)", (up_b, key_a[:3], ISO(TA)))
+    f"D3 발견 날 전 일별 값 {len(before)}일 = 앵커 넣기 전 + 1,000 × 그날 $1(원래 있던 보유 — 지난날 곡선 포함)", (up_b, key_a[:3], ISO(TA)))
 last = key_a[-1] if key_a else None
 dv = ((db.get(last) or {}).get("val") or 0) - ((da.get(last) or {}).get("val") or 0) if last else None
 chk(dv is not None and abs(dv - 800) < 1.0, "D3 오늘 값 = +$800(보유 400 × $2 — 음수는 0 으로 가려졌던 몫)", (last, dv))

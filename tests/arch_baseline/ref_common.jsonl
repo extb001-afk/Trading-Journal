@@ -1,0 +1,4 @@
+{"_doc": "파일별 common 참조 수 — attr = common.X 속성 참조(별칭 포함) · imp = common 대상 Import·ImportFrom·import_module 자리 · sh = tools 셸 대본의 heredoc import 줄. 늘면 실패 · 줄면 안내 · 4-6 끝 목표 0(정의 = _arch_refcommon 머리).", "kind": "max", "spec": "ref_common"}
+{"key": "tools/cutover_c.sh", "sh": 3}
+{"key": "tools/cutover_ledger_20260926.sh", "sh": 1}
+{"key": "tools/deploy_final_20260926.sh", "sh": 1}

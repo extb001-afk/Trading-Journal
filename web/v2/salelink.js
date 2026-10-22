@@ -10,8 +10,7 @@
   const joRo = w => { const c = String(w).charCodeAt(String(w).length - 1), j = c >= 0xAC00 && c <= 0xD7A3 ? (c - 0xAC00) % 28 : 0; return j && j !== 8 ? '으로' : '로'; };
   const SALE = '세일 참가금';
   const SALE_WORDS = /세일|참가금|참여금|예치|회수\s*대기|청약|\bsale\b|\bido\b|\bico\b/i;
-  const esc0 = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  const esc = s => (X() ? X().esc(s) : esc0(s));
+  const esc = TJDOM.esc;
   const num = v => { const n = typeof v === 'number' ? v : parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; };
   const arr = v => (Array.isArray(v) ? v : []);
   const pvOn = () => { const x = X(); return !!(x && x.pvOn()); };
@@ -133,7 +132,7 @@
     if (!e.of && e.ofc) return sugBody(e);
     const o = e.of, cc = curCls(e), r = cc.r, a = o.a || '';
     const chain = (y.CHAIN_KO && y.CHAIN_KO[o.ch]) || o.ch || '';
-    const xl = (u, t) => u ? '<a class="mono" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(t) + ' ↗</a>' : '<span class="mono">' + esc(t) + '</span>';
+    const xl = (u, t) => u ? '<a class="mono" href="' + esc(TJDOM.safeUrl(u)) + '" target="_blank" rel="noopener noreferrer">' + esc(t) + ' ↗</a>' : '<span class="mono">' + esc(t) + '</span>';
     const txL = o.tx ? xl(y.exUrl(o.ch, o.tx), short(o.tx)) : '—';
     const adL = a && a !== 'multi' && a !== '?' ? xl(y.exUrl(o.ch, a, true), short(a)) : nmMask(o.nm || '', destKind(a, o.nm));
     const nmU = r ? (r.alias || r.memo) : '';
@@ -197,7 +196,8 @@
     slMemo: el => { const x = X(), a = el.getAttribute('data-k'); if (!x || !a || pvOn()) return;
       const d = x.S.drafts['slm:' + a], r = ofRow(a), v = String(d == null ? (r ? r.memo : '') : d).trim();
       if (v.length > 200) { x.toast('메모는 200자까지예요', true); return; }
-      x.post('/api/outflow_resolve', { address: a, op: 'memo', memo: v }, v ? '메모를 저장했어요' : '메모를 지웠어요').then(dd => { if (dd) delete x.S.drafts['slm:' + a]; }); },
+      const sy = window.TJ && window.TJ.sync, sn = sy ? sy.snap(x.S.drafts, ['slm:' + a]) : null;
+      x.post('/api/outflow_resolve', { address: a, op: 'memo', memo: v }, v ? '메모를 저장했어요' : '메모를 지웠어요').then(dd => { if (dd) { if (sn) sy.done(x.S.drafts, sn); else delete x.S.drafts['slm:' + a]; } }); },
     slGo: el => { const x = X(), z = Z(), a = el.getAttribute('data-k'); if (z) z.close(true); if (x && a) setTimeout(() => x.revealAndHighlight('outflow:' + a), 0); },
     slLink: el => { const x = X(), a = el.getAttribute('data-k'), k = el.getAttribute('data-v'), r = ofRow(a); if (!x || !a || !k) return;
       const c = r ? arr(r.candTop).find(y => y.key === k) : null, sug = REG.find(e => e && e.ofc && e.ofc.key === k);
@@ -232,20 +232,8 @@
     return out;
   }
 
-  const CSS = '.slrow{all:unset;cursor:pointer;display:inline;color:inherit;border-bottom:1px dashed var(--line2)}.slrow:hover{color:var(--text)}.slrow:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}'
-    + '.slrow .slgo{margin-left:4px;color:var(--faint)}.slsug{cursor:pointer;margin-left:4px}'
-    + '.slhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}.slamt{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}.slamt b{font-size:22px}.slamt .mut{font-size:13px}'
-    + '.slbox{border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-bottom:12px;background:var(--surface2)}.slkv{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}'
-    + '.slkv:last-child{border-bottom:0}.slkv .k{flex:0 0 92px;color:var(--muted)}.slkv .v{flex:1;min-width:0;overflow-wrap:anywhere;text-align:right}.slkv.ok .v{color:var(--ok)}.slkv a{color:var(--accent);text-decoration:none}'
-    + '.sllab{margin:12px 0 6px}.sllh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 6px}.sllh .lnk{background:none;border:0;color:var(--muted);font-size:12.5px;cursor:pointer;padding:4px 0}.slcats{margin-bottom:6px}.slmemo{display:flex;gap:8px}.slmemo .field{flex:1;min-width:0}.slft{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px}'
-    + '.slcand{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px dashed var(--line);background:color-mix(in srgb,var(--warn) 7%,var(--surface));font-size:13px}'
-    + '.slcand.in{border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:var(--surface)}.slcand .slc-t{font-weight:650;color:var(--warn)}.slcand .slc-m{flex:1;min-width:0}.slcand .slc-b{display:flex;gap:6px}'
-    + '.slcand .btn{min-height:32px}.slc-more{margin-left:auto}.ofnm{font-weight:650;max-width:100%}.ofsl0{cursor:pointer;margin-left:6px}'
-    + '@media (max-width:640px){.slkv .k{flex-basis:80px}.slcand{padding:9px 12px}.slcand .slc-b{width:100%;justify-content:flex-end}.slcand .btn{min-height:40px;padding:0 16px}}';
-  function addCss() { if (document.getElementById('tjSlCss')) return; const s = document.createElement('style'); s.id = 'tjSlCss'; s.textContent = CSS; document.head.appendChild(s); }
 
   function boot() {
-    addCss();
     const z = Z(); if (z) z.reg('sl', sheetBody);
     const T = window.__tj; if (T && T.A) Object.keys(ACTS).forEach(k => { if (!T.A[k]) T.A[k] = ACTS[k]; });
     if (!(z && T && T.A)) { setTimeout(boot, 200); return; }

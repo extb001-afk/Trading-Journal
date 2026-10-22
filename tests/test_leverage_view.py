@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
-import leverage as L
-import lev_view as V
+import paths, statefile  # noqa: E402
+import leverage as L  # noqa: E402
+import lev_view as V  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
+assert T.TMP in paths.STATE_DIR
 NOW = 1_800_000_000
 SECRET = "SECRETLIKE-0000"
 
@@ -34,7 +34,7 @@ class R:
 
 def collect(ex, g, prev=None):
     if prev is not None:
-        common.atomic_write_json(L.path(), prev)
+        statefile.atomic_write_json(L.path(), prev)
     elif os.path.exists(L.path()):
         os.remove(L.path())
     doc = L.collect({k: "x" for k in L.NEED[ex]}, {ex: g}, now=NOW, cycle_sec=600, fresh_sec=1800)
@@ -42,7 +42,7 @@ def collect(ex, g, prev=None):
     return doc
 
 
-P = lambda ex, p, st="ok", meas=NOW - 60: {"ex": ex, "product": p, "status": st, "status_eff": st, "measured_at": meas}
+P = lambda ex, p, st="ok", meas=NOW - 60: {"ex": ex, "product": p, "status": st, "status_eff": st, "measured_at": meas}   # noqa: E731
 
 print("[n0] 공식 상태는 맨 끝")
 lev0 = {"v": 1, "ts": NOW, "products": [P("binance", "margin_isolated")], "items": [
@@ -136,7 +136,7 @@ check("쿠코인 캐시 원문 칸 미저장", SECRET not in open(L.path()).read
 check("모든 캐시 진입점이 칸 목록에 있음(코드 속 run.cached 키 = CACHE_FIELDS)", all(L._proj_spec(k) is not None for k in (
     "binance:tradeCoeff", "binance:crossMarginData:USDT", "binance:loanCollateral", "binance:loanable", "bybit:account-info", "bybit:collateral-info:USDT",
     "okx:account-config", "okx:interest-rate:USDT", "okx:loan-interest-accrued", "kucoin:margin-config", "kucoin:borrowRate:USDT", "kucoin:isolated-symbols", "gate:multi-ltv")))
-import re
+import re  # noqa: E402
 keys_in_code = set(re.findall(r'run\.cached\(f?"([a-z]+:[A-Za-z-]+:?)', open(os.path.join(T.SRC, "leverage.py"), encoding="utf-8").read()))
 check("코드의 캐시 키 앞부분이 전부 칸 목록에 있음(새 캐시 추가 때 빠뜨림 방지)", all(L._proj_spec(k + ("X" if k.endswith(":") else "")) is not None for k in keys_in_code), sorted(keys_in_code))
 

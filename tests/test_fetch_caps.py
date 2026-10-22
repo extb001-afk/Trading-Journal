@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import socket
-import threading
-import time
-import urllib.request
+import json  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.request  # noqa: E402
 
 json.dump({"chains": {"base": {"blockscout": "https://bs.invalid", "conf_depth": 3, "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "base", "address": "0x" + "a1" * 20, "label": "w"}]},
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import bf_engine
-import common
-import evm_watch
+import bf_engine  # noqa: E402
+import paths  # noqa: E402
+import evm_watch  # noqa: E402
 
 chk = T.chk
 print("[1] 블록스카웃 상세 목록 누적 상한")
@@ -47,17 +47,15 @@ http0 = evm_watch.http_json
 
 def run(mode, **kw):
     del CALLS[:]
-    evm_watch.http_json = fake_pages(mode, **kw)
-    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+    T.patch_moved("http_json", fake_pages(mode, **kw), ("evm_",))
     try:
         return w._fetch_all_items("/api/v2/transactions/0xabc/token-transfers"), None
     except KeyboardInterrupt as e:
         return None, e
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return None, e
     finally:
-        evm_watch.http_json = http0
-        T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+        T.patch_moved("http_json", http0, ("evm_",))
 
 
 out, err = run("finite")
@@ -83,21 +81,19 @@ def fake_bigcur(url, prio="fg", deadline=None, retries=None, breaker_5xx=True):
 
 fake_bigcur._tj_test_mock = True
 del CALLS[:]
-evm_watch.http_json = fake_bigcur
-T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+T.patch_moved("http_json", fake_bigcur, ("evm_",))
 try:
     w._fetch_all_items("/api/v2/transactions/0xabc/internal-transactions")
     err = None
 except KeyboardInterrupt as e:
     err = e
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     err = e
 finally:
-    evm_watch.http_json = http0
-    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+    T.patch_moved("http_json", http0, ("evm_",))
     del w.BS_DETAIL_MAX_BYTES
 chk(CAP is not None and isinstance(err, CAP) and len(CALLS) <= 6 and "바이트" in str(err),
-    "항목 0 · 큰 커서(200KB씩)만 = 바이트 상한(시험 1MB)에 걸림 — 커서도 셈(코덱스 ui904 · 종전 200쪽까지 커서 40MB 보관)", (type(err).__name__, len(CALLS), str(err)[:100]))
+    "항목 0 · 큰 커서(200KB씩)만 = 바이트 상한(시험 1MB)에 걸림 — 커서도 셈(종전 200쪽까지 커서 40MB 보관)", (type(err).__name__, len(CALLS), str(err)[:100]))
 TX = {"hash": "0xabc", "block_number": 123, "value": "0", "fee": {"value": "1"}, "status": "ok", "timestamp": "2026-10-11T00:00:00Z"}
 
 
@@ -109,17 +105,15 @@ def fake_detail(url, prio="fg", deadline=None, retries=None, breaker_5xx=True):
 
 fake_detail._tj_test_mock = True
 del CALLS[:]
-evm_watch.http_json = fake_detail
-T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+T.patch_moved("http_json", fake_detail, ("evm_",))
 try:
     snap, e9 = w.fetch_detail("0xabc"), None
 except KeyboardInterrupt as e:
     snap, e9 = None, e
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     snap, e9 = None, e
 finally:
-    evm_watch.http_json = http0
-    T.patch_moved("http_json", evm_watch.http_json, ("evm_",))
+    T.patch_moved("http_json", http0, ("evm_",))
 chk(snap is None and CAP is not None and isinstance(e9, CAP), "fetch_detail: 토큰 이동 목록 상한 초과 = 예외(부분 목록으로 완전 상세 안 만듦)", (type(e9).__name__, str(e9)[:100]))
 w.enrich = {"0xabc": 0}
 w._enrich_5xx = {}
@@ -133,7 +127,7 @@ def fd_cap(h, accept_pending=False):
 
 w.fetch_detail = fd_cap
 w._enrich_pass(1000, healthy=True)
-pz = os.path.join(common.STATE_DIR, "pending_poison.jsonl")
+pz = os.path.join(paths.STATE_DIR, "pending_poison.jsonl")
 rows = [json.loads(x) for x in open(pz)] if os.path.exists(pz) else []
 chk(not w.enrich and any(r.get("src") == "enrich_giveup_cap" and r.get("txhash") == "0xabc" for r in rows),
     "enrich: 상한 초과 = 1번에 포기(pending_poison 기록 · rpc_basic 확정 — 종전 200회 × 최대 200쪽)", (w.enrich, rows[-1:] if rows else None))
@@ -239,7 +233,7 @@ def call(url, **kw):
     t0 = time.time()
     try:
         return bf_engine.http_request(url, **kw)[0], None, time.time() - t0
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return None, e, time.time() - t0
 
 
@@ -268,7 +262,7 @@ chk(isinstance(e9, bf_engine.NetError) and e9.kind == "timeout" and t9 < 3.0,
     "종전 모드: 시도마다 max(timeout, HTTP_BODY_MAX_SEC=1초) 안에 timeout(종전 ≈6초)", (type(e9).__name__, getattr(e9, "kind", None), round(t9, 2)))
 d9, e9, t9 = call(srv[5][1], timeout=1.0, retries=1, deadline=time.time() + 1.5, sem_timeout=1.5)
 chk(isinstance(e9, bf_engine.NetError) and e9.kind == "timeout" and t9 < 3.0,
-    "chunked: 0 청크 뒤 trailer 를 0.2초마다 = 하드 마감(1.5초) 안에 timeout(코덱스 ui904 · 종전 ≈6초 뒤 성공 반환)", (type(e9).__name__, getattr(e9, "kind", None), round(t9, 2), d9))
+    "chunked: 0 청크 뒤 trailer 를 0.2초마다 = 하드 마감(1.5초) 안에 timeout(종전 ≈6초 뒤 성공 반환)", (type(e9).__name__, getattr(e9, "kind", None), round(t9, 2), d9))
 bf_engine.HTTP_BODY_MAX_SEC = 1.0
 try:
     d9, e9, t9 = call(srv[6][1], timeout=0.5, retries=1)

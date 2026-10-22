@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import re
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
 
 p = os.path.join(T.ROOT, "config.example.json")
 c = json.load(open(p, encoding="utf-8"))

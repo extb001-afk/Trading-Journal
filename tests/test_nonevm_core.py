@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check, Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_event as ce
-import chain_registry as reg
-import address_codec as ac
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 
 NOW = int(time.time())
 DAY = 86400
@@ -26,11 +26,11 @@ EXA = "41" + "e1" * 20
 CFG_PATH = os.path.join(T.TMP, "config.json")
 base_cfg = json.load(open(CFG_PATH))
 
-c0 = core.Core(common.load_config())
+c0 = core.Core(config.load_config())
 c0.conn.commit()
 check("K0 새 체인 지갑 없음 = 새 스트림 0", c0.chain_readers == [] and c0.chain_owners == {}, c0.chain_readers)
-check("K0 새 인박스 폴더 안 만듦", not any(os.path.isdir(os.path.join(common.INBOX_DIR, x)) for x in reg.CHAINS),
-      os.listdir(common.INBOX_DIR))
+check("K0 새 인박스 폴더 안 만듦", not any(os.path.isdir(os.path.join(paths.INBOX_DIR, x)) for x in reg.CHAINS),
+      os.listdir(paths.INBOX_DIR))
 c0.conn.close()
 
 
@@ -44,7 +44,7 @@ def write_cfg(chain_wallets, ex=None):
 write_cfg([{"chain": "tron", "address": ac.tron_display(A), "label": "ta"}, {"chain": "ton", "address": "0:" + "31" * 32},
            {"chain": "sui", "address": N.OWN["sui"][0]}],
           ex=[{"exchange": "upbit", "chain": "tron", "address": ac.tron_display(EXA)}])
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 check("K0 지갑 있으면 그 체인 스트림만", [x for x, _r in c.chain_readers] == ["sui", "ton", "tron"] and c.chain_owners["tron"] == {A},
       c.chain_readers)
@@ -71,7 +71,7 @@ def wsum(chain, loc_like="wallet:%"):
 
 
 def poison_n():
-    p = os.path.join(common.STATE_DIR, "poison.jsonl")
+    p = os.path.join(paths.STATE_DIR, "poison.jsonl")
     return sum(1 for _ in open(p)) if os.path.exists(p) else 0
 
 
@@ -126,9 +126,9 @@ U5, U6 = "a6" * 32, "a7" * 32
 TKA = ("token", N.TOK["tron"], "TKA", 6)
 feed(N.rec("tron", U5, NOW - 7 * DAY, [(A, "native", -2_000_100), (A, TKA, 50)], fees=[(A, 100)], hint="swap", trusted=False))
 check("K5 검증 안 된 스왑 힌트 = UNKNOWN", ev(U5) == "UNKNOWN", ev(U5))
-c._leg_px = lambda aid, ts: 0.5
+c.svc_price._leg_px = lambda aid, ts: 0.5
 c.px.fx_at = lambda *a, **k: 1400.0
-c._price_tx("tron", U5)
+c.svc_price._price_tx("tron", U5)
 nn = c.conn.execute("SELECT COUNT(*) FROM postings WHERE source_id=? AND leg_kind IN ('disp','acq') AND cost_usd IS NOT NULL", (U5,)).fetchone()[0]
 check("K5 UNKNOWN 교환 레그 시세 없음(가격 없는 교환 = 원가 넘기기 · 실현 확정 없음)", nn == 0, nn)
 feed(N.rec("tron", U6, NOW - 7 * DAY, [(A, "native", -2_000_100), (A, TKA, 50)], fees=[(A, 100)], hint="swap", trusted=True,
@@ -187,17 +187,17 @@ evr = c._rederive_tx("tron", U3)
 c.conn.commit()
 check("K8 _rederive_tx(새 체인) = 같은 결과", evr == "TRANSFER_SELF" and legs(U3) == L3, (evr, legs(U3)))
 
-wr9 = SegmentWriter(os.path.join(common.INBOX_DIR, "tron"))
+wr9 = SegmentWriter(os.path.join(paths.INBOX_DIR, "tron"))
 U9 = "b1" * 32
 wr9.append(N.rec("tron", U9, NOW - DAY, [(A, "native", 4_000_000)]))
 seg, off, got = c._drain_stream("tron", dict(c.chain_readers)["tron"], 1, 0)
 check("K9 state/inbox/tron 레코드 소비 · 오프셋 'tron'", got == 1 and ev(U9) == "TRANSFER_IN" and c.conn.execute(
     "SELECT off FROM inbox_offsets WHERE stream='tron'").fetchone()["off"] == off, (got, ev(U9)))
 write_cfg([])
-c2 = core.Core(common.load_config())
+c2 = core.Core(config.load_config())
 c2.conn.commit()
 check("K9 지갑을 빼도 이미 쓰인 인박스 스트림은 유지(유실 방지)", "tron" in [x for x, _r in c2.chain_readers], c2.chain_readers)
-check("K9 대사 펜스(미소비 체인 목록)에 새 스트림 포함", c2._recon_pending_chains() is not None)
+check("K9 대사 펜스(미소비 체인 목록)에 새 스트림 포함", c2.svc_recon._recon_pending_chains() is not None)
 
 check("K10 새 원본 시각(_tx_hist_ts) = 레코드 ts", c._tx_hist_ts("tron", U9) == NOW - DAY)
 c.conn.execute("DELETE FROM postings WHERE source_id=?", (U4,))

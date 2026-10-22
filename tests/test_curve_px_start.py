@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import calendar
-import inspect
-import json
-import os
-from datetime import datetime, timedelta, timezone
+import calendar  # noqa: E402
+import inspect  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import candles
-import histcurve as H
+import candles  # noqa: E402
+import histcurve as H  # noqa: E402
 
 chk = T.chk
 KST = timezone(timedelta(hours=9))
@@ -130,7 +130,7 @@ chk(body9["days"] and body9["days"][0][0] == "2025-06-15" and abs(body9["days"][
     "S NK3 장기 곡선 '전체' = 첫 기록 날(2025-06-15)부터", (body9["days"][:1], body9.get("first")))
 
 pth2 = os.path.join(T.TMP, "state", "s_hist2.json")
-H.common.atomic_write_json(pth2, {"_v": H.HIST_V, "d": {"2026-01-01": [5.0, None, 0, "hc", 0], "2026-03-09": [5.0, None, 0, "hc", 0]},
+H.statefile.atomic_write_json(pth2, {"_v": H.HIST_V, "d": {"2026-01-01": [5.0, None, 0, "hc", 0], "2026-03-09": [5.0, None, 0, "hc", 0]},
                                   "s": {}, "meta": {"first": "2026-01-01", "pending": False, "flow_pending": False}})
 HC2 = H.HistCurve(path=pth2, px_path=os.path.join(T.TMP, "state", "s_hist2_px.json"))
 ds2 = H.days_between("2026-01-01", "2026-10-08")
@@ -139,6 +139,6 @@ GL = {1: {"sym": "USDT", "is_stable": True, "qty_timeline": [(ts_kst("2026-03-10
 HC2.run_once(kit_of(GL, {1: 100.0}, floor=ts_kst("2026-01-01", 0)), cap=0, now=NOW)
 c2, b2 = HC2.view(None)
 chk(b2.get("first") == "2026-03-10" and b2["days"] and b2["days"][0][0] == "2026-03-10" and "2026-01-01" in HC2.st["d"],
-    "S NK3 cv402 저장본에 첫날 앞 행이 있어도 응답 = 첫 기록 날(03-10)부터 · 저장본 행은 그대로", (b2.get("first"), b2["days"][:1], sorted(HC2.st["d"])[:1]))
+    "S NK3 저장본에 첫날 앞 행이 있어도 응답 = 첫 기록 날(3/10)부터 · 저장본 행은 그대로", (b2.get("first"), b2["days"][:1], sorted(HC2.st["d"])[:1]))
 
 T.finish()

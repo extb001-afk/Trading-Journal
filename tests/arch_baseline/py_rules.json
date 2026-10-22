@@ -1,0 +1,276 @@
+{
+ "_설명": "파이썬 아키텍처 래칫 규칙(사람이 고치는 설정 · 설명 = docs/ARCH.md). 한도를 올리거나 허용을 늘리는 등 느슨하게 바꾸면 test_arch_integrity 가 막는다 — 그런 변경은 기준 브랜치(refactor)에서만(총괄 검토).",
+ "limits": {
+  "file.lines": 800,
+  "file.bytes": 65536,
+  "func.lines": 80,
+  "func.args": 7,
+  "func.depth": 4,
+  "class.lines": 400,
+  "class.methods": 25
+ },
+ "targets": {
+  "file.lines": 600,
+  "file.bytes": 49152,
+  "func.lines": 60
+ },
+ "src_packages": [
+  "brokers"
+ ],
+ "api_allow": {
+  "urlopen": [
+   "net",
+   "net_*"
+  ],
+  "hmac": [
+   "ex_sign*",
+   "login_auth"
+  ],
+  "sqlite": [
+   "db",
+   "db_*"
+  ],
+  "replace": [
+   "fsio",
+   "fsio_*"
+  ],
+  "kst": [
+   "timeutil",
+   "timeutil_*"
+  ],
+  "statepath": [
+   "paths",
+   "paths_*"
+  ],
+  "gwrite": [
+   "accounting_basis"
+  ]
+ },
+ "copy_home": {
+  "num": [
+   "num",
+   "num_*"
+  ],
+  "atomic": [
+   "fsio",
+   "fsio_*"
+  ],
+  "statepath": [
+   "paths",
+   "paths_*"
+  ]
+ },
+ "allow_units": [
+  {
+   "k": "api.replace",
+   "m": "alert_bot",
+   "q": "_load_cursor",
+   "why": "손상된 커서 파일을 .bad 로 옆으로 치움(쓰기 아님)"
+  },
+  {
+   "k": "api.replace",
+   "m": "bf_engine",
+   "q": "_hist_keep_bad",
+   "why": "손상된 이력 파일을 .bad.<시각> 으로 옆으로 치움"
+  },
+  {
+   "k": "api.replace",
+   "m": "bsc_balw",
+   "q": "BalwMixin._balw_rx",
+   "why": "못 읽는 요청 파일을 .bad 로 옆으로 치움"
+  },
+  {
+   "k": "api.replace",
+   "m": "core_inbox",
+   "q": "InboxMixin.poison_replay_pass",
+   "why": "손상된 격리 재처리 요청을 .bad 로 옆으로 치움"
+  },
+  {
+   "k": "api.replace",
+   "m": "discopen",
+   "q": "Runner._req_take",
+   "why": "요청 파일 가져가기 — 원자 이름 바꾸기로 한 번만 처리(쓰기 아님)"
+  },
+  {
+   "k": "api.replace",
+   "m": "ledger_backup",
+   "q": "backup_files._put",
+   "why": "원장 백업 파일 원자 교체(원장 백업 도구 자체의 fsync 순서)"
+  },
+  {
+   "k": "api.replace",
+   "m": "ledger_backup",
+   "q": "run_once",
+   "why": "원장 백업 파일·저널 원자 교체(원장 백업 도구 자체의 fsync 순서)"
+  },
+  {
+   "k": "api.replace",
+   "m": "ledger_backup",
+   "q": "swap_in",
+   "why": "원장 DB 교체 — 하드 링크 보존 + 이름 바꾸기 한 번 + 실패 되돌리기(core._ext_swap 이 부름)"
+  },
+  {
+   "k": "api.replace",
+   "m": "review_daily",
+   "q": "fill_request_check",
+   "why": "손상된 채우기 요청을 .bad 로 옆으로 치움"
+  },
+  {
+   "k": "api.replace",
+   "m": "settings_store",
+   "q": "_read_settings_for_write",
+   "why": "손상된 settings.json 을 옆으로 치우고 새로 씀"
+  },
+  {
+   "k": "api.replace",
+   "m": "statefile",
+   "q": "read_control_json",
+   "why": "손상된 제어 JSON 을 .bad 로 옆으로 치움"
+  },
+  {
+   "k": "api.replace",
+   "m": "view_fspin",
+   "q": "_fs_pin_load",
+   "why": "손상된 최초 인식 시가 고정 파일을 .bad 로 옆으로 치움"
+  }
+ ],
+ "ledger_schema_module": "db",
+ "ledger_tables": [
+  "alerts_sent",
+  "asset_groups",
+  "assets",
+  "decisions",
+  "exchange_addresses",
+  "exf_adj_tomb",
+  "exf_late_pending",
+  "inbox_offsets",
+  "journal",
+  "meta",
+  "positions",
+  "postings",
+  "raw_ex",
+  "raw_observations",
+  "raw_rewrites",
+  "raw_txs",
+  "snapshots",
+  "transfers",
+  "tx_class",
+  "wallets"
+ ],
+ "money_modules": [
+  "accounting_basis",
+  "accounting_books",
+  "accounting_cp",
+  "accounting_ctx",
+  "accounting_fee",
+  "accounting_fs",
+  "accounting_index",
+  "accounting_krw",
+  "accounting_loan",
+  "accounting_lp",
+  "accounting_offc",
+  "accounting_origin",
+  "accounting_outmove",
+  "accounting_sale",
+  "accounting_unk",
+  "accounting_util",
+  "acct_norm",
+  "bf_engine",
+  "buychart",
+  "candles",
+  "core",
+  "core_classify",
+  "core_common",
+  "core_dec",
+  "core_exf",
+  "core_exf_fut",
+  "core_exf_late",
+  "core_ext",
+  "core_fills",
+  "core_inbox",
+  "core_late",
+  "core_lp",
+  "core_outflow",
+  "core_post",
+  "core_pricing",
+  "core_prov",
+  "core_recon",
+  "core_snap",
+  "core_upbit",
+  "core_upbit_recon",
+  "db",
+  "discopen",
+  "exprov",
+  "flowev",
+  "fut_rcpt",
+  "histcurve",
+  "leverage",
+  "lpchain",
+  "lpdec",
+  "lpsol",
+  "outflow_match",
+  "pricing",
+  "provbal",
+  "recon",
+  "sale_match",
+  "salelink",
+  "sellchart",
+  "spamguard",
+  "ubfill",
+  "view_alerts",
+  "view_b_cards",
+  "view_b_daily",
+  "view_b_futidx",
+  "view_b_outflows",
+  "view_b_pendings",
+  "view_b_replay",
+  "view_b_tail",
+  "view_backfill",
+  "view_builder",
+  "view_common",
+  "view_daily",
+  "view_detail",
+  "view_evals",
+  "view_fspin",
+  "view_fut",
+  "view_hero",
+  "view_index",
+  "view_krw",
+  "view_load",
+  "view_misc",
+  "view_offc",
+  "view_order",
+  "view_outflows",
+  "view_pending",
+  "view_plans",
+  "view_prov",
+  "view_pxfix",
+  "view_regroup",
+  "view_review",
+  "view_reviews",
+  "view_snapfile",
+  "view_spot",
+  "view_tax",
+  "view_text",
+  "view_txkey",
+  "view_workers",
+  "view_xv",
+  "wow",
+  "wow2",
+  "xchain_match",
+  "xfer_match",
+  "xparts"
+ ],
+ "except_reasons": {
+  "boundary": "스레드·프로세스·요청 처리의 맨 바깥 경계 — 한 번 실패가 유닛·서버를 죽이지 않게(로그 남기고 계속)",
+  "isolate": "여러 항목을 도는 중 한 항목 실패를 그 항목에 가둠(나머지 계속 · 실패 기록)",
+  "optional": "선택 기능·부가 표시 — 실패하면 그 기능만 꺼짐(숫자·원장 무변)",
+  "cleanup": "닫기·지우기·정리 실패 무시(본 결과는 이미 정해짐)",
+  "fallback": "다른 경로·직전 값으로 대체하고 대체한 사실을 남김",
+  "probe": "있는지·되는지 확인 — 실패 = '없음·안 됨'이 답"
+ },
+ "env_docs_exclude": [
+  "ARCH.md",
+  "CODEMAP.md"
+ ]
+}

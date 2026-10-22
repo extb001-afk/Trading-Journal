@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import bf_engine
-import nodesel
-import evm_watch
+import paths  # noqa: E402
+import bf_engine  # noqa: E402
+import nodesel  # noqa: E402
+import evm_watch  # noqa: E402
 
 KEYTOK = "k3yS3cr3tT0ken0123456789"
 PUB_A = "https://pub-a.example.org/rpc"
@@ -137,7 +137,7 @@ T.chk(row and row[0].get("ledger") == "node_ankr", "O5 같은 Ankr 키(BSC)도 �
 for u in (QN, SUBKEY, NODEREAL):
     nodesel.end(u, ["eth_getBalance"], 1, nodesel.begin())
 nodesel._maybe_flush(force=True)
-fp = os.path.join(common.quota_dir(), "node_stats", f"{bf_engine._RPC_DAY_PROC}.json")
+fp = os.path.join(paths.quota_dir(), "node_stats", f"{bf_engine._RPC_DAY_PROC}.json")
 raw = open(fp, encoding="utf-8").read() if os.path.exists(fp) else ""
 T.chk(bool(raw) and KEYTOK not in raw and KEYTOK.lower() not in raw and "my-endpoint-name" not in raw and "/rpc" not in raw
       and "pub-a" not in raw and "https://" not in raw, "O2 관측 파일에 주소·키·경로·이름 칸 없음", raw[:300])
@@ -288,8 +288,8 @@ put(PUB_A, ["eth_getBalance"], 0.5, n=6)
 T.chk(nodesel.via("base") == "Ankr + 공개 노드", "U1 섞임 = 많은 순 2개(20% 이상)", nodesel.via("base"))
 CLK.t += 400
 T.chk(nodesel.via("base") == "", "U1 5분 지난 표본 = 칩 없음(오래된 표시 안 남김)")
-import web
-import time as _t
+import web  # noqa: E402
+import time as _t  # noqa: E402
 now9 = _t.time()
 j9 = web.StateBuilder._bf_job_text("base:rpc", 0.45, 720, 0, "extend",
                                    {"done": 45, "total": 100, "unit": "blocks", "moved_at": now9 - 10, "updated": now9, "note": None, "via": "Ankr"}, now=now9)
@@ -323,7 +323,7 @@ W.trace_rpcs = [QN, DRPC, PUB_A]
 T.chk(W._trace_order() == [QN, PUB_A, DRPC], "R1 키 노드 뒤 공개 노드끼리는 느린 것 뒤로", W._trace_order())
 
 
-import bsc_watch
+import bsc_watch  # noqa: E402
 CAP = []
 
 

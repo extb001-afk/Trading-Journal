@@ -2,18 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import unit_beat
+import config, paths, statefile  # noqa: E402
+import health  # noqa: E402
+import unit_beat  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = time.time()
 W = "0x" + "a1" * 20
 
@@ -24,7 +24,7 @@ def ck(name, cond, extra=None):
 
 def wj(name, obj):
     os.makedirs(os.path.dirname(os.path.join(S, name)), exist_ok=True)
-    common.atomic_write_json(os.path.join(S, name), obj)
+    statefile.atomic_write_json(os.path.join(S, name), obj)
 
 
 def rm(name):
@@ -35,7 +35,7 @@ def rm(name):
 
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "blocks_per_day": 7200, "rpcs": ["https://rpc.invalid"]}},
-           "wallets": [{"type": "evm", "chain": "eth", "address": W}]}, open(common.CONFIG_PATH, "w"))
+           "wallets": [{"type": "evm", "chain": "eth", "address": W}]}, open(paths.CONFIG_PATH, "w"))
 os.makedirs(os.path.join(T.TMP, "logs"), exist_ok=True)
 UNITS = list(health.UNITS)
 
@@ -62,10 +62,10 @@ PROBES = {"inbox": lambda: {}, "disk": lambda: {"free": 100 * 10 ** 9, "total": 
 
 
 def run_eval(mod, pm2):
-    h = mod.settings(common.load_config())
+    h = mod.settings(config.load_config())
     h["log_dir"] = os.path.join(T.TMP, "logs")
     m = mod.Monitor(probes=dict(PROBES, pm2=lambda: pm2))
-    obs = m.observe(common.load_config(), h, NOW, False)
+    obs = m.observe(config.load_config(), h, NOW, False)
     return mod.evaluate(obs, h, open_ids={}), obs
 
 
@@ -140,13 +140,13 @@ ck("[3] ④ 관측 5분 전(막 켬) = 판정 안 함", "collect:all" not in c3,
 
 base_state(prices=False)
 rm("health_eval.json")
-src4 = {s["key"]: s for s in health.collect_sources(common.load_config(), {}, NOW)}
+src4 = {s["key"]: s for s in health.collect_sources(config.load_config(), {}, NOW)}
 ck("[4] ③ 바퀴는 돌았는데(updated) 받은 시세 0 = 성공 아님(마지막 성공 없음)", src4["price:spot"]["last_success"] is None
    and "받은 시세 없음" in str(src4["price:spot"]["extra"]), src4["price:spot"])
 base_state(prices=True)
-src4 = {s["key"]: s for s in health.collect_sources(common.load_config(), {}, NOW)}
+src4 = {s["key"]: s for s in health.collect_sources(config.load_config(), {}, NOW)}
 ck("[4] ③ 받은 시세 있음 = 종전처럼 성공", src4["price:spot"]["last_success"] == NOW - 10, src4["price:spot"])
 wj("spot.json", {"updated": NOW - 10, "usd": {}, "ex_usd": {}, "dex_usd": {}, "want": {"ex": [], "dex": 0}})
-src4 = {s["key"]: s for s in health.collect_sources(common.load_config(), {}, NOW)}
+src4 = {s["key"]: s for s in health.collect_sources(config.load_config(), {}, NOW)}
 ck("[4] ③ 매길 보유가 없음(필요한 거래소·DEX 0) = 빈 시세가 정상(성공)", src4["price:spot"]["last_success"] == NOW - 10, src4["price:spot"])
 T.finish()

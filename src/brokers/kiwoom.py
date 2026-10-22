@@ -1,11 +1,11 @@
 """Kiwoom Securities REST holdings adapter (read-only, UNVERIFIED)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from .base import Adapter as _Base, BrokerError, fnum, ERR_BODY
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 
 
 class Adapter(_Base):

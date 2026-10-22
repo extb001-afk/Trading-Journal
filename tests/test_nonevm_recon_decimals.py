@@ -2,27 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
-import core
-import bf_engine
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter
-import _tronfake as F
-import tron_watch as TW
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import bf_engine  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
+import _tronfake as F  # noqa: E402
+import tron_watch as TW  # noqa: E402
 
 fake = F.FakeTron()
 F.install_loop_open(bf_engine, T)
@@ -47,7 +47,7 @@ json.dump(cfg, open(CFG_PATH, "w"))
 reg.FORCE_AVAILABLE.update({"tron", "sui", "ton"})
 DRAINED = {"tron", "sui", "ton"}
 
-ad = TW.make_adapter(common.load_config())
+ad = TW.make_adapter(config.load_config())
 bal = ad.fetch_balances({A}, None, tokens={A: []})
 v = ce.validate_balances(bal, "tron", {A})
 check("D1 어댑터: 자릿수 모르는 새 토큰 = usable 에서 뺌(0 도 아님) · _unobserved", ("token", SIX) not in (v["usable"].get(A) or {})
@@ -56,14 +56,13 @@ check("D1 어댑터: 대사 보류(_complete 아님 — 완료 도장으로 영�
 
 st = cs.ChainState("tron")
 ad.state = st
-col = cw.Collector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, "tron")), st, {A})
+col = cw.Collector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, "tron")), st, {A})
 col.cycle()
 check("D1 수집기 준비(창 안 거래 없음)", st.ready({A}), st.status_view())
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-c._nonevm_adapters = {"tron": TW.make_adapter(common.load_config()), "sui": None, "ton": None}
+T.patch_moved("dm", lambda *a, **k: None)
+c.svc_recon._nonevm_adapters = {"tron": TW.make_adapter(config.load_config()), "sui": None, "ton": None}
 
 
 def asset(chain, addr):
@@ -86,8 +85,8 @@ def pos(chain, addr, w):
 
 
 def run(chain):
-    c._last_recon = 0
-    c.recon_pass(DRAINED)
+    c.svc_recon._last_recon = 0
+    c.svc_recon.recon_pass(DRAINED)
     return bool(c._meta_get(f"recon_done_{chain}"))
 
 
@@ -129,13 +128,13 @@ KS = "0x" + "b7" * 32 + "::newc::NEWC"
 stub_sui = Stub("sui", SU)
 stub_sui.rows[("token", KS)] = 1_000_000
 stub_sui.meta[KS] = ("NEWC", None)
-c._nonevm_adapters = {"tron": None, "sui": stub_sui, "ton": None}
+c.svc_recon._nonevm_adapters = {"tron": None, "sui": stub_sui, "ton": None}
 done = run("sui")
 check("D3 test_nonevm_opening_metadata_guard: 어댑터가 자릿수 None 을 usable 로 넘겨도 core 가 쓰기 전 차단(자산·opening·도장 0)",
       asset("sui", KS) is None and not opening("sui", KS) and not done, (asset("sui", KS), opening("sui", KS), done))
 KT = "0:" + "b8" * 32
 stub_ton = Stub("ton", TO)
-c._nonevm_adapters = {"tron": None, "sui": None, "ton": stub_ton}
+c.svc_recon._nonevm_adapters = {"tron": None, "sui": None, "ton": stub_ton}
 for bad in (True, -1, 78, "6"):
     stub_ton.rows = {("native", None): 0, ("token", KT): 3_000_000}
     stub_ton.meta = {KT: ("BAD", bad)}
@@ -158,7 +157,7 @@ check("D4 test_nonevm_known_metadata_missing_hint: 원장 6자리 + 힌트 None 
 K0 = "0x" + "b0" * 32 + "::zero::ZERO"
 stub_sui.rows = {("native", None): 0, ("token", K0): 7}
 stub_sui.meta = {K0: ("ZERO", 0)}
-c._nonevm_adapters = {"tron": None, "sui": stub_sui, "ton": None}
+c.svc_recon._nonevm_adapters = {"tron": None, "sui": stub_sui, "ton": None}
 done = run("sui")
 check("D5 test_nonevm_zero_decimals_opening: 0자리 = 0 저장 · opening 7 · qty_norm 7", done and asset("sui", K0) and asset("sui", K0)[1] == 0
       and opening("sui", K0) == [7] and pos("sui", K0, SU) == Decimal(7), (done, asset("sui", K0), opening("sui", K0), pos("sui", K0, SU)))
@@ -178,7 +177,7 @@ nat = sum(int(r["q"]) for r in c.conn.execute("SELECT p.qty_base q FROM postings
 stub_tr = Stub("tron", A)
 stub_tr.rows = {("native", None): nat, ("token", SIX): 1_000_000, ("token", LEG): 1_000_000}
 stub_tr.meta = {LEG: ("LEG", None)}
-c._nonevm_adapters = {"tron": stub_tr, "sui": None, "ton": None}
+c.svc_recon._nonevm_adapters = {"tron": stub_tr, "sui": None, "ton": None}
 n_post = c.conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0]
 done = run("tron")
 check("D6 이미 기장된 NULL 자산 + 힌트 None = 차단(새 posting·도장 0 · 18 로 확정 안 함)",
@@ -186,7 +185,7 @@ check("D6 이미 기장된 NULL 자산 + 힌트 None = 차단(새 posting·도�
 stub_tr.rows[("token", CF)] = 0
 stub_tr.meta = {LEG: ("LEG", 6), CF: ("CF", 8)}
 done = run("tron")
-iss = common.read_json(os.path.join(common.STATE_DIR, "asset_decimals_issues.json"), {}) or {}
+iss = statefile.read_json(os.path.join(paths.STATE_DIR, "asset_decimals_issues.json"), {}) or {}
 check("D6 test_nonevm_decimals_conflict_rebuild: 힌트 6 = 덮지 않고 재구축 표식(자릿수 NULL 유지 · base 수량 보존) · 대사 진행",
       done and asset("tron", LEG)[1] is None and c._meta_get("ext_prewindow:decimals_fix") == "1" and opening("tron", LEG) == [1_000_000],
       (done, asset("tron", LEG), c._meta_get("ext_prewindow:decimals_fix"), opening("tron", LEG)))

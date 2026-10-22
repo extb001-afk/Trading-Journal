@@ -8,7 +8,7 @@ import urllib.parse
 
 import bf_engine
 import cgplan
-import common
+import net_http
 
 LANES = ("live", "past", "nft")
 GT_ROOT = "https://api.geckoterminal.com/api/v2"
@@ -64,7 +64,7 @@ def key() -> str:
     try:
         import settings_store
         k = str(settings_store.env_value(cgplan.ENV_KEY) or "").strip()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         k = ""
     with _LOCK:
         _ST.update(key=k, key_at=now)
@@ -79,11 +79,11 @@ def _record(k):
     st = cgplan.Store()
     try:
         rec = st.load(k)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         rec = None
     try:
         share = st.share()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         share = cgplan.DEFAULT_SHARE
     with _LOCK:
         _ST.update(rec=rec, rec_fp=fp, rec_at=now, share=share)
@@ -197,7 +197,7 @@ def reserve(lane, rec=None, share=None) -> str:
             rec, share = _record(k) if k else (None, None)
         pm, pd = nft.cg_key_windows(rec, b, share)
         return b.take_cg(lane, pm, pd)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return "store"
 
 
@@ -205,13 +205,13 @@ def _err_info(e):
     if isinstance(e, urllib.error.HTTPError):
         body = ""
         try:
-            body = (e.read(common.HTTP_ERR_BODY_MAX) or b"")[:400].decode("utf-8", "replace")
-        except Exception:
+            body = (e.read(net_http.HTTP_ERR_BODY_MAX) or b"")[:400].decode("utf-8", "replace")
+        except Exception:   # noqa: BLE001 [fallback]
             body = ""
         ra = None
         try:
             ra = (e.headers or {}).get("Retry-After")
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             ra = None
         kind = "http429" if e.code == 429 else ("http5xx" if 500 <= e.code < 600 else "http4xx")
         return int(e.code), kind, body, ra
@@ -275,7 +275,7 @@ def request(path, lane, via, allow=True, valid=None):
     if lane == "live":
         try:
             gw = bf_engine.gate_wait(GATE[plan])
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             gw = 0.0
         if gw > LIVE_GATE_WAIT_S:
             _stat(lane, "skip", "gate_busy")
@@ -291,7 +291,7 @@ def request(path, lane, via, allow=True, valid=None):
         try:
             d = via(url, {cgplan.HDR[plan]: k}, GATE[plan])
             code, kind, body, ra = 200, "", "", None
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             if _passthru(e):
                 raise
             code, kind, body, ra = _err_info(e)

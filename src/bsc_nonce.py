@@ -1,6 +1,7 @@
 from __future__ import annotations
 import bf_engine
-import common
+import logs, paths, statefile, timeutil
+import db as dbm
 import json
 import os
 import time
@@ -42,12 +43,12 @@ log = logging.getLogger('tj-bsc')
 class NonceMixin:
 
     def _nonce_path(self) -> str:
-        return os.path.join(common.STATE_DIR, "bsc_nonce.json")
+        return paths.state("bsc_nonce.json")
 
     def _nonce_load(self) -> dict:
         d = getattr(self, "_nonce_st", None)
         if d is None:
-            d = common.read_json(self._nonce_path(), {})
+            d = statefile.read_json(self._nonce_path(), {})
             if not isinstance(d, dict) or not isinstance(d.get("w"), dict):
                 d = {"w": {}}
             self._nonce_st = d
@@ -71,21 +72,20 @@ class NonceMixin:
         if h and h not in hs:
             hs[h] = b
             ws["blocks"] = sorted(hs.values())
-            common.atomic_write_json(self._nonce_path(), st)
+            statefile.atomic_write_json(self._nonce_path(), st)
 
     def _nonce_boot(self, st: dict) -> bool:
         if st.get("boot"):
             return True
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             return False
-        import sqlite3
         try:
-            con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
+            con = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=10)
             try:
                 rows = con.execute("SELECT txhash, block, json_extract(snapshot, '$.tx.from') FROM raw_txs WHERE chain='bsc'").fetchall()
             finally:
                 con.close()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.info("BSC nonce 색인 부트스트랩 실패(다음 기회): %s", str(e)[:120])
             return False
         mine = set(self.wallets)
@@ -96,7 +96,7 @@ class NonceMixin:
         for w, ws in st["w"].items():
             ws["blocks"] = sorted((ws.get("hashes") or {}).values())
         st["boot"] = int(_now())
-        common.atomic_write_json(self._nonce_path(), st)
+        statefile.atomic_write_json(self._nonce_path(), st)
         log.info("BSC nonce 색인 부트스트랩: 원장 발신 tx %d건", sum(len(ws.get("hashes") or {}) for ws in st["w"].values()))
         return True
 
@@ -113,7 +113,7 @@ class NonceMixin:
         if any(isinstance(h9, list) and h9 and h9[0] == b for h9 in hl):
             return False
         hl.append([b, int(_now())])
-        common.atomic_write_json(self._nonce_path(), st)
+        statefile.atomic_write_json(self._nonce_path(), st)
         return True
 
     def _nonce_due(self, st: dict, now: float, lo_blk: int, busy: set, known_set) -> bool:
@@ -167,7 +167,7 @@ class NonceMixin:
                         raise
                     except _PubDown:
                         down = True
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [fallback]
                         if isinstance(e, bf_engine.NetError) and e.kind in _NONCE_STOP_KINDS:
                             raise
                 failed = []
@@ -324,7 +324,7 @@ class NonceMixin:
                         continue
                     try:
                         out.append(self_.call(m, p, *a, **kw))
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [isolate]
                         out.append(halt[0] if halt[0] is not None else e)
                 return out
 
@@ -350,7 +350,7 @@ class NonceMixin:
                     d9 = bf_engine.http_json(u9, data=json.dumps(body).encode(), timeout=25, retries=1, cost=n)
                     pub_rpc.i = j9
                     return d9, bf_engine._url_host(u9), g9
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     if isinstance(e, bf_engine.NetError) and e.kind in _NONCE_STOP_KINDS:
                         halt_on(e)
                         raise
@@ -408,7 +408,7 @@ class NonceMixin:
                 return pub_single(m, p)
             except _NonceBudget:
                 raise
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 if halt[0] is not None:
                     raise
                 if not archive_ok:
@@ -635,7 +635,7 @@ class NonceMixin:
                     sample(v, (a9 + z9) // 2)
         except _NonceBudget as e:
             log.debug("BSC nonce 확인 — 이번 실행 상한: %s", e)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             err = e
         finally:
             if own_arch:
@@ -662,7 +662,7 @@ class NonceMixin:
                         v.ws["missing"] = v.missing()
                         if v.ws["missing"] <= 0:
                             v.ws.pop("pend", None)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.debug("BSC nonce 표본 정리 실패 %s: %s", v.w[:10], e)
             v.save()
             m9 = v.ws.get("missing")
@@ -683,10 +683,10 @@ class NonceMixin:
             wait9 = int(min(NONCE_BO_MAX, NONCE_BO_BASE * (2 ** min(n9 - 1, 16))))
             st["bo_until"] = int(_now() + wait9)
             log.info("BSC nonce 확인 중단(%d초 쉼 뒤 다음 기회): %s", wait9, _nonce_why(err))
-        common.atomic_write_json(self._nonce_path(), st)
-        common.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.atomic_write_json(self._nonce_path(), st)
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
         if cnt["emit"]:
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if cnt["arch"] or cnt["emit"] or err is not None:
             log.info("BSC nonce 회수: 아카이브 %d콜 · 공개 %d콜 · 찾은 블록 %d · 방출 %d · 남은 누락 %d건(지갑 %d개)",
                      cnt["arch"], cnt["pub"], cnt["found"], cnt["emit"], left, n_left)
@@ -698,10 +698,9 @@ class NonceMixin:
         if not need:
             return 0
         tos = {}
-        if any(not memo[h].get("to") for h in need) and os.path.exists(common.DB_PATH):
-            import sqlite3
+        if any(not memo[h].get("to") for h in need) and os.path.exists(paths.DB_PATH):
             try:
-                con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
+                con = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=10)
                 try:
                     q9 = [h for h in need if not memo[h].get("to")]
                     rows = []
@@ -712,7 +711,7 @@ class NonceMixin:
                 finally:
                     con.close()
                 tos = {str(h9): str(t9 or "") for h9, t9 in rows}
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [optional]
                 log.debug("BSC 거래소 출금 힌트 — 원장 읽기 실패(다음 기회): %s", str(e)[:120])
         n = 0
         for h in need:
@@ -722,7 +721,7 @@ class NonceMixin:
                 try:
                     n += 1 if self._nonce_hint(to9, m9["blk"]) else 0
                     m9["hint"] = 1
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.debug("BSC nonce 힌트 기록 실패: %s", str(e)[:120])
             else:
                 m9["hint_n"] = int(m9.get("hint_n") or 0) + 1
@@ -731,13 +730,12 @@ class NonceMixin:
         return n
 
     def _xin_path(self) -> str:
-        return os.path.join(common.STATE_DIR, "bsc_xin.json")
+        return paths.state("bsc_xin.json")
 
     def _xin_cands(self) -> list:
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             return []
-        import sqlite3
-        con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
+        con = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=10)
         try:
             rows = con.execute(
                 "SELECT r.payload FROM raw_ex r JOIN (SELECT exchange, uuid, max(revision) AS rv FROM raw_ex WHERE kind='withdraw'"
@@ -765,13 +763,13 @@ class NonceMixin:
             addr = str(p.get("address") or "").strip().lower()
             if addr and addr not in mine:
                 continue
-            t9 = common.iso_epoch(p.get("done_at")) or common.iso_epoch(p.get("created_at")) or 0
+            t9 = timeutil.iso_epoch(p.get("done_at")) or timeutil.iso_epoch(p.get("created_at")) or 0
             out[tx] = max(out.get(tx, 0), t9)
         return sorted(out, key=lambda h: (-out[h], h))
 
     def _xin_pass(self, head: int) -> int:
         try:
-            st = common.read_json(self._xin_path(), {})
+            st = statefile.read_json(self._xin_path(), {})
         except SystemExit as e:
             log.warning("BSC 거래소 출금 txid 진행 파일 손상 — 새로 시작: %s", str(e)[:120])
             st = {}
@@ -785,9 +783,9 @@ class NonceMixin:
         n_emit = 0
         try:
             cands = self._xin_cands()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.info("BSC 거래소 출금 txid 확인 — 원장 읽기 실패(다음 기회): %s", str(e)[:120])
-            common.atomic_write_json(self._xin_path(), st)
+            statefile.atomic_write_json(self._xin_path(), st)
             return 0
         memo = st["tx"]
         w9 = sorted(set(self.wallets))
@@ -813,12 +811,12 @@ class NonceMixin:
             m["tried_at"] = int(_now())
             try:
                 snap = self.fetch_details([h]).get(h)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 snap = e
             if not isinstance(snap, dict):
                 nf = _xin_not_found(snap)
                 m.update(r="nf" if nf else "retry", n=int(m.get("n") or 0) + 1,
-                         nf_n=(int(m.get("nf_n") or 0) + 1 if m.get("r") == "nf" else 1) if nf else 0, err=common.safe_err(snap)[:120])
+                         nf_n=(int(m.get("nf_n") or 0) + 1 if m.get("r") == "nf" else 1) if nf else 0, err=logs.safe_err(snap)[:120])
                 continue
             tx = snap.get("tx") or {}
             try:
@@ -840,7 +838,7 @@ class NonceMixin:
             try:
                 self.writer.append({"v": 1, "kind": "evm_tx", "chain": "bsc", "txhash": h, "snapshot": snap, "wallets": self.wallets,
                                     "observed_head": head, "ts": int(time.time()), "via": "exchange_txid"})
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 log.error("BSC 거래소 출금 txid 회수 — inbox 쓰기 실패(다음 기회): %s", e)
                 break
             self.emitted.add(h)
@@ -849,8 +847,8 @@ class NonceMixin:
             log.info("★BSC 받는 쪽 순수 BNB 회수(거래소 출금 txid) %s 블록 %d★", h[:14], blk)
         self._xin_hints(memo)
         st["tx"] = {h: v for h, v in memo.items() if h in set(cands)}
-        common.atomic_write_json(self._xin_path(), st)
+        statefile.atomic_write_json(self._xin_path(), st)
         if n_emit:
-            common.write_json_if_changed(self.meta_path, self.token_meta)
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.meta_path, self.token_meta)
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         return n_emit

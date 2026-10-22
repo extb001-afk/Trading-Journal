@@ -13,75 +13,53 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, envfile, logs, paths, runtime, statefile
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
+    runtime.cpu_reserve_apply()
 import lpdec
 import bf_engine
 import tsfix
 import addr_tier
 from inbox import SegmentWriter
 
-from evm_base import (
+from evm_base import (  # noqa: F401
     _dm,
     _ES_DAILY,
     _ES_DAILY_LOCK,
     _ES_Q,
-    _ES_Q_LOCK,
     _ES_WMEM,
-    _HTTP5XX_RE,
-    _int_or,
     _is_http_5xx,
     _revoke_stamp_disk,
-    _RpcBudget,
-    _SCAN_LOG,
     _ScanLog,
-    _TDLY,
-    _TRACE_END,
-    _TraceBudget,
-    _WALK_END,
-    BACKFILL_PAGES_MAX,
     BisectBudget,
     BsDetailCap,
     ChainDisabled,
     DISCOVERY_PAGES_MAX,
-    ES_DAILY_DM_GAP,
-    ES_DAILY_FAR,
     es_daily_left,
     ES_DAILY_MARGIN,
     ES_DAILY_PROBE,
     es_daily_trip,
-    ES_FAIL_ISOLATE_SEC,
     es_is_daily_limit,
-    ES_Q_TTL,
     EtherscanDailyLimit,
     EtherscanKeyError,
     EtherscanPaced,
-    EXPLORER_FROZEN_GAP,
     EXPLORER_FROZEN_SEC,
     HoldError,
     http_json,
     HTTP_RETRIES,
-    HTTP_TIMEOUT,
-    leaf_overflow_path,
     leaf_overflow_read,
-    RETENTION_CONFIRM_N,
     RETENTION_CONFIRM_SEC,
-    RETENTION_MIN_AGE_SEC,
     retention_summary,
     rpc_handback,
     StateUnavailable,
     TRACE_DEPTH_MAX,
     trace_fail_index,
-    TRACE_FAIL_NODES_MAX,
     trace_path_failed,
     TraceDeferred,
-    TraceStaged,
-    UA,
 )
 
 
-log = common.setup_logging("tj-evm")
+log = logs.setup_logging("tj-evm")
 
 
 ES_FALLBACK_STREAK = 3
@@ -138,9 +116,9 @@ def es_bs_busy(chain: str, wt=None) -> bool:
     if wt is not None and (getattr(wt, "enrich", None) or getattr(wt, "pending_detail", None)
                            or _es_bs_unfinished(getattr(wt, "cursor", None))):
         return True
-    if _es_bs_unfinished(common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {})):
+    if _es_bs_unfinished(statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {})):
         return True
-    return any(common.read_json(os.path.join(common.STATE_DIR, n9), {})
+    return any(statefile.read_json(paths.state(n9), {})
                for n9 in (f"enrich_{chain}.json", f"pending_detail_{chain}.json"))
 
 
@@ -156,7 +134,7 @@ def es_daily_return(cfg: dict, wt, make):
         return wt, True
     try:
         nw = make(cfg, wt.chain, wt.wallets)
-    except (Exception, SystemExit) as e9:
+    except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
         log.warning("%s: 이더스캔 복귀 워처 생성 실패(blockscout 유지·다음 사이클 재시도): %s", wt.chain, e9)
         return wt, True
     if not isinstance(nw, EtherscanWatcher):
@@ -196,11 +174,11 @@ CUR_WATCHER = {}
 
 
 def _rpcfb_path() -> str:
-    return os.path.join(common.STATE_DIR, RPCFB_FILE)
+    return paths.state(RPCFB_FILE)
 
 
 def _rpcfb_all() -> dict:
-    d = common.read_json(_rpcfb_path(), {})
+    d = statefile.read_json(_rpcfb_path(), {})
     return d if isinstance(d, dict) else {}
 
 
@@ -216,7 +194,7 @@ def _rpcfb_put(chain: str, rec):
             d[chain] = rec
         else:
             d.pop(chain, None)
-        common.atomic_write_json(_rpcfb_path(), d)
+        statefile.atomic_write_json(_rpcfb_path(), d)
 
 
 def _rpcfb_text(rec: dict) -> str:
@@ -249,7 +227,7 @@ def _rpcfb_info(rec: dict) -> dict:
 def _rpcfb_swap(chain: str):
     try:
         bf_engine.health("evm").reset_facts(chain)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 
@@ -282,8 +260,8 @@ def rpcfb_enter(cfg: dict, chain: str, wallets: list, writer, src: str, why: str
         return None
     try:
         nw = RpcChainWatcher(cfg, chain, wallets, writer)
-    except (Exception, SystemExit) as e:
-        log.error("%s RPC 대체 수집기 생성 실패(종전 경로 유지): %s", chain, common.redact_urls(common.safe_err(e))[:160])
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
+        log.error("%s RPC 대체 수집기 생성 실패(종전 경로 유지): %s", chain, logs.redact_urls(logs.safe_err(e))[:160])
         return None
     now = time.time()
     with _RPCFB_LOCK:
@@ -294,7 +272,7 @@ def rpcfb_enter(cfg: dict, chain: str, wallets: list, writer, src: str, why: str
         ent9 = [t for t in (rec.get("entries") or []) if isinstance(t, (int, float)) and now - t < 86400][-9:] + [int(now)]
         dm9 = why != "day" and now - float(rec.get("dm_at") or 0) > RPCFB_DM_GAP
         rec.update(active=True, src=src, why=why, bs=bs, nokey=bool(nokey) or None,
-                   err=common.redact_urls(common.redact_secret_text(str(err or ""), generic=False))[:160] or None,
+                   err=logs.redact_urls(logs.redact_secret_text(logs.redact_urls(str(err or "")), generic=False))[:160] or None,
                    since=int(now), stay=int(stay), next_probe=int(now + stay), entries=ent9,
                    until=int(_ES_DAILY["until"]) if why == "day" and _ES_DAILY["until"] > now else None,
                    limited=getattr(nw, "nodes_limited", None))
@@ -344,8 +322,8 @@ def rpcfb_resume(cfg: dict, chain: str, wallets: list, writer, es_key: str):
                 _rpcfb_put(chain, rec)
     try:
         nw = RpcChainWatcher(cfg, chain, wallets, writer)
-    except (Exception, SystemExit) as e:
-        log.error("%s RPC 대체 수집기 재생성 실패(주 경로로): %s", chain, common.redact_urls(common.safe_err(e))[:160])
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
+        log.error("%s RPC 대체 수집기 재생성 실패(주 경로로): %s", chain, logs.redact_urls(logs.safe_err(e))[:160])
         with _RPCFB_LOCK:
             rec.update(active=False, exit_at=int(now))
             _rpcfb_put(chain, rec)
@@ -381,8 +359,8 @@ def rpcfb_bs_error(cfg: dict, wt, e, writer, es_key: str):
     if getattr(wt, "lr_info", None):
         try:
             nw = RpcChainWatcher(cfg, chain, wt.wallets, writer)
-        except (Exception, SystemExit) as e9:
-            log.warning("%s RPC 본선 재생성 실패(블록스카웃 최후 경로 유지): %s", chain, common.safe_err(e9)[:120])
+        except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
+            log.warning("%s RPC 본선 재생성 실패(블록스카웃 최후 경로 유지): %s", chain, logs.safe_err(e9)[:120])
             return wt
         _lr_restore_fb(nw, wt.lr_info)
         m["bs_n"] = m["bs_403"] = 0
@@ -394,9 +372,9 @@ def rpcfb_bs_error(cfg: dict, wt, e, writer, es_key: str):
     if cc.get("etherscan_chainid") and es_key:
         eb9 = rpcfb_get(chain).get("es_bad")
         why9 = "day" if es_daily_left() > 0 else (str(eb9.get("why")) if isinstance(eb9, dict) and eb9.get("why") else "queue")
-        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "etherscan", why9, err=common.safe_err(e), bs=k9, bs_seen=True)
+        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "etherscan", why9, err=logs.safe_err(e), bs=k9, bs_seen=True)
     else:
-        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "blockscout", k9, err=common.safe_err(e), bs=k9, bs_seen=True,
+        nw = rpcfb_enter(cfg, chain, wt.wallets, writer, "blockscout", k9, err=logs.safe_err(e), bs=k9, bs_seen=True,
                          nokey=bool(cc.get("etherscan_chainid")))
     if nw is None:
         return wt
@@ -413,7 +391,7 @@ def rpcfb_paced(cfg: dict, wt, writer, err=None):
     m["paced_since"] = ps
     if now - ps < RPCFB_PACE_SEC:
         return wt
-    nw = rpcfb_enter(cfg, wt.chain, wt.wallets, writer, "etherscan", "pace", err=common.safe_err(err) if err else None)
+    nw = rpcfb_enter(cfg, wt.chain, wt.wallets, writer, "etherscan", "pace", err=logs.safe_err(err) if err else None)
     if nw is None:
         return wt
     m["paced_since"] = None
@@ -443,7 +421,7 @@ def _es_probe(chain: str, cid: int, key: str):
     try:
         p.head_block()
         return True, None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         return False, e
 
 
@@ -453,8 +431,8 @@ def _bs_probe(cfg: dict, chain: str, wallet: str = None):
         return False, "블록스카웃 미구성"
     try:
         d = http_json(f"{base}/api/v2/blocks?type=block", retries=1)
-    except Exception as e:
-        return False, common.redact_urls(common.safe_err(e))[:120]
+    except Exception as e:   # noqa: BLE001 [fallback]
+        return False, logs.redact_urls(logs.safe_err(e))[:120]
     items = d.get("items") if isinstance(d, dict) else None
     if not items or not isinstance(items[0], dict) or items[0].get("height") is None:
         return False, "blocks 응답 비어있음"
@@ -470,8 +448,8 @@ def _bs_probe(cfg: dict, chain: str, wallet: str = None):
     if wallet:
         try:
             d2 = http_json(f"{base}/api/v2/addresses/{wallet}/transactions", retries=1)
-        except Exception as e:
-            return False, "주소 목록 " + common.redact_urls(common.safe_err(e))[:110]
+        except Exception as e:   # noqa: BLE001 [fallback]
+            return False, "주소 목록 " + logs.redact_urls(logs.safe_err(e))[:110]
         if not isinstance(d2, dict) or not isinstance(d2.get("items"), list):
             return False, "주소 목록 응답 형식 오류"
     return True, None
@@ -495,13 +473,13 @@ def _explorer_era_cursor(cur) -> bool:
 
 def evm_route(cfg: dict, chain: str, decide: bool = True) -> str:
     cc = ((cfg or {}).get("chains") or {}).get(chain) or {}
-    if common.chain_discovery(chain, cc) == "rpc":
+    if config.chain_discovery(chain, cc) == "rpc":
         return "rpc"
     if str(cc.get("discovery") or "").lower() == "explorer" or (cfg or {}).get("rpc_first") is False or cc.get("rpc_first") is False:
         return "legacy"
-    p9 = os.path.join(common.STATE_DIR, EVM_ROUTE_FILE)
+    p9 = paths.state(EVM_ROUTE_FILE)
     with _EVM_ROUTE_LOCK:
-        d9 = common.read_json(p9, {})
+        d9 = statefile.read_json(p9, {})
         d9 = d9 if isinstance(d9, dict) else {}
         r9 = d9.get(chain)
         if isinstance(r9, dict) and r9.get("route") in ("rpc_first", "legacy"):
@@ -509,9 +487,9 @@ def evm_route(cfg: dict, chain: str, decide: bool = True) -> str:
         try:
             nd9 = rpc_nodes(cfg, chain)
             rpc_ok = bool(nd9.get("detail")) and bool(nd9.get("logs")) and bool((RPC_NODES.get(chain) or {}).get("logs") or cc.get("rpc_logs"))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             rpc_ok = False
-        cur9 = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {})
+        cur9 = statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {})
         if not rpc_ok:
             route, why = "legacy", "RPC 노드 표 없음"
         elif _explorer_era_cursor(cur9) or rpcfb_get(chain):
@@ -520,14 +498,14 @@ def evm_route(cfg: dict, chain: str, decide: bool = True) -> str:
             route, why = "rpc_first", "새 체인(커서 없음)"
         if decide:
             d9[chain] = {"route": route, "at": int(time.time()), "why": why}
-            common.atomic_write_json(p9, d9)
+            statefile.atomic_write_json(p9, d9)
             log.info("%s 수집 경로 순서 = %s(%s) — state/%s 에 고정", chain, route, why, EVM_ROUTE_FILE)
         return route
 
 
 def _primary_kind(cfg: dict, chain: str, es_key: str) -> str:
     cc = cfg["chains"].get(chain) or {}
-    if common.chain_discovery(chain, cc) == "rpc":
+    if config.chain_discovery(chain, cc) == "rpc":
         return "rpc"
     if cc.get("etherscan_chainid") and es_key and not es_bs_busy(chain) and es_daily_left() <= 0:
         return "etherscan"
@@ -567,8 +545,8 @@ def rpc_first_last_resort(cfg: dict, wt, writer):
         return wt
     try:
         nw = ChainWatcher(cfg, wt.chain, wt.wallets, writer)
-    except (Exception, SystemExit) as e9:
-        log.warning("%s 블록스카웃 최후 경로 생성 실패(RPC 유지): %s", wt.chain, common.safe_err(e9)[:120])
+    except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
+        log.warning("%s 블록스카웃 최후 경로 생성 실패(RPC 유지): %s", wt.chain, logs.safe_err(e9)[:120])
         return wt
     nw.lr_info = {"since": int(now), "fails": n9, "fb_info": dict(getattr(wt, "fb_info", None) or {})}
     RPCFB_ON.pop(wt.chain, None)
@@ -596,8 +574,8 @@ def _rpc_probe(cfg: dict, chain: str, wallet: str = None):
             bf_engine.rpc_call(nd["logs"][0], "eth_getLogs", [{"fromBlock": b9, "toBlock": b9,
                                                                "topics": [RpcSynthMixin.TRANSFER_TOPIC, "0x" + wallet[2:].rjust(64, "0")]}],
                                timeout=20, retries=0)
-    except Exception as e:
-        return False, common.redact_urls(common.safe_err(e))[:120]
+    except Exception as e:   # noqa: BLE001 [fallback]
+        return False, logs.redact_urls(logs.safe_err(e))[:120]
     return True, None
 
 
@@ -617,8 +595,8 @@ def rpc_first_try_back(cfg: dict, wt, writer):
         return wt
     try:
         nw = RpcChainWatcher(cfg, wt.chain, wt.wallets, writer)
-    except (Exception, SystemExit) as e9:
-        log.warning("%s RPC 본선 재생성 실패(블록스카웃 유지): %s", wt.chain, common.safe_err(e9)[:120])
+    except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
+        log.warning("%s RPC 본선 재생성 실패(블록스카웃 유지): %s", wt.chain, logs.safe_err(e9)[:120])
         return wt
     _lr_restore_fb(nw, lr9)
     _rpcfb_swap(wt.chain)
@@ -652,7 +630,7 @@ def rpcfb_try_return(cfg: dict, wt, make, es_key: str):
                 if not ok9:
                     with _RPCFB_LOCK:
                         rec["next_probe"] = int(now + RPCFB_ES_PROBE_SEC)
-                        rec["probe_err"] = common.redact_urls(common.redact_secret_text(str(e9), generic=False))[:120]
+                        rec["probe_err"] = logs.redact_urls(logs.redact_secret_text(logs.redact_urls(str(e9)), generic=False))[:120]
                         _rpcfb_put(chain, rec)
                     log.info("%s 이더스캔 복귀 시험 실패 — RPC 대체 유지(%d분 뒤 다시): %s", chain, RPCFB_ES_PROBE_SEC // 60, rec["probe_err"])
                     return wt
@@ -683,9 +661,9 @@ def rpcfb_try_return(cfg: dict, wt, make, es_key: str):
     _RPCFB_RETURNING.add(chain)
     try:
         nw = make(cfg, chain, wt.wallets)
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         nw = None
-        log.warning("%s 주 경로 워처 생성 실패(RPC 대체 유지 · 다음 시험): %s", chain, common.safe_err(e)[:120])
+        log.warning("%s 주 경로 워처 생성 실패(RPC 대체 유지 · 다음 시험): %s", chain, logs.safe_err(e)[:120])
     finally:
         _RPCFB_RETURNING.discard(chain)
     if nw is None:
@@ -710,7 +688,7 @@ def rpcfb_try_return(cfg: dict, wt, make, es_key: str):
 def build_watcher(cfg: dict, chain: str, addrs: list, shared_writer, es_key: str):
     if chain not in cfg["chains"]:
         raise SystemExit(f"config.chains 에 없는 체인: {chain}")
-    if common.chain_discovery(chain, cfg["chains"][chain]) == "rpc":
+    if config.chain_discovery(chain, cfg["chains"][chain]) == "rpc":
         log.info("%s: RPC 전용 발견 경로 사용 (getLogs + nonce·잔고 정합)", chain)
         RPCFB_ON.pop(chain, None)
         if rpcfb_get(chain).get("active"):
@@ -787,7 +765,7 @@ class ChainLoop:
                 wt._states([(wt.wallets[0], b9)], strict=True)
             except StateUnavailable:
                 det = True
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 return False
         return det
 
@@ -858,24 +836,24 @@ class ChainLoop:
                 _RPCFB_MEM.setdefault(wt.chain, {})["broken"] = True
                 with _RPCFB_LOCK:
                     rec9 = rpcfb_get(wt.chain)
-                    rec9.update(active=False, exit_at=int(time.time()), broken=common.redact_urls(str(e))[:120])
+                    rec9.update(active=False, exit_at=int(time.time()), broken=logs.redact_urls(str(e))[:120])
                     _rpcfb_put(wt.chain, rec9)
                 RPCFB_ON.pop(wt.chain, None)
-                log.error("★%s RPC 대체 수집기 설정 오류 — 대체 끄고 주 경로로: %s★", wt.chain, common.redact_urls(str(e)))
+                log.error("★%s RPC 대체 수집기 설정 오류 — 대체 끄고 주 경로로: %s★", wt.chain, logs.redact_urls(str(e)))
                 _RPCFB_RETURNING.add(wt.chain)
                 try:
                     self.wt = make(cfg, wt.chain, wt.wallets)
-                except (Exception, SystemExit) as e9:
+                except (Exception, SystemExit) as e9:   # noqa: BLE001 [optional]
                     log.error("%s 주 경로 워처 생성 실패(다음 주기 재시도): %s", wt.chain, e9)
                 finally:
                     _RPCFB_RETURNING.discard(wt.chain)
                 return True
             bf_engine.health("evm").fail(wt.chain, e, "rpc")
             bf_engine.health("evm").flush()
-            log.error("★%s 체인 추적 중지(설정 오류): %s — 다른 체인은 계속, 고친 뒤 pm2 restart tj-evm★", wt.chain, common.redact_urls(str(e)))
+            log.error("★%s 체인 추적 중지(설정 오류): %s — 다른 체인은 계속, 고친 뒤 pm2 restart tj-evm★", wt.chain, logs.redact_urls(str(e)))
             DISABLED_CHAINS.add(wt.chain)
             return False
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             if getattr(e, "_tj_health_counted", False):
                 n9 = int((bf_engine.health("evm")._s(wt.chain).get("consecutive_failures")) or 1)
             else:
@@ -884,7 +862,7 @@ class ChainLoop:
             bf_engine.health("evm").flush()
             lv = bf_engine.LogDebounce.level(n9)
             if lv:
-                getattr(log, lv)("%s cycle 실패 %d회 연속(다음 주기 재시도): %s", wt.chain, n9, common.redact_urls(str(e)))
+                getattr(log, lv)("%s cycle 실패 %d회 연속(다음 주기 재시도): %s", wt.chain, n9, logs.redact_urls(str(e)))
             if (getattr(wt, "fb_info", None) or (isinstance(wt, RpcChainWatcher) and evm_route(cfg, wt.chain, decide=False) == "rpc_first")) \
                     and isinstance(e, StateUnavailable) and "인계 기준점" in str(e):
                 m9 = _RPCFB_MEM.setdefault(wt.chain, {})
@@ -905,13 +883,13 @@ class ChainLoop:
                 self.es_daily_fb = False
             self.wt = wt
             try:
-                cur9 = common.read_json(wt.cursor_path, {})
+                cur9 = statefile.read_json(wt.cursor_path, {})
                 a9 = cur9.pop("_synced_at", None) is not None
                 b9 = cur9.pop("_synced_tok_at", None) is not None
                 if a9 or b9:
-                    common.atomic_write_json(wt.cursor_path, cur9)
+                    statefile.atomic_write_json(wt.cursor_path, cur9)
                 wt.cursor = cur9
-            except Exception:
+            except Exception:  # noqa: BLE001 [optional]
                 pass
         wt = self.wt
         CUR_WATCHER[wt.chain] = wt
@@ -921,27 +899,27 @@ class ChainLoop:
                 wt.chain, es_daily_until=int(_ES_DAILY["until"]) if self.es_daily_fb and es_daily_left() > 0 else None,
                 rpc_fb=dict(fb9) if fb9 else None,
                 rpc_limited=getattr(wt, "nodes_limited", None) if (isinstance(wt, RpcChainWatcher) and not fb9) else None)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         return True
 
 
-from evm_synth import (
+from evm_synth import (  # noqa: F401
     RpcSynthMixin,
 )
 
 
-from evm_bscout import (
+from evm_bscout import (  # noqa: F401
     ChainWatcher,
 )
 
 
-from evm_es import (
+from evm_es import (  # noqa: F401
     EtherscanWatcher,
 )
 
 
-from evm_logdisc import (
+from evm_logdisc import (  # noqa: F401
     RpcLogDiscovery,
 )
 
@@ -960,7 +938,7 @@ def take_rebuild(wt, make):
         return wt
     try:
         new = make(nw9[0], wt.chain, nw9[1])
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         REBUILD.setdefault(wt.chain, nw9)
         n9 = REBUILD_FAILS[wt.chain] = REBUILD_FAILS.get(wt.chain, 0) + 1
         lv = "warning" if n9 == 1 else bf_engine.LogDebounce.level(n9)
@@ -972,9 +950,7 @@ def take_rebuild(wt, make):
     return new
 
 
-from evm_rpcw import (
-    _cap_num,
-    logs_cap_host,
+from evm_rpcw import (  # noqa: F401
     RPC_NODES,
     rpc_nodes,
     RpcChainWatcher,
@@ -982,8 +958,8 @@ from evm_rpcw import (
 
 
 def main():
-    common.ensure_dirs()
-    cfg = common.load_config()
+    paths.ensure_dirs()
+    cfg = config.load_config()
     bf_engine.configure(cfg)
     bf_engine.es_budget_install_sigterm()
     addr_tier.ACTIVE_PROC = True
@@ -993,8 +969,8 @@ def main():
     for w in cfg["wallets"]:
         if w.get("type", "evm") == "evm":
             by_chain.setdefault(w["chain"], []).append(w["address"])
-    shared_writer = SegmentWriter(os.path.join(common.INBOX_DIR, "evm"))
-    es_key = common.read_env_file().get("TJ_ETHERSCAN_KEY", "")
+    shared_writer = SegmentWriter(os.path.join(paths.INBOX_DIR, "evm"))
+    es_key = envfile.read_env_file().get("TJ_ETHERSCAN_KEY", "")
     chain_poll_cfg = {}
 
     def make_watcher(cfg, chain, addrs):
@@ -1056,18 +1032,18 @@ def main():
                 rd.bs = cw9
             try:
                 rd.cycle()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 n9 = bf_engine.health("evm").fail(f"{rd.chain}:rpclog", e, "rpclog")
                 bf_engine.health("evm").flush()
                 lv = bf_engine.LogDebounce.level(n9)
                 if lv:
-                    getattr(log, lv)("%s rpclog cycle 실패 %d회 연속(다음 주기 재시도): %s", rd.chain, n9, common.redact_urls(str(e)))
+                    getattr(log, lv)("%s rpclog cycle 실패 %d회 연속(다음 주기 재시도): %s", rd.chain, n9, logs.redact_urls(str(e)))
                 try:
-                    st9 = common.read_json(rd.state_path, {})
+                    st9 = statefile.read_json(rd.state_path, {})
                     if st9.pop("rpc_synced_at", None) is not None:
-                        common.atomic_write_json(rd.state_path, st9)
+                        statefile.atomic_write_json(rd.state_path, st9)
                     rd.st = st9
-                except Exception:
+                except Exception:  # noqa: BLE001 [optional]
                     pass
             time.sleep(max(5.0, poll - (time.time() - t0)))
 
@@ -1088,15 +1064,15 @@ def main():
             continue
         last_reload = time.time()
         try:
-            cfg2 = common.load_config()
-        except (Exception, SystemExit) as e:
+            cfg2 = config.load_config()
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [boundary]
             log.warning("활동 게이트 반영용 설정 재적재 실패(다음 주기): %s", e)
             continue
         try:
             for b9 in list(addr_tier.BOOKS.values()):
                 b9.reload_cfg(cfg2)
             addr_tier.plan_stretch(list(addr_tier.BOOKS.values()), cfg2)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("계단식 주기 설정·예산 반영 실패(다음 주기): %s", e)
         by2 = {}
         for w in cfg2["wallets"]:
@@ -1111,7 +1087,7 @@ def main():
                 continue
             try:
                 wt = make_watcher(cfg2, c, ws9)
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
                 log.error("★%s 새 체인 워처 생성 실패(다음 주기 재시도): %s★", c, e)
                 continue
             cur_pairs[c] = ws9

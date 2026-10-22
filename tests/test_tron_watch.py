@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import bf_engine
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import chain_event as ce
-import address_codec as ac
-from inbox import SegmentWriter
-import _tronfake as F
-import tron_watch as TW
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import bf_engine  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import chain_event as ce  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
+import _tronfake as F  # noqa: E402
+import tron_watch as TW  # noqa: E402
 
 fake = F.FakeTron()
 F.install_loop_open(bf_engine, T)
@@ -40,8 +40,8 @@ ZD = "41" + "e3" * 20
 fake.tokmeta = {USDT: ("USDT", 6), TK: ("TKA", 18), FAKE: ("USDT", 6), NOMETA: ("NOM", None), ZD: ("ZD", 0)}
 NOW = int(time.time() * 1000)
 DAY = 86400_000
-SD = common.STATE_DIR
-INB = os.path.join(common.INBOX_DIR, "tron")
+SD = paths.STATE_DIR
+INB = os.path.join(paths.INBOX_DIR, "tron")
 CFG_PATH = os.path.join(T.TMP, "config.json")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}]
@@ -107,7 +107,7 @@ fake.call(tid(22), NOW - 13 * DAY, X, ZD, logs=[(ZD, X, A, 9)])
 fake.call(tid(20), NOW - 11 * DAY, X, TK, logs=[(TK, A, X, 3)])
 
 st = cs.ChainState("tron")
-ad = TW.make_adapter(common.load_config())
+ad = TW.make_adapter(config.load_config())
 ad.state = st
 w = SegmentWriter(INB)
 col = cw.Collector(ad, w, st, {A}, page_budget={"latest": 5, "history": 50}, detail_budget={"latest": 50, "history": 500})
@@ -174,7 +174,7 @@ check("TR10 목록 token_info 메타(USDT 6)", a4.get("symbol") == "USDT" and a4
 check("TR11 순서 높이·시각 = 영수증 블록", rec_of(2)["order"]["height"] == fake.by_id[tid(2)]["blk"] and rec_of(2)["ts"] == (NOW - 9 * DAY) // 1000)
 
 reg.FORCE_AVAILABLE.add("tron")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = dict(c.chain_readers)["tron"]
 
@@ -223,7 +223,7 @@ col.cycle()
 hist_calls = [p for (_m, p, _r, _h) in fake.log[lists0:] if "/v1/accounts/" in p and "max_timestamp" in p]
 check("TR11 두 번째 주기 = 새 레코드 0 · 과거(history) 목록 호출 0", len(recs()) == n0 and not hist_calls, (len(recs()) - n0, hist_calls[:2]))
 st2 = cs.ChainState("tron")
-ad2 = TW.make_adapter(common.load_config())
+ad2 = TW.make_adapter(config.load_config())
 ad2.state = st2
 col2 = cw.Collector(ad2, w, st2, {A})
 col2.cycle()
@@ -285,7 +285,7 @@ cfg["chain_wallets"].append({"chain": "tron", "address": ac.tron_display(B)})
 json.dump(cfg, open(CFG_PATH, "w"))
 c.chain_owners["tron"] = {A, B}
 st3 = cs.ChainState("tron")
-ad3 = TW.make_adapter(common.load_config())
+ad3 = TW.make_adapter(config.load_config())
 ad3.state = st3
 col3 = cw.Collector(ad3, w, st3, {A, B}, detail_budget={"latest": 50, "history": 500})
 col3.cycle()
@@ -313,7 +313,7 @@ wa0, wb0, n7 = wsum(), wsum(reg.make_location("tron", B)), len(recs())
 for f9 in ("cursor_tron.json", "emitted_tron.json"):
     os.remove(os.path.join(SD, f9))
 st7 = cs.ChainState("tron")
-ad7 = TW.make_adapter(common.load_config())
+ad7 = TW.make_adapter(config.load_config())
 ad7.state = st7
 cw.Collector(ad7, w, st7, {A, B}, detail_budget={"latest": 100, "history": 500}).cycle()
 drain()
@@ -325,7 +325,7 @@ cfg["backfill_since"] = "2025-01-01"
 json.dump(cfg, open(CFG_PATH, "w"))
 time.sleep(0.01)
 os.utime(CFG_PATH, None)
-ad4 = TW.make_adapter(common.load_config())
+ad4 = TW.make_adapter(config.load_config())
 ad4.state = st3
 q4, _fp4 = ad4.discovery_query(A, "history")
 check("TR11 창을 앞당기면 끝낸 구간 앞쪽만 다시(새 하한 · 상한 = 예전 창 시작 + 겹침)", not q4.get("done") and q4["lo"] < hs9["from"]
@@ -336,7 +336,7 @@ base = NOW - 30 * DAY
 for i in range(450):
     ts9 = base + (195 if 195 <= i < 206 else i) * 1000
     fake.call("%064x" % (0x10000 + i), ts9, X, USDT, logs=[(USDT, X, P, 1 + i)])
-pa = TW.make_adapter(common.load_config())
+pa = TW.make_adapter(config.load_config())
 q = {"lane": "latest", "lo": base - 1000, "hi": None, "limit": 200}
 
 
@@ -367,7 +367,7 @@ fake.no_fp = False
 
 KEY = "tk_synthetic_value_0123456789abcdef"
 os.environ["TJ_TRONGRID_KEY"] = KEY
-cfgk = common.load_config()
+cfgk = config.load_config()
 cfgk["nonevm"]["tron"]["daily_limit"] = 10
 ak = TW.make_adapter(cfgk)
 mark = len(fake.log)
@@ -393,7 +393,7 @@ try:
 except cw.Transient as e:
     e403 = str(e)
 check("TR12 403 = 일시 실패(Transient · 빈 결과 아님)", e403.startswith("TronGrid"), e403)
-cfgt = common.load_config()
+cfgt = config.load_config()
 cfgt["nonevm"]["tron"]["timeout_sec"] = 0.3
 fake.delay["getblock"] = 1.5
 reset_gates()
@@ -406,14 +406,14 @@ except cw.Transient as e:
 fake.delay.clear()
 check("TR12 시간 초과 = 일시 실패(제때 · 빈 결과 아님)", "timeout" in eto and time.time() - t9 < 1.4, (eto, round(time.time() - t9, 2)))
 
-import pricing
-import spamguard
+import pricing  # noqa: E402
+import spamguard  # noqa: E402
 aid_u = c.conn.execute("SELECT asset_id FROM assets WHERE chain='tron' AND address=?", (USDT,)).fetchone()[0]
 aid_f = c.conn.execute("SELECT asset_id FROM assets WHERE chain='tron' AND address=?", (FAKE,)).fetchone()[0]
 gname = c.conn.execute("SELECT g.name FROM assets a JOIN asset_groups g ON g.group_id=a.group_id WHERE a.asset_id=?", (aid_u,)).fetchone()
-check("TR21 정식 Tron USDT = 검증 스테이블 · 정품 · 그룹 USDT(인스턴스 그룹 아님)", c._is_stable_aid(aid_u) and spamguard.is_genuine("tron", USDT)
-      and gname and gname[0] == "USDT", (c._is_stable_aid(aid_u), spamguard.is_genuine("tron", USDT), gname and gname[0]))
-check("TR21 사칭 'USDT'(다른 계약) = 스테이블·정품 아님", not c._is_stable_aid(aid_f) and not spamguard.is_genuine("tron", FAKE))
+check("TR21 정식 Tron USDT = 검증 스테이블 · 정품 · 그룹 USDT(인스턴스 그룹 아님)", c.svc_price._is_stable_aid(aid_u) and spamguard.is_genuine("tron", USDT)
+      and gname and gname[0] == "USDT", (c.svc_price._is_stable_aid(aid_u), spamguard.is_genuine("tron", USDT), gname and gname[0]))
+check("TR21 사칭 'USDT'(다른 계약) = 스테이블·정품 아님", not c.svc_price._is_stable_aid(aid_f) and not spamguard.is_genuine("tron", FAKE))
 
 class _Clock:
     def __init__(self, real):
@@ -439,7 +439,7 @@ for i in range(450):
 SD18 = os.path.join(T.TMP, "st18")
 os.makedirs(SD18, exist_ok=True)
 st18 = cs.ChainState("tron", SD18)
-ad18 = TW.make_adapter(common.load_config())
+ad18 = TW.make_adapter(config.load_config())
 ad18.state = st18
 clk = _Clock(time)
 real_time = TW.time

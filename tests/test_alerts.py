@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 os.environ["TJ_TG_API"] = "http://127.0.0.1:9/never"
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import alert_prefs as AP
-import alert_watch as AW
-import alert_bot as ab
-import health as H
+assert T.TMP in paths.STATE_DIR
+import alert_prefs as AP  # noqa: E402
+import alert_watch as AW  # noqa: E402
+import alert_bot as ab  # noqa: E402
+import health as H  # noqa: E402
 
 SRC = T.SRC
 KST = timezone(timedelta(hours=9))
@@ -34,12 +34,12 @@ def kst(y, mo, d, h=0, mi=0):
 def safe(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return e
 
 
 try:
-    import flowev
+    import flowev  # noqa: E402
 except ImportError:
     flowev = None
 ab.send_message = lambda *a, **k: (_ for _ in ()).throw(AssertionError("실제 발송 금지"))
@@ -362,7 +362,7 @@ check("R11 들고 있는 코인 · 신선한 두 곳 시세로 1.5% 이탈 = 알
 
 app = T.app_js()
 hjs = open(os.path.join(T.ROOT, "web", "v2", "health.js"), encoding="utf-8").read()
-rd = open(T.README, encoding="utf-8").read()
+rd = T.doc_text("README.md")
 check("R12 이전 배너: 옛 '추천'의 급등락 꺼짐 · 조용한 시간에도 목표가·디페그·큰 출금이 바로", "급등락 알림은 이제 꺼져 있어요" in app
       and "조용한 시간에도 목표가·손절, 스테이블 가격 이탈, 내가 안 한 큰 출금은 이제 바로 와요" in app and "almig" in app)
 check("R12 상태 패널 '6시간마다 리마인드' 없음", "6시간마다 리마인드" not in hjs)
@@ -480,7 +480,7 @@ for k9 in range(5):
     H.plan(s22, H.step(s22, [ckh("crit", "disk:state", "디스크 여유 부족", "system", "disk")], t9, HS), t9, HS, True)
     t9 += 60
 H.deliver(s22, fsend, t9, HS)
-fails = lambda text, reply_to=None: (False, None, "down")
+fails = lambda text, reply_to=None: (False, None, "down")   # noqa: E731
 for k9 in range(26):
     t9 += 3600
     H.plan(s22, H.step(s22, [ckh("crit", "disk:state", "디스크 여유 부족", "system", "disk")], t9, HS), t9, HS, True)
@@ -863,7 +863,7 @@ c51b = ab.coalesce_k([(i + 1, x) for i, x in enumerate(r51b if isinstance(r51b, 
 t51b = c51b[0][1] if c51b else ""
 check("R51 큰 출금을 끄고 부족 도착 4건(도착 확인) 묶음 = '할 일은 없어요'로 바뀌지 않고 '내역을 확인하세요' 남음",
       kinds(r51b) == ["MOVE_ARRIVED"] * 4 and len(c51b) == 1 and "할 일은 없어요" not in t51b and "내역을 확인하세요" in t51b and t51b.count("수수료보다") == 4, t51b)
-qpath = os.path.join(common.STATE_DIR, "alerts_web.jsonl")
+qpath = os.path.join(paths.STATE_DIR, "alerts_web.jsonl")
 with open(qpath, "w", encoding="utf-8") as f9:
     for i in range(30):
         f9.write(json.dumps({"kind": "DEPEG", "text": f"🔴 Y{i:02d} 스테이블 코인 시세가 1달러에서 5% 벗어났어요\n보유 비중을 확인하세요.\n" + "현재 " + "8" * 300}, ensure_ascii=False) + "\n")
@@ -895,8 +895,8 @@ check("R52 상한 넘는 묶음 = 첫 통만 나가고 실패 → 커서 그대�
 
 json.dump({"chains": {}, "wallets": [], "web": {"port": 1}}, open(os.path.join(T.TMP, "config.json"), "w"))
 try:
-    import web
-except Exception as e9:
+    import web  # noqa: E402
+except Exception as e9:   # noqa: BLE001
     web = None
     print("web 가져오기 실패:", e9)
 if web is not None:
@@ -924,9 +924,11 @@ if web is not None:
     web.BUILDER = fb
     conn_ok = [True]
     web._tg_connected = lambda: conn_ok[0]
-    web._append_alert = lambda a9: None
+    for _mn9 in [m9 for m9 in sys.modules if m9 == "web" or m9.startswith(("view_", "http_"))]:
+        if hasattr(sys.modules[_mn9], "_append_alert"):
+            sys.modules[_mn9]._append_alert = lambda a9: None
     wst = {}
-    fl = lambda t, evs: {"v": 1, "builtAt": int(t), "window": 48 * 3600, "ev": evs}
+    fl = lambda t, evs: {"v": 1, "builtAt": int(t), "window": 48 * 3600, "ev": evs}   # noqa: E731
     fb._flow_ev = fl(T8, [])
     web.alert_watch_once(wst, T8)
     conn_ok[0] = False

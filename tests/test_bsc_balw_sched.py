@@ -2,25 +2,25 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _bscchain as B
+import _harness as T  # noqa: E402
+import _bscchain as B  # noqa: E402
 
-import json
-import os
-import sqlite3
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
 
 bw = B.bsc_watch
 CH = B.CH
-common = B.common
+import paths, statefile  # noqa: E402
 E18 = 10 ** 18
 E17 = 10 ** 17
 clk = [time.time()]
 bw._now = lambda: clk[0]
 T.patch_moved("_now", bw._now, ("bsc_",))
-REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
-BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
-CHK = os.path.join(common.STATE_DIR, "onchain_check.json")
+REQ = os.path.join(paths.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
+BALW = os.path.join(paths.STATE_DIR, "bsc_balw.json")
+CHK = os.path.join(paths.STATE_DIR, "onchain_check.json")
 W3 = "0x" + "a3" * 20
 W4 = "0x" + "a4" * 20
 
@@ -31,7 +31,7 @@ def tick(sec, blocks):
 
 
 def setup_db():
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
                 " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
     con.execute("CREATE TABLE IF NOT EXISTS raw_txs (chain TEXT, txhash TEXT, block INTEGER, snapshot TEXT, PRIMARY KEY (chain, txhash))")
@@ -64,7 +64,7 @@ def fresh(wallets=None, keep_tx=False):
     B.reset_state()
     gates_reset()
     setup_db()
-    common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+    statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                        "_wallets": sorted(ws)})
     wr = B.Wr()
     w = bw.BscWatcher(cfg_for(ws), list(ws), wr)
@@ -78,7 +78,7 @@ def mk(wr, wallets=None):
 
 
 def ingest(wr):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     for r in wr.recs:
         sn = r.get("snapshot") or {}
         con.execute("INSERT OR REPLACE INTO raw_txs (chain, txhash, block, snapshot) VALUES ('bsc', ?, ?, ?)",
@@ -103,12 +103,12 @@ def recs(wr, h):
 
 
 def reqs():
-    d = common.read_json(REQ, {}) if os.path.exists(REQ) else {}
+    d = statefile.read_json(REQ, {}) if os.path.exists(REQ) else {}
     return list(d.get("items") or []) if isinstance(d, dict) else []
 
 
 def balw_st():
-    return common.read_json(BALW, {}) if os.path.exists(BALW) else {}
+    return statefile.read_json(BALW, {}) if os.path.exists(BALW) else {}
 
 
 def wst(w9):
@@ -120,7 +120,7 @@ def jobs_left():
 
 
 def mismatch(rows):
-    common.atomic_write_json(CHK, {"mismatches": [{"key": f"bsc:{w9}:native", "chain": "bsc", "wallet": w9, "ca": None, "sym": "BNB",
+    statefile.atomic_write_json(CHK, {"mismatches": [{"key": f"bsc:{w9}:native", "chain": "bsc", "wallet": w9, "ca": None, "sym": "BNB",
                                                    "ledger": 1.0, "onchain": 1.0 + g9, "confirmed": True} for w9, g9 in rows]})
 
 
@@ -287,7 +287,7 @@ w._balw_hist(st2, [B.W1, B.W2], cnt2)
 T.chk(any(j.get("k") == "hist" for j in ws2.get("jobs") or []) and ws2.get("hist_at") == int(clk[0]) and "hist_wait" not in ws2,
       "F2 몫이 생기면 바로 초기화(작업 생성) · hist_at = 지금 · 대기 표시 지움", {"w": {k9: v9 for k9, v9 in ws2.items() if k9 not in ("cp", "jobs")}})
 st2["w"][B.W2]["hist_wait"] = int(clk[0])
-common.atomic_write_json(CHK, {"mismatches": []})
+statefile.atomic_write_json(CHK, {"mismatches": []})
 w._balw_hist_cands(st2, [B.W1, B.W2], clk[0])
 T.chk("hist_wait" not in st2["w"][B.W2], "F2 대조 부족이 풀리면 대기 표시도 지움", {k9: v9 for k9, v9 in st2["w"][B.W2].items() if k9 not in ("cp", "jobs")})
 w._balw_st = None
@@ -301,7 +301,7 @@ CH.answer = lambda url, m, p: ({"_err": {"code": -32603, "message": "internal er
 cnt2 = {"n": 0, "emit": 0, "jobs": 0, "halt": None, "head": CH.head, "t_end": time.time() + 10}
 try:
     w._balw_hist(st2, [B.W1, B.W2], cnt2)
-except Exception:
+except Exception:   # noqa: BLE001
     pass
 CH.answer = ans2
 ws2 = st2["w"][B.W2]

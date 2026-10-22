@@ -4,6 +4,7 @@ from core_common import CLASSIFIER_VER
 from core_common import dm
 from decimal import Decimal
 from decimal import InvalidOperation
+import num_parse
 import logging
 
 log = logging.getLogger('tj-core')
@@ -129,11 +130,8 @@ class UpbitMixin:
 
     @staticmethod
     def _upbit_q8(amount):
-        try:
-            a = Decimal(str(amount))
-        except (InvalidOperation, ValueError, TypeError):
-            return None
-        if not a.is_finite() or a <= 0:
+        a = num_parse.to_dec(amount)
+        if a is None or a <= 0:
             return None
         q = a * (Decimal(10) ** 8)
         if q != q.to_integral_value():

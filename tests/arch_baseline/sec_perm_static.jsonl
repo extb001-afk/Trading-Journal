@@ -1,0 +1,2 @@
+{"_doc": "G1 비밀 파일 쓰기 자리 권한 정책(n = 0 0600 · 1 preserve(기존 권한 유지) · 2 umask(기본) · 3 loose) — 늘면 FAIL"}
+{"m": "secret_writer_policy", "k": "src/settings_store.py::write_config_raw", "n": 1}

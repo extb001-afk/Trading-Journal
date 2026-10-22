@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import re
-import signal
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
 chk = T.chk
 
@@ -22,7 +22,7 @@ def run_unit(fname, unit):
     env.update(TJ_BASE=base, PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8",
                HTTP_PROXY="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9", http_proxy="http://127.0.0.1:9", https_proxy="http://127.0.0.1:9")
     p = subprocess.Popen([sys.executable, os.path.join(T.SRC, fname)], env=env, cwd=T.TMP, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True, encoding="utf-8", errors="replace")
+                         text=True, encoding="utf-8", errors="replace", preexec_fn=T.sigint_default)
     beat = os.path.join(base, "state", f"runner_{unit}.json")
     t0 = time.time()
     while time.time() - t0 < 60 and p.poll() is None and not os.path.exists(beat):

@@ -4,9 +4,11 @@ import sys
 import threading
 import time
 
-import common
+import chaincatalog, histmark, logs, paths, statefile
+import db as dbm
 import spamguard
-import calcguard
+import recon_adj
+import calcguard  # noqa: E402
 
 SID_TAG = ":disc:"
 CAND = "negabs_cand:"
@@ -31,9 +33,9 @@ LANE_FAIL_WHY = "과거 블록 상태 없음(대체 조건 미충족)"
 def _lanes_chain(chain: str) -> bool:
     try:
         if chain == "bsc":
-            cur = common.read_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {}) or {}
+            cur = statefile.read_json(paths.state("cursor_bsc.json"), {}) or {}
             return isinstance(cur.get("_live"), dict) or bool(cur.get("_lanes_seen"))
-        cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {}) or {}
+        cur = statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {}) or {}
         return isinstance(cur, dict) and isinstance(cur.get("_handover"), dict)
     except (SystemExit, TypeError, ValueError):
         return False
@@ -131,18 +133,18 @@ def recon_done(conn, chain: str, w: str, native: bool) -> bool:
 
 
 def lane_hold(chain: str, w: str, upto: int):
-    sd = common.STATE_DIR
+    sd = paths.STATE_DIR
     upto = int(upto)
     try:
         if chain == "bsc":
-            cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {}) or {}
+            cur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {}) or {}
             fb = int(cur.get("from_block") or 0)
             if fb >= upto:
                 return None
             if isinstance(cur.get("_live"), dict):
                 return f"BSC 옛 기록 차선이 그 블록 아래를 아직 다 못 받음(블록 {fb} 까지 — 그 아래 안 받은 입금이 원장에 빠져 있을 수 있음 · 지나가면 다시)"
             return f"BSC 수집기가 그 블록까지 빈틈없이 아직 안 옴(커서 {fb})"
-        cur = common.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
+        cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
     except (SystemExit, TypeError, ValueError):
         return "수집기 커서를 못 읽음"
     if not isinstance(cur, dict) or cur.get("_rpc_v") is None:
@@ -165,9 +167,9 @@ def lane_hold(chain: str, w: str, upto: int):
 def lane_busy(chain: str):
     try:
         if chain == "bsc":
-            cur = common.read_json(os.path.join(common.STATE_DIR, "cursor_bsc.json"), {}) or {}
+            cur = statefile.read_json(paths.state("cursor_bsc.json"), {}) or {}
             return "BSC 옛 기록 차선 진행 중" if isinstance(cur.get("_live"), dict) else None
-        cur = common.read_json(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {}) or {}
+        cur = statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {}) or {}
     except (SystemExit, TypeError, ValueError):
         return None
     if not isinstance(cur, dict) or cur.get("_rpc_v") is None:
@@ -242,7 +244,7 @@ def asset_guard(conn, aid: int, prefs=None):
         if not ca:
             return "토큰 주소 없음"
         ca = str(ca).lower()
-        if any(x and str(x[0]).lower() == ca for x in (common.NATIVE_MIRROR.get(chain), common.ZK_STACK.get(chain))):
+        if ca in chaincatalog.not_token_cas(chain):
             return "네이티브 거울·시스템 CA"
         if not spamguard.is_genuine(chain, ca) and (spamguard.impostor_of(sym) or spamguard.odd_symbol(sym)):
             return "사칭·혼용 심볼"
@@ -382,20 +384,22 @@ def write_anchor(core, chain: str, w: str, aid: int, ca, diff: int, obs_block: i
                  (sid, "opening_balance", chain, json.dumps(pay, ensure_ascii=False), int(obs_ts) + 1))
     core._post_leg_strict("opening", chain, sid, 0, int(at_ts), int(aid), loc, int(diff), None, None, "opening", "OPENING",
                           ver=_ver(core))
+    recon_adj.note(conn, "K3", ("opening", chain, sid, 0), "disc", basis=basis)
+    dbm.bump_daily_inval(conn)
     core.__dict__.pop("_disc_t_cache", None)
     return sid
 
 
 def after_write(at_ts: int, log=None) -> None:
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(paths.state("daily_cache.json"))
     except FileNotFoundError:
         pass
     except OSError:
         pass
     try:
-        common.mark_hist_dirty(int(at_ts))
-    except Exception as e:
+        histmark.mark_hist_dirty(int(at_ts))
+    except Exception as e:   # noqa: BLE001 [optional]
         calcguard.swallowed("discopen:after_write", e)
         if log:
             log.warning("발견 시점 기초 잔고: 장기 곡선 표식 실패: %s", e)
@@ -434,6 +438,8 @@ def disc_obs(conn) -> dict:
         w, cell = wl[0]
         key, bal = next(iter(cell.items()))
         kind9, _, ca = str(key).partition(":")
+        if kind9 == "token" and ca.lower() in chaincatalog.not_token_cas(venue):
+            continue
         r = conn.execute("SELECT asset_id FROM assets WHERE kind='native' AND chain=?", (venue,)).fetchone() if kind9 == "native" else \
             conn.execute("SELECT asset_id FROM assets WHERE kind='token' AND chain=? AND address=?", (venue, ca.lower())).fetchone()
         try:
@@ -488,9 +494,9 @@ class Runner:
         self.core.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (k, json.dumps(d, ensure_ascii=False, sort_keys=True)))
 
     def _res(self, kind: str, key: str, d: dict):
-        p = os.path.join(common.STATE_DIR, RES_NAME)
+        p = paths.state(RES_NAME)
         try:
-            cur = common.read_json(p, {}) or {}
+            cur = statefile.read_json(p, {}) or {}
         except SystemExit:
             cur = {}
         cur = cur if isinstance(cur, dict) else {}
@@ -501,7 +507,7 @@ class Runner:
                 sec.pop(k9, None)
         cur["ts"] = int(time.time())
         try:
-            common.atomic_write_json(p, cur)
+            statefile.atomic_write_json(p, cur)
         except OSError:
             pass
 
@@ -530,12 +536,12 @@ class Runner:
         return list(cc.get("rpcs") or _RS.RPC_DEFAULT.get(chain) or [])
 
     def _cursor(self, chain: str, w: str):
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
         try:
             if chain == "bsc":
-                cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {}) or {}
+                cur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {}) or {}
                 return int(cur.get("from_block") or 0) or None
-            cur = common.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
+            cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
             v = cur.get(w, cur.get(str(w).lower()))
             return int(v) if v is not None else None
         except (SystemExit, TypeError, ValueError):
@@ -546,7 +552,7 @@ class Runner:
 
     def _prefs(self) -> dict:
         try:
-            d = common.read_json(os.path.join(common.STATE_DIR, "ui_prefs.json"), {}) or {}
+            d = statefile.read_json(paths.state("ui_prefs.json"), {}) or {}
         except SystemExit:
             d = {}
         return d if isinstance(d, dict) else {}
@@ -585,9 +591,9 @@ class Runner:
         return n
 
     def _req_take(self, name: str, key: str) -> tuple:
-        p = os.path.join(common.STATE_DIR, name)
+        p = paths.state(name)
         pp, tk = p + ".processing", p + ".taking"
-        cur = common.read_control_json(pp, None)
+        cur = statefile.read_control_json(pp, None)
         items = list(cur.get(key) or []) if isinstance(cur, dict) and isinstance(cur.get(key), list) else []
         by = str((cur or {}).get("by") or "")[:40] if isinstance(cur, dict) else ""
         if not os.path.exists(tk) and os.path.exists(p):
@@ -596,11 +602,11 @@ class Runner:
             except OSError:
                 pass
         if os.path.exists(tk):
-            new = common.read_control_json(tk, None)
+            new = statefile.read_control_json(tk, None)
             if isinstance(new, dict) and isinstance(new.get(key), list):
                 items += new[key]
                 by = str(new.get("by") or by)[:40]
-            common.atomic_write_json(pp, {key: items, "by": by, "ts": int(time.time())})
+            statefile.atomic_write_json(pp, {key: items, "by": by, "ts": int(time.time())})
             try:
                 os.remove(tk)
             except OSError:
@@ -608,9 +614,9 @@ class Runner:
         return items, by
 
     def _req_keep(self, name: str, key: str, left: list, by: str) -> None:
-        pp = os.path.join(common.STATE_DIR, name) + ".processing"
+        pp = paths.state(name) + ".processing"
         if left:
-            common.atomic_write_json(pp, {key: left, "by": by, "ts": int(time.time())})
+            statefile.atomic_write_json(pp, {key: left, "by": by, "ts": int(time.time())})
         else:
             try:
                 os.remove(pp)
@@ -718,12 +724,14 @@ class Runner:
                     b1 = int(job["pl"]["block"]) - 1
                     try:
                         job["res"] = ("arch", b1) + fetch_at(urls, job["w"], job["pl"]["ca"], b1)
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [fallback]
                         if not (_state_err(e) and job["fb"]):
                             raise
+                        calcguard.swallowed("discopen:Runner._start_jobs._run[state]", e)
                         job["res"] = ("now", int(job["fb"])) + fetch_at(urls, job["w"], job["pl"]["ca"], int(job["fb"]))
-                except BaseException as e:
+                except BaseException as e:   # noqa: BLE001 [fallback]
                     job["err"] = e
+                    calcguard.swallowed("discopen:Runner._start_jobs._run", e)
                 finally:
                     job["t1"] = time.time()
                     job["ev"].set()
@@ -761,7 +769,7 @@ class Runner:
                 n9 = int(d.get("n") or 0) + 1
                 fin = n9 >= MAX_TRIES
                 d.update(st="fail" if fin else "retry", n=n9, why=(LANE_FAIL_WHY if _state_err(e) else "조회 실패: ")
-                         + ("" if _state_err(e) else common.safe_err(str(e))[:120]),
+                         + ("" if _state_err(e) else logs.safe_err(str(e))[:120]),
                          next=now + min(BACKOFF_MAX, BACKOFF0 * (2 ** (n9 - 1))))
                 self._put(k, d)
                 conn.commit()
@@ -848,10 +856,10 @@ class Runner:
         for it in items[:2000]:
             try:
                 st, why, sid = self._recheck_one(it, prefs)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("discopen:Runner._recheck_request", e)
                 self.core.conn.rollback()
-                st, why, sid = "err", common.safe_err(str(e))[:160], ""
+                st, why, sid = "err", logs.safe_err(str(e))[:160], ""
             key = f"{(it or {}).get('chain')}:{str((it or {}).get('wallet') or '').lower()}:{str((it or {}).get('ca') or 'native').lower()}@{(it or {}).get('block')}" \
                 if isinstance(it, dict) else "?"
             self._res("recheck", key, {"st": st, "why": why, "sid": sid})
@@ -930,7 +938,7 @@ class Runner:
             return "wait", "블록 모르는 거래", ""
         if base < 0:
             conn.rollback()
-            return "list", "그 블록에서 원장 음수 — 안전망(나간 거래 직전 블록) 경로 대상(tools/negabs_1010.py)", ""
+            return "list", "그 블록에서 원장 음수 — 안전망(나간 거래 직전 블록) 경로 대상(tools/negabs.py)", ""
         diff = cbal - base
         if diff <= 0:
             conn.rollback()

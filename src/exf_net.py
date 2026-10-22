@@ -8,14 +8,14 @@ import time
 import urllib.request
 from decimal import Decimal
 from decimal import InvalidOperation
-import common
+import bf_engine, config, logs, net_http, num_parse, paths, statefile
 import logging
 
 log = logging.getLogger('tj-exf')
 
 try:
-    import fut_rcpt
-except Exception:
+    import fut_rcpt  # noqa: E402
+except Exception:   # noqa: BLE001 [optional]
     fut_rcpt = None
 
 
@@ -25,9 +25,6 @@ POLL_SEC = 600
 PACE = 0.35
 
 
-STATE_PATH = os.path.join(common.STATE_DIR, "exf_state.json")
-
-
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 
@@ -35,7 +32,7 @@ DAY = 86400
 
 
 def _xm(v) -> str:
-    return common.redact_secret_text("" if v is None else str(v))
+    return logs.redact_secret_text("" if v is None else str(v))
 
 
 _ACCT_TL = threading.local()
@@ -52,7 +49,7 @@ def _ak(ex: str) -> str:
 
 def _save_state(state) -> None:
     root = getattr(state, "root", None)
-    common.atomic_write_json(STATE_PATH, root if root is not None else state)
+    statefile.atomic_write_json(paths.state("exf_state.json"), root if root is not None else state)
 
 
 HTTP_MAX_BYTES = 32 * 1024 * 1024
@@ -82,7 +79,7 @@ def _err_body(e, n: int = ERR_BODY_MAX) -> str:
         return c9[:n]
     try:
         s9 = e.read(ERR_BODY_MAX).decode("utf-8", "replace") if getattr(e, "fp", None) else ""
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         s9 = ""
     if isinstance(d9, dict):
         d9["_tj_body"] = s9
@@ -106,6 +103,7 @@ _BN_W_API = {"/api/v3/myTrades": 20, "/api/v3/account": 20, "/api/v3/exchangeInf
 
 _BN_W_SAPI = {"/sapi/v1/margin/myTrades": 10, "/sapi/v1/margin/account": 10, "/sapi/v1/margin/isolated/account": 10,
               "/sapi/v1/capital/withdraw/history": 10, "/sapi/v1/simple-earn/flexible/position": 150,
+              "/sapi/v1/asset/assetDividend": 10,
               "/sapi/v1/simple-earn/locked/position": 150, "/sapi/v2/loan/flexible/ongoing/orders": 300,
               "/sapi/v1/margin/tradeCoeff": 10, "/sapi/v1/margin/crossMarginData": 1,
               "/sapi/v2/loan/flexible/collateral/data": 400, "/sapi/v2/loan/flexible/loanable/data": 400}
@@ -140,6 +138,8 @@ GOV_BUCKETS = (
     ("kc_spot", "api.kucoin.com", lambda p: p not in _KC_MGMT, 30, 2000, lambda p: _KC_W.get(p, 10)),
     ("gate", "api.gateio.ws", lambda p: True, 10, 100, lambda p: 1),
     ("bithumb", "api.bithumb.com", lambda p: True, 1, 5, lambda p: 1),
+    ("cb_hr", "api.coinbase.com", lambda p: True, 3600, 8000, lambda p: 1),
+    ("cb_s", "api.coinbase.com", lambda p: True, 10, 80, lambda p: 1),
     ("bn_dapi", "dapi.binance.com", lambda p: True, 60, 1200, lambda p: {"/dapi/v1/positionRisk": 1}.get(p, 5)),
     ("kc_fut", "api-futures.kucoin.com", lambda p: True, 30, 1000, lambda p: {"/api/v1/positions": 2}.get(p, 5)),
 )
@@ -293,12 +293,14 @@ CLOCK_WARN_MS = 2000
 
 CLOCK_HOST = {"api.binance.com": "binance", "fapi.binance.com": "binance", "dapi.binance.com": "binance",
               "api.bybit.com": "bybit", "www.okx.com": "okx", "api.kucoin.com": "kucoin",
-              "api-futures.kucoin.com": "kucoin", "api.gateio.ws": "gate", "api.bithumb.com": "bithumb"}
+              "api-futures.kucoin.com": "kucoin", "api.gateio.ws": "gate", "api.bithumb.com": "bithumb",
+              "api.coinbase.com": "coinbase"}
 
 
 CLOCK_SRC = {"binance": "https://api.binance.com/api/v3/time", "bybit": "https://api.bybit.com/v5/market/time",
              "okx": "https://www.okx.com/api/v5/public/time", "kucoin": "https://api.kucoin.com/api/v1/timestamp",
-             "gate": "https://api.gateio.ws/api/v4/spot/time", "bithumb": "https://api.bithumb.com/v1/ticker?markets=KRW-BTC"}
+             "gate": "https://api.gateio.ws/api/v4/spot/time", "bithumb": "https://api.bithumb.com/v1/ticker?markets=KRW-BTC",
+             "coinbase": "https://api.coinbase.com/v2/time"}
 
 
 _CLOCK_ON = [False]
@@ -327,6 +329,9 @@ def _clock_parse(ex: str, d, date_hdr):
             return int(d["server_time"])
         if ex == "bithumb":
             return int(email.utils.parsedate_to_datetime(date_hdr).timestamp() * 1000) + 500 if date_hdr else None
+        if ex == "coinbase":
+            epoch_s = float(d["data"]["epoch"])
+            return int(epoch_s * 1000) + (500 if epoch_s == int(epoch_s) else 0) if epoch_s > 0 else None
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         return None
     return None
@@ -342,10 +347,10 @@ def _clock_fetch(ex: str):
     except RateLimited:
         return None
     _gov_admit(host, path)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    req = net_http.request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     t0 = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with net_http.urlopen(req, timeout=10) as r:
             raw = _read_capped(r, 256 * 1024, host + path)
             dh = r.headers.get("Date") if r.headers is not None else None
         t1 = time.time()
@@ -355,7 +360,7 @@ def _clock_fetch(ex: str):
             _rl_hit(host, e)
         log.warning("%s 서버 시각 조회 실패: HTTP %s", ex, e.code)
         return None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("%s 서버 시각 조회 실패: %s", ex, _xm(repr(e))[:120])
         return None
     srv = _clock_parse(ex, d if isinstance(d, dict) else {}, dh)
@@ -375,8 +380,8 @@ def _clock_save() -> None:
     with _CLOCK_LOCK:
         doc = {"v": 1, "ex": {k: {k2: v[k2] for k2 in ("off", "at", "rtt") if k2 in v} for k, v in _CLOCK.items() if "at" in v}}
     try:
-        common.atomic_write_json(os.path.join(common.STATE_DIR, CLOCK_PATH_NAME), doc)
-    except Exception as e:
+        statefile.atomic_write_json(paths.state(CLOCK_PATH_NAME), doc)
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("서버 시각 차이 기록 실패: %s", e)
 
 
@@ -418,6 +423,41 @@ def _srv_ms(host: str) -> int:
     return int(time.time() * 1000) + off
 
 
+_CLOCK_FILE = {"at": 0.0, "ex": {}}
+CLOCK_FILE_MAX_AGE = 6 * 3600
+
+
+def sign_ms(ex: str) -> int:
+    now = time.time()
+    if _CLOCK_ON[0]:
+        c = _CLOCK.get(ex) or {}
+        try:
+            fresh = now - float(c.get("at") or 0) <= CLOCK_FILE_MAX_AGE
+            return int(now * 1000) + (int(c.get("off") or 0) if fresh else 0)
+        except (TypeError, ValueError):
+            return int(now * 1000)
+    if now - _CLOCK_FILE["at"] >= 60:
+        _CLOCK_FILE["at"] = now
+        try:
+            with open(paths.state(CLOCK_PATH_NAME), encoding="utf-8") as f:
+                d9 = (json.load(f) or {}).get("ex") or {}
+            _CLOCK_FILE["ex"] = d9 if isinstance(d9, dict) else {}
+        except (OSError, ValueError, AttributeError):
+            _CLOCK_FILE["ex"] = {}
+    c = _CLOCK_FILE["ex"].get(ex)
+    off = 0
+    try:
+        if isinstance(c, dict) and now - float(c.get("at") or 0) <= CLOCK_FILE_MAX_AGE:
+            off = int(c.get("off") or 0)
+    except (TypeError, ValueError):
+        off = 0
+    return int(now * 1000) + off
+
+
+def iso_ms(ms: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms / 1000.0)) + f".{int(ms) % 1000:03d}Z"
+
+
 _CLOCK_ERR = {"binance": lambda d: str(d.get("code")) == "-1021",
               "bybit": lambda d: str(d.get("retCode")) == "10002",
               "okx": lambda d: str(d.get("code")) == "50102",
@@ -448,7 +488,7 @@ def _clock_retry(fn):
         _HTTP_TL.clock_hit = None
         try:
             r = fn(*a, **k)
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             if not getattr(_HTTP_TL, "clock_hit", None):
                 raise
             _HTTP_TL.clock_hit = None
@@ -471,12 +511,12 @@ def http_json(url: str, headers: dict | None = None, data: bytes | None = None,
     h = {"User-Agent": UA, "Accept": "application/json"}
     if headers:
         h.update(headers)
-    req = urllib.request.Request(url, headers=h, data=data, method=method)
+    req = net_http.request(url, headers=h, data=data, method=method)
     try:
-        with common.auth_urlopen(req, timeout=timeout) as r:
+        with net_http.auth_urlopen(req, timeout=timeout) as r:
             try:
                 _gov_headers(host, path, r.headers)
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
             out9 = json.loads(_read_capped(r, HTTP_MAX_BYTES_PATH.get(path, HTTP_MAX_BYTES), host + path).decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -518,10 +558,7 @@ def norm_row(ex: str, native_id: str, currency: str, amount, fee, txid, state: s
 
 
 def _int_or(v, d=-999):
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return d
+    return num_parse.to_int(v, d)
 
 
 _DEP_DENIED = set()
@@ -562,11 +599,8 @@ _POLL_HINT = [POLL_SEC]
 
 
 def _dstr(x) -> str:
-    try:
-        d = Decimal(str(x))
-    except (InvalidOperation, TypeError, ValueError):
-        return "0"
-    if not d.is_finite():
+    d = num_parse.to_dec(x)
+    if d is None:
         return "0"
     return format(d.normalize(), "f") if d != 0 else "0"
 
@@ -641,7 +675,7 @@ def _http_json_err(url, headers=None, data=None, method=None, timeout=20):
             except ValueError:
                 pass
             body = body[:300]
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             body = ""
         raise RuntimeError(f"HTTP {e.code}: {_xm(body)}") from e
 
@@ -685,7 +719,7 @@ class _CoolMap(dict):
 
 
 def _cool_path():
-    return os.path.join(common.STATE_DIR, COOL_PATH_NAME)
+    return paths.state(COOL_PATH_NAME)
 
 
 def _cool_save():
@@ -704,9 +738,9 @@ def _cool_save():
                     continue
             out[kind] = d9
         try:
-            common.atomic_write_json(_cool_path(), out)
-        except Exception as e:
-            log.warning("쿨다운 기록 실패(메모리 값은 유지): %s", common.safe_err(e)[:120])
+            statefile.atomic_write_json(_cool_path(), out)
+        except Exception as e:   # noqa: BLE001 [optional]
+            log.warning("쿨다운 기록 실패(메모리 값은 유지): %s", logs.safe_err(e)[:120])
 
 
 _BAL_SRC_OFF = _CoolMap("bal")
@@ -721,9 +755,9 @@ _BAL_SRC_HAD = None
 def _bal_src_had_load():
     global _BAL_SRC_HAD
     if _BAL_SRC_HAD is None:
-        path = os.path.join(common.STATE_DIR, _BAL_SRC_HAD_PATH)
+        path = paths.state(_BAL_SRC_HAD_PATH)
         try:
-            d = common.read_json(path, {})
+            d = statefile.read_json(path, {})
         except SystemExit as e:
             raise RuntimeError(f"잔고 소스 메타 손상 — 잔고 발행 보류: {e}") from None
         if not isinstance(d, dict):
@@ -782,7 +816,7 @@ def _sub_bal(ex, src, fn, out, extra_deny=(), lenient=False):
     has9 = bool(local) or bool(local.debts)
     if had.get(key) != has9:
         had[key] = has9
-        common.atomic_write_json(os.path.join(common.STATE_DIR, _BAL_SRC_HAD_PATH), had)
+        statefile.atomic_write_json(paths.state(_BAL_SRC_HAD_PATH), had)
     for k9, v9 in local.items():
         out[k9] = out.get(k9, 0) + v9
     if isinstance(getattr(out, "debts", None), dict):
@@ -937,7 +971,7 @@ def _mark_seen(rows, seen, seen_txids, seen_dest, pend=None):
 
 
 def _invalidate_balance_snapshot(ex):
-    bp = os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json")
+    bp = paths.state(f"exf_balances_{ex}.json")
     _keep_view(bp, bp + ".pending")
     for p in (bp, bp + ".pending"):
         try:
@@ -957,8 +991,18 @@ _FUT_MULTI = {}
 
 def _fut_path(ex):
     if _FUT_MULTI.get(ex):
-        return os.path.join(common.STATE_DIR, f"futraw_{ex}_{_acct() or 'main'}.json")
-    return os.path.join(common.STATE_DIR, f"futures_{ex}.json")
+        return paths.state(f"futraw_{ex}_{_acct() or 'main'}.json")
+    return paths.state(f"futures_{ex}.json")
+
+
+def fut_first_t0(ex: str, now: float):
+    try:
+        win_t0 = int(bf_engine.effective_backfill_t0(config.load_config(), now))
+        since_t0 = bf_engine.SINCE.target(ex)
+        return int(min(win_t0, since_t0)) if since_t0 else win_t0
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
+        log.warning("%s 선물 첫 하한 계산 실패(종전 기본): %s", ex, _xm(repr(e))[:120])
+        return None
 
 
 def _fut_write(ex, wallet, positions, events, cursor, covered_through=None):
@@ -969,7 +1013,7 @@ def _fut_write(ex, wallet, positions, events, cursor, covered_through=None):
     d9 = {"ts": ts9, "wallet": wallet, "positions": positions, "events": events, "cursor": cursor}
     if covered_through is not None:
         d9["inc_cov_ts"] = min(ts9, int(covered_through))
-    common.atomic_write_json(_fut_path(ex), d9)
+    statefile.atomic_write_json(_fut_path(ex), d9)
 
 
 def _fut_req(v, what):
@@ -1004,7 +1048,7 @@ def _px_safe(ex, fn):
         return
     try:
         fn()
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [optional]
         log.warning("%s 선물 가격 옆 파일 실패(정산 무관 · 다음 주기): %s", ex, _xm(repr(e))[:160])
 
 
@@ -1013,15 +1057,15 @@ def _keep_view(bp9, pend_bp):
         best = None
         for p9 in (bp9, pend_bp):
             if os.path.exists(p9):
-                d9 = common.read_json(p9, {})
+                d9 = statefile.read_json(p9, {})
                 if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
                     if best is None or float(d9.get("ts") or 0) > float(best.get("ts") or 0):
                         best = d9
         if best is None:
             return
         vp9 = bp9 + ".view"
-        cur9 = common.read_json(vp9, {}) if os.path.exists(vp9) else {}
+        cur9 = statefile.read_json(vp9, {}) if os.path.exists(vp9) else {}
         if not isinstance(cur9, dict) or float(best.get("ts") or 0) >= float(cur9.get("ts") or 0):
-            common.atomic_write_json(vp9, best)
-    except (Exception, SystemExit) as e:
+            statefile.atomic_write_json(vp9, best)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [optional]
         log.warning("잔고 표시 사본 보존 실패: %s", repr(e)[:120])

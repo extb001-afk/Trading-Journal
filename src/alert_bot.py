@@ -1,6 +1,5 @@
 """Telegram alert sender (price targets, health, daily summaries)."""
 from __future__ import annotations
-
 import hashlib
 import json
 import os
@@ -12,18 +11,19 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import envfile, net_http, num_parse, paths, runtime, statefile
+import db as dbm
+import logs
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
-import unit_beat
+    runtime.cpu_reserve_apply()
+import unit_beat  # noqa: E402
 import health
 import alert_prefs as AP
 
-log = common.setup_logging("tj-alert")
+log = logs.setup_logging("tj-alert")
 
 SOURCES = ("pending_dm.jsonl", "alerts_web.jsonl", AP.FAST_QUEUE)
 FROM_START = frozenset({AP.FAST_QUEUE})
-CURSOR_PATH = os.path.join(common.STATE_DIR, "tg_cursor.json")
 POLL_SEC = 20
 URGENT_TICK = 0.5
 URGENT_MAX_PASS = 10
@@ -43,7 +43,7 @@ HOLD_IDS_WARN = 4 * READ_LINES_MAX
 
 
 def _env():
-    return common.read_env_file()
+    return envfile.read_env_file()
 
 
 def _tg_creds():
@@ -53,7 +53,7 @@ def _tg_creds():
         chat = settings_store.env_value(settings_store.TG_CHAT)
         if tok and chat:
             return tok, chat
-    except Exception:
+    except Exception:  # noqa: BLE001 [optional]
         pass
     env = _env()
     token, chat = env.get("TJ_TG_TOKEN") or None, env.get("TJ_TG_CHAT") or None
@@ -93,7 +93,7 @@ def _retry_after(body) -> float:
         d = body if isinstance(body, dict) else json.loads(body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body))
         v = float(((d or {}).get("parameters") or {}).get("retry_after") or 0)
         return v if v == v and v > 0 else 0.0
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0.0
 
 
@@ -106,19 +106,19 @@ def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
     if now < _TG_WAIT_UNTIL[0]:
         _LAST_SEND["cls"] = "wait"
         return False, None, f"텔레그램 속도 제한 대기 {int(_TG_WAIT_UNTIL[0] - now) + 1}초"
-    text = common.redact_secret_text(text, generic=False)
+    text = logs.redact_secret_text(logs.strip_bidi(text), generic=False)
     params = {"chat_id": chat, "text": text[:3900]}
     if silent or (silent is None and _silent_text(text)):
         params["disable_notification"] = "true"
     if reply_to:
         params["reply_to_message_id"] = str(reply_to)
         params["allow_sending_without_reply"] = "true"
-    req = urllib.request.Request(f"{TG_API}/bot{token}/sendMessage", data=urllib.parse.urlencode(params).encode())
+    req = net_http.request(f"{TG_API}/bot{token}/sendMessage", data=urllib.parse.urlencode(params).encode())
     ra = 0.0
     cls9 = "temp"
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            d = json.loads(common.read_capped(r, TG_BODY_MAX).decode())
+        with net_http.urlopen(req, timeout=15) as r:
+            d = json.loads(net_http.read_capped(r, TG_BODY_MAX).decode())
         ok = d.get("ok") is True
         err = None if ok else str(d.get("description") or "ok=false")[:160]
         mid = ((d.get("result") or {}).get("message_id")) if ok else None
@@ -127,16 +127,16 @@ def send_message(token: str, chat: str, text: str, reply_to=None, silent=None):
         elif not ok and int(d.get("error_code") or 0) in _TG_PERM_CODES:
             cls9 = "perm"
     except urllib.error.HTTPError as e:
-        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+        ok, mid, err = False, None, logs.redact_secret_text(str(e))[:160]
         cls9 = "perm" if e.code in _TG_PERM_CODES else "temp"
         if e.code == 429:
             try:
-                ra = _retry_after(common.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
-            except Exception:
+                ra = _retry_after(net_http.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
+            except Exception:   # noqa: BLE001 [fallback]
                 ra = 30.0
         log.warning("발송 실패: %s", err)
-    except Exception as e:
-        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+    except Exception as e:  # noqa: BLE001 [fallback]
+        ok, mid, err = False, None, logs.redact_secret_text(str(e))[:160]
         log.warning("발송 실패: %s", err)
     if ra > 0:
         _TG_WAIT_UNTIL[0] = time.time() + min(ra, TG_RETRY_MAX)
@@ -158,7 +158,7 @@ def send_photo(token: str, chat: str, png: bytes, caption: str = "", silent: boo
     now = time.time()
     if now < _TG_WAIT_UNTIL[0]:
         return False, None, f"텔레그램 속도 제한 대기 {int(_TG_WAIT_UNTIL[0] - now) + 1}초"
-    caption = common.redact_secret_text(caption or "", generic=False)[:1024]
+    caption = logs.redact_secret_text(logs.strip_bidi(caption or ""), generic=False)[:1024]
     bnd = "tjb" + os.urandom(12).hex()
     parts = []
     fields = {"chat_id": str(chat), "caption": caption}
@@ -168,26 +168,26 @@ def send_photo(token: str, chat: str, png: bytes, caption: str = "", silent: boo
         parts.append(f"--{bnd}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode("utf-8"))
     parts.append(f"--{bnd}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"summary.png\"\r\nContent-Type: image/png\r\n\r\n".encode())
     body = b"".join(parts) + png + f"\r\n--{bnd}--\r\n".encode()
-    req = urllib.request.Request(f"{TG_API}/bot{token}/sendPhoto", data=body, headers={"Content-Type": f"multipart/form-data; boundary={bnd}"})
+    req = net_http.request(f"{TG_API}/bot{token}/sendPhoto", data=body, headers={"Content-Type": f"multipart/form-data; boundary={bnd}"})
     ra = 0.0
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(common.read_capped(r, TG_BODY_MAX).decode())
+        with net_http.urlopen(req, timeout=30) as r:
+            d = json.loads(net_http.read_capped(r, TG_BODY_MAX).decode())
         ok = d.get("ok") is True
         err = None if ok else str(d.get("description") or "ok=false")[:160]
         mid = ((d.get("result") or {}).get("message_id")) if ok else None
         if not ok and int(d.get("error_code") or 0) == 429:
             ra = _retry_after(d) or 30.0
     except urllib.error.HTTPError as e:
-        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+        ok, mid, err = False, None, logs.redact_secret_text(str(e))[:160]
         if e.code == 429:
             try:
-                ra = _retry_after(common.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
-            except Exception:
+                ra = _retry_after(net_http.read_capped(e, TG_ERR_BODY_MAX)) or 30.0
+            except Exception:   # noqa: BLE001 [fallback]
                 ra = 30.0
         log.warning("그림 발송 실패: %s", err)
-    except Exception as e:
-        ok, mid, err = False, None, common.redact_secret_text(str(e))[:160]
+    except Exception as e:   # noqa: BLE001 [fallback]
+        ok, mid, err = False, None, logs.redact_secret_text(str(e))[:160]
         log.warning("그림 발송 실패: %s", err)
     if ra > 0:
         _TG_WAIT_UNTIL[0] = time.time() + min(ra, TG_RETRY_MAX)
@@ -217,7 +217,7 @@ def init_cursor(cursor: dict) -> bool:
     for fn in SOURCES:
         if fn in cursor:
             continue
-        path = os.path.join(common.STATE_DIR, fn)
+        path = paths.state(fn)
         cursor[fn] = _fast_start(path) if fn in FROM_START else (_tail_end(path) if os.path.exists(path) else 0)
         log.info("%s 커서 초기화 — 백로그 %d바이트 건너뜀(파일 끝에서 시작)", fn, cursor[fn])
         changed = True
@@ -252,7 +252,7 @@ def _fast_send_ok(kind, conn=None) -> bool:
         if not (t9 and c9):
             return False
         return AP.decide(AP.load(), AP.cat_of(kind), time.time(), conn, kind) == "send"
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return True
 
 
@@ -379,8 +379,8 @@ def _cnt(v) -> int:
 
 def load_stats() -> dict:
     try:
-        raw = common.read_json(AP.STATS_PATH, {}) or {}
-    except (Exception, SystemExit):
+        raw = statefile.read_json(paths.state("alert_stats.json"), {}) or {}
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         raw = {}
     st = {"v": 1, "days": {}, "counted": {}}
     if not isinstance(raw, dict):
@@ -416,8 +416,8 @@ def save_stats(st: dict, now: float = None) -> None:
         keep = {AP.day_key((now or time.time()) - i * 86400) for i in range(AP.STATS_KEEP_DAYS)}
         st["days"] = {k: v for k, v in (st.get("days") if isinstance(st.get("days"), dict) else {}).items() if k in keep}
         st.pop("_dirty", None)
-        common.atomic_write_json(AP.STATS_PATH, st)
-    except Exception as e:
+        statefile.atomic_write_json(paths.state("alert_stats.json"), st)
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("알림 발송 기록 저장 실패: %s", e)
 
 
@@ -440,8 +440,8 @@ def stat_add(st: dict, cat: str, field: str, n: int = 1, now: float = None) -> N
 
 def load_hold() -> dict:
     try:
-        raw = common.read_json(AP.HOLD_PATH, {}) or {}
-    except (Exception, SystemExit):
+        raw = statefile.read_json(paths.state("alert_hold.json"), {}) or {}
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         raw = {}
     h = {"n": {}, "items": [], "ids": {fn: [] for fn in SOURCES}}
     if not isinstance(raw, dict):
@@ -490,9 +490,9 @@ def load_hold() -> dict:
 def save_hold(h: dict) -> bool:
     pend = h.pop("_pend", None)
     try:
-        common.atomic_write_json(AP.HOLD_PATH, h)
+        statefile.atomic_write_json(paths.state("alert_hold.json"), h)
         return True
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         if pend:
             h["_pend"] = pend
         log.warning("보류·하루 요약 재료 저장 실패(커서는 그 줄 앞에 둠): %s", e)
@@ -629,7 +629,7 @@ def filter_rows(rows, fn: str, doc: dict, conn, now: float, st: dict, hold: dict
         if kind == BAL_KIND and hst is not None:
             try:
                 cov9 = health.bal_covered(hst, d.get("keys"))
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 cov9 = False
             if cov9:
                 if off > counted:
@@ -693,7 +693,7 @@ def flush_hold(token, chat, doc: dict, conn, now: float, st: dict, hold: dict, f
     for k in hold["n"]:
         try:
             stat_add(st, k, "sent", 1, now)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             log.warning("발송 기록 실패(무시): %s", e)
     hold.update(items=[], n={})
     hold.pop("since", None)
@@ -732,7 +732,7 @@ def _open_problems(hst, stall_on=False) -> list:
             if health.alert_cat(i) == "bal":
                 continue
             out.append((0 if i.get("level") == "crit" else 1, str(i.get("title") or "")[:40]))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return []
     return [t for _l, t in sorted(out)]
 
@@ -756,7 +756,7 @@ def _open_bal_keys(hst) -> int:
                     pend9.update(o.get("keys") or ())
             n += len((set(i.get("keys_told") or ()) & set(i.get("keys") or ())) - pend9)
         return n
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0
 
 
@@ -764,7 +764,7 @@ def _open_bal_any(hst) -> bool:
     try:
         return any(isinstance(i, dict) and i.get("check") == "balcheck:mismatch" and not i.get("resolved") and i.get("level") in ("warn", "crit")
                    for i in ((hst or {}).get("incidents") or {}).values())
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -881,7 +881,7 @@ def flush_digest(token, chat, doc: dict, now: float, st: dict, hold: dict, hst=N
             try:
                 import tinychart
                 png = tinychart.render(curve, axis=bool(th.get("digest_axis", True)), cur=cur)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [optional]
                 log.warning("하루 요약 그림 실패(글자만 보냄): %s", e)
         ok = bool(png) and len(text) <= 1024 and send_photo(token, chat, png, text, silent=True)[0]
         if not ok:
@@ -893,7 +893,7 @@ def flush_digest(token, chat, doc: dict, now: float, st: dict, hold: dict, hst=N
         _SENT_TIMES.append(time.time())
         try:
             stat_add(st, "digest", "sent", 1, now)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.warning("발송 기록 실패(무시): %s", e)
     hold["dg"] = {"items": [], "n": {}}
     hold["dg_day"] = day
@@ -911,7 +911,7 @@ def health_gate(st: dict, hold: dict, now_fn=time.time):
             doc = AP.load()
             conn = AP.connect_ts(st)
             how = AP.decide(doc, cat, now, conn)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("헬스 알림 설정 판정 실패(보냄): %s", e)
             return True
         if how == "send":
@@ -928,7 +928,7 @@ def health_gate(st: dict, hold: dict, now_fn=time.time):
             else:
                 stat_add(st, cat, "web" if how == "web" else "skip", 1, now)
             save_stats(st, now)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.warning("헬스 알림 보류·기록 실패(무시): %s", e)
         return False
     return gate
@@ -943,14 +943,13 @@ def drop_scam(rows, conn_factory=None):
     if not want:
         return rows
     try:
-        import sqlite3
         import spamguard
-        conn = conn_factory() if conn_factory else sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=10)
-    except Exception as e:
+        conn = conn_factory() if conn_factory else dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=10)
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("스캠 알림 거르기 생략(원장 열기 실패): %s", e)
         return rows
     try:
-        cfg = common.read_json(common.CONFIG_PATH, {}) or {}
+        cfg = statefile.read_json(paths.CONFIG_PATH, {}) or {}
         my = {(w.get("address") or "") if w.get("type") == "sol" else (w.get("address") or "").lower() for w in cfg.get("wallets") or []}
         out = list(rows)
         n = 0
@@ -962,13 +961,13 @@ def drop_scam(rows, conn_factory=None):
         if n:
             log.info("스캠 tx 알림 %d건 거름(가짜 전송·사칭·주소 오염)", n)
         return out
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("스캠 알림 거르기 실패(원래대로 발송): %s", e)
         return rows
     finally:
         try:
             conn.close()
-        except Exception:
+        except Exception:   # noqa: BLE001 [cleanup]
             pass
 
 
@@ -977,7 +976,7 @@ def health_tick(mon, token, chat, gate=None):
         if mon.due():
             send_fn = (lambda text, reply_to=None: send_message(token, chat, text, reply_to)) if token else None
             mon.tick(send_fn, tg_configured=bool(token), gate=gate)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("헬스 판정 실패(다음 주기): %s", e)
 
 
@@ -1059,7 +1058,7 @@ def urgent_pass(now=None) -> int:
         return 0
     sent = 0
     for fn in SOURCES:
-        path = os.path.join(common.STATE_DIR, fn)
+        path = paths.state(fn)
         try:
             size = os.path.getsize(path)
         except OSError:
@@ -1085,7 +1084,7 @@ def urgent_pass(now=None) -> int:
                 c["pos"][fn] = off
                 try:
                     stat_add(st, cat, "skip", 1, now)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.warning("발송 기록 실패(무시): %s", e)
                 continue
             token, chat = _tg_creds()
@@ -1104,7 +1103,7 @@ def urgent_pass(now=None) -> int:
             c["pos"][fn] = off
             try:
                 stat_add(st, cat, "sent", 1, now)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("발송 기록 실패(무시): %s", e)
             ts9 = _num_ts(d.get("ts"))
             log.info("긴급 알림 즉시 발송(%s%s)", kind, f" · 줄 시각 뒤 {time.time() - ts9:.1f}초" if ts9 else "")
@@ -1112,17 +1111,14 @@ def urgent_pass(now=None) -> int:
 
 
 def _num_ts(v) -> float:
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return 0.0
+    x = num_parse.to_float(v, 0.0)
     return x if 1e9 < x < 1e11 else 0.0
 
 
 def _urgent_hook():
     try:
         urgent_pass()
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("긴급 즉시 경로 실패(다음 틱): %s", e)
 
 
@@ -1158,7 +1154,7 @@ def _wait_creds(sec: float) -> None:
 def _save_cursor(cursor: dict, fn: str, off: int) -> bool:
     cursor[fn] = off
     try:
-        common.atomic_write_json(CURSOR_PATH, cursor)
+        statefile.atomic_write_json(paths.state("tg_cursor.json"), cursor)
         return True
     except OSError as e:
         log.warning("커서 저장 실패: %s", e)
@@ -1166,7 +1162,7 @@ def _save_cursor(cursor: dict, fn: str, off: int) -> bool:
 
 
 def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, hold: dict, cap_state: dict, hst: dict = None) -> None:
-    path = os.path.join(common.STATE_DIR, fn)
+    path = paths.state(fn)
     try:
         size = os.path.getsize(path)
     except OSError:
@@ -1186,7 +1182,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         rows = drop_scam(rows)
     try:
         rows, hch = filter_rows(rows, fn, doc, conn, time.time(), st, hold, hst)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("알림 설정 필터 실패(이번 청크는 전부 발송): %s", e)
     ceil9 = None
     if hold.get("_pend") and not save_hold(hold):
@@ -1212,7 +1208,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                         save_hold(hold)
                     try:
                         stat_add(st, AP.cat_of(kind), "skip", len(cov), time.time())
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [isolate]
                         log.warning("발송 기록 실패(무시): %s", e)
                     continue
                 _SENT_TIMES[:] = [t for t in _SENT_TIMES if time.time() - t < 3600]
@@ -1228,10 +1224,10 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
                     save_hold(hold)
                 try:
                     stat_add(st, AP.cat_of(kind), "sent", 1, time.time())
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.warning("발송 기록 실패(무시): %s", e)
                 time.sleep(0.5)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.warning("%s 봇 이상 경보 앞 훑기 실패(다음 사이클): %s", fn, e)
     blocked = False
     for end_off, text, kind, cov in msgs:
@@ -1251,7 +1247,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         if kind in AP.FAST_KINDS and not _fast_send_ok(kind, conn) and not (cov and all(held(hold, fn, o) for o in cov)):
             try:
                 stat_add(st, AP.cat_of(kind), "skip", len(cov), time.time())
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("발송 기록 실패(무시): %s", e)
             if blocked or (ceil9 is not None and end_off > ceil9):
                 if mark_done(hold, fn, cov, off):
@@ -1272,7 +1268,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         if kind == BAL_KIND and hst is not None and bal_keys:
             try:
                 health.note_bal_dm(hst, [k for o in cov for k in (bal_keys.get(o) or ())], time.time())
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("잔고 불일치 발송 키 기록 실패(무시): %s", e)
         hc9 = blocked or end_off is None or (ceil9 is not None and end_off > ceil9)
         if mark_done(hold, fn, cov if hc9 else [o for o in cov if o > end_off], off if hc9 else end_off):
@@ -1290,7 +1286,7 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
         if not is_test:
             try:
                 stat_add(st, AP.cat_of(kind), "sent", 1, now)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("발송 기록 실패(무시): %s", e)
         time.sleep(0.5)
     if _save_cursor(cursor, fn, off) and retire_held(hold, fn, off):
@@ -1299,16 +1295,16 @@ def run_source(fn: str, token, chat, cursor: dict, doc: dict, conn, st: dict, ho
 
 def _load_cursor() -> dict:
     try:
-        cur = common.read_json(CURSOR_PATH, {})
+        cur = statefile.read_json(paths.state("tg_cursor.json"), {})
         why = None if isinstance(cur, dict) else f"객체가 아님({type(cur).__name__})"
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         cur, why = None, str(e)[:160]
     if why is not None:
-        dst = CURSOR_PATH + ".bad"
+        dst = paths.state("tg_cursor.json") + ".bad"
         if os.path.exists(dst):
-            dst = f"{CURSOR_PATH}.bad.{int(time.time())}_{os.getpid()}"
+            dst = f"{paths.state('tg_cursor.json')}.bad.{int(time.time())}_{os.getpid()}"
         try:
-            os.replace(CURSOR_PATH, dst)
+            os.replace(paths.state("tg_cursor.json"), dst)
         except OSError:
             dst = "(옮기지 못함)"
         log.warning("텔레그램 커서 파일 손상 — 원본 → %s · 소스마다 파일 끝(긴급 큐는 최근 1시간)부터 다시: %s", os.path.basename(dst), why)
@@ -1320,7 +1316,7 @@ def _load_cursor() -> dict:
 
 
 def main():
-    common.ensure_dirs()
+    paths.ensure_dirs()
     unit_beat.start("alert")
     cursor = _load_cursor()
     warned = False
@@ -1351,16 +1347,16 @@ def main():
                 save_stats(st, now0)
         try:
             doc = AP.load()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("알림 설정 읽기 실패(추천값으로): %s", e)
             doc = AP.default_doc()
         try:
             conn = AP.connect_ts(st)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("텔레그램 연결 시각 읽기 실패: %s", e)
             conn = None
         if init_cursor(cursor):
-            common.atomic_write_json(CURSOR_PATH, cursor)
+            statefile.atomic_write_json(paths.state("tg_cursor.json"), cursor)
         _URG.update(token=token, chat=chat, cursor=cursor, doc=doc, conn=conn, st=st, hold=hold)
         _urgent_hook()
         try:
@@ -1369,18 +1365,18 @@ def main():
                 log.warning("조용한 시간 보류가 너무 큼(소스별 ID > %d) — 묶음을 미리 보냄(ID 는 커서가 지날 때까지 유지)", HOLD_IDS_WARN)
             if flush_hold(token, chat, doc, conn, now0, st, hold, force=big):
                 save_stats(st, now0)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("조용한 시간 묶음 발송 실패(다음 사이클): %s", e)
         for fn in SOURCES:
             _urgent_hook()
             try:
                 run_source(fn, token, chat, cursor, doc, conn, st, hold, cap_state, mon.st)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 log.warning("%s 처리 실패(다음 사이클): %s", fn, e)
         try:
             if flush_digest(token, chat, doc, time.time(), st, hold, mon.st):
                 save_stats(st)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [boundary]
             log.warning("하루 요약 발송 실패(다음 사이클): %s", e)
         if st.get("_dirty"):
             save_stats(st)

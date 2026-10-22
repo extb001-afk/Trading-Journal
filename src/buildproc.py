@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import traceback
+import fsio
 
 log = logging.getLogger("tj")
 
@@ -59,8 +60,8 @@ _ST = {"fails": 0, "pause_until": 0.0, "n_fork": 0, "n_inproc": 0, "last": None,
 
 
 def plan() -> dict:
-    import common
-    return common.cpu_plan()
+    import runtime
+    return runtime.cpu_plan()
 
 
 def status() -> dict:
@@ -244,7 +245,7 @@ def _picklable(v) -> bool:
     try:
         _dumps(v)
         return True
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -297,7 +298,7 @@ def _child_reinit(b):
 def _ln(v):
     try:
         return len(v) if isinstance(v, (dict, list, set, frozenset, tuple)) else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -314,7 +315,7 @@ def _small(v):
 def _fp(v):
     try:
         b9 = pickle.dumps(v, protocol=pickle.HIGHEST_PROTOCOL)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
     return (len(b9), zlib.crc32(b9))
 
@@ -350,7 +351,7 @@ def _warn_new_sqlite():
             if site not in seen:
                 seen.add(site)
                 log.warning("빌드 자식: 새 SQLite 연결(%s) — 빌드 연결을 넘겨 쓰게 고칠 자리", site)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         return real(*a, **k)
     sqlite3.connect = connect
@@ -395,7 +396,7 @@ def _hist_begin():
     hc = sys.modules.get("histcurve")
     if hc is None or not hasattr(hc, "HIST") or not hasattr(hc, "DAYCLOSE"):
         return None
-    import common
+    import statefile
     H, DC = hc.HIST, hc.DAYCLOSE
     notes = []
     real_note = DC.note_change
@@ -408,13 +409,13 @@ def _hist_begin():
         return n9
     DC.note_change = note
     dcp = os.path.abspath(str(getattr(DC, "path", "") or ""))
-    real_w = common.atomic_write_json
+    real_w = statefile.atomic_write_json
 
     def write(path, obj, *a, **k):
         if dcp and os.path.abspath(str(path)) == dcp:
             return None
         return real_w(path, obj, *a, **k)
-    common.atomic_write_json = write
+    statefile.atomic_write_json = write
     want0 = {sp: (set((v or {}).get("days") or ()), float((v or {}).get("w") or 0)) for sp, v in dict(DC.want).items()}
     wold0 = {sp: (set((v or {}).get("days") or ()), float((v or {}).get("w") or 0)) for sp, v in dict(getattr(DC, "want_old", None) or {}).items()}
     return {"H": H, "DC": DC, "kit0": H.kit, "lo0": H.last_offer, "want0": want0, "wold0": wold0, "notes": notes}
@@ -513,7 +514,7 @@ def _child_run(b, conn, shm, wfd):
         try:
             import calcguard
             calcguard.child_reset("build")
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         _warn_new_sqlite()
         b.__dict__["_bp_shm"] = shm
@@ -597,7 +598,7 @@ def _child_run(b, conn, shm, wfd):
                "threads": threading.active_count()}
         try:
             data = _dumps(("ok", out, pay))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             bad = [k for k, v in st.items() if not _picklable(v)]
             for k in bad:
                 st.pop(k, None)
@@ -611,15 +612,15 @@ def _child_run(b, conn, shm, wfd):
                 bad.append("histcurve.HIST.kit")
             pay["skipped"] = bad
             data = _dumps(("ok", out, pay))
-    except BaseException as e:
+    except BaseException as e:   # noqa: BLE001 [fallback]
         name = type(e).__name__
         if name == "_BuildObsolete":
             data = _dumps(("obsolete", str(e)))
         else:
             try:
-                import common
-                msg = common.safe_err(e)
-            except Exception:
+                import logs
+                msg = logs.safe_err(e)
+            except Exception:   # noqa: BLE001 [fallback]
                 msg = str(e)[:300]
             data = _dumps(("err", name, msg, traceback.format_exc()[-4000:]))
         code = 3
@@ -633,12 +634,12 @@ def _child_run(b, conn, shm, wfd):
     try:
         sys.stdout.flush()
         sys.stderr.flush()
-    except Exception:
+    except Exception:   # noqa: BLE001 [cleanup]
         pass
     try:
         import calcguard
         calcguard.flush_as("build")
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     os._exit(code)
 
@@ -656,7 +657,7 @@ def _prctl():
         f9.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
         f9.restype = ctypes.c_int
         return f9
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -682,9 +683,9 @@ def run(b):
 
 def _run_once(b):
     import db as dbm
-    import common
+    import paths
     t0 = time.time()
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     pid = None
     rfd = wfd = None
     shm = None
@@ -701,7 +702,7 @@ def _run_once(b):
         try:
             sys.stdout.flush()
             sys.stderr.flush()
-        except Exception:
+        except Exception:   # noqa: BLE001 [cleanup]
             pass
         ppid9, prctl9 = os.getpid(), _prctl()
         b.__dict__["_bp_threads"] = sorted(t9.name for t9 in threading.enumerate())
@@ -715,7 +716,7 @@ def _run_once(b):
             if prctl9 is not None:
                 try:
                     prctl9(1, int(signal.SIGKILL), 0, 0, 0)
-                except Exception:
+                except Exception:   # noqa: BLE001 [optional]
                     pass
             if os.getppid() != ppid9:
                 os._exit(4)
@@ -787,7 +788,7 @@ def _run_once(b):
             try:
                 with nogc():
                     res = pickle.loads(bytes(buf))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 why = f"결과 읽기 실패({type(e).__name__})"
         _ST["bytes"] = len(buf)
         del buf
@@ -839,9 +840,9 @@ def _raise_child_err(res):
         raise SystemExit(res[2])
     tb9 = res[3] if len(res) > 3 and isinstance(res[3], str) else ""
     try:
-        import common
-        tb9 = common.redact_secret_text(tb9, generic=False)
-    except Exception:
+        import logs
+        tb9 = logs.redact_secret_text(tb9, generic=False)
+    except Exception:   # noqa: BLE001 [fallback]
         tb9 = ""
     log.warning("빌드 예외(자식): %s: %s%s", res[1], res[2], ("\n자식 빌드 traceback(끝 4000자):\n" + tb9.rstrip()) if tb9 else "")
     raise ChildBuildError(f"{res[1]}: {res[2]}")
@@ -863,14 +864,13 @@ def _status_text(status) -> str:
     return f"종료 코드 {code}"
 
 
-TMP_PREFIX = ".tmp_"
 TMP_KEEP_S = 3600
 KILL_TMP_MIN_AGE = 30
 
 
 def sweep_tmp(min_age: float = TMP_KEEP_S, since: float = None, root: str = None, now: float = None) -> int:
-    import common
-    root = root or common.STATE_DIR
+    import paths
+    root = root or paths.STATE_DIR
     now = time.time() if now is None else now
     n = 0
     try:
@@ -883,7 +883,7 @@ def sweep_tmp(min_age: float = TMP_KEEP_S, since: float = None, root: str = None
         except OSError:
             continue
         for e in it:
-            if not e.name.startswith(TMP_PREFIX):
+            if not e.name.startswith(fsio.TMP_PREFIX):
                 continue
             try:
                 if not e.is_file(follow_symlinks=False):
@@ -1015,7 +1015,7 @@ def _apply_hist(hs):
     for spec, days, ts, inv in hs.get("notes") or ():
         try:
             DC.note_change(spec, days, ts=ts, invalidate=inv)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             log.warning("그날 마감가 변경 기록 반영 실패(다음 빌드에 다시): %s", type(e).__name__)
     add = hs.get("want_add") or {}
     if add:
@@ -1039,7 +1039,7 @@ def _apply_hist(hs):
         H.ev.set()
     try:
         DC.kick()
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 

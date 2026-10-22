@@ -60,13 +60,15 @@
   }
   const rcOn = R => S.drawer === 'rcpt' && S.rcpt && S.rcpt.key === R.key;
   async function postJ(path, body) {
-    const tok = await csrf();
-    const hd = { 'Content-Type': 'application/json' };
-    if (tok) hd['X-TJ-CSRF'] = tok;
-    const r = await fetch(path, { method: 'POST', headers: hd, body: JSON.stringify(body) });
-    if (r.status === 401) { onUnauthorized(); return { st: 401, d: null }; }
-    let d = null;
-    try { d = await r.json(); } catch (e) { d = null; }
+    let r, d;
+    for (let n = 0; n < 2; n++) {
+      const tok = await csrf(n > 0), hd = { 'Content-Type': 'application/json' };
+      if (tok) hd['X-TJ-CSRF'] = tok;
+      r = await fetch(path, { method: 'POST', headers: hd, body: JSON.stringify(body) });
+      if (r.status === 401) { onUnauthorized(); return { st: 401, d: null }; }
+      try { d = await r.json(); } catch (e) { d = null; }
+      if (!(r.status === 403 && d && /CSRF/.test(d.error || ''))) break;
+    }
     return { st: r.status, d };
   }
   function rcLoad(force) {

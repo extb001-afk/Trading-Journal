@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import threading
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 W0 = "0x" + "e0" * 20
@@ -20,14 +20,14 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": W0, "label": "w"}]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
 R = evm_watch.RpcChainWatcher
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
-EPATH = os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
+EPATH = os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json")
 HEAD = 60_000_000
 SAFE = HEAD - 10
 C0 = SAFE - 200
@@ -154,8 +154,8 @@ def states_fake(w, slow=0.0):
 
 
 def mk(cur=None, rpcs=(URL,), fake_states=True):
-    common.atomic_write_json(CPATH, cur if cur is not None else {"_rpc_v": 1, "_start": 0, W0: C0, "_ns": {W0: [C0, 0, str(BAL0), 0, "0"]}})
-    common.atomic_write_json(EPATH, [])
+    statefile.atomic_write_json(CPATH, cur if cur is not None else {"_rpc_v": 1, "_start": 0, W0: C0, "_ns": {W0: [C0, 0, str(BAL0), 0, "0"]}})
+    statefile.atomic_write_json(EPATH, [])
     w = R(CFG, CH, [W0], Wr())
     w.multicall = None
     w.trace_rpcs = []
@@ -176,7 +176,7 @@ def n_calls(kind=None):
 
 
 def disk():
-    return common.read_json(CPATH, {})
+    return statefile.read_json(CPATH, {})
 
 
 try:
@@ -253,7 +253,7 @@ try:
             with w4._rpc_budget(time.time() + 1.5):
                 try:
                     res4["out"] = w4._batch([("eth_getTransactionByHash", [LH[0]])])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     res4["err"] = e
         th = threading.Thread(target=run4, daemon=True)
         th.start()
@@ -303,7 +303,7 @@ try:
                 w._order = order
             try:
                 return w._states([(W0, blk)])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 return e
         a5 = st5((KEYU, URL), OLD)
         T.chk(isinstance(a5, HoldError) and not isinstance(a5, StateUnavailable),
@@ -321,7 +321,7 @@ try:
         T.chk(isinstance(f5, StateUnavailable), "P5 헤드 근처(라이브 꼬리) = 종전 StateUnavailable(뒤처진 노드 보류 규칙 _state_lag_hold 가 다룸)", type(f5).__name__)
         h5 = st5((KEYU, URL), OLD, ctx=False)
         T.chk(isinstance(h5, StateUnavailable) and not isinstance(h5, HoldError),
-              "P5 (코덱스 ev905) 뒤 차선 걸음 밖(초기화·인계·새 지갑 합류·창 확장 준비·엿보기·라이브 차선) = 종전 StateUnavailable(호출측이 흡수 — 최신 수집 안 멈춤)",
+              "P5 뒤 차선 걸음 밖(초기화·인계·새 지갑 합류·창 확장 준비·엿보기·라이브 차선) = 종전 StateUnavailable(호출측이 흡수 — 최신 수집 안 멈춤)",
               type(h5).__name__)
         g5 = st5((KEYU, URL), SAFE)
         T.chk(isinstance(g5, dict) and g5.get((W0, SAFE)) == (0, BAL0), "P5 키 노드가 쉬어도 최신 블록 상태는 공개 노드가 줌", type(g5).__name__ if not isinstance(g5, dict) else g5)
@@ -350,8 +350,8 @@ try:
               "P5 옛 구간(뒤 차선)은 보류 — 진행점·기준점 그대로(종전: 이분 탐색 없이 누적 전진 → 그 구간 로그 없는 internal 입금 영영 정합 안 됨)",
               {"done": j5.get("done"), "bkns": (d5c.get("_bkns") or {}).get(W0)})
         def mk7(cur, wallets=(W0,), window=None):
-            common.atomic_write_json(CPATH, cur)
-            common.atomic_write_json(EPATH, [])
+            statefile.atomic_write_json(CPATH, cur)
+            statefile.atomic_write_json(EPATH, [])
             w = R(CFG, CH, list(wallets), Wr())
             w.multicall = None
             w.trace_rpcs = []
@@ -436,7 +436,7 @@ try:
     mk(cur=cur6b)
     it6c = dict(prog.items.get(KEY6) or {})
     T.chk(it6c.get("phase") == "extend" and str(it6c.get("note") or "").startswith("재기동"),
-          "P6 뒤 차선 일이 남은 재기동 = 종전대로 기동 즉시 'extend'(perf1008c — 첫 사이클 전 재구축 끼어들기 방지)", {k: it6c.get(k) for k in ("phase", "note")})
+          "P6 뒤 차선 일이 남은 재기동 = 종전대로 기동 즉시 'extend'(첫 사이클 전 재구축 끼어들기 방지)", {k: it6c.get(k) for k in ("phase", "note")})
     cur6c = dict(cur6)
     cur6c.pop("_hq")
     w6c = mk(cur=cur6c)

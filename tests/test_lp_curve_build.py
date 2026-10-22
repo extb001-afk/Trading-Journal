@@ -2,36 +2,35 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
-import xparts
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
 netpace.wait = lambda url, now=None, sleep=None: None
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 DAY = 86400
 NOW = int(time.time())
@@ -65,7 +64,7 @@ def snap(hx, ts, blk, frm, to, toks=()):
                                  "total": {"value": str(v)}} for f, t, ca, sym, v in toks], "internal": []}
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c._drain_stream("evm", Reader([{"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": h(1), "wallets": [W],
                                 "snapshot": snap(h(1), T0, 1500, X, USDC, toks=[(X, W, USDC, "USDC", 100000 * 10 ** 6)]), "ts": 1}]), 0, 0)
 c.conn.commit()
@@ -92,11 +91,11 @@ def pin(lp_days, lp_val):
     for i9 in range(1, 30):
         d9[iso(i9)] = {"p": {}, "k": {}, "xv": {"v": xparts.GEN, "p": {"ku": [0.0, "snap"], "kb": [0.0, "snap"], "ub": [{}, "snap"],
                                                                      "rest": [lp_val if i9 in lp_days else 0.0, "snap"]}, "fx": 1400.0, "how": "live"}}
-    json.dump(d9, open(web.DAILY_PX_PATH, "w"))
+    json.dump(d9, open(paths.state("daily_px.json"), "w"))
 
 
 json.dump({"usd": {"ETH": 2000.0}, "usd_ts": {"ETH": NOW}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing.PxCache.fx_at = lambda self, ms: 1400.0
 web.pricing._gj = lambda url, timeout=10.0: None
@@ -106,12 +105,12 @@ histcurve.DAYCLOSE.lookup._tj_test_mock = True
 
 def build(keep_cache=False):
     if not keep_cache:
-        for p9 in (web.DAILY_PATH,):
+        for p9 in (paths.state("daily_cache.json"),):
             if os.path.exists(p9):
                 os.remove(p9)
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f9 = b._build(conn)["fields"]
     finally:
@@ -139,7 +138,7 @@ try:
     kit9 = histcurve.make_kit(TODAY.strftime("%Y-%m-%d"), G9, {gid: 100000}, set(), set(), {}, set(), {}, {}, {}, [], {}, [], {},
                               xkit=b2.__dict__.get("_x_kit"))
     q9 = histcurve.rewind(kit9, [iso(5), iso(4), iso(3), iso(2)])
-except Exception as e9:
+except Exception as e9:   # noqa: BLE001
     q9 = {"_exc": repr(e9)}
 chk(close((q9.get(gid) or {}).get(iso(4)), 70000) and close((q9.get(gid) or {}).get(iso(5)), 100000) and close((q9.get(gid) or {}).get(iso(2)), 100000),
     "B2 장기 곡선 rewind(빌드가 만든 x 재료) = 30일 곡선과 같은 지갑 수량(LP 열린 날 70,000)", q9)

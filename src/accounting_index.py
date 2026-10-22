@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import accounting_util
 import calcguard
-import common
+import logs, paths, seeds
 
 from view_common import STABLE_GROUPS
 from view_common import _ex_stable_sym
@@ -171,11 +171,11 @@ def nopx_index(rows, gsym, norm, fxb):
             continue
         nopx_legs.setdefault(key9, []).append(r)
     try:
-        zv9 = {str(x).strip().lower() for x in ((common.seed_json("zero_value_companions.json", {}, base_dir=common.BASE_DIR) or {}).get("tokens") or [])
+        zv9 = {str(x).strip().lower() for x in ((seeds.seed_json("zero_value_companions.json", {}, base_dir=paths.BASE_DIR) or {}).get("tokens") or [])
                if isinstance(x, str)}
-    except (Exception, SystemExit) as e9:
-        calcguard.swallowed("view_b_replay:ReplayMixin._build_replay", e9)
-        log.warning("동반 토큰 목록(zero_value_companions.json) 읽기 실패 — 이번 빌드 규칙 없음: %s", common.safe_err(e9)[:160])
+    except (Exception, SystemExit) as e9:   # noqa: BLE001 [fallback]
+        calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[zv9]", e9)
+        log.warning("동반 토큰 목록(zero_value_companions.json) 읽기 실패 — 이번 빌드 규칙 없음: %s", logs.safe_err(e9)[:160])
         zv9 = set()
 
     def zv_leg(r9):

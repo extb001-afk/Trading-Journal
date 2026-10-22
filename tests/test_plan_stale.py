@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as H
+import _harness as H  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import alert_prefs as AP
-import web
+import alert_prefs as AP  # noqa: E402
+import web  # noqa: E402
+import paths  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -56,7 +56,7 @@ def run_once():
 
 
 def alerts():
-    p = web.ALERTS_PATH
+    p = paths.state("alerts_web.jsonl")
     if not os.path.exists(p):
         return []
     with open(p, encoding="utf-8") as f:
@@ -64,7 +64,7 @@ def alerts():
 
 
 def reset():
-    for p in (web.ALERTS_PATH, web.ALERTS_SENT_PATH):
+    for p in (paths.state("alerts_web.jsonl"), paths.state("alerts_sent_web.json")):
         try:
             os.remove(p)
         except FileNotFoundError:
@@ -111,5 +111,5 @@ check("P4 … 1,700초 + 200초 = 1,900초(> 30분) → 감시 불가 1통", [x[
 reset()
 build({"key": "g1", "sym": "ABC", "price": 80.0, "pxSrc": "dex:gecko", "pxAge": 333}, built_ago=60)
 run_once()
-check("P4 … 393초(10분 안 — 라이브 DEX 시세 나이 p90 333초) → 종전대로 손절 알림", [x["kind"] for x in alerts()] == ["STOP_HIT"], [x["kind"] for x in alerts()])
+check("P4 … 393초(10분 안 — 흔한 DEX 시세 나이 예) → 종전대로 손절 알림", [x["kind"] for x in alerts()] == ["STOP_HIT"], [x["kind"] for x in alerts()])
 H.finish()

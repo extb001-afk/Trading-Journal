@@ -7,8 +7,11 @@ import sqlite3
 import threading
 import time
 
-import common
-import settings_store as ss
+import config, paths, statefile
+import db as dbm
+import fsio
+import settings_store as ss, runner_fp
+import evm_watch
 
 NONCE_MAX = 10
 NONCE_MAX_AGE = 2 * 86400
@@ -37,7 +40,7 @@ _NAMES = {"eth": "Ethereum", "base": "Base", "arbitrum": "Arbitrum", "optimism":
 
 def _names() -> dict:
     t = dict(_NAMES)
-    common.fill_chain_table(t)
+    config.fill_chain_table(t)
     return t
 
 
@@ -56,7 +59,7 @@ def _evm_addr(a) -> str:
 
 
 def _sent_by_chain(now: float):
-    db = common.DB_PATH
+    db = paths.DB_PATH
     with _SENT_LOCK:
         c9 = _SENT_CACHE
         if c9["db"] == db and c9["v"] is not None and now - c9["at"] < _SENT_TTL:
@@ -66,7 +69,7 @@ def _sent_by_chain(now: float):
     since = int(now - SENT_DAYS * 86400)
     out = {}
     try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(db), uri=True, timeout=3)
+        conn = dbm.connect(paths.sqlite_ro_uri(db), uri=True, timeout=3)
         try:
             rows = conn.execute("SELECT location, source_id, MIN(event_ts) FROM postings WHERE leg_kind='gas' AND source_kind='chain_tx'"
                                 " AND event_ts>=? GROUP BY location, source_id", (since,)).fetchall()
@@ -154,7 +157,7 @@ def _nonce_of(chain: str, addr: str, gate: dict, tier_pairs: dict, now: float = 
 
 
 def _tier_book(chain: str) -> dict:
-    d = _read(os.path.join(common.STATE_DIR, f"addr_tier_{chain}.json"), {})
+    d = _read(paths.state(f"addr_tier_{chain}.json"), {})
     return d if d.get("scope") == chain and isinstance(d.get("pairs"), dict) else {}
 
 
@@ -179,7 +182,7 @@ def _calls_of(book: dict, cfg: dict):
         est = addr_tier.estimate([s9], cfg)
         return {"perDay": int(sum(float(v.get("perDay") or 0) for v in est.values())),
                 "es": int(float((est.get("etherscan") or {}).get("perDay") or 0))}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -198,7 +201,7 @@ def _poll_sec(chain: str, cfg: dict, raw: dict, book: dict):
             return int(float((raw.get("bsc") or {}).get("poll_sec") or 60))
         import addr_tier
         return int(addr_tier.chain_poll(cfg if chain in (cfg.get("chains") or {}) else raw, chain))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -209,7 +212,7 @@ def _bal() -> dict | None:
     try:
         v = fn()
         return {str(k): float(x) for k, x in v.items() if x is not None} if isinstance(v, dict) else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -229,7 +232,7 @@ def _first_scan_missing(chain: str, wallets, book: dict = None, now: float = Non
     if pairs is None or not isinstance(upd, (int, float)) or now - float(upd) > BOOK_STALE_SEC:
         return True
     plow = {str(k).lower(): v for k, v in pairs.items()}
-    cur = _read(os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json"), {})
+    cur = _read(paths.state(f"cursor_evm_{chain}.json"), {})
     low = {str(k).lower(): v for k, v in cur.items()}
     job = low.get("_bfjob") if isinstance(low.get("_bfjob"), dict) else {}
     job_ws = {str(x).lower() for x in (job.get("wallets") or [])}
@@ -266,10 +269,12 @@ def _auto_since(chain: str, gate: dict):
     return best
 
 
-def _off_reason(chain: str, cc, evm_on: set, runner: bool, wallets=(), book: dict = None) -> str:
+def _off_reason(chain: str, cc, evm_on: set, runner: bool, wallets=(), book: dict = None, route: str = "") -> str:
     if chain in UNSUPPORTED:
         return UNSUPPORTED[chain]
-    if isinstance(cc, dict) and common.chain_discovery(chain, cc) == "rpc":
+    if isinstance(cc, dict) and config.chain_discovery(chain, cc) == "rpc":
+        return RPC_ONLY_WHY
+    if route == "rpc_first":
         return RPC_ONLY_WHY
     if not runner and evm_on and evm_on <= {chain}:
         return LAST_EVM_WHY
@@ -283,9 +288,9 @@ def summary(now: float = None) -> dict:
     raw = ss.read_config_raw()
     try:
         cfg = ss.load_config_quiet()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         cfg = raw
-    gate = _read(common.ACTIVITY_GATE_PATH, {})
+    gate = _read(paths.ACTIVITY_GATE_PATH, {})
     names = _names()
     rch = raw.get("chains") if isinstance(raw.get("chains"), dict) else {}
     lch = cfg.get("chains") if isinstance(cfg.get("chains"), dict) else {}
@@ -306,7 +311,7 @@ def summary(now: float = None) -> dict:
     for k in keys:
         rc = rch.get(k) if isinstance(rch.get(k), dict) else None
         on = k in lch or k in ("bsc", "sol")
-        if rc is not None and not common.chain_enabled(k, rc):
+        if rc is not None and not config.chain_enabled(k, rc):
             on = False
         ws = sorted(by.get(k) or ())
         book = _tier_book(k)
@@ -318,7 +323,8 @@ def summary(now: float = None) -> dict:
         tiers = sm.get("tiers") if isinstance(sm.get("tiers"), list) else None
         mark = (rc or {}).get("_chainoff") if isinstance((rc or {}).get("_chainoff"), dict) else {}
         usd = None if bal is None else round(float(bal.get(k) or 0.0), 2)
-        why = _off_reason(k, lch.get(k), evm_on, ap["evmRunner"], ws, book) if on else ""
+        rt = evm_watch.evm_route(cfg, k, decide=False) if on and k not in UNSUPPORTED else ""
+        why = _off_reason(k, lch.get(k), evm_on, ap["evmRunner"], ws, book, route=rt) if on else ""
         can = not why
         se = (sent or {}).get(k) if sent is not None else None
         holds = sm.get("holds") if isinstance(sm.get("holds"), dict) else {}
@@ -363,21 +369,14 @@ def summary(now: float = None) -> dict:
 
 
 def _backup(raw_bytes: bytes, now: float) -> str:
-    d = os.path.join(common.STATE_DIR, "backups", "config_chainoff")
+    d = paths.state("backups", "config_chainoff")
     os.makedirs(d, exist_ok=True)
     for i in range(100):
         p = os.path.join(d, f"config.json.{int(now)}_{time.time_ns() % 10**9:09d}_{i}")
-        try:
-            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        if fsio.create_exclusive(p, raw_bytes, mode=0o600, dir_fsync=False):
             break
-        except FileExistsError:
-            continue
     else:
         raise OSError("백업 파일 이름을 만들지 못했어요")
-    with os.fdopen(fd, "wb") as f:
-        f.write(raw_bytes)
-        f.flush()
-        os.fsync(f.fileno())
     try:
         olds = sorted((x for x in os.listdir(d) if x.startswith("config.json.")), key=lambda x: os.path.getmtime(os.path.join(d, x)))
         for x in olds[:-BACKUP_KEEP]:
@@ -392,7 +391,7 @@ def _ign_has(ign: list, chain: str) -> bool:
 
 
 def auto_enabled() -> bool:
-    p = os.path.join(common.STATE_DIR, "ui_prefs.json")
+    p = paths.state("ui_prefs.json")
     try:
         with open(p, "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -409,7 +408,7 @@ def auto_enabled() -> bool:
 
 
 def _keep_on_path() -> str:
-    return os.path.join(common.STATE_DIR, KEEP_ON_NAME)
+    return paths.state(KEEP_ON_NAME)
 
 
 def _keep_on() -> set:
@@ -421,7 +420,7 @@ def _keep_on_set(chain: str, keep: bool):
     cur = _keep_on()
     nxt = (cur | {chain}) if keep else (cur - {chain})
     if nxt != cur:
-        common.atomic_write_json(_keep_on_path(), {"chains": sorted(nxt)})
+        statefile.atomic_write_json(_keep_on_path(), {"chains": sorted(nxt)})
 
 
 def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
@@ -435,7 +434,7 @@ def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
     if chain in UNSUPPORTED:
         raise ValueError(UNSUPPORTED[chain])
     with ss.LOCK:
-        with open(common.CONFIG_PATH, "rb") as f:
+        with open(paths.CONFIG_PATH, "rb") as f:
             raw_bytes = f.read()
         raw = json.loads(raw_bytes.decode("utf-8"))
         if not isinstance(raw, dict):
@@ -450,7 +449,7 @@ def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
         if chain not in known:
             raise ValueError("설정에 없는 체인입니다")
         cc = chains.get(chain)
-        cur_on = not (isinstance(cc, dict) and not common.chain_enabled(chain, cc))
+        cur_on = not (isinstance(cc, dict) and not config.chain_enabled(chain, cc))
         if cur_on == on:
             if not auto:
                 _keep_on_set(chain, on)
@@ -479,18 +478,18 @@ def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
                 mark["ign"] = True
         else:
             mark = cc.get("_chainoff") if isinstance(cc.get("_chainoff"), dict) else {}
-            legacy = not mark.get("created") and common.auto_off_block(cc)
+            legacy = not mark.get("created") and config.auto_off_block(cc)
             if legacy:
                 trial = dict(raw, chains={k: v for k, v in chains.items() if k != chain})
                 ok9 = (sw or {}).get("auto_enable") is True and any(d["chain"] == chain and d["ok"] and d.get("block")
-                                                                    for d in common.gate_decisions(trial))
+                                                                    for d in config.gate_decisions(trial))
                 if not ok9:
                     raise ValueError("이 체인은 설정 블록이 비어 있어 여기서 켜면 수집기가 멈춰요 — config.json 의 체인 설정을 먼저 채워 주세요")
             if mark.get("created") or legacy:
                 chains.pop(chain, None)
             else:
                 cc.pop("_chainoff", None)
-                if mark and not mark.get("had") and common.chain_enabled(chain, {}):
+                if mark and not mark.get("had") and config.chain_enabled(chain, {}):
                     cc.pop("enabled", None)
                 else:
                     cc["enabled"] = True
@@ -507,10 +506,10 @@ def set_enabled(chain, on, now: float = None, auto: bool = False) -> dict:
 
 def _recon_ready(chain: str, addrs) -> bool:
     addrs = {str(a).lower() for a in (addrs or ())}
-    if not addrs or not os.path.exists(common.DB_PATH):
+    if not addrs or not os.path.exists(paths.DB_PATH):
         return False
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=3)
         try:
             if not c.execute("SELECT v FROM meta WHERE k=?", (f"recon_done_{chain}",)).fetchone():
                 return False
@@ -537,7 +536,7 @@ def auto_off(now: float = None) -> list:
     keep = _keep_on()
     try:
         info = AUTO_INFO_FN() if AUTO_INFO_FN is not None else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         info = None
     if not isinstance(info, dict) or not isinstance(info.get("chains"), dict):
         return []
@@ -548,8 +547,8 @@ def auto_off(now: float = None) -> list:
     out = []
     try:
         raw9 = ss.read_config_raw()
-        wal9 = _chain_wallets(raw9, ss.load_config_quiet(), _read(common.ACTIVITY_GATE_PATH, {}))
-    except Exception:
+        wal9 = _chain_wallets(raw9, ss.load_config_quiet(), _read(paths.ACTIVITY_GATE_PATH, {}))
+    except Exception:   # noqa: BLE001 [fallback]
         return []
     for r in summary(now)["rows"]:
         inf = info["chains"].get(r["key"]) if isinstance(info["chains"].get(r["key"]), dict) else {"usd": 0.0}
@@ -573,12 +572,12 @@ def auto_off(now: float = None) -> list:
 
 def apply_info() -> dict:
     try:
-        rs = ss.runner_status() or {}
+        rs = runner_fp.runner_status() or {}
         own = {u: h for u, h in rs.items() if isinstance(h, dict) and h.get("by") != "reload"}
         reload_on = any(isinstance(h, dict) and h.get("by") == "reload" for h in rs.values())
         evm_runner = "evm" in own
         mode = "runner" if own else ("reload" if reload_on else "")
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         mode, evm_runner = "", False
     return {"runner": bool(mode), "mode": mode, "evmRunner": evm_runner, "manual": MANUAL, "units": list(UNITS)}
 
@@ -587,6 +586,6 @@ def request_apply(chain: str, on: bool) -> dict:
     try:
         import wallet_register as wr
         wr._record_reload({"ts": int(time.time()), "chains": [str(chain)], "on": bool(on), "source": "chainoff", "units": list(UNITS)})
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return apply_info()

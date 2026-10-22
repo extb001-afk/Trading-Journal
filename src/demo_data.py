@@ -5,9 +5,10 @@ import hashlib
 import math
 import random
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
+import db as dbm
 DOW = ["월", "화", "수", "목", "금", "토", "일"]
 CHAIN_NAME = {"eth": "Ethereum", "base": "Base", "arbitrum": "Arbitrum", "optimism": "Optimism",
               "polygon": "Polygon", "scroll": "Scroll", "zksync": "zkSync", "gnosis": "Gnosis",
@@ -409,7 +410,7 @@ def att_detail(d_from, d_to) -> dict:
                 mk.append([s.upper(), round(v, 2), round((p1 / p0 - 1) * 100, 2), q, float("%.8g" % p0), float("%.8g" % p1)])
         mk.sort(key=lambda x: (-abs(x[1]), x[0]))
         fl = [["원화 출금(은행으로)", round(float(r["flow"]), 2), []]] if abs(float(r.get("flow") or 0)) >= 0.005 else []
-        days[iso] = {"mk": mk, "mkN": len(mk), "xm": [], "kx": [0.0, 0.0, 0.0], "unp": [], "un": [], "op": [], "fb": [], "fl": fl}
+        days[iso] = {"mk": mk, "mkN": len(mk), "xm": [], "kx": [0.0, 0.0, 0.0], "unp": [], "un": [], "op": [], "fb": [], "fl": fl, "ur": {"rows": [], "n": 0, "fee": 0.0, "lp": 0.0, "gx": 0.0, "etc": 0.0}}
     return {"ok": True, "builtAt": d.get("builtAt"), "days": days}
 
 
@@ -556,7 +557,7 @@ def _outflows(now) -> list:
              "priorIn": {"n": 0, "usd": 0}, "txs": txs, "txsCut": 0, "phantomTxN": 0}
         r.update(extra or {})
         return r
-    usdc = lambda q: {"sym": "USDC", "qty": q, "usdAtSend": q, "usdNow": q, "costUsd": q, "unknownCostQty": 0}
+    usdc = lambda q: {"sym": "USDC", "qty": q, "usdAtSend": q, "usdNow": q, "costUsd": q, "unknownCostQty": 0}   # noqa: E731
     ex9 = row(demo_evm(90), ["eth"], [usdc(3000.0)], "exchange_matched", 3,
               {"exchange": "업비트", "autoMatch": {"basis": ["txid"], "matched": 1, "of": 1, "exchange": "업비트"}, "matchedUsd": 3000.0,
                "hints": [{"kind": "exchange_txid", "chip": "업비트 입금 자동 매칭 · 1/1건", "label": "업비트 입금으로 자동 매칭(근거: txid 일치) · 1/1건 · 원가 이관됨"}]})
@@ -672,7 +673,7 @@ def ledger():
     import sqlite3
     f = build()["fields"]
     now = datetime.now(KST)
-    c = sqlite3.connect(":memory:", check_same_thread=False)
+    c = dbm.connect(":memory:", check_same_thread=False)
     c.row_factory = sqlite3.Row
     c.executescript("""
     CREATE TABLE asset_groups (group_id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, norm_decimals INTEGER NOT NULL DEFAULT 18);
@@ -719,9 +720,9 @@ _DEMO_W = (("메인", "evm", 1, ("eth", "base", "arbitrum", "optimism", "bsc")),
 def demo_config() -> dict:
     import json
     import os
-    import common
+    import paths
     try:
-        with open(os.path.join(common.BASE_DIR, "config.example.json"), encoding="utf-8") as f9:
+        with open(os.path.join(paths.BASE_DIR, "config.example.json"), encoding="utf-8") as f9:
             ex = json.load(f9)
     except (OSError, ValueError):
         ex = {}
@@ -828,7 +829,7 @@ def chains_view(now=None) -> dict:
 
 def tier_view(raw_path: str = "", now=None) -> dict:
     import addr_tier
-    import settings_store as ss
+    import settings_wallets
     now = float(now or time.time())
     cfg = demo_config()
     out = addr_tier.web_view(cfg, now=now)
@@ -845,7 +846,7 @@ def tier_view(raw_path: str = "", now=None) -> dict:
         v["now"] = v["perDay"]
     es = dict(out.get("esToday") or {}, n=int((budget.get("etherscan") or {}).get("perDay", 0) * 0.42))
     out.update(scopes=scopes, addrs=addrs, budget=budget, esToday=es, at=int(now),
-               cap={"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len(_DEMO_W)})
+               cap={"max": settings_wallets.MAX_ADDRESSES, "batch": settings_wallets.MAX_BATCH, "n": len(_DEMO_W)})
     return out
 
 
@@ -854,10 +855,9 @@ def rnd_off(sc, i) -> int:
 
 
 def coverage(now=None) -> dict:
-    import sqlite3
     import coverage_limits
     now = int(now or time.time())
-    c = sqlite3.connect(":memory:")
+    c = dbm.connect(":memory:")
     try:
         c.executescript("CREATE TABLE wallets (chain TEXT, address TEXT, label TEXT);"
                         "CREATE TABLE postings (location TEXT, event_ts INTEGER, leg_kind TEXT);")

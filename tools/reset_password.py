@@ -7,13 +7,13 @@ import sys
 USAGE = ("사용법: python3 tools/reset_password.py [-y]   비밀번호·로그인 세션 지우기 → 이 컴퓨터에서 /login 으로 새로 만들기\n"
          "       python3 tools/reset_password.py --set   새 비밀번호를 터미널에서 바로 입력(모든 기기 로그아웃)")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-import common
-import login_auth
+import paths  # noqa: E402
+import login_auth  # noqa: E402
 
 
 def _port():
     try:
-        with open(common.CONFIG_PATH, encoding="utf-8") as f:
+        with open(paths.CONFIG_PATH, encoding="utf-8") as f:
             return int(((json.load(f).get("web") or {}).get("port")) or 8023)
     except (OSError, ValueError, TypeError):
         return 8023
@@ -35,8 +35,8 @@ def main(argv):
     if bad:
         print("알 수 없는 옵션: " + " ".join(bad) + "  (-h 도움말)")
         return 2
-    if not os.path.isdir(common.STATE_DIR):
-        print(f"state 폴더가 없어요: {common.STATE_DIR} — 설치 폴더에서 실행하거나 TJ_BASE 를 지정하세요")
+    if not os.path.isdir(paths.STATE_DIR):
+        print(f"state 폴더가 없어요: {paths.STATE_DIR} — 설치 폴더에서 실행하거나 TJ_BASE 를 지정하세요")
         return 2
     if "--set" in argv:
         if not sys.stdin.isatty():
@@ -52,11 +52,12 @@ def main(argv):
             return 1
         login_auth.set_password(pw)
         _rm(login_auth.SESS_PATH)
+        _rm(login_auth.DEV_PATH)
         _rm(login_auth.INTERNAL_PATH)
         _rm(login_auth.SETUP_CODE_PATH)
         print("새 비밀번호를 저장했어요 · 모든 기기 로그아웃 — 브라우저에서 다시 로그인하세요")
         return 0
-    have = [p for p in (login_auth.AUTH_PATH, login_auth.SESS_PATH, login_auth.INTERNAL_PATH) if os.path.exists(p)]
+    have = [p for p in (login_auth.AUTH_PATH, login_auth.SESS_PATH, login_auth.DEV_PATH, login_auth.INTERNAL_PATH) if os.path.exists(p)]
     if not have:
         print("지울 것이 없어요(비밀번호·세션 파일 없음)")
         return 0
@@ -71,7 +72,7 @@ def main(argv):
     for p in have:
         _rm(p)
     _rm(login_auth.SETUP_CODE_PATH)
-    print("지웠어요: " + ", ".join(os.path.relpath(p, common.BASE_DIR) for p in have))
+    print("지웠어요: " + ", ".join(os.path.relpath(p, paths.BASE_DIR) for p in have))
     print(f"이제 이 컴퓨터에서 http://127.0.0.1:{_port()}/login 을 열어 새 비밀번호를 만드세요"
           " (web.login 이 켜져 있는 동안은 그 전까지 화면이 열리지 않아요)")
     print(f"그 화면이 묻는 설정 코드 = {login_auth.SETUP_CODE_REL} 파일 내용(화면을 열면 tj-web 이 만들어요 — cat {login_auth.SETUP_CODE_REL})")

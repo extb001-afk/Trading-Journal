@@ -5,11 +5,11 @@ import math
 import os
 import re
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-import common
+import num_parse, paths, statefile
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 PX_V = 1
 ROWS_MAX = 60000
 KEEP_MS = 800 * 86400 * 1000
@@ -32,15 +32,7 @@ OKX_BF_V = 3
 
 
 def num(v):
-    if v is None or isinstance(v, bool):
-        return None
-    if isinstance(v, str) and not v.strip():
-        return None
-    try:
-        x = float(v)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return x if math.isfinite(x) else None
+    return num_parse.to_float(v, allow_bool=False, catch_overflow=True)
 
 
 def pnum(v):
@@ -63,7 +55,7 @@ def quote_of(sym) -> str:
 
 
 def px_path(ex):
-    return os.path.join(common.STATE_DIR, f"futures_px_{ex}.json")
+    return paths.state(f"futures_px_{ex}.json")
 
 
 def load(ex) -> dict:
@@ -81,7 +73,7 @@ def load(ex) -> dict:
 
 
 def save(ex, d) -> None:
-    common.atomic_write_json(px_path(ex), d)
+    statefile.atomic_write_json(px_path(ex), d)
 
 
 def merge(old_rows, new_rows, now_ms, keep=None):

@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _bscchain as B
+import _harness as T  # noqa: E402
+import _bscchain as B  # noqa: E402
 
-import os
-import time
+import os  # noqa: E402
+import time  # noqa: E402
 
 bw = B.bsc_watch
 CH = B.CH
-common = B.common
+import paths, statefile  # noqa: E402
 clk = [time.time()]
 bw._now = lambda: clk[0]
 T.patch_moved("_now", bw._now, ("bsc_",))
@@ -22,13 +22,13 @@ def tick(sec, blocks):
 
 
 def nonce_state():
-    return common.read_json(os.path.join(common.STATE_DIR, "bsc_nonce.json"), {})
+    return statefile.read_json(os.path.join(paths.STATE_DIR, "bsc_nonce.json"), {})
 
 
 def caught_up():
     B.reset_state()
     B.exch_withdraw("0x" + "f" * 64, B.W2)
-    common.atomic_write_json(B.CPATH, {"from_block": CH.head - 20 - 10, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+    statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 20 - 10, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                        "_wallets": sorted([B.W1, B.W2])})
 
 
@@ -112,7 +112,7 @@ for x in WS:
 miss5 = CH.native(CH.head - 50_000, WS[0], B.OTHER, 9 * 10 ** 15)
 B.reset_state()
 B.exch_withdraw("0x" + "f" * 64, B.W2)
-common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK, "_wallets": sorted(WS)})
+statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK, "_wallets": sorted(WS)})
 c5 = B.cfg(detail_rpcs=[ARCH])
 c5["wallets"] = [{"type": "bsc_rpc", "address": x} for x in WS]
 wr5 = B.Wr()
@@ -146,7 +146,7 @@ B.bf_engine.http_json = http_down
 miss6 = CH.native(CH.head - 30_000, WS[1], B.OTHER, 8 * 10 ** 15)
 B.reset_state()
 B.exch_withdraw("0x" + "f" * 64, B.W2)
-common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK, "_wallets": sorted(WS)})
+statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK, "_wallets": sorted(WS)})
 c6 = B.cfg(detail_rpcs=[DOWN, ARCH])
 c6["wallets"] = [{"type": "bsc_rpc", "address": x} for x in WS]
 wr6 = B.Wr()

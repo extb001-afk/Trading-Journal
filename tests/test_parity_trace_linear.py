@@ -1,12 +1,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import random
-import time
+import random  # noqa: E402
+import time  # noqa: E402
 
-import evm_watch
+import evm_watch  # noqa: E402
 
 
 def old_failed(ta, bad_list):

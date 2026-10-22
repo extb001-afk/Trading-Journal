@@ -5,8 +5,9 @@ import os
 import re
 import threading
 import time
-import common
+import config, logs, paths, statefile
 import db as dbm
+import fsio
 import pricing
 import websnap
 import health
@@ -26,12 +27,7 @@ from view_review import review_pause_eff
 from view_review import review_progress
 from view_common import BUILD_EX_N
 from view_common import BUILD_HIST_N
-from view_common import DAILY_PATH
-from view_common import DAILY_PX_PATH
-from view_common import DAILY_PX_SEED
 from view_common import DAILY_V
-from view_common import EXT_RB_STATUS_PATH
-from view_common import WEB_DIAG_PATH
 from view_snapfile import _snapfile_drop
 from view_snapfile import _snapfile_load
 from view_snapfile import _snapfile_save
@@ -62,9 +58,9 @@ from view_b_futidx import FutIdxMixin
 from view_b_tail import TailMixin
 DAY_MEMO_REEVAL = None
 import logging
-import calcguard
-import accounting_books
-import accounting_ctx
+import calcguard  # noqa: E402
+import accounting_books  # noqa: E402
+import accounting_ctx  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -91,7 +87,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                            "addr_tier_req.json")
                           + nft.STATE_FILES)
     _SIG_SKIP_RX = re.compile(r"^(cursor_|emitted_|enrich_|pending_detail_|health_|alerts_|runner_)|(token_meta|mint_meta)[\w.-]*\.json$"
-                              r"|\.(lock|tmp|pending|log)$|\.bak|\.absent")
+                              r"|\.(lock|tmp|pending|log)$|\.bak|\.absent|^" + re.escape(fsio.TMP_PREFIX))
 
     _SIG_CONTENT = ("outflow_decisions.json", "ui_prefs.json")
     PREFS_NOBUILD = frozenset(("alert_prefs", "alert_prefs_v1",
@@ -108,7 +104,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         if hit9 is not None and hit9[0] == key9 and hit9[1] == prov9:
             return hit9[2]
         try:
-            with open(os.path.join(common.STATE_DIR, name), "rb") as f9:
+            with open(paths.state(name), "rb") as f9:
                 d9 = json.loads(f9.read().decode("utf-8"))
             if not isinstance(d9, dict):
                 raise ValueError("not dict")
@@ -145,16 +141,16 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
     def _rtxc(self):
         r9 = self.__dict__.get("_rtx")
         if r9 is None:
-            r9 = self._rtx = rawtx_cache.RawTxCache(common.STATE_DIR, common.DB_PATH)
+            r9 = self._rtx = rawtx_cache.RawTxCache(paths.STATE_DIR, paths.DB_PATH)
         return r9
 
     def _input_sig(self):
         try:
             sig = []
-            for p9 in (common.CONFIG_PATH,):
+            for p9 in (paths.CONFIG_PATH,):
                 st9 = os.stat(p9) if os.path.exists(p9) else None
                 sig.append((p9, st9.st_mtime_ns, st9.st_size) if st9 else (p9, 0, 0))
-            with os.scandir(common.STATE_DIR) as it9:
+            with os.scandir(paths.STATE_DIR) as it9:
                 for e9 in it9:
                     n9 = e9.name
                     if n9 in self._SIG_SKIP or self._SIG_SKIP_RX.search(n9) or not e9.is_file(follow_symlinks=False):
@@ -191,7 +187,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
 
     def __init__(self):
         self._cfg_hot_sig = _cfg_file_sig()
-        self.cfg = common.load_config()
+        self.cfg = config.load_config()
         self.addr_label = self._label_map(self.cfg)
         self.spot = Spot()
         self._spot_off()
@@ -205,9 +201,9 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                 "dex_max_age_sec", Spot.DEX_MAX_AGE_SEC)))
         except (TypeError, ValueError):
             self.spot.dex_max_age = Spot.DEX_MAX_AGE_SEC
-        self.px = pricing.PxCache(os.path.join(common.STATE_DIR, "px_cache_web.json"))
+        self.px = pricing.PxCache(paths.state("px_cache_web.json"))
         self._pxq = pricing.PxFetchQueue(self.px)
-        self.daily = common.read_json(DAILY_PATH, {}) if os.path.exists(DAILY_PATH) else {}
+        self.daily = statefile.read_json(paths.state("daily_cache.json"), {}) if os.path.exists(paths.state("daily_cache.json")) else {}
         if self.daily.get("_v") != DAILY_V:
             if any(not str(k).startswith("_") for k in self.daily):
                 log.info("일별 캐시 v%s → v%s: 마감값 정의 통일로 지난날 1회 재계산", self.daily.get("_v"), DAILY_V)
@@ -215,15 +211,15 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             self.daily = {"_v": DAILY_V}
             if live9:
                 self.daily["_live"] = live9
-        dpx9 = common.read_json(DAILY_PX_PATH, {}) if os.path.exists(DAILY_PX_PATH) else {}
+        dpx9 = statefile.read_json(paths.state("daily_px.json"), {}) if os.path.exists(paths.state("daily_px.json")) else {}
         self.daily_px = dpx9 if isinstance(dpx9, dict) and dpx9.get("_v") == 1 else {"_v": 1}
-        seed9 = common.read_json(DAILY_PX_SEED, {}) if os.path.exists(DAILY_PX_SEED) else {}
+        seed9 = statefile.read_json(paths.state("daily_px_seed.json"), {}) if os.path.exists(paths.state("daily_px_seed.json")) else {}
         self._daily_seed = {k9: v9 for k9, v9 in (seed9 or {}).items()
                             if not str(k9).startswith("_") and isinstance(v9, dict) and v9.get("src") == "live"
                             and isinstance(v9.get("g"), dict)}
         self._upbit_krw_tl = None
         self._bt_krw_tl = None
-        self._rtx = rawtx_cache.RawTxCache(common.STATE_DIR, common.DB_PATH)
+        self._rtx = rawtx_cache.RawTxCache(paths.STATE_DIR, paths.DB_PATH)
         self.cache = None
         self.cache_at = 0.0
         self.lock = threading.Lock()
@@ -233,7 +229,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         self._last_client = 0.0
         self._built_sig = None
         try:
-            wd0 = (common.read_json(WEB_DIAG_PATH, {}) or {}) if os.path.exists(WEB_DIAG_PATH) else {}
+            wd0 = (statefile.read_json(paths.state("web_diag.json"), {}) or {}) if os.path.exists(paths.state("web_diag.json")) else {}
             bh0 = wd0.get("build_hist") if isinstance(wd0, dict) else None
             if isinstance(bh0, list):
                 self._build_hist = [int(x) for x in bh0 if isinstance(x, (int, float)) and not isinstance(x, bool)][-BUILD_HIST_N:]
@@ -241,7 +237,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             if isinstance(bx0, list):
                 self._build_ex = [{"ms": int(x["ms"]), "at": int(x["at"]), "why": str(x.get("why") or "")[:20]} for x in bx0
                                   if isinstance(x, dict) and isinstance(x.get("ms"), (int, float)) and isinstance(x.get("at"), (int, float))][-BUILD_EX_N:]
-        except (Exception, SystemExit) as _cg9:
+        except (Exception, SystemExit) as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_builder:StateBuilder.__init__", _cg9)
             pass
         self.build_lock = threading.Lock()
@@ -257,7 +253,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         self._flow_pending = []
         self._flow_lock = threading.Lock()
         threading.Thread(target=self._flow_worker, daemon=True, name="flow-worker").start()
-        self._bot_wallet_usd = rabby.load_bot_usd(os.path.join(common.STATE_DIR, rabby.BOTUSD_NAME))
+        self._bot_wallet_usd = rabby.load_bot_usd(paths.state(rabby.BOTUSD_NAME))
         self._lp_targets = []
         self._lp_lock = threading.Lock()
         threading.Thread(target=self._lp_worker, daemon=True, name="lp-worker").start()
@@ -268,14 +264,14 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         threading.Thread(target=addr_ai.worker_loop, args=(self,), daemon=True, name="addr-ai-worker").start()
 
     def _hist_wallets(self) -> list:
-        return common.history_wallets(self.cfg)
+        return config.history_wallets(self.cfg)
 
     @staticmethod
     def _chain_disp_wallets(cfg) -> list:
         try:
             import chain_registry as _cr9
             rows9 = _cr9.wallets(cfg)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_builder:StateBuilder._chain_disp_wallets", _cg9)
             return []
         return [{"chain": r9["chain"], "network": r9["network"], "key": r9["key"], "label": r9["label"],
@@ -289,8 +285,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         if not off:
             return
         try:
-            raw9 = common.read_json(common.CONFIG_PATH, {}) or {}
-        except (Exception, SystemExit) as _cg9:
+            raw9 = statefile.read_json(paths.CONFIG_PATH, {}) or {}
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_builder:StateBuilder._spot_off", _cg9)
             raw9 = {}
         now9 = time.time()
@@ -319,8 +315,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
 
     def _rb_mark(self):
         try:
-            d9 = common.read_json(EXT_RB_STATUS_PATH, {}) if os.path.exists(EXT_RB_STATUS_PATH) else {}
-        except (Exception, SystemExit) as _cg9:
+            d9 = statefile.read_json(paths.state("ext_rebuild_status.json"), {}) if os.path.exists(paths.state("ext_rebuild_status.json")) else {}
+        except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_builder:StateBuilder._rb_mark", _cg9)
             return False, None
         if not isinstance(d9, dict):
@@ -381,7 +377,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             sig9 = self._input_sig()
             try:
                 self._cfg_hot_refresh()
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [optional]
                 calcguard.swallowed("view_builder:StateBuilder.build", e9)
                 log.warning("설정 다시 읽기 실패(종전 값으로 빌드): %s", type(e9).__name__)
             conn = None
@@ -393,7 +389,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                 out = self._build_child()
                 if out is None:
                     buildproc.note_inproc()
-                    conn = dbm.open_db(common.DB_PATH, readonly=True)
+                    conn = dbm.open_db(paths.DB_PATH, readonly=True)
                     conn.execute("BEGIN")
                     nb9 = getattr(self.px, "nb_begin", None)
                     if nb9:
@@ -425,7 +421,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             except _BuildObsolete as e:
                 obsolete9 = str(e)
             except BaseException as e:
-                self._build_err = f"{type(e).__name__}: {common.safe_err(e)}"
+                self._build_err = f"{type(e).__name__}: {logs.safe_err(e)}"
                 raise
             finally:
                 self._ph_gen0 = None
@@ -464,7 +460,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
     @staticmethod
     def _label_map(cfg) -> dict:
         out = {}
-        for w in common.history_wallets(cfg):
+        for w in config.history_wallets(cfg):
             a = w["address"] if w.get("type") == "sol" else w["address"].lower()
             if w.get("label"):
                 out[a] = w["label"]
@@ -478,7 +474,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         if sig9 is None or sig9 == self.__dict__.get("_cfg_hot_sig"):
             return False
         try:
-            with open(common.CONFIG_PATH, "r", encoding="utf-8") as f9:
+            with open(paths.CONFIG_PATH, "r", encoding="utf-8") as f9:
                 raw9 = json.load(f9)
         except (OSError, ValueError):
             return False
@@ -543,8 +539,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                 if self.__dict__.get("_mp_n", 0) != mp0:
                     try:
                         out = self._mp_apply(out, self.__dict__.get("_mp_kinds") or frozenset())
-                    except Exception as e:
-                        calcguard.swallowed("view_builder:StateBuilder._publish_built", e)
+                    except Exception as e:   # noqa: BLE001 [optional]
+                        calcguard.swallowed("view_builder:StateBuilder._publish_built[nogc]", e)
                         log.warning("칸 고치기(빌드 뒤) 실패(무시): %s", type(e).__name__)
                 with self.lock:
                     published = self.cache is building
@@ -557,8 +553,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                     self._publish(out, gen0)
             try:
                 self._rtxc().maybe_save()
-            except Exception as e:
-                calcguard.swallowed("view_builder:StateBuilder._publish_built", e)
+            except Exception as e:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_builder:StateBuilder._publish_built[t0_9]", e)
                 log.warning("raw_txs 캐시 저장 실패(무시): %s", e)
         return published, out
 
@@ -611,7 +607,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                     _snapfile_drop()
                 self._publish(new, gen, at=cur9.at)
                 return self._build_err is None
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_builder:StateBuilder.mpatch", e)
             log.warning("칸 고치기 실패(종전 무효화로): %s", type(e).__name__)
             return False
@@ -693,8 +689,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         try:
             try:
                 pub = dict(out, health=health.compact(health.web_view()))
-            except Exception as e:
-                calcguard.swallowed("view_builder:StateBuilder._publish", e)
+            except Exception as e:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_builder:StateBuilder._publish[pub]", e)
                 log.warning("health 요약 실패(무시): %s", e)
                 pub = out
             snap9 = _publish_snap(pub, gen, out)
@@ -704,18 +700,18 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             self._build_err = None
             if self.__dict__.get("_snapfile_on") and gen == self.__dict__.get("_inval", 0):
                 _snapfile_save(snap9, still_ok=lambda: self.__dict__.get("_inval", 0) == gen)
-        except Exception as e:
-            calcguard.swallowed("view_builder:StateBuilder._publish", e)
-            self._build_err = f"publish {type(e).__name__}: {common.safe_err(e)}"
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_builder:StateBuilder._publish[blk]", e)
+            self._build_err = f"publish {type(e).__name__}: {logs.safe_err(e)}"
             log.warning("스냅샷 게시 실패: %s", e)
 
     def restore_snapfile(self) -> bool:
         ok = False
         try:
             _snapfile_sig()
-        except Exception as e:
-            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile", e)
-            log.warning("스냅샷 저장본 서명 실패(저장본 끔): %s", type(e).__name__)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile[_snapfile_sig]", e)
+            (log.warning if os.path.exists(paths.DB_PATH) else log.debug)("스냅샷 저장본 서명 실패(저장본 끔): %s", type(e).__name__)
             return False
         try:
             with self.lock:
@@ -730,8 +726,8 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                     self._restored = True
                     log.info("스냅샷 저장본으로 시작(%d초 전 · 버전 %s) — 배경 빌드로 새로", int(time.time() - snap.at), snap.ver[:8])
                     self.kick_refresh()
-        except Exception as e:
-            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile", e)
+        except Exception as e:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile[self]", e)
             log.warning("스냅샷 저장본 복원 실패(무시): %s", type(e).__name__)
         self.__dict__["_snapfile_on"] = True
         return ok
@@ -746,7 +742,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
             return True
         try:
             self.build()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             calcguard.swallowed("view_builder:StateBuilder.mats_wait", e)
             log.warning("첫 빌드 대기 실패(%s): %s", str(path)[:40], type(e).__name__)
         return self.__dict__.get("_last_out") is not None
@@ -789,7 +785,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                     if not again:
                         break
                     time.sleep(self._min_gap())
-            except (Exception, SystemExit) as e:
+            except (Exception, SystemExit) as e:  # noqa: BLE001 [boundary]
                 calcguard.swallowed("view_builder:StateBuilder.kick_refresh.run", e)
                 log.warning("백그라운드 빌드 실패(다음 요청은 동기 빌드): %s", e)
             finally:
@@ -804,24 +800,23 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         return out if ok else self.build()
 
     def _build(self, conn) -> dict:
-        _bs9 = self._build_replay(conn)
-        self._build_cards(_bs9)
-        self._build_pendings(_bs9)
-        self._build_outflows(_bs9)
-        self._build_daily(_bs9)
-        self._build_futidx(_bs9)
-        if calcguard.strict():
-            accounting_books.check_aliases(_bs9["books"], _bs9, "cards~futidx")
-            accounting_ctx.check_ctx(_bs9["ctx"], _bs9, "cards~futidx")
-        return self._build_tail(_bs9)
+        inval = dbm.daily_inval_state(conn)
+        rr = self._build_replay(conn)
+        _bs9 = rr.screen_scope(inval)
+        seal = accounting_books.books_seal(rr.books) if calcguard.strict() else None
+        for stage in (self._build_cards, self._build_pendings, self._build_outflows, self._build_daily, self._build_futidx, self._build_tail):
+            out = stage(_bs9)
+            if calcguard.strict():
+                seal = accounting_books.screen_check(seal, rr, _bs9, stage.__name__, accounting_ctx.check_ctx)
+        return out
 
 
-    BF_REQ_PATH = os.path.join(common.STATE_DIR, "backfill_request.json")
+    BF_REQ_PATH = paths.StatePath("backfill_request.json")
 
 
     OUTFLOW_SALE_CAT = "세일 참가금"
     OUTFLOW_CATEGORIES = ("송금·결제/선물", OUTFLOW_SALE_CAT, "분실·해킹", "기타")
-    OUTFLOW_PATH = os.path.join(common.STATE_DIR, "outflow_decisions.json")
+    OUTFLOW_PATH = paths.StatePath("outflow_decisions.json")
 
 
     OF_LINK_KINDS = ("refund", "tokens")
@@ -830,7 +825,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
 
 
     OF_CAND_WINDOW = 60 * 86400
-    SALE_CAND_PATH = os.path.join(common.STATE_DIR, "sale_cand_alerts.json")
+    SALE_CAND_PATH = paths.StatePath("sale_cand_alerts.json")
 
 
     _ADDR_RX = re.compile(r"0x[0-9a-fA-F]{40}(?![0-9a-fA-F])")

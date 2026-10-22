@@ -196,8 +196,8 @@ def render(vals, w=720, h=300, axis=True, cur="KRW", up=None, theme="dark", flow
     span = hi - lo
     lo -= span * 0.08
     hi += span * 0.08
-    X = lambda i: padL + (w - padL - padR) * i / (len(v) - 1)
-    Y = lambda x: padT + (h - padT - padB) * (1 - (x - lo) / (hi - lo))
+    X = lambda i: padL + (w - padL - padR) * i / (len(v) - 1)   # noqa: E731
+    Y = lambda x: padT + (h - padT - padB) * (1 - (x - lo) / (hi - lo))   # noqa: E731
     for k in range(4):
         gy = padT + (h - padT - padB) * k / 3
         im.hline(padL, w - padR, gy, grid, 1.0)
@@ -228,7 +228,7 @@ def render(vals, w=720, h=300, axis=True, cur="KRW", up=None, theme="dark", flow
         im.text(padL + (im.text_w(big, 3) + 12 if big else 0), 20 if big else 12, f"{len(v)}D {'+' if chg >= 0 else '−'}{abs(chg):.1f}%", lab, 2)
     if axis:
         tx = w - padR + 12
-        clamp = lambda yy: int(max(padT - 6, min(h - padB - 14, yy - 7)))
+        clamp = lambda yy: int(max(padT - 6, min(h - padB - 14, yy - 7)))   # noqa: E731
         put = [(v[-1], clamp(ly), col)]
         for val in (max(v), min(v)):
             ty = clamp(Y(val))

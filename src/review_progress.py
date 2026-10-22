@@ -4,10 +4,10 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import tempfile
 import threading
 import time
-import common
+import logs  # noqa: E402
+import fsio  # noqa: E402
 from datetime import datetime, timedelta
 
 DURATIONS_KEEP = 30
@@ -55,21 +55,7 @@ def read(path) -> dict:
 
 
 def _write(path, d):
-    dn = os.path.dirname(path)
-    os.makedirs(dn, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dn, prefix=".tmp_rp_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    fsio.atomic_write_json(path, d, ensure_ascii=False, separators=(",", ":"), dir_fsync=False)
 
 
 def update(path, fn):
@@ -85,7 +71,7 @@ def update(path, fn):
                 return True
             finally:
                 fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -155,7 +141,7 @@ class Run:
                     self.regen += 1
             else:
                 self.fail += 1
-                self.last_error = (common.safe_err(err) if err else f"{key} 생성 실패")[:200]
+                self.last_error = (logs.safe_err(err) if err else f"{key} 생성 실패")[:200]
 
             def add(d):
                 if ok and llm and secs > 0 and not skipped:

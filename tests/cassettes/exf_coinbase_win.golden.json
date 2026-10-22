@@ -1,0 +1,29 @@
+{
+ "_doc": "합성 데이터 — exf_coinbase_win 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "exf_coinbase_win",
+ "golden": {
+  "a": [
+   "coinbase:tx-0071",
+   "coinbase:tx-0072",
+   "coinbase:tx-0073"
+  ],
+  "b": [
+   "coinbase:tx-0071"
+  ],
+  "c": [
+   "coinbase:tx-0071",
+   "coinbase:tx-0072",
+   "coinbase:tx-0073"
+  ],
+  "loop": "coinbase fills 커서 반복(쪽 2) — 이번 주기 체결 보류",
+  "new_key_calls": 3,
+  "same_bal_calls": 3,
+  "split": [
+   "coinbase:e-s00",
+   "coinbase:e-s22",
+   "coinbase:e-w1",
+   "coinbase:e-w2"
+  ]
+ }
+}

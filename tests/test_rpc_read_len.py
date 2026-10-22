@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
+import json  # noqa: E402
 
-import bf_engine as B
+import bf_engine as B  # noqa: E402
 
 chk = T.chk
 READS = []

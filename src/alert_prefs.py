@@ -6,15 +6,11 @@ import math
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
-import common
+import paths, statefile
 
-KST = timezone(timedelta(hours=9))
-PREFS_PATH = os.path.join(common.STATE_DIR, "ui_prefs.json")
-SETTINGS_PATH = os.path.join(common.STATE_DIR, "settings.json")
-STATS_PATH = os.path.join(common.STATE_DIR, "alert_stats.json")
-HOLD_PATH = os.path.join(common.STATE_DIR, "alert_hold.json")
+from timeutil import KST
 PREF_KEY = "alert_prefs"
 FIRST_DAYS = 7
 STATS_KEEP_DAYS = 9
@@ -175,6 +171,12 @@ def cat_of(kind, hint=None) -> str:
     return "other"
 
 
+def alert_line(kind: str, text: str, **kw) -> dict:
+    d = {"ts": int(time.time()), "kind": kind, "cat": cat_of(kind), "text": text}
+    d.update(kw)
+    return d
+
+
 NEW_CATS = ("arrive",)
 NEW_OFF_CATS = ("stall",)
 QUIET_ONLY_SOUND = ("move", "arrive")
@@ -268,7 +270,7 @@ def normalize(raw) -> dict:
                 m = "on"
             if isinstance(m, str) and m in MODES:
                 d["cats"][k] = m
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
     for k in NEW_OFF_CATS:
         if not (isinstance(cats.get(k), str) and cats.get(k) in MODES):
@@ -288,7 +290,7 @@ def normalize(raw) -> dict:
                 v = _th_clean(k, th[k])
                 if v is not None:
                     d["th"][k] = v
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
     q = raw.get("quiet") if isinstance(raw.get("quiet"), dict) else {}
     if isinstance(q.get("on"), bool):
@@ -392,36 +394,36 @@ def match_preset(doc) -> str:
 
 def _read(path, default):
     try:
-        return common.read_json(path, default)
-    except (Exception, SystemExit):
+        return statefile.read_json(path, default)
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return default
 
 
 def load(prefs: dict | None = None) -> dict:
     try:
         if prefs is None:
-            prefs = _read(PREFS_PATH, {}) or {}
+            prefs = _read(paths.state("ui_prefs.json"), {}) or {}
         return normalize(prefs.get(PREF_KEY) if isinstance(prefs, dict) else None)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return default_doc()
 
 
 def connect_ts(stats: dict | None = None):
     vals = []
     try:
-        st = _read(SETTINGS_PATH, {}) or {}
+        st = _read(paths.state("settings.json"), {}) or {}
         tg = st.get("telegram") if isinstance(st, dict) else None
         v = tg.get("connected_at") if isinstance(tg, dict) else None
         if _num_ok(v) and 0 < v < TS_MAX:
             vals.append(float(v))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     try:
-        s = stats if stats is not None else (_read(STATS_PATH, {}) or {})
+        s = stats if stats is not None else (_read(paths.state("alert_stats.json"), {}) or {})
         v = s.get("first_seen") if isinstance(s, dict) else None
         if _num_ok(v) and 0 < v < TS_MAX:
             vals.append(float(v))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return min(vals) if vals else None
 
@@ -440,7 +442,7 @@ _SW_OFF = (False, 0, "false", "off", "0", "no")
 
 def liq_switch_on(cfg=None) -> bool:
     if cfg is None:
-        p = common.CONFIG_PATH
+        p = paths.CONFIG_PATH
         try:
             st = os.stat(p)
             sig = (p, st.st_mtime_ns, st.st_size)
@@ -449,8 +451,8 @@ def liq_switch_on(cfg=None) -> bool:
         if sig != _SW["sig"]:
             _SW["sig"] = sig
             try:
-                cfg = common.read_json(p, {})
-            except (Exception, SystemExit):
+                cfg = statefile.read_json(p, {})
+            except (Exception, SystemExit):   # noqa: BLE001 [fallback]
                 return _SW["on"]
             if not isinstance(cfg, dict):
                 return _SW["on"]
@@ -546,9 +548,9 @@ _PUB_RE = re.compile(r"https://[a-z0-9.-]+(?::\d{1,5})?")
 
 def public_link(tab: str = "dash", cfg: dict = None) -> str:
     try:
-        c = cfg if cfg is not None else (common.read_json(common.CONFIG_PATH, {}) or {})
+        c = cfg if cfg is not None else (statefile.read_json(paths.CONFIG_PATH, {}) or {})
         u = str(((c or {}).get("web") or {}).get("public_url") or "").strip().rstrip("/")
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return ""
     if not u or len(u) > 300 or not _PUB_RE.fullmatch(u):
         return ""
@@ -561,7 +563,7 @@ def day_key(now=None) -> str:
 
 def counts7(stats=None, now=None) -> dict:
     now = time.time() if now is None else now
-    s = stats if stats is not None else (_read(STATS_PATH, {}) or {})
+    s = stats if stats is not None else (_read(paths.state("alert_stats.json"), {}) or {})
     days = (s or {}).get("days") if isinstance(s, dict) else None
     keep = {day_key(now - i * 86400) for i in range(7)}
     out = {k: {"sent": 0, "skip": 0, "held": 0, "daily": 0, "web": 0} for k in CAT_KEYS}
@@ -580,11 +582,11 @@ def counts7(stats=None, now=None) -> dict:
 def view(prefs=None, now=None, tg_connected=None, extra=None) -> dict:
     now = time.time() if now is None else now
     doc = load(prefs)
-    stats = _read(STATS_PATH, {}) or {}
+    stats = _read(paths.state("alert_stats.json"), {}) or {}
     conn = connect_ts(stats)
     fw = first_week(conn, now)
     eff = {k: effective(doc, k, now, conn) for k in CAT_KEYS}
-    hold = _read(HOLD_PATH, {}) or {}
+    hold = _read(paths.state("alert_hold.json"), {}) or {}
     hn = hold.get("n") if isinstance(hold, dict) else None
     hn = sum(v for v in (hn.values() if isinstance(hn, dict) else ()) if isinstance(v, int) and not isinstance(v, bool) and 0 < v < 10 ** 9)
     out = {"ok": True, "v": 1, "prefs": {k: doc[k] for k in ("cats", "th", "quiet")}, "preset": match_preset(doc),

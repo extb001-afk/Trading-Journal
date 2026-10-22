@@ -203,7 +203,7 @@ class FakeTron:
                 return 200, json.dumps({"blockID": h[2], "block_header": {"raw_data": {"number": h[0], "timestamp": h[1]}}}).encode()
             if name == "triggerconstantcontract":
                 return 200, self._const(body)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             return 500, json.dumps({"err": str(e)}).encode()
         return 404, b"{}"
 

@@ -5,17 +5,16 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-import common
+import config, logs, paths, statefile
 import netpace
-import pricing
+import token_tables
 import recon
 
 log = logging.getLogger("tj-web")
-KST = timezone(timedelta(hours=9))
-STATUS_PATH = os.path.join(common.STATE_DIR, "onchain_check.json")
+from timeutil import KST
 
 DEFAULTS = {
     "enabled": True,
@@ -56,7 +55,7 @@ def _rpcs_for(cfg: dict, chain: str) -> list:
     try:
         from evm_watch import RpcSynthMixin
         return list(RpcSynthMixin.RPC_DEFAULT.get(chain) or [])
-    except Exception:
+    except Exception:  # noqa: BLE001 [fallback]
         return []
 
 
@@ -87,7 +86,7 @@ class _Caller:
                 r = recon._rpc(u, method, params, timeout=15)
                 time.sleep(self.pace)
                 return r
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
                 m = str(e)
                 ratelike = "429" in m or "Too Many" in m or "rate" in m.lower() or "-32016" in m
@@ -131,7 +130,7 @@ def _sol_call(caller, urls: list, method: str, params: list):
         try:
             netpace.wait(u)
             return recon._rpc(u, method, params, timeout=20)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             last = e
             netpace.note_error(u, e)
             m = str(e)
@@ -207,7 +206,7 @@ def _native_gid(conn, chain: str, sym: str):
             return r[0]
         r = conn.execute("SELECT group_id FROM asset_groups WHERE name=? LIMIT 1", (str(sym or "").upper(),)).fetchone()
         return r[0] if r else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -229,7 +228,7 @@ def _anchored_pairs(conn) -> set:
             parts = str(k).split(":", 2)
             if len(parts) == 3:
                 out.add((parts[1], parts[2].lower()))
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("잔고 대조: 기초잔고 표식 읽기 실패(전부 대조): %s", e)
         return None
     return out
@@ -259,14 +258,14 @@ def _upbit_found(cfg: dict, conn, live_px: dict, st: dict, errors: list):
     try:
         if not conn.execute("SELECT 1 FROM meta WHERE k='recon_done_upbit'").fetchone():
             return None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
-    bal = common.read_json(os.path.join(common.STATE_DIR, "upbit_balances.json"), {}) or {}
-    if not isinstance(bal, dict) or time.time() - float(bal.get("ts") or 0) > common.upbit_fresh_sec(cfg):
+    bal = statefile.read_json(paths.state("upbit_balances.json"), {}) or {}
+    if not isinstance(bal, dict) or time.time() - float(bal.get("ts") or 0) > config.upbit_fresh_sec(cfg):
         return None
     try:
-        sync = common.read_json(os.path.join(common.STATE_DIR, "upbit_sync.json"), {})
-        ost = common.read_json(os.path.join(common.STATE_DIR, "upbit_orders_state.json"), {})
+        sync = statefile.read_json(paths.state("upbit_sync.json"), {})
+        ost = statefile.read_json(paths.state("upbit_orders_state.json"), {})
         snap_ts = float(bal.get("ts") or 0)
         if not isinstance(sync, dict) or not isinstance(ost, dict) or not ost.get("complete"):
             return None
@@ -275,7 +274,7 @@ def _upbit_found(cfg: dict, conn, live_px: dict, st: dict, errors: list):
         le9 = sync.get("last_err")
         if isinstance(le9, dict) and float(le9.get("ts") or 0) >= snap_ts:
             return None
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return None
     oo = bal.get("open_orders")
     if not isinstance(oo, list) or not isinstance(bal.get("accounts"), list):
@@ -291,7 +290,7 @@ def _upbit_found(cfg: dict, conn, live_px: dict, st: dict, errors: list):
             continue
         try:
             actual[cur] = Decimal(str(a["balance"])) + Decimal(str(a["locked"]))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             errors.append(f"upbit: {cur} 잔고 파싱 실패")
             return None
     oo_uuids = set()
@@ -326,8 +325,8 @@ def _upbit_found(cfg: dict, conn, live_px: dict, st: dict, errors: list):
                 mk9 = ""
             for s9 in (mk9.split("-", 1) if "-" in mk9 else []):
                 skip.add(s9.upper())
-    except Exception as e:
-        errors.append(f"upbit: 진행 중 입출금·주문 확인 실패 {common.safe_err(e)[:60]}")
+    except Exception as e:   # noqa: BLE001 [fallback]
+        errors.append(f"upbit: 진행 중 입출금·주문 확인 실패 {logs.safe_err(e)[:60]}")
         return None
     ledger = {}
     for r in conn.execute("SELECT a.symbol, a.decimals, a.group_id, p.qty_base FROM postings p JOIN assets a ON a.asset_id = p.asset_id"
@@ -394,9 +393,9 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                 _mr9 = float(((cfg.get("price_guard") or {}).get("min_reserve_usd", _td.DS_MIN_RESERVE)))
             except (TypeError, ValueError):
                 _mr9 = _td.DS_MIN_RESERVE
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             disc_on = False
-            errors.append(f"토큰 발견 상태 읽기 실패: {common.safe_err(e)[:60]}")
+            errors.append(f"토큰 발견 상태 읽기 실패: {logs.safe_err(e)[:60]}")
     for i9, (ch, w) in enumerate(order9):
         if caller.capped():
             capped = True
@@ -416,7 +415,7 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             sym9 = (cfg.get("native_symbol") or {}).get(ch) or ch.upper()
             gid9 = _native_gid(conn, ch, sym9)
             items.append(("native", None, 0, 18, float(live_px.get(gid9) or 0) if gid9 is not None else 0.0, sym9, gid9))
-        stables = {ca.lower(): s for ca, s in (pricing.STABLE_CAS.get(ch) or {}).items()}
+        stables = {ca.lower(): s for ca, s in (token_tables.STABLE_CAS.get(ch) or {}).items()}
         seen_ca = set()
         for aid, (qb, kind, addr, sym, dec, gid) in rows.items():
             if kind != "token" or not addr:
@@ -475,11 +474,11 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                 try:
                     hold9 = _td.rejudge_hold(ch, w, hold9, _mr9, budget=dexb9) if hold9 else []
                     excl_keys |= {f"{ch}:{w}:{c9}" for c9 in hc9 - {x9[0] for x9 in hold9}}
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [fallback]
                     hold9 = [(ca9, ss9, {k9: v9 for k9, v9 in m9.items() if k9 != "_stale" and not (k9 == "px" and m9.get("_stale"))})
                              for ca9, ss9, m9 in hold9]
                     if len(errors) < 20:
-                        errors.append(f"토큰 재판정 {ch}:{w[:8]}: {common.safe_err(e)[:60]}")
+                        errors.append(f"토큰 재판정 {ch}:{w[:8]}: {logs.safe_err(e)[:60]}")
                 for ca9, ss9, m9 in hold9 + led9:
                     if _td.static_credible(ch, ca9, ss9, m9)[0] is False:
                         excl_keys.add(f"{ch}:{w}:{ca9}")
@@ -529,7 +528,7 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                                 disc_due.append((ch, w, sig9, why9))
                             elif ent9 and "nat" not in (ent9.get("sig") or {}):
                                 disc_due.append((ch, w, sig9, "baseline"))
-                        except Exception:
+                        except Exception:   # noqa: BLE001 [optional]
                             pass
                 else:
                     data = "0x70a08231" + w.replace("0x", "").rjust(64, "0")
@@ -541,10 +540,10 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                             continue
                         r2 = caller.rpc(ch, "eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"])
                         dec = int(r2, 16)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 failed_keys.add(f"{ch}:{w}:{ca or 'native'}")
                 if len(errors) < 20:
-                    errors.append(f"{ch}:{w[:8]}:{sym}: {common.safe_err(e)[:80]}")
+                    errors.append(f"{ch}:{w[:8]}:{sym}: {logs.safe_err(e)[:80]}")
                 continue
             checked += 1
             if px <= 0:
@@ -591,12 +590,12 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                                   burst=(why9 == "first"))
                 _td.save_result(ch, w, r9, sig9, why9)
                 disc_n += 1
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 if len(errors) < 20:
-                    errors.append(f"토큰 발견 {ch}:{w[:8]}: {common.safe_err(e)[:60]}")
+                    errors.append(f"토큰 발견 {ch}:{w[:8]}: {logs.safe_err(e)[:60]}")
         try:
             disc_sum = dict(_td.summary(cfg), refreshed=disc_n, due=len([x for x in disc_due if x[3] != "baseline"]))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             disc_sum = None
     sol_ws = _sol_wallets(cfg) if st.get("sol") else []
     if anch is not None:
@@ -607,16 +606,16 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
         errors.append("sol: 대조용 공개 RPC 미구성(balance_check.sol_rpcs 또는 sol.rpc_fallbacks)")
     led_sol = _ledger(conn, [("sol", w) for w in sol_ws]) if sol_urls else {}
     sol_caller = _Caller(cfg, st.get("sol_max_calls") or 80, st["pace_sec"])
-    stable_mints = dict(pricing.STABLE_MINTS)
+    stable_mints = dict(token_tables.STABLE_MINTS)
     for w in (sol_ws if sol_urls else []):
         if sol_caller.capped():
             capped = True
             break
         try:
             onc = _sol_onchain(sol_caller, sol_urls, w)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [isolate]
             if len(errors) < 20:
-                errors.append(f"sol:{w[:8]}: {common.safe_err(e)[:80]}")
+                errors.append(f"sol:{w[:8]}: {logs.safe_err(e)[:80]}")
             continue
         rows = led_sol.get(("sol", w), {})
         items = []
@@ -663,8 +662,8 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
                               "diffUsd": round(float(diff_usd), 2)})
     stake_n = 0
     try:
-        sd = common.read_json(os.path.join(common.STATE_DIR, "sol_stake.json"), {}) or {}
-    except (Exception, SystemExit):
+        sd = statefile.read_json(paths.state("sol_stake.json"), {}) or {}
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         sd = {}
     if st.get("sol") and sd and time.time() - float(sd.get("ts") or 0) < 3 * 3600:
         led_st = {}
@@ -835,10 +834,10 @@ def finalize(state: dict, defer_keys=frozenset()) -> list:
 
 def view():
     try:
-        if not os.path.exists(STATUS_PATH):
+        if not os.path.exists(paths.state("onchain_check.json")):
             return None
-        d = common.read_json(STATUS_PATH, {})
-    except (Exception, SystemExit):
+        d = statefile.read_json(paths.state("onchain_check.json"), {})
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         return None
     return {"checkedAt": d.get("checkedAt"), "checked": d.get("checked"), "pairs": d.get("pairs"),
             "capped": d.get("capped"), "errors": len(d.get("errors") or []), "unchecked": d.get("unchecked"),

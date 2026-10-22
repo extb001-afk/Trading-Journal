@@ -2,15 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, SOLW, Reader
+import _harness as T  # noqa: E402
+import time  # noqa: E402
+import _cassette_clock  # noqa: E402
+_cassette_clock.freeze(now=float(int(time.time())) + 0.5)
+import _ingest  # noqa: E402
+from _ingest import check, W, SOLW, Reader  # noqa: E402
 
-import glob
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 SOLW2 = "So2" + "2" * 41
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
@@ -18,11 +20,10 @@ json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_cha
            "wallets": [{"type": "evm", "chain": "eth", "address": W}, {"type": "sol", "address": SOLW}, {"type": "sol", "address": SOLW2}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5, "sol": {"rpcs": ["https://solrpc.invalid"]}},
           open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
+import config, histmark, paths, statefile  # noqa: E402
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 KST = timezone(timedelta(hours=9))
 DAY = 86400
@@ -31,7 +32,7 @@ NOW = int(time.time())
 RT = "0x" + "e5" * 20
 X = "0x" + "b7" * 20
 TKN = "0x" + "d4" * 20
-SD = common.STATE_DIR
+SD = paths.STATE_DIR
 
 
 def iso(ts):
@@ -52,7 +53,7 @@ def reset():
 
 
 def new_core():
-    c = core.Core(common.load_config())
+    c = core.Core(config.load_config())
     c.conn.commit()
     return c
 
@@ -73,13 +74,13 @@ def feed(c, hx, snap, repair=None, stream="evm"):
 
 
 def recon(c, per):
-    c._scope_ready = lambda s: True
-    c._recon_quiet = lambda *a: True
-    c._recon_bal = lambda chain, kind, mode, wallets: ({"per_wallet": per[chain]} if chain in per else None)
-    c._last_recon = 0
-    c.recon_pass(set())
+    c.svc_recon._scope_ready = lambda s: True
+    c.svc_recon._recon_quiet = lambda *a: True
+    c.svc_recon._recon_bal = lambda chain, kind, mode, wallets: ({"per_wallet": per[chain]} if chain in per else None)
+    c.svc_recon._last_recon = 0
+    c.svc_recon.recon_pass(set())
     for k9 in ("_scope_ready", "_recon_quiet", "_recon_bal"):
-        c.__dict__.pop(k9, None)
+        c.svc_recon.__dict__.pop(k9, None)
 
 
 def eth_aid(c):
@@ -99,7 +100,7 @@ def cell(c, aid, loc=None):
 
 
 def marks(c):
-    return common.hist_late_read(c.conn)
+    return histmark.hist_late_read(c.conn)
 
 
 def min_mark(c):
@@ -165,7 +166,7 @@ reset()
 c = new_core()
 s5 = setup_int(c, 5 * E18, 10 * E18, h(5))
 A = eth_aid(c)
-real_put = common.hist_late_put
+real_put = histmark.hist_late_put
 boom = {"n": 0}
 
 
@@ -175,11 +176,11 @@ def put_then_boom(conn, ts, now=None):
     raise RuntimeError("시험: 표식 쓴 직후 예외")
 
 
-common.hist_late_put = put_then_boom
+histmark.hist_late_put = put_then_boom
 try:
     feed(c, h(5), s5, repair="int_fill")
 finally:
-    common.hist_late_put = real_put
+    histmark.hist_late_put = real_put
 check("R5 ★표식 쓴 직후 예외 = 롤백 — 앵커 10 그대로 · 표식 없음★(같은 트랜잭션)",
       boom["n"] >= 1 and anchor_rows(c) == [(10 * E18, c._win_t0(None, "eth"))] and marks(c) == [] and cell(c, A) == 10 * E18,
       (boom, anchor_rows(c), marks(c), cell(c, A)))
@@ -211,12 +212,12 @@ c._hist_late_scan()
 AT = c.conn.execute("SELECT asset_id FROM assets WHERE chain='eth' AND kind='token'").fetchone()[0]
 a7 = anchor_rows(c)
 check("R7 (전제) 토큰 앵커 +3(창 시작)", a7 == [(3 * E18, c._win_t0(None, "eth"))], a7)
-hd = os.path.join(SD, common.HIST_DIRTY)
+hd = os.path.join(SD, histmark.HIST_DIRTY)
 feed(c, H7, esnap(H7, TL, 1000, toks=[(W, X, 1 * E18), (X, W, 3 * E18)]), repair="leg_union")
 check("R7 (전제) leg_union 재기장 → 앵커 3 → 0 · 합 2", anchor_rows(c) == [] and cell(c, AT) == 2 * E18, (anchor_rows(c), cell(c, AT)))
 check("R7 ★leg_union 도 원장 표식(앵커 날)★", min_mark(c) == iso(c._win_t0(None, "eth")), marks(c))
 check("R7 core 가 장기 곡선 파일 표식을 트랜잭션 밖에서 직접 쓰지 않음(롤백돼도 남는 표식 금지 — 원장 표식이 web 을 거쳐 넘김)",
-      not os.path.exists(hd), common.read_json(hd, None) if os.path.exists(hd) else None)
+      not os.path.exists(hd), statefile.read_json(hd, None) if os.path.exists(hd) else None)
 c.conn.close()
 
 reset()

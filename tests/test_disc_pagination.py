@@ -2,19 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import urllib.parse
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.parse  # noqa: E402
 
-import token_discovery as td
-import bf_engine
+import token_discovery as td  # noqa: E402
+import bf_engine  # noqa: E402
 try:
-    import evm_watch
-    evm_watch.es_daily_left = lambda *a, **k: 0
-    T.patch_moved("es_daily_left", evm_watch.es_daily_left, ("evm_",))
-except Exception:
+    import evm_watch  # noqa: E402
+    T.patch_moved("es_daily_left", lambda *a, **k: 0, ("evm_",))
+except Exception:   # noqa: BLE001
     evm_watch = None
 
 chk = T.chk
@@ -24,7 +23,7 @@ A = "0x" + "a1" * 20
 B = "0x" + "b1" * 20
 C = "0x" + "c1" * 20
 D = "0x" + "e1" * 20
-NOOP = lambda *_a, **_k: None
+NOOP = lambda *_a, **_k: None   # noqa: E731
 ALLOW = {"n": None}
 
 
@@ -206,7 +205,7 @@ chk(str(r["fail"].get("etherscan", "")).startswith("more") and len(f.calls) == n
 td.ES_PAGES = old_pages
 os.environ.pop("TJ_ETHERSCAN_KEY", None)
 
-import importlib.util
+import importlib.util  # noqa: E402
 reset_state()
 td.ES_PAGES = 1
 f = use(FakeES(rows4))

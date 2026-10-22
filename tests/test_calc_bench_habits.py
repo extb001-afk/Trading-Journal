@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import histcurve
-import wow
+import paths  # noqa: E402
+import histcurve  # noqa: E402
+import wow  # noqa: E402
 
 chk = T.chk
 
@@ -31,7 +31,7 @@ def days(a, b):
 
 CA_A = "0x" + "a1" * 20
 TODAY = "2026-09-30"
-st = common.STATE_DIR
+st = paths.STATE_DIR
 px = {"sym:PEPE": {"p": {d: 100.0 for d in days("2026-09-01", TODAY)}},
       "ca:eth:" + CA_A: {"p": {d: 2.0 for d in days("2026-09-01", TODAY)}},
       "sym:GAP": {"p": dict({d: 10.0 for d in days("2026-09-01", "2026-09-10")}, **{d: 20.0 for d in days("2026-09-25", TODAY)})},

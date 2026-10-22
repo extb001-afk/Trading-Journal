@@ -15,13 +15,13 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import address_codec as ac
-import chain_event
-import chain_registry as reg
-import chain_state
-import chain_watch
-from chain_watch import Transient
+import config, logs, net_http, paths, runtime, statefile  # noqa: E402
+import address_codec as ac  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state  # noqa: E402
+import chain_watch  # noqa: E402
+from chain_watch import Transient  # noqa: E402
 
 CHAIN = "ton"
 PROVIDER = "toncenter_v3"
@@ -290,7 +290,7 @@ def finalized(ct: dict) -> bool:
     return ct.get("mc") is not None and not ct.get("em") and ct.get("fin") in (None, "finalized")
 
 
-def wallet_effect(ct: dict, own_jw=frozenset()) -> dict:
+def wallet_effect(ct: dict, own_jw=frozenset(), roots: dict = None) -> dict:
     im = ct.get("in") or None
     internal = bool(im and im.get("src"))
     inv = int(im.get("val") or 0) if internal else 0
@@ -312,7 +312,8 @@ def wallet_effect(ct: dict, own_jw=frozenset()) -> dict:
     orig = bounced_op(im.get("body")) if bounced else None
     jet_out = sum(int(o["val"]) for o in outs if o.get("op") in JETTON_OUT_OPS and o.get("dst") in own_jw)
     op_in = im.get("op") if internal else None
-    refund = inv if internal and ((not bounced and (op_in == OP_EXCESS or (op_in == OP_TRANSFER_NOTIFICATION and im.get("src") in own_jw)))
+    ex_ok = op_in == OP_EXCESS and (roots is None or im.get("src") in own_jw or (ct.get("tr") or "") in roots)
+    refund = inv if internal and ((not bounced and (ex_ok or (op_in == OP_TRANSFER_NOTIFICATION and im.get("src") in own_jw)))
                                   or (bounced and orig in JETTON_OUT_OPS and im.get("src") in own_jw)) else 0
     fee = (fee_tf + jet_out - refund) if fee_ok else None
     moves = []
@@ -368,7 +369,7 @@ _PACE_LOCK = threading.Lock()
 
 
 def _env_key():
-    v = os.environ.get(KEY_ENV) or common._env_file_value(KEY_ENV) or ""
+    v = os.environ.get(KEY_ENV) or runtime._env_file_value(KEY_ENV) or ""
     v = str(v).strip()
     return v if KEY_RE.match(v) else None
 
@@ -397,7 +398,7 @@ class TonClient:
         iv = self.min_interval
         if iv <= 0:
             return
-        path = self.pace_file or os.path.join(common.STATE_DIR, "ton_pace.lock")
+        path = self.pace_file or paths.state("ton_pace.lock")
         with _PACE_LOCK:
             now = time.time()
             slot = None
@@ -439,13 +440,13 @@ class TonClient:
         if body is not None:
             data = json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
-        rq = urllib.request.Request(url, data=data, headers=headers, method=method)
+        rq = net_http.request(url, data=data, headers=headers, method=method)
         self._pace()
         self.calls += 1
-        opener = self._open or urllib.request.urlopen
+        opener = self._open or (net_http.auth_urlopen if self.key else net_http.urlopen)
         try:
             with opener(rq, timeout=self.timeout) as r:
-                raw = common.read_capped(r, BODY_CAP)
+                raw = net_http.read_capped(r, BODY_CAP)
         except urllib.error.HTTPError as e:
             raise Transient(f"toncenter HTTP {e.code} {path}") from None
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
@@ -558,7 +559,7 @@ def _floor(cfg: dict) -> int:
         t = int(bf_engine.effective_backfill_t0(cfg or {}) or 0)
         s = bf_engine.SINCE.target(CHAIN)
         return int(min(t, s)) if s and t else int(s or t or 0)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0
 
 
@@ -956,7 +957,7 @@ class TonAdapter(reg.ChainAdapter):
                 if wait and (any(o9.get("op") in JETTON_OUT_OPS and o9.get("dst") in wait for o9 in ct.get("out") or [])
                              or (im9.get("src") in wait and (im9.get("b") or im9.get("op") == OP_TRANSFER_NOTIFICATION))):
                     return None
-                e = wallet_effect(ct, own_jw)
+                e = wallet_effect(ct, own_jw, self._T()["roots"] if self.st is not None else None)
                 kk = (owner, "native", None)
                 net[kk] = net.get(kk, 0) + int(e["net"])
                 if e["fee"]:
@@ -1030,7 +1031,7 @@ class TonAdapter(reg.ChainAdapter):
 
     def fetch_balances(self, owners, boundary, tokens=None):
         owners = set(owners)
-        sd = common.read_json(os.path.join(common.STATE_DIR, reg.spec(CHAIN).cursor_file), None)
+        sd = statefile.read_json(paths.state(reg.spec(CHAIN).cursor_file), None)
         sd = sd if isinstance(sd, dict) else {}
         T = sd.get("ton") if isinstance(sd.get("ton"), dict) else {}
         A, JW, META = T.get("acct") or {}, T.get("jw") or {}, T.get("meta") or {}
@@ -1137,7 +1138,7 @@ class TonAdapter(reg.ChainAdapter):
 
 def jw_fingerprint(owners, T=None) -> dict:
     if T is None:
-        sd = common.read_json(os.path.join(common.STATE_DIR, reg.spec(CHAIN).cursor_file), None)
+        sd = statefile.read_json(paths.state(reg.spec(CHAIN).cursor_file), None)
         T = sd.get("ton") if isinstance(sd, dict) and isinstance(sd.get("ton"), dict) else {}
     JW = T.get("jw") if isinstance(T.get("jw"), dict) else {}
     out = {}
@@ -1153,9 +1154,9 @@ def make_adapter(cfg):
 
 def main(poll_default: int = 60):
     from inbox import SegmentWriter
-    log = common.setup_logging("tj-" + CHAIN)
-    common.ensure_dirs()
-    cfg = common.load_config()
+    log = logs.setup_logging("tj-" + CHAIN)
+    paths.ensure_dirs()
+    cfg = config.load_config()
     owners = reg.owners(cfg, CHAIN)
     if not owners:
         raise SystemExit("추적할 TON 지갑이 없음 — config chain_wallets 확인")
@@ -1169,7 +1170,7 @@ def main(poll_default: int = 60):
     for k in [k for k, x in T["jw_wait"].items() if not isinstance(x, dict) or x.get("owner") not in owners]:
         T["jw_wait"].pop(k, None)
     st.save()
-    col = chain_watch.Collector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, reg.spec(CHAIN).stream)), st, owners, log=log)
+    col = chain_watch.Collector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, reg.spec(CHAIN).stream)), st, owners, log=log)
     c9 = ((cfg.get(reg.CFG_CHAIN_KEY) or {}).get(CHAIN) or {}) if isinstance(cfg.get(reg.CFG_CHAIN_KEY), dict) else {}
     poll = int(c9.get("poll_sec", poll_default)) if isinstance(c9, dict) else poll_default
     log.info("가동: TON %d지갑, %d초 주기 · 키 %s", len(owners), poll, "있음" if ad.client.key else "없음(1rps)")
@@ -1179,8 +1180,8 @@ def main(poll_default: int = 60):
             try:
                 r = col.cycle()
                 log.info("[ton] 주기: %s", r)
-            except Exception as e:
-                log.warning("[ton] 주기 실패(다음 주기): %s", common.safe_err(e)[:200])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("[ton] 주기 실패(다음 주기): %s", logs.safe_err(e)[:200])
             time.sleep(max(5.0, poll - (time.time() - t0)))
     except KeyboardInterrupt:
         log.info("정지 신호(SIGINT) — 종료")

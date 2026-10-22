@@ -343,7 +343,7 @@
     ton: ['https://tonviewer.com/transaction/', ''], btc: ['https://mempool.space/tx/', ''] };
   const exUrl = (chain, id, addr) => { if (S.rand) return ''; if (EXPL_NX[chain]) { const p = EXPL_NX[chain][addr ? 1 : 0], t = chain === 'ton' && !addr ? String(id).split('.').pop() : id; return p ? p + encodeURIComponent(t) : ''; }
     const e = EXPL[chain] || (String(id).indexOf('0x') === 0 ? EXPL.eth : EXPL.sol); return e[addr ? 1 : 0] + encodeURIComponent(id); };
-  const exLink = (chain, id, addr, txt) => { const u = exUrl(chain, id, addr); return u ? '<a class="fx-l" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" title="' + esc((addr ? '주소' : 'tx') + ' 탐색기에서 보기') + '">' + (txt || esc(short(id))) + '</a>' : '<span class="fx-l">' + (txt || esc(short(id))) + '</span>'; };
+  const exLink = (chain, id, addr, txt) => { const u = exUrl(chain, id, addr); return u ? '<a class="fx-l" href="' + esc(TJDOM.safeUrl(u)) + '" target="_blank" rel="noopener noreferrer" title="' + esc((addr ? '주소' : 'tx') + ' 탐색기에서 보기') + '">' + (txt || esc(short(id))) + '</a>' : '<span class="fx-l">' + (txt || esc(short(id))) + '</span>'; };
   const FL_KIND = { lookmine: ['ok', '내 지갑일 가능성 높음'], mine: ['ok', '내 지갑'], exchange: ['a', '거래소 입금 주소'], bridge: ['a', '브릿지'], contract: ['g', '컨트랙트'],
     eoa: ['w', '모르는 주소'], unknown: ['g', '주소 특정 불가'], self: ['g', '같은 주소 · 다른 체인'], burn: ['g', '발행·소각 주소'] };
   const coinsTxt = (cs, n) => cs.slice(0, n || 3).map(c => '<span class="num">' + q(c.qty) + '</span> ' + esc(c.sym)).join(' · ') + (cs.length > (n || 3) ? ' 외 ' + (cs.length - (n || 3)) + '종' : '');

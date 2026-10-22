@@ -2,22 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _gate as _x
-from _gate import check, done
-import glob
-import hashlib
-import json
-import os
-import subprocess
-import time
-import common
-import core
-assert _x.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-c = core.Core(common.load_config())
-S = common.STATE_DIR
+import _harness as T  # noqa: E402,F401
+import _gate as _x  # noqa: E402
+from _gate import check, done  # noqa: E402
+import glob  # noqa: E402
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+assert _x.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+c = core.Core(config.load_config())
+S = paths.STATE_DIR
 REJ = os.path.join(S, "rebuild_rejected")
 APV = os.path.join(S, "rebuild_pnl_approve.json")
 GATE = os.path.join(S, "rebuild_pnl_gate.json")
@@ -56,7 +55,7 @@ rs1 = g1.get("report_sha")
 pres = glob.glob(os.path.join(REJ, "*"))
 check("[1] 보류 + 게이트 기록에 report_sha", (not g1["ok"]) and isinstance(rs1, str) and len(rs1) == 64, g1)
 check("[1] 거부 보고서 보존(파일 sha256 = report_sha · 0600)", any(sha(p) == rs1 and (os.stat(p).st_mode & 0o077) == 0 for p in pres), (pres, rs1))
-check("[1] 게이트 기록 파일에도 report_sha", rs1 is not None and (common.read_json(GATE, {}) or {}).get("report_sha") == rs1)
+check("[1] 게이트 기록 파일에도 report_sha", rs1 is not None and (statefile.read_json(GATE, {}) or {}).get("report_sha") == rs1)
 
 json.dump({"until": int(time.time()) + 3600, "at": int(time.time()), "by": "옛 형식"}, open(APV, "w"))
 g2 = gate(rep({"2026-01": 100.0}, {"2026-01": 900.0}))
@@ -65,7 +64,7 @@ os.remove(APV)
 
 g2b = gate(A)
 t3 = tool("--yes")
-ap = common.read_json(APV, {}) if os.path.exists(APV) else {}
+ap = statefile.read_json(APV, {}) if os.path.exists(APV) else {}
 check("[3] 도구 --yes → 승인 파일에 마지막 보고서 해시", t3.returncode == 0 and ap.get("report_sha") is not None and ap.get("report_sha") == g2b.get("report_sha"), (t3.returncode, t3.stdout[-300:], t3.stderr[-300:], ap))
 A2 = rep({"2026-01": 100.0}, {"2026-01": 900.4}, extra={"took_s": 2})
 g3 = gate(A2)
@@ -133,7 +132,7 @@ b10 = pass10(700)
 c10 = pass10(300)
 json.dump({"report_sha": "0" * 64, "until": int(time.time()) + 3600, "at": int(time.time()), "by": "시험"}, open(APV, "w"))
 d10 = pass10(700)
-import rebuild2
+import rebuild2  # noqa: E402
 F = {"positions": [{"key": "g12", "held": 3.0, "cost": 300.0, "sym": "AAA"}, {"key": "g12f0", "held": 0, "cost": 50.0, "sym": "AAA"},
                    {"key": "g13", "held": 1.0, "cost": 10.0, "sym": "BBB"}, {"key": "s14", "held": 0, "cost": 0, "kind": "stable", "sym": "USDT"},
                    {"key": "g15", "held": 2.0, "cost": 99.0, "kind": "quarantined", "sym": "SCAM"}],
@@ -185,7 +184,7 @@ open(nanrep, "w").write(json.dumps({"G4_vs_baseline": dict(base12, realized_by_m
 gnan = gate(nanrep)
 check("[12] 비유한(NaN) 월별 실현 = 보류", not gnan["ok"] and "months" in (gnan.get("missing") or []), gnan)
 
-import ops_requests
+import ops_requests  # noqa: E402
 ev_a = ops_requests.gate_eval({"G4_vs_baseline": dict(base12, unverified_baseline={"sum": 500, "by": {"5": 500}}, unverified_shadow={"sum": 600, "by": {"5": 600}}),
                                "cost_lost": {"n": 0, "usd": 0}, "decimals_unresolved": []}, 50, 0.01)
 ev_b = ops_requests.gate_eval({"G4_vs_baseline": dict(base12, unverified_baseline={"sum": 0, "by": {}}, unverified_shadow={"sum": 600, "by": {"5": 600}}),

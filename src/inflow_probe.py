@@ -5,12 +5,12 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import threading
 import time
 import urllib.parse
 
-import common
+import logs, paths, statefile
+import db as dbm
 
 log = logging.getLogger("tj-inflow")
 
@@ -53,14 +53,14 @@ def settings(cfg: dict) -> dict:
 
 
 def state_path(chain: str) -> str:
-    return os.path.join(common.STATE_DIR, f"inflow_{chain}.json")
+    return paths.state(f"inflow_{chain}.json")
 
 
 def _mem(chain: str) -> dict:
     with _LOCK:
         m = _MEM.get(chain)
         if m is None:
-            st = common.read_json(state_path(chain), {})
+            st = statefile.read_json(state_path(chain), {})
             st = st if isinstance(st, dict) else {}
             if not isinstance(st.get("blk"), int) or isinstance(st.get("blk"), bool) or st["blk"] < 0:
                 st.pop("blk", None)
@@ -72,7 +72,7 @@ def _mem(chain: str) -> dict:
 
 def _save(chain: str, st: dict):
     try:
-        common.atomic_write_json(state_path(chain), st)
+        statefile.atomic_write_json(state_path(chain), st)
     except OSError as e:
         log.warning("%s 받음 탐지 상태 저장 실패(다음 바퀴): %s", chain, e)
 
@@ -81,7 +81,7 @@ def _ankr_key():
     try:
         import nodekeys
         return nodekeys._key(nodekeys._env(), nodekeys.ENV_ANKR)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -89,7 +89,7 @@ def _is_key_node(u: str) -> bool:
     try:
         import nodekeys
         return bool(nodekeys.is_key_node(u))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         h = (urllib.parse.urlsplit(str(u)).hostname or "").lower()
         return h.endswith(".g.alchemy.com") or h == "rpc.ankr.com" or h.endswith(".quiknode.pro") or "nodereal" in h
 
@@ -98,7 +98,7 @@ def _ankr_span() -> int:
     try:
         import nodekeys
         return int(nodekeys.SPAN.get("ankr") or 3000)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 3000
 
 
@@ -109,7 +109,7 @@ def nodes(cfg: dict, chain: str, key: str = None) -> list:
     try:
         import evm_watch
         rn = evm_watch.rpc_nodes(cfg, chain)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.debug("%s 받음 탐지 노드 표 못 읽음: %s", chain, e)
         cc = ((cfg or {}).get("chains") or {}).get(chain) or {}
         rn = {"logs": list(cc.get("rpc_logs") or cc.get("rpcs") or []), "caps": {}, "fallback": {}, "addr_max": 0}
@@ -145,7 +145,7 @@ def _expect_cid(cfg: dict, chain: str):
         try:
             import chaincatalog
             v = (chaincatalog.CATALOG.get(chain) or {}).get("chain_id")
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             v = None
     try:
         return int(v) if v is not None and not isinstance(v, bool) else None
@@ -169,7 +169,7 @@ def _addr_of_topic(t) -> str:
 
 
 def _safe(e, key=None) -> str:
-    m = common.redact_urls(str(e))
+    m = logs.redact_urls(str(e))
     if key:
         m = m.replace(key, "<키>")
     return m[:120]
@@ -199,8 +199,8 @@ def _token_spam(chain: str, ca: str, now: float) -> bool:
         import spamguard
         if not spamguard.is_genuine(chain, ca):
             sym = None
-            if os.path.exists(common.DB_PATH):
-                conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=1)
+            if os.path.exists(paths.DB_PATH):
+                conn = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=1)
                 try:
                     r = conn.execute("SELECT symbol FROM assets WHERE kind='token' AND chain=? AND address=?", (chain, ca)).fetchone()
                 finally:
@@ -209,7 +209,7 @@ def _token_spam(chain: str, ca: str, now: float) -> bool:
             if sym:
                 lure = getattr(spamguard, "_TAIL_LURE", None)
                 spam = bool(spamguard.impostor_of(sym) or spamguard.odd_symbol(sym) or (lure is not None and lure.search(str(sym))))
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.debug("%s %s 스팸 판정 못 함(깨움 쪽): %s", chain, ca[:10], e)
         spam = False
     if len(_SPAM) > 5000:
@@ -223,7 +223,7 @@ def _targets(tb, now: float) -> dict:
     for w in list(tb.wallets):
         try:
             _t, iv, why = tb.tier(w, now)
-        except Exception:
+        except Exception:   # noqa: BLE001 [isolate]
             continue
         if not why and iv > 0:
             out[str(w).lower()] = w
@@ -259,7 +259,7 @@ def _shape(groups) -> str:
 def tick(cfg: dict, wt, now: float = None, deadline: float = None):
     try:
         return _tick(cfg, wt, now, deadline)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("%s 받음 탐지 실패(다음 바퀴): %s", getattr(wt, "chain", "?"), _safe(e, _ankr_key()))
         return None
 
@@ -324,7 +324,7 @@ def _tick(cfg, wt, now, deadline):
                 m["cid"][url] = True
             res["calls"] += 1
             safe = _hexint(_call(url, "eth_blockNumber", [], deadline)) - conf
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             if time.time() >= deadline:
                 err_last = f"{label}: 시간 상한 — 다음 바퀴에 이어서"
                 break
@@ -360,7 +360,7 @@ def _tick(cfg, wt, now, deadline):
             prog = {"next": n0}
             try:
                 _scan_range(url, a, b, groups, deadline, res, prog, lambda r, b=b: _take(chain, r, tg, found, res, b, now))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 if int(prog.get("next") or 0) > n0:
                     st["scan"] = {"from": a, "to": b, "next": int(prog["next"]), "shape": shape}
                 failed = True
@@ -486,7 +486,7 @@ def _health(chain: str, st: dict):
         import bf_engine
         bf_engine.health("evm").facts(chain, inflow={"at": st.get("at"), "try": st.get("try"), "ok": bool(st.get("ok")), "node": st.get("node"),
                                                      "n": st.get("targets"), "sec": st.get("sec")})
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
 
@@ -521,8 +521,8 @@ def web_view(cfg: dict = None, now: float = None) -> dict:
     now = time.time() if now is None else now
     rows = []
     chains9 = ((cfg or {}).get("chains") or {}) if isinstance(cfg, dict) else {}
-    for f in sorted(glob.glob(os.path.join(common.STATE_DIR, "inflow_*.json"))):
-        d = common.read_json(f, {})
+    for f in sorted(glob.glob(paths.state("inflow_*.json"))):
+        d = statefile.read_json(f, {})
         if not isinstance(d, dict):
             continue
         c = os.path.basename(f)[len("inflow_"):-len(".json")]

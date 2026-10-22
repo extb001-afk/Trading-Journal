@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import ex_foreign
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
+import ex_foreign  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
-core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
+core_svc.ExfService.EXF_REVERT_LOG = os.path.join(paths.STATE_DIR, "exf_recon_revert.jsonl")
 chk = T.chk
 E8 = 10 ** 8
 NOW = int(time.time())
@@ -42,17 +42,13 @@ def _bn(url, headers=None, *a, **k):
 
 
 _bn._tj_test_mock = True
-ex_foreign._http_json_err = _bn
-T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
-ex_foreign._gov_prepare = lambda *a, **k: None
-T.patch_moved("_gov_prepare", ex_foreign._gov_prepare, ("exf_",))
-ex_foreign._px_safe = lambda *a, **k: None
-T.patch_moved("_px_safe", ex_foreign._px_safe, ("exf_",))
-ex_foreign.PACE = 0
-T.patch_moved("PACE", ex_foreign.PACE, ("exf_",))
-common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_binance.json"), {"ts": 0, "events": [], "cursor": {"income": (NOW - 3600) * 1000}})
+T.patch_moved("_http_json_err", _bn, ("exf_", "ex_foreign"))
+T.patch_moved("_gov_prepare", lambda *a, **k: None, ("exf_", "ex_foreign"))
+T.patch_moved("_px_safe", lambda *a, **k: None, ("exf_", "ex_foreign"))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "futures_binance.json"), {"ts": 0, "events": [], "cursor": {"income": (NOW - 3600) * 1000}})
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
-fb = json.load(open(os.path.join(common.STATE_DIR, "futures_binance.json")))
+fb = json.load(open(os.path.join(paths.STATE_DIR, "futures_binance.json")))
 am = {e["uid"].split(":")[1]: e.get("asset") for e in fb["events"]}
 chk(am == {"1": "USDT", "2": "BNB", "3": None}, "A1 바이낸스 income asset → 이벤트 asset(USDT·BNB) · 응답에 없으면 칸 없음", am)
 
@@ -66,22 +62,21 @@ def _okx(env, path, params=None):
     return []
 
 
-ex_foreign._okx_get = _okx
-T.patch_moved("_okx_get", ex_foreign._okx_get, ("exf_",))
+T.patch_moved("_okx_get", _okx, ("exf_", "ex_foreign"))
 try:
     ex_foreign.bf_engine.SINCE.target = lambda ex: None
 except AttributeError:
     pass
-common.atomic_write_json(os.path.join(common.STATE_DIR, "futures_okx.json"), {"ts": 0, "events": [], "cursor": {"bills": (NOW - 3600) * 1000}})
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "futures_okx.json"), {"ts": 0, "events": [], "cursor": {"bills": (NOW - 3600) * 1000}})
 ex_foreign._fut_okx({"TJ_OKX_KEY": "k", "TJ_OKX_SECRET": "s", "TJ_OKX_PASSPHRASE": "p"})
-fo = json.load(open(os.path.join(common.STATE_DIR, "futures_okx.json")))
+fo = json.load(open(os.path.join(paths.STATE_DIR, "futures_okx.json")))
 ao = sorted((e["uid"], e.get("asset")) for e in fo["events"])
 chk(ao == [("ok:b1:f", "BTC"), ("ok:b1:p", "BTC"), ("ok:b2:f", "USDT"), ("ok:b2:p", "USDT")], "A2 OKX bills ccy → 이벤트 asset(코인 마진 BTC · USDT)", ao)
 
 print("[L] 원장 — 정산 자산 그대로")
-C = core.Core(common.load_config())
-C._quote_usd = lambda q, ts: Decimal(1)
-C.EXF_INIT_PHASE = 5
+C = core.Core(config.load_config())
+C.svc_exf._quote_usd = lambda q, ts: Decimal(1)
+C.svc_exf.EXF_INIT_PHASE = 5
 SEQ = {"t": NOW - 1700}
 
 
@@ -91,7 +86,7 @@ def tick(d=10):
 
 
 def post(ex, t, sym, qty, sid):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     qb = int(Decimal(str(qty)) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                    " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange',?,?,0,?,?,?,?,NULL,NULL,'move_in','EXF_DEPOSIT',?)",
@@ -101,22 +96,22 @@ def post(ex, t, sym, qty, sid):
 
 
 def futfile(ex, events):
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), {
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"futures_{ex}.json"), {
         "ts": int(time.time()),
         "events": [dict({"t": int(t) * 1000 + 123, "symbol": s, "kind": k, "amount": a, "uid": f"u{i}"}, **({"asset": asx} if asx else {}))
                    for i, (t, s, k, a, asx) in enumerate(events)]})
-    C.__dict__.pop("_exf_fut_cache", None)
+    C.svc_exf.__dict__.pop("_exf_fut_cache", None)
 
 
 def recon(ex, bal, sources=("futures",)):
     bts = tick()
-    st = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+    st = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_state.json"), {})
     st.setdefault(ex, {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"), {"ts": bts, "balances": bal, "sources": list(sources)})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"exf_balances_{ex}.json"), {"ts": bts, "balances": bal, "sources": list(sources)})
     C._drain_at = bts + 5
-    C._last_exfrecon = 0
-    C.exf_recon_pass({"ex"})
+    C.svc_exf._last_exfrecon = 0
+    C.svc_exf.exf_recon_pass({"ex"})
     return bts
 
 
@@ -154,7 +149,7 @@ chk((tf2, Decimal("-0.5")) in rows("binance", "USDT", "futpnl") and not rows("bi
     "L4 자산 없는 옛 이벤트 = 계약 통화(USDT) · 코인 정산 계약(AAAUSD_PERP · AAA) = 종전처럼 선물 줄 없음(대사가 흡수)", (rows("binance", "USDT", "futpnl"), rows("binance", "AAA", "futpnl")))
 
 print("[D] 화면 — 표시용 달러")
-import web
+import web  # noqa: E402
 px = {"BNB": 600.0, "BTC": 60000.0}
 e1 = web.fut_ev_usd({"amount": -0.02, "asset": "BNB", "kind": "FEE"}, px.get)
 e2 = web.fut_ev_usd({"amount": 0.01, "asset": "BTC", "kind": "REALIZED"}, px.get)

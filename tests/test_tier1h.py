@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import re
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
 for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY", "TJ_ALCHEMY_KEY"):
     os.environ.pop(_k, None)
@@ -23,10 +23,10 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import addr_tier as AT
+assert T.TMP in paths.STATE_DIR
+import addr_tier as AT  # noqa: E402
 
 DAY = 86400
 NOW = time.time()
@@ -37,9 +37,9 @@ def check(n, c, d=""):
 
 
 def book(scope="eth", path="etherscan", ws=(W1,), poll=45.0, cfg=None, sent_days=200, code="eoa"):
-    for f in os.listdir(common.STATE_DIR):
+    for f in os.listdir(paths.STATE_DIR):
         if f.startswith("addr_tier_") and f != AT.REQ_PATH_NAME:
-            os.remove(os.path.join(common.STATE_DIR, f))
+            os.remove(os.path.join(paths.STATE_DIR, f))
     b = AT.TierBook(scope, cfg if cfg is not None else {"backfill_months": 0}, poll, path, list(ws))
     b.set_boot({}, "test")
     for w in ws:
@@ -225,9 +225,9 @@ sm = b.summary()
 check("A6b 요약 하루 탐색기 확인 ≈ 24회(1시간마다) + 깨움 추정", 24 <= sm["fullPerDay"] <= 26, sm)
 check("A6c 요약 활동 점검 = 하루 144회(10분마다)", 140 <= sm["actPerDay"] <= 145, sm)
 b.save(force=True)
-d = common.read_json(AT.state_path("eth"), {})
+d = statefile.read_json(AT.state_path("eth"), {})
 d["pairs"][W1]["tier"] = 4
-common.atomic_write_json(AT.state_path("eth"), d)
+statefile.atomic_write_json(AT.state_path("eth"), d)
 wv = AT.web_view(dict(CFG))
 check("A6d 화면 계단 표 = 라벨 수 · 옛 장부 계단 번호는 마지막 칸으로", len(wv["steps"]) == len(AT.TIER_LABELS)
       and all(0 <= p["t"] < len(AT.TIER_LABELS) for p in wv["addrs"].get(W1, [])), (wv["steps"], wv["addrs"].get(W1)))
@@ -239,12 +239,12 @@ ts_js = re.findall(r"'([^']*)'", m.group(1)) if m else None
 check("A7a setup.js 계단 라벨 = 서버 라벨", ts_js == list(AT.TIER_LABELS), (ts_js, AT.TIER_LABELS))
 for old in ("'빈 지갑 · 하루 1회'", "6개월 넘게 안 쓴 주소 = 최대 약 하루 늦게", "받침 확인(6시간, 6개월↑ 하루)", "활동은 하루 한 번 확인해요(토큰 입금만 오면 주 1회", "cnt = [0, 0, 0, 0, 0]"):
     check(f"A7b 옛 문구 없음: {old[:24]}", old not in SJ)
-import demo_data
+import demo_data  # noqa: E402
 
 bk9, ad9 = demo_data._tier_books(NOW)
 check("A7c 데모 장부 계단 칸 수 = 계단 수 · 칸 번호 범위 안", all(len(x["summary"]["tiers"]) == len(AT.TIER_LABELS) for x in bk9.values())
       and all(0 <= p["t"] < len(AT.TIER_LABELS) for ps9 in ad9.values() for p in ps9), [x["summary"]["tiers"] for x in bk9.values()])
-import health
+import health  # noqa: E402
 
 check("A7d 헬스 '쉬는 쌍 느린 확인 대기' 상한 ≤ 13시간(1시간 × 넘침 배수 12 + 여유)", health.REST_LATE_MAX <= 13 * 3600, health.REST_LATE_MAX)
 
@@ -256,34 +256,34 @@ rw = getattr(AT, "request_wake", None)
 check("B1a 도우미 request_wake 있음", callable(rw))
 if callable(rw):
     r = rw([("base", W2)])
-    reqs = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     check("B1b 요청 = '<체인>:<주소>' 시각", isinstance(reqs.get(f"base:{W2}"), int) and abs(reqs[f"base:{W2}"] - time.time()) < 5, reqs)
     t0 = reqs.get(f"base:{W2}")
     mt0 = os.path.getmtime(RQ)
     r2 = rw([("base", W2)])
-    reqs2 = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs2 = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     check("B1c 같은 키 10분 안 다시 = 안 씀(시각 그대로)", reqs2.get(f"base:{W2}") == t0 and os.path.getmtime(RQ) == mt0, (r2, reqs2))
-    d = common.read_json(RQ, {})
+    d = statefile.read_json(RQ, {})
     d["reqs"][f"base:{W2}"] = int(time.time()) - 601
-    common.atomic_write_json(RQ, d)
+    statefile.atomic_write_json(RQ, d)
     rw([("base", W2)])
-    reqs3 = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs3 = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     check("B1d 10분 지나면 다시 요청", reqs3.get(f"base:{W2}", 0) >= int(time.time()) - 5, reqs3)
     AT.request_check(W1)
     rw([("eth", W1)])
-    reqs4 = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs4 = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     check("B2a '지금 확인'·깨움 키가 서로 덮어쓰지 않음", f"*:{W1}" in reqs4 and f"eth:{W1}" in reqs4 and f"base:{W2}" in reqs4, reqs4)
     code = ("import sys,os;sys.path.insert(0,os.environ['TJ_TSRC']);import addr_tier as A\n"
             "p=sys.argv[1]\nfor i in range(40):\n    A.request_wake([('eth','0x%s%038x'%(p,i))])\n")
     env = dict(os.environ, TJ_TSRC=T.SRC)
     procs = [subprocess.Popen([sys.executable, "-c", code, p], env=env) for p in ("aa", "bb")]
     rcs = [p.wait(60) for p in procs]
-    reqs5 = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs5 = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     got = sum(1 for k in reqs5 if k.startswith("eth:0xaa") or k.startswith("eth:0xbb"))
     check("B2b 두 프로세스 동시 깨움 80건 = 유실 0", rcs == [0, 0] and got == 80, (rcs, got))
 
-    import fcntl
-    import threading
+    import fcntl  # noqa: E402
+    import threading  # noqa: E402
     with open(RQ + ".lock", "a") as lf9:
         fcntl.flock(lf9, fcntl.LOCK_EX)
         t9 = time.time()
@@ -316,7 +316,7 @@ if callable(rw):
     due, rest = b.due_list([W2])
     check("B3c 확인 끝(note_full) = 다시 쉼", W2 in rest and b.hold_reason(W2) is None, (due, rest, b.hold_reason(W2)))
 
-import web
+import web  # noqa: E402
 
 SB = web.StateBuilder
 wk = getattr(SB, "_wd_transit_wake", None)
@@ -339,7 +339,7 @@ if callable(wk) and callable(rw):
              "_reg": True}]
     sb._hist_wallets = lambda: [{"address": W1}, {"address": W2}, {"address": SOLD}, {"address": "0x" + "9c" * 20}]
     keys = SB._wd_transit_wake(sb, ents)
-    reqs = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     want = {f"base:{W2}", f"eth:{W1}", f"sol:{SOLD}", "*:0x" + "9c" * 20}
     check("B4b 전송 중 · 내 등록 지갑(수집 중 체인)만 깨움 — 체인 = 출금 네트워크 · 네트워크 모름 = 주소 전체(*)", set(reqs) == want, sorted(reqs))
     check("B4c 도착·나감·취소·거래소행·미추적·남의 주소 = 안 깨움", not any(("3c" * 20) in k or ("4d" * 20) in k or ("5e" * 20) in k or ("6f" * 20) in k
@@ -358,7 +358,7 @@ if callable(wk) and callable(rw):
     out = SB._wd_transit_resolve(sb, wd, [], raw, {}, {}, {}, {}, {}, now=NOW)
     check("B5a 도착 기장 전 = 전송 중(내 지갑)", out and out[0]["state"] == "pending" and out[0]["own"], out)
     SB._wd_transit_wake(sb, out)
-    reqs = (common.read_json(RQ, {}) or {}).get("reqs") or {}
+    reqs = (statefile.read_json(RQ, {}) or {}).get("reqs") or {}
     check("B5b 전송 중 = 받는 주소 깨움(base)", f"base:{W2}" in reqs, reqs)
     os.remove(RQ)
     rows = [{"event": "TRANSFER_IN", "leg_kind": "acq", "source_id": TX, "event_ts": int(NOW - 60), "location": f"wallet:base:{W2}",
@@ -367,7 +367,7 @@ if callable(wk) and callable(rw):
     out2 = SB._wd_transit_resolve(sb, wd2, rows, raw, {}, {}, {}, {}, {}, now=NOW)
     check("B5c 같은 txid 유입 기장 = 도착(전송 중 가산 없음)", out2 and out2[0]["state"] == "arrived", out2)
     SB._wd_transit_wake(sb, out2)
-    check("B5d 도착 = 깨움 멈춤(요청 0)", not os.path.exists(RQ) or not ((common.read_json(RQ, {}) or {}).get("reqs")), common.read_json(RQ, {}))
+    check("B5d 도착 = 깨움 멈춤(요청 0)", not os.path.exists(RQ) or not ((statefile.read_json(RQ, {}) or {}).get("reqs")), statefile.read_json(RQ, {}))
 
 if callable(wk):
     TX6 = "0x" + "e6" * 32
@@ -375,11 +375,11 @@ if callable(wk):
     sb6.cfg = {}
     sb6.outflow_decisions = lambda: {}
     sb6._hist_wallets = lambda: [{"address": W2}]
-    HD = os.path.join(common.STATE_DIR, "health")
+    HD = os.path.join(paths.STATE_DIR, "health")
     os.makedirs(HD, exist_ok=True)
 
     def clear6():
-        for f9 in (os.path.join(common.STATE_DIR, "cursor_evm_base.json"), os.path.join(HD, "evm.json"), AT.state_path("base")):
+        for f9 in (os.path.join(paths.STATE_DIR, "cursor_evm_base.json"), os.path.join(HD, "evm.json"), AT.state_path("base")):
             if os.path.exists(f9):
                 os.remove(f9)
 
@@ -396,20 +396,20 @@ if callable(wk):
     check("B6a 내 지갑행 50시간 · 받는 체인 수집 진행 모름 = 전송 중 유지(받는 쪽 기록 확인 중)", e6.get("state") == "pending" and e6.get("why") == "cover", e6.get("state"))
     loc6 = SB._transit_loc(dict(e6, src="바이낸스", qty=web.Decimal("8800"), uuid="u6"), NOW) if e6.get("state") == "pending" else {}
     check("B6b 위치 문구 = '받는 쪽 기록 확인 중'", "받는 쪽 기록 확인 중" in str(loc6.get("sub")), loc6)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"), {W2: 1000})
-    common.atomic_write_json(os.path.join(HD, "evm.json"), {"schema": 1, "unit": "evm", "ts": int(NOW), "sources": {
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"), {W2: 1000})
+    statefile.atomic_write_json(os.path.join(HD, "evm.json"), {"schema": 1, "unit": "evm", "ts": int(NOW), "sources": {
         "base": {"head": 1000 + 60 * 3600, "block_sec_est": 2.0, "last_cycle_ts": int(NOW), "last_success_ts": int(NOW)}}})
     e6 = res6(50)
     check("B6c 받는 지갑 커서가 출금 시각보다 뒤(120시간 전 블록) = 전송 중 유지", e6.get("state") == "pending" and e6.get("why") == "cover", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(os.path.join(HD, "evm.json"), {"schema": 1, "unit": "evm", "ts": int(NOW), "sources": {
+    statefile.atomic_write_json(os.path.join(HD, "evm.json"), {"schema": 1, "unit": "evm", "ts": int(NOW), "sources": {
         "base": {"head": 1010, "block_sec_est": 2.0, "last_cycle_ts": int(NOW), "last_success_ts": int(NOW)}}})
     e6 = res6(50)
     check("B6d 받는 지갑 커서가 출금 + 여유를 넘음(20초 전 블록) = 종전대로 '나감'(창 지남)", e6.get("state") == "out" and e6.get("why") == "expired", (e6.get("state"), e6.get("why")))
     clear6()
-    common.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 120)}}})
+    statefile.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 120)}}})
     e6 = res6(50)
     check("B6e 계단 장부 마지막 확인(2분 전)이 출금 뒤 = '나감'", e6.get("state") == "out" and e6.get("why") == "expired", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 51 * 3600)}}})
+    statefile.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 51 * 3600)}}})
     e6 = res6(50)
     check("B6f 계단 장부 마지막 확인이 출금 전 = 전송 중 유지", e6.get("state") == "pending" and e6.get("why") == "cover", (e6.get("state"), e6.get("why")))
     clear6()
@@ -425,27 +425,27 @@ if callable(wk):
         src = {"head": head, "block_sec_est": 2.0, "last_cycle_ts": int(NOW - cycle_ago_s), "last_success_ts": int(NOW - success_ago_s)}
         if cursor is not None:
             src["cursor"] = cursor
-        common.atomic_write_json(os.path.join(HD, unit + ".json"), {"schema": 1, "unit": unit, "ts": int(NOW), "sources": {chain: src}})
+        statefile.atomic_write_json(os.path.join(HD, unit + ".json"), {"schema": 1, "unit": unit, "ts": int(NOW), "sources": {chain: src}})
 
     def blk(ago_h):
         return H7 - int(ago_h * 3600 / 2)
 
     clear6()
     hb7()
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"),
                              {W2: blk(1 / 60), "_bk:" + W2: {"from": blk(200), "to": blk(1 / 60), "done": blk(60), "why": "new"}})
     e6 = res6(50)
     check("B7a 차선 모드: 라이브 커서는 1분 전이지만 뒤 차선 진행점이 60시간 전(출금 50시간 전 미수집) = 유예 유지", e6.get("state") == "pending" and e6.get("why") == "cover",
           (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"),
                              {W2: blk(1 / 60), "_bk:" + W2: {"from": blk(200), "to": blk(1 / 60), "done": blk(40), "why": "new"}})
     e6 = res6(50)
     check("B7b 뒤 차선이 출금 + 여유(40시간 전)까지 끝남 = '나감'", e6.get("state") == "out" and e6.get("why") == "expired", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"),
                              {W2: blk(1 / 60), "_bk:" + W2: {"from": blk(200), "to": blk(55), "done": blk(150), "why": "new"}})
     e6 = res6(50)
     check("B7c 차선 나뉜 뒤(55시간 전)의 출금 = 라이브 커서가 덮음 = '나감'", e6.get("state") == "out" and e6.get("why") == "expired", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"), {W2: H7})
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"), {W2: H7})
     hb7(success_ago_s=60 * 3600, cycle_ago_s=0)
     e6 = res6(50)
     check("B7d 마지막 성공 60시간 전 · 그 뒤 실패 주기만(last_cycle 지금) = 유예 유지(성공 시각 기준)", e6.get("state") == "pending" and e6.get("why") == "cover",
@@ -453,29 +453,29 @@ if callable(wk):
     hb7(success_ago_s=60, cycle_ago_s=0)
     e6 = res6(50)
     check("B7e 마지막 성공 1분 전 = '나감'", e6.get("state") == "out", e6.get("state"))
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "cursor_evm_base.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "cursor_evm_base.json"),
                              {W2: H7, "_bk:" + W2: {"from": blk(200), "to": blk(1 / 60), "done": blk(60), "why": "new"}})
-    common.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 120)}}})
+    statefile.atomic_write_json(AT.state_path("base"), {"scope": "base", "updatedAt": int(NOW), "pairs": {W2: {"full": int(NOW - 120)}}})
     e6 = res6(50)
     check("B7f 계단 장부 확인 시각이 최근이어도 뒤 차선 미완(출금 구간) = 유예 유지", e6.get("state") == "pending" and e6.get("why") == "cover", (e6.get("state"), e6.get("why")))
     clear6()
-    bscp = os.path.join(common.STATE_DIR, "cursor_bsc.json")
+    bscp = os.path.join(paths.STATE_DIR, "cursor_bsc.json")
     hb7(unit="bsc", chain="bsc", cursor=H7)
-    common.atomic_write_json(bscp, {"_wallets": [], "head": H7})
+    statefile.atomic_write_json(bscp, {"_wallets": [], "head": H7})
     e6 = res6(50, net="BSC")
     check("B7g BSC 커서 지갑 목록에 없음(새 지갑) = 유예 유지", e6.get("state") == "pending" and e6.get("why") == "cover", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(bscp, {"_wallets": [W2], "_neww": {"wallets": [W2]}, "head": H7})
+    statefile.atomic_write_json(bscp, {"_wallets": [W2], "_neww": {"wallets": [W2]}, "head": H7})
     e6 = res6(50, net="BSC")
     check("B7h BSC 새 지갑 백필 대상 = 유예 유지", e6.get("state") == "pending" and e6.get("why") == "cover", (e6.get("state"), e6.get("why")))
-    common.atomic_write_json(bscp, {"_wallets": [W2], "head": H7})
+    statefile.atomic_write_json(bscp, {"_wallets": [W2], "head": H7})
     e6 = res6(50, net="BSC")
     check("B7i BSC 커서 지갑 · 커서가 지금 = '나감'", e6.get("state") == "out", e6.get("state"))
     os.remove(bscp)
     os.remove(os.path.join(HD, "bsc.json"))
 
-import settings_store as ss
-import onboarding
-import bf_engine
+import settings_store as ss  # noqa: E402
+import onboarding  # noqa: E402
+import bf_engine  # noqa: E402
 
 na = getattr(ss, "needs_ankr", None)
 check("C1a settings_store.needs_ankr 있음", callable(na))
@@ -504,7 +504,7 @@ HJ = open(os.path.join(T.ROOT, "web", "v2", "health.js"), encoding="utf-8").read
 check("C2a setup.js Ankr 배너·필수 배지·요약 줄", "function ankrBanner" in SJ and "evmNeedsAnkr" in SJ and "k === 'ankr'" in SJ, "")
 check("C2b app.js 처음 설정 안내·빈 키에 Ankr", "evmNeedsAnkr" in AJ and "'Ankr'" in AJ, "")
 check("C2c health.js 키 바로가기 key:ankr", "'key:ankr'" in HJ, "")
-RD = open(T.README, encoding="utf-8").read()
+RD = T.doc_text("README.md")
 AK_DOC = open(os.path.join(os.path.dirname(T.README), "docs", "API_KEYS.md"), encoding="utf-8").read()
 ENVX = open(os.path.join(os.path.dirname(T.README), ".env.example"), encoding="utf-8").read()
 check("C2d README 키 표 Ankr = EVM 필수", re.search(r"`TJ_ANKR_KEY` \| EVM 지갑이 있으면 \*\*필수\*\*", RD) is not None, "")
@@ -531,8 +531,8 @@ real_node_rpc = onboarding._node_rpc
 real_http = onboarding._http
 try:
     for code, name in ((401, "C3a"), (403, "C3b"), (404, "C3c")):
-        if os.path.exists(common.ENV_PATH):
-            os.remove(common.ENV_PATH)
+        if os.path.exists(paths.ENV_PATH):
+            os.remove(paths.ENV_PATH)
         NODE_CALLS.clear()
         onboarding._node_rpc = node_rpc_err("http4xx", code)
         onboarding.RL.reset() if hasattr(onboarding.RL, "reset") else None

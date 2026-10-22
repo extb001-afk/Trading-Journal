@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
-from datetime import datetime, timedelta, timezone
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 W = "0x" + "cd" * 20
 DAY = 86400
@@ -20,10 +20,10 @@ json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "
            "backfill_months": 3, "chains": {}}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 os.environ["TJ_REPLAY_DEBUG"] = "1"
-import common
+import paths, seeds, statefile  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -38,7 +38,7 @@ def iso(ts):
     return datetime.fromtimestamp(ts, KST).strftime("%Y-%m-%d")
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC, GID = {}, {}
 
@@ -133,8 +133,8 @@ ctx("base", "p2-by", D - 3600, [(ub, -500, "disp", 500), (py2, 100, "acq", 500)]
 ctx("base", "p2-x", D, [(px2, -100, "disp", None), (py2, -100, "disp", None), (ub, 1800, "acq", 1800)], "SWAP")
 P2 = D
 ZV = ["base:0x" + "a7" * 20, "base:0x" + "a8" * 20, "base:0x" + "a9" * 20, "base:0x" + "aa" * 20]
-os.makedirs(os.path.join(common.STATE_DIR, "seed_local"), exist_ok=True)
-json.dump({"tokens": ZV}, open(os.path.join(common.STATE_DIR, "seed_local", "zero_value_companions.json"), "w"))
+os.makedirs(os.path.join(paths.STATE_DIR, "seed_local"), exist_ok=True)
+json.dump({"tokens": ZV}, open(os.path.join(paths.STATE_DIR, "seed_local", "zero_value_companions.json"), "w"))
 D = NOW - 98 * DAY
 ez = asset("base", None, "ETH", None, 18, "native")
 skz, gvz = asset("base", "0x" + "96" * 20, "SKZ"), asset("base", "0x" + "a7" * 20, "GVZ")
@@ -210,9 +210,9 @@ for (g, loc), q in pos.items():
 con.commit()
 con.close()
 
-import acct_norm
-import pricing
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 
 def _no_price(url, *a, **k):
@@ -222,17 +222,17 @@ def _no_price(url, *a, **k):
 pricing._gj = _no_price
 PX = {"ETH": 2000.0, "BTC": 60000.0, "WETH": 2000.0, "WBTC": 60000.0}
 acct_norm.FxBook.candle = lambda self, sym, ts: PX.get(str(sym or "").upper())
-web._fx_candle_near = lambda fxb, sym, ts, within_s=3600: PX.get(str(sym or "").upper())
+_fx9 = lambda fxb, sym, ts, within_s=3600: PX.get(str(sym or "").upper())   # noqa: E731
 for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:
     if hasattr(sys.modules[_mn9], "_fx_candle_near"):
-        sys.modules[_mn9]._fx_candle_near = web._fx_candle_near
+        sys.modules[_mn9]._fx_candle_near = _fx9
 web.Spot.dex_pending = lambda self, c, ca: False
 web.Spot.ex_pending = lambda self, ex: False
 web.Spot.price = lambda self, sym, *a, **k: None
 
 
 def build(gas_on):
-    common.atomic_write_json(web.PREFS_PATH, {"gas_in_cost": gas_on})
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), {"gas_in_cost": gas_on})
     b = web.StateBuilder()
     web.BUILDER = b
     st = T.safe(b.build)
@@ -305,7 +305,7 @@ check("P1 GVB 원가 $1,250 · 원가 미상 0 · '추정' 표시", gvc and abs(
 check("P2 거울: 낸 쪽 둘 다 시세 없음 · 받은 USDC 1,800 → 정산액 균등 추정 = 실현 −$100 + $400 = +$300 · 대금 미상 검토 없음",
       abs(day(fon, P2) - 300) <= 0.05 and not [p for p in (fon.get("pendings") or []) if str(p.get("key") or "").startswith("noproc:")]
       and any("추정" in d for d in evs(fon, "PXA")), (day(fon, P2), [p for p in (fon.get("pendings") or []) if str(p.get("key") or "").startswith("noproc:")], evs(fon, "PXA")))
-zl = common.seed_json("zero_value_companions.json", {}, base_dir=common.BASE_DIR) or {}
+zl = seeds.seed_json("zero_value_companions.json", {}, base_dir=paths.BASE_DIR) or {}
 check("Z 목록 = 공개 seed(govBNB) + 이 설치 덧붙임 합집합", "bsc:0x0000000000000000000000000000000000002005" in (zl.get("tokens") or [])
       and all(z in (zl.get("tokens") or []) for z in ZV), zl)
 

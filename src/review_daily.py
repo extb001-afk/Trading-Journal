@@ -11,28 +11,24 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, logs, net_http, paths, runtime, statefile, textutil
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
+    runtime.cpu_reserve_apply()
+import ai_cli
 import review_prompt as rp
 import review_progress as rprog
 import salelink as _salelink
 import day_memo
 
-log = common.setup_logging("tj-review")
+log = logs.setup_logging("tj-review")
 
-KST = timezone(timedelta(hours=9))
-OUT_PATH = os.path.join(common.STATE_DIR, "reviews_llm.json")
-WEEKLY_PATH = os.path.join(common.STATE_DIR, "reviews_llm_weekly.json")
-CLAUDE_BINS = ("claude", os.path.expanduser("~/.local/bin/claude"),
-               "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
+from timeutil import KST
 
 PROMPT = rp.DAILY_PROMPT
 PROMPT_VERSION = rp.PROMPT_VERSION
-REVIEW_MODEL = "claude-sonnet-5-5"
 CATCHUP_PACE_S = 20
 CATCHUP_DAYS = 3
 REALIZED_MIN_USD = 0.5
@@ -49,6 +45,7 @@ KRW_MARKETS = {"업비트", "빗썸"}
 GAS_KIND_KO = {"FAILED": "실패 tx", "LP_ADD": "LP 예치", "LP_REMOVE": "LP 회수", "NOOP": "승인·기타", "TRANSFER_OUT_EX": "거래소 입금 전송",
                "BRIDGE": "브릿지", "TRANSFER_SELF": "내 지갑 간 이동", "TRANSFER_OUT": "외부 전송", "PROGRAM_IN": "프로그램 수령",
                "SWAP": "매매 미연결 스왑"}
+GAS_KIND_KO["LOAN_INT"] = "대출 이자"
 GAS_KIND_KO["BRIDGE_FEE"] = "브릿지 수수료"
 GAS_MENTION_MIN = 5.0
 GAS_MENTION_PCT = 0.05
@@ -77,28 +74,11 @@ WEEKLY_LEN_MAX = rp.len_preset("weekly")["max"]
 WEEKLY_PATTERNS_MAX = rp.len_preset("weekly")["pat_max"]
 WEEKLY_FIELD_HARD = 320
 OBS_MAX = rp.len_preset("daily")["obs"]
-PREFS_PATH = os.path.join(common.STATE_DIR, "ui_prefs.json")
-PROGRESS_PATH = os.path.join(common.STATE_DIR, "review_progress.json")
-CLI_START_GAP_S = 3.0
-_CLI_PACE = threading.Lock()
-_CLI_LAST = [0.0]
-_GS = threading.local()
+_GS = ai_cli.GS
 _FILL_OVERRIDE = {}
-FILL_REQ_PATH = os.path.join(common.STATE_DIR, "review_fill_request.json")
 FILL_POLL_S = 60
 _FILL_BTN = [False]
 _FILL_THREAD = [None]
-
-
-def claude_bin():
-    for b in CLAUDE_BINS:
-        try:
-            subprocess.run([b, "--version"], capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
-            _cli_probe(b)
-            return b
-        except (OSError, subprocess.SubprocessError):
-            continue
-    return None
 
 
 def _hosts(cfg):
@@ -123,7 +103,6 @@ STATE_MAX_AGE = 300
 
 def _get_json(cfg, path, timeout=STATE_TIMEOUT, hosts=None):
     import urllib.error
-    import urllib.request
     port, hosts = hosts or _hosts(cfg)
     last_err = None
     for ip in hosts:
@@ -134,15 +113,15 @@ def _get_json(cfg, path, timeout=STATE_TIMEOUT, hosts=None):
                 try:
                     import login_auth
                     hdr = login_auth.internal_headers()
-                except Exception:
+                except Exception:   # noqa: BLE001 [fallback]
                     hdr = {}
-            with urllib.request.urlopen(urllib.request.Request(url, headers=hdr) if hdr else url, timeout=timeout) as r:
+            with (net_http.auth_urlopen(net_http.request(url, headers=hdr), timeout) if hdr else net_http.urlopen(url, timeout)) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise
             last_err = e
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             last_err = e
         log.warning("%s 조회 실패(%s) — 다음 후보: %s", path.split("?")[0], ip, last_err)
     raise RuntimeError(f"{path.split('?')[0]} 조회 전부 실패({', '.join(hosts)}): {last_err}")
@@ -172,7 +151,7 @@ def fetch_day_events(cfg, d_from, d_to=None):
     except urllib.error.HTTPError as e:
         log.warning("/api/day_events 없음(HTTP %s, 구 tj-web) — /api/state 이벤트(카드 최근 60건·부가 최신 150건)로 폴백", e.code)
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         log.warning("/api/day_events 조회 실패 — /api/state 이벤트로 폴백: %s", e)
         return None
     if not isinstance(body, dict) or not isinstance(body.get("events"), list):
@@ -962,7 +941,7 @@ DAY_MEMOS_MAX = 20
 def _day_memos_for(day_iso) -> list:
     try:
         mm = day_memo.Store().for_date(day_iso)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("근거 메모 읽기 실패(무시): %s", e)
         return []
     return [{"sym": s9, "memo": mm[s9]} for s9 in sorted(mm)][:DAY_MEMOS_MAX]
@@ -976,10 +955,10 @@ def known_patterns(cfg) -> list:
 
 
 def _read_reviews(path=None) -> dict:
-    path = path or OUT_PATH
+    path = path or paths.state("reviews_llm.json")
     try:
-        return common.read_json(path, {}) if os.path.exists(path) else {}
-    except (Exception, SystemExit):
+        return statefile.read_json(path, {}) if os.path.exists(path) else {}
+    except (Exception, SystemExit):  # noqa: BLE001 [fallback]
         return {}
 
 
@@ -989,8 +968,8 @@ def _store_put(path, key, rec, drop=None) -> bool:
         try:
             if os.path.exists(path):
                 try:
-                    cur = common.read_json(path, None)
-                except (Exception, SystemExit):
+                    cur = statefile.read_json(path, None)
+                except (Exception, SystemExit):  # noqa: BLE001 [fallback]
                     cur = None
                 if not isinstance(cur, dict):
                     log.error("리뷰 파일 읽기 실패 — 덮어쓰기 보류(%s): %s", key, path)
@@ -1000,7 +979,7 @@ def _store_put(path, key, rec, drop=None) -> bool:
             cur[key] = rec
             if drop and isinstance(cur.get(drop), dict) and isinstance(cur[drop].get("fp"), dict):
                 cur.pop(drop, None)
-            common.atomic_write_json(path, cur)
+            statefile.atomic_write_json(path, cur)
             return True
         finally:
             fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
@@ -1013,8 +992,8 @@ def _store_template(path, day_iso, rec) -> bool:
             if not os.path.exists(path):
                 return False
             try:
-                cur = common.read_json(path, None)
-            except (Exception, SystemExit):
+                cur = statefile.read_json(path, None)
+            except (Exception, SystemExit):  # noqa: BLE001 [fallback]
                 cur = None
             if not isinstance(cur, dict):
                 log.error("리뷰 파일 읽기 실패 — 템플릿 다시 쓰기 보류(%s): %s", day_iso, path)
@@ -1023,7 +1002,7 @@ def _store_template(path, day_iso, rec) -> bool:
             if not vals or any(not isinstance(v9, dict) or v9.get("model") != "template" for v9 in vals):
                 return False
             cur[day_iso] = rec
-            common.atomic_write_json(path, cur)
+            statefile.atomic_write_json(path, cur)
             return True
         finally:
             fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
@@ -1064,7 +1043,7 @@ def prior_obs(reviews, day_iso, days=7) -> list:
 _CHAIN_KO = {"eth": "Ethereum", "base": "Base", "bsc": "BSC", "sol": "Solana", "arbitrum": "Arbitrum", "optimism": "Optimism",
              "polygon": "Polygon", "zksync": "zkSync", "scroll": "Scroll", "gnosis": "Gnosis", "robinhood": "Robinhood",
              "arc": "Arc"}
-common.fill_chain_table(_CHAIN_KO)
+config.fill_chain_table(_CHAIN_KO)
 
 
 def _day_summary(day_ev, d) -> dict:
@@ -1516,8 +1495,21 @@ def _stale(rv, fp) -> bool:
     return False
 
 
+def _input_sym(s: str) -> str:
+    w = str(s or "").split()
+    return "".join(c for c in (w[0] if w else "") if c.isalnum() or c in "._-₮")[:24] or "?"
+
+
+def _clean_syms(v):
+    if isinstance(v, dict):
+        return {k: (_input_sym(x) if k == "sym" and isinstance(x, str) else _clean_syms(x)) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_clean_syms(x) for x in v]
+    return v
+
+
 def payload(data) -> str:
-    return json.dumps({k: v for k, v in data.items() if not k.startswith("_")}, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(_clean_syms({k: v for k, v in data.items() if not k.startswith("_")}), ensure_ascii=False, separators=(",", ":"))
 
 
 _SENT_END = re.compile(r"(?:[\.\!\?。…]|다\.|요\.)(?=\s|$)")
@@ -1555,17 +1547,6 @@ _FIELD_RX = re.compile(r"\b(" + "|".join(sorted((re.escape(k) for k in rp.GLOSSA
 
 def screen_terms(s: str) -> str:
     return _FIELD_RX.sub(lambda m: rp.GLOSSARY.get(m.group(1), m.group(1)), str(s or ""))
-
-
-def _parse(txt):
-    m = re.search(r"\{.*\}", txt or "", re.S)
-    if not m:
-        return None
-    try:
-        rv = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
-    return rv if isinstance(rv, dict) else None
 
 
 _USD_RX = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)")
@@ -1778,7 +1759,7 @@ def _fields(rv):
 
 def review_len_pref(kind: str) -> str:
     try:
-        with open(PREFS_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("ui_prefs.json"), "r", encoding="utf-8") as f9:
             p = json.load(f9)
         v = ((p if isinstance(p, dict) else {}).get("review_len") or {}).get(kind)
     except (OSError, ValueError, AttributeError):
@@ -1788,7 +1769,7 @@ def review_len_pref(kind: str) -> str:
 
 def review_paused() -> bool:
     try:
-        with open(PREFS_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("ui_prefs.json"), "r", encoding="utf-8") as f9:
             p = json.load(f9)
         v = (p if isinstance(p, dict) else {}).get("review_pause")
         return isinstance(v, dict) and v.get("on") is True
@@ -1811,7 +1792,7 @@ def _paused_skip(what: str) -> bool:
 
 def review_fill_pref() -> dict:
     try:
-        with open(PREFS_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("ui_prefs.json"), "r", encoding="utf-8") as f9:
             p = json.load(f9)
         v = (p if isinstance(p, dict) else {}).get("review_fill")
     except (OSError, ValueError, AttributeError):
@@ -1967,9 +1948,9 @@ def _delink(rv: dict) -> dict:
     for k in _LINK_FIELDS:
         v = out.get(k)
         if isinstance(v, str):
-            out[k] = common.strip_links(v)
+            out[k] = textutil.strip_links(v)
         elif isinstance(v, list):
-            out[k] = [y for y in (common.strip_links(x) if isinstance(x, str) else x for x in v) if not (isinstance(y, str) and not y.strip())]
+            out[k] = [y for y in (textutil.strip_links(x) if isinstance(x, str) else x for x in v) if not (isinstance(y, str) and not y.strip())]
     return out
 
 
@@ -1995,107 +1976,18 @@ def normalize(rv: dict, data: dict) -> dict:
         out["lossCoins"] = data["loss_coins"]
     out = _fit_len(out, pr["max"])
     out["fp"] = _fp(data)
-    out["model"] = REVIEW_MODEL
+    out["model"] = ai_cli.REVIEW_MODEL
     out["at"] = int(time.time())
     return out
 
 
-CLI_ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR",
-                "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
-                "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_CONFIG_HOME")
-CLI_ENV_AUTH = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
-                "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
-                "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-                "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
-                "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS")
-
-
-def _cli_env(src=None) -> dict:
-    src = os.environ if src is None else src
-    return {k: v for k, v in src.items()
-            if k in CLI_ENV_KEEP or k in CLI_ENV_AUTH or k == "LC_ALL" or k.startswith("LC_")}
-
-
-_CLI_FLAGS = {}
-
-
-def _cli_probe(b) -> list:
-    if b not in _CLI_FLAGS:
-        try:
-            h = subprocess.run([b, "--help"], capture_output=True, text=True, timeout=20, env=_cli_env(), stdin=subprocess.DEVNULL).stdout or ""
-        except Exception:
-            h = ""
-        _CLI_FLAGS[b] = ["--no-session-persistence"] if "--no-session-persistence" in h else []
-    return _CLI_FLAGS[b]
-
-
-def _cli_extra(b) -> list:
-    return list(_CLI_FLAGS.get(b) or [])
-
-
-def _cli_cwd():
-    import tempfile
-    base = os.path.join(tempfile.gettempdir(), f"tj-review-cli-{os.getuid()}")
-    try:
-        os.makedirs(base, mode=0o700, exist_ok=True)
-        st = os.lstat(base)
-        import stat as _st9
-        if _st9.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() and not os.listdir(base):
-            if st.st_mode & 0o077:
-                os.chmod(base, 0o700)
-            return base, False
-    except OSError:
-        pass
-    return tempfile.mkdtemp(prefix="tj-review-cli-"), True
-
-
 def _run_cli(b, prompt, data, label, body=None):
-    with _CLI_PACE:
-        wait = _CLI_LAST[0] + CLI_START_GAP_S - time.time()
-        if wait > 0:
-            time.sleep(wait)
-        _CLI_LAST[0] = time.time()
-    _GS.calls = getattr(_GS, "calls", 0) + 1
     if body is None:
         import secrets
         nonce = secrets.token_hex(8)
         prompt = rp.with_data_fence(prompt, nonce)
         body = f"<<<DATA {nonce}>>>\n" + payload(data) + f"\n<<<END {nonce}>>>"
-    cwd9, rm9 = _cli_cwd()
-    try:
-        out = subprocess.run(
-            [b, "-p", "--strict-mcp-config", "--model", REVIEW_MODEL, "--tools", ""] + _cli_extra(b),
-            input=prompt + body,
-            capture_output=True, text=True, timeout=600, cwd=cwd9, env=dict(_cli_env(), CLAUDE_CODE_SAFE_MODE="1"))
-    finally:
-        if rm9:
-            import shutil
-            shutil.rmtree(cwd9, ignore_errors=True)
-    if out.returncode != 0:
-        raw9 = (out.stderr or "").strip() or (out.stdout or "").strip()
-        why9 = common.redact_secret_text(raw9.splitlines()[0] if raw9 else "")[:300]
-        _GS.last_err = why9
-        log.warning("리뷰 CLI 실패(%s, rc=%s): %s", label, out.returncode, why9[:200])
-        return None
-    _GS.last_err = None
-    rv = _parse((out.stdout or "").strip())
-    if rv is None:
-        log.warning("리뷰 응답 파싱 실패(%s): %s", label, (out.stdout or "").strip()[:200])
-    return rv
-
-
-def cli_error_text(default: str) -> str:
-    w = str(getattr(_GS, "last_err", None) or "")
-    lw = w.lower()
-    if not w:
-        return default
-    if "disabled claude subscription access" in lw or ("organization" in lw and "disabled" in lw):
-        return "Claude 접근이 막혀 있어요 — 서버에 로그인된 계정의 조직 설정에서 Claude Code 사용이 꺼져 있어요(관리자 설정 또는 서버에서 claude 다시 로그인)"
-    if "not logged in" in lw or "/login" in lw or "invalid api key" in lw or "authentication" in lw or "oauth" in lw:
-        return "Claude 로그인이 필요해요 — 서버에서 claude 로그인(또는 API 키)을 확인하세요"
-    if "usage limit" in lw or "rate limit" in lw or "limit reached" in lw or "overloaded" in lw:
-        return "Claude 사용 한도에 걸렸어요 — 잠시 뒤 다시 평가하세요"
-    return default + " — " + common.redact_secret_text(w)[:120]
+    return ai_cli.invoke(b, prompt + body, label)
 
 
 def _idle_day(data) -> bool:
@@ -2295,7 +2187,7 @@ def generate(b, data) -> bool:
             if n2 and len(n2) <= NOTE_MAX and "…" not in n2:
                 rv = dict(rv, note=n2)
         rec = normalize(rv, data)
-    if not _store_put(OUT_PATH, day, rec, drop=day[5:10]):
+    if not _store_put(paths.state("reviews_llm.json"), day, rec, drop=day[5:10]):
         return False
     log.info("리뷰 생성 완료: %s [%s] 기록 %d건 · 입력 %d자%s", day, rec["s"], rec["fp"]["n"], len(payload(data)),
              " · 템플릿(체결 없음)" if rec.get("model") == "template" else "")
@@ -2339,7 +2231,7 @@ def _run_items(run, items, work, parallel=1, pace_s=None, stop_check=None):
             t0, err = time.time(), None
             try:
                 res = work(kind, key)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 log.warning("리뷰 생성 오류(%s %s): %s", kind, key, e)
                 res, err = False, e
             secs = time.time() - t0
@@ -2370,13 +2262,13 @@ def _run_items(run, items, work, parallel=1, pace_s=None, stop_check=None):
 
 
 def _new_run(mode, queue, fill):
-    return rprog.Run(PROGRESS_PATH, mode, queue, fill["order"], fill["parallel"], CATCHUP_PACE_S)
+    return rprog.Run(paths.state("review_progress.json"), mode, queue, fill["order"], fill["parallel"], CATCHUP_PACE_S)
 
 
 def run_today(cfg):
     if _paused_skip("오늘 일간 리뷰"):
         return
-    b = claude_bin()
+    b = ai_cli.claude_bin()
     if not b:
         log.info("claude CLI 없음 — 자동요약 폴백 유지")
         return
@@ -2417,7 +2309,7 @@ def _eval_chart(cfg, date, sym, side, get, sleep):
             _EVAL_GET_LAST[0] = time.time()
         try:
             r = get(path)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("AI 평가 차트 조회 실패(%s %s %s): %s", date, sym, side, e)
             return None
         if isinstance(r, dict) and r.get("ok") and r.get("status") in ("preparing", "busy"):
@@ -2450,16 +2342,13 @@ def eval_one(cfg, date, sym, side, get=None, sleep=time.sleep, runner=None, binf
         return "fresh"
     lab = f"{'매수' if side == 'buy' else '매도'}평가 {date}|{sym2}"
     run = runner or (lambda b9, p9, body9: _run_cli(b9, p9, None, lab, body=body9))
-    rec, err = sellchart.run_eval(st, cfg, date, sym2, fp, inp, runner=run, binfn=binfn or claude_bin, slots=EVAL_SLOTS, model=REVIEW_MODEL)
+    rec, err = sellchart.run_eval(st, cfg, date, sym2, fp, inp, runner=run, binfn=binfn or ai_cli.claude_bin, slots=EVAL_SLOTS, model=ai_cli.REVIEW_MODEL)
     if rec:
         return "made"
-    e9 = str(err or "")
-    if "한도" in e9 or "꺼져 있어요" in e9:
-        return "budget"
-    if "진행 중" in e9:
-        return "busy"
-    log.warning("AI %s 평가 실패(%s %s): %s", side, date, sym2, e9)
-    return "fail"
+    kind = sellchart.eval_err_kind(cfg, side, err)
+    if kind in ("blocked", "fail"):
+        log.warning("AI %s 평가 실패(%s %s): %s", side, date, sym2, err or "")
+    return kind
 
 
 EVAL_SIDES = ("sell", "buy")
@@ -2474,7 +2363,7 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
     pace_s = EVAL_PACE_S if pace_s is None else pace_s
     lock = threading.Lock()
     it = iter(list(items))
-    cnt = {"items": len(items), "made": 0, "fresh": 0, "nochart": 0, "budget": 0, "busy": 0, "fail": 0, "skip": 0, "stopped": None,
+    cnt = {"items": len(items), "made": 0, "fresh": 0, "nochart": 0, "budget": 0, "blocked": 0, "busy": 0, "fail": 0, "skip": 0, "stopped": None,
            "stopped_sides": {}}
     on9 = eval_sides_on(cfg)
     for side in EVAL_SIDES:
@@ -2510,13 +2399,13 @@ def receipt_evals(cfg, items, parallel=1, pace_s=None, get=None, sleep=time.slee
                         return
                 try:
                     res = eval_one(cfg, d9, s9, side, get=get, sleep=sleep, runner=runner, binfn=binfn, stores=stores)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.warning("AI 평가 오류(%s %s %s): %s", d9, s9, side, e)
                     res = "fail"
                 with lock:
                     cnt[res] = cnt.get(res, 0) + 1
-                    if res == "budget":
-                        cnt["stopped_sides"].setdefault(side, "하루 상한")
+                    if res in ("budget", "blocked"):
+                        cnt["stopped_sides"].setdefault(side, "하루 상한" if res == "budget" else "Claude CLI 막힘")
                 if res == "made" and pace_s:
                     sleep(pace_s)
 
@@ -2571,11 +2460,10 @@ def _receipt_evals_safe(cfg):
         return
     try:
         receipt_evals_recent(cfg)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("AI 매도·매수 평가 자동 생성 실패(다음 회차 재시도): %s", e)
 
 
-PREWARM_PATH = os.path.join(common.STATE_DIR, "candles", "prewarm.json")
 PREWARM_MAX = 300
 PREWARM_GAP_S = 4.0
 PREWARM_TRIES = 130
@@ -2617,14 +2505,14 @@ def prewarm_dex_cap():
                     _pm, pd = nft.cg_key_windows(rec, b, share)
                     used = int(b.cg_usage().get("total") or 0)
                     extra = max(0, int(int(pd) * candles.BG_KEY_FRAC) - used) // PREWARM_KEY_CALLS
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         extra = 0
     return min(PREWARM_DEX_MAX, PREWARM_DEX_BASE + extra), plan
 
 
 def _pw_read(day) -> dict:
     try:
-        with open(PREWARM_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("candles", "prewarm.json"), "r", encoding="utf-8") as f9:
             st = json.load(f9)
         if not isinstance(st, dict):
             raise ValueError("prewarm")
@@ -2648,9 +2536,9 @@ def _pw_write(st) -> bool:
     while len(d) > PREWARM_DONE_MAX:
         d.pop(min(d, key=lambda k9: int((d[k9] or {}).get("at") or 0)))
     try:
-        common.atomic_write_json(PREWARM_PATH, st)
+        statefile.atomic_write_json(paths.state("candles", "prewarm.json"), st)
         return True
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("미리 받기 기록 실패 — 이번 회차 끝: %s", e)
         return False
 
@@ -2730,8 +2618,8 @@ def _pw_get(path, get, sleep):
     for _ in range(PREWARM_TRIES):
         try:
             r = get(path)
-        except Exception as e:
-            return "err", common.safe_err(e)[:120]
+        except Exception as e:   # noqa: BLE001 [fallback]
+            return "err", logs.safe_err(e)[:120]
         if isinstance(r, dict) and r.get("ok") and r.get("status") in ("preparing", "busy"):
             if r.get("status") == "busy":
                 return "busy", None
@@ -2752,7 +2640,7 @@ def prewarm_charts(cfg, get=None, sleep=time.sleep, today_iso=None, stop_check=N
     if n_cfg <= 0:
         return None
     if stop_check is None:
-        stop_check = lambda: "수동 보충 진행 중" if _manual_lock_live() else ("자동 생성 멈춤(설정)" if review_paused() else None)
+        stop_check = lambda: "수동 보충 진행 중" if _manual_lock_live() else ("자동 생성 멈춤(설정)" if review_paused() else None)   # noqa: E731
     w0 = stop_check()
     if w0:
         log.info("영수증 봉 미리 받기 건너뜀 — %s", w0)
@@ -2770,12 +2658,12 @@ def prewarm_charts(cfg, get=None, sleep=time.sleep, today_iso=None, stop_check=N
         return cnt
     if get is None:
         hosts9 = _hosts(cfg)
-        g = lambda p9: _get_json(cfg, p9, timeout=120, hosts=hosts9)
+        g = lambda p9: _get_json(cfg, p9, timeout=120, hosts=hosts9)   # noqa: E731
     else:
         g = get
     try:
         lst = g(f"/api/receipt_list?from={PREWARM_FROM}&to={day}") or {}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("영수증 봉 미리 받기: 영수증 목록 조회 실패(다음 회차): %s", e)
         cnt["stopped"] = "목록 실패"
         return cnt
@@ -2852,7 +2740,7 @@ def prewarm_charts(cfg, get=None, sleep=time.sleep, today_iso=None, stop_check=N
 def _prewarm_safe(cfg):
     try:
         return prewarm_charts(cfg)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("영수증 봉 미리 받기 실패(다음 회차 재시도): %s", e)
         return None
 
@@ -2869,13 +2757,12 @@ def _prewarm_start(cfg):
     return t9
 
 
-MANUAL_LOCK = os.path.join(common.STATE_DIR, "review_catchup_manual.lock")
 MANUAL_LOCK_MAX_S = 12 * 3600
 
 
 def _manual_lock_live(now=None) -> bool:
     try:
-        d = json.load(open(MANUAL_LOCK, encoding="utf-8"))
+        d = json.load(open(paths.state("review_catchup_manual.lock"), encoding="utf-8"))
         pid, ts = int(d.get("pid") or 0), float(d.get("ts") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
         return False
@@ -2896,21 +2783,20 @@ class _ManualLock:
 
     def __enter__(self):
         try:
-            common.atomic_write_json(MANUAL_LOCK, {"pid": os.getpid(), "ts": int(time.time())})
+            statefile.atomic_write_json(paths.state("review_catchup_manual.lock"), {"pid": os.getpid(), "ts": int(time.time())})
         except OSError as e:
             log.warning("수동 보충 잠금 쓰기 실패(보충은 진행): %s", e)
         return self
 
     def __exit__(self, *a):
         try:
-            if int((json.load(open(MANUAL_LOCK, encoding="utf-8")) or {}).get("pid") or 0) == os.getpid():
-                os.remove(MANUAL_LOCK)
+            if int((json.load(open(paths.state("review_catchup_manual.lock"), encoding="utf-8")) or {}).get("pid") or 0) == os.getpid():
+                os.remove(paths.state("review_catchup_manual.lock"))
         except (OSError, ValueError, TypeError, AttributeError):
             pass
         return False
 
 
-OLD_BUDGET_PATH = os.path.join(common.STATE_DIR, "review_old_budget.json")
 _OB_LOCK = threading.Lock()
 
 
@@ -2924,12 +2810,12 @@ def _old_budget_read(day_iso: str) -> dict:
     def bad(why):
         if not _OB_WARNED[0]:
             _OB_WARNED[0] = True
-            log.warning("옛 날 리뷰 예산 파일 이상(%s) — 오늘 자동 모델 보충 보류(%s)", why, OLD_BUDGET_PATH)
+            log.warning("옛 날 리뷰 예산 파일 이상(%s) — 오늘 자동 모델 보충 보류(%s)", why, paths.state("review_old_budget.json"))
         return exhausted
-    if not os.path.exists(OLD_BUDGET_PATH):
+    if not os.path.exists(paths.state("review_old_budget.json")):
         return fresh
     try:
-        with open(OLD_BUDGET_PATH, "r", encoding="utf-8") as f9:
+        with open(paths.state("review_old_budget.json"), "r", encoding="utf-8") as f9:
             b = json.load(f9)
     except (OSError, ValueError) as e:
         return bad(f"읽기 실패 {type(e).__name__}")
@@ -2962,8 +2848,8 @@ def _old_budget_take(day_iso: str, d: str) -> bool:
         b["days"].append(d)
         b["at"] = int(time.time())
         try:
-            common.atomic_write_json(OLD_BUDGET_PATH, b)
-        except (Exception, SystemExit) as e:
+            statefile.atomic_write_json(paths.state("review_old_budget.json"), b)
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
             log.warning("옛 날 리뷰 예산 기록 실패 — %s 보충 보류: %s", d, e)
             return False
         return True
@@ -2972,14 +2858,14 @@ def _old_budget_take(day_iso: str, d: str) -> bool:
 def catch_up(cfg, since_iso=None, dry=False, before=None):
     b = None
     if not dry:
-        b = claude_bin()
+        b = ai_cli.claude_bin()
         if not b:
             return
     auto = not since_iso
     if auto and not dry and _paused_skip("일간 리뷰 보충"):
         return
     if auto and _manual_lock_live():
-        log.info("리뷰 보충 건너뜀 — 수동 보충 진행 중(%s)", MANUAL_LOCK)
+        log.info("리뷰 보충 건너뜀 — 수동 보충 진행 중(%s)", paths.state("review_catchup_manual.lock"))
         return
     st = _state_for_today(cfg)
     today_iso = _today_iso(st)
@@ -3086,7 +2972,7 @@ def refresh_templates(cfg, dry=False, st=None) -> list:
         if dry:
             done.append(d)
             continue
-        if _store_template(OUT_PATH, d, _template_rec(data)):
+        if _store_template(paths.state("reviews_llm.json"), d, _template_rec(data)):
             done.append(d)
         else:
             log.info("템플릿 다시 쓰기 %s 건너뜀 — 그날 모델 리뷰가 있거나 템플릿이 없음(보존)", d)
@@ -3416,7 +3302,7 @@ def normalize_week(rv: dict, data: dict) -> dict:
     if data.get("loss_coins"):
         rec["lossCoins"] = data["loss_coins"]
     rec = _fit_len(rec, pr["max"])
-    rec.update(fp=_fp_week(data), model=REVIEW_MODEL, at=int(time.time()))
+    rec.update(fp=_fp_week(data), model=ai_cli.REVIEW_MODEL, at=int(time.time()))
     return rec
 
 
@@ -3446,7 +3332,7 @@ def generate_week(b, data) -> bool:
         if n2 and len(n2) <= NOTE_MAX and "…" not in n2:
             rv = dict(rv, note=n2)
     rec = normalize_week(rv, data)
-    if not _store_put(WEEKLY_PATH, key, rec):
+    if not _store_put(paths.state("reviews_llm_weekly.json"), key, rec):
         return False
     log.info("주간 리뷰 생성 완료: %s(%s~%s) [%s] 사이클 %d개 · 입력 %d자", key, data["from"], data["to"], rec["s"], len(data["cycles"]),
              len(payload(data)))
@@ -3456,11 +3342,11 @@ def generate_week(b, data) -> bool:
 def _gather_seg(st, cfg, seg, weekly=None, day_ev=None):
     if day_ev is None:
         day_ev = fetch_day_events(cfg, _ev_from(seg[1]), seg[2])
-    return gather_week(st, seg[1], day_ev, cfg, weekly if weekly is not None else _read_reviews(WEEKLY_PATH))
+    return gather_week(st, seg[1], day_ev, cfg, weekly if weekly is not None else _read_reviews(paths.state("reviews_llm_weekly.json")))
 
 
 def run_week(cfg, day_iso=None, mode="daemon-week"):
-    b = claude_bin()
+    b = ai_cli.claude_bin()
     if not b:
         log.info("claude CLI 없음 — 주간 리뷰 생략")
         return
@@ -3475,7 +3361,7 @@ def run_week(cfg, day_iso=None, mode="daemon-week"):
 
 
 def weekly_plan(st, cfg, today_iso, since_iso=None, weekly=None, day_ev=None) -> list:
-    weekly = weekly if weekly is not None else _read_reviews(WEEKLY_PATH)
+    weekly = weekly if weekly is not None else _read_reviews(paths.state("reviews_llm_weekly.json"))
     rdays = realized_days(st)
     auto = not since_iso
     lo = since_iso or (datetime.strptime(today_iso, "%Y-%m-%d") - timedelta(days=WEEKLY_AUTO_DAYS)).strftime("%Y-%m-%d")
@@ -3510,7 +3396,7 @@ def weekly_plan(st, cfg, today_iso, since_iso=None, weekly=None, day_ev=None) ->
 def weekly_refresh(cfg):
     if _paused_skip("주간 리뷰 보충"):
         return
-    b = claude_bin()
+    b = ai_cli.claude_bin()
     if not b:
         return
     if _manual_lock_live():
@@ -3546,7 +3432,7 @@ weekly_catch_up = weekly_refresh
 def weekly_since(cfg, since_iso, dry=False, before=None):
     b = None
     if not dry:
-        b = claude_bin()
+        b = ai_cli.claude_bin()
         if not b:
             log.info("claude CLI 없음 — 주간 보충 생략")
             return []
@@ -3586,9 +3472,9 @@ def weekly_since(cfg, since_iso, dry=False, before=None):
 
 
 def fill_request_check(cfg) -> bool:
-    if not os.path.exists(FILL_REQ_PATH) or _paused_skip("전체 채우기"):
+    if not os.path.exists(paths.state("review_fill_request.json")) or _paused_skip("전체 채우기"):
         return False
-    req = common.read_control_json(FILL_REQ_PATH, None)
+    req = statefile.read_control_json(paths.state("review_fill_request.json"), None)
     since = req.get("since") if isinstance(req, dict) else None
     try:
         ok9 = isinstance(since, str) and datetime.strptime(since, "%Y-%m-%d").strftime("%Y-%m-%d") == since
@@ -3596,27 +3482,27 @@ def fill_request_check(cfg) -> bool:
         ok9 = False
     if req is not None and not ok9:
         try:
-            os.replace(FILL_REQ_PATH, FILL_REQ_PATH + ".bad")
+            os.replace(paths.state("review_fill_request.json"), paths.state("review_fill_request.json") + ".bad")
         except OSError:
             pass
-        log.warning("전체 채우기 요청 형식 오류 — 무시(%s.bad)", os.path.basename(FILL_REQ_PATH))
+        log.warning("전체 채우기 요청 형식 오류 — 무시(%s.bad)", os.path.basename(paths.state("review_fill_request.json")))
         return False
     if req is None:
         return False
     t9 = _FILL_THREAD[0]
     if t9 is not None and t9.is_alive():
         try:
-            os.remove(FILL_REQ_PATH)
+            os.remove(paths.state("review_fill_request.json"))
         except OSError:
             pass
         log.warning("전체 채우기 요청 무시 — 앞 요청을 아직 쓰는 중")
         return False
     try:
-        os.remove(FILL_REQ_PATH)
+        os.remove(paths.state("review_fill_request.json"))
     except OSError:
         return False
     if _manual_lock_live():
-        log.warning("전체 채우기 요청 무시 — 수동 보충이 이미 진행 중(%s)", MANUAL_LOCK)
+        log.warning("전체 채우기 요청 무시 — 수동 보충이 이미 진행 중(%s)", paths.state("review_catchup_manual.lock"))
         return False
     before = datetime.now(KST).strftime("%Y-%m-%d")
     log.info("전체 채우기(설정 버튼) 시작 — %s 부터 %s 앞까지 일간 → 주간(배경)", since, before)
@@ -3633,7 +3519,7 @@ def _fill_run(cfg, since, before, weekly):
             catch_up(cfg, since, before=before)
             if weekly and not review_paused():
                 weekly_since(cfg, since, before=before)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [boundary]
         log.warning("전체 채우기 실패: %s", e)
     finally:
         _FILL_BTN[0] = False
@@ -3648,14 +3534,14 @@ def _nap(secs, cfg):
         time.sleep(min(FILL_POLL_S, left))
         try:
             fill_request_check(cfg)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [isolate]
             log.warning("전체 채우기 요청 확인 실패(다음 확인 때): %s", e)
 
 
 def _refresh_templates_safe(cfg):
     try:
         refresh_templates(cfg)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("템플릿 다시 쓰기 실패(다음 회차 재시도): %s", e)
 
 
@@ -3688,11 +3574,11 @@ def _pop_fill_override(argv) -> dict:
 
 
 def main():
-    common.ensure_dirs()
+    paths.ensure_dirs()
     _FILL_OVERRIDE.update(_pop_fill_override(sys.argv))
     if _FILL_OVERRIDE and len(sys.argv) == 1:
         raise SystemExit("--order·--parallel 은 --catchup-since·--weekly-since·--days·--sell-evals-since 와 함께만 씁니다")
-    cfg = common.load_config()
+    cfg = config.load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "--dry-run":
         st = fetch_state(cfg, max_age=None)
         d = sys.argv[2] if len(sys.argv) > 2 else _today_iso(st)
@@ -3721,7 +3607,7 @@ def main():
         run_week(cfg, sys.argv[2] if len(sys.argv) > 2 else None, mode="manual-week")
         return
     if len(sys.argv) > 2 and sys.argv[1] == "--days":
-        b = claude_bin()
+        b = ai_cli.claude_bin()
         st = fetch_state(cfg)
         days9 = [x.strip() for x in sys.argv[2].split(",") if x.strip()]
         fill9 = review_fill_pref()
@@ -3757,11 +3643,11 @@ def main():
     boot = datetime.now(KST)
     try:
         catch_up(cfg)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [boundary]
         log.warning("리뷰 보충 실패(다음 회차 재시도): %s", e)
     try:
         weekly_refresh(cfg)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [boundary]
         log.warning("주간 리뷰 보충 실패(다음 회차 재시도): %s", e)
     _refresh_templates_safe(cfg)
     _receipt_evals_safe(cfg)
@@ -3784,11 +3670,11 @@ def main():
         _nap(max(30, (target - now).total_seconds()), cfg)
         try:
             run_today(cfg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("리뷰 생성 실패(내일 재시도): %s", e)
         try:
             catch_up(cfg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("리뷰 보충 실패(다음 회차 재시도): %s", e)
         _receipt_evals_safe(cfg)
         _prewarm_start(cfg)
@@ -3799,11 +3685,11 @@ def main():
             try:
                 if not _paused_skip("주간 리뷰"):
                     run_week(cfg, target.strftime("%Y-%m-%d"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [boundary]
                 log.warning("주간 리뷰 생성 실패(기동 시·다음 회차 재시도 · 수동 --weekly): %s", e)
         try:
             weekly_refresh(cfg)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.warning("주간 리뷰 보충 실패(다음 회차 재시도): %s", e)
         _refresh_templates_safe(cfg)
 

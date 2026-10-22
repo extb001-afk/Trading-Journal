@@ -2,25 +2,25 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import threading
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
 
 json.dump({"chains": {}, "wallets": []}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import common
-import lpchain
-import web
+import paths, statefile  # noqa: E402
+import lpchain  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 MGR = "0x" + "11" * 20
-os.makedirs(os.path.join(common.STATE_DIR, "seed_local"), exist_ok=True)
+os.makedirs(os.path.join(paths.STATE_DIR, "seed_local"), exist_ok=True)
 json.dump({"base": {MGR: {"proto": "uni_v4", "name": "Uniswap V4", "stateview": "0x" + "66" * 20}}},
-          open(os.path.join(common.STATE_DIR, "seed_local", "lp_managers.json"), "w"))
+          open(os.path.join(paths.STATE_DIR, "seed_local", "lp_managers.json"), "w"))
 OWNER = "0x" + "22" * 20
-LOC = lambda tid: f"lp:base:{MGR}:{tid}"
-TGT = lambda tid, ch="base": (ch, MGR, tid, f"lp:{ch}:{MGR}:{tid}", {"proto": "uni_v4"})
+LOC = lambda tid: f"lp:base:{MGR}:{tid}"   # noqa: E731
+TGT = lambda tid, ch="base": (ch, MGR, tid, f"lp:{ch}:{MGR}:{tid}", {"proto": "uni_v4"})   # noqa: E731
 
 CLOCK = [1_000_000.0]
 _real_time = web.time.time
@@ -89,13 +89,13 @@ def reset():
     READS.clear(); LISTS.clear(); HOOKS.clear(); FAIL_IDS.clear()
     STOP_AT[0] = None
     try:
-        os.remove(web.LP_POS_PATH)
+        os.remove(paths.state("lp_positions.json"))
     except FileNotFoundError:
         pass
 
 
 def lp_file():
-    return common.read_json(web.LP_POS_PATH, {}) or {}
+    return statefile.read_json(paths.state("lp_positions.json"), {}) or {}
 
 
 def run_worker(b, until):
@@ -149,14 +149,14 @@ chk((f1.get("positions") or {}).get(LOC(1)) == (f0.get("positions") or {}).get(L
 chk(((f1.get("positions") or {}).get(LOC(3)) or {}).get("owner") == OWNER, "[3d] 새 포지션도 owner(지갑별 대조용) 기록")
 
 READS.clear()
-st0 = os.stat(web.LP_POS_PATH).st_mtime_ns
+st0 = os.stat(paths.state("lp_positions.json")).st_mtime_ns
 writes = []
-_aw = common.atomic_write_json
-common.atomic_write_json = lambda p, o: (writes.append(p), _aw(p, o))
+_aw = statefile.atomic_write_json
+statefile.atomic_write_json = lambda p, o: (writes.append(p), _aw(p, o))
 CLOCK[0] += 30
 r = b._lp_refresh_new() if hasattr(b, "_lp_refresh_new") else None
-common.atomic_write_json = _aw
-chk(r == (0, 0) and not READS and not writes and os.stat(web.LP_POS_PATH).st_mtime_ns == st0,
+statefile.atomic_write_json = _aw
+chk(r == (0, 0) and not READS and not writes and os.stat(paths.state("lp_positions.json")).st_mtime_ns == st0,
     "[4] 새 대상이 없으면 온체인 읽기 0 · 파일 쓰기 0", {"r": r, "reads": len(READS), "writes": len(writes)})
 
 FAIL_IDS.add(4)

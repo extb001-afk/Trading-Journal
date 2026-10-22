@@ -2,10 +2,10 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
 for _k in ("TJ_NODEREAL_KEY", "TJ_ANKR_KEY", "TJ_QUICKNODE_KEY", "TJ_QUICKNODE_BSC_KEY", "TJ_QUICKNODE_BASE_KEY"):
     os.environ.pop(_k, None)
@@ -16,11 +16,11 @@ CFG = {"wallets": [{"type": "evm", "chain": "eth", "address": "0x" + "1f" * 20, 
 CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
+import config, paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import nodekeys as NK
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import nodekeys as NK  # noqa: E402
+import settings_store as ss, settings_wallets  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -70,7 +70,7 @@ check("K2 받은 주소 = 질의·조각 떼고 호스트 소문자", NK._qn_url
       == "https://fake-one.bsc.quiknode.pro/tok12345/", NK._qn_url("https://Fake-One.BSC.quiknode.pro/tok12345/?a=1#f", "bsc"))
 
 pl0 = NK.plans({})
-check("K3a 기본 = 전부 무료 · 유료 비율 기본 10(QuickNode 80 — qn1011) · 월 한도 없음 · Chainnodes(cn18) 도 같은 꼴",
+check("K3a 기본 = 전부 무료 · 유료 비율 기본 10(QuickNode 80) · 월 한도 없음 · Chainnodes 도 같은 꼴",
       pl0 == {"nodereal": {"plan": "free", "share": 10, "month": None}, "ankr": {"plan": "free", "share": 10, "month": None},
               "quicknode": {"plan": "free", "share": 80, "month": None}, "chainnodes": {"plan": "free", "share": 10, "month": None},
               "alchemy": {"plan": "free", "share": 10, "month": None}}, pl0)
@@ -79,7 +79,7 @@ pl1 = NK.plans({"node_plans": {"nodereal": {"plan": "paid", "share": 25, "month"
                                "quicknode": {"plan": "free", "share": 50, "month": 1000}}})
 check("K3b 유료 · 비율 25 · 월 한도 그대로", pl1["nodereal"] == {"plan": "paid", "share": 25, "month": 500_000_000}, pl1["nodereal"])
 check("K3c 비율 7(목록 밖) = 10 · 월 한도 True(불리언) = 없음", pl1["ankr"] == {"plan": "paid", "share": 10, "month": None}, pl1["ankr"])
-check("K3d QuickNode 무료 저장 = 무료 그대로(qn1011 — 무료 플랜 월 1,000만 크레딧)", pl1["quicknode"]["plan"] == "free" and pl1["quicknode"]["share"] == 50, pl1["quicknode"])
+check("K3d QuickNode 무료 저장 = 무료 그대로(무료 플랜 월 1,000만 크레딧)", pl1["quicknode"]["plan"] == "free" and pl1["quicknode"]["share"] == 50, pl1["quicknode"])
 for sh in (True, "25", 0, 100, 81, None, 25.5):
     check(f"K3e 비율 {sh!r} = 기본 10", NK.plans({"node_plans": {"ankr": {"plan": "paid", "share": sh}}})["ankr"]["share"] == 10)
 for mo, exp in ((0, None), (-5, None), (10 ** 12, 10 ** 12), (10 ** 12 + 1, None), (1.5e6, None), ("1000", None), (1, 1)):
@@ -136,7 +136,7 @@ cb = cfg["chains"]["base"]
 check("K6f Base 로그 = 키 노드 먼저 · 공개 노드 예비 · QuickNode 없음", cb["rpc_logs"] == [us["base"][0][1]] + ["https://pub-base.invalid"], cb["rpc_logs"])
 check("K6g Base 상한 = 기존 유지 + Ankr 3천(QuickNode 칸 없음)",
       cb["rpc_log_span_caps"] == {"https://pub-base.invalid": 5000, us["base"][0][1]: 3000}, cb["rpc_log_span_caps"])
-check("K6g2 Base trace = QuickNode → 16차 기본(내장 drpc 꼬리 — cn18)", cb.get("trace_rpcs") == [QBa, "https://base.drpc.org"], cb.get("trace_rpcs"))
+check("K6g2 Base trace = QuickNode → 기본(내장 drpc 꼬리)", cb.get("trace_rpcs") == [QBa, "https://base.drpc.org"], cb.get("trace_rpcs"))
 check("K6h Base 상태(archive) = 키 노드는 뒤 예비(공개 상태 풀 먼저)", cb["archive_rpcs"][-2:] == [u for _, u in us["base"]]
       and len(cb["archive_rpcs"]) > 2, cb["archive_rpcs"])
 lim = cfg["rpc_day_limits"]
@@ -164,7 +164,7 @@ check("K6m 유료 NodeReal = 유료 초당 한도 얹음", cfg4["backfill"]["hos
 cfg5 = fresh(CFG)
 cfg5["backfill"] = {"hosts": {}}
 NK.apply(cfg5, env={NK.ENV_NODEREAL: NR}, settings={})
-check("K6n 무료 NodeReal = 호스트 한도 안 얹음(내장 무료 기준 · QuickNode 무료 초당 한도만 — 코덱스 qn801)",
+check("K6n 무료 NodeReal = 호스트 한도 안 얹음(내장 무료 기준 · QuickNode 무료 초당 한도만)",
       list(cfg5["backfill"]["hosts"]) == ["*.quiknode.pro"] and cfg5["backfill"]["hosts"]["*.quiknode.pro"]["call_rate"] == 6.0, cfg5["backfill"])
 cfg6 = {"wallets": [], "chains": {"base": {}}, "bsc": {"logs_rpcs": ["https://pub-bsc.invalid"]}}
 NK.apply(cfg6, env={NK.ENV_ANKR: AK}, settings={})
@@ -177,14 +177,14 @@ check("K6p 체인 블록 없음·이상한 꼴 = 예외 없이 건너뜀", "_exc
 
 with open(CP, "rb") as f:
     b0 = f.read()
-with open(common.ENV_PATH, "w", encoding="utf-8") as f:
+with open(paths.ENV_PATH, "w", encoding="utf-8") as f:
     f.write(f"# 시험\nTJ_NODEREAL_KEY={NR}\nTJ_ANKR_KEY='{AK}'\n")
-lc = common.load_config()
+lc = config.load_config()
 mem = json.dumps(lc)
 check("K7a load_config = 메모리에 키 노드 붙음", NR in mem and AK in mem and any(u.endswith(NR) for u in lc["bsc"]["logs_rpcs"]), lc["bsc"])
 with open(CP, "rb") as f:
     check("K7b load_config 뒤 config.json 바이트 그대로", f.read() == b0)
-n9 = ss.rename_wallet("0x" + "1f" * 20, "시험2")
+n9 = settings_wallets.rename_wallet("0x" + "1f" * 20, "시험2")
 with open(CP, "r", encoding="utf-8") as f:
     disk = f.read()
 check("K7c 설정 저장(지갑 이름 바꿈) 뒤에도 config.json 에 키·키 노드 주소 없음",
@@ -195,7 +195,7 @@ check("K7d 설정 화면용 읽기(load_config_quiet)도 키를 안 붙임(화�
 e9 = NK._env()
 check("K8a .env 따옴표 벗김", e9.get(NK.ENV_ANKR) == AK and e9.get(NK.ENV_NODEREAL) == NR, {k: len(v) for k, v in e9.items()})
 fp1 = NK.fingerprint()
-with open(common.ENV_PATH, "a", encoding="utf-8") as f:
+with open(paths.ENV_PATH, "a", encoding="utf-8") as f:
     f.write("export TJ_QUICKNODE_BSC_KEY=" + QB + "\n")
 fp2 = NK.fingerprint()
 check("K8b export 줄도 읽음 · 키 늘면 지문 바뀜", NK._env().get(NK.ENV_QN_BSC) == QB and fp1 != fp2, (fp1, fp2))
@@ -210,7 +210,7 @@ try:
 finally:
     os.environ.pop(NK.ENV_ANKR, None)
 check("K8g 환경변수 지우면 지문 원래대로(같은 입력 = 같은 지문)", NK.fingerprint() == fp3)
-os.remove(common.ENV_PATH)
+os.remove(paths.ENV_PATH)
 check("K8h .env 없음 = 빈 값(예외 없음)", NK._env() == {} and NK.urls() == {"bsc": [], "base": []})
 
 for u, exp in ((f"https://bsc-mainnet.nodereal.io/v1/{NR}", True), (f"https://rpc.ankr.com/base/{AK}", True), (QBa, True),
@@ -218,7 +218,7 @@ for u, exp in ((f"https://bsc-mainnet.nodereal.io/v1/{NR}", True), (f"https://rp
                ("https://[::1", False), ("", False), (None, False)):
     check(f"K9 is_key_node({str(u)[:40]}) = {exp}", NK.is_key_node(u) is exp)
 
-import bf_engine
+import bf_engine  # noqa: E402
 
 pl10 = NK.plans({"node_plans": {"nodereal": {"plan": "paid", "share": 25, "month": 310_000_000}}})
 bf_engine.rpc_day_configure({"rpc_day_limits": {f"node_{p}": NK.budget_spec(p, pl10[p]) for p in NK.PROVIDERS}})
@@ -230,7 +230,7 @@ check("K10c 호스트 → 장부(QuickNode 와일드카드 포함)", bf_engine._
 check("K10d 단가: getLogs 50 + 일반 25 · 메서드 모름 = 가장 비싼 값",
       bf_engine._rpc_day_units("node_nodereal", ["eth_getLogs", "eth_call"]) == 75 and bf_engine._rpc_day_units("node_nodereal", None) == 50)
 
-import onboarding
+import onboarding  # noqa: E402
 
 BAD = [({"provider": "nope", "plan": "free", "share": 10}, "알 수 없는 서비스"),
        ({"provider": "quicknode", "plan": "gold", "share": 80}, "QuickNode 요금제 이상"),
@@ -249,7 +249,7 @@ check("K11b 저장 → settings.json → plans() 왕복 · 다른 서비스 요�
       r.get("ok") and st11["nodereal"] == {"plan": "paid", "share": 50, "month": 62_000_000} and st11["ankr"]["plan"] == "paid", (r.get("ok"), st11))
 check("K11c 저장 응답 상태 = 하루 예산 1,000,000(6,200만 ÷ 31 × 50%) · 키·주소 없음",
       r["nodes"]["nodereal"]["perDay"] == 1_000_000 and "nodereal.io" not in json.dumps(r, ensure_ascii=False), r.get("nodes", {}).get("nodereal"))
-with open(os.path.join(common.STATE_DIR, "settings.json"), encoding="utf-8") as f:
+with open(os.path.join(paths.STATE_DIR, "settings.json"), encoding="utf-8") as f:
     sdisk = f.read()
 check("K11d settings.json 에 키 없음(요금제만 · 비밀 아님)", NR not in sdisk and AK not in sdisk and "node_plans" in sdisk)
 with open(CP, "rb") as f:

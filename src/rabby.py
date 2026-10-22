@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.request
-import common
+import config, logs, net_http, num_parse, timeutil  # noqa: E402
+import fsio  # noqa: E402
 
 API = "https://api.rabby.io"
 STATE_NAME = "rabby_portfolio.json"
@@ -30,7 +30,7 @@ RABBY_CHAIN_IDS = {"eth": 1, "bsc": 56, "arb": 42161, "op": 10, "base": 8453, "m
                    "metis": 1088, "lisk": 1135, "opbnb": 204, "nova": 42170, "pze": 1101, "katana": 747474,
                    "megaeth": 4326, "stable": 988, "gravity": 1625, "chiliz": 88888, "story": 1514, "cfx": 1030,
                    "merlin": 4200, "ape": 33139}
-DEF = {"enabled": True, "wallet_every_h": 24.0, "gap_sec": 75.0, "backoff_sec": 1800.0, "backoff_max_sec": 21600.0,
+DEF = {"enabled": False, "wallet_every_h": 24.0, "gap_sec": 75.0, "backoff_sec": 1800.0, "backoff_max_sec": 21600.0,
        "first_delay_sec": 300.0, "tick_sec": 600.0, "timeout_sec": 40.0, "min_usd": 0.01, "daily_calls_max": 150,
        "min_wallet_usd": 1000.0}
 
@@ -39,15 +39,34 @@ class RateLimited(OSError):
     pass
 
 
+def _bool(v):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    t = str(v).strip().lower()
+    return True if t in ("1", "true", "yes", "on") else False if t in ("0", "false", "no", "off", "") else None
+
+
 def settings(cfg: dict) -> dict:
     s = dict(DEF)
-    for k, v in ((cfg or {}).get("rabby") or {}).items():
+    rb = (cfg or {}).get("rabby") if isinstance(cfg, dict) else None
+    for k, v in (rb.items() if isinstance(rb, dict) else ()):
         if k in DEF:
+            if isinstance(DEF[k], bool):
+                b = _bool(v)
+                if b is not None:
+                    s[k] = b
+                continue
             try:
                 s[k] = type(DEF[k])(v)
             except (TypeError, ValueError):
                 pass
     return s
+
+
+def enabled(cfg: dict) -> bool:
+    return bool(settings(cfg)["enabled"])
 
 
 def evm_wallets(cfg: dict, include_disabled: bool = False) -> list:
@@ -111,10 +130,10 @@ def chain_label(state: dict, rid: str, bot_names: dict = None) -> str:
 
 
 def http_get(url: str, timeout: float = 40.0):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    req = net_http.request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(common.read_capped(r))
+        with net_http.urlopen(req, timeout=timeout) as r:
+            return json.loads(net_http.read_capped(r))
     except urllib.error.HTTPError as e:
         if e.code == 429:
             raise RateLimited(f"429 {url.split('?')[0]}")
@@ -122,11 +141,7 @@ def http_get(url: str, timeout: float = 40.0):
 
 
 def _num(x) -> float:
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return 0.0
-    return v if v == v and abs(v) != float("inf") else 0.0
+    return num_parse.to_float(x, 0.0)
 
 
 def _tok(t: dict) -> dict:
@@ -270,12 +285,7 @@ def load_state(path: str) -> dict:
 
 
 def _write(path: str, obj):
-    tmp = f"{path}.tmp{os.getpid()}"
-    with open(tmp, "w") as f:
-        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    fsio.atomic_write_json(path, obj, ensure_ascii=False, separators=(",", ":"), mode=None, dir_fsync=False, makedirs=False)
 
 
 RB_EVERY_SAME = 7 * 86400
@@ -295,7 +305,7 @@ def wallet_every(w: dict, bot_usd, every_sec: float) -> float:
         return every_sec
     if rb < RB_EMPTY_USD and bu < RB_EMPTY_USD:
         return max(every_sec, RB_EVERY_EMPTY)
-    return max(every_sec, RB_EVERY_SAME)
+    return every_sec if bot_usd is not None and abs(rb - bu) > max(200.0, 0.05 * max(rb, bu, 0.0)) else max(every_sec, RB_EVERY_SAME)
 
 
 def due_wallet(state: dict, addrs: list, now: float, every_sec: float, bot_usd: dict = None):
@@ -321,7 +331,7 @@ def due_wallet(state: dict, addrs: list, now: float, every_sec: float, bot_usd: 
 
 def _freeze_disabled(cfg: dict, state: dict, old: dict, fresh: dict) -> dict:
     off = set((cfg or {}).get("_disabled_chains") or ())
-    off.update(c for c, cc in ((cfg or {}).get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(c, cc))
+    off.update(c for c, cc in ((cfg or {}).get("chains") or {}).items() if isinstance(cc, dict) and not config.chain_enabled(c, cc))
     if not off:
         return fresh
     ids = dict((state or {}).get("chainIds") or {})
@@ -350,7 +360,7 @@ def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.s
     st.setdefault("wallets", {})
     if float(st.get("backoffUntil") or 0) > now:
         return "cooldown"
-    day = time.strftime("%Y-%m-%d", time.gmtime(now + 9 * 3600))
+    day = timeutil.kst_day(now)
     calls = st.get("calls") if isinstance(st.get("calls"), dict) else {}
     if int(calls.get(day) or 0) + 2 > int(s["daily_calls_max"]):
         return "cap"
@@ -371,14 +381,14 @@ def refresh_once(cfg: dict, path: str, now: float = None, get=None, sleep=time.s
         d = fetch_wallet(a, get=counted, sleep=sleep, gap=s["gap_sec"], timeout=s["timeout_sec"],
                          want_protocols=lambda tot9: need_protocols(prev9, (bot_usd or {}).get(a) if isinstance(bot_usd, dict) else None, tot9, now=now))
     except RateLimited as e:
-        res, err = "ratelimited", common.safe_err(e)
-    except Exception as e:
-        res, err = "error", f"{type(e).__name__}: {common.safe_err(e)[:160]}"
+        res, err = "ratelimited", logs.safe_err(e)
+    except Exception as e:   # noqa: BLE001 [fallback]
+        res, err = "error", f"{type(e).__name__}: {logs.safe_err(e)[:160]}"
     st = load_state(path) or st
     st.setdefault("v", 1)
     st.setdefault("wallets", {})
     calls = st.get("calls") if isinstance(st.get("calls"), dict) else {}
-    calls = {k: v for k, v in calls.items() if k >= time.strftime("%Y-%m-%d", time.gmtime(now + 9 * 3600 - 7 * 86400))}
+    calls = {k: v for k, v in calls.items() if k >= timeutil.kst_day(now, 7)}
     calls[day] = int(calls.get(day) or 0) + n["c"]
     st["calls"] = calls
     w = dict(st["wallets"].get(a) or {})

@@ -4,8 +4,9 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
+import accounting_util
 import calcguard
-import common
+import logs
 import flow_trace
 import flowev
 import outflow_match
@@ -13,7 +14,7 @@ import salelink
 import spamguard
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
+from timeutil import KST
 from view_common import OF_BASIS_KO
 
 log = logging.getLogger('tj-web')
@@ -21,53 +22,54 @@ log = logging.getLogger('tj-web')
 
 class OutMove:
 
-    def __init__(omx, sb, _ro, _un, br_transit, consume, cp_last, cp_merge, cv_label, diag, ev, ever_in, ex_transit, extra_ev, extra_events, fs_on, fs_rec, fx_dep_tx, fx_name, fxdep_transit, krw_rec, krw_took, mv_note, my_all9, now, ob, of_bridge, of_dec9, of_match, of_noauto, of_pay_on, of_pay_take, ret_pool, rt_back, rt_out, rt_same, rt_transit, sale_bid9, sale_lot_by, sale_pay_take, sale_rf_bid, sale_rf_load, signer9, stl_out, up_dep_by_tx, up_dep_uid_ts, up_win_t0):
-        omx.sb = sb
-        omx._ro = _ro
+    def __init__(omx, px, *, _un, movein, fns):
+        omx.sb = px.sb
+        omx._ro = movein.ro
         omx._un = _un
-        omx.br_transit = br_transit
-        omx.consume = consume
-        omx.cp_last = cp_last
-        omx.cp_merge = cp_merge
-        omx.cv_label = cv_label
-        omx.diag = diag
-        omx.ev = ev
-        omx.ever_in = ever_in
-        omx.ex_transit = ex_transit
-        omx.extra_ev = extra_ev
-        omx.extra_events = extra_events
-        omx.fs_on = fs_on
-        omx.fs_rec = fs_rec
-        omx.fx_dep_tx = fx_dep_tx
-        omx.fx_name = fx_name
-        omx.fxdep_transit = fxdep_transit
-        omx.krw_rec = krw_rec
-        omx.krw_took = krw_took
-        omx.mv_note = mv_note
-        omx.my_all9 = my_all9
-        omx.now = now
-        omx.ob = ob
-        omx.of_bridge = of_bridge
-        omx.of_dec9 = of_dec9
-        omx.of_match = of_match
-        omx.of_noauto = of_noauto
-        omx.of_pay_on = of_pay_on
-        omx.of_pay_take = of_pay_take
-        omx.ret_pool = ret_pool
-        omx.rt_back = rt_back
-        omx.rt_out = rt_out
-        omx.rt_same = rt_same
-        omx.rt_transit = rt_transit
-        omx.sale_bid9 = sale_bid9
-        omx.sale_lot_by = sale_lot_by
-        omx.sale_pay_take = sale_pay_take
-        omx.sale_rf_bid = sale_rf_bid
-        omx.sale_rf_load = sale_rf_load
-        omx.signer9 = signer9
-        omx.stl_out = stl_out
-        omx.up_dep_by_tx = up_dep_by_tx
-        omx.up_dep_uid_ts = up_dep_uid_ts
-        omx.up_win_t0 = up_win_t0
+        omx.br_transit = movein.br_transit
+        omx.consume = px.cpx.consume
+        omx.cp_last = px.cpx.cp_last
+        omx.cp_merge = accounting_util.cp_merge
+        omx.cv_label = fns.cv_label
+        omx.diag = px.slx.diag
+        omx.ev = px.cpx.ev
+        omx.ever_in = movein.ever_in
+        omx.ex_transit = movein.ex_transit
+        omx.extra_ev = fns.extra_ev
+        omx.extra_events = px.books.extra_events
+        omx.fs_on = px.ctx.fs_on
+        omx.fs_rec = px.fsx.fs_rec
+        omx.fx_dep_tx = px.slx.fx_dep_tx
+        omx.fx_name = px.ofx.fx_name
+        omx.fxdep_transit = movein.fxdep_transit
+        omx.krw_rec = px.kpx.krw_rec
+        omx.krw_took = px.kpx.krw_took
+        omx.mv_note = accounting_util.mv_note
+        omx.my_all9 = movein.my_all
+        omx.now = px.ctx.now
+        omx.ob = px.slx.ob
+        omx.of_bridge = movein.of_bridge
+        omx.of_dec9 = movein.of_dec
+        omx.of_match = movein.of_match
+        omx.of_noauto = movein.of_noauto
+        omx.of_pay_on = px.slx.of_pay_on
+        omx.of_pay_take = px.slx.of_pay_take
+        omx.ret_pool = px.fsx.ret_pool
+        omx.rt_back = movein.rt_back
+        omx.rt_out = px.slx.rt_out
+        omx.rt_same = movein.rt_same
+        omx.rt_transit = movein.rt_transit
+        omx.sale_bid9 = movein.sale_bid
+        omx.sale_lot_by = px.slx.sale_lot_by
+        omx.sale_pay_take = px.slx.sale_pay_take
+        omx.sale_rf_bid = px.slx.sale_rf_bid
+        omx.sale_rf_load = px.slx.sale_rf_load
+        omx.signer9 = movein.signer
+        omx.stl_out = px.kpx.stl_out
+        omx.up_dep_by_tx = px.slx.up_dep_by_tx
+        omx.up_dep_uid_ts = movein.up_dep_uid_ts
+        omx.up_win_t0 = movein.up_win_t0
+        omx.cb = px.cb
 
     def out_move(omx, r9, g9, q9, ts9, chain9, txh9):
         sale9 = False
@@ -97,7 +99,7 @@ class OutMove:
                                            bool(r9["kind"] == "native" or g9["is_stable"]),
                                            Decimal(str(r9["cost_krw"])) if r9["cost_krw"] is not None else None, omx.sb._of_key(r9),
                                            omx.sb._of_asset(r9), str(r9["qty_base"]), False))
-        g9["qty_timeline"].append((ts9, -q9))
+        omx.cb.snapshot(g9, ts9, -q9)
         tk9 = o9["tokens"].setdefault(g9["sym"], {"qty": Decimal(0), "cost": Decimal(0), "usd_send": Decimal(0),
                                                    "usd_send_known": True, "gid": g9["gid"], "unknown": Decimal(0),
                                                    "held": Decimal(0), "stable": bool(g9["is_stable"])})
@@ -211,7 +213,8 @@ class OutMove:
                 r9x = aq9 / q9
                 bt_q, bt_k, bt_u = aq9, mk9 * r9x, bt_u * r9x
             omx.br_transit[bm9["key"]] = {"sym": g9["sym"], "qty": bt_q, "ts": ts9, "cost": mc9, "known": bt_k,
-                                      "unknown": bt_u, "left": bt_q, "gid": g9["gid"], "_src": [(r9["posting_id"], 1.0)], "_cmp": omx.cp_merge({}, cp_o9)}
+                                      "unknown": bt_u, "left": bt_q, "gid": g9["gid"], "_src": [(r9["posting_id"], 1.0)], "_cmp": omx.cp_merge({}, cp_o9),
+                                      "krw": kr9, "kc": kc9r, "kk": kk9r, "fk": fk9r, "_stl": stl9r, "id_link": bool(bm9.get("id_link"))}
             if bt_q is aq9:
                 omx.br_transit[bm9["key"]]["_cv"] = {"from": omx.cv_label(cp_o9, g9["sym"]), "ratio": float(r9x)}
             d9 = (f"{CHAIN_NAME.get(chain9, chain9)} → 브릿지 → 내 {CHAIN_NAME.get(bm9['chain'], bm9['chain'])} 지갑 "
@@ -237,26 +240,28 @@ class OutMove:
                                                  "krw": Decimal(0), "left": Decimal(0), "_cmp": {}}
                 p9["qty"] += q9 * sh9; p9["left"] += q9 * sh9; p9["cost"] += mc9 * sh9; p9["known"] += mk9 * sh9
                 p9["unknown"] += un9s * sh9; p9["krw"] += kr9 * sh9
+                p9["kc"] = p9.get("kc", Decimal(0)) + kc9r * sh9
+                p9["kk"] = p9.get("kk", Decimal(0)) + kk9r * sh9
                 p9["_cmp"] = omx.cp_merge(p9["_cmp"], cp_o9, float(sh9))
             try:
                 omx.sale_pay_take(r9, g9, q9, ts9, chain9, txh9, dest9, mc9, mk9, cp_o9)
-            except Exception as e9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move", e9)
-                log.warning("토큰 세일 사용분 처분 재료 실패(이 입찰 종전 경로): %s", common.safe_err(e9)[:160])
+            except Exception as e9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move[sale_pay_take]", e9)
+                log.warning("토큰 세일 사용분 처분 재료 실패(이 입찰 종전 경로): %s", logs.safe_err(e9)[:160])
         else:
             if omx.sale_rf_bid and dest9 not in omx.of_noauto:
                 try:
                     srf9 = omx.sale_rf_load(r9, g9, q9, chain9, txh9, dest9, mc9, mk9, mu9, kr9, cp_o9)
-                except Exception as e9:
-                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move", e9)
-                    log.warning("토큰 세일 정산 환불 재료 실패(종전 경로): %s", common.safe_err(e9)[:160])
+                except Exception as e9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move[srf9]", e9)
+                    log.warning("토큰 세일 정산 환불 재료 실패(종전 경로): %s", logs.safe_err(e9)[:160])
                     srf9 = False
             if omx.of_pay_on and not srf9 and ("of:" + dest9) in omx.sale_lot_by:
                 try:
                     omx.of_pay_take(r9, g9, q9, ts9, chain9, txh9, dest9, mc9, mk9, cp_o9, kr9)
-                except Exception as e9:
-                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move", e9)
-                    log.warning("수동 참가금 처분 재료 실패(종전 경로): %s", common.safe_err(e9)[:160])
+                except Exception as e9:   # noqa: BLE001 [optional]
+                    calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move[of_pay_take]", e9)
+                    log.warning("수동 참가금 처분 재료 실패(종전 경로): %s", logs.safe_err(e9)[:160])
             unk9 = mu9 + max(Decimal(0), q9 - (mk9 + mu9))
             if unk9 <= EPS:
                 c9t = f"원가 ${float(mc9):,.2f}"
@@ -266,13 +271,18 @@ class OutMove:
                 c9t = "원가 미확인"
             dl9 = {"multi": "여러 수령처", "?": "수령처 미상"}.get(dest9) or f"외부 {dest9[:8]}…{dest9[-4:]}"
             d9 = f"{CHAIN_NAME.get(chain9, chain9)} → {dl9} (보낸 내역 · {c9t} 유출)"
-        if (r9["source_ns"], txh9) in omx.rt_out and not g9["is_stable"] and not (ex_fx or u_up or bm9 or sale9 or srf9):
+        if (r9["source_ns"], txh9) in omx.rt_out and not (ex_fx or u_up or bm9 or sale9 or srf9):
             rt9 = omx.rt_transit.setdefault((r9["source_ns"], txh9, g9["gid"]), {"qty": Decimal(0), "cost": Decimal(0), "known": Decimal(0),
                                                                               "unknown": Decimal(0), "left": Decimal(0)})
             rt9["qty"] += q9; rt9["left"] += q9; rt9["cost"] += mc9; rt9["known"] += mk9
             rt9.setdefault("_src", []).append((r9["posting_id"], 1.0))
             rt9["_cmp"] = omx.cp_merge(rt9.get("_cmp") or {}, cp_o9)
             rt9["krw"] = rt9.get("krw", Decimal(0)) + kr9
+            rt9["kc"] = rt9.get("kc", Decimal(0)) + kc9r
+            rt9["kk"] = rt9.get("kk", Decimal(0)) + kk9r
+            rt9["fk"] = rt9.get("fk", Decimal(0)) + fk9r
+            if stl9r:
+                rt9.setdefault("_stl", []).extend(stl9r)
             rt9["unknown"] += mu9 + max(Decimal(0), q9 - (mk9 + mu9))
             d9 += " · 프로그램 예치(왕복 — 복귀 시 원가 복원)"
         elif (omx.fs_on and not (ex_fx or u_up or bm9 or sale9 or srf9) and not g9["is_stable"] and not g9.get("is_fiat")
@@ -328,6 +338,6 @@ class OutMove:
                 lw9 = sorted(str(l0).split(":", 2)[2] for l0 in ((omx._ro.get((r9["source_ns"], r9["source_id"])) or {}).get("loc") or ())
                              if str(l0).count(":") >= 2)
                 of_ev9["of"] = dict(of9, a=dest9, ch=chain9, tx=str(txh9 or ""), w=lw9[0] if lw9 else "", **({} if sale9 else {"cost": c9t}))
-            except Exception as e9:
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move", e9)
+            except Exception as e9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.out_move[sale9]", e9)
                 log.debug("외부 전송 분류 표식 실패: %s", e9)

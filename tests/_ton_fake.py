@@ -221,7 +221,7 @@ class _H(BaseHTTPRequestHandler):
                     return self._send(200, {"transactions": [], "jetton_wallets": [], "accounts": []})
                 break
         ch = srv.ch
-        g = lambda k, d=None: (q.get(k) or [d])[0]
+        g = lambda k, d=None: (q.get(k) or [d])[0]   # noqa: E731
         if path == "/transactions":
             acct = tw.akey(g("account"))
             rows = ch.visible(acct)
@@ -277,7 +277,7 @@ class _H(BaseHTTPRequestHandler):
             m = tw.akey(body.get("address"))
             try:
                 o = tw.Bits(tw.boc_root_bits(body["stack"][0]["value"])).addr()
-            except Exception:
+            except Exception:   # noqa: BLE001
                 return self._send(200, {"exit_code": 9, "stack": []})
             w = ch.gwa.get((m, o))
             if w is None:

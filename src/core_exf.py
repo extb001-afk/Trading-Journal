@@ -1,10 +1,11 @@
 import acct_norm
 import bisect
-import common
+import config, histmark, logs, paths, statefile
 import db as dbm
 import json
 import os
 import re
+import recon_adj
 import sqlite3
 import time
 from core_common import CLASSIFIER_VER
@@ -13,15 +14,15 @@ from decimal import Decimal
 from decimal import ROUND_CEILING
 from decimal import ROUND_HALF_EVEN
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-core')
 
 
-from core_exf_fut import ExfFutMixin
+from core_exf_fut import ExfFutMixin  # noqa: E402
 
 
-from core_exf_late import ExfLateMixin
+from core_exf_late import ExfLateMixin  # noqa: E402
 
 
 class ExfMixin(ExfLateMixin, ExfFutMixin):
@@ -49,11 +50,18 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         self._wd_fee_new_ex(ex)
         now = int(time.time())
         n = 0
-        late9 = []
+        late9, new_income = [], {}
         for f in rec.get("fills") or []:
             if not isinstance(f, dict) or not f.get("id"):
                 continue
             fid = str(f["id"])
+            if f.get("src") == "income":
+                ins_cur = self.conn.execute(
+                    "INSERT OR IGNORE INTO raw_ex (exchange, kind, uuid, revision, payload, observed_at) VALUES (?, 'income', ?, 1, ?, ?)",
+                    (ex, fid, json.dumps(f, ensure_ascii=False), now))
+                if ins_cur.rowcount and self._consume_exf_income(ex, fid, f, new_income):
+                    n += 1
+                continue
             cur9 = self.conn.execute(
                 "INSERT OR IGNORE INTO raw_ex (exchange, kind, uuid, revision, payload,"
                 " observed_at) VALUES (?, 'trade', ?, 1, ?, ?)",
@@ -66,9 +74,108 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 n += 1
                 if f.get("src") == "convert" or f.get("late"):
                     late9.append(f)
-        self._late_stage(ex, self._late_fill_deltas(late9), rec)
+        late_dl = self._late_fill_deltas(late9)
+        if new_income:
+            left = {}
+            self._exf_income_absorb(ex, new_income, left)
+            try:
+                last_l = int(float(self._meta_get(f"recon_done_exf_{ex}") or 0))
+            except (TypeError, ValueError):
+                last_l = 0
+            for sym_l, rows_l in left.items():
+                if sym_l not in late_dl:
+                    continue
+                bounds_l = self._exf_bounds_q(self.conn, ex, sym_l)
+                net_l = {}
+                for ts_l, amt_l in late_dl[sym_l]:
+                    if ts_l <= last_l:
+                        b_l = self._exf_bucket(bounds_l, ts_l)
+                        net_l[b_l] = net_l.get(b_l, Decimal(0)) + amt_l
+                paired_l = []
+                for ts_l, amt_l in rows_l:
+                    b_l = self._exf_bucket(bounds_l, ts_l)
+                    take_l = min(amt_l, max(Decimal(0), -net_l.get(b_l, Decimal(0))))
+                    if take_l > self.EXF_TOL:
+                        paired_l.append((ts_l, take_l))
+                        net_l[b_l] += take_l
+                if paired_l:
+                    late_dl[sym_l].extend(paired_l)
+        self._late_stage(ex, late_dl, rec)
         if n:
             log.info("%s 체결 반영: %d건", ex, n)
+
+    def _consume_exf_income(self, ex: str, fid: str, f: dict, new_income: dict) -> bool:
+        if not self._post_exf_income(ex, f):
+            if not self.conn.execute("SELECT 1 FROM postings WHERE source_ns=? AND source_id=? LIMIT 1", (f"{ex}:income", fid)).fetchone():
+                ex_name = ex if re.fullmatch(r"[a-z0-9_]{1,20}", ex) else "?"
+                log.warning("%s 지급 내역 기장 안 됨(원본만 보존 — 형식 이상)", ex_name)
+                calcguard.swallowed("core_exf:ExfMixin._consume_exf_income:skip", ValueError("지급 내역 기장 누락 %s" % ex_name))
+            return False
+        new_income.setdefault(str(f.get("asset") or "").strip().upper(), []).append(
+            (int(int(f.get("ts") or 0) / 1000), Decimal(str(f.get("amount")))))
+        return True
+
+    def _exf_income_absorb(self, ex: str, items: dict, left: dict = None) -> int:
+        try:
+            last_ts = int(float(self._meta_get(f"recon_done_exf_{ex}") or 0))
+        except (TypeError, ValueError):
+            last_ts = 0
+        if last_ts <= 0:
+            return 0
+        loc, n = f"exchange:{ex}", 0
+        for sym, lst in sorted(items.items()):
+            rows = [r for r in self._exf_adj_rows(ex, sym) if int(r["qty_base"]) > 0 and self._exf_bts(r["source_id"]) is not None
+                    and not histmark.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id"))]
+            bounds = self._exf_bounds_q(self.conn, ex, sym)
+            for ts_s, amt in sorted(lst):
+                if ts_s > last_ts:
+                    continue
+                rem, bucket = amt, self._exf_bucket(bounds, ts_s)
+                for r in sorted((r for r in rows if int(r["qty_base"]) > 0 and ts_s <= int(r["event_ts"]) <= bucket),
+                                key=lambda r: (int(r["event_ts"]), int(r["posting_id"]))):
+                    rem -= self._exf_income_take(ex, r, rem, loc, f"지급 내역 대체 흡수(대사 {bucket} 구간)")
+                    if rem <= self.EXF_TOL:
+                        break
+                for r in sorted((r for r in rows if self._exf_bts(r["source_id"]) >= ts_s and int(r["qty_base"]) > 0 and int(r["event_ts"]) < ts_s),
+                                key=lambda r: (self._exf_bts(r["source_id"]), -int(r["event_ts"]), int(r["posting_id"]))):
+                    if rem <= self.EXF_TOL or not bucket:
+                        break
+                    room = self._exf_room(self._exf_series(ex, sym), int(r["event_ts"]), t_end=ts_s)
+                    rem -= self._exf_income_take(ex, r, min(rem, room), loc, f"지급 내역 앞 보정 대체 흡수(대사 {bucket} 구간)")
+                if left is not None and rem > self.EXF_TOL:
+                    left.setdefault(sym, []).append((ts_s, rem))
+                if amt - rem > self.EXF_TOL:
+                    n += 1
+                    log.info("%s %s: 지급 %s 중 %s 를 지난 대사 보정에서 수입 행으로 대체", ex, sym, format(amt, "f"), format(amt - rem, "f"))
+        return n
+
+    def _exf_income_take(self, ex: str, r: dict, want: Decimal, loc: str, why: str) -> Decimal:
+        if want <= self.EXF_TOL:
+            return Decimal(0)
+        scale = Decimal(10) ** (8 if r["decimals"] is None else int(r["decimals"]))
+        take_base = int(min(want, Decimal(int(r["qty_base"])) / scale) * scale)
+        if take_base <= 0:
+            return Decimal(0)
+        self._exf_shrink(r, take_base, loc, why)
+        return Decimal(take_base) / scale
+
+    def _post_exf_income(self, ex: str, f: dict) -> bool:
+        fid = str(f.get("id") or "")
+        sym = str(f.get("asset") or "").strip().upper()
+        try:
+            amt = Decimal(str(f.get("amount") or "0"))
+            ts_s = int(int(f.get("ts") or 0) / 1000)
+        except (ArithmeticError, TypeError, ValueError):
+            return False
+        qb = int(amt * (Decimal(10) ** 8)) if amt.is_finite() else 0
+        if not fid or not sym or qb <= 0 or ts_s <= 0:
+            return False
+        unit_usd = self._quote_usd(sym, ts_s) if sym != "KRW" else None
+        cost_usd = amt * unit_usd if unit_usd is not None else None
+        fx_rate = self.px.fx_at(ts_s * 1000) if cost_usd is not None else None
+        return self._post_leg("exchange", f"{ex}:income", fid, 0, ts_s, self._exf_asset(ex, sym), f"exchange:{ex}", qb,
+                              repr(float(cost_usd)) if cost_usd is not None else None,
+                              repr(float(cost_usd) * fx_rate) if (cost_usd is not None and fx_rate) else None, "acq", "STAKE_REWARD")
 
     def _exf_fill_skipped(self, ex: str, fid: str, f: dict) -> None:
         try:
@@ -80,7 +187,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             log.warning("%s 체결 기장 안 됨(원본만 보존 — 형식 이상): %s", ex9, why)
             calcguard.swallowed("core_exf:ExfMixin._consume_exf_fills:skip", ValueError("체결 기장 누락 %s %s" % (ex9, why)))
         except sqlite3.Error as e9:
-            log.warning("체결 누락 확인 실패: %s", common.safe_err(e9))
+            log.warning("체결 누락 확인 실패: %s", logs.safe_err(e9))
 
     @staticmethod
     def _exf_fill_bad(f: dict) -> str:
@@ -124,7 +231,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
 
     EXF_DEBT_ONLY_SOURCES = {"gate": ("cross",), "kucoin": ("margin",)}
 
-    EXF_DEBT_FIRST_SEEN = os.path.join(common.BASE_DIR, "seed", "debt_first_seen_t.json")
+    EXF_DEBT_FIRST_SEEN = os.path.join(paths.BASE_DIR, "seed", "debt_first_seen_t.json")
 
     @staticmethod
     def _exf_bts(source_id):
@@ -303,7 +410,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             ex = ns.split(":", 1)[0]
             sym = str(r["symbol"] or "").upper()
             b9 = self._exf_bts(r["source_id"])
-            if b9 is None or not sym or sym in self.EXF_FIX_SKIP or r["location"] != f"exchange:{ex}":
+            if b9 is None or not sym or sym in acct_norm.ex_off_ledger(ex) or r["location"] != f"exchange:{ex}":
                 continue
             if (int(r["leg_seq"]) == 2 or int(r["qty_base"]) <= 0
                     or (int(r["leg_seq"]) == 0 and int(r["event_ts"]) <= max(self._exf_open_ts(ex, b9), b9 - span9) + 60)):
@@ -370,18 +477,15 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             want = {x["leg"]: x for x in m["new"]}
             for o in m["old"]:
                 if o["leg"] not in want:
-                    self.conn.execute("DELETE FROM postings WHERE posting_id=?", (o["pid"],))
+                    self._leg_sql("_exf_fix_place_apply.1", (o["pid"],))
             for l9, x in sorted(want.items()):
                 if l9 in cur and int(cur[l9]["qty_base"]) > 0 and any(o["leg"] == l9 for o in m["old"]):
-                    self.conn.execute("UPDATE postings SET event_ts=?, qty_base=? WHERE posting_id=?",
-                                      (int(x["ts"]), x["qb"], int(cur[l9]["posting_id"])))
+                    self._leg_sql("_exf_fix_place_apply.2", (int(x["ts"]), x["qb"], int(cur[l9]["posting_id"])))
                 elif l9 in cur:
                     raise ValueError(f"재배치 레그 충돌 {m['sid']} leg {l9}")
                 else:
-                    self.conn.execute(
-                        "INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
-                        " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange', ?, ?, ?, ?, ?, ?, ?, NULL, NULL,"
-                        " 'opening', 'EXF_ADJUST', ?)",
+                    self._leg_sql(
+                        "_exf_fix_place_apply.3",
                         (m["ns"], m["sid"], l9, int(x["ts"]), int(m["asset_id"]), m["loc"], x["qb"], int(m["cv"])))
             n += 1
         return n
@@ -402,18 +506,19 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 log.error("양수 정정 재배치 거부 — 잠금 안 계획(%d묶음)이 검토한 계획(%d묶음)과 다름(원장이 그 사이 바뀜)", len(plan), len(expect))
                 return False
             if plan:
-                common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_fix_place_v{self.EXF_FIX_V}.json"),
+                statefile.atomic_write_json(paths.state(f"exf_fix_place_v{self.EXF_FIX_V}.json"),
                                          {"ts": int(time.time()), "v": self.EXF_FIX_V, "moves": plan})
             n = self._exf_fix_place_apply(plan) if plan else 0
+            if n:
+                self._exf_hist_touch(min(min(int(o["ts"]) for o in m["old"] + m["new"]) for m in plan))
             self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fix_place_v', ?)", (f"{self.EXF_FIX_V}:{int(time.time())}:{n}",))
             self.conn.commit()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             calcguard.swallowed("core_exf:ExfMixin._exf_fix_place_once", e)
             self.conn.rollback()
             log.error("양수 정정 재배치 보류(되돌림 · 다음 대사에 다시): %s", e)
             return None
         if n:
-            self._exf_hist_touch(min(min(int(o["ts"]) for o in m["old"] + m["new"]) for m in plan))
             log.warning("★해외 대사 양수 정정 %d묶음 재배치(원장이 처음 모자란 때부터 — 최소 필요량 분할) — 수량 무변, 지난 곡선 무효화★", n)
             self._exf_hist_flush()
         return n
@@ -426,7 +531,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         if s9 == "KRW":
             try:
                 fx = self.px.fx_at(int(time.time()) * 1000)
-            except Exception as _cg9:
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
                 calcguard.swallowed("core_exf:ExfMixin._exf_unit_usd", _cg9)
                 fx = None
             return (Decimal(1) / Decimal(str(fx))) if fx else None
@@ -455,7 +560,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         big = max(abs(ledger), abs(Decimal(str(actual or 0))))
         return big > 0 and abs(diff) <= big * self.EXF_MICRO_REL
 
-    EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
+    EXF_REVERT_LOG = paths.StatePath("exf_recon_revert.jsonl")
 
     def _exf_shrink(self, r: dict, take_base: int, loc: str, why: str = "") -> None:
         old = int(r["qty_base"])
@@ -486,6 +591,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 log.warning("대사 구간 경계 기록 실패(되돌림은 진행): %s", e9)
         else:
             self._amend_leg(r["posting_id"], r["asset_id"], loc, new - old, qb_new=new)
+            recon_adj.note_fix(self.conn, "K7", r["posting_id"], "shrink:" + str(why)[:40])
         r["qty_base"] = str(new)
         r["_t"] = True
         self._exf_hist_touch(r["event_ts"])
@@ -495,7 +601,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
     def _exf_now_sym(self, ex: str, sym: str) -> bool:
         if ex not in self.EXF_NOW_EX:
             return False
-        p9 = os.path.join(common.STATE_DIR, "hl_cash_syms.json")
+        p9 = paths.state("hl_cash_syms.json")
         try:
             mt9 = os.path.getmtime(p9)
         except OSError:
@@ -505,8 +611,8 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             syms9 = {"USDC"}
             if mt9 is not None:
                 try:
-                    syms9 |= {str(x).upper() for x in ((common.read_json(p9, {}) or {}).get("syms") or []) if isinstance(x, str)}
-                except (Exception, SystemExit) as _cg9:
+                    syms9 |= {str(x).upper() for x in ((statefile.read_json(p9, {}) or {}).get("syms") or []) if isinstance(x, str)}
+                except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [optional]
                     calcguard.swallowed("core_exf:ExfMixin._exf_now_sym", _cg9)
                     pass
             c9 = (mt9, frozenset(syms9))
@@ -541,7 +647,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             q9 = int(r["qty_base"])
             if b9 is None or b9 >= bts or q9 == 0 or (q9 > 0) == (sign > 0):
                 continue
-            if common.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id")):
+            if histmark.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id")):
                 continue
             if int(r["event_ts"]) < b9 - 60:
                 continue
@@ -657,14 +763,6 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 t9 = t
         return int(min(max(t9 if t9 is not None else hi, lo), hi))
 
-    @classmethod
-    def settle_planner(cls, cfg: dict, conn):
-        c = object.__new__(cls)
-        c.cfg = cfg
-        c.conn = conn
-        c.recon_months = 0.0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 0)
-        return c
-
     def _exf_ext_settle_plan(self, ex: str, bts_set) -> list:
         want9 = {int(b) for b in bts_set}
         if len(want9) > 1:
@@ -695,12 +793,12 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         moved = 0
         t_min9 = None
         for m9 in self._exf_ext_settle_plan(ex, bts_set):
-            self.conn.execute("UPDATE postings SET event_ts=? WHERE posting_id=? AND event_ts=?", (m9["new"], m9["pid"], m9["old"]))
+            self._leg_sql("_exf_ext_settle_repair.1", (m9["new"], m9["pid"], m9["old"]))
             moved += 1
             t_min9 = m9["new"] if t_min9 is None else min(t_min9, m9["new"])
         if moved:
-            self.conn.commit()
             self._exf_hist_touch(t_min9)
+            self.conn.commit()
             log.warning("★%s 확장 직후 대사 보정 %d건 → 음수 = 잔고가 남던 구간 시작 · 양수 = 창 시작(시각만 — 지난날 유령·누락 보유 제거)★", ex, moved)
         return moved
 
@@ -726,7 +824,8 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             w9 = self._win_t0(b9, ex)
             if et9 <= w9 + 60:
                 continue
-            self.conn.execute("UPDATE postings SET event_ts=? WHERE posting_id=?", (int(w9), r["posting_id"]))
+            self._leg_sql("_exf_ext_redate.1", (int(w9), r["posting_id"]))
+            recon_adj.note_fix(self.conn, "K7", r["posting_id"], "ext_redate")
             moved += 1
             self._exf_hist_touch(w9)
         if moved:
@@ -773,7 +872,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         self._exf_debt_redate_once()
         self._exf_fix_place_once()
         self._exf_fut_place_once(auto=True)
-        st_all = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+        st_all = statefile.read_json(paths.state("exf_state.json"), {})
         now = int(time.time())
         for ex, st in (st_all or {}).items():
             done_ts = self._meta_get(f"recon_done_exf_{ex}")
@@ -782,11 +881,11 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 continue
             if self._exf_late_pending(ex):
                 continue
-            bal = common.read_json(
-                os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"), {})
+            bal = statefile.read_json(
+                paths.state(f"exf_balances_{ex}.json"), {})
             bts = int(bal.get("ts") or 0)
             balances = bal.get("balances")
-            if now - bts > common.exf_fresh_sec(self.cfg) or not isinstance(balances, dict):
+            if now - bts > config.exf_fresh_sec(self.cfg) or not isinstance(balances, dict):
                 continue
             if done_ts and int(float(done_ts)) >= bts:
                 continue
@@ -799,7 +898,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                              ex, bts, int(getattr(self, "_drain_at", 0)))
                 continue
             actual = {str(k).upper(): float(v) for k, v in balances.items()
-                      if str(k).upper() not in ("KRW", "USD")}
+                      if str(k).upper() not in acct_norm.ex_off_ledger(ex)}
             debts9 = bal.get("debts") if isinstance(bal.get("debts"), dict) else {}
             for k9, v9 in debts9.items():
                 ku9 = str(k9).upper()
@@ -807,13 +906,13 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                     fv9 = float(v9)
                 except (TypeError, ValueError):
                     continue
-                if ku9 not in ("KRW", "USD") and fv9 < 0:
+                if ku9 not in acct_norm.ex_off_ledger(ex) and fv9 < 0:
                     actual[ku9] = actual.get(ku9, 0.0) + fv9
             first9 = not done_ts
             settle9 = self._exf_ext_settling(ex, st, done_ts)
             cov_new9 = self._exf_cov_new(ex, bal)
             debt_now9 = {str(k9).upper(): Decimal(str(-float(v9))) for k9, v9 in debts9.items()
-                         if isinstance(v9, (int, float)) and v9 < 0 and str(k9).upper() not in ("KRW", "USD")}
+                         if isinstance(v9, (int, float)) and v9 < 0 and str(k9).upper() not in acct_norm.ex_off_ledger(ex)}
             added9 = self._exf_src_added(ex, bal)
             loan_since9, loan_prin9 = {}, {}
             for ln9 in (bal.get("loans") if isinstance(bal.get("loans"), list) else ()):
@@ -915,7 +1014,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                     legs9.append((0, self._exf_open_ts(ex, bts), int(diff * (Decimal(10) ** main_dec))))
                 elif diff > 0 and now9:
                     legs9.append((0, bts, int(diff * (Decimal(10) ** main_dec))))
-                elif diff > 0 and sym not in self.EXF_FIX_SKIP:
+                elif diff > 0 and sym not in acct_norm.ex_off_ledger(ex):
                     agg9, keys9 = self._exf_agg(ex, sym)
                     sc9 = Decimal(10) ** main_dec
                     tr9, rem9 = self._exf_tranches(agg9, keys9, int(diff * sc9), sc9, bts, self._exf_open_ts(ex, bts))
@@ -938,6 +1037,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                     if qb == 0:
                         continue
                     if self._post_leg('exchange', f'{ex}:recon', f'exfrecon:{sym}:{bts}', seq9, int(ev9), main_aid, loc9, qb, None, None, 'opening', 'EXF_ADJUST'):
+                        recon_adj.note(self.conn, "K7", ('exchange', f'{ex}:recon', f'exfrecon:{sym}:{bts}', seq9), recon_adj.exf_why(qb, ev9, bts, seq9, {"first": first9, "cov": cov_new9, "settle": settle9 is not None, "now": now9, "debt": sym in debt_now9, "skip": sym in self.EXF_FIX_SKIP}))
                         hit9 = True
                         if ev9 < bts - 60:
                             self._exf_hist_touch(ev9)
@@ -973,12 +1073,12 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             try:
                 if not first9 and self._exf_ext_redate(ex, bts, st_all.get(ex) if isinstance(st_all, dict) else None):
                     self._exf_hist_dirty = True
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("core_exf:ExfMixin.exf_recon_pass", e9)
                 self.conn.rollback()
                 log.warning("%s 옛 창 시작 보정 시각 이동 실패(다음 대사): %s", ex, e9)
             if n_adj > 0:
-                dm("EXF_RECON", f"{ex} 잔고 대사 완료 — {n_adj}개 통화 보정")
+                recon_adj.exf_dm(self.conn, self._win_t0, ex, bts, n_adj, dm, px_fn=lambda sym_, aid_: self._exf_unit_usd(ex, sym_, [aid_]))
         self._exf_hist_flush()
 
     def _post_exf_deposit_in(self, ex: str, uid: str, d: dict) -> bool:
@@ -987,7 +1087,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         except ArithmeticError:
             amt9 = Decimal(0)
         ccy9 = str(d.get("currency") or "").upper()
-        if amt9 <= 0 or not ccy9:
+        if amt9 <= 0 or not ccy9 or self.conn.execute("SELECT 1 FROM meta WHERE k=?", (f"exf_rawskip:{ex}:deposit:{uid}",)).fetchone():
             return False
         if ccy9 == "KRW":
             return False
@@ -997,6 +1097,12 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             return False
         aid9 = self._exf_asset(ex, ccy9)
         qb9 = int(amt9 * (Decimal(10) ** 8))
+        if d.get("reward") and ccy9 in self.EXF_STABLE_QUOTES:
+            fx_rate = self.px.fx_at(dts * 1000)
+            if self._post_leg('exchange', f'{ex}:deposit', uid, 0, dts, aid9, f'exchange:{ex}', qb9, repr(float(amt9)),
+                              repr(float(amt9) * fx_rate) if fx_rate else None, 'acq', 'STAKE_REWARD'):
+                return True
+            return False
         if self._post_leg('exchange', f'{ex}:deposit', uid, 0, dts, aid9, f'exchange:{ex}', qb9, None, None, 'move_in', 'EXF_DEPOSIT'):
             return True
         return False
@@ -1034,7 +1140,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
         except ArithmeticError:
             amt9 = Decimal(0)
         ccy9 = str(d.get("currency") or "").upper()
-        if amt9 <= 0 or not ccy9:
+        if amt9 <= 0 or not ccy9 or self.conn.execute("SELECT 1 FROM meta WHERE k=?", (f"exf_rawskip:{ex}:withdraw:{uid}",)).fetchone():
             return False
         if ccy9 == "KRW":
             return False

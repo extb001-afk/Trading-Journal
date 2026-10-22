@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
-import subprocess
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
 
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-import common
-import db as dbm
-import inbox
-import ledger_backup as lb
-import ledger_restore as LR
-import unit_runner as U
+import histmark, paths, statefile  # noqa: E402
+import db as dbm  # noqa: E402
+import inbox  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import ledger_restore as LR  # noqa: E402
+import unit_runner as U  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 os.makedirs(os.path.join(S, "inbox"), exist_ok=True)
 
 
@@ -27,7 +27,7 @@ def ck(name, cond, extra=None):
 
 
 def wj(name, obj):
-    common.atomic_write_json(os.path.join(S, name), obj)
+    statefile.atomic_write_json(os.path.join(S, name), obj)
 
 
 def rj(name):
@@ -133,8 +133,8 @@ open(os.path.join(S, "backups", "backup_status.json"), "w").write("{}")
 wj("daily_cache.json", {"x": 1})
 rc = LR.new_ledger(apply_=True, log=lambda *a: None)
 ck("[1] new --apply = 허용 표식", rc == 0 and os.path.exists(os.path.join(S, lb.NEW_LEDGER_OK)))
-hd9 = json.load(open(os.path.join(S, common.HIST_DIRTY), encoding="utf-8")) if os.path.exists(os.path.join(S, common.HIST_DIRTY)) else None
-ck("[1] new --apply = 일별 캐시 무효화 + 장기 곡선 처음부터 다시 계산 표식(it326)", not os.path.exists(os.path.join(S, "daily_cache.json"))
+hd9 = json.load(open(os.path.join(S, histmark.HIST_DIRTY), encoding="utf-8")) if os.path.exists(os.path.join(S, histmark.HIST_DIRTY)) else None
+ck("[1] new --apply = 일별 캐시 무효화 + 장기 곡선 처음부터 다시 계산 표식", not os.path.exists(os.path.join(S, "daily_cache.json"))
    and isinstance(hd9, dict) and hd9.get("from") == "1970-01-01", hd9)
 g = run_runner_once()
 ck("[1] 표식이 있으면 흔적이 있어도 한 번 허용", (g.get("env") or {}).get("TJ_ALLOW_NEW_LEDGER") == "1")
@@ -154,7 +154,7 @@ try:
         r9 = "거부: " + str(e9)
 finally:
     LR.running_units = saved_ru9
-ck("[1] new --fresh-collect + 수집기 떠 있음 = 거부(정지 안내) · 파일 그대로 · 표식 없음(it329)",
+ck("[1] new --fresh-collect + 수집기 떠 있음 = 거부(정지 안내) · 파일 그대로 · 표식 없음",
    isinstance(r9, str) and "pm2 stop" in r9 and os.path.exists(os.path.join(S, "cursor_evm_eth.json"))
    and not os.path.exists(os.path.join(S, lb.NEW_LEDGER_OK)), r9)
 LR.running_units = lambda root=None: [(4243, "unit_runner.py core"), (4244, "web.py")]
@@ -166,7 +166,7 @@ ck("[1] 원장 없음으로 기다리는 core 러너·웹만 떠 있음 = 허용
    and os.path.exists(os.path.join(S, lb.NEW_LEDGER_OK)), r9)
 
 clear_state()
-live = common.DB_PATH
+live = paths.DB_PATH
 
 
 def mkdb(path, rows=1, tag="x"):
@@ -213,7 +213,7 @@ ck("[2] 마지막 교체가 실패해도 원장 자리가 비지 않음(옛 원�
    and sqlite3.connect(live).execute("SELECT count(*) FROM t").fetchone()[0] == 5)
 ck("[2] 교체 이름 바꾸기는 한 번만 시도(원장 → 보존본 이름 바꾸기 없음)", not any(os.path.abspath(a) == os.path.abspath(live) for a, _b in calls), calls)
 
-import core
+import core  # noqa: E402
 mkdb(live + ".extnew_X", 2, "ext")
 ino_now = os.stat(live).st_ino
 core.Core._ext_swap(live, live + ".extnew_X", "20261009_000000")
@@ -253,7 +253,7 @@ def _cnt9():
 
 
 n9 = T.safe(_cnt9)
-ck("[2] 교체 실패 뒤 옛 원장 = 자기 WAL 커밋까지(5행) — wl314 ②", raised9 and n9 == 5 and wal9, (raised9, n9, wal9))
+ck("[2] 교체 실패 뒤 옛 원장 = 자기 커밋 5행 그대로 · R3 교체 전 WAL 합침", raised9 and n9 == 5, (raised9, n9, wal9))
 ck("[2] 교체 실패 = 보존본 링크 정리(옛 원장 그대로라 필요 없음)", not os.path.exists(lw + ".pre_x") and not os.path.exists(lw + ".pre_x-wal"))
 
 pw = os.path.join(T.TMP, "walsrc.db")
@@ -266,7 +266,7 @@ os._exit(0)
 ''', pw], check=True)
 ck("[2] (전제) -wal 에 커밋이 남음", os.path.getsize(pw + "-wal") > 0)
 LR.copy_ledger(pw, pw + ".copy")
-ck("[2] 복원 복사 = WAL 몫까지(2행) · 단일 파일 · 0600", sqlite3.connect(common.sqlite_ro_uri(pw + ".copy", immutable=True), uri=True)
+ck("[2] 복원 복사 = WAL 몫까지(2행) · 단일 파일 · 0600", sqlite3.connect(paths.sqlite_ro_uri(pw + ".copy", immutable=True), uri=True)
    .execute("SELECT count(*) FROM t").fetchone()[0] == 2 and not os.path.exists(pw + ".copy-wal") and (os.stat(pw + ".copy").st_mode & 0o777) == 0o600)
 
 clear_state()
@@ -381,15 +381,15 @@ ck("[4] 인박스에 백업 위치가 다 남음 = 되감기 없음", p["rewind"
 after_preview = {n: open(os.path.join(S, n), "rb").read() for n in before}
 ck("[6] 미리보기(계획)는 아무것도 안 바꿈", after_preview == before and os.stat(live).st_ino == ino_cur)
 rec = LR.apply(p, proc_check=False, log=lambda *a: None)
-c = sqlite3.connect(common.sqlite_ro_uri(live), uri=True)
+c = sqlite3.connect(paths.sqlite_ro_uri(live), uri=True)
 ck("[4] 원장 = 백업 내용(inbox_offsets 포함 — core 가 그 위치부터 다시 읽음)",
    c.execute("SELECT seg, off FROM inbox_offsets WHERE stream='evm'").fetchone() == (2, 10))
 c.close()
 ck("[4] 이전 원장 보존(하드 링크)", rec["kept"] and os.stat(rec["kept"]).st_ino == ino_cur)
 ck("[4] 수집기 상태 파일 그대로", {n: open(os.path.join(S, n), "rb").read() for n in before} == before)
 ck("[4] 일별 캐시 무효화", not os.path.exists(os.path.join(S, "daily_cache.json")))
-hd9 = json.load(open(os.path.join(S, common.HIST_DIRTY), encoding="utf-8")) if os.path.exists(os.path.join(S, common.HIST_DIRTY)) else None
-ck("[4] 장기 곡선 처음부터 다시 계산 표식(hist_dirty — it326: 옛 원장 기준 창 밖 동결 행이 남지 않게)", isinstance(hd9, dict) and hd9.get("from") == "1970-01-01", hd9)
+hd9 = json.load(open(os.path.join(S, histmark.HIST_DIRTY), encoding="utf-8")) if os.path.exists(os.path.join(S, histmark.HIST_DIRTY)) else None
+ck("[4] 장기 곡선 처음부터 다시 계산 표식(hist_dirty — 옛 원장 기준 창 밖 동결 행이 남지 않게)", isinstance(hd9, dict) and hd9.get("from") == "1970-01-01", hd9)
 ck("[4] 기록 plan.json · 잠금 해제", os.path.exists(os.path.join(rec["originals"], "plan.json")) and not os.path.exists(os.path.join(S, "restore.lock")))
 ck("[4] 백업 파일은 그대로(복사해서 씀)", os.path.exists(BK))
 
@@ -398,7 +398,7 @@ os.makedirs(os.path.join(S, "backups"))
 make_backup(BK)
 mkdb(live, 1, "cur")
 state_files()
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"wallets": [{"type": "sol", "address": SOLW}]}, f)
 for st9, n in (("evm", 9), ("sol", 4), ("bsc", 6), ("ex", 8)):
     seg(st9, n)
@@ -419,13 +419,13 @@ ck("[5] 솔라나 지갑 커서 = 여유 이전 그 지갑이 낀 마지막 서�
 ck("[5] 솔라나 스테이크 계정 커서 = 그 계정 잔고가 바뀐 서명", cs.get(STK) == SIG(2), cs)
 ck("[5] 솔라나 토큰 계정 커서 = 지움(목록 처음부터 · 방출 기록이 거름)", ATA not in cs and "_slot:" + ATA not in cs, cs)
 ck("[5] 솔라나 스테이킹 보상 다음 에폭 낮춤", cs["_stk:" + STK]["rwd_next"] < 800, cs["_stk:" + STK])
-ck("[5] 솔라나 첫 백필 진행 표식·엿보기 기준(_fbw·_hl) 지움(되감은 원장 = 처음부터 새 관점으로 다시 읽음 · sollive1010)",
+ck("[5] 솔라나 첫 백필 진행 표식·엿보기 기준(_fbw·_hl) 지움(되감은 원장 = 처음부터 새 관점으로 다시 읽음)",
    not [k for k in cs if k.startswith(("_fbw:", "_hl:"))], [k for k in cs if k.startswith(("_fbw:", "_hl:"))])
 ck("[5] 솔라나 방출 기록 = 백업에 있는 것만(합성 보상 ID 포함)", rj("emitted_sol.json") == [SIG(1), SIG(2), SIG(3), f"stakerwd:{STK}:800"], rj("emitted_sol.json"))
-ck("[5] 합성 ID(stakerwd:…)는 서명 커서로 안 씀(wl316 ①)", not any(str(v).startswith(("stakerwd:", "stakeopen:")) for v in cs.values()), cs)
+ck("[5] 합성 ID(stakerwd:…)는 서명 커서로 안 씀", not any(str(v).startswith(("stakerwd:", "stakeopen:")) for v in cs.values()), cs)
 cb = rj("cursor_bsc.json")
 ck("[5] BSC from_block 되감음(창 하한 위) · 체크포인트·도장 지움", 1000 <= cb["from_block"] < 900000 and "_scan" not in cb and "_synced_at" not in cb, cb)
-ck("[5] BSC 라이브 차선 기록(_live·_lscan) 지움 — 되감기 기준 뒤를 받은 것으로 남기지 않음(bsclive1010)", "_live" not in cb and "_lscan" not in cb, cb)
+ck("[5] BSC 라이브 차선 기록(_live·_lscan) 지움 — 되감기 기준 뒤를 받은 것으로 남기지 않음", "_live" not in cb and "_lscan" not in cb, cb)
 ck("[5] BSC 방출 기록·발신 색인·출금 회수 기록 = 백업 것만", rj("emitted_bsc.json") == ["0xb1"]
    and list(rj("bsc_nonce.json")["w"][W1]["hashes"]) == ["0xb1"] and "missing" not in rj("bsc_nonce.json")["w"][W1]
    and "0xb2new" not in rj("bsc_xin.json")["tx"] and "0xold" in rj("bsc_xin.json")["tx"])
@@ -447,7 +447,7 @@ ck("[5] 하이퍼리퀴드 커서 = 여유 이전 · 그 뒤에 본 기록 지�
 ck("[5] 해외 잔고 스냅숏 치움(다시 받기 전 대사 방지)", not os.path.exists(os.path.join(S, "exf_balances_binance.json")))
 ck("[5] 바꾼 파일 원본 보존", os.path.exists(os.path.join(rec["originals"], "cursor_evm_eth.json"))
    and os.path.exists(os.path.join(rec["originals"], "exf_balances_binance.json")))
-ck("[5] 원장 = 백업", sqlite3.connect(common.sqlite_ro_uri(live), uri=True).execute("SELECT count(*) FROM raw_txs").fetchone()[0] == 8)
+ck("[5] 원장 = 백업", sqlite3.connect(paths.sqlite_ro_uri(live), uri=True).execute("SELECT count(*) FROM raw_txs").fetchone()[0] == 8)
 
 clear_state()
 os.makedirs(os.path.join(S, "backups"))
@@ -457,7 +457,7 @@ c9.execute("UPDATE inbox_offsets SET seg=400, off=12000 WHERE stream='evm'")
 c9.commit()
 c9.close()
 state_files()
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"wallets": []}, f)
 seg("evm", 1, lines=2)
 seg("evm", 2, lines=1)
@@ -466,13 +466,13 @@ for st9 in ("sol", "bsc", "ex"):
 p = LR.plan(BK, now=NOW)
 ck("[7] 인박스 잃음 = evm gap", p["coverage"]["evm"]["state"] == "gap", p["coverage"]["evm"])
 LR.apply(p, proc_check=False, log=lambda *a: None)
-c9 = sqlite3.connect(common.sqlite_ro_uri(live), uri=True)
+c9 = sqlite3.connect(paths.sqlite_ro_uri(live), uri=True)
 row9 = c9.execute("SELECT seg, off FROM inbox_offsets WHERE stream='evm'").fetchone()
 c9.close()
 seg0, off0 = row9 if row9 else (1, 0)
 got9, _s9, _o9 = inbox.SegmentReader(os.path.join(S, "inbox", "evm")).read_batch(seg0, off0)
-ck("[7] 복구 뒤 core 가 새 인박스를 처음부터 읽음(3건 — wl314 ①)", len(got9) == 3, (row9, len(got9)))
-ck("[7] 이어읽기 스트림(sol)은 백업 위치 그대로", sqlite3.connect(common.sqlite_ro_uri(live), uri=True)
+ck("[7] 복구 뒤 core 가 새 인박스를 처음부터 읽음(3건)", len(got9) == 3, (row9, len(got9)))
+ck("[7] 이어읽기 스트림(sol)은 백업 위치 그대로", sqlite3.connect(paths.sqlite_ro_uri(live), uri=True)
    .execute("SELECT seg, off FROM inbox_offsets WHERE stream='sol'").fetchone() == (1, 0))
 ck("[7] 복구 원장 단일 파일(-wal 없음)", not os.path.exists(live + "-wal") or os.path.getsize(live + "-wal") == 0)
 clear_state()
@@ -507,8 +507,8 @@ try:
     ck("[6] 유닛이 떠 있으면 적용 거부(정지 안내)", refused)
 finally:
     LR.running_units = saved_ru
-import contextlib
-import io
+import contextlib  # noqa: E402
+import io  # noqa: E402
 
 
 def run_cli(argv):
@@ -519,7 +519,7 @@ def run_cli(argv):
         return rc, out.getvalue(), None
     except SystemExit as e:
         return (e.code if isinstance(e.code, int) else str(e.code)), out.getvalue(), None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return None, out.getvalue(), type(e).__name__
 
 
@@ -608,11 +608,11 @@ open(os.path.join(fd9, "daily_px.json"), "w", encoding="utf-8").write('{"2026-10
 wj("daily_px.json", {"2026-10-07": {"BTC": 777}})
 wj("settings.json", {"tg": {"chat": "now"}})
 r9 = run_cli(["files", "20261008", "--apply", "--no-proc-check"])
-ck("[8] op405 ② 깨진 사본(잘린 daily_px) 하나 = 전체 거부 · 지금 파일 무변 · 보존 폴더 안 만듦",
+ck("[8] 깨진 사본(잘린 daily_px) 하나 = 전체 거부 · 지금 파일 무변 · 보존 폴더 안 만듦",
    r9[2] is None and "깨진 사본" in str(r9[0]) and rj("daily_px.json") == {"2026-10-07": {"BTC": 777}} and rj("settings.json") == {"tg": {"chat": "now"}}
    and len([n for n in os.listdir(S) if n.startswith("restore_files_")]) == 1, r9)
 r9 = run_cli(["files", "20261008"])
-ck("[8] op405 ② 미리보기에 깨진 사본 표시", r9[2] is None and "깨짐" in r9[1] and "daily_px.json" in r9[1], r9)
+ck("[8] 미리보기에 깨진 사본 표시", r9[2] is None and "깨짐" in r9[1] and "daily_px.json" in r9[1], r9)
 with open(os.path.join(fd9, "daily_px.json"), "w", encoding="utf-8") as f:
     json.dump({"2026-10-07": {"BTC": 1}}, f)
 LR.running_units = lambda root=None, **k: [(4243, "review_daily.py")] if "review_daily.py" in (k.get("scripts") or ()) else []
@@ -620,9 +620,9 @@ try:
     r9 = run_cli(["files", "20261008", "--apply"])
 finally:
     LR.running_units = saved_ru
-ck("[8] op405 ③ tj-review(review_daily.py)가 떠 있으면 files 적용 거부(정지 안내)", r9[2] is None and "pm2 stop tj-web tj-review" in str(r9[0])
+ck("[8] tj-review(review_daily.py)가 떠 있으면 files 적용 거부(정지 안내)", r9[2] is None and "pm2 stop tj-web tj-review" in str(r9[0])
    and "review_daily.py" in str(r9[0]) and rj("daily_px.json") == {"2026-10-07": {"BTC": 777}}, r9)
-ck("[8] op405 ③ 원장 되돌리기(restore)는 tj-review 를 막지 않음(원장을 안 씀) — 기본 검사 목록에 없음", "review_daily.py" not in LR.UNIT_SCRIPTS)
+ck("[8] 원장 되돌리기(restore)는 tj-review 를 막지 않음(원장을 안 씀) — 기본 검사 목록에 없음", "review_daily.py" not in LR.UNIT_SCRIPTS)
 r9 = run_cli(["files", "2026-10-08"])
 ck("[8] ⑥ 날짜 형식이 틀리면 안내(traceback 없음)", r9[2] is None and "YYYYMMDD" in str(r9[0]), r9)
 T.finish()

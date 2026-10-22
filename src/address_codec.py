@@ -4,6 +4,8 @@ import base64
 import hashlib
 import re
 
+import token_tables
+
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _B58_IDX = {c: i for i, c in enumerate(_B58)}
 
@@ -437,3 +439,121 @@ def btc_wallet_id(source_text: str) -> str:
 def btc_mask(text: str) -> str:
     s = str(text or "")
     return s if len(s) <= 14 else s[:6] + "…" + s[-4:]
+
+
+_RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
+       0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
+       0x000000000000008A, 0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
+       0x000000008000808B, 0x800000000000008B, 0x8000000000008089, 0x8000000000008003,
+       0x8000000000008002, 0x8000000000000080, 0x000000000000800A, 0x800000008000000A,
+       0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008]
+
+
+_ROT = [[0, 36, 3, 41, 18], [1, 44, 10, 45, 2], [62, 6, 43, 15, 61], [28, 55, 25, 21, 56], [27, 20, 39, 8, 14]]
+
+
+_M64 = (1 << 64) - 1
+
+
+def _keccak_f(s):
+    for rc in _RC:
+        c = [s[x][0] ^ s[x][1] ^ s[x][2] ^ s[x][3] ^ s[x][4] for x in range(5)]
+        d = [c[(x - 1) % 5] ^ (((c[(x + 1) % 5] << 1) | (c[(x + 1) % 5] >> 63)) & _M64) for x in range(5)]
+        s = [[s[x][y] ^ d[x] for y in range(5)] for x in range(5)]
+        b = [[0] * 5 for _ in range(5)]
+        for x in range(5):
+            for y in range(5):
+                r = _ROT[x][y]
+                v = s[x][y]
+                b[y][(2 * x + 3 * y) % 5] = ((v << r) | (v >> (64 - r))) & _M64 if r else v
+        s = [[b[x][y] ^ ((~b[(x + 1) % 5][y]) & b[(x + 2) % 5][y]) for y in range(5)] for x in range(5)]
+        s[0][0] ^= rc
+    return s
+
+
+def keccak256(data: bytes) -> bytes:
+    rate = 136
+    msg = bytearray(data) + b"\x01"
+    while len(msg) % rate:
+        msg.append(0)
+    msg[-1] |= 0x80
+    s = [[0] * 5 for _ in range(5)]
+    for off in range(0, len(msg), rate):
+        blk = msg[off:off + rate]
+        for i in range(rate // 8):
+            x, y = i % 5, i // 5
+            s[x][y] ^= int.from_bytes(blk[i * 8:i * 8 + 8], "little")
+        s = _keccak_f(s)
+    out = b""
+    for i in range(4):
+        out += s[i % 5][i // 5].to_bytes(8, "little")
+    return out
+
+
+def to_checksum(addr: str) -> str:
+    a = addr.lower().replace("0x", "")
+    h = keccak256(a.encode()).hex()
+    return "0x" + "".join(ch.upper() if ch.isalpha() and int(h[i], 16) >= 8 else ch for i, ch in enumerate(a))
+
+
+SOL_NOT_WALLET = {
+    "11111111111111111111111111111111": "시스템 프로그램",
+    "So11111111111111111111111111111111111111112": "wSOL 민트",
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": "토큰 프로그램",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb": "토큰-2022 프로그램",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": "연결 토큰 계정 프로그램",
+    "Stake11111111111111111111111111111111111111": "스테이크 프로그램",
+    "Vote111111111111111111111111111111111111111": "투표 프로그램",
+    "ComputeBudget111111111111111111111111111111": "컴퓨트 예산 프로그램",
+    **{m: f"{sym} 민트" for m, sym in token_tables.STABLE_MINTS.items()},
+}
+
+
+def validate_address(addr: str):
+    a = (addr or "").strip()
+    sec9 = secret_like([a]) or ("개인 키(Solana 비밀 키)처럼 보이는 값이에요 — 지우고 주소만 넣으세요. 개인 키는 절대 입력하지 마세요"
+                                if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{80,90}", a) else "") \
+        or ("개인 키(비트코인 WIF·확장 개인 키)처럼 보이는 값이에요 — 지우고 주소만 넣으세요. 개인 키는 절대 입력하지 마세요" if has_private_material(a) else "")
+    if sec9:
+        raise ValueError(sec9.replace("아무것도 저장하지 않았습니다", "저장하지 않았습니다"))
+    if a in SOL_NOT_WALLET:
+        raise ValueError(f"지갑 주소가 아니에요({SOL_NOT_WALLET[a]}) — 내 지갑 주소를 넣으세요")
+    if a.lower().startswith("0x"):
+        body = a[2:]
+        if len(body) != 40 or not re.fullmatch(r"[0-9a-fA-F]{40}", body):
+            raise ValueError("EVM 주소는 0x + 16진수 40자입니다")
+        if int(body, 16) == 0:
+            raise ValueError("0 주소는 추적할 수 없습니다")
+        note = ""
+        if body != body.lower() and body != body.upper():
+            if to_checksum(a) != "0x" + body:
+                raise ValueError("체크섬이 맞지 않습니다 — 대소문자가 섞인 주소는 한 글자만 틀려도 거부합니다. 복사한 원문을 확인하세요")
+            note = "체크섬 확인됨"
+        else:
+            note = "체크섬 없는 주소(전부 소문자/대문자) — 오타 여부를 한 번 더 확인하세요"
+        return "evm", "0x" + body.lower(), note
+    if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", a):
+        raise ValueError("0x… EVM 주소 또는 Solana(base58) 주소가 아닙니다 — 비트코인·트론·코스모스 등은 지원하지 않아요")
+    if len(b58decode(a)) != 32:
+        raise ValueError("Solana 주소는 base58 로 32바이트여야 합니다(트론 T… 주소 등은 지원하지 않아요)")
+    return "sol", a, "Solana 주소 형식 확인됨"
+
+
+ADDR_SPLIT = re.compile(r"[\s,;，；、]+")
+
+
+def split_addresses(text) -> list:
+    return [t for t in ADDR_SPLIT.split(str(text or "")) if t]
+
+
+_SECRET_HEX64 = re.compile(r"[0-9a-fA-F]{64}")
+_WORD = re.compile(r"[A-Za-z]{3,8}")
+
+
+def secret_like(tokens) -> str:
+    toks = [t for t in tokens if isinstance(t, str)]
+    if _SECRET_HEX64.search(ADDR_SPLIT.sub("", "".join(toks))):
+        return "개인 키(16진수 64자)처럼 보이는 값이 있어 아무것도 저장하지 않았습니다 — 지우고 주소만 넣으세요. 개인 키는 절대 입력하지 마세요"
+    if sum(1 for t in toks for w in ADDR_SPLIT.split(t) if _WORD.fullmatch(w)) >= 12:
+        return "시드 문구(단어 12·24개)처럼 보이는 값이 있어 아무것도 저장하지 않았습니다 — 지우고 주소만 넣으세요. 시드는 절대 입력하지 마세요"
+    return ""

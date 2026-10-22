@@ -14,6 +14,7 @@ hist_dirty.json
 *.log
 *.bak*
 *.jsonl
+!tests/arch_baseline/*.jsonl
 __pycache__/
 *.pyc
 .DS_Store

@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
 
 W = "0x" + "ab" * 20
 DAY = 86400
@@ -17,11 +17,11 @@ shutil.copytree(os.path.join(T.ROOT, "seed"), os.path.join(T.TMP, "seed"), dirs_
 json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "w"}], "backfill_months": 3, "chains": {}},
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
-import spamguard
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
+import spamguard  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -53,7 +53,7 @@ check("U2 라틴 + 콥트 섞인 이름 = 혼용 문자(종전 키릴 섞임과 
 check("U2 접기 표 = 한 글자 → 라틴 대문자 하나(길이 어긋난 칸 없음)", all(len(v) == 1 and v.isascii() and v.isupper() for v in spamguard._CONF.values()),
       {k: v for k, v in spamguard._CONF.items() if not (len(v) == 1 and v.isascii() and v.isupper())})
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC, GID = {}, {}
 
@@ -121,9 +121,9 @@ con.commit()
 con.close()
 
 json.dump({"risk_overrides": {f"g{GID[a_keep]}": "visible", f"g{GID[a_keepimp]}": "visible"}},
-          open(os.path.join(common.STATE_DIR, "ui_prefs.json"), "w"))
-import pricing
-import web
+          open(os.path.join(paths.STATE_DIR, "ui_prefs.json"), "w"))
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 pricing._gj = lambda url, *a, **k: (_ for _ in ()).throw(OSError("시험: 시세 받기 없음"))
 web.Spot.dex_pending = lambda self, c, ca: False

@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import check, W, Reader  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]},
@@ -17,11 +17,11 @@ json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_cha
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}, {"type": "evm", "chain": "base", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH", "base": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
-import core
-import db as dbm
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
+assert T.TMP in paths.STATE_DIR
 KST = timezone(timedelta(hours=9))
 DAY = 86400
 NOW = int(time.time())
@@ -62,7 +62,7 @@ def ev_of(c, hx, chain="eth"):
     return r["event"] if r else None
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 T_FUND, T_U1 = NOW - 60 * DAY, NOW - 30 * DAY
 H_FUND, H_U1, H_U2, H_SELL = h(0xF0), h(0xA1), h(0xA2), h(0xA3)
@@ -77,17 +77,17 @@ check("U1 원장 TKN = 1,000", abs(pos(c, "TKN") - 1000) < 1e-9, pos(c, "TKN"))
 pc = {r["leg_kind"]: r["n"] for r in c.conn.execute(
     "SELECT leg_kind, COUNT(*) AS n FROM postings WHERE source_id=? GROUP BY leg_kind", (H_U1,))}
 check("U1 레그 = 처분 1 · 취득 1 · 가스 1(가격 없는 교환 — 시세를 매기지 않음)", pc == {"disp": 1, "acq": 1, "gas": 1}, pc)
-c._leg_px = lambda aid, ts: 2000.0
+c.svc_price._leg_px = lambda aid, ts: 2000.0
 c.px.fx_at = lambda *a, **k: 1400.0
-c._price_tx("eth", H_U1)
+c.svc_price._price_tx("eth", H_U1)
 gas9 = c.conn.execute("SELECT cost_usd FROM postings WHERE source_id=? AND leg_kind='gas'", (H_U1,)).fetchone()[0]
 check("U1 가스는 시세 매김(종전 그대로 · 0.001 × $2,000)", gas9 is not None and abs(float(gas9) - 2.0) < 1e-6, gas9)
 nul = c.conn.execute("SELECT COUNT(*) FROM postings WHERE source_id=? AND leg_kind IN ('disp','acq') AND cost_usd IS NOT NULL",
                      (H_U1,)).fetchone()[0]
 check("U1 가격 패스가 교환 레그에 시세를 안 매김(원가 넘기기 몫)", nul == 0, nul)
 dm_n = 0
-if os.path.exists(core.DM_PATH):
-    dm_n = sum(1 for ln in open(core.DM_PATH, encoding="utf-8") if H_U1 in ln)
+if os.path.exists(paths.state("pending_dm.jsonl")):
+    dm_n = sum(1 for ln in open(paths.state("pending_dm.jsonl"), encoding="utf-8") if H_U1 in ln)
 check("전제: U1 은 30일 전이라 6시간 알림 큐에 없음", dm_n == 0, dm_n)
 
 T_U2 = NOW - 1200
@@ -97,7 +97,7 @@ feed(c, H_SELL, snap(H_SELL, T_U2 + 300, W, RT, 0, toks=[(W, RT, TKB, "TKB", 18,
 check("전제: TKB 매도 = SWAP", ev_of(c, H_SELL) == "SWAP", ev_of(c, H_SELL))
 c.conn.execute("UPDATE postings SET cost_usd='3000.0' WHERE source_id=? AND leg_kind IN ('disp','acq')", (H_SELL,))
 c.conn.commit()
-dm2 = sum(1 for ln in open(core.DM_PATH, encoding="utf-8") if H_U2 in ln and '"UNKNOWN"' in ln) if os.path.exists(core.DM_PATH) else 0
+dm2 = sum(1 for ln in open(paths.state("pending_dm.jsonl"), encoding="utf-8") if H_U2 in ln and '"UNKNOWN"' in ln) if os.path.exists(paths.state("pending_dm.jsonl")) else 0
 check("전제: U2 는 알림 큐에도 있음(중복 없애기 시험)", dm2 == 1, dm2)
 
 W2 = "0x" + "a2" * 20
@@ -117,9 +117,9 @@ check("원장 이더리움 ETH = 7.998(U1·U2 각 1 + 가스 0.001)", abs(pos(c,
 check("원장 베이스 ETH = 1.4(2 − 보낸 1 + 내 다른 지갑에 돌아온 0.4)", abs(pos(c, "ETH", "base") - 1.4) < 1e-9, pos(c, "ETH", "base"))
 c.conn.close()
 
-import acct_norm
-import pricing
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 
 def _no_price(url, *a, **k):
@@ -134,7 +134,7 @@ b = web.StateBuilder()
 web.BUILDER = b
 try:
     st = b.build()
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     import traceback
     traceback.print_exc()
     st = {"_exc": f"{type(e).__name__}: {e}"}
@@ -178,7 +178,7 @@ check("검토 행에 코인 이름(원장 레그) · 금액 없음", bool(u1) an
 check("미매칭(원가미상 매도) 검토에 TKB 없음 — 원가가 넘어갔다",
       not [p for p in pend if p.get("sym") == "TKB" and str(p.get("key") or "").startswith(("unv:", "unkh:", "noproc:", "unvlost:"))],
       [p for p in pend if p.get("sym") == "TKB"])
-conn9 = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"), readonly=True)
+conn9 = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"), readonly=True)
 try:
     GG, LIVE = {}, {}
     for r9 in conn9.execute("SELECT asset_id, group_id, symbol FROM assets"):
@@ -193,7 +193,7 @@ finally:
 td9 = fl9.get(datetime.fromtimestamp(T_U2, KST).strftime("%m-%d")) or (0, [])
 check("U2 날 순유입 = 0 · 'UNKNOWN' 입출금 줄 없음(분류 보류 교환 = 매매 — 일별 성과 분해·곡선 순유입에 안 섞임)",
       abs(float(td9[0] or 0)) < 0.005 and not any("UNKNOWN" in str(x9[0]) for x9 in (td9[1] or [])), td9)
-conn9 = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"), readonly=True)
+conn9 = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"), readonly=True)
 try:
     p9 = b._pendings(conn9, {"ignored": [f"UNKNOWN:{H_U1}"]})
 finally:

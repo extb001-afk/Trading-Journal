@@ -1,17 +1,18 @@
 from __future__ import annotations
 import bf_engine
-import common
+import envfile, paths, statefile
 import os
 import time
 from datetime import datetime
 from view_common import CHAIN_NAME
-from view_common import KST
-import calcguard
+from timeutil import KST
+import calcguard  # noqa: E402
 
 
 class BackfillMixin:
 
-    EX_NAME_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+    EX_NAME_KO = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid",
+                  "coinbase": "코인베이스"}
 
     BF_DONE_FRAC = 0.999
 
@@ -134,12 +135,12 @@ class BackfillMixin:
         return f"{h9}시간" + (f" {m9}분" if m9 and h9 < 10 else "")
 
     def _backfill_progress(self, conn):
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
         jobs = []
         try:
             jobs = self._bf_jobs()
-        except Exception as _cg9:
-            calcguard.swallowed("view_backfill:BackfillMixin._backfill_progress", _cg9)
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_backfill:BackfillMixin._backfill_progress[jobs]", _cg9)
             jobs = []
         eta_txt = None
         now9 = time.time()
@@ -171,7 +172,7 @@ class BackfillMixin:
                     ch = w["chain"]
                     ch_tot[ch] = ch_tot.get(ch, 0) + 1
                     if ch not in curs:
-                        curs[ch] = common.read_json(
+                        curs[ch] = statefile.read_json(
                             os.path.join(sd, f"cursor_evm_{ch}.json"), {})
                     a = w["address"].lower()
                     bk9 = curs[ch].get("_bk:" + a)
@@ -193,12 +194,12 @@ class BackfillMixin:
                             units += min(1.0, (int(ck.get("ep") or 0)) / 3.0)
                             active.append(f"{ch} {w.get('label') or a[:8]}"
                                           f" {int(ck.get('pages') or 0)}p")
-            sol_cur = common.read_json(os.path.join(sd, "cursor_sol.json"), {})
+            sol_cur = statefile.read_json(os.path.join(sd, "cursor_sol.json"), {})
             for w in self.cfg.get("wallets", []):
                 if w.get("type") == "sol":
                     total += 1
                     units += 1.0 if w["address"] in sol_cur else 0.0
-            bcur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {})
+            bcur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {})
             head, frm = int(bcur.get("head") or 0), int(bcur.get("from_block") or 0)
             has_bsc9 = any(w.get("type") == "bsc_rpc" for w in self.cfg.get("wallets", []))
             total += 1 if has_bsc9 else 0
@@ -217,7 +218,7 @@ class BackfillMixin:
             rc_expect = {w.get("chain") for w in ws9 if w.get("type", "evm") == "evm"} & set(self.cfg.get("chains") or {})
             rc_expect |= {"bsc"} if any(w.get("type") == "bsc_rpc" for w in ws9) else set()
             rc_expect |= {"sol"} if any(w.get("type") == "sol" for w in ws9) else set()
-            e9 = common.read_env_file()
+            e9 = envfile.read_env_file()
             rc_expect |= {"upbit"} if (e9.get("UPBIT_ACCESS") and e9.get("UPBIT_SECRET")) else set()
             rc, rc_total = len(rc_have & rc_expect), len(rc_expect)
             pct = int(round(units * 100.0 / total)) if total else 0
@@ -227,7 +228,7 @@ class BackfillMixin:
                         if ch_done.get(c, 0) < t]
             remain_r = []
             for c in sorted(rc_expect - rc_have):
-                np9 = len(common.read_json(
+                np9 = len(statefile.read_json(
                     os.path.join(sd, f"pending_detail_{c}.json"), {})) \
                     if c not in ("bsc", "sol", "upbit") else 0
                 remain_r.append(f"{c} (잔여상세 {np9}건)" if np9 else c)
@@ -244,12 +245,12 @@ class BackfillMixin:
                     "active": act,
                     "remain": " / ".join(remain) if remain else None,
                     "eta": eta_txt, "jobs": jobs_out, "stalled": sum(1 for t9 in jtx if t9["stalled"])}
-        except Exception as _cg9:
-            calcguard.swallowed("view_backfill:BackfillMixin._backfill_progress", _cg9)
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_backfill:BackfillMixin._backfill_progress[units]", _cg9)
             return None
 
     def _backfill_pct(self, which: str) -> str:
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
         try:
             if which == "evm":
                 total = done = 0
@@ -257,7 +258,7 @@ class BackfillMixin:
                     if w.get("type", "evm") != "evm":
                         continue
                     total += 1
-                    cur = common.read_json(
+                    cur = statefile.read_json(
                         os.path.join(sd, f"cursor_evm_{w['chain']}.json"), {})
                     bk9 = cur.get("_bk:" + w["address"].lower())
                     if w["address"].lower() in cur and not (isinstance(bk9, dict) and bk9.get("why") == "new"):
@@ -268,13 +269,13 @@ class BackfillMixin:
             if which == "sol":
                 owners = [w["address"] for w in self.cfg.get("wallets", [])
                           if w.get("type") == "sol"]
-                cur = common.read_json(os.path.join(sd, "cursor_sol.json"), {})
+                cur = statefile.read_json(os.path.join(sd, "cursor_sol.json"), {})
                 done = sum(1 for o in owners if o in cur)
                 if owners and done >= len(owners):
                     return "증분 감시"
                 return f"백필 {done}/{len(owners)}지갑"
             if which == "bsc":
-                cur = common.read_json(os.path.join(sd, "cursor_bsc.json"), {})
+                cur = statefile.read_json(os.path.join(sd, "cursor_bsc.json"), {})
                 head = int(cur.get("head") or 0)
                 frm = int(cur.get("from_block") or 0)
                 if head and frm:
@@ -284,7 +285,7 @@ class BackfillMixin:
                     pct = min(100, max(0, int((frm - start) * 100 / span)))
                     return "증분 감시" if head - frm < 3000 else f"백필 {pct}%"
                 return "백필 시작 대기"
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_backfill:BackfillMixin._backfill_pct", _cg9)
             pass
         return "상태 미상"
@@ -295,14 +296,14 @@ class BackfillMixin:
                 "tron": "cursor_tron.", "sui": "cursor_sui.", "ton": "cursor_ton.", "btc": "cursor_btc."}
         off9 = {f"cursor_evm_{c}.json" for c in (self.cfg.get("_disabled_chains") or [])}
         try:
-            for fn in os.listdir(common.STATE_DIR):
+            for fn in os.listdir(paths.STATE_DIR):
                 if which and not fn.startswith(pats[which]):
                     continue
                 if not which and not fn.startswith("cursor"):
                     continue
                 if fn in off9:
                     continue
-                newest = max(newest, os.path.getmtime(os.path.join(common.STATE_DIR, fn)))
+                newest = max(newest, os.path.getmtime(os.path.join(paths.STATE_DIR, fn)))
         except OSError:
             pass
         if not newest:

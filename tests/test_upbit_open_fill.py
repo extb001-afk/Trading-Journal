@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import config, paths, statefile  # noqa: E402
 
 CFG = os.path.join(os.environ["TJ_BASE"], "config.json")
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(CFG, "w"))
-import db as dbm
-import netpace
-import web
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 try:
-    import ubfill
+    import ubfill  # noqa: E402
 except ImportError:
     ubfill = None
 
@@ -28,7 +28,7 @@ for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_f
         setattr(web.StateBuilder, _m, lambda self: None)
 netpace.wait = lambda url, now=None, sleep=None: None
 web.pricing._gj = lambda url, timeout=10.0: None
-S = common.STATE_DIR
+S = paths.STATE_DIR
 FX = 1400.0
 DAY = 86400
 NOW = int(time.time())
@@ -40,12 +40,12 @@ web.pricing.PxCache.candle_usd = lambda self, sym, ms: PX.get(str(sym).upper())
 
 def reset_ledger(holds, wallet_eth=None, booked=()):
     for sfx in ("", "-wal", "-shm"):
-        if os.path.exists(common.DB_PATH + sfx):
-            os.remove(common.DB_PATH + sfx)
+        if os.path.exists(paths.DB_PATH + sfx):
+            os.remove(paths.DB_PATH + sfx)
     for fn in ("daily_cache.json", "daily_px.json"):
         if os.path.exists(os.path.join(S, fn)):
             os.remove(os.path.join(S, fn))
-    c = dbm.open_db(common.DB_PATH)
+    c = dbm.open_db(paths.DB_PATH)
     gid, aid = {}, {}
     syms = set(holds) | ({"ETH"} if (wallet_eth or booked) else set())
     for sym in sorted(syms):
@@ -88,7 +88,7 @@ def snap(accounts, orders=(), age=0, oo=True):
          "accounts": [{"currency": k, "balance": str(v[0]), "locked": str(v[1])} for k, v in accounts.items()]}
     if oo:
         d["open_orders"] = list(orders)
-    common.atomic_write_json(UP, d)
+    statefile.atomic_write_json(UP, d)
 
 
 def order(uu, market, side, vol, exe, funds, fee="0"):
@@ -98,8 +98,8 @@ def order(uu, market, side, vol, exe, funds, fee="0"):
 
 
 json.dump({"usd": PX, "usd_ts": {k: NOW for k in PX}, "rate": FX, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
 open(os.path.join(S, "backfill_done"), "w").write("1")
 
 
@@ -114,7 +114,7 @@ def build(px=None):
         else:
             b.spot.ex_usd.pop(f"upbit:{k}", None)
             b.spot.usd.pop(k, None)
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -253,7 +253,7 @@ e = rows(f, "ETH")
 chk(len(fu) == 1 and fu[0].get("stale") is True and "업비트 잔고" in fu[0]["note"] and near(fu[0]["krw"], 50 * KRW1),
     "S8 신선도(600초) 넘은 스냅숏 = 원화 마지막 값 유지 + 낡음 표시(종전: 통째로 빠짐)", fu)
 chk(e and near(e[0]["qty"], 100) and (b.__dict__.get("_ub_fill_info") or {}).get("why") == "stale",
-    "S8 낡은 스냅숏으로는 체결분 보정 안 함(코덱스 ub601 HIGH2 — 마감 후보에 낡은 보정이 굳지 않게 · 업비트 실시간 코인 행과 같은 신선도 규칙)",
+    "S8 낡은 스냅숏으로는 체결분 보정 안 함(마감 후보에 낡은 보정이 굳지 않게 · 업비트 실시간 코인 행과 같은 신선도 규칙)",
     (b.__dict__.get("_ub_fill_info"), [(r.get("key"), r.get("qty")) for r in e]))
 xv8 = ((b.daily.get("_live") or {}).get("xv") or {}).get("p") or {}
 chk((xv8.get("ku") or [None, None])[1] == "carry", "S8 마감 구성요소 업비트 원화 출처 = carry(낡은 마지막 값 — 확정 관측으로 안 굳음)", xv8)
@@ -285,28 +285,27 @@ bq = rows(f, "BTC")
 chk(bq and near(bq[0]["qty"], 0.998), "S9 BTC 마켓 매수 = 쿼트 BTC 원장 −0.002(1 → 0.998 · 실잔고와 같음)", [(r.get("key"), r.get("qty")) for r in bq])
 
 reset_ledger({"ETH": 100})
-c0 = dbm.open_db(common.DB_PATH, readonly=True)
+c0 = dbm.open_db(paths.DB_PATH, readonly=True)
 before = (c0.execute("SELECT COUNT(*), COALESCE(SUM(CAST(qty_base AS INTEGER)), 0) FROM postings").fetchone()[:],
           c0.execute("SELECT group_id, location, qty_norm FROM positions ORDER BY 1, 2").fetchall())
 c0.close()
 snap({"KRW": (0, 50 * KRW1), "ETH": (150, 0)}, [order("u10", "KRW-ETH", "bid", 100, 50, 50 * KRW1)])
 build()
-c0 = dbm.open_db(common.DB_PATH, readonly=True)
+c0 = dbm.open_db(paths.DB_PATH, readonly=True)
 after = (c0.execute("SELECT COUNT(*), COALESCE(SUM(CAST(qty_base AS INTEGER)), 0) FROM postings").fetchone()[:],
          c0.execute("SELECT group_id, location, qty_norm FROM positions ORDER BY 1, 2").fetchall())
 c0.close()
 chk([tuple(x) for x in before[1]] == [tuple(x) for x in after[1]] and tuple(before[0]) == tuple(after[0]), "S10 원장(postings)·위치 표(positions) 무변 — 화면 계산만", (before, after))
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5, "upbit": {"poll_sec": 300}}, open(CFG, "w"))
-common.CFG_CACHE = None if hasattr(common, "CFG_CACHE") else None
 snap({"KRW": (0, 50 * KRW1), "ETH": (150, 0)}, [order("u11", "KRW-ETH", "bid", 100, 50, 50 * KRW1)], age=700)
 b, f = build()
-if common.upbit_fresh_sec(b.cfg) == 1200:
+if config.upbit_fresh_sec(b.cfg) == 1200:
     fu = [x9 for x9 in f.get("fiats") or [] if x9["ex"] == "업비트"]
     chk(len(fu) == 1 and not fu[0].get("stale") and f.get("upbitConnected") is True and near(total(f), 200000),
         "S11 주기 300초(신선도 1,200초) · 700초 스냅숏 = 원화 신선(낡음 표시 없음 · 연결됨 — 종전 600초 하드코딩은 낡음)", (fu, f.get("upbitConnected")))
 else:
-    chk(False, "S11 설정 주기 300초가 빌더 설정에 안 실림(시험 준비 문제)", common.upbit_fresh_sec(b.cfg))
+    chk(False, "S11 설정 주기 300초가 빌더 설정에 안 실림(시험 준비 문제)", config.upbit_fresh_sec(b.cfg))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(CFG, "w"))
 
 if ubfill is None:
@@ -343,8 +342,8 @@ else:
     m = ubfill.deltas([o_nf], {})
     chk(m["ETH"]["dq"] == D(2) and m["ETH"]["c"]["KRW"] == D(2800000), "U 체결 금액 칸 없음 = 지정가 × 체결량(core 와 같은 대체)", m)
 
-from datetime import datetime as _dt, timedelta as _td
-import histcurve
+from datetime import datetime as _dt, timedelta as _td  # noqa: E402
+import histcurve  # noqa: E402
 YD = _dt.now(web.KST) - _td(days=1)
 YISO, YKEY = YD.strftime("%Y-%m-%d"), YD.strftime("%m-%d")
 
@@ -373,7 +372,7 @@ rw = histcurve.rewind(kit, [YISO]) if kg else {}
 chk(kg and abs(float(kg.get("hold") or 0) - 150) < 1e-9 and abs(float((rw.get(G["ETH"]) or {}).get(YISO, 0)) - 100) < 1e-9,
     "H1 장기 곡선 재료: 지금 150 · 어제 되감기 = 100(보정분은 그 스냅숏 시각 뒤 증감)", (kg.get("hold"), rw.get(G["ETH"])))
 
-import xparts
+import xparts  # noqa: E402
 for side9, acc9, o9 in (("매수", {"KRW": (0, 50 * KRW1), "ETH": (150, 0)}, order("h1b", "KRW-ETH", "bid", 100, 50, 50 * KRW1)),
                         ("매도", {"KRW": (150 * KRW1, 0), "ETH": (0, 50)}, order("h1c", "KRW-ETH", "ask", 100, 50, 50 * KRW1))):
     G = reset_ledger({"ETH": 100})
@@ -385,7 +384,7 @@ for side9, acc9, o9 in (("매수", {"KRW": (0, 50 * KRW1), "ETH": (150, 0)}, ord
     os.remove(os.path.join(S, "daily_cache.json"))
     b, f = build()
     chk(ku9 and ku9[1] == "tl" and near(day_val(f, YKEY), 200000) and near(today_val(f), 200000),
-        f"H1b 부분 {side9} · 어제 원화 = 이력 되감기(tl) · 무효화 뒤 다시 계산한 어제 = $200,000 · 오늘 $200,000(ub607 전 어제만 체결 금액만큼 틀림)",
+        f"H1b 부분 {side9} · 어제 원화 = 이력 되감기(tl) · 무효화 뒤 다시 계산한 어제 = $200,000 · 오늘 $200,000(고치기 전 어제만 체결 금액만큼 틀림)",
         (ku9, day_val(f, YKEY), today_val(f)))
     src9 = ((b.__dict__.get("_x_kit") or {}).get("src") or {})
     k9 = xparts.krw_at((src9.get("base") or {}).get("ku"), (src9.get("tl") or {}).get("ku"), YD.replace(hour=23, minute=59, second=59).timestamp())
@@ -396,7 +395,7 @@ def build_on(b9):
     for k9, v9 in PX.items():
         b9.spot.ex_usd[f"upbit:{k9}"] = v9
         b9.spot.ex_ts[f"upbit:{k9}"] = t9
-    conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+    conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b9._build(conn9)["fields"]
     finally:
@@ -404,7 +403,7 @@ def build_on(b9):
 
 
 def book_done(uu, side, vol, funds, gid, ts):
-    c9 = dbm.open_db(common.DB_PATH)
+    c9 = dbm.open_db(paths.DB_PATH)
     c9.execute("INSERT INTO raw_ex (exchange, kind, uuid, revision, payload, observed_at) VALUES ('upbit','order',?,1,?,?)",
                (uu, json.dumps({"uuid": uu, "market": "KRW-ETH", "side": side, "state": "done", "ord_type": "limit", "price": "1400000",
                                 "volume": str(vol), "executed_volume": str(vol), "executed_funds": str(funds), "paid_fee": "0",
@@ -439,12 +438,12 @@ for side9 in ("bid", "ask"):
     f = build_on(b)
     seq9.append(("S4", day_val(f, YKEY), round(total(f), 2), (((b.__dict__.get("_x_kit") or {}).get("src") or {}).get("bad") or {}).get("ku")))
     chk(all(near(v9, 200000) and near(t9, 200000) and not bd9 for _n9, v9, t9, bd9 in seq9),
-        f"H3 {'매수' if side9 == 'bid' else '매도'} 같은 빌더 연속 수집 S0→S4 = 어제·오늘 늘 $200,000 · 자가 점검 불신 표식 없음(ub611 전 S2 부터 어제 "
+        f"H3 {'매수' if side9 == 'bid' else '매도'} 같은 빌더 연속 수집 S0→S4 = 어제·오늘 늘 $200,000 · 자가 점검 불신 표식 없음(고치기 전 S2 부터 어제 "
         f"{'$150,000' if side9 == 'bid' else '$250,000'})", seq9)
 
 G = reset_ledger({"ETH": 100}, booked=[("h2", "done", 100, 100 * KRW1)])
 T_FILL = int(YD.replace(hour=23, minute=57, second=0, microsecond=0).timestamp())
-_c = dbm.open_db(common.DB_PATH)
+_c = dbm.open_db(paths.DB_PATH)
 _pl = json.loads(_c.execute("SELECT payload FROM raw_ex WHERE uuid='h2'").fetchone()[0])
 _pl["created_at"] = YD.replace(hour=23, minute=57, second=0, microsecond=0).isoformat()
 _c.execute("UPDATE raw_ex SET payload=? WHERE uuid='h2'", (json.dumps(_pl),))
@@ -468,8 +467,8 @@ json.dump(dpx, open(os.path.join(S, "daily_px.json"), "w"))
 snap({"KRW": (0, 0), "ETH": (200, 0)}, [])
 b, f = build()
 chk(near(day_val(f, YKEY), 200000) and (b.daily.get(YISO) or {}).get("src") == "partial",
-    "H2 낡은 스냅숏 마감 → 다음 날 동결 = $200,000(원장 200 + 그날 마감 원화 0 — 종전 보정 150 이 굳어 $150,000) · ubfillr1011(부록 A4): 그 스냅숏은 "
-    "미기장 체결이 든 낡은 스냅숏이라 유예(defer) → 그 순간 가격 + 지금 원장 되감기 수량(부분 동결 'partial' — 15차 = 'live')",
+    "H2 낡은 스냅숏 마감 → 다음 날 동결 = $200,000(원장 200 + 그날 마감 원화 0 — 종전 보정 150 이 굳어 $150,000) · 그 스냅숏은 "
+    "미기장 체결이 든 낡은 스냅숏이라 유예(defer) → 그 순간 가격 + 지금 원장 되감기 수량(부분 동결 'partial' — 종전 = 'live')",
     (day_val(f, YKEY), (b.daily.get(YISO) or {}).get("src")))
 
 T.finish()

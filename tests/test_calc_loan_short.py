@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 
 chk = T.chk
@@ -30,7 +30,7 @@ NOW = int(time.time())
 DAY = 86400
 W = int((datetime.fromtimestamp(NOW, KST).replace(hour=9, minute=0, second=0, microsecond=0) - timedelta(days=140)).timestamp())
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 A, G = {}, {}
 for sym in ("LLL", "MMM", "NNN", "OOO", "PPP", "QQQ", "RRR", "SSS", "USDT"):
     c.execute("INSERT INTO asset_groups (name) VALUES (?)", (sym,))
@@ -127,7 +127,7 @@ histcurve.DAYCLOSE.lookup = fake_lookup
 px = {"LLL": 2.5, "MMM": 2.5, "NNN": 2.5, "OOO": 2.5}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
            "fx_basis": 1400.0, "ex_usd": {f"{e}:{k}": v for k, v in px.items() for e in ("bybit", "binance")},
-           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("bybit", "binance")}}, open(web.SPOT_PATH, "w"))
+           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("bybit", "binance")}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 
@@ -148,10 +148,10 @@ LOANS = [{"exchange": "bybit", "asset": "LLL", "from": _d(W + 5 * DAY), "to": _d
 def build(prefs, loans=LOANS):
     json.dump(dict({"chains": {}, "wallets": [], "backfill_months": 5}, **({"loan_short": loans} if loans is not None else {})),
               open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **prefs))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **prefs))
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -198,19 +198,19 @@ q6 = tax(rows, "QQQ")
 rp6 = [r for r in q6 if "대출 상환" in str(r.get("ex"))]
 pq = [p for p in (f.get("_positionsAll") or f.get("positions") or []) if p.get("sym") == "QQQ"]
 chk(rz(f, "QQQ") == 199.8 and len(rp6) == 1 and abs(float(rp6[0]["_acq"]) - 200.2) < 1e-6,
-    "S6 (ex441 ①) 같은 거래소 매수 상환 + 수수료 0.2 USDT → 상환 취득가 $200.2 · 실현 $199.8(수수료 전 정산이면 $200)", [rz(f, "QQQ"), q6])
+    "S6 같은 거래소 매수 상환 + 수수료 0.2 USDT → 상환 취득가 $200.2 · 실현 $199.8(수수료 전 정산이면 $200)", [rz(f, "QQQ"), q6])
 ev6 = [e for p in pq for e in (p.get("events") or []) if "대출 상환" in str(e.get("d"))]
 hid6 = [e for e in (f.get("extraEventsHidden") or []) if "대출 상환" in str(e.get("d"))]
-chk(len(ev6) == 1 and not hid6, "S6 (ex448) 상환 기록 = 카드에 보임(수수료 0.2 USDT 기준 '소액' 숨김 아님)", [ev6, hid6])
+chk(len(ev6) == 1 and not hid6, "S6 상환 기록 = 카드에 보임(수수료 0.2 USDT 기준 '소액' 숨김 아님)", [ev6, hid6])
 chk(pq and all(float(p.get("held") or 0) <= 1e-9 for p in pq) and abs(sum(float(p.get("realized") or 0) for p in pq) - 199.8) < 0.005,
     "S6 카드 = 보유 0 · 실현 $199.8(수수료까지 상환 원가)", [(p.get("held"), p.get("realized"), p.get("status")) for p in pq])
 dR = ISO(TR + 600)
 fsr = f.get("fsRealByDate") or {}
 r7 = [r for r in tax(rows, "RRR") if "대출 상환" in str(r.get("ex"))]
 chk(len(r7) == 1 and abs(float(r7[0]["_acq"]) - 190) < 1e-6 and r7[0]["ex"].endswith(FS_EX) and dR in fsr and abs(fsr[dR][0] - 110) < 0.01,
-    "S7 (ex441 ②) 갚은 코인 원가 $190(최초 인식 $10 + 매수 $180) · 상환 실현 $110 = 그날 '이 중 추정' $110 한 번(부분 $20·중복 $130 아님)", [r7, fsr.get(dR)])
+    "S7 갚은 코인 원가 $190(최초 인식 $10 + 매수 $180) · 상환 실현 $110 = 그날 '이 중 추정' $110 한 번(부분 $20·중복 $130 아님)", [r7, fsr.get(dR)])
 chk(rz(f, "SSS") == 0 and unv(f, "SSS") and not [r for r in tax(rows, "SSS") if "대출" in str(r.get("ex"))],
-    "S8 (ex441 ③) 설정에 없는 자산의 같은 모양 = 대출 아님(종전 원가 미확인)", [rz(f, "SSS"), tax(rows, "SSS")])
+    "S8 설정에 없는 자산의 같은 모양 = 대출 아님(종전 원가 미확인)", [rz(f, "SSS"), tax(rows, "SSS")])
 fn, rowsn = build({}, loans=None)
 chk(not [r for r in rowsn if "대출" in str(r.get("ex"))] and rz(fn, "LLL") == 0 and unv(fn, "LLL"),
     "S8 설정 loan_short 없음 = B′ 꺼짐(전부 종전)", [rz(fn, "LLL"), tax(rowsn, "LLL")])

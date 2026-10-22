@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+import paths
 from chk_base import BENIGN_DEFAULT
 from chk_base import BUCKET
 from chk_base import CHAIN_NAME
@@ -17,6 +18,19 @@ from chk_base import QUIET_EXC
 from chk_base import TRANSIENT_RX
 from chk_base import _now
 from chk_base import _sig
+
+_HOST_RX = re.compile(r"(?:https?|wss?)://([A-Za-z0-9.-]+)|host='([A-Za-z0-9.-]+)'|\b((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,24})\b")
+_NOT_TLD = frozenset(("py", "pyc", "json", "jsonl", "js", "mjs", "log", "db", "txt", "sh", "html", "css", "md", "lock", "tmp", "gz", "so",
+                      "wal", "shm", "sqlite", "csv", "yml", "yaml", "toml", "cfg", "ini", "bak", "zip"))
+
+
+def net_host(msg: str):
+    for m in _HOST_RX.finditer(msg or ""):
+        hst = (m.group(1) or m.group(2) or m.group(3) or "").strip(".").lower()
+        if hst and "." in hst and hst.rsplit(".", 1)[-1] not in _NOT_TLD:
+            return hst
+    return None
+
 
 class LogWatch:
 
@@ -169,6 +183,8 @@ class LogWatch:
         u = self.units.get(unit) or {"last_ts": None, "ev": (), "review": None}
         w60 = now - 3600
         err_b, net_b = set(), set()
+        net_h = set()
+        b_recent = int(now // BUCKET) - 1
         n_err = n_warn = n_tr = n_net = n_crash = 0
         top = collections.Counter()
         sample = {}
@@ -188,11 +204,13 @@ class LogWatch:
             elif cls == "net":
                 net_b.add(b)
                 n_net += 1
+                if b >= b_recent:
+                    net_h.add(net_host(msg) or "?")
             elif cls == "transient":
                 n_tr += 1
             elif cls == "warn":
                 n_warn += 1
-        return {"last_ts": u["last_ts"], "err_buckets": sorted(err_b), "net_buckets": sorted(net_b),
+        return {"last_ts": u["last_ts"], "err_buckets": sorted(err_b), "net_buckets": sorted(net_b), "net_hosts": sorted(net_h),
                 "n_err": n_err, "n_warn": n_warn, "n_transient": n_tr, "n_net": n_net, "n_crash": n_crash,
                 "top": [(s, c, sample[s]) for s, c in top.most_common(3)], "last_crash": last_crash,
                 "review": u.get("review")}
@@ -207,7 +225,23 @@ def _pm2_bin(h: dict):
     return None
 
 
+def _own_roots() -> set:
+    return {os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), os.path.realpath(paths.BASE_DIR)}
+
+
+def _foreign_py(e: dict, roots: set) -> bool:
+    ex = e.get("pm_exec_path") or ""
+    if not isinstance(ex, str) or not ex.endswith(".py"):
+        return False
+    rex = os.path.realpath(ex)
+    if any(rex.startswith(os.path.join(r, d) + os.sep) for r in roots for d in ("src", "tools")):
+        return False
+    cwd = e.get("pm_cwd")
+    return not (isinstance(cwd, str) and cwd and os.path.realpath(cwd) in roots)
+
+
 def pm2_list(h: dict):
+    h.pop("pm2_foreign", None)
     b = _pm2_bin(h)
     if not b:
         return None
@@ -221,16 +255,23 @@ def pm2_list(h: dict):
         return None
     if not isinstance(data, list):
         return None
-    res = {}
+    res, nonpy = {}, set()
+    roots = _own_roots()
     for p in data:
         e = p.get("pm2_env") or {}
         name = p.get("name") or e.get("name")
-        if not name:
+        if not name or _foreign_py(e, roots):
             continue
+        exec_path = e.get("pm_exec_path")
+        if isinstance(exec_path, str) and exec_path and not exec_path.endswith(".py"):
+            nonpy.add(name)
         res[name] = {"status": e.get("status"), "restarts": int(e.get("restart_time") or 0),
                      "pid": p.get("pid"), "uptime": (e.get("pm_uptime") or 0) / 1000.0,
                      "out": e.get("pm_out_log_path"), "err": e.get("pm_err_log_path"),
                      "mem": (p.get("monit") or {}).get("memory")}
+    if not any(str(n).startswith("tj-") and n not in nonpy for n in res):
+        h["pm2_foreign"] = True
+        return None
     return res
 
 
@@ -246,11 +287,11 @@ def _cname(c) -> str:
     if c in CHAIN_NAME:
         return CHAIN_NAME[c]
     try:
-        import chainsweep as _cs9
-        ent = _cs9.SWEEP_CHAINS.get(c)
+        import chaincatalog
+        ent = chaincatalog.SWEEP_CHAINS.get(c)
         if ent:
             return ent[0]
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return str(c)[:1].upper() + str(c)[1:]
 

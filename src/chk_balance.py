@@ -4,7 +4,8 @@ import os
 import re
 import sqlite3
 import time
-import common
+import paths
+import db as dbm
 from chk_base import BAL_RB_LIVE_SEC
 from chk_base import BAL_RB_WHY
 from chk_base import BF_EXT_ORPHAN_SEC
@@ -39,12 +40,12 @@ def _disc_ents(disc, cfg) -> dict:
         if nf9 != int(disc.get("failPairs") or 0) or nh9 != int(disc.get("hold") or 0):
             return {}
         return ents9
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
 
 
 def collect_balcheck(cfg: dict = None):
-    p = os.path.join(common.STATE_DIR, "onchain_check.json")
+    p = paths.state("onchain_check.json")
     d = _read(p, None)
     if not isinstance(d, dict):
         return None
@@ -76,7 +77,7 @@ def collect_bal_busy(now: float, extrb=None, bf=None) -> dict:
         if why not in lst:
             lst.append(why)
     try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
+        conn = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=2)
         try:
             rows = conn.execute("SELECT k, v FROM meta WHERE k LIKE 'ext_prewindow:%'").fetchall()
         finally:
@@ -111,12 +112,12 @@ def collect_bal_busy(now: float, extrb=None, bf=None) -> dict:
             ch = {"bsc": "bsc", "sol": "sol", "ex": "upbit"}.get(unit) or (str(key).split(":", 1)[0] if unit == "evm" else None)
             if ch:
                 addc(ch, "과거 기록 범위를 넓히는 중")
-    cb = _read(os.path.join(common.STATE_DIR, "cursor_bsc.json"), None)
+    cb = _read(paths.state("cursor_bsc.json"), None)
     nw = cb.get("_neww") if isinstance(cb, dict) else None
     if isinstance(nw, dict):
         for w in nw.get("wallets") or []:
             out["wallets"].setdefault(f"bsc|{str(w).lower()}", []).append("새 지갑 과거 기록 수집 중")
-    bn = _read(os.path.join(common.STATE_DIR, "bsc_nonce.json"), None)
+    bn = _read(paths.state("bsc_nonce.json"), None)
     for w, ws in ((bn.get("w") or {}).items() if isinstance(bn, dict) and isinstance(bn.get("w"), dict) else ()):
         try:
             miss = int((ws or {}).get("missing") or 0)
@@ -303,7 +304,7 @@ def _short_addr(a: str) -> str:
 
 def tier_rest_map() -> dict:
     out = {}
-    for f in glob.glob(os.path.join(common.STATE_DIR, "addr_tier_*.json")):
+    for f in glob.glob(paths.state("addr_tier_*.json")):
         if os.path.basename(f) == "addr_tier_req.json":
             continue
         d = _read(f, None)
@@ -343,7 +344,7 @@ def balcheck_split(bc: dict, sources) -> tuple:
     now9, late9 = [], []
     try:
         rest9 = tier_rest_map()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         rest9 = {}
     for it in bc.get("items") or []:
         ch, w = it.get("chain"), str(it.get("wallet") or "").lower()

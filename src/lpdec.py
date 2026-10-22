@@ -1,53 +1,12 @@
 """Liquidity-position decoding helpers."""
 import json
 import os
-import calcguard
-
-_RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
-       0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
-       0x000000000000008A, 0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
-       0x000000008000808B, 0x800000000000008B, 0x8000000000008089, 0x8000000000008003,
-       0x8000000000008002, 0x8000000000000080, 0x000000000000800A, 0x800000008000000A,
-       0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008]
-_ROT = [[0, 36, 3, 41, 18], [1, 44, 10, 45, 2], [62, 6, 43, 15, 61], [28, 55, 25, 21, 56], [27, 20, 39, 8, 14]]
-_M64 = (1 << 64) - 1
-
-
-def _rol(x, n):
-    n %= 64
-    return ((x << n) | (x >> (64 - n))) & _M64 if n else x
-
-
-def _keccak_f(st):
-    for rnd in range(24):
-        c = [st[x][0] ^ st[x][1] ^ st[x][2] ^ st[x][3] ^ st[x][4] for x in range(5)]
-        d = [c[(x - 1) % 5] ^ _rol(c[(x + 1) % 5], 1) for x in range(5)]
-        st = [[st[x][y] ^ d[x] for y in range(5)] for x in range(5)]
-        b = [[0] * 5 for _ in range(5)]
-        for x in range(5):
-            for y in range(5):
-                b[y][(2 * x + 3 * y) % 5] = _rol(st[x][y], _ROT[x][y])
-        st = [[b[x][y] ^ ((~b[(x + 1) % 5][y]) & b[(x + 2) % 5][y]) for y in range(5)] for x in range(5)]
-        st[0][0] ^= _RC[rnd]
-    return st
-
-
-def keccak256(data: bytes) -> bytes:
-    rate = 136
-    msg = bytearray(data) + b"\x01"
-    msg += b"\x00" * ((-len(msg)) % rate)
-    msg[-1] |= 0x80
-    st = [[0] * 5 for _ in range(5)]
-    for off in range(0, len(msg), rate):
-        blk = msg[off:off + rate]
-        for i in range(rate // 8):
-            st[i % 5][i // 5] ^= int.from_bytes(blk[8 * i:8 * i + 8], "little")
-        st = _keccak_f(st)
-    return b"".join(st[i % 5][i // 5].to_bytes(8, "little") for i in range(17))[:32]
+import address_codec
+import calcguard  # noqa: E402
 
 
 def selector(sig: str) -> str:
-    return keccak256(sig.encode()).hex()[:8]
+    return address_codec.keccak256(sig.encode()).hex()[:8]
 
 
 _MGR_CACHE = None
@@ -61,8 +20,8 @@ def lp_managers(base_dir=None) -> dict:
     if _MGR_CACHE is not None:
         return _MGR_CACHE
     base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    import common
-    raw = common.seed_json("lp_managers.json", {}, base_dir=base_dir) or {}
+    import seeds
+    raw = seeds.seed_json("lp_managers.json", {}, base_dir=base_dir) or {}
     out = {}
     for chain, m in raw.items():
         if chain.startswith("_") or not isinstance(m, dict):
@@ -156,7 +115,7 @@ def _decode_calls(b: bytes, depth: int) -> list:
             tid = _u(data, 0) if (name != "MINT" and len(data) >= 32) else None
             liq = _u(data, 32) if (name == "DECREASE" and len(data) >= 64) else None
             out.append((name, tid, liq))
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpdec:_decode_calls", _cg9)
         return out
     return out
@@ -209,7 +168,7 @@ def lp_location(chain: str, mgr: str, ids) -> str:
 
 
 if __name__ == "__main__":
-    assert keccak256(b"").hex() == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+    assert address_codec.keccak256(b"").hex() == "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
     assert selector("transfer(address,uint256)") == "a9059cbb"
     assert selector("balanceOf(address)") == "70a08231"
     assert SEL_V4_MODIFY == "dd46508f" and SEL_MULTICALL == "ac9650d8"

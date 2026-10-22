@@ -1,6 +1,7 @@
 from __future__ import annotations
 import bf_engine
-import common
+import logs, paths, statefile
+import db as dbm
 import json
 import os
 import time
@@ -51,13 +52,13 @@ log = logging.getLogger('tj-bsc')
 class BalwMixin:
 
     def _balw_path(self) -> str:
-        return os.path.join(common.STATE_DIR, "bsc_balw.json")
+        return paths.state("bsc_balw.json")
 
     def _balw_load(self) -> dict:
         d = self.__dict__.get("_balw_st")
         if d is None:
             try:
-                d = common.read_json(self._balw_path(), {})
+                d = statefile.read_json(self._balw_path(), {})
             except SystemExit as e:
                 log.warning("BSC 잔고 감시 진행 파일 손상 — 새로 시작: %s", str(e)[:120])
                 d = {}
@@ -67,7 +68,7 @@ class BalwMixin:
         return d
 
     def _balw_save(self):
-        common.atomic_write_json(self._balw_path(), self._balw_load())
+        statefile.atomic_write_json(self._balw_path(), self._balw_load())
 
     @staticmethod
     def _balw_lo(ws) -> "int | None":
@@ -150,17 +151,17 @@ class BalwMixin:
         if pub is not None and (recent or arch is None):
             try:
                 return pub.call(m, p, timeout=15)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 last = e
         if arch is None:
-            raise _BalwNoArch(f"옛 블록 상태를 줄 아카이브 노드 없음({common.safe_err(last)[:80] if last else '공개 노드 없음'})")
+            raise _BalwNoArch(f"옛 블록 상태를 줄 아카이브 노드 없음({logs.safe_err(last)[:80] if last else '공개 노드 없음'})")
         if float(self._balw_load().get("bo_until") or 0) > _now():
             raise _BalwStop("아카이브 쉬는 중")
         try:
             return arch.call(m, p, timeout=20)
         except _BalwStop:
             raise
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             if isinstance(e, bf_engine.NetError) and e.kind in _NONCE_STOP_KINDS:
                 cnt["halt"] = e
                 raise _BalwStop(_nonce_why(e)) from e
@@ -170,7 +171,7 @@ class BalwMixin:
                         return pub.call(m, p, timeout=15)
                     except _BalwStop:
                         raise
-                    except Exception as e2:
+                    except Exception as e2:   # noqa: BLE001 [fallback]
                         last = e2
                 try:
                     age = int(cnt.get("head") or 0) - int(str(p[-1]), 16)
@@ -206,8 +207,8 @@ class BalwMixin:
                     res += list(pub.batch(items[i:i + NONCE_TOP_BATCH], timeout=15))
                 except _BalwStop:
                     break
-                except Exception as e:
-                    log.debug("BSC 잔고 감시 — 공개 노드 배치 실패: %s", common.safe_err(e)[:120])
+                except Exception as e:   # noqa: BLE001 [fallback]
+                    log.debug("BSC 잔고 감시 — 공개 노드 배치 실패: %s", logs.safe_err(e)[:120])
                     res += [None] * len(items[i:i + NONCE_TOP_BATCH])
             for w, jb, jn in slots:
                 try:
@@ -225,8 +226,8 @@ class BalwMixin:
                 out[w] = (b9, n9)
             except _BalwStop:
                 break
-            except Exception as e:
-                log.debug("BSC 잔고 감시 %s 블록 %d 잔고 못 읽음: %s", w[:10], S, common.safe_err(e)[:120])
+            except Exception as e:   # noqa: BLE001 [isolate]
+                log.debug("BSC 잔고 감시 %s 블록 %d 잔고 못 읽음: %s", w[:10], S, logs.safe_err(e)[:120])
         return out
 
     def _balw_f(self, st: dict, w: str, job: dict, b: int) -> int:
@@ -283,8 +284,8 @@ class BalwMixin:
         return True
 
     def _balw_req_write(self, items: list) -> bool:
-        p = os.path.join(common.STATE_DIR, DISC_REQ_NAME)
-        cur = common.read_control_json(p, None)
+        p = paths.state(DISC_REQ_NAME)
+        cur = statefile.read_control_json(p, None)
         have = list(cur.get("items") or []) if isinstance(cur, dict) and isinstance(cur.get("items"), list) else []
         add = []
         for it in items:
@@ -294,20 +295,19 @@ class BalwMixin:
             add.append(it)
         if not add:
             return False
-        common.atomic_write_json(p, {"items": have + add, "by": "tj-bsc 잔고 감시", "ts": int(time.time())})
+        statefile.atomic_write_json(p, {"items": have + add, "by": "tj-bsc 잔고 감시", "ts": int(time.time())})
         return True
 
     def _balw_ingested(self, hs: list):
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             return set(hs)
-        import sqlite3
         try:
-            con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
+            con = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=2)
             try:
                 return {h for h in hs if con.execute("SELECT 1 FROM raw_txs WHERE chain='bsc' AND txhash=?", (h,)).fetchone()}
             finally:
                 con.close()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.debug("BSC 잔고 감시 — 원장 확인 실패: %s", str(e)[:120])
             return None
 
@@ -369,14 +369,14 @@ class BalwMixin:
             for h in direct:
                 snap = dets.get(h)
                 if not isinstance(snap, dict):
-                    raise RuntimeError(f"블록 {y} 상세 실패 {h[:12]}: {common.safe_err(snap)[:80]}")
+                    raise RuntimeError(f"블록 {y} 상세 실패 {h[:12]}: {logs.safe_err(snap)[:80]}")
                 if h in self.emitted:
                     self._balw_put(st, w, h, y, snap)
                     continue
                 self._balw_emit(h, snap, head, cnt)
                 log.info("★BSC 받는 쪽 BNB 회수(잔고 감시 · 직접 거래) %s 블록 %d★", h[:14], y)
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-            common.write_json_if_changed(self.meta_path, self.token_meta)
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.meta_path, self.token_meta)
             if more9:
                 self._balw_stop_budget(cnt, "한 블록 직접 거래 남음 — 다음 실행")
             d = self._balw_f(st, w, job, y) - self._balw_f(st, w, job, y - 1)
@@ -390,8 +390,8 @@ class BalwMixin:
             self._balw_charge(cnt, 1)
             try:
                 rcs = self.rpc.call("eth_getBlockReceipts", [hex(y)])
-            except Exception as e:
-                log.debug("BSC 잔고 감시 블록 %d 영수증 묶음 실패: %s", y, common.safe_err(e)[:80])
+            except Exception as e:   # noqa: BLE001 [fallback]
+                log.debug("BSC 잔고 감시 블록 %d 영수증 묶음 실패: %s", y, logs.safe_err(e)[:80])
                 rcs = None
             hits = set()
             pw, wh = _pad_topic(w), w[2:]
@@ -414,7 +414,7 @@ class BalwMixin:
             if time.time() > cnt["t_end"]:
                 raise _BalwStop("귀속 상세 마감")
             if not isinstance(snap, dict):
-                raise RuntimeError(f"블록 {y} 귀속 상세 실패 {pick[:12]}: {common.safe_err(snap)[:80]}")
+                raise RuntimeError(f"블록 {y} 귀속 상세 실패 {pick[:12]}: {logs.safe_err(snap)[:80]}")
             why9 = self._balw_attr_why(snap, w, d, via9, cnt)
             if not why9:
                 tx9 = snap["tx"]
@@ -422,8 +422,8 @@ class BalwMixin:
                     {"from": str(tx9.get("to") or "").lower(), "to": w, "value": str(int(d)), "success": True, "attr": "balance_delta"}],
                     internal_note="balance_delta")
                 self._balw_emit(pick, snap, head, cnt)
-                common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-                common.write_json_if_changed(self.meta_path, self.token_meta)
+                statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+                statefile.write_json_if_changed(self.meta_path, self.token_meta)
                 log.info("★BSC 받는 쪽 BNB 회수(잔고 감시 · internal 귀속) %s 블록 %d +%d wei★", pick[:14], y, int(d))
                 d = self._balw_f(st, w, job, y) - self._balw_f(st, w, job, y - 1)
                 if d < BALW_DUST:
@@ -447,8 +447,8 @@ class BalwMixin:
                     code9 = self._balw_call(cnt, "eth_getCode", [src9, "latest"], recent=True)
                 except _BalwStop:
                     raise
-                except Exception as e:
-                    raise RuntimeError(f"단서 거래 받는 쪽 코드 확인 실패: {common.safe_err(e)[:80]}") from None
+                except Exception as e:   # noqa: BLE001
+                    raise RuntimeError(f"단서 거래 받는 쪽 코드 확인 실패: {logs.safe_err(e)[:80]}") from None
                 if str(code9 or "0x").lower() in ("0x", "0x0", ""):
                     return "단서 거래가 코드 없는 주소로 감(internal 불가)"
                 memo.add(src9)
@@ -504,14 +504,14 @@ class BalwMixin:
                 for b9, h in found:
                     snap = dets.get(h)
                     if not isinstance(snap, dict):
-                        raise RuntimeError(f"공개 블록 {b9} 입금 상세 실패 {h[:12]}: {common.safe_err(snap)[:80]}")
+                        raise RuntimeError(f"공개 블록 {b9} 입금 상세 실패 {h[:12]}: {logs.safe_err(snap)[:80]}")
                     if h in self.emitted:
                         self._balw_put(st, w, h, b9, snap)
                         continue
                     self._balw_emit(h, snap, head, cnt)
                     log.info("★BSC 받는 쪽 BNB 회수(잔고 감시 · 공개 블록 본문 — 아카이브 없음) %s 블록 %d★", h[:14], b9)
-                common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-                common.write_json_if_changed(self.meta_path, self.token_meta)
+                statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+                statefile.write_json_if_changed(self.meta_path, self.token_meta)
             if more9:
                 self._balw_stop_budget(cnt, "공개 블록 본문 훑기 — 이 묶음 남은 입금은 다음 실행")
             nxt += n9
@@ -541,7 +541,7 @@ class BalwMixin:
                     ts9 = self._block_time(hex(z))
                 except _BalwStop:
                     raise
-                except Exception:
+                except Exception:   # noqa: BLE001 [fallback]
                     return False
             self._balw_disc_req(st, w, z, int(job["s"][str(z)]), ts9, rest, why, old=job.get("k") == "hist")
         return True
@@ -550,7 +550,7 @@ class BalwMixin:
         if isinstance(self.cursor.get("_live"), dict):
             return []
         try:
-            chk = common.read_json(os.path.join(common.STATE_DIR, "onchain_check.json"), {})
+            chk = statefile.read_json(paths.state("onchain_check.json"), {})
         except SystemExit:
             return []
         out, seen, open9 = [], set(), set()
@@ -655,16 +655,15 @@ class BalwMixin:
                 raise
 
     def _balw_raw_deltas(self, w: str, a: int, z: int, deadline: float = None, cache: dict = None):
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             return {}
-        import sqlite3
         rows = cache.get((int(a), int(z))) if cache is not None else None
         if rows is None:
             left = 10.0 if deadline is None else min(10.0, float(deadline) - time.time())
             if left <= 0:
                 return None
             try:
-                con = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=left)
+                con = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=left)
                 try:
                     if deadline is not None:
                         con.set_progress_handler(lambda: 1 if time.time() >= deadline else 0, 2000)
@@ -677,7 +676,7 @@ class BalwMixin:
                                            " AND instr(lower(snapshot), ?) > 0", (int(a), int(z), w[2:])).fetchall()
                 finally:
                     con.close()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 log.info("BSC 잔고 감시 — 원장 읽기 실패(다음 기회): %s", str(e)[:120])
                 return None
         if cache is not None:
@@ -791,16 +790,16 @@ class BalwMixin:
             if ts9 is None:
                 self._balw_charge(cnt, 1)
                 ts9 = self._block_time(hex(z))
-        except Exception as e:
-            log.debug("BSC 잔고 감시 %s: 미해결 구간 끝 블록 시각 실패: %s", w[:10], common.safe_err(e)[:80])
+        except Exception as e:   # noqa: BLE001 [fallback]
+            log.debug("BSC 잔고 감시 %s: 미해결 구간 끝 블록 시각 실패: %s", w[:10], logs.safe_err(e)[:80])
             return False
         log.warning("BSC 잔고 감시 %s: %s — 블록 %d 기초 잔고 요청(잔여 %d wei · core 가 잔고 − 원장으로 다시 잼)", w[:10], why, z, int(r))
         self._balw_disc_req(st, w, z, bz, ts9, max(1, int(r)), why)
         return True
 
     def _balw_rx(self, st: dict, eoas: list, cnt: dict, limit: int = None):
-        p = os.path.join(common.STATE_DIR, BALW_RX_NAME)
-        req = common.read_control_json(p, None) if os.path.exists(p) and not cnt.get("rx_take") else None
+        p = paths.state(BALW_RX_NAME)
+        req = statefile.read_control_json(p, None) if os.path.exists(p) and not cnt.get("rx_take") else None
         now = _now()
         if req is not None:
             since = None
@@ -992,11 +991,11 @@ class BalwMixin:
                 continue
             except _BalwStop:
                 raise
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 skip[id(job)] = job
                 cnt.setdefault("err", e)
                 log.info("BSC 잔고 감시 %s: 작업 %d~%d 걸음 실패(이 작업만 다음 실행): %s", w[:10], int(job.get("a") or 0), int(job.get("z") or 0),
-                         common.safe_err(e)[:120])
+                         logs.safe_err(e)[:120])
                 continue
             finally:
                 job["n"] = int(job.get("n") or 0) + (cnt["n"] - n0)
@@ -1009,8 +1008,8 @@ class BalwMixin:
     def _balw_safe(self, head: int, S: int) -> int:
         try:
             return self._balw_pass(head, S)
-        except Exception as e:
-            log.info("BSC 잔고 감시 실패(다음 기회): %s", common.safe_err(e)[:120])
+        except Exception as e:  # noqa: BLE001 [fallback]
+            log.info("BSC 잔고 감시 실패(다음 기회): %s", logs.safe_err(e)[:120])
             return 0
 
     def _balw_pass(self, head: int, S: int) -> int:
@@ -1095,7 +1094,7 @@ class BalwMixin:
                 ws["cp"], ws["cp_at"] = [int(S), str(bal), int(non)], int(now)
             hc9 = [] if resting else self._balw_hist_cands(st, eoas, now)
             if not resting:
-                back9 = bool(hc9) or os.path.exists(os.path.join(common.STATE_DIR, BALW_RX_NAME)) or any(
+                back9 = bool(hc9) or os.path.exists(paths.state(BALW_RX_NAME)) or any(
                     (st["w"].get(w9) or {}).get("ux") or (st["w"].get(w9) or {}).get("rx") or (st["w"].get(w9) or {}).get("rs")
                     or any(self._balw_back(j9) for j9 in (st["w"].get(w9) or {}).get("jobs") or []) for w9 in eoas)
                 if back9:
@@ -1127,12 +1126,12 @@ class BalwMixin:
                     if cnt["halt"] is not None:
                         raise
                     log.debug("BSC 잔고 감시 — 옛 몫 단계 멈춤(다음 단계로): %s", e)
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     cnt.setdefault("err", e)
-                    log.info("BSC 잔고 감시 — 옛 몫 단계 실패(다음 단계로): %s", common.safe_err(e)[:120])
+                    log.info("BSC 잔고 감시 — 옛 몫 단계 실패(다음 단계로): %s", logs.safe_err(e)[:120])
         except _BalwStop as e:
             log.debug("BSC 잔고 감시 — 이번 실행 멈춤: %s", e)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             err = e
         finally:
             for pool9, old9 in dl_pools:

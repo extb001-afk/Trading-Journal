@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
 
-import io
-import json
-import os
-import re
-import urllib.error
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import urllib.error  # noqa: E402
 
-import common
+import config, net_http  # noqa: E402
 
 chk = T.chk
 DOCS = os.path.dirname(T.README)
 
-import cgkey
+import cgkey  # noqa: E402
 
 READS = []
 
@@ -30,7 +30,7 @@ class _Fp(io.BytesIO):
 big = b'{"status":{"error_message":"rate limited"}}' + b" " * (200 * 1024)
 e9 = urllib.error.HTTPError("https://api.coingecko.invalid/x", 429, "Too Many", {"Retry-After": "7"}, _Fp(big))
 code9, kind9, body9, ra9 = cgkey._err_info(e9)
-chk(READS and all(isinstance(n, int) and 0 <= n <= common.HTTP_ERR_BODY_MAX for n in READS),
+chk(READS and all(isinstance(n, int) and 0 <= n <= net_http.HTTP_ERR_BODY_MAX for n in READS),
     "R1 코인게코 키 오류 본문 = 64KiB 까지만 읽음(끝까지 읽지 않음)", READS)
 chk(code9 == 429 and kind9 == "http429" and "rate limited" in body9 and ra9 == "7", "R1b 오류 판정 그대로(코드·종류·본문 앞부분·Retry-After)",
     [code9, kind9, body9[:60], ra9])
@@ -41,12 +41,13 @@ for m in ("cgkey", "pricing", "sol_watch"):
         left += [f"{m}.py:{i}" for i, line in enumerate(f, 1) if pat.search(line)]
 chk(not left, "R2 cgkey·pricing·sol_watch 에 끝까지 읽기 0", left)
 
-import health
-import settings_store
+import health  # noqa: E402
+import paths  # noqa: E402
+import settings_store  # noqa: E402
 
 for k in ("UPBIT_ACCESS", "UPBIT_SECRET"):
     os.environ.pop(k, None)
-ENVP = common.ENV_PATH
+ENVP = paths.ENV_PATH
 
 
 def _env(txt):
@@ -60,13 +61,18 @@ def _env(txt):
 
 bad_dir = os.path.join(T.TMP, "env_is_dir")
 os.makedirs(bad_dir, exist_ok=True)
-_old_ep = settings_store.ENV_PATH
-settings_store.ENV_PATH = bad_dir
+_env("UPBIT_ACCESS=" + "a" * 20 + "\n")
+chk(settings_store.read_env().get("UPBIT_ACCESS") == "a" * 20 and "ENV_PATH" not in vars(settings_store),
+    "U0 settings_store 는 .env 경로 사본이 없음(4-4) · 호출 시점 paths.ENV_PATH 를 읽음", sorted(settings_store.read_env()))
+_old_ep = paths.ENV_PATH
+paths.ENV_PATH = bad_dir
 try:
     u1 = health.upbit_connected()
+    u1r = settings_store.read_env()
 finally:
-    settings_store.ENV_PATH = _old_ep
+    paths.ENV_PATH = _old_ep
 chk(u1 is True, "U1 .env 못 읽음 = 모름 → 있음(종전 경고 유지 · 키 지움으로 오인 안 함)", u1)
+chk(u1r == {}, "U1b settings_store.read_env 도 같은 '못 읽음' 경로를 지남(빈 값 · 진짜 .env 키 안 보임)", u1r)
 _env(None)
 chk(health.upbit_connected() is False, "U2 .env 없음 = 키 없음")
 _env("UPBIT_ACCESS=\nUPBIT_SECRET=\n")
@@ -75,16 +81,15 @@ _env("UPBIT_ACCESS=" + "a" * 20 + "\nUPBIT_SECRET=" + "s" * 20 + "\n")
 chk(health.upbit_connected() is True, "U4 키 있음 = 있음")
 _env(None)
 
-import core
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"chains": {"eth": {"blockscout": "https://eth.example.invalid", "conf_depth": 12, "blocks_per_day": 7200}},
                "wallets": [], "backfill_months": 1}, f)
-MARK = os.path.join(common.STATE_DIR, "backfill_done")
-c = core.Core(common.load_config())
+MARK = os.path.join(paths.STATE_DIR, "backfill_done")
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
@@ -96,7 +101,7 @@ def mrun(env_txt, metas):
     for k9 in metas:
         c.conn.execute("INSERT INTO meta (k, v) VALUES (?, '1700000000')", (k9,))
     c.conn.commit()
-    c._recon_pass_scopes(set(), False, {})
+    c.svc_recon._recon_pass_scopes(set(), False, {})
     return os.path.exists(MARK)
 
 
@@ -105,7 +110,7 @@ BNK = "TJ_BINANCE_KEY=synthetic-k\nTJ_BINANCE_SECRET=synthetic-s\n"
 chk(mrun(UPK, ["recon_done_upbit"]), "M1 지갑 0개 + 업비트 첫 대사 끝 → 백필 완료 표식 생성")
 mt9 = open(MARK, encoding="utf-8").read().strip() if os.path.exists(MARK) else ""
 chk(re.fullmatch(r"\d+\.\d+", mt9) is not None and abs(float(mt9) - __import__("time").time()) < 600,
-    "M5 표식 내용 = 만든 시각 소수 초(web 이 같은 초 안 '표식 전 스냅숏'도 가름 · 코덱스 mo512 RECORD)", mt9)
+    "M5 표식 내용 = 만든 시각 소수 초(web 이 같은 초 안 '표식 전 스냅숏'도 가름)", mt9)
 chk(not mrun(UPK, []), "M2 지갑 0개 + 업비트 첫 대사 전 → 표식 없음")
 chk(not mrun(BNK, []), "M3a 지갑 0개 + 바이낸스 키 · 첫 대사 전 → 표식 없음(해외 거래소 첫 동기화 중 동결 금지)")
 chk(mrun(BNK, ["recon_done_exf_binance"]), "M3b 지갑 0개 + 바이낸스 첫 대사 끝 → 표식 생성")
@@ -119,7 +124,7 @@ chk(ex.get("wallets") == [] and ex.get("exchange_addresses") == [], "E1 예시 �
 evm_src = open(os.path.join(T.SRC, "evm_watch.py"), encoding="utf-8").read()
 chk("int(self.backfill_months), since, safe" not in evm_src, "E2 이더스캔 백필 시작 로그 = 개월 수 소수 그대로(0.5개월 ≠ '0개월')")
 
-RD = open(T.README, encoding="utf-8").read()
+RD = T.doc_text("README.md")
 AK = open(os.path.join(DOCS, "docs", "API_KEYS.md"), encoding="utf-8").read()
 EX9 = open(os.path.join(DOCS, ".env.example"), encoding="utf-8").read()
 SJ = open(os.path.join(T.ROOT, "web", "v2", "setup.js"), encoding="utf-8").read() if os.path.exists(os.path.join(T.ROOT, "web", "v2", "setup.js")) else ""
@@ -131,29 +136,29 @@ chk(re.search(r"\| `TJ_ETHERSCAN_KEY` \| EVM 지갑이 있으면 \*\*필수\*\*"
 chk(re.search(r"#[^\n]*EVM 지갑이 있으면 필수[^\n]*\n(?:#[^\n]*\n)*TJ_ETHERSCAN_KEY=", EX9) is not None, "D4 .env.example 이더스캔 = EVM 필수")
 chk("Etherscan, CoinGecko" not in RD and "All keys are optional except `TJ_HELIUS_KEY` when you track a Solana wallet and `TJ_ALCHEMY_KEY` when" not in AK,
     "D5 영어 안내 = 이더스캔·Ankr 도 EVM 필수(선택 목록에 없음)")
-import chainsweep
+import chaincatalog  # noqa: E402
 
-n_sweep = len(chainsweep.SWEEP_CHAINS)
+n_sweep = len(chaincatalog.SWEEP_CHAINS)
 note = str((ex.get("chain_sweep") or {}).get("_note") or "")
 m9 = re.search(r"× (\d+)체인", note)
-chk(m9 is not None and int(m9.group(1)) == n_sweep, "D6 예시 설정 미추적 체인 점검 체인 수 = 코드 표(chainsweep.SWEEP_CHAINS)", [m9 and m9.group(1), n_sweep])
+chk(m9 is not None and int(m9.group(1)) == n_sweep, "D6 예시 설정 미추적 체인 점검 체인 수 = 코드 표(chaincatalog.SWEEP_CHAINS)", [m9 and m9.group(1), n_sweep])
 bnote = str(((ex.get("chains") or {}).get("base") or {}).get("_note") or "")
-chk(common.chain_discovery("base", (ex.get("chains") or {}).get("base") or {}) == "rpc" and "RPC" in bnote,
+chk(config.chain_discovery("base", (ex.get("chains") or {}).get("base") or {}) == "rpc" and "RPC" in bnote,
     "D7 예시 Base = RPC 전용(안내에 적힘 · 블록스카웃 주소는 보조)", bnote[:80])
 chk("blockscout 로 동작" not in SJ, "D8 설정 요약 줄 이더스캔 없음 = 'blockscout 로 동작' 아님(새 설치본은 블록스카웃 첫 경로 금지)")
 chk("공개 탐색기로만 받아" not in SJ, "D9 이더스캔 키 경고 = '공개 탐색기로만' 아님(키 없는 새 설치본 = 공개 노드)")
 chk("맥의 인터넷" not in T.mod_src("health", "chk_"), "H1 네트워크 끊김 안내 = '이 컴퓨터'(리눅스 설치본도)")
-chk("Helius·Etherscan 키와 노드 키" in AK and "never in URLs" not in AK, "D10 API_KEYS 키 전송 안내 = 구현대로(Helius·Etherscan·노드 키 = 요청 주소 · 코덱스 mo510 RECORD)")
+chk("Helius·Etherscan 키와 노드 키" in AK and "never in URLs" not in AK, "D10 API_KEYS 키 전송 안내 = 구현대로(Helius·Etherscan·노드 키 = 요청 주소)")
 m9 = re.search(r"- \*\*알려진 한계\(이번 판\)\*\*[^\n]*\n((?:  - [^\n]*\n)+)", RD)
 chk(m9 is not None and len(m9.group(1).strip().splitlines()) >= 6 and "**Known limitations (this release):**" in RD,
     "L1 README 알려진 한계(이번 판) 6줄 이상 · 영어 절도", m9 and len(m9.group(1).strip().splitlines()))
 
-import time
+import time  # noqa: E402
 
-import nodekeys
-import onboarding
+import nodekeys  # noqa: E402
+import onboarding  # noqa: E402
 
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"chains": {}, "wallets": [], "sol": {"rpc": "helius"}}, f)
 onboarding._save_probe = lambda g, v: ("ok", "")
 TODAY = time.strftime("%Y-%m-%d", time.gmtime())
@@ -182,7 +187,7 @@ chk(r.get("ok") and "fresh_since" not in hplan(), "K7 끄기 = 지움", hplan())
 r1 = onboarding._dispatch("keys/nodeplan", {"provider": "helius", "fresh": "yes"})
 r2 = onboarding._dispatch("keys/nodeplan", {"provider": "helius", "plan": "paid", "share": 10})
 chk(r1.get("ok") is False and r2.get("ok") is False, "K8 헬리우스 = '새로 받은 키' 켜기·끄기만(이상한 값·요금제 칸 거부)", [r1, r2])
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump({"chains": {}, "wallets": [], "sol": {"rpc": "helius", "helius_burst": False}}, f)
 chk((onboarding.status().get("heliusFresh") or {}).get("burst") is False, "K9 버스트 끔(sol.helius_burst false) = 칩 안 보임 표식")
 chk("data-p=\"helius\"" in SJ and "heliusFresh" in SJ and "새로 받은 키(지난 사용 없음)" in SJ, "K10 설정 화면 헬리우스 카드에 같은 칩(data-su=nfresh · data-p=helius)")

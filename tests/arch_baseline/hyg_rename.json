@@ -1,0 +1,30 @@
+{
+ "_doc": "시험 이름 승계 표 {옛 이름: 새 이름} — _arch_ratchet '시험 이름 승계'(hyg_tests·hyg_checks 의 옛 열쇠 값을 새 열쇠로) · 도구 = tools/refactor/test_rename.py apply(10막 10-5a) · 손 편집 금지",
+ "renames": {
+  "test_alch_gate1012.py": "test_alch_gate_cu.py",
+  "test_btc_bt939.py": "test_btc_change_scan.py",
+  "test_burst_flex_bu465.py": "test_helius_burst_window.py",
+  "test_exbal1012.py": "test_exbal_prefetch.py",
+  "test_exbal1012b.py": "test_exbal_prov_edges.py",
+  "test_exf_x12.py": "test_exf_clock_fills.py",
+  "test_feegrp1013.py": "test_tax_fee_coin_rows.py",
+  "test_p2b_silent.py": "test_silent_failures.py",
+  "test_prov_cover1012.py": "test_prov_cover_chains.py",
+  "test_prov_cover1012b.py": "test_prov_cover_stake.py",
+  "test_prov_ec1012.py": "test_prov_nonevm_latest.py",
+  "test_rev1012_autooff_alert.py": "test_chainoff_auto_alert.py",
+  "test_rev1012_dayev_conv.py": "test_day_events_page_conv.py",
+  "test_rev1012_logdata.py": "test_transfer_log_data.py",
+  "test_rev1012_nonevm_holdloc.py": "test_nonevm_hold_locs.py",
+  "test_rmhold1013.py": "test_curve_hold_hidden.py",
+  "test_s22_eval_auto_retry.py": "test_receipt_eval_auto.py",
+  "test_s22_noredir.py": "test_auth_no_redirect.py",
+  "test_s22_perm.py": "test_state_perm_tighten.py",
+  "test_s22_readable.py": "test_settings_readable.py",
+  "test_s22_reload_newchain.py": "test_reload_new_chains.py",
+  "test_s22_revfill.py": "test_review_fill_all.py",
+  "test_s22_small4.py": "test_prewarm_and_gates.py",
+  "test_s23rev1012.py": "test_snapshot_cross_fills.py",
+  "test_subacct1013.py": "test_exchange_subaccounts.py"
+ }
+}

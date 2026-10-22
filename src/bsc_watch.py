@@ -11,13 +11,13 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, logs, paths, runtime, statefile, textutil
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
+    runtime.cpu_reserve_apply()
 import bf_engine
 from inbox import SegmentWriter
 
-log = common.setup_logging("tj-bsc")
+log = logs.setup_logging("tj-bsc")
 
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 DEPOSIT_TOPIC = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
@@ -27,71 +27,28 @@ BLOCKS_PER_DAY = 28800
 CALL_SLEEP = 0.25
 
 
-from bsc_base import (
-    _balw_nostate,
-    _BalwNoArch,
-    _BalwNoState,
+from bsc_base import (  # noqa: F401
     _BalwStop,
     _native_delta,
-    _NONCE_NEXT_KINDS,
-    _NONCE_STOP_KINDS,
-    _nonce_why,
-    _NonceBudget,
     _now,
-    _NView,
     _pad_topic,
-    _PubDown,
     _touches,
-    _XIN_NET,
-    _XIN_NF,
-    _xin_not_found,
-    _XIN_TXID,
-    BALW_BACK_MIN,
-    BALW_BO_BASE,
-    BALW_BO_MAX,
     BALW_CALL_CAP,
     BALW_DAY_CAP,
-    BALW_DUST,
-    BALW_EVERY,
-    BALW_EVERY_ARCH,
-    BALW_HIST_DAYS,
     BALW_HIST_GAP,
     BALW_HIST_RETRY,
-    BALW_JOB_CALLS,
-    BALW_JOB_DONE_MAX,
-    BALW_JOB_KEEP,
     BALW_JOBS_MAX,
-    BALW_NONCE_STUCK,
-    BALW_NOSTATE_N,
-    BALW_PUB_NEAR,
-    BALW_PUB_SCAN,
     BALW_REQ_WAIT,
-    BALW_RX_MAX_H,
     BALW_RX_NAME,
-    BALW_SCAN_BATCH,
-    BALW_SCAN_RUN,
     BALW_STALE,
     BALW_TIME_CAP,
     DISC_REQ_NAME,
     LANE_SPLIT_SEC,
-    NONCE_ARCH_GAP,
-    NONCE_BACKLOG_EVERY,
-    NONCE_BO_BASE,
-    NONCE_BO_MAX,
     NONCE_CALL_CAP,
-    NONCE_EVERY,
     NONCE_HEAD_EVERY,
-    NONCE_HINT_FAR,
-    NONCE_HINT_KEEP,
-    NONCE_HINT_NEAR,
     NONCE_MAX_FIND,
-    NONCE_NARROW,
-    NONCE_OLD_BURST,
     NONCE_PUB_CAP,
-    NONCE_RECENT_SEC,
-    NONCE_TOP_BATCH,
     Rpc,
-    XIN_EVERY,
     XIN_MAX_NEW,
     XIN_NF_MAX,
 )
@@ -115,11 +72,11 @@ class _SentTap:
         r = self.inner.append(rec)
         try:
             self._owner._nonce_note(rec)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.debug("nonce 색인 기록 실패: %s", e)
         try:
             self._owner._balw_note(rec)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.debug("잔고 감시 색인 기록 실패: %s", e)
         return r
 
@@ -142,7 +99,7 @@ def _bsc_via() -> str:
     try:
         import nodesel
         return nodesel.via("bsc")
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return ""
 
 
@@ -171,15 +128,15 @@ def _dec_string(hexdata: str) -> str | None:
         if len(b) >= 64:
             ln = int.from_bytes(b[32:64], "big")
             return b[64:64 + ln].decode("utf-8", "ignore") or None
-    except Exception:
+    except Exception:  # noqa: BLE001 [optional]
         pass
     return None
 
 
-from bsc_balw import BalwMixin
+from bsc_balw import BalwMixin  # noqa: E402
 
 
-from bsc_nonce import NonceMixin
+from bsc_nonce import NonceMixin  # noqa: E402
 
 
 class BscWatcher(NonceMixin, BalwMixin):
@@ -195,7 +152,7 @@ class BscWatcher(NonceMixin, BalwMixin):
         try:
             import nodesel
             nodesel.register("bsc", self.logs_rpc.urls, self.rpc.urls, self._arch_urls)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
         self.logs_sleep = float(bc.get("logs_sleep_sec", 1.2))
         self.span = int(bc.get("getlogs_span", 5000))
@@ -219,13 +176,13 @@ class BscWatcher(NonceMixin, BalwMixin):
         self.wallet_since = bf_engine.wallet_since_map(cfg, "bsc")
         self.topics = [_pad_topic(w) for w in self.wallets]
         self.writer = _SentTap(writer, self)
-        self.cursor_path = os.path.join(common.STATE_DIR, "cursor_bsc.json")
-        self.cursor = common.read_json(self.cursor_path, {})
-        self.meta_path = os.path.join(common.STATE_DIR, "bsc_token_meta.json")
-        self.token_meta = _valid_meta(common.read_json(self.meta_path, {}))
+        self.cursor_path = paths.state("cursor_bsc.json")
+        self.cursor = statefile.read_json(self.cursor_path, {})
+        self.meta_path = paths.state("bsc_token_meta.json")
+        self.token_meta = _valid_meta(statefile.read_json(self.meta_path, {}))
         self.nodec = bf_engine.nodec_registry("bsc", log)
-        self.emitted_path = os.path.join(common.STATE_DIR, "emitted_bsc.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
+        self.emitted_path = paths.state("emitted_bsc.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
         self.block_ts = {}
         self.span_caps = {str(u): int(c) for u, c in (bc.get("getlogs_span_caps") or {}).items()}
         self.scan_workers = int(bc.get("scan_workers", 1))
@@ -257,15 +214,15 @@ class BscWatcher(NonceMixin, BalwMixin):
             other = urls[(self.rpc.i + 1) % len(urls)]
             try:
                 heads[other] = int(bf_engine.rpc_call(other, "eth_blockNumber", [], timeout=10, retries=1), 16)
-            except Exception:
+            except Exception:  # noqa: BLE001 [optional]
                 pass
         top = max(heads.values())
         for u, h9 in heads.items():
             if top - h9 > self.STALE_NODE_BLOCKS:
                 g9 = bf_engine.gate(u)
                 g9.open_until = max(g9.open_until, time.time() + 60)
-                log.info("BSC 노드 %s 헤드 %d 가 %d블록 뒤처짐 — 60초 제외", common.redact_urls(u), h9, top - h9)
-        self.node_heads = {common.redact_urls(u): h9 for u, h9 in heads.items()}
+                log.info("BSC 노드 %s 헤드 %d 가 %d블록 뒤처짐 — 60초 제외", logs.redact_urls(u), h9, top - h9)
+        self.node_heads = {logs.redact_urls(u): h9 for u, h9 in heads.items()}
         self._log_head = top
         return top
 
@@ -280,14 +237,14 @@ class BscWatcher(NonceMixin, BalwMixin):
         try:
             r = self.rpc.call("eth_call", [{"to": ca, "data": "0x95d89b41"}, "latest"])
             sym = _dec_string(r or "")
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             sym = None
         time.sleep(CALL_SLEEP)
         try:
             r = self.rpc.call("eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"])
         except Exception as e:
-            if bf_engine.revert_like(e) and self.nodec.bad(ca, "revert: " + common.safe_err(e)[:80]):
-                raise bf_engine.TokenNoDecimals(f"token decimals 영구 불능 {ca[:10]}: {common.safe_err(e)[:80]}") from e
+            if bf_engine.revert_like(e) and self.nodec.bad(ca, "revert: " + logs.safe_err(e)[:80]):
+                raise bf_engine.TokenNoDecimals(f"token decimals 영구 불능 {ca[:10]}: {logs.safe_err(e)[:80]}") from e
             raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: {e}")
         dec, why = bf_engine.decimals_from_result(r)
         if dec is None:
@@ -311,7 +268,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                 if not isinstance(res, list):
                     raise RuntimeError(f"getLogs 비정상 result: {type(res).__name__}")
                 return res
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
                 msg = str(e)
                 if "429" in msg or "Too Many" in msg:
@@ -335,12 +292,12 @@ class BscWatcher(NonceMixin, BalwMixin):
                     chunk = one.call("eth_getLogs", [{"fromBlock": hex(cur), "toBlock": hex(end),
                                                       "topics": topics}])
                     if not isinstance(chunk, list):
-                        raise RuntimeError(f"폴백 {common.redact_urls(url)} 청크 {cur}-{end} 비정상 result: {type(chunk).__name__}")
+                        raise RuntimeError(f"폴백 {logs.redact_urls(url)} 청크 {cur}-{end} 비정상 result: {type(chunk).__name__}")
                     rows.extend(chunk)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     last = e; ok = False
-                    log.warning("폴백 %s 청크 %d-%d 실패: %s", common.redact_urls(url), cur, end,
-                                common.redact_urls(str(e))[:60])
+                    log.warning("폴백 %s 청크 %d-%d 실패: %s", logs.redact_urls(url), cur, end,
+                                logs.redact_urls(str(e))[:60])
                     break
                 cur = end + 1
                 time.sleep(0.3)
@@ -357,7 +314,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             try:
                 import nodekeys
                 key9 = [u9 for u9 in eps9 if nodekeys.is_key_node(u9)]
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 key9 = []
             if key9 and len(key9) < len(eps9):
                 eps9 = [u9 for u9 in eps9 if u9 not in key9]
@@ -413,7 +370,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             if fr9 not in self.wallets and to9 not in self.wallets:
                 continue
             try:
-                val = common.log_word0(lg.get("data") or "0x0")
+                val = textutil.log_word0(lg.get("data") or "0x0")
             except ValueError:
                 continue
             if not val:
@@ -519,8 +476,8 @@ class BscWatcher(NonceMixin, BalwMixin):
             res = pub.batch([("eth_getBalance", [f, hex(blk - 1)]), ("eth_getBalance", [f, hex(blk)]),
                              ("eth_getTransactionCount", [f, hex(blk - 1)]), ("eth_getTransactionCount", [f, hex(blk)])], timeout=15)
             b0, b1, n0, n1 = (int(r, 16) for r in res)
-        except Exception as e:
-            log.info("BSC %s 매도 받은 BNB 잔고 확인 실패(로그 값 사용): %s", str(tx.get("hash"))[:12], common.safe_err(e)[:80])
+        except Exception as e:   # noqa: BLE001 [fallback]
+            log.info("BSC %s 매도 받은 BNB 잔고 확인 실패(로그 값 사용): %s", str(tx.get("hash"))[:12], logs.safe_err(e)[:80])
             return x
         if n1 - n0 != 1:
             return x
@@ -539,7 +496,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                       ("eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"])]
         try:
             res = self.rpc.batch(calls)
-        except Exception:
+        except Exception:  # noqa: BLE001 [optional]
             return
         for j, ca in enumerate(cas):
             sym_r, dec_r = res[2 * j], res[2 * j + 1]
@@ -575,7 +532,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                         pairs[h] = (tx, rc)
             except _BalwStop:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.info("상세 배치 실패 → 단건 경로: %s", str(e)[:100])
             try:
                 need = sorted({tx["blockNumber"] for tx, rc in pairs.values()
@@ -591,7 +548,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                 self._token_info_batch(cas)
             except _BalwStop:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.info("블록/메타 배치 실패 → 단건 경로: %s", str(e)[:100])
             for h in chunk:
                 try:
@@ -601,7 +558,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                         out[h] = self._fetch_detail_single(h)
                 except _BalwStop:
                     raise
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     out[h] = e
             time.sleep(CALL_SLEEP)
         return out
@@ -670,8 +627,8 @@ class BscWatcher(NonceMixin, BalwMixin):
                      block_sec_est=round(bsec, 3) if bsec else None,
                      head_unchanged_sec=int(now - self._hb_prev[1]) if getattr(self, "_hb_prev", None) else None,
                      node_heads=getattr(self, "node_heads", None),
-                     current_source=common.redact_urls(self.rpc.urls[self.rpc.i]),
-                     logs_sources=[common.redact_urls(u) for u in self.logs_rpc.urls],
+                     current_source=logs.redact_urls(self.rpc.urls[self.rpc.i]),
+                     logs_sources=[logs.redact_urls(u) for u in self.logs_rpc.urls],
                      scan_pending=len(sc.get("found") or []) if isinstance(sc, dict) else 0,
                      synced_at=self.cursor.get("_synced_at"), scan=self.last_scan_metrics or None,
                      lanes=(extra or {}).get("lanes"),
@@ -699,7 +656,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             ext = {"target": int(target), "tblk": int(tblk), "to": int(cov), "done_to": int(tblk), "found": [],
                    "t0": int(time.time())}
             self.cursor["_ext"] = ext
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("★BSC 과거 창 확장: 블록 %d → %d (%s~)★", tblk, cov, time.strftime("%Y-%m-%d", time.gmtime(target)))
         t0 = time.time()
         bud = self._side_left()
@@ -708,7 +665,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             if last > ext["done_to"]:
                 ext["found"] = sorted(set(ext["found"]) | {h for h in found if h not in self.emitted})
                 ext["done_to"] = last
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
         todo = [h for h in ext["found"] if h not in self.emitted]
         dets = self.fetch_details(todo, deadline=t0 + bud) if todo else {}
         order = sorted(todo, key=lambda h: (dets[h]["tx"]["block_number"], h) if isinstance(dets.get(h), dict)
@@ -723,8 +680,8 @@ class BscWatcher(NonceMixin, BalwMixin):
                                 "wallets": self.wallets, "observed_head": head, "ts": int(time.time())})
             self.emitted.add(h)
             n_emit += 1
-        common.write_json_if_changed(self.meta_path, self.token_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         ext["found"] = [h for h in ext["found"] if h not in self.emitted]
         span = max(1, ext["to"] - ext["tblk"])
         self.progress.update("bsc:extend", phase="extend", unit="blocks", done=ext["done_to"] - ext["tblk"], total=span,
@@ -735,7 +692,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             self.cursor.pop("_ext", None)
             self.progress.finish("bsc:extend", note=f"확장 완료 {span}블록")
             log.info("★BSC 과거 창 확장 완료 — 하한 블록 %d (%.0f분)★", ext["tblk"], (time.time() - ext["t0"]) / 60)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     NEWW_KEY = "bsc:newwallet"
 
@@ -744,7 +701,7 @@ class BscWatcher(NonceMixin, BalwMixin):
         known = self.cursor.get("_wallets")
         if not isinstance(known, list):
             self.cursor["_wallets"] = cur
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("BSC 추적 지갑 집합 시드: %d개 (재스캔 없음)", len(cur))
             return
         kept = sorted(set(known) & set(cur))
@@ -764,7 +721,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                     pass
             dirty = True
         if dirty:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _new_wallet_lo(self, head: int, new=None) -> int:
         cands = [self.block_at_ts(int(time.time()) - self.backfill_days * 86400, head - self.conf_depth)]
@@ -802,7 +759,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                 job["to"] = max(int(job["to"]), top)
             if not jw:
                 self.cursor.pop("_neww", None)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 return
             job["wallets"] = jw
         else:
@@ -812,18 +769,18 @@ class BscWatcher(NonceMixin, BalwMixin):
             if fb <= 0 or hint == 0:
                 self.cursor.pop("_neww_top", None)
                 self.cursor["_wallets"] = sorted(cur)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 return
             lo = self._new_wallet_lo(head, new)
             self.cursor.pop("_neww_top", None)
             if lo > top:
                 self.cursor["_wallets"] = sorted(set(known) | set(new))
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 return
             job = {"wallets": new, "lo": int(lo), "to": int(top), "done_to": int(lo) - 1, "found": [],
                    "t0": int(time.time())}
             self.cursor["_neww"] = job
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("★BSC 나중 등록 지갑 %d개 이력 백필: 블록 %d → %d (새 지갑 토픽만)★", len(new), lo, top)
         t0 = time.time()
         bud = self._side_left()
@@ -833,7 +790,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             if last > job["done_to"]:
                 job["found"] = sorted(set(job["found"]) | set(found))
                 job["done_to"] = last
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
         todo = list(job["found"])
         dets = self.fetch_details(todo, deadline=t0 + bud) if todo else {}
         order = sorted(todo, key=lambda h: (dets[h]["tx"]["block_number"], h) if isinstance(dets.get(h), dict)
@@ -847,13 +804,13 @@ class BscWatcher(NonceMixin, BalwMixin):
             try:
                 self.writer.append({"v": 1, "kind": "evm_tx", "chain": "bsc", "txhash": h, "snapshot": snap,
                                     "wallets": self.wallets, "observed_head": head, "ts": int(time.time())})
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패 — 새 지갑 백필 보류: %s", e)
                 break
             self.emitted.add(h)
             sent.add(h)
-        common.write_json_if_changed(self.meta_path, self.token_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         job["found"] = [h for h in job["found"] if h not in sent]
         span = max(1, job["to"] - job["lo"] + 1)
         self.progress.update(self.NEWW_KEY, phase="extend", unit="blocks", done=job["done_to"] - job["lo"] + 1,
@@ -864,7 +821,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             self.cursor.pop("_neww", None)
             self.progress.finish(self.NEWW_KEY, note=f"새 지갑 {len(job['wallets'])}개 이력 백필 완료 {span}블록")
             log.info("★BSC 나중 등록 지갑 이력 백필 완료 — %d개, %.0f분★", len(job["wallets"]), (time.time() - job["t0"]) / 60)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _detail_fail_note(self, bad: list, dets: dict) -> list:
         return bf_engine.detail_fail_note(self.cursor, bad, dets, "bsc", "bsc_detail", log, self.__dict__.setdefault("_df_seen", set()))
@@ -889,9 +846,9 @@ class BscWatcher(NonceMixin, BalwMixin):
                 bf_engine.quarantine_result(self.cursor, h, True, "bsc", "bsc_detail", log)
             else:
                 bf_engine.quarantine_result(self.cursor, h, False, "bsc", "bsc_detail", log, err=snap)
-        common.write_json_if_changed(self.meta_path, self.token_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         return n
 
 
@@ -955,7 +912,7 @@ class BscWatcher(NonceMixin, BalwMixin):
         lv = self.cursor.get("_live")
         if not isinstance(lv, dict):
             if self.cursor.pop("_lscan", None) is not None:
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
             return False
         fb = int(self.cursor.get("from_block") or 0)
         try:
@@ -969,7 +926,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             self.cursor.pop("_live", None)
             self.cursor["_lanes_seen"] = int(time.time())
             self.cursor.pop("_lscan", None)
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             return False
         out = []
         for a, b in holes:
@@ -983,14 +940,14 @@ class BscWatcher(NonceMixin, BalwMixin):
             self.cursor["_lanes_seen"] = int(time.time())
             self.cursor.pop("_lscan", None)
             log.info("★BSC 옆 차선(옛 기록) 끝 — 한 차선으로 합침(from_block %d)★", int(self.cursor["from_block"]))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             return False
         if out[0][0] > fb:
             self._set_fb(out[0][0])
         if out != holes or lv.get("fb") != int(self.cursor["from_block"]):
             lv["holes"] = out
             lv["fb"] = int(self.cursor["from_block"])
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         return True
 
     def _lane_scan(self, frm: int, to: int, ckey: str, head: int, budget: float, detail_deadline: float) -> tuple:
@@ -1005,7 +962,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             if last_done < frm:
                 return "none", frm - 1
             self.cursor[ckey] = {"frm": frm, "to": last_done, "found": sorted(h for h in found if h not in self.emitted)}
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         qset = bf_engine.quarantine_map(self.cursor)
         todo = [h for h in found if h not in self.emitted and h not in qset]
         dets = self.fetch_details(todo, deadline=detail_deadline) if todo else {}
@@ -1029,17 +986,17 @@ class BscWatcher(NonceMixin, BalwMixin):
                 self.writer.append({"v": 1, "kind": "evm_tx", "chain": "bsc", "txhash": h, "snapshot": snap, "wallets": self.wallets,
                                     "observed_head": head, "ts": int(time.time())})
                 self.emitted.add(h)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 ok = False
                 break
-        common.write_json_if_changed(self.meta_path, self.token_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if not ok:
             sc9 = self.cursor.get(ckey)
             if isinstance(sc9, dict):
                 sc9["found"] = sorted(h for h in found if h not in self.emitted)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
             return "detail", frm - 1
         self.cursor.pop(ckey, None)
         return ("done" if last_done >= to else "part"), last_done
@@ -1053,40 +1010,40 @@ class BscWatcher(NonceMixin, BalwMixin):
                 lv["holes"] = list(lv.get("holes") or []) + [[L, nl]]
                 lv["done"] = L = nl
                 self.cursor.pop("_lscan", None)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 log.info("BSC 라이브 차선이 크게 뒤 — 블록 %d 부터 다시(그 앞 %d블록은 옆 차선)", nl + 1, nl - int(lv["holes"][-1][0]))
         live_st, live_err = "done", None
         if L < safe:
             t0 = time.time()
             try:
                 live_st, last = self._lane_scan(L + 1, safe, "_lscan", head, self.cycle_budget, t0 + self.cycle_budget + 300)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 live_st, last, live_err = "none", L, e
             if last > L:
                 lv["done"] = L = int(last)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
             if live_st in ("none", "detail") and live_err is None:
                 live_err = RuntimeError("라이브 차선 " + ("상세 실패 — 체크포인트로 재시도" if live_st == "detail" else
                                                        "한 청크도 못 나감 — " + str((self.last_scan_metrics or {}).get("stop") or "노드 오류")))
         live_ok = live_st in ("done", "part")
         if live_ok:
             self.cursor["head"] = head
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         try:
             self._xin_pass(head)
-        except Exception as e:
-            log.info("BSC 거래소 출금 txid 확인 실패(다음 기회): %s", common.safe_err(e)[:120])
+        except Exception as e:  # noqa: BLE001 [optional]
+            log.info("BSC 거래소 출금 txid 확인 실패(다음 기회): %s", logs.safe_err(e)[:120])
         if live_st == "done" and L >= safe:
             try:
                 hl9 = [int(b9) for _a9, b9 in (self.cursor["_live"].get("holes") or [])]
                 if hl9:
                     self._nonce_pass(head, lo_blk=max(hl9))
-            except Exception as e:
-                log.info("BSC nonce 확인(라이브 범위) 실패(다음 기회): %s", common.safe_err(e)[:120])
+            except Exception as e:  # noqa: BLE001 [optional]
+                log.info("BSC nonce 확인(라이브 범위) 실패(다음 기회): %s", logs.safe_err(e)[:120])
             try:
                 self._balw_pass(head, L)
-            except Exception as e:
-                log.info("BSC 잔고 감시 실패(다음 기회): %s", common.safe_err(e)[:120])
+            except Exception as e:  # noqa: BLE001 [optional]
+                log.info("BSC 잔고 감시 실패(다음 기회): %s", logs.safe_err(e)[:120])
         live_metrics = dict(self.last_scan_metrics or {})
         bk_st, bk_err, bk_adv = None, None, 0
         if self._lane_norm():
@@ -1098,10 +1055,10 @@ class BscWatcher(NonceMixin, BalwMixin):
                 if last > fb:
                     bk_adv = int(last) - fb
                     self._set_fb(last)
-                    common.atomic_write_json(self.cursor_path, self.cursor)
-            except Exception as e:
+                    statefile.atomic_write_json(self.cursor_path, self.cursor)
+            except Exception as e:  # noqa: BLE001 [fallback]
                 bk_st, bk_err = "none", e
-                log.warning("BSC 옆 차선 실패(다음 사이클 이어서): %s", common.redact_urls(common.safe_err(e))[:160])
+                log.warning("BSC 옆 차선 실패(다음 사이클 이어서): %s", logs.redact_urls(logs.safe_err(e))[:160])
             self._lane_norm()
         lv = self.cursor.get("_live") if isinstance(self.cursor.get("_live"), dict) else None
         lanes = None
@@ -1114,7 +1071,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             lanes = {"why": lv.get("why"), "back_from": int(self.cursor.get("from_block") or 0), "back_to": int(holes[-1][1]) if holes else None,
                      "holes": len(holes), "live": int(lv["done"]), "advanced": bk_adv,
                      "stalled": bool(bk_st in ("none", "detail") or bk_err is not None),
-                     "err": (common.redact_urls(common.safe_err(bk_err))[:160] if bk_err is not None else
+                     "err": (logs.redact_urls(logs.safe_err(bk_err))[:160] if bk_err is not None else
                              (str(stop)[:160] if stop and bk_st in ("none", "detail") else None))}
             note = None if not lanes["stalled"] else "옛 기록 차선 멈춤 — " + str(lanes["err"] or "노드 오류")[:120]
             self.progress.update("bsc", phase="scan", unit="blocks", done=max(0, total - miss), total=total, note=note,
@@ -1126,14 +1083,14 @@ class BscWatcher(NonceMixin, BalwMixin):
     def cycle(self):
         tc0 = self._tc0 = time.time()
         if self.cursor.pop("_synced_at", None) is not None:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         self._seed_wallet_set()
         self._df_seen = set()
         self._detail_home()
         head = self.head()
         try:
             self._quarantine_retry(head)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [boundary]
             log.info("BSC 격리 tx 재시도 실패(다음 사이클): %s", str(e)[:120])
         safe = head - self.conf_depth
         since = int(self.cursor.get("from_block", 0))
@@ -1145,14 +1102,14 @@ class BscWatcher(NonceMixin, BalwMixin):
             self.cursor["_bf_start"] = since
             self.cursor["_cov"] = since
             self._lane_open(safe, "new")
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("백필 시작: 블록 %d → %d (%d일, timestamp 탐색)",
                      since, safe, self.backfill_days)
         lanes9 = self._lane_norm()
         if not lanes9 and self._lanes_on() and (safe - int(self.cursor.get("from_block") or 0)) * self._bsec() > LANE_SPLIT_SEC:
             lanes9 = self._lane_open(safe, "lag")
             if lanes9:
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
         if lanes9:
             self._lanes_cycle(head, safe, tc0)
             return
@@ -1184,7 +1141,7 @@ class BscWatcher(NonceMixin, BalwMixin):
                 return
             self.cursor["_scan"] = {"frm": since + 1, "to": last_done,
                                     "found": sorted(h for h in found if h not in self.emitted)}
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         safe = last_done
         complete = last_done >= safe0
         ok = True
@@ -1214,12 +1171,12 @@ class BscWatcher(NonceMixin, BalwMixin):
                 self.writer.append(rec)
                 self.emitted.add(h)
                 n_ok += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 ok = False
                 break
-        common.write_json_if_changed(self.meta_path, self.token_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.meta_path, self.token_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if ok:
             self.cursor["from_block"] = safe
             self.cursor["head"] = head
@@ -1229,7 +1186,7 @@ class BscWatcher(NonceMixin, BalwMixin):
             else:
                 self.cursor.pop("_synced_at", None)
                 log.warning("부분 조회 %d→%d (확정 헤드 %d) — 커서 전진, 도장 보류", since, safe, safe0)
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             if found:
                 log.info("사이클 완료: %d tx (블록 %d→%d, %.0f초)", len(found), since, safe, time.time() - t_cycle)
             self._report(head, safe, "live" if complete else "scan")
@@ -1244,27 +1201,27 @@ class BscWatcher(NonceMixin, BalwMixin):
             sc9 = self.cursor.get("_scan")
             if isinstance(sc9, dict):
                 sc9["found"] = sorted(h for h in found if h not in self.emitted)
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
             self._report(head, since, "detail", note=f"상세 남음 {len(sc9.get('found') or []) if isinstance(sc9, dict) else '?'}건")
             self._health(head, since, False, RuntimeError("상세 실패 — 스캔 체크포인트로 재시도"))
 
 
 def main():
-    common.ensure_dirs()
-    cfg = common.load_config()
+    paths.ensure_dirs()
+    cfg = config.load_config()
     bf_engine.configure(cfg)
     wallets = [w["address"] for w in cfg["wallets"] if w.get("type") == "bsc_rpc"]
     if not wallets:
         raise SystemExit("추적할 BSC 지갑이 없음 — config.wallets 확인")
     poll = int(cfg.get("bsc", {}).get("poll_sec", 60))
-    writer = SegmentWriter(os.path.join(common.INBOX_DIR, "bsc"))
+    writer = SegmentWriter(os.path.join(paths.INBOX_DIR, "bsc"))
     w = BscWatcher(cfg, wallets, writer)
     log.info("가동: %d지갑, %d초 주기, 백필 %d일", len(wallets), poll, w.backfill_days)
     while True:
         t0 = time.time()
         try:
             w.cycle()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             n9 = bf_engine.health("bsc").fail("bsc", e, "bsc_rpc")
             bf_engine.health("bsc").flush()
             lv = bf_engine.LogDebounce.level(n9)

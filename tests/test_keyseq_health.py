@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
+import config, paths, statefile  # noqa: E402
+import health  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 NOW = time.time()
 SOLW = "So1" + "a" * 40
 EVMW = "0x" + "b2" * 20
@@ -19,7 +19,7 @@ EVMW = "0x" + "b2" * 20
 
 def wj(name, obj):
     os.makedirs(os.path.dirname(os.path.join(S, name)), exist_ok=True)
-    common.atomic_write_json(os.path.join(S, name), obj)
+    statefile.atomic_write_json(os.path.join(S, name), obj)
 
 
 def rm(name):
@@ -30,25 +30,25 @@ def rm(name):
 
 
 def set_env(helius: bool):
-    with open(common.ENV_PATH, "w") as f:
+    with open(paths.ENV_PATH, "w") as f:
         f.write("TJ_HELIUS_KEY=" + ("h" * 36 if helius else "") + "\n")
 
 
 def state(cfg, age, runner, helius):
-    json.dump(cfg, open(common.CONFIG_PATH, "w"))
+    json.dump(cfg, open(paths.CONFIG_PATH, "w"))
     set_env(helius)
     if age is None:
         rm("cursor_sol.json")
         rm(os.path.join("health", "sol.json"))
     else:
         wj("cursor_sol.json", {SOLW: 123, "_synced_at": NOW - age})
-        wj(os.path.join(health.HB_DIR, "sol.json"), {"schema": 1, "unit": "sol", "ts": int(NOW - age), "pid": 1,
+        wj(os.path.join(paths.state("health"), "sol.json"), {"schema": 1, "unit": "sol", "ts": int(NOW - age), "pid": 1,
                                                      "sources": {"sol": {"kind": "chain", "ok": True, "last_success_ts": NOW - age}}})
     if runner is None:
         rm("runner_sol.json")
     else:
         wj("runner_sol.json", dict({"unit": "sol", "pid": 1, "ts": int(time.time())}, **runner))
-    c = common.load_config()
+    c = config.load_config()
     st = {}
     health.collect_sources(c, st, NOW - (age or 0) - 60)
     obs = {"now": NOW, "sources": health.collect_sources(c, st, NOW), "hb": health.read_heartbeats(c), "keys": health.collect_keys(c, NOW)}
@@ -81,7 +81,7 @@ T.chk("key:helius" not in lv, "K5 공개 RPC 주소를 쓰는 설치 = 카드 �
 
 bad, lv = state(CFG, 3 * 3600, dict(WAIT_KEY), False)
 wj("runner_sol.json", dict({"unit": "sol", "pid": 1, "ts": int(time.time()) - 300}, **WAIT_KEY))
-c7 = common.load_config()
+c7 = config.load_config()
 st7 = {}
 health.collect_sources(c7, st7, NOW - 3 * 3600 - 60)
 ids7 = {s.get("key") for s in health.collect_sources(c7, st7, NOW)}
@@ -94,14 +94,14 @@ T.chk("sync:chain:sol" not in lv and "hb:tj-sol" not in lv and "key:helius" not 
 
 
 def upbit(keys: bool):
-    json.dump({"chains": {}, "wallets": []}, open(common.CONFIG_PATH, "w"))
-    with open(common.ENV_PATH, "w") as f:
+    json.dump({"chains": {}, "wallets": []}, open(paths.CONFIG_PATH, "w"))
+    with open(paths.ENV_PATH, "w") as f:
         f.write(("UPBIT_ACCESS=" + "a" * 20 + "\nUPBIT_SECRET=" + "s" * 20 + "\n") if keys else "UPBIT_ACCESS=\nUPBIT_SECRET=\n")
     for n in ("cursor_sol.json", "runner_sol.json", os.path.join("health", "sol.json")):
         rm(n)
     wj("upbit_balances.json", {"ts": NOW - 3 * 3600, "balances": []})
     wj("upbit_sync.json", {"last_ok": NOW - 3 * 3600})
-    c = common.load_config()
+    c = config.load_config()
     st = {}
     health.collect_sources(c, st, NOW - 4 * 3600)
     obs = {"now": NOW, "sources": health.collect_sources(c, st, NOW), "hb": health.read_heartbeats(c), "keys": health.collect_keys(c, NOW)}

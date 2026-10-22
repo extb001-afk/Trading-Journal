@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import http.client
-import json
-import os
-import subprocess
-import threading
-import time
+import hashlib  # noqa: E402
+import http.client  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import health_ack
+import paths, statefile  # noqa: E402
+import health  # noqa: E402
+import health_ack  # noqa: E402
 
 chk = T.chk
 NOW = time.time()
@@ -46,7 +46,7 @@ def run(st, now, unpriced):
     ob = obs_of(now, unpriced)
     cs = health.evaluate(ob, HS, open_ids={k: v.get("unit") for k, v in (st.get("incidents") or {}).items()})
     health.step(st, cs, now, HS)
-    common.atomic_write_json(health.STATUS_PATH, health.build_status(st, ob, cs, now, HS))
+    statefile.atomic_write_json(paths.state("health_status.json"), health.build_status(st, ob, cs, now, HS))
     return cs
 
 
@@ -69,7 +69,7 @@ def apx(check, fp, now):
 
 
 def fresh():
-    for p9 in (health_ack.path(), health.STATUS_PATH):
+    for p9 in (health_ack.path(), paths.state("health_status.json")):
         if os.path.exists(p9):
             os.remove(p9)
     health._ACK_VIEWS.clear()
@@ -86,7 +86,7 @@ def opened(unpriced, t0):
 
 ENT_ID = getattr(health_ack, "ent_id", None)
 ENT_IDS = getattr(health_ack, "ent_ids", None)
-SHA = lambda s: hashlib.sha256(s.encode("utf-8")).hexdigest()
+SHA = lambda s: hashlib.sha256(s.encode("utf-8")).hexdigest()  # noqa: E731
 
 print("[R] 같은 200자 접두의 339자 신원 A·B — A 를 닫은 뒤 A+B")
 chk(len(A) == 339 and len(B) == 339 and A[:200] == B[:200] and A != B, "R0 합성 신원 A·B = 339자 · 앞 200자 같음 · 서로 다름", (len(A), len(B)))
@@ -171,7 +171,7 @@ print("[M] 구형 기록(200자 절단 키) — 추측 이행 없이 무효 · �
 fresh()
 SHORT = "eth:0x" + "0e" * 20
 G = A[:200]
-common.atomic_write_json(health_ack.path(), {"v": 1, "items": {CK: {"at": int(NOW - 99999), "level": "warn",
+statefile.atomic_write_json(health_ack.path(), {"v": 1, "items": {CK: {"at": int(NOW - 99999), "level": "warn",
                                                                     "ents": {A[:200]: 900.0, SHORT: 600.0}, "title": "옛 기록", "detail": ""}}})
 doc = health_ack.load()[0]
 chk(health_ack.state(doc, CK, "warn", T.safe(ENT_IDS, {SHORT: 600.0}) if callable(ENT_IDS) else {SHORT: 600.0}) == "acked",
@@ -196,16 +196,16 @@ chk(vis(health.web_view(TM + 61)), "M7 그 뒤 200자 G 등장 = 다시 보임")
 
 print("[H] HTTP — 오래된 화면의 닫기 = 409 · 원장·커서 그대로")
 fresh()
-from http.server import ThreadingHTTPServer
-import onboarding
-import settings_store as ss
-import web
+from http.server import ThreadingHTTPServer  # noqa: E402
+import onboarding  # noqa: E402
+import settings_store as ss  # noqa: E402
+import web  # noqa: E402
 with open(os.path.join(T.ROOT, "config.example.json"), encoding="utf-8") as f:
     CFG = json.load(f)
 CFG["wallets"], CFG["exchange_addresses"] = [], []
 CFG["web"] = {"port": 8023, "bind": "loopback", "login": {"enabled": False}}
 CFG.setdefault("balance_check", {})["enabled"] = False
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(CFG, f, ensure_ascii=False)
 web.BUILDER = onboarding.DemoBuilder()
 SRV = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)

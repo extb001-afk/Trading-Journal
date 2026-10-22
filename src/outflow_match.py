@@ -4,7 +4,8 @@ import re
 from decimal import Decimal
 
 import acct_norm
-import calcguard
+import calcguard  # noqa: E402
+import paths, seeds
 
 _HEX64 = re.compile(r"^(?:0[xX])?([0-9a-fA-F]{64})$")
 _B58SIG = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{64,100}$")
@@ -197,10 +198,9 @@ def bridge_dests() -> frozenset:
         try:
             import json
             import os
-            import common
-            out |= {str(a).lower() for a in (common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR) or []) if isinstance(a, str)}
-            out |= {str(a).lower() for a in (common.seed_json("bridge_labels.json", {}, base_dir=common.BASE_DIR) or {}) if isinstance(a, str) and not a.startswith("_")}
-        except Exception as _cg9:
+            out |= {str(a).lower() for a in (seeds.seed_json("bridge_contracts.json", [], base_dir=paths.BASE_DIR) or []) if isinstance(a, str)}
+            out |= {str(a).lower() for a in (seeds.seed_json("bridge_labels.json", {}, base_dir=paths.BASE_DIR) or {}) if isinstance(a, str) and not a.startswith("_")}
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("outflow_match:bridge_dests", _cg9)
             pass
         _BRIDGE_DESTS = frozenset(out)

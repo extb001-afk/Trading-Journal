@@ -1,5 +1,6 @@
 from __future__ import annotations
 import glob
+import http.client
 import json
 import os
 import re
@@ -10,7 +11,8 @@ import subprocess
 import time
 from datetime import datetime
 from datetime import timedelta
-import common
+import config, logs, net_http, paths
+import db as dbm
 from chk_base import CALC_BUG_SHOW_S
 from chk_base import CALC_UNIT
 from chk_base import DEFAULTS
@@ -67,18 +69,19 @@ def _unreadable_rules(rel: str):
         "chain_sweep.json": [r"chainsweep:(?:untracked|stale)"],
         "chain_activity.json": [r"chainsweep:untracked"],
         "backups/backup_status.json": [r"backup:age"],
-        "backups/offsite_status.json": [r"offsite:age"],
+        "backups/offsite_status.json": [r"offsite:age", r"offsite:kid"],
         "backfill_status.json": [r"bfstall:.+"],
         "ext_rebuild_status.json": [r"rebuild:ext"],
         "tg_cursor.json": [r"tg:dmlag"],
         "ledger.db": [r"inbox:.+"],
         "recon_hold.json": [r"ledger:recon_hold:.+"],
+        "recon_adj.json": [r"ledger:adj"],
     }
     return list(table.get(rel, [])), set()
 
 
 def collect_unreadable(st: dict, now: float) -> dict:
-    base = os.path.realpath(common.STATE_DIR)
+    base = os.path.realpath(paths.STATE_DIR)
     cur = {}
     for p9, err9 in list(_READ_FAIL.items()):
         rp9 = os.path.realpath(p9)
@@ -116,7 +119,7 @@ def missing_run(keys, day, fmt: str, limit: int = 14) -> int:
 
 
 def collect_daily_review(now: float, logs: LogWatch, h: dict = None) -> tuple:
-    S = common.STATE_DIR
+    S = paths.STATE_DIR
     t = (h or DEFAULTS)["t"]
     dc = _read(os.path.join(S, "daily_cache.json"), None)
     daily = None
@@ -171,29 +174,29 @@ def collect_poison():
     try:
         import tsfix
         return tsfix.status()
-    except (Exception, SystemExit) as e:
+    except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         log.warning("격리 기록 집계 실패: %s", e)
-        return {"error": common.safe_err(e)[:160]}
+        return {"error": logs.safe_err(e)[:160]}
 
 
 def collect_nonevm_gaps(cfg: dict) -> dict:
     try:
         import chain_registry as _reg9
         chains9 = [c9 for c9 in _reg9.configured_chains(cfg or {}) if _reg9.available(c9)]
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
     out = {}
     for c9 in chains9:
         try:
             import chain_state as _cst9
             own9 = _reg9.owners(cfg, c9)
-            st9 = _cst9.ChainState(c9, common.STATE_DIR)
+            st9 = _cst9.ChainState(c9, paths.STATE_DIR)
             gs9 = [g9 for g9 in st9.unresolved_gaps() if g9[1].get("owner") in own9]
             ids9 = {g9[0] for g9 in gs9}
             why9 = [str(x.get("why") or "") for x in st9.d["gaps"] if isinstance(x, dict) and str(x.get("id")) in ids9]
             out[c9] = {"n": len(gs9), "why": why9[-1][:160] if why9 else ""}
-        except (Exception, SystemExit) as e:
-            log.warning("[%s] 수집 상태(상세 누락) 읽기 실패: %s", c9, common.safe_err(e)[:160])
+        except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
+            log.warning("[%s] 수집 상태(상세 누락) 읽기 실패: %s", c9, logs.safe_err(e)[:160])
             out[c9] = None
     return out
 
@@ -202,11 +205,11 @@ def collect_recon_hold(cfg: dict) -> dict:
     try:
         import chain_registry as _reg9
         chains9 = {c9 for c9 in _reg9.configured_chains(cfg or {}) if _reg9.available(c9)}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
     if not chains9:
         return {}
-    d9 = _read(os.path.join(common.STATE_DIR, "recon_hold.json"), {})
+    d9 = _read(paths.state("recon_hold.json"), {})
     out = {}
     for c9, r9 in (d9.items() if isinstance(d9, dict) else ()):
         if c9 in chains9 and isinstance(r9, dict):
@@ -221,27 +224,27 @@ def _sweep_scope():
     try:
         import copy
         import chainsweep as _cs9
-        cf9 = _read(common.CONFIG_PATH, None)
+        cf9 = _read(paths.CONFIG_PATH, None)
         if not isinstance(cf9, dict) or not isinstance(cf9.get("wallets"), list):
             return set(), {}
         cf9 = copy.deepcopy(cf9)
         cf9.setdefault("chains", {})
         off9 = {}
         for n, cc in (cf9.get("chains") or {}).items():
-            if isinstance(cc, dict) and not common.chain_enabled(n, cc):
+            if isinstance(cc, dict) and not config.chain_enabled(n, cc):
                 co9 = cc.get("_chainoff") if isinstance(cc.get("_chainoff"), dict) else {}
                 try:
                     off9[n] = float(co9["at"]) if co9.get("auto") is True and co9.get("at") else None
                 except (TypeError, ValueError):
                     off9[n] = None
-        common.apply_activity_gate(cf9)
+        config.apply_activity_gate(cf9)
         return {pr for pr in _cs9.wallets(cf9)[2] if pr[0] not in off9}, off9
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return set(), {}
 
 
 def collect_chainsweep():
-    d = _read(os.path.join(common.STATE_DIR, "chain_sweep.json"), None)
+    d = _read(paths.state("chain_sweep.json"), None)
     if not isinstance(d, dict):
         return None
     fs = [f for f in (d.get("findings") or []) if isinstance(f, dict)]
@@ -267,11 +270,11 @@ def collect_chainsweep():
         fs = keep9
     try:
         import chainsweep as _cs9
-        sp9 = _read(common.BACKFILL_SPEED_PATH, None) or {}
-        cf9 = _read(common.CONFIG_PATH, None) or {}
+        sp9 = _read(paths.BACKFILL_SPEED_PATH, None) or {}
+        cf9 = _read(paths.CONFIG_PATH, None) or {}
         auto9 = bool(((cf9.get("chain_sweep") or {}) if isinstance(cf9, dict) else {}).get("auto_enable") is True)
         fs = [_cs9.refresh_reason(f, (sp9.get("chains") or {}) if isinstance(sp9, dict) else {}, auto9) for f in fs]
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return {"checkedAt": d.get("checkedAt"), "findings": fs, "off": n_off,
             "auto": len(d.get("autoEnabled") or []), "errors": len(d.get("errors") or []), "chains": len(d.get("chains") or {})}
@@ -287,25 +290,25 @@ def _offsite_obs(cfg, st: dict = None, now: float = None) -> dict:
     if isinstance(st, dict):
         since = st.setdefault("offsite_since", float(time.time() if now is None else now))
     return {"enabled": True, "warn_h": o.get("warn_h") if isinstance(o.get("warn_h"), (int, float)) and not isinstance(o.get("warn_h"), bool) else 36,
-            "since": since, "status": _read(os.path.join(common.STATE_DIR, "backups", "offsite_status.json"), None)}
+            "since": since, "status": _read(paths.state("backups", "offsite_status.json"), None)}
 
 
 def collect_inbox(st: dict, now: float):
     mem = st.setdefault("inbox", {})
     try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=2)
+        conn = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=2)
         try:
             rows = conn.execute("SELECT stream, seg, off FROM inbox_offsets").fetchall()
         finally:
             conn.close()
     except sqlite3.Error as e:
-        _READ_FAIL[common.DB_PATH] = type(e).__name__
+        _READ_FAIL[paths.DB_PATH] = type(e).__name__
         if not mem:
             return None
-        return {s9: {"unknown": True, "err": common.safe_err(e)[:120]} for s9 in sorted(mem)}
+        return {s9: {"unknown": True, "err": logs.safe_err(e)[:120]} for s9 in sorted(mem)}
     out = {}
     for stream, seg, off in rows:
-        d = os.path.join(common.INBOX_DIR, stream)
+        d = os.path.join(paths.INBOX_DIR, stream)
         try:
             segs = sorted(int(f.split(".")[0]) for f in os.listdir(d) if f.endswith(".jsonl"))
         except OSError:
@@ -337,6 +340,18 @@ def _tcp(host, port, timeout=3.0) -> bool:
         return False
 
 
+def _http_alive(port, timeout=3.0) -> bool:
+    conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=timeout)
+    try:
+        conn.request("GET", "/api/auth/status", headers={"Connection": "close"})
+        conn.getresponse()
+        return True
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        conn.close()
+
+
 def _tailnet_ip():
     for b in TAILSCALE_BINS:
         try:
@@ -353,7 +368,7 @@ def collect_web(cfg: dict, st: dict, now: float):
         return None
     web = (cfg or {}).get("web") or {}
     port = int(web.get("port", 8023))
-    lo = _tcp("127.0.0.1", port)
+    lo = _http_alive(port)
     mode = web.get("bind", "loopback")
     res = {"lo": lo, "tail_mode": mode == "tailscale", "tail_ip": None, "ext": None}
     if mode == "tailscale":
@@ -368,7 +383,7 @@ def collect_web(cfg: dict, st: dict, now: float):
 
 
 def collect_fut_wait(now: float, path: str = None) -> list:
-    d = _read(path or os.path.join(common.STATE_DIR, "exf_fut_wait.json"), None)
+    d = _read(path or paths.state("exf_fut_wait.json"), None)
     if not isinstance(d, dict):
         return []
     out = []
@@ -443,10 +458,10 @@ def collect_fut_wait(now: float, path: str = None) -> list:
 
 
 def collect_snap_miss(now: float, path: str = None) -> list:
-    d = _read(path or os.path.join(common.STATE_DIR, "exf_snap_miss.json"), None)
+    d = _read(path or paths.state("exf_snap_miss.json"), None)
     if not isinstance(d, dict) or not isinstance(d.get("ex"), dict):
         return []
-    names = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "하이퍼리퀴드"}
+    names = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "hyperliquid": "하이퍼리퀴드", "coinbase": "코인베이스"}
     base = {"unit": "tj-exf", "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "snapmiss",
             "action": "보통 선물·봇 거래가 잦아 10분마다 잔고가 움직이는 계정 — 할 일 없음(총자산이 최대 1시간 늦게 따라와요). 거래가 없는데 이어지면 tj-exf 로그 '잔고 표본 불일치' 확인"}
     out = []
@@ -467,12 +482,12 @@ def collect_snap_miss(now: float, path: str = None) -> list:
 
 
 def collect_calcguard(now: float, state_dir: str = None) -> list:
-    d0 = state_dir or common.STATE_DIR
+    d0 = state_dir or paths.STATE_DIR
     try:
         names = sorted(f for f in os.listdir(d0) if f.startswith("calcguard_") and f.endswith(".json"))
     except OSError:
         return []
-    bug, other = [], {}
+    bug, sus, other = [], [], {}
     for fn in names:
         d = _read(os.path.join(d0, fn), None)
         if not isinstance(d, dict) or not isinstance(d.get("sites"), dict):
@@ -488,10 +503,14 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
                 nb = int(it.get("bug") or 0)
                 n = int(it.get("n") or 0)
                 bl = float(it.get("bug_last") or 0) if "bug_last" in it else last
+                ns = int(it.get("sus") or 0)
+                sl = float(it.get("sus_last") or 0)
             except (TypeError, ValueError):
                 continue
             if nb > 0 and now - bl <= CALC_BUG_SHOW_S:
                 bug.append((proc, str(site), nb, str(it.get("bug_why") or it.get("why") or "")[:120], bl))
+            elif ns > 0 and now - sl <= CALC_BUG_SHOW_S:
+                sus.append((proc, str(site), ns, str(it.get("sus_why") or "")[:120], sl))
             elif now - last <= CALC_BUG_SHOW_S:
                 o = other.setdefault(proc, [0, 0])
                 o[0] += 1
@@ -507,6 +526,13 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
     else:
         out.append({"cid": "calc:bug", "unit": "tj-web", "title": "계산 코드 오류 삼킴 없음", "level": "ok", "detail": "정상",
                     "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "calcbug"})
+    if sus:
+        sus.sort(key=lambda x: -x[4])
+        out.append({"cid": "calc:suspect", "unit": CALC_UNIT.get(sus[0][0], "tj-web"), "title": "계산 중 의심스러운 예외를 넘김 — 숫자 확인 필요",
+                    "level": "warn",
+                    "detail": " · ".join("%s %d회(%s)" % (b[1], b[2], b[3]) for b in sus[:5]) + (" 외 %d곳" % (len(sus) - 5) if len(sus) > 5 else ""),
+                    "action": "데이터 이상일 수도, 코드 실수일 수도 있음 — 그 자리 이름으로 로그를 보고 판단. 계산은 멈추지 않고 그 단계만 건너뜀",
+                    "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "calcsuspect"})
     if other:
         out.append({"cid": "calc:swallow", "unit": "tj-web", "title": "계산 중 넘어간 예외(데이터 이상 등)", "level": "ok",
                     "detail": " · ".join("%s %d곳 %d회" % (p9, v9[0], v9[1]) for p9, v9 in sorted(other.items())) + " — 하루 안(정보 · 알림 없음)",
@@ -516,7 +542,7 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
 
 def collect_disk():
     try:
-        du = shutil.disk_usage(common.STATE_DIR)
+        du = shutil.disk_usage(paths.STATE_DIR)
         return {"free": du.free, "total": du.total}
     except OSError:
         return None
@@ -526,10 +552,10 @@ def collect_dm(st: dict, now: float, tg_configured: bool):
     if not tg_configured:
         st.pop("dm", None)
         return None
-    cur = _read(os.path.join(common.STATE_DIR, "tg_cursor.json"), {}) or {}
+    cur = _read(paths.state("tg_cursor.json"), {}) or {}
     lag = 0
     for fn in ("pending_dm.jsonl", "alerts_web.jsonl", "alerts_fast.jsonl"):
-        p = os.path.join(common.STATE_DIR, fn)
+        p = paths.state(fn)
         try:
             sz = os.path.getsize(p)
         except OSError:
@@ -556,23 +582,22 @@ def collect_tunnel(h: dict, pm2):
     url = tn.get("ready_url") or ""
     if not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
         return None
-    import urllib.request
     try:
-        with urllib.request.urlopen(url, timeout=3) as r:
+        with net_http.urlopen(url, timeout=3) as r:
             d = json.loads(r.read().decode() or "{}")
         return {"ok": True, "n": int(d.get("readyConnections") or 0)}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         n = None
         try:
             n = int(json.loads(e.read().decode()).get("readyConnections") or 0)
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
-        return {"ok": False, "n": n or 0, "err": f"{type(e).__name__}: {common.safe_err(e)[:100]}"}
+        return {"ok": False, "n": n or 0, "err": f"{type(e).__name__}: {logs.safe_err(e)[:100]}"}
 
 
 def collect_exbal(now: float) -> list:
     out = []
-    for p in sorted(glob.glob(os.path.join(common.STATE_DIR, "exf_balances_*.json"))):
+    for p in sorted(glob.glob(paths.state("exf_balances_*.json"))):
         ex = os.path.basename(p)[len("exf_balances_"):-5]
         d = _read(p, None)
         if not isinstance(d, dict):
@@ -589,7 +614,7 @@ def collect_exbal(now: float) -> list:
 
 
 def collect_debt(logs, now: float, h: dict):
-    S = common.STATE_DIR
+    S = paths.STATE_DIR
     sp9 = _read(os.path.join(S, "spot.json"), {}) or {}
     exu9 = sp9.get("ex_usd") if isinstance(sp9.get("ex_usd"), dict) else {}
     ext9 = sp9.get("ex_ts") if isinstance(sp9.get("ex_ts"), dict) else {}
@@ -678,7 +703,7 @@ def collect_keys(cfg: dict, now: float = None) -> dict:
                 "ankrNeed": settings_store.needs_ankr(cfg or {}), "ankr": bool(settings_store.env_value("TJ_ANKR_KEY")),
                 "heliusNeed": settings_store.needs_helius(cfg or {}), "helius": bool(settings_store.env_value("TJ_HELIUS_KEY")),
                 "alchemyRej": _alch_rej()}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
 
 
@@ -686,7 +711,7 @@ def _alch_rej():
     try:
         import nodekeys
         return nodekeys.alch_rejected()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
 
 
@@ -761,7 +786,7 @@ def ledger_wait_item(rc, now: float, db_path: str = None):
     except (TypeError, ValueError):
         return None
     why = str(rc.get("why") or "")
-    dbp = db_path or common.DB_PATH
+    dbp = db_path or paths.DB_PATH
     ev = " · ".join(str(x) for x in (rc.get("evidence") or [])[:4])
     try:
         since = int(float(rc.get("since") or rc.get("ts")))

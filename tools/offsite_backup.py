@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import gzip
 import hashlib
@@ -14,16 +15,68 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(ROOT, "src"))
-import common
+DEPLOY_LOCK = os.path.join(ROOT, ".deploy.lock")
+EX_TEMPFAIL = 75
+_BARRIER = []
 
-BK_DIR = os.path.join(common.STATE_DIR, "backups")
+
+def deploy_barrier(cmd, wait_s=None, log=print):
+    if not cmd:
+        return None
+    try:
+        wait_s = float(os.environ.get("TJ_DEPLOY_BARRIER_WAIT") or 600) if wait_s is None else float(wait_s)
+    except ValueError:
+        wait_s = 600.0
+    try:
+        fd = os.open(DEPLOY_LOCK, os.O_RDONLY | os.O_CREAT, 0o600)
+    except OSError as e:
+        log("배포 장벽 잠금 파일을 못 엶(%s: %s) — 아무것도 안 함 · 다음에 다시(75)" % (DEPLOY_LOCK, e.strerror))
+        return EX_TEMPFAIL
+    end = time.time() + wait_s
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            _BARRIER.append(fd)
+            return None
+        except OSError as e:
+            if e.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                os.close(fd)
+                log("배포 장벽 잠금 실패(%s) — 아무것도 안 함 · 다음에 다시(75)" % e.strerror)
+                return EX_TEMPFAIL
+        if cmd == "run":
+            os.close(fd)
+            log("배포 중(트리 뿌리 .deploy.lock 배타 잠금) — 이번 서버 밖 백업은 건너뜀(다음 정시에 다시)")
+            return 0
+        if time.time() >= end:
+            os.close(fd)
+            log("배포가 %d초 안에 안 끝남(.deploy.lock) — 아무것도 안 함 · 다음에 다시(75)" % wait_s)
+            return EX_TEMPFAIL
+        time.sleep(1)
+
+
+def _cmd_of(argv):
+    if any(a in ("-h", "--help") for a in argv):
+        return None
+    cmd = next((a for a in argv if not a.startswith("-")), None)
+    return cmd if cmd in ("run", "status", "test", "list-remote", "fetch", "confirm", "open", "auth-key") else None
+
+
+if __name__ == "__main__":
+    _rc9 = deploy_barrier(_cmd_of(sys.argv[1:]))
+    if _rc9 is not None:
+        sys.exit(_rc9)
+sys.path[:0] = [os.path.join(ROOT, "src"), HERE]
+import fsio, logs, offsite_seal as seal, paths, statefile  # noqa: E402
+
+BK_DIR = os.path.join(paths.STATE_DIR, "backups")
 OUT_DIR = os.path.join(BK_DIR, "offsite")
 STATUS = os.path.join(BK_DIR, "offsite_status.json")
+AUTH_KEY, KNOWN_HOSTS = os.path.join(BK_DIR, "offsite_auth.key"), os.path.join(BK_DIR, "known_hosts_offsite")
 STAMP_RX = re.compile(r"^(tjoff_\d{8}_\d{4})\.(db\.gz|files\.tar\.gz|manifest\.json)$")
 DEFAULTS = {"enabled": False, "mode": "push", "port": 22, "keep": 2, "keep_local": 1, "bwlimit_kbps": 4096, "every_h": 24, "warn_h": 36}
 CHUNK = 8 << 20
@@ -34,7 +87,7 @@ FRESH_MAX_AGE_S = 26 * 3600
 def conf(cfg: dict = None) -> dict:
     if cfg is None:
         try:
-            with open(common.CONFIG_PATH, encoding="utf-8") as f:
+            with open(paths.CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
         except (OSError, ValueError):
             cfg = {}
@@ -50,6 +103,7 @@ def conf(cfg: dict = None) -> dict:
             out[k] = DEFAULTS[k]
     out["enabled"] = out.get("enabled") is True
     out["mode"] = "outbox" if out.get("mode") == "outbox" else "push"
+    out["host_key_fpr"] = seal.parse_fprs(out.get("host_key_fpr"))
     if out.get("key"):
         out["key"] = os.path.expanduser(str(out["key"]))
     return out
@@ -71,6 +125,8 @@ def problems(c: dict) -> list:
             p.append("path 는 /… 또는 ~/… (영문·숫자·_ . - / 만 · '..' 금지)")
         if c.get("key") and not os.path.isfile(c["key"]):
             p.append(f"키 파일 없음: {c['key']}")
+        if any(not seal.FPR_RX.fullmatch(x) for x in c.get("host_key_fpr") or []):
+            p.append("host_key_fpr 형식(SHA256:… · 여럿이면 쉼표 — ssh-keygen -lf <호스트 공개 키>)")
     return p
 
 
@@ -85,7 +141,7 @@ def read_status() -> dict:
 
 def write_status(d: dict):
     os.makedirs(BK_DIR, exist_ok=True)
-    common.atomic_write_json(STATUS, d)
+    statefile.atomic_write_json(STATUS, d)
 
 
 def _sha256(path: str) -> str:
@@ -110,13 +166,13 @@ def _latest_local_backup(now: float):
 
 
 def snapshot(dst: str, src: str = None):
-    src = src or common.DB_PATH
+    src = src or paths.DB_PATH
     for sfx in ("", "-wal", "-shm", "-journal"):
         if os.path.exists(dst + sfx):
             os.remove(dst + sfx)
     fd = os.open(dst, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
     os.close(fd)
-    s = sqlite3.connect(common.sqlite_ro_uri(src), uri=True, timeout=60)
+    s = sqlite3.connect(paths.sqlite_ro_uri(src), uri=True, timeout=60)
     d = sqlite3.connect(dst)
     try:
         s.backup(d)
@@ -127,7 +183,7 @@ def snapshot(dst: str, src: str = None):
 
 
 def ledger_facts(path: str, check: bool = True) -> dict:
-    c = sqlite3.connect(common.sqlite_ro_uri(path, immutable=True), uri=True, timeout=30)
+    c = sqlite3.connect(paths.sqlite_ro_uri(path, immutable=True), uri=True, timeout=30)
     try:
         ok = c.execute("PRAGMA quick_check").fetchone()[0] if check else "skipped"
         sv = c.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
@@ -180,20 +236,32 @@ def _files_bundle(dst: str) -> dict:
     return {"name": os.path.basename(dst), "sha256": _sha256(dst), "size": os.path.getsize(dst), "includes": inc}
 
 
+def stamp_of(now: float) -> str:
+    return "tjoff_" + time.strftime("%Y%m%d_%H%M", time.gmtime(now + 9 * 3600))
+
+
 def build(now: float = None, check: bool = True, log=print) -> dict:
     now = time.time() if now is None else now
     os.makedirs(OUT_DIR, mode=0o700, exist_ok=True)
     os.chmod(OUT_DIR, 0o700)
-    stamp = "tjoff_" + time.strftime("%Y%m%d_%H%M", time.gmtime(now + 9 * 3600))
+    st0 = read_status()
+    if not os.path.lexists(AUTH_KEY) and (st0.get("last_stamp") or st0.get("kid")):
+        raise RuntimeError(f"열쇠 파일이 없음(state/backups/offsite_auth.key · 지난 묶음 {st0.get('last_stamp') or '?'} kid {st0.get('kid') or '?'})"
+                           " — 새 열쇠를 만들지 않고 멈춤: 서버 밖에 둔 열쇠 사본을 제자리로 되돌리거나(kid 대조), 새 열쇠가 맞으면"
+                           " python3 tools/offsite_backup.py auth-key 로 만든 뒤 --export 로 사본 보관")
+    key = seal.load_key(AUTH_KEY, create=True)
+    stamp = stamp_of(now)
+    if os.path.lexists(os.path.join(OUT_DIR, f"{stamp}.manifest.json")):
+        raise RuntimeError(f"같은 분 묶음이 이미 있음({stamp}) — 1분 뒤 다시")
     src = _latest_local_backup(now)
     tmp_db = None
-    size = os.path.getsize(common.DB_PATH) if os.path.exists(common.DB_PATH) else 0
+    size = os.path.getsize(paths.DB_PATH) if os.path.exists(paths.DB_PATH) else 0
     free = shutil.disk_usage(BK_DIR).free
     need = int((size if src else size * 1.6) * 0.7) + (512 << 20)
     if free < need:
         raise RuntimeError(f"디스크 여유 부족(여유 {free / 1024 ** 3:.1f}GB < 필요 {need / 1024 ** 3:.1f}GB)")
     if not src:
-        if not os.path.exists(common.DB_PATH):
+        if not os.path.exists(paths.DB_PATH):
             raise RuntimeError("원장 파일 없음")
         tmp_db = os.path.join(OUT_DIR, f"{stamp}.snap.db")
         log("오늘 정기 백업이 없어 원장 스냅숏을 새로 떠요")
@@ -210,7 +278,7 @@ def build(now: float = None, check: bool = True, log=print) -> dict:
                "db": {"name": os.path.basename(dbgz), "sha256": h_gz, "size": os.path.getsize(dbgz), "raw_sha256": h_raw,
                       "raw_size": os.path.getsize(src), **facts},
                "files": files}
-        common.atomic_write_json(os.path.join(OUT_DIR, f"{stamp}.manifest.json"), man)
+        statefile.atomic_write_json(os.path.join(OUT_DIR, f"{stamp}.manifest.json"), seal.seal(man, key))
         os.chmod(os.path.join(OUT_DIR, f"{stamp}.manifest.json"), 0o600)
     finally:
         if tmp_db and os.path.exists(tmp_db):
@@ -225,7 +293,36 @@ def local_stamps() -> list:
         return []
 
 
-def prune_local(keep: int) -> list:
+ORPHAN_RX = re.compile(r"^(tjoff_\d{8}_\d{4})\.(?:db\.gz|files\.tar\.gz|snap\.db(?:-[A-Za-z]+)?)$")
+
+
+def _prev_local_kid(cur: str) -> str:
+    for s in reversed([x for x in local_stamps() if x < cur]):
+        try:
+            with open(os.path.join(OUT_DIR, s + ".manifest.json"), encoding="utf-8") as f:
+                k = _kid_of(json.load(f))
+        except (OSError, ValueError, RecursionError):
+            continue
+        if k:
+            return k
+    return ""
+
+
+def prune_orphans(keep_stamp: str = None) -> list:
+    try:
+        names = os.listdir(OUT_DIR)
+    except OSError:
+        return []
+    have, gone = set(local_stamps()), []
+    for n in names:
+        m = ORPHAN_RX.match(n)
+        if m and m.group(1) not in have and m.group(1) != keep_stamp:
+            os.remove(os.path.join(OUT_DIR, n))
+            gone.append(n)
+    return gone
+
+
+def prune_local(keep: int, cur: str = None) -> list:
     st = local_stamps()
     gone = []
     for s in st[:max(0, len(st) - keep)]:
@@ -236,23 +333,19 @@ def prune_local(keep: int) -> list:
     for n in os.listdir(OUT_DIR):
         if n.endswith((".part", ".snap.db")):
             os.remove(os.path.join(OUT_DIR, n))
-    return gone
+    return gone + prune_orphans(cur)
 
 
-def ssh_cmd(c: dict) -> list:
-    a = ["ssh", "-p", str(c["port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30",
-         "-o", "StrictHostKeyChecking=accept-new"]
+def ssh_cmd(c: dict, scp: bool = False) -> list:
+    a = (["scp", "-q", "-P"] if scp else ["ssh", "-p"]) + [str(c["port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
+                                                          "-o", "ServerAliveInterval=30"] + seal.host_opts(c, KNOWN_HOSTS)
     if c.get("key"):
         a += ["-i", c["key"], "-o", "IdentitiesOnly=yes"]
     return a
 
 
 def scp_cmd(c: dict) -> list:
-    a = ["scp", "-q", "-P", str(c["port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30",
-         "-o", "StrictHostKeyChecking=accept-new"]
-    if c.get("key"):
-        a += ["-i", c["key"], "-o", "IdentitiesOnly=yes"]
-    return a
+    return ssh_cmd(c, scp=True)
 
 
 def transfer_tool(c: dict) -> tuple:
@@ -342,7 +435,7 @@ def push(c: dict, man: dict, log=print) -> dict:
     send(c, [os.path.join(OUT_DIR, f"{man['stamp']}.manifest.json")])
     mv = " && ".join(f"mv -f -- {_q(rp + '/.incoming/' + n)} {_q(rp + '/' + n)}" for n in names + [f"{man['stamp']}.manifest.json"])
     remote(c, mv)
-    gone = prune_remote(c)
+    gone = prune_remote(c, _kid_of(man))
     return {"dur": round(time.time() - t0, 1), "remote_pruned": gone}
 
 
@@ -351,8 +444,115 @@ def remote_stamps(c: dict) -> list:
     return sorted({m.group(1) for n in out.split() for m in [STAMP_RX.match(n)] if m and n.endswith(".manifest.json")})
 
 
-def prune_remote(c: dict) -> list:
-    st = remote_stamps(c)
+def remote_manifests(c: dict, stamps: list) -> dict:
+    res = {}
+    for s in stamps:
+        if not seal.STAMP_RX.fullmatch(str(s)):
+            continue
+        try:
+            d = json.loads(remote(c, "cat -- " + _q(_rpath(c) + "/" + s + ".manifest.json") + " 2>/dev/null || true"))
+        except (ValueError, RecursionError):
+            d = None
+        res[s] = d if isinstance(d, dict) else None
+    return res
+
+
+REGRESS_SIZE = 0.5
+REGRESS_UNTIL_S = 86400
+
+
+def _kid_of(man) -> str:
+    a = man.get("auth") if isinstance(man, dict) else None
+    k = a.get("kid") if isinstance(a, dict) else None
+    return k if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k) else ""
+
+
+def _num(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    try:
+        f = float(v)
+    except OverflowError:
+        return None
+    return f if f == f and abs(f) != float("inf") else None
+
+
+def regress_reasons(ref, man: dict) -> list:
+    if not isinstance(ref, dict):
+        return ["원격 마지막 manifest 를 못 읽음(비교 불가)"]
+    try:
+        return _regress(ref, man)
+    except Exception as e:   # noqa: BLE001
+        return [f"원격 마지막 manifest 비교 실패({type(e).__name__})"]
+
+
+def _regress(ref: dict, man: dict) -> list:
+    out = []
+    rk, mk = _kid_of(ref), _kid_of(man)
+    if "auth" in ref and not rk:
+        out.append("원격 마지막 manifest 의 인증 칸 꼴 아님(비교 불가)")
+    elif rk and mk and rk != mk:
+        out.append(f"열쇠가 다름(원격 마지막 {ref.get('stamp')} kid {rk} · 이번 kid {mk})")
+    rd = ref.get("db") if isinstance(ref.get("db"), dict) else {}
+    md = man.get("db") or {}
+    rs, ms = _num(rd.get("raw_size")), _num(md.get("raw_size"))
+    if rs is None or rs <= 0:
+        out.append("원격 마지막 manifest 에 원장 크기가 없음·꼴 아님(비교 불가)")
+    elif ms is not None and ms < rs * REGRESS_SIZE:
+        out.append(f"원장 크기 후퇴({rs / 1024 ** 2:.1f}MB → {ms / 1024 ** 2:.1f}MB)")
+    ru, mu = _num(rd.get("data_until")), _num(md.get("data_until"))
+    if ru is not None and ru > 0 and (mu is None or mu < ru - REGRESS_UNTIL_S):
+        def fm(t):
+            try:
+                return time.strftime("%Y-%m-%d %H:%M KST", time.gmtime(t + 9 * 3600)) if t is not None else "없음"
+            except (OverflowError, OSError, ValueError):
+                return str(t)[:24]
+        out.append(f"자료 시각 후퇴({fm(ru)} → {fm(mu)})")
+    elif "data_until" not in rd or (rd.get("data_until") is not None and ru is None):
+        out.append("원격 마지막 manifest 의 자료 시각이 없음·숫자가 아님(비교 불가)")
+    return out
+
+
+def check_remote(c: dict, man: dict, allow_regress: bool = False, log=print) -> None:
+    rp = _rpath(c)
+    try:
+        out = remote(c, f"{{ mkdir -p {_q(rp)} && ls -1 {_q(rp)}; }} 2>/dev/null || echo __TJ_LS_FAIL__")
+    except (UnicodeDecodeError, subprocess.TimeoutExpired) as e:
+        raise RegressError("원격 목록을 못 읽음(글자 깨짐·시간 초과) — 보내기·회전 멈춤 · 원격 폴더 확인") from e
+    if "__TJ_LS_FAIL__" in out.split():
+        raise RegressError("원격 폴더 목록을 못 읽음(권한 등) — 보내기·회전 멈춤 · 원격 폴더 확인")
+    st = sorted({m.group(1) for n in out.split() for m in [STAMP_RX.match(n)] if m and n.endswith(".manifest.json")})
+    if man["stamp"] in st:
+        raise RegressError(f"원격에 같은 이름 묶음이 이미 있음({man['stamp']}) — 이번 묶음 지우고 멈춤 · 1분 뒤 다시")
+    if not st:
+        return
+    try:
+        ref = remote_manifests(c, [st[-1]]).get(st[-1])
+    except Exception:   # noqa: BLE001
+        ref = None
+    why = regress_reasons(ref, man)
+    if why and not allow_regress:
+        raise RegressError(f"원격 마지막 묶음 {st[-1]} 대비 " + " · ".join(why) + " — 보내기·회전 멈춤(새 서버·빈 원장·열쇠 분실이면 원격 정상 묶음이"
+                           " 회전으로 지워짐) · 맞으면 python3 tools/offsite_backup.py run --force --allow-regress")
+    if why:
+        log("경고(--allow-regress): " + " · ".join(why) + " — 그래도 보냄(다른 열쇠 묶음은 회전에서 안 지움)")
+
+
+class RegressError(RuntimeError):
+    pass
+
+
+def prune_remote(c: dict, kid: str = None) -> list:
+    try:
+        st = remote_stamps(c)
+    except UnicodeDecodeError:
+        return []
+    if kid:
+        try:
+            mans = remote_manifests(c, st)
+        except Exception:   # noqa: BLE001
+            return []
+        st = [s for s in st if _kid_of(mans.get(s)) == kid]
     old = st[:max(0, len(st) - c["keep"])]
     if not old:
         return []
@@ -372,7 +572,7 @@ def recv(c: dict, name: str, dst: str, timeout: float = 6 * 3600):
         raise RuntimeError(f"받기 실패 {name}: {(r.stderr or r.stdout).strip()[-200:]}")
 
 
-def fetch(c: dict, stamp: str = None, log=print) -> str:
+def fetch(c: dict, stamp: str = None, log=print, key=None, allow_unsigned: bool = False) -> str:
     st = remote_stamps(c)
     if not st:
         raise RuntimeError("원격에 묶음이 없어요")
@@ -381,32 +581,86 @@ def fetch(c: dict, stamp: str = None, log=print) -> str:
         raise RuntimeError(f"원격에 없는 묶음: {stamp} (있는 것: {', '.join(st)})")
     d = os.path.join(BK_DIR, "offsite_fetch", stamp)
     os.makedirs(d, mode=0o700, exist_ok=True)
-    names = [f"{stamp}.manifest.json", f"{stamp}.db.gz", f"{stamp}.files.tar.gz"]
-    for n in names:
-        try:
+    key, mp = seal.load_key(AUTH_KEY) if key is None else key, os.path.join(d, f"{stamp}.manifest.json")
+    try:
+        recv(c, f"{stamp}.manifest.json", mp)
+        for n, _h in seal.manifest_parts(seal.load_manifest(mp, stamp, key, allow_unsigned, log=lambda *a: None), stamp):
             recv(c, n, os.path.join(d, n))
-        except RuntimeError:
-            if n != names[-1]:
-                raise
-    with open(os.path.join(d, names[0]), encoding="utf-8") as f:
-        man = json.load(f)
-    if _sha256(os.path.join(d, names[1])) != man["db"]["sha256"]:
-        raise RuntimeError("받은 원장 압축본 sha256 불일치")
-    out = os.path.join(d, f"ledger_{stamp[6:]}.db")
-    h = hashlib.sha256()
-    fd = os.open(out + ".part", os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with gzip.open(os.path.join(d, names[1]), "rb") as g, os.fdopen(fd, "wb") as f:
-        for b in iter(lambda: g.read(CHUNK), b""):
-            h.update(b)
-            f.write(b)
-    if h.hexdigest() != man["db"]["raw_sha256"]:
-        raise RuntimeError("풀린 원장 sha256 불일치")
-    os.replace(out + ".part", out)
-    return out
+        return seal.open_bundle(d, stamp, d, key, allow_unsigned, log)
+    except seal.AuthError:
+        for n in os.listdir(d):
+            if n.startswith(stamp + "."):
+                os.remove(os.path.join(d, n))
+        raise
+
+
+def _link_new(src: str, dst: str) -> bool:
+    try:
+        os.link(src, dst)
+        return True
+    except FileExistsError:
+        return False
+
+
+FILES_MEMBER_RX = re.compile(r"^(files_\d{8})(?:/((?!\.)[\w.-]+))?$|^(prefs_\d{8}\.json)$")
+
+
+def unpack_files(src_dir: str, stamp: str, key, allow_unsigned: bool = False, dst_dir: str = None, log=print) -> list:
+    dst_dir = dst_dir or BK_DIR
+    man = seal.load_manifest(os.path.join(src_dir, stamp + ".manifest.json"), stamp, key, allow_unsigned, log=lambda *a: None)
+    parts = dict(seal.manifest_parts(man, stamp))
+    fname = stamp + ".files.tar.gz"
+    if fname not in parts:
+        return []
+    os.makedirs(dst_dir, mode=0o700, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix=".offsite_unpack_", dir=dst_dir)
+    placed = []
+    try:
+        tp, h = os.path.join(tmp, ".bundle.tar.gz"), hashlib.sha256()
+        with open(os.path.join(src_dir, fname), "rb") as f, fsio.atomic_open(tp, binary=True, mode=0o600, makedirs=False) as g:
+            for b in iter(lambda: f.read(CHUNK), b""):
+                h.update(b)
+                g.write(b)
+        if h.hexdigest() != parts[fname]:
+            raise RuntimeError("원장 밖 사본 sha256 불일치")
+        with tarfile.open(tp, "r:gz") as tf:
+            for m in tf:
+                mm = FILES_MEMBER_RX.match(m.name)
+                if m.isdir() and mm and mm.group(1) and not mm.group(2):
+                    continue
+                if not mm or not m.isfile():
+                    log(f"원장 밖 사본: 건너뜀 {m.name[:80]}")
+                    continue
+                out = os.path.join(tmp, m.name)
+                if os.path.lexists(out):
+                    continue
+                os.makedirs(os.path.dirname(out), mode=0o700, exist_ok=True)
+                with fsio.atomic_open(out, binary=True, mode=0o600, makedirs=False) as f, tf.extractfile(m) as g:
+                    shutil.copyfileobj(g, f)
+        os.remove(tp)
+        for top in sorted(os.listdir(tmp)):
+            src9, dst = os.path.join(tmp, top), os.path.join(dst_dir, top)
+            placed.append(top)
+            pairs = [(src9, dst)]
+            if os.path.isdir(src9):
+                try:
+                    os.mkdir(dst, 0o700)
+                except FileExistsError:
+                    if os.path.islink(dst) or not os.path.isdir(dst):
+                        log(f"원장 밖 사본: {top} 자리가 폴더가 아니라 그대로 둠")
+                        continue
+                pairs = [(os.path.join(src9, n), os.path.join(dst, n)) for n in sorted(os.listdir(src9))]
+            kept = [os.path.basename(d) for s9, d in pairs if not _link_new(s9, d)]
+            if kept:
+                log(f"원장 밖 사본: {top} 안 {len(kept)}개가 이미 있어 그대로 둠(덮지 않음)" if os.path.isdir(src9)
+                    else f"원장 밖 사본: {top} 이 이미 있어 그대로 둠(덮지 않음)")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return placed
 
 
 def err_text(e) -> str:
-    m = common.safe_err(e)
+    m = logs.safe_err(e)
     if re.search(r"[가-힣]", m):
         return m
     if isinstance(e, subprocess.TimeoutExpired):
@@ -462,7 +716,7 @@ def confirm(stamp: str, sha256: str, log=print) -> int:
     return 0
 
 
-def run(force: bool = False, check: bool = True, cfg: dict = None, now: float = None, log=print) -> int:
+def run(force: bool = False, check: bool = True, cfg: dict = None, now: float = None, log=print, allow_regress: bool = False) -> int:
     c = conf(cfg)
     now = time.time() if now is None else now
     if not c["enabled"]:
@@ -495,33 +749,60 @@ def run(force: bool = False, check: bool = True, cfg: dict = None, now: float = 
         t0 = time.time()
         try:
             man = build(now=now, check=check, log=log)
-            prune_local(max(1, c["keep_local"]))
+            kid9 = _kid_of(man)
+            if not st.get("kid"):
+                st["kid"] = _prev_local_kid(man["stamp"]) or None
+            if st.get("kid") and kid9 and st["kid"] != kid9:
+                st.update(kid_prev=st["kid"], kid_changed_at=int(now + (time.time() - t0)))
+                log(f"경고: 서버 밖 백업 열쇠가 바뀜(kid {st['kid']} → {kid9}) — 그 전 묶음은 옛 열쇠로만 열림")
+            if kid9 and st.get("kid") != kid9:
+                st["kid"] = kid9
+                write_status(st)
+            if c["mode"] == "push":
+                try:
+                    check_remote(c, man, allow_regress, log)
+                except RegressError:
+                    for n in os.listdir(OUT_DIR):
+                        if n.startswith(man["stamp"] + "."):
+                            os.remove(os.path.join(OUT_DIR, n))
+                    raise
+                except Exception:
+                    prune_local(max(1, c["keep_local"]), man["stamp"])
+                    raise
+            prune_local(max(1, c["keep_local"]), man["stamp"])
             res = push(c, man, log=log) if c["mode"] == "push" else {}
-            prune_local(max(c["keep_local"], 1 if c["mode"] == "outbox" else c["keep_local"]))
+            prune_local(max(c["keep_local"], 1 if c["mode"] == "outbox" else c["keep_local"]), man["stamp"])
             t_end9 = int(now + (time.time() - t0))
             st.update(last_built=t_end9, last_stamp=man["stamp"], raw_size=man["db"]["raw_size"],
                       data_until=man["db"].get("data_until"), dur=round(time.time() - t0, 1), err=None, running=False,
                       remote_pruned=res.get("remote_pruned"))
             if c["mode"] == "push":
-                st.update(last_ok=t_end9, size=man["db"]["size"], dest=f"{c['host']}:{c['path']}")
+                st.update(last_ok=t_end9, size=man["db"]["size"], dest=f"{c['host']}:{c['path']}", hostkey="고정" if c["host_key_fpr"] else "미고정")
             else:
                 st.update(dest="outbox(받는 쪽 확인 대기)")
             write_status(st)
             log(("서버 밖 백업 완료" if c["mode"] == "push" else "서버 밖 백업 묶음 만듦(받는 쪽 confirm 대기)")
                 + f": {man['stamp']} ({man['db']['size'] / 1024 ** 3:.2f}GB 압축 · {st['dur']:.0f}초)")
             return 0
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             st.update(err=err_text(e)[:240], err_at=int(now + (time.time() - t0)), running=False)
             write_status(st)
             log("서버 밖 백업 실패: " + st["err"])
             for n in os.listdir(OUT_DIR) if os.path.isdir(OUT_DIR) else []:
                 if n.endswith((".part", ".snap.db")):
                     os.remove(os.path.join(OUT_DIR, n))
+            prune_orphans(stamp_of(now))
             return 1
     finally:
         fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
         lockf.close()
 
+
+RESTORE_ORDER = """복구 순서(새 설치도 · tj-core 는 마지막에):
+  1 원장  python3 tools/ledger_restore.py restore {p}  (미리보기 → pm2 stop … → --apply · tj-core 는 아직 띄우지 않음)
+  2 원장 밖 사본  python3 tools/ledger_restore.py files {day}  (미리보기 → pm2 stop tj-web tj-review → --apply)
+  3 config 지갑  state/backups/files_{day}/config_subset.json 의 wallets · chain_wallets · exchange_addresses 를 config.json 에 옮김
+  4 그 다음에 pm2 start tj-core  (지갑 없이 띄우면 원장을 지갑 없는 기준으로 다시 기장)"""
 
 EPILOG = """설정(config.json — 값은 예시):
   "backup": {"offsite": {"enabled": true, "mode": "push", "host": "backup.example.net", "user": "backup", "port": 22,
@@ -534,13 +815,14 @@ EPILOG = """설정(config.json — 값은 예시):
                 m=$(ls /srv/tj_offsite/tjoff_*.manifest.json | tail -1) && s=$(basename "$m" .manifest.json) &&
                 h=$(sha256sum "/srv/tj_offsite/$s.db.gz" | cut -d' ' -f1) &&
                 ssh -i ~/.ssh/<키> <사용자>@<이 컴퓨터> "cd <설치 폴더> && python3 tools/offsite_backup.py confirm $s $h"
+                받는 쪽 회전은 직접 — rsync 는 지우지 않아 묶음이 쌓임 · --delete 는 쓰지 말 것(이 컴퓨터 outbox 가 비거나 새 서버면 받는 쪽 정상 묶음도
+                지워짐) · confirm 이 성공한 묶음 중 최신 N벌만 남기고 지우되, 새 묶음이 지난 것보다 크게 작으면(원장 크기 raw_size) 지우지 말고 확인.
 크론(매시 — 하루 1번만 보냄 · 실패 뒤 3시간 쉼):  17 * * * * cd <설치 폴더> && python3 tools/offsite_backup.py run
-묶음 = 원장 압축본(.db.gz) · 원장 밖 사본(.files.tar.gz — .env 제외) · manifest(sha256) — 받는 쪽 sha256 이 같을 때만 제자리로.
-되돌리기 = fetch → python3 tools/ledger_restore.py restore <받은 경로>.
-보안(NC7 ⑤): 묶음은 압축만 하고 ★암호화하지 않아요★ — 받는 컴퓨터에 접근할 수 있는 사람은 원장(거래·주소·금액)을 읽을 수 있으니 믿는 컴퓨터만.
-  처음 접속 때 원격 호스트 키를 묻지 않고 받아들여요(StrictHostKeyChecking=accept-new — 그 뒤 키가 바뀌면 거부). 처음부터 확인하려면
-  먼저 ssh -p <포트> -i <키> <사용자>@<호스트> 로 한 번 접속해 지문을 원격 관리자에게 받은 값과 맞춰 known_hosts 에 넣으세요.
-  test = ssh 연결 · 원격 폴더·여유 · 보낼 도구(rsync → 없으면 scp)와 원격 rsync 까지 확인."""
+배포 중(설치 폴더 .deploy.lock 배타 잠금 — 배포 도구가 잡음): run = 건너뜀(0) · confirm 등 = 끝날 때까지 기다림(TJ_DEPLOY_BARRIER_WAIT 초 · 기본 600) ·
+  시간 초과 = 75(받는 쪽 크론이 다음에 다시 보내면 됨 — 위 예시는 비0 이면 다음 날 다시).
+묶음 = 원장 압축본(.db.gz) · 원장 밖 사본(.files.tar.gz — .env 제외 · 첫 정기 백업 전엔 없음) · manifest(sha256 + HMAC) · 되돌리기 = fetch(또는 open —
+  원장 + 원장 밖 사본을 state/backups/files_<날>/ · prefs_<날>.json 으로 · 이미 있으면 그대로) → 원장 restore → ledger_restore files <날> →
+  config 지갑(config_subset.json) → 마지막에 tj-core · test = ssh 연결 · 원격 폴더·여유 · 보낼 도구(rsync → 없으면 scp)와 원격 rsync 까지 확인.\n""" + seal.HELP
 
 
 def main(argv=None) -> int:
@@ -549,20 +831,47 @@ def main(argv=None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--force", action="store_true", help="간격과 무관하게 지금")
     r.add_argument("--no-check", action="store_true", help="압축 전 quick_check 생략")
+    r.add_argument("--allow-regress", action="store_true",
+                   help="원격 마지막 묶음보다 원장이 크게 작거나 오래됐거나 다른 열쇠여도 보냄(되돌린 원장·새 열쇠가 맞을 때만 · 다른 열쇠 묶음은 회전에서 안 지움)")
     sub.add_parser("status")
     sub.add_parser("test")
     sub.add_parser("list-remote")
     f = sub.add_parser("fetch")
     f.add_argument("stamp", nargs="?")
+    o = sub.add_parser("open", help="로컬 묶음 확인·풀기(ssh 없음 · 받는 쪽·outbox): HMAC → sha256 → 원장 풀기")
+    o.add_argument("dir")
+    o.add_argument("stamp")
+    for p9 in (f, o):
+        p9.add_argument("--auth-key", help="HMAC 열쇠 사본(없으면 이 설치 state/backups/offsite_auth.key)")
+        p9.add_argument("--allow-unsigned", action="store_true", help="서명(auth) 없는 옛 묶음 허용(경고 · sha256 만)")
+    sub.add_parser("auth-key", help="HMAC 열쇠 kid(없으면 만듦) · --export <파일> = 사본(0600)").add_argument("--export")
     cf = sub.add_parser("confirm", help="outbox: 받는 쪽이 가져간 묶음 확인(sha256)")
     cf.add_argument("stamp")
     cf.add_argument("sha256")
     a = ap.parse_args(argv)
     c = conf()
     if a.cmd == "run":
-        return run(force=a.force, check=not a.no_check)
+        return run(force=a.force, check=not a.no_check, allow_regress=a.allow_regress)
     if a.cmd == "confirm":
         return confirm(a.stamp, a.sha256)
+    if a.cmd == "auth-key":
+        rc = seal.key_cli(AUTH_KEY, a.export)
+        if rc == 0 and a.export:
+            lk = _lock(True)
+            try:
+                st = read_status()
+                k9 = seal.load_key(AUTH_KEY)
+                if "kid_changed_at" in st or (k9 and st.get("kid") != seal.kid(k9)):
+                    st.pop("kid_changed_at", None)
+                    st.pop("kid_prev", None)
+                    if k9:
+                        st["kid"] = seal.kid(k9)
+                    write_status(st)
+            finally:
+                if lk:
+                    fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+                    lk.close()
+        return rc
     if a.cmd == "status":
         st = read_status()
         print(json.dumps({"config": {k: v for k, v in c.items() if k != "key"}, "status": st}, ensure_ascii=False, indent=1))
@@ -581,22 +890,45 @@ def main(argv=None) -> int:
                 out = remote(c, f"mkdir -p {_q(_rpath(c))} && df -Pk {_q(_rpath(c))} | tail -1 && command -v sha256sum"
                                 " && (command -v rsync >/dev/null && echo TJ_RSYNC_OK || echo TJ_RSYNC_NO)")
             except (RuntimeError, OSError, subprocess.SubprocessError) as e:
-                print("연결 실패: " + common.safe_err(e)[:300])
+                print("연결 실패: " + logs.safe_err(e)[:300])
                 return 1
             lines9 = [x for x in out.strip().splitlines() if x.strip()]
             if tool9 == "rsync" and "TJ_RSYNC_OK" not in lines9:
                 print("원격에 rsync 가 없어요 — 이 컴퓨터는 rsync 로 보내므로 실패해요(원격에 rsync 설치)")
                 return 1
-            print("연결 정상 · 보내기: " + why9 + " · 원격 여유: " + (lines9[0] if lines9 else "?"))
+            print("연결 정상 · 보내기: " + why9 + " · 원격 여유: " + (lines9[0] if lines9 else "?") + " · 호스트 키 " + ("고정" if c["host_key_fpr"] else "미고정"))
             return 0
         if a.cmd == "list-remote":
-            for s in remote_stamps(c):
+            try:
+                st9 = remote_stamps(c)
+            except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+                print("연결 실패: " + err_text(e)[:300], file=sys.stderr)
+                return 1
+            for s in st9:
                 print(s)
+            if not st9:
+                print("원격에 묶음이 없어요(" + str(c.get("path")) + ")", file=sys.stderr)
             return 0
-        p = fetch(c, a.stamp)
-        print(f"받음: {p}\n되돌리기(미리보기): python3 tools/ledger_restore.py restore {p}")
-        return 0
-    return 2
+    try:
+        key = seal.read_key_file(a.auth_key) if a.auth_key else seal.load_key(AUTH_KEY)
+        p = fetch(c, a.stamp, key=key, allow_unsigned=a.allow_unsigned) if a.cmd == "fetch" else \
+            seal.open_bundle(a.dir, a.stamp, os.path.join(BK_DIR, "offsite_fetch", a.stamp), key, a.allow_unsigned)
+        stamp9 = os.path.basename(os.path.dirname(p)) if a.cmd == "fetch" else a.stamp
+        put9 = unpack_files(os.path.dirname(p) if a.cmd == "fetch" else a.dir, stamp9, key, a.allow_unsigned)
+    except seal.AuthError as e:
+        print("인증 실패(묶음을 믿을 수 없음): " + err_text(e)[:300])
+        return 3
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+        print("가져오기 실패: " + err_text(e)[:300])
+        return 1
+    days9 = sorted({re.sub(r"\D", "", x)[:8] for x in put9 if x.startswith(("files_", "prefs_"))}, reverse=True)
+    day9 = next((x[6:14] for x in put9 if x.startswith("files_")), None) or (days9[0] if days9 else "<YYYYMMDD>")
+    print(f"받음: {p}" + (f"\n원장 밖 사본 자리: state/backups/{' · '.join(put9)}" if put9 else ""))
+    print(RESTORE_ORDER.format(p=p, day=day9))
+    for d9 in days9:
+        if d9 != day9:
+            print(f"  (+ 화면 설정·보낸 내역 판정 사본 prefs_{d9}.json 은 날짜가 달라 따로: python3 tools/ledger_restore.py files {d9})")
+    return 0
 
 
 if __name__ == "__main__":

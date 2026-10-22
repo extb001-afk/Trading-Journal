@@ -2,36 +2,35 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
 TON = 10 ** 9
 A, J, M, X = F.K("52"), F.K("d3"), F.K("e3"), F.K("98")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(A)}]
 json.dump(cfg, open(CFG_PATH, "w"))
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
 ch = F.Chain()
 srv = F.Server(ch).start()
@@ -43,7 +42,7 @@ JW_ROWS = list(ch.jw)
 ch.jw = []
 
 st = cs.ChainState("ton")
-ad = tw.TonAdapter(common.load_config(), client=srv.client(), state=st)
+ad = tw.TonAdapter(config.load_config(), client=srv.client(), state=st)
 ad.page = 3
 col = cw.Collector(ad, SegmentWriter(INB), st, {A})
 for _i in range(3):
@@ -79,9 +78,9 @@ class SlowEmpty:
 
 
 def mk_core(client=None):
-    c9 = core.Core(common.load_config())
+    c9 = core.Core(config.load_config())
     c9.conn.commit()
-    c9._nonevm_adapters = {"ton": tw.TonAdapter(common.load_config(), client=client or srv.client())}
+    c9.svc_recon._nonevm_adapters = {"ton": tw.TonAdapter(config.load_config(), client=client or srv.client())}
     return c9
 
 
@@ -104,8 +103,8 @@ def jet(c9):
 
 
 def recon(c9):
-    c9._last_recon = 0
-    c9.recon_pass({"ton"})
+    c9.svc_recon._last_recon = 0
+    c9.svc_recon.recon_pass({"ton"})
 
 
 slow = SlowEmpty(srv.client())
@@ -113,7 +112,7 @@ c = mk_core(slow)
 drain(c)
 recon(c)
 for _i in range(3):
-    if not c.__dict__.get("_recon_jobs"):
+    if not c.svc_recon.__dict__.get("_recon_jobs"):
         break
     drain(c)
     if c._meta_get("recon_done_ton"):

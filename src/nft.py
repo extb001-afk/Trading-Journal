@@ -8,26 +8,23 @@ import logging
 import math
 import os
 import re
-import secrets
 import threading
 import time
 import unicodedata
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
-import alert_watch
+import alert_prefs
 import bf_engine
 import cgplan
-import common
+import config, logs, num_parse, paths, statefile
+import fsio
 import spamguard
 
 log = logging.getLogger("tj-web")
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 SCHEMA = 1
-HOLD_PATH = os.path.join(common.STATE_DIR, "nft_holdings.json")
-FP_PATH = os.path.join(common.STATE_DIR, "nft_fp.json")
-PREFS_PATH = os.path.join(common.STATE_DIR, "nft_prefs.json")
-BUDGET_PATH = os.path.join(common.STATE_DIR, "nft_budget.json")
+BUDGET_PATH = paths.state("nft_budget.json")
 STATE_FILES = ("nft_holdings.json", "nft_fp.json", "nft_prefs.json", "nft_budget.json")
 
 SCAN_EVERY = 86400
@@ -126,7 +123,6 @@ THIN_FULL_DAYS = 90
 THIN_MAX_DAYS = 365
 AB_MIG_V = 1
 ERR_RETRY = 1800
-OS_ERR_GIVEUP = 3
 CG_TRACK_EVERY = 4 * 3600
 BAK_SUFFIX = ".bak_ab1006"
 AB_BLOCK_UNTIL = 253402300799.0
@@ -150,6 +146,7 @@ NATIVE_SYM = {"eth": "ETH", "base": "ETH", "arbitrum": "ETH", "optimism": "ETH",
               "hyperevm": "HYPE", "kaia": "KAIA", "sol": "SOL"}
 OS_CHAIN = {"eth": "ethereum", "arbitrum": "arbitrum", "base": "base", "optimism": "optimism", "polygon": "matic",
             "zksync": "zksync", "avalanche": "avalanche", "blast": "blast", "abstract": "abstract", "berachain": "berachain"}
+CG_OS_URL = tuple(f"/nfts/{CG_PLATFORM[c]}/" for c in OS_CHAIN if c in CG_PLATFORM)
 EXPLORER = {"eth": "https://etherscan.io/token/", "base": "https://basescan.org/token/", "arbitrum": "https://arbiscan.io/token/",
             "optimism": "https://optimistic.etherscan.io/token/", "polygon": "https://polygonscan.com/token/",
             "bsc": "https://bscscan.com/token/", "scroll": "https://scrollscan.com/token/", "zksync": "https://era.zksync.network/token/",
@@ -231,13 +228,8 @@ def _fin(v) -> bool:
 
 
 def _num(v):
-    if isinstance(v, bool) or v is None:
-        return None
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return None
-    return x if math.isfinite(x) and abs(x) < 1e18 else None
+    x = num_parse.to_float(v, allow_bool=False)
+    return x if x is not None and abs(x) < 1e18 else None
 
 
 def _jsafe(o):
@@ -384,31 +376,15 @@ def last_trade(rec, now=None):
 
 
 def atomic_write(path: str, obj) -> None:
-    d = os.path.dirname(path)
-    os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, ".nft_%s_%s.tmp" % (os.getpid(), secrets.token_hex(4)))
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-        try:
-            dfd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError:
-            pass
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+        fsio.atomic_write_json(path, obj, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except fsio.DirSyncError:
+        pass
+
+
+def _cg_evm(key) -> bool:
+    ch, _s, ca = str(key).partition(":")
+    return ch in CG_PLATFORM and bool(ADDR_RE.match(ca))
 
 
 def _cg_only(c) -> bool:
@@ -446,7 +422,7 @@ def empty_prefs() -> dict:
 
 
 def load_prefs(path: str | None = None) -> dict:
-    path = path or PREFS_PATH
+    path = path or paths.state("nft_prefs.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -483,7 +459,7 @@ def registered(cfg: dict):
 def _off_chains(cfg: dict) -> set:
     cfg = cfg if isinstance(cfg, dict) else {}
     off = set(cfg.get("_disabled_chains") or [])
-    off.update(c for c, cc in (cfg.get("chains") or {}).items() if isinstance(cc, dict) and not common.chain_enabled(c, cc))
+    off.update(c for c, cc in (cfg.get("chains") or {}).items() if isinstance(cc, dict) and not config.chain_enabled(c, cc))
     return off
 
 
@@ -518,10 +494,10 @@ def evm_targets(cfg: dict, gate: dict | None = None) -> list:
         if not CHAIN_RE.match(c):
             continue
         cc = chains.get(c) if isinstance(chains.get(c), dict) else None
-        if c in off9 or (cc is not None and not common.chain_enabled(c, cc)):
+        if c in off9 or (cc is not None and not config.chain_enabled(c, cc)):
             continue
         bs = None
-        if cc and cc.get("blockscout") and common.chain_discovery(c, cc) != "rpc":
+        if cc and cc.get("blockscout") and config.chain_discovery(c, cc) != "rpc":
             u = str(cc["blockscout"]).rstrip("/")
             if u.startswith("https://"):
                 bs = u
@@ -542,7 +518,7 @@ def is_lp(chain: str, ca: str, name, sym) -> bool:
         ent = m.get(str(ca or "").lower())
         if ent and ent.get("proto") in tuple(lpdec.NFT_PROTOS) + ("stake",):
             return True
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return bool(LP_NAME_RE.search(str(name or "")) or LP_NAME_RE.search(str(sym or "")))
 
@@ -794,7 +770,7 @@ def id_match(d, field, want, norm=str) -> str:
         return "miss"
     try:
         a, b = norm(d[field]), norm(want)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return "diff"
     return "same" if (a and a == b) else "diff"
 
@@ -1062,7 +1038,7 @@ def default_http(url: str, data=None, headers=None, timeout: float = 20.0):
         if "coingecko.com" in url and cgplan.wrong_root(getattr(e, "body", "") or ""):
             return WRONGROOT, None
         return code, None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0, None
 
 
@@ -1084,6 +1060,7 @@ class _Budget:
         self.dyn = {}
         self.mc = {}
         self.act = {}
+        self.os_fn = _os_env
         self.lock = threading.Lock()
         self._sig = None
         if path:
@@ -1238,7 +1215,7 @@ class _Budget:
     def take_cg(self, lane, per_min, per_day) -> str:
         if lane not in CG_LANES:
             return "lane"
-        pol = cg_policy(per_min, per_day)
+        pol = cg_policy(per_min, per_day, bool(self.os_fn()))
         try:
             with self._xlock():
                 n0 = self.now()
@@ -1275,7 +1252,7 @@ class _Budget:
             return "store"
 
     def cg_wait(self, lane, per_min, per_day) -> float:
-        pol = cg_policy(per_min, per_day)
+        pol = cg_policy(per_min, per_day, bool(self.os_fn()))
         with self.lock:
             self._load()
             n0 = self.now()
@@ -1330,9 +1307,9 @@ class _Budget:
 MONTH_KEYS = ("coingecko_key",)
 
 
-def cg_policy(per_min, per_day) -> dict:
+def cg_policy(per_min, per_day, os_on: bool = False) -> dict:
     pm, pd = max(0, int(per_min or 0)), max(0, int(per_day or 0))
-    fl = {ln: int(pd * CG_FLOOR[ln]) for ln in CG_LANES}
+    fl = {ln: 0 if os_on and ln == "nft" else int(pd * CG_FLOOR[ln]) for ln in CG_LANES}
     fl["live"] += pd - sum(fl.values())
     return {"per_min": pm, "per_day": pd, "floor": fl, "min_reserve": int(pm * CG_LIVE_MIN),
             "hour": {"live": (-(-pd // 24)) if pd > 0 else 0}}
@@ -1346,6 +1323,10 @@ def cg_key_windows(rec, budget=None, share=None) -> tuple:
             return int(bb["per_min"]), int(bb["per_day"])
     w = {win: cap for cap, win in _wins(CG_G)}
     return int(w.get(60, cgplan.DEMO_BUDGET[0])), int(w.get(86400, cgplan.DEMO_BUDGET[1]))
+
+
+def _os_env() -> str:
+    return str(_env("TJ_OPENSEA_KEY") or "").strip()
 
 
 def _ym_utc(t) -> str:
@@ -1369,7 +1350,7 @@ def cg_reserve(key: str, wait_max: float = 5.0, sleep=None, budget=None) -> str:
     st = cgplan.Store()
     try:
         rec = st.load(key)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         rec = None
     bb = cgplan.budget(rec, b.now(), st.share(), b.month_count("coingecko_key"))
     wins = ((int(bb["per_min"]), 60), (int(bb["per_day"]), 86400))
@@ -1404,10 +1385,10 @@ class Tracker:
         self.sleep = sleep or time.sleep
         self.now = now or _now
         self.env_fn = env_fn or _env
-        self.gate_fn = gate_fn or (lambda: common.read_json(common.ACTIVITY_GATE_PATH, {}))
-        self.hold_path = hold_path or HOLD_PATH
-        self.fp_path = fp_path or FP_PATH
-        self.prefs_path = prefs_path or PREFS_PATH
+        self.gate_fn = gate_fn or (lambda: statefile.read_json(paths.ACTIVITY_GATE_PATH, {}))
+        self.hold_path = hold_path or paths.state("nft_holdings.json")
+        self.fp_path = fp_path or paths.state("nft_fp.json")
+        self.prefs_path = prefs_path or paths.state("nft_prefs.json")
         self.lock = threading.RLock()
         self.prefs_lock = threading.RLock()
         self.run_lock = threading.Lock()
@@ -1418,6 +1399,7 @@ class Tracker:
         else:
             self.budget = _Budget(self.now, budget_path or (os.path.join(os.path.dirname(self.hold_path), "nft_budget.json")
                                                               if hold_path else BUDGET_PATH))
+            self.budget.os_fn = self._os_key
         self.wake = threading.Event()
         self._tl = threading.local()
         self.calls = {}
@@ -1434,7 +1416,7 @@ class Tracker:
     def _cfg(self) -> dict:
         try:
             c = self.cfg_fn() or {}
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             c = {}
         return c if isinstance(c, dict) else {}
 
@@ -1447,6 +1429,10 @@ class Tracker:
 
     def _call(self, bkey, url, data=None, headers=None, hkey=None, take=None):
         host = hkey or (urllib.parse.urlsplit(url).hostname or "?").lower()
+        cgn = bkey in ("coingecko", CG_G) and any(x in url for x in CG_OS_URL)
+        if cgn and self._os_key():
+            self._last_st = NOBUDGET
+            return NOBUDGET, None
         if self._item_hid():
             self._last_st = HIDDEN
             return HIDDEN, None
@@ -1456,7 +1442,7 @@ class Tracker:
         if bkey == "helius":
             try:
                 bf_engine.helius_configure(self._cfg())
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
         hl9 = (lambda: bf_engine.HELIUS.take("web", 10, kind="aux")) if bkey == "helius" else None
         if bkey in ("etherscan", "helius") and not take:
@@ -1479,6 +1465,9 @@ class Tracker:
             if self._item_hid():
                 self._last_st = HIDDEN
                 return HIDDEN, None
+            if cgn and self._os_key():
+                self._last_st = NOBUDGET
+                return NOBUDGET, None
         self._last_call = self.now()
         self._host_last[host] = self._last_call
         self.calls[host] = self.calls.get(host, 0) + 1
@@ -1497,7 +1486,7 @@ class Tracker:
     def _cg_key(self) -> str:
         try:
             return str(self.env_fn(CG_KEY_ENV) or "").strip()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return ""
 
     def _key_bad(self, k: str) -> bool:
@@ -1506,7 +1495,7 @@ class Tracker:
             return False
         try:
             rec = self.cg_store.load(k)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             rec = None
         at = _num((rec or {}).get("at")) if isinstance(rec, dict) else None
         return not (at and at > (_num(kb.get("at")) or 0))
@@ -1514,7 +1503,7 @@ class Tracker:
     def _cg_mode(self, k: str):
         try:
             rec = self.cg_store.load(k)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             _warn("코인게코 키 등급 기록 읽기 실패: %s", type(e).__name__)
             rec = None
         plan = rec.get("plan") if isinstance(rec, dict) and rec.get("plan") in cgplan.PLANS else "demo"
@@ -1530,7 +1519,7 @@ class Tracker:
     def _cg_share(self) -> int:
         try:
             return cgplan.norm_share(self.cg_store.share())
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return cgplan.DEFAULT_SHARE
 
     def _cg_key_call(self, plan: str, path: str, k: str):
@@ -1557,7 +1546,7 @@ class Tracker:
     def _cg_remember(self, k: str, **fields):
         try:
             return self.cg_store.save(k, **fields)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             _warn("코인게코 키 등급 기록 실패: %s", type(e).__name__)
             return None
 
@@ -1674,10 +1663,10 @@ class Tracker:
         text = (f"⏳ {NOTICE_SLOW}\n지금 바닥가를 기다리는 EVM 컬렉션 {int(n.get('waiting') or 0)}개"
                 + (" · 코인게코 무키 호출 쉬는 중" if n.get("blocked_until") else "")
                 + f"\n키 발급: 오픈시 {OS_KEY_URL} (넣으면 최우선) · 코인게코 {CG_KEY_URL} (가입 → Demo 키, 무료)")
-        line = alert_watch._alert("NFT_CG_SLOW", text)
+        line = alert_prefs.alert_line("NFT_CG_SLOW", text)
         try:
             ok = self.alert_fn(line) is True
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             _warn("NFT 코인게코 지연 알림 적재 실패: %s", type(e).__name__)
             ok = False
         if ok:
@@ -1806,7 +1795,7 @@ class Tracker:
         cfg = cfg if cfg is not None else self._cfg()
         try:
             gate = self.gate_fn() or {}
-        except (Exception, SystemExit):
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             gate = {}
         out = [(f"{c}:{a}", c, a, bs, es) for c, a, bs, es in evm_targets(cfg, gate)]
         _evm, sol = registered(cfg)
@@ -2025,7 +2014,7 @@ class Tracker:
             off9 = set(cfg.get("_disabled_chains") or [])
             for key, c in self.hold["cols"].items():
                 ch9 = c.get("chain")
-                if ch9 in off9 or (isinstance(chains.get(ch9), dict) and not common.chain_enabled(ch9, chains.get(ch9))):
+                if ch9 in off9 or (isinstance(chains.get(ch9), dict) and not config.chain_enabled(ch9, chains.get(ch9))):
                     continue
                 if ishid(self.canon(key)):
                     continue
@@ -2086,11 +2075,11 @@ class Tracker:
                 cid = ES_CHAINID.get(ch)
             sp9 = ser_parse(key)
             if sp9:
-                if base.startswith("https://") and common.chain_discovery(ch, cc) != "rpc" and tid_in(sample, sp9[2]):
+                if base.startswith("https://") and config.chain_discovery(ch, cc) != "rpc" and tid_in(sample, sp9[2]):
                     r = self._acq_ser(base, owner, sp9[1], str(sample), set(evm), nat)
                 else:
                     r, final = {"kind": "unknown"}, True
-            elif base.startswith("https://") and common.chain_discovery(ch, cc) != "rpc":
+            elif base.startswith("https://") and config.chain_discovery(ch, cc) != "rpc":
                 r = self._acq_evm(base, owner, c["ca"], set(evm), nat)
             elif cid and self.env_fn("TJ_ETHERSCAN_KEY") and TXH_RE.match(str(item.get("tx") or "")):
                 r = self._acq_es(cid, owner, str(item["tx"]), str(item.get("from") or ""), set(evm), nat)
@@ -2296,22 +2285,12 @@ class Tracker:
             else:
                 rt[key] = now
 
-    def _os_err_giveup(self, key) -> bool:
-        with self.lock:
-            if key in (self.fp.get("fp") or {}):
-                return False
-            oe = self.fp.get("oserr")
-            if not isinstance(oe, dict):
-                oe = self.fp["oserr"] = {}
-            n = int(_num(oe.get(key)) or 0) + 1
-            oe[key] = n
-            return n >= OS_ERR_GIVEUP
-
     def fetch_fp(self, key, col):
         if ser_parse(key) or ab_parent_key(key) or col_ab_parent(col):
             return self._fetch_series(key, col)
         chain = col.get("chain")
         rec, out = None, "err"
+        os_on = bool(self._os_key()) and chain in OS_CHAIN
         if chain == "sol" or chain == "os":
             if chain == "os":
                 rec, out = self._fp_os_slug(col.get("os") or "", key)
@@ -2334,18 +2313,12 @@ class Tracker:
                     self._mark(key, out)
                     key = ck
         else:
-            os_first = bool(self._os_key()) and chain in OS_CHAIN and ADDR_RE.match(str(col.get("ca") or ""))
-            os_out, os_last = None, None
-            if os_first:
+            if os_on and ADDR_RE.match(str(col.get("ca") or "")):
                 rec, out = self._fp_os_contract(key, chain, col.get("ca"))
-                os_out = out
                 if out == "ok" and rec:
                     rec.setdefault("src", "os")
-                    if rec.get("basis") == "last":
-                        os_last, rec, out = rec, None, "none"
             plat = CG_PLATFORM.get(chain)
-            if not (os_first and out == "ok" and rec) and plat and ADDR_RE.match(str(col.get("ca") or "")):
-                rec, out = None, "none"
+            if not os_on and plat and ADDR_RE.match(str(col.get("ca") or "")):
                 st, d = self._cg_get(f"{CG_HOST}/api/v3/nfts/{plat}/contract/{col['ca']}")
                 out = self._st_out(st)
                 if st == 200:
@@ -2355,14 +2328,6 @@ class Tracker:
                     fp9 = d.get("floor_price") if isinstance(d, dict) and isinstance(d.get("floor_price"), dict) else {}
                     if rec is None and (_num(fp9.get("native_currency")) or 0) > 0:
                         out = "err"
-                if out == "none" and os_out not in (None, "none", "ok"):
-                    if not (os_out == "err" and self._os_err_giveup(key)):
-                        rec, out = None, os_out
-                elif os_first and os_out in ("none", "ok"):
-                    with self.lock:
-                        (self.fp.get("oserr") if isinstance(self.fp.get("oserr"), dict) else {}).pop(key, None)
-            if os_last and not (out == "ok" and rec):
-                rec, out = os_last, "ok"
         if self._hid_seen():
             return "budget"
         now = self.now()
@@ -2374,7 +2339,7 @@ class Tracker:
                 (self.fp.get("neg") or {}).pop(key, None)
                 self._hist_put(key, rec)
             elif out == "none":
-                self._set_neg(key, "cg" if chain not in ("sol", "os") else ("me" if chain == "sol" else "os"))
+                self._set_neg(key, "me" if chain == "sol" else ("os" if chain == "os" or os_on else "cg"))
                 self.fp["fp"].pop(key, None)
             elif key in self.fp["fp"]:
                 self.fp["fp"][key]["err"] = out
@@ -2604,7 +2569,7 @@ class Tracker:
             return None
         try:
             p = self.px_fn(sym)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             p = None
         return float(p) if _fin(p) and p > 0 else None
 
@@ -2686,7 +2651,7 @@ class Tracker:
     def refresh_fp(self) -> dict:
         try:
             self._os_sync_key()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             _warn("NFT 오픈시 키 확인 실패: %s", type(e).__name__)
         n = {"ok": 0, "none": 0, "err": 0, "budget": 0}
         for key, c in self.due_fp():
@@ -2765,19 +2730,7 @@ class Tracker:
             try:
                 with open(path, "rb") as f:
                     raw = f.read()
-                d = os.path.dirname(bak)
-                tmp = os.path.join(d, ".nft_bak_%s_%s.tmp" % (os.getpid(), secrets.token_hex(4)))
-                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                try:
-                    with os.fdopen(fd, "wb") as f:
-                        f.write(raw)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp, bak)
-                except BaseException:
-                    with contextlib.suppress(OSError):
-                        os.unlink(tmp)
-                    raise
+                fsio.atomic_write_bytes(bak, raw, dir_fsync=False, makedirs=False)
             except OSError as e:
                 _warn("NFT 시리즈 이관 전 사본 실패(%s) — 이관 미룸", type(e).__name__)
                 ok = False
@@ -2904,7 +2857,7 @@ class Tracker:
     def _os_key(self) -> str:
         try:
             return str(self.env_fn("TJ_OPENSEA_KEY") or "").strip()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return ""
 
     def _os_sync_key(self) -> int:
@@ -2912,10 +2865,16 @@ class Tracker:
         kf = _kfp(k) if k else ""
         with self.lock:
             st = self.fp.get("oskey") if isinstance(self.fp.get("oskey"), dict) else {}
-            if st.get("fp") == kf:
+            n = 0
+            if not kf:
+                neg, chk = self.fp.setdefault("neg", {}), self.fp.setdefault("chk", {})
+                for key in [k9 for k9, v9 in neg.items() if isinstance(v9, dict) and v9.get("src") == "os" and _cg_evm(k9)]:
+                    neg.pop(key, None)
+                    chk.pop(key, None)
+                    n += 1
+            if st.get("fp") == kf and not n:
                 return 0
             self.fp["oskey"] = {"fp": kf, "at": self.now()}
-            n = 0
             if kf:
                 mp, neg, chk = self.fp.setdefault("map", {}), self.fp.setdefault("neg", {}), self.fp.setdefault("chk", {})
                 for key in list(set(neg) | set(mp)):
@@ -2947,7 +2906,7 @@ class Tracker:
         with self.run_lock:
             try:
                 out["abmig"] = self._ab_migrate()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("NFT 시리즈 이관 표식 실패: %s", type(e).__name__)
             if not fp_only:
                 out["scan"] = self.scan()
@@ -2955,7 +2914,7 @@ class Tracker:
                     self._ab_migrate()
             try:
                 out["abprefs"] = self._ab_prefs_sync()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("NFT 시리즈 설정 잇기 실패: %s", type(e).__name__)
             out["fp"] = self.refresh_fp()
             if fp_only:
@@ -2965,7 +2924,7 @@ class Tracker:
                 self.save()
             try:
                 out["alert"] = self.maybe_alert()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("NFT 코인게코 지연 알림 판정 실패: %s", type(e).__name__)
         return out
 
@@ -3000,14 +2959,14 @@ class Tracker:
         while True:
             try:
                 self.cg_info_tick()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("코인게코 프로 한도(/key) 확인 실패: %s", type(e).__name__)
             try:
                 full = self.now() - full_at >= FP_EVERY - 60 or bool(self.urgent)
                 self.run_once(fp_only=not full)
                 if full:
                     full_at = self.now()
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [boundary]
                 _warn("NFT 바퀴 실패: %s", type(e).__name__)
             self.wake.wait(self._loop_wait())
             self.wake.clear()
@@ -3017,8 +2976,8 @@ class Tracker:
         if not off:
             return {}
         try:
-            raw = common.read_json(common.CONFIG_PATH, {}) or {}
-        except (Exception, SystemExit):
+            raw = statefile.read_json(paths.CONFIG_PATH, {}) or {}
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
             raw = {}
         rch = raw.get("chains") if isinstance(raw, dict) and isinstance(raw.get("chains"), dict) else {}
         out = {}
@@ -3041,7 +3000,7 @@ class Tracker:
             prefs = self.prefs()
             perr = None
         except StoreError as e:
-            prefs, perr = empty_prefs(), common.safe_err(e)
+            prefs, perr = empty_prefs(), logs.safe_err(e)
         evm, sol = registered(cfg)
         labels = {**evm, **sol}
         rate = self.rate_fn() or 0.0
@@ -3175,11 +3134,11 @@ class Tracker:
         if cgk:
             try:
                 cg_rec = self.cg_store.load(cgk)
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 cg_rec = None
         try:
             ntc = self.notice(prefs)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             _warn("NFT 안내 판정 실패: %s", type(e).__name__)
             ntc = None
         return _jsafe({
@@ -3273,7 +3232,7 @@ class Tracker:
             try:
                 p = load_prefs(self.prefs_path)
             except StoreError as e:
-                return None, (503, common.safe_err(e))
+                return None, (503, logs.safe_err(e))
             with self.lock:
                 known = set(self.hold["cols"]) | {self.canon(k) for k in self.hold["cols"]} | \
                     {w.get("key") for w in p["watch"] if isinstance(w, dict)}
@@ -3417,12 +3376,12 @@ def _env(k):
     try:
         import settings_store
         return settings_store.env_value(k)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return ""
 
 
 def _warn(fmt, *a):
     try:
         log.warning(fmt, *a)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass

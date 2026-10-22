@@ -14,11 +14,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # README 약속 = Python 3.9+ — 가장 낮은 판 · 기본 판 · 최신 판
-        python-version: ["3.9", "3.11", "3.13"]
+        # README 약속 = Python 3.9+ — 가장 낮은 판 · 기본 판 · 3.12(distutils 제거·sqlite3 기본 어댑터 경고 등 바뀐 판) · 최신 판
+        python-version: ["3.9", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # 액션은 커밋 SHA 로 고정(태그는 옮겨질 수 있다) — 끝 주석 = 그 SHA 의 태그.
+      #   올릴 때: git ls-remote https://github.com/actions/<이름> refs/tags/<태그> 의 SHA 로 바꾸고 주석도 같이
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0 (= v4)
+        with:
+          persist-credentials: false   # 시험은 git 인증이 필요 없다 — 토큰을 .git/config 에 남기지 않음
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0 (= v5)
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile every Python file (py_compile — syntax on this Python, no .pyc written)
@@ -38,6 +42,10 @@ jobs:
           PY
       - name: Run tests (standard library only, no network)
         run: python3 tests/run_all.py
+      # 포크 빌드(buildproc 자식)는 리눅스에서만 돈다 — 맥(내부 게이트)에선 시스템 sqlite 가 fork 뒤 죽어 못 본다.
+      #   tests/test_fork_build.py 는 위 run_all 안에서 리눅스면 자동 실행 · 아래는 R1 경합 시험을 실제 포크 자식 경로로 한 번 더.
+      - name: Fork build path (Linux only — daily cache race through the build child)
+        run: TJ_TEST_FORK=1 python3 tests/test_daily_inval_race.py
       - name: Check browser scripts parse (node --check)
         run: for f in web/v2/*.js; do node --check "$f" || exit 1; done
       - name: Check shell scripts parse (bash -n)

@@ -2,30 +2,30 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import logging
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
-import xparts
+import paths, statefile  # noqa: E402
+import xparts  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import db as dbm
-import netpace
-import web
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
         setattr(web.StateBuilder, _m, lambda self: None)
 netpace.wait = lambda url, now=None, sleep=None: None
-S = common.STATE_DIR
+S = paths.STATE_DIR
 FX = 1400.0
 
 
@@ -36,7 +36,7 @@ def xv_sum(xv):
 
 
 NOW = int(time.time())
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 c.execute("INSERT INTO asset_groups (name) VALUES ('USDT')")
 gid_u = c.execute("SELECT group_id FROM asset_groups WHERE name='USDT'").fetchone()[0]
 c.execute("INSERT INTO assets (kind, chain, address, symbol, decimals, confirmed, group_id) VALUES ('exchange_currency',NULL,'bithumb:USDT','USDT',8,1,?)", (gid_u,))
@@ -48,10 +48,10 @@ c.commit()
 c.close()
 PX = {"USDT": 1.0}
 json.dump({"usd": PX, "usd_ts": {k: NOW for k in PX}, "rate": FX, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": FX, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: PX.get(str(sym).upper())
 web.pricing._gj = lambda url, timeout=10.0: None
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
 open(os.path.join(S, "backfill_done"), "w").write("1")
 UP = os.path.join(S, "upbit_balances.json")
 BT = os.path.join(S, "exf_balances_bithumb.json")
@@ -60,18 +60,18 @@ OK = os.path.join(S, "exf_balances_okx.json")
 
 def files(up_age=0, bt=1_400_000, bt_age=0, okx=None):
     t = int(time.time())
-    common.atomic_write_json(UP, {"ts": t - up_age, "accounts": [{"currency": "KRW", "balance": "2800000", "locked": "0"},
+    statefile.atomic_write_json(UP, {"ts": t - up_age, "accounts": [{"currency": "KRW", "balance": "2800000", "locked": "0"},
                                                                  {"currency": "QQQ", "balance": "100", "locked": "0"}]})
     if bt is None:
         if os.path.exists(BT):
             os.remove(BT)
     else:
-        common.atomic_write_json(BT, {"ts": t - bt_age, "balances": {"KRW": bt}})
+        statefile.atomic_write_json(BT, {"ts": t - bt_age, "balances": {"KRW": bt}})
     if okx is None:
         if os.path.exists(OK):
             os.remove(OK)
     else:
-        common.atomic_write_json(OK, {"ts": t, "balances": {"KRW": okx}})
+        statefile.atomic_write_json(OK, {"ts": t, "balances": {"KRW": okx}})
     return t
 
 
@@ -83,7 +83,7 @@ def build(no_rate=False):
     t = int(time.time())
     b.spot.ex_usd["upbit:QQQ"] = 2.0
     b.spot.ex_ts["upbit:QQQ"] = t
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -195,7 +195,7 @@ X_TOTAL = 3700.0
 
 
 def reset_files():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
 
@@ -218,8 +218,8 @@ def scenario(extra, steps):
     b = unit_builder()
     out = []
     for today, now_ts, pend, inval, *lg in steps:
-        if inval and os.path.exists(web.DAILY_PATH):
-            os.remove(web.DAILY_PATH)
+        if inval and os.path.exists(paths.state("daily_cache.json")):
+            os.remove(paths.state("daily_cache.json"))
         d = run(b, today, now_ts, extra, pend, lg[0] if lg else None)
         out.append((copy.deepcopy(d), copy.deepcopy(b.daily), copy.deepcopy(b.daily_px)))
     return out
@@ -234,7 +234,7 @@ def twin_same(name, a, b):
 X_NO = {k: v for k, v in X.items() if k != "xv"}
 STEPS = [(D27, T_CLOSE, (), False), (D28, T_NEXT, (), False), (D28, T_NEXT + 60, (), False), (D28, T_NEXT + 120, (), True)]
 sa = scenario(X, STEPS)
-f27 = (common.read_json(web.DAILY_PX_PATH, {}) or {}).get("2026-09-27") or {}
+f27 = (statefile.read_json(paths.state("daily_px.json"), {}) or {}).get("2026-09-27") or {}
 sb = scenario(X_NO, STEPS)
 d0, c0, p0 = sa[0]
 lxv = (c0.get("_live") or {}).get("xv") or {}

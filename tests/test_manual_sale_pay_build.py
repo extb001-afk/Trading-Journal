@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 B = "0x" + "b8" * 20
 X = "0x" + "a8" * 20
@@ -19,11 +19,11 @@ USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 json.dump({"chains": {}, "wallets": [{"chain": "eth", "address": B, "label": "B"}], "backfill_months": 5},
           open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker", "_rabby_worker"):
@@ -82,8 +82,8 @@ web.pricing._gj = lambda url, timeout=10.0: None
 histcurve.DAYCLOSE.lookup = fake_lookup
 spot = {"ETH": 2000.0, "USDT": 1.0, "USDC": 1.0}
 json.dump({"usd": spot, "usd_ts": {k: NOW for k in spot}, "rate": 1300.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
-FX_CORE = os.path.join(common.STATE_DIR, "px_cache_core.json")
+           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
+FX_CORE = os.path.join(paths.STATE_DIR, "px_cache_core.json")
 
 
 def set_fx(pts):
@@ -96,7 +96,7 @@ def set_fx(pts):
 
 class L:
     def __init__(self):
-        p = common.DB_PATH
+        p = paths.DB_PATH
         for sfx in ("", "-wal", "-shm"):
             if os.path.exists(p + sfx):
                 os.remove(p + sfx)
@@ -196,7 +196,7 @@ def link(tokens=(), refunds=(), excl=()):
     dec = {X: {"verdict": "external", "category": "세일 참가금", "links": ls}}
     if excl:
         dec[X]["excludeLegs"] = list(excl)
-    common.atomic_write_json(OFP, {"decisions": dec})
+    statefile.atomic_write_json(OFP, {"decisions": dec})
     return dec
 
 
@@ -204,10 +204,10 @@ BLD = [None]
 
 
 def build(prefs=None):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **(prefs or {})))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **(prefs or {})))
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -234,7 +234,7 @@ def reset():
     PX["ETH"] = [(0, 1000.0)]
     NO_PX_BEFORE[0] = 0
     set_fx([])
-    pin9 = getattr(web, "FS_PIN_PATH", os.path.join(common.STATE_DIR, "first_seen_px.json"))
+    pin9 = paths.state("first_seen_px.json")
     if os.path.exists(pin9):
         os.remove(pin9)
     if os.path.exists(OFP):
@@ -470,12 +470,12 @@ chk(len(p13) == 1 and abs(float(p13[0]["_qty"]) - 6000) < 1e-6 and abs(float(p13
 
 eth_case(2000)
 before10 = open(OFP, "rb").read()
-c10 = dbm.open_db(common.DB_PATH, readonly=True)
+c10 = dbm.open_db(paths.DB_PATH, readonly=True)
 n10 = c10.execute("SELECT COUNT(*), COALESCE(SUM(CAST(qty_base AS REAL)), 0) FROM postings").fetchone()
 c10.close()
 build()
 build()
-c10 = dbm.open_db(common.DB_PATH, readonly=True)
+c10 = dbm.open_db(paths.DB_PATH, readonly=True)
 n10b = c10.execute("SELECT COUNT(*), COALESCE(SUM(CAST(qty_base AS REAL)), 0) FROM postings").fetchone()
 c10.close()
 chk(open(OFP, "rb").read() == before10 and tuple(n10) == tuple(n10b), "M10 빌드가 판정 파일(구 수동 링크)·원장을 바꾸지 않음(매 빌드 재계산)", [tuple(n10), tuple(n10b)])

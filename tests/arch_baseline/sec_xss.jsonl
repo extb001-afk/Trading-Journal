@@ -1,0 +1,4 @@
+{"_doc": "G1 test_xss_lint 기준선 — 화면 HTML 싱크·URL 속성·외부 필드 자리(파일::함수 → 수). 늘면 FAIL · 줄면 `--update-lower`. 분류 규칙 = _sec_lint.classify_expr·_url_kind·_ext_hits(이름 기반 esc 판정 · 삼항 조건·비교 자리는 출력 아님)"}
+{"m": "sink_all", "k": "tjdom.js::frag", "n": 1}
+{"m": "sink_esc_raw", "k": "tjdom.js::frag", "n": 1}
+{"m": "sink_raw", "k": "tjdom.js::frag", "n": 1}

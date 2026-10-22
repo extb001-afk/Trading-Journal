@@ -1,0 +1,400 @@
+{
+ "_doc": "합성 데이터 — evm_rpc 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "evm_rpc",
+ "golden": {
+  "backfill_status.json": {
+   "_updated": 1760000060,
+   "evm": {
+    "base:rpc": {
+     "done": 2020,
+     "eta_sec": 0,
+     "moved_at": 1760000060,
+     "phase": "live",
+     "rate": 0.5,
+     "started": 1760000000,
+     "total": 2020,
+     "unit": "blocks",
+     "updated": 1760000060,
+     "via": "공개 노드"
+    }
+   }
+  },
+  "cursor_evm_base.json": {
+   "0x«a1*20»": 2000020,
+   "0x«b2*20»": 2000020,
+   "_bkns": {},
+   "_first_own": {
+    "0x«a1*20»": [
+     1998800,
+     "0x«0*56+c0de0003»"
+    ]
+   },
+   "_handover": {
+    "adopted": 0,
+    "at": 1760000000,
+    "backup": "cursor_evm_base.json.explorer_legacy",
+    "bk_from": 1998000,
+    "curs": {},
+    "extend": 0,
+    "from": "fresh",
+    "hq": 0,
+    "internal": 0,
+    "live": 1998000,
+    "new": 0,
+    "nobase": [
+     0,
+     0
+    ],
+    "overlap": 0,
+    "src_max": null,
+    "src_min": null,
+    "start": 1998000
+   },
+   "_nonces": {
+    "0x«a1*20»": {
+     "0": 1998800
+    }
+   },
+   "_ns": {
+    "0x«a1*20»": [
+     2000020,
+     1,
+     "1499999500000000000",
+     0,
+     "0"
+    ],
+    "0x«b2*20»": [
+     2000020,
+     0,
+     "0",
+     0,
+     "0"
+    ]
+   },
+   "_quarantine": {},
+   "_rpc_v": 1,
+   "_start": 1998000,
+   "_synced_at": 1760000060,
+   "_xcurs": {}
+  },
+  "cursor_evm_base.json.explorer_legacy": [
+   "{}"
+  ],
+  "emitted_evm_base.json": [
+   "0x«0*56+c0de0002»",
+   "0x«0*56+c0de0003»",
+   "0x«0*56+c0de0004»",
+   "0x«0*56+c0de0005»",
+   "0x«0*56+c0de0006»"
+  ],
+  "health/evm.json": {
+   "net": {
+    "base-node.cassette.invalid": {
+     "calls": 40,
+     "circuit_open_sec": 0
+    }
+   },
+   "ok": true,
+   "pid": "<pid>",
+   "schema": 1,
+   "sources": {
+    "base": {
+     "backfilling_ids": [],
+     "block_sec_est": 2.0,
+     "consecutive_failures": 0,
+     "current_source": "base-node.cassette.invalid",
+     "cursor": 2000020,
+     "emitted": 5,
+     "es_daily_until": null,
+     "head": 2000030,
+     "head_ts": null,
+     "head_unchanged_sec": 0,
+     "kind": "rpc",
+     "lag_blocks": 0,
+     "lag_sec": 0,
+     "last_cycle_ts": 1760000060,
+     "last_error": null,
+     "last_success_ts": 1760000060,
+     "native_gaps": null,
+     "native_unexplained": null,
+     "native_verified": [
+      "0xa1a1a1a1",
+      "0xb2b2b2b2"
+     ],
+     "ok": true,
+     "ref_gap_blocks": 0,
+     "ref_head": 2000030,
+     "retention": null,
+     "rpc_backfill": null,
+     "rpc_bk": null,
+     "rpc_fb": null,
+     "rpc_limited": null,
+     "scan": {
+      "calls": 2,
+      "errors": 0,
+      "halved": 0,
+      "head_calls": 1,
+      "lag_clip": 0,
+      "pruned": 0,
+      "range_split": 0,
+      "stop": null
+     },
+     "synced_at": 1760000060,
+     "wallets": 2,
+     "wallets_backfilling": 0,
+     "wallets_resting": 0
+    }
+   },
+   "started": 1760000000,
+   "ts": 1760000060,
+   "unit": "evm"
+  },
+  "helius_budget/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "inbox/evm/000000001.jsonl": [
+   {
+    "chain": "base",
+    "kind": "evm_tx",
+    "observed_head": 2000000,
+    "snapshot": {
+     "internal": [],
+     "token_transfers": [
+      {
+       "from": "0x«c3*20»",
+       "log_index": 0,
+       "to": "0x«a1*20»",
+       "token": {
+        "address": "0x«d4*20»",
+        "decimals": 6,
+        "symbol": "USDC",
+        "type": "ERC-20"
+       },
+       "total": {
+        "value": "8800000"
+       }
+      }
+     ],
+     "tx": {
+      "block_hash": "0x«0*58+1e835b»",
+      "block_number": 1999700,
+      "fee": {
+       "value": "500000000000"
+      },
+      "from": "0x«c3*20»",
+      "hash": "0x«0*56+c0de0005»",
+      "position": 0,
+      "raw_input": "0xa9059cbb",
+      "status": "ok",
+      "synth": "rpc",
+      "timestamp": 1759999400,
+      "to": "0x«d4*20»",
+      "type": 2,
+      "value": "0"
+     }
+    },
+    "ts": 1760000000,
+    "txhash": "0x«0*56+c0de0005»",
+    "v": 1,
+    "wallets": [
+     "0x«a1*20»"
+    ]
+   },
+   {
+    "chain": "base",
+    "kind": "evm_tx",
+    "observed_head": 2000000,
+    "snapshot": {
+     "internal": [],
+     "token_transfers": [
+      {
+       "from": "0x«c3*20»",
+       "log_index": 0,
+       "to": "0x«b2*20»",
+       "token": {
+        "address": "0x«d4*20»",
+        "decimals": 6,
+        "symbol": "USDC",
+        "type": "ERC-20"
+       },
+       "total": {
+        "value": "5000000"
+       }
+      }
+     ],
+     "tx": {
+      "block_hash": "0x«0*58+1e7eab»",
+      "block_number": 1998500,
+      "fee": {
+       "value": "500000000000"
+      },
+      "from": "0x«c3*20»",
+      "hash": "0x«0*56+c0de0002»",
+      "position": 0,
+      "raw_input": "0xa9059cbb",
+      "status": "ok",
+      "synth": "rpc",
+      "timestamp": 1759997000,
+      "to": "0x«d4*20»",
+      "type": 2,
+      "value": "0"
+     }
+    },
+    "ts": 1760000000,
+    "txhash": "0x«0*56+c0de0002»",
+    "v": 1,
+    "wallets": [
+     "0x«b2*20»"
+    ]
+   },
+   {
+    "chain": "base",
+    "kind": "evm_tx",
+    "observed_head": 2000000,
+    "snapshot": {
+     "internal": [],
+     "token_transfers": [
+      {
+       "from": "0x«a1*20»",
+       "log_index": 0,
+       "to": "0x«c3*20»",
+       "token": {
+        "address": "0x«d4*20»",
+        "decimals": 6,
+        "symbol": "USDC",
+        "type": "ERC-20"
+       },
+       "total": {
+        "value": "1250000"
+       }
+      }
+     ],
+     "tx": {
+      "block_hash": "0x«0*58+1e7fd7»",
+      "block_number": 1998800,
+      "fee": {
+       "value": "500000000000"
+      },
+      "from": "0x«a1*20»",
+      "hash": "0x«0*56+c0de0003»",
+      "position": 0,
+      "raw_input": "0xa9059cbb",
+      "status": "ok",
+      "synth": "rpc",
+      "timestamp": 1759997600,
+      "to": "0x«d4*20»",
+      "type": 2,
+      "value": "0"
+     }
+    },
+    "ts": 1760000000,
+    "txhash": "0x«0*56+c0de0003»",
+    "v": 1,
+    "wallets": [
+     "0x«a1*20»"
+    ]
+   },
+   {
+    "chain": "base",
+    "kind": "evm_tx",
+    "observed_head": 2000000,
+    "snapshot": {
+     "internal": [],
+     "token_transfers": [],
+     "tx": {
+      "block_hash": "0x«0*58+1e8103»",
+      "block_number": 1999100,
+      "fee": {
+       "value": "210000000000"
+      },
+      "from": "0x«c3*20»",
+      "hash": "0x«0*56+c0de0004»",
+      "position": 0,
+      "raw_input": "0x",
+      "status": "ok",
+      "synth": "rpc",
+      "timestamp": 1759998200,
+      "to": "0x«a1*20»",
+      "type": 2,
+      "value": "1000000000000000000"
+     }
+    },
+    "ts": 1760000000,
+    "txhash": "0x«0*56+c0de0004»",
+    "v": 1,
+    "wallets": [
+     "0x«a1*20»"
+    ]
+   },
+   {
+    "chain": "base",
+    "kind": "evm_tx",
+    "observed_head": 2000030,
+    "snapshot": {
+     "internal": [],
+     "token_transfers": [
+      {
+       "from": "0x«c3*20»",
+       "log_index": 0,
+       "to": "0x«b2*20»",
+       "token": {
+        "address": "0x«d4*20»",
+        "decimals": 6,
+        "symbol": "USDC",
+        "type": "ERC-20"
+       },
+       "total": {
+        "value": "2500000"
+       }
+      }
+     ],
+     "tx": {
+      "block_hash": "0x«0*58+1e8493»",
+      "block_number": 2000012,
+      "fee": {
+       "value": "500000000000"
+      },
+      "from": "0x«c3*20»",
+      "hash": "0x«0*56+c0de0006»",
+      "position": 0,
+      "raw_input": "0xa9059cbb",
+      "status": "ok",
+      "synth": "rpc",
+      "timestamp": 1760000024,
+      "to": "0x«d4*20»",
+      "type": 2,
+      "value": "0"
+     }
+    },
+    "ts": 1760000060,
+    "txhash": "0x«0*56+c0de0006»",
+    "v": 1,
+    "wallets": [
+     "0x«b2*20»"
+    ]
+   }
+  ],
+  "rpc_day_node_alchemy/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_ankr/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_chainnodes/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_nodereal/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_day_node_quicknode/head_days.hist": [
+   "{\"days\":{},\"since\":20370}"
+  ],
+  "rpc_token_meta_base.json": {
+   "0x«d4*20»": 6
+  },
+  "rpc_token_sym_base.json": {
+   "0x«d4*20»": "USDC"
+  }
+ }
+}

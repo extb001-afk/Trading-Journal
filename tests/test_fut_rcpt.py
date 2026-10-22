@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 with open(os.environ["TJ_CONFIG"], "w") as f:
     json.dump({}, f)
-import common
-import fut_rcpt as F
+import paths  # noqa: E402
+import fut_rcpt as F  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
+assert T.TMP in paths.STATE_DIR
 KST = timezone(timedelta(hours=9))
 D0 = datetime(2026, 1, 15, tzinfo=KST)
 ISO = D0.strftime("%Y-%m-%d")

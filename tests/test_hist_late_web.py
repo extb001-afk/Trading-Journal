@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import histmark, paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import histcurve
-import web
-import xparts
+import histcurve  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -59,7 +59,7 @@ class FakePx:
 
 
 def unit_builder():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH, os.path.join(S, common.HIST_DIRTY)):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json"), os.path.join(S, histmark.HIST_DIRTY)):
         if os.path.exists(p9):
             os.remove(p9)
     b = object.__new__(web.StateBuilder)
@@ -126,7 +126,7 @@ def frozen(b, n=46, val=100000.0, g=None, extra_g=None):
 
 
 def save(b):
-    json.dump(b.daily, open(web.DAILY_PATH, "w"))
+    json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 
 
 def dv(b, k):
@@ -155,7 +155,7 @@ if not has_kw:
 b = unit_builder()
 pin_all(b)
 frozen(b)
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 busy = [mk(ID1, iso(10, 5), NOW - 60, NOW - 400)]
 s0 = vals(run(b, G1, busy))
 chk(all(close(s0.get("10-%02d" % d9), 100000) for d9 in range(5, 10)), "W1 표식이 붐비면(마지막 활동 300초 안) 아직 기다림 — 동결 값 그대로",
@@ -175,7 +175,7 @@ pnl = {d9: round(fl["10-%02d" % d9] - fl["10-%02d" % (d9 - 1)] - (50000 if d9 ==
 chk(all(abs(v) < 0.01 for v in pnl.values()), "W1 손익 쌍(사건 날 −50,000 · 따라잡은 날 +50,000) 사라짐 — 날별 (값 변화 − 순유입) = 0", pnl)
 
 b.daily[iso(10, 7)]["val"] = 150001.0
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 s2 = vals(run(b, G1, M1, NOW + 120))
 chk(close(s2.get("10-07"), 150001), "W2 두 번째 빌드 = 다시 계산 없음(같은 날 반복 없음)", s2.get("10-07"))
 G2 = {1: dict(G1[1], qty_timeline=G1[1]["qty_timeline"] + [(int(E(10, 8, 9, 0, 0)), Decimal(7000))])}
@@ -227,7 +227,7 @@ b = unit_builder()
 pin_all(b)
 frozen(b, extra_g={"2": 2000.0})
 b.daily_px[iso(10, 6)] = {"p": {}, "k": {}, "xv": copy.deepcopy(XV)}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 G4 = mkG(TL, tkn=True)
 s4 = vals(run(b, G4, M1, pend={2}, tkn=True))
 e46 = b.daily.get(iso(10, 6)) or {}
@@ -243,7 +243,7 @@ pin_all(b)
 frozen(b)
 run(b, G1, M1)
 b.daily[iso(10, 6)] = {"val": 100000.0, "usdt": FX, "kimp": None, "g": {"1": 100000.0}, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 s5 = vals(run(b, G1, M1, NOW + 60))
 chk(close(s5.get("10-06"), 150000) and (b.daily.get(iso(10, 6)) or {}).get("hq") == ID1, "W5 롤백 중 옛 코드가 다시 굳힌 날(hq 없음) = 돌아오면 남은 표식만큼 1회 다시",
     (s5.get("10-06"), b.daily.get(iso(10, 6))))
@@ -259,7 +259,7 @@ b2 = unit_builder()
 pin_all(b2)
 frozen(b2)
 run(b2, mkG(E(10, 5, 12, 0, 0)), [mk(ID1, iso(10, 5), NOW - 400)])
-chk(not os.path.exists(os.path.join(S, common.HIST_DIRTY)) and (b2.daily_px.get("_hlf") or {}).get("id") == ID1,
+chk(not os.path.exists(os.path.join(S, histmark.HIST_DIRTY)) and (b2.daily_px.get("_hlf") or {}).get("id") == ID1,
     "W6 30일 창 안 표식 = 장기 곡선 표식 안 넘김(창 안은 30일 곡선 행을 받음) · 커서만", b2.daily_px.get("_hlf"))
 b = unit_builder()
 pin_all(b)
@@ -271,11 +271,11 @@ run(b, G6, M6)
 out9 = {k9: dv(b, k9) for k9 in (iso(8, 26), iso(8, 27), iso(9, 5), iso(9, 10), iso(9, 11), iso(10, 9))}
 chk(close(out9[iso(8, 26)], 100000) and all(close(out9[k9], 150000) for k9 in (iso(8, 27), iso(9, 5), iso(9, 10), iso(9, 11), iso(10, 9))),
     "W6 45일 전 입금 = 30일 창 밖(일별 가격 보관 안) 동결 항목도 사건 날부터 150,000 · 그 전 100,000", out9)
-hd9 = common.read_json(os.path.join(S, common.HIST_DIRTY), None)
+hd9 = statefile.read_json(os.path.join(S, histmark.HIST_DIRTY), None)
 chk(isinstance(hd9, dict) and hd9.get("from") == iso(8, 27) and len(hd9.get("marks") or []) == 1 and (b.daily_px.get("_hlf") or {}).get("id") == ID1,
     "W6 30일 창 밖 날 = 장기 곡선 다시 계산 표식(hist_dirty.json) 넘김 · 커서 daily_px['_hlf']", (hd9, b.daily_px.get("_hlf")))
 run(b, G6, M6, NOW + 60)
-hd9b = common.read_json(os.path.join(S, common.HIST_DIRTY), None)
+hd9b = statefile.read_json(os.path.join(S, histmark.HIST_DIRTY), None)
 chk(len((hd9b or {}).get("marks") or []) == 1, "W6 두 번째 빌드 = 다시 넘기지 않음(커서)", hd9b)
 pth9, pxp9 = os.path.join(S, "chH.json"), os.path.join(S, "chH_px.json")
 ser6 = run(b, G6, M6, NOW + 120)
@@ -291,7 +291,7 @@ pre9 = {"_v": histcurve.HIST_V, "d": {k9: hrow(100000) for k9 in out_days},
         "s": {k9: [100000.0, 0.0, 0.0, 0, 0.0, histcurve.LQ_V, ""] for k9 in out_days},
         "x": {k9: {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(k9) - 1} for k9 in out_days},
         "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pth9, pre9)
+statefile.atomic_write_json(pth9, pre9)
 HH = histcurve.HistCurve(path=pth9, px_path=pxp9)
 kH = histcurve.make_kit("2026-10-10", G6, hold(), set(), set(), {}, set(), {}, {}, {}, [], mkx(NOW), ser6, b.daily,
                         xkit=copy.deepcopy(b.__dict__.get("_x_kit")))
@@ -304,12 +304,12 @@ chk(repH.get("dirty_from") == iso(8, 27) and close((dH.get(iso(8, 27)) or [None]
     and close((dH.get(iso(8, 26)) or [None])[0], 100000) and close((dH.get(iso(8, 20)) or [None])[0], 100000),
     "W6 장기 곡선 창 밖 행 = 사건 날(8/27)부터 150,000 · 그 전(8/20·8/26) 100,000 그대로",
     (repH.get("dirty_from"), dH.get(iso(8, 26)), dH.get(iso(8, 27)), dH.get(iso(9, 5))))
-chk(not os.path.exists(os.path.join(S, common.HIST_DIRTY)), "W6 장기 곡선은 가져간 표식만 지움(원장 표식·30일 곡선 지문과 따로)", common.read_json(os.path.join(S, common.HIST_DIRTY), None))
+chk(not os.path.exists(os.path.join(S, histmark.HIST_DIRTY)), "W6 장기 곡선은 가져간 표식만 지움(원장 표식·30일 곡선 지문과 따로)", statefile.read_json(os.path.join(S, histmark.HIST_DIRTY), None))
 b7 = unit_builder()
 pin_all(b7)
 os.remove(os.path.join(S, "backfill_done"))
 s7 = vals(run(b7, G6, M6))
-chk(close(s7.get("09-20"), 150000) and not os.path.exists(os.path.join(S, common.HIST_DIRTY)) and "_hlf" not in b7.daily_px and not any(
+chk(close(s7.get("09-20"), 150000) and not os.path.exists(os.path.join(S, histmark.HIST_DIRTY)) and "_hlf" not in b7.daily_px and not any(
     "hq" in v for k, v in b7.daily.items() if not k.startswith("_") and isinstance(v, dict)),
     "W7 기초 대사 전(백필 완료 표식 없음) = 늘 지금 원장으로 계산 · 장기 곡선 넘김·지문 없음", (s7.get("09-20"), b7.daily_px.get("_hlf")))
 open(os.path.join(S, "backfill_done"), "w").write("1")
@@ -331,7 +331,7 @@ pre8 = {"_v": histcurve.HIST_V, "d": dict({k9: hrow(102000) for k9 in hc_days}, 
         "s": {k9: [102000.0, 0.0, 0.0, 0, 0.0, histcurve.LQ_V, ""] for k9 in hc_days},
         "x": {k9: {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(k9) - 1} for k9 in hc_days},
         "dqd": {k9: "" for k9 in dc_days}, "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pth8, pre8)
+statefile.atomic_write_json(pth8, pre8)
 H8c = histcurve.HistCurve(path=pth8, px_path=pxp8)
 k8 = histcurve.make_kit("2026-10-10", G8, H8, set(), set(), {}, set(), OV8, {2: 10.0}, {}, [], mkx(NOW), ser8, b8.daily,
                         xkit=copy.deepcopy(b8.__dict__.get("_x_kit")), rb_days={k9: RB for k9 in dc_days})
@@ -353,7 +353,7 @@ H8c.run_once(k8b, cap=0, now=NOW + 400)
 chk(close(((H8c.st.get("d") or {}).get(iso(9, 5)) or [None])[0], 162500), "W8 30일 곡선이 나중에 굳힌 값도 다음 실행에 dc 행으로 받음(표식 없이 — 유예 날 수렴)",
     (H8c.st.get("d") or {}).get(iso(9, 5)))
 
-import rabby
+import rabby  # noqa: E402
 RBF = iso(9, 5)
 json.dump({"first": RBF, "d": {RBF: RB}, "wf": {"0xw": RBF}, "n": {RBF: RB}}, open(os.path.join(S, rabby.DAILY_NAME), "w"))
 rb9d = rabby.day_values(rabby.load_state(os.path.join(S, rabby.DAILY_NAME)), dc_days, "2026-10-10", 0.0)
@@ -363,8 +363,8 @@ pre9w = copy.deepcopy(pre8)
 pre9w["d"] = dict(pre9w["d"], **{k9: [102000.0 + rb9d.get(k9, 0.0), None, 0, "dc", 0] for k9 in dc_days})
 pre9w["f"] = {k9: [round(rb9d.get(k9, 0.0), 2) if k9 == RBF else 0.0, FX, [[LBL, RB]] if k9 == RBF else None, "dc"] for k9 in dc_days}
 pre9w["fv"] = histcurve.FLOW_V
-common.atomic_write_json(pth9w, pre9w)
-common.mark_hist_dirty(int(T45))
+statefile.atomic_write_json(pth9w, pre9w)
+histmark.mark_hist_dirty(int(T45))
 H9 = histcurve.HistCurve(path=pth9w, px_path=pxp9w)
 
 

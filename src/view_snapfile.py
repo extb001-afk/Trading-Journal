@@ -7,16 +7,15 @@ import re
 import threading
 import time
 from datetime import datetime
-import common
+import paths
 import db as dbm
+import fsio
 import websnap
-from view_common import KST
+from timeutil import KST
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
-
-SNAPFILE_PATH = os.path.join(common.STATE_DIR, "web_snap_last.bin")
 
 
 SNAPFILE_EVERY = 300
@@ -45,7 +44,7 @@ def _code_sig() -> str:
             with open(os.path.join(d9, n9), "rb") as f9:
                 h.update(n9.encode() + b"\0" + f9.read())
     seen9 = set()
-    for sd in (os.path.join(os.path.dirname(d9), "seed"), os.path.join(common.BASE_DIR, "seed")):
+    for sd in (os.path.join(os.path.dirname(d9), "seed"), os.path.join(paths.BASE_DIR, "seed")):
         rp = os.path.realpath(sd)
         if rp in seen9 or not os.path.isdir(rp):
             continue
@@ -64,16 +63,16 @@ _SIG0 = {}
 
 def _snapfile_sig() -> dict:
     if not _SIG0:
-        with open(common.CONFIG_PATH, "rb") as f9:
+        with open(paths.CONFIG_PATH, "rb") as f9:
             cfg9 = hashlib.sha1(f9.read()).hexdigest()[:16]
         try:
-            st9 = os.stat(common.ENV_PATH)
+            st9 = os.stat(paths.ENV_PATH)
             env9 = [st9.st_mtime_ns, st9.st_size]
         except OSError:
             env9 = None
         _SIG0.update(code=_code_sig(), cfg=cfg9, env=env9)
     out = dict(_SIG0)
-    c9 = dbm.open_db(common.DB_PATH, readonly=True)
+    c9 = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         out["led"] = [list(r) for r in c9.execute("SELECT k, v FROM meta WHERE k IN ('schema_version', 'ext_rebuilt_at') ORDER BY k")]
     finally:
@@ -94,21 +93,15 @@ def _snapfile_save(snap, force=False, still_ok=None):
                 "slim": snap.slim_gz is not None, "parts": [n for n in websnap.PARTS if n in parts], "lens": [len(b) for b in blobs],
                 "h": hashlib.sha1(b"".join(blobs)).hexdigest()}
         hj = json.dumps(head, ensure_ascii=False).encode()
-        tmp = SNAPFILE_PATH + ".tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        with os.fdopen(fd, "wb") as f9:
+        with fsio.atomic_open(paths.state("web_snap_last.bin"), binary=True, dir_fsync=False, makedirs=False) as f9:
             f9.write(_SNAPFILE_MAGIC + str(len(hj)).encode() + b"\n" + hj)
             for b9 in blobs:
                 f9.write(b9)
-            f9.flush()
-            os.fsync(f9.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, SNAPFILE_PATH)
         if still_ok is not None and not still_ok():
             _snapfile_drop()
             return False
         return True
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_snapfile:_snapfile_save", e)
         log.warning("스냅샷 저장본 쓰기 실패(무시): %s", type(e).__name__)
         with _SNAPFILE["lock"]:
@@ -118,7 +111,7 @@ def _snapfile_save(snap, force=False, still_ok=None):
 
 def _snapfile_drop():
     try:
-        os.unlink(SNAPFILE_PATH)
+        os.unlink(paths.state("web_snap_last.bin"))
     except OSError:
         pass
     with _SNAPFILE["lock"]:
@@ -143,11 +136,11 @@ def _aged_last_scan(raw: bytes, elapsed: float):
 
 
 def _snapfile_load(gen: int, stale_max: float):
-    if not os.path.exists(SNAPFILE_PATH):
+    if not os.path.exists(paths.state("web_snap_last.bin")):
         return None
     why = ""
     try:
-        with open(SNAPFILE_PATH, "rb") as f9:
+        with open(paths.state("web_snap_last.bin"), "rb") as f9:
             data = f9.read()
         if not data.startswith(_SNAPFILE_MAGIC):
             raise ValueError("magic")
@@ -198,7 +191,7 @@ def _snapfile_load(gen: int, stale_max: float):
         else:
             snap.slim_gz = snap.parts_gz = None
         return snap
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_snapfile:_snapfile_load", e)
         log.warning("스냅샷 저장본 읽기 실패(지움): %s", type(e).__name__)
         _snapfile_drop()

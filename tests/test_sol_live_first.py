@@ -7,14 +7,14 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _harness as H
+import _harness as H  # noqa: E402
 
 os.fsync = lambda fd: None
 
-import common
-import bf_engine
-import sol_watch
-from inbox import SegmentWriter
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import sol_watch  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 
 chk = H.chk
 NEW = hasattr(sol_watch, "LIVE_FIRST_HOURS")
@@ -211,7 +211,7 @@ class Inbox:
         self.lines = {}
 
     def scan(self):
-        d = os.path.join(common.INBOX_DIR, "sol")
+        d = os.path.join(paths.INBOX_DIR, "sol")
         cnt = {}
         for f in sorted(os.listdir(d)) if os.path.isdir(d) else ():
             for line in open(os.path.join(d, f), encoding="utf-8"):
@@ -229,13 +229,15 @@ class Inbox:
 def setup(name, owners, cfg_sol=None, chain=None, metered=False, months=5):
     sd = os.path.join(H.TMP, name, "state")
     os.makedirs(sd, exist_ok=True)
-    common.rebase_state(sd)
+    paths.rebase_state(sd)
     bf_engine.HELIUS = HelStub() if metered else _HEL0
     sol9 = {"rpc": "https://sol-rpc.mock.invalid", "poll_sec": 60, "stake": False, "ata_every_cycles": 5, "addr_pace_sec": 0}
     sol9.update(cfg_sol or {})
     cfg = {"wallets": [{"type": "sol", "chain": "sol", "address": o} for o in owners], "backfill_months": months, "sol": sol9}
     rpc = MockRpc(chain, metered=metered)
-    sol_watch.Rpc = lambda c9, _r=rpc: _r
+    for _mn9 in [m9 for m9 in sys.modules if m9.startswith("sol_")]:
+        if hasattr(sys.modules[_mn9], "Rpc"):
+            sys.modules[_mn9].Rpc = lambda c9, _r=rpc: _r
     return cfg, rpc
 
 
@@ -243,7 +245,7 @@ _HEL0 = bf_engine.HELIUS
 
 
 def watcher(cfg, owners):
-    return sol_watch.SolWatcher(cfg, owners, SegmentWriter(os.path.join(common.INBOX_DIR, "sol")))
+    return sol_watch.SolWatcher(cfg, owners, SegmentWriter(os.path.join(paths.INBOX_DIR, "sol")))
 
 
 def run(wt, secs, ib, errs, poll=60, each=None):
@@ -253,7 +255,7 @@ def run(wt, secs, ib, errs, poll=60, each=None):
         t0 = clock.time()
         try:
             wt.cycle()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             errs.append(f"{type(e).__name__}: {e}"[:200])
         durs.append(clock.time() - t0)
         ib.scan()
@@ -398,7 +400,7 @@ sd = os.path.join(H.TMP, "E", "state")
 os.makedirs(sd, exist_ok=True)
 pre_cur = {OE: "E-base", "_slot:" + OE: slot_of(T0 - 5 * 86400 - 600), OU: "U-base", "_slot:" + OU: slot_of(T0 - 5 * 86400 - 600),
            "_cov_ts:" + OE: int(T0 - 150 * 86400), "_cov_ts:" + OU: int(T0 - 150 * 86400), "_synced_at": int(T0 - 5 * 86400)}
-common.atomic_write_json(os.path.join(sd, "cursor_sol.json"), pre_cur)
+statefile.atomic_write_json(os.path.join(sd, "cursor_sol.json"), pre_cur)
 cfg, rpc = setup("E", [OE, OU], chain=cE)
 wt = watcher(cfg, [OE, OU])
 ib, errs = Inbox(), []
@@ -426,7 +428,7 @@ cF.sol_in(O2, "F-b", T0 - 200)
 cF.sol_in(O1, "F-c", T0 - 100)
 sd = os.path.join(H.TMP, "F", "state")
 os.makedirs(sd, exist_ok=True)
-common.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {O1: "base-" + O1[:6], O2: "base-" + O2[:6], "_cov_ts:" + O1: int(T0 - 150 * 86400),
+statefile.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {O1: "base-" + O1[:6], O2: "base-" + O2[:6], "_cov_ts:" + O1: int(T0 - 150 * 86400),
                                                                 "_cov_ts:" + O2: int(T0 - 150 * 86400)})
 cfg, rpc = setup("F", [O1, O2], chain=cF)
 wt = watcher(cfg, [O1, O2])
@@ -434,7 +436,7 @@ ib, errs = Inbox(), []
 run(wt, 1, ib, errs)
 order = [h for h, _t in sorted(ib.first.items(), key=lambda kv: kv[1])]
 recs = []
-d9 = os.path.join(common.INBOX_DIR, "sol")
+d9 = os.path.join(paths.INBOX_DIR, "sol")
 for f in sorted(os.listdir(d9)):
     recs += [json.loads(x)["txhash"] for x in open(os.path.join(d9, f), encoding="utf-8") if x.strip()]
 chk(recs == ["F-a", "F-b", "F-c"] and cur(wt).get(O1) == "F-c" and cur(wt).get(O2) == "F-b" and isinstance(cur(wt).get("_synced_at"), int),
@@ -450,7 +452,7 @@ wt = watcher(cfg, [O3])
 ib, errs = Inbox(), []
 run(wt, 1, ib, errs)
 recs = []
-d9 = os.path.join(common.INBOX_DIR, "sol")
+d9 = os.path.join(paths.INBOX_DIR, "sol")
 for f in sorted(os.listdir(d9)):
     recs += [json.loads(x)["txhash"] for x in open(os.path.join(d9, f), encoding="utf-8") if x.strip()]
 chk(len(recs) == 21 and recs[-1] == "F2-new", "[F] live_first_hours 0 = 종전 순서(오래된 것부터 · 최신이 끝)", {"끝": recs[-1:] if recs else None})
@@ -466,7 +468,7 @@ for i in range(2499):
 cG.tok_in(OG, ZG, "G-tok-new", T0 - 1200)
 sd = os.path.join(H.TMP, "G", "state")
 os.makedirs(sd, exist_ok=True)
-common.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {OG: "G-base", "_cov_ts:" + OG: int(T0 - 150 * 86400)})
+statefile.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {OG: "G-base", "_cov_ts:" + OG: int(T0 - 150 * 86400)})
 cfg, rpc = setup("G", [OG], chain=cG, cfg_sol={"sig_spool_pages": 1})
 wt = watcher(cfg, [OG])
 ib, errs = Inbox(), []
@@ -492,7 +494,7 @@ for i in range(1500):
     cH.sol_in(KH, b58(f"H-stk-{i}"), T0 - 100 * 86400 + i * 5000)
 sd = os.path.join(H.TMP, "H", "state")
 os.makedirs(sd, exist_ok=True)
-common.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {OH: "H-base", "_cov_ts:" + OH: int(T0 - 150 * 86400),
+statefile.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {OH: "H-base", "_cov_ts:" + OH: int(T0 - 150 * 86400),
                                                                 "_stk:" + KH: {"w": OH, "t0": int(T0 - 150 * 86400), "rwd_next": 0, "first": None}})
 cfg, rpc = setup("H", [OH], chain=cH)
 wt = watcher(cfg, [OH])
@@ -542,7 +544,7 @@ txj = {"slot": slot_of(T0 - 600), "blockTime": int(T0 - 600),
 cJ.add([PJ, NJ], "J-pn", T0 - 600, txj)
 sd = os.path.join(H.TMP, "J", "state")
 os.makedirs(sd, exist_ok=True)
-common.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {PJ: "J-base", "_cov_ts:" + PJ: int(T0 - 150 * 86400)})
+statefile.atomic_write_json(os.path.join(sd, "cursor_sol.json"), {PJ: "J-base", "_cov_ts:" + PJ: int(T0 - 150 * 86400)})
 cfg, rpc = setup("J", [PJ], chain=cJ)
 wt = watcher(cfg, [PJ])
 ib, errs = Inbox(), []
@@ -550,7 +552,7 @@ run(wt, 1, ib, errs)
 wt.owners.append(NJ)
 run(wt, 10 * 60, ib, errs)
 recsJ = []
-d9 = os.path.join(common.INBOX_DIR, "sol")
+d9 = os.path.join(paths.INBOX_DIR, "sol")
 for f in sorted(os.listdir(d9)):
     recsJ += [json.loads(x) for x in open(os.path.join(d9, f), encoding="utf-8") if x.strip()]
 rp = [r for r in recsJ if r.get("txhash") == "J-pn" and r.get("repersp")]
@@ -585,7 +587,7 @@ cK.atas[OK_] = []
 run(wt, 90 * 60, ib, errs, each=_k_each)
 got = ib.scan()
 chk(0 < part_k < 800 and allK <= set(got) and YK not in cur(wt) and ("_fb_wait:" + YK) not in cur(wt) and not bad_stamp,
-    "[K] 닫힌 뒤에도 남은 이력 전부 받고 퇴역 · 다 받기 전 동기화 도장 0(코덱스 so494)",
+    "[K] 닫힌 뒤에도 남은 이력 전부 받고 퇴역 · 다 받기 전 동기화 도장 0",
     {"첫 사이클": part_k, "빠짐": len(allK - set(got)), "커서": YK in cur(wt), "대기 표식": ("_fb_wait:" + YK) in cur(wt), "도장 위반 초": bad_stamp[:3]})
 
 print("— L 최근 구간 끔(live_first_hours 0) · 헬리우스 · 남은 옛 기록 몫 500 < 첫 백필 1,000 → 종전처럼 차례 대기")
@@ -600,7 +602,7 @@ wt = watcher(cfg, [OL])
 ib, errs = Inbox(), []
 run(wt, 10 * 60, ib, errs)
 fill_txL = sum(1 for m, _k, kd in cL.calls if m == "getTransaction" and kd == "fill")
-chk(fill_txL == 0 and OL not in cur(wt), "[L] 끈 모드 = 종전 몫 판정(첫 백필 건수 = 안 보낸 전부 · 몫 우회 0 · 코덱스 so494)", {"fill 상세": fill_txL})
+chk(fill_txL == 0 and OL not in cur(wt), "[L] 끈 모드 = 종전 몫 판정(첫 백필 건수 = 안 보낸 전부 · 몫 우회 0)", {"fill 상세": fill_txL})
 
 print("— M 새 설치 · 토큰 계정 20개 × 최근 100건(최근 구간만 2,000건) — 최근 구간도 시간 상한 · 주소별 최신 먼저 · 실시간 확인 계속")
 clock.t = T0
@@ -623,7 +625,7 @@ got = ib.scan()
 tops = [f"M-{j}-99" for j in range(20)]
 latM = ib.first.get("M-live", 1e18) - (T0 + 150)
 chk(durM and durM[0] <= 200 and all(t in got and ib.first[t] - T0 <= durM[0] + 1 for t in tops),
-    "[M] 첫 사이클 ≤ 200초 · 그 안에 토큰 계정마다 가장 새 입금 먼저(코덱스 so494)", {"첫 사이클 초": round(durM[0], 1) if durM else None,
+    "[M] 첫 사이클 ≤ 200초 · 그 안에 토큰 계정마다 가장 새 입금 먼저", {"첫 사이클 초": round(durM[0], 1) if durM else None,
                                                                                 "최신 방출": sum(1 for t in tops if t in got)})
 chk(latM <= 240, "[M] 최근 구간이 많아도 그동안 들어온 새 입금 4분 안", {"초": round(latM, 1)})
 chk(durM and not [t for t in auditM if t <= T0 + durM[0] + 1], "[M] 끊어 받은 전체 사이클엔 publicnode 대조 안 함(안 보낸 서명 = 누락 오판 → 6시간 끊김 방지)",
@@ -651,5 +653,189 @@ itW = wt.progress.items.get("sol") or {}
 chk(len(ib.scan()) == 376 and OW in wt.cursor and "parse" in phW, "[W] 백필 완주(376건 · 커서) · 도중엔 진행 중(parse) 표시", {"방출": len(ib.scan()), "오류": errs[:1]})
 chk(itW.get("phase") == "live", "[W] 마지막 조각이 50건 이하여도 진행 항목이 '끝(live)'으로 닫힘(멈춤 표시로 남지 않음)",
     {k: itW.get(k) for k in ("phase", "done", "total")})
+
+
+def check9(msg, ok, extra=None):
+    H.chk(ok, msg, extra)
+
+
+print("— X 영구 안 읽히는 서명 하나 → 격리 뒤 나머지 진행 · Y 두 ATA 열거 사이에 생겼다 닫힌 토큰 계정")
+none_set = set()
+_orig_call = MockRpc.call
+
+
+def call2(self, method, params, timeout=25):
+    if method == "getTransaction" and params[0] in none_set:
+        self.c.calls.append((method, params[0], self.kind()))
+        return None
+    return _orig_call(self, method, params, timeout)
+
+
+MockRpc.call = call2
+clock.t = T0
+c = Chain()
+O, P = b58("S1-O"), b58("S1-P")
+c.sol_in(O, "O-old", T0 - 86400)
+c.sol_in(P, "P-old", T0 - 86400)
+cfg, rpc = setup("S1", [O, P], chain=c, cfg_sol=None)
+wt = watcher(cfg, [O, P])
+ib, errs = Inbox(), []
+run(wt, 300, ib, errs)
+check9("[X] 평소 사이클 = 격리·실패 표식 없음 · 도장", isinstance(cur(wt).get("_synced_at"), int) and not cur(wt).get("_quarantine")
+      and not cur(wt).get("_detail_fail"), {k: v for k, v in cur(wt).items() if k.startswith("_q") or k.startswith("_detail_f")})
+t1 = clock.time()
+c.sol_in(O, "O-s1", t1 + 10)
+c.sol_in(O, "O-s2-poison", t1 + 20)
+none_set.add("O-s2-poison")
+c.sol_in(O, "O-s3", t1 + 30)
+c.sol_in(P, "P-p1", t1 + 40)
+run(wt, 3600, ib, errs)
+got = ib.scan()
+check9("[X] 한도 전(1시간) = 종전처럼 멈춤(격리 안 함 · 커서 보류)", "O-s3" not in got and not cur(wt).get("_quarantine")
+      and (cur(wt).get("_detail_fail") or {}).get("O-s2-poison", [0])[0] > 0, sorted(got))
+run(wt, 6 * 3600, ib, errs)
+got = ib.scan()
+pp = paths.state("pending_poison.jsonl")
+pl = [json.loads(x) for x in open(pp)] if os.path.exists(pp) else []
+check9("[X] 한도 넘음 = 격리(pending_poison.jsonl · 커서 _quarantine) · 나머지 방출(같은 지갑 뒤 서명 · 다른 지갑)",
+      {"O-s1", "O-s3", "P-p1"} <= set(got) and "O-s2-poison" not in got and "O-s2-poison" in (cur(wt).get("_quarantine") or {})
+      and any(x.get("txhash") == "O-s2-poison" and x.get("chain") == "sol" for x in pl), {"got": sorted(got), "q": list(cur(wt).get("_quarantine") or {}), "errs": errs[:2]})
+rows_o = c.sigs[O]
+check9("[X] 커서 전진(두 지갑 최신 서명) · 동기화 도장 · 실패 표식 지움",
+      str(cur(wt).get(O) or "").startswith("O-s3") and str(cur(wt).get(P) or "").startswith("P-p1") and isinstance(cur(wt).get("_synced_at"), int)
+      and "O-s2-poison" not in (cur(wt).get("_detail_fail") or {}), {"O": cur(wt).get(O), "P": cur(wt).get(P)})
+hb9 = (bf_engine.health("sol").src.get("sol") or {})
+check9("[X] 헬스 사실 quarantined = 1", hb9.get("quarantined") == 1, hb9)
+import health  # noqa: E402
+UN9 = ["tj-sol", "tj-core", "tj-web"]
+HS9 = health.settings({"health": {"units": UN9}})
+
+
+def ev_sol(src):
+    ob9 = {"now": clock.time(), "pm2": {u: {"status": "online", "restarts": 0, "pid": 1} for u in UN9}, "bal_mem": {}, "prev_inc": {}, "sources": [],
+           "hb": {"sol": {"sources": {"sol": src}}}}
+    return {c9["id"]: c9 for c9 in health.evaluate(ob9, HS9)}.get("sol:poison")
+
+
+e1, e0 = ev_sol({"quarantined": 1, "primary": "ok"}), ev_sol({"primary": "ok"})
+check9("[X] 헬스 카드 sol:poison = 격리 있음 주의(warn) · 평소 = 카드 없음", (e1 or {}).get("level") == "warn" and e0 is None, (e1, e0))
+n_before = c.n_tx("O-s2-poison")
+run(wt, 3600, ib, errs)
+check9("[X] 격리 뒤엔 사이클마다 다시 읽지 않음(하루 1회만)", c.n_tx("O-s2-poison") - n_before <= 1, c.n_tx("O-s2-poison") - n_before)
+none_set.discard("O-s2-poison")
+run(wt, 25 * 3600, ib, errs, poll=600)
+got = ib.scan()
+check9("[X] 읽히게 되면 하루 뒤 재시도 = 방출 · 격리 해제", got.get("O-s2-poison") == 1 and not (cur(wt).get("_quarantine") or {}),
+      {"got": got.get("O-s2-poison"), "q": cur(wt).get("_quarantine")})
+check9("[X] 같은 서명 두 번 방출 없음", all(v == 1 for v in got.values()), {k: v for k, v in got.items() if v != 1})
+clock.t = T0 + 20 * 86400
+c3 = Chain()
+O3, P3 = b58("Z-O"), b58("Z-P")
+tz = clock.t - 3 * 86400
+c3.sol_in(O3, "Z-O-old", tz - 86400)
+c3.sol_in(P3, "Z-P-old", tz - 86400)
+c3.add([O3, P3], "Z-shared", tz, {"slot": slot_of(tz), "blockTime": int(tz),
+       "meta": {"fee": 5000, "err": None, "preBalances": [5 * 10 ** 9, 10 ** 9], "postBalances": [4 * 10 ** 9 - 5000, 2 * 10 ** 9],
+                "preTokenBalances": [], "postTokenBalances": [], "innerInstructions": []},
+       "transaction": {"message": {"accountKeys": [{"pubkey": O3, "signer": True, "writable": True}, {"pubkey": P3, "signer": False, "writable": True}],
+                                   "instructions": [{"programId": "11111111111111111111111111111111"}]}}})
+cfg3, _rpc3 = setup("Z1", [O3], chain=c3)
+wt3 = watcher(cfg3, [O3])
+ib3, errs3 = Inbox(), []
+run(wt3, 300, ib3, errs3)
+check9("[X] 준비: O 관점으로 공유 서명 방출", ib3.scan().get("Z-shared") == 1, ib3.scan())
+cfg3["wallets"].append({"type": "sol", "chain": "sol", "address": P3})
+wt3b = watcher(cfg3, [O3, P3])
+none_set.add("Z-shared")
+run(wt3b, 7 * 3600, ib3, errs3)
+q3 = (cur(wt3b).get("_quarantine") or {}).get("Z-shared") or {}
+check9("[X] 새 관점 다시 읽기 실패 = 격리(새 관점 표시) · P 커서 확정(진행 안 막힘)", q3.get("new_view") is True and P3 in cur(wt3b),
+       {"q": q3, "P": cur(wt3b).get(P3)})
+none_set.discard("Z-shared")
+run(wt3b, 25 * 3600, ib3, errs3, poll=600)
+zrecs = []
+d3 = os.path.join(paths.INBOX_DIR, "sol")
+for f3 in sorted(os.listdir(d3)):
+    for ln3 in open(os.path.join(d3, f3), encoding="utf-8"):
+        try:
+            r3 = json.loads(ln3)
+        except ValueError:
+            continue
+        if r3.get("txhash") == "Z-shared":
+            zrecs.append(r3)
+check9("[X] 하루 뒤 재시도 = 새 관점으로 다시 보냄(repersp) · 격리 해제", len(zrecs) == 2 and zrecs[-1].get("repersp") is True
+       and not (cur(wt3b).get("_quarantine") or {}).get("Z-shared"), [(x.get("repersp"), len(x.get("deltas") or [])) for x in zrecs])
+MockRpc.call = _orig_call
+
+STK3 = b58("Z-stake")
+wt3b.cursor[STK3] = {}
+wt3b.cursor["_stk:" + STK3] = {"w": O3, "t0": int(tz) - 86400, "rwd_next": None, "first": [slot_of(tz), 150 * 10 ** 9], "open": False}
+wt3b.cursor["_quarantine"] = {"Z-held": {"t": int(clock.t), "new_view": False}}
+wt3b._stake_open(True)
+check9("[X] 격리 남음 = 스테이크 opening 보류(방출 0 · open 미확정)",
+       ("stakeopen:" + STK3) not in wt3b.emitted and wt3b.cursor["_stk:" + STK3].get("open") is False,
+       {"open": wt3b.cursor["_stk:" + STK3].get("open")})
+wt3b.cursor.pop("_quarantine", None)
+wt3b._stake_open(True)
+check9("[X] 격리 0 = 종전처럼 opening 확정(방출 1 · open)",
+       ("stakeopen:" + STK3) in wt3b.emitted and wt3b.cursor["_stk:" + STK3].get("open") is True,
+       {"open": wt3b.cursor["_stk:" + STK3].get("open")})
+wt3b.cursor.pop("_stk:" + STK3, None)
+wt3b.cursor.pop(STK3, None)
+
+
+def tok_tx(keys, rows_pre, rows_post, ts):
+    return {"slot": slot_of(ts), "blockTime": int(ts),
+            "meta": {"fee": 5000, "err": None, "preBalances": [10 ** 9] * len(keys), "postBalances": [10 ** 9 - (5000 if i == 0 else 0) for i in range(len(keys))],
+                     "preTokenBalances": rows_pre, "postTokenBalances": rows_post, "innerInstructions": []},
+            "transaction": {"message": {"accountKeys": [{"pubkey": k, "signer": i == 0, "writable": True} for i, k in enumerate(keys)],
+                                        "instructions": [{"programId": TOKEN_PROG}]}}}
+
+
+def row(ix, owner, amt):
+    return {"accountIndex": ix, "mint": MINT, "owner": owner, "uiTokenAmount": {"amount": str(amt), "decimals": 6}}
+
+
+clock.t = T0 + 40 * 86400
+c2 = Chain()
+O2, A2 = b58("S2-O"), b58("S2-ATA")
+c2.sol_in(O2, "O2-old", clock.t - 86400)
+cfg2, rpc2 = setup("S2", [O2], chain=c2)
+wt2 = watcher(cfg2, [O2])
+ib2, errs2 = Inbox(), []
+run(wt2, 130, ib2, errs2)
+u1 = clock.time() + 5
+c2.add([O2, A2], "T1-create+dep", u1, tok_tx([X, A2, O2], [], [row(1, O2, 100)], u1))
+c2.add([A2], "T2-dep-ata-only", u1 + 20, tok_tx([X, A2], [row(1, O2, 100)], [row(1, O2, 150)], u1 + 20))
+c2.add([O2, A2], "T3-out", u1 + 40, tok_tx([O2, A2], [row(1, O2, 150)], [row(1, O2, 0)], u1 + 40))
+c2.add([O2, A2], "T4-close", u1 + 50, tok_tx([O2, A2], [row(1, O2, 0)], [], u1 + 50))
+
+
+def each2():
+    c2.atas[O2] = [A2] if u1 <= clock.time() < u1 + 50 else []
+
+
+run(wt2, 20 * 60, ib2, errs2, each=each2)
+got2 = ib2.scan()
+check9("[Y] 열거 사이에 닫힌 토큰 계정의 계정만 낀 입금(T2)도 방출 · 네 건 모두 한 번씩",
+      {"T1-create+dep", "T2-dep-ata-only", "T3-out", "T4-close"} <= set(got2) and all(v == 1 for v in got2.values()),
+      {"got": sorted(got2), "errs": errs2[:2]})
+check9("[Y] 첫 동기화 끝 = 표식(_tbseen) 지움 · 닫힌 계정 퇴역(커서에서 빠짐)",
+      not any(k.startswith("_tbseen:") for k in cur(wt2)) and A2 not in cur(wt2), [k for k in cur(wt2) if not k.startswith("_pnv")][:12])
+u2 = clock.time() + 5
+c2.add([O2, A2], "T5-recreate+dep", u2, tok_tx([X, A2, O2], [], [row(1, O2, 70)], u2))
+c2.add([A2], "T6-dep-ata-only", u2 + 20, tok_tx([X, A2], [row(1, O2, 70)], [row(1, O2, 90)], u2 + 20))
+c2.add([O2, A2], "T7-out", u2 + 40, tok_tx([O2, A2], [row(1, O2, 90)], [row(1, O2, 0)], u2 + 40))
+c2.add([O2, A2], "T8-close", u2 + 50, tok_tx([O2, A2], [row(1, O2, 0)], [], u2 + 50))
+
+
+def each3():
+    c2.atas[O2] = [A2] if u2 <= clock.time() < u2 + 50 else []
+
+
+run(wt2, 20 * 60, ib2, errs2, each=each3)
+got3 = ib2.scan()
+check9("[Y] 퇴역한 같은 주소 재사용(열거 사이 열림·닫힘)의 계정만 낀 입금(T6)도 방출 · 한 번씩",
+       {"T5-recreate+dep", "T6-dep-ata-only", "T7-out", "T8-close"} <= set(got3) and all(v == 1 for v in got3.values()), sorted(got3))
 
 H.finish()

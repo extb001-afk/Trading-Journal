@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import address_codec as ac
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
+import address_codec as ac  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
 
 chk = T.chk
 A, B = N.OWN["tron"]

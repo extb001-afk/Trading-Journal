@@ -1,7 +1,9 @@
 """SQLite ledger schema and access helpers."""
 import sqlite3
+import time
+import uuid
 
-import common
+import paths
 
 SCHEMA_VERSION = 2
 
@@ -37,6 +39,32 @@ def data_rev_refusal(conn):
         return (f"원장이 이 코드보다 새 데이터 변환을 거쳤어요(원장 개정 {v} > 코드 {DATA_REV}) — 코드를 최신으로 올리세요(README '업데이트'). "
                 "옛 코드를 써야 하면 그 변환 전 백업으로 되돌리세요(python3 tools/ledger_restore.py list). 원장은 그대로 뒀어요")
     return None
+
+
+LEDGER_EPOCH_K = "ledger_epoch"
+DAILY_INVAL_K = "cache_inval:daily"
+
+
+def daily_inval_state(conn: sqlite3.Connection):
+    try:
+        rows = conn.execute("SELECT k, v FROM meta WHERE k IN (?, ?)", (LEDGER_EPOCH_K, DAILY_INVAL_K)).fetchall()
+    except sqlite3.Error:
+        return None
+    kv = {str(r[0]): str(r[1]) for r in rows}
+    return kv.get(LEDGER_EPOCH_K, ""), kv.get(DAILY_INVAL_K)
+
+
+def bump_daily_inval(conn: sqlite3.Connection, now: float = None) -> None:
+    ms = int((time.time() if now is None else float(now)) * 1000)
+    conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET"
+                 " v = CAST(MAX(CAST(meta.v AS INTEGER) + 1, CAST(excluded.v AS INTEGER)) AS TEXT)", (DAILY_INVAL_K, str(ms)))
+
+
+def renew_ledger_epoch(conn: sqlite3.Connection) -> str:
+    epoch = uuid.uuid4().hex
+    conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (LEDGER_EPOCH_K, epoch))
+    return epoch
+
 
 DDL = [
     "PRAGMA journal_mode=WAL",
@@ -149,9 +177,17 @@ DDL = [
 ]
 
 
+def connect(*args, **kwargs) -> sqlite3.Connection:
+    return sqlite3.connect(*args, **kwargs)
+
+
+def open_ro(path: str, timeout: float = 10, immutable: bool = False) -> sqlite3.Connection:
+    return connect(paths.sqlite_ro_uri(path, immutable=immutable), uri=True, timeout=timeout)
+
+
 def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
     if readonly:
-        conn = sqlite3.connect(common.sqlite_ro_uri(path), uri=True, timeout=10)
+        conn = open_ro(path, timeout=10)
     else:
         conn = sqlite3.connect(path, timeout=30)
         has_meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
@@ -169,6 +205,7 @@ def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
             conn.execute(ddl)
         if row is None:
             conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES (?, ?)", (LEDGER_EPOCH_K, uuid.uuid4().hex))
         conn.commit()
     conn.row_factory = sqlite3.Row
     return conn

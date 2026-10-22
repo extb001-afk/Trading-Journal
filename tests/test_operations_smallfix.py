@@ -10,8 +10,8 @@ import io
 import json
 import os
 
-import common
-import settings_store as ss
+import paths
+import settings_store as ss, runner_fp
 import chain_registry as reg
 import btc_descriptor as bd
 import btc_watch as bw
@@ -32,7 +32,7 @@ def cfg(*rows):
 
 
 def fp(unit, config):
-    return ss.unit_inputs(unit, config, {})[2]
+    return runner_fp.unit_inputs(unit, config, {})[2]
 
 
 def old_chain_fp(unit, config):
@@ -40,17 +40,17 @@ def old_chain_fp(unit, config):
     sp = reg.spec(unit)
     key = os.environ.get(sp.key_env, "") if sp.key_env else ""
     kh = hashlib.sha256(key.encode()).hexdigest()[:8] if key else ""
-    return ss._h([keys, (config.get(reg.CFG_CHAIN_KEY) or {}).get(unit), kh])
+    return runner_fp._h([keys, (config.get(reg.CFG_CHAIN_KEY) or {}).get(unit), kh])
 
 
 def old_core_fp(config):
     import nodekeys
     parts = [[], config.get("exchange_addresses"), "", nodekeys.fingerprint(),
              config.get("backfill_months"), config.get("backfill_full_history")]
-    nev = ss._nonevm_core_view(config)
+    nev = runner_fp._nonevm_core_view(config)
     if nev:
         parts += [nev, [(c, old_chain_fp(c, config)) for c in sorted({c for c, _ in nev})]]
-    return ss._h(parts)
+    return runner_fp._h(parts)
 
 
 for unit in ("btc", "core"):
@@ -100,8 +100,8 @@ with open(cp, "w", encoding="utf-8") as f:
     json.dump(source, f)
 with open(os.path.join(T.TMP, ".env"), "w", encoding="utf-8") as f:
     f.write("SYNTHETIC_SECRET=not_backed_up\n")
-lb.backup_files("20261011", common.STATE_DIR, cp)
-subset_path = os.path.join(lb.BACKUP_DIR, "files_20261011", "config_subset.json")
+lb.backup_files("20261011", paths.STATE_DIR, cp)
+subset_path = os.path.join(paths.state("backups"), "files_20261011", "config_subset.json")
 with open(subset_path, encoding="utf-8") as f:
     subset = json.load(f)
 T.chk(subset.get("chain_wallets") == wallets, "backup preserves all registered chain wallets and HD fields")
@@ -112,8 +112,8 @@ T.chk(os.stat(subset_path).st_mode & 0o777 == 0o600, "configuration backup retai
 T.chk(not os.path.exists(os.path.join(os.path.dirname(subset_path), ".env")), "backup still excludes .env")
 with open(cp, "w", encoding="utf-8") as f:
     json.dump(BASE, f)
-lb.backup_files("20261012", common.STATE_DIR, cp)
-with open(os.path.join(lb.BACKUP_DIR, "files_20261012", "config_subset.json"), encoding="utf-8") as f:
+lb.backup_files("20261012", paths.STATE_DIR, cp)
+with open(os.path.join(paths.state("backups"), "files_20261012", "config_subset.json"), encoding="utf-8") as f:
     legacy = json.load(f)
 T.chk(legacy == {"wallets": []}, "absent chain_wallets stays absent in legacy backup")
 

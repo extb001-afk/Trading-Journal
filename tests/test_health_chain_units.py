@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import health
-import chain_registry as reg
-import address_codec as ac
+import config, paths, statefile  # noqa: E402
+import health  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import address_codec as ac  # noqa: E402
 
 NOW = time.time()
-S = common.STATE_DIR
+S = paths.STATE_DIR
 W = "0x" + "a1" * 20
 A = N.OWN["tron"][0]
 reg.FORCE_AVAILABLE.add("tron")
@@ -31,12 +31,12 @@ def write_cfg(tron=True, health_cfg=None):
         cfg["chain_wallets"] = [{"chain": "tron", "network": "mainnet", "address": ac.tron_display(A), "label": "트론 1"}]
     if health_cfg:
         cfg["health"] = health_cfg
-    json.dump(cfg, open(common.CONFIG_PATH, "w"))
-    common.atomic_write_json(os.path.join(S, "cursor_evm_eth.json"), {W: 100, "_synced_at": NOW - 30})
+    json.dump(cfg, open(paths.CONFIG_PATH, "w"))
+    statefile.atomic_write_json(os.path.join(S, "cursor_evm_eth.json"), {W: 100, "_synced_at": NOW - 30})
 
 
 def run(pm2_units):
-    c = common.load_config()
+    c = config.load_config()
     h = health.settings(c)
     h["log_dir"] = os.path.join(T.TMP, "logs")
     pm2 = None if pm2_units is None else {u: {"status": "online", "restarts": 0, "pid": 100 + i, "uptime": NOW - 5000, "out": None, "err": None,

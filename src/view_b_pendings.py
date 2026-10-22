@@ -1,6 +1,6 @@
 from __future__ import annotations
 import acct_norm
-import common
+import config, logs, paths, statefile
 import copy
 import depaddr
 import json
@@ -8,7 +8,7 @@ import lpchain
 import lpdec
 import lpsol
 import os
-import pricing
+import token_tables
 import rabby
 import re
 import spamguard
@@ -18,8 +18,7 @@ from decimal import Decimal
 from decimal import InvalidOperation
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
-from view_common import LP_POS_PATH
+from timeutil import KST
 from view_common import STABLE_GROUPS
 from view_common import TRANSIT_ASK_DAYS
 from view_common import _ex_stable_sym
@@ -32,179 +31,301 @@ from view_pending import _of_linked_txs
 from view_pending import _tx_norm
 from view_text import _scam_name
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _unk_cands(gid, sym, px, *, G, resolve_origin, wallet_label):
+    srcs = list((G.get(gid) or {}).get("unk_src") or [])
+    if not srcs:
+        return []
+    srcs.sort(key=lambda x: -x["qty"])
+    tot = sum(x["qty"] for x in srcs) or 1.0
+    expanded = []
+    for x in srcs[:6]:
+        expanded.append((x, 0))
+        ug = G.get(x.get("up_gid")) if x.get("up_gid") is not None else None
+        for y in sorted((ug or {}).get("unk_src") or [], key=lambda z: -z["qty"])[:2]:
+            expanded.append((y, 1))
+            ug2 = G.get(y.get("up_gid")) if y.get("up_gid") is not None else None
+            for z in sorted((ug2 or {}).get("unk_src") or [], key=lambda w: -w["qty"])[:1]:
+                expanded.append((z, 2))
+    out = []
+    seen = set()
+    for x, lvl in expanded:
+        x = x if x.get("via") else resolve_origin(x)
+        key_x = (lvl > 0, x.get("ref"), x.get("kind"))
+        if key_x in seen:
+            continue
+        seen.add(key_x)
+        if len(out) >= 12:
+            break
+        ref = x.get("ref") or ""; frm = x.get("from"); dt = datetime.fromtimestamp(x["ts"], KST).strftime("%m-%d %H:%M")
+        short = (ref[:8] + "…" + ref[-4:]) if len(ref) > 14 else ref
+        if x.get("via"):
+            who = f" ← {x['via']}"; copy = ref; btn = "참조 복사" if ref else "—"
+        elif frm and frm in wallet_label:
+            who = f" ← 내 지갑 {wallet_label[frm]} ({frm[:6]}…{frm[-4:]})"; copy = frm; btn = "주소 복사"
+        elif frm:
+            who = f" ← 외부 지갑 {frm[:6]}…{frm[-4:]} (미등록 · 내 지갑이면 설정에 등록)"; copy = frm; btn = "주소 복사"
+        elif ref.startswith("0x") and len(ref) == 66 and x.get("oc_na"):
+            who = (" ← 발신 조회 불가 (추적 체인에서 찾지 못함 · txid 로 직접 확인)" if x["oc_na"] == "notfound"
+                   else f" ← 발신 조회 불가 (네트워크 미지원: {x['oc_na']} · txid 로 직접 확인)")
+            copy = ref; btn = "txid 복사"
+        elif ref.startswith("0x") and len(ref) == 66 and x.get("oc_fail"):
+            who = f" ← 발신 조회 실패(재시도 {datetime.fromtimestamp(x['oc_fail'], KST).strftime('%m-%d')})"; copy = ref; btn = "txid 복사"
+        elif ref.startswith("0x") and len(ref) == 66:
+            who = " ← 발신 지갑 조회 중"; copy = ref; btn = "txid 복사"
+        else:
+            who = ""; copy = ref; btn = "참조 복사" if ref else "—"
+        val = x["qty"] * float(px or 0)
+        sym_x = (G.get(x.get("up_gid")) or {}).get("sym") if lvl and x.get("up_gid") is not None else sym
+        ov_txt = ""
+        if x.get("ov"):
+            ov_txt = (f" · ★원가 지정 ${x['ov']['unit']:,.6g}/개 적용★" if x["ov"].get("mode") == "unit"
+                      else f" · ★당시 시세 ${x['ov']['unit']:,.6g}/개 적용★")
+        out.append({"kind": "src", "label": ("↳ " * lvl) + (f"상류({sym_x or sym}) " if lvl else "") + f"{dt} {x['kind']} {x['qty']:,.4f}" + (f" · {short}" if short else "") + who
+                     + (f" · 지금 평가 ${val:,.0f}" if (val >= 1 and not lvl) else "") + ov_txt,
+                     "score": (x.get("chain") or x.get("ex") or "—"),
+                     "pct": (0 if lvl else min(100, int(round(100.0 * x["qty"] / tot)))),
+                     "copy": copy, "btn": btn})
+    return out
+
+
+def _leg_scam(r, *, quarantined, spoof_keys):
+    return ((r["group_id"] or -r["asset_id"]) in quarantined
+            or (r["source_ns"], r["source_id"], r["asset_id"]) in spoof_keys or int(r["qty_base"]) == 0)
+
+
+def _grp_weak(r, *, quarantined, spoof_keys, G):
+    gid = r["group_id"] or -r["asset_id"]
+    if gid not in quarantined or (r["source_ns"], r["source_id"], r["asset_id"]) in spoof_keys or int(r["qty_base"]) == 0:
+        return None
+    rr = str((G.get(gid) or {}).get("risk_reason") or "")
+    if rr.startswith(("가짜 ", "사칭 ", "확인 필요")) or "유저 확정" in rr or "스캠 확증" in rr \
+            or _scam_name((G.get(gid) or {}).get("sym") or r["symbol"]):
+        return None
+    return rr or "실매수 이력 없는 유입"
+
+
+def _dep_net(a, ch=None, *, cr):
+    c = ch if cr.is_nonevm(ch) else cr.key_chain(a)
+    return cr.display_name(c) if c else None
+
+
+def _lp_tok_px(ch, addr, sym, *, lpa, tok_gid, live_px, sb):
+    a = lpa(ch, addr)
+    if token_tables.STABLE_CAS.get(ch, {}).get(a) or (ch == "sol" and token_tables.STABLE_MINTS.get(a)):
+        return 1.0
+    if ch == "sol" and a == lpsol.WSOL:
+        a = lpchain.ZERO
+    gid = tok_gid.get((ch, a.lower()))
+    if gid is not None and live_px.get(gid):
+        return float(live_px[gid])
+    if a and a != lpchain.ZERO:
+        dp = sb.spot.dex_price(ch, a)
+        return float(dp) if dp else None
+    p = sb.spot.price(sym or "") if sym else None
+    return float(p) if p else None
+
+
+def _qnow(x, *, qfmt):
+    if x is None:
+        return "구성 미확인"
+    return "<0.0001" if 0 < abs(float(x)) < 0.00005 else qfmt(x)
+
+
+def _lp_extra(b, loc, tid, *, lp_v2_units, lp_meta_by):
+    ex = {"proto": b.get("proto")}
+    if b.get("proto") == "v2":
+        ex["units"] = str(max(0, lp_v2_units.get(loc, 0)))
+        ex["wallet"] = str(tid)
+    stk = ((lp_meta_by.get((b["chain"], b["mgr"])) or {}).get("stake") or {}).get(str(b["id"]))
+    if stk:
+        ex["stake"] = stk
+        ex.setdefault("wallet", ((lp_meta_by.get((b["chain"], b["mgr"])) or {}).get("who") or {}).get(str(b["id"])))
+    return ex
+
+
+def _lp_value(oc, ch, *, lpa, tok_gid, live_px, sb):
+    p0 = _lp_tok_px(ch, oc.get("token0"), oc.get("sym0"), lpa=lpa, tok_gid=tok_gid, live_px=live_px, sb=sb)
+    p1 = _lp_tok_px(ch, oc.get("token1"), oc.get("sym1"), lpa=lpa, tok_gid=tok_gid, live_px=live_px, sb=sb)
+    pr = float(oc.get("price") or 0)
+    if p0 is None and p1 is not None and pr:
+        p0 = p1 * pr
+    if p1 is None and p0 is not None and pr:
+        p1 = p0 / pr
+    if p0 is None or p1 is None:
+        return None
+    a0, a1 = float(oc.get("amount0") or 0), float(oc.get("amount1") or 0)
+    f0, f1 = float(oc.get("fees0") or 0), float(oc.get("fees1") or 0)
+    rw = float(oc.get("rewardAmount") or 0)
+    rp = _lp_tok_px(ch, oc.get("rewardToken"), oc.get("rewardSym"), lpa=lpa, tok_gid=tok_gid, live_px=live_px, sb=sb) if rw > 0 else None
+    return {"value": a0 * p0 + a1 * p1, "fees": f0 * p0 + f1 * p1, "p0": p0, "p1": p1,
+            "rewards": rw * rp if rp else 0.0}
+
+
+def _pend_upbit_only(coins, ignored_u, pendings, now):
+    for c in sorted((c for c in coins if str(c.get("key", "")).startswith("ub:") and not (c.get("avg") or 0)
+                      and float(c.get("qty") or 0) * float(c.get("price") or 0) >= 50.0),
+                     key=lambda c: -(float(c["qty"]) * float(c.get("price") or 0))):
+        key = f"unkh:{c['key']}"
+        if key in ignored_u:
+            continue
+        pendings.insert(0, {
+            "key": key, "t": datetime.fromtimestamp(now, KST).strftime("%m-%d"),
+            "kind": "원가미상 보유 (업비트 단독 · 손익 제외(평가 포함))",
+            "sym": c["sym"], "chain": "업비트",
+            "onchain": f"{float(c['qty']):,.4f} {c['sym']} 업비트 잔고 · 원장 매수·입금 기록과 매칭 안 됨",
+            "ex": "업비트",
+            "gap": "원장에 이 코인의 업비트 유입(매수 체결·입금)이 없음 — 수집 창(백필) 이전부터 보유했거나 체결·입금 미수집",
+            "why": "업비트 실잔고로만 보이는 보유분이라 원가를 모릅니다 — 평가손익에서 빠져 있어요. 업비트 체결·입금이 원장에 잡히면 자동으로 원가가 붙습니다.",
+            "fbAvg": 0, "fbCost": 0, "gkey": "", "ckey": c["key"], "costOv": None, "cands": [], "candsHint": "",
+            "qty": _f(float(c["qty"]), 6) or 0, "usd": _f(float(c["qty"]) * float(c.get("price") or 0), 2) or 0,
+        })
+
+
+def _pend_gas_nopx(gas_nopx, ignored_u, pendings):
+    for gid_g, gn in sorted(gas_nopx.items(), key=lambda kv: -float(kv[1]["cost"])):
+        key_g = f"gasnopx:{gid_g}"
+        if key_g in ignored_u or gn["cost"] < 1:
+            continue
+        pendings.insert(0, {
+            "key": key_g, "t": acct_norm.mmdd(gn["last"]),
+            "kind": "시세 없는 가스 · 원가만 소진",
+            "sym": gn["sym"], "chain": "/".join(sorted(CHAIN_NAME.get(c, c) for c in gn["chains"])) or "—",
+            "onchain": f"{float(gn['qty']):,.6f}".rstrip("0").rstrip(".") + f" {gn['sym']} 가스 {gn['n']}건 · 소진한 원가 ${float(gn['cost']):,.2f}",
+            "ex": "—",
+            "gap": f"{gn['n']}건 · 그 시각 달러 시세가 없어 가스 비용·실현에 안 잡히고 원가만 빠짐",
+            "why": "가스로 나간 수량의 원가가 손익 없이 사라졌어요(가스 비용 칸에도 없음). 그 시각 시세를 받으면(가격 채움·재구축) 가스 비용으로 들어가요 — "
+                   "금액이 작으면 무시해도 돼요.",
+            "gkey": f"g{gid_g}", "costOv": None, "cands": [], "candsHint": "",
+            "qty": _f(float(gn["qty"]), 6) or 0, "usd": _f(float(gn["cost"]), 2) or 0})
+
+
+def _pend_noproc(noproc, ignored_u, pendings):
+    for gid_n, np in sorted(noproc.items(), key=lambda kv: -float(kv[1]["cost"])):
+        key_n = f"noproc:{gid_n}"
+        if key_n in ignored_u or not np["old"] or (np["cost"] < 1 and np["unk"] <= 0):
+            continue
+        wh = " · ".join(sorted(np["where"])) or "—"
+        pendings.insert(0, {
+            "key": key_n, "t": acct_norm.mmdd(np["last"]),
+            "kind": "대금 미상 매도 (정산액 산정 전)",
+            "sym": np["sym"], "chain": "—",
+            "onchain": f"{float(np['qty']):,.4f} {np['sym']} 매도 {np['n']}건 · 정산액 없음"
+                       + (f" · 소진한 원가 ${float(np['cost']):,.2f}" if np["cost"] > 0 else ""),
+            "ex": wh,
+            "gap": f"{np['n']}건 · {np['first'][5:] if len(np['first']) >= 10 else np['first']}"
+                   + (f"~{np['last'][5:] if len(np['last']) >= 10 else np['last']}" if np["last"] != np["first"] else "")
+                   + " · 그 시각 시세(받은 쪽 코인·마켓 쿼트)를 못 받아 정산액이 비어 있음",
+            "why": "판 대금을 몰라 이 매도의 원가가 실현손익에도 원가미상 매도에도 들어가지 않았어요. 시세를 받으면(가격 채움·재구축) 자동으로 실현에 들어갑니다.",
+            "gkey": f"g{gid_n}", "costOv": None, "cands": [], "candsHint": "", "tx": np["tx"],
+            "qty": _f(float(np["qty"]), 6) or 0, "usd": _f(float(np["cost"]), 2) or 0})
+
+
+def _pend_ord_far(far, rows, fx_name, ignored_u, pendings):
+    if not far:
+        return
+    want = {(f[0], f[1]) for f in far}
+    arrival = {}
+    for row in rows:
+        k = (row["source_ns"], row["source_id"])
+        if k in want and row["leg_kind"] in ("acq", "move_in") and k not in arrival:
+            arrival[k] = row
+    seen = set()
+    for ns, sid, at_ts, wd_ex, wd_ts, txid in far:
+        key = f"ordgap:{txid}"
+        row = arrival.get((ns, sid))
+        if key in ignored_u or key in seen or row is None:
+            continue
+        seen.add(key)
+        dec = row["decimals"] if row["decimals"] is not None else 18
+        qty = float(int(row["qty_base"])) / (10 ** int(dec))
+        sym = row["symbol"] or "?"
+        wd_name = fx_name.get(wd_ex, wd_ex)
+        pendings.insert(0, {
+            "key": key, "t": datetime.fromtimestamp(at_ts, KST).strftime("%m-%d"),
+            "kind": "출금보다 먼저 찍힌 도착 · 원가 연결 안 됨",
+            "sym": sym, "chain": CHAIN_NAME.get(row["chain"], row["chain"]) if row["chain"] else fx_name.get(ns.split(":")[0], ns.split(":")[0]),
+            "onchain": f"{qty:,.4f} {sym} 도착 {datetime.fromtimestamp(at_ts, KST).strftime('%m-%d %H:%M')} · "
+                       f"{wd_name} 출금 기록 {datetime.fromtimestamp(wd_ts, KST).strftime('%m-%d %H:%M')} (같은 txid)",
+            "ex": wd_name,
+            "gap": f"도착이 출금 기록보다 {(wd_ts - at_ts) / 3600.0:,.1f}시간 먼저 — 거래소 시계·기록 지연 허용(1시간)을 넘어 출금 원가를 이어받지 못함",
+            "why": "도착은 원가 미상(최초 인식 시가를 켰으면 그 시가)으로 잡혔고, 출금 쪽 원가는 이동 중으로 남았을 수 있어요. 같은 코인이면 아래에서 출금 때 평단으로 원가를 지정하세요.",
+            "gkey": f"g{row['group_id'] or -row['asset_id']}", "costOv": None, "cands": [], "candsHint": "", "tx": txid,
+            "qty": _f(qty, 6) or 0, "usd": 0})
+
+
+def _pend_unv_lost(G, ignored_u, pendings, backfill_t0, cost_ov, UNK_HINT):
+    for gid_l, g_l in sorted(G.items(), key=lambda kv: float((kv[1].get("unv_lost") or (0, 0, 0))[1])):
+        lost = g_l.get("unv_lost")
+        if not lost:
+            continue
+        k_l, c_l, ts_l = lost
+        key_l = f"unvlost:{gid_l}"
+        if key_l in ignored_u or float(c_l) < 1.0:
+            continue
+        pendings.insert(0, {
+            "key": key_l, "t": datetime.fromtimestamp(ts_l or backfill_t0, KST).strftime("%m-%d"),
+            "kind": f"창 밖 처분 · 원가 ${float(c_l):,.2f}",
+            "sym": g_l["sym"], "chain": "/".join(sorted(CHAIN_NAME.get(c, c) for c in g_l["chains"])) or "—",
+            "onchain": f"{float(k_l):,.4f} {g_l['sym']} 실매수분 · 원가 ${float(c_l):,.2f} 가 손익에 안 잡힘",
+            "ex": "—",
+            "gap": "백필 창(5개월) 시작 직후 창 이전 보유분을 처분 — 원장 순액이 0 밑으로 파여 리플레이가 그 처분을 버리고, 뒤 매수분 원가가 대응 없이 남음",
+            "why": "창 이전 보유분은 원가를 모르고 처분은 창 안에 있어 실현손익으로도 미확인 매도로도 못 잡습니다. "
+                   "표시용 보정(원장 무변경)이라 무시해도 되고, 창 이전 매수 이력을 등록하면 원가가 연결됩니다.",
+            "gkey": f"g{gid_l}", "costOv": cost_ov.get(f"g{gid_l}"), "cands": [], "candsHint": UNK_HINT,
+            "qty": _f(float(k_l), 6) or 0, "usd": _f(float(c_l), 2) or 0})
+
+
+def _pend_spam(spam_sorted, pendings, today_kst):
+    for gid13, g13, qty13, px13 in spam_sorted:
+        key13 = f"risk:g{gid13}"
+        val13 = qty13 * (px13 or 0)
+        ch13 = "/".join(sorted(CHAIN_NAME.get(c, c) for c in g13["chains"])) or "—"
+        pendings.insert(0, {
+            "key": key13, "t": today_kst.strftime("%m-%d %H:%M"),
+            "kind": "스팸·에어드랍 의심", "sym": g13["sym"], "chain": ch13,
+            "onchain": f"{qty13:,.4f} {g13['sym']} · 평가 ${val13:,.2f} — 스팸 의심이라 평가에서 뺐어요",
+            "ex": "—",
+            "gap": g13.get("risk_reason") or "실매수 이력 없는 유입",
+            "why": "실매수·스왑·내 지갑 이동 이력이 없는 유입이라 메인 목록과 일별 기록에서 뺐습니다."
+                   " 실제 보유가 맞으면 [정상으로 복원]을 누르거나, 보낸 주소를 설정 › 발신 주소 화이트리스트에 추가하세요.",
+            "gkey": f"g{gid13}", "risk": g13.get("risk_reason") or "",
+            "qty": _f(qty13, 6) or 0, "usd": _f(val13, 2) or 0,
+            "cands": []})
+
+
+def _collect_upbit_withdrawals(conn, ub_wd_shown, wd_rows):
+    for r8 in conn.execute(
+            "SELECT uuid, payload FROM raw_ex WHERE kind='withdraw' AND exchange='upbit'"
+            " GROUP BY uuid HAVING revision = MAX(revision)").fetchall():
+        try:
+            wd = json.loads(r8["payload"])
+        except json.JSONDecodeError:
+            continue
+        if str(wd.get("state") or "").upper() not in ("DONE", "ACCEPTED"):
+            continue
+        if r8["uuid"] in ub_wd_shown:
+            continue
+        try:
+            wts = int(datetime.fromisoformat(str(wd.get("done_at")
+                                                 or wd.get("created_at"))).timestamp())
+        except (ValueError, TypeError):
+            continue
+        wd_rows.append((wts, wd))
 
 
 class PendingsMixin:
 
     def _build_pendings(self, _bs9):
         (G, _ak, _qfmt, aliases, backfill_t0, be_done, be_until, coins, conn, cost_be, cost_ov, cur_src, debt_over9, disp9, ev_hide, ev_usd, ex_fee, exb9, extra_ev, extra_events, fb_cov9, fb_on, fs_on, fx_dep_tx, fx_name, fx_wd, gas_applied, gas_by_chain, gas_expense, gas_nopx, gas_on, gid_pairs_all, hl_neg, led_by_gid, live_px, locs_by_gid, lp_by_tx, lp_events, lp_meta_by, lp_mgrs, lpb, my_all9, noproc, now, of_applied, of_cands, of_dec9, overrides9, pos_hid9, pos_rows, prefs, pv_led9, quarantined, rb_view, realized_by_date, resolve_origin, rows, sale_lot_by, signer9, spam_view, spoof_keys, stables, syms9, today_kst, ub2, ub_path2, ub_wd_shown, ub_wd_tx, uncred_gid, unv9, unverified, wallet_label, wd_fee, wl9,) = (_bs9["G"], _bs9["_ak"], _bs9["_qfmt"], _bs9["aliases"], _bs9["backfill_t0"], _bs9["be_done"], _bs9["be_until"], _bs9["coins"], _bs9["ctx"].conn, _bs9["cost_be"], _bs9["cost_ov"], _bs9["cur_src"], _bs9["debt_over9"], _bs9["disp9"], _bs9["ev_hide"], _bs9["ev_usd"], _bs9["ex_fee"], _bs9["exb9"], _bs9["extra_ev"], _bs9["extra_events"], _bs9["fb_cov9"], _bs9["ctx"].fb_on, _bs9["ctx"].fs_on, _bs9["fx_dep_tx"], _bs9["fx_name"], _bs9["fx_wd"], _bs9["gas_applied"], _bs9["gas_by_chain"], _bs9["gas_expense"], _bs9["gas_nopx"], _bs9["ctx"].gas_on, _bs9["gid_pairs_all"], _bs9["hl_neg"], _bs9["led_by_gid"], _bs9["live_px"], _bs9["locs_by_gid"], _bs9["lp_by_tx"], _bs9["lp_events"], _bs9["lp_meta_by"], _bs9["lp_mgrs"], _bs9["lpb"], _bs9["my_all9"], _bs9["noproc"], _bs9["ctx"].now, _bs9["of_applied"], _bs9["of_cands"], _bs9["of_dec9"], _bs9["overrides9"], _bs9["pos_hid9"], _bs9["pos_rows"], _bs9["ctx"].prefs, _bs9["pv_led9"], _bs9["quarantined"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["resolve_origin"], _bs9["rows"], _bs9["sale_lot_by"], _bs9["signer9"], _bs9["spam_view"], _bs9["spoof_keys"], _bs9["stables"], _bs9["syms9"], _bs9["ctx"].today_kst, _bs9["ub2"], _bs9["ub_path2"], _bs9["ub_wd_shown"], _bs9["ub_wd_tx"], _bs9["uncred_gid"], _bs9["unv9"], _bs9["unverified"], _bs9["wallet_label"], _bs9["wd_fee"], _bs9["wl9"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "acc" in _bs9:
-            acc = _bs9["acc"]
-        if "age9" in _bs9:
-            age9 = _bs9["age9"]
-        if "ap9" in _bs9:
-            ap9 = _bs9["ap9"]
-        if "b9" in _bs9:
-            b9 = _bs9["b9"]
-        if "bd9" in _bs9:
-            bd9 = _bs9["bd9"]
-        if "bp9" in _bs9:
-            bp9 = _bs9["bp9"]
-        if "c9" in _bs9:
-            c9 = _bs9["c9"]
-        if "ch9" in _bs9:
-            ch9 = _bs9["ch9"]
-        if "cv9" in _bs9:
-            cv9 = _bs9["cv9"]
-        if "d9" in _bs9:
-            d9 = _bs9["d9"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "ex9" in _bs9:
-            ex9 = _bs9["ex9"]
-        if "f9" in _bs9:
-            f9 = _bs9["f9"]
-        if "fu9" in _bs9:
-            fu9 = _bs9["fu9"]
-        if "fv9" in _bs9:
-            fv9 = _bs9["fv9"]
-        if "g9" in _bs9:
-            g9 = _bs9["g9"]
-        if "gid9" in _bs9:
-            gid9 = _bs9["gid9"]
-        if "gn9" in _bs9:
-            gn9 = _bs9["gn9"]
-        if "gs9" in _bs9:
-            gs9 = _bs9["gs9"]
-        if "h9" in _bs9:
-            h9 = _bs9["h9"]
-        if "i9" in _bs9:
-            i9 = _bs9["i9"]
-        if "k" in _bs9:
-            k = _bs9["k"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "keep9" in _bs9:
-            keep9 = _bs9["keep9"]
-        if "key9" in _bs9:
-            key9 = _bs9["key9"]
-        if "l9" in _bs9:
-            l9 = _bs9["l9"]
-        if "legs9" in _bs9:
-            legs9 = _bs9["legs9"]
-        if "ln9" in _bs9:
-            ln9 = _bs9["ln9"]
-        if "loc9" in _bs9:
-            loc9 = _bs9["loc9"]
-        if "lr9" in _bs9:
-            lr9 = _bs9["lr9"]
-        if "m9" in _bs9:
-            m9 = _bs9["m9"]
-        if "mm9" in _bs9:
-            mm9 = _bs9["mm9"]
-        if "n9" in _bs9:
-            n9 = _bs9["n9"]
-        if "np9" in _bs9:
-            np9 = _bs9["np9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "px9" in _bs9:
-            px9 = _bs9["px9"]
-        if "q9" in _bs9:
-            q9 = _bs9["q9"]
-        if "r7" in _bs9:
-            r7 = _bs9["r7"]
-        if "r9" in _bs9:
-            r9 = _bs9["r9"]
-        if "s0" in _bs9:
-            s0 = _bs9["s0"]
-        if "s9" in _bs9:
-            s9 = _bs9["s9"]
-        if "st9" in _bs9:
-            st9 = _bs9["st9"]
-        if "su9" in _bs9:
-            su9 = _bs9["su9"]
-        if "sym9" in _bs9:
-            sym9 = _bs9["sym9"]
-        if "t9" in _bs9:
-            t9 = _bs9["t9"]
-        if "tx9" in _bs9:
-            tx9 = _bs9["tx9"]
-        if "u" in _bs9:
-            u = _bs9["u"]
-        if "u9" in _bs9:
-            u9 = _bs9["u9"]
-        if "v9" in _bs9:
-            v9 = _bs9["v9"]
-        if "why9" in _bs9:
-            why9 = _bs9["why9"]
-        if "wk9" in _bs9:
-            wk9 = _bs9["wk9"]
         pendings = self._pendings(conn, prefs)
         ignored_u = set(prefs.get("ignored", []))
         UNK_HINT = ("내 지갑에서 보낸 거라면 설정 › 연결 · 키에서 그 지갑을 추가해 주세요 — 다음 재구축 때 원가가 자동으로 붙습니다. "
                     "에어드랍·타인 송금·LP 인출이라면 아래에서 개당 원가를 입력하거나 '당시 시세로 추정'을 누르세요.")
-
-        def unk_cands(gid9, sym9, px9):
-            srcs9 = list((G.get(gid9) or {}).get("unk_src") or [])
-            if not srcs9:
-                return []
-            srcs9.sort(key=lambda x: -x["qty"])
-            tot9 = sum(x["qty"] for x in srcs9) or 1.0
-            expanded = []
-            for x in srcs9[:6]:
-                expanded.append((x, 0))
-                ug = G.get(x.get("up_gid")) if x.get("up_gid") is not None else None
-                for y in sorted((ug or {}).get("unk_src") or [], key=lambda z: -z["qty"])[:2]:
-                    expanded.append((y, 1))
-                    ug2 = G.get(y.get("up_gid")) if y.get("up_gid") is not None else None
-                    for z in sorted((ug2 or {}).get("unk_src") or [], key=lambda w: -w["qty"])[:1]:
-                        expanded.append((z, 2))
-            out9 = []
-            seen9 = set()
-            for x, lvl in expanded:
-                x = x if x.get("via") else resolve_origin(x)
-                key_x = (lvl > 0, x.get("ref"), x.get("kind"))
-                if key_x in seen9:
-                    continue
-                seen9.add(key_x)
-                if len(out9) >= 12:
-                    break
-                ref = x.get("ref") or ""; frm = x.get("from"); dt9 = datetime.fromtimestamp(x["ts"], KST).strftime("%m-%d %H:%M")
-                short = (ref[:8] + "…" + ref[-4:]) if len(ref) > 14 else ref
-                if x.get("via"):
-                    who = f" ← {x['via']}"; copy = ref; btn = "참조 복사" if ref else "—"
-                elif frm and frm in wallet_label:
-                    who = f" ← 내 지갑 {wallet_label[frm]} ({frm[:6]}…{frm[-4:]})"; copy = frm; btn = "주소 복사"
-                elif frm:
-                    who = f" ← 외부 지갑 {frm[:6]}…{frm[-4:]} (미등록 · 내 지갑이면 설정에 등록)"; copy = frm; btn = "주소 복사"
-                elif ref.startswith("0x") and len(ref) == 66 and x.get("oc_na"):
-                    who = (" ← 발신 조회 불가 (추적 체인에서 찾지 못함 · txid 로 직접 확인)" if x["oc_na"] == "notfound"
-                           else f" ← 발신 조회 불가 (네트워크 미지원: {x['oc_na']} · txid 로 직접 확인)")
-                    copy = ref; btn = "txid 복사"
-                elif ref.startswith("0x") and len(ref) == 66 and x.get("oc_fail"):
-                    who = f" ← 발신 조회 실패(재시도 {datetime.fromtimestamp(x['oc_fail'], KST).strftime('%m-%d')})"; copy = ref; btn = "txid 복사"
-                elif ref.startswith("0x") and len(ref) == 66:
-                    who = " ← 발신 지갑 조회 중"; copy = ref; btn = "txid 복사"
-                else:
-                    who = ""; copy = ref; btn = "참조 복사" if ref else "—"
-                val9 = x["qty"] * float(px9 or 0)
-                sym_x = (G.get(x.get("up_gid")) or {}).get("sym") if lvl and x.get("up_gid") is not None else sym9
-                ov_txt = ""
-                if x.get("ov"):
-                    ov_txt = (f" · ★원가 지정 ${x['ov']['unit']:,.6g}/개 적용★" if x["ov"].get("mode") == "unit"
-                              else f" · ★당시 시세 ${x['ov']['unit']:,.6g}/개 적용★")
-                out9.append({"kind": "src", "label": ("↳ " * lvl) + (f"상류({sym_x or sym9}) " if lvl else "") + f"{dt9} {x['kind']} {x['qty']:,.4f}" + (f" · {short}" if short else "") + who
-                             + (f" · 지금 평가 ${val9:,.0f}" if (val9 >= 1 and not lvl) else "") + ov_txt,
-                             "score": (x.get("chain") or x.get("ex") or "—"),
-                             "pct": (0 if lvl else min(100, int(round(100.0 * x["qty"] / tot9)))),
-                             "copy": copy, "btn": btn})
-            return out9
         _unk_rows = [c9 for c9 in coins if (c9.get("fbQty") or 0) > 0 and str(c9.get("key", "")).startswith("g")
                      and ((c9.get("fbCost") or 0) >= 50.0 or float(c9["fbQty"]) * float(c9.get("price") or 0) >= 50.0)]
         _unk_rows.sort(key=lambda c9: -(float(c9["fbQty"]) * float(c9.get("price") or 0)))
@@ -228,60 +349,14 @@ class PendingsMixin:
                                        "원가 추적(지갑 등록·체결 연동)이 우선입니다. 설정의 '원가 미확인 → 평균가 대체'를 켜면 이 종목 평균 매수가로 원가를 잡아 평가·손익에 반영합니다.")),
                 "fbAvg": _f(float(c9["avg"]), 6) or 0, "fbCost": c9.get("fbCost") or 0,
                 "gkey": f"g{gid9}" if gid9 is not None else "", "costOv": cost_ov.get(f"g{gid9}") if gid9 is not None else None,
-                "cands": unk_cands(gid9, c9["sym"], c9.get("price") or 0),
+                "cands": _unk_cands(gid9, c9["sym"], c9.get("price") or 0, G=G, resolve_origin=resolve_origin, wallet_label=wallet_label),
                 "candsHint": UNK_HINT,
                 "qty": _f(float(c9["fbQty"]), 6) or 0, "usd": _f(float(c9["fbQty"]) * float(c9.get("price") or 0), 2) or 0,
             })
-        for c9 in sorted((c9 for c9 in coins if str(c9.get("key", "")).startswith("ub:") and not (c9.get("avg") or 0)
-                          and float(c9.get("qty") or 0) * float(c9.get("price") or 0) >= 50.0),
-                         key=lambda c9: -(float(c9["qty"]) * float(c9.get("price") or 0))):
-            key9 = f"unkh:{c9['key']}"
-            if key9 in ignored_u:
-                continue
-            pendings.insert(0, {
-                "key": key9, "t": datetime.fromtimestamp(now, KST).strftime("%m-%d"),
-                "kind": "원가미상 보유 (업비트 단독 · 손익 제외(평가 포함))",
-                "sym": c9["sym"], "chain": "업비트",
-                "onchain": f"{float(c9['qty']):,.4f} {c9['sym']} 업비트 잔고 · 원장 매수·입금 기록과 매칭 안 됨",
-                "ex": "업비트",
-                "gap": "원장에 이 코인의 업비트 유입(매수 체결·입금)이 없음 — 수집 창(백필) 이전부터 보유했거나 체결·입금 미수집",
-                "why": "업비트 실잔고로만 보이는 보유분이라 원가를 모릅니다 — 평가손익에서 빠져 있어요. 업비트 체결·입금이 원장에 잡히면 자동으로 원가가 붙습니다.",
-                "fbAvg": 0, "fbCost": 0, "gkey": "", "ckey": c9["key"], "costOv": None, "cands": [], "candsHint": "",
-                "qty": _f(float(c9["qty"]), 6) or 0, "usd": _f(float(c9["qty"]) * float(c9.get("price") or 0), 2) or 0,
-            })
-        for gid_g, gn9 in sorted(gas_nopx.items(), key=lambda kv: -float(kv[1]["cost"])):
-            key_g = f"gasnopx:{gid_g}"
-            if key_g in ignored_u or gn9["cost"] < 1:
-                continue
-            pendings.insert(0, {
-                "key": key_g, "t": acct_norm.mmdd(gn9["last"]),
-                "kind": "시세 없는 가스 · 원가만 소진",
-                "sym": gn9["sym"], "chain": "/".join(sorted(CHAIN_NAME.get(c9, c9) for c9 in gn9["chains"])) or "—",
-                "onchain": f"{float(gn9['qty']):,.6f}".rstrip("0").rstrip(".") + f" {gn9['sym']} 가스 {gn9['n']}건 · 소진한 원가 ${float(gn9['cost']):,.2f}",
-                "ex": "—",
-                "gap": f"{gn9['n']}건 · 그 시각 달러 시세가 없어 가스 비용·실현에 안 잡히고 원가만 빠짐",
-                "why": "가스로 나간 수량의 원가가 손익 없이 사라졌어요(가스 비용 칸에도 없음). 그 시각 시세를 받으면(가격 채움·재구축) 가스 비용으로 들어가요 — "
-                       "금액이 작으면 무시해도 돼요.",
-                "gkey": f"g{gid_g}", "costOv": None, "cands": [], "candsHint": "",
-                "qty": _f(float(gn9["qty"]), 6) or 0, "usd": _f(float(gn9["cost"]), 2) or 0})
-        for gid_n, np9 in sorted(noproc.items(), key=lambda kv: -float(kv[1]["cost"])):
-            key_n = f"noproc:{gid_n}"
-            if key_n in ignored_u or not np9["old"] or (np9["cost"] < 1 and np9["unk"] <= 0):
-                continue
-            wh9 = " · ".join(sorted(np9["where"])) or "—"
-            pendings.insert(0, {
-                "key": key_n, "t": acct_norm.mmdd(np9["last"]),
-                "kind": "대금 미상 매도 (정산액 산정 전)",
-                "sym": np9["sym"], "chain": "—",
-                "onchain": f"{float(np9['qty']):,.4f} {np9['sym']} 매도 {np9['n']}건 · 정산액 없음"
-                           + (f" · 소진한 원가 ${float(np9['cost']):,.2f}" if np9["cost"] > 0 else ""),
-                "ex": wh9,
-                "gap": f"{np9['n']}건 · {np9['first'][5:] if len(np9['first']) >= 10 else np9['first']}"
-                       + (f"~{np9['last'][5:] if len(np9['last']) >= 10 else np9['last']}" if np9["last"] != np9["first"] else "")
-                       + " · 그 시각 시세(받은 쪽 코인·마켓 쿼트)를 못 받아 정산액이 비어 있음",
-                "why": "판 대금을 몰라 이 매도의 원가가 실현손익에도 원가미상 매도에도 들어가지 않았어요. 시세를 받으면(가격 채움·재구축) 자동으로 실현에 들어갑니다.",
-                "gkey": f"g{gid_n}", "costOv": None, "cands": [], "candsHint": "", "tx": np9["tx"],
-                "qty": _f(float(np9["qty"]), 6) or 0, "usd": _f(float(np9["cost"]), 2) or 0})
+        _pend_upbit_only(coins, ignored_u, pendings, now)
+        _pend_gas_nopx(gas_nopx, ignored_u, pendings)
+        _pend_noproc(noproc, ignored_u, pendings)
+        _pend_ord_far(getattr(self, "_ord_far", None) or (), rows, fx_name, ignored_u, pendings)
         for gid_u, u in sorted(unverified.items(), key=lambda kv: float(kv[1]["proceeds"])):
             key_u = f"unv:{gid_u}"
             if key_u in ignored_u:
@@ -312,7 +387,7 @@ class PendingsMixin:
                 **({"costBe": cost_be.get(f"g{gid_u}")} if be_until(gid_u) is not None else {}),
                 "qty": _f(float(u["qty"]), 6) or 0, "usd": _f(float(u["proceeds"]), 2) or 0,
                 "qtyExact": str(u["qty"]),
-                "cands": unk_cands(gid_u, u["sym"], live_px.get(gid_u) or 0), "candsHint": UNK_HINT})
+                "cands": _unk_cands(gid_u, u["sym"], live_px.get(gid_u) or 0, G=G, resolve_origin=resolve_origin, wallet_label=wallet_label), "candsHint": UNK_HINT})
         cost_decided_rows = []
         for gid_b, bd in sorted(be_done.items(), key=lambda kv: -float(kv[1]["proceeds"])):
             g_b = G.get(gid_b) or {}
@@ -325,25 +400,7 @@ class PendingsMixin:
                 "first": bd["first"], "last": bd["last"],
                 "until": int(ut9) if ut9 is not None else None,
                 "untilT": datetime.fromtimestamp(ut9, KST).strftime("%m-%d %H:%M") if ut9 is not None else ""})
-        for gid_l, g_l in sorted(G.items(), key=lambda kv: float((kv[1].get("unv_lost") or (0, 0, 0))[1])):
-            lost = g_l.get("unv_lost")
-            if not lost:
-                continue
-            k_l, c_l, ts_l = lost
-            key_l = f"unvlost:{gid_l}"
-            if key_l in ignored_u or float(c_l) < 1.0:
-                continue
-            pendings.insert(0, {
-                "key": key_l, "t": datetime.fromtimestamp(ts_l or backfill_t0, KST).strftime("%m-%d"),
-                "kind": f"창 밖 처분 · 원가 ${float(c_l):,.2f}",
-                "sym": g_l["sym"], "chain": "/".join(sorted(CHAIN_NAME.get(c, c) for c in g_l["chains"])) or "—",
-                "onchain": f"{float(k_l):,.4f} {g_l['sym']} 실매수분 · 원가 ${float(c_l):,.2f} 가 손익에 안 잡힘",
-                "ex": "—",
-                "gap": "백필 창(5개월) 시작 직후 창 이전 보유분을 처분 — 원장 순액이 0 밑으로 파여 리플레이가 그 처분을 버리고, 뒤 매수분 원가가 대응 없이 남음",
-                "why": "창 이전 보유분은 원가를 모르고 처분은 창 안에 있어 실현손익으로도 미확인 매도로도 못 잡습니다. "
-                       "표시용 보정(원장 무변경)이라 무시해도 되고, 창 이전 매수 이력을 등록하면 원가가 연결됩니다.",
-                "gkey": f"g{gid_l}", "costOv": cost_ov.get(f"g{gid_l}"), "cands": [], "candsHint": UNK_HINT,
-                "qty": _f(float(k_l), 6) or 0, "usd": _f(float(c_l), 2) or 0})
+        _pend_unv_lost(G, ignored_u, pendings, backfill_t0, cost_ov, UNK_HINT)
         spam_all = [x for x in sorted(spam_view, key=lambda x: -(x[2] * (x[3] or 0)))
                     if f"risk:g{x[0]}" not in ignored_u]
         pin_gids13 = {x[0] for x in spam_all
@@ -362,40 +419,11 @@ class PendingsMixin:
                 "why": "격리는 이 종목들 전부에 적용돼 있습니다(평가액이 작은 순서라 개별 행은 생략). "
                        "특정 종목을 되살리려면 그 종목 행에서 [정상으로 복원]을 누르세요.", "cands": [],
                 "n": len(more13), "usd": _f(sum(x[2] * (x[3] or 0) for x in more13), 2) or 0})
-        for gid13, g13, qty13, px13 in spam_sorted:
-            key13 = f"risk:g{gid13}"
-            val13 = qty13 * (px13 or 0)
-            ch13 = "/".join(sorted(CHAIN_NAME.get(c, c) for c in g13["chains"])) or "—"
-            pendings.insert(0, {
-                "key": key13, "t": today_kst.strftime("%m-%d %H:%M"),
-                "kind": "스팸·에어드랍 의심", "sym": g13["sym"], "chain": ch13,
-                "onchain": f"{qty13:,.4f} {g13['sym']} · 평가 ${val13:,.2f} — 스팸 의심이라 평가에서 뺐어요",
-                "ex": "—",
-                "gap": g13.get("risk_reason") or "실매수 이력 없는 유입",
-                "why": "실매수·스왑·내 지갑 이동 이력이 없는 유입이라 메인 목록과 일별 기록에서 뺐습니다."
-                       " 실제 보유가 맞으면 [정상으로 복원]을 누르거나, 보낸 주소를 설정 › 발신 주소 화이트리스트에 추가하세요.",
-                "gkey": f"g{gid13}", "risk": g13.get("risk_reason") or "",
-                "qty": _f(qty13, 6) or 0, "usd": _f(val13, 2) or 0,
-                "cands": []})
-
+        _pend_spam(spam_sorted, pendings, today_kst)
         tx_legs9 = {}
         for r9 in rows:
             if r9["leg_kind"] in ("acq", "disp", "move_in", "move_out") and (r9["location"] or "").startswith("wallet:"):
                 tx_legs9.setdefault((r9["source_ns"], r9["source_id"]), []).append(r9)
-
-        def leg_scam9(r9):
-            return ((r9["group_id"] or -r9["asset_id"]) in quarantined
-                    or (r9["source_ns"], r9["source_id"], r9["asset_id"]) in spoof_keys or int(r9["qty_base"]) == 0)
-
-        def grp_weak9(r9):
-            gid9 = r9["group_id"] or -r9["asset_id"]
-            if gid9 not in quarantined or (r9["source_ns"], r9["source_id"], r9["asset_id"]) in spoof_keys or int(r9["qty_base"]) == 0:
-                return None
-            rr9 = str((G.get(gid9) or {}).get("risk_reason") or "")
-            if rr9.startswith(("가짜 ", "사칭 ", "확인 필요")) or "유저 확정" in rr9 or "스캠 확증" in rr9 \
-                    or _scam_name((G.get(gid9) or {}).get("sym") or r9["symbol"]):
-                return None
-            return rr9 or "실매수 이력 없는 유입"
         fold9 = {}
         of_linked9 = _of_linked_txs(of_dec9)
         for p9 in pendings:
@@ -416,8 +444,8 @@ class PendingsMixin:
             syms9 = sorted({(G.get(r9["group_id"] or -r9["asset_id"]) or {}).get("sym") or (r9["symbol"] or "?") for r9 in legs9})
             if p9.get("sym") in (None, "", "—"):
                 p9["sym"] = "/".join(syms9)[:40]
-            if all(leg_scam9(r9) for r9 in legs9):
-                wk9 = [w9 for w9 in (grp_weak9(r9) for r9 in legs9) if w9]
+            if all(_leg_scam(r9, quarantined=quarantined, spoof_keys=spoof_keys) for r9 in legs9):
+                wk9 = [w9 for w9 in (_grp_weak(r9, quarantined=quarantined, spoof_keys=spoof_keys, G=G) for r9 in legs9) if w9]
                 if wk9:
                     p9["riskOf"] = wk9[0]
                 else:
@@ -433,9 +461,9 @@ class PendingsMixin:
                 if s9n and spamguard.signer_mine(*s9n, my_all9):
                     p9["autoDone"] = "원가 있는 내 스왑 체결 — 새 자산 자동 기록 확인됨"
                     continue
-            if any(r9["leg_kind"] in ("disp", "move_out") and not leg_scam9(r9) for r9 in legs9):
+            if any(r9["leg_kind"] in ("disp", "move_out") and not _leg_scam(r9, quarantined=quarantined, spoof_keys=spoof_keys) for r9 in legs9):
                 continue
-            ins9 = [r9 for r9 in legs9 if not leg_scam9(r9)]
+            ins9 = [r9 for r9 in legs9 if not _leg_scam(r9, quarantined=quarantined, spoof_keys=spoof_keys)]
             vals9 = [ev_usd(r9, G.get(r9["group_id"] or -r9["asset_id"]) or {"gid": None, "sym": ""}) for r9 in ins9]
             if ins9 and all(v9 is not None for v9 in vals9):
                 p9["usdIn"] = round(sum(vals9), 6)
@@ -461,9 +489,7 @@ class PendingsMixin:
                 x9["_fold"] = True
         if fold9:
             pendings[:] = [p9 for p9 in pendings if not p9.pop("_fold", False)]
-
         _classify_pendings(pendings, prefs)
-
         wallets_cfg = self._hist_wallets()
         by_addr = {}
         for w in wallets_cfg:
@@ -485,12 +511,8 @@ class PendingsMixin:
         deposit_rows = []
         seen_dep = set()
         import chain_registry as _cr9
-
-        def _dep_net9(a9, ch9=None):
-            c9 = ch9 if _cr9.is_nonevm(ch9) else _cr9.key_chain(a9)
-            return _cr9.display_name(c9) if c9 else None
         for e in self.cfg.get("exchange_addresses", []):
-            net = _dep_net9(e["address"], e["chain"]) or ("SOL" if e["chain"] == "sol" else "EVM")
+            net = _dep_net(e["address"], e["chain"], cr=_cr9) or ("SOL" if e["chain"] == "sol" else "EVM")
             k = (e["exchange"], net, e["address"])
             if k in seen_dep:
                 continue
@@ -502,22 +524,22 @@ class PendingsMixin:
             for r9 in depaddr.deposit_rows():
                 if depaddr.norm_addr(r9["addr"]) not in man9:
                     deposit_rows.append(r9)
-        except Exception as _cg9:
-            calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings", _cg9)
+        except Exception as _cg9:  # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings[man9]", _cg9)
             pass
         dec_dep9 = self.outflow_decisions()
         for a9, v9 in dec_dep9.items():
             if isinstance(v9, dict) and v9.get("verdict") == "exchange":
-                deposit_rows.append({"ex": v9.get("exchange") or "?", "net": _dep_net9(a9) or ("SOL" if not a9.startswith("0x") else "EVM"),
+                deposit_rows.append({"ex": v9.get("exchange") or "?", "net": _dep_net(a9, cr=_cr9) or ("SOL" if not a9.startswith("0x") else "EVM"),
                                      "addr": a9, "memo": "보낸 내역 판정" + (f" · {v9['memo']}" if v9.get("memo") else ""),
                                      "ok": True})
         for a9, (ex9, how9) in sorted(((getattr(self, "_of_auto", None) or {}).get("proven") or {}).items()):
             if ex9 and how9 == "txid" and a9 not in dec_dep9 and a9 not in ("multi", "?") and \
                     not any(str(d9.get("addr") or "").lower() == a9.lower() for d9 in deposit_rows):
-                deposit_rows.append({"ex": ex9, "net": _dep_net9(a9) or ("SOL" if not a9.startswith("0x") else "EVM"), "addr": a9,
+                deposit_rows.append({"ex": ex9, "net": _dep_net(a9, cr=_cr9) or ("SOL" if not a9.startswith("0x") else "EVM"), "addr": a9,
                                      "memo": "보낸 내역 자동 입증(txid 일치)", "ok": True})
         ch9 = {n: c for n, c in (self.cfg.get("chains") or {}).items() if isinstance(c, dict) and not str(n).startswith("_")}
-        n_rpc9 = sum(1 for n, c in ch9.items() if common.chain_discovery(n, c) == "rpc")
+        n_rpc9 = sum(1 for n, c in ch9.items() if config.chain_discovery(n, c) == "rpc")
         wl9 = [w for w in (self.cfg.get("wallets") or []) if isinstance(w, dict) and w.get("address")]
         n_evm9 = len({str(w["address"]).lower() for w in wl9 if w.get("type", "evm") == "evm"})
         n_sol9 = len({str(w["address"]) for w in wl9 if w.get("type") == "sol"})
@@ -538,25 +560,8 @@ class PendingsMixin:
                 n9 = len(_cr9.wallets(self.cfg, c9))
                 src_chips.append({"label": f"{_cr9.display_name(c9)} · {nx_src9.get(c9, 'API')}", "short": f"{_cr9.display_name(c9)} {n9}지갑",
                                   "addr": self._last_scan_str(c9)})
-
         wd_rows = []
-        for r8 in conn.execute(
-                "SELECT uuid, payload FROM raw_ex WHERE kind='withdraw' AND exchange='upbit'"
-                " GROUP BY uuid HAVING revision = MAX(revision)").fetchall():
-            try:
-                wd = json.loads(r8["payload"])
-            except json.JSONDecodeError:
-                continue
-            if str(wd.get("state") or "").upper() not in ("DONE", "ACCEPTED"):
-                continue
-            if r8["uuid"] in ub_wd_shown:
-                continue
-            try:
-                wts = int(datetime.fromisoformat(str(wd.get("done_at")
-                                                     or wd.get("created_at"))).timestamp())
-            except (ValueError, TypeError):
-                continue
-            wd_rows.append((wts, wd))
+        _collect_upbit_withdrawals(conn, ub_wd_shown, wd_rows)
         wd_rows.sort(key=lambda x: -x[0])
         n_ev_before_wd = len(extra_events)
         cur_src[0] = "ex:upbit"
@@ -590,7 +595,6 @@ class PendingsMixin:
             extra_ev(wts, str(wd.get("currency") or "?"), "전송",
                      f"업비트 출금 → {dest}", str(amt), "—", txid or "—")
         cur_src[0] = None
-
         _k9 = lambda e9: e9.get("_ts", 0)
         ev_main9, ev_wd9, ev_hid9 = [], [], []
         n_wd_hid9 = 0
@@ -650,10 +654,8 @@ class PendingsMixin:
         hid_kind_n9 = {"scam": 0, "dust": 0}
         for e9 in ev_hid9:
             hid_kind_n9[e9.get("hideKind") or "scam"] = hid_kind_n9.get(e9.get("hideKind") or "scam", 0) + 1
-
         realized_month = sum(v for k, v in realized_by_date.items()
                              if k.startswith(today_kst.strftime("%Y-%m-")))
-
         gas_list = [{"chain": CHAIN_NAME.get(c, c), "spot": _f(v["usd"], 2) or 0,
                      "lp": 0, "tx": v["tx"], **({"br": _f(v["br"], 2)} if v.get("br") else {})}
                     for c, v in sorted(gas_by_chain.items(), key=lambda kv: -kv[1]["usd"])]
@@ -667,16 +669,15 @@ class PendingsMixin:
         tax_gas = {"on": gas_on, "total": _f(gas_chain_usd, 2) or 0,
                    "inCost": _f(gas_applied["buy"], 2) or 0, "inRealized": _f(gas_applied["sell"], 2) or 0,
                    "separate": _f(gas_chain_usd - (gas_applied["buy"] + gas_applied["sell"] if gas_on else 0), 2) or 0,
-                   "expense": _f(sum((v9[0] - (v9[3].get("EXF_WD_FEE") or (Decimal(0),))[0] for v9 in gas_expense.values()), Decimal(0)), 2) or 0,
+                   "expense": _f(sum((v9[0] - (v9[3].get("EXF_WD_FEE") or (Decimal(0),))[0] - (v9[3].get("LOAN_INT") or (Decimal(0),))[0]
+                                      for v9 in gas_expense.values()), Decimal(0)), 2) or 0,
                    "wdFee": _f(sum((v9["usd"] for v9 in wd_fee.values()), Decimal(0)), 2) or 0,
                    "swapTx": gas_applied["n"],
                    "exFee": _f(sum((v9["usd"] for v9 in ex_fee.values()), Decimal(0)), 2) or 0}
-
         day_memos9, day_memos_err9 = DAY_MEMOS.read()
         if day_memos_err9:
             log.warning("그날 매매 근거 메모 파일 이상(%s) — 화면엔 빈 것 · 저장 거부", day_memos_err9)
         plans_out, plan_memos = self._plans_view(prefs)
-
         fiats = []
         xv_up_krw9 = None
         xv_up_krw_st9 = False
@@ -685,7 +686,7 @@ class PendingsMixin:
             age_u9 = time.time() - float(ub.get("ts") or 0)
             if age_u9 < self.UB_KRW_KEEP_SEC:
                 xv_up_krw9 = float(ub.get("ts") or 0)
-                xv_up_krw_st9 = age_u9 >= common.upbit_fresh_sec(self.cfg)
+                xv_up_krw_st9 = age_u9 >= config.upbit_fresh_sec(self.cfg)
                 for acc in ub.get("accounts") or []:
                     if acc.get("currency") == "KRW":
                         try:
@@ -698,7 +699,7 @@ class PendingsMixin:
                                 fu9.update(age=int(age_u9), stale=True, note=f"거래소 예수금 · 업비트 잔고 {_ago_ko(age_u9)} 전")
                             fiats.append(fu9)
         fx_name9 = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX",
-                    "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸"}
+                    "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "coinbase": "코인베이스"}
         ex_debts = []
         bal_src9 = {}
         xv_krw9 = {}
@@ -719,18 +720,18 @@ class PendingsMixin:
             if ex9 == "bithumb" and kts9 > 0:
                 try:
                     r9, t9 = type(self)._krw_roll(self._bithumb_krw_timeline(conn), kts9)
-                except Exception as e9:
-                    calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings", e9)
+                except Exception as e9:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings[r9]", e9)
                     r9, t9 = 0.0, kts9
-                    log.warning("빗썸 원화 예수금 굴림 실패(스냅숏 그대로): %s", common.safe_err(e9)[:120])
+                    log.warning("빗썸 원화 예수금 굴림 실패(스냅숏 그대로): %s", logs.safe_err(e9)[:120])
                 if r9:
                     krw9 = max(0.0, krw9 + r9)
                     kts9 = max(kts9, t9)
             xv_krw9[ex9] = (max(krw9, 0.0), kts9,
-                            age9 > (common.exf_fresh_sec(self.cfg) if bp9.endswith(".json") else max(21600, common.exf_fresh_sec(self.cfg))))
+                            age9 > (config.exf_fresh_sec(self.cfg) if bp9.endswith(".json") else max(21600, config.exf_fresh_sec(self.cfg))))
             if krw9 > 0:
                 f9 = {"ex": kn9, "krw": krw9, "note": "거래소 예수금"}
-                if age9 > common.exf_fresh_sec(self.cfg):
+                if age9 > config.exf_fresh_sec(self.cfg):
                     f9["age"] = int(age9)
                     f9["stale"] = True
                     f9["note"] = f"거래소 예수금 · {kn9} 잔고 {_ago_ko(age9)} 전"
@@ -772,7 +773,6 @@ class PendingsMixin:
                             d9["price"] = float(px9)
                             d9["usd"] = round(q9 * float(px9), 2)
                         ex_debts.append(d9)
-
         for gid9, q9 in sorted(hl_neg.items()):
             if q9 < -EPS:
                 sym9 = str((G.get(gid9) or {}).get("sym") or "USDC").upper()
@@ -808,8 +808,7 @@ class PendingsMixin:
             for n9 in neg_hold:
                 if (int(n9["key"][1:]), n9["loc"]) in pend9:
                     n9["pend"] = True
-
-        rate_fx = self.spot.rate or 1384
+        rate_fx = self.spot.rate or acct_norm.DEFAULT_KRW_USD
         hold_qty = {gid9: led_by_gid.get(gid9, Decimal(0)) + uncred_gid.get(gid9, Decimal(0)) - pv_led9.get(gid9, Decimal(0))
                     for gid9 in G if not G[gid9].get("is_fiat")}
         x_ub = sum(c["qty"] * (c.get("price") or 0) for c in coins + stables if str(c.get("key", "")).startswith("ub:"))
@@ -820,20 +819,20 @@ class PendingsMixin:
                 a9[0] += float(c["qty"])
                 a9[1] += float(c["qty"]) * float(c.get("price") or 0)
         x_fiat = sum(f5["krw"] / rate_fx for f5 in fiats)
-        up_fresh9 = bool(ub2) and time.time() - float((ub2 or {}).get("ts") or 0) < common.upbit_fresh_sec(self.cfg)
+        up_fresh9 = bool(ub2) and time.time() - float((ub2 or {}).get("ts") or 0) < config.upbit_fresh_sec(self.cfg)
         x_ok = True
-        for p9, lim9 in ([(ub_path2, common.upbit_fresh_sec(self.cfg))] + [(os.path.join(common.STATE_DIR, f"exf_balances_{e9}.json"), common.exf_fresh_sec(self.cfg))
+        for p9, lim9 in ([(ub_path2, config.upbit_fresh_sec(self.cfg))] + [(paths.state(f"exf_balances_{e9}.json"), config.exf_fresh_sec(self.cfg))
                                                for e9 in fx_name9 if e9 not in bal_src9]):
             if os.path.exists(p9):
-                age9 = time.time() - float((common.read_json(p9, {}) or {}).get("ts") or 0)
+                age9 = time.time() - float((statefile.read_json(p9, {}) or {}).get("ts") or 0)
                 if lim9 < age9 < 86400:
                     x_ok = False
         for e9, (p9, ts9) in bal_src9.items():
             age9 = time.time() - ts9
-            lim9 = common.exf_fresh_sec(self.cfg) if p9.endswith(".json") else max(21600, common.exf_fresh_sec(self.cfg))
+            lim9 = config.exf_fresh_sec(self.cfg) if p9.endswith(".json") else max(21600, config.exf_fresh_sec(self.cfg))
             if lim9 < age9 < 86400:
                 x_ok = False
-        lp_onchain = (common.read_json(LP_POS_PATH, {}) or {}).get("positions") or {}
+        lp_onchain = (statefile.read_json(paths.state("lp_positions.json"), {}) or {}).get("positions") or {}
         tok_gid = {}
         self._lp_solmeta = {r7["address"]: {"symbol": r7["symbol"], "decimals": r7["decimals"]} for r7 in conn.execute(
             "SELECT address, symbol, decimals FROM assets WHERE chain='sol' AND kind='token' AND address IS NOT NULL"
@@ -846,49 +845,10 @@ class PendingsMixin:
         lp_want = sorted({(oc9.get("chain") or loc9.split(":")[1], _lpa(oc9.get("chain") or loc9.split(":")[1], oc9.get(k9)))
                           for loc9, oc9 in lp_onchain.items() for k9 in ("token0", "token1", "rewardToken")
                           if str(oc9.get(k9) or "").lower() not in ("", lpchain.ZERO)})
-        self.spot.want_tokens([p9 for p9 in lp_want if not pricing.STABLE_CAS.get(p9[0], {}).get(p9[1])
-                               and not (p9[0] == "sol" and pricing.STABLE_MINTS.get(p9[1]))], slot="lp")
-
-        def lp_tok_px(ch9, addr9, sym9):
-            a9 = _lpa(ch9, addr9)
-            if pricing.STABLE_CAS.get(ch9, {}).get(a9) or (ch9 == "sol" and pricing.STABLE_MINTS.get(a9)):
-                return 1.0
-            if ch9 == "sol" and a9 == lpsol.WSOL:
-                a9 = lpchain.ZERO
-            gid9 = tok_gid.get((ch9, a9.lower()))
-            if gid9 is not None and live_px.get(gid9):
-                return float(live_px[gid9])
-            if a9 and a9 != lpchain.ZERO:
-                dp9 = self.spot.dex_price(ch9, a9)
-                return float(dp9) if dp9 else None
-            p9 = self.spot.price(sym9 or "") if sym9 else None
-            return float(p9) if p9 else None
-
-        def lp_value(oc9, ch9):
-            p0 = lp_tok_px(ch9, oc9.get("token0"), oc9.get("sym0"))
-            p1 = lp_tok_px(ch9, oc9.get("token1"), oc9.get("sym1"))
-            pr9 = float(oc9.get("price") or 0)
-            if p0 is None and p1 is not None and pr9:
-                p0 = p1 * pr9
-            if p1 is None and p0 is not None and pr9:
-                p1 = p0 / pr9
-            if p0 is None or p1 is None:
-                return None
-            a0, a1 = float(oc9.get("amount0") or 0), float(oc9.get("amount1") or 0)
-            f0, f1 = float(oc9.get("fees0") or 0), float(oc9.get("fees1") or 0)
-            rw9 = float(oc9.get("rewardAmount") or 0)
-            rp9 = lp_tok_px(ch9, oc9.get("rewardToken"), oc9.get("rewardSym")) if rw9 > 0 else None
-            return {"value": a0 * p0 + a1 * p1, "fees": f0 * p0 + f1 * p1, "p0": p0, "p1": p1,
-                    "rewards": rw9 * rp9 if rp9 else 0.0}
-
+        self.spot.want_tokens([p9 for p9 in lp_want if not token_tables.STABLE_CAS.get(p9[0], {}).get(p9[1])
+                               and not (p9[0] == "sol" and token_tables.STABLE_MINTS.get(p9[1]))], slot="lp")
         def _qfmt(x):
             return f"{float(x):,.4f}".rstrip("0").rstrip(".") if x else "0"
-
-        def _qnow(x):
-            if x is None:
-                return "구성 미확인"
-            return "<0.0001" if 0 < abs(float(x)) < 0.00005 else _qfmt(x)
-
         lps_out, lps_pending, lps_closed = [], [], []
         lp_targets9 = []
         lp_v2_units = {}
@@ -900,17 +860,6 @@ class PendingsMixin:
                     continue
                 k9 = f"lp:{ch9}:{d9['mgr']}:{t9}"
                 lp_v2_units[k9] = lp_v2_units.get(k9, 0) + (int(l9) if act9 in ("MINT", "INCREASE") else -int(l9))
-
-        def lp_extra(b9, loc9, tid9):
-            ex9 = {"proto": b9.get("proto")}
-            if b9.get("proto") == "v2":
-                ex9["units"] = str(max(0, lp_v2_units.get(loc9, 0)))
-                ex9["wallet"] = str(tid9)
-            stk9 = ((lp_meta_by.get((b9["chain"], b9["mgr"])) or {}).get("stake") or {}).get(str(b9["id"]))
-            if stk9:
-                ex9["stake"] = stk9
-                ex9.setdefault("wallet", ((lp_meta_by.get((b9["chain"], b9["mgr"])) or {}).get("who") or {}).get(str(b9["id"])))
-            return ex9
         seen_lp = set()
         for loc9, b9 in sorted(lpb.items(), key=lambda kv: -kv[1]["last"]):
             seen_lp.add(loc9)
@@ -921,7 +870,7 @@ class PendingsMixin:
             is_open = (liq9 > 0) if liq9 is not None else bool(units9)
             tid9 = lpdec.lp_tid(b9["id"])
             if tid9 is not None and (is_open or units9):
-                lp_targets9.append((b9["chain"], b9["mgr"], tid9, loc9, lp_extra(b9, loc9, tid9)))
+                lp_targets9.append((b9["chain"], b9["mgr"], tid9, loc9, _lp_extra(b9, loc9, tid9, lp_v2_units=lp_v2_units, lp_meta_by=lp_meta_by)))
             base9 = {"key": loc9, "id": b9["id"], "chainKey": b9["chain"], "chain": CHAIN_NAME.get(b9["chain"], b9["chain"]),
                      "mgr": b9["mgr"], "proto": b9["proto"], "dex": b9["name"],
                      "opened": datetime.fromtimestamp(b9["opened"], KST).strftime("%m-%d"),
@@ -953,7 +902,7 @@ class PendingsMixin:
                 base9["residualUnits"] = base9["principalUnits"]
                 lps_closed.append(base9)
                 continue
-            val9 = lp_value(oc9, b9["chain"]) if oc9 else None
+            val9 = _lp_value(oc9, b9["chain"], lpa=_lpa, tok_gid=tok_gid, live_px=live_px, sb=self) if oc9 else None
             if val9 is None:
                 base9["closed"] = False
                 base9["pendingReason"] = ("온체인 평가 대기" if not oc9 else
@@ -985,8 +934,8 @@ class PendingsMixin:
                 "deposit": round(float(prin9), 2), "value": round(val9["value"], 2), "fees": round(val9["fees"], 2),
                 "rewards": round(val9.get("rewards") or 0, 2), "il": round(val9["value"] - hold9, 2) if hold9 is not None else 0,
                 "apr": (f"{(val9['fees'] + (val9.get('rewards') or 0)) / float(prin9) * 365 / days9 * 100:.1f}%" if prin9 > 0 else "—"),
-                "comp": [{"sym": s0, "then": _qfmt(units9.get(s0)), "now": _qnow(oc9.get("amount0"))},
-                         {"sym": s1, "then": _qfmt(units9.get(s1)), "now": _qnow(oc9.get("amount1"))}],
+                "comp": [{"sym": s0, "then": _qfmt(units9.get(s0)), "now": _qnow(oc9.get("amount0"), qfmt=_qfmt)},
+                         {"sym": s1, "then": _qfmt(units9.get(s1)), "now": _qnow(oc9.get("amount1"), qfmt=_qfmt)}],
                 "feesStale": bool(oc9.get("feesStale"))})
             b9["pool"] = row9["pool"]
             lps_out.append(row9)
@@ -997,7 +946,7 @@ class PendingsMixin:
             if len(parts9) < 4:
                 continue
             mg9 = (lp_mgrs.get(parts9[1]) or {}).get(parts9[2]) or {}
-            val9 = lp_value(oc9, parts9[1])
+            val9 = _lp_value(oc9, parts9[1], lpa=_lpa, tok_gid=tok_gid, live_px=live_px, sb=self)
             s0, s1 = oc9.get("sym0") or "?", oc9.get("sym1") or "?"
             ent9 = {"key": loc9, "id": parts9[3], "chainKey": parts9[1], "chain": CHAIN_NAME.get(parts9[1], parts9[1]),
                     "mgr": parts9[2], "proto": mg9.get("proto"), "dex": mg9.get("name") or "LP", "noLedger": True,
@@ -1013,8 +962,8 @@ class PendingsMixin:
                          "deposit": 0, "value": round(val9["value"], 2), "fees": round(val9["fees"], 2),
                          "rewards": round(val9.get("rewards") or 0, 2),
                          "il": 0, "apr": "—",
-                         "comp": [{"sym": s0, "then": "—", "now": _qnow(oc9.get("amount0"))},
-                                  {"sym": s1, "then": "—", "now": _qnow(oc9.get("amount1"))}]})
+                         "comp": [{"sym": s0, "then": "—", "now": _qnow(oc9.get("amount0"), qfmt=_qfmt)},
+                                  {"sym": s1, "then": "—", "now": _qnow(oc9.get("amount1"), qfmt=_qfmt)}]})
             lps_out.append(ent9)
         with self._lp_lock:
             self._lp_targets = lp_targets9
@@ -1045,7 +994,7 @@ class PendingsMixin:
         self._bot_wallet_usd = dict(bot_w9)
         if self.__dict__.get("_bot_usd_saved") != bot_w9:
             try:
-                common.atomic_write_json(os.path.join(common.STATE_DIR, rabby.BOTUSD_NAME), {"v": 1, "t": int(now), "w": {a9: round(v9, 2) for a9, v9 in bot_w9.items()}})
+                statefile.atomic_write_json(paths.state(rabby.BOTUSD_NAME), {"v": 1, "t": int(now), "w": {a9: round(v9, 2) for a9, v9 in bot_w9.items()}})
                 self._bot_usd_saved = dict(bot_w9)
             except OSError as e9:
                 log.warning("지갑별 봇 평가 저장 실패(다음 빌드에 다시): %s", e9)
@@ -1058,14 +1007,13 @@ class PendingsMixin:
                                  "fetchedAt": wv9["fetchedAt"], "top": wv9["top"],
                                  "skipped": {k9: v9 for k9, v9 in wv9["skipped"].items() if v9 >= 1}, "err": wv9.get("err")})
             try:
-                gs9 = rabby.gap_track(os.path.join(common.STATE_DIR, rabby.GAP_NAME), rb_recon, now)
+                gs9 = rabby.gap_track(paths.state(rabby.GAP_NAME), rb_recon, now)
                 for r9 in rb_recon:
                     if r9["addr"] in gs9:
                         r9["gapSince"] = gs9[r9["addr"]]
-            except Exception as e9:
-                calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings", e9)
+            except Exception as e9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_pendings:PendingsMixin._build_pendings[gs9]", e9)
                 log.warning("Rabby 차이 추적 실패: %s", e9)
-
         tc9 = self.cfg.get("transit") if isinstance(self.cfg.get("transit"), dict) else {}
         ask9 = now - float(tc9.get("ask_days", TRANSIT_ASK_DAYS)) * 86400
         for a9m, st9 in (getattr(self, "_of_man_state", None) or {}).items():

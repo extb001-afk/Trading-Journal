@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
-import _suifake as F
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
+import _suifake as F  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import core
-import chain_event
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-from inbox import SegmentWriter
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+from inbox import SegmentWriter  # noqa: E402
 try:
-    import sui_watch as SW
+    import sui_watch as SW  # noqa: E402
 except ImportError:
-    import _wip_sui_watch as SW
+    import _wip_sui_watch as SW  # noqa: E402
 
 A, B = N.OWN["sui"]
 X = N.EXT["sui"]
@@ -37,8 +37,8 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "sui", "address": A}]
 cfg["nonevm"] = {"sui": {"graphql_url": URL, "retries": 1}}
 json.dump(cfg, open(CFG_PATH, "w"))
-cfg = common.load_config()
-INB = os.path.join(common.INBOX_DIR, "sui")
+cfg = config.load_config()
+INB = os.path.join(paths.INBOX_DIR, "sui")
 w = SegmentWriter(INB)
 
 
@@ -69,7 +69,7 @@ def rerun_details(d, n=1, clear=True):
 
 
 reg.FORCE_AVAILABLE.add("sui")
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 rd = dict(c.chain_readers)["sui"]
 
@@ -163,7 +163,7 @@ st2.mark_synced()
 st2.save()
 st2 = cs.ChainState("sui")
 check("X2 gap 남은 지갑 = 상세 완료 경계 없음 · 대사 준비 아님 · core 대사 스코프 준비 아님", (st2.d["status"].get(A) or {}).get("details_complete_through") is None
-      and not st2.ready({A}) and not c._scope_ready("sui"), st2.d["status"].get(A))
+      and not st2.ready({A}) and not c.svc_recon._scope_ready("sui"), st2.d["status"].get(A))
 st2.pending_upsert([(D2, {"stable_id": D2, "owner": A, "lane": "latest"})])
 st2.save()
 col = col_for(cs.ChainState("sui"))

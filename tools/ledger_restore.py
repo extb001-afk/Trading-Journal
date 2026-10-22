@@ -14,21 +14,22 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-import common
-import db as dbm
-import ledger_backup as lb
+import histmark, logs, paths, statefile  # noqa: E402
+import db as dbm  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import ledger_lock  # noqa: E402
 
 STREAMS = ("evm", "sol", "bsc", "ex")
 try:
-    import chain_registry as reg
-except Exception:
+    import chain_registry as reg  # noqa: E402
+except Exception:   # noqa: BLE001
     reg = None
 
 
 def streams_for(sd: str = None, offsets: dict = None) -> tuple:
     if reg is None:
         return STREAMS
-    sd = sd or common.STATE_DIR
+    sd = sd or paths.STATE_DIR
     extra = set(reg.present_streams(os.path.join(sd, "inbox"), sd)) | {c for c in (offsets or {}) if c in reg.SPECS}
     return STREAMS + tuple(c for c in reg.CHAINS if c in extra)
 
@@ -57,8 +58,8 @@ def _gb(n) -> str:
 
 
 def _ro(path: str) -> sqlite3.Connection:
-    imm = not os.path.exists(path + "-wal")
-    c = sqlite3.connect(common.sqlite_ro_uri(path, immutable=imm), uri=True, timeout=30)
+    imm = not (os.path.exists(path + "-wal") or os.path.exists(path + "-journal"))
+    c = sqlite3.connect(paths.sqlite_ro_uri(path, immutable=imm), uri=True, timeout=30)
     c.row_factory = sqlite3.Row
     return c
 
@@ -72,7 +73,7 @@ def _read_json(path, default=None):
 
 
 def backups(state_dir: str = None) -> list:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     out = []
     bdir = os.path.join(sd, "backups")
     try:
@@ -81,10 +82,10 @@ def backups(state_dir: str = None) -> list:
                 out.append(os.path.join(bdir, n))
     except OSError:
         pass
-    base = os.path.basename(common.DB_PATH)
+    base = os.path.basename(paths.DB_PATH)
     try:
         for n in os.listdir(sd):
-            if n.startswith(base + ".pre_") and not n.endswith(("-wal", "-shm")):
+            if n.startswith(base + ".pre_") and not n.endswith(("-wal", "-shm", "-journal")):
                 out.append(os.path.join(sd, n))
     except OSError:
         pass
@@ -100,7 +101,7 @@ def backups(state_dir: str = None) -> list:
 
 
 def resolve(arg: str, state_dir: str = None) -> str:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     rows = backups(sd)
     if arg.isdigit() and 1 <= int(arg) <= len(rows):
         return rows[int(arg) - 1]["path"]
@@ -136,7 +137,7 @@ def check(path: str, full: bool = False) -> dict:
     try:
         info = inspect(path)
     except sqlite3.DatabaseError as e:
-        return {"ok": False, "why": [f"열기 실패: {common.safe_err(e)}"], "info": None, "full": full}
+        return {"ok": False, "why": [f"열기 실패: {logs.safe_err(e)}"], "info": None, "full": full}
     why = []
     sv = info["meta"].get("schema_version")
     if sv is None or str(sv) != str(dbm.SCHEMA_VERSION):
@@ -166,7 +167,7 @@ def check(path: str, full: bool = False) -> dict:
 
 
 def coverage(offsets: dict, inbox_dir: str = None) -> dict:
-    ib = inbox_dir or common.INBOX_DIR
+    ib = inbox_dir or paths.INBOX_DIR
     out = {}
     for s in streams_for(os.path.dirname(ib) if inbox_dir else None, offsets):
         seg, off = offsets.get(s, (1, 0))
@@ -175,7 +176,12 @@ def coverage(offsets: dict, inbox_dir: str = None) -> dict:
             short9 = seg in segs and os.path.getsize(os.path.join(ib, s, f"{seg:09d}.jsonl")) < off
         except OSError:
             short9 = True
-        if (seg in segs and not short9) or (not segs and (seg, off) == (1, 0)):
+        have9 = set(segs)
+        hole9 = [x for x in range(seg, segs[-1] + 1) if x not in have9] if seg in have9 else []
+        if hole9 and not short9:
+            out[s] = {"state": "gap", "seg": seg, "off": off, "segs": [segs[0], segs[-1]],
+                      "why": f"세그먼트 {hole9[0]}" + (f"~{hole9[-1]}" if len(hole9) > 1 else "") + f" 빠짐(구멍 {len(hole9)}개 — 이어 읽으면 조용히 건너뜀)"}
+        elif (seg in segs and not short9) or (not segs and (seg, off) == (1, 0)):
             out[s] = {"state": "replay", "seg": seg, "off": off, "segs": [segs[0], segs[-1]] if segs else None}
         elif short9:
             out[s] = {"state": "gap", "seg": seg, "off": off, "segs": [segs[0], segs[-1]], "why": f"세그먼트 {seg} 가 백업 위치보다 짧음(새 인박스)"}
@@ -229,9 +235,9 @@ def _load_cfg() -> dict:
         cfg = settings_store.load_config_quiet()
         if isinstance(cfg, dict):
             return cfg
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001
         pass
-    return _read_json(common.CONFIG_PATH, {}) or {}
+    return _read_json(paths.CONFIG_PATH, {}) or {}
 
 
 def _backup_sets(path: str, cut: int) -> dict:
@@ -301,9 +307,6 @@ def _drop_wallet_evm(cur: dict, w: str):
     for m in _EVM_PER_WALLET_MAPS:
         if isinstance(cur.get(m), dict):
             cur[m].pop(w, None)
-    es = cur.get("_es_int")
-    if isinstance(es, dict) and isinstance(es.get("seen"), dict):
-        es["seen"].pop(w, None)
 
 
 EVM_BPD_DEFAULT = 43200
@@ -322,7 +325,7 @@ def block_sec(sd: str, ch: str, cfg: dict = None):
         try:
             import chaincatalog
             bpd = (chaincatalog.CATALOG.get(ch) or {}).get("blocks_per_day")
-        except Exception:
+        except Exception:   # noqa: BLE001
             bpd = None
     try:
         if bpd and float(bpd) > 0:
@@ -448,6 +451,10 @@ def plan_evm(sd: str, B: dict, notes: list, cut: int = None, now: int = None, cf
                         notes.append(f"{n}: 차선 모드(내 지갑 발신만 trace) — 복구 해시 {len(hq9) - h0}건을 인계 큐(_hq)에도(외부 → 컨트랙트 → 내 지갑 internal 입금도 trace)")
             if b is not None:
                 notes.append(f"{n}: 지갑 커서 → 블록 {b} 이하")
+            es9 = new.get("_es_int")
+            if isinstance(es9, dict) and es9.get("seen"):
+                notes.append(f"{n}: 늦은 색인 방출 기록 {len(es9['seen'])}건 비움(되감은 창에서 레그 합집합 다시 확인)")
+                es9["seen"] = {}
             for k9 in ("_scan", "_bkscan"):
                 new.pop(k9, None)
         for k9 in ("_synced_at", "_synced_tok_at"):
@@ -496,17 +503,23 @@ def plan_sol(sd: str, B: dict, cfg: dict, cut: int, notes: list) -> dict:
             for p in side[1:]:
                 new.pop(p + a, None)
             n_set += 1
-        elif a in owners:
-            notes.append(f"★cursor_sol: 지갑 {a[:8]}… 기준 서명 없음(여유 이전 네이티브 변화·수수료 tx 없음) — 커서 그대로(토큰 이동은 토큰 계정 되감기로 받음)★")
         else:
+            if a in owners:
+                notes.append(f"cursor_sol: 지갑 {a[:8]}… 기준 서명 없음(여유 이전 네이티브 변화·수수료 tx 없음) — 서명 목록 처음부터(창 안 · 받은 것은 방출 기록이 거름)")
             for p in ("",) + side:
                 new.pop(p + a, None)
+            if a in owners:
+                new[a] = ""
             n_drop += 1
+    opened9 = {str(h).split(":")[1] for h in B["tx"].get("sol", set()) if str(h).startswith("stakeopen:")}
     for a in stake:
         stk = new.get("_stk:" + a)
         if isinstance(stk, dict) and isinstance(stk.get("rwd_next"), int):
             back = int((time.time() - cut) // 172800) + 2
             stk["rwd_next"] = max(0, stk["rwd_next"] - back)
+        if isinstance(stk, dict) and stk.get("open") and a not in opened9:
+            stk["open"] = False
+            notes.append(f"cursor_sol: 스테이크 계정 {a[:8]}… 기초잔고(stakeopen) 백업에 없음 — 다시 냄")
     new.pop("_synced_at", None)
     for k9 in [k9 for k9 in new if k9.startswith(("_hl:", "_fbw:"))]:
         new.pop(k9, None)
@@ -660,6 +673,61 @@ def _rewind_seen_wd(st: dict, bex: dict) -> int:
     return n
 
 
+def _acct_rows(exn: str, tag: str, bex: dict) -> dict:
+    p9, out = f"{exn}:{tag.split('@', 1)[0]}:", {}
+    for kind, rows in bex.items():
+        out[kind] = {f"{exn}:{u[len(p9):]}": v for u, v in (rows or {}).items() if str(u).startswith(p9)}
+    return out
+
+
+def _rewind_exf_acct(exn: str, st: dict, bex: dict, cut: int) -> tuple:
+    n_wd = _rewind_seen_wd(st, bex)
+    if isinstance(st.get("backfilled_until"), (int, float)) and st["backfilled_until"] > cut:
+        st["backfilled_until"] = cut
+    st.pop("pend_scan", None)
+    it9 = st.get("int")
+    if isinstance(it9, dict) and isinstance(it9.get("until"), (int, float)) and it9["until"] > cut:
+        it9["until"] = cut
+    fst = st.get("fills") if isinstance(st.get("fills"), dict) else None
+    n_f = 0
+    if fst is not None:
+        trades = bex.get("trade") or {}
+        fseen = fst.get("seen") if isinstance(fst.get("seen"), dict) else {}
+        if exn == "hyperliquid":
+            for k in [k for k, v in fseen.items() if not isinstance(v, (int, float)) or v >= cut * 1000]:
+                fseen.pop(k)
+                n_f += 1
+        else:
+            for k in [k for k in fseen if k not in trades]:
+                fseen.pop(k)
+                n_f += 1
+                if exn == "bithumb" and str(k).startswith("bithumb:"):
+                    tr9 = fst.setdefault("open_track", {}) if isinstance(fst.get("open_track", {}), dict) else {}
+                    if not isinstance(tr9.get(k[len("bithumb:"):]), dict):
+                        tr9[k[len("bithumb:"):]] = {"closed": True}
+        if isinstance(fst.get("backfilled_until"), (int, float)) and fst["backfilled_until"] > cut:
+            fst["backfilled_until"] = cut
+        for k9, v9 in fst.items():
+            if k9.startswith("cv") and isinstance(v9, dict) and isinstance(v9.get("until"), (int, float)) and v9["until"] > cut:
+                v9["until"] = cut
+        if exn == "binance":
+            n_f += _rewind_binance(fst, trades)
+    return n_wd, n_f
+
+
+def _live_upbit_orders(cand: set) -> set:
+    if not os.path.isfile(paths.DB_PATH):
+        return set()
+    try:
+        c = _ro(paths.DB_PATH)
+        try:
+            return {r[0] for r in c.execute("SELECT uuid FROM raw_ex WHERE exchange='upbit' AND kind='order'") if r[0] in cand}
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return set()
+
+
 def plan_ex(sd: str, B: dict, cut: int, notes: list) -> dict:
     files = {}
     ups = _read_json(os.path.join(sd, "upbit_orders_state.json"), None)
@@ -670,6 +738,16 @@ def plan_ex(sd: str, B: dict, cut: int, notes: list) -> dict:
         if len(uu) != len(new.get("uuids") or []):
             notes.append(f"upbit_orders_state.json: 주문 uuid {len(new.get('uuids') or [])} → {len(uu)}")
         new["uuids"] = uu
+        tr9 = new.get("open_track") if isinstance(new.get("open_track"), dict) else {}
+        cand9 = [u9 for u9 in ups.get("uuids") or [] if u9 not in known and not isinstance(tr9.get(u9), dict)]
+        sent9 = _live_upbit_orders(set(cand9)) if cand9 else set()
+        n9 = 0
+        for u9 in cand9:
+            tr9[u9] = {"closed": True} if u9 in sent9 else {"closed": True, "rs": 1}
+            n9 += 1
+        if n9:
+            new["open_track"] = tr9
+            notes.append(f"upbit_orders_state.json: 백업 뒤 방출한 주문 {n9}건 단건 확정으로 다시 받음(오래 걸린 지정가 포함)")
         bu = new.get("backfilled_until")
         if isinstance(bu, (int, float)) and bu > cut - 30 * 86400:
             new["backfilled_until"] = cut - 30 * 86400
@@ -683,29 +761,7 @@ def plan_ex(sd: str, B: dict, cut: int, notes: list) -> dict:
             if not isinstance(st, dict):
                 continue
             bex = B["ex"].get(exn) or {}
-            n_wd = _rewind_seen_wd(st, bex)
-            if isinstance(st.get("backfilled_until"), (int, float)) and st["backfilled_until"] > cut:
-                st["backfilled_until"] = cut
-            fst = st.get("fills") if isinstance(st.get("fills"), dict) else None
-            n_f = 0
-            if fst is not None:
-                trades = bex.get("trade") or {}
-                fseen = fst.get("seen") if isinstance(fst.get("seen"), dict) else {}
-                if exn == "hyperliquid":
-                    for k in [k for k, v in fseen.items() if not isinstance(v, (int, float)) or v >= cut * 1000]:
-                        fseen.pop(k)
-                        n_f += 1
-                else:
-                    for k in [k for k in fseen if k not in trades]:
-                        fseen.pop(k)
-                        n_f += 1
-                if isinstance(fst.get("backfilled_until"), (int, float)) and fst["backfilled_until"] > cut:
-                    fst["backfilled_until"] = cut
-                for k9, v9 in fst.items():
-                    if k9.startswith("cv") and isinstance(v9, dict) and isinstance(v9.get("until"), (int, float)) and v9["until"] > cut:
-                        v9["until"] = cut
-                if exn == "binance":
-                    n_f += _rewind_binance(fst, trades)
+            n_wd, n_f = _rewind_exf_acct(exn, st, bex, cut)
             if exn == "hyperliquid":
                 for a, ast in (st.get("hl") or {}).items():
                     for k9 in ("led", "fil"):
@@ -715,6 +771,13 @@ def plan_ex(sd: str, B: dict, cut: int, notes: list) -> dict:
                 sl = st.get("seen_led") if isinstance(st.get("seen_led"), dict) else {}
                 for k in [k for k, v in sl.items() if not isinstance(v, (int, float)) or v >= cut * 1000]:
                     sl.pop(k)
+            for tag9, ast9 in ((st.get("accts") or {}).items() if isinstance(st.get("accts"), dict) else ()):
+                if isinstance(ast9, dict):
+                    a_wd, a_f = _rewind_exf_acct(exn, ast9, _acct_rows(exn, tag9, bex), cut)
+                    b9 = tag9.split("@", 1)[0]
+                    if exn == "binance" and isinstance(ast9.get("fills"), dict) and any(str(t9).startswith(b9 + "@") for t9 in st["accts"]):
+                        a_f += _rewind_binance(ast9["fills"], {})
+                    n_wd, n_f = n_wd + a_wd, n_f + a_f
             if n_wd or n_f:
                 notes.append(f"exf_state.json {exn}: 입출금 기록 {n_wd}건 · 체결 기록 {n_f}건 되돌림(다시 받음)")
         if new != exs:
@@ -749,13 +812,46 @@ def _rewind_binance(fst: dict, trades: dict) -> int:
     return n
 
 
+def wallets_missing(backup: str, cfg: dict = None) -> list:
+    if cfg is None:
+        cfg = _read_json(paths.CONFIG_PATH, {}) or {}
+        try:
+            import config as cfgm
+            cfgm.apply_activity_gate(cfg)
+        except (Exception, SystemExit):   # noqa: BLE001 [optional]
+            pass
+    have = set()
+    w1, w2 = cfg.get("wallets"), cfg.get("_disabled_wallets")
+    for w in (w1 if isinstance(w1, list) else []) + (w2 if isinstance(w2, list) else []):
+        if not isinstance(w, dict) or not w.get("address"):
+            continue
+        if w.get("type", "evm") == "sol":
+            have.add(("sol", str(w["address"])))
+        else:
+            have.add((str(w.get("chain") or ""), str(w["address"]).lower()))
+    if reg is not None:
+        try:
+            have |= {(r9["chain"], str(r9["key"]).lower()) for r9 in reg.wallets(cfg)}
+        except Exception:   # noqa: BLE001 [optional]
+            pass
+    try:
+        c = _ro(backup)
+        try:
+            rows = c.execute("SELECT chain, address FROM wallets ORDER BY chain, address").fetchall()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return []
+    return [f"{ch}:{a}" for ch, a in rows if (ch, str(a) if ch == "sol" else str(a).lower()) not in have]
+
+
 def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None, state_dir: str = None) -> dict:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     now = int(time.time()) if now is None else int(now)
     try:
         info = inspect(backup)
     except sqlite3.DatabaseError as e:
-        raise SystemExit(f"백업 열기 실패: {common.safe_err(e)} — 깨졌거나 원장 백업 파일이 아니에요(list 의 다른 번호로)")
+        raise SystemExit(f"백업 열기 실패: {logs.safe_err(e)} — 깨졌거나 원장 백업 파일이 아니에요(list 의 다른 번호로)")
     miss9 = [t9 for t9 in ("meta", "raw_txs", "raw_ex", "inbox_offsets", "wallets") if t9 not in info["tables"]]
     if miss9:
         raise SystemExit(f"원장 백업이 아니에요(표 없음: {', '.join(miss9)}) — 빈 파일·다른 파일이면 list 의 다른 번호로")
@@ -766,7 +862,7 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
     notes, files = [], {}
     if rewind:
         B = _backup_sets(backup, cut)
-        cfg = _read_json(common.CONFIG_PATH, {}) or {}
+        cfg = _read_json(paths.CONFIG_PATH, {}) or {}
         if "evm" in rewind:
             files.update(plan_evm(sd, B, notes, cut=cut, now=now, cfg=_load_cfg()))
         if "sol" in rewind:
@@ -778,8 +874,30 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
         if "ex" in rewind:
             files.update(plan_ex(sd, B, cut, notes))
             notes.append("업비트 입출금: tj-ex 를 다시 시작하면 창 전체를 다시 보냄(파일 커서 없음)")
+    files.update(_plan_poison_done(sd, cut, notes))
     return {"backup": backup, "T": T, "cut": cut, "margin_h": margin_h, "info": info, "coverage": cov, "rewind": rewind,
-            "files": files, "notes": notes, "decisions_after": decisions_after(T)}
+            "files": files, "notes": notes, "decisions_after": decisions_after(T), "wallets_missing": wallets_missing(backup)}
+
+
+def _plan_poison_done(sd: str, cut: int, notes: list) -> dict:
+    d9 = _read_json(os.path.join(sd, "poison_replayed.json"), None)
+    if not isinstance(d9, dict):
+        return {}
+    gone = {k: v for k, v in d9.items()
+            if isinstance(v, dict) and isinstance(v.get("ts"), (int, float)) and not isinstance(v.get("ts"), bool) and v["ts"] > cut}
+    if not gone:
+        return {}
+    out = {"poison_replayed.json": {k: v for k, v in d9.items() if k not in gone}}
+    redo = [k for k, v in gone.items() if v.get("ok")]
+    if redo:
+        req = _read_json(os.path.join(sd, "poison_replay_request.json"), None)
+        req = req if isinstance(req, dict) else {}
+        if req.get("all") is not True:
+            ids = list(dict.fromkeys([str(x) for x in (req.get("ids") or []) if isinstance(x, str)] + redo))
+            out["poison_replay_request.json"] = {"all": False, "ids": ids, "ts": int(time.time()), "by": "ledger_restore"}
+    notes.append(f"poison_replayed.json: 되감기 기준 뒤 격리 재처리 기록 {len(gone)}건 지움(상태 패널 미해결로)"
+                 + (f" · 성공이던 {len(redo)}건은 tj-core 가 켜지면 다시 처리(poison_replay_request.json)" if redo else ""))
+    return out
 
 
 def plan_chain(sd: str, chain: str, notes: list) -> dict:
@@ -793,7 +911,7 @@ def plan_chain(sd: str, chain: str, notes: list) -> dict:
 
 
 def decisions_after(T: int, live: str = None):
-    live = live or common.DB_PATH
+    live = live or paths.DB_PATH
     if not os.path.exists(live):
         return None
     try:
@@ -811,14 +929,14 @@ def invalidate_curves(sd: str):
         os.remove(os.path.join(sd, "daily_cache.json"))
     except FileNotFoundError:
         pass
-    common.mark_hist_dirty(0, state_dir=sd)
+    histmark.mark_hist_dirty(0, state_dir=sd)
 
 
 def copy_ledger(src: str, dst: str):
     fd = os.open(dst, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     os.close(fd)
-    if os.path.exists(src + "-wal") and os.path.getsize(src + "-wal") > 0:
-        s = sqlite3.connect(common.sqlite_ro_uri(src), uri=True, timeout=30)
+    if (os.path.exists(src + "-wal") and os.path.getsize(src + "-wal") > 0) or os.path.exists(src + "-journal"):
+        s = sqlite3.connect(paths.sqlite_ro_uri(src), uri=True, timeout=30)
         d = sqlite3.connect(dst)
         try:
             s.backup(d)
@@ -849,14 +967,19 @@ def reset_inbox_offsets(path: str, streams: list) -> list:
 
 def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir: str = None, log=print,
           keep_pre: int = PRE_RESTORE_KEEP) -> dict:
-    sd = state_dir or common.STATE_DIR
-    live = common.DB_PATH
+    sd = state_dir or paths.STATE_DIR
+    live = paths.DB_PATH
     if proc_check:
         run = running_units()
         if run is None:
             raise SystemExit("프로세스 목록(ps)을 못 읽어 유닛 정지를 확인할 수 없어요 — 정지를 직접 확인했다면 --no-proc-check")
         if run:
             raise SystemExit("먼저 유닛을 멈추세요: " + STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in run))
+    with ledger_lock.hold(live, who="원장 복구(restore --apply)"):
+        return _apply_locked(p, full_check, sd, live, log, keep_pre)
+
+
+def _apply_locked(p: dict, full_check: bool, sd: str, live: str, log, keep_pre: int) -> dict:
     ck = check(p["backup"], full=full_check)
     if not ck["ok"]:
         raise SystemExit("백업 검사 실패 — 되돌리지 않았어요: " + " · ".join(ck["why"]))
@@ -887,7 +1010,14 @@ def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir:
                 if os.path.exists(tmp + sfx):
                     os.remove(tmp + sfx)
             reset_inbox_offsets(tmp, [s for s, cv in p["coverage"].items() if cv["state"] == "gap"])
-            c = sqlite3.connect(common.sqlite_ro_uri(tmp, immutable=True), uri=True)
+            epoch_conn = sqlite3.connect(tmp)
+            try:
+                dbm.renew_ledger_epoch(epoch_conn)
+                dbm.bump_daily_inval(epoch_conn)
+                epoch_conn.commit()
+            finally:
+                epoch_conn.close()
+            c = sqlite3.connect(paths.sqlite_ro_uri(tmp, immutable=True), uri=True)
             try:
                 ok = c.execute("PRAGMA quick_check").fetchone()[0] == "ok"
             finally:
@@ -903,34 +1033,37 @@ def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir:
                         os.remove(src9)
                         changed.append(f"치움 {name}")
                 else:
-                    common.atomic_write_json(src9, obj)
+                    statefile.atomic_write_json(src9, obj)
                     changed.append(f"고침 {name}")
             if not os.path.exists(live):
                 for sfx in ("-wal", "-shm"):
                     if os.path.exists(live + sfx):
                         os.replace(live + sfx, live + f".orphan_{ts}{sfx}")
-            res = lb.swap_in(live, tmp, live + f".pre_restore_{ts}")
+            invalidate_curves(sd)
+            try:
+                res = lb.swap_in(live, tmp, live + f".pre_restore_{ts}")
+            except lb.SwapRefused as e:
+                raise SystemExit(f"원장 교체 안 함 — {e}") from None
         except BaseException:
             try:
                 os.remove(tmp)
             except OSError:
                 pass
             try:
-                common.atomic_write_json(os.path.join(rec_dir, "plan.json"), {"ts": int(time.time()), "backup": p["backup"], "failed": True,
+                statefile.atomic_write_json(os.path.join(rec_dir, "plan.json"), {"ts": int(time.time()), "backup": p["backup"], "failed": True,
                                                                              "changed": changed})
             except OSError:
                 pass
             raise
         log(f"원장 교체 완료 — 이전 원장: {os.path.basename(res['kept']) if res['kept'] else '(없었음)'}"
             + ("" if res["linked"] or not res["kept"] else " · 하드 링크 불가라 이름 바꾸기로"))
-        invalidate_curves(sd)
         gone = prune_pre_restore(sd, keep_pre, keep_path=res["kept"])
         if gone:
             log("오래된 복구 전 보존본 정리(최근 %d개만): %s" % (keep_pre, ", ".join(os.path.basename(g) for g in gone)))
         rec = {"ts": int(time.time()), "backup": p["backup"], "T": p["T"], "cut": p["cut"], "margin_h": p["margin_h"],
                "coverage": p["coverage"], "rewind": p["rewind"], "changed": changed, "notes": p["notes"],
                "kept": res["kept"], "originals": rec_dir, "pre_restore_pruned": [os.path.basename(g) for g in gone]}
-        common.atomic_write_json(os.path.join(rec_dir, "plan.json"), rec)
+        statefile.atomic_write_json(os.path.join(rec_dir, "plan.json"), rec)
         lb.fsync_dir(sd)
         return rec
     finally:
@@ -942,9 +1075,9 @@ def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir:
 
 def prune_pre_restore(sd: str, keep: int = PRE_RESTORE_KEEP, keep_path: str = None) -> list:
     keep = max(1, int(keep))
-    pre = os.path.basename(common.DB_PATH) + ".pre_restore_"
+    pre = os.path.basename(paths.DB_PATH) + ".pre_restore_"
     try:
-        names = sorted((n for n in os.listdir(sd) if n.startswith(pre) and not n.endswith(("-wal", "-shm"))),
+        names = sorted((n for n in os.listdir(sd) if n.startswith(pre) and not n.endswith(("-wal", "-shm", "-journal"))),
                        key=lambda n: os.path.getmtime(os.path.join(sd, n)), reverse=True)
     except OSError:
         return []
@@ -953,7 +1086,7 @@ def prune_pre_restore(sd: str, keep: int = PRE_RESTORE_KEEP, keep_path: str = No
         names = [kp] + [n for n in names if n != kp] if kp in names else names
     gone = []
     for n in names[keep:]:
-        for sfx in ("", "-wal", "-shm"):
+        for sfx in ("", "-wal", "-shm", "-journal"):
             q = os.path.join(sd, n + sfx)
             try:
                 os.remove(q)
@@ -972,7 +1105,7 @@ _SEED_LOCAL_RX = re.compile(r"^seed_local__([\w.-]+(?:__[\w.-]+)*\.json)$")
 
 
 def files_days(state_dir: str = None) -> list:
-    bdir = os.path.join(state_dir or common.STATE_DIR, "backups")
+    bdir = os.path.join(state_dir or paths.STATE_DIR, "backups")
     days = set()
     try:
         for n in os.listdir(bdir):
@@ -985,7 +1118,7 @@ def files_days(state_dir: str = None) -> list:
 
 
 def files_plan(day: str, state_dir: str = None) -> dict:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     if not re.fullmatch(r"\d{8}", str(day or "")):
         raise SystemExit("날짜는 YYYYMMDD — python3 tools/ledger_restore.py files 로 목록")
     bdir = os.path.join(sd, "backups")
@@ -1034,14 +1167,14 @@ def files_payloads(fp: dict) -> tuple:
             if not isinstance(val, (dict, list)):
                 raise ValueError("JSON 객체·배열이 아님")
         except (OSError, ValueError, UnicodeDecodeError) as e:
-            bad.append(f"{rel}: {common.safe_err(e)[:80]}")
+            bad.append(f"{rel}: {logs.safe_err(e)[:80]}")
             continue
         ok.append((rel, data))
     return ok, bad
 
 
 def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=print) -> dict:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     if proc_check:
         run = running_units(scripts=UNIT_SCRIPTS + ("review_daily.py",))
         if run is None:
@@ -1076,7 +1209,7 @@ def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=pr
         done.append(rel)
     if "daily_px.json" in done:
         invalidate_curves(sd)
-    common.atomic_write_json(os.path.join(keep, "plan.json"), {"ts": int(time.time()), "day": fp["day"], "restored": done})
+    statefile.atomic_write_json(os.path.join(keep, "plan.json"), {"ts": int(time.time()), "day": fp["day"], "restored": done})
     log(f"되돌림 {len(done)}개: " + ", ".join(done) + f"\n지금 것 보존: {keep}")
     return {"restored": done, "kept": keep}
 
@@ -1088,7 +1221,7 @@ COLLECT_STOP_HINT = "pm2 stop tj-evm tj-sol tj-bsc tj-ex tj-exf" + EXTRA_UNIT_HI
 
 
 def new_ledger(apply_: bool, fresh_collect: bool = False, state_dir: str = None, log=print, proc_check: bool = True) -> int:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     if apply_ and fresh_collect and proc_check:
         run = running_units()
         if run is None:
@@ -1096,8 +1229,8 @@ def new_ledger(apply_: bool, fresh_collect: bool = False, state_dir: str = None,
         col9 = [(pid, n) for pid, n in run if n in COLLECTOR_UNITS or n.split()[0] in COLLECTOR_UNITS[:5]]
         if col9:
             raise SystemExit("먼저 수집기를 멈추세요: " + COLLECT_STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in col9))
-    if os.path.exists(common.DB_PATH):
-        log(f"원장이 있어요({common.DB_PATH}) — 새 원장 표식은 원장이 없을 때만")
+    if os.path.exists(paths.DB_PATH):
+        log(f"원장이 있어요({paths.DB_PATH}) — 새 원장 표식은 원장이 없을 때만")
         return 1
     ev = lb.prior_ledger_evidence(sd)
     log("예전 원장 흔적: " + (" · ".join(ev) if ev else "없음(첫 설치 — 표식 없이도 유닛 러너가 만듦)"))
@@ -1105,7 +1238,7 @@ def new_ledger(apply_: bool, fresh_collect: bool = False, state_dir: str = None,
     if fresh_collect:
         pats = (r"^cursor_(evm|rpc)_[\w.-]+\.json$", r"^emitted_(evm|rpc)_[\w.-]+\.json$", r"^cursor_(sol|bsc)\.json$", r"^emitted_(sol|bsc)\.json$",
                 r"^(cursor|emitted)_(tron|sui|ton|btc)\.json$",
-                r"^(upbit_orders_state|exf_state|bsc_nonce|bsc_xin|backfill_done)(\.json)?$")
+                r"^(upbit_orders_state|exf_state|bsc_nonce|bsc_xin|bsc_balw|backfill_done)(\.json)?$")
         moved = [n for n in sorted(os.listdir(sd)) if any(re.match(x, n) for x in pats)]
         log("수집 기록 옆으로(처음부터 다시 받음): " + (", ".join(moved) if moved else "없음"))
     else:
@@ -1120,7 +1253,7 @@ def new_ledger(apply_: bool, fresh_collect: bool = False, state_dir: str = None,
             os.replace(os.path.join(sd, n), os.path.join(aside, n))
         log(f"옮김: {aside}")
     invalidate_curves(sd)
-    common.atomic_write_json(os.path.join(sd, lb.NEW_LEDGER_OK), {"ts": int(time.time()), "by": "ledger_restore new"})
+    statefile.atomic_write_json(os.path.join(sd, lb.NEW_LEDGER_OK), {"ts": int(time.time()), "by": "ledger_restore new"})
     log(f"새 원장 허용 표식 기록(1시간 · 한 번) — 유닛 러너가 다음 확인(15초) 때 빈 원장을 만들어요. pm2 직접 실행이면: TJ_ALLOW_NEW_LEDGER=1 로 core 1회")
     return 0
 
@@ -1142,6 +1275,11 @@ def _print_plan(p: dict, log=print):
         log("  · " + n)
     if p["files"]:
         log(f"  바꿀 상태 파일 {len(p['files'])}개: " + ", ".join(sorted(p["files"])))
+    wm9 = p.get("wallets_missing") or []
+    if wm9:
+        log(f"  ★백업 원장의 지갑 {len(wm9)}개가 지금 설정(config.json)에 없어요: " + ", ".join(wm9[:20]) + (" …" if len(wm9) > 20 else "")
+            + " — 이대로 tj-core 를 켜면 그 지갑 없이 원장을 다시 기장해요. 설정에 지갑을 먼저 되살리세요(새 설치본 = config 사본 · "
+            "files <날짜> 의 config_subset.json). 일부러 뺀 지갑이면 --force 로 적용★")
     da9 = p.get("decisions_after")
     if da9:
         log(f"  ★지금 원장의 판정(매칭 확인·원가 지정 등) {da9}건이 백업 뒤에 생겼어요 — 되돌리면 원장에서 사라져요(화면에서 다시 · "
@@ -1173,6 +1311,7 @@ def main(argv=None) -> int:
     r.add_argument("--rewind", default="auto", help="auto(인박스에 없는 스트림만) | all | none | evm,sol,bsc,ex")
     r.add_argument("--full-check", action="store_true", help="적용 전 integrity_check(느림 · 기본은 quick_check)")
     r.add_argument("--no-proc-check", action="store_true", help="유닛 정지 확인을 못 하는 환경에서만")
+    r.add_argument("--force", action="store_true", help="백업 원장 지갑이 지금 설정에 없어도 적용(일부러 뺀 지갑일 때만)")
     r.add_argument("--keep-pre", type=int, default=PRE_RESTORE_KEEP, help=f"복구 전 보존본(ledger.db.pre_restore_*) 최근 몇 개 남길지(기본 {PRE_RESTORE_KEEP} · 최소 1)")
     fl = sub.add_parser("files", help="원장 밖 사본(files_<날짜>/ · prefs_<날짜>.json) 되돌리기(기본 = 미리보기)")
     fl.add_argument("day", nargs="?", help="YYYYMMDD — 없으면 목록")
@@ -1183,13 +1322,13 @@ def main(argv=None) -> int:
     n.add_argument("--fresh-collect", action="store_true", help="수집 커서·방출 기록도 옆으로(처음부터 다시 받음 — 수집기를 먼저 멈춤)")
     n.add_argument("--no-proc-check", action="store_true", help="수집기 정지 확인을 못 하는 환경에서만")
     a = ap.parse_args(argv)
-    common.ensure_dirs()
+    paths.ensure_dirs()
     if a.cmd == "list":
         rows = backups()
         if not rows:
             print("백업이 없어요(state/backups · state/ledger.db.pre_*)")
             return 1
-        print(f"원장: {common.DB_PATH} " + ("(있음)" if os.path.exists(common.DB_PATH) else "(없음)"))
+        print(f"원장: {paths.DB_PATH} " + ("(있음)" if os.path.exists(paths.DB_PATH) else "(없음)"))
         for k, r9 in enumerate(rows, 1):
             try:
                 i = inspect(r9["path"])
@@ -1212,7 +1351,7 @@ def main(argv=None) -> int:
             return 0
         fp = files_plan(a.day)
         for src, rel in fp["items"]:
-            print(f"  되돌림 대상: state/{rel}  ← " + (f"{os.path.basename(src[2])} 의 칸" if isinstance(src, tuple) else os.path.relpath(src, common.STATE_DIR)))
+            print(f"  되돌림 대상: state/{rel}  ← " + (f"{os.path.basename(src[2])} 의 칸" if isinstance(src, tuple) else os.path.relpath(src, paths.STATE_DIR)))
         for x in fp["manual"] + fp["info"]:
             print("  · " + x)
         for x in files_payloads(fp)[1]:
@@ -1229,7 +1368,7 @@ def main(argv=None) -> int:
         return 0 if res["ok"] else 1
     if a.cmd == "restore":
         bk = resolve(a.backup)
-        if os.path.realpath(bk) == os.path.realpath(common.DB_PATH):
+        if os.path.realpath(bk) == os.path.realpath(paths.DB_PATH):
             raise SystemExit("지금 원장 자체는 백업이 아니에요")
         st9 = streams_for()
         streams = None if a.rewind == "auto" else (list(st9) if a.rewind == "all" else
@@ -1246,6 +1385,10 @@ def main(argv=None) -> int:
                 print("\n떠 있는 유닛: " + ", ".join(f"{n9}(pid {pid})" for pid, n9 in run) + f" — 적용 전에 {STOP_HINT}")
             print("\n미리보기예요(아무것도 안 바꿈). 적용: 같은 명령 + --apply")
             return 0
+        if p.get("wallets_missing") and not a.force:
+            wm9 = p["wallets_missing"]
+            raise SystemExit(f"되돌리지 않았어요 — 백업 원장의 지갑 {len(wm9)}개가 지금 설정에 없어요: " + ", ".join(wm9[:20])
+                             + (" …" if len(wm9) > 20 else "") + "\n  설정(config.json)에 지갑을 먼저 되살린 뒤 다시(일부러 뺀 지갑이면 --force)")
         rec = apply(p, full_check=a.full_check, proc_check=not a.no_proc_check, keep_pre=a.keep_pre)
         print(f"\n완료 — 기록·원본: {rec['originals']}")
         print("다음: " + START_HINT)

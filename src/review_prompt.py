@@ -53,11 +53,11 @@ def coach_role(cfg=None) -> str:
     try:
         if cfg is None:
             import json
-            import common
-            with open(common.CONFIG_PATH, encoding="utf-8") as f:
+            import paths
+            with open(paths.CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
         v = ((cfg or {}).get("review") or {}).get("coach_role") if isinstance(cfg, dict) else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return DEFAULT_COACH_ROLE
     if isinstance(v, str):
         v = " ".join(v.split())

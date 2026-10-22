@@ -2,36 +2,36 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+core_svc.ExfService.EXF_REVERT_LOG = os.path.join(paths.STATE_DIR, "exf_recon_revert.jsonl")
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-import exf_fut_place
+import exf_fut_place  # noqa: E402
 
 chk = T.chk
-C = core.Core(common.load_config())
-os.makedirs(os.path.join(common.STATE_DIR, "backups"), exist_ok=True)
-open(os.path.join(common.STATE_DIR, "backups", "ledger_test.db"), "w").close()
-common.atomic_write_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"),
-                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(common.STATE_DIR, "backups", "ledger_test.db")})
-C._quote_usd = lambda q, ts: Decimal(1)
-C.EXF_INIT_PHASE = 5
+C = core.Core(config.load_config())
+os.makedirs(os.path.join(paths.STATE_DIR, "backups"), exist_ok=True)
+open(os.path.join(paths.STATE_DIR, "backups", "ledger_test.db"), "w").close()
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "backups", "backup_status.json"),
+                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(paths.STATE_DIR, "backups", "ledger_test.db")})
+C.svc_exf._quote_usd = lambda q, ts: Decimal(1)
+C.svc_exf.EXF_INIT_PHASE = 5
 NOW = int(time.time())
 E8 = 10 ** 8
 SEQ = {"t": NOW - 1700}
@@ -48,7 +48,7 @@ def tick_min():
 
 
 def post(ex, t, sym, qty, ev="EXF_DEPOSIT", lk="move_in", sid=None):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     qb = int(Decimal(str(qty)) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                    " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange',?,?,0,?,?,?,?,NULL,NULL,?,?,?)",
@@ -59,22 +59,22 @@ def post(ex, t, sym, qty, ev="EXF_DEPOSIT", lk="move_in", sid=None):
 
 
 def futfile(ex, events, ts=None):
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), {
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"futures_{ex}.json"), {
         "ts": int(ts if ts is not None else time.time()),
         "events": [{"t": int(t) * 1000 + 123, "symbol": s, "kind": k, "amount": a, "uid": f"u{i}"} for i, (t, s, k, a) in enumerate(events)]})
-    C.__dict__.pop("_exf_fut_cache", None)
+    C.svc_exf.__dict__.pop("_exf_fut_cache", None)
 
 
 def recon(ex, bal, sources=("futures",), bts=None):
     bts = bts or tick()
-    st = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+    st = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_state.json"), {})
     st.setdefault(ex, {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"exf_balances_{ex}.json"),
                              {"ts": bts, "balances": bal, "sources": list(sources)})
     C._drain_at = bts + 5
-    C._last_exfrecon = 0
-    C.exf_recon_pass({"ex"})
+    C.svc_exf._last_exfrecon = 0
+    C.svc_exf.exf_recon_pass({"ex"})
     return bts
 
 
@@ -92,7 +92,7 @@ def total(ex, sym, t=None):
 
 
 def pos_ok(ex, sym):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     g = C._group_of(aid)
     r = C.conn.execute("SELECT qty_norm FROM positions WHERE group_id=? AND location=?", (g, f"exchange:{ex}")).fetchone()
     return Decimal(r[0] if r else 0) == total(ex, sym)
@@ -121,10 +121,10 @@ def scene(ex, sym_c, fut=True):
 
 
 print("[S] 정산 통화 · 같은 분 묶음")
-chk(C._exf_fut_sym("binance", "NMRUSDT") == "USDT" and C._exf_fut_sym("binance", "BTCUSDC") == "USDC" and C._exf_fut_sym("binance", "BTCUSD_PERP") == ""
-    and C._exf_fut_sym("okx", "AA-USDT-SWAP") == "USDT" and C._exf_fut_sym("okx", "BTC-USD-SWAP") == "" and C._exf_fut_sym("bybit", "BTCPERP") == "USDC"
-    and C._exf_fut_sym("bybit", "BTCUSD") == "", "S1 정산 통화: USDT·USDC 계약만 · 코인 정산(인버스) = 모름")
-lg = C._exf_fut_legs([(120, Decimal("1.5")), (130, Decimal("-0.5")), (179, Decimal("2")), (180, Decimal("1")), (181, Decimal("-1"))], Decimal(E8))
+chk(C.svc_exf._exf_fut_sym("binance", "NMRUSDT") == "USDT" and C.svc_exf._exf_fut_sym("binance", "BTCUSDC") == "USDC" and C.svc_exf._exf_fut_sym("binance", "BTCUSD_PERP") == ""
+    and C.svc_exf._exf_fut_sym("okx", "AA-USDT-SWAP") == "USDT" and C.svc_exf._exf_fut_sym("okx", "BTC-USD-SWAP") == "" and C.svc_exf._exf_fut_sym("bybit", "BTCPERP") == "USDC"
+    and C.svc_exf._exf_fut_sym("bybit", "BTCUSD") == "", "S1 정산 통화: USDT·USDC 계약만 · 코인 정산(인버스) = 모름")
+lg = C.svc_exf._exf_fut_legs([(120, Decimal("1.5")), (130, Decimal("-0.5")), (179, Decimal("2")), (180, Decimal("1")), (181, Decimal("-1"))], Decimal(E8))
 chk(lg == [(179, 3 * E8)], "S2 같은 분 = 한 줄(시각 = 그 분 마지막 정산) · 합 0 인 분 빠짐", lg)
 
 print("[A] 바이낸스 — 선물 정산 = 정산 시각")
@@ -159,7 +159,7 @@ chk((tf3, 0, Decimal(100)) in rows("binance", "USDT", "futpnl") and not any(t ==
     and total("binance", "USDT") == 945 and pos_ok("binance", "USDT"), "B2 파일이 덮으면 +100 = 정산 시각 · 대사 줄 없음 · 원장 = 실잔고", rows("binance", "USDT", "futpnl"))
 tf3b = tick(5)
 futfile("binance", evs, ts=tf3b - 1)
-C.EXF_FUT_WAIT_S = 0
+C.svc_exf.EXF_FUT_WAIT_S = 0
 b7 = recon("binance", {"USDT": 955})
 chk(C._meta_get("recon_done_exf_binance") == str(b7) and total("binance", "USDT") == 955 and not any(t == tf3b for t, _l, _q in rows("binance", "USDT", "futpnl")),
     "B3 상한 넘으면 종전 규칙으로 대사(원장 = 실잔고)", (C._meta_get("recon_done_exf_binance"), b7, total("binance", "USDT")))
@@ -168,7 +168,7 @@ futfile("binance", evs)
 recon("binance", {"USDT": 955})
 chk(not any(t == tf3b for t, _l, _q in rows("binance", "USDT", "futpnl")) and total("binance", "USDT") == 955 and pos_ok("binance", "USDT"),
     "B4 그 뒤 온 정산은 다시 안 뗌(이중 계상 없음)", rows("binance", "USDT", "futpnl")[-2:])
-del C.EXF_FUT_WAIT_S
+del C.svc_exf.EXF_FUT_WAIT_S
 
 print("[C] 떼지 않는 경우")
 tf4 = tick(5)
@@ -181,7 +181,7 @@ evs += [(tf5, "AAAUSD_PERP", "REALIZED", 7.0)]
 futfile("binance", evs)
 recon("binance", {"USDT": 985, "AAA": 7})
 chk(len(rows("binance", "USDT", "futpnl")) == 3 and not rows("binance", "AAA", "futpnl"), "C2 코인 정산 계약 = 안 뗌", rows("binance", "AAA", "futpnl"))
-chk(C._exf_fut_window("hyperliquid", {"sources": ["futures"]}, NOW, NOW - 100) == {}, "C3 Hyperliquid = 대상 밖(종전 '지금 손익' 규칙 그대로)")
+chk(C.svc_exf._exf_fut_window("hyperliquid", {"sources": ["futures"]}, NOW, NOW - 100) == {}, "C3 Hyperliquid = 대상 밖(종전 '지금 손익' 규칙 그대로)")
 
 print("[E] 나머지 초소액이어도 선물 정산은 적는다")
 tf6 = tick(5)
@@ -198,22 +198,22 @@ chk(any(t < G["b0"] and q == 200 for t, _l, q in before) and (G["b2"], 0, Decima
 futfile("okx", G["evs"])
 C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_place_v', 'exf_fut_cur_okx', 'exf_fut_from_okx')")
 C.conn.commit()
-plan, curs = C._exf_fut_place_plan()
+plan, curs = C.svc_exf._exf_fut_place_plan()
 po = [m for m in plan if m["ex"] == "okx"]
 chk(len(po) == 1 and po[0]["cands"] == [G["b3"], G["b4"]] and not po[0]["skip"], "G1 후보 = 선물 정산 낀 대사 2건", [(m["ex"], m.get("cands"), m.get("skip")) for m in plan])
 snap0 = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings WHERE location='exchange:okx'").fetchall())
-n = C._exf_fut_place_once()
+n = C.svc_exf._exf_fut_place_once()
 after = rows("okx", "USDT")
 chk(n == 1 and rows("okx", "USDT", "futpnl") == [(G["tf1"], 0, Decimal(-5)), (G["tf2"] + 2, 0, Decimal(600))], "G2 선물 줄 = 정산 시각", rows("okx", "USDT", "futpnl"))
 chk((G["b2"], 0, Decimal(-50)) in after and not any(t < G["b0"] for t, _l, _q in after) and not any(t in (G["b3"], G["b4"]) for t, _l, _q in after),
     "G3 소급 +200 지움 · 되돌린 −50 복원 · 정산 대사 줄 없음(나머지 0)", after)
 chk(total("okx", "USDT") == 845 and pos_ok("okx", "USDT") and total("okx", "USDT", G["t1"] + 1) == -200, "G4 원장 합·보유 무변 · 지난날 = 소급 전", total("okx", "USDT"))
-chk(C._exf_fut_place_once() is None and rows("okx", "USDT") == after, "G5 두 번 = 무변(세대 표식)")
+chk(C.svc_exf._exf_fut_place_once() is None and rows("okx", "USDT") == after, "G5 두 번 = 무변(세대 표식)")
 cur = json.loads(C._meta_get("exf_fut_cur_okx") or "{}")
 chk(cur.get("t") == int(C._meta_get("recon_done_exf_okx")) and cur.get("s", {}).get("USDT") in (None, G["b4"])
     and C._meta_get("exf_fut_from_okx") == C._meta_get("recon_done_exf_okx"), "G6 커서 = 마지막 대사 · 통화별 시작 · 새 규칙 시작 표식", cur)
 chk(any(int(b) == G["b3"] for b, in C.conn.execute("SELECT bts FROM exf_adj_tomb WHERE ex='okx' AND sym='USDT'")), "G7 지운 대사 경계 기록(tomb)")
-rc = exf_fut_place._undo(os.path.join(common.STATE_DIR, "exf_fut_place_v1.json"))
+rc = exf_fut_place._undo(os.path.join(paths.STATE_DIR, "exf_fut_place_v1.json"))
 snap1 = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings WHERE location='exchange:okx'").fetchall())
 chk(rc == 0 and snap1 == snap0 and pos_ok("okx", "USDT") and str(C._meta_get("exf_fut_place_v")).startswith("1:undone:"),
     "G8 되돌리기 = 재배치 전 줄 그대로 · 표식 = '1:undone:시각'(NB2 — 자동 적용 금지)", C._meta_get("exf_fut_place_v"))
@@ -231,29 +231,29 @@ futfile("bybit", Z["evs"] + [(H["tf1"], "BBBUSDT", "FEE", -5.0), (H["tf2"], "BBB
 C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_place_v', 'exf_fut_cur_bybit', 'exf_fut_from_bybit')")
 C.conn.commit()
 tot0 = total("bybit", "USDT")
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 pb = next((m for m in plan if m["ex"] == "bybit"), {})
 chk(any(b == H["b3"] for b, _w in pb.get("skip") or ()) and H["b4"] in (pb.get("cands") or []), "G9 −25 대사 = 건너뜀(후보 아닌 대사가 줄임) · +600 대사 = 다시 놓음",
     (pb.get("cands"), pb.get("skip")))
-C._exf_fut_place_once()
+C.svc_exf._exf_fut_place_once()
 chk(total("bybit", "USDT") == tot0 and pos_ok("bybit", "USDT") and any(t == H["tf2"] and q == 600 for t, _l, q in rows("bybit", "USDT", "futpnl")),
     "G10 건너뛴 후보가 있어도 원장 합·보유 무변 · 다시 놓은 대사의 선물 줄", (tot0, total("bybit", "USDT")))
 
 print("[G11] 새 규칙이 이미 돈 대사 = 이관 대상 아님(이중 계상 방지)")
 C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
 C.conn.commit()
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 chk(not [m for m in plan if m.get("cands")], "G11 바이낸스(새 규칙 대사)·OKX·바이빗(이미 다시 놓음) = 후보 0 — 새 규칙 시작 표식", [(m["ex"], m.get("cands")) for m in plan])
 C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_from_okx', 'exf_fut_from_bybit')")
 C.conn.commit()
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 chk(not [m for m in plan if m["ex"] in ("okx", "bybit") and m.get("cands")], "G12 표식이 지워져도 선물 줄 있는 대사 = 후보 아님(두 번 놓지 않음)",
     [(m["ex"], m.get("cands")) for m in plan])
 C.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_place_v', '1:0:0')")
 C.conn.commit()
 
 print("[H] 종전 코드 이력(소액 보류 포함) → 도구 미리보기·적용(가짜 pm2) → 첫 새 대사가 통화별 시작부터 뗌 · 끝전 허용")
-import subprocess
+import subprocess  # noqa: E402
 FAKE = os.path.join(T.TMP, "fakebin")
 os.makedirs(FAKE, exist_ok=True)
 with open(os.path.join(FAKE, "pm2"), "w") as fh:
@@ -263,7 +263,7 @@ os.chmod(os.path.join(FAKE, "pm2"), 0o755)
 
 WRAP = os.path.join(T.TMP, "fp_wrap.py")
 with open(WRAP, "w") as fh:
-    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\ncore.Core.EXF_INIT_PHASE = 5\n"
+    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\nimport core_svc\ncore_svc.ExfService.EXF_INIT_PHASE = 5\n"
              "tool = sys.argv[2]\nsys.argv = [tool] + sys.argv[3:]\nrunpy.run_path(tool, run_name='__main__')\n")
 
 
@@ -275,7 +275,7 @@ def tool(*args):
     return r.returncode, r.stdout + r.stderr
 
 
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 tA = tick(5)
 post("okx", tA, "USDC", 1000, sid="okx:usdc:d0")
 hA = recon("okx", {"USDT": 845, "USDC": 990})
@@ -285,7 +285,7 @@ tR = tick_min()
 hC = recon("okx", {"USDT": 845, "USDC": 1039.700000006})
 tF2 = tick(5)
 hD = recon("okx", {"USDT": 845, "USDC": 1039.5})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 chk(not any(t == hA for t, _l, _q in rows("okx", "USDC")) and any(t == hC for t, _l, _q in rows("okx", "USDC")), "H0 전제: 종전 = −10 되돌림 · 대사 시각 +",
     rows("okx", "USDC"))
 futfile("okx", G["evs"] + [(tF, "AAA-USDC-SWAP", "FUNDING", -0.3), (tR, "AAA-USDC-SWAP", "REALIZED", 50.0), (tF2, "AAA-USDC-SWAP", "FUNDING", -0.2)])
@@ -326,13 +326,13 @@ rc, out = tool("--apply", "--expect", ej)
 chk(rc == 1 and "거부" in out and C._meta_get("exf_fut_place_v") == v0, "H8 계획 못 세운 통화가 든 계획 = 적용 거부(원장·표식 무변)", out[-200:])
 
 print("[I] (fr296 #2) 감사 기록이 빠진 지운 대사 = 이관 계획 못 세움(통화 err · 도구 미리보기 종료 1 · 적용 안 함)")
-LOG = core.Core.EXF_REVERT_LOG
-C.EXF_FUT_EX = ()
+LOG = core_svc.ExfService.EXF_REVERT_LOG
+C.svc_exf.EXF_FUT_EX = ()
 post("bybit", tick(0) - 600, "USDC", 1000, sid="bybit:usdc:d0")
 iA = recon("bybit", {"USDT": 845 + 1000 + 585, "USDC": 950})
 iF = tick(5)
 iB = recon("bybit", {"USDT": 845 + 1000 + 585, "USDC": 1050})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 bb_evs = Z["evs"] + [(H["tf1"], "BBBUSDT", "FEE", -5.0), (H["tf2"], "BBBUSDT", "REALIZED", 600.0), (iF, "CCCUSDC", "REALIZED", 100.0)]
 futfile("bybit", bb_evs)
 C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_place_v', 'exf_fut_cur_bybit', 'exf_fut_from_bybit')")
@@ -341,23 +341,23 @@ log_all = open(LOG, encoding="utf-8").read().splitlines(True)
 gone = [ln for ln in log_all if f'"exfrecon:USDC:{iA}"' in ln]
 with open(LOG, "w", encoding="utf-8") as fh:
     fh.writelines(ln for ln in log_all if ln not in gone)
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 pu = next((m for m in plan if m["ex"] == "bybit" and m["sym"] == "USDC"), {})
 chk(len(gone) == 1 and pu.get("hold") and not pu.get("cands"), "I1 지운 −50 의 감사 줄 없음 → bybit USDC = 보류(근거 부족 — 옛 배치 유지)",
     (len(gone), pu.get("hold"), pu.get("cands")))
 rc, out = tool("--json", pj)
-chk(rc == 0 and "보류(옛 배치 유지" in out and "보류 통화 1" in out, "I2 (fr299) 도구 미리보기 = 보류 표시 · 종료 0(다른 통화는 옮김)", out[-300:])
+chk(rc == 0 and "보류(옛 배치 유지" in out and "보류 통화 1" in out, "I2 도구 미리보기 = 보류 표시 · 종료 0(다른 통화는 옮김)", out[-300:])
 n0 = len(rows("bybit", "USDC", "futpnl"))
 snapI = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings p JOIN assets a USING(asset_id)"
                                                 " WHERE p.location='exchange:bybit' AND upper(a.symbol)='USDC'"))
-r9 = C._exf_fut_place_once()
+r9 = C.svc_exf._exf_fut_place_once()
 snapI2 = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings p JOIN assets a USING(asset_id)"
                                                  " WHERE p.location='exchange:bybit' AND upper(a.symbol)='USDC'"))
 chk(r9 is not None and C._meta_get("exf_fut_place_v") is not None and snapI2 == snapI and len(rows("bybit", "USDC", "futpnl")) == n0,
     "I3 core 자동 경로 = 보류 통화(bybit USDC) 줄 그대로 · 이관 완료 표식", (r9, C._meta_get("exf_fut_place_v")))
 with open(LOG, "w", encoding="utf-8") as fh:
     fh.writelines(log_all)
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 pu = next((m for m in plan if m["ex"] == "bybit" and m["sym"] == "USDC"), {})
 chk(not pu.get("err") and pu.get("cands") == [iB], "I4 감사 줄이 있으면 정상 계획(후보 = 그 대사)", (pu.get("err"), pu.get("cands")))
 with open(LOG, "a", encoding="utf-8") as fh:
@@ -370,12 +370,12 @@ with open(LOG, "w", encoding="utf-8") as fh:
 print("[J] (fr296 #3) 바이낸스 잔고 소스에 선물 지갑이 없으면 이관 대상 아님(대사와 같은 조건)")
 C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_from_binance')")
 C.conn.commit()
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 jb = [m for m in plan if m["ex"] == "binance" and m.get("cands")]
 src0 = C._meta_get("recon_src_exf_binance")
 C.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_src_exf_binance', '[\"funding\", \"margin\"]')")
 C.conn.commit()
-plan, _c = C._exf_fut_place_plan()
+plan, _c = C.svc_exf._exf_fut_place_plan()
 chk(jb and not [m for m in plan if m["ex"] == "binance" and m.get("cands")], "J1 선물 지갑 소스 있음 = 후보 있음 · 없음 = 바이낸스 제외",
     ([m.get("cands") for m in jb], [(m["ex"], m.get("cands")) for m in plan]))
 C.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_src_exf_binance', ?)", (src0,))
@@ -384,10 +384,10 @@ C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
 C.conn.commit()
 
 print("[K] (fr296 #4) 미리보기 --json 출력 = state·설정 경로 거부 · 미리보기 계획 아닌 기존 파일 거부 · 심볼릭 링크로 state 가리켜도 거부")
-ldb = common.DB_PATH
+ldb = paths.DB_PATH
 sz0 = os.path.getsize(ldb)
 rc1, out1 = tool("--json", ldb)
-rc2, out2 = tool("--json", os.path.join(common.STATE_DIR, "fp_x.json"))
+rc2, out2 = tool("--json", os.path.join(paths.STATE_DIR, "fp_x.json"))
 other = os.path.join(T.TMP, "not_plan.json")
 with open(other, "w") as fh:
     fh.write('{"keep": 1}')
@@ -395,7 +395,7 @@ rc3, out3 = tool("--json", other)
 lnk = os.path.join(T.TMP, "plan_link.json")
 os.symlink(ldb, lnk)
 rc4, out4 = tool("--json", lnk)
-chk(rc1 == 1 and rc2 == 1 and rc3 == 1 and rc4 == 1 and os.path.getsize(ldb) == sz0 and not os.path.exists(os.path.join(common.STATE_DIR, "fp_x.json"))
+chk(rc1 == 1 and rc2 == 1 and rc3 == 1 and rc4 == 1 and os.path.getsize(ldb) == sz0 and not os.path.exists(os.path.join(paths.STATE_DIR, "fp_x.json"))
     and open(other).read() == '{"keep": 1}', "K1 원장·state·남의 파일·링크 = 거부(원장 크기 그대로)", (rc1, rc2, rc3, rc4, out1[-120:]))
 rc5, out5 = tool("--json", pj)
 chk(rc5 == 0 and json.load(open(pj)).get("plan") is not None, "K2 기존 미리보기 계획 파일 = 덮어씀(원자)", out5[-200:])
@@ -405,7 +405,7 @@ C.conn.execute("DELETE FROM meta WHERE k IN ('exf_fut_place_v', 'exf_fut_cur_byb
 C.conn.commit()
 rc, out = tool("--json", pj)
 rc, out = tool("--apply", "--expect", pj)
-undo_p = os.path.join(common.STATE_DIR, f"exf_fut_place_v{core.Core.EXF_FUT_V}.json")
+undo_p = os.path.join(paths.STATE_DIR, f"exf_fut_place_v{core_svc.ExfService.EXF_FUT_V}.json")
 ud = json.load(open(undo_p))
 snapL = sorted(tuple(r) for r in C.conn.execute("SELECT source_ns, source_id, leg_seq, event_ts, qty_base FROM postings WHERE location='exchange:bybit'"))
 bad = json.loads(json.dumps(ud))
@@ -431,7 +431,7 @@ C.conn.commit()
 rcn, outn = tool("--undo", undo_p)
 C.conn.execute("UPDATE meta SET v=? WHERE k='exf_fut_place_v'", (mk0,))
 C.conn.commit()
-chk(rcc == 1 and rcn == 1 and C._meta_get("exf_fut_place_v") == mk0, "L2b (fr297 #3) 정본과 다른 자료 · 원장 표식의 통화 수와 다른 자료 = 거부", (outc[-150:], outn[-150:]))
+chk(rcc == 1 and rcn == 1 and C._meta_get("exf_fut_place_v") == mk0, "L2b 정본과 다른 자료 · 원장 표식의 통화 수와 다른 자료 = 거부", (outc[-150:], outn[-150:]))
 rcu, outu = tool("--undo", undo_p)
 chk(rcu == 0 and pos_ok("bybit", "USDC") and str(C._meta_get("exf_fut_place_v")).startswith("1:undone:"), "L3 정본 되돌리기 자료 = 되돌림(합·보유 무변 · 표식 undone)",
     outu[-200:])
@@ -441,30 +441,30 @@ C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
 C.conn.commit()
 
 print("[N] 감사 기록 쓰기 실패 = 같은 트랜잭션에 표식(meta exf_revert_log_fail '<누계>:<시각>') → 이관 미리보기 종료 1 · 자동 경로 보류")
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 post("kucoin", tick(0) - 500, "USDT", 100, sid="kc:d0")
 recon("kucoin", {"USDT": 90})
-C.EXF_REVERT_LOG = os.path.join(T.TMP, "no_such_dir", "x.jsonl")
+C.svc_exf.EXF_REVERT_LOG = os.path.join(T.TMP, "no_such_dir", "x.jsonl")
 recon("kucoin", {"USDT": 120})
-del C.EXF_REVERT_LOG
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_REVERT_LOG
+del C.svc_exf.EXF_FUT_EX
 lf = C._meta_get("exf_revert_log_fail")
 chk(lf is not None and lf.split(":")[0] == "1" and total("kucoin", "USDT") == 120, "N1 쓰기 실패 1건 = 표식 '1:<시각>'(기장은 진행)", lf)
 rc, out = tool("--json", pj)
 chk(rc == 1 and "감사 기록 쓰기 실패" in out, "N2 표식 있으면 미리보기 종료 1(배포 중단)", out[-300:])
 C.conn.execute("DELETE FROM meta WHERE k='exf_fut_place_v'")
 C.conn.commit()
-chk(C._exf_fut_place_once() is None and C._meta_get("exf_fut_place_v") is None, "N3 core 자동 경로도 보류(완료 표식 없음)")
+chk(C.svc_exf._exf_fut_place_once() is None and C._meta_get("exf_fut_place_v") is None, "N3 core 자동 경로도 보류(완료 표식 없음)")
 C.conn.execute("DELETE FROM meta WHERE k='exf_revert_log_fail'")
 C.conn.commit()
 
 print("[R] (fr296 #1) 재구축(rebuild2 앵커 재계산) = 선물 정산 줄 금액 그대로 · 재파생 차이는 대사 줄로")
-import importlib.util
-import db as dbm
+import importlib.util  # noqa: E402
+import db as dbm  # noqa: E402
 spec = importlib.util.spec_from_file_location("rb2", os.path.join(T.ROOT, "tools", "rebuild2.py"))
 rb2 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rb2)
-gaid = C._exf_asset("gate", "USDT")
+gaid = C.svc_exf._exf_asset("gate", "USDT")
 gdec = C.conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (gaid,)).fetchone()[0]
 GL = "exchange:gate"
 rT = tick(0) - 300
@@ -496,7 +496,7 @@ C.conn.commit()
 try:
     rb2.recompute_anchors(BP, C.conn, C, anchors, {}, {})
     rex = None
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     rex = repr(e)
 fr = sorted((int(r[0]), Decimal(int(r[1])) / 10 ** gdec) for r in C.conn.execute(
     "SELECT event_ts, qty_base FROM postings WHERE location=? AND source_ns='gate:futpnl'", (GL,)))
@@ -506,7 +506,7 @@ tg = total("gate", "USDT")
 chk(rex is None and fr == [(rT - 30, Decimal(100)), (rT2 - 5, Decimal(50))], "R1 선물 정산 줄 = 금액·시각 그대로(+100 · +50 — 종전 = δ 를 받아 +200)", (rex, fr))
 rts = {str(r[0]): int(r[1]) for r in C.conn.execute("SELECT source_id, event_ts FROM postings WHERE location=? AND source_ns='gate:recon'", (GL,))}
 chk(rts.get(f"exfrecon:USDT:{rT}") == rT and rts.get(f"exfrecon:USDT:{rT2}") == rT2,
-    "R3 (fr297 #5) 부호가 바뀐 대사 줄·지은 0 앵커 = 그 대사 시각 그대로(창 시작으로 소급 안 함)", rts)
+    "R3 부호가 바뀐 대사 줄·지은 0 앵커 = 그 대사 시각 그대로(창 시작으로 소급 안 함)", rts)
 chk(rr.get(f"exfrecon:USDT:{rT}") == Decimal(90) and rr.get(f"exfrecon:USDT:{rT2}") == Decimal(20) and tg == Decimal(1000 - 100 + 100 + 90 + 50 + 20) - Decimal(0),
     "R2 재파생 차이 = 같은 대사 시각의 대사 줄(−10 → +90) · 선물만 있던 대사 = 대사 줄 새로(+20) · 합 = 라이브 관측", (rr, tg))
 

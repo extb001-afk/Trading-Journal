@@ -1,14 +1,14 @@
 from __future__ import annotations
 import acct_norm
-import common
+import paths, statefile
 import json
 import os
 from datetime import datetime
 from decimal import Decimal
 from decimal import InvalidOperation
-from view_common import KST
+from timeutil import KST
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -24,7 +24,7 @@ class KrwMixin:
                 q9 = Decimal(int(r[2])) / (Decimal(10) ** int(r[3] if r[3] is not None else 18))
                 if q9:
                     out.setdefault(int(r[0]), []).append((int(r[1]), q9))
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._upbit_led_timeline", e9)
             log.warning("원장 업비트 위치 이력 조회 실패(지난날 업비트 미매칭 몫 빼기 생략): %s", e9)
             return {}
@@ -36,7 +36,7 @@ class KrwMixin:
         try:
             key9 = tuple(conn.execute("SELECT COUNT(*), MAX(observed_at) FROM raw_ex WHERE exchange='upbit'"
                                       " AND kind IN ('order', 'deposit', 'withdraw')").fetchone())
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._upbit_krw_timeline", e9)
             log.warning("업비트 원화 타임라인 조회 실패(과거일 이월 유지): %s", e9)
             return None
@@ -121,7 +121,7 @@ class KrwMixin:
         try:
             key9 = tuple(conn.execute("SELECT COUNT(*), MAX(observed_at) FROM raw_ex WHERE exchange='bithumb'"
                                       " AND kind IN ('trade', 'deposit', 'withdraw')").fetchone())
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._bithumb_krw_timeline", e9)
             log.warning("빗썸 원화 타임라인 조회 실패(지난날 빗썸 원화 = 이월): %s", e9)
             return None
@@ -197,7 +197,7 @@ class KrwMixin:
             first9["ub"] = min(f9) if f9 else None
             r9 = conn.execute("SELECT MIN(event_ts) FROM postings WHERE location >= 'lp:' AND location < 'lp;'").fetchone()
             first9["rest"] = int(r9[0]) if r9 and r9[0] is not None else None
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._x_src", e9)
             first9.pop("rest", None)
             log.warning("원장 밖 금액 첫 활동 시각 조회 실패(자르지 않음): %s", e9)
@@ -271,7 +271,7 @@ class KrwMixin:
             key9 = tuple(tuple(r9) for r9 in conn.execute(
                 "SELECT exchange, COUNT(*), MAX(observed_at) FROM raw_ex WHERE exchange IN ('upbit', 'bithumb')"
                 " GROUP BY exchange ORDER BY exchange").fetchall())
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._krw_flows", e9)
             log.warning("원화 입출금 조회 실패: %s", e9)
             return None
@@ -325,12 +325,12 @@ class KrwMixin:
     @staticmethod
     def _exf_bal_view() -> dict:
         out = {}
-        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb"):
-            bp0 = os.path.join(common.STATE_DIR, f"exf_balances_{ex9}.json")
+        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb", "coinbase"):
+            bp0 = paths.state(f"exf_balances_{ex9}.json")
             for c9 in (bp0, bp0 + ".pending", bp0 + ".view"):
                 try:
-                    d9 = common.read_json(c9, {}) if os.path.exists(c9) else {}
-                except (Exception, SystemExit) as _cg9:
+                    d9 = statefile.read_json(c9, {}) if os.path.exists(c9) else {}
+                except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_krw:KrwMixin._exf_bal_view", _cg9)
                     d9 = {}
                 if isinstance(d9, dict) and isinstance(d9.get("balances"), dict):
@@ -341,13 +341,13 @@ class KrwMixin:
     @staticmethod
     def _flow_debts() -> dict:
         out = {}
-        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb"):
-            bp9 = os.path.join(common.STATE_DIR, f"exf_balances_{ex9}.json")
+        for ex9 in ("binance", "bybit", "okx", "kucoin", "gate", "bithumb", "coinbase"):
+            bp9 = paths.state(f"exf_balances_{ex9}.json")
             if not os.path.exists(bp9):
                 continue
             try:
-                dd9 = (common.read_json(bp9, {}) or {}).get("debts")
-            except (Exception, SystemExit) as _cg9:
+                dd9 = (statefile.read_json(bp9, {}) or {}).get("debts")
+            except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("view_krw:KrwMixin._flow_debts", _cg9)
                 continue
             for s9, v9 in (dd9.items() if isinstance(dd9, dict) else ()):

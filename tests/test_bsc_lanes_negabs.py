@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import threading
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
 
 CFG = json.load(open(os.path.join(T.TMP, "config.json"), encoding="utf-8"))
 CFG["wallets"].append({"type": "bsc_rpc", "chain": "bsc", "address": W})
@@ -17,20 +17,19 @@ CFG["bsc"] = {"detail_rpcs": ["https://bscrpc.invalid"], "logs_rpcs": []}
 CFG.setdefault("native_symbol", {})["bsc"] = "BNB"
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8"))
 
-import common
-import core
-import discopen
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import discopen  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 E18 = 10 ** 18
 DAY = 86400
 NOW = int(time.time())
 X = "0x" + "b7" * 20
 TKB, TKC, TKD, TKE = ("0x" + c * 20 for c in ("c1", "c2", "c3", "c4"))
 T0 = NOW - 20 * DAY
-CPATH = os.path.join(common.STATE_DIR, "cursor_bsc.json")
+CPATH = os.path.join(paths.STATE_DIR, "cursor_bsc.json")
 
 
 def h(n):
@@ -73,7 +72,7 @@ def cand(c, ca):
 def rearm(c, ca):
     d = cand(c, ca)
     d["next"] = 0
-    c._negabs_runner()._put(discopen.cand_key("bsc", W, aid_of(c, ca)), d)
+    c.svc_recon._negabs_runner()._put(discopen.cand_key("bsc", W, aid_of(c, ca)), d)
     c.conn.commit()
 
 
@@ -100,9 +99,9 @@ discopen.fetch_at = fake_fetch
 
 def pump(c, n=60):
     for _ in range(n):
-        r = c._negabs_runner()
+        r = c.svc_recon._negabs_runner()
         r.last = 0.0
-        c.negabs_pass()
+        c.svc_recon.negabs_pass()
         if not r.jobs:
             return
         time.sleep(0.02)
@@ -114,15 +113,15 @@ def cursor(fb, live=None, synced=True):
         cur["_synced_at"] = NOW + 3600
     if live:
         cur["_live"] = live
-    common.atomic_write_json(CPATH, cur)
+    statefile.atomic_write_json(CPATH, cur)
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_done_bsc', ?)", (str(T0),))
 c.conn.execute("INSERT OR REPLACE INTO raw_observations (obs_id, kind, venue, payload, observed_at) VALUES (?,?,?,?,?)",
                ("recon:bsc", "opening_balance", "bsc", json.dumps({W: {"native:None": 0}}), T0))
 c.conn.commit()
-chk("bsc" in c._negabs_runner()._chains(), "전제: BSC 지갑 = 발견 시점 처리 대상 체인")
+chk("bsc" in c.svc_recon._negabs_runner()._chains(), "전제: BSC 지갑 = 발견 시점 처리 대상 체인")
 
 print("[D1] 차선 중 — 빈 구간 입금이 아직 안 옴")
 LIVE = {"done": 2980, "holes": [[1500, 2400]], "why": "lag", "start": 1500, "fb": 1500}
@@ -154,9 +153,9 @@ T3 = T2 + DAY
 FAKE[(TKD, 2699)] = (7 * E18, T3 - 12)
 GATE[TKD] = threading.Event()
 feed(c, h(31), snap(h(31), T3, 2700, W, TKD, toks=[(W, X, TKD, "TKD", 7 * E18)], fee=10 ** 15))
-r = c._negabs_runner()
+r = c.svc_recon._negabs_runner()
 r.last = 0.0
-c.negabs_pass()
+c.svc_recon.negabs_pass()
 chk(any(j["ch"] == "bsc" for j in r.jobs.values()), "D3 전제: 조회 진행 중", list(r.jobs))
 cursor(2600, {"done": 2980, "holes": [[2600, 2650]], "why": "lag", "start": 2600, "fb": 2600})
 GATE[TKD].set()
@@ -193,10 +192,10 @@ chk(len(an5) == 1 and int(an5[0][1]) == 7 * E18 and total(c, TKF) == 0, "D5 그 
 
 LV = {"done": 3500, "holes": [[2749, 3200]], "why": "lag", "start": 2749, "fb": 2749}
 cursor(2749, LV)
-r5a = c._negabs_runner()._lane_hold("bsc", 2749)
+r5a = c.svc_recon._negabs_runner()._lane_hold("bsc", 2749)
 cursor(2748, dict(LV, holes=[[2748, 3200]], fb=2748))
-r5b = c._negabs_runner()._lane_hold("bsc", 2749)
-chk(r5a is None and r5b and "차선" in r5b and c._negabs_runner()._lane_hold("base", 1) is None,
+r5b = c.svc_recon._negabs_runner()._lane_hold("bsc", 2749)
+chk(r5a is None and r5b and "차선" in r5b and c.svc_recon._negabs_runner()._lane_hold("base", 1) is None,
     "D5 경계 — from_block = 읽는 블록이면 통과 · 한 블록 모자라면 대기(사유 '차선') · BSC 밖 체인은 이 판정 없음", (r5a, r5b))
 
 T.finish()

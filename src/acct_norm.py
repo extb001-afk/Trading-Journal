@@ -5,9 +5,10 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-KST = timezone(timedelta(hours=9))
+import num_parse
+from timeutil import KST, KST_OFFSET_S
 log = logging.getLogger("tj-web")
 DEFAULT_KRW_USD = 1384.0
 _DEFAULT_WARN = [0.0]
@@ -18,6 +19,14 @@ def _warn_default(why: str):
     if now - _DEFAULT_WARN[0] >= 3600:
         _DEFAULT_WARN[0] = now
         log.warning("환율 데이터 없음(%s) — 원화 환산에 고정값 %.0f 원/달러를 씀(원화 실현·세금 원화가 부정확할 수 있음)", why, DEFAULT_KRW_USD)
+EX_OFF_LEDGER = ("KRW", "USD")
+EX_USD_LEDGER = frozenset(("coinbase",))
+
+
+def ex_off_ledger(ex: str) -> tuple:
+    return ("KRW",) if str(ex or "") in EX_USD_LEDGER else EX_OFF_LEDGER
+
+
 _SEED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "ticker_aliases.json")
 _ALIAS = None
 
@@ -26,8 +35,8 @@ def _aliases() -> dict:
     global _ALIAS
     if _ALIAS is None:
         try:
-            import common
-            ex = (common.seed_json("ticker_aliases.json", {}, base_dir=os.path.dirname(os.path.dirname(_SEED))) or {}).get("exchange") or {}
+            import seeds
+            ex = (seeds.seed_json("ticker_aliases.json", {}, base_dir=os.path.dirname(os.path.dirname(_SEED))) or {}).get("exchange") or {}
             _ALIAS = {str(k).lower(): {norm_ticker(a): norm_ticker(b) for a, b in (v or {}).items()}
                       for k, v in ex.items() if isinstance(v, dict)}
         except (OSError, ValueError, AttributeError):
@@ -81,7 +90,7 @@ _ISO_DAY = {}
 
 def iso_day(ts) -> str:
     t = int(ts)
-    d = (t + 32400) // 86400
+    d = (t + KST_OFFSET_S) // 86400
     s = _ISO_DAY.get(d)
     if s is None:
         s = datetime.fromtimestamp(t, KST).strftime("%Y-%m-%d")
@@ -107,6 +116,34 @@ def month_of(key, today) -> str:
     return f"{y}-{mm:02d}"
 
 
+FLAT_MIN_N = 5
+FLAT_MIN_SPAN_MS = 86_400_000
+
+
+def flat_keys(candle: dict) -> set:
+    by = {}
+    for k, v in (candle or {}).items():
+        if not v or str(k).startswith(("UPBITKRW2:", "JPYUSD:")):
+            continue
+        sym, _, ms = str(k).rpartition(":")
+        if sym and ms.isdigit():
+            by.setdefault(sym, []).append((int(ms), v, k))
+    out = set()
+    for pts in by.values():
+        if len(pts) < FLAT_MIN_N:
+            continue
+        pts.sort()
+        i = 0
+        while i < len(pts):
+            j = i
+            while j + 1 < len(pts) and pts[j + 1][1] == pts[i][1]:
+                j += 1
+            if j - i + 1 >= FLAT_MIN_N and pts[j][0] - pts[i][0] >= FLAT_MIN_SPAN_MS and not (0.98 <= float(pts[i][1]) <= 1.02):
+                out.update(pt[2] for pt in pts[i:j + 1])
+            i = j + 1
+    return out
+
+
 class FxBook:
 
     def __init__(self, web_fx: dict, core_path: str = None, spot_rate: float = None, web_candle: dict = None):
@@ -118,6 +155,8 @@ class FxBook:
                     d = json.load(f) or {}
                 fx.update({int(k): float(v) for k, v in (d.get("fx") or {}).items() if str(k).isdigit() and v})
                 cand = dict(d.get("candle") or {})
+                for key in flat_keys(cand):
+                    cand[key] = None
             except (OSError, ValueError, TypeError, AttributeError):
                 pass
         for k, v in (web_fx or {}).items():
@@ -179,6 +218,9 @@ class FxBook:
 
     def candle(self, sym, ts):
         s = str(sym or "").upper()
+        m = (int(ts) * 1000 // 60_000) * 60_000
+        if self._cand.get(f"{s}:{m}", 0) is None:
+            return None
         if s not in self._csym:
             pts = {}
             pre = s + ":"
@@ -192,7 +234,6 @@ class FxBook:
         ks, pts = self._csym[s]
         if not ks:
             return None
-        m = (int(ts) * 1000 // 60_000) * 60_000
         if m in pts:
             return pts[m]
         j = bisect.bisect_left(ks, m)
@@ -219,8 +260,8 @@ def fill_ts(order: dict):
             if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
                 ts = float(v) / (1000.0 if float(v) > 1e11 else 1.0)
             elif v:
-                import common
-                ts = common.iso_epoch(v)
+                import timeutil
+                ts = timeutil.iso_epoch(v)
         except (TypeError, ValueError):
             ts = None
         if ts and (best is None or ts > best):
@@ -232,12 +273,7 @@ UPBIT_TERMINAL = ("done", "cancel")
 
 
 def _dec(v):
-    from decimal import Decimal, InvalidOperation
-    try:
-        d = Decimal(str(v))
-    except (InvalidOperation, ValueError, TypeError):
-        return None
-    return d if d.is_finite() else None
+    return num_parse.to_dec(v)
 
 
 def trades_fill_merge(stored: dict, resp: dict):

@@ -3,104 +3,21 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import common
-import calcguard
+from typing import Callable
+import acct_norm  # noqa: E402
+import ex_sign, logs, net_http, num_parse  # noqa: E402
+import fsio  # noqa: E402
+import calcguard  # noqa: E402
+import token_tables
 
 _UA = {"Accept": "application/json", "User-Agent": "tj-bot/0.1 (personal trade journal)"}
 
-_USDE_OFT = "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34"
-STABLE_CAS = {
-    "eth": {
-        "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT",
-        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
-        "0x6b175474e89094c44da98b954eedeac495271d0f": "DAI",
-        "0x4c9edd5852cd905f086c759e8383e09bff1e68b3": "USDE",
-        "0xcccc62962d17b8914c62d74ffb843d73b2a3cccc": "CUSD",
-        "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d": "USD1",
-        "0xe556aba6fe6036275ec1f87eda296be72c811bce": "NUSD",
-    },
-    "base": {
-        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": "USDC",
-        "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": "USDT",
-        "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": "DAI",
-    },
-    "arbitrum": {
-        "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": "USDT",
-        "0xaf88d065e77c8cc2239327c5edb3a432268e5831": "USDC",
-        "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8": "USDC",
-        "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": "DAI",
-    },
-    "optimism": {
-        "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58": "USDT",
-        "0x0b2c639c533813f4aa9d7837caf62653d097ff85": "USDC",
-        "0x7f5c764cbc14f9669b88837ca1490cca17c31607": "USDC",
-        "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": "DAI",
-    },
-    "polygon": {
-        "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": "USDT",
-        "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359": "USDC",
-        "0x2791bca1f2de4661ed88a30c99a7a9449aa84174": "USDC",
-        "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063": "DAI",
-    },
-    "scroll": {
-        "0xf55bec9cafdbe8730f096aa55dad6d22d44099df": "USDT",
-        "0x06efdbff2a14a7c8e15944d1f4a48f9f95f663a4": "USDC",
-    },
-    "zksync": {
-        "0x493257fd37edb34451f62edf8d2a0c418852ba4c": "USDT",
-        "0x1d17cbcf0d6d143135ae902365d2e5e2a16538d4": "USDC",
-        "0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4": "USDC",
-    },
-    "gnosis": {
-        "0x4ecaba5870353805a9f068101a40e0f32ed605c6": "USDT",
-        "0xddafbb505ad214d7b80b1f830fccc89b60fb7a83": "USDC",
-    },
-    "bsc": {
-        "0x55d398326f99059ff775485246999027b3197955": "USDT",
-        "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d": "USDC",
-        "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3": "DAI",
-        "0xe9e7cea3dedca5984780bafc599bd69add087d56": "BUSD",
-        "0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d": "USD1",
-    },
-    "robinhood": {
-        "0x5fc5360d0400a0fd4f2af552add042d716f1d168": "USDG",
-    },
-}
-for _ch in ("base", "arbitrum", "optimism", "scroll", "bsc", "robinhood"):
-    STABLE_CAS[_ch][_USDE_OFT] = "USDE"
-for _ch, _m in {
-    "monad": {"0x754704bc059f8c67012fed69bc8a327a5aafb603": "USDC", "0xe7cd86e13ac4309349f30b3435a9d337750fc82d": "USDT"},
-    "plasma": {"0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb": "USDT"},
-    "megaeth": {"0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb": "USDT", "0xfafddbb3fc7688494971a79cc65dca3ef82079e7": "USDM"},
-    "xlayer": {"0x779ded0c9e1022225f8e0630b35a9b54be713736": "USDT", "0x74b7f16337b8972027f6196a17a631ac6de26d22": "USDC"},
-    "kaia": {"0xd077a400968890eacc75cdc901f0356c943e4fdb": "USDT"},
-    "bob": {"0xe75d0fb2c24a55ca1e3f96781a2bcc7bdba058f0": "USDC", "0x05d032ac25d322df992303dca074ee7392c117b9": "USDT"},
-    "avalanche": {"0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": "USDC", "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": "USDT"},
-    "story": {"0xf1815bd50389c46847f0bda824ec8da914045d14": "USDC"},
-    "abstract": {"0x84a71ccd554cc1b02749b35d22f684cc8ec987e1": "USDC", "0x0709f39376deee2a2dfc94a58edeb2eb9df012bd": "USDT"},
-    "katana": {"0x203a662b0bd271a6ed5a60edfbd04bfce608fd36": "USDC"},
-    "tron": {"41a614f803b6fd780986a42c78ec9c7f77e6ded13c": "USDT"},
-    "ton": {"0_b113a994b5024a16719f69139328eb759596c38a25f59028b146fecdc3621dfe": "USDT"},
-    "sui": {"mv_3078646261333436373265333063623036356231663933653361623535333138373638666436666566363663313539343263396637636238343665326639303065373a3a757364633a3a55534443": "USDC"},
-}.items():
-    STABLE_CAS.setdefault(_ch, {}).update(_m)
-STABLE_SYMS = {"USDT", "USDC", "DAI"}
-JPY_STABLE_CAS = {
-    "eth": {"0xe7c3d8c9a439fede00d2600032d5db0be71c3c29": "JPYC"},
-    "polygon": {"0xe7c3d8c9a439fede00d2600032d5db0be71c3c29": "JPYC"},
-}
 DOLLAR_NATIVES = {"XDAI", "USDC", "USDT"}
-STABLE_MINTS = {
-    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT",
-    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC",
-    "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH": "USDG",
-}
 
 MAJOR_CANDLE_SYMS = {"ETH", "BTC", "SOL", "POL", "BNB", "AVAX"}
 NATIVE_EX_TICKER = {"TON": "GRAM"}
@@ -124,9 +41,9 @@ def _upbit_pace(url: str) -> None:
 
 def _gj(url: str, timeout: float = 10.0):
     _upbit_pace(url)
-    req = urllib.request.Request(url, headers=_UA)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(common.read_capped(r).decode())
+    req = net_http.request(url, headers=_UA)
+    with net_http.urlopen(req, timeout=timeout) as r:
+        return json.loads(net_http.read_capped(r).decode())
 
 
 class BulkError(RuntimeError):
@@ -139,25 +56,32 @@ def _fin(x) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
 
 
+def _kl_zero(row, vi, qi) -> bool:
+    try:
+        return len(row) > max(vi, qi) and _vol_zero(row[vi]) and _vol_zero(row[qi])
+    except TypeError:
+        return False
+
+
 def _c_binance(sym, ms):
-    arr = _gj(f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval=1m"
+    arr = _gj(f"https://api.binance.com/api/v3/klines?symbol={urllib.parse.quote(sym, safe='')}USDT&interval=1m"
               f"&startTime={ms}&endTime={ms + 59_999}&limit=1")
-    if arr and _fin(float(arr[0][1])):
+    if arr and _fin(float(arr[0][1])) and not _kl_zero(arr[0], 5, 7):
         return float(arr[0][1])
     return None
 
 
 def _c_bybit(sym, ms):
-    d = _gj(f"https://api.bybit.com/v5/market/kline?category=spot&symbol={sym}USDT"
+    d = _gj(f"https://api.bybit.com/v5/market/kline?category=spot&symbol={urllib.parse.quote(sym, safe='')}USDT"
             f"&interval=1&start={ms}&end={ms + 59_999}&limit=1")
     rows = ((d.get("result") or {}).get("list")) or []
-    if rows and _fin(float(rows[0][1])):
+    if rows and _fin(float(rows[0][1])) and not _kl_zero(rows[0], 5, 6):
         return float(rows[0][1])
     return None
 
 
 def _c_gate(sym, ms):
-    arr = _gj(f"https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair={sym}_USDT"
+    arr = _gj(f"https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair={urllib.parse.quote(sym, safe='')}_USDT"
               f"&interval=1m&from={ms // 1000}&to={ms // 1000 + 59}")
     if arr and len(arr[0]) >= 6 and _fin(float(arr[0][5])):
         return float(arr[0][5])
@@ -165,7 +89,7 @@ def _c_gate(sym, ms):
 
 
 def _c_kucoin(sym, ms):
-    d = _gj(f"https://api.kucoin.com/api/v1/market/candles?type=1min&symbol={sym}-USDT"
+    d = _gj(f"https://api.kucoin.com/api/v1/market/candles?type=1min&symbol={urllib.parse.quote(sym, safe='')}-USDT"
             f"&startAt={ms // 1000}&endAt={ms // 1000 + 60}")
     rows = d.get("data") or []
     want = ms // 1000
@@ -186,7 +110,7 @@ def _upbit_code(sym: str) -> str:
         for code, canon in (acct_norm._aliases().get("upbit") or {}).items():
             if canon == sym and code != sym:
                 return code
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [optional]
         calcguard.swallowed("pricing:_upbit_code", _cg9)
         pass
     return sym
@@ -242,7 +166,7 @@ def _cg_pts_at(pts, ms):
 def _cg_sym_id(sym):
     try:
         import candles as _cd
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:_cg_sym_id", _cg9)
         return None
     s9 = str(sym or "").upper()
@@ -266,7 +190,7 @@ def _cg_keyed(url, lane, allow, valid, timeout=15.0):
         return "skip", "allow"
     try:
         import cgkey
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:_cg_keyed", _cg9)
         return "skip", "import"
     if not cgkey.key():
@@ -308,7 +232,7 @@ def cg_points_day(key, url_base, day0, store=None, keyed=False):
         if e.code != 404:
             return None
         pts = []
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:cg_points_day", e)
         if getattr(e, "code", None) == 404 and getattr(e, "kind", "") == "http4xx":
             pts = []
@@ -359,7 +283,7 @@ CANDLE_ORDER = (("binance", _c_binance), ("bybit", _c_bybit),
 def _upbit_krw_minute(sym: str, ms: int) -> float | None:
     from datetime import datetime, timezone
     to_s = datetime.fromtimestamp(ms / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-{sym}&to={to_s}&count=30")
+    arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-{urllib.parse.quote(sym, safe='')}&to={to_s}&count=30")
     best = None
     for c in arr or []:
         ts = datetime.strptime(c["candle_date_time_utc"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000
@@ -471,6 +395,8 @@ class PxCache:
         self.d["candle"] = {k: v for k, v in self.d["candle"].items() if v}
         self.d["fx"] = {k: v for k, v in self.d["fx"].items() if v}
         self._dirty = 20 if new_leg9 else 0
+        self._flat = acct_norm.flat_keys(self.d["candle"])
+        self._flat_syms = frozenset(k.rpartition(":")[0] for k in self._flat)
         self._tl = threading.local()
 
     def nb_begin(self):
@@ -501,14 +427,14 @@ class PxCache:
         sym_u = sym.upper()
         m = (ts_ms // 60_000) * 60_000
         with self.lock:
-            v = self.d["candle"].get(f"{sym_u}:{m}")
+            v = self._cget(f"{sym_u}:{m}")
         if v:
             return v
         if sym_u in ("USDT", "USDC", "DAI"):
             return self.candle_usd(sym, ts_ms)
         with self.lock:
             for i in range(1, max(0, int(back_min)) + 1):
-                v = self.d["candle"].get(f"{sym_u}:{m - i * 60_000}")
+                v = self._cget(f"{sym_u}:{m - i * 60_000}")
                 if v:
                     break
         if v:
@@ -517,12 +443,12 @@ class PxCache:
             return v
         return self.candle_usd(sym, ts_ms)
 
+    def _cget(self, key):
+        return None if key in self._flat else self.d["candle"].get(key)
+
     def _save(self):
         s9 = json.dumps(self.d, separators=(",", ":"))
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(s9)
-        os.replace(tmp, self.path)
+        fsio.atomic_write_text(self.path, s9, mode=None, fsync=False, dir_fsync=False, makedirs=False)
         self._dirty = 0
 
     def maybe_save(self):
@@ -541,7 +467,7 @@ class PxCache:
         m = (ts_ms // 60_000) * 60_000
         key = f"{sym}:{m}"
         with self.lock:
-            if key in self.d["candle"]:
+            if key in self.d["candle"] and key not in self._flat:
                 v = self.d["candle"][key]
                 return v if v else None
             neg = self.d["neg_ts"].get(sym, 0)
@@ -558,7 +484,10 @@ class PxCache:
         px = None
         ven9 = None
         alt9 = NATIVE_EX_TICKER.get(sym)
+        url_ok9 = sym.isascii()
         for _name, fn in CANDLE_ORDER:
+            if not url_ok9 and fn is not _c_coingecko:
+                continue
             try:
                 if fn is _c_coingecko:
                     px = fn(sym, m, cache=self)
@@ -566,14 +495,14 @@ class PxCache:
                     px = fn(alt9, m)
                 else:
                     px = fn(sym, m)
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:PxCache.candle_usd", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("pricing:PxCache.candle_usd[fn]", _cg9)
                 px = None
             if not px and alt9 and _name in ("binance", "bybit"):
                 try:
                     px = fn(alt9, m)
-                except Exception as _cg9:
-                    calcguard.swallowed("pricing:PxCache.candle_usd", _cg9)
+                except Exception as _cg9:  # noqa: BLE001 [fallback]
+                    calcguard.swallowed("pricing:PxCache.candle_usd[px]", _cg9)
                     px = None
             if px:
                 ven9 = _name
@@ -581,6 +510,7 @@ class PxCache:
         with self.lock:
             if px:
                 self.d["candle"][key] = px
+                self._flat.discard(key)
                 self.d.setdefault("cven", {})[key] = ven9
                 self.d["neg_ts"].pop(sym, None)
                 self.d["neg_n"].pop(sym, None)
@@ -605,8 +535,8 @@ class PxCache:
                 if getattr(e, "code", None) not in (400, 404):
                     return None
                 v = None
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:PxCache.jpy_stable_usd", _cg9)
+            except Exception as _cg9:     # noqa: BLE001 [fallback]
+                calcguard.swallowed("pricing:PxCache.jpy_stable_usd[v]", _cg9)
                 return None
             if v:
                 with self.lock:
@@ -625,8 +555,8 @@ class PxCache:
             try:
                 d = _gj(f"https://api.frankfurter.app/{day}?from=JPY&to=USD")
                 jv = float(((d or {}).get("rates") or {}).get("USD") or 0) or None
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:PxCache.jpy_stable_usd", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("pricing:PxCache.jpy_stable_usd[d]", _cg9)
                 jv = None
             if jv:
                 with self.lock:
@@ -666,8 +596,8 @@ class PxCache:
             to_s = datetime.fromtimestamp(end / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WIN}")
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:PxCache.prefetch_fx", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("pricing:PxCache.prefetch_fx[arr]", _cg9)
                 arr = None
             calls += 1
             i += len(grp)
@@ -725,8 +655,8 @@ class PxCache:
                         bn.append((int(row[0]), float(row[1])))
                     except (TypeError, ValueError, IndexError):
                         continue
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:PxCache.prefetch_fx", _cg9)
+            except Exception as _cg9:  # noqa: BLE001 [fallback]
+                calcguard.swallowed("pricing:PxCache.prefetch_fx[_gj]", _cg9)
                 ub, bn = [], []
                 _fail()
                 stop = True
@@ -766,10 +696,10 @@ class PxCache:
         with self.lock:
             for sym, t in pairs:
                 s9 = str(sym or "").upper()
-                if not s9 or s9 in ("USDT", "USDC", "DAI") or now9 - self.d["neg_ts"].get(s9, 0) < self.NEG_TTL:
+                if not s9 or not s9.isascii() or s9 in ("USDT", "USDC", "DAI") or now9 - self.d["neg_ts"].get(s9, 0) < self.NEG_TTL:
                     continue
                 m = (int(t) // 60_000) * 60_000
-                if f"{s9}:{m}" not in self.d["candle"]:
+                if f"{s9}:{m}" not in self.d["candle"] or f"{s9}:{m}" in self._flat:
                     by.setdefault(s9, set()).add(m)
         calls = filled = 0
         dead = self.__dict__.setdefault("_bulk_dead", {})
@@ -792,11 +722,13 @@ class PxCache:
                         dead[s9] = time.time()
                         break
                     arr = None
-                except Exception as _cg9:
+                except Exception as _cg9:  # noqa: BLE001 [fallback]
                     calcguard.swallowed("pricing:PxCache.prefetch_candles", _cg9)
                     arr = None
                 opens = {}
                 for row in arr or []:
+                    if _kl_zero(row, 5, 7):
+                        continue
                     try:
                         opens[int(row[0])] = float(row[1])
                     except (TypeError, ValueError, IndexError):
@@ -806,6 +738,7 @@ class PxCache:
                         px = opens.get(m)
                         if _fin(px):
                             self.d["candle"][f"{s9}:{m}"] = px
+                            self._flat.discard(f"{s9}:{m}")
                             self.d.setdefault("cven", {})[f"{s9}:{m}"] = "binance"
                             filled += 1
                             self._dirty += 1
@@ -828,7 +761,7 @@ class PxCache:
     def cg_usd_at(self, ts_ms: int, chain: str = None, ca: str = None, keyed: bool = False) -> float | None:
         try:
             import candles as _cd
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("pricing:PxCache.cg_usd_at", _cg9)
             return None
         plat = _cd.CG_PLATFORM.get(chain or "")
@@ -878,7 +811,7 @@ class PxCache:
             return None
         try:
             fx = _fx_candle_krw_per_usdt(m)
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("pricing:PxCache.fx_at", _cg9)
             fx = None
         with self.lock:
@@ -927,7 +860,7 @@ class PxCache:
             to_s = datetime.fromtimestamp(g[-1] / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-USDT&to={to_s}&count={self.FX_WARM_SPAN}")
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("pricing:PxCache.fx_warm", _cg9)
                 arr = None
             if not isinstance(arr, list):
@@ -1001,7 +934,7 @@ class PxFetchQueue:
                     self.px.candle_usd(sym, m)
                 elif kind == "fx":
                     self.px.fx_at(m)
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("pricing:PxFetchQueue.drain", _cg9)
                 pass
         if items:
@@ -1017,7 +950,7 @@ class PxFetchQueue:
             self.ev.clear()
             try:
                 self.drain()
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [boundary]
                 calcguard.swallowed("pricing:PxFetchQueue._loop", _cg9)
                 time.sleep(5)
 
@@ -1034,7 +967,7 @@ class FxWarmQueue(PxFetchQueue):
     def _missing(self, items):
         with self.px.lock:
             return [(k, s, m) for k, s, m in items
-                    if not (self.px.d["fx"].get(str(m)) if k == "fx" else self.px.d["candle"].get(f"{s}:{m}"))]
+                    if not (self.px.d["fx"].get(str(m)) if k == "fx" else self.px._cget(f"{s}:{m}"))]
 
     def drain(self) -> int:
         with self.lock:
@@ -1056,8 +989,8 @@ class FxWarmQueue(PxFetchQueue):
                     try:
                         if not fx_ms or self.px.fx_warm(fx_ms) <= 0:
                             break
-                    except Exception as _cg9:
-                        calcguard.swallowed("pricing:FxWarmQueue.drain", _cg9)
+                    except Exception as _cg9:   # noqa: BLE001 [fallback]
+                        calcguard.swallowed("pricing:FxWarmQueue.drain[not]", _cg9)
                         break
                     fx_ms = [m for k, _s, m in self._missing([("fx", "", m9) for m9 in fx_ms])]
                 for kind, sym, m in self._missing(left):
@@ -1066,8 +999,8 @@ class FxWarmQueue(PxFetchQueue):
                             self.px.fx_at(m)
                         elif kind == "c":
                             self.px.candle_usd(sym, m)
-                    except Exception as _cg9:
-                        calcguard.swallowed("pricing:FxWarmQueue.drain", _cg9)
+                    except Exception as _cg9:   # noqa: BLE001 [isolate]
+                        calcguard.swallowed("pricing:FxWarmQueue.drain[kind]", _cg9)
                         pass
                     if gap:
                         time.sleep(gap)
@@ -1117,7 +1050,7 @@ def upbit_tickers(markets: list) -> dict:
         mk = ",".join(markets[i:i + 50])
         try:
             arr = _gj(f"https://api.upbit.com/v1/ticker?markets={urllib.parse.quote(mk)}")
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [isolate]
             calcguard.swallowed("pricing:upbit_tickers", _cg9)
             continue
         finally:
@@ -1144,28 +1077,7 @@ def pick_global_usd(syms, book, order=GLOBAL_USD_ORDER, ident=None, ref=None, no
             v = (book(ex) or {}).get(s)
             if not _fin(v or 0):
                 continue
-            ok, why = ident(s, ex) if ident else (None, "")
-            if ok is None and ref:
-                rf = ref(s)
-                if rf and _fin(rf[0] or 0):
-                    r9 = v / rf[0]
-                    ok, why = (True, f"{rf[1]} 기준 {r9:.2f}배") if IDENT_LO <= r9 <= IDENT_HI else (
-                        False, f"{ex} {s} 시세가 {rf[1]}의 {r9:.2f}배 — 동명 다른 코인 의심")
-            if ok is None:
-                unk9 = None
-                for ex2 in order:
-                    if ex2 == ex or (ident and ident(s, ex2)[0] is False):
-                        continue
-                    bk9 = book(ex2)
-                    if failed and failed(ex2):
-                        unk9 = unk9 or ex2
-                        continue
-                    w = (bk9 or {}).get(s)
-                    if _fin(w or 0) and not (IDENT_LO <= v / w <= IDENT_HI):
-                        ok, why = False, f"{ex}·{ex2} {s} 시세가 {v / w:.2f}배 달라 같은 코인인지 확인 불가"
-                        break
-                if ok is None and unk9:
-                    ok, why = False, f"{ex} {s} — 비교할 {unk9} 시세 조회 실패(동일성 판정 못 함 · 이번엔 안 씀)"
+            ok, why = global_ident(s, ex, v, book, order, (ident, ref, failed))
             if ok is False:
                 if notes is not None:
                     notes.setdefault(s, []).append(why)
@@ -1173,6 +1085,33 @@ def pick_global_usd(syms, book, order=GLOBAL_USD_ORDER, ident=None, ref=None, no
             out[s] = (float(v), f"{ex} {s}USDT" + (f" · {why}" if why else ""))
             break
     return out
+
+
+def global_ident(s: str, ex: str, v: float, book: Callable, order: tuple, hooks: tuple = (None, None, None)) -> tuple:
+    ident, ref, failed = hooks
+    ok, why = ident(s, ex) if ident else (None, "")
+    if ok is None and ref:
+        rf = ref(s)
+        if rf and _fin(rf[0] or 0):
+            ratio = v / rf[0]
+            ok, why = (True, f"{rf[1]} 기준 {ratio:.2f}배") if IDENT_LO <= ratio <= IDENT_HI else (
+                False, f"{ex} {s} 시세가 {rf[1]}의 {ratio:.2f}배 — 동명 다른 코인 의심")
+    if ok is None:
+        unknown_ex = None
+        for ex2 in order:
+            if ex2 == ex or (ident and ident(s, ex2)[0] is False):
+                continue
+            other_book = book(ex2)
+            if failed and failed(ex2):
+                unknown_ex = unknown_ex or ex2
+                continue
+            w = (other_book or {}).get(s)
+            if _fin(w or 0) and not (IDENT_LO <= v / w <= IDENT_HI):
+                ok, why = False, f"{ex}·{ex2} {s} 시세가 {v / w:.2f}배 달라 같은 코인인지 확인 불가"
+                break
+        if ok is None and unknown_ex:
+            ok, why = False, f"{ex} {s} — 비교할 {unknown_ex} 시세 조회 실패(동일성 판정 못 함 · 이번엔 안 씀)"
+    return ok, why
 
 
 UPBIT_ALT_DIVERGE = 0.20
@@ -1202,16 +1141,61 @@ def upbit_alt_usd(syms: list, alt: dict, tickers: dict, btc_usd: float, global_p
     return out
 
 
-def upbit_spot_krw(syms: list) -> dict:
+def timed_out(e: BaseException) -> bool:
+    if isinstance(e, urllib.error.HTTPError) or not isinstance(e, OSError):
+        return False
+    r = getattr(e, "reason", None) if isinstance(e, urllib.error.URLError) else None
+    x = r if isinstance(r, BaseException) else e
+    return isinstance(x, TimeoutError) or "timed out" in str(x).lower()
+
+
+UPBIT_404_DEPTH = 7
+UPBIT_404_CALLS = 16
+
+
+def _upbit_404_parts(grp: list, dep: int, seen) -> list:
+    if len(grp) < 2 or dep >= UPBIT_404_DEPTH:
+        return []
+    if dep == 0 and seen is not None:
+        a, b = [s for s in grp if s in seen], [s for s in grp if s not in seen]
+        if a and b:
+            return [(a, 1), (b, 1)]
+    h = len(grp) // 2
+    return [(grp[:h], dep + 1), (grp[h:], dep + 1)]
+
+
+def upbit_spot_krw(syms: list, dead: set | None = None, answered: set | None = None, seen: set | None = None) -> dict:
     out = {}
     syms = [s for s in syms if s]
-    for i in range(0, len(syms), 50):
-        mk = ",".join(f"KRW-{s}" for s in syms[i:i + 50])
+    todo = [(syms[i:i + 50], 0) for i in range(0, len(syms), 50)]
+    spent = 0
+    while todo:
+        if dead is not None and "upbit" in dead:
+            break
+        grp, dep = todo.pop(0)
+        if dep:
+            if spent >= UPBIT_404_CALLS:
+                continue
+            spent += 1
+            time.sleep(1.0 if spent == 1 else 0.12)
+        elif spent:
+            time.sleep(0.12)
+        mk = ",".join(f"KRW-{s}" for s in grp)
         try:
             arr = _gj(f"https://api.upbit.com/v1/ticker?markets={urllib.parse.quote(mk)}")
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [isolate]
             calcguard.swallowed("pricing:upbit_spot_krw", _cg9)
+            if dead is not None and timed_out(_cg9):
+                dead.add("upbit")
+            if isinstance(_cg9, urllib.error.HTTPError) and _cg9.code == 404:
+                if answered is not None:
+                    answered.update(grp)
+                todo[0:0] = _upbit_404_parts(grp, dep, seen)
+            elif dep:
+                todo = [t for t in todo if not t[1]]
             continue
+        if answered is not None:
+            answered.update(grp)
         for t in arr or []:
             try:
                 px = float(t["trade_price"])
@@ -1226,7 +1210,7 @@ def upbit_spot_krw(syms: list) -> dict:
 def ex_spot_usd(ex: str, usdt_krw: float = 0) -> dict:
     out = {}
 
-    def _put(sym, px, vol=None):
+    def _put(sym, px, vol=None, qv=None):
         try:
             px = float(px or 0)
         except (TypeError, ValueError):
@@ -1237,16 +1221,19 @@ def ex_spot_usd(ex: str, usdt_krw: float = 0) -> dict:
             return
         if _fin(px) and px > 0:
             out[str(sym).upper()] = px
+            qvols[str(sym).upper()] = num_parse.to_float(qv)
 
     EX_DEAD[ex] = 0
-    dead9 = set()
+    dead9, qvols = set(), {}
     if ex == "binance":
         return binance_spot_usdt()
     if ex == "hyperliquid":
         import hl_spot
         return hl_spot.fetch_book()
     try:
-        return _ex_spot_usd_body(ex, usdt_krw, out, _put)
+        got = _ex_spot_usd_body(ex, usdt_krw, out, _put)
+        EX_QVOL[ex] = (time.time(), qvols)
+        return got
     finally:
         EX_DEAD_SYMS[ex] = frozenset(dead9)
 
@@ -1264,6 +1251,9 @@ def _bulk_rows(ex, d):
     elif ex == "okx":
         ok9 = isinstance(d, dict) and str(d.get("code")) == "0"
         rows9 = d.get("data") if ok9 else None
+    elif ex == "coinbase":
+        ok9 = isinstance(d, dict) and isinstance(d.get("products"), list)
+        rows9 = d.get("products") if ok9 else None
     elif ex == "bithumb":
         ok9 = isinstance(d, dict) and str(d.get("status")) == "0000"
         rows9 = d.get("data") if ok9 else None
@@ -1273,6 +1263,33 @@ def _bulk_rows(ex, d):
     if not ok9 or not isinstance(rows9, list) or not rows9:
         raise BulkError(ex, d)
     return rows9
+
+
+def _coinbase_books() -> dict:
+    base_url = "https://api.coinbase.com/api/v3/brokerage/market/products?product_type=SPOT"
+    rows, url, seen_c = [], base_url, set()
+    for _ in range(50):
+        d = _gj(url, timeout=20)
+        rows += _bulk_rows("coinbase", d)
+        pg = d.get("pagination") if isinstance(d.get("pagination"), dict) else {}
+        if pg.get("has_next") is not True:
+            break
+        cur = str(pg.get("next_cursor") or "")
+        if not cur or cur in seen_c:
+            raise BulkError("coinbase", {"error": "상품 목록 다음 쪽 커서 이상"})
+        seen_c.add(cur)
+        url = base_url + "&cursor=" + urllib.parse.quote(cur, safe="")
+    else:
+        raise BulkError("coinbase", {"error": "상품 목록 쪽 상한 초과"})
+    best = {}
+    for t in rows:
+        if (not isinstance(t, dict) or t.get("trading_disabled") is True or t.get("is_disabled") is True
+                or str(t.get("status") or "online").lower() != "online"):
+            continue
+        b, q = str(t.get("base_currency_id") or "").upper(), str(t.get("quote_currency_id") or "").upper()
+        if b and q in ("USD", "USDC") and (q == "USD" or b not in best):
+            best[b] = t
+    return best
 
 
 def _ex_spot_usd_body(ex, usdt_krw, out, _put):
@@ -1286,7 +1303,7 @@ def _ex_spot_usd_body(ex, usdt_krw, out, _put):
                 v9 = t.get("volume24h")
                 if v9 in (None, ""):
                     v9 = t.get("turnover24h")
-                _put(s[:-4], t.get("lastPrice"), v9)
+                _put(s[:-4], t.get("lastPrice"), v9, t.get("turnover24h"))
     elif ex == "gate":
         arr = _gj("https://api.gateio.ws/api/v4/spot/tickers", timeout=20)
         for t in _bulk_rows(ex, arr):
@@ -1294,7 +1311,7 @@ def _ex_spot_usd_body(ex, usdt_krw, out, _put):
                 continue
             s = str(t.get("currency_pair") or "")
             if s.endswith("_USDT"):
-                _put(s[:-5], t.get("last"), t.get("quote_volume"))
+                _put(s[:-5], t.get("last"), t.get("quote_volume"), t.get("quote_volume"))
     elif ex == "kucoin":
         d = _gj("https://api.kucoin.com/api/v1/market/allTickers", timeout=20)
         for t in _bulk_rows(ex, d):
@@ -1302,7 +1319,7 @@ def _ex_spot_usd_body(ex, usdt_krw, out, _put):
                 continue
             s = str(t.get("symbol") or "")
             if s.endswith("-USDT"):
-                _put(s[:-5], t.get("last"), t.get("vol"))
+                _put(s[:-5], t.get("last"), t.get("vol"), t.get("volValue"))
     elif ex == "okx":
         d = _gj("https://www.okx.com/api/v5/market/tickers?instType=SPOT", timeout=20)
         for t in _bulk_rows(ex, d):
@@ -1310,7 +1327,10 @@ def _ex_spot_usd_body(ex, usdt_krw, out, _put):
                 continue
             s = str(t.get("instId") or "")
             if s.endswith("-USDT"):
-                _put(s[:-5], t.get("last"), t.get("vol24h"))
+                _put(s[:-5], t.get("last"), t.get("vol24h"), t.get("volCcy24h"))
+    elif ex == "coinbase":
+        for b, t in _coinbase_books().items():
+            _put(b, t.get("price"), t.get("volume_24h"), t.get("approximate_quote_24h_volume"))
     elif ex == "bithumb":
         if not usdt_krw:
             return out
@@ -1328,16 +1348,14 @@ def _ex_spot_usd_body(ex, usdt_krw, out, _put):
 
 EX_DEAD = {}
 EX_DEAD_SYMS = {}
+EX_QVOL = {}
 
 
 def _vol_zero(v) -> bool:
     if v is None or v == "":
         return False
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(f) and f == 0.0
+    f = num_parse.to_float(v)
+    return f is not None and f == 0.0
 
 
 BN_DEAD_EVERY = 600
@@ -1352,18 +1370,19 @@ def binance_dead_syms(now: float = None) -> frozenset:
     _BN_DEAD["at"] = now
     try:
         arr = _gj("https://api.binance.com/api/v3/ticker/24hr?type=MINI", timeout=20)
-    except Exception as _cg9:
+    except Exception as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:binance_dead_syms", _cg9)
         return _BN_DEAD["syms"]
     if not isinstance(arr, list):
         return _BN_DEAD["syms"]
-    dead = set()
+    dead, qvols = set(), {}
     for t in arr:
         if not isinstance(t, dict):
             continue
         s = str(t.get("symbol") or "")
         if not s.endswith("USDT"):
             continue
+        qvols[s[:-4]] = num_parse.to_float(t.get("quoteVolume"))
         cnt, ct = t.get("count"), t.get("closeTime")
         stale = False
         try:
@@ -1374,6 +1393,7 @@ def binance_dead_syms(now: float = None) -> frozenset:
         if _vol_zero(cnt) or stale:
             dead.add(s[:-4])
     _BN_DEAD["syms"] = frozenset(dead)
+    EX_QVOL["binance"] = (now, qvols)
     return _BN_DEAD["syms"]
 
 
@@ -1469,7 +1489,7 @@ def _gt_free(url, timeout=15.0):
     g = None
     try:
         import bf_engine
-        import candles
+        import candles  # noqa: F401
         g = bf_engine.gate(GT_FREE_HOST)
     except ImportError:
         g = None
@@ -1478,7 +1498,7 @@ def _gt_free(url, timeout=15.0):
             g.acquire("bg", deadline=time.time() + GT_FREE_WAIT_S)
         except bf_engine.NetError as e:
             ra9 = max(GT_FREE_PAUSE_S, bf_engine.gate_wait(GT_FREE_HOST))
-            raise GtGateWait(url.split("?", 1)[0], 429, "게이트 대기 — " + common.safe_err(e)[:80],
+            raise GtGateWait(url.split("?", 1)[0], 429, "게이트 대기 — " + logs.safe_err(e)[:80],
                              {"Retry-After": str(int(min(300.0, ra9)))}, None)
     try:
         return _gj(url, timeout=timeout)
@@ -1518,16 +1538,16 @@ def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
             ra = None
             try:
                 ra = (e.headers or {}).get("Retry-After")
-            except Exception as _cg9:
-                calcguard.swallowed("pricing:gt_token_prices_ex", _cg9)
+            except Exception as _cg9:   # noqa: BLE001 [isolate]
+                calcguard.swallowed("pricing:gt_token_prices_ex[ra]", _cg9)
                 pass
             _GT_ERR = ("rate" if e.code == 429 else "http", "gate" if isinstance(e, GtGateWait) else e.code, str(ra or ""))
             if e.code == 429:
                 break
             continue
-        except Exception as e:
-            calcguard.swallowed("pricing:gt_token_prices_ex", e)
-            _GT_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
+        except Exception as e:   # noqa: BLE001 [isolate]
+            calcguard.swallowed("pricing:gt_token_prices_ex[kind9]", e)
+            _GT_ERR = ("net", None, f"{type(e).__name__}: {logs.safe_err(e)[:80]}")
             continue
         finally:
             time.sleep(2.1)
@@ -1554,9 +1574,9 @@ def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
                     _GT_ERR = ("rate" if e.code == 429 else "http", "gate" if isinstance(e, GtGateWait) else e.code, "")
                     if e.code != 404:
                         _GT_UNRESOLVED.update(miss9)
-                except Exception as e:
-                    calcguard.swallowed("pricing:gt_token_prices_ex", e)
-                    _GT_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
+                except Exception as e:   # noqa: BLE001 [fallback]
+                    calcguard.swallowed("pricing:gt_token_prices_ex[d2]", e)
+                    _GT_ERR = ("net", None, f"{type(e).__name__}: {logs.safe_err(e)[:80]}")
                     _GT_UNRESOLVED.update(miss9)
                 finally:
                     time.sleep(2.1)
@@ -1599,12 +1619,6 @@ def _gt_parse(d, batch):
     return out, res_out
 
 
-DS_CHAIN = {"eth": "ethereum", "bsc": "bsc", "base": "base", "arbitrum": "arbitrum", "optimism": "optimism",
-            "polygon": "polygon", "sol": "solana", "zksync": "zksync", "scroll": "scroll",
-            "monad": "monad", "megaeth": "megaeth", "plasma": "plasma", "xlayer": "xlayer", "kaia": "kaia",
-            "fraxtal": "fraxtal", "bob": "bob", "story": "story", "somnia": "somnia", "avalanche": "avalanche",
-            "abstract": "abstract",
-            "hyperevm": "hyperevm"}
 _DS_ERR = None
 _DS_META = {}
 
@@ -1624,7 +1638,7 @@ def ds_take_error():
 def ds_token_prices(chain: str, cas: list):
     global _DS_ERR, _DS_META
     _DS_META = {}
-    net = DS_CHAIN.get(chain)
+    net = token_tables.DS_CHAIN.get(chain)
     if not net or not cas:
         return {}, {}
     batch = list(cas)[:30]
@@ -1634,9 +1648,9 @@ def ds_token_prices(chain: str, cas: list):
     except urllib.error.HTTPError as e:
         _DS_ERR = ("rate" if e.code == 429 else "http", e.code, "")
         return {}, {}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:ds_token_prices", e)
-        _DS_ERR = ("net", None, f"{type(e).__name__}: {common.safe_err(e)[:80]}")
+        _DS_ERR = ("net", None, f"{type(e).__name__}: {logs.safe_err(e)[:80]}")
         return {}, {}
     finally:
         time.sleep(0.5)
@@ -1687,11 +1701,11 @@ OKX_CHAIN_INDEX = {"eth": "1", "base": "8453", "sol": "501", "bsc": "56",
                    "scroll": "534352", "zksync": "324", "gnosis": "100"}
 def _okx_anchor_for(chain: str):
     if chain == "sol":
-        for mint, sym in STABLE_MINTS.items():
+        for mint, sym in token_tables.STABLE_MINTS.items():
             if sym == "USDC":
                 return mint
         return None
-    cas = STABLE_CAS.get(chain) or {}
+    cas = token_tables.STABLE_CAS.get(chain) or {}
     for sym_want in ("USDC", "USDT"):
         for ca, sym in cas.items():
             if sym == sym_want:
@@ -1703,15 +1717,10 @@ def okx_headers(creds: dict, method: str, path: str, body: str):
     key, sec, pw = creds.get("key"), creds.get("secret"), creds.get("passphrase")
     if not (key and sec and pw):
         return None
-    import base64
-    import hashlib
-    import hmac
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-    sign = base64.b64encode(
-        hmac.new(sec.encode(), (ts + method + path + body).encode(),
-                 hashlib.sha256).digest()).decode()
+    sign = ex_sign.okx_sign(sec, ts, method, path, body)
     return {"OK-ACCESS-KEY": key, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": ts,
             "OK-ACCESS-PASSPHRASE": pw, "Content-Type": "application/json",
             "User-Agent": _UA["User-Agent"], "Accept": "application/json"}
@@ -1747,13 +1756,13 @@ def okx_dex_prices(creds: dict, pairs: list) -> dict:
         hdrs = okx_headers(creds, "POST", OKX_PRICE_PATH, body)
         if hdrs is None:
             return {}
-        req = urllib.request.Request(OKX_HOST + OKX_PRICE_PATH, data=body.encode(),
-                                     headers=hdrs)
+        req = net_http.request(OKX_HOST + OKX_PRICE_PATH, data=body.encode(),
+                               headers=hdrs)
         try:
             try:
-                with urllib.request.urlopen(req, timeout=12) as r:
-                    d = json.loads(common.read_capped(r).decode())
-            except Exception as _cg9:
+                with net_http.auth_urlopen(req, timeout=12) as r:
+                    d = json.loads(net_http.read_capped(r).decode())
+            except Exception as _cg9:  # noqa: BLE001 [isolate]
                 calcguard.swallowed("pricing:okx_dex_prices", _cg9)
                 continue
             if str(d.get("code")) != "0":
@@ -1790,6 +1799,6 @@ def fx_basis_krw_per_usd() -> float | None:
         d = _gj("https://open.er-api.com/v6/latest/USD", timeout=15)
         v = float((d.get("rates") or {}).get("KRW") or 0)
         return v if _fin(v) else None
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:fx_basis_krw_per_usd", _cg9)
         return None

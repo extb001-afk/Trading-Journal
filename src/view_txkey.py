@@ -1,9 +1,9 @@
 from __future__ import annotations
 import re
-import common
+import logs
 import outflow_match
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -28,9 +28,9 @@ def _ton_hash_uids(conn) -> dict:
             if h9 in out and out[h9] != u9:
                 dup.add(h9)
             out[h9] = u9
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_txkey:_ton_hash_uids", e9)
-        log.warning("TON 출금 도착 색인 실패(이번 빌드 종전 비교키): %s", common.safe_err(e9)[:160])
+        log.warning("TON 출금 도착 색인 실패(이번 빌드 종전 비교키): %s", logs.safe_err(e9)[:160])
         return {}
     for h9 in dup:
         out.pop(h9, None)

@@ -2,18 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check, Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import address_codec as ac
-import chain_registry as reg
-import common
-import core
+import address_codec as ac  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
 
 TS = 1_700_000_000
 TON1 = N.OWN["ton"][0]
@@ -28,7 +28,7 @@ cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(TON1), "labe
                         {"chain": "btc", "mode": "address", "address": TAP, "label": "AuditTaproot"},
                         {"chain": "sui", "address": SUI1, "label": "AuditSuiOne"}]
 json.dump(cfg, open(CFG_PATH, "w"))
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 
 
 def feed(stream, recs):
@@ -44,10 +44,10 @@ feed("sui", [N.rec("sui", U_SUI, TS + 100, [(SUI1, "native", 5_000_000_000)])])
 c.conn.commit()
 c.conn.close()
 
-import acct_norm
-import pricing
-import search_index as si
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import search_index as si  # noqa: E402
+import web  # noqa: E402
 
 
 def _no_price(url, *a, **k):
@@ -65,7 +65,7 @@ EVM_DOC = {"kind": "tx", "key": "tx:eth:" + H_EVM, "grp": "tx:eth", "title": "tx
            "ts": TS + 50, "chain": "eth", "etype": "transfer", "addr": W_EVM, "tx": H_EVM, "syms": ["ETH"], "chains": ["eth"], "wals": [W_EVM]}
 web.BUILDER = b = web.StateBuilder()
 st = b.build()
-ix = si.Indexer(state_fn=lambda: (st, getattr(b, "_day_idx", None)), chain_names=web.CHAIN_NAME, path=SPATH, ledger_path=common.DB_PATH,
+ix = si.Indexer(state_fn=lambda: (st, getattr(b, "_day_idx", None)), chain_names=web.CHAIN_NAME, path=SPATH, ledger_path=paths.DB_PATH,
                 sleep=lambda s9: None)
 ix.tick()
 ix.ix._insert([EVM_DOC])

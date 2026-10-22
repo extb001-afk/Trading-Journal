@@ -1,0 +1,243 @@
+{
+ "_doc": "합성 데이터 — net_policy_tighten 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "net_policy_tighten",
+ "golden": {
+  "http": {
+   "mixed": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "race": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "rd_loop": {
+    "exc": "RuntimeError"
+   },
+   "rd_out": {
+    "exc": "RuntimeError"
+   },
+   "t_cgnat": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_dnsprv": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_loop4": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_loop6": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_mapped": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_meta": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_rfc1918": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   },
+   "t_zero": {
+    "bfe": {
+     "code": 302,
+     "exc": "NetError",
+     "kind": "http4xx"
+    },
+    "rabby": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    },
+    "sol_open": {
+     "code": 302,
+     "exc": "HTTPError",
+     "status": 302
+    }
+   }
+  },
+  "private_conns": {
+   "mixed": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "race": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "rd_loop": [
+    "127.0.0.1"
+   ],
+   "rd_out": [
+    "127.0.0.1"
+   ],
+   "t_cgnat": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_dnsprv": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_loop4": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_loop6": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_mapped": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_meta": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_rfc1918": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   },
+   "t_zero": {
+    "bfe": 0,
+    "rabby": 0,
+    "sol_open": 0
+   }
+  }
+ }
+}

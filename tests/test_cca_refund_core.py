@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
@@ -16,18 +16,17 @@ json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_cha
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 os.environ["TJ_NEGABS"] = "0"
-import acct_norm
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import pricing
-import web
+import acct_norm  # noqa: E402
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
     if hasattr(web.StateBuilder, _m):
@@ -94,7 +93,7 @@ def ledger_rows(c):
     return [tuple(r) for r in c.conn.execute("SELECT source_id, leg_seq, event, leg_kind, location, qty_base FROM postings ORDER BY source_id, leg_seq")]
 
 
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 for hx, s in FEEDS:
     feed(c, hx, s)
 c.conn.commit()
@@ -103,8 +102,8 @@ for hx, s in FEEDS:
     feed(c, hx, s)
 c.conn.commit()
 for _ in range(3):
-    c._last_price_pass = 0
-    c.price_pass()
+    c.svc_price._last_price_pass = 0
+    c.svc_price.price_pass()
 c.conn.commit()
 rows = ledger_rows(c)
 ev = {(r[0], r[3], r[4].split(":")[0] + ":" + r[4].split(":")[-1][:6]): (r[2], int(r[5])) for r in rows}
@@ -121,17 +120,17 @@ json.dump({"owners": {f"eth:{W}": {"t": NOW, "chain": "eth", "owner": W,
                                               "filled": str(1000 * E18), "refunded": str(9 * E18), "exit_tx": EXIT, "exit_ts": D0 + 2 * DAY,
                                               "claim_tx": CLAIM, "claim_ts": D0 + 3 * DAY}],
                                     "auctions": {AUC: {"ok": True, "why": "seed", "currency": {"addr": "", "sym": "ETH", "dec": 18},
-                                                       "token": {"addr": TKN, "sym": "TKN", "dec": 18}}}}}}, open(web.SALE_PATH, "w"))
+                                                       "token": {"addr": TKN, "sym": "TKN", "dec": 18}}}}}}, open(paths.state("sale_bids.json"), "w"))
 spot = {"ETH": 2000.0, "USDT": 1.0}
 json.dump({"usd": spot, "usd_ts": {k: NOW for k in spot}, "rate": 1300.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1300.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 
 
 def build(prefs=None):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **(prefs or {})))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **(prefs or {})))
     b = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -147,7 +146,7 @@ def ad(rows9):
 f, er = build()
 sl = [(s.get("costUsd"), s.get("refundBackCost")) for s in f.get("saleLinks") or []]
 rz = round(float((f.get("realizedByDate") or {}).get(ISO(D0 + 10 * DAY), 0)), 2)
-chk(sl and sl[0][0] == 1000.0, "R2 취득 토큰 원가 $1,000(15차 그대로)", [sl, costs])
+chk(sl and sl[0][0] == 1000.0, "R2 취득 토큰 원가 $1,000(종전 그대로)", [sl, costs])
 chk(ad(er) == [(9.0, 9000.0, 10800.0, False)] and rz == 1800.0,
     "R2 환불 ETH 매도 명세 = 수량 9 · 취득 $9,000 · 처분 $10,800 · 실현 $1,800 · 최초 인식 시가 표기 없음(종전 $10,800 · 실현 0 · 추정 표기)", [ad(er), rz, costs])
 f2, er2 = build({"first_seen_px": False})

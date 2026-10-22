@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import bf_engine as B
-import nodekeys as NK
-import settings_store as ss
+import paths, statefile  # noqa: E402
+import bf_engine as B  # noqa: E402
+import nodekeys as NK  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -24,7 +24,7 @@ SPEC = {"hosts": ["*.bfix.invalid"], "unit": "cu", "month": 3100, "pct": 80.0, "
 
 
 def ldir(name):
-    return os.path.join(common.quota_dir(), f"rpc_day_{name}")
+    return os.path.join(paths.quota_dir(), f"rpc_day_{name}")
 
 
 def fresh_dir(name, files: dict = None):
@@ -48,7 +48,7 @@ def conf(name, spec=SPEC):
 fresh_dir("node_f1", {"reserve.lock": "", f"old.1.aa.json": {"day": DAY, "n": 0, "nh": 0, "proc": "old", "pid": 1, "inst": "aa", "at": 0, "closed": True}})
 conf("node_f1")
 L = B.rpc_day_limits("node_f1")
-check("F1a 업그레이드 직후(지난날 기록 없음) = qn2: 기록 없는 지난날 = 0(실측만 · 오너 10-11) → 바로 버스트(하루 몫 × 배수 안)",
+check("F1a 업그레이드 직후(지난날 기록 없음) = qn2: 기록 없는 지난날 = 0(실측만 · 오너) → 바로 버스트(하루 몫 × 배수 안)",
       L.get("prev") == 0 and L.get("normal") == 80 and 80 < L.get("burst", 0) <= 80 * 3, L)
 B.RPC_DAY_UNKNOWN_ZERO = False
 try:
@@ -85,7 +85,7 @@ sn = NK.budget_spec("nodereal", pl["nodereal"])
 check("F1f budget_spec: 무료 = fresh_since(UTC 날 번호) · 유료 = 버스트·fresh 없음", sa.get("fresh_since") == DAY and "fresh_since" not in sn and "burst" not in sn, (sa, sn))
 check("F1g plans 기본값엔 fresh_since 칸 없음(종전 모양 그대로)", NK.plans({})["ankr"] == {"plan": "free", "share": 10, "month": None}, NK.plans({})["ankr"])
 
-import onboarding
+import onboarding  # noqa: E402
 
 onboarding._node_rpc = lambda u, m, p, timeout=15.0: "0x10"
 
@@ -117,7 +117,7 @@ with open(os.path.join(T.ROOT, "web", "v2", "setup.js"), encoding="utf-8") as f:
 fresh_dir("node_f2", {"head_days.hist": {"days": {}, "since": DAY - 40}})
 ent = conf("node_f2")
 check("F2a 기록 비었음 = 버스트 240", B.rpc_day_limits("node_f2").get("burst") == 240)
-common.atomic_write_json(os.path.join(ldir("node_f2"), "head_days.hist"), {"days": {str(DAY - 1): {"other.9.zz": [2000, 2000]}}, "since": DAY - 40})
+statefile.atomic_write_json(os.path.join(ldir("node_f2"), "head_days.hist"), {"days": {str(DAY - 1): {"other.9.zz": [2000, 2000]}}, "since": DAY - 40})
 check("F2b 다른 프로세스가 방금 합친 기록 = 바로 반영(캐시 없음) → 버스트 없음", B.rpc_day_limits("node_f2").get("burst") <= 80, B.rpc_day_limits("node_f2"))
 order = []
 m2 = ent["meter"]
@@ -225,7 +225,7 @@ with B._GATES_LOCK:
 fresh_dir("node_f5", {"head_days.hist": "{깨진 json"})
 ent5 = conf("node_f5")
 L5 = B.rpc_day_limits("node_f5")
-check("F5a 날짜별 기록 손상 = 버스트 끔 · 평소 몫(보수 — burst1010b: 백필 ≤ 평소 몫)", L5.get("burst", 99) <= 80 and L5.get("normal") == 80, L5)
+check("F5a 날짜별 기록 손상 = 버스트 끔 · 평소 몫(보수 — 백필 ≤ 평소 몫)", L5.get("burst", 99) <= 80 and L5.get("normal") == 80, L5)
 bad = [f for f in os.listdir(ldir("node_f5")) if f.startswith("head_days.hist.bad")]
 check("F5b 손상 파일 보존(이름 바꿔 둠) · 새 기록 = 기록 시작 오늘", len(bad) == 1 and open(os.path.join(ldir("node_f5"), bad[0])).read() == "{깨진 json"
       and json.load(open(os.path.join(ldir("node_f5"), "head_days.hist"))).get("since") == DAY, (bad, os.listdir(ldir("node_f5"))))

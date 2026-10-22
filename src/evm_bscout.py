@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutTimeout
 import urllib.request
-import common
+import logs, paths, statefile
 import bf_engine
 import tsfix
 import addr_tier
@@ -17,6 +17,7 @@ from evm_base import EXPLORER_FROZEN_SEC
 from evm_base import _is_http_5xx
 from evm_base import _revoke_stamp_disk
 from evm_base import http_json
+from evm_base import new_view_wallets
 from evm_base import rpc_handback
 from evm_synth import RpcSynthMixin
 import logging
@@ -35,33 +36,31 @@ class ChainWatcher(RpcSynthMixin):
         self.wallets = [w.lower() for w in wallets]
         self.wallet_since = bf_engine.wallet_since_map(cfg, chain)
         self.writer = writer
-        self.cursor_path = os.path.join(common.STATE_DIR, f"cursor_evm_{chain}.json")
-        self.cursor = common.read_json(self.cursor_path, {})
+        self.cursor_path = paths.state(f"cursor_evm_{chain}.json")
+        self.cursor = statefile.read_json(self.cursor_path, {})
         if self.cursor.get("_rpc_v") is not None:
             self._rpc_handback()
-        self.pending_detail = common.read_json(
-            os.path.join(common.STATE_DIR, f"pending_detail_{chain}.json"), {})
+        self.pending_detail = statefile.read_json(
+            paths.state(f"pending_detail_{chain}.json"), {})
         self.fail_streak = {}
         self.cfg_rpcs = cfg["chains"][chain].get("rpcs")
-        self.rpc_meta_path = os.path.join(common.STATE_DIR, f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = common.read_json(self.rpc_meta_path, {})
-        self.emitted_path = os.path.join(common.STATE_DIR, f"emitted_evm_{chain}.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
-        _prev_w = {k for k in self.cursor if not k.startswith("_")}
-        if _prev_w and not set(self.wallets).issubset(_prev_w) and self.emitted:
-            log.warning("%s 새 관점 지갑 감지 — emitted %d건 초기화(재방출 허용)", chain, len(self.emitted))
-            self.emitted.clear()
+        self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
+        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.emitted_path = paths.state(f"emitted_evm_{chain}.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
+        emitted_before = set(self.emitted)
+        new_view_wallets(self)
         self.rescan_overlap = int(cfg["chains"][chain].get("rescan_overlap_blocks", 0))
         self.idx_guard = bool(cfg["chains"][chain].get("indexing_status_guard"))
         self.idx_guard_scope = str(cfg["chains"][chain].get("indexing_guard_scope") or "head")
-        self.enrich_path = os.path.join(common.STATE_DIR, f"enrich_{chain}.json")
-        self.enrich = common.read_json(self.enrich_path, {})
+        self.enrich_path = paths.state(f"enrich_{chain}.json")
+        self.enrich = statefile.read_json(self.enrich_path, {})
         self._enrich_5xx = {}
         bfc = cfg.get("backfill") or {}
         self.bf_mode = str(bfc.get("engine") or "v2")
         self.bf2_budget = float(bfc.get("evm_cycle_budget_sec") or self.BF2_TIME_BUDGET)
         self.progress = bf_engine.progress("evm")
-        self._prev_emitted = set(common.read_json(self.emitted_path, []))
+        self._prev_emitted = emitted_before
         self._tier = addr_tier.evm_book(self, cfg, "blockscout")
 
     def _rpc_handback(self):
@@ -98,7 +97,7 @@ class ChainWatcher(RpcSynthMixin):
         self._idx_ratio = None
         try:
             d = http_json(f"{self.base}/api/v2/main-page/indexing-status")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             return self._idx_sticky(e)
         if not isinstance(d, dict):
             return self._idx_sticky(RuntimeError("indexing-status 응답 형식 오류"))
@@ -201,7 +200,7 @@ class ChainWatcher(RpcSynthMixin):
         return self._idx_stable()
 
     def _idx_sticky(self, err) -> str:
-        self._idx_unknown = common.safe_err(err)[:120]
+        self._idx_unknown = logs.safe_err(err)[:120]
         seen = getattr(self, "_idx_seen", None)
         now9 = time.time()
         if seen and seen[0] == "blocks" and now9 - seen[1] < self.IDX_BLOCKS_STICKY_SEC:
@@ -261,7 +260,7 @@ class ChainWatcher(RpcSynthMixin):
                 if i == tries - 1 or e.kind in ("circuit", "quota", "budget"):
                     raise
                 time.sleep(1.0 + 1.5 * i)
-            except Exception:
+            except Exception:  # noqa: BLE001 [fallback]
                 if i == tries - 1:
                     raise
                 time.sleep(1.0 + 1.5 * i)
@@ -290,8 +289,8 @@ class ChainWatcher(RpcSynthMixin):
             while url and pages < pages_max:
                 try:
                     d = self._page_json(url)
-                except Exception as e:
-                    self._disc_err = f"{ep}: {common.safe_err(e)[:160]}"
+                except Exception as e:  # noqa: BLE001 [fallback]
+                    self._disc_err = f"{ep}: {logs.safe_err(e)[:160]}"
                     self._rpcfb_disc_error = e
                     return None
                 if not isinstance(d, dict) or not isinstance(d.get("items"), list):
@@ -359,12 +358,12 @@ class ChainWatcher(RpcSynthMixin):
                 since0 = min(since0, self.window_start_block_ts(ws9))
             ck = {"since": since0, "safe": safe_now, "ep": 0, "npp": None, "pages": 0}
             self.cursor["_bf:" + w] = ck
-            common.atomic_write_json(self.enrich_path, self.enrich)
-            common.atomic_write_json(
-                os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"),
+            statefile.atomic_write_json(self.enrich_path, self.enrich)
+            statefile.atomic_write_json(
+                paths.state(f"pending_detail_{self.chain}.json"),
                 self.pending_detail)
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("%s 재개형 백필 시작 (%d → %d)", w[:10], since0, safe_now)
         since0, safe0 = int(ck["since"]), int(ck["safe"])
         eps = (("transactions", "hash"),
@@ -380,7 +379,7 @@ class ChainWatcher(RpcSynthMixin):
                     url += "?" + urllib.parse.urlencode(ck["npp"])
                 try:
                     d = self._page_json(url)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     log.warning("%s %s 백필 페이지 실패 — 체크포인트 유지(p%d): %s",
                                 w[:10], ep, int(ck.get("pages", 0)), e)
                     return False
@@ -426,7 +425,7 @@ class ChainWatcher(RpcSynthMixin):
                                 results[futs[fu]] = fu.result(timeout=remain9)
                             except FutTimeout:
                                 results[futs[fu]] = RuntimeError("페이지 상세 예산 초과")
-                            except Exception as e9:
+                            except Exception as e9:  # noqa: BLE001 [fallback]
                                 results[futs[fu]] = e9
                     finally:
                         ex9.shutdown(wait=False, cancel_futures=True)
@@ -453,7 +452,7 @@ class ChainWatcher(RpcSynthMixin):
                         continue
                     try:
                         self.emit(h, snap, head)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [fallback]
                         log.error("inbox append 실패 — 체크포인트 유지: %s", e)
                         return False
                     self.emitted.add(h.lower())
@@ -474,12 +473,12 @@ class ChainWatcher(RpcSynthMixin):
                 else:
                     ck["npp"] = npp
                 if int(ck["pages"]) % self.BF_FLUSH_EVERY == 0:
-                    common.atomic_write_json(self.enrich_path, self.enrich)
-                    common.atomic_write_json(
-                        os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"),
+                    statefile.atomic_write_json(self.enrich_path, self.enrich)
+                    statefile.atomic_write_json(
+                        paths.state(f"pending_detail_{self.chain}.json"),
                         self.pending_detail)
-                    common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-                    common.atomic_write_json(self.cursor_path, self.cursor)
+                    statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+                    statefile.atomic_write_json(self.cursor_path, self.cursor)
                 if int(ck["pages"]) % 50 == 0:
                     log.info("%s 백필 진행: %d페이지 누적, endpoint %d/3",
                              w[:10], int(ck["pages"]), int(ck["ep"]))
@@ -494,12 +493,12 @@ class ChainWatcher(RpcSynthMixin):
                      w[:10], why, int(ck.get("pages", 0)), int(ck["ep"]))
             return False
         finally:
-            common.atomic_write_json(self.enrich_path, self.enrich)
-            common.atomic_write_json(
-                os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"),
+            statefile.atomic_write_json(self.enrich_path, self.enrich)
+            statefile.atomic_write_json(
+                paths.state(f"pending_detail_{self.chain}.json"),
                 self.pending_detail)
-            common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     BF2_TIME_BUDGET = 240
     BF2_EPS = (("transactions", "hash"), ("token-transfers", "transaction_hash"),
@@ -507,14 +506,14 @@ class ChainWatcher(RpcSynthMixin):
     BF2_FLUSH_EMITS = 50
 
     def _bf2_spool_path(self, job: dict) -> str:
-        return os.path.join(common.STATE_DIR, f"bfspool_{self.chain}_{int(job['id'])}.jsonl")
+        return paths.state(f"bfspool_{self.chain}_{int(job['id'])}.jsonl")
 
     def _bf2_persist(self):
-        common.atomic_write_json(self.enrich_path, self.enrich)
-        common.atomic_write_json(os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"),
+        statefile.atomic_write_json(self.enrich_path, self.enrich)
+        statefile.atomic_write_json(paths.state(f"pending_detail_{self.chain}.json"),
                                  self.pending_detail)
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _bf2_new_job(self, first_ws: list, safe_now: int):
         groups = {}
@@ -591,7 +590,7 @@ class ChainWatcher(RpcSynthMixin):
         if not tb or tb[0] != target:
             try:
                 tb = self._ext_tb = (target, self.window_start_block_ts(target))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.info("%s 확장 목표 블록 탐색 실패(다음 사이클): %s", self.chain, e)
                 return None
         tblk = tb[1]
@@ -715,7 +714,7 @@ class ChainWatcher(RpcSynthMixin):
                 mir = self.cursor.get("_bf:" + w)
                 if isinstance(mir, dict):
                     mir["pages"] = int(mir.get("pages", 0)) + 1
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 progressed = True
                 self.progress.update(f"{self.chain}:job", phase="collect" if job.get("kind") != "extend" else "extend",
                                      unit="frac", since_block=job["since"], safe_block=job["safe"],
@@ -829,7 +828,7 @@ class ChainWatcher(RpcSynthMixin):
                     try:
                         snap = self.fetch_detail(h)
                         n_detail += 1
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 [isolate]
                         if g["b"] is None:
                             nf = job.setdefault("nob_fail", {})
                             nf[h] = int(nf.get(h, 0)) + 1
@@ -957,7 +956,7 @@ class ChainWatcher(RpcSynthMixin):
         try:
             hts = self._block_ts(hi_max)
             m["to_ts"] = max(int(m.get("to_ts") or 0), int(hts))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [optional]
             log.info("%s internal 대기 구간 끝 시각 미확보(표시만 영향): %s", self.chain, e)
         m["ratio"] = getattr(self, "_idx_ratio", None)
         self.cursor["_ext_internal_pending"] = m
@@ -1017,7 +1016,7 @@ class ChainWatcher(RpcSynthMixin):
                     r["done"], r["npp"] = True, None
                     break
                 if time.time() >= deadline:
-                    common.atomic_write_json(self.cursor_path, self.cursor)
+                    statefile.atomic_write_json(self.cursor_path, self.cursor)
                     return False
                 w, lo, hi = r["wallet"], int(r["from_block"]), int(r["to_block"])
                 npp = r.get("npp") if isinstance(r.get("npp"), dict) else \
@@ -1027,12 +1026,12 @@ class ChainWatcher(RpcSynthMixin):
                     d = http_json(url, prio="bg", deadline=deadline)
                 except bf_engine.NetError as e:
                     log.info("%s internal 재훑기 %s 보류(다음 사이클 같은 페이지부터): %s", self.chain, w[:10], str(e)[:120])
-                    common.atomic_write_json(self.cursor_path, self.cursor)
+                    statefile.atomic_write_json(self.cursor_path, self.cursor)
                     return False
                 if not isinstance(d, dict) or not isinstance(d.get("items"), list) or \
                         (d.get("next_page_params") is not None and not isinstance(d.get("next_page_params"), dict)):
                     log.warning("%s internal 재훑기 %s 응답 형식 오류 — 체크포인트 유지", self.chain, w[:10])
-                    common.atomic_write_json(self.cursor_path, self.cursor)
+                    statefile.atomic_write_json(self.cursor_path, self.cursor)
                     return False
                 oldest = None
                 for it in d["items"]:
@@ -1067,13 +1066,13 @@ class ChainWatcher(RpcSynthMixin):
                 if (oldest is not None and oldest <= lo) or not nxt:
                     if not self._idx_recheck():
                         log.info("%s internal 재훑기 %s 완료 표시 보류 — 색인 재확인 실패(다음 사이클 같은 페이지부터)", self.chain, w[:10])
-                        common.atomic_write_json(self.cursor_path, self.cursor)
+                        statefile.atomic_write_json(self.cursor_path, self.cursor)
                         return False
                     r["done"], r["npp"] = True, None
                     r["done_at"] = int(time.time())
                 else:
                     r["npp"] = nxt
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
         i = int(m.get("emit_i", 0))
         n_full = n_retry = 0
         span = [(int(r["from_block"]), int(r["to_block"])) for r in ranges]
@@ -1132,8 +1131,8 @@ class ChainWatcher(RpcSynthMixin):
             log.debug("pending %s 보류(게이트·장부 거절 — 횟수 안 셈): %s", h[:12], str(err)[:120])
             return False
         if n9 > 200:
-            common.append_durable_jsonl(
-                os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+            statefile.append_durable_jsonl(
+                paths.state("pending_poison.jsonl"),
                 {"ts": int(time.time()), "chain": self.chain,
                  "txhash": h, "err": str(snap)[:200]})
             del self.pending_detail[h]
@@ -1148,13 +1147,13 @@ class ChainWatcher(RpcSynthMixin):
         rows9 = list(((m.get("items") or {}).get(h) or {}).values())
 
         def poison(src, err=None, n=None):
-            common.append_durable_jsonl(os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+            statefile.append_durable_jsonl(paths.state("pending_poison.jsonl"),
                                         {"ts": int(time.time()), "chain": self.chain, "txhash": h, "src": src, "n": n,
-                                         "err": (common.safe_err(err)[:200] if err else None), "internal": rows9})
+                                         "err": (logs.safe_err(err)[:200] if err else None), "internal": rows9})
         try:
             snap = self.fetch_detail(h)
             blk = int(snap["tx"]["block_number"])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             rt = m.setdefault("detail_retry", {})
             rt[h] = int(rt.get(h, 0)) + 1
             if rt[h] > self.ENRICH_FAIL_MAX:
@@ -1246,7 +1245,7 @@ class ChainWatcher(RpcSynthMixin):
         if not tsfix.ts_valid(tx.get("timestamp")):
             try:
                 tx["timestamp"] = tsfix.block_ts(self, int(tx["block_number"]))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001
                 raise RuntimeError(f"tx 상세 시각 없음 · 블록 시각 조회 실패: {txhash}") from e
         tt = self._fetch_all_items(f"/api/v2/transactions/{txhash}/token-transfers")
         it = self._fetch_all_items(f"/api/v2/transactions/{txhash}/internal-transactions")
@@ -1274,7 +1273,7 @@ class ChainWatcher(RpcSynthMixin):
         try:
             snap = self.fetch_detail(h9, accept_pending=True)
             return isinstance(snap, dict) and bool(snap.get("tx"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [probe]
             log.info("enrich 5xx 판정용 상세 프로브 실패 → 포기 보류: %s", str(e)[:120])
             return False
 
@@ -1297,7 +1296,7 @@ class ChainWatcher(RpcSynthMixin):
         for h in list(self.enrich)[:self.ENRICH_BATCH]:
             try:
                 snap = self.fetch_detail(h)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 self.enrich[h] = int(self.enrich.get(h, 0)) + 1
                 giveup, src9 = self.enrich[h] > self.ENRICH_FAIL_MAX, "enrich_giveup"
                 if isinstance(e, BsDetailCap):
@@ -1314,10 +1313,10 @@ class ChainWatcher(RpcSynthMixin):
                     self._enrich_5xx.pop(h, None)
                 if giveup:
                     n9, n5xx9 = self.enrich[h], self._enrich_5xx.get(h, 0)
-                    common.append_durable_jsonl(
-                        os.path.join(common.STATE_DIR, "pending_poison.jsonl"),
+                    statefile.append_durable_jsonl(
+                        paths.state("pending_poison.jsonl"),
                         {"ts": int(time.time()), "chain": self.chain, "txhash": h,
-                         "src": src9, "n": n9, "n5xx": n5xx9, "err": common.safe_err(e)[:200]})
+                         "src": src9, "n": n9, "n5xx": n5xx9, "err": logs.safe_err(e)[:200]})
                     del self.enrich[h]
                     self._enrich_5xx.pop(h, None)
                     log.error("★enrich %s 포기(%s, 실패 누계 %d회·연속 5xx %d회) — rpc_basic 영구 확정"
@@ -1330,7 +1329,7 @@ class ChainWatcher(RpcSynthMixin):
                 self.emit(h, snap, head)
                 del self.enrich[h]
                 log.info("★enrich %s 완전 상세 재방출 — core 승격 대상★", h[:12])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.warning("enrich %s emit 실패(카운트 유지, 재시도): %s", h[:12], e)
 
     def cycle(self):
@@ -1373,7 +1372,7 @@ class ChainWatcher(RpcSynthMixin):
                         res_p[futs8[fu8]] = fu8.result(timeout=remain8)
                     except FutTimeout:
                         res_p[futs8[fu8]] = RuntimeError("pending 시간예산 초과 — 다음 사이클")
-                    except Exception as e8:
+                    except Exception as e8:  # noqa: BLE001 [fallback]
                         res_p[futs8[fu8]] = e8
             finally:
                 ex8.shutdown(wait=False, cancel_futures=True)
@@ -1392,7 +1391,7 @@ class ChainWatcher(RpcSynthMixin):
                             self.enrich[h.lower()] = 0
                             log.info("pending %s RPC 합성 확정 (블록스카웃 상세 불능 대체)", h[:12])
                             continue
-                        except Exception as e9r:
+                        except Exception as e9r:  # noqa: BLE001 [isolate]
                             if emitted_ok:
                                 log.warning("pending %s 합성 emit 후 정리 실패(카운트 유지): %s",
                                             h[:12], e9r)
@@ -1409,7 +1408,7 @@ class ChainWatcher(RpcSynthMixin):
                     del self.pending_detail[h]
                     if not accepts[h]:
                         self.enrich[h.lower()] = 0
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [isolate]
                     log.warning("pending %s emit 실패(카운트 유지 %d): %s",
                                 h[:12], self.pending_detail.get(h, 0), e)
         idx_state = self._indexing_state() if self.idx_guard else "ok"
@@ -1488,7 +1487,7 @@ class ChainWatcher(RpcSynthMixin):
                 try:
                     snap = self.fetch_detail(h)
                     detail_blk = int(snap["tx"]["block_number"])
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     if hinted_blk is None:
                         log.warning("detail %s 블록 확인 실패 — 커서 유지: %s", h[:12], e)
                         ok = False
@@ -1504,7 +1503,7 @@ class ChainWatcher(RpcSynthMixin):
                 try:
                     self.emit(h, snap, head)
                     self.emitted.add(h.lower())
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     log.error("inbox append 실패 — 커서 미전진: %s", e)
                     ok = False
                     _revoke_stamp_disk(self.cursor_path)
@@ -1539,7 +1538,7 @@ class ChainWatcher(RpcSynthMixin):
         if first_ws or ext_job or (ext_idx_ok and self.bf_mode != "legacy" and self._maybe_extend(head, safe)):
             try:
                 self._bf2_step(first_ws, head, safe)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [boundary]
                 log.error("%s v2 백필 스텝 예외(다음 사이클 재개): %s", self.chain, e)
                 self._bf2_persist()
         if idx_ok and isinstance(self.cursor.get("_ext_internal_pending"), dict) and not self._idx_stable():
@@ -1551,15 +1550,15 @@ class ChainWatcher(RpcSynthMixin):
         elif idx_ok and isinstance(self.cursor.get("_ext_internal_pending"), dict):
             try:
                 self._int_rescan_step(head, time.time() + max(30.0, self.bf2_budget / 2))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [boundary]
                 log.error("%s internal 재훑기 예외(다음 사이클 재개): %s", self.chain, e)
                 self._bf2_persist()
         if idx_ok and self._idx_stable():
             self._enrich_pass(head, healthy=all_ok)
-        common.atomic_write_json(self.enrich_path, self.enrich)
-        common.atomic_write_json(
-            os.path.join(common.STATE_DIR, f"pending_detail_{self.chain}.json"), self.pending_detail)
-        common.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.enrich_path, self.enrich)
+        statefile.atomic_write_json(
+            paths.state(f"pending_detail_{self.chain}.json"), self.pending_detail)
+        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
         if all_ok and not self.pending_detail and not self.enrich and "_ext_internal_pending" not in self.cursor:
             self.cursor["_synced_at"] = int(time.time())
         else:
@@ -1569,7 +1568,7 @@ class ChainWatcher(RpcSynthMixin):
             self.cursor["_synced_tok_at"] = int(time.time())
         else:
             self.cursor.pop("_synced_tok_at", None)
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if tb is not None:
             addr_tier.evm_baselines(self, tb, [w for w in self.wallets if w not in rest_set])
             if head_idx_ok and not getattr(self, "_idx_unknown", None):

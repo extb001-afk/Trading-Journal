@@ -1,0 +1,27 @@
+{"_doc": "G1 외부 요청 정책 예외 자리(파일::함수 → 수) — 6막 공용 opener 전환 목록. 늘면 FAIL · 줄면 --update-lower"}
+{"m": "base_override", "k": "src/alert_bot.py::_tg_api_base", "n": 1}
+{"m": "base_override", "k": "src/onboarding.py::_cg_base", "n": 2}
+{"m": "internal_hdr", "k": "src/login_auth.py::<mod>", "n": 1}
+{"m": "internal_hdr", "k": "src/review_daily.py::_get_json", "n": 1}
+{"m": "local_http", "k": "src/brokers/base.py::default_http", "n": 2}
+{"m": "local_http", "k": "src/brokers/ibkr.py::Adapter.base", "n": 2}
+{"m": "local_http", "k": "src/btc_watch.py::_settings", "n": 2}
+{"m": "local_http", "k": "src/cgkey.py::root", "n": 1}
+{"m": "local_http", "k": "src/chk_collect.py::collect_tunnel", "n": 2}
+{"m": "local_http", "k": "src/health.py::settings", "n": 2}
+{"m": "local_http", "k": "src/login_auth.py::setup_allowed", "n": 1}
+{"m": "local_http", "k": "src/onboarding.py::_base", "n": 1}
+{"m": "local_http", "k": "src/onboarding.py::_cg_base", "n": 2}
+{"m": "local_http", "k": "src/sui_watch.py::SuiAdapter.__init__", "n": 1}
+{"m": "local_http", "k": "src/ton_watch.py::TonClient.__init__", "n": 1}
+{"m": "local_http", "k": "tools/rebuild2.py::_net_block._gai", "n": 1}
+{"m": "redirect", "k": "src/brokers/base.py::_NoRedirect", "n": 1}
+{"m": "redirect", "k": "src/brokers/base.py::default_http", "n": 1}
+{"m": "redirect", "k": "src/net_http.py::_NoAuthRedirect", "n": 1}
+{"m": "redirect", "k": "src/net_http.py::auth_urlopen", "n": 1}
+{"m": "tailnet", "k": "src/chk_collect.py::_tailnet_ip", "n": 1}
+{"m": "tailnet", "k": "src/onboarding.py::<mod>", "n": 2}
+{"m": "tailnet", "k": "src/review_daily.py::_hosts", "n": 1}
+{"m": "tailnet", "k": "src/web.py::_login_startup_warnings", "n": 1}
+{"m": "tailnet", "k": "src/web.py::tailnet_ip", "n": 1}
+{"m": "tls_off", "k": "src/brokers/base.py::default_http", "n": 2}

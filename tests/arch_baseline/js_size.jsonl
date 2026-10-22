@@ -1,0 +1,15 @@
+{"_doc": "web/ 의 .js·.html 중 600줄 또는 48,000바이트 넘는 파일 — 줄·바이트 상한(늘면 실패 · 새 파일은 600줄·48KB 이하).", "checked_with": "파이썬 토크나이저 측정 · acorn 8.16.0 · node v25.9.0 대조 일치", "kind": "max", "spec": "js_size"}
+{"key": "web/index.html", "lines": 3628, "bytes": 287256}
+{"key": "web/support.js", "lines": 1911, "bytes": 69150}
+{"key": "web/v2/app.js", "lines": 4887, "bytes": 517547}
+{"key": "web/v2/health.js", "lines": 645, "bytes": 62123}
+{"key": "web/v2/search.js", "lines": 1585, "bytes": 150332}
+{"key": "web/v2/setup.js", "lines": 1700, "bytes": 182309}
+{"key": "web/v2/tab_daily.js", "lines": 1126, "bytes": 141462}
+{"key": "web/v2/tab_dash.js", "lines": 1982, "bytes": 254619}
+{"key": "web/v2/tab_jrnl.js", "lines": 1096, "bytes": 153048}
+{"key": "web/v2/tab_other.js", "lines": 754, "bytes": 93041}
+{"key": "web/v2/tab_out.js", "lines": 874, "bytes": 129645}
+{"key": "web/v2/tab_rcpt.js", "lines": 1379, "bytes": 169291}
+{"key": "web/v2/tab_set.js", "lines": 1391, "bytes": 168229}
+{"key": "web/v2/wow.js", "lines": 986, "bytes": 114865}

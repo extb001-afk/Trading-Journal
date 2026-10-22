@@ -1,0 +1,520 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=pxzero · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "pxzero",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [],
+ "requests": 12,
+ "interactions": [
+  {
+   "key": "GET https://api.bybit.com/v5/market/kline?category=spot&symbol=ZDEADUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=ZDEADUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "list": [
+       [
+        "1759989180000",
+        "0.3171",
+        "0.3171",
+        "0.3171",
+        "0.3171",
+        "0",
+        "0"
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/kline?category=spot&symbol=ZLIVEUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=ZLIVEUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "list": [
+       [
+        "1759989180000",
+        "2.5",
+        "2.6",
+        "2.4",
+        "2.55",
+        "10",
+        "25"
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZDEADUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZDEADUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     [
+      1759989180000,
+      "1.5",
+      "1.5",
+      "1.5",
+      "1.5",
+      "0.00000000",
+      1759989239999,
+      "0.00000000",
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZLIVEUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZLIVEUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     [
+      1759989180000,
+      "1.5",
+      "1.5",
+      "1.5",
+      "1.5",
+      "3.0",
+      1759989239999,
+      "4.5",
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZNOQUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZNOQUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     [
+      1759989180000,
+      "1.5",
+      "1.5",
+      "1.5",
+      "1.5",
+      "0"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZIPUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZIPUSDT&interval=1m&startTime=1759989180000&endTime=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 400,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": -1121,
+     "msg": "Invalid symbol."
+    }
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/kline?category=spot&symbol=ZIPUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=ZIPUSDT&interval=1&start=1759989180000&end=1759989239999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "list": [
+       [
+        "1759989180000",
+        "0.3171",
+        "0.3171",
+        "0.3171",
+        "0.3171",
+        "0",
+        "0"
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/candles/minutes/1?market=KRW-ZIP&to=2025-10-09T05:54:00Z&count=30",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/candles/minutes/1?market=KRW-ZIP&to=2025-10-09T05:54:00Z&count=30"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 404,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "error": {
+      "name": "404",
+      "message": "Code not found"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZMIXUSDT&interval=1m&startTime=1759989180000&endTime=1760049179999&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZMIXUSDT&interval=1m&startTime=1759989180000&endTime=1760049179999&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     [
+      1759989180000,
+      "1.0",
+      "1.0",
+      "1.0",
+      "1.0",
+      "0",
+      1759989239999,
+      "0",
+      0
+     ],
+     [
+      1759989240000,
+      "1.1",
+      "1.1",
+      "1.1",
+      "1.1",
+      "4",
+      1759989299999,
+      "4.4",
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/kline?category=spot&symbol=ZZUSDT&interval=D&start=1756512000000&end=1756943999999&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=ZZUSDT&interval=D&start=1756512000000&end=1756943999999&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    "accept": "application/json",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "list": [
+       [
+        "1756857600000",
+        "2",
+        "2",
+        "2",
+        "2",
+        "0",
+        "0"
+       ],
+       [
+        "1756771200000",
+        "2",
+        "2",
+        "2",
+        "2",
+        "0",
+        "0"
+       ],
+       [
+        "1756684800000",
+        "2",
+        "2",
+        "2",
+        "2",
+        "0",
+        "0"
+       ],
+       [
+        "1756598400000",
+        "2",
+        "2",
+        "2",
+        "2",
+        "5",
+        "10"
+       ],
+       [
+        "1756512000000",
+        "2",
+        "2",
+        "2",
+        "2",
+        "5",
+        "10"
+       ]
+      ]
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.binance.com/api/v3/klines?symbol=ZFLUSDT&interval=1m&startTime=1759762380000&endTime=1759762439999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.binance.com/api/v3/klines?symbol=ZFLUSDT&interval=1m&startTime=1759762380000&endTime=1759762439999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.binance.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.binance.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 400,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "code": -1121,
+     "msg": "Invalid symbol."
+    }
+   }
+  },
+  {
+   "key": "GET https://api.bybit.com/v5/market/kline?category=spot&symbol=ZFLUSDT&interval=1&start=1759762380000&end=1759762439999&limit=1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=ZFLUSDT&interval=1&start=1759762380000&end=1759762439999&limit=1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.bybit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1 (personal trade journal)",
+    ":timeout": "10",
+    ":tls": "검증",
+    ":sni": "api.bybit.com"
+   },
+   "auth": {},
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "retCode": 0,
+     "retMsg": "OK",
+     "result": {
+      "list": [
+       [
+        "1759762380000",
+        "0.29",
+        "0.3",
+        "0.28",
+        "0.29",
+        "100",
+        "29"
+       ]
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

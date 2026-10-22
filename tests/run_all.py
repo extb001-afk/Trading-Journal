@@ -17,7 +17,7 @@ SOLO = ("test_unit_sigint_quiet",)
 def _root():
     env = os.environ.get("TJ_TEST_ROOT")
     for c in ([env] if env else [os.path.join(HERE, ".."), os.path.join(HERE, "..", "..")]):
-        if c and os.path.isfile(os.path.join(c, "src", "common.py")):
+        if c and os.path.isfile(os.path.join(c, "src", "version.py")):
             return os.path.abspath(c)
     return None
 
@@ -126,7 +126,7 @@ def main():
         return 1
     root = _root()
     if not root:
-        print("src/common.py 를 찾지 못했어요 — TJ_TEST_ROOT=<src 가 든 폴더>")
+        print("src/version.py(뿌리 표식)를 찾지 못했어요 — TJ_TEST_ROOT=<src 가 든 폴더>")
         return 1
     files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py") and (not args or any(a in f for a in args)))
     if not files:

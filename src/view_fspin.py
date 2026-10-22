@@ -1,16 +1,13 @@
 from __future__ import annotations
 import math
 import os
-import common
+import logs, paths, statefile
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
 FS_EX = " · 최초 인식 시가"
-
-
-FS_PIN_PATH = os.path.join(common.STATE_DIR, "first_seen_px.json")
 
 
 FS_CAP_X = 10
@@ -24,16 +21,16 @@ FS_HOLD_KO = {"wait": " · 최초 인식 시가 시세 대기(받으면 자동 �
 
 
 def _fs_pin_load() -> dict:
-    if not os.path.exists(FS_PIN_PATH):
+    if not os.path.exists(paths.state("first_seen_px.json")):
         return {}
     try:
-        d9 = common.read_json(FS_PIN_PATH, {})
-    except (Exception, SystemExit) as _cg9:
+        d9 = statefile.read_json(paths.state("first_seen_px.json"), {})
+    except (Exception, SystemExit) as _cg9:   # noqa: BLE001 [fallback]
         calcguard.swallowed("view_fspin:_fs_pin_load", _cg9)
         d9 = None
     if not isinstance(d9, dict) or d9.get("_v") != 1 or not isinstance(d9.get("p"), dict):
         try:
-            os.replace(FS_PIN_PATH, FS_PIN_PATH + ".bad")
+            os.replace(paths.state("first_seen_px.json"), paths.state("first_seen_px.json") + ".bad")
         except OSError:
             pass
         log.warning("최초 인식 시가 고정 저장소 손상 — .bad 로 옮기고 새로 시작")
@@ -65,6 +62,6 @@ def _fs_pin_save(new9: dict) -> None:
         return
     cur9.update(add9)
     try:
-        common.atomic_write_json(FS_PIN_PATH, {"_v": 1, "p": cur9})
+        statefile.atomic_write_json(paths.state("first_seen_px.json"), {"_v": 1, "p": cur9})
     except OSError as e9:
-        log.warning("최초 인식 시가 고정 저장 실패(다음 빌드에 다시): %s", common.safe_err(e9)[:160])
+        log.warning("최초 인식 시가 고정 저장 실패(다음 빌드에 다시): %s", logs.safe_err(e9)[:160])

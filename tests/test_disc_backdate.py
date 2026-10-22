@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import histcurve
-import web
-import xparts
+import histcurve  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -67,7 +67,7 @@ def unit_builder():
 
 
 def reset_files():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
 
@@ -129,7 +129,7 @@ pin_all(b)
 for d9 in range(1, 9):
     b.daily[iso(10, d9)] = old_entry(100000)
 b.daily[iso(10, 5)] = old_entry(100000, src="live", snap=E(10, 5, 23, 55, 0))
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 G1 = mkG()
 FP = dfp(G1)
 s1 = vals(run(b, G1))
@@ -138,7 +138,7 @@ chk(FP and all(close(s1.get("10-%02d" % d9), 102000) for d9 in range(1, 9)), "J1
 chk(all((b.daily.get(iso(10, d9)) or {}).get("dq") == FP for d9 in range(1, 10)), "J1 동결 항목 지문 dq = 지금 지문", {d9: (b.daily.get(iso(10, d9)) or {}).get("dq") for d9 in range(1, 10)})
 chk(close(s1.get("09-20"), 102000) and close(s1.get("10-10"), 102000), "J1 창 앞쪽 날·오늘도 같은 정의(계단 없음)", (s1.get("09-20"), s1.get("10-10")))
 b.daily[iso(10, 3)]["val"] = 102001.0
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 s1b = vals(run(b, G1, NOW + 60))
 chk(close(s1b.get("10-03"), 102001), "J1 두 번째 빌드 = 다시 계산 없음(1회)", s1b.get("10-03"))
 reset_files()
@@ -146,7 +146,7 @@ b = unit_builder()
 pin_all(b)
 for d9 in range(1, 9):
     b.daily[iso(10, d9)] = old_entry(100000)
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 G0 = mkG(disc=False)
 s0 = vals(run(b, G0, hold={1: Decimal(100000), 2: Decimal(1000)}))
 chk(dfp(G0) == "" and close(s0.get("10-05"), 100000) and (b.daily.get(iso(10, 5)) or {}).get("dq") == "",
@@ -178,7 +178,7 @@ pin_all(b)
 run(b, mkG())
 for d9 in (3, 4):
     b.daily[iso(10, d9)] = old_entry(100000)
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 s3 = vals(run(b, mkG(), NOW + 60))
 chk(close(s3.get("10-03"), 102000) and close(s3.get("10-04"), 102000), "J3 롤백 뒤 옛 코드가 다시 굳힌 날 = 새 코드 첫 빌드에 다시 102,000", (s3.get("10-03"), s3.get("10-04")))
 G3 = mkG(q=1500)
@@ -186,7 +186,7 @@ s3b = vals(run(b, G3, NOW + 120, hold={1: Decimal(100000), 2: Decimal(1500)}))
 chk(close(s3b.get("10-03"), 103000) and (b.daily.get(iso(10, 3)) or {}).get("dq") == dfp(G3), "J3 새 지문 = 다시 계산 103,000", s3b.get("10-03"))
 
 before4 = {k9: v9 for k9, v9 in s3b.items() if k9 != "10-10"}
-os.remove(web.DAILY_PATH)
+os.remove(paths.state("daily_cache.json"))
 s4 = vals(run(b, G3, NOW + 180, hold={1: Decimal(100000), 2: Decimal(1500)}))
 chk(all(close(s4.get(k9), v9) for k9, v9 in before4.items()), "J4 캐시 삭제 뒤 처음부터 = 같은 지난날 값", {k9: (v9, s4.get(k9)) for k9, v9 in list(before4.items())[-4:]})
 
@@ -209,7 +209,7 @@ pre9 = {"_v": histcurve.HIST_V, "d": {iso(8, 20): hrow(100000), iso(8, 21): hrow
         "s": {iso(8, 20): [100000.0, 0.0, 0.0, 0, 0.0], iso(8, 21): [100000.0, 0.0, 0.0, 0, 0.0]},
         "x": {k9: {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(k9) - 1} for k9 in (iso(8, 20), iso(8, 21))},
         "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pth9, pre9)
+statefile.atomic_write_json(pth9, pre9)
 HJ = histcurve.HistCurve(path=pth9, px_path=pxp9)
 
 
@@ -235,7 +235,7 @@ chk(close(((HJ.st.get("d") or {}).get(iso(8, 20)) or [None])[0], 105001), "J5 �
 st9 = HJ.st
 st9["d"] = dict(st9["d"], **{iso(8, 20): hrow(100000)})
 st9["s"] = dict(st9["s"], **{iso(8, 20): [100000.0, 0.0, 0.0, 0, 0.0]})
-common.atomic_write_json(pth9, st9)
+statefile.atomic_write_json(pth9, st9)
 HJ2 = histcurve.HistCurve(path=pth9, px_path=pxp9)
 HJ2.px["fx"] = HJ.px["fx"]
 HJ2.run_once(kJ, cap=0, now=NOW + 120)
@@ -274,7 +274,7 @@ pthK, pxpK = os.path.join(S, "chK.json"), os.path.join(S, "chK_px.json")
 preK = {"_v": histcurve.HIST_V, "d": {iso(8, 20): hrow(1), iso(8, 22): hrow(1, "dc")}, "s": {iso(8, 20): [1.0, 0.0, 0.0, 0, 0.0]},
         "x": {iso(8, 20): {"p": xp0, "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(iso(8, 20)) - 1}},
         "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pthK, preK)
+statefile.atomic_write_json(pthK, preK)
 HK = histcurve.HistCurve(path=pthK, px_path=pxpK)
 HK.px["fx"] = {"lo": "2026-07-01", "hi": "2026-10-10", "st": "ok", "p": {d9: FX for d9 in daysJ}}
 

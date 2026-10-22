@@ -12,10 +12,11 @@ from decimal import Decimal, localcontext, InvalidOperation
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-import common
+import config, histmark, paths, statefile  # noqa: E402
+import ledger_lock  # noqa: E402
 
-LIVE_STATE = common.STATE_DIR
-LIVE_DB = common.DB_PATH
+LIVE_STATE = paths.STATE_DIR
+LIVE_DB = paths.DB_PATH
 DERIVED_TABLES = ("postings", "tx_class", "transfers", "positions")
 ANCHOR_SQL = ("SELECT source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location,"
               " qty_base, cost_usd, cost_krw, leg_kind, event, classifier_ver"
@@ -58,7 +59,17 @@ def _write_private_json(path: str, obj):
 
 
 def _ro(path, immutable: bool = False):
-    return sqlite3.connect(common.sqlite_ro_uri(path, immutable=immutable), uri=True, timeout=10)
+    return sqlite3.connect(paths.sqlite_ro_uri(path, immutable=immutable), uri=True, timeout=10)
+
+
+def shadow_lock(shadow_dir: str, baseline_dir: str = None) -> int:
+    if baseline_dir:
+        if _paths_overlap(shadow_dir, LIVE_STATE) or _paths_overlap(shadow_dir, ROOT) or _paths_overlap(shadow_dir, baseline_dir):
+            raise SystemExit("shadow-dir 가 라이브/저장소/기준선 디렉터리와 겹친다 — 중단")
+    elif _paths_overlap(shadow_dir, LIVE_STATE) or _paths_overlap(shadow_dir, ROOT):
+        raise SystemExit("shadow-dir 가 라이브 state/저장소와 겹친다 — 중단")
+    _make_private_dir(shadow_dir)
+    return ledger_lock.acquire(os.path.join(shadow_dir, "ledger.db"), who="rebuild2(shadow)")
 
 
 def snapshot_from(baseline_dir: str, shadow_dir: str) -> tuple:
@@ -112,7 +123,7 @@ def snapshot_live(shadow_dir: str) -> tuple:
         for p in (base, base + "-wal", base + "-shm"):
             if os.path.exists(p):
                 os.remove(p)
-    src = sqlite3.connect(common.sqlite_ro_uri(LIVE_DB), uri=True, timeout=30)
+    src = sqlite3.connect(paths.sqlite_ro_uri(LIVE_DB), uri=True, timeout=30)
     tgt = sqlite3.connect(baseline)
     try:
         src.backup(tgt)
@@ -218,7 +229,7 @@ def _net_block(stats):
                 fr = fr.f_back
             if who in callers or len(callers) < 50:
                 callers[who] = callers.get(who, 0) + 1
-        except Exception:
+        except Exception:   # noqa: BLE001
             pass
 
     def _cg_offline(path, lane, via, allow=True, valid=None):
@@ -478,7 +489,7 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         order.append((T if T is not None else -1, a, False))
         if a[11] == "EXF_ADJUST" and T is not None:
             sc9 = (str(sid), loc, sh_idx.sym_of.get(aid, ""))
-            if common.exf_is_fut(a[11], ns):
+            if histmark.exf_is_fut(a[11], ns):
                 fut_sc.setdefault(sc9, (T, a))
             elif str(ns).endswith(":recon"):
                 rec_sc.add(sc9)
@@ -524,7 +535,7 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         if ns in ("upbit:recon_comp", "upbit:recon"):
             dropped_comp += 1
             continue
-        if T < 0 or common.exf_is_fut(a[11], ns):
+        if T < 0 or histmark.exf_is_fut(a[11], ns):
             cur9 = conn.execute("INSERT OR IGNORE INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts,"
                                 " asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event, classifier_ver)"
                                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", a)
@@ -539,7 +550,7 @@ def recompute_anchors(live_db, conn, core, anchors, obs, meta):
         rescale9 = (Decimal(10) ** int(ldec9)) / (Decimal(10) ** int(dec)) if ldec9 != dec else None
         tgt_aid, tgt_dec = aid, dec
         if loc == "exchange:upbit":
-            tgt_aid, tgt_dec = core._upbit_asset(sym9), 8
+            tgt_aid, tgt_dec = core.svc_exf._upbit_asset(sym9), 8
             remapped += (1 if tgt_aid != aid else 0)
         live_then = live_idx.sum_before(key, T)
         sh_then = sh_idx.sum_before(key, T)
@@ -674,6 +685,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
                         "missing_sample": missing[:10], "mismatch_sample": mismatch[:10],
                         "unlinked_sum_q8": {k: str(v) for k, v in sorted(unlinked_sum.items())}}
     import core as _core9
+    import core_svc
     elig_ord, elig_q, n_nonkrw = set(), {}, 0
     for r in b.execute("SELECT uuid, payload FROM raw_ex WHERE exchange='upbit' AND kind='order'"
                        " GROUP BY uuid HAVING revision = MAX(revision)"):
@@ -684,7 +696,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         mk = str(o.get("market") or "")
         if not mk.startswith("KRW-"):
             n_nonkrw += 1
-            p9 = _core9.Core._upbit_quote_fill_legs(_core9.Core, o)
+            p9 = core_svc.ExfService._upbit_quote_fill_legs(core_svc.ExfService, o)
             if p9 is not None:
                 elig_q[r[0]] = p9
             continue
@@ -868,7 +880,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
             g3_bad.append(("gap>1%", uid, sym, str(src_q), str(dst)))
     g["G3_linked_deposits"] = {"total": g3_n, "violations": len(g3_bad), "sample": g3_bad[:10]}
     try:
-        bal = json.load(open(os.path.join(common.STATE_DIR, "upbit_balances.json"), encoding="utf-8"))
+        bal = json.load(open(os.path.join(paths.STATE_DIR, "upbit_balances.json"), encoding="utf-8"))
     except Exception:
         bal = {}
     actual = {}
@@ -969,7 +981,7 @@ DEC_RESOLVE = {}
 def apply_dec_pending(conn, state_dir: str) -> dict:
     dec_pend = {}
     DEC_RESOLVE.clear()
-    for k9, it9 in ((common.read_json(os.path.join(state_dir, "asset_decimals_issues.json"), {}) or {}).get("items") or {}).items():
+    for k9, it9 in ((statefile.read_json(os.path.join(state_dir, "asset_decimals_issues.json"), {}) or {}).get("items") or {}).items():
         if not isinstance(it9, dict) or not isinstance(it9.get("seen"), int) or isinstance(it9.get("seen"), bool):
             continue
         try:
@@ -1207,10 +1219,10 @@ def _obs_price_fn(assets, spot_path):
         sp = {}
     usd, dex, guarded = sp.get("usd") or {}, sp.get("dex_usd") or {}, set((sp.get("guarded") or {}).keys())
     try:
-        import pricing as _pr
-        stab = {(ch, str(ca).lower()) for ch, m in (getattr(_pr, "STABLE_CAS", {}) or {}).items() for ca in m}
-        stab |= {("sol", m) for m in (getattr(_pr, "STABLE_MINTS", {}) or {})}
-    except Exception:
+        import token_tables
+        stab = {(ch, str(ca).lower()) for ch, m in (getattr(token_tables, "STABLE_CAS", {}) or {}).items() for ca in m}
+        stab |= {("sol", m) for m in (getattr(token_tables, "STABLE_MINTS", {}) or {})}
+    except Exception:   # noqa: BLE001
         stab = set()
 
     def px(aid):
@@ -1409,26 +1421,28 @@ def main():
             os.path.realpath(os.path.join(shadow_dir, name + suffix))
             for name in ("ledger.db", "live_snapshot.db") for suffix in ("", "-wal", "-shm")}:
         raise SystemExit("--report 가 shadow DB/기준선과 겹친다 — 중단")
+    shadow_lock(shadow_dir, os.path.abspath(args.from_baseline) if args.from_baseline else None)
     if args.from_baseline:
         shadow_db, baseline_db = snapshot_from(os.path.abspath(args.from_baseline), shadow_dir)
     else:
         shadow_db, baseline_db = snapshot_live(shadow_dir)
     print(f"[0] 스냅샷 완료 → 작업 {shadow_db} / 기준선 {baseline_db} ({time.monotonic() - t0:.1f}s)")
 
-    _live_state = common.STATE_DIR
-    common.rebase_state(shadow_dir, shadow_db)
-    assert common.ACTIVITY_GATE_PATH.startswith(shadow_dir), "활동 게이트 경로가 shadow 밖"
-    common.QUOTA_STATE_DIR = _live_state
-    import nft as _nft9
+    _live_state = paths.STATE_DIR
+    paths.rebase_state(shadow_dir, shadow_db)
+    assert paths.ACTIVITY_GATE_PATH.startswith(shadow_dir), "활동 게이트 경로가 shadow 밖"
+    paths.QUOTA_STATE_DIR = _live_state
+    import nft as _nft9  # noqa: E402
     _nft9.BUDGET_PATH = os.path.join(_live_state, "nft_budget.json")
-    import pricing
+    import pricing  # noqa: E402
     px_stats = offline_patch(pricing)
-    import core as core_mod
-    import db as dbm
+    import core as core_mod  # noqa: E402
+    import core_svc  # noqa: E402
+    import db as dbm  # noqa: E402
     assert dbm
 
-    cfg = common.load_config()
-    bal_p = os.path.join(common.STATE_DIR, "upbit_balances.json")
+    cfg = config.load_config()
+    bal_p = os.path.join(paths.STATE_DIR, "upbit_balances.json")
     try:
         bal_ts = int((json.load(open(bal_p, encoding="utf-8")) or {}).get("ts") or 0)
     except Exception:
@@ -1447,19 +1461,20 @@ def main():
         raise SystemExit(f"★기준선 DB 세대 {_bv} — 허용 {dbm.SCHEMA_VERSION - 1}/{dbm.SCHEMA_VERSION} 만 (중단)★")
     _c0 = sqlite3.connect(shadow_db)
     _c0.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_version', ?)", (str(dbm.SCHEMA_VERSION),))
+    inval_base = {str(r[0]): str(r[1]) for r in _c0.execute("SELECT k, v FROM meta WHERE k IN (?, ?)", (dbm.LEDGER_EPOCH_K, dbm.DAILY_INVAL_K))}
     _c0.commit(); _c0.close()
     c = core_mod.Core(cfg)
     conn = c.conn
     if not c.lp_mgrs:
         raise SystemExit("★LP 관리자 목록 비어 있음(seed/lp_managers.json + state/seed_local) — 재구축 중단★")
-    GEN_T0 = c._upbit_window_t0()
+    GEN_T0 = c.svc_exf._upbit_window_t0()
     _cb0 = _ro(baseline_db, immutable=True)
     _t0_live = _cb0.execute("SELECT min(event_ts) FROM postings WHERE source_ns IN ('upbit:deposit', 'upbit:withdraw')").fetchone()[0]
     _cb0.close()
     if _t0_live and c.recon_months > 0 and int(_t0_live) < GEN_T0:
         print(f"[0b] 업비트 기장 창 시작 {GEN_T0} → 기준선 최초 기장 {int(_t0_live)} 로 고정(재파생이 라이브 기장분을 잃지 않게)")
         GEN_T0 = int(_t0_live)
-        c._upbit_window_t0 = (lambda t9=GEN_T0: t9)
+        c.svc_exf._upbit_window_t0 = (lambda t9=GEN_T0: t9)
     assert os.path.abspath(conn.execute("PRAGMA database_list").fetchone()[2]) == shadow_db, "shadow 아님"
 
     anchors = [tuple(r) for r in conn.execute(ANCHOR_SQL).fetchall()]
@@ -1471,7 +1486,7 @@ def main():
         conn.execute(f"DELETE FROM {t}")
     conn.commit()
     print("[2] 파생 삭제")
-    dec_pend = apply_dec_pending(conn, common.STATE_DIR)
+    dec_pend = apply_dec_pending(conn, paths.STATE_DIR)
     if dec_pend:
         print(f"[2c] decimals 채움 대기 {len(dec_pend)}개 자산에 먼저 반영")
 
@@ -1514,7 +1529,7 @@ def main():
         txid = str(p.get("txid") or "")
         if not txid:
             continue
-        m += c._link_transfers(d["uuid"], txid, p.get("currency"), now)
+        m += c.svc_exf._link_transfers(d["uuid"], txid, p.get("currency"), now)
     dep_n = 0
     for d in conn.execute("SELECT uuid, payload FROM raw_ex WHERE kind='deposit' AND exchange='upbit'"
                           " GROUP BY uuid HAVING revision = MAX(revision)"
@@ -1523,8 +1538,8 @@ def main():
             p = json.loads(d["payload"])
         except json.JSONDecodeError as e9:
             raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
-        dep_ts = c._iso_ts(p.get("done_at") or p.get("created_at")) or now
-        if c._post_ex_deposit(d["uuid"], p, dep_ts):
+        dep_ts = c.svc_exf._iso_ts(p.get("done_at") or p.get("created_at")) or now
+        if c.svc_exf._post_ex_deposit(d["uuid"], p, dep_ts):
             dep_n += 1
     wd_n = 0
     for d in conn.execute("SELECT uuid, payload FROM raw_ex WHERE kind='withdraw' AND exchange='upbit'"
@@ -1534,17 +1549,27 @@ def main():
             p = json.loads(d["payload"])
         except json.JSONDecodeError as e9:
             raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
-        if c._post_ex_withdraw(d["uuid"], p):
+        if c.svc_exf._post_ex_withdraw(d["uuid"], p):
             wd_n += 1
     conn.commit()
     print(f"[4a] 업비트 입금 canonical 기장 {dep_n}건 (링크 매칭 {m}건) / [4b] 출금 기장 {wd_n}건")
     nf = 0
     for t in exf_trade_rows(conn):
         try:
-            if c._post_exf_fill(t["exchange"], json.loads(t["payload"])):
+            if c.svc_exf._post_exf_fill(t["exchange"], json.loads(t["payload"])):
                 nf += 1
         except json.JSONDecodeError as e9:
             raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+    n_income = 0
+    for t in conn.execute("SELECT exchange, payload FROM raw_ex WHERE kind='income'"
+                          " GROUP BY exchange, uuid HAVING revision = MAX(revision) ORDER BY observed_at, exchange, uuid").fetchall():
+        try:
+            if c.svc_exf._post_exf_income(t["exchange"], json.loads(t["payload"])):
+                n_income += 1
+        except json.JSONDecodeError as bad_json:
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({bad_json}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+    if n_income:
+        print(f"[4] 해외 지급 내역(배당·에어드랍·Earn 이자) {n_income}건")
     for t in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='withdraw'"
                           " AND exchange != 'upbit' GROUP BY exchange, uuid"
                           " HAVING revision = MAX(revision) ORDER BY observed_at, exchange, uuid").fetchall():
@@ -1554,7 +1579,7 @@ def main():
             raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
         if str(d9.get("state") or "").upper() != "DONE":
             continue
-        c._post_exf_withdraw(t["exchange"], t["uuid"], d9)
+        c.svc_exf._post_exf_withdraw(t["exchange"], t["uuid"], d9)
     for t in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
                           " AND exchange != 'upbit' GROUP BY exchange, uuid"
                           " HAVING revision = MAX(revision) ORDER BY observed_at, exchange, uuid").fetchall():
@@ -1566,8 +1591,8 @@ def main():
             continue
         txid9 = str(d9.get("txid") or "")
         if txid9:
-            c._link_transfers(t["uuid"], txid9, d9.get("currency"), now)
-        c._post_exf_deposit_in(t["exchange"], t["uuid"], d9)
+            c.svc_exf._link_transfers(t["uuid"], txid9, d9.get("currency"), now)
+        c.svc_exf._post_exf_deposit_in(t["exchange"], t["uuid"], d9)
     conn.commit()
     orders = []
     for o in conn.execute("SELECT payload FROM raw_ex WHERE kind='order'"
@@ -1577,7 +1602,7 @@ def main():
         except json.JSONDecodeError as e9:
             raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
     if orders:
-        c._consume_fills({"orders": orders})
+        c.svc_exf._consume_fills({"orders": orders})
         conn.commit()
     print(f"[4] 업비트 입금 대사 {m} / 해외 체결 {nf} / 업비트 주문 {len(orders)} ({time.monotonic() - t0:.1f}s)")
     if err:
@@ -1601,8 +1626,8 @@ def main():
     passes = 0
     prev = None
     while passes < 400:
-        c._last_price_pass = 0.0
-        c.price_pass()
+        c.svc_price._last_price_pass = 0.0
+        c.svc_price.price_pass()
         passes += 1
         left = conn.execute("SELECT count(*) FROM postings WHERE cost_usd IS NULL"
                             " AND (leg_kind='gas' OR (event='SWAP' AND leg_kind IN ('disp','acq'))"
@@ -1625,9 +1650,9 @@ def main():
         for r9 in conn.execute("SELECT DISTINCT source_ns, source_id FROM postings WHERE source_kind='chain_tx'"
                                " AND event LIKE 'LP\\_%' ESCAPE '\\' AND leg_kind IN ('disp','acq') AND cost_usd IS NULL"
                                " ORDER BY source_ns, source_id").fetchall():
-            c._price_tx(r9[0], r9[1])
+            c.svc_price._price_tx(r9[0], r9[1])
             n_lp9 += 1
-        n_uq9 = c._price_upbit_quote_fills(10 ** 6)
+        n_uq9 = c.svc_price._price_upbit_quote_fills(10 ** 6)
         conn.commit()
         try:
             fx_calls9 = int(os.environ.get("TJ_REBUILD_FX_CALLS") or 3000)
@@ -1650,8 +1675,8 @@ def main():
         print(f"[5b] 온라인 가격: LP tx {n_lp9} · 업비트 비KRW 체결 {n_uq9} → LP 레그 미산정 잔여 {left9}(시세 없는 토큰)")
         prev9 = None
         for _i9 in range(400):
-            c._last_price_pass = 0.0
-            c.price_pass()
+            c.svc_price._last_price_pass = 0.0
+            c.svc_price.price_pass()
             n9 = conn.execute("SELECT count(*) FROM postings WHERE cost_usd IS NULL"
                               " AND (leg_kind='gas' OR (event='SWAP' AND leg_kind IN ('disp','acq'))"
                               "      OR (event LIKE 'LP\\_%' ESCAPE '\\' AND leg_kind IN ('disp','acq')))").fetchone()[0]
@@ -1688,9 +1713,9 @@ def main():
         anc["mode"] = "recompute"
     conn.execute("DELETE FROM meta WHERE k='recon_done_upbit'")
     conn.commit()
-    c._last_exrecon = 0.0
+    c.svc_exf._last_exrecon = 0.0
     before6 = conn.execute("SELECT count(*) FROM postings WHERE source_ns='upbit:recon'").fetchone()[0]
-    c.exchange_recon_pass(drained={"ex"})
+    c.svc_exf.exchange_recon_pass(drained={"ex"})
     core_mod.time.time = real_time
     core_mod.time.sleep = real_sleep
     kept6 = keep_upbit_anchor_names(baseline_db, conn)
@@ -1701,7 +1726,7 @@ def main():
     except Exception:
         bal9 = {}
     try:
-        ost9 = json.load(open(os.path.join(common.STATE_DIR, "upbit_orders_state.json"), encoding="utf-8")) or {}
+        ost9 = json.load(open(os.path.join(paths.STATE_DIR, "upbit_orders_state.json"), encoding="utf-8")) or {}
     except Exception:
         ost9 = {}
     locked9 = sorted({str(a9.get("currency") or "").upper() for a9 in (bal9.get("accounts") or [])
@@ -1727,13 +1752,18 @@ def main():
     if incomplete:
         print("★[6b] 업비트 재대사 미완(잔고 스냅샷 신선도/주문 스윕/미체결 통화) — rebuild_incomplete 유지, "
               "이 shadow 는 컷오버 후보 아님(진단 리포트만 생성)★")
+    for inval_key in (dbm.LEDGER_EPOCH_K, dbm.DAILY_INVAL_K):
+        if inval_key in inval_base:
+            conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (inval_key, inval_base[inval_key]))
+        else:
+            conn.execute("DELETE FROM meta WHERE k=?", (inval_key,))
     conn.commit()
     c.px.flush = lambda: None
     conn.close()
     print(f"[6] 앵커 {anc['mode']}: " + ", ".join(f"{k}={v}" for k, v in anc.items() if k != "rows")
           + f" ({time.monotonic() - t0:.1f}s)")
 
-    rep = compare(baseline_db, shadow_db, GEN_T0, core_mod.Core._iso_ts)
+    rep = compare(baseline_db, shadow_db, GEN_T0, core_svc.ExfService._iso_ts)
     _cu = _ro(shadow_db)
     try:
         rep["decimals_unresolved"] = dec_unresolved(_cu, dec_pend)
@@ -1742,7 +1772,7 @@ def main():
     rep["anchors"] = anc
     try:
         rep["G_obs_replay"] = obs_replay_gate(baseline_db, shadow_db, os.path.join(shadow_dir, "spot.json"))
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001
         rep["G_obs_replay"] = {"ok": False, "error": repr(e9)[:300], "worse_n": 0, "worse": []}
     _og = rep["G_obs_replay"]
     print(f"[7b] G_obs_replay: 관측 칸 {_og.get('cells', '?')} · 판정 {_og.get('checked', '?')} · 가격 없음 제외 {_og.get('no_price', '?')}"
@@ -1764,7 +1794,7 @@ def main():
     web_error = False
     if args.web_compare:
         try:
-            import web
+            import web  # noqa: E402
             b = web.StateBuilder()
             conn2 = dbm.open_db(shadow_db, readonly=True)
             try:

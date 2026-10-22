@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
 
 W = "0x" + "ab" * 20
 DAY = 86400
@@ -17,10 +17,10 @@ shutil.copytree(os.path.join(T.ROOT, "seed"), os.path.join(T.TMP, "seed"), dirs_
 json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "w"}, {"type": "evm", "chain": "arbitrum", "address": W, "label": "w"}],
            "backfill_months": 3, "chains": {}}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -31,7 +31,7 @@ def h(tag):
     return "0x" + hashlib.sha256(tag.encode()).hexdigest()
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC, GID = {}, {}
 
@@ -97,12 +97,12 @@ con.commit()
 con.close()
 json.dump({"_note": "사용자 정품 목록", "arbitrum": {CA["wbtc_u"].upper().replace("0X", "0x"): "WBTC"},
            "base": {CA7["ust"]: "USDT", CA7["air"]: "WBTC", CA7["gps"]: "USDC"}},
-          open(os.path.join(common.STATE_DIR, "genuine_tokens.json"), "w"))
-json.dump({f"base:{CA7['gps']}": {"risk": {"strong": True, "label": "허니팟"}}}, open(os.path.join(common.STATE_DIR, "goplus_cache.json"), "w"))
+          open(os.path.join(paths.STATE_DIR, "genuine_tokens.json"), "w"))
+json.dump({f"base:{CA7['gps']}": {"risk": {"strong": True, "label": "허니팟"}}}, open(os.path.join(paths.STATE_DIR, "goplus_cache.json"), "w"))
 
-import pricing
-import spamguard
-import web
+import pricing  # noqa: E402
+import spamguard  # noqa: E402
+import web  # noqa: E402
 
 pricing._gj = lambda url, *a, **k: (_ for _ in ()).throw(OSError("시험: 시세 받기 없음"))
 web.Spot.dex_pending = lambda self, c, ca: False
@@ -157,7 +157,7 @@ check("S7 등록했어도 고플러스 스캠 확증 = 격리 유지(보유 행 
       (GID[a_gps] in quar, coins.get(GID[a_gps]), (getattr(b, "_risk_reasons", {}) or {}).get(GID[a_gps])))
 check("S7 등록 안 한 같은 모양 'USDT' = 종전대로 확인 필요(평가 0)", float((coins.get(GID[a_usdt]) or {}).get("price") or 0) == 0 and GID[a_usdt] in unv)
 my = {W.lower()}
-c2 = __import__("sqlite3").connect(os.path.join(common.STATE_DIR, "ledger.db"))
+c2 = __import__("sqlite3").connect(os.path.join(paths.STATE_DIR, "ledger.db"))
 check("S3 알림 판정: 확인 필요 'USDC' 유입 = 알림 안 보냄(가짜 USDC 사유)", "가짜 USDC" in str(spamguard.tx_scam_reason(c2, "base", h("air"), my)),
       spamguard.tx_scam_reason(c2, "base", h("air"), my))
 c2.close()
@@ -200,8 +200,8 @@ if hasattr(spamguard, "set_user_genuine"):
         check("S6 깨진 파일에 등록 = 거절(덮어쓰지 않음)", open(spamguard.user_path()).read() == "{깨진")
 else:
     check("S6 사용자 정품 목록 API(spamguard.set_user_genuine) 있음", False, "없음")
-import sqlite3
-c8 = sqlite3.connect(os.path.join(common.STATE_DIR, "ledger.db"))
+import sqlite3  # noqa: E402
+c8 = sqlite3.connect(os.path.join(paths.STATE_DIR, "ledger.db"))
 OTHER = "0x" + "ee" * 20
 
 
@@ -221,7 +221,7 @@ t_out_unv = tx8("s8-out-wbtc", a_wbtc, -0.1, "move_out", "TRANSFER_OUT", W)
 t_in_liq = tx8("s8-in-weth", a_weth, 0.2, "acq", "TRANSFER_IN", OTHER)
 t_in_unv = tx8("s8-in-wbtc", a_wbtc, 0.3, "acq", "TRANSFER_IN", OTHER)
 c8.commit()
-sp8 = os.path.join(common.STATE_DIR, "spot.json")
+sp8 = os.path.join(paths.STATE_DIR, "spot.json")
 json.dump({"dex_usd": {k_weth: 2000.0}, "dex_ts": {k_weth: time.time()}, "dex_res": {k_weth: 5_000_000.0}, "dex_res_ts": {k_weth: time.time()}}, open(sp8, "w"))
 r8 = {k: spamguard.tx_scam_reason(c8, "base", t9, my) for k, t9 in (("out_liq", t_out_liq), ("out_unv", t_out_unv), ("in_liq", t_in_liq), ("in_unv", t_in_unv))}
 check("S8 내가 서명해 보낸 목록 밖 WETH(유동성 있음) = 알림 지우지 않음", r8["out_liq"] is None, r8)

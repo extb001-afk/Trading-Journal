@@ -10,17 +10,17 @@ import logging
 import re
 import secrets
 import statistics
-import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-import common
-import calcguard
+import paths, statefile, textutil
+import calcguard  # noqa: E402
+import ai_cli
 
 log = logging.getLogger("tj-web")
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 CUR_SYM = {"KRW": "₩", "USD": "$"}
 USD_LIKE = {"USDT", "USDC", "USD", "FDUSD", "USD1", "BUSD", "TUSD", "DAI", "USDE", "PYUSD", "USDG"}
 EX_NS = {"upbit", "bithumb", "binance", "bybit", "okx", "gate", "kucoin"}
@@ -62,7 +62,6 @@ def _pct(a, b):
     return round((a / b - 1) * 100, 2) if (a is not None and b) else None
 
 
-DEX_LATER_PATH = os.path.join(common.STATE_DIR, "candles", "dex_later.json")
 DEX_LATER_MAX = 1000
 _DL_LOCK = threading.Lock()
 _DL = {"items": None}
@@ -70,7 +69,7 @@ _DL = {"items": None}
 
 def dex_later_read(path=None) -> dict:
     try:
-        with open(path or DEX_LATER_PATH, "r", encoding="utf-8") as f9:
+        with open(path or paths.state("candles", "dex_later.json"), "r", encoding="utf-8") as f9:
             d = json.load(f9)
         it = d.get("items") if isinstance(d, dict) else None
         return {str(k): v for k, v in it.items() if isinstance(v, dict) and v.get("d") and v.get("sym") and v.get("side") in ("sell", "buy")} \
@@ -96,8 +95,8 @@ def dex_later_mark(date, sym, side, why) -> bool:
                 return False
             it.pop(k, None)
         try:
-            common.atomic_write_json(DEX_LATER_PATH, {"v": 1, "items": it})
-        except Exception as _cg9:
+            statefile.atomic_write_json(paths.state("candles", "dex_later.json"), {"v": 1, "items": it})
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("sellchart:dex_later_mark", _cg9)
             _DL["items"] = None
             return False
@@ -383,9 +382,9 @@ def normalize_eval(rv, cur="KRW", kind="sell", score=None):
     lines = rv.get("lines")
     if isinstance(lines, str):
         lines = [lines]
-    lines = [common.strip_links(str(x)).strip() for x in (lines or []) if str(x).strip()]
+    lines = [textutil.strip_links(str(x)).strip() for x in (lines or []) if str(x).strip()]
     lines = [x for x in lines if x][:4]
-    nxt = common.strip_links(str(rv.get("next") or "")).strip()
+    nxt = textutil.strip_links(str(rv.get("next") or "")).strip()
     if len(lines) < 2:
         return None, ["json"]
     lines = [x if len(x) <= 160 else x[:159].rstrip() + "…" for x in lines]
@@ -406,7 +405,7 @@ def normalize_eval(rv, cur="KRW", kind="sell", score=None):
 class EvalStore:
 
     def __init__(self, state_dir=None, kind="sell"):
-        sd = state_dir or common.STATE_DIR
+        sd = state_dir or paths.STATE_DIR
         self.kind = "buy" if kind == "buy" else "sell"
         self.path = os.path.join(sd, f"{self.kind}_evals.json")
         self.budget_path = os.path.join(sd, f"{self.kind}_eval_budget.json")
@@ -454,7 +453,7 @@ class EvalStore:
                 if len(d) > EVAL_KEEP:
                     for k in sorted(d, key=lambda k: int((d[k] or {}).get("at") or 0))[:len(d) - EVAL_KEEP]:
                         d.pop(k, None)
-                common.atomic_write_json(self.path, d)
+                statefile.atomic_write_json(self.path, d)
                 return True
             finally:
                 fcntl.flock(fd, fcntl.LOCK_UN)
@@ -505,8 +504,8 @@ class EvalStore:
                 b["keys"].append(key)
                 b["at"] = int(time.time())
                 try:
-                    common.atomic_write_json(self.budget_path, b)
-                except Exception as _cg9:
+                    statefile.atomic_write_json(self.budget_path, b)
+                except Exception as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("sellchart:EvalStore.budget_take", _cg9)
                     return False
                 return True
@@ -580,10 +579,16 @@ def budget_msg(cap, kind="sell") -> str:
     return f"오늘 AI {side_ko} 평가 한도({n}회)를 다 썼어요"
 
 
+def eval_err_kind(cfg: dict | None, kind: str, err: str | None) -> str:
+    text = str(err or "")
+    if text in (budget_msg(0, kind), budget_msg(daily_max(cfg, kind), kind)):
+        return "budget"
+    if ai_cli.cli_blocked(text):
+        return "blocked"
+    return "busy" if "진행 중" in text else "fail"
+
+
 def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, slots=(0,), model=None, skip_if_fresh=True):
-    rd = None
-    if runner is None or binfn is None or model is None:
-        import review_daily as rd
     import review_prompt as rp
     kind = getattr(store, "kind", "sell")
     side_ko = "매수" if kind == "buy" else "매도"
@@ -603,7 +608,7 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
         cap = daily_max(cfg, kind)
         if cap <= 0:
             return None, budget_msg(0, kind)
-        b = (binfn or rd.claude_bin)()
+        b = (binfn or ai_cli.claude_bin)()
         if not b:
             return None, "claude CLI 를 찾지 못했어요"
         day = datetime.fromtimestamp(now or time.time(), KST).strftime("%Y-%m-%d")
@@ -612,7 +617,7 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
         if inp.get("memo"):
             prompt = rp.with_day_memo_rule(prompt, "eval")
         body = f"<<<DATA {nonce}>>>\n" + json.dumps(inp, ensure_ascii=False, separators=(",", ":")) + f"\n<<<END {nonce}>>>"
-        run = runner or (lambda b9, p9, body9: rd._run_cli(b9, p9, None, f"{side_ko}평가 {key}", body=body9))
+        run = runner or (lambda b9, p9, body9: ai_cli.invoke(b9, p9 + body9, f"{side_ko}평가 {key}"))
         sc9 = (inp.get("summary") or {}).get("score") if isinstance(inp.get("summary"), dict) else None
         fixed9 = sc9.get("total") if isinstance(sc9, dict) else None
         if fixed9 is None:
@@ -632,16 +637,13 @@ def run_eval(store, cfg, date, sym, fp, inp, runner=None, binfn=None, now=None, 
             if res is not None:
                 out = res
         if out is None:
-            rd9 = rd or sys.modules.get("review_daily") or sys.modules.get("__main__")
             msg9 = "모델 응답을 읽지 못했어요(형식)"
-            if rd9 is not None and hasattr(rd9, "cli_error_text"):
-                try:
-                    msg9 = rd9.cli_error_text(msg9)
-                except Exception as _cg9:
-                    calcguard.swallowed("sellchart:run_eval", _cg9)
-                    pass
+            try:
+                msg9 = ai_cli.cli_error_text(msg9)
+            except Exception as _cg9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("sellchart:run_eval", _cg9)
             return None, msg9
-        rec = dict(out, date=date, sym=sym, fp=fp, at=int(now or time.time()), model=model if model is not None else getattr(rd, "REVIEW_MODEL", ""),
+        rec = dict(out, date=date, sym=sym, fp=fp, at=int(now or time.time()), model=model if model is not None else ai_cli.REVIEW_MODEL,
                    pv=rp.BUY_EVAL_VERSION if kind == "buy" else rp.SELL_EVAL_VERSION, calls=calls, venue=inp.get("venue"), src=inp.get("chart_src"),
                    iv=inp.get("chart_iv"), cur=inp.get("cur"), nFills=inp.get("fills_total"),
                    warn=["unit"] if "unit" in (probs or []) else [],

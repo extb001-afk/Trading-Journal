@@ -2,13 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import re
-import shutil
-import subprocess
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 chk = T.chk
 APP = T.app_js_path()
@@ -42,10 +41,8 @@ run('hide', Object.assign({}, base, pay), true);
 run('unk', Object.assign({}, base, pay, { payUnkQty: 0.5 }));
 process.stdout.write(JSON.stringify(out));
 '''
-node = shutil.which("node")
-if not node or not src:
-    print("SKIP node 없음 — 화면 함수 실행 시험 건너뜀(정적 S0 만)")
-else:
+node = T.node_bin("화면 함수 실행 시험(정적 S0 만)")
+if node and src:
     r = subprocess.run([node, "--input-type=module", "-"], input=JS, capture_output=True, text=True, timeout=60, env=dict(os.environ, TJ_TEST_APP=APP))
     try:
         o = json.loads(r.stdout)

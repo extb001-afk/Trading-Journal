@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import calcguard as CG
-import common
+import calcguard as CG  # noqa: E402
+import paths  # noqa: E402
 
 chk = T.chk
 os.environ.pop("TJ_STRICT", None)
@@ -18,7 +18,7 @@ try:
 except Exception as e:
     CG.swallowed("t:g1", e)
 try:
-    undefined_name_xyz
+    undefined_name_xyz  # noqa: F821
 except Exception as e:
     CG.swallowed("t:g1", e)
 s = CG.snapshot().get("t:g1") or {}
@@ -27,7 +27,7 @@ chk(s.get("n") == 2 and s.get("types") == {"ValueError": 1, "NameError": 1} and 
 CG.flush(now=CG.time.time() + 10 ** 6)
 p = CG.path_of()
 d = json.load(open(p)) if os.path.exists(p) else {}
-chk(p.startswith(common.STATE_DIR) and d.get("v") == 1 and "t:g1" in (d.get("sites") or {}), "G2 저장 파일(state 안 · 자리 기록)", (p, d))
+chk(p.startswith(paths.STATE_DIR) and d.get("v") == 1 and "t:g1" in (d.get("sites") or {}), "G2 저장 파일(state 안 · 자리 기록)", (p, d))
 CG.flush_as("build")
 chk(os.path.exists(CG.path_of(suffix="build")) or not CG._DIRTY[0], "G2 빌드 자식용 파일 이름(_build) — 바뀐 것 없으면 안 씀", CG.path_of(suffix="build"))
 
@@ -40,7 +40,7 @@ for exc in (NameError("x"), UnboundLocalError("y"), ImportError("z"), AssertionE
         except Exception as e:
             CG.swallowed("t:g3", e)
         caught.append((type(exc).__name__, "삼킴"))
-    except Exception as e2:
+    except Exception as e2:   # noqa: BLE001
         caught.append((type(e2).__name__, "던짐"))
 os.environ.pop("TJ_STRICT", None)
 chk(caught == [("NameError", "던짐"), ("UnboundLocalError", "던짐"), ("ImportError", "던짐"), ("AssertionError", "던짐"),
@@ -57,7 +57,7 @@ try:
     except Exception as e:
         CG.swallowed(None, e)
     ok4 = True
-except Exception:
+except Exception:   # noqa: BLE001
     ok4 = False
 chk(ok4, "G4 기록 실패 = 조용히(계산 계속)", ok4)
 
@@ -68,7 +68,7 @@ except Exception as e:
     CG.swallowed("t:g4b", e)
 chk((CG.snapshot().get("t:g4b") or {}).get("bug") == 0, "G4b 라이브 = ImportError 는 빨강 수에 안 셈", CG.snapshot().get("t:g4b"))
 
-import health
+import health  # noqa: E402
 sd5 = os.path.join(T.TMP, "cg5")
 os.makedirs(sd5, exist_ok=True)
 now5 = 2_000_000_000
@@ -82,7 +82,7 @@ c5b = {c["cid"]: c for c in health.collect_calcguard(now5 + 2 * 86400, sd5)}
 chk(c5b.get("calc:bug", {}).get("level") == "ok", "G5 하루 지나면 정상으로", c5b)
 
 try:
-    undefined_g6
+    undefined_g6  # noqa: F821
 except Exception as e:
     CG.swallowed("t:g6", e)
 s6 = CG.snapshot()["t:g6"]
@@ -114,11 +114,11 @@ w7 = (d7["sites"].get("t:g7") or {}).get("why") or ""
 chk(w7 and "SEKRETVALUE0123456789abcdef" not in w7 and "abcdefghijklmnopqrstuvwxyz0123456789" not in w7, "G7 저장된 사유에 키·키 든 URL 없음", w7)
 chk((os.stat(CG.path_of()).st_mode & 0o077) == 0, "G7 파일 권한 0600", oct(os.stat(CG.path_of()).st_mode))
 
-import time as _t8
+import time as _t8  # noqa: E402
 CG.FLUSH_SEC = 0.2
 CG._TIMER["pid"] = None
 try:
-    undefined_g8
+    undefined_g8  # noqa: F821
 except Exception as e:
     CG.swallowed("t:g8", e)
 ok8 = False
@@ -128,7 +128,7 @@ for _ in range(40):
         if "t:g8" in (json.load(open(CG.path_of())).get("sites") or {}):
             ok8 = True
             break
-    except Exception:
+    except Exception:   # noqa: BLE001
         pass
 chk(ok8, "G8 단발 코드 실수도 주기 스레드가 저장(종전: 다음 예외·종료까지 미저장)", ok8)
 
@@ -148,7 +148,7 @@ CG.FLUSH_SEC = 60
 parent_before = open(CG.path_of()).read()
 CG.child_reset("build")
 try:
-    undefined_g10
+    undefined_g10  # noqa: F821
 except Exception as e:
     CG.swallowed("t:g10", e)
 CG.flush_as("build")
@@ -166,15 +166,15 @@ chk("t:g1" not in db10["sites"] and s10.get("n") == 2 and s10.get("bug") == 1 an
 CG._SUFFIX[0] = ""
 CG._MERGE[0] = False
 
-import importlib
-import sys as _s11
+import importlib  # noqa: E402
+import sys as _s11  # noqa: E402
 _fr = _s11.modules.get("fut_rcpt")
 _s11.modules["fut_rcpt"] = None
 _s11.modules.pop("view_detail", None)
 try:
     vd11 = importlib.import_module("view_detail")
     ok11 = vd11.fut_rcpt is None
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     ok11 = repr(e)
 finally:
     if _fr is not None:
@@ -203,7 +203,7 @@ chk(st12["old:bug"].get("bug") == 1 and int(st12["old:bug"].get("bug_last") or 0
     "G14 옛 형식 빨강 = 병합 뒤에도 코드 실수 시각·사유 유지", st12["old:bug"])
 json.dump({"v": 1, "sites": [1, 2]}, open(bp, "w"))
 try:
-    undefined_g13
+    undefined_g13  # noqa: F821
 except Exception as e:
     CG.swallowed("t:g13", e)
 CG.flush_as("build")
@@ -214,7 +214,7 @@ CG._MERGE[0] = False
 for f15, k15 in (("core_prov.py", "core_prov:ProvMixin.prov_pass"), ("discopen.py", "discopen:Runner._harvest"), ("recon.py", "recon:fetch_evm_rpc_balances")):
     chk(k15 in open(os.path.join(T.SRC, f15), encoding="utf-8").read(), "G15 %s 메인 소비 자리 계측" % f15, k15)
 
-import time as _t16
+import time as _t16  # noqa: E402
 _sl16, _fl16, _n16 = _t16.sleep, CG.flush, [0]
 _t16.sleep = lambda s: None
 CG.flush = lambda *a, **k: (_n16.__setitem__(0, _n16[0] + 1), _fl16(*a, **k))[1]

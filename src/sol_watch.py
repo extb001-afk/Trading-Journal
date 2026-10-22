@@ -13,16 +13,17 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import config, logs, paths, runtime, statefile
 if __name__ == "__main__":
-    common.cpu_reserve_apply()
+    runtime.cpu_reserve_apply()
 import addr_tier
+import address_codec
 import lpsol
 import bf_engine
 import tsfix
 from inbox import SegmentWriter
 
-log = common.setup_logging("tj-sol")
+log = logs.setup_logging("tj-sol")
 
 TOKEN_PROGRAMS = (
     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -36,45 +37,15 @@ PLAIN_PROGRAMS = set(TOKEN_PROGRAMS) | {
     "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
 }
 SIG_PAGE = 1000
-from sol_base import (
+from sol_base import (  # noqa: F401
     _check_tx_result,
     _hl_paced,
-    _host,
-    _PnSkip,
-    _retry_after_sec,
-    ARCHIVE_METHOD_PER10S,
-    ARCHIVE_PER10S,
-    ARCHIVE_RPC_DEFAULT,
-    BUDGET_WARN_PER_HOUR,
-    HEAD_AUDIT_PER_CYCLE,
-    HEAD_GAP_SEC,
-    HEAD_HEALTH_MIN_N,
-    HEAD_HEALTH_PCT,
-    HEAD_HEALTH_SEC,
-    HEAD_KEEP_HOURS,
-    HEAD_LAG_MAX_SLOTS,
-    HEAD_MARGIN_HOURS,
-    HEAD_METHODS,
     HEAD_RPC_DEFAULT,
-    HEAD_TIMEOUT_SEC,
     HEAD_TRIP_BASE,
-    HEAD_TRIP_MAX,
-    HEAD_TRIP_STREAK,
-    HL_COST,
-    PRIMARY_QUOTA_OPEN,
-    PRIMARY_RL_OPEN,
-    PRIMARY_TRIP_STREAK,
     RateLimited,
-    RL_WAIT_MAX,
     Rpc,
-    SLOT_SEC_EST,
-    SLOTS_PER_EPOCH,
     STAKE_PROGRAM,
-    STAKE_RWD_EPOCHS_PER_CYCLE,
-    STAKE_RWD_MARGIN_SLOTS,
-    STAKE_RWD_POLL_SEC,
     stake_state,
-    STAKE_WITHDRAWER_OFFSET,
     TX_BATCH_SLEEP,
     U64_MAX,
 )
@@ -167,7 +138,7 @@ def ata_address(owner: str, mint: str, token_program: str):
     if k in _ATA_MEMO:
         return _ATA_MEMO[k]
     try:
-        o9, m9, p9 = lpsol.b58decode(owner), lpsol.b58decode(mint), lpsol.b58decode(token_program)
+        o9, m9, p9 = address_codec.b58decode(owner), address_codec.b58decode(mint), address_codec.b58decode(token_program)
         a = lpsol.find_pda([o9, p9, m9], ATA_PROGRAM)[0] if len(o9) == 32 and len(m9) == 32 and len(p9) == 32 else None
     except (KeyError, ValueError, TypeError):
         a = None
@@ -188,7 +159,7 @@ def ata_owner_of(acct: str, mint, owners, program=None):
     return None
 
 
-from sol_stake import StakeMixin
+from sol_stake import StakeMixin  # noqa: E402
 
 
 class SolWatcher(StakeMixin):
@@ -199,12 +170,12 @@ class SolWatcher(StakeMixin):
         months = 0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 0)
         self.cutoff_ts = int(time.time() - months * 30 * 86400) if months > 0 else 0
         self.writer = writer
-        self.cursor_path = os.path.join(common.STATE_DIR, "cursor_sol.json")
-        self.cursor = common.read_json(self.cursor_path, {})
-        self.meta_path = os.path.join(common.STATE_DIR, "sol_mint_meta.json")
-        self.mint_meta = common.read_json(self.meta_path, {})
-        self.emitted_path = os.path.join(common.STATE_DIR, "emitted_sol.json")
-        self.emitted = set(common.read_json(self.emitted_path, []))
+        self.cursor_path = paths.state("cursor_sol.json")
+        self.cursor = statefile.read_json(self.cursor_path, {})
+        self.meta_path = paths.state("sol_mint_meta.json")
+        self.mint_meta = statefile.read_json(self.meta_path, {})
+        self.emitted_path = paths.state("emitted_sol.json")
+        self.emitted = set(statefile.read_json(self.emitted_path, []))
         self.ata_owner = {}
         for k9 in [k9 for k9 in self.cursor if k9.startswith("_fb_wait:")]:
             if self.cursor[k9] in self.owners:
@@ -240,8 +211,8 @@ class SolWatcher(StakeMixin):
         self._rl_log_base = 0
         self.stake_on = bool(sol9.get("stake", True))
         self.stake_every = float(sol9.get("stake_every_sec", STAKE_EVERY_SEC))
-        self.stake_path = os.path.join(common.STATE_DIR, "sol_stake.json")
-        self.stake_snap = common.read_json(self.stake_path, {}) or {}
+        self.stake_path = paths.state("sol_stake.json")
+        self.stake_snap = statefile.read_json(self.stake_path, {}) or {}
         self._stake_disc_at = 0.0
         self._stake_rwd_at = 0.0
         self._epoch = None
@@ -296,7 +267,7 @@ class SolWatcher(StakeMixin):
         pass
 
     def _spool_path(self, addr: str, tag: str = "") -> str:
-        return os.path.join(common.STATE_DIR, f"solspool{tag}_{addr}.jsonl")
+        return paths.state(f"solspool{tag}_{addr}.jsonl")
 
     def _sigs_spooled(self, addr: str, ck: dict, first_rows: list = None, cutoff: int = None, tag: str = "", gate=None):
         path = self._spool_path(addr, tag)
@@ -318,10 +289,10 @@ class SolWatcher(StakeMixin):
 
         if first_rows is not None:
             _append(first_rows)
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         while not ck.get("done") and pages < self.sig_spool_pages:
             if gate is not None and not gate():
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 raise self.FillPaced(f"{addr[:8]} 서명 {ck['n']}건 — 오늘 옛 기록 몫을 다 써서 멈춤(몫이 나면 이어서)")
             opt = {"limit": SIG_PAGE, "commitment": "finalized"}
             if ck.get("before"):
@@ -342,9 +313,9 @@ class SolWatcher(StakeMixin):
             if cut_stop or (short and self._end_ok(res)):
                 ck["done"] = True
             elif short:
-                common.atomic_write_json(self.cursor_path, self.cursor)
+                statefile.atomic_write_json(self.cursor_path, self.cursor)
                 raise self.SpoolPending(f"{addr[:8]} 서명 {ck['n']}건 — 폴백 RPC 의 짧은 페이지(이력 끝 미확인) · 주 RPC 로 끝 확인 대기")
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
             pages += 1
             self.progress.update(f"sol:{addr[:8]}", phase="sigs", unit="sigs", done=int(ck["n"]),
                                  note="서명 수집 중(총량 미상)")
@@ -376,7 +347,7 @@ class SolWatcher(StakeMixin):
         try:
             v = fn(url, "minimumLedgerSlot", []) if fn else None
             v = int(v) if isinstance(v, int) and not isinstance(v, bool) else None
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             v = None
         memo[url] = (v, time.time())
         return v
@@ -475,7 +446,7 @@ class SolWatcher(StakeMixin):
                 dec = ti["decimals"]
             if isinstance(ti.get("symbol"), str) and not sym:
                 sym = ti["symbol"]
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             ok = False
         if isinstance(sym, str):
             sym = sym.strip()[:16] or None
@@ -499,7 +470,7 @@ class SolWatcher(StakeMixin):
                     if not isinstance(r9, Exception):
                         try:
                             out[s9] = self._parse_result(s9, r9)
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 [fallback]
                             out[s9] = e
                     elif "429" in str(r9) or "too many" in str(r9).lower():
                         n_rl += 1
@@ -508,13 +479,13 @@ class SolWatcher(StakeMixin):
                     time.sleep(self.batch_sleep)
                 else:
                     self.batch_sleep = max(self.batch_sleep_min, self.batch_sleep * 0.8)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [optional]
                 log.info("getTransaction 배치 실패 → 단건: %s", str(e)[:100])
         for s9 in sigs:
             if s9 not in out or isinstance(out[s9], Exception):
                 try:
                     out[s9] = self.parse_tx(s9)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 [fallback]
                     out[s9] = e
                 time.sleep(TX_BATCH_SLEEP)
         return out
@@ -596,6 +567,19 @@ class SolWatcher(StakeMixin):
             key = (owner_of(row), row.get("mint"))
             ent = tb.setdefault(key, [0, 0, (row.get("uiTokenAmount") or {}).get("decimals")])
             ent[1] += int((row.get("uiTokenAmount") or {}).get("amount") or 0)
+        tbseen_changed = False
+        for tb_row in pre_tb + post_tb:
+            tb_own, tb_ix = (tb_row.get("owner"), tb_row.get("accountIndex")) if isinstance(tb_row, dict) else (None, None)
+            if tb_own in mine and isinstance(tb_ix, int) and 0 <= tb_ix < len(keys):
+                tb_acct = keys[tb_ix]
+                if tb_acct and tb_acct != tb_own and tb_acct not in mine and tb_acct not in self.cursor:
+                    self.ata_owner.setdefault(tb_acct, tb_own)
+                    seen_key = "_tbseen:" + tb_acct
+                    if self.cursor.get(seen_key) != tb_own:
+                        self.cursor[seen_key] = tb_own
+                        tbseen_changed = True
+        if tbseen_changed:
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
         unres9 = [{"acct": keys[int(o9[1:])] if int(o9[1:]) < len(keys) else None, "mint": m9, "delta": str(b1 - b0)}
                   for (o9, m9), (b0, b1, _d9) in tb.items() if isinstance(o9, str) and o9.startswith("?") and m9 and b1 != b0]
         hold9o = self.__dict__.setdefault("_own_hold", tsfix.TsHold())
@@ -609,7 +593,7 @@ class SolWatcher(StakeMixin):
                 log.error("★tx %s 토큰 잔고 %d줄 소유자를 못 찾음(%s) — 그 줄 빼고 내보냄 · 목록 state/sol_owner_unknown.jsonl(내 계정이면 입출금이 빠짐)★",
                           sig[:12], len(unres9), "owner 칸 없는 옛 응답" if old9 else f"{hold9o.limit}회 연속")
             try:
-                common.append_durable_jsonl(os.path.join(common.STATE_DIR, "sol_owner_unknown.jsonl"),
+                statefile.append_durable_jsonl(paths.state("sol_owner_unknown.jsonl"),
                                             {"ts": int(now9), "sig": sig, "old": old9, "rows": unres9})
             except OSError as e9:
                 log.warning("sol_owner_unknown.jsonl 기록 실패: %s", e9)
@@ -640,7 +624,7 @@ class SolWatcher(StakeMixin):
             try:
                 bt9 = tsfix.block_ts(self, tx.get("slot") or 0, fn=self._block_time)
                 hold9.clear(sig)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 if hold9.hold(sig):
                     raise RuntimeError(f"tx {sig[:12]} 시각 없음 · 슬롯 시각 조회 실패 — 보류: {str(e)[:80]}") from e
                 log.error("★tx %s 시각 없음 %d회 연속 — 내보냄(core 격리 → 슬롯 시각 구하는 대로 자동 재방출)★", sig[:12], hold9.limit)
@@ -753,6 +737,8 @@ class SolWatcher(StakeMixin):
         s9, bt9 = r["signature"], r.get("blockTime")
         if cut_all and isinstance(bt9, int) and bt9 < cut_all:
             return True
+        if s9 in (self.cursor.get("_quarantine") or {}):
+            return True
         return s9 in self.emitted and (s9 not in re_sigs or s9 in emit9)
 
     FBW_E_MAX = 500
@@ -818,7 +804,7 @@ class SolWatcher(StakeMixin):
         o9 = self.ata_owner.get(a)
         if o9 and a not in self.owners and self.cursor.get("_fb_wait:" + a) != o9:
             self.cursor["_fb_wait:" + a] = o9
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def cycle(self):
         full = self.full_due() and not self.__dict__.pop("_own_only", False)
@@ -828,7 +814,12 @@ class SolWatcher(StakeMixin):
         self._n_cycle += 1
         self._rl_summary()
         if full and self.cursor.pop("_synced_at", None) is not None:
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
+        self._df_seen = set()
+        try:
+            sol_quarantine_retry(self)
+        except Exception as e:  # noqa: BLE001 [boundary]
+            log.info("sol 격리 서명 재시도 실패(다음 사이클): %s", logs.safe_err(e)[:120])
         if full or not self._stake_disc_at:
             self._stake_discover()
         own9 = tuple(self.owners)
@@ -873,6 +864,13 @@ class SolWatcher(StakeMixin):
             in9 = set(addrs)
             addrs.extend(a for a in sorted(getattr(self, "_unc_prev", ()) or ()) if a not in in9
                          and ((a in stake_reg and not stake_reg[a].get("gone")) or self._own_of(a) in own_set))
+        for seen_key, seen_own in [(k, o) for k, o in self.cursor.items() if isinstance(k, str) and k.startswith("_tbseen:")]:
+            seen_acct = seen_key[8:]
+            if seen_acct in self.cursor or seen_own not in self.owners:
+                self.cursor.pop(seen_key, None)
+            elif seen_own in own_set and seen_acct not in addrs:
+                self.ata_owner.setdefault(seen_acct, seen_own)
+                addrs.append(seen_acct)
         active_addrs = set(addrs)
         if not full:
             addrs.extend(a for a in sorted(getattr(self, "_unc_ret", ()) or ()) if a not in active_addrs and self._own_of(a) in own_set)
@@ -951,9 +949,9 @@ class SolWatcher(StakeMixin):
                 self._fb_wait_note(a)
                 failed_addr = True
                 continue
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [isolate]
                 log.debug("%s 서명 조회 실패 — 이 주소 커서 유지: %s", a[:8], e)
-                fail_list.append((a[:8], common.safe_err(e)[:120]))
+                fail_list.append((a[:8], logs.safe_err(e)[:120]))
                 failed_addr = True
                 if "429" in str(e):
                     rl_hits += 1
@@ -1006,7 +1004,7 @@ class SolWatcher(StakeMixin):
                     continue
                 try:
                     peek9[a] = self._live_peek(a, self.cutoff_ts, time.time())
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [isolate]
                     log.debug("%s 최근 서명 엿보기 실패(다음 주기 다시): %s", a[:8], e)
                 time.sleep(pace)
         ordered = []
@@ -1038,7 +1036,8 @@ class SolWatcher(StakeMixin):
         cut_all = min([self.cutoff_ts] + [int(v.get("t0") or 0) for v in stake_reg.values()]) if self.cutoff_ts else 0
         done_ok = True
         todo = [r["signature"] for r in ordered if (r["signature"] not in self.emitted or r["signature"] in re_sigs) and not (
-            cut_all and isinstance(r.get("blockTime"), int) and r["blockTime"] < cut_all)]
+            cut_all and isinstance(r.get("blockTime"), int) and r["blockTime"] < cut_all)
+                and r["signature"] not in (self.cursor.get("_quarantine") or {})]
         head_sigs9 = {r["signature"] for a9, rows9 in addr_sigs.items() if a9 not in fb_set for r in rows9}
         bt_of = {r["signature"]: r.get("blockTime") for r in ordered}
         fb_sigs9 = {r["signature"] for a9, rows9 in addr_sigs.items() if a9 in fb_set for r in rows9} - head_sigs9
@@ -1050,9 +1049,12 @@ class SolWatcher(StakeMixin):
         t_det9 = time.time()
         sliced9 = False
         emit9 = set()
+        quar = self.cursor.get("_quarantine") or {}
         for r in ordered:
             sig = r["signature"]
             if sig in self.emitted and sig not in re_sigs:
+                continue
+            if sig in quar:
                 continue
             bt = r.get("blockTime")
             if cut_all and isinstance(bt, int) and bt < cut_all:
@@ -1078,6 +1080,8 @@ class SolWatcher(StakeMixin):
                     pre = self.parse_txs(chunk) if chunk else {}
                 time.sleep(TX_BATCH_SLEEP if len(chunk) <= 1 else self.batch_sleep)
             rec = pre.pop(sig, None)
+            if (rec is None or isinstance(rec, Exception)) and sol_sig_poison(self, sig, rec, repersp=sig in re_sigs):
+                continue
             if isinstance(rec, Exception):
                 log.warning("tx %s 파싱 실패 — 커서 미전진, 다음 사이클: %s", sig[:12], rec)
                 done_ok = False
@@ -1091,6 +1095,7 @@ class SolWatcher(StakeMixin):
             try:
                 self.writer.append(rec)
                 self.emitted.add(sig)
+                bf_engine.detail_fail_clear(self.cursor, [sig])
                 self._emit_seq += 1
                 self._emit_cur[sig] = self._emit_seq
                 emit9.add(sig)
@@ -1098,14 +1103,14 @@ class SolWatcher(StakeMixin):
                 if tb is not None:
                     for o9 in {rec.get("fee_payer")} | set(self.__dict__.get("_tier_signers", {}).pop(sig, None) or []):
                         tb.note_sent(o9, rec.get("ts"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 log.error("inbox append 실패 — 커서 미전진: %s", e)
                 done_ok = False
                 break
             n_done += 1
             if big and n_done % 50 == 0:
                 self.progress.update("sol", phase="parse", unit="tx", done=n_done, total=len(todo))
-                common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+                statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if big or (self.progress.items.get("sol") or {}).get("phase") == "parse":
             self.progress.update("sol", phase="parse" if (not done_ok or sliced9) else "live", unit="tx", done=n_done,
                                  total=len(todo), flush=True)
@@ -1193,9 +1198,9 @@ class SolWatcher(StakeMixin):
             for o in newp:
                 if o in self.cursor and all(a9 in self.cursor for a9, o9 in self.ata_owner.items() if o9 == o):
                     self.cursor.pop("_persp:" + o, None)
-        common.write_json_if_changed(self.meta_path, self.mint_meta)
-        common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.write_json_if_changed(self.meta_path, self.mint_meta)
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if full and done_ok and not sliced9:
             self._pn_audit()
         self._health_cycle(full, addrs, addr_sigs, fail_list, done_ok, held)
@@ -1203,7 +1208,7 @@ class SolWatcher(StakeMixin):
         if full and done_ok and not sliced9 and not fail_list:
             try:
                 self._extend([a for a in dict.fromkeys(addrs) if a in active_addrs and a not in stake_reg])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [boundary]
                 log.info("과거 창 확장 예외(다음 전체 사이클): %s", e)
 
     EXT_BUDGET = 300
@@ -1258,7 +1263,7 @@ class SolWatcher(StakeMixin):
             return len(parts) == 2 and all(a in settled for a in m)
         try:
             n = self.progress.prune(pred)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("지난 진행 표식 정리 건너뜀: %s", type(e).__name__)
             return 0
         if n:
@@ -1336,7 +1341,7 @@ class SolWatcher(StakeMixin):
                 time.sleep(TX_BATCH_SLEEP if len(chunk) <= 1 else self.batch_sleep)
                 if bad:
                     break
-            common.write_json_if_changed(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
             left = [sg for sg in todo if sg not in self.emitted]
             self.progress.update(f"sol:{a[:8]}:extend", phase="extend", unit="tx", done=len(todo) - len(left),
                                  total=len(todo), target=time.strftime("%Y-%m-%d", time.gmtime(target)))
@@ -1352,7 +1357,7 @@ class SolWatcher(StakeMixin):
                 if not isinstance(self.cursor.get("_sigbf:" + a), dict) and (self.progress.items.get(f"sol:{a[:8]}") or {}).get("phase") == "sigs":
                     self.progress.drop(f"sol:{a[:8]}")
                 self.progress.finish(f"sol:{a[:8]}:extend", note=f"{len(todo)}건")
-            common.atomic_write_json(self.cursor_path, self.cursor)
+            statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _cursor_slot_fill(self, a: str):
         rpc, sig = self.rpc, self.cursor.get(a)
@@ -1371,7 +1376,7 @@ class SolWatcher(StakeMixin):
                 if isinstance(sl, int) and not isinstance(sl, bool) and sl > 0:
                     self.cursor["_slot:" + a] = sl
                     return True
-            except Exception:
+            except Exception:   # noqa: BLE001 [isolate]
                 continue
         return False
 
@@ -1387,17 +1392,17 @@ class SolWatcher(StakeMixin):
             pn = rpc._call(hu, "getSlot", [{"commitment": "finalized"}], timeout=rpc.head_timeout)
             if not isinstance(pn, int) or isinstance(pn, bool):
                 raise RuntimeError("getSlot 형식")
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [probe]
             rpc._pn_note(False, f"getSlot: {e}")
             return
         try:
             with rpc.as_kind("head"):
                 rs = int(rpc._call(ref, "getSlot", [{"commitment": "finalized"}]))
-        except Exception:
+        except Exception:   # noqa: BLE001 [probe]
             return
         rpc.pn_lag = rs - int(pn)
         if rpc.pn_lag > rpc.head_lag_max:
-            rpc.pn_fault(f"최신 슬롯이 {rpc.pn_lag}슬롯 뒤(기준 {common.redact_urls(ref)})", HEAD_TRIP_BASE * 5)
+            rpc.pn_fault(f"최신 슬롯이 {rpc.pn_lag}슬롯 뒤(기준 {logs.redact_urls(ref)})", HEAD_TRIP_BASE * 5)
         else:
             rpc._pn_note(True)
 
@@ -1454,7 +1459,7 @@ class SolWatcher(StakeMixin):
                         if cut and isinstance(bt9, int) and bt9 < cut:
                             past_cut = True
                             continue
-                        if s9 in self.emitted or s9 in have:
+                        if s9 in self.emitted or s9 in have or s9 in (self.cursor.get("_quarantine") or {}):
                             continue
                         due9 = ((chk["tslot"] is not None and isinstance(sl9, int) and sl9 <= chk["tslot"]) or s9 == chk["top"]
                                 or (isinstance(bt9, int) and chk["pn"] > 0 and bt9 <= chk["pn"] - self.PN_SEEN_LAG))
@@ -1467,7 +1472,7 @@ class SolWatcher(StakeMixin):
                     if len(res) < SIG_PAGE or past_cut:
                         reached = True
                         break
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [isolate]
                 log.debug("publicnode 대조 %s 실패(다음 차례에 이어서): %s", a[:8], e9)
             if miss:
                 self.cursor["_pnmiss:" + a] = miss
@@ -1484,7 +1489,7 @@ class SolWatcher(StakeMixin):
                     self.cursor.pop("_pnv:" + a, None)
             else:
                 e["chk"] = chk
-        common.atomic_write_json(self.cursor_path, self.cursor)
+        statefile.atomic_write_json(self.cursor_path, self.cursor)
         if fault:
             rpc.pn_fault(f"대조 누락 {fault}건", HEAD_AUDIT_TRIP_SEC)
 
@@ -1501,7 +1506,7 @@ class SolWatcher(StakeMixin):
         if full:
             try:
                 slot = int(self.rpc.call("getSlot", [{"commitment": "finalized"}]))
-            except Exception:
+            except Exception:  # noqa: BLE001 [fallback]
                 slot = None
         newest = max((r[0].get("blockTime") or 0 for r in addr_sigs.values() if r), default=0) or None
         facts = dict(addresses=n_addr, addresses_failed=len(fail_list), full_cycle=full,
@@ -1509,7 +1514,7 @@ class SolWatcher(StakeMixin):
                      newest_sig_block_time=newest, synced_at=self.cursor.get("_synced_at"),
                      primary=("open" if self.rpc.primary_open() else "ok"),
                      primary_open_until=int(self.rpc.primary_open_until) if self.rpc.primary_open() else None,
-                     current_source=common.redact_urls(self.rpc.fallbacks[0] if (self.rpc.primary_open() and self.rpc.fallbacks)
+                     current_source=logs.redact_urls(self.rpc.fallbacks[0] if (self.rpc.primary_open() and self.rpc.fallbacks)
                                                        else self.rpc.url),
                      rl_429_total=self.rpc.rl_seen, consecutive_failed_cycles=self._fail_cycles,
                      spooling=[k[7:15] for k in self.cursor if k.startswith("_sigbf:")],
@@ -1517,13 +1522,16 @@ class SolWatcher(StakeMixin):
                      helius_budget=bf_engine.HELIUS.budget if getattr(self.rpc, "metered", False) else None,
                      helius_daycap_until=None,
                      fill_wait=len(set(held)))
+        n_quar = len(self.cursor.get("_quarantine") or {})
+        if n_quar or (hb.src.get("sol") or {}).get("quarantined"):
+            facts["quarantined"] = n_quar
         if callable(getattr(self.rpc, "pn_state", None)):
             pn9 = self.rpc.pn_state()
             facts.update(head_rpc=pn9["host"], head_rpc_on=pn9["on"], head_rpc_ok=pn9["healthy"],
                          head_rpc_rate=(round(pn9["rate"], 4) if pn9["rate"] is not None else None), head_rpc_n=pn9["n"],
                          head_rpc_open_until=int(pn9["open_until"]) if pn9["open_until"] else None, head_rpc_why=pn9["why"], head_rpc_lag=pn9["lag"],
                          head_rpc_audit=dict(self.rpc.pn_n),
-                         archive_rpc=common.redact_urls(self.rpc.archive_url) if getattr(self.rpc, "archive_url", None) else None,
+                         archive_rpc=logs.redact_urls(self.rpc.archive_url) if getattr(self.rpc, "archive_url", None) else None,
                          helius_closed_until=int(self.rpc.hl_closed_until) if self.rpc.hl_closed() else None,
                          pn_unverified=sum(1 for k9 in self.cursor if k9.startswith("_pnv:")),
                          helius_head_min=round(float(getattr(bf_engine.HELIUS, "head_min", 0.1)), 4) if getattr(self.rpc, "metered", False) else None)
@@ -1540,10 +1548,43 @@ class SolWatcher(StakeMixin):
         hb.flush()
 
 
+def sol_sig_poison(w: "SolWatcher", sig: str, rec: object, repersp: bool = False) -> bool:
+    err = rec if isinstance(rec, Exception) else ValueError("getTransaction 응답 None")
+    left = bf_engine.detail_fail_note(w.cursor, [sig], {sig: err}, "sol", "sol_tx", log, w.__dict__.setdefault("_df_seen", set()))
+    if sig in left:
+        return False
+    if repersp:
+        bf_engine.quarantine_map(w.cursor)[sig]["new_view"] = True
+    return True
+
+
+def sol_quarantine_retry(w: "SolWatcher") -> None:
+    if not w.cursor.get("_quarantine"):
+        return
+    for sig in bf_engine.quarantine_due(w.cursor):
+        again = bool((bf_engine.quarantine_map(w.cursor).get(sig) or {}).get("new_view"))
+        if sig in w.emitted and not again:
+            bf_engine.quarantine_result(w.cursor, sig, True, "sol", "sol_tx", log)
+            continue
+        try:
+            rec = w.parse_txs([sig]).get(sig)
+        except Exception as e:  # noqa: BLE001 [isolate]
+            rec = e
+        if isinstance(rec, dict):
+            if again:
+                rec["repersp"] = True
+            w.writer.append(rec)
+            w._stake_note_tx(rec)
+            w.emitted.add(sig)
+            bf_engine.quarantine_result(w.cursor, sig, True, "sol", "sol_tx", log)
+        else:
+            bf_engine.quarantine_result(w.cursor, sig, False, "sol", "sol_tx", log, err=rec if isinstance(rec, Exception) else None)
+
+
 def _pn_ok(rpc) -> bool:
     try:
         return bool(callable(getattr(rpc, "pn_ok", None)) and rpc.pn_ok())
-    except Exception:
+    except Exception:   # noqa: BLE001 [probe]
         return False
 
 
@@ -1639,11 +1680,11 @@ def run_cycle(w) -> bool:
         return False
     try:
         _floor_tick(w)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.debug("실시간 하한 조정 실패: %s", e)
     try:
         paced_ok = rest_if_paced(w)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("헬리우스 새 거래 확인 몫 판정 실패(이번 사이클은 그대로 돌림): %s", str(e)[:160])
         paced_ok = True
     if not paced_ok:
@@ -1656,7 +1697,7 @@ def run_cycle(w) -> bool:
     try:
         w.cycle()
         tsfix.repair("sol", lambda s9: tsfix.block_ts(w, s9, fn=w._block_time), w.writer)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         n9 = bf_engine.health("sol").fail("sol", e, "sol_rpc")
         bf_engine.health("sol").flush()
         lv = bf_engine.LogDebounce.level(n9)
@@ -1671,8 +1712,8 @@ def run_cycle(w) -> bool:
 
 
 def main():
-    common.ensure_dirs()
-    cfg = common.load_config()
+    paths.ensure_dirs()
+    cfg = config.load_config()
     bf_engine.configure(cfg)
     addr_tier.ACTIVE_PROC = True
     bf_engine.es_budget_install_sigterm()
@@ -1680,7 +1721,7 @@ def main():
     if not wallets:
         raise SystemExit("추적할 SOL 지갑이 없음 — config.wallets 확인")
     poll = int(cfg.get("sol", {}).get("poll_sec", 60))
-    writer = SegmentWriter(os.path.join(common.INBOX_DIR, "sol"))
+    writer = SegmentWriter(os.path.join(paths.INBOX_DIR, "sol"))
     w = SolWatcher(cfg, wallets, writer)
     w.prune_progress()
     log.info("가동: %d지갑, %d초 주기", len(wallets), poll)

@@ -1,0 +1,7 @@
+{"_doc": "G1 AI 입력 인젝션 알려진 자리 — payload:<칸 경로>(링크·지시문이 모델 입력에 그대로 · 방어 = 데이터 울타리 nonce + 출력 _delink)"}
+{"m": "known_hole", "k": "payload:lp.rows[].dex", "n": 1}
+{"m": "known_hole", "k": "payload:lp.rows[].pair", "n": 1}
+{"m": "known_hole", "k": "payload:lp.rows[].pool", "n": 1}
+{"m": "known_hole", "k": "payload:memos[].memo", "n": 1}
+{"m": "known_hole", "k": "payload:outflows[].looks_like", "n": 1}
+{"m": "known_hole", "k": "payload:trades[].venue", "n": 1}

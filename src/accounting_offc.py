@@ -8,14 +8,47 @@ from view_common import _f
 
 class OffcView:
 
-    def __init__(ofx, fx_name, offc_ans, offc_excl, offc_on, offc_pool, offc_s, offc_st):
-        ofx.fx_name = fx_name
-        ofx.offc_ans = offc_ans
-        ofx.offc_excl = offc_excl
-        ofx.offc_on = offc_on
-        ofx.offc_pool = offc_pool
-        ofx.offc_s = offc_s
-        ofx.offc_st = offc_st
+    def __init__(ofx, *, offcin):
+        ofx.fx_name = offcin.fx_name
+        ofx.offc_ans = offcin.offc_ans
+        ofx.offc_excl = offcin.offc_excl
+        ofx.offc_on = offcin.offc_on
+        ofx.offc_pool = offcin.offc_pool
+        ofx.offc_st = offcin.offc_st
+        ofx.offc_wd_addr = offcin.offc_wd_addr
+
+    def offc_s(ofx: OffcView, ex: str) -> dict:
+        return ofx.offc_st.setdefault(ex, {"wdN": 0, "wdCost": Decimal(0), "wdUnkQty": Decimal(0), "depN": 0, "inhN": 0,
+                                           "inhCost": Decimal(0), "inhQty": Decimal(0), "inhUnkQty": Decimal(0),
+                                           "excessQty": Decimal(0), "excessN": 0, "syms": set(),
+                                           "wdCostStable": Decimal(0), "inhCostStable": Decimal(0), "bySym": {}, "byAddr": {},
+                                           "exclN": 0, "exclCost": Decimal(0)})
+
+    def offc_addr_add(ofx: OffcView, ex: str, uid: str, cost: Decimal) -> None:
+        addr = ofx.offc_wd_addr.get((ex, uid)) or ""
+        ent = ofx.offc_s(ex)["byAddr"].setdefault(addr, [0, Decimal(0)])
+        ent[0] += 1
+        ent[1] += cost
+        if addr and addr in ofx.offc_excl.get(ex, ()) and ex in ofx.offc_on:
+            ofx.offc_s(ex)["exclN"] += 1
+            ofx.offc_s(ex)["exclCost"] += cost
+
+    def offc_add(ofx: OffcView, ex: str, sym: str, stable: bool, wd: Decimal | None = None, dep: bool = False,
+                 inh: Decimal | None = None) -> None:
+        st = ofx.offc_s(ex)
+        ent = st["bySym"].setdefault(sym, {"wdN": 0, "wdCost": Decimal(0), "depN": 0, "inhN": 0, "inhCost": Decimal(0), "stable": bool(stable)})
+        if wd is not None:
+            ent["wdN"] += 1
+            ent["wdCost"] += wd
+            if stable:
+                st["wdCostStable"] += wd
+        if dep:
+            ent["depN"] += 1
+        if inh is not None:
+            ent["inhN"] += 1
+            ent["inhCost"] += inh
+            if stable:
+                st["inhCostStable"] += inh
 
     def offc_summary(ofx):
         out9 = {}

@@ -2,22 +2,22 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
+import config, paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import ex_foreign as EF
+assert T.TMP in paths.STATE_DIR
+import ex_foreign as EF  # noqa: E402
 
 chk = T.chk
 NOW = int(time.time())
@@ -49,13 +49,10 @@ def fake_http(url, headers=None, data=None, method=None, timeout=20):
     raise AssertionError("예상 밖 URL " + url[:80])
 
 
-EF.http_json = fake_http
-T.patch_moved("http_json", EF.http_json, ("exf_",))
-EF._gov_prepare = lambda *a, **k: None
-T.patch_moved("_gov_prepare", EF._gov_prepare, ("exf_",))
-EF.PACE = 0
-T.patch_moved("PACE", EF.PACE, ("exf_",))
-UNI_P = os.path.join(common.STATE_DIR, "exf_bybit_symbols.json")
+T.patch_moved("http_json", fake_http, ("exf_", "ex_foreign"))
+T.patch_moved("_gov_prepare", lambda *a, **k: None, ("exf_", "ex_foreign"))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
+UNI_P = os.path.join(paths.STATE_DIR, "exf_bybit_symbols.json")
 
 
 def n_uni():
@@ -139,15 +136,14 @@ ok5 = callable(keep) and keep(st5, {"bb_hold": {"a": {"execId": "a"}, "b": {"exe
 ok5 = ok5 and callable(keep) and not keep(st5, {"bb_hold": {"a": {}}}) and not keep(st5, {})
 chk(ok5, "S5 과거 창 확장이 보류한 체결을 정본 체결 상태에 옮김(새 것만 · 없으면 그대로)", st5)
 
-import core
+import core  # noqa: E402
 
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 
-c = core.Core(common.load_config())
-c._quote_usd = lambda q, ts: Decimal(1)
+c = core.Core(config.load_config())
+c.svc_exf._quote_usd = lambda q, ts: Decimal(1)
 c.px.fx_at = lambda ms: 1380.0
-c._consume_exf_fills({"exchange": "bybit", "fills": [f for f in f1 if f["id"] == "bybit:e1"]})
+c.svc_exf._consume_exf_fills({"exchange": "bybit", "fills": [f for f in f1 if f["id"] == "bybit:e1"]})
 c.conn.commit()
 legs = sorted((r[0], r[1]) for r in c.conn.execute(
     "SELECT a.symbol, p.qty_base FROM postings p JOIN assets a ON a.asset_id=p.asset_id WHERE p.source_ns='bybit:trade' AND p.leg_kind!='gas'"))

@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import ast
-import glob
-import os
-from decimal import Decimal
+import ast  # noqa: E402
+import glob  # noqa: E402
+import os  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import accounting_books as AB
+import accounting_books as AB  # noqa: E402
 
 chk = T.chk
 NAMES = set(AB.Books.names())
@@ -85,5 +85,89 @@ b2 = AB.Books()
 chk(b2.gas_applied == {"buy": Decimal(0), "sell": Decimal(0), "n": 0} and isinstance(b2.gas_applied["buy"], Decimal)
     and all(getattr(b2, n) in ({}, []) for n in NAMES - {"gas_applied"}), "B4 기본값 = 종전 초기값")
 chk(all(getattr(b, n) is not getattr(b2, n) for n in NAMES), "B4 인스턴스마다 새 객체")
+
+import dataclasses  # noqa: E402
+
+RR = AB.ReplayResult
+OLDN = RR.old_names()
+bk = AB.Books()
+cx = object()
+scope = {n: object() for n in OLDN}
+scope.update({n: getattr(bk, n) for n in NAMES}, books=bk, ctx=cx, other9=object())
+rr = RR.from_scope(scope)
+edge = [f.name for f in dataclasses.fields(RR) if f.name not in ("books", "ctx", "_scope", "_cb")]
+chk(rr.books is bk and rr.ctx is cx and all(getattr(rr, f) is scope[AB.OLD.get(f, f)] for f in edge),
+    "B5 from_scope = 같은 객체(필드 %d · 옛 이름 %d)" % (len(edge) + 2, len(OLDN)))
+old = rr.as_old_names()
+chk(set(old) == set(OLDN) and old is not scope and all(old[n] is getattr(bk, n) for n in NAMES) and old["books"] is bk
+    and all(old[AB.OLD.get(f, f)] is getattr(rr, f) for f in edge) and "other9" not in old,
+    "B5 as_old_names = 옛 이름 새 dict(Books 필드 = 장부 필드 같은 객체 · 경계 밖 리플레이 지역 없음)")
+inv = ("e", "1")
+sc9 = rr.screen_scope(inv)
+chk(sc9["daily_inval"] is inv and set(sc9) == set(OLDN) | {"daily_inval"} and sc9 is not old, "B5 screen_scope = 옛 이름 + daily_inval(부를 때마다 새 dict)")
+try:
+    RR.from_scope({k: v for k, v in scope.items() if k != "dep_tr9"})
+    miss = None
+except KeyError as e:
+    miss = str(e)
+chk(miss == "'dep_tr9'", "B5 경계 이름 빠짐 = KeyError(조용한 None 아님 · .get 으로 읽는 dep_tr9 도)", miss)
+try:
+    rr.rows = []
+    froz = False
+except dataclasses.FrozenInstanceError:
+    froz = True
+chk(froz, "B5 필드 다시 묶기 불가(frozen)")
+ctx_calls = []
+AB.check_rr(rr, scope, "t", lambda c, s, w: ctx_calls.append((c, w)))
+chk(ctx_calls == [(cx, "t")], "B5 check_rr 같은 객체 = 통과(입력 묶음 검사는 넘긴 check_ctx 로)", ctx_calls)
+for bad9, want in ((dict(scope, rows=[]), "rows"), (dict(scope, tax_rows=[]), "tax_rows"), (dict(scope, debt_neg9={}), "debt_neg")):
+    try:
+        AB.check_rr(rr, bad9, "t4", lambda c, s, w: None)
+        msg = None
+    except AssertionError as e:
+        msg = str(e)
+    chk(msg is not None and want in msg and "t4" in msg, "B5 check_rr 다시 묶임 = AssertionError(%s)" % want, msg)
+
+chk(set(AB.SCREEN_WRITES) == {"_build_cards", "_build_pendings", "_build_outflows"} and all(set(v) <= NAMES for v in AB.SCREEN_WRITES.values())
+    and set(AB.SCREEN_WRITES_DATA) <= {"_build_cards", "_build_pendings", "_build_outflows", "_build_daily", "_build_futidx", "_build_tail"}
+    and all(set(v) <= set(OLDN) - NAMES - {"books", "ctx"} for v in AB.SCREEN_WRITES_DATA.values()),
+    "B6 선언 표: SCREEN_WRITES = 장부 필드 · SCREEN_WRITES_DATA = 경계 데이터(옛 이름) · 열쇠 = 화면 단계 메서드 이름")
+bk6 = AB.Books()
+bk6.tax_rows.append({"a": Decimal("1.0")})
+sl0 = AB.books_seal(bk6)
+chk(set(sl0) == NAMES and sl0 == AB.books_seal(bk6), "B6 books_seal = 필드마다 지문 · 같은 내용 = 같은 봉인")
+bk6.tax_rows.append({"a": Decimal("2")})
+bk6.realized_by_date["2026-10-18"] = 1.5
+sl1 = AB.books_check(sl0, bk6, "_build_cards")
+chk(sl1 == AB.books_seal(bk6) and sl1 != sl0, "B6 books_check 선언 안 쓰기(cards: tax_rows·realized_by_date) = 통과 · 새 봉인 반환")
+bad6 = []
+for stage, mut in (("_build_pendings", lambda: bk6.tax_rows.append({})), ("_build_tail", lambda: bk6.realized_by_date.update(x=1)),
+                   ("_build_cards", lambda: bk6.gas_by_chain.update(eth={})), ("_build_cards", lambda: bk6.fee_day.pop("nope", None) or bk6.fee_day.update(d=[0, 0]))):
+    s0 = AB.books_seal(bk6)
+    mut()
+    try:
+        AB.books_check(s0, bk6, stage)
+        bad6.append(stage)
+    except AssertionError as e:
+        if stage not in str(e):
+            bad6.append(str(e))
+chk(not bad6, "B6 books_check 선언 밖 쓰기 = AssertionError(직전↔직후만 비교 · 단계 이름)", bad6)
+d6 = AB.Books()
+d6.realized_by_date.update(a=1, b=2)
+s6 = AB.books_seal(d6)
+d6.realized_by_date.clear()
+d6.realized_by_date.update(b=2, a=1)
+chk(AB.books_seal(d6) != s6, "B6 봉인은 dict 순서 바뀜도 잡음(같은 내용 · 다른 삽입 순서)")
+rr6 = RR.from_scope(dict(scope, books=bk6, **{n: getattr(bk6, n) for n in NAMES}))
+sc6 = rr6.screen_scope(None)
+calls6 = []
+s7 = AB.screen_check(AB.books_seal(bk6), rr6, sc6, "_build_daily", lambda c, s, w: calls6.append(w))
+chk(calls6 == ["_build_daily"] and s7 == AB.books_seal(bk6), "B6 screen_check = 별칭 확인(입력 묶음 = 넘긴 check_ctx) + 봉인 → 새 봉인")
+try:
+    AB.screen_check(s7, rr6, dict(sc6, tax_rows=[]), "_build_daily", lambda c, s, w: None)
+    msg = None
+except AssertionError as e:
+    msg = str(e)
+chk(msg is not None and "tax_rows" in msg and "_build_daily" in msg, "B6 screen_check 장부 별칭 다시 묶임 = AssertionError", msg)
 
 T.finish()

@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import threading
-import time
-import urllib.parse
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.parse  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
-import common
-import bf_engine
-import candles
-import sellchart
-import review_daily as rd
+import paths  # noqa: E402
+import bf_engine  # noqa: E402
+import candles  # noqa: E402
+import sellchart  # noqa: E402
+import review_daily as rd  # noqa: E402
 
 chk = T.chk
 KST = timezone(timedelta(hours=9))
@@ -75,7 +75,7 @@ def fsleep(s):
 
 
 def reset_pw():
-    for p9 in (rd.PREWARM_PATH, sellchart.DEX_LATER_PATH):
+    for p9 in (paths.state("candles", "prewarm.json"), paths.state("candles", "dex_later.json")):
         try:
             os.remove(p9)
         except OSError:
@@ -95,7 +95,7 @@ chk(rd.prewarm_per_day({}) == 0 and rd.prewarm_per_day({"review": {}}) == 0 and 
     and rd.prewarm_per_day({"review": {"chart_prewarm_per_day": 99999}}) == rd.PREWARM_MAX,
     "A1 설정 없음·이상 = 0 · 상한 PREWARM_MAX")
 chk(rd._prewarm_start({}) is None and rd._PW_THREAD[0] is None, "A1 꺼짐 = 미리 받기 스레드도 안 띄움")
-chk(not os.path.exists(rd.PREWARM_PATH), "A1 꺼짐 = 기록 파일도 안 씀")
+chk(not os.path.exists(paths.state("candles", "prewarm.json")), "A1 꺼짐 = 기록 파일도 안 씀")
 
 reset_pw()
 items = [{"date": ago(300 + i), "sym": f"C{i}", "vk": ["cex"]} for i in range(10)]
@@ -103,9 +103,9 @@ w = FakeWeb(items)
 c = run(3, w)
 chk(len(w.paths) == 3 and c["counted"] == 3 and c["stopped"] == "하루 상한", "A2 하루 상한 N=3 = 차트 요청 3번에서 멈춤", (w.paths, c))
 chk(all("bg=1" in p9 and "inp=" not in p9 for p9 in w.paths), "A2 요청 = bg=1 · inp 없음(평가 입력·모델 호출 0)", w.paths)
-st = json.load(open(rd.PREWARM_PATH, encoding="utf-8"))
+st = json.load(open(paths.state("candles", "prewarm.json"), encoding="utf-8"))
 chk(st.get("day") == TODAY and st.get("n") == 3 and len(st.get("done") or {}) == 3, "A2 하루 진행·다 받음 기록 = state/candles/prewarm.json", st)
-chk(os.path.dirname(rd.PREWARM_PATH) == os.path.join(common.STATE_DIR, "candles"), "A2 기록 위치 = state/candles(tj-web 빌드 입력 서명 밖)")
+chk(os.path.isfile(os.path.join(paths.STATE_DIR, "candles", "prewarm.json")), "A2 기록 위치 = state/candles(tj-web 빌드 입력 서명 밖 · reset_pw 로 지운 뒤 실행이 만든 파일)")
 w2 = FakeWeb(items)
 c2 = run(3, w2)
 chk(not w2.paths and c2["stopped"] == "하루 상한", "A3 재시작 뒤에도 그날 상한 유지(기록 파일)", (w2.paths, c2))
@@ -156,7 +156,7 @@ prep = {"ok": True, "status": "preparing", "retryAfter": 3}
 w = FakeWeb(items, resp={f"{ago(303)}|B3|sell": [busy], f"{ago(303)}|B3|buy": [prep, prep, None]})
 SLEPT.clear()
 c = run(20, w)
-chk(c["busy"] == 1 and f"{ago(303)}|B3|sell" not in json.load(open(rd.PREWARM_PATH, encoding="utf-8"))["done"]
+chk(c["busy"] == 1 and f"{ago(303)}|B3|sell" not in json.load(open(paths.state("candles", "prewarm.json"), encoding="utf-8"))["done"]
     and rd.PREWARM_BUSY_WAIT_S in SLEPT, "A6 202 busy = 그 건 양보(다 받음 아님 · 잠시 쉼) 뒤 다음 차례", (c, SLEPT[:5]))
 chk(w.keys().count(f"{ago(303)}|B3|buy") == 3 and c["done"] == 7, "A6 202 준비 중 = retryAfter 뒤 같은 건 다시(끝나면 다 받음)", (w.keys(), c))
 reset_pw()
@@ -170,7 +170,7 @@ items = [{"date": ago(100), "sym": "D1", "vk": ["dex"]}, {"date": ago(110), "sym
 w = FakeWeb(items, resp={f"{ago(110)}|D2|sell": {"ok": True, "dexLater": "deferred", "chart": {"ok": True, "tried": []}, "calls": 1},
                          f"{ago(110)}|D2|buy": {"ok": True, "side": "buy", "dexLater": "bg_stop", "chart": {"ok": True}, "segs": [], "calls": 1}})
 c = run(20, w)
-st = json.load(open(rd.PREWARM_PATH, encoding="utf-8"))
+st = json.load(open(paths.state("candles", "prewarm.json"), encoding="utf-8"))
 chk(f"{ago(110)}|D2|sell" not in st["done"] and c["later"] >= 1, "A7 dexLater(대체 봉) = 다 받음 아님(다음에 다시)", (st["done"], c))
 chk(st.get("dex_stop") == TODAY and not any("D1" in k for k in w.keys()) and c["skipped_dex"] == 2 and any("C1" in k for k in w.keys()),
     "A7 DEX 429(bg_stop) = 그날 DEX 영수증만 건너뜀 · 거래소 봉은 계속", (w.keys(), c, st.get("dex_stop")))
@@ -184,7 +184,7 @@ w = FakeWeb(items, resp={f"{ago(300)}|C1|sell": {"ok": True, "chart": {"ok": Fal
                          f"{ago(300)}|C1|buy": {"ok": True, "side": "buy", "chart": {"ok": False}, "segs": [{"ok": False, "tried": [{"why": "no_market"}]}],
                                                 "calls": 1}})
 c = run(20, w)
-st = json.load(open(rd.PREWARM_PATH, encoding="utf-8"))
+st = json.load(open(paths.state("candles", "prewarm.json"), encoding="utf-8"))
 chk(f"{ago(300)}|C1|sell" not in st["done"] and st["done"].get(f"{ago(300)}|C1|buy", {}).get("r") == "none",
     "A7 일시 실패(net) = 다음에 다시 · 영영 없음(no_market) = 다 받음(그릴 것 없음)", st["done"])
 
@@ -208,7 +208,7 @@ t8.join(5)
 rd.prewarm_charts = _orig
 chk(t8 is not None and calls8 == [1] and t8.daemon, "A8 켜짐 = 배경 스레드 하나(데몬 스레드)", (t8, calls8))
 src_rd = open(os.path.join(T.SRC, "review_daily.py"), encoding="utf-8").read()
-import re
+import re  # noqa: E402
 ev9 = [m9.start() for m9 in re.finditer(r"^[ \t]+_receipt_evals_safe\(cfg\)", src_rd, re.M)]
 pw9 = [m9.start() for m9 in re.finditer(r"^[ \t]+_prewarm_start\(cfg\)", src_rd, re.M)]
 chk(len(pw9) == 2 and len(ev9) == 2 and ev9[0] < pw9[0] < ev9[1] < pw9[1],
@@ -319,8 +319,8 @@ with candles.chart_mode("bg"), candles.hard_deadline(time.time() + 40):
     res5 = candles.best_chart(plan, "5m", T0c - 5 * 86400, T1c - 5 * 86400, "USD", ref_px=1.0)
 chk(res5["ok"] and res5.get("dexLater") == "bg_pace" and res5["src"]["venue"] == "binance", "B5 미리 받기 간격 미룸 = 사슬은 이어 감(대체 봉 · 나중에 채움)", res5.get("tried"))
 
-import cgkey
-import nft
+import cgkey  # noqa: E402
+import nft  # noqa: E402
 _k, _p, _b, _w, _bud = cgkey.key, cgkey.plan_of, candles.cgplan_basis, nft.cg_key_windows, cgkey.budget
 REQ = []
 _req = cgkey.request
@@ -371,14 +371,14 @@ with candles.count_calls() as nc2:
     candles.best_chart(plan, "5m", T0 - 9 * 86400, T1 - 9 * 86400, "USD", ref_px=1.0)
 chk(nc2[0] == 0, "B7 다시 = 디스크 캐시라 호출 0(미리 받기가 상한에 안 셈)", nc2)
 
-import web
+import web  # noqa: E402
 
 reset_pw()
 o = {"ok": True, "autoEval": True}
 web.StateBuilder._dex_later(o, "2026-10-01", "ABC", "sell", "deferred")
 it = sellchart.dex_later_read()
 chk(o.get("dexLater") == "deferred" and o.get("autoEval") is False and "2026-10-01|ABC|sell" in it, "C1 dexLater = 자동 평가 끔 · '나중에 채움' 목록에 넣음", (o, it))
-chk(sellchart.DEX_LATER_PATH.startswith(os.path.join(common.STATE_DIR, "candles") + os.sep), "C1 목록 위치 = state/candles(빌드 서명 밖)")
+chk(os.path.isfile(os.path.join(paths.STATE_DIR, "candles", "dex_later.json")), "C1 목록 위치 = state/candles(빌드 서명 밖 · reset_pw 로 지운 뒤 _dex_later 가 만든 파일)")
 o1 = {"ok": True, "autoEval": True}
 web.StateBuilder._dex_later(o1, "2026-10-01", "ABC", "sell", None, listed=False)
 chk("2026-10-01|ABC|sell" in sellchart.dex_later_read() and "dexLater" not in o1,
@@ -389,12 +389,12 @@ chk('listed=(iv == "5m" and after == "1h" and not venue)' in src_w and 'listed=(
 o2 = {"ok": True, "autoEval": True}
 web.StateBuilder._dex_later(o2, "2026-10-01", "ABC", "sell", None)
 chk("dexLater" not in o2 and o2["autoEval"] is True and not sellchart.dex_later_read(), "C1 DEX 로 그림(사유 없음) = 목록에서 뺌 · 자동 평가 그대로", o2)
-mt = os.stat(sellchart.DEX_LATER_PATH).st_mtime_ns
+mt = os.stat(paths.state("candles", "dex_later.json")).st_mtime_ns
 web.StateBuilder._dex_later({}, "2026-10-02", "Q", "buy", None)
-chk(os.stat(sellchart.DEX_LATER_PATH).st_mtime_ns == mt, "C1 바뀐 것 없으면 안 씀")
+chk(os.stat(paths.state("candles", "dex_later.json")).st_mtime_ns == mt, "C1 바뀐 것 없으면 안 씀")
 sb = web.StateBuilder.__new__(web.StateBuilder)
-chk(not any(n.startswith("chart_dex_later") or n == "prewarm.json" for n in os.listdir(common.STATE_DIR)), "C1 state 맨 위에 새 파일 없음(재빌드 유발 없음)",
-    os.listdir(common.STATE_DIR))
+chk(not any(n.startswith("chart_dex_later") or n == "prewarm.json" for n in os.listdir(paths.STATE_DIR)), "C1 state 맨 위에 새 파일 없음(재빌드 유발 없음)",
+    os.listdir(paths.STATE_DIR))
 
 D2 = "2026-10-01"
 ts2 = int(datetime.strptime(D2, "%Y-%m-%d").replace(tzinfo=KST).timestamp()) + 3600
@@ -449,9 +449,9 @@ chk(h_bg is None and isinstance(h_fg, dict) and h_fg.get("dexLater") == "deferre
 js = T.app_js()
 chk("' 봉 대신 '" in js and "오늘 몫 소진 — DEX 봉은 나중에 채움" in js and js.count("rcFbTxt(") >= 3 and js.count("rcLaterTxt(") >= 2,
     "C5 화면 = '… 봉 대신 …' + '오늘 몫 소진 — DEX 봉은 나중에 채움'(매도·매수 출처 줄)")
-chk("chart_prewarm_per_day" in open(T.README, encoding="utf-8").read(), "C5 README = config 키 설명")
+chk("chart_prewarm_per_day" in T.doc_text("README.md"), "C5 README = config 키 설명")
 
-import onboarding
+import onboarding  # noqa: E402
 
 
 class FH:

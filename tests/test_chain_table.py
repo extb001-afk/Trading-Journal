@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import importlib.util
-import json
-import os
-import re
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
 
-import common
-import chaincatalog as CC
-import chainsweep as CS
+import config, paths, statefile  # noqa: E402
+import chaincatalog as CC  # noqa: E402
+import chainsweep as CS  # noqa: E402
 
 W1 = "0x" + "a1" * 20
 W2 = "0x" + "a2" * 20
@@ -49,22 +49,22 @@ T.chk(CC.CATALOG["base"].get("alchemy") == "base-mainnet" and CC.CATALOG["eth"].
 T.chk(CC.alchemy_tokens("base") and not CC.alchemy_tokens("megaeth") and not CC.alchemy_tokens("somnia") and not CC.alchemy_tokens("nochain"),
       "alchemy_tokens: 토큰 API 켜진 체인만 참")
 sw_bad = []
-for k, e in CS.SWEEP_CHAINS.items():
+for k, e in CC.SWEEP_CHAINS.items():
     if not (isinstance(e, tuple) and len(e) == 5 and isinstance(e[0], str) and type(e[1]) is int and isinstance(e[2], str)
             and isinstance(e[3], list) and e[3] and all(str(u).startswith("https://") for u in e[3]) and type(e[4]) is int and e[4] >= 1):
         sw_bad.append(k)
 T.chk(not sw_bad, "점검 목록 형식(표시명·체인 id·심볼·https 노드·배치 상한)", sw_bad)
-swc = [e[1] for e in CS.SWEEP_CHAINS.values()]
+swc = [e[1] for e in CC.SWEEP_CHAINS.values()]
 T.chk(len(swc) == len(set(swc)), "점검 목록 체인 id 중복 없음")
-mis = [k for k in CC.CATALOG if k in CS.SWEEP_CHAINS and CC.CATALOG[k]["chain_id"] != CS.SWEEP_CHAINS[k][1]]
+mis = [k for k in CC.CATALOG if k in CC.SWEEP_CHAINS and CC.CATALOG[k]["chain_id"] != CC.SWEEP_CHAINS[k][1]]
 T.chk(not mis, "카탈로그·점검 목록 같은 체인 = 같은 체인 id", mis)
 only = [k for k, v in CC.CATALOG.items() if v.get("alchemy_only")]
-T.chk(only and not [k for k in only if k in CS.SWEEP_CHAINS], "알케미 전용(무키 노드 없음) 체인은 점검 목록 밖", only)
-T.chk("tempo" not in CS.SWEEP_CHAINS and "xmtp" not in CS.SWEEP_CHAINS and "edge" not in CS.SWEEP_CHAINS,
+T.chk(only and not [k for k in only if k in CC.SWEEP_CHAINS], "알케미 전용(무키 노드 없음) 체인은 점검 목록 밖", only)
+T.chk("tempo" not in CC.SWEEP_CHAINS and "xmtp" not in CC.SWEEP_CHAINS and "edge" not in CC.SWEEP_CHAINS,
       "점검 불가 체인(tempo 잔고 고정값 · xmtp·edge 가스 토큰 미확인)은 점검 목록 밖")
 new9 = ("adi", "anime", "astar", "boba", "citrea", "earnm", "galactica", "gensyn", "humanity", "mythos", "rise", "settlus",
         "superseed", "worldmobile", "zetachain", "pharos", "jovay")
-T.chk(all(k in CS.SWEEP_CHAINS and CC.alchemy_network(k) for k in new9), "새 Alchemy 체인 17개 = 점검 목록 + alchemy 칸")
+T.chk(all(k in CC.SWEEP_CHAINS and CC.alchemy_network(k) for k in new9), "새 Alchemy 체인 17개 = 점검 목록 + alchemy 칸")
 
 T.chk(set(CC.blocks()) == OLD_BLOCKS and all(CC.is_block(k) for k in OLD_BLOCKS) and not CC.is_block("eth") and not CC.is_block("nochain"),
       "blocks()·is_block = 수집 블록 13개만(종전 12 + hyperevm · 표 전용 항목 제외)", sorted(CC.blocks()))
@@ -94,12 +94,12 @@ CFG = {"chains": {"eth": {"blockscout": "https://eth.invalid", "rpcs": ["https:/
                    {"type": "evm", "chain": "base", "address": W1, "label": "가"},
                    {"type": "evm", "chain": "eth", "address": W2, "label": "나"}],
        "chain_sweep": {"enabled": True, "auto_enable": True, "pace_sec": 0}}
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 
 
 def load():
-    return common.load_config()
+    return config.load_config()
 
 
 c0 = load()
@@ -115,27 +115,27 @@ gate = {"version": 1, "chains": {}, "pairs": {
     f"adi:{W1}": {"active": False}}}
 speed = {"version": 1, "chains": {"zetachain": {"getLogsSpan": 10000, "blocksPerSec": 0.26, "autoOk": False},
                                   "gensyn": {"getLogsSpan": None, "blocksPerSec": 0.5, "autoOk": False}}}
-common.atomic_write_json(common.ACTIVITY_GATE_PATH, gate)
-common.atomic_write_json(common.BACKFILL_SPEED_PATH, speed)
+statefile.atomic_write_json(paths.ACTIVITY_GATE_PATH, gate)
+statefile.atomic_write_json(paths.BACKFILL_SPEED_PATH, speed)
 c1 = load()
 T.chk(set(c1["chains"]) == {"eth", "base", "monad", "zetachain"}, "게이트: 수집 블록(monad)·새 활동+실측(zetachain)만 켬 — 표 전용·알케미 전용·실측 없음은 안 켬",
       sorted(c1["chains"]))
 auto9 = sorted((w["chain"], w["address"]) for w in c1["wallets"] if w.get("_auto"))
 T.chk(auto9 == [("monad", W1), ("zetachain", W1)], "자동 지갑 행 = 켠 쌍만", auto9)
 T.chk("alchemy" not in c1["chains"]["monad"] and "alchemy" not in c1["chains"]["zetachain"]
-      and c1["chains"]["zetachain"]["rpcs"] == list(CS.SWEEP_CHAINS["zetachain"][3]),
+      and c1["chains"]["zetachain"]["rpcs"] == list(CC.SWEEP_CHAINS["zetachain"][3]),
       "켠 체인 블록에 Alchemy 칸·Alchemy 노드 없음(감시 = 무료 노드)", c1["chains"]["zetachain"].get("rpcs"))
-dec = {d["chain"]: d for d in common.gate_decisions(c0, gate, speed)}
+dec = {d["chain"]: d for d in config.gate_decisions(c0, gate, speed)}
 T.chk(dec["crossfi"]["reason"] == "점검 목록에 없는 체인" and dec["tempo"]["reason"] == "점검 목록에 없는 체인"
       and dec["edge"]["reason"] == "점검 목록에 없는 체인"
       and dec["pharos"]["reason"].startswith("실측 없음") and dec["gensyn"]["reason"].startswith("실측 없음") and "adi" not in dec,
       "판정 사유: 표 전용 = 점검 목록 없음 · 새 체인 실측 전 = 실측 없음 · 비활성 쌍 = 판정 없음", {k: v["reason"] for k, v in dec.items()})
 CFG2 = dict(CFG, chain_sweep={"enabled": True, "auto_enable": False, "pace_sec": 0})
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(CFG2, f)
 c2 = load()
 T.chk(set(c2["chains"]) == {"eth", "base"} and not [w for w in c2["wallets"] if w.get("_auto")], "자동 켜기 끔 = 아무 체인도 안 켬")
-with open(common.CONFIG_PATH, "w", encoding="utf-8") as f:
+with open(paths.CONFIG_PATH, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 
 lst = CS.chain_list(c0)
@@ -186,7 +186,7 @@ T.chk(not miss and not extra, "표 = 카탈로그의 Alchemy 체인과 같은 �
 diff = []
 for k, r in rows.items():
     v = CC.CATALOG.get(k) or {}
-    st = "catalog" if CC.is_block(k) else "sweep" if k in CS.SWEEP_CHAINS else "table"
+    st = "catalog" if CC.is_block(k) else "sweep" if k in CC.SWEEP_CHAINS else "table"
     if r.get("alchemy") != v.get("alchemy") or r.get("chain_id") != v.get("chain_id") or bool(r.get("alchemy_tokens")) != bool(v.get("alchemy_tokens")):
         diff.append((k, "이름·id·토큰"))
     if bool(r.get("free_path")) == bool(v.get("alchemy_only")):
@@ -206,24 +206,24 @@ for k, r in rows.items():
     want = CC.native_of(k)[0] if CC.is_block(k) else v.get("native")
     if (r.get("native") or [None])[0] != want:
         nat_bad.append((k, "표≠카탈로그", r.get("native"), want))
-    if not CC.is_block(k) and k in CS.SWEEP_CHAINS and CS.SWEEP_CHAINS[k][2] != v.get("native"):
-        nat_bad.append((k, "점검 목록≠카탈로그", CS.SWEEP_CHAINS[k][2], v.get("native")))
+    if not CC.is_block(k) and k in CC.SWEEP_CHAINS and CC.SWEEP_CHAINS[k][2] != v.get("native"):
+        nat_bad.append((k, "점검 목록≠카탈로그", CC.SWEEP_CHAINS[k][2], v.get("native")))
 T.chk(not nat_bad, "네이티브(가스) 심볼 = 표·카탈로그·점검 목록 일치", nat_bad)
 nc_bad = [k for k, r in rows.items() if not str(r.get("native_check") or "").strip()]
 T.chk(not nc_bad, "표 행마다 가스 토큰 근거(native_check)", nc_bad[:10])
 unv = [k for k, r in rows.items() if str(r.get("native_check") or "").startswith(("미확인", "체인 목록 값(미확인", "네이티브 가스 토큰 없음"))]
-T.chk(unv and not [k for k in unv if k in CS.SWEEP_CHAINS], "가스 토큰 미확인·없음 체인은 점검 목록 밖(잘못된 시세로 문턱·금액 계산 방지)",
-      [k for k in unv if k in CS.SWEEP_CHAINS])
-T.chk(CS.SWEEP_CHAINS["mythos"][2] == "ETH" == CC.CATALOG["mythos"]["native"] and "MYTH 는 생태계 토큰" in rows["mythos"]["native_check"],
+T.chk(unv and not [k for k in unv if k in CC.SWEEP_CHAINS], "가스 토큰 미확인·없음 체인은 점검 목록 밖(잘못된 시세로 문턱·금액 계산 방지)",
+      [k for k in unv if k in CC.SWEEP_CHAINS])
+T.chk(CC.SWEEP_CHAINS["mythos"][2] == "ETH" == CC.CATALOG["mythos"]["native"] and "MYTH 는 생태계 토큰" in rows["mythos"]["native_check"],
       "Mythos(42018) 가스 = ETH(OP L1Block·탐색기·Alchemy 'Gas token') — 생태계 토큰 MYTH 아님(근거 기록)")
 af = doc.get("alchemy_free_tier") or {}
 T.chk(af.get("getlogs_max_blocks") == 10 and af.get("cap_pct") == 80 and isinstance(af.get("rules"), list) and len(af["rules"]) >= 3,
       "Alchemy 무료 등급 규칙(getLogs 10블록 · 80% 상한 · 용도 규칙)")
 
-import bf_engine
+import bf_engine  # noqa: E402
 SMALL = {"zetachain-evm.blockpi.network": 3}
 cap_bad = []
-for k, e in CS.SWEEP_CHAINS.items():
+for k, e in CC.SWEEP_CHAINS.items():
     for u in e[3]:
         h = u.split("/")[2]
         cap = bf_engine.gate(u).batch_cap(int(e[4]))
@@ -240,7 +240,7 @@ if os.path.isfile(TP):
     spec.loader.exec_module(mod)
     T.chk(set(mod.CHAINS) == OLD_BLOCKS, "allchains_enable: 시드 가능한 체인 = 수집 블록만(표 전용 eth·base 아님)", sorted(mod.CHAINS))
     try:
-        mod.seed_pairs(c0, common.STATE_DIR, [f"eth:{W1}"])
+        mod.seed_pairs(c0, paths.STATE_DIR, [f"eth:{W1}"])
         T.chk(False, "allchains_enable --seed-pair 표 전용 체인 = 거부")
     except ValueError as e:
         T.chk("카탈로그에 없는 체인" in str(e), "allchains_enable --seed-pair 표 전용 체인 = 거부(종전 문구)", str(e)[:80])

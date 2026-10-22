@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 A = "0x" + "a1" * 20
 json.dump({"chains": {}, "wallets": [{"type": "evm", "chain": "eth", "address": A, "label": "main"}], "backfill_months": 5},
           open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import acct_norm
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
@@ -35,7 +35,7 @@ USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 E = {k: "0x" + h * 20 for k, h in (("TKN", "e1"), ("TK2", "e2"), ("TK3", "e3"), ("TK4", "c4"), ("TK5", "e5"), ("TKR", "e6"))}
 F = "0x" + "f1" * 20
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 G, AS, CA = {}, {}, {}
 
 
@@ -199,20 +199,20 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 px = {"USDC": 1.0, "ETH": 2000.0, "BTC": 70000.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
-           "fx_basis": 1400.0, "ex_usd": {"upbit:BTC": 70000.0}, "ex_ts": {"upbit:BTC": NOW}}, open(web.SPOT_PATH, "w"))
+           "fx_basis": 1400.0, "ex_usd": {"upbit:BTC": 70000.0}, "ex_ts": {"upbit:BTC": NOW}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 MINUTE = {"on": False}
 
 
 def build(prefs, b=None):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **prefs))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **prefs))
     b = b or web.StateBuilder()
     b.skip_gen_check = True
     b.spot.dex_res[f"eth:{CA['LQT']}"] = 50000.0
     if MINUTE["on"]:
         b.px.d.setdefault("candle", {})[f"BTC:{(TB * 1000 // 60_000) * 60_000}"] = 50000.0
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         out = b._build(conn)
     finally:
@@ -258,7 +258,7 @@ chk(rz(f, "VTK") == 0 and u7 and u7[0].get("fsHold") == "cap", "G7 (NA2) 일봉 
 chk(rz(f, "LQT") == 500.0 and not unv(f, "LQT"), "G8 풀 유동성 기록 $50,000 ≥ 가드 기준 = 적용(원가 $2,000 → 실현 +$500)", [rz(f, "LQT"), unv(f, "LQT")])
 chk(rz(f, "PTK") == 1000.0, "G9 첫 빌드 PTK = P1 $2 → 실현 +$1,000", rz(f, "PTK"))
 chk(rz(f, "BTC") == 1000.0, "G9b 첫 빌드 BTC = 그날 일봉 $60,000(1분봉 없음) → 실현 +$1,000", rz(f, "BTC"))
-PIN_PATH = getattr(web, "FS_PIN_PATH", os.path.join(common.STATE_DIR, "first_seen_px.json"))
+PIN_PATH = paths.state("first_seen_px.json")
 pin = json.load(open(PIN_PATH)) if os.path.exists(PIN_PATH) else {}
 chk(pin.get("_v") == 1 and any(abs(v[0] - 2.0) < 1e-9 for v in (pin.get("p") or {}).values()), "G9 고정 저장소 파일(state/first_seen_px.json)에 단가 저장", pin)
 u10 = unv(f, "WTK")
@@ -272,7 +272,7 @@ hc = [x for x in f.get("coins") or [] if x.get("sym") == "HTK"]
 chk(hc and abs(float(hc[0].get("fsc") or 0) - 300.0) < 0.01, "G15 (ND3) 보유 원가 중 최초 인식 시가 몫 = 코인 행 fsc $300(보유 줄 '추정' 칩)", hc)
 chk(not [x for x in f.get("coins") or [] if x.get("sym") == "ETH" and x.get("fsc")], "G15 매수 원가만 있는 보유 = fsc 없음")
 
-chk(rz(f, "TKR") == 900.0, "G16 (fs407 ①) 같은 주소 두 번 왕복 = 둘째 반환은 둘째 송신 원가 $1,000 만 → 실현 +$400 + +$500(둘째 $550 섞임 아님)", rz(f, "TKR"))
+chk(rz(f, "TKR") == 900.0, "G16 같은 주소 두 번 왕복 = 둘째 반환은 둘째 송신 원가 $1,000 만 → 실현 +$400 + +$500(둘째 $550 섞임 아님)", rz(f, "TKR"))
 chk(rz(f, "LPA") == 100.0 and rz(f, "LPB") == 100.0, "G17 LP 회수 두 자산 첫 빌드 = A $2 · B $4 각각(실현 +$100 · +$100)", [rz(f, "LPA"), rz(f, "LPB")])
 
 DC[(f"ca:eth:{CA['PTK']}", ISO(T1))] = 2.5
@@ -283,8 +283,8 @@ chk(rz(f2, "PTK") == 1000.0 and acq(rows2, "PTK") == 2000.0, "G9 (NA3) 저장소
 chk(rz(f2, "BTC") == 1000.0, "G9b (NA3) 나중에 들어온 1분봉 $50,000 이 고정 일봉 $60,000 을 안 덮음 → 실현 +$1,000 그대로", rz(f2, "BTC"))
 chk(int((f2.get("firstSeen") or {}).get("pin") or 0) >= 1, "G9 둘째 빌드 = 고정값 사용(firstSeen.pin)", f2.get("firstSeen"))
 chk(rz(f2, "TKN") == 9000.0 and rz(f2, "SDT") == 0, "G9 둘째 빌드도 G1·G11 그대로", [rz(f2, "TKN"), rz(f2, "SDT")])
-chk(rz(f2, "LPA") == 100.0 and rz(f2, "LPB") == 100.0, "G17 (fs407 ②) 둘째 빌드 = 자산마다 따로 고정(A 가 B 값 $4 로 바뀌어 −$100 이 되지 않음)", [rz(f2, "LPA"), rz(f2, "LPB")])
-chk(rz(f2, "VTK") == 300.0 and not unv(f2, "VTK"), "G18 (fs407 ③) 보류했던 값은 고정 안 됨 — 시세 $1.2 로 정정되면 적용(원가 $1,200 → 실현 +$300)", [rz(f2, "VTK"), unv(f2, "VTK")])
+chk(rz(f2, "LPA") == 100.0 and rz(f2, "LPB") == 100.0, "G17 둘째 빌드 = 자산마다 따로 고정(A 가 B 값 $4 로 바뀌어 −$100 이 되지 않음)", [rz(f2, "LPA"), rz(f2, "LPB")])
+chk(rz(f2, "VTK") == 300.0 and not unv(f2, "VTK"), "G18 보류했던 값은 고정 안 됨 — 시세 $1.2 로 정정되면 적용(원가 $1,200 → 실현 +$300)", [rz(f2, "VTK"), unv(f2, "VTK")])
 
 f0, rows0, _b0, _o0 = build({"first_seen_px": False})
 chk(rz(f0, "TKN") == 0 and unv(f0, "TKN") and rz(f0, "PTK") == 0 and int((f0.get("firstSeen") or {}).get("pin") or 0) == 0,
@@ -293,7 +293,7 @@ chk(not [p for p in f0.get("pendings") or [] if p.get("fsHold")], "G13 끔 = 보
 chk(not [x for x in f0.get("coins") or [] if x.get("fsc")], "G13 끔 = 보유 줄 '추정' 재료(fsc) 없음")
 
 chk((f.get("firstSeen") or {}).get("note") is False, "G14 처음 = 배너 안 닫음(firstSeen.note false)", f.get("firstSeen"))
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": [], "first_seen_note": int(time.time())})
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": [], "first_seen_note": int(time.time())})
 b1.__dict__.pop("_prefs_c", None)
 mp = b1._mp_apply(out1, {"fsnote"})
 chk(((mp.get("fields") or {}).get("firstSeen") or {}).get("note") is True and (mp["fields"]["firstSeen"].get("n") == fs.get("n")),
@@ -308,7 +308,7 @@ with open(PIN_PATH, "w") as fh:
              '"ok_nan_ts": [1.5, "close", "2026-01-01", NaN], "ok_inf_ts": [1.5, "close", "2026-01-01", Infinity], "ok": [2.0, "close", "2026-01-01", 123]}}')
 r19 = T.safe(load) if load else {"_exc": "없음"}
 chk(isinstance(r19, dict) and "_exc" not in r19 and set(r19) == {"ok_nan_ts", "ok_inf_ts", "ok"} and r19["ok_inf_ts"][3] == 0,
-    "G19 (fs407 ④) 항목 손상(빈 객체·글자·NaN 단가·음수·NaN/무한대 시각) = 나쁜 항목만 버림 · 시각은 0", r19)
+    "G19 항목 손상(빈 객체·글자·NaN 단가·음수·NaN/무한대 시각) = 나쁜 항목만 버림 · 시각은 0", r19)
 f19 = T.safe(lambda: build({})[0])
 chk(isinstance(f19, dict) and "_exc" not in f19 and (f19.get("firstSeen") or {}).get("on") is True, "G19 손상 항목이 든 저장소로도 빌드 계속", f19 if "_exc" in (f19 or {}) else None)
 with open(PIN_PATH, "w") as fh:

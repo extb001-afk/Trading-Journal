@@ -1,0 +1,24 @@
+{
+ "_doc": "9막 서비스 이름 자리 표(정의 = public/tests/_svc_names.py 머리 · 판정 = test_svc_names · 쓰기 = tools/refactor/svc_names.py --emit). findings = [파일, 둘레 함수, 꼴, 묶음, 이름, 수] · 새 자리·늘어남 = 실패 · enforce[묶음] = true 면 그 묶음 자리 0 강제 · allow = [{key, why}](손으로 남기는 자리 · 이유 줄 필수).",
+ "enforce": {
+  "EXF": true,
+  "PRICING": true,
+  "RECON": true
+ },
+ "allow": [
+  {"key": ["tests/test_fut_place_undo.py", "recon", "assign?", "EXF", "_last_exfrecon"], "why": "9-1 손 이전 끝: c = c or C(받는 쪽 BoolOp — 풀이 밖) · 부르는 곳 C·C2·C3·C5·C6 전부 mkcore() = core.Core · c.svc_exf 로 옮김"},
+  {"key": ["tests/test_fut_place_undo.py", "recon", "indirect?", "EXF", "_exf_fut_cache"], "why": "9-1 손 이전 끝: 위와 같은 받는 쪽(c = c or C = core.Core) · c.svc_exf.__dict__.pop 로 옮김"},
+  {"key": ["tests/test_num_parse.py", "_Self.__init__", "assign?", "EXF", "_exf_hist_from"], "why": "Core 아님 — _exf_hist_touch 를 정의 클래스에서 꺼내 부르는 가짜 self(_Self) 의 자기 상태"},
+  {"key": ["tests/test_rebuild_cause.py", "run", "key?", "?", "?"], "why": "setattr/delattr(c, 변수) 열쇠 = run(**over) 키워드 = _ext_position_gate·_ext_touched(CORE ExtMixin 이름 · 서비스 이름 아님)"},
+  {"key": ["src/discopen.py", "write_anchor", "indirect?", "RECON", "_disc_t_cache"], "why": "9-2 설계 5장 discopen 무수정: core = Runner.core = ReconService(core_recon._negabs_runner 가 self 를 넘김) · __dict__.pop 은 _disc_max_t 가 만든 서비스 사전 그 자체(core_bounds self_pass dict_keys 로 대조)"},
+  {"key": ["tests/test_sui_recon_gap.py", "<module>", "assign?", "RECON", "_last_recon"], "why": "9-2 손 이전 끝: bp, sc = copy_core(…)(튜플 풀기 — 풀이 밖) · copy_core 는 core.Core(…) 를 돌려줌 · sc.svc_recon 으로 옮김"}
+ ],
+ "findings": [
+  ["src/discopen.py", "write_anchor", "indirect?", "RECON", "_disc_t_cache", 1],
+  ["tests/test_fut_place_undo.py", "recon", "assign?", "EXF", "_last_exfrecon", 1],
+  ["tests/test_fut_place_undo.py", "recon", "indirect?", "EXF", "_exf_fut_cache", 1],
+  ["tests/test_num_parse.py", "_Self.__init__", "assign?", "EXF", "_exf_hist_from", 1],
+  ["tests/test_rebuild_cause.py", "run", "key?", "?", "?", 2],
+  ["tests/test_sui_recon_gap.py", "<module>", "assign?", "RECON", "_last_recon", 2]
+ ]
+}

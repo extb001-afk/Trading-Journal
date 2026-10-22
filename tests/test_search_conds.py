@@ -2,18 +2,18 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import ast
-import json
-import os
-import re
-import sqlite3
-from datetime import datetime, timedelta, timezone
+import ast  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import sqlite3  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import search_index as si
-from _search_samples import SAMPLES
+import config  # noqa: E402
+import search_index as si  # noqa: E402
+from _search_samples import SAMPLES  # noqa: E402
 
 chk = T.chk
 
@@ -22,7 +22,7 @@ TODAY = datetime(2026, 10, 6, 1, 0, tzinfo=KST)
 WSRC = T.web_src()
 
 m9 = re.search(r"^\s*_nopid9 = (lambda e9: .*?)(?:\s+#.*)?$", WSRC, re.M)
-nopid = eval(m9.group(1)) if m9 else None
+nopid = eval(m9.group(1)) if m9 else None   # noqa: S307
 keys = set(re.findall(r'\["events"\]\[-1\]\["(_\w+)"\]', WSRC))
 keys |= set(re.findall(r'"(_ts|_pid)": ', WSRC[re.search(r"def ev\((?:cpx, )?flow, ts, k, d, q, a, tx", WSRC).start():][:1500]))
 keys |= set(re.findall(r'pos_hid9\.append\(dict\(e9, [^)]*?(_\w+)=', WSRC))
@@ -61,7 +61,7 @@ chk(s1 == s2, "H 그날 서명 = 색인과 같은 규칙(숨긴 기록의 _tax �
 SM = SAMPLES
 m9 = re.search(r"^CHAIN_NAME = (\{.*?\})\n", WSRC, re.M | re.S)
 CN = ast.literal_eval(m9.group(1)) if m9 else {}
-common.fill_chain_table(CN)
+config.fill_chain_table(CN)
 NM = si.Names(CN)
 
 
@@ -153,7 +153,7 @@ lc.close()
 def S(q, path=WP):
     try:
         return si.search(q, today=TODAY, path=path, budget_s=5, limit=50, kinds=["tx"])
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return {"_exc": f"{type(e).__name__}: {e}"}
 
 

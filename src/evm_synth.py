@@ -1,7 +1,7 @@
 import json
 import random
 import time
-import common
+import chaincatalog, logs, net_http, statefile, textutil
 import bf_engine
 from evm_base import UA
 import logging
@@ -28,10 +28,12 @@ class RpcSynthMixin:
     }
 
     NATIVE_EMITTER = {"arc": "0xfffffffffffffffffffffffffffffffffffffffe",
-                      **{c9: z9[0] for c9, z9 in common.ZK_STACK.items()}}
-    NATIVE_FEE_SINK = {c9: z9[1] for c9, z9 in common.ZK_STACK.items()}
-    NATIVE_MIRROR = {c9: frozenset({m9[0]}) for c9, m9 in common.NATIVE_MIRROR.items()}
-    NATIVE_MIRROR_SRC = {k9: v9 for k9, v9 in common.NATIVE_MIRROR.items() if k9 != "arc"}
+                      **{c9: z9[0] for c9, z9 in chaincatalog.ZK_STACK.items()}}
+    NATIVE_FEE_SINK = {c9: z9[1] for c9, z9 in chaincatalog.ZK_STACK.items()}
+    NATIVE_MIRROR = {c9: frozenset(({chaincatalog.NATIVE_MIRROR[c9][0]} if c9 in chaincatalog.NATIVE_MIRROR else set())
+                                   | ({chaincatalog.NATIVE_ALIAS_TOKEN[c9]} if c9 in chaincatalog.NATIVE_ALIAS_TOKEN else set()))
+                     for c9 in sorted(set(chaincatalog.NATIVE_MIRROR) | set(chaincatalog.NATIVE_ALIAS_TOKEN))}
+    NATIVE_MIRROR_SRC = {k9: v9 for k9, v9 in chaincatalog.NATIVE_MIRROR.items() if k9 != "arc"}
 
     SYNTH_TRIP_BASE = 15.0
     SYNTH_TRIP_RATE = 60.0
@@ -70,7 +72,7 @@ class RpcSynthMixin:
         st["fail_until"] = time.time() + wait
         st["streak"] += 1
         log.warning("%s rpc 엔드포인트 쿨다운 %.0fs (%d연속): %s — %s", self.chain, wait, st["streak"],
-                    common.redact_urls(url), common.redact_urls(msg)[:80])
+                    logs.redact_urls(url), logs.redact_urls(msg)[:80])
 
     def _rpc_call(self, method: str, params: list):
         rpcs = self.cfg_rpcs or self.RPC_DEFAULT.get(self.chain) or []
@@ -82,30 +84,30 @@ class RpcSynthMixin:
             try:
                 d = bf_engine.http_json(
                     url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
-                    headers={"User-Agent": common.ua_for(url, UA)}, timeout=15, retries=1, rpc_methods=(method,))
+                    headers={"User-Agent": net_http.ua_for(url, UA)}, timeout=15, retries=1, rpc_methods=(method,))
                 if not isinstance(d, dict):
                     raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
                 if d.get("error"):
-                    raise RuntimeError(f"rpc {method}: {common.redact_secret_text(str(d['error']))[:160]}")
+                    raise RuntimeError(f"rpc {method}: {logs.redact_secret_text(str(d['error']))[:160]}")
                 self._synth_ep(url)["streak"] = 0
                 self._synth_ep(url)["deferred"] = None
                 if d.get("result") is not None:
                     return d["result"]
                 last = RuntimeError("result null")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
                 self._synth_trip(url, e)
         for url in rpcs:
             d9 = self._synth_ep(url).get("deferred")
             if d9 is not None:
-                raise bf_engine.NetError(f"보류(게이트·장부): {common.redact_urls(str(d9))[:160]}", getattr(d9, "kind", None) or "circuit",
+                raise bf_engine.NetError(f"보류(게이트·장부): {logs.redact_urls(str(d9))[:160]}", getattr(d9, "kind", None) or "circuit",
                                          host=getattr(d9, "host", None))
         raise last if last else RuntimeError("rpc 미구성")
 
     def _ref_head(self):
         try:
             return int(self._rpc_call("eth_blockNumber", []), 16)
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             return None
 
     def _block_sec_est(self, head: int) -> float:
@@ -159,7 +161,7 @@ class RpcSynthMixin:
             log.info("%s 백필 창 시작 = 블록 %d (타임스탬프 탐색, bpd 가정치 %d 대비 %+d블록)", self.chain, b,
                      max(0, safe_now - int(months * 30 * bpd)), b - max(0, safe_now - int(months * 30 * bpd)))
             return b
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 [fallback]
             b = max(0, safe_now - int(months * 30 * bpd))
             log.warning("%s 창 시작 타임스탬프 탐색 실패 → blocks_per_day 환산 %d 로 폴백: %s", self.chain, b, e)
             return b
@@ -177,8 +179,8 @@ class RpcSynthMixin:
         try:
             r = self._rpc_call("eth_call", [{"to": ca, "data": "0x313ce567"}, "latest"])
         except Exception as e:
-            if bf_engine.revert_like(e) and reg.bad(ca, "revert: " + common.safe_err(e)[:80]):
-                raise bf_engine.TokenNoDecimals(f"token decimals 영구 불능 {ca[:10]}: {common.safe_err(e)[:80]}") from e
+            if bf_engine.revert_like(e) and reg.bad(ca, "revert: " + logs.safe_err(e)[:80]):
+                raise bf_engine.TokenNoDecimals(f"token decimals 영구 불능 {ca[:10]}: {logs.safe_err(e)[:80]}") from e
             raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: {e}") from e
         dec, why = bf_engine.decimals_from_result(r)
         if dec is None:
@@ -187,7 +189,7 @@ class RpcSynthMixin:
             raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: decimals() {why}")
         reg.ok(ca)
         self.rpc_meta[ca] = dec
-        common.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
+        statefile.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
         return dec
 
     @staticmethod
@@ -366,7 +368,7 @@ class RpcSynthMixin:
                 continue
             data = lg.get("data") or "0x"
             try:
-                v = common.log_word0(data)
+                v = textutil.log_word0(data)
             except ValueError:
                 continue
             if not v:

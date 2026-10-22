@@ -3,28 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
+import accounting_util
 import buychart
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
+from timeutil import KST
 from view_common import SUB_SID_RE
 
 
 class CostPools:
 
-    def __init__(cpx, G, kst_fmt, _ak, krw_mix, consume_krw, krw_last, oa_last, oa_take, CP_EMIT_MAX, cp_last, cp_ev, cp_pool):
+    def __init__(cpx, px, *, G, _ak, oa_last, CP_EMIT_MAX, cp_last):
         cpx.G = G
-        cpx.kst_fmt = kst_fmt
+        cpx.kst_fmt = px.fbx.kst_fmt
         cpx._ak = _ak
-        cpx.krw_mix = krw_mix
-        cpx.consume_krw = consume_krw
-        cpx.krw_last = krw_last
+        cpx.krw_mix = px.kpx.krw_mix
+        cpx.consume_krw = px.kpx.consume_krw
+        cpx.krw_last = px.kpx.krw_last
         cpx.oa_last = oa_last
-        cpx.oa_take = oa_take
+        cpx.oa_take = accounting_util.oa_take
         cpx.CP_EMIT_MAX = CP_EMIT_MAX
         cpx.cp_last = cp_last
-        cpx.cp_ev = cp_ev
-        cpx.cp_pool = cp_pool
+        cpx.cp_ev = px.books.cp_ev
+        cpx.cp_pool = accounting_util.cp_pool
+        cpx.cb = px.cb
 
     def cp_add(cpx, g, key, q9, c9):
         p9 = cpx.cp_pool(g)
@@ -97,7 +99,7 @@ class CostPools:
         cpx.krw_mix[0] = Decimal(0)
         cost_taken = Decimal(0)
         from_unknown = min(qty, g["qty_unknown"])
-        g["qty_unknown"] -= from_unknown
+        cpx.cb.sub_unknown(g, from_unknown)
         rem = qty - from_unknown
         take = Decimal(0)
         cpx.cp_last[0] = None
@@ -106,10 +108,10 @@ class CostPools:
             take = min(rem, g["qty_known"])
             cpx.oa_last[0] = cpx.oa_take(g, take)
             cpx.cp_last[0] = cpx.cp_take(g, take, wac * take, cp)
-            g["qty_known"] -= take
+            cpx.cb.sub_known(g, take)
             cost_taken = wac * take
             cpx.krw_last[0] = cpx.consume_krw(g, cost_taken)
-            g["cost"] -= cost_taken
+            cpx.cb.sub_cost(g, cost_taken)
         return cost_taken, take, from_unknown
 
     def ev(cpx, flow, ts, k, d, q, a, tx, un=None):

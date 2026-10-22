@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import hashlib
-import json
-import os
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
 
 CFG = {"chains": {"eth": {"blockscout": "https://bs.invalid", "rpcs": ["https://rpc.invalid"]}},
        "wallets": [{"type": "evm", "chain": "eth", "address": "0x" + "a1" * 20, "label": "w"},
@@ -16,9 +16,9 @@ CFG = {"chains": {"eth": {"blockscout": "https://bs.invalid", "rpcs": ["https://
 CP = os.path.join(T.TMP, "config.json")
 json.dump(CFG, open(CP, "w"))
 os.environ["TJ_CONFIG"] = CP
-import common
-import settings_store as ss
-import unit_runner
+import paths  # noqa: E402
+import settings_store as ss, runner_fp  # noqa: E402
+import unit_runner  # noqa: E402
 
 chk = T.chk
 A_TRON = N.OWN["tron"][0]
@@ -29,38 +29,38 @@ K1, K2 = "k" * 32, "q" * 32
 def S(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return f"예외:{type(e).__name__}"
 
 
 def old_fp(cfg, env):
-    genv = lambda k: os.environ.get(k) or env.get(k, "")
+    genv = lambda k: os.environ.get(k) or env.get(k, "")  # noqa: E731
     ws = cfg.get("wallets") or []
     hk = hashlib.sha256(genv("TJ_HELIUS_KEY").encode()).hexdigest()[:8] if genv("TJ_HELIUS_KEY") else ""
     try:
         import nodekeys
         nk = nodekeys.fingerprint()
-    except Exception:
+    except Exception:   # noqa: BLE001
         nk = ""
     allw = sorted({(w.get("type", "evm"), w.get("chain"), w.get("address") if w.get("type") == "sol"
                     else (w.get("address") or "").lower()) for w in ws})
-    return ss._h([allw, cfg.get("exchange_addresses"), hk, nk, cfg.get("backfill_months"), cfg.get("backfill_full_history")])
+    return runner_fp._h([allw, cfg.get("exchange_addresses"), hk, nk, cfg.get("backfill_months"), cfg.get("backfill_full_history")])
 
 
 def core_fp(cfg, env):
-    r = S(ss.unit_inputs, "core", cfg, env)
+    r = S(runner_fp.unit_inputs, "core", cfg, env)
     return r[2] if isinstance(r, tuple) else r
 
 
 def write_env(lines):
-    with open(common.ENV_PATH, "w", encoding="utf-8") as f:
+    with open(paths.ENV_PATH, "w", encoding="utf-8") as f:
         f.write("".join(x + "\n" for x in lines))
 
 
 cfg0 = ss.load_config_quiet()
 
-import tron_watch
-import ton_watch
+import tron_watch  # noqa: E402
+import ton_watch  # noqa: E402
 cfg_t = dict(cfg0, chain_wallets=[{"chain": "tron", "network": "mainnet", "address": A_TRON}])
 write_env([f"TJ_TRONGRID_KEY={K1}", f"TJ_TONCENTER_KEY={K1}"])
 ad_t = S(tron_watch.make_adapter, cfg_t)
@@ -73,7 +73,7 @@ chk(getattr(ad_t2, "key", None) == K2, "K0 전제: 새로 만든 어댑터 = 새
 ad_t3 = S(tron_watch.make_adapter, dict(cfg_t, nonevm={"tron": {"api": "https://tron-alt.invalid"}}))
 chk(getattr(ad_t, "base", None) == tron_watch.API_DEFAULT and getattr(ad_t3, "base", None) == "https://tron-alt.invalid",
     "K0 전제: 제공자 주소(nonevm.tron.api)도 만들 때 고정", (getattr(ad_t, "base", None), getattr(ad_t3, "base", None)))
-os.remove(common.ENV_PATH)
+os.remove(paths.ENV_PATH)
 
 base = old_fp(cfg0, {})
 chk(core_fp(cfg0, {}) == base, "K1 새 체인 지갑 없음 = core 지문 종전 계산식과 바이트 동일")
@@ -110,19 +110,19 @@ chk(isinstance(e1, tuple) and isinstance(e2, tuple) and e1[0] is True and e1[2] 
     "K5 유닛 러너 판정: .env 의 TronGrid 키를 바꾸면 core 지문 바뀜(→ '설정 변경 감지 — 새 설정으로 재시작')", (e1, e2))
 write_env([f"TJ_TRONGRID_KEY={K2}"])
 chk(S(unit_runner._evaluate, "core") == e2, "K5 러너 판정 반복 = 같은 지문")
-os.remove(common.ENV_PATH)
+os.remove(paths.ENV_PATH)
 json.dump(CFG, open(CP, "w"))
 
-_orig = ss._nonevm_unit_inputs
+_orig = runner_fp._nonevm_unit_inputs
 
 
 def _boom(*_a, **_k):
     raise RuntimeError("시험: 체인 지문 계산 실패")
 
 
-ss._nonevm_unit_inputs = _boom
-r6 = S(ss.unit_inputs, "core", cfg_t, {"TJ_TRONGRID_KEY": K1})
-ss._nonevm_unit_inputs = _orig
+runner_fp._nonevm_unit_inputs = _boom
+r6 = S(runner_fp.unit_inputs, "core", cfg_t, {"TJ_TRONGRID_KEY": K1})
+runner_fp._nonevm_unit_inputs = _orig
 chk(isinstance(r6, tuple) and r6[0] is True and isinstance(r6[2], str) and len(r6[2]) == 16, "K6 체인 지문 계산 예외 = core 판정은 그대로 준비(죽지 않음)", r6)
 chk(core_fp(cfg0, {}) == base, "K6 뒤에도 지갑 없는 설치 지문 그대로")
 

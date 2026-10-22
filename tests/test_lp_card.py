@@ -2,12 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import re
-import shutil
-import subprocess
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 JS = r'''// 대시보드 LP 카드 + 레버리지 · 대출 2줄 — 실제 app.js 블록(normLP · uiPaged(o.more 카드 펼침) · LP · 레버리지)을 가짜 의존성으로 돌린다(브라우저·서버·네트워크 없음)
 import fs from 'node:fs';
@@ -154,9 +153,8 @@ console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
 '''
 
 APP = T.app_js_path()
-CSS = os.path.join(T.ROOT, "web", "v2", "index.html")
 app = open(APP, encoding="utf-8").read()
-css = open(CSS, encoding="utf-8").read()
+css = T.v2_css()
 
 print("[1] 정적 — 자리 · 칸")
 T.chk("+ levHTML() + lpCardHTML() + '<div class=\"dmid\">'" in app, "머리 = 4칸 요약 → 레버리지 · 대출 → LP 카드 → 오늘 무엇이 움직였나")
@@ -175,10 +173,8 @@ blk = css[i9:j9] if 0 <= i9 < j9 else ""
 T.chk(bool(blk) and not re.search(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(", blk), "LP 카드 색 = 토큰 변수만(어두운·밝은 공통 · 직접 색 0)", re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\([^)]*\)", blk)[:5])
 
 print("[2] 화면 함수(node)")
-NODE = shutil.which("node")
-if not NODE:
-    print("SKIP node 없음 — 화면 함수 동작 시험 건너뜀")
-else:
+NODE = T.node_bin("화면 함수 동작 시험")
+if NODE:
     env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
     env["TJ_TEST_APP"] = APP
     p = subprocess.run([NODE, "--input-type=module", "-"], input=JS, env=env, cwd=T.TMP, capture_output=True, text=True, encoding="utf-8", timeout=120)

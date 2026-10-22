@@ -8,7 +8,8 @@ import threading
 import time
 import zlib
 
-import common
+import config, logs, paths, statefile
+import db as dbm
 
 log = logging.getLogger("tj-tier")
 
@@ -117,12 +118,12 @@ def recon_on(cfg: dict) -> bool:
 
 
 def recon_done_sets(scope: str, db_path: str = None) -> tuple:
-    db_path = db_path or common.DB_PATH
+    db_path = db_path or paths.DB_PATH
     init, added = set(), set()
     if not os.path.exists(db_path):
         return init, added, False
     try:
-        conn = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=1)
+        conn = dbm.connect(paths.sqlite_ro_uri(db_path), uri=True, timeout=1)
         try:
             done = conn.execute("SELECT v FROM meta WHERE k=?", (f"recon_done_{scope}",)).fetchone()
             if done and done[0]:
@@ -143,11 +144,11 @@ def recon_done_sets(scope: str, db_path: str = None) -> tuple:
 
 
 def req_path() -> str:
-    return os.path.join(common.STATE_DIR, REQ_PATH_NAME)
+    return paths.state(REQ_PATH_NAME)
 
 
 def state_path(scope: str) -> str:
-    return os.path.join(common.STATE_DIR, f"addr_tier_{scope}.json")
+    return paths.state(f"addr_tier_{scope}.json")
 
 
 def code_kind(code) -> str | None:
@@ -176,7 +177,7 @@ class TierBook:
         self._recon_cache = None
         self.lock = threading.RLock()
         self.file = state_path(scope)
-        d = common.read_json(self.file, {})
+        d = statefile.read_json(self.file, {})
         d = d if isinstance(d, dict) else {}
         p = d.get("pairs") if isinstance(d.get("pairs"), dict) else {}
         self.pairs = {k: {kk: vv for kk, vv in v.items() if kk not in ("hold", "tier")} for k, v in p.items() if isinstance(v, dict)}
@@ -244,7 +245,7 @@ class TierBook:
         except OSError:
             return {}
         if mt != self._req_cache[0]:
-            d = common.read_json(p, {})
+            d = statefile.read_json(p, {})
             r = d.get("reqs") if isinstance(d, dict) and isinstance(d.get("reqs"), dict) else {}
             self._req_cache = (mt, r)
         return self._req_cache[1]
@@ -295,7 +296,7 @@ class TierBook:
             return "boot"
         try:
             inc = self.incomplete(w)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             inc = "unknown"
         if inc in FILL_ONLY and self.path_kind in FILL_PATHS:
             self.filling[w] = inc
@@ -306,7 +307,7 @@ class TierBook:
             return "hist:" + str(inc)
         try:
             rp = self.recon_pending(w)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             rp = True
         if rp:
             return "hist:recon"
@@ -421,7 +422,7 @@ class TierBook:
             return False
         try:
             return not self.recon_pending(w)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return False
 
     def period_rest(self, w: str, p: dict, now: float) -> bool:
@@ -619,7 +620,7 @@ class TierBook:
                    "lastCycle": self.last_cycle, "calls": self.calls, "summary": self.summary(now),
                    "updatedAt": int(now), "pairs": pairs}
             try:
-                common.atomic_write_json(self.file, out)
+                statefile.atomic_write_json(self.file, out)
                 self._dirty = False
                 self._last_save = time.time()
             except OSError as e:
@@ -647,7 +648,7 @@ def rpc(wt, tb: "TierBook", method: str, params: list):
             r = bf_engine.rpc_call(u, method, params, timeout=15, retries=1, prio="bg")
             tb._ep_fail[u] = 0
             return r
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             n = tb._ep_fail.get(u, 0) + 1
             tb._ep_fail[u] = n
             tb._ep_cool[u] = now + min(900.0, 30.0 * (2 ** min(n - 1, 5)))
@@ -772,17 +773,17 @@ def _mc_addr(cfg: dict, chain: str):
         v = cc.get("multicall3")
         return str(v).lower() if isinstance(v, str) and len(v) == 42 and v.startswith("0x") else None
     try:
-        import recon
-        return str(recon.MULTICALL3_BY_CHAIN.get(chain, recon.MULTICALL3)).lower()
-    except Exception:
+        import token_tables
+        return str(token_tables.MULTICALL3_BY_CHAIN.get(chain, token_tables.MULTICALL3)).lower()
+    except Exception:   # noqa: BLE001 [fallback]
         return MULTICALL3
 
 
 def _lp_chain(chain: str) -> bool:
     try:
         import lpdec
-        return bool(lpdec.lp_managers(common.BASE_DIR).get(chain))
-    except Exception:
+        return bool(lpdec.lp_managers(paths.BASE_DIR).get(chain))
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -794,7 +795,7 @@ def idle_cycle(wt, tb: TierBook, kind: str, source: str):
                 wt.cursor[k] = int(time.time())
                 ch = True
         if ch:
-            common.atomic_write_json(wt.cursor_path, wt.cursor)
+            statefile.atomic_write_json(wt.cursor_path, wt.cursor)
     except OSError as e:
         log.warning("%s 쉼 주기 도장 갱신 실패: %s", tb.scope, e)
     tb.save()
@@ -802,7 +803,7 @@ def idle_cycle(wt, tb: TierBook, kind: str, source: str):
     try:
         wt._health_cycle(kind, head, max(0, head - int(getattr(wt, "conf_depth", 0) or 0)), ok=True, current_source=source,
                          wallets_failing=0, pending_detail=0, tier_idle=True)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.debug("%s 쉼 주기 헬스 기록 실패: %s", tb.scope, e)
 
 
@@ -822,7 +823,7 @@ def evm_activity(wt, tb: TierBook, deadline: float = None) -> int:
                 break
             try:
                 tb.set_code(w, code_kind(call("eth_getCode", [w, "latest"])))
-            except Exception:
+            except Exception:   # noqa: BLE001 [isolate]
                 continue
         ts_cache = {}
         for w in tb.wallets:
@@ -839,7 +840,7 @@ def evm_activity(wt, tb: TierBook, deadline: float = None) -> int:
                     b9 = call("eth_getBlockByNumber", [hex(int(blk)), False]) or {}
                     ts_cache[blk] = int(b9["timestamp"], 16)
                 tb.note_cov(w, ts_cache[blk], blk)
-            except Exception:
+            except Exception:   # noqa: BLE001 [isolate]
                 continue
         targets = tb.activity_targets()
         if targets and time.time() < deadline:
@@ -855,7 +856,7 @@ def evm_activity(wt, tb: TierBook, deadline: float = None) -> int:
                     try:
                         r9 = call("eth_call", [{"to": tb.mc, "data": evm_watch.RpcChainWatcher._mc_encode(part, tb.mc)}, hex(head)])
                         bals = evm_watch.RpcChainWatcher._mc_decode(r9, len(part), None)
-                    except Exception as e:
+                    except Exception as e:   # noqa: BLE001 [fallback]
                         import bf_engine
                         if isinstance(e, ValueError) or bf_engine.revert_like(e):
                             tb._mc_off_until = time.time() + MC_OFF_SEC
@@ -871,10 +872,10 @@ def evm_activity(wt, tb: TierBook, deadline: float = None) -> int:
                 try:
                     nc = int(call("eth_getTransactionCount", [w, hex(head)]), 16)
                     bl = int(call("eth_getBalance", [w, hex(head)]), 16)
-                except Exception:
+                except Exception:   # noqa: BLE001 [isolate]
                     continue
                 tb.note_activity(w, nc, bl, head)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.debug("%s 활동 점검 중단(다음 주기): %s", tb.scope, e)
     return n
 
@@ -891,7 +892,7 @@ def evm_baselines(wt, tb: TierBook, ws, deadline: float = None) -> int:
             nc = int(rpc(wt, tb, "eth_getTransactionCount", [w, hex(blk)]), 16)
             bl = int(rpc(wt, tb, "eth_getBalance", [w, hex(blk)]), 16)
             tb.note_baseline(w, nc, bl, blk)
-        except Exception:
+        except Exception:   # noqa: BLE001 [isolate]
             tb.note_baseline_fail(w)
     return n
 
@@ -916,7 +917,7 @@ def empty_candidates(tb: "TierBook", ws, now: float = None) -> list:
         try:
             if tb.hold_reason(w, now):
                 continue
-        except Exception:
+        except Exception:   # noqa: BLE001 [isolate]
             continue
         out.append(w)
     return out[:EMPTY_PROBE_MAX]
@@ -929,7 +930,7 @@ def evm_empty_probe(wt, tb: "TierBook", has_rows, ws=None, now: float = None) ->
         blk = int((tb.pairs.get(w) or {}).get("act", {}).get("blk"))
         try:
             r = has_rows(w, blk)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [probe]
             log.debug("%s %s 빈 지갑 판정 보류: %s", tb.scope, w[:10], str(e)[:80])
             break
         n += 1
@@ -944,7 +945,7 @@ def evm_empty_probe(wt, tb: "TierBook", has_rows, ws=None, now: float = None) ->
                 if not isinstance(cv, int) or cv > 0:
                     wt.cursor["_cov:" + w] = 0
                     try:
-                        common.atomic_write_json(wt.cursor_path, wt.cursor)
+                        statefile.atomic_write_json(wt.cursor_path, wt.cursor)
                     except OSError as e:
                         log.warning("%s 빈 지갑 커버 하한 기록 실패(다음 주기): %s", tb.scope, e)
             log.info("%s %s 빈 지갑(블록 %d 까지 nonce·잔고 0 · 토큰 기록 0) — 하루 1회만 확인", tb.scope, w[:10], blk)
@@ -1148,7 +1149,7 @@ def sol_activity(wt, tb: TierBook, deadline: float = None) -> int:
                  else wt.rpc.call("getAccountInfo", [o, {"encoding": "base64"}]))
             v = (r or {}).get("value") if isinstance(r, dict) else None
             tb.set_code(o, "eoa" if v is None or v.get("owner") == SYSTEM_PROGRAM else "contract")
-        except Exception:
+        except Exception:   # noqa: BLE001 [isolate]
             continue
     return n
 
@@ -1247,7 +1248,7 @@ def sol_period_tick(wt, tb: TierBook, now: float = None):
     rpc9 = getattr(wt, "rpc", None)
     try:
         pnh9 = bool(callable(getattr(rpc9, "pn_ok", None)) and rpc9.pn_ok())
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         pnh9 = False
     if now - float(getattr(tb, "_period_at", 0) or 0) < SOL_PERIOD_EVERY and pnh9 == bool(getattr(tb, "pn_head", False)):
         return
@@ -1259,8 +1260,8 @@ def sol_period_tick(wt, tb: TierBook, now: float = None):
         tb.stake_n = sum(1 for k, v in (wt.cursor or {}).items() if str(k).startswith("_stk:") and isinstance(v, dict) and not v.get("gone"))
         tb.stake_on = bool(getattr(wt, "stake_on", False))
         tb.stake_every = float(getattr(wt, "stake_every", 3600) or 3600)
-        plan_period_sol(tb, getattr(wt, "cfg", None) or common.load_config(), now)
-    except Exception as e:
+        plan_period_sol(tb, getattr(wt, "cfg", None) or config.load_config(), now)
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("솔라나 기본 주기 계산 실패(종전 주기): %s", e)
         tb.period, tb.stretch = None, 1.0
 
@@ -1276,11 +1277,11 @@ def _tx_fields(tx) -> tuple:
 
 
 def boot_from_ledger(scope: str, wallets, db_path: str = None) -> dict:
-    db_path = db_path or common.DB_PATH
+    db_path = db_path or paths.DB_PATH
     if not os.path.exists(db_path):
         return {}
     want = {(w if scope == "sol" else str(w).lower()): w for w in wallets}
-    conn = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=30)
+    conn = dbm.connect(paths.sqlite_ro_uri(db_path), uri=True, timeout=30)
     out = {}
 
     def put(f, t):
@@ -1343,9 +1344,9 @@ def start_boot(books: list, db_path: str = None, gap: float = 2.0):
                     sent = boot_from_ledger(b.scope, b.wallets, db_path)
                     b.set_boot(sent, "ledger")
                     log.info("주기 장부 %s: 원장에서 내 발신 시각 %d쌍 / %d쌍 (%.1f초)", b.scope, len(sent), len(b.wallets), time.time() - t0)
-                except Exception as e:
-                    b.set_boot({}, "ledger", err=common.safe_err(e))
-                    log.warning("주기 장부 %s 부트스트랩 실패(지금 주기 유지 · 다음 기동 재시도): %s", b.scope, common.safe_err(e))
+                except Exception as e:   # noqa: BLE001 [isolate]
+                    b.set_boot({}, "ledger", err=logs.safe_err(e))
+                    log.warning("주기 장부 %s 부트스트랩 실패(지금 주기 유지 · 다음 기동 재시도): %s", b.scope, logs.safe_err(e))
                 b.save(force=True)
                 time.sleep(gap)
     t = threading.Thread(target=run, daemon=True, name="tier-boot")
@@ -1461,12 +1462,12 @@ HOLD_TEXT = {"off": "꺼짐(설정)", "path": "이 체인은 수집 방식상 �
 def _es_today(now: float = None) -> dict:
     now = time.time() if now is None else now
     day = int(now // 86400)
-    d = os.path.join(common.quota_dir(), "es_budget")
+    d = os.path.join(paths.quota_dir(), "es_budget")
     n = 0
     try:
         for f in os.listdir(d):
             if f.endswith(".json"):
-                j = common.read_json(os.path.join(d, f), {})
+                j = statefile.read_json(os.path.join(d, f), {})
                 if isinstance(j, dict) and j.get("day") == day:
                     n += int(j.get("n") or 0)
     except (OSError, ValueError, TypeError):
@@ -1478,7 +1479,7 @@ def _es_today(now: float = None) -> dict:
         r9 = bf_engine.es_ledger_rooms(now)
         if not r9.get("off"):
             out.update(head=r9["nh"], rt=r9["rt"], fillLeft=max(0, int(r9["fill"])), fillFirst=bool(r9["fillFirst"]))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return out
 
@@ -1488,16 +1489,16 @@ def web_view(cfg: dict, add_n: int = 0, add_chains=None, now: float = None) -> d
     now = time.time() if now is None else now
     st = settings(cfg)
     scopes, addrs, sums = {}, {}, []
-    for f in sorted(glob.glob(os.path.join(common.STATE_DIR, "addr_tier_*.json"))):
+    for f in sorted(glob.glob(paths.state("addr_tier_*.json"))):
         if os.path.basename(f) == REQ_PATH_NAME:
             continue
-        d = common.read_json(f, {})
+        d = statefile.read_json(f, {})
         if not isinstance(d, dict) or not d.get("scope") or not isinstance(d.get("pairs"), dict):
             continue
         sc = str(d["scope"])
         cc9 = ((cfg or {}).get("chains") or {}).get(sc)
-        if sc != "sol" and (sc in ((cfg or {}).get("_disabled_chains") or ()) or not common.chain_enabled(sc, cc9)
-                            or common.chain_discovery(sc, cc9) == "rpc"):
+        if sc != "sol" and (sc in ((cfg or {}).get("_disabled_chains") or ()) or not config.chain_enabled(sc, cc9)
+                            or config.chain_discovery(sc, cc9) == "rpc"):
             continue
         sm = d.get("summary") if isinstance(d.get("summary"), dict) else {}
         if sm:
@@ -1538,7 +1539,7 @@ def web_view(cfg: dict, add_n: int = 0, add_chains=None, now: float = None) -> d
     for c, cc in (cfg.get("chains") or {}).items():
         if not isinstance(cc, dict) or str(c).startswith("_"):
             continue
-        path = (scopes.get(c) or {}).get("path") or ("rpc" if common.chain_discovery(c, cc) == "rpc" else "etherscan" if cc.get("etherscan_chainid") else "blockscout")
+        path = (scopes.get(c) or {}).get("path") or ("rpc" if config.chain_discovery(c, cc) == "rpc" else "etherscan" if cc.get("etherscan_chainid") else "blockscout")
         pair_cost[c] = {"prov": "etherscan" if path == "etherscan" else f"{path}:{c}",
                         "day": round(86400.0 / chain_poll(cfg, c) * per_check_calls(path, path == "etherscan" and _lp_chain(c)))}
     budget = estimate(sums, cfg, extra=extra)
@@ -1546,7 +1547,7 @@ def web_view(cfg: dict, add_n: int = 0, add_chains=None, now: float = None) -> d
     for k, v in budget.items():
         v["now"] = (base.get(k) or {}).get("perDay")
     rpcfb = []
-    fbd = common.read_json(os.path.join(common.STATE_DIR, "rpc_fallback.json"), {})
+    fbd = statefile.read_json(paths.state("rpc_fallback.json"), {})
     chains9 = cfg.get("chains") or {}
     for c, rec in sorted((fbd if isinstance(fbd, dict) else {}).items()):
         if c in chains9 and isinstance(rec, dict) and rec.get("active") and isinstance(rec.get("text"), str):
@@ -1568,19 +1569,19 @@ def _hl_today(now: float = None) -> dict:
     day = int(now // 86400)
     n = 0
     try:
-        d = os.path.join(common.quota_dir(), "helius_budget")
+        d = os.path.join(paths.quota_dir(), "helius_budget")
         for f in os.listdir(d):
             if f.endswith(".json"):
-                j = common.read_json(os.path.join(d, f), {})
+                j = statefile.read_json(os.path.join(d, f), {})
                 if isinstance(j, dict) and j.get("day") == day:
                     n += int(j.get("n") or 0)
     except (OSError, ValueError, TypeError):
         pass
     cfg9 = {}
     try:
-        cfg9 = common.load_config()
+        cfg9 = config.load_config()
         b = bf_engine.helius_day_budget(cfg9)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         cfg9 = {}
         b = bf_engine.helius_day_budget({})
     out = {"n": n, "budget": b, "since": day * 86400}
@@ -1591,10 +1592,10 @@ def _hl_today(now: float = None) -> dict:
         r9 = bf_engine.ledger_rooms("helius_budget", b, burst9, keep9, now, floor=bf_engine.helius_head_min(cfg9), flex=bf_engine.helius_flex(cfg9))
         if not r9.get("off"):
             out.update(head=r9["nh"], rt=r9["rt"], fillLeft=max(0, int(r9["fill"])), fillFirst=bool(r9["fillFirst"]))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     try:
-        hb9 = common.read_json(os.path.join(common.STATE_DIR, "health", "sol.json"), {}) or {}
+        hb9 = statefile.read_json(paths.state("health", "sol.json"), {}) or {}
         s9 = ((hb9.get("sources") or {}).get("sol") or {}) if isinstance(hb9, dict) else {}
         if s9.get("head_rpc_on"):
             fresh9 = now - float(hb9.get("ts") or 0) <= 1800
@@ -1603,7 +1604,7 @@ def _hl_today(now: float = None) -> dict:
                          "n": s9.get("head_rpc_n"), "openUntil": s9.get("head_rpc_open_until"), "fresh": fresh9,
                          "hlClosedUntil": cu9 if isinstance(cu9, (int, float)) and cu9 > now else None,
                          "floorPct": round(float(s9.get("helius_head_min")) * 100, 1) if isinstance(s9.get("helius_head_min"), (int, float)) else None}
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return out
 
@@ -1614,7 +1615,7 @@ WAKE_GAP_SEC = 600
 
 def _req_read() -> dict:
     try:
-        d = common.read_json(req_path(), {})
+        d = statefile.read_json(req_path(), {})
     except SystemExit:
         d = {}
     r = d.get("reqs") if isinstance(d, dict) and isinstance(d.get("reqs"), dict) else {}
@@ -1644,7 +1645,7 @@ def _req_update(fn, wait: float = 10.0) -> object:
             if res:
                 if len(reqs) > 2000:
                     reqs = dict(sorted(reqs.items(), key=lambda kv: -kv[1])[:2000])
-                common.atomic_write_json(p, {"v": 1, "reqs": reqs, "updatedAt": now})
+                statefile.atomic_write_json(p, {"v": 1, "reqs": reqs, "updatedAt": now})
             return res
     finally:
         _REQ_LOCK.release()

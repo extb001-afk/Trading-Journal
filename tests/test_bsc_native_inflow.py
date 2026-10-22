@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _bscchain as B
+import _harness as T  # noqa: E402
+import _bscchain as B  # noqa: E402
 
-import json
-import os
-import sqlite3
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
 
 bw = B.bsc_watch
 CH = B.CH
-common = B.common
+import paths, statefile  # noqa: E402
 E18 = 10 ** 18
 clk = [time.time()]
 bw._now = lambda: clk[0]
 T.patch_moved("_now", bw._now, ("bsc_",))
-REQ = os.path.join(common.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
-BALW = os.path.join(common.STATE_DIR, "bsc_balw.json")
+REQ = os.path.join(paths.STATE_DIR, getattr(bw, "DISC_REQ_NAME", "disc_open_request.json"))
+BALW = os.path.join(paths.STATE_DIR, "bsc_balw.json")
 
 
 def tick(sec, blocks):
@@ -27,7 +27,7 @@ def tick(sec, blocks):
 
 
 def setup_db():
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
                 " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
     con.execute("CREATE TABLE IF NOT EXISTS raw_txs (chain TEXT, txhash TEXT, block INTEGER, snapshot TEXT)")
@@ -51,7 +51,7 @@ def fresh(arch=True, n_old_send=True):
     B.reset_state()
     gates_reset()
     setup_db()
-    common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+    statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                        "_wallets": sorted([B.W1, B.W2])})
     wr = B.Wr()
     w = B.mk(B.cfg(archive_rpcs=[B.ARCH]) if arch else B.cfg(), wr=wr)
@@ -79,7 +79,7 @@ def recs(wr, h):
 
 
 def ingest(wr):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     for r in wr.recs:
         sn = r.get("snapshot") or {}
         con.execute("DELETE FROM raw_txs WHERE chain='bsc' AND txhash=?", (r["txhash"].lower(),))
@@ -90,12 +90,12 @@ def ingest(wr):
 
 
 def reqs():
-    d = common.read_json(REQ, {}) if os.path.exists(REQ) else {}
+    d = statefile.read_json(REQ, {}) if os.path.exists(REQ) else {}
     return list(d.get("items") or []) if isinstance(d, dict) else []
 
 
 def balw_st():
-    return common.read_json(BALW, {}) if os.path.exists(BALW) else {}
+    return statefile.read_json(BALW, {}) if os.path.exists(BALW) else {}
 
 
 def jobs_left():
@@ -229,7 +229,7 @@ wr.recs.append({"txhash": ghost, "snapshot": snap, "via": "old"})
 w.emitted.add(ghost)
 st10 = balw_st()
 st10["at"] = int(clk[0] - 3 * 3600)
-common.atomic_write_json(BALW, st10)
+statefile.atomic_write_json(BALW, st10)
 w._balw_st = None
 w2 = B.mk(B.cfg(archive_rpcs=[B.ARCH]), wr=wr)
 w2.emitted.add(ghost)
@@ -243,14 +243,14 @@ def raw_put(h):
     s = {"tx": {"hash": h, "from": t["from"], "to": t["to"], "value": str(t["value"]), "fee": {"value": "21000"}, "status": "ok", "block_number": t["blk"]},
          "token_transfers": [{"from": fr, "to": to, "token": {"address": tok}, "total": {"value": str(v)}} for tok, fr, to, v in t["logs"]],
          "internal": []}
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("INSERT INTO raw_txs (chain, txhash, block, snapshot) VALUES ('bsc', ?, ?, ?)", (h, t["blk"], json.dumps(s)))
     con.commit()
     con.close()
 
 
 def mismatch(gap):
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "onchain_check.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "onchain_check.json"),
                              {"mismatches": [{"key": f"bsc:{B.W1}:native", "chain": "bsc", "wallet": B.W1, "ca": None, "sym": "BNB",
                                               "ledger": 1.0, "onchain": 1.0 + gap, "confirmed": True}]})
 
@@ -267,7 +267,7 @@ gates_reset()
 setup_db()
 for h9 in (old_send, old_tok):
     raw_put(h9)
-common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                    "_wallets": sorted([B.W1, B.W2])})
 wr = B.Wr()
 w = B.mk(B.cfg(archive_rpcs=[B.ARCH]), wr=wr)
@@ -287,7 +287,7 @@ B.reset_state()
 gates_reset()
 setup_db()
 raw_put(old_send)
-common.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
+statefile.atomic_write_json(B.CPATH, {"from_block": CH.head - 30, "head": CH.head - 10, "_cov": B.WIN_BLK, "_bf_start": B.WIN_BLK,
                                    "_wallets": sorted([B.W1, B.W2])})
 wr = B.Wr()
 w = B.mk(B.cfg(archive_rpcs=[B.ARCH]), wr=wr)
@@ -305,7 +305,7 @@ w, wr = fresh()
 run(w, 3)
 st14 = balw_st()
 st14["bo_n"] = 3
-common.atomic_write_json(BALW, st14)
+statefile.atomic_write_json(BALW, st14)
 w._balw_st = None
 CH.arch_fail = "429"
 d14a = CH.native(CH.head + 5, B.OTHER, B.W1, 1 * E18)
@@ -391,8 +391,8 @@ T.chk(all(e16.count(h) <= 1 for h in many16) and ne16 >= 40 and not any(h in e16
       "N16 여러 실행에 걸쳐 실제 거래로 방출(중복 0) · 작업 호출 상한(160)에 닿으면 남은 입금 + 먼지 합은 구간 끝 기초 잔고 요청 한 번(금액 합 정확) · 먼지는 상세 안 받음",
       {"emitted": ne16, "dust": sum(1 for h in dust16 if h in e16), "q": q16, "jobs": jobs_left()})
 
-import balcheck
-import db as dbm
+import balcheck  # noqa: E402
+import db as dbm  # noqa: E402
 
 DBP = os.path.join(T.TMP, "bc13.db")
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"

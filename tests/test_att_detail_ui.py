@@ -2,12 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
-import re
-import shutil
-import subprocess
+import os  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 JS = r'''import fs from 'node:fs';
 const APP = fs.readFileSync(process.env.TJ_TEST_APP, 'utf8');
@@ -19,7 +18,7 @@ const B = ['let RK = 2.5;', line('  const trimZeros = s =>'), cut('  const NFC =
   line('  const KV = (usd, krw) =>'), line('  const dayV = x =>'), line('  const dayFlowV = x =>'), line('  const rate = () =>'), line('  const isZ = v =>'), line('  const cls = v =>'),
   line('  const clsV = v =>'), line('  const pctS = (v, d) =>'), line('  const attPct = p =>'), line('  function todayD() {'), line('  const futSym = s =>'), line('  const heroDayLbl = k =>'),
   line('  const pad2 = n =>'), line('  const isISO = s =>'),
-  cut('  function attOf(k) {', '  const ATT_MVD_TIP ='), cut('  function attBars(a, k, dash) {', "  function rbLine() { return ''; }"),
+  cut('  function attOf(k) {', '  const ATT_MVD_TIP ='), cut('  const ATT_MVD_TIP =', '  const josa ='), cut('  function attDetail(a, k, noCoins) {', '  function attHTML(k) {'), cut('  function attBars(a, k, dash) {', "  function rbLine() { return ''; }"),
   cut('  const MATT_K = [', '  function monthGlanceHTML(ym) {'), cut('  function dayContrib(iso) {', '  const rcptable = x =>'),
   cut('  function setHide(on) {', '  function rkApply() {'), cut('  function setRand(on) {', '  function wowSlot(k, x) {')].join('\n');
 const R = [];
@@ -49,7 +48,7 @@ const deps = {
 };
 const PGSZ = { v: 20 };
 const names = Object.keys(deps);
-const F = new Function(...names, B + '\nreturn { attOf, attItems, attItemsK, attBars, attdParts, attdItems, attdDays, attdRowsDay, attdSheet, attdTitle, attdActs, attdCache, attdFit, setHide: typeof setHide === "function" ? setHide : null, setRand: typeof setRand === "function" ? setRand : null, attdShow: typeof attdShow === "function" ? attdShow : (it => it), attdMoney: typeof attdMoney === "function" ? attdMoney : (v => m(v, { sign: true })), monthAtt, monthBarRows, mgBar, MATT_K };')(...names.map(k => deps[k]));
+const F = new Function(...names, B + '\nreturn { attLine, attDetail, attOf, attItems, attItemsK, attBars, attdParts, attdItems, attdDays, attdRowsDay, attdSheet, attdTitle, attdActs, attdCache, attdFit, setHide: typeof setHide === "function" ? setHide : null, setRand: typeof setRand === "function" ? setRand : null, attdShow: typeof attdShow === "function" ? attdShow : (it => it), attdMoney: typeof attdMoney === "function" ? attdMoney : (v => m(v, { sign: true })), monthAtt, monthBarRows, mgBar, MATT_K };')(...names.map(k => deps[k]));
 const A = Object.assign(deps.A, F.attdActs());
 // ── 합성 재료(둥글지 않은 값 · 실제와 무관) ──
 const R1 = 1400;
@@ -83,12 +82,14 @@ const D = { rate: R1, todayKey: '10-11', hasKrw: true, builtAt: 111, total: 9388
   lpCycles: [{ _lp: { key: 'lp:1' }, key: 'lp:1', sym: 'WETH / USDC', chain: 'Base', realizedByDay: { '2026-10-10': 20 } }] };
 const DET = {
   '2026-10-10': { mk: mkDet, mkN: 25, xm: [['ABC', 12.34]], kx: [2.0, 1.21, 0], unp: [['DDD', -120.4, 'cut']], un: [['ZZZ', 7.5]], op: [], fb: [['binance', 25.75]], fl: fl10,
-    fut: [['binance', '바이낸스', 'ETHUSDT', 20.25, 28300, 2, -1.1], ['binance', '바이낸스', 'BTCUSDT', 5.5, 7700, 1, 0], ['bybit', '바이빗', 'SOLUSDT', 5, 7000, 1, 0]] },
+    fut: [['binance', '바이낸스', 'ETHUSDT', 20.25, 28300, 2, -1.1], ['binance', '바이낸스', 'BTCUSDT', 5.5, 7700, 1, 0], ['bybit', '바이빗', 'SOLUSDT', 5, 7000, 1, 0]],
+    // 사고판 분(→실현) 코인별: [심볼, 판 돈, 산 돈, 실현, 기존 보유 평가 이동, 그날 산 코인 평가 변화, 합, 원가 중 그날 산 몫, 원가 모르는 판 돈] — 합 + fee + lp + gx + etc = att.ur(−42.5)
+    ur: { rows: [['MPLX', 266.65, 180.01, 72.55, -23.57, 0, -23.57, 180.01, 0], ['QQQ', 0, 5, 0, 0, 1.25, 1.25, 0, 0]], n: 2, fee: -0.5, lp: 0, gx: -2.5, etc: -17.18 } },
   '2026-10-09': { mk: [['CAX', 600.11, 1.2, 50, 12, 24.0022], ['CBX', 212.22, -0.8, 7, 30, 60.3171]], mkN: 2, xm: [], kx: [0, 0, 0], unp: [], un: [], op: [], fb: [], fl: [] },
   '2026-10-11': { mk: [['CAX', -2000.5, -2.0], ['CBX', -345.17, -1.0]], mkN: 2, xm: [], kx: [0, 0, 0], unp: [], un: [], op: [], fb: [], fl: [] },
   '2026-10-08': { mk: [['CAX', 4000.01, 3], ['CBX', 321.08, 1]], mkN: 2, xm: [], kx: [0, 0, 0], unp: [], un: [], op: [], fb: [], fl: [] } };
 S.D = D;
-const KEYS = ['mk', 'rz', 'rzf', 'fl', 'fx', 'fo', 'un', 'op', 'tr', 'oth'];
+const KEYS = ['mk', 'rz', 'rzf', 'fl', 'fx', 'fo', 'un', 'op', 'tr', 'oth', 'ur'];
 const near = (x, y, t = 1e-6) => Math.abs(x - y) <= t * Math.max(1, Math.abs(y));
 const DAYS = ['10-08', '10-09', '10-10', '10-11'];
 for (const cur of ['USD', 'KRW']) {
@@ -142,7 +143,7 @@ A.attdGo({ dataset: { v: 'd|10-10|rz' } });
 h = F.attdSheet(S.sheet.v);
 chk(S.sheet.t === '현물 실현 · 10월 10일' && /data-a="attdRc" data-v="2026-10-10\|AAA"/.test(h) && /data-a="attdLp"/.test(h) && /가스\(매매 외\)/.test(h) && /실현에서 뺌/.test(h) && !/참고 · 매매 가스·수수료/.test(h) && rowsOf(h) >= 5 && /같아요/.test(h) && !/1–20/.test(txt(h)),
   '줄 바꾸기(현물 실현) = 첫 쪽부터 · 코인 = 차익 영수증 · LP = LP · 가스·스테이킹 줄 · 합 = 현물 실현', txt(h).slice(0, 300));
-// fee1012b: 그날 가스·수수료 전부(서버 feeAllByDate) − 매매 외 가스 = 흐린 참고 줄(가스 줄 바로 아래 · 원가·손익에 포함 칩) · 합·개수 밖
+// fee1012b('알아보기 쉬운 쪽'): 그날 가스·수수료 전부(서버 feeAllByDate) − 매매 외 가스 = 흐린 참고 줄(가스 줄 바로 아래 · 코인 손익에 포함 칩) · 합·개수 밖
 D.feeAll = { '2026-10-10': [30.0, null] };
 h = F.attdSheet(S.sheet.v);
 const t9 = txt(h), gI = t9.indexOf('가스(매매 외)'), rI = t9.indexOf('참고 · 매매 가스·수수료');
@@ -159,6 +160,27 @@ h = F.attdSheet('d|10-10|rzf');
 chk(/선물 영수증/.test(h) && /data-a="attdFr" data-v="2026-10-10\|binance"/.test(h) && /ETH 무기한/.test(h) && /정산 2건/.test(txt(h)), '선물 실현 = 거래소·종목별 · 선물 영수증', txt(h).slice(0, 300));
 h = F.attdSheet('d|10-10|fo');
 chk(/바이빗/.test(h) && !/>바이낸스</.test(h) && /같아요/.test(h), '선물 미반영 = 대사가 안 넣은 거래소(바이빗)만 · 다 든 거래소(바이낸스) 0 줄 없음', txt(h).slice(0, 300));
+// 사고판 분(→실현) — 시세 안 줄 '그날 사고판 분' 누르면 코인별(판 돈 − 원가 = 실현 · 기존 보유 평가 이동 · 그날 산 코인 평가 변화) · 합 = 그 줄
+{ const Pu = F.attdParts('10-10', DET['2026-10-10']), it = Pu.mk.find(x => x.id === 'ur');
+  chk(it && it.a === 'attdGo' && it.av === 'd|10-10|ur' && near(sum(Pu.ur, x => x.v), num(F.attOf('10-10').ur)) && Pu.ur.length === 4,
+    "시세 안 '그날 사고판 분' = 누르면 코인별(attdGo d|날|ur) · 코인 2 + 수수료 + 그 밖 · 합 = 사고판 분(ur − gx)", { it, ur: Pu.ur.map(x => [x.l, x.v]) });
+  A.attdGo({ dataset: { v: 'd|10-10|ur' } });
+  h = F.attdSheet(S.sheet.v);
+  chk(S.sheet.t === '사고판 분(→실현) · 10월 10일' && /시세 안의 줄/.test(h) && /MPLX/.test(h) && /판 돈 \$267 − 원가 \$194 = 실현 \+\$72\.55<br>그날 산 몫: 산 돈 \$180 · 그중 판 것 원가 \$180 · 마감까지 평가 변화 \$0<br>이미 평가에 있던 몫\(실현으로 이동\): 판 것 원가 \$14\.09 · 평가 이동 −\$23\.57<br>이 코인이 사고판 분에 주는 값 −\$23\.57/.test(h)
+    && /그날 산 몫: 산 돈 \$5\.00 · 마감까지 평가 변화 \+\$1\.25<br>이 코인이/.test(h) && !/QQQ[^]*이미 평가에 있던 몫/.test(txt(h)) && /수수료·가스 레그/.test(h) && /그 밖\(스테이블/.test(h) && /같아요/.test(h),
+    "사고판 분 시트 = 오너 꼴(판 돈 − 원가 = 실현 / 그날 산 몫 / 이미 평가에 있던 몫 / 이 코인 합 · 0 인 줄 숨김) · 합 = 줄", txt(h).slice(0, 600));
+  A.attdUx({ dataset: { v: 'u:MPLX' } }); const hx = F.attdSheet(S.sheet.v);
+  chk(/data-a="attdUx" data-v="u:MPLX" aria-expanded="true"/.test(hx) && /<span class="ads open">판 돈/.test(hx) && /aria-expanded="false"/.test(hx),
+    '코인 줄 누르면 설명 전부 펼침(ads open · aria-expanded) · 다른 줄은 접힘', hx.slice(0, 400));
+  A.attdUx({ dataset: { v: 'u:MPLX' } }); chk(!/ads open/.test(F.attdSheet(S.sheet.v)), '다시 누르면 접힘', null);
+  const P0 = F.attdParts('10-10', null);
+  chk(P0.ur.length === 1 && P0.ur[0].l === '코인별로 나누지 못한 몫' && near(P0.ur[0].v, num(F.attOf('10-10').ur)), '서버 상세 없음 = 한 줄(합 = 줄 값)', P0.ur);
+  chk(!F.attdParts('10-08', DET['2026-10-08']).ur.length, '옛 분해(v1) 날 = 사고판 분 줄 없음', null);
+  chk(/이 줄을 다시 찾지 못했어요/.test(F.attdSheet('m|2026-10|ur')), "그 달 경로(m|달|ur)는 받지 않음 — 사고판 분 시트는 그날만(월 합 0 으로 덮이지 않게)", null);
+  const ad = F.attDetail(F.attOf('10-10'), '10-10'), al = F.attLine(F.attOf('10-10'), 3, true);
+  chk(/<button type="button" data-a="attdOpen" data-v="d\|10-10\|ur" aria-haspopup="dialog" class="ar sub"><span class="al mut">그날 사고판 분<\/span>/.test(ad)
+    && /<button type="button" class="amvd" data-a="attdOpen" data-v="d\|10-10\|ur" aria-haspopup="dialog" title="[^"]+">사고판 분\(→실현\)/.test(al),
+    "펼침 '그날 사고판 분' 줄 · 시세 옆 '사고판 분(→실현)' 칩 = 단추(누르면 사고판 분 코인별 시트 d|날|ur)", { ad: ad.slice(0, 300), al }); }
 h = F.attdSheet('d|10-10|fl');
 chk(/외부 전송 USDC/.test(h) && /거래소 입금 ETH/.test(h) && /외부 전송 ETH/.test(h) && /스테이킹 보상 → 현물 실현으로/.test(h) && /같아요/.test(h), '입출금 = 이동 건 · 상계된 레그(아래 줄) · 스테이킹 보상 옮김 줄', txt(h).slice(0, 400));
 S.cur = 'KRW';
@@ -182,12 +204,12 @@ chk(rowsOf(h) === 4 && /data-a="attdGo" data-v="d\|10-10\|mk"/.test(h) && /같�
 A.attdView({ dataset: { v: 'it' } });
 // 금액 숨김·랜덤값 — 실제 금액 글자 0
 const real = new Set();
-for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'm|2026-10|mk', 'm|2026-10|fl']) {
+for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'd|10-10|ur', 'm|2026-10|mk', 'm|2026-10|fl']) {
   S.attdUI = { v, pg: 0, view: 'it' };
   for (const x of txt(F.attdSheet(v)).matchAll(/\d{1,3}(?:,\d{3})+\.\d\d|\d+\.\d\d/g)) if (x[0].replace(/[,.]/g, '').length >= 4) real.add(x[0]);
 }
 const leak = mode => { S.hide = mode === 'hide'; S.rand = mode === 'rand'; const out = [];
-  for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'm|2026-10|mk', 'm|2026-10|fl']) {
+  for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'd|10-10|ur', 'm|2026-10|mk', 'm|2026-10|fl']) {
     S.attdUI = { v, pg: 0, view: 'it' }; const t = F.attdSheet(v).replace(/<[^>]+>/g, ' ');
     const vis = mode === 'rand' ? t.replace(/[^]*/g, ' ') : t.replace(/[^]*/g, ' ');
     real.forEach(r => { if (vis.includes(r)) out.push([v, r]); }); }
@@ -284,7 +306,7 @@ chk(JSON.stringify(F.attItems(a10)) === JSON.stringify(F.attItemsK(a10).map(x =>
   S.attdC = null; FETCH = () => Promise.resolve({ status: 200, ok: true, json: () => Promise.resolve({ ok: true, days: DET }) });
   for (const cur of ['USD', 'KRW']) {
     S.cur = cur;
-    for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'd|10-11|mk', 'm|2026-10|mk', 'm|2026-10|oth', 'm|2026-10|fl']) {
+    for (const v of ['d|10-10|mk', 'd|10-10|rz', 'd|10-10|rzf', 'd|10-10|fl', 'd|10-10|fx', 'd|10-10|fo', 'd|10-10|oth', 'd|10-10|ur', 'd|10-11|mk', 'm|2026-10|mk', 'm|2026-10|oth', 'm|2026-10|fl']) {
       S.attdUI = { v, pg: 0, view: 'it' }; F.attdSheet(v); await new Promise(r => setTimeout(r, 5));
       let tot = 0, head = null, ckv = null;
       for (let pg = 0; pg < 5; pg++) {
@@ -339,9 +361,8 @@ chk(JSON.stringify(F.attItems(a10)) === JSON.stringify(F.attItemsK(a10).map(x =>
 '''
 
 APP = T.app_js_path()
-CSS = os.path.join(T.ROOT, "web", "v2", "index.html")
 app = open(APP, encoding="utf-8").read()
-css = open(CSS, encoding="utf-8").read()
+css = T.v2_css()
 
 print("[1] 정적 — 단추 · 시트 · 칸")
 T.chk("UI_SHEETS.attd = v => attdSheet(v);" in app and "Object.assign(A, attdActs());" in app, "시트 등록(UI_SHEETS.attd) · 액션 연결(attdActs)")
@@ -355,10 +376,8 @@ T.chk(bool(blk) and not re.search(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(", blk), "분해 
 T.chk("@media (max-width:640px){\n  .attdp .adr{grid-template-columns:22px minmax(0,1fr) auto 12px" in css, "폰 = 막대 칸 없이 이름·금액(줄 높이 52px)")
 
 print("[2] 화면 함수(node)")
-NODE = shutil.which("node")
-if not NODE:
-    print("SKIP node 없음 — 화면 함수 동작 시험 건너뜀")
-else:
+NODE = T.node_bin("화면 함수 동작 시험")
+if NODE:
     env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
     env["TJ_TEST_APP"] = APP
     p = subprocess.run([NODE, "--input-type=module", "-"], input=JS, env=env, cwd=T.TMP, capture_output=True, text=True, encoding="utf-8", timeout=120)

@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import shutil
-import time
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import time  # noqa: E402
 
 W = "0x" + "ab" * 20
 DAY = 86400
@@ -17,10 +17,10 @@ shutil.copytree(os.path.join(T.ROOT, "seed"), os.path.join(T.TMP, "seed"), dirs_
 json.dump({"wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}], "backfill_months": 3, "chains": {}},
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import db as dbm
+assert T.TMP in paths.STATE_DIR
+import db as dbm  # noqa: E402
 
 
 def check(name, ok, detail=""):
@@ -31,7 +31,7 @@ def h(tag):
     return "0x" + hashlib.sha256(tag.encode()).hexdigest()
 
 
-con = dbm.open_db(os.path.join(common.STATE_DIR, "ledger.db"))
+con = dbm.open_db(os.path.join(paths.STATE_DIR, "ledger.db"))
 ST = {"aid": 0, "pid": 0}
 DEC, GID = {}, {}
 
@@ -102,16 +102,16 @@ for (g, loc), q in pos.items():
                 (g, loc, format(q, ".12f")))
 con.commit()
 con.close()
-json.dump({"eth": {CA["user"]: "USERT"}}, open(os.path.join(common.STATE_DIR, "genuine_tokens.json"), "w"))
+json.dump({"eth": {CA["user"]: "USERT"}}, open(os.path.join(paths.STATE_DIR, "genuine_tokens.json"), "w"))
 json.dump({"v": 1, "e": {f"eth:{CA['nocg']}": [NOW - 60, None], f"eth:{CA['cg']}": [NOW - 60, 2.05], f"eth:{CA['thin']}": [NOW - 60, 3.0],
                          f"eth:{CA['buy']}": [NOW - 60, None], f"eth:{CA['user']}": [NOW - 60, None],
                          "eth:0x" + "d7" * 20: [NOW - 60, None], "eth:0x" + "d8" * 20: [NOW - 60, None],
                          "eth:0x" + "d9" * 20: [NOW - 60, None], "eth:0x" + "da" * 20: [NOW - 60, 3.0]}},
-          open(os.path.join(common.STATE_DIR, "cg_ca.json"), "w"))
+          open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
 
-import pricing
-import cgca
-import web
+import pricing  # noqa: E402
+import cgca  # noqa: E402
+import web  # noqa: E402
 
 cgca.reset_for_tests()
 pricing._gj = lambda url, *a, **k: (_ for _ in ()).throw(OSError("시험: 시세 받기 없음"))
@@ -171,10 +171,10 @@ check("C7 확인 대상 = 기초잔고뿐인 CA(nocg·cg·thin·unk) · 산 토�
 check("C7 값이 필요한 쌍 = 유동성 가드로 DEX 0 인 thin · MTHIN(C12)", cgca._ST["px_want"] == {("eth", CA["thin"]), ("eth", "0x" + "da" * 20)},
       cgca._ST["px_want"])
 
-OFF_AT = NOW - 7 * 3600
-d9 = json.load(open(os.path.join(common.STATE_DIR, "cg_ca.json")))
+OFF_AT = NOW - 25 * 3600
+d9 = json.load(open(os.path.join(paths.STATE_DIR, "cg_ca.json")))
 d9["e"][f"eth:{CA['thin']}"] = [OFF_AT - 60, 3.0]
-json.dump(d9, open(os.path.join(common.STATE_DIR, "cg_ca.json"), "w"))
+json.dump(d9, open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
 cgca.reset_for_tests()
 b2 = web.StateBuilder()
 web.BUILDER = b2
@@ -187,10 +187,10 @@ st2 = T.safe(b2.build)
 f2 = (st2 or {}).get("fields") or {} if isinstance(st2, dict) else {}
 coins2 = {int(str(c["key"])[1:]): c for c in (f2.get("coins") or []) if str(c.get("key", "")).startswith("g")}
 c9t = coins2.get(GID[a_thin]) or {}
-check("C9 끈 체인 코인게코 값 = 끈 시각 기준 유지($30 — 지금 기준 6시간 만료로 0 이 되지 않음)",
+check("C9 끈 체인 코인게코 값 = 끈 시각 기준 유지($30 — 지금 기준 24시간 만료로 0 이 되지 않음)",
       abs(float(c9t.get("qty") or 0) * float(c9t.get("price") or 0) - 30) < 0.01, c9t)
 check("C9 끈 체인 = 코인게코 확인 대상 아님(want·px_want 비어 있음)", not cgca._ST["want"] and not cgca._ST["px_want"], (cgca._ST["want"], cgca._ST["px_want"]))
-import buildproc
+import buildproc  # noqa: E402
 cgca.want({}, set())
 WANT10 = ({("eth", "0x" + "f1" * 20): 5.0}, {("eth", "0x" + "f1" * 20)})
 orig9 = (buildproc.usable, buildproc.qsnap_of, buildproc.run, buildproc.apply)
@@ -202,8 +202,42 @@ out10 = b2._build_child()
 buildproc.usable, buildproc.qsnap_of, buildproc.run, buildproc.apply = orig9
 check("C10 자식 빌드가 정한 확인 대상이 부모 cgca 에 등록", cgca._ST["want"] == WANT10[0] and cgca._ST["px_want"] == WANT10[1], cgca._ST["want"])
 
-import candles
-import bf_engine
+TOT13 = TOT
+for age13, want13 in ((23 * 3600, 30.0), (25 * 3600, 0.0)):
+    d13 = json.load(open(os.path.join(paths.STATE_DIR, "cg_ca.json")))
+    d13["e"][f"eth:{CA['thin']}"] = [float(NOW - age13), 3.0]
+    json.dump(d13, open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
+    cgca.reset_for_tests()
+    b3 = web.StateBuilder()
+    n13 = time.time()
+    for k9, px9, rv9 in DEXSET:
+        kk = f"eth:{k9}"
+        b3.spot.dex_usd[kk], b3.spot.dex_ts[kk], b3.spot.dex_res[kk], b3.spot.dex_res_ts[kk] = px9, n13, rv9, n13
+    st3 = T.safe(b3.build)
+    f3 = (st3 or {}).get("fields") or {} if isinstance(st3, dict) else {}
+    coins3 = {int(str(c["key"])[1:]): c for c in (f3.get("coins") or []) if str(c.get("key", "")).startswith("g")}
+    c3 = coins3.get(GID[a_thin]) or {}
+    u13 = float(c3.get("qty") or 0) * float(c3.get("price") or 0)
+    tot3 = sum(float(c.get("qty") or 0) * float(c.get("price") or 0) for c in coins3.values()) + \
+        sum(float(x.get("qty") or 0) * float(x.get("price") or 0) for x in (f3.get("stables") or []))
+    ds3 = [d for d in (f3.get("dailySeries") or []) if isinstance(d, dict)]
+    h13 = age13 // 3600
+    check(f"C13 코인게코 값 {h13}시간 전(갱신 밀림) = 보유 평가 ${want13:,.0f}", abs(u13 - want13) < 0.01, c3)
+    if want13:
+        check(f"C13 (세션20 A6-04) {h13}시간 전 값 = 출처 coingecko · 나이(pxAge) = 받은 지 {h13}시간", c3.get("pxSrc") == "coingecko"
+              and abs(float(c3.get("pxAge") or 0) - age13) < 600, (c3.get("pxSrc"), c3.get("pxAge")))
+    check(f"C13 {h13}시간 전 = 총자산·오늘 일별 값 {'포함' if want13 else '제외'}",
+          abs(tot3 - (TOT13 - 30 + want13)) < 0.01 and bool(ds3) and abs(float(ds3[-1].get("val") or 0) - (TOT13 - 30 + want13)) < 1,
+          (tot3, ds3[-1:] if ds3 else None))
+    e13 = json.load(open(os.path.join(paths.STATE_DIR, "cg_ca.json")))["e"].get(f"eth:{CA['thin']}")
+    check(f"C13 {h13}시간 전 = 받은 시각 그대로(빌드가 시각을 꾸미지 않음)", e13 == [float(NOW - age13), 3.0], e13)
+d13 = json.load(open(os.path.join(paths.STATE_DIR, "cg_ca.json")))
+d13["e"][f"eth:{CA['thin']}"] = [float(NOW - 60), 3.0]
+json.dump(d13, open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
+cgca.reset_for_tests()
+
+import candles  # noqa: E402
+import bf_engine  # noqa: E402
 calls = []
 RESP = {}
 
@@ -220,7 +254,7 @@ candles._get = fake_get
 candles._keyed = lambda url, lane, allow, valid, dl: ("skip", "nokey")
 cgca.GAP = 0.0
 cgca.reset_for_tests()
-os.remove(os.path.join(common.STATE_DIR, "cg_ca.json"))
+os.remove(os.path.join(paths.STATE_DIR, "cg_ca.json"))
 A1, A2, A3, A4 = ("0x" + c * 20 for c in ("e1", "e2", "e3", "e4"))
 RESP.update({A1: {A1: {"usd": 1.5}}, A2: {}, A3: {"status": {"error_code": 429, "error_message": "rate"}}})
 cgca.want({("eth", A1): 10.0, ("eth", A2): 5.0, ("eth", A3): 1.0, ("eth", A4): 0.5, ("nochain", A1): 99.0})
@@ -231,7 +265,7 @@ check("U1 응답 해석: 있음 = True·값 · 없음({}) = False", cgca.status(
 check("U2 오류 응답(429 본문) = 모름 그대로 · 쉼 · 이번 tick 멈춤", cgca.status("eth", A3) is None and cgca._ST["backoff"] > time.time() and n == 2
       and len(calls) == 3, (n, calls, cgca._ST["backoff"]))
 check("U2 쉼 동안 tick = 호출 0", cgca.tick() == 0 and len(calls) == 3, calls)
-d9 = json.load(open(os.path.join(common.STATE_DIR, "cg_ca.json")))
+d9 = json.load(open(os.path.join(paths.STATE_DIR, "cg_ca.json")))
 check("U3 캐시 파일 = 확인한 2개(있음·없음)", set(d9.get("e") or {}) == {f"eth:{A1}", f"eth:{A2}"}, d9)
 cgca._ST["backoff"] = 0
 RESP[A3] = {A3: {"usd": 2.0}}
@@ -241,8 +275,9 @@ check("U4 tick 상한(PER_TICK) · 남은 것 = 평가 큰 것부터", cgca.tick
 cgca.PER_TICK = 3
 cgca.reset_for_tests()
 check("U3 재시작(새 프로세스) = 파일에서 판정 이어받음", cgca.status("eth", A1) is True and cgca.status("eth", A3) is True and cgca.status("eth", A4) is None)
-check("U1 시세는 6시간 안 값만(낡으면 None)", cgca.price("eth", A1, now=time.time() + 7 * 3600) is None)
-import cgkey
+check("U1 시세는 24시간 안 값만(낡으면 None)", cgca.price("eth", A1, now=time.time() + 7 * 3600) == 1.5
+      and cgca.price("eth", A1, now=time.time() + 25 * 3600) is None)
+import cgkey  # noqa: E402
 cgkey.key = lambda: "synthetic-key"
 lanes, calls = [], []
 KMODE = {"m": "ok"}
@@ -258,7 +293,7 @@ def fake_keyed(url, lane, allow, valid, dl):
 
 candles._keyed = fake_keyed
 cgca.reset_for_tests()
-os.remove(os.path.join(common.STATE_DIR, "cg_ca.json"))
+os.remove(os.path.join(paths.STATE_DIR, "cg_ca.json"))
 B1, B2 = "0x" + "b1" * 20, "0x" + "b2" * 20
 cgca.want({("eth", B1): 3.0, ("eth", B2): 1.0}, {("eth", B1)})
 cgca.tick()
@@ -291,8 +326,10 @@ def fake_keyed2(url, lane, allow, valid, dl):
     lanes.append((lane, allow))
     if lane == "past":
         return "skip", "share"
+    if LMODE.get("err"):
+        return "err", LMODE["err"]
     ca9 = url.split("contract_addresses=")[1].split("&")[0]
-    return "ok", {ca9: {"usd": 2.0}}
+    return "ok", {ca9: {"usd": LMODE.get("usd", 2.0)}}
 
 
 candles._keyed = fake_keyed2
@@ -304,4 +341,31 @@ lanes.clear()
 cgca._ST["e"][cgca.key_of("eth", B1)][0] -= cgca.PX_EVERY + 1
 cgca.tick()
 check("U7 배경 칸 대기 중에도 다음 바퀴 평가 값 갱신은 계속", lanes == [("live", True)], lanes)
+cgca.reset_for_tests()
+os.remove(os.path.join(paths.STATE_DIR, "cg_ca.json"))
+cgca._entries()
+cgca._ST["kd"] = [int(time.time() // 86400), 0]
+t8 = float(int(time.time()))
+P8 = {0: "0x" + "80" * 20, 5: "0x" + "85" * 20, 7: "0x" + "87" * 20, 23: "0x" + "83" * 20, 25: "0x" + "8f" * 20, 100: "0x" + "8a" * 20}
+for h8, a8 in P8.items():
+    cgca._entries()[cgca.key_of("eth", a8)] = [t8 - (0.5 if h8 == 0 else h8) * 3600, 1.25]
+check("U8 평가 = 5h·7h·23h 있음 · 25h 없음", [cgca.price("eth", P8[h8], now=t8) for h8 in (5, 7, 23, 25)] == [1.25, 1.25, 1.25, None],
+      [cgca.price("eth", P8[h8], now=t8) for h8 in (5, 7, 23, 25)])
+cgca.want({("eth", a8): 1.0 for a8 in P8.values()}, {("eth", P8[h8]) for h8 in (0, 5, 7, 23, 25)})
+due8 = cgca._due(t8)
+check("U8 갱신 판단 그대로: 값 필요한 쌍 = PX_EVERY(1시간) 넘은 5h·7h·23h·25h 갱신 · 30분 = 아직 · 값 필요 없는 쌍(7h 아닌 100h 확인) = TTL_POS 전이라 아님",
+      {("eth", P8[h8]) for h8 in (5, 7, 23, 25)} <= set(due8) and ("eth", P8[0]) not in due8 and ("eth", P8[100]) not in due8, due8)
+check("U8 갱신 순서 = 오래된 값부터(25h 먼저)", due8[:1] == [("eth", P8[25])], due8)
+cgca.want({("eth", P8[23]): 1.0}, {("eth", P8[23])})
+LMODE["err"] = OSError("시험: 코인게코 429")
+calls.clear()
+cgca.tick(now=t8)
+check("U8 갱신 실패 = 직전 값·받은 시각 그대로(23h 값 계속 평가) · 쉼", cgca._entries()[cgca.key_of("eth", P8[23])] == [t8 - 23 * 3600, 1.25]
+      and cgca.price("eth", P8[23], now=t8) == 1.25 and cgca._ST["backoff"] > time.time(), (cgca._entries()[cgca.key_of("eth", P8[23])], cgca._ST["err"]))
+cgca._ST["backoff"] = 0
+LMODE.pop("err")
+LMODE["usd"] = 4.0
+cgca.tick(now=t8)
+v8 = cgca._entries()[cgca.key_of("eth", P8[23])]
+check("U8 새로 받으면 바로 교체(값·받은 시각)", v8[1] == 4.0 and v8[0] >= t8 - 1 and cgca.price("eth", P8[23]) == 4.0, v8)
 T.finish()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import acct_norm
 import bf_engine
-import common
+import histmark, paths, seeds, statefile, textutil
 import db as dbm
 import depaddr
 import flow_trace
@@ -22,7 +22,7 @@ from decimal import InvalidOperation
 from view_alerts import _append_alert
 from view_common import CHAIN_NAME
 from view_common import EPS
-from view_common import KST
+from timeutil import KST
 from view_common import OF_BASIS_KO
 from view_common import STABLE_GROUPS
 from view_common import TRANSIT_COVER_MARGIN_S
@@ -39,7 +39,7 @@ from view_offc import _offc_tx
 from view_txkey import _txk
 from view_txkey import _wd_txk
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -48,9 +48,9 @@ class OutflowsMixin:
 
     def _backfill_since_view(self, conn=None):
         try:
-            req = common.read_json(self.BF_REQ_PATH, {}) if os.path.exists(self.BF_REQ_PATH) else {}
-        except BaseException as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._backfill_since_view", _cg9)
+            req = statefile.read_json(self.BF_REQ_PATH, {}) if os.path.exists(self.BF_REQ_PATH) else {}
+        except BaseException as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._backfill_since_view[req]", _cg9)
             req = {}
         months = float(self.cfg.get("backfill_months") or 5)
         base_t0 = int(time.time() - months * 30 * 86400)
@@ -72,18 +72,18 @@ class OutflowsMixin:
                                  "updated": it.get("updated")})
         meta = {}
         try:
-            c9 = conn if conn is not None else dbm.open_db(common.DB_PATH, readonly=True)
+            c9 = conn if conn is not None else dbm.open_db(paths.DB_PATH, readonly=True)
             try:
                 for r9 in c9.execute("SELECT k, v FROM meta WHERE k IN ('ext_rebuilt_at', 'ext_rebuild_fail_at', 'ext_rebuild_fails',"
                                      " 'ext_rebuild_last_error', 'ext_rebuild_started_at', 'rebuild_not_before', 'ext_rebuild_fail_code',"
                                      " 'ext_rebuild_fail_stage', 'ext_rebuild_fail_code_at')"
-                                     " OR k LIKE 'ext_prewindow:%'").fetchall():
+                                     " OR k LIKE 'ext\\_prewindow:%' ESCAPE '\\'").fetchall():
                     meta[r9["k"]] = r9["v"]
             finally:
                 if c9 is not conn:
                     c9.close()
-        except Exception as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._backfill_since_view", _cg9)
+        except Exception as _cg9:  # noqa: BLE001 [optional]
+            calcguard.swallowed("view_outflows:OutflowsMixin._backfill_since_view[c9]", _cg9)
             pass
         g9 = bf_engine.SINCE.target(None)
         fc9 = meta.get("ext_rebuild_fail_code") if meta.get("ext_rebuild_fails") and meta.get("ext_rebuild_fail_at") \
@@ -144,7 +144,7 @@ class OutflowsMixin:
             try:
                 import wallet_register as _wr9
                 out["applyWait"] = bool(_wr9.auto_reload_alive() and a in _wr9.pending_addrs())
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_outflows:OutflowsMixin.of_row_patch", _cg9)
                 out["applyWait"] = False
         if e9.get("exchange"):
@@ -152,7 +152,7 @@ class OutflowsMixin:
         return out
 
     def outflow_decisions(self) -> dict:
-        d = common.read_json(self.OUTFLOW_PATH, {}) if os.path.exists(self.OUTFLOW_PATH) else {}
+        d = statefile.read_json(self.OUTFLOW_PATH, {}) if os.path.exists(self.OUTFLOW_PATH) else {}
         dd = d.get("decisions") if isinstance(d, dict) else None
         return dd if isinstance(dd, dict) else {}
 
@@ -216,7 +216,7 @@ class OutflowsMixin:
         if self.prefs().get("sale_cand_alert") is False:
             return
         first9 = not os.path.exists(self.SALE_CAND_PATH)
-        seen = {} if first9 else (common.read_json(self.SALE_CAND_PATH, {}) or {})
+        seen = {} if first9 else (statefile.read_json(self.SALE_CAND_PATH, {}) or {})
         if not isinstance(seen, dict):
             seen = {}
         d9 = seen.setdefault("dests", {})
@@ -235,7 +235,7 @@ class OutflowsMixin:
             changed = True
         if changed:
             seen["v"] = 1
-            common.atomic_write_json(self.SALE_CAND_PATH, seen)
+            statefile.atomic_write_json(self.SALE_CAND_PATH, seen)
         for x9 in out9:
             _append_alert(x9)
             log.info("세일 참가금 후보 알림 적재: %s", x9["text"][:40])
@@ -344,7 +344,7 @@ class OutflowsMixin:
                     for _k, r9, q9 in toks:
                         try:
                             p9 = float(self.px.candle_usd(str(r9["symbol"] or ""), int(r9["event_ts"]) * 1000) or 0)
-                        except Exception as _cg9:
+                        except Exception as _cg9:   # noqa: BLE001 [fallback]
                             calcguard.swallowed("view_outflows:OutflowsMixin._of_manual_lots", _cg9)
                             p9 = 0.0
                         px9.append(p9)
@@ -379,19 +379,19 @@ class OutflowsMixin:
         for w in self._hist_wallets():
             put(w.get("address"), "my_wallet", w.get("label") or "내 지갑")
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트",
-                   "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+                   "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
         for e in self.cfg.get("exchange_addresses") or []:
             put(e.get("address"), "exchange_deposit", fx_name.get(e.get("exchange"), e.get("exchange")) + " 입금주소(내 계정)")
         try:
             for a9, labs in depaddr.hint_index().items():
                 for _ex9, lab9 in labs:
                     put(a9, "exchange_deposit", lab9)
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_outflows:OutflowsMixin._known_addrs", _cg9)
             pass
-        for a9 in common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR, strict=True) or []:
+        for a9 in seeds.seed_json("bridge_contracts.json", [], base_dir=paths.BASE_DIR, strict=True) or []:
             put(a9, "bridge", "브릿지 컨트랙트")
-        for ch9, mg9 in lpdec.lp_managers(common.BASE_DIR).items():
+        for ch9, mg9 in lpdec.lp_managers(paths.BASE_DIR).items():
             for a9, m9 in mg9.items():
                 if not str(a9).startswith("0x"):
                     continue
@@ -403,14 +403,14 @@ class OutflowsMixin:
     def _bridge_labels(self) -> dict:
         out = {}
         try:
-            for a9 in common.seed_json("bridge_contracts.json", [], base_dir=common.BASE_DIR, strict=True) or []:
+            for a9 in seeds.seed_json("bridge_contracts.json", [], base_dir=paths.BASE_DIR, strict=True) or []:
                 if isinstance(a9, str):
                     out[a9.lower()] = {"name": "브릿지 컨트랙트", "chain": None}
-            d9 = common.seed_json("bridge_labels.json", {}, base_dir=common.BASE_DIR, strict=True) or {}
+            d9 = seeds.seed_json("bridge_labels.json", {}, base_dir=paths.BASE_DIR, strict=True) or {}
             for a9, v9 in d9.items():
                 if isinstance(v9, dict) and v9.get("name") and not a9.startswith("_"):
                     out[a9.lower() if a9.startswith("0x") else a9] = {"name": str(v9["name"])[:80], "chain": v9.get("chain")}
-        except BaseException as _cg9:
+        except BaseException as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_outflows:OutflowsMixin._bridge_labels", _cg9)
             pass
         return out
@@ -543,11 +543,11 @@ class OutflowsMixin:
         own_h = float(tc.get("own_hours", TRANSIT_OWN_H))
         try:
             dec = self.outflow_decisions() or {}
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_outflows:OutflowsMixin._wd_transit_resolve", _cg9)
             dec = {}
         cls_fn = getattr(self, "_wd_cls_fn", None)
-        fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+        fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트", "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
         wl9 = {}
         for w9 in self._hist_wallets():
             if isinstance(w9, dict) and w9.get("address"):
@@ -694,12 +694,12 @@ class OutflowsMixin:
 
     @staticmethod
     def _recv_covered(chain, addr, t_from, t_need, memo, now) -> bool:
-        sd = common.STATE_DIR
+        sd = paths.STATE_DIR
 
         def rd(key, path):
             if key not in memo:
                 try:
-                    v9 = common.read_json(path, {})
+                    v9 = statefile.read_json(path, {})
                 except SystemExit:
                     v9 = {}
                 memo[key] = v9 if isinstance(v9, dict) else {}
@@ -770,16 +770,16 @@ class OutflowsMixin:
                 return []
             import addr_tier
             return addr_tier.request_wake(items).get("added") or []
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_outflows:OutflowsMixin._wd_transit_wake", e9)
             log.debug("전송 중 출금 받는 주소 깨움 실패: %s", e9)
             return []
 
     @staticmethod
     def _hl_neg_mark(G, neg_gids) -> bool:
-        p9 = os.path.join(common.STATE_DIR, "hl_neg_mark.json")
+        p9 = paths.state("hl_neg_mark.json")
         try:
-            prev9 = set(int(x) for x in ((common.read_json(p9, {}) or {}).get("gids") or []))
+            prev9 = set(int(x) for x in ((statefile.read_json(p9, {}) or {}).get("gids") or []))
         except (SystemExit, TypeError, ValueError):
             prev9 = set()
         new9 = set(neg_gids or ()) - prev9
@@ -787,8 +787,8 @@ class OutflowsMixin:
             return False
         ts9 = [int(t9) for g9 in new9 for t9, _dq in ((G.get(g9) or {}).get("qty_timeline") or ())]
         if ts9:
-            common.mark_hist_dirty(min(ts9))
-        common.atomic_write_json(p9, {"v": 1, "gids": sorted(prev9 | new9), "at": int(time.time())})
+            histmark.mark_hist_dirty(min(ts9))
+        statefile.atomic_write_json(p9, {"v": 1, "gids": sorted(prev9 | new9), "at": int(time.time())})
         return True
 
     def _hl_bridge_links(self, conn, wd_raw) -> dict:
@@ -859,13 +859,13 @@ class OutflowsMixin:
         for e in self.cfg.get("exchange_addresses") or []:
             put(e.get("address"), e.get("exchange"))
         try:
-            names = os.listdir(common.STATE_DIR)
+            names = os.listdir(paths.STATE_DIR)
         except OSError:
             names = []
         for f9 in names:
             if f9.startswith("exf_addrs_") and f9.endswith(".json"):
                 try:
-                    d9 = common.read_json(os.path.join(common.STATE_DIR, f9), {})
+                    d9 = statefile.read_json(os.path.join(paths.STATE_DIR, f9), {})
                 except SystemExit:
                     continue
                 for a9 in (d9.get("addrs") or []) if isinstance(d9, dict) else []:
@@ -881,7 +881,7 @@ class OutflowsMixin:
                 if r and r.get("match") in ("exact", "family") and not r.get("tag_required") and not r.get("ambiguous"):
                     return r.get("exchange")
                 return None
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_outflows:OutflowsMixin._deposit_exchange", _cg9)
             pass
         return (getattr(self, "_depx_idx", None) or {}).get(a)
@@ -892,8 +892,8 @@ class OutflowsMixin:
 
     def _inflow_senders(self, conn, dests) -> dict:
         try:
-            mine = rawtx_cache.mine_wallets(common.read_json(common.CONFIG_PATH, {}) or {})
-        except BaseException as _cg9:
+            mine = rawtx_cache.mine_wallets(statefile.read_json(paths.CONFIG_PATH, {}) or {})
+        except BaseException as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("view_outflows:OutflowsMixin._inflow_senders", _cg9)
             mine = set()
         self._rtxc().sync(conn)
@@ -976,7 +976,7 @@ class OutflowsMixin:
                     q9 = abs(Decimal(int(r9["qty_base"]))) / (Decimal(10) ** int(r9["decimals"] if r9["decimals"] is not None else 18))
                     if q9 > 0:
                         lst.append((int(r9["event_ts"]), float(Decimal(r9["cost_usd"]) / q9)))
-            except Exception as _cg9:
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_outflows:OutflowsMixin._ledger_unit_px", _cg9)
                 lst = []
             lst.sort()
@@ -1044,7 +1044,7 @@ class OutflowsMixin:
                         pass
                 if self._rt_parties(json.loads(ri[0]), "in", mine9) & self._rt_parties(json.loads(ro[0]), "out", mine9):
                     ok.add(ko)
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("view_outflows:OutflowsMixin._rt_same_dest", e)
                 log.debug("왕복 상대 대조 실패 %s: %s", ko, e)
                 continue
@@ -1077,7 +1077,7 @@ class OutflowsMixin:
                 if q9 > 0:
                     out.append({"ts": ts9, "ex": rf["exchange"], "cur": acct_norm.canon(cur9, rf["exchange"]), "qty": q9, "net": net9,
                                 "selfnet": selfnet9})
-        except Exception as e9:
+        except Exception as e9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("view_outflows:OutflowsMixin._untracked_net_deps", e9)
             log.warning("미추적 체인 입금 읽기 실패(제안 없음): %s", e9)
             return []
@@ -1104,21 +1104,21 @@ class OutflowsMixin:
         known = self._known_addrs()
         try:
             reg_now = {((w.get("address") or "").lower() if str(w.get("address") or "").startswith("0x") else (w.get("address") or ""))
-                       for w in (common.read_json(common.CONFIG_PATH, {}) or {}).get("wallets") or []}
-        except BaseException as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._outflows", _cg9)
+                       for w in (statefile.read_json(paths.CONFIG_PATH, {}) or {}).get("wallets") or []}
+        except BaseException as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._outflows[reg_now]", _cg9)
             reg_now = set()
         try:
             import wallet_register as _wr9
             alive9 = _wr9.auto_reload_alive()
             reload_addrs9 = _wr9.pending_addrs() if alive9 else set()
             auto9 = bool(_wr9.apply_info().get("runner"))
-        except Exception as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._outflows", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._outflows[blk]", _cg9)
             reload_addrs9, auto9 = set(), False
         self._of_auto_reload = auto9
         fx_name = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트",
-                   "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
+                   "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
         groups = {a: dict(v, resolved_rows=False, list=list(v.get("list") or ())) for a, v in ob.items()}
         try:
             gid_ca9 = {r9[0] for r9 in conn.execute("SELECT DISTINCT COALESCE(group_id, -asset_id) FROM assets"
@@ -1127,8 +1127,8 @@ class OutflowsMixin:
             gid_ca9 -= {r9[0] for r9 in conn.execute("SELECT COALESCE(group_id, -asset_id), chain, address FROM assets"
                                                      " WHERE kind='token' AND address IS NOT NULL").fetchall()
                         if spamguard.is_genuine(r9[1], r9[2])}
-        except Exception as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._outflows", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._outflows[gid_ca9]", _cg9)
             gid_ca9 = set()
         for a, v in dec.items():
             if not isinstance(v, dict) or v.get("verdict") not in ("exchange", "own"):
@@ -1142,8 +1142,8 @@ class OutflowsMixin:
             else:
                 q = ("SELECT p.source_ns, p.source_id, p.event_ts, p.qty_base, p.cost_usd, a.symbol, a.decimals, a.group_id, a.asset_id"
                      " FROM postings p JOIN assets a ON a.asset_id=p.asset_id WHERE p.source_kind='chain_tx'"
-                     " AND p.event IN ('TRANSFER_SELF', 'TRANSFER_OUT') AND p.leg_kind='move_in' AND p.location LIKE ?")
-                args = ("wallet:%:" + a,)
+                     " AND p.event IN ('TRANSFER_SELF', 'TRANSFER_OUT') AND p.leg_kind='move_in' AND p.location LIKE ? ESCAPE '\\'")
+                args = ("wallet:%:" + textutil.like_escape(a),)
             for r in conn.execute(q, args).fetchall():
                 qn = abs(Decimal(int(r["qty_base"])) / (Decimal(10) ** int(r["decimals"] if r["decimals"] is not None else 18)))
                 o9 = groups.setdefault(a, {"chains": set(), "first": r["event_ts"], "last": r["event_ts"], "txs": set(),
@@ -1238,7 +1238,7 @@ class OutflowsMixin:
         blabels = self._bridge_labels()
         auto9 = getattr(self, "_of_auto", None) or {}
         up_from = {}
-        for t9, oc9 in (common.read_json(os.path.join(common.STATE_DIR, "tx_origin_cache.json"), {}) or {}).items():
+        for t9, oc9 in (statefile.read_json(paths.state("tx_origin_cache.json"), {}) or {}).items():
             f9 = (oc9 or {}).get("from") if isinstance(oc9, dict) else None
             if f9:
                 up_from.setdefault(f9.lower() if f9.startswith("0x") else f9, []).append(t9)
@@ -1562,15 +1562,15 @@ class OutflowsMixin:
         self._outflow_legmeta = {a9: {x0[6]: (x0[7], x0[8]) for x0 in (o9.get("sends") or ()) if x0[6]} for a9, o9 in ob.items()}
         try:
             self._sale_cand_notify(sale_cands9)
-        except Exception as e9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._outflows", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_outflows:OutflowsMixin._outflows[_sale_cand_notify]", e9)
             log.warning("세일 참가금 후보 알림 실패(다음 빌드): %s", e9)
         self._outflow_rettx = {r9["address"]: {str(x9.get("tx") or "").lower() for x9 in r9.get("returned") or []} for r9 in rows if r9.get("returned")}
         return rows, n_pend, {k: {"n": v["n"], "usdAtSend": round(v["usdAtSend"], 2), "usdNow": round(v["usdNow"], 2)}
                               for k, v in tot.items()}
 
     def _flow_cache_load(self) -> dict:
-        p9 = os.path.join(common.STATE_DIR, flow_trace.CACHE_NAME)
+        p9 = paths.state(flow_trace.CACHE_NAME)
         try:
             st9 = os.stat(p9)
             sig9 = (st9.st_ino, st9.st_mtime_ns, st9.st_size)
@@ -1579,7 +1579,7 @@ class OutflowsMixin:
         hit9 = self.__dict__.get("_flow_cache_hit")
         if sig9 is not None and hit9 is not None and hit9[0] == sig9:
             return hit9[1]
-        c9 = flow_trace.load_cache(common.STATE_DIR)
+        c9 = flow_trace.load_cache(paths.STATE_DIR)
         self._flow_cache_hit = (sig9, c9) if sig9 is not None else None
         return c9
 
@@ -1595,12 +1595,12 @@ class OutflowsMixin:
             with lk9:
                 self._flow_pending = cands
         try:
-            mine = {xchain_match.norm(w.get("address")) for w in (common.read_json(common.CONFIG_PATH, {}) or {}).get("wallets") or []
+            mine = {xchain_match.norm(w.get("address")) for w in (statefile.read_json(paths.CONFIG_PATH, {}) or {}).get("wallets") or []
                     if w.get("address")}
-            alias = {xchain_match.norm(w.get("address")): (w.get("label") or "") for w in (common.read_json(common.CONFIG_PATH, {}) or {}).get("wallets") or []
+            alias = {xchain_match.norm(w.get("address")): (w.get("label") or "") for w in (statefile.read_json(paths.CONFIG_PATH, {}) or {}).get("wallets") or []
                      if w.get("address")}
-        except BaseException as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._attach_flows", _cg9)
+        except BaseException as _cg9:  # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._attach_flows[mine]", _cg9)
             mine, alias = set(), {}
         by_addr = {r9["address"]: r9 for r9 in rows}
         dec = self.outflow_decisions()
@@ -1696,8 +1696,8 @@ class OutflowsMixin:
                 gs9 = (G.get(ra9["group_id"] or -ra9["asset_id"]) or {}).get("sym")
                 if gs9:
                     grp9[(ra9["chain"], xchain_match.norm(ra9["address"]))] = gs9
-        except Exception as _cg9:
-            calcguard.swallowed("view_outflows:OutflowsMixin._attach_flows", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_outflows:OutflowsMixin._attach_flows[execute]", _cg9)
             grp9 = {}
         spam_tok9 = self._flow_spam_tokens(ap[1], q_flow9)
         ctx = {"mine": mine, "alias": alias, "exch": exch, "bridges": bridges, "lookalike": lookalike, "back": back,

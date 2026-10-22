@@ -3,9 +3,8 @@ import glob
 import os
 import time
 from datetime import datetime
-import common
+import config, envfile, logs, paths
 from chk_base import EX_NAME
-from chk_base import HB_DIR
 from chk_base import INT_PROGRESS
 from chk_base import INT_STALL_SEC
 from chk_base import KST
@@ -53,7 +52,7 @@ def fill_paced(sub: str, budget: float, keep: float = 0.02, now: float = None) -
     day = int(now // 86400)
     n = 0
     try:
-        d = os.path.join(common.quota_dir(), sub)
+        d = os.path.join(paths.quota_dir(), sub)
         for f in os.listdir(d):
             if f.endswith(".json"):
                 j = _read(os.path.join(d, f), None)
@@ -91,7 +90,7 @@ def _fill_paced_map(cfg: dict, now: float) -> dict:
         burst = max(0.0, float(es9.get("pace_burst_pct", 4))) / 100.0
         return {"evm": bf_engine.es_ledger_rooms(now, es, burst, keep)["fill"] <= 0,
                 "sol": bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg))["fill"] <= 0}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
 
 
@@ -106,7 +105,7 @@ def _pace_note(cfg: dict, now: float, unit: str) -> str:
             ff = bf_engine.ledger_rooms("helius_budget", bf_engine.helius_day_budget(cfg), burst, keep, now, floor=bf_engine.helius_head_min(cfg), flex=bf_engine.helius_flex(cfg)).get("fillFirst")
         else:
             ff = bf_engine.es_ledger_rooms(now, float(es9.get("daily_budget") or 80000), burst, keep).get("fillFirst")
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         ff = None
     return PACE_NOTE_HEAD if ff is False else PACE_NOTE_FILL
 
@@ -114,7 +113,7 @@ def _pace_note(cfg: dict, now: float, unit: str) -> str:
 def human_err(msg, label: str = "") -> str:
     if not msg:
         return msg
-    m = common.redact_secret_text(str(msg))
+    m = logs.redact_secret_text(str(msg))
     if is_challenge(m):
         return "외부 탐색기가 사람 확인 화면으로 막는 중(HTTP 403 · 우리 쪽 문제 아님)"
     if _PERMANENT_RX.search(m):
@@ -133,7 +132,7 @@ def human_err(msg, label: str = "") -> str:
         return f"{who} 응답 시간 초과 — 다음 주기 재시도"
     if "circuit open" in low:
         return f"{who} 연속 실패로 잠시 쉬는 중"
-    return common.redact_urls(m)
+    return logs.redact_urls(m)
 
 
 def _transient_err(err) -> bool:
@@ -299,7 +298,7 @@ def uncollected_text(rt):
 
 
 def collect_sources(cfg: dict, st: dict, now: float) -> list:
-    S = common.STATE_DIR
+    S = paths.STATE_DIR
     out = []
     chains = (cfg.get("chains") or {}) if cfg else {}
     hb = read_heartbeats(cfg)
@@ -429,11 +428,11 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
                 if1 = inflow_probe.health_text(hbs9.get("inflow"), now)
                 if if1:
                     hex_ = " · ".join(x for x in (hex_, if1) if x)
-            except Exception:
+            except Exception:   # noqa: BLE001 [optional]
                 pass
         out.append(_source(st, now, f"chain:{c}", "tj-evm", _cname(c), "chain",
                            max(cands) if cands else None, human_err(herr, _cname(c)), hex_))
-        out[-1]["err_raw"] = common.redact_urls(common.redact_secret_text(herr, generic=False)) if herr else None
+        out[-1]["err_raw"] = logs.redact_urls(logs.redact_secret_text(logs.redact_urls(herr), generic=False)) if herr else None
         if rt9:
             out[-1]["uncollected"] = True
         if chains[c].get("_auto") and not cands and not out[-1]["last_success"]:
@@ -468,7 +467,7 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
                     done9, to9 = v9.get("done"), v9.get("to")
                     if type(done9) is int and type(to9) is int and done9 < to9:
                         bw9.add(w9)
-        if chains[c].get("rpc_log_discovery") and common.chain_discovery(c, chains[c]) != "rpc" and isinstance(dr, dict):
+        if chains[c].get("rpc_log_discovery") and config.chain_discovery(c, chains[c]) != "rpc" and isinstance(dr, dict):
             for k9, v9 in dr.items():
                 w9 = str(k9)[4:].lower() if str(k9).startswith("_nw:") else ""
                 if w9 in wl9 and isinstance(v9, dict):
@@ -546,8 +545,9 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         which = None
         if len(vals) == 2 and abs(float(dw) - float(fl)) > 1800:
             which = "입출금" if float(dw) < float(fl) else "체결"
-        out.append(_source(st, now, f"ex:{ex}", "tj-exf", EX_NAME.get(ex, ex), "exchange", cur,
-                           None, f"{which} 수집 지연" if which else None))
+        held = [str(t)[1:].replace("@", " 이전 계정 ") for t in (v["sub_held"] if isinstance(v.get("sub_held"), list) else []) if active9 is not None]
+        out.append(_source(st, now, f"ex:{ex}", "tj-exf", EX_NAME.get(ex, ex), "exchange", cur, None, " · ".join(x for x in (
+            f"{which} 수집 지연" if which else None, held and f"서브 키 제외됨 — 대사 보류(서브{', 서브'.join(held)} 마지막 잔고가 0 이 아님 · 같은 계정 키를 다시 넣으면 풀림)") if x) or None))
         for tag9, a9 in sorted((v.get("accts") or {}).items()) if isinstance(v.get("accts"), dict) else ():
             if not isinstance(a9, dict) or (active9 is not None and f"{ex}~{tag9}" not in active9):
                 continue
@@ -637,23 +637,23 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
 
 def upbit_connected() -> bool:
     try:
-        import settings_store
+        import paths
         env9 = {}
         try:
-            with open(settings_store.ENV_PATH, "r", encoding="utf-8-sig") as f9:
+            with open(paths.ENV_PATH, "r", encoding="utf-8-sig") as f9:
                 for line9 in f9:
-                    kv9 = common.parse_env_line(line9)
+                    kv9 = envfile.parse_env_line(line9)
                     if kv9 and kv9[0]:
                         env9[kv9[0]] = kv9[1]
         except FileNotFoundError:
             env9 = {}
         return bool((os.environ.get("UPBIT_ACCESS") or env9.get("UPBIT_ACCESS")) and (os.environ.get("UPBIT_SECRET") or env9.get("UPBIT_SECRET")))
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return True
 
 
 def runner_waiting(unit: str, whys: tuple, now: float = None) -> bool:
-    rb = _read(os.path.join(common.STATE_DIR, f"runner_{unit}.json"), None)
+    rb = _read(paths.state(f"runner_{unit}.json"), None)
     if not isinstance(rb, dict) or rb.get("state") != "waiting" or rb.get("by") == "reload":
         return False
     try:
@@ -668,10 +668,10 @@ def read_heartbeats(cfg: dict = None) -> dict:
     off = set((cfg or {}).get("_disabled_chains") or ())
     evm_wait = False
     if cfg is not None and not any(isinstance(w, dict) and w.get("type", "evm") == "evm" for w in cfg.get("wallets") or []):
-        rb = _read(os.path.join(common.STATE_DIR, "runner_evm.json"), None)
+        rb = _read(paths.state("runner_evm.json"), None)
         evm_wait = (isinstance(rb, dict) and rb.get("state") == "waiting" and rb.get("why") == "EVM 지갑 없음"
                     and isinstance(rb.get("ts"), (int, float)) and 0 <= time.time() - float(rb["ts"]) < 120)
-    for p in glob.glob(os.path.join(HB_DIR, "*.json")):
+    for p in glob.glob(os.path.join(paths.state("health"), "*.json")):
         d = _read(p, None)
         if isinstance(d, dict) and d.get("ts") and d.get("schema") == 1 and isinstance(d.get("sources"), dict):
             unit = str(d.get("unit") or os.path.basename(p)[:-5])
@@ -686,6 +686,6 @@ def read_heartbeats(cfg: dict = None) -> dict:
 
 
 def _activity_pairs() -> dict:
-    d = _read(os.path.join(common.STATE_DIR, "chain_activity.json"), None)
+    d = _read(paths.state("chain_activity.json"), None)
     p = d.get("pairs") if isinstance(d, dict) else None
     return p if isinstance(p, dict) else {}

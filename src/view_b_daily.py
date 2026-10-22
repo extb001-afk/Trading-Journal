@@ -1,6 +1,6 @@
 from __future__ import annotations
 import acct_norm
-import common
+import histmark, logs, paths
 import flowev
 import histcurve
 import os
@@ -11,7 +11,6 @@ from decimal import Decimal
 from view_common import CHAIN_NAME
 from view_common import DAYCLOSE_ON
 from view_common import EPS
-from view_common import RABBY_DAILY_PATH
 from view_common import STABLE_GROUPS
 from view_fspin import _fs_pin_save
 from view_misc import _hist_kit_rows
@@ -19,78 +18,41 @@ from view_regroup import _daily_krw
 from view_regroup import _stable_regroup_aliases
 from view_xv import _xq_sets
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
+
+
+def _ufc_of(xv9u):
+    if not isinstance(xv9u, dict):
+        return []
+    o = [str(u) for u in xv9u["ufc"]] if isinstance(xv9u.get("ufc"), dict) else []
+    for z in (xv9u["ufz"].values() if isinstance(xv9u.get("ufz"), dict) else ()):
+        o.extend(str(u) for u in (z if isinstance(z, dict) else ()))
+    return o
 
 
 class DailyBuildMixin:
 
     def _build_daily(self, _bs9):
-        (G, _bf_since, ask9, ca_all, coins, conn, debt_capg9, diag, ex_c9, ex_gid, fs_need, fs_pin_new, fs_sum, gid_pairs_all, hl_cash_syms9, hold_qty, live_px, lp_total, lpb, native_c9, now, ob, of_bridge, of_deps, of_match, of_sends, offc_dep, offc_on, offc_self_wd, offc_wd, outflows_out, override_px, pending_gids, quarantined, rate_fx, rb_debts, rb_net, rb_view, realized_by_date, rows, spoof_keys, stables, stake_inc, today_kst, uf_dl9, unv9, unv_fb9, unverified, wallet_label, x_fiat, x_ok, xf_links, xtra9,) = (_bs9["G"], _bs9["_bf_since"], _bs9["ask9"], _bs9["ca_all"], _bs9["coins"], _bs9["ctx"].conn, _bs9["debt_capg9"], _bs9["diag"], _bs9["ex_c9"], _bs9["ex_gid"], _bs9["fs_need"], _bs9["fs_pin_new"], _bs9["fs_sum"], _bs9["gid_pairs_all"], _bs9["hl_cash_syms9"], _bs9["hold_qty"], _bs9["live_px"], _bs9["lp_total"], _bs9["lpb"], _bs9["native_c9"], _bs9["ctx"].now, _bs9["ob"], _bs9["of_bridge"], _bs9["of_deps"], _bs9["of_match"], _bs9["of_sends"], _bs9["offc_dep"], _bs9["ctx"].offc_on, _bs9["offc_self_wd"], _bs9["offc_wd"], _bs9["outflows_out"], _bs9["override_px"], _bs9["pending_gids"], _bs9["quarantined"], _bs9["rate_fx"], _bs9["rb_debts"], _bs9["rb_net"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["rows"], _bs9["spoof_keys"], _bs9["stables"], _bs9["stake_inc"], _bs9["ctx"].today_kst, _bs9["uf_dl9"], _bs9["unv9"], _bs9["unv_fb9"], _bs9["unverified"], _bs9["wallet_label"], _bs9["x_fiat"], _bs9["x_ok"], _bs9["xf_links"], _bs9["xtra9"],)
-        if "a9" in _bs9:
-            a9 = _bs9["a9"]
-        if "b9" in _bs9:
-            b9 = _bs9["b9"]
-        if "d9" in _bs9:
-            d9 = _bs9["d9"]
-        if "e9" in _bs9:
-            e9 = _bs9["e9"]
-        if "fl9" in _bs9:
-            fl9 = _bs9["fl9"]
-        if "g9" in _bs9:
-            g9 = _bs9["g9"]
-        if "gid9" in _bs9:
-            gid9 = _bs9["gid9"]
-        if "k9" in _bs9:
-            k9 = _bs9["k9"]
-        if "lpf9" in _bs9:
-            lpf9 = _bs9["lpf9"]
-        if "mk9" in _bs9:
-            mk9 = _bs9["mk9"]
-        if "p9" in _bs9:
-            p9 = _bs9["p9"]
-        if "q9" in _bs9:
-            q9 = _bs9["q9"]
-        if "r9" in _bs9:
-            r9 = _bs9["r9"]
-        if "row9" in _bs9:
-            row9 = _bs9["row9"]
-        if "sp9" in _bs9:
-            sp9 = _bs9["sp9"]
-        if "td9" in _bs9:
-            td9 = _bs9["td9"]
-        if "tk9" in _bs9:
-            tk9 = _bs9["tk9"]
-        if "u9" in _bs9:
-            u9 = _bs9["u9"]
-        if "ud9" in _bs9:
-            ud9 = _bs9["ud9"]
-        if "v9" in _bs9:
-            v9 = _bs9["v9"]
-        if "w9" in _bs9:
-            w9 = _bs9["w9"]
-        if "wdt_all" in _bs9:
-            wdt_all = _bs9["wdt_all"]
-        if "wv9" in _bs9:
-            wv9 = _bs9["wv9"]
+        (G, _bf_since, ask9, ca_all, coins, conn, debt_capg9, diag, ex_c9, ex_gid, fs_need, fs_pin_new, fs_sum, gid_pairs_all, hl_cash_syms9, hold_qty, live_px, lp_total, lpb, native_c9, now, ob, of_bridge, of_deps, of_match, of_sends, offc_dep, offc_on, offc_self_wd, offc_wd, outflows_out, override_px, pending_gids, quarantined, rate_fx, rb_debts, rb_net, rb_view, realized_by_date, rows, spoof_keys, stables, stake_inc, today_kst, uf_dl9, unv9, unv_fb9, unverified, wallet_label, x_fiat, x_ok, xf_links, xtra9, wdt_all,) = (_bs9["G"], _bs9["_bf_since"], _bs9["ask9"], _bs9["ca_all"], _bs9["coins"], _bs9["ctx"].conn, _bs9["debt_capg9"], _bs9["diag"], _bs9["ex_c9"], _bs9["ex_gid"], _bs9["fs_need"], _bs9["fs_pin_new"], _bs9["fs_sum"], _bs9["gid_pairs_all"], _bs9["hl_cash_syms9"], _bs9["hold_qty"], _bs9["live_px"], _bs9["lp_total"], _bs9["lpb"], _bs9["native_c9"], _bs9["ctx"].now, _bs9["ob"], _bs9["of_bridge"], _bs9["of_deps"], _bs9["of_match"], _bs9["of_sends"], _bs9["offc_dep"], _bs9["ctx"].offc_on, _bs9["offc_self_wd"], _bs9["offc_wd"], _bs9["outflows_out"], _bs9["override_px"], _bs9["pending_gids"], _bs9["quarantined"], _bs9["rate_fx"], _bs9["rb_debts"], _bs9["rb_net"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["rows"], _bs9["spoof_keys"], _bs9["stables"], _bs9["stake_inc"], _bs9["ctx"].today_kst, _bs9["uf_dl9"], _bs9["unv9"], _bs9["unv_fb9"], _bs9["unverified"], _bs9["wallet_label"], _bs9["x_fiat"], _bs9["x_ok"], _bs9["xf_links"], _bs9["xtra9"], _bs9["wdt_all"],)
         hl_cash9 = frozenset(gid9 for gid9, ex9 in ex_gid.items()
                              if ex9 == "hyperliquid" and str((G.get(gid9) or {}).get("sym") or "").upper() in hl_cash_syms9)
         try:
             self._hl_neg_mark(G, hl_cash9)
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[_hl_neg_mark#1]", e9)
             log.warning("Hyperliquid 음수 허용 그룹 장기 곡선 표식 실패(다음 빌드): %s", e9)
         try:
             lg9 = conn.execute("SELECT v FROM meta WHERE k='ext_rebuilt_at'").fetchone()
             led_gen9 = int(float(lg9[0])) if lg9 and lg9[0] else 0
-        except Exception as _cg9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", _cg9)
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[_hl_neg_mark#2]", _cg9)
             led_gen9 = 0
-        hl_marks9 = common.hist_late_read(conn)
-        hl_pw9 = common.hist_late_pw(conn)
+        hl_marks9 = histmark.hist_late_read(conn)
+        hl_pw9 = histmark.hist_late_pw(conn)
         try:
-            mk9 = os.path.join(common.STATE_DIR, "backfill_done")
+            mk9 = paths.state("backfill_done")
             try:
                 mts9 = float(open(mk9).read().strip() or 0) if os.path.exists(mk9) else 0.0
             except (OSError, ValueError):
@@ -101,8 +63,8 @@ class DailyBuildMixin:
             else:
                 fs9 = {str(e9): t9 for e9, t9 in conn.execute("SELECT exchange, MIN(observed_at) FROM raw_ex GROUP BY exchange").fetchall()}
                 xq9, xqb9 = _xq_sets(mrow9, fs9, mts9)
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[_hl_neg_mark#3]", e9)
             log.warning("거래소 지문 읽기 실패(이번 빌드 종전대로): %s", e9)
             xq9, xqb9 = None, None
         self._xq9 = (xq9, xqb9)
@@ -122,20 +84,13 @@ class DailyBuildMixin:
         if uf_inf9.get("ubf") and isinstance(xs9, dict) and isinstance(xs9.get("now"), dict) and isinstance(xs9["now"].get("ub"), dict):
             xtra9["xsrc"] = dict(xs9, now=dict(xs9["now"], ubf=[uf_ts9, dict(uf_inf9["ubf"])]))
         try:
-            def ufc_of9(xv9u):
-                if not isinstance(xv9u, dict):
-                    return []
-                o9 = [str(u9) for u9 in xv9u["ufc"]] if isinstance(xv9u.get("ufc"), dict) else []
-                for z9 in (xv9u["ufz"].values() if isinstance(xv9u.get("ufz"), dict) else ()):
-                    o9.extend(str(u9) for u9 in (z9 if isinstance(z9, dict) else ()))
-                return o9
             uu9 = set()
             for k9 in ("_live", "_live_ok"):
-                uu9.update(ufc_of9((self.daily.get(k9) or {}).get("xv") if isinstance(self.daily.get(k9), dict) else None))
+                uu9.update(_ufc_of((self.daily.get(k9) or {}).get("xv") if isinstance(self.daily.get(k9), dict) else None))
             for e9 in (self.daily_px or {}).values():
                 if isinstance(e9, dict):
-                    uu9.update(ufc_of9(e9.get("xv")))
-                    uu9.update(ufc_of9((e9.get("partial") or {}).get("xv") if isinstance(e9.get("partial"), dict) else None))
+                    uu9.update(_ufc_of(e9.get("xv")))
+                    uu9.update(_ufc_of((e9.get("partial") or {}).get("xv") if isinstance(e9.get("partial"), dict) else None))
             xs9 = xtra9.get("xsrc")
             if uu9 and isinstance(xs9, dict) and isinstance(xs9.get("now"), dict):
                 def ts_uf9(pl9):
@@ -154,16 +109,16 @@ class DailyBuildMixin:
                     elif u9 in (uf_inf9.get("ufc") or {}) or any(u9 in z9 for z9 in (uf_inf9.get("ufz") or {}).values()):
                         ufp9[u9] = float(uf_ts9)
                 xtra9["xsrc"] = dict(xs9, now=dict(xs9["now"], ufp=ufp9))
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
-            log.warning("업비트 체결 관측 경계 재료 실패(종전대로): %s", common.safe_err(e9)[:160])
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[_hl_neg_mark#4]", e9)
+            log.warning("업비트 체결 관측 경계 재료 실패(종전대로): %s", logs.safe_err(e9)[:160])
         if uf_inf9.get("stale_fill"):
             xtra9["ufd"] = 1
         daily = self._daily_series(curve_G9, today_kst, override_px, live_px,
                                    ca_gids=ca_all, ex_gids=set(ex_gid),
                                    skip_gids=quarantined, pending_gids=pending_gids, native_c=native_c9 | ex_c9,
                                    hold_qty=hold_qty, extra=xtra9, extra_ok=x_ok, now_ts=now, led_gen=led_gen9, hist_late=hl_marks9,
-                                   led_pw=hl_pw9, late_after=(lambda pw9, t9, _c=conn: common.hist_late_after(_c, pw9, t9)),
+                                   led_pw=hl_pw9, late_after=(lambda pw9, t9, _c=conn: histmark.hist_late_after(_c, pw9, t9)),
                                    neg_ok=hl_cash9,
                                    debt_neg=debt_capg9,
                                    debt_moves=self._debt_redate_moves(conn),
@@ -172,7 +127,8 @@ class DailyBuildMixin:
                                    stable_aliases=_stable_regroup_aliases(conn),
                                    day_close=(histcurve.DAYCLOSE.resolver(G, ca_all, ex_gid, native_c9 | ex_c9, override_px, gid_pairs_all,
                                                                           STABLE_GROUPS, now) if DAYCLOSE_ON else None),
-                                   xq=xq9, xq_base=xqb9)
+                                   xq=xq9, xq_base=xqb9,
+                                   inval=_bs9.get("daily_inval"))
         self._xq9 = (xq9, ((self.daily_px or {}).get("_xqb") or {}).get("xq", xqb9) if xq9 is not None else None)
         if fs_pin_new:
             _fs_pin_save(fs_pin_new)
@@ -188,26 +144,26 @@ class DailyBuildMixin:
                 for sp9, (ds9, w9) in ask9.items():
                     histcurve.DAYCLOSE.ask_old(sp9, ds9, w9, now)
                 fs_sum["ask_old"] = {"specs": len(ask9), "days": sum(len(v9[0]) for v9 in ask9.values())}
-            except Exception as e9:
-                calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+            except Exception as e9:   # noqa: BLE001 [optional]
+                calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[ask9]", e9)
                 log.warning("옛날 날 시세 요청 실패(다음 빌드): %s", type(e9).__name__)
         if DAYCLOSE_ON:
             histcurve.DAYCLOSE.kick()
         rb_dc9 = {}
         try:
-            if rb_view is not None or os.path.exists(RABBY_DAILY_PATH):
+            if rb_view is not None or os.path.exists(paths.state("rabby_daily.json")):
                 tiso9 = today_kst.strftime("%Y-%m-%d")
                 pw9 = {}
                 if rb_view is not None:
                     for a9, wv9 in rb_view["wallets"].items():
                         pw9[a9] = round(wv9["only"] + wv9["onlyDebt"], 2)
-                rb_note9 = rabby.daily_note(RABBY_DAILY_PATH, tiso9, rb_net, now, per_wallet=pw9) if rb_view is not None \
-                    else rabby.load_state(RABBY_DAILY_PATH)
+                rb_note9 = rabby.daily_note(paths.state("rabby_daily.json"), tiso9, rb_net, now, per_wallet=pw9) if rb_view is not None \
+                    else rabby.load_state(paths.state("rabby_daily.json"))
                 rabby.daily_overlay(daily, rb_note9, tiso9, rb_net)
                 rb_dc9 = rabby.day_values(rb_note9, [k9 for k9 in self.daily if len(str(k9)) == 10 and str(k9)[4] == "-" and str(k9) < tiso9],
                                           tiso9, rb_net)
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[rb_view]", e9)
             log.warning("Rabby 일별 보강 실패: %s", e9)
         offc_ids9 = frozenset()
         vflow_loc9 = None
@@ -225,8 +181,8 @@ class DailyBuildMixin:
                 if row9.get("rbNew"):
                     row9["flow"] = round(float(row9.get("flow") or 0) + float(row9["rbNew"]), 2)
                     row9["flowTop"] = [["Rabby 기준 첫 반영(봇 미추적 보유)", round(float(row9["rbNew"]), 2)]] + list(row9.get("flowTop") or [])[:2]
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[offc_ids9]", e9)
             log.warning("일별 순유입 계산 실패: %s", e9)
         pvu9 = float((self.__dict__.get("_prov_view") or {}).get("usd") or 0)
         if abs(pvu9) >= 0.005 and daily:
@@ -254,8 +210,8 @@ class DailyBuildMixin:
                 names={"chain": CHAIN_NAME, "wallet": wallet_label}, fx=lambda t9: self.px.fx_at(int(t9 * 1000)) or rate_fx, xf_links=xf_links,
                 proof_sends=[dict(s9, gid=pid_gid9.get(s9["pid"])) for s9 in of_sends], deposit_exchange=self._deposit_exchange,
                 skip_pids=frozenset(spoof_pids9))
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[pid_gid9]", e9)
             log.warning("큰 출금 재료(flowev) 실패 — 이번 빌드는 판정 재료 없음: %s", e9)
         att_ok9 = False
         self._att_det_new = None
@@ -280,15 +236,15 @@ class DailyBuildMixin:
             for row9 in daily:
                 if row9.get("date") in att9:
                     row9["att"] = att9[row9["date"]]
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[lpf9]", e9)
             log.warning("일별 자산 변동 분해 실패: %s", e9)
         if not att_ok9:
             self._att_by_today = {}
         try:
             hold_today9, spark7_9 = self._hold_today(coins, G, live_px, today_kst, self.daily_px, getattr(self, "_att_by_today", None))
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[hold_today9]", e9)
             log.warning("보유표 오늘 변동·7일 추이 재료 실패: %s", e9)
             hold_today9, spark7_9 = {}, {}
         _daily_krw(daily, today_kst.strftime("%m-%d"))
@@ -310,8 +266,8 @@ class DailyBuildMixin:
                     rb_days=dict(rb_dc9),
                     first_floor=None if self.cfg.get("backfill_full_history") else _bf_since,
                     xq=(self.__dict__.get("_xq9") or (None, None))[0], xq_base=(self.__dict__.get("_xq9") or (None, None))[1]))
-        except Exception as e9:
-            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily", e9)
+        except Exception as e9:   # noqa: BLE001 [optional]
+            calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[td9]", e9)
             log.warning("장기 곡선 재료 실패: %s", e9)
         disp_total = (sum(c["qty"] * (c.get("price") or 0) for c in coins)
                       + sum(s["qty"] * (s.get("price") or 0) for s in stables) + x_fiat + lp_total

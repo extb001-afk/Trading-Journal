@@ -9,14 +9,14 @@ import time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import address_codec as ac
-import bf_engine
-import btc_descriptor as bd
-import chain_event
-import chain_registry as reg
-import chain_state
-import chain_watch
+import config, logs, paths  # noqa: E402
+import address_codec as ac  # noqa: E402
+import bf_engine  # noqa: E402
+import btc_descriptor as bd  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state  # noqa: E402
+import chain_watch  # noqa: E402
 
 CHAIN = "btc"
 PARSER_VERSION = 1
@@ -436,7 +436,7 @@ class BtcAdapter(reg.ChainAdapter):
         except chain_watch.Transient as e:
             self.soft_errors += 1
             self.stopped = True
-            self._warn("[btc] tip 조회 실패(다음 주기): %s", common.safe_err(e)[:120])
+            self._warn("[btc] tip 조회 실패(다음 주기): %s", logs.safe_err(e)[:120])
             return
         F = tip[0] - self.min_conf + 1
         ring = self.sb.setdefault("ring", [])
@@ -447,7 +447,7 @@ class BtcAdapter(reg.ChainAdapter):
             except chain_watch.Transient as e:
                 self.soft_errors += 1
                 self.stopped = True
-                self._warn("[btc] 확정 블록 조회 실패(다음 주기): %s", common.safe_err(e)[:120])
+                self._warn("[btc] 확정 블록 조회 실패(다음 주기): %s", logs.safe_err(e)[:120])
                 return
             seen = {h: hs for h, hs, _t in blk}
             if blk[0][0] != F:
@@ -565,7 +565,7 @@ class BtcAdapter(reg.ChainAdapter):
         except chain_watch.Transient as e:
             self.soft_errors += 1
             self.stopped = True
-            self._warn("[btc] %s 발견 일시 실패(여기까지 저장 · 다음 주기): %s", owner[:10], common.safe_err(e)[:120])
+            self._warn("[btc] %s 발견 일시 실패(여기까지 저장 · 다음 주기): %s", owner[:10], logs.safe_err(e)[:120])
             more = False
         if self.es.switched:
             self.stopped = True
@@ -1014,9 +1014,9 @@ class BtcCollector(chain_watch.Collector):
 
 def main(poll_default: int = 60):
     from inbox import SegmentWriter
-    log = common.setup_logging("tj-btc")
-    common.ensure_dirs()
-    cfg = common.load_config()
+    log = logs.setup_logging("tj-btc")
+    paths.ensure_dirs()
+    cfg = config.load_config()
     owners = reg.owners(cfg, CHAIN)
     if not owners:
         raise SystemExit("추적할 Bitcoin 지갑이 없음 — config chain_wallets 확인")
@@ -1026,7 +1026,7 @@ def main(poll_default: int = 60):
     ad = make_adapter(cfg).bind(st, log)
     ad.prune_wallets(owners)
     st.save()
-    col = BtcCollector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, sp.stream)), st, owners, log=log)
+    col = BtcCollector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, sp.stream)), st, owners, log=log)
     s9 = ((cfg.get(reg.CFG_CHAIN_KEY) or {}).get(CHAIN) or {}) if isinstance(cfg.get(reg.CFG_CHAIN_KEY), dict) else {}
     poll = s9.get("poll_sec", poll_default) if isinstance(s9, dict) else poll_default
     poll = int(poll) if isinstance(poll, int) and not isinstance(poll, bool) and 10 <= poll <= 3600 else poll_default
@@ -1037,8 +1037,8 @@ def main(poll_default: int = 60):
             try:
                 r = col.cycle()
                 log.info("[btc] 주기: %s · 콜 %d", r, ad.es.calls)
-            except Exception as e:
-                log.warning("[btc] 주기 실패(다음 주기): %s", common.safe_err(e)[:200])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("[btc] 주기 실패(다음 주기): %s", logs.safe_err(e)[:200])
             time.sleep(max(5.0, poll - (time.time() - t0)))
     except KeyboardInterrupt:
         log.info("정지 신호(SIGINT) — 종료")

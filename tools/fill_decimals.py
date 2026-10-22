@@ -6,19 +6,19 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
-import common
+import paths, statefile  # noqa: E402
 
 
 def meta_caches():
     out = {}
-    for f in sorted(os.listdir(common.STATE_DIR)):
+    for f in sorted(os.listdir(paths.STATE_DIR)):
         if f.startswith("rpc_token_meta_") and f.endswith(".json"):
             ch, conv = f[len("rpc_token_meta_"):-5], lambda v: v
         elif f == "bsc_token_meta.json":
             ch, conv = "bsc", lambda v: v[1] if isinstance(v, (list, tuple)) and len(v) >= 2 else v
         else:
             continue
-        raw = common.read_json(os.path.join(common.STATE_DIR, f), {}) or {}
+        raw = statefile.read_json(os.path.join(paths.STATE_DIR, f), {}) or {}
         m = out.setdefault(ch, {})
         for k, v in (raw.items() if isinstance(raw, dict) else []):
             v = conv(v)
@@ -43,9 +43,9 @@ def main():
         print(msg)
         return 0 if ok else 2
     as_json = "--json" in sys.argv
-    if not os.path.exists(common.DB_PATH):
-        raise SystemExit("원장 없음: " + common.DB_PATH)
-    c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=30)
+    if not os.path.exists(paths.DB_PATH):
+        raise SystemExit("원장 없음: " + paths.DB_PATH)
+    c = sqlite3.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=30)
     c.row_factory = sqlite3.Row
     meta = meta_caches()
     posted = {int(r[0]): int(r[1]) for r in c.execute(
@@ -60,7 +60,7 @@ def main():
             conflicts.append({"asset_id": r["asset_id"], "chain": r["chain"], "symbol": r["symbol"], "stored": r["decimals"], "cache": m9})
     c.close()
     try:
-        issues = json.load(open(os.path.join(common.STATE_DIR, "asset_decimals_issues.json"), encoding="utf-8")) or {}
+        issues = json.load(open(os.path.join(paths.STATE_DIR, "asset_decimals_issues.json"), encoding="utf-8")) or {}
     except (OSError, ValueError):
         issues = {}
     rep = {"null_total": len(null_rows), "null_posted": [x for x in null_rows if x["postings"]],

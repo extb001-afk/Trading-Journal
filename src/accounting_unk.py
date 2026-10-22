@@ -8,11 +8,12 @@ from view_common import EPS
 
 class UnkBook:
 
-    def __init__(unx, sb, cost_ov, fs_on, krw_of):
+    def __init__(unx, sb, cost_ov, fs_on, krw_of, cb):
         unx.sb = sb
         unx.cost_ov = cost_ov
         unx.fs_on = fs_on
         unx.krw_of = krw_of
+        unx.cb = cb
 
     def apply_ov(unx, fl9, pend9):
         ts9, take, unit_d, txt9, ref9, badd9 = pend9
@@ -38,7 +39,7 @@ class UnkBook:
             if ov9.get("mode") == "market":
                 try:
                     unit9 = float(unx.sb.px.candle_usd(g9.get("sym") or "", int(ts9) * 1000) or 0)
-                except Exception as _cg9:
+                except Exception as _cg9:  # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.note_unk", _cg9)
                     unit9 = 0.0
             else:
@@ -50,9 +51,10 @@ class UnkBook:
                 dq = Decimal(str(qty9))
                 take = min(dq, g9["qty_unknown"])
                 if take > 0:
-                    g9["qty_unknown"] -= take
-                    g9["qty_known"] += take
+                    unx.cb.sub_unknown(g9, take)
+                    unx.cb.add_known(g9, take)
                     g9["cost"] += take * Decimal(str(unit9))
+                    unx.cb.note_cost(g9, take, unit9)
                     unc_d = dq if unc9 is None else max(Decimal(0), min(dq, Decimal(str(unc9))))
                     pend9 = (ts9, take, Decimal(str(unit9)), ("개당 지정 단가" if ov9.get("mode") != "market" else "유입 당시 시세") + f" ${unit9:,.6g} 적용",
                              ref if ref.startswith("0x") else "", take * unc_d / dq)

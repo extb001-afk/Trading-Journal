@@ -2,35 +2,35 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import subprocess
-import time
-from decimal import Decimal
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
-LOG = core.Core.EXF_REVERT_LOG
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+core_svc.ExfService.EXF_REVERT_LOG = os.path.join(paths.STATE_DIR, "exf_recon_revert.jsonl")
+LOG = core_svc.ExfService.EXF_REVERT_LOG
 chk = T.chk
-C = core.Core(common.load_config())
-os.makedirs(os.path.join(common.STATE_DIR, "backups"), exist_ok=True)
-open(os.path.join(common.STATE_DIR, "backups", "ledger_test.db"), "w").close()
-common.atomic_write_json(os.path.join(common.STATE_DIR, "backups", "backup_status.json"),
-                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(common.STATE_DIR, "backups", "ledger_test.db")})
-C._quote_usd = lambda q, ts: Decimal(1)
-C.EXF_INIT_PHASE = 5
+C = core.Core(config.load_config())
+os.makedirs(os.path.join(paths.STATE_DIR, "backups"), exist_ok=True)
+open(os.path.join(paths.STATE_DIR, "backups", "ledger_test.db"), "w").close()
+statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "backups", "backup_status.json"),
+                         {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(paths.STATE_DIR, "backups", "ledger_test.db")})
+C.svc_exf._quote_usd = lambda q, ts: Decimal(1)
+C.svc_exf.EXF_INIT_PHASE = 5
 NOW = int(time.time())
 E8 = 10 ** 8
 SEQ = {"t": NOW - 1700}
@@ -43,7 +43,7 @@ def tick(d=10):
 
 
 def post(ex, t, sym, qty, ns=None, sid=None, ev="EXF_DEPOSIT", lk="move_in"):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     qb = int(Decimal(str(qty)) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw,"
                    " leg_kind, event, classifier_ver) VALUES ('exchange',?,?,0,?,?,?,?,NULL,NULL,?,?,?)",
@@ -54,22 +54,22 @@ def post(ex, t, sym, qty, ns=None, sid=None, ev="EXF_DEPOSIT", lk="move_in"):
 
 def futfile(ex, add=(), ts=None):
     EVS.setdefault(ex, []).extend(add)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), {
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"futures_{ex}.json"), {
         "ts": int(ts if ts is not None else SEQ["t"] + 10 ** 6),
         "events": [{"t": int(t) * 1000, "symbol": s, "kind": k, "amount": a, "uid": f"u{i}"} for i, (t, s, k, a) in enumerate(EVS[ex])]})
-    C.__dict__.pop("_exf_fut_cache", None)
+    C.svc_exf.__dict__.pop("_exf_fut_cache", None)
 
 
 def recon(ex, bal, sources=("futures",)):
     bts = tick()
-    st = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+    st = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_state.json"), {})
     st.setdefault(ex, {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"), {"ts": bts, "balances": {k: float(v) for k, v in bal.items()},
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"exf_balances_{ex}.json"), {"ts": bts, "balances": {k: float(v) for k, v in bal.items()},
                                                                                        "sources": list(sources)})
     C._drain_at = bts + 5
-    C._last_exfrecon = 0
-    C.exf_recon_pass({"ex"})
+    C.svc_exf._last_exfrecon = 0
+    C.svc_exf.exf_recon_pass({"ex"})
     return bts
 
 
@@ -86,7 +86,7 @@ def total(ex, sym):
 
 
 def pos_ok(ex, sym):
-    g = C._group_of(C._exf_asset(ex, sym))
+    g = C._group_of(C.svc_exf._exf_asset(ex, sym))
     r = C.conn.execute("SELECT qty_norm FROM positions WHERE group_id=? AND location=?", (g, f"exchange:{ex}")).fetchone()
     return Decimal(r[0] if r else 0) == total(ex, sym)
 
@@ -99,7 +99,7 @@ def unmark(*exs):
 
 
 def pm(ex, sym):
-    plan, curs = C._exf_fut_place_plan()
+    plan, curs = C.svc_exf._exf_fut_place_plan()
     return next((m for m in plan if m["ex"] == ex and m["sym"] in (sym, "*")), {}), curs
 
 
@@ -110,7 +110,7 @@ with open(os.path.join(FAKE, "pm2"), "w") as fh:
 os.chmod(os.path.join(FAKE, "pm2"), 0o755)
 WRAP = os.path.join(T.TMP, "fp_wrap.py")
 with open(WRAP, "w") as fh:
-    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\ncore.Core.EXF_INIT_PHASE = 5\n"
+    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\nimport core_svc\ncore_svc.ExfService.EXF_INIT_PHASE = 5\n"
              "tool = sys.argv[2]\nsys.argv = [tool] + sys.argv[3:]\nrunpy.run_path(tool, run_name='__main__')\n")
 PJ = os.path.join(T.TMP, "plan.json")
 
@@ -123,7 +123,7 @@ def tool(*args):
     return r.returncode, r.stdout + r.stderr
 
 
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 for ex9 in ("binance", "bybit", "okx"):
     post(ex9, tick(0) - 90 * 86400, "USDT", 10000, sid=f"{ex9}:d0")
 recon("binance", {"USDT": 10000})
@@ -142,7 +142,7 @@ for i9, (side, qty, px) in enumerate((("buy", "100", "10"), ("sell", "100", "13"
     sg = 1 if side == "buy" else -1
     post("binance", tL + 60 * i9, "XXX", sg * int(qty), ns="binance:trade", sid=fid, ev="EXF_BUY" if side == "buy" else "EXF_SELL", lk="acq" if side == "buy" else "disp")
     C.conn.execute("UPDATE postings SET leg_seq=0 WHERE source_id=?", (fid,))
-    aid = C._exf_asset("binance", "USDT")
+    aid = C.svc_exf._exf_asset("binance", "USDT")
     qb = -sg * int(Decimal(qty) * Decimal(px) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw, leg_kind,"
                    " event, classifier_ver) VALUES ('exchange','binance:trade',?,1,?,?,'exchange:binance',?,NULL,NULL,?,?,?)",
@@ -152,10 +152,10 @@ C.conn.commit()
 bYr = recon("binance", {"USDT": 9990})
 tP = tick(5)
 bYp = recon("binance", {"USDT": 10490})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 chk(any(t == bYr and q == -300 for t, _l, q, _s in rows("binance", "USDT")) is False and total("binance", "USDT") == 10490, "Y0 전제: −300 이 되돌림으로 지워짐",
     rows("binance", "USDT"))
-import importlib.util
+import importlib.util  # noqa: E402
 _sp = importlib.util.spec_from_file_location("lfm", os.path.join(T.ROOT, "tools", "latefix_move.py"))
 lfm = importlib.util.module_from_spec(_sp)
 _sp.loader.exec_module(lfm)
@@ -165,7 +165,7 @@ futfile("binance", [(tP, "AAAUSDT", "REALIZED", 500.0)])
 unmark("binance", "bybit", "okx")
 m, _c = pm("binance", "USDT")
 lt = m.get("late") or []
-toff = tL + 60 + C.EXF_LATE_DT
+toff = tL + 60 + C.svc_exf.EXF_LATE_DT
 chk(m.get("cands") == [bYp] and len(lt) == 1 and lt[0]["parts"][0]["ts"] == toff and lt[0]["parts"][0]["sid"].startswith(f"exflate:USDT:{toff}:b")
     and int(lt[0]["parts"][0]["qb"]) == -300 * E8 and int(lt[0]["rem"]) == 0, "Y2 계획: 되살릴 −300 = 묶음 직후(마지막 체결 + 1초) 상쇄 줄 · 대사 시각 남는 몫 0", (m.get("cands"), lt))
 tot0 = total("binance", "USDT")
@@ -177,7 +177,7 @@ chk(rc == 0 and rc2 == 0 and [(t, q) for t, _l, q, _s in ry] == [(toff, Decimal(
     "Y3 적용: 상쇄 −300 @ 묶음 직후 · 대사 시각 줄 없음 · 선물 +500 정산 시각 · 합·보유 무변", (rc, rc2, out2[-200:], ry))
 
 print("[Z] 대사 되돌림은 부채 이자 레그(leg 2)를 지우지 않음")
-aidZ = C._exf_asset("bybit", "USDT")
+aidZ = C.svc_exf._exf_asset("bybit", "USDT")
 bZ = tick(0) - 5
 for leg9, q9 in ((0, -5), (2, -1)):
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base, cost_usd, cost_krw, leg_kind, event,"
@@ -185,17 +185,17 @@ for leg9, q9 in ((0, -5), (2, -1)):
                    (f"exfrecon:USDT:{bZ}", leg9, bZ, aidZ, str(q9 * E8), core.CLASSIFIER_VER))
     C._bump_position(aidZ, q9 * E8, "exchange:bybit")
 C.conn.commit()
-rem, nrv = C._exf_reverse("bybit", "USDT", Decimal(10), tick())
+rem, nrv = C.svc_exf._exf_reverse("bybit", "USDT", Decimal(10), tick())
 C.conn.commit()
 rz = [(l, q) for t, l, q, _s in rows("bybit", "USDT") if t == bZ]
 chk(rz == [(2, Decimal(-1))] and rem == Decimal(5), "Z1 양수 차이 10 = leg 0 −5 만 되돌림 · 이자 −1 그대로 · 남는 5", (rz, rem))
 
 print("[T] 커서 뒤 정산 합 $1 이상인데 흔적 없음(일부만 줄인 되돌림의 감사 줄 누락) = 보류")
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 bTa = recon("bybit", {"USDT": total("bybit", "USDT") - 100})
 tT = tick(5)
 bTb = recon("bybit", {"USDT": total("bybit", "USDT") + 50})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 futfile("bybit", [(tT, "BBBUSDT", "REALIZED", 50.0)])
 unmark("bybit")
 la = open(LOG, encoding="utf-8").read().splitlines(True)
@@ -228,12 +228,12 @@ with open(LOG, "w", encoding="utf-8") as fh:
     fh.writelines(la)
 
 print("[V] 바이낸스: 대사 차이가 선물 정산으로 설명 안 됨 = 보류")
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 post("binance", tick(0) - 86400, "USDC", 1000, sid="bn:usdc0")
 recon("binance", {"USDT": float(total("binance", "USDT")), "USDC": 990})
 tV = tick(5)
 bV = recon("binance", {"USDT": float(total("binance", "USDT")), "USDC": 1010})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 futfile("binance", [(tV, "VVVUSDC", "REALIZED", 100.0)])
 unmark("binance")
 m, _c = pm("binance", "USDC")
@@ -242,12 +242,12 @@ C.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('exf_fut_from_binance
 C.conn.commit()
 
 print("[Q] (fr299 #2) 바이빗·OKX 도: 대사 차이가 선물 정산으로 설명 안 되면 보류(뒤 대사가 가린 일부 줄임 감사 누락 등)")
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 post("bybit", tick(0) - 86400, "USDC", 1000, sid="bb:usdc0")
 recon("bybit", {"USDT": float(total("bybit", "USDT")), "USDC": 990})
 tQ = tick(5)
 bQ = recon("bybit", {"USDT": float(total("bybit", "USDT")), "USDC": 1010})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 futfile("bybit", [(tQ, "QQQPERP", "REALIZED", 100.0)])
 unmark("bybit")
 m, _c = pm("bybit", "USDC")
@@ -269,12 +269,12 @@ rc, out = tool("--json", PJ)
 chk("Traceback" not in out and "readonly" not in out.lower(), "W1 OKX USDC(원장에 없음) 미리보기가 쓰기 시도 없이 끝남", out[-300:])
 
 print("[X] 마지막 후보 대사 자신의 줄이 뒤 대사에 지워졌는데 감사 기록 없음 = 보류")
-C.EXF_FUT_EX = ()
+C.svc_exf.EXF_FUT_EX = ()
 recon("okx", {"USDT": 9998})
 tX = tick(5)
 bX = recon("okx", {"USDT": 9993})
 bX2 = recon("okx", {"USDT": 9998})
-del C.EXF_FUT_EX
+del C.svc_exf.EXF_FUT_EX
 futfile("okx", [(tX, "XXX-USDT-SWAP", "FEE", -5.0)])
 unmark("okx")
 la = open(LOG, encoding="utf-8").read().splitlines(True)
@@ -291,17 +291,17 @@ m, _c = pm("okx", "USDT")
 chk(m.get("err") and "낡음" in m["err"], "F1 파일 시각 < 마지막 대사 = OKX 보류(완료 표식 없이)", m)
 
 print("[P] 상태 패널: 선물 정산 기다리며 대사 미룸 1시간 넘으면 주의 · 상한 넘겨 종전 규칙이면 하루 주의(알림 없음)")
-import health
-WP = os.path.join(common.STATE_DIR, "exf_fut_wait.json")
+import health  # noqa: E402
+WP = os.path.join(paths.STATE_DIR, "exf_fut_wait.json")
 futfile("bybit", [], ts=SEQ["t"] - 5)
 dP = C._meta_get("recon_done_exf_bybit")
 recon("bybit", {"USDT": float(total("bybit", "USDT"))})
 wd = json.load(open(WP)) if os.path.exists(WP) else {}
 t_now = time.time()
-warns = lambda lst: [c["cid"] for c in lst if c["level"] == "warn" and c["cid"].startswith("futwait")]
+warns = lambda lst: [c["cid"] for c in lst if c["level"] == "warn" and c["cid"].startswith("futwait")]   # noqa: E731
 it0 = health.collect_fut_wait(t_now + 100)
 wd2 = dict(wd, ts=int(t_now) + 3600)
-common.atomic_write_json(WP, wd2)
+statefile.atomic_write_json(WP, wd2)
 it1 = health.collect_fut_wait(t_now + 3700)
 w1 = [c for c in it1 if c["level"] == "warn" and c["cid"].startswith("futwait")]
 chk(C._meta_get("recon_done_exf_bybit") == dP and "bybit" in (wd.get("wait") or {}) and not warns(it0)
@@ -313,15 +313,15 @@ hh = dict(health.DEFAULTS, units=["tj-core"])
 for dt9 in (3700, 3710):
     health.step(hst, health.evaluate({"now": t_now + dt9}, hh), t_now + dt9, hh)
 opened = "futwait:bybit" in (hst.get("incidents") or {})
-C.EXF_FUT_WAIT_S = 0
+C.svc_exf.EXF_FUT_WAIT_S = 0
 recon("bybit", {"USDT": float(total("bybit", "USDT"))})
-del C.EXF_FUT_WAIT_S
+del C.svc_exf.EXF_FUT_WAIT_S
 it2 = health.collect_fut_wait(time.time())
 chk(warns(it2) == ["futwait:fb:bybit"] and C._meta_get("recon_done_exf_bybit") != dP, "P3 상한 넘겨 종전 규칙 = '주의' 한 줄(대기 줄은 ok)", warns(it2))
 for dt9 in (3760, 3770):
     health.step(hst, health.evaluate({"now": t_now + dt9}, hh), t_now + dt9, hh)
 chk(opened and "futwait:bybit" not in (hst.get("incidents") or {}) and "futwait:fb:bybit" in (hst.get("incidents") or {}),
-    "P3b (fr303) 평가→사건: 대기 사건은 상한 전환 때 바로 닫히고 '종전 규칙' 사건이 열림(1시간 유예 없음)", sorted(hst.get("incidents") or {}))
+    "P3b 평가→사건: 대기 사건은 상한 전환 때 바로 닫히고 '종전 규칙' 사건이 열림(1시간 유예 없음)", sorted(hst.get("incidents") or {}))
 futfile("bybit", [])
 recon("bybit", {"USDT": float(total("bybit", "USDT"))})
 wd = json.load(open(WP))
@@ -330,11 +330,11 @@ chk(not wd.get("wait") and warns(health.collect_fut_wait(time.time())) == ["futw
 t9 = time.time() + health.FUT_FB_SHOW_S + 10
 for dt9 in (0, 10):
     health.step(hst, health.evaluate({"now": t9 + dt9}, hh), t9 + dt9, hh)
-chk(not any(k.startswith("futwait") for k in (hst.get("incidents") or {})), "P4b (fr303) 하루 지나면 '종전 규칙' 사건도 바로 닫힘", sorted(hst.get("incidents") or {}))
+chk(not any(k.startswith("futwait") for k in (hst.get("incidents") or {})), "P4b 하루 지나면 '종전 규칙' 사건도 바로 닫힘", sorted(hst.get("incidents") or {}))
 
 print("[K9] (fr299 #3) 바이낸스 선물 정산 수집이 5쪽 상한에서 멈추면 파일 시각 = 확인된 정산 끝(지금 아님)")
-import ex_foreign
-FB = os.path.join(common.STATE_DIR, "futures_binance.json")
+import ex_foreign  # noqa: E402
+FB = os.path.join(paths.STATE_DIR, "futures_binance.json")
 fb_keep = open(FB, encoding="utf-8").read()
 T0K = (int(time.time()) - 30 * 86400) * 1000
 CALLS = {"n": 0}
@@ -354,34 +354,31 @@ def _fake(url, headers=None, *a, **k):
 
 
 _fake._tj_test_mock = True
-ex_foreign._http_json_err = _fake
-T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
-ex_foreign._gov_prepare = lambda *a, **k: None
-T.patch_moved("_gov_prepare", ex_foreign._gov_prepare, ("exf_",))
-ex_foreign.PACE = 0
-T.patch_moved("PACE", ex_foreign.PACE, ("exf_",))
-common.atomic_write_json(FB, {"ts": 0, "events": [], "cursor": {"income": T0K}})
+T.patch_moved("_http_json_err", _fake, ("exf_", "ex_foreign"))
+T.patch_moved("_gov_prepare", lambda *a, **k: None, ("exf_", "ex_foreign"))
+T.patch_moved("PACE", 0, ("exf_", "ex_foreign"))
+statefile.atomic_write_json(FB, {"ts": 0, "events": [], "cursor": {"income": T0K}})
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
 fk = json.load(open(FB))
 last_t = max(int(e["t"]) for e in fk["events"])
-C.__dict__.pop("_exf_fut_cache", None)
+C.svc_exf.__dict__.pop("_exf_fut_cache", None)
 chk(CALLS["n"] == 5 and abs(fk["ts"] - time.time()) < 60 and fk.get("inc_cov_ts") == (last_t - 1) // 1000 and len(fk["events"]) == 5000
-    and C._exf_fut_events("binance")[0] == (last_t - 1) // 1000,
-    "K9a 5쪽 꽉 참 = 정산 확인 끝(inc_cov_ts) = 마지막 정산 직전 · 대사는 그 시각까지만 덮은 것으로 · 파일 ts 는 조회 시각(fr303) · 5,000건 보존",
-    (CALLS["n"], fk["ts"], fk.get("inc_cov_ts"), last_t, C._exf_fut_events("binance")[0]))
+    and C.svc_exf._exf_fut_events("binance")[0] == (last_t - 1) // 1000,
+    "K9a 5쪽 꽉 참 = 정산 확인 끝(inc_cov_ts) = 마지막 정산 직전 · 대사는 그 시각까지만 덮은 것으로 · 파일 ts 는 조회 시각 · 5,000건 보존",
+    (CALLS["n"], fk["ts"], fk.get("inc_cov_ts"), last_t, C.svc_exf._exf_fut_events("binance")[0]))
 fk["positions"] = [{"symbol": "AAAUSDT", "side": "LONG", "qty": 1.0, "entry": 10.0, "mark": 11.0, "upnl": 1.0, "leverage": "5", "liq": 1.0}]
-common.atomic_write_json(FB, fk)
-import web
-import types
+statefile.atomic_write_json(FB, fk)
+import web  # noqa: E402
+import types  # noqa: E402
 _wb = web.StateBuilder.__new__(web.StateBuilder)
 _wb.cfg = {}
 _wb.spot = types.SimpleNamespace(rate=1380.0, fx_basis=1380.0, price=lambda s9: None)
 try:
     _fv = web.StateBuilder._futures_view(_wb)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     _fv = {"_exc": repr(e)}
 chk(any(p.get("exKey") == "binance" for p in (_fv.get("positions") or [])),
-    "K9c (fr303) 부분 수집 파일도 화면에선 신선 — 방금 읽은 바이낸스 포지션이 빠지지 않음", {k: _fv.get(k) for k in ("staleEx", "positions", "_exc")})
+    "K9c 부분 수집 파일도 화면에선 신선 — 방금 읽은 바이낸스 포지션이 빠지지 않음", {k: _fv.get(k) for k in ("staleEx", "positions", "_exc")})
 
 
 def _fake2(url, headers=None, *a, **k):
@@ -391,8 +388,7 @@ def _fake2(url, headers=None, *a, **k):
 
 
 _fake2._tj_test_mock = True
-ex_foreign._http_json_err = _fake2
-T.patch_moved("_http_json_err", ex_foreign._http_json_err, ("exf_",))
+T.patch_moved("_http_json_err", _fake2, ("exf_", "ex_foreign"))
 ex_foreign._fut_binance({"TJ_BINANCE_KEY": "k", "TJ_BINANCE_SECRET": "s"})
 chk(abs(json.load(open(FB))["ts"] - time.time()) < 60, "K9b 끝까지 받음(마지막 쪽 1000건 미만) = 파일 ts = 지금(종전)", json.load(open(FB))["ts"])
 with open(FB, "w", encoding="utf-8") as fh:

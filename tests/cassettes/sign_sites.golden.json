@@ -1,0 +1,2607 @@
+{
+ "_doc": "합성 데이터(지어낸 키 · 고정 시각·nonce) — test_sign_sites 의 서명 자리 요청 골든. 다시 녹화 = TJ_TEST_RECORD=sign_sites · «~…» = 서명 등 합성 꼴 아닌 16진수의 지문 · «u:n» = 고정 uuid4",
+ "version": 1,
+ "name": "sign_sites",
+ "clock": {
+  "now": 1760000000.0,
+  "off_ms": {
+   "binance": 1111,
+   "bybit": 2222,
+   "okx": 3333,
+   "kucoin": 4444,
+   "gate": 5555,
+   "bithumb": 6666,
+   "coinbase": 7777
+  }
+ },
+ "golden": {
+  "binance.bal_futures": [
+   {
+    "data": null,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": null,
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/api/v3/account",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/api/v3/account?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   },
+   {
+    "data": null,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": null,
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/margin/account",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/margin/account?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   },
+   {
+    "data": null,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": null,
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/margin/isolated/account",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/margin/isolated/account?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   },
+   {
+    "data": {
+     "bytes": ""
+    },
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": "POST",
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/asset/get-funding-asset",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/asset/get-funding-asset?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   },
+   {
+    "data": null,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": null,
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/simple-earn/flexible/position",
+     "q": [
+      [
+       "current",
+       "1"
+      ],
+      [
+       "size",
+       "100"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~b8807bf4e54cd81a1c09"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/simple-earn/flexible/position?current=1&size=100&timestamp=1760000001111&recvWindow=10000&signature=sig~b8807bf4e54cd81a1c09"
+    },
+    "via": "exf_binance._http_json_err"
+   },
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "exf_binance:_bal_binance._futures"
+    ],
+    "url": {
+     "base": "https://fapi.binance.com/fapi/v2/balance",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://fapi.binance.com/fapi/v2/balance?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   }
+  ],
+  "binance.caller": [
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "exf_binance:_binance_caller.call"
+    ],
+    "url": {
+     "base": "https://api.binance.com/api/v3/myTrades",
+     "q": [
+      [
+       "symbol",
+       "ETHUSDT"
+      ],
+      [
+       "fromId",
+       "7"
+      ],
+      [
+       "limit",
+       "1000"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~43e8423aca4ff4ed46e7"
+      ]
+     ],
+     "raw": "https://api.binance.com/api/v3/myTrades?symbol=ETHUSDT&fromId=7&limit=1000&timestamp=1760000001111&recvWindow=10000&signature=sig~43e8423aca4ff4ed46e7"
+    },
+    "via": "exf_binance.http_json"
+   }
+  ],
+  "binance.deriv_get": [
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "exf_binance:_bn_deriv_get"
+    ],
+    "url": {
+     "base": "https://dapi.binance.com/dapi/v1/account",
+     "q": [
+      [
+       "x",
+       "1"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~c96d8b8d872507745027"
+      ]
+     ],
+     "raw": "https://dapi.binance.com/dapi/v1/account?x=1&timestamp=1760000001111&recvWindow=10000&signature=sig~c96d8b8d872507745027"
+    },
+    "via": "exf_binance._http_json_err"
+   }
+  ],
+  "binance.fetch": [
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "exf_binance:fetch_binance.call"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/capital/withdraw/history",
+     "q": [
+      [
+       "startTime",
+       "1759740800000"
+      ],
+      [
+       "endTime",
+       "1760000000000"
+      ],
+      [
+       "limit",
+       "1000"
+      ],
+      [
+       "offset",
+       "0"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~7ecbbdc15485eb596fe4"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/capital/withdraw/history?startTime=1759740800000&endTime=1760000000000&limit=1000&offset=0&timestamp=1760000001111&recvWindow=10000&signature=sig~7ecbbdc15485eb596fe4"
+    },
+    "via": "exf_binance.http_json"
+   }
+  ],
+  "binance.fut_fcall": [
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "exf_binance:_fut_binance.fcall"
+    ],
+    "url": {
+     "base": "https://fapi.binance.com/fapi/v2/account",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://fapi.binance.com/fapi/v2/account?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   }
+  ],
+  "binance.signed_get": [
+   {
+    "data": null,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": null,
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/api/v3/account",
+     "q": [
+      [
+       "omitZeroBalances",
+       "true"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~69be543afeaf17434940"
+      ]
+     ],
+     "raw": "https://api.binance.com/api/v3/account?omitZeroBalances=true&timestamp=1760000001111&recvWindow=10000&signature=sig~69be543afeaf17434940"
+    },
+    "via": "exf_binance._http_json_err"
+   }
+  ],
+  "binance.signed_post": [
+   {
+    "data": {
+     "bytes": ""
+    },
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "method": "POST",
+    "sites": [
+     "exf_binance:_binance_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/asset/get-funding-asset",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/asset/get-funding-asset?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exf_binance._http_json_err"
+   }
+  ],
+  "bithumb.caller": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgBHkey01"
+         ],
+         [
+          "nonce",
+          "«u:2»"
+         ],
+         [
+          "timestamp",
+          1760000006666
+         ],
+         [
+          "query_hash",
+          "«~6e272481977a»"
+         ],
+         [
+          "query_hash_alg",
+          "SHA512"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~6e14873bb941308e30a3",
+        "jwt_sig": "sig~fd389ddc55d8eb721c1a",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "exf_bithumb:_bithumb_caller.call"
+    ],
+    "url": {
+     "base": "https://api.bithumb.com/v1/orders",
+     "q": [
+      [
+       "market",
+       "KRW-BTC"
+      ],
+      [
+       "state",
+       "done"
+      ],
+      [
+       "limit",
+       "100"
+      ]
+     ],
+     "raw": "https://api.bithumb.com/v1/orders?market=KRW-BTC&state=done&limit=100"
+    },
+    "via": "exf_bithumb.http_json"
+   }
+  ],
+  "bithumb.fetch": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgBHkey01"
+         ],
+         [
+          "nonce",
+          "«u:1»"
+         ],
+         [
+          "timestamp",
+          1760000006666
+         ],
+         [
+          "query_hash",
+          "«~032685b955c4»"
+         ],
+         [
+          "query_hash_alg",
+          "SHA512"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~712ee988b0fc91f64e2c",
+        "jwt_sig": "sig~aadf3e2532ffeb028ee6",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "exf_bithumb:fetch_bithumb.call"
+    ],
+    "url": {
+     "base": "https://api.bithumb.com/v1/withdraws",
+     "q": [
+      [
+       "limit",
+       "100"
+      ],
+      [
+       "page",
+       "1"
+      ],
+      [
+       "order_by",
+       "desc"
+      ]
+     ],
+     "raw": "https://api.bithumb.com/v1/withdraws?limit=100&page=1&order_by=desc"
+    },
+    "via": "exf_bithumb.http_json"
+   }
+  ],
+  "bithumb.get": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgBHkey01"
+         ],
+         [
+          "nonce",
+          "«u:3»"
+         ],
+         [
+          "timestamp",
+          1760000006666
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~ec45b5092ee40fdafe85",
+        "jwt_sig": "sig~2ab28157d998dce39f13",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "exf_bithumb:_bithumb_get"
+    ],
+    "url": {
+     "base": "https://api.bithumb.com/v1/accounts",
+     "q": [],
+     "raw": "https://api.bithumb.com/v1/accounts"
+    },
+    "via": "exf_bithumb.http_json"
+   }
+  ],
+  "bybit.bal": [
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~883ca5bb637b40e459a0"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:_bal_bybit"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/account/wallet-balance",
+     "q": [
+      [
+       "accountType",
+       "UNIFIED"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/account/wallet-balance?accountType=UNIFIED"
+    },
+    "via": "exf_bybit.http_json"
+   },
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~63a8ba1988b542e26998"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:_bal_bybit"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/asset/transfer/query-account-coins-balance",
+     "q": [
+      [
+       "accountType",
+       "FUND"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/asset/transfer/query-account-coins-balance?accountType=FUND"
+    },
+    "via": "exf_bybit.http_json"
+   }
+  ],
+  "bybit.fetch": [
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~0aed25b498cea0c2762e"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:fetch_bybit.call"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/asset/withdraw/query-record",
+     "q": [
+      [
+       "startTime",
+       "1759740800000"
+      ],
+      [
+       "endTime",
+       "1760000000000"
+      ],
+      [
+       "limit",
+       "50"
+      ],
+      [
+       "withdrawType",
+       "2"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/asset/withdraw/query-record?startTime=1759740800000&endTime=1760000000000&limit=50&withdrawType=2"
+    },
+    "via": "exf_bybit.http_json"
+   }
+  ],
+  "bybit.fills": [
+   {
+    "sites": [],
+    "timeout": 30,
+    "url": {
+     "base": "https://api.bybit.com/v5/market/instruments-info",
+     "q": [
+      [
+       "category",
+       "spot"
+      ],
+      [
+       "limit",
+       "1000"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/market/instruments-info?category=spot&limit=1000"
+    },
+    "via": "exf_bybit.http_json"
+   },
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~cf391d76e30c532cb7ac"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:fills_bybit.call"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/execution/list",
+     "q": [
+      [
+       "category",
+       "spot"
+      ],
+      [
+       "startTime",
+       "1759740800000"
+      ],
+      [
+       "endTime",
+       "1760000000000"
+      ],
+      [
+       "limit",
+       "100"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/execution/list?category=spot&startTime=1759740800000&endTime=1760000000000&limit=100"
+    },
+    "via": "exf_bybit.http_json"
+   }
+  ],
+  "bybit.fut": [
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~b0b61a97243e1f26f4b5"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:_fut_bybit.bcall"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/position/list",
+     "q": [
+      [
+       "category",
+       "linear"
+      ],
+      [
+       "settleCoin",
+       "USDT"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/position/list?category=linear&settleCoin=USDT"
+    },
+    "via": "exf_bybit.http_json"
+   }
+  ],
+  "bybit.get": [
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~8e87073ef0613904160e"
+     ]
+    ],
+    "sites": [
+     "exf_bybit:_bybit_get"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/user/query-api",
+     "q": [],
+     "raw": "https://api.bybit.com/v5/user/query-api"
+    },
+    "via": "exf_bybit.http_json"
+   }
+  ],
+  "coinbase.get": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "sub",
+          "sgCBkey01"
+         ],
+         [
+          "iss",
+          "cdp"
+         ],
+         [
+          "nbf",
+          1760000007
+         ],
+         [
+          "exp",
+          1760000127
+         ],
+         [
+          "uri",
+          "GET api.coinbase.com/api/v3/brokerage/accounts"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "ES256"
+         ],
+         [
+          "kid",
+          "sgCBkey01"
+         ],
+         [
+          "nonce",
+          "000000045eed4eed8eed000000000004"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~ffabf9080ef6e15160f5",
+        "jwt_sig": "sig~2304bc899212db37430f",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "exf_coinbase:jwt_for",
+     "exf_coinbase:jwt_for",
+     "exf_coinbase:jwt_for",
+     "exf_coinbase:jwt_for",
+     "exf_coinbase:jwt_for"
+    ],
+    "url": {
+     "base": "https://api.coinbase.com/api/v3/brokerage/accounts",
+     "q": [
+      [
+       "limit",
+       "250"
+      ]
+     ],
+     "raw": "https://api.coinbase.com/api/v3/brokerage/accounts?limit=250"
+    },
+    "via": "exf_coinbase.http_json"
+   }
+  ],
+  "depaddr.binance": [
+   {
+    "ex": "binance",
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "depaddr:Client._get"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/capital/deposit/address",
+     "q": [
+      [
+       "coin",
+       "ETH"
+      ],
+      [
+       "network",
+       "ETH"
+      ],
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~421ec8b8129125d797f9"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/capital/deposit/address?coin=ETH&network=ETH&timestamp=1760000001111&recvWindow=10000&signature=sig~421ec8b8129125d797f9"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.bithumb": [
+   {
+    "ex": "bithumb",
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgBHkey01"
+         ],
+         [
+          "nonce",
+          "«u:7»"
+         ],
+         [
+          "timestamp",
+          1760000000000
+         ],
+         [
+          "query_hash",
+          "«~39f03b4979ff»"
+         ],
+         [
+          "query_hash_alg",
+          "SHA512"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~ba22e3dc205751cac2dc",
+        "jwt_sig": "sig~efb779a7c27febf046b6",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "depaddr:_jwt"
+    ],
+    "url": {
+     "base": "https://api.bithumb.com/v1/deposits/coin_addresses",
+     "q": [
+      [
+       "currency",
+       "BTC"
+      ]
+     ],
+     "raw": "https://api.bithumb.com/v1/deposits/coin_addresses?currency=BTC"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.bybit": [
+   {
+    "ex": "bybit",
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~523d57fc205e1b22fafd"
+     ]
+    ],
+    "sites": [
+     "depaddr:Client._get"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/asset/deposit/query-address",
+     "q": [
+      [
+       "coin",
+       "ETH"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/asset/deposit/query-address?coin=ETH"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.gate": [
+   {
+    "ex": "gate",
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000005"
+     ],
+     [
+      "SIGN",
+      "sig~18bb9b79ac65fb1f49a4"
+     ]
+    ],
+    "sites": [
+     "depaddr:Client._get"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/wallet/deposit_address",
+     "q": [
+      [
+       "currency",
+       "ETH"
+      ]
+     ],
+     "raw": "https://api.gateio.ws/api/v4/wallet/deposit_address?currency=ETH"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.kucoin": [
+   {
+    "ex": "kucoin",
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~5c064f84af50a798e41a"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "depaddr:Client._get",
+     "depaddr:Client._get"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v3/deposit-addresses",
+     "q": [
+      [
+       "currency",
+       "ETH"
+      ]
+     ],
+     "raw": "https://api.kucoin.com/api/v3/deposit-addresses?currency=ETH"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.okx": [
+   {
+    "ex": "okx",
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~9245e71951c5377b3ae9"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "depaddr:Client._get"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/asset/deposit-address",
+     "q": [
+      [
+       "ccy",
+       "ETH"
+      ]
+     ],
+     "raw": "https://www.okx.com/api/v5/asset/deposit-address?ccy=ETH"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.upbit": [
+   {
+    "ex": "upbit",
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgUPkey01"
+         ],
+         [
+          "nonce",
+          "«u:5»"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~83ae7d8ed7af752d50ea",
+        "jwt_sig": "sig~6d81aaaa8c9dfcff96f0",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "depaddr:_jwt"
+    ],
+    "url": {
+     "base": "https://api.upbit.com/v1/deposits/coin_addresses",
+     "q": [],
+     "raw": "https://api.upbit.com/v1/deposits/coin_addresses"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "depaddr.upbit_q": [
+   {
+    "ex": "upbit",
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgUPkey01"
+         ],
+         [
+          "nonce",
+          "«u:6»"
+         ],
+         [
+          "query_hash",
+          "«~4912f3f613e4»"
+         ],
+         [
+          "query_hash_alg",
+          "SHA512"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~cf501ce8fb3152ab2a7e",
+        "jwt_sig": "sig~20c4f78b21bebc85e766",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "depaddr:_jwt"
+    ],
+    "url": {
+     "base": "https://api.upbit.com/v1/deposits",
+     "q": [
+      [
+       "currency",
+       "ETH"
+      ],
+      [
+       "limit",
+       "100"
+      ]
+     ],
+     "raw": "https://api.upbit.com/v1/deposits?currency=ETH&limit=100"
+    },
+    "via": "depaddr.http_get"
+   }
+  ],
+  "gate.fetch": [
+   {
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000005"
+     ],
+     [
+      "SIGN",
+      "sig~e47547be53522e1f9471"
+     ]
+    ],
+    "sites": [
+     "exf_gate:fetch_gate.call"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/wallet/withdrawals",
+     "q": [
+      [
+       "from",
+       "1759740800"
+      ],
+      [
+       "to",
+       "1760000000"
+      ],
+      [
+       "limit",
+       "500"
+      ],
+      [
+       "offset",
+       "0"
+      ]
+     ],
+     "raw": "https://api.gateio.ws/api/v4/wallet/withdrawals?from=1759740800&to=1760000000&limit=500&offset=0"
+    },
+    "via": "exf_gate.http_json"
+   }
+  ],
+  "gate.fills": [
+   {
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000005"
+     ],
+     [
+      "SIGN",
+      "sig~d05e2f6ca620e5547ccd"
+     ]
+    ],
+    "sites": [
+     "exf_gate:fills_gate.call"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/spot/my_trades",
+     "q": [
+      [
+       "from",
+       "1759740800"
+      ],
+      [
+       "to",
+       "1760000000"
+      ],
+      [
+       "limit",
+       "1000"
+      ],
+      [
+       "page",
+       "1"
+      ]
+     ],
+     "raw": "https://api.gateio.ws/api/v4/spot/my_trades?from=1759740800&to=1760000000&limit=1000&page=1"
+    },
+    "via": "exf_gate.http_json"
+   }
+  ],
+  "gate.get": [
+   {
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000005"
+     ],
+     [
+      "SIGN",
+      "sig~3f75e3f7231efd4973ce"
+     ]
+    ],
+    "sites": [
+     "exf_gate:_gate_get"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/wallet/total_balance",
+     "q": [
+      [
+       "currency",
+       "USDT"
+      ]
+     ],
+     "raw": "https://api.gateio.ws/api/v4/wallet/total_balance?currency=USDT"
+    },
+    "via": "exf_gate.http_json"
+   }
+  ],
+  "gate.get_noq": [
+   {
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000005"
+     ],
+     [
+      "SIGN",
+      "sig~5b350e953dce9a373190"
+     ]
+    ],
+    "sites": [
+     "exf_gate:_gate_get"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/spot/accounts",
+     "q": [],
+     "raw": "https://api.gateio.ws/api/v4/spot/accounts"
+    },
+    "via": "exf_gate.http_json"
+   }
+  ],
+  "kucoin.call": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~454e932eb1a517588cbf"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "exf_kucoin:_kucoin_call",
+     "exf_kucoin:_kucoin_call"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v1/accounts",
+     "q": [
+      [
+       "type",
+       "main"
+      ]
+     ],
+     "raw": "https://api.kucoin.com/api/v1/accounts?type=main"
+    },
+    "via": "exf_kucoin.http_json"
+   }
+  ],
+  "kucoin.fetch": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~0d456fe90a190c35f392"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "exf_kucoin:fetch_kucoin.call",
+     "exf_kucoin:fetch_kucoin.call"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v1/withdrawals",
+     "q": [
+      [
+       "startAt",
+       "1759740800000"
+      ],
+      [
+       "endAt",
+       "1760000000000"
+      ],
+      [
+       "pageSize",
+       "50"
+      ],
+      [
+       "currentPage",
+       "1"
+      ]
+     ],
+     "raw": "https://api.kucoin.com/api/v1/withdrawals?startAt=1759740800000&endAt=1760000000000&pageSize=50&currentPage=1"
+    },
+    "via": "exf_kucoin.http_json"
+   }
+  ],
+  "kucoin.fills": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~07174be39fb75345897d"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "exf_kucoin:fills_kucoin.call",
+     "exf_kucoin:fills_kucoin.call"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v1/fills",
+     "q": [
+      [
+       "startAt",
+       "1759740800000"
+      ],
+      [
+       "endAt",
+       "1760000000000"
+      ],
+      [
+       "pageSize",
+       "500"
+      ],
+      [
+       "currentPage",
+       "1"
+      ]
+     ],
+     "raw": "https://api.kucoin.com/api/v1/fills?startAt=1759740800000&endAt=1760000000000&pageSize=500&currentPage=1"
+    },
+    "via": "exf_kucoin.http_json"
+   }
+  ],
+  "kucoin.fut_get": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~dc7f313b0849a55af9bb"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "exf_kucoin:_kucoin_fut_get",
+     "exf_kucoin:_kucoin_fut_get"
+    ],
+    "url": {
+     "base": "https://api-futures.kucoin.com/api/v1/positions",
+     "q": [],
+     "raw": "https://api-futures.kucoin.com/api/v1/positions"
+    },
+    "via": "exf_kucoin.http_json"
+   }
+  ],
+  "kucoin.get": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~401f768fd6a6f9fa60a6"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000004444"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "exf_kucoin:_kucoin_get",
+     "exf_kucoin:_kucoin_get"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v1/accounts",
+     "q": [],
+     "raw": "https://api.kucoin.com/api/v1/accounts"
+    },
+    "via": "exf_kucoin.http_json"
+   }
+  ],
+  "liq.bn_get": [
+   {
+    "bucket": "bn_fapi",
+    "ex": "binance",
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "kind": "bn_fapi",
+    "method": "GET",
+    "sites": [
+     "liq_watch:Watcher.bn_get"
+    ],
+    "url": {
+     "base": "https://fapi.binance.com/fapi/v2/positionRisk",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://fapi.binance.com/fapi/v2/positionRisk?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "self.call",
+    "w": 5
+   }
+  ],
+  "liq.bybit_get": [
+   {
+    "bucket": "bybit_ip",
+    "ex": "bybit",
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~b0b61a97243e1f26f4b5"
+     ]
+    ],
+    "kind": "bybit_ip",
+    "method": "GET",
+    "sites": [
+     "liq_watch:Watcher.bybit_get"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/position/list",
+     "q": [
+      [
+       "category",
+       "linear"
+      ],
+      [
+       "settleCoin",
+       "USDT"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/position/list?category=linear&settleCoin=USDT"
+    },
+    "via": "self.call"
+   }
+  ],
+  "liq.okx_get": [
+   {
+    "bucket": "okx_pos",
+    "ex": "okx",
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~bd9e6c202b631562ea04"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "kind": "okx_pos",
+    "method": "GET",
+    "sites": [
+     "liq_watch:Watcher.okx_get"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/account/positions",
+     "q": [
+      [
+       "instType",
+       "SWAP"
+      ]
+     ],
+     "raw": "https://www.okx.com/api/v5/account/positions?instType=SWAP"
+    },
+    "via": "self.call"
+   }
+  ],
+  "okx.fetch": [
+   {
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~a48f793a56003ddb03a1"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "exf_okx:fetch_okx.call"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/asset/withdrawal-history",
+     "q": [
+      [
+       "limit",
+       "100"
+      ]
+     ],
+     "raw": "https://www.okx.com/api/v5/asset/withdrawal-history?limit=100"
+    },
+    "via": "exf_okx.http_json"
+   }
+  ],
+  "okx.fills": [
+   {
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~dfa66eeaf40db6e9c406"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "exf_okx:fills_okx.call"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/trade/fills-history",
+     "q": [
+      [
+       "instType",
+       "SPOT"
+      ],
+      [
+       "limit",
+       "100"
+      ]
+     ],
+     "raw": "https://www.okx.com/api/v5/trade/fills-history?instType=SPOT&limit=100"
+    },
+    "via": "exf_okx.http_json"
+   }
+  ],
+  "okx.get": [
+   {
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~c7c241f20c6ed74cb6b6"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "exf_okx:_okx_get"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/account/balance",
+     "q": [
+      [
+       "ccy",
+       "USDT"
+      ]
+     ],
+     "raw": "https://www.okx.com/api/v5/account/balance?ccy=USDT"
+    },
+    "via": "exf_okx.http_json"
+   }
+  ],
+  "onb.binance": [
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://api.binance.com/api/v3/account",
+     "q": [
+      [
+       "timestamp",
+       "1760000000000"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~6716f2d91c79470abea6"
+      ]
+     ],
+     "raw": "https://api.binance.com/api/v3/account?timestamp=1760000000000&recvWindow=10000&signature=sig~6716f2d91c79470abea6"
+    },
+    "via": "onboarding._http"
+   },
+   {
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/account/apiRestrictions",
+     "q": [
+      [
+       "timestamp",
+       "1760000000000"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~6716f2d91c79470abea6"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/account/apiRestrictions?timestamp=1760000000000&recvWindow=10000&signature=sig~6716f2d91c79470abea6"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.bithumb": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgBHkey01"
+         ],
+         [
+          "nonce",
+          "«u:9»"
+         ],
+         [
+          "timestamp",
+          1760000000000
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~fae92505e0ffaab50ecd",
+        "jwt_sig": "sig~e01ded1fdca83aaedf9a",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "onboarding:_jwt_hs256"
+    ],
+    "url": {
+     "base": "https://api.bithumb.com/v1/accounts",
+     "q": [],
+     "raw": "https://api.bithumb.com/v1/accounts"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.bybit": [
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000000000"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~6153dd4f294e08f3ef51"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/account/wallet-balance",
+     "q": [
+      [
+       "accountType",
+       "UNIFIED"
+      ]
+     ],
+     "raw": "https://api.bybit.com/v5/account/wallet-balance?accountType=UNIFIED"
+    },
+    "via": "onboarding._http"
+   },
+   {
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000000000"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~7dd8b26087a8fa87f78e"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/user/query-api",
+     "q": [],
+     "raw": "https://api.bybit.com/v5/user/query-api"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.coinbase": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "sub",
+          "sgCBkey01"
+         ],
+         [
+          "iss",
+          "cdp"
+         ],
+         [
+          "nbf",
+          1760000000
+         ],
+         [
+          "exp",
+          1760000120
+         ],
+         [
+          "uri",
+          "GET api.coinbase.com/api/v3/brokerage/accounts"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "ES256"
+         ],
+         [
+          "kid",
+          "sgCBkey01"
+         ],
+         [
+          "nonce",
+          "0000000a5eed4eed8eed00000000000a"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~765ba97aa3d8d0dd9d11",
+        "jwt_sig": "sig~b1693dcf8b3df9f9b93a",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call"
+    ],
+    "url": {
+     "base": "https://api.coinbase.com/api/v3/brokerage/accounts",
+     "q": [
+      [
+       "limit",
+       "250"
+      ]
+     ],
+     "raw": "https://api.coinbase.com/api/v3/brokerage/accounts?limit=250"
+    },
+    "via": "onboarding._http"
+   },
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "sub",
+          "sgCBkey01"
+         ],
+         [
+          "iss",
+          "cdp"
+         ],
+         [
+          "nbf",
+          1760000000
+         ],
+         [
+          "exp",
+          1760000120
+         ],
+         [
+          "uri",
+          "GET api.coinbase.com/api/v3/brokerage/key_permissions"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "ES256"
+         ],
+         [
+          "kid",
+          "sgCBkey01"
+         ],
+         [
+          "nonce",
+          "0000000b5eed4eed8eed00000000000b"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~ae5cb078ea0221159c2c",
+        "jwt_sig": "sig~9f54212d24ec3f17a5a0",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call",
+     "onboarding:_test_coinbase.call"
+    ],
+    "url": {
+     "base": "https://api.coinbase.com/api/v3/brokerage/key_permissions",
+     "q": [],
+     "raw": "https://api.coinbase.com/api/v3/brokerage/key_permissions"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.gate": [
+   {
+    "headers": [
+     [
+      "KEY",
+      "sgGTkey01"
+     ],
+     [
+      "Timestamp",
+      "1760000000"
+     ],
+     [
+      "SIGN",
+      "sig~bed8fee04162cd3e5fb3"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group"
+    ],
+    "url": {
+     "base": "https://api.gateio.ws/api/v4/spot/accounts",
+     "q": [],
+     "raw": "https://api.gateio.ws/api/v4/spot/accounts"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.kucoin": [
+   {
+    "headers": [
+     [
+      "KC-API-KEY",
+      "sgKCkey01"
+     ],
+     [
+      "KC-API-SIGN",
+      "sig~bbf13b6add27182af2f8"
+     ],
+     [
+      "KC-API-TIMESTAMP",
+      "1760000000000"
+     ],
+     [
+      "KC-API-PASSPHRASE",
+      "sig~a03f3e4c5a6fd38171f5"
+     ],
+     [
+      "KC-API-KEY-VERSION",
+      "2"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group",
+     "onboarding:_test_group"
+    ],
+    "url": {
+     "base": "https://api.kucoin.com/api/v1/accounts",
+     "q": [],
+     "raw": "https://api.kucoin.com/api/v1/accounts"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.okx": [
+   {
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~ba546bf1e95df60b39ea"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:20.000Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/account/balance",
+     "q": [],
+     "raw": "https://www.okx.com/api/v5/account/balance"
+    },
+    "via": "onboarding._http"
+   },
+   {
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~3fa3b6a97a8a51c6c432"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:20.000Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "sites": [
+     "onboarding:_test_group.call"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/account/config",
+     "q": [],
+     "raw": "https://www.okx.com/api/v5/account/config"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "onb.upbit": [
+   {
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgUPkey01"
+         ],
+         [
+          "nonce",
+          "«u:8»"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~e4519a1ffa95bdb4167d",
+        "jwt_sig": "sig~e33b2764b6ff5a3e7c26",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "sites": [
+     "onboarding:_jwt_hs256"
+    ],
+    "url": {
+     "base": "https://api.upbit.com/v1/accounts",
+     "q": [],
+     "raw": "https://api.upbit.com/v1/accounts"
+    },
+    "via": "onboarding._http"
+   }
+  ],
+  "pricing.okx_dex": [
+   {
+    "req": {
+     "data": {
+      "bytes": "[{\"chainIndex\": \"1\", \"tokenContractAddress\": \"0x«c4*20»\"}, {\"chainIndex\": \"1\", \"tokenContractAddress\": \"0x«~2f538c632b15»\"}]"
+     },
+     "headers": [
+      [
+       "Ok-access-key",
+       "sgOKkey01"
+      ],
+      [
+       "Ok-access-sign",
+       "sig~dc982cf42fdc12718c64"
+      ],
+      [
+       "Ok-access-timestamp",
+       "2025-10-09T08:53:20.000Z"
+      ],
+      [
+       "Ok-access-passphrase",
+       "sgOKpp01"
+      ],
+      [
+       "Content-type",
+       "application/json"
+      ],
+      [
+       "User-agent",
+       "tj-bot/0.1 (personal trade journal)"
+      ],
+      [
+       "Accept",
+       "application/json"
+      ]
+     ],
+     "method": "POST",
+     "url": {
+      "base": "https://www.okx.com/api/v6/dex/market/price",
+      "q": [],
+      "raw": "https://www.okx.com/api/v6/dex/market/price"
+     }
+    },
+    "sites": [
+     "pricing:okx_headers"
+    ],
+    "timeout": 12,
+    "via": "net_http.auth_urlopen"
+   }
+  ],
+  "upbit.get": [
+   {
+    "req": {
+     "data": null,
+     "headers": [
+      [
+       "Authorization",
+       {
+        "bearer": {
+         "jwt_claims": [
+          [
+           "access_key",
+           "sgUPkey01"
+          ],
+          [
+           "nonce",
+           "«u:13»"
+          ]
+         ],
+         "jwt_header": [
+          [
+           "alg",
+           "HS256"
+          ],
+          [
+           "typ",
+           "JWT"
+          ]
+         ],
+         "jwt_raw": "sig~84b83ff869bd20489e6b",
+         "jwt_sig": "sig~284bf3a64015aca0f5a2",
+         "jwt_valid": true
+        }
+       }
+      ],
+      [
+       "Accept",
+       "application/json"
+      ],
+      [
+       "User-agent",
+       "tj-bot/0.1"
+      ]
+     ],
+     "method": "GET",
+     "url": {
+      "base": "https://api.upbit.com/v1/accounts",
+      "q": [],
+      "raw": "https://api.upbit.com/v1/accounts"
+     }
+    },
+    "sites": [
+     "upbit_link:_jwt"
+    ],
+    "timeout": 20,
+    "via": "net_http.auth_urlopen"
+   }
+  ],
+  "upbit.get_q": [
+   {
+    "req": {
+     "data": null,
+     "headers": [
+      [
+       "Authorization",
+       {
+        "bearer": {
+         "jwt_claims": [
+          [
+           "access_key",
+           "sgUPkey01"
+          ],
+          [
+           "nonce",
+           "«u:12»"
+          ],
+          [
+           "query_hash",
+           "«~032685b955c4»"
+          ],
+          [
+           "query_hash_alg",
+           "SHA512"
+          ]
+         ],
+         "jwt_header": [
+          [
+           "alg",
+           "HS256"
+          ],
+          [
+           "typ",
+           "JWT"
+          ]
+         ],
+         "jwt_raw": "sig~4feee2753f3f86e332b1",
+         "jwt_sig": "sig~94c95e0a2e54ef4900df",
+         "jwt_valid": true
+        }
+       }
+      ],
+      [
+       "Accept",
+       "application/json"
+      ],
+      [
+       "User-agent",
+       "tj-bot/0.1"
+      ]
+     ],
+     "method": "GET",
+     "url": {
+      "base": "https://api.upbit.com/v1/withdraws",
+      "q": [
+       [
+        "limit",
+        "100"
+       ],
+       [
+        "page",
+        "1"
+       ],
+       [
+        "order_by",
+        "desc"
+       ]
+      ],
+      "raw": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+     }
+    },
+    "sites": [
+     "upbit_link:_jwt"
+    ],
+    "timeout": 20,
+    "via": "net_http.auth_urlopen"
+   }
+  ]
+ }
+}

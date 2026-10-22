@@ -6,8 +6,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
-import common
-import core as core_mod
+import config, paths  # noqa: E402
+import core as core_mod  # noqa: E402
+import core_svc  # noqa: E402
+import ledger_lock  # noqa: E402
 
 DERIVED_TABLES = ("postings", "tx_class", "transfers", "positions")
 
@@ -35,11 +37,11 @@ def guard_core_stopped():
 
 def main():
     dry = "--dry-run" in sys.argv
-    common.ensure_dirs()
-    cfg = common.load_config()
+    paths.ensure_dirs()
+    cfg = config.load_config()
 
     import db as dbm
-    ro = dbm.open_db(common.DB_PATH, readonly=True)
+    ro = dbm.open_db(paths.DB_PATH, readonly=True)
     n_raw = ro.execute("SELECT count(*) FROM raw_txs").fetchone()[0]
     n_ord = ro.execute(
         "SELECT count(DISTINCT uuid) FROM raw_ex WHERE kind='order'").fetchone()[0]
@@ -51,10 +53,15 @@ def main():
         print("--dry-run: 여기서 종료 (파생·마스터 미변경)")
         return
     guard_core_stopped()
-    if hasattr(core_mod.Core, "_upbit_asset"):
+    if hasattr(core_svc.ExfService, "_upbit_asset"):
         raise SystemExit("이 도구(tools/rebuild.py)는 옛 원장 형식용이라 지금 원장에서는 쓸 수 없어요 — 다시 계산은 "
                          "python3 tools/rebuild2.py --shadow-dir <빈 폴더>(사본에서 계산·비교만) · 자동 재구축은 tj-core 가 해요(README '백필 · 재구축'). "
                          "[canonical C 원장에서는 tools/rebuild.py 사용 금지]")
+    with ledger_lock.hold(paths.DB_PATH, who="rebuild"):
+        _rebuild(cfg)
+
+
+def _rebuild(cfg):
     c = core_mod.Core(cfg)
     conn = c.conn
 
@@ -63,10 +70,10 @@ def main():
     for t in DERIVED_TABLES:
         conn.execute(f"DELETE FROM {t}")
     conn.execute("DELETE FROM meta WHERE k LIKE 'recon_done_%'")
-    marker = os.path.join(common.STATE_DIR, "backfill_done")
+    marker = os.path.join(paths.STATE_DIR, "backfill_done")
     if os.path.exists(marker):
         os.remove(marker)
-    dc = os.path.join(common.STATE_DIR, "daily_cache.json")
+    dc = os.path.join(paths.STATE_DIR, "daily_cache.json")
     if os.path.exists(dc):
         os.remove(dc)
     conn.commit()
@@ -112,8 +119,8 @@ def main():
             " WHERE state='sent' AND chain_txhash IN (?, ?)",
             (d["uuid"], now, cand, txid))
         if cur.rowcount:
-            dep_ts = c._iso_ts(p.get("done_at") or p.get("created_at")) or now
-            c._post_ex_deposit(d["uuid"], p, dep_ts)
+            dep_ts = c.svc_exf._iso_ts(p.get("done_at") or p.get("created_at")) or now
+            c.svc_exf._post_ex_deposit(d["uuid"], p, dep_ts)
             m += cur.rowcount
     conn.commit()
     print(f"입금 대사: {m}건")
@@ -123,7 +130,7 @@ def main():
             "SELECT exchange, payload FROM raw_ex WHERE kind='trade'"
             " AND exchange != 'upbit'").fetchall():
         try:
-            if c._post_exf_fill(t["exchange"], json.loads(t["payload"])):
+            if c.svc_exf._post_exf_fill(t["exchange"], json.loads(t["payload"])):
                 nf += 1
         except json.JSONDecodeError:
             continue
@@ -137,7 +144,7 @@ def main():
             continue
         if str(d9.get("state") or "").upper() != "DONE":
             continue
-        c._post_exf_withdraw(t["exchange"], t["uuid"], d9)
+        c.svc_exf._post_exf_withdraw(t["exchange"], t["uuid"], d9)
     for t in conn.execute(
             "SELECT exchange, uuid, payload FROM raw_ex WHERE kind='deposit'"
             " AND exchange != 'upbit' GROUP BY exchange, uuid"
@@ -148,7 +155,7 @@ def main():
             continue
         if str(d9.get("state") or "").upper() != "ACCEPTED":
             continue
-        c._post_exf_deposit_in(t["exchange"], t["uuid"], d9)
+        c.svc_exf._post_exf_deposit_in(t["exchange"], t["uuid"], d9)
     conn.commit()
     print(f"해외거래소 체결 재파생: {nf}건")
 
@@ -161,7 +168,7 @@ def main():
         except json.JSONDecodeError:
             continue
     if orders:
-        c._consume_fills({"orders": orders})
+        c.svc_exf._consume_fills({"orders": orders})
         conn.commit()
     print(f"체결 재파생: {len(orders)}건 투입")
 

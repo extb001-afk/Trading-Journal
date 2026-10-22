@@ -34,9 +34,9 @@ def cfg(**bsc):
 
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(cfg(), f)
-import common
-import bf_engine
-import bsc_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import bsc_watch  # noqa: E402
 class _Fwd9(__import__("types").ModuleType):
     def __setattr__(self, k9, v9):
         super().__setattr__(k9, v9)
@@ -44,11 +44,12 @@ class _Fwd9(__import__("types").ModuleType):
             if n9.startswith("bsc_") and m9 is not None and m9 is not self and k9 in getattr(m9, "__dict__", {}):
                 setattr(m9, k9, v9)
 bsc_watch.__class__ = _Fwd9
-import core
+import core  # noqa: E402
+import core_recon  # noqa: E402
 
 bf_engine.configure(cfg())
 bsc_watch.CALL_SLEEP = 0
-CPATH = os.path.join(common.STATE_DIR, "cursor_bsc.json")
+CPATH = os.path.join(paths.STATE_DIR, "cursor_bsc.json")
 
 
 def pad(a):
@@ -255,8 +256,7 @@ fake_http_json._tj_test_mock = True
 bf_engine.rpc_call = fake_call
 bf_engine.rpc_batch = fake_batch
 bf_engine.http_json = fake_http_json
-bsc_watch.NONCE_ARCH_GAP = 0
-T.patch_moved("NONCE_ARCH_GAP", bsc_watch.NONCE_ARCH_GAP, ("bsc_",))
+T.patch_moved("NONCE_ARCH_GAP", 0, ("bsc_",))
 
 
 class Wr:
@@ -268,8 +268,8 @@ class Wr:
 
 
 def reset_state():
-    shutil.rmtree(common.STATE_DIR, ignore_errors=True)
-    os.makedirs(common.STATE_DIR, exist_ok=True)
+    shutil.rmtree(paths.STATE_DIR, ignore_errors=True)
+    os.makedirs(paths.STATE_DIR, exist_ok=True)
     bf_engine._PROGRESS.clear()
     with bf_engine._EP_HEADS_LOCK:
         bf_engine._EP_HEADS.clear()
@@ -277,7 +277,7 @@ def reset_state():
 
 
 def exch_withdraw(txid, to):
-    con = sqlite3.connect(common.DB_PATH)
+    con = sqlite3.connect(paths.DB_PATH)
     con.execute("CREATE TABLE IF NOT EXISTS raw_ex (exchange TEXT NOT NULL, kind TEXT NOT NULL, uuid TEXT NOT NULL, revision INTEGER NOT NULL,"
                 " payload TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY (exchange, kind, uuid, revision))")
     con.execute("CREATE TABLE IF NOT EXISTS raw_txs (chain TEXT, txhash TEXT, block INTEGER, snapshot TEXT)")
@@ -297,12 +297,12 @@ def emitted(wr):
 
 
 def scope_ready():
-    stub = types.SimpleNamespace(_synced=core.Core._synced, sol_wallets=set(), my_wallets={})
-    return core.Core._scope_ready(stub, "bsc")
+    stub = types.SimpleNamespace(_synced=core_recon.ReconMixin._synced, sol_wallets=set(), my_wallets={})
+    return core_recon.ReconMixin._scope_ready(stub, "bsc")
 
 
 def cur():
-    return common.read_json(CPATH, {})
+    return statefile.read_json(CPATH, {})
 
 
 def cycle(w):

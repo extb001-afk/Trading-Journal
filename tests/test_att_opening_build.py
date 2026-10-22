@@ -2,33 +2,32 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import W, Reader
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402
+from _ingest import W, Reader  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_chainid": 1, "conf_depth": 12, "blocks_per_day": 7200,
                               "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "eth", "address": W, "label": "w"}],
            "native_symbol": {"eth": "ETH"}, "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import acct_norm
-import common
-import core
-import db as dbm
-import histcurve
-import netpace
-import web
+import acct_norm  # noqa: E402
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import db as dbm  # noqa: E402
+import histcurve  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 try:
-    import discopen
+    import discopen  # noqa: E402
 except ImportError as e:
     chk(False, "발견 시점 기초 잔고 모듈(src/discopen.py) 있음", repr(e))
     T.finish()
@@ -62,9 +61,9 @@ def feed(c, hx, s):
     c._drain_stream("evm", Reader([{"v": 1, "kind": "evm_tx", "chain": "eth", "txhash": hx, "wallets": [W], "snapshot": s, "ts": 1}]), 0, 0)
 
 
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 os.environ["TJ_NEGABS"] = "0"
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 feed(c, h(1), snap(h(1), T0, 1500, X, W, value=2 * E18, data="0x"))
 feed(c, h(2), snap(h(2), TA, 2000, W, TKN, toks=[(W, X, TKN, "TKN", 600 * E18)], fee=10 ** 15))
 TKS, TB = "0x" + "e2" * 20, NOW - 3 * DAY
@@ -88,20 +87,20 @@ fake_lookup._tj_test_mock = True
 histcurve.DAYCLOSE.lookup = fake_lookup
 k9, k9s = f"eth:{TKN}", f"eth:{TKS}"
 json.dump({"usd": {"ETH": 2000.0}, "usd_ts": {"ETH": NOW}, "rate": 1400.0, "updated": NOW, "dex_usd": {k9: 2.0, k9s: 3.0}, "dex_ts": {k9: NOW, k9s: NOW},
-           "dex_res": {k9: 1e6, k9s: 1e6}, "dex_res_ts": {k9: NOW, k9s: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(web.SPOT_PATH, "w"))
+           "dex_res": {k9: 1e6, k9s: 1e6}, "dex_res_ts": {k9: NOW, k9s: NOW}, "fx_basis": 1400.0, "ex_usd": {}, "ex_ts": {}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
 
 
 def build():
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
     global BB
     b = BB = web.StateBuilder()
     b.skip_gen_check = True
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         return b._build(conn)["fields"]
     finally:
@@ -143,6 +142,6 @@ c.conn.execute("INSERT INTO raw_ex (exchange, kind, uuid, revision, payload, obs
 c.conn.commit()
 build()
 chk(isinstance(xqb0, dict) and xqb0.get("xq") == "" and getattr(BB, "_xq9", None) == ("upbit", ""),
-    "fixc1010 빌드 배선: 처음 기준 = 거래소 없음('') · 그 뒤 업비트 대사 = 지금 'upbit' · 기준 그대로('' — 새 거래소로 판정)", (xqb0, getattr(BB, "_xq9", None)))
+    "빌드 배선: 처음 기준 = 거래소 없음('') · 그 뒤 업비트 대사 = 지금 'upbit' · 기준 그대로('' — 새 거래소로 판정)", (xqb0, getattr(BB, "_xq9", None)))
 c.conn.close()
 T.finish()

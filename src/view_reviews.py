@@ -1,5 +1,5 @@
 from __future__ import annotations
-import common
+import paths, statefile
 import os
 import re
 from datetime import datetime
@@ -37,8 +37,8 @@ class ReviewsMixin:
         return " · ".join(why) or None
 
     def _merge_llm_reviews(self, reviews, day_ix, rbd, fbd, today_iso, rbdk=None, fbdk=None):
-        llm_path = os.path.join(common.STATE_DIR, "reviews_llm.json")
-        llm = (common.read_json(llm_path, {}) or {}) if os.path.exists(llm_path) else {}
+        llm_path = paths.state("reviews_llm.json")
+        llm = (statefile.read_json(llm_path, {}) or {}) if os.path.exists(llm_path) else {}
         items = []
         for key, rv in llm.items():
             if not isinstance(rv, dict) or not rv.get("s") or not isinstance(rv.get("fp"), dict):
@@ -73,8 +73,8 @@ class ReviewsMixin:
         return round(tot, 2)
 
     def _merge_weekly_reviews(self, rbd, fbd):
-        wk_path = os.path.join(common.STATE_DIR, "reviews_llm_weekly.json")
-        wk = (common.read_json(wk_path, {}) or {}) if os.path.exists(wk_path) else {}
+        wk_path = paths.state("reviews_llm_weekly.json")
+        wk = (statefile.read_json(wk_path, {}) or {}) if os.path.exists(wk_path) else {}
         weekly = {}
         keys = sorted((k9 for k9, v9 in wk.items() if isinstance(v9, dict) and isinstance(v9.get("fp"), dict)))
         kset = set(keys)

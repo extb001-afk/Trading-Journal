@@ -2,28 +2,28 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time as _rt
-import types
+import json  # noqa: E402
+import os  # noqa: E402
+import time as _rt  # noqa: E402
+import types  # noqa: E402
 
-import common
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
+import config, paths  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
 
 
 def S(fn, *a, **k):
     try:
         return fn(*a, **k)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return f"예외:{type(e).__name__}"
 
 
@@ -71,7 +71,7 @@ cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}]
 json.dump(cfg, open(CFG_PATH, "w"))
 reg.FORCE_AVAILABLE.add("tron")
-INB = os.path.join(common.INBOX_DIR, "tron")
+INB = os.path.join(paths.INBOX_DIR, "tron")
 W = SegmentWriter(INB)
 st = cs.ChainState("tron")
 st.set_status(A, requested_from=0, available_from=0, scanned_through=100, details_complete_through=100)
@@ -92,12 +92,12 @@ while st.d["pending"] or not Ad.found:
 check("RQ1 장애 약 14.6시간 뒤 gap 1 · 대기 0", [g["id"] for g in st.d["gaps"]] == [UID] and not st.d["pending"]
       and 14 * 3600 < Clock.t - t0 < 15 * 3600, ((Clock.t - t0) / 3600, st.d["gaps"], list(st.d["pending"])))
 
-import health
-g6 = health.collect_nonevm_gaps(common.load_config())
+import health  # noqa: E402
+g6 = health.collect_nonevm_gaps(config.load_config())
 check("RQ6 헬스: 재시도 성공 전 미해소 1건(ledger:gap:tron 재료)", (g6.get("tron") or {}).get("n") == 1, g6)
 
-import core
-c = core.Core(common.load_config())
+import core  # noqa: E402
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
@@ -110,7 +110,7 @@ class BalAd(reg.ChainAdapter):
                 "_complete": True, "_source": "fake", "_ownership_version": "x"}
 
 
-c._nonevm_adapters = {"tron": BalAd({})}
+c.svc_recon._nonevm_adapters = {"tron": BalAd({})}
 
 
 def drain():
@@ -127,13 +127,13 @@ def drain():
 
 def recon():
     drain()
-    c._last_recon = 0
-    c.recon_pass({"tron"})
+    c.svc_recon._last_recon = 0
+    c.svc_recon.recon_pass({"tron"})
 
 
 recon()
-check("RQ7 gap 미해소 = 체인 준비 아님 · 대사 보류(recon_done_tron 없음)", not c._scope_ready("tron") and not c._meta_get("recon_done_tron"),
-      (c._scope_ready("tron"), c._meta_get("recon_done_tron")))
+check("RQ7 gap 미해소 = 체인 준비 아님 · 대사 보류(recon_done_tron 없음)", not c.svc_recon._scope_ready("tron") and not c._meta_get("recon_done_tron"),
+      (c.svc_recon._scope_ready("tron"), c._meta_get("recon_done_tron")))
 
 Ad.down = False
 f0 = Ad.fetches
@@ -149,7 +149,7 @@ check("RQ3 그 지갑 백필 완료(owner_done) · 체인 준비(ready) · 화�
       (st.owner_done(A), st.ready({A}), st.status_view().get(A)))
 check("RQ3 gap 이력 1줄은 남음(증거 · 해소로 판정)", len(st.d["gaps"]) == 1 and st.status_view()[A]["gaps"] == 1, st.d["gaps"])
 
-g6 = health.collect_nonevm_gaps(common.load_config())
+g6 = health.collect_nonevm_gaps(config.load_config())
 check("RQ6 헬스: 재시도 성공 뒤 미해소 0건(ledger:gap 풀림)", (g6.get("tron") or {}).get("n") == 0, g6)
 
 recon()

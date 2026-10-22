@@ -1,6 +1,6 @@
 from __future__ import annotations
 import acct_norm
-import common
+import paths, statefile
 import depaddr
 import json
 import os
@@ -11,8 +11,7 @@ import time
 from datetime import datetime
 from decimal import Decimal
 from view_common import CHAIN_NAME
-from view_common import DM_PATH
-from view_common import KST
+from timeutil import KST
 from view_common import SUB_TAG_RE
 from view_fut import FUT_CEX
 from view_fut import FUT_T_MIN_MS
@@ -35,7 +34,7 @@ from view_text import _human_dm
 from view_text import _scam_name
 from view_text import _short_addr
 import logging
-import calcguard
+import calcguard  # noqa: E402
 
 log = logging.getLogger('tj-web')
 
@@ -53,7 +52,7 @@ class IndexMixin:
                 perp_on = dict(self.__dict__.get("_perp_on_last") or {})
             else:
                 self.__dict__["_perp_on_last"] = perp_on
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_index:IndexMixin._futures_view", e9)
             perp_on = {}
             log.warning("퍼프 덱스 설정 읽기 실패(합류 생략): %s", e9)
@@ -61,8 +60,8 @@ class IndexMixin:
         pxf9, est_n9 = None, 0
         for ex9 in FUT_CEX + tuple(k9 for k9 in PERP_KEYS if k9 in perp_on):
             try:
-                d9 = common.read_json(
-                    os.path.join(common.STATE_DIR, f"futures_{ex9}.json"), {})
+                d9 = statefile.read_json(
+                    paths.state(f"futures_{ex9}.json"), {})
             except SystemExit:
                 log.warning("선물 스냅숏 손상: %s — 이번 빌드에서 제외", ex9)
                 continue
@@ -134,7 +133,7 @@ class IndexMixin:
             dt9 = datetime.fromtimestamp(t9 / 1000, KST)
             dk9 = dt9.strftime("%Y-%m-%d")
             by_date[dk9] = by_date.get(dk9, 0) + amt9
-            k9 = amt9 * (fxb.rate_at(t9 // 1000) if fxb else float(self.spot.rate or 1384))
+            k9 = amt9 * (fxb.rate_at(t9 // 1000) if fxb else float(self.spot.rate or acct_norm.DEFAULT_KRW_USD))
             by_date_krw[dk9] = by_date_krw.get(dk9, 0) + k9
             fev9.append((dk9, t9, amt9, k9, r9))
             x9 = by_date_ex.setdefault((dk9, r9.get("ex")), [0.0, 0.0, 0, 0])
@@ -304,7 +303,7 @@ class IndexMixin:
             r9 = conn.execute("SELECT " + rawtx_cache.signer_cols(chain) + " FROM raw_txs WHERE chain=? AND txhash=? AND json_valid(snapshot)",
                               (chain, txh)).fetchone()
             return (r9[0], r9[1], r9[2]) if r9 else None
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_index:IndexMixin._tx_signer", _cg9)
             return None
 
@@ -338,7 +337,7 @@ class IndexMixin:
         try:
             sig = (tuple(conn.execute("SELECT COUNT(*), MAX(observed_at) FROM raw_ex WHERE kind IN ('deposit','withdraw')").fetchone()),
                    conn.execute("SELECT MAX(posting_id) FROM postings").fetchone()[0])
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_index:IndexMixin._cex_proof", _cg9)
             sig = None
         cache = self.__dict__.get("_cex_proof_cache")
@@ -392,7 +391,7 @@ class IndexMixin:
             return self._todst
         out = dict(getattr(self, "_todst", {}) or {})
         try:
-            with open(DM_PATH, "r", encoding="utf-8") as f:
+            with open(paths.state("pending_dm.jsonl"), "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except OSError:
             lines = []
@@ -411,7 +410,7 @@ class IndexMixin:
                 try:
                     row = conn.execute(
                         "SELECT symbol FROM assets WHERE asset_id=?", (int(aid_s),)).fetchone()
-                except Exception as _cg9:
+                except Exception as _cg9:  # noqa: BLE001 [fallback]
                     calcguard.swallowed("view_index:IndexMixin._transfer_out_dest", _cg9)
                     row = None
                 if row and row["symbol"]:
@@ -454,7 +453,7 @@ class IndexMixin:
             for a, labs in depaddr.hint_index().items():
                 if labs:
                     idx.setdefault(a, labs[0][0])
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_index:IndexMixin._ex_addr_index", _cg9)
             pass
         self._exidx, self._exidx_at = idx, time.time()
@@ -462,7 +461,7 @@ class IndexMixin:
 
     def _dm_records(self) -> list:
         try:
-            st = os.stat(DM_PATH)
+            st = os.stat(paths.state("pending_dm.jsonl"))
         except OSError:
             self._dm_cache = None
             return []
@@ -471,7 +470,7 @@ class IndexMixin:
             c = {"ino": st.st_ino, "off": 0, "recs": []}
         if st.st_size > c["off"]:
             try:
-                with open(DM_PATH, "rb") as f:
+                with open(paths.state("pending_dm.jsonl"), "rb") as f:
                     f.seek(c["off"])
                     buf = f.read(st.st_size - c["off"])
             except OSError:
@@ -555,8 +554,8 @@ class IndexMixin:
         out = []
         try:
             rows = conn.execute("SELECT chain, txhash FROM tx_class WHERE event='UNKNOWN'").fetchall()
-        except Exception as e:
-            calcguard.swallowed("view_index:IndexMixin._pend_unknown", e)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_index:IndexMixin._pend_unknown[rows]", e)
             log.warning("분류 보류 검토 행 읽기 실패(건너뜀): %s", e)
             return out
         for r in rows:
@@ -568,8 +567,8 @@ class IndexMixin:
             try:
                 t9 = conn.execute("SELECT MIN(event_ts) FROM postings WHERE source_kind='chain_tx' AND source_ns=? AND source_id=?",
                                   (ch, tx9)).fetchone()[0]
-            except Exception as _cg9:
-                calcguard.swallowed("view_index:IndexMixin._pend_unknown", _cg9)
+            except Exception as _cg9:   # noqa: BLE001 [fallback]
+                calcguard.swallowed("view_index:IndexMixin._pend_unknown[t9]", _cg9)
                 t9 = None
             out.append((int(t9 or 0), {
                 "key": key,
@@ -685,7 +684,7 @@ class IndexMixin:
     def _krw_day_index(self, conn, acts):
         try:
             kf9 = self._krw_flows(conn)
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_index:IndexMixin._krw_day_index", e9)
             log.warning("그날 기록 원화 입출금 색인 실패(목록에서 빠짐): %s", e9)
             kf9 = None

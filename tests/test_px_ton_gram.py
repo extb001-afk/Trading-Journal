@@ -2,15 +2,15 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import time
-import urllib.error
+import time  # noqa: E402
+import urllib.error  # noqa: E402
 
-import chain_registry
-import pricing
-import spamguard
-import web
+import chain_registry  # noqa: E402
+import pricing  # noqa: E402
+import spamguard  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 pricing.time.sleep = lambda s: None
@@ -28,8 +28,8 @@ def _bn():
 
 
 pricing.binance_spot_usdt = _bn
-pricing.upbit_spot_krw = lambda syms: {s: BOOK["krw"][s] for s in syms if s in BOOK["krw"]}
-web.Spot._upbit_alt_global = lambda self, syms, bn, now: {}
+pricing.upbit_spot_krw = lambda syms, dead=None, answered=None, seen=None: {s: BOOK["krw"][s] for s in syms if s in BOOK["krw"]}
+web.Spot._upbit_alt_global = lambda self, syms, bn, now, **k: {}
 web.Spot._gt_round = lambda self, now: None
 web.Spot._ds_round = lambda self, now: None
 web.Spot._okx_creds = lambda self: None
@@ -119,8 +119,8 @@ chk(set(MAP9) == {chain_registry.native_symbol("ton")} and MAP9.get("TON") == "G
 chk(spamguard.major_of("TON") is None and "TON" not in spamguard.MAJORS,
     "G8 'TON' = 대표 심볼 밖(같은 심볼 CA 토큰은 보유 평가에서 심볼 시세 안 받음)", spamguard.major_of("TON"))
 
-import core
-import db as dbm
+import core  # noqa: E402
+import db as dbm  # noqa: E402
 
 
 class _Px:
@@ -139,17 +139,18 @@ class _Px:
 cc = dbm.open_db(T.TMP + "/core_ton.db")
 C = core.Core.__new__(core.Core)
 C.conn, C.wrapped, C.native_sym, C.px = cc, {}, {"ton": "TON", "eth": "ETH"}, _Px()
-C._sym_px_verdict = lambda aid, px, sym=None, ts_ms=None: "unknown"
+core.core_svc.attach(C)
+C.svc_price._sym_px_verdict = lambda aid, px, sym=None, ts_ms=None: "unknown"
 TOK = "0x" + "2b" * 20
 a_nat = C.asset_id("native", "ton", None, "TON", 9)
 a_tok = C.asset_id("token", "eth", TOK, "TON", 18)
 del _Px.calls[:]
-chk(C._leg_px(a_nat, 1_790_000_000) == 2.5 and _Px.calls == ["TON"], "G9 TON 체인 네이티브 원가 = 심볼 1분봉 'TON'", _Px.calls)
+chk(C.svc_price._leg_px(a_nat, 1_790_000_000) == 2.5 and _Px.calls == ["TON"], "G9 TON 체인 네이티브 원가 = 심볼 1분봉 'TON'", _Px.calls)
 del _Px.calls[:]
-v = C._leg_px(a_tok, 1_790_000_000)
+v = C.svc_price._leg_px(a_tok, 1_790_000_000)
 chk(v == 1.1 and not _Px.calls and _Px.checked[-1] == ("TON", "eth", None), "G9 같은 심볼 CA 토큰 = 심볼 1분봉 후보 없음(코인게코 컨트랙트 값만)",
     (v, _Px.calls, _Px.checked[-1:]))
-chk(C._leg_px_sym(a_nat) == "TON" and C._leg_px_sym(a_tok) is None, "G9 선조회 심볼: 네이티브 = TON · 같은 심볼 CA 토큰 = 없음",
-    (C._leg_px_sym(a_nat), C._leg_px_sym(a_tok)))
+chk(C.svc_price._leg_px_sym(a_nat) == "TON" and C.svc_price._leg_px_sym(a_tok) is None, "G9 선조회 심볼: 네이티브 = TON · 같은 심볼 CA 토큰 = 없음",
+    (C.svc_price._leg_px_sym(a_nat), C.svc_price._leg_px_sym(a_tok)))
 
 T.finish()

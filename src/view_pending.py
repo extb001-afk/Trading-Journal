@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from typing import Callable
 from view_text import _GP_KO
 from view_text import _scam_name
 from view_text import _usd_txt
@@ -97,3 +98,40 @@ def unpriced_facts(unpriced_w, cap: int = UNPRICED_FACTS_MAX) -> list:
             | ({"ent": w9["ent"]} if w9.get("ent") else {})
             for w9 in sorted(unpriced_w, key=lambda w9: -max(w9["cost"], w9["ref"]))[:max(0, int(cap))]
             if max(w9["cost"], w9["ref"]) >= 1]
+
+
+def unpriced_pairs(rows: list, pairs_of: dict, locs: dict, zero_value: dict = None, keep: set = frozenset()) -> dict:
+    zl = zero_value.get("tokens") if isinstance(zero_value, dict) else None
+    zv = {str(x).strip().lower() for x in (zl if isinstance(zl, list) else ()) if isinstance(x, str)}
+    out = {}
+    for r in rows or ():
+        k = str(r.get("key") or "")
+        if k[:1] != "g" or not k[1:].isdigit() or int(k[1:]) in keep or r.get("price") or r.get("guard") or r.get("unv") \
+                or not float(r.get("qty") or 0) > 0:
+            continue
+        cas = {}
+        for ch, ca in pairs_of.get(int(k[1:])) or ():
+            p = (str(ch), str(ca or "").lower())
+            if p[1] and f"{p[0]}:{p[1]}" not in zv:
+                cas.setdefault(p[0], set()).add(p)
+        for lc in locs.get(int(k[1:])) or ():
+            w = str(lc["location"] or "").split(":")
+            if w[0] == "wallet" and len(w) >= 3 and w[2] and w[1] in cas and float(lc["qty_norm"] or 0) > 0:
+                out.setdefault(w[2].lower(), set()).update(cas[w[1]])
+    return out
+
+
+def merge_scoped(merge: Callable[..., dict], excl: dict, state: dict, **kw) -> dict:
+    addrs, known = kw.pop("only_addrs", None), kw.pop("known_pairs")
+    groups = {}
+    for a in (((state or {}).get("wallets") or {}) if addrs is None else addrs):
+        groups.setdefault(frozenset((excl or {}).get(a) or ()), set()).add(a)
+    if len(groups) <= 1:
+        ex = next(iter(groups), frozenset())
+        return merge(state, known_pairs=(known - ex) if ex else known, only_addrs=addrs, **kw)
+    parts = [merge(state, known_pairs=known - ex, only_addrs=grp, **kw) for ex, grp in groups.items()]
+    items = sorted((x for m in parts for x in m["items"]), key=lambda x: x["addr"])
+    debts = sorted((x for m in parts for x in m["debts"]), key=lambda x: x["addr"])
+    return {"items": items, "debts": debts, "wallets": dict(sorted(kv for m in parts for kv in m["wallets"].items())),
+            "onlyUsd": round(sum(x["usd"] for x in items), 2), "debtUsd": round(sum(x["usd"] for x in debts), 2),
+            "at": min((x["at"] for x in items + debts), default=None)}

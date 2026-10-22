@@ -26,6 +26,6 @@ def _eval_budget_msg(cap, side, side_ko) -> str:
     if callable(fn):
         try:
             return str(fn(cap, side))
-        except Exception:
+        except Exception:   # noqa: BLE001 [optional]
             pass
     return f"오늘 AI {side_ko} 평가 한도({cap}회)를 다 썼어요"

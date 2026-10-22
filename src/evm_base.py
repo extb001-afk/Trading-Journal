@@ -4,7 +4,7 @@ import threading
 import time
 import re
 import urllib.request
-import common
+import paths, statefile
 import bf_engine
 import logging
 
@@ -78,11 +78,11 @@ BACKFILL_PAGES_MAX = 400
 
 def _dm(kind: str, text: str):
     try:
-        fd = os.open(os.path.join(common.STATE_DIR, "pending_dm.jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = os.open(paths.state("pending_dm.jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": int(time.time()), "kind": kind, "text": text, "payload": None},
                                ensure_ascii=False) + "\n")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [optional]
         log.warning("DM 큐 기록 실패: %s", e)
 
 
@@ -179,12 +179,12 @@ def es_daily_trip(text: str, now: float = None) -> float:
 
 def _revoke_stamp_disk(cursor_path: str, tok: bool = True):
     try:
-        cur9 = common.read_json(cursor_path, {})
+        cur9 = statefile.read_json(cursor_path, {})
         a9 = cur9.pop("_synced_at", None) is not None
         b9 = tok and cur9.pop("_synced_tok_at", None) is not None
         if a9 or b9:
-            common.atomic_write_json(cursor_path, cur9)
-    except Exception as e:
+            statefile.atomic_write_json(cursor_path, cur9)
+    except Exception as e:  # noqa: BLE001 [optional]
         log.warning("도장 철회 실패(무시): %s", e)
 
 
@@ -194,7 +194,7 @@ def http_json(url: str, prio: str = "fg", deadline: float = None, retries: int =
 
 
 def leaf_overflow_path(chain: str) -> str:
-    return os.path.join(common.STATE_DIR, f"leaf_later_overflow_{chain}.jsonl")
+    return paths.state(f"leaf_later_overflow_{chain}.jsonl")
 
 
 def leaf_overflow_read(path: str) -> list:
@@ -216,13 +216,32 @@ def leaf_overflow_read(path: str) -> list:
     return out
 
 
+def new_view_wallets(wt: object, durable: bool = True) -> bool:
+    cur = sorted({str(w).lower() for w in wt.wallets})
+    known = wt.cursor.get("_wallets")
+    if not isinstance(known, list):
+        known = [k for k in wt.cursor if not str(k).startswith("_")]
+    fresh = bool(known) and bool(set(cur) - {str(k).lower() for k in known})
+    if fresh and wt.emitted:
+        log.warning("%s 새 관점 지갑 감지 — emitted %d건 초기화(재방출 허용)", wt.chain, len(wt.emitted))
+        wt.emitted.clear()
+        if durable:
+            statefile.atomic_write_json(wt.emitted_path, [])
+    if known and wt.cursor.get("_wallets") != cur:
+        wt.cursor["_wallets"] = cur
+        statefile.atomic_write_json(wt.cursor_path, wt.cursor)
+    return fresh
+
+
 def rpc_handback(wt, target: str):
     cur = wt.cursor
     ts9 = time.strftime("%Y%m%d_%H%M%S")
-    common.atomic_write_json(wt.cursor_path + f".rpc_handback_{ts9}", cur)
+    statefile.atomic_write_json(wt.cursor_path + f".rpc_handback_{ts9}", cur)
     jobs = {k[4:]: v for k, v in cur.items() if k.startswith("_bk:") and isinstance(v, dict)}
     new = {k: v for k, v in cur.items() if k.startswith("_cov:") or (not k.startswith("_") and isinstance(v, int)
                                                                     and not isinstance(v, bool))}
+    if isinstance(cur.get("_wallets"), list):
+        new["_wallets"] = list(cur["_wallets"])
     rs, drop = [], []
     for w, j in jobs.items():
         try:
@@ -261,11 +280,11 @@ def rpc_handback(wt, target: str):
     if qd and target == "etherscan":
         new["_quarantine_left"] = qd
     elif qd:
-        pp = os.path.join(common.STATE_DIR, f"pending_detail_{wt.chain}.json")
-        pend9 = common.read_json(pp, {}) or {}
+        pp = paths.state(f"pending_detail_{wt.chain}.json")
+        pend9 = statefile.read_json(pp, {}) or {}
         for h in qd:
             pend9.setdefault(str(h).lower(), 0)
-        common.atomic_write_json(pp, pend9)
+        statefile.atomic_write_json(pp, pend9)
     hq = dict(cur["_hq"]) if isinstance(cur.get("_hq"), dict) else {}
     tl9 = cur.get("_trace_later") if isinstance(cur.get("_trace_later"), dict) else {}
     n_tl9 = 0
@@ -276,7 +295,7 @@ def rpc_handback(wt, target: str):
             keep9[h9.lower()] = dict(e9)
             n_tl9 += 1
     try:
-        with open(os.path.join(common.STATE_DIR, f"trace_later_overflow_{wt.chain}.jsonl"), encoding="utf-8") as f9:
+        with open(paths.state(f"trace_later_overflow_{wt.chain}.jsonl"), encoding="utf-8") as f9:
             for ln9 in f9:
                 try:
                     r9 = json.loads(ln9)
@@ -290,28 +309,28 @@ def rpc_handback(wt, target: str):
     except (OSError, TypeError, ValueError):
         pass
     if keep9:
-        tp9 = os.path.join(common.STATE_DIR, f"trace_later_left_{wt.chain}.json")
-        old9 = common.read_json(tp9, {})
+        tp9 = paths.state(f"trace_later_left_{wt.chain}.json")
+        old9 = statefile.read_json(tp9, {})
         old9 = old9 if isinstance(old9, dict) else {}
         old9.update(keep9)
-        common.atomic_write_json(tp9, old9)
+        statefile.atomic_write_json(tp9, old9)
     if hq and target == "etherscan":
-        hp = os.path.join(common.STATE_DIR, f"hq_left_{wt.chain}.json")
-        old9 = common.read_json(hp, {}) or {}
+        hp = paths.state(f"hq_left_{wt.chain}.json")
+        old9 = statefile.read_json(hp, {}) or {}
         for h in hq:
             old9.setdefault(str(h).lower(), 0)
-        common.atomic_write_json(hp, old9)
+        statefile.atomic_write_json(hp, old9)
     elif hq:
-        ep = os.path.join(common.STATE_DIR, f"enrich_{wt.chain}.json")
-        enr = common.read_json(ep, {}) or {}
+        ep = paths.state(f"enrich_{wt.chain}.json")
+        enr = statefile.read_json(ep, {}) or {}
         for h in hq:
             enr.setdefault(str(h).lower(), 0)
-        common.atomic_write_json(ep, enr)
+        statefile.atomic_write_json(ep, enr)
     new["_handback"] = {"at": int(time.time()), "from": "rpc", "first_backfill": len(drop), "internal_ranges": len(rs), "enrich": len(hq),
                         "leaf_later": len(ll9), "trace_later": n_tl9,
                         "backup": os.path.basename(wt.cursor_path + f".rpc_handback_{ts9}")}
     wt.cursor = new
-    common.atomic_write_json(wt.cursor_path, new)
+    statefile.atomic_write_json(wt.cursor_path, new)
     if os.path.exists(ovp9):
         try:
             os.remove(ovp9)

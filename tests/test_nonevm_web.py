@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check, Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check, Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import core
-import chain_registry as reg
-import address_codec as ac
+import config  # noqa: E402
+import core  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import address_codec as ac  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 NOW = int(time.time())
@@ -28,7 +28,7 @@ cfg = json.load(open(CFG_PATH))
 cfg["wallets"] = [dict(w, chain=w.get("chain") or ("sol" if w.get("type") == "sol" else "eth")) for w in cfg["wallets"]]
 cfg["chain_wallets"] = [{"chain": "tron", "address": ac.tron_display(A)}, {"chain": "sui", "address": N.OWN["sui"][0]}]
 json.dump(cfg, open(CFG_PATH, "w"))
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 c.conn.commit()
 
 
@@ -44,17 +44,17 @@ c.conn.commit()
 feed(N.rec("tron", U_UNK, T_UNK, [(A, "native", -7_000_000), (A, TKA, 100_000_000)], fees=[(A, 2_000_000)], hint="unknown"))
 feed(N.rec("tron", U_OUT, T_OUT, [(A, "native", -1_001_000)], fees=[(A, 1_000)], moves=[("native", A, X, 1_000_000)]))
 feed(N.rec("sui", "Rb9", T_OUT, [(N.OWN["sui"][0], "native", 5)], fees=[(N.OWN["sui"][0], -5)]), stream="sui")
-c._leg_px = lambda aid, ts: 1.0
+c.svc_price._leg_px = lambda aid, ts: 1.0
 c.px.fx_at = lambda *a, **k: 1400.0
 for u in (U_UNK, U_OUT):
-    c._price_tx("tron", u)
+    c.svc_price._price_tx("tron", u)
 c.conn.commit()
 check("전제: UNKNOWN 분류", c.conn.execute("SELECT event FROM tx_class WHERE txhash=?", (U_UNK,)).fetchone()["event"] == "UNKNOWN")
 c.conn.close()
 
-import acct_norm
-import pricing
-import web
+import acct_norm  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 
 def _no_price(url, *a, **k):
@@ -69,7 +69,7 @@ b = web.StateBuilder()
 web.BUILDER = b
 try:
     st = b.build()
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     import traceback
     traceback.print_exc()
     st = {"_exc": f"{type(e).__name__}: {e}"}

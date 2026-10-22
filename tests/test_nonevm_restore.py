@@ -2,19 +2,19 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import shutil
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
 
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
-import common
-import db as dbm
-import ledger_backup as lb
-import ledger_restore as LR
+import paths, statefile  # noqa: E402
+import db as dbm  # noqa: E402
+import ledger_backup as lb  # noqa: E402
+import ledger_restore as LR  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 chk = T.chk
 
 
@@ -48,11 +48,11 @@ chk(list(LR.coverage({"evm": (1, 0)}, os.path.join(S, "inbox"))) == ["evm", "sol
 chk(lb.prior_ledger_evidence(S) == [], "B1 흔적 없음 = 첫 설치(종전)")
 
 clear()
-common.atomic_write_json(os.path.join(S, "emitted_tron.json"), {"v": 1, "uids": {"ab" * 32: 1}})
+statefile.atomic_write_json(os.path.join(S, "emitted_tron.json"), {"v": 1, "uids": {"ab" * 32: 1}})
 ev = lb.prior_ledger_evidence(S)
 chk(any("tron" in e for e in ev), "B2 새 체인 수집기 방출 기록 + 빈 인박스 = 예전 원장 흔적", ev)
 clear()
-common.atomic_write_json(os.path.join(S, "emitted_tron.json"), {})
+statefile.atomic_write_json(os.path.join(S, "emitted_tron.json"), {})
 chk(lb.prior_ledger_evidence(S) == [], "B2 빈 방출 기록 = 흔적 아님")
 
 clear()
@@ -63,9 +63,9 @@ for s9 in ("evm", "sol", "bsc", "ex"):
     seg(s9, 1)
 seg("tron", 4)
 seg("sui", 1)
-common.atomic_write_json(os.path.join(S, "cursor_tron.json"), {"v": 1, "lanes": {"history": {"cursor": "c9"}}})
-common.atomic_write_json(os.path.join(S, "emitted_tron.json"), {"v": 1, "uids": {"x": 1}})
-common.atomic_write_json(os.path.join(S, "cursor_sui.json"), {"v": 1})
+statefile.atomic_write_json(os.path.join(S, "cursor_tron.json"), {"v": 1, "lanes": {"history": {"cursor": "c9"}}})
+statefile.atomic_write_json(os.path.join(S, "emitted_tron.json"), {"v": 1, "uids": {"x": 1}})
+statefile.atomic_write_json(os.path.join(S, "cursor_sui.json"), {"v": 1})
 p = LR.plan(BK)
 chk(p["coverage"]["sui"]["state"] == "replay" and p["coverage"]["tron"]["state"] == "gap", "B3 새 체인 인박스 판정(sui 그대로 · tron gap)",
     {k: v["state"] for k, v in p["coverage"].items()})
@@ -76,8 +76,8 @@ chk(os.path.exists(os.path.join(S, "cursor_tron.json")), "B3 미리보기는 파
 
 logs = []
 clear()
-common.atomic_write_json(os.path.join(S, "cursor_btc.json"), {"v": 1})
-common.atomic_write_json(os.path.join(S, "emitted_btc.json"), {"v": 1, "uids": {}})
+statefile.atomic_write_json(os.path.join(S, "cursor_btc.json"), {"v": 1})
+statefile.atomic_write_json(os.path.join(S, "emitted_btc.json"), {"v": 1, "uids": {}})
 LR.new_ledger(False, fresh_collect=True, state_dir=S, log=logs.append, proc_check=False)
 chk(any("cursor_btc.json" in x and "emitted_btc.json" in x for x in logs), "B4 새 원장 --fresh-collect = 새 체인 수집 기록도 옆으로", logs)
 chk("btc_watch.py" in LR.COLLECTOR_UNITS and "unit_runner.py tron" in LR.COLLECTOR_UNITS and LR.COLLECTOR_UNITS[:5] == (

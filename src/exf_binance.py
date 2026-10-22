@@ -1,13 +1,11 @@
 from __future__ import annotations
-import hashlib
-import hmac
 import json
 import os
 import time
 import urllib.request
 from decimal import Decimal
 from decimal import InvalidOperation
-import common
+import ex_sign, paths, statefile
 from exf_net import BN_UNI_RETRY
 from exf_net import BN_UNI_TTL
 from exf_net import DAY
@@ -48,6 +46,7 @@ from exf_net import _recon_hold_clear
 from exf_net import _srv_ms
 from exf_net import _sub_bal
 from exf_net import _xm
+from exf_net import fut_first_t0
 from exf_net import fut_rcpt
 from exf_net import http_json
 from exf_net import norm_fill
@@ -74,7 +73,7 @@ def fetch_binance(env, t0: int, t1: int):
         q["timestamp"] = _srv_ms("api.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
-        sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.binance_sign(sec, qs)
         return http_json(f"https://api.binance.com{path}?{qs}&signature={sig}",
                          {"X-MBX-APIKEY": key})
 
@@ -129,7 +128,7 @@ def _binance_caller(env):
         q["timestamp"] = _srv_ms("api.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
-        sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.binance_sign(sec, qs)
         return http_json(f"https://api.binance.com{path}?{qs}&signature={sig}",
                          {"X-MBX-APIKEY": key})
     return call
@@ -240,11 +239,11 @@ _BN_UNI = {"ts": 0.0, "fail": 0.0, "sym": None, "path": None}
 
 def _bn_universe(now: float):
     u = _BN_UNI
-    p = os.path.join(common.STATE_DIR, BN_UNI_NAME)
+    p = paths.state(BN_UNI_NAME)
     if u.get("path") != p:
         u.update(ts=0.0, fail=0.0, sym=None, path=p)
         try:
-            d = common.read_json(p, {}) if os.path.exists(p) else {}
+            d = statefile.read_json(p, {}) if os.path.exists(p) else {}
         except SystemExit:
             d = {}
         sy = d.get("symbols") if isinstance(d, dict) else None
@@ -273,9 +272,9 @@ def _bn_universe(now: float):
             if not sym:
                 raise RuntimeError("exchangeInfo 심볼 0")
             u["sym"], u["ts"] = sym, float(now)
-            common.atomic_write_json(p, {"ts": int(now), "symbols": {k: list(v) for k, v in sym.items()}})
+            statefile.atomic_write_json(p, {"ts": int(now), "symbols": {k: list(v) for k, v in sym.items()}})
             log.info("binance 심볼 목록 갱신: %d개(상장 폐지 포함)", len(sym))
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             u["fail"] = float(now)
             log.warning("binance exchangeInfo 갱신 실패(%s · 1시간 뒤 재시도): %s",
                         "직전 목록 사용" if u["sym"] else "종전 주요 쿼트 5종으로", _xm(repr(e))[:140])
@@ -426,7 +425,7 @@ def fills_binance(env, st, t0: int, t1: int):
                     open_now = sorted({str(o.get("symbol") or "").upper() for o in oo if isinstance(o, dict) and o.get("symbol")})
             except RateLimited:
                 raise
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [optional]
                 log.warning("binance 미체결 주문 조회 실패(표적 조회 재료만 생략): %s", _xm(repr(e9))[:120])
         for p9 in sorted(p for p, v in cand.items() if v[0] in dirty):
             poll(p9, *cand[p9])
@@ -536,9 +535,9 @@ def fills_binance(env, st, t0: int, t1: int):
                 b9, q9 = _bn_split(pr, bq, uni)
                 mpairs[ck] = (pr, "TRUE" if ck.startswith("i:") else "FALSE", b9, q9)
             for b9 in sorted(mcur):
-                for q9 in BINANCE_QUOTES:
-                    if b9 != q9 and (not uni or b9 + q9 in uni):
-                        mpairs.setdefault(f"c:{b9}{q9}", (b9 + q9, "FALSE", b9, q9))
+                for p9, bb9, q9 in pairs_of(b9):
+                    if bb9 != q9 and (q9 in BINANCE_QUOTES or not uni or uni[p9][3]):
+                        mpairs.setdefault(f"c:{p9}", (p9, "FALSE", bb9, q9))
             for s9 in icur:
                 b9, q9 = _bn_split(s9, bq, uni)
                 mpairs.setdefault(f"i:{s9}", (s9, "TRUE", b9, q9))
@@ -590,7 +589,7 @@ def fills_binance(env, st, t0: int, t1: int):
             _recon_hold_clear(st, "margin")
         except (RateLimited, SignatureExpired) as e9m:
             partial = _xm(str(e9m))[:160]
-        except Exception as e9m:
+        except Exception as e9m:  # noqa: BLE001 [fallback]
             msg9m = _xm(repr(e9m))
             if isinstance(e9m, urllib.error.HTTPError):
                 msg9m += " " + _xm(_err_body(e9m)[:200])
@@ -629,8 +628,9 @@ def convert_binance(env, t0: int, t1: int):
     while s < t1:
         e = min(s + 30 * DAY - 1, int(t1))
         start = s * 1000
+        end_ms = min(e * 1000 + 999, int(t1) * 1000)
         for _pg in range(50):
-            d = call("/sapi/v1/convert/tradeFlow", {"startTime": start, "endTime": e * 1000, "limit": 1000})
+            d = call("/sapi/v1/convert/tradeFlow", {"startTime": start, "endTime": end_ms, "limit": 1000})
             rows = d.get("list") if isinstance(d, dict) else None
             if not isinstance(rows, list):
                 raise RuntimeError(f"binance convert 응답 형식 오류: {str(d)[:100]}")
@@ -661,7 +661,7 @@ def convert_binance_dust(env, t0: int, t1: int):
     s = int(t0)
     while s < t1:
         e = min(s + 90 * DAY - 1, int(t1))
-        d = call("/sapi/v1/asset/dribblet", {"startTime": s * 1000, "endTime": e * 1000})
+        d = call("/sapi/v1/asset/dribblet", {"startTime": s * 1000, "endTime": min(e * 1000 + 999, int(t1) * 1000)})
         if not isinstance(d, dict):
             raise RuntimeError("binance dribblet 응답 형식 오류")
         rows = d.get("userAssetDribblets")
@@ -699,7 +699,7 @@ def _binance_signed(env, path, params=None, method="GET"):
     p["timestamp"] = _srv_ms("api.binance.com")
     p["recvWindow"] = 10000
     qs = urllib.parse.urlencode(p)
-    sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    sig = ex_sign.binance_sign(sec, qs)
     url = f"https://api.binance.com{path}?{qs}&signature={sig}"
     return _http_json_err(url, {"X-MBX-APIKEY": key},
                           data=(b"" if method == "POST" else None),
@@ -801,7 +801,7 @@ def _bal_binance(env):
         _gov_prepare("fapi.binance.com", "/fapi/v2/balance")
         q2 = urllib.parse.urlencode({"timestamp": _srv_ms("fapi.binance.com"),
                                      "recvWindow": 10000})
-        sig2 = hmac.new(sec2.encode(), q2.encode(), hashlib.sha256).hexdigest()
+        sig2 = ex_sign.binance_sign(sec2, q2)
         rows = _http_json_err(f"https://fapi.binance.com/fapi/v2/balance?{q2}&signature={sig2}",
                               {"X-MBX-APIKEY": key2})
         for a in _balance_rows(rows):
@@ -895,6 +895,9 @@ def _bal_binance(env):
     return out
 
 
+BN_INCOME_KEEP_DAYS = 364
+
+
 BN_INCOME_MS_PAGES = 20
 
 
@@ -908,11 +911,11 @@ def _fut_binance(env):
         q["timestamp"] = _srv_ms("fapi.binance.com")
         q["recvWindow"] = 10000
         qs = urllib.parse.urlencode(q)
-        sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        sig = ex_sign.binance_sign(sec, qs)
         return _http_json_err(f"https://fapi.binance.com{path}?{qs}&signature={sig}",
                               {"X-MBX-APIKEY": key})
 
-    st = common.read_json(_fut_path("binance"), {})
+    st = statefile.read_json(_fut_path("binance"), {})
     acct = fcall("/fapi/v2/account")
     poss = []
     rows9 = fcall("/fapi/v2/positionRisk")
@@ -930,8 +933,11 @@ def _fut_binance(env):
                      "margin_mode": (str(p.get("marginType")).lower() if str(p.get("marginType") or "").lower() in ("cross", "isolated") else None),
                      "liq": float(p.get("liquidationPrice") or 0)})
     cross_syms9 = {str(p9.get("symbol") or "") for p9 in poss if p9.get("margin_mode") != "isolated"}
-    cur = int((st.get("cursor") or {}).get("income")
-              or (int(time.time()) - 150 * 86400) * 1000)
+    cur = (st.get("cursor") or {}).get("income")
+    if not cur:
+        first_t0 = fut_first_t0("binance", time.time())
+        cur = (max(first_t0, int(time.time()) - BN_INCOME_KEEP_DAYS * 86400) if first_t0 is not None else int(time.time()) - 150 * 86400) * 1000
+    cur = int(cur)
     ev = list(st.get("events") or [])
     seen = {(r.get("uid") or f"{r['t']}:{r['kind']}:{r['amount']}") for r in ev}
     kmap = {"REALIZED_PNL": "REALIZED", "FUNDING_FEE": "FUNDING",
@@ -1056,7 +1062,7 @@ def _px_binance(fcall, ev, new_ev):
                     jobs[0] = [sym, start, end]
             except RateLimited:
                 raise
-            except Exception as e9x:
+            except Exception as e9x:   # noqa: BLE001 [fallback]
                 fk = f"{sym}:{end}"
                 n9 = fails.get(fk, 0) + 1
                 msg9 = _xm(repr(e9x))
@@ -1097,5 +1103,74 @@ def _bn_deriv_get(env, host, path, params=None):
     q["timestamp"] = _srv_ms(host)
     q["recvWindow"] = 10000
     qs = urllib.parse.urlencode(q)
-    sig = hmac.new(sec.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    sig = ex_sign.binance_sign(sec, qs)
     return _http_json_err(f"https://{host}{path}?{qs}&signature={sig}", {"X-MBX-APIKEY": key})
+
+
+BN_DIV_PATH = "/sapi/v1/asset/assetDividend"
+BN_DIV_LIMIT = 500
+BN_DIV_SPAN = 89 * DAY
+BN_DIV_MIN_SPLIT_MS = 1000
+BN_DIV_MAX_CALLS = 300
+BN_DIV_SKIP_WORDS = ("swap", "redenomination", "rebrand", "migration", "conversion", "convert", "token upgrade", "contract upgrade")
+
+
+def dividend_binance(env: dict, t0: int, t1: int, call: "object" = None, pace: "float | None" = None) -> list:
+    call = call or _binance_caller(env)
+    pace = PACE if pace is None else pace
+    got, n_call = {}, [0]
+
+    def window(s_ms, e_ms):
+        n_call[0] += 1
+        if n_call[0] > BN_DIV_MAX_CALLS:
+            raise RuntimeError(f"binance assetDividend 조회 {BN_DIV_MAX_CALLS}회 초과(창 나누기 과다) — 이번 주기 보류")
+        d = call(BN_DIV_PATH, {"startTime": int(s_ms), "endTime": int(e_ms), "limit": BN_DIV_LIMIT})
+        if not isinstance(d, dict) or d.get("total") is None:
+            raise RuntimeError(f"binance assetDividend 응답 형식 오류(total 없음): {str(d)[:100]}")
+        try:
+            total_n = int(str(d.get("total")).strip())
+        except (TypeError, ValueError):
+            raise RuntimeError("binance assetDividend total 형식 오류") from None
+        rows = d.get("rows")
+        if rows is None and total_n == 0:
+            rows = []
+        if not isinstance(rows, list):
+            raise RuntimeError(f"binance assetDividend 응답 형식 오류: {str(d)[:100]}")
+        time.sleep(pace)
+        if len(rows) >= BN_DIV_LIMIT or total_n > len(rows):
+            if e_ms - s_ms < BN_DIV_MIN_SPLIT_MS:
+                raise RuntimeError(f"binance assetDividend 1초 창에 {len(rows)}건 이상 — 나눌 수 없음(창 보류)")
+            mid_ms = (int(s_ms) + int(e_ms)) // 2
+            window(s_ms, mid_ms)
+            window(mid_ms, e_ms)
+            return
+        for r in rows:
+            if not isinstance(r, dict):
+                raise RuntimeError("binance assetDividend 행 형식 오류")
+            rid = r.get("id")
+            asset = str(r.get("asset") or "").strip().upper()
+            try:
+                amt = Decimal(str(r.get("amount")))
+                div_ms = int(float(r.get("divTime")))
+            except (InvalidOperation, TypeError, ValueError):
+                raise RuntimeError("binance assetDividend 수량·시각 형식 오류") from None
+            if 0 < div_ms < 10 ** 12:
+                div_ms *= 1000
+            if rid in (None, "") or not asset or not amt.is_finite() or div_ms <= 0:
+                raise RuntimeError("binance assetDividend 필드 누락(id·asset·amount·divTime)")
+            info = r.get("enInfo")
+            if amt <= 0 or not isinstance(info, str) or not info.strip() or any(w in info.lower() for w in BN_DIV_SKIP_WORDS):
+                continue
+            got[f"binance:div:{rid}"] = {"id": f"binance:div:{rid}", "ts": div_ms, "src": "income", "late": 1, "asset": asset, "base": asset,
+                                         "amount": format(amt, "f"), "info": info[:80]}
+
+    s = int(t0)
+    if s >= int(t1):
+        return []
+    while True:
+        e = min(s + BN_DIV_SPAN, int(t1))
+        window(s * 1000, e * 1000)
+        if e >= int(t1):
+            break
+        s = e
+    return sorted(got.values(), key=lambda x: (x["ts"], x["id"]))

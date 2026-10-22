@@ -11,19 +11,20 @@ import time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import bf_engine
-import address_codec as ac
-import chain_event
-import chain_registry as reg
-import chain_state
-import chain_watch
+import config, envfile, logs, paths  # noqa: E402
+import bf_engine  # noqa: E402
+import address_codec as ac  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state  # noqa: E402
+import chain_watch  # noqa: E402
 
 CHAIN = "tron"
 PARSER_VERSION = 1
 API_DEFAULT = "https://api.trongrid.io"
 PROVIDER = "trongrid"
 PAGE_LIMIT = 200
+CONST_REJECT_CODES = ("CONTRACT_VALIDATE_ERROR", "CONTRACT_EXE_ERROR", "REVERT")
 META_NEG_SEC = 6 * 3600
 LAG_MS = 3 * 60 * 1000
 OVERLAP_MS = 10 * 60 * 1000
@@ -63,7 +64,7 @@ class TronAdapter(reg.ChainAdapter):
         if not re.fullmatch(r"https?://[A-Za-z0-9.\-]+(:\d{1,5})?", base):
             raise ValueError("nonevm.tron.api 는 http(s)://호스트[:포트] 꼴이어야 해요")
         self.base = base
-        self.key = os.environ.get(self.spec.key_env or "", "") or common.read_env_file().get(self.spec.key_env or "", "")
+        self.key = os.environ.get(self.spec.key_env or "", "") or envfile.read_env_file().get(self.spec.key_env or "", "")
         rps = self.opts.get("rps")
         try:
             rps = float(rps) if rps is not None else (KEYED_RPS if self.key else KEYLESS_RPS)
@@ -84,6 +85,7 @@ class TronAdapter(reg.ChainAdapter):
         self._pause_until = 0.0
         self.meta = {}
         self._meta_neg = {}
+        self._dec_bad = {}
         self.state = None
         self._fp_fail = {}
         self.calls = 0
@@ -113,12 +115,12 @@ class TronAdapter(reg.ChainAdapter):
         except bf_engine.NetError as e:
             if e.kind in ("http429", "quota"):
                 self._pause(self.RATE_PAUSE if e.retry_after is None else min(60.0, float(e.retry_after) + 1))
-            raise chain_watch.Transient(f"TronGrid {e.kind}: {common.safe_err(e)[:120]}") from None
+            raise chain_watch.Transient(f"TronGrid {e.kind}: {logs.safe_err(e)[:120]}") from None
         if not isinstance(d, dict):
             raise chain_watch.Transient("TronGrid 응답이 객체가 아님")
         err = d.get("Error") if "Error" in d else d.get("error")
         if err:
-            s = common.redact_secret_text(str(err))
+            s = logs.redact_secret_text(str(err))
             if "exceeded" in s or "suspend" in s:
                 self._pause(self.RATE_PAUSE)
             raise chain_watch.Transient("TronGrid 거절: " + s[:120])
@@ -164,7 +166,7 @@ class TronAdapter(reg.ChainAdapter):
         for sec in (None, CHAIN):
             try:
                 v = bf_engine.SINCE.target(sec)
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 v = None
             if v:
                 vals.append(int(v))
@@ -368,18 +370,29 @@ class TronAdapter(reg.ChainAdapter):
         self.meta[tk] = (_clean_sym(s), d)
         if d is None:
             self._meta_neg[tk] = time.time()
+            self._dec_bad[tk] = self._dec_bad.get(tk, 0) + 1
+        else:
+            self._dec_bad.pop(tk, None)
         return self.meta[tk]
+
+    def dec_invalid(self, tk: str) -> bool:
+        return self._dec_bad.get(tk, 0) >= 2 and (self.meta.get(tk) or (None, None))[1] is None
 
     def _const(self, contract: str, selector: str, param: str, owner: str = None, kind: str = "head"):
         d = self._call("/walletsolidity/triggerconstantcontract",
                        {"owner_address": owner or "41" + "0" * 40, "contract_address": contract, "function_selector": selector,
                         "parameter": param}, kind=kind)
-        res = d.get("result") if isinstance(d.get("result"), dict) else {}
+        res = d.get("result")
+        if not isinstance(res, dict):
+            raise chain_watch.Transient("상수 호출 result 없음 — 다시 조회")
+        if res.get("result") is not True:
+            if res.get("code") in CONST_REJECT_CODES:
+                return None
+            raise chain_watch.Transient("상수 호출 거부 원인 미확인 — 다시 조회")
         cr = d.get("constant_result")
-        if res.get("result") is not True or not isinstance(cr, list) or not cr or not isinstance(cr[0], str) \
-                or not re.fullmatch(r"[0-9a-fA-F]*", cr[0]):
-            return None
-        return cr[0].lower()
+        if not isinstance(cr, list) or (cr and (not isinstance(cr[0], str) or not re.fullmatch(r"[0-9a-fA-F]*", cr[0]))):
+            raise chain_watch.Transient("상수 호출 constant_result 형식 오류 — 다시 조회")
+        return cr[0].lower() if cr else None
 
     def fetch_and_normalize(self, ref, owners):
         txid = self.canonical_txid((ref or {}).get("stable_id"))
@@ -526,6 +539,11 @@ class TronAdapter(reg.ChainAdapter):
                 reasons.append("unsupported_contract:" + ctype[:48])
                 hint = "unknown"
         D = {k: v for k, v in D.items() if v}
+        bad_tokens = {ak[1] for (_o, ak) in D if ak[0] == "token" and self.dec_invalid(ak[1])}
+        if bad_tokens:
+            D = {k: v for k, v in D.items() if not (k[1][0] == "token" and k[1][1] in bad_tokens)}
+            moves = [mv_ for mv_ in moves if not ((mv_.get("asset") or {}).get("kind") == "token" and (mv_.get("asset") or {}).get("id") in bad_tokens)]
+            reasons.append("token_decimals_invalid_skipped")
         if hint == "transfer" and not failed and sender in mine and ctype in ("TriggerSmartContract", "CreateSmartContract"):
             tot = {}
             for (o, ak), v in D.items():
@@ -644,7 +662,7 @@ class TronAdapter(reg.ChainAdapter):
                     if m9[1] is None:
                         if int(r, 16) > 0:
                             unobs[o].append(tk)
-                            dec_unknown = True
+                            dec_unknown = dec_unknown or not self.dec_invalid(tk)
                         continue
                     meta[tk] = (m9[0], m9[1])
                 elif tk in self.meta:
@@ -717,9 +735,9 @@ def budgets(ad: TronAdapter, cfg: dict):
 
 def main(poll_default: int = 60):
     from inbox import SegmentWriter
-    log = common.setup_logging("tj-" + CHAIN)
-    common.ensure_dirs()
-    cfg = common.load_config()
+    log = logs.setup_logging("tj-" + CHAIN)
+    paths.ensure_dirs()
+    cfg = config.load_config()
     owners = reg.owners(cfg, CHAIN)
     if not owners:
         raise SystemExit("추적할 Tron 지갑이 없음 — config chain_wallets 확인")
@@ -730,7 +748,7 @@ def main(poll_default: int = 60):
     ad = make_adapter(cfg)
     ad.state = st
     pb, db = budgets(ad, cfg)
-    col = chain_watch.Collector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, sp.stream)), st, owners, log=log,
+    col = chain_watch.Collector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, sp.stream)), st, owners, log=log,
                                 page_budget=pb, detail_budget=db)
     try:
         poll = int(ad.opts.get("poll_sec", poll_default))
@@ -742,8 +760,8 @@ def main(poll_default: int = 60):
         try:
             r = col.cycle()
             log.info("[tron] 주기: %s · 호출 %d", r, ad.calls)
-        except Exception as e:
-            log.warning("[tron] 주기 실패(다음 주기): %s", common.safe_err(e)[:200])
+        except Exception as e:   # noqa: BLE001 [boundary]
+            log.warning("[tron] 주기 실패(다음 주기): %s", logs.safe_err(e)[:200])
         time.sleep(max(5.0, poll - (time.time() - t0)))
 
 
@@ -751,4 +769,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        common.setup_logging("tj-" + CHAIN).info("정지 신호(SIGINT) — 종료")
+        logs.setup_logging("tj-" + CHAIN).info("정지 신호(SIGINT) — 종료")

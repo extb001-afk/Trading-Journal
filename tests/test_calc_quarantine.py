@@ -2,17 +2,17 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import histcurve
-import wow
-import wow2
+import paths  # noqa: E402
+import histcurve  # noqa: E402
+import wow  # noqa: E402
+import wow2  # noqa: E402
 
 chk = T.chk
 
@@ -35,10 +35,10 @@ TODAY = "2026-09-30"
 CA_N, CA_Q = "0x" + "d5" * 20, "0x" + "e6" * 20
 json.dump({"_v": 1, "specs": {"ca:eth:" + CA_N: {"p": {d: 100.0 for d in days("2026-09-01", TODAY)}},
                               "ca:eth:" + CA_Q: {"p": {d: 100.0 for d in days("2026-09-01", TODAY)}}}},
-          open(os.path.join(common.STATE_DIR, "curve_hist_px.json"), "w"))
+          open(os.path.join(paths.STATE_DIR, "curve_hist_px.json"), "w"))
 histcurve.HIST.kit = {"groups": {31: {"sym": "PEPX", "ca": [("eth", CA_N)]},
                                  32: {"sym": "PEPX", "ca": [("eth", CA_Q)], "skip": True}}}
-SELL = lambda a, **kw: dict({"k": "온체인 매도", "a": a, "sym": "PEPX"}, **kw)
+SELL = lambda a, **kw: dict({"k": "온체인 매도", "a": a, "sym": "PEPX"}, **kw)   # noqa: E731
 D1 = "2026-09-05"
 TAX = [{"sold": D1, "sym": "PEPX", "qty": 1, "acq": 50, "disp": 100},
        {"sold": D1, "sym": "PEPX", "qty": 100, "acq": 1, "disp": 100}]
@@ -110,8 +110,8 @@ hq = habits(TAX[1:], [HID], POS[1:])
 chk([x for x in hq["hold"] if x["n"]] == [] and hq["next"] == [0, 0] and hq["n"] == 0, "Q6 격리만 판 날 = 습관 어디에도 없음", (hq["hold"], hq["next"]))
 
 NOW = datetime.now(wow2.KST)
-TS = lambda n, hh=12: int((NOW - timedelta(days=n)).replace(hour=hh, minute=0, second=0, microsecond=0).timestamp())
-DD = lambda n: (NOW - timedelta(days=n)).strftime("%Y-%m-%d")
+TS = lambda n, hh=12: int((NOW - timedelta(days=n)).replace(hour=hh, minute=0, second=0, microsecond=0).timestamp())  # noqa: E731
+DD = lambda n: (NOW - timedelta(days=n)).strftime("%Y-%m-%d")  # noqa: E731
 W1 = "0x" + "f7" * 20
 DB = os.path.join(T.TMP, "ledger.db")
 c = sqlite3.connect(DB)
@@ -168,7 +168,7 @@ try:
     t = wow2.tm(D8, hist=PxHist(), daily=daily, dpx=dpx, fields={}, conn=conn, chain_names={}, now_px={"42": 2.0, "43": 2.0})
     it = [(i["sym"], i["usd"], i["nowUsd"]) for i in t.get("items") or []]
     chk(it == [("PEPX", 100.0, 200.0)] and t.get("etcUsd") == 0.0 and t.get("x") == 0.0 and t.get("total") == 100.0 and t.get("nowTotal") == 200.0,
-        "Q8 격리 그룹 몫 = 정상 줄과 안 합침 · 그 밖·원장 밖에도 없음(그날 합계 val 이 이미 뺀 값 — qdaily1006)", (it, t.get("etcUsd"), t.get("x"), t.get("total"), t.get("nowTotal")))
+        "Q8 격리 그룹 몫 = 정상 줄과 안 합침 · 그 밖·원장 밖에도 없음(그날 합계 val 이 이미 뺀 값)", (it, t.get("etcUsd"), t.get("x"), t.get("total"), t.get("nowTotal")))
 finally:
     histcurve.spec_of, histcurve.pmap_of = _orig
 T.finish()

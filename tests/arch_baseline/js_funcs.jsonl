@@ -1,0 +1,19 @@
+{"_doc": "80줄 넘는 JS 함수(블록 몸통 · 모듈 감싸개 제외) — 열쇠 = 감싸는 함수 이름 사슬(파일 이름 없음). JS 원본 = web/**/*.js(fonts 제외 — 지금 web/v2/*.js·web/support.js) · web/**/*.html 인라인 <script>(정의 = _arch_js 머리)", "checked_with": "파이썬 토크나이저 측정 · acorn 8.16.0 · node v25.9.0 대조 일치", "kind": "bag", "spec": "js_funcs"}
+{"key": "_designRenderVals", "file": "web/index.html", "lines": 766}
+{"key": "_liveVals", "file": "web/index.html", "lines": 89}
+{"key": "attdParts", "file": "web/v2/tab_dash.js", "lines": 120}
+{"key": "attdSheet", "file": "web/v2/tab_dash.js", "lines": 81}
+{"key": "chartSVG", "file": "web/v2/tab_dash.js", "lines": 109}
+{"key": "clientItems", "file": "web/v2/search.js", "lines": 230}
+{"key": "createComponentFactory", "file": "web/support.js", "lines": 246}
+{"key": "createExternalModules", "file": "web/support.js", "lines": 177}
+{"key": "createHelmetManager", "file": "web/support.js", "lines": 130}
+{"key": "createRuntime", "file": "web/support.js", "lines": 167}
+{"key": "main", "file": "web/futures.html", "lines": 120}
+{"key": "rcptBody", "file": "web/v2/tab_rcpt.js", "lines": 149}
+{"key": "reviewHTML", "file": "web/v2/tab_daily.js", "lines": 136}
+{"key": "rkCombo", "file": "web/v2/tab_rcpt.js", "lines": 283}
+{"key": "rkFut", "file": "web/v2/tab_rcpt.js", "lines": 99}
+{"key": "rkSection", "file": "web/v2/tab_rcpt.js", "lines": 149}
+{"key": "vJournal", "file": "web/v2/tab_jrnl.js", "lines": 165}
+{"key": "walkXImport", "file": "web/support.js", "lines": 81}

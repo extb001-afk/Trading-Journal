@@ -4,7 +4,7 @@ import re
 import time
 
 import bf_engine
-import common
+import logs
 
 SRC = "alchemy_transfers"
 METHOD = "alchemy_getAssetTransfers"
@@ -46,7 +46,7 @@ def url_for(chain: str, env: dict = None):
     try:
         import nodekeys
         u = nodekeys.alchemy_url(net, env)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
     if not u:
         return None
@@ -54,7 +54,7 @@ def url_for(chain: str, env: dict = None):
         bf_engine._rpc_cfg_ensure()
         if not bf_engine._rpc_day_of(f"{net}.g.alchemy.com"):
             return None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return None
     return u
 
@@ -131,13 +131,13 @@ def fetch_range(url: str, b0: int, b1: int, kw: dict = None, max_pages: int = MA
             res = bf_engine.rpc_call(url, METHOD, [prm], **kw)
         except AlchFail:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if _local(e):
                 raise AlchFail("budget", f"0콜 거절({getattr(e, 'kind', '?')})")
             if _cap_off(e):
                 _set_off(f"키 거부·미지원({getattr(e, 'code', None) or getattr(e, 'kind', '?')})")
                 raise AlchSkip("키 거부·미지원 — 1시간 쉼")
-            raise AlchFail(str(getattr(e, "kind", None) or type(e).__name__), common.safe_err(e)[:120])
+            raise AlchFail(str(getattr(e, "kind", None) or type(e).__name__), logs.safe_err(e)[:120])
         pages += 1
         if not isinstance(res, dict) or not isinstance(res.get("transfers"), list):
             raise AlchFail("payload", "transfers 없음")

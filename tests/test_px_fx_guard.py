@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 A = "0x" + "a1" * 20
 json.dump({"chains": {}, "wallets": [{"type": "evm", "chain": "eth", "address": A, "label": "main"}], "backfill_months": 5},
           open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import db as dbm
-import netpace
-import pricing
-import web
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import pricing  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 for _m in ("_sale_worker", "_xchain_worker", "_lp_worker", "_origin_worker", "_flow_worker"):
@@ -109,7 +109,7 @@ sp = spot(px=12.0, src="okx", alt={"okx": (12.0, 0), "gecko": (100.0, 60)})
 chk(sp.dex_price("eth", CA) == 0.0, "S14 지금 값 OKX 12.0 · 게코 100 = 0", sp.guarded)
 
 NOW = int(time.time())
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 GID = {}
 
 
@@ -140,8 +140,8 @@ c.commit()
 c.close()
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: None
 web.pricing._gj = lambda url, timeout=10.0: None
-common.atomic_write_json(web.PREFS_PATH, {"plans": {}, "ignored": []})
-open(os.path.join(common.STATE_DIR, "backfill_done"), "w").write("1")
+statefile.atomic_write_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []})
+open(os.path.join(paths.STATE_DIR, "backfill_done"), "w").write("1")
 
 
 def spot_file(rate=1380.0, rate_age=0, res=None, legacy=False):
@@ -150,7 +150,7 @@ def spot_file(rate=1380.0, rate_age=0, res=None, legacy=False):
          "dex_res": {} if res is None else {K: res}, "dex_res_ts": {} if res is None else {K: t}, "fx_basis": 1370.0, "ex_usd": {}, "ex_ts": {}}
     if rate and not legacy:
         d["rate_ts"] = t - rate_age
-    common.atomic_write_json(web.SPOT_PATH, d)
+    statefile.atomic_write_json(paths.state("spot.json"), d)
 
 
 CAP = {}
@@ -170,7 +170,7 @@ def build(no_rate=False):
     b.skip_gen_check = True
     if no_rate:
         b.spot.rate = 0
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:
@@ -281,7 +281,7 @@ X = {"ub": 0.0, "fiat": 1000.0, "lp": 0.0, "ubs": {}, "ub_tl": {}, "krw_up": 130
 
 
 def series(state):
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
     b = unit_builder(state)

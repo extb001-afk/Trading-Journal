@@ -2,7 +2,7 @@ from __future__ import annotations
 import acct_norm
 import buychart
 import candles
-import common
+import paths
 import day_memo
 import db as dbm
 import json
@@ -13,19 +13,20 @@ import threading
 import time
 from datetime import datetime
 from datetime import timedelta
-from view_common import KST
+from timeutil import KST
 from view_evals import DAY_MEMOS
 from view_fut import FUT_FEE_SYM
 from view_fut import PERP_NAMES
 from view_fut import _fut_by_date_ex
 from view_fut import fut_sym
 from view_tax import _tax_fee_merge
+import calcguard  # noqa: E402
 try:
     import fut_rcpt
-except Exception:
+except Exception as e_cg:   # noqa: BLE001 [optional]
+    calcguard.swallowed("view_detail:<module>[fut_rcpt]", e_cg)
     fut_rcpt = None
 import logging
-import calcguard
 
 log = logging.getLogger('tj-web')
 
@@ -68,7 +69,7 @@ class DetailApiMixin:
         try:
             spamguard.annotate(vis)
             spamguard.annotate(hid)
-        except Exception as e9:
+        except Exception as e9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_detail:DetailApiMixin.day_events", e9)
             log.warning("심볼 정리 실패(무시): %s", e9)
         counts = {}
@@ -131,7 +132,7 @@ class DetailApiMixin:
         try:
             spamguard.annotate(vis)
             spamguard.annotate(hid)
-        except Exception as e9:
+        except Exception as e9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_detail:DetailApiMixin._day_events_page", e9)
             log.warning("심볼 정리 실패(무시): %s", e9)
         return {"ok": True, "from": d_from, "to": d_to, "builtAt": idx["builtAt"], "n": n_vis, "counts": counts, "days": per,
@@ -341,7 +342,7 @@ class DetailApiMixin:
             return
         try:
             sellchart.dex_later_mark(iso, sym, side, why)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("view_detail:DetailApiMixin._dex_later", _cg9)
             pass
 
@@ -374,7 +375,7 @@ class DetailApiMixin:
         out, gtok = {}, {}
         if not pids:
             return out, gtok
-        conn = dbm.open_db(common.DB_PATH, readonly=True)
+        conn = dbm.open_db(paths.DB_PATH, readonly=True)
         try:
             rows = []
             pl = sorted(set(pids))
@@ -421,7 +422,7 @@ class DetailApiMixin:
         fn = (lambda **k9: self.receipt_chart_buy(iso, sym, iv, venue, bvenue, **k9)) if buy else \
             (lambda **k9: self.receipt_chart(iso, sym, iv, after, venue, **k9))
         if side == "fut":
-            fn = lambda **k9: self.fut_chart(iso, sym, iv, venue, **k9)
+            fn = lambda **k9: self.fut_chart(iso, sym, iv, venue, **k9)   # noqa: E731
         key = (iso, sym, iv, "-" if buy else after, venue or "") + (("buy", bvenue or "") if buy else ()) + (("fut",) if side == "fut" else ()) \
             + (("bg",) if bg else ())
         J, L = type(self)._CHART_JOBS, type(self)._CHART_JLOCK
@@ -453,7 +454,7 @@ class DetailApiMixin:
                             job["res"] = fn()
                         if bg and isinstance(job["res"], dict):
                             job["res"] = dict(job["res"], calls=nc9[0])
-                    except Exception as e9:
+                    except Exception as e9:   # noqa: BLE001 [boundary]
                         calcguard.swallowed("view_detail:DetailApiMixin.chart_request.work", e9)
                         log.warning("%s 차트 수집 실패(%s %s): %s", "매수" if buy else "매도", iso, sym, e9)
                         job["res"] = {"ok": False, "error": "차트를 만들지 못했어요"}
@@ -791,7 +792,7 @@ class DetailApiMixin:
     def _memo_inp(inp, iso, syms):
         try:
             mm = DAY_MEMOS.for_date(iso)
-        except Exception as _cg9:
+        except Exception as _cg9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_detail:DetailApiMixin._memo_inp", _cg9)
             return inp
         if not mm:
@@ -872,7 +873,7 @@ class DetailApiMixin:
     @staticmethod
     def _xc_resolve(legs, raw_syms):
         fam = {str(x9 or "").split("#", 1)[0].strip().upper() for x9 in raw_syms}
-        conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+        conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
         try:
             for l9 in legs:
                 x9 = l9["xc"]
@@ -976,7 +977,7 @@ class DetailApiMixin:
                          and specs[l9["pid"]][3] is not None and card_gid(l9["pkey"]) is not None and int(specs[l9["pid"]][3]) != card_gid(l9["pkey"])})
         row_sym = {}
         if lp_odd:
-            conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+            conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
             try:
                 for i9 in range(0, len(lp_odd), 400):
                     ch9 = lp_odd[i9:i9 + 400]
@@ -1003,7 +1004,7 @@ class DetailApiMixin:
                 ch9 = ko2code.get(str(l9.get("chain") or ""), str(l9.get("chain") or "").lower())
                 tok9 = next((ca for c9, ca in (gtok.get(gid_of.get(l9["pkey"], any_gid)) or ()) if c9 == ch9), None)
                 if tok9 is None and gid_of.get(l9["pkey"], any_gid) is not None:
-                    conn9 = dbm.open_db(common.DB_PATH, readonly=True)
+                    conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
                     try:
                         r9 = conn9.execute("SELECT address FROM assets WHERE group_id=? AND chain=? AND address IS NOT NULL AND address != '' AND hidden=0 LIMIT 1",
                                            (gid_of.get(l9["pkey"], any_gid), ch9)).fetchone()
@@ -1192,7 +1193,7 @@ class DetailApiMixin:
         if gap_job is not None and (out.get("chart") or {}).get("ok"):
             try:
                 gb9 = self._gap_bridges(gap_job)
-            except Exception as e9:
+            except Exception as e9:   # noqa: BLE001 [fallback]
                 calcguard.swallowed("view_detail:DetailApiMixin.receipt_chart_buy", e9)
                 log.warning("빈 시간 표시 봉 실패(%s %s): %s", iso, want, e9)
                 gb9 = None

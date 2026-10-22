@@ -2,24 +2,24 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import check
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import check  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
-import common
-import core
-import chain_event as ce
-import chain_registry as reg
-import chain_state as cs
-import chain_watch as cw
-import address_codec as ac
-from inbox import SegmentWriter, SegmentReader
-import ton_watch as tw
-import _ton_fake as F
+import config, paths  # noqa: E402
+import core  # noqa: E402
+import chain_event as ce  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state as cs  # noqa: E402
+import chain_watch as cw  # noqa: E402
+import address_codec as ac  # noqa: E402
+from inbox import SegmentWriter, SegmentReader  # noqa: E402
+import ton_watch as tw  # noqa: E402
+import _ton_fake as F  # noqa: E402
 
 DAY = 86400
 NOW = int(time.time())
@@ -28,11 +28,10 @@ A, B, X = F.K("31"), F.K("32"), F.K("99")
 MS, WS = F.K("a7"), F.K("b7")
 MN, WN = F.K("a8"), F.K("b8")
 CFG_PATH = os.path.join(T.TMP, "config.json")
-INB = os.path.join(common.INBOX_DIR, "ton")
+INB = os.path.join(paths.INBOX_DIR, "ton")
 reg.FORCE_AVAILABLE.add("ton")
 tw.META_RETRY_SEC = 0
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
+T.patch_moved("dm", lambda *a, **k: None)
 INVALID = {"valid": False, "type": "jetton_masters", "extra": {}}
 
 md_bad = {"0:AA": {"is_indexed": True, "token_info": [INVALID]}}
@@ -49,7 +48,7 @@ check("SM1 유효 행 있음 · 체인 위 자릿수 있음 · 다른 종류 행
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "ton", "address": ac.ton_friendly(w)} for w in (A, B)]
 json.dump(cfg, open(CFG_PATH, "w"))
-cfg = common.load_config()
+cfg = config.load_config()
 ch = F.Chain()
 srv = F.Server(ch).start()
 for owner, old, new in ((A, 1_000_000, 1), (B, 100, 2)):
@@ -68,7 +67,7 @@ for _i in range(3):
 c = core.Core(cfg)
 c.conn.commit()
 rb = tw.TonAdapter(cfg, client=srv.client())
-c._nonevm_adapters = {"ton": rb}
+c.svc_recon._nonevm_adapters = {"ton": rb}
 
 
 def drain():
@@ -101,8 +100,8 @@ chk = ce.validate_balances(bal, "ton", {A, B})
 check("SM2 경로 A: _complete True · 스팸은 A 의 _unobserved 에만(보류 사유 아님) · 공통 계약 통과",
       bal["_complete"] is True and "jetton_decimals_unknown" not in bal["_why"] and bal["_unobserved"].get(A) == [MS]
       and not bal["_unobserved"].get(B) and chk["ok"], (bal["_complete"], bal["_why"], bal["_unobserved"], chk["why"]))
-c._last_recon = 0
-c.recon_pass({"ton"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"ton"})
 check("SM2 체인 대사 완료 · 두 지갑 네이티브 = 체인 잔고(A 1,000,001 · B 102) · 스팸 토큰 자산 없음",
       bool(c._meta_get("recon_done_ton")) and native(A) == ch.bal[A] == 1_000_001 * TON and native(B) == ch.bal[B] == 102 * TON
       and tok_assets() == 0, (c._meta_get("recon_done_ton"), native(A), ch.bal[A], native(B), ch.bal[B], tok_assets()))
@@ -123,8 +122,8 @@ check("SM3 레코드: 토큰 레그 없음 · 사유 jetton_meta_invalid_skipped
       r9 is not None and not [d for d in snap.get("deltas") or [] if (d.get("asset") or {}).get("kind") == "token"]
       and "jetton_meta_invalid_skipped" in ((snap.get("completeness") or {}).get("reasons") or [])
       and native(A) == ch.bal[A] and tok_assets() == 0, (r9 is not None, (snap.get("completeness") or {}).get("reasons"), native(A), tok_assets()))
-c._last_recon = 0
-c.recon_pass({"ton"})
+c.svc_recon._last_recon = 0
+c.svc_recon.recon_pass({"ton"})
 check("SM3 다음 대사 주기 뒤에도 네이티브 = 체인 잔고", native(A) == ch.bal[A] and native(B) == ch.bal[B], (native(A), native(B)))
 
 ch.add_jetton(B, WN, MN, symbol=None, decimals=None, onchain=False)

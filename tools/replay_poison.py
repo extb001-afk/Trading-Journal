@@ -5,7 +5,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
-import ops_requests
+import ops_requests  # noqa: E402
 
 
 def main():

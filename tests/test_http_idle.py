@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import socket
-import threading
-import time
-import urllib.request
+import json  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import urllib.request  # noqa: E402
 
 json.dump({"chains": {"base": {"blockscout": "https://bs.invalid", "conf_depth": 3, "rpcs": ["https://rpc.invalid"]}},
            "wallets": [{"type": "evm", "chain": "base", "address": "0x" + "a1" * 20, "label": "w"}]},
           open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
-import bf_engine
-import evm_watch
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 chk = T.chk
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -183,7 +183,7 @@ def call(url, body_max=2.5, **kw):
     t0 = time.time()
     try:
         return bf_engine.http_request(url, **kw)[0], None, time.time() - t0
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         return None, e, time.time() - t0
     finally:
         bf_engine.HTTP_BODY_MAX_SEC = BODY0
@@ -262,7 +262,7 @@ def pair(kw_a, kw_b, url_b):
         t0 = time.time()
         try:
             res[name] = (bf_engine.http_request(url, **kw)[0], None, time.time() - t0)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             res[name] = (None, e, time.time() - t0)
     try:
         ta = threading.Thread(target=go, args=("a", U["stall_len"], kw_a), daemon=True)
@@ -310,7 +310,7 @@ bf_engine.HTTP_BODY_MAX_SEC = 2.5
 t0 = time.time()
 try:
     out9, e9 = w._batch([("eth_blockNumber", []), ("eth_chainId", [])]), None
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     out9, e9 = None, e
 finally:
     bf_engine.HTTP_BODY_MAX_SEC = BODY0
@@ -334,7 +334,7 @@ try:
     with _opener.open(urllib.request.Request(U["stall_len"]), timeout=IDLE) as r9:
         bf_engine._read_capped(r9, 10, time.time() + 2.5)
     e9 = None
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     e9 = e
 t9 = time.time() - t0
 chk(isinstance(e9, socket.timeout) and t9 < OK_T, "idle 인자 없이 부른 _read_capped = 들어올 때 소켓 timeout(0.25초)을 idle 로", (type(e9).__name__, str(e9)[:60], round(t9, 2)))

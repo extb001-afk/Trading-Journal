@@ -1,0 +1,1626 @@
+{
+ "_doc": "설정 키 읽기 기준선(tools/refactor/cfg_keys.py --write · 손 편집 금지) — top/sub = 자료 흐름으로 찾은 읽기 · varkey = 키가 변수인 자리와 가능한 글자 · unresolved = 못 정하는 자리 닫힌 표(guard·whole·passout) · test_cfg_keys 가 새 것 = 실패로 봄",
+ "top": {
+  "_auto_pairs": [
+   "config"
+  ],
+  "_disabled_chains": [
+   "addr_ai",
+   "addr_tier",
+   "chainoff",
+   "chainsweep",
+   "chk_sources",
+   "config",
+   "flow_trace",
+   "health",
+   "rabby",
+   "settings_store",
+   "view_b_cards",
+   "view_b_replay",
+   "view_backfill",
+   "view_builder",
+   "view_outflows",
+   "view_workers"
+  ],
+  "_disabled_wallets": [
+   "chainsweep",
+   "config",
+   "core",
+   "rabby",
+   "tools.ledger_restore",
+   "tools.repair_own_overlap"
+  ],
+  "addr_ai": [
+   "addr_ai"
+  ],
+  "addr_tier": [
+   "addr_tier",
+   "bf_engine",
+   "inflow_probe"
+  ],
+  "alerts": [
+   "alert_prefs"
+  ],
+  "backfill": [
+   "bf_engine",
+   "core_ext",
+   "core_pricing",
+   "evm_bscout",
+   "health",
+   "nodekeys",
+   "nodesel",
+   "view_outflows"
+  ],
+  "backfill_covered_since": [
+   "bf_engine"
+  ],
+  "backfill_full_history": [
+   "addr_tier",
+   "balcheck",
+   "bf_engine",
+   "core",
+   "core_svc",
+   "evm_bscout",
+   "evm_es",
+   "evm_rpcw",
+   "ex_foreign",
+   "hl_spot",
+   "runner_fp",
+   "sol_watch",
+   "tools.fix_dupsnap_1004",
+   "upbit_link",
+   "view_b_daily",
+   "view_b_replay"
+  ],
+  "backfill_months": [
+   "addr_tier",
+   "balcheck",
+   "bf_engine",
+   "chainsweep",
+   "core",
+   "core_exf",
+   "core_svc",
+   "coverage_limits",
+   "depaddr",
+   "evm_bscout",
+   "evm_es",
+   "evm_logdisc",
+   "evm_rpcw",
+   "ex_foreign",
+   "hl_spot",
+   "onboarding",
+   "perp_dex",
+   "runner_fp",
+   "sol_watch",
+   "tools.fix_dupsnap_1004",
+   "tools.repair_anchor_ts",
+   "tools.repair_onchain_balances",
+   "upbit_link",
+   "view_b_replay",
+   "view_outflows"
+  ],
+  "backfill_since": [
+   "bf_engine",
+   "coverage_limits"
+  ],
+  "backup": [
+   "chk_collect",
+   "core_ext",
+   "ledger_backup",
+   "tools.offsite_backup"
+  ],
+  "balance_check": [
+   "balcheck",
+   "bf_engine"
+  ],
+  "bsc": [
+   "balcheck",
+   "bf_engine",
+   "bsc_watch",
+   "chainoff",
+   "chainsweep",
+   "core_recon",
+   "discopen",
+   "lpchain",
+   "nodekeys",
+   "runner_fp",
+   "settings_store",
+   "tools.gate_onchain",
+   "tools.migrate_nodekeys_1008",
+   "tools.negabs",
+   "tools.repair_onchain_balances",
+   "tools.token_recheck"
+  ],
+  "build_proc": [
+   "runtime"
+  ],
+  "chain_sweep": [
+   "chainoff",
+   "chainsweep",
+   "chk_collect",
+   "config"
+  ],
+  "chains": [
+   "addr_ai",
+   "addr_tier",
+   "balcheck",
+   "bf_engine",
+   "chainoff",
+   "chainsweep",
+   "chk_collect",
+   "chk_sources",
+   "config",
+   "core_prov",
+   "core_recon",
+   "discopen",
+   "evm_bscout",
+   "evm_es",
+   "evm_logdisc",
+   "evm_rpcw",
+   "evm_watch",
+   "flow_trace",
+   "histcurve",
+   "inflow_probe",
+   "lpchain",
+   "nft",
+   "nodekeys",
+   "rabby",
+   "runner_fp",
+   "settings_store",
+   "token_discovery",
+   "tools.gate_onchain",
+   "tools.ledger_restore",
+   "tools.negabs",
+   "tools.pretrace_hotfix_h",
+   "tools.repair_onchain_balances",
+   "tools.repair_partial_legs",
+   "tools.repair_synth_nft",
+   "tools.robinhood_rpc_enable",
+   "tools.token_recheck",
+   "view_b_pendings",
+   "view_backfill",
+   "view_builder",
+   "view_outflows",
+   "view_workers"
+  ],
+  "etherscan": [
+   "addr_tier",
+   "bf_engine",
+   "chk_sources",
+   "evm_es",
+   "evm_rpcw"
+  ],
+  "evm_poll_sec": [
+   "addr_tier",
+   "evm_rpcw",
+   "evm_watch",
+   "runner_fp"
+  ],
+  "exchange_addresses": [
+   "core",
+   "depaddr",
+   "runner_fp",
+   "tools.fix_dupsnap_1004",
+   "view_b_pendings",
+   "view_index",
+   "view_outflows",
+   "xchain_match"
+  ],
+  "exchanges": [
+   "bf_engine"
+  ],
+  "exf": [
+   "ex_foreign"
+  ],
+  "first_seen_px": [
+   "view_b_replay"
+  ],
+  "flow_trace": [
+   "view_outflows",
+   "view_workers"
+  ],
+  "gas_in_cost": [
+   "view_b_replay"
+  ],
+  "health": [
+   "health"
+  ],
+  "hyperliquid": [
+   "depaddr",
+   "hl_spot"
+  ],
+  "loan_short": [
+   "view_b_replay"
+  ],
+  "native_symbol": [
+   "balcheck",
+   "config",
+   "core",
+   "core_recon",
+   "lpchain",
+   "tools.fix_dupsnap_1004",
+   "tools.gate_onchain",
+   "view_b_replay",
+   "view_prov"
+  ],
+  "negabs_enabled": [
+   "core_recon"
+  ],
+  "net_pace": [
+   "netpace"
+  ],
+  "okx_dex": [
+   "view_b_cards"
+  ],
+  "perp_wallets": [
+   "coverage_limits",
+   "perp_dex",
+   "settings_wallets",
+   "view_builder"
+  ],
+  "price_guard": [
+   "alert_bot",
+   "balcheck",
+   "token_discovery",
+   "view_builder"
+  ],
+  "price_overrides": [
+   "view_b_cards"
+  ],
+  "rabby": [
+   "rabby",
+   "token_discovery"
+  ],
+  "recon_native_stall_hours": [
+   "core_recon"
+  ],
+  "recon_tokens": [
+   "chaincatalog"
+  ],
+  "review": [
+   "review_daily",
+   "review_prompt",
+   "sellchart"
+  ],
+  "rpc_day_limits": [
+   "bf_engine",
+   "nodekeys",
+   "token_discovery"
+  ],
+  "rpc_day_pct": [
+   "bf_engine"
+  ],
+  "rpc_fallback": [
+   "evm_watch"
+  ],
+  "rpc_first": [
+   "evm_watch"
+  ],
+  "runner": [
+   "unit_runner"
+  ],
+  "sol": [
+   "addr_tier",
+   "balcheck",
+   "bf_engine",
+   "chainoff",
+   "core_recon",
+   "onboarding",
+   "runner_fp",
+   "settings_store",
+   "sol_base",
+   "sol_watch",
+   "view_b_pendings",
+   "view_workers",
+   "xchain_match"
+  ],
+  "token_discovery": [
+   "balcheck",
+   "core_prov",
+   "core_recon"
+  ],
+  "transit": [
+   "view_b_pendings",
+   "view_outflows"
+  ],
+  "wallets": [
+   "alert_bot",
+   "balcheck",
+   "bf_engine",
+   "bsc_watch",
+   "chainoff",
+   "chainsweep",
+   "chk_balance",
+   "chk_collect",
+   "chk_sources",
+   "config",
+   "core",
+   "core_prov",
+   "core_recon",
+   "demo_data",
+   "discopen",
+   "evm_rpcw",
+   "evm_watch",
+   "onboarding",
+   "rabby",
+   "rawtx_cache",
+   "runner_fp",
+   "settings_store",
+   "settings_wallets",
+   "sol_watch",
+   "token_discovery",
+   "tools.fix_dupsnap_1004",
+   "tools.gate_onchain",
+   "tools.ledger_restore",
+   "tools.lp_enrich_sol",
+   "tools.negabs",
+   "tools.rederive_perspective",
+   "tools.repair_onchain_balances",
+   "tools.repair_own_overlap",
+   "tools.repair_partial_legs",
+   "tools.repair_synth_nft",
+   "tools.repair_wrap_legs",
+   "tools.robinhood_rpc_enable",
+   "tools.token_recheck",
+   "view_b_pendings",
+   "view_backfill",
+   "view_builder",
+   "view_outflows",
+   "view_workers"
+  ],
+  "web": [
+   "alert_prefs",
+   "chk_collect",
+   "config",
+   "login_auth",
+   "onboarding",
+   "reqclass",
+   "review_daily",
+   "tools.reset_password",
+   "web"
+  ],
+  "wrapped_native": [
+   "bsc_watch",
+   "config",
+   "core",
+   "core_recon",
+   "evm_bscout",
+   "evm_es",
+   "evm_logdisc",
+   "evm_rpcw",
+   "tools.fix_dupsnap_1004",
+   "tools.gate_onchain",
+   "tools.repair_wrap_legs",
+   "tools.token_recheck"
+  ],
+  "xchain": [
+   "view_workers"
+  ]
+ },
+ "sub": {
+  "addr_ai.chain_calls_day": [
+   "addr_ai"
+  ],
+  "addr_ai.enabled": [
+   "addr_ai"
+  ],
+  "addr_tier.budget_pct": [
+   "bf_engine"
+  ],
+  "addr_tier.inflow_sec": [
+   "inflow_probe"
+  ],
+  "alerts.liq_fast": [
+   "alert_prefs"
+  ],
+  "backfill.auto_rebuild": [
+   "core_ext",
+   "view_outflows"
+  ],
+  "backfill.bf_target_sec": [
+   "nodesel"
+  ],
+  "backfill.engine": [
+   "evm_bscout"
+  ],
+  "backfill.evm_cycle_budget_sec": [
+   "evm_bscout"
+  ],
+  "backfill.hosts": [
+   "bf_engine",
+   "nodekeys"
+  ],
+  "backfill.node_select": [
+   "nodesel"
+  ],
+  "backfill.node_slo_sec": [
+   "nodesel"
+  ],
+  "backfill.px_prefetch": [
+   "core_pricing"
+  ],
+  "backfill.quota_open_sec": [
+   "bf_engine"
+  ],
+  "backfill.rebuild_allow_locked": [
+   "core_ext"
+  ],
+  "backfill.rebuild_check_sec": [
+   "core_ext"
+  ],
+  "backfill.rebuild_dir": [
+   "core_ext"
+  ],
+  "backfill.rebuild_keep_oldest": [
+   "core_ext"
+  ],
+  "backfill.rebuild_keep_recent": [
+   "core_ext"
+  ],
+  "backfill.rebuild_min_gap_sec": [
+   "core_ext"
+  ],
+  "backfill.rebuild_pnl_gate": [
+   "core_ext"
+  ],
+  "backfill.rebuild_pnl_tol_pct": [
+   "ops_requests"
+  ],
+  "backfill.rebuild_pnl_tol_usd": [
+   "ops_requests"
+  ],
+  "backfill.rebuild_retry_sec": [
+   "core_ext"
+  ],
+  "backfill.rebuild_timeout_sec": [
+   "core_ext",
+   "view_outflows"
+  ],
+  "backfill.stall_sec": [
+   "core_ext",
+   "health"
+  ],
+  "backfill.verify_timeout_sec": [
+   "core_ext"
+  ],
+  "backup.keep_db": [
+   "ledger_backup"
+  ],
+  "backup.keep_pre_rebuild": [
+   "core_ext"
+  ],
+  "backup.offsite": [
+   "chk_collect",
+   "tools.offsite_backup"
+  ],
+  "balance_check.sol_rpcs": [
+   "bf_engine"
+  ],
+  "bsc.archive_rpcs": [
+   "bsc_watch",
+   "nodekeys",
+   "tools.gate_onchain",
+   "tools.token_recheck"
+  ],
+  "bsc.backfill_days": [
+   "bf_engine"
+  ],
+  "bsc.canary": [
+   "bsc_watch"
+  ],
+  "bsc.conf_depth": [
+   "bsc_watch"
+  ],
+  "bsc.cycle_budget_sec": [
+   "bsc_watch"
+  ],
+  "bsc.detail_batch": [
+   "bsc_watch"
+  ],
+  "bsc.detail_rpcs": [
+   "balcheck",
+   "bsc_watch",
+   "core_recon",
+   "discopen",
+   "lpchain",
+   "tools.gate_onchain",
+   "tools.negabs",
+   "tools.repair_onchain_balances",
+   "tools.token_recheck"
+  ],
+  "bsc.discover_wrap": [
+   "bsc_watch"
+  ],
+  "bsc.getlogs_span": [
+   "bsc_watch"
+  ],
+  "bsc.getlogs_span_caps": [
+   "bsc_watch",
+   "nodekeys"
+  ],
+  "bsc.getlogs_span_max": [
+   "bsc_watch"
+  ],
+  "bsc.lane_budget_sec": [
+   "bsc_watch"
+  ],
+  "bsc.lanes": [
+   "bsc_watch"
+  ],
+  "bsc.logs_head_guard": [
+   "bsc_watch"
+  ],
+  "bsc.logs_rpcs": [
+   "bsc_watch",
+   "discopen",
+   "nodekeys",
+   "tools.gate_onchain",
+   "tools.negabs"
+  ],
+  "bsc.logs_rpcs_fallback": [
+   "bsc_watch"
+  ],
+  "bsc.logs_sleep_sec": [
+   "bsc_watch"
+  ],
+  "bsc.poll_sec": [
+   "bsc_watch",
+   "chainoff"
+  ],
+  "bsc.scan_workers": [
+   "bsc_watch"
+  ],
+  "bsc.sell_verify_blocks": [
+   "bsc_watch"
+  ],
+  "chain_sweep.auto_enable": [
+   "chainoff",
+   "chainsweep",
+   "chk_collect",
+   "config"
+  ],
+  "chain_sweep.ignore": [
+   "chainoff"
+  ],
+  "chains.base": [
+   "nodekeys"
+  ],
+  "chains.robinhood": [
+   "tools.robinhood_rpc_enable"
+  ],
+  "etherscan.daily_budget": [
+   "bf_engine",
+   "chk_sources"
+  ],
+  "etherscan.fill_keep_pct": [
+   "addr_tier",
+   "bf_engine",
+   "chk_sources"
+  ],
+  "etherscan.int_lag_sec": [
+   "evm_es",
+   "evm_rpcw"
+  ],
+  "etherscan.pace_burst_pct": [
+   "addr_tier",
+   "bf_engine",
+   "chk_sources"
+  ],
+  "etherscan.page_rows": [
+   "evm_es"
+  ],
+  "exf.leverage": [
+   "ex_foreign"
+  ],
+  "flow_trace.cycle_calls": [
+   "view_workers"
+  ],
+  "flow_trace.interval_sec": [
+   "view_workers"
+  ],
+  "flow_trace.min_usd": [
+   "view_outflows"
+  ],
+  "flow_trace.trace": [
+   "view_workers"
+  ],
+  "health.t": [
+   "health"
+  ],
+  "hyperliquid.spot": [
+   "depaddr",
+   "hl_spot"
+  ],
+  "hyperliquid.spot_exclude": [
+   "hl_spot"
+  ],
+  "native_symbol.zksync": [
+   "tools.repair_fix2_20260930"
+  ],
+  "net_pace.cooldown_sec": [
+   "netpace"
+  ],
+  "net_pace.explorer_sec": [
+   "netpace"
+  ],
+  "net_pace.other_sec": [
+   "netpace"
+  ],
+  "okx_dex.krw_threshold": [
+   "view_b_cards"
+  ],
+  "price_guard.dex_max_age_sec": [
+   "spamguard",
+   "view_builder"
+  ],
+  "price_guard.min_reserve_usd": [
+   "balcheck",
+   "spamguard",
+   "token_discovery",
+   "view_builder"
+  ],
+  "review.chart_prewarm_per_day": [
+   "review_daily"
+  ],
+  "review.coach_role": [
+   "review_prompt"
+  ],
+  "review.known_patterns": [
+   "review_daily"
+  ],
+  "rpc_day_limits.node_alchemy": [
+   "token_discovery"
+  ],
+  "runner.max_mb": [
+   "unit_runner"
+  ],
+  "sol.addr_pace_sec": [
+   "sol_watch"
+  ],
+  "sol.archive_rpc": [
+   "bf_engine",
+   "sol_base"
+  ],
+  "sol.ata_every_cycles": [
+   "addr_tier",
+   "sol_watch"
+  ],
+  "sol.batch_sleep_sec": [
+   "sol_watch"
+  ],
+  "sol.head_rpc": [
+   "bf_engine",
+   "sol_base"
+  ],
+  "sol.helius_burst": [
+   "bf_engine"
+  ],
+  "sol.helius_head_min_pct": [
+   "bf_engine"
+  ],
+  "sol.helius_monthly_credits": [
+   "bf_engine"
+  ],
+  "sol.parse_batch": [
+   "sol_watch"
+  ],
+  "sol.poll_sec": [
+   "addr_tier",
+   "chainoff",
+   "sol_watch"
+  ],
+  "sol.quota_open_sec": [
+   "sol_base"
+  ],
+  "sol.rpc": [
+   "balcheck",
+   "bf_engine",
+   "core_recon",
+   "onboarding",
+   "runner_fp",
+   "settings_store",
+   "sol_base",
+   "view_b_pendings"
+  ],
+  "sol.rpc_fallback": [
+   "balcheck",
+   "bf_engine",
+   "core_recon",
+   "sol_base",
+   "view_workers",
+   "xchain_match"
+  ],
+  "sol.rpc_fallbacks": [
+   "balcheck",
+   "bf_engine",
+   "sol_base",
+   "view_workers",
+   "xchain_match"
+  ],
+  "sol.sig_spool_pages": [
+   "sol_watch"
+  ],
+  "sol.stake": [
+   "sol_watch"
+  ],
+  "sol.stake_every_sec": [
+   "sol_watch"
+  ],
+  "token_discovery.enabled": [
+   "balcheck",
+   "core_prov",
+   "core_recon"
+  ],
+  "transit.ask_days": [
+   "view_b_pendings"
+  ],
+  "transit.cover_max_hours": [
+   "view_outflows"
+  ],
+  "transit.default_hours": [
+   "view_outflows"
+  ],
+  "transit.hours": [
+   "view_outflows"
+  ],
+  "transit.own_hours": [
+   "view_outflows"
+  ],
+  "web.allowed_hosts": [
+   "onboarding"
+  ],
+  "web.behind_proxy": [
+   "login_auth"
+  ],
+  "web.bind": [
+   "chk_collect",
+   "web"
+  ],
+  "web.login": [
+   "login_auth",
+   "web"
+  ],
+  "web.max_conn": [
+   "web"
+  ],
+  "web.max_conn_per_ip": [
+   "web"
+  ],
+  "web.port": [
+   "chk_collect",
+   "onboarding",
+   "review_daily",
+   "tools.reset_password",
+   "web"
+  ],
+  "web.public_url": [
+   "alert_prefs"
+  ],
+  "web.setup_allow_lan": [
+   "reqclass"
+  ],
+  "web.setup_allow_proxy": [
+   "reqclass"
+  ],
+  "web.token_logos": [
+   "config"
+  ],
+  "wrapped_native.bsc": [
+   "bsc_watch"
+  ],
+  "xchain.budget": [
+   "view_workers"
+  ],
+  "xchain.cycle_calls": [
+   "view_workers"
+  ],
+  "xchain.interval_sec": [
+   "view_workers"
+  ],
+  "xchain.per_cycle": [
+   "view_workers"
+  ],
+  "xchain.trace": [
+   "view_workers"
+  ]
+ },
+ "varkey": {
+  "addr_ai:settings.num|varkey|addr_ai[k]": [
+   "daily_max",
+   "fail_max",
+   "first_delay_sec",
+   "interval_sec",
+   "max_targets",
+   "per_item_calls",
+   "regen_min_sec",
+   "retry_sec"
+  ],
+  "addr_ai:settings|varkey|addr_ai[k]": [
+   "?"
+  ],
+  "addr_tier:_mc_addr|varkey|chains[chain]": [
+   "?"
+  ],
+  "addr_tier:chain_poll|varkey|chains[chain]": [
+   "?"
+  ],
+  "addr_tier:web_view|varkey|chains[c]": [
+   "?"
+  ],
+  "addr_tier:web_view|varkey|chains[sc]": [
+   "?"
+  ],
+  "balcheck:_rpcs_for|varkey|chains[chain]": [
+   "?"
+  ],
+  "balcheck:run_once|varkey|native_symbol[ch]": [
+   "?"
+  ],
+  "bf_engine:_SinceSource._section|varkey|<top>[section]": [
+   "?"
+  ],
+  "bf_engine:_SinceSource._section|varkey|chains[section]": [
+   "?"
+  ],
+  "bf_engine:_SinceSource._section|varkey|exchanges[section]": [
+   "?"
+  ],
+  "bf_engine:rpc_day_configure|varkey|rpc_day_limits[name]": [
+   "?"
+  ],
+  "bf_engine:sol_meter_configure.f|varkey|sol[k]": [
+   "archive_rpc_method_per10s",
+   "archive_rpc_per10s",
+   "head_rpc_gap_ms",
+   "helius_rps",
+   "rpc_other_gap_ms"
+  ],
+  "bf_engine:sol_meter_configure|varkey|sol[k]": [
+   "?"
+  ],
+  "btc_watch:_settings|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "btc_watch:main|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "cfg_schema:check|varkey|<top>[k]": [
+   "?"
+  ],
+  "chain_registry:wallets|varkey|<top>[CFG_KEY]": [
+   "chain_wallets"
+  ],
+  "chain_watch:main|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "chaincatalog:recon_tokens_for|varkey|recon_tokens[chain]": [
+   "?"
+  ],
+  "chainoff:set_enabled|varkey|chains[chain]": [
+   "?"
+  ],
+  "chainoff:summary|varkey|chains[k]": [
+   "?"
+  ],
+  "chainsweep:speed_view|varkey|chains[k]": [
+   "?"
+  ],
+  "chk_sources:collect_sources|varkey|chains[c]": [
+   "?"
+  ],
+  "config:_as_enabled|varkey|chains[n]": [
+   "?"
+  ],
+  "config:_drop_disabled_chains|varkey|chains[n]": [
+   "?"
+  ],
+  "config:_keep_disabled_pair|varkey|native_symbol[c]": [
+   "?"
+  ],
+  "config:_keep_disabled_pair|varkey|wrapped_native[c]": [
+   "?"
+  ],
+  "config:_poll_cfg|varkey|<top>[sect]": [
+   "exf",
+   "upbit"
+  ],
+  "config:apply_activity_gate|varkey|chains[c]": [
+   "?"
+  ],
+  "config:apply_activity_gate|varkey|native_symbol[c]": [
+   "?"
+  ],
+  "config:apply_activity_gate|varkey|wrapped_native[c]": [
+   "?"
+  ],
+  "config:exf_binance_dividends|varkey|<top>[sect]": [
+   "exf"
+  ],
+  "config:gate_decisions|varkey|chains[c]": [
+   "?"
+  ],
+  "config:load_config|varkey|native_symbol[_name]": [
+   "?"
+  ],
+  "config:load_config|varkey|wrapped_native[_name]": [
+   "?"
+  ],
+  "core:Core._group_of|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_classify:ClassifyMixin.deltas|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_outflow:OutflowMixin._out_dests|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_post:PostMixin._post_event|varkey|native_symbol[chain]": [
+   "?",
+   "sol"
+  ],
+  "core_pricing:PricingMixin._leg_px_sym|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_pricing:PricingMixin._leg_px|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._gate_reload|varkey|chains[c]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._gate_reload|varkey|native_symbol[c]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._gate_reload|varkey|wrapped_native[c]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._prov_sol_lanes._u|varkey|sol[k]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._prov_sol_lanes|varkey|sol[k]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._recon_fetch_plan|varkey|chains[chain]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._recon_onchain|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._recon_pass_scopes|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "core_recon:ReconMixin._scope_ready_natx|varkey|chains[scope]": [
+   "?"
+  ],
+  "discopen:Runner._recheck_one|varkey|native_symbol[ch]": [
+   "?"
+  ],
+  "discopen:Runner._urls|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_bscout:ChainWatcher.__init__|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_bscout:ChainWatcher.__init__|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "evm_es:EtherscanWatcher.__init__|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_es:EtherscanWatcher.__init__|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "evm_logdisc:RpcLogDiscovery.__init__|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_logdisc:RpcLogDiscovery.__init__|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "evm_rpcw:RpcChainWatcher.__init__|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_rpcw:RpcChainWatcher.__init__|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "evm_rpcw:RpcChainWatcher._adopt_explorer|varkey|chains[self.chain]": [
+   "?"
+  ],
+  "evm_rpcw:RpcChainWatcher._lanes_recent_blocks|varkey|chains[self.chain]": [
+   "?"
+  ],
+  "evm_rpcw:RpcChainWatcher._scan_logs|varkey|chains[self.chain]": [
+   "?"
+  ],
+  "evm_rpcw:rpc_nodes|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:ChainLoop.__init__|varkey|chains[wt.chain]": [
+   "?"
+  ],
+  "evm_watch:build_watcher|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:evm_route|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:main.chain_poll|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:main.make_watcher|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:main|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:main|varkey|chains[wt.chain]": [
+   "?"
+  ],
+  "evm_watch:rpcfb_allowed|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:rpcfb_bs_dead|varkey|chains[chain]": [
+   "?"
+  ],
+  "evm_watch:rpcfb_resume|varkey|chains[chain]": [
+   "?"
+  ],
+  "ledger_backup:backup_files|varkey|<top>[k]": [
+   "chain_wallets",
+   "exchange_addresses",
+   "wallets"
+  ],
+  "lpchain:_rpcs|varkey|chains[chain]": [
+   "?"
+  ],
+  "lpchain:list_wallet_positions|varkey|chains[chain]": [
+   "?"
+  ],
+  "lpchain:token_meta|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "nft:Tracker._off_at|varkey|chains[ch]": [
+   "?"
+  ],
+  "nodekeys:apply|varkey|rpc_day_limits[f'node_{p}']": [
+   "?"
+  ],
+  "runner_fp:_nonevm_unit_inputs|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "runner_fp:unit_inputs|varkey|chains[c]": [
+   "?"
+  ],
+  "sellchart:daily_max|varkey|review['buy_eval_daily_max' if kind == 'buy' else 'sell_eval_daily_]": [
+   "?"
+  ],
+  "settings_store:load_config_quiet|varkey|chains[n]": [
+   "?"
+  ],
+  "settings_wallets:add_chain_wallet|varkey|<top>[reg.CFG_KEY]": [
+   "chain_wallets"
+  ],
+  "settings_wallets:remove_chain_wallet|varkey|<top>[reg.CFG_KEY]": [
+   "chain_wallets"
+  ],
+  "settings_wallets:rename_chain_wallet|varkey|<top>[reg.CFG_KEY]": [
+   "chain_wallets"
+  ],
+  "sol_base:Rpc.__init__._f|varkey|sol[k]": [
+   "?"
+  ],
+  "sol_base:Rpc.__init__|varkey|sol[k]": [
+   "?"
+  ],
+  "sol_watch:SolWatcher.__init__._num9|varkey|sol[k]": [
+   "?"
+  ],
+  "sol_watch:SolWatcher.__init__|varkey|sol[k]": [
+   "?"
+  ],
+  "sui_watch:_budgets|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "sui_watch:main|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "token_discovery:_cc|varkey|chains[chain]": [
+   "?"
+  ],
+  "ton_watch:main|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "tools.gate_onchain:main|varkey|chains[chain]": [
+   "?"
+  ],
+  "tools.gate_onchain:main|varkey|native_symbol[chain]": [
+   "?"
+  ],
+  "tools.ledger_restore:block_sec|varkey|chains[ch]": [
+   "?"
+  ],
+  "tools.ledger_restore:plan_evm|varkey|chains[ch]": [
+   "?"
+  ],
+  "tools.migrate_nodekeys_1008:_scan|varkey|bsc[f]": [
+   "getlogs_span_caps",
+   "logs_rpcs_fallback"
+  ],
+  "tools.migrate_nodekeys_1008:main|varkey|bsc[f]": [
+   "getlogs_span_caps",
+   "logs_rpcs_fallback"
+  ],
+  "tools.negabs:_urls|varkey|chains[chain]": [
+   "?"
+  ],
+  "tools.pretrace_hotfix_h:<module>|varkey|chains[ch]": [
+   "?"
+  ],
+  "tools.repair_onchain_balances:chains_caught_up|varkey|chains[chain]": [
+   "?"
+  ],
+  "tools.repair_partial_legs:main|varkey|chains[c]": [
+   "?"
+  ],
+  "tools.repair_partial_legs:main|varkey|chains[ch]": [
+   "?"
+  ],
+  "tools.repair_synth_nft:main|varkey|chains[a.chain]": [
+   "?"
+  ],
+  "tools.token_recheck:_native_px|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "tools.token_recheck:rpcs_for|varkey|chains[chain]": [
+   "?"
+  ],
+  "tools.token_recheck:strict_fn|varkey|wrapped_native[chain]": [
+   "?"
+  ],
+  "tron_watch:TronAdapter.__init__|varkey|<top>[reg.CFG_CHAIN_KEY]": [
+   "nonevm"
+  ],
+  "view_b_replay:ReplayMixin._replay_main|varkey|native_symbol[c9]": [
+   "?"
+  ],
+  "view_builder:StateBuilder._cfg_hot_refresh|varkey|<top>[k9]": [
+   "_disabled_wallets",
+   "wallets"
+  ],
+  "view_builder:StateBuilder._spot_off|varkey|chains[ch9]": [
+   "?"
+  ],
+  "view_outflows:OutflowsMixin._backfill_since_view|varkey|<top>[x]": [
+   "bsc",
+   "sol"
+  ],
+  "view_prov:ProvMixin._prov_price|varkey|native_symbol[ch9]": [
+   "?"
+  ],
+  "view_prov:ProvMixin._prov_seen|varkey|native_symbol[c9]": [
+   "?"
+  ]
+ },
+ "unresolved": [
+  "accounting_fs:FirstSeen.fs_spec|guard|fsx.sb.cfg[price_overrides]",
+  "addr_ai:_off_chains|passout|_disabled_chains → set()",
+  "addr_ai:_off_chains|whole|chains.items()",
+  "addr_ai:probe_evm|guard|cfg[chains]",
+  "addr_ai:probe|guard|cfg[chains]",
+  "addr_tier:chain_poll|guard|(cfg.get('chains') or {}).get(chain) or {}[poll_sec]",
+  "addr_tier:chain_poll|passout|evm_poll_sec → float()",
+  "addr_tier:recon_on|passout|backfill_months → float()",
+  "addr_tier:settings|whole|addr_tier.items()",
+  "addr_tier:web_view|guard|(cfg.get('chains') or {}).get(c) or {}[etherscan_chainid]",
+  "addr_tier:web_view|whole|chains.items()",
+  "alert_bot:drop_scam|whole|for in wallets",
+  "alert_bot:load_hold|guard|raw[dg]",
+  "alert_bot:load_hold|guard|raw[dg_day]",
+  "alert_bot:load_hold|guard|raw[ids]",
+  "alert_bot:load_hold|guard|raw[items]",
+  "alert_bot:load_hold|guard|raw[n]",
+  "alert_bot:load_hold|guard|raw[since]",
+  "alert_bot:load_stats|guard|raw[bf_first]",
+  "alert_bot:load_stats|guard|raw[counted]",
+  "alert_bot:load_stats|guard|raw[days]",
+  "alert_bot:load_stats|guard|raw[first_seen]",
+  "alert_prefs:_v1_was_rec|guard|raw[cats]",
+  "alert_prefs:_v1_was_rec|guard|raw[quiet]",
+  "alert_prefs:_v1_was_rec|guard|raw[th]",
+  "alert_prefs:normalize|guard|raw[cats]",
+  "alert_prefs:normalize|guard|raw[quiet]",
+  "alert_prefs:normalize|guard|raw[th]",
+  "alert_prefs:normalize|guard|raw[updated]",
+  "alert_prefs:normalize|guard|raw[v]",
+  "balcheck:_registered_pairs|whole|for in wallets",
+  "balcheck:_sol_wallets|whole|for in wallets",
+  "balcheck:run_once|passout|backfill_months → float()",
+  "balcheck:settings|whole|balance_check.items()",
+  "bf_engine:_rpc_day_pct|passout|rpc_day_pct → float()",
+  "bf_engine:bsc_backfill_days|passout|backfill_months → float()",
+  "bf_engine:effective_backfill_t0|passout|backfill_months → float()",
+  "bf_engine:helius_head_min_pn|guard|(cfg or {}).get('sol') or {}[helius_head_min_pct_pn]",
+  "bf_engine:helius_head_min_pn|guard|cfg or {}[sol]",
+  "bf_engine:parse_date_ts|conflict|v{blk:backfill_covered_since,blk:backfill_since}",
+  "bf_engine:parse_date_ts|passout|backfill_covered_since → int()",
+  "bf_engine:rpc_day_configure|passout|rpc_day_limits → list()",
+  "bf_engine:wallet_since_map|whole|for in wallets",
+  "brokers.alpaca:Adapter.base|guard|self.cfg[paper]",
+  "brokers.alpaca:Adapter.fetch|guard|self.cfg[key_id]",
+  "brokers.alpaca:Adapter.hd|guard|self.cfg[key_id]",
+  "brokers.alpaca:Adapter.hd|guard|self.cfg[secret_key]",
+  "brokers.dbsec:Adapter.fetch|guard|self.cfg[app_key]",
+  "brokers.dbsec:Adapter.fetch|guard|self.cfg[overseas]",
+  "brokers.dbsec:Adapter.token|guard|self.cfg[app_key]",
+  "brokers.dbsec:Adapter.token|guard|self.cfg[app_secret]",
+  "brokers.ibkr:Adapter.base|guard|self.cfg[gateway_url]",
+  "brokers.ibkr:Adapter.fetch|guard|self.cfg[account_id]",
+  "brokers.kis:Adapter.acct|guard|self.cfg[account]",
+  "brokers.kis:Adapter.base|guard|self.cfg[paper]",
+  "brokers.kis:Adapter.fetch|guard|self.cfg[overseas]",
+  "brokers.kis:Adapter.fetch|guard|self.cfg[overseas_exchanges]",
+  "brokers.kis:Adapter.fetch|guard|self.cfg[paper]",
+  "brokers.kis:Adapter.hd|guard|self.cfg[app_key]",
+  "brokers.kis:Adapter.hd|guard|self.cfg[app_secret]",
+  "brokers.kis:Adapter.hd|guard|self.cfg[paper]",
+  "brokers.kis:Adapter.token|guard|self.cfg[app_key]",
+  "brokers.kis:Adapter.token|guard|self.cfg[app_secret]",
+  "brokers.kiwoom:Adapter.base|guard|self.cfg[mock]",
+  "brokers.kiwoom:Adapter.fetch|guard|self.cfg[app_key]",
+  "brokers.kiwoom:Adapter.fetch|guard|self.cfg[us]",
+  "brokers.kiwoom:Adapter.token|guard|self.cfg[app_key]",
+  "brokers.kiwoom:Adapter.token|guard|self.cfg[secret_key]",
+  "brokers.ls:Adapter.fetch|guard|self.cfg[app_key]",
+  "brokers.ls:Adapter.fetch|guard|self.cfg[overseas]",
+  "brokers.ls:Adapter.token|guard|self.cfg[app_key]",
+  "brokers.ls:Adapter.token|guard|self.cfg[app_secret]",
+  "brokers.schwab:Adapter.token|guard|self.cfg[app_key]",
+  "brokers.schwab:Adapter.token|guard|self.cfg[app_secret]",
+  "brokers.schwab:Adapter.token|guard|self.cfg[refresh_token]",
+  "brokers.toss:Adapter.fetch|guard|self.cfg[account_seq]",
+  "brokers.toss:Adapter.fetch|guard|self.cfg[cash]",
+  "brokers.toss:Adapter.token|guard|self.cfg[client_id]",
+  "brokers.toss:Adapter.token|guard|self.cfg[client_secret]",
+  "brokers:run_sync|guard|cfg[account]",
+  "bsc_watch:main|whole|for in wallets",
+  "btc_watch:BtcAdapter.__init__|passout|<top> → super().__init__()",
+  "btc_watch:window_start|guard|cfg[backfill_full_history]",
+  "btc_watch:window_start|guard|cfg[backfill_months]",
+  "cfg_schema:check|whole|<top>.keys()",
+  "chain_watch:Collector.__init__|guard|cfg9[history_details]",
+  "chain_watch:Collector.__init__|guard|cfg9[history_pages]",
+  "chain_watch:Collector.__init__|guard|cfg9[latest_details]",
+  "chain_watch:Collector.__init__|guard|cfg9[latest_pages]",
+  "chain_watch:main|guard|(cfg.get(reg.CFG_CHAIN_KEY) or {}).get(chain) or {}[poll_sec]",
+  "chain_watch:main|passout|<top> → make_adapter()",
+  "chainoff:_chain_wallets|whole|for in _disabled_chains",
+  "chainoff:_chain_wallets|whole|for in wallets",
+  "chainoff:_evm_chains_on|whole|for in wallets",
+  "chainoff:set_enabled|whole|chains.items()",
+  "chainoff:summary|whole|chains.items()",
+  "chainsweep:auto_off_keys|whole|chains.items()",
+  "chainsweep:chain_list|passout|_disabled_chains → set()",
+  "chainsweep:chain_list|whole|chains.items()",
+  "chainsweep:run_once|passout|_disabled_chains → set()",
+  "chainsweep:settings|whole|chain_sweep.items()",
+  "chainsweep:speed_tick|whole|for in wallets",
+  "chainsweep:speed_view|passout|backfill_months → float()",
+  "chainsweep:wallets|passout|wallets → list()",
+  "chainsweep:wallets|whole|for in _disabled_wallets",
+  "chk_balance:_disc_ents|whole|for in wallets",
+  "chk_collect:_sweep_scope|whole|chains.items()",
+  "chk_logs:LogWatch.__init__|whole|for in _disabled_chains",
+  "chk_sources:collect_sources|passout|chains → sorted()",
+  "chk_sources:collect_sources|whole|for in wallets",
+  "chk_sources:read_heartbeats|passout|_disabled_chains → set()",
+  "chk_sources:read_heartbeats|whole|for in wallets",
+  "config:_as_enabled|whole|chains.items()",
+  "config:_drop_disabled_chains|whole|chains.items()",
+  "config:_drop_disabled_chains|whole|for in wallets",
+  "config:_poll_cfg|guard|(cfg or {}).get(sect) or {}[poll_sec]",
+  "config:_registered_evm|whole|for in wallets",
+  "config:apply_activity_gate|whole|chains.items()",
+  "config:gate_decisions|whole|chains.items()",
+  "config:gate_decisions|whole|for in wallets",
+  "config:history_wallets|passout|wallets → list()",
+  "config:history_wallets|whole|for in _disabled_wallets",
+  "config:load_config|passout|_disabled_chains → set()",
+  "config:load_config|passout|chains → set()",
+  "config:load_config|whole|chains.items()",
+  "core:Core.__init__|passout|backfill_months → float()",
+  "core:Core.__init__|whole|for in _disabled_wallets",
+  "core:Core.__init__|whole|for in wallets",
+  "core:Core.__init__|whole|wrapped_native.items()",
+  "core:Core._load_exchange_addrs|whole|for in exchange_addresses",
+  "core_exf:ExfMixin._exf_fix_pool|passout|backfill_months → float()",
+  "core_exf:ExfMixin._exf_open_ts|passout|backfill_months → float()",
+  "core_pricing:PricingMixin._price_upbit_quote_fills|guard|raw9[payload]",
+  "core_pricing:PricingMixin.price_pass|guard|raw9[payload]",
+  "core_prov:ProvMixin._prov_targets|whole|for in chains",
+  "core_prov:ProvMixin._prov_targets|whole|for in wallets",
+  "core_recon:ReconMixin._gate_reload|whole|for in wallets",
+  "core_recon:ReconMixin._nonevm_adapter|passout|<top> → mk()",
+  "core_recon:ReconMixin._recon_pass_scopes|whole|for in chains",
+  "core_recon:ReconMixin._recon_pass_scopes|whole|for in wallets",
+  "core_recon:ReconMixin._rpc_recon_reset|whole|chains.items()",
+  "core_recon:ReconMixin._scope_ready_natx|passout|recon_native_stall_hours → float()",
+  "core_svc:exf_settle_planner|passout|backfill_months → float()",
+  "coverage_limits:build|passout|backfill_months → float()",
+  "coverage_limits:build|whole|for in perp_wallets",
+  "demo_data:demo_config|guard|cfg[chains]",
+  "demo_data:demo_config|guard|cfg[wallets]",
+  "demo_data:empty|whole|for in wallets",
+  "depaddr:_hist_depth|passout|backfill_months → float()",
+  "depaddr:_manual_rows|guard|_CFG_CACHE[mt]",
+  "depaddr:_manual_rows|guard|_CFG_CACHE[rows]",
+  "depaddr:_manual_rows|whole|for in exchange_addresses",
+  "discopen:Runner._chains|whole|for in chains",
+  "discopen:Runner._chains|whole|for in wallets",
+  "discopen:Runner._my|whole|for in wallets",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][blocks_per_day]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][blockscout]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][conf_depth]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][indexing_guard_scope]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][indexing_status_guard]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][rescan_overlap_blocks]",
+  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][rpcs]",
+  "evm_bscout:ChainWatcher.__init__|passout|backfill_months → float()",
+  "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][blocks_per_day]",
+  "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][conf_depth]",
+  "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][rpcs]",
+  "evm_es:EtherscanWatcher.__init__|passout|backfill_months → float()",
+  "evm_logdisc:RpcLogDiscovery.__init__|passout|backfill_months → float()",
+  "evm_rpcw:RpcChainWatcher.__init__|passout|backfill_months → float()",
+  "evm_rpcw:RpcChainWatcher.__init__|passout|evm_poll_sec → float()",
+  "evm_rpcw:RpcChainWatcher.__init__|whole|for in wallets",
+  "evm_rpcw:RpcChainWatcher._scan_logs|guard|self.cfg['chains'][self.chain][logs_head_guard]",
+  "evm_rpcw:RpcChainWatcher.day_calls|guard|cfg[chains]",
+  "evm_rpcw:RpcChainWatcher.day_calls|guard|cfg[evm_poll_sec]",
+  "evm_watch:ChainLoop.__init__|guard|cfg['chains'].get(wt.chain) or {}[etherscan_chainid]",
+  "evm_watch:ChainLoop.step|guard|cfg['chains'].get(nw9.chain) or {}[etherscan_chainid]",
+  "evm_watch:ChainLoop.step|guard|cfg[chains]",
+  "evm_watch:_bs_probe|guard|(cfg.get('chains') or {}).get(chain) or {}[blockscout]",
+  "evm_watch:_bs_probe|guard|cfg[chains]",
+  "evm_watch:_primary_kind|guard|cfg[chains]",
+  "evm_watch:build_watcher|guard|cfg['chains'][chain][etherscan_chainid]",
+  "evm_watch:es_fallback_watcher|guard|cfg['chains'].get(wt.chain, {})[blockscout]",
+  "evm_watch:es_fallback_watcher|guard|cfg[chains]",
+  "evm_watch:main.chain_poll|guard|cfg['chains'].get(chain) or {}[poll_sec]",
+  "evm_watch:main.make_watcher|guard|cfg['chains'][chain] or {}[poll_sec]",
+  "evm_watch:main|guard|cfg['chains'].get(chain) or {}[poll_sec]",
+  "evm_watch:main|guard|cfg['chains'][chain] or {}[poll_sec]",
+  "evm_watch:main|guard|cfg['chains'][wt.chain][rpc_log_discovery]",
+  "evm_watch:main|passout|evm_poll_sec → int()",
+  "evm_watch:main|whole|for in wallets",
+  "evm_watch:rpc_first_last_resort|guard|cfg[chains]",
+  "evm_watch:rpcfb_allowed|guard|((cfg or {}).get('chains') or {}).get(chain) or {}[rpc_fallback]",
+  "evm_watch:rpcfb_bs_error|guard|cfg[chains]",
+  "evm_watch:rpcfb_try_return|guard|cfg[chains]",
+  "ex_foreign:main|passout|backfill_months → float()",
+  "flow_trace:Scanner.__init__|passout|<top> → evm_watch.rpc_nodes()",
+  "flow_trace:Scanner.__init__|whole|chains.items()",
+  "flow_trace:Scanner._alt|guard|self.cfg[chains]",
+  "flow_trace:Scanner._bs|guard|self.cfg[chains]",
+  "flow_trace:Scanner._es|guard|(self.cfg.get('chains') or {}).get(chain) or {}[etherscan_chainid]",
+  "flow_trace:Scanner._es|guard|self.cfg[chains]",
+  "flow_trace:Scanner._scan_alt|guard|self.cfg[chains]",
+  "flow_trace:run_once|passout|_disabled_chains → set()",
+  "flow_trace:run_once|whole|chains.items()",
+  "health:settings|whole|health.items()",
+  "histcurve:off_chains_now|whole|chains.items()",
+  "hl_spot:Meta.__init__|guard|raw or {}[tokens]",
+  "hl_spot:Meta.__init__|guard|raw or {}[universe]",
+  "hl_spot:load_meta|guard|raw[tokens]",
+  "hl_spot:load_meta|guard|raw[universe]",
+  "hl_spot:window_t0|passout|backfill_months → float()",
+  "http_get:GetMixin._send_wow|guard|cfg9[ask_llm]",
+  "http_get:GetMixin._send_wow|guard|cfg9[ask_llm_daily_max]",
+  "inflow_probe:_expect_cid|guard|cfg or {}[chains]",
+  "inflow_probe:nodes|guard|cfg or {}[chains]",
+  "leverage:bybit_loan_thr|guard|cfg[alerts]",
+  "leverage:kucoin.cross|guard|cfg[liqDebtRatio]",
+  "leverage:kucoin.cross|guard|cfg[warningDebtRatio]",
+  "leverage:kucoin|guard|cfg[liqDebtRatio]",
+  "leverage:kucoin|guard|cfg[warningDebtRatio]",
+  "leverage:okx.unified|guard|cfg[0][acctLv]",
+  "leverage:okx|guard|cfg[0][acctLv]",
+  "liq_watch:_asset_ratio_model|guard|raw[accountType]",
+  "liq_watch:bybit_loan_thr|guard|cfg[alerts]",
+  "liq_watch:repeat_sec|guard|cfg[alerts]",
+  "liq_watch:risk_row|guard|raw[indexPrice]",
+  "liq_watch:risk_row|guard|raw[liquidatePrice]",
+  "login_auth:_sessions_locked|guard|raw[_g]",
+  "lpchain:list_wallet_positions|guard|(cfg.get('chains') or {}).get(chain) or {}[blockscout]",
+  "nft:Tracker._acq_one|guard|cfg[native_symbol]",
+  "nft:Tracker.acquire_lookups|guard|cfg[_disabled_chains]",
+  "nft:Tracker.acquire_lookups|guard|cfg[chains]",
+  "nft:_off_chains|guard|cfg[_disabled_chains]",
+  "nft:_off_chains|guard|cfg[chains]",
+  "nft:evm_targets|guard|cfg[_disabled_chains]",
+  "nft:evm_targets|guard|cfg[chains]",
+  "nft:evm_targets|guard|cfg[wallets]",
+  "nft:registered|guard|cfg or {}[wallets]",
+  "nodekeys:apply|passout|<top> → evm_watch.rpc_nodes()",
+  "nodesel:_after_sample|guard|_CFG[slo]",
+  "nodesel:configure|guard|_CFG[bf_target]",
+  "nodesel:configure|guard|_CFG[on]",
+  "nodesel:configure|guard|_CFG[slo]",
+  "nodesel:enabled|guard|_CFG[on]",
+  "nodesel:lane_eta|guard|_CFG[bf_target]",
+  "nodesel:node_bad|guard|_CFG[slo]",
+  "onboarding:_alchemy_save_net|whole|for in wallets",
+  "onboarding:_tier_view|whole|for in wallets",
+  "other_assets:Quoter.broker_cycle|guard|cfg.get('other_assets') or {}[broker_every_sec]",
+  "other_assets:Quoter.broker_cycle|guard|cfg[brokers]",
+  "other_assets:Quoter.broker_cycle|guard|cfg[other_assets]",
+  "other_assets:Quoter.cycle|guard|cfg[quote_every_sec]",
+  "other_assets:Quoter.cycle|guard|cfg[quotes]",
+  "other_assets:Quoter.loop|guard|cfg[quote_every_sec]",
+  "perp_dex:_rows|passout|perp_wallets → enumerate()",
+  "perp_dex:_t0_ms|passout|backfill_months → float()",
+  "rabby:_freeze_disabled|passout|_disabled_chains → set()",
+  "rabby:_freeze_disabled|whole|chains.items()",
+  "rabby:bot_chain_ids|whole|chains.items()",
+  "rabby:chain_resolver|passout|_disabled_chains → set()",
+  "rabby:chain_resolver|whole|chains.keys()",
+  "rabby:chain_resolver|whole|for in wallets",
+  "rabby:evm_wallets|passout|_disabled_wallets → list()",
+  "rabby:evm_wallets|passout|wallets → list()",
+  "rabby:settings|whole|rabby.items()",
+  "rabby:wallet_chains|passout|_disabled_wallets → list()",
+  "rabby:wallet_chains|passout|wallets → list()",
+  "rawtx_cache:mine_wallets|whole|for in wallets",
+  "runner_fp:unit_inputs|whole|for in wallets",
+  "runner_fp:web_restart_view|whole|<top>.items()",
+  "sale_match:load_seed|guard|raw[auctions]",
+  "sale_match:load_seed|guard|raw[cca_factories]",
+  "sale_match:load_seed|guard|raw[chains]",
+  "sale_match:load_seed|guard|raw[redeem]",
+  "settings_store:evm_chains|whole|chains.items()",
+  "settings_store:load_config_quiet|whole|chains.items()",
+  "settings_store:load_config_quiet|whole|for in wallets",
+  "settings_store:needs_alchemy|whole|for in wallets",
+  "settings_store:needs_etherscan|whole|for in wallets",
+  "settings_store:needs_helius|whole|for in wallets",
+  "settings_store:write_config_raw|passout|<top> → json.dumps()",
+  "settings_wallets:add_chain_wallet|whole|for in wallets",
+  "settings_wallets:add_wallets|whole|for in wallets",
+  "settings_wallets:add_wallet|whole|for in wallets",
+  "settings_wallets:remove_perp|passout|perp_wallets → list()",
+  "settings_wallets:remove_wallet|whole|for in wallets",
+  "settings_wallets:rename_wallet|whole|for in wallets",
+  "settings_wallets:wallet_list|whole|for in wallets",
+  "sol_watch:SolWatcher.__init__|passout|backfill_months → float()",
+  "sol_watch:main|whole|for in wallets",
+  "sui_watch:SuiAdapter.__init__|passout|<top> → super().__init__()",
+  "sui_watch:SuiAdapter.window_t0|guard|self.cfg[backfill_full_history]",
+  "sui_watch:SuiAdapter.window_t0|guard|self.cfg[backfill_months]",
+  "token_discovery:summary|whole|for in wallets",
+  "ton_watch:TonAdapter.__init__|passout|<top> → super().__init__()",
+  "ton_watch:_floor|guard|cfg or {}[backfill_full_history]",
+  "tools.allchains_enable:plan|guard|cfg[chain_sweep]",
+  "tools.allchains_enable:seed_pairs|guard|cfg[wallets]",
+  "tools.arc_enable:main|guard|cfg[wallets]",
+  "tools.arc_enable:plan|guard|cfg[bsc]",
+  "tools.arc_enable:plan|guard|cfg[chains]",
+  "tools.arc_enable:plan|guard|cfg[native_symbol]",
+  "tools.arc_enable:plan|guard|cfg[wallets]",
+  "tools.arc_enable:status|guard|cfg[wallets]",
+  "tools.backfill_gap:_bsc_nft_items|guard|cfg[bsc]",
+  "tools.backfill_gap:_import_locked|guard|cfg[wallets]",
+  "tools.backfill_gap:_receipt|guard|(cfg.get('chains') or {}).get(chain) or {}[rpcs]",
+  "tools.backfill_gap:_receipt|guard|cfg[bsc]",
+  "tools.backfill_gap:_receipt|guard|cfg[chains]",
+  "tools.backfill_gap:_window_start|guard|cfg[backfill_months]",
+  "tools.backfill_gap:cmd_nft_enrich|guard|cfg['chains'][chain][blockscout]",
+  "tools.backfill_gap:cmd_nft_enrich|guard|cfg[chains]",
+  "tools.backfill_gap:cmd_nft_enrich|guard|cfg[wallets]",
+  "tools.backfill_gap:cmd_scan_bsc|guard|cfg[bsc]",
+  "tools.backfill_gap:cmd_scan_bsc|guard|cfg[wallets]",
+  "tools.backfill_gap:cmd_scan_evm|guard|cfg[chains]",
+  "tools.backfill_gap:cmd_scan_evm|guard|cfg[wallets]",
+  "tools.backfill_gap:main|passout|<top> → {'scan-bsc': cmd_scan_bsc, 'scan-evm': cmd_scan_evm, 'nft-en()",
+  "tools.fix_dupsnap_1004:_mk_core|passout|backfill_months → float()",
+  "tools.fix_dupsnap_1004:_mk_core|whole|for in exchange_addresses",
+  "tools.fix_dupsnap_1004:_mk_core|whole|for in wallets",
+  "tools.fix_dupsnap_1004:_mk_core|whole|wrapped_native.items()",
+  "tools.gate_onchain:main|whole|for in wallets",
+  "tools.gate_onchain:main|whole|wrapped_native.items()",
+  "tools.hl_enable:_evm_wallets|guard|cfg[wallets]",
+  "tools.hl_enable:plan|guard|cfg[hyperliquid]",
+  "tools.hl_enable:plan|guard|cfg[perp_wallets]",
+  "tools.ledger_restore:block_sec|guard|((cfg or {}).get('chains') or {}).get(ch, {})[blocks_per_day]",
+  "tools.ledger_restore:plan_sol|whole|for in wallets",
+  "tools.lp_enrich_sol:_run|passout|<top> → sol_watch.Rpc()",
+  "tools.lp_enrich_sol:main|whole|for in wallets",
+  "tools.negabs:_wallets|whole|for in wallets",
+  "tools.prep_hotfix_h_caches:<module>|guard|b.cfg[chains]",
+  "tools.prep_hotfix_h_caches:<module>|guard|b.cfg[wallets]",
+  "tools.pretrace_hotfix_h:<module>|guard|(cfg.get('chains') or {}).get(ch) or {}[blockscout]",
+  "tools.rederive_perspective:_my_wallets|whole|for in wallets",
+  "tools.repair_anchor_ts:_run|passout|backfill_months → float()",
+  "tools.repair_onchain_balances:_run|passout|backfill_months → float()",
+  "tools.repair_onchain_balances:_run|whole|chains.items()",
+  "tools.repair_onchain_balances:chains_caught_up|guard|(cfg.get('chains') or {}).get(chain) or {}[blocks_per_day]",
+  "tools.repair_onchain_balances:chains_caught_up|whole|for in wallets",
+  "tools.repair_own_overlap:_ro_core|whole|for in _disabled_wallets",
+  "tools.repair_own_overlap:_ro_core|whole|for in wallets",
+  "tools.repair_partial_legs:main|guard|chains_cfg[c][etherscan_chainid]",
+  "tools.repair_partial_legs:main|guard|chains_cfg[ch][etherscan_chainid]",
+  "tools.repair_partial_legs:main|passout|chains → sorted()",
+  "tools.repair_partial_legs:main|whole|for in wallets",
+  "tools.repair_synth_nft:main|guard|(cfg.get('chains') or {}).get(a.chain) or {}[rpcs]",
+  "tools.repair_synth_nft:main|whole|for in wallets",
+  "tools.repair_wrap_legs:find|whole|for in wallets",
+  "tools.repair_wrap_legs:find|whole|wrapped_native.items()",
+  "tools.robinhood_rpc_enable:<module>|passout|<top> → json.dumps()",
+  "tools.robinhood_rpc_enable:<module>|whole|for in wallets",
+  "tools.token_recheck:pairs_of|whole|for in wallets",
+  "tron_watch:TronAdapter.__init__|passout|<top> → super().__init__()",
+  "tron_watch:TronAdapter.requested_from_ms|guard|cfg[backfill_full_history]",
+  "tron_watch:TronAdapter.requested_from_ms|guard|cfg[backfill_months]",
+  "upbit_link:main|passout|backfill_months → float()",
+  "view_b_cards:CardsMixin._build_cards|passout|_disabled_chains → set()",
+  "view_b_cards:CardsMixin._build_cards|whole|price_overrides.items()",
+  "view_b_pendings:PendingsMixin._build_pendings|whole|chains.items()",
+  "view_b_pendings:PendingsMixin._build_pendings|whole|for in exchange_addresses",
+  "view_b_pendings:PendingsMixin._build_pendings|whole|for in wallets",
+  "view_b_replay:ReplayMixin._replay_prep|passout|_disabled_chains → set()",
+  "view_b_replay:ReplayMixin._replay_prep|passout|backfill_months → float()",
+  "view_b_replay:ReplayMixin._replay_prep|passout|first_seen_px → accounting_ctx.FsIn()",
+  "view_b_replay:ReplayMixin._replay_prep|passout|first_seen_px → accounting_ctx.ReplayCtx()",
+  "view_b_replay:ReplayMixin._replay_prep|passout|gas_in_cost → accounting_ctx.ReplayCtx()",
+  "view_backfill:BackfillMixin._backfill_pct|whole|for in wallets",
+  "view_backfill:BackfillMixin._backfill_progress|passout|chains → set()",
+  "view_backfill:BackfillMixin._backfill_progress|whole|for in wallets",
+  "view_backfill:BackfillMixin._last_scan_str|whole|for in _disabled_chains",
+  "view_builder:StateBuilder._cfg_hot_refresh|passout|perp_wallets → json.dumps()",
+  "view_builder:StateBuilder._cfg_hot_refresh|whole|for in wallets",
+  "view_builder:StateBuilder._spot_off|passout|_disabled_chains → set()",
+  "view_detail:DetailApiMixin.receipt._norm_px|guard|raw9[i9][un]",
+  "view_detail:DetailApiMixin.receipt._norm_px|guard|raw9[i][ts]",
+  "view_detail:DetailApiMixin.receipt|guard|raw9[i9][un]",
+  "view_detail:DetailApiMixin.receipt|guard|raw9[i][ts]",
+  "view_index:IndexMixin._ex_addr_index|whole|for in exchange_addresses",
+  "view_outflows:OutflowsMixin._attach_flows|passout|_disabled_chains → set()",
+  "view_outflows:OutflowsMixin._attach_flows|whole|for in wallets",
+  "view_outflows:OutflowsMixin._backfill_since_view|passout|backfill_months → float()",
+  "view_outflows:OutflowsMixin._backfill_since_view|whole|chains.items()",
+  "view_outflows:OutflowsMixin._deposit_exchange_index|whole|for in exchange_addresses",
+  "view_outflows:OutflowsMixin._known_addrs|whole|for in exchange_addresses",
+  "view_outflows:OutflowsMixin._outflows|whole|for in wallets",
+  "view_outflows:OutflowsMixin._untracked_net_deps|whole|for in chains",
+  "view_outflows:OutflowsMixin._xfer_links|whole|for in wallets",
+  "view_plans:_loan_windows|whole|for in loan_short",
+  "view_workers:WorkersMixin._lp_refresh_new|passout|_disabled_chains → set()",
+  "view_workers:WorkersMixin._lp_refresh_new|whole|chains.items()",
+  "view_workers:WorkersMixin._lp_refresh_once|passout|_disabled_chains → set()",
+  "view_workers:WorkersMixin._lp_refresh_once|whole|chains.items()",
+  "view_workers:WorkersMixin._lp_refresh_once|whole|for in wallets",
+  "view_workers:WorkersMixin._origin_chains|whole|chains.items()",
+  "view_workers:WorkersMixin._origin_worker|passout|_disabled_chains → set()",
+  "view_workers:WorkersMixin._sale_refresh_once|whole|chains.items()",
+  "view_workers:WorkersMixin._sale_refresh_once|whole|for in wallets",
+  "web:_balcheck_defer_keys|passout|<top> → health.collect_sources()",
+  "web:public_url|guard|(cfg or {}).get('web') or {}[public_url]",
+  "web:public_url|guard|cfg or {}[web]",
+  "wow2:flows.val|guard|conf[none]",
+  "wow2:flows|guard|conf[day]",
+  "wow2:flows|guard|conf[none]",
+  "wow2:flows|guard|conf[now]",
+  "xchain_match:Tracer._bs|guard|(self.cfg.get('chains') or {}).get(chain) or {}[blockscout]",
+  "xchain_match:Tracer._bs|guard|self.cfg[chains]",
+  "xchain_match:Tracer._evm_urls|guard|self.cfg[bsc]",
+  "xchain_match:Tracer._evm_urls|guard|self.cfg[chains]",
+  "xchain_match:Tracer._span|guard|self.cfg[chains]",
+  "xchain_match:Tracer.cluster|guard|(self.cfg.get('chains') or {}).get(chain) or {}[blockscout]",
+  "xchain_match:Tracer.cluster|guard|self.cfg[chains]",
+  "xchain_match:anchors_from_state|whole|for in exchange_addresses",
+  "xchain_match:exchange_addrs_from_state|whole|for in exchange_addresses"
+ ],
+ "example_only": [
+  "brokers",
+  "brokers_note",
+  "loan_short_note",
+  "other_assets",
+  "price_overrides_note"
+ ]
+}

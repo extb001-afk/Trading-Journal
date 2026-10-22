@@ -2,21 +2,21 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import hashlib
-import json
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import db as dbm
-import netpace
-import web
+import db as dbm  # noqa: E402
+import netpace  # noqa: E402
+import web  # noqa: E402
 
 FS_EX = getattr(web, "FS_EX", " · 최초 인식 시가")
 chk = T.chk
@@ -31,7 +31,7 @@ DAY = 86400
 TDEP = D0 + DAY
 TXM = "0x" + hashlib.sha256(b"m1-move").hexdigest()
 
-c = dbm.open_db(common.DB_PATH)
+c = dbm.open_db(paths.DB_PATH)
 A = {}
 for i, (ex, sym) in enumerate((("upbit", "USDT"), ("binance", "USDT"), ("upbit", "USDC"))):
     c.execute("INSERT INTO asset_groups (name) VALUES (?)", (f"{sym}#{901 + i}",))
@@ -69,17 +69,17 @@ c.close()
 px = {"USDT": 1.0, "USDC": 1.0}
 json.dump({"usd": px, "usd_ts": {k: NOW for k in px}, "rate": 1400.0, "updated": NOW, "dex_usd": {}, "dex_ts": {}, "dex_res": {}, "dex_res_ts": {},
            "fx_basis": 1400.0, "ex_usd": {f"{e}:{k}": v for k, v in px.items() for e in ("upbit", "binance")},
-           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("upbit", "binance")}}, open(web.SPOT_PATH, "w"))
+           "ex_ts": {f"{e}:{k}": NOW for k in px for e in ("upbit", "binance")}}, open(paths.state("spot.json"), "w"))
 web.pricing.PxCache.candle_usd = lambda self, sym, ms: px.get(str(sym).upper())
 web.pricing._gj = lambda url, timeout=10.0: None
 
 
 def build(prefs):
-    common.atomic_write_json(web.PREFS_PATH, dict({"plans": {}, "ignored": []}, **prefs))
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), dict({"plans": {}, "ignored": []}, **prefs))
     b = web.StateBuilder()
     b.skip_gen_check = True
     b.px.d.setdefault("fx", {})[str((TDEP * 1000 // 60_000) * 60_000)] = 1380.0
-    conn = dbm.open_db(common.DB_PATH, readonly=True)
+    conn = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(conn)["fields"]
     finally:

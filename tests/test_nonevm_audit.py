@@ -2,16 +2,16 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
-import _ingest
-from _ingest import Reader
-import _nonevm as N
+import _harness as T  # noqa: E402
+import _ingest  # noqa: E402,F401
+from _ingest import Reader  # noqa: E402
+import _nonevm as N  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import address_codec as ac
-import chain_registry as reg
+import address_codec as ac  # noqa: E402
+import chain_registry as reg  # noqa: E402
 
 chk = T.chk
 SOL_A = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -37,7 +37,7 @@ kp = getattr(reg, "key_parse", lambda x: None)
 chk(kp(TRON_D) == ("tron", TRON_K) and kp(TON_F) == ("ton", TON_K) and kp(N.BTC_ADDR.upper()) == ("btc", N.BTC_ADDR),
     "K key_parse: 표시 꼴 → 원장 키(T… → 41… · UQ… → 0_… · BTC bech32 대문자 → 소문자)", (kp(TRON_D), kp(TON_F), kp(N.BTC_ADDR.upper())))
 
-import addr_ai
+import addr_ai  # noqa: E402
 
 chk(addr_ai.fam(EVM_A) == "evm" and addr_ai.fam(SOL_A) == "sol" and addr_ai.fam(SOL_SYS) == "sol" and addr_ai.fam("multi") is None,
     "G fam: EVM·솔라나 종전 그대로")
@@ -46,7 +46,7 @@ chk(all(v is None for v in bad.values()), "G fam: 새 체인 주소 = None(솔�
 chk(addr_ai.akey(TRON_K) is None and addr_ai.akey(SOL_A) == "sol:" + SOL_A, "G akey: Tron 키 = 대상 아님 · 솔라나 그대로")
 
 
-import xchain_match
+import xchain_match  # noqa: E402
 
 
 def _row(ns, txh, wallet, ev="TRANSFER_IN", leg="acq", loc=None, gid=7, cost=None, addr="tok"):
@@ -67,15 +67,15 @@ srows = [_row("eth", "0x" + "e2" * 32, EVM_A, ev="TRANSFER_OUT", leg="move_in", 
 ss = xchain_match.send_candidates(srows, {}, seed, now=1_700_000_100)
 chk([c9["chain"] for c9 in ss] == ["eth"], "C 출발 id 후보 = EVM 만(새 체인 출발 제외)", [c9["chain"] for c9 in ss])
 
-import common
-import core
-import search_index as si
+import config  # noqa: E402
+import core  # noqa: E402
+import search_index as si  # noqa: E402
 
 CFG_PATH = os.path.join(T.TMP, "config.json")
 cfg = json.load(open(CFG_PATH))
 cfg["chain_wallets"] = [{"chain": "tron", "address": TRON_D}, {"chain": "ton", "address": TON_F}]
 json.dump(cfg, open(CFG_PATH, "w"))
-c = core.Core(common.load_config())
+c = core.Core(config.load_config())
 U_TR, H_TON = "f1" * 32, "f2" * 32
 U_TON = TON_K + ".5." + H_TON
 c._drain_stream("tron", Reader([N.rec("tron", U_TR, 1_700_000_000, [(TRON_K, "native", 5_000_000)])]), 0, 0)
@@ -110,10 +110,10 @@ chk(si.parse_query(SOL_A)["exact"] == [("addr_or_tx", SOL_A)] and si.parse_query
     "I 솔라나·EVM 주소 질의 해석 종전 그대로")
 chk(got[H_EVM] == ["tx:eth:" + H_EVM] and got[H_EVM[2:]] == ["tx:eth:" + H_EVM], "A EVM 해시(0x 있든 없든) 종전 그대로", got)
 
-import base64
-from decimal import Decimal
+import base64  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import outflow_match as OM
+import outflow_match as OM  # noqa: E402
 
 SIG = "5" * 40 + "Ab" * 22
 nt = {x: OM.norm_txid(x) for x in (U_TON, base64.b64encode(bytes.fromhex(H_TON)).decode(), base64.urlsafe_b64encode(bytes.fromhex("fb" * 32)).decode(),
@@ -129,7 +129,7 @@ mt, _sg, pv = OM.match(snd, dep)
 chk((mt.get(1) or {}).get("basis") == "txid" and (mt.get(1) or {}).get("uuid") == "d1" and pv.get(N.EXT["ton"]) == ("okx", "txid"),
     "B R1: 원장 TON 보냄 = 거래소 입금(base64 txid) txid 일치 · 입금주소 입증", (mt, pv))
 
-import depaddr
+import depaddr  # noqa: E402
 
 DEP_T = ac.tron_display(N.EXT["tron"])
 EVM_DEP = "0x" + "9e" * 20
@@ -149,10 +149,10 @@ hm = OM.match([{"pid": 9, "txn": "0x" + "aa" * 32, "chain": "tron", "dest": N.EX
               and depaddr.lookup(ch9, a9)["exchange"])
 chk(hm[2].get(N.EXT["tron"]) == ("binance", "list"), "H 보낸 내역 R3: Tron 목적지 = 거래소 입금주소로 입증(web._deposit_exchange 와 같은 판정)", hm[2])
 
-import shutil
+import shutil  # noqa: E402
 
-import coverage_limits as CL
-import health
+import coverage_limits as CL  # noqa: E402
+import health  # noqa: E402
 
 os.makedirs(os.path.join(T.TMP, "seed", "coverage"), exist_ok=True)
 for fn9 in ("api_limits.json", "token_sources.json"):

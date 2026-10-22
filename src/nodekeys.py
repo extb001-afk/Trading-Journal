@@ -4,7 +4,7 @@ import os
 import re
 import urllib.parse
 
-import common
+import envfile, paths, statefile
 
 SHARES = (10, 25, 50, 80)
 FREE_PCT = 80
@@ -59,7 +59,7 @@ SPAN = {"nodereal": 50000, "ankr": 3000, "quicknode": 10000}
 
 
 def _env() -> dict:
-    out = common.read_env_file()
+    out = envfile.read_env_file()
     for k in (ENV_NODEREAL, ENV_ANKR, ENV_QN, ENV_QN_BSC, ENV_QN_BASE, ENV_ALCHEMY, ENV_CN):
         if os.environ.get(k):
             out[k] = os.environ[k]
@@ -86,7 +86,7 @@ def ankr_multichain_url(env: dict = None):
 def used_today(p: str, now: float = None) -> int:
     import time as _t
     day = int((_t.time() if now is None else now) // 86400)
-    d = os.path.join(common.quota_dir(), f"rpc_day_node_{p}")
+    d = os.path.join(paths.quota_dir(), f"rpc_day_node_{p}")
     try:
         names = os.listdir(d)
     except OSError:
@@ -96,10 +96,10 @@ def used_today(p: str, now: float = None) -> int:
         if not f.endswith(".json"):
             continue
         try:
-            j = common.read_json(os.path.join(d, f), None)
+            j = statefile.read_json(os.path.join(d, f), None)
             if isinstance(j, dict) and j.get("day") == day:
                 tot += max(0, int(j.get("n") or 0))
-        except (Exception, SystemExit):
+        except (Exception, SystemExit):   # noqa: BLE001 [isolate]
             continue
     return tot
 
@@ -163,7 +163,7 @@ QN_SLOT_TTL = 60.0
 
 
 def _qn_path() -> str:
-    return os.path.join(common.quota_dir(), QN_REJECT_FILE)
+    return os.path.join(paths.quota_dir(), QN_REJECT_FILE)
 
 
 def _host(u: str) -> str:
@@ -192,7 +192,7 @@ def _qn_slot():
         try:
             env = _env()
             _QN_SLOT.update(at=now, kh=qn_kh(env), hosts=qn_hosts(env))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             _QN_SLOT.update(at=now, kh=None, hosts={})
     return _QN_SLOT["kh"], _QN_SLOT["hosts"]
 
@@ -216,8 +216,8 @@ def _qn_rej_body(body) -> bool:
 
 def _qn_read():
     try:
-        cur = common.read_json(_qn_path(), None)
-    except (Exception, SystemExit):
+        cur = statefile.read_json(_qn_path(), None)
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return None
     return cur if isinstance(cur, dict) and isinstance(cur.get("hosts"), dict) else None
 
@@ -236,7 +236,7 @@ def _qn_update(fn):
             except FileNotFoundError:
                 pass
         elif new is not cur:
-            common.atomic_write_json(p, new)
+            statefile.atomic_write_json(p, new)
         return new
 
 
@@ -331,7 +331,7 @@ ALCH_WHY_KO = {"month": "월 사용량(CU) 한도를 다 썼어요", "pay": "결
 
 
 def _alch_path() -> str:
-    return os.path.join(common.quota_dir(), ALCH_REJECT_FILE)
+    return os.path.join(paths.quota_dir(), ALCH_REJECT_FILE)
 
 
 def _alch_kh_of(k):
@@ -373,8 +373,8 @@ def _alch_why(body=None, err=None, text: str = ""):
 
 def _alch_read():
     try:
-        cur = common.read_json(_alch_path(), None)
-    except (Exception, SystemExit):
+        cur = statefile.read_json(_alch_path(), None)
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return None
     return cur if isinstance(cur, dict) and cur.get("kh") else None
 
@@ -393,7 +393,7 @@ def _alch_update(fn):
             except FileNotFoundError:
                 pass
         elif new is not cur:
-            common.atomic_write_json(p, new)
+            statefile.atomic_write_json(p, new)
         return new
 
 
@@ -477,7 +477,7 @@ def route_fp(chain: str) -> str:
             return ""
         mine = qn_hosts(env)
         return f"qn_off:{qn_kh(env)}:{chain}" if any(mine.get(k) == chain for k in off) else ""
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return ""
 
 
@@ -538,7 +538,7 @@ def urls(env: dict = None, all_qn: bool = False) -> dict:
 
 def plans(settings: dict = None) -> dict:
     if settings is None:
-        settings = common.read_json(os.path.join(common.STATE_DIR, "settings.json"), {}) or {}
+        settings = statefile.read_json(paths.state("settings.json"), {}) or {}
     raw = settings.get(PLANS_KEY) if isinstance(settings, dict) and isinstance(settings.get(PLANS_KEY), dict) else {}
     out = {}
     for p, meta in PROVIDERS.items():
@@ -580,7 +580,7 @@ _FRESH_CACHE = {"key": None, "v": {}}
 
 
 def fresh_day(p: str):
-    path = os.path.join(common.STATE_DIR, "settings.json")
+    path = paths.state("settings.json")
     try:
         st = os.stat(path)
         key = (path, st.st_mtime_ns, st.st_size)
@@ -588,9 +588,9 @@ def fresh_day(p: str):
         return None
     if _FRESH_CACHE["key"] != key:
         try:
-            st9 = common.read_json(path, {}) or {}
+            st9 = statefile.read_json(path, {}) or {}
             pl = plans(st9 if isinstance(st9, dict) else {})
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return None
         v9 = {q: (fresh_day_num(v.get("fresh_since")) if v.get("plan") != "paid" and not PROVIDERS[q]["paid_only"] else None)
               for q, v in pl.items()}
@@ -677,7 +677,7 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
         try:
             import evm_watch
             d16 = [str(u) for u in (evm_watch.rpc_nodes(cfg, "base").get("trace") or [])]
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             d16 = []
         user9 = [str(u) for u in (cb.get("trace_rpcs") or [])] if "trace_rpcs" in cb else []
         cb["trace_rpcs"] = list(dict.fromkeys(user9 + [u for _p, u in tn] + d16))
@@ -695,7 +695,7 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
             try:
                 import evm_watch
                 rl = [str(u) for u in (evm_watch.rpc_nodes(cfg, "base").get("logs") or [])]
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 rl = None
         if rl is None:
             return done
@@ -704,7 +704,7 @@ def apply(cfg: dict, env: dict = None, settings: dict = None) -> dict:
             try:
                 import evm_watch
                 ar = [str(u) for u in (evm_watch.rpc_nodes(cfg, "base").get("state") or [])]
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 return done
         caps = dict(cb.get("rpc_log_span_caps") or {})
         for p, u in us["base"]:
@@ -769,7 +769,7 @@ def status(env: dict = None, settings: dict = None) -> dict:
         if p == "quicknode":
             try:
                 rj9 = qn_rejected(env)
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 rj9 = None
             if rj9:
                 out[p]["rejected"] = rj9
@@ -788,11 +788,11 @@ def _flex_view(p: str, sp: dict) -> dict:
         per = float(sp["month"]) / bf_engine.RPC_DAY_MONTH_DAYS
         n_day = max(1, int(per * float(sp["pct"]) / 100.0))
         cap = int(float(sp["month"]) * float(sp["pct"]) / 100.0)
-        d = os.path.join(common.quota_dir(), f"rpc_day_node_{p}")
+        d = os.path.join(paths.quota_dir(), f"rpc_day_node_{p}")
         L = bf_engine.es_ledger_read(now, d=d)
         r = bf_engine.node_day_lims(d, now, n_day, float(sp["burst"]), cap, int(L["n"]), int(L["nh"]), fresh_day(p))
         if r.get("bad"):
             return {}
         return {"rtDay": int(r.get("rt") or 0), "burstCap": int(r.get("burst") or 0)}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}

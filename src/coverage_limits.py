@@ -7,11 +7,12 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import logs, paths, seeds, statefile
+import db as dbm
 
 SCHEMA_VERSION = 1
 OUT_NAME = "coverage_limits.json"
-SEED_DIR = os.path.join(common.BASE_DIR, "seed", "coverage")
+SEED_DIR = os.path.join(paths.BASE_DIR, "seed", "coverage")
 
 FIX_HINT = "원가 미확인 목록에서 그 코인의 '원가 적용'(개당 원가 입력) 또는 '당시 시세로 추정'을 눌러 주세요"
 
@@ -108,26 +109,26 @@ COST_UNKNOWN_REASONS = [
 ]
 
 EX_KO = {"upbit": "업비트", "bithumb": "빗썸", "binance": "바이낸스", "bybit": "바이비트", "okx": "OKX", "gate": "게이트",
-         "kucoin": "쿠코인", "hyperliquid": "Hyperliquid"}
+         "kucoin": "쿠코인", "hyperliquid": "Hyperliquid", "coinbase": "코인베이스"}
 FAM_KO = {"deposits": "입금", "withdrawals": "출금", "spot_fills": "현물 체결", "krw_fills": "원화 체결", "futures_fills": "선물 체결",
           "futures_pnl": "선물 청산손익", "futures_income": "선물 손익", "transaction_log": "거래 내역", "loans": "차입", "convert": "간편전환",
           "earn": "예치(Earn)", "bills": "정산 내역", "margin_fills": "마진 체결", "hist_deposits": "2019년 이전 입금", "orders": "주문",
-          "bills_archive": "옛 체결·정산 아카이브(분기 신청)", "account_book": "잔고 변동 원장"}
+          "bills_archive": "옛 체결·정산 아카이브(분기 신청)", "account_book": "잔고 변동 원장", "dividend": "배당·에어드랍·Earn 이자"}
 
 
 def ex_label(ex, fam):
     return f"{EX_KO.get(ex, ex)} {FAM_KO.get(fam, fam)}"
 
 
-EX_WINDOW_DAYS = {"upbit": 7, "bybit": 7, "kucoin": 7, "gate": 30, "binance": 90, "okx": 90, "bithumb": None}
+EX_WINDOW_DAYS = {"upbit": 7, "bybit": 7, "kucoin": 7, "gate": 30, "binance": 90, "okx": 90, "bithumb": None, "coinbase": None}
 
 
 def _sweep_name(ch):
     try:
-        import chainsweep
-        ent = chainsweep.SWEEP_CHAINS.get(ch)
+        import chaincatalog
+        ent = chaincatalog.SWEEP_CHAINS.get(ch)
         return str(ent[0]) if ent else str(ch)
-    except Exception:
+    except Exception:  # noqa: BLE001 [fallback]
         return str(ch)
 
 
@@ -191,7 +192,7 @@ API_LIMITS_NAME = "api_limits.json"
 
 
 def api_limits_table(base=None, active_ex=None, active_chains=None, active_perps=None):
-    d = common.seed_json("coverage/" + API_LIMITS_NAME, None, base_dir=base or common.BASE_DIR)
+    d = seeds.seed_json("coverage/" + API_LIMITS_NAME, None, base_dir=base or paths.BASE_DIR)
     if not isinstance(d, dict) or not isinstance(d.get("exchanges"), list):
         return None
     out = {k: d.get(k) for k in ("schema", "updated", "columns", "actions", "window_note")}
@@ -224,7 +225,7 @@ TOKEN_SOURCES_NAME = "token_sources.json"
 
 
 def old_holdings_row(match, base=None):
-    t = common.seed_json("coverage/" + TOKEN_SOURCES_NAME, None, base_dir=base or common.BASE_DIR)
+    t = seeds.seed_json("coverage/" + TOKEN_SOURCES_NAME, None, base_dir=base or paths.BASE_DIR)
     rows = (t or {}).get("chains") if isinstance(t, dict) else None
     if not isinstance(rows, dict):
         return None
@@ -306,9 +307,9 @@ def api_limits_markdown(t=None) -> str:
 
 
 def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
-    st = os.path.join(base, "state") if base else common.STATE_DIR
-    cfg = _rj(os.path.join(base, "config.json") if base else common.CONFIG_PATH, {}) or {}
-    base = base or common.BASE_DIR
+    st = os.path.join(base, "state") if base else paths.STATE_DIR
+    cfg = _rj(os.path.join(base, "config.json") if base else paths.CONFIG_PATH, {}) or {}
+    base = base or paths.BASE_DIR
     since = cfg.get("backfill_since")
     months = float(cfg.get("backfill_months") or 5)
     now = int(now or time.time())
@@ -316,10 +317,10 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
     ts_since = _ts(since)
     tgt = min(win0, ts_since) if ts_since else win0
     status = _rj(os.path.join(st, "backfill_status.json"), {}) or {}
-    exl = (_rj(exl_path, {}) if exl_path else common.seed_json("coverage/exchange_limits.json", {}, base_dir=base)) or {}
-    speed = (_rj(speed_path, {}) if speed_path else common.seed_json("coverage/speed_model.json", {}, base_dir=base)) or {}
+    exl = (_rj(exl_path, {}) if exl_path else seeds.seed_json("coverage/exchange_limits.json", {}, base_dir=base)) or {}
+    speed = (_rj(speed_path, {}) if speed_path else seeds.seed_json("coverage/speed_model.json", {}, base_dir=base)) or {}
     other_speed = _rj(os.path.join(st, "chain_backfill_speed.json"), None)
-    db = conn or sqlite3.connect(common.sqlite_ro_uri(os.path.join(st, 'ledger.db')), uri=True, timeout=10)
+    db = conn or dbm.connect(paths.sqlite_ro_uri(os.path.join(st, 'ledger.db')), uri=True, timeout=10)
     try:
         wallets = {}
         for ch, a, lab in db.execute("SELECT chain, address, label FROM wallets"):
@@ -492,11 +493,14 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
                 src["achieved_start"] = ach = src["earliest_retrievable"]
             if fam in ("spot_fills", "krw_fills"):
                 if ext.get("fills_limit"):
-                    src["bot_limit_ko"] = common.redact_secret_text(str(ext["fills_limit"]))[:200]
+                    src["bot_limit_ko"] = logs.redact_secret_text(str(ext["fills_limit"]))[:200]
                 if ext.get("fills_err"):
-                    src["collector_error"] = common.redact_secret_text(str(ext["fills_err"]))[:200]
+                    src["collector_error"] = logs.redact_secret_text(str(ext["fills_err"]))[:200]
             if ext.get("wd_err") and fam in ("deposits", "withdrawals"):
-                src["collector_error"] = common.redact_secret_text(str(ext["wd_err"]))[:200]
+                src["collector_error"] = logs.redact_secret_text(str(ext["wd_err"]))[:200]
+            div_state = (((exf.get(ex) or {}).get("fills") or {}).get("cv_div") or {}) if fam == "dividend" else {}
+            if isinstance(div_state, dict) and div_state.get("err"):
+                src["collector_error"] = logs.redact_secret_text(str(div_state["err"]))[:200]
             wd9 = EX_WINDOW_DAYS.get(ex)
             if v.get("bot_uses") and wd9:
                 src["eta"] = {y9: [round(-(-n9 * 365 // wd9) * 0.7), round(-(-n9 * 365 // wd9) * 0.7 * 2)]
@@ -529,7 +533,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
     try:
         import chain_registry
         active_chains = sorted(set(active_chains) | set(chain_registry.configured_chains(cfg)))
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     return {"schema": SCHEMA_VERSION, "generated_at": now, "generator": "src/coverage_limits.py",
             "api_limits": api_limits_table(base, set(exf) | ({"upbit"} if upo else set()), active_chains,
@@ -542,7 +546,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
 
 def write(base=None, out=None) -> dict:
     d = build(base)
-    common.atomic_write_json(out or (os.path.join(base, "state", OUT_NAME) if base else os.path.join(common.STATE_DIR, OUT_NAME)), d)
+    statefile.atomic_write_json(out or (os.path.join(base, "state", OUT_NAME) if base else paths.state(OUT_NAME)), d)
     return d
 
 
@@ -557,7 +561,7 @@ def main():
         return 0
     out = sys.argv[1] if len(sys.argv) > 1 else None
     d = write(out=out)
-    print(f"{out or os.path.join(common.STATE_DIR, OUT_NAME)}: sources {len(d['sources'])} · unavailable {len(d['unavailable'])}")
+    print(f"{out or paths.state(OUT_NAME)}: sources {len(d['sources'])} · unavailable {len(d['unavailable'])}")
 
 
 if __name__ == "__main__":

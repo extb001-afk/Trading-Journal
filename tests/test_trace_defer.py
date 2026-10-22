@@ -2,11 +2,11 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import time
+import json  # noqa: E402
+import os  # noqa: E402
+import time  # noqa: E402
 
 CH = "zerog"
 W = ["0x" + f"{0xe0 + i:02x}" * 20 for i in range(2)]
@@ -20,16 +20,16 @@ CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 166
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
-import common
-import bf_engine
-import evm_watch
+import paths, statefile  # noqa: E402
+import bf_engine  # noqa: E402
+import evm_watch  # noqa: E402
 
 bf_engine.configure(CFG)
 R = evm_watch.RpcChainWatcher
-CPATH = os.path.join(common.STATE_DIR, f"cursor_evm_{CH}.json")
-EPATH = os.path.join(common.STATE_DIR, f"emitted_evm_{CH}.json")
-TOVF = os.path.join(common.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
-LOVF = os.path.join(common.STATE_DIR, f"leaf_later_overflow_{CH}.jsonl")
+CPATH = os.path.join(paths.STATE_DIR, f"cursor_evm_{CH}.json")
+EPATH = os.path.join(paths.STATE_DIR, f"emitted_evm_{CH}.json")
+TOVF = os.path.join(paths.STATE_DIR, f"trace_later_overflow_{CH}.jsonl")
+LOVF = os.path.join(paths.STATE_DIR, f"leaf_later_overflow_{CH}.jsonl")
 HEAD = 60_000_000
 SAFE = HEAD - 10
 E18 = 10 ** 18
@@ -133,8 +133,8 @@ def hx(i):
 
 
 def mk(cur=None, wallets=None, txs=None, trace=(TA, TB)):
-    common.atomic_write_json(CPATH, cur if cur is not None else {"_rpc_v": 1, "_start": 0})
-    common.atomic_write_json(EPATH, [])
+    statefile.atomic_write_json(CPATH, cur if cur is not None else {"_rpc_v": 1, "_start": 0})
+    statefile.atomic_write_json(EPATH, [])
     for p9 in (TOVF, LOVF):
         if os.path.exists(p9):
             os.remove(p9)
@@ -153,7 +153,7 @@ def mk(cur=None, wallets=None, txs=None, trace=(TA, TB)):
 
 
 def disk():
-    return common.read_json(CPATH, {})
+    return statefile.read_json(CPATH, {})
 
 
 def n_trace():
@@ -217,7 +217,7 @@ try:
         try:
             with tb(w, t0 + budget):
                 w._trace_internal(hx(0x200), snap)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             err = e
         return FT.t - t0, err, w
     cases = {
@@ -251,7 +251,7 @@ try:
     try:
         with tb(w2e, FT.t - 1):
             w2e._trace_internal(hx(0x201), {})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         err2e = e
     T.chk(TraceDeferred is not None and isinstance(err2e, TraceDeferred) and not LOG and not R._trace_gone(err2e),
           "D2 마감이 이미 지남 = 호출 0 · '시도 안 함'(TraceDeferred — 일시 · 시도 횟수 안 올림)", {"err": type(err2e).__name__, "calls": len(LOG)})
@@ -427,10 +427,10 @@ try:
     except Crash:
         pass
     d7 = disk()
-    T.chk(H7 in (d7.get("_trace_later") or {}) and int(d7.get(W0) or 0) == C7 and H7 not in common.read_json(EPATH, []),
+    T.chk(H7 in (d7.get("_trace_later") or {}) and int(d7.get(W0) or 0) == C7 and H7 not in statefile.read_json(EPATH, []),
           "D7 방출 도중 종료 — 늦은 채움 항목은 방출 전에 이미 디스크(선등록 · 커서 전진 없음)", {"tl": (d7.get("_trace_later") or {}).get(H7), "cur": d7.get(W0)})
     w7b = rig7()
-    real_aw = common.atomic_write_json
+    real_aw = statefile.atomic_write_json
     st7 = {"e": False}
 
     def aw(path, obj, *a, **k):
@@ -439,16 +439,16 @@ try:
         elif path == CPATH and st7["e"]:
             raise Crash("종료(emitted 저장 뒤)")
         return real_aw(path, obj, *a, **k)
-    common.atomic_write_json = aw
+    statefile.atomic_write_json = aw
     try:
         try:
             w7b.cycle()
         except Crash:
             pass
     finally:
-        common.atomic_write_json = real_aw
+        statefile.atomic_write_json = real_aw
     d7b = disk()
-    T.chk(H7 in common.read_json(EPATH, []) and H7 in (d7b.get("_trace_later") or {}),
+    T.chk(H7 in statefile.read_json(EPATH, []) and H7 in (d7b.get("_trace_later") or {}),
           "D7 (B6) emitted 저장 뒤 · 커서 저장 전 종료 → 디스크 늦은 채움 큐에 그 tx 가 있음(종전: emitted 라 다시 상세·등록 안 함 = internal 영구 누락)",
           {"tl": (d7b.get("_trace_later") or {}).get(H7)})
     FT.t += 400
@@ -618,7 +618,7 @@ try:
     d12 = disk()
     tl12 = d12.get("_trace_later") or {}
     T.chk(int(d12.get(W0) or 0) == SAFE and FT.t - t012 <= 120 and n_trace() <= 8,
-          "D12 최근 창 86,400블록 · 내 컨트랙트 호출 300건 · trace 노드 408 ×2 → 첫 사이클 헤드 · trace 시도 ≤ 8(아픈 노드 · 종전 a0e04716 = 20회·100초 · 14차 = 몇 시간)",
+          "D12 최근 창 86,400블록 · 내 컨트랙트 호출 300건 · trace 노드 408 ×2 → 첫 사이클 헤드 · trace 시도 ≤ 8(아픈 노드 · 종전 a0e04716 = 20회·100초 · 더 옛 판 = 몇 시간)",
           {"cursor": d12.get(W0), "sec": round(FT.t - t012, 1), "trace_calls": n_trace()})
     T.chk(len(tl12) == N12 and all(int(e.get("n") or 0) <= 1 and e.get("sent") is True for e in tl12.values()) and sum(1 for e in tl12.values() if int(e.get("n") or 0) == 0) >= N12 - 2,
           "D12 300건 전부 늦은 채움 큐(디스크 · 방출 사실 · 실제로 부른 1~2건 빼고 시도 0)", {"q": len(tl12)})
@@ -651,7 +651,7 @@ try:
         FT.t = max(FT.t, float((w13.cursor["_trace_later"][H13] or {}).get("next") or FT.t)) + 1
     re13 = [r for r in w13.writer.recs if r.get("txhash") == H13 and (r.get("snapshot") or {}).get("internal")]
     T.chk(re13 and H13 not in (w13.cursor.get("_trace_later") or {}),
-          "D13 (코덱스 ba705 #1) callTracer 가 30초 예산을 다 쓰고 408 · parity 는 정상 → 다음 재시도는 parity 부터(같은 절대 예산) — internal 회수(종전: 매번 callTracer 가 예산 소진 · 30일·5회 뒤 삭제)",
+          "D13 callTracer 가 30초 예산을 다 쓰고 408 · parity 는 정상 → 다음 재시도는 parity 부터(같은 절대 예산) — internal 회수(종전: 매번 callTracer 가 예산 소진 · 30일·5회 뒤 삭제)",
           {"reemit": len(re13), "q": w13.cursor.get("_trace_later")})
 
     for kind14 in ("budget", "local"):
@@ -664,7 +664,7 @@ try:
         T.safe(w14._trace_later_step, HEAD)
         e14 = (w14.cursor.get("_trace_later") or {}).get(hx(0xd14)) or {}
         T.chk(int(e14.get("n") or -1) == 4 and int(getattr(w14, "_trace_nf", 0) or 0) == 1 and not sick(w14),
-              f"D14 (ba705 #2) trace 노드 '{kind14}' 거절(HTTP 전송 전) = 시도 횟수·아픈 노드 계수 안 올림(종전: n 4→5 · 30일 넘은 항목 삭제 길 · 아픈 노드 진입)",
+              f"D14 trace 노드 '{kind14}' 거절(HTTP 전송 전) = 시도 횟수·아픈 노드 계수 안 올림(종전: n 4→5 · 30일 넘은 항목 삭제 길 · 아픈 노드 진입)",
               {"e": e14, "nf": getattr(w14, "_trace_nf", None)})
         w14b = mk()
         LOG.clear()
@@ -672,7 +672,7 @@ try:
         try:
             with tb(w14b, FT.t + 60):
                 w14b._trace_block(123)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             err14 = e
         T.chk(TraceDeferred is not None and isinstance(err14, TraceDeferred) and int(getattr(w14b, "_trace_nf", 0) or 0) == 0,
               f"D14 블록 trace 도 '{kind14}' 거절만이면 '시도 안 함'(TraceDeferred) · 아픈 노드 계수 0", {"err": type(err14).__name__, "nf": getattr(w14b, "_trace_nf", None)})
@@ -716,7 +716,7 @@ try:
             ok16 = round(FT.t - ts16)
             break
     T.chk(s16 and ok16 is not None and ok16 <= 300 + 90 and not sick(w16),
-          "D16 (ba705 #4) 아픈 노드 만료는 처음 진입 때 고정(실패마다 연장 안 함) → 실패가 45초마다 이어져도 5분 뒤 정상 경로가 parity 까지 확인해 회복(종전: 영영 아픔 · parity 만 회복한 노드를 안 봄)",
+          "D16 아픈 노드 만료는 처음 진입 때 고정(실패마다 연장 안 함) → 실패가 45초마다 이어져도 5분 뒤 정상 경로가 parity 까지 확인해 회복(종전: 영영 아픔 · parity 만 회복한 노드를 안 봄)",
           {"sick0": s16, "recovered_after_s": ok16, "sick_now": sick(w16)})
 
     def mixed17(kind):
@@ -746,7 +746,7 @@ try:
             FT.t += POLL
         re17 = [r for r in w17.writer.recs if r.get("txhash") == H17 and (r.get("snapshot") or {}).get("internal")]
         T.chk(got17 is not None and got17 <= 2 and re17,
-              f"D17 (ba710) 인계 큐 · 노드 A {kind17}(미전송) + B callTracer 30초 408 · parity 정상 → 다음 사이클 parity 먼저로 회수(종전: A 의 미전송 오류가 대표 오류라 교대 계수가 안 늘어 매번 callTracer 부터 — 영영 못 풂)",
+              f"D17 인계 큐 · 노드 A {kind17}(미전송) + B callTracer 30초 408 · parity 정상 → 다음 사이클 parity 먼저로 회수(종전: A 의 미전송 오류가 대표 오류라 교대 계수가 안 늘어 매번 callTracer 부터 — 영영 못 풂)",
               {"cycle": got17, "reemit": len(re17), "hq": w17.cursor.get("_hq"), "try": w17.__dict__.get("_hq_try")})
         H17b = hx(0x1710 + (1 if kind17 == "local" else 0))
         w17b = mk(live_cur(SAFE), txs={H17b: own_tx(H17b, SAFE - 9)})
@@ -771,7 +771,7 @@ try:
     try:
         with tb(w17c, FT.t + 60):
             w17c._trace_internal(hx(0x1720), {})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         err17 = e
     T.chk(err17 is not None and not R._trace_untried(err17) and "408" in str(err17),
           "D17 혼합 오류의 대표 오류 = 실제로 보낸 노드 것(408) — 미전송 거절이 오류 목록 앞에 있어도(오류 순서에 기대지 않음)", {"err": str(err17)[:80]})
@@ -796,11 +796,11 @@ try:
         in_hq, tl18 = H18 in (d18.get("_hq") or {}), (d18.get("_trace_later") or {}).get(H18)
         if kind18 == "mixed":
             T.chk(in_hq or (tl18 and tl18.get("sent") is True),
-                  "D18 (ba715) 인계 큐 · 노드 A 미전송(하루 장부) + B callTracer·parity 형식 오류 8번 → 항목 남음(혼합 = 결정적 실패로 안 셈 · 종전: 5번 뒤 삭제 — 늦은 채움에도 안 감)",
+                  "D18 인계 큐 · 노드 A 미전송(하루 장부) + B callTracer·parity 형식 오류 8번 → 항목 남음(혼합 = 결정적 실패로 안 셈 · 종전: 5번 뒤 삭제 — 늦은 채움에도 안 감)",
                   {"hq": d18.get("_hq"), "tl": tl18})
         else:
             T.chk(not in_hq and tl18 and tl18.get("sent") is True and int(tl18.get("n") or 0) == 0,
-                  "D18 (ba715) 인계 큐 · 전 노드 형식 오류 5번(결정적) → 지우지 않고 늦은 채움(_trace_later · 방출 사실 · 디스크)으로 넘김(백오프·30일·실제 5회 만료 규칙)",
+                  "D18 인계 큐 · 전 노드 형식 오류 5번(결정적) → 지우지 않고 늦은 채움(_trace_later · 방출 사실 · 디스크)으로 넘김(백오프·30일·실제 5회 만료 규칙)",
                   {"hq": d18.get("_hq"), "tl": tl18})
         PLAN.clear()
         PLAN["debug_traceTransaction"] = ("ok", [(RT, W0, 17)])
@@ -814,18 +814,18 @@ try:
         T.chk(re18 and H18 not in (d18b.get("_hq") or {}) and H18 not in (d18b.get("_trace_later") or {}),
               f"D18 ({kind18}) 노드 회복 뒤 internal 채워 재방출 · 큐에서 빠짐(조용한 유실 0)", {"reemit": len(re18)})
 
-    HP18 = os.path.join(common.STATE_DIR, f"hq_left_{CH}.json")
-    EP18 = os.path.join(common.STATE_DIR, f"enrich_{CH}.json")
+    HP18 = os.path.join(paths.STATE_DIR, f"hq_left_{CH}.json")
+    EP18 = os.path.join(paths.STATE_DIR, f"enrich_{CH}.json")
     for tgt18 in ("etherscan", "blockscout"):
-        for p9 in (HP18, EP18, os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json")):
+        for p9 in (HP18, EP18, os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json")):
             if os.path.exists(p9):
                 os.remove(p9)
         w18c = mk(live_cur(SAFE))
         HO18 = hx(0x18f0)
-        common.append_durable_jsonl(TOVF, {"h": HO18, "at": int(FT.t), "n": 0, "blk": 5, "sent": True})
+        statefile.append_durable_jsonl(TOVF, {"h": HO18, "at": int(FT.t), "n": 0, "blk": 5, "sent": True})
         r18c = T.safe(evm_watch.rpc_handback, w18c, tgt18)
-        got18 = common.read_json(HP18 if tgt18 == "etherscan" else EP18, {}) or {}
-        left18 = common.read_json(os.path.join(common.STATE_DIR, f"trace_later_left_{CH}.json"), {}) or {}
+        got18 = statefile.read_json(HP18 if tgt18 == "etherscan" else EP18, {}) or {}
+        left18 = statefile.read_json(os.path.join(paths.STATE_DIR, f"trace_later_left_{CH}.json"), {}) or {}
         T.chk(not (isinstance(r18c, dict) and "_exc" in r18c) and HO18 in got18 and HO18 in left18,
               f"D18b {tgt18} 되돌림 = 늦은 채움 넘침 파일 tx 도 넘김(종전: 파일에만 남아 탐색기 경로에선 회수 안 됨)", {"r": r18c, "got": HO18 in got18, "left": HO18 in left18})
 

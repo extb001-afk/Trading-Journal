@@ -2,14 +2,14 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
+import json  # noqa: E402
+import os  # noqa: E402
 
-import common
-import ex_foreign as X
-import health
+import paths, statefile  # noqa: E402
+import ex_foreign as X  # noqa: E402
+import health  # noqa: E402
 
 chk = T.chk
 
@@ -41,7 +41,7 @@ for i in range(20):
     forced += 1 if ok == "forced" else 0
     prev = cur
 chk(prom >= 1 and forced >= 1, "S1 USDT 0.03%씩 20주기 → 일치 확인 없이 반영 1번 이상(종전 0 — 총자산이 굳음)", (prom, forced))
-sm = common.read_json(os.path.join(common.STATE_DIR, "exf_snap_miss.json"), {}) if os.path.exists(os.path.join(common.STATE_DIR, "exf_snap_miss.json")) else {}
+sm = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_snap_miss.json"), {}) if os.path.exists(os.path.join(paths.STATE_DIR, "exf_snap_miss.json")) else {}
 it = (sm.get("ex") or {}).get("bybit") or {}
 chk(it.get("n") == 20 and it.get("forced") and "USDT" in str(it.get("why")), "S1 상태 파일 = 연속 20주기 · 마지막 강제 반영 시각 · 통화 USDT", sm)
 hc = {c["cid"]: c for c in getattr(health, "collect_snap_miss", lambda now: [])(T0 + 600 * 20 + 60)}
@@ -69,7 +69,7 @@ chk(ok1 is False and "USDT" in why1 and ok2 is True, "S3 소스 사이 이동이
 
 p0 = snap({"USDT": 5000.0})
 ok, why = decide("bybit", p0, snap({"USDT": 5000.0}), T0 + 20000)
-sm = common.read_json(os.path.join(common.STATE_DIR, "exf_snap_miss.json"), {}) if os.path.exists(os.path.join(common.STATE_DIR, "exf_snap_miss.json")) else {}
+sm = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_snap_miss.json"), {}) if os.path.exists(os.path.join(paths.STATE_DIR, "exf_snap_miss.json")) else {}
 hc = {c["cid"]: c for c in getattr(health, "collect_snap_miss", lambda now: [])(T0 + 20060)}
 chk(ok is True and "bybit" not in (sm.get("ex") or {}) and (hc.get("snapmiss:bybit") or {}).get("level") == "ok", "S4 다시 일치 = 상태 항목 정상(닫힘)", (sm, hc.get("snapmiss:bybit")))
 for i in range(3):

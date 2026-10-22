@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import socket
-import threading
-import time
-from http.server import BaseHTTPRequestHandler
+import json  # noqa: E402
+import os  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from http.server import BaseHTTPRequestHandler  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
-import common
-import settings_store as ss
+import paths  # noqa: E402
+import settings_store as ss, address_codec  # noqa: E402
 
-S = common.STATE_DIR
+S = paths.STATE_DIR
 
 
 def ck(name, cond, extra=None):
@@ -23,18 +23,18 @@ def ck(name, cond, extra=None):
 
 
 for a, why in (("11111111111111111111111111111111", "시스템 프로그램"), ("So11111111111111111111111111111111111111112", "wSOL")):
-    r = T.safe(ss.validate_address, a)
+    r = T.safe(address_codec.validate_address, a)
     ck(f"W11 {why} 주소 거부", isinstance(r, dict) and "지갑 주소가 아니에요" in r.get("_exc", ""), r)
-import pricing
-for m9, sym9 in pricing.STABLE_MINTS.items():
-    r = T.safe(ss.validate_address, m9)
-    ck(f"W11 솔라나 {sym9} 민트 거부(실제 민트 주소 — wl314 ⑥)", isinstance(r, dict) and "지갑 주소가 아니에요" in r.get("_exc", ""), r)
-r = T.safe(ss.validate_address, "0x" + "ab" * 32)
+import token_tables  # noqa: E402
+for m9, sym9 in token_tables.STABLE_MINTS.items():
+    r = T.safe(address_codec.validate_address, m9)
+    ck(f"W11 솔라나 {sym9} 민트 거부(실제 민트 주소)", isinstance(r, dict) and "지갑 주소가 아니에요" in r.get("_exc", ""), r)
+r = T.safe(address_codec.validate_address, "0x" + "ab" * 32)
 ck("W11 한 건 입력 개인 키 = 경고 문구", isinstance(r, dict) and "개인 키" in r.get("_exc", ""), r)
-ck("W11 정상 주소는 그대로", T.safe(ss.validate_address, "0x" + "ab" * 20)[0] == "evm"
-   and T.safe(ss.validate_address, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")[0] == "sol")
+ck("W11 정상 주소는 그대로", T.safe(address_codec.validate_address, "0x" + "ab" * 20)[0] == "evm"
+   and T.safe(address_codec.validate_address, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")[0] == "sol")
 
-with open(ss.SETTINGS_PATH, "w", encoding="utf-8") as f:
+with open(paths.state("settings.json"), "w", encoding="utf-8") as f:
     f.write('{"telegram": {"bot": "x"}, ')
 ss.update_settings(currency="USD")
 bad = [n for n in os.listdir(S) if n.startswith("settings.json.bad.")]
@@ -43,7 +43,7 @@ ck("W12② 증거 파일에 원문", bad and open(os.path.join(S, bad[0]), encod
 ss.update_settings(onboarded=True)
 ck("W12② 정상 파일은 합쳐 씀", ss.read_settings().get("currency") == "USD" and ss.read_settings().get("onboarded") is True)
 
-import ops_requests as O
+import ops_requests as O  # noqa: E402
 recs = [{"ts": 1, "err": "합성", "rec": {"kind": "evm_tx", "chain": "eth", "txhash": f"0x{i:064x}"}} for i in range(3)]
 with open(os.path.join(S, "poison.jsonl"), "w", encoding="utf-8") as f:
     for r9 in recs:
@@ -59,7 +59,7 @@ O.poison_request(ids=[ids[2]])
 req = json.load(open(os.path.join(S, O.POISON_REQ_NAME), encoding="utf-8"))
 ck("W12③ 앞 요청이 '전부'면 전부 유지", req.get("all") is True, req)
 
-import web
+import web  # noqa: E402
 
 
 class H0(BaseHTTPRequestHandler):
@@ -111,10 +111,10 @@ ck("W8 캐시 넣기 = 상한 지킴 · 최근 것 남음", len(cache) == web.St
 src = T.web_src()
 ck("W8 이른 반환 세 곳도 _chart_cache_put", src.count("self._chart_cache_put(cache, ck, out)") >= 3)
 
-import alert_prefs
+import alert_prefs  # noqa: E402
 r9 = T.safe(alert_prefs.apply_post, {}, {"preset": ["rec"]})
 ck("W9 알림 preset 배열 = 오류 문구(종전 TypeError 500)", isinstance(r9, tuple) and r9[0] is None and "preset" in str(r9[1]), r9)
-import onboarding
+import onboarding  # noqa: E402
 
 
 class FakeH:
@@ -129,7 +129,7 @@ class FakeH:
         self.sent = (code, body)
 
 
-ck("(전제) 원장 없음", not os.path.exists(common.DB_PATH))
+ck("(전제) 원장 없음", not os.path.exists(paths.DB_PATH))
 for p9 in ("/api/fut_receipt", "/api/receipt_list", "/api/outflow_candidates"):
     h9 = FakeH(p9)
     hit = T.safe(onboarding.handle_get, h9, p9)
@@ -148,7 +148,7 @@ ck("W9 (재현) 깊은 중첩은 RecursionError 를 낼 수 있음 — ValueErro
 ck("W10① override 키 = g + 숫자 1~12자", 'r"g\\d{1,12}"' in src_w and 'r"g\\d+"' not in src_w)
 ck("W10② 계획 저장 = 0 < 손절 < 목표 검사", "손절선은 목표가보다 낮아야 해요" in src_w)
 
-import ast
+import ast  # noqa: E402
 _tw = ast.parse(src_w)
 
 

@@ -11,13 +11,13 @@ import time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
-import address_codec as ac
-import bf_engine
-import chain_event
-import chain_registry as reg
-import chain_state
-import chain_watch
+import config, logs, paths  # noqa: E402
+import address_codec as ac  # noqa: E402
+import bf_engine  # noqa: E402
+import chain_event  # noqa: E402
+import chain_registry as reg  # noqa: E402
+import chain_state  # noqa: E402
+import chain_watch  # noqa: E402
 
 CHAIN = "sui"
 PROVIDER = "sui_graphql"
@@ -155,6 +155,7 @@ class SuiAdapter(reg.ChainAdapter):
         self._mm_at = 0.0
         self._cache = {}
         self._meta = {}
+        self._nometa = {}
         self._lock = threading.Lock()
 
     def _post(self, op, query, variables=None, prio="fg"):
@@ -162,9 +163,9 @@ class SuiAdapter(reg.ChainAdapter):
         try:
             d, _h = bf_engine.http_request(self.url, data=body, timeout=self.timeout, retries=self.retries, prio=prio)
         except bf_engine.NetError as e:
-            raise chain_watch.Transient(f"{op}: {common.safe_err(e)[:160]}") from e
+            raise chain_watch.Transient(f"{op}: {logs.safe_err(e)[:160]}") from e
         except (OSError, ValueError) as e:
-            raise chain_watch.Transient(f"{op}: {common.safe_err(e)[:160]}") from e
+            raise chain_watch.Transient(f"{op}: {logs.safe_err(e)[:160]}") from e
         if not isinstance(d, dict):
             raise chain_watch.Transient(f"{op}: 응답 형식 오류")
         errs = d.get("errors")
@@ -172,8 +173,8 @@ class SuiAdapter(reg.ChainAdapter):
             msg = "; ".join(str((e or {}).get("message") if isinstance(e, dict) else e)[:120] for e in (errs if isinstance(errs, list) else [errs]))[:240]
             low9 = msg.lower()
             if "consistent range" in low9 or ("outside" in low9 and "range" in low9):
-                raise StaleRange(f"{op}: {common.safe_err(msg)}")
-            raise GqlError(f"{op}: {common.safe_err(msg)}")
+                raise StaleRange(f"{op}: {logs.safe_err(msg)}")
+            raise GqlError(f"{op}: {logs.safe_err(msg)}")
         data = d.get("data")
         if not isinstance(data, dict):
             raise GqlError(f"{op}: data 없음")
@@ -405,6 +406,13 @@ class SuiAdapter(reg.ChainAdapter):
         tok_types = sorted({t for (_o, t) in mine_ch if t != ac.SUI_NATIVE_TYPE})
         meta = self.coin_meta(tok_types) if tok_types else {}
         nodec = [t for t in tok_types if meta.get(t, (None, None))[1] is None]
+        nometa_types = {t for t in nodec if self.dec_invalid(t)}
+        extra_reasons = []
+        if nometa_types:
+            mine_ch = {k: v for k, v in mine_ch.items() if k[1] not in nometa_types}
+            allc = {k: v for k, v in allc.items() if k[1] not in nometa_types}
+            nodec = [t for t in nodec if t not in nometa_types]
+            extra_reasons.append("token_decimals_invalid_skipped")
         if nodec:
             raise chain_watch.Transient(f"내 토큰 자릿수(coinMetadata) 없음 — 보류: {_struct_name(nodec[0])}")
 
@@ -453,7 +461,7 @@ class SuiAdapter(reg.ChainAdapter):
                 "deltas": deltas, "fees": fees, "movements": moves,
                 "classification": {"hint": hint, "trusted": False,
                                    "evidence": "balance_changes_conserved" if conserved else "balance_changes_not_conserved"},
-                "completeness": {"history": True, "details": True, "balances": True, "reasons": []},
+                "completeness": {"history": True, "details": True, "balances": True, "reasons": extra_reasons},
                 "source": {"provider": PROVIDER, "parser_version": QV, "observed_at": int(time.time()),
                            "payload_digest": chain_event.payload_digest({"n": node.get("digest"), "c": changes, "g": gs})}}
 
@@ -478,6 +486,11 @@ class SuiAdapter(reg.ChainAdapter):
                 m = data[f"m{j}"]
                 dec = None
                 sym = None
+                with self._lock:
+                    if m is None:
+                        self._nometa[t] = self._nometa.get(t, 0) + 1
+                    else:
+                        self._nometa.pop(t, None)
                 if isinstance(m, dict):
                     d9 = m.get("decimals")
                     dec = d9 if isinstance(d9, int) and not isinstance(d9, bool) and 0 <= d9 <= 77 else None
@@ -486,6 +499,11 @@ class SuiAdapter(reg.ChainAdapter):
                     self._meta[t] = (sym, dec, now)
                 out[t] = (sym, dec)
         return out
+
+    def dec_invalid(self, t: str) -> bool:
+        with self._lock:
+            m = self._meta.get(t)
+            return self._nometa.get(t, 0) >= 2 and (m is None or m[1] is None)
 
     def fetch_balances(self, owners, boundary, tokens=None):
         owners = sorted(set(owners or ()))
@@ -539,7 +557,7 @@ class SuiAdapter(reg.ChainAdapter):
                     for o in owners:
                         if ("token", k) in per[o] and k not in set(map(str, tokens.get(o) or ())):
                             unobs.setdefault(o, []).append(k)
-                            if per[o][("token", k)] > 0:
+                            if per[o][("token", k)] > 0 and not self.dec_invalid(t):
                                 dec_un.setdefault(o, []).append(k)
                     continue
                 meta[k] = (sym or _struct_name(t), dec)
@@ -617,7 +635,7 @@ class SuiCollector(chain_watch.Collector):
             self.ad.preflight()
         except chain_watch.Transient as e:
             self.errors += 1
-            self._say("[sui] 사전 점검 실패(다음 주기): %s", common.safe_err(e)[:160])
+            self._say("[sui] 사전 점검 실패(다음 주기): %s", logs.safe_err(e)[:160])
             return 0
         fp = self.ad.lane_fp(lane)
         for o in sorted(self.owners):
@@ -626,7 +644,7 @@ class SuiCollector(chain_watch.Collector):
                 self._init_owner(o)
             except chain_watch.Transient as e:
                 self.errors += 1
-                self._say("[sui] %s 시작 경계 못 잡음: %s", key, common.safe_err(e)[:120])
+                self._say("[sui] %s 시작 경계 못 잡음: %s", key, logs.safe_err(e)[:120])
                 continue
             ln = self.st.lane(key)
             if ln.get("fp") and ln.get("fp") != fp:
@@ -654,7 +672,7 @@ class SuiCollector(chain_watch.Collector):
                         items, nxt, done = self.ad.history_page(o, safe, cur)
                 except chain_watch.Transient as e:
                     self.errors += 1
-                    self._say("[sui] %s 발견 일시 실패(다음 주기): %s", key, common.safe_err(e)[:160])
+                    self._say("[sui] %s 발견 일시 실패(다음 주기): %s", key, logs.safe_err(e)[:160])
                     if isinstance(e, GqlError) and cur is not None:
                         self.st.save_cursor(key, self.ad.rebase_cursor(lane, cur), fp)
                     break
@@ -714,9 +732,9 @@ def _budgets(cfg):
 
 def main(poll_default: int = 60):
     from inbox import SegmentWriter
-    log = common.setup_logging("tj-" + CHAIN)
-    common.ensure_dirs()
-    cfg = common.load_config()
+    log = logs.setup_logging("tj-" + CHAIN)
+    paths.ensure_dirs()
+    cfg = config.load_config()
     bf_engine.configure(cfg)
     owners = reg.owners(cfg, CHAIN)
     if not owners:
@@ -729,8 +747,8 @@ def main(poll_default: int = 60):
     try:
         ad = make_adapter(cfg)
     except ValueError as e:
-        raise SystemExit(f"Sui 설정 오류: {common.safe_err(e)[:160]}")
-    col = SuiCollector(ad, SegmentWriter(os.path.join(common.INBOX_DIR, sp.stream)), st, owners, log=log,
+        raise SystemExit(f"Sui 설정 오류: {logs.safe_err(e)[:160]}")
+    col = SuiCollector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, sp.stream)), st, owners, log=log,
                        page_budget=pb, detail_budget=db)
     sc = (cfg.get(reg.CFG_CHAIN_KEY) or {}).get(CHAIN) if isinstance(cfg.get(reg.CFG_CHAIN_KEY), dict) else None
     try:
@@ -744,8 +762,8 @@ def main(poll_default: int = 60):
             try:
                 r = col.cycle()
                 log.info("[sui] 주기: %s", r)
-            except Exception as e:
-                log.warning("[sui] 주기 실패(다음 주기): %s", common.safe_err(e)[:200])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("[sui] 주기 실패(다음 주기): %s", logs.safe_err(e)[:200])
             time.sleep(max(5.0, poll - (time.time() - t0)))
     except KeyboardInterrupt:
         log.info("정지 신호(SIGINT) — 종료")

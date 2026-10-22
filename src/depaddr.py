@@ -1,9 +1,7 @@
 """Exchange deposit-address discovery and matching."""
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -18,22 +16,16 @@ import urllib.request
 import uuid as uuidlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import common
+import chaincatalog, envfile, ex_sign, logs, net_http, paths, statefile  # noqa: E402
+import db as dbm
+import exf_net  # noqa: E402
 
 log = logging.getLogger("tj-depaddr")
 
 STORE_NAME = "deposit_addresses.json"
 REQ_NAME = "depaddr_request.json"
 EXCHANGES = ("upbit", "bithumb", "binance", "bybit", "okx", "kucoin", "gate")
-NEED = {
-    "upbit": ("UPBIT_ACCESS", "UPBIT_SECRET"),
-    "bithumb": ("TJ_BITHUMB_KEY", "TJ_BITHUMB_SECRET"),
-    "binance": ("TJ_BINANCE_KEY", "TJ_BINANCE_SECRET"),
-    "bybit": ("TJ_BYBIT_KEY", "TJ_BYBIT_SECRET"),
-    "okx": ("TJ_OKX_KEY", "TJ_OKX_SECRET", "TJ_OKX_PASSPHRASE"),
-    "kucoin": ("TJ_KUCOIN_KEY", "TJ_KUCOIN_SECRET", "TJ_KUCOIN_PASSPHRASE"),
-    "gate": ("TJ_GATE_KEY", "TJ_GATE_SECRET"),
-}
+NEED = {ex: envfile.EX_KEYS[ex] for ex in EXCHANGES}
 EX_NAME = {"binance": "바이낸스", "bybit": "바이빗", "okx": "OKX", "kucoin": "쿠코인", "gate": "게이트",
            "bithumb": "빗썸", "upbit": "업비트", "hyperliquid": "Hyperliquid"}
 HL_BRIDGE2 = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7"
@@ -58,18 +50,18 @@ _CFG_CACHE = {"mt": None, "rows": []}
 
 
 def store_path() -> str:
-    return os.path.join(common.STATE_DIR, STORE_NAME)
+    return paths.state(STORE_NAME)
 
 
 def req_path() -> str:
-    return os.path.join(common.STATE_DIR, REQ_NAME)
+    return paths.state(REQ_NAME)
 
 
 _EVM_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _ADDR_OK = re.compile(r"^[A-Za-z0-9:._\-]{3,160}$")
 EVM_CHAINS = {"eth", "bsc", "arbitrum", "base", "optimism", "polygon", "zksync", "scroll", "gnosis", "robinhood", "arc",
               "linea", "avalanche", "mantle", "blast", "opbnb", "celo", "kava"}
-EVM_CHAINS |= set(common.EXTRA_CHAINS)
+EVM_CHAINS |= set(chaincatalog.EXTRA_CHAINS)
 
 _NET_ALIASES = {
     "eth": ("ETH", "ERC20", "ERC-20", "ETHEREUM", "ETHEREUM(ERC20)", "ETH-ERC20", "ETHEREUM (ERC20)", "ETHER"),
@@ -143,7 +135,7 @@ def _empty_store() -> dict:
 def load_store(path: str | None = None) -> dict:
     p = path or store_path()
     try:
-        d = common.read_json(p, None)
+        d = statefile.read_json(p, None)
     except SystemExit as e:
         raise RuntimeError(f"입금주소 저장소 손상 — 이번 실행 보류: {e}") from None
     if d is None:
@@ -224,7 +216,7 @@ def merge(store: dict, ex: str, observed: list, now: int, api_seen: bool = True,
 
 
 def save_store(store: dict, path: str | None = None) -> None:
-    common.atomic_write_json(path or store_path(), store)
+    statefile.atomic_write_json(path or store_path(), store)
     _CACHE["idx"] = None
 
 
@@ -239,15 +231,15 @@ def write_compat(store: dict, ex: str, now: int) -> None:
         seen.add(k)
         addrs.append({"currency": r.get("currency"), "chain": r.get("network") or r.get("currency"),
                       "address": r["address"], "tag": r.get("tag") or ""})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_addrs_{ex}.json"), {"ts": now, "addrs": addrs})
+    statefile.atomic_write_json(paths.state(f"exf_addrs_{ex}.json"), {"ts": now, "addrs": addrs})
 
 
 def _import_compat(store: dict, now: int) -> int:
     n = 0
     for ex in EXCHANGES:
-        p = os.path.join(common.STATE_DIR, f"exf_addrs_{ex}.json")
+        p = paths.state(f"exf_addrs_{ex}.json")
         try:
-            d = common.read_json(p, None)
+            d = statefile.read_json(p, None)
         except SystemExit:
             continue
         if not isinstance(d, dict):
@@ -271,7 +263,7 @@ def _import_compat(store: dict, now: int) -> int:
 class ApiError(Exception):
 
     def __init__(self, msg, status=0, fatal=False):
-        super().__init__(common.redact_secret_text(msg))
+        super().__init__(logs.redact_secret_text(msg))
         self.status, self.fatal = status, fatal
 
 
@@ -300,14 +292,14 @@ def _is_fatal(status, body: str = "", ex: str = "", code=None) -> bool:
 def http_get(url: str, headers: dict, timeout: int = 20, ex: str = ""):
     h = {"User-Agent": UA, "Accept": "application/json"}
     h.update(headers or {})
-    req = urllib.request.Request(url, headers=h, method="GET")
+    req = net_http.request(url, headers=h, method="GET")
     try:
-        with common.auth_urlopen(req, timeout=timeout) as r:
-            return json.loads(common.read_capped(r).decode("utf-8")), dict(r.headers)
+        with net_http.auth_urlopen(req, timeout=timeout) as r:
+            return json.loads(net_http.read_capped(r).decode("utf-8")), dict(r.headers)
     except urllib.error.HTTPError as e:
         try:
-            body = e.read(common.HTTP_ERR_BODY_MAX).decode("utf-8", "ignore")[:400]
-        except Exception:
+            body = e.read(net_http.HTTP_ERR_BODY_MAX).decode("utf-8", "ignore")[:400]
+        except Exception:  # noqa: BLE001 [fallback]
             body = ""
         raise ApiError(f"HTTP {e.code}: {body[:200]}", e.code, _is_fatal(e.code, body, ex)) from None
     except (urllib.error.URLError, OSError, ValueError) as e:
@@ -315,19 +307,13 @@ def http_get(url: str, headers: dict, timeout: int = 20, ex: str = ""):
 
 
 def _jwt(access, secret, params, with_ts=False) -> str:
-    def b64u(b):
-        return base64.urlsafe_b64encode(b).rstrip(b"=")
     payload = {"access_key": access, "nonce": str(uuidlib.uuid4())}
     if with_ts:
         payload["timestamp"] = int(time.time() * 1000)
     if params:
-        raw = "&".join(f"{k}={v}" for k, v in params.items())
-        payload["query_hash"] = hashlib.sha512(raw.encode()).hexdigest()
+        payload["query_hash"] = ex_sign.query_hash(params)
         payload["query_hash_alg"] = "SHA512"
-    h = b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    p = b64u(json.dumps(payload).encode())
-    s = b64u(hmac.new(secret.encode(), h + b"." + p, hashlib.sha256).digest())
-    return (h + b"." + p + b"." + s).decode()
+    return ex_sign.jwt_hs256(payload, secret)
 
 
 class Client:
@@ -349,8 +335,8 @@ class Client:
         try:
             return self._get(path, params)
         except ApiError as e9:
-            sec = [v for k, v in (self.env or {}).items() if common._secret_name(k)]
-            raise ApiError(common.redact_secret_text(str(e9), extra=sec), e9.status, e9.fatal) from None
+            sec = [v for k, v in (self.env or {}).items() if logs.is_secret_name(k)]
+            raise ApiError(logs.redact_secret_text(str(e9), extra=sec), e9.status, e9.fatal) from None
 
     def _get(self, path: str, params: dict | None = None):
         self._wait()
@@ -374,19 +360,18 @@ class Client:
                 raise ApiError(f"{ex} {nm}: {str(err.get('message') or '')[:120]}", 200, _is_fatal(0, ex=ex, code=nm))
             return d
         if ex == "binance":
-            p["timestamp"] = int(time.time() * 1000)
+            p["timestamp"] = exf_net.sign_ms("binance")
             p["recvWindow"] = 10000
             qs = urllib.parse.urlencode(p)
-            sig = hmac.new(e["TJ_BINANCE_SECRET"].encode(), qs.encode(), hashlib.sha256).hexdigest()
+            sig = ex_sign.binance_sign(e["TJ_BINANCE_SECRET"], qs)
             d, _ = http_get(f"https://api.binance.com{path}?{qs}&signature={sig}", {"X-MBX-APIKEY": e["TJ_BINANCE_KEY"]}, ex=ex)
             if isinstance(d, dict) and "code" in d and isinstance(d.get("code"), int) and d["code"] < 0:
                 raise ApiError(f"binance {d['code']} {str(d.get('msg'))[:120]}", 200, _is_fatal(0, ex=ex, code=d["code"]))
             return d
         if ex == "bybit":
             qs = urllib.parse.urlencode(p)
-            t = str(int(time.time() * 1000))
-            sig = hmac.new(e["TJ_BYBIT_SECRET"].encode(), (t + e["TJ_BYBIT_KEY"] + "10000" + qs).encode(),
-                           hashlib.sha256).hexdigest()
+            t = str(exf_net.sign_ms("bybit"))
+            sig = ex_sign.bybit_sign(e["TJ_BYBIT_SECRET"], t, e["TJ_BYBIT_KEY"], "10000", qs)
             d, _ = http_get(f"https://api.bybit.com{path}?{qs}",
                             {"X-BAPI-API-KEY": e["TJ_BYBIT_KEY"], "X-BAPI-TIMESTAMP": t,
                              "X-BAPI-RECV-WINDOW": "10000", "X-BAPI-SIGN": sig}, ex=ex)
@@ -399,9 +384,8 @@ class Client:
             qs = urllib.parse.urlencode(p)
             full = path + ("?" + qs if qs else "")
             if ex == "okx":
-                t = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int(time.time() * 1000) % 1000:03d}Z"
-                sig = base64.b64encode(hmac.new(e["TJ_OKX_SECRET"].encode(), (t + "GET" + full).encode(),
-                                                hashlib.sha256).digest()).decode()
+                t = exf_net.iso_ms(exf_net.sign_ms("okx"))
+                sig = ex_sign.okx_sign(e["TJ_OKX_SECRET"], t, "GET", full)
                 d, _ = http_get("https://www.okx.com" + full,
                                 {"OK-ACCESS-KEY": e["TJ_OKX_KEY"], "OK-ACCESS-SIGN": sig, "OK-ACCESS-TIMESTAMP": t,
                                  "OK-ACCESS-PASSPHRASE": e["TJ_OKX_PASSPHRASE"]}, ex=ex)
@@ -410,10 +394,9 @@ class Client:
                     raise ApiError(f"okx {code} {str((d or {}).get('msg') if isinstance(d, dict) else d)[:120]}",
                                    200, _is_fatal(0, ex=ex, code=code))
                 return d.get("data") or []
-            t = str(int(time.time() * 1000))
-            sec = e["TJ_KUCOIN_SECRET"].encode()
-            sig = base64.b64encode(hmac.new(sec, (t + "GET" + full).encode(), hashlib.sha256).digest()).decode()
-            pph = base64.b64encode(hmac.new(sec, e["TJ_KUCOIN_PASSPHRASE"].encode(), hashlib.sha256).digest()).decode()
+            t = str(exf_net.sign_ms("kucoin"))
+            sig = ex_sign.kucoin_sign(e["TJ_KUCOIN_SECRET"], t, "GET", full)
+            pph = ex_sign.kucoin_passphrase(e["TJ_KUCOIN_SECRET"], e["TJ_KUCOIN_PASSPHRASE"])
             d, _ = http_get("https://api.kucoin.com" + full,
                             {"KC-API-KEY": e["TJ_KUCOIN_KEY"], "KC-API-SIGN": sig, "KC-API-TIMESTAMP": t,
                              "KC-API-PASSPHRASE": pph, "KC-API-KEY-VERSION": "2"}, ex=ex)
@@ -424,10 +407,9 @@ class Client:
             return d.get("data")
         if ex == "gate":
             qs = urllib.parse.urlencode(p)
-            t = str(int(time.time()))
+            t = str(exf_net.sign_ms("gate") // 1000)
             bh = hashlib.sha512(b"").hexdigest()
-            sig = hmac.new(e["TJ_GATE_SECRET"].encode(), f"GET\n{path}\n{qs}\n{bh}\n{t}".encode(),
-                           hashlib.sha512).hexdigest()
+            sig = ex_sign.gate_sign(e["TJ_GATE_SECRET"], "GET", path, qs, bh, t)
             d, _ = http_get(f"https://api.gateio.ws{path}" + (f"?{qs}" if qs else ""),
                             {"KEY": e["TJ_GATE_KEY"], "Timestamp": t, "SIGN": sig}, ex=ex)
             if isinstance(d, dict) and d.get("label") and not d.get("address") and "multichain_addresses" not in d:
@@ -438,10 +420,10 @@ class Client:
 
 def _db_currencies(ex: str) -> dict:
     out = {"deposit": set(), "withdraw": set(), "trade": set(), "pairs": set()}
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return out
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=5)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=5)
     except sqlite3.Error:
         return out
     try:
@@ -477,7 +459,7 @@ def _held(ex: str) -> set:
     out = set()
     if ex == "upbit":
         try:
-            d = common.read_json(os.path.join(common.STATE_DIR, "upbit_balances.json"), {}) or {}
+            d = statefile.read_json(paths.state("upbit_balances.json"), {}) or {}
         except SystemExit:
             d = {}
         for a in d.get("accounts") or [] if isinstance(d, dict) else []:
@@ -489,7 +471,7 @@ def _held(ex: str) -> set:
         return out
     for suf in ("", ".pending"):
         try:
-            d = common.read_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json{suf}"), {}) or {}
+            d = statefile.read_json(paths.state(f"exf_balances_{ex}.json{suf}"), {}) or {}
         except SystemExit:
             continue
         b = d.get("balances") if isinstance(d, dict) else None
@@ -603,7 +585,7 @@ def hist_okx(cl, t0, t1):
             out.append({"currency": r.get("ccy"), "network": r.get("chain"), "address": r.get("to"),
                         "tag": r.get("tag") or r.get("memo") or "", "source": "history", "used_ts": _ts(r.get("ts"))})
         oldest = min(int(r.get("ts") or 0) for r in rows)
-        if oldest // 1000 <= t0 or len(rows) < 100:
+        if oldest < t0 * 1000 or len(rows) < 100:
             break
         if after and n_new == 0:
             raise ApiError("okx 이력 시각 미전진")
@@ -811,7 +793,7 @@ def _collect_percoin(ex, cl, coins):
 def _hist_depth(now: int) -> int:
     t0 = now - HIST_DAYS * DAY
     try:
-        cfg = common.read_json(common.CONFIG_PATH, {}) or {}
+        cfg = statefile.read_json(paths.CONFIG_PATH, {}) or {}
         m = float(cfg.get("backfill_months") or 5)
         t0 = min(t0, int(now - m * 30 * DAY))
     except (SystemExit, TypeError, ValueError):
@@ -821,7 +803,7 @@ def _hist_depth(now: int) -> int:
         tg = bf_engine.SINCE.target(None)
         if tg:
             t0 = min(t0, int(tg))
-    except Exception:
+    except Exception:  # noqa: BLE001 [optional]
         pass
     return int(t0)
 
@@ -904,9 +886,9 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
             checked |= ck
             errs.extend(er)
     except ApiError as e:
-        fatal = common.redact_secret_text(str(e))[:200]
-    except Exception as e:
-        fatal = f"{type(e).__name__}: {common.redact_secret_text(str(e))[:160]}"
+        fatal = logs.redact_secret_text(str(e))[:200]
+    except Exception as e:           # noqa: BLE001 [fallback]
+        fatal = f"{type(e).__name__}: {logs.redact_secret_text(str(e))[:160]}"
     res["calls"] = cl.calls
     with _LOCK:
         store2 = load_store()
@@ -931,9 +913,9 @@ def refresh(ex: str, env: dict, reason: str = "manual", only=None, hist_only: bo
                 meta2["checked"] = sorted(set(meta2.get("checked") or []) | set(only))
             meta2["fail_count"] = 0
             meta2["next_try"] = 0
-            meta2["last_error"] = common.redact_secret_text(hist_note) if hist_note else hist_note
+            meta2["last_error"] = logs.redact_secret_text(hist_note) if hist_note else hist_note
             meta2["partial_errors"] = len(errs)
-            meta2["partial_sample"] = [common.redact_secret_text(x) for x in errs[:5]]
+            meta2["partial_sample"] = [logs.redact_secret_text(x) for x in errs[:5]]
         else:
             fc = int(meta2.get("fail_count") or 0) + 1
             meta2["fail_count"] = fc
@@ -959,14 +941,14 @@ def request_refresh(ex: str = "all") -> dict:
     p = req_path()
     with _LOCK:
         try:
-            d = common.read_json(p, {}) or {}
+            d = statefile.read_json(p, {}) or {}
         except SystemExit:
             d = {}
         rq = d.get("requests") if isinstance(d.get("requests"), dict) else {}
         now = round(time.time(), 3)
         for e in (EXCHANGES if ex == "all" else (ex,)):
             rq[e] = now
-        common.atomic_write_json(p, {"requests": rq})
+        statefile.atomic_write_json(p, {"requests": rq})
     return {"requested": list(EXCHANGES) if ex == "all" else [ex], "ts": now}
 
 
@@ -976,7 +958,7 @@ def notify(ex: str, what: str = "deposit") -> None:
 
 def _requests() -> dict:
     try:
-        d = common.read_json(req_path(), {}) or {}
+        d = statefile.read_json(req_path(), {}) or {}
     except SystemExit:
         return {}
     r = d.get("requests") if isinstance(d, dict) else None
@@ -1015,13 +997,13 @@ def tick(env_fn, cand_cache: dict) -> list:
     out = []
     env = env_fn() or {}
     now = int(time.time())
-    for ex, acct, env_a in [(ex, t9, e9) for ex in EXCHANGES for t9, e9 in common.exchange_accounts(env, ex, NEED[ex])
+    for ex, acct, env_a in [(ex, t9, e9) for ex in EXCHANGES for t9, e9 in envfile.exchange_accounts(env, ex, NEED[ex])
                             if not (t9 and ex in SUB_NO_DEPOSIT)]:
         try:
             store = load_store()
             d = due(ex, env_a, store, now, cand_cache, acct=acct)
-        except Exception as e:
-            log.warning("입금주소 %s 판정 실패: %s", _mk(ex, acct), common.redact_secret_text(repr(e))[:120])
+        except Exception as e:  # noqa: BLE001 [isolate]
+            log.warning("입금주소 %s 판정 실패: %s", _mk(ex, acct), logs.redact_secret_text(repr(e))[:120])
             continue
         if not d:
             continue
@@ -1052,10 +1034,10 @@ def start_background(env_fn) -> threading.Thread:
         return _THREAD["t"]
     try:
         with _LOCK:
-            n9 = common.scrub_secret_file(store_path(), ("exchanges",))
+            n9 = logs.scrub_secret_file(store_path(), ("exchanges",))
         if n9:
             log.info("입금주소 저장소: 수정 전 오류 문구 %d칸 비밀값 가림", n9)
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
 
     def loop():
@@ -1064,8 +1046,8 @@ def start_background(env_fn) -> threading.Thread:
         while True:
             try:
                 tick(env_fn, cache)
-            except Exception as e:
-                log.warning("입금주소 스레드 예외(계속): %s", common.redact_secret_text(repr(e))[:160])
+            except Exception as e:  # noqa: BLE001 [boundary]
+                log.warning("입금주소 스레드 예외(계속): %s", logs.redact_secret_text(repr(e))[:160])
             time.sleep(TICK)
     t = threading.Thread(target=loop, name="tj-depaddr", daemon=True)
     t.start()
@@ -1075,12 +1057,12 @@ def start_background(env_fn) -> threading.Thread:
 
 def _manual_rows() -> list:
     try:
-        mt = os.path.getmtime(common.CONFIG_PATH)
+        mt = os.path.getmtime(paths.CONFIG_PATH)
     except OSError:
         return []
     if _CFG_CACHE["mt"] != mt:
         try:
-            cfg = common.read_json(common.CONFIG_PATH, {}) or {}
+            cfg = statefile.read_json(paths.CONFIG_PATH, {}) or {}
         except SystemExit:
             cfg = {}
         rows = []
@@ -1220,7 +1202,7 @@ def summary(env: dict | None = None) -> dict:
     try:
         st = load_store() if os.path.exists(store_path()) else _empty_store()
     except RuntimeError as e:
-        return {"error": common.safe_err(e)}
+        return {"error": logs.safe_err(e)}
     rq = _requests()
     now = time.time()
     out = {}
@@ -1235,7 +1217,7 @@ def summary(env: dict | None = None) -> dict:
                    "current": sum(1 for r in recs if _is_current(r, _rmeta(r, st["exchanges"]))),
                    "fromHistory": sum(1 for r in recs if "history" in (r.get("sources") or [])),
                    "lastRefresh": m.get("last_ok"), "lastFull": m.get("last_full"),
-                   "lastError": common.redact_secret_text(m.get("last_error")),
+                   "lastError": logs.redact_secret_text(m.get("last_error")),
                    "lastAttempt": m.get("last_attempt"),
                    "running": bool(running and now - float(running) < 1800),
                    "requested": float(rq.get(ex) or 0) > float(m.get("req_done") or 0),
@@ -1274,8 +1256,8 @@ def deposit_rows(limit_per_ex: int = 12) -> list:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [tj-depaddr] %(message)s")
-    import ex_foreign as _xf
-    env0 = _xf._env()
+    logs.install_excepthook()
+    env0 = envfile.read_env_file()
     env0.update({k: v for k, v in os.environ.items() if k.startswith(("TJ_", "UPBIT_"))})
     for ex0 in (sys.argv[1:] or EXCHANGES):
         if all(env0.get(k) for k in NEED.get(ex0, ("?",))):

@@ -2,26 +2,26 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import gzip
-import hashlib
-import json
-import os
-import random
-import sqlite3
-import stat
-import time as _real_time
-from datetime import datetime, timedelta, timezone
+import copy  # noqa: E402
+import gzip  # noqa: E402
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import random  # noqa: E402
+import sqlite3  # noqa: E402
+import stat  # noqa: E402
+import time as _real_time  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump({"chains": {}, "wallets": [], "web": {"port": 1, "login": {"enabled": False}}}, f)
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-import websnap as WS
+assert T.TMP in paths.STATE_DIR
+import websnap as WS  # noqa: E402
 
 
 class Clock:
@@ -356,15 +356,15 @@ pc.precompute()
 check("S4u 선계산 = 2분 안 버전만 메모 · 오래된 요청 기록은 지움", (q0.ver, q2.ver) in pc.memo and (q1.ver, q2.ver) not in pc.memo and q1.ver not in pc.wanted,
       (list(pc.memo), list(pc.wanted)))
 
-os.makedirs(common.STATE_DIR, exist_ok=True)
-con = sqlite3.connect(common.DB_PATH)
+os.makedirs(paths.STATE_DIR, exist_ok=True)
+con = sqlite3.connect(paths.DB_PATH)
 con.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)")
 con.executemany("INSERT INTO meta VALUES (?, ?)", [("schema_version", "2"), ("ext_rebuilt_at", "100")])
 con.commit()
 con.close()
 try:
-    import web
-except Exception as e9:
+    import web  # noqa: E402
+except Exception as e9:   # noqa: BLE001
     web = None
     check("S5 web 가져오기", False, e9)
 if web is not None:
@@ -378,17 +378,13 @@ if web is not None:
 
     web.time = CLK
     web.datetime = FixedDT
-    web.SNAPFILE_PATH = os.path.join(common.STATE_DIR, "web_snap_last.bin")
     for _mn9 in [m for m in sys.modules if m.startswith(("view_", "http_", "accounting_"))]:
         _m9 = sys.modules[_mn9]
         if hasattr(_m9, "time"):
             _m9.time = CLK
         if hasattr(_m9, "datetime"):
             _m9.datetime = FixedDT
-    SFM = sys.modules.get("view_snapfile")
-    if SFM is not None:
-        SFM.SNAPFILE_PATH = web.SNAPFILE_PATH
-    SP = web.SNAPFILE_PATH
+    SP = paths.state("web_snap_last.bin")
     T5 = T0 + 10 ** 6
     ob = mkstate(random.Random(55), 55)
     CLK.t = T5
@@ -423,12 +419,12 @@ if web is not None:
     DAY[0] = datetime(2030, 3, 15, 0, 1, tzinfo=KST)
     check("S5g 날짜 바뀜(hero.todayKey) = 안 씀", load(0) is None)
     DAY[0] = datetime(2030, 3, 14, 12, 0, tzinfo=KST)
-    c9 = sqlite3.connect(common.DB_PATH)
+    c9 = sqlite3.connect(paths.DB_PATH)
     c9.execute("UPDATE meta SET v='200' WHERE k='ext_rebuilt_at'")
     c9.commit()
     c9.close()
     check("S5h 원장 세대(ext_rebuilt_at) 바뀜 = 안 씀", load(0) is None)
-    c9 = sqlite3.connect(common.DB_PATH)
+    c9 = sqlite3.connect(paths.DB_PATH)
     c9.execute("UPDATE meta SET v='100' WHERE k='ext_rebuilt_at'")
     c9.commit()
     c9.close()

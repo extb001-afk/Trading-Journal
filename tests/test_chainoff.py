@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import sqlite3
-import stat
-import time as _real_time
+import json  # noqa: E402
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import stat  # noqa: E402
+import time as _real_time  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 W1 = "0x" + "c1" * 20
@@ -32,12 +32,12 @@ CFG0 = {
 CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG0, f)
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.CONFIG_PATH
-import chainoff as CO
-import chaincatalog
-import settings_store as ss
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.CONFIG_PATH
+import chainoff as CO  # noqa: E402
+import chaincatalog  # noqa: E402
+import settings_store as ss  # noqa: E402
 
 if (chaincatalog.CATALOG.get("megaeth") or {}).get("discovery", "explorer") == "rpc" or "megaeth" not in chaincatalog.CATALOG:
     T.chk(False, "시험 전제: 카탈로그에 탐색기 체인 megaeth 가 있어야 함(자동 체인 시험 대상)")
@@ -61,7 +61,7 @@ DAY = 86400
 U = int(T0 - 3600)
 CLK = Clock(T0)
 CO.time = CLK
-S = common.STATE_DIR
+S = paths.STATE_DIR
 EVM = ("eth", "scroll", "gnosis", "megaeth", "robinhood")
 CW = {"eth": [W1], "scroll": [W1, W2], "gnosis": [W1], "megaeth": [W1], "robinhood": [W1]}
 
@@ -103,12 +103,12 @@ def gate(nonces=None, mega_days=45.0, chains_ok=None, extra=None):
     pairs.update(extra or {})
     chs = {c: {"ok": True, "checkedAt": U, "addrs": list(CW[c])} for c in EVM}
     chs.update(chains_ok or {})
-    wj(common.ACTIVITY_GATE_PATH, {"version": 1, "updatedAt": U, "pairs": pairs, "chains": chs})
+    wj(paths.ACTIVITY_GATE_PATH, {"version": 1, "updatedAt": U, "pairs": pairs, "chains": chs})
 
 
 def ledger(sends=(), recon=("eth", "scroll", "gnosis", "megaeth")):
-    rm(common.DB_PATH)
-    c = sqlite3.connect(common.DB_PATH)
+    rm(paths.DB_PATH)
+    c = sqlite3.connect(paths.DB_PATH)
     c.execute("CREATE TABLE postings (source_kind TEXT, source_ns TEXT, source_id TEXT, event_ts INTEGER, location TEXT, leg_kind TEXT)")
     c.execute("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)")
     c.execute("CREATE TABLE raw_observations (obs_id TEXT PRIMARY KEY, payload TEXT)")
@@ -220,7 +220,7 @@ check("C2k 다른 체인은 영향 없음(gnosis 추천 · sent30 0)", r["gnosis
 ledger(sends=[("scroll", W2, T0 - 31 * DAY), ("scroll", W1, T0 - 29 * DAY), ("scroll", W1, T0 - 29 * DAY)])
 r, _ = rows()
 check("C2l 31일 전 거래는 안 셈 · 같은 tx 의 가스 레그 중복은 1건", r["scroll"]["sent30"] == 2 and not r["scroll"]["recommend"], r["scroll"]["sent30"])
-c9 = sqlite3.connect(common.DB_PATH)
+c9 = sqlite3.connect(paths.DB_PATH)
 c9.execute("DELETE FROM postings")
 c9.execute("INSERT INTO postings VALUES ('chain_tx', 'scroll', '0xaa', ?, ?, 'gas')", (int(T0 - DAY), f"wallet:scroll:{W1}"))
 c9.execute("INSERT INTO postings VALUES ('chain_tx', 'scroll', '0xaa', ?, ?, 'gas')", (int(T0 - DAY), f"wallet:scroll:{W2}"))
@@ -230,11 +230,11 @@ c9.commit()
 c9.close()
 r, _ = rows()
 check("C2m 한 tx 를 두 지갑이 나눠 기록해도 1건 · 가스 레그·체인 tx 만 셈", r["scroll"]["sent30"] == 1 and r["gnosis"]["sent30"] == 0, (r["scroll"]["sent30"], r["gnosis"]["sent30"]))
-rm(common.DB_PATH)
+rm(paths.DB_PATH)
 r, _ = rows()
 check("C2n 원장 없음(보낸 거래 확인 못 함) = 아무 체인도 추천 안 함 · sent30·spark 없음",
       not any(x["recommend"] for x in r.values()) and r["scroll"]["sent30"] is None and r["scroll"]["spark"] is None, {k: x["recommend"] for k, x in r.items()})
-with open(common.DB_PATH, "wb") as f:
+with open(paths.DB_PATH, "wb") as f:
     f.write(b"not a database" * 100)
 r, _ = rows()
 check("C2o 원장 읽기 실패 = 추천 안 함(예외 없음)", not any(x["recommend"] for x in r.values()), {k: x["recommend"] for k, x in r.items()})
@@ -391,14 +391,14 @@ CO.AUTO_INFO_FN = lambda: {"lim": 50.0, "chains": {}}
 off = CO.auto_off()
 check("C6g 기초잔고 대사 전(recon_done 없음) 체인 = 안 끔", off == ["gnosis"], off)
 reset()
-c9 = sqlite3.connect(common.DB_PATH)
+c9 = sqlite3.connect(paths.DB_PATH)
 c9.execute("UPDATE raw_observations SET payload=? WHERE obs_id='recon:scroll'", (json.dumps({W1: {"bal": "0"}}),))
 c9.commit()
 c9.close()
 CO.AUTO_INFO_FN = lambda: {"lim": 50.0, "chains": {}}
 off = CO.auto_off()
 check("C6h 대사에 없는 새 지갑이 있는 체인 = 안 끔", "scroll" not in off, off)
-c9 = sqlite3.connect(common.DB_PATH)
+c9 = sqlite3.connect(paths.DB_PATH)
 c9.execute("INSERT INTO meta VALUES (?, '1')", (f"wrecon_done:scroll:{W2}",))
 c9.commit()
 c9.close()
@@ -409,7 +409,7 @@ CO.AUTO_INFO_FN = lambda: {"lim": 50.0, "chains": {"gnosis": {"usd": 10 ** 9}, "
 r, _ = rows()
 assert r["scroll"]["recommend"]
 CO.summary()
-c9 = sqlite3.connect(common.DB_PATH)
+c9 = sqlite3.connect(paths.DB_PATH)
 c9.execute("INSERT INTO postings VALUES ('chain_tx', 'scroll', '0xdd', ?, ?, 'gas')", (int(T0 - 60), f"wallet:scroll:{W1}"))
 c9.commit()
 c9.close()
@@ -510,8 +510,8 @@ check("C7r config chain_sweep 꼴 이상 = 저장 전 거부 · 설정 무변", 
 
 reset()
 try:
-    import web
-except Exception as e9:
+    import web  # noqa: E402
+except Exception as e9:   # noqa: BLE001
     web = None
     check("C8 web 가져오기", False, e9)
 if web is not None:

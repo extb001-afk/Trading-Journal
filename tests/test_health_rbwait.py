@@ -2,12 +2,12 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import os
+import os  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
-import health as H
+import health as H  # noqa: E402
 
 NOW = 1_800_000_000.0
 UNITS = ["tj-evm", "tj-bsc", "tj-core", "tj-web", "tj-alert"]
@@ -59,7 +59,7 @@ T.chk(isinstance(c3, dict) and c3.get("level") == "warn" and c3.get("title") == 
       "W7 재계산 대기가 3일 넘어도 확장이 멈추지 않고 진행 중 = 보류 유지(주황 · 알림 없음)", c3)
 c8 = T.safe(lambda: ev([item(first=NOW - 7 * 86400 - 60)], RB)["balcheck:mismatch"])
 T.chk(isinstance(c8, dict) and c8.get("level") == "warn" and c8.get("title") == "원장·온체인 잔고 불일치 1건 · 재계산 대기",
-      "W8 7일 넘어도 그 체인 넓히기가 안 끝났으면 주의(주황) — 오너 10-09 규칙(끝나야 오류)", c8)
+      "W8 7일 넘어도 그 체인 넓히기가 안 끝났으면 주의(주황) — 오너 규칙(끝나야 오류)", c8)
 OLD_ES = {"phase": "extend", "done": 3, "total": 9, "updated": NOW - 5 * 86400, "moved_at": NOW - 5 * 86400}
 BF_HAND = {"evm": {"base:extend": OLD_ES, "base:job": dict(OLD_ES), "base:rpc": dict(BF["evm"]["base:rpc"], phase="live", done=100)}}
 c10 = T.safe(lambda: ev([item(first=NOW - 3 * 86400 - 60)], RB, bf=BF_HAND)["balcheck:mismatch"])

@@ -2,27 +2,27 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import inspect
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import inspect  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import histcurve
-import web
+import histcurve  # noqa: E402
+import web  # noqa: E402
 
 chk = T.chk
 
 
 def xkw(b):
     return {"xkit": copy.deepcopy(b.__dict__.get("_x_kit"))} if "xkit" in inspect.signature(histcurve.make_kit).parameters else {}
-S = common.STATE_DIR
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -73,7 +73,7 @@ def unit_builder():
 
 
 def reset_files():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
 
@@ -105,14 +105,14 @@ def val_of(series, m, d):
 
 
 def inval():
-    if os.path.exists(web.DAILY_PATH):
-        os.remove(web.DAILY_PATH)
+    if os.path.exists(paths.state("daily_cache.json")):
+        os.remove(paths.state("daily_cache.json"))
 
 
 def hist_run(b, G, hold, today, series, extra, tmp, now_ts, pre=None):
     pth, pxp = os.path.join(S, tmp + ".json"), os.path.join(S, tmp + "_px.json")
     if pre is not None:
-        common.atomic_write_json(pth, pre)
+        statefile.atomic_write_json(pth, pre)
     H = histcurve.HistCurve(path=pth, px_path=pxp)
     kit = histcurve.make_kit(today.strftime("%Y-%m-%d"), G, hold, set(), set(), {}, set(), {}, {}, {}, [], copy.deepcopy(extra), series, b.daily, **xkw(b))
     lo9 = min(histcurve.FIRST_DAY, kit.get("first") or histcurve.FIRST_DAY)
@@ -128,7 +128,7 @@ NOW = E(10, 9, 12, 0, 0)
 X1 = mkx(NOW, kb=0.0, rest=10000.0, tl_kb=[(E(3, 1) - 3600, 14e6), (E(10, 1) - 3600, -14e6)], first={"rest": E(1, 1) - 86400})
 b = unit_builder()
 s1 = run(b, {}, {}, D(10, 9), NOW, X1)
-chk(abs((val_of(s1, 9, 28) or 0) - 20000) < 0.01 and abs(val_of(s1, 10, 5) - 10000) < 0.01, "B cs313/n 30일: 9/28 = LP + 빗썸 · 10/5 = LP 만", (val_of(s1, 9, 28), val_of(s1, 10, 5)))
+chk(abs((val_of(s1, 9, 28) or 0) - 20000) < 0.01 and abs(val_of(s1, 10, 5) - 10000) < 0.01, "B 30일: 9/28 = LP + 빗썸 · 10/5 = LP 만", (val_of(s1, 9, 28), val_of(s1, 10, 5)))
 px1 = copy.deepcopy(b.daily_px)
 s1b = run(b, {}, {}, D(10, 9), NOW + 60, X1)
 chk(b.daily_px == px1 and s1b[:-1] == s1[:-1], "A 빌드 두 번 = daily_px · 지난날 값 동일", None)
@@ -142,7 +142,7 @@ inval()
 s1e = run(b, {}, {}, D(10, 9), NOW + 240, X1L)
 chk([r["val"] for r in s1e[:-1]] == [r["val"] for r in s1[:-1]], "A LP 바뀐 뒤 무효화해도 지난날 불변(고정 구성요소)", None)
 H1, v1 = hist_run(b, {}, {}, D(10, 9), s1, X1, "ch1", NOW)
-chk(abs(v1[iso(2, 1)][1] - 10000) < 0.01 and abs(v1[iso(5, 1)][1] - 20000) < 0.01, "B cs313/n 장기: 2/1 = LP 만 · 5/1 = LP + 빗썸(입금 전 LP 안 지워짐)",
+chk(abs(v1[iso(2, 1)][1] - 10000) < 0.01 and abs(v1[iso(5, 1)][1] - 20000) < 0.01, "B 장기: 2/1 = LP 만 · 5/1 = LP + 빗썸(입금 전 LP 안 지워짐)",
     (v1[iso(2, 1)][1], v1[iso(5, 1)][1]))
 chk(abs(v1[iso(1, 1)][1] - 10000) < 0.01 and abs(v1[iso(9, 9)][1] - 20000) < 0.01, "B 장기 1/1(LP 시작 뒤) · 9/9", (v1[iso(1, 1)][1], v1[iso(9, 9)][1]))
 chk(abs(v1[iso(9, 9)][1] - val_of(s1, 9, 10)) < 0.01, "G 경계 9/9(장기) = 9/10(30일) — 같은 규칙(입출금 없음 = 같은 값)", (v1[iso(9, 9)][1], val_of(s1, 9, 10)))
@@ -155,7 +155,7 @@ H1.run_once(kit_t, cap=0, now=NOW + 300)
 c9, b9 = H1.view(None)
 v1t = {r[0]: r for r in b9["days"]}
 chk(abs(v1t[iso(4, 1)][1] - 15000) < 0.01 and abs(v1t[iso(5, 1)][1] - 20000) < 0.01 and (H1.st["s"].get(iso(4, 1)) or [None])[0] == 0.0,
-    "B cs313/s 늦게 채워진 이력 = 그날 x 만 정정(4/1 $15,000) · 가격 부분 그대로 · 세대 올림 없음", (v1t[iso(4, 1)][1], H1.st["s"][iso(4, 1)]))
+    "B 늦게 채워진 이력 = 그날 x 만 정정(4/1 $15,000) · 가격 부분 그대로 · 세대 올림 없음", (v1t[iso(4, 1)][1], H1.st["s"][iso(4, 1)]))
 
 reset_files()
 NOW = E(9, 30, 12, 0, 0)
@@ -166,12 +166,12 @@ b.daily_px[iso(9, 20)] = {"p": {}, "k": {}, "x": 100.0, "xk": "live"}
 b.daily[iso(9, 20)] = {"val": 2600.0, "usdt": FX, "g": {"1": 2500.0}, "x": 100.0, "src": "calc", "st": ""}
 X2 = mkx(NOW, kb=0.0, rest=1500.0, tl_kb=[])
 s2 = run(b, G2, H2, D(9, 30), NOW, X2)
-chk(abs(val_of(s2, 9, 20) - 2600) < 0.01 and xvo(b, iso(9, 20))["p"].get("rest") == [100.0, "snap"], "C cs317/n 실제 마감 x(재구축 보존) = 빗썸 0·빈 이력·지금 LP 1,500 에도 그대로",
+chk(abs(val_of(s2, 9, 20) - 2600) < 0.01 and xvo(b, iso(9, 20))["p"].get("rest") == [100.0, "snap"], "C 실제 마감 x(재구축 보존) = 빗썸 0·빈 이력·지금 LP 1,500 에도 그대로",
     (val_of(s2, 9, 20), xvo(b, iso(9, 20))))
 s2b = run(b, G2, H2, D(9, 30), NOW + 60, X2)
 inval()
 s2c = run(b, G2, H2, D(9, 30), NOW + 120, X2)
-chk(abs(val_of(s2b, 9, 20) - 2600) < 0.01 and abs(val_of(s2c, 9, 20) - 2600) < 0.01, "C cs317/s 다음 빌드·무효화 재계산 = 같은 값(2,600)", (val_of(s2b, 9, 20), val_of(s2c, 9, 20)))
+chk(abs(val_of(s2b, 9, 20) - 2600) < 0.01 and abs(val_of(s2c, 9, 20) - 2600) < 0.01, "C 다음 빌드·무효화 재계산 = 같은 값(2,600)", (val_of(s2b, 9, 20), val_of(s2c, 9, 20)))
 reset_files()
 b = unit_builder()
 X3 = mkx(NOW, kb=14e6, rest=10000.0, tl_kb=[])
@@ -181,7 +181,7 @@ s3b = run(b, {}, {}, D(9, 30), NOW + 60, X3b)
 inval()
 s3c = run(b, {}, {}, D(9, 30), NOW + 120, X3b)
 chk(abs(val_of(s3, 9, 29) - 20000) < 0.01 and abs(val_of(s3b, 9, 29) - 20000) < 0.01 and abs(val_of(s3c, 9, 29) - 20000) < 0.01,
-    "C cs317/n 계산 동결 = LP 가 바뀌어도 $20,000 · 무효화 뒤에도", (val_of(s3, 9, 29), val_of(s3b, 9, 29), val_of(s3c, 9, 29)))
+    "C 계산 동결 = LP 가 바뀌어도 $20,000 · 무효화 뒤에도", (val_of(s3, 9, 29), val_of(s3b, 9, 29), val_of(s3c, 9, 29)))
 
 reset_files()
 b = unit_builder()
@@ -189,14 +189,14 @@ G4 = {1: {"gid": 1, "sym": "USDT", "is_stable": True, "qty_timeline": [(E(1, 5),
 H4 = {1: Decimal(100)}
 X4 = mkx(NOW, kb=14e6, ub={"QQQ": [1000.0, 2000.0]}, tl_kb=[])
 s4 = run(b, G4, H4, D(9, 30), NOW, X4)
-chk(abs(val_of(s4, 9, 25) - 12100) < 0.01 and (xvo(b, iso(9, 25))["p"].get("ub") or [None])[0] == {"QQQ": 1000.0}, "D cs321/n 매칭 전 $12,100 · 미매칭 분해 ub 고정", val_of(s4, 9, 25))
+chk(abs(val_of(s4, 9, 25) - 12100) < 0.01 and (xvo(b, iso(9, 25))["p"].get("ub") or [None])[0] == {"QQQ": 1000.0}, "D 매칭 전 $12,100 · 미매칭 분해 ub 고정", val_of(s4, 9, 25))
 G4b = {**G4, 2: {"gid": 2, "sym": "QQQ", "is_stable": False, "qty_timeline": [(E(9, 1), Decimal(1000))]}}
 H4b = {**H4, 2: Decimal(1000)}
 X4b = mkx(NOW, kb=14e6, ub={}, tl_kb=[], ub_tl={2: [(int(E(9, 1)), Decimal(1000))]})
 s4b = run(b, G4b, H4b, D(9, 30), NOW + 60, X4b, live_px={2: 2.0}, ca=(2,))
 inval()
 s4c = run(b, G4b, H4b, D(9, 30), NOW + 120, X4b, live_px={2: 2.0}, ca=(2,))
-chk(abs(val_of(s4b, 9, 25) - 12100) < 0.01 and abs(val_of(s4c, 9, 25) - 12100) < 0.01, "D cs321/n 원장이 QQQ 를 세게 돼도(소급·무효화 재계산) $12,100 — 이중 계상 없음",
+chk(abs(val_of(s4b, 9, 25) - 12100) < 0.01 and abs(val_of(s4c, 9, 25) - 12100) < 0.01, "D 원장이 QQQ 를 세게 돼도(소급·무효화 재계산) $12,100 — 이중 계상 없음",
     (val_of(s4b, 9, 25), val_of(s4c, 9, 25)))
 reset_files()
 b = unit_builder()
@@ -206,7 +206,7 @@ G5 = {**G4, 3: {"gid": 3, "sym": "ABC", "is_stable": False, "qty_timeline": [(E(
 H5 = {**H4, 3: Decimal(10)}
 inval()
 s5b = run(b, G5, H5, D(9, 30), NOW + 60, mkx(NOW, tl_kb=[], ub_tl={3: [(int(E(9, 1)), Decimal(10))]}), live_px={3: 10.0}, ca=(3,))
-chk(abs(val_of(s5, 9, 25) - 200) < 0.01 and abs(val_of(s5b, 9, 25) - 200) < 0.01, "D cs321/s 빼기 0 이던 날의 미매칭 분해 유지 → 원장 편입 뒤 무효화 = $200 그대로",
+chk(abs(val_of(s5, 9, 25) - 200) < 0.01 and abs(val_of(s5b, 9, 25) - 200) < 0.01, "D 빼기 0 이던 날의 미매칭 분해 유지 → 원장 편입 뒤 무효화 = $200 그대로",
     (val_of(s5, 9, 25), val_of(s5b, 9, 25)))
 
 reset_files()
@@ -216,12 +216,12 @@ b.daily[iso(9, 20)] = {"val": 10000.0, "usdt": FX, "g": {}, "x": 10000.0, "src":
 X6 = mkx(NOW, kb=7e6, rest=5000.0, tl_kb=[])
 s6 = run(b, {}, {}, D(9, 30), NOW, X6)
 v6 = val_of(s6, 9, 20)
-chk(abs(v6 - 10000) < 0.01 and xvo(b, iso(9, 20)).get("how") == "mig:calc", "E cs321/n 옛 calc(표식 있음) = 한 번 규칙대로 다시(오너 결정)", (v6, xvo(b, iso(9, 20))))
+chk(abs(v6 - 10000) < 0.01 and xvo(b, iso(9, 20)).get("how") == "mig:calc", "E 옛 calc(표식 있음) = 한 번 규칙대로 다시(오너 결정)", (v6, xvo(b, iso(9, 20))))
 X6b = mkx(NOW, ku=1.4e6, kb=7e6, rest=5000.0, tl_kb=[], tl_ku=None)
 s6b = run(b, {}, {}, D(9, 30), NOW + 60, X6b)
 inval()
 s6c = run(b, {}, {}, D(9, 30), NOW + 120, X6b)
-chk(abs(val_of(s6b, 9, 20) - v6) < 0.01 and abs(val_of(s6c, 9, 20) - v6) < 0.01, "E cs321/n 그 뒤 업비트 원화 이월분이 생겨도 지난날 그대로 · 무효화 뒤에도",
+chk(abs(val_of(s6b, 9, 20) - v6) < 0.01 and abs(val_of(s6c, 9, 20) - v6) < 0.01, "E 그 뒤 업비트 원화 이월분이 생겨도 지난날 그대로 · 무효화 뒤에도",
     (val_of(s6b, 9, 20), val_of(s6c, 9, 20)))
 x7 = copy.deepcopy(b.daily_px)
 s6d = run(b, {}, {}, D(9, 30), NOW + 180, X6b)
@@ -233,7 +233,7 @@ for d9 in range(1, 30):
     b.daily[iso(9, d9)] = {"val": 20000.0, "usdt": FX, "g": {}, "x": 20000.0, "src": "live", "st": ""}
 X8 = mkx(NOW, ku=28e6, kb=14e6, tl_ku=[], tl_kb=[])
 s8 = run(b, {}, {}, D(9, 30), NOW, X8)
-chk(abs(val_of(s8, 9, 10) - 30000) < 0.01 and xvo(b, iso(9, 10))["p"].get("kb") == [14e6, "tl"], "E cs321/n 빗썸 안 담은 옛 마감 + 빗썸 이력값(출처 tl) = $30,000",
+chk(abs(val_of(s8, 9, 10) - 30000) < 0.01 and xvo(b, iso(9, 10))["p"].get("kb") == [14e6, "tl"], "E 빗썸 안 담은 옛 마감 + 빗썸 이력값(출처 tl) = $30,000",
     (val_of(s8, 9, 10), xvo(b, iso(9, 10))))
 H8, v8 = hist_run(b, {}, {}, D(9, 30), s8, X8, "ch8", NOW)
 chk(abs(v8[iso(8, 31)][1] - 30000) < 0.01 and abs(v8[iso(8, 31)][1] - val_of(s8, 9, 1)) < 0.01, "E 장기 곡선 경계 전날(8/31) = $30,000 = 9/1(경계 차 0)",
@@ -247,7 +247,7 @@ pre = {"_v": histcurve.HIST_V, "d": {iso(7, 1): [999.0 + 50000.0, None, 1, "hc",
        "meta": {"pending": False, "flow_pending": False}}
 H9, v9 = hist_run(b, {}, {}, D(9, 30), s9, X9, "ch9", NOW, pre=pre)
 chk(abs(v9[iso(7, 1)][1] - (999.0 + 1000.0 + 5000.0)) < 0.01 and (H9.st["s"].get(iso(7, 1)) or [None])[0] == 999.0 and len(H9.st["s"].get(iso(7, 1)) or ()) == 5,
-    "F cs321/n·s 옛 행 = 가격 부분(999) 그대로 · x 만 규칙으로(LP 1,000 + 빗썸 ₩7M) · 세대 올림 없음", (v9[iso(7, 1)], H9.st["s"].get(iso(7, 1))))
+    "F 옛 행 = 가격 부분(999) 그대로 · x 만 규칙으로(LP 1,000 + 빗썸 ₩7M) · 세대 올림 없음", (v9[iso(7, 1)], H9.st["s"].get(iso(7, 1))))
 H9.run_once(histcurve.make_kit("2026-09-30", {}, {}, set(), set(), {}, set(), {}, {}, {}, [], copy.deepcopy(X9), s9, b.daily, **xkw(b)), cap=0, now=NOW + 60)
 chk(abs(H9.view(None)[1]["days"][[r[0] for r in H9.view(None)[1]["days"]].index(iso(7, 1))][1] - 6999.0) < 0.01, "F 다시 실행 = 같은 값(멱등)", None)
 
@@ -298,9 +298,9 @@ for defer9, lab9 in ((False, "마감 스냅숏(_live_ok)"), (True, "유예 스�
         b.daily["_live_ok"] = copy.deepcopy(sn9)
     sh2 = run(b, {}, {}, D(10, 9), NOWh + 600, Xh2)
     chk(v1h is not None and abs(v1h - 2500) < 0.01 and abs((val_of(sh2, 10, 8) or 0) - v1h) < 0.01,
-        "H cv333 " + lab9 + " 재동결 = 처음 채운 이월(QQQ $2,000) 그대로 — 지금 평가($3,000)로 다시 매기지 않음", (v1h, val_of(sh2, 10, 8), xvo(b, iso(10, 8))))
+        "H " + lab9 + " 재동결 = 처음 채운 이월(QQQ $2,000) 그대로 — 지금 평가($3,000)로 다시 매기지 않음", (v1h, val_of(sh2, 10, 8), xvo(b, iso(10, 8))))
 
-import rabby
+import rabby  # noqa: E402
 note9 = {"first": "2026-09-01", "d": {"2026-09-01": 10000.0, "2026-09-05": 12000.0}}
 dv9 = rabby.day_values(note9, ["2026-08-31", "2026-09-01", "2026-09-03", "2026-09-06"], "2026-10-09", 15000.0)
 rows9 = [{"date": "08-31", "val": 1.0}, {"date": "09-01", "val": 1.0}, {"date": "09-03", "val": 1.0}, {"date": "09-06", "val": 1.0}]
@@ -315,7 +315,7 @@ if "rb_days" in inspect.signature(histcurve.make_kit).parameters:
     dcv9 = (kit9.get("dcv") or {}).get("2026-08-25")
 else:
     dcv9 = None
-chk(dcv9 is not None and abs(dcv9[0] - 110000.0) < 0.01 and dcv9[1] == round(110000.0 * FX), "I cv334 창 밖 dc 행 값 = 동결 항목(봇 $100,000) + 그날 Rabby $10,000", dcv9)
+chk(dcv9 is not None and abs(dcv9[0] - 110000.0) < 0.01 and dcv9[1] == round(110000.0 * FX), "I 창 밖 dc 행 값 = 동결 항목(봇 $100,000) + 그날 Rabby $10,000", dcv9)
 
 reset_files()
 b = unit_builder()
@@ -323,11 +323,11 @@ NOWj = E(10, 9, 12, 0, 0)
 b.daily_px[iso(10, 5)] = {"p": {}, "k": {}, "x": 500.0, "xk": "calc",
                           "xv": {"v": 1, "p": {"kb": [0.0, "snap"], "rest": [500.0, "snap"]}, "fx": FX, "ts": int(E(10, 5) - 300)}}
 b.daily[iso(10, 5)] = {"val": 500.0, "usdt": FX, "g": {}, "x": 500.0, "src": "partial", "st": ""}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 sj = run(b, {}, {}, D(10, 9), NOWj, mkx(NOWj, rest=500.0, ub={"QQQ": [1000.0, 2000.0]}, tl_kb=[]))
 cj = b.daily.get(iso(10, 5)) or {}
 chk(cj.get("src") == "partial" and abs((val_of(sj, 10, 5) or 0) - 2500) < 0.01 and (cj.get("xu") or {}).get("QQQ") == [1000.0, 2000.0],
-    "J cv336 이관으로 채운 미매칭 코인(QQQ $2,000) = 동결 val 2,500 + 동결 항목 xu 에 기록", (val_of(sj, 10, 5), cj))
+    "J 이관으로 채운 미매칭 코인(QQQ $2,000) = 동결 val 2,500 + 동결 항목 xu 에 기록", (val_of(sj, 10, 5), cj))
 
 def obs_day(b, m, d, rest):
     import xparts
@@ -362,11 +362,11 @@ chk(abs((val_of(sk3, 9, 19) or 0) - 7000) < 0.01, "K NK2③ 관측 기록이 사
 reset_files()
 b = unit_builder()
 run(b, {}, {}, D(10, 9), NOWk, mkx(NOWk, rest=0.0, tl_kb=[], first={"rest": None}))
-dpx_before = json.load(open(web.DAILY_PX_PATH)) if os.path.exists(web.DAILY_PX_PATH) else {}
+dpx_before = json.load(open(paths.state("daily_px.json"))) if os.path.exists(paths.state("daily_px.json")) else {}
 run(b, {}, {}, D(10, 9), NOWk + 60, mkx(NOWk + 60, rest=7000.0, tl_kb=[], first={"rest": None}))
-dpx_disk = json.load(open(web.DAILY_PX_PATH)) if os.path.exists(web.DAILY_PX_PATH) else {}
+dpx_disk = json.load(open(paths.state("daily_px.json"))) if os.path.exists(paths.state("daily_px.json")) else {}
 chk("_xfirst" not in dpx_before and abs(float((dpx_disk.get("_xfirst") or {}).get("rest") or 0) - int(NOWk + 60)) < 1,
-    "K NK2⑤ cv402 첫 관측 시각만 바뀐 빌드 = daily_px 파일에도 저장(메모리만 아님)", (dpx_before.get("_xfirst"), dpx_disk.get("_xfirst")))
+    "K NK2⑤ 첫 관측 시각만 바뀐 빌드 = daily_px 파일에도 저장(메모리만 아님)", (dpx_before.get("_xfirst"), dpx_disk.get("_xfirst")))
 reset_files()
 b = unit_builder()
 sk4 = run(b, {}, {}, D(10, 9), NOWk, mkx(NOWk, rest=500.0, tl_kb=[], first={}))

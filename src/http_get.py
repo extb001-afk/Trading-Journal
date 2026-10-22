@@ -1,5 +1,6 @@
 from __future__ import annotations
-import common
+import logs
+import acct_norm
 import day_memo
 import demo_data
 import gzip
@@ -10,6 +11,7 @@ import onboarding
 import os
 import other_assets
 import re
+import reqclass
 import search_index
 import sellchart
 import time
@@ -20,9 +22,10 @@ import wow2
 from datetime import datetime
 from http_assets import V2_DIR
 from http_assets import _asset
+from http_assets import CSP_HEADERS, v2_csp
 from view_builder import StateBuilder
 from view_common import CHAIN_NAME
-from view_common import KST
+from timeutil import KST
 from view_evals import BUY_EVALS
 from view_evals import SELL_EVALS
 from view_hero import _HERO_HTML
@@ -31,6 +34,9 @@ from view_hero import _hero_ok
 import logging
 
 log = logging.getLogger('tj-web')
+
+
+V2_INDEX_CACHE = "private, no-store"
 
 
 class GetMixin:
@@ -51,11 +57,11 @@ class GetMixin:
         b = web_ctx.builder()
         snap = getattr(getattr(b, "snaps", None), "cur", None) if b is not None else None
         hero = getattr(snap, "hero", None) if snap is not None else None
-        csp = (("Content-Security-Policy", web_ctx.v2_csp(a["raw"], a["hash"])),)
+        csp = tuple((name, value) for name, value in zip(CSP_HEADERS, v2_csp(a["raw"], a["hash"])) if value)
         if hero and any(c.strip() == "tj_v2_rand=1" for raw9 in (self.headers.get_all("Cookie") or []) for c in raw9.split(";")):
             hero = None
         if not hero or not _hero_ok(b, snap) or b"<!--HERO-->" not in a["raw"]:
-            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache="private, no-cache", extra=csp)
+            return self._send_bytes(200, a["raw"], a["gz"], "text/html; charset=utf-8", etag=a["etag"], cache=V2_INDEX_CACHE, extra=csp)
         k9 = (a["hash"], snap.ver)
         with _HERO_HTML_LOCK:
             m9 = _HERO_HTML.get(k9)
@@ -66,7 +72,7 @@ class GetMixin:
             with _HERO_HTML_LOCK:
                 _HERO_HTML.clear()
                 _HERO_HTML[k9] = m9
-        self._send_bytes(200, m9[0], m9[1], "text/html; charset=utf-8", etag=m9[2], cache="private, no-cache", extra=csp)
+        self._send_bytes(200, m9[0], m9[1], "text/html; charset=utf-8", etag=m9[2], cache=V2_INDEX_CACHE, extra=csp)
 
     def _send_state_v2(self, query):
         qs9 = urllib.parse.parse_qs(query)
@@ -217,7 +223,7 @@ class GetMixin:
 
     def _send_att_detail(self, query):
         qs = urllib.parse.parse_qs(query)
-        g9 = lambda k: (qs.get(k) or [""])[0].strip()
+        g9 = lambda k: (qs.get(k) or [""])[0].strip()   # noqa: E731
         lo9, hi9 = g9("from") or g9("date"), g9("to") or g9("date")
         if not self._DAY_RE.fullmatch(lo9) or not self._DAY_RE.fullmatch(hi9):
             return self._send(400, {"ok": False, "error": "from·to(또는 date) = YYYY-MM-DD 필요"})
@@ -272,7 +278,7 @@ class GetMixin:
         if err:
             return self._send(400, err)
         if a9.get("bg") and a9["side"] in ("sell", "buy") and not onboarding.DEMO and not (
-                login_auth._internal_ok(self) or (not login_auth.S.enabled and login_auth.direct_loopback(self))):
+                login_auth._internal_ok(self) or (not login_auth.S.enabled and reqclass.direct_loopback(self))):
             return self._send(403, {"ok": False, "error": "봉 미리 받기는 내부 요청만 허용합니다"})
         web_ctx.builder().snapshot()
         body, st9 = web_ctx.builder().chart_request(a9["date"], a9["sym"], a9["iv"], a9["after"], a9["venue"], side=a9["side"], bvenue=a9["bvenue"],
@@ -335,7 +341,7 @@ class GetMixin:
             with other_assets.STORE_LOCK:
                 d9 = other_assets.load_store()
         except other_assets.StoreError as e9:
-            return {"ok": False, "error": common.safe_err(e9)}
+            return {"ok": False, "error": logs.safe_err(e9)}
         bc9 = (getattr(web_ctx.builder(), "cfg", None) or {}).get("brokers")
         return other_assets.view(d9, q9, web_ctx.oa_rate(), bc9 if isinstance(bc9, dict) else {})
 
@@ -343,7 +349,7 @@ class GetMixin:
         if not onboarding.origin_ok(self, required=False):
             return self._send(403, {"ok": False, "error": "다른 출처(사이트)에서 온 요청은 거부합니다"})
         qs9 = urllib.parse.parse_qs(query or "")
-        g9 = lambda k: (qs9.get(k) or [""])[0]
+        g9 = lambda k: (qs9.get(k) or [""])[0]   # noqa: E731
         last9 = getattr(web_ctx.builder(), "_last_out", None) or {}
         f9 = last9.get("fields") if isinstance(last9, dict) else None
         bt9 = last9.get("builtAt") if isinstance(last9, dict) and isinstance(f9, dict) else None
@@ -351,7 +357,7 @@ class GetMixin:
             try:
                 b9 = web_ctx.builder().build() or {}
                 f9, bt9 = b9.get("fields"), b9.get("builtAt")
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 f9 = None
         f9 = f9 if isinstance(f9, dict) else {}
         if not f9:
@@ -361,7 +367,7 @@ class GetMixin:
             if path == "/api/search/ask":
                 cfg9 = (getattr(web_ctx.builder(), "cfg", None) or {}).get("wow") or {}
                 coins9 = sorted({str(c.get("sym") or "").upper() for c in (f9.get("coins") or ()) if isinstance(c, dict) and c.get("sym")})[:800]
-                body = wow2.ask(g9("q"), coins=coins9, chains=sorted(CHAIN_NAME), rate=float(f9.get("rate") or 1384),
+                body = wow2.ask(g9("q"), coins=coins9, chains=sorted(CHAIN_NAME), rate=float(f9.get("rate") or acct_norm.DEFAULT_KRW_USD),
                                llm_on=(cfg9.get("ask_llm") is True) and not onboarding.DEMO, llm_cap=int(cfg9.get("ask_llm_daily_max") or 40))
                 return self._send(200 if body.get("ok") else 400, body)
             conn9 = demo_data.ledger() if onboarding.DEMO else wow2._ro()
@@ -376,19 +382,19 @@ class GetMixin:
             else:
                 body = wow2.flows(f9, conn=conn9, chain_names=CHAIN_NAME, since=g9("since") or None, hist=hist9)
             self._send(200 if body.get("ok") else 400, body)
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [optional]
             log.warning("감탄 기능 %s 실패: %s", path, type(e9).__name__, exc_info=True)
             self._send(503, {"ok": False, "error": "지금은 만들지 못했어요 — 잠시 뒤 다시"})
         finally:
             if conn9 is not None:
                 try:
                     conn9.close()
-                except Exception:
+                except Exception:   # noqa: BLE001 [cleanup]
                     pass
 
     def _send_search(self, query):
         qs9 = urllib.parse.parse_qs(query or "")
-        g9 = lambda k: (qs9.get(k) or [""])[0]
+        g9 = lambda k: (qs9.get(k) or [""])[0]   # noqa: E731
         kinds9 = [k for k in g9("kinds").split(",") if k] or None
         req9 = {"q": g9("q")[:search_index.Q_MAX], "kinds": kinds9, "limit": g9("limit") or None,
                 "after": g9("after") or None, "before": g9("before") or None, "offset": g9("offset") or None,
@@ -397,7 +403,7 @@ class GetMixin:
             body = web_ctx.search_pool().run(req9)
             if body is None:
                 body = search_index.search(req9["q"], kinds=kinds9, limit=req9["limit"], after=req9["after"], before=req9["before"], offset=req9["offset"], krw=req9["krw"])
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             log.warning("검색 실패: %s", type(e9).__name__)
             return self._send(503, {"ok": False, "error": "검색하지 못했어요 — 잠시 뒤 다시"})
         self._send(200, body)
@@ -405,7 +411,7 @@ class GetMixin:
     def _send_nft(self, query):
         try:
             v9 = web_ctx.nft_tracker().view()
-        except Exception as e9:
+        except Exception as e9:   # noqa: BLE001 [fallback]
             log.warning("NFT 보기 실패: %s", type(e9).__name__)
             return self._send(503, {"ok": False, "error": "NFT 목록을 만들지 못했어요"})
         self._send(200, v9)

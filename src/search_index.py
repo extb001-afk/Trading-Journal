@@ -11,14 +11,15 @@ import threading
 import time
 import unicodedata
 import zlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import chain_registry
-import common
+import logs, num_parse, paths, textutil
+import db as dbm
 
 log = logging.getLogger("tj-web")
 
-KST = timezone(timedelta(hours=9))
+from timeutil import KST
 DB_NAME = "search.db"
 SCHEMA = 2
 ROWV = 3
@@ -82,7 +83,7 @@ EX_ALIAS = {"upbit": "upbit", "업비트": "upbit", "bithumb": "bithumb", "빗�
             "bybit": "bybit", "바이빗": "bybit", "okx": "okx", "오케이엑스": "okx", "kucoin": "kucoin", "쿠코인": "kucoin", "gate": "gate",
             "gateio": "gate", "gate.io": "gate", "게이트": "gate", "게이트아이오": "gate", "hyperliquid": "hyperliquid", "하이퍼리퀴드": "hyperliquid",
             "bitget": "bitget", "비트겟": "bitget", "coinone": "coinone", "코인원": "coinone", "korbit": "korbit", "코빗": "korbit", "mexc": "mexc",
-            "htx": "htx", "huobi": "htx", "후오비": "htx"}
+            "htx": "htx", "huobi": "htx", "후오비": "htx", "coinbase": "coinbase", "코인베이스": "coinbase"}
 _EX_NAMES = sorted(EX_ALIAS, key=len, reverse=True)
 TYPE_ALIAS = {"매도": "sell", "매수": "buy", "스왑": "swap", "입금": "deposit", "받음": "deposit", "출금": "withdraw", "보냄": "withdraw", "가스": "gas",
               "수수료": "gas", "fee": "gas", "전송": "transfer", "이동": "transfer", "send": "transfer", "유동성": "lp"}
@@ -177,7 +178,7 @@ _TX_PRIO = ("SWAP", "CONVERT", "LP_ADD", "LP_REMOVE", "LP_ADJUST", "BRIDGE", "TR
 
 
 def db_path() -> str:
-    return os.path.join(common.STATE_DIR, DB_NAME)
+    return paths.state(DB_NAME)
 
 
 def _demo() -> bool:
@@ -339,7 +340,7 @@ def _row(d) -> dict:
 
 def fts_supported() -> bool:
     try:
-        c = sqlite3.connect(":memory:")
+        c = dbm.connect(":memory:")
         try:
             c.execute("CREATE VIRTUAL TABLE t USING fts5(x, tokenize='trigram')")
             return True
@@ -376,7 +377,7 @@ class Index:
             pass
 
     def _connect(self):
-        c = sqlite3.connect(self.path, timeout=30, check_same_thread=False, isolation_level=None)
+        c = dbm.connect(self.path, timeout=30, check_same_thread=False, isolation_level=None)
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
         c.execute("PRAGMA journal_size_limit=33554432")
@@ -722,12 +723,12 @@ def docs_state(fields: dict, chain_names):
         g["guard"] |= 1 if c.get("guard") else 0
     try:
         import spamguard as _sg
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         _sg = None
     for su, g in by.items():
         try:
             sp = bool(_sg and (_sg.odd_symbol(g["sym"]) or _sg.impostor_of(g["sym"])))
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             sp = False
         ch = sorted(g["chains"])
         cks9, xks9 = [], []
@@ -937,7 +938,7 @@ def _lure_assets(conn) -> set:
         import spamguard as _sg
         return {int(r[0]) for r in conn.execute("SELECT asset_id, chain, address, symbol FROM assets WHERE kind = 'token' AND address IS NOT NULL")
                 if r[3] and not _sg.is_genuine(r[1], r[2]) and (_sg.impostor_of(r[3]) or _sg.odd_symbol(r[3]))}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return set()
 
 
@@ -1013,7 +1014,7 @@ class Indexer:
         self.names = Names(chain_names)
         self.cn = self.names.disp
         self.ix = Index(path, sleep=sleep)
-        self.ledger_path = ledger_path or common.DB_PATH
+        self.ledger_path = ledger_path or paths.DB_PATH
         self.sleep, self.clock = sleep, clock
         self.mu = threading.Lock()
         self.done_first = False
@@ -1103,7 +1104,7 @@ class Indexer:
         self.last_nft = self.clock()
         try:
             v = self.nft_fn()
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             log.warning("검색 색인: NFT 보기 실패(무시): %s", type(e).__name__)
             return
         docs = docs_nft(v, self.names)
@@ -1149,7 +1150,7 @@ class Indexer:
         now = self.clock()
         if fsig == self._tx_fsig and not (self._tx_pending and now - self._tx_rescan_at >= TX_RESCAN_S):
             return
-        lc = sqlite3.connect(common.sqlite_ro_uri(lp), uri=True, timeout=10)
+        lc = dbm.connect(paths.sqlite_ro_uri(lp), uri=True, timeout=10)
         try:
             lc.execute("BEGIN")
             try:
@@ -1235,7 +1236,7 @@ class Indexer:
             vac = self.ix.vacuum_if_bloated()
         except sqlite3.Error as e:
             vac = None
-            log.warning("검색 색인: 정리 실패(다음 6시간에 다시): %s", common.safe_err(e)[:120])
+            log.warning("검색 색인: 정리 실패(다음 6시간에 다시): %s", logs.safe_err(e)[:120])
         self._chg_full = 0
         log.info("검색 색인: 행 형식 %s 완료(%.0f초 · 옛 행 %d 정리 · 크기 %s)", ROWV, self.clock() - m["t0"], len(ids), vac)
 
@@ -1257,7 +1258,7 @@ class Indexer:
             if self.state_fn:
                 try:
                     out, dix = self.state_fn()
-                except Exception as e:
+                except Exception as e:   # noqa: BLE001 [optional]
                     log.warning("검색 색인: 상태 읽기 실패(무시): %s", type(e).__name__)
             w0 = self.ix.writes
             c0 = self.ix.changed
@@ -1282,7 +1283,7 @@ class Indexer:
                 elif dc >= 200:
                     self.ix.maintain(full=False)
             except sqlite3.Error as e:
-                log.warning("검색 색인: 병합 실패(다음 회차): %s", common.safe_err(e)[:120])
+                log.warning("검색 색인: 병합 실패(다음 회차): %s", logs.safe_err(e)[:120])
             if self.ix.writes != w0 or self.clock() - self._ia_saved >= IA_SAVE_S:
                 self.ix.meta_set("indexedAt", self.indexed_at)
                 self._ia_saved = self.clock()
@@ -1304,8 +1305,8 @@ class Indexer:
             t0 = self.clock()
             try:
                 self.tick()
-            except Exception as e:
-                log.warning("검색 색인 갱신 실패(다음 회차): %s", common.safe_err(e)[:160])
+            except Exception as e:   # noqa: BLE001 [boundary]
+                log.warning("검색 색인 갱신 실패(다음 회차): %s", logs.safe_err(e)[:160])
             self.sleep(max(min(2.0, tk), tk - (self.clock() - t0)))
 
 
@@ -1319,8 +1320,8 @@ def start(state_fn, nft_fn=None, chain_names=None):
     INDEXER = Indexer(state_fn, nft_fn, chain_names)
     try:
         INDEXER.ix.open()
-    except Exception as e:
-        log.warning("검색 색인 열기 실패(첫 회차에 다시): %s", common.safe_err(e)[:160])
+    except Exception as e:   # noqa: BLE001 [optional]
+        log.warning("검색 색인 열기 실패(첫 회차에 다시): %s", logs.safe_err(e)[:160])
     threading.Thread(target=INDEXER.loop, daemon=True, name="search-index").start()
     return INDEXER
 
@@ -1458,11 +1459,8 @@ def alias_syms(tok: str, held=None):
 
 
 def krw_rate(v):
-    try:
-        x = float(v)
-    except (TypeError, ValueError):
-        return None
-    return x if 100 <= x <= 10000 else None
+    x = num_parse.to_float(v)
+    return x if x is not None and 100 <= x <= 10000 else None
 
 
 def parse_query(q: str, today: datetime = None, held=None, names=None):
@@ -1648,7 +1646,7 @@ def _fts_phrase(tok: str) -> str:
 
 
 def _lesc(tok: str) -> str:
-    return str(tok).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return textutil.like_escape(tok)
 
 
 def _like(tok: str) -> str:
@@ -1789,7 +1787,7 @@ def _kind_query(p, kind, fts_on, ctx):
         where.append(c9)
         args += a9
     wtg = kind == "tx" and ctx.get("has_tg", True)
-    wrng = lambda v9: [("t >= ? AND t < ?", ["w:" + v9, "w:" + v9 + "\uffff"])] if wtg else []
+    wrng = lambda v9: [("t >= ? AND t < ?", ["w:" + v9, "w:" + v9 + "\uffff"])] if wtg else []   # noqa: E731
     if f.get("after"):
         where.append("d.date >= ?")
         args.append(f["after"])
@@ -1817,7 +1815,7 @@ def _kind_query(p, kind, fts_on, ctx):
             op, x = m.group(1) or "=", float(m.group(2))
             where.append(f"d.{col} IS NOT NULL AND {'abs(d.' + col + ')' if k == 'amt' else 'd.' + col} {op} ?")
             args.append(x)
-    rng = lambda col, v9: (f"{col} >= ? AND {col} < ?", [v9, v9 + "￿"])
+    rng = lambda col, v9: (f"{col} >= ? AND {col} < ?", [v9, v9 + "￿"])   # noqa: E731
     for k, col in (("addr", "addr_l"), ("tx", "tx_l")):
         v = f.get(k)
         if v:
@@ -1982,7 +1980,7 @@ def search(q: str, kinds=None, limit=None, after=None, before=None, path=None, t
     base = {"ok": True, "q": q, "parsed": {}, "tookMs": 0, "building": False, "indexedAt": None, "groups": [], "total": 0, "ignored": []}
     if not _demo() and os.path.exists(path):
         try:
-            c = sqlite3.connect(common.sqlite_ro_uri(path), uri=True, timeout=2)
+            c = dbm.connect(paths.sqlite_ro_uri(path), uri=True, timeout=2)
             c.execute("PRAGMA query_only=1")
             c.execute("BEGIN")
         except sqlite3.Error:
@@ -2250,7 +2248,7 @@ def search(q: str, kinds=None, limit=None, after=None, before=None, path=None, t
             base["groups"] = [g for g in groups if g["items"] or off]
             base["total"] = total
         except sqlite3.Error as e:
-            log.warning("검색 실패: %s", common.safe_err(e)[:160])
+            log.warning("검색 실패: %s", logs.safe_err(e)[:160])
             base["ok"] = False
             base["error"] = "검색 색인을 읽지 못했어요 — 잠시 뒤 다시"
         if partial:

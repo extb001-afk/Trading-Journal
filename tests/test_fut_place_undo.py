@@ -2,43 +2,43 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import glob
-import json
-import os
-import subprocess
-import time
-from decimal import Decimal
+import glob  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)
 json.dump([], open(os.path.join(T.TMP, "seed", "bridge_contracts.json"), "w"))
 json.dump({}, open(os.path.join(T.TMP, "seed", "lp_managers.json"), "w"))
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(T.TMP, "config.json"), "w"))
-import common
-import core
-import health
+import config, paths, statefile  # noqa: E402
+import core  # noqa: E402
+import core_svc  # noqa: E402
+import health  # noqa: E402
 
-assert T.TMP in common.STATE_DIR
-core.dm = lambda *a, **k: None
-T.patch_moved("dm", core.dm)
-core.Core.EXF_REVERT_LOG = os.path.join(common.STATE_DIR, "exf_recon_revert.jsonl")
+assert T.TMP in paths.STATE_DIR
+T.patch_moved("dm", lambda *a, **k: None)
+core_svc.ExfService.EXF_REVERT_LOG = os.path.join(paths.STATE_DIR, "exf_recon_revert.jsonl")
 chk = T.chk
 E8 = 10 ** 8
 NOW = int(time.time())
 SEQ = {"t": NOW - 1700}
-BK = os.path.join(common.STATE_DIR, "backups")
+BK = os.path.join(paths.STATE_DIR, "backups")
 os.makedirs(BK, exist_ok=True)
 open(os.path.join(BK, "ledger_test.db"), "w").close()
-common.atomic_write_json(os.path.join(BK, "backup_status.json"),
+statefile.atomic_write_json(os.path.join(BK, "backup_status.json"),
                          {"last_ok": int(time.time()) + 86400 * 30, "last_path": os.path.join(BK, "ledger_test.db")})
 
 
 def mkcore():
-    c = core.Core(common.load_config())
-    c._quote_usd = lambda q, ts: Decimal(1)
-    c.EXF_INIT_PHASE = 5
+    c = core.Core(config.load_config())
+    c.svc_exf._quote_usd = lambda q, ts: Decimal(1)
+    c.svc_exf.EXF_INIT_PHASE = 5
     return c
 
 
@@ -56,7 +56,7 @@ def tick_min():
 
 
 def post(ex, t, sym, qty, ev="EXF_DEPOSIT", lk="move_in", sid=None):
-    aid = C._exf_asset(ex, sym)
+    aid = C.svc_exf._exf_asset(ex, sym)
     qb = int(Decimal(str(qty)) * E8)
     C.conn.execute("INSERT INTO postings (source_kind, source_ns, source_id, leg_seq, event_ts, asset_id, location, qty_base,"
                    " cost_usd, cost_krw, leg_kind, event, classifier_ver) VALUES ('exchange',?,?,0,?,?,?,?,NULL,NULL,?,?,?)",
@@ -67,25 +67,25 @@ def post(ex, t, sym, qty, ev="EXF_DEPOSIT", lk="move_in", sid=None):
 
 
 def futfile(ex, events, ts=None):
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"futures_{ex}.json"), {
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"futures_{ex}.json"), {
         "ts": int(ts if ts is not None else time.time()),
         "events": [{"t": int(t) * 1000 + 123, "symbol": s, "kind": k, "amount": a, "uid": f"u{i}"} for i, (t, s, k, a) in enumerate(events)]})
     for c9 in (C,):
-        c9.__dict__.pop("_exf_fut_cache", None)
+        c9.svc_exf.__dict__.pop("_exf_fut_cache", None)
 
 
 def recon(ex, bal, sources=("futures",), bts=None, c=None):
     c = c or C
     bts = bts or tick()
-    st = common.read_json(os.path.join(common.STATE_DIR, "exf_state.json"), {})
+    st = statefile.read_json(os.path.join(paths.STATE_DIR, "exf_state.json"), {})
     st.setdefault(ex, {"seen": {}, "backfilled_until": NOW, "fills": {"backfilled_until": NOW}})
-    common.atomic_write_json(os.path.join(common.STATE_DIR, "exf_state.json"), st)
-    common.atomic_write_json(os.path.join(common.STATE_DIR, f"exf_balances_{ex}.json"),
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, "exf_state.json"), st)
+    statefile.atomic_write_json(os.path.join(paths.STATE_DIR, f"exf_balances_{ex}.json"),
                              {"ts": bts, "balances": bal, "sources": list(sources)})
     c._drain_at = bts + 5
-    c._last_exfrecon = 0
-    c.__dict__.pop("_exf_fut_cache", None)
-    c.exf_recon_pass({"ex"})
+    c.svc_exf._last_exfrecon = 0
+    c.svc_exf.__dict__.pop("_exf_fut_cache", None)
+    c.svc_exf.exf_recon_pass({"ex"})
     return bts
 
 
@@ -127,9 +127,9 @@ def scene(ex, sym_c):
 def once(c=None):
     c = c or C
     try:
-        return c._exf_fut_place_once(auto=True)
+        return c.svc_exf._exf_fut_place_once(auto=True)
     except TypeError:
-        return c._exf_fut_place_once()
+        return c.svc_exf._exf_fut_place_once()
 
 
 def unmark(*exs):
@@ -146,7 +146,7 @@ with open(os.path.join(FAKE, "pm2"), "w") as fh:
 os.chmod(os.path.join(FAKE, "pm2"), 0o755)
 WRAP = os.path.join(T.TMP, "fp_wrap.py")
 with open(WRAP, "w") as fh:
-    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\ncore.Core.EXF_INIT_PHASE = 5\n"
+    fh.write("import runpy, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, sys.argv[1])\nimport core\nimport core_svc\ncore_svc.ExfService.EXF_INIT_PHASE = 5\n"
              "tool = sys.argv[2]\nsys.argv = [tool] + sys.argv[3:]\nrunpy.run_path(tool, run_name='__main__')\n")
 
 
@@ -158,7 +158,7 @@ def tool(*args):
     return r.returncode, r.stdout + r.stderr
 
 
-UNDO = os.path.join(common.STATE_DIR, f"exf_fut_place_v{core.Core.EXF_FUT_V}.json")
+UNDO = os.path.join(paths.STATE_DIR, f"exf_fut_place_v{core_svc.ExfService.EXF_FUT_V}.json")
 
 print("[V] 선물 파일 하나가 낡아도 준비된 거래소는 옮김")
 VB = scene("bybit", "VVVUSDT")
@@ -217,7 +217,7 @@ bk1 = set(glob.glob(os.path.join(BK, "ledger_pre_futplace_v*.db"))) - bk0
 chk(rc == 0 and len(bk1) == 1 and "적용 전 원장 백업" in out and snap("bybit", "okx") == snapU1 and not str(C._meta_get("exf_fut_place_v")).startswith("1:undone"),
     "U6 --apply = 적용 전 원장 백업 1부(state/backups/ledger_pre_futplace_*) · 다시 적용(첫 적용과 같은 줄) · 표식 새로", (rc, out[-400:], sorted(bk1)))
 if bk1:
-    import sqlite3
+    import sqlite3  # noqa: E402
     b9 = sqlite3.connect(next(iter(bk1)))
     nb9 = b9.execute("SELECT count(*) FROM postings WHERE location IN ('exchange:bybit','exchange:okx') AND source_ns LIKE '%:futpnl'").fetchone()[0]
     nrow9 = b9.execute("SELECT count(*) FROM postings WHERE location IN ('exchange:bybit','exchange:okx')").fetchone()[0]
@@ -235,7 +235,7 @@ C3 = mkcore()
 snapU9 = snap("bybit", "okx")
 recon("bybit", {"USDT": 845}, c=C3)
 recon("okx", {"USDT": 845}, c=C3)
-chk(snap("bybit", "okx") == snapU9 and getattr(C3, "_exf_fut_place_scope", lambda: None)() == ("done", None) and once(C3) is None
+chk(snap("bybit", "okx") == snapU9 and getattr(C3.svc_exf, "_exf_fut_place_scope", lambda: None)() == ("done", None) and once(C3) is None
     and C._meta_get("exf_fut_place_v") == "1:1790000000:1", "U9 라이브 모양 끝난 표식('1:1790000000:1') = 새 core 대사 뒤에도 원장·표식 무변(재적용·되돌림 0)",
     [r for r in snap("bybit", "okx") if r not in snapU9][:4])
 rc, out = tool("--json", os.path.join(T.TMP, "plan_u9.json"))
@@ -250,31 +250,31 @@ chk(rc == 0 and "usage:" in out and snap("bybit", "okx") == s0 and C._meta_get("
     "U13 --apply --help = 사용법만 · 적용 안 함", out[-200:])
 
 print("[W] 선물 정산 대기 시작 시각 = 재시작에도 이어짐 · 종전 규칙 동안 '주의' 유지")
-WP = C.EXF_FUT_WAIT_PATH
+WP = C.svc_exf.EXF_FUT_WAIT_PATH
 CW = mkcore()
 futfile("bybit", [], ts=NOW - 50)
 balw = {"sources": ["futures"]}
 t_w0 = NOW
-held1 = CW._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0)
+held1 = CW.svc_exf._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0)
 since1 = (json.load(open(WP)).get("wait") or {}).get("bybit", {}).get("since")
 CW2 = mkcore()
-held2 = CW2._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0 + 7200)
+held2 = CW2.svc_exf._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0 + 7200)
 since2 = (json.load(open(WP)).get("wait") or {}).get("bybit", {}).get("since")
-held3 = CW2._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0 + 3 * 3600 + 60)
+held3 = CW2.svc_exf._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_w0 + 3 * 3600 + 60)
 chk(held1 and held2 and since1 == t_w0 and since2 == t_w0 and not held3,
     "W1 재시작 뒤에도 대기 시작 = 처음 시각(2시간 뒤 재시작 → 1시간 더 기다리고 3시간에 종전 규칙 · 종전: 재시작마다 3시간 다시)", (held1, held2, held3, since1, since2))
 wd = json.load(open(WP))
 chk((wd.get("wait") or {}).get("bybit", {}).get("fallback") is True, "W2 종전 규칙 전환 = 대기 표식 fallback", wd.get("wait"))
 t_late = t_w0 + 3 * 3600 + 60 + health.FUT_FB_SHOW_S + 3600
-CW2._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_late)
+CW2.svc_exf._exf_fut_hold("bybit", balw, NOW, NOW - 600, t_late)
 wd = json.load(open(WP))
 wd["ts"] = int(t_late)
-common.atomic_write_json(WP, wd)
+statefile.atomic_write_json(WP, wd)
 hw = {c["cid"]: c for c in health.collect_fut_wait(t_late + 60)}
 chk(hw.get("futwait:fb:bybit", {}).get("level") == "warn" and "대사 중" in hw["futwait:fb:bybit"]["title"],
     "W3 종전 규칙으로 물러난 지 하루가 넘어도 계속 물러나 있으면 '주의'(종전: 하루 뒤 초록)", hw.get("futwait:fb:bybit"))
 futfile("bybit", [])
-CW2._exf_fut_hold("bybit", balw, NOW - 100, NOW - 600, t_late + 120)
+CW2.svc_exf._exf_fut_hold("bybit", balw, NOW - 100, NOW - 600, t_late + 120)
 hw = {c["cid"]: c for c in health.collect_fut_wait(time.time())}
 chk(not (json.load(open(WP)).get("wait") or {}).get("bybit") and hw.get("futwait:bybit", {}).get("level") == "ok",
     "W4 파일이 덮으면 대기 끝(표식 지움)", json.load(open(WP)).get("wait"))
@@ -288,19 +288,19 @@ recon("bybit", {"USDT": 845}, c=C5)
 wd = json.load(open(WP))
 t_old = int(time.time()) - 7200
 wd["wait"]["bybit"]["since"] = t_old
-common.atomic_write_json(WP, wd)
+statefile.atomic_write_json(WP, wd)
 C6 = mkcore()
 d0 = C._meta_get("recon_done_exf_bybit")
 recon("bybit", {"USDT": 845}, c=C6)
 wd = json.load(open(WP))
 chk(C._meta_get("recon_done_exf_bybit") == d0 and (wd.get("wait") or {}).get("bybit", {}).get("since") == t_old and "okx" in (wd.get("place") or {}),
-    "W5 (fu406) 재시작 뒤 대사 주기(재배치 대기 저장이 먼저) = 대기 시작 시각 그대로(2시간 전) · 아직 대기 · 재배치 대기(okx) 표시",
+    "W5 재시작 뒤 대사 주기(재배치 대기 저장이 먼저) = 대기 시작 시각 그대로(2시간 전) · 아직 대기 · 재배치 대기(okx) 표시",
     (C._meta_get("recon_done_exf_bybit"), d0, wd.get("wait"), t_old))
 wd["wait"]["bybit"]["since"] = int(time.time()) - 3 * 3600 - 60
-common.atomic_write_json(WP, wd)
+statefile.atomic_write_json(WP, wd)
 C7 = mkcore()
 recon("bybit", {"USDT": 845}, c=C7)
 wd = json.load(open(WP))
 chk(C._meta_get("recon_done_exf_bybit") != d0 and (wd.get("wait") or {}).get("bybit", {}).get("fallback") is True,
-    "W6 (fu406) 재시작이 이어져도 처음 시작부터 3시간 = 종전 규칙으로 대사(대기가 재시작마다 밀리지 않음)", (C._meta_get("recon_done_exf_bybit"), d0, wd.get("wait")))
+    "W6 재시작이 이어져도 처음 시작부터 3시간 = 종전 규칙으로 대사(대기가 재시작마다 밀리지 않음)", (C._meta_get("recon_done_exf_bybit"), d0, wd.get("wait")))
 T.finish()

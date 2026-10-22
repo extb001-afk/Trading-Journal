@@ -6,13 +6,13 @@ import shutil
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-import common
+import logs, paths, statefile
+import db as dbm
+import fsio
 
-KST = timezone(timedelta(hours=9))
-BACKUP_DIR = os.path.join(common.STATE_DIR, "backups")
-STATUS_PATH = os.path.join(BACKUP_DIR, "backup_status.json")
+from timeutil import KST
 AT_HM = (4, 30)
 KEEP_DB = 3
 KEEP_DB_MAX = 30
@@ -40,15 +40,15 @@ CHECK_EVERY_S = 60
 
 def _read_status() -> dict:
     try:
-        d = json.load(open(STATUS_PATH, encoding="utf-8"))
+        d = json.load(open(paths.state("backups", "backup_status.json"), encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
 def _write_status(d: dict):
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    common.atomic_write_json(STATUS_PATH, d)
+    os.makedirs(paths.state("backups"), exist_ok=True)
+    statefile.atomic_write_json(paths.state("backups", "backup_status.json"), d)
 
 
 def _secure_perms(db_path: str):
@@ -62,7 +62,7 @@ def _secure_perms(db_path: str):
 
 def keep_db(config_path: str = None) -> int:
     try:
-        cfg = json.load(open(config_path or common.CONFIG_PATH, encoding="utf-8"))
+        cfg = json.load(open(config_path or paths.CONFIG_PATH, encoding="utf-8"))
         v = (cfg.get("backup") or {}).get("keep_db") if isinstance(cfg, dict) else None
         if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= KEEP_DB_MAX:
             return v
@@ -72,11 +72,11 @@ def keep_db(config_path: str = None) -> int:
 
 
 def _rotate(rx, keep: int):
-    names = sorted((n for n in os.listdir(BACKUP_DIR) if rx.match(n)), reverse=True)
+    names = sorted((n for n in os.listdir(paths.state("backups")) if rx.match(n)), reverse=True)
     gone = []
     for n in names[keep:]:
         try:
-            os.remove(os.path.join(BACKUP_DIR, n))
+            os.remove(os.path.join(paths.state("backups"), n))
             gone.append(n)
         except OSError:
             pass
@@ -95,26 +95,26 @@ def due(now: float, st: dict) -> bool:
 def dump_prefs(db_path: str, state_dir: str) -> dict:
     out = {"ts": int(time.time())}
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=30)
+        c = dbm.connect(paths.sqlite_ro_uri(db_path), uri=True, timeout=30)
         try:
             c.row_factory = sqlite3.Row
             out["decisions"] = [dict(r) for r in c.execute("SELECT * FROM decisions").fetchall()]
         finally:
             c.close()
     except sqlite3.Error as e:
-        out["decisions_err"] = common.safe_err(e)[:200]
+        out["decisions_err"] = logs.safe_err(e)[:200]
     for name in ("ui_prefs.json", "outflow_decisions.json"):
         p = os.path.join(state_dir, name)
         if os.path.exists(p):
             try:
                 out[name[:-5]] = json.load(open(p, encoding="utf-8"))
             except (OSError, ValueError) as e:
-                out[name[:-5] + "_err"] = common.safe_err(e)[:200]
+                out[name[:-5] + "_err"] = logs.safe_err(e)[:200]
     return out
 
 
 def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
-    d9 = os.path.join(BACKUP_DIR, f"files_{day}")
+    d9 = os.path.join(paths.state("backups"), f"files_{day}")
     os.makedirs(d9, exist_ok=True)
     try:
         os.chmod(d9, 0o700)
@@ -123,12 +123,7 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
     out = {}
 
     def _put(name, data: bytes):
-        tmp = os.path.join(d9, name + ".tmp")
-        fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, os.path.join(d9, name))
+        fsio.atomic_write_bytes(os.path.join(d9, name), data, fsync=False, dir_fsync=False, makedirs=False)
         out[name] = len(data)
 
     names = [n for n in FILES_STATE if os.path.exists(os.path.join(state_dir, n))]
@@ -141,7 +136,7 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
             with open(os.path.join(state_dir, n), "rb") as f:
                 _put(n, f.read())
         except OSError as e:
-            out[n] = f"err: {common.safe_err(e)}"[:200]
+            out[n] = f"err: {logs.safe_err(e)}"[:200]
     sl9 = os.path.join(state_dir, "seed_local")
     if os.path.isdir(sl9):
         for root9, _d9, fs9 in os.walk(sl9):
@@ -153,24 +148,24 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
                     with open(os.path.join(root9, f9), "rb") as fh9:
                         _put("seed_local__" + rel9, fh9.read())
                 except OSError as e:
-                    out["seed_local__" + rel9] = f"err: {common.safe_err(e)}"[:200]
-    cp = config_path or common.CONFIG_PATH
+                    out["seed_local__" + rel9] = f"err: {logs.safe_err(e)}"[:200]
+    cp = config_path or paths.CONFIG_PATH
     if os.path.exists(cp):
         try:
             cfg = json.load(open(cp, encoding="utf-8"))
             sub = {k: cfg.get(k) for k in CONFIG_KEYS if isinstance(cfg, dict) and k in cfg}
             _put("config_subset.json", json.dumps(sub, ensure_ascii=False, indent=1).encode("utf-8"))
         except (OSError, ValueError) as e:
-            out["config_subset.json"] = f"err: {common.safe_err(e)}"[:200]
+            out["config_subset.json"] = f"err: {logs.safe_err(e)}"[:200]
     return out
 
 
 def _rotate_dirs(rx, keep: int):
-    names = sorted((n for n in os.listdir(BACKUP_DIR) if rx.match(n) and os.path.isdir(os.path.join(BACKUP_DIR, n))), reverse=True)
+    names = sorted((n for n in os.listdir(paths.state("backups")) if rx.match(n) and os.path.isdir(os.path.join(paths.state("backups"), n))), reverse=True)
     gone = []
     for n in names[keep:]:
         try:
-            shutil.rmtree(os.path.join(BACKUP_DIR, n))
+            shutil.rmtree(os.path.join(paths.state("backups"), n))
             gone.append(n)
         except OSError:
             pass
@@ -178,19 +173,22 @@ def _rotate_dirs(rx, keep: int):
 
 
 def run_once(db_path: str = None, now: float = None, log=None) -> dict:
-    db_path = db_path or common.DB_PATH
+    db_path = db_path or paths.DB_PATH
     now = time.time() if now is None else now
     day = datetime.fromtimestamp(now, KST).strftime("%Y%m%d")
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(paths.state("backups"), exist_ok=True)
     try:
-        os.chmod(BACKUP_DIR, 0o700)
+        os.chmod(paths.state("backups"), 0o700)
+        for left in os.listdir(paths.state("backups")):
+            if re.match(r"^ledger_\d{8}\.db\.tmp(?:-wal|-shm|-journal)?$", left):
+                os.remove(os.path.join(paths.state("backups"), left))
     except OSError:
         pass
     st = _read_status()
     st.setdefault("created", int(now))
     st["last_try"] = int(now)
     size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
-    free = shutil.disk_usage(BACKUP_DIR).free
+    free = shutil.disk_usage(paths.state("backups")).free
     st["free"] = int(free)
     if free < max(MIN_FREE, int(size * 1.2)):
         st.update(skip="disk", skip_at=int(now), need=int(max(MIN_FREE, size * 1.2)))
@@ -200,16 +198,13 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
                         free / 1024 ** 3, max(MIN_FREE, size * 1.2) / 1024 ** 3)
         return st
     t0 = time.time()
-    dst_path = os.path.join(BACKUP_DIR, f"ledger_{day}.db")
+    dst_path = os.path.join(paths.state("backups"), f"ledger_{day}.db")
     tmp = dst_path + ".tmp"
     try:
-        for sfx in ("", "-wal", "-shm", "-journal"):
-            if os.path.exists(tmp + sfx):
-                os.remove(tmp + sfx)
         fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
         os.close(fd)
-        src = sqlite3.connect(common.sqlite_ro_uri(db_path), uri=True, timeout=60)
-        dst = sqlite3.connect(tmp)
+        src = dbm.connect(paths.sqlite_ro_uri(db_path), uri=True, timeout=60)
+        dst = dbm.connect(tmp)
         try:
             src.backup(dst)
             jm = (dst.execute("PRAGMA journal_mode=DELETE").fetchone() or [""])[0]
@@ -229,15 +224,12 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
         os.chmod(tmp, 0o600)
         os.replace(tmp, dst_path)
         prefs = dump_prefs(db_path, os.path.dirname(db_path))
-        jp = os.path.join(BACKUP_DIR, f"prefs_{day}.json")
-        fd = os.open(jp + ".tmp", os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(prefs, f, ensure_ascii=False)
-        os.replace(jp + ".tmp", jp)
+        jp = os.path.join(paths.state("backups"), f"prefs_{day}.json")
+        fsio.atomic_write_json(jp, prefs, ensure_ascii=False, fsync=False, dir_fsync=False, makedirs=False)
         try:
             st["files"] = backup_files(day, os.path.dirname(db_path))
             st["files_err"] = None
-        except Exception as e9:
+        except Exception as e9:  # noqa: BLE001 [fallback]
             st["files_err"] = _err_text(e9)[:200]
         gone = _rotate(_DB_RX, keep_db()) + _rotate(_JS_RX, KEEP_JSON) + _rotate_dirs(_FD_RX, KEEP_FILES)
         st.update(last_ok=int(time.time()), last_date=day, last_path=dst_path, size=os.path.getsize(dst_path),
@@ -246,7 +238,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
         if log:
             log.info("원장 정기 백업 완료: %s (%.2fGB, %.0f초)%s", os.path.basename(dst_path), st["size"] / 1024 ** 3, st["dur"],
                      f" · 회전 삭제 {len(gone)}개" if gone else "")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [boundary]
         for sfx in ("", "-wal", "-shm", "-journal"):
             try:
                 if os.path.exists(tmp + sfx):
@@ -261,7 +253,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
 
 
 def _err_text(e) -> str:
-    m = common.safe_err(e)
+    m = logs.safe_err(e)
     if re.search(r"[가-힣]", m):
         return m
     if isinstance(e, OSError) and getattr(e, "errno", None) == 28:
@@ -280,11 +272,11 @@ def tick(log=None, now: float = None, db_path: str = None) -> bool:
         if now - _last_check < CHECK_EVERY_S:
             return False
         _last_check = now
-        db_path = db_path or common.DB_PATH
+        db_path = db_path or paths.DB_PATH
         if not _perm_done:
             _perm_done = True
             _secure_perms(db_path)
-            if not os.path.exists(STATUS_PATH):
+            if not os.path.exists(paths.state("backups", "backup_status.json")):
                 _write_status({"created": int(now)})
         if now - _t0 < START_GRACE_S:
             return False
@@ -296,7 +288,7 @@ def tick(log=None, now: float = None, db_path: str = None) -> bool:
             _thread = threading.Thread(target=run_once, args=(db_path, None, log), daemon=True, name="ledger-backup")
             _thread.start()
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 [fallback]
         if log:
             log.warning("원장 정기 백업 점검 실패(다음 주기): %s", e)
         return False
@@ -311,7 +303,7 @@ STREAM_STATE = {
 try:
     import chain_registry as _reg9
     STREAM_STATE.update({c9: (re.compile("^" + re.escape(_reg9.SPECS[c9].emitted_file) + "$"),) for c9 in _reg9.CHAINS})
-except Exception:
+except Exception:   # noqa: BLE001 [optional]
     pass
 NEW_LEDGER_OK = "ledger_new_ok.json"
 NEW_LEDGER_OK_TTL = 3600
@@ -335,7 +327,7 @@ def inbox_segments(inbox_dir: str, stream: str) -> list:
 
 
 def prior_ledger_evidence(state_dir: str = None, db_path: str = None) -> list:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     dbp = db_path or os.path.join(sd, "ledger.db")
     base = os.path.basename(dbp)
     out = []
@@ -373,7 +365,7 @@ def prior_ledger_evidence(state_dir: str = None, db_path: str = None) -> list:
 
 
 def new_ledger_ok(state_dir: str = None, consume: bool = False, now: float = None) -> bool:
-    p = os.path.join(state_dir or common.STATE_DIR, NEW_LEDGER_OK)
+    p = os.path.join(state_dir or paths.STATE_DIR, NEW_LEDGER_OK)
     try:
         with open(p, encoding="utf-8") as f:
             d = json.load(f)
@@ -404,7 +396,7 @@ def _ro_connect(path: str):
     for imm in (False, True):
         c = None
         try:
-            c = sqlite3.connect(common.sqlite_ro_uri(path, immutable=imm), uri=True, timeout=10)
+            c = dbm.connect(paths.sqlite_ro_uri(path, immutable=imm), uri=True, timeout=10)
             c.execute("SELECT 1").fetchone()
             return c
         except sqlite3.OperationalError as e:
@@ -420,7 +412,7 @@ def ledger_check_light(path: str) -> tuple:
         with open(path, "rb") as f:
             hdr = f.read(100)
     except OSError as e:
-        return True, f"검사 못 함: {common.safe_err(e)[:120]}"
+        return True, f"검사 못 함: {logs.safe_err(e)[:120]}"
     if size < 512 or not hdr.startswith(b"SQLite format 3\x00"):
         return False, f"파일 머리가 SQLite 원장이 아님(크기 {size:,}바이트 — 덮어쓰기·잘림)"
     ps = int.from_bytes(hdr[16:18], "big")
@@ -432,7 +424,7 @@ def ledger_check_light(path: str) -> tuple:
     try:
         c = _ro_connect(path)
     except sqlite3.Error as e:
-        return (False, f"열기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+        return (False, f"열기 실패: {logs.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {logs.safe_err(e)[:120]}")
     try:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "meta" not in names:
@@ -444,7 +436,7 @@ def ledger_check_light(path: str) -> tuple:
                 c.execute(f'SELECT rowid FROM "{t}" LIMIT 1').fetchone()
         return True, ""
     except sqlite3.Error as e:
-        return (False, f"읽기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+        return (False, f"읽기 실패: {logs.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {logs.safe_err(e)[:120]}")
     finally:
         c.close()
 
@@ -453,11 +445,11 @@ def ledger_check_deep(path: str) -> tuple:
     try:
         c = _ro_connect(path)
     except sqlite3.Error as e:
-        return (False, f"열기 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+        return (False, f"열기 실패: {logs.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {logs.safe_err(e)[:120]}")
     try:
         rows = [r[0] for r in c.execute("PRAGMA quick_check").fetchall()]
     except sqlite3.Error as e:
-        return (False, f"빠른 검사 실패: {common.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {common.safe_err(e)[:120]}")
+        return (False, f"빠른 검사 실패: {logs.safe_err(e)[:160]}") if corrupt_error(e) else (True, f"검사 못 함: {logs.safe_err(e)[:120]}")
     finally:
         c.close()
     if rows == ["ok"]:
@@ -487,7 +479,32 @@ def fsync_dir(path: str) -> bool:
         os.close(fd)
 
 
-def swap_in(live: str, new: str, keep_as: str = None, log=None) -> dict:
+class SwapRefused(RuntimeError):
+    pass
+
+
+def _settle_wal(live: str, timeout: float) -> str:
+    wal = live + "-wal"
+    if not ((os.path.exists(wal) and os.path.getsize(wal) > 0) or os.path.exists(live + "-journal")):
+        return "ok"
+    try:
+        c = dbm.connect(live, timeout=timeout)
+        try:
+            c.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            busy, nlog, ncp = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        finally:
+            c.close()
+    except sqlite3.DatabaseError as e:
+        m = str(e).lower()
+        if "locked" in m or "busy" in m:
+            return "busy"
+        if corrupt_error(e) or any(x in m for x in ("unable to open", "readonly", "read-only")):
+            return "unreadable"
+        return "failed"
+    return "ok" if not busy or (nlog >= 0 and nlog == ncp) else "busy"
+
+
+def swap_in(live: str, new: str, keep_as: str = None, log=None, wal_timeout: float = 30.0) -> dict:
     d = os.path.dirname(os.path.abspath(live))
     fsync_file(new)
     linked, kept = False, None
@@ -496,6 +513,11 @@ def swap_in(live: str, new: str, keep_as: str = None, log=None) -> dict:
             raise ValueError("live 가 있으면 keep_as 필요(옛 원장 보존 이름)")
         if os.path.lexists(keep_as):
             raise FileExistsError(keep_as)
+        settled = _settle_wal(live, wal_timeout)
+        if settled == "busy":
+            raise SwapRefused("옛 원장 WAL 을 본문에 합치지 못함 — 다른 연결이 원장을 쥐고 있음(원장을 여는 유닛·프로세스를 멈추고 다시 · 원장 무변)")
+        if settled == "failed":
+            raise SwapRefused("옛 원장 WAL·저널을 본문에 합치다 실패(디스크 여유·입출력 오류 확인 뒤 다시 · 원장 무변)")
         try:
             os.link(live, keep_as)
             linked = True
@@ -504,7 +526,7 @@ def swap_in(live: str, new: str, keep_as: str = None, log=None) -> dict:
                 log.warning("원장 하드 링크 실패(%s) — 이름 바꾸기 두 번으로 교체", e)
         moved, renamed = [], False
         try:
-            for sfx in ("-wal", "-shm"):
+            for sfx in ("-wal", "-shm", "-journal"):
                 if os.path.exists(live + sfx):
                     os.replace(live + sfx, keep_as + sfx)
                     moved.append(sfx)
@@ -604,12 +626,11 @@ def _wal_head(wal: str, ps: int) -> str:
 
 
 def _restore_state(path: str, size: int, deep: bool) -> tuple:
-    import db as dbm
     try:
         with open(path, "rb") as f:
             hdr = f.read(100)
     except OSError as e:
-        return "unknown", f"검사 못 함: {common.safe_err(e)[:120]}"
+        return "unknown", f"검사 못 함: {logs.safe_err(e)[:120]}"
     if size < 512 or not hdr.startswith(b"SQLite format 3\x00"):
         return "invalid", f"파일 머리가 SQLite 원장이 아님(크기 {size:,}바이트 — 덮어쓰기·잘림)"
     ps = int.from_bytes(hdr[16:18], "big")
@@ -624,17 +645,18 @@ def _restore_state(path: str, size: int, deep: bool) -> tuple:
         try:
             w9 = _wal_head(wal, ps)
         except OSError as e:
-            return "unknown", f"WAL 검사 못 함: {common.safe_err(e)[:120]}"
+            return "unknown", f"WAL 검사 못 함: {logs.safe_err(e)[:120]}"
         if w9:
             return "invalid", w9
     else:
         n9 = int.from_bytes(hdr[28:32], "big")
         if n9 and hdr[24:28] == hdr[92:96] and n9 * ps > size:
             return "invalid", f"파일이 머리의 페이지 수보다 짧음({size:,} < {n9 * ps:,}바이트 — 잘림)"
+    has_journal = os.path.exists(path + "-journal")
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(path, immutable=not use_wal), uri=True, timeout=10)
+        c = dbm.connect(paths.sqlite_ro_uri(path, immutable=not (use_wal or has_journal)), uri=True, timeout=10)
     except sqlite3.Error as e:
-        return ("invalid" if corrupt_error(e) else "unknown"), f"열기 실패: {common.safe_err(e)[:160]}"
+        return ("invalid" if corrupt_error(e) else "unknown"), f"열기 실패: {logs.safe_err(e)[:160]}"
     try:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         miss = [t for t in RESTORE_TABLES if t not in names]
@@ -661,7 +683,7 @@ def _restore_state(path: str, size: int, deep: bool) -> tuple:
                 return "invalid", "빠른 검사(quick_check) 실패: " + "; ".join(str(x) for x in rows[:3])[:200]
         return "valid", ""
     except sqlite3.Error as e:
-        return ("invalid" if corrupt_error(e) else "unknown"), f"읽기 실패: {common.safe_err(e)[:160]}"
+        return ("invalid" if corrupt_error(e) else "unknown"), f"읽기 실패: {logs.safe_err(e)[:160]}"
     finally:
         c.close()
 
@@ -673,15 +695,15 @@ def restore_state(path: str, deep: bool = True) -> tuple:
     except FileNotFoundError:
         return "invalid", "파일 없음"
     except OSError as e:
-        return "unknown", f"검사 못 함: {common.safe_err(e)[:120]}"
+        return "unknown", f"검사 못 함: {logs.safe_err(e)[:120]}"
     key = (os.path.abspath(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns,
            (wst.st_size, wst.st_mtime_ns) if wst else None)
     if deep and key in _VERIFIED:
         return _VERIFIED[key]
     try:
         res = _restore_state(path, st.st_size, deep)
-    except Exception as e:
-        res = ("unknown", f"검사 못 함: {type(e).__name__}: {common.safe_err(e)[:120]}")
+    except Exception as e:  # noqa: BLE001 [fallback]
+        res = ("unknown", f"검사 못 함: {type(e).__name__}: {logs.safe_err(e)[:120]}")
     if deep and res[0] != "unknown":
         if len(_VERIFIED) >= _VERIFIED_MAX:
             _VERIFIED.clear()
@@ -744,7 +766,7 @@ def relief_candidates(step: str, db_path: str, home: str = None, now: float = No
         k9, held9 = _verified_split([os.path.join(sd, n) for n in pres])
         for n in pres[:k9]:
             p = os.path.join(sd, n)
-            out.append({"name": n, "kind": "pre_extrebuild", "paths": [p + s for s in ("", "-wal", "-shm")], "dir": False})
+            out.append({"name": n, "kind": "pre_extrebuild", "paths": [p + s for s in ("", "-wal", "-shm", "-journal")], "dir": False})
         out += [{"name": pres[i9], "kind": "pre_extrebuild", "skip": w9} for i9, w9 in sorted(held9.items())]
     elif step == "daily":
         bd = os.path.join(sd, "backups")
@@ -825,7 +847,7 @@ def relieve(db_path: str, short, home: str = None, now: float = None, log=None, 
                     try:
                         _remove(c)
                     except OSError as e:
-                        skipped[c["name"]] = "지우기 실패: " + common.safe_err(e)[:120]
+                        skipped[c["name"]] = "지우기 실패: " + logs.safe_err(e)[:120]
                         continue
                     skipped.pop(c["name"], None)
                     rec["removed"].append({"name": c["name"], "kind": c["kind"], "bytes": int(g)})
@@ -836,8 +858,8 @@ def relieve(db_path: str, short, home: str = None, now: float = None, log=None, 
             if not need or not did:
                 break
         rec["ok"] = not need
-    except Exception as e:
-        skipped["(자동 정리)"] = "오류: " + common.safe_err(e)[:160]
+    except Exception as e:  # noqa: BLE001 [fallback]
+        skipped["(자동 정리)"] = "오류: " + logs.safe_err(e)[:160]
     rec["skipped"] = [{"name": k, "why": v} for k, v in list(skipped.items())[:20]]
     if log and rec["removed"]:
         log.warning("재구축 자동 공간 확보: %d개 지움(≈%.1fGB) — %s%s", len(rec["removed"]), rec["freed"] / 1024 ** 3,

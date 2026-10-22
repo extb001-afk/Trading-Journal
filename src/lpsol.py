@@ -3,8 +3,8 @@ import base64
 import hashlib
 import json
 import struct
-import urllib.request
-import calcguard
+import address_codec, net_http
+import calcguard  # noqa: E402
 
 DLMM_PROG = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
 MGR = "dlmm"
@@ -51,35 +51,12 @@ for _n in ("add_liquidity", "add_liquidity2", "add_liquidity_by_strategy", "add_
 DEP_KINDS = ("open", "add", "lo_place", "rebalance")
 WD_KINDS = ("remove", "claim", "close", "lo_cancel", "lo_close", "rebalance")
 
-_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-_B58I = {c: i for i, c in enumerate(_B58)}
-
-
-def b58decode(s: str) -> bytes:
-    n = 0
-    for c in s:
-        n = n * 58 + _B58I[c]
-    raw = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
-    pad = len(s) - len(s.lstrip("1"))
-    return b"\x00" * pad + raw
-
-
-def b58encode(b: bytes) -> str:
-    n = int.from_bytes(b, "big")
-    out = ""
-    while n:
-        n, r = divmod(n, 58)
-        out = _B58[r] + out
-    pad = len(b) - len(b.lstrip(b"\x00"))
-    return "1" * pad + out
-
-
 def is_pubkey(s) -> bool:
-    if not isinstance(s, str) or not (32 <= len(s) <= 44) or any(c not in _B58I for c in s):
+    if not isinstance(s, str) or not (32 <= len(s) <= 44):
         return False
     try:
-        return len(b58decode(s)) == 32
-    except (KeyError, ValueError):
+        return len(address_codec.b58decode(s)) == 32
+    except ValueError:
         return False
 
 
@@ -105,7 +82,7 @@ def extract(tx: dict, mine) -> dict:
                 continue
             accs = [a.get("pubkey") if isinstance(a, dict) else a for a in (ins.get("accounts") or [])]
             try:
-                data = b58decode(ins["data"])
+                data = address_codec.b58decode(ins["data"])
             except (KeyError, ValueError):
                 continue
             ent = IX.get(data[:8].hex())
@@ -126,7 +103,7 @@ def extract(tx: dict, mine) -> dict:
             mints = [accs[mi[0]], accs[mi[1]]] if mi and mi[1] < len(accs) else None
             out.append([kind, name, accs[pi], accs[qi] if 0 <= qi < len(accs) else None, bps, mints])
         return {"prog": MGR, "ixs": out} if out else None
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpsol:extract", _cg9)
         return None
 
@@ -206,16 +183,16 @@ def _on_curve(b: bytes) -> bool:
 
 
 def find_pda(seeds, program: str):
-    prog = b58decode(program)
+    prog = address_codec.b58decode(program)
     for bump in range(255, -1, -1):
         h = hashlib.sha256(b"".join(seeds) + bytes([bump]) + prog + b"ProgramDerivedAddress").digest()
         if not _on_curve(h):
-            return b58encode(h), bump
+            return address_codec.b58encode(h), bump
     return None, None
 
 
 def bin_array_pda(lb_pair: str, index: int) -> str:
-    return find_pda([b"bin_array", b58decode(lb_pair), struct.pack("<q", index)], DLMM_PROG)[0]
+    return find_pda([b"bin_array", address_codec.b58decode(lb_pair), struct.pack("<q", index)], DLMM_PROG)[0]
 
 
 def bin_array_index(bin_id: int) -> int:
@@ -226,13 +203,13 @@ def _rpc(urls, method, params, timeout=20):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     for u in urls or []:
         try:
-            req = urllib.request.Request(u, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1"})
+            req = net_http.request(u, data=body, headers={"Content-Type": "application/json", "User-Agent": "tj-bot/0.1"})
             import bf_engine as _bfe9
             with _bfe9.sol_open(req, timeout, method, sol=True) as r:
-                d = json.loads(_bfe9.common.read_capped(r).decode())
+                d = json.loads(_bfe9.net_http.read_capped(r).decode())
             if "result" in d:
                 return d["result"]
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [isolate]
             calcguard.swallowed("lpsol:_rpc", _cg9)
             continue
     return None
@@ -250,7 +227,7 @@ def _accounts(urls, keys):
             continue
         try:
             out.append((v.get("owner"), base64.b64decode(v["data"][0])))
-        except Exception as _cg9:
+        except Exception as _cg9:  # noqa: BLE001 [isolate]
             calcguard.swallowed("lpsol:_accounts", _cg9)
             out.append(None)
     return out
@@ -272,7 +249,7 @@ def parse_position(b: bytes) -> dict:
         fees.append((int.from_bytes(b[o:o + 16], "little"), int.from_bytes(b[o + 16:o + 32], "little"),
                      struct.unpack_from("<Q", b, o + 32)[0], struct.unpack_from("<Q", b, o + 40)[0]))
     lo, hi = struct.unpack_from("<ii", b, 7912)
-    return {"lb_pair": b58encode(b[8:40]), "owner": b58encode(b[40:72]), "shares": shares, "fees": fees,
+    return {"lb_pair": address_codec.b58encode(b[8:40]), "owner": address_codec.b58encode(b[40:72]), "shares": shares, "fees": fees,
             "lower": lo, "upper": hi}
 
 
@@ -280,7 +257,7 @@ def parse_lbpair(b: bytes) -> dict:
     if len(b) < 216 or b[:8] != DISC_LBPAIR:
         return {}
     active, step = struct.unpack_from("<iH", b, 76)
-    return {"active_id": active, "bin_step": step, "mint_x": b58encode(b[88:120]), "mint_y": b58encode(b[120:152])}
+    return {"active_id": active, "bin_step": step, "mint_x": address_codec.b58encode(b[88:120]), "mint_y": address_codec.b58encode(b[120:152])}
 
 
 def parse_bin_array(b: bytes) -> dict:
@@ -295,7 +272,7 @@ def parse_bin_array(b: bytes) -> dict:
         fx = int.from_bytes(b[o + 80:o + 96], "little")
         fy = int.from_bytes(b[o + 96:o + 112], "little")
         out[idx * 70 + i] = (ax, ay, sup, fx, fy)
-    return {"index": idx, "lb_pair": b58encode(b[24:56]), "bins": out}
+    return {"index": idx, "lb_pair": address_codec.b58encode(b[24:56]), "bins": out}
 
 
 def position_amounts(pos: dict, bins: dict):
@@ -374,6 +351,6 @@ def read_dlmm_position(urls, pos_key: str, meta_of=None) -> dict:
                 "fees0": fx / 10 ** d0, "fees1": fy / 10 ** d1, "price": px(pair["active_id"]),
                 "priceLower": px(pos["lower"]), "priceUpper": px(pos["upper"] + 1),
                 "inRange": pos["lower"] <= pair["active_id"] <= pos["upper"], "feesOk": ok, "amountsOk": ok}
-    except Exception as _cg9:
+    except Exception as _cg9:  # noqa: BLE001 [fallback]
         calcguard.swallowed("lpsol:read_dlmm_position", _cg9)
         return {}

@@ -7,7 +7,7 @@ import os
 import threading
 import time
 
-import common
+import logs, paths, statefile
 
 log = logging.getLogger("tj-tsfix")
 
@@ -117,7 +117,7 @@ def rec_chain(rec) -> str:
 
 
 def _scan(state_dir: str = None):
-    p = os.path.join(state_dir or common.STATE_DIR, POISON_FILE)
+    p = os.path.join(state_dir or paths.STATE_DIR, POISON_FILE)
     try:
         st = os.stat(p)
     except FileNotFoundError:
@@ -155,25 +155,25 @@ def scan(state_dir: str = None) -> list:
 
 
 def fix_path(chain: str) -> str:
-    return os.path.join(common.STATE_DIR, f"poison_tsfix_{chain}.json")
+    return paths.state(f"poison_tsfix_{chain}.json")
 
 
 def _rj(path: str, default):
     try:
-        return common.read_json(path, default)
+        return statefile.read_json(path, default)
     except SystemExit as ex:
-        raise RuntimeError(common.safe_err(str(ex))[:200]) from None
+        raise RuntimeError(logs.safe_err(str(ex))[:200]) from None
 
 
 def _done_ok(state_dir: str = None) -> set:
-    d = _rj(os.path.join(state_dir or common.STATE_DIR, DONE_FILE), {}) or {}
+    d = _rj(os.path.join(state_dir or paths.STATE_DIR, DONE_FILE), {}) or {}
     return {k for k, v in d.items() if isinstance(v, dict) and v.get("ok")} if isinstance(d, dict) else set()
 
 
 def repair(chain: str, lookup, writer, now: float = None, force: bool = False) -> int:
     now = time.time() if now is None else now
     try:
-        if not os.path.exists(os.path.join(common.STATE_DIR, POISON_FILE)):
+        if not os.path.exists(paths.state(POISON_FILE)):
             return 0
         with _lock:
             if not force and now - _last_run.get(chain, 0) < TSFIX_PERIOD:
@@ -227,9 +227,9 @@ def repair(chain: str, lookup, writer, now: float = None, force: bool = False) -
                 ts = int(lookup(blk))
                 if ts <= 0:
                     raise RuntimeError("블록 시각 0")
-            except Exception as ex:
+            except Exception as ex:   # noqa: BLE001 [isolate]
                 for pid, _e in pend:
-                    doc[pid] = {"fail_at": int(now), "err": common.safe_err(ex)[:160], "n": nfail + 1}
+                    doc[pid] = {"fail_at": int(now), "err": logs.safe_err(ex)[:160], "n": nfail + 1}
                 log.warning("%s 격리된 시각 없는 tx %s — 블록 %s 시각 조회 실패(나중에 다시): %s", chain, th[:14], blk, str(ex)[:100])
                 continue
             for pid, e in pend:
@@ -241,7 +241,7 @@ def repair(chain: str, lookup, writer, now: float = None, force: bool = False) -
                 rec2["ts_fix"] = {"poison_ids": [pid], "src": "block_ts", "block": blk, "at": int(now)}
                 try:
                     writer.append(rec2)
-                except Exception as ex:
+                except Exception as ex:   # noqa: BLE001 [fallback]
                     log.error("%s 격리 tx %s 시각 보강 재방출 — inbox 쓰기 실패(다음 점검): %s", chain, th[:14], ex)
                     stop = True
                     break
@@ -252,15 +252,15 @@ def repair(chain: str, lookup, writer, now: float = None, force: bool = False) -
                             time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts)) + "Z", len(pend))
         live = {pid for pid, _e in ents}
         doc = {p9: v for p9, v in doc.items() if p9 in live}
-        common.atomic_write_json(fp, doc)
+        statefile.atomic_write_json(fp, doc)
         return n
-    except (Exception, SystemExit) as ex:
-        log.warning("%s 격리 시각 보강 점검 실패(다음 주기): %s", chain, common.safe_err(str(ex))[:160])
+    except (Exception, SystemExit) as ex:   # noqa: BLE001 [fallback]
+        log.warning("%s 격리 시각 보강 점검 실패(다음 주기): %s", chain, logs.safe_err(str(ex))[:160])
         return 0
 
 
 def status(state_dir: str = None) -> dict:
-    sd = state_dir or common.STATE_DIR
+    sd = state_dir or paths.STATE_DIR
     if not os.path.exists(os.path.join(sd, POISON_FILE)):
         return None
     ents, bad = _scan(sd)

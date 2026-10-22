@@ -2,20 +2,20 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import json
-import os
-import shutil
-import sqlite3
-import threading
-import time
-import unicodedata
-from datetime import datetime, timedelta, timezone
+import json  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import sqlite3  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import unicodedata  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
-import common
-import db as dbm
-import search_index as si
+import paths  # noqa: E402
+import db as dbm  # noqa: E402
+import search_index as si  # noqa: E402
 
 chk, safe, SRC, TMP = T.chk, T.safe, T.SRC, T.TMP
 NEW = hasattr(si, "ROWV")
@@ -28,7 +28,7 @@ def ts_of(iso, hm="12:00"):
     return int(datetime.strptime(iso + " " + hm, "%Y-%m-%d %H:%M").replace(tzinfo=KST).timestamp())
 
 
-P = lambda q: safe(si.parse_query, q, TODAY)
+P = lambda q: safe(si.parse_query, q, TODAY)   # noqa: E731
 p = P("ＢＴＣ")
 chk(isinstance(p, dict) and p.get("ticker") == "BTC", "A NFKC: 전각 'ＢＴＣ' = 티커 BTC", p)
 nfd = unicodedata.normalize("NFD", "비트코인")
@@ -69,7 +69,7 @@ MID = "Fp4Wn8Rd2Kx7Bq5Mz3Ht9Cv6Jy"
 SOLA = "7vHtM3" + MID + "BzYc"
 SOLA2 = "7vHtm3" + "zz" + MID[2:] + "AaAa"
 SOLS = "3dPwkz" + MID * 3 + "R8Lt"
-L = common.DB_PATH
+L = paths.DB_PATH
 conn = dbm.open_db(L)
 assets = [("token", "eth", "0x" + "1" * 40, "USDC", 6), ("native", "sol", None, "SOL", 9), ("token", "base", "0x" + "2" * 40, "ETH", 18),
           ("token", "optimism", "0x" + "3" * 40, "OP", 18), ("token", "base", "0x" + "4" * 40, "BTC", 8)]
@@ -135,7 +135,7 @@ OUT = {"todayIso": "2026-10-06", "fields": {
     "walletRows": [{"alias": "콜드 지갑", "addr": SP_WAL, "chains": "Ethereum · Base"}, {"alias": "hot7", "addr": SOLA, "chains": "Solana"}],
     "depositRows": [{"ex": "업비트", "net": "Solana", "addr": SOLA2, "memo": "—"}],
     "realizedByDate": {D1: 1027.0, D2: -10.0}}}
-SD = common.STATE_DIR
+SD = paths.STATE_DIR
 json.dump({"v": 1, "memos": {f"{D1}|BTC": {"memo": "브릿지 자금 마련용 매도", "at": ts_of(D1)}}}, open(os.path.join(SD, "day_memos.json"), "w"), ensure_ascii=False)
 json.dump({D2: {"iso": D2, "s": "보통", "sum": "ETH 비중을 줄였다", "note": "Ethereum 수수료가 비쌌음", "obs": [], "next": ""},
            D3: {"iso": D3, "s": "양호", "sum": "ETHF 상장 소식만 봤다", "note": "", "obs": [], "next": ""}},
@@ -170,15 +170,15 @@ def subs(r, k):
 r = S("chain:eth")
 ev9 = subs(r, "event")
 chk(ev9 and all("Ethereum ·" in s9 for s9 in ev9) and not any("Base ·" in s9 for s9 in ev9) and not any("업비트" in s9 for s9 in ev9),
-    "B chain:eth = 이더리움 기록만(Base 스왑·업비트 기록 아님 — 외부 재검토 재현 'chain:eth 가 Base')", ev9)
+    "B chain:eth = 이더리움 기록만(Base 스왑·업비트 기록 아님 — 종전 결함: 'chain:eth 가 Base')", ev9)
 r = S("chain:sol")
 ev9 = subs(r, "event")
 chk(ev9 and any("Solana · 스테이킹" in s9 for s9 in ev9) and not any("업비트 입금" in s9 for s9 in ev9),
-    "B chain:sol = 솔라나 온체인 기록(업비트 SOL 입금 아님 — 외부 재검토 재현 'chain:sol 이 업비트 SOL 입금만')", ev9)
+    "B chain:sol = 솔라나 온체인 기록(업비트 SOL 입금 아님 — 종전 결함: 'chain:sol 이 업비트 SOL 입금만')", ev9)
 r = S("chain:op")
 ts9 = titles(r, "event") + titles(r, "coin")
 chk(any("OP" == t9.split()[0] for t9 in ts9) and not any("STOP" in t9 for t9 in ts9) and not any("거래소" in s9 for s9 in subs(r, "event")),
-    "B chain:op = Optimism 기록만('STOP'·바이빗 OP 아님 — 외부 재검토 재현)", [ts9, subs(r, "event")])
+    "B chain:op = Optimism 기록만('STOP'·바이빗 OP 아님 — 종전 결함)", [ts9, subs(r, "event")])
 r = S("chain:base")
 chk(grp(r, "tx") and all(i["chain"] == "base" for i in grp(r, "tx")["items"]) and any("BTC" in t9 for t9 in titles(r, "event")), "B chain:base = Base tx·기록", r if not isinstance(r, dict) else titles(r, "event"))
 r = S("ETH")
@@ -189,11 +189,11 @@ rv9 = titles(r, "review")
 chk(rv9 and len(rv9) == 1 and "9월 20일" in rv9[0], "B 'ETH' 리뷰 = 낱말 ETH 든 리뷰만(ETHF 상장 리뷰 아님)", rv9)
 r = S("OP")
 chk(not any("STOP" in t9 for t9 in titles(r, "event") + titles(r, "coin")) and any(t9.startswith("OP ") for t9 in titles(r, "event")),
-    "B 'OP' = 심볼 OP 만('STOP' 아님 — 외부 재검토 재현)", titles(r, "event") + titles(r, "coin"))
+    "B 'OP' = 심볼 OP 만('STOP' 아님 — 종전 결함)", titles(r, "event") + titles(r, "coin"))
 r = S("ＢＴＣ")
-chk(grp(r, "coin") and titles(r, "coin")[0] == "BTC", "B 'ＢＴＣ'(전각) = BTC 찾음(외부 재검토 재현 0건)", r if not isinstance(r, dict) else r.get("groups"))
+chk(grp(r, "coin") and titles(r, "coin")[0] == "BTC", "B 'ＢＴＣ'(전각) = BTC 찾음(종전 결함: 0건)", r if not isinstance(r, dict) else r.get("groups"))
 r = S(unicodedata.normalize("NFD", "브릿지 자금"))
-chk(grp(r, "memo") or grp(r, "event"), "B 자모 분리형 '브릿지 자금' = 메모·기록 찾음(외부 재검토 재현 0건)", r if not isinstance(r, dict) else [g["kind"] for g in r.get("groups") or []])
+chk(grp(r, "memo") or grp(r, "event"), "B 자모 분리형 '브릿지 자금' = 메모·기록 찾음(종전 결함: 0건)", r if not isinstance(r, dict) else [g["kind"] for g in r.get("groups") or []])
 r = S("7vHtM3")
 w9 = grp(r, "wallet")
 chk(w9 and [i["addr"] for i in w9["items"]] == [SOLA] and not grp(r, "deposit"), "B 솔라나 앞부분 '7vHtM3' = 그 지갑(·그 지갑 tx)만(대소문자 다른 7vHtm3… 입금 주소 아님)",
@@ -203,18 +203,18 @@ chk(grp(r, "deposit") and [i["addr"] for i in grp(r, "deposit")["items"]] == [SO
 r = S(SOLS[:8])
 chk(grp(r, "tx") and grp(r, "tx")["items"][0]["tx"] == SOLS, "B 솔라나 서명 앞 8자 = 그 tx", r if not isinstance(r, dict) else r.get("groups"))
 r = S(H64)
-chk(grp(r, "tx") and grp(r, "tx")["items"][0]["tx"] == HB, "B 0x 없는 64자리 = 그 tx(외부 재검토 재현 못 찾음)", r if not isinstance(r, dict) else r.get("groups"))
+chk(grp(r, "tx") and grp(r, "tx")["items"][0]["tx"] == HB, "B 0x 없는 64자리 = 그 tx(종전 결함: 못 찾음)", r if not isinstance(r, dict) else r.get("groups"))
 r = S("0x5ea7...f00d")
-chk(grp(r, "tx") and grp(r, "tx")["items"][0]["tx"] == HB and grp(r, "event"), "B '0x5ea7...f00d' = 그 tx + 줄인 해시 기록(외부 재검토 재현 못 찾음)", r if not isinstance(r, dict) else r.get("groups"))
+chk(grp(r, "tx") and grp(r, "tx")["items"][0]["tx"] == HB and grp(r, "event"), "B '0x5ea7...f00d' = 그 tx + 줄인 해시 기록(종전 결함: 못 찾음)", r if not isinstance(r, dict) else r.get("groups"))
 r = S("005930")
-chk(grp(r, "other") and titles(r, "other") == ["삼성전자"], "B '005930' = 종목코드 글자로도 찾음(외부 재검토 재현 0건)", r if not isinstance(r, dict) else r.get("groups"))
+chk(grp(r, "other") and titles(r, "other") == ["삼성전자"], "B '005930' = 종목코드 글자로도 찾음(종전 결함: 0건)", r if not isinstance(r, dict) else r.get("groups"))
 r = S("9999-12")
 chk(isinstance(r, dict) and r.get("ok") and "_exc" not in r and any(x.get("t") == "9999-12" for x in r.get("ignored") or []), "B '9999-12' = 503 아님 · 결과 없음으로 숨기지 않고 '범위 밖' 안내", r)
 r = S("x", before="9999-12")
 chk(isinstance(r, dict) and r.get("ok") and r.get("ignored"), "B before=9999-12(요청 인자) = 예외 없음 · 안내", r)
 for q9 in ("비트", "ㅂㅌ", "비트코"):
     r = S(q9)
-    chk(grp(r, "coin") and titles(r, "coin")[0] == "BTC", f"B '{q9}' = BTC 코인 먼저(외부 재검토 재현 못 찾음 · BCH 는 뒤)", r if not isinstance(r, dict) else titles(r, "coin"))
+    chk(grp(r, "coin") and titles(r, "coin")[0] == "BTC", f"B '{q9}' = BTC 코인 먼저(종전 결함: 못 찾음 · BCH 는 뒤)", r if not isinstance(r, dict) else titles(r, "coin"))
 r = S("coin:ZZZ", limit=30)
 g9 = grp(r, "event")
 chk(g9 and g9["n"] == 120 and len(g9["items"]) == 30 and g9.get("more") is True, "B 30건 잘림 = n 120(전체 건수) · more", g9 and {k: g9[k] for k in g9 if k != "items"})
@@ -310,7 +310,7 @@ IDX.tick()
 IDX.ix.sleep = IDX.sleep = (lambda s: None)
 n_tx1 = count_tx()
 chk(n_tx1 == n_tx0 - 1, f"C 옛 거래 재계산(행 줄어듦) 뒤 tx {n_tx0} → {n_tx1}(하나만 빠짐)")
-chk(probe["min"] is None or probe["min"] >= n_tx0 - 1, f"C 재계산 중 다른 연결이 본 tx 최소 {probe['min']}건(탐침 {probe['n']}회) — 0건·일부만 없음(외부 재검토 재현 22초 빔)", probe)
+chk(probe["min"] is None or probe["min"] >= n_tx0 - 1, f"C 재계산 중 다른 연결이 본 tx 최소 {probe['min']}건(탐침 {probe['n']}회) — 0건·일부만 없음(종전 결함: 22초 빔)", probe)
 stop = {"v": False}
 seen = []
 

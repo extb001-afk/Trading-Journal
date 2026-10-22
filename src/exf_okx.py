@@ -1,11 +1,7 @@
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
 import time
 import urllib.request
-import common
-import bf_engine
+import ex_sign, statefile
 import calendar
 from exf_net import DAY
 from exf_net import PACE
@@ -27,6 +23,7 @@ from exf_net import _px_safe
 from exf_net import _srv_ms
 from exf_net import _sub_bal
 from exf_net import _xm
+from exf_net import fut_first_t0
 from exf_net import fut_rcpt
 from exf_net import http_json
 from exf_net import norm_fill
@@ -52,8 +49,7 @@ def fetch_okx(env, t0: int, t1: int):
         qs = urllib.parse.urlencode(params)
         full = path + ("?" + qs if qs else "")
         ts = _okx_ts(_srv_ms("www.okx.com"))
-        sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
-                                        hashlib.sha256).digest()).decode()
+        sig = ex_sign.okx_sign(sec, ts, "GET", full)
         d = http_json("https://www.okx.com" + full,
                       {"OK-ACCESS-KEY": key, "OK-ACCESS-SIGN": sig,
                        "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": pph})
@@ -90,10 +86,12 @@ def fetch_okx(env, t0: int, t1: int):
                     continue
                 got.add(r9["uuid"])
                 n_new += 1
+                if ts_ms < t0 * 1000:
+                    continue
                 (out_w if bucket == "w" else out_d).append(r9)
             oldest = min(int(r.get("ts") or 0) for r in rows)
             time.sleep(PACE)
-            if oldest // 1000 <= t0 or len(rows) < 100:
+            if oldest < t0 * 1000 or len(rows) < 100:
                 break
             if after and n_new == 0:
                 raise RuntimeError("okx 입출금 페이지 시각 미전진 — 다음 주기 재시도")
@@ -110,8 +108,7 @@ def fills_okx(env, st, t0: int, t1: int):
         qs = urllib.parse.urlencode(params)
         full = "/api/v5/trade/fills-history" + ("?" + qs if qs else "")
         ts = _okx_ts(_srv_ms("www.okx.com"))
-        sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
-                                        hashlib.sha256).digest()).decode()
+        sig = ex_sign.okx_sign(sec, ts, "GET", full)
         d = http_json("https://www.okx.com" + full,
                       {"OK-ACCESS-KEY": key, "OK-ACCESS-SIGN": sig,
                        "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": pph})
@@ -143,7 +140,7 @@ def fills_okx(env, st, t0: int, t1: int):
                                    r.get("fillSz"), fee_ok, r.get("feeCcy")))
         oldest = min(int(r.get("ts") or 0) for r in rows)
         time.sleep(PACE)
-        if oldest // 1000 <= t0 or len(rows) < 100:
+        if oldest < t0 * 1000 or len(rows) < 100:
             break
         nxt = rows[-1].get("billId") or str(oldest)
         if nxt in seen_pages:
@@ -190,7 +187,7 @@ def convert_okx(env, t0: int, t1: int):
             out.append(f9)
         oldest = min(int(float(r.get("ts") or 0)) for r in rows if isinstance(r, dict)) if rows else 0
         time.sleep(PACE)
-        if oldest // 1000 <= t0 or len(rows) < 100:
+        if oldest < t0 * 1000 or len(rows) < 100:
             break
         if after and n_new == 0:
             raise RuntimeError("okx convert 페이지 시각 미전진")
@@ -207,8 +204,7 @@ def _okx_get(env, path, params=None):
     qs = urllib.parse.urlencode(params or {})
     full = path + ("?" + qs if qs else "")
     ts = _okx_ts(_srv_ms("www.okx.com"))
-    sig = base64.b64encode(hmac.new(sec.encode(), (ts + "GET" + full).encode(),
-                                    hashlib.sha256).digest()).decode()
+    sig = ex_sign.okx_sign(sec, ts, "GET", full)
     d = http_json("https://www.okx.com" + full,
                   {"OK-ACCESS-KEY": key, "OK-ACCESS-SIGN": sig,
                    "OK-ACCESS-TIMESTAMP": ts, "OK-ACCESS-PASSPHRASE": pph})
@@ -354,7 +350,7 @@ def _fut_okx(env):
         if not ct9:
             try:
                 ct9.append((fut_rcpt.load("okx").get("ct") or {}) if fut_rcpt else {})
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 ct9.append({})
         return ct9[0].get(iid)
     for p in _okx_get(env, "/api/v5/account/positions"):
@@ -373,7 +369,7 @@ def _fut_okx(env):
                      "upnl": _fut_opt(p.get("upl")), "leverage": p.get("lever"),
                      "liq": float(p.get("liqPx") or 0),
                      "settle": (str(p.get("ccy") or "").strip().upper() or None), "inst_type": p.get("instType") or None})
-    st = common.read_json(_fut_path("okx"), {})
+    st = statefile.read_json(_fut_path("okx"), {})
     ev = list(st.get("events") or [])
     seen = {r.get("uid") for r in ev}
     time.sleep(PACE)
@@ -409,8 +405,8 @@ def _fut_okx(env):
             begin = lo9
         srcs.append(bills("/api/v5/account/bills-archive", {"begin": str(begin), "end": str(now_ms - 6 * DAY * 1000)}))
     hist_lo = (st.get("cursor") or {}).get("hist_lo")
-    tg9 = bf_engine.SINCE.target("okx")
-    if tg9:
+    tg9 = fut_first_t0("okx", now_ms / 1000)
+    if tg9 is not None:
         g9 = time.gmtime(now_ms / 1000)
         y9, m9 = g9.tm_year, g9.tm_mon - 3
         if m9 <= 0:
@@ -426,7 +422,7 @@ def _fut_okx(env):
                 hist_lo = want9
                 log.info("okx 선물 과거 정산 채움 %s~%s · %d건", time.strftime("%Y-%m-%d", time.gmtime(want9 / 1000)),
                          time.strftime("%Y-%m-%d", time.gmtime(end9 / 1000)), len(hist9))
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [optional]
                 log.warning("okx 선물 과거 정산 채움 실패(다음 주기 재시도): %s", str(e)[:160])
     import itertools as _it
     pxraw = []

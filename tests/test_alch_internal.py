@@ -2,13 +2,13 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import io
-import json
-import os
-import urllib.error
+import copy  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import urllib.error  # noqa: E402
 
 W0 = "0x" + "e0" * 20
 W1 = "0x" + "e1" * 20
@@ -22,14 +22,14 @@ CP = os.path.join(T.TMP, "config.json")
 with open(CP, "w", encoding="utf-8") as f:
     json.dump(CFG, f)
 os.environ["TJ_CONFIG"] = CP
-import common
+import paths  # noqa: E402
 
-assert T.TMP in common.STATE_DIR and T.TMP in common.ENV_PATH
-import alch_internal as AI
-import bf_engine
-import core
-import evm_watch
-import nodekeys as NK
+assert T.TMP in paths.STATE_DIR and T.TMP in paths.ENV_PATH
+import alch_internal as AI  # noqa: E402
+import bf_engine  # noqa: E402
+import core  # noqa: E402
+import evm_watch  # noqa: E402
+import nodekeys as NK  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -224,7 +224,7 @@ for pages, why, kind in (([{"pageKey": None}], "transfers 없음", "payload"),
     try:
         AI.fetch_range(URL, B, B)
         e9 = None
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001
         e9 = e
     check(f"L2d {why} = 실패(일시 · 부분 결과 없음)", isinstance(e9, AI.AlchFail) and (kind is None or e9.kind == kind)
           and not evm_watch.RpcChainWatcher._trace_gone(e9), repr(e9))
@@ -234,7 +234,7 @@ os.environ[NK.ENV_ALCHEMY] = AKEY
 try:
     AI.fetch_range(URL, B, B)
     e9 = None
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     e9 = e
 check("L2e 401 = 보완 안 함(AlchSkip) + 1시간 쉼(그동안 url_for = None)", isinstance(e9, AI.AlchSkip) and AI.off_now() and AI.url_for("base") is None, (repr(e9), AI._OFF))
 AI._OFF["until"] = 0.0
@@ -279,7 +279,7 @@ def run(plan, blk, key=True, h=None, status="ok", snap_extra=None, nodes=None, p
     try:
         w._trace_internal(h, snap)
         return snap, None
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001
         return snap, e9
 
 
@@ -330,7 +330,7 @@ SCRIPT.update(ALL_GONE)
 err2 = None
 try:
     w._trace_internal(HO2, s2)
-except Exception as e:
+except Exception as e:   # noqa: BLE001
     err2 = e
 check("L3k 같은 블록 다른 tx = 메모 재사용(Alchemy 1콜) · 각 tx 행", err is None and err2 is None and len(al_hits()) == 1
       and s2.get("internal") == [{"from": RT, "to": W1, "value": "44", "success": True}], (repr(err2), s2, HITS))
@@ -356,7 +356,7 @@ check("L4a 1콜 = node_alchemy 장부 120 CU(alchemy_getAssetTransfers 공식 �
 small = {"hosts": ["*.g.alchemy.com"], "unit": "cu", "month": 31 * 100, "pct": 80.0, "cu": 26, "cu_methods": {"alchemy_getAssetTransfers": 120}}
 bf_engine.rpc_day_configure({"rpc_day_limits": {"node_alchemy": small}})
 snap, err = run(ALL_GONE, OLD)
-check("L4b ★al944 #1★ 하루 몫(80%) 다 씀 = 0콜 거절 → 일시(AlchFail budget · '영영 못 줌' 아님 → 큐 유지) · Alchemy HTTP 0 · 내부 이동 없음으로 안 바꿈",
+check("L4b 하루 몫(80%) 다 씀 = 0콜 거절 → 일시(AlchFail budget · '영영 못 줌' 아님 → 큐 유지) · Alchemy HTTP 0 · 내부 이동 없음으로 안 바꿈",
       isinstance(err, AI.AlchFail) and err.kind == "budget" and not TG(err) and not al_hits() and "internal" not in snap, (repr(err), HITS))
 SPEC_REAL = {"rpc_day_limits": {f"node_{p}": NK.budget_spec(p, NK.plans({})[p]) for p in NK.PROVIDERS}}
 bf_engine.rpc_day_configure(SPEC_REAL)
@@ -364,7 +364,7 @@ AL_PAGES[OLD] = [{"transfers": [tr(HO, RT, W0, "0x2a", "0_1", OLD)], "pageKey": 
 u9 = NK.used_today("alchemy")
 bf_engine.rpc_day_configure({"rpc_day_limits": {"node_alchemy": dict(small, month=None, day=u9 + 180, pct=100.0)}})
 snap, err = run(ALL_GONE, OLD)
-check("L4c ★al944 #1★ 첫 쪽 받은 뒤 둘째 쪽 장부 0콜 거절 = 일시(AlchFail budget · 부분 결과 안 씀 · 큐 유지)",
+check("L4c 첫 쪽 받은 뒤 둘째 쪽 장부 0콜 거절 = 일시(AlchFail budget · 부분 결과 안 씀 · 큐 유지)",
       isinstance(err, AI.AlchFail) and err.kind == "budget" and not TG(err) and len(al_hits()) == 1 and "internal" not in snap, (repr(err), HITS, snap))
 bf_engine.rpc_day_configure(SPEC_REAL)
 AL_PAGES[OLD] = [{"transfers": [tr(HO, RT, W0, "0x2a", "0_1", OLD)]}]
@@ -376,7 +376,7 @@ def _open_alch():
 
 
 snap, err = run(ALL_GONE, OLD, pre=_open_alch)
-check("L4d ★al944 #1★ Alchemy 서킷 열림(0콜 거절) = 일시(AlchFail budget · 큐 유지 · '영영 못 줌' 아님)",
+check("L4d Alchemy 서킷 열림(0콜 거절) = 일시(AlchFail budget · 큐 유지 · '영영 못 줌' 아님)",
       isinstance(err, AI.AlchFail) and err.kind == "budget" and not TG(err) and not al_hits() and "internal" not in snap, (repr(err), HITS))
 
 HB1, HB2 = hx(0xb1), hx(0xb2)
@@ -401,7 +401,7 @@ def run_block(plan, blk, ctx_n=None, key=True):
         w._alch_ctx_n = ctx_n
     try:
         return w._trace_block(blk), None
-    except Exception as e9:
+    except Exception as e9:   # noqa: BLE001
         return None, e9
 
 
@@ -523,7 +523,7 @@ n9 = w._leaf_later_step(HEAD)
 check("L8d 키 없음 = 종전(전부 이력 밖 = 잎 큐에서 뺌 · 0콜)", LK not in (w.cursor.get("_leaf_later") or {}) and not al_hits(), (w.cursor.get("_leaf_later"), HITS))
 w.cursor.pop("_leaf_later", None)
 
-import types
+import types  # noqa: E402
 
 CLK = {"off": 0.0}
 _RT = evm_watch.time
@@ -550,7 +550,7 @@ try:
         try:
             w._alch_status([HL])
             e9 = None
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001
             e9 = e
 finally:
     evm_watch.time = _RT
@@ -579,7 +579,7 @@ def _sim(method, sec=40.0):
     pol = dict(bf_engine._policy_for(AHOST), share="t_al944_" + method[-8:].lower())
     with bf_engine._SHARES_LOCK:
         bf_engine._SHARES.pop(pol["share"], None)
-    fp = os.path.join(common.quota_dir(), "rpc_gap", pol["share"] + ".bucket")
+    fp = os.path.join(paths.quota_dir(), "rpc_gap", pol["share"] + ".bucket")
     if os.path.exists(fp):
         os.remove(fp)
     bf_engine.time = fk
@@ -607,7 +607,7 @@ m10, m1 = _win_max(ts_at, 10.0) * CU["alchemy_getAssetTransfers"], _win_max(ts_a
 check("L10a getAssetTransfers 연속 호출 · 10초 창 최대 CU ≤ 2,400(무료 3,000 CU/10초의 80%)", m10 <= 2400, (m10, _win_max(ts_at, 10.0)))
 check("L10b getAssetTransfers · 1초 창 최대 CU ≤ 240(무료 300 CU/s 의 80%)", m1 <= 240, (m1, _win_max(ts_at, 1.0)))
 lg10 = _win_max(ts_lg, 10.0)
-check("L10c eth_getLogs(60 CU = 3칸 · exbal1012 칸 20 CU) · 10초 창 ≤ 2,400 CU · 1초 창 ≤ 240 CU · 처리량 종전(10초 22콜) 이상",
+check("L10c eth_getLogs(60 CU = 3칸 · 칸 20 CU) · 10초 창 ≤ 2,400 CU · 1초 창 ≤ 240 CU · 처리량 종전(10초 22콜) 이상",
       lg10 * CU["eth_getLogs"] <= 2400 and lg10 >= 22 and _win_max(ts_lg, 1.0) * CU["eth_getLogs"] <= 240, (lg10, _win_max(ts_lg, 1.0)))
 GC = []
 _acq0 = bf_engine.HostGate.acquire
@@ -628,7 +628,7 @@ try:
 finally:
     bf_engine.HostGate.acquire = _acq0
 os.environ.pop(NK.ENV_ALCHEMY, None)
-check("L10d 실제 경로(rpc_call → http_request): getAssetTransfers 1콜이 Alchemy 게이트에서 6칸(120 CU = 20 CU × 6 — exbal1012 칸 20 CU)", GC == [6], GC)
+check("L10d 실제 경로(rpc_call → http_request): getAssetTransfers 1콜이 Alchemy 게이트에서 6칸(120 CU = 20 CU × 6 — 칸 20 CU)", GC == [6], GC)
 check("L10e 다른 칸(call_cost 없음 — drpc 등) = 칸 수 종전(콜 수) 그대로 · Alchemy 메서드 모름 = 콜마다 2칸 · getLogs 3 + eth_call 2",
       bf_engine.gate(DH).gate_cost(3, ["alchemy_getAssetTransfers"] * 3) == 3 and bf_engine.gate(AHOST).gate_cost(2, None) == 4
       and bf_engine.gate(AHOST).gate_cost(2, ["eth_getLogs", "eth_call"]) == 5)

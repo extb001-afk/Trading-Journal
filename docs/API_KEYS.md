@@ -19,7 +19,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 | `TJ_CHAINNODES_KEY` | 선택 | Chainnodes 무료 Core API 키(월 1,250만 요청·초당 25 · 8-4-4-4-12 형식 · Base 주소를 넣으면 키만 저장) | Base 거래의 내부 이동 확인(trace)에 먼저 — 로그·잔고엔 안 씀 · 순서 Chainnodes → QuickNode → 기본 노드 · 최근 약 45일보다 옛 거래·한도 동안은 다음 노드 · 월 한도의 80% | QuickNode(키 있으면) → 기본 노드로 |
 | `TJ_TRONGRID_KEY` | 선택(Tron 지갑이 있으면 권장) | 무료 가입 | Tron 지갑 수집·잔고 대조(TronGrid — 헤더로만 보냄 · 초당 4회 · 하루 공표 한도의 80% 안) | 공용 무키 초당 0.8회 — 옛 기록이 느려요 |
 | `TJ_TONCENTER_KEY` | 선택(TON 지갑이 있으면 권장) | 무료 | TON 지갑 수집·잔고 대조(toncenter v3 — 헤더로만 · 초당 8회 = 무료 10회의 80%) | 공용 무키 초당 1회 |
-| 거래소 키(업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트) | 선택 | 무료 | 그 거래소 잔고·체결·입출금 | 그 거래소는 안 받아요 |
+| 거래소 키(업비트·빗썸·바이낸스·바이빗·OKX·쿠코인·게이트·코인베이스) | 선택 | 무료 | 그 거래소 잔고·체결·입출금 | 그 거래소는 안 받아요 |
 | `TJ_TG_TOKEN` · `TJ_TG_CHAT` | 선택 | 무료 | 텔레그램 알림 | 알림 없이 화면만 |
 
 ---
@@ -149,6 +149,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
   한 달 몫은 남은 날에 고르게 나누고, 같은 키를 다른 곳에서도 많이 썼으면 그만큼 줄여 계정 전체가 80% 를 넘지 않게 합니다.
   플랜 한도는 6시간에 한 번 코인게코에 물어 갱신합니다(추적 NFT 가 없어도). 못 읽으면 데모 수준으로 아껴 씁니다.
 - 하루 몫은 기능별로 나눕니다 — 지금 시세 50% · NFT 30% · 지난 시세 20% 는 그 기능 몫으로 남겨 두고, 쓰지 않는 기능 몫은 다른 기능이 빌려 씁니다.
+  오픈시 키가 있으면 NFT 보장 몫은 0, 지금 시세가 80% 입니다(오픈시가 지원하지 않는 체인의 NFT 는 남는 몫 · 없으면 무키로 코인게코).
   분당 몫의 1/4 은 지금 시세용으로 남기고, 지금 시세는 한 시간에 하루 몫의 1/24 까지만(하루 몫을 한꺼번에 쓰지 않게).
 - 웹·수집기 등 여러 프로세스가 같은 예산 기록(`state/nft_budget.json`)을 함께 써서 합계가 한도를 넘지 않습니다.
 - **영수증 차트**: DEX 봉은 그 몫이 있을 때만 받고, 막혀 있으면(429 쉼 등) 같은 코인 거래소 봉으로 대신 그린 뒤 나중에 채웁니다.
@@ -161,7 +162,7 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 1. https://docs.opensea.io/reference/api-keys 에서 무료로 신청.
 2. **설정 › 연결·키 › 탐색기 키 › OpenSea** 에 저장.
 
-- 쓰는 곳: EVM NFT 바닥가를 **오픈시에서 먼저** 받아 작은 컬렉션까지 추적합니다. 없거나 실패하면 코인게코 NFT.
+- 쓰는 곳: EVM NFT 바닥가를 **오픈시에서만** 받아 작은 컬렉션까지 추적합니다(키가 있으면 오픈시 체인 NFT 는 코인게코를 부르지 않음 — 오픈시가 지원하지 않는 체인(BSC·HyperEVM 등)은 코인게코). 키가 없으면 코인게코 NFT.
 - 오픈시 연결은 공개 문서 기준입니다(키 없이 실호출 시험은 못 함).
 
 ## 거래소 키
@@ -175,19 +176,34 @@ tj-bot 은 **무료 키와 공개 노드만으로** 돌아가게 짜여 있어�
 | OKX | `TJ_OKX_KEY` · `TJ_OKX_SECRET` · `TJ_OKX_PASSPHRASE` | OKX › API keys |
 | 쿠코인 | `TJ_KUCOIN_KEY` · `TJ_KUCOIN_SECRET` · `TJ_KUCOIN_PASSPHRASE` | 쿠코인 › API Management |
 | 게이트 | `TJ_GATE_KEY` · `TJ_GATE_SECRET` | 게이트 › API Keys |
+| 코인베이스 | `TJ_COINBASE_KEY_NAME` · `TJ_COINBASE_SECRET` | 코인베이스 › 설정 › API → Coinbase Developer Platform (아래 '코인베이스 키') |
 
 > **반드시 '조회(읽기)' 권한만 켜고, IP 화이트리스트를 거세요.** 거래·출금·이체 권한은 절대 켜지 마세요.
-> 바이낸스·바이빗·OKX 는 저장할 때 권한을 확인해 거래·출금·이체가 켜진 키를 거부하고,
+> 바이낸스·바이빗·OKX·코인베이스는 저장할 때 권한을 확인해 거래·출금·이체가 켜진 키를 거부하고,
 > 권한을 API 로 확인할 수 없는 업비트·빗썸·쿠코인·게이트는 '조회 권한만 켰음' 확인을 눌러야 저장됩니다.
 > 그다음 잔고 조회 1콜(읽기 전용)로 키를 확인해, 거래소가 키를 거부하면(401·403 — 틀린 키·IP 화이트리스트 밖) 저장하지 않습니다.
 
 - 쓰는 곳: 그 거래소의 잔고·체결·입출금(무엇을 어디까지 받는지는 [COLLECTION_LIMITS.md](COLLECTION_LIMITS.md)).
 - 바이낸스·바이빗·OKX 는 같은 조회 키로 선물 손익과 선물 영수증의 진입·청산 가격도 받습니다(추가 권한 필요 없음 · 바이낸스만 선물 체결 내역을 조금 더 부름 — 공표 한도 80% 안).
+- 바이낸스는 같은 조회 키로 배당·에어드랍·런치풀·Earn 이자 지급 내역도 받아 소득(받은 시각 시가)으로 적습니다(추가 권한 필요 없음 · 주기마다 1콜 · 끄기 = config `exf.binance_dividends: false`).
 - 거래소 공개 시세(달러·원화 시세)는 키 없이 받습니다.
 - **서브계정 키(선택 · 바이낸스·바이빗·OKX·쿠코인·게이트 · 거래소마다 1~5개)** — 메인 키 이름 가운데에 `SUB<번호>_` 를 넣은 이름이에요
   (예: `TJ_BYBIT_SUB1_KEY` · `TJ_BYBIT_SUB1_SECRET` · OKX·쿠코인은 `…_SUB1_PASSPHRASE` 도). 설정 › 연결·키 › 거래소 칸의 **서브계정 키 추가**로 넣으면
   메인 키와 같은 권한 확인·연결 시험을 거쳐요. 서브 몫은 **같은 거래소로 합쳐** 잔고·체결·입출금·선물을 세고, 화면 기록 줄에만 `· 서브1` 딱지가 붙어요.
   메인 키가 있어야 서브 키를 써요 · 바이빗·OKX 서브는 입금 주소를 거래소가 주지 않아 입금 주소 목록에는 메인만 보여요.
+
+### 코인베이스 키 (CDP API 키 · 조회 전용)
+
+1. coinbase.com 로그인 → **설정 › API** → **Coinbase Developer Platform**(portal.cdp.coinbase.com) → **API Keys › Secret API Keys › Create API key**.
+2. 권한(API restrictions)은 **View 만** 체크하세요 — **Trade·Transfer 는 끄기**(켜져 있으면 저장할 때 거부해요). 포트폴리오는 **Default**.
+3. **Advanced settings › Signature algorithm = ECDSA** 로 바꾸세요 — 기본값 Ed25519 는 코인베이스 거래 API 가 받지 않아요. IP allowlist 에 이 서버 공인 IP.
+4. 만든 직후 보이는 **API key name**(`organizations/…/apiKeys/…`)과 **Private key**(`-----BEGIN EC PRIVATE KEY-----` 부터 끝줄까지 통째로)를
+   설정 › 거래소 › 코인베이스 두 칸에 붙여넣으세요. 비밀키는 한 번만 보이니 JSON 다운로드도 받아 두세요(파일 안 `privateKey` 그대로 붙여도 돼요).
+- 저장 = 비밀키를 검증(P-256 · 공개점 일치)해 base64 본문 한 줄로 `.env` 에 · 연결 시험 = 잔고 계정 목록 1콜 + 키 권한 1콜(`key_permissions`).
+- 인증 = 요청마다 새 JWT(ES256 · 2분 만료). 서명은 표준 라이브러리만으로 하는 순수 파이썬 P-256 ECDSA(RFC 6979 결정적 k)예요 —
+  **한계: 상수 시간 구현이 아니라 서명 시간이 비밀키 비트에 따라 미세하게 달라요(타이밍 부채널).** 봇이 자기 서버에서 혼자 서명하고 바깥에서
+  서명을 시킬 길이 없어 받아들인 한계예요(이 서명 코드를 남이 요청을 보내 서명시키는 서비스에 쓰지 마세요).
+- 받는 범위·확인 목록 = [COLLECTION_LIMITS.md](COLLECTION_LIMITS.md) '코인베이스'.
 
 ## 텔레그램 — `TJ_TG_TOKEN` · `TJ_TG_CHAT`
 
@@ -266,8 +282,8 @@ are built in memory only.
   the key fails (429 / 401 / 403 / outage), that single call falls back to the old keyless request and the key rests for a while.
   Demo = 24/min, 260/day (below 80% of the published 30/min, 10k/month). Pro = 10% of the plan limits by default (25/50/80% selectable,
   80% hard cap), plan limits refreshed every 6 hours. The daily share is split live prices 50% / NFT 30% / historical 20% (idle shares are
-  borrowed), and all processes share one budget file.
-- **OpenSea** (`TJ_OPENSEA_KEY`, free application — https://docs.opensea.io/reference/api-keys): first source for EVM NFT floors.
+  borrowed; with an OpenSea key the NFT floor share is 0 and live prices get 80%), and all processes share one budget file.
+- **OpenSea** (`TJ_OPENSEA_KEY`, free application — https://docs.opensea.io/reference/api-keys): sole source for EVM NFT floors on OpenSea chains when set (no CoinGecko NFT calls there; other chains keep CoinGecko).
 - **Exchanges**: read-only keys with an IP whitelist only; keys with trade/withdraw/transfer permissions are refused where the exchange lets us check.
   Binance, Bybit and OKX keys also feed futures PnL and the futures-receipt entry/exit prices (no extra permission).
 - **TronGrid / toncenter** (`TJ_TRONGRID_KEY`, `TJ_TONCENTER_KEY`, free, optional — put them in `.env`): faster Tron / TON wallet collection and

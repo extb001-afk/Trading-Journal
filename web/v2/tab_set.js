@@ -2,7 +2,7 @@
 (window.__tjTabs = window.__tjTabs || {}).set = function (X) {
   const {
     $, ago, alLoad, arr, CHAIN_KO, clearCache, DUST_OPTS, errTxt, esc, EX_NAMES, exLogo, fmtTs, fxNote, hs, IC, isISO, KST_MS, lockOut, logError,
-    logosOff, LS, m, MK_RE, mN, nf, num, ofAuto, onbHidden, onUnauthorized, pad2, pctS, plainT, prTxt, PV_PROT, PVM, pvm, pvOn, pvW, px, q, render,
+    LS, m, MK_RE, mN, nf, num, ofAuto, onbHidden, onUnauthorized, pad2, pctS, plainT, prTxt, PV_PROT, PVM, pvm, pvOn, pvW, px, q, render,
     renderView, revTxt, rkFix, S, scanText, short, sum, sv, sxAlertsBody, syncUrl, taxTip, thSys, toast, uiDate, uiFold, uiPaged, uiPageSize, uiPgBar,
     uiPgReveal, uiPgS, uiPgSlice, uiPick, venueLogo
   } = X;
@@ -142,7 +142,7 @@
   function sxIt(id, t, cap, right, o) {
     o = o || {};
     const tx = '<span class="tx"><b>' + t + '</b>' + (cap ? '<span class="cap">' + cap + '</span>' : '') + '</span>';
-    if (o.href) return '<a class="sx-it sx-lk" id="' + id + '" href="' + o.href + '">' + (o.lead || '') + tx + (right || '') + '<span class="sx-ch">' + IC.right + '</span></a>';
+    if (o.href) return '<a class="sx-it sx-lk" id="' + id + '" href="' + esc(TJDOM.safeUrl(o.href)) + '">' + (o.lead || '') + tx + (right || '') + '<span class="sx-ch">' + IC.right + '</span></a>';
     const open = !!o.exp && S.set.open.has(id);
     const head = o.exp ? '<button class="sx-itx" data-a="sxTog" data-v="' + id + '" aria-expanded="' + open + '" aria-controls="' + id + '-d">' + tx + (o.val || '') + '<span class="sx-ch sx-chd' + (open ? ' o' : '') + '">' + IC.chev + '</span></button>'
       : '<div class="sx-itx">' + tx + (o.val || '') + '</div>';
@@ -366,7 +366,6 @@
       + sxIt('sx-display-scheme', '손익 색', glob ? '상승 <span style="color:var(--upc)">초록</span> · 하락 <span style="color:var(--downc)">빨강</span>' : '상승 <span style="color:var(--upc)">빨강</span> · 하락 <span style="color:var(--downc)">파랑</span>', sxSeg('scheme', [['kr', '국내식', !glob], ['global', '글로벌', glob]], '손익 색'))
       + sxIt('sx-display-hide', '금액 가리기', '밖에서 보여 줄 때 · 상단 눈 버튼 · Shift+H', sxSw('hideToggle', S.hide, '금액 가리기'))
       + sxIt('sx-display-pgsize', '목록 한 쪽', '긴 목록을 이만큼씩 넘겨 봐요 · 이 기기만', sxSeg('pgSize', [['10', '10개', uiPageSize() === 10], ['20', '20개', uiPageSize() === 20]], '목록 한 쪽 개수'))
-      + sxIt('sx-display-logo', '토큰 로고', logosOff() ? '꺼짐 — 글자 아이콘만(외부 요청 없음)' : '외부(jsDelivr)에서 받음 — 끄면 로고 요청을 안 보내요', sxSw('logoToggle', !logosOff(), '토큰 로고'))
       + sxIt('sx-display-rand', '금액 랜덤값', '예시 화면용 · 가리기와 둘 중 하나', sxSw('randToggle', S.rand, '금액 랜덤값'), { exp: () => '<div class="cap">금액·수량에 열 때마다 바뀌는 같은 배수를 곱해 실제와 다른 숫자로 보여요(합계·차트는 서로 맞고 %·단가는 그대로) · 화면에 ‘랜덤값’ 표시 · 탐색기 링크 없음</div>' + rkCtl() })
       + dust
       + (legacyOn("classic") ? '<a class="sx-it sx-lk" id="sx-display-classic" href="/classic"><span class="tx"><b>클래식 화면</b><span class="cap">이전 디자인 · 같은 데이터</span></span><span class="sx-ch">' + IC.ext + '</span></a>' : '')
@@ -594,7 +593,7 @@
     [['helius', 'Helius (Solana)', '솔라나 sol 탐색기 api 키 key'], ['etherscan', 'Etherscan', '이더스캔 evm 가속 백필 api 키 key 필수'], ['alchemy', 'Alchemy', '알케미 evm 토큰 잔고 찾기 노드 api 키 key 필수 무료 cu'], ['ankr', 'Ankr', '앵커 evm 받은 토큰 확인 bsc base 옛 기록 노드 api 키 key 필수 무료 크레딧'], ['coingecko', 'CoinGecko', '코인게코 시세 dex 게코터미널 차트 nft 바닥가 데모 프로 무료 유료 api 키 key'], ['opensea', 'OpenSea', '오픈시 nft 바닥가 api 키 key']]
       .forEach(x => add('keys', '', x[1] + ' 키', x[2], '[data-su="xp"][data-v="' + x[0] + '"]', xpOpen(x[0])));
     add('keys', 'exchanges', '거래소 조회 키', '거래소 api 키 key 업비트 바이낸스 조회 전용 read only', '.sx-exslot');
-    [['upbit', '업비트'], ['bithumb', '빗썸'], ['binance', '바이낸스 Binance'], ['bybit', '바이빗 Bybit'], ['okx', 'OKX'], ['kucoin', '쿠코인 KuCoin'], ['gate', '게이트 Gate']]
+    [['upbit', '업비트'], ['bithumb', '빗썸'], ['binance', '바이낸스 Binance'], ['bybit', '바이빗 Bybit'], ['okx', 'OKX'], ['kucoin', '쿠코인 KuCoin'], ['gate', '게이트 Gate'], ['coinbase', '코인베이스 Coinbase']]
       .forEach(x => add('keys', 'exchanges', x[1] + ' 키', '거래소 api key 조회 입금주소 입금 주소', '[data-su="ex"][data-v="' + x[0] + '"]', exOpen(x[0])));
     add('keys', '', '이 서버 공인 IP', 'ip 아이피 화이트리스트 허용 목록 거래소', '#sx-keys-ip');
     add('keys', 'telegram', '텔레그램 알림 봇', 'telegram 봇 bot 토큰 token botfather chat', '.sx-tgslot');
@@ -619,7 +618,6 @@
     add('display', '', '금액 가리기', '숨김 가리기 hide 눈 shift+h 프라이버시', '#sx-display-hide');
     add('display', '', '금액 랜덤값', '랜덤 random 예시 스크린샷 주사위', '#sx-display-rand');
     add('ai', '', '자동 생성 잠시 멈춤', 'ai 리뷰 멈춤 정지 끄기 일시정지 pause 대량 재작성 자동', '#sx-ai-pause');
-    add('display', '', '토큰 로고', '로고 아이콘 jsdelivr 외부 요청 프라이버시 logo', '#sx-display-logo');
     add('display', '', '목록 한 쪽', '쪽 넘김 페이지 10개 20개 목록 개수 다음 이전 page size', '#sx-display-pgsize');
     add('display', '', '소액 기준', '소액 먼지 dust 숨김 기준 $50 소액기준', '#sx-display-dust', openIt('sx-display-dust'));
     if (legacyOn("classic")) add('display', '', '클래식 화면', '이전 디자인 classic 옛 화면 기존 화면', '#sx-display-classic');
@@ -660,7 +658,7 @@
   function sxSearchPaint() {
     const q = S.set.q || '', op = !!q && S.set.qOpen, r = $('#sxQr'), i = $('#sxQ');
     if (!r) return;
-    r.hidden = !op; r.innerHTML = op ? sxResultsHTML(q) : '';
+    r.hidden = !op; TJDOM.set(r, op ? sxResultsHTML(q) : '');
     if (i) { i.setAttribute('aria-expanded', String(op)); if (op && S.set.qr && S.set.qr.length) i.setAttribute('aria-activedescendant', 'sxQo' + (S.set.qi || 0)); else i.removeAttribute('aria-activedescendant'); }
     const on = $('#sxQo' + (S.set.qi || 0)); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
   }
@@ -808,13 +806,15 @@
     const c = S.auth;
     if (!force && c && (c.st === 'load' || Date.now() - c.t < 60000)) return c;
     const nc = S.auth = { st: 'load', t: Date.now(), d: c && c.d };
-    fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(j => {
-      if (S.auth !== nc) return;
+    nc.p = fetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(j => {
+      if (S.auth !== nc) return j && j.ok ? j : null;
       nc.st = j && j.ok ? 'ok' : 'none'; nc.d = j && j.ok ? j : null; nc.t = Date.now();
       if (S.tab === 'settings' && !S.locked) renderView();
+      return nc.d;
     }).catch(() => { if (S.auth === nc) { nc.st = 'err'; nc.t = Date.now(); if (S.tab === 'settings' && !S.locked) renderView(); } });
     return nc;
   }
+  const authRefresh = () => authLoad(true).p;
   const AU_KEYS = ['au:cur', 'au:new', 'au:new2'];
   function loginBody() {
     const c = authLoad(), d = c && c.d;
@@ -838,13 +838,16 @@
       + '<div class="cap sx-note">잊었으면 tj-bot 이 도는 컴퓨터에서 <span class="mono">python3 tools/reset_password.py</span> · 켜기·끄기 = config.json web.login 후 tj-web 재시작</div>';
   }
   async function authPost(path, body) {
-    const d0 = S.auth && S.auth.d, hd = { 'Content-Type': 'application/json' };
-    if (d0 && d0.csrf) hd['X-TJ-CSRF'] = d0.csrf;
-    const r = await fetch(path, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: hd, body: JSON.stringify(body || {}) });
-    let d = null;
-    try { d = await r.json(); } catch (e) { d = null; }
-    return { st: r.status, d: d || {} };
+    for (let n = 0; ; n++) {
+      const d0 = n ? await authRefresh() : S.auth && S.auth.d, hd = { 'Content-Type': 'application/json' };
+      if (d0 && d0.csrf) hd['X-TJ-CSRF'] = d0.csrf;
+      const r = await fetch(path, { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: hd, body: JSON.stringify(body || {}) });
+      const d = await r.json().catch(() => null);
+      if (n || r.status !== 403 || !/CSRF/.test((d && d.error) || '')) return { st: r.status, d: d || {} };
+      csrfDrop();
+    }
   }
+  const csrfDrop = () => { S.csrf = ''; try { const u = window.__tjSetup.U; if (u && u.st) u.st.csrf = ''; } catch (e) {  } };
   function wipeLocal() {
     const KEEP = { tj_v2_theme: 1, tj_v2_scheme: 1, tj_v2_hide: 1, tj_v2_rand: 1, tj_v2_pgsize: 1 };
     [[window.localStorage, KEEP], [window.sessionStorage, null]].forEach(([st, keep]) => {
@@ -878,8 +881,7 @@
       AU_KEYS.forEach(k => { delete S.drafts[k]; });
       S.authPw = false; S.authErr = '';
       if (x.d.csrf && S.auth && S.auth.d) S.auth.d.csrf = x.d.csrf;
-      S.csrf = '';
-      try { const st9 = window.__tjSetup && window.__tjSetup.U && window.__tjSetup.U.st; if (st9) st9.csrf = ''; } catch (e) {  }
+      csrfDrop();
       toast('비밀번호를 바꿨어요' + (x.d.revoked ? ' · 다른 기기 ' + num(x.d.revoked) + '개는 로그아웃됐어요' : ''));
       authLoad(true); renderView();
       return;
@@ -952,7 +954,7 @@
     const actName = c => String(act[c] || c).split(' — ')[0];
     const rowH = r => { const todo = String(r.todo || '').split(',').map(x => x.trim()).filter(Boolean);
       return '<div class="covx"><div class="covxk">' + esc(r.kind || '') + '</div><dl>'
-        + [['api', r.api], ['bot', r.bot], ['miss', r.miss]].filter(x => x[1]).map(x => '<dt>' + esc(col[x[0]] || x[0]) + '</dt><dd' + (x[0] === 'miss' && !/^없음/.test(x[1]) ? ' class="wtxt"' : '') + '>' + esc(x[1]) + '</dd>').join('')
+        + ['api', 'bot', 'miss'].filter(k => r[k]).map(k => '<dt>' + esc(col[k] || k) + '</dt><dd' + (k === 'miss' && !/^없음/.test(r[k]) ? ' class="wtxt"' : '') + '>' + esc(r[k]) + '</dd>').join('')
         + (todo.length ? '<dt>' + esc(col.todo || '이용자가 할 일') + '</dt><dd>' + todo.map(c => '<span class="pill a sm" title="' + esc(act[c] || '') + '">' + esc(actName(c)) + '</span>').join(' ') + '</dd>' : '') + '</dl></div>'; };
     const srcH = e => '<details class="covd covxs"><summary><b>' + esc(e.name || e.id) + '</b>' + (e.used ? ' <span class="pill ok sm">사용 중</span>' : '') + ' <span class="cap num">' + arr(e.rows).length + '가지</span></summary>'
       + (e.perm ? '<div class="cap covxp">키 권한 · ' + esc(e.perm) + '</div>' : '') + arr(e.rows).map(rowH).join('') + '</details>';

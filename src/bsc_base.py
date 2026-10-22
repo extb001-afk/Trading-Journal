@@ -2,7 +2,7 @@ from __future__ import annotations
 import bisect
 import re
 import time
-import common
+import logs
 import bf_engine
 
 _now = time.time
@@ -236,7 +236,7 @@ def _balw_nostate(e) -> bool:
 
 def _nonce_why(e) -> str:
     parts = [str(x) for x in (getattr(e, "host", None), getattr(e, "kind", None)) if x]
-    msg = common.safe_err(e)[:160]
+    msg = logs.safe_err(e)[:160]
     return (" · ".join(parts) + " — " + msg) if parts else msg
 
 
@@ -355,7 +355,7 @@ class Rpc:
                 return d.get("result")
             except _BalwStop:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
                 self.i = (j + 1) % len(self.urls)
                 time.sleep(0.2)
@@ -385,7 +385,7 @@ class Rpc:
                 return res
             except _BalwStop:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 [fallback]
                 last = e
                 self.i = (self.i + 1) % len(self.urls)
         raise last if last else RuntimeError("batch: 노드 없음")

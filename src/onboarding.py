@@ -1,7 +1,6 @@
 """Setup wizard API (wallets, keys, Telegram) for the local web UI."""
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import ipaddress
@@ -18,15 +17,21 @@ import urllib.request
 import uuid
 
 import cgplan
-import common
+import config, ex_sign, logs, net_http, paths
+import db as dbm
+import csrf_gate
 import demo_data
-import settings_store as ss
+import exf_coinbase
+import reqclass
+import settings_store as ss, address_codec, runner_fp, settings_wallets
 
-log = common.setup_logging("tj-web")
+log = logs.setup_logging("tj-web")
 DEMO = os.environ.get("TJ_DEMO") == "1"
-SETUP_JS = os.path.join(common.BASE_DIR, "web", "v2", "setup.js")
+SETUP_JS = os.path.join(paths.BASE_DIR, "web", "v2", "setup.js")
 UA = "tj-bot/1.0 (self-hosted trade journal)"
 MAX_BODY = 64 * 1024
+SETUP_PROXY_DENY = ("리버스 프록시·터널로 연 화면에서는 설정(키·지갑·텔레그램)을 바꿀 수 없어요 — 이 컴퓨터나 테일넷 주소로 열어 바꾸세요. "
+                    "터널에서도 바꾸려면 config.json 의 web.setup_allow_proxy 를 true 로(재시작 필요 없음)")
 
 
 def _hostname(host_header: str) -> str:
@@ -52,34 +57,9 @@ def host_allowed(host_header: str) -> bool:
         return True
     try:
         extra = (ss.read_config_raw().get("web") or {}).get("allowed_hosts") or []
-    except Exception:
+    except Exception:  # noqa: BLE001 [fallback]
         extra = []
     return h in {str(x).lower() for x in extra}
-
-
-_TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
-_TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
-
-
-def _setup_allow_lan() -> bool:
-    try:
-        return (ss.read_config_raw().get("web") or {}).get("setup_allow_lan") is True
-    except Exception:
-        return False
-
-
-def client_allowed(ip: str) -> bool:
-    try:
-        a = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    if getattr(a, "ipv4_mapped", None):
-        a = a.ipv4_mapped
-    if a.is_loopback:
-        return True
-    if (a.version == 4 and a in _TAILNET_V4) or (a.version == 6 and a in _TAILNET_V6):
-        return True
-    return bool(a.is_private) and _setup_allow_lan()
 
 
 def origin_ok(h, required: bool) -> bool:
@@ -129,18 +109,16 @@ class RateLimit:
 RL = RateLimit()
 
 
-def scrub(msg, extra=()) -> str:
-    s = str(msg)
+_SCRUB_RES = (re.compile(r"(bot)\d+:[A-Za-z0-9_-]{10,}"), re.compile(r"(?i)(api[-_]?key=)[^&\s\"']+"))
+
+
+def scrub(msg: object, extra: object = ()) -> str:
     vals = [v for v in list(ss.read_env().values()) + list(extra) if v and len(v) >= 4]
-    for v in sorted(vals, key=len, reverse=True):
-        s = s.replace(v, "••••")
-    s = re.sub(r"bot\d+:[A-Za-z0-9_-]{10,}", "bot••••", s)
-    s = re.sub(r"(api[-_]?key=)[^&\s\"']+", r"\1••••", s, flags=re.I)
-    return s[:300]
+    return logs.redact_secret_text(str(msg), generic=False, extra=vals, extra_min=4, dashless=True, patterns=_SCRUB_RES)[:300]
 
 
 def demo_synth() -> bool:
-    return DEMO and not os.path.exists(common.CONFIG_PATH)
+    return DEMO and not os.path.exists(paths.CONFIG_PATH)
 
 
 def why_text(e, what: str) -> str:
@@ -210,14 +188,14 @@ def _cg_probe(key: str, cached: bool = False) -> dict:
         return c[1]
     try:
         prefer = (cgplan.Store().load(key) or {}).get("plan")
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         prefer = None
 
     def reserve():
         try:
             import nft
             return nft.cg_reserve(key)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             log.warning("코인게코 확인 예산 확인 실패: %s", type(e).__name__)
             return "store"
     r = cgplan.probe(key, lambda u, h: _http(u, h), base=_cg_base, prefer=prefer, reserve=reserve)
@@ -232,7 +210,7 @@ def _cg_ours() -> int:
     try:
         import nft
         return nft.shared_budget().month_count("coingecko_key")
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return 0
 
 
@@ -240,7 +218,7 @@ def _cg_status(key: str) -> dict:
     st = cgplan.Store()
     try:
         rec = st.load(key) if key else None
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         rec = None
     return cgplan.status(rec, None, st.share(), _cg_ours())
 
@@ -258,14 +236,14 @@ def _cg_record(key: str, r: dict, how: str) -> None:
             f.update(info=None, info_at=None)
     try:
         cgplan.Store().save(key, **f)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [optional]
         log.warning("코인게코 키 등급 기록 실패: %s", type(e).__name__)
 
 
 def _http(url: str, headers=None, data=None, method=None, timeout=12, sol=False):
     h = {"User-Agent": UA, "Accept": "application/json"}
     h.update(headers or {})
-    req = urllib.request.Request(url, headers=h, data=data, method=method)
+    req = net_http.request(url, headers=h, data=data, method=method)
     try:
         import bf_engine as _bfe9
         with _bfe9.sol_open(req, timeout, sol=sol, no_redirect=True) as r:
@@ -280,15 +258,8 @@ def _http(url: str, headers=None, data=None, method=None, timeout=12, sol=False)
         return code, raw.decode("utf-8", "replace")[:300]
 
 
-def _b64u(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-
-
 def _jwt_hs256(payload: dict, secret: str) -> str:
-    h = _b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    p = _b64u(json.dumps(payload).encode())
-    s = _b64u(hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest())
-    return f"{h}.{p}.{s}"
+    return ex_sign.jwt_hs256(payload, secret)
 
 
 def _err_text(code, d) -> str:
@@ -311,7 +282,8 @@ def _ip_hint(text: str) -> str:
     return ""
 
 
-PERM_VERIFIABLE = ("binance", "bybit", "okx")
+PERM_VERIFIABLE = ("binance", "bybit", "okx", "coinbase")
+EC_KEY_FIELDS = frozenset(("TJ_COINBASE_SECRET",))
 PERM_WHY = ("이 봇은 잔고·내역 조회만 합니다 — 거래·출금·이체 권한은 전혀 쓰지 않습니다. 그런데 키는 이 서버 .env 에 저장되므로, "
             "서버·백업·화면 공유 중 어디서든 키가 새면 거래 권한으로는 남이 내 계정에서 사고팔아 자산을 빼돌릴 수 있고"
             "(유동성 없는 코인을 비싸게 사게 만드는 식), 출금 권한으로는 바로 외부 주소로 보낼 수 있으며, 이체 권한으로는 계정 사이로 자산을 옮길 수 있습니다. "
@@ -332,8 +304,13 @@ PERM_FIX = {
             "Create API key 에서 권한은 Read 만 체크하세요 (Trade·Withdraw 체크 금지)",
             "IP 허용 목록에 이 서버 공인 IP 를 넣으세요",
             "새 API Key·Secret·Passphrase 를 여기에 다시 넣으세요"],
+    "coinbase": ["코인베이스 개발자 플랫폼(portal.cdp.coinbase.com) → API Keys 에서 이 키를 삭제하세요",
+                 "Secret API Keys → Create API key 로 새 키를 만드세요",
+                 "API restrictions 에서 View 만 체크하세요 (Trade·Transfer 체크 금지)",
+                 "Advanced settings → Signature algorithm = ECDSA · IP allowlist 에 이 서버 공인 IP",
+                 "새 API key name·Private key 를 여기에 다시 넣으세요"],
 }
-PERM_NOT_CHECKABLE = ("이 거래소(업비트·빗썸·쿠코인·게이트)는 API 로 키 권한을 확인할 수 없습니다 — 자동 확인은 바이낸스·바이비트·OKX 만 됩니다. "
+PERM_NOT_CHECKABLE = ("이 거래소(업비트·빗썸·쿠코인·게이트)는 API 로 키 권한을 확인할 수 없습니다 — 자동 확인은 바이낸스·바이비트·OKX·코인베이스만 됩니다. "
                       "발급 화면에서 '조회' 권한만 켰는지 직접 확인하세요")
 PERM_RETRY = "키 권한을 자동으로 확인하지 못해 저장하지 않았습니다 — 잠시 뒤 다시 저장하세요(이 거래소는 '조회 권한만 켰음' 체크로 대신할 수 없습니다)"
 
@@ -426,6 +403,55 @@ def _perm_okx(perm):
     return d
 
 
+def _uid_of(v):
+    s = str(v).strip() if isinstance(v, (int, str)) and not isinstance(v, bool) else ""
+    return s if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", s) else None
+
+
+def _api_rec(group: str, vals: dict, r: dict) -> dict:
+    uid = r.get("_uid") if isinstance(r, dict) else None
+    key = vals.get(ss.GROUPS[group]["fields"][0][0])
+    return dict({"how": "api", "at": int(time.time())}, **({"uid": uid, "kfp": cgplan.kfp(key)} if uid else {}))
+
+
+def _key_value_in(k: str, raw: object) -> tuple:
+    v = str(raw or "").strip()
+    if not v or k not in EC_KEY_FIELDS:
+        return v, None
+    try:
+        return ex_sign.ec_key_body(v), None
+    except ValueError as key_err:
+        return "", "코인베이스 비밀키 형식이 맞지 않아요 — " + str(key_err)[:120] + " (ECDSA 키의 Private key 전체를 붙여넣으세요)"
+
+
+def _test_coinbase(v: list) -> dict:
+    base = _base("coinbase", "https://" + exf_coinbase.HOST)
+
+    def call(path, qs=""):
+        now_s = int(time.time())
+        claims = {"sub": v[0], "iss": "cdp", "nbf": now_s, "exp": now_s + exf_coinbase.JWT_TTL, "uri": f"GET {exf_coinbase.HOST}{path}"}
+        tok = ex_sign.jwt_es256(claims, v[1], v[0], uuid.uuid4().hex)
+        return _http(base + path + (("?" + qs) if qs else ""), {"Authorization": "Bearer " + tok})
+    try:
+        code, d = call("/api/v3/brokerage/accounts", "limit=250")
+    except ValueError as e:
+        return {"ok": False, "detail": "비밀키 형식 오류 — " + str(e)[:120]}
+    if not (code == 200 and isinstance(d, dict) and isinstance(d.get("accounts"), list)):
+        t = _err_text(code, d)
+        return {"ok": False, "detail": t + _ip_hint(t), "http": code}
+    n = sum(1 for a in d["accounts"] if isinstance(a, dict) and str((a.get("available_balance") or {}).get("value") or "0") not in ("0", "0.0", ""))
+    c2, r = call("/api/v3/brokerage/key_permissions")
+    perm = _perm_result(None, f"권한 조회 실패({_err_text(c2, r)})")
+    warn = []
+    if c2 == 200 and isinstance(r, dict):
+        perm = _perm_result(exf_coinbase.perm_of(r))
+        if perm["danger"]:
+            warn.append("Trade·Transfer 권한이 켜져 있습니다 — View 만 켠 키로 다시 만드세요")
+        if str(r.get("portfolio_type") or "") not in ("DEFAULT", ""):
+            warn.append("이 키는 기본(Default) 포트폴리오가 아닌 곳의 키입니다 — 그 포트폴리오만 보입니다")
+    return {"ok": True, "detail": f"잔고 조회 성공 · 보유 자산 {n}종", "warn": warn, "perm": perm}
+
+
 def _perm_result(danger, note=""):
     if danger is None:
         return {"checked": False, "danger": [], "note": note or "키 권한 응답을 해석하지 못했습니다"}
@@ -450,7 +476,7 @@ def perm_gate(group: str, vals: dict, ack: bool):
             return {"ok": False, "permBlock": info,
                     "error": info["title"] + " — 저장하지 않았습니다. 조회 전용 키로 다시 만들어 넣어 주세요"}, None
         if p.get("checked"):
-            return None, {"how": "api", "at": int(time.time())}
+            return None, _api_rec(group, vals, r)
         if not r.get("ok") and r.get("detail"):
             why = scrub(r.get("detail"), vals.values())
             return {"ok": False, "permRetry": True, "reason": why,
@@ -483,8 +509,8 @@ def _test_group(group: str, v: list) -> dict:
         if group == "helius":
             import bf_engine as _bfe9
             try:
-                _bfe9.helius_configure(common.load_config())
-            except (Exception, SystemExit):
+                _bfe9.helius_configure(config.load_config())
+            except (Exception, SystemExit):   # noqa: BLE001 [optional]
                 pass
             if not _bfe9.HELIUS.take("web", 1, kind="must"):
                 return {"ok": False, "detail": "Helius 오늘 호출 예산을 다 써서 지금은 확인을 미뤄요(" + str(_bfe9.HELIUS.last_why()) + ") — UTC 0시(한국 오전 9시) 뒤 다시"}
@@ -542,7 +568,7 @@ def _test_group(group: str, v: list) -> dict:
 
             def call(path):
                 qs = urllib.parse.urlencode({"timestamp": int(time.time() * 1000), "recvWindow": 10000})
-                sig = hmac.new(v[1].encode(), qs.encode(), hashlib.sha256).hexdigest()
+                sig = ex_sign.binance_sign(v[1], qs)
                 return _http(f"{base}{path}?{qs}&signature={sig}", {"X-MBX-APIKEY": v[0]})
             code, d = call("/api/v3/account")
             if not (code == 200 and isinstance(d, dict) and "balances" in d):
@@ -562,14 +588,14 @@ def _test_group(group: str, v: list) -> dict:
                     warn.append("이체 권한이 켜져 있습니다 — 조회 전용 키로 다시 만드세요")
                 if not r.get("ipRestrict"):
                     warn.append("IP 제한이 꺼져 있습니다 — 이 서버 IP 로 제한하길 권장")
-            return {"ok": True, "detail": f"잔고 조회 성공 · 보유 자산 {n}종", "warn": warn, "perm": perm}
+            return {"ok": True, "detail": f"잔고 조회 성공 · 보유 자산 {n}종", "warn": warn, "perm": perm, "_uid": _uid_of(d.get("uid"))}
         if group == "bybit":
             base = _base("bybit", "https://api.bybit.com")
 
             def call(path, params):
                 qs = urllib.parse.urlencode(params)
                 ts, recv = str(int(time.time() * 1000)), "10000"
-                sig = hmac.new(v[1].encode(), (ts + v[0] + recv + qs).encode(), hashlib.sha256).hexdigest()
+                sig = ex_sign.bybit_sign(v[1], ts, v[0], recv, qs)
                 return _http(f"{base}{path}" + (f"?{qs}" if qs else ""),
                              {"X-BAPI-API-KEY": v[0], "X-BAPI-TIMESTAMP": ts, "X-BAPI-RECV-WINDOW": recv, "X-BAPI-SIGN": sig})
             code, d = call("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
@@ -577,9 +603,10 @@ def _test_group(group: str, v: list) -> dict:
                 t = _err_text(code, d)
                 return {"ok": False, "detail": t + _ip_hint(t)}
             c2, r = call("/v5/user/query-api", {})
-            perm = _perm_result(None, f"권한 조회 실패({_err_text(c2, r)})")
+            perm, uid = _perm_result(None, f"권한 조회 실패({_err_text(c2, r)})"), None
             if isinstance(r, dict) and r.get("retCode") == 0:
                 res = r.get("result") or {}
+                uid = _uid_of(res.get("userID") if isinstance(res, dict) else None)
                 perm = _perm_result(_perm_bybit(res))
                 ks = {x["kind"] for x in perm["danger"]}
                 if "trade" in ks:
@@ -588,13 +615,15 @@ def _test_group(group: str, v: list) -> dict:
                     warn.append("출금 권한이 켜져 있습니다 — 조회 전용 키로 다시 만드세요")
                 if not res.get("ips") or res.get("ips") == ["*"]:
                     warn.append("IP 제한이 없습니다 — 이 서버 IP 로 제한하길 권장")
-            return {"ok": True, "detail": "잔고 조회 성공 (Unified 계정)", "warn": warn, "perm": perm}
+            return {"ok": True, "detail": "잔고 조회 성공 (Unified 계정)", "warn": warn, "perm": perm, "_uid": uid}
+        if group == "coinbase":
+            return _test_coinbase(v)
         if group == "okx":
             base = _base("okx", "https://www.okx.com")
 
             def call(path):
                 ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int(time.time() * 1000) % 1000:03d}Z"
-                sig = base64.b64encode(hmac.new(v[1].encode(), (ts + "GET" + path).encode(), hashlib.sha256).digest()).decode()
+                sig = ex_sign.okx_sign(v[1], ts, "GET", path)
                 return _http(base + path, {"OK-ACCESS-KEY": v[0], "OK-ACCESS-SIGN": sig, "OK-ACCESS-TIMESTAMP": ts,
                                            "OK-ACCESS-PASSPHRASE": v[2]})
             code, d = call("/api/v5/account/balance")
@@ -602,20 +631,21 @@ def _test_group(group: str, v: list) -> dict:
                 t = _err_text(code, d)
                 return {"ok": False, "detail": t + _ip_hint(t)}
             c2, r = call("/api/v5/account/config")
-            perm = _perm_result(None, f"권한 조회 실패({_err_text(c2, r)})")
+            perm, uid = _perm_result(None, f"권한 조회 실패({_err_text(c2, r)})"), None
             if isinstance(r, dict) and str(r.get("code")) == "0" and r.get("data") and isinstance(r["data"], list):
                 p9 = (r["data"][0].get("perm") if isinstance(r["data"][0], dict) else None)
+                uid = _uid_of(r["data"][0].get("uid") if isinstance(r["data"][0], dict) else None)
                 perm = _perm_result(_perm_okx(p9))
                 p9 = str(p9 or "")
                 if perm["danger"]:
                     warn.append(f"키 권한이 '{p9[:60]}' 입니다 — Read 만 켠 키로 다시 만드세요")
-            return {"ok": True, "detail": "잔고 조회 성공", "warn": warn, "perm": perm}
+            return {"ok": True, "detail": "잔고 조회 성공", "warn": warn, "perm": perm, "_uid": uid}
         if group == "kucoin":
             base = _base("kucoin", "https://api.kucoin.com")
             path = "/api/v1/accounts"
             ts = str(int(time.time() * 1000))
-            sig = base64.b64encode(hmac.new(v[1].encode(), (ts + "GET" + path).encode(), hashlib.sha256).digest()).decode()
-            pph = base64.b64encode(hmac.new(v[1].encode(), v[2].encode(), hashlib.sha256).digest()).decode()
+            sig = ex_sign.kucoin_sign(v[1], ts, "GET", path)
+            pph = ex_sign.kucoin_passphrase(v[1], v[2])
             code, d = _http(base + path, {"KC-API-KEY": v[0], "KC-API-SIGN": sig, "KC-API-TIMESTAMP": ts,
                                           "KC-API-PASSPHRASE": pph, "KC-API-KEY-VERSION": "2"})
             if isinstance(d, dict) and str(d.get("code")) == "200000":
@@ -626,14 +656,13 @@ def _test_group(group: str, v: list) -> dict:
             base = _base("gate", "https://api.gateio.ws")
             path = "/api/v4/spot/accounts"
             ts = str(int(time.time()))
-            payload = f"GET\n{path}\n\n{hashlib.sha512(b'').hexdigest()}\n{ts}"
-            sig = hmac.new(v[1].encode(), payload.encode(), hashlib.sha512).hexdigest()
+            sig = ex_sign.gate_sign(v[1], "GET", path, "", hashlib.sha512(b'').hexdigest(), ts)
             code, d = _http(base + path, {"KEY": v[0], "Timestamp": ts, "SIGN": sig})
             if code == 200 and isinstance(d, list):
                 return {"ok": True, "detail": f"잔고 조회 성공 · 자산 {len(d)}종"}
             t = _err_text(code, d)
             return {"ok": False, "detail": t + _ip_hint(t), "http": code}
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         log.warning("키 시험 연결 실패(%s): %s", group, scrub(e, v)[:200])
         return {"ok": False, "detail": "연결 실패 — " + net_why(e)}
     return {"ok": False, "detail": "알 수 없는 대상"}
@@ -739,7 +768,7 @@ def tg_poll() -> dict:
         try:
             _tg_send(token, found["id"], "[tj-bot] 알림 연결 완료 — 이 채팅으로 목표가·손절·분류 알림이 옵니다.")
         except RuntimeError as e:
-            return {"ok": False, "error": common.safe_err(e)}
+            return {"ok": False, "error": logs.safe_err(e)}
         _tg(token, "getUpdates", {"offset": p["offset"], "timeout": 0})
         _tg_save(token, found["id"], p["bot"], info)
         TG["p"] = None
@@ -767,7 +796,7 @@ def tg_manual(chat_id: str, token: str = "") -> dict:
         try:
             _tg_send(tok, chat_id, "[tj-bot] 알림 연결 완료 (chat_id 직접 입력).")
         except RuntimeError as e:
-            return {"ok": False, "error": common.safe_err(e) + " — 봇에게 먼저 /start 를 보냈는지, 그룹이면 봇을 초대했는지 확인하세요"}
+            return {"ok": False, "error": logs.safe_err(e) + " — 봇에게 먼저 /start 를 보냈는지, 그룹이면 봇을 초대했는지 확인하세요"}
         _tg_save(tok, chat_id, bot, {"type": "manual", "name": ""})
         TG["p"] = None
     return {"ok": True, "connected": True}
@@ -780,7 +809,7 @@ def tg_test() -> dict:
     try:
         _tg_send(tok, chat, "[tj-bot] 테스트 알림입니다.")
     except RuntimeError as e:
-        return {"ok": False, "error": common.safe_err(e)}
+        return {"ok": False, "error": logs.safe_err(e)}
     return {"ok": True}
 
 
@@ -793,10 +822,10 @@ def tg_disconnect() -> dict:
 
 
 def _recon_done() -> list:
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return []
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=3)
         try:
             return [r[0][len("recon_done_"):] for r in c.execute("SELECT k FROM meta WHERE k LIKE 'recon_done_%'")]
         finally:
@@ -812,23 +841,23 @@ def _node_apply(group: str, key_change: bool = False) -> dict:
     try:
         import nodekeys
         hot9 = key_change and group in nodekeys.HOT_KEYS
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         hot9 = False
     if hot9:
         try:
             import chainoff
             return dict(chainoff.apply_info(), restart=False)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             return {"mode": "", "manual": "", "restart": False}
     try:
         import wallet_register as wr
         wr._record_reload({"ts": int(time.time()), "chains": ["bsc", "base"], "source": "nodekeys:" + str(group)[:20], "units": list(NODE_UNITS)})
-    except Exception:
+    except Exception:   # noqa: BLE001 [optional]
         pass
     try:
         import chainoff
         return chainoff.apply_info()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {"mode": "", "manual": "pm2 restart " + " ".join(NODE_UNITS)}
 
 
@@ -903,7 +932,7 @@ def _node_test(group: str, got: dict) -> dict:
                 bal = _node_rpc(u, "eth_getBalance", [probe[c], hex(max(1, head - back[c]))])
                 r["archive"] = isinstance(bal, str) and bal.startswith("0x")
                 r["ok"] = True
-            except Exception as e:
+            except Exception as e:   # noqa: BLE001 [fallback]
                 r["err"] = _node_err(e)
             out.append(r)
     if not out:
@@ -951,7 +980,7 @@ def _qn_test(env9: dict) -> dict:
                 r["ok"] = r["trace"]
                 if not r["trace"]:
                     r["err"] = "trace 응답 형식 이상"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         r["err"] = _node_err(e, auth=QN_AUTH_TXT)
     det = "Base " + ("최신 블록 OK · 내부 이동 trace 됨 — Base 옛 거래 내부 이동 채우기에만 써요" if r["ok"] else "실패 — " + r.get("err", ""))
     if r["ok"] and nodekeys.qn_kh(env9) == nodekeys.qn_kh() and _qn_clear():
@@ -966,7 +995,7 @@ def _qn_clear() -> bool:
     try:
         import nodekeys
         return nodekeys.qn_reject_clear()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -974,14 +1003,14 @@ def _alch_clear() -> bool:
     try:
         import nodekeys
         return nodekeys.alch_reject_clear()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
 def _cn_rpc(u: str, method: str, params: list, timeout: float = 15.0):
     try:
         return _node_rpc(u, method, params, timeout=timeout)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         ra9 = getattr(e, "retry_after", None)
         if getattr(e, "kind", "") != "http429" or isinstance(ra9, bool) or not isinstance(ra9, (int, float)) or not 0 < ra9 <= CN_TEST_RETRY_MAX:
             raise
@@ -1033,7 +1062,7 @@ def _cn_test(env9: dict) -> dict:
                 r["ok"] = r["trace"]
                 if not r["trace"]:
                     r["err"] = "trace 응답 형식 이상"
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         r["err"] = err9(e)
     det = "Base " + ("최신 블록 OK · 내부 이동 trace 됨 — Base 거래 내부 이동 확인에 먼저 써요(최근 약 한 달 반 · 그보다 옛 거래는 다음 노드)" if r["ok"]
                      else "실패 — " + r.get("err", ""))
@@ -1054,7 +1083,7 @@ def _alchemy_test(env9: dict) -> dict:
         try:
             r["head"] = int(str(_node_rpc(u, "eth_blockNumber", [])), 16)
             r["ok"] = True
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             r["err"] = _node_err(e, auth="키 거부 또는 이 네트워크가 앱에서 꺼져 있음(Alchemy 대시보드 › 앱 › Networks 에서 켜기)")
         out.append(r)
     if not out:
@@ -1096,7 +1125,7 @@ def _node_save_probe(group: str, got: dict) -> tuple:
     for nm, u in tgt:
         try:
             _node_rpc(u, "eth_blockNumber", [], timeout=12)
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [fallback]
             if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) in rej9:
                 if group == "quicknode":
                     rejs9.append(f"{nm} 노드가 이 주소를 거부했어요(HTTP {int(e.code)} — 1개월 체험이 끝났으면 유료로 바꾸세요)")
@@ -1129,7 +1158,7 @@ def _alchemy_save_net() -> tuple:
                 return n9, "Ethereum"
         if nets:
             return nets[0][1], nets[0][0].capitalize()
-    except (Exception, SystemExit):
+    except (Exception, SystemExit):   # noqa: BLE001 [optional]
         pass
     return "eth-mainnet", "Ethereum"
 
@@ -1160,10 +1189,10 @@ def _iga(word: str) -> str:
 
 
 def _recon_late() -> set:
-    if not os.path.exists(common.DB_PATH):
+    if not os.path.exists(paths.DB_PATH):
         return set()
     try:
-        c = sqlite3.connect(common.sqlite_ro_uri(common.DB_PATH), uri=True, timeout=3)
+        c = dbm.connect(paths.sqlite_ro_uri(paths.DB_PATH), uri=True, timeout=3)
         try:
             rd = {}
             for k, v in c.execute("SELECT k, v FROM meta WHERE k LIKE 'recon_done_%'"):
@@ -1204,19 +1233,19 @@ def status() -> dict:
         raw = demo_data.demo_config()
     try:
         cfg = ss.load_config_quiet()
-    except Exception:
+    except Exception:  # noqa: BLE001 [fallback]
         cfg = raw
     st = ss.read_settings()
-    wl = ss.wallet_list(raw)
+    wl = settings_wallets.wallet_list(raw)
     try:
-        cwl = ss.chain_wallet_list(raw)
-    except Exception:
+        cwl = settings_wallets.chain_wallet_list(raw)
+    except Exception:   # noqa: BLE001 [fallback]
         cwl = []
     late9 = _recon_late()
     try:
         import wallet_register as _wr
         wait9 = _wr.pending_addrs() if _wr.auto_reload_alive() else set()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         wait9 = set()
     for w in wl:
         a9 = str(w.get("address") or "")
@@ -1231,14 +1260,14 @@ def status() -> dict:
         return {"name": g["name"], "set": all(x["set"] for x in fields),
                 "partial": any(x["set"] for x in fields) or any(bool(env.get(k)) for k in g.get("legacy", ())),
                 "fields": fields}
-    runners = ss.runner_status()
+    runners = runner_fp.runner_status()
     units = {}
     if runners:
-        for u in ss.runner_units(cfg):
+        for u in runner_fp.runner_units(cfg):
             hb = runners.get(u)
             try:
-                ready, why, fp = ss.unit_inputs(u, cfg, env)
-            except BaseException:
+                ready, why, fp = runner_fp.unit_inputs(u, cfg, env)
+            except BaseException:  # noqa: BLE001 [fallback]
                 ready, why, fp = False, "설정 읽기 실패", ""
             if not hb:
                 units[u] = {"state": "unknown"}
@@ -1301,38 +1330,44 @@ def status() -> dict:
                   "mode": ("reload" if runners and all(h9.get("by") == "reload" for h9 in runners.values()) else ("runner" if runners else "")),
                   "manual": "pm2 restart tj-evm tj-sol tj-bsc tj-core tj-web"},
         "backfillMonths": raw.get("backfill_months", 5),
-        "walletCap": {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH},
+        "walletCap": {"max": settings_wallets.MAX_ADDRESSES, "batch": settings_wallets.MAX_BATCH},
         "depaddr": dep,
         "perp": _perp_status(raw),
     }
+
+
+def _status_for(h) -> dict:
+    d = status()
+    d["csrf"] = csrf_gate.token_for(h)
+    return d
 
 
 def _nonevm_status() -> list:
     try:
         import chain_registry as reg
         return [{"key": c, "name": reg.display_name(c), "native": reg.native_symbol(c), "available": reg.available(c)} for c in reg.CHAINS]
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return []
 
 
 def _evm_needs_keys(raw) -> bool:
     try:
         return ss.needs_etherscan(raw)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
 def _evm_needs_alchemy(raw) -> bool:
     try:
         return ss.needs_alchemy(raw)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
 def _evm_needs_ankr(raw) -> bool:
     try:
         return ss.needs_ankr(raw)
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return False
 
 
@@ -1342,24 +1377,24 @@ def _tier_view(raw_path: str) -> dict:
         import addr_tier
         q = _up.parse_qs(raw_path.partition("?")[2])
         try:
-            add_n = max(0, min(ss.MAX_ADDRESSES, int((q.get("add") or ["0"])[0])))
+            add_n = max(0, min(settings_wallets.MAX_ADDRESSES, int((q.get("add") or ["0"])[0])))
         except ValueError:
             add_n = 0
         chains = [c for c in ((q.get("chains") or [""])[0]).split(",") if re.fullmatch(r"[a-z0-9_]{1,24}", c or "")][:40]
         try:
             cfg = ss.load_config_quiet()
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             cfg = {}
         out = addr_tier.web_view(cfg, add_n=add_n, add_chains=chains)
         try:
             import inflow_probe
             out["inflow"] = inflow_probe.web_view(cfg)
-        except Exception:
+        except Exception:   # noqa: BLE001 [fallback]
             out["inflow"] = None
         raw = ss.read_config_raw()
-        out["cap"] = {"max": ss.MAX_ADDRESSES, "batch": ss.MAX_BATCH, "n": len({ss._addr_key(w) for w in raw.get("wallets") or []})}
+        out["cap"] = {"max": settings_wallets.MAX_ADDRESSES, "batch": settings_wallets.MAX_BATCH, "n": len({settings_wallets.addr_key(w) for w in raw.get("wallets") or []})}
         return out
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         return {"ok": False, "error": why_text(e, "확인 주기 정보")}
 
 
@@ -1374,7 +1409,7 @@ def _explorers_status(grp) -> dict:
         if cg.get("set"):
             try:
                 cg["plan"] = _cg_status(ss.env_value(cgplan.ENV_KEY))
-            except Exception:
+            except Exception:   # noqa: BLE001 [fallback]
                 cg["plan"] = cgplan.status(None)
     return out
 
@@ -1383,7 +1418,7 @@ def _nodes_status() -> dict:
     try:
         import nodekeys
         return nodekeys.status()
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {}
 
 
@@ -1397,7 +1432,7 @@ def _helius_fresh_status(raw) -> dict:
         np9 = ss.read_settings().get(nodekeys.PLANS_KEY)
         h9 = np9.get("helius") if isinstance(np9, dict) and isinstance(np9.get("helius"), dict) else {}
         return {"burst": bool(fx9 and fx9.get("x", 1) > 1), "since": nodekeys._fresh_str(h9.get("fresh_since"))}
-    except Exception:
+    except Exception:   # noqa: BLE001 [fallback]
         return {"burst": False, "since": None}
 
 
@@ -1405,8 +1440,8 @@ def _perp_status(raw) -> dict:
     try:
         import perp_dex
         return {"dexes": [{"key": k, "name": v["name"], "kind": v["kind"]} for k, v in perp_dex.DEXES.items()],
-                "wallets": ss.perp_list(raw), "state": perp_dex.status(raw), "max": ss.MAX_PERP}
-    except Exception as e:
+                "wallets": settings_wallets.perp_list(raw), "state": perp_dex.status(raw), "max": settings_wallets.MAX_PERP}
+    except Exception as e:   # noqa: BLE001 [fallback]
         return {"error": why_text(e, "퍼프 덱스 상태"), "dexes": [], "wallets": []}
 
 
@@ -1414,7 +1449,7 @@ def _depaddr_status(env) -> dict:
     try:
         import depaddr
         return depaddr.summary(env)
-    except Exception as e:
+    except Exception as e:   # noqa: BLE001 [fallback]
         return {"error": why_text(e, "입금주소 수집 현황")}
 
 
@@ -1430,31 +1465,31 @@ def handle_get(h, path: str) -> bool:
             h._send(200, f.read(), "application/javascript; charset=utf-8")
         return True
     if path == "/api/setup/status":
-        if not client_allowed(h.client_address[0]):
+        if not reqclass.client_allowed(h.client_address[0]):
             h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
             return True
-        h._send(200, status())
+        h._send(200, _status_for(h))
         return True
     if demo_synth() and path in ("/api/setup/tier", "/api/setup/chains"):
         try:
             h._send(200, demo_data.tier_view(getattr(h, "path", "") or "") if path == "/api/setup/tier" else demo_data.chains_view())
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             h._send(200, {"ok": False, "error": why_text(e, "확인 주기 정보" if path == "/api/setup/tier" else "체인 목록")})
         return True
     if path == "/api/setup/tier":
-        if not client_allowed(h.client_address[0]):
+        if not reqclass.client_allowed(h.client_address[0]):
             h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
             return True
         h._send(200, _tier_view(getattr(h, "path", "") or ""))
         return True
     if path == "/api/setup/chains":
-        if not client_allowed(h.client_address[0]):
+        if not reqclass.client_allowed(h.client_address[0]):
             h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
             return True
         try:
             import chainoff
             h._send(200, chainoff.summary())
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             h._send(200, {"ok": False, "error": why_text(e, "체인 목록")})
         return True
     if DEMO and path in ("/api/state", "/api/v2/state"):
@@ -1466,32 +1501,32 @@ def handle_get(h, path: str) -> bool:
     if demo_synth() and path == "/api/coverage_limits":
         try:
             h._send(200, {"ok": True, "data": demo_data.coverage()})
-        except Exception as e:
+        except Exception as e:   # noqa: BLE001 [optional]
             h._send(200, {"ok": False, "error": why_text(e, "수집 한계")})
         return True
-    if path == "/api/day_events" and (DEMO or not os.path.exists(common.DB_PATH)):
+    if path == "/api/day_events" and (DEMO or not os.path.exists(paths.DB_PATH)):
         h._send(200, {"ok": True, "n": 0, "counts": {}, "days": {}, "events": [], "hidden": []})
         return True
-    if path == "/api/tax_rows" and (DEMO or not os.path.exists(common.DB_PATH)):
+    if path == "/api/tax_rows" and (DEMO or not os.path.exists(paths.DB_PATH)):
         h._send(200, {"ok": True, "total": 0, "rows": []})
         return True
-    if path == "/api/curve_hist" and (DEMO or not os.path.exists(common.DB_PATH)):
+    if path == "/api/curve_hist" and (DEMO or not os.path.exists(paths.DB_PATH)):
         h._send(200, {"ok": True, "days": [], "building": False, "progress": {}})
         return True
-    if path == "/api/receipt" and (DEMO or not os.path.exists(common.DB_PATH)):
+    if path == "/api/receipt" and (DEMO or not os.path.exists(paths.DB_PATH)):
         h._send(200, {"ok": True, "empty": True})
         return True
-    if not DEMO and not os.path.exists(common.DB_PATH) and path in ("/api/fut_receipt", "/api/receipt_list", "/api/outflow_candidates"):
+    if not DEMO and not os.path.exists(paths.DB_PATH) and path in ("/api/fut_receipt", "/api/receipt_list", "/api/outflow_candidates"):
         h._send(200, {"ok": True, "empty": True, "n": 0, "items": []} if path != "/api/outflow_candidates" else
                 {"ok": True, "empty": True, "total": 0, "totalTok": 0, "totalStable": 0, "shown": 0, "quarN": 0, "cands": []})
         return True
-    if not DEMO and not os.path.exists(common.DB_PATH) and path == "/api/att_detail":
+    if not DEMO and not os.path.exists(paths.DB_PATH) and path == "/api/att_detail":
         h._send(200, {"ok": True, "days": {}})
         return True
-    if path in ("/api/state", "/api/v2/state") and not os.path.exists(common.DB_PATH):
+    if path in ("/api/state", "/api/v2/state") and not os.path.exists(paths.DB_PATH):
         try:
             cfg = ss.load_config_quiet()
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             cfg = {}
         h._send(200, demo_data.empty(cfg))
         return True
@@ -1522,21 +1557,13 @@ def handle_post(h, path: str) -> bool:
     if not origin_ok(h, required=True):
         h._send(403, {"ok": False, "error": "출처(Origin) 확인 실패 — 같은 화면에서만 요청할 수 있습니다"})
         return True
-    tok0 = h.headers.get("X-TJ-CSRF") or ""
-    if not tok0 or not hmac.compare_digest(tok0, ss.csrf_token()):
+    if not csrf_gate.check(h):
         h._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
         return True
     if not path.startswith("/api/setup/"):
         return False
-    if not client_allowed(h.client_address[0]):
-        h._send(403, {"ok": False, "error": "로컬·테일넷에서만 설정할 수 있습니다"})
-        return True
-    if not origin_ok(h, required=True):
-        h._send(403, {"ok": False, "error": "출처(Origin) 확인 실패"})
-        return True
-    tok = h.headers.get("X-TJ-CSRF") or ""
-    if not tok or not hmac.compare_digest(tok, ss.csrf_token()):
-        h._send(403, {"ok": False, "error": "CSRF 토큰 불일치 — 페이지를 새로고침하세요"})
+    if not reqclass.setup_client_ok(h):
+        h._send(403, {"ok": False, "error": SETUP_PROXY_DENY if reqclass.client_allowed(h.client_address[0]) else "로컬·테일넷에서만 설정할 수 있습니다"})
         return True
     if "application/json" not in (h.headers.get("Content-Type") or ""):
         h._send(415, {"ok": False, "error": "JSON 요청만 받습니다"})
@@ -1552,10 +1579,10 @@ def handle_post(h, path: str) -> bool:
     try:
         res = _dispatch(act, body)
     except ValueError as e:
-        res = {"ok": False, "error": common.safe_err(e)}
+        res = {"ok": False, "error": logs.safe_err(e)}
     except RuntimeError as e:
         res = {"ok": False, "error": scrub(e)}
-    except Exception as e:
+    except Exception as e:     # noqa: BLE001 [fallback]
         log.warning("setup %s 실패: %s", act, scrub(type(e).__name__))
         res = {"ok": False, "error": "저장하다 예상하지 못한 오류가 났어요 — 바뀐 것이 있는지 화면을 새로 고쳐 확인하고, 계속되면 tj-web 로그(pm2 logs tj-web)를 보세요"}
     code = 200 if res.get("ok") else (429 if res.get("rate") else 400)
@@ -1583,7 +1610,11 @@ def _limited(key, n, per):
 def _dispatch(act: str, b: dict) -> dict:
     if act == "wallets/add":
         import wallet_register
-        r = wallet_register.register_wallet(b.get("address"), b.get("chains") or [], b.get("label"), source="setup")
+        try:
+            r = wallet_register.register_wallet(b.get("address"), b.get("chains") or [], b.get("label"), source="setup",
+                                                confirm=b.get("confirm") is True)
+        except wallet_register.NeedConfirm as e:
+            return {"ok": False, "needConfirm": True, "error": str(e)}
         done = set(_recon_done())
         late = [c for c in r["chains"] if c in done]
         return {"ok": True, "added": r, "reconDone": late}
@@ -1594,18 +1625,21 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "addresses 는 주소 문자열 배열입니다"}
         if not isinstance(chains, list):
             return {"ok": False, "error": "chains 는 체인 이름 배열입니다"}
-        r = wallet_register.register_wallets(addrs, chains, source="setup")
+        confirmed = b.get("confirm") or []
+        if not (isinstance(confirmed, list) and len(confirmed) <= settings_wallets.MAX_BATCH and all(isinstance(x, str) for x in confirmed)):
+            return {"ok": False, "error": "confirm 은 확인한 주소 문자열 배열입니다"}
+        r = wallet_register.register_wallets(addrs, chains, source="setup", confirm=confirmed)
         done = set(_recon_done())
         late = sorted({c for x in r["results"] if x.get("status") == "added" for c in x.get("chains") or [] if c in done})
         return {"ok": True, "results": r["results"], "added": r["added"], "apply": r["apply"], "reconDone": late,
-                "max": ss.MAX_BATCH}
+                "max": settings_wallets.MAX_BATCH}
     if act == "wallets/check_now":
         import addr_tier
         a = b.get("address")
         if a is not None:
             if not isinstance(a, str) or not a.strip():
                 return {"ok": False, "error": "주소 형식이 아닙니다"}
-            _k, a, _n = ss.validate_address(a)
+            _k, a, _n = address_codec.validate_address(a)
         if not RL.hit("check_now", 30, 60):
             return {"ok": False, "rate": True, "error": "너무 자주 눌렀어요 — 1분 뒤 다시"}
         return addr_tier.request_check(a)
@@ -1622,22 +1656,22 @@ def _dispatch(act: str, b: dict) -> dict:
                                                   script_type=b.get("script_type"))
         return {"ok": True, "added": r}
     if act == "chain_wallets/remove":
-        n = ss.remove_chain_wallet(str(b.get("chain") or ""), b.get("address"))
+        n = settings_wallets.remove_chain_wallet(str(b.get("chain") or ""), b.get("address"))
         return {"ok": bool(n), "removed": n, **({} if n else {"error": "없는 지갑입니다"})}
     if act == "chain_wallets/label":
-        n = ss.rename_chain_wallet(str(b.get("chain") or ""), b.get("address"), b.get("label"))
+        n = settings_wallets.rename_chain_wallet(str(b.get("chain") or ""), b.get("address"), b.get("label"))
         return {"ok": bool(n), **({} if n else {"error": "없는 지갑입니다"})}
     if act == "wallets/remove":
-        n = ss.remove_wallet(b.get("address"))
+        n = settings_wallets.remove_wallet(b.get("address"))
         return {"ok": bool(n), "removed": n, **({} if n else {"error": "없는 주소입니다"})}
     if act == "perp/add":
-        r = ss.add_perp(str(b.get("dex") or ""), b.get("address"), b.get("label"))
+        r = settings_wallets.add_perp(str(b.get("dex") or ""), b.get("address"), b.get("label"))
         return {"ok": True, "added": r}
     if act == "perp/remove":
-        n = ss.remove_perp(str(b.get("dex") or ""), b.get("address"))
+        n = settings_wallets.remove_perp(str(b.get("dex") or ""), b.get("address"))
         return {"ok": bool(n), "removed": n, **({} if n else {"error": "없는 주소입니다"})}
     if act == "wallets/label":
-        n = ss.rename_wallet(b.get("address"), b.get("label"))
+        n = settings_wallets.rename_wallet(b.get("address"), b.get("label"))
         return {"ok": bool(n), **({} if n else {"error": "없는 주소입니다"})}
     if act == "keys/nodeplan":
         import nodekeys
@@ -1657,13 +1691,6 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": True, "heliusFresh": _helius_fresh_status(None), "apply": {"restart": False}}
         if p9 not in nodekeys.PROVIDERS:
             return {"ok": False, "error": "알 수 없는 서비스"}
-        plan9, share9, month9 = b.get("plan"), b.get("share"), b.get("month")
-        if plan9 not in ("free", "paid") or (nodekeys.PROVIDERS[p9]["paid_only"] and plan9 != "paid"):
-            return {"ok": False, "error": "요금제는 무료·유료 중 하나"}
-        if isinstance(share9, bool) or share9 not in nodekeys.SHARES:
-            return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
-        if month9 is not None and (isinstance(month9, bool) or not isinstance(month9, int) or not 0 < month9 <= 10 ** 12):
-            return {"ok": False, "error": "월 한도는 1 이상 정수(비우면 무료 한도 기준)"}
         fresh9 = b.get("fresh")
         if fresh9 is not None and not isinstance(fresh9, bool):
             return {"ok": False, "error": "'새로 받은 키' 값은 켜기·끄기만 됩니다"}
@@ -1672,6 +1699,13 @@ def _dispatch(act: str, b: dict) -> dict:
             np9 = dict(cur9.get(nodekeys.PLANS_KEY) or {}) if isinstance(cur9.get(nodekeys.PLANS_KEY), dict) else {}
             old9 = np9.get(p9) if isinstance(np9.get(p9), dict) else {}
             eff9 = nodekeys.plans(cur9).get(p9) or {}
+            plan9, share9, month9 = (b[k9] if k9 in b else eff9.get(k9) for k9 in ("plan", "share", "month"))
+            if plan9 not in ("free", "paid") or (nodekeys.PROVIDERS[p9]["paid_only"] and plan9 != "paid"):
+                return {"ok": False, "error": "요금제는 무료·유료 중 하나"}
+            if isinstance(share9, bool) or share9 not in nodekeys.SHARES:
+                return {"ok": False, "error": "사용 비율은 10·25·50·80(%) 중 하나만 됩니다"}
+            if month9 is not None and (isinstance(month9, bool) or not isinstance(month9, int) or not 0 < month9 <= 10 ** 12):
+                return {"ok": False, "error": "월 한도는 1 이상 정수(비우면 무료 한도 기준)"}
             new9 = {"plan": plan9, "share": share9, "month": month9}
             fs9 = old9.get("fresh_since") if fresh9 is None else (time.strftime("%Y-%m-%d", time.gmtime()) if fresh9 else None)
             if nodekeys._fresh_str(fs9):
@@ -1692,20 +1726,21 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "알 수 없는 대상"}
         fields = [k for k, _ in ss.GROUPS[g]["fields"]]
         if act == "keys/delete":
-            ss.write_env({k: None for k in fields + list(ss.GROUPS[g].get("legacy", ()))})
+            with ss.LOCK:
+                ss.write_env({k: None for k in fields + list(ss.GROUPS[g].get("legacy", ()))})
+                if ss.base_ex(g):
+                    _perm_record(g, None)
             if g == "quicknode":
                 _qn_clear()
             elif g == "alchemy":
                 _alch_clear()
             if g in ss.NODE_GROUPS:
                 return {"ok": True, "apply": _node_apply(g, key_change=True)}
-            if ss.base_ex(g):
-                _perm_record(g, None)
             if g == "coingecko":
                 _CG_PROBE.clear()
                 try:
                     cgplan.Store().clear()
-                except Exception:
+                except Exception:   # noqa: BLE001 [optional]
                     pass
             return {"ok": True}
         vals_in = b.get("values") if isinstance(b.get("values"), dict) else {}
@@ -1714,7 +1749,9 @@ def _dispatch(act: str, b: dict) -> dict:
             return {"ok": False, "error": "키 값은 글자로만 넣을 수 있어요"}
         vals = {}
         for k in fields:
-            v = str(vals_in.get(k) or "").strip()
+            v, bad_key = _key_value_in(k, vals_in.get(k))
+            if bad_key:
+                return {"ok": False, "error": bad_key}
             vals[k] = ss.validate_env_value(k, v) if v else ""
         if act == "keys/save" and g in ss.NODE_GROUPS:
             got = {k: v for k, v in vals.items() if v}
@@ -1772,11 +1809,11 @@ def _dispatch(act: str, b: dict) -> dict:
                     try:
                         if cgplan.Store().load(key9) is None:
                             cgplan.Store().clear()
-                    except Exception:
+                    except Exception:   # noqa: BLE001 [optional]
                         pass
                 try:
                     st9 = _cg_status(key9)
-                except Exception:
+                except Exception:   # noqa: BLE001 [fallback]
                     st9 = cgplan.status(None)
                 if r9.get("ok"):
                     note9 = {}
@@ -1805,7 +1842,10 @@ def _dispatch(act: str, b: dict) -> dict:
                 if pr9 == "unknown":
                     note9 = "연결은 확인하지 못했어요(" + why9 + ") — 잠시 뒤 '연결 테스트'로 다시 확인하세요"
             hchg9 = g == "helius" and any(str(ss.read_env().get(k) or "").strip() != v for k, v in vals.items())
-            ss.write_env(vals)
+            with ss.LOCK:
+                if rec:
+                    _perm_record(g, rec)
+                ss.write_env(vals)
             if hchg9:
                 import nodekeys
                 with ss.LOCK:
@@ -1814,13 +1854,12 @@ def _dispatch(act: str, b: dict) -> dict:
                     if isinstance(np9.get("helius"), dict) and "fresh_since" in np9["helius"]:
                         np9["helius"] = {k: v for k, v in np9["helius"].items() if k != "fresh_since"}
                         ss.update_settings(**{nodekeys.PLANS_KEY: np9})
-            if rec:
-                _perm_record(g, rec)
             if ss.base_ex(g):
                 try:
                     import depaddr
-                    depaddr.request_refresh(ss.base_ex(g))
-                except Exception:
+                    if ss.base_ex(g) in depaddr.EXCHANGES:
+                        depaddr.request_refresh(ss.base_ex(g))
+                except Exception:  # noqa: BLE001 [optional]
                     pass
             return {"ok": True, **({"note": note9} if note9 else {})}
         if g in ss.NODE_GROUPS:
@@ -1834,6 +1873,7 @@ def _dispatch(act: str, b: dict) -> dict:
         stored = ss.read_env()
         vals = {k: (vals[k] or stored.get(k, "")) for k in fields}
         r = test_group(g, vals)
+        r.pop("_uid", None)
         cg9 = r.pop("_cg", None)
         if g == "coingecko" and cg9 and cg9.get("ok") and vals.get(fields[0]) and vals[fields[0]] == ss.env_value(fields[0]):
             _cg_record(vals[fields[0]], cg9, "test")
@@ -1852,7 +1892,7 @@ def _dispatch(act: str, b: dict) -> dict:
         if ex != "all" and ex not in ss.EXCHANGES:
             return {"ok": False, "error": "알 수 없는 거래소"}
         targets = [e for e in (ss.EXCHANGES if ex == "all" else [ex])
-                   if all(env.get(k) for k, _ in ss.EXCHANGES[e]["fields"])]
+                   if e in depaddr.EXCHANGES and all(env.get(k) for k, _ in ss.EXCHANGES[e]["fields"])]
         if not targets:
             return {"ok": False, "error": "조회 키가 저장된 거래소가 없습니다"}
         lim = _limited("depaddr:" + ex, 4, 60)
@@ -1888,7 +1928,7 @@ def _dispatch(act: str, b: dict) -> dict:
         try:
             code, d = _http(_base("ipify", "https://api.ipify.org") + "/?format=json", timeout=8)
             ip = str((d or {}).get("ip") or "") if isinstance(d, dict) else ""
-        except Exception:
+        except Exception:  # noqa: BLE001 [fallback]
             ip = ""
         return {"ok": bool(ip), "ip": ip, **({} if ip else {"error": "공인 IP 조회 실패"})}
     return {"ok": False, "error": "알 수 없는 요청"}
@@ -1946,6 +1986,9 @@ class DemoBuilder:
             return self.fut_chart(iso, sym, iv, venue), "ok"
         return {"ok": False, "error": "데모에는 이 차트가 없어요(합성 데이터)"}, "ok"
 
+    def receipt_list(self, d_from: str, d_to: str) -> dict:
+        return {"ok": True, "from": d_from, "to": d_to, "builtAt": self._day_idx.get("builtAt"), "n": 0, "items": []}
+
     def att_detail(self, d_from, d_to, lite=False):
         out = demo_data.att_detail(d_from, d_to)
         if lite:
@@ -1971,7 +2014,7 @@ class DemoBuilder:
 def demo_main(webmod) -> bool:
     if not DEMO:
         return False
-    common.ensure_dirs()
+    paths.ensure_dirs()
     try:
         cport = (ss.read_config_raw().get("web") or {}).get("port")
     except (OSError, ValueError):

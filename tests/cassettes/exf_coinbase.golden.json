@@ -1,0 +1,186 @@
+{
+ "_doc": "합성 데이터 — exf_coinbase 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "exf_coinbase",
+ "golden": {
+  "bal": {
+   "BTC": 0.352,
+   "MON": 500.0,
+   "USD": 605.0,
+   "USDC": 138.5
+  },
+  "cv": [
+   {
+    "base": "BTC",
+    "cv": {
+     "from": "USD",
+     "from_amt": "250.00",
+     "to": "BTC",
+     "to_amt": "0.01000000"
+    },
+    "fee": "0",
+    "fee_ccy": "",
+    "id": "coinbase:cv:buy:buy-0001",
+    "price": "25000",
+    "qty": "0.01000000",
+    "quote": "USD",
+    "side": "buy",
+    "src": "convert",
+    "ts": 1759827200123
+   },
+   {
+    "base": "USD",
+    "cv": {
+     "from": "USD",
+     "from_amt": "100.00",
+     "to": "USDC",
+     "to_amt": "100.00"
+    },
+    "fee": "0",
+    "fee_ccy": "",
+    "id": "coinbase:cv:trade:trd-0001",
+    "price": "1",
+    "qty": "100.00",
+    "quote": "USDC",
+    "side": "sell",
+    "src": "convert",
+    "ts": 1759913600123
+   },
+   {
+    "base": "MON",
+    "cv": {
+     "from": "USDC",
+     "from_amt": "20.00",
+     "to": "MON",
+     "to_amt": "500.00000000"
+    },
+    "fee": "0",
+    "fee_ccy": "",
+    "id": "coinbase:cv:raise:tx-0061",
+    "price": "0.04",
+    "qty": "500.00000000",
+    "quote": "USDC",
+    "side": "buy",
+    "src": "convert",
+    "ts": 1759654340123
+   }
+  ],
+  "cv_partial": "coinbase 전환 짝 안 맞음 1건",
+  "d": [
+   {
+    "amount": "0.00200000",
+    "created_at": "2025-10-09T03:53:20+00:00",
+    "currency": "BTC",
+    "done_at": "2025-10-09T03:53:20+00:00",
+    "fee": "0",
+    "network": "bitcoin",
+    "state": "ACCEPTED",
+    "txid": "",
+    "uuid": "coinbase:tx-0002"
+   },
+   {
+    "amount": "0.50000000",
+    "created_at": "2025-10-06T08:53:20+00:00",
+    "currency": "BTC",
+    "done_at": "2025-10-06T08:53:20+00:00",
+    "fee": "0",
+    "network": "bitcoin",
+    "state": "ACCEPTED",
+    "txid": "0x«0*62+b3»",
+    "uuid": "coinbase:tx-0006"
+   },
+   {
+    "amount": "1000.00",
+    "created_at": "2025-10-05T08:53:20+00:00",
+    "currency": "USD",
+    "done_at": "2025-10-05T08:53:20+00:00",
+    "fee": "0",
+    "state": "ACCEPTED",
+    "txid": "",
+    "uuid": "coinbase:tx-0014"
+   },
+   {
+    "amount": "0.50",
+    "created_at": "2025-10-09T02:53:20+00:00",
+    "currency": "USDC",
+    "done_at": "2025-10-09T02:53:20+00:00",
+    "fee": "0",
+    "reward": "interest",
+    "state": "ACCEPTED",
+    "txid": "",
+    "uuid": "coinbase:tx-0022"
+   }
+  ],
+  "fills": [
+   {
+    "base": "BTC",
+    "fee": "7.2",
+    "fee_ccy": "USD",
+    "id": "coinbase:e-0001",
+    "price": "60000.00",
+    "qty": "0.02",
+    "quote": "USD",
+    "side": "buy",
+    "ts": 1759971200123
+   },
+   {
+    "base": "ETH",
+    "fee": "1.0005",
+    "fee_ccy": "USDC",
+    "id": "coinbase:e-0002",
+    "price": "2500.5",
+    "qty": "0.4",
+    "quote": "USDC",
+    "side": "sell",
+    "ts": 1759928000123
+   }
+  ],
+  "fst": {
+   "hold_since": {
+    "cb_fill": 1760000003
+   },
+   "recon_hold": "coinbase 기장 보류 체결 4건(조정·쿼트 단위·현물 아님)"
+  },
+  "reuse_calls": 0,
+  "same2": [
+   true,
+   true
+  ],
+  "w": [
+   {
+    "address": "bc1qcassette0000000000000000000000000000",
+    "amount": "0.05000000",
+    "created_at": "2025-10-09T07:53:20+00:00",
+    "currency": "BTC",
+    "done_at": "2025-10-09T07:53:20+00:00",
+    "fee": "0",
+    "network": "bitcoin",
+    "state": "PENDING",
+    "txid": "0x«0*62+b1»",
+    "uuid": "coinbase:tx-0001"
+   },
+   {
+    "address": "bc1qcassette1111111111111111111111111111",
+    "amount": "0.10000000",
+    "created_at": "2025-10-08T08:53:20+00:00",
+    "currency": "BTC",
+    "done_at": "2025-10-08T08:53:20+00:00",
+    "fee": "0.00010000",
+    "network": "bitcoin",
+    "state": "DONE",
+    "txid": "0x«0*62+b2»",
+    "uuid": "coinbase:tx-0004"
+   },
+   {
+    "amount": "50.00",
+    "created_at": "2025-10-08T20:53:20+00:00",
+    "currency": "USD",
+    "done_at": "2025-10-08T20:53:20+00:00",
+    "fee": "0",
+    "state": "DONE",
+    "txid": "",
+    "uuid": "coinbase:tx-0011"
+   }
+  ]
+ }
+}

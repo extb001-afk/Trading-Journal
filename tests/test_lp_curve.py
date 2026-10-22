@@ -2,23 +2,23 @@
 import sys
 
 sys.dont_write_bytecode = True
-import _harness as T
+import _harness as T  # noqa: E402
 
-import copy
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+import copy  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from decimal import Decimal  # noqa: E402
 
-import common
+import paths, statefile  # noqa: E402
 
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(os.path.join(os.environ["TJ_BASE"], "config.json"), "w"))
-import histcurve
-import web
-import xparts
+import histcurve  # noqa: E402
+import web  # noqa: E402
+import xparts  # noqa: E402
 
 chk = T.chk
-S = common.STATE_DIR
+S = paths.STATE_DIR
 open(os.path.join(S, "backfill_done"), "w").write("1")
 KST = timezone(timedelta(hours=9))
 FX = 1400.0
@@ -69,7 +69,7 @@ def unit_builder():
 
 
 def reset_files():
-    for p9 in (web.DAILY_PATH, web.DAILY_PX_PATH):
+    for p9 in (paths.state("daily_cache.json"), paths.state("daily_px.json")):
         if os.path.exists(p9):
             os.remove(p9)
 
@@ -208,7 +208,7 @@ def setup_e(b, usdt=FX):
     b.daily[iso(10, 5)]["src"] = "live"
     b.daily[iso(10, 5)]["val"] = 99999.0
     b.daily[iso(10, 5)]["g"] = {"1": 99999.0}
-    json.dump(b.daily, open(web.DAILY_PATH, "w"))
+    json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 
 
 reset_files()
@@ -221,10 +221,10 @@ chk(close(val_of(sE, 10, 7), 100015) and close(val_of(sE, 10, 8), 100015) and cE
 chk(close(val_of(sE, 10, 5), 99999) and "lq" not in (b.daily.get(iso(10, 5)) or {}), "E 실시간 마감(live) 날 = 값 그대로 · 표식 없음", b.daily.get(iso(10, 5)))
 chk(close(val_of(sE, 10, 6), 100000) and (b.daily.get(iso(10, 6)) or {}).get("lq") == LQ, "E 보정 0 인 옛 계산 날 = 값 그대로 · 확인 표식만(다음에 다시 안 봄)",
     b.daily.get(iso(10, 6)))
-disk9 = json.load(open(web.DAILY_PATH))
+disk9 = json.load(open(paths.state("daily_cache.json")))
 chk((disk9.get(iso(10, 8)) or {}).get("lq") == LQ and close((disk9.get(iso(10, 8)) or {}).get("val"), 100015), "E 파일에도 저장", disk9.get(iso(10, 8)))
 b.daily[iso(10, 8)]["val"] = 100016.0
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 sE2 = run(b, GA, HA, D(10, 10), NOW + 60, mkx(NOW + 60, 0.0))
 chk(close(val_of(sE2, 10, 8), 100016), "E 두 번째 빌드 = 다시 계산 없음(1회)", val_of(sE2, 10, 8))
 reset_files()
@@ -239,7 +239,7 @@ sE3 = run(b, GA, HA, D(10, 10), NOW + 60, mkx(NOW + 60, 0.0))
 chk(close(val_of(sE3, 10, 8), 100015) and (b.daily.get(iso(10, 8)) or {}).get("lq") == LQ, "E 환율 생긴 다음 빌드 = 다시 계산 $100,015", b.daily.get(iso(10, 8)))
 b.daily[iso(10, 8)] = {k9: v9 for k9, v9 in b.daily[iso(10, 8)].items() if k9 != "lq"}
 b.daily[iso(10, 8)].update(val=130015.0, g={"1": 100000.0})
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 sE4 = run(b, GA, HA, D(10, 10), NOW + 120, mkx(NOW + 120, 0.0))
 chk(close(val_of(sE4, 10, 8), 100015), "E 롤백 뒤 옛 코드가 다시 굳힌 날 = 새 코드 첫 빌드에 다시 고침", val_of(sE4, 10, 8))
 known9 = {"val", "usdt", "kimp", "g", "x", "src", "st", "xraw", "xu", "x0", "xu0", "drd", "wdt", "snap", "pend", "xs", "why", "est", "xc", "lg", "z",
@@ -248,7 +248,7 @@ extra9 = sorted({k9 for ck9, c9 in b.daily.items() if not ck9.startswith("_") an
 chk(not extra9 and not [k9 for k9 in b.daily if k9.startswith("_") and k9 not in ("_v", "_risk_rev", "_live", "_live_ok", "_reset_at")],
     "E 롤백 안전: 동결 항목 = 종전 키 + lq·dq(옛 코드는 모르는 키를 무시) · 메타 키 추가 없음", extra9)
 
-import sqlite3
+import sqlite3  # noqa: E402
 reset_files()
 b = unit_builder()
 pin_a(b)
@@ -280,10 +280,10 @@ for d9 in range(1, 10):
     pin_x(b, 10, d9, 30015.0 if 3 <= d9 <= 6 else 0.0)
 b.daily[iso(10, 1)] = {"val": 70000.0, "usdt": FX, "kimp": None, "g": {"1": 70000.0}, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
 b.daily[iso(10, 9)] = {"val": 100000.0, "usdt": FX, "kimp": None, "g": {"1": 100000.0}, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 sG = run(b, GG, {1: Decimal(100000)}, D(10, 10), NOW, mkx(NOW, 0.0))
 chk(close(val_of(sG, 10, 1), 100000) and (b.daily.get(iso(10, 1)) or {}).get("lq") == LQ,
-    "G lp489#1 LP 열린 동안 옛 코드가 굳힌 날(10/1 $70,000 · 보정 순합 0) = 다시 계산 $100,000(수정 전 표식만 → $70,000 유지)", (val_of(sG, 10, 1), b.daily.get(iso(10, 1))))
+    "G LP 열린 동안 옛 코드가 굳힌 날(10/1 $70,000 · 보정 순합 0) = 다시 계산 $100,000(수정 전 표식만 → $70,000 유지)", (val_of(sG, 10, 1), b.daily.get(iso(10, 1))))
 chk(close(val_of(sG, 10, 9), 100000) and (b.daily.get(iso(10, 9)) or {}).get("lq") == LQ, "G 관측 뒤 LP 레그 없는 날(10/9) = 표식만(값 그대로)", b.daily.get(iso(10, 9)))
 chk(close(val_of(sG, 10, 4), 100015), "G LP 열린 날(10/4) = 지갑 몫 70,000 + 평가 30,015", val_of(sG, 10, 4))
 
@@ -298,17 +298,17 @@ for d9 in range(1, 10):
     pin_x(b, 10, d9, 0.0)
 b.daily[iso(9, 5)] = {"val": 130015.0, "usdt": FX, "kimp": None, "g": {"1": 100000.0}, "x": 30015.0, "src": "calc", "st": "1", "xraw": 30015.0}
 b.daily[iso(9, 2)] = {"val": 100000.0, "usdt": FX, "kimp": None, "g": {"1": 100000.0}, "x": 0.0, "src": "calc", "st": "1", "xraw": 0.0}
-json.dump(b.daily, open(web.DAILY_PATH, "w"))
+json.dump(b.daily, open(paths.state("daily_cache.json"), "w"))
 sH = run(b, GH, {1: Decimal(100000)}, D(10, 10), NOW, mkx(NOW, 0.0))
 cH = b.daily.get(iso(9, 5)) or {}
 chk(close(cH.get("val"), 100015) and cH.get("lq") == LQ and len(sH) == 30 and sH[0]["date"] == "09-11",
-    "H lp489#2 창 밖 옛 계산 동결(9/5 $130,015) = 다시 계산 $100,015 · 표식 lq · 화면 행은 30일 그대로", (cH, len(sH), sH[0]["date"]))
+    "H 창 밖 옛 계산 동결(9/5 $130,015) = 다시 계산 $100,015 · 표식 lq · 화면 행은 30일 그대로", (cH, len(sH), sH[0]["date"]))
 chk(close((b.daily.get(iso(9, 2)) or {}).get("val"), 100000) and (b.daily.get(iso(9, 2)) or {}).get("lq") == LQ, "H 창 밖 보정 없는 날(9/2) = 값 그대로 · 표식만",
     b.daily.get(iso(9, 2)))
 kitH = histcurve.make_kit("2026-10-10", GH, {1: Decimal(100000)}, set(), set(), {}, set(), {}, {}, {}, [], mkx(NOW, 0.0), sH, b.daily,
                           xkit=copy.deepcopy(b.__dict__.get("_x_kit")))
 chk(close(((kitH.get("dcv") or {}).get(iso(9, 5)) or [None])[0], 100015), "H 장기 곡선 dc 행 재료(dcv) = 고친 값 $100,015", (kitH.get("dcv") or {}).get(iso(9, 5)))
-import wow2
+import wow2  # noqa: E402
 tmH = T.safe(wow2.tm, iso(9, 5), hist=None, daily=b.daily, dpx=b.daily_px)
 chk(isinstance(tmH, dict) and close(tmH.get("total"), 100015), "H 타임머신(그날 보유 재현 — 동결 항목 우선) 합계 = $100,015",
     {k9: (tmH or {}).get(k9) for k9 in ("ok", "total", "src", "error", "_exc")})
@@ -328,7 +328,7 @@ pre9 = {"_v": histcurve.HIST_V, "d": {iso(9, 5): [130015.0, None, 0, "hc", 0], i
         "x": {iso(9, 5): {"p": xp95, "fx": FX, "cut": 0.0, "x": 30015.0, "xc": 0.0, "uat": e95},
               iso(9, 2): {"p": dict(xp95, rest=[0.0, "snap"]), "fx": FX, "cut": 0.0, "x": 0.0, "xc": 0.0, "uat": histcurve.day_end(iso(9, 2)) - 1}},
         "meta": {"pending": False, "flow_pending": False}}
-common.atomic_write_json(pth9, pre9)
+statefile.atomic_write_json(pth9, pre9)
 HI = histcurve.HistCurve(path=pth9, px_path=pxp9)
 kitI = histcurve.make_kit("2026-10-10", GH, {1: Decimal(100000)}, set(), set(), {}, set(), {}, {}, {}, [], mkx(NOW, 0.0), sI, b.daily,
                           xkit=copy.deepcopy(b.__dict__.get("_x_kit")))
@@ -345,7 +345,7 @@ def row_lq(H, k9):
 
 
 chk(close((dI.get(iso(9, 5)) or [None])[0], 100015) and row_lq(HI, iso(9, 5)),
-    "I lp489#2 장기 곡선 hc 행(9/5 $130,015 — 옛 되감기) = 1회 다시 계산 $100,015 · 행 표식(cov 6번째 칸)", (dI.get(iso(9, 5)), (HI.st.get("s") or {}).get(iso(9, 5))))
+    "I 장기 곡선 hc 행(9/5 $130,015 — 옛 되감기) = 1회 다시 계산 $100,015 · 행 표식(cov 6번째 칸)", (dI.get(iso(9, 5)), (HI.st.get("s") or {}).get(iso(9, 5))))
 chk(close((dI.get(iso(9, 2)) or [None])[0], 100000), "I 예치 전 hc 날(9/2 — 관측 뒤 레그가 있어 다시 계산 · 같은 값 $100,000)", dI.get(iso(9, 2)))
 dI[iso(9, 5)] = [100016.0] + list(dI[iso(9, 5)][1:])
 HI.st["d"] = dI
@@ -358,17 +358,17 @@ dI[iso(9, 5)] = [100017.0] + list(dI[iso(9, 5)][1:])
 HI.st["d"] = dI
 HI.run_once(kitI, cap=0, now=NOW + 100)
 chk(row_lq(HI, iso(9, 5)) and close(((HI.st.get("d") or {}).get(iso(9, 5)) or [None])[0], 100017),
-    "I lp495 원장 밖 금액만 다시 써도 행 표식 유지 → 다음 실행 다시 계산 없음", ((HI.st.get("s") or {}).get(iso(9, 5)), (HI.st.get("d") or {}).get(iso(9, 5))))
+    "I 원장 밖 금액만 다시 써도 행 표식 유지 → 다음 실행 다시 계산 없음", ((HI.st.get("s") or {}).get(iso(9, 5)), (HI.st.get("d") or {}).get(iso(9, 5))))
 st9 = HI.st
 st9["d"] = dict(st9["d"], **{iso(9, 5): [130015.0, None, 0, "hc", 0]})
 st9["s"] = dict(st9["s"], **{iso(9, 5): [100000.0, 0.0, 0.0, 0, 0.0]})
 st9["meta"] = dict(st9.get("meta") or {}, lq=LQH)
-common.atomic_write_json(pth9, st9)
+statefile.atomic_write_json(pth9, st9)
 HI2 = histcurve.HistCurve(path=pth9, px_path=pxp9)
 HI2.px["fx"] = HI.px["fx"]
 HI2.run_once(kitI, cap=0, now=NOW + 120)
 chk(close(((HI2.st.get("d") or {}).get(iso(9, 5)) or [None])[0], 100015) and row_lq(HI2, iso(9, 5)),
-    "I lp495 롤백 중 옛 코드가 다시 굳힌 hc 행($130,015 · meta lq 남음) = 새 코드 첫 실행에 다시 교정 $100,015", ((HI2.st.get("d") or {}).get(iso(9, 5)), HI2.st.get("meta")))
+    "I 롤백 중 옛 코드가 다시 굳힌 hc 행($130,015 · meta lq 남음) = 새 코드 첫 실행에 다시 교정 $100,015", ((HI2.st.get("d") or {}).get(iso(9, 5)), HI2.st.get("meta")))
 
 reset_files()
 T.finish()

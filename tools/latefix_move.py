@@ -12,16 +12,18 @@ from decimal import Decimal
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
-import common
-from core import Core
-from exf_fix_place import _core_stopped
+import histmark, paths  # noqa: E402
+import ledger_lock  # noqa: E402
+from core import Core  # noqa: E402
+import core_svc  # noqa: E402
+from exf_fix_place import _core_stopped  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 TOL = Decimal("0.00000001")
 REL = Decimal("0.01")
 OBS_GAP = 600
 RECON_WIN = 7200
-PFX = common.EXF_LATE_PFX
+PFX = histmark.EXF_LATE_PFX
 
 
 def _t(ts):
@@ -29,13 +31,13 @@ def _t(ts):
 
 
 def _ro():
-    c = sqlite3.connect(f"file:{common.DB_PATH}?mode=ro", uri=True, timeout=30)
+    c = sqlite3.connect(f"file:{paths.DB_PATH}?mode=ro", uri=True, timeout=30)
     c.row_factory = sqlite3.Row
     return c
 
 
 def _sid(sym, t_off, b9):
-    return Core._exf_late_sid(sym, t_off, b9)
+    return core_svc.ExfService._exf_late_sid(sym, t_off, b9)
 
 
 def _fill_deltas(f):
@@ -60,8 +62,8 @@ def _fill_deltas(f):
 def _offset_clusters(bounds, dl):
     grp = {}
     for ts9, amt in dl:
-        grp.setdefault(Core._exf_bucket(bounds, ts9), []).append((ts9, amt))
-    out = [(t0, t1, net, b9) for b9, lst in grp.items() for t0, t1, net in Core._exf_late_clusters(lst)]
+        grp.setdefault(core_svc.ExfService._exf_bucket(bounds, ts9), []).append((ts9, amt))
+    out = [(t0, t1, net, b9) for b9, lst in grp.items() for t0, t1, net in core_svc.ExfService._exf_late_clusters(lst)]
     return sorted(out, key=lambda c9: (c9[1], c9[0]))
 
 
@@ -144,7 +146,7 @@ def plan(conn, since, only_ex=None):
                 if b["o0"] - OBS_GAP <= o9 <= b["o1"] + OBS_GAP:
                     mixed |= ccys
             for sym, dl in sorted(per.items()):
-                if sym in Core.EXF_FIX_SKIP:
+                if sym in core_svc.ExfService.EXF_FIX_SKIP:
                     continue
                 net = sum((a for _, a in dl), Decimal(0))
                 if abs(net) <= TOL:
@@ -169,7 +171,7 @@ def plan(conn, since, only_ex=None):
                 if (q_adj > 0) == (net > 0) or abs(abs(q_adj) - abs(net)) > abs(net) * REL:
                     rejects.append(f"{tag}: 보정/−순액 비율 {(-q_adj / net):.6f} — 대상 아님(±1% 밖·부호 다름)")
                     continue
-                cl = _offset_clusters(Core._exf_bounds_q(conn, ex, sym), dl)
+                cl = _offset_clusters(core_svc.ExfService._exf_bounds_q(conn, ex, sym), dl)
                 if any((c9[2] > 0) != (net > 0) or abs(c9[2]) <= TOL for c9 in cl):
                     rejects.append(f"{tag}: 묶음 안 무리 부호가 섞임 — 수동")
                     continue
@@ -179,7 +181,7 @@ def plan(conn, since, only_ex=None):
                 for i9, (t0, t1, cn, cb9) in enumerate(cl):
                     qb9 = (move_b - used) if i9 == len(cl) - 1 else min(move_b - used, int(abs(cn) * scale))
                     if qb9 > 0:
-                        parts.append({"ts": int(t1) + Core.EXF_LATE_DT, "qb": sg * qb9, "b": int(cb9)})
+                        parts.append({"ts": int(t1) + core_svc.ExfService.EXF_LATE_DT, "qb": sg * qb9, "b": int(cb9)})
                         used += qb9
                 moves.append({"ex": ex, "sym": sym, "bts": bts, "pid": int(r["posting_id"]), "sid": str(r["source_id"]), "leg": 0,
                               "asset_id": int(r["asset_id"]), "dec": dec, "qb_old": str(r["qty_base"]), "ts_old": int(r["event_ts"]),
@@ -224,14 +226,14 @@ def _sums(rw, keys):
 
 
 def _apply(moves, before_commit=None):
-    rw = sqlite3.connect(common.DB_PATH, timeout=30, isolation_level=None)
+    rw = sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
     done = []
     try:
         rw.execute("BEGIN IMMEDIATE")
         keys = {(f"exchange:{m['ex']}", int(m["asset_id"])) for m in moves}
         sym_keys = sorted({(m["ex"], m["sym"]) for m in moves})
         s0 = _sums(rw, keys)
-        b0 = {k: Core._exf_bounds_q(rw, *k) for k in sym_keys}
+        b0 = {k: core_svc.ExfService._exf_bounds_q(rw, *k) for k in sym_keys}
         for m in moves:
             cv = rw.execute("SELECT classifier_ver, leg_kind, source_kind, source_ns, location FROM postings WHERE posting_id=? AND source_id=? AND leg_seq=?"
                             " AND event_ts=? AND qty_base=?", (m["pid"], m["sid"], m["leg"], m["ts_old"], m["qb_old"])).fetchone()
@@ -246,7 +248,7 @@ def _apply(moves, before_commit=None):
                               (p0["ts"], sid0, str(p0["qb"]), m["pid"], m["ts_old"], m["qb_old"])).rowcount != 1:
                     raise RuntimeError(f"pid {m['pid']}: 옮기기 실패")
                 post = {"ts": int(p0["ts"]), "sid": sid0, "qb": str(p0["qb"])}
-                if int(m["bts"]) not in Core._exf_bounds_q(rw, m["ex"], m["sym"]):
+                if int(m["bts"]) not in core_svc.ExfService._exf_bounds_q(rw, m["ex"], m["sym"]):
                     tomb = rw.execute("INSERT OR IGNORE INTO exf_adj_tomb (ex, sym, bts) VALUES (?,?,?)", (m["ex"], m["sym"], int(m["bts"]))).rowcount == 1
             else:
                 if rw.execute("UPDATE postings SET qty_base=? WHERE posting_id=? AND qty_base=?", (m["keep_qb"], m["pid"], m["qb_old"])).rowcount != 1:
@@ -267,7 +269,7 @@ def _apply(moves, before_commit=None):
         if _sums(rw, keys) != s0:
             raise RuntimeError("수량 합이 바뀜(내부 오류)")
         for k in sym_keys:
-            if Core._exf_bounds_q(rw, *k) != b0[k]:
+            if core_svc.ExfService._exf_bounds_q(rw, *k) != b0[k]:
                 raise RuntimeError(f"{k[0]} {k[1]}: 구간 경계가 바뀜(내부 오류)")
         if before_commit is not None:
             before_commit(done)
@@ -281,7 +283,7 @@ def _apply(moves, before_commit=None):
 
 
 def _undo(undo):
-    rw = sqlite3.connect(common.DB_PATH, timeout=30, isolation_level=None)
+    rw = sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
     try:
         rw.execute("BEGIN IMMEDIATE")
         keys = set()
@@ -320,10 +322,10 @@ def _undo(undo):
 
 def _invalidate(t_min):
     try:
-        os.remove(os.path.join(common.STATE_DIR, "daily_cache.json"))
+        os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
-    print("장기 곡선 다시 계산 표식:", common.mark_hist_dirty(int(t_min)))
+    print("장기 곡선 다시 계산 표식:", histmark.mark_hist_dirty(int(t_min)))
 
 
 def _since(v):
@@ -355,14 +357,19 @@ def _write_undo(path, obj):
 def main(argv=None):
     a = _args(sys.argv[1:] if argv is None else argv)
     apply = a.apply
-    assert os.path.abspath(common.DB_PATH).startswith(os.path.abspath(common.STATE_DIR)), "DB 경로가 state 밖"
-    print(f"원장 {common.DB_PATH}")
-    if not os.path.isfile(common.DB_PATH):
+    assert os.path.abspath(paths.DB_PATH).startswith(os.path.abspath(paths.STATE_DIR)), "DB 경로가 state 밖"
+    print(f"원장 {paths.DB_PATH}")
+    if not os.path.isfile(paths.DB_PATH):
         print("거부: 원장 없음 — TJ_BASE 확인(빈 원장을 만들지 않음)")
         return 1
     if apply and not _core_stopped():
         print("거부: pm2 에 떠 있는 tj-core(src/core.py)가 있거나 확인하지 못함 — tj-core·tj-exf·tj-web 을 멈춘 뒤(우회 옵션 없음)")
         return 1
+    with ledger_lock.hold_if(apply, paths.DB_PATH, who="latefix_move --apply"):
+        return _run(a, apply)
+
+
+def _run(a, apply):
     if a.undo:
         f = a.undo
         try:
@@ -403,7 +410,7 @@ def main(argv=None):
     if not apply or not moves:
         print("(점검만 — 쓰려면 --apply)" if not apply else "할 일 없음")
         return 0
-    fd, undo = tempfile.mkstemp(prefix=f"latefix_move_undo_{time.strftime('%Y%m%d_%H%M%S')}_", suffix=".json", dir=common.STATE_DIR)
+    fd, undo = tempfile.mkstemp(prefix=f"latefix_move_undo_{time.strftime('%Y%m%d_%H%M%S')}_", suffix=".json", dir=paths.STATE_DIR)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(moves, f)
