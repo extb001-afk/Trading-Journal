@@ -298,7 +298,7 @@ def it(ca, blk, cbal, led, spam=False, **kw):
 
 
 items = [it(TK9, 4000, 250 * E18, 0), it(TKA, 4000, 7 * E18, 0, spam=True), it(TKN, 4000, 100 * E18, 400 * E18),
-         it(TK2, 4000, 50 * E18, -100 * E18), it(TK9, 6000, 260 * E18, 0)]
+         it(TK2, 4000, 50 * E18, -100 * E18), it(TK9, 6000, 260 * E18, 0), it(TKA, 4100, 7 * E18, 0, spam=None)]
 statefile.atomic_write_json(os.path.join(paths.STATE_DIR, discopen.RECHK_REQ_NAME), {"items": items, "by": "test"})
 pump(c)
 res = (statefile.read_json(os.path.join(paths.STATE_DIR, discopen.RES_NAME), {}) or {}).get("recheck") or {}
@@ -306,7 +306,8 @@ st9 = {k.split(":")[2]: v.get("st") for k, v in res.items()}
 a9 = anchors(c, TK9)
 chk(len(a9) == 1 and int(a9[0][2]) == 250 * E18 and a9[0][1] == T9 and a9[0][0] == discopen.sid_of("eth", W, TK9, 4000) and total(c, TK9) == 250 * E18,
     "N9 diff>0 ∧ 스팸 아님 = 그 블록 시각에 +250(원장에 처음 보는 토큰도 자산 생성)", (a9, st9))
-chk(st9.get(f"{TKA}@4000") == "skip" and not anchors(c, TKA), "N9 스팸 줄 = 넣지 않음", st9)
+chk(st9.get(f"{TKA}@4000") == "skip" and st9.get(f"{TKA}@4100") == "skip" and not anchors(c, TKA),
+    "N9 스팸 줄·판정 없음(spam null — token_recheck 덱스 미확인) 줄 = 넣지 않음", st9)
 chk(st9.get(f"{TKN}@4000") == "list" and st9.get(f"{TK2}@4000") == "list" and st9.get(f"{TK9}@6000") == "wait",
     "N9 원장이 더 많음·그 블록 음수 칸 = 목록만 · 수집기 커서 밖 블록 = 대기", st9)
 pr9 = json.loads(c.conn.execute("SELECT payload FROM raw_observations WHERE obs_id=?", (a9[0][0],)).fetchone()[0]) if a9 else {}

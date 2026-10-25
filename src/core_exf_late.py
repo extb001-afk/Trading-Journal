@@ -76,14 +76,16 @@ class ExfLateMixin:
 
     LATE_BATCH_WAIT = 3600
 
-    def _late_stage(self, ex: str, deltas: dict, rec: dict) -> None:
+    EXF_LATE_INC = "inc:"
+    EXF_LATE_KEEP = "@inc:"
+    def _late_stage(self, ex: str, deltas: dict, rec: dict, incs: dict = None) -> None:
         lb = rec.get("lb")
         try:
             lbi, lbn = int(rec.get("lbi") or 0), max(1, int(rec.get("lbn") or 1))
         except (TypeError, ValueError):
             lb, lbi, lbn = None, 0, 1
         if not lb:
-            if not deltas:
+            if not deltas and not incs:
                 return
             import uuid as _uuid
             lb, lbi, lbn = f"r:{_uuid.uuid4().hex}", 0, 1
@@ -91,10 +93,11 @@ class ExfLateMixin:
         lc = str(rec.get("lc")) if rec.get("lc") else None
         self.conn.execute("INSERT INTO exf_late_pending (ex, lb, lbi, lbn, sym, ts, amt, at, lc) VALUES (?,?,?,?,NULL,NULL,NULL,?,?)",
                           (ex, str(lb), lbi, lbn, now9, lc))
-        for sym, lst in (deltas or {}).items():
+        staged = [(sym, lst, "") for sym, lst in (deltas or {}).items()] + [(sym, lst, self.EXF_LATE_INC) for sym, lst in (incs or {}).items()]
+        for sym, lst, pfx in staged:
             for ts9, amt in lst:
                 self.conn.execute("INSERT INTO exf_late_pending (ex, lb, lbi, lbn, sym, ts, amt, at, lc) VALUES (?,?,?,?,?,?,?,?,?)",
-                                  (ex, str(lb), lbi, lbn, sym, int(ts9), str(amt), now9, lc))
+                                  (ex, str(lb), lbi, lbn, sym, int(ts9), pfx + str(amt), now9, lc))
 
     def _late_cycle_done(self, rec: dict) -> None:
         ex, lc = str(rec.get("exchange") or ""), str(rec.get("lc") or "")
@@ -104,12 +107,42 @@ class ExfLateMixin:
 
     def _exf_late_pending(self, ex: str) -> bool:
         try:
-            return self.conn.execute("SELECT 1 FROM exf_late_pending WHERE ex=? LIMIT 1", (ex,)).fetchone() is not None
+            return self.conn.execute("SELECT 1 FROM exf_late_pending WHERE ex=? AND substr(lb, 1, 5) != ? LIMIT 1",
+                                     (ex, self.EXF_LATE_KEEP)).fetchone() is not None
         except sqlite3.OperationalError:
             return False
 
+    def _late_keep_load(self, keep: list, ready_ex: set, inc_ex: dict) -> None:
+        for r in keep:
+            if r["ex"] not in ready_ex or r["sym"] is None or str(r["lb"]) != self.EXF_LATE_KEEP + str(self._meta_get(f"recon_done_exf_{r['ex']}") or ""):
+                continue
+            try:
+                amount = Decimal(str(r["amt"])[len(self.EXF_LATE_INC):])
+            except (ArithmeticError, TypeError, ValueError):
+                continue
+            inc_ex.setdefault(r["ex"], {}).setdefault(str(r["sym"]), []).append((int(r["ts"]), amount))
+
+    def _exf_income_unoffset(self, ex: str, left: dict, max_pid: int) -> dict:
+        out = {}
+        for sym, lst in sorted(left.items()):
+            bounds = self._exf_bounds_q(self.conn, ex, sym)
+            for ts_inc, amount in sorted(lst):
+                bucket = self._exf_bucket(bounds, ts_inc)
+                cands = [r for r in self._exf_adj_rows(ex, sym) if self._exf_late_b(r["source_id"]) is not None and int(r["qty_base"]) > 0
+                         and int(r["posting_id"]) <= max_pid and self._exf_bucket(bounds, int(r["event_ts"]) - self.EXF_LATE_DT) == bucket]
+                cands.sort(key=lambda r: (abs(int(r["event_ts"]) - int(ts_inc)), -int(r["posting_id"])))
+                rest = self._exf_take(ex, sym, cands, amount, removing_positive=True, why=f"지급 짝 늦은 상쇄 되돌림(대사 {bucket} 구간)")
+                if amount - rest > self.EXF_TOL:
+                    log.info("%s %s: 지급 %s 중 %s 를 앞서 흡수된 늦은 변화의 상쇄 줄에서 되돌림(같은 사건 · 대사 %s 구간)", ex, sym,
+                             format(amount, "f"), format(amount - rest, "f"), bucket or "없음")
+                if rest > self.EXF_TOL:
+                    out.setdefault(sym, []).append((ts_inc, rest))
+        return out
+
     def _exf_late_flush(self) -> int:
         rows = self.conn.execute("SELECT ex, lb, lbi, lbn, sym, ts, amt, at, lc FROM exf_late_pending").fetchall()
+        keep = [r for r in rows if str(r["lb"]).startswith(self.EXF_LATE_KEEP)]
+        rows = [r for r in rows if not str(r["lb"]).startswith(self.EXF_LATE_KEEP)]
         if not rows:
             return 0
         now9 = int(time.time())
@@ -132,23 +165,37 @@ class ExfLateMixin:
                 ready |= set(mine)
         if not ready:
             return 0
-        per_ex = {}
+        per_ex, inc_ex = {}, {}
         for r in rows:
             if (r["ex"], r["lb"]) not in ready or r["sym"] is None:
                 continue
+            amt_s = str(r["amt"])
+            is_inc = amt_s.startswith(self.EXF_LATE_INC)
             try:
-                amt = Decimal(str(r["amt"]))
+                amt = Decimal(amt_s[len(self.EXF_LATE_INC):] if is_inc else amt_s)
             except (ArithmeticError, TypeError, ValueError):
                 continue
-            per_ex.setdefault(r["ex"], {}).setdefault(str(r["sym"]), []).append((int(r["ts"]), amt))
+            (inc_ex if is_inc else per_ex).setdefault(r["ex"], {}).setdefault(str(r["sym"]), []).append((int(r["ts"]), amt))
+        ready_ex = {k[0] for k in ready}
+        self._late_keep_load(keep, ready_ex, inc_ex)
+        cur_lb = {ex: self.EXF_LATE_KEEP + str(self._meta_get(f"recon_done_exf_{ex}") or "") for ex in ready_ex}
+        comp_ex = late_comp_load(keep, cur_lb, self.EXF_LATE_KEEP, self.EXF_LATE_INC)
         n = 0
         try:
             if not self.conn.in_transaction:
                 self.conn.execute("BEGIN")
+            left_ex = {ex: self._exf_income_pair(ex, per_ex.get(ex, {}), incs) for ex, incs in sorted(inc_ex.items())}
+            max_pid = int(self.conn.execute("SELECT COALESCE(MAX(posting_id), 0) FROM postings").fetchone()[0])
             for ex, deltas in sorted(per_ex.items()):
-                n += self._exf_absorb_deltas(ex, deltas, "늦은 체결·입출금")
+                n += self._exf_absorb_deltas(ex, deltas, "늦은 체결·입출금", comp_ex.get(ex))
+            left_ex = {ex: self._exf_income_unoffset(ex, left_pair, max_pid) for ex, left_pair in sorted(left_ex.items())}
             for ex, lb in sorted(ready):
                 self.conn.execute("DELETE FROM exf_late_pending WHERE ex=? AND lb=?", (ex, lb))
+            for ex in sorted(ready_ex):
+                self.conn.execute("DELETE FROM exf_late_pending WHERE ex=? AND substr(lb, 1, 5) = ?", (ex, self.EXF_LATE_KEEP))
+                for lb, incs in late_keep_plan(cur_lb[ex], left_ex.get(ex), comp_ex.get(ex), self.EXF_LATE_KEEP, self.EXF_TOL,
+                                               lambda s, r_old: late_comp_rows(self._exf_adj_rows(ex, s), self._exf_bounds_q(self.conn, ex, s), r_old, ex)):
+                    self._late_stage(ex, {}, {"lb": lb}, incs)
             self.conn.commit()
         except Exception:
             self.conn.rollback()
@@ -178,7 +225,7 @@ class ExfLateMixin:
     def _exf_absorb_late(self, ex: str, fills: list) -> int:
         return self._exf_absorb_deltas(ex, self._late_fill_deltas(fills), "늦은 체결")
 
-    def _exf_absorb_deltas(self, ex: str, deltas: dict, what: str) -> int:
+    def _exf_absorb_deltas(self, ex: str, deltas: dict, what: str, comp: dict = None) -> int:
         last = self._meta_get(f"recon_done_exf_{ex}")
         if not last or not deltas:
             return 0
@@ -210,6 +257,8 @@ class ExfLateMixin:
                     n += 1
                     log.info("%s %s %s: 대사 %d 구간 순액 %s 중 %s 를 지난 대사 보정에서 되돌림(이중 계상 방지)", ex, what, sym, b9,
                              format(amt, "f"), format(abs(amt) - rem, "f"))
+                rem = late_comp_take((comp or {}).get(sym) if amt < 0 else None, b9, bts_all, rem, self.EXF_TOL, lambda r_old, want: self._exf_take(
+                    ex, sym, late_comp_rows(rows, bts_all, r_old, ex), want, removing_positive=False, why=f"늦은 변화 나머지 ↔ 지급 맞춘 대사 보정 흡수(대사 {b9} 구간)"))
                 if rem > self.EXF_TOL:
                     rem_s = rem if amt > 0 else -rem
                     left9 = self._exf_late_offset(ex, sym, grp.get(b9) or [], amt, rem_s, b9, what)
@@ -555,3 +604,62 @@ class ExfLateMixin:
         self.conn.commit()
         if moves:
             log.warning("★기존 부채 첫 반영 %d건 첫 관측 시각으로 소급(나머지 = 이자 레그) — 수량 무변, 지난 곡선은 web 이 해당 날만 조정★", len(moves))
+
+
+def _bucket_at(bounds: list, ts: int) -> int:
+    i = bisect.bisect_left(bounds, int(ts))
+    return int(bounds[i]) if i < len(bounds) else 0
+
+
+def _bts_of(source_id: object) -> int:
+    try:
+        return int(str(source_id).rsplit(":", 1)[1])
+    except (IndexError, ValueError, TypeError):
+        return None
+
+
+def late_comp_load(keep: list, cur_lb: dict, keep_pfx: str, inc_pfx: str) -> dict:
+    out = {}
+    for r in keep:
+        lb = str(r["lb"])
+        if r["ex"] not in cur_lb or r["sym"] is None or lb == cur_lb[r["ex"]]:
+            continue
+        try:
+            amount, r_old = Decimal(str(r["amt"])[len(inc_pfx):]), int(float(lb[len(keep_pfx):] or 0))
+        except (ArithmeticError, TypeError, ValueError):
+            continue
+        if r_old > 0:
+            out.setdefault(r["ex"], {}).setdefault(str(r["sym"]), []).append([int(r["ts"]), amount, r_old])
+    return out
+
+
+def late_comp_rows(rows: list, bounds: list, r_old: int, ex: str) -> list:
+    nb = _bucket_at(bounds, int(r_old) + 1)
+    return sorted((r for r in rows if nb and _bts_of(r["source_id"]) == nb
+            and int(r["qty_base"]) < 0 and not histmark.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id"))),
+                  key=lambda r: int(r["posting_id"]))
+
+
+def late_comp_take(comp: list, bucket: int, bounds: list, rem: Decimal, tol: Decimal, take: "Callable[[int, Decimal], Decimal]") -> Decimal:
+    for ent in sorted(comp or (), key=lambda e: (e[0], e[2])):
+        if rem <= tol:
+            break
+        if ent[1] <= tol or _bucket_at(bounds, ent[0]) != int(bucket or 0):
+            continue
+        want = min(rem, ent[1])
+        got = want - take(ent[2], want)
+        if got > 0:
+            log.info("늦은 변화 나머지 %s 를 먼저 기장된 지급(대사 %s 구간)을 맞춘 다음 대사 보정에서 되돌림", format(got, "f"), bucket)
+        ent[1] -= got
+        rem -= got
+    return rem
+
+
+def late_keep_plan(cur_lb: str, live: dict, comp: dict, keep_pfx: str, tol: Decimal, comp_rows: "Callable[[str, int], list]") -> list:
+    out = [(cur_lb, live)] if live else []
+    by_recon = {}
+    for sym, lst in sorted((comp or {}).items()):
+        for ts_inc, amount, r_old in lst:
+            if amount > tol and comp_rows(sym, r_old):
+                by_recon.setdefault(r_old, {}).setdefault(sym, []).append((ts_inc, amount))
+    return out + [(keep_pfx + str(r_old), incs) for r_old, incs in sorted(by_recon.items())]

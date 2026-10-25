@@ -400,8 +400,6 @@ class Scanner:
         memo = cache.setdefault("_memo", {})
         for k in ("etx", "blk", "dec"):
             memo.setdefault(k, {})
-        if len(memo["blk"]) > 5000:
-            memo["blk"].clear()
         self.t = xm.Tracer(cfg, {"stx": {}, "sigs": {}, "ws": {}, "etx": memo["etx"], "blk": memo["blk"], "dec": memo["dec"],
                                  "inflows": {}, "outflows": {}}, None, xm.load_seed(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                            px=px, budget=budget, sleep=sleep, log=log)

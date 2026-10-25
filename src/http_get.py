@@ -238,6 +238,7 @@ class GetMixin:
             return self._send(200, {"ok": True, "days": {}})
         web_ctx.builder().snapshot()
         body = fn9(lo9, hi9, lite=g9("lite") == "1")
+        body = {k: v for k, v in body.items() if k != "days"} if g9("frz") == "1" and isinstance(body, dict) else body
         if body is None:
             web_ctx.builder().kick_refresh()
             return self._send(503, {"ok": False, "error": "분해 재료를 만드는 중 — 잠시 뒤 다시 시도하세요"})

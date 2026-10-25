@@ -27,7 +27,6 @@ CATS = {"realestate": "부동산", "stock": "주식", "gold": "금", "car": "자
 CURS = ("KRW", "USD")
 OZT_G = 31.1034768
 MAX_ITEMS = 300
-MAX_HIST = 400
 NAME_MAX = 60
 MEMO_MAX = 300
 VAL_MAX = 1e13
@@ -286,9 +285,6 @@ def _hist_add(it: dict, ent: dict) -> None:
         h[-1] = ent
     else:
         h.append(ent)
-    while len(h) > MAX_HIST:
-        idx = next((i for i, x in enumerate(h) if x.get("src") == "auto"), 0)
-        h.pop(idx)
 
 
 def _new_id(prefix="oa") -> str:
@@ -521,8 +517,7 @@ class Quoter:
                     old = {c[0]: c[1] for c in (r.get("closes") or [])}
                     for dk, c in q["closes"]:
                         old[dk] = c
-                    keep = sorted(old.items())[-400:]
-                    r["closes"] = [[k, v] for k, v in keep]
+                    r["closes"] = [[k, v] for k, v in sorted(old.items())]
                     if rng == "1y":
                         r["closes_at"] = int(now)
             else:
@@ -927,7 +922,7 @@ def view(d: dict, q: Quoter | None, rate: float, brokers_cfg: dict | None = None
             sym = "GC=F" if it["auto"] == "gold" else (it.get("ysym") or "")
             c = q.quote_cached(sym) if sym else None
             qh = [(x.get("date") or "", x.get("qty")) for x in h if x.get("qty") is not None]
-            for dk, cl in (c or {}).get("closes") or []:
+            for dk, cl in ((c or {}).get("closes") or [])[-400:]:
                 if dk < (qh[0][0] if qh else "9999"):
                     continue
                 qq = None

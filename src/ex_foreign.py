@@ -19,6 +19,7 @@ from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acct_norm, config, envfile, paths, runtime, statefile  # noqa: E402
+from envfile import acct_hist, acct_hist_slot, acct_progress  # noqa: E402
 import cgplan, settings_store  # noqa: E402
 import logs  # noqa: E402
 if __name__ == "__main__":
@@ -147,7 +148,8 @@ sub_key_names = envfile.sub_key_names
 
 
 def acct_envs(env: dict, ex: str, need=None) -> list:
-    return [a for a in envfile.exchange_accounts(env, ex, need or (FETCHERS.get(ex) or (None, ()))[1]) if (ex, a[0]) not in _IDENT_BAD]
+    return [a for a in envfile.exchange_accounts(env, ex, need or (FETCHERS.get(ex) or (None, ()))[1])
+            if (ex, a[0]) not in _IDENT_BAD and (ex, a[0]) not in _DUP]
 
 
 def sub_tags(env: dict, ex: str) -> list:
@@ -166,31 +168,93 @@ def acct_state(state: dict, ex: str, tag: str, now: int = None) -> dict:
     return st
 
 
-def acct_ident(state: dict, ex: str, tag: str, key: str, kperm: dict, now: int) -> bool:
+def _slot_uid(ex: str, tag: str, kfp: str, kperm: dict, state: dict = None):
+    rec = kperm.get(f"{ex}_sub{tag[1:]}" if tag else ex) if isinstance(kperm, dict) else None
+    uid = str(rec["uid"]) if isinstance(rec, dict) and rec.get("uid") and rec.get("kfp") == kfp else None
+    cur = ((state.get(ex) or {}).get("accts") or {}).get(tag) if tag and not uid and isinstance(state, dict) else None
+    if isinstance(cur, dict) and cur.get("uid") and cur.get("kfp") == kfp:
+        uid = str(cur["uid"])
+    return uid if uid and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", uid) else None
+
+
+def acct_dups(env: dict, ex: str, need: tuple, kperm: dict, state: dict = None) -> dict:
+    first, parent = {}, {}
+
+    def root(tag):
+        while parent[tag] != tag:
+            tag = parent[tag]
+        return tag
+    for tag, env_a in envfile.exchange_accounts(env, ex, need):
+        parent[tag] = tag
+        kfp = cgplan.kfp(env_a.get(need[0]))
+        ids = [("k", kfp)] + [("u", u) for u in (_slot_uid(ex, tag, kfp, kperm, state),) if u]
+        hits = {root(first[i]) for i in ids if i in first}
+        if hits:
+            keep = next(t for t in parent if t in hits)
+            for t in hits | {tag}:
+                parent[t] = keep
+        for i in ids:
+            first.setdefault(i, tag)
+    return {tag: root(tag) for tag in parent if root(tag) != tag}
+
+
+def _dup_scan(env: dict, kperm: dict, state: dict, only: str = None) -> None:
+    for key in [k for k in _DUP if only is None or k[0] == only]:
+        del _DUP[key]
+    for dex, (_fetch, dneed) in FETCHERS.items():
+        if only is None or dex == only:
+            _DUP.update({(dex, dtag): first for dtag, first in acct_dups(env, dex, dneed, kperm, state).items()})
+
+
+def _legacy_same(cur: dict, rec, kfp: str) -> tuple:
+    prog = acct_progress(cur)
+    kat = rec.get("kat", rec.get("at")) if isinstance(rec, dict) else None
+    if not acct_hist(cur) or not isinstance(kat, (int, float)) or isinstance(kat, bool):
+        return True, None
+    if (rec.get("kkfp") or rec.get("kfp") or kfp) != kfp:
+        return True, None
+    if kat < prog:
+        return True, None
+    pk, pkat = rec.get("pkfp"), rec.get("pkat")
+    return False, (pk if isinstance(pk, str) and re.fullmatch(r"[0-9a-f]{8}", pk) and isinstance(pkat, (int, float)) and pkat < prog else None)
+
+
+def acct_ident(state: dict, ex: str, tag: str, key: str, kperm: dict, now: int, active: dict = None) -> bool:
     subs = state.setdefault(ex, {"seen": {}, "backfilled_until": 0}).setdefault("accts", {})
     kfp = cgplan.kfp(key)
-    rec = kperm.get(f"{ex}_sub{tag[1:]}") if isinstance(kperm, dict) else None
-    uid = str(rec["uid"]) if isinstance(rec, dict) and rec.get("uid") and rec.get("kfp") == kfp else None
-    uid = uid if uid and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", uid) else None
+    uid = _slot_uid(ex, tag, kfp, kperm)
     backs = [t for t, v in sorted(subs.items()) if t.startswith(tag + "@") and isinstance(v, dict)
              and ((uid and str(v.get("uid") or "") == uid) or (v.get("kfp") == kfp and not (uid and v.get("uid") and str(v["uid"]) != uid)))]
     back_tag = backs[0] if backs else None
     cur = subs.get(tag)
+    old_kfp, same = None, False
     if isinstance(cur, dict):
         if uid and cur.get("uid"):
             same = str(cur["uid"]) == uid
+        elif cur.get("kfp"):
+            same = cur["kfp"] == kfp
         else:
-            same = bool(uid) or not cur.get("kfp") or cur["kfp"] == kfp
+            same, old_kfp = _legacy_same(cur, kperm.get(f"{ex}_sub{tag[1:]}") if isinstance(kperm, dict) else None, kfp)
+    if not acct_hist(subs.get(back_tag) if back_tag else (cur if same else None)):
+        other = acct_hist_slot(subs, tag, uid, kfp, active, ex)
+        if other is not None:
+            raise RuntimeError(f"같은 계정 이력이 {other} 칸에 있음(원래 칸에 넣으세요 · 여기서 다시 받으면 두 번 기장)")
+    map_keep = tag in ((((envfile.ident_read().get("ex") or {}).get(ex) or {}).get("fut_keep")) or ())
+    if isinstance(cur, dict):
         if same and not back_tag:
-            new = dict(cur, kfp=kfp, **({"uid": uid} if uid and not cur.get("uid") else {}))
+            new = dict(cur, kfp=kfp, **({"uid": uid} if uid and not cur.get("uid") else {}), **({"fut_keep": 1} if map_keep else {}))
             if new == cur:
                 return False
             cur.update(new)
             return True
     ops = []
+    legacy = isinstance(cur, dict) and not same and not cur.get("uid") and not cur.get("kfp")
+    keep = map_keep or legacy or any(isinstance(v, dict) and v.get("fut_keep") for v in ([cur] if isinstance(cur, dict) and not same else []) + [subs[t] for t in backs])
     if isinstance(cur, dict) and not same:
-        old_tag = f"{tag}@u{cur['uid']}" if cur.get("uid") else f"{tag}@k{cur['kfp']}"
-        subs[old_tag] = cur
+        if legacy:
+            cur = dict(cur, **({"kfp": old_kfp} if old_kfp else {}))
+        old_tag = f"{tag}@u{cur['uid']}" if cur.get("uid") else (f"{tag}@k{cur['kfp']}" if cur.get("kfp") else f"{tag}@x{acct_progress(cur)}")
+        subs[old_tag] = dict(cur, **({"fut_keep": 1} if keep else {}))
         ops.append([tag, old_tag])
         log.warning("%s 서브 칸 %s 에 다른 계정 키 — 옛 계정 상태는 %s 로 물려 두고(마지막 잔고 0 아니면 대사 보류) 새 계정은 처음부터 받음", ex, tag, old_tag)
     if back_tag:
@@ -199,7 +263,9 @@ def acct_ident(state: dict, ex: str, tag: str, key: str, kperm: dict, now: int) 
         ops.append([extra, tag, "rows"])
         del subs[extra]
     subs[tag] = subs.pop(back_tag) if back_tag else {"seen": {}, "backfilled_until": 0, "dest_bf": int(now), "added": int(now)}
-    subs[tag].update({"kfp": kfp, **({"uid": uid} if uid else {})})
+    subs[tag].update({"kfp": kfp, **({"uid": uid} if uid else {}), **({"fut_keep": 1} if keep else {})})
+    if keep:
+        ops = [[tag, tag, "unraw"]] if not same else []
     if ops:
         state[ex].setdefault("fut_retag", []).extend(ops)
     return True
@@ -209,7 +275,10 @@ def _fut_retag_pending(state: dict, ex: str) -> None:
     todo = state.get(ex, {}).get("fut_retag") if isinstance(state.get(ex), dict) else None
     while isinstance(todo, list) and todo:
         op = list(todo[0])
-        _fut_retag(ex, op[0], op[1], raw=op[2:] != ["rows"])
+        if op[2:] == ["unraw"]:
+            _fut_unraw(ex, op[0])
+        else:
+            _fut_retag(ex, op[0], op[1], raw=op[2:] != ["rows"])
         todo.pop(0)
         if not todo:
             state[ex].pop("fut_retag", None)
@@ -221,15 +290,16 @@ def _fut_retag_pending(state: dict, ex: str) -> None:
             raise
 
 
+_DUP = {}
 _IDENT_BAD = set()
 
 
-def _ident_ok(state: dict, ex: str, acct: tuple, need, kperm: dict, now: int) -> bool:
+def _ident_ok(state: dict, ex: str, acct: tuple, need, kperm: dict, now: int, active: dict = None) -> bool:
     tag, env_a = acct
     if not tag:
         return True
     try:
-        if acct_ident(state, ex, tag, env_a.get(need[0]), kperm, now):
+        if acct_ident(state, ex, tag, env_a.get(need[0]), kperm, now, active):
             _save_state(state)
     except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
         _IDENT_BAD.add((ex, tag))
@@ -242,6 +312,45 @@ def _ident_ok(state: dict, ex: str, acct: tuple, need, kperm: dict, now: int) ->
         _IDENT_BAD.update((ex, str(t).split("@")[0]) for op in ops for t in op[:2])
         log.warning("%s 서브 선물 딱지 옮기기 실패(%s · 대기 칸 이번 주기 빼냄): %s", ex, [op[:2] for op in ops], _xm(repr(e))[:140])
     return (ex, tag) not in _IDENT_BAD
+
+
+def _ident_all(state: dict, ex: str, env: dict, need, kperm: dict, now: int) -> None:
+    slots = envfile.exchange_accounts(env, ex, need)
+    live = {tag: (_slot_uid(ex, tag, cgplan.kfp(env_a.get(need[0])), kperm), cgplan.kfp(env_a.get(need[0]))) for tag, env_a in slots if tag}
+    for slot in slots:
+        _ident_ok(state, ex, slot, need, kperm, now, live)
+
+
+def _main_gate(state: dict, env: dict, kperm: dict) -> dict:
+    out, dirty, now = dict(env), False, int(time.time())
+    for ex, (_fn, need) in FETCHERS.items():
+        on, kfp = all(env.get(k) for k in need), cgplan.kfp(env.get(need[0]))
+        stx = state.setdefault(ex, {"seen": {}, "backfilled_until": 0}) if on else state.get(ex)
+        if not isinstance(stx, dict):
+            continue
+        hold = stx.get("main_hold")
+        try:
+            how, rec, slot = envfile.main_ident(stx, _slot_uid(ex, "", kfp, kperm), kfp, ex) if on else ("off", None, None)
+        except Exception as e:   # noqa: BLE001 [fallback]
+            log.warning("%s 메인 칸 계정 확인 실패(종전대로 받음): %s", ex, _xm(repr(e))[:140])
+            continue
+        if how == "hold":
+            if not isinstance(hold, dict) or hold.get("slot") != slot:
+                stx["main_hold"], dirty = {"slot": slot, "at": now}, True
+                log.error("★%s 메인 칸에 %s 칸에서 기록을 받던 계정 키 — 같은 거래 두 번 기장이라 이 거래소 수집 보류(원래 메인 키를 다시 넣으면 풀림)★", ex, slot)
+            for k in [k for n in range(SUB_MAX + 1) for k in (sub_key_names(ex, n, need) if n else need)]:
+                out.pop(k, None)
+            _invalidate_balance_snapshot(ex)
+            continue
+        if stx.pop("main_hold", None) is not None:
+            stx["main_hold_off"], dirty = now, True
+        if how == "new":
+            log.warning("%s 메인 칸 계정이 바뀜 — 다른 칸 이력 계정은 아니라 종전대로 받음(다른 칸에서 옮겨 온 계정이면 원래 칸에 넣으세요)", ex)
+        if rec is not None and rec != stx.get("main_id"):
+            stx["main_id"], dirty = rec, True
+    if dirty:
+        _save_state(state)
+    return out
 
 
 def acct_vstate(state: dict, ex: str, tag: str, now: int = None) -> _AcctState:
@@ -1026,9 +1135,12 @@ def _fut_merge(ex, tags, denied=()):
             bal9 += float(b9)
         elif b9 is not None:
             bal_ok9 = False
+    live_ids = _fut_live_ids(ex, [t9 for t9, _d in docs9 if t9])
     for prev_row in (prev9.get("events") if isinstance(prev9, dict) else None) or []:
         if isinstance(prev_row, dict):
             key = (prev_row.get("acct") or "", prev_row.get("uid") or f"{prev_row.get('t')}:{prev_row.get('kind')}:{prev_row.get('amount')}:{prev_row.get('symbol')}")
+            if "@" in key[0] and any((tag, key[1]) in seen9 for tag, ids in live_ids.items() if ids & _fut_name_ids(key[0])):
+                continue
             if key not in seen9:
                 seen9.add(key)
                 evs9.append(prev_row)
@@ -1048,6 +1160,18 @@ def _fut_merge(ex, tags, denied=()):
     statefile.atomic_write_json(paths.state(f"futures_{ex}.json"), out9)
 
 
+def _fut_name_ids(tag: str) -> set:
+    return {f"{k[0]}:{v}" for k, v in (envfile.acct_key({}, tag) or {}).items()}
+
+
+def _fut_live_ids(ex: str, tags: list) -> dict:
+    try:
+        subs = ((statefile.read_json(paths.state("exf_state.json"), {}) or {}).get(ex) or {}).get("accts") or {}
+    except (Exception, SystemExit):   # noqa: BLE001 [fallback]
+        subs = {}
+    return {t: {f"{k[0]}:{v}" for k, v in (envfile.acct_key(subs.get(t)) or {}).items()} for t in tags if isinstance(subs, dict)}
+
+
 def _fut_retag(ex, old, new, raw=True):
     can = paths.state(f"futures_{ex}.json")
     doc = statefile.read_json(can, {}) if os.path.exists(can) else {}
@@ -1061,6 +1185,26 @@ def _fut_retag(ex, old, new, raw=True):
         if raw:
             statefile.atomic_write_json(paths.state(f"futraw_{ex}_{new}.json"), statefile.read_json(src, {}))
         os.remove(src)
+
+
+def _fut_unraw(ex, tag):
+    src = paths.state(f"futraw_{ex}_{tag}.json")
+    if not os.path.exists(src):
+        return
+    got = statefile.read_json(src, {}) or {}
+    can = paths.state(f"futures_{ex}.json")
+    doc = statefile.read_json(can, {}) if os.path.exists(can) else {}
+    doc = doc if isinstance(doc, dict) else {}
+
+    def key(r):
+        return r.get("uid") or f"{r.get('t')}:{r.get('kind')}:{r.get('amount')}:{r.get('symbol')}"
+    evs = list(doc.get("events") or [])
+    have = {(r.get("acct") or "", key(r)) for r in evs if isinstance(r, dict)}
+    rows = got.get("events") if isinstance(got, dict) and isinstance(got.get("events"), list) else []
+    add = [dict(r, acct=tag) for r in rows if isinstance(r, dict) and (tag, key(r)) not in have]
+    if add:
+        statefile.atomic_write_json(can, dict(doc, events=sorted(evs + add, key=lambda r: (r.get("t") or 0) if isinstance(r, dict) else 0)))
+    os.remove(src)
 
 
 def _fut_seed_main(ex):
@@ -1538,8 +1682,13 @@ def acct_held(ex: str, state: dict, accts: list, loud: bool = False) -> list:
     subs = exst.get("accts")
     active = {tag for tag, _env in accts}
     held, dropped = [], False
+    dup = {t: f for (dex, t), f in _DUP.items() if dex == ex and (dex, t) not in _IDENT_BAD}
     for tag, sub in sorted((subs or {}).items()) if isinstance(subs, dict) else ():
         if not tag or tag in active or not isinstance(sub, dict) or not isinstance(sub.get("last_bal"), dict):
+            continue
+        if tag in dup:
+            del sub["last_bal"]
+            dropped = True
             continue
         if _lb_nonzero(sub["last_bal"]):
             held.append(tag)
@@ -1549,8 +1698,14 @@ def acct_held(ex: str, state: dict, accts: list, loud: bool = False) -> list:
     if held != (exst.get("sub_held") or []):
         exst["sub_held"] = held
         dropped = True
+    if dup != (exst.get("sub_dup") or {}):
+        exst["sub_dup"] = dup
+        dropped = True
     if dropped:
         _save_state(state)
+    if dup and loud:
+        log.warning("%s 같은 계정 키가 두 칸에 있음(%s) — 뒤 칸은 잔고·이력에서 빼고 셈 · 그 칸 키를 지우세요", ex,
+                    ",".join(f"{t}={f or 'main'}" for t, f in sorted(dup.items())))
     if held and loud:
         log.warning("%s 서브 키 제외됨(%s) — 마지막 잔고가 0 이 아니라 잔고 대사 보류(표시용만 · 같은 계정 키를 다시 넣으면 풀림)", ex, ",".join(held))
     return held
@@ -1561,7 +1716,7 @@ def _bal_all(ex: str, accts: list, st: dict = None):
         raise RuntimeError(f"{ex} 키 없음")
     a9 = (st.get("accts") if isinstance(st, dict) and isinstance(st.get("accts"), dict) else {}) or {}
     on9 = {t for t, _e in accts}
-    frozen9 = [t for t, v in sorted(a9.items()) if t and t not in on9 and isinstance(v, dict) and isinstance(v.get("last_bal"), dict)]
+    frozen9 = [t for t, v in sorted(a9.items()) if t and t not in on9 and ((ex, t) not in _DUP or (ex, t) in _IDENT_BAD) and isinstance(v, dict) and isinstance(v.get("last_bal"), dict)]
     if len(accts) == 1 and not frozen9:
         return BAL_FETCHERS[ex](accts[0][1])
     out = _Bal()
@@ -1653,6 +1808,7 @@ def main():
     while True:
         env = _env()
         kperm = settings_store.read_settings().get("key_perm") or {}
+        env = _main_gate(state, env, kperm)
         cfg = config.load_config()
         poll9 = config.exf_poll_sec(cfg)
         _POLL_HINT[0] = poll9
@@ -1660,6 +1816,7 @@ def main():
         months = 0 if cfg.get("backfill_full_history") else float(cfg.get("backfill_months") or 5)
         window = int((months or 5) * 30 * DAY)
         now = int(time.time())
+        _dup_scan(env, kperm, state)
         hl_on9 = _hl_on(cfg)
         try:
             statefile.atomic_write_json(paths.state("exf_active.json"),
@@ -1691,7 +1848,9 @@ def main():
             _quiet_n[ex] = _quiet_n.get(ex, 0) + 1
             loud9 = _quiet_n[ex] % 10 == 1
             _IDENT_BAD.difference_update({k for k in _IDENT_BAD if k[0] == ex})
-            accts9 = [a for a in acct_envs(env, ex, need) if _ident_ok(state, ex, a, need, kperm, now)]
+            _ident_all(state, ex, env, need, kperm, now)
+            _dup_scan(env, kperm, state, ex)
+            accts9 = acct_envs(env, ex, need)
             agg_ok9, agg_new9, agg_fly9, agg_rl9, agg_trk9 = not any(k[0] == ex for k in _IDENT_BAD), 0, [], False, False
             for tag9, env_a in accts9:
                 with _acct_ctx(tag9):

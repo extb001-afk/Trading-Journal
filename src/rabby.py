@@ -628,9 +628,7 @@ def daily_note(path: str, date_iso: str, usd: float, now: float, per_wallet: dic
             n.pop(date_iso, None)
     elif date_iso == d["first"]:
         n[date_iso] = round(float(usd), 2)
-    keep = sorted(d["d"])[-120:]
-    d["d"] = {k: d["d"][k] for k in keep}
-    d["n"] = {k: v for k, v in n.items() if k >= keep[0]}
+    d["n"] = n
     if json.dumps({k: d.get(k) for k in ("first", "d", "wf", "n")}, sort_keys=True) != before and now - float(d.get("_w") or 0) >= 60:
         d["_w"] = int(now)
         try:

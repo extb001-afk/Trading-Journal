@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import gzip
 import hashlib
 import json
 import os
@@ -9,10 +10,11 @@ import re
 import threading
 import time
 import urllib.parse
+import zlib
 from datetime import datetime, timezone
 
 import bf_engine
-import logs, num_parse, paths, statefile
+import fsio, logs, num_parse, paths, statefile
 import calcguard  # noqa: E402
 
 from timeutil import KST
@@ -22,6 +24,12 @@ MAX_PAGES = 12
 CLOSED_AFTER_S = 3600
 NEG_TTL_S = 6 * 3600
 POOL_TTL_S = 7 * 86400
+POOL_SRC = "token-pairs"
+POOL_CAND_MAX = 30
+POOL_KEEP_MAX = 200
+GT_PAGE_ROWS = 20
+POOL_TRY_MAX = 4
+DEX_EMPTY_TTL_S = 60 * 86400
 DEADLINE_S = 45.0
 GT_MAX_AGE_S = 179 * 86400
 GATE_MAX_POINTS = 9990
@@ -77,11 +85,12 @@ class BudgetExceeded(RuntimeError):
 
 
 class Result:
-    __slots__ = ("candles", "why", "note", "cached", "calls", "complete")
+    __slots__ = ("candles", "why", "note", "cached", "calls", "complete", "sure")
 
-    def __init__(self, candles=None, why=None, note=None, cached=False, calls=0, complete=True):
+    def __init__(self, candles=None, why=None, note=None, cached=False, calls=0, complete=True, sure=False):
         self.candles, self.why, self.note, self.cached, self.calls = candles, why, note, cached, calls
         self.complete = complete
+        self.sure = sure
 
     @property
     def ok(self):
@@ -451,7 +460,7 @@ def parse_gt(d):
     return out
 
 
-def parse_ds_pairs(d, chain_id):
+def parse_ds_pairs(d, chain_id, bad: list | None = None):
     if isinstance(d, dict):
         d = d.get("pairs") or []
     if not isinstance(d, list):
@@ -459,6 +468,8 @@ def parse_ds_pairs(d, chain_id):
     out = []
     for p in d:
         if not isinstance(p, dict) or not p.get("pairAddress"):
+            if bad is not None:
+                bad[0] += 1
             continue
         if p.get("chainId") and p.get("chainId") != chain_id:
             continue
@@ -468,6 +479,30 @@ def parse_ds_pairs(d, chain_id):
                     "quote": str((p.get("quoteToken") or {}).get("address") or ""),
                     "qsym": str((p.get("quoteToken") or {}).get("symbol") or ""),
                     "created": int(_f(p.get("pairCreatedAt")) or 0) // 1000})
+    out.sort(key=lambda x: -x["liq"])
+    return out
+
+
+def parse_gt_pools(d: object, bad: list | None = None) -> list | None:
+    rows = d.get("data") if isinstance(d, dict) else None
+    if not isinstance(rows, list):
+        return None
+    out = []
+    for p in rows:
+        a = p.get("attributes") if isinstance(p, dict) else None
+        if not isinstance(a, dict) or not a.get("address"):
+            if bad is not None:
+                bad[0] += 1
+            continue
+        nm = str(a.get("name") or "")
+        qsym = nm.split("/", 1)[1].strip().split(" ")[0] if "/" in nm else ""
+        try:
+            cr = _utc_s(a["pool_created_at"]) if a.get("pool_created_at") else 0
+        except (ValueError, TypeError):
+            cr = 0
+        dx = ((((p.get("relationships") or {}).get("dex") or {}).get("data") or {}).get("id")) if isinstance(p.get("relationships"), dict) else None
+        out.append({"pool": str(a["address"]), "dex": str(dx or ""), "liq": _f(a.get("reserve_in_usd")) or 0.0, "base": "", "quote": "",
+                    "qsym": qsym, "created": int(cr)})
     out.sort(key=lambda x: -x["liq"])
     return out
 
@@ -530,10 +565,54 @@ def _cpath(*parts):
 
 def _cache_get(path):
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        with open(path, "rb") as f:
+            raw = f.read()
+        if raw[:2] == b"\x1f\x8b":
+            return _bars_unpack(json.loads(gzip.decompress(raw).decode("utf-8")))
+        return json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, EOFError, TypeError, zlib.error):
         return None
+
+
+BAR_SIG = 6
+
+
+def _sig(x, sig):
+    if sig and type(x) is float and x == x and x not in (float("inf"), float("-inf")):
+        return float(format(x, ".%dg" % sig))
+    return x
+
+
+def _bars_pack(rec, sig=BAR_SIG):
+    rows = rec.get("candles") if isinstance(rec, dict) else None
+    if not (isinstance(rows, list) and all(isinstance(r, list) and len(r) == 6 for r in rows)):
+        return rec
+    cz = []
+    for r in rows:
+        r = [r[0]] + [_sig(x, sig) for x in r[1:]]
+        o = r[1]
+        cz.append([r[0], o, r[5]] if all(type(x) is type(o) and repr(x) == repr(o) for x in r[2:5]) else r)
+    return {("cz" if k == "candles" else k): (cz if k == "candles" else v) for k, v in rec.items()}
+
+
+def _bars_unpack(d):
+    if isinstance(d, dict) and isinstance(d.get("cz"), list) and "candles" not in d:
+        if not all(isinstance(r, list) and len(r) in (3, 6) for r in d["cz"]):
+            raise ValueError("봉 행 꼴 아님")
+        rows = [[r[0], r[1], r[1], r[1], r[1], r[2]] if len(r) == 3 else r for r in d["cz"]]
+        d = {("candles" if k == "cz" else k): (rows if k == "cz" else v) for k, v in d.items()}
+    return d
+
+
+def bars_encode(rec: dict, sig: int | None = BAR_SIG) -> bytes:
+    return gzip.compress(json.dumps(_bars_pack(rec, sig), ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 6, mtime=0)
+
+
+def _bars_put(path, rec):
+    try:
+        fsio.atomic_write_bytes(path, bars_encode(rec))
+    except Exception as exc:   # noqa: BLE001 [optional]
+        calcguard.swallowed("candles:_bars_put", exc)
 
 
 CACHE_V = 2
@@ -554,7 +633,7 @@ def _cache_store(path, key, out, why, note, complete, now):
     rec = {"key": key, "candles": out, "why": why, "note": note, "at": int(now), "complete": CACHE_V}
     if not out:
         rec["until"] = int(now + NEG_TTL_S)
-    _cache_put(path, rec)
+    _bars_put(path, rec)
 
 
 def _cache_put(path, obj):
@@ -759,6 +838,20 @@ def _pools_path():
 
 
 def find_pool(chain, token, tx_addrs=(), now=None):
+    cands, why, calls = pool_candidates(chain, token, tx_addrs, now=now)
+    return (cands[0] if cands else None), why, calls
+
+
+def _keep_cut_miss(ent: dict, touched: set, evm: bool, now: float) -> bool:
+    pairs = ent.get("pairs") or ()
+    if not (ent.get("cut") and touched and len(pairs) >= POOL_KEEP_MAX):
+        return False
+    if now < max(float(ent.get("until") or 0) - POOL_TTL_S, float(ent.get("missAt") or 0)) + NEG_TTL_S:
+        return False
+    return not any((str(p.get("pool") or "").lower() if evm else p.get("pool")) in touched for p in pairs if isinstance(p, dict))
+
+
+def pool_candidates(chain: str, token: str, tx_addrs: tuple | list = (), now: float | None = None) -> tuple:
     now = now or time.time()
     net = DS_CHAIN.get(chain)
     if not net or not token:
@@ -766,41 +859,89 @@ def find_pool(chain, token, tx_addrs=(), now=None):
     evm = chain != "sol"
     tk = token.lower() if evm else token
     key = f"{chain}:{tk}"
+    touched = {(a.lower() if evm else a) for a in (tx_addrs or ())}
+    pairs, cut = None, False
     with _CACHE_LOCK:
         pc = _cache_get(_pools_path()) or {}
-    ent = pc.get(key) if isinstance(pc, dict) else None
-    pairs = None
-    if isinstance(ent, dict) and float(ent.get("until") or 0) > now:
-        pairs = ent.get("pairs")
+        ent = pc.get(key) if isinstance(pc, dict) else None
+        live = isinstance(ent, dict) and float(ent.get("until") or 0) > now and ent.get("src") == POOL_SRC
+        miss = live and _keep_cut_miss(ent, touched, evm, now)
+        if miss:
+            pc[key] = dict(ent, missAt=int(now))
+            _cache_put(_pools_path(), pc)
+    if (live and not miss
+            and not ("cut" not in ent and len(ent.get("pairs") or ()) >= min(GT_PAGE_ROWS, POOL_CAND_MAX))):
+        pairs, cut = ent.get("pairs"), bool(ent.get("cut"))
         if pairs is None:
             return None, "no_pool", 0
     calls = 0
     if pairs is None:
         calls = 1
         try:
-            d = _get(f"https://api.dexscreener.com/tokens/v1/{net}/{urllib.parse.quote(token, safe='')}", deadline=time.time() + 20)
+            d = _get(f"https://api.dexscreener.com/token-pairs/v1/{net}/{urllib.parse.quote(token, safe='')}", deadline=time.time() + 20)
         except BudgetExceeded:
             return None, "budget", 0
         except bf_engine.NetError as e:
             return None, f"net:{getattr(e, 'kind', '?')}", calls
-        pairs = parse_ds_pairs(d, net)
+        bad = [0]
+        pairs = parse_ds_pairs(d, net, bad)
         if pairs is None:
             return None, "bad", calls
-        pairs = pairs[:30]
+        cut = bad[0] > 0
+        if not pairs and GT_NETWORK.get(chain):
+            gt_pairs, gt_why, gt_calls, gt_cut = _gt_token_pools(chain, token)
+            calls += gt_calls
+            if gt_why:
+                return None, gt_why, calls
+            pairs, cut = gt_pairs or [], cut or gt_cut
+        if not pairs and cut:
+            return None, "bad", calls
+        if len(pairs) > POOL_KEEP_MAX:
+            ids = {id(p) for p in [q for q in pairs if (q["pool"].lower() if evm else q["pool"]) in touched][:POOL_KEEP_MAX]}
+            ids |= {id(p) for p in [q for q in pairs if id(q) not in ids][:max(0, POOL_KEEP_MAX - len(ids))]}
+            pairs, cut = [p for p in pairs if id(p) in ids], True
         with _CACHE_LOCK:
             pc = _cache_get(_pools_path()) or {}
             if not isinstance(pc, dict):
                 pc = {}
             pc = {k: v for k, v in pc.items() if isinstance(v, dict) and float(v.get("until") or 0) > now}
-            pc[key] = {"pairs": pairs or None, "until": int(now + (POOL_TTL_S if pairs else NEG_TTL_S))}
+            pc[key] = {"pairs": pairs or None, "until": int(now + (POOL_TTL_S if pairs else NEG_TTL_S)), "src": POOL_SRC, "cut": cut}
             _cache_put(_pools_path(), pc)
         if not pairs:
             return None, "no_pool", calls
-    touched = {(a.lower() if evm else a) for a in (tx_addrs or ())}
     hit = [p for p in pairs if (p["pool"].lower() if evm else p["pool"]) in touched]
-    best = hit[0] if hit else sorted(pairs, key=lambda p: (str(p.get("qsym") or "").upper() not in _MAJOR_Q, -p["liq"]))[0]
-    best = dict(best, matched=bool(hit))
-    return best, None, calls
+    rest = sorted((p for p in pairs if p not in hit), key=lambda p: (str(p.get("qsym") or "").upper() not in _MAJOR_Q, -p["liq"]))
+    out = [dict(p, matched=True) for p in hit] + [dict(p, matched=False) for p in rest]
+    if len(out) > POOL_CAND_MAX:
+        out, cut = out[:POOL_CAND_MAX], True
+    if cut:
+        for p in out:
+            p["poolsCut"] = True
+    return out, None, calls
+
+
+def _gt_token_pools(chain, token):
+    url = (f"https://api.geckoterminal.com/api/v2/networks/{GT_NETWORK[chain]}/tokens/{urllib.parse.quote(token, safe='')}/pools?page=1")
+    deadline = time.time() + DEADLINE_S
+    room = _keyless_room("api.geckoterminal.com", deadline)
+    if room:
+        return None, room[0], 0, False
+    try:
+        d = _get(url, headers={"Accept": "application/json;version=20230302"}, deadline=deadline, inline_wait=30.0,
+                 **({"single": True} if chart_mode_now() == "bg" else {}))
+    except BudgetExceeded:
+        return None, "budget", 0, False
+    except bf_engine.NetError as e:
+        if _bg_mark_429("api.geckoterminal.com", e):
+            return None, "bg_stop", 1, False
+        if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) == 404:
+            return [], None, 1, False
+        return None, f"net:{getattr(e, 'kind', '?')}", 1, False
+    bad = [0]
+    pools = parse_gt_pools(d, bad)
+    if pools is None:
+        return None, "bad", 1, False
+    return pools, None, 1, len(d["data"]) >= GT_PAGE_ROWS or bad[0] > 0
 
 
 def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True):
@@ -820,18 +961,18 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True)
     s = IV_SEC[iv]
     t0 = int(t0) // s * s
     t1 = -(-int(t1) // s) * s
-    if now - t0 > GT_MAX_AGE_S:
-        return Result(why="too_old", note="GeckoTerminal 무료 API 는 지난 180일까지만")
     nk = f"gt:{chain}:{pool.lower()}"
-    if neg_get(nk, now):
-        return Result(why="no_market", note="GeckoTerminal 풀 없음(최근 확인)", cached=True)
     closed = t1 + CLOSED_AFTER_S < now
     cp = _cpath("dex", chain, pool.lower(), str(token or "").lower(), iv, t0, t1)
     if closed:
         c = _cache_get(cp)
-        if _cache_ok(c, now):
+        if _cache_ok(c, now) and (c["candles"] or now - t0 <= GT_MAX_AGE_S):
             return Result(candles=c["candles"] or None, why=None if c["candles"] else (c.get("why") or "no_data"),
                           note=c.get("note"), cached=True)
+    if now - t0 > GT_MAX_AGE_S:
+        return Result(why="too_old", note="GeckoTerminal 무료 API 는 지난 180일까지만")
+    if neg_get(nk, now):
+        return Result(why="no_market", note="GeckoTerminal 풀 없음(최근 확인)", cached=True)
     rows, calls, deadline = [], 0, time.time() + DEADLINE_S + 30
     if chart_mode_now() == "bg" and getattr(_TL, "dl", None) is not None:
         deadline = max(deadline, _TL.dl)
@@ -870,7 +1011,7 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True)
                 if getattr(e, "code", None) == 401 and "180 days" in str(e):
                     return Result(why="too_old", note="GeckoTerminal 무료 API 는 지난 180일까지만", calls=calls)
                 if getattr(e, "kind", "") == "http4xx" and getattr(e, "code", None) == 404:
-                    neg_put(nk, "no_market")
+                    neg_put(nk, "no_market", ttl=DEX_EMPTY_TTL_S)
                     return Result(why="no_market", note="GeckoTerminal 풀 없음", calls=calls)
                 return Result(why="net", note=f"GeckoTerminal 조회 실패({getattr(e, 'kind', '?')}: {logs.safe_err(e)[:80]})", calls=calls)
             got = parse_gt(d)
@@ -895,6 +1036,8 @@ def fetch_gt(chain, pool, token, iv, t0, t1, now=None, res="minute", keyed=True)
     note = None if out else "GeckoTerminal 그 구간 봉 없음(무료 API 과거 한도·풀 생성 전·거래 없음)"
     if closed:
         _cache_store(cp, ["dex", chain, pool, token, iv, t0, t1], out, why, note, complete, now)
+        if complete and not out:
+            _bars_put(cp, dict(_cache_get(cp) or {}, until=int(now + DEX_EMPTY_TTL_S)))
     return Result(candles=out or None, why=why, note=note, calls=calls, complete=complete)
 
 
@@ -905,16 +1048,19 @@ def fetch_spec(spec, iv, t0, t1, now=None, res=None):
         calls0 = 0
         if (now or time.time()) - int(t0) > GT_MAX_AGE_S:
             sp.pop("tx_addrs", None)
-            return Result(why="too_old", note="GeckoTerminal 무료 API 는 지난 180일까지만"), sp
+            return _dex_old(sp, iv, t0, t1, now, res)
         if not sp.get("pool"):
-            pool, why, calls0 = find_pool(sp.get("chain"), sp.get("token"), sp.get("tx_addrs") or (), now=now)
-            if not pool:
-                note = {"no_pool": "DEX 풀 못 찾음(DexScreener 페어 없음)", "unsupported": f"DEX 미지원 체인 {sp.get('chain')}"}.get(
+            cands, why, calls0 = pool_candidates(sp.get("chain"), sp.get("token"), sp.get("tx_addrs") or (), now=now)
+            if not cands and why in DEFER_WHYS:
+                return Result(why=why, note={"deferred": DEFER_NOTE, "bg_pace": BG_PACE_NOTE, "bg_stop": BG_STOP_NOTE}[why],
+                              calls=calls0, complete=False), sp
+            if not cands:
+                note = {"no_pool": "DEX 풀 못 찾음(DexScreener·GeckoTerminal 풀 없음)", "unsupported": f"DEX 미지원 체인 {sp.get('chain')}"}.get(
                     why, f"DEX 풀 조회 실패({why})")
                 return Result(why="no_market" if why in ("no_pool", "unsupported") else ("budget" if why == "budget" else "net"),
                               note=note, calls=calls0), sp
-            sp.update(pool=pool["pool"], dex=pool.get("dex"), poolMatched=pool.get("matched"), liq=pool.get("liq"),
-                      pair=None)
+            had_tx = bool(sp.pop("tx_addrs", None))
+            return _fetch_pools(sp, cands, had_tx, calls0, (iv, t0, t1, now, res))
         sp.pop("tx_addrs", None)
         r = fetch_gt(sp["chain"], sp["pool"], sp.get("token"), iv, t0, t1, now=now, res=res or "minute")
         r.calls += calls0
@@ -940,6 +1086,109 @@ def fetch_spec(spec, iv, t0, t1, now=None, res=None):
             with _CACHE_LOCK:
                 _INFLIGHT.pop(key, None)
             ev.set()
+
+
+_DEX_IDX = {"mt": None, "map": {}}
+
+
+def _dex_norm(iv, t0, t1, res):
+    iv = "1h" if res == "hour" else ("1d" if res == "day" else iv)
+    s = IV_SEC.get(iv)
+    if not s:
+        return None
+    return iv, int(t0) // s * s, -(-int(t1) // s) * s
+
+
+def _dex_index(now):
+    d = os.path.join(CACHE_DIR, "dex")
+    try:
+        mt = os.stat(d).st_mtime_ns
+    except OSError:
+        return {}
+    with _CACHE_LOCK:
+        if _DEX_IDX["mt"] == mt:
+            return _DEX_IDX["map"]
+    idx = {}
+    for ent in os.scandir(d):
+        if not ent.name.endswith(".json"):
+            continue
+        c = _cache_get(ent.path)
+        k = c.get("key") if isinstance(c, dict) else None
+        if not (isinstance(k, list) and len(k) == 7 and _cache_ok(c, now) and c["candles"]):
+            continue
+        try:
+            kk = (str(k[1]), str(k[3] or "").lower(), str(k[4]), int(k[5]), int(k[6]))
+        except (TypeError, ValueError):
+            continue
+        if len(c["candles"]) > idx.get(kk, (0, ""))[0]:
+            idx[kk] = (len(c["candles"]), ent.path)
+    with _CACHE_LOCK:
+        _DEX_IDX.update(mt=mt, map=idx)
+    return idx
+
+
+def _dex_old(sp, iv, t0, t1, now, res):
+    now = now or time.time()
+    if sp.get("pool"):
+        return fetch_gt(sp["chain"], sp["pool"], sp.get("token"), iv, t0, t1, now=now, res=res or "minute"), sp
+    nk = _dex_norm(iv, t0, t1, res)
+    hit = _dex_index(now).get((str(sp.get("chain")), str(sp.get("token") or "").lower()) + nk) if nk else None
+    c = _cache_get(hit[1]) if hit else None
+    if isinstance(c, dict) and c.get("candles"):
+        k = c.get("key") or []
+        return Result(candles=c["candles"], note=c.get("note"), cached=True), dict(sp, pool=str(k[2]), pair=None)
+    return Result(why="too_old", note="GeckoTerminal 무료 API 는 지난 180일까지만"), sp
+
+
+def _cg_old_cached(parts, t0, t1, now):
+    t0d, t1d = int(t0) // 86400 * 86400, -(-int(t1) // 86400) * 86400
+    if t1d + CLOSED_AFTER_S >= now:
+        return None
+    c = _cache_get(_cpath(*parts, t0d, t1d))
+    if _cache_ok(c, now) and c["candles"]:
+        return Result(candles=c["candles"], note=c.get("note"), cached=True)
+    return None
+
+
+def _fetch_pools(sp, cands, had_tx, calls0, win):
+    iv, t0, t1, now, res = win
+    calls, asked, paid, born, first = calls0, 0, 0, 0, None
+    for p in cands:
+        if int(p.get("created") or 0) and int(p["created"]) >= int(t1):
+            born += 1
+            continue
+        if paid >= POOL_TRY_MAX:
+            break
+        asked += 1
+        sp2 = dict(sp, pool=p["pool"], dex=p.get("dex"), poolMatched=p.get("matched"), liq=p.get("liq"), pair=None)
+        r = fetch_gt(sp2["chain"], sp2["pool"], sp2.get("token"), iv, t0, t1, now=now, res=res or "minute")
+        calls += r.calls
+        paid += 1 if r.calls else 0
+        if first is None:
+            first = sp2
+        if r.ok:
+            r.calls = calls
+            return r, sp2
+        if r.why not in ("no_data", "no_market") or (r.why == "no_data" and not r.complete):
+            r.calls = calls
+            return r, sp2
+    n_cand = len(cands)
+    n_seen = born + asked
+    part = any(p.get("poolsCut") for p in cands)
+    miss = had_tx and not any(p.get("matched") for p in cands)
+    sure = n_seen >= n_cand and not part and not miss
+    again = "" if sure else (" — 풀 목록이 다 오지 않아 다음에 다시" if part else " — 다음에 다시")
+    if not asked:
+        note = f"DEX 풀 {n_cand}개 모두 그 구간 뒤에 생김(풀 생성 전) — 그 구간 봉 없음" + again
+    elif n_seen >= n_cand:
+        note = f"DEX 후보 풀 {asked}개 모두 그 구간 봉 없음" + (f"(그 밖 {born}개는 구간 뒤 생성)" if born else "") + again
+    else:
+        note = f"DEX 후보 풀 {n_cand}개 중 {n_seen}개만 확인(모두 봉 없음) — 나머지는 다음에 다시"
+    if had_tx and not any(p.get("matched") for p in cands):
+        note = "체결 풀을 DEX 페어 목록에서 못 찾음 · " + note
+    sp_out = first or dict(sp, pool=cands[0]["pool"], dex=cands[0].get("dex"), poolMatched=cands[0].get("matched"),
+                           liq=cands[0].get("liq"), pair=None)
+    return Result(why="no_data", note=note, calls=calls, complete=True, sure=sure), sp_out
 
 
 CEX_ORDER_USD = ("binance", "bybit")
@@ -1047,7 +1296,7 @@ def date_aware(chain_plan, iv, t0, now=None):
             extra.append((1, ({"venue": "coingecko", "chain": sp.get("chain"), "token": sp.get("token")}, "hour", "lowres")))
     for _o, (sp, res, tag) in sorted(extra, key=lambda x: x[0]):
         k = (spec_key(sp), res)
-        if k in seen or too_old_rule(sp, res, iv, t0, now) is not None:
+        if k in seen or (sp.get("venue") != "coingecko" and too_old_rule(sp, res, iv, t0, now) is not None):
             continue
         seen.add(k)
         out.append((sp, res, tag))
@@ -1117,6 +1366,8 @@ def _best_chart(chain_plan, iv, t0, t1, display_cur, now=None, max_tries=8, fx_r
         use_iv = "1h" if res == "hour" else iv
         if not r.ok:
             tried.append({"label": spec_label(sp2), "iv": use_iv, "why": r.why, "note": r.note})
+            if sp2.get("venue") == "dex" and r.why == "no_data":
+                tried[-1]["sure"] = bool(r.sure)
             if later is None and r.why in LATER_WHYS and sp2.get("venue") in ("dex", "coingecko"):
                 later = r.why
             if r.why == "budget":
@@ -1263,8 +1514,12 @@ def points_to_hourly(points, t0, t1):
 def fetch_cg_hourly(chain, token, t0, t1, now=None):
     now = now or time.time()
     if now - int(t0) > CG_MAX_AGE_S:
-        return Result(why="too_old", note="코인게코 무키 API 는 지난 365일까지만")
-    r = fetch_cg(chain, token, int(t0) // 3600 * 3600, t1, now=now)
+        tk = token.lower() if chain != "sol" else token
+        r = _cg_old_cached(("cg", chain, tk), int(t0) // 3600 * 3600, t1, now) if token else None
+        if r is None:
+            return Result(why="too_old", note="코인게코 무키 API 는 지난 365일까지만")
+    else:
+        r = fetch_cg(chain, token, int(t0) // 3600 * 3600, t1, now=now)
     if not r.ok:
         return r
     out = points_to_hourly(r.candles, t0, t1)
@@ -1476,8 +1731,11 @@ def _cg_simple_have(ids, now, ttl, at=None):
 def fetch_cg_id_hourly(cid, t0, t1, now=None):
     now = now or time.time()
     if now - int(t0) > CG_MAX_AGE_S:
-        return Result(why="too_old", note="코인게코 무키 API 는 지난 365일까지만")
-    r = fetch_cg_id(cid, int(t0) // 3600 * 3600, t1, now=now)
+        r = _cg_old_cached(("cg", "id", cid), int(t0) // 3600 * 3600, t1, now) if cid else None
+        if r is None:
+            return Result(why="too_old", note="코인게코 무키 API 는 지난 365일까지만")
+    else:
+        r = fetch_cg_id(cid, int(t0) // 3600 * 3600, t1, now=now)
     if not r.ok:
         return r
     out = points_to_hourly(r.candles, t0, t1)

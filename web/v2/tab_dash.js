@@ -5,7 +5,8 @@
     EX_BY_KO, EX_NAMES, exLogo, fmtTs, futFxNote, hq, hs, IC, icon, impChip, isDex, isISO, isoDay, isYMD, isZ, krw, KS, KV, LS, m, mN, N, nbDot, nf,
     num, onUnauthorized, openDay, pad2, pAgg, partHave, partsNeed, PCAT_ORDER, PCATS, pctS, plPx, prTxt, PVM, pvm, pvW, px, pxC, pxSrcTxt, q, rate,
     rbChip, renderAuto, renderOverlay, renderView, retPct, revealAndHighlight, rw, S, scanText, short, staleChip, sum, toast, todayISO, trimZeros,
-    UI_SHEETS, uiCell, uiFold, uiPaged, uiPgBar, uiPgS, uiPgSlice, uiPgSz, uiSheetCloseThen, uiSheetOpen, venueLogo, wowSlot, ymOf, ymShift
+    UI_SHEETS, uiCell, uiFold, uiPaged, uiPgBar, uiPgS, uiPgSlice, uiPgSz, uiSheetCloseThen, uiSheetOpen, venueLogo, wowSlot, ymOf, ymShift,
+    dayFrz
   } = X;
   let A, apOf, copyBtn, dayContrib, evPill, EXPL, feeRef, groupDayEvs, isoAdd, levHTML, locH, locName, mAlt, monthAtt, monthBarRows, nmKey, oaDashLine, openFutRcpt, realDays, suSt, sxKeys, topRcptSym, trChip, vib;
   const __late = L => {
@@ -139,8 +140,10 @@
   }
   function flowTip(fl, top) { return '입출금 ' + m(num(fl), { sign: true }) + (arr(top).length ? ' — ' + arr(top).map(t => t[0] + ' ' + m(num(t[1]), { sign: true, compact: true })).join(' · ') : '') + ' · 입출금 = 외부·원화 입출금 + 거래소 잔고 정정·원가 없는 유입(시세 변동 아님)'; }
   function flowSplit(delta, fl, top, lead) { return '<span class="nw">' + (lead ? '· ' : '') + '시장 변동 <span class="' + cls(delta - num(fl)) + '">' + m(delta - num(fl), { sign: true, compact: true }) + '</span></span> <span class="nw" title="' + esc(flowTip(fl, top)) + '">· 입출금 ' + m(num(fl), { sign: true, compact: true }) + '</span>'; }
+  const attRow = k => { const D = S.D, x0 = D && D.dayMap.get(k); return x0 || (D && /^\d\d-\d\d$/.test(k) && dayFrz(k)) || undefined; };
+  const frzDay = k => !!(attRow(k) || 0)._frz;
   function attOf(k) {
-    const D = S.D, x = D && D.dayMap.get(k);
+    const D = S.D, x = attRow(k);
     if (!x || !x.att || typeof x.att !== 'object' || !x._prev) return null;
     const a = x.att, isT = k === D.todayKey;
     const delta = isT ? todayD() : dayV(x) - dayV(x._prev);
@@ -163,11 +166,11 @@
       const mvd = ur * rz < 0 ? ur : 0;
       const stk = num(a.stk) * kf;
       const iso9 = isoDay(k), fF = D.f || {}, fU = D.fut || {};
-      const at9 = mp => (mp && mp[iso9] != null ? mp[iso9] : mp ? mp[k] : null);
+      const fr = x._frz && x._frz.rzd, at9 = (mp, kk) => (fr ? fr[kk] : mp && mp[iso9] != null ? mp[iso9] : mp ? mp[k] : null);
       const kvP = (u, kr) => KV(u, D.hasKrw ? (kr != null && isFinite(kr) ? num(kr) : u * rate()) : null);
-      const rzS = kvP(num(at9(fF.realizedByDate)), at9(fF.realizedKrwByDate));
-      const rzF = kvP(num(at9(fU.realizedByDate)), at9(fU.realizedKrwByDate));
-      const fbU = num(a.fb), fb = fbU * kf, foU = fbU - num(at9(fU.realizedByDate));
+      const rzS = kvP(num(at9(fF.realizedByDate, 's')), at9(fF.realizedKrwByDate, 'sk'));
+      const rzF = kvP(num(at9(fU.realizedByDate, 'f')), at9(fU.realizedKrwByDate, 'fk'));
+      const fbU = num(a.fb), fb = fbU * kf, foU = fbU - num(at9(fU.realizedByDate, 'f'));
       const flC = fl - stk, fo = Math.abs(foU) < 0.015 ? 0 : (fbU ? foU * kf : -rzF);
       const fxC = fxl + (rz + lpf + fl + fb) - (rzS + rzF + flC + fo);
       const op = num(a.op) * kf;
@@ -254,7 +257,7 @@
     return '총자산 변동은 ' + w0 + josa(w0, '과', '와') + ' ' + w1 + josa(w1, '이', '가') + ' 컸다.';
   }
   function attDetail(a, k, noCoins) {
-    const D = S.D, x = D.dayMap.get(k) || {};
+    const D = S.D, x = attRow(k) || {};
     const row = (l, v, sub) => '<div class="ar"><span class="al">' + l + '</span><b class="num ' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</b>' + (sub ? '<span class="as">' + sub + '</span>' : '') + '</div>';
     const srow = (l, v, at) => '<' + (at ? 'button type="button" ' + at : 'div') + ' class="ar sub"><span class="al mut">' + l + '</span><span></span><b class="num ' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</b></' + (at ? 'button' : 'div') + '>';
     const mx = Math.max.apply(null, a.top.map(t => Math.abs(t.v)).concat([1e-9]));
@@ -571,7 +574,7 @@
     return b.concat(['이 코인이 사고판 분에 주는 값 ' + Mx(c[6])]).join('<br>');
   }
   function attdParts(k, det) {
-    const D = S.D, x = D && D.dayMap.get(k), a = x ? attOf(k) : null;
+    const D = S.D, x = D && attRow(k), a = x ? attOf(k) : null;
     if (!a) return null;
     const raw = x.att || {}, iso = isoDay(k), isT = k === D.todayKey, krw = S.cur !== 'USD';
     const kf = krw && !isT && x.valKrw != null && num(x.usdt) > 0 ? num(x.usdt) / rate() : 1;
@@ -597,17 +600,17 @@
     const mkMore = !mo.mk && dt && num(dt.mkN) > arr(dt.mk).length ? num(dt.mkN) - arr(dt.mk).length : 0;
     P.mk = attdFit(mk, a.mk, mkMore ? '그 밖 ' + mkMore + '종' : '그 밖(반올림·기준가)', L(mkMore ? '목록에 안 실은 작은 코인들의 기여 합' : '코인별 반올림·기준가 차'));
     P.ur = attdUr(dt, a, kf, more);
-    const rz = [], rzf = [], fo = [];
+    const rz = [], rzf = [], fo = [], fzr = !!(x._frz && x._frz.rzd);
     if (a.v2) {
-      dayContrib(iso).filter(r => !r.fut).forEach(r => { const v = KV(r.v, r.vk), sy = String(r.sym);
+      (fzr ? [] : dayContrib(iso)).filter(r => !r.fut).forEach(r => { const v = KV(r.v, r.vk), sy = String(r.sym);
         if (r.lp) { const lk = r.lpN ? '' : String((r.p && r.p.key) || ''), pool = String(r.lpN ? r.pool : (r.p && r.p.sym) || r.sym);
           rz.push(attdIt('lp:' + pool + '|' + lk, sy, v, { ico: 'lp', s: L('LP 수수료·회수 손익' + (r.lpN ? ' · ' + r.lpN + '개' : '')) + ' · 누르면 LP', a: 'attdLp', av: iso + '|' + pool + '|' + lk })); }
         else if (r.gas) rz.push(attdIt('gas:' + sy, '가스(매매 외)', v, { ico: 'gas', s: L('실패·승인·전송·브릿지·LP 가스 — 실현에서 뺌') }));
         else if (r.stk) rz.push(attdIt('stk:' + sy, sy, v, { ico: 'stk', s: L('스테이킹 보상 — 받은 시각 시가') }));
         else rz.push(attdIt('c:' + sy, sy, v, { sym: sy, s: L('판 것의 원가 대비 손익') + ' · 누르면 차익 영수증', a: 'attdRc', av: iso + '|' + sy })); });
-      P.rz = attdFit(rz, a.rz, '코인별로 나누지 못한 실현', L('코인·LP별 줄에 안 든 $0.005 미만 조각·반올림'));
+      P.rz = attdFit(rz, a.rz, fzr ? '저장된 현물 실현' : '코인별로 나누지 못한 실현', L(fzr ? '저장 때 합계' : '코인·LP별 줄에 안 든 $0.005 미만 조각·반올림'));
       const kvF = (u, kr) => KV(u, D.hasKrw ? (kr != null && isFinite(kr) ? num(kr) : u * rate()) : null);
-      const exD = arr(((D.fut || {}).realizedByDateEx || {})[iso]).filter(e => e && isFinite(+e.usd));
+      const exD = fzr ? [] : arr(((D.fut || {}).realizedByDateEx || {})[iso]).filter(e => e && isFinite(+e.usd));
       if (dt && Array.isArray(dt.fut) && dt.fut.length) dt.fut.forEach(f => { if (!Array.isArray(f)) return; const ex = String(f[0] || ''), nm = String(f[1] || EX_NAMES[ex] || ex || '선물'), sy = String(f[2] || '—');
         rzf.push(attdIt('f:' + ex + ':' + sy, sy === '—' ? nm + ' 선물' : futSym(sy), kvF(num(f[3]), f[4] == null ? null : num(f[4])), { ico: 'fut',
           s: L(nm) + (num(f[5]) ? ' · <span class="pvx">정산 ' + num(f[5]) + '건</span>' : '') + (num(f[6]) ? ' · 수수료·펀딩 포함' : '') + ' · 누르면 선물 영수증', a: 'attdFr', av: iso + '|' + ex })); });
@@ -621,12 +624,12 @@
       if (a.fo) {
         const fbm = {};
         if (dt && Array.isArray(dt.fb)) dt.fb.forEach(f => { if (Array.isArray(f)) fbm[String(f[0])] = num(fbm[String(f[0])]) + num(f[1]); });
-        if (num(raw.fb)) {
+        if (num(raw.fb) && !fzr) {
           const ks = []; Object.keys(fbm).concat(exD.map(e => String(e.exKey || ''))).forEach(e => { if (ks.indexOf(e) < 0) ks.push(e); });
           ks.forEach(ek => { const e = exD.find(z => String(z.exKey || '') === ek), ru = e ? num(e.usd) : 0, fv = num(fbm[ek]), v = (fv - ru) * kf;
             if (v) fo.push(attdIt('fo:' + ek, String((e && e.ex) || EX_NAMES[ek] || ek || '선물'), v, { ico: 'fut', s: '그날 정산 ' + m(ru * kf, { sign: true, compact: true }) + ' 중 총자산 반영 ' + m(fv * kf, { sign: true, compact: true }) })); });
         } else exD.forEach(e => fo.push(attdIt('fo:' + e.exKey, String(e.ex || EX_NAMES[e.exKey] || '선물'), -kvF(num(e.usd), e.krw == null ? null : num(e.krw)), { ico: 'fut', s: L('대사가 아직 총자산에 안 넣은 정산') })));
-        P.fo = attdFit(fo, a.fo, '반올림 끝전');
+        P.fo = attdFit(fo, a.fo, fzr ? '저장된 선물 미반영' : '반올림 끝전');
       } else P.fo = [];
       const unL = dt && Array.isArray(dt.un) ? dt.un.filter(Array.isArray).map(c => attdIt('un:' + c[0], String(c[0]), num(c[1]) * kf, { sym: String(c[0]), s: L('판 금액 − 그날 가격 평가') })) : [];
       const opL = dt && Array.isArray(dt.op) ? dt.op.filter(Array.isArray).map(c => attdIt('op:' + c[0], String(c[0]), num(c[1]) * kf, { sym: String(c[0]), s: L('기초 잔고 × 그날 가격') })) : [];
@@ -805,7 +808,7 @@
     const main = all.filter(x => !x.fold && !x.rest).sort(byDay ? (x, y) => (x.id < y.id ? 1 : x.id > y.id ? -1 : 0) : (x, y) => Math.abs(y.v) - Math.abs(x.v) || (x.l < y.l ? -1 : x.l > y.l ? 1 : 0));
     const fold = all.filter(x => x.fold), rest = all.filter(x => x.rest && !(x.rest === 2 && isZ(x.v)));
     const gi9 = q.mode === 'd' && q.key === 'rz' && !byDay ? main.findIndex(x => /^gas:/.test(x.id)) : -1;
-    const fr9 = q.mode === 'd' && q.key === 'rz' && !byDay ? feeRef(isoDay(q.at), gi9 >= 0 ? main[gi9].v : 0) : null;
+    const fr9 = q.mode === 'd' && q.key === 'rz' && !byDay && !frzDay(q.at) ? feeRef(isoDay(q.at), gi9 >= 0 ? main[gi9].v : 0) : null;
     if (fr9 != null) main.splice(gi9 >= 0 ? gi9 + 1 : main.length, 0, attdIt('gasref', '참고 · 매매 가스·수수료', -fr9, { ico: 'gas', ref: 1, s: '<span class="pill g sm">원가·손익에 포함</span> 산 쪽은 원가, 판 쪽은 손익에 이미 들어 있어요 · 합에 안 들어가요' }));
     const vis = main.concat(rest, fold), N = vis.length, nRef = vis.filter(x => x.ref).length;
     const ds = attdDs(), totU = sum(all, x => Math.round(x.v * ds)), wantU = Math.round(row.v * ds), tot = totU / ds, ok = totU === wantU;

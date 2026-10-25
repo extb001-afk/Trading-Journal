@@ -185,6 +185,8 @@ SKIP_HIDDEN = {"lock", "build_lock", "snaps", "spot", "px", "_pxq", "_rtx", "cfg
 
 def extras(b) -> dict:
     raw = {k: v for k, v in b.__dict__.items() if k not in SKIP_HIDDEN and not callable(v)}
+    if isinstance(raw.get("_att_frz_ix"), dict):
+        raw["_att_frz_ix"] = {k: v for k, v in raw["_att_frz_ix"].items() if k != "sig"}
     hid = san(raw)
     enc = FP.Encoder(builder_cls=web.StateBuilder, base=FP_BASE)
     p_hid = {k: enc.fingerprint("hidden." + k, v, FP.norm_for("hidden." + k)) for k, v in raw.items()}

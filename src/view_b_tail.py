@@ -1,5 +1,6 @@
 from __future__ import annotations
 import addr_ai
+import attfreeze
 import balcheck
 import buildproc
 import config, paths, statefile
@@ -421,5 +422,6 @@ class TailMixin:
         except Exception as e9:  # noqa: BLE001 [optional]
             calcguard.swallowed("view_b_tail:TailMixin._build_tail[annotate]", e9)
             log.warning("심볼 정리 실패(무시): %s", e9)
+        attfreeze.hook(self, fields, today_kst.strftime("%Y-%m-%d"), now)
         return {"fields": fields, "todayKey": today_kst.strftime("%m-%d"), "todayIso": today_kst.strftime("%Y-%m-%d"),
                 "realizedMonth": round(realized_month, 2), "builtAt": int(now)}

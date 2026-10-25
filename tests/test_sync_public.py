@@ -48,6 +48,14 @@ def status():
     return subprocess.run(["git", "-C", PUB, "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True).stdout
 
 
+def _files_of(d):
+    got = []
+    for dp, dns, fns in os.walk(d):
+        dns[:] = [x for x in dns if x != ".git"]
+        got += [os.path.relpath(os.path.join(dp, f), d).replace(os.sep, "/") for f in fns]
+    return sorted(got)
+
+
 NOSTRIP = {}
 
 
@@ -153,7 +161,58 @@ chk(rc == 2 and "커밋 안 한 변경" in out, "[3] 커밋 전 다시 돌리면
 subprocess.run(GIT + ["commit", "-q", "-m", "sync"], check=True)
 rc, out = run(OUT, PUB, scan=ok_scan)
 chk(rc == 0 and f"새로·바뀐 0 · 같음 {n} · 지울 추적 파일 0" in out, "[3] 커밋 뒤 다시 계획 = 바꿀 것 0", out[-200:])
+
+PUB2 = os.path.join(BASE, "pubrepo_nofm")
+os.makedirs(os.path.join(PUB2, "tools"))
+GIT2 = ["git", "-C", PUB2, "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false"]
+subprocess.run(GIT2 + ["init", "-q"], check=True)
+subprocess.run(GIT2 + ["config", "core.filemode", "false"], check=True)
+EXE = sorted(f for f in _files_of(OUT) if os.stat(os.path.join(OUT, f)).st_mode & 0o111)
+chk(EXE and "tools/setup.sh" in EXE, "[4] (전제) 산출물에 실행 파일 있음(tools/setup.sh)", EXE)
+shutil.copyfile(os.path.join(OUT, "tools", "setup.sh"), os.path.join(PUB2, "tools", "setup.sh"))
+os.chmod(os.path.join(PUB2, "tools", "setup.sh"), 0o755)
+shutil.copyfile(os.path.join(OUT, "README.md"), os.path.join(PUB2, "README.md"))
+os.chmod(os.path.join(PUB2, "README.md"), 0o644)
+subprocess.run(GIT2 + ["add", "-A"], check=True)
+subprocess.run(GIT2 + ["update-index", "--chmod=-x", "tools/setup.sh"], check=True)
+subprocess.run(GIT2 + ["update-index", "--chmod=+x", "README.md"], check=True)
+subprocess.run(GIT2 + ["commit", "-q", "-m", "init"], check=True)
+
+
+def stage_modes(repo):
+    got = {}
+    for ent in subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z"], capture_output=True, text=True, check=True).stdout.split("\0"):
+        if ent:
+            meta, path = ent.split("\t", 1)
+            got[path] = meta.split()[0]
+    return got
+
+
+m0 = stage_modes(PUB2)
+chk(m0 == {"tools/setup.sh": "100644", "README.md": "100755"}, "[4] (전제) 인덱스 모드 = 산출물과 반대(바이트는 같음)", m0)
+with open(os.path.join(PUB2, ".git", "info", "exclude"), "w") as f:
+    f.write("")
+rc, out = run(OUT, PUB2, scan=ok_scan)
+chk(rc == 0 and f"새로·바뀐 {n} · 같음 0 · 지울 추적 파일 0" in out, "[4] 계획: 인덱스 모드만 다른 파일도 '같음' 아님(바꿀 것에 셈)", out[-300:])
+rc, out = run(OUT, PUB2, "--apply", scan=ok_scan)
+m1 = stage_modes(PUB2)
+want = {f: ("100755" if f in EXE else "100644") for f in _files_of(OUT)}
+chk(rc == 0 and m1 == want, "[4] 적용 뒤 인덱스 모드 = 산출물 실행 비트(새 파일 · 불가→가능 · 가능→불가 · filemode=false)",
+    (rc, {k: v for k, v in m1.items() if want.get(k) != v}, out[-300:]))
+chk("실행 모드" in out, "[4] 성공 문구 = 경로·바이트·실행 모드까지 확인했다고 말함", out[-200:])
+subprocess.run(GIT2 + ["commit", "-q", "-m", "sync"], check=True)
+CL = os.path.join(BASE, "pub_clone")
+subprocess.run(["git", "clone", "-q", "--no-hardlinks", PUB2, CL], check=True, capture_output=True)
+bad_cl = [f for f in _files_of(OUT) if bool(os.stat(os.path.join(CL, f)).st_mode & 0o111) != (f in EXE)]
+chk(not bad_cl, "[4] 새 clone 실행 비트 = 산출물(tools/setup.sh 실행 가능 · README.md 아님)", bad_cl[:10])
+rc, out = run(OUT, PUB2, scan=ok_scan)
+chk(rc == 0 and f"새로·바뀐 0 · 같음 {n} · 지울 추적 파일 0" in out, "[4] 커밋 뒤 다시 계획 = 바꿀 것 0", out[-200:])
+subprocess.run(GIT2 + ["update-index", "--chmod=-x", "tools/setup.sh"], check=True)
+chk("tools/setup.sh" in SP._index_matches(PUB2, OUT, _files_of(OUT)), "[4] 인덱스 모드 어긋남 = 재확인이 잡음(바이트 같아도)")
+subprocess.run(GIT2 + ["update-index", "--chmod=+x", "tools/setup.sh"], check=True)
 os.environ.update(keep_env)
 shutil.rmtree(OUT, ignore_errors=True)
 shutil.rmtree(PUB, ignore_errors=True)
+shutil.rmtree(PUB2, ignore_errors=True)
+shutil.rmtree(CL, ignore_errors=True)
 T.finish()

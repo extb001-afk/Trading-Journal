@@ -20,6 +20,7 @@ NORMALIZE = (
     ("hidden._flow_cache_hit", (0, 0), "drop", "파일 inode — APFS 복제마다 다름(golden_diff 기본 무시와 같은 칸)"),
     ("hidden._built_sig", (), "drop", "입력 파일 서명(실행 폴더 경로·inode) — golden_diff 기본 무시와 같은 칸"),
     ("hidden._sigc_memo", (), "drop", "입력 파일 서명 메모(inode·시각) — golden_diff 기본 무시와 같은 칸"),
+    ("hidden._att_frz_ix", ("sig",), "drop", "동결 분해 색인의 파일 서명(수정 시각·크기) — 실행마다 다름(golden_diff 기본 무시와 같은 칸)"),
     ("hidden._lpx_cache", (), "sortkeys", "빌드당 그룹 단가 메모(buildproc CHILD_ONLY) — 채우는 순서 = 부르는 순서(해시 순서 의존) · 열쇠별 값은 같음"),
 )
 NORMALIZE_ATTR = (

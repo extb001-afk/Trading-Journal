@@ -377,9 +377,6 @@ class Store:
                 log.warning("AI 주소 의견 저장 파일 손상 — 쓰지 않음(%s)", self.path)
                 return False
             fn(d)
-            if len(d["items"]) > STORE_KEEP:
-                for k in sorted(d["items"], key=lambda k: int((d["items"][k] or {}).get("at") or 0))[:len(d["items"]) - STORE_KEEP]:
-                    d["items"].pop(k, None)
             if len(d["err"]) > STORE_KEEP:
                 for k in sorted(d["err"], key=lambda k: int((d["err"][k] or {}).get("at") or 0))[:len(d["err"]) - STORE_KEEP]:
                     d["err"].pop(k, None)

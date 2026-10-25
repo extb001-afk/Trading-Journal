@@ -12,6 +12,7 @@ import calcguard
 import logs
 import num_parse
 import paths
+import spamguard
 import statefile
 import token_tables
 
@@ -50,7 +51,7 @@ AMEND_SITES = {
     ("core_exf_late", "_exf_debt_redate_once"): "1회 이행(부채 첫 반영 시각·이자 레그)",
 }
 
-CLS_KO = {"spam": "스팸·무가치(가격 없음)", "dust": "$1 미만 먼지", "interest": "부채 이자", "futpnl": "선물 정산", "exflate": "늦은 행 상쇄",
+CLS_KO = {"spam": "스팸 토큰(가격 없음 · 사칭·낚시 이름 · 정품 주소 아닌 대표 심볼)", "dust": "$1 미만 먼지", "interest": "부채 이자", "futpnl": "선물 정산", "exflate": "늦은 행 상쇄",
           "tool": "수리 도구 행", "pair": "±상쇄 쌍(14일 안)", "pre_window": "창 시작 기초 잔고(수집 이전 보유)", "new_source": "새 잔고 출처 첫 실림",
           "estimated": "추정 — 알려진 미수집", "unexplained": "설명 안 됨"}
 RED_KO = {"prewin_rows": "창 이전 원장 행을 되받는 앵커", "mirror": "네이티브와 수량 같은 토큰 앵커", "flip3": "같은 칸 ±쌍 하루 3개 이상"}
@@ -173,7 +174,8 @@ def prices(state_dir: Optional[str] = None) -> dict:
         px = _pos_float(v[0]) if isinstance(v, list) and v else None
         if px is not None:
             leg[str(k)] = px
-    return {"grp": grp, "leg": leg}
+    fx = _pos_float(((_rj((os.path.join(state_dir, "spot.json") if state_dir else paths.state("spot.json")), {}) or {}).get("rate")))
+    return {"grp": grp, "leg": leg, "krw": 1.0 / fx if fx is not None and 100 <= fx <= 10000 else None}
 
 
 def coverage_gaps(state_dir: Optional[str] = None) -> dict:
@@ -235,12 +237,25 @@ def _px_of(r: dict, px: dict, px_fn: PxFn) -> Optional[float]:
     got = px["leg"].get(f"{r['ns']}|{r['sid']}|{r['seq']}|{r['aid']}")
     if got is None and r["gid"] is not None:
         got = px["grp"].get(int(r["gid"]))
-    if got is None and px_fn is not None and r["akind"] == "exchange_currency" and r["sym"].upper() != "KRW":
+    if got is None and r["akind"] == "exchange_currency" and r["sym"].upper() == "KRW":
+        return px.get("krw")
+    if got is None and px_fn is not None and r["akind"] == "exchange_currency":
         try:
             got = _pos_float(px_fn(r["sym"], int(r["aid"])))
         except (TypeError, ValueError, ArithmeticError):
             got = None
     return got
+
+
+def _spam_why(r: dict) -> str:
+    if r["akind"] != "token" or spamguard.is_genuine(r["chain"], r["ca"]):
+        return ""
+    sym = r["sym"]
+    if spamguard.impostor_of(sym) or spamguard.odd_symbol(sym):
+        return "사칭 문자"
+    if spamguard._TAIL_LURE.search(sym):
+        return "링크·보상 유도 이름"
+    return "대표 심볼 흉내(정품 주소 아님)" if spamguard.fake_major(sym, [(r["chain"], r["ca"])]) else ""
 
 
 def _notes(conn: sqlite3.Connection) -> dict:
@@ -278,14 +293,14 @@ def load_rows(conn: sqlite3.Connection, px: Optional[dict] = None, px_fn: PxFn =
         px_fn = _per_asset(px_fn)
     notes = _notes(conn)
     obs_at = {str(o): int(t) for o, t in conn.execute("SELECT obs_id, observed_at FROM raw_observations WHERE obs_id >= 'recon:' AND obs_id < 'recon;'")}
-    out = []
+    out, spam = [], {}
     for row in conn.execute(_ROW_SQL):
         r = dict(zip(_ROW_KEYS, row))
         try:
             r["q"] = int(r["qb"]) / 10 ** int(r["dec"] if r["dec"] is not None else 8)
         except (TypeError, ValueError):
             continue
-        r.update(sid=str(r["sid"]), sym=str(r["sym"] or ""), addr=str(r["addr"] or "").lower(), venue=_venue(r["loc"]), bts=_bts(r["sid"]))
+        r.update(sid=str(r["sid"]), sym=str(r["sym"] or ""), ca=str(r["addr"] or ""), addr=str(r["addr"] or "").lower(), venue=_venue(r["loc"]), bts=_bts(r["sid"]))
         nt = notes.get(_oid((r["kind"], r["ns"], r["sid"], r["seq"])))
         r["note"] = nt[0] if nt else None
         r["site"] = (nt[0].get("site") if nt and nt[0].get("site") in SITES else None) or _site_of(r)
@@ -297,6 +312,12 @@ def load_rows(conn: sqlite3.Connection, px: Optional[dict] = None, px_fn: PxFn =
         r["t0_ref"] = obs_at.get(r["sid"], r["made"]) if r["site"] == "K4" else r["made"]
         r["px"] = _px_of(r, px, px_fn)
         r["usd"] = r["q"] * r["px"] if r["px"] is not None else None
+        if r["px"] is None and r["aid"] not in spam:
+            spam[r["aid"]] = (_spam_why(r), r["akind"] != "token" or spamguard.is_genuine(r["chain"], r["ca"]))
+        why_spam, real = spam[r["aid"]] if r["px"] is None else ("", True)
+        r["spam"] = why_spam
+        r["nopx"] = r["px"] is None and not why_spam
+        r["real"] = r["nopx"] and real
         out.append(r)
     return out
 
@@ -386,7 +407,7 @@ def _red_shape(conn: sqlite3.Connection, r: dict, early: dict, cache: dict) -> N
 
 def _cls_of(r: dict, gaps: dict) -> str:
     s, q = r["site"], r["q"]
-    rules = (("spam", r["px"] is None), ("dust", r["usd"] is not None and abs(r["usd"]) < DUST_USD), ("futpnl", s == "K8" or r["ns"].endswith(":futpnl")),
+    rules = (("spam", bool(r.get("spam"))), ("dust", r["usd"] is not None and abs(r["usd"]) < DUST_USD), ("futpnl", s == "K8" or r["ns"].endswith(":futpnl")),
              ("exflate", s == "K9" or r["sid"].startswith("exflate:")),
              ("tool", s == SITE_TOOL), ("interest", s == "K7" and r["seq"] == 2 and q < 0), ("pair", bool(r["pair"])),
              ("pre_window", r["ws"] and r["red"] != "prewin_rows"), ("new_source", r["why"] == "new_source"))
@@ -431,15 +452,19 @@ def venue_values(conn: sqlite3.Connection, px: dict) -> dict:
 
 
 def _row_view(r: dict) -> dict:
-    return {"venue": r["venue"], "loc": r["loc"], "sym": r["sym"], "q": r["q"], "usd": None if r["usd"] is None else round(r["usd"], 2),
-            "ts": r["ts"], "made": r["made"], "site": r["site"], "why": r["why"], "cls": r["cls"], "red": r["red"], "cause": r.get("cause") or ""}
+    out = {"venue": r["venue"], "loc": r["loc"], "sym": r["sym"], "q": r["q"], "usd": None if r["usd"] is None else round(r["usd"], 2),
+           "ts": r["ts"], "made": r["made"], "site": r["site"], "why": r["why"], "cls": r["cls"], "red": r["red"], "cause": r.get("cause") or ""}
+    if r.get("nopx"):
+        out["nopx"] = True
+    return out
 
 
 def _venue_table(rows: list, now: float, values: dict) -> dict:
     venues = {}
     for r in (x for x in rows if x["cls"] in ("unexplained", "estimated")):
-        v = venues.setdefault(r["venue"], {"n": 0, "usd": 0.0, "n7": 0, "usd7": 0.0, "est_n": 0, "est_usd": 0.0,
+        v = venues.setdefault(r["venue"], {"n": 0, "usd": 0.0, "n7": 0, "usd7": 0.0, "est_n": 0, "est_usd": 0.0, "nopx": 0,
                                            "value": round(values.get(r["venue"], 0.0), 2)})
+        v["nopx"] += 1 if r.get("nopx") else 0
         u = abs(r["usd"] or 0.0)
         pre = "est_" if r["cls"] == "estimated" else ""
         v[pre + "n"] += 1
@@ -467,9 +492,12 @@ def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = 
         b = by_cls.setdefault(r["cls"], {"n": 0, "usd": 0.0})
         b["n"] += 1
         b["usd"] = round(b["usd"] + abs(r["usd"] or 0.0), 2)
+        if r.get("nopx"):
+            b["nopx"] = b.get("nopx", 0) + 1
     une = [r for r in rows if r["cls"] == "unexplained"]
     une7 = [r for r in une if now - r["made"] <= WEEK]
-    warn = [r for r in rows if now - r["made"] <= WEEK and r["usd"] is not None and _is_warn(r, values)]
+    warn = [r for r in rows if now - r["made"] <= WEEK and (_is_warn(r, values) if r["usd"] is not None else
+                                                         r.get("real") and r["cls"] in ("unexplained", "estimated"))]
     red = [r for r in rows if r["red"]]
     red_by = {}
     for r in red:
@@ -479,7 +507,8 @@ def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = 
         return -abs(r["usd"] or 0.0)
     doc = {"v": 1, "ts": int(now), "n_rows": len(rows),
             "unexplained": {"n": len(une), "usd": round(sum(abs(r["usd"] or 0) for r in une), 2),
-                            "n7": len(une7), "usd7": round(sum(abs(r["usd"] or 0) for r in une7), 2)},
+                            "n7": len(une7), "usd7": round(sum(abs(r["usd"] or 0) for r in une7), 2),
+                            "nopx": sum(1 for r in une if r.get("nopx")), "nopx7": sum(1 for r in une7 if r.get("nopx"))},
             "by_class": dict(sorted(by_cls.items())), "venues": _venue_table(rows, now, values),
             "top": [_row_view(r) for r in sorted(une, key=key)[:TOP_N]],
             "warn": [_row_view(r) for r in sorted(warn, key=key)[:20]], "warn_n": len(warn),
@@ -532,7 +561,8 @@ def tick(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], log_: Opti
 
 def _fmt_row(r: dict) -> str:
     u = r.get("usd")
-    head = f"{r.get('sym')} {r.get('venue')}" + (f" {'+' if (r.get('q') or 0) > 0 else '−'}${abs(u):,.0f}" if u is not None else "")
+    sign = "+" if (r.get("q") or 0) > 0 else "−"
+    head = f"{r.get('sym')} {r.get('venue')}" + (f" {sign}${abs(u):,.0f}" if u is not None else f" {sign}{abs(r.get('q') or 0):,.8g}개 평가 불가" if r.get("nopx") else "")
     where = SITES.get(r.get("site"), ("", "", "수리 도구 행"))[2].split("(")[0].split(" —")[0]
     return head + f"({where}{' · ' + r['cause'] if r.get('cause') else ''})"
 
@@ -542,21 +572,26 @@ def check(doc: object, now: Optional[float] = None) -> Optional[dict]:
         return None
     une = doc.get("unexplained") or {}
     red_n, warn_n = int(doc.get("red_n") or 0), int(doc.get("warn_n") or 0)
-    usd7, n7 = float(une.get("usd7") or 0), int(une.get("n7") or 0)
-    ven = " · ".join(f"{k} {int(v.get('n7') or 0)}건 ${float(v.get('usd7') or 0):,.0f}" for k, v in (doc.get("venues") or {}).items() if v.get("n7"))
-    tot = f"전체 설명 안 된 보정 {int(une.get('n') or 0)}건 ${float(une.get('usd') or 0):,.0f}"
+    usd7, n7, nx7 = float(une.get("usd7") or 0), int(une.get("n7") or 0), int(une.get("nopx7") or 0)
+    nxt = f"(평가 불가 {int(une.get('nopx') or 0)}건)" if une.get("nopx") else ""
+    nxt7 = f"(평가 불가 {nx7}건)" if nx7 else ""
+    ven = " · ".join(f"{k} {int(v.get('n7') or 0)}건" + (f" ${float(v.get('usd7') or 0):,.0f}" if v.get("usd7") or not v.get("nopx") else "")
+                     for k, v in (doc.get("venues") or {}).items() if v.get("n7"))
+    priced = int(une.get("n") or 0) > int(une.get("nopx") or 0)
+    tot = f"전체 설명 안 된 보정 {int(une.get('n') or 0)}건" + (f" ${float(une.get('usd') or 0):,.0f}" if priced or not nxt else "") + nxt
     if red_n:
         kinds = " · ".join(f"{RED_KO.get(k, k)} {n}" for k, n in (doc.get("red_by") or {}).items())
         return {"title": f"보정 버그 꼴 {red_n}건", "level": "crit", "tg": True,
                 "detail": f"{kinds} — " + " · ".join(_fmt_row(r) for r in (doc.get("red") or [])[:3]) + f" · {tot}",
                 "action": "실잔고 대사가 넣은 보정 중 버그 모양(창 이전 행 되받기·네이티브 거울·하루 여러 번 뒤집기)이 있어요 — 그 칸의 수집 기록을 점검하세요"}
     if warn_n or usd7 >= WEEK_TG_USD:
-        week = (f"7일 {n7}건 ${usd7:,.0f}" + (f" ({ven})" if ven else "") + " · ") if n7 else ""
-        return {"title": f"설명 안 된 보정 7일 ${usd7:,.0f}" if n7 else f"보정 확인 {warn_n}건(추정)", "level": "warn", "tg": usd7 >= WEEK_TG_USD,
+        week = (f"7일 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + nxt7 + (f" ({ven})" if ven else "") + " · ") if n7 else ""
+        title = (f"설명 안 된 보정 7일 ${usd7:,.0f}" + nxt7 if n7 > nx7 else f"설명 안 된 보정 7일 {n7}건(평가 불가)" if n7 else f"보정 확인 {warn_n}건(추정)")
+        return {"title": title, "level": "warn", "tg": usd7 >= WEEK_TG_USD,
                 "detail": week + " · ".join(_fmt_row(r) for r in (doc.get("warn") or doc.get("top") or [])[:3]) + f" · {tot}",
                 "action": "원장이 모르는 입출금이 실잔고 대사로 메워졌어요 — 그 거래소·체인의 수집 범위(입출금·Earn·배당)와 지갑 등록을 확인하세요"}
     return {"title": "보정 감시", "level": "ok", "tg": False, "action": "",
-            "detail": (f"7일 설명 안 된 보정 {n7}건 ${usd7:,.0f} · " if n7 else "7일 설명 안 된 큰 보정 없음 · ") + tot}
+            "detail": (f"7일 설명 안 된 보정 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + f"{nxt7} · " if n7 else "7일 설명 안 된 큰 보정 없음 · ") + tot}
 
 
 def exf_dm(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], ex: str, bts: int, n_adj: int, dm_fn: Callable[[str, str], object],
@@ -572,10 +607,14 @@ def exf_dm(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], ex: str,
     mine = [r for r in rows if r["venue"] == ex and r["bts"] == int(bts) and r["site"] == "K7" and (r["cls"] == "unexplained" or r["red"])]
     if not mine:
         return
-    syms = {}
+    syms, nopx = {}, set()
     for r in mine:
         syms[r["sym"]] = syms.get(r["sym"], 0.0) + (r["usd"] or 0.0)
-    top = " · ".join(f"{s} {'+' if v >= 0 else '−'}${abs(v):,.0f}" for s, v in sorted(syms.items(), key=lambda kv: -abs(kv[1]))[:3])
+        if r.get("nopx"):
+            nopx.add(r["sym"])
+    top = " · ".join(f"{s} 평가 불가" if s in nopx else f"{s} {'+' if v >= 0 else '−'}${abs(v):,.0f}" for s, v in sorted(syms.items(), key=lambda kv: -abs(kv[1]))[:3])
+    priced = len(syms) > len(nopx)
     red_n = sum(1 for r in mine if r["red"])
-    dm_fn("EXF_RECON", f"{ex} 잔고 대사 — 설명 안 된 {len(syms)}개 통화 보정 ${sum(abs(v) for v in syms.values()):,.0f}"
+    dm_fn("EXF_RECON", f"{ex} 잔고 대사 — 설명 안 된 {len(syms)}개 통화 보정"
+          + (f" ${sum(abs(v) for v in syms.values()):,.0f}" if priced else "") + (f" · 평가 불가 {len(nopx)}개" if nopx else "")
           + (f" · 버그 꼴 {red_n}건" if red_n else "") + f" ({top})")

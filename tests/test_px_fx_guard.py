@@ -50,6 +50,18 @@ got = ds([P_NOLIQ, P_LIQ])
 chk(got == ({CA: 1.25}, {CA: 20000.0}), "D3 유동성 없는 페어 + 있는 페어 = 있는 페어의 가격만(12.5 안 씀)", got)
 got = ds([P_LIQ, P_NOLIQ])
 chk(got == ({CA: 1.25}, {CA: 20000.0}), "D3 순서가 바뀌어도 같음", got)
+for lb9, lq9 in (("NaN", "NaN"), ("Infinity", "Infinity"), ("음수", -5), ("숫자 아님", "x"), ("참거짓", True)):
+    got = ds([dict(P_NOLIQ, liquidity={"usd": lq9}), P_LIQ])
+    chk(got == ({CA: 1.25}, {CA: 20000.0}), f"D4 유동성 {lb9} 페어 = 유동성 모름(그 페어 가격 안 씀 · 합에 안 넣음)", got)
+got = ds([dict(P_LIQ, priceUsd=True)])
+chk(got == ({}, {}), "D5 가격 칸이 참거짓(True) = 가격 아님(1.0 으로 믿지 않음)", got)
+got = ds([dict(P_LIQ, liquidity={"usd": 1e308}), dict(P_LIQ, liquidity={"usd": 1e308})])
+chk(got == ({}, {}), "D6 유동성 합이 넘침(무한) = 그 토큰 결과 없음(무한 유동성으로 가드 통과 금지 · 미확인)", got)
+try:
+    got = ds([dict(P_LIQ, baseToken="x"), dict(P_LIQ, quoteToken=7), P_LIQ])
+except Exception as e9:   # noqa: BLE001
+    got = repr(e9)
+chk(got == ({CA: 1.25}, {CA: 40000.0}), "D7 토큰 칸이 객체 아닌 깨진 행 = 그 칸만 건너뜀(성한 base 칸은 셈 · 예외로 묶음 전체 잃지 않음)", got)
 
 K = f"eth:{CA}"
 

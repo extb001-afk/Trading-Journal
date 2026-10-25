@@ -289,7 +289,7 @@ class DailyMixin:
         hist9 = days is not None
         if not hist9:
             self._venue_flow = None
-            self._flow_px_delta = {}
+            self._flow_px_delta, self._flow_att_px, self._flow_att_rep = {}, {}, {}
             self._flow_nf = set()
         if not daily and not hist9:
             return {}
@@ -304,6 +304,7 @@ class DailyMixin:
                 keys[d9.strftime("%Y-%m-%d")] = d9.strftime("%m-%d")
         lo_ts = datetime.strptime(min(keys), "%Y-%m-%d").replace(tzinfo=KST).timestamp()
         vflow9 = {} if not hist9 else None
+        flow_px_at = self._flow_att_px if not hist9 else {}
         dpx = (self.daily_px or {}) if dpx is None else dpx
         today_iso9 = today_kst.strftime("%Y-%m-%d")
         acc = {}
@@ -421,6 +422,8 @@ class DailyMixin:
                     a9[lbl9] = a9.get(lbl9, Decimal(0)) + q9
                     gpx.setdefault((ck9, gid9), px9)
                     gpxc.setdefault((ck9, gid9), pxc9)
+        if not hist9:
+            self._flow_att_rep.update(view_attur.flow_prev_reprice(acc, (gpx, gpxc, gsrc9), G, (dpx, self.__dict__.get("_daily_att_src") or {}), today_iso9, type(self).ATT_NOPX_BAND, held9))
         for (ck9, su9), gh9 in sorted(held9.items()):
             gm9 = (acc.get(ck9) or {}).get(su9) or {}
             if not gm9:
@@ -450,7 +453,7 @@ class DailyMixin:
                     if datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d") not in keys:
                         continue
                     d9 = datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d")
-                    fx9 = float(fx_day(d9) or 0)
+                    fx9 = float((self._att_fx_at(int(ts9 * 1000)) if self.__dict__.get("_att_fx_at") else fx_day(d9)) or 0)
                     if not fx9 > 0:
                         nofx9[d9] = nofx9.get(d9, 0.0) + k9
                         continue
@@ -505,6 +508,7 @@ class DailyMixin:
                 cur9 = 0.0
                 for gs9 in _bands(ck9, gm9, (lambda g0: gpxc[(ck9, g0)],)):
                     cur9 += float(sum((v for g0 in gs9 for v in gm9[g0].values()), Decimal(0))) * gpxc[(ck9, _ref(gm9, gs9))]
+                    flow_px_at.update(((ck9, g0), gpxc[(ck9, _ref(gm9, gs9))]) for g0 in gs9)
                 shown9 = 0.0
                 for r9 in sorted(set(sup9)):
                     mem9 = [i9 for i9 in range(len(cl_d9)) if sup9[i9] == r9]
@@ -738,7 +742,7 @@ class DailyMixin:
             if has_krw9 and ud and up9 and ud != up9:
                 kx = _krw_close(ckp, dpx=dpx, krw_at=krw_at) * (1 / ud - 1 / up9)
             kx0 = kx
-            fxat9 = getattr(getattr(self, "px", None), "fx_at", None)
+            fxat9 = self.__dict__.get("_att_fx_at") or getattr(getattr(self, "px", None), "fx_at", None)
             if tlo_ok9 and ud and callable(fxat9):
                 a9, b9 = _day_ts(ckd)
                 o9 = {}
@@ -789,7 +793,9 @@ class DailyMixin:
                 l9 = lg9.get(gid9) or ()
                 return (float(sum((abs(v9) for v9 in m9.values()), Decimal(0))), float(sum((abs(v9) for v9 in l9), Decimal(0))),
                         abs(_fnum(gd.get(str(gid9)))) + abs(_fnum(gp.get(str(gid9)))), -gid9)
-            prev_only = view_attur.prev_only(own9, pdx, ppx, moved9, G, mvd9, type(self).FLOW_INT_EV) - view_attur.day_excl(ckd, opn9, fb9, dbi9, real)
+            prev_only = view_attur.prev_only(own9, pdx, ppx, moved9, G, mvd9, type(self).FLOW_INT_EV) - view_attur.day_excl(ckd, opn9, fb9, dbi9, real, is_today9)
+            fl_att = {} if is_today9 else view_attur.past_flow_px(prev_only, self.__dict__.get("_flow_att_rep") or {}, self.__dict__.get("_flow_att_px") or {}, ckd)
+            fl_att.update({} if is_today9 else view_attur.nopx_flow_px(lg9, mvd9, set(opn9.get(ckd) or ()) | set(fb9.get(ckd) or ()), own9, self.__dict__.get("_flow_att_px") or {}, ckd))
             by_sym9 = view_attur.by_symbol(own9, G, set())
             leg_px9 = {}
             bands9 = {}
@@ -806,8 +812,11 @@ class DailyMixin:
                         leg_px9[gid9] = own9[ref9]
                 bands9[sym9] = [(own9[max(gs0, key=wt9)], gs0) for _p9, gs0 in cl9]
             lo9, hi9 = type(self).ATT_NOPX_BAND
-            leg_px9.update(view_attur.prev_band_px(prev_only, own9, bands9, live_px if is_today9 else None, G, (lo9, hi9), pdx))
-            for gid9, lv9 in cand9.items():
+            pb9 = lambda p9: view_attur.prev_band_px(p9, own9, bands9, live_px if is_today9 else None, G, (lo9, hi9), pdx)   # noqa: E731
+            leg_px9.update(view_attur.unv_live_keep(pb9, prev_only, ((real or {}).get("unv") or {}).get(ckd) or {}, self.__dict__.get("_flow_att_px") or {}, ckd, bands9))
+            leg_px9.update(fl_att)
+            prev_only.update(fl_att)
+            for gid9, lv9 in ((g, v) for g, v in cand9.items() if g not in fl_att):
                 sym9 = str((G.get(gid9) or {}).get("sym") or "?").upper()
                 fit9 = [bp9 for bp9, _g in bands9.get(sym9) or () if lo9 <= lv9 / bp9 <= hi9]
                 if fit9:
@@ -831,7 +840,7 @@ class DailyMixin:
                 elif gpv9:
                     if not pp9:
                         continue
-                    b9, po9 = view_attur.prev_out(gid9, gpv9, pp9, prev_only, is_today9, mvd9, type(self).FLOW_INT_EV), pp9
+                    b9, po9 = view_attur.prev_out(gid9, gpv9, pp9, prev_only, is_today9 or gid9 in fl_att, mvd9, type(self).FLOW_INT_EV), pp9
                 else:
                     continue
                 gx += b9 * (1 - lp9 / po9)
@@ -1672,7 +1681,7 @@ class DailyMixin:
             new9 = [m for m in rdy9 if int(m[0]) > fwid9] if frozen_ok else []
             if new9:
                 min9 = min(m[1] for m in new9)
-                if min9 < (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"):
+                if min9 <= (today_kst - timedelta(days=29)).strftime("%Y-%m-%d"):
                     try:
                         t9h = int(datetime.strptime(min9, "%Y-%m-%d").replace(tzinfo=today_kst.tzinfo, hour=12).timestamp())
                         log.info("장기 곡선 다시 계산 표식(늦은 원장 행): %s 부터", histmark.mark_hist_dirty(t9h))
@@ -1855,7 +1864,7 @@ class DailyMixin:
                     if sp9 and 0.5 <= sp9 / p9 <= 2.0:
                         p9, k9 = sp9, "seed"
                     elif day_close is not None and float(q9) * p9 >= DC_SMALL_USD:
-                        dcb9 = day_close(gid9, ck9, float(q9) * p9)[0]
+                        dcb9 = day_close(gid9, ck9, float(q9) * p9, ref=p9)[0]
                         if dcb9:
                             p9, k9 = float(dcb9), "d"
                 v9 = q9 * Decimal(str(p9))
@@ -2170,7 +2179,7 @@ class DailyMixin:
                         px, kind = sp9, "seed"
                 if (kind == "now" and day_close is not None and hold_qty is not None and sid not in fixed_p
                         and abs(float(qty) * float(px or 0)) >= DC_SMALL_USD):
-                    dcp9 = day_close(gid, ck, abs(float(qty) * float(px or 0)))[0]
+                    dcp9 = day_close(gid, ck, abs(float(qty) * float(px or 0)), ref=px)[0]
                     if dcp9:
                         px, kind = dcp9, "d"
                 if px and sid not in fixed_p:

@@ -518,6 +518,33 @@
     return c && c.evs || null;
   }
   function dayWait(k) { const D = S.D, iso = isoDay(k), c = iso && (S.dayFull || {})[iso]; return !!(D && D.dayActs && c && c.st === 'load' && !c.evs); }
+  function dayFrz(k, load) {
+    const D = S.D, iso = isoDay(k);
+    if (!D || !iso || k === D.todayKey) return null;
+    const C = S.dayFrz || (S.dayFrz = {}), c = C[iso];
+    if (!load || (c && (c.st === 'load' || (c.st === 'ok' && c.at === D.builtAt)))) return (c && c.x) || null;
+    const q = C[iso] = { at: D.builtAt, st: 'load', x: c && c.x }, at = q.at;
+    fetch('/api/att_detail?frz=1&date=' + iso, { cache: 'no-store' })
+      .then(r => { if (r.status === 401) { onUnauthorized(); return null; } return r.ok ? r.json().catch(() => null) : null; })
+      .then(j => { const cur = C[iso]; if (cur !== q || S.dayFrz !== C) return;
+        const ok = !!(j && j.ok), same = ok && j.builtAt === at && S.D && S.D.builtAt === at, f = same && j.frz ? j.frz[iso] : null;
+        C[iso] = { at, st: same ? 'ok' : ok ? 'skew' : 'err', x: same ? frzRow(f) : cur.x };
+        if ((same || (ok && S.D && S.D.builtAt !== at)) && (S.tab === 'daily' || S.tab === 'dash')) render(); })
+      .catch(() => { if (C[iso] === q) C[iso] = { at, st: 'err', x: q.x }; });
+    return (c && c.x) || null;
+  }
+  function frzRow(f) {
+    const r = f && f.r && typeof f.r === 'object' ? f.r : null, p = f && f.p && typeof f.p === 'object' ? f.p : null;
+    if (!r || !p || !r.att || typeof r.att !== 'object' || !isFinite(+r.val) || !isFinite(+p.val)) return null;
+    const one = y => { const z = Object.assign({}, y, { val: num(y.val) });
+      z.valKrw = y.valKrw != null && isFinite(+y.valKrw) ? num(y.valKrw) : null;
+      const a0 = num(z.est) + num(z.xc); z.ap = a0 >= Math.max(50, 0.005 * Math.abs(z.val)) ? a0 : 0; return z; };
+    const x = one(r), pv = one(p);
+    x._prev = pv; x.delta = x.val - pv.val;
+    const rzd = f.rzd && typeof f.rzd === 'object' ? f.rzd : null;
+    x._frz = { at: num(f.at), st: f.st ? String(f.st) : '', sx: f.sx ? String(f.sx) : '', rzd };
+    return x;
+  }
   function evSkel(rows, heads) {
     const bar = w => '<i class="skl" style="width:' + w + '%"></i>';
     let h = '';
@@ -1615,7 +1642,7 @@
     S.feedFull = null; S.dayFull = {}; S.rcpt = null; S.rcptX = {}; S.rcptB = {}; S.rcptE = {}; S.fut = null; S.jLast = null; S.drafts = {};
     if (S.oa) { S.oa.d = null; S.oa.lk = null; }
     if (S.nft) S.nft.d = null;
-    S.al = null; if (S.hist) S.hist.days = [];
+    S.al = null; S.dayFrz = null; if (S.hist) S.hist.days = [];
     S.drawer = null; S.modal = null; S.pop = null; S.sheet = null; S.err = '401'; S.errCode = 401;
   }
   function lockPanels() {
@@ -2555,7 +2582,8 @@
     EX_BY_KO, EX_NAMES, exLogo, fmtTs, futFxNote, hq, hs, IC, icon, impChip, isDex, isISO, isoDay, isYMD, isZ, krw, KS, KV, LS, m, mN, N, nbDot, nf,
     num, onUnauthorized, openDay, pad2, pAgg, partHave, partsNeed, PCAT_ORDER, PCATS, pctS, plPx, prTxt, PVM, pvm, pvW, px, pxC, pxSrcTxt, q, rate,
     rbChip, renderAuto, renderOverlay, renderView, retPct, revealAndHighlight, rw, S, scanText, short, staleChip, sum, toast, todayISO, trimZeros,
-    UI_SHEETS, uiCell, uiFold, uiPaged, uiPgBar, uiPgS, uiPgSlice, uiPgSz, uiSheetCloseThen, uiSheetOpen, venueLogo, wowSlot, ymOf, ymShift
+    UI_SHEETS, uiCell, uiFold, uiPaged, uiPgBar, uiPgS, uiPgSlice, uiPgSz, uiSheetCloseThen, uiSheetOpen, venueLogo, wowSlot, ymOf, ymShift,
+    dayFrz
   });
 
   const {
@@ -2578,7 +2606,7 @@
     evDT, evNm, evPill, evQ, evSkel, evXf, EX_NAMES, flowSplit, flowTip, hs, IC, icon, impChip, isISO, isoDay, isYMD, isZ, kimpChip, kimpCol,
     krwDayHTML, KV, lpNm, lpNmHTML, LS, m, mcal, mN, monthRealized, nf, num, optCk, pad2, parseMoney, pctS, plainT, popBox, prTxt, PVM, pvMoney, pvOn,
     pvW, q, rate, revTxt, rfrTag, rollMinISO, S, short, srcBtn, srcPass, sum, term, todayD, todayISO, UI_SHEETS, uiFold, uiPaged, uiPgBar, uiPgSlice,
-    ymOf, ymShift
+    ymOf, ymShift, dayFrz
   });
   tjLate_dash({ apOf, dayContrib, feeRef, groupDayEvs, isoAdd, monthAtt, monthBarRows, realDays });
   tjLate_jrnl({ payChip });

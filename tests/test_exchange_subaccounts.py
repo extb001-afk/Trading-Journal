@@ -708,6 +708,34 @@ chk(ok14b is False and {("bybit", "s1"), ("bybit", "s2")} <= X._IDENT_BAD and st
     "I14b 막힌 일지 뒤 대기 항목의 칸(s2)도 이번 주기 뺌 · 일지는 남김", [ok14b, sorted(X._IDENT_BAD)])
 X._IDENT_BAD.clear()
 os.remove(os.path.join(S, "futraw_bybit_s1.json"))
+kperm(bsF={"how": "api", "uid": "9995"})
+CFG["env"] = sub_keys("bsF")
+run_cycles(1, clear=True)
+st_i15 = rd("exf_state.json")
+st_i15["bybit"]["accts"]["s1"].pop("uid", None)
+statefile.atomic_write_json(os.path.join(S, "exf_state.json"), st_i15)
+kperm(bsG={"how": "api", "uid": "4444"})
+BAL["bsG"] = {}
+CFG["env"] = sub_keys("bsG")
+run_cycles(2, clear=False)
+subs_i15 = (((rd("exf_state.json") or {}).get("bybit") or {}).get("accts") or {})
+chk(emitted_s1() == ["bybit:s1:d1", "bybit:s1:e1"] and sub_st().get("uid") == "4444" and f"s1@k{key_fp('bsF')}" in subs_i15,
+    "I15 UID 미상 + 키 바뀜 + 새 UID = 옛 상태 's1@k<지문>' 로 물려 두고 새 계정 처음부터(종전: 새 UID 를 같은 계정 근거로 보고 커서 승계)",
+    [emitted_s1(), sorted(subs_i15)])
+st_i16 = rd("exf_state.json")
+st_i16["bybit"]["accts"]["s1"].pop("uid", None)
+statefile.atomic_write_json(os.path.join(S, "exf_state.json"), st_i16)
+run_cycles(2, clear=False)
+chk(emitted_s1() == [] and sub_st().get("uid") == "4444" and sub_st().get("kfp") == key_fp("bsG"),
+    "I16 UID 미상 + 같은 키 지문 + UID 첫 확보 = 이어 감(UID 만 채움 · 다시 안 받음)", [emitted_s1(), sub_st().get("uid")])
+st17 = {"bybit": {"seen": {}, "accts": {"s1": {"seen": {"x": 1}, "kfp": key_fp("kA")}}}}
+X.acct_ident(st17, "bybit", "s1", "kB", {"bybit_sub1": {"uid": "B1", "kfp": key_fp("kB")}}, NOW)
+st17b = {"bybit": {"seen": {}, "accts": {"s1": {"seen": {"x": 1}}}}}
+X.acct_ident(st17b, "bybit", "s1", "kB", {"bybit_sub1": {"uid": "B1", "kfp": key_fp("kB")}}, NOW)
+chk(sorted(st17["bybit"]["accts"]) == ["s1", f"s1@k{key_fp('kA')}"] and st17["bybit"]["accts"]["s1"].get("seen") == {}
+    and st17["bybit"]["accts"][f"s1@k{key_fp('kA')}"].get("seen") == {"x": 1}
+    and sorted(st17b["bybit"]["accts"]) == ["s1"] and st17b["bybit"]["accts"]["s1"].get("uid") == "B1",
+    "I17 acct_ident: 지문만 있는 옛 상태 + 다른 키 = 분리(옛 seen 보관) · 지문도 없는 옛 상태 = 채택(I6 이행 0 그대로)", [st17, st17b])
 CFG["env"] = dict(ENV)
 def fut_uids():
     return sorted(e.get("uid") for e in (rd("futures_bybit.json") or {}).get("events") or [])
@@ -729,4 +757,103 @@ for case_j, fail_j in (("J1", True), ("J2", False)):
         [j_multi, j_single, fut_uids(), raw_j])
 CFG.update(env=dict(ENV), fut_fail_main=False)
 CFG.pop("fut_main", None)
+def kperm_g(**grp):
+    ss.update_settings(key_perm={g: {"how": "api", "uid": u, "kfp": key_fp(k)} for g, (k, u) in grp.items()} or None)
+
+
+def env_subs(**subs):
+    e = dict(ENV_NOSUB)
+    for t, k in subs.items():
+        e[f"TJ_BYBIT_SUB{t[1:]}_KEY"], e[f"TJ_BYBIT_SUB{t[1:]}_SECRET"] = k, k + "s"
+    return e
+
+
+def emitted_tag(tag):
+    return sorted({x.get("uuid") or x.get("id") for r in OUT if r.get("kind") in ("ex_snapshot", "exf_fills")
+                   for x in (r.get("deposits") or []) + (r.get("fills") or []) if (x.get("uuid") or x.get("id") or "").startswith(f"bybit:{tag}:")})
+
+
+def formal_bb():
+    return (rd("exf_balances_bybit.json") or {}).get("balances")
+
+
+DEBT.clear()
+BAL.update({"bm": {"USDT": 100.0}, "bs1": {"USDT": 50.0}, "bs2": {"USDT": 50.0}, "bs3": {"USDT": 7.0}})
+SRC.update(bm=[], bs1=[], bs2=[], bs3=[])
+kperm_g(bybit_sub1=("bs1", "5551"), bybit_sub2=("bs2", "5551"))
+CFG["env"] = env_subs(s1="bs1", s2="bs2")
+run_cycles(3)
+act_u1 = (rd("exf_active.json") or {}).get("active") or []
+chk(formal_bb() == {"USDT": 150.0} and emitted_tag("s2") == [] and emitted_tag("s1") and "bybit~s2" not in act_u1,
+    "U1 다른 키·같은 UID 두 칸 = 둘째 칸(서브2)은 잔고·이력에서 뺌(정식 150 · 종전 200 → 가짜 +50 보정)", [formal_bb(), emitted_tag("s2"), act_u1])
+chk("같은 계정 중복 칸 빼고 셈(서브2 = 서브1" in str(health_ex().get("extra")), "U1 상태 패널 '같은 계정 중복 칸 빼고 셈(서브2 = 서브1 …)'", health_ex().get("extra"))
+kperm_g()
+CFG["env"] = env_subs(s1="bs1", s2="bs1")
+run_cycles(3)
+chk(formal_bb() == {"USDT": 150.0} and emitted_tag("s2") == [], "U2 같은 키 두 칸(UID 모름) = 둘째 칸 뺌", [formal_bb(), emitted_tag("s2")])
+kperm_g(bybit_sub1=("bs1", "5551"), bybit_sub2=("bs3", "6662"))
+CFG["env"] = env_subs(s1="bs1", s2="bs3")
+run_cycles(3)
+chk(formal_bb() == {"USDT": 157.0} and emitted_tag("s2") and "같은 계정" not in str(health_ex().get("extra")),
+    "U3 UID 다른 두 서브 = 둘 다 셈(대조)", [formal_bb(), health_ex().get("extra")])
+kperm_g(bybit=("bm", "1"), bybit_sub1=("bs1", "1"))
+CFG["env"] = env_subs(s1="bs1")
+run_cycles(3)
+chk(formal_bb() == {"USDT": 100.0} and emitted_tag("s1") == [] and "서브1 = 메인" in str(health_ex().get("extra")),
+    "U4 메인과 같은 UID 서브 = 서브 뺌(메인만)", [formal_bb(), health_ex().get("extra")])
+kperm_g(bybit_sub1=("bs1", "5551"))
+CFG["env"] = env_subs(s1="bs1", s2="bs2")
+run_cycles(3)
+pre_u5 = formal_bb()
+kperm_g(bybit_sub1=("bs1", "5551"), bybit_sub2=("bs2", "5551"))
+run_cycles(3, clear=False)
+chk(pre_u5 == {"USDT": 200.0} and formal_bb() == {"USDT": 150.0} and "대사 보류" not in str(health_ex().get("extra"))
+    and "last_bal" not in sub_st("s2"), "U5 이미 따로 셈된 둘째 칸 = 마지막 잔고 지우고 뺌(지운 서브 보류로 안 감)", [pre_u5, formal_bb(), health_ex().get("extra")])
+CFG["env"] = env_subs(s1="bs1")
+run_cycles(3, clear=False)
+chk(formal_bb() == {"USDT": 150.0} and "대사 보류" not in str(health_ex().get("extra")) and "같은 계정" not in str(health_ex().get("extra")),
+    "U5 그 칸 키를 지워도 보류 없음 · 경고 사라짐", [formal_bb(), health_ex().get("extra")])
+kperm_g(bybit_sub1=("bs1", "5551"))
+CFG["env"] = env_subs(s1="bs1")
+run_cycles(3)
+CFG["env"] = env_subs(s1="bm")
+run_cycles(2, clear=False)
+subs_u7 = (((rd("exf_state.json") or {}).get("bybit") or {}).get("accts") or {})
+chk(((subs_u7.get("s1@u5551") or {}).get("last_bal") or {}).get("b") == {"USDT": 50.0} and formal_bb() is None
+    and "서브1 이전 계정 u5551" in str(health_ex().get("extra")) and "서브1 = 메인" in str(health_ex().get("extra")),
+    "U7 다른 계정이 들었던 칸에 메인 키 = 옛 계정 마지막 잔고 보존·대사 보류 + 중복 칸 표시", [sorted(subs_u7), formal_bb(), health_ex().get("extra")])
+NEED_BB = ("TJ_BYBIT_KEY", "TJ_BYBIT_SECRET")
+kp_u8 = {"bybit_sub1": {"uid": "A", "kfp": key_fp("bm")}, "bybit_sub2": {"uid": "A", "kfp": key_fp("bs2")}}
+kp_u8b = {"bybit_sub1": {"uid": "A", "kfp": key_fp("bs1")}, "bybit_sub2": {"uid": "A", "kfp": key_fp("bm")}}
+d_u8 = [X.acct_dups(env_subs(s1="bm", s2="bs2"), "bybit", NEED_BB, kp_u8), X.acct_dups(env_subs(s1="bs1", s2="bm"), "bybit", NEED_BB, kp_u8b)]
+chk(d_u8 == [{"s1": "", "s2": ""}, {"s1": "", "s2": ""}], "U8 같은 계정 연결 = 칸을 건너 이어 셈(앞 칸 뒤늦게 묶임 포함)", d_u8)
+kperm_g(bybit=("bm", "1"), bybit_sub1=("bs1", "1"))
+CFG["env"] = env_subs(s1="bs1")
+run_cycles(2)
+kperm_g(bybit=("bm", "1"), bybit_sub1=("bs3", "7"))
+CFG["env"] = env_subs(s1="bs3")
+run_cycles(2, clear=False)
+pre_u9 = sorted((((rd("exf_state.json") or {}).get("bybit") or {}).get("accts") or {}))
+CFG["env"] = env_subs(s1="bs1")
+run_cycles(2, clear=False)
+st_u9 = sub_st("s1")
+chk("s1@u1" in pre_u9 and st_u9.get("uid") == "1" and emitted_tag("s1") == [] and "서브1 = 메인" in str(health_ex().get("extra")),
+    "U9 보관본 되살림으로 메인과 같은 계정 = 같은 주기 수집에서 뺌(이력 한 번만 · 물려 둔 다른 계정 u7 = 대사 보류 그대로)", [pre_u9, st_u9.get("uid"), emitted_tag("s1"), health_ex().get("extra")])
+KC = {"TJ_KUCOIN_KEY": "kc0", "TJ_KUCOIN_SECRET": "x", "TJ_KUCOIN_PASSPHRASE": "p",
+      "TJ_KUCOIN_SUB1_KEY": "kc1", "TJ_KUCOIN_SUB1_SECRET": "x", "TJ_KUCOIN_SUB1_PASSPHRASE": "p"}
+ss.write_env(dict(env_subs(s1="bs1"), **KC))
+r_u6a = T.safe(onboarding._dispatch, "keys/save", {"group": "kucoin_sub2", "readOnlyAck": True, "values": {
+    "TJ_KUCOIN_SUB2_KEY": "kc1", "TJ_KUCOIN_SUB2_SECRET": "y", "TJ_KUCOIN_SUB2_PASSPHRASE": "q"}}) or {}
+chk(not r_u6a.get("ok") and "쿠코인 서브1 칸과 같은 계정" in str(r_u6a.get("error")) and not ss.read_env().get("TJ_KUCOIN_SUB2_KEY"),
+    "U6 서브1 과 같은 키를 서브2 에 저장 = 거부(저장 안 함)", r_u6a)
+kperm_g(bybit_sub1=("bs1", "5551"))
+d_u6 = [T.safe(onboarding._dup_slot, g, v, r) for g, v, r in (
+    ("bybit_sub2", {"TJ_BYBIT_SUB2_KEY": "bs2"}, {"uid": "5551"}), ("bybit_sub2", {"TJ_BYBIT_SUB2_KEY": "bm"}, {"how": "ack"}),
+    ("bybit_sub2", {"TJ_BYBIT_SUB2_KEY": "bs2"}, {"uid": "6662"}), ("bybit_sub1", {"TJ_BYBIT_SUB1_KEY": "bs1r"}, {"uid": "5551"}))]
+chk(d_u6 == ["바이빗 서브1", "바이빗", None, None],
+    "U6 같은 계정 판정 = 다른 키·같은 UID(서브1) · 같은 키(메인) 거부 · 다른 UID · 같은 칸 키 회전 = 허용", d_u6)
+ss.write_env({k: None for k in KC})
+ss.write_env({k: None for k in ("TJ_BYBIT_SUB1_KEY", "TJ_BYBIT_SUB1_SECRET", "TJ_BYBIT_SUB2_KEY", "TJ_BYBIT_SUB2_SECRET")})
+kperm_g()
+CFG["env"] = dict(ENV)
 T.finish()

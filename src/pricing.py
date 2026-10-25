@@ -770,9 +770,6 @@ class PxCache:
         tk = ca.lower() if chain != "sol" else ca
         with self.lock:
             store = self.d.setdefault("cgday", {})
-            if len(store) > 4000:
-                for k9 in sorted(store)[:1000]:
-                    store.pop(k9, None)
         n0 = len(store)
         pts = cg_points_day(f"ca:{chain}:{tk}", f"https://api.coingecko.com/api/v3/coins/{plat}/contract/{urllib.parse.quote(tk, safe='')}",
                             (int(ts_ms) // 1000) // 86400 * 86400, store, keyed=keyed)
@@ -1667,14 +1664,13 @@ def ds_token_prices(chain: str, cas: list):
         if not isinstance(pr, dict) or (pr.get("chainId") and pr.get("chainId") != net):
             continue
         lq0 = (pr.get("liquidity") or {}).get("usd") if isinstance(pr.get("liquidity"), dict) else None
-        try:
-            liq = float(lq0) if lq0 not in (None, "") else None
-        except (TypeError, ValueError):
-            liq = None
-        if liq is not None and not (math.isfinite(liq) and liq >= 0):
+        liq = num_parse.to_float(lq0, allow_bool=False) if lq0 not in (None, "") else None
+        if liq is not None and liq < 0:
             liq = None
         for side in ("baseToken", "quoteToken"):
-            tk = pr.get(side) or {}
+            tk = pr.get(side)
+            if not isinstance(tk, dict):
+                continue
             a = str(tk.get("address") or "")
             orig = want.get(a.lower() if evm else a)
             if orig is None:
@@ -1684,13 +1680,11 @@ def ds_token_prices(chain: str, cas: list):
             if liq is not None:
                 res[orig] = res.get(orig, 0.0) + liq
             if side == "baseToken":
-                try:
-                    px = float(pr.get("priceUsd") or 0)
-                except (TypeError, ValueError):
-                    continue
+                px = num_parse.to_float(pr.get("priceUsd") or 0, 0.0, allow_bool=False)
                 if liq is not None and _fin(px) and (orig not in best or liq > best[orig][0]):
                     best[orig] = (liq, px)
     _DS_META = meta
+    best = {k: v for k, v in best.items() if math.isfinite(res[k])}
     return {k: v[1] for k, v in best.items()}, {k: v for k, v in res.items() if k in best}
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import acct_norm
+import attfreeze
 import buychart
 import candles
 import paths
@@ -648,14 +649,15 @@ class DetailApiMixin:
             if d9 >= end9:
                 break
             d9 += timedelta(days=1)
-        af9 = idx.get("attFut") or {}
+        af9 = dict(idx.get("attFut") or {})
+        frz = {} if lite else attfreeze.serve(days, af9, d_from, d_to, idx.get("builtAt"))
         for k9, v9 in days.items():
             f9 = af9.get(k9)
             if f9:
                 v9["fut"] = [list(x) for x in f9.get("rows") or ()]
                 if f9.get("more"):
                     v9["more"] = dict(v9.get("more") or {}, fut=list(f9["more"]))
-        return {"ok": True, "builtAt": idx.get("builtAt"), "days": days}
+        return dict({"ok": True, "builtAt": idx.get("builtAt"), "days": days}, **({"frz": frz} if frz else {}))
 
     def _fut_rkey(self, base):
         C = self.__dict__.get("_fut_rc") or {}

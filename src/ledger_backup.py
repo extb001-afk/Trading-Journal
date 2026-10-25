@@ -3,12 +3,14 @@ import json
 import os
 import re
 import shutil
+import stat
 import sqlite3
 import threading
 import time
 from datetime import datetime
 
-import logs, paths, statefile
+import envfile, logs, paths, statefile
+from backup_complete import FAILED_MAX, FILES_STATUS, files_brief, files_state_of, last_complete_dir, mark_pending, write_dir_state
 import db as dbm
 import fsio
 
@@ -24,11 +26,120 @@ _DB_RX = re.compile(r"^ledger_(\d{8})\.db$")
 _JS_RX = re.compile(r"^prefs_(\d{8})\.json$")
 _FD_RX = re.compile(r"^files_(\d{8})$")
 KEEP_FILES = 30
+STATE_LIST = "(state 목록)"
 FILES_STATE = ("daily_px.json", "other_assets.json", "settings.json", "nft_prefs.json", "day_memos.json",
                "first_seen_px.json",
-               "genuine_tokens.json")
+               "genuine_tokens.json",
+               "chainoff_keep_on.json",
+               envfile.IDENT_FILE)
 FILES_STATE_RX = re.compile(r"^reviews_llm[\w-]*\.json$")
 CONFIG_KEYS = ("wallets", "exchange_addresses", "chain_wallets")
+FILES_CACHE = ("buy_evals.json", "sell_evals.json", "addr_ai.json", "curve_hist.json", "curve_hist_px.json", "daily_close_px.json",
+               "nft_fp.json", "rabby_daily.json", "other_assets_px.json", "att_frozen.json",
+               "att_frozen_bfpx.json", "exf_redate_m.json", "exf_debt_redate_t.json", "exf_recon_revert.jsonl", "deposit_addresses.json")
+FILES_CACHE_RX = re.compile(r"^(?:futures_[a-z0-9_]+|futraw_[a-z0-9]+_[A-Za-z0-9_@-]+)\.json$")
+FUT_CANON_RX = re.compile(r"^futures_(?!px_)[a-z0-9_]+\.json$")
+PREFS_FILES = ("ui_prefs.json", "outflow_decisions.json")
+
+
+def backup_kind(name: str):
+    if name in FILES_STATE or FILES_STATE_RX.match(name):
+        return "state"
+    if name in FILES_CACHE or FILES_CACHE_RX.match(name):
+        return "cache"
+    return None
+CANDLES = "candles"
+
+
+def candle_files(root: str, errs: list = None):
+    try:
+        subs = sorted(os.listdir(root))
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        if errs is not None:
+            errs.append(("", logs.safe_err(e)[:160]))
+        return
+    for sub in subs:
+        d = os.path.join(root, sub)
+        if os.path.islink(d) or not os.path.isdir(d):
+            continue
+        try:
+            names = sorted(os.listdir(d))
+        except OSError as e:
+            if errs is not None:
+                errs.append((sub + "/", logs.safe_err(e)[:160]))
+            continue
+        for fn in names:
+            if fn.endswith(".json") and not fn.startswith("."):
+                yield sub, fn
+
+
+def _prev_files_dir(cur: str):
+    bd = os.path.dirname(cur)
+    try:
+        days = sorted((n for n in os.listdir(bd) if _FD_RX.match(n) and os.path.join(bd, n) != cur), reverse=True)
+    except OSError:
+        return None
+    return os.path.join(bd, days[0]) if days else None
+
+
+def backup_candles(dst_dir: str, state_dir: str) -> dict:
+    src = os.path.join(state_dir, CANDLES)
+    prev = _prev_files_dir(dst_dir)
+    n = {"files": 0, "bytes": 0, "copied": 0, "failed": []}
+    if not os.path.isdir(src):
+        return n
+    errs = []
+    for sub, fn in candle_files(src, errs):
+        src_path = os.path.join(src, sub, fn)
+        try:
+            st = os.lstat(src_path)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            n["failed"].append((f"{sub}/{fn}", logs.safe_err(e)[:160]))
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        td = os.path.join(dst_dir, CANDLES, sub)
+        try:
+            os.makedirs(td, mode=0o700, exist_ok=True)
+        except OSError as e:
+            n["failed"].append((f"{sub}/{fn}", logs.safe_err(e)[:160]))
+            continue
+        dst_path = os.path.join(td, fn)
+        try:
+            if os.path.samefile(src_path, dst_path):
+                n["files"] += 1
+                n["bytes"] += st.st_size
+                continue
+            os.unlink(dst_path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.link(src_path, dst_path)
+        except OSError:
+            prev_path = os.path.join(prev, CANDLES, sub, fn) if prev else None
+            try:
+                ps = os.lstat(prev_path) if prev_path else None
+            except OSError:
+                ps = None
+            try:
+                if ps is None or (ps.st_size, ps.st_mtime_ns) != (st.st_size, st.st_mtime_ns):
+                    raise OSError("다름")
+                os.link(prev_path, dst_path)
+            except OSError:
+                try:
+                    shutil.copy2(src_path, dst_path)
+                except OSError as e:
+                    n["failed"].append((f"{sub}/{fn}", logs.safe_err(e)[:160]))
+                    continue
+                n["copied"] += 1
+        n["files"] += 1
+        n["bytes"] += st.st_size
+    n["failed"] += errs
+    return n
 
 _lock = threading.Lock()
 _thread = None
@@ -74,7 +185,10 @@ def keep_db(config_path: str = None) -> int:
 def _rotate(rx, keep: int):
     names = sorted((n for n in os.listdir(paths.state("backups")) if rx.match(n)), reverse=True)
     gone = []
+    lc = last_complete_dir(paths.state("backups")) if rx is _JS_RX else None
     for n in names[keep:]:
+        if lc and n == f"prefs_{lc[6:]}.json":
+            continue
         try:
             os.remove(os.path.join(paths.state("backups"), n))
             gone.append(n)
@@ -83,11 +197,16 @@ def _rotate(rx, keep: int):
     return gone
 
 
+def files_partial(st: dict, day: str) -> bool:
+    fs = st.get("files_state")
+    return st.get("last_date") == day and isinstance(fs, dict) and fs.get("day") == day and fs.get("ok") is False
+
+
 def due(now: float, st: dict) -> bool:
     k = datetime.fromtimestamp(now, KST)
     if (k.hour, k.minute) < AT_HM:
         return False
-    if st.get("last_date") == k.strftime("%Y%m%d"):
+    if st.get("last_date") == k.strftime("%Y%m%d") and not files_partial(st, k.strftime("%Y%m%d")):
         return False
     return now - float(st.get("last_try") or 0) >= RETRY_S
 
@@ -103,7 +222,7 @@ def dump_prefs(db_path: str, state_dir: str) -> dict:
             c.close()
     except sqlite3.Error as e:
         out["decisions_err"] = logs.safe_err(e)[:200]
-    for name in ("ui_prefs.json", "outflow_decisions.json"):
+    for name in PREFS_FILES:
         p = os.path.join(state_dir, name)
         if os.path.exists(p):
             try:
@@ -113,33 +232,51 @@ def dump_prefs(db_path: str, state_dir: str) -> dict:
     return out
 
 
-def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
+def backup_files(day: str, state_dir: str, config_path: str = None, extra_failed: dict = None) -> dict:
     d9 = os.path.join(paths.state("backups"), f"files_{day}")
+    fresh = not os.path.isdir(d9)
     os.makedirs(d9, exist_ok=True)
     try:
         os.chmod(d9, 0o700)
     except OSError:
         pass
+    if not mark_pending(d9, day):
+        if fresh:
+            try:
+                os.rmdir(d9)
+            except OSError:
+                pass
+        return {FILES_STATUS: "err: 완전성 표식을 못 씀(디스크·권한)"}
     out = {}
 
     def _put(name, data: bytes):
         fsio.atomic_write_bytes(os.path.join(d9, name), data, fsync=False, dir_fsync=False, makedirs=False)
         out[name] = len(data)
 
+    ident0 = envfile.ident_snapshot(state_dir)
     names = [n for n in FILES_STATE if os.path.exists(os.path.join(state_dir, n))]
+    names += [n for n in FILES_CACHE if os.path.exists(os.path.join(state_dir, n))]
     try:
-        names += sorted(n for n in os.listdir(state_dir) if FILES_STATE_RX.match(n))
-    except OSError:
-        pass
+        names += sorted(n for n in os.listdir(state_dir) if FILES_STATE_RX.match(n) or FILES_CACHE_RX.match(n))
+    except OSError as e:
+        out[STATE_LIST] = f"err: {logs.safe_err(e)}"[:200]
     for n in names:
         try:
             with open(os.path.join(state_dir, n), "rb") as f:
                 _put(n, f.read())
         except OSError as e:
             out[n] = f"err: {logs.safe_err(e)}"[:200]
+    ident, ierr = envfile.ident_snapshot(state_dir, ident0)
+    if ident:
+        _put(envfile.IDENT_FILE, ident)
+    elif ierr:
+        out[envfile.IDENT_FILE] = f"err: {ierr}"
     sl9 = os.path.join(state_dir, "seed_local")
     if os.path.isdir(sl9):
-        for root9, _d9, fs9 in os.walk(sl9):
+        def _walk_err(err):
+            out["seed_local__" + os.path.relpath(getattr(err, "filename", None) or sl9, sl9).replace(os.sep, "__") + "/"] = \
+                f"err: {logs.safe_err(err)}"[:200]
+        for root9, _d9, fs9 in os.walk(sl9, onerror=_walk_err):
             for f9 in sorted(fs9):
                 if not f9.endswith(".json"):
                     continue
@@ -149,6 +286,17 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
                         _put("seed_local__" + rel9, fh9.read())
                 except OSError as e:
                     out["seed_local__" + rel9] = f"err: {logs.safe_err(e)}"[:200]
+    try:
+        cand = backup_candles(d9, state_dir)
+        if cand["files"]:
+            out[CANDLES + "/"] = cand["bytes"]
+            out[CANDLES + "/#files"] = cand["files"]
+        for rel, why in cand["failed"][:FAILED_MAX]:
+            out[f"{CANDLES}/{rel}"] = f"err: {why}"[:200]
+        if len(cand["failed"]) > FAILED_MAX:
+            out[CANDLES + "/#failed"] = len(cand["failed"])
+    except OSError as e:
+        out[CANDLES + "/"] = f"err: {logs.safe_err(e)}"[:200]
     cp = config_path or paths.CONFIG_PATH
     if os.path.exists(cp):
         try:
@@ -157,13 +305,19 @@ def backup_files(day: str, state_dir: str, config_path: str = None) -> dict:
             _put("config_subset.json", json.dumps(sub, ensure_ascii=False, indent=1).encode("utf-8"))
         except (OSError, ValueError) as e:
             out["config_subset.json"] = f"err: {logs.safe_err(e)}"[:200]
+    werr = write_dir_state(d9, files_state_of(out, day, extra_failed, CANDLES))
+    if werr:
+        out[FILES_STATUS] = f"err: {werr}"
     return out
 
 
 def _rotate_dirs(rx, keep: int):
     names = sorted((n for n in os.listdir(paths.state("backups")) if rx.match(n) and os.path.isdir(os.path.join(paths.state("backups"), n))), reverse=True)
     gone = []
+    lc = last_complete_dir(paths.state("backups")) if rx is _FD_RX else None
     for n in names[keep:]:
+        if n == lc:
+            continue
         try:
             shutil.rmtree(os.path.join(paths.state("backups"), n))
             gone.append(n)
@@ -187,6 +341,12 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
     st = _read_status()
     st.setdefault("created", int(now))
     st["last_try"] = int(now)
+    if files_partial(st, day):
+        _files_pass(st, day, db_path)
+        _write_status(st)
+        if log:
+            log.info("원장 밖 사본 다시: %s", "완전" if st["files_state"]["ok"] else st["files_err"])
+        return st
     size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
     free = shutil.disk_usage(paths.state("backups")).free
     st["free"] = int(free)
@@ -223,14 +383,7 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
                 os.remove(tmp + sfx)
         os.chmod(tmp, 0o600)
         os.replace(tmp, dst_path)
-        prefs = dump_prefs(db_path, os.path.dirname(db_path))
-        jp = os.path.join(paths.state("backups"), f"prefs_{day}.json")
-        fsio.atomic_write_json(jp, prefs, ensure_ascii=False, fsync=False, dir_fsync=False, makedirs=False)
-        try:
-            st["files"] = backup_files(day, os.path.dirname(db_path))
-            st["files_err"] = None
-        except Exception as e9:  # noqa: BLE001 [fallback]
-            st["files_err"] = _err_text(e9)[:200]
+        _files_pass(st, day, db_path)
         gone = _rotate(_DB_RX, keep_db()) + _rotate(_JS_RX, KEEP_JSON) + _rotate_dirs(_FD_RX, KEEP_FILES)
         st.update(last_ok=int(time.time()), last_date=day, last_path=dst_path, size=os.path.getsize(dst_path),
                   dur=round(time.time() - t0, 1), skip=None, err=None)
@@ -250,6 +403,25 @@ def run_once(db_path: str = None, now: float = None, log=None) -> dict:
         if log:
             log.warning("원장 정기 백업 실패(1시간 뒤 재시도): %s", st["err"])
     return st
+
+
+def _files_pass(st: dict, day: str, db_path: str):
+    perr = {}
+    try:
+        prefs = dump_prefs(db_path, os.path.dirname(db_path))
+        perr = {f"prefs_{day}.json:{k[:-4]}": v for k, v in prefs.items() if k.endswith("_err")}
+        fsio.atomic_write_json(os.path.join(paths.state("backups"), f"prefs_{day}.json"), prefs, ensure_ascii=False, fsync=False,
+                               dir_fsync=False, makedirs=False)
+    except Exception as e:  # noqa: BLE001 [fallback]
+        perr[f"prefs_{day}.json"] = _err_text(e)[:200]
+    try:
+        st["files"] = backup_files(day, os.path.dirname(db_path), extra_failed=perr)
+        fs = files_state_of(st["files"], day, perr, CANDLES)
+    except Exception as err:  # noqa: BLE001 [fallback]
+        fs = {"v": 1, "day": day, "ts": int(time.time()), "ok": False, "expected": [], "copied": [],
+              "failed": dict(perr, **{"*": _err_text(err)[:200]}), "n_failed": len(perr) + 1}
+    st["files_state"] = fs
+    st["files_err"] = None if fs["ok"] else files_brief(fs)[:200]
 
 
 def _err_text(e) -> str:

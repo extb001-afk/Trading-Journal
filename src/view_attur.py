@@ -10,7 +10,7 @@ import histmark
 import num_parse
 from timeutil import KST
 
-__all__ = ["UrBuild", "attach", "by_symbol", "day_excl", "leg_index", "prev_band_px", "prev_only", "prev_out"]
+__all__ = ["UrBuild", "attach", "by_symbol", "day_excl", "leg_index", "flow_prev_reprice", "nopx_flow_px", "past_flow_px", "prev_band_px", "prev_only", "prev_out", "unv_live_keep"]
 
 
 def _num(v: object) -> float:
@@ -28,9 +28,9 @@ def prev_only(own: dict, pdx: dict, ppx: dict, moved: Callable, G: dict, moves: 
     return {g for g in prev if _sym(G, g) in day_syms}
 
 
-def day_excl(day: str, opening: dict, fut: dict, debt: dict, real: dict | None) -> set:
+def day_excl(day: str, opening: dict, fut: dict, debt: dict, real: dict | None, live: bool = False) -> set:
     out = set(opening.get(day) or ()) | set(fut.get(day) or ()) | set(debt.get(day) or ())
-    return out | set((((real or {}).get("unv") or {}).get(day) or {}))
+    return out if live else out | set((((real or {}).get("unv") or {}).get(day) or {}))
 
 
 def by_symbol(own: dict, G: dict, skip: set) -> dict:
@@ -53,6 +53,81 @@ def prev_band_px(prev: set, own: dict, bands: dict, live_px: dict | None, G: dic
         if fit:
             out[gid] = min(fit, key=lambda bp: abs(cv / bp - 1))
     prev.intersection_update(out)
+    return out
+
+
+def unv_live_keep(band_px: Callable, prev: set, unv: dict, flow_px: dict, day: str, bands: dict) -> dict:
+    cand = prev & set(unv)
+    prev.difference_update(cand)
+    out = band_px(prev)
+    alt = band_px(set(cand)) if cand else {}
+    for gs in (gs for bs in bands.values() for _bp, gs in bs if cand & set(gs)):
+        if set(gs) <= cand and all(g in alt and abs(alt[g] - _num(flow_px.get((day, g)))) <= 1e-9 * alt[g] for g in gs):
+            out.update({g: alt[g] for g in gs})
+            prev.update(gs)
+    return out
+
+
+def flow_prev_reprice(acc: dict, px: tuple, G: dict, src: tuple, today_iso: str, band: tuple, held: dict) -> dict:
+    (dpx, att_src), out = src, {}
+    for ck, syms in acc.items():
+        sd = att_src.get(ck)
+        if ck >= today_iso or not sd or not isinstance(sd[0], dict):
+            continue
+        cut = ((dpx.get(ck) or {}).get("p") or {}, sd[0], sd[1] or {})
+        for sym, gm in syms.items():
+            if (ck, sym) not in held:
+                out.update(_reprice_one(ck, gm, cut, px, G, band))
+    return out
+
+
+def _chain(pc: dict) -> list:
+    cl = []
+    for g in sorted(pc, key=lambda g: (pc[g], g)):
+        if cl and pc[g] <= cl[-1][0] * 1.2:
+            cl[-1][1].append(g)
+        else:
+            cl.append([pc[g], [g]])
+    return cl
+
+
+def _reprice_one(ck: str, gm: dict, cut: tuple, px: tuple, G: dict, band: tuple) -> dict:
+    (gpx, gpxc, gsrc), (lo, hi), (dp, gd, pd) = px, band, cut
+    if any((G.get(g) or {}).get("is_stable") or not gpxc.get((ck, g)) for g in gm):
+        return {}
+    pc = {g: gpxc[(ck, g)] for g in gm}
+    pf = {g for g in pc if not _num(dp.get(str(g))) and not _num(gd.get(str(g))) and not _num(pd.get(str(g)))}
+    cl = _chain(pc)
+    if not pf or {frozenset(gs) for _p, gs in cl} != {frozenset(gs) for _p, gs in _chain({g: _num(gpx.get((ck, g))) for g in pc})}:
+        return {}
+    refs = [max(gs, key=lambda g: (sum(abs(v) for v in gm[g].values()), -g)) for _p, gs in cl]
+    refs = [r for r in refs if _num(dp.get(str(r)))]
+    out = {}
+    for _p, gs in cl:
+        if set(gs) - pf:
+            continue
+        tg = {min((r for r in refs if lo <= pc[g] / pc[r] <= hi), key=lambda r: abs(pc[g] / pc[r] - 1), default=None) for g in gs}
+        if len(tg) != 1 or None in tg:
+            continue
+        r = tg.pop()
+        for g in gs:
+            gpx[(ck, g)], gpxc[(ck, g)], gsrc[(ck, g)] = gpx[(ck, r)], pc[r], {}
+            out[(ck, g)] = pc[r]
+    return out
+
+
+def nopx_flow_px(legs: dict, moves: dict, skip: set, own: dict, flow_px: dict, day: str) -> dict:
+    out = {}
+    for g, q in legs.items():
+        f = _num(flow_px.get((day, g)))
+        if f and g not in own and g not in skip and not sum(q, Decimal(0)) + sum((moves.get(g) or {}).values(), Decimal(0)):
+            out[g] = f
+    return out
+
+
+def past_flow_px(prev: set, rep: dict, flow_px: dict, day: str) -> dict:
+    out = {g: _num(flow_px.get((d, g))) for (d, g) in rep if d == day and _num(flow_px.get((d, g)))}
+    prev.difference_update(out)
     return out
 
 

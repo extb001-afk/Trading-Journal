@@ -5,6 +5,7 @@ import collections
 import glob
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -118,11 +119,13 @@ from chk_collect import (  # noqa: F401
     _unreadable_rules,
     collect_calcguard,
     collect_chainsweep,
+    collect_chart_dex,
     collect_daily_review,
     collect_debt,
     collect_disk,
     collect_dm,
     collect_exbal,
+    collect_exf_hold,
     collect_fut_wait,
     collect_inbox,
     collect_keys,
@@ -498,11 +501,77 @@ def _eval_units(obs: dict, h: dict, open_ids=()) -> dict:
     return dict(locals())
 
 
+CHART_DEX_SOFT_WARN = 10
+
+
+def _chart_dex_item(add, obs, units, open_ids) -> None:
+    cd = obs.get("chart_dex")
+    if "tj-review" not in units or (cd is None and "chart:dex" not in open_ids):
+        return
+    act = ("미리 받기가 기한 뒤 저절로 다시 받아요 — 멈춘 건이 남으면 pm2 logs tj-web 에서 GeckoTerminal·DexScreener 실패 사유 확인 ·"
+           " 영수증을 열면 화면이 다시 받아요")
+    if not isinstance(cd, dict) or cd.get("error"):
+        add("chart:dex", "tj-review", "DEX 차트 봉", None, "미리 받기 기록을 못 읽음 — 다음 판에 다시", act,
+            persist=0, resolve=600, notify=False, remind=False, kind="chart")
+        return
+    soft, gu = int(cd.get("soft") or 0), int(cd.get("gaveup") or 0)
+    bad = gu > 0 or soft >= CHART_DEX_SOFT_WARN
+    det = (f"다시 받을 DEX 차트 {soft}건(후보 풀을 다 못 봐 기한 두고 다시 물음)" + (f" · 다시 물어도 그대로라 멈춘 것 {gu}건" if gu else "")
+           + (f" · 가장 오래된 것 {_safe_ts(cd.get('oldest'))}" if soft and cd.get("oldest") else ""))
+    add("chart:dex", "tj-review", f"DEX 차트 봉 못 받음 {soft + gu}건" if bad else "DEX 차트 봉", "warn" if bad else "ok", det, act,
+        persist=0, resolve=600, notify=False, remind=False, kind="chart")
+
+
+PX_FLIP_WARN_USD = 50.0
+
+
+def _px_flip_item(add, obs, units, open_ids) -> None:
+    pf = obs.get("px_flip")
+    if "tj-web" not in units or not isinstance(pf, dict):
+        return
+    top = [row for row in pf.get("top") or () if isinstance(row, list) and len(row) == 3]
+    bad, n_all = any(row[1] >= PX_FLIP_WARN_USD for row in top), int(pf.get("n") or 0)
+    det = f"최근 동결 날 가격이 이웃 날과 3배 넘게 2번 이상 뒤집힌 그룹 {n_all}개" + "".join(f" · #{g} ${u:,.0f}({n}번)" for g, u, n in top[:3])
+    add("px:flip", "tj-web", f"날별 가격 뒤집힘 {n_all}개" if bad else "날별 가격 뒤집힘", "warn" if bad else "ok", det,
+        "'왜 움직였나'에서 그 코인 '튐 주의' 확인 — 그날 마감가(일봉)와 실시간 시세 출처가 수천 배 다른 코인", persist=0, resolve=600, notify=False,
+        remind=False, kind="daily")
+
+
+def backup_files_item(bk: dict):
+    state = bk.get("files_state")
+    if not isinstance(state, dict) and not bk.get("files_err"):
+        return None
+    if isinstance(state, dict) and state.get("ok") is True and not bk.get("files_err"):
+        return "원장 밖 사본", "ok", f"원장 밖 사본 완전({state.get('day') or '?'} · {len(state.get('copied') or [])}개)", ""
+    failed = sorted((state.get("failed") or {}).items())[:5] if isinstance(state, dict) else []
+    detail = str(bk.get("files_err") or "원장 밖 사본 불완전")[:160] + ("" if not failed else " · 실패: " + " · ".join(
+        f"{name}({str(why)[:40]})" for name, why in failed))
+    return ("원장 밖 사본 일부 실패", "warn", detail,
+            "권한·디스크 여유 확인 — tj-core 가 1시간마다 사본만 다시 해요 · 되돌리기 전 python3 tools/ledger_restore.py files")
+
+
 def _safe_ts(v) -> str:
     try:
         return fmt_ts(float(v)) if not isinstance(v, bool) else "?"
     except (TypeError, ValueError, OverflowError, OSError):
         return "?"
+
+
+def _adj_fresh(ck: dict, ts, now: float, lim: float) -> tuple:
+    lvl, ttl, det, act = ck.get("level"), str(ck["title"]), str(ck.get("detail") or ""), str(ck.get("action") or "")
+    try:
+        ts = float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None
+    except OverflowError:
+        ts = None
+    ts = ts if ts is not None and math.isfinite(ts) and ts > 0 else None
+    age = None if ts is None else now - ts
+    if age is not None and -300 <= age <= lim:
+        return lvl, ttl, det, act
+    why = ("관측 시각 없음" if age is None else "관측 시각이 지금보다 뒤(시계 확인)" if age < 0 else
+           f"관측 지연 · 마지막 확인 {datetime.fromtimestamp(ts, KST).strftime('%m-%d %H:%M')}({fmt_ago(age)} 전)")
+    if lvl in ("warn", "crit"):
+        return lvl, ttl, why + " — " + det, act
+    return "warn", "보정 감시 관측 지연", why + " — 그때 판정: " + det, "pm2 logs tj-core 에서 '보정 감시 갱신 실패' 확인 — 갱신되면 저절로 풀려요"
 
 
 def _eval_feeds(_bs9):
@@ -703,7 +772,7 @@ def _eval_feeds(_bs9):
         for c9 in collect_fut_wait(now):
             add(**c9)
     if "tj-exf" in units:
-        for c9 in collect_snap_miss(now):
+        for c9 in collect_snap_miss(now) + collect_exf_hold(now):
             add(**c9)
     for c9 in collect_calcguard(now):
         add(**c9)
@@ -829,9 +898,10 @@ def _eval_feeds(_bs9):
     adj_doc = obs.get("recon_adj") if isinstance(obs.get("recon_adj"), dict) else {}
     adj_ck = adj_doc.get("check") if "tj-core" in units and isinstance(adj_doc.get("check"), dict) and adj_doc["check"].get("title") else None
     if adj_ck:
-        add("ledger:adj", "tj-core", str(adj_ck["title"]), adj_ck.get("level"), str(adj_ck.get("detail") or ""), str(adj_ck.get("action") or ""), persist=0, resolve=600,
-            notify=adj_ck.get("level") == "crit" or bool(adj_ck.get("tg")), remind=False, kind="ledger")
-        if adj_ck.get("tg") and adj_ck.get("level") == "warn":
+        adj_lvl, adj_ttl, adj_det, adj_act = _adj_fresh(adj_ck, adj_doc.get("ts"), now, float(t.get("adj_stale_sec") or 10800))
+        add("ledger:adj", "tj-core", adj_ttl, adj_lvl, adj_det, adj_act, persist=0, resolve=600,
+            notify=adj_lvl == "crit" or (bool(adj_ck.get("tg")) and adj_lvl == adj_ck.get("level")), remind=False, kind="ledger")
+        if adj_ck.get("tg") and adj_lvl == "warn" and adj_ck.get("level") == "warn":
             checks[-1]["tg_force"] = True
     wd = obs.get("webdiag")
     if isinstance(wd, dict) and "tj-web" in units:
@@ -1026,6 +1096,9 @@ def _eval_feeds(_bs9):
             "crit" if crit9 else "warn" if bad else "ok", det,
             "디스크 여유 확보(옛 백업 정리) 뒤 tj-core 로그의 '원장 정기 백업' 줄 확인",
             persist=0, resolve=600, notify=crit9, remind=crit9, kind="backup")
+        files_item = backup_files_item(bk)
+        if files_item:
+            add("backup:files", "tj-core", *files_item, persist=0, resolve=600, notify=False, remind=False, kind="backup")
     ob = obs.get("offsite")
     if isinstance(ob, dict) and ob.get("enabled"):
         os9 = ob.get("status") if isinstance(ob.get("status"), dict) else {}
@@ -1157,6 +1230,8 @@ def _eval_feeds(_bs9):
             "pm2 logs tj-review — '/api/state 조회 실패' 면 tj-web 접속(루프백) 확인",
             since=r.get("since") if lvl == "crit" else None, persist=0, resolve=0, remind=False, kind="review")
         chip("리뷰 꺼짐(claude CLI 없음)" if lvl == "off" else f"리뷰 {r.get('latest') or r['date'] if lvl == 'ok' else r['date']}" + (" 누락" if lvl == "crit" else ""))
+    _chart_dex_item(add, obs, units, open_ids)
+    _px_flip_item(add, obs, units, open_ids)
     _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")
 
 
@@ -2716,12 +2791,13 @@ class Monitor:
                 "extrb": _read(paths.state("ext_rebuild_status.json"), None),
                 "decis": _read(paths.state("asset_decimals_issues.json"), None),
                 "poison": collect_poison(),
+                "chart_dex": collect_chart_dex(now),
                 "nonevm_gaps": collect_nonevm_gaps(cfg),
                 "recon_hold": collect_recon_hold(cfg),
                 "pnlgate": _read(paths.state("rebuild_pnl_gate.json"), None),
                 "liqw": _read(paths.state("liq_watch.json"), None),
                 "hb": read_heartbeats(cfg),
-                "daily": daily, "review": review,
+                "daily": daily, "review": review, "px_flip": (daily or {}).get("flip"),
                 "webdiag": _read(paths.state("web_diag.json"), None),
                 "recon_adj": _read(paths.state("recon_adj.json"), None),
                 "backup": _read(paths.state("backups", "backup_status.json"), None),

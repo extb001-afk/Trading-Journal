@@ -53,7 +53,9 @@ def pair_incomplete(td, r: dict) -> str:
     if r.get("stop"):
         return str(r["stop"])[:80]
     soft = [s9 for s9, v in ((r.get("disc") or {}).get("fail") or {}).items() if str(v).split(":")[0] not in td.FINAL_FAIL]
-    return ("출처 실패: " + ",".join(sorted(soft))) if soft else ""
+    if soft:
+        return "출처 실패: " + ",".join(sorted(soft))
+    return f"덱스 판정 미확인 {r['unk_judge']}칸" if r.get("unk_judge") else ""
 
 
 def done_keys(prog: dict) -> set:
@@ -348,13 +350,14 @@ def run_pair(td, recon, cfg, conn, chain, w, a, env, dex_cache, explain_on=False
     for r in rows:
         g = dex_cache.get((chain, r["ca"]))
         if r["ok"] is None:
-            r["ok"] = bool(g and g[0])
-            import token_tables
+            r["ok"] = bool(g[0]) if g else None
             r["why"] = (f"덱스 유동성 ${g[1]:,.0f}" if g and g[0] else ("유동성 부족" if g else
                         ("일시 보류 — 판정 출처 장애" if chain in token_tables.DS_CHAIN else "판정 불가 체인(덱스 미지원)")))
+            if g is None and chain in token_tables.DS_CHAIN:
+                res["unk_judge"] = res.get("unk_judge", 0) + 1
         px = (1.0 if r["ca"] in stables else None) or r["m"].get("px") or spot_px(chain, r["ca"]) or (g[2] if g else None)
         r["px"] = px
-        spam = not r["ok"]
+        spam = None if r["ok"] is None else not r["ok"]
         try:
             amt = (r["diff"] or 0) / (10 ** int(18 if r["dec"] is None else r["dec"]))
         except (TypeError, ValueError, OverflowError):
@@ -364,16 +367,18 @@ def run_pair(td, recon, cfg, conn, chain, w, a, env, dex_cache, explain_on=False
             usd["unpriced"] += 1
         elif spam:
             usd["diff_spam"] += r["usd"]
+        elif spam is None:
+            usd["diff_unk"] = usd.get("diff_unk", 0.0) + r["usd"]
         else:
             usd["diff_cred"] += r["usd"]
         if r["diff"] is not None:
             res["rows"].append({"chain": chain, "wallet": w, "ca": r["ca"], "symbol": r["sym"], "decimals": r["dec"], "block": blk,
                                 "chain_bal_raw": int(r["onc"]), "ledger_raw": int(r["led"]), "diff_raw": int(r["diff"]),
-                                "spam": bool(spam), "sources": r["srcs"]})
+                                "spam": spam, "sources": r["srcs"]})
         res["table"].append((short(w), chain, (r["sym"] or r["ca"][:10]), _fmt(r["onc"], r["dec"]), _fmt(r["led"], r["dec"]),
                              _fmt(r["diff"], r["dec"]) if r["diff"] is not None else "관측 불가",
-                             ("스팸 의심 · " if spam else "") + (r["why"] or ""), ",".join(r["srcs"]),
-                             (_usd(r["usd"]) if r["usd"] is not None else "—"), spam, -abs(r["usd"] or 0)))
+                             ("스팸 의심 · " if spam else ("미확인 · " if spam is None else "")) + (r["why"] or ""), ",".join(r["srcs"]),
+                             (_usd(r["usd"]) if r["usd"] is not None else "—"), {False: 0, None: 1}.get(spam, 2), -abs(r["usd"] or 0)))
     res["table"] = [t[:9] for t in sorted(res["table"], key=lambda t: (t[9], t[10]))]
     if explain_on:
         nz = {ca: v for (k9, ca), v in per.items() if k9 == "token" and v}
@@ -445,6 +450,7 @@ def explain(cfg, results, targets):
             else:
                 led9 = (tok.get("onc_all") or 0) - (tok.get("diff_cred") or 0) - (tok.get("nat_diff") or 0) if "onc_all" in tok else None
                 line += (f" · 토큰으로 설명되는 몫(원장에 빠진 보유) ${tok.get('diff_cred', 0):,.0f}" + (f" · 스팸 의심 차이 ${tok.get('diff_spam', 0):,.0f}(뺌)" if tok.get("diff_spam") else "")
+                         + (f" · 판정 미확인 차이 ${tok['diff_unk']:,.0f}(뺌)" if tok.get("diff_unk") else "")
                          + (f" · 네이티브 차이 ${tok['nat_diff']:,.0f}" if tok.get("nat_diff") else (f" · 네이티브 차이 {nat.get('diff_raw')}(값 모름)" if nat.get("diff_raw") else ""))
                          + (f" · 체인 실잔고 평가 ${tok['onc_all']:,.0f} → 봇 원장 ≈${led9:,.0f}" if led9 is not None else "")
                          + (f" · 남는 몫(가격 차이·Rabby 만 아는 토큰) ${(cu - pv) - tok['onc_all']:,.0f}" if "onc_all" in tok else "")

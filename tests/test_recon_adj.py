@@ -156,7 +156,8 @@ def cls_of(sym):
     return sorted({(x["cls"], x["red"]) for x in rows if x["sym"] == sym})
 
 
-chk(cls_of("SCAM") == [("spam", None)], "B2 가격 없음 = 스팸", cls_of("SCAM"))
+chk(cls_of("SCAM") == [("pre_window", None)] and [x["px"] for x in rows if x["sym"] == "SCAM"] == [None],
+    "B2 가격 없는 거래소 통화 = 스팸 아님(평가 불가 · 다른 규칙 그대로 — 첫 대사 양수 = 창 시작)", cls_of("SCAM"))
 chk(cls_of("DOT") == [("dust", None)], "B2 $1 미만 = 먼지", cls_of("DOT"))
 chk(cls_of("USDC") == [("interest", None)], "B2 부채 이자(leg 2 음수)", cls_of("USDC"))
 chk(sorted(x["cls"] for x in rows if x["sym"] == "USDT") == ["exflate", "futpnl"], "B2 선물 정산 · 늦은 행 상쇄", cls_of("USDT"))

@@ -72,7 +72,7 @@ chk(sp.dex_price("base", CA) == 0.1507 and ok_px(sp) == 0.1507, "준비: 정상 
 gt(sp, T0 + 600, "16.15")
 v = sp.dex_price("base", CA)
 chk(v == 0.0 and sp.guarded.get(K, "").startswith("시세 급변"),
-    "J1 (P1) 게코 $16.15 + 유동성 $79k(전 풀 합) = 0 · 가드 '시세 급변'(종전 = 16.15 그대로 · 207개 ≈ ₩450만)", (v, sp.guarded.get(K)))
+    "J1 (P1) 게코 $16.15 + 유동성 $79k(전 풀 합) = 0 · 가드 '시세 급변'(종전 = 16.15 그대로)", (v, sp.guarded.get(K)))
 chk(ok_px(sp) == 0.1507 and (sp.jump.wait.get(K) or [None])[0] == 16.15, "J1 확인된 값 그대로 · 급변 시작 기록", (sp.jump.ok.get(K), sp.jump.wait.get(K)))
 gt(sp, T0 + 1200, "0.1508")
 v = sp.dex_price("base", CA)

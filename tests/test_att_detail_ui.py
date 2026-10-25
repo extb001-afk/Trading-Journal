@@ -18,6 +18,7 @@ const B = ['let RK = 2.5;', line('  const trimZeros = s =>'), cut('  const NFC =
   line('  const KV = (usd, krw) =>'), line('  const dayV = x =>'), line('  const dayFlowV = x =>'), line('  const rate = () =>'), line('  const isZ = v =>'), line('  const cls = v =>'),
   line('  const clsV = v =>'), line('  const pctS = (v, d) =>'), line('  const attPct = p =>'), line('  function todayD() {'), line('  const futSym = s =>'), line('  const heroDayLbl = k =>'),
   line('  const pad2 = n =>'), line('  const isISO = s =>'),
+  line('  const attRow = k =>'), line('  const frzDay = k =>'),
   cut('  function attOf(k) {', '  const ATT_MVD_TIP ='), cut('  const ATT_MVD_TIP =', '  const josa ='), cut('  function attDetail(a, k, noCoins) {', '  function attHTML(k) {'), cut('  function attBars(a, k, dash) {', "  function rbLine() { return ''; }"),
   cut('  const MATT_K = [', '  function monthGlanceHTML(ym) {'), cut('  function dayContrib(iso) {', '  const rcptable = x =>'),
   cut('  function setHide(on) {', '  function rkApply() {'), cut('  function setRand(on) {', '  function wowSlot(k, x) {')].join('\n');
@@ -35,9 +36,10 @@ const attQ = v => (S.hide ? '8,888.88' : rw(fmt(KS(v))));
 const px = v => (!(v > 0) ? '—' : S.hide ? '$8.8888' : '$' + rw(String(v)));
 const SENT = [];
 let FETCH = null;
+const FRZ = {};   // attfreeze: 그날 카드가 받아 둔 동결 행(30일 창 밖 날)
 const deps = {
   S, A: {}, esc, num, arr, sum, attQ, px, isoDay: k => (String(k).length === 10 ? String(k) : '2026-' + String(k)), ymOf: k => (String(k).length === 10 ? String(k) : '2026-' + String(k)).slice(0, 7),
-  todayISO: () => '2026-10-11', apOf: () => false, DOWS: ['일', '월', '화', '수', '목', '금', '토'], EX_NAMES: { binance: '바이낸스', bybit: '바이빗', okx: 'OKX' },
+  todayISO: () => '2026-10-11', apOf: () => false, dayFrz: k => FRZ[k] || null, DOWS: ['일', '월', '화', '수', '목', '금', '토'], EX_NAMES: { binance: '바이낸스', bybit: '바이빗', okx: 'OKX' },
   lpNm: s => s, icon: s => '<span class="ic xs">' + esc(String(s).slice(0, 1)) + '</span>', attTbl: () => '', attLine: () => '', attDetail: () => '<div class="attd"></div>',
   uiFold: (k, o) => o.head + o.body(), IC: { right: '<svg class="r"></svg>', left: '<svg class="l"></svg>', chev: '<svg class="c"></svg>', check: '<svg class="ok"></svg>', alert: '<svg class="w"></svg>', info: '<svg class="i"></svg>',
     send: '<svg class="s"></svg>', bank: '<svg class="b"></svg>', coin: '<svg class="co"></svg>', scale: '<svg class="sc"></svg>', layers: '<svg class="la"></svg>', fuel: '<svg class="f"></svg>', undo: '<svg class="u"></svg>', wallet: '<svg class="wa"></svg>', cal: '<svg class="ca"></svg>' },
@@ -115,6 +117,37 @@ for (const cur of ['USD', 'KRW']) {
   }
   chk(o.n === 4 && rows.every(r => r[2]) && !badM.length, cur + " 그 달: 'M월 한눈에' 줄마다 항목 합·날짜별 합 = 줄 값(나머지 = 접힌 줄 포함)", { n: o.n, badM, rows: rows.map(r => [r[0], r[2]]) });
 }
+// ★attfreeze★ 30일 창 밖 날(dayMap 에 없음) = 그날 카드가 받아 둔 동결 행(dayFrz) — 창 안 날과 같은 분해 규칙(항목 합 = 값) · 'M월 한눈에' 합치기엔 안 들어감
+FRZ['09-20'] = Object.assign({}, P10, { date: '09-20', _prev: Object.assign({}, P09, { date: '09-19' }), _frz: { at: 1, st: '' } });
+for (const cur of ['USD', 'KRW']) {
+  S.cur = cur;
+  const a = F.attOf('09-20'), P = F.attdParts('09-20', DET['2026-10-10']), bad = [];
+  if (!a || !P) bad.push('없음');
+  else {
+    if (!near(a.delta, cur === 'USD' ? P10.val - P09.val : P10.valKrw / R1 - P09.valKrw / R1)) bad.push(['delta', a.delta]);
+    for (const c of KEYS) { const s9 = sum(P[c] || [], x => x.v), want = num(a[c]); if (!near(s9, want)) bad.push([c, s9, want]); }
+  }
+  chk(!bad.length, cur + ' 창 밖 날(동결 행): 전일 대비 = 그날 값 − 전일 값 · 구성 10칸 항목 합 = 분해 값', bad.slice(0, 6));
+}
+// 동결 행 = 저장 때 실현(rzd) — 그날(10-10) 복사본 + 그날 실현이면 분해 줄이 10-10 과 같음(지금 실현 표가 그날을 몰라도 환율 줄로 새지 않음)
+FRZ['09-22'] = Object.assign({}, P10, { date: '09-22', _prev: Object.assign({}, P09, { date: '09-21' }), _frz: { at: 1, st: '', rzd: { s: 523.45, sk: 728000, f: 30.75, fk: 43000 } } });
+for (const cur of ['USD', 'KRW']) {
+  S.cur = cur;
+  const a0 = F.attOf('10-10'), a1 = F.attOf('09-22'), bad = [];
+  for (const c of ['rz', 'rzf', 'fx', 'fo', 'oth', 'mk', 'fl']) if (!near(num(a0[c]), num(a1[c]))) bad.push([c, a0[c], a1[c]]);
+  chk(!bad.length, cur + ' 동결 행 실현 = 저장 때 값(rzd) — 같은 재료면 창 안 날과 같은 분해(정정된 지금 실현이 환율 줄로 안 샘)', bad);
+}
+// 동결 행 줄 상세 = 지금 표(정정 뒤일 수 있는 코인별 실현·거래소별 선물)로 안 나눔 — 실현 = 저장 합계 한 줄
+{ S.cur = 'USD'; const a1 = F.attOf('09-22'), P1 = F.attdParts('09-22', null);
+  chk(P1 && P1.rz.length === 1 && P1.rz[0].l === '저장된 현물 실현' && near(P1.rz[0].v, a1.rz) && P1.rzf.every(it => !/^f:/.test(it.id)),
+    '동결 행 상세 = 저장 실현 합계 한 줄(지금 코인별·거래소별 표 안 씀)', P1 && [P1.rz.map(it => [it.l, it.v]), P1.rzf.map(it => [it.id, it.v])]);
+  const P2 = F.attdParts('09-22', DET['2026-10-10']);   // 저장 상세(det.fb 거래소별)가 있어도 지금 정산 표 없이 거래소별로 나누면 그날 정산 0 으로 틀림 → 저장 합계 한 줄
+  chk(P2 && (!a1.fo || (P2.fo.length === 1 && P2.fo[0].l === '저장된 선물 미반영' && near(P2.fo[0].v, a1.fo))), '동결 행 선물 미반영 = 저장 합계 한 줄(저장 상세가 있어도)',
+    P2 && [a1.fo, P2.fo.map(it => [it.l, it.v])]); }
+FRZ['2026-09-22'] = FRZ['09-22'];   // 장기 곡선 점(ISO 키)은 동결 행을 안 씀 — 곡선 변화 그대로
+chk(!F.attOf('2026-09-22') && !!F.attOf('09-22'), '장기 곡선 점(ISO 키) = 동결 행 안 씀(그날 카드 MM-DD 만)');
+delete FRZ['2026-09-22'];
+chk(!F.attOf('09-21') && F.monthAtt('2026-09').n === 0, "동결 행 없는 창 밖 날 = 분해 없음 · 그 달 합치기(창 안 날만)는 동결 행을 안 셈", F.monthAtt('2026-09').n);
 S.cur = 'USD';
 // 시트 그리기 — 상세 받은 상태
 const C = F.attdCache(); Object.assign(C.days, DET); C.st['2026-10-10|2026-10-10'] = 'ok'; C.st['2026-10-08|2026-10-11'] = 'ok'; C.st['2026-10-11|2026-10-11'] = 'ok';

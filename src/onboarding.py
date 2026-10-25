@@ -22,6 +22,7 @@ import db as dbm
 import csrf_gate
 import demo_data
 import exf_coinbase
+import envfile
 import reqclass
 import settings_store as ss, address_codec, runner_fp, settings_wallets
 
@@ -412,6 +413,100 @@ def _api_rec(group: str, vals: dict, r: dict) -> dict:
     uid = r.get("_uid") if isinstance(r, dict) else None
     key = vals.get(ss.GROUPS[group]["fields"][0][0])
     return dict({"how": "api", "at": int(time.time())}, **({"uid": uid, "kfp": cgplan.kfp(key)} if uid else {}))
+
+
+def _dup_slot(group: str, vals: dict, rec) -> str:
+    env, kp = ss.read_env(), ss.read_settings().get("key_perm")
+    kp = kp if isinstance(kp, dict) else {}
+    kfp = cgplan.kfp(vals.get(ss.GROUPS[group]["fields"][0][0]))
+    uid = str(rec.get("uid") or "") if isinstance(rec, dict) else ""
+    for g2, d2 in ss.GROUPS.items():
+        if g2 == group or ss.base_ex(g2) != ss.base_ex(group) or not all(env.get(k) for k, _l in d2["fields"]):
+            continue
+        k2, r2 = cgplan.kfp(env.get(d2["fields"][0][0])), kp.get(g2)
+        if k2 == kfp or (uid and isinstance(r2, dict) and str(r2.get("uid") or "") == uid and r2.get("kfp") == k2):
+            return d2["name"]
+    return None
+
+
+def _dup_refuse(name: str) -> dict:
+    return {"ok": False, "error": f"이 키는 이미 넣은 {name} 칸과 같은 계정이에요 — 같은 계정을 두 칸에 넣으면 잔고·기록이 두 번 셈돼요"
+                                 "(저장하지 않았어요 · 다른 계정 키를 넣으세요)"}
+
+
+def _slot_tag(group: str) -> str:
+    sub = ss.SUB_GROUPS.get(group)
+    return f"s{sub['sub']}" if sub else ""
+
+
+def _moved_slot(group: str, vals: dict, rec) -> str:
+    ex = ss.base_ex(group)
+    try:
+        with open(paths.state("exf_state.json"), encoding="utf-8") as f:
+            subs = ((json.load(f) or {}).get(ex) or {}).get("accts")
+    except FileNotFoundError:
+        subs = {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(subs, dict):
+        subs = {}
+    slot = envfile.acct_hist_slot(subs, _slot_tag(group), str(rec.get("uid") or "") if isinstance(rec, dict) else "",
+                                  cgplan.kfp(vals.get(ss.GROUPS[group]["fields"][0][0])), ex=ex)
+    if slot is None:
+        return None
+    grp = ss.GROUPS.get(f"{ex}_sub{slot[1:]}" if slot else ex)
+    return (grp["name"] if grp else slot) + ("\0" if slot in envfile.ident_held(ex, subs) else "")
+
+
+def _moved_refuse(name: str) -> dict:
+    if name.endswith("\0"):
+        name = name[:-1]
+        return {"ok": False, "error": f"되돌린 원장에 {name} 칸 기록이 있는데 어느 계정인지 몰라요(계정 지도 없는 옛 사본) — 먼저 {name} 칸에 원래 키를 넣어"
+                                     " 받게 한 뒤 다른 칸을 넣으세요(같은 계정을 다른 칸에 넣으면 두 번 기장 · 저장하지 않았어요)"}
+    return {"ok": False, "error": f"이 키는 예전에 {name} 칸에서 기록을 받던 계정이에요 — 다른 칸에 넣으면 같은 거래가 두 번 기장돼요"
+                                 f"(저장하지 않았어요 · {name} 칸에 다시 넣으면 받던 기록을 그대로 이어요)"}
+
+
+def _slot_guard(group: str, vals: dict, rec):
+    if not ss.base_ex(group):
+        return None
+    name = _dup_slot(group, vals, rec)
+    if name:
+        return _dup_refuse(name)
+    name = _moved_slot(group, vals, rec)
+    return _moved_refuse(name) if name else None
+
+
+def _key_prev(group: str) -> tuple:
+    old = str(ss.read_env().get(ss.GROUPS[group]["fields"][0][0]) or "")
+    cur = ss.read_settings().get("key_perm")
+    prev = cur.get(group) if isinstance(cur, dict) and isinstance(cur.get(group), dict) else {}
+    pat = prev.get("kat", prev.get("at"))
+    return (cgplan.kfp(old) if old else None, prev, prev.get("kkfp") or prev.get("kfp"),
+            pat if isinstance(pat, (int, float)) and not isinstance(pat, bool) else None)
+
+
+def _key_times(group: str, vals: dict, rec: dict) -> dict:
+    env_fp, prev, prev_fp, pat = _key_prev(group)
+    new_fp = cgplan.kfp(vals.get(ss.GROUPS[group]["fields"][0][0]))
+    if (env_fp or prev_fp) == new_fp and prev_fp in (None, new_fp):
+        keep = {k: prev[k] for k in ("pkfp", "pkat") if k in prev}
+        return dict(rec, kkfp=new_fp, kat=pat if pat is not None else (0 if not prev else rec.get("at")), **keep)
+    was = prev_fp if env_fp == new_fp else (env_fp or prev_fp)
+    return dict(rec, kkfp=new_fp, kat=rec.get("at"), **({"pkfp": was} if was else {}), **({"pkat": pat} if was and pat is not None else {}))
+
+
+def _key_delete(group: str, fields: list) -> None:
+    tomb = _key_gone(group) if ss.base_ex(group) else None
+    ss.write_env({k: None for k in fields + list(ss.GROUPS[group].get("legacy", ()))})
+    if ss.base_ex(group):
+        _perm_record(group, tomb)
+
+
+def _key_gone(group: str):
+    env_fp, _prev, prev_fp, pat = _key_prev(group)
+    fp = env_fp or prev_fp
+    return {"gone": int(time.time()), "kkfp": fp, "kat": pat if pat is not None and prev_fp in (None, fp) else 0} if fp else None
 
 
 def _key_value_in(k: str, raw: object) -> tuple:
@@ -1727,9 +1822,7 @@ def _dispatch(act: str, b: dict) -> dict:
         fields = [k for k, _ in ss.GROUPS[g]["fields"]]
         if act == "keys/delete":
             with ss.LOCK:
-                ss.write_env({k: None for k in fields + list(ss.GROUPS[g].get("legacy", ()))})
-                if ss.base_ex(g):
-                    _perm_record(g, None)
+                _key_delete(g, fields)
             if g == "quicknode":
                 _qn_clear()
             elif g == "alchemy":
@@ -1822,6 +1915,9 @@ def _dispatch(act: str, b: dict) -> dict:
                 else:
                     note9 = {"note": "코인게코 연결을 확인하지 못해 등급(데모·프로)은 첫 조회 때 자동으로 판별해요 — " + scrub(r9.get("detail") or "", [key9])}
                 return {"ok": True, "cg": st9, **note9}
+            refused = _slot_guard(g, vals, None)
+            if refused:
+                return refused
             if ss.base_ex(g):
                 lim = _limited("save:" + g, 8, 60) if ss.base_ex(g) in PERM_VERIFIABLE else None
                 if lim:
@@ -1843,8 +1939,11 @@ def _dispatch(act: str, b: dict) -> dict:
                     note9 = "연결은 확인하지 못했어요(" + why9 + ") — 잠시 뒤 '연결 테스트'로 다시 확인하세요"
             hchg9 = g == "helius" and any(str(ss.read_env().get(k) or "").strip() != v for k, v in vals.items())
             with ss.LOCK:
+                refused = _slot_guard(g, vals, rec)
+                if refused:
+                    return refused
                 if rec:
-                    _perm_record(g, rec)
+                    _perm_record(g, _key_times(g, vals, rec))
                 ss.write_env(vals)
             if hchg9:
                 import nodekeys

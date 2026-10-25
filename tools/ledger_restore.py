@@ -14,9 +14,10 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-import histmark, logs, paths, statefile  # noqa: E402
+import envfile, fsio, histmark, logs, paths, statefile  # noqa: E402
 import db as dbm  # noqa: E402
 import ledger_backup as lb  # noqa: E402
+import backup_complete as bc  # noqa: E402
 import ledger_lock  # noqa: E402
 
 STREAMS = ("evm", "sol", "bsc", "ex")
@@ -1123,15 +1124,32 @@ def files_plan(day: str, state_dir: str = None) -> dict:
         raise SystemExit("날짜는 YYYYMMDD — python3 tools/ledger_restore.py files 로 목록")
     bdir = os.path.join(sd, "backups")
     fdir = os.path.join(bdir, f"files_{day}")
-    items, manual, info = [], [], []
+    items, manual, info, cand, folded = [], [], [], [], {}
+    cdir = os.path.join(fdir, lb.CANDLES)
+    if os.path.isdir(cdir) and not os.path.islink(cdir):
+        have = 0
+        for sub, fn in lb.candle_files(cdir):
+            if os.path.lexists(os.path.join(sd, lb.CANDLES, sub, fn)):
+                have += 1
+            else:
+                cand.append((os.path.join(cdir, sub, fn), os.path.join(lb.CANDLES, sub, fn)))
+        info.append(f"봉 캐시(candles/) — 지금 없는 {len(cand)}개만 되돌림 · {have}개는 지금 파일이 있어 그대로")
     if os.path.isdir(fdir):
+        fut_items, fut_info, fut_names, folded = _fut_plan(sd, fdir)
+        items += fut_items
+        info += fut_info
         for n in sorted(os.listdir(fdir)):
             src = os.path.join(fdir, n)
-            if not os.path.isfile(src) or n.endswith(".tmp"):
+            if not os.path.isfile(src) or n.endswith(".tmp") or n in fut_names:
                 continue
             m = _SEED_LOCAL_RX.match(n)
             if n in lb.FILES_STATE or lb.FILES_STATE_RX.match(n):
                 items.append((src, n))
+            elif n in lb.FILES_CACHE or lb.FILES_CACHE_RX.match(n):
+                if os.path.exists(os.path.join(sd, n)):
+                    info.append(f"{n} — 지금 파일이 있어 그대로(받아 둔 보관본은 없을 때만 되돌림)")
+                else:
+                    items.append((src, n))
             elif m and ".." not in m.group(1).split("__"):
                 items.append((src, os.path.join("seed_local", *m.group(1).split("__"))))
             elif n == "config_subset.json":
@@ -1146,9 +1164,219 @@ def files_plan(day: str, state_dir: str = None) -> dict:
                 items.append((("json", d9[key], pj), name))
         if isinstance(d9.get("decisions"), list):
             info.append(f"원장 판정(decisions) {len(d9['decisions'])}건은 원장 안 표라 이 명령으로 안 바뀌어요 — 원장째 되돌리기 = restore")
-    if not items and not manual:
+    warn = []
+    fs9 = bc.files_dir_state(fdir) if os.path.isdir(fdir) else None
+    if isinstance(fs9, dict) and fs9.get("ok") is False:
+        lc9 = bc.last_complete_dir(bdir, before=f"files_{day}")
+        miss9 = sorted(fs9.get("failed") or {})
+        warn.append(f"이 날 사본은 불완전 — 빠진 것 {fs9.get('n_failed') or len(miss9)}개: " + ", ".join(miss9[:10])
+                    + (f" · 마지막 완전 사본 = {lc9[6:]}(빠진 파일만 손으로: state/backups/{lc9}/<이름> → state/<이름>)" if lc9
+                       else " · 그 전 완전한 사본 없음"))
+    hold = _ident_hold(sd, fdir)
+    if hold:
+        warn.append("이 사본의 계정 지도에 계정이 없는 칸이 있어요(옛 사본 · 빈 지도 · 빠진 칸) — 되돌린 원장에 기록이 있는 거래소 서브 칸(" + ", ".join(f"{e} {', '.join(t)}" for e, t in sorted(hold.items()))
+                    + ")은 계정을 몰라 그 밖 서브 칸의 새 수집을 보류해요: 먼저 그 칸에 원래 키를 넣어 받게 하세요(state/exf_ident.json 의 hold)")
+    if not items and not manual and not info and not cand and not warn:
         raise SystemExit(f"{day} 사본이 없어요(state/backups/files_{day}/ · prefs_{day}.json) — files 로 목록")
-    return {"day": day, "items": items, "manual": manual, "info": info}
+    return {"day": day, "items": items, "manual": manual, "info": info, "candles": cand, "warn": warn, "hold": hold, "fut_keep": folded}
+
+
+def _ident_hold(sd: str, fdir: str) -> dict:
+    dbp = os.path.join(sd, os.path.basename(paths.DB_PATH))
+    if not os.path.isfile(dbp):
+        return {}
+    known = {ex: {str(t).split("@", 1)[0] for t, v in subs.items() if envfile.acct_hist(v)} for ex, subs in _live_accts(sd).items()}
+    for doc in (envfile.ident_read(sd), envfile.ident_read(fdir)):
+        for ex, v in (doc.get("ex") or {}).items():
+            hist = v.get("hist") if isinstance(v, dict) and isinstance(v.get("hist"), dict) else {}
+            known.setdefault(ex, set()).update(t for t, lst in hist.items() if isinstance(lst, list) and any(envfile.acct_key(a) for a in lst))
+    out = {}
+    try:
+        c = _ro(dbp)
+        try:
+            for ex, u in c.execute("SELECT exchange, uuid FROM raw_ex WHERE uuid GLOB '*:s[0-9]*:*'"):
+                m = re.match(r"^" + re.escape(str(ex)) + r":(s\d{1,2}):", str(u))
+                if m and m.group(1) not in known.get(ex, ()):
+                    out.setdefault(ex, set()).add(m.group(1))
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return {}
+    return {ex: sorted(t) for ex, t in out.items()}
+
+
+def _fut_key(r: dict) -> tuple:
+    return (r.get("acct") or "", r.get("uid") or f"{r.get('t')}:{r.get('kind')}:{r.get('amount')}:{r.get('symbol')}")
+
+
+def _acct_ids(tag, active=None) -> set:
+    t = str(tag or "")
+    if not t:
+        return {"main"}
+    k = envfile.acct_key({}, t) if "@" in t else envfile.acct_key((active or {}).get(t) if isinstance(active, dict) else None)
+    return {f"{n[0]}:{v}" for n, v in (k or {}).items()} | ({"t:" + t} if "@" not in t or not k else set())
+
+
+def _new_rows(cur_rows: list, bak_rows: list, cur_act: dict = None, bak_act: dict = None) -> list:
+    have = {(a, _fut_key(r)[1]) for r in cur_rows if isinstance(r, dict) for a in _acct_ids(r.get("acct"), cur_act)}
+    add = []
+    for r in bak_rows:
+        ks = {(a, _fut_key(r)[1]) for a in _acct_ids(r.get("acct"), bak_act)} if isinstance(r, dict) else set()
+        if ks and not ks & have:
+            have |= ks
+            add.append(r)
+    return add
+
+
+def fut_union(cur, bak, cur_act: dict = None, bak_act: dict = None) -> tuple:
+    if not (isinstance(cur, dict) and isinstance(bak, dict) and isinstance(cur.get("events", []), list) and isinstance(bak.get("events", []), list)):
+        return None, None
+    cur_rows = [r for r in cur.get("events") or [] if isinstance(r, dict)]
+    bak_rows = [r for r in bak.get("events") or [] if isinstance(r, dict)]
+    ct, bt = {str(r.get("acct") or "") for r in cur_rows}, {str(r.get("acct") or "") for r in bak_rows}
+    bound = {str(t) for t in bak.get("bound") or ()} if isinstance(bak.get("bound"), list) else set()
+    if any(b in ct and not envfile.acct_key((cur_act or {}).get(b) if isinstance(cur_act, dict) else None) for b in bound):
+        return None, -1
+    for base in {a.split("@", 1)[0] for a in ct | bt if "@" in a} - bound:
+        c9, b9 = {a for a in ct if a.split("@", 1)[0] == base}, {a for a in bt if a.split("@", 1)[0] == base}
+        if c9 and b9 and (c9 - {base}) != (b9 - {base}):
+            return None, -1
+    add = _new_rows(cur_rows, bak_rows, cur_act, bak_act)
+    evs = list(cur.get("events") or []) + add
+    return dict(cur, events=sorted(evs, key=lambda r: (r.get("t") or 0) if isinstance(r, dict) else 0)), len(add)
+
+
+def _live_accts(sd: str) -> dict:
+    st = _read_json(os.path.join(sd, "exf_state.json"), None)
+    return {ex: v["accts"] for ex, v in st.items() if isinstance(v, dict) and isinstance(v.get("accts"), dict)} if isinstance(st, dict) else {}
+
+
+def _bak_active(fdir: str, key: str = "active") -> dict:
+    return {ex: (v.get(key) or {}) for ex, v in (envfile.ident_read(fdir).get("ex") or {}).items() if isinstance(v, dict)}
+
+
+def fut_bind(bak: dict, cur_state, tag: str, lineage: bool = False) -> tuple:
+    if not tag or tag == "main" or "@" in tag:
+        return "same", tag
+    b = envfile.acct_key(bak)
+    c = envfile.acct_key(cur_state) if isinstance(cur_state, dict) else None
+    if b and c:
+        both = [k for k in ("uid", "kfp") if b.get(k) and c.get(k)]
+        if not both:
+            return "hold", None
+        if b[both[0]] == c[both[0]]:
+            return "same", tag
+    if lineage or not (b or c):
+        return "fold", tag
+    if b:
+        return "move", f"{tag}@u{b['uid']}" if b.get("uid") else f"{tag}@k{b['kfp']}"
+    return "hold", None
+
+
+def _fut_plan(sd: str, fdir: str) -> tuple:
+    names = sorted(n for n in os.listdir(fdir) if os.path.isfile(os.path.join(fdir, n)) and not n.endswith(".tmp")
+                   and (lb.FUT_CANON_RX.match(n) or (n.startswith("futraw_") and lb.FILES_CACHE_RX.match(n))))
+    live, bak, keep = _live_accts(sd), _bak_active(fdir), _bak_active(fdir, "fut_keep")
+    items, info, folded = [], [], {}
+    for ex in sorted({n[len("futures_"):-5] for n in names if n.startswith("futures_")} | {n.split("_", 2)[1] for n in names if n.startswith("futraw_")}):
+        canon = f"futures_{ex}.json"
+        raws, add, moves, held = [n for n in names if n.startswith(f"futraw_{ex}_")], [], {}, []
+        bd = _read_json(os.path.join(fdir, canon), None) if canon in names else None
+        for tag in sorted({r.get("acct") for r in (bd.get("events") if isinstance(bd, dict) and isinstance(bd.get("events"), list) else ())
+                           if isinstance(r, dict) and isinstance(r.get("acct"), str) and re.fullmatch(r"s\d{1,2}", r["acct"])} - {n[len(f"futraw_{ex}_"):-5] for n in raws}):
+            how, dest = fut_bind((bak.get(ex) or {}).get(tag), (live.get(ex) or {}).get(tag), tag, tag in (keep.get(ex) or ()))
+            if how == "move":
+                moves[tag] = dest
+            elif how == "hold":
+                held.append(tag)
+            elif how == "fold":
+                folded.setdefault(ex, set()).add(tag)
+        for n in raws:
+            src, tag = os.path.join(fdir, n), n[len(f"futraw_{ex}_"):-5]
+            how, dest = fut_bind((bak.get(ex) or {}).get(tag), (live.get(ex) or {}).get(tag), tag, tag in (keep.get(ex) or ()))
+            if how == "hold":
+                held.append(tag)
+                info.append(f"{n} — 사본에 계정 기록이 없어 지금 {tag} 칸 계정과 같은지 몰라 그대로(손으로 확인: {os.path.relpath(src, sd)})")
+                continue
+            if how in ("move", "fold"):
+                rd = _read_json(src, None)
+                add += [dict(r, acct=dest) for r in (rd.get("events") if isinstance(rd, dict) and isinstance(rd.get("events"), list) else ()) if isinstance(r, dict)]
+            if how == "move":
+                moves[tag] = dest
+            if how == "fold":
+                folded.setdefault(ex, set()).add(tag)
+                info.append(f"{n} — 지금 {tag} 칸 계정을 몰라 원본(수집 커서)은 안 되살림 · 정산만 정본에(그 칸 계정은 처음 창부터 다시 받음)")
+                continue
+            rel = f"futraw_{ex}_{dest}.json"
+            if os.path.exists(os.path.join(sd, rel)):
+                info.append(f"{rel} — 지금 파일이 있어 그대로(받아 둔 보관본은 없을 때만 되돌림)")
+            else:
+                items.append((src, rel))
+                if how == "move":
+                    info.append(f"{n} — 사본 때 {tag} 칸 계정이 지금 그 칸 계정과 다르거나 지금 계정을 몰라 보관 딱지 {dest} 로 되돌림(지금 칸에 안 넣음)")
+        if canon not in names and not add:
+            continue
+        src = os.path.join(fdir, canon)
+        bd = bd if canon in names else {"ts": 0, "events": []}
+        if held or not (isinstance(bd, dict) and isinstance(bd.get("events", []), list)):
+            info.append(f"{canon} — " + ("계정 확인이 안 된 칸이 있어" if held else "사본을 못 읽어") + f" 자동 되돌림 안 함(손으로 확인: {os.path.relpath(src, sd)})")
+            continue
+        evs = [dict(r, acct=moves[r.get("acct")]) if isinstance(r, dict) and r.get("acct") in moves else r for r in bd.get("events") or []]
+        add = _new_rows(evs, add, bak.get(ex), bak.get(ex))
+        doc = dict(bd, events=sorted(evs + add, key=lambda r: (r.get("t") or 0) if isinstance(r, dict) else 0))
+        if add:
+            info.append(f"{canon} — 원본에만 있던 정산 {len(add)}건을 정본 사본에 보탬")
+        if not os.path.exists(os.path.join(sd, canon)):
+            items.append((("json", doc, src), canon))
+            if moves:
+                info.append(f"{canon} — 사본 때와 계정이 바뀐 칸({', '.join(sorted(moves))})의 정산은 옛 계정 보관 딱지로 되돌림")
+            continue
+        doc = dict(doc, bound=sorted(moves)) if moves else doc
+        k9 = fut_union(_read_json(os.path.join(sd, canon), None), doc, live.get(ex), bak.get(ex))[1]
+        if k9 is None or k9 < 0:
+            info.append(f"{canon} — " + ("계정 교체 흔적(보관 딱지)이 사본과 달라 자동 합치기 안 함" if k9 else "지금 정본 또는 사본을 못 읽어 그대로")
+                        + f"(손으로 확인: {os.path.relpath(src, sd)})")
+            items[:] = [it for it in items if not (isinstance(it[1], str) and it[1].startswith(f"futraw_{ex}_"))]
+        elif k9:
+            items.append((("json", doc, src), canon))
+            info.append(f"{canon} — 지금 정본이 있어 덮지 않고 사본에만 있는 정산 {k9}건을 합침((계정, 정산 번호) 기준 · 지금 지갑·포지션·시각·커서 그대로)")
+        else:
+            info.append(f"{canon} — 지금 정본에 사본의 정산이 모두 있어 그대로")
+    return items, info, set(names), {ex: sorted(t) for ex, t in folded.items()}
+
+
+def _candle_ok(data: bytes) -> bool:
+    import gzip
+    import zlib
+    try:
+        if data[:2] == b"\x1f\x8b":
+            data = gzip.decompress(data)
+        return isinstance(json.loads(data.decode("utf-8")), dict)
+    except (OSError, ValueError, EOFError, zlib.error):
+        return False
+
+
+def files_candles(fp: dict, sd: str, log=print) -> dict:
+    n = {"restored": 0, "kept": 0, "bad": 0}
+    for src, rel in fp.get("candles") or ():
+        dst = os.path.join(sd, rel)
+        try:
+            with open(src, "rb") as f:
+                data = f.read()
+        except OSError:
+            n["bad"] += 1
+            continue
+        if not _candle_ok(data):
+            n["bad"] += 1
+            continue
+        os.makedirs(os.path.dirname(dst), mode=0o700, exist_ok=True)
+        if fsio.create_exclusive(dst, data, makedirs=False):
+            n["restored"] += 1
+        else:
+            n["kept"] += 1
+    if fp.get("candles"):
+        log(f"봉 캐시 되돌림 {n['restored']}개 · 그 사이 생겨 그대로 {n['kept']}개 · 깨진 사본 건너뜀 {n['bad']}개")
+    return n
 
 
 def files_payloads(fp: dict) -> tuple:
@@ -1163,6 +1391,12 @@ def files_payloads(fp: dict) -> tuple:
         try:
             with open(src, "rb") as f:
                 data = f.read()
+            if rel.endswith(".jsonl"):
+                for ln9 in data.decode("utf-8").splitlines():
+                    if ln9.strip() and not isinstance(json.loads(ln9), dict):
+                        raise ValueError("JSON 줄이 객체가 아님")
+                ok.append((rel, data))
+                continue
             val = json.loads(data.decode("utf-8"))
             if not isinstance(val, (dict, list)):
                 raise ValueError("JSON 객체·배열이 아님")
@@ -1173,15 +1407,62 @@ def files_payloads(fp: dict) -> tuple:
     return ok, bad
 
 
+def _perm_gen(r) -> float:
+    v = [x for x in ((r or {}).get(k) for k in ("at", "kat", "gone")) if isinstance(x, (int, float)) and not isinstance(x, bool)] if isinstance(r, dict) else []
+    return max(v) if v and all(-float("inf") < x < float("inf") for x in v) else -1
+
+
+def settings_keep_ident(cur, data: bytes) -> tuple:
+    try:
+        bak = json.loads(data.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return data, []
+    ck = cur.get("key_perm") if isinstance(cur, dict) else None
+    if not (isinstance(bak, dict) and isinstance(ck, dict)):
+        return data, []
+    bk = bak.get("key_perm") if isinstance(bak.get("key_perm"), dict) else {}
+    out, kept = dict(bk), []
+    for g, r in ck.items():
+        if isinstance(r, dict) and _perm_gen(r) >= _perm_gen(bk.get(g)) and bk.get(g) != r:
+            out[g] = r
+            kept.append(g)
+    if not kept:
+        return data, []
+    return json.dumps(dict(bak, key_perm=out), ensure_ascii=False, indent=1).encode("utf-8"), sorted(kept)
+
+
+def ident_union(cur: dict, bak: dict) -> dict:
+    out = envfile.ident_build({}, cur if isinstance(cur, dict) else {})
+    for ex, v in ((bak or {}).get("ex") or {}).items() if isinstance(bak, dict) else ():
+        if not isinstance(v, dict):
+            continue
+        o = out["ex"].setdefault(ex, {"active": {}, "hist": {}})
+        for t, a in (v.get("active") or {}).items():
+            o["active"].setdefault(t, a)
+        for b, lst in (v.get("hist") or {}).items():
+            h = o["hist"].setdefault(b, [])
+            h += [a for a in (lst if isinstance(lst, list) else ()) if isinstance(a, dict) and a not in h]
+        for fld in ("hold", "fut_keep"):
+            if isinstance(v.get(fld), list) and v[fld]:
+                o[fld] = sorted(set(o.get(fld) or ()) | {t for t in v[fld] if isinstance(t, str) and re.fullmatch(r"s\d{1,2}", t)})
+        if envfile.acct_key(v.get("main")) and not o.get("main"):
+            o["main"] = envfile.acct_key(v["main"])
+    for ex, v in ((cur or {}).get("ex") or {}).items() if isinstance(cur, dict) else ():
+        if isinstance(v, dict) and ex in out["ex"]:
+            out["ex"][ex]["active"].update(v.get("active") or {})
+    return out
+
+
 def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=print) -> dict:
     sd = state_dir or paths.STATE_DIR
     if proc_check:
         run = running_units(scripts=UNIT_SCRIPTS + ("review_daily.py",))
         if run is None:
             raise SystemExit("프로세스 목록(ps)을 못 읽어 유닛 정지를 확인할 수 없어요 — 정지를 직접 확인했다면 --no-proc-check")
-        web9 = [(pid, n) for pid, n in run if n in FILES_UNITS]
+        units9 = FILES_UNITS + (("ex_foreign.py", "unit_runner.py exf") if any(lb.FILES_CACHE_RX.match(r9) for _s9, r9 in fp["items"]) else ())
+        web9 = [(pid, n) for pid, n in run if n in units9]
         if web9:
-            raise SystemExit("먼저 화면·리뷰 유닛을 멈추세요: " + FILES_STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in web9))
+            raise SystemExit("먼저 화면·리뷰 유닛을 멈추세요: " + FILES_STOP_HINT + (" tj-exf" if len(units9) > len(FILES_UNITS) else "") + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in web9))
     payloads, bad = files_payloads(fp)
     if bad:
         raise SystemExit("깨진 사본이 있어 아무것도 안 바꿨어요(하나라도 깨지면 전체 거부): " + " · ".join(bad[:5])
@@ -1195,6 +1476,36 @@ def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=pr
     done = []
     for rel, data in payloads:
         dst = os.path.join(sd, rel)
+        if rel == envfile.IDENT_FILE and os.path.exists(dst):
+            os.makedirs(keep, mode=0o700, exist_ok=True)
+            shutil.copy2(dst, os.path.join(keep, rel))
+            statefile.atomic_write_json(dst, ident_union(envfile.ident_read(sd), json.loads(data.decode("utf-8"))))
+            os.chmod(dst, 0o600)
+            done.append(rel)
+            continue
+        if lb.FUT_CANON_RX.match(rel) and os.path.exists(dst):
+            ex9 = rel[len("futures_"):-5]
+            merged, k9 = fut_union(_read_json(dst, None), json.loads(data.decode("utf-8")), _live_accts(sd).get(ex9),
+                                   _bak_active(os.path.join(sd, "backups", f"files_{fp['day']}")).get(ex9))
+            if not k9 or k9 < 0:
+                log(f"{rel} — " + ("계정 교체 흔적이 사본과 달라 그대로" if k9 else "지금 정본을 못 읽어 그대로" if merged is None
+                                   else "지금 정본에 사본의 정산이 모두 있어 그대로"))
+                continue
+            shutil.copy2(dst, os.path.join(keep, rel))
+            statefile.atomic_write_json(dst, merged)
+            os.chmod(dst, 0o600)
+            done.append(f"{rel} (정산 {k9}건 합침)")
+            continue
+        if rel == "settings.json" and os.path.exists(dst):
+            data, kept9 = settings_keep_ident(_read_json(dst, None), data)
+            if kept9:
+                log(f"settings.json — 키 저장 기록 {', '.join(kept9)} 은 지금 것이 사본보다 새것이라 지금 것 유지(계정 정체 기록 후퇴 방지)")
+        if rel in lb.FILES_CACHE or lb.FILES_CACHE_RX.match(rel):
+            if fsio.create_exclusive(dst, data, makedirs=False):
+                done.append(rel)
+            else:
+                log(f"{rel} — 지금 파일이 있어 그대로(받아 둔 보관본은 없을 때만 되돌림)")
+            continue
         if os.path.exists(dst):
             os.makedirs(os.path.dirname(os.path.join(keep, rel)), mode=0o700, exist_ok=True)
             shutil.copy2(dst, os.path.join(keep, rel))
@@ -1207,11 +1518,24 @@ def files_apply(fp: dict, proc_check: bool = True, state_dir: str = None, log=pr
             os.fsync(f.fileno())
         os.replace(tmp9, dst)
         done.append(rel)
+    if fp.get("hold") or fp.get("fut_keep"):
+        m9 = envfile.ident_read(sd) or {"v": 1, "ex": {}}
+        for fld in ("hold", "fut_keep"):
+            for ex9, tags9 in (fp.get(fld) or {}).items():
+                e9 = m9["ex"].setdefault(ex9, {"active": {}, "hist": {}})
+                e9[fld] = sorted(set(e9.get(fld) or ()) | set(tags9))
+        statefile.atomic_write_json(os.path.join(sd, envfile.IDENT_FILE), m9)
+        os.chmod(os.path.join(sd, envfile.IDENT_FILE), 0o600)
+        done.append(f"{envfile.IDENT_FILE} (보류 칸 {sum(len(t) for t in (fp.get('hold') or {}).values())} · 줄기 칸 {sum(len(t) for t in (fp.get('fut_keep') or {}).values())})")
+    cand_res = files_candles(fp, sd, log=log)
+    if cand_res["restored"]:
+        done.append(f"{lb.CANDLES}/ ({cand_res['restored']}개)")
     if "daily_px.json" in done:
         invalidate_curves(sd)
-    statefile.atomic_write_json(os.path.join(keep, "plan.json"), {"ts": int(time.time()), "day": fp["day"], "restored": done})
-    log(f"되돌림 {len(done)}개: " + ", ".join(done) + f"\n지금 것 보존: {keep}")
-    return {"restored": done, "kept": keep}
+    statefile.atomic_write_json(os.path.join(keep, "plan.json"), {"ts": int(time.time()), "day": fp["day"], "restored": done,
+                                                                   "warn": fp.get("warn") or []})
+    log(f"되돌림 {len(done)}개: " + ", ".join(done) + f"\n지금 것 보존: {keep}" + "".join("\n★" + x + "★" for x in fp.get("warn") or ()))
+    return {"restored": done, "kept": keep, "warn": fp.get("warn") or []}
 
 
 COLLECTOR_UNITS = ("evm_watch.py", "sol_watch.py", "bsc_watch.py", "upbit_link.py", "ex_foreign.py",
@@ -1350,17 +1674,20 @@ def main(argv=None) -> int:
             print("다음: python3 tools/ledger_restore.py files <YYYYMMDD>   (미리보기 → --apply)")
             return 0
         fp = files_plan(a.day)
+        for x in fp.get("warn") or ():
+            print("  ★" + x + "★")
         for src, rel in fp["items"]:
             print(f"  되돌림 대상: state/{rel}  ← " + (f"{os.path.basename(src[2])} 의 칸" if isinstance(src, tuple) else os.path.relpath(src, paths.STATE_DIR)))
         for x in fp["manual"] + fp["info"]:
             print("  · " + x)
         for x in files_payloads(fp)[1]:
             print("  ★깨짐(적용 거부): " + x + "★")
+        ex9 = " tj-exf" if any(lb.FILES_CACHE_RX.match(r9) for _s9, r9 in fp["items"]) else ""
         if not a.apply:
-            print(f"\n미리보기예요(아무것도 안 바꿈). 적용: {FILES_STOP_HINT} → 같은 명령 + --apply → pm2 start tj-web tj-review")
+            print(f"\n미리보기예요(아무것도 안 바꿈). 적용: {FILES_STOP_HINT}{ex9} → 같은 명령 + --apply → pm2 start tj-web tj-review{ex9}")
             return 0
         files_apply(fp, proc_check=not a.no_proc_check)
-        print("다음: pm2 start tj-web tj-review")
+        print(f"다음: pm2 start tj-web tj-review{ex9}")
         return 0
     if a.cmd == "check":
         res = check(resolve(a.backup), full=not a.quick)

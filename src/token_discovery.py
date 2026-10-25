@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.parse
 
-import config, envfile, logs, paths, seeds, statefile
+import config, envfile, logs, num_parse, paths, seeds, statefile
 import bf_engine
 
 STATE_NAME = "token_discovery.json"
@@ -45,6 +45,8 @@ ANKR_ADV_CREDITS = 700
 ALCHEMY_FALLBACK = {"hosts": ["*.g.alchemy.com"], "unit": "cu", "month": 30_000_000, "pct": 80.0, "cu": 26, "cu_heavy": 26,
                     "cu_methods": {"alchemy_getTokenBalances": 20, "eth_getLogs": 60, "eth_call": 26, "eth_getBalance": 20}}
 DS_MIN_RESERVE = 10000.0
+DS_PAIRS_MAX = 5
+DS_PAIRS_TTL_S = 86400
 _SEED = {"d": None}
 _LOCK = threading.Lock()
 
@@ -881,13 +883,16 @@ def static_credible(chain: str, ca: str, srcs, m: dict, strict=None, confirmed=f
     return None, ""
 
 
-def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=time.sleep, retries: int = 2) -> dict:
+def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=time.sleep, retries: int = 2,
+              pairs_budget: list = None, batch_ok: list = None) -> dict:
     import token_tables
     net = token_tables.DS_CHAIN.get(chain)
     out = {}
     if not net:
         return out
     lst = sorted({str(c).lower() for c in cas})
+    pairs_left = pairs_budget if pairs_budget is not None else [DS_PAIRS_MAX]
+    late = []
     for i in range(0, len(lst), 30):
         batch = lst[i:i + 30]
         try:
@@ -895,36 +900,184 @@ def dex_check(chain: str, cas: list, min_reserve: float = DS_MIN_RESERVE, sleep=
         except SourceFail:
             continue
         if isinstance(d, dict):
-            d = d.get("pairs") or []
+            d = d.get("pairs")
         if not isinstance(d, list):
             continue
-        res, best, sym = {}, {}, {}
-        for pr in d:
-            if not isinstance(pr, dict) or (pr.get("chainId") and pr.get("chainId") != net):
-                continue
-            try:
-                liq = float(((pr.get("liquidity") or {}).get("usd")) or 0)
-            except (TypeError, ValueError, AttributeError):
-                liq = 0.0
-            for side in ("baseToken", "quoteToken"):
-                a = str(((pr.get(side) or {}).get("address")) or "").lower()
-                if a not in batch:
-                    continue
-                res[a] = res.get(a, 0.0) + liq
-                sym.setdefault(a, (pr.get(side) or {}).get("symbol"))
-                if side == "baseToken":
-                    try:
-                        px = float(pr.get("priceUsd") or 0)
-                    except (TypeError, ValueError):
-                        px = 0.0
-                    if px > 0 and (a not in best or liq > best[a][0]):
-                        best[a] = (liq, px)
+        if batch_ok is not None:
+            batch_ok[0] = True
+        res, best, sym, stray, nf = _ds_rows(d, batch, net)
+        low = [a for a in batch if a in res and res[a] < float(min_reserve)] + [a for a in batch if a not in res]
+        lt = {a for a in low if a in nf}
+        late += [(a, res, best, sym) for a in low if a in lt]
+        low = [a for a in low if a not in lt]
+        full = _pairs_liq(chain, net, low, pairs_left, sleep, float(min_reserve)) if low else {}
+        cut = len(d) >= 30 or stray
         for a in batch:
-            if a in res:
-                out[a] = (res[a] >= float(min_reserve), res[a], best.get(a, (0, None))[1], sym.get(a))
+            if a in lt:
+                continue
+            if a in low and a not in full and (a in res or cut):
+                continue
+            if a in res or (a in full and full[a][0] > 0):
+                out[a] = _ds_judge(a, full.get(a), res, best, sym, min_reserve)
             else:
                 out[a] = (False, 0.0, None, None)
         sleep(0.5)
+    full = _pairs_liq(chain, net, [x[0] for x in late], pairs_left, sleep, float(min_reserve)) if late else {}
+    for a, res, best, sym in late:
+        if a in full:
+            out[a] = _ds_judge(a, full[a], res, best, sym, min_reserve)
+    return out
+
+
+def _ds_rows(d: list, batch: list, net: str) -> tuple:
+    res, best, sym, stray, nf = {}, {}, {}, False, set()
+    for pr in d:
+        if not isinstance(pr, dict):
+            stray = True
+            continue
+        if pr.get("chainId") and pr.get("chainId") != net:
+            continue
+        sides = {side: _ds_side(pr, side) for side in ("baseToken", "quoteToken")}
+        if not all(_ds_addr(t) for t in sides.values()):
+            stray = True
+        if not any(_ds_addr(t) for t in sides.values()):
+            continue
+        liq = _ds_liq(pr)
+        for side, tok in sides.items():
+            a = _ds_addr(tok)
+            if a not in batch:
+                continue
+            sym.setdefault(a, tok.get("symbol"))
+            if liq is None:
+                res.setdefault(a, 0.0)
+                if _ds_nonfinite(pr):
+                    nf.add(a)
+                continue
+            res[a] = res.get(a, 0.0) + liq
+            px = _ds_px(pr) if side == "baseToken" else 0.0
+            if px > 0 and (a not in best or liq > best[a][0]):
+                best[a] = (liq, px)
+    for a in [a for a, v in res.items() if num_parse.to_float(v) is None]:
+        res[a] = 0.0
+        nf.add(a)
+    return res, best, sym, stray, nf
+
+
+def _ds_judge(a: str, f, res: dict, best: dict, sym: dict, min_reserve: float) -> tuple:
+    if f and f[0] > res.get(a, 0.0):
+        res[a] = f[0]
+        if f[1]:
+            best[a] = (0.0, f[1])
+        if f[2]:
+            sym.setdefault(a, f[2])
+    return (res[a] >= float(min_reserve), res[a], best.get(a, (0, None))[1], sym.get(a))
+
+
+def _ds_nonfinite(pr: dict) -> bool:
+    lq = pr.get("liquidity")
+    v = lq.get("usd") if isinstance(lq, dict) else None
+    try:
+        return isinstance(v, (int, float, str)) and not isinstance(v, bool) and num_parse.to_float(float(v)) is None
+    except (ValueError, OverflowError):
+        return False
+
+
+def _ds_side(pr: dict, side: str) -> dict:
+    v = pr.get(side)
+    return v if isinstance(v, dict) else {}
+
+
+def _ds_addr(tok: dict) -> str:
+    a = tok.get("address")
+    return a.strip().lower() if isinstance(a, str) else ""
+
+
+def _ds_liq(pr: dict) -> float | None:
+    lq = pr.get("liquidity")
+    if lq is None:
+        return 0.0
+    if not isinstance(lq, dict):
+        return None
+    v = lq.get("usd")
+    if v is None or v == "":
+        return 0.0
+    x = num_parse.to_float(v, allow_bool=False)
+    return x if x is not None and x >= 0 else None
+
+
+def _ds_px(pr: dict) -> float:
+    x = num_parse.to_float(pr.get("priceUsd") or 0, 0.0, allow_bool=False)
+    return x if x > 0 else 0.0
+
+
+def _pairs_sum(d, net: str, ca: str, floor: float | None = None) -> tuple:
+    if isinstance(d, dict):
+        d = d.get("pairs")
+    if not isinstance(d, list):
+        return None
+    liq, best, sym, bad = 0.0, None, None, False
+    for pr in d:
+        if not isinstance(pr, dict):
+            bad = True
+            continue
+        if pr.get("chainId") and pr.get("chainId") != net:
+            continue
+        base, quote = _ds_side(pr, "baseToken"), _ds_side(pr, "quoteToken")
+        if not (_ds_addr(base) and _ds_addr(quote)):
+            bad = True
+        if not _ds_addr(base) and not _ds_addr(quote):
+            continue
+        mine = base if _ds_addr(base) == ca else (quote if _ds_addr(quote) == ca else None)
+        if mine is None:
+            continue
+        pl = _ds_liq(pr)
+        if pl is None:
+            bad = True
+            continue
+        liq += pl
+        sym = sym or mine.get("symbol")
+        px = _ds_px(pr) if mine is base else 0.0
+        if px > 0 and (best is None or pl > best[0]):
+            best = (pl, px)
+    if num_parse.to_float(liq) is None or (bad and (floor is None or liq < floor)):
+        return None
+    return liq, (best[1] if best else None), sym, not bad
+
+
+def _pairs_liq(chain: str, net: str, cas: list, left: list, sleep, floor: float | None = None) -> dict:
+    now = time.time()
+    cache = load_state().get("dexliq") or {}
+    out, fresh = {}, {}
+    for ca in cas:
+        ent = cache.get(f"{chain}:{ca}")
+        c_liq = num_parse.to_float(ent.get("liq") or 0.0, allow_bool=False) if isinstance(ent, dict) else None
+        if c_liq is not None and c_liq >= 0 and now - float(ent.get("at") or 0) < DS_PAIRS_TTL_S:
+            out[ca] = (c_liq, None, ent.get("sym"))
+            continue
+        if left[0] <= 0:
+            continue
+        left[0] -= 1
+        try:
+            got = _pairs_sum(_http(f"https://api.dexscreener.com/token-pairs/v1/{net}/{ca}", retries=1), net, ca, floor)
+        except SourceFail:
+            got = None
+        finally:
+            sleep(0.25)
+        if got is None:
+            continue
+        out[ca] = got[:3]
+        if got[3]:
+            fresh[f"{chain}:{ca}"] = {"liq": got[0], "px": got[1], "sym": got[2], "at": int(now)}
+    if fresh:
+        def _put(cur):
+            keep = {k: v for k, v in (cur.get("dexliq") or {}).items() if isinstance(v, dict) and now - float(v.get("at") or 0) < DS_PAIRS_TTL_S}
+            keep.update(fresh)
+            cur["dexliq"] = keep
+            return cur
+        try:
+            update_state(_put)
+        except OSError:
+            pass
     return out
 
 
@@ -1210,12 +1363,17 @@ def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_M
             if budget is not None:
                 budget[0] -= 1
             tried += part
+            pb = [min(DS_PAIRS_MAX, max(0, budget[0]))] if budget is not None else [DS_PAIRS_MAX]
+            pb0 = pb[0]
+            bok = [False]
             try:
-                g9 = fn(chain, part, min_reserve, **kw) or {}
+                g9 = fn(chain, part, min_reserve, **(dict(kw, pairs_budget=pb, batch_ok=bok) if fn is _DEX_IMPL else kw)) or {}
             except Exception:   # noqa: BLE001 [fallback]
                 g9 = {}
+            if budget is not None:
+                budget[0] -= pb0 - pb[0]
             got.update(g9)
-            if not g9:
+            if not g9 and not bok[0]:
                 if budget is not None:
                     budget[0] = 0
                 break
@@ -1471,7 +1629,7 @@ def filter_result(bal: dict, prep: dict, ext: dict, dex=None, keep_pending: bool
                 if bad:
                     skip.setdefault(wl, {})[ca] = bad
                 elif not ss:
-                    skip.setdefault(wl, {})[ca] = "심볼 모름 — 앵커 안 함"
+                    skip.setdefault(wl, {})[ca] = "일시 보류 — 판정 출처 장애" if (ds_ok and g is None) else "심볼 모름 — 앵커 안 함"
                 elif u9["cred"]:
                     keep_why.setdefault(wl, {})[ca] = u9["cred"]
                 elif g and g[0]:

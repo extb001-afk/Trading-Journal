@@ -2477,6 +2477,9 @@ PREWARM_DONE_MAX = 6000
 PREWARM_FROM = "2000-01-01"
 RET_D = {"dex": (179, 364), "gate": (34,), "cex": ()}
 PW_TRANSIENT = ("net", "time", "budget", "bad", "deferred", "bg_pace", "bg_stop", "fx")
+PW_DONE_V = 3
+PW_SOFT_TTL_S = 3 * 86400
+PW_SOFT_MAX = 8
 _PW_THREAD = [None]
 _PW_LAST = [0.0]
 
@@ -2560,9 +2563,10 @@ def ret_left(kinds, age_d):
     return None if free else "expired"
 
 
-def prewarm_order(items, later, today_iso, done=None):
+def prewarm_order(items, later, today_iso, done=None, now: float | None = None):
     t9 = datetime.strptime(today_iso, "%Y-%m-%d")
     done = done or {}
+    now = time.time() if now is None else now
     cand = {}
     for x in items or ():
         d9, s9 = str(x.get("date") or ""), str(x.get("sym") or "")
@@ -2576,7 +2580,11 @@ def prewarm_order(items, later, today_iso, done=None):
         cand[key] = (v9["d"], v9["sym"], v9["side"], sorted(set(tuple(old[3] if old else ()) + ("dex",))))
     out = []
     for key, (d9, s9, side, kinds) in cand.items():
-        if key in done and key not in (later or {}):
+        rec = done.get(key)
+        r9 = rec or {}
+        buy_v2 = side == "buy" and r9.get("pv") == 2 and r9.get("r") in ("ok", "none") and not r9.get("exp")
+        reask = buy_v2 or ("dex" in kinds and r9.get("pv") != PW_DONE_V and r9.get("r") == "none")
+        if rec is not None and key not in (later or {}) and not reask and not (rec.get("exp") and float(rec.get("exp") or 0) <= now):
             continue
         try:
             age = (t9 - datetime.strptime(d9, "%Y-%m-%d")).days
@@ -2612,6 +2620,25 @@ def _pw_judge(r, side) -> str:
     if ch.get("ok"):
         return "done"
     return "retry" if any(t9.get("why") in PW_TRANSIENT for t9 in tried) else "done"
+
+
+def _pw_soft(r) -> bool:
+    if not isinstance(r, dict):
+        return False
+    lists = [((r.get("chart") or {}) if isinstance(r.get("chart"), dict) else {}).get("tried") or ()]
+    lists += [seg.get("tried") or () for seg in (r.get("segs") or ()) if isinstance(seg, dict)]
+    return any(isinstance(tr, dict) and tr.get("sure") is False for lst in lists for tr in lst)
+
+
+def pw_done_rec(r: dict, prev: dict | None, now: float) -> dict:
+    rec = {"at": int(now), "r": "ok" if ((r.get("chart") or {}).get("ok")) else "none", "pv": PW_DONE_V}
+    if _pw_soft(r):
+        n_soft = int((prev or {}).get("soft") or 0) + 1 if isinstance(prev, dict) else 1
+        if n_soft <= PW_SOFT_MAX:
+            rec.update(soft=n_soft, exp=int(now + PW_SOFT_TTL_S))
+        else:
+            rec.update(soft=n_soft, gaveup=True)
+    return rec
 
 
 def _pw_get(path, get, sleep):
@@ -2667,7 +2694,7 @@ def prewarm_charts(cfg, get=None, sleep=time.sleep, today_iso=None, stop_check=N
         log.warning("영수증 봉 미리 받기: 영수증 목록 조회 실패(다음 회차): %s", e)
         cnt["stopped"] = "목록 실패"
         return cnt
-    order = prewarm_order(lst.get("items") or [], sellchart.dex_later_read(), day, st["done"])
+    order = prewarm_order(lst.get("items") or [], sellchart.dex_later_read(), day, st["done"], now=time.time())
     busy9 = err9 = 0
     for d9, s9, side, kinds, left in order:
         if st["n"] >= n_cfg:
@@ -2719,7 +2746,7 @@ def prewarm_charts(cfg, get=None, sleep=time.sleep, today_iso=None, stop_check=N
         v9 = _pw_judge(r, side)
         key = f"{d9}|{s9}|{side}"
         if v9 == "done":
-            st["done"][key] = {"at": int(time.time()), "r": "ok" if ((r.get("chart") or {}).get("ok")) else "none"}
+            st["done"][key] = pw_done_rec(r, st["done"].get(key), time.time())
             cnt["done"] += 1
         elif v9 == "stop":
             st["dex_stop"] = day

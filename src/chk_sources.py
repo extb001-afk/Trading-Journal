@@ -546,8 +546,11 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
         if len(vals) == 2 and abs(float(dw) - float(fl)) > 1800:
             which = "입출금" if float(dw) < float(fl) else "체결"
         held = [str(t)[1:].replace("@", " 이전 계정 ") for t in (v["sub_held"] if isinstance(v.get("sub_held"), list) else []) if active9 is not None]
+        dup = sorted(v["sub_dup"].items()) if isinstance(v.get("sub_dup"), dict) and active9 is not None else []
+        dup = " · ".join(f"서브{str(t)[1:]} = " + (f"서브{str(d)[1:]}" if d else "메인") for t, d in dup)
         out.append(_source(st, now, f"ex:{ex}", "tj-exf", EX_NAME.get(ex, ex), "exchange", cur, None, " · ".join(x for x in (
-            f"{which} 수집 지연" if which else None, held and f"서브 키 제외됨 — 대사 보류(서브{', 서브'.join(held)} 마지막 잔고가 0 이 아님 · 같은 계정 키를 다시 넣으면 풀림)") if x) or None))
+            f"{which} 수집 지연" if which else None, held and f"서브 키 제외됨 — 대사 보류(서브{', 서브'.join(held)} 마지막 잔고가 0 이 아님 · 같은 계정 키를 다시 넣으면 풀림)",
+            dup and f"같은 계정 중복 칸 빼고 셈({dup} · 뒤 칸 키를 지우세요)") if x) or None))
         for tag9, a9 in sorted((v.get("accts") or {}).items()) if isinstance(v.get("accts"), dict) else ():
             if not isinstance(a9, dict) or (active9 is not None and f"{ex}~{tag9}" not in active9):
                 continue

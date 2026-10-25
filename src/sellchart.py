@@ -30,7 +30,6 @@ SPIKE_MULT = 2.0
 SPIKE_TOP = 0.8
 EVAL_DAILY_MAX = 0
 EVAL_DAILY_CAP = 5000
-EVAL_KEEP = 12000
 EVAL_KEEP_PER = 3
 _ADDR_RX = re.compile(r"0x[0-9a-fA-F]{40}|0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{32,44}")
 
@@ -450,9 +449,6 @@ class EvalStore:
                 same9 = sorted((k for k in d if k.startswith(pre9)), key=lambda k: (-int((d[k] or {}).get("at") or 0), 0 if k == new9 else 1))
                 for k in same9[EVAL_KEEP_PER:]:
                     d.pop(k, None)
-                if len(d) > EVAL_KEEP:
-                    for k in sorted(d, key=lambda k: int((d[k] or {}).get("at") or 0))[:len(d) - EVAL_KEEP]:
-                        d.pop(k, None)
                 statefile.atomic_write_json(self.path, d)
                 return True
             finally:

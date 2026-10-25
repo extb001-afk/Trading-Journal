@@ -75,34 +75,42 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
                 if f.get("src") == "convert" or f.get("late"):
                     late9.append(f)
         late_dl = self._late_fill_deltas(late9)
+        left = {}
         if new_income:
-            left = {}
             self._exf_income_absorb(ex, new_income, left)
-            try:
-                last_l = int(float(self._meta_get(f"recon_done_exf_{ex}") or 0))
-            except (TypeError, ValueError):
-                last_l = 0
-            for sym_l, rows_l in left.items():
-                if sym_l not in late_dl:
-                    continue
-                bounds_l = self._exf_bounds_q(self.conn, ex, sym_l)
-                net_l = {}
-                for ts_l, amt_l in late_dl[sym_l]:
-                    if ts_l <= last_l:
-                        b_l = self._exf_bucket(bounds_l, ts_l)
-                        net_l[b_l] = net_l.get(b_l, Decimal(0)) + amt_l
-                paired_l = []
-                for ts_l, amt_l in rows_l:
-                    b_l = self._exf_bucket(bounds_l, ts_l)
-                    take_l = min(amt_l, max(Decimal(0), -net_l.get(b_l, Decimal(0))))
-                    if take_l > self.EXF_TOL:
-                        paired_l.append((ts_l, take_l))
-                        net_l[b_l] += take_l
-                if paired_l:
-                    late_dl[sym_l].extend(paired_l)
-        self._late_stage(ex, late_dl, rec)
+        self._late_stage(ex, late_dl, rec, left)
         if n:
             log.info("%s 체결 반영: %d건", ex, n)
+
+    def _exf_income_pair(self, ex: str, deltas: dict, incs: dict) -> dict:
+        try:
+            last_l = int(float(self._meta_get(f"recon_done_exf_{ex}") or 0))
+        except (TypeError, ValueError):
+            last_l = 0
+        left_l = {}
+        for sym_l, rows_l in sorted(incs.items()):
+            if sym_l not in deltas:
+                left_l[sym_l] = sorted(rows_l)
+                continue
+            bounds_l = self._exf_bounds_q(self.conn, ex, sym_l)
+            net_l = {}
+            for ts_l, amt_l in deltas[sym_l]:
+                if ts_l <= last_l:
+                    b_l = self._exf_bucket(bounds_l, ts_l)
+                    net_l[b_l] = net_l.get(b_l, Decimal(0)) + amt_l
+            paired_l = []
+            for ts_l, amt_l in sorted(rows_l):
+                b_l = self._exf_bucket(bounds_l, ts_l)
+                take_l = min(amt_l, max(Decimal(0), -net_l.get(b_l, Decimal(0)))) if ts_l <= last_l else Decimal(0)
+                if take_l > self.EXF_TOL:
+                    paired_l.append((ts_l, take_l))
+                    net_l[b_l] += take_l
+                else:
+                    take_l = Decimal(0)
+                if amt_l - take_l > self.EXF_TOL:
+                    left_l.setdefault(sym_l, []).append((ts_l, amt_l - take_l))
+            deltas[sym_l].extend(paired_l)
+        return left_l
 
     def _consume_exf_income(self, ex: str, fid: str, f: dict, new_income: dict) -> bool:
         if not self._post_exf_income(ex, f):

@@ -16,6 +16,7 @@ import db as dbm
 from chk_base import CALC_BUG_SHOW_S
 from chk_base import CALC_UNIT
 from chk_base import DEFAULTS
+from chk_base import EX_NAME
 from chk_base import FUT_FB_SHOW_S
 from chk_base import FUT_PLACE_FRESH_S
 from chk_base import FUT_WAIT_FRESH_S
@@ -68,7 +69,7 @@ def _unreadable_rules(rel: str):
         "reviews_llm.json": [r"review:daily"],
         "chain_sweep.json": [r"chainsweep:(?:untracked|stale)"],
         "chain_activity.json": [r"chainsweep:untracked"],
-        "backups/backup_status.json": [r"backup:age"],
+        "backups/backup_status.json": [r"backup:age", r"backup:files"],
         "backups/offsite_status.json": [r"offsite:age", r"offsite:kid"],
         "backfill_status.json": [r"bfstall:.+"],
         "ext_rebuild_status.json": [r"rebuild:ext"],
@@ -76,6 +77,7 @@ def _unreadable_rules(rel: str):
         "ledger.db": [r"inbox:.+"],
         "recon_hold.json": [r"ledger:recon_hold:.+"],
         "recon_adj.json": [r"ledger:adj"],
+        "candles/prewarm.json": [r"chart:dex"],
     }
     return list(table.get(rel, [])), set()
 
@@ -118,6 +120,28 @@ def missing_run(keys, day, fmt: str, limit: int = 14) -> int:
     return n
 
 
+PX_FLIP_X = 3.0
+
+
+def px_flip_scan(dc: dict, today_iso: str, days: int = 20) -> dict:
+    skip = set(str(dc.get("_risk_rev") or "").split(",")) if isinstance(dc, dict) else set()
+    seq = {}
+    for day in sorted(k for k in (dc if isinstance(dc, dict) else ()) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(k)) and str(k) < today_iso)[-days:]:
+        ent = dc[day] if isinstance(dc[day], dict) else {}
+        gv = ent.get("g") if isinstance(ent.get("g"), dict) else {}
+        prices = ent["px"].get("p") if isinstance(ent.get("px"), dict) else None
+        for sid, px in prices.items() if isinstance(prices, dict) else ():
+            if isinstance(px, (int, float)) and px > 0 and sid not in skip and isinstance(gv.get(sid, 0), (int, float)):
+                seq.setdefault(sid, []).append((float(px), abs(float(gv.get(sid) or 0)) / px))
+    top = []
+    for sid, rows in seq.items():
+        jumps = [q1 * abs(p1 - p0) for (p0, _q0), (p1, q1) in zip(rows, rows[1:]) if not 1.0 / PX_FLIP_X <= p1 / p0 <= PX_FLIP_X]
+        if len(jumps) >= 2:
+            top.append([sid, round(max(jumps), 2), len(jumps)])
+    top.sort(key=lambda row: (-row[1], row[0]))
+    return {"n": len(top), "top": top[:5]}
+
+
 def collect_daily_review(now: float, logs: LogWatch, h: dict = None) -> tuple:
     S = paths.STATE_DIR
     t = (h or DEFAULTS)["t"]
@@ -145,6 +169,7 @@ def collect_daily_review(now: float, logs: LogWatch, h: dict = None) -> tuple:
         y_close = datetime(y.year, y.month, y.day, tzinfo=KST).timestamp() + 86400
         if ra and y_close <= ra and now - ra < float(t.get("daily_heal_sec") or 3 * 3600):
             daily["healing"] = ra
+        daily["flip"] = px_flip_scan(dc, datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d"))
     rv = _read(os.path.join(S, "reviews_llm.json"), None)
     rsum = logs.units.get("tj-review", {}).get("review") if logs else None
     y = expected_day(now, t["review_min"])
@@ -177,6 +202,31 @@ def collect_poison():
     except (Exception, SystemExit) as e:   # noqa: BLE001 [fallback]
         log.warning("격리 기록 집계 실패: %s", e)
         return {"error": logs.safe_err(e)[:160]}
+
+
+def collect_chart_dex(now: float = None) -> dict:
+    path = paths.state("candles", "prewarm.json")
+    st = _read(path, None)
+    if st is None:
+        return {"error": "읽기 실패"} if os.path.lexists(path) else None
+    if not isinstance(st, dict) or not isinstance(st.get("done"), dict):
+        return {"error": "미리 받기 기록 형식 이상"}
+    def _num(x) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x and abs(x) != float("inf")
+
+    soft, gaveup, oldest = 0, 0, None
+    for v in st["done"].values():
+        if not isinstance(v, dict) or not _num(v.get("at")) or ("exp" in v and not _num(v["exp"])) \
+                or ("gaveup" in v and not isinstance(v["gaveup"], bool)):
+            return {"error": "미리 받기 항목 형식 이상"}
+        at = float(v["at"])
+        pending = float(v.get("exp") or 0) > 0 and not v.get("gaveup")
+        if v.get("gaveup"):
+            gaveup += 1
+        elif pending:
+            soft += 1
+            oldest = at if oldest is None else min(oldest, at)
+    return {"soft": soft, "gaveup": gaveup, "oldest": oldest}
 
 
 def collect_nonevm_gaps(cfg: dict) -> dict:
@@ -478,6 +528,24 @@ def collect_snap_miss(now: float, path: str = None) -> list:
                                    f" 약 1시간마다 반영 중 — 마지막 반영 {fmt_ts(float(it['forced']))}"))
         else:
             out.append(dict(base, cid=f"snapmiss:{ex}", title=f"{nm} 잔고 표본 일치", level="ok", detail="정상"))
+    return out
+
+
+def collect_exf_hold(now: float, path: str = None) -> list:
+    d = _read(path or paths.state("exf_state.json"), None)
+    out, base = [], {"unit": "tj-exf", "persist": 0, "resolve": 0, "kind": "exfmain"}
+    for ex, v in sorted(d.items()) if isinstance(d, dict) else ():
+        v = v if isinstance(v, dict) else {}
+        h, off, nm = v.get("main_hold"), v.get("main_hold_off"), EX_NAME.get(ex, ex)
+        if isinstance(h, dict):
+            sn = f"서브{str(h.get('slot'))[1:]}" if re.fullmatch(r"s\d{1,2}", str(h.get("slot"))) else "다른 서브"
+            at = h.get("at") if isinstance(h.get("at"), (int, float)) and not isinstance(h.get("at"), bool) else None
+            out.append(dict(base, cid=f"exfmain:{ex}", level="crit", notify=True, remind=True, title=f"{nm} 수집 멈춤 — 메인 칸에 {sn} 칸 계정 키",
+                            detail=f"설정 파일(.env)의 {nm} 메인 칸 키가 예전에 {sn} 칸에서 기록을 받던 계정이에요 — 메인 칸에서 다시 받으면 같은 거래가 두 번"
+                                   f" 기장돼서 {nm} 수집(입출금·체결·잔고·선물)을 모두 멈췄어요" + (f" · {fmt_ts(at)}부터" if at else ""),
+                            action=f"메인 칸에 원래 메인 계정 키를 다시 넣으세요(이 계정 키는 {sn} 칸에) — 다음 수집 주기(10분 안)에 저절로 풀리고 이어 받아요"))
+        elif isinstance(off, (int, float)) and not isinstance(off, bool) and now - off < 86400:
+            out.append(dict(base, cid=f"exfmain:{ex}", level="ok", notify=False, remind=False, title=f"{nm} 메인 칸 계정 확인", detail="정상"))
     return out
 
 

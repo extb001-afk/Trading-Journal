@@ -28,6 +28,10 @@ ADOPT_GAP_S = 3600
 MAX_TRIES = 3
 DIRTY_MARGIN_S = 1800
 SMALL_USD = 1.0
+DEX_JUMP_X = 1000.0
+DEX_SHARE_X = 1.0
+GUARD_V = 1
+SPIKE_WARN_X = 30.0
 EPS = 1e-12
 FFILL_DAYS = 10
 FFILL_MIN_DENSITY = 0.5
@@ -166,7 +170,7 @@ def pmap_of(e, upto):
         return {}
     pd9 = pend_days(e)
     pm9 = {d9: v9 for d9, v9 in (e.get("p") or {}).items() if d9 not in pd9}
-    ff9 = ffill_map(pm9, upto)
+    ff9 = ffill_map(pm9, upto, density_upto=e.get("hi") or upto, dens_days=e.get("_cut") or ())
     if not pd9 or not ff9:
         return ff9
     out9, cut9 = {}, False
@@ -209,6 +213,119 @@ def day_state(e, iso, pm) -> str:
     if v9 and v9 > 0:
         return "ok"
     return "none" if is_final(e) else "retry"
+
+
+def _weak_lab(e: dict) -> bool:
+    labs = list(e.get("src") or ()) + (list(e["ps"].values()) if isinstance(e.get("ps"), dict) else [])
+    return any(str(lab).split(":", 1)[0] in DC_WEAK_VENUES for lab in labs)
+
+
+def dex_spike_cut(e: dict | None, bad: bool = False) -> tuple:
+    if not isinstance(e, dict) or not isinstance(e.get("p"), dict) or not _weak_lab(e):
+        return e, set()
+    weak = {day: float(px) for day, px in e["p"].items() if px and entry_venue(e, day) in DC_WEAK_VENUES + ("?",)}
+    vals = sorted(weak.values())
+    cut = {day for day, px in weak.items() if px > DEX_JUMP_X * vals[(len(vals) - 1) // 2]} if len(vals) >= 2 else set()
+    if bad:
+        cut |= {day for day in weak if entry_venue(e, day) in DC_WEAK_VENUES}
+    if not cut:
+        return e, set()
+    return dict(e, p={day: px for day, px in e["p"].items() if day not in cut}, _cut=sorted(cut)), cut
+
+
+def weak_days(e: dict | None, upto: str) -> set:
+    if not isinstance(e, dict) or not _weak_lab(e):
+        return set()
+    return {day for day, (_px, ven) in served_map(e, upto).items() if ven in DC_WEAK_VENUES}
+
+
+def dex_verdict(hc: "HistCurve", kit: dict, days: list) -> set:
+    groups, specs, base, cand, pm, weak = kit["groups"], hc.px.get("specs") or {}, dict.fromkeys(days, 0.0), [], {}, {}
+    for gid, qd in (rewind(kit, days) if days else {}).items():
+        g = groups[gid]
+        sp = None if g.get("skip") else spec_of(g)
+        if sp is None:
+            continue
+        if sp not in pm and sp not in ("stable", "ov"):
+            ent = hc._clean(sp, specs, bad=set())
+            pm[sp], weak[sp] = pmap_of(ent, days[-1]), weak_days(ent, days[-1])
+        for day, q in qd.items():
+            px = 1.0 if sp == "stable" else (g["ov"] if sp == "ov" else pm[sp].get(day))
+            if day not in base or not px:
+                continue
+            lp = float(g.get("lp") or 0)
+            if day in weak.get(sp, ()) and not (lp > 0 and px <= DEX_JUMP_X * lp):
+                cand.append((sp, day, abs(q * px)))
+            else:
+                base[day] += q * px
+    return {sp for sp, day, val in cand if base[day] > 0 and val > DEX_SHARE_X * base[day]}
+
+
+def _drop_days(e: dict | None, days) -> dict | None:
+    if not days or not isinstance(e, dict) or not isinstance(e.get("p"), dict):
+        return e
+    return dict(e, p={day: px for day, px in e["p"].items() if day not in set(days)}, _cut=sorted(days))
+
+
+def guard_cuts(hc: "HistCurve", bad: set) -> dict:
+    specs, out = hc.px.get("specs") or {}, {}
+    for sp in specs:
+        cut = dex_spike_cut(hc._clean(sp, specs, bad=False), sp in bad)[1]
+        if cut:
+            out[sp] = sorted(cut)
+    return out
+
+
+def guard_hits(hc: "HistCurve", kit: dict, ck: list, old: dict, new: dict, upto: str = "") -> tuple:
+    specs, diff, upto = hc.px.get("specs") or {}, {}, max([upto] + list(ck[-1:]))
+    for sp in {sp for sp in set(old) | set(new) if old.get(sp) != new.get(sp)}:
+        raw = hc._clean(sp, specs, bad=False)
+        pa, pb = pmap_of(_drop_days(raw, old.get(sp)), upto), pmap_of(_drop_days(raw, new.get(sp)), upto)
+        diff[sp] = {day for day in set(pa) | set(pb) if pa.get(day) != pb.get(day)}
+    rows, flows = set(), set()
+    for day in set().union(*diff.values()) if diff else ():
+        flows |= {day, (date.fromisoformat(day) + timedelta(days=1)).isoformat()}
+    groups = kit["groups"]
+    for gid, qd in (rewind(kit, ck) if ck and diff else {}).items():
+        sp = None if groups[gid].get("skip") else spec_of(groups[gid])
+        rows |= {day for day, q in qd.items() if sp in diff and day in diff[sp] and abs(q) > EPS}
+    return sorted(rows), sorted(flows)
+
+
+def guard_recheck(hc: "HistCurve", kit: dict, stores: tuple, win: set, today: str, days: list) -> tuple:
+    meta, (rows, _s, _x, flows) = hc.st.get("meta") or {}, stores
+    gk_ok = meta.get("gk") == [GUARD_V, meta.get("updated")]
+    bad = dex_verdict(hc, kit, days)
+    cuts, saved = guard_cuts(hc, bad), dict(meta.get("dexcut") or {})
+    if gk_ok and cuts == saved:
+        return bad, cuts, []
+    ck = sorted(k for k, r in rows.items() if k not in win and k < today and isinstance(r, list) and len(r) >= 4 and r[3] == "hc")
+    hits, fdays = set(), set()
+    for old in [saved] + ([] if gk_ok else [{}]):
+        part = guard_hits(hc, kit, ck, old, cuts, days[-1] if days else "")
+        hits, fdays = hits | set(part[0]), fdays | set(part[1])
+    hits, fdays = sorted(hits), sorted(fdays)
+    for day in hits:
+        for store in stores:
+            store.pop(day, None)
+    for day in fdays:
+        if day not in win and day < today and isinstance(flows.get(day), list) and len(flows[day]) >= 4 and flows[day][3] == "hc":
+            flows.pop(day, None)
+    if hits or fdays:
+        log.warning("장기 곡선: DEX 튐 가드 — 그날 값이 바뀌는 굳은 날 %d일 · 입출금 다시 셀 날 %d일 다시 계산", len(hits), len(fdays))
+    return bad, cuts, hits
+
+
+def spike_days(rows: dict, seen: list | None = None) -> list:
+    ks = sorted(k for k, r in rows.items() if isinstance(r, list) and len(r) >= 4 and r[3] in ("hc", "hp") and r[0])
+    out = []
+    for i, k in enumerate(ks):
+        nb = sorted(abs(rows[x][0]) for x in ks[max(0, i - 3):i + 4] if x != k)
+        if nb and rows[k][0] > SPIKE_WARN_X * nb[len(nb) // 2]:
+            out.append(k)
+    if out and out != seen:
+        log.warning("장기 곡선: 앞뒤 날의 %d배 넘게 튄 날 %d일(%s…) — 가격 출처 확인 필요", int(SPIKE_WARN_X), len(out), out[0])
+    return out
 
 
 def due(e, now) -> bool:
@@ -278,9 +395,10 @@ def stale_src(k, src) -> bool:
     return False
 
 
-def ffill_map(pm, upto):
+def ffill_map(pm: dict, upto: str, *, density_upto: str | None = None, dens_days=()) -> dict:
     out9, last9, gap9 = {}, None, 0
-    if pm and len(pm) < FFILL_MIN_DENSITY * len(days_between(min(pm), max(pm))):
+    dens = set(pm) | set(dens_days or ())
+    if pm and len(dens) < FFILL_MIN_DENSITY * len(days_between(min(dens), max(density_upto or upto, max(dens)))):
         out9 = dict(pm)
     elif pm:
         for iso9 in days_between(min(pm), max(upto, max(pm))):
@@ -929,6 +1047,7 @@ class HistCurve:
         self.flow_fails = 0
         self.dirty_fails = 0
         self.dirty_fail_key = None
+        self.dexbad, self.dexcut, self.spike_seen = set(m9.get("dexbad") or ()), dict(m9.get("dexcut") or {}), None
 
     def _dirty_marks(self):
         try:
@@ -1107,6 +1226,7 @@ class HistCurve:
         if lqfix9:
             log.warning("장기 곡선: LP 위치 레그·발견 시점 기초 잔고·격리 전환 보정 — 옛 되감기로 동결된 날 %d일(%s~%s) 다시 계산(1회)", len(lqfix9), lqfix9[0], lqfix9[-1])
         rep["lqfix"] = lqfix9
+        self.dexbad, self.dexcut, rep["gfix"] = guard_recheck(self, kit, (d, s, xs, f), win, today, list(days_between(first, last_hc)) if first <= last_hc else [])
         rep["vblk"] = 0
         for k9, e9 in list((self.px.get("specs") or {}).items()):
             if not isinstance(e9, dict) or not isinstance(e9.get("p"), dict) or not e9["p"]:
@@ -1218,12 +1338,14 @@ class HistCurve:
             self.pending = False
             self.progress = {"specs": 0, "done": 0, "pending": 0}
         rep["xfix"] = self._x_refresh(kit, d, s, xs, win, today)
+        self.spike_seen = rep["spike"] = spike_days(d, self.spike_seen)
         rep["calls"] = candles.CALLS["n"] - n0
         rep["by_host"] = {h: n - h0.get(h, 0) for h, n in candles.CALLS["by_host"].items() if n - h0.get(h, 0)}
         rep["flows"], rep["flow_left"] = self._flows(kit, d, f, win, today)
         meta = dict(self.st.get("meta") or {})
         meta.update(adopted_day=today, adopted_at=int(now), first=first, updated=int(now),
-                    calls=int(meta.get("calls") or 0) + rep["calls"], runs=int(meta.get("runs") or 0) + 1)
+                    calls=int(meta.get("calls") or 0) + rep["calls"], runs=int(meta.get("runs") or 0) + 1,
+                    gk=[GUARD_V, int(now)], dexbad=sorted(self.dexbad), dexcut=self.dexcut)
         self.progress["calls"] = meta["calls"]
         meta.update(pending=bool(self.pending), progress={k9: v9 for k9, v9 in self.progress.items() if k9 != "calls"},
                     flow_pending=bool(self.flow_pending))
@@ -1396,9 +1518,10 @@ class HistCurve:
             return ((dc9.st.get("s") or {}).get(sp)) or None
         return None
 
-    def _clean(self, sp, specs):
+    def _clean(self, sp, specs, bad=None):
         e9 = specs.get(sp)
-        return view(e9, blocked_union(e9, self._dc_entry(sp)) | map_blocked(sp))
+        e9 = view(e9, blocked_union(e9, self._dc_entry(sp)) | map_blocked(sp))
+        return e9 if bad is False else dex_spike_cut(e9, sp in (self.dexbad if bad is None else bad))[0]
 
     @staticmethod
     def _x_src(kit):
@@ -1634,6 +1757,8 @@ DC_SETTLE_S = 1800
 DC_KEEP_DAYS = 50
 DC_OLD_RUN_CALLS = 40
 DC_OLD_BUSY_CALLS = 10
+DC_SPIKE_X = 3.0
+DC_WEAK_VENUES = ("geckoterminal",)
 DC_REQ_TTL_S = 3 * 86400
 
 
@@ -1647,6 +1772,15 @@ def needs_krw(k) -> bool:
 
 def _final(e) -> bool:
     return is_final(e)
+
+
+def weak_spike(dc: "DayClose", spec: str, iso: str, val: float | None, ref: float | None) -> bool:
+    if not (val and ref and float(ref) > 0) or 1.0 / DC_SPIKE_X <= float(val) / float(ref) <= DC_SPIKE_X:
+        return False
+    for entry in dc._sources(spec):
+        if dc.covers(entry, iso) and day_state(entry, iso, dc._ffp(entry)) == "ok":
+            return not (entry.get("p") or {}).get(iso) or entry_venue(entry, iso) in DC_WEAK_VENUES
+    return False
 
 
 class DayClose:
@@ -1755,8 +1889,9 @@ class DayClose:
                 memo[gid] = spec_of(group_desc(gid, g, ca_gids, ex_gid, major_gids, override_px, pairs, stable_syms)) if g else None
             return memo[gid]
 
-        def f(gid, iso, w=0.0):
-            return self.lookup(spec9(gid), iso, now, w)
+        def f(gid, iso, w=0.0, ref=None):
+            got = self.lookup(spec9(gid), iso, now, w)
+            return (None, "none") if weak_spike(self, spec9(gid), iso, got[0], ref) else got
         f.gen = self.gen
         f.spec = spec9
         m9 = self.st.get("px1004") if isinstance(self.st.get("px1004"), dict) else {}

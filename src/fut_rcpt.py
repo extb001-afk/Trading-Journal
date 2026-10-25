@@ -11,8 +11,6 @@ import num_parse, paths, statefile
 
 from timeutil import KST
 PX_V = 1
-ROWS_MAX = 60000
-KEEP_MS = 800 * 86400 * 1000
 DAY_MS = 86400 * 1000
 RETAIN_MS = {"binance": 90 * DAY_MS, "okx": 89 * DAY_MS}
 PX_EX = ("binance", "bybit", "okx", "hyperliquid")
@@ -81,9 +79,7 @@ def merge(old_rows, new_rows, now_ms, keep=None):
     for r in list(old_rows or ()) + list(new_rows or ()):
         if isinstance(r, dict) and r.get("uid") and isinstance(r.get("ts_ms"), (int, float)) and (keep is None or keep(r)):
             by[r["uid"]] = r
-    lo = now_ms - KEEP_MS
-    rows = sorted((r for r in by.values() if r["ts_ms"] >= lo), key=lambda r: (r["ts_ms"], r["uid"]))
-    return rows[-ROWS_MAX:]
+    return sorted(by.values(), key=lambda r: (r["ts_ms"], r["uid"]))
 
 
 def update(ex, new_rows, now_ms, cursor=None, ct=None, keep=None):

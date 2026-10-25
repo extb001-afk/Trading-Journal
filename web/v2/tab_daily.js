@@ -5,7 +5,7 @@
     evDT, evNm, evPill, evQ, evSkel, evXf, EX_NAMES, flowSplit, flowTip, hs, IC, icon, impChip, isISO, isoDay, isYMD, isZ, kimpChip, kimpCol,
     krwDayHTML, KV, lpNm, lpNmHTML, LS, m, mcal, mN, monthRealized, nf, num, optCk, pad2, parseMoney, pctS, plainT, popBox, prTxt, PVM, pvMoney, pvOn,
     pvW, q, rate, revTxt, rfrTag, rollMinISO, S, short, srcBtn, srcPass, sum, term, todayD, todayISO, UI_SHEETS, uiFold, uiPaged, uiPgBar, uiPgSlice,
-    ymOf, ymShift
+    ymOf, ymShift, dayFrz
   } = X;
   let A, mAlt;
   const __late = L => {
@@ -421,18 +421,28 @@
       if (t && c) TJDOM.replace(t, dmTxt(c.memo));
     });
   }
+  function frzPill(f) {
+    const st = f && f.st || '', at = f && num(f.at) > 0 ? new Date(num(f.at) * 1000) : null;
+    const ymd = at ? at.getFullYear() + '-' + pad2(at.getMonth() + 1) + '-' + pad2(at.getDate()) : '';
+    const when = at ? ' (' + ymd + ' ' + pad2(at.getHours()) + ':' + pad2(at.getMinutes()) + ' 저장)' : '';
+    const L = st === 's' ? ['정정 전 값', '정정 전', '이 날 뒤 원장 정정이 있었어요 — 저장된 전일 대비·분해는 정정 전에 계산한 값이에요(최근 30일 밖이라 다시 셀 재료가 없어 그대로 둬요)']
+      : st === 'ba' ? ['근사 복원', '근사', '최근 30일 밖 날의 분해를 남은 재료(장기 곡선 그날 가격)로 다시 계산했어요 — 근사라 그때 화면 값과 조금 다를 수 있어요']
+      : st === 'b' ? ['복원한 분해', '복원', '최근 30일 밖 날의 분해를 남아 있던 그날 재료로 다시 계산해 저장했어요']
+      : ['저장된 분해', '저장', '최근 30일 밖이라 다시 계산하지 않고, 이 날이 30일 창을 벗어나기 전 마지막으로 계산한 전일 대비·분해를 저장해 보여 줘요'];
+    const c = st === 's' || st === 'ba' ? 'w' : 'g';
+    return '<span class="pill ' + c + ' sm" title="' + esc(L[2] + when) + '">' + (S.mobile ? L[1] : L[0]) + '</span>';
+  }
   function reviewHTML() {
     const D = S.D, k = S.day || D.todayKey;
     const rv0 = D.reviews[k] || null, rv = rv0 && isYMD(rv0.iso) && String(rv0.iso).slice(0, 10) < rollMinISO() ? null : rv0, ai = isAI(rv);
-    const snap = D.dayMap.get(k);
-    const isToday = k === D.todayKey;
+    const isToday = k === D.todayKey, snap0 = D.dayMap.get(k), fz = !isToday && !snap0 ? dayFrz(k, true) : null, snap = fz || snap0;
     const r = KV(num(D.realized[k]), D.hasKrw ? D.realizedK[k] : null);
     const iso = isoDay(k);
     const dt = iso ? new Date(iso + 'T00:00:00') : null;
     const label = dt ? (S.mobile ? (dt.getMonth() + 1) + '월 ' + dt.getDate() + '일' : (dt.getMonth() + 1) + '월 ' + dt.getDate() + '일') + ' (' + DOWS[dt.getDay()] + ')' : k;
-    const u = D.usdt[k] || {};
+    const u = D.usdt[k] || (fz ? { usdt: fz.usdt, kimp: fz.kimp } : {});
     const total = isToday ? D.total : (snap ? dayV(snap) : null);
-    const prevSnap = (() => { const i = D.daily.findIndex(x => x.date === k); return i > 0 ? D.daily[i - 1] : null; })();
+    const prevSnap = fz ? fz._prev : (() => { const i = D.daily.findIndex(x => x.date === k); return i > 0 ? D.daily[i - 1] : null; })();
     const pvV = prevSnap ? dayV(prevSnap) : null;
     const delta = total != null && prevSnap ? total - pvV : null;
     const isStep = isToday ? !!D._todayStep : D.steps.indexOf(k) >= 0;
@@ -502,7 +512,7 @@
       : staleTag + '<p class="rvlead' + (tpl ? '' : ' aib') + (rvOpen || tpl ? '' : ' clamp2') + (stale ? ' mut' : '') + '">' + esc(tpl && pvOn() ? hs(lead, true) : revTxt(lead)) + '</p>' + (rvOpen ? full : '') + (tog ? '<div class="rvtogw">' + tog + '</div>' : ''))
       : '<div class="noai">' + IC.info.replace('<svg', '<svg width="18" height="18"') + (isToday ? '오늘의 AI 리뷰는 23:50 에 만들어져요' : noTrade ? noTradeTxt : '이 날은 AI 리뷰가 아직 없어요') + '</div>';
     const fx = (u.usdt ? 'USDT <span class="num">₩' + nf('ko-KR').format(num(u.usdt)) + '</span>' : '') + (kp != null ? (u.usdt ? ' · ' : '') + '김프 ' + '<span class="num">' + pctS(kp, 2) + '</span>' + kimpChip(kp) : '');
-    const stPill = '<span class="pill ' + (isToday ? 'w' : 'g') + ' sm"' + (!isToday && !snap ? ' title="최근 30일 밖이라 그날 총자산 마감 기록이 없어요 — 전일 대비·자산 변동 분해도 없어요"' : '') + '>' + (isToday ? (S.mobile ? '실시간' : '실시간 · 23:59 마감') : (snap ? (S.mobile ? '마감' : '마감 기록') : '마감 기록 없음')) + '</span>';
+    const stPill = fz ? frzPill(fz._frz) : '<span class="pill ' + (isToday ? 'w' : 'g') + ' sm"' + (!isToday && !snap ? ' title="최근 30일 밖이라 그날 총자산 마감 기록이 없어요 — 전일 대비·자산 변동 분해도 없어요"' : '') + '>' + (isToday ? (S.mobile ? '실시간' : '실시간 · 23:59 마감') : (snap ? (S.mobile ? '마감' : '마감 기록') : '마감 기록 없음')) + '</span>';
     const dxv = (v, c9) => { const t9 = m(v, { sign: true, compact: !S.dxFull });
       return '<span class="' + c9 + ' dxv' + (S.dxFull ? ' xf" style="--n:' + plainT(t9).length : '') + '" role="button" tabindex="0" data-a="dxTog" aria-pressed="' + !!S.dxFull + '" title="' + esc(m(v, { sign: true }) + ' · 누르면 ' + (S.dxFull ? '줄인 금액' : '전체 금액')) + '">' + t9 + '</span>'; };
     const h3 = '<b class="v num">' + (tiny ? '<span class="mut">≈0</span> <small class="mut tiny">(끝전 ' + m(r, { sign: true }) + ')</small>' : r ? dxv(r, cls(r)) : '<span class="mut">없음</span>') + '</b>';

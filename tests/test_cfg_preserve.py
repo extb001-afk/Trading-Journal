@@ -171,8 +171,6 @@ def fresh_dir(name):
 
 TOOL_CASES = (
     ("tools/allchains_enable", "tools/allchains_enable.py", ["--apply"], (2, 4)),
-    ("tools/arc_enable", "tools/arc_enable.py", ["--apply"], (2, 4)),
-    ("tools/hl_enable", "tools/hl_enable.py", ["--apply", "--wallet", W1], (2,)),
     ("tools/robinhood_rpc_enable", "tools/robinhood_rpc_enable.py", ["--apply"], (2, 4)),
 )
 for name, rel, args, indents in TOOL_CASES:
@@ -184,14 +182,16 @@ for name, rel, args, indents in TOOL_CASES:
         b0 = write_cfg(cp, base_cfg(), ind)
         p = run_tool(rel, [cp] + args, d)
         chk(p.returncode == 0, "[1] %s(들여쓰기 %d): 종료 코드 0" % (name, ind), (p.stdout + p.stderr)[-500:])
-        verify("%s(들여쓰기 %d)" % (name, ind), cp, b0, 2 if name == "tools/hl_enable" else ind)
-if have("tools/hl_enable.py", "tools/hl_enable") and have("tools/migrate_nodekeys_1008.py", "tools/migrate_nodekeys(노드 키 옮기기)"):
-    d = fresh_dir("hl_enable_ind4")
+        verify("%s(들여쓰기 %d)" % (name, ind), cp, b0, ind)
+if have("tools/allchains_enable.py", "tools/allchains_enable(--seed-gate 무동작)"):
+    d = fresh_dir("allchains_seedgate")
     cp = os.path.join(d, "config.json")
-    b0 = write_cfg(cp, base_cfg(), 4)
-    p = run_tool("tools/hl_enable.py", [cp, "--apply", "--wallet", W1], d)
-    verify("tools/hl_enable(원래 4 → 2 고정)", cp, b0, 2)
-
+    b0 = write_cfg(cp, base_cfg())
+    p = run_tool("tools/allchains_enable.py", [cp, "--apply", "--seed-gate", os.path.join(d, "state")], d)
+    chk(p.returncode == 0 and "무동작" in p.stdout and not os.path.exists(os.path.join(d, "state", "chain_activity.json")),
+        "[1] tools/allchains_enable --seed-gate = 무동작 안내 · 게이트 파일 안 만듦(운영 쌍 상수 없음)", (p.stdout + p.stderr)[-500:])
+    verify("tools/allchains_enable(--seed-gate)", cp, b0, 2)
+if have("tools/migrate_nodekeys_1008.py", "tools/migrate_nodekeys(노드 키 옮기기)"):
     d = fresh_dir("migrate_nodekeys")
     cp = os.path.join(d, "config.json")
     b0 = write_cfg(cp, base_cfg())
@@ -210,7 +210,6 @@ else:
 
 
 SH_CASES = (
-    ("배포 셸 지갑 추가 조각", "tools/deploy_hotfix_20260928t.sh", r"^\s*x27\)\s.*<<'PY'", lambda cp: [cp], {}, (2,), True),
     ("배포 셸 설정 병합 조각", "tools/deploy_final_20260926.sh", r"MODE_CM=.*CFG=.*<<'PY'", lambda cp: [],
      {"MODE_CM": "apply"}, (2, 4), True),
     ("발견 이중화 배포 조각", "tools/deploy_bprime_shadow.sh", r"^python3 - <<'EOF'", lambda cp: [], {}, (1,), True),
@@ -239,7 +238,7 @@ COVERED_PY = {
     "src/settings_wallets.py:add_wallet", "src/settings_wallets.py:add_wallets", "src/settings_wallets.py:remove_wallet",
     "src/settings_wallets.py:rename_wallet", "src/settings_wallets.py:add_chain_wallet", "src/settings_wallets.py:remove_chain_wallet",
     "src/settings_wallets.py:rename_chain_wallet", "src/settings_wallets.py:add_perp", "src/settings_wallets.py:remove_perp",
-    "tools/allchains_enable.py:main", "tools/arc_enable.py:main", "tools/hl_enable.py:main", "tools/migrate_nodekeys_1008.py:main",
+    "tools/allchains_enable.py:main", "tools/migrate_nodekeys_1008.py:main",
     "tools/robinhood_rpc_enable.py:<module>",
 }
 NOT_WRITER_PY = {
@@ -251,10 +250,9 @@ NOT_WRITER_PY = {
     "src/settings_store.py:rotate_csrf_token": "설정 잠금 안에서 CSRF 토큰 상태 파일을 씀",
     "src/settings_store.py:write_env": "설정 잠금 안에서 .env 를 씀(config.json 아님)",
     "src/wallet_register.py:_record_reload": "설정 잠금 안에서 state/wallet_reload.json 을 씀",
-    "tools/pretrace_hotfix_h.py:<module>": "설정은 읽기만 · 보고서 파일을 씀",
     "tools/repair_partial_legs.py:main": "설정은 읽기만 · 캐시·보고 파일을 씀",
 }
-COVERED_SH = {"tools/deploy_hotfix_20260928t.sh", "tools/deploy_final_20260926.sh", "tools/deploy_bprime_shadow.sh", "tools/rollback_bprime.sh"}
+COVERED_SH = {"tools/deploy_final_20260926.sh", "tools/deploy_bprime_shadow.sh", "tools/rollback_bprime.sh"}
 NOT_WRITER_SH = {
     "tools/cutover_c.sh": "업비트 대사 조각 — 설정은 안 씀(원장·상태)",
     "tools/verify_audit_20260909.sh": "설정은 읽기만(API 주소 계산)",
@@ -276,6 +274,8 @@ for rel, n in sorted(counts_sh.items()):
 new_sh = sorted(found_sh - COVERED_SH - set(NOT_WRITER_SH))
 chk(not new_sh, "[2] 새 config 작성자(셸 안 파이썬) 0", new_sh)
 stale_sh = sorted((COVERED_SH | set(NOT_WRITER_SH)) - found_sh)
+chk("tools/deploy_hotfix_20260928t.sh" not in counts_sh,
+    "[2] 배포 셸 t = config 쓰는 파이썬 조각 0(세션23 x27 지움 — 운영 지갑 주소 상수 든 1회 등록 단계가 되살아나면 실패)", counts_sh.get("tools/deploy_hotfix_20260928t.sh"))
 chk(not stale_sh, "[2] 표에 낡은 자리 없음(셸)", stale_sh)
 chk(len(found_py) >= 16 and len(found_sh) >= 4, "[2] 탐지가 실제로 돎(알려진 작성자 수 이상)", (len(found_py), len(found_sh)))
 T.finish()

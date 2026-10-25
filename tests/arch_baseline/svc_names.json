@@ -7,6 +7,7 @@
  },
  "allow": [
   {"key": ["tests/test_fut_place_undo.py", "recon", "assign?", "EXF", "_last_exfrecon"], "why": "9-1 손 이전 끝: c = c or C(받는 쪽 BoolOp — 풀이 밖) · 부르는 곳 C·C2·C3·C5·C6 전부 mkcore() = core.Core · c.svc_exf 로 옮김"},
+  {"key": ["tests/test_exf_income_chunking.py", "recon", "assign?", "EXF", "_last_exfrecon"], "why": "받는 쪽 = 인자 c(풀이 밖) · 부르는 곳 전부 new_core() = core.Core 를 넘김 · c.svc_exf 로 씀(대사 간격 초기화)"},
   {"key": ["tests/test_fut_place_undo.py", "recon", "indirect?", "EXF", "_exf_fut_cache"], "why": "9-1 손 이전 끝: 위와 같은 받는 쪽(c = c or C = core.Core) · c.svc_exf.__dict__.pop 로 옮김"},
   {"key": ["tests/test_num_parse.py", "_Self.__init__", "assign?", "EXF", "_exf_hist_from"], "why": "Core 아님 — _exf_hist_touch 를 정의 클래스에서 꺼내 부르는 가짜 self(_Self) 의 자기 상태"},
   {"key": ["tests/test_rebuild_cause.py", "run", "key?", "?", "?"], "why": "setattr/delattr(c, 변수) 열쇠 = run(**over) 키워드 = _ext_position_gate·_ext_touched(CORE ExtMixin 이름 · 서비스 이름 아님)"},
@@ -15,6 +16,7 @@
  ],
  "findings": [
   ["src/discopen.py", "write_anchor", "indirect?", "RECON", "_disc_t_cache", 1],
+  ["tests/test_exf_income_chunking.py", "recon", "assign?", "EXF", "_last_exfrecon", 1],
   ["tests/test_fut_place_undo.py", "recon", "assign?", "EXF", "_last_exfrecon", 1],
   ["tests/test_fut_place_undo.py", "recon", "indirect?", "EXF", "_exf_fut_cache", 1],
   ["tests/test_num_parse.py", "_Self.__init__", "assign?", "EXF", "_exf_hist_from", 1],

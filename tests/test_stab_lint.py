@@ -100,6 +100,15 @@ def exclusive_lock(n):
 FUNCS = [(mod, fi) for mod, t in IX.mods.items() for fi in L.func_table(t["tree"])]
 FLOCK = {(mod, fi.qual) for mod, fi in FUNCS if any(exclusive_lock(n) for n in fi.nodes)}
 FLOCK |= {(mod, q.split(".")[0]) for mod, q in list(FLOCK) if "." in q and q.split(".")[0] in IX.mods[mod]["cls"]}
+_gen_grew = True
+while _gen_grew:
+    _gen_grew = False
+    for _gm, _gfi in FUNCS:
+        if "." in _gfi.qual or (_gm, _gfi.qual) in FLOCK or not any(isinstance(x, (ast.Yield, ast.YieldFrom)) for x in _gfi.nodes):
+            continue
+        if any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and (_gm, c.func.id) in FLOCK for c in _gfi.nodes):
+            FLOCK.add((_gm, _gfi.qual))
+            _gen_grew = True
 CALLERS = {}
 LOCKWITH = {}
 HAS_MAIN = {}
@@ -351,6 +360,8 @@ T.chk("ledger_lock" not in IX.mods or ({("ledger_lock", "acquire")} <= WRITER_LO
                                         and {("ledger_lock", "hold"), ("ledger_lock", "hold_if")} <= WRITER_LOCK_CTX),
       "[stab] 원장 잠금 도우미 인식(ledger_lock — 부르면 잡음 acquire · with 로 들어가야 잡음 hold·hold_if)",
       {"call": sorted(WRITER_LOCK_CALLS), "with": sorted(WRITER_LOCK_CTX)})
+T.chk("fsio" not in IX.mods or ("fsio", "locked") in FLOCK,
+      "[stab] 제품 잠금 도우미 인식(fsio.locked — with 블록 동안 flock 을 쥐는 생성기)", sorted(q for m, q in FLOCK if m == "fsio"))
 L.ratchet(T, "stab", M, doc, hints=hints, samples=S, modes={"helper_copy": "total"},
           exists=lambda f: (os.path.exists(os.path.join(T.ROOT, f)) if "/" in f else True))
 print("(시간 %.1f초)" % (time.time() - t0))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -165,6 +166,15 @@ SNAP_SKIP = (r"(^|/)\.[^/]*lock$", r"\.lock$", r"\.log$", r"\.pid$", r"\.tmp$", 
 
 def read_any(p: str):
     raw = open(p, "rb").read()
+    if raw[:2] == b"\x1f\x8b" and p.endswith(".json"):
+        try:
+            d = json.loads(gzip.decompress(raw).decode("utf-8"))
+            if isinstance(d, dict) and isinstance(d.get("cz"), list) and "candles" not in d:
+                rows = [[r[0], r[1], r[1], r[1], r[1], r[2]] if len(r) == 3 else r for r in d["cz"]]
+                d = {("candles" if k == "cz" else k): (rows if k == "cz" else v) for k, v in d.items()}
+            return d
+        except (OSError, ValueError, EOFError, TypeError):
+            pass
     try:
         s = raw.decode("utf-8")
     except UnicodeDecodeError:

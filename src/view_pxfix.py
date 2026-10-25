@@ -134,7 +134,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
                 continue
             if abs(gv9) < DC_SMALL_USD or gid9 not in G:
                 continue
-            np9, st9 = day_close(gid9, ck9, abs(gv9))
+            np9, st9 = day_close(gid9, ck9, abs(gv9), ref=op9)
             if np9:
                 plan9.append((ck9, sid9, float(op9), float(np9), False))
             elif st9 == "none":

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import threading
 import time
 from decimal import Decimal as D
 
@@ -80,7 +81,16 @@ def _seed_tables(px_cache, conn):
 _C = [None]
 
 
+def _join_bg_db():
+    for t9 in threading.enumerate():
+        if t9 is not threading.current_thread() and t9.name == "rawfrom-worker" and t9.is_alive():
+            t9.join(120)
+            if t9.is_alive():
+                raise RuntimeError("배경 원장 읽기(rawfrom-worker)가 120초 안에 안 끝남 — 원장 파일을 지우지 않음")
+
+
 def reset(cfg_extra=None, px=None, pxf=None):
+    _join_bg_db()
     if _C[0] is not None:
         try:
             _C[0].conn.close()
@@ -177,6 +187,7 @@ def build(prefs=None):
         f = b._build(co)["fields"]
     finally:
         co.close()
+    _join_bg_db()
     rr = cap[-1] if cap else None
     return f, (rr.G if rr is not None else {}), rr
 

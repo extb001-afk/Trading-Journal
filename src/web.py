@@ -1565,11 +1565,11 @@ def _balcheck_defer_keys(state: dict) -> set:
         return set()
 
 
-def _hist_flows(fk, days, dpx, fx_day) -> dict:
+def _hist_flows(fk, days, dpx, fx_day, fx_tx=None) -> dict:
     sh9 = StateBuilder.__new__(StateBuilder)
     sh9.daily = fk.get("wdt") or {}
     sh9.daily_px = {}
-    sh9._flow_px_delta = {}
+    sh9._flow_px_delta, sh9._att_fx_at = {}, fx_tx
     today9 = datetime.strptime(fk.get("today") or datetime.now(KST).strftime("%Y-%m-%d"), "%Y-%m-%d").replace(tzinfo=KST)
     conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
     try:

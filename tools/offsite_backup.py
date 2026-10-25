@@ -72,6 +72,8 @@ if __name__ == "__main__":
         sys.exit(_rc9)
 sys.path[:0] = [os.path.join(ROOT, "src"), HERE]
 import fsio, logs, offsite_seal as seal, paths, statefile  # noqa: E402
+import backup_complete as bc  # noqa: E402
+import ledger_backup as lb  # noqa: E402
 
 BK_DIR = os.path.join(paths.STATE_DIR, "backups")
 OUT_DIR = os.path.join(BK_DIR, "offsite")
@@ -219,6 +221,16 @@ def _files_bundle(dst: str) -> dict:
     inc = ([fdirs[0]] if fdirs else []) + ([prefs[0]] if prefs else [])
     if not inc:
         return {}
+    complete = {}
+    if fdirs:
+        s0 = bc.files_dir_state(os.path.join(BK_DIR, fdirs[0]))
+        complete[fdirs[0]] = _brief_state(s0)
+        lc = bc.last_complete_dir(BK_DIR, before=fdirs[0]) if isinstance(s0, dict) and s0.get("ok") is False else None
+        if lc:
+            inc.insert(1, lc)
+            complete[lc] = _brief_state(bc.files_dir_state(os.path.join(BK_DIR, lc)))
+            if f"prefs_{lc[6:]}.json" in prefs[1:]:
+                inc.append(f"prefs_{lc[6:]}.json")
     tmp = dst + ".part"
     fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
 
@@ -226,6 +238,9 @@ def _files_bundle(dst: str) -> dict:
         base = os.path.basename(ti.name)
         if base.startswith(".env") or base.endswith((".pem", ".key")):
             return None
+        if ti.islnk():
+            ti.type, ti.linkname = tarfile.REGTYPE, ""
+            ti.size = os.lstat(os.path.join(BK_DIR, ti.name)).st_size
         ti.uid = ti.gid = 0
         ti.uname = ti.gname = ""
         return ti
@@ -233,7 +248,23 @@ def _files_bundle(dst: str) -> dict:
         for n in inc:
             tf.add(os.path.join(BK_DIR, n), arcname=n, filter=_flt)
     os.replace(tmp, dst)
-    return {"name": os.path.basename(dst), "sha256": _sha256(dst), "size": os.path.getsize(dst), "includes": inc}
+    return {"name": os.path.basename(dst), "sha256": _sha256(dst), "size": os.path.getsize(dst), "includes": inc, "complete": complete}
+
+
+def _brief_state(s) -> dict:
+    if not isinstance(s, dict):
+        return {"ok": None}
+    return {"ok": s.get("ok") is True, "n_expected": len(s.get("expected") or []), "n_copied": len(s.get("copied") or []),
+            "failed": sorted(s.get("failed") or {})[:50], "n_failed": int(s.get("n_failed") or len(s.get("failed") or {}))}
+
+
+def incomplete_lines(man: dict) -> list:
+    out = []
+    for d9, s9 in sorted(((man.get("files") or {}).get("complete") or {}).items(), reverse=True) if isinstance(man.get("files"), dict) else ():
+        if isinstance(s9, dict) and s9.get("ok") is False:
+            out.append(f"★원장 밖 사본 {d9} 불완전 — 빠진 것 {s9.get('n_failed') or len(s9.get('failed') or [])}개: "
+                       + ", ".join(str(x) for x in (s9.get("failed") or [])[:8]) + "★")
+    return out
 
 
 def stamp_of(now: float) -> str:
@@ -274,6 +305,8 @@ def build(now: float = None, check: bool = True, log=print) -> dict:
         dbgz = os.path.join(OUT_DIR, f"{stamp}.db.gz")
         h_raw, h_gz = _gzip(src, dbgz)
         files = _files_bundle(os.path.join(OUT_DIR, f"{stamp}.files.tar.gz"))
+        for ln9 in incomplete_lines({"files": files}):
+            log(ln9 + " — 묶음에 마지막 완전 사본도 같이 넣음(있으면)")
         man = {"v": 1, "stamp": stamp, "created": int(now), "source": os.path.basename(src) if src != tmp_db else "snapshot",
                "db": {"name": os.path.basename(dbgz), "sha256": h_gz, "size": os.path.getsize(dbgz), "raw_sha256": h_raw,
                       "raw_size": os.path.getsize(src), **facts},
@@ -602,7 +635,7 @@ def _link_new(src: str, dst: str) -> bool:
         return False
 
 
-FILES_MEMBER_RX = re.compile(r"^(files_\d{8})(?:/((?!\.)[\w.-]+))?$|^(prefs_\d{8}\.json)$")
+FILES_MEMBER_RX = re.compile(r"^(files_\d{8})(?:/((?!\.)[\w.@-]+)(/(?!\.)[\w.-]+(?:/(?!\.)[\w.-]+)?)?)?$|^(prefs_\d{8}\.json)$")
 
 
 def unpack_files(src_dir: str, stamp: str, key, allow_unsigned: bool = False, dst_dir: str = None, log=print) -> list:
@@ -626,9 +659,11 @@ def unpack_files(src_dir: str, stamp: str, key, allow_unsigned: bool = False, ds
         with tarfile.open(tp, "r:gz") as tf:
             for m in tf:
                 mm = FILES_MEMBER_RX.match(m.name)
-                if m.isdir() and mm and mm.group(1) and not mm.group(2):
+                if mm and mm.group(3) and mm.group(2) != lb.CANDLES:
+                    mm = None
+                if m.isdir() and mm and mm.group(1) and (not mm.group(2) or mm.group(2) == lb.CANDLES):
                     continue
-                if not mm or not m.isfile():
+                if not mm or not m.isfile() or (mm.group(2) == lb.CANDLES and (mm.group(3) or "").count("/") != 2):
                     log(f"원장 밖 사본: 건너뜀 {m.name[:80]}")
                     continue
                 out = os.path.join(tmp, m.name)
@@ -649,7 +684,18 @@ def unpack_files(src_dir: str, stamp: str, key, allow_unsigned: bool = False, ds
                     if os.path.islink(dst) or not os.path.isdir(dst):
                         log(f"원장 밖 사본: {top} 자리가 폴더가 아니라 그대로 둠")
                         continue
-                pairs = [(os.path.join(src9, n), os.path.join(dst, n)) for n in sorted(os.listdir(src9))]
+                pairs = [(os.path.join(src9, n), os.path.join(dst, n)) for n in sorted(os.listdir(src9)) if n != lb.CANDLES]
+                cand_dir = os.path.join(dst, lb.CANDLES)
+                if os.path.isdir(os.path.join(src9, lb.CANDLES)):
+                    for sub, fn in lb.candle_files(os.path.join(src9, lb.CANDLES)):
+                        dd = os.path.join(cand_dir, sub)
+                        if os.path.islink(cand_dir) or os.path.islink(dd):
+                            continue
+                        try:
+                            os.makedirs(dd, mode=0o700, exist_ok=True)
+                        except OSError:
+                            continue
+                        pairs.append((os.path.join(src9, lb.CANDLES, sub, fn), os.path.join(dd, fn)))
             kept = [os.path.basename(d) for s9, d in pairs if not _link_new(s9, d)]
             if kept:
                 log(f"원장 밖 사본: {top} 안 {len(kept)}개가 이미 있어 그대로 둠(덮지 않음)" if os.path.isdir(src9)
@@ -922,12 +968,20 @@ def main(argv=None) -> int:
         print("가져오기 실패: " + err_text(e)[:300])
         return 1
     days9 = sorted({re.sub(r"\D", "", x)[:8] for x in put9 if x.startswith(("files_", "prefs_"))}, reverse=True)
-    day9 = next((x[6:14] for x in put9 if x.startswith("files_")), None) or (days9[0] if days9 else "<YYYYMMDD>")
+    day9 = max((x[6:14] for x in put9 if x.startswith("files_")), default=None) or (days9[0] if days9 else "<YYYYMMDD>")
     print(f"받음: {p}" + (f"\n원장 밖 사본 자리: state/backups/{' · '.join(put9)}" if put9 else ""))
+    try:
+        man9 = seal.load_manifest(os.path.join(os.path.dirname(p) if a.cmd == "fetch" else a.dir, stamp9 + ".manifest.json"), stamp9, key,
+                                  a.allow_unsigned, log=lambda *x: None)
+        for ln9 in incomplete_lines(man9):
+            print(ln9 + " — ledger_restore files <날> 미리보기에 빠진 이름 · 마지막 완전 사본 날짜가 나와요")
+    except (RuntimeError, OSError, seal.AuthError):
+        pass
     print(RESTORE_ORDER.format(p=p, day=day9))
     for d9 in days9:
-        if d9 != day9:
-            print(f"  (+ 화면 설정·보낸 내역 판정 사본 prefs_{d9}.json 은 날짜가 달라 따로: python3 tools/ledger_restore.py files {d9})")
+        if d9 != day9 and f"prefs_{d9}.json" in put9 and f"files_{d9}" not in put9:
+            print(f"  (+ 날짜가 다른 state/backups/prefs_{d9}.json 은 ui_prefs·outflow_decisions 칸만 손으로 state/ui_prefs.json·state/outflow_decisions.json 에"
+                  " — files {d9} 통째 적용은 그날 다른 사본까지 옛 값으로 덮을 수 있음)")
     return 0
 
 

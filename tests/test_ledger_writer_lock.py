@@ -178,7 +178,7 @@ try:
     p, rel, ok = hold_in_child(DB, "b", how="core")
     chk(ok and probe() == "busy", "B0 (전제) core.writer_lock(core.main 과 같은 함수)이 원장 잠금을 쥠")
     for name, args in (("exf_fix_place.py", ["--apply"]), ("exf_fut_place.py", ["--apply"]), ("latefix_move.py", ["--apply"]),
-                       ("repair_own_overlap.py", ["--apply", "--force"]), ("fix_dupsnap_1004.py", ["--dry-run"])):
+                       ("repair_own_overlap.py", ["--apply", "--force"])):
         if not os.path.isfile(os.path.join(T.ROOT, "tools", name)):
             continue
         rc, out = tool(name, *args)

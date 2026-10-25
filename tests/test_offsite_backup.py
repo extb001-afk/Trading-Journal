@@ -578,4 +578,25 @@ put9 = OB.unpack_files(EV9, SE9, K9, dst_dir=DST9, log=Q)
 ck("[9] A7-02 꼴 아닌 이름·링크·깊은 자리·숨김 = 건너뜀 · 바깥에 안 씀", put9 == ["files_20990101"]
    and os.listdir(os.path.join(DST9, "files_20990101")) == ["a.json"] and sorted(os.listdir(DST9)) == ["files_20990101"]
    and not os.path.exists(os.path.join(T.TMP, "evil.json")) and not os.path.exists(os.path.join(T.TMP, "x.json")), (put9, os.listdir(DST9)))
+SE10 = "tjoff_20990102_0000"
+GZ10 = gzip.compress(b'{"cz":[]}')
+with tarfile.open(os.path.join(EV9, SE10 + ".files.tar.gz"), "w:gz") as tf:
+    for nm9 in ("files_20990102/a.json", "files_20990102/candles/cg/x.json", "files_20990102/candles/cg/keep.json", "files_20990102/candles/upbit/y.json",
+                "files_20990102/other/cg/z.json", "files_20990102/candles/.h/w.json", "files_20990102/candles/cg/deep/v.json",
+                "files_20990102/candles/cg/.hid.json", "files_20990102/candles/top.json"):
+        ti = tarfile.TarInfo(nm9)
+        ti.size = len(GZ10)
+        tf.addfile(ti, io.BytesIO(GZ10))
+mf10 = {"v": 1, "stamp": SE10, "db": {"name": SE10 + ".db.gz", "sha256": "0" * 64},
+        "files": {"name": SE10 + ".files.tar.gz", "sha256": sha(os.path.join(EV9, SE10 + ".files.tar.gz"))}}
+statefile.atomic_write_json(os.path.join(EV9, SE10 + ".manifest.json"), OB.seal.seal(mf10, K9))
+os.makedirs(os.path.join(DST9, "files_20990102", "candles", "cg"))
+open(os.path.join(DST9, "files_20990102", "candles", "cg", "keep.json"), "w").write("{}")
+put10 = OB.unpack_files(EV9, SE10, K9, dst_dir=DST9, log=Q)
+got10 = sorted(os.path.relpath(os.path.join(dp, f), DST9) for dp, _d, fs in os.walk(os.path.join(DST9, "files_20990102")) for f in fs)
+ck("[9] candlez 봉 캐시 사본 = files_<날>/candles/<출처>/<파일> 만 풂 · 있던 파일 안 덮음 · 다른 깊은 자리·숨김 = 건너뜀",
+   put10 == ["files_20990102"] and got10 == ["files_20990102/a.json", "files_20990102/candles/cg/keep.json", "files_20990102/candles/cg/x.json",
+                                             "files_20990102/candles/upbit/y.json"]
+   and open(os.path.join(DST9, "files_20990102", "candles", "cg", "keep.json")).read() == "{}"
+   and open(os.path.join(DST9, "files_20990102", "candles", "cg", "x.json"), "rb").read() == GZ10, (put10, got10))
 T.finish()

@@ -72,9 +72,14 @@
 5. 다시 켜기 — `pm2 start ecosystem.config.js`(새 유닛·설정까지 붙게 restart 대신 start) → 설정 맨 아래 버전이 바뀌었는지 · 상태 패널이 초록인지
 6. 저장 — `pm2 save`(새 유닛까지 지금 목록을 저장 — 안 하면 재부팅 때 pm2 가 예전 목록을 되살려 새로 붙은 유닛(예: `tj-tron`·`tj-ton`)이 빠져요)
 
-**되돌리기** — `git checkout <예전 버전의 커밋·태그>` → 다시 켜기. 업데이트가 원장 내용을 한 방향으로 바꿨다면(CHANGELOG 에 '데이터 개정 N' 이라고 적어요 —
+**되돌리기** — 멈춘 뒤(1단계) **지금 코드 그대로** `python3 tools/rollback_check.py <예전 버전의 커밋·태그> && python3 tools/candles_compact.py --expand --apply && git checkout <예전 버전의 커밋·태그>` → 다시 켜기.
+봉 캐시는 **checkout 전에** 지금 코드로 평문 복원하세요. `tj-web`·`tj-review` 는 복원부터 checkout 까지 멈춘 채로 두세요(예전 판에는 이 복원 도구가 없어요).
+점검(`tools/rollback_check.py`)이 거부하면(종료 코드 1) checkout 하지 마세요 — 원장에 1회 정정 도구(`tools/ledger_rowfix.py`)가 남긴 표식이 있는데 그 예전 코드는
+그 표식을 읽지 않아, 정정으로 지운 입출금을 원본에서 다시 기장합니다(데이터 개정 번호가 같아 예전 코드가 스스로 못 막아요). 그때는 안내대로 지금 코드로 먼저
+정정을 되돌리고(`python3 tools/ledger_rowfix.py --undo <state/ledger_rowfix_undo_….json> --apply`) 점검을 다시 돌리거나, 그 정정 **전** 백업으로 원장째 되돌리세요.
+확인 불가(종료 코드 2)도 되돌리지 마세요. 업데이트가 원장 내용을 한 방향으로 바꿨다면(CHANGELOG 에 '데이터 개정 N' 이라고 적어요 —
 원장 `meta` 의 `data_rev`) 그 변환을 모르는 예전 코드는 원장을 쓰지 않고 기다립니다(화면 위 '원장이 코드보다 새 판 — 코드 업데이트 필요').
-그때는 업데이트 **전** 백업으로 원장도 되돌리세요(`python3 tools/ledger_restore.py list` → `restore <번호>` · 위 '되돌리기' 순서). 데이터 개정이 없는 업데이트는 코드만 되돌리면 됩니다.
+그때는 업데이트 **전** 백업으로 원장도 되돌리세요(`python3 tools/ledger_restore.py list` → `restore <번호>` · 위 '되돌리기' 순서). 데이터 개정이 없고 점검과 봉 캐시 평문 복원이 끝났다면 원장을 되돌릴 필요는 없어요.
 
 ## 멈추기 · 지우기
 

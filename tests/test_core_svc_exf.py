@@ -142,7 +142,7 @@ def tool(name, *args):
     return r.returncode, r.stdout + r.stderr
 
 
-for name, args in (("fix_dupsnap_1004.py", ["--dry-run"]), ("repair_own_overlap.py", ["--force"])):
+for name, args in (("repair_own_overlap.py", ["--force"]),):
     if not os.path.isfile(os.path.join(T.ROOT, "tools", name)):
         print("SKIP %s 없음(공개판 배치)" % name)
         continue

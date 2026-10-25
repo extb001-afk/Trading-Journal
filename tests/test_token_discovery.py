@@ -338,6 +338,26 @@ json.dump({"wallets": {W2: {"total": 900.0, "chains": [{"id": "eth", "cid": 1, "
 ex = "\n".join(tr.explain(c.cfg, {("eth", W2): res2}, [W2]))
 chk("프로토콜·스테이킹 $300" in ex and "지갑 토큰 $500" in ex and "토큰으로 설명되는 몫" in ex and "봇 미추적 체인" in ex,
     "D11 Rabby 설명 = 프로토콜·스테이킹 몫(토큰 아님) / 토큰으로 설명되는 몫 / 봇 미추적 체인 따로", ex)
+
+
+class _TDU:
+    def __getattr__(self, n):
+        return getattr(td, n)
+
+    @staticmethod
+    def dex_check(chain, cas, *a9, **k9):
+        return {ca: v for ca, v in fake_dex(chain, cas).items() if ca != TS}
+
+
+res3 = tr.run_pair(_TDU(), recon, c.cfg, c.conn, "eth", W2, _A(), {}, {})
+rows3 = {r["ca"]: r for r in res3["rows"]}
+t3 = [t for t in res3["table"] if t[2] == "FREEDROP"]
+chk(TS in rows3 and rows3[TS]["spam"] is None and set(rows3[TS]) == KEYS and rows3[TB]["spam"] is False,
+    "D11 덱스 판정 미확인 = spam null(스팸 true 아님 · 키 그대로) · 판정된 토큰 = 종전", rows3.get(TS))
+chk(t3 and "스팸 의심" not in t3[0][6] and "미확인" in t3[0][6] and res3["usd"].get("diff_spam", 0) == 0,
+    "D11 표 = '미확인'(스팸 의심 아님) · 스팸 차이 달러에 안 넣음", (t3[:1], res3["usd"]))
+chk("미확인" in tr.pair_incomplete(td, res3) and not tr.pair_incomplete(td, res),
+    "D11 미확인 칸 있는 쌍 = 완전히 끝나지 않음(진행 파일 retry · 다시 하면 판정) · 다 판정된 쌍 = 끝남", tr.pair_incomplete(td, res3))
 n_net = len(T.NET_TRIES)
 rc = tr.main(["--plan-only", "--quiet"])
 chk(rc == 0 and len(T.NET_TRIES) == n_net, "D11 --plan-only = 예상만(바깥 연결 0)", (rc, T.NET_TRIES[n_net:]))

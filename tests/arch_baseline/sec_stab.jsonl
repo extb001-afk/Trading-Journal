@@ -9,8 +9,6 @@
 {"m": "delete_signal", "k": "src/view_snapfile.py::_snapfile_drop", "n": 1}
 {"m": "delete_signal", "k": "tools/exf_fix_place.py::_undo", "n": 1}
 {"m": "delete_signal", "k": "tools/exf_fut_place.py::_undo", "n": 1}
-{"m": "delete_signal", "k": "tools/fix_dupsnap_1004.py::plan_and_apply", "n": 1}
-{"m": "delete_signal", "k": "tools/fix_dupsnap_1004.py::undo", "n": 1}
 {"m": "delete_signal", "k": "tools/latefix_move.py::_invalidate", "n": 1}
 {"m": "delete_signal", "k": "tools/ledger_restore.py::invalidate_curves", "n": 1}
 {"m": "delete_signal", "k": "tools/lp_enrich_sol.py::_run", "n": 1}
@@ -18,15 +16,12 @@
 {"m": "delete_signal", "k": "tools/repair_anchor_ts.py::_run", "n": 1}
 {"m": "delete_signal", "k": "tools/repair_onchain_balances.py::_run", "n": 1}
 {"m": "direct_write", "k": "tools/exf_fix_place.py::main", "n": 1}
-{"m": "direct_write", "k": "tools/fix_dupsnap_1004.py::plan_and_apply", "n": 2}
 {"m": "direct_write", "k": "tools/futplace_guard.py::cmd_audit", "n": 1}
-{"m": "direct_write", "k": "tools/hl_enable.py::main", "n": 1}
 {"m": "direct_write", "k": "tools/latefix_move.py::_write_undo", "n": 1}
 {"m": "direct_write", "k": "tools/ledger_restore.py::copy_ledger", "n": 1}
 {"m": "direct_write", "k": "tools/migrate_nodekeys_1008.py::main", "n": 1}
 {"m": "direct_write", "k": "tools/offsite_backup.py::snapshot", "n": 1}
 {"m": "direct_write", "k": "tools/prep_hotfix_h_caches.py::<mod>", "n": 1}
-{"m": "direct_write", "k": "tools/pretrace_hotfix_h.py::<mod>", "n": 1}
 {"m": "direct_write", "k": "tools/rebuild2.py::_write_private_json", "n": 1}
 {"m": "fixed_tmp", "k": "src/ledger_backup.py::run_once", "n": 1}
 {"m": "fixed_tmp", "k": "tools/bithumb_filltime.py::save_progress", "n": 1}
@@ -42,7 +37,7 @@
 {"m": "helper_copy", "k": "tools/offsite_backup.py::_gzip", "n": 1}
 {"m": "helper_copy", "k": "tools/upbit_trades_fill.py::save_progress", "n": 1}
 {"m": "multi_writer", "k": "auth.json", "n": 1}
-{"m": "multi_writer", "k": "chain_activity.json", "n": 3}
+{"m": "multi_writer", "k": "chain_activity.json", "n": 2}
 {"m": "multi_writer", "k": "config.json", "n": 1}
 {"m": "multi_writer", "k": "daily_cache.json", "n": 4}
 {"m": "multi_writer", "k": "daily_px.json", "n": 3}
@@ -51,6 +46,6 @@
 {"m": "multi_writer", "k": "head_days.hist", "n": 1}
 {"m": "multi_writer", "k": "pending_dm.jsonl", "n": 2}
 {"m": "multi_writer", "k": "pending_poison.jsonl", "n": 7}
-{"m": "multi_writer", "k": "sale_bids.json", "n": 3}
+{"m": "multi_writer", "k": "sale_bids.json", "n": 2}
 {"m": "multi_writer", "k": "settings.json", "n": 1}
 {"m": "multi_writer", "k": "setup_token", "n": 2}

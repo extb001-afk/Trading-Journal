@@ -39,7 +39,6 @@ MIN_GAP = 1.0
 MASS_N = 20
 MASS_HOLDERS = 50000
 STALE_SEC = 3 * 3600
-MAX_HIST = 400
 MAX_WATCH = 50
 MAX_PREF_KEYS = 2000
 PAGES_MAX = 20
@@ -2561,7 +2560,6 @@ class Tracker:
             h[-1] = row
         else:
             h.append(row)
-        del h[:-MAX_HIST]
 
     def _native_usd(self, rec):
         sym = str((rec or {}).get("sym") or "").upper()
