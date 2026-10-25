@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-import chaincatalog, histmark, logs, paths, statefile
+import chaincatalog, histmark, logs, paths, prefs_ident, statefile
 import db as dbm
 import spamguard
 import recon_adj
@@ -249,7 +249,7 @@ def asset_guard(conn, aid: int, prefs=None):
         if not spamguard.is_genuine(chain, ca) and (spamguard.impostor_of(sym) or spamguard.odd_symbol(sym)):
             return "사칭·혼용 심볼"
     ov = ((prefs or {}).get("risk_overrides") or {}).get(f"g{gid}") if gid is not None else None
-    if ov == "spam":
+    if ov == "spam" and prefs_ident.applies(prefs, "risk_overrides", f"g{gid}", conn):
         return "사용자 스팸 확정"
     return ""
 

@@ -5,7 +5,6 @@ sys.dont_write_bytecode = True
 
 import json  # noqa: E402
 import os  # noqa: E402
-import subprocess  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -320,18 +319,14 @@ if len(sys.argv) > 2 and sys.argv[1] == "--case":
         a = st["bybit"]["accts"]
         out["restore"] = {"tags": sorted(a), "retag": st["bybit"].get("fut_retag"), "seen": a["s1"].get("seen")}
     out["net"] = list(T.NET_TRIES)
-    print("CASE " + json.dumps(out, default=str, ensure_ascii=False), flush=True)
+    T.case_emit(out)
     sys.exit(0)
 
 import _harness as T  # noqa: E402
 
 
 def child(case):
-    p = subprocess.run([sys.executable, os.path.abspath(__file__), "--case", case], cwd=HERE, capture_output=True, text=True, timeout=600)
-    for ln in p.stdout.splitlines():
-        if ln.startswith("CASE "):
-            return json.loads(ln[5:])
-    return {"_err": (p.stdout[-600:] + p.stderr[-1500:])}
+    return T.case_run([sys.executable, os.path.abspath(__file__), "--case", case], cwd=HERE)
 
 
 BASE = {"qty": {"USDT": 60.0, "USDC": 40.0}, "raw": 3}

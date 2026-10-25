@@ -64,7 +64,7 @@ def _unreadable_rules(rel: str):
         "upbit_balances.json": [r"sync:ex:upbit", r"upbit:pending"],
         "upbit_sync.json": [r"sync:ex:upbit", r"upbit:pending"],
         "spot.json": [r"sync:price:.+"],
-        "web_diag.json": [r"sync:price:dex", r"goplus:queue", r"ledger:neg", r"price:proof", r"price:unpriced", r"web:build", r"web:buildmode", r"rabby:gap"],
+        "web_diag.json": [r"sync:price:dex", r"goplus:queue", r"ledger:neg", r"price:proof", r"price:unpriced", r"web:build", r"web:buildmode", r"rabby:gap", r"prefs:ident"],
         "daily_cache.json": [r"daily:close"],
         "reviews_llm.json": [r"review:daily"],
         "chain_sweep.json": [r"chainsweep:(?:untracked|stale)"],

@@ -366,12 +366,17 @@ class ExfLateMixin:
             t_off = int(t1) + self.EXF_LATE_DT
             bnd9 = self._exf_bounds_q(self.conn, ex, sym)
             near = [r for r in self._exf_adj_rows(ex, sym) if self._exf_late_b(r["source_id"]) is not None and int(r["qty_base"]) != 0
-                    and self._exf_bucket(bnd9, int(r["event_ts"]) - self.EXF_LATE_DT) == int(b9 or 0)
-                    and (int(r["qty_base"]) > 0) != (q > 0) and int(t0) - self.EXF_LATE_GAP_S <= int(r["event_ts"]) <= t_off]
+                    and (int(r["qty_base"]) > 0) != (q > 0) and int(t0) - self.EXF_LATE_GAP_S <= int(r["event_ts"]) <= t_off + self.EXF_LATE_GAP_S
+                    and (self._exf_bucket(bnd9, int(r["event_ts"]) - self.EXF_LATE_DT) == int(b9 or 0) or abs(int(r["event_ts"]) - t_off) <= self.EXF_LATE_GAP_S)]
             if near:
-                near.sort(key=lambda r: (-int(r["event_ts"]), -int(r["posting_id"])))
-                sg9 = 1 if q > 0 else -1
-                rq9 = self._exf_take(ex, sym, near, q, removing_positive=(q < 0), why=f"{what} 늦은 상쇄 되돌림(대사 {b9 or 0} 구간)")
+                near.sort(key=lambda r: (self._exf_bucket(bnd9, int(r["event_ts"]) - self.EXF_LATE_DT) != int(b9 or 0), abs(int(r["event_ts"]) - t_off), -int(r["posting_id"])))
+                sg9, rq9 = (1 if q > 0 else -1), abs(q)
+                for r in (r for r in near if rq9 > self.EXF_TOL):
+                    want = rq9
+                    if q > 0 and not now9 and int(r["event_ts"]) > t_off:
+                        bal_ser = self._exf_series(ex, sym)
+                        want = Decimal(0) if self._exf_new_neg(bal_ser, int(t0), t_off) else min(rq9, self._exf_room(sorted(bal_ser + [(t_off, rq9)]), t_off, t_end=int(r["event_ts"])))
+                    rq9 -= want - self._exf_take(ex, sym, [r], want, removing_positive=(q < 0), why=f"{what} 늦은 상쇄 되돌림(대사 {b9 or 0} 구간)")
                 left += sg9 * (abs(q) - rq9)
                 q = sg9 * rq9
             qb = int(q * scale)

@@ -1,8 +1,8 @@
 {"_doc": "pm2 유닛마다 입구(+ 러너 unit_runner)에서 닿는 import 폐포의 노드 수(src 모듈 · 하위 패키지 · tools 대본) — 늘면 실패 · 줄면 안내. 그래프 = tools/deploy_lib.sh 유닛 표·동적 간선 + AST import(지연 포함) · 정의 = _arch_closure 머리.", "kind": "max", "spec": "py_unit_closure"}
-{"key": "tj-alert", "n": 61}
+{"key": "tj-alert", "n": 62}
 {"key": "tj-bsc", "n": 55}
 {"key": "tj-btc", "n": 51}
-{"key": "tj-core", "n": 98}
+{"key": "tj-core", "n": 99}
 {"key": "tj-evm", "n": 51}
 {"key": "tj-ex", "n": 43}
 {"key": "tj-exf", "n": 65}
@@ -12,4 +12,4 @@
 {"key": "tj-sui", "n": 52}
 {"key": "tj-ton", "n": 52}
 {"key": "tj-tron", "n": 52}
-{"key": "tj-web", "n": 192}
+{"key": "tj-web", "n": 193}

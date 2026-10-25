@@ -286,7 +286,7 @@ class DailyMixin:
 
     def _daily_flows(self, conn, daily, G, today_kst, live_px, skip_gids=frozenset(), rate_now=None, transit=None, offc_ids=frozenset(),
                      days=None, dpx=None, fx_day=None) -> dict:
-        hist9 = days is not None
+        hist9, bf_box = days is not None, self.__dict__.get("_att_bf")
         if not hist9:
             self._venue_flow = None
             self._flow_px_delta, self._flow_att_px, self._flow_att_rep = {}, {}, {}
@@ -304,7 +304,7 @@ class DailyMixin:
                 keys[d9.strftime("%Y-%m-%d")] = d9.strftime("%m-%d")
         lo_ts = datetime.strptime(min(keys), "%Y-%m-%d").replace(tzinfo=KST).timestamp()
         vflow9 = {} if not hist9 else None
-        flow_px_at = self._flow_att_px if not hist9 else {}
+        flow_px_at = self._flow_att_px if not hist9 else {} if bf_box is None else bf_box.setdefault("px", {})
         dpx = (self.daily_px or {}) if dpx is None else dpx
         today_iso9 = today_kst.strftime("%Y-%m-%d")
         acc = {}
@@ -422,8 +422,8 @@ class DailyMixin:
                     a9[lbl9] = a9.get(lbl9, Decimal(0)) + q9
                     gpx.setdefault((ck9, gid9), px9)
                     gpxc.setdefault((ck9, gid9), pxc9)
-        if not hist9:
-            self._flow_att_rep.update(view_attur.flow_prev_reprice(acc, (gpx, gpxc, gsrc9), G, (dpx, self.__dict__.get("_daily_att_src") or {}), today_iso9, type(self).ATT_NOPX_BAND, held9))
+        if not hist9 or bf_box is not None:
+            (bf_box.setdefault("rep", {}) if hist9 else self._flow_att_rep).update(view_attur.flow_prev_reprice(acc, (gpx, gpxc, gsrc9), G, (dpx, (bf_box.get("src") if hist9 else self.__dict__.get("_daily_att_src")) or {}), today_iso9, type(self).ATT_NOPX_BAND, held9))
         for (ck9, su9), gh9 in sorted(held9.items()):
             gm9 = (acc.get(ck9) or {}).get(su9) or {}
             if not gm9:

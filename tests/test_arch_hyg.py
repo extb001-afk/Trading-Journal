@@ -72,6 +72,21 @@ inc_kept = R.increases(S["hyg_checks"], dropped, b_min, present={"t1.py", "t2.py
 chk(inc_kept and not R.increases(S["hyg_checks"], dropped, b_min, present={"t1.py"}),
     "[R] 변조 검사: 아직 있는 시험(t2)의 바닥 줄을 지우면 실패 · 지운 시험의 바닥 줄을 지우는 건 통과")
 
+gw, gbad = R.parse_growth('{"_doc": "x"}\n{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "종단 시험", "commit": "c1"}\n')
+b_ht = D({"t1.py": {"patch_attr": 1}})
+eb, allow = R.grown(S["hyg_tests"], b_ht, gw)
+bad_ok = R.compare(S["hyg_tests"], D({"t1.py": {"patch_attr": 1}, "t9.py": {"patch_attr": 3}}), eb)[0]
+bad_over = R.compare(S["hyg_tests"], D({"t9.py": {"patch_attr": 4}}), eb)[0]
+bad_other = R.compare(S["hyg_tests"], D({"t9.py": {"patch_attr": 2, "patch_call": 1}}), eb)[0]
+chk(not gbad and not bad_ok and len(bad_over) == 1 and len(bad_other) == 1 and "patch_call" in bad_other[0] and allow and b_ht["items"] == {"t1.py": {"patch_attr": 1}},
+    "[R] 성장 사유 표: 지금 값 ≤ to = 허용(기준선 무변 · 안내) · to 넘음·다른 칸 = 실패", (bad_ok, bad_over, bad_other, allow))
+bad_rows = ['{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "", "commit": "c1"}',
+            '{"spec": "hyg_checks", "key": "t9.py", "f": "n", "to": 3, "why": "w", "commit": "c1"}',
+            '{"spec": "hyg_tests", "key": "t9.py", "f": "nope", "to": 3, "why": "w", "commit": "c1"}',
+            '{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": true, "why": "w", "commit": "c1"}']
+got_rows = [R.parse_growth(x + '\n{"spec": "hyg_tests", "key": "t8.py", "f": "patch_attr", "to": 1, "why": "w", "commit": "c"}') for x in bad_rows]
+chk(all(rows == [] and len(bd) == 1 for rows, bd in got_rows), "[R] 성장 사유 표: 빈 사유·하한 지표·모르는 칸·bool 상한 = 틀린 줄 → 표 전체 안 씀", got_rows)
+
 src9 = os.path.join(T.TMP, "src9")
 os.makedirs(src9, exist_ok=True)
 for fn, body in (("fake_a.py", "from fake_b import helper\nLIMIT = 3\n"), ("fake_b.py", "def helper():\n    return 1\n")):

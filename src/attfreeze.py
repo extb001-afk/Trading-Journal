@@ -26,7 +26,7 @@ WINDOW_DAYS = 30
 PREV_KEYS = ("date", "val", "valKrw", "usdt", "kimp", "est", "xc")
 WRITE_GAP_S = 900
 READ_CACHE_N = 64
-BF_V = 3
+BF_V = 4
 BF_TRIES = 3
 BF_PEND_TRIES = 5
 BF_PEND_GAP_S = 120
@@ -309,7 +309,7 @@ def _bf_fx(owner, dpx):
             v = _fx_of(dpx, iso)
         memo[m] = v
         return v
-    fx.miss = set()
+    fx.miss, fx.att = set(), {}
     return fx
 
 
@@ -337,6 +337,9 @@ def _bf_rows(days, G, skip, kit, dpx, flow_fn, fx_tx=None):
         rows[d] = row
     tabs = {d: {"p": dict(v.get("p") or {})} for d, v in dpx.items()}
     kw = {"fx_tx": fx_tx} if fx_tx is not None else {}
+    if isinstance(getattr(fx_tx, "att", None), dict):
+        kw["att"] = fx_tx.att
+        fx_tx.att["src"] = src
     flows = flow_fn(kit.get("fk") or {}, days, tabs, lambda iso: _fx_of(dpx, iso), **kw) if days else {}
     for d in days:
         fv = flows.get(d)
@@ -386,7 +389,7 @@ def _bf_call(owner, conn, ctx, seq, src, rows, fx_tx=None):
                                                "_flow_att_px", "_flow_att_rep")}
     try:
         owner._daily_att_src, owner._flow_px_delta, owner._daily_lpc, owner._flow_det = src, {}, {}, None
-        owner._flow_att_px, owner._flow_att_rep = {}, {}
+        owner._flow_att_px, owner._flow_att_rep = (dict(getattr(fx_tx, "att", {}).get(k) or {}) for k in ("px", "rep"))
         owner._att_fx_at = fx_tx
         att = owner._daily_attrib(conn, [dict(rows[d], date=d[5:]) for d in seq], G, t_shift, live_px, skip_gids, extra, real=real, px_src=px_src)
         det = dict(owner.__dict__.get("_att_det_new") or {})

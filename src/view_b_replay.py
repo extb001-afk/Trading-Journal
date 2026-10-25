@@ -235,7 +235,7 @@ class ReplayMixin:
         self._ph("prep")
         rows = self._drop_cancelled_openings(self._load(conn))
         rows = self._replay_order(conn, rows)
-        prefs = self.prefs()
+        prefs = self._prefs_ident(conn, self.prefs())
         fb_on = bool(prefs.get("fallback_avg"))
         fs_pref = prefs.get("first_seen_px")
         if fs_pref is None:

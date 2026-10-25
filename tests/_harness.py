@@ -4,6 +4,7 @@ import os
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 import tempfile
 
@@ -260,6 +261,35 @@ def safe(fn, *a, **kw):
         return fn(*a, **kw)
     except Exception as e:   # noqa: BLE001
         return {"_exc": f"{type(e).__name__}: {e}"}
+
+
+CASE_OUT_ENV = "TJ_TEST_CASE_OUT"
+_CASE_N = [0]
+
+
+def case_emit(out) -> None:
+    txt = json.dumps(out, default=str, ensure_ascii=False)
+    path = os.environ.get(CASE_OUT_ENV)
+    if path:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write(txt)
+        os.replace(path + ".tmp", path)
+    sys.stdout.write("CASE " + txt + "\n")
+    sys.stdout.flush()
+
+
+def case_run(argv, timeout=600, cwd=None) -> dict:
+    _CASE_N[0] += 1
+    path = os.path.join(TMP, "case_%d_%d.json" % (os.getpid(), _CASE_N[0]))
+    r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=dict(os.environ, **{CASE_OUT_ENV: path}))
+    try:
+        with open(path, encoding="utf-8") as f:
+            got = json.load(f)
+    except (OSError, ValueError) as e:
+        return {"_err": "결과 파일 없음·깨짐(%s) · 종료값 %s" % (type(e).__name__, r.returncode), "stdout": r.stdout[-600:], "stderr": r.stderr[-1500:]}
+    if r.returncode != 0:
+        return {"_err": "결과 뒤 비정상 종료 · 종료값 %s" % r.returncode, "result": got, "stdout": r.stdout[-600:], "stderr": r.stderr[-1500:]}
+    return got
 
 
 def _outside_stdlib():

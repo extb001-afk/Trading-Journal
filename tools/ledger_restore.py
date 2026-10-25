@@ -19,6 +19,8 @@ import db as dbm  # noqa: E402
 import ledger_backup as lb  # noqa: E402
 import backup_complete as bc  # noqa: E402
 import ledger_lock  # noqa: E402
+import prefs_ident  # noqa: E402
+import inbox as inboxq  # noqa: E402
 
 STREAMS = ("evm", "sol", "bsc", "ex")
 try:
@@ -120,6 +122,12 @@ def inspect(path: str) -> dict:
             if "meta" in has else {}
         offs = {r["stream"]: (int(r["seg"]), int(r["off"])) for r in c.execute("SELECT stream, seg, off FROM inbox_offsets")} \
             if "inbox_offsets" in has else {}
+        anch = {}
+        for r in (c.execute("SELECT k, v FROM meta WHERE k LIKE ?", (inboxq.ANCHOR_META + "%",)) if "meta" in has else ()):
+            try:
+                anch[r["k"][len(inboxq.ANCHOR_META):]] = json.loads(r["v"])
+            except ValueError:
+                anch[r["k"][len(inboxq.ANCHOR_META):]] = None
         t = []
         if "raw_txs" in has:
             t += [r[0] for r in c.execute("SELECT ingested_at FROM raw_txs ORDER BY rowid DESC LIMIT 500") if r[0]]
@@ -130,7 +138,7 @@ def inspect(path: str) -> dict:
         c.close()
     mt = int(os.path.getmtime(path))
     data_t = int(max(t)) if t else None
-    return {"meta": meta, "offsets": offs, "data_until": data_t, "mtime": mt,
+    return {"meta": meta, "offsets": offs, "anchors": anch, "data_until": data_t, "mtime": mt,
             "T": min(data_t, mt) if data_t else mt, "postings_max_rowid": n_post, "tables": sorted(has)}
 
 
@@ -167,7 +175,26 @@ def check(path: str, full: bool = False) -> dict:
     return {"ok": not why, "why": why, "info": info, "full": full}
 
 
-def coverage(offsets: dict, inbox_dir: str = None) -> dict:
+def _same_gen(ib: str, s: str, seg: int, off: int, segs: list, anc):
+    if off <= 0 and not any(x < seg for x in segs):
+        return True, ""
+    try:
+        aseg, aoff, an, ah = int(anc["seg"]), int(anc["off"]), int(anc["n"]), str(anc["h"])
+    except (TypeError, KeyError, ValueError):
+        return None, "백업에 인박스 내용 앵커가 없음(이 판 전 백업 · 손으로 만든 사본) — 같은 세대인지 확인 불가"
+    if (aseg, aoff) > (seg, off) or an <= 0 or aseg not in segs:
+        return None, f"앵커 위치 {aseg}:{aoff} 를 지금 인박스에서 확인할 수 없음"
+    if any(os.path.islink(p9) for p9 in (ib, os.path.join(ib, s), os.path.join(ib, s, f"{aseg:09d}.jsonl"))):
+        return None, "인박스 폴더·세그먼트가 심볼릭 링크 — 같은 세대인지 확인 불가"
+    cur = inboxq.anchor(os.path.join(ib, s), aseg, aoff, an)
+    if cur is None:
+        return False, f"세그먼트 {aseg} 가 백업 때보다 짧음(다른 세대 인박스)"
+    if cur["h"] != ah:
+        return False, f"세그먼트 {aseg} 내용이 백업 때와 다름(같은 번호·다른 세대 인박스 — 이어 읽으면 새 사건을 건너뜀)"
+    return True, ""
+
+
+def coverage(offsets: dict, inbox_dir: str = None, anchors: dict = None) -> dict:
     ib = inbox_dir or paths.INBOX_DIR
     out = {}
     for s in streams_for(os.path.dirname(ib) if inbox_dir else None, offsets):
@@ -183,7 +210,11 @@ def coverage(offsets: dict, inbox_dir: str = None) -> dict:
             out[s] = {"state": "gap", "seg": seg, "off": off, "segs": [segs[0], segs[-1]],
                       "why": f"세그먼트 {hole9[0]}" + (f"~{hole9[-1]}" if len(hole9) > 1 else "") + f" 빠짐(구멍 {len(hole9)}개 — 이어 읽으면 조용히 건너뜀)"}
         elif (seg in segs and not short9) or (not segs and (seg, off) == (1, 0)):
-            out[s] = {"state": "replay", "seg": seg, "off": off, "segs": [segs[0], segs[-1]] if segs else None}
+            ok9, why9 = _same_gen(ib, s, seg, off, segs, (anchors or {}).get(s)) if segs else (True, "")
+            st9 = "replay" if ok9 else ("gap" if ok9 is False else "unverified")
+            out[s] = {"state": st9, "seg": seg, "off": off, "segs": [segs[0], segs[-1]] if segs else None}
+            if why9:
+                out[s]["why"] = why9
         elif short9:
             out[s] = {"state": "gap", "seg": seg, "off": off, "segs": [segs[0], segs[-1]], "why": f"세그먼트 {seg} 가 백업 위치보다 짧음(새 인박스)"}
         elif segs and segs[0] > seg:
@@ -196,15 +227,24 @@ def coverage(offsets: dict, inbox_dir: str = None) -> dict:
 
 
 def running_units(root: str = ROOT, scripts=UNIT_SCRIPTS) -> list:
-    try:
-        out = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "command="], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
+    for try9 in range(3):
+        try:
+            ps9 = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "command="], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if ps9.returncode == 0 and isinstance(ps9.stdout, str) and str(os.getpid()) in ps9.stdout:
+            break
+        time.sleep(0.3)
+    else:
         return None
+    out = ps9.stdout
     src = os.path.realpath(os.path.join(root, "src"))
     me = os.getpid()
-    hits = []
+    hits, saw_me = [], False
     for ln in out.splitlines():
         parts = ln.strip().split(None, 1)
+        if parts and parts[0].isdigit() and int(parts[0]) == me:
+            saw_me = True
         if len(parts) < 2 or not parts[0].isdigit() or int(parts[0]) == me:
             continue
         pid, cmd = int(parts[0]), parts[1]
@@ -227,7 +267,7 @@ def running_units(root: str = ROOT, scripts=UNIT_SCRIPTS) -> list:
             arg9 = toks9[i9 + 1] if name == "unit_runner.py" and 0 <= i9 < len(toks9) - 1 else ""
             hits.append((pid, f"{name} {arg9}".strip()))
             break
-    return hits
+    return hits if saw_me else None
 
 
 def _load_cfg() -> dict:
@@ -846,7 +886,7 @@ def wallets_missing(backup: str, cfg: dict = None) -> list:
     return [f"{ch}:{a}" for ch, a in rows if (ch, str(a) if ch == "sol" else str(a).lower()) not in have]
 
 
-def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None, state_dir: str = None) -> dict:
+def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None, state_dir: str = None, unverified: str = None) -> dict:
     sd = state_dir or paths.STATE_DIR
     now = int(time.time()) if now is None else int(now)
     try:
@@ -858,7 +898,10 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
         raise SystemExit(f"원장 백업이 아니에요(표 없음: {', '.join(miss9)}) — 빈 파일·다른 파일이면 list 의 다른 번호로")
     T = info["T"]
     cut = int(T - margin_h * 3600)
-    cov = coverage(info["offsets"], os.path.join(sd, "inbox"))
+    cov = coverage(info["offsets"], os.path.join(sd, "inbox"), info.get("anchors"))
+    for c9 in cov.values():
+        if c9["state"] == "unverified" and unverified in ("rewind", "trust"):
+            c9.update(state="gap" if unverified == "rewind" else "replay", how=f"--inbox-unverified {unverified}")
     rewind = [s for s in cov if (streams is None and cov[s]["state"] == "gap") or (streams is not None and s in streams)]
     notes, files = [], {}
     if rewind:
@@ -876,6 +919,10 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
             files.update(plan_ex(sd, B, cut, notes))
             notes.append("업비트 입출금: tj-ex 를 다시 시작하면 창 전체를 다시 보냄(파일 커서 없음)")
     files.update(_plan_poison_done(sd, cut, notes))
+    pf = prefs_bind(sd, paths.DB_PATH)
+    if pf is not None:
+        files["ui_prefs.json"] = pf
+        notes.append("화면 설정(원가 지정·계획 등)의 자산 정체성을 지금 원장으로 묶음 — 복원한 원장에서 같은 번호를 다른 코인이 쓰면 적용하지 않고 '확인 필요'로")
     return {"backup": backup, "T": T, "cut": cut, "margin_h": margin_h, "info": info, "coverage": cov, "rewind": rewind,
             "files": files, "notes": notes, "decisions_after": decisions_after(T), "wallets_missing": wallets_missing(backup)}
 
@@ -957,6 +1004,7 @@ def reset_inbox_offsets(path: str, streams: list) -> list:
     try:
         c.execute("PRAGMA journal_mode=DELETE").fetchone()
         c.executemany("DELETE FROM inbox_offsets WHERE stream=?", [(s,) for s in streams])
+        c.executemany("DELETE FROM meta WHERE k=?", [(inboxq.ANCHOR_META + s,) for s in streams])
         c.commit()
     finally:
         c.close()
@@ -976,8 +1024,16 @@ def apply(p: dict, full_check: bool = False, proc_check: bool = True, state_dir:
             raise SystemExit("프로세스 목록(ps)을 못 읽어 유닛 정지를 확인할 수 없어요 — 정지를 직접 확인했다면 --no-proc-check")
         if run:
             raise SystemExit("먼저 유닛을 멈추세요: " + STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n}(pid {pid})" for pid, n in run))
+    unv9 = sorted(s for s, cv in p["coverage"].items() if cv["state"] == "unverified")
+    if unv9:
+        raise SystemExit(UNVERIFIED_HINT.format(", ".join(unv9)))
     with ledger_lock.hold(live, who="원장 복구(restore --apply)"):
         return _apply_locked(p, full_check, sd, live, log, keep_pre)
+
+
+UNVERIFIED_HINT = ("되돌리지 않았어요 — 인박스 {} 가 백업 때와 같은 세대인지 확인할 수 없어요(백업에 내용 앵커 없음 등).\n"
+                   "  원래 인박스를 그대로 뒀다면 --inbox-unverified trust(백업 위치에서 이어 읽기) · 모르거나 새로 만든 인박스면 "
+                   "--inbox-unverified rewind(지금 인박스 처음부터 다시 읽기 + 수집기 되감기 · 같은 거래는 한 번만 기장) — docs/OPERATIONS.md '백업·복구'")
 
 
 def _apply_locked(p: dict, full_check: bool, sd: str, live: str, log, keep_pre: int) -> dict:
@@ -1072,6 +1128,24 @@ def _apply_locked(p: dict, full_check: bool, sd: str, live: str, log, keep_pre: 
             os.remove(lock)
         except OSError:
             pass
+
+
+def prefs_bind(sd: str, live: str):
+    cur = _read_json(os.path.join(sd, "ui_prefs.json"), None)
+    if not isinstance(cur, dict) or not any(True for _e in prefs_ident.entries(cur)):
+        return None
+    idents, ep = {}, prefs_ident.NO_MARK
+    if os.path.exists(live):
+        try:
+            c = _ro(live)
+            try:
+                idents, ep = prefs_ident.ident_map(c), prefs_ident.ledger_epoch(c)
+            finally:
+                c.close()
+        except sqlite3.Error as e:
+            log_err = logs.safe_err(e)
+            print(f"지금 원장의 자산 정체성을 못 읽음({log_err}) — 정체성 없는 화면 설정 칸은 복원 뒤 적용하지 않고 '확인 필요'로")
+    return prefs_ident.bind_doc(cur, prefs_ident.resolve(cur, idents, ep)[2], prefs_ident.NO_MARK)
 
 
 def prune_pre_restore(sd: str, keep: int = PRE_RESTORE_KEEP, keep_path: str = None) -> list:
@@ -1589,7 +1663,9 @@ def _print_plan(p: dict, log=print):
     log(f"  기준 시각 T = {_kst(p['T'])} · 되감기 기준 = T − {p['margin_h']:g}시간 = {_kst(p['cut'])}")
     for s, c in p["coverage"].items():
         if c["state"] == "replay":
-            log(f"  인박스 {s:3}: 백업 위치 {c['seg']}:{c['off']} 그대로 있음 → core 가 다시 읽어 채움")
+            log(f"  인박스 {s:3}: 백업 위치 {c['seg']}:{c['off']} 그대로 있음 → core 가 다시 읽어 채움" + (f" ({c['how']})" if c.get("how") else ""))
+        elif c["state"] == "unverified":
+            log(f"  인박스 {s:3}: ★{c.get('why')} → 적용 거부 — --inbox-unverified trust(원래 인박스 그대로) | rewind(처음부터 다시 + 되감기)★")
         else:
             log(f"  인박스 {s:3}: {c.get('why')} → 원장의 인박스 위치를 처음으로(지금 인박스 전부 다시 읽음) + 수집기 되감기"
                 + ("" if s in p["rewind"] else " (되감기는 이번엔 안 함)"))
@@ -1636,6 +1712,8 @@ def main(argv=None) -> int:
     r.add_argument("--full-check", action="store_true", help="적용 전 integrity_check(느림 · 기본은 quick_check)")
     r.add_argument("--no-proc-check", action="store_true", help="유닛 정지 확인을 못 하는 환경에서만")
     r.add_argument("--force", action="store_true", help="백업 원장 지갑이 지금 설정에 없어도 적용(일부러 뺀 지갑일 때만)")
+    r.add_argument("--inbox-unverified", choices=("rewind", "trust"), default=None,
+                   help="인박스가 백업 때와 같은 세대인지 확인 불가할 때: rewind(처음부터 다시 + 수집기 되감기) | trust(원래 인박스를 그대로 둔 것을 확인함)")
     r.add_argument("--keep-pre", type=int, default=PRE_RESTORE_KEEP, help=f"복구 전 보존본(ledger.db.pre_restore_*) 최근 몇 개 남길지(기본 {PRE_RESTORE_KEEP} · 최소 1)")
     fl = sub.add_parser("files", help="원장 밖 사본(files_<날짜>/ · prefs_<날짜>.json) 되돌리기(기본 = 미리보기)")
     fl.add_argument("day", nargs="?", help="YYYYMMDD — 없으면 목록")
@@ -1656,8 +1734,8 @@ def main(argv=None) -> int:
         for k, r9 in enumerate(rows, 1):
             try:
                 i = inspect(r9["path"])
-                cov = coverage(i["offsets"])
-                rep = " ".join(f"{s}:{'이어읽기' if c['state'] == 'replay' else '되감기'}" for s, c in cov.items())
+                cov = coverage(i["offsets"], anchors=i.get("anchors"))
+                rep = " ".join(f"{s}:{ {'replay': '이어읽기', 'unverified': '확인불가'}.get(c['state'], '되감기')}" for s, c in cov.items())
                 extra = f"데이터 {_kst(i['data_until']) if i['data_until'] else '?'} · 세대 {i['meta'].get('schema_version')} · {rep}"
             except sqlite3.DatabaseError as e:
                 extra = f"열기 실패: {e}"
@@ -1704,7 +1782,7 @@ def main(argv=None) -> int:
             run = running_units()
             if run:
                 raise SystemExit("먼저 유닛을 멈추세요: " + STOP_HINT + "\n  떠 있는 것: " + ", ".join(f"{n9}(pid {pid})" for pid, n9 in run))
-        p = plan(bk, streams=streams, margin_h=a.margin_hours)
+        p = plan(bk, streams=streams, margin_h=a.margin_hours, unverified=a.inbox_unverified)
         _print_plan(p)
         if not a.apply:
             run = running_units()

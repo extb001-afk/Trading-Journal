@@ -1,5 +1,6 @@
 from __future__ import annotations
 import paths
+import prefs_ident
 import re
 import spamguard
 import statefile
@@ -101,6 +102,7 @@ def post_plan(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):
     for f in ("target", "stop", "memo", "src", "venue", "tags"):
         if f in body:
             ent[f] = body[f]
+    prefs_ident.bind_now(prefs, "plans", key)
     statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
     if not web_ctx.bcall("mpatch", {"plan"}):
         with web_ctx.builder().lock:
@@ -122,6 +124,8 @@ def post_ignore(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):
     for k in keys:
         if k and k not in ig:
             ig.append(k); added += 1
+        if k:
+            prefs_ident.bind_now(prefs, "ignored", k)
     statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
     with web_ctx.builder().lock:
         web_ctx.builder().cache = None
@@ -183,6 +187,7 @@ def post_cost_override(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: 
         else:
             be.pop(key, None)
         prefs["cost_breakeven"] = be
+        prefs_ident.bind_now(prefs, "cost_breakeven", key)
         statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
         with web_ctx.builder().lock:
             web_ctx.builder().cache = None
@@ -200,6 +205,7 @@ def post_cost_override(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: 
         if not (unit > 0) or unit > 1e9:
             return h._send(400, {"error": "value 범위 오류"})
         ov[key] = {"mode": "unit", "unit": unit}
+    prefs_ident.bind_now(prefs, "cost_overrides", key)
     statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
     with web_ctx.builder().lock:
         web_ctx.builder().cache = None
@@ -348,6 +354,7 @@ def post_risk_override(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: 
         ro.pop(key, None)
     else:
         ro[key] = verdict
+    prefs_ident.bind_now(prefs, "risk_overrides", key)
     statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
     with web_ctx.builder().lock:
         web_ctx.builder().cache = None

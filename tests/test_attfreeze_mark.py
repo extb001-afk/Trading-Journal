@@ -149,6 +149,8 @@ sys.path.insert(0, os.path.join(T.ROOT, "tools"))
 import attfreeze_unstale as U  # noqa: E402
 import contextlib  # noqa: E402
 import io  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 
 AT = 1_792_683_000
 live = {"_v": 1, "dm": [], "bf": {"v": 2, "at": AT + 9000, "n": 0, "want": 1, "re": 0}, "d": {}}
@@ -215,7 +217,29 @@ chk("되돌림 16일" in out and "건너뜀 1일" in out and dd["d"][OLD[0]]["h"
     "U5 그 뒤 다시 계산한 날·bf = 그대로(건너뜀)", out)
 
 json.dump(live, open(P, "w"))
-chk(U.web_running() is None, "U6 실제 판정(ps · 이 임시 설치) = 떠 있는 tj-web 없음")
+
+
+def foreign_rel(why):
+    if not why or os.path.isdir("/proc") or "떠 있는 것:" not in why:
+        return False
+    src9 = os.path.realpath(os.path.join(paths.BASE_DIR, "src"))
+    for pid9 in re.findall(r"\(pid (\d+)\)", why):
+        ps9 = subprocess.run(["ps", "-o", "command=", "-p", pid9], capture_output=True, text=True, timeout=10)
+        if ps9.returncode != 0 or not ps9.stdout.strip():
+            return None
+        if any(os.path.isabs(t9) and os.path.realpath(os.path.dirname(t9)) == src9 for t9 in ps9.stdout.split()):
+            return False
+    return True
+
+
+for _i9 in range(5):
+    wr9 = U.web_running()
+    fr9 = foreign_rel(wr9) if wr9 is not None else False
+    if wr9 is None or fr9 is not None:
+        break
+if wr9 is not None and fr9:
+    print("  (U6 맥: 다른 폴더 상대 경로 프로세스 = 안전 쪽 '떠 있음' — 이 설치 것 아님 확인)", wr9.replace("\n", " "))
+chk(wr9 is None or fr9 is True, "U6 실제 판정(ps · 이 임시 설치) = 떠 있는 tj-web 없음(맥: 다른 폴더 상대 경로 토큰만 = 이 설치 것 아님)", wr9)
 raw1 = open(P, "rb").read()
 rc, out = run("--at", str(AT), "--apply", "--undo-out", UND + "3", running=lambda: "먼저 tj-web 을 멈추세요: pm2 stop tj-web")
 chk(rc == 2 and "pm2 stop tj-web" in out and open(P, "rb").read() == raw1 and not os.path.exists(UND + "3"), "U6 tj-web 떠 있으면 거부(무변)", out)

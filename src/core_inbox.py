@@ -8,6 +8,7 @@ import os
 import sqlite3
 import time
 from core_common import dm
+import inbox
 from inbox import SegmentReader
 import logging
 import calcguard  # noqa: E402
@@ -163,7 +164,7 @@ class InboxMixin:
 
     def _drain_stream(self, stream: str, reader: SegmentReader, seg: int, off: int):
         batch, nseg, noff = reader.read_batch(seg, off)
-        for rec, rseg, roff in batch:
+        for idx, (rec, rseg, roff) in enumerate(batch):
             ok9 = False
             try:
                 self.conn.execute("BEGIN")
@@ -193,6 +194,8 @@ class InboxMixin:
                     "INSERT INTO inbox_offsets (stream, seg, off) VALUES (?, ?, ?)"
                     " ON CONFLICT(stream) DO UPDATE SET seg=excluded.seg, off=excluded.off",
                     (stream, rseg, roff))
+                if idx == len(batch) - 1:
+                    self._anchor_put(stream, getattr(reader, "dir", None), rseg, roff)
                 self.conn.commit()
                 seg, off = rseg, roff
             except Exception:
@@ -202,6 +205,14 @@ class InboxMixin:
                 self._ts_fix_done(rec)
         reader.gc(seg, off)
         return seg, off, len(batch)
+
+    def _anchor_put(self, stream: str, dirpath: str, seg: int, off: int):
+        anc = inbox.anchor(dirpath, seg, off) if dirpath else None
+        if anc:
+            self.conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                              (inbox.ANCHOR_META + stream, json.dumps(anc, sort_keys=True)))
+        else:
+            self.conn.execute("DELETE FROM meta WHERE k=?", (inbox.ANCHOR_META + stream,))
 
     def _ts_fix_done(self, rec: dict):
         ids = [str(x) for x in ((rec.get("ts_fix") or {}).get("poison_ids") or []) if x] if isinstance(rec.get("ts_fix"), dict) else []

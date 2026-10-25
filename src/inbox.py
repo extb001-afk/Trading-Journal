@@ -1,5 +1,6 @@
 """Event inbox shared by collectors and the ledger core."""
 import fcntl
+import hashlib
 import json
 import os
 import time
@@ -9,6 +10,21 @@ SEG_MAX_AGE_SEC = 3600
 RETAIN_SEC = 8 * 86400
 RETAIN_MAX_BYTES = 512 * 1024 * 1024
 LOCK_FILE = ".queue.lock"
+ANCHOR_BYTES = 4096
+ANCHOR_META = "inbox_anchor:"
+
+
+def anchor(dirpath: str, seg: int, off: int, n: int = ANCHOR_BYTES):
+    k = min(int(n), int(off))
+    if k <= 0:
+        return None
+    try:
+        with open(os.path.join(dirpath, f"{int(seg):09d}.jsonl"), "rb") as f:
+            f.seek(int(off) - k)
+            b = f.read(k)
+    except OSError:
+        return None
+    return {"seg": int(seg), "off": int(off), "n": k, "h": hashlib.sha256(b).hexdigest()} if len(b) == k else None
 
 
 class SegmentWriter:

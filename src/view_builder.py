@@ -401,6 +401,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
                         if nb9:
                             self._pxq.add(self.px.nb_end())
                 self._ph("reviews·tail")
+                self._prefid_persist()
                 self.build_ms = int((time.time() - t0_9) * 1000)
                 ex9 = self._build_sample_ex(rb0_9, self._rb_mark())
                 self._ph_note(self.build_ms, ex9)
@@ -649,7 +650,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         if "plan" in kinds:
             if "plans" not in f or "planMemos" not in f:
                 raise ValueError("계획 칸 없음")
-            g["plans"], g["planMemos"] = self._plans_view(self.prefs())
+            g["plans"], g["planMemos"] = self._plans_view(self._prefid_eff(self.prefs()))
         if "review" in kinds:
             pr9 = self.prefs()
             for k9, v9 in (("reviewLen", review_len_eff(pr9)), ("reviewPause", review_pause_eff(pr9)),

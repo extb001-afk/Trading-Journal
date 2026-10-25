@@ -1,6 +1,6 @@
 from __future__ import annotations
 import acct_norm
-import config, logs, paths, statefile
+import config, logs, paths, prefs_ident, statefile
 import copy
 import depaddr
 import json
@@ -420,6 +420,7 @@ class PendingsMixin:
                        "특정 종목을 되살리려면 그 종목 행에서 [정상으로 복원]을 누르세요.", "cands": [],
                 "n": len(more13), "usd": _f(sum(x[2] * (x[3] or 0) for x in more13), 2) or 0})
         _pend_spam(spam_sorted, pendings, today_kst)
+        pendings[:0] = prefs_ident.pend_rows((self.__dict__.get("_prefid") or {}).get("hold"), ignored_u, today_kst.strftime("%m-%d %H:%M"))
         tx_legs9 = {}
         for r9 in rows:
             if r9["leg_kind"] in ("acq", "disp", "move_in", "move_out") and (r9["location"] or "").startswith("wallet:"):

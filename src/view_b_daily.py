@@ -257,7 +257,8 @@ class DailyBuildMixin:
                 log.debug("장기 곡선 재료: 비확정 지난날 %d(%s…) — 값 비워 넘김", len(hnf9), min(hnf9))
             attfreeze.note_marks(self)
             if hok9:
-                histcurve.HIST.offer(td9, kit_fn := (lambda: histcurve.make_kit(
+                dex_guarded = sorted(g for g, prs in gid_pairs_all.items() if any(self.spot.guarded.get(f"{c}:{a}") for c, a in prs or ()))
+                histcurve.HIST.offer(td9, kit_fn := (lambda: dict(histcurve.make_kit(
                     td9, curve_G9, hold_qty, quarantined, ca_all, ex_gid, native_c9 | ex_c9, override_px, live_px, gid_pairs_all,
                     [e9 for e9 in wdt_all if e9["state"] == "pending"] + list(_bs9.get("dep_tr9") or ()),
                     xtra9, hd9, self.daily, stable_syms=STABLE_GROUPS,
@@ -267,7 +268,7 @@ class DailyBuildMixin:
                     debt_days={k9: dict(v9) for k9, v9 in ((self.daily_px or {}).get("_dbt") or {}).items() if isinstance(v9, dict)},
                     rb_days=dict(rb_dc9),
                     first_floor=None if self.cfg.get("backfill_full_history") else _bf_since,
-                    xq=(self.__dict__.get("_xq9") or (None, None))[0], xq_base=(self.__dict__.get("_xq9") or (None, None))[1])))
+                    xq=(self.__dict__.get("_xq9") or (None, None))[0], xq_base=(self.__dict__.get("_xq9") or (None, None))[1]), dg=dex_guarded)))
                 attfreeze.backfill(self, conn, kit_fn, att_args)
         except Exception as e9:   # noqa: BLE001 [optional]
             calcguard.swallowed("view_b_daily:DailyBuildMixin._build_daily[td9]", e9)

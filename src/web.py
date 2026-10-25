@@ -26,7 +26,7 @@ if __name__ == "__main__":
     _SQLITE_MEMSTAT_OFF = runtime.sqlite_memstatus_off()
 import web_ctx  # noqa: E402
 import db as dbm
-import pricing
+import pricing, prefs_ident
 import balcheck
 import chainsweep
 import websnap
@@ -340,6 +340,7 @@ def snapshot_refresher():
 
 
 PREFS_LOCK = threading.Lock()
+prefs_ident.WRITE_LOCK_FN = lambda: PREFS_LOCK
 from http_state import (  # noqa: F401
     _ALERT_TEST_T,
     MemoHourly,
@@ -1565,11 +1566,11 @@ def _balcheck_defer_keys(state: dict) -> set:
         return set()
 
 
-def _hist_flows(fk, days, dpx, fx_day, fx_tx=None) -> dict:
+def _hist_flows(fk, days, dpx, fx_day, fx_tx=None, att=None) -> dict:
     sh9 = StateBuilder.__new__(StateBuilder)
     sh9.daily = fk.get("wdt") or {}
     sh9.daily_px = {}
-    sh9._flow_px_delta, sh9._att_fx_at = {}, fx_tx
+    sh9._flow_px_delta, sh9._att_fx_at, sh9._att_bf = {}, fx_tx, att
     today9 = datetime.strptime(fk.get("today") or datetime.now(KST).strftime("%Y-%m-%d"), "%Y-%m-%d").replace(tzinfo=KST)
     conn9 = dbm.open_db(paths.DB_PATH, readonly=True)
     try:

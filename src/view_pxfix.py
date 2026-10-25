@@ -112,7 +112,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
         return out
     skip9 = set(skip_gids or ())
     lo9 = (datetime.strptime(today_iso, "%Y-%m-%d") - timedelta(days=29)).strftime("%Y-%m-%d")
-    plan9, fin9, pend9 = [], {}, {}
+    plan9, fin9, pend9, unfin = [], {}, {}, []
     for ck9 in sorted(k9 for k9 in dpx if not str(k9).startswith("_")):
         if not (lo9 <= ck9 < today_iso):
             continue
@@ -122,7 +122,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
         p9, k9, dn9 = e9.get("p") or {}, e9.get("k") or {}, set(e9.get("dcn") or ())
         done9 = c9.get("dcp") if isinstance(c9.get("dcp"), dict) else {}
         for sid9, op9 in p9.items():
-            if sid9 in k9 or sid9 in dn9 or not op9:
+            if sid9 in k9 or not op9:
                 continue
             if done9.get(sid9) is not None:
                 plan9.append((ck9, sid9, float(op9), float(done9[sid9]), True))
@@ -134,12 +134,14 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
                 continue
             if abs(gv9) < DC_SMALL_USD or gid9 not in G:
                 continue
-            np9, st9 = day_close(gid9, ck9, abs(gv9), ref=op9)
+            np9, st9 = day_close(gid9, ck9, abs(gv9), ref=op9, **({"ask": False} if sid9 in dn9 else {}))
             if np9:
                 plan9.append((ck9, sid9, float(op9), float(np9), False))
-            elif st9 == "none":
+            elif st9 == "suspect":
+                unfin += [(ck9, sid9)] if sid9 in dn9 else []
+            elif st9 == "none" and sid9 not in dn9:
                 fin9.setdefault(ck9, []).append(sid9)
-            else:
+            elif sid9 not in dn9:
                 pend9.setdefault(ck9, []).append(sid9)
     stamp9 = {}
     for ck9 in pend9:
@@ -149,7 +151,7 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
         if isinstance(e9, dict) and e9.get("dcw") and ck9 not in pend9:
             stamp9.setdefault(ck9, None)
     out["pend"] = sum(len(v9) for v9 in pend9.values())
-    if not plan9 and not fin9 and not stamp9:
+    if not plan9 and not fin9 and not stamp9 and not unfin:
         return out
     if not isinstance(dpx.get("_pxfix"), dict):
         ts9 = int(now_ts)
@@ -171,6 +173,9 @@ def _reprice_now_days(daily, dpx, G, today_iso, now_ts, day_close, skip_gids=Non
         e9 = dpx[ck9]
         e9["dcn"] = sorted(set(e9.get("dcn") or ()) | set(sids9), key=lambda x9: (len(x9), x9))
         out["fin"] += len(sids9)
+    for ck9, sid9 in unfin + [tuple(row[:2]) for row in plan9 if row[1] in (dpx[row[0]].get("dcn") or ())]:
+        left = [x for x in dpx[ck9]["dcn"] if x != sid9]
+        dpx[ck9].update(dcn=left) if left else dpx[ck9].pop("dcn")
     for ck9, sid9, op9, np9, rec9 in plan9:
         e9, c9 = dpx[ck9], daily[ck9]
         d9 = out["days"].setdefault(ck9, [0, 0.0, float(c9.get("est") or 0), None])

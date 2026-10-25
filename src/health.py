@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
-import config, logs, net_http, paths, statefile
+import config, logs, net_http, paths, prefs_ident, statefile
 import fsio
 import health_ack
 
@@ -909,7 +909,7 @@ def _eval_feeds(_bs9):
         if 1800 <= wd_age9 < float(t.get("webdiag_hold_sec") or 21600):
             for cid9, unit9, kind9 in (("goplus:queue", "tj-web", "goplus"), ("ledger:neg", "tj-core", "ledger"),
                                        ("price:proof", "tj-web", "price"), ("price:unpriced", "tj-web", "price"),
-                                       ("web:build", "tj-web", "web"), ("web:buildmode", "tj-web", "web"), ("rabby:gap", "tj-web", "rabby")):
+                                       ("web:build", "tj-web", "web"), ("web:buildmode", "tj-web", "web"), ("rabby:gap", "tj-web", "rabby"), ("prefs:ident", "tj-web", "ledger")):
                 if cid9 in open_ids:
                     add(cid9, unit9, "판단 보류", None, f"웹 빌드 진단이 {fmt_ago(wd_age9)} 전 것 — 다음 빌드 뒤 다시 판정(그동안 직전 판정 유지)",
                         "", persist=0, resolve=600, notify=False, remind=False, kind=kind9)
@@ -994,6 +994,8 @@ def _eval_feeds(_bs9):
         ackf(dict([(str(x.get("ent") or f"sym:{x.get('sym')}|{x.get('where') or ''}"), max(float(x.get("cost") or 0), float(x.get("ref") or 0))) for x in uph]
                   + [(f"exdead:{str(x.get('ex') or '').lower()}:{x.get('sym')}",
                       (float(x.get("qty") or 0) * float(x.get("ref") or 0)) if x.get("ref") else None) for x in edh]))
+        if (pfh := prefs_ident.health_item(wd)):
+            add(*pfh[0], **pfh[1])
     bd = wd.get("build") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None
     bpm9 = build_mode_view(wd.get("build_proc") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None, now)
     if isinstance(bd, dict) and "tj-web" in units and int(bd.get("n") or 0) >= 5:

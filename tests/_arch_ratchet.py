@@ -168,6 +168,53 @@ def _path(name: str) -> str:
     return os.path.join(BASE_DIR, name + ".jsonl")
 
 
+GROWTH_FILE = "hyg_growth.jsonl"
+
+
+def parse_growth(text: str) -> tuple[list, list]:
+    rows, bad = [], []
+    for ln in text.splitlines():
+        if not ln.strip():
+            continue
+        try:
+            g = json.loads(ln)
+        except ValueError:
+            bad.append(ln.strip()[:160])
+            continue
+        if isinstance(g, dict) and "_doc" in g:
+            continue
+        sp = SPECS.get(g.get("spec")) if isinstance(g, dict) else None
+        to = g.get("to") if isinstance(g, dict) else None
+        if (sp is not None and sp.kind == "max" and g.get("f") in sp.fields and isinstance(g.get("key"), str) and g["key"].strip()
+                and isinstance(to, int) and not isinstance(to, bool) and to >= 0
+                and all(isinstance(g.get(x), str) and g[x].strip() for x in ("why", "commit"))):
+            rows.append(g)
+        else:
+            bad.append(ln.strip()[:160])
+    return ([] if bad else rows), bad
+
+
+def load_growth() -> tuple[list, list]:
+    p = os.path.join(BASE_DIR, GROWTH_FILE)
+    if os.path.islink(p):
+        return [], [GROWTH_FILE + " 이 심볼릭 링크 — 실제 파일이어야 함"]
+    if not os.path.isfile(p):
+        return [], []
+    with open(p, encoding="utf-8") as f:
+        return parse_growth(f.read())
+
+
+def grown(spec: Spec, base: dict, growth) -> tuple[dict, list[str]]:
+    rows = [g for g in growth or () if g["spec"] == spec.name]
+    if not rows:
+        return base, []
+    items = {k: dict(v) for k, v in base["items"].items()}
+    for g in rows:
+        it = items.setdefault(g["key"], {f: 0 for f in spec.fields})
+        it[g["f"]] = max(int(it.get(g["f"], 0) or 0), g["to"])
+    return dict(base, items=items), [f"{g['key']}: {g['f']} ≤ {g['to']} — {g['why']} ({g['commit']})" for g in rows]
+
+
 def load(name: str) -> dict | None:
     p = _path(name)
     if os.path.islink(BASE_DIR) or os.path.islink(p):
@@ -262,8 +309,8 @@ def _renamed(spec: Spec, doc: dict, present: set, absent: set | None = None) -> 
     return RN.renamed(spec, doc, present, absent=absent)
 
 
-def judge_now(spec: Spec, cur: dict, base: dict) -> tuple[list[str], list[str], dict]:
-    base = _renamed(spec, base, set(cur["items"]))
+def judge_now(spec: Spec, cur: dict, base: dict, growth=()) -> tuple[list[str], list[str], dict]:
+    base = grown(spec, _renamed(spec, base, set(cur["items"])), growth)[0]
     side, base2, bad, succ = _succ(spec, cur, base, cur)
     bad0, stale = compare(spec, side, base2)
     return bad + bad0, stale, succ
@@ -409,6 +456,14 @@ def check(T, root: str, cur: dict) -> None:
     if ref.sha and any(n in ("hyg_tests", "hyg_checks") for n in cur):
         errs = rename_ref_check(ref)
         T.chk(not errs, f"시험 이름 승계 표가 {ref.why} {ref.sha[:8]} 대비 줄만 더함 · 이름 바꾸기만", errs[:10])
+    growth, gbad = load_growth()
+    T.chk(not gbad, f"성장 사유 표({GROWTH_FILE}) 줄 = 상한 지표 spec · 열쇠 key · 칸 f · 절대 상한 to(0 이상 정수) · 사유 why · 커밋 commit", gbad[:5])
+    if ref.sha and growth:
+        old9 = _git(ref.top, "show", f"{ref.sha}:public/tests/arch_baseline/{GROWTH_FILE}")
+        seen9 = {json.dumps(g, sort_keys=True, ensure_ascii=False) for g in parse_growth(old9 or "")[0]}
+        for g in growth:
+            if g["spec"] in cur and json.dumps(g, sort_keys=True, ensure_ascii=False) not in seen9:
+                print(f"  검수 [{GROWTH_FILE}] {ref.why} {ref.sha[:8]} 뒤 새 줄: {g['spec']} {g['key']} {g['f']} ≤ {g['to']} — {g['why']} ({g['commit']})")
     for name in sorted(cur):
         spec = SPECS[name]
         try:
@@ -420,11 +475,13 @@ def check(T, root: str, cur: dict) -> None:
             T.chk(False, f"[{name}] 기준선 파일 있음(arch_baseline/{name}.jsonl)", "없음 — 총괄이 --freeze 로 만든다")
             continue
         try:
-            bad, stale, succ = judge_now(spec, cur[name], base)
+            bad, stale, succ = judge_now(spec, cur[name], base, growth)
         except ValueError as e:
             T.chk(False, f"[{name}] 시험 이름 승계 표 읽힘", str(e))
             continue
         T.chk(not bad, f"[{name}] {spec.title} — 새 위반·나빠짐 0", bad[:40])
+        for x in grown(spec, base, growth)[1]:
+            print(f"  허용 [{name}] 성장 사유 표: {x}")
         if succ:
             print(f"  안내 [{name}] 8막 승계 인정(_sec_succession): {', '.join(sorted(succ))}")
         if stale:
@@ -482,7 +539,7 @@ def main(argv: list[str]) -> int:
     for name in names:
         spec, base = SPECS[name], load(name)
         if mode == "--show":
-            bad, stale = compare(spec, cur[name], base or _doc())
+            bad, stale = compare(spec, cur[name], grown(spec, base or _doc(), load_growth()[0])[0])
             print(f"[{name}] 실패 {len(bad)} · 좋아짐 {len(stale)}" + ("" if base else " (기준선 없음)"))
             for x in (bad + stale)[:12]:
                 print("   " + x)

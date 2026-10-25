@@ -247,7 +247,8 @@ ck("R8 보존 기간 안 세그먼트는 그대로 남김(반대 방향)", segs9
 os.remove(os.path.join(d9, "000000005.jsonl"))
 cv9 = LR.coverage({"evm": (3, 0)}, os.path.join(S, "inbox"))
 ck("R8 백업 세그먼트부터 끝까지 번호에 구멍 = gap(이어읽기면 5 를 조용히 건너뜀)", cv9["evm"]["state"] == "gap", cv9["evm"])
-cv9 = LR.coverage({"evm": (6, 0)}, os.path.join(S, "inbox"))
+an9 = {"evm": inbox.anchor(d9, 4, os.path.getsize(os.path.join(d9, "000000004.jsonl")))}
+cv9 = LR.coverage({"evm": (6, 0)}, os.path.join(S, "inbox"), an9)
 ck("R8 구멍이 백업 위치보다 앞이면 이어읽기(반대 방향)", cv9["evm"]["state"] == "replay", cv9["evm"])
 
 SOLQ = "So1Quiet11111111111111111111111111111111111"

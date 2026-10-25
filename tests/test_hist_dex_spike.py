@@ -131,7 +131,7 @@ chk(getattr(H1b, "dexbad", None) == {f"ca:eth:{CA_A}", f"ca:eth:{CA_C}"} and "6"
 G0 = {gid: G[gid] for gid in (2, 4)}
 k0 = H.make_kit(TODAY, G0, {2: 0.0, 4: 1000.0}, set(), {2, 4}, {}, set(), {}, {**LIVE, 4: 0.0}, PAIRS, [], {}, [], {})
 VERD = getattr(H, "dex_verdict", lambda hc, kit, days: None)
-chk(VERD(H1, k0, list(H.days_between(iso(1), iso(19)))) == set(), "A 바탕 0 이면 판정 안 함(지금 시세 없는 DEX 토큰만 가진 사용자)", None)
+chk(VERD(fresh("ds0"), k0, list(H.days_between(iso(1), iso(19)))) == set(), "A 바탕 0 이면 판정 안 함(지금 시세를 본 적 없는 DEX 토큰만 가진 사용자)", None)
 k0b = H.make_kit(TODAY, G0, {2: 0.0, 4: 1000.0}, set(), {2, 4}, {}, set(), {}, LIVE, PAIRS, [], {}, [], {})
 chk(VERD(H1, k0b, list(H.days_between(iso(1), iso(19)))) == {f"ca:eth:{CA_A}"},
     "A 지금 시세로 확인된 DEX 보유(L)는 바탕에 셈 → 그보다 큰 스팸 A 는 판정", None)
@@ -218,17 +218,17 @@ chk(close(((H5.st.get("d") or {}).get(iso(5)) or [None])[0], 1_000_000.0), "R2 �
     (H5.st.get("d") or {}).get(iso(5)))
 
 H8 = fresh("dsR8")
-H8.px["specs"] = {f"ca:eth:{CA_E}": ent({iso(5): 2_000_000.0})}
+H8.px["specs"] = {f"ca:eth:{CA_E}": ent({iso(5): 20_000_000.0})}
 H8.run_once(k5, cap=0, now=NOW)
-chk(close(((H8.st.get("d") or {}).get(iso(5)) or [None])[0], 1_000_000.0), "R8 준비 — 바탕보다 큰 DEX 값(지금 시세 없음) = (A) 판정", (H8.st.get("d") or {}).get(iso(5)))
+chk(close(((H8.st.get("d") or {}).get(iso(5)) or [None])[0], 1_000_000.0), "R8 준비 — 바탕의 DEX_SHARE_X 배 넘는 DEX 값(지금 시세 없음) = (A) 판정", (H8.st.get("d") or {}).get(iso(5)))
 st8 = H8.st
 st8["meta"] = dict(st8["meta"], updated=int(NOW) + 300)
 statefile.atomic_write_json(H8.path, st8)
 H8 = fresh("dsR8")
-H8.px["specs"] = {f"ca:eth:{CA_E}": ent({iso(5): 2_000_000.0})}
-k8 = H.make_kit(TODAY, G5, {1: 1_000_000.0, 7: 1.0}, set(), {7}, {}, set(), {}, {1: 1.0, 7: 2000.0}, {7: [("eth", CA_E)]}, [], {}, [], {})
+H8.px["specs"] = {f"ca:eth:{CA_E}": ent({iso(5): 20_000_000.0})}
+k8 = H.make_kit(TODAY, G5, {1: 1_000_000.0, 7: 1.0}, set(), {7}, {}, set(), {}, {1: 1.0, 7: 20000.0}, {7: [("eth", CA_E)]}, [], {}, [], {})
 H8.run_once(k8, cap=0, now=NOW + 600)
-chk(close(((H8.st.get("d") or {}).get(iso(5)) or [None])[0], 3_000_000.0), "R8 롤백 복귀 + 가드 풀림(지금 시세 생김) = 저장 상태와 비교해 굳은 행 되돌림",
+chk(close(((H8.st.get("d") or {}).get(iso(5)) or [None])[0], 21_000_000.0), "R8 롤백 복귀 + 가드 풀림(지금 시세 생김) = 저장 상태와 비교해 굳은 행 되돌림",
     (H8.st.get("d") or {}).get(iso(5)))
 
 H7 = fresh("dsR7")

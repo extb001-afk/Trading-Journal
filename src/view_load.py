@@ -1,6 +1,7 @@
 from __future__ import annotations
 import bisect
 import logs, paths, statefile
+import prefs_ident
 import json
 import os
 import re
@@ -30,6 +31,34 @@ class LoadMixin:
     def prefs(self):
         return statefile.read_json(paths.state("ui_prefs.json"), {"plans": {}, "ignored": []}) \
             if os.path.exists(paths.state("ui_prefs.json")) else {"plans": {}, "ignored": []}
+
+    def _prefs_ident(self, conn, prefs):
+        idents = prefs_ident.ident_map(conn)
+        epoch = prefs_ident.ledger_epoch(conn)
+        eff, hold, bind = prefs_ident.resolve(prefs, idents, epoch)
+        self._prefid = {"idents": idents, "epoch": epoch, "hold": hold, "bind": bind, "need": prefs_ident.needs_write(prefs, bind, epoch)}
+        return eff
+
+    def _prefid_eff(self, prefs):
+        pi = self.__dict__.get("_prefid")
+        return prefs_ident.resolve(prefs, pi["idents"], pi["epoch"])[0] if pi else prefs
+
+    def _prefid_persist(self) -> bool:
+        pi = self.__dict__.get("_prefid")
+        if not pi or not pi.get("need"):
+            return False
+        lk = prefs_ident.write_lock()
+        if not lk.acquire(blocking=False):
+            return False
+        try:
+            cur = statefile.read_json(paths.state("ui_prefs.json"), {}) or {}
+            new = prefs_ident.bind_doc(cur, pi["bind"], pi["epoch"]) if isinstance(cur, dict) else None
+            if new is not None:
+                statefile.atomic_write_json(paths.state("ui_prefs.json"), new)
+        finally:
+            lk.release()
+        pi["need"] = False
+        return new is not None
 
     def _load(self, conn):
         rows = conn.execute(

@@ -5,7 +5,6 @@ sys.dont_write_bytecode = True
 
 import json  # noqa: E402
 import os  # noqa: E402
-import subprocess  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -162,18 +161,14 @@ if len(sys.argv) > 2 and sys.argv[1] == "--case":
         f, b = build()
         out = {"total": usd_total(f), "expect": {"zero": 0.0, "equal": 1000.0, "mixed": 1510.0}.get(mode, 1010.0)}
     out["net"] = list(T.NET_TRIES)
-    print("CASE " + json.dumps(out, default=str), flush=True)
+    T.case_emit(out)
     sys.exit(0)
 
 import _harness as T  # noqa: E402
 
 
 def child(case):
-    p = subprocess.run([sys.executable, os.path.abspath(__file__), "--case", case], cwd=HERE, capture_output=True, text=True, timeout=600)
-    for ln in p.stdout.splitlines():
-        if ln.startswith("CASE "):
-            return json.loads(ln[5:])
-    return {"_err": (p.stdout[-600:] + p.stderr[-1200:])}
+    return T.case_run([sys.executable, os.path.abspath(__file__), "--case", case], cwd=HERE)
 
 
 for side in ("buy", "sell"):
@@ -205,7 +200,7 @@ for side in ("buy", "sell"):
 
 for mode in ("near", "far", "zero", "equal", "mixed"):
     r = child(f"tr_{mode}")
-    T.chk(r.get("total") == r.get("expect") and not r.get("net"), f"R2 받는 거래소 첫 대사 전 전송 중 ({mode}) = {r.get('expect')}", r)
+    T.chk("_err" not in r and r.get("total") == r.get("expect") and not r.get("net"), f"R2 받는 거래소 첫 대사 전 전송 중 ({mode}) = {r.get('expect')}", r)
 
 import config, paths, statefile  # noqa: E402
 import core  # noqa: E402

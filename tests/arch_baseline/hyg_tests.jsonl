@@ -7,7 +7,6 @@
 {"key": "_harness.py", "str_checks": 8, "str_neg": 3, "patch_attr": 5, "patch_call": 3}
 {"key": "_sec_lint.py", "str_checks": 1}
 {"key": "_suifake.py", "patch_attr": 1}
-{"key": "test_acct_recovery.py", "patch_attr": 21, "patch_call": 5, "patch_foreign": 5}
 {"key": "test_acct_slot_move.py", "patch_attr": 19, "patch_call": 2, "patch_foreign": 1}
 {"key": "test_ai_cli_error.py", "patch_attr": 9}
 {"key": "test_ai_inject_canary.py", "patch_attr": 1}

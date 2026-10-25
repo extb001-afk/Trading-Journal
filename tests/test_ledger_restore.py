@@ -4,6 +4,7 @@ import sys
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
 
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
@@ -326,6 +327,8 @@ def make_backup(path):
     for e in ex:
         c.execute("INSERT INTO raw_ex VALUES(?,?,?,?,?,?)", (e[0], e[1], e[2], e[3], json.dumps(e[4]), T_BK))
     c.execute("INSERT INTO inbox_offsets VALUES('evm', 2, 10)")
+    c.execute("INSERT INTO meta VALUES(?, ?)", (inbox.ANCHOR_META + "evm", json.dumps(
+        {"seg": 2, "off": 10, "n": 10, "h": hashlib.sha256((json.dumps({"kind": "x", "chain": "eth", "i": 0}) + "\n").encode()[:10]).hexdigest()})))
     c.execute("INSERT INTO inbox_offsets VALUES('sol', 1, 0)")
     c.execute("INSERT INTO inbox_offsets VALUES('bsc', 1, 0)")
     c.execute("INSERT INTO inbox_offsets VALUES('ex', 3, 0)")

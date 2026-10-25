@@ -60,7 +60,7 @@ try:
     rj = [f(7, iso(d), 100.0, ref=LIVE_J) for d in (11, 10, 9, 5)]
 except TypeError as e9:
     rj = [("TypeError", str(e9))]
-chk(rj == [(None, "none")] * 4, "F2 얇은 풀 일봉(8,000배) · 이어 붙인 값 = 쓰지 않음(근사 확정 'none')", rj)
+chk(rj == [(None, "suspect")] * 3 + [(None, "none")], "F2 얇은 풀 일봉(8,000배) = 쓰지 않음(의심 'suspect' — PD02: 출처 없음과 분리) · 값 없는 날 = 'none'", rj)
 chk(f(7, iso(10), 100.0) == (GT_J, "ok"), "F2 기준가 없이 부르면(종전 호출) = 종전대로 값", f(7, iso(10), 100.0))
 try:
     rj2 = f(7, iso(10), 100.0, ref=GT_J / 2)
@@ -91,7 +91,9 @@ except TypeError as e9:
 kj = [(dpx[d9].get("k") or {}).get("7") for d9 in D]
 pj = [(dpx[d9].get("p") or {}).get("7") for d9 in D]
 chk(all(k9 is None for k9 in kj) and all(p9 == LIVE_J for p9 in pj), "F3 TKJ 날별 가격 = 한 출처(근사) 그대로 — 'd' 로 뒤집힌 날 0", list(zip(kj, pj)))
-chk(all("7" in (dpx[d9].get("dcn") or ()) for d9 in D), "F3 TKJ = 근사 확정(dcn) — 빌드마다 다시 묻지 않음", [dpx[d9].get("dcn") for d9 in D])
+GT_DAYS = {iso(12), iso(11), iso(10), iso(9)}
+chk(all(("7" in (dpx[d9].get("dcn") or ())) == (d9 not in GT_DAYS) for d9 in D),
+    "F3 TKJ 얇은 풀 일봉 날 = 의심(근사 그대로 · 확정 안 함 — PD02 강한 출처가 오면 회복) · 값 없는 날 = 근사 확정(dcn)", [dpx[d9].get("dcn") for d9 in D])
 ks = [(dpx[d9].get("k") or {}).get("8") for d9 in D]
 chk(all(k9 == "d" for k9 in ks) and all(abs(daily[d9]["g"]["8"] - 50.0) < 1e-6 for d9 in D), "F3 TKS(코인게코 · 5배) = 종전대로 그날 마감가로 재평가", ks)
 dv = [round(daily[d9]["val"] - val0[d9], 2) for d9 in D]

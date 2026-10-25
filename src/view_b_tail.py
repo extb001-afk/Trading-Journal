@@ -3,7 +3,7 @@ import addr_ai
 import attfreeze
 import balcheck
 import buildproc
-import config, paths, statefile
+import config, paths, prefs_ident, statefile
 import histcurve
 import json
 import netpace
@@ -264,7 +264,7 @@ class TailMixin:
                        "pend": {"n": len(neg_pd9), "usd": round(sum(n9["usd"] for n9 in neg_pd9), 2)}},
                "proof_div": list(self.spot.proof_div), "ex_dead": dict(self.spot.ex_dead), "ex_dead_held": dead_held9,
                "alt_spread": px_alt.held_spread(getattr(self.spot, "alt_spread", None) or {}, coins, ex_gid, G, set(self.spot.upbit_alt) - set(self.spot.upbit_krw)),
-               "unpriced_held": unpriced_facts(unpriced_w),
+               "unpriced_held": unpriced_facts(unpriced_w), "prefid": prefs_ident.diag(self.__dict__.get("_prefid")),
                "gt": dict(self.spot.gt_stat), "ds": dict(self.spot.ds_stat), "goplus": dict(GOPLUS_STATUS, started=int(GOPLUS_T0)),
                "dex_age": {"n": len(dex_rows9), "usd": round(dex_tot9, 2), "p90w": p90w9,
                            "max": dex_rows9[-1][0] if dex_rows9 else None},

@@ -29,7 +29,7 @@ MAX_TRIES = 3
 DIRTY_MARGIN_S = 1800
 SMALL_USD = 1.0
 DEX_JUMP_X = 1000.0
-DEX_SHARE_X = 1.0
+DEX_SHARE_X = 10.0
 GUARD_V = 1
 SPIKE_WARN_X = 30.0
 EPS = 1e-12
@@ -240,7 +240,8 @@ def weak_days(e: dict | None, upto: str) -> set:
 
 
 def dex_verdict(hc: "HistCurve", kit: dict, days: list) -> set:
-    groups, specs, base, cand, pm, weak = kit["groups"], hc.px.get("specs") or {}, dict.fromkeys(days, 0.0), [], {}, {}
+    groups, specs, base, cand, pm, weak, seen = kit["groups"], hc.px.get("specs") or {}, dict.fromkeys(days, 0.0), [], {}, {}, hc.__dict__.setdefault("dexlp", {})
+    dg = set(kit.get("dg") or ())
     for gid, qd in (rewind(kit, days) if days else {}).items():
         g = groups[gid]
         sp = None if g.get("skip") else spec_of(g)
@@ -249,11 +250,15 @@ def dex_verdict(hc: "HistCurve", kit: dict, days: list) -> set:
         if sp not in pm and sp not in ("stable", "ov"):
             ent = hc._clean(sp, specs, bad=set())
             pm[sp], weak[sp] = pmap_of(ent, days[-1]), weak_days(ent, days[-1])
+        if gid in dg:
+            seen.pop(sp, None)
+        elif float(g.get("lp") or 0) > 0 and (weak.get(sp) or str(sp).startswith("ca:")):
+            seen[sp] = float(g["lp"])
+        lp = float(g.get("lp") or 0) or xparts.num(seen.get(sp)) or 0.0
         for day, q in qd.items():
             px = 1.0 if sp == "stable" else (g["ov"] if sp == "ov" else pm[sp].get(day))
             if day not in base or not px:
                 continue
-            lp = float(g.get("lp") or 0)
             if day in weak.get(sp, ()) and not (lp > 0 and px <= DEX_JUMP_X * lp):
                 cand.append((sp, day, abs(q * px)))
             else:
@@ -296,7 +301,7 @@ def guard_recheck(hc: "HistCurve", kit: dict, stores: tuple, win: set, today: st
     meta, (rows, _s, _x, flows) = hc.st.get("meta") or {}, stores
     gk_ok = meta.get("gk") == [GUARD_V, meta.get("updated")]
     bad = dex_verdict(hc, kit, days)
-    cuts, saved = guard_cuts(hc, bad), dict(meta.get("dexcut") or {})
+    cuts, saved = guard_cuts(hc, bad), dict(meta["dexcut"]) if isinstance(meta.get("dexcut"), dict) else {}
     if gk_ok and cuts == saved:
         return bad, cuts, []
     ck = sorted(k for k, r in rows.items() if k not in win and k < today and isinstance(r, list) and len(r) >= 4 and r[3] == "hc")
@@ -1047,7 +1052,7 @@ class HistCurve:
         self.flow_fails = 0
         self.dirty_fails = 0
         self.dirty_fail_key = None
-        self.dexbad, self.dexcut, self.spike_seen = set(m9.get("dexbad") or ()), dict(m9.get("dexcut") or {}), None
+        self.dexbad, self.dexcut, self.dexlp, self.spike_seen = set(m9.get("dexbad") or ()), *(dict(m9[key]) if isinstance(m9.get(key), dict) else {} for key in ("dexcut", "dexlp")), None
 
     def _dirty_marks(self):
         try:
@@ -1345,7 +1350,7 @@ class HistCurve:
         meta = dict(self.st.get("meta") or {})
         meta.update(adopted_day=today, adopted_at=int(now), first=first, updated=int(now),
                     calls=int(meta.get("calls") or 0) + rep["calls"], runs=int(meta.get("runs") or 0) + 1,
-                    gk=[GUARD_V, int(now)], dexbad=sorted(self.dexbad), dexcut=self.dexcut)
+                    gk=[GUARD_V, int(now)], dexbad=sorted(self.dexbad), dexcut=self.dexcut, dexlp=self.dexlp)
         self.progress["calls"] = meta["calls"]
         meta.update(pending=bool(self.pending), progress={k9: v9 for k9, v9 in self.progress.items() if k9 != "calls"},
                     flow_pending=bool(self.flow_pending))
@@ -1589,12 +1594,12 @@ class HistCurve:
         return xparts.ub_cut(ub, float(uat), xk.get("sym_tl") or {}, q_of)[0]
 
     @staticmethod
-    def _row(priced, miss, xr, fx, kind):
+    def _row(priced, miss, xr, fx, kind, nm=0):
         usd = round(float(priced) + float(xr["x"]), 2)
         krw = round(usd * fx) if fx else None
         if kind == "hp":
             return [usd, krw, 1, "hp", round(float(miss) + float(xr["xc"]), 2) or 1.0]
-        ap = ap_flag(usd, miss, xr["xc"])
+        ap = 1 if nm else ap_flag(usd, miss, xr["xc"])
         return [usd, krw, ap, "hc", round(float(miss) + float(xr["xc"]), 2) if ap else 0]
 
     def _x_refresh(self, kit, d, s, xs, win, today):
@@ -1631,7 +1636,7 @@ class HistCurve:
                 continue
             xs[iso] = xr
             s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]] + cov[5:8]
-            d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), r[3])
+            d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), r[3], cov[3])
             n += 1
         if redo:
             qty = rewind(kit, redo)
@@ -1641,7 +1646,7 @@ class HistCurve:
                 xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=xs.get(iso), qcache=qc9)
                 xs[iso] = xr
                 s[iso] = [cov[0], cov[1], xr["xc"], cov[3], xr["cut"]] + cov[5:8]
-                d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), d[iso][3])
+                d[iso] = self._row(cov[0], cov[1], xr, self.fx(iso), d[iso][3], cov[3])
                 n += 1
         for iso, row in sorted((kit.get("dcv") or {}).items()):
             r9 = d.get(iso)
@@ -1711,7 +1716,7 @@ class HistCurve:
                                 pin9.pop(key9, None)
                     old9 = dict(old9, p=pin9)
             xr = self._x_rec(kit, iso, lambda gid, _i=iso: (qty.get(gid) or {}).get(_i, 0.0), old=old9, qcache=qc9)
-            out[iso] = {"row": self._row(priced, miss, xr, fx, "hc"),
+            out[iso] = {"row": self._row(priced, miss, xr, fx, "hc", n_miss),
                         "cov": [round(priced, 2), round(miss, 2), xr["xc"], n_miss, xr["cut"]], "x": xr["x"], "xr": xr}
         return out
 
@@ -1733,7 +1738,7 @@ class HistCurve:
             c9, xr9 = s9.get(k), x9.get(k)
             if (isinstance(r9, list) and len(r9) >= 4 and r9[3] in ("hc", "hp") and isinstance(c9, list) and len(c9) >= 5
                     and isinstance(xr9, dict) and xr9.get("x") is not None):
-                return self._row(c9[0], c9[1], xr9, self.fx(k), r9[3])
+                return self._row(c9[0], c9[1], xr9, self.fx(k), r9[3], c9[3])
             return r9
         if meta.get("first"):
             keys = [k for k in keys if k >= meta["first"]]
@@ -1889,9 +1894,9 @@ class DayClose:
                 memo[gid] = spec_of(group_desc(gid, g, ca_gids, ex_gid, major_gids, override_px, pairs, stable_syms)) if g else None
             return memo[gid]
 
-        def f(gid, iso, w=0.0, ref=None):
-            got = self.lookup(spec9(gid), iso, now, w)
-            return (None, "none") if weak_spike(self, spec9(gid), iso, got[0], ref) else got
+        def f(gid, iso, w=0.0, ref=None, ask=True):
+            got = self.lookup(spec9(gid), iso, now, w, ask=ask)
+            return (None, "suspect") if weak_spike(self, spec9(gid), iso, got[0], ref) else got
         f.gen = self.gen
         f.spec = spec9
         m9 = self.st.get("px1004") if isinstance(self.st.get("px1004"), dict) else {}
