@@ -133,7 +133,8 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
   - 비밀번호를 잊었으면 이 컴퓨터에서 `python3 tools/reset_password.py`(지운 뒤 /login 에서 새로 만들기) 또는
     `python3 tools/reset_password.py --set`(터미널에서 바로 입력). 실행 중인 tj-web 이 바로 알아챕니다.
   - 끄기 = `config.json` 의 `"web": {"login": {"enabled": false}}` → `pm2 restart tj-web`(켜기·끄기·기간 변경은 재시작 때 반영).
-    끄면 이 주소에 닿는 누구나 화면을 볼 수 있습니다.
+    끄면 이 주소에 닿는 누구나 화면을 볼 수 있습니다. `bind` 가 `tailscale`·사설 IP 인데 끄면 tj-web 이 **시작을 거부**합니다
+    (같은 네트워크 누구나 자산 전부를 보게 되므로 — 그래도 열려면 `"login": {"enabled": false, "allow_lan_without_password": true}` 명시 · 권장 안 함).
   - 같은 컴퓨터의 유닛(tj-review)은 내부 토큰(`state/auth_internal_token`, tj-web 이 켜질 때마다 새로 만듦)으로 자동 통과합니다.
     직접 조회할 땐 토큰이 명령줄(프로세스 목록)에 남지 않게 헤더를 파일 꼴로 넘기세요:
     `curl -H @<(printf 'X-TJ-Internal: %s\n' "$(cat state/auth_internal_token)") http://127.0.0.1:8023/api/state`
@@ -154,6 +155,7 @@ pm2 없이 돌려도 상태 패널은 각 유닛이 남기는 `state/runner_<유
     ```
     헤더를 붙일 수 없는 프록시를 쓰거나 확실히 하고 싶으면 `config.json` 에 `"web": {"behind_proxy": true}` — 모든 요청을 프록시 경유로 봅니다
     (그때 웹 화면에선 첫 비밀번호를 만들 수 없어요 — 이 컴퓨터 터미널에서 `python3 tools/reset_password.py --set` 으로 바로 입력합니다(인자 없이 실행하면 지우기만 해요) · 내부 토큰 조회는 안 됩니다).
+    `behind_proxy` 면 로그인 쿠키에 늘 `Secure` 가 붙습니다(HTTPS 프록시 전제 — HTTP 프록시 뒤라면 `"login": {"secure_cookie": false}` 를 명시해야 로그인되고, 그때 tj-web 이 시작할 때 오류로 알립니다).
   - **`ssh -R`·`socat`·`tailscale serve --tcp`·`ngrok tcp` 같은 순수 TCP 중계로 열지 마세요.** 헤더를 붙이지 않아 이 컴퓨터에서 직접 연 것처럼
     보입니다(첫 비밀번호 만들기·내부 토큰·시도 상한 예외가 밖에 열림). HTTP 를 이해하는 프록시(헤더를 붙이는 것 — `tailscale serve`·`funnel` 은 `Tailscale-*`)만 쓰세요.
   - 로그인 화면은 `http://` 로 열렸는데 이 컴퓨터·테일넷 주소가 아니면 '암호화되지 않은 주소' 경고를 띄웁니다(비밀번호·쿠키가 그대로 오감).

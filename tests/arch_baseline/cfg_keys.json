@@ -1448,7 +1448,6 @@
   "nodesel:node_bad|guard|_CFG[slo]",
   "onboarding:_alchemy_save_net|whole|for in wallets",
   "onboarding:_tier_view|whole|for in wallets",
-  "other_assets:Quoter.broker_cycle|guard|cfg.get('other_assets') or {}[broker_every_sec]",
   "other_assets:Quoter.broker_cycle|guard|cfg[brokers]",
   "other_assets:Quoter.broker_cycle|guard|cfg[other_assets]",
   "other_assets:Quoter.cycle|guard|cfg[quote_every_sec]",

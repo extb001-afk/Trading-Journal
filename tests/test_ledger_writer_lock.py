@@ -290,7 +290,9 @@ try:
 
         EXEMPT = {"prep_hotfix_h_caches.py": "읽기만 — 부속 파일(-wal·-shm) 유지용 연결로 SELECT 1 · 원장 사본 전용(라이브 경로 금지)"}
         writers, missing = [], []
-        for fn in sorted(os.listdir(TOOLS)):
+        ONE = os.path.join(TOOLS, "oneoff")
+        names9 = sorted(os.listdir(TOOLS)) + sorted(os.path.relpath(os.path.join(dp, f), TOOLS) for dp, _d, fs in os.walk(ONE) for f in fs)
+        for fn in names9:
             if not fn.endswith(".py"):
                 continue
             t9 = ast.parse(open(os.path.join(TOOLS, fn), encoding="utf-8").read())
@@ -304,6 +306,9 @@ try:
         chk(known <= set(writers), "D2 (검사기 자체) 알려진 원장 작성 도구를 원장 쓰기로 알아봄(공개판 도구 7)", sorted(known - set(writers)))
         ro_only = {"verify_fixc.py", "offsite_backup.py", "negabs.py", "token_recheck.py", "negabs_1010.py", "token_recheck_1010.py", "fill_decimals.py", "replay_poison.py"}
         chk(not (ro_only & set(writers)), "D3 (검사기 자체) 읽기 전용·요청 파일 도구는 원장 작성자로 안 봄", sorted(ro_only & set(writers)))
+        one9 = {"oneoff/2026.08.30/repair_bithumb_fills.py", "oneoff/2026.08.30/repair_comp_assets.py", "oneoff/2026.08.31/repair_anchor_ts.py"}
+        one9 = {fn for fn in one9 if os.path.isfile(os.path.join(TOOLS, fn))}
+        chk(one9 <= set(writers), "D4 (검사기 자체) tools/oneoff/<판>/ 의 원장 작성 도구도 검사함(있는 것 %d)" % len(one9), sorted(one9 - set(writers)))
     else:
         chk(True, "D 건너뜀 — tools/ 없는 배치")
 finally:

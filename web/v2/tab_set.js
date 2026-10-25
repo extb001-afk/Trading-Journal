@@ -260,7 +260,7 @@
         limits: { cap: '옛 기록을 어디까지 주는지 · 봇이 실제로 어디부터 가져왔는지(하루 한 번 갱신)', body: () => '<div class="sx-card">' + coverageBody() + '</div>' } } },
     account: { cap: '로컬 웹 로그인(비밀번호 하나) · 켜기·끄기는 config.json web.login', body: () => '<div class="sx-card">' + loginBody() + '</div>' },
     advanced: { cap: '실험 기능 · 설정을 바꾼 뒤 적용되는 방식', body: sxAdvBody,
-      subs: { brokers: { cap: '보유 종목·예수금을 읽기만 · 미검증(실험 안 함) · 켜기 = 서버 config.json brokers', body: () => '<div class="sx-card">' + brokersBody() + '</div>' } } }
+      subs: { brokers: { cap: '보유 종목·예수금을 읽기만 · 실험(미검증) · 켜기 = config.json brokers+실험 확인', body: () => '<div class="sx-card">' + brokersBody() + '</div>' } } }
   };
 
   function sxWalletsBody() {

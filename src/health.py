@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
-import config, logs, net_http, paths, prefs_ident, statefile
+import chk_base, config, evm_reorg, logs, net_http, paths, prefs_ident, statefile
 import fsio
 import health_ack
 
@@ -725,6 +725,7 @@ def _eval_feeds(_bs9):
                                   if bu in ("evm", "sol") else f"{key} 하루 한도 안에서 남는 몫으로 천천히 채우는 중(새 거래 확인 먼저)") if slow9 else f"{key} {it.get('phase')}"),
                 "해당 유닛 로그 확인(pm2 logs " + un + ") — 거래소 API 한도·권한이면 설정의 날짜를 늦추거나 그대로 두세요(원장 재계산은 막지 않음)",
                 persist=0, resolve=600, notify=False, remind=False, kind="bfstall")
+    evm_reorg.health_items(add, obs, units, open_ids, CHAIN_NAME)
     for k9, s9 in (((obs.get("hb") or {}).get("evm") or {}).get("sources") or {}).items():
         gaps = (s9 or {}).get("native_gaps") or []
         if not gaps or "tj-evm" not in units:
@@ -788,6 +789,7 @@ def _eval_feeds(_bs9):
                 ("다른 값은 덮지 않았어요 — 상태 › 정리 요청 › '자리수 다름'에서 확인하고 관측값으로 다시 기장 요청(또는 python3 tools/fill_decimals.py)"
                  if cf else "다음 자동 재구축에서 채워져요(수량 표시가 맞춰짐 · 손익이 바뀌면 재계산 승인 필요)"),
                 persist=0, resolve=600, remind=False, kind="ledger")
+    chk_base.decwait_item(add, chip, obs.get("decwait"), units, open_ids, now)
     po = obs.get("poison")
     if "tj-core" in units and ((isinstance(po, dict) and int(po.get("total") or 0) > 0) or "ledger:poison" in open_ids):
         n9 = int((po or {}).get("total") or 0) if isinstance(po, dict) else 0
@@ -2791,7 +2793,7 @@ class Monitor:
                 "bf": _read(paths.state("backfill_status.json"), {}) or {},
                 "fill_paced": _fill_paced_map(cfg, now),
                 "extrb": _read(paths.state("ext_rebuild_status.json"), None),
-                "decis": _read(paths.state("asset_decimals_issues.json"), None),
+                "decis": _read(paths.state("asset_decimals_issues.json"), None), "decwait": _read(paths.state("decimals_wait.json"), None),
                 "poison": collect_poison(),
                 "chart_dex": collect_chart_dex(now),
                 "nonevm_gaps": collect_nonevm_gaps(cfg),

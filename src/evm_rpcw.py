@@ -4,7 +4,7 @@ import os
 import time
 import urllib.request
 import config, logs, paths, statefile
-import bf_engine
+import bf_engine, evm_reorg
 from evm_base import BisectBudget
 from evm_base import ChainDisabled
 from evm_base import HoldError
@@ -214,7 +214,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             d[h] = d.get(h, 0) + n
         h0 = host(rpcs[0]) if rpcs else "?"
         hs = host(state[0]) if state else h0
-        add(st, h0, 2 * cyc)
+        add(st, h0, 4 * cyc)
         nw9 = max(1, n_wallets)
         st_cost = (nw9 + math.ceil(nw9 / 150)) if mc else 2 * nw9
         add(st, hs, st_cost * cyc)
@@ -241,6 +241,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.chain_id = int(cc["chain_id"]) if cc.get("chain_id") else None
         self.conf_depth = int(cc.get("conf_depth", 12))
+        self.reorg_set = evm_reorg.settings(cc)
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.backfill_full = bool(cfg.get("backfill_full_history"))
         self.bpd = int(cc.get("blocks_per_day", 43200))
@@ -1039,7 +1040,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 self.cursor = cur
                 self._sweep_add(live0, live)
         for k9, v9 in old.items():
-            if str(k9).startswith("_cov:") or k9 in ("_quarantine", "_detail_fail", "_q_released", "_wallets"):
+            if str(k9).startswith("_cov:") or k9 in ("_quarantine", "_detail_fail", "_q_released", "_wallets", "_reorg"):
                 cur[k9] = v9
         if isinstance(old.get("_quarantine_left"), dict):
             q9 = cur["_quarantine"] if isinstance(cur.get("_quarantine"), dict) else cur.setdefault("_quarantine", {})
@@ -1315,7 +1316,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 if old:
                     statefile.atomic_write_json(self.cursor_path + ".explorer_legacy", old)
                 start = self._window_start(safe)
-                self.cursor = {"_rpc_v": self.VERSION, "_start": int(start)}
+                self.cursor = {"_rpc_v": self.VERSION, "_start": int(start), **({"_reorg": old["_reorg"]} if evm_reorg.held(old) else {})}
                 xc9 = {k: v for k, v in old.items() if not str(k).startswith("_") and isinstance(v, int) and not isinstance(v, bool)}
                 self.cursor["_xcurs"] = xc9
                 if bf_engine.SINCE.target(self.chain):
@@ -1962,6 +1963,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         safe = head - self.conf_depth
         self._st_safe = int(safe)
         self._init(safe)
+        safe = evm_reorg.cycle_check(self, safe)
         try:
             self._quarantine_retry(head)
         except Exception as e:  # noqa: BLE001 [boundary]

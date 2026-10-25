@@ -18,6 +18,10 @@
 
 기본은 모두 꺼짐(`"enabled": false` 또는 항목 없음). 켠 뒤 서버(tj-web)를 다시 시작해야 반영됩니다.
 
+**실험 켜기 확인(필수)**: 미검증 어댑터라 `"other_assets": {"brokers": {"experimental_ack": true}}`(글자 `"true"`·`1` 은 안 됨 — true 만)가 있어야 켜집니다.
+없으면 `enabled: true` 인 증권사도 동기화하지 않고 설정 › 증권사 연결 상태 줄에 '실험 확인 필요'가 뜹니다.
+이 확인이 생기기 전(2026.10.25.3 까지)부터 켜 두어 이 설치에서 한 번이라도 동기화된 연결은 업데이트 뒤에도 끊지 않고 계속 돌며, 상태 줄에 노란 안내만 뜹니다(확인을 넣으면 사라짐).
+
 ```json
 "brokers": {
   "kis":    {"enabled": false, "app_key": "", "app_secret": "", "account": "12345678-01", "paper": false, "overseas": true, "overseas_exchanges": ["NASD"]},
@@ -29,7 +33,7 @@
   "ibkr":   {"enabled": false, "gateway_url": "https://localhost:5000/v1/api", "account_id": ""},
   "schwab": {"enabled": false, "app_key": "", "app_secret": "", "refresh_token": ""}
 },
-"other_assets": {"quotes": true, "quote_every_sec": 900, "broker_every_sec": 3600}
+"other_assets": {"quotes": true, "quote_every_sec": 900, "broker_every_sec": 3600, "brokers": {"experimental_ack": false}}
 ```
 
 | 키 | 증권사 | 필수 필드 | 선택 필드 | 공개 문서 | 무엇을 부르나 |

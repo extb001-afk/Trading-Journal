@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutTimeout
 import urllib.request
-import logs, paths, statefile
+import evm_reorg, logs, paths, statefile
 import bf_engine
 import tsfix
 import addr_tier
@@ -19,7 +19,7 @@ from evm_base import _revoke_stamp_disk
 from evm_base import http_json
 from evm_base import new_view_wallets
 from evm_base import rpc_handback
-from evm_synth import RpcSynthMixin
+from evm_synth import RpcSynthMixin, bs_dec_fill
 import logging
 
 log = logging.getLogger('tj-evm')
@@ -29,7 +29,8 @@ class ChainWatcher(RpcSynthMixin):
         self.chain = chain
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.base = cfg["chains"][chain]["blockscout"].rstrip("/")
-        self.conf_depth = int(cfg["chains"][chain].get("conf_depth", 12))
+        chain_cc = cfg["chains"][chain]
+        self.conf_depth = int(chain_cc.get("conf_depth", 12))
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.bpd = int(cfg["chains"][chain].get("blocks_per_day", 43200))
@@ -40,6 +41,7 @@ class ChainWatcher(RpcSynthMixin):
         self.cursor = statefile.read_json(self.cursor_path, {})
         if self.cursor.get("_rpc_v") is not None:
             self._rpc_handback()
+        evm_reorg.ack_start(self, chain_cc)
         self.pending_detail = statefile.read_json(
             paths.state(f"pending_detail_{chain}.json"), {})
         self.fail_streak = {}
@@ -1254,7 +1256,7 @@ class ChainWatcher(RpcSynthMixin):
     def emit(self, txhash: str, snapshot: dict, head: int, repair: str = None):
         rec = {
             "v": 1, "kind": "evm_tx", "chain": self.chain, "txhash": txhash,
-            "snapshot": snapshot,
+            "snapshot": bs_dec_fill(self, snapshot),
             "wallets": self.wallets,
             "observed_head": head, "ts": int(time.time()),
         }

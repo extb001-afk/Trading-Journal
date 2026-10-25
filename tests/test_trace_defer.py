@@ -15,7 +15,7 @@ POLL = 60
 URL = "http://127.0.0.1:9/rpc"
 TA, TB = "http://127.0.0.1:9/trA", "http://127.0.0.1:9/trB"
 CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 16661, "rpcs": [URL], "getlogs_span": 10_000_000,
-                                             "conf_depth": 10, "blocks_per_day": 43200, "poll_sec": POLL, "cycle_budget_sec": 240,
+                                             "conf_depth": 10, "reorg_check": False, "blocks_per_day": 43200, "poll_sec": POLL, "cycle_budget_sec": 240,
                                              "rpc_log_span_caps": {URL: 5000}}},
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:

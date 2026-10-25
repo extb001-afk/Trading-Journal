@@ -21,7 +21,7 @@
     if (S.hide) return sym + pvW(PVM.px);
     return sym + rw(cur === 'KRW' ? nf('ko-KR', 0, 0).format(Math.round(v)) : nf('en-US', 2, 2).format(v));
   }
-  const oaBrkPend = () => arr(S.oa.d && S.oa.d.brokers).filter(b => b.enabled && !(b.status && b.status.ok === true));
+  const oaBrkPend = () => arr(S.oa.d && S.oa.d.brokers).filter(b => b.enabled && !(b.status && (b.status.ok === true || b.status.gate)));
   function oaTot() {
     const it = oaItems(), D = S.D, A0 = it.filter(o => !o.liab), L0 = it.filter(o => o.liab);
     const pa = A0.filter(oaUnv), pd = L0.filter(oaUnv), pend = pa.concat(pd);
@@ -451,8 +451,8 @@
   function brokersBody() {
     oaNeed(300000);
     const bl = arr(S.oa.d && S.oa.d.brokers);
-    const rows = bl.length ? bl.map(b => '<div class="srow"><span class="dot' + (b.enabled ? (b.status && b.status.ok === false ? ' w' : '') : ' off') + '"></span><div style="min-width:0;flex:1"><b>' + esc(b.name) + '</b> <span class="pill w sm" title="' + esc(b.note || OA_UNVER) + '">미검증(실험 안 함)</span>'
-      + '<div class="cap">' + (b.enabled ? (b.status && b.status.at ? (b.status.ok ? '마지막 동기화 ' + esc(fmtTs(b.status.at)) + ' · <span class="pvx">' + num(b.status.n) + '종목</span>' : '동기화 실패 · ' + esc(errTxt(b.status.err || ''))) : '켜짐 · 첫 동기화 대기') : '꺼짐') + (b.configured ? '' : ' · 설정 필드: ' + esc(arr(b.fields).join(', '))) + '</div></div>'
+    const rows = bl.length ? bl.map(b => '<div class="srow"><span class="dot' + (b.enabled ? (b.status && b.status.ok === false || b.ack ? ' w' : '') : ' off') + '"></span><div style="min-width:0;flex:1"><b>' + esc(b.name) + '</b> <span class="pill w sm" title="' + esc(b.note || OA_UNVER) + '">실험(미검증)</span>'
+      + '<div class="cap">' + (b.enabled ? (b.status && b.status.gate ? esc(b.ack) : b.status && b.status.at ? (b.status.ok ? '마지막 동기화 ' + esc(fmtTs(b.status.at)) + ' · <span class="pvx">' + num(b.status.n) + '종목</span>' : '동기화 실패 · ' + esc(errTxt(b.status.err || ''))) : '켜짐 · 첫 동기화 대기') : '꺼짐') + (b.configured ? '' : ' · 설정 필드: ' + esc(arr(b.fields).join(', '))) + (b.status && b.status.noack ? ' · ' + esc(b.ack) : '') + '</div></div>'
       + (b.docs ? '<a class="link" href="' + esc(TJDOM.safeUrl(b.docs)) + '" target="_blank" rel="noopener noreferrer">문서</a>' : '') + '</div>').join('') : '<div class="cap">' + (S.oa.st === 'none' ? '이 서버는 아직 지원하지 않아요' : S.oa.st === 'err' ? '불러오지 못했어요 · ' + esc(errTxt(S.oa.err)) : '불러오는 중…') + '</div>';
     return rows + '<div class="cap sx-note">주문 기능 없음 · ' + esc(OA_UNVER) + ' · 필드는 src/brokers/README.md · 키·토큰은 화면·로그·저장 파일에 남지 않아요</div>';
   }

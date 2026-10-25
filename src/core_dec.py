@@ -139,9 +139,48 @@ class DecMixin:
                 continue
         return out
 
+    DEC_WAIT_PATH = paths.StatePath("decimals_wait.json")
+    DEC_WAIT_EVERY = 300
+
+    def _dec_wait_scan(self, force: bool = False) -> int:
+        now = time.time()
+        if not force and now - float(self.__dict__.get("_dec_wait_at") or 0) < self.DEC_WAIT_EVERY:
+            return -1
+        self._dec_wait_at = now
+        rows = self.conn.execute("SELECT a.asset_id, a.chain, a.address, a.symbol FROM assets a WHERE a.kind='token' AND a.decimals IS NULL"
+                                 " AND EXISTS (SELECT 1 FROM postings p WHERE p.asset_id=a.asset_id)").fetchall()
+        iss = _read_soft(self.DEC_ISSUES_PATH, {}) or {}
+        its = iss.get("items") if isinstance(iss, dict) and isinstance(iss.get("items"), dict) else {}
+        prev = _read_soft(self.DEC_WAIT_PATH, {}) or {}
+        prev = prev.get("items") if isinstance(prev, dict) and isinstance(prev.get("items"), dict) else {}
+        nodec = {}
+        items = {}
+        for r in rows:
+            k = str(r["asset_id"])
+            if isinstance(its.get(k), dict) and its[k].get("kind") in ("pending", "resolve"):
+                continue
+            ch = r["chain"]
+            if ch not in nodec:
+                reg = _read_soft(paths.state(f"token_nodec_{ch}.json"), {}) if ch else {}
+                nodec[ch] = reg if isinstance(reg, dict) else {}
+            ent = nodec[ch].get(str(r["address"] or "").lower())
+            old = prev.get(k) if isinstance(prev.get(k), dict) else {}
+            since = old.get("since") if isinstance(old.get("since"), (int, float)) and not isinstance(old.get("since"), bool) else int(now)
+            items[k] = {"chain": ch, "address": r["address"], "symbol": r["symbol"], "since": int(since),
+                        "est": bool(isinstance(ent, dict) and ent.get("perm"))}
+        if items != prev or not os.path.exists(self.DEC_WAIT_PATH):
+            statefile.atomic_write_json(self.DEC_WAIT_PATH, {"ts": int(now), "items": items})
+        return len(items)
+
     DEC_REQ_PATH = paths.StatePath("decimals_resolve_request.json")
 
     DEC_RES_PATH = paths.StatePath("decimals_resolve_result.json")
+
+    def decimals_pass(self) -> int:
+        try:
+            return self.decimals_resolve_pass()
+        finally:
+            self._dec_wait_scan()
 
     def decimals_resolve_pass(self) -> int:
         req = statefile.read_control_json(self.DEC_REQ_PATH, None)

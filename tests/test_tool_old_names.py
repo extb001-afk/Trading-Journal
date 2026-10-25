@@ -11,6 +11,7 @@ import subprocess  # noqa: E402
 
 chk = T.chk
 TOOLS = os.path.join(T.ROOT, "tools")
+OLD_DIR = os.path.join(TOOLS, "oneoff", "2026.10.10")
 PAIRS = (("bithumb_filltime_1010", "bithumb_filltime"), ("negabs_1010", "negabs"), ("token_recheck_1010", "token_recheck"))
 STDLIB = {"importlib", "os", "sys"}
 ENV = {k: v for k, v in os.environ.items() if not k.startswith("TJ_") or k.startswith("TJ_TEST_")}
@@ -33,7 +34,7 @@ if not os.path.isfile(os.path.join(TOOLS, "rebuild2.py")):
     T.finish()
 
 for old, new in PAIRS:
-    p = os.path.join(TOOLS, old + ".py")
+    p = os.path.join(OLD_DIR, old + ".py")
     with open(p, encoding="utf-8") as fh:
         text = fh.read()
     tree = ast.parse(text)
@@ -46,17 +47,19 @@ for old, new in PAIRS:
     calls_main = any(isinstance(r, ast.Call) and isinstance(r.func, ast.Attribute) and r.func.attr == "main" for r in rets)
     chk(imps <= STDLIB and consts.get("NEW") == new and calls_main and len(text.splitlines()) <= 60
         and os.path.isfile(os.path.join(TOOLS, new + ".py")),
-        "E1 tools/%s.py = 얇은 입구(표준 라이브러리만 · NEW = %s · main() → 새 이름 main())" % (old, new), (imps, consts, calls_main))
+        "E1 tools/oneoff/2026.10.10/%s.py = 얇은 입구(표준 라이브러리만 · NEW = %s · main() → 새 이름 main())" % (old, new), (imps, consts, calls_main))
 
 for old, new in PAIRS:
     for args in (["--help"], ["--no-such-option"]):
-        ro, oo = run(os.path.join(TOOLS, old + ".py"), args)
+        ro, oo = run(os.path.join(OLD_DIR, old + ".py"), args)
         rn, on = run(os.path.join(TOOLS, new + ".py"), args)
         chk(ro == rn and ro in (0, 2) and norm(oo, old, new) == norm(on, old, new) and on.strip(),
             "E2 %s %s = 새 이름과 같은 종료 코드(%s)·출력" % (old, " ".join(args), rn), (ro, rn, oo[-300:], on[-300:]))
 
+chk(not any(os.path.exists(os.path.join(TOOLS, o + ".py")) for o, _n in PAIRS), "E1 tools/ 맨 위엔 옛 이름 없음(새 이름만)")
+
 old, new = PAIRS[2]
-with open(os.path.join(TOOLS, old + ".py"), encoding="utf-8") as fh:
+with open(os.path.join(OLD_DIR, old + ".py"), encoding="utf-8") as fh:
     shim = fh.read()
 rn, on = run(os.path.join(TOOLS, new + ".py"), ["--help"])
 rb, ob = run(None, ["--base", T.ROOT, "--help"], stdin=shim)

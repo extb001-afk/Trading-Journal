@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 import paths
 
@@ -269,3 +270,22 @@ UNIT_KO = {"tj-evm": "이더리움 계열 수집", "tj-sol": "솔라나 수집",
 def _u(i) -> str:
     u = str(i.get("unit") or "")
     return UNIT_KO.get(u) or ("원격 접속" if u.endswith("-tunnel") else u)
+
+
+def decwait_item(add: Callable, chip: Callable, doc: dict | None, units: list, open_ids: tuple, now: float) -> None:
+    items = doc.get("items") if isinstance(doc, dict) and isinstance(doc.get("items"), dict) else {}
+    if "tj-core" not in units or not (items or "ledger:decimals_wait" in open_ids):
+        return
+    rows = [x for x in items.values() if isinstance(x, dict)]
+    wait = [x for x in rows if not x.get("est")]
+    est = [x for x in rows if x.get("est")]
+    oldest = min((float(x.get("since") or now) for x in wait), default=now)
+    det = " · ".join(f"{x.get('symbol') or '?'}({x.get('chain')})" for x in (wait or est)[:4])
+    if est:
+        det += f"{' · ' if det else ''}자릿수를 알려 주지 않는 토큰 {len(est)}개 = 18자리로 가정(추정)"
+    add("ledger:decimals_wait", "tj-core", f"자릿수 모르는 토큰 {len(wait)}개 — 수량이 틀릴 수 있음" if wait else ("자릿수 추정 토큰" if est else "자릿수 모르는 토큰"),
+        "warn" if wait else "ok", (det or "모두 확인됨")[:300],
+        "수집기가 자릿수를 알게 되면 다음 자동 재구축에서 바로 잡혀요(수량 표시가 맞춰짐) · 목록: python3 tools/fill_decimals.py" if wait else "",
+        persist=0, resolve=600, notify=False, remind=False, kind="ledger")
+    if wait and now - oldest > 86400:
+        chip("24시간 넘음")

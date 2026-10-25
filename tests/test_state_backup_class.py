@@ -28,7 +28,7 @@ CLASS = {
     "cursor_bsc.json": LG, "cursor_btc.json": LG, "cursor_sol.json": LG, "cursor_ton.json": LG,
     "curve_hist.json": B, "curve_hist_px.json": B, "daily_cache.json": F, "daily_close_px.json": B, "daily_px.json": B,
     "daily_px_seed.json": TM,
-    "day_memos.json": B, "decimals_resolve_request.json": TM, "decimals_resolve_result.json": TM, "depaddr_request.json": TM,
+    "day_memos.json": B, "decimals_resolve_request.json": TM, "decimals_resolve_result.json": TM, "decimals_wait.json": F, "depaddr_request.json": TM,
     "deposit_addresses.json": B,
     "dex_jump.json": F, "disc_open_request.json": TM, "emitted_bsc.json": LG, "emitted_sol.json": LG, "evm_route.json": F,
     "exf_active.json": F, "exf_balance_sources.json": F, "exf_balances_*.json": F, "exf_balances_hyperliquid.json": F,

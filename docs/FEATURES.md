@@ -84,6 +84,7 @@ AI 일별·주간 리뷰와 영수증 AI 매수·매도 평가는 **봇을 돌�
 
 > **증권사 연결은 미검증입니다 — 공개 문서만 보고 작성했고, 실제 계정으로 시험하지 않았습니다.**
 > 한국투자·키움·LS·DB·토스·Alpaca·IBKR·Schwab 어댑터가 있지만 모두 기본 꺼짐(`config.json` 의 `brokers.*.enabled: false`)입니다.
+> 켜려면 `enabled: true` 에 더해 실험 확인 `"other_assets": {"brokers": {"experimental_ack": true}}` 가 있어야 합니다(없으면 동기화 안 함 · 설정 › 증권사 연결 상태 줄에 '실험 확인 필요').
 > 읽기 전용(보유·예수금 조회만, 주문 코드 없음)이며, 실제로 켜면 필드 이름·연속 조회·오류 코드가 문서와 달라 실패할 수 있습니다.
 > 증권사별 필드·주의점은 [src/brokers/README.md](../src/brokers/README.md) 에 있습니다.
 

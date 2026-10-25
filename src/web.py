@@ -2074,9 +2074,9 @@ def _login_startup_warnings(cfg):
         ext9, _why = extra_host(cfg)
         tail9 = isinstance(ext9, str) and ext9.startswith("100.") and 64 <= int(ext9.split(".")[1]) <= 127
         if not login_auth.S.enabled:
-            if ext9:
-                log.error("★웹 로그인이 꺼져 있어요 — %s(%s)에 닿는 누구나 대시보드를 보고 바꿀 수 있어요★ config.json web.login.enabled 를 "
-                          "true 로(또는 키 삭제) 바꾸고 tj-web 을 다시 시작하세요", ext9, "테일넷" if tail9 else "사설망")
+            if ext9 or mode9 == "tailscale":
+                log.error("★웹 로그인이 꺼져 있어요(allow_lan_without_password) — %s(%s)에 닿는 누구나 대시보드를 보고 바꿀 수 있어요★ config.json web.login.enabled 를 "
+                          "true 로(또는 키 삭제) 바꾸고 tj-web 을 다시 시작하세요", ext9 or "테일넷 IP", "테일넷" if tail9 or not ext9 else "사설망")
             else:
                 log.error("웹 로그인이 꺼져 있어요(web.login.enabled=false) — 이 컴퓨터의 다른 프로그램·사용자도 대시보드를 열 수 있어요. "
                           "리버스 프록시·터널 요청은 거부합니다(403). 켜려면 enabled 를 true 로(또는 키 삭제)")
@@ -2135,7 +2135,7 @@ def main():
         histcurve.migrate_px1004()
     except Exception as e9:   # noqa: BLE001 [boundary]
         log.warning("px1004 이관 실패(다음 기동에 다시): %s", logs.safe_err(e9)[:160])
-    login_auth.init(cfg)
+    login_auth.init(cfg, lan=extra_host(cfg)[0])
     BUILDER = StateBuilder()
     import chainoff
     chainoff.BAL_FN = _chain_usd_now

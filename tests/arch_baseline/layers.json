@@ -109,6 +109,7 @@
   "evm_bscout": "수집기",
   "evm_es": "수집기",
   "evm_logdisc": "수집기",
+  "evm_reorg": "수집기",
   "evm_rpc_later": "수집기",
   "evm_rpc_native": "수집기",
   "evm_rpc_trace": "수집기",

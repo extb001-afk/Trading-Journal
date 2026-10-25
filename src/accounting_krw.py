@@ -5,6 +5,8 @@ from decimal import Decimal
 import calcguard
 from view_common import EPS
 
+POOL_DUST_USD = Decimal("0.000001")
+
 
 class KrwPools:
 
@@ -42,8 +44,15 @@ class KrwPools:
         left = flow["cost"] - used
         if left <= EPS:
             return None
+        dust_res = g["cost"] - left
+        if not g["is_stable"] and not flow.get("_krw_stale") and EPS < dust_res <= POOL_DUST_USD:
+            used_krw = flow.get("_cost_krw_used", Decimal(0))
+            flow["_cost_krw_used"] = used_krw - (flow["cost_krw"] - used_krw) * dust_res / left
+            flow["_cost_used"] = used = used - dust_res
+            left = flow["cost"] - used
         if abs(left - g["cost"]) > EPS:
             if not (g["is_stable"] and g["cost"] > left + EPS):
+                flow["_krw_stale"] = True
                 return None
             take9 = cost * left / g["cost"]
             kpx.krw_mix[0] = cost - take9

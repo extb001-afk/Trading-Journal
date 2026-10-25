@@ -1,5 +1,4 @@
 {"_doc": "tools/ 최상위: ledger_writers = 원장 표에 쓰는 도구 · dated = 이름에 날짜 붙은 파일 — 새로 생기면 실패 · why = 이름으로 부르는 곳(이름 고정 사유).", "kind": "set", "spec": "hyg_tools"}
-{"set": "dated", "key": "tools/bithumb_filltime_1010.py", "why": "이름 고정 — 부르는 곳 3: public/docs/OPERATIONS.md · tools/bithumb_filltime.py · tools/package/pub_files.txt"}
 {"set": "dated", "key": "tools/cutover_ledger_20260926.sh", "why": "이름 고정 — 부르는 곳 3: tools/deploy_final_20260926.files · tools/deploy_final_20260926.sh · tools/rollback_ledger_20260926.sh"}
 {"set": "dated", "key": "tools/deploy_audit_20260909.sh"}
 {"set": "dated", "key": "tools/deploy_final_20260926.files", "why": "이름 고정 — 부르는 곳 4: tools/cutover_ledger_20260926.sh · tools/deploy_final_20260926.sh · tools/robinhood_rpc_enable.py · tools/rollback_final_20260926.sh"}
@@ -23,7 +22,6 @@
 {"set": "dated", "key": "tools/deploy_hotfix_20260928s.sh"}
 {"set": "dated", "key": "tools/deploy_hotfix_20260928t.sh", "why": "이름 고정 — 부르는 곳 3: tools/futplace_guard.py · tools/pin_frozen_x.py · tools/rollback_hotfix_20260928t.sh"}
 {"set": "dated", "key": "tools/migrate_nodekeys_1008.py", "why": "이름 고정 — 부르는 곳 1: src/nodekeys.py"}
-{"set": "dated", "key": "tools/negabs_1010.py", "why": "이름 고정 — 부르는 곳 3: public/docs/OPERATIONS.md · tools/negabs.py · tools/package/pub_files.txt"}
 {"set": "dated", "key": "tools/repair_fix2_20260930.py", "why": "이름 고정 — 부르는 곳 1: src/core_snap.py"}
 {"set": "dated", "key": "tools/rollback_audit_20260909.sh"}
 {"set": "dated", "key": "tools/rollback_final_20260926.sh", "why": "이름 고정 — 부르는 곳 3: tools/cutover_ledger_20260926.sh · tools/deploy_final_20260926.files · tools/deploy_final_20260926.sh"}
@@ -43,23 +41,19 @@
 {"set": "dated", "key": "tools/rollback_hotfix_20260928q.sh"}
 {"set": "dated", "key": "tools/rollback_hotfix_20260928r.sh"}
 {"set": "dated", "key": "tools/rollback_hotfix_20260928s.sh"}
-{"set": "dated", "key": "tools/rollback_hotfix_20260928t.sh", "why": "이름 고정 — 부르는 곳 1: tools/deploy_hotfix_20260928t.sh"}
+{"set": "dated", "key": "tools/rollback_hotfix_20260928t.sh", "why": "이름 고정 — 부르는 곳 2: tools/deploy_hotfix_20260928t.sh · tools/rollback_check.py"}
 {"set": "dated", "key": "tools/rollback_ledger_20260926.sh", "why": "이름 고정 — 부르는 곳 4: tools/cutover_ledger_20260926.sh · tools/deploy_final_20260926.files · tools/deploy_hotfix_20260928t.sh · tools/rollback_hotfix_20260928t.sh"}
-{"set": "dated", "key": "tools/token_recheck_1010.py", "why": "이름 고정 — 부르는 곳 2: public/docs/OPERATIONS.md · tools/package/pub_files.txt"}
 {"set": "dated", "key": "tools/verify_audit_20260909.sh"}
 {"set": "ledger_writers", "key": "tools/backfill_gap.py", "why": "이름 고정 — 부르는 곳 8: src/addr_tier.py · src/bf_engine.py · src/core_classify.py · src/core_lp.py · src/core_snap.py …"}
 {"set": "ledger_writers", "key": "tools/exf_fix_place.py", "why": "이름 고정 — 부르는 곳 8: src/migrate.py · src/recon_adj.py · tools/deploy_hotfix_20260928t.sh · tools/exf_fut_place.py · tools/latefix_move.py …"}
 {"set": "ledger_writers", "key": "tools/exf_fut_place.py", "why": "이름 고정 — 부르는 곳 11: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/chk_collect.py · src/core_exf_fut.py · src/db.py …"}
 {"set": "ledger_writers", "key": "tools/latefix_move.py", "why": "이름 고정 — 부르는 곳 7: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/core_exf_fut.py · src/core_exf_late.py · src/histmark.py …"}
-{"set": "ledger_writers", "key": "tools/ledger_restore.py", "why": "이름 고정 — 부르는 곳 15: public/README.md · public/docs/OPERATIONS.md · public/docs/README_EN.md · src/bsc_balw.py · src/chk_collect.py …"}
-{"set": "ledger_writers", "key": "tools/ledger_rowfix.py", "why": "이름 고정 — 부르는 곳 6: src/core_exf.py · tools/deploy_hotfix_20260928t.sh · tools/deploy_lib.sh · tools/package/cmt_reviewed.txt · tools/package/pub_files.txt …"}
+{"set": "ledger_writers", "key": "tools/ledger_restore.py", "why": "이름 고정 — 부르는 곳 20: public/README.md · public/docs/OPERATIONS.md · public/docs/README_EN.md · src/backup_complete.py · src/bsc_balw.py …"}
+{"set": "ledger_writers", "key": "tools/ledger_rowfix.py", "why": "이름 고정 — 부르는 곳 8: public/README.md · src/core_exf.py · tools/deploy_hotfix_20260928t.sh · tools/deploy_lib.sh · tools/package/cmt_reviewed.txt …"}
 {"set": "ledger_writers", "key": "tools/lp_enrich_sol.py", "why": "이름 고정 — 부르는 곳 2: src/core_post.py · tools/deploy_hotfix_20260928t.sh"}
 {"set": "ledger_writers", "key": "tools/rebuild.py", "why": "이름 고정 — 부르는 곳 26: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/chk_collect.py · src/core.py · src/core_exf.py …"}
 {"set": "ledger_writers", "key": "tools/rebuild2.py", "why": "이름 고정 — 부르는 곳 51: public/docs/CONFIG.md · public/docs/OPERATIONS.md · src/bf_engine.py · src/core.py · src/core_dec.py …"}
 {"set": "ledger_writers", "key": "tools/rederive_perspective.py", "why": "이름 고정 — 부르는 곳 3: src/config.py · tools/lp_enrich_sol.py · tools/repair_own_overlap.py"}
-{"set": "ledger_writers", "key": "tools/repair_anchor_ts.py"}
-{"set": "ledger_writers", "key": "tools/repair_bithumb_fills.py"}
-{"set": "ledger_writers", "key": "tools/repair_comp_assets.py"}
 {"set": "ledger_writers", "key": "tools/repair_exf_settle.py", "why": "이름 고정 — 부르는 곳 2: src/core_exf.py · src/recon_adj.py"}
 {"set": "ledger_writers", "key": "tools/repair_fix2_20260930.py", "why": "이름 고정 — 부르는 곳 1: src/core_snap.py"}
 {"set": "ledger_writers", "key": "tools/repair_onchain_balances.py", "why": "이름 고정 — 부르는 곳 1: src/evm_logdisc.py"}

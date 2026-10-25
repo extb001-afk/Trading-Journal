@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-import chaincatalog, histmark, logs, paths, prefs_ident, statefile
+import chaincatalog, evm_reorg, histmark, logs, paths, prefs_ident, statefile
 import db as dbm
 import spamguard
 import recon_adj
@@ -147,6 +147,8 @@ def lane_hold(chain: str, w: str, upto: int):
         cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{chain}.json"), {}) or {}
     except (SystemExit, TypeError, ValueError):
         return "수집기 커서를 못 읽음"
+    if evm_reorg.held(cur) is not None:
+        return "깊은 재편(reorg) 보류 중 — 그 체인 reorg_ack 뒤 다시"
     if not isinstance(cur, dict) or cur.get("_rpc_v") is None:
         return None
     wl = str(w).lower()

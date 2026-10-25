@@ -12,9 +12,10 @@
 | `backfill_months` / `backfill_since` | 5개월 / 없음 | 처음 불러올 과거 기간 / 시작일(YYYY-MM-DD)로 앞당기기 |
 | `web.port` · `web.bind` | 8023 · `loopback` | 화면 포트 / `loopback`(이 컴퓨터만, 권장) 또는 `tailscale`(테일넷 IP 추가) |
 | `web.login.enabled` · `session_days` · `idle_days` | 켜짐 · 30 · 7 | 웹 비밀번호 로그인. **키가 없어도 켜짐** — 끄기는 `false` 를 적을 때만. 바꾸면 `pm2 restart tj-web` |
-| `web.login.secure_cookie` | false | true 면 로그인 쿠키에 항상 `Secure`(HTTPS 로만 열 때). HTTPS 리버스 프록시가 `X-Forwarded-Proto: https` 를 붙이면 꺼 둬도 자동으로 붙음 |
+| `web.login.secure_cookie` | false(`behind_proxy: true` 면 true) | true 면 로그인 쿠키에 항상 `Secure`(HTTPS 로만 열 때). HTTPS 리버스 프록시가 `X-Forwarded-Proto: https` 를 붙이면 꺼 둬도 자동으로 붙음. `web.behind_proxy: true` 면 적지 않아도 켜짐 — `false` 를 명시할 때만 꺼짐(기동 로그 ERROR · HTTP 프록시 뒤에서만) |
 | `web.allowed_hosts` · `web.public_url` | 비어 있음 | 리버스 프록시·터널 도메인(Host 허용) / 텔레그램 알림 '보기' 링크 주소(`https://도메인`만, 비우면 링크 없음) — [아래](INSTALL.md#6-화면-열기--다른-기기에서-보기) |
-| `web.behind_proxy` | 없음(false) | true 면 모든 요청을 리버스 프록시 경유로 취급(헤더를 안 붙이는 프록시 뒤 · 첫 비밀번호는 `tools/reset_password.py`) |
+| `web.login.allow_lan_without_password` | 없음(false) | 로그인 꺼짐(`enabled: false`) + `bind` 가 사설 IP·`tailscale` 이면 tj-web 이 **시작을 거부**해요(같은 네트워크 누구나 자산 전부를 봄). 그래도 비밀번호 없이 열려면 `true` 를 적어야만 통과(기동 로그 ERROR 는 남음 · 권장 안 함) |
+| `web.behind_proxy` | 없음(false) | true 면 모든 요청을 리버스 프록시 경유로 취급(헤더를 안 붙이는 프록시 뒤 · 첫 비밀번호는 `tools/reset_password.py`) · 로그인 쿠키 `Secure`(이름 `__Host-tj_session`) 기본 — 켜거나 끄는 판에선 기존 로그인이 한 번 풀림 |
 | `web.setup_allow_lan` · `setup_allow_proxy` | 없음(false) | true 면 설정 바꾸기를 사설망(192.168.x 등) / 프록시·터널에서도 허용 — 기본은 루프백·테일넷만 |
 | `web.token_logos` | 없음(false) | (호환으로 남은 키 — **효과 없음**) 화면이 토큰 로고를 받지 않아요(글자 아이콘만 · 외부 요청 0) · 예전 판의 '기본 꺼짐' 로고 스위치는 없어졌어요 |
 | `review.sell_eval_daily_max` · `buy_eval_daily_max` | 0(끔) | AI 매도·매수 평가 하루 상한. 켜려면 예: 20 (`claude` CLI 필요) |
@@ -23,7 +24,7 @@
 | `recon_tokens` | 없음 | 잔고 대사에 늘 넣을 토큰 `{"체인": {"0x토큰 CA": ["심볼", 소수 자리]}}` — 자동으로 켜진 추가 체인에 합쳐짐 |
 | `health.heartbeat_url` · `heartbeat_sec` | 없음(꺼짐) · 300 | 감시기(tj-alert)를 밖에서 감시 — healthchecks.io 같은 서비스의 핑 주소를 넣으면 상태 점검이 한 바퀴 돌 때마다(최소 60초 간격) GET 한 번. tj-alert 가 죽거나 멈추면 핑이 끊겨 그 서비스가 알려 줍니다(실패는 조용히 다음 주기에) |
 | `health.tunnel` | 없음(꺼짐) | 터널 유닛 감시 `{"unit": "pm2 이름", "ready_url": "http://127.0.0.1:<메트릭 포트>/ready"}` — 터널 연결 0 이 5분 이어지면 알림(클라우드플레어 터널 메트릭의 `/ready` 등) |
-| `other_assets` · `brokers` | 증권사 전부 꺼짐 | 기타 자산 탭의 공개 시세 갱신 주기 / 증권사 보유 동기화(**미검증**, 아래 '기타 자산' 참고) |
+| `other_assets` · `brokers` | 증권사 전부 꺼짐 | 기타 자산 탭의 공개 시세 갱신 주기 / 증권사 보유 동기화(**실험(미검증)** — 켜려면 `other_assets.brokers.experimental_ack: true` 도 필요 · 필드 = src/brokers/README.md) |
 | `chains.<체인>.enabled` | 체인마다 | 쓰지 않는 체인을 통째로 끄기 — 화면 **설정 › 지갑 · 주소 › 체인별 조회** 스위치가 이 값을 바꿔요 |
 | (화면) 추천 체인 자동으로 끄기 | 켜짐 | 자동 끄기가 싫으면 **설정 › 지갑 · 주소 › 체인별 조회** 의 '추천 체인 자동으로 끄기' 스위치를 끄세요. 끄면 '끄는 걸 추천해요' 표시만 남고 자동으로 끄지 않아요. 이미 자동으로 꺼 둔 체인은 그대로라 다시 켜려면 그 체인 스위치를 직접 켜야 해요(재시작 필요 없음 · 값은 `state/ui_prefs.json`). 자동으로 켠 체인은 켠 뒤 30일 동안 끄기 추천·자동 끄기에서 빠져요 |
 | `rpc_fallback` · `chains.<체인>.rpc_fallback` | 켜짐 | 이더스캔·블록스카웃이 막히면 그 체인을 공개 RPC 로 대체 — `false` 면 끔(전체 / 그 체인만) |
@@ -87,6 +88,7 @@
 | `negabs_enabled` | 켜짐 | `false` 면 발견 시점 기초 잔고(놓친 옛 보유 토큰이 나가 생긴 원장 마이너스를 직전 블록 잔고로 바로잡기) 끔 |
 | `rpc_first` · `chains.<체인>.rpc_first` | 켜짐 | 새로 받는 탐색기 체인(Ethereum·Arbitrum·Polygon 등)의 수집 순서 = 이더스캔(키 있고 그 체인 지원) → 공개 RPC → 블록스카웃은 최후. 체인별로 처음 정한 순서는 `state/evm_route.json` 에 고정(이미 탐색기로 받던 설치본 = 종전 순서) · `false` = 종전(이더스캔 → 블록스카웃 → RPC) |
 | `chains.<체인>.rpc_lanes` · `chains.<체인>.rpc_lanes_recent_hours` | 켜짐 · 48 | RPC 로 받는 체인 = 최신 블록 먼저(라이브 차선) + 옛 구간은 뒤 차선 · 라이브 차선이 처음 맡는 최근 시간. `false` = 종전 단일 차선(창 시작부터 순서대로) |
+| `chains.<체인>.reorg_check` · `chains.<체인>.reorg_ack` | 켜짐 · 없음 | RPC 로 받는 체인의 깊은 재편(확정 깊이 `conf_depth` 보다 깊은 리오그) 감지 — 사이클마다 블록 해시 2콜로 확인하고, 바뀌면 그 구간을 다시 훑고(새 갈래 거래 반영) 그 체인 잔고 대사를 보류(상태 패널 `evm:reorg:<체인>` 노랑 · 이미 기장한 옛 갈래 거래는 그대로). 확인 뒤 `reorg_ack: <상태 패널의 블록>` + tj-evm 재시작 = 보류 해제 · `reorg_check: false` = 감지 끔 |
 | `addr_tier.inflow_sec` | 600 | 쉬는·빈 지갑에 들어온 토큰 확인 간격(초 · Ankr 키 → 공개 노드 getLogs · `0` = 끔 · tj-evm 재시작 때 반영) |
 | `bsc.lanes` · `bsc.backfill_days` | 켜짐 · `backfill_months` × 30 | BNB Chain 최신 블록 먼저 + 옛 기록 옆 차선(`false` = 종전 한 차선) · BSC 수집 기간(일 — 따로 정할 때만) |
 | `sol.live_first_hours` · `sol.live_first_n` · `sol.old_slice_sec` | 24 · 100 · 60 | Solana 첫 동기화 때 먼저 받는 최근 시간 · 주소당 건수 · 옛 구간을 사이클마다 끊어 받는 초(`live_first_hours`·`old_slice_sec` 가 `0` = 종전 순서) |
@@ -133,7 +135,7 @@
 | `nft` | 객체 | 켜짐 | NFT 추적(enabled false = 끔) |
 | `nonevm` | 객체 | 없음 | 비EVM 체인별 선택 설정 {체인: {…}} — 수집기가 정의 |
 | `okx_dex` | 객체 | krw_threshold 1000000 | OKX DEX 시세 기준(krw_threshold) |
-| `other_assets` | 객체 | config.example 값 | 기타 자산 탭 공개 시세 갱신(quote_every_sec · broker_every_sec · quotes) |
+| `other_assets` | 객체 | config.example 값 · 확인 없음 | 기타 자산 탭 공개 시세 갱신(quote_every_sec · broker_every_sec · quotes) · 증권사 실험 켜기 확인(brokers.experimental_ack = true 만) |
 | `perp_wallets` | 목록 | 없음 | 무기한 선물 DEX 지갑 목록(설정 화면이 씀) |
 | `price_guard` | 객체 | config.example 값 | DEX 시세 유동성 가드(min_reserve_usd · dex_max_age_sec) |
 | `price_overrides` | 객체 | 없음 | 비상용 수동 가격 고정 |
@@ -191,9 +193,9 @@
 | `review.known_patterns` | 지적하지 않을 내 운용 패턴 문장 목록 |
 | `review.sell_eval_daily_max` | AI 매도 평가 하루 상한(0 = 끔) |
 | `web.allowed_hosts` | 리버스 프록시·터널 도메인(Host 허용) |
-| `web.behind_proxy` | true = 모든 요청을 프록시 경유로 취급 |
+| `web.behind_proxy` | true = 모든 요청을 프록시 경유로 취급(로그인 쿠키 Secure 기본) |
 | `web.bind` | loopback(권장) · tailscale |
-| `web.login` | 웹 로그인(enabled · session_days · idle_days · secure_cookie) |
+| `web.login` | 웹 로그인(enabled · session_days · idle_days · secure_cookie · allow_lan_without_password) |
 | `web.max_conn` | 동시 연결 상한 |
 | `web.max_conn_per_ip` | 주소 하나당 동시 연결 상한 |
 | `web.port` | 화면 포트 |

@@ -148,7 +148,7 @@ CH.usdc(HEAD0 - 1_200, W1, X, 1_250_000)
 CH.add(HEAD0 - 900, X, W1, value=E18)
 CH.usdc(HEAD0 - 300, X, W1, 8_800_000)
 CFG = {"backfill_months": 1,
-       "chains": {"base": {"chain_id": 8453, "rpcs": [RPC], "rpc_logs": [RPC], "trace_rpcs": [], "multicall3": False, "conf_depth": 10,
+       "chains": {"base": {"chain_id": 8453, "rpcs": [RPC], "rpc_logs": [RPC], "trace_rpcs": [], "multicall3": False, "conf_depth": 10, "reorg_check": False,
                            "blocks_per_day": 43200, "poll_sec": 60, "cycle_budget_sec": 120, "getlogs_span": 5000,
                            "rpc_log_span_caps": {RPC: 5000}, "start_block": START}},
        "wallets": [{"type": "evm", "chain": "base", "address": w, "label": "w"} for w in (W1, W2)],

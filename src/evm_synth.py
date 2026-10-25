@@ -2,7 +2,7 @@ import json
 import random
 import time
 import chaincatalog, logs, net_http, statefile, textutil
-import bf_engine
+import bf_engine, evm_reorg
 from evm_base import UA
 import logging
 
@@ -141,6 +141,7 @@ class RpcSynthMixin:
                      wallets_backfilling=sum(1 for w in self.wallets if not isinstance(self.cursor.get(w), int)),
                      backfilling_ids=[w[:6] for w in self.wallets if not isinstance(self.cursor.get(w), int)][:3],
                      wallets_resting=sum(1 for w in self.wallets if tb9 is not None and tb9.is_resting(w)),
+                     **evm_reorg.hb_fact(self.cursor),
                      **extra)
         if ok:
             hb.ok(self.chain, kind, **facts)
@@ -436,3 +437,35 @@ class RpcSynthMixin:
         if msrc:
             return {"tx": snap_tx, "token_transfers": tts, "internal": internal, "internal_note": "native_mirror"}
         return {"tx": snap_tx, "token_transfers": tts, "internal": []}
+
+
+BS_DEC_RETRY_SEC = 600
+
+
+def _leg_addr(x) -> str:
+    return str((x.get("hash") if isinstance(x, dict) else x) or "").lower()
+
+
+def bs_dec_fill(w: "RpcSynthMixin", snapshot: dict) -> dict:
+    my = set(w.wallets)
+    missed = w.__dict__.setdefault("_bs_dec_missed", {})
+    for tt in (snapshot.get("token_transfers") or []) if isinstance(snapshot, dict) else ():
+        tok = tt.get("token") if isinstance(tt, dict) else None
+        if not isinstance(tok, dict) or tok.get("decimals") is not None or (tok.get("type") or "ERC-20") != "ERC-20":
+            continue
+        if _leg_addr(tt.get("from")) not in my and _leg_addr(tt.get("to")) not in my:
+            continue
+        try:
+            if not int((tt.get("total") or {}).get("value") or 0):
+                continue
+        except (TypeError, ValueError):
+            continue
+        ca = str(tok.get("address") or tok.get("address_hash") or "").lower()
+        if not ca or time.time() - missed.get(ca, 0) < BS_DEC_RETRY_SEC:
+            continue
+        try:
+            tok["decimals"] = w._rpc_token_dec(ca)
+        except Exception as e:  # noqa: BLE001 [fallback]
+            missed[ca] = time.time()
+            log.info("%s 토큰 %s 자릿수 미상(블록스카웃 null · RPC %s) — 그대로 보냄", w.chain, ca[:10], logs.safe_err(e)[:80])
+    return snapshot

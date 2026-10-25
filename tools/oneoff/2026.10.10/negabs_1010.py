@@ -12,7 +12,7 @@ def _tools_dir(argv: list) -> str:
     except NameError:
         here = ""
     if os.path.isfile(here):
-        return os.path.dirname(here)
+        return os.path.normpath(os.path.join(os.path.dirname(here), "..", ".."))
     base = os.environ.get("TJ_BASE", "")
     for i, a in enumerate(argv):
         if a == "--base" and i + 1 < len(argv):

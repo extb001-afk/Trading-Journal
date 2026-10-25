@@ -2,7 +2,7 @@ import bf_engine
 import chain_event
 import chain_registry
 import chain_state
-import chaincatalog, config, envfile, logs, paths, statefile
+import chaincatalog, config, envfile, evm_reorg, logs, paths, statefile
 import discopen
 import fsio
 import json
@@ -54,7 +54,7 @@ class ReconMixin:
         cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
         pend = statefile.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
         enr = statefile.read_json(os.path.join(sd, f"enrich_{scope}.json"), {})
-        return self._synced(cur) and not pend and not enr \
+        return self._synced(cur) and not pend and not enr and not evm_reorg.held(cur) \
             and all(w in cur for w in self.my_wallets.get(scope, set()))
 
     def _scope_ready_tok(self, scope: str) -> bool:
@@ -64,7 +64,7 @@ class ReconMixin:
             return True
         sd = paths.STATE_DIR
         cur = statefile.read_json(os.path.join(sd, f"cursor_evm_{scope}.json"), {})
-        if not (isinstance(cur.get("_ext_internal_pending"), dict) or isinstance(cur.get("_ext_internal_lag"), dict)):
+        if evm_reorg.held(cur) or not (isinstance(cur.get("_ext_internal_pending"), dict) or isinstance(cur.get("_ext_internal_lag"), dict)):
             return False
         pend = statefile.read_json(os.path.join(sd, f"pending_detail_{scope}.json"), {})
         return self._synced(cur, key="_synced_tok_at") and not pend \

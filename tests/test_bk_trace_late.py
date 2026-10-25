@@ -13,7 +13,7 @@ CH = "zerog"
 W = ["0x" + f"{0xb0 + i:02x}" * 20 for i in range(3)]
 OTHER = "0x" + "cc" * 20
 CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 16661, "rpcs": ["http://127.0.0.1:9/rpc"], "getlogs_span": 10_000,
-                                             "conf_depth": 10, "blocks_per_day": 1440, "poll_sec": 60, "cycle_budget_sec": 15}},
+                                             "conf_depth": 10, "reorg_check": False, "blocks_per_day": 1440, "poll_sec": 60, "cycle_budget_sec": 15}},
        "wallets": [{"type": "evm", "chain": CH, "address": w, "label": "w"} for w in W]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)

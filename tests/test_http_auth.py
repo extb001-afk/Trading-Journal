@@ -125,11 +125,183 @@ chk(st == 403 and "CSRF" in str((j or {}).get("error")), "D4b 로그인 켬 + �
 st, _hd, j, _ = req("POST", "/api/setup/prefs", body={"currency": "USD"}, cookie=tok, headers={"X-TJ-CSRF": csrf})
 chk(st == 200 and (j or {}).get("ok"), "D5 같은 출처 + 맞는 CSRF = 200(대조군)", (st, j))
 
+import logging  # noqa: E402
+import socket  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+
+
+class _Cap(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+
+    def emit(self, record):
+        self.rows.append((record.levelno, record.getMessage()))
+
+
+def login_as(web_cfg):
+    cap, lg = _Cap(), logging.getLogger("tj-web")
+    lg.addHandler(cap)
+    try:
+        LA.init(dict(CFG, web=web_cfg))
+    finally:
+        lg.removeHandler(cap)
+    st_l, _hd_l, _j_l, sc_l = req("POST", "/api/login", body={"password": PW})
+    ck_l = next((x for x in sc_l if x.split("=", 1)[0] in (LA.COOKIE, "__Host-" + LA.COOKIE) and "Max-Age=0" not in x), "")
+    return st_l, ck_l, sum(1 for lv, _m in cap.rows if lv >= logging.ERROR)
+
+
+def has_secure(ck):
+    return any(a.strip() == "Secure" for a in ck.split(";")[1:])
+
+
+def tok_of(ck):
+    return ck.split(";", 1)[0].split("=", 1)[1] if ck else None
+
+
+st, ck, ne = login_as({"port": 8023, "bind": "loopback", "behind_proxy": True})
+chk(st == 200 and ck.startswith("__Host-" + LA.COOKIE + "=") and has_secure(ck) and ne == 0,
+    "G1 behind_proxy: true(X-Forwarded-Proto 없음) = Set-Cookie 에 Secure · 이름 __Host-tj_session · 기동 ERROR 없음", (st, ck[:140], ne))
+tok_proxy = tok_of(ck)
+st, ck, ne = login_as({"port": 8023, "bind": "loopback", "behind_proxy": True, "login": {"secure_cookie": False}})
+chk(st == 200 and ck.startswith(LA.COOKIE + "=") and not has_secure(ck) and ne == 1,
+    "G2 behind_proxy + secure_cookie: false 명시 = Secure 없음(이름 tj_session) · 기동 ERROR 1줄", (st, ck[:140], ne))
+st, ck, ne = login_as({"port": 8023, "bind": "loopback", "behind_proxy": True, "login": {"secure_cookie": "false"}})
+chk(st == 200 and has_secure(ck), "G2b secure_cookie 글자 'false' = 명시 false 아님 → Secure 그대로", (st, ck[:140]))
+st, ck, ne = login_as({"port": 8023, "bind": "loopback"})
+tok_plain = tok_of(ck)
+chk(st == 200 and ck.startswith(LA.COOKIE + "=") and not has_secure(ck) and ne == 0,
+    "G3 반대 방향: behind_proxy 없음 + 루프백 HTTP = Secure 없음 · 이름 tj_session(종전 그대로)", (st, ck[:140], ne))
+LA.init(dict(CFG, web={"port": 8023, "bind": "loopback", "behind_proxy": True}))
+st, _hd, _j, _sc = req("GET", "/api/state", headers={"Cookie": f"{LA.COOKIE}={tok_plain}"})
+chk(st == 401, "G4 배포 직후: behind_proxy 설치의 옛 이름 쿠키(tj_session) = 401 → 한 번 다시 로그인(세션 기록은 서버에 남음)", st)
+st, _hd, _j, _sc = req("GET", "/api/state", headers={"Cookie": f"__Host-{LA.COOKIE}={tok_proxy}"})
+chk(st == 200, "G4b 새 이름 쿠키(__Host-tj_session) = 200", st)
+LA.init(dict(CFG, web={"port": 8023, "bind": "loopback", "behind_proxy": True, "login": {"secure_cookie": False}}))
+st, _hd, _j, _sc = req("GET", "/api/state", headers={"Cookie": f"__Host-{LA.COOKIE}={tok_proxy}"})
+chk(st == 401, "G4c 롤백(옛 판 = Secure 기본 없음 · secure_cookie:false 와 같은 동작) 방향: __Host- 쿠키 = 401 → 한 번 다시 로그인", st)
+LA.init(CFG)
+
 LL.LIM = LL.Limiter()
 codes = [req("POST", "/api/login", body={"password": "wrong-password-%d" % i})[0] for i in range(5)]
 chk(codes == [401, 401, 401, 401, 429], "E1 10분에 5번 틀리면 5번째에 잠금(429)", codes)
 st, hd, j, sc = req("POST", "/api/login", body={"password": PW})
 chk(st == 429 and not token(sc) and int(hd.get("retry-after", "0") or 0) > 0, "E2 잠금 중엔 맞는 비밀번호도 429 + Retry-After · 세션 없음", (st, hd.get("retry-after"), sc))
+
+def gate(web_cfg, lan=None):
+    cfg_t = dict(CFG, web=web_cfg)
+    cap, lg = _Cap(), logging.getLogger("tj-web")
+    lg.addHandler(cap)
+    rc = None
+    try:
+        LA.init(cfg_t, lan=lan if lan is not None else web.extra_host(cfg_t)[0])
+        if web_cfg.get("bind") != "tailscale":
+            web._login_startup_warnings(cfg_t)
+    except SystemExit as e:
+        rc = e.code
+    finally:
+        lg.removeHandler(cap)
+    return rc, sum(1 for lv, _m in cap.rows if lv >= logging.ERROR), " ".join(m for _lv, m in cap.rows)
+
+
+OFF = {"enabled": False}
+rc, ne, txt = gate({"port": 8023, "bind": "10.0.0.5", "login": OFF})
+chk(rc == 2 and "기동 거부" in txt and "allow_lan_without_password" in txt and "loopback" in txt and "***" not in txt,
+    "F1 로그인 꺼짐 + bind 10.0.0.5 = 기동 거부(rc 2 · 이유 + 해결법 · 허용 키 이름 · 로그 가림에 안 걸림)", (rc, txt[:300]))
+rc, ne, txt = gate({"port": 8023, "bind": "10.0.0.5", "login": dict(OFF, allow_lan_without_password=True)})
+chk(rc is None and ne >= 1 and "10.0.0.5" in txt, "F2 allow_lan_without_password: true = 통과 · 기동 ERROR 는 그대로", (rc, ne, txt[:300]))
+rc, ne, txt = gate({"port": 8023, "bind": "10.0.0.5", "login": dict(OFF, allow_lan_without_password="true")})
+chk(rc == 2, "F2b 허용 키는 참·거짓 true 만(글자 'true' = 거부)", rc)
+rc, _ne, _txt = gate({"port": 8023, "bind": "tailscale", "login": OFF}, lan="100.101.102.103")
+chk(rc == 2, "F3 로그인 꺼짐 + bind tailscale(테일넷 IP 있음) = 기동 거부", rc)
+rc, _ne, _txt = gate({"port": 8023, "bind": "tailscale", "login": OFF}, lan="")
+chk(rc == 2, "F3b 테일스케일이 기동 때 꺼져 IP 가 없어도 거부(60초 뒤 붙는 길 막음 — 설정 의도로 판정)", rc)
+rc, _ne, _txt = gate({"port": 8023, "bind": "tailscale", "login": dict(OFF, allow_lan_without_password=True)}, lan="")
+chk(rc is None, "F3c bind tailscale + 허용 키 = 통과", rc)
+rc, _ne, _txt = gate({"port": 8023, "bind": "100.70.1.2", "login": OFF})
+chk(rc == 2, "F3d 로그인 꺼짐 + 테일넷(CGNAT) 명시 IP = 기동 거부", rc)
+for bind_t in ("loopback", "127.0.0.1", "0.0.0.0", "8.8.8.8", None):
+    web_t = {"port": 8023, "login": OFF}
+    if bind_t is not None:
+        web_t["bind"] = bind_t
+    rc, ne, _txt = gate(web_t)
+    chk(rc is None and ne == 1, f"F4 반대 방향: 로그인 꺼짐 + bind {bind_t!r}(추가 주소 없음 · 루프백 전용) = 그대로 기동(종전 ERROR 1줄)", (rc, ne))
+rc, ne, _txt = gate({"port": 8023, "bind": "10.0.0.5"})
+chk(rc is None and ne == 0, "F4b 반대 방향: 로그인 켜짐(기본) + bind 10.0.0.5 = 그대로 기동(거부·ERROR 없음)", (rc, ne))
+LA.init(CFG)
+
+PRELUDE = r"""
+import os, runpy, socket, sys
+WEB = sys.argv[1]
+LOOP = ("127.0.0.1", "::1", "localhost")
+_c, _ce, _g = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
+def _bad(h):
+    return h is not None and h not in LOOP
+def connect(self, a):
+    if _bad(a[0] if isinstance(a, tuple) else None):
+        raise OSError("test: blocked")
+    return _c(self, a)
+def connect_ex(self, a):
+    if _bad(a[0] if isinstance(a, tuple) else None):
+        raise OSError("test: blocked")
+    return _ce(self, a)
+def gai(host, *a, **k):
+    h = host.decode() if isinstance(host, bytes) else host
+    if _bad(h):
+        raise socket.gaierror("test: blocked")
+    return _g(host, *a, **k)
+socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo = connect, connect_ex, gai
+sys.argv = [WEB]
+sys.path.insert(0, os.path.dirname(WEB))
+runpy.run_path(WEB, run_name="__main__")
+"""
+WEB_PY = os.path.join(T.SRC, "web.py")
+LINKS = [(nm, os.path.join(T.ROOT, nm)) for nm in ("web", "seed", "tools", "VERSION", "config.example.json")]
+
+
+def run_web(tag, login):
+    base = os.path.join(T.TMP, "f5_" + tag)
+    os.makedirs(os.path.join(base, "state"))
+    for nm, src in LINKS:
+        if os.path.exists(src):
+            os.symlink(src, os.path.join(base, nm))
+    sk = socket.socket()
+    sk.bind(("127.0.0.1", 0))
+    port = sk.getsockname()[1]
+    sk.close()
+    with open(os.path.join(base, "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(dict(CFG, web={"port": port, "bind": "10.0.0.5", "login": login}), fh, ensure_ascii=False)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_")}
+    env.update(TJ_BASE=base, PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env.pop(k, None)
+    p = subprocess.Popen([sys.executable, "-c", PRELUDE, WEB_PY], env=env, cwd=base, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, errors="replace", preexec_fn=T.sigint_default)
+    up, t0 = False, time.time()
+    while time.time() - t0 < 90 and p.poll() is None:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            up = True
+            break
+        except OSError:
+            time.sleep(0.3)
+    if p.poll() is None:
+        p.send_signal(2)
+    try:
+        out, _e = p.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        out, _e = p.communicate(timeout=10)
+    return p.returncode, up, out or ""
+
+
+rc, up, out = run_web("deny", OFF)
+chk(rc == 2 and not up and out.count("기동 거부") == 1 and out.count("Traceback") == 0,
+    "F5 실제 web.py: 로그인 꺼짐 + bind 10.0.0.5 = rc 2 · 루프백 포트도 안 엶 · 이유 한 줄(트레이스백 없음)", (rc, up, out[-600:]))
+rc, up, out = run_web("allow", dict(OFF, allow_lan_without_password=True))
+chk(up and out.count("기동 거부") == 0 and out.count("allow_lan_without_password") >= 1,
+    "F5b 실제 web.py: allow_lan_without_password: true = 기동(루프백 포트 열림 · ERROR 안내 유지)", (rc, up, out[-600:]))
 
 SRV.shutdown()
 SRV.server_close()

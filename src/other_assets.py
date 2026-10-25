@@ -714,17 +714,19 @@ class Quoter:
     def broker_cycle(self, force=False):
         cfg = self.cfg_fn() or {}
         bc = cfg.get("brokers") if isinstance(cfg.get("brokers"), dict) else {}
-        every = float(((cfg.get("other_assets") or {}).get("broker_every_sec")) or 3600)
-        from brokers import ADAPTERS, run_sync
+        every = float((oac := cfg.get("other_assets") or {}).get("broker_every_sec") or 3600)
+        from brokers import ADAPTERS, gate, run_sync
+        ack, gated = gate(oac, bc, self.bst, lambda: load_store(self.store_path))
+        self.bst.update({k: {"gate": "ack"} for k in gated})
         n = 0
         for key, b in bc.items():
-            if key not in ADAPTERS or not isinstance(b, dict) or b.get("enabled") is not True:
+            if key not in ADAPTERS or key in gated or not isinstance(b, dict) or b.get("enabled") is not True:
                 continue
             if not force and self.now() - self._brk_at.get(key, 0) < every:
                 continue
             self._brk_at[key] = self.now()
             res = run_sync(key, b, self.http_json)
-            self.bst[key] = {k: res[k] for k in ("at", "ok", "n", "err") if k in res}
+            self.bst[key] = dict({k: res[k] for k in ("at", "ok", "n", "err") if k in res}, **({} if ack else {"noack": True}))
             if res.get("ok"):
                 self.merge_broker(key, res)
             n += 1
@@ -825,7 +827,7 @@ class Quoter:
                 it["updated"] = int(now)
                 if it.get("value") is not None and (prev_q != it.get("qty") or (w["cat"] != "stock" and prev_v != it.get("value")) or not it.get("hist")):
                     _hist_add(it, {"at": int(now), "date": it["date"], "value": it["value"], "qty": it.get("qty"), "cur": it["cur"], "src": "broker"})
-            d.setdefault("bst", {})[key] = self.bst.get(key, {})
+            d.setdefault("bst", {})[key] = {k: v for k, v in self.bst.get(key, {}).items() if k in ("at", "ok", "n", "err")}
             save_store(d, self.store_path)
         try:
             self.apply_quotes()

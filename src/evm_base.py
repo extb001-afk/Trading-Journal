@@ -242,6 +242,8 @@ def rpc_handback(wt, target: str):
                                                                     and not isinstance(v, bool))}
     if isinstance(cur.get("_wallets"), list):
         new["_wallets"] = list(cur["_wallets"])
+    if isinstance(cur.get("_reorg"), dict):
+        new["_reorg"] = cur["_reorg"]
     rs, drop = [], []
     for w, j in jobs.items():
         try:

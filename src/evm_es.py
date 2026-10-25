@@ -4,7 +4,7 @@ import os
 import time
 import re
 import urllib.request
-import logs, paths, statefile
+import evm_reorg, logs, paths, statefile
 import lpdec
 import bf_engine
 import tsfix
@@ -44,7 +44,8 @@ class EtherscanWatcher(RpcSynthMixin):
         self.cfg_rpcs = cfg["chains"][chain].get("rpcs")
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
         self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
-        self.conf_depth = int(cfg["chains"][chain].get("conf_depth", 12))
+        chain_cc = cfg["chains"][chain]
+        self.conf_depth = int(chain_cc.get("conf_depth", 12))
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.bpd = int(cfg["chains"][chain].get("blocks_per_day", 7200))
@@ -63,6 +64,7 @@ class EtherscanWatcher(RpcSynthMixin):
         self.cursor = statefile.read_json(self.cursor_path, {})
         if self.cursor.get("_rpc_v") is not None:
             rpc_handback(self, "etherscan")
+        evm_reorg.ack_start(self, chain_cc)
         self.emitted_path = paths.state(f"emitted_evm_{chain}.json")
         self.emitted = set(statefile.read_json(self.emitted_path, []))
         new_view_wallets(self)

@@ -127,7 +127,49 @@ Bitcoin 공개 디스크립터·xpub 로 돈을 옮길 수는 없지만 HD 지�
   - `tools/token_recheck.py` — 이미 등록한 지갑의 옛 보유 토큰을 한 번에 전부 점검할 때(미리보기 전용 · 원장 쓰기 없음 · `--plan-only` 로 예상 콜 먼저 · 결과 JSON 줄은 아래 도구가 읽음 · [옛 보유 토큰 찾기](FEATURES.md#옛-보유-토큰-찾기--체인-표)).
   - `tools/negabs.py` — 업데이트 전에 이미 생긴 원장 마이너스 칸(놓친 옛 보유 토큰)이나 위 점검 결과(`--recheck <파일>`)를 발견 시점 기초 잔고로 반영할 때(기본 = 미리보기 · `--rpc` 직전 블록 잔고 확인 · `--apply` = tj-core 가 다시 확인한 뒤 기장 · `--genuine <CA> --chain --wallet` = 그 칸 일반 토큰 정품 등록).
   - `tools/bithumb_filltime.py` — 예전 판이 빗썸 지정가 체결을 주문 생성 시각으로 적었을 때 마지막 체결 시각으로 바로잡기(1회 · `--base <설치 폴더>` · 미리보기 → `--fetch`(초당 4) → `--apply` · tj-core 가 다시 기장 · 적용 뒤 예전 판으로 되돌리려면 적용 전 백업으로).
-  - 위 세 도구의 옛 이름(`tools/token_recheck_1010.py` · `tools/negabs_1010.py` · `tools/bithumb_filltime_1010.py`)도 그대로 동작해요(같은 인자 → 새 이름 도구).
+  - 위 세 도구의 옛 이름(`token_recheck_1010.py` · `negabs_1010.py` · `bithumb_filltime_1010.py`)은 `tools/oneoff/2026.10.10/` 으로 옮겼어요(같은 인자 → 새 이름 도구). 지난 판에서 한 번 돌리던 1회 도구 목록·지금 돌릴 필요 여부는 [`tools/oneoff/README.md`](../tools/oneoff/README.md).
+
+### 모듈 이름 용어집(`src/`)
+
+여기는 `src/` 파일 이름 앞머리만 풀어 둡니다(공개판 코드는 주석·독스트링을 뺀 빌드라 파일 안 설명은 없어요).
+
+| 이름 | 뜻 |
+|---|---|
+| `core` · `core_*` | `tj-core` 원장 쓰기 — 인박스 소비·분류·기장·대사·선물 정산(`core.py` 의 `Core` 에서 떼어 낸 조각) |
+| `accounting_*` | 원가 엔진(리플레이) 조각 — 평단·실현·세금 행·수수료·원가 흐름 장부(`view_b_replay` 가 부름) |
+| `view_*` · `view_b_*` | `tj-web` 화면 상태 계산 — `view_builder`(StateBuilder) 와 도우미 · `view_b_*` = 빌드 단계 묶음(`view_b_replay` = 리플레이) |
+| `http_*` · `web` · `web_ctx` · `websnap` | `tj-web` 서버 — GET·POST·라우팅·정적 파일 · 실행 중 전역 등록부 · 응답 스냅숏 |
+| `evm_*` · `sol_*` · `bsc_*` | 지갑 수집기 조각(`tj-evm` 블록스카웃·이더스캔·RPC 전용·getLogs 발견 / `tj-sol` / `tj-bsc`) |
+| `chain_*` · `tron_watch` · `sui_watch` · `ton_watch` · `btc_*` | 비EVM 수집기 공용(레지스트리·커서·주 루프·정규화 계약) · 체인별 수집기 |
+| `ex_foreign` · `exf_*` | `tj-exf` 해외 거래소 — 거래소별 드라이버 · `exf_net` = 공용 HTTP·속도 조절 |
+| `upbit_link` · `ex_sign` | `tj-ex` 업비트 수집 · 거래소 API 서명 공식 한 곳 |
+| `health` · `chk_*` · `health_ack` | 상태 패널 — 판정·사건 · `chk_*` = 관측 수집·문구 조각(`health.py` 에서 떼어 냄 · 잔고 대조 문구는 `chk_balance` 하나) · 주의 닫기 |
+| `alert_*` | 텔레그램 알림 — `alert_bot` 발송(`tj-alert`) · `alert_watch` 생산 · `alert_prefs` 종류별 켜기·끄기 |
+| `login_*` · `csrf_gate` · `reqclass` | 웹 로그인·기기·시도 제한 · 쓰기 요청 CSRF · 요청 판별(프록시·루프백) |
+| `settings_*` · `onboarding` · `wallet_register` | 설정 저장 창구 · 첫 실행 마법사·설정 API · 지갑 등록 단일 창구 |
+| `review_*` | AI 리뷰(`tj-review`) — 생성기·프롬프트·진행 상황 |
+| `search_*` | 전체 검색 — 색인·질의 · 검색 일꾼 프로세스 |
+| `wow` · `wow2` | 분석 뷰('감탄 기능' — 타임머신·자금 흐름 지도·물어보는 검색 · 표시 전용 · 읽기 전용) |
+| `attfreeze` · `view_attur` | 자산 변동 분해(attribution) — 지난날 분해 동결 기록 · 그날 사고판 분 보조 |
+| `histcurve` · `histmark` | 장기 총자산 곡선(3개월~전체) · 지난날 다시 계산 표식 |
+| `lpdec` · `lpchain` · `lpsol` | LP 해석 — NFT 포지션 공용 도우미 · EVM `eth_call` 평가 · 솔라나 DLMM |
+| `bf_engine` | 백필(과거 기록 채우기) 엔진 공용부 |
+| `recon` · `recon_adj` · `balcheck` | 기초잔고 대사 · 보정 줄 감시(아래 절) · 온체인 잔고 상시 대조(알림 전용) |
+| `prov*` · `exprov` | 첫 대사 전 임시 보유 = 지금 실제 잔고(`core_prov` · `view_prov` 와 짝) |
+| `*_match` | 연결 매칭 — `xchain_match` 교차체인 · `xfer_match` 거래소 간 · `outflow_match` 보낸 내역 · `sale_match` 토큰 세일 |
+| `pricing` · `px_alt` · `dex_jump` · `cg*` | 시세 — 공개 API · 업비트 비원화 대체 시세 · DEX 급변 가드 · 코인게코 키·등급(`cgkey` · `cgplan` · `cgca`) |
+| `node*` · `net_http` · `netpace` | 노드 키·노드 고르기 · 바깥 HTTP 공용 조각 · 배경 워커 요청 간격 |
+| `fsio` · `statefile` | 파일 원자 쓰기·잠금·요청 파일 차지 · `state/` JSON 읽기·쓰기 규약 |
+| `ledger_lock` · `ledger_backup` · `db` · `migrate` | 원장 작성자 잠금 · 정기 백업 · 스키마 · 마이그레이션 등록부 |
+| `calcguard` | 숫자 경로에서 삼킨 예외의 기록·경보(엄격 모드면 다시 던짐) |
+| `inbox` · `inbox_rec` | 수집기 → `tj-core` 세그먼트 큐 · 레코드 계약 |
+| `unit_*` · `runner_fp` · `buildproc` | 유닛 러너(설정 바뀌면 재시작)·생존 기록·입력 지문 · 화면 계산 자식 프로세스 |
+| `brokers/` | 증권사 보유 동기화 어댑터(**실험(미검증)** — `other_assets.brokers.experimental_ack` 필요) |
+| 기반 계층 | `paths` · `config` · `cfg_schema` · `envfile` · `logs` · `timeutil` · `num_parse` · `textutil` · `seeds` · `runtime` · `statefile` · `net_http` 등 — 맨 아래 계층(위 계층을 import 하지 않음 · 전체 목록 = `tests/arch_baseline/layers.json` 의 '기반') |
+
+- 변수 이름 끝 `9`(`d9` · `bc9` · `e9` 등)는 뜻이 없는 **임시 지역 이름 표시**예요 — 긴 함수·클로저에 끼워 넣은 코드가 같은 함수의 기존 이름(`d` · `now` · `e` …)과
+  겹치거나 가리지 않게 붙였을 뿐(클로저에서 꺼낸 변수라는 뜻 아님 · 모듈 함수·메서드 어디에나 있음). 새 코드엔 쓰지 않고(래칫 `hygiene.name9` — 새 바인딩 = 실패),
+  함수로 떼어 낼 때 끝 `9` 를 뗍니다(원가 엔진 묶음 필드 = 지역 이름에서 앞 밑줄·끝 `9` 를 뗀 이름).
 
 ## 보정 감시 — 설명 안 된 보정
 

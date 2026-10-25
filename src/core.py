@@ -441,7 +441,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
                 self.conn.rollback()
                 log.error("격리 레코드 재처리 실패(다음 주기): %s", e)
             try:
-                self.decimals_resolve_pass()
+                self.decimals_pass()
             except Exception as e:  # noqa: BLE001 [boundary]
                 calcguard.swallowed("core:Core.run[decimals_resolve_pass]", e)
                 self.conn.rollback()

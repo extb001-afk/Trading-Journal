@@ -126,7 +126,8 @@ statement use this average.
 - **Search:** ⌘K or / searches coins, addresses, tx hashes, dates, amounts, notes and reviews with a filter syntax
   (`coin:` `chain:` `type:` `after:` `before:` `pnl:` `amt:` …) and plain-sentence queries (rule-based by default; no external calls).
 - **Broker adapters** in the other-assets tab are **UNVERIFIED** — written from public documentation only and never tested
-  against a real account; all are disabled by default.
+  against a real account; all are disabled by default, and enabling one also requires the explicit opt-in
+  `"other_assets": {"brokers": {"experimental_ack": true}}` (without it the adapter does not sync).
 - **Privacy:** random-amount mode multiplies amounts by a per-page random factor (not stored by default — it can be pinned per browser in
   Settings › 표시 for consistent screenshots, never shown while the mode is on) with a "랜덤값" (random) watermark; explorer links are removed;
   hide mode (Shift+H) blurs amounts. Both are display-only. In either mode, names and notes you wrote yourself (wallet names, aliases,
@@ -137,6 +138,8 @@ statement use this average.
   every device then needs it. Sessions last 30 days (7 days idle). Passwords are stored as PBKDF2-SHA256 hashes; 5 wrong tries in
   10 minutes lock that IP for 15 minutes (doubling on repeat). Change it or log out everywhere in Settings › 로그인; forgot it →
   `python3 tools/reset_password.py` (or `--set`) on the machine. Disable only with `"web": {"login": {"enabled": false}}` + restart tj-web.
+  With login off and `bind` set to `tailscale` or a private IP, tj-web refuses to start unless `web.login.allow_lan_without_password: true`
+  is set explicitly (not recommended — everyone on that network could see everything).
   The first-password form also asks for a one-time **setup code** — the contents of `state/auth_setup_code` (0600, `cat state/auth_setup_code`
   on the machine; deleted once used), so nobody behind a header-less proxy can claim the first password.
   **Upgrading:** login is now on even when `web.login` is missing from `config.json` — after updating, restart tj-web and create the
@@ -148,7 +151,7 @@ statement use this average.
   password in a terminal on this computer with `python3 tools/reset_password.py --set` — without `--set` it only deletes the password and sessions). With login off, every request carrying proxy headers is refused (403). Proxied requests always need a
   session, can't create the first password or use the internal token, count toward the global login limit, and get `Secure` cookies, HSTS
   and `private, no-store` caching. Never use raw TCP forwarders (`ssh -R`, `socat`, `tailscale serve --tcp`, `ngrok tcp`) — they look like
-  direct local access. `web.login.secure_cookie: true` forces the `Secure` flag; the login page warns on plain `http://` outside loopback/Tailscale.
+  direct local access. `web.login.secure_cookie: true` forces the `Secure` flag (on by default with `behind_proxy: true` — only an explicit `false` turns it off, logged as an error); the login page warns on plain `http://` outside loopback/Tailscale.
   The internal token (`state/auth_internal_token`, regenerated on every tj-web start) is for same-machine units only — pass it as a header file,
   e.g. `curl -H @<(printf 'X-TJ-Internal: %s\n' "$(cat state/auth_internal_token)") http://127.0.0.1:8023/api/state`.
 - **Security:** binds to 127.0.0.1 by default (optional Tailscale IP; public IPs and 0.0.0.0 are refused); password login is on

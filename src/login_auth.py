@@ -63,12 +63,13 @@ def _int(v, dflt, lo, hi):
 
 
 class Settings:
-    def __init__(self, raw):
+    def __init__(self, raw, proxy: bool = False):
         r = raw if isinstance(raw, dict) else {}
         self.enabled = raw is not False and r.get("enabled") is not False
         self.session_days = _int(r.get("session_days"), 30, 1, 365)
         self.idle_days = min(_int(r.get("idle_days"), 7, 1, 365), self.session_days)
-        self.secure = r.get("secure_cookie") is True
+        self.secure = r.get("secure_cookie") is True or (proxy and r.get("secure_cookie") is not False)
+        self.allow_lan = r.get("allow_lan_without_password") is True
 
 
 S = Settings({"enabled": False})
@@ -78,13 +79,21 @@ _SESS = {"sig": False, "d": {}, "saved": 0.0, "g": None}
 DEVICES = login_device.DeviceStore(DEV_PATH)
 
 
-def init(cfg: dict) -> Settings:
+def init(cfg: dict, lan: str | None = None) -> Settings:
     global S
     w = (cfg or {}).get("web") if isinstance((cfg or {}).get("web"), dict) else {}
-    S = Settings(w.get("login", None))
+    S = Settings(w.get("login", None), proxy=w.get("behind_proxy") is True)
+    lan = lan or ("테일넷" if w.get("bind") == "tailscale" else None)
+    if lan and not S.enabled and not S.allow_lan:
+        log.error("★기동 거부: 웹 로그인이 꺼져 있는데 %s 에도 열도록(bind) 돼 있어요 — 같은 네트워크 누구나 자산 전부를 볼 수 있어요★ 고치는 법: "
+                  "config.json web.login.enabled 를 true 로(또는 키 삭제) · 또는 web.bind 를 \"loopback\" 으로. 그래도 비밀번호 없이 열려면 "
+                  "web.login 에 allow_lan_without_password 키를 true 로 적으세요(권장 안 함). 그다음 tj-web 다시 시작", lan)
+        raise SystemExit(2)
     reqclass.BEHIND_PROXY = w.get("behind_proxy") is True
     if reqclass.BEHIND_PROXY:
         log.info("web.behind_proxy = true — 모든 요청을 리버스 프록시 경유로 취급(첫 비밀번호는 tools/reset_password.py)")
+        if not S.secure:
+            log.error("web.behind_proxy = true 인데 web.login.secure_cookie = false — 로그인 쿠키에 Secure 가 안 붙어요(평문으로 오갈 수 있음) · HTTPS 프록시면 그 키를 지우세요")
     if S.enabled:
         paths.ensure_dirs()
         rotate_internal_token()

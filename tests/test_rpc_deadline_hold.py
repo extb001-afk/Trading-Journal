@@ -16,7 +16,7 @@ URL = "http://127.0.0.1:9/rpc"
 URL2 = "http://127.0.0.1:9/rpc2"
 KEYU = "https://rpc.ankr.com/zerog/TESTKEY"
 CFG = {"backfill_months": 0, "chains": {CH: {"discovery": "rpc", "chain_id": 16661, "rpcs": [URL], "getlogs_span": 10_000_000,
-                                             "conf_depth": 10, "blocks_per_day": 43200, "poll_sec": POLL, "cycle_budget_sec": 240}},
+                                             "conf_depth": 10, "reorg_check": False, "blocks_per_day": 43200, "poll_sec": POLL, "cycle_budget_sec": 240}},
        "wallets": [{"type": "evm", "chain": CH, "address": W0, "label": "w"}]}
 with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
     json.dump(CFG, f)
