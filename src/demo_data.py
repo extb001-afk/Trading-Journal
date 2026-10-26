@@ -521,7 +521,7 @@ def fut_state(now=None) -> dict:
             a9[1] += x9["pnl"]
         else:
             a9[2] -= x9["pnl"]
-    return {"realizedByDate": {k: round(v, 2) for k, v in by_date.items()}, "realizedKrwByDate": {k: round(v) for k, v in by_krw.items()},
+    return {"realizedByDate": {k: round(v, 2) for k, v in by_date.items()}, "realizedKrwByDate": {k: round(v, 2) for k, v in by_krw.items()},
             "realizedByDateEx": fut_by_date_ex(by_ex, FUT_EXN), "realizedRows": rows[:60], "realizedRowsTotal": len(rows),
             "realizedSummary": [[k[0], k[1], k[2], v[0], round(v[1], 4), round(v[2], 4)] for k, v in sorted(fsum.items())],
             "realizedTotal": round(sum(r["pnl"] for r in rows), 2),

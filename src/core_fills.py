@@ -3,7 +3,6 @@ import histmark, logs, timeutil
 import json
 import pricing
 import time
-from core_common import CLASSIFIER_VER
 from decimal import Decimal
 from decimal import InvalidOperation
 import logging

@@ -3,8 +3,6 @@ import os
 from decimal import Decimal
 import config, paths, statefile
 import re
-import sale_match
-import rabby
 import chain_registry
 import time
 import calcguard  # noqa: E402

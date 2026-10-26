@@ -10,7 +10,6 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, logs, paths  # noqa: E402
-import address_codec as ac  # noqa: E402
 import bf_engine  # noqa: E402
 import btc_descriptor as bd  # noqa: E402
 import chain_event  # noqa: E402

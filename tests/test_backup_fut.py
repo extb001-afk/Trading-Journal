@@ -4,23 +4,18 @@ import sys
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
 
-import builtins  # noqa: E402
 import contextlib  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import shutil  # noqa: E402
 import tarfile  # noqa: E402
-import time  # noqa: E402
-from datetime import datetime  # noqa: E402
 
 json.dump({"wallets": [], "chains": {}}, open(os.path.join(T.TMP, "config.json"), "w"))
 os.environ["TJ_CONFIG"] = os.path.join(T.TMP, "config.json")
 sys.path.insert(0, os.path.join(T.ROOT, "tools"))
 import paths  # noqa: E402
 import db as D  # noqa: E402
-import fsio  # noqa: E402
-import health as H  # noqa: E402
 import ledger_backup as L  # noqa: E402
 import ledger_restore as R  # noqa: E402
 import offsite_backup as O  # noqa: E402

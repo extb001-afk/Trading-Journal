@@ -4,7 +4,6 @@ import sys
 sys.dont_write_bytecode = True
 import _harness as H  # noqa: E402
 
-import json  # noqa: E402
 import os  # noqa: E402
 import time  # noqa: E402
 import urllib.parse  # noqa: E402

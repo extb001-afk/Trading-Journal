@@ -459,7 +459,7 @@ def bench(idx, today_iso: str = None, since: str = None) -> dict:
             by_sp.setdefault(sp, []).append((d, q, disp))
         for sp, rs in by_sp.items():
             rs.sort()
-            j, cq, cp, pend = 0, 0.0, 0.0, 0.0
+            j, cq, cp = 0, 0.0, 0.0
             for dd in days:
                 while j < len(rs) and rs[j][0] <= dd:
                     cq += rs[j][1]

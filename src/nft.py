@@ -2589,7 +2589,7 @@ class Tracker:
         prefs = prefs if prefs is not None else self._prefs_or_empty()
         off9 = _off_chains(self._cfg())
         now = self.now()
-        hidden, promoted = set(prefs.get("hidden") or []), set(prefs.get("promoted") or [])
+        promoted = set(prefs.get("promoted") or [])
         trusted = set(prefs.get("notspam") or [])
         watch = {w["key"]: w for w in prefs.get("watch") or [] if isinstance(w, dict) and w.get("key")}
         out, seen = [], set()
@@ -3006,7 +3006,7 @@ class Tracker:
         now = self.now()
         off_at9 = self._off_at(cfg, now)
         td = today_iso(now)
-        hidden, promoted = set(prefs.get("hidden") or []), set(prefs.get("promoted") or [])
+        promoted = set(prefs.get("promoted") or [])
         trusted = set(prefs.get("notspam") or [])
         watch = {w["key"]: w for w in prefs.get("watch") or [] if isinstance(w, dict) and w.get("key")}
         with self.lock:

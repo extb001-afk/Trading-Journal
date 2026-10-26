@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import io
 import os
 import re
@@ -472,6 +473,56 @@ def metrics(root: str) -> dict:
         if m["error"]:
             out["errors"].append((u.path,) + m["error"])
     out["fns"].sort(key=lambda f: (f["file"], f["start"], f["end"], f["qual"]))
+    return out
+
+
+def long_lines(units: list) -> dict:
+    out: dict = {}
+    for u in units:
+        for i, ln in enumerate(u.text.split("\n"), 1):
+            if len(ln.rstrip("\r")) > LIMITS["line_chars"]:
+                out.setdefault(u.path, set()).add(i + u.offset)
+    return out
+
+
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def _diff_path(x: str):
+    x = x[:-1] if x.endswith("\t") else x
+    if x.startswith('"') and x.endswith('"') and len(x) >= 2:
+        try:
+            x = codecs.escape_decode(x[1:-1].encode("utf-8"))[0].decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return x[2:] if x.startswith("b/") else None
+
+
+def diff_long_lines(diff: str, cur_long: dict) -> list:
+    out: list = []
+    path, cur, plus, minus, head = None, 0, [], 0, False
+
+    def flush():
+        out.extend((path, n) for n in plus[minus:])
+
+    for ln in diff.split("\n"):
+        h = _HUNK.match(ln)
+        if h or ln.startswith("diff --git "):
+            flush()
+            plus, minus, head = [], 0, not h
+            cur = int(h.group(1)) if h else 0
+        elif head:
+            if ln.startswith("+++ "):
+                path = _diff_path(ln[4:])
+        elif ln.startswith("-"):
+            minus += len(ln[1:].rstrip("\r")) > LIMITS["line_chars"]
+        elif ln.startswith("+"):
+            if path and cur in cur_long.get(path, ()):
+                plus.append(cur)
+            cur += 1
+        elif ln.startswith(" ") or ln == "":
+            cur += 1
+    flush()
     return out
 
 

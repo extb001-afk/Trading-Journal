@@ -138,8 +138,8 @@ class LogWatch:
                 ev.popleft()
 
     def poll(self, unit_files: dict, now: float):
-        for unit, paths in unit_files.items():
-            for p in paths:
+        for unit, unit_paths in unit_files.items():
+            for p in unit_paths:
                 try:
                     st = os.stat(p)
                 except OSError:

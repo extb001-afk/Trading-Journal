@@ -283,7 +283,6 @@ if callable(rw):
     check("B2b 두 프로세스 동시 깨움 80건 = 유실 0", rcs == [0, 0] and got == 80, (rcs, got))
 
     import fcntl  # noqa: E402
-    import threading  # noqa: E402
     with open(RQ + ".lock", "a") as lf9:
         fcntl.flock(lf9, fcntl.LOCK_EX)
         t9 = time.time()

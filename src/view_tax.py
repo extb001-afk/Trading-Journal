@@ -1,5 +1,6 @@
 from __future__ import annotations
 import acct_norm
+import calcguard
 from view_common import _f
 
 FEE_TAX_EX = "수수료로 쓴 코인(처분)"
@@ -42,7 +43,9 @@ def _tax_fee_merge(rows):
     return out
 
 
-def _tax_summary(rows, today):
+def _tax_summary(rows, today, rkd=None):
+    if rkd is not None:
+        krw_sum_check(rows, rkd)
     acc, fee_days = {}, set()
     for r in rows:
         ym = acct_norm.month_of(r.get("sold"), today)
@@ -77,6 +80,35 @@ def _tax_summary(rows, today):
              round(v[9], 2), round(v[10], 2), v[11], k[3]]
             for k, v in sorted(acc.items())]
 
+
+KRW_GAP_WARN = 1.0
+RATE_ROUND_HALF = 5e-5
+
+
+def krw_sum_gap(rows: list, rkd: dict) -> tuple:
+    total, factor_sum = 0.0, 0.0
+    for r in rows:
+        acq, disp, fee = (float(r.get("_" + k, r.get(k)) or 0) for k in ("acq", "disp", "fee"))
+        rate = float(r.get("rate") or 0)
+        akr = r.get("_akr", r.get("akr"))
+        if r.get("_akm") and akr is not None:
+            total += disp * rate - float(akr) - fee * rate
+            factor_sum += abs(disp - fee)
+        else:
+            total += (disp - acq - fee) * rate
+            factor_sum += abs(disp - acq - fee)
+    return total - sum(float(v) for v in rkd.values()), KRW_GAP_WARN + RATE_ROUND_HALF * factor_sum
+
+
+def krw_sum_check(rows: list, rkd: dict, site: str = "view_tax:krw_sum") -> float | None:
+    try:
+        gap, tol = krw_sum_gap(rows, rkd)
+    except (TypeError, ValueError, ArithmeticError) as e:
+        calcguard.swallowed(site, e)
+        return None
+    if abs(gap) >= tol:
+        calcguard.swallowed(site, ArithmeticError("명세 원화 실현 합 − 날짜별 원화 실현 합 = %+.0f원(허용 %.0f원)" % (gap, tol)))
+    return gap
 
 def _tax_stable_fx(rows, today):
     acc = {}

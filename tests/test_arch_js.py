@@ -5,7 +5,6 @@ sys.dont_write_bytecode = True
 import _arch_ratchet as R  # noqa: E402
 import _harness as T  # noqa: E402
 
-import os  # noqa: E402
 import time  # noqa: E402
 import _arch_js as J  # noqa: E402
 import _arch_js_acorn as JA  # noqa: E402
@@ -81,6 +80,29 @@ for bad_js, why in (("function f() {\n  if (x) {\n}\n", "닫히지"), ("const s 
         err = str(e)
     chk(err is not None and why in err, f"[0] 깨진 JS = JSError({why})", err)
 
+L150, L160 = "x" * 150, "y" * 160
+DIFF = "\n".join([
+    "diff --git a/web/x.js b/web/x.js", "--- a/web/x.js", "+++ b/web/x.js",
+    "@@ -3 +3 @@", "-" + L150, "+" + L160,
+    "@@ -10,0 +11,2 @@", "+" + L150, "+short",
+    "@@ -20 +22 @@", "-" + L160, "+short",
+    "@@ -30 +32 @@", "--- " + L150, "+++ " + L160,
+    "diff --git a/web/n.js b/web/n.js", "new file mode 100644", "--- /dev/null", "+++ b/web/n.js",
+    "@@ -0,0 +1,2 @@", "+ok", "+" + L150,
+    "diff --git a/web/d.js b/web/d.js", "deleted file mode 100644", "--- a/web/d.js", "+++ /dev/null",
+    "@@ -1 +0,0 @@", "-" + L160,
+    'diff --git "a/web/q\\tn.js" "b/web/q\\tn.js"', '--- "a/web/q\\tn.js"', '+++ "b/web/q\\tn.js"',
+    "@@ -1 +1 @@", "-short", "+" + L150,
+    "diff --git a/web/\uac00.js b/web/\uac00.js", "--- a/web/\uac00.js", '+++ "b/web/\\352\\260\\200.js"', "@@ -0,0 +1 @@", "+" + L150,
+    'diff --git "a/web/\uac00\\tn.js" "b/web/\uac00\\tn.js"', '--- "a/web/\uac00\\tn.js"', '+++ "b/web/\uac00\\tn.js"', "@@ -1 +1 @@", "-s", "+" + L150,
+    "diff --git a/web/s p.js b/web/s p.js", "--- a/web/s p.js\t", "+++ b/web/s p.js\t", "@@ -1 +1 @@", "-short", "+" + L150,
+    "diff --git a/web/c.js b/web/c.js", "--- a/web/c.js", "+++ b/web/c.js", "@@ -1,3 +1,3 @@", "-a", "+b", " ctx", "+" + L150, "-" + "z", ""])
+CUR_LONG = {"web/x.js": {3, 11, 32}, "web/n.js": {2}, "web/q\tn.js": {1}, "web/\uac00.js": {1}, "web/s p.js": {1}, "web/c.js": {3}, "web/\uac00\tn.js": {1}}
+got_dl = J.diff_long_lines(DIFF, CUR_LONG)
+chk(got_dl == [("web/x.js", 11), ("web/n.js", 2), ("web/q\tn.js", 1), ("web/\uac00.js", 1), ("web/\uac00\tn.js", 1), ("web/s p.js", 1), ("web/c.js", 3)], "[0] 새 긴 줄 = 더한 긴 줄 − 같은 덩어리에서 지운 긴 줄(고친 기존 긴 줄·줄인 줄·지운 파일 = 통과 · 새 줄·새 파일·따옴표 꼴 경로 = 실패)", got_dl)
+lu = J.long_lines([J.Unit("web/a.html", 10, "short\n" + L150 + "\n"), J.Unit("web/b.js", 0, L160 + "\r\nok")])
+chk(lu == {"web/a.html": {12}, "web/b.js": {1}}, "[0] 지금 긴 줄 = 파일 줄 번호(HTML <script> 는 원본 줄 + offset · 끝 \\r 빼고 셈)", lu)
+
 units = J.js_units(T.ROOT)
 res = [J.unit_metrics(u) for u in units]
 errs = [(u.path, r["error"]) for u, r in zip(units, res) if r["error"]]
@@ -107,6 +129,15 @@ if not R.repo_layout():
     print("[3] 공개판 배치 — 래칫 건너뜀")
 else:
     R.check(T, T.ROOT, cur)
+    ref = R.base_ref(T.ROOT)
+    if ref.sha:
+        d9 = R._git(ref.top, "-c", "diff.interHunkContext=0", "-c", "core.quotePath=true", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-relative", "--src-prefix=a/",
+                    "--dst-prefix=b/", ref.sha, "--", "web")
+        new9 = J.diff_long_lines(d9, J.long_lines(units)) if d9 is not None else None
+        chk(new9 == [], f"[3b] {ref.why} {ref.sha[:8]} 뒤 새로 생긴 140자 넘는 JS 줄 0 — 줄을 140자 안으로 나눠라(기존 긴 줄은 기준선)",
+            (new9 or [])[:20] if new9 is not None else "git diff 실패")
+    else:
+        print(f"  ([3b] 새 긴 줄 검사 건너뜀: {ref.why})")
 
 lim = J.LIMITS
 over = lambda v: v["lines"] > lim["file_lines"] or v["bytes"] > lim["file_bytes"]  # noqa: E731

@@ -1203,7 +1203,7 @@ def _impact_top3(data) -> list:
     return c[:3]
 
 
-def _krw_total(f, day_iso, spot, fut):
+def _krw_total(f, day_iso, spot, fut, raw=False):
     rk = f.get("realizedKrwByDate")
     if not isinstance(rk, dict):
         return None
@@ -1211,7 +1211,7 @@ def _krw_total(f, day_iso, spot, fut):
     sk, fv = rk.get(day_iso), fk.get(day_iso)
     if (sk is None and abs(spot) >= 0.005) or (fv is None and abs(fut) >= 0.005):
         return None
-    return int(round(float(sk or 0) + float(fv or 0)))
+    return float(sk or 0) + float(fv or 0) if raw else int(round(float(sk or 0) + float(fv or 0)))
 
 
 def gather(st, day_iso=None, day_ev=None, cfg=None, reviews=None) -> dict:
@@ -3101,7 +3101,7 @@ def gather_week(st, day_iso=None, day_ev=None, cfg=None, weekly=None) -> dict:
     for d in days:
         rs, rf = _realized(f, d)
         if abs(rs) >= 0.005 or abs(rf) >= 0.005:
-            k9 = _krw_total(f, d, rs, rf)
+            k9 = _krw_total(f, d, rs, rf, raw=True)
             if k9 is None:
                 krw_ok = False
             else:
@@ -3218,7 +3218,7 @@ def gather_week(st, day_iso=None, day_ev=None, cfg=None, weekly=None) -> dict:
     if seg[0] != data["iso_week"]:
         data["partial"] = True
     if krw_ok and any(abs(x["realized"]) >= 0.005 for x in daily):
-        data["realized_total_krw"] = int(krw_tot)
+        data["realized_total_krw"] = int(round(krw_tot))
     if dca_rows:
         data["dca_sells"] = {"n": len(dca_rows), "sell_usd": _r(sum(c["sell_u"] for c in dca_rows)),
                              "realized": _r(sum(c["realized"] for c in dca_rows)), "syms": sorted(c["sym"] for c in dca_rows)[:8],

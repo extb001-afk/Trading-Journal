@@ -32,7 +32,6 @@ import db as dbm  # noqa: E402
 import histcurve  # noqa: E402
 import netpace  # noqa: E402
 import web  # noqa: E402
-import xparts  # noqa: E402
 
 web.datetime = _FDT
 histcurve.datetime = _FDT

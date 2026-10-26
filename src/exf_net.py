@@ -6,8 +6,6 @@ import os
 import threading
 import time
 import urllib.request
-from decimal import Decimal
-from decimal import InvalidOperation
 import bf_engine, config, logs, net_http, num_parse, paths, statefile
 import logging
 

@@ -1,7 +1,6 @@
 import chain_registry
 import histmark, paths
 import json
-import os
 import time
 import logging
 import calcguard  # noqa: E402

@@ -9,7 +9,6 @@ import _btcfake as BF  # noqa: E402
 
 import json  # noqa: E402
 import os  # noqa: E402
-import threading  # noqa: E402
 import time  # noqa: E402
 
 import config, paths  # noqa: E402

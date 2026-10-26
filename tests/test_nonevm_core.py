@@ -13,7 +13,6 @@ import time  # noqa: E402
 
 import config, paths  # noqa: E402
 import core  # noqa: E402
-import chain_event as ce  # noqa: E402
 import chain_registry as reg  # noqa: E402
 import address_codec as ac  # noqa: E402
 from inbox import SegmentWriter  # noqa: E402

@@ -37,7 +37,6 @@ from exf_net import _fut_write
 from exf_net import _gov_prepare
 from exf_net import _http_json_err
 from exf_net import _int_or
-from exf_net import _iso
 from exf_net import _loan_add
 from exf_net import _loan_amt
 from exf_net import _px_safe

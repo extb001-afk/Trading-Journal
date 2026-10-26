@@ -76,7 +76,6 @@ class _Img:
                 d = math.hypot(px - (x0 + t * dx), py - (y0 + t * dy))
                 cov = r - d + 0.5
                 if cov > 0:
-                    i = (y * self.w + x) * 3
                     self.blend(x, y, col, min(1.0, cov))
 
     def text(self, x, y, s, col, scale=2, a=1.0):

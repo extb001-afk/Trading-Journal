@@ -238,7 +238,6 @@ check("A10c 노드 상태 = 하루 몫 774,193 · 오늘 쓴 양 숫자 · 쓰�
       na10.get("perDay") == int(30_000_000 / 31 * 80 / 100) and isinstance(na10.get("usedToday"), int) and na10.get("chains") == [], na10)
 check("A10d 다른 노드도 오늘 쓴 양", all(isinstance(v.get("usedToday"), int) for v in (st.get("nodes") or {}).values()), st.get("nodes"))
 
-import wallet_register  # noqa: E402
 
 RL = paths.state("wallet_reload.json")
 

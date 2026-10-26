@@ -645,7 +645,7 @@ def late_comp_rows(rows: list, bounds: list, r_old: int, ex: str) -> list:
                   key=lambda r: int(r["posting_id"]))
 
 
-def late_comp_take(comp: list, bucket: int, bounds: list, rem: Decimal, tol: Decimal, take: "Callable[[int, Decimal], Decimal]") -> Decimal:
+def late_comp_take(comp: list, bucket: int, bounds: list, rem: Decimal, tol: Decimal, take: "Callable[[int, Decimal], Decimal]") -> Decimal:  # noqa: F821
     for ent in sorted(comp or (), key=lambda e: (e[0], e[2])):
         if rem <= tol:
             break
@@ -660,7 +660,7 @@ def late_comp_take(comp: list, bucket: int, bounds: list, rem: Decimal, tol: Dec
     return rem
 
 
-def late_keep_plan(cur_lb: str, live: dict, comp: dict, keep_pfx: str, tol: Decimal, comp_rows: "Callable[[str, int], list]") -> list:
+def late_keep_plan(cur_lb: str, live: dict, comp: dict, keep_pfx: str, tol: Decimal, comp_rows: "Callable[[str, int], list]") -> list:  # noqa: F821
     out = [(cur_lb, live)] if live else []
     by_recon = {}
     for sym, lst in sorted((comp or {}).items()):

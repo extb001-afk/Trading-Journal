@@ -1,18 +1,15 @@
 import acct_norm
 import bisect
 import config, histmark, logs, paths, statefile
-import db as dbm
 import json
 import os
 import re
 import recon_adj
 import sqlite3
 import time
-from core_common import CLASSIFIER_VER
 from core_common import dm
 from decimal import Decimal
 from decimal import ROUND_CEILING
-from decimal import ROUND_HALF_EVEN
 import logging
 import calcguard  # noqa: E402
 

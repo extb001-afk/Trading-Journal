@@ -6,7 +6,6 @@ import _harness as T  # noqa: E402
 import _cassette as C  # noqa: E402
 
 C.freeze()
-import json  # noqa: E402
 import os  # noqa: E402
 
 T1 = (int(C.NOW) // 60) * 60 - 2 * 3600

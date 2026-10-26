@@ -13,7 +13,6 @@ import subprocess  # noqa: E402
 
 os.environ["TJ_HEALTH"] = "0"
 import paths  # noqa: E402
-import settings_store as ss  # noqa: E402
 import settings_wallets as SW  # noqa: E402
 import chainoff as CO  # noqa: E402
 

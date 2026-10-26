@@ -325,7 +325,6 @@ X._fut_merge("bybit", ["", "s2"])
 chk((rd("futures_bybit.json") or {}).get("inc_cov_ts") == 0, "R4 원본이 아직 없는 활성 서브(첫 조회 실패) = 선물 확인 미완(inc_cov_ts 0 → core 가 대사 기다림)")
 X._fut_merge("bybit", ["", "s2"], denied={"s2"})
 chk("inc_cov_ts" not in (rd("futures_bybit.json") or {}), "R4 그 서브가 권한 거부 쿨다운이면 선물 없음으로(대사 막지 않음)")
-import core as _core9  # noqa: E402
 import core_svc  # noqa: E402
 
 chk(core_svc.ExfService._exf_has_fut_src(["spot", "s1:futures"]) and core_svc.ExfService._exf_has_fut_src(["futures"]) and not core_svc.ExfService._exf_has_fut_src(["s1:spot", "earn"]),
@@ -554,7 +553,7 @@ def key_fp(key):
 
 
 def kperm(**recs):
-    ss.update_settings(key_perm={f"bybit_sub1": dict(rec, kfp=key_fp(key)) for key, rec in recs.items()} or None)
+    ss.update_settings(key_perm={"bybit_sub1": dict(rec, kfp=key_fp(key)) for key, rec in recs.items()} or None)
 
 
 def sub_keys(key):

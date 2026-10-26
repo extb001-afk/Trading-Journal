@@ -79,7 +79,7 @@ chk(d0["hyperevm"]["reason"].startswith("이더스캔 무료 키 필요") and no
     d0["hyperevm"]["reason"])
 chk(d0["opbnb"]["reason"].startswith("창 백필 비용 과다") and d0["celo"]["reason"].startswith("창 백필 비용 과다"),
     "B opBNB·Celo = 종전 그대로(카탈로그 아님 — 창 백필 비용 과다)", (d0["opbnb"]["reason"], d0["celo"]["reason"]))
-import settings_store, runner_fp  # noqa: E402
+import runner_fp  # noqa: E402
 fp_evm0 = runner_fp.unit_inputs("evm", c0, {})[2]
 fp_core0 = runner_fp.unit_inputs("core", c0, {})[2]
 

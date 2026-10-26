@@ -196,8 +196,6 @@ def bridge_dests() -> frozenset:
     if _BRIDGE_DESTS is None:
         out = set()
         try:
-            import json
-            import os
             out |= {str(a).lower() for a in (seeds.seed_json("bridge_contracts.json", [], base_dir=paths.BASE_DIR) or []) if isinstance(a, str)}
             out |= {str(a).lower() for a in (seeds.seed_json("bridge_labels.json", {}, base_dir=paths.BASE_DIR) or {}) if isinstance(a, str) and not a.startswith("_")}
         except Exception as _cg9:  # noqa: BLE001 [optional]

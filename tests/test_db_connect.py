@@ -12,7 +12,6 @@ import subprocess  # noqa: E402
 
 sys.path.insert(0, T.SRC)
 import db  # noqa: E402
-import paths  # noqa: E402
 
 chk = T.chk
 TMP = os.path.join(T.TMP, "dbc")

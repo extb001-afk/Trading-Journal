@@ -61,7 +61,7 @@ OLD = {"ak": "_ak", "bf_since": "_bf_since", "debt_capg": "debt_capg9", "debt_ne
 @dataclass(frozen=True, eq=False, repr=False)
 class ReplayResult:
     books: Books
-    ctx: "accounting_ctx.ReplayCtx"
+    ctx: "accounting_ctx.ReplayCtx"   # noqa: F821
     G: Any
     bf_since: Any
     qfmt: Any

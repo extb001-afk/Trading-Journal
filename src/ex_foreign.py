@@ -1,21 +1,15 @@
 """Collectors for global exchanges (Binance, Bybit, OKX, KuCoin, Gate)."""
 from __future__ import annotations
-import base64
-import email.utils
-import functools
-import hashlib
 import json
 import logging
 import os
 import re
 import sys
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid as uuidlib
-from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acct_norm, config, envfile, paths, runtime, statefile  # noqa: E402
@@ -26,7 +20,6 @@ if __name__ == "__main__":
     runtime.cpu_reserve_apply()
 import unit_beat  # noqa: E402
 import bf_engine  # noqa: E402
-import calendar  # noqa: E402
 import depaddr  # noqa: E402
 from inbox import SegmentWriter  # noqa: E402
 from exf_net import (  # noqa: F401
@@ -934,7 +927,7 @@ def dest_backfill_pass(env: dict, state: dict, writer, now: int, window: int, fe
             log.warning("%s 출금 목적지 소급 실패 %d회(%d분 뒤 재시도): %s", ex, n9, wait9 // 60, repr(e)[:140])
             out[ex] = "error"
             continue
-        seen, seen_txids, seen_dest = st["seen"], st.setdefault("seen_txids", {}), st.setdefault("seen_dest", {})
+        seen, _seen_txids, seen_dest = st["seen"], st.setdefault("seen_txids", {}), st.setdefault("seen_dest", {})
         new_w = [r for r in w_rows if r["uuid"] in seen and r.get("address") and not seen_dest.get(r["uuid"])]
         for i in range(0, len(new_w), 500):
             writer.append({"v": 1, "kind": "ex_snapshot", "exchange": ex, "ts": now,

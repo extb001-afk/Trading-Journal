@@ -24,7 +24,7 @@ SEEN_CFG = []
 _cfg({"backfill_months": 5})
 import paths  # noqa: E402
 import config  # noqa: E402
-import exf_okx, exf_bybit, exf_binance, exf_net  # noqa: E402
+import exf_okx, exf_bybit, exf_binance  # noqa: E402
 
 chk = T.chk
 DAY = 86400

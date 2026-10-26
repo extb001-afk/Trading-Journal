@@ -40,7 +40,6 @@ with open(os.path.join(T.TMP, "config.json"), "w", encoding="utf-8") as f:
 import paths, statefile  # noqa: E402
 import bf_engine  # noqa: E402
 import bsc_watch  # noqa: E402
-import core  # noqa: E402
 import core_recon  # noqa: E402
 
 bf_engine.configure(cfg())

@@ -177,8 +177,8 @@ def main():
     rows = _summary(plan)
     for r in rows:
         print(f"{r['ex']:8s} {r['sym']:10s} {r['amount']:>20,.8f}  대사 {r['bts']}")
-        print(f"    전: " + " | ".join(f"{t} L{l} {q:,.8f}" for t, l, q in r["old"]))
-        print(f"    후: " + " | ".join(f"{t} L{l} {q:,.8f}" for t, l, q in r["new"]))
+        print("    전: " + " | ".join(f"{t} L{l} {q:,.8f}" for t, l, q in r["old"]))
+        print("    후: " + " | ".join(f"{t} L{l} {q:,.8f}" for t, l, q in r["new"]))
     print(f"바뀌는 묶음 {len(rows)} · 최대 분할 {max((len(m['new']) for m in plan), default=0)}레그/묶음")
     if out:
         json.dump({"plan": plan, "rows": rows}, open(out, "w"), ensure_ascii=False, indent=1)

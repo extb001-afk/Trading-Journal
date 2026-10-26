@@ -14,7 +14,6 @@ from chk_base import EX_NAME
 from chk_base import REST_LATE_MARGIN
 from chk_base import REST_LATE_MAX
 from chk_base import _read
-from chk_base import _u
 from chk_sources import fill_slow
 
 def _disc_ents(disc, cfg) -> dict:

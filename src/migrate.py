@@ -54,7 +54,7 @@ REGISTRY = (
 STARTUP = tuple(m.n for m in REGISTRY if "migrate.startup" in m.callers)
 
 
-def startup(core: "core.Core") -> None:
+def startup(core: "core.Core") -> None:  # noqa: F821
     for n, call in ((1, lambda: core._reclass_plain_xfer_once()),
                     (2, lambda: core._reclass_added_lp_mgrs_once()),
                     (3, lambda: core.svc_price._out_px_band_fix_once())):

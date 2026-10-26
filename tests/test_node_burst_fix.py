@@ -11,7 +11,6 @@ import time  # noqa: E402
 import paths, statefile  # noqa: E402
 import bf_engine as B  # noqa: E402
 import nodekeys as NK  # noqa: E402
-import settings_store as ss  # noqa: E402
 
 
 def check(n, c, d=""):
@@ -45,7 +44,7 @@ def conf(name, spec=SPEC):
     return B._RPC_DAY[name]
 
 
-fresh_dir("node_f1", {"reserve.lock": "", f"old.1.aa.json": {"day": DAY, "n": 0, "nh": 0, "proc": "old", "pid": 1, "inst": "aa", "at": 0, "closed": True}})
+fresh_dir("node_f1", {"reserve.lock": "", "old.1.aa.json": {"day": DAY, "n": 0, "nh": 0, "proc": "old", "pid": 1, "inst": "aa", "at": 0, "closed": True}})
 conf("node_f1")
 L = B.rpc_day_limits("node_f1")
 check("F1a 업그레이드 직후(지난날 기록 없음) = qn2: 기록 없는 지난날 = 0(실측만 · 오너) → 바로 버스트(하루 몫 × 배수 안)",

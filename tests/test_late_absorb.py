@@ -3,7 +3,7 @@ import sys
 
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
-import _ingest  # noqa: E402
+import _ingest  # noqa: E402, F401
 from _ingest import check, W, SOLW, Reader  # noqa: E402
 
 import glob  # noqa: E402
@@ -23,7 +23,6 @@ json.dump({"chains": {"eth": {"blockscout": "https://bs.invalid", "etherscan_cha
           open(os.path.join(T.TMP, "config.json"), "w"))
 import config, histmark, paths  # noqa: E402
 import core  # noqa: E402
-import discopen  # noqa: E402
 
 T.patch_moved("dm", lambda *a, **k: None)
 

@@ -1,6 +1,7 @@
 'use strict';
 (function () {
   const POLL_MS = 30000;
+  const pollGap = n => (n < 3 ? POLL_MS : Math.min(300000, POLL_MS * 2 ** (n - 2)));
   function tjTab(n, X) {
     const f = window.__tjTabs && window.__tjTabs[n];
     if (typeof f !== 'function') throw new Error('[tj] 화면 파일 없음: tab_' + n + '.js');
@@ -1897,7 +1898,7 @@
         x = await loadResp(r, since);
       }
       if (seq < S.applied || S.locked) return;
-      S.applied = seq; S.err = null; S.lastOk = Date.now(); S.pulse = true;
+      S.applied = seq; S.err = null; S.lastOk = Date.now(); S.pulse = true; S.pollFail = 0;
       const wasCached = S.cached; S.cached = false;
       const optGone = optSettle(seq);
       if (x.kind === 'same') {
@@ -1918,6 +1919,7 @@
     } catch (e) {
       if (seq < S.applied) return;
       S.err = (e && e.message) || String(e);
+      S.pollFail = (S.pollFail || 0) + 1; S.pollFailAt = Date.now();
       if (!S.D && S.data && S.errCode !== 401) {
         try { S.cached = true; adopt(S.data, S.ver, performance.now(), 'cache'); render(); if (manual) toast('불러오지 못했어요 · 저장된 화면을 보여주는 중', true); return; }
         catch (e2) { S.D = null; S.cached = false; logError('[tj] 저장된 화면 그리기 실패', e2); }
@@ -2715,10 +2717,17 @@
     hydrateLogos();
     ovAfter(h);
   }
+  function bgInert(ov) {
+    const on = !!ov || !!document.getElementById('tjhOverlay');
+    ['header.top', '#mtop', '#banners', '#view', '#tabbar', '#bf'].forEach(sel => {
+      const x = $(sel);
+      if (x && x.inert !== on) x.inert = on;
+    });
+  }
   function ovAfter(h) {
     const ov = $('#overlay');
     if (h) fitUvSoon();
-    { const on = !!h; ['header.top', '#mtop', '#banners', '#view', '#tabbar', '#bf'].forEach(sel => { const x = $(sel); if (x && x.inert !== on) x.inert = on; }); }
+    bgInert(h);
     document.documentElement.classList.toggle('ov-lock', !!h);
     { const on = !!S.modal; ov.querySelectorAll('.usheet,.usheet-bg,.drawer,.drawer-bg').forEach(x => { if (x.inert !== on) x.inert = on; }); }
     const ok = (S.modal && S.modal.danger ? $('#overlay [data-a="modalCancel"]') : null) || $('#overlay [data-a="modalOk"]') || $('#overlay [data-a="modalCancel"]');
@@ -4188,9 +4197,11 @@
   if (S.rand) clearCache();
   if (S.hide || S.rand) pvFix(document.body);
   bootLoad();
-  setInterval(() => { if (!document.hidden) refresh(false, null, true); }, POLL_MS);
+  const pollDue = () => Date.now() - (S.pollFailAt || 0) >= pollGap(S.pollFail || 0) - 1000;
+  setInterval(() => { if (!document.hidden && pollDue()) refresh(false, null, true); }, POLL_MS);
   setInterval(() => { if (!document.hidden && !S.locked && (RLW.size || arr(S.D && S.D.of).some(x => x.applyWait))) rlFetch(false); }, 5000);
   window.TJ = { clearCache: clearCache, onUnauthorized: onUnauthorized, isLocked: () => !!S.locked, pgSize: uiPageSize,
+    bgInert: () => bgInert(($('#overlay') || {}).__h),
     sync,
     bfInfo: () => (S.locked ? null : bfInfo()),
     revealAndHighlight: revealAndHighlight,

@@ -4,7 +4,6 @@ import sys
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
 
-import os  # noqa: E402
 
 import envfile, paths, runtime  # noqa: E402
 import logs  # noqa: E402

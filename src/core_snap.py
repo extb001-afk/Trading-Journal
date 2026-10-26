@@ -4,7 +4,6 @@ import discopen
 import recon_adj
 import json
 import time
-from core_common import CLASSIFIER_VER
 from core_common import dm
 import logging
 

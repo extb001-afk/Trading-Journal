@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import time
@@ -12,21 +11,12 @@ from evm_base import RETENTION_CONFIRM_N
 from evm_base import RETENTION_CONFIRM_SEC
 from evm_base import RETENTION_MIN_AGE_SEC
 from evm_base import StateUnavailable
-from evm_base import TRACE_DEPTH_MAX
 from evm_base import TraceDeferred
-from evm_base import TraceStaged
 from evm_base import _RpcBudget
 from evm_base import _SCAN_LOG
 from evm_base import _TDLY
-from evm_base import _TraceBudget
-from evm_base import _WALK_END
-from evm_base import _int_or
-from evm_base import leaf_overflow_path
-from evm_base import leaf_overflow_read
 from evm_base import new_view_wallets
 from evm_base import retention_summary
-from evm_base import trace_fail_index
-from evm_base import trace_path_failed
 from evm_synth import RpcSynthMixin
 from evm_es import EtherscanWatcher
 import logging

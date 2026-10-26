@@ -9,8 +9,6 @@ import email.message  # noqa: E402
 import inspect  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
-import socket  # noqa: E402
-import time  # noqa: E402
 
 import login_auth as LA  # noqa: E402
 import login_limits as LL  # noqa: E402

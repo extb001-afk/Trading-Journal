@@ -4,7 +4,6 @@ import sys
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
 
-import time  # noqa: E402
 import urllib.error  # noqa: E402
 
 import chain_registry  # noqa: E402

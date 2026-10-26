@@ -867,7 +867,6 @@ def flows(fields: dict, conn=None, chain_names=None, min_usd=1.0, since=None, hi
             e9 = unexpl.setdefault(loc_key(s9[3]), {"usd": 0.0, "rows": []})
             e9["usd"] += v
             e9["rows"].append(_row(s9[0], sym_of(s9[1]), v, abs(s9[2]), "내 다른 지갑(추적 밖)" if why9 == "own" else "브릿지 · 도착 못 찾음"))
-    keyk = lambda kind, k: k if kind == "exchange" else _chain_key(k, chain_names) or k   # noqa: E731
     exs = set(krw["in"]) | set(krw["out"]) | set(hold_ex) | set(cash_ex) | set(gas_ex) | {k[0] for k in route} | {k[0] for k in back} | set(ex_out) \
         | {k[1] for k in coin_in if k[0] == "exchange"} | {k[1] for k in open_in if k[0] == "exchange"}
     chs = set(hold_w) | set(lp_ch) | set(sent_ch) | set(gas_ch) | {k[1] for k in route} | {k[1] for k in back} \

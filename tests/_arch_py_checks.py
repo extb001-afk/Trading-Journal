@@ -338,7 +338,9 @@ def _check_file_parsed(name, cur, old, mb, ref, units):
         return
     if old is None:
         return
-    if name.endswith(".jsonl"):
+    if name in CLS_FILES:
+        bad = loosened_cls(name, cur, old)
+    elif name.endswith(".jsonl"):
         bad = _loosened_lines(name, R.parse_lines(cur, name), R.parse_lines(old, name + "@" + mb[:8]), units)
     elif name == "py_rules.json":
         bad = _loosened_rules(R.loads(cur), R.loads(old))
@@ -357,23 +359,54 @@ def _check_file_parsed(name, cur, old, mb, ref, units):
 RATCHET_OWNED = frozenset({"py_unit_closure.jsonl"})
 
 
+CLS_FILES = frozenset({"hyg_srctext.jsonl", "hyg_untested.jsonl"})
+
+
+def loosened_cls(name, cur, old):
+    import _arch_ratchet as HR
+    spec = HR.SPECS[name[:-len(".jsonl")]]
+    return HR.increases(spec, HR.parse(spec, cur), HR.parse(spec, old))
+
+
 def _ours(name):
-    return (name.startswith("py_") and name not in RATCHET_OWNED) or name == "layers.json"
+    return (name.startswith("py_") and name not in RATCHET_OWNED) or name == "layers.json" or name in CLS_FILES
+
+
+def _public_base(root, top):
+    tag = G.last_tag(root)
+    sha = G.commit_of(root, tag) if tag else None
+    if sha:
+        return sha, "마지막 태그 %s" % tag
+    if G.is_shallow(root):
+        return None, "태그 없는 얕은 복제(VERSION 마지막 커밋 = 얕은 경계라 비교 못 함 — git fetch --unshallow --tags 또는 CI fetch-depth: 0)"
+    rel = os.path.relpath(os.path.join(os.path.realpath(root), "VERSION"), top).replace(os.sep, "/")
+    sha = G.last_commit_of(top, rel)
+    return (sha, "VERSION 마지막 커밋") if sha else (None, "태그도 VERSION 커밋도 없음")
+
+
+def base_commit(root, public, want=""):
+    ref = want or ("공개판 기준" if public else "refactor")
+    if ref.lower() in _SKIP_REF:
+        return None, ref, "TJ_TEST_ARCH_BASE_REF=%s" % ref
+    top = G.toplevel(root)
+    head = G.commit_of(root, "HEAD")
+    if public and not want:
+        if not top or not head:
+            return None, ref, "공개판 배치 · git 작업 트리·HEAD 없음(깃 없는 사본 — 비교할 이전 판이 없음)"
+        sha, name = _public_base(root, top)
+        return (sha, name, None) if sha else (None, ref, "공개판 배치 · " + name)
+    rc = G.commit_of(root, ref)
+    if not top or not head or not rc:
+        return None, ref, "git 작업 트리·HEAD·기준 브랜치 '%s' 중 없는 것이 있음" % ref
+    mb = G.merge_base(root, head, rc)
+    return (mb, ref, None) if mb else (None, ref, "병합 기준점 없음(%s)" % ref)
 
 
 def run_integrity():
-    if A.PUBLIC_LAYOUT:
-        return _skip("integrity", "공개판 배치")
-    ref = A._ENV["TJ_TEST_ARCH_BASE_REF"] or "refactor"
-    if ref.lower() in _SKIP_REF:
-        return _skip("integrity", "TJ_TEST_ARCH_BASE_REF=%s" % ref)
+    mb, ref, why = base_commit(A.ROOT, A.PUBLIC_LAYOUT, A._ENV["TJ_TEST_ARCH_BASE_REF"])
+    if why:
+        return _skip("integrity", why)
     top = G.toplevel(A.ROOT)
-    head, rc = G.commit_of(A.ROOT, "HEAD"), G.commit_of(A.ROOT, ref)
-    if not top or not head or not rc:
-        return _skip("integrity", "git 작업 트리·HEAD·기준 브랜치 '%s' 중 없는 것이 있음" % ref)
-    mb = G.merge_base(A.ROOT, head, rc)
-    if not mb:
-        return _skip("integrity", "병합 기준점 없음(%s)" % ref)
     st = A.state()
     units = st.metrics.units if st.metrics is not None else {}
     rel_dir = os.path.relpath(A.BASE_DIR, top).replace(os.sep, "/")

@@ -5,7 +5,7 @@ import hashlib
 import time
 from typing import Callable
 
-from .base import UNVERIFIED, Adapter, BrokerError, redact
+from .base import UNVERIFIED, Adapter, BrokerError, TokenRejected, redact
 from . import kis, kiwoom, ls, alpaca, ibkr, schwab, toss, dbsec
 
 ADAPTERS = {m.Adapter.KEY: m.Adapter for m in (kis, kiwoom, ls, dbsec, toss, alpaca, ibkr, schwab)}
@@ -24,7 +24,15 @@ def run_sync(key: str, cfg: dict, http=None, now=None) -> dict:
     if miss:
         return {"ok": False, "at": at, "err": "설정 빠짐: " + ", ".join(miss)}
     try:
-        r = A(cfg, http=http, now=now).fetch()
+        try:
+            ad = A(cfg, http=http, now=now)
+            r = ad.fetch()
+        except TokenRejected:
+            ad = A(cfg, http=http, now=now)
+            r = ad.fetch()
+        t = Adapter._tokens.get(ad._ck) if ad._ck else None
+        if t:
+            Adapter._tokens[ad._ck] = (t[0], t[1], True)
     except BrokerError as e:
         toks = [t[0] for t in list(Adapter._tokens.values()) if isinstance(t, tuple) and t and isinstance(t[0], str)]
         return {"ok": False, "at": at, "err": redact(str(e), {"cfg": cfg, "tok": toks})}

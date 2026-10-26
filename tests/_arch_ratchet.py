@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,6 +63,13 @@ SPECS = {s.name: s for s in [
          "tools/ 최상위: ledger_writers = 원장 표에 쓰는 도구 · dated = 이름에 날짜 붙은 파일 — 새로 생기면 실패 · why = 이름으로 부르는 곳(이름 고정 사유).",
          {"ledger_writers": "1회성 원장 고치기 도구를 새로 만들지 말 것(9막 번호 마이그레이션 · 그 전엔 총괄 승인)",
           "dated": "도구 이름에 날짜를 붙이지 말 것(동작 이름 · 이력은 커밋)"}),
+    Spec("hyg_srctext", "set", (), "src 원문을 여는 동작 시험(목록 동결 · 아키텍처 시험 분류)",
+         "test_*.py 중 이름이 test_arch_ 가 아닌데 src 원문을 여는 파일(정의 = _arch_hyg_cls 머리) — 이 목록 + test_arch_* = 아키텍처 시험"
+         "(run_all --kind arch) · 새로 생기면 실패.",
+         {"*": "소스 글을 읽어 단언하지 말고 동작(함수 호출·출력)으로 검사하라 — 원문 검사가 목적인 정적 분석 시험이면 이름을 test_arch_ 로"}),
+    Spec("hyg_untested", "set", (), "직접 임포트하는 시험이 없는 src 모듈(목록 동결)",
+         "src 모듈 중 그것을 직접 임포트하는 test_*.py 가 없는 것(정의 = _arch_hyg_cls 머리) — 새 모듈이 들어오면 실패 · 기존 것은 채우지 않아도 됨.",
+         {"*": "새 모듈엔 그 모듈을 직접 임포트해 동작을 보는 시험 하나를 같이 넣어라"}),
     Spec("hyg_docs", "max", ("bytes",), "README 크기",
          "public/README.md 바이트 상한(목표 30KB + docs/ — 줄이기만).",
          {"*": "README 를 늘리지 말고 docs/ 로 옮겨라(README 내용을 읽는 시험 목록은 test_arch_hyg 안내 줄)"}),
@@ -114,7 +122,14 @@ def current_hyg(root: str, tests_dir: str, readme: str, exempt: dict | None = No
     docs = {os.path.relpath(readme, root).replace(os.sep, "/"): {"bytes": sizes["readme"]}}
     cur = {"hyg_tests": _doc(tests, exempt=dict(exempt or {})), "hyg_checks": _doc(checks, total=sum(v["n"] for v in checks.values())),
            "hyg_names": _doc(names), "hyg_tools": _doc({k: {x: None for x in v} for k, v in tools.items()}), "hyg_docs": _doc(docs)}
+    cur.update(current_cls(root, tests_dir))
     return cur, {"tests": th, "tools": tools, "sizes": sizes}
+
+
+def current_cls(root: str, tests_dir: str) -> dict:
+    import _arch_hyg_cls as HC
+    return {"hyg_srctext": _doc({"src_readers": {fn: None for fn in HC.src_readers(tests_dir)}}),
+            "hyg_untested": _doc({"modules": {m: None for m in HC.untested(tests_dir, os.path.join(root, "src"))}})}
 
 
 def parse(spec: Spec, text: str) -> dict:
@@ -169,6 +184,11 @@ def _path(name: str) -> str:
 
 
 GROWTH_FILE = "hyg_growth.jsonl"
+_WHY_FILLER = re.compile(r"허용|성장|allow(?:ed)?|[\W\d_]+", re.I)
+
+
+def _why_ok(why) -> bool:
+    return isinstance(why, str) and len(why.strip()) >= 20 and len(_WHY_FILLER.sub("", why)) >= 4
 
 
 def parse_growth(text: str) -> tuple[list, list]:
@@ -187,7 +207,7 @@ def parse_growth(text: str) -> tuple[list, list]:
         to = g.get("to") if isinstance(g, dict) else None
         if (sp is not None and sp.kind == "max" and g.get("f") in sp.fields and isinstance(g.get("key"), str) and g["key"].strip()
                 and isinstance(to, int) and not isinstance(to, bool) and to >= 0
-                and all(isinstance(g.get(x), str) and g[x].strip() for x in ("why", "commit"))):
+                and all(isinstance(g.get(x), str) and g[x].strip() for x in ("why", "commit")) and _why_ok(g["why"])):
             rows.append(g)
         else:
             bad.append(ln.strip()[:160])
@@ -457,7 +477,8 @@ def check(T, root: str, cur: dict) -> None:
         errs = rename_ref_check(ref)
         T.chk(not errs, f"시험 이름 승계 표가 {ref.why} {ref.sha[:8]} 대비 줄만 더함 · 이름 바꾸기만", errs[:10])
     growth, gbad = load_growth()
-    T.chk(not gbad, f"성장 사유 표({GROWTH_FILE}) 줄 = 상한 지표 spec · 열쇠 key · 칸 f · 절대 상한 to(0 이상 정수) · 사유 why · 커밋 commit", gbad[:5])
+    T.chk(not gbad, f"성장 사유 표({GROWTH_FILE}) 줄 = 상한 지표 spec · 열쇠 key · 칸 f · 절대 상한 to(0 이상 정수) · 사유 why(20자 이상 · 빈말만 금지) · "
+          "커밋 commit", gbad[:5])
     if ref.sha and growth:
         old9 = _git(ref.top, "show", f"{ref.sha}:public/tests/arch_baseline/{GROWTH_FILE}")
         seen9 = {json.dumps(g, sort_keys=True, ensure_ascii=False) for g in parse_growth(old9 or "")[0]}

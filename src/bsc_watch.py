@@ -1,10 +1,7 @@
 """BNB Smart Chain wallet watcher."""
 from __future__ import annotations
 
-import bisect
-import json
 import os
-import re
 import sys
 import time
 import urllib.parse

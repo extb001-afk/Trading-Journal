@@ -5,9 +5,7 @@ sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402,F401
 import _gate as _x  # noqa: E402
 from _gate import check, done  # noqa: E402
-import glob  # noqa: E402
 import json  # noqa: E402
-import math  # noqa: E402
 import os  # noqa: E402
 import subprocess  # noqa: E402
 import time  # noqa: E402

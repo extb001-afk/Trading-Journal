@@ -1,14 +1,9 @@
 """Ledger core: consumes collected events and writes double-entry postings."""
-import bisect
-import json
 import os
-import random
-import re
 import sqlite3
 import sys
-import threading
 import time
-from decimal import Decimal, localcontext, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN
+from decimal import Decimal, localcontext
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, histmark, logs, paths, runtime, seeds
@@ -16,21 +11,13 @@ if __name__ == "__main__":
     runtime.cpu_reserve_apply()
 import db as dbm
 import pricing, token_tables
-import acct_norm
-import spamguard
-import recon
-import token_discovery
 import lpdec
-import lpsol
 import bf_engine
 import ledger_backup
 import recon_adj
 import ledger_lock
-import ops_requests
-import discopen
 import chain_registry
 import chain_event
-import chain_state
 from inbox import SegmentReader
 
 log = logs.setup_logging("tj-core")

@@ -21,7 +21,6 @@ if not os.path.isfile(os.path.join(TOOLS, "golden_v2.py")):
     T.finish()
 sys.path.insert(0, TOOLS)
 import golden_v2 as G  # noqa: E402
-import _golden_fp as P  # noqa: E402
 
 
 def code_ast(path):

@@ -6,7 +6,7 @@ import _harness as T  # noqa: E402
 import time  # noqa: E402
 import _cassette_clock  # noqa: E402
 _cassette_clock.freeze(now=float(int(time.time())) + 0.5)
-import _ingest  # noqa: E402
+import _ingest  # noqa: E402, F401
 from _ingest import check, W, SOLW, Reader  # noqa: E402
 
 import glob  # noqa: E402
@@ -171,7 +171,7 @@ boom = {"n": 0}
 
 
 def put_then_boom(conn, ts, now=None):
-    iso9 = real_put(conn, ts, now)
+    real_put(conn, ts, now)
     boom["n"] += 1
     raise RuntimeError("시험: 표식 쓴 직후 예외")
 

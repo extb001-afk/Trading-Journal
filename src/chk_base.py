@@ -5,7 +5,7 @@ import re
 import time
 from collections.abc import Callable
 from datetime import datetime
-import paths
+import paths  # noqa: F401
 
 from timeutil import KST
 

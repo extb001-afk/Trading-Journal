@@ -11,7 +11,7 @@ import json
 import os
 
 import paths
-import settings_store as ss, runner_fp
+import runner_fp
 import chain_registry as reg
 import btc_descriptor as bd
 import btc_watch as bw

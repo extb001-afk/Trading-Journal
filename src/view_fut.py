@@ -1,6 +1,5 @@
 from __future__ import annotations
 import bisect
-import os
 import re
 import time
 import num_parse, paths

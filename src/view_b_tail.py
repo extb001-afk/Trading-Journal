@@ -102,7 +102,6 @@ class TailMixin:
 
     def _build_tail(self, _bs9):
         (G, _pos_all_dbg, acts_md9, bal_src9, be_done, be_until, chain_wallet_rows, coins, conn, cost_be, cost_decided_rows, cost_ov, daily, day_acts, day_ix, day_memos9, day_memos_err9, deposit_rows, diag, ev_hid9, ev_main9, ev_wd9, ex_debts, ex_fee_m, ex_gid, ex_transit, exfee_lab, extra_events_hidden, extra_events_out, fb_on, fee_day, fee_diag, fiats, fs_floor9, fs_on, fs_pref, fs_rbd, fs_sum, fut, fx_name, fx_transit, gas_by_month, gas_expense, gas_list, guard_held9, hid_kind_n9, live_px, lp_events_out, lpb, lps_closed, lps_out, lps_pending, n_wd_hid9, neg_hold, now, oc_fresh, of_tot, offc_summary, offc_wd_addr, origin_cache, origin_pending, outflows_out, outflows_pending, pendings, plan_memos, plans_out, pos_cut9, positions, prefs, quarantined, rb_debts, rb_recon, rb_view, realized_by_date, realized_by_loc, realized_krw_by_date, realized_month, review_realized, sale_links, sale_lots, sale_rf_bid, sale_used, src_chips, stables, stake_inc, tax_gas, tax_rows, today_kst, ub2, unpriced_w, unverified, venue_w, vflow_loc9, wallet_rows, wd_fee_m, wdfee_lab, xc_cands, xc_used, hold_today9, spark7_9, wdt_all,) = (_bs9["G"], _bs9["_pos_all_dbg"], _bs9["acts_md9"], _bs9["bal_src9"], _bs9["be_done"], _bs9["be_until"], _bs9["chain_wallet_rows"], _bs9["coins"], _bs9["ctx"].conn, _bs9["cost_be"], _bs9["cost_decided_rows"], _bs9["cost_ov"], _bs9["daily"], _bs9["day_acts"], _bs9["day_ix"], _bs9["day_memos9"], _bs9["day_memos_err9"], _bs9["deposit_rows"], _bs9["diag"], _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["ex_debts"], _bs9["ex_fee_m"], _bs9["ex_gid"], _bs9["ex_transit"], _bs9["exfee_lab"], _bs9["extra_events_hidden"], _bs9["extra_events_out"], _bs9["ctx"].fb_on, _bs9["fee_day"], _bs9["fee_diag"], _bs9["fiats"], _bs9["fs_floor9"], _bs9["ctx"].fs_on, _bs9["ctx"].fs_pref, _bs9["fs_rbd"], _bs9["fs_sum"], _bs9["fut"], _bs9["fx_name"], _bs9["fx_transit"], _bs9["gas_by_month"], _bs9["gas_expense"], _bs9["gas_list"], _bs9["guard_held9"], _bs9["hid_kind_n9"], _bs9["live_px"], _bs9["lp_events_out"], _bs9["lpb"], _bs9["lps_closed"], _bs9["lps_out"], _bs9["lps_pending"], _bs9["n_wd_hid9"], _bs9["neg_hold"], _bs9["ctx"].now, _bs9["oc_fresh"], _bs9["of_tot"], _bs9["offc_summary"], _bs9["offc_wd_addr"], _bs9["origin_cache"], _bs9["origin_pending"], _bs9["outflows_out"], _bs9["outflows_pending"], _bs9["pendings"], _bs9["plan_memos"], _bs9["plans_out"], _bs9["pos_cut9"], _bs9["positions"], _bs9["ctx"].prefs, _bs9["quarantined"], _bs9["rb_debts"], _bs9["rb_recon"], _bs9["rb_view"], _bs9["realized_by_date"], _bs9["realized_by_loc"], _bs9["realized_krw_by_date"], _bs9["realized_month"], _bs9["review_realized"], _bs9["sale_links"], _bs9["sale_lots"], _bs9["sale_rf_bid"], _bs9["sale_used"], _bs9["src_chips"], _bs9["stables"], _bs9["stake_inc"], _bs9["tax_gas"], _bs9["tax_rows"], _bs9["ctx"].today_kst, _bs9["ub2"], _bs9["unpriced_w"], _bs9["unverified"], _bs9["venue_w"], _bs9["vflow_loc9"], _bs9["wallet_rows"], _bs9["wd_fee_m"], _bs9["wdfee_lab"], _bs9["xc_cands"], _bs9["xc_used"], _bs9["hold_today9"], _bs9["spark7_9"], _bs9["wdt_all"],)
-        d9: object
         reviews = self._auto_reviews(daily, review_realized, acts_md9)
         reviews_weekly = self._merge_llm_reviews(reviews, day_ix, realized_by_date, fut.get("realizedByDate") or {},
                                                  today_kst.strftime("%Y-%m-%d"),
@@ -325,12 +324,12 @@ class TailMixin:
             "extraEventsTotal": {"main": len(ev_main9), "wd": len(ev_wd9), "hidden": len(ev_hid9),
                                  "hiddenScam": hid_kind_n9.get("scam", 0), "hiddenDust": hid_kind_n9.get("dust", 0),
                                  "wdHidden": n_wd_hid9},
-            "taxSummary": _tax_summary(tax_rows, today_kst), "taxRowsTotal": len(tax_rows),
+            "taxSummary": _tax_summary(tax_rows, today_kst, realized_krw_by_date), "taxRowsTotal": len(tax_rows),
             "taxStableFx": _tax_stable_fx(tax_rows, today_kst),
             "srcWhitelist": list(prefs.get("src_whitelist") or []),
             "realizedByDate": {k: round(v, 2) for k, v in realized_by_date.items()},
             "dateKeys": "iso",
-            "realizedKrwByDate": {k: round(v) for k, v in realized_krw_by_date.items() if k in realized_by_date},
+            "realizedKrwByDate": {k: round(v, 2) for k, v in realized_krw_by_date.items() if k in realized_by_date},
             "reviews": reviews,
             "reviewsWeekly": reviews_weekly,
             "rate": self.spot.rate or 1384,

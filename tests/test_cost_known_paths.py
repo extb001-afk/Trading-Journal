@@ -86,7 +86,7 @@ def _iso(ts):
 
 
 def a101_offc(offc):
-    c = S.reset()
+    S.reset()
     t0 = S.NOW - 30 * DAY
     S.PXF[0] = lambda sym, ts: 2000 + 20 * ((ts - t0) / 86400.0) if sym == "ETH" else None
     usd = [D(0)]
@@ -462,7 +462,7 @@ def f04_of_bridge(linked):
 for l9, want9 in ((True, -100), (False, 0)):
     r = T.safe(f04_of_bridge, l9) or {}
     chk(near(r.get("rz"), want9) and near(r.get("tax"), r.get("rz")),
-        f"F04 보낸 내역 브릿지 스테이블 — " + ("프로토콜 id 확정 = 원가 승계(실현 −$100)" if l9 else "id 없는 금액·시각 짝 = 종전 액면(실현 0)"), r)
+        "F04 보낸 내역 브릿지 스테이블 — " + ("프로토콜 id 확정 = 원가 승계(실현 −$100)" if l9 else "id 없는 금액·시각 짝 = 종전 액면(실현 0)"), r)
 
 def f04_split_id():
     c = S.reset()

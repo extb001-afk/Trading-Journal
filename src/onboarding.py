@@ -1002,7 +1002,6 @@ def _node_test(group: str, got: dict) -> dict:
         return _qn_test(env9)
     if group == "chainnodes":
         return _cn_test(env9)
-    keys9 = [v for v in got.values() if v] + [env9.get(k, "") for k, _ in ss.GROUPS[group]["fields"]]
     us = nodekeys.urls(env9)
     out = []
     back = {"bsc": 180 * 192_000, "base": 180 * 43_200}

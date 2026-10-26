@@ -237,7 +237,6 @@ json.dump(d13, open(os.path.join(paths.STATE_DIR, "cg_ca.json"), "w"))
 cgca.reset_for_tests()
 
 import candles  # noqa: E402
-import bf_engine  # noqa: E402
 calls = []
 RESP = {}
 

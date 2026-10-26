@@ -224,5 +224,5 @@ statement use this average.
   with a floor price count toward the optional NFT total, and old long-range curve days with only daily candles use the 09:00 KST (UTC daily open) price.
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
-  same command on Python 3.9, 3.11 and 3.13.
+  same command on Python 3.9, 3.11 and 3.13; a separate lint job installs pinned ruff (F, E9) and mypy (listed files only, settings in `pyproject.toml`).
 - **License:** [MIT](../LICENSE). Provided as is; PnL and tax figures are an aid, not advice.

@@ -11,7 +11,7 @@ CP = os.path.join(T.TMP, "config.json")
 json.dump({"chains": {}, "wallets": [], "backfill_months": 5}, open(CP, "w"))
 os.environ["TJ_CONFIG"] = CP
 import paths  # noqa: E402
-import settings_store as ss, settings_wallets  # noqa: E402
+import settings_wallets  # noqa: E402
 import chain_registry as reg  # noqa: E402
 import btc_descriptor as bd  # noqa: E402
 import address_codec as ac  # noqa: E402

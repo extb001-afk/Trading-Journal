@@ -56,7 +56,6 @@ class DetailApiMixin:
         days = sorted(d for d in ix if d_from <= d <= d_to)
         vis, hid, per = [], [], {}
         for d in days:
-            a = {"n": 0, "b": 0, "s": 0, "dep": 0, "h": 0}
             for ts, kind, e, meta in ix[d]:
                 o = {k: v for k, v in e.items() if not k.startswith("_")}
                 o["ts"], o["iso"], o["kind"] = ts, d, kind
@@ -963,7 +962,6 @@ class DetailApiMixin:
         sell_ctx = {"avgPx": ssm.get("avgPx") if (ssm.get("cur") or cur) == cur else None,
                     "firstTs": sw.get("sellFrom") or (base.get("pathTs") or {}).get("first_sell"), "lastTs": sw.get("sellTo"),
                     "openTs": ssm.get("openTs"), "costPx": cost9 if cost9 and cost9 > 0 else None}
-        idx = self._day_idx
         cards = self._buy_cards(raw_syms)
         real = buychart.sell_cards(cards, iso)
         ex = buychart.extract_legs(cards, real, iso)

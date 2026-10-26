@@ -2,20 +2,15 @@
 from __future__ import annotations
 
 import collections
-import glob
 import json
 import logging
 import math
 import os
 import re
-import shutil
-import socket
-import sqlite3
-import subprocess
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import chk_base, config, evm_reorg, logs, net_http, paths, prefs_ident, statefile
 import fsio

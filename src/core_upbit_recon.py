@@ -3,7 +3,6 @@ import json
 import os
 import recon_adj
 import time
-from core_common import CLASSIFIER_VER
 from core_common import dm
 from decimal import Decimal
 import logging

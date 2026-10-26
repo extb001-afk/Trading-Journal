@@ -1,0 +1,24 @@
+# 개발 도구 설정(ruff·mypy) — 봇 실행·시험과 무관(둘 다 표준 라이브러리만 · 시험 = python3 tests/run_all.py).
+# CI(.github/workflows/tests.yml 의 lint 잡)만 ruff·mypy 를 설치해 돌린다. 판 고정은 그 잡에 있다.
+# 단계: 1) F(미정의 이름·미사용 import 등)+E9(문법) — 지금 · 2) B006·B007·B008·B904·PLW0603 — 다음 · mypy 는 0 오류 파일만 하나씩 추가.
+
+[tool.ruff]
+line-length = 140
+target-version = "py39"   # README 약속 = Python 3.9+
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.mypy]
+# 3.9 를 대상으로 못 두는 이유: 최신 mypy(2.x)는 python_version 3.10 미만을 지원하지 않는다 — 3.9 전용 문법 차이는 CI 의 3.9 시험 잡이 잡는다.
+python_version = "3.10"
+mypy_path = "src"
+ignore_missing_imports = true
+follow_imports = "silent"
+# 0 오류 파일만(늘릴 때 = 그 파일 0 오류 확인 후 한 줄씩 · 나머지 accounting_* 는 Decimal 전환과 같이)
+files = [
+    "src/accounting_basis.py",
+    "src/accounting_cp.py",
+    "src/accounting_krw.py",
+    "src/accounting_fee.py",
+]

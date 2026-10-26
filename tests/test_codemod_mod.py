@@ -3,6 +3,7 @@ import sys
 
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
+import _arch_py_ratchet as PR  # noqa: E402
 
 import contextlib  # noqa: E402
 import io  # noqa: E402
@@ -224,9 +225,9 @@ chk(rows == [{"k": "file.bytes", "m": "big", "q": "<file>", "to": 70010}], "[5] 
 chk(len(block) == 1 and "src/small.py" in block[0], "[5] 기준선 밖인데 하드 한도(64KiB)를 넘게 됨 = 막힘(성장 사유 표로 못 받음)", block)
 txt = C.growth_text(R5, rows, "w 시험", changed={"big", "huge"})
 got = [json.loads(x) for x in txt.split("\n") if x.strip()]
-chk([g["k"] for g in got] == ["func.lines", "file.bytes"] and got[1]["to"] == 70010 and got[1]["commit"] == "w 시험" and got[1]["why"] == C.MARK_WHY
-    and not any(g.get("m") == "huge" for g in got),
-    "[5] 바뀐 모듈의 옛 코드모드 줄 = 새 값으로(big) · 기준선 이하가 되면 지움(huge) · 다른 사유 줄 그대로", got)
+chk([g["k"] for g in got] == ["func.lines", "file.bytes"] and got[1]["to"] == 70010 and got[1]["commit"] == "w 시험" and got[1]["why"] == C.WRITE_WHY
+    and C.MARK_WHY in C.WRITE_WHY and PR.why_ok(C.WRITE_WHY) and not any(g.get("m") == "huge" for g in got),
+    "[5] 바뀐 모듈의 옛 코드모드 줄 = 새 값으로(big · 사유 = 표지 + 설명 · 래칫 사유 규칙 통과) · 기준선 이하가 되면 지움(huge) · 다른 사유 줄 그대로", got)
 txt2 = C.growth_text(R5, [], "w", changed={"big"})
 chk('"m": "huge"' in txt2 and '"m": "big", "q": "<file>"' not in txt2, "[5] 이번 범위 밖 모듈(huge)의 코드모드 줄은 그대로 물려받음", txt2)
 with open(os.path.join(B5, "py_growth.jsonl"), "a", encoding="utf-8") as f:

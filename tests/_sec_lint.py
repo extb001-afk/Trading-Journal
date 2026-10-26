@@ -937,7 +937,7 @@ def _split_args(toks, i, mb):
 
 
 def _scan_concat_ext(toks, mb, ctx, add):
-    n, seen = len(toks), set()
+    seen = set()
     for i, t in enumerate(toks):
         if t.k != "str" or not _HTML_MARK.search(t.v) or i in seen:
             continue

@@ -223,7 +223,7 @@ class IndexMixin:
             "venues": venues,
             "positions": pos_out,
             "realizedByDate": {k: round(v, 2) for k, v in by_date.items()},
-            "realizedKrwByDate": {k: round(v) for k, v in by_date_krw.items()},
+            "realizedKrwByDate": {k: round(v, 2) for k, v in by_date_krw.items()},
             "realizedByDateEx": _fut_by_date_ex(by_date_ex, exn),
             "realizedRows": rows[:60],
             "realizedRowsTotal": len(rows), "realizedSummary": realized_summary,

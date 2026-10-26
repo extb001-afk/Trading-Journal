@@ -9,8 +9,6 @@ import io  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import shutil  # noqa: E402
-import tarfile  # noqa: E402
-import time  # noqa: E402
 from datetime import datetime  # noqa: E402
 
 json.dump({"wallets": [], "chains": {}}, open(os.path.join(T.TMP, "config.json"), "w"))

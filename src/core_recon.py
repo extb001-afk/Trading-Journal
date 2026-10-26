@@ -14,7 +14,6 @@ import spamguard
 import threading
 import time
 import token_discovery
-from core_common import CLASSIFIER_VER
 from core_common import dm
 import logging
 import calcguard  # noqa: E402

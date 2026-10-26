@@ -14,7 +14,6 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "src"))
 import histmark, paths  # noqa: E402
 import ledger_lock  # noqa: E402
-from core import Core  # noqa: E402
 import core_svc  # noqa: E402
 from exf_fix_place import _core_stopped  # noqa: E402
 

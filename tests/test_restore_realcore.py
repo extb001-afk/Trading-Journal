@@ -3,7 +3,7 @@ import sys
 
 sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
-import _ingest  # noqa: E402
+import _ingest  # noqa: E402, F401
 from _ingest import check, W  # noqa: E402
 
 import json  # noqa: E402

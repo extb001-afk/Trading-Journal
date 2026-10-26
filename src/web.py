@@ -1,7 +1,5 @@
 """tj-web: dashboard HTTP server and state builder."""
 from __future__ import annotations
-import gzip
-import bisect
 import copy
 import json
 import math
@@ -14,8 +12,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, getcontext
+from datetime import datetime
+from decimal import Decimal, getcontext  # noqa: F401
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,50 +29,23 @@ import balcheck
 import chainsweep
 import websnap
 import health
-import health_ack
-import spamguard
 import cgca
-import depaddr
+import depaddr   # noqa: F401
 import onboarding
-import demo_data
 import login_auth
 import reqclass
-import lpdec
-import lpchain
-import lpsol
 import bf_engine
-import outflow_match
-import xfer_match
-import sale_match
-import flow_trace
-import xchain_match
-import chain_registry
+import xfer_match   # noqa: F401
 import search_index
-import wow
-import wow2
-import ops_requests
 import other_assets
 import nft
-import candles
 import histcurve
-import xparts
 import sellchart
-import buychart
-import netpace
 import coverage_limits
 import buildproc
-import rawtx_cache
-import acct_norm
-import provbal
-import exprov
-import ubfill
-import rabby
-import salelink
 import day_memo
 import alert_prefs
 import alert_watch
-import flowev
-import addr_ai
 from view_review import (  # noqa: F401
     review_fill_req_view,
     review_len_eff,

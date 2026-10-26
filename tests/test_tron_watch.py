@@ -406,7 +406,6 @@ except cw.Transient as e:
 fake.delay.clear()
 check("TR12 시간 초과 = 일시 실패(제때 · 빈 결과 아님)", "timeout" in eto and time.time() - t9 < 1.4, (eto, round(time.time() - t9, 2)))
 
-import pricing  # noqa: E402
 import spamguard  # noqa: E402
 aid_u = c.conn.execute("SELECT asset_id FROM assets WHERE chain='tron' AND address=?", (USDT,)).fetchone()[0]
 aid_f = c.conn.execute("SELECT asset_id FROM assets WHERE chain='tron' AND address=?", (FAKE,)).fetchone()[0]

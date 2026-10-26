@@ -11,6 +11,8 @@ import time  # noqa: E402
 from collections import Counter  # noqa: E402
 
 import _arch_hyg as H  # noqa: E402
+import _arch_hyg_cls as HC  # noqa: E402
+import _arch_py_ratchet as PYR  # noqa: E402
 import _arch_hyg_src as HS  # noqa: E402
 import _arch_hyg_tools as HT  # noqa: E402
 from _arch_hyg_patch import SrcIndex  # noqa: E402
@@ -72,7 +74,8 @@ inc_kept = R.increases(S["hyg_checks"], dropped, b_min, present={"t1.py", "t2.py
 chk(inc_kept and not R.increases(S["hyg_checks"], dropped, b_min, present={"t1.py"}),
     "[R] 변조 검사: 아직 있는 시험(t2)의 바닥 줄을 지우면 실패 · 지운 시험의 바닥 줄을 지우는 건 통과")
 
-gw, gbad = R.parse_growth('{"_doc": "x"}\n{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "종단 시험", "commit": "c1"}\n')
+WHY9 = "종단 시험 — 수집기 주입 지점이 없어 속성 바꿔 끼우기"
+gw, gbad = R.parse_growth('{"_doc": "x"}\n{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "%s", "commit": "c1"}\n' % WHY9)
 b_ht = D({"t1.py": {"patch_attr": 1}})
 eb, allow = R.grown(S["hyg_tests"], b_ht, gw)
 bad_ok = R.compare(S["hyg_tests"], D({"t1.py": {"patch_attr": 1}, "t9.py": {"patch_attr": 3}}), eb)[0]
@@ -84,8 +87,17 @@ bad_rows = ['{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "
             '{"spec": "hyg_checks", "key": "t9.py", "f": "n", "to": 3, "why": "w", "commit": "c1"}',
             '{"spec": "hyg_tests", "key": "t9.py", "f": "nope", "to": 3, "why": "w", "commit": "c1"}',
             '{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": true, "why": "w", "commit": "c1"}']
-got_rows = [R.parse_growth(x + '\n{"spec": "hyg_tests", "key": "t8.py", "f": "patch_attr", "to": 1, "why": "w", "commit": "c"}') for x in bad_rows]
-chk(all(rows == [] and len(bd) == 1 for rows, bd in got_rows), "[R] 성장 사유 표: 빈 사유·하한 지표·모르는 칸·bool 상한 = 틀린 줄 → 표 전체 안 씀", got_rows)
+bad_rows += ['{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "짧은 사유", "commit": "c1"}',
+             '{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "허용 허용 허용 허용 허용 허용 허용", "commit": "c1"}',
+             '{"spec": "hyg_tests", "key": "t9.py", "f": "patch_attr", "to": 3, "why": "성장 허용 (2026-10-26 · 1234567)", "commit": "c1"}']
+got_rows = [R.parse_growth(x + '\n{"spec": "hyg_tests", "key": "t8.py", "f": "patch_attr", "to": 1, "why": "%s", "commit": "c"}' % WHY9) for x in bad_rows]
+chk(all(rows == [] and len(bd) == 1 for rows, bd in got_rows), "[R] 성장 사유 표: 빈 사유·20자 못 된 사유·'허용'·'성장' 빈말과 숫자만인 사유·하한 지표·모르는 칸·"
+    "bool 상한 = 틀린 줄 → 표 전체 안 씀", got_rows)
+why_cases = {"성장 허용(사유 기록은 비공개 저장소)": True, "W8 이유 코드 주석 — AST 같음 · 10-1": True, WHY9: True, "세션29(개선 요청서 10-25)": False,
+             "허용 허용 허용 허용 허용 허용 허용": False, "allowed allowed allowed": False, "": False, None: False}
+got_why = {k: (PYR.why_ok(k), R._why_ok(k)) for k in why_cases}
+chk(all(v == (why_cases[k], why_cases[k]) for k, v in got_why.items()),
+    "[R] 성장 사유 글 규칙(py_growth·hyg_growth 두 사본 같음): 20자 이상 + 빈말·기호·숫자 빼고 4자 이상 · 공개판 중립 사유 통과 · 접두어만(18자) 거부", got_why)
 
 src9 = os.path.join(T.TMP, "src9")
 os.makedirs(src9, exist_ok=True)
@@ -192,11 +204,71 @@ dated = {n: bool(HT.DATED.search(n)) for n in ("deploy_hotfix_20260928t.sh", "ne
 chk(dated == {"deploy_hotfix_20260928t.sh": True, "negabs_1010.py": True, "rebuild2.py": False, "post_checks_r6.sh": False},
     "[0] 날짜 붙은 도구 = 20YYMMDD·MMDD(숫자 낱말 r6·rebuild2 는 아님)", dated)
 
+H0 = "import os\nimport sys\nimport glob\nimport ast\nimport subprocess\nimport _harness as T\n"
+reads = {"직접 open": ('s = open(os.path.join(T.SRC, "a.py")).read()\n', 1),
+         "키워드 open·Path.open": ('import pathlib\na = open(file=os.path.join(T.SRC, "a.py")).read()\n'
+                                  'b = pathlib.Path(T.SRC, "b.py").open(encoding="utf-8").read()\nc = pathlib.Path(T.SRC).joinpath("c.py").open().read()\n', 3),
+         "키워드 open 도우미": ('def rd(p):\n    return open(file=p).read()\nrd(os.path.join(T.SRC, "a.py"))\n', 1),
+         "경로 이름 거쳐 with": ('P = os.path.join(T.SRC, "a.py")\nwith open(P) as f:\n    s = f.read()\n', 1),
+         "뿌리 이름 + src": ('R = T.ROOT\ns = open(os.path.join(R, "src", "a.py")).read()\n', 1),
+         "pathlib 뿌리(/ · Path 인자)": ('from pathlib import Path\na = ast.parse((Path(T.ROOT) / "src" / "a.py").read_text())\n'
+                                       'b = Path(T.ROOT, "src", "b.py").open().read()\nc = Path(T.ROOT, "web", "c.js").read_text()\n', 2),
+         "하네스 src 읽기": ('s = T.web_src()\nc = T.core_src()\n', 2),
+         "glob 반복 + ast.parse": ('for f in glob.glob(os.path.join(T.SRC, "*.py")):\n    ast.parse(open(f).read())\n', 1),
+         "경로를 여는 도우미에 넘김": ('def rd(p):\n    return open(p).read()\nrd(os.path.join(T.SRC, "a.py"))\n', 1),
+         "셈 밖(sys.path·자식 인자·TMP·web)": ('sys.path.insert(0, T.SRC)\np = subprocess.run([sys.executable, "x.py", T.SRC])\nopen(p.stdout)\n'
+                                           'open(os.path.join(T.TMP, "o"))\nopen(os.path.join(T.ROOT, "web", "a.js"))\n', 0),
+         "함수 인자가 바깥 경로 이름을 가림": ('p = os.path.join(T.SRC, "a.py")\ndef sha(p):\n    return open(p, "rb").read()\n', 0)}
+got_r = {k: len(HC.src_reads(H0 + v[0], "test_x.py")) for k, v in reads.items()}
+chk(got_r == {k: v[1] for k, v in reads.items()}, "[0] src 원문을 여는 자리 = open·read_text·하네스 src 읽기·경로 도우미(경로 함수 안만 따라감 · "
+    "sys.path·자식 프로세스 인자·TMP·web 은 셈 밖 · 함수 인자는 바깥 이름을 가림)", got_r)
+mods9 = {"q9core", "q9pkg", "q9pkg.q9a", "q9pkg.q9b", "q9dyn", "q9kid", "q9kid2", "q9kid3", "q9none", "q9doc"}
+imp9 = ('"""독스트링 속 import q9doc 는 셈 밖(공개판 빌드가 지움)"""\nimport q9core\nfrom q9pkg import q9a\nimport importlib\n'
+        'importlib.import_module("q9dyn")\nCODE = "import q9kid, q9kid2 as k2\\nfrom q9kid3 import x\\n"\n')
+got_i = sorted(HC.imported_modules(imp9, "test_x.py", mods9))
+chk(got_i == ["q9core", "q9dyn", "q9kid", "q9kid2", "q9kid3", "q9pkg", "q9pkg.q9a"],
+    "[0] 직접 임포트 = import·from 패키지 import 하위모듈·import_module·자식 코드 글자(독스트링 빼고 · 안 부른 q9pkg.q9b·q9none·q9doc 는 미시험)", got_i)
+cls9 = os.path.join(T.TMP, "cls9")
+os.makedirs(os.path.join(cls9, "arch_baseline"), exist_ok=True)
+for fn, body in (("test_arch_lint9.py", "s = T.web_src()\n"), ("test_reads9.py", "s = T.web_src()\n"), ("test_old9.py", "s = T.web_src()\n"),
+                 ("test_plain9.py", "import q9core\n"), ("_helper9.py", "s = T.web_src()\n")):
+    with open(os.path.join(cls9, fn), "w", encoding="utf-8") as f:
+        f.write(H0 + body)
+with open(os.path.join(cls9, "arch_baseline", "hyg_srctext.jsonl"), "w", encoding="utf-8") as f:
+    f.write(R.dump(S["hyg_srctext"], D({"src_readers": {"test_old9.py": None}})))
+rd9 = sorted(HC.src_readers(cls9))
+bad9 = R.compare(S["hyg_srctext"], D({"src_readers": {x: None for x in rd9}}), D({"src_readers": {"test_old9.py": None}}))[0]
+inc9 = R.increases(S["hyg_srctext"], D({"src_readers": {"test_old9.py": None, "test_reads9.py": None}}), D({"src_readers": {"test_old9.py": None}}))
+chk(rd9 == ["test_old9.py", "test_reads9.py"] and len(bad9) == 1 and "test_reads9.py" in bad9[0] and inc9,
+    "[0] 분류 래칫: test_arch_* 이름·도우미(_*.py) 는 셈 밖 · 목록에 없는 test_ 가 src 를 열면 실패 · 목록에 줄 더하기 = 변조 검사 실패", (rd9, bad9, inc9))
+k9 = HC.kinds(cls9)
+chk(k9 == {"test_arch_lint9.py": "arch", "test_old9.py": "arch", "test_plain9.py": "behavior", "test_reads9.py": "behavior"},
+    "[0] run_all --kind 분류 = test_arch_* + 기준선 목록 → arch · 나머지 behavior", k9)
+import run_all as RA  # noqa: E402
+try:
+    RA._parse(["--kind", "unit"])
+    kerr = None
+except ValueError as e:
+    kerr = str(e)
+kp = (RA._parse(["--kind", "arch", "-j", "2", "search"]), RA._parse(["--kind=behavior"]), RA._parse([])[3])
+jobs0 = int(os.environ.get("TJ_TEST_JOBS") or 1)
+chk(kp == ((["search"], False, 2, "arch"), ([], False, jobs0, "behavior"), None) and kerr and "--kind" in kerr,
+    "[0] run_all --kind arch|behavior 읽기(기본 = 전부 · 다른 값 = 오류)", (kp, kerr))
+badu = R.compare(S["hyg_untested"], D({"modules": {"old_mod": None, "new_mod": None}}), D({"modules": {"old_mod": None, "gone": None}}))
+chk(len(badu[0]) == 1 and "new_mod" in badu[0][0] and any("gone" in x for x in badu[1]),
+    "[0] 미시험 모듈 래칫: 새 모듈이 목록에 들어오면 실패 · 시험이 생겨 빠진 모듈 = 안내(--update-lower 로 줄이기)", badu)
+
 layout = R.repo_layout()
 old_tests = R.load("hyg_tests") if layout else None
 cur, extra = R.current_hyg(T.ROOT, T.HERE, T.README, old_tests["exempt"] if old_tests else None)
 if not layout:
-    print("[1] 공개판 배치 — 래칫 건너뜀")
+    print("[1] 공개판 배치 — 래칫 건너뜀(시험 분류 둘만 비교)")
+    for name in ("hyg_srctext", "hyg_untested"):
+        b9 = R.load(name)
+        chk(b9 is not None, f"[{name}] 기준선 파일 있음(arch_baseline/{name}.jsonl · 공개판 배치)")
+        if b9 is not None:
+            bad_p = R.compare(S[name], cur[name], b9)[0]
+            chk(not bad_p, f"[{name}] {S[name].title} — 새 위반 0(공개판 배치)", bad_p[:20])
 else:
     R.check(T, T.ROOT, cur)
 

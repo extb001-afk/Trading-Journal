@@ -1,11 +1,20 @@
 import json
 import os
+import re
 import tempfile
 
 import _arch_py_defs as D
 
 GROWTH_FILE = "py_growth.jsonl"
 KEYS_LINE = "_keys"
+
+
+WHY_MIN = 20
+_WHY_FILLER = re.compile(r"허용|성장|allow(?:ed)?|[\W\d_]+", re.I)
+
+
+def why_ok(why) -> bool:
+    return isinstance(why, str) and len(why.strip()) >= WHY_MIN and len(_WHY_FILLER.sub("", why)) >= 4
 GROUP_FILE = {"size": "py_size.jsonl", "layers": "py_layers.jsonl", "imports": "py_imports.jsonl",
               "api": "py_api.jsonl", "ledger": "py_ledger.jsonl", "except": "py_except.jsonl",
               "contracts": "py_contracts.jsonl", "compat": "py_compat.jsonl"}
@@ -81,8 +90,8 @@ HARD = {
     "ref.modset": ("api", "buildproc MODSET/MODDICT 의 (모듈, 이름)이 그 모듈에 정의돼 있어야 함"),
     "ledger.tables": ("ledger", "db 스키마의 표는 전부 원장 표 목록에"),
     "except.badcode": ("except", "이유 코드는 닫힌 목록(py_rules.json except_reasons · docs/ARCH.md)에서만"),
-    "growth.invalid": ("size", "성장 사유 표(py_growth.jsonl) 줄 = 아는 지표 k · 모듈 m · 이름 q · 허용 상한 to(0 이상 정수) · 사유 why · 커밋 commit"
-                               "(글자) — 틀린 줄이 하나라도 있으면 표 전체를 안 씀"),
+    "growth.invalid": ("size", "성장 사유 표(py_growth.jsonl) 줄 = 아는 지표 k · 모듈 m · 이름 q · 허용 상한 to(0 이상 정수) · 사유 why(20자 이상 · "
+                               "'허용'·'성장' 같은 빈말만이면 거부) · 커밋 commit(글자) — 틀린 줄이 하나라도 있으면 표 전체를 안 씀"),
     "rules.invalid": ("size", "규칙 파일 한도(limits) = 0 이상 정수(NaN·글자 금지)"),
 }
 _ORDER = ("k", "m", "q", "f", "h", "v", "a")

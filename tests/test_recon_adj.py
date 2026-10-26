@@ -9,7 +9,6 @@ import glob  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
-import time  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
 os.makedirs(os.path.join(T.TMP, "seed"), exist_ok=True)

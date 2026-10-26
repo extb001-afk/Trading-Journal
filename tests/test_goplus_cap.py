@@ -5,7 +5,6 @@ sys.dont_write_bytecode = True
 import _harness as T  # noqa: E402
 
 import json  # noqa: E402
-import os  # noqa: E402
 import types  # noqa: E402
 
 import net_http, paths, statefile  # noqa: E402

@@ -19,7 +19,15 @@ var nx=location.pathname+location.search+location.hash,u='/login'+(nx&&nx!=='/'&
 var del=function(){try{var r=indexedDB.deleteDatabase('tj_v2');r.onsuccess=r.onerror=r.onblocked=go;}catch(e){go();}};setTimeout(go,1500);
 try{var T=window.TJ;if(T&&typeof T.clearCache==='function'){Promise.resolve(T.clearCache()).then(del,del);return;}}catch(e){}del();};
 window.__tjLoginCheck=function(r){try{if(r&&r.status===401&&r.headers&&r.headers.get('X-TJ-Login')){window.__tjToLogin();return true;}}catch(e){}return false;};
-(function(){var f0=window.fetch;if(!f0)return;window.fetch=function(){return f0.apply(this,arguments).then(function(r){window.__tjLoginCheck(r);return r;});};})();
+(function(){var f0=window.fetch;if(!f0)return;
+var SHORT=' health ops wallet_reload auth/status setup/status setup/tier setup/chains ';
+var lim=function(rq,o){var m=String((o&&o.method)||'GET').toUpperCase(),p=typeof rq==='string'?rq.split(/[?#]/)[0]:'';
+if(!(m==='GET'||m==='HEAD')||(o&&o.signal)||!window.AbortController||p.slice(0,5)!=='/api/')return 0;
+return SHORT.indexOf(' '+p.slice(5)+' ')>=0?20000:0;};
+window.fetch=function(rq,o){var ms=lim(rq,o),a=arguments,t=0;
+if(ms){var ac=new AbortController();a=[rq,Object.assign({},o,{signal:ac.signal})];
+t=setTimeout(function(){try{ac.abort(new DOMException('서버 응답이 '+ms/1000+'초 넘게 없어요','TimeoutError'));}catch(e){ac.abort();}},ms);}
+return f0.apply(this,a).then(function(r){clearTimeout(t);window.__tjLoginCheck(r);return r;},function(e){clearTimeout(t);throw e;});};})();
 var F=null;try{F=localStorage.getItem('tj_v2_full');}catch(e){}
 try{B.res=fetch('/api/v2/state?slim=1'+(v?'&since='+encodeURIComponent(v)+(F==='1'?'':'&nd=1'):''),{cache:'no-store'});B.res.then(function(r){B.resAt=performance.now();},function(){});}catch(e){}
 var rd=function(){return new Promise(function(ok0){var dn=false,ok=function(x){if(!dn){dn=true;ok0(x);}};setTimeout(function(){ok(null);},3000);

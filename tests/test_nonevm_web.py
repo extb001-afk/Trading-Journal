@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import config  # noqa: E402
 import core  # noqa: E402
-import chain_registry as reg  # noqa: E402
 import address_codec as ac  # noqa: E402
 
 KST = timezone(timedelta(hours=9))

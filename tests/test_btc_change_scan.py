@@ -14,7 +14,6 @@ import tempfile  # noqa: E402
 import config, paths  # noqa: E402
 import address_codec as ac  # noqa: E402
 import btc_descriptor as bd  # noqa: E402
-import chain_event as ce  # noqa: E402
 import chain_registry as reg  # noqa: E402
 import chain_state as cs  # noqa: E402
 import btc_watch as bw  # noqa: E402

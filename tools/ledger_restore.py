@@ -1652,7 +1652,7 @@ def new_ledger(apply_: bool, fresh_collect: bool = False, state_dir: str = None,
         log(f"옮김: {aside}")
     invalidate_curves(sd)
     statefile.atomic_write_json(os.path.join(sd, lb.NEW_LEDGER_OK), {"ts": int(time.time()), "by": "ledger_restore new"})
-    log(f"새 원장 허용 표식 기록(1시간 · 한 번) — 유닛 러너가 다음 확인(15초) 때 빈 원장을 만들어요. pm2 직접 실행이면: TJ_ALLOW_NEW_LEDGER=1 로 core 1회")
+    log("새 원장 허용 표식 기록(1시간 · 한 번) — 유닛 러너가 다음 확인(15초) 때 빈 원장을 만들어요. pm2 직접 실행이면: TJ_ALLOW_NEW_LEDGER=1 로 core 1회")
     return 0
 
 

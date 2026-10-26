@@ -17,25 +17,17 @@ import accounting_unk
 import accounting_util
 import acct_norm
 import bf_engine
-import bisect
-import buychart
 import histmark, logs, paths, statefile
 import depaddr
 import flow_trace
-import flowev
 import histcurve
 import json
 import lpdec
-import lpsol
-import math
 import os
 import outflow_match
-import pricing
 import provbal
-import rawtx_cache
 import re
 import sale_match
-import salelink
 import spamguard
 import time
 import xchain_match
@@ -45,23 +37,15 @@ from datetime import timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
 from view_common import CHAIN_NAME
-from view_common import DAYCLOSE_ON
 from view_common import DISC_OPEN_KO
 from view_common import DISC_OPEN_KO_UNK
 from view_common import EPS
-from view_common import EX_CANDLE_SYMS
 from timeutil import KST
-from view_common import LP_CONV_MIN_USD
-from view_common import OF_BASIS_KO
-from view_common import OF_NATIVE_SYMS
 from view_common import STABLE_GROUPS
-from view_common import SUB_SID_RE
 from view_common import _ex_stable_sym
 from view_common import _f
 from view_common import _hl_cash_syms
 from view_common import _px_tables
-from view_fspin import FS_CAP_X
-from view_fspin import FS_EX
 from view_fspin import _fs_pin_load
 from view_misc import _BuildObsolete
 from view_misc import _fx_candle_near
@@ -70,7 +54,6 @@ from view_offc import _offc_answered
 from view_offc import _offc_excl
 from view_offc import _offc_on
 from view_offc import _offc_tx
-from view_order import NOPX_LEGS_MAX
 from view_order import _ord_pair_moves
 from view_order import _ord_splice
 from view_plans import BR_UNIQ_LO
@@ -1123,7 +1106,6 @@ class ReplayMixin:
         (consume_krw, cp_add_map, cp_emit, cp_take, ev, fee_gain, fs_mark, fs_rec, krw_of, note_unk, tax_krw_acq,) = (kpx.consume_krw, cpx.cp_add_map, cpx.cp_emit, cpx.cp_take, cpx.ev, fbx.fee_gain, fsx.fs_mark, fsx.fs_rec, kpx.krw_of, unx.note_unk, fbx.tax_krw_acq,)
         if calcguard.strict():
             accounting_books.check_pool_aliases(_bs9, "consume_krw cp_add_map cp_emit cp_take ev fee_gain fs_mark fs_rec krw_of note_unk tax_krw_acq", (consume_krw, cp_add_map, cp_emit, cp_take, ev, fee_gain, fs_mark, fs_rec, krw_of, note_unk, tax_krw_acq,), "links")
-        x0: object
         xf_links = self._xfer_links(conn, of_chain, set(uuid2txh) | {u0 for m0 in of_match.values() for u0 in _of_uids(m0)}, prefs,
                                     origin_cache, origin_pending)
         for xl9 in xf_links.values():

@@ -18,7 +18,6 @@ except ImportError:
     fcntl = None
 
 import _arch_py_facts as F  # noqa: E402
-import _arch_py_git as G  # noqa: E402
 import _arch_py_metrics as M  # noqa: E402
 import _arch_py_ratchet as R  # noqa: E402
 import _arch_split as S  # noqa: E402
@@ -224,7 +223,7 @@ class State:
 
 def growth_row_ok(g):
     return isinstance(g, dict) and g.get("k") in R.SPECS and R.SPECS[g["k"]][1] == "num" \
-        and all(isinstance(g.get(x), str) and g[x].strip() for x in ("m", "q", "why", "commit")) \
+        and all(isinstance(g.get(x), str) and g[x].strip() for x in ("m", "q", "why", "commit")) and R.why_ok(g["why"]) \
         and isinstance(g.get("to"), int) and not isinstance(g.get("to"), bool) and g["to"] >= 0
 
 

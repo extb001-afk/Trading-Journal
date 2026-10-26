@@ -1,22 +1,15 @@
 """EVM wallet watcher (RPC and explorer based)."""
-import hashlib
-import json
 import os
-import random
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, envfile, logs, paths, runtime, statefile
 if __name__ == "__main__":
     runtime.cpu_reserve_apply()
-import lpdec
+import lpdec  # noqa: F401
 import bf_engine
 import tsfix
 import addr_tier

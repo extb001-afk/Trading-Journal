@@ -1,5 +1,4 @@
 """Liquidity-position decoding helpers."""
-import json
 import os
 import address_codec
 import calcguard  # noqa: E402

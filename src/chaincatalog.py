@@ -1,6 +1,5 @@
 """Catalog of supported EVM chains and their data sources."""
 import json
-import os
 import re
 
 _POLL = 120

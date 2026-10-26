@@ -28,6 +28,21 @@ def commit_of(root, ref):
     return out.strip() if out else None
 
 
+def last_tag(root):
+    out = _git(root, "describe", "--tags", "--abbrev=0", "HEAD")
+    return (out.strip() or None) if out else None
+
+
+def last_commit_of(root, relpath):
+    out = _git(root, "log", "-1", "--format=%H", "HEAD", "--", relpath)
+    return (out.strip() or None) if out else None
+
+
+def is_shallow(root):
+    out = _git(root, "rev-parse", "--is-shallow-repository")
+    return bool(out) and out.strip() == "true"
+
+
 def merge_base(root, a, b):
     out = _git(root, "merge-base", a, b)
     return out.strip() if out else None

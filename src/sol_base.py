@@ -354,7 +354,7 @@ class Rpc:
                 if not until or not ("-32020" in s9 or "not found" in s9.lower()):
                     raise
                 if not slot_ok:
-                    raise _PnSkip(f"커서를 못 찾음(-32020) · 커서 슬롯 모름 — 헬리우스로") from e
+                    raise _PnSkip("커서를 못 찾음(-32020) · 커서 슬롯 모름 — 헬리우스로") from e
                 if len(self._pn_nf) > 5000:
                     self._pn_nf.clear()
                 self._pn_nf[a] = until

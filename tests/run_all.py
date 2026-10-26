@@ -32,14 +32,20 @@ def _snapshot(root):
 
 
 def _parse(argv):
-    args, verbose, jobs = [], False, os.environ.get("TJ_TEST_JOBS") or "1"
+    args, verbose, jobs, kind = [], False, os.environ.get("TJ_TEST_JOBS") or "1", None
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in ("-j", "--jobs"):
+        if a in ("-j", "--jobs", "--kind"):
             if i + 1 >= len(argv):
-                raise ValueError(f"{a} 뒤에 숫자가 필요해요")
-            jobs, i = argv[i + 1], i + 1
+                raise ValueError(f"{a} 뒤에 값이 필요해요")
+            if a == "--kind":
+                kind = argv[i + 1]
+            else:
+                jobs = argv[i + 1]
+            i += 1
+        elif a.startswith("--kind="):
+            kind = a.split("=", 1)[1]
         elif a.startswith("--jobs="):
             jobs = a.split("=", 1)[1]
         elif a.startswith("-j") and len(a) > 2:
@@ -55,7 +61,9 @@ def _parse(argv):
         raise ValueError(f"동시 수가 숫자가 아니에요: {jobs!r}")
     if n < 1:
         raise ValueError(f"동시 수는 1 이상이어야 해요: {n}")
-    return args, verbose, n
+    if kind not in (None, "arch", "behavior"):
+        raise ValueError(f"--kind 는 arch 또는 behavior: {kind!r}")
+    return args, verbose, n, kind
 
 
 def _run_one(f, env):
@@ -120,7 +128,7 @@ def _run_parallel(files, env, jobs, verbose):
 
 def main():
     try:
-        args, verbose, jobs = _parse(sys.argv[1:])
+        args, verbose, jobs, kind = _parse(sys.argv[1:])
     except ValueError as e:
         print(e)
         return 1
@@ -129,6 +137,10 @@ def main():
         print("src/version.py(뿌리 표식)를 찾지 못했어요 — TJ_TEST_ROOT=<src 가 든 폴더>")
         return 1
     files = sorted(f for f in os.listdir(HERE) if f.startswith("test_") and f.endswith(".py") and (not args or any(a in f for a in args)))
+    if kind:
+        import _arch_hyg_cls as HC
+        k9 = HC.kinds(HERE)
+        files = [f for f in files if k9.get(f) == kind]
     if not files:
         print("돌릴 시험이 없어요")
         return 1

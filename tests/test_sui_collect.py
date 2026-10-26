@@ -17,7 +17,6 @@ import core  # noqa: E402
 import chain_event  # noqa: E402
 import chain_registry as reg  # noqa: E402
 import chain_state as cs  # noqa: E402
-import address_codec as ac  # noqa: E402
 from inbox import SegmentWriter  # noqa: E402
 try:
     import sui_watch as SW  # noqa: E402

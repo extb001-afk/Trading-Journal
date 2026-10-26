@@ -232,7 +232,7 @@ try:
           and K(V1, 7) not in (Tbud.fp.get("chk") or {}), (o, rbud.calls))
     print("[B''] 직전 값 보존 — 같은 시리즈로 확인한 값만 낡음 표시로 · 표식 없는 값(계약 단위·구버전)은 버림")
     T.fp["fp"][K(V1, 9)]["at"] = CLOCK[0] - 5000
-    r.on(f"api.opensea.io/api/v2/collections/nine-by-b/stats", (503, None))
+    r.on("api.opensea.io/api/v2/collections/nine-by-b/stats", (503, None))
     o = guard("B'' fetch err", lambda: T.fetch_fp(K(V1, 9), T.hold["cols"][K(V1, 9)]))
     f9 = (T.fp.get("fp") or {}).get(K(V1, 9)) or {}
     check("B''1 오류 = 직전 시리즈 값 0.2 유지 + err 표식", o == "err" and f9.get("native") == 0.2 and f9.get("err") == "err", (o, f9))

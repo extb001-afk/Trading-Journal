@@ -1,7 +1,6 @@
 from __future__ import annotations
 import acct_norm
 import config, logs, paths, prefs_ident, statefile
-import copy
 import depaddr
 import json
 import lpchain

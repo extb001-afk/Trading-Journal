@@ -684,7 +684,6 @@ def gates(b, t0: int = 0, iso=None) -> dict:
                         "before_window_skipped": len(_before_window),
                         "missing_sample": missing[:10], "mismatch_sample": mismatch[:10],
                         "unlinked_sum_q8": {k: str(v) for k, v in sorted(unlinked_sum.items())}}
-    import core as _core9
     import core_svc
     elig_ord, elig_q, n_nonkrw = set(), {}, 0
     for r in b.execute("SELECT uuid, payload FROM raw_ex WHERE exchange='upbit' AND kind='order'"

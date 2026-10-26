@@ -1,6 +1,7 @@
 (function () {
   'use strict';
   const POLL_MS = 30000;
+  const pollGap = n => (n < 3 ? POLL_MS : Math.min(300000, POLL_MS * 2 ** (n - 2)));
   const esc = TJDOM.esc;
   const money = v => (window.__tj && typeof window.__tj.moneyTxt === 'function') ? window.__tj.moneyTxt(v) : String(v == null ? '' : v);
   const H = { data: null, err: null, at: 0, open: false, pop: false, inflight: false, showAllResolved: false, knownOpen: false, incOpen: new Set(), unitsAll: false };
@@ -49,6 +50,7 @@
     H.locked = true; H.data = null; H.err = null; H.at = 0; H.pop = false; H.open = false; H.knownOpen = false; H.showAllResolved = false; H.ackBusy = false;
     OPS.d = null; OPS.err = null; OPS.ask = ''; OPS.askBody = ''; OPS.det.clear();
     const ov = document.getElementById('tjhOverlay'); if (ov) ov.remove();
+    bgSync();
     document.documentElement.classList.remove('tjh-lock');
     const pp = document.getElementById('tjhPop'); if (pp) pp.remove();
     try { chrome(); } catch (e) {  }
@@ -67,9 +69,10 @@
       if (isLocked()) { H.data = null; return; }
       if (stale()) gone = true;
       else { H.data = j.health || null; H.ver = typeof j.version === 'string' ? j.version.slice(0, 40) : '';
-        H.drev = Number.isInteger(j.dataRev) ? j.dataRev : null; H.err = null; H.at = Date.now(); }
+        H.drev = Number.isInteger(j.dataRev) ? j.dataRev : null; H.err = null; H.at = Date.now(); H.fail = 0; }
     } catch (e) {
-      if (stale()) gone = true; else H.err = (e && e.message) || String(e);
+      if (stale()) gone = true;
+      else { H.err = (e && e.message) || String(e); H.fail = (H.fail || 0) + 1; H.failAt = Date.now(); }
     } finally {
       H.inflight = false;
     }
@@ -489,8 +492,10 @@
     } else if (ov) {
       ov.remove();
     }
+    bgSync();
     paintPop();
   }
+  function bgSync() { try { const T = window.TJ; if (T && typeof T.bgInert === 'function') T.bgInert(); } catch (e) {  } }
   function paintPop() {
     let host = document.getElementById('tjhPop');
     if (!H.pop || H.open) { if (host) host.remove(); return; }
@@ -572,7 +577,8 @@
   document.addEventListener('pointerdown', ev => { if (H.pop && !ev.target.closest('.tjh-pop') && !ev.target.closest('.tjh-btn')) togglePop(false); }, true);
   window.addEventListener('resize', () => { if (H.pop) paintPop(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - H.at > POLL_MS) load(); });
-  setInterval(() => { if (!document.hidden) { load(); if (H.open) loadOps(); } }, POLL_MS);
+  const pollDue = () => Date.now() - (H.failAt || 0) >= pollGap(H.fail || 0) - 1000;
+  setInterval(() => { if (!document.hidden && pollDue()) { load(); if (H.open) loadOps(); } }, POLL_MS);
   setInterval(() => { const s = document.querySelector('#tjhOverlay .tjh-sub'); if (s && !document.hidden) TJDOM.set(s, headerLine()); }, 15000);
 
   function refocus(sel, v) { const b = Array.from(document.querySelectorAll('#tjhOverlay ' + sel + ', #tjhCard ' + sel + ', #tjhPop ' + sel)).find(x => v == null || x.getAttribute('data-v') === v); if (b) { try { b.focus({ preventScroll: true }); } catch (e) {  } } }

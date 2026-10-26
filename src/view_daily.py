@@ -1436,10 +1436,6 @@ class DailyMixin:
         px_wait9 = self.__dict__.get("_px_wait_gids") or set()
         extra = extra or {}
         x_now = float(extra.get("ub") or 0) + float(extra.get("fiat") or 0) + float(extra.get("lp") or 0)
-        x_split = "krw_up" in extra
-        krw_up_now = float(extra.get("krw_up") or 0)
-        krw_other_now = float(extra.get("krw_other") or 0)
-        x_nonkrw = float(extra.get("ub") or 0) + float(extra.get("lp") or 0)
         ubs_now = ({str(k9).upper(): v9 for k9, v9 in extra["ubs"].items()} if isinstance(extra.get("ubs"), dict) else {})
         ub_tl9 = extra.get("ub_tl") if isinstance(extra.get("ub_tl"), dict) else {}
         ub_sym9 = {}
@@ -1470,7 +1466,6 @@ class DailyMixin:
                     rest9[s9] = [round(q9, 12), round(u9, 2)]
             return cut9, rest9, px9
         rate_now = float(extra.get("rate") or self.spot.rate or acct_norm.DEFAULT_KRW_USD)
-        up_tl = extra.get("krw_up_tl")
         now_ts = time.time() if now_ts is None else float(now_ts)
         now_ms = int(now_ts * 1000)
         days = []

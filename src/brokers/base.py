@@ -21,6 +21,10 @@ class BrokerError(Exception):
     pass
 
 
+class TokenRejected(BrokerError):
+    pass
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -104,6 +108,7 @@ class Adapter:
     OPTIONAL: tuple = ()
     NOTE = UNVERIFIED
     _tokens: dict = {}
+    _ck = None
 
     def __init__(self, cfg: dict, http=None, now=None):
         self.cfg = cfg or {}
@@ -112,6 +117,10 @@ class Adapter:
 
     def req(self, method, url, headers=None, body=None, verify=True, ok=(200,)):
         st, j, rh = self.http(method, url, headers or {}, body, 15.0, verify)
+        t = Adapter._tokens.get(self._ck) if self._ck else None
+        if t and st == 401 and t[2]:
+            Adapter._tokens.pop(self._ck, None)
+            raise TokenRejected("HTTP 401 인증 실패(토큰 거부 — 새로 받음)")
         if st not in ok:
             kind = ("인증 실패" if st in (401, 403) else "요청 한도" if st == 429 else "리다이렉트 거부" if 300 <= st < 400
                     else "증권사 서버 오류" if st >= 500 else "요청 거부")
@@ -127,11 +136,13 @@ class Adapter:
     def cached_token(self, ck):
         t = Adapter._tokens.get(ck)
         if t and t[1] - 60 > self.now():
+            self._ck = ck
             return t[0]
         return None
 
     def keep_token(self, ck, tok, ttl_sec):
-        Adapter._tokens[ck] = (tok, self.now() + max(60, float(ttl_sec or 0)))
+        Adapter._tokens[ck] = (tok, self.now() + max(60, float(ttl_sec or 0)), False)
+        self._ck = ck
 
     @staticmethod
     def need(v, typ, what):

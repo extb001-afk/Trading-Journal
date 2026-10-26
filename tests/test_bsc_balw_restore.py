@@ -7,7 +7,6 @@ import _bscchain as B  # noqa: E402
 
 import json  # noqa: E402
 import os  # noqa: E402
-import shutil  # noqa: E402
 import sqlite3  # noqa: E402
 import time  # noqa: E402
 

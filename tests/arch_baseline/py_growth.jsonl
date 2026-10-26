@@ -535,3 +535,4 @@
 {"k": "class.lines", "m": "evm_es", "q": "EtherscanWatcher", "to": 1093, "why": "성장 허용(사유 기록은 비공개 저장소)", "commit": "private"}
 {"k": "func.lines", "m": "evm_base", "q": "rpc_handback", "to": 129, "why": "성장 허용(사유 기록은 비공개 저장소)", "commit": "private"}
 {"k": "class.lines", "m": "other_assets", "q": "Quoter", "to": 448, "why": "성장 허용(사유 기록은 비공개 저장소)", "commit": "private"}
+{"k": "file.bytes", "m": "review_daily", "q": "<file>", "to": 236774, "why": "성장 허용(사유 기록은 비공개 저장소)", "commit": "private"}

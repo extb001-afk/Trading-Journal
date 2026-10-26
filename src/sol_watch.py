@@ -1,16 +1,11 @@
 """Solana wallet watcher."""
 from __future__ import annotations
 
-from collections import deque
 import contextlib
 import json
 import os
 import sys
-import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, logs, paths, runtime, statefile
