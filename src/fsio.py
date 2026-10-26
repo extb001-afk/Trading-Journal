@@ -10,7 +10,7 @@ import secrets
 import stat
 import threading
 import weakref
-from typing import IO, Any, Callable, Iterator, Optional, Tuple, Union
+from typing import IO, Any, Callable, Iterator, Optional, Tuple, Union, cast
 
 TMP_PREFIX = ".tmp_"
 TMP_SUFFIX = ".tmp"
@@ -64,7 +64,7 @@ def _perm_for(path: str, mode: Mode) -> Optional[int]:
             return stat.S_IMODE(os.stat(path).st_mode)
         except FileNotFoundError:
             return 0o600
-    return int(mode)
+    return int(cast(int, mode))
 
 
 def _open_temp(path: str, mode: Mode, *, create_error: bool = False) -> Tuple[int, str]:
@@ -227,9 +227,9 @@ def claim(path: PathLike) -> Optional[str]:
 
 
 _TGUARD = threading.Lock()
-_TLOCKS = {}
-_TOWNER = {}
-_RLOCKS = weakref.WeakSet()
+_TLOCKS: dict = {}
+_TOWNER: dict = {}
+_RLOCKS: "weakref.WeakSet[FileRLock]" = weakref.WeakSet()
 
 
 def lock_path(path: PathLike) -> str:
@@ -296,8 +296,8 @@ class FileRLock:
     def _reset(self) -> None:
         self._rlock = threading.RLock()
         self._depth = 0
-        self._owner = None
-        self._fd = None
+        self._owner: Optional[int] = None
+        self._fd: Optional[int] = None
 
     def path(self) -> str:
         lf = self._lock_file
@@ -322,7 +322,7 @@ class FileRLock:
         if self._depth == 0:
             fd, self._fd, self._owner = self._fd, None, None
             try:
-                _unlock_fd(fd)
+                _unlock_fd(cast(int, fd))
             finally:
                 self._rlock.release()
         else:
@@ -337,7 +337,7 @@ class FileRLock:
 
 
 def _after_fork_child() -> None:
-    global _TGUARD, _TLOCKS, _TOWNER
+    global _TGUARD, _TLOCKS, _TOWNER  # noqa: PLW0603
     _TGUARD = threading.Lock()
     _TLOCKS = {}
     _TOWNER = {}

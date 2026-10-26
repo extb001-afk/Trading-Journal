@@ -76,7 +76,7 @@ _SECRET_MIN = 8
 
 
 def _secret_name(name) -> bool:
-    global _SECRET_NAME_RE
+    global _SECRET_NAME_RE  # noqa: PLW0603
     import re as _re9
     if _SECRET_NAME_RE is None:
         _SECRET_NAME_RE = _re9.compile(r"(?i)(?:key|secret|token|pass|access|refresh|client_id|account)")
@@ -307,7 +307,7 @@ def _render(s: str, hit: list, bracket=frozenset()) -> str:
 
 def _redact(text: object, generic: bool, extra: Iterable = (), extra_min: int = _SECRET_MIN, dashless: bool = False,
             patterns: Iterable = ()) -> str:
-    global _KV_SECRET_RE, _ORIGIN_RE, _LONG_RE
+    global _KV_SECRET_RE, _ORIGIN_RE, _LONG_RE  # noqa: PLW0603
     s = str(text)
     if _KV_SECRET_RE is None:
         names = (r"api[_\-]?key|apikey|access[_\-]?key|secret[_\-]?key|secret|passphrase|password|signature|"

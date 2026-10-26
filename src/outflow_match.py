@@ -192,7 +192,7 @@ _BRIDGE_DESTS = None
 
 
 def bridge_dests() -> frozenset:
-    global _BRIDGE_DESTS
+    global _BRIDGE_DESTS  # noqa: PLW0603
     if _BRIDGE_DESTS is None:
         out = set()
         try:

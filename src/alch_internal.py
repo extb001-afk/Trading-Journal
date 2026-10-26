@@ -82,8 +82,8 @@ def norm(t) -> dict:
         raise AlchFail("payload", f"분류 {t.get('category')!r}")
     try:
         blk = int(str(t.get("blockNum")), 16)
-    except (TypeError, ValueError):
-        raise AlchFail("payload", "blockNum 형식")
+    except (TypeError, ValueError) as exc:
+        raise AlchFail("payload", "blockNum 형식") from exc
     f9 = str(t.get("from") or "").lower()
     t9 = str(t.get("to") or "").lower()
     if not _ADDR_RE.match(f9) or (t9 and not _ADDR_RE.match(t9)):
@@ -133,11 +133,11 @@ def fetch_range(url: str, b0: int, b1: int, kw: dict = None, max_pages: int = MA
             raise
         except Exception as e:  # noqa: BLE001
             if _local(e):
-                raise AlchFail("budget", f"0콜 거절({getattr(e, 'kind', '?')})")
+                raise AlchFail("budget", f"0콜 거절({getattr(e, 'kind', '?')})")   # noqa: B904
             if _cap_off(e):
                 _set_off(f"키 거부·미지원({getattr(e, 'code', None) or getattr(e, 'kind', '?')})")
-                raise AlchSkip("키 거부·미지원 — 1시간 쉼")
-            raise AlchFail(str(getattr(e, "kind", None) or type(e).__name__), logs.safe_err(e)[:120])
+                raise AlchSkip("키 거부·미지원 — 1시간 쉼")  # noqa: B904
+            raise AlchFail(str(getattr(e, "kind", None) or type(e).__name__), logs.safe_err(e)[:120])  # noqa: B904
         pages += 1
         if not isinstance(res, dict) or not isinstance(res.get("transfers"), list):
             raise AlchFail("payload", "transfers 없음")

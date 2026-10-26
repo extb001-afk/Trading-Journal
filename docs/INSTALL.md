@@ -25,6 +25,7 @@ bash tools/setup.sh
 `tools/setup.sh` 는 **아무것도 설치하지 않습니다.** 파이썬 버전·sqlite3·ssl 을 점검하고,
 `config.example.json` → `config.json`, `.env.example` → `.env` 를 복사하고(이미 있으면 내용은 그대로 · 두 파일 모두 권한을 600 으로 맞춤),
 `state/`(권한 700)를 만든 뒤 다음에 칠 명령을 알려 줍니다. 여러 번 실행해도 안전합니다.
+(개발용·선택) 편집기·`mypy` 가 `src/` 모듈을 찾게 하려면 `bash tools/setup.sh --dev-path` — 사용자 site-packages 에 `tj.pth` 한 줄(`<이 폴더>/src`)을 만듭니다(봇 실행엔 필요 없음 · 이미 있으면 그대로).
 
 ### 3) 키 준비 — `.env` 와 `config.json`
 

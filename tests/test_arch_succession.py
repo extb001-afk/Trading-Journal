@@ -88,4 +88,17 @@ T.chk(not vd.ok and len(vd.new) == 1 and not vd.succeeded, "[1b] 한 새 단위�
 
 T.chk(R.succession_rows("ledger.write") == [], "[6] 집합 지표 ledger.write 는 승계 표 대상 아님")
 
+DK, LK = "func.depth", "func.lines"
+TB = ((DK, ("mod", "C.big"), ("mod", "C.p1"), "시험"), (DK, ("mod", "C.big"), ("mod", "C.p2"), "시험"),
+      (LK, ("mod", "C.big"), ("mod", "C.p1"), "시험"), (LK, ("mod", "C.big"), ("mod", "C.p2"), "시험"))
+RULES = {"limits": {"func.depth": 4, "func.lines": 80}}
+vd = R.compare(DK, [U(DK, "mod", "C.big", 2), U(DK, "mod", "C.p1", 5), U(DK, "mod", "C.p2", 5)], [B(DK, "mod", "C.big", 5)], RULES, (), TB)
+T.chk(DK in R.SUCCESSION_MAX and vd.ok and len(vd.succeeded) == 2, "[7] 깊이 5·5 ≤ 옛 5(최대) → 둘 다 승계", (vd.new, vd.succeeded))
+vd = R.compare(DK, [U(DK, "mod", "C.big", 2), U(DK, "mod", "C.p1", 6), U(DK, "mod", "C.p2", 5)], [B(DK, "mod", "C.big", 5)], RULES, (), TB)
+T.chk(not vd.ok and len(vd.new) == 2, "[7] 깊이 6 > 옛 5 → 새 위반(둘 다)")
+vd = R.compare(LK, [U(LK, "mod", "C.big", 10), U(LK, "mod", "C.p1", 100), U(LK, "mod", "C.p2", 100)], [B(LK, "mod", "C.big", 210)], RULES, (), TB)
+T.chk(vd.ok and len(vd.succeeded) == 2, "[7] 줄 수는 합: 10 + 100 + 100 ≤ 210 → 승계")
+vd = R.compare(LK, [U(LK, "mod", "C.big", 10), U(LK, "mod", "C.p1", 100), U(LK, "mod", "C.p2", 100)], [B(LK, "mod", "C.big", 209)], RULES, (), TB)
+T.chk(not vd.ok and len(vd.new) == 2, "[7] 줄 수 합 210 > 209 → 새 위반")
+
 T.finish()

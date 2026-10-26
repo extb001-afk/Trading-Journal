@@ -15,7 +15,7 @@ NFT_PROTOS = ("uni_v4", "uni_v3", "slipstream")
 
 
 def lp_managers(base_dir=None) -> dict:
-    global _MGR_CACHE
+    global _MGR_CACHE  # noqa: PLW0603
     if _MGR_CACHE is not None:
         return _MGR_CACHE
     base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

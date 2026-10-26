@@ -63,7 +63,7 @@ def read_json(path: str, default):
     except FileNotFoundError:
         return default
     except (json.JSONDecodeError, OSError) as e:
-        raise SystemExit(f"상태 파일 손상: {path}: {e}")
+        raise SystemExit(f"상태 파일 손상: {path}: {e}") from e
 
 
 def read_control_json(path: str, default=None):

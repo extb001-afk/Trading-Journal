@@ -747,7 +747,7 @@ def main(poll_default: int = 60):
     try:
         ad = make_adapter(cfg)
     except ValueError as e:
-        raise SystemExit(f"Sui 설정 오류: {logs.safe_err(e)[:160]}")
+        raise SystemExit(f"Sui 설정 오류: {logs.safe_err(e)[:160]}") from e
     col = SuiCollector(ad, SegmentWriter(os.path.join(paths.INBOX_DIR, sp.stream)), st, owners, log=log,
                        page_budget=pb, detail_budget=db)
     sc = (cfg.get(reg.CFG_CHAIN_KEY) or {}).get(CHAIN) if isinstance(cfg.get(reg.CFG_CHAIN_KEY), dict) else None

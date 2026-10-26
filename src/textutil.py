@@ -19,7 +19,7 @@ LINK_KEEP = frozenset((
 
 
 def strip_links(text):
-    global _LINK_RES
+    global _LINK_RES  # noqa: PLW0603
     if not isinstance(text, str) or not text:
         return text
     if _LINK_RES is None:

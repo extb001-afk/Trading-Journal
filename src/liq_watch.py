@@ -2103,7 +2103,7 @@ class Watcher:
                 if it["id"] in (self.__dict__.get("_risk_near") or ()):
                     near_ex.add(ex9)
         for ex9, syms in need.items():
-            if self._submit(f"rpx:{ex9}", lambda ex9=ex9, syms=sorted(syms): self.fetch_spot(ex9, syms), now):
+            if self._submit(f"rpx:{ex9}", lambda ex9=ex9, syms=sorted(syms): self.fetch_spot(ex9, syms), now):  # noqa: B008
                 self._due(f"rpx:{ex9}", RISK_PX_NEAR if ex9 in near_ex else RISK_PX_SEC, now)
         conf9 = self._slow_conf()
         live = set(self.v) | set(conf9 or ())

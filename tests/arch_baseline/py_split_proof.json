@@ -1,4 +1,4 @@
 {
- "_설명": "분할 승계 근거(tools/refactor/move_proof.py --emit 이 씀 · public/tests/_arch_split 이 읽음 · 규칙 파일 = 총괄이 기준 브랜치에서 커밋) · 4막 4-6 끝 승계 해제(결정 18) — origins 비움(옛 근거 = git 이력 · 증명 목록 = docs/ARCH.md 9절 '승계 해제 기록')",
+ "_설명": "분할 승계 근거((비공개 도구) --emit 이 씀 · public/tests/_arch_split 이 읽음 · 규칙 파일 = 총괄이 기준 브랜치에서 커밋) · 4막 4-6 끝 승계 해제(결정 18) — origins 비움(옛 근거 = git 이력 · 증명 목록 = 설계 문서(비공개) 9절 '승계 해제 기록')",
  "origins": {}
 }

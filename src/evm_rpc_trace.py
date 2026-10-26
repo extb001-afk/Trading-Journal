@@ -364,7 +364,7 @@ class RpcTraceMixin:
                 hs9 = [str(x if isinstance(x, str) else (x or {}).get("hash") or "").lower()
                        for x in (self._rpc_call("eth_getBlockByNumber", [hex(int(blk)), False]) or {}).get("transactions") or []]
             except Exception as e:  # noqa: BLE001
-                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 블록 tx 목록 실패: {logs.safe_err(e)[:80]}")
+                raise RuntimeError(f"블록 trace 항목 txHash 없음 — 블록 tx 목록 실패: {logs.safe_err(e)[:80]}")  # noqa: B904
             if len(hs9) != len(res) or not all(hs9):
                 raise RuntimeError(f"블록 trace 항목 txHash 없음 — 개수 불일치 {len(res)} ≠ {len(hs9)}")
         for k9, it in enumerate(res):
@@ -528,8 +528,8 @@ class RpcTraceMixin:
                 res = self._batch([("eth_getTransactionReceipt", [h]) for h in hs])
         except Exception as e:  # noqa: BLE001
             if self._trace_untried(e) or "예산 소진" in str(e):
-                raise TraceDeferred("budget: Alchemy 보완 영수증 — 마감(다음 차례)")
-            raise alch_internal.AlchFail("receipt", logs.safe_err(e)[:80])
+                raise TraceDeferred("budget: Alchemy 보완 영수증 — 마감(다음 차례)")  # noqa: B904
+            raise alch_internal.AlchFail("receipt", logs.safe_err(e)[:80])  # noqa: B904
         out = {}
         for h, r in zip(hs, res):
             try:
@@ -537,7 +537,7 @@ class RpcTraceMixin:
                     raise ValueError("영수증 없음·상태 없음")
                 out[h] = (int(r["blockNumber"], 16), r["status"] == "0x1")
             except (KeyError, TypeError, ValueError) as e:
-                raise alch_internal.AlchFail("receipt", str(e)[:60])
+                raise alch_internal.AlchFail("receipt", str(e)[:60]) from e
         return out
 
     def _alch_tx(self, h: str, snap: dict, errs, n=0, blk_hint=None):

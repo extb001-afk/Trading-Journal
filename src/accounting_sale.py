@@ -95,7 +95,7 @@ class SaleBook:
                             "sale": bool(sl9 and not sl9.get("manual")), "asset": slx.sb._of_asset(r9), "qb": str(r9["qty_base"])}
         except Exception as _cg9:   # noqa: BLE001 [optional]
             calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.of_cand", _cg9)
-            pass
+            calcguard.row_err("view_b_replay:ReplayMixin._build_replay.of_cand", r9, nxt=g9.get("cur") is None)
         return False
 
     def of_finalize(slx, lot9):

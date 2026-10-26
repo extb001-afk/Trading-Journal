@@ -776,7 +776,7 @@ def _tg(token: str, method: str, params: dict | None = None, timeout: int = 12):
                         timeout=timeout)
     except Exception as e:
         log.warning("텔레그램 연결 실패: %s", scrub(e, [token])[:200])
-        raise RuntimeError("텔레그램 연결 실패 — " + net_why(e))
+        raise RuntimeError("텔레그램 연결 실패 — " + net_why(e)) from e
     if not isinstance(d, dict):
         raise RuntimeError(f"텔레그램 응답 오류 (HTTP {code})")
     return d

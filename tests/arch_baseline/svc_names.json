@@ -1,5 +1,5 @@
 {
- "_doc": "9막 서비스 이름 자리 표(정의 = public/tests/_svc_names.py 머리 · 판정 = test_svc_names · 쓰기 = tools/refactor/svc_names.py --emit). findings = [파일, 둘레 함수, 꼴, 묶음, 이름, 수] · 새 자리·늘어남 = 실패 · enforce[묶음] = true 면 그 묶음 자리 0 강제 · allow = [{key, why}](손으로 남기는 자리 · 이유 줄 필수).",
+ "_doc": "9막 서비스 이름 자리 표(정의 = public/tests/_svc_names.py 머리 · 판정 = test_svc_names · 쓰기 = (비공개 도구) --emit). findings = [파일, 둘레 함수, 꼴, 묶음, 이름, 수] · 새 자리·늘어남 = 실패 · enforce[묶음] = true 면 그 묶음 자리 0 강제 · allow = [{key, why}](손으로 남기는 자리 · 이유 줄 필수).",
  "enforce": {
   "EXF": true,
   "PRICING": true,

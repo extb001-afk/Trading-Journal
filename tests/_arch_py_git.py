@@ -48,6 +48,11 @@ def merge_base(root, a, b):
     return out.strip() if out else None
 
 
+def revs_touching(root, base, head, relpath):
+    out = _git(root, "log", "--full-history", "--format=%H", "%s..%s" % (base, head), "--", relpath.replace(os.sep, "/"))
+    return [x for x in out.split("\n") if x] if out else []
+
+
 def show(root, commit, relpath):
     out = _git(root, "show", "%s:%s" % (commit, relpath.replace(os.sep, "/")), binary=True)
     return out.decode("utf-8", "replace") if out is not None else None

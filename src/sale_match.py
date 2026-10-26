@@ -51,7 +51,7 @@ _SEED = None
 
 
 def load_seed(base_dir=None) -> dict:
-    global _SEED
+    global _SEED  # noqa: PLW0603
     if _SEED is not None and base_dir is None:
         return _SEED
     bd = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

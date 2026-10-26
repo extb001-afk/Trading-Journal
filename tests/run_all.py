@@ -57,8 +57,8 @@ def _parse(argv):
         i += 1
     try:
         n = int(jobs)
-    except ValueError:
-        raise ValueError(f"동시 수가 숫자가 아니에요: {jobs!r}")
+    except ValueError as exc:
+        raise ValueError(f"동시 수가 숫자가 아니에요: {jobs!r}") from exc
     if n < 1:
         raise ValueError(f"동시 수는 1 이상이어야 해요: {n}")
     if kind not in (None, "arch", "behavior"):

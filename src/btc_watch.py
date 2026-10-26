@@ -115,12 +115,12 @@ class Esplora:
                 d, _h = bf_engine.http_request(url, timeout=20.0, retries=2, prio="bg", max_inline_wait=10.0)
         except bf_engine.NetError as e:
             if getattr(e, "code", None) == 404:
-                raise NotFound(f"{self.host}: 404(없음)")
-            raise chain_watch.Transient(f"{self.host}: {e.kind}{' ' + str(e.code) if e.code else ''}")
+                raise NotFound(f"{self.host}: 404(없음)") from e
+            raise chain_watch.Transient(f"{self.host}: {e.kind}{' ' + str(e.code) if e.code else ''}") from e
         except chain_watch.Transient:
             raise
         except (OSError, ValueError) as e:
-            raise chain_watch.Transient(f"{self.host}: {type(e).__name__}")
+            raise chain_watch.Transient(f"{self.host}: {type(e).__name__}") from e
         return d
 
     @contextlib.contextmanager

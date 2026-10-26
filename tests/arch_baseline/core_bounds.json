@@ -1,5 +1,5 @@
 {
- "_doc": "9막 Core 묶음 경계 표(정의 = public/tests/_core_bounds.py 머리 · 판정 = test_core_bounds · 갱신 = tools/refactor/core_bounds.py --update-lower — 줄어든 것만). classes·runtime·tm_recv·services·duty = 사람이 정하는 칸(9-1~9-3 이 서비스 클래스로 고침) · 나머지 = 도구가 씀.",
+ "_doc": "9막 Core 묶음 경계 표(정의 = public/tests/_core_bounds.py 머리 · 판정 = test_core_bounds · 갱신 = (비공개 도구) --update-lower — 줄어든 것만). classes·runtime·tm_recv·services·duty = 사람이 정하는 칸(9-1~9-3 이 서비스 클래스로 고침) · 나머지 = 도구가 씀.",
  "classes": {
   "ClassifyMixin": "CORE",
   "Core": "CORE",

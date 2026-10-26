@@ -1,4 +1,4 @@
-{"_doc": "pm2 유닛마다 입구(+ 러너 unit_runner)에서 닿는 import 폐포의 노드 수(src 모듈 · 하위 패키지 · tools 대본) — 늘면 실패 · 줄면 안내. 그래프 = tools/deploy_lib.sh 유닛 표·동적 간선 + AST import(지연 포함) · 정의 = _arch_closure 머리.", "kind": "max", "spec": "py_unit_closure"}
+{"_doc": "pm2 유닛마다 입구(+ 러너 unit_runner)에서 닿는 import 폐포의 노드 수(src 모듈 · 하위 패키지 · tools 대본) — 늘면 실패 · 줄면 안내. 그래프 = (비공개 도구) 유닛 표·동적 간선 + AST import(지연 포함) · 정의 = _arch_closure 머리.", "kind": "max", "spec": "py_unit_closure"}
 {"key": "tj-alert", "n": 63}
 {"key": "tj-bsc", "n": 56}
 {"key": "tj-btc", "n": 52}

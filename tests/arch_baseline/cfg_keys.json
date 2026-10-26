@@ -1,5 +1,5 @@
 {
- "_doc": "설정 키 읽기 기준선(tools/refactor/cfg_keys.py --write · 손 편집 금지) — top/sub = 자료 흐름으로 찾은 읽기 · varkey = 키가 변수인 자리와 가능한 글자 · unresolved = 못 정하는 자리 닫힌 표(guard·whole·passout) · test_cfg_keys 가 새 것 = 실패로 봄",
+ "_doc": "설정 키 읽기 기준선((비공개 도구) --write · 손 편집 금지) — top/sub = 자료 흐름으로 찾은 읽기 · varkey = 키가 변수인 자리와 가능한 글자 · unresolved = 못 정하는 자리 닫힌 표(guard·whole·passout) · test_cfg_keys 가 새 것 = 실패로 봄",
  "top": {
   "_auto_pairs": [
    "config"
@@ -1557,8 +1557,8 @@
   "tron_watch:TronAdapter.requested_from_ms|guard|cfg[backfill_full_history]",
   "tron_watch:TronAdapter.requested_from_ms|guard|cfg[backfill_months]",
   "upbit_link:main|passout|backfill_months → float()",
-  "view_b_cards:CardsMixin._build_cards|passout|_disabled_chains → set()",
-  "view_b_cards:CardsMixin._build_cards|whole|price_overrides.items()",
+  "view_b_cards:CardsMixin._cards_risk|passout|_disabled_chains → set()",
+  "view_b_cards:CardsMixin._cards_risk|whole|price_overrides.items()",
   "view_b_pendings:PendingsMixin._build_pendings|whole|chains.items()",
   "view_b_pendings:PendingsMixin._build_pendings|whole|for in exchange_addresses",
   "view_b_pendings:PendingsMixin._build_pendings|whole|for in wallets",

@@ -217,7 +217,7 @@ FAILS = []
 
 
 def chk(ok, msg, extra=None):
-    global PASS
+    global PASS  # noqa: PLW0603
     if ok:
         PASS += 1
         print("PASS " + msg, flush=True)

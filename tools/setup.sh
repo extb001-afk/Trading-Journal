@@ -6,9 +6,11 @@ case "${1:-}" in
 tj-bot 첫 설치 도우미 — 아무것도 설치하지 않습니다(확인·안내만). 여러 번 실행해도 안전합니다.
   bash tools/setup.sh          점검 + config.json·.env·state/ 준비 + 다음 단계 안내
   bash tools/setup.sh --demo   합성 데이터로 화면만 구경(저장 안 함 · 포트 TJ_PORT=8024 bash tools/setup.sh --demo)
+  bash tools/setup.sh --dev-path  (개발용·선택) 사용자 site-packages 에 tj.pth 한 줄(<이 폴더>/src) — 편집기가 src 모듈을 찾게
+                                  봇 실행엔 필요 없음 · 이미 있으면 건드리지 않음 · 지우기 = 안내되는 tj.pth 파일 삭제
 USAGE
     exit 0;;
-  ""|--demo) ;;
+  ""|--demo|--dev-path) ;;
   *) echo "모르는 옵션: $1 (bash tools/setup.sh --help)"; exit 2;;
 esac
 cd "$(dirname "$0")/.."
@@ -36,6 +38,30 @@ if [[ "${1:-}" == "--demo" ]]; then
   echo "데모 모드 — 합성 데이터(실제 지갑·거래 아님), 설정 저장 안 함. 끄려면 Ctrl+C"
   echo "  → http://127.0.0.1:${TJ_PORT:-8023}/"
   exec env TJ_DEMO=1 "$PY" src/web.py
+fi
+
+if [[ "${1:-}" == "--dev-path" ]]; then
+  case "$PWD" in
+    *$'\n'*|*$'\r'*) die "폴더 경로에 줄바꿈이 있어 .pth 한 줄로 저장할 수 없어요 — 폴더 이름을 바꾸세요";;
+  esac
+  SITE="$("$PY" -c 'import site; print(site.getusersitepackages() if site.ENABLE_USER_SITE else "")')"
+  [[ -n "$SITE" ]] || die "이 파이썬은 사용자 site-packages 를 읽지 않아요(가상환경 등) — 그 환경의 site-packages 에 직접 넣으세요: $ROOT/src"
+  PTH="$SITE/tj.pth"
+  if [[ -e "$PTH" || -L "$PTH" ]]; then
+    if [[ -f "$PTH" && "$(cat "$PTH")" == "$ROOT/src" ]]; then
+      ok "tj.pth 있음 (이 폴더를 가리킴 · 그대로): $PTH"
+    else
+      warn "tj.pth 가 이미 있어요 — 건드리지 않음(다른 설치본을 가리킬 수 있음): $PTH"
+    fi
+  else
+    mkdir -p "$SITE"
+    if (set -o noclobber; printf '%s\n' "$ROOT/src" > "$PTH"); then   # 배타 생성(동시 실행·끊긴 링크로 남의 파일을 덮지 않게)
+      ok "tj.pth 만듦: $PTH → $ROOT/src (지우기 = rm $PTH)"
+    else
+      die "tj.pth 를 만들지 못했어요(권한 또는 그새 생긴 파일) — 확인하세요: $PTH"
+    fi
+  fi
+  exit 0
 fi
 
 if [[ -f config.json ]]; then

@@ -1495,7 +1495,7 @@ def _gt_free(url, timeout=15.0):
             g.acquire("bg", deadline=time.time() + GT_FREE_WAIT_S)
         except bf_engine.NetError as e:
             ra9 = max(GT_FREE_PAUSE_S, bf_engine.gate_wait(GT_FREE_HOST))
-            raise GtGateWait(url.split("?", 1)[0], 429, "게이트 대기 — " + logs.safe_err(e)[:80],
+            raise GtGateWait(url.split("?", 1)[0], 429, "게이트 대기 — " + logs.safe_err(e)[:80],  # noqa: B904
                              {"Retry-After": str(int(min(300.0, ra9)))}, None)
     try:
         return _gj(url, timeout=timeout)
@@ -1511,7 +1511,7 @@ def _gt_free(url, timeout=15.0):
 
 
 def gt_token_prices_ex(chain: str, cas: list, keyed: bool = True):
-    global _GT_ERR
+    global _GT_ERR  # noqa: PLW0603
     net = GT_NETWORK.get(chain)
     if not net or not cas:
         return {}, {}
@@ -1633,7 +1633,7 @@ def ds_take_error():
 
 
 def ds_token_prices(chain: str, cas: list):
-    global _DS_ERR, _DS_META
+    global _DS_ERR, _DS_META  # noqa: PLW0603
     _DS_META = {}
     net = token_tables.DS_CHAIN.get(chain)
     if not net or not cas:

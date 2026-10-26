@@ -41,8 +41,13 @@ chk(set(alias) == NAMES and all(v == 1 for v in alias.values()) and not direct, 
     (sorted(NAMES - set(alias)), direct))
 
 
-def _unpack_el(e, nm):
+STAGE_CTX = {"view_b_cards.py": ("_cards_", "cst")}
+
+
+def _unpack_el(e, nm, ctx=None):
     if isinstance(e, ast.Attribute):
+        if ctx is not None and isinstance(e.value, ast.Name) and e.value.id == ctx:
+            return e.attr == nm
         return e.attr == nm and _unpack_el(e.value, "ctx")
     return isinstance(e, ast.Subscript) and isinstance(e.value, ast.Name) and e.value.id == "_bs9" and isinstance(e.slice, ast.Constant) and e.slice.value == nm
 
@@ -59,6 +64,14 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "view_b_*.py"))) + [os.path.join(T
                 if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Tuple)
                 and isinstance(st.value, ast.Tuple) and st.value.elts and len(st.targets[0].elts) == len(st.value.elts)
                 and all(isinstance(t9, ast.Name) and _unpack_el(e, t9.id) for t9, e in zip(st.targets[0].elts, st.value.elts))}
+    pre, cx = STAGE_CTX.get(os.path.basename(f), (None, None))
+    for fn in ast.walk(tr):
+        if pre and isinstance(fn, ast.FunctionDef) and fn.name.startswith(pre) and [a.arg for a in fn.args.args] == ["self", cx]:
+            st = fn.body[0]
+            if (isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Tuple)
+                    and isinstance(st.value, ast.Tuple) and st.value.elts and len(st.targets[0].elts) == len(st.value.elts)
+                    and all(isinstance(t9, ast.Name) and _unpack_el(e, t9.id, cx) for t9, e in zip(st.targets[0].elts, st.value.elts))):
+                ok_lines.add(st.lineno)
     if os.path.basename(f) == "view_b_replay.py":
         ok_lines |= alias_lines
     for n in ast.walk(tr):

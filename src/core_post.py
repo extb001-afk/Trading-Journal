@@ -421,8 +421,8 @@ class PostMixin:
         row = self.conn.execute("SELECT snapshot FROM raw_txs WHERE chain=? AND txhash=?", (chain, uid)).fetchone()
         try:
             old = json.loads(row["snapshot"])
-        except (TypeError, ValueError):
-            raise RuntimeError(f"[{chain}] 저장본 해석 불가 — 재방출 격리 유지(replay_poison 으로 재시도)")
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"[{chain}] 저장본 해석 불가 — 재방출 격리 유지(replay_poison 으로 재시도)") from exc
         verdict = chain_event.merge_ok(old, rec)
         if verdict == "same":
             return None

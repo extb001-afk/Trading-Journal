@@ -964,6 +964,7 @@
         if (!(mergedAvg >= lo * 0.8 && mergedAvg <= hi * 1.25))
         mergedAvg = sum(la, l => num(l.avg) * num(l.bought)) / sum(la, l => num(l.bought));
       }
+      const ceLeg = legs.find(l => l.calcErr);
       out.push(Object.assign({}, main, {
         held, bought, cost, realized, unreal, soldQty, soldProceeds, avgSell: soldQty > 0 ? soldProceeds / soldQty : 0, paidQty, paidUsd, payReal, payByDay: pbd,
         lpConvQty: sum(legs, l => num(l.lpConvQty)),
@@ -977,7 +978,7 @@
         srcAct: hasSA ? sa : null, evN,
         movedTo: null, inFrom: null, nBuy: sum(legs, l => num(l.nBuy)),
         events, _legs: legs.map(l => l.key), _legP: legs
-      }));
+      }, ceLeg ? { calcErr: ceLeg.calcErr } : {}));
     });
     return out;
   }

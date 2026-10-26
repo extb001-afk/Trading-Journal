@@ -513,4 +513,5 @@ def facts(text, modname, is_pkg=False):
         "n9": walk.n9, "ids9": sorted(walk.ids9),
         "comments": [n_comments, len(hist)], "hist": sorted(set(hist)),
         "doclines": [n_doc, len(doc_hist)], "dochist": sorted(set(doc_hist)),
+        "bare_str": D.bare_strings(tree),
     }

@@ -666,7 +666,7 @@ class Scanner:
         try:
             netpace.wait(url)
         except netpace.Cooldown as e:
-            raise xm.Paused(str(e))
+            raise xm.Paused(str(e)) from e
         try:
             try:
                 bf_engine.es_dispatch_wait(time.time() + 60)
@@ -676,7 +676,7 @@ class Scanner:
                 return json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
-                raise xm.Paused(f"{netpace.host_of(url)} 429")
+                raise xm.Paused(f"{netpace.host_of(url)} 429") from e
             raise RuntimeError(f"이더스캔 HTTP {e.code}") from None
         except urllib.error.URLError as e:
             raise RuntimeError(f"이더스캔 연결 실패: {type(e.reason).__name__}") from None

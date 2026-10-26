@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import _arch as A
 import _arch_py_git as G
@@ -61,7 +62,7 @@ def _tighten(group, st, old):
             changed.append("%s 처음 동결" % k)
             continue
         units = S.fold_units(st.split, k, st.metrics.units.get(k, []), by_k.get(k, []))
-        vd = R.compare(k, units, by_k.get(k, []), st.rules, st.growth)
+        vd = R.compare(k, units, by_k.get(k, []), st.rules, st.allow())
         if not vd.ok:
             refused.append("%s(새 %d · 커짐 %d)" % (k, len(vd.new), len(vd.grew)))
             out += by_k.get(k, [])
@@ -86,8 +87,101 @@ def _tighten(group, st, old):
     return _with_acts(out, old), refused, changed
 
 
+def _grown(st):
+    out, failing = {}, []
+    for group in R.GROUP_FILE:
+        by_k = {}
+        for ln in R.load_lines(A.baseline_path(group)) or []:
+            if ln["k"] != R.KEYS_LINE and R.valid_value(ln["k"], ln.get("v")):
+                by_k.setdefault(ln["k"], []).append(ln)
+        for k in R.metrics_of(group):
+            if R.SPECS[k][1] != "num" or (k == "doc.missing" and A.PUBLIC_LAYOUT):
+                continue
+            units = S.fold_units(st.split, k, st.metrics.units.get(k, []), by_k.get(k, []))
+            vd = R.compare(k, units, by_k.get(k, []), st.rules, st.allow())
+            if not vd.ok:
+                failing.append((k, "%s(새 %d · 커짐 %d)" % (k, len(vd.new), len(vd.grew))))
+            for u, _b, _g in vd.grown:
+                key = (k, u["m"], u["q"])
+                out[key] = max(out.get(key, 0), u["v"])
+    return out, failing
+
+
+LIMITS_DOC = ("현재 상한 표 — 기준선(py_*.jsonl)보다 커진 채 허용된 단위의 상한(to = 접을 때 지금 크기 · at = 접은 달). "
+              "쓰는 법: python3 tests/_arch.py --fold-growth(성장 사유 표를 접고 비움 · 멱등) · 줄어든 값은 --update-lower 가 내림")
+
+
+def fold_growth(st, at=None):
+    if not st.allow() and not os.path.isfile(A.LIMITS_PATH):
+        print("접을 줄 없음(성장 사유 표·현재 상한 표 둘 다 비어 있음)")
+        return 0
+    grown, failing = _grown(st)
+    if failing:
+        print("접기 거부 — 래칫 실패 중: %s(코드를 고치거나 성장 사유 줄을 먼저)" % ", ".join(x for _k, x in failing))
+        return 1
+    rows = R.fold_limits(grown, st.limits, at or time.strftime("%Y-%m"))
+    R.dump_limits(A.LIMITS_PATH, rows, LIMITS_DOC)
+    R.dump_lines(A.GROWTH_PATH, [])
+    print("접음: 성장 사유 줄 %d + 옛 상한 표 줄 %d → 현재 상한 표 %d줄(%s) · 성장 사유 표 비움" % (
+        len(st.growth), len(st.limits), len(rows), R.LIMITS_FILE))
+    return 0
+
+
+TARGET_KEYS = ("file.lines", "file.bytes", "func.lines", "class.lines")
+TARGETS_DOC = ("축소 목표 표(안내만 · 시험 실패 아님) — 분기마다 --tighten-targets --write 로 지금 크기에서 rate 만큼 줄인 목표를 쓰고, "
+               "--tighten-targets 가 목표를 넘는 단위('쪼개야 할 파일')를 출력")
+
+
+def _target_units(st):
+    out = []
+    for k in TARGET_KEYS:
+        for u in st.metrics.units.get(k, []):
+            if R.violating(k, u["v"], st.rules):
+                out.append((k, u["m"], u["q"], u["v"], u.get("at") or u["m"]))
+    return out
+
+
+def tighten_targets(st, write=False, rate=0.05, label=None):
+    cur = _target_units(st)
+    if write:
+        rows = [{"k": k, "m": m, "q": q, "from": v, "to": max(R.limit_of(k, st.rules), int(v * (1 - rate)))}
+                for k, m, q, v, _at in cur]
+        doc = {"_doc": TARGETS_DOC, "label": label or _quarter(), "rate": rate}
+        lines = ["  " + json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in sorted(rows, key=lambda r: (r["k"], r["m"], r["q"]))]
+        R.write_text(A.TARGETS_PATH, '{"_doc": %s,\n "label": %s,\n "rate": %s,\n "targets": [%s]}\n' % (
+            json.dumps(doc["_doc"], ensure_ascii=False), json.dumps(doc["label"]), json.dumps(rate),
+            ("\n" + ",\n".join(lines) + "\n ") if lines else ""))
+        print("목표 표 씀: %s %d단위(%s · 줄임 %g)" % (R.TARGETS_FILE, len(rows), doc["label"], rate))
+    try:
+        with open(A.TARGETS_PATH, encoding="utf-8") as f:
+            tdoc = R.loads(f.read())
+        targets = {(t["k"], t["m"], t["q"]): t["to"] for t in tdoc["targets"]}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print("안내 목표 표 없음·못 읽음(%s) — --tighten-targets --write 로 만든다" % e.__class__.__name__)
+        return 0
+    over = sorted(((v - targets[(k, m, q)], k, m, q, v, targets[(k, m, q)], at) for k, m, q, v, at in cur
+                   if (k, m, q) in targets and v > targets[(k, m, q)]), reverse=True)
+    files = {}
+    for _d, k, m, q, v, t, at in over:
+        if k in ("file.lines", "file.bytes"):
+            files.setdefault(at, []).append("%s %d → %d" % ("줄" if k == "file.lines" else "바이트", v, t))
+    print("쪼개야 할 파일(목표 %s · 파일 %d · 함수·클래스 %d) — 안내만(실패 아님)" % (
+        tdoc.get("label", "?"), len(files), sum(1 for x in over if x[1] not in ("file.lines", "file.bytes"))))
+    for at, parts in files.items():
+        print("- %s %s" % (at, " · ".join(sorted(parts))))
+    for _d, k, m, q, v, t, at in [x for x in over if x[1] not in ("file.lines", "file.bytes")][:20]:
+        print("  · %s %s %s %d → 목표 %d" % (at, q, k, v, t))
+    return 0
+
+
+def _quarter():
+    y, mo = time.localtime()[:2]
+    return "%d-Q%d" % (y, (mo - 1) // 3 + 1)
+
+
 def update_lower(st):
     rc = 0
+    grown, failing = _grown(st)
     for group in R.GROUP_FILE:
         path = A.baseline_path(group)
         old = R.load_lines(path)
@@ -102,6 +196,11 @@ def update_lower(st):
         if changed:
             R.dump_lines(path, new)
             print("%s: 조임 %s" % (group, ", ".join(changed)))
+    if st.limits:
+        low = R.lower_limits(grown, st.limits, {k for k, _x in failing})
+        if low != st.limits:
+            R.dump_limits(A.LIMITS_PATH, low, LIMITS_DOC)
+            print("%s: 내림 %d줄 → %d줄(줄어든 값만)" % (R.LIMITS_FILE, len(st.limits), len(low)))
     return rc
 
 
@@ -114,6 +213,8 @@ def init(st, force, base):
         old = R.load_lines(A.baseline_path(group)) or []
         R.dump_lines(A.baseline_path(group), _with_acts(_current_lines(group, st), old))
     R.dump_lines(A.GROWTH_PATH, [])
+    if os.path.isfile(A.LIMITS_PATH):
+        R.dump_limits(A.LIMITS_PATH, [], LIMITS_DOC)
     commit = G.commit_of(A.ROOT, base or "HEAD") or ""
     meta = {"hygiene_base": commit, "_설명": "hygiene_base = 이름·주석 위생의 기준 트리 커밋(이 커밋 src 에 없던 새 9-이름·이력 주석만 실패)"}
     with open(A.META_PATH, "w", encoding="utf-8") as f:
@@ -198,13 +299,26 @@ def main(argv):
     if st.metrics is None:
         print("규칙 파일(py_rules.json·layers.json)이 없음 — 저장소 배치에서 쓰는 명령")
         return 1
-    if st.errors and ("--update-lower" in argv or "--init" in argv):
+    if st.errors and ("--update-lower" in argv or "--init" in argv or "--fold-growth" in argv):
         for e in st.errors:
             print("기준선 갱신 거부 — 소스 분석 실패: " + e)
         print("고칠 것: 위 파일을 고쳐 분석이 되게 한 뒤 다시 실행")
         return 1
     if "--update-lower" in argv:
         return update_lower(st)
+    if "--fold-growth" in argv:
+        return fold_growth(st)
+    if "--tighten-targets" in argv:
+        rate = 0.05
+        try:
+            if "--rate" in argv and argv.index("--rate") + 1 < len(argv):
+                rate = float(argv[argv.index("--rate") + 1])
+        except ValueError:
+            rate = -1.0
+        if not 0 < rate < 1:
+            print("--rate 는 0 과 1 사이")
+            return 2
+        return tighten_targets(st, "--write" in argv, rate)
     if "--init" in argv:
         base = argv[argv.index("--base") + 1] if "--base" in argv and argv.index("--base") + 1 < len(argv) else None
         return init(st, "--force" in argv, base)

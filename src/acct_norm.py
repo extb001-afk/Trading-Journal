@@ -32,7 +32,7 @@ _ALIAS = None
 
 
 def _aliases() -> dict:
-    global _ALIAS
+    global _ALIAS  # noqa: PLW0603
     if _ALIAS is None:
         try:
             import seeds

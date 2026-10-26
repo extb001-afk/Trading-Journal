@@ -45,7 +45,7 @@ def _cfg_build_proc():
 
 
 def cpu_plan() -> dict:
-    global _CPU_PLAN
+    global _CPU_PLAN  # noqa: PLW0603
     if _CPU_PLAN is not None:
         return _CPU_PLAN
     mode, msrc = build_proc_mode()
@@ -201,7 +201,7 @@ def parent_watch_start(env_key: str = "TJ_RUNNER_PID", every: float = 2.0) -> bo
 
 
 def cpu_reserve_apply():
-    global _CPU_APPLIED
+    global _CPU_APPLIED  # noqa: PLW0603
     if _CPU_APPLIED:
         return
     _CPU_APPLIED = True

@@ -387,7 +387,7 @@ class ExtMixin:
             self._ext_swap(live, tmp, ts, keep_recent=kr9, keep_oldest=ko9)
         except Exception as e:
             log.critical("★재구축 원장 교체 중 오류 — core 재기동(원장 파일 확인: %s*): %s★", live, e)
-            raise SystemExit(1)
+            raise SystemExit(1) from e
         shutil.rmtree(shadow, ignore_errors=True)
         self._ext_prune_reports(home)
         try:

@@ -8,6 +8,7 @@ from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
+from types import SimpleNamespace
 from view_common import DAILY_LIVE_WIN
 from view_common import DAILY_LQ_V
 from view_common import DAILY_PX_KEEP
@@ -1413,6 +1414,17 @@ class DailyMixin:
                       hold_qty=None, extra=None, extra_ok=True, now_ts=None, native_c=None, debt_moves=None, transit=None, dep_transit=None,
                       stable_aliases=None, day_close=None, neg_ok=None, led_gen=None, xq=None, xq_base=None, debt_neg=None, hist_late=None,
                       led_pw=None, late_after=None, inval=None) -> list:
+        dct = SimpleNamespace(G=G, ca_gids=ca_gids, day_close=day_close, debt_moves=debt_moves, debt_neg=debt_neg, dep_transit=dep_transit, ex_gids=ex_gids, extra=extra, extra_ok=extra_ok, hist_late=hist_late, hold_qty=hold_qty, inval=inval, late_after=late_after, led_gen=led_gen, led_pw=led_pw, live_px=live_px, native_c=native_c, neg_ok=neg_ok, now_ts=now_ts, override_px=override_px, pending_gids=pending_gids, skip_gids=skip_gids, stable_aliases=stable_aliases, today_kst=today_kst, transit=transit, xq=xq, xq_base=xq_base)
+        self._ds_prep(dct)
+        self._ds_rewind(dct)
+        self._ds_fixups(dct)
+        self._ds_days(dct)
+        self._ds_save(dct)
+        (days,) = (dct.days,)
+        return days[-30:]
+
+    def _ds_prep(self, dct):
+        (G, ca_gids, debt_neg, dep_transit, ex_gids, extra, hold_qty, inval, led_gen, live_px, neg_ok, now_ts, override_px, pending_gids, skip_gids, stable_aliases, today_kst, transit,) = (dct.G, dct.ca_gids, dct.debt_neg, dct.dep_transit, dct.ex_gids, dct.extra, dct.hold_qty, dct.inval, dct.led_gen, dct.live_px, dct.neg_ok, dct.now_ts, dct.override_px, dct.pending_gids, dct.skip_gids, dct.stable_aliases, dct.today_kst, dct.transit,)
         lo_bind9 = (today_kst - timedelta(days=DAILY_PX_KEEP)).strftime("%Y-%m-%d")
         bound9, legacy9 = _bind_px_blocks(self.daily, self.daily_px, lo_bind9)
         if legacy9:
@@ -1442,29 +1454,6 @@ class DailyMixin:
         for gid9 in ub_tl9:
             if gid9 in G:
                 ub_sym9.setdefault(str(G[gid9].get("sym") or "").upper(), []).append(gid9)
-        def xu_cut(v9, end_ts9, only=None):
-            cut9, rest9, px9 = 0.0, {}, {}
-            for s9, (q9, u9) in _xu_of(v9).items():
-                qu9 = Decimal(0)
-                for gid9 in ub_sym9.get(s9, ()):
-                    if only is not None and gid9 not in only:
-                        continue
-                    qg9 = Decimal(0)
-                    for t9, d9 in ub_tl9[gid9]:
-                        if t9 > end_ts9:
-                            break
-                        qg9 += d9
-                    qu9 += max(Decimal(0), min(qg9, qty_at(gid9, int(end_ts9 * 1000))))
-                if qu9 > EPS:
-                    f9 = min(1.0, float(qu9) / q9)
-                    cut9 += u9 * f9
-                    if u9 > 0:
-                        px9[s9] = u9 / q9
-                    if f9 < 1.0:
-                        rest9[s9] = [round(q9 * (1 - f9), 12), round(u9 * (1 - f9), 2)]
-                else:
-                    rest9[s9] = [round(q9, 12), round(u9, 2)]
-            return cut9, rest9, px9
         rate_now = float(extra.get("rate") or self.spot.rate or acct_norm.DEFAULT_KRW_USD)
         now_ts = time.time() if now_ts is None else float(now_ts)
         now_ms = int(now_ts * 1000)
@@ -1559,6 +1548,10 @@ class DailyMixin:
                 e9x = (self.daily_px.get(d9.strftime("%Y-%m-%d")) or {}).get("xv")
                 if isinstance(e9x, dict) and e9x.get("v") == xparts.GEN:
                     _lp_obs_set(d9.replace(hour=23, minute=59, second=59, microsecond=0).timestamp(), _xv_parts(e9x), e9x.get("ts"), lp_to=lp_to9)
+        (dct.att_src9, dct.bf_at9, dct.ca_gids, dct.changed, dct.days, dct.dbt_day, dct.dbt_now9, dct.dpx, dct.dtr_by9, dct.ex_gids, dct.extra, dct.frozen_ok, dct.lg_now9, dct.live_ok, dct.live_px, dct.live_snap, dct.lo_bind9, dct.lp_tls9, dct.lp_to9, dct.nf9, dct.now_ms, dct.now_ts, dct.old9, dct.override_px, dct.pending_gids, dct.px_changed, dct.px_wait9, dct.rate_now, dct.skip9s, dct.stable_base9, dct.stable_gids9, dct.stable_rev9, dct.timelines, dct.tr_by9, dct.ub_sym9, dct.ub_tl9, dct.ubs_now, dct.x_now, dct.xsrc9,) = (att_src9, bf_at9, ca_gids, changed, days, dbt_day, dbt_now9, dpx, dtr_by9, ex_gids, extra, frozen_ok, lg_now9, live_ok, live_px, live_snap, lo_bind9, lp_tls9, lp_to9, nf9, now_ms, now_ts, old9, override_px, pending_gids, px_changed, px_wait9, rate_now, skip9s, stable_base9, stable_gids9, stable_rev9, timelines, tr_by9, ub_sym9, ub_tl9, ubs_now, x_now, xsrc9,)
+
+    def _ds_rewind(self, dct):
+        (G, changed, dpx, dtr_by9, frozen_ok, hist_late, hold_qty, late_after, lp_tls9, lp_to9, now_ms, now_ts, old9, px_changed, skip_gids, timelines, today_kst, tr_by9, ub_sym9, ub_tl9, xq, xq_base,) = (dct.G, dct.changed, dct.dpx, dct.dtr_by9, dct.frozen_ok, dct.hist_late, dct.hold_qty, dct.late_after, dct.lp_tls9, dct.lp_to9, dct.now_ms, dct.now_ts, dct.old9, dct.px_changed, dct.skip_gids, dct.timelines, dct.today_kst, dct.tr_by9, dct.ub_sym9, dct.ub_tl9, dct.xq, dct.xq_base,)
         def qty_at(gid9, end_ms9):
             q9 = hold_qty.get(gid9, Decimal(0))
             if end_ms9 < now_ms:
@@ -1575,6 +1568,29 @@ class DailyMixin:
                 if gid9 in lp_tls9 and end_ms9 in lp_to9:
                     q9 += _lp_after(gid9, lp_to9[end_ms9], lp_tls=lp_tls9)
             return q9
+        def xu_cut(v9, end_ts9, only=None):
+            cut9, rest9, px9 = 0.0, {}, {}
+            for s9, (q9, u9) in _xu_of(v9).items():
+                qu9 = Decimal(0)
+                for gid9 in ub_sym9.get(s9, ()):
+                    if only is not None and gid9 not in only:
+                        continue
+                    qg9 = Decimal(0)
+                    for t9, d9 in ub_tl9[gid9]:
+                        if t9 > end_ts9:
+                            break
+                        qg9 += d9
+                    qu9 += max(Decimal(0), min(qg9, qty_at(gid9, int(end_ts9 * 1000))))
+                if qu9 > EPS:
+                    f9 = min(1.0, float(qu9) / q9)
+                    cut9 += u9 * f9
+                    if u9 > 0:
+                        px9[s9] = u9 / q9
+                    if f9 < 1.0:
+                        rest9[s9] = [round(q9 * (1 - f9), 12), round(u9 * (1 - f9), 2)]
+                else:
+                    rest9[s9] = [round(q9, 12), round(u9, 2)]
+            return cut9, rest9, px9
         lpfix9 = set()
         dfp9 = histcurve.disc_fp(G) if hold_qty is not None else ""
         xq9 = xq if (xq is not None and hold_qty is not None) else None
@@ -1703,6 +1719,10 @@ class DailyMixin:
                 if xv9.get("xq") != xq9:
                     xv9["xq"] = xq9
                     px_changed = True
+        (dct.changed, dct.dfp9, dct.hl9, dct.hlr9, dct.hq_now9, dct.lpfix9, dct.old9, dct.pw_late9, dct.px_changed, dct.qty_at, dct.xq9, dct.xqb9, dct.xu_cut,) = (changed, dfp9, hl9, hlr9, hq_now9, lpfix9, old9, pw_late9, px_changed, qty_at, xq9, xqb9, xu_cut,)
+
+    def _ds_fixups(self, dct):
+        (G, ca_gids, changed, day_close, debt_moves, dpx, ex_gids, frozen_ok, hold_qty, live_px, native_c, now_ts, override_px, px_changed, qty_at, skip_gids, today_kst, ub_tl9, xu_cut,) = (dct.G, dct.ca_gids, dct.changed, dct.day_close, dct.debt_moves, dct.dpx, dct.ex_gids, dct.frozen_ok, dct.hold_qty, dct.live_px, dct.native_c, dct.now_ts, dct.override_px, dct.px_changed, dct.qty_at, dct.skip_gids, dct.today_kst, dct.ub_tl9, dct.xu_cut,)
         for gid9 in sorted(native_c or ()):
             if gid9 not in G:
                 continue
@@ -1891,7 +1911,10 @@ class DailyMixin:
             c9["src9"] = "px_backfill"
             log.info("일별 %s: 늦게 가격이 생긴 그룹 %d개 소급 %+.2f (근사 %.2f)", ck9, n9, float(add9), float(est9))
             return True
+        (dct.bf_gids9, dct.changed, dct.drd_all9, dct.px_backfill, dct.px_changed,) = (bf_gids9, changed, drd_all9, px_backfill, px_changed,)
 
+    def _ds_days(self, dct):
+        (G, att_src9, bf_at9, bf_gids9, ca_gids, changed, day_close, days, dbt_day, dbt_now9, debt_moves, dfp9, dpx, drd_all9, ex_gids, extra, extra_ok, frozen_ok, hl9, hlr9, hold_qty, hq_now9, led_pw, lg_now9, live_ok, live_px, live_snap, lp_tls9, lp_to9, lpfix9, native_c, neg_ok, nf9, now_ms, now_ts, old9, override_px, pending_gids, pw_late9, px_backfill, px_changed, px_wait9, qty_at, rate_now, skip9s, skip_gids, stable_base9, stable_gids9, stable_rev9, timelines, today_kst, tr_by9, ub_tl9, ubs_now, x_now, xq9, xqb9, xsrc9, xu_cut,) = (dct.G, dct.att_src9, dct.bf_at9, dct.bf_gids9, dct.ca_gids, dct.changed, dct.day_close, dct.days, dct.dbt_day, dct.dbt_now9, dct.debt_moves, dct.dfp9, dct.dpx, dct.drd_all9, dct.ex_gids, dct.extra, dct.extra_ok, dct.frozen_ok, dct.hl9, dct.hlr9, dct.hold_qty, dct.hq_now9, dct.led_pw, dct.lg_now9, dct.live_ok, dct.live_px, dct.live_snap, dct.lp_tls9, dct.lp_to9, dct.lpfix9, dct.native_c, dct.neg_ok, dct.nf9, dct.now_ms, dct.now_ts, dct.old9, dct.override_px, dct.pending_gids, dct.pw_late9, dct.px_backfill, dct.px_changed, dct.px_wait9, dct.qty_at, dct.rate_now, dct.skip9s, dct.skip_gids, dct.stable_base9, dct.stable_gids9, dct.stable_rev9, dct.timelines, dct.today_kst, dct.tr_by9, dct.ub_tl9, dct.ubs_now, dct.x_now, dct.xq9, dct.xqb9, dct.xsrc9, dct.xu_cut,)
         for i in range(max(29, DAILY_PX_KEEP), -1, -1):
             d = (today_kst - timedelta(days=i))
             dkey = d.strftime("%m-%d")
@@ -2354,6 +2377,10 @@ class DailyMixin:
                         else:
                             e9.pop("xu", None)
                     px_changed = True
+        (dct.changed, dct.px_changed,) = (changed, px_changed,)
+
+    def _ds_save(self, dct):
+        (changed, dpx, frozen_ok, lo_bind9, lp_tls9, lp_to9, px_changed, today_kst, xsrc9,) = (dct.changed, dct.dpx, dct.frozen_ok, dct.lo_bind9, dct.lp_tls9, dct.lp_to9, dct.px_changed, dct.today_kst, dct.xsrc9,)
         xd9, xo9 = {}, {}
         for ck9, e9 in dpx.items():
             xv9 = e9.get("xv") if isinstance(e9, dict) and len(str(ck9)) == 10 and str(ck9)[4] == "-" else None
@@ -2393,4 +2420,3 @@ class DailyMixin:
             statefile.atomic_write_json(paths.state("daily_px.json"), dpx)
             self._dpx_dirty = False
         self.px.flush()
-        return days[-30:]

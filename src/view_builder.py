@@ -802,6 +802,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
 
     def _build(self, conn) -> dict:
         inval = dbm.daily_inval_state(conn)
+        calcguard.rows_reset()
         rr = self._build_replay(conn)
         _bs9 = rr.screen_scope(inval)
         seal = accounting_books.books_seal(rr.books) if calcguard.strict() else None

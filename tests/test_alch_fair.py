@@ -779,7 +779,7 @@ def f9_turn2(w9, k, mode):
 
 
 def f9_fixture(mode):
-    global w
+    global w  # noqa: PLW0603
     lprep()
     BLOCK_TRACE[OLD] = copy.deepcopy(TRACE42)
     PLAN.clear()

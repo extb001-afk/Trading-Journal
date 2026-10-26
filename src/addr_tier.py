@@ -1635,9 +1635,9 @@ def _req_update(fn, wait: float = 10.0) -> object:
                 try:
                     fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
-                except BlockingIOError:
+                except BlockingIOError as exc:
                     if time.monotonic() >= t_end:
-                        raise TimeoutError("요청 파일 잠금 대기 초과")
+                        raise TimeoutError("요청 파일 잠금 대기 초과") from exc
                     time.sleep(0.05)
             now = int(time.time())
             reqs = {k: v for k, v in _req_read().items() if now - v < 2 * 86400}

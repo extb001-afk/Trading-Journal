@@ -32,8 +32,8 @@ def main():
         import ops_requests
         try:
             aid = int(sys.argv[sys.argv.index("--resolve") + 1])
-        except (IndexError, ValueError):
-            raise SystemExit("--resolve <asset_id(정수)>")
+        except (IndexError, ValueError) as exc:
+            raise SystemExit("--resolve <asset_id(정수)>") from exc
         it = next((x for x in ops_requests.decimals_items() if x["aid"] == aid), None)
         if not it or it["kind"] != "conflict":
             print(f"#{aid} 은 지금 '자리수 다름' 목록에 없어요")

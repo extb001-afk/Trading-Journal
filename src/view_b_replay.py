@@ -36,6 +36,8 @@ from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 from decimal import InvalidOperation
+from dataclasses import dataclass
+from typing import Any
 from view_common import CHAIN_NAME
 from view_common import DISC_OPEN_KO
 from view_common import DISC_OPEN_KO_UNK
@@ -193,6 +195,119 @@ def _load_position_rows(conn, lp_pos_rows, pos_rows, G, by_symloc):
             sym0 = ((G.get(d0["gid"]) or {}).get("sym") or "").upper()
             if sym0:
                 by_symloc.setdefault((sym0, d0["location"]), []).append(d0)
+
+@dataclass(frozen=True, eq=False, repr=False)
+class BridgeIn:
+    xc_links: Any; fx_dep_tx: Any; nopx_swap: Any; xc_transit: Any
+    br_arr: Any; sale_links: Any; rt_pair: Any; fx_wd: Any; ub_wd_tx: Any; gp: Any; xc_barr: Any
+
+
+def _phase_bridge_plan(sb, rows, bi):
+    (xc_links, fx_dep_tx, nopx_swap, xc_transit, br_arr, sale_links, rt_pair, fx_wd, ub_wd_tx, gp, xc_barr,) = (bi.xc_links, bi.fx_dep_tx, bi.nopx_swap, bi.xc_transit, bi.br_arr, bi.sale_links, bi.rt_pair, bi.fx_wd, bi.ub_wd_tx, bi.gp, bi.xc_barr,)
+    br_plan = {}
+    br_amb = {}
+    br_sum = {}
+    br_natfee = set()
+    sb._br_early = None
+    try:
+        br_deps, br_arrs = [], []
+        links = {k: (v[0], xchain_match.norm(v[1])) for k, v in xc_links.items()}
+        K = (lambda c: c) if (not rows or isinstance(rows[0], dict)) else list(rows[0].keys()).index
+        iEV, iLK = K("event"), K("leg_kind")
+        for o, r in enumerate(rows):
+            lk = r[iLK]
+            if lk != "move_out" and lk != "acq":
+                continue
+            ev = r[iEV]
+            if ev == "BRIDGE" and lk == "move_out":
+                t = str(r["source_id"] or "")
+                if t.lower() in fx_dep_tx or t in fx_dep_tx or int(r["qty_base"]) >= 0 or (r["source_ns"], t) in nopx_swap:
+                    continue
+                br_deps.append({"pid": r["posting_id"], "ord": o, "sym": sb._gsym(r), "qty": -sb._norm(r), "ts": int(r["event_ts"]),
+                                 "chain": r["chain"] or "?", "addr": str(r["address"] or "").lower(),
+                                 "link": (r["source_ns"], xchain_match.norm(t))})
+                br_deps[-1]["nat"] = (r["kind"] or "") == "native"
+            elif lk == "acq" and ev in ("TRANSFER_IN", "PROGRAM_IN") and r["cost_usd"] is None and int(r["qty_base"]) > 0:
+                if ((r["gname"] or "") in STABLE_GROUPS or (r["kind"] == "exchange_currency" and _ex_stable_sym(r["symbol"])))\
+                        and (r["source_ns"], xchain_match.norm(str(r["source_id"] or ""))) not in links:
+                    continue
+                t = str(r["source_id"] or "")
+                p = r["posting_id"]
+                if (p in xc_transit or p in br_arr or p in sale_links
+                        or (r["source_ns"], t) in rt_pair or _txk(t) in fx_wd or _txk(t) in ub_wd_tx):
+                    continue
+                ca = f"{r['source_ns']}:{(r['address'] or '').lower()}"
+                strong = bool(((gp.get(ca) or {}).get("risk") or {}).get("strong")) if isinstance(gp, dict) else False
+                br_arrs.append({"pid": p, "ord": o, "sym": sb._gsym(r), "qty": sb._norm(r), "ts": int(r["event_ts"]),
+                                 "chain": r["chain"] or "?", "addr": str(r["address"] or "").lower(),
+                                 "link": (r["source_ns"], xchain_match.norm(t)),
+                                 "spam": strong or bool(spamguard.impostor_of(r["symbol"])),
+                                 "bridge": (r["source_ns"], xchain_match.norm(t)) in xc_barr})
+        tok_links = {d["link"] for d in br_deps if not d.get("nat")}
+        br_natfee = {d["pid"] for d in br_deps if d.get("nat") and d["link"] in tok_links}
+        if br_natfee:
+            nat_linked = {(links[a["link"]], a["sym"]) for a in br_arrs if a["link"] in links}
+            br_natfee = {d["pid"] for d in br_deps if d["pid"] in br_natfee and (d["link"], d["sym"]) not in nat_linked}
+        if br_deps and br_arrs:
+            br_plan = _bridge_plan(br_deps, br_arrs, links, br_amb)
+            ba = {a["pid"]: a for a in br_arrs}
+            bd = {d["pid"]: d["ord"] for d in br_deps}
+            for ap, dp in br_plan.items():
+                br_sum[dp] = br_sum.get(dp, Decimal(0)) + ba[ap]["qty"]
+            early = [(ba[ap]["ord"], bd[dp]) for ap, dp in br_plan.items() if ba[ap]["ord"] < bd[dp]]
+            if early:
+                mv, kept = _ord_pair_moves(rows, early)
+                if mv:
+                    rows = _ord_splice(rows, mv)
+                sb._br_early = (len(early), len(mv), kept)
+        sb._br_plan_n = len(br_plan)
+    except Exception as e:   # noqa: BLE001 [fallback]
+        calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[br_deps9#1]", e)
+        log.warning("브릿지 도착 짝 계산 실패(이번 빌드 대체 매칭 없음): %s", logs.safe_err(e)[:160])
+        br_plan, br_amb, br_sum, br_natfee = {}, {}, {}, set()
+    return rows, br_plan, br_amb, br_sum, br_natfee
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class FinIn:
+    G: Any; be_tax: Any; consume: Any; cur_row: Any; fs_rbd: Any; fs_sales: Any
+    fs_sum: Any; lf_pend: Any; loan_settle: Any; loan_unp: Any; sale_pay_flush: Any; win_cut_d: Any
+
+
+def _phase_finalize(fi):
+    (G, be_tax, consume, cur_row, fs_rbd, fs_sales, fs_sum, lf_pend, loan_settle, loan_unp, sale_pay_flush, win_cut_d,) = (fi.G, fi.be_tax, fi.consume, fi.cur_row, fi.fs_rbd, fi.fs_sales, fi.fs_sum, fi.lf_pend, fi.loan_settle, fi.loan_unp, fi.sale_pay_flush, fi.win_cut_d,)
+    if lf_pend:
+        loan_settle()
+    for gid_u, (q_u, ts_u) in loan_unp.items():
+        g_u = G.get(gid_u)
+        if g_u is None:
+            continue
+        c_u, k_u, _x = consume(g_u, q_u)
+        if k_u > EPS:
+            o_u = g_u.get("unv_lost") or (Decimal(0), Decimal(0), ts_u)
+            g_u["unv_lost"] = (o_u[0] + k_u, o_u[1] + c_u, min(int(o_u[2] or ts_u), ts_u))
+    sale_pay_flush(None)
+    cur_row[0] = None
+    for fl, tx, sh, c, rt, dk in fs_sales:
+        est = (float(tx.get("_disp", tx.get("disp")) or 0) - float(tx.get("_fee", tx.get("fee")) or 0)) * sh - c
+        a = fs_rbd.setdefault(dk, [0.0, 0.0])
+        a[0] += est
+        a[1] += est * rt
+        fl["fs_rz"] = fl.get("fs_rz", 0.0) + est
+        fs_sum["real"] += Decimal(str(est))
+    for ud, t in be_tax:
+        p = float(ud["proceeds"])
+        t.update({"acq": _f(p, 2), "disp": _f(p, 2), "_acq": p, "_disp": p, "_akr": p * float(t["rate"] or 0)})
+        t["akr"] = float(t["disp"]) * float(t["rate"] or 0)
+    for gid_w, dw in win_cut_d.items():
+        if not dw:
+            continue
+        g_w = G.get(gid_w)
+        if g_w is None:
+            continue
+        c_lost, k_lost, _u_lost = consume(g_w, dw[0])
+        if k_lost > EPS:
+            g_w["unv_lost"] = (k_lost, c_lost, dw[1])
 
 
 class ReplayMixin:
@@ -1401,67 +1516,7 @@ class ReplayMixin:
         pid_row = {}
         sell_wm = {}
         bo_pid = {}
-        br_plan = {}
-        br_amb = {}
-        br_sum = {}
-        br_natfee = set()
-        self._br_early = None
-        try:
-            br_deps9, br_arrs9 = [], []
-            links9 = {k9: (v9[0], xchain_match.norm(v9[1])) for k9, v9 in xc_links.items()}
-            K9 = (lambda c9: c9) if (not rows or isinstance(rows[0], dict)) else list(rows[0].keys()).index
-            iEV9, iLK9 = K9("event"), K9("leg_kind")
-            for o9, r9 in enumerate(rows):
-                lk9 = r9[iLK9]
-                if lk9 != "move_out" and lk9 != "acq":
-                    continue
-                ev9 = r9[iEV9]
-                if ev9 == "BRIDGE" and lk9 == "move_out":
-                    t9 = str(r9["source_id"] or "")
-                    if t9.lower() in fx_dep_tx or t9 in fx_dep_tx or int(r9["qty_base"]) >= 0 or (r9["source_ns"], t9) in nopx_swap:
-                        continue
-                    br_deps9.append({"pid": r9["posting_id"], "ord": o9, "sym": self._gsym(r9), "qty": -self._norm(r9), "ts": int(r9["event_ts"]),
-                                     "chain": r9["chain"] or "?", "addr": str(r9["address"] or "").lower(),
-                                     "link": (r9["source_ns"], xchain_match.norm(t9))})
-                    br_deps9[-1]["nat"] = (r9["kind"] or "") == "native"
-                elif lk9 == "acq" and ev9 in ("TRANSFER_IN", "PROGRAM_IN") and r9["cost_usd"] is None and int(r9["qty_base"]) > 0:
-                    if ((r9["gname"] or "") in STABLE_GROUPS or (r9["kind"] == "exchange_currency" and _ex_stable_sym(r9["symbol"]))) \
-                            and (r9["source_ns"], xchain_match.norm(str(r9["source_id"] or ""))) not in links9:
-                        continue
-                    t9 = str(r9["source_id"] or "")
-                    p9 = r9["posting_id"]
-                    if (p9 in xc_transit or p9 in br_arr9 or p9 in sale_links
-                            or (r9["source_ns"], t9) in rt_pair or _txk(t9) in fx_wd or _txk(t9) in ub_wd_tx):
-                        continue
-                    ca9 = f"{r9['source_ns']}:{(r9['address'] or '').lower()}"
-                    strong9 = bool(((gp9.get(ca9) or {}).get("risk") or {}).get("strong")) if isinstance(gp9, dict) else False
-                    br_arrs9.append({"pid": p9, "ord": o9, "sym": self._gsym(r9), "qty": self._norm(r9), "ts": int(r9["event_ts"]),
-                                     "chain": r9["chain"] or "?", "addr": str(r9["address"] or "").lower(),
-                                     "link": (r9["source_ns"], xchain_match.norm(t9)),
-                                     "spam": strong9 or bool(spamguard.impostor_of(r9["symbol"])),
-                                     "bridge": (r9["source_ns"], xchain_match.norm(t9)) in xc_barr})
-            tok_links = {d9["link"] for d9 in br_deps9 if not d9.get("nat")}
-            br_natfee = {d9["pid"] for d9 in br_deps9 if d9.get("nat") and d9["link"] in tok_links}
-            if br_natfee:
-                nat_linked = {(links9[a9["link"]], a9["sym"]) for a9 in br_arrs9 if a9["link"] in links9}
-                br_natfee = {d9["pid"] for d9 in br_deps9 if d9["pid"] in br_natfee and (d9["link"], d9["sym"]) not in nat_linked}
-            if br_deps9 and br_arrs9:
-                br_plan = _bridge_plan(br_deps9, br_arrs9, links9, br_amb)
-                ba9 = {a9["pid"]: a9 for a9 in br_arrs9}
-                bd9 = {d9["pid"]: d9["ord"] for d9 in br_deps9}
-                for ap9, dp9 in br_plan.items():
-                    br_sum[dp9] = br_sum.get(dp9, Decimal(0)) + ba9[ap9]["qty"]
-                early9 = [(ba9[ap9]["ord"], bd9[dp9]) for ap9, dp9 in br_plan.items() if ba9[ap9]["ord"] < bd9[dp9]]
-                if early9:
-                    mv9, kept9 = _ord_pair_moves(rows, early9)
-                    if mv9:
-                        rows = _ord_splice(rows, mv9)
-                    self._br_early = (len(early9), len(mv9), kept9)
-            self._br_plan_n = len(br_plan)
-        except Exception as e9:   # noqa: BLE001 [fallback]
-            calcguard.swallowed("view_b_replay:ReplayMixin._build_replay[br_deps9#1]", e9)
-            log.warning("브릿지 도착 짝 계산 실패(이번 빌드 대체 매칭 없음): %s", logs.safe_err(e9)[:160])
-            br_plan, br_amb, br_sum, br_natfee = {}, {}, {}, set()
+        rows, br_plan, br_amb, br_sum, br_natfee = _phase_bridge_plan(self, rows, BridgeIn(xc_links=xc_links, fx_dep_tx=fx_dep_tx, nopx_swap=nopx_swap, xc_transit=xc_transit, br_arr=br_arr9, sale_links=sale_links, rt_pair=rt_pair, fx_wd=fx_wd, ub_wd_tx=ub_wd_tx, gp=gp9, xc_barr=xc_barr))
         self._disc_back = disc_bk9 = set()
         try:
             balw_disc9 = {r9[0] for r9 in conn.execute("SELECT obs_id FROM raw_observations WHERE obs_id LIKE 'recon:%:disc:%'"
@@ -1473,9 +1528,10 @@ class ReplayMixin:
         F9: object; _rl9: object; arr_gid: object; chg9f: object; cv9: object; cvk9: object; d5: object; d6: object
         e4: object; e5: object; ex_fee9: object; flow: object; fu9: object; g2: object; gn9: object; hl9: object
         ikr7: object; inh7: object; k2: object; kd9: object; kg9: object; lab9: object; lb9: object; mc9: object
-        mu9: object; np9: object; nx9: object; qty: object; rb9: object; rd9: object; sc7: object; so9: object
+        mu9: object; mv9: object; np9: object; nx9: object; qty: object; rb9: object; rd9: object; sc7: object; so9: object
         sp9: object; st7: object; st9: object; take7: object; take9: object; td9: object; tk9: object; u: object
         unit9: object
+        fl9: object; rt9: object; sh9: object
 
         def _h_opening():
             nonlocal hl9, lab9, ln9, rb9
@@ -3267,38 +3323,7 @@ class ReplayMixin:
                 _h_disp()
                 continue
 
-        if lf_pend:
-            loan_settle()
-        for gid_u9, (q_u9, ts_u9) in loan_unp.items():
-            g_u9 = G.get(gid_u9)
-            if g_u9 is None:
-                continue
-            c_u9, k_u9, _x9 = consume(g_u9, q_u9)
-            if k_u9 > EPS:
-                o_u9 = g_u9.get("unv_lost") or (Decimal(0), Decimal(0), ts_u9)
-                g_u9["unv_lost"] = (o_u9[0] + k_u9, o_u9[1] + c_u9, min(int(o_u9[2] or ts_u9), ts_u9))
-        sale_pay_flush(None)
-        cur_row[0] = None
-        for fl9, tx9, sh9, c9, rt9, dk9 in fs_sales:
-            est9 = (float(tx9.get("_disp", tx9.get("disp")) or 0) - float(tx9.get("_fee", tx9.get("fee")) or 0)) * sh9 - c9
-            a9 = fs_rbd.setdefault(dk9, [0.0, 0.0])
-            a9[0] += est9
-            a9[1] += est9 * rt9
-            fl9["fs_rz"] = fl9.get("fs_rz", 0.0) + est9
-            fs_sum["real"] += Decimal(str(est9))
-        for ud9, t9 in be_tax:
-            p9 = float(ud9["proceeds"])
-            t9.update({"acq": _f(p9, 2), "disp": _f(p9, 2), "_acq": p9, "_disp": p9, "_akr": p9 * float(t9["rate"] or 0)})
-            t9["akr"] = float(t9["disp"]) * float(t9["rate"] or 0)
-        for gid_w, dw in win_cut_d.items():
-            if not dw:
-                continue
-            g_w = G.get(gid_w)
-            if g_w is None:
-                continue
-            c_lost, k_lost, _u_lost = consume(g_w, dw[0])
-            if k_lost > EPS:
-                g_w["unv_lost"] = (k_lost, c_lost, dw[1])
+        _phase_finalize(FinIn(G=G, be_tax=be_tax, consume=consume, cur_row=cur_row, fs_rbd=fs_rbd, fs_sales=fs_sales, fs_sum=fs_sum, lf_pend=lf_pend, loan_settle=loan_settle, loan_unp=loan_unp, sale_pay_flush=sale_pay_flush, win_cut_d=win_cut_d))
 
         exb9 = type(self)._exf_bal_view()
         pvc_cs9, pvc_xs9 = {}, {}

@@ -77,7 +77,7 @@ def seed_json(rel: str, default=None, base_dir: str = None, strict: bool = False
             return False, None
         except (json.JSONDecodeError, OSError, ValueError) as e:
             if strict9:
-                raise SystemExit(f"seed 파일 손상: {p}: {e}")
+                raise SystemExit(f"seed 파일 손상: {p}: {e}") from e
             return False, None
     root = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     hb, b = _one(os.path.join(root, "seed", rel), strict)

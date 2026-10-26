@@ -54,7 +54,7 @@ jobs:
 
   lint:
     # 개발 도구(ruff·mypy)는 이 잡에서만 설치한다 — 위 시험 잡은 표준 라이브러리만(설치 0) 그대로.
-    #   설정 = pyproject.toml(ruff: F·E9 · mypy: 0 오류 파일 목록) · 판 고정(올릴 때 = 새 판으로 같은 결과 0 확인 후 숫자만 바꿈)
+    #   설정 = pyproject.toml(ruff: F·E9·B006·B008·B904·PLW0603 · mypy: 0 오류 파일 목록) · 판 고정(올릴 때 = 새 판으로 같은 결과 0 확인 후 숫자만 바꿈)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -66,7 +66,7 @@ jobs:
           python-version: "3.12"
       - name: Install pinned lint tools (this job only)
         run: python3 -m pip install --disable-pip-version-check ruff==0.17.2 mypy==2.4.0
-      - name: ruff (F + E9, settings in pyproject.toml)
+      - name: ruff (rules in pyproject.toml)
         run: ruff check src tools tests
       - name: mypy (files listed in pyproject.toml)
         run: mypy

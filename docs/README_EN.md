@@ -4,6 +4,8 @@
 
 ## English
 
+English guides: [installation in detail](INSTALL_EN.md#installation-in-detail) · [security · data](SECURITY_DATA_EN.md#security--data).
+
 **tj-bot** is a self-hosted, **read-only** crypto trade journal. Give it wallet addresses (EVM chains, BNB Chain, Solana, plus
 optional extra EVM chains; Tron, Sui, TON and Bitcoin — single address or a watch-only HD wallet from a public descriptor/xpub — are added in
 Settings > wallets, keyless by default with optional free TronGrid/toncenter keys; see docs/COLLECTION_LIMITS.md for their limits) and, optionally, **read-only** API keys for Upbit, Bithumb, Binance, Bybit, OKX, KuCoin, Gate and Coinbase.
@@ -224,5 +226,5 @@ statement use this average.
   with a floor price count toward the optional NFT total, and old long-range curve days with only daily candles use the 09:00 KST (UTC daily open) price.
 - **Tests:** `python3 tests/run_all.py` — standard library only, synthetic data, no network, including real HTTP login checks (401 without a cookie,
   421 for a foreign Host, 403 without CSRF, lockout after repeated failures). `.github/workflows/tests.yml` runs `py_compile` on every file and the
-  same command on Python 3.9, 3.11 and 3.13; a separate lint job installs pinned ruff (F, E9) and mypy (listed files only, settings in `pyproject.toml`).
+  same command on Python 3.9, 3.11 and 3.13; a separate lint job installs pinned ruff (F, E9, B006, B008, B904, PLW0603) and mypy (listed files only, settings in `pyproject.toml`).
 - **License:** [MIT](../LICENSE). Provided as is; PnL and tax figures are an aid, not advice.

@@ -136,7 +136,7 @@ def http_get(url: str, timeout: float = 40.0):
             return json.loads(net_http.read_capped(r))
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            raise RateLimited(f"429 {url.split('?')[0]}")
+            raise RateLimited(f"429 {url.split('?')[0]}") from e
         raise
 
 

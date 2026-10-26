@@ -122,11 +122,20 @@ def _moved_names(pairs, cur, base):
 def new_bindings(cur, base):
     pairs, out = correspond(cur, base), []
     moved = _moved_names(pairs, cur, base)
+    heir = {}
+    for _k, (om, oq), (nm, nq), _why in R.SUCCESSION:
+        heir.setdefault((nm, nq), set()).add((om, oq))
     for key in sorted(cur):
         names = cur[key][2]
         if not names:
             continue
         old = base[pairs[key]][2] if key in pairs else set()
+        if key not in pairs:
+            olds = set(heir.get(key, ()))
+            for (nm, nq), os_ in heir.items():
+                if nm == key[0] and key[1].startswith(nq + "."):
+                    olds |= {(om, oq + key[1][len(nq):]) for om, oq in os_}
+            old = set().union(*[base[o][2] for o in olds if o in base] or [set()])
         for name in sorted(names - old - moved.get(key, set())):
             out.append("%s %s 안 %s" % (_locate(key[0], name, True), key[1], name))
     return out
@@ -322,14 +331,65 @@ def _growth_new(cur, old):
     return out
 
 
-def _check_file(name, cur, old, mb, ref, units):
+def loosened_limits(cur, old, growth_texts, public=False):
+    rows, bad = R.parse_limits(cur)
+    if bad:
+        return bad, []
+    prev = {(e["k"], e["m"], e["q"]): e["to"] for e in (R.parse_limits(old)[0] if old is not None else [])}
+    allowed = {}
+    for text in growth_texts:
+        try:
+            lines = R.parse_lines(text or "", R.GROWTH_FILE)
+        except ValueError:
+            continue
+        for g in lines:
+            if A.growth_row_ok(g):
+                key = (g["k"], g["m"], g["q"])
+                allowed[key] = max(allowed.get(key, -1), g["to"])
+    out, review = [], []
+    for e in rows:
+        key = (e["k"], e["m"], e["q"])
+        if key in prev and e["to"] <= prev[key]:
+            continue
+        what = "%s %s %s ≤ %d(기준 %s)" % (e["k"], e["m"], e["q"], e["to"], prev.get(key, "없음"))
+        if allowed.get(key, -1) >= e["to"]:
+            review.append(what)
+        elif public:
+            review.append(what + " — 받치는 성장 사유 줄 없음(공개판 배치 = 검수만)")
+        else:
+            out.append(what)
+    return out, review
+
+
+def _growth_texts(mb, rel_dir, cur_growth):
+    rel = rel_dir + "/" + R.GROWTH_FILE
+    texts = [G.show(A.ROOT, mb, rel), cur_growth]
+    head = G.commit_of(A.ROOT, "HEAD")
+    for c in G.revs_touching(A.ROOT, mb, head, rel) if head else []:
+        texts.append(G.show(A.ROOT, c, rel))
+    return texts
+
+
+def _check_file(name, cur, old, mb, ref, units, rel_dir=""):
     try:
-        _check_file_parsed(name, cur, old, mb, ref, units)
+        _check_file_parsed(name, cur, old, mb, ref, units, rel_dir)
     except ValueError as e:
         T.chk(False, "integrity %s — 읽을 수 없음(%s)" % (name, e))
 
 
-def _check_file_parsed(name, cur, old, mb, ref, units):
+def _check_file_parsed(name, cur, old, mb, ref, units, rel_dir=""):
+    if name == R.TARGETS_FILE:
+        T.chk(True, "integrity %s — 축소 목표 표(안내만 · 허용을 늘리지 않음) · 비교 없음" % name)
+        return
+    if name == R.LIMITS_FILE:
+        gpath = os.path.join(A.BASE_DIR, R.GROWTH_FILE)
+        cur_growth = open(gpath, encoding="utf-8").read() if os.path.isfile(gpath) else ""
+        bad, review = loosened_limits(cur, old, _growth_texts(mb, rel_dir, cur_growth), A.PUBLIC_LAYOUT)
+        for a in review:
+            print("검수 현재 상한 표 새 줄·올림(병합 기준점 %s 뒤 · 성장 사유 줄을 접은 것): %s" % (mb[:8], a), flush=True)
+        T.chk(not bad, "integrity %s — 병합 기준점 %s(%s) 뒤 새 줄·올린 상한은 성장 사유 줄(py_growth.jsonl)을 접은 것만(--fold-growth) · "
+              "어긋남 %d · 검수 %d" % (name, mb[:8], ref, len(bad), len(review)), bad[:40])
+        return
     if name == R.GROWTH_FILE:
         added = _growth_new(cur, old)
         for a in added:
@@ -424,6 +484,6 @@ def run_integrity():
         with open(path, encoding="utf-8") as f:
             cur = f.read()
         seen += old is not None
-        _check_file(name, cur, old, mb, ref, units)
+        _check_file(name, cur, old, mb, ref, units, rel_dir)
     if not seen:
         T.chk(True, "integrity — 병합 기준점 %s 에 기준선 파일이 없음(처음 생기는 커밋) · 비교 없음" % mb[:8])

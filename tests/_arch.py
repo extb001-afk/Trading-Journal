@@ -27,6 +27,9 @@ python3 <tests>/_arch.py --update-lower    줄어든 값만 기준선에 반영(
 python3 <tests>/_arch.py --sync-doc        docs/ARCH.md 의 계층 표(자동 칸)를 layers.json 으로 다시 씀
 python3 <tests>/_arch.py --split-report    분할 승계 증명 목록(layers.json split_of · 근거 py_split_proof.json — 승계 단위 · 허용 내부 간선 · 실패)
 python3 <tests>/_arch.py --init [--force] [--base <커밋>]   기준선 처음 만들기(이미 있으면 거부)
+python3 <tests>/_arch.py --fold-growth     성장 사유 표(py_growth.jsonl)를 현재 상한 표(py_limits_current.json · 단위별 지금 크기)로 접고 비움(멱등)
+python3 <tests>/_arch.py --tighten-targets [--write] [--rate 0.05]   축소 목표 표(py_targets.json)와 '쪼개야 할 파일' 안내(실패 아님 ·
+      --write = 지금 값의 rate 만큼 줄인 새 목표를 씀 — 분기마다 한 번)
 환경(run_all 이 넘기는 TJ_TEST_* 만): TJ_TEST_ARCH_STALE_FAIL=1 낮출 수 있는 기준선도 실패 ·
       TJ_TEST_ARCH_BASE_REF 기준선 무결성 비교 기준(기본 refactor 와의 병합 기준점 · none = 건너뜀) ·
       TJ_TEST_ARCH_CACHE 캐시 폴더(0 = 끔 · 기본 = 임시 폴더 tj_arch_cache_<uid>)"""
@@ -42,6 +45,8 @@ META_PATH = os.path.join(BASE_DIR, "py_meta.json")
 SELF_CMD = "python3 " + os.path.relpath(os.path.abspath(__file__), ROOT)
 STALE_FAIL = _ENV["TJ_TEST_ARCH_STALE_FAIL"] == "1"
 GROWTH_PATH = os.path.join(BASE_DIR, R.GROWTH_FILE)
+LIMITS_PATH = os.path.join(BASE_DIR, R.LIMITS_FILE)
+TARGETS_PATH = os.path.join(BASE_DIR, R.TARGETS_FILE)
 LAYER_BEGIN = "<!-- ARCH:LAYERS:BEGIN — python3 public/tests/_arch.py --sync-doc 가 layers.json 으로 다시 씀(손으로 고치지 말 것) -->"
 LAYER_END = "<!-- ARCH:LAYERS:END -->"
 
@@ -184,6 +189,7 @@ class State:
 
     def __init__(self):
         self.errors, self.load_error, self.split = [], "", None
+        self.limits, limits_bad = [], []
         try:
             self.rules = read_json(RULES_PATH)
             self.layers = read_json(LAYERS_PATH)
@@ -192,6 +198,9 @@ class State:
         except ValueError as e:
             self.rules = self.layers = None
             self.meta, self.growth, self.load_error = {}, [], "규칙·기준선 파일을 못 읽음: %s" % e
+        if os.path.isfile(LIMITS_PATH):
+            with open(LIMITS_PATH, encoding="utf-8") as f:
+                self.limits, limits_bad = R.parse_limits(f.read())
         if self.rules is None or self.layers is None:
             self.metrics = None
             return
@@ -210,8 +219,9 @@ class State:
         if self.subdirs:
             self.metrics.hard["src.subdirs"] = list(self.subdirs)
         bad = [json.dumps(g, ensure_ascii=False)[:160] for g in self.growth if not growth_row_ok(g)]
+        if bad or limits_bad:
+            self.metrics.hard["growth.invalid"] = bad + limits_bad
         if bad:
-            self.metrics.hard["growth.invalid"] = bad
             self.growth = []
         lim = self.rules.get("limits", {})
         bad = ["limits.%s = %r" % (k, v) for k, v in sorted(lim.items())
@@ -219,6 +229,9 @@ class State:
         if bad:
             self.metrics.hard["rules.invalid"] = bad
         self.split = S.attach(self, SRC)
+
+    def allow(self):
+        return self.growth + R.limit_rows(self.limits)
 
 
 def growth_row_ok(g):
@@ -339,7 +352,7 @@ def run_group(group, finish=True):
             T.chk(True, "doc.missing — 공개판 배치는 독스트링을 지워 건너뜀")
             continue
         units = S.fold_units(st.split, k, mx.units.get(k, []), by_k.get(k, []))
-        emit(R.compare(k, units, by_k.get(k, []), st.rules, st.growth), len(by_k.get(k, [])))
+        emit(R.compare(k, units, by_k.get(k, []), st.rules, st.allow()), len(by_k.get(k, [])))
     _special(group, mx, by_k)
     _hard(group, mx)
     return T.finish() if finish else None

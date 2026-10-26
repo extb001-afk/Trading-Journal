@@ -25,7 +25,7 @@ def guard_core_stopped():
         apps = json.loads(out.stdout or "[]")
     except Exception as e:
         raise SystemExit(f"★pm2 상태 확인 실패({e!r}) — core 정지 여부를 보증할 수 없어 중단."
-                         " pm2 없는 호스트면 --no-pm2-guard 로 명시하라★")
+                         " pm2 없는 호스트면 --no-pm2-guard 로 명시하라★") from e
     for a in apps:
         if a.get("name") not in ("tj-core", "tj-ex"):
             continue

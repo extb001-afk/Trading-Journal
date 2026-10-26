@@ -462,14 +462,14 @@ class _XprocSharedBucket(_SharedBucket):
                 os.makedirs(d, exist_ok=True)
                 fd = os.open(os.path.join(d, re.sub(r"[^a-z0-9_]", "_", self.name)[:40] + ".bucket"), os.O_RDWR | os.O_CREAT, 0o600)
             except OSError as e:
-                raise NetError(f"budget: {self.name} 공유 버킷 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+                raise NetError(f"budget: {self.name} 공유 버킷 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name) from e
             try:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     return 0.02
                 except OSError as e:
-                    raise NetError(f"budget: {self.name} 공유 버킷 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+                    raise NetError(f"budget: {self.name} 공유 버킷 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name) from e
                 try:
                     now = time.monotonic()
                     raw = os.pread(fd, 256, 0)
@@ -493,7 +493,7 @@ class _XprocSharedBucket(_SharedBucket):
                     self.tokens, self.t_last = tok, now
                     return w
                 except OSError as e:
-                    raise NetError(f"budget: {self.name} 공유 버킷 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name)
+                    raise NetError(f"budget: {self.name} 공유 버킷 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=self.name) from e
                 finally:
                     try:
                         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -1477,19 +1477,19 @@ def host_gap_wait(host: str, method: str = None, gap: float = 0.0, method_gap: f
             os.makedirs(d, exist_ok=True)
             fd = os.open(os.path.join(d, key + ".slot"), os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as e:
-            raise NetError(f"budget: {key} 공유 간격 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+            raise NetError(f"budget: {key} 공유 간격 파일 열기 실패 — 보내지 않음({type(e).__name__})", "budget", host=key) from e
         try:
             t_lock = time.time()
             while True:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
-                except BlockingIOError:
+                except BlockingIOError as exc:
                     if time.time() - t_lock > HG_LOCK_WAIT or (deadline is not None and time.time() >= deadline):
-                        raise NetError(f"budget: {key} 공유 간격 잠금 대기 초과", "budget", host=key)
+                        raise NetError(f"budget: {key} 공유 간격 잠금 대기 초과", "budget", host=key) from exc
                     time.sleep(0.02)
                 except OSError as e:
-                    raise NetError(f"budget: {key} 공유 간격 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+                    raise NetError(f"budget: {key} 공유 간격 잠금 실패 — 보내지 않음({type(e).__name__})", "budget", host=key) from e
             try:
                 now = time.time()
                 try:
@@ -1519,7 +1519,7 @@ def host_gap_wait(host: str, method: str = None, gap: float = 0.0, method_gap: f
                 os.ftruncate(fd, 0)
                 os.pwrite(fd, b, 0)
             except OSError as e:
-                raise NetError(f"budget: {key} 공유 간격 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=key)
+                raise NetError(f"budget: {key} 공유 간격 읽기·기록 실패 — 보내지 않음({type(e).__name__})", "budget", host=key) from e
             finally:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_UN)
@@ -2136,9 +2136,9 @@ def es_dispatch_wait(deadline: float = None):
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
-                except BlockingIOError:
+                except BlockingIOError as exc:
                     if time.time() - t_lock > ES_DISPATCH_LOCK_WAIT or (deadline is not None and time.time() >= deadline):
-                        raise NetError("budget: 이더스캔 공유 간격 잠금 대기 초과", "budget", host="api.etherscan.io")
+                        raise NetError("budget: 이더스캔 공유 간격 잠금 대기 초과", "budget", host="api.etherscan.io") from exc
                     time.sleep(0.02)
                 except OSError as e:
                     if not _ES_DISPATCH_WARNED[0]:
@@ -2193,7 +2193,7 @@ _CFG_ENSURE_LOCK = threading.Lock()
 
 
 def configure(cfg: dict):
-    global QUOTA_OPEN, ES_DAILY_BUDGET, ES_PACE_BURST_FRAC, ES_FILL_KEEP_FRAC
+    global QUOTA_OPEN, ES_DAILY_BUDGET, ES_PACE_BURST_FRAC, ES_FILL_KEEP_FRAC  # noqa: PLW0603
     _CONFIGURED[0] = True
     try:
         ES_DAILY_BUDGET = int(((cfg or {}).get("etherscan") or {}).get("daily_budget") or 80000)
@@ -2502,7 +2502,7 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             try:
                 d = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError) as e:
-                raise NetError(f"payload: JSON 파싱 불가 ({str(e)[:60]})", "payload", host=host)
+                raise NetError(f"payload: JSON 파싱 불가 ({str(e)[:60]})", "payload", host=host) from e
             if host.endswith(".quiknode.pro"):
                 _qn_note(host, body=d)
             elif host.endswith(".g.alchemy.com"):
@@ -2540,12 +2540,12 @@ def http_request(url: str, *, data: bytes = None, headers: dict = None, timeout:
             g.failure(err, count_5xx=breaker_5xx)
             last = err
             if err.kind not in RETRYABLE or (err.kind == "http5xx" and not retry_5xx) or err.kind == "quota":
-                raise err
+                raise err  # noqa: B904
             if i + 1 >= retries:
                 break
             wait = err.retry_after if (err.kind == "http429" and err.retry_after is not None) else _backoff(i)
             if wait > max_inline_wait or (deadline is not None and time.time() + wait > deadline):
-                raise err
+                raise err  # noqa: B904
             time.sleep(wait)
         finally:
             g.sem.release()
@@ -3149,8 +3149,8 @@ class LogScanner:
         r = rpc_call(url, "eth_blockNumber", [], timeout=min(10.0, self.timeout), retries=1, prio=self.prio)
         try:
             h2 = int(r, 16)
-        except (TypeError, ValueError):
-            raise NetError(f"eth_blockNumber 형식 오류: {str(r)[:40]}", "payload", host=_url_host(url))
+        except (TypeError, ValueError) as exc:
+            raise NetError(f"eth_blockNumber 형식 오류: {str(r)[:40]}", "payload", host=_url_host(url)) from exc
         self.ep_head[url] = h2
         with _EP_HEADS_LOCK:
             _EP_HEADS[url] = (h2, time.time())

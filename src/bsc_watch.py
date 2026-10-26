@@ -242,7 +242,7 @@ class BscWatcher(NonceMixin, BalwMixin):
         except Exception as e:
             if bf_engine.revert_like(e) and self.nodec.bad(ca, "revert: " + logs.safe_err(e)[:80]):
                 raise bf_engine.TokenNoDecimals(f"token decimals 영구 불능 {ca[:10]}: {logs.safe_err(e)[:80]}") from e
-            raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: {e}")
+            raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: {e}")  # noqa: B904
         dec, why = bf_engine.decimals_from_result(r)
         if dec is None:
             if self.nodec.bad(ca, why):

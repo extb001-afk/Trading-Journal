@@ -150,8 +150,8 @@ def _stable_bal(url: str, cas: dict, cand: list, st: dict, bmax: int, post, res:
         for ca, v in zip(need, d9):
             try:
                 n9 = int(v, 16)
-            except (TypeError, ValueError):
-                raise RuntimeError(f"decimals 응답 이상 {ca[:10]}")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"decimals 응답 이상 {ca[:10]}") from exc
             if not 0 <= n9 <= 36:
                 raise RuntimeError(f"decimals 범위 밖 {ca[:10]}: {n9}")
             dec[ca] = n9

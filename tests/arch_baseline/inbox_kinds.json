@@ -1,5 +1,5 @@
 {
- "_doc": "9막 9-0 ⑤ inbox 계약 표(tools/refactor/inbox_kinds.py freeze) — test_inbox_kinds 가 지금 표와 대조(한 칸이라도 다르면 실패 · 갱신 = freeze + 사유 커밋 · 9-4 뒤엔 계약 모듈 대조로 바뀜)",
+ "_doc": "9막 9-0 ⑤ inbox 계약 표((비공개 도구) freeze) — test_inbox_kinds 가 지금 표와 대조(한 칸이라도 다르면 실패 · 갱신 = freeze + 사유 커밋 · 9-4 뒤엔 계약 모듈 대조로 바뀜)",
  "appended": [
   {
    "file": "src/chk_collect.py",

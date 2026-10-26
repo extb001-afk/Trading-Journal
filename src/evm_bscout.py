@@ -1207,8 +1207,8 @@ class ChainWatcher(RpcSynthMixin):
             n_pg += 1
             try:
                 n_b += len(json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-            except (TypeError, ValueError):
-                raise RuntimeError(f"상세 목록 쪽 직렬화 불가: {path}")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"상세 목록 쪽 직렬화 불가: {path}") from exc
             out.extend(pg9)
             if len(out) > self.BS_DETAIL_MAX_ITEMS or n_b > self.BS_DETAIL_MAX_BYTES:
                 raise BsDetailCap(f"상세 목록 상한 초과({n_pg}쪽 · {len(out):,}개 · {n_b:,}바이트 > {self.BS_DETAIL_MAX_ITEMS:,}개·"

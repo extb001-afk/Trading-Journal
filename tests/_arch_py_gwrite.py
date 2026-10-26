@@ -217,7 +217,7 @@ def parse(text, where):
         try:
             d = R.loads(line)
         except ValueError as e:
-            raise ValueError("%s:%d JSON 이 아님(%s)" % (where, n, e))
+            raise ValueError("%s:%d JSON 이 아님(%s)" % (where, n, e)) from e
         bad = not isinstance(d, dict) or d.get("k") != K or any(not isinstance(d.get(x), str) or not d.get(x)
                                                                 for x in ("m", "q", "b", "s"))
         bad = bad or d.get("s") not in KEYS + (TL,) or not R.valid_value("func.lines", d.get("v")) or d.get("v") < 1

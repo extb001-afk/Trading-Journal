@@ -403,6 +403,8 @@
       + ' 최초 인식 시가(원가를 모르던 수량을 그 수량이 장부에 처음 생긴 날 시가로 잡은 값)예요' + (Math.abs(num(fsE.real)) >= 0.005 ? ' — 이 중 최초 인식 시가로 계산된 실현 ' + m(num(fsE.real), { sign: true }) : '') + ' · 설정 › 원가 계산에서 끌 수 있어요') + '">최초 인식 시가</span>' : '';
     const costCell = p.kind === 'gas' || p.kind === 'stake' ? '<div class="n num mut">—</div>' : p._noCost && !p._lp ? '<div class="n w">원가 미확인</div>' : '<div class="n num"' + covTip + '>' + m(KV(num(p.cost), cKrw(p, 'costKrw'))) + (fsChip ? '<div>' + fsChip + '</div>' : '') + '</div>'
       + (covTxt ? '<div class="cov"' + covTip + '><b><i style="width:' + Math.max(covP, 2).toFixed(0) + '%"></i></b>' + covTxt + '</div>' : '');
+    const ceTip = '이 카드를 계산하다 예외를 건너뛴 자리가 있어요(' + p.calcErr + ') — 숫자가 실제와 조금 다를 수 있어요';
+    const ceChip = p.calcErr ? ' <span class="kchip hi" title="' + esc(ceTip) + '">계산 오류</span>' : '';
     const oaChip = p.offcA ? '<span class="kchip pvx" data-pvt="1" title="' + esc('이 카드 매도 중 ' + q(num(p.offcA.qty)) + '개의 원가는 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 이어받음 · 가정</span>' : '';
     const realCell = real ? '<div class="n num ' + clsV(realV) + '">' + m(realV, { sign: true }) + (oaChip ? '<div>' + oaChip + '</div>' : '') + '</div>' : (unvOnly ? '<div class="n w" title="원가를 모르는 수량의 매도 — 실현손익에서 빠짐 (정산 ' + esc(m(perOn ? ag.inUP : (ag.has ? ag.allUP : num(p.unvProceeds)))) + ')">원가 미확인 매도 ' + (unvN ? nf('ko-KR').format(unvN) + '회' : m(num(p.unvProceeds), { compact: true })) + '<br><span class="mut" style="font-weight:500">실현 제외</span></div>' : '<div class="n num mut">—</div>');
     const roiCell = (() => {
@@ -424,7 +426,9 @@
     const pillH = p._lp ? lpStatePill(p._lp) : statusPill(p), pillDup = !p._lp && plainT(pillH).trim() === String(p.sym).trim();
     const pillTip = pillDup ? (/title="([^"]*)"/.exec(pillH) || [])[1] || '' : '';
     return '<div class="card cyc' + (open ? ' open' : '') + '" data-anc="cycle:' + esc(p.key) + '"><div class="hd" role="button" tabindex="0" aria-expanded="' + open + '" data-a="jTog" data-k="' + esc(p.key) + '">'
-      + '<div class="asset">' + (p._lp ? lpIcon(p._lp) : icon(p.sym, false, S.D.symLogo[String(p.sym).toUpperCase()] || {})) + '<div class="ell"><div class="sym ell' + (p._lp ? ' lpsym' : '') + '"' + (pillTip ? ' title="' + pillTip + '"' : '') + '>' + nm + impChip(p) + (pillDup ? '' : ' ' + pillH) + '</div></div></div>'
+      + '<div class="asset">' + (p._lp ? lpIcon(p._lp) : icon(p.sym, false, S.D.symLogo[String(p.sym).toUpperCase()] || {}))
+      + '<div class="ell"><div class="sym ell' + (p._lp ? ' lpsym' : '') + '"' + (pillTip ? ' title="' + pillTip + '"' : '') + '>'
+      + nm + impChip(p) + ceChip + (pillDup ? '' : ' ' + pillH) + '</div></div></div>'
       + '<div class="stepcol"><div class="rt ell' + (ln[0].indexOf('class="rtp"') >= 0 ? ' rtf' : '') + '" title="' + esc(plainT(ln[0])) + '">' + ln[0] + '</div><div class="mt" title="' + esc(plainT(ln[1])) + '">' + ln[1] + '</div></div>'
       + '<div class="kcol"><div class="k" title="' + (perOn ? '선택한 기간에 체결된 매도의 실현손익' : '사이클 시작부터 누적') + '">' + (perOn ? '기간 실현' : '실현') + '</div>' + realCell + '</div>'
       + '<div class="kcol"><div class="k">원가</div>' + costCell + '</div>'

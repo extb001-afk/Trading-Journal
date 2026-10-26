@@ -191,6 +191,8 @@ def compute(index, rules, layers, docs_text):
         for src_mod, name, bound in fx.get("unused_from", []):
             if src_mod in c.mods or (src_mod + "." + name) in c.mods:
                 mx.add("import.reexport", mod, bound, 1, "n", c.path(mod))
+        for line in fx.get("bare_str", []):
+            mx.hard.setdefault("doc.misplaced", []).append("%s:%d" % (c.path(mod), line))
         for tm, name in fx.get("modset", []):
             if tm not in c.mods or name not in index[tm].get("defs", []):
                 mx.hard.setdefault("ref.modset", []).append("%s: (%s, %s) — %s 에 그 이름이 없음" % (c.path(mod), tm, name, tm))

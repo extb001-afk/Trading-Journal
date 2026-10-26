@@ -49,7 +49,7 @@ def quota_dir() -> str:
 
 
 def rebase_state(state_dir: str, db_path: str = None) -> None:
-    global STATE_DIR, INBOX_DIR, DB_PATH, ACTIVITY_GATE_PATH, BACKFILL_SPEED_PATH
+    global STATE_DIR, INBOX_DIR, DB_PATH, ACTIVITY_GATE_PATH, BACKFILL_SPEED_PATH  # noqa: PLW0603
     STATE_DIR = state_dir
     INBOX_DIR = os.path.join(state_dir, "inbox")
     DB_PATH = db_path or os.path.join(state_dir, "ledger.db")

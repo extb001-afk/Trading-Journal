@@ -59,6 +59,8 @@
 - [docs/CONFIG.md](docs/CONFIG.md): [알아 두면 좋은 키](docs/CONFIG.md#알아-두면-좋은-키) · [고급 설정](docs/CONFIG.md#고급-설정)
 - [docs/SECURITY_DATA.md](docs/SECURITY_DATA.md): [보안 · 데이터](docs/SECURITY_DATA.md#보안--데이터)
 - [docs/README_EN.md](docs/README_EN.md): [English](docs/README_EN.md#english)
+- [docs/INSTALL_EN.md](docs/INSTALL_EN.md): [Installation in detail (English)](docs/INSTALL_EN.md#installation-in-detail)
+- [docs/SECURITY_DATA_EN.md](docs/SECURITY_DATA_EN.md): [Security · data (English)](docs/SECURITY_DATA_EN.md#security--data)
 
 ## 업데이트
 
@@ -115,7 +117,7 @@ python3 tests/run_all.py
 ```
 
 설치·키·네트워크 없이 표준 라이브러리만으로 돕니다(합성 데이터 · 임시 폴더 · 바깥 연결 차단). 검색 해석·악의적 입력, 알림 분류·묶음·문구, 분석 계산 예제(안 팔았다면·습관·흐름 지도·하루 요약 그림·문장 검색·격리 자산 분리), 수집→원장(시각 보강·WAL 정리), NFT 시세, 레버리지·청산 감시, 재계산 승인, 선물 영수증 누적 포지션(분할·반전·강제청산 누락), 빌드 분리 교착 판정, 노드 키 한도(키를 설정 파일에 안 씀), 체인 끄기 추천·자동 끄기, 화면 스냅숏 저장·복원을 확인합니다 — 특히 확인하지 못한 것을 '없음·해소·도착'으로 확정하지 않는지 봅니다. 웹 로그인 경로(쿠키 없이 401 · 다른 Host 421 · CSRF 없이 403 · 연속 실패 잠금)도 실제 HTTP 로 확인합니다. 하나라도 실패하면 종료 코드 1입니다.
-GitHub 에 올리면 `.github/workflows/tests.yml` 이 Python 3.9·3.11·3.12·3.13 에서 전 파일 문법 검사(`py_compile`)와 같은 명령을 돌립니다. 같은 파일의 lint 잡은 판을 고정한 ruff(F·E9)·mypy(통과 파일만 — 설정 `pyproject.toml`)를 그 잡에서만 설치해 돌립니다.
+GitHub 에 올리면 `.github/workflows/tests.yml` 이 Python 3.9·3.11·3.12·3.13 에서 전 파일 문법 검사(`py_compile`)와 같은 명령을 돌립니다. 같은 파일의 lint 잡은 판을 고정한 ruff(F·E9·B006·B008·B904·PLW0603)·mypy(통과 파일만 — 설정 `pyproject.toml`)를 그 잡에서만 설치해 돌립니다.
 
 ## 라이선스
 

@@ -638,7 +638,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         try:
             p = json.loads(r[1])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if str(p.get("state") or "").upper() != "ACCEPTED":
             continue
         cur = str(p.get("currency") or "").upper()
@@ -674,7 +674,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         try:
             p = json.loads(r[1])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         cur = str(p.get("currency") or "").upper()
         if str(p.get("state") or "").upper() == "ACCEPTED" and cur and cur != "KRW" and r[0] not in _before_window:
             eligible.add(r[0])
@@ -691,7 +691,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         try:
             o = json.loads(r[1])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         mk = str(o.get("market") or "")
         if not mk.startswith("KRW-"):
             n_nonkrw += 1
@@ -771,7 +771,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         try:
             p = json.loads(r[1])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if str(p.get("state") or "").upper() != "DONE":
             continue
         cur = str(p.get("currency") or "").upper()
@@ -803,7 +803,7 @@ def gates(b, t0: int = 0, iso=None) -> dict:
         try:
             p = json.loads(r[1])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         cur = str(p.get("currency") or "").upper()
         if str(p.get("state") or "").upper() != "DONE" or not cur or cur == "KRW":
             continue
@@ -1522,7 +1522,7 @@ def main():
         try:
             p = json.loads(d["payload"])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if str(p.get("state") or "").upper() != "ACCEPTED":
             continue
         txid = str(p.get("txid") or "")
@@ -1536,7 +1536,7 @@ def main():
         try:
             p = json.loads(d["payload"])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         dep_ts = c.svc_exf._iso_ts(p.get("done_at") or p.get("created_at")) or now
         if c.svc_exf._post_ex_deposit(d["uuid"], p, dep_ts):
             dep_n += 1
@@ -1547,7 +1547,7 @@ def main():
         try:
             p = json.loads(d["payload"])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if c.svc_exf._post_ex_withdraw(d["uuid"], p):
             wd_n += 1
     conn.commit()
@@ -1558,7 +1558,7 @@ def main():
             if c.svc_exf._post_exf_fill(t["exchange"], json.loads(t["payload"])):
                 nf += 1
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
     n_income = 0
     for t in conn.execute("SELECT exchange, payload FROM raw_ex WHERE kind='income'"
                           " GROUP BY exchange, uuid HAVING revision = MAX(revision) ORDER BY observed_at, exchange, uuid").fetchall():
@@ -1566,7 +1566,7 @@ def main():
             if c.svc_exf._post_exf_income(t["exchange"], json.loads(t["payload"])):
                 n_income += 1
         except json.JSONDecodeError as bad_json:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({bad_json}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({bad_json}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from bad_json
     if n_income:
         print(f"[4] 해외 지급 내역(배당·에어드랍·Earn 이자) {n_income}건")
     for t in conn.execute("SELECT exchange, uuid, payload FROM raw_ex WHERE kind='withdraw'"
@@ -1575,7 +1575,7 @@ def main():
         try:
             d9 = json.loads(t["payload"])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if str(d9.get("state") or "").upper() != "DONE":
             continue
         c.svc_exf._post_exf_withdraw(t["exchange"], t["uuid"], d9)
@@ -1585,7 +1585,7 @@ def main():
         try:
             d9 = json.loads(t["payload"])
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
         if str(d9.get("state") or "").upper() != "ACCEPTED":
             continue
         txid9 = str(d9.get("txid") or "")
@@ -1599,7 +1599,7 @@ def main():
         try:
             orders.append(json.loads(o["payload"]))
         except json.JSONDecodeError as e9:
-            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★")
+            raise SystemExit(f"★raw_ex 원본 JSON 손상({e9}) — 재파생·게이트 신뢰 불가, shadow 사용 금지★") from e9
     if orders:
         c.svc_exf._consume_fills({"orders": orders})
         conn.commit()

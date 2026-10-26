@@ -1430,7 +1430,7 @@ def rejudge_hold(chain: str, wallet: str, items: list, min_reserve: float = DS_M
         if sk is None or sk is False or (drop and not skip_final(sk)):
             out.append((ca, ss, m))
 
-    def _fn(cur, k9=pair_key(chain, wallet), res=res):
+    def _fn(cur, k9=pair_key(chain, wallet), res=res):  # noqa: B008
         e9 = (cur.get("pairs") or {}).get(k9)
         if not isinstance(e9, dict):
             return cur

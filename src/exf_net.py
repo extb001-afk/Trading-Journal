@@ -751,7 +751,7 @@ _BAL_SRC_HAD = None
 
 
 def _bal_src_had_load():
-    global _BAL_SRC_HAD
+    global _BAL_SRC_HAD  # noqa: PLW0603
     if _BAL_SRC_HAD is None:
         path = paths.state(_BAL_SRC_HAD_PATH)
         try:

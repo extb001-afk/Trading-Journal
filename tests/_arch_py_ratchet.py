@@ -6,6 +6,11 @@ import tempfile
 import _arch_py_defs as D
 
 GROWTH_FILE = "py_growth.jsonl"
+LIMITS_FILE = "py_limits_current.json"
+TARGETS_FILE = "py_targets.json"
+LIMITS_WHY = ("기준선 동결 — 기준선보다 커진 채 허용된 단위(성장 사유 표의 줄)를 접은 달(at)의 지금 크기로 상한 고정: "
+              "이보다 커지면 실패 · 줄면 --update-lower 가 내림 · 새로 커질 일은 py_growth.jsonl 에 실제 사유와 함께")
+_AT = re.compile(r"\d{4}-(0[1-9]|1[0-2])\Z")
 KEYS_LINE = "_keys"
 
 
@@ -30,7 +35,7 @@ SPECS = {
                    "일찍 돌려주기(guard clause)·도우미 함수로 펴라"),
     "stage.reload": ("size", "num", "f", "빌드 단계 이름표 조건부 재적재 `if \"x\" in _bs9: x = _bs9[\"x\"]` 수(함수 자기 범위)",
                      "늘리지 말 것(5막 S1 — 단계 입력은 머리 풀기 · 증명된 것만 남김)",
-                     "늘 묶이는 입력은 머리 풀기로 · 죽은 쌍은 지워라(tools/refactor/bs9_reload.py --report·--apply)"),
+                     "늘 묶이는 입력은 머리 풀기로 · 죽은 쌍은 지워라(단계 재적재 정리 도구 bs9_reload --report·--apply)"),
     "class.lines": ("size", "num", "c", "클래스 줄 수", "클래스 ≤ 400줄", "역할별 클래스로 나눠라(새 믹스인 금지)"),
     "class.methods": ("size", "num", "c", "클래스 메서드 수", "메서드 ≤ 25", "역할별 클래스로 나눠라(새 믹스인 금지)"),
     "class.mixin_bases": ("size", "num", "c", "…Mixin 부모 수", "믹스인 상속 늘리지 말 것", "합성(역할 객체를 속성으로)으로"),
@@ -93,6 +98,8 @@ HARD = {
     "growth.invalid": ("size", "성장 사유 표(py_growth.jsonl) 줄 = 아는 지표 k · 모듈 m · 이름 q · 허용 상한 to(0 이상 정수) · 사유 why(20자 이상 · "
                                "'허용'·'성장' 같은 빈말만이면 거부) · 커밋 commit(글자) — 틀린 줄이 하나라도 있으면 표 전체를 안 씀"),
     "rules.invalid": ("size", "규칙 파일 한도(limits) = 0 이상 정수(NaN·글자 금지)"),
+    "doc.misplaced": ("contracts", "문자열 단독 문장은 독스트링 자리(모듈·클래스·함수 몸통 첫 문장)에만 — 그 밖 자리는 공개 빌드(주석·독스트링 제거)가 "
+                                   "지워 비공개·공개 몸통 지문이 달라짐 · 고치는 법: 함수 맨 앞 독스트링으로 옮기거나 # 주석으로"),
 }
 _ORDER = ("k", "m", "q", "f", "h", "v", "a")
 _LEVELS = {"f": ("mq", "h", "q", "f", "b"), "c": ("mq", "h", "q", "b"), "b": ("mq", "q"), "m": ("mq",),
@@ -161,7 +168,7 @@ def parse_lines(text, where):
             try:
                 d = loads(line)
             except ValueError as e:
-                raise ValueError("%s:%d JSON 이 아님(%s)" % (where, n, e))
+                raise ValueError("%s:%d JSON 이 아님(%s)" % (where, n, e)) from e
             if not isinstance(d, dict) or not isinstance(d.get("k"), str):
                 raise ValueError("%s:%d 줄 모양이 아님(k 없음)" % (where, n))
             out.append(d)
@@ -209,16 +216,7 @@ def dump_lines(path, lines):
     for d in sorted(lines, key=_sort_key):
         rows.append(json.dumps({x: d[x] for x in _ORDER if x in d and d[x] not in (None, "")},
                                ensure_ascii=False, separators=(",", ":")))
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_arch_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("\n".join(rows) + ("\n" if rows else ""))
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    write_text(path, "\n".join(rows) + ("\n" if rows else ""))
 
 
 def identity(u):
@@ -299,25 +297,127 @@ def growth_allows(growth, k, u):
     return None
 
 
+def parse_limits(text):
+    try:
+        doc = loads(text)
+    except ValueError as e:
+        return [], ["%s JSON 이 아님(%s)" % (LIMITS_FILE, e)]
+    rows = doc.get("limits") if isinstance(doc, dict) else None
+    if not isinstance(rows, list):
+        return [], ["%s 의 limits 가 목록이 아님" % LIMITS_FILE]
+    bad, seen = [], set()
+    for e in rows:
+        ok = isinstance(e, dict) and e.get("k") in SPECS and SPECS[e["k"]][1] == "num" \
+            and all(isinstance(e.get(x), str) and e[x].strip() for x in ("m", "q")) \
+            and isinstance(e.get("to"), int) and not isinstance(e.get("to"), bool) and e["to"] >= 0 \
+            and isinstance(e.get("at"), str) and bool(_AT.match(e["at"])) and set(e) <= {"k", "m", "q", "to", "at"}
+        key = (e.get("k"), e.get("m"), e.get("q")) if isinstance(e, dict) else None
+        if not ok or key in seen:
+            bad.append("%s 줄 %s %s" % (LIMITS_FILE, "겹침" if ok else "모양 틀림", json.dumps(e, ensure_ascii=False)[:140]))
+        seen.add(key)
+    return (rows if not bad else []), bad
+
+
+def limit_rows(rows):
+    return [{"k": e["k"], "m": e["m"], "q": e["q"], "to": e["to"], "why": "%s 기준선 동결(%s)" % (e["at"], LIMITS_FILE),
+             "commit": LIMITS_FILE} for e in rows]
+
+
+def fold_limits(grown, old, at):
+    prev = {(e["k"], e["m"], e["q"]): e for e in old}
+    out = []
+    for key in sorted(grown):
+        p = prev.get(key)
+        out.append({"k": key[0], "m": key[1], "q": key[2], "to": grown[key],
+                    "at": p["at"] if p is not None and grown[key] <= p["to"] else at})
+    return out
+
+
+def lower_limits(grown, old, keep_k=()):
+    out = []
+    for e in old:
+        key = (e["k"], e["m"], e["q"])
+        if e["k"] in keep_k:
+            out.append(e)
+        elif key in grown:
+            out.append(dict(e, to=min(e["to"], grown[key])))
+    return out
+
+
+def dump_limits(path, rows, doc):
+    lines = ["  " + json.dumps({x: e[x] for x in ("k", "m", "q", "to", "at")}, ensure_ascii=False, separators=(",", ":"))
+             for e in sorted(rows, key=lambda e: (e["k"], e["m"], e["q"]))]
+    write_text(path, '{"_doc": %s,\n "why": %s,\n "limits": [%s]}\n' % (
+        json.dumps(doc, ensure_ascii=False), json.dumps(LIMITS_WHY, ensure_ascii=False),
+        ("\n" + ",\n".join(lines) + "\n ") if lines else ""))
+
+
+def write_text(path, text):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp_arch_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+_WHY_CARDS = ("거대 함수 단계 추출(요청서 #9) — _build_cards 몸통을 같은 파일 안 단계 메서드 _cards_* 7개로 그대로 옮김(공유 지역 = cst) · "
+              "줄 수 = 옛 함수 예산 안(합) · 중첩 깊이 = 옛 함수 값 이하(최대) · cfg 리터럴·함수 안 import 는 자리만 옮김(합 무변)")
+_WHY_DAILY = ("거대 함수 단계 추출(요청서 #9) — _daily_series 몸통을 같은 파일 안 단계 메서드 _ds_* 5개로 그대로 옮김(공유 지역 = dct) · "
+              "줄 수 = 옛 함수 예산 안(합) · 중첩 깊이 = 옛 함수 값 이하(최대)")
 SUCCESSION = (
     ("class.mixin_bases", ("core", "Core"), ("core_svc", "ExfService"),
-     "9-1 ExfService 합성(설계 DESIGN_ACT9_CORE '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 EXF 믹스인 4개가 "
+     "9-1 ExfService 합성(9막 설계 문서 '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 EXF 믹스인 4개가 "
      "ExfService 바탕으로 옮김(Core 16 → 12 · 합 16 무변)"),
     ("cfg.literal", ("core_exf", "ExfMixin.settle_planner"), ("core_svc", "exf_settle_planner"),
      "9-1 정착 계획기 ExfMixin.settle_planner → core_svc.exf_settle_planner(읽기 전용 계획기 · 같은 cfg 리터럴 2 · 옛 메서드는 지움)"),
     ("class.mixin_bases", ("core", "Core"), ("core_svc", "ReconService"),
-     "9-2 ReconService 합성(설계 DESIGN_ACT9_CORE '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 RECON 믹스인 2개"
+     "9-2 ReconService 합성(9막 설계 문서 '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 RECON 믹스인 2개"
      "(ReconMixin·ProvMixin)가 ReconService 바탕으로 옮김(Core 12 → 10 · Core 10 + ExfService 4 + ReconService 2 = 16 무변)"),
     ("class.mixin_bases", ("core", "Core"), ("core_svc", "PriceService"),
-     "9-3 PriceService 합성(설계 DESIGN_ACT9_CORE '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 PRICING 믹스인 1개"
+     "9-3 PriceService 합성(9막 설계 문서 '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 PRICING 믹스인 1개"
      "(PricingMixin)가 PriceService 바탕으로 옮김(Core 10 → 9 · Core 9 + ExfService 4 + ReconService 2 + PriceService 1 = 16 무변)"),
     ("except.broad", ("core", "Core.run"), ("migrate", "startup"),
      "9-6 시작 1회 변환 3 자리(Core.run 의 try·calcguard·rollback·로그 세 벌) → migrate.startup 의 등록부 차례 한 벌(Core.run 23 → 20 · "
      "startup 1 · 합 21 ≤ 23 · 위치 글·로그 글은 등록부 칸 그대로)"),
     ("import.lazy", ("http_route", "RouteMixin.do_POST"), ("http_post_prefs", "post_wallet_alias"),
-     "10-3 do_POST 사슬 몸통 → http_post_prefs 최상위 함수(설계 DESIGN_ACT10_FINAL 6장 · '래칫 영향 예측' import.lazy 줄 = 단위 이동 승계) — "
+     "10-3 do_POST 사슬 몸통 → http_post_prefs 최상위 함수(10막 설계 문서 6장 · '래칫 영향 예측' import.lazy 줄 = 단위 이동 승계) — "
      "지갑 별명 몸통의 함수 안 import chain_registry 한 자리가 몸통과 같이 옮김(do_POST 1 → 0 · post_wallet_alias 1 · 합 1 무변)"),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_risk"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_hold_prep"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_holdings"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_prov_events"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_positions"), _WHY_CARDS),
+    ("func.lines", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_daily_gates"), _WHY_CARDS),
+    ("func.lines", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_prep"), _WHY_DAILY),
+    ("func.lines", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_rewind"), _WHY_DAILY),
+    ("func.lines", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_fixups"), _WHY_DAILY),
+    ("func.lines", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_days"), _WHY_DAILY),
+    ("func.lines", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_save"), _WHY_DAILY),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_risk"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_hold_prep"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_holdings"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_prov_events"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_positions"), _WHY_CARDS),
+    ("func.depth", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_daily_gates"), _WHY_CARDS),
+    ("func.depth", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_prep"), _WHY_DAILY),
+    ("func.depth", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_rewind"), _WHY_DAILY),
+    ("func.depth", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_fixups"), _WHY_DAILY),
+    ("func.depth", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_days"), _WHY_DAILY),
+    ("func.depth", ("view_daily", "DailyMixin._daily_series"), ("view_daily", "DailyMixin._ds_save"), _WHY_DAILY),
+    ("cfg.literal", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_risk"), _WHY_CARDS),
+    ("cfg.literal", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
+    ("import.lazy", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
 )
+
+
+SUCCESSION_MAX = frozenset({"func.depth"})
 
 
 def succession_rows(k, table=None):
@@ -350,7 +450,8 @@ def _succeed(k, base, cur_units, pairs, back, rules, table=None):
         if not js or any(claims[j] > 1 for j in js):
             continue
         own = pairs.get(i)
-        total = (cur_units[own]["v"] if own is not None else 0) + sum(cur_units[j]["v"] for j in js)
+        vals = ([cur_units[own]["v"]] if own is not None else []) + [cur_units[j]["v"] for j in js]
+        total = max(vals) if k in SUCCESSION_MAX else sum(vals)
         if total <= base[i]["v"]:
             for j in js:
                 out[j] = i

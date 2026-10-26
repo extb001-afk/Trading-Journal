@@ -1,5 +1,5 @@
 {
- "_doc": "시험 이름 승계 표 {옛 이름: 새 이름} — _arch_ratchet '시험 이름 승계'(hyg_tests·hyg_checks 의 옛 열쇠 값을 새 열쇠로) · 도구 = tools/refactor/test_rename.py apply(10막 10-5a) · 손 편집 금지",
+ "_doc": "시험 이름 승계 표 {옛 이름: 새 이름} — _arch_ratchet '시험 이름 승계'(hyg_tests·hyg_checks 의 옛 열쇠 값을 새 열쇠로) · 도구 = (비공개 도구) apply(10막 10-5a) · 손 편집 금지",
  "renames": {
   "test_alch_gate1012.py": "test_alch_gate_cu.py",
   "test_btc_bt939.py": "test_btc_change_scan.py",

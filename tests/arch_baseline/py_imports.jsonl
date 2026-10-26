@@ -1,21 +1,21 @@
 {"k":"_keys","m":"*","q":"*","v":["import.cycle_edges","import.lazy","import.private","import.reexport","import.star"]}
 {"k":"import.cycle_edges","m":"addr_tier","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"addr_tier","q":"config","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"addr_tier","q":"evm_watch","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"addr_tier","q":"evm_watch","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"addr_tier","q":"lpdec","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"alch_internal","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"alch_internal","q":"nodekeys","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"bf_engine","q":"config","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"bf_engine","q":"nodekeys","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"bf_engine","q":"nodesel","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"bf_engine","q":"nodesel","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"candles","q":"pricing","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"config","q":"nodekeys","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_base","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_bscout","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_bscout","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_bscout","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_bscout","q":"evm_base","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_bscout","q":"evm_synth","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_es","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_es","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_es","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_es","q":"evm_base","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_es","q":"evm_synth","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
@@ -34,7 +34,7 @@
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"config","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_base","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_es","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_es","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_rpc_later","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_rpc_native","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"evm_rpc_trace","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
@@ -43,27 +43,27 @@
 {"k":"import.cycle_edges","m":"evm_rpcw","q":"nodesel","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_synth","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_synth","q":"evm_base","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_watch","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_watch","q":"addr_tier","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"config","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"evm_base","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_watch","q":"evm_bscout","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
-{"k":"import.cycle_edges","m":"evm_watch","q":"evm_es","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_watch","q":"evm_bscout","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_watch","q":"evm_es","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"evm_logdisc","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_watch","q":"evm_rpcw","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_watch","q":"evm_rpcw","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"evm_synth","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"evm_watch","q":"inflow_probe","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"evm_watch","q":"inflow_probe","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"evm_watch","q":"lpdec","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"hl_spot","q":"candles","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"hl_spot","q":"perp_dex","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"inflow_probe","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"inflow_probe","q":"evm_watch","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"inflow_probe","q":"evm_watch","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"inflow_probe","q":"nodekeys","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"lpdec","q":"lpsol","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"lpsol","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"nodekeys","q":"bf_engine","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"nodekeys","q":"evm_watch","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
-{"k":"import.cycle_edges","m":"nodesel","q":"bf_engine","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · DESIGN_ACT4_BASE 결정 8)"}
+{"k":"import.cycle_edges","m":"nodesel","q":"bf_engine","v":1,"a":"11막 판단(4막·6막 뒤에도 남는 순환 — bf_engine↔nodesel · evm 수집 묶음 · 설계 문서(비공개) 결정 8)"}
 {"k":"import.cycle_edges","m":"nodesel","q":"nodekeys","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"perp_dex","q":"hl_spot","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
 {"k":"import.cycle_edges","m":"pricing","q":"candles","v":1,"a":"11막 판단(6막 설계 0-11 — 노드 기본 표·시세 표·HL 예산은 데이터·도메인 결합)"}
@@ -107,7 +107,7 @@
 {"k":"import.lazy","m":"buildproc","q":"_run_once","h":"1c57b1f609f3","v":2}
 {"k":"import.lazy","m":"buildproc","q":"plan","h":"68622ba6fa39","v":1}
 {"k":"import.lazy","m":"buildproc","q":"sweep_tmp","h":"884cecb02f59","v":1}
-{"k":"import.lazy","m":"calcguard","q":"path_of","h":"b94f738125ea","v":1}
+{"k":"import.lazy","m":"calcguard","q":"path_of","h":"caf07ce5b133","v":1}
 {"k":"import.lazy","m":"candles","q":"_bg_key_ok","h":"4ee4503bbdcd","v":2}
 {"k":"import.lazy","m":"candles","q":"_keyed","h":"5c2e2702606a","v":1}
 {"k":"import.lazy","m":"candles","q":"cgplan_basis","h":"f6ac4bcb5eda","v":1}
@@ -167,7 +167,7 @@
 {"k":"import.lazy","m":"discopen","q":"fetch_at","h":"c369d0e591f6","v":1}
 {"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_frames","f":"_alch_frames","h":"215f29935078","v":1}
 {"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_raw","f":"_alch_raw","h":"f595f3833981","v":1}
-{"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_status","f":"_alch_status","h":"433c1b169aeb","v":1}
+{"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_status","f":"_alch_status","h":"c43a87ffb210","v":1}
 {"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_tx","f":"_alch_tx","h":"5dbfce50dcdc","v":1}
 {"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._alch_url","f":"_alch_url","h":"0e4986bf4d12","v":1}
 {"k":"import.lazy","m":"evm_rpc_trace","q":"RpcTraceMixin._sel_trace","f":"_sel_trace","h":"1985a2ceda2c","v":1}
@@ -303,10 +303,10 @@
 {"k":"import.lazy","m":"settings_wallets","q":"rename_chain_wallet","h":"6400095058c7","v":1}
 {"k":"import.lazy","m":"settings_wallets","q":"validate_chain_wallet","h":"3735dc56798c","v":3}
 {"k":"import.lazy","m":"spamguard","q":"_genuine","h":"1cb1804fb02f","v":1}
-{"k":"import.lazy","m":"spamguard","q":"set_user_genuine","h":"55d3e9402786","v":1}
+{"k":"import.lazy","m":"spamguard","q":"set_user_genuine","h":"d77808fefe2b","v":1}
 {"k":"import.lazy","m":"spamguard","q":"spot_liquid","h":"b6cc6dacb6a3","v":1}
 {"k":"import.lazy","m":"spamguard","q":"user_path","h":"def9273de7bd","v":1}
-{"k":"import.lazy","m":"sui_watch","q":"main","h":"7279cdfde187","v":1}
+{"k":"import.lazy","m":"sui_watch","q":"main","h":"26ee329d2cea","v":1}
 {"k":"import.lazy","m":"token_discovery","q":"_decimals","h":"8205c3954ff7","v":1}
 {"k":"import.lazy","m":"token_discovery","q":"_ensure_ledger","h":"b83d9bef16de","v":1}
 {"k":"import.lazy","m":"token_discovery","q":"_es_like","h":"bbe06804936d","v":3}

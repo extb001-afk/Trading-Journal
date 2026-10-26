@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+from typing import Any, Optional
 
 import fsio
 import logs
@@ -16,15 +17,15 @@ MAX_SITES = 2000
 
 _LOCK = threading.Lock()
 _FLUSH_LOCK = threading.Lock()
-_SITES = {}
+_SITES: dict = {}
 _DIRTY = [False]
 _LAST_FLUSH = [0.0]
 _SUFFIX = [""]
 _MERGE = [False]
-_TIMER = {"pid": None}
+_TIMER: dict = {"pid": None}
 KEEP_SEC = 7 * 86400
 _START = time.time()
-_CARRY = {"loaded": False, "sites": {}}
+_CARRY: dict = {"loaded": False, "sites": {}}
 
 
 def strict() -> bool:
@@ -38,7 +39,7 @@ def _proc() -> str:
         return "py"
 
 
-def path_of(state_dir: str = None, suffix: str = "") -> str:
+def path_of(state_dir: Optional[str] = None, suffix: str = "") -> str:
     try:
         import paths
         d = state_dir or paths.STATE_DIR
@@ -99,8 +100,29 @@ def swallowed(site: str, exc: BaseException) -> None:
         pass
 
 
+_ROWS: dict = {}
+ROWS_PER_GID = 20
+
+
+def row_err(site: str, row: Any, nxt: bool = False) -> None:
+    try:
+        lst = _ROWS.setdefault(row["group_id"] or -row["asset_id"], [])
+        if len(lst) < ROWS_PER_GID:
+            lst.append((site, int(row["event_ts"]), bool(nxt)))
+    except Exception:   # noqa: BLE001 [optional]
+        return
+
+
+def rows_reset() -> None:
+    _ROWS.clear()
+
+
+def row_errs(gid: int) -> list:
+    return _ROWS.get(gid) or []
+
+
 def child_reset(suffix: str = "build") -> None:
-    global _LOCK, _FLUSH_LOCK
+    global _LOCK, _FLUSH_LOCK  # noqa: PLW0603
     _LOCK = threading.Lock()
     _FLUSH_LOCK = threading.Lock()
     _SITES.clear()
@@ -135,7 +157,7 @@ def _carry_sites(p: str) -> dict:
     return _CARRY["sites"]
 
 
-def _merge_old(p: str, snap: dict, now: float, old: dict = None) -> dict:
+def _merge_old(p: str, snap: dict, now: float, old: Optional[dict] = None) -> dict:
     if old is None:
         old = _read_doc(p).get("sites") or {}
     if not isinstance(old, dict):
@@ -168,16 +190,16 @@ def _merge_old(p: str, snap: dict, now: float, old: dict = None) -> dict:
                 ty[t9] = int(ty.get(t9) or 0) + c9
             m["types"] = ty
             if not v.get("bug_last") and o.get("bug_last"):
-                m["bug_last"], m["bug_why"] = int(float(o.get("bug_last"))), str(o.get("bug_why") or "")
+                m["bug_last"], m["bug_why"] = int(float(o["bug_last"])), str(o.get("bug_why") or "")
             if not v.get("sus_last") and o.get("sus_last"):
-                m["sus_last"], m["sus_why"] = int(float(o.get("sus_last"))), str(o.get("sus_why") or "")
+                m["sus_last"], m["sus_why"] = int(float(o["sus_last"])), str(o.get("sus_why") or "")
         except Exception:   # noqa: BLE001 [fallback]
             m = dict(v)
         out[k] = m
     return out
 
 
-def flush(now: float = None, suffix: str = None) -> None:
+def flush(now: Optional[float] = None, suffix: Optional[str] = None) -> None:
     now = now or time.time()
     sfx = _SUFFIX[0] if suffix is None else suffix
     with _FLUSH_LOCK:

@@ -1314,7 +1314,7 @@ INDEXER = None
 
 
 def start(state_fn, nft_fn=None, chain_names=None):
-    global INDEXER
+    global INDEXER  # noqa: PLW0603
     if INDEXER is not None or _demo():
         return INDEXER
     INDEXER = Indexer(state_fn, nft_fn, chain_names)

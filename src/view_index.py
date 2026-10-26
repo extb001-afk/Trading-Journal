@@ -101,7 +101,7 @@ class IndexMixin:
                 if r9.get("asset"):
                     if pxf9 is None:
                         pxf9 = fut_px_at(fxb if fxb is not None else _fut_fxb(getattr(self, "px", None), self.spot), self.spot.price)
-                    r9 = fut_ev_usd(r9, lambda a9, t9=r9.get("t"): pxf9(a9, t9))
+                    r9 = fut_ev_usd(r9, lambda a9, t9=r9.get("t"): pxf9(a9, t9))  # noqa: B008
                     if r9 is None:
                         continue
                     est_n9 += 1 if r9.get("px_est") else 0

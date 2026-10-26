@@ -12,6 +12,7 @@ import re
 import spamguard
 import time
 from datetime import datetime
+from types import SimpleNamespace
 from decimal import Decimal
 from view_common import CHAIN_NAME
 from view_common import EPS
@@ -114,6 +115,18 @@ def _liq_real(gid12, *, cex_proof, sb, gid_pairs_all):
     return False
 
 
+def _calc_err_mark(pos, fl, g):
+    for site, ts, nxt in calcguard.row_errs(g["gid"]):
+        if fl is not None:
+            before = [f for f in g["flows"] if f["opened"] <= ts]
+            after = [f for f in g["flows"] if f["opened"] >= ts]
+            target = (after[0] if after else None) if nxt else (before[-1] if before else (after[0] if after else None))
+            if target is not fl:
+                continue
+        pos["calcErr"] = site
+        return
+
+
 def _add_gas_card(gas_expense, positions, tax_rows):
     if gas_expense:
         gx_rbd = {k: round(-float(v[0]), 2) for k, v in sorted(gas_expense.items())}
@@ -165,6 +178,21 @@ class CardsMixin:
 
     def _build_cards(self, _bs9):
         (G, conn, debt_neg9, debt_take9, ex_gid, fb_cov9, fb_on, fs_on, fx_name, fx_transit, fxb, gas_expense, gid_pairs, hl_neg, led_by_gid, led_upbit_gids, live, locs_by_gid, lp_pos_rows, my_all9, now, pid_row, prefs, price_groups, pv_dl9, pv_unk9, realized_by_date, realized_krw_by_date, signer9, spoof_keys, stake_inc, stake_rwd, tax_rows, tok_pairs9, ub_snap9, uf_dl9, uncred_cost, uncred_fx, uncred_gid, uncred_known, unv_fb9, unverified, upbit_transit_gids, wdt_gid, xp_unk9,) = (_bs9["G"], _bs9["ctx"].conn, _bs9["debt_neg9"], _bs9["debt_take9"], _bs9["ex_gid"], _bs9["fb_cov9"], _bs9["ctx"].fb_on, _bs9["ctx"].fs_on, _bs9["fx_name"], _bs9["fx_transit"], _bs9["ctx"].fxb, _bs9["gas_expense"], _bs9["gid_pairs"], _bs9["hl_neg"], _bs9["led_by_gid"], _bs9["led_upbit_gids"], _bs9["live"], _bs9["locs_by_gid"], _bs9["lp_pos_rows"], _bs9["my_all9"], _bs9["ctx"].now, _bs9["pid_row"], _bs9["ctx"].prefs, _bs9["price_groups"], _bs9["pv_dl9"], _bs9["pv_unk9"], _bs9["realized_by_date"], _bs9["realized_krw_by_date"], _bs9["signer9"], _bs9["spoof_keys"], _bs9["stake_inc"], _bs9["stake_rwd"], _bs9["tax_rows"], _bs9["tok_pairs9"], _bs9["ub_snap9"], _bs9["uf_dl9"], _bs9["uncred_cost"], _bs9["uncred_fx"], _bs9["uncred_gid"], _bs9["uncred_known"], _bs9["unv_fb9"], _bs9["unverified"], _bs9["upbit_transit_gids"], _bs9["wdt_gid"], _bs9["xp_unk9"],)
+        cst = SimpleNamespace(G=G, conn=conn, debt_neg9=debt_neg9, debt_take9=debt_take9, ex_gid=ex_gid, fb_cov9=fb_cov9, fb_on=fb_on, fs_on=fs_on, fx_name=fx_name, fx_transit=fx_transit, fxb=fxb, gas_expense=gas_expense, gid_pairs=gid_pairs, hl_neg=hl_neg, led_by_gid=led_by_gid, led_upbit_gids=led_upbit_gids, live=live, locs_by_gid=locs_by_gid, lp_pos_rows=lp_pos_rows, my_all9=my_all9, now=now, pid_row=pid_row, prefs=prefs, price_groups=price_groups, pv_dl9=pv_dl9, pv_unk9=pv_unk9, realized_by_date=realized_by_date, realized_krw_by_date=realized_krw_by_date, signer9=signer9, spoof_keys=spoof_keys, stake_inc=stake_inc, stake_rwd=stake_rwd, tax_rows=tax_rows, tok_pairs9=tok_pairs9, ub_snap9=ub_snap9, uf_dl9=uf_dl9, uncred_cost=uncred_cost, uncred_fx=uncred_fx, uncred_gid=uncred_gid, uncred_known=uncred_known, unv_fb9=unv_fb9, unverified=unverified, upbit_transit_gids=upbit_transit_gids, wdt_gid=wdt_gid, xp_unk9=xp_unk9)
+        self._cards_risk(cst)
+        self._cards_hold_prep(cst)
+        self._cards_holdings(cst)
+        self._cards_extra(cst)
+        self._cards_prov_events(cst)
+        self._cards_positions(cst)
+        self._cards_daily_gates(cst)
+        (_pos_all_dbg, aliases, ca_all, coins, disp9, dust_ev, ev_hide, ev_usd, ex_c9, gid_pairs_all, guard_held9, invck9, live_px, native_c9, override_px, overrides9, pending_gids, pos_cut9, pos_ev_full, pos_hid9, positions, quarantined, rb_debts, rb_net, rb_view, spam_view, stab_ev, stables, syms9, ub2, ub_path2, unpriced_w, unv9, venue_w, wl9, xv_up_coin9,) = (cst._pos_all_dbg, cst.aliases, cst.ca_all, cst.coins, cst.disp9, cst.dust_ev, cst.ev_hide, cst.ev_usd, cst.ex_c9, cst.gid_pairs_all, cst.guard_held9, cst.invck9, cst.live_px, cst.native_c9, cst.override_px, cst.overrides9, cst.pending_gids, cst.pos_cut9, cst.pos_ev_full, cst.pos_hid9, cst.positions, cst.quarantined, cst.rb_debts, cst.rb_net, cst.rb_view, cst.spam_view, cst.stab_ev, cst.stables, cst.syms9, cst.ub2, cst.ub_path2, cst.unpriced_w, cst.unv9, cst.venue_w, cst.wl9, cst.xv_up_coin9,)
+        self._ph("cex_proof·prices")
+        invck9.to_diag(_bs9["diag"])
+        _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")
+
+    def _cards_risk(self, cst):
+        (G, conn, ex_gid, gid_pairs, prefs, price_groups, tok_pairs9,) = (cst.G, cst.conn, cst.ex_gid, cst.gid_pairs, cst.prefs, cst.price_groups, cst.tok_pairs9,)
         cex_proof = self._cex_proof(conn)
         self.spot.want_ex({ex9 for gid9, lst9 in cex_proof.items() if gid9 in gid_pairs for ex9, _c9 in lst9})
         exk9 = {}
@@ -375,6 +403,10 @@ class CardsMixin:
                     override_px[row["group_id"]] = float(v)
                 except (TypeError, ValueError):
                     pass
+        (cst.cex_proof, cst.cg_px_want9, cst.cg_want9, cst.gid_pairs_all, cst.native_kind9, cst.open_cg9, cst.override_px, cst.overrides9, cst.pre_og9, cst.quarantined, cst.spam_view, cst.unv9, cst.wl9,) = (cex_proof, cg_px_want9, cg_want9, gid_pairs_all, native_kind9, open_cg9, override_px, overrides9, pre_og9, quarantined, spam_view, unv9, wl9,)
+
+    def _cards_hold_prep(self, cst):
+        (G, cex_proof, conn, debt_take9, fx_name, hl_neg, locs_by_gid, now, pre_og9, prefs, pv_dl9, stake_rwd, tok_pairs9, ub_snap9, uf_dl9, uncred_fx, upbit_transit_gids, wdt_gid,) = (cst.G, cst.cex_proof, cst.conn, cst.debt_take9, cst.fx_name, cst.hl_neg, cst.locs_by_gid, cst.now, cst.pre_og9, cst.prefs, cst.pv_dl9, cst.stake_rwd, cst.tok_pairs9, cst.ub_snap9, cst.uf_dl9, cst.uncred_fx, cst.upbit_transit_gids, cst.wdt_gid,)
         aliases = prefs.get("aliases") or {}
         stake_meta = _sol_stake_accounts()
         disp9 = {(cw["chain"], cw["key"]): cw["disp"] for cw in self._chain_disp_wallets(self.cfg)}
@@ -447,21 +479,6 @@ class CardsMixin:
                 return [{"w": d9["label"],
                          "sub": f"외부 전송 확인 · {(d9.get('to') or '')[:12]}…", "qty": 0}]
             return [{"w": "확인 필요", "sub": "원장 위치 없음 — 미매칭 탭 참조", "qty": 0}]
-
-        def venue_w(loc):
-            parts = str(loc or "").split(":")
-            if parts[0] == "exchange" and len(parts) >= 2:
-                return fx_name.get(parts[1], parts[1])
-            if parts[0] != "wallet":
-                return None
-            ch = parts[1] if len(parts) >= 2 else "?"
-            wa = parts[2] if len(parts) >= 3 and parts[2] else None
-            if not wa:
-                return "SOL 지갑" if ch == "sol" else "EVM 지갑"
-            label = aliases.get(wa) or self.addr_label.get(wa) or (_wdisp(ch, wa, disp=disp9) or wa)[:8]
-            if len(parts) >= 5 and parts[3] == "stake":
-                return f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"
-            return label if str(label).rstrip().endswith("지갑") else f"{label} 지갑"
 
         ub_coins = {}
         ub2 = {}
@@ -543,6 +560,10 @@ class CardsMixin:
             return 0.0, None, None, None, 0
 
         invck9 = accounting_util.Invariants()
+        (cst.aliases, cst.cex_px_pairs, cst.coins, cst.disp9, cst.guard_held9, cst.hold_prio, cst.invck9, cst.live_px, cst.locs_for, cst.meta_want9, cst.pending_gids, cst.pre_px9, cst.pre_used9, cst.proof_div9, cst.px_wait9, cst.stables, cst.ub2, cst.ub_coins, cst.ub_path2, cst.unpriced, cst.unpriced_w, cst.xv_up_coin9,) = (aliases, cex_px_pairs, coins, disp9, guard_held9, hold_prio, invck9, live_px, locs_for, meta_want9, pending_gids, pre_px9, pre_used9, proof_div9, px_wait9, stables, ub2, ub_coins, ub_path2, unpriced, unpriced_w, xv_up_coin9,)
+
+    def _cards_holdings(self, cst):
+        (cex_proof, cex_px_pairs, cg_px_want9, coins, ex_gid, fb_on, fs_on, fx_name, gid_pairs, gid_pairs_all, guard_held9, hold_prio, invck9, led_by_gid, led_upbit_gids, live, live_px, locs_for, meta_want9, native_kind9, now, open_cg9, override_px, pending_gids, pre_px9, pre_used9, price_groups, proof_div9, px_wait9, quarantined, spam_view, stables, ub_coins, uncred_cost, uncred_gid, uncred_known, unpriced, unpriced_w, unv9, upbit_transit_gids,) = (cst.cex_proof, cst.cex_px_pairs, cst.cg_px_want9, cst.coins, cst.ex_gid, cst.fb_on, cst.fs_on, cst.fx_name, cst.gid_pairs, cst.gid_pairs_all, cst.guard_held9, cst.hold_prio, cst.invck9, cst.led_by_gid, cst.led_upbit_gids, cst.live, cst.live_px, cst.locs_for, cst.meta_want9, cst.native_kind9, cst.now, cst.open_cg9, cst.override_px, cst.pending_gids, cst.pre_px9, cst.pre_used9, cst.price_groups, cst.proof_div9, cst.px_wait9, cst.quarantined, cst.spam_view, cst.stables, cst.ub_coins, cst.uncred_cost, cst.uncred_gid, cst.uncred_known, cst.unpriced, cst.unpriced_w, cst.unv9, cst.upbit_transit_gids,)
         for gid, g in sorted(price_groups.items(), key=lambda kv: kv[1]["sym"]):
             sym = g["sym"]
             uncred = uncred_gid.get(gid, Decimal(0))
@@ -733,6 +754,8 @@ class CardsMixin:
                                    "where": fx_name.get(ex_gid.get(gid), ex_gid.get(gid)) if gid in ex_gid else "지갑",
                                    "ent": unpriced_ent(gid_pairs_all.get(gid) or gid_pairs.get(gid), ex_gid.get(gid), dsym9 or sym)})
 
+    def _cards_extra(self, cst):
+        (G, aliases, cex_px_pairs, cg_px_want9, cg_want9, coins, conn, fx_name, gid_pairs, gid_pairs_all, hold_prio, live_px, locs_by_gid, lp_pos_rows, meta_want9, now, override_px, pre_og9, pre_used9, proof_div9, pv_unk9, quarantined, stables, ub_coins, unpriced, unpriced_w, xp_unk9,) = (cst.G, cst.aliases, cst.cex_px_pairs, cst.cg_px_want9, cst.cg_want9, cst.coins, cst.conn, cst.fx_name, cst.gid_pairs, cst.gid_pairs_all, cst.hold_prio, cst.live_px, cst.locs_by_gid, cst.lp_pos_rows, cst.meta_want9, cst.now, cst.override_px, cst.pre_og9, cst.pre_used9, cst.proof_div9, cst.pv_unk9, cst.quarantined, cst.stables, cst.ub_coins, cst.unpriced, cst.unpriced_w, cst.xp_unk9,)
         pv_unk_px9 = []
         try:
             pv_unk_px9 = self._prov_price(pv_unk9, now, cg_want9, cg_px_want9, hold_prio)
@@ -882,6 +905,10 @@ class CardsMixin:
             log.warning("Rabby 보강 실패(봇 숫자만 표시): %s", e9)
             rb_view, rb_debts = None, []
         rb_net = round((rb_view or {}).get("onlyUsd", 0.0) + sum(d9["usd"] for d9 in rb_debts), 2)
+        (cst.pv_unk_px9, cst.rb_debts, cst.rb_net, cst.rb_pairs9, cst.rb_view, cst.xp_unk_px9,) = (pv_unk_px9, rb_debts, rb_net, rb_pairs9, rb_view, xp_unk_px9,)
+
+    def _cards_prov_events(self, cst):
+        (G, aliases, coins, fx_name, fx_transit, gid_pairs_all, live_px, my_all9, now, pid_row, prefs, pv_dl9, pv_unk_px9, quarantined, rb_pairs9, signer9, spoof_keys, stables, xp_unk_px9,) = (cst.G, cst.aliases, cst.coins, cst.fx_name, cst.fx_transit, cst.gid_pairs_all, cst.live_px, cst.my_all9, cst.now, cst.pid_row, cst.prefs, cst.pv_dl9, cst.pv_unk_px9, cst.quarantined, cst.rb_pairs9, cst.signer9, cst.spoof_keys, cst.stables, cst.xp_unk_px9,)
         pv9 = {"usd": 0.0, "n": 0, "skipped": {}, "chains": {}}
         try:
             if pv_dl9 or pv_unk_px9 or xp_unk_px9:
@@ -1000,12 +1027,30 @@ class CardsMixin:
                     return "scam", f"주소 오염 의심 초소액 수령 (${usd9:.4f})"
             return "dust", f"소액 ${usd9:,.2f} (기준 ${dust_ev:g} 미만)"
         pos_hid9 = []
+        (cst.dust_ev, cst.ev_hide, cst.ev_usd, cst.pos_hid9,) = (dust_ev, ev_hide, ev_usd, pos_hid9,)
+
+    def _cards_positions(self, cst):
+        (G, aliases, debt_neg9, dust_ev, ev_hide, fb_cov9, fb_on, fx_name, fxb, gas_expense, gid_pairs, led_by_gid, live_px, pos_hid9, quarantined, realized_by_date, realized_krw_by_date, stake_inc, tax_rows, uncred_cost, uncred_gid, uncred_known, unv_fb9, unverified,) = (cst.G, cst.aliases, cst.debt_neg9, cst.dust_ev, cst.ev_hide, cst.fb_cov9, cst.fb_on, cst.fx_name, cst.fxb, cst.gas_expense, cst.gid_pairs, cst.led_by_gid, cst.live_px, cst.pos_hid9, cst.quarantined, cst.realized_by_date, cst.realized_krw_by_date, cst.stake_inc, cst.tax_rows, cst.uncred_cost, cst.uncred_gid, cst.uncred_known, cst.unv_fb9, cst.unverified,)
         disp9 = {}
         for gid9, g9 in G.items():
             if g9.get("sym") == "TOKEN" and gid9 not in quarantined and gid_pairs.get(gid9):
                 s9 = _meta_sym(gid9, gid_pairs=gid_pairs, sb=self)
                 if s9:
                     disp9[gid9] = s9
+        def venue_w(loc):
+            parts = str(loc or "").split(":")
+            if parts[0] == "exchange" and len(parts) >= 2:
+                return fx_name.get(parts[1], parts[1])
+            if parts[0] != "wallet":
+                return None
+            ch = parts[1] if len(parts) >= 2 else "?"
+            wa = parts[2] if len(parts) >= 3 and parts[2] else None
+            if not wa:
+                return "SOL 지갑" if ch == "sol" else "EVM 지갑"
+            label = aliases.get(wa) or self.addr_label.get(wa) or (_wdisp(ch, wa, disp=disp9) or wa)[:8]
+            if len(parts) >= 5 and parts[3] == "stake":
+                return f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"
+            return label if str(label).rstrip().endswith("지갑") else f"{label} 지갑"
         positions = []
         pos_ev_full = []
         stab_ev = []
@@ -1052,6 +1097,7 @@ class CardsMixin:
                     "realizedKrw": round(sum(v9 for k9, v9 in rbdk_s.items() if k9 in rbd_s)),
                     "steps": ["스테이블 환전 차익" if g["is_stable"] else "격리 자산 매도"], "events": [],
                 })
+                _calc_err_mark(positions[-1], None, g)
                 continue
             px = live_px.get(gid) or 0
             total_flows = len(g["flows"])
@@ -1189,6 +1235,7 @@ class CardsMixin:
                 if fl.get("fs_c") or fl.get("fs_rz"):
                     positions[-1]["fsEst"] = {"cost": _f(fl.get("fs_c", Decimal(0)), 2) or 0, "qty": _f(fl.get("fs_q", Decimal(0)), 6) or 0,
                                               "real": round(float(fl.get("fs_rz") or 0), 2)}
+                _calc_err_mark(positions[-1], fl, g)
                 pos_ev_full.append((positions[-1]["key"], positions[-1]["sym"], positions[-1]["chain"], fl["events"]))
         _add_gas_card(gas_expense, positions, tax_rows)
         _add_stake_card(stake_inc, positions, tax_rows)
@@ -1208,6 +1255,10 @@ class CardsMixin:
         if _pos_all_dbg is None:
             for p9 in positions:
                 p9.pop("_gid", None)
+        (cst._pos_all_dbg, cst.disp9, cst.pos_cut9, cst.pos_ev_full, cst.positions, cst.stab_ev, cst.syms9, cst.venue_w,) = (_pos_all_dbg, disp9, pos_cut9, pos_ev_full, positions, stab_ev, syms9, venue_w,)
+
+    def _cards_daily_gates(self, cst):
+        (G, conn, ex_gid, gid_pairs_all, native_kind9,) = (cst.G, cst.conn, cst.ex_gid, cst.gid_pairs_all, cst.native_kind9,)
         ca_all = {r10["group_id"] for r10 in conn.execute(
             "SELECT DISTINCT group_id FROM assets WHERE kind='token'"
             " AND address IS NOT NULL AND group_id IS NOT NULL").fetchall()}
@@ -1230,6 +1281,4 @@ class CardsMixin:
             if (m9 and m9 == str(g9["sym"]).upper() and "USD" not in m9 and m9 != "DAI"
                     and not g9.get("is_stable") and not g9.get("is_fiat")):
                 ex_c9.add(gid9)
-        self._ph("cex_proof·prices")
-        invck9.to_diag(_bs9["diag"])
-        _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")
+        (cst.ca_all, cst.ex_c9, cst.native_c9,) = (ca_all, ex_c9, native_c9,)

@@ -689,7 +689,7 @@ def _oa_paxg():
 
 
 def _oa_quoter():
-    global OA_Q
+    global OA_Q  # noqa: PLW0603
     if OA_Q is None:
         OA_Q = other_assets.Quoter(rate_fn=_oa_rate, paxg_fn=_oa_paxg, cfg_fn=lambda: getattr(BUILDER, "cfg", None) or {})
     return OA_Q
@@ -720,7 +720,7 @@ def _nft_alert(line) -> bool:
 
 
 def _nft_tracker():
-    global NFT_T
+    global NFT_T  # noqa: PLW0603
     if NFT_T is None:
         NFT_T = nft.Tracker(cfg_fn=lambda: getattr(BUILDER, "cfg", None) or {}, px_fn=_nft_px, rate_fn=_oa_rate, alert_fn=_nft_alert)
     return NFT_T
@@ -2072,7 +2072,7 @@ def port_busy_exit(port: int, e: OSError, demo: bool = False):
 
 
 def main():
-    global BUILDER
+    global BUILDER  # noqa: PLW0603
     if onboarding.demo_main(sys.modules[__name__]):
         return
     paths.ensure_dirs()

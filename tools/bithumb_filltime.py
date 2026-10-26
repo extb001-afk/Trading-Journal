@@ -118,7 +118,7 @@ def load_progress(path: str) -> dict:
     except FileNotFoundError:
         st = {}
     except (OSError, ValueError) as e:
-        raise SystemExit(f"진행 파일 읽기 실패({path}): {e} — 손으로 확인(지우면 처음부터 다시 받음)")
+        raise SystemExit(f"진행 파일 읽기 실패({path}): {e} — 손으로 확인(지우면 처음부터 다시 받음)") from e
     if not isinstance(st, dict):
         st = {}
     for k in ("got", "keep", "bad", "nf", "err"):

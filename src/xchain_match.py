@@ -776,13 +776,13 @@ class Tracer:
         try:
             netpace.wait(url)
         except netpace.Cooldown as e:
-            raise Paused(str(e))
+            raise Paused(str(e)) from e
         try:
             with net_http.urlopen(req, timeout=timeout) as r:
                 return json.loads(net_http.read_capped(r).decode())
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
-                raise Paused(f"{netpace.host_of(url)} 429")
+                raise Paused(f"{netpace.host_of(url)} 429") from e
             raise
         finally:
             time.sleep(self.sleep)

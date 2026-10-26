@@ -85,7 +85,7 @@ def build():
         os.remove(os.path.join(paths.STATE_DIR, "daily_cache.json"))
     except FileNotFoundError:
         pass
-    global BB
+    global BB  # noqa: PLW0603
     b = BB = web.StateBuilder()
     b.skip_gen_check = True
     conn = dbm.open_db(paths.DB_PATH, readonly=True)

@@ -32,6 +32,9 @@ HIST_MARKS = re.compile(
     r"|\b[PSRWG]\d{1,2}[a-z]?\b")
 
 
+_NOQA_HEAD = re.compile(r"^\s*#?\s*noqa\b(?::\s*[A-Z]+\d+\b(?:\s*,\s*[A-Z]+\d+\b)*)?")
+
+
 def docstring_node(owner):
     body = getattr(owner, "body", None)
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
@@ -45,6 +48,7 @@ def comment_norm(text):
 
 
 def is_history(text):
+    text = _NOQA_HEAD.sub("", text)
     return bool(HIST_WORDS.search(text) or HIST_MARKS.search(text))
 
 
@@ -337,6 +341,22 @@ def comment_facts(text, comment_at):
             if is_history(body):
                 hist.append(body)
     return total, hist
+
+
+def bare_strings(tree):
+    out, todo = [], [tree]
+    while todo:
+        node = todo.pop()
+        for field in ("body", "orelse", "finalbody"):
+            seq = getattr(node, field, None)
+            if not isinstance(seq, list):
+                continue
+            for i, st in enumerate(seq):
+                if isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant) and isinstance(st.value.value, str) \
+                        and not (field == "body" and i == 0 and isinstance(node, DOC_OWNERS)):
+                    out.append(st.lineno)
+        todo.extend(ast.iter_child_nodes(node))
+    return sorted(set(out))
 
 
 def doc_facts(doc_nodes):

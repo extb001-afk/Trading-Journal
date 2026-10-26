@@ -438,7 +438,7 @@ def _err_text(e) -> str:
 
 
 def tick(log=None, now: float = None, db_path: str = None) -> bool:
-    global _thread, _perm_done, _last_check
+    global _thread, _perm_done, _last_check  # noqa: PLW0603
     try:
         now = time.time() if now is None else now
         if now - _last_check < CHECK_EVERY_S:

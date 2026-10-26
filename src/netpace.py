@@ -22,7 +22,7 @@ class Cooldown(OSError):
 
 
 def configure(cfg: dict | None):
-    global EXPLORER_SEC, OTHER_SEC, COOLDOWN_SEC
+    global EXPLORER_SEC, OTHER_SEC, COOLDOWN_SEC  # noqa: PLW0603
     np_ = (cfg or {}).get("net_pace") or {}
     try:
         EXPLORER_SEC = float(np_.get("explorer_sec", EXPLORER_SEC))

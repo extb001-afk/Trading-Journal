@@ -80,7 +80,7 @@ DEVICES = login_device.DeviceStore(DEV_PATH)
 
 
 def init(cfg: dict, lan: str | None = None) -> Settings:
-    global S
+    global S  # noqa: PLW0603
     w = (cfg or {}).get("web") if isinstance((cfg or {}).get("web"), dict) else {}
     S = Settings(w.get("login", None), proxy=w.get("behind_proxy") is True)
     lan = lan or ("테일넷" if w.get("bind") == "tailscale" else None)

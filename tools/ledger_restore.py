@@ -892,7 +892,7 @@ def plan(backup: str, streams=None, margin_h: float = MARGIN_H, now: int = None,
     try:
         info = inspect(backup)
     except sqlite3.DatabaseError as e:
-        raise SystemExit(f"백업 열기 실패: {logs.safe_err(e)} — 깨졌거나 원장 백업 파일이 아니에요(list 의 다른 번호로)")
+        raise SystemExit(f"백업 열기 실패: {logs.safe_err(e)} — 깨졌거나 원장 백업 파일이 아니에요(list 의 다른 번호로)") from e
     miss9 = [t9 for t9 in ("meta", "raw_txs", "raw_ex", "inbox_offsets", "wallets") if t9 not in info["tables"]]
     if miss9:
         raise SystemExit(f"원장 백업이 아니에요(표 없음: {', '.join(miss9)}) — 빈 파일·다른 파일이면 list 의 다른 번호로")
@@ -1048,8 +1048,8 @@ def _apply_locked(p: dict, full_check: bool, sd: str, live: str, log, keep_pre: 
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
-    except FileExistsError:
-        raise SystemExit(f"다른 복구가 진행 중이에요(또는 지난 복구가 중간에 멈춤): {lock} — 확인 뒤 지우고 다시")
+    except FileExistsError as exc:
+        raise SystemExit(f"다른 복구가 진행 중이에요(또는 지난 복구가 중간에 멈춤): {lock} — 확인 뒤 지우고 다시") from exc
     rec_dir = tmp = None
     changed = []
     try:

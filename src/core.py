@@ -349,7 +349,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
                     pass
                 if i9 + 1 >= max(1, int(self.HL_FENCE_TRIES)):
                     raise SystemExit("★늦은 원장 행 커서 울타리(meta %s) 초기화 실패 — 수집 소비를 시작하지 않음(원장 쓰기 가능 여부 확인 뒤 다시 기동): %s★"
-                                     % (histmark.HIST_LATE_PID_K, logs.safe_err(str(e))[:200]))
+                                     % (histmark.HIST_LATE_PID_K, logs.safe_err(str(e))[:200])) from e
                 log.warning("늦은 원장 행 커서 울타리 초기화 실패(%d/%d — 잠시 뒤 다시): %s", i9 + 1, self.HL_FENCE_TRIES, logs.safe_err(str(e))[:200])
                 time.sleep(float(self.HL_FENCE_SLEEP))
         streams = (("evm", self.reader), ("sol", self.sol_reader), ("bsc", self.bsc_reader),

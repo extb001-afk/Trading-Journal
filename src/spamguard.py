@@ -335,8 +335,8 @@ def set_user_genuine(chain, ca, sym, on: bool) -> bool:
                 d = {}
         except FileNotFoundError:
             d = {}
-        except (OSError, ValueError):
-            raise ValueError("정품 목록 파일이 깨져 있어요 — state/" + USER_FILE + " 를 고치거나 지운 뒤 다시")
+        except (OSError, ValueError) as exc:
+            raise ValueError("정품 목록 파일이 깨져 있어요 — state/" + USER_FILE + " 를 고치거나 지운 뒤 다시") from exc
         m = d.get(ch) if isinstance(d.get(ch), dict) else {}
         hit = next((k for k in m if isinstance(k, str) and _norm_ca(ch, k)[1] == a), None)
         if on:
@@ -364,7 +364,7 @@ def plain_symbol(sym) -> bool:
 
 
 def _genuine():
-    global _GEN
+    global _GEN  # noqa: PLW0603
     if _GEN is None:
         s = set()
         for ch, m in GENUINE_CAS.items():

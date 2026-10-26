@@ -204,6 +204,27 @@ _r = _json.loads(_new.split("\n")[0])
 chk(_r["to"] == 123 and _r["m"] == "zqmod" and "zqacct1" not in _new and "zq-branch" not in _new and PSt.data_check(_rel, _ln + "\n", _new) == [],
     "[6c] 기준선 사유·묶음 글만 고정 글 · 증명 0", _new[:200])
 chk(PSt.data_check(_rel, _ln + "\n", _new.replace("123", "124")) != [], "[6c] 사유 밖 칸이 바뀌면 증명 실패")
+_pub = frozenset({"tools/zq_pub.py", "tests/arch_baseline/zq.jsonl"})
+_rel = "tests/arch_baseline/zq.jsonl"
+_old = "\n".join([_json.dumps({"_doc": "정의 = docs/ARCH.md · 생성 tools/refactor/zq_gen.py · DESIGN_ACT1_ZQ 결정 1", "spec": "zq"}, ensure_ascii=False),
+                  _json.dumps({"key": "tools/zq_pub.py", "n": 2, "why": "부르는 곳 tools/zq_priv.sh · tools/zq_pub.py"}, ensure_ascii=False),
+                  _json.dumps({"key": "tools/zq_priv_20260101.sh", "n": 1}, ensure_ascii=False),
+                  '{"m":"w","k":"tools/zq_priv.py::main","n":1}', '{"m":"w","k":"src/zq.py::f","n":1}']) + "\n"
+_new = PSt.strip_base(_rel, _old, _pub)
+_rows = [_json.loads(x) for x in _new.split("\n") if x]
+chk(PSt.base_target(_rel) and not PSt.base_target("tests/arch_baseline/py_growth.jsonl") and not PSt.base_target("tests/x.json"),
+    "[6d] 대상 = tests/arch_baseline/*.json(l) 중 DATA_SCRUB 밖")
+chk([r.get("key") or r.get("k") for r in _rows] == [None, "tools/zq_pub.py", "src/zq.py::f"]
+    and "zq_gen" not in _new and "DESIGN_" not in _new and "ARCH.md" not in _new and "zq_priv" not in _new
+    and "tools/zq_pub.py" in _rows[1]["why"] and PSt.base_check(_rel, _old, _new, _pub) == [],
+    "[6d] 비공개 열쇠 줄 2 뺌 · 설명 칸 비공개 이름 = 일반 이름(공개 경로는 그대로) · 증명 0", _new[:300])
+chk(PSt.base_check(_rel, _old, _new.replace('"n": 2', '"n": 3'), _pub) != [], "[6d] 숫자가 바뀐 결과 = 증명 실패")
+_bad = "\n".join(x for x in _new.split("\n") if "src/zq.py" not in x)
+chk(PSt.base_check(_rel, _old, _bad, _pub) != [], "[6d] 공개 열쇠 줄을 뺀 결과 = 증명 실패")
+_js = '{\n "_doc": "tools/refactor/zq_gen.py --emit 이 씀",\n "v": [1, 2]\n}\n'
+_jn = PSt.strip_base("tests/arch_baseline/zq.json", _js, _pub)
+chk(_jn == _js.replace("tools/refactor/zq_gen.py", PSt.PRIV_PATH_NAME) and PSt.base_check("tests/arch_baseline/zq.json", _js, _jn, _pub) == [],
+    "[6d] .json = 설명 칸 글만 바꿈(나머지 바이트 그대로) · 증명 0", _jn)
 SG = os.path.join(os.path.realpath(T.TMP), "gitroot7")
 for rel7, body7 in (("tools/package/pub_files.txt", "docs/*.md\n"), ("docs/a.md", "# a\n"), (".gitignore", "docs/c.md\n")):
     os.makedirs(os.path.dirname(os.path.join(SG, rel7)), exist_ok=True)
