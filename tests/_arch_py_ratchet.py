@@ -77,6 +77,9 @@ SPECS = {
                      "늘리지 말 것", "잡을 예외를 좁혀라 — 꼭 넓게면 `# noqa: BLE001 [이유코드] 설명`(닫힌 목록 = docs/ARCH.md)"),
     "except.money_nocg": ("except", "num", "s", "돈 경로 모듈의 삼키는 넓은 except 인데 calcguard 기록 없음", "0 목표 · 늘리지 말 것",
                           "처리기에 calcguard.swallowed('자리 이름', e) 를 넣어라(이유 코드로는 안 빠짐)"),
+    "except.swallow_pass": ("except", "num", "x", "calcguard.swallowed(…) 다음이 pass 뿐인 처리기(저장소 전체 합 · 세션31 요청서 #2-3)",
+                            "늘리지 말 것", "삼킨 뒤 할 일을 적어라 — 계산 경로면 calcguard.row_err 로 행 표식 · 데이터 이상을 일부러 넘기면 "
+                            "swallowed(…, expected=True) 와 처리(대체값·건너뜀 기록)를 같이"),
     "doc.missing": ("contracts", "num", "f", "공개 함수 독스트링 없음", "공개 함수 = 한 줄 계약",
                     "무엇을 받아 무엇을 돌려주나 한 줄 독스트링"),
     "hint.untyped": ("contracts", "num", "f", "공개 함수 인자 타입 힌트 없음(self·cls·*args·**kw 빼고)", "새 공개 함수는 전부",
@@ -369,6 +372,11 @@ _WHY_CARDS = ("거대 함수 단계 추출(요청서 #9) — _build_cards 몸통
               "줄 수 = 옛 함수 예산 안(합) · 중첩 깊이 = 옛 함수 값 이하(최대) · cfg 리터럴·함수 안 import 는 자리만 옮김(합 무변)")
 _WHY_DAILY = ("거대 함수 단계 추출(요청서 #9) — _daily_series 몸통을 같은 파일 안 단계 메서드 _ds_* 5개로 그대로 옮김(공유 지역 = dct) · "
               "줄 수 = 옛 함수 예산 안(합) · 중첩 깊이 = 옛 함수 값 이하(최대)")
+_WHY_REPLAY = ("거대 함수 단계 추출(지시서 #3 · 세션31) — _replay_main 본 루프 뒤 후처리 몸통을 같은 파일 안 모듈 함수 _pos_* 7개로, 본 루프 행 프롤로그를"
+               " _row_prologue 로 글자 그대로 옮김(구간마다 입력 = 묶기 전에 읽는 앞 이름 · 출력 = 뒤 구간·결과가 읽는 이름) · 줄 수 = 옛 함수 예산 안(합) · "
+               "중첩 깊이 = 옛 함수 값 이하(최대) · cfg 리터럴은 자리만 옮김(합 무변)")
+_WHY_REPLAY_RUN = ("거대 함수 단계 추출(지시서 #3 · 세션31 단계 4) — _replay_main 안 중첩 분기 함수를 ReplayRun 메서드로 몸통 그대로 옮김(nonlocal 줄만 지움 · "
+                   "행을 넘어 사는 상태 없음 확인) — 줄 수·깊이는 옛 중첩 함수 단위와 이름 짝(맨 끝 이름) · 이 줄 = 옛 함수의 9-이름 승계(이름 위생)")
 SUCCESSION = (
     ("class.mixin_bases", ("core", "Core"), ("core_svc", "ExfService"),
      "9-1 ExfService 합성(9막 설계 문서 '래칫 영향 예측' class.mixin_bases 줄 = 9막 승계 표) — Core 바탕에서 뺀 EXF 믹스인 4개가 "
@@ -414,6 +422,22 @@ SUCCESSION = (
     ("cfg.literal", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_risk"), _WHY_CARDS),
     ("cfg.literal", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
     ("import.lazy", ("view_b_cards", "CardsMixin._build_cards"), ("view_b_cards", "CardsMixin._cards_extra"), _WHY_CARDS),
+    ("func.depth", ("view_b_replay", "ReplayMixin._replay_main"), ("view_b_replay", "_pos_ex_pending"), _WHY_REPLAY),
+    ("cfg.literal", ("view_b_replay", "ReplayMixin._replay_main"), ("view_b_replay", "_pos_prov"), _WHY_REPLAY),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main"), ("view_b_replay", "_row_prologue"), _WHY_REPLAY),
+    ("func.depth", ("view_b_replay", "ReplayMixin._replay_main"), ("view_b_replay", "ReplayRun._after_exf_fee"), _WHY_REPLAY_RUN),
+    ("class.lines", ("view_b_replay", "ReplayMixin"), ("view_b_replay", "ReplayRun"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_stake_reward"), ("view_b_replay", "ReplayRun._h_stake_reward"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_gas_exf_wd_fee"), ("view_b_replay", "ReplayRun._h_gas_exf_wd_fee"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_gas"), ("view_b_replay", "ReplayRun._h_gas"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_opening"), ("view_b_replay", "ReplayRun._h_opening"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_ex_deposit"), ("view_b_replay", "ReplayRun._h_ex_deposit"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_exf_deposit"), ("view_b_replay", "ReplayRun._h_exf_deposit"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_exf_fee"), ("view_b_replay", "ReplayRun._h_exf_fee"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_move"), ("view_b_replay", "ReplayRun._h_move"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_acq"), ("view_b_replay", "ReplayRun._h_acq"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._stable_bridge_in"), ("view_b_replay", "ReplayRun._stable_bridge_in"), _WHY_REPLAY_RUN),
+    ("func.lines", ("view_b_replay", "ReplayMixin._replay_main._h_disp"), ("view_b_replay", "ReplayRun._h_disp"), _WHY_REPLAY_RUN),
 )
 
 

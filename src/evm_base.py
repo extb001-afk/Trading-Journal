@@ -6,6 +6,7 @@ import re
 import urllib.request
 import paths, statefile
 import bf_engine
+import chaincatalog
 import logging
 
 log = logging.getLogger('tj-evm')
@@ -452,6 +453,17 @@ RETENTION_CONFIRM_SEC = 1800
 
 
 RETENTION_MIN_AGE_SEC = 2 * 86400
+
+
+CONF_DEPTH_DEFAULT = {"eth": 12, "base": 30, "arbitrum": 30, "optimism": 30, "polygon": 30, "scroll": 30, "zksync": 30,
+                      "gnosis": 20, "robinhood": 600, "arc": 20}
+
+
+def conf_depth_of(cc: dict, chain: str) -> int:
+    v = cc.get("conf_depth")
+    if v is not None:
+        return int(v)
+    return int(CONF_DEPTH_DEFAULT.get(chain) or (chaincatalog.CATALOG.get(chain) or {}).get("conf_depth") or 12)
 
 
 EXPLORER_FROZEN_SEC = 3 * 3600

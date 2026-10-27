@@ -2,7 +2,7 @@ import bisect
 import calcguard
 import acct_norm, histmark, num_parse, paths, seeds, statefile
 import json
-import recon_adj
+import recon_adj, autofix_apply
 import os
 import sqlite3
 import time
@@ -235,6 +235,7 @@ class ExfLateMixin:
             return 0
         n = 0
         for sym, lst in sorted(deltas.items()):
+            lst = autofix_apply.late_take(self.conn, ex, sym, lst, touch=self._exf_hist_touch)
             rows = [r for r in self._exf_adj_rows(ex, sym)
                     if not histmark.exf_is_debt_int("EXF_ADJUST", r.get("leg_seq"), f"{ex}:recon", r.get("source_id"))]
             bts_all = self._exf_bounds_q(self.conn, ex, sym)

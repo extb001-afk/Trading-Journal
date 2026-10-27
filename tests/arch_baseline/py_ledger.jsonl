@@ -1,4 +1,11 @@
 {"k":"_keys","m":"*","q":"*","v":["ledger.write"]}
+{"k":"ledger.write","m":"autofix_apply","q":"_mark","h":"cf323edec111","v":["exf_adj_tomb:INSERT","meta:DELETE","meta:INSERT"]}
+{"k":"ledger.write","m":"autofix_apply","q":"_pos_add","h":"821e552a01e2","v":["positions:UPDATE"]}
+{"k":"ledger.write","m":"autofix_apply","q":"_replan","h":"163513ea1a7d","v":["meta:UPDATE","postings:DELETE","postings:INSERT","postings:UPDATE"]}
+{"k":"ledger.write","m":"autofix_apply","q":"apply_cell","h":"252dc8000c03","v":["meta:INSERT","postings:DELETE","postings:INSERT","postings:UPDATE"]}
+{"k":"ledger.write","m":"autofix_apply","q":"autofix_on","h":"c90123731858","v":["meta:DELETE"]}
+{"k":"ledger.write","m":"autofix_apply","q":"data_rev_down","h":"da395249c070","v":["meta:UPDATE"]}
+{"k":"ledger.write","m":"autofix_apply","q":"undo_cell","h":"cb3932db093e","v":["meta:DELETE","meta:INSERT","postings:DELETE","postings:INSERT","postings:UPDATE"]}
 {"k":"ledger.write","m":"core","q":"Core.__init__","f":"__init__","h":"7b7f681c01d6","v":["meta:INSERT","wallets:INSERT"]}
 {"k":"ledger.write","m":"core","q":"Core._group_of","f":"_group_of","h":"81bd90f480c3","v":["asset_groups:INSERT","assets:UPDATE"]}
 {"k":"ledger.write","m":"core","q":"Core._load_exchange_addrs","f":"_load_exchange_addrs","h":"3a1565c830dd","v":["exchange_addresses:INSERT"]}
@@ -46,6 +53,7 @@
 {"k":"ledger.write","m":"core_post","q":"PostMixin._post_leg","f":"_post_leg","h":"bc7f47de3618","v":["postings:INSERT"]}
 {"k":"ledger.write","m":"core_post","q":"PostMixin._post_legs_strict","f":"_post_legs_strict","h":"6f1e9a494004","v":["postings:INSERT"]}
 {"k":"ledger.write","m":"core_post","q":"PostMixin._post_stake_open","f":"_post_stake_open","h":"da9bdbdcfe57","v":["raw_observations:INSERT"]}
+{"k":"ledger.write","m":"core_post","q":"PostMixin._renorm_asset","f":"_renorm_asset","h":"c7c7baef2598","v":["positions:INSERT","positions:UPDATE"]}
 {"k":"ledger.write","m":"core_post","q":"PostMixin._unpost_source","f":"_unpost_source","h":"eedbeaa2c074","v":["postings:DELETE"]}
 {"k":"ledger.write","m":"core_post","q":"PostMixin.apply_chain_delta","f":"apply_chain_delta","h":"704d8e044c58","v":["assets:UPDATE"]}
 {"k":"ledger.write","m":"core_post","q":"PostMixin.apply_sol","f":"apply_sol","h":"016c570970f0","v":["assets:UPDATE"]}

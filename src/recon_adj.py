@@ -8,10 +8,12 @@ import sqlite3
 import time
 from typing import Callable, Optional
 
+import autofix
 import calcguard
 import logs
 import num_parse
 import paths
+import recon_auto
 import spamguard
 import statefile
 import token_tables
@@ -36,6 +38,7 @@ SITES = {
     "K8": ("core_exf_fut", "_exf_fut_post", "선물 정산(futpnl)"),
     "K9": ("core_exf_late", "_exf_late_offset", "늦은 행 상쇄(exflate)"),
     "K10": ("core_upbit_recon", "exchange_recon_pass", "업비트 대사 차이"),
+    "K11": ("autofix_apply", "apply_cell", "자동 처리 행(창 안 미확인 유출 — 칸 트랜잭션 INSERT · 늦은 행 재계획 _replan 도 같은 키)"),
 }
 SITE_TOOL = "K6"
 TOOL_SIDS = ("rebal20260901", "fix1004")
@@ -53,7 +56,9 @@ AMEND_SITES = {
 
 CLS_KO = {"spam": "스팸 토큰(가격 없음 · 사칭·낚시 이름 · 정품 주소 아닌 대표 심볼)", "dust": "$1 미만 먼지", "interest": "부채 이자", "futpnl": "선물 정산", "exflate": "늦은 행 상쇄",
           "tool": "수리 도구 행", "pair": "±상쇄 쌍(14일 안)", "pre_window": "창 시작 기초 잔고(수집 이전 보유)", "new_source": "새 잔고 출처 첫 실림",
-          "estimated": "추정 — 알려진 미수집", "unexplained": "설명 안 됨"}
+          "estimated": "추정 — 알려진 미수집", "unexplained": "설명 안 됨",
+          "auto": "자동 처리(창 시작 음수 — 숫자 맞춰 둠)", "owner_kept": "그대로 둠(자동 처리 끔)", "auto_wait": "자동 처리 대기(첫 대사 72시간 뒤)",
+          "gap": "기록 종류별 보존 기한 차이 빈 구간(작은 보정)"}
 RED_KO = {"prewin_rows": "창 이전 원장 행을 되받는 앵커", "mirror": "네이티브와 수량 같은 토큰 앵커", "flip3": "같은 칸 ±쌍 하루 3개 이상"}
 RED_CAUSE = {"prewin_rows": "창 시작 앵커인데 그 칸에 창보다 이른 원장 행 있음", "mirror": "토큰 수량이 같은 지갑 네이티브 잔고와 같음",
              "flip3": "같은 칸에서 하루 3쌍 이상 ±뒤집힘"}
@@ -211,6 +216,8 @@ def _site_of(r: dict) -> str:
         if sid.startswith("recon:sol:stake:"):
             return "K5"
         return "K1" if len(p) == 2 else "K2"
+    if autofix.is_auto_ns(ns) or sid.startswith(autofix.SID_HEAD):
+        return recon_auto.SITE_AUTO
     if r["event"] == "EX_ADJUST":
         return "K10"
     if ns.endswith(":futpnl"):
@@ -219,6 +226,9 @@ def _site_of(r: dict) -> str:
 
 
 def _bts(sid: str) -> Optional[int]:
+    got = autofix.parse_sid(sid)
+    if got is not None:
+        return got[1]
     if not str(sid).startswith(("exfrecon:", "exrecon:")):
         return None
     try:
@@ -287,6 +297,10 @@ def _per_asset(px_fn: Callable[[str, int], object]) -> Callable[[str, int], obje
     return f
 
 
+def _site_ok(site: object) -> bool:
+    return site in SITES or site == recon_auto.SITE_AUTO
+
+
 def load_rows(conn: sqlite3.Connection, px: Optional[dict] = None, px_fn: PxFn = None) -> list:
     px = px or {"grp": {}, "leg": {}}
     if px_fn is not None:
@@ -303,11 +317,11 @@ def load_rows(conn: sqlite3.Connection, px: Optional[dict] = None, px_fn: PxFn =
         r.update(sid=str(r["sid"]), sym=str(r["sym"] or ""), ca=str(r["addr"] or ""), addr=str(r["addr"] or "").lower(), venue=_venue(r["loc"]), bts=_bts(r["sid"]))
         nt = notes.get(_oid((r["kind"], r["ns"], r["sid"], r["seq"])))
         r["note"] = nt[0] if nt else None
-        r["site"] = (nt[0].get("site") if nt and nt[0].get("site") in SITES else None) or _site_of(r)
+        r["site"] = (nt[0].get("site") if nt and _site_ok(nt[0].get("site")) else None) or _site_of(r)
         if r["site"] == "K7f":
             r["site"] = "K8" if str(r["ns"]).endswith(":futpnl") else "K7"
         r["why"] = str(nt[0].get("why") or "") if nt else ""
-        by_note = nt is not None and nt[0].get("site") in SITES
+        by_note = nt is not None and _site_ok(nt[0].get("site"))
         r["made"] = nt[1] if by_note else r["bts"] if r["bts"] else obs_at.get(r["sid"], int(r["ts"]))
         r["t0_ref"] = obs_at.get(r["sid"], r["made"]) if r["site"] == "K4" else r["made"]
         r["px"] = _px_of(r, px, px_fn)
@@ -344,8 +358,8 @@ def _same(a: float, b: float) -> bool:
     return a >= 1e-6 and b >= 1e-6 and abs(a - b) <= 1e-9 * max(a, b)
 
 
-def _mark_first(rows: list) -> dict:
-    first_b = {}
+def _mark_first(rows: list, boundaries: Optional[dict] = None) -> dict:
+    first_b = dict(boundaries or {})
     for r in rows:
         if r["site"] in ("K7", "K10") and r["bts"] is not None:
             first_b[r["venue"]] = min(first_b.get(r["venue"], r["bts"]), r["bts"])
@@ -364,7 +378,7 @@ def _mark_first(rows: list) -> dict:
 
 
 def _pair_cell(lst: list) -> None:
-    lst = [r for r in lst if r["site"] not in ("K8", "K9") and not r["ns"].endswith(":futpnl") and not r["sid"].startswith("exflate:")]
+    lst = [r for r in lst if r["site"] not in ("K8", "K9", recon_auto.SITE_AUTO) and not r["ns"].endswith(":futpnl") and not r["sid"].startswith("exflate:")]
     neg = sorted((r for r in lst if r["q"] < 0), key=lambda r: r["made"])
     used, by_day = set(), {}
     for p in sorted((r for r in lst if r["q"] > 0), key=lambda r: r["made"]):
@@ -405,9 +419,10 @@ def _red_shape(conn: sqlite3.Connection, r: dict, early: dict, cache: dict) -> N
         r["red"] = "mirror"
 
 
-def _cls_of(r: dict, gaps: dict) -> str:
+def _cls_of(r: dict, gaps: dict, values: Optional[dict] = None) -> str:
     s, q = r["site"], r["q"]
-    rules = (("spam", bool(r.get("spam"))), ("dust", r["usd"] is not None and abs(r["usd"]) < DUST_USD), ("futpnl", s == "K8" or r["ns"].endswith(":futpnl")),
+    rules = (("auto", bool(r.get("auto"))), ("owner_kept", bool(r.get("kept"))), ("auto_wait", bool(r.get("wait"))),
+             ("spam", bool(r.get("spam"))), ("dust", r["usd"] is not None and abs(r["usd"]) < DUST_USD), ("futpnl", s == "K8" or r["ns"].endswith(":futpnl")),
              ("exflate", s == "K9" or r["sid"].startswith("exflate:")),
              ("tool", s == SITE_TOOL), ("interest", s == "K7" and r["seq"] == 2 and q < 0), ("pair", bool(r["pair"])),
              ("pre_window", r["ws"] and r["red"] != "prewin_rows"), ("new_source", r["why"] == "new_source"))
@@ -415,24 +430,36 @@ def _cls_of(r: dict, gaps: dict) -> str:
     if hit:
         return hit
     gap = gaps.get(r["venue"])
+    if r.get("vgap") and r["usd"] is not None and not _amt_warn(r, values or {}):
+        return "gap"
     return "estimated" if gap and (gap[0] is None or r["ts"] <= gap[0] + DAY) else "unexplained"
 
 
-def classify(conn: sqlite3.Connection, rows: list, t0_fn: T0Fn = None, gaps: Optional[dict] = None) -> list:
-    gaps = gaps or {}
-    guess = _mark_first(rows)
+def classify(conn: sqlite3.Connection, rows: list, t0_fn: T0Fn = None, gaps: Optional[dict] = None, ctx: Optional[dict] = None) -> list:
+    gaps, ctx = gaps or {}, ctx or {}
+    now = time.time() if ctx.get("now") is None else ctx["now"]
+    cells = recon_auto.auto_cells(conn, rows)
+    managed = {ex for ex, _sym in set(cells[0]) | cells[1] | set(cells[2])}
+    boundaries = {}
+    if managed and conn.execute("SELECT 1 FROM sqlite_master WHERE name='exf_adj_tomb'").fetchone():
+        boundaries = {str(ex): int(bts) for ex, bts in conn.execute("SELECT ex, min(bts) FROM exf_adj_tomb GROUP BY ex")
+                      if str(ex) in managed}
+    guess = _mark_first(rows, boundaries)
     by_cell = {}
     for r in rows:
         by_cell.setdefault((r["loc"], r["aid"]), []).append(r)
     for lst in by_cell.values():
-        _pair_cell(lst)
+        _pair_cell([r for r in lst if not recon_auto.is_auto_anchor(r, cells)])
     early, cache = _cells_before(conn, set(by_cell)), {}
     for r in rows:
         r["t0"] = _t0_of_row(r, t0_fn, guess)
         _red_shape(conn, r, early, cache)
-        r["cls"] = _cls_of(r, gaps)
+        recon_auto.mark(r, cells, ctx.get("vgap") or {}, bool(ctx.get("auto_on")), now)
+        r["cls"] = _cls_of(r, gaps, ctx.get("values"))
         r["cause"] = (RED_CAUSE.get(r["red"], RED_KO.get(r["red"], str(r["red"]))) if r["red"] else gaps[r["venue"]][1] if r["cls"] == "estimated"
                       else HINTS.get(r["venue"], "") if r["cls"] == "unexplained" else CLS_KO[r["cls"]])
+        if r["r1"] and r["red"]:
+            r["cause"] += " · 자동 처리가 첫 대사 72시간 넘게 못 닫음(R1 — 선물 이관·레그 걸침·그룹·관측 순서 가드)"
     return rows
 
 
@@ -478,13 +505,42 @@ def _venue_table(rows: list, now: float, values: dict) -> dict:
     return dict(sorted(venues.items(), key=lambda kv: -kv[1]["usd"]))
 
 
-def _is_warn(r: dict, values: dict) -> bool:
+def _amt_warn(r: dict, values: dict) -> bool:
     big = abs(r["usd"]) >= ROW_WARN_USD
     share = values.get(r["venue"], 0) > 0 and abs(r["usd"]) >= ROW_WARN_PCT * values[r["venue"]]
-    return r["cls"] in ("unexplained", "estimated") and (big or share)
+    return big or share
 
 
-def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = None) -> dict:
+def _is_auto_row(r: dict) -> bool:
+    return r.get("cls") == "auto" and r.get("site") == recon_auto.SITE_AUTO
+
+
+def _warn_cls(r: dict) -> bool:
+    return r["cls"] in ("unexplained", "estimated") or _is_auto_row(r)
+
+
+def _is_warn(r: dict, values: dict) -> bool:
+    return _warn_cls(r) and _amt_warn(r, values)
+
+
+def _gray(rows: list, now: float, values: dict, warn: list) -> dict:
+    wid = {id(r) for r in warn}
+    small = [r for r in rows if _is_auto_row(r) and id(r) not in wid and r["usd"] is not None and now - r["made"] <= WEEK]
+    gap = [r for r in rows if r["cls"] == "gap"]
+    return {"auto": [_row_view(r) for r in sorted(small, key=lambda r: -abs(r["usd"] or 0.0))[:5]], "auto_n": len(small),
+            "kept_n": len({(r["venue"], r["sym"]) for r in rows if r["cls"] == "owner_kept"}),
+            "wait_n": len({(r["venue"], r["sym"]) for r in rows if r["cls"] == "auto_wait"}),
+            "gap_n": len(gap), "gap_usd": round(sum(abs(r["usd"] or 0.0) for r in gap), 2)}
+
+
+def _auto_sum(rows: list, now: float) -> dict:
+    a = [r for r in rows if _is_auto_row(r)]
+    a7 = [r for r in a if now - r["made"] <= WEEK]
+    return {"n": len(a), "usd": round(sum(abs(r["usd"] or 0.0) for r in a), 2), "n7": len(a7), "usd7": round(sum(abs(r["usd"] or 0.0) for r in a7), 2),
+            "nopx7": sum(1 for r in a7 if r.get("nopx"))}
+
+
+def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = None, neg: Optional[dict] = None) -> dict:
     now = time.time() if now is None else now
     values = values or {}
     by_cls = {}
@@ -497,7 +553,7 @@ def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = 
     une = [r for r in rows if r["cls"] == "unexplained"]
     une7 = [r for r in une if now - r["made"] <= WEEK]
     warn = [r for r in rows if now - r["made"] <= WEEK and (_is_warn(r, values) if r["usd"] is not None else
-                                                         r.get("real") and r["cls"] in ("unexplained", "estimated"))]
+                                                         r.get("real") and _warn_cls(r))]
     red = [r for r in rows if r["red"]]
     red_by = {}
     for r in red:
@@ -511,21 +567,34 @@ def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = 
                             "nopx": sum(1 for r in une if r.get("nopx")), "nopx7": sum(1 for r in une7 if r.get("nopx"))},
             "by_class": dict(sorted(by_cls.items())), "venues": _venue_table(rows, now, values),
             "top": [_row_view(r) for r in sorted(une, key=key)[:TOP_N]],
-            "warn": [_row_view(r) for r in sorted(warn, key=key)[:20]], "warn_n": len(warn),
-            "red": [_row_view(r) for r in sorted(red, key=key)[:20]], "red_n": len(red), "red_by": dict(sorted(red_by.items()))}
+            "warn": [_row_view(r) for r in sorted(warn, key=key)[:20]], "warn_n": len(warn), "warn_auto_n": sum(1 for r in warn if _is_auto_row(r)),
+            "red": [_row_view(r) for r in sorted(red, key=key)[:20]], "red_n": len(red), "red_by": dict(sorted(red_by.items())),
+            "auto": _auto_sum(rows, now), "gray": _gray(rows, now, values, warn)}
+    if isinstance(neg, dict):
+        doc["neg_runs"] = neg
     doc["check"] = check(doc, now)
     return doc
 
 
 def compute(conn: sqlite3.Connection, now: Optional[float] = None, t0_fn: T0Fn = None, state_dir: Optional[str] = None,
-            px_fn: PxFn = None) -> tuple:
+            px_fn: PxFn = None, opts: Optional[dict] = None) -> tuple:
+    now, opts = time.time() if now is None else now, opts or {}
     px = prices(state_dir)
-    rows = classify(conn, load_rows(conn, px, px_fn), t0_fn=t0_fn, gaps=coverage_gaps(state_dir))
-    return rows, summarize(rows, now, venue_values(conn, px))
+    values = venue_values(conn, px)
+    rows = load_rows(conn, px, px_fn)
+    vgap = recon_auto.venue_gaps(conn, {r["venue"] for r in rows if r["site"] == "K7"}, now, opts.get("gap_fn"))
+    rows = classify(conn, rows, t0_fn=t0_fn, gaps=coverage_gaps(state_dir), ctx={"values": values, "vgap": vgap, "auto_on": bool(opts.get("auto_on")), "now": now})
+    neg = None
+    if opts.get("runs", True):
+        try:
+            neg = recon_auto.neg_runs(conn, recon_auto.venue_t0(rows), t0_of=(lambda v: t0_fn(v, int(now))) if t0_fn else None)
+        except sqlite3.Error as e:
+            calcguard.swallowed("recon_adj:neg_runs", e)
+    return rows, summarize(rows, now, values, neg)
 
 
-def refresh(conn: sqlite3.Connection, now: Optional[float] = None, t0_fn: T0Fn = None, px_fn: PxFn = None) -> dict:
-    doc = compute(conn, now, t0_fn, None, px_fn)[1]
+def refresh(conn: sqlite3.Connection, now: Optional[float] = None, t0_fn: T0Fn = None, px_fn: PxFn = None, auto_on: bool = False) -> dict:
+    doc = compute(conn, now, t0_fn, None, px_fn, {"auto_on": auto_on})[1]
     statefile.atomic_write_json(paths.state(STATE_NAME), doc)
     return doc
 
@@ -540,7 +609,7 @@ _TICK = {"t": 0.0, "fp": None, "checked": 0.0}
 
 
 def tick(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], log_: Optional[logging.Logger] = None, now: Optional[float] = None,
-         st: Optional[dict] = None) -> Optional[dict]:
+         st: Optional[dict] = None, auto_on: bool = False) -> Optional[dict]:
     now = time.time() if now is None else now
     st = _TICK if st is None else st
     if now - float(st.get("checked") or 0.0) < MIN_GAP_SEC:
@@ -550,11 +619,11 @@ def tick(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], log_: Opti
         fp = tuple(conn.execute("SELECT count(*), coalesce(max(posting_id), 0) FROM postings WHERE leg_kind='opening'").fetchone())
         if fp == st.get("fp") and now - float(st.get("t") or 0.0) < REFRESH_SEC:
             return None
-        doc = refresh(conn, now, _t0_fn(win_t0))
+        doc = refresh(conn, now, _t0_fn(win_t0), None, auto_on)
         st.update(t=now, fp=fp)
         return doc
     except Exception as e:  # noqa: BLE001 [boundary]
-        calcguard.swallowed("recon_adj:tick", e)
+        calcguard.swallowed("recon_adj:tick", e, expected=True)
         (log_ or log).warning("보정 감시 갱신 실패(다음 주기): %s", logs.safe_err(str(e))[:200])
         return None
 
@@ -563,13 +632,19 @@ def _fmt_row(r: dict) -> str:
     u = r.get("usd")
     sign = "+" if (r.get("q") or 0) > 0 else "−"
     head = f"{r.get('sym')} {r.get('venue')}" + (f" {sign}${abs(u):,.0f}" if u is not None else f" {sign}{abs(r.get('q') or 0):,.8g}개 평가 불가" if r.get("nopx") else "")
-    where = SITES.get(r.get("site"), ("", "", "수리 도구 행"))[2].split("(")[0].split(" —")[0]
+    where = (recon_auto.SITE_AUTO_KO if r.get("site") == recon_auto.SITE_AUTO else SITES.get(r.get("site"), ("", "", "수리 도구 행"))[2]).split("(")[0].split(" —")[0]
     return head + f"({where}{' · ' + r['cause'] if r.get('cause') else ''})"
 
 
 def check(doc: object, now: Optional[float] = None) -> Optional[dict]:
     if not isinstance(doc, dict) or doc.get("v") != 1:
         return None
+    out = _check(doc)
+    out["info"] = recon_auto.info_lines(doc, _fmt_row)
+    return out
+
+
+def _check(doc: dict) -> dict:
     une = doc.get("unexplained") or {}
     red_n, warn_n = int(doc.get("red_n") or 0), int(doc.get("warn_n") or 0)
     usd7, n7, nx7 = float(une.get("usd7") or 0), int(une.get("n7") or 0), int(une.get("nopx7") or 0)
@@ -584,12 +659,21 @@ def check(doc: object, now: Optional[float] = None) -> Optional[dict]:
         return {"title": f"보정 버그 꼴 {red_n}건", "level": "crit", "tg": True,
                 "detail": f"{kinds} — " + " · ".join(_fmt_row(r) for r in (doc.get("red") or [])[:3]) + f" · {tot}",
                 "action": "실잔고 대사가 넣은 보정 중 버그 모양(창 이전 행 되받기·네이티브 거울·하루 여러 번 뒤집기)이 있어요 — 그 칸의 수집 기록을 점검하세요"}
-    if warn_n or usd7 >= WEEK_TG_USD:
+    au = doc.get("auto") if isinstance(doc.get("auto"), dict) else {}
+    a_usd7, a_n7, a_nx7 = float(au.get("usd7") or 0), int(au.get("n7") or 0), int(au.get("nopx7") or 0)
+    a_warn_n = int(doc.get("warn_auto_n") or 0)
+    if warn_n or usd7 + a_usd7 >= WEEK_TG_USD:
         week = (f"7일 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + nxt7 + (f" ({ven})" if ven else "") + " · ") if n7 else ""
-        title = (f"설명 안 된 보정 7일 ${usd7:,.0f}" + nxt7 if n7 > nx7 else f"설명 안 된 보정 7일 {n7}건(평가 불가)" if n7 else f"보정 확인 {warn_n}건(추정)")
-        return {"title": title, "level": "warn", "tg": usd7 >= WEEK_TG_USD,
-                "detail": week + " · ".join(_fmt_row(r) for r in (doc.get("warn") or doc.get("top") or [])[:3]) + f" · {tot}",
-                "action": "원장이 모르는 입출금이 실잔고 대사로 메워졌어요 — 그 거래소·체인의 수집 범위(입출금·Earn·배당)와 지갑 등록을 확인하세요"}
+        only_auto = not n7 and (a_warn_n or a_usd7 >= WEEK_TG_USD) and a_warn_n == warn_n
+        title = (f"설명 안 된 보정 7일 ${usd7:,.0f}" + nxt7 if n7 > nx7 else f"설명 안 된 보정 7일 {n7}건(평가 불가)" if n7 else
+                 (f"큰 미확인 유출 자동 처리 7일 ${a_usd7:,.0f}" if a_n7 > a_nx7 else f"큰 미확인 유출 자동 처리 7일 {a_n7}칸(평가 불가)") if only_auto else
+                 f"보정 확인 {warn_n}건(추정)")
+        auto_txt = (f"자동 처리 7일 {a_n7}칸" + (f" ${a_usd7:,.0f}" if a_n7 > a_nx7 else "") + " · ") if a_n7 and not only_auto else ""
+        return {"title": title, "level": "warn", "tg": usd7 + a_usd7 >= WEEK_TG_USD,
+                "detail": week + auto_txt + " · ".join(_fmt_row(r) for r in (doc.get("warn") or doc.get("top") or [])[:3]) + f" · {tot}",
+                "action": ("창 안에서 원장이 모르는 유출을 자동 처리 행으로 맞췄어요(숫자는 맞춰 둠) — 해킹·등록 안 한 출금일 수 있으니 그 거래소 출금·이체 기록을 "
+                           "확인하세요(7일 뒤 저절로 내려감 · 그대로 두려면 ledger_rowfix --undo-autofix)") if only_auto else
+                "원장이 모르는 입출금이 실잔고 대사로 메워졌어요 — 그 거래소·체인의 수집 범위(입출금·Earn·배당)와 지갑 등록을 확인하세요"}
     return {"title": "보정 감시", "level": "ok", "tg": False, "action": "",
             "detail": (f"7일 설명 안 된 보정 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + f"{nxt7} · " if n7 else "7일 설명 안 된 큰 보정 없음 · ") + tot}
 
@@ -599,9 +683,9 @@ def exf_dm(conn: sqlite3.Connection, win_t0: Callable[[int, str], int], ex: str,
     if n_adj <= 0:
         return
     try:
-        rows = compute(conn, None, _t0_fn(win_t0), None, px_fn)[0]
+        rows = compute(conn, None, _t0_fn(win_t0), None, px_fn, {"runs": False})[0]
     except Exception as e:  # noqa: BLE001 [fallback]
-        calcguard.swallowed("recon_adj:exf_dm", e)
+        calcguard.swallowed("recon_adj:exf_dm", e, expected=True)
         dm_fn("EXF_RECON", f"{ex} 잔고 대사 완료 — {n_adj}개 통화 보정")
         return
     mine = [r for r in rows if r["venue"] == ex and r["bts"] == int(bts) and r["site"] == "K7" and (r["cls"] == "unexplained" or r["red"])]

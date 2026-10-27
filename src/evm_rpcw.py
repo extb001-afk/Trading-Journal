@@ -15,6 +15,7 @@ from evm_base import TraceDeferred
 from evm_base import _RpcBudget
 from evm_base import _SCAN_LOG
 from evm_base import _TDLY
+from evm_base import conf_depth_of
 from evm_base import new_view_wallets
 from evm_base import retention_summary
 from evm_synth import RpcSynthMixin
@@ -230,7 +231,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         self.cfg = cfg
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.chain_id = int(cc["chain_id"]) if cc.get("chain_id") else None
-        self.conf_depth = int(cc.get("conf_depth", 12))
+        self.conf_depth = conf_depth_of(cc, chain)
         self.reorg_set = evm_reorg.settings(cc)
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.backfill_full = bool(cfg.get("backfill_full_history"))

@@ -6,6 +6,7 @@ import urllib.request
 import logs, net_http, paths, statefile
 import bf_engine
 from evm_base import UA
+from evm_base import conf_depth_of
 from evm_synth import RpcSynthMixin
 import logging
 
@@ -27,7 +28,7 @@ class RpcLogDiscovery(RpcSynthMixin):
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.mode = str(cc.get("rpc_log_discovery") or "shadow")
         self.chain_id = int(cc["chain_id"])
-        self.conf_depth = int(cc.get("conf_depth", 12))
+        self.conf_depth = conf_depth_of(cc, chain)
         self.bpd = int(cc.get("blocks_per_day", 43200))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.logs_rpcs = list(cc.get("rpc_logs") or [])

@@ -170,7 +170,7 @@ def classify_rpc_error(err) -> NetError:
                       retry_after=(1.0 + random.random() * 0.5) if persec else ((20.0 + random.random() * 10) if permin else None))
         e9.persec = persec
         return e9
-    mc9 = re.search(r"(?:limited to a|up to a|maximum)\s+(\d{1,7})\s+(?:block\s+)?(?:range|blocks)\b", low)
+    mc9 = re.search(r"(?:limited to a|up to a|maximum(?: of)?)\s+(\d{1,7})\s+(?:block\s+)?(?:range|blocks?)\b", low)
     if mc9 and int(mc9.group(1)) > 0:
         return NetError(text, "range", code=code, cap=int(mc9.group(1)))
     mc8 = (re.search(r"spans \d+ blocks.{0,80}?but only (\d{1,7}) are allowed", low) or re.search(r"\brange \d+ exceeds limit of (\d{1,7})", low)
@@ -3556,7 +3556,7 @@ class Progress:
                 finally:
                     fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
         except Exception as _cg9:  # noqa: BLE001 [fallback]
-            calcguard.swallowed("bf_engine:Progress.prune", _cg9)
+            calcguard.swallowed("bf_engine:Progress.prune", _cg9, expected=True)
             return 0
 
     def flush(self):

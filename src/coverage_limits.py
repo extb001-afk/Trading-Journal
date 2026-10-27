@@ -8,6 +8,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import logs, paths, seeds, statefile
+import autofix
 import db as dbm
 
 SCHEMA_VERSION = 1
@@ -33,8 +34,9 @@ CHAIN_TRACKS = {
                "reason_ko": "blockscout 로 체인 시작부터 조회 가능"},
     "zksync": {"track": "blockscout_v2", "label": "zkSync Era", "genesis": "2023-03-24", "limit_kind": "none",
                "reason_ko": "blockscout 로 체인 시작부터 조회 가능"},
-    "robinhood": {"track": "rpc_getlogs", "label": "Robinhood Chain", "genesis": "2026-07-01", "limit_kind": "none",
-                  "reason_ko": "2026-07 메인넷 — 그 이전 이력 자체가 없어요"},
+    "robinhood": {"track": "rpc_getlogs", "label": "Robinhood Chain", "genesis": "2026-07-01", "limit_kind": "state_recent",
+                  "reason_ko": "2026-07 메인넷 — 그 이전 이력 자체가 없어요. 공개 노드(무키)는 과거 블록 상태를 약 10분만 보관해서 "
+                               "옛 시점 네이티브 잔고는 못 물어보고 지금 잔고로 대조해요(로그 없는 옛 네이티브 입금 시점 = 원가 미확인)"},
     "arc": {"track": "rpc_getlogs", "label": "Arc", "genesis": "2026-09-14", "fixed_start": "2026-09-14", "limit_kind": "none",
             "reason_ko": "2026-09-16 공개 메인넷 — 봇은 출시 직전 블록(2026-09-14)부터 추적해요. 그 이전 이력은 없어요"},
     "xlayer": {"track": "rpc_getlogs", "label": "X Layer", "genesis": None, "fixed_start": "2026-09-28", "limit_kind": "archive_only",
@@ -72,8 +74,13 @@ CHAIN_TRACKS = {
 ROLLING_DAYS = {("bybit", "spot_fills"): 730, ("bybit", "futures_fills"): 730, ("bybit", "futures_pnl"): 730,
                 ("bybit", "transaction_log"): 730, ("bybit", "loans"): 730,
                 ("okx", "spot_fills"): 120, ("okx", "futures_fills"): 120, ("okx", "bills"): 120,
-                ("binance", "futures_fills"): 180}
+                ("binance", "futures_fills"): 180,
+                ("binance", "futures_income"): 364}
 OKX_CAL = {("okx", "spot_fills"), ("okx", "futures_fills"), ("okx", "bills")}
+ROLLING_REASON = {("binance", "futures_income"): "바이낸스 선물 손익(income: 실현손익·수수료·펀딩비)은 봇이 최근 약 1년(364일)까지만 거슬러 받아요 — "
+                                                 "그보다 옛 선물 손익은 빠지고 잔고 차이는 대사가 맞춰요"}
+BOT_LIMIT_NOTE = {("okx", "bills"): "평시 이어받기(유닛이 오래 멈춘 뒤)는 최근 89일까지만 받아요 — 정산 공백이 3개월을 넘으면 그 앞은 빠져요(경고 로그) · "
+                                     "과거 창 채움은 달력 한도(3개월 전 달 1일)까지"}
 
 BOT_CAPS = [
     ("exchange:upbit:deposits", "업비트 입금·출금", "봇이 1분마다 최신순으로 수집 시작일까지 전부 다시 넘겨요 — 수집 기간이 길수록 매 분 조회가 늘고, 페이지 상한에 먼저 닿으면 그 회차는 보류(다음 분 재시도)돼 "
@@ -89,6 +96,8 @@ BOT_CAPS = [
     ("exchange:okx:bills_archive", "OKX 옛 체결", "약 4개월(3개월 전 달 1일) 이전 OKX 체결은 API 가 주지 않고, OKX 웹/분기별 정산 아카이브(신청 후 CSV 다운로드)로만 "
      "볼 수 있어요 — 봇은 이 신청·다운로드를 하지 않아요(의도적으로 지원 안 함). 그 기간에 OKX 에서 산 코인이 아직 있거나 다른 곳으로 옮겨졌다면 "
      "원가 미확인으로 보여요 → " + FIX_HINT),
+    ("exchange:okx:margin_fills", "OKX 마진 체결", "봇은 OKX 현물 체결(instType=SPOT)만 받아요 — 마진 계정 체결(자동 차입 매수·매도 등)은 기록하지 않고, "
+     "그 쿼트·코인 수량 차이는 대사가 잔고 차이로 맞춰요(원가 미확인). 보존 기한은 현물과 같은 달력 3개월"),
     ("exchange:hyperliquid:spot_fills", "Hyperliquid 현물", "Hyperliquid API 는 체결을 최근 1만 건까지만 줘요 — 그보다 옛 체결, 볼트(HLP 등) 예치 잔고"
      "(넣고 뺀 기록만 입출금으로 보여요), 무기한 실현 손익·펀딩(현금 USDC 잔고 변화)은 대사가 잔고 차이로 맞춰요(원가 미확인). "
      "무기한 포지션·손익은 선물 화면(표시 전용) · 아비트럼 출금은 HL 이 아비트럼 txid 를 주지 않아 금액·시간으로만 이어져요"),
@@ -306,7 +315,29 @@ def api_limits_markdown(t=None) -> str:
     return "\n".join(L).rstrip() + "\n"
 
 
-def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
+def _venue_gap_rows(db, ex, now, st_ex, t0, gap_fn=None):
+    try:
+        got = (gap_fn or autofix.venue_gap)(db, ex, int(now), st_ex=st_ex, t0=t0)
+    except Exception:  # noqa: BLE001 [optional]
+        return []
+    out = []
+    for g in got or []:
+        try:
+            start, until, kind = int(g["t0"]), int(g["full_t0"]), str(g.get("kind") or "")
+        except (KeyError, TypeError, ValueError):
+            continue
+        if until <= start:
+            continue
+        lab = ex_label(ex, kind)
+        out.append({"source_id": f"exchange:{ex}:{kind}", "label": lab + " 빈 구간", "before": _d(until), "from": _d(start),
+                    "severity": "partial", "venue_gap": True,
+                    "reason_ko": (f"{lab} 기록은 {_d(until)}부터만 있어요(보존 기한) — 수집 창 시작 {_d(start)}부터 그 사이는 다른 기록(입출금 등)만 있는 빈 구간이에요. "
+                                  "그 구간 매매로 생긴 잔고 차이는 대사가 맞추고, 계산으로 닫을 수 있으면 자동 처리해요"
+                                  + (f" · {g['why']}" if g.get("why") else ""))})
+    return out
+
+
+def build(base=None, exl_path=None, speed_path=None, now=None, conn=None, gap_fn: object = None):
     st = os.path.join(base, "state") if base else paths.STATE_DIR
     cfg = _rj(os.path.join(base, "config.json") if base else paths.CONFIG_PATH, {}) or {}
     base = base or paths.BASE_DIR
@@ -320,6 +351,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
     exl = (_rj(exl_path, {}) if exl_path else seeds.seed_json("coverage/exchange_limits.json", {}, base_dir=base)) or {}
     speed = (_rj(speed_path, {}) if speed_path else seeds.seed_json("coverage/speed_model.json", {}, base_dir=base)) or {}
     other_speed = _rj(os.path.join(st, "chain_backfill_speed.json"), None)
+    exf = _rj(os.path.join(st, "exf_state.json"), {}) or {}
     db = conn or dbm.connect(paths.sqlite_ro_uri(os.path.join(st, 'ledger.db')), uri=True, timeout=10)
     try:
         wallets = {}
@@ -336,6 +368,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
             n_open = db.execute("SELECT count(*) FROM postings WHERE leg_kind='opening'").fetchone()[0]
         except sqlite3.Error:
             n_open = None
+        vgaps = {ex: _venue_gap_rows(db, ex, now, exf.get(ex), tgt, gap_fn) for ex in sorted(exf) if isinstance(exf.get(ex), dict)}
     finally:
         if conn is None:
             db.close()
@@ -460,7 +493,6 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
                 if d9 and (not w9.get("achieved_start") or d9 > str(w9["achieved_start"])):
                     w9["achieved_start"] = d9
                 w9["records_reach_start"] = False
-    exf = _rj(os.path.join(st, "exf_state.json"), {}) or {}
     upo = _rj(os.path.join(st, "upbit_orders_state.json"), {}) or {}
     for ex, fams in sorted((exl.get("exchanges") or {}).items()):
         if ex != "upbit" and ex not in exf:
@@ -491,6 +523,7 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
                 src["earliest_retrievable"] = _d(okx_floor(now) if (ex, fam) in OKX_CAL else now - rd * 86400)
             if rd and ach and src["earliest_retrievable"] and ach < src["earliest_retrievable"]:
                 src["achieved_start"] = ach = src["earliest_retrievable"]
+            src.update({"bot_limit_ko": BOT_LIMIT_NOTE[(ex, fam)]} if (ex, fam) in BOT_LIMIT_NOTE else {})
             if fam in ("spot_fills", "krw_fills"):
                 if ext.get("fills_limit"):
                     src["bot_limit_ko"] = logs.redact_secret_text(str(ext["fills_limit"]))[:200]
@@ -512,23 +545,19 @@ def build(base=None, exl_path=None, speed_path=None, now=None, conn=None):
                 before9 = _d(okx_floor(now)) if (ex, fam) in OKX_CAL else (_d(now - rd * 86400) if rd else v.get("rejected_before"))
                 unavailable.append({"source_id": src["id"], "label": ex_label(ex, fam), "before": before9,
                                     "rolling_days": rd, "rolling_kind": "calendar_month" if (ex, fam) in OKX_CAL else ("days" if rd else None),
-                                    "severity": "hard", "reason_ko": v.get("reason_ko")})
+                                    "severity": "hard", "reason_ko": ROLLING_REASON.get((ex, fam)) or v.get("reason_ko")})
             elif v.get("bot_uses") is False and "권한" in (v.get("reason_ko") or ""):
                 unavailable.append({"source_id": src["id"], "label": ex_label(ex, fam), "before": None,
                                     "severity": "no_permission", "reason_ko": v.get("reason_ko")})
             elif v.get("bot_uses") is False and v.get("reason_ko") and not noise and v.get("account_earliest_seen"):
                 unavailable.append({"source_id": src["id"], "label": ex_label(ex, fam), "before": None,
                                     "severity": "not_collected", "reason_ko": v.get("reason_ko")})
+    unavailable.extend(g for gl in vgaps.values() for g in gl)
     active_ex = {"upbit"} | set(exf)
     for sid, lab, why in BOT_CAPS:
         if sid.split(":")[1] in active_ex:
             unavailable.append({"source_id": sid, "label": lab, "before": None, "severity": "bot_cap", "reason_ko": why})
-    reasons = []
-    for code, txt in COST_UNKNOWN_REASONS:
-        r = {"code": code, "reason_ko": txt}
-        if code == "pre_window_holding":
-            r["count"] = n_open
-        reasons.append(r)
+    reasons = [dict({"code": code, "reason_ko": txt}, **({"count": n_open} if code == "pre_window_holding" else {})) for code, txt in COST_UNKNOWN_REASONS]
     active_chains = sorted(ch for ch in wallets if ch in CHAIN_TRACKS)
     try:
         import chain_registry

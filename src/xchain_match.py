@@ -1,5 +1,6 @@
 """Cross-chain bridge transfer matching."""
 import calendar
+import io
 import json
 import os
 import time
@@ -52,6 +53,11 @@ REL_SOLVER = Decimal("0.03")
 ABS_STABLE = Decimal("1")
 WINDOW = 3600
 WINDOW_BRIDGE = 6 * 3600
+DENY_SEC = 6 * 3600
+LOG_CAP_SEC = 6 * 3600
+_LOG_CAP = {}
+_LOG_CAP_AT = {}
+_DENY = {}
 
 
 def D(x) -> Decimal:
@@ -718,6 +724,21 @@ class Paused(Budget):
     pass
 
 
+class Denied(urllib.error.HTTPError):
+
+    def __init__(self, url, msg):
+        super().__init__(url, 403, msg, None, io.BytesIO(b""))
+
+
+def _log_span(method, params):
+    if method != "eth_getLogs" or not params or not isinstance(params[0], dict):
+        return 0
+    try:
+        return int(params[0]["toBlock"], 16) - int(params[0]["fromBlock"], 16) + 1
+    except (KeyError, TypeError, ValueError):
+        return 0
+
+
 class Tracer:
 
     def __init__(self, cfg, cache, ledger, seed, px=None, budget=300, sleep=0.35, log=None, anchors=None, skip_gids=None, cex=None):
@@ -755,7 +776,7 @@ class Tracer:
                     raise RuntimeError(f"rpc {method}: 응답 형식 오류 ({type(d).__name__})")
                 if "error" in d:
                     ce9 = _bfe9.classify_rpc_error(d["error"])
-                    raise _bfe9.NetError(str(d["error"])[:200], ce9.kind, code=ce9.code)
+                    raise _bfe9.NetError(str(d["error"])[:200], ce9.kind, code=ce9.code, cap=ce9.cap)
                 return d.get("result")
             with _bfe9.sol_open(req, timeout, method, sol=("_" not in str(method))) as r:
                 d = json.loads(net_http.read_capped(r).decode())
@@ -773,6 +794,11 @@ class Tracer:
             raise Budget()
         self.calls += 1
         req = net_http.request(url, headers={"User-Agent": "tj-bot/0.1 (personal trade journal)", "Accept": "application/json"})
+        branch = netpace.cool_key(url)
+        deny_until = _DENY.get(branch)
+        if deny_until and deny_until > time.time():
+            self.calls -= 1
+            raise Denied(url, f"Forbidden — {branch} 최근 403 기억({int((deny_until - time.time()) // 60)}분 남음 · 호출 안 함)")
         try:
             netpace.wait(url)
         except netpace.Cooldown as e:
@@ -783,6 +809,8 @@ class Tracer:
         except urllib.error.HTTPError as e:
             if netpace.note_error(url, e):
                 raise Paused(f"{netpace.host_of(url)} 429") from e
+            if e.code == 403 and "blockscout" in branch:
+                _DENY[branch] = time.time() + DENY_SEC
             raise
         finally:
             time.sleep(self.sleep)
@@ -811,7 +839,15 @@ class Tracer:
     def _evm(self, chain, method, params, logs=False):
         err = None
         errs = []
+        span = _log_span(method, params)
         for u in self._evm_urls(chain, logs):
+            known_cap = _LOG_CAP.get(u) if span else None
+            if known_cap and time.time() - _LOG_CAP_AT.get(u, 0) >= LOG_CAP_SEC:
+                known_cap = None
+            if known_cap and span > known_cap:
+                err = RuntimeError(f"rpc-error -32602: block range too large — {netpace.host_of(u)} getLogs 상한 {known_cap} 블록 < 요청 {span} 블록(기억 · 호출 안 함)")
+                errs.append(err)
+                continue
             try:
                 r = self._post(u, method, params)
                 if r is None and method != "eth_getLogs":
@@ -825,6 +861,11 @@ class Tracer:
                 calcguard.swallowed("xchain_match:Tracer._evm", e)
                 err = e
                 errs.append(e)
+                net_err = getattr(e, "net", None) or e
+                got_cap = getattr(net_err, "cap", None)
+                if span and getattr(net_err, "kind", None) == "range" and isinstance(got_cap, int) and not isinstance(got_cap, bool) and 0 < got_cap < span:
+                    _LOG_CAP[u] = got_cap
+                    _LOG_CAP_AT[u] = time.time()
         ex = RuntimeError(f"{chain} {method}: {err}")
         ex.errs = errs or ["엔드포인트 없음"]
         raise ex

@@ -49,6 +49,9 @@ REGISTRY = (
               ("core_recon.ReconMixin.recon_pass",), "체인별(설정 chains 의 RPC 조회 체인 · 백필 끝 · 대사 도장 있음)", 0, _CARRY),
     Migration(8, "_exf_fut_place_once", "세대 1회", "exf_fut_place_v", "core_exf_fut.ExfFutMixin._exf_fut_place_once",
               ("core_exf.ExfMixin.exf_recon_pass", "tools/exf_fut_place._apply"), "세대 번호 ExfFutMixin.EXF_FUT_V · 도구 redo", 1, _CARRY),
+    Migration(9, "apply_cell", "데이터 1회", "autofix:<ex>:<SYM>", "autofix_apply.apply_cell",
+              ("tools/ledger_rowfix._run_autofix",), "칸마다(영수증·끄기 표식 없을 때 · core 경로 = autofix.enabled 만 — autofix_apply.core_pass)", 2,
+              "자동 행·영수증 이월 — rebuild2 가 opening 행을 그대로 다시 넣고(시각 모름 = 역산 안 함) meta 영수증·묘비·재파생 막음 표식을 가져감"),
 )
 
 STARTUP = tuple(m.n for m in REGISTRY if "migrate.startup" in m.callers)
@@ -62,6 +65,6 @@ def startup(core: "core.Core") -> None:  # noqa: F821
         try:
             call()
         except Exception as e:  # noqa: BLE001 [isolate]
-            calcguard.swallowed(m.guard, e)
+            calcguard.swallowed(m.guard, e, expected=calcguard.db_env(e))
             core.conn.rollback()
             log.error(m.fail_log, e)

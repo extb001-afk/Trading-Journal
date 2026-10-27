@@ -476,7 +476,7 @@ class DailyMixin:
         except Exception as e9:   # noqa: BLE001 [fallback]
             if hist9:
                 raise
-            calcguard.swallowed("view_daily:DailyMixin._daily_flows[krw_bank]", e9)
+            calcguard.swallowed("view_daily:DailyMixin._daily_flows[krw_bank]", e9, expected=calcguard.db_env(e9))
             vflow9 = None
             log.warning("일별 순유입: 원화 입출금(업비트·빗썸) 조회 실패: %s", e9)
         out = {}
@@ -672,7 +672,7 @@ class DailyMixin:
         try:
             krwb9 = [(t9, k9) for _e9, t9, k9, _i9 in type(self)._krw_bank_moves(conn, ("bithumb",))]
         except Exception as e9:   # noqa: BLE001 [fallback]
-            calcguard.swallowed("view_daily:DailyMixin._daily_attrib[krwb9]", e9)
+            calcguard.swallowed("view_daily:DailyMixin._daily_attrib[krwb9]", e9, expected=calcguard.db_env(e9))
             log.debug("자산 변동 분해: 빗썸 원화 입출금 조회 실패(종전대로): %s", e9)
             krwb9 = []
         krw_up_now = float(extra.get("krw_up") or 0)

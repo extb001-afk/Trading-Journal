@@ -472,7 +472,7 @@
       + '<div class="sx-card">' + sxGrp('과거 · 한계')
       + (bs ? sxIt('sx-data-hist', '과거 데이터 더 가져오기', '지금 <span class="num">' + esc(bs.windowStart) + '</span>부터 · 날짜 고르면 그 구간만', bs.rebuildRunning || arr(bs.jobs).some(j => j.phase !== 'done') ? sxPill('a', '진행 중') : '', { href: '#settings/data/history' }) : '')
       + sxIt('sx-data-lim', '수집 한계', limCap, sxPill('g', '하루 1회'), { href: '#settings/data/limits' })
-      + '<div class="sx-acts sx-pad"><button class="btn sm" data-a="reload">지금 새로고침</button><span class="cap">화면 데이터를 다시 불러와요</span></div></div>';
+      + '<div class="sx-acts sx-pad"><button class="btn sm" data-a="reload">지금 새로고침</button><span class="cap">화면 데이터를 다시 불러와요</span></div>' + '<div class="cap sx-pad" id="sx-data-bean">Beancount 내보내기(Fava로 열기) = 서버에서 <span class="mono">python3 tools/export_beancount.py --out tj.beancount</span> · 원장은 읽기만</div></div>';
   }
   const BF_LIM = [
     { ex: 'okx', t: 'OKX 체결은', at: n => new Date(n.getFullYear(), n.getMonth() - 3, 1) },
@@ -635,6 +635,7 @@
     add('data', '', '환율 · 김프', '환율 김프 usdt 매매기준율 fx', '#sx-data-fx');
     add('data', '', '온체인 잔고 대조', '잔고 대조 불일치 balance', '#sx-data-bc');
     add('data', '', '지금 새로고침', '새로고침 reload 다시 불러오기', '.sx [data-a="reload"]');
+    add('data', '', 'Beancount 내보내기', 'beancount fava 내보내기 export 원장', '#sx-data-bean');
     add('data', 'history', '과거 데이터 더 가져오기', '백필 backfill 과거 가져오기 날짜', '');
     add('data', 'limits', '수집 한계', '수집 한계 api 한도 누락 coverage', '');
     add('account', '', '로그인 · 비밀번호', '비밀번호 바꾸기 password 로그인 login', '#sx-acc-state');

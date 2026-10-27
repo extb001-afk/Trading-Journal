@@ -73,10 +73,16 @@ class DecMixin:
 
 
     def _dec_startup(self) -> None:
+        n_re = 0
+        for aid, sv in sorted(self._dec_pending_seen().items()):
+            cur = self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=? AND decimals IS NULL AND kind='token'", (sv, aid))
+            if cur.rowcount and self._renorm_asset(aid):
+                n_re += 1
         self._dec_issues_prune()
         try:
             rows = self.conn.execute("SELECT asset_id, chain, address, decimals FROM assets WHERE kind='token' AND address IS NOT NULL").fetchall()
         except sqlite3.Error:
+            self._renorm_done(n_re)
             return
         cand = {}
         for r in rows:
@@ -88,6 +94,7 @@ class DecMixin:
             elif int(r["decimals"]) != m9:
                 self._dec_issue(int(r["asset_id"]), "conflict", int(r["decimals"]), m9)
         if not cand:
+            self._renorm_done(n_re)
             return
         posted = set()
         ids = list(cand)
@@ -96,10 +103,29 @@ class DecMixin:
             posted |= {int(x[0]) for x in self.conn.execute(
                 "SELECT DISTINCT asset_id FROM postings WHERE asset_id IN (%s)" % ",".join("?" * len(ch)), ch).fetchall()}
         for aid, m9 in sorted(cand.items()):
-            if aid in posted and m9 != 18:
-                self._dec_issue(aid, "pending", None, m9)
-            else:
-                self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (m9, aid))
+            self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (m9, aid))
+            if aid in posted and self._renorm_asset(aid):
+                n_re += 1
+        self._renorm_done(n_re)
+
+    def _dec_pending_seen(self) -> dict:
+        d = _read_soft(self.DEC_ISSUES_PATH, None)
+        its = d.get("items") if isinstance(d, dict) and isinstance(d.get("items"), dict) else {}
+        out = {}
+        for k, it in its.items():
+            sv = it.get("seen") if isinstance(it, dict) else None
+            if not isinstance(it, dict) or it.get("kind") != "pending" or isinstance(sv, bool) or not isinstance(sv, int) or not 0 <= sv <= 77:
+                continue
+            try:
+                out[int(k)] = sv
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _renorm_done(self, n: int) -> None:
+        if n:
+            log.warning("자릿수 채움 재정규화 %d개 자산 — 표시 수량 정정(원장 무변 · 재구축 불필요)", n)
+            self._renorm_info = {"n": int(n), "ts": int(time.time())}
 
     def _dec_issues_prune(self) -> None:
         try:
@@ -151,8 +177,9 @@ class DecMixin:
                                  " AND EXISTS (SELECT 1 FROM postings p WHERE p.asset_id=a.asset_id)").fetchall()
         iss = _read_soft(self.DEC_ISSUES_PATH, {}) or {}
         its = iss.get("items") if isinstance(iss, dict) and isinstance(iss.get("items"), dict) else {}
-        prev = _read_soft(self.DEC_WAIT_PATH, {}) or {}
-        prev = prev.get("items") if isinstance(prev, dict) and isinstance(prev.get("items"), dict) else {}
+        prev0 = _read_soft(self.DEC_WAIT_PATH, {}) or {}
+        prev = prev0.get("items") if isinstance(prev0, dict) and isinstance(prev0.get("items"), dict) else {}
+        ren = self.__dict__.get("_renorm_info") or (prev0.get("renorm") if isinstance(prev0, dict) and isinstance(prev0.get("renorm"), dict) else None)
         nodec = {}
         items = {}
         for r in rows:
@@ -168,8 +195,11 @@ class DecMixin:
             since = old.get("since") if isinstance(old.get("since"), (int, float)) and not isinstance(old.get("since"), bool) else int(now)
             items[k] = {"chain": ch, "address": r["address"], "symbol": r["symbol"], "since": int(since),
                         "est": bool(isinstance(ent, dict) and ent.get("perm"))}
-        if items != prev or not os.path.exists(self.DEC_WAIT_PATH):
-            statefile.atomic_write_json(self.DEC_WAIT_PATH, {"ts": int(now), "items": items})
+        doc = {"ts": int(now), "items": items}
+        if ren:
+            doc["renorm"] = ren
+        if items != prev or ren != (prev0.get("renorm") if isinstance(prev0, dict) else None) or not os.path.exists(self.DEC_WAIT_PATH):
+            statefile.atomic_write_json(self.DEC_WAIT_PATH, doc)
         return len(items)
 
     DEC_REQ_PATH = paths.StatePath("decimals_resolve_request.json")

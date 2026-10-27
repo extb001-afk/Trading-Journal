@@ -29,6 +29,8 @@ TON1_F = ac.ton_friendly(TON1, bounceable=False)
 DESC = btc_descriptor.descriptor_from_xpub(N.BTC_XPUB, "wpkh")
 BTC_A = reg.btc_source({"mode": "address", "address": N.BTC_ADDR})["key"]
 BTC_HD = reg.btc_source({"mode": "descriptor", "descriptor": DESC})["key"]
+BTC_ADDR2 = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
+BTC_A2 = reg.btc_source({"mode": "address", "address": BTC_ADDR2})["key"]
 CFG_PATH = os.path.join(T.TMP, "config.json")
 cfg = json.load(open(CFG_PATH))
 cfg["wallets"] = [dict(w, chain=w.get("chain") or ("sol" if w.get("type") == "sol" else "eth")) for w in cfg["wallets"]]
@@ -36,7 +38,8 @@ cfg["chain_wallets"] = [{"chain": "tron", "address": TR1_D},
                         {"chain": "sui", "address": SUI1, "label": "SuiOne"},
                         {"chain": "ton", "address": ac.ton_friendly(TON1)},
                         {"chain": "btc", "mode": "address", "address": N.BTC_ADDR, "label": "콜드"},
-                        {"chain": "btc", "mode": "descriptor", "descriptor": DESC, "label": "HdOne"}]
+                        {"chain": "btc", "mode": "descriptor", "descriptor": DESC, "label": "HdOne"},
+                        {"chain": "btc", "mode": "address", "address": BTC_ADDR2}]
 json.dump(cfg, open(CFG_PATH, "w"))
 c = core.Core(config.load_config())
 
@@ -49,7 +52,8 @@ feed("tron", [N.rec("tron", "d1" * 32, TS, [(TR1, "native", 3_000_000)])])
 feed("sui", [N.rec("sui", "Sx9" + "b" * 40, TS + 100, [(SUI1, "native", 5_000_000_000)])])
 H_TON = "e2" * 32
 feed("ton", [N.rec("ton", TON1 + ".7." + H_TON, TS + 200, [(TON1, "native", 7_000_000_000)], txhash=H_TON)])
-feed("btc", [N.rec("btc", "e3" * 32, TS + 300, [(BTC_A, "native", 10_000)]), N.rec("btc", "e4" * 32, TS + 400, [(BTC_HD, "native", 20_000)])])
+feed("btc", [N.rec("btc", "e3" * 32, TS + 300, [(BTC_A, "native", 10_000)]), N.rec("btc", "e4" * 32, TS + 400, [(BTC_HD, "native", 20_000)]),
+                N.rec("btc", "e5" * 32, TS + 500, [(BTC_A2, "native", 30_000)])])
 c.conn.commit()
 c.conn.close()
 
@@ -107,12 +111,15 @@ ba = [lc for lc in bt if lc.get("w") == "콜드 지갑"]
 bh = [lc for lc in bt if lc.get("w") == "HdOne 지갑"]
 check("H4 BTC 단일 주소 = 'Bitcoin · bc1q…' 줄임(지갑 id 없음)", ba and all(lc.get("sub") == f"Bitcoin · {N.BTC_ADDR[:6]}…{N.BTC_ADDR[-4:]}" for lc in ba), bt)
 check("H4 BTC HD = 'Bitcoin' 만(디스크립터·지갑 id 줄임 없음)", bh and all(lc.get("sub") == "Bitcoin" for lc in bh), bt)
-keys9 = (TR1, TON1, BTC_A, BTC_HD)
+keys9 = (TR1, TON1, BTC_A, BTC_HD, BTC_A2)
 leak = [lc for lc in locs if any(k9[:6] in str(lc.get("sub")) or k9[:8] in str(lc.get("w")) for k9 in keys9)]
 check("H2~H4 보유 줄 어디에도 원장 키 조각 없음", not leak, leak)
 vw = VW.get("fn")
 vn = [vw(f"wallet:{ch9}:{k9}") for ch9, k9 in (("tron", TR1), ("ton", TON1), ("btc", BTC_A), ("btc", BTC_HD), ("sui", SUI1))] if vw else []
 check("H5 보관처 이름 = 보유 줄 이름(원장 키 조각 없음)", vn == [f"{TR1_D[:8]} 지갑", f"{TON1_F[:8]} 지갑", "콜드 지갑", "HdOne 지갑", "SuiOne 지갑"], vn)
+b2 = [lc for lc in bt if lc.get("sub") == f"Bitcoin · {BTC_ADDR2[:6]}…{BTC_ADDR2[-4:]}"]
+check("H5b 이름 없는 BTC 단일 주소 = 보관처 이름 = 보유 줄 이름(bc1… · 지갑 id 조각 없음)",
+      bool(vw) and len(b2) == 1 and vw(f"wallet:btc:{BTC_A2}") == b2[0].get("w") == f"{BTC_ADDR2[:8]} 지갑", [vw(f"wallet:btc:{BTC_A2}") if vw else None, b2])
 st_txt = json.dumps(st, ensure_ascii=False, default=str)
 check("H4 디스크립터·xpub 원문이 화면 상태에 없음", N.BTC_XPUB[4:40] not in st_txt)
 

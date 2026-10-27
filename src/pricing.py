@@ -129,6 +129,8 @@ CG_DAY_CAP = 200
 _CG_PACE = {"last": 0.0, "day": "", "n": 0}
 _CG_PACE_LOCK = threading.Lock()
 _CG_MEM = {}
+CG_404_SEC = 6 * 3600
+_CG_404 = {}
 
 
 def _key_h(k) -> int:
@@ -214,6 +216,9 @@ def cg_points_day(key, url_base, day0, store=None, keyed=False):
     m = _CG_MEM.get(dk)
     if m and time.time() - m[0] < 600:
         return m[1]
+    t404 = _CG_404.get(key)
+    if t404 is not None and time.time() - t404 < CG_404_SEC:
+        return []
     url = f"{url_base}/market_chart/range?vs_currency=usd&from={int(day0) - 3600}&to={int(day0) + 86400 + 3600}"
     kind, kv = _cg_keyed(url, "past", keyed, cg_body_ok)
     try:
@@ -232,10 +237,12 @@ def cg_points_day(key, url_base, day0, store=None, keyed=False):
         if e.code != 404:
             return None
         pts = []
+        _CG_404[key] = time.time()
     except Exception as e:   # noqa: BLE001 [fallback]
         calcguard.swallowed("pricing:cg_points_day", e)
         if getattr(e, "code", None) == 404 and getattr(e, "kind", "") == "http4xx":
             pts = []
+            _CG_404[key] = time.time()
         else:
             return None
     if store is not None and int(day0) + 86400 + 7200 < time.time():
@@ -280,10 +287,24 @@ CANDLE_ORDER = (("binance", _c_binance), ("bybit", _c_bybit),
                 ("coingecko", _c_coingecko))
 
 
+UPBIT_NOMKT_SEC = 3600
+_UPBIT_NOMKT = {}
+
+
 def _upbit_krw_minute(sym: str, ms: int) -> float | None:
     from datetime import datetime, timezone
+    started = time.time()
+    t404 = _UPBIT_NOMKT.get(sym)
+    if t404 is not None and started - t404 < UPBIT_NOMKT_SEC and (ms // 60_000 + 1) * 60 <= t404:
+        return None
     to_s = datetime.fromtimestamp(ms / 1000 + 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-{urllib.parse.quote(sym, safe='')}&to={to_s}&count=30")
+    try:
+        arr = _gj(f"https://api.upbit.com/v1/candles/minutes/1?market=KRW-{urllib.parse.quote(sym, safe='')}&to={to_s}&count=30")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            _UPBIT_NOMKT[sym] = started
+        raise
+    _UPBIT_NOMKT.pop(sym, None)
     best = None
     for c in arr or []:
         ts = datetime.strptime(c["candle_date_time_utc"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000
@@ -1720,6 +1741,40 @@ def okx_headers(creds: dict, method: str, path: str, body: str):
             "User-Agent": _UA["User-Agent"], "Accept": "application/json"}
 
 
+OKX_OFF_SEC = 6 * 3600
+_OKX_OFF = {}
+
+
+def _okx_fp(creds: dict) -> str:
+    import hashlib
+    return hashlib.sha256("\x00".join(str(creds.get(k) or "") for k in ("key", "secret", "passphrase")).encode()).hexdigest()[:16]
+
+
+def _okx_skip(key_fp: str) -> bool:
+    o = dict(_OKX_OFF)
+    return bool(o) and o.get("fp") == key_fp and time.time() < o["until"]
+
+
+def _okx_off_note(e, key_fp: str) -> bool:
+    if not (isinstance(e, urllib.error.HTTPError) and e.code in (401, 403)):
+        return False
+    t_off = time.time()
+    _OKX_OFF.clear()
+    _OKX_OFF.update(until=t_off + OKX_OFF_SEC, at=t_off, why=f"HTTP {e.code}", fp=key_fp)
+    return True
+
+
+def okx_off_state(now: float = None) -> dict:
+    t = time.time() if now is None else now
+    o = dict(_OKX_OFF)
+    return {"until": int(o["until"]), "at": int(o["at"]), "why": o["why"]} if o and o["until"] > t else {}
+
+
+def okx_off_part() -> dict:
+    st = okx_off_state()
+    return {"okx_off": st} if st else {}
+
+
 def okx_dex_prices(creds: dict, pairs: list) -> dict:
     items = []
     back = {}
@@ -1735,6 +1790,9 @@ def okx_dex_prices(creds: dict, pairs: list) -> dict:
         back_low[lk] = (ch, ca) if back_low.get(lk, (ch, ca)) == (ch, ca) else None
         chains_used.add(ch)
     if not items:
+        return {}
+    key_fp = _okx_fp(creds)
+    if _okx_skip(key_fp):
         return {}
     out = {}
     for i in range(0, len(items), 90):
@@ -1758,7 +1816,10 @@ def okx_dex_prices(creds: dict, pairs: list) -> dict:
                     d = json.loads(net_http.read_capped(r).decode())
             except Exception as _cg9:  # noqa: BLE001 [isolate]
                 calcguard.swallowed("pricing:okx_dex_prices", _cg9)
+                if _okx_off_note(_cg9, key_fp):
+                    return out
                 continue
+            _OKX_OFF.clear()
             if str(d.get("code")) != "0":
                 continue
             rows = d.get("data") or []

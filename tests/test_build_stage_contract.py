@@ -11,11 +11,11 @@ import os  # noqa: E402
 
 chk = T.chk
 BS = "_bs9"
-STAGES = (("view_b_replay", "_replay_prep"), ("view_b_replay", "_replay_rt"), ("view_b_replay", "_replay_links"),
+STAGES = (("view_b_replay", "_replay_prep"),
           ("view_b_replay", "_replay_main"), ("view_b_cards", "_build_cards"), ("view_b_pendings", "_build_pendings"),
           ("view_b_outflows", "_build_outflows"), ("view_b_daily", "_build_daily"), ("view_b_futidx", "_build_futidx"),
           ("view_b_tail", "_build_tail"))
-N_REPLAY = 4
+N_REPLAY = 2
 ON_BOUNDARY = True
 ON_WRITES = True
 ALLOWED = {
@@ -192,9 +192,58 @@ chk(dict(counts) == ALLOWED, "K1 머리 풀기·재적재 밖 이름표 읽기·
 
 prep = STS[0]
 last = body_of(prep.fn)[-1]
-chk(isinstance(last, ast.Return) and isinstance(last.value, ast.Call) and getattr(last.value.func, "id", "") == "dict"
-    and isinstance(last.value.args[0], ast.Call) and getattr(last.value.args[0].func, "id", "") == "locals",
-    "K2 _replay_prep 은 return dict(locals()) 로 끝남(이름표 시작)")
+
+
+def _kw_export(call):
+    if not isinstance(call, ast.Call) or call.args or not call.keywords:
+        return None
+    def _same(k):
+        if isinstance(k.value, ast.Name):
+            return k.value.id == k.arg
+        f9 = k.arg[1:] if k.arg.startswith("_") else k.arg
+        f9 = f9[:-1] if f9.endswith("9") else f9
+        return isinstance(k.value, ast.Attribute) and getattr(k.value.value, "id", "") == "lko" and k.value.attr == f9
+    if any(k.arg is None or not _same(k) for k in call.keywords):
+        return None
+    return {k.arg for k in call.keywords}
+
+
+pb = body_of(prep.fn)
+mk = pb[-2] if len(pb) >= 2 and isinstance(pb[-2], ast.If) else None
+od = pb[-3] if mk is not None else pb[-2]
+prep_exp = _kw_export(od.value) if (isinstance(od, ast.Assign) and getattr(od.value.func, "id", "") == "dict"
+                                    and [t.id for t in od.targets if isinstance(t, ast.Name)] == ["scope_out"]) else None
+if prep_exp is not None and mk is not None:
+    b0 = mk.body[0] if len(mk.body) == 1 else None
+    ok9 = (isinstance(b0, ast.Assign) and isinstance(b0.targets[0], ast.Subscript) and getattr(b0.targets[0].value, "id", "") == "scope_out"
+           and isinstance(b0.targets[0].slice, ast.Constant) and isinstance(b0.value, ast.Name) and b0.value.id == b0.targets[0].slice.value)
+    prep_exp = (prep_exp | {b0.value.id}) if ok9 else None
+chk(prep_exp is not None and isinstance(last, ast.Return) and getattr(last.value, "id", "") == "scope_out"
+    and not any(isinstance(y, ast.Call) and getattr(y.func, "id", "") == "locals" for y in ast.walk(prep.fn)),
+    "K2 _replay_prep 은 명시 내보내기 scope_out = dict(x=x, …) 로 끝남(이름표 시작 · locals() 0 · 지시서 #3 단계 5)")
+exp_of = {prep.name: prep_exp or set()}
+for s in STS[1:N_REPLAY]:
+    ups = [st for st in body_of(s.fn) if is_update(st)]
+    e9 = _kw_export(ups[0].value) if len(ups) == 1 else None
+    chk(e9 is not None and not any(isinstance(y, ast.Call) and getattr(y.func, "id", "") == "locals" for y in ast.walk(s.fn)),
+        "K2 %s 꼬리 = 명시 내보내기 _bs9.update(x=x, …) 하나(locals() 0)" % s.name)
+    exp_of[s.name] = e9 or set()
+import accounting_books as AB  # noqa: E402
+import accounting_ctx as AC  # noqa: E402
+have, miss_e = set(), []
+for s in STS[:N_REPLAY]:
+    if s.i:
+        need9 = {"ctx" if k.startswith("ctx.") else k for _t, k in s.pairs} | {k for k, _ok, _st in s.reloads}
+        need9 |= {n for y in ast.walk(s.fn) if isinstance(y, ast.Call) and getattr(y.func, "attr", "") == "check_pool_aliases"
+                  and getattr(y.args[0], "id", "") == BS for n in y.args[1].value.split()}
+        miss_e += ["%s ← %s" % (s.name, k) for k in sorted(need9 - have)]
+    have |= exp_of[s.name]
+fin9 = {AB.OLD.get(f, f) for f in AB._CONTRACT} | {"cb", "px", "gstate"} | set(AB.Books.names()) | set(AC.ReplayCtx.names())
+for tab in (AC.INJECT, AC.LATE_WIRES, AC.ALIASES, AC.HELD):
+    fin9 |= {"self" if n == "sb" else n for names in tab.values() for n in names}
+fin9 |= {bv for ents in AC.INPUTS.values() for bv, _p in ents} | {loc for ents in AC.INPUTS.values() for _b, pairs in ents for _f, loc in pairs}
+miss_e += ["경계·엄격 끝 ← %s" % k for k in sorted(fin9 - have)]
+chk(not miss_e, "K2 명시 내보내기 완전: 뒤 단계 머리 풀기·재적재 ⊆ 앞 내보내기 · 경계·엄격 끝 검사 이름 ⊆ 내보내기 합(%d)" % len(have), miss_e[:20])
 shape = []
 for s in STS[1:]:
     if s.h is None:

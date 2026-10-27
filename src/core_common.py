@@ -11,6 +11,13 @@ class MissingTs(ValueError):
     pass
 
 
+class MissingDecimals(ValueError):
+    pass
+
+
+POS_PROVISIONAL_DEC = 18
+
+
 CLASSIFIER_VER = 5
 
 

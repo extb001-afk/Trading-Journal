@@ -8,6 +8,9 @@ NAME = "leverage.json"
 V = 1
 NOPERM_COOL_SEC = 3600
 DENY_COOL_SEC = 6 * 3600
+KEYPERM_COOL_SEC = DENY_COOL_SEC
+KEYPERM_SIGS = ("does not have futures permission", "does not have unified permission", "does not have margin permission",
+                "does not have permission", "doesn't have permission")
 CACHE_TTL = 24 * 3600
 CACHE_KEEP = 7 * 24 * 3600
 STALE_DROP = 3 * 24 * 3600
@@ -428,11 +431,12 @@ class Run:
             self.items.extend(its)
             return self._row(ex, product, "ok", endpoints, note=note, n=len(its), measured_at=self.now)
         except Exception as e:   # noqa: BLE001 [fallback]
-            calcguard.swallowed("leverage:Run.run", e)
+            calcguard.swallowed("leverage:Run.run", e, expected=isinstance(e, Unknown))
             st, msg = classify(e)
-            retry = None
+            retry, keyperm = None, False
             if st == "no_permission":
-                retry = self.now + NOPERM_COOL_SEC
+                keyperm = any(sig in msg.lower() for sig in KEYPERM_SIGS)
+                retry = self.now + (KEYPERM_COOL_SEC if keyperm else NOPERM_COOL_SEC)
             elif st == "not_opened":
                 retry = self.now + DENY_COOL_SEC
             elif st == "rate_limited":
@@ -443,6 +447,8 @@ class Run:
                     "not_opened": "상품 미개설 — 차입·포지션 없음(6시간마다 다시 확인)",
                     "rate_limited": "API 한도 백오프 중 — 다음 주기 재시도",
                     "error": "조회 실패 — 다음 주기 재시도(직전 값은 '낡음' 표시)"}.get(st)
+            if st == "no_permission" and keyperm:
+                note = "키 권한 없음(거래소: 이 키에 이 상품 권한이 없음) — 6시간마다 다시 확인 · 키에서 권한을 켜면 다음 확인 때 자동으로 다시 켜짐"
             return self._row(ex, product, st, endpoints, note=note, err=msg, n=len(carry),
                              measured_at=pp.get("measured_at"), retry_at=retry)
 
@@ -1281,7 +1287,7 @@ def gate(run: Run, g: dict, now: int):
     run.run(ex, "margin_cross", cross, ["GET /api/v4/margin/cross/accounts"])
     run.pace()
     row = run.run(ex, "unified", unified, ["GET /api/v4/unified/accounts"])
-    if row.get("status") == "no_permission":
+    if row.get("status") == "no_permission" and not str(row.get("note") or "").startswith("키 권한 없음"):
         row["note"] = "클래식 계정(통합계정 미사용)이거나 키 권한 없음 — 1시간마다 다시 확인"
     run.pace()
     run.run(ex, "loan", loan, ["GET /api/v4/loan/multi_collateral/orders", "GET /api/v4/loan/multi_collateral/ltv (대출 있을 때 · 하루 1번)"],

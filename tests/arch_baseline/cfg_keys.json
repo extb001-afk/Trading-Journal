@@ -67,7 +67,6 @@
    "hl_spot",
    "runner_fp",
    "sol_watch",
-   "tools.fix_dupsnap_1004",
    "upbit_link",
    "view_b_daily",
    "view_b_replay"
@@ -92,8 +91,6 @@
    "perp_dex",
    "runner_fp",
    "sol_watch",
-   "tools.fix_dupsnap_1004",
-   "tools.repair_anchor_ts",
    "tools.repair_onchain_balances",
    "upbit_link",
    "view_b_replay",
@@ -171,7 +168,6 @@
    "tools.gate_onchain",
    "tools.ledger_restore",
    "tools.negabs",
-   "tools.pretrace_hotfix_h",
    "tools.repair_onchain_balances",
    "tools.repair_partial_legs",
    "tools.repair_synth_nft",
@@ -200,7 +196,6 @@
    "core",
    "depaddr",
    "runner_fp",
-   "tools.fix_dupsnap_1004",
    "view_b_pendings",
    "view_index",
    "view_outflows",
@@ -238,7 +233,6 @@
    "core",
    "core_recon",
    "lpchain",
-   "tools.fix_dupsnap_1004",
    "tools.gate_onchain",
    "view_b_replay",
    "view_prov"
@@ -349,7 +343,6 @@
    "settings_wallets",
    "sol_watch",
    "token_discovery",
-   "tools.fix_dupsnap_1004",
    "tools.gate_onchain",
    "tools.ledger_restore",
    "tools.lp_enrich_sol",
@@ -388,7 +381,6 @@
    "evm_es",
    "evm_logdisc",
    "evm_rpcw",
-   "tools.fix_dupsnap_1004",
    "tools.gate_onchain",
    "tools.repair_wrap_legs",
    "tools.token_recheck"
@@ -774,6 +766,7 @@
   ],
   "web.bind": [
    "chk_collect",
+   "login_auth",
    "web"
   ],
   "web.login": [
@@ -932,6 +925,9 @@
   ],
   "config:apply_activity_gate|varkey|wrapped_native[c]": [
    "?"
+  ],
+  "config:autofix_enabled|varkey|<top>[sect]": [
+   "autofix"
   ],
   "config:exf_binance_dividends|varkey|<top>[sect]": [
    "exf"
@@ -1151,9 +1147,6 @@
   "tools.negabs:_urls|varkey|chains[chain]": [
    "?"
   ],
-  "tools.pretrace_hotfix_h:<module>|varkey|chains[ch]": [
-   "?"
-  ],
   "tools.repair_onchain_balances:chains_caught_up|varkey|chains[chain]": [
    "?"
   ],
@@ -1178,7 +1171,7 @@
   "tron_watch:TronAdapter.__init__|varkey|<top>[reg.CFG_CHAIN_KEY]": [
    "nonevm"
   ],
-  "view_b_replay:ReplayMixin._replay_main|varkey|native_symbol[c9]": [
+  "view_b_replay:_pos_prov|varkey|native_symbol[c]": [
    "?"
   ],
   "view_builder:StateBuilder._cfg_hot_refresh|varkey|<top>[k9]": [
@@ -1357,14 +1350,12 @@
   "discopen:Runner._my|whole|for in wallets",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][blocks_per_day]",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][blockscout]",
-  "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][conf_depth]",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][indexing_guard_scope]",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][indexing_status_guard]",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][rescan_overlap_blocks]",
   "evm_bscout:ChainWatcher.__init__|guard|cfg['chains'][chain][rpcs]",
   "evm_bscout:ChainWatcher.__init__|passout|backfill_months → float()",
   "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][blocks_per_day]",
-  "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][conf_depth]",
   "evm_es:EtherscanWatcher.__init__|guard|cfg['chains'][chain][rpcs]",
   "evm_es:EtherscanWatcher.__init__|passout|backfill_months → float()",
   "evm_logdisc:RpcLogDiscovery.__init__|passout|backfill_months → float()",
@@ -1497,12 +1488,6 @@
   "ton_watch:_floor|guard|cfg or {}[backfill_full_history]",
   "tools.allchains_enable:plan|guard|cfg[chain_sweep]",
   "tools.allchains_enable:seed_pairs|guard|cfg[wallets]",
-  "tools.arc_enable:main|guard|cfg[wallets]",
-  "tools.arc_enable:plan|guard|cfg[bsc]",
-  "tools.arc_enable:plan|guard|cfg[chains]",
-  "tools.arc_enable:plan|guard|cfg[native_symbol]",
-  "tools.arc_enable:plan|guard|cfg[wallets]",
-  "tools.arc_enable:status|guard|cfg[wallets]",
   "tools.backfill_gap:_bsc_nft_items|guard|cfg[bsc]",
   "tools.backfill_gap:_import_locked|guard|cfg[wallets]",
   "tools.backfill_gap:_receipt|guard|(cfg.get('chains') or {}).get(chain) or {}[rpcs]",
@@ -1517,15 +1502,8 @@
   "tools.backfill_gap:cmd_scan_evm|guard|cfg[chains]",
   "tools.backfill_gap:cmd_scan_evm|guard|cfg[wallets]",
   "tools.backfill_gap:main|passout|<top> → {'scan-bsc': cmd_scan_bsc, 'scan-evm': cmd_scan_evm, 'nft-en()",
-  "tools.fix_dupsnap_1004:_mk_core|passout|backfill_months → float()",
-  "tools.fix_dupsnap_1004:_mk_core|whole|for in exchange_addresses",
-  "tools.fix_dupsnap_1004:_mk_core|whole|for in wallets",
-  "tools.fix_dupsnap_1004:_mk_core|whole|wrapped_native.items()",
   "tools.gate_onchain:main|whole|for in wallets",
   "tools.gate_onchain:main|whole|wrapped_native.items()",
-  "tools.hl_enable:_evm_wallets|guard|cfg[wallets]",
-  "tools.hl_enable:plan|guard|cfg[hyperliquid]",
-  "tools.hl_enable:plan|guard|cfg[perp_wallets]",
   "tools.ledger_restore:block_sec|guard|((cfg or {}).get('chains') or {}).get(ch, {})[blocks_per_day]",
   "tools.ledger_restore:plan_sol|whole|for in wallets",
   "tools.lp_enrich_sol:_run|passout|<top> → sol_watch.Rpc()",
@@ -1533,9 +1511,7 @@
   "tools.negabs:_wallets|whole|for in wallets",
   "tools.prep_hotfix_h_caches:<module>|guard|b.cfg[chains]",
   "tools.prep_hotfix_h_caches:<module>|guard|b.cfg[wallets]",
-  "tools.pretrace_hotfix_h:<module>|guard|(cfg.get('chains') or {}).get(ch) or {}[blockscout]",
   "tools.rederive_perspective:_my_wallets|whole|for in wallets",
-  "tools.repair_anchor_ts:_run|passout|backfill_months → float()",
   "tools.repair_onchain_balances:_run|passout|backfill_months → float()",
   "tools.repair_onchain_balances:_run|whole|chains.items()",
   "tools.repair_onchain_balances:chains_caught_up|guard|(cfg.get('chains') or {}).get(chain) or {}[blocks_per_day]",
@@ -1616,6 +1592,7 @@
   "xchain_match:exchange_addrs_from_state|whole|for in exchange_addresses"
  ],
  "example_only": [
+  "autofix",
   "brokers",
   "brokers_note",
   "loan_short_note",

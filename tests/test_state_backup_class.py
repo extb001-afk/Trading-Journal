@@ -59,7 +59,7 @@ CLASS = {
     "wallet_reload_done.json": TM, "web_diag.json": TM, "web_snap_last.bin": TM, "wow_ask.json": TM, "xchain_px_cache.json": F,
     "addr_tier_{}.json": F, "bfspool_{}_{}.jsonl": LG, "cursor_evm_{}.json": LG, "cursor_rpc_{}.json": LG, "emitted_evm_{}.json": LG,
     "emitted_rpc_{}.json": LG, "enrich_{}.json": F, "exf_addrs_{}.json": F, "exf_balances_{}.json": F, "exf_balances_{}.json.view": F,
-    "exf_balances_{}.json{}": F, "exf_fix_place_v{}.json": TM, "exf_fut_place_v{}.json": TM,
+    "exf_balances_{}.json{}": F, "exf_fix_place_v{}.json": TM, "autofix_undo_{}_{}_{}_{}.json": TM, "exf_fut_place_v{}.json": TM,
     "futraw_{}_main.json": B, "futraw_{}_{}.json": B,
     "futures_px_{}.json": B,
     "futures_{}.json": B,

@@ -204,6 +204,7 @@ def compute(index, rules, layers, docs_text):
     for name in sorted(env):
         documented = name in docs_text and _word_in(name, docs_text)
         mx.add("env.undocumented", "*", name, 0 if documented else 1, "x")
+    mx.add("except.swallow_pass", "*", "*", sum(sc.get("swp", 0) for fx in index.values() for sc in fx["scopes"].values()), "x")
     for mod in sorted(c.mods - set(c.layer_of)):
         mx.hard.setdefault("layer.unassigned", []).append(
             "%s — 계층 표(arch_baseline/layers.json 'modules')에 없음: 책임에 맞는 계층으로 한 줄 등록하라" % c.path(mod))

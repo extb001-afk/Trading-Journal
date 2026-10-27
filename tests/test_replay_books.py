@@ -74,6 +74,27 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "view_b_*.py"))) + [os.path.join(T
                 ok_lines.add(st.lineno)
     if os.path.basename(f) == "view_b_replay.py":
         ok_lines |= alias_lines
+        for cl in tr.body:
+            if isinstance(cl, ast.ClassDef) and cl.name == "ReplayRun":
+                for fn in cl.body:
+                    b9 = [x for x in fn.body if not (isinstance(x, ast.Expr) and isinstance(x.value, ast.Constant))] if isinstance(fn, ast.FunctionDef) else []
+                    st = b9[0] if b9 else None
+                    if (isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Tuple)
+                            and isinstance(st.value, ast.Tuple) and st.value.elts and len(st.targets[0].elts) == len(st.value.elts)
+                            and all(isinstance(t9, ast.Name) and isinstance(e, ast.Attribute) and isinstance(e.value, ast.Name)
+                                    and e.value.id in ("self", "rc") and (t9.id not in NAMES or (e.value.id == "self" and e.attr == t9.id))
+                                    for t9, e in zip(st.targets[0].elts, st.value.elts))):
+                        ok_lines.add(st.lineno)
+        for st in ast.walk(tr):
+            if (isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Tuple)
+                    and isinstance(st.value, ast.Tuple) and st.value.elts and len(st.targets[0].elts) == len(st.value.elts)
+                    and all(isinstance(t9, ast.Name) and isinstance(e, ast.Attribute) and isinstance(e.value, ast.Name)
+                            and e.value.id in ("li", "lko", "ri", "rto") and (t9.id not in NAMES or e.attr == t9.id)
+                            for t9, e in zip(st.targets[0].elts, st.value.elts))):
+                ok_lines.add(st.lineno)
+        for cl in tr.body:
+            if isinstance(cl, ast.ClassDef) and cl.name in ("LinksIn", "LinksOut", "RtIn", "RtOut"):
+                ok_lines |= {x.lineno for x in cl.body if isinstance(x, ast.AnnAssign) and x.value is None}
     for n in ast.walk(tr):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id in NAMES and n.lineno not in ok_lines:
             bad.append(f"{os.path.basename(f)}:{n.lineno} {n.id}")

@@ -12,6 +12,7 @@
   "InboxMixin": "CORE",
   "LateMixin": "CORE",
   "LpMixin": "CORE",
+  "MissingDecimals": "OTHER",
   "MissingTs": "OTHER",
   "OutflowMixin": "CORE",
   "PostMixin": "CORE",

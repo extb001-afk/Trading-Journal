@@ -39,7 +39,8 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "*.py"))):
 chk(not bad, "L1 _bump_position 호출 = 원장 계층 함수 안에만", bad)
 
 LEDGER_MODS = {"core_post.py", "core_post_cols.py"}
-ALLOW_MODS = {"demo_data.py": "데모 원장(빈 임시 원장에 견본 줄 · 실원장 아님)"}
+ALLOW_MODS = {"demo_data.py": "데모 원장(빈 임시 원장에 견본 줄 · 실원장 아님)",
+              "autofix_apply.py": "거래소 칸 자동 처리 칸 트랜잭션(I1·I2 다시 셈·영수증과 한 몸 — 총괄 검토 대상 · 세션32)"}
 SUCCESSION = (
     ("core", "Core._stable_regroup", 381, "_stable_regroup.1", "a8610def8cd523d4"),
     ("core", "Core._stable_regroup", 384, "_stable_regroup.2", "7470eee823854b47"),

@@ -192,7 +192,7 @@ def _snapfile_load(gen: int, stale_max: float):
             snap.slim_gz = snap.parts_gz = None
         return snap
     except Exception as e:   # noqa: BLE001 [fallback]
-        calcguard.swallowed("view_snapfile:_snapfile_load", e)
+        calcguard.swallowed("view_snapfile:_snapfile_load", e, expected=True)
         log.warning("스냅샷 저장본 읽기 실패(지움): %s", type(e).__name__)
         _snapfile_drop()
         return None

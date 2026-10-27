@@ -28,7 +28,7 @@ class KrwPools:
                 if cu9 > 0:
                     return usd * Decimal(row9["cost_krw"]) / cu9
             except Exception as _cg9:  # noqa: BLE001 [optional]
-                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of[cu9]", _cg9)
+                calcguard.swallowed("view_b_replay:ReplayMixin._build_replay.krw_of[cu9]", _cg9, expected=isinstance(_cg9, ArithmeticError))
                 calcguard.row_err("view_b_replay:ReplayMixin._build_replay.krw_of[cu9]", row9)
         return usd * Decimal(str(kpx.fxb.rate_at(ts9)))
 

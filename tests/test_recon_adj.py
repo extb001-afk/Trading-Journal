@@ -19,6 +19,7 @@ import config, paths  # noqa: E402
 import core  # noqa: E402
 import discopen  # noqa: E402
 import recon_adj  # noqa: E402
+import recon_auto  # noqa: E402
 
 assert T.TMP in paths.STATE_DIR
 chk = T.chk
@@ -37,7 +38,9 @@ def _const(n):
     return n.value if isinstance(n, ast.Constant) else None
 
 
-post_sites, amend_sites, note_keys, fix_funcs = set(), set(), {}, set()
+post_sites, amend_sites, note_keys, fix_funcs, auto_ins = set(), set(), {}, set(), set()
+AUTO_SITES = {("autofix_apply", "apply_cell"), ("autofix_apply", "_replan")}
+AUTO_RESTORE = {("autofix_apply", "undo_cell")}
 CORE_MODS = {"core_recon", "discopen", "core_snap", "core_post", "core_exf", "core_exf_fut", "core_exf_late", "core_upbit_recon"}
 for f in sorted(glob.glob(os.path.join(T.SRC, "*.py"))):
     mod = os.path.basename(f)[:-3]
@@ -47,6 +50,8 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "*.py"))):
             continue
         if any(len(c.args) >= 11 and _const(c.args[10]) == "opening" for c in _calls(fn, "_post_leg") + _calls(fn, "_post_leg_strict")):
             post_sites.add((mod, fn.name))
+        if mod == "autofix_apply" and any(isinstance(n, ast.Constant) and isinstance(n.value, str) and "INSERT INTO postings" in n.value for n in ast.walk(fn)):
+            auto_ins.add((mod, fn.name))
         if mod in CORE_MODS and (_calls(fn, "_amend_leg") or _calls(fn, "_leg_sql")):
             amend_sites.add((mod, fn.name))
         for c in _calls(fn, "note"):
@@ -55,13 +60,20 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "*.py"))):
         if any(isinstance(c.func.value, ast.Name) and c.func.value.id == "recon_adj" for c in _calls(fn, "note_fix")):
             fix_funcs.add((mod, fn.name))
 want = {(m, f) for (m, f, _d) in recon_adj.SITES.values()}
-chk(post_sites == want, "S1 보정 쓰는 자리(src) = SITES 표", (sorted(post_sites ^ want)))
+chk(post_sites == want - AUTO_SITES, "S1 보정 쓰는 자리(src) = SITES 표", (sorted(post_sites ^ (want - AUTO_SITES))))
+chk(auto_ins - AUTO_RESTORE == AUTO_SITES, "S1 자동 처리 행 쓰는 자리(autofix_apply INSERT) = AUTO_SITES", sorted(auto_ins ^ (AUTO_SITES | AUTO_RESTORE)))
+chk(recon_auto.SITE_AUTO == "K11" and tuple(recon_adj.SITES.get("K11", ())[:2]) in AUTO_SITES, "S1 SITES['K11'] = 자동 행 첫 자리 · recon_auto.SITE_AUTO 같은 값", recon_adj.SITES.get("K11"))
+chk(all("K11" in (note_keys.get(p) or set()) for p in AUTO_SITES), "S1 자동 행 자리마다 recon_adj.note(연결, 'K11', …)", {p: note_keys.get(p) for p in AUTO_SITES})
 bad = [(k, (m, f), note_keys.get((m, f))) for k, (m, f, _d) in recon_adj.SITES.items() if k not in (note_keys.get((m, f)) or set())]
 chk(not bad, "S1 자리마다 recon_adj.note(연결, 그 키, …)", bad)
 chk(all(k in recon_adj.SITES for ks in note_keys.values() for k in ks), "S1 note 첫 키 = SITES 키(글자 상수)", note_keys)
 chk(amend_sites == set(recon_adj.AMEND_SITES), "S2 보정 고치는 자리 = AMEND_SITES 표", sorted(amend_sites ^ set(recon_adj.AMEND_SITES)))
 miss = [k for k, v in recon_adj.AMEND_SITES.items() if v == "note" and k not in fix_funcs]
 chk(not miss, "S2 'note' 자리 = recon_adj.note_fix 호출", miss)
+tick_calls = [n for n in ast.walk(ast.parse(open(os.path.join(T.SRC, "core.py"), encoding="utf-8").read())) if isinstance(n, ast.Call)
+              and isinstance(n.func, ast.Attribute) and n.func.attr == "tick" and isinstance(n.func.value, ast.Name) and n.func.value.id == "recon_adj"]
+tick_kw = [ast.unparse(k.value) for n in tick_calls for k in n.keywords if k.arg == "auto_on"]
+chk(len(tick_calls) == 1 and tick_kw == ["config.autofix_enabled(self.cfg)"], "S3 core recon_adj.tick 배선 = auto_on=config.autofix_enabled(self.cfg)(기본 꺼짐 = 종전)", tick_kw)
 
 c = core.Core(config.load_config())
 cx = c.conn

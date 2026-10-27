@@ -2,6 +2,7 @@ import chain_event
 import chain_registry
 import paths
 import db as dbm
+import histmark
 import json
 import lpdec
 import lpsol
@@ -10,6 +11,7 @@ import os
 import time
 from core_common import CLASSIFIER_VER
 from core_common import MissingTs
+from core_common import POS_PROVISIONAL_DEC
 from core_common import dm
 from core_post_cols import LEG_SQL
 from decimal import Decimal
@@ -17,6 +19,13 @@ from decimal import localcontext
 import logging
 
 log = logging.getLogger('tj-core')
+
+
+def _same_qty(old: str, q: Decimal) -> bool:
+    try:
+        return Decimal(old) == q
+    except ArithmeticError:
+        return False
 
 
 class PostMixin:
@@ -234,7 +243,7 @@ class PostMixin:
 
     def _bump_position(self, aid: int, v: int, loc: str) -> None:
         grp = self._group_of(aid)
-        norm = self._norm(aid, v)
+        norm = self._norm(aid, v, provisional=True)
         row = self.conn.execute(
             "SELECT qty_norm FROM positions WHERE group_id=? AND location=?",
             (grp, loc)).fetchone()
@@ -248,6 +257,36 @@ class PostMixin:
         else:
             self.conn.execute("INSERT INTO positions (group_id, location, qty_norm) VALUES (?,?,?)",
                               (grp, loc, new_qty))
+
+    def _renorm_asset(self, aid: int) -> int:
+        r = self.conn.execute("SELECT group_id, decimals FROM assets WHERE asset_id=?", (aid,)).fetchone()
+        if r is None or r["group_id"] is None:
+            return 0
+        gid = int(r["group_id"])
+        t0 = self.conn.execute("SELECT MIN(event_ts) FROM postings WHERE asset_id=?", (aid,)).fetchone()[0]
+        if t0 is not None and r["decimals"] is not None and int(r["decimals"]) != POS_PROVISIONAL_DEC:
+            histmark.hist_late_put(self.conn, int(t0))
+        tot = {}
+        for one, loc, qb in self.conn.execute("SELECT asset_id, location, qty_base FROM postings"
+                                              " WHERE asset_id IN (SELECT asset_id FROM assets WHERE group_id=?)", (gid,)).fetchall():
+            tot[(one, loc)] = tot.get((one, loc), 0) + int(qb)
+        n = 0
+        with localcontext() as ctx:
+            ctx.prec = 100
+            want = {}
+            for (one, loc), q in tot.items():
+                want[loc] = want.get(loc, Decimal(0)) + Decimal(self._norm(one, q, provisional=True))
+            cur = {row[0]: row[1] for row in self.conn.execute("SELECT location, qty_norm FROM positions WHERE group_id=?", (gid,)).fetchall()}
+            for loc in sorted(set(cur) | set(want)):
+                q = want.get(loc, Decimal(0))
+                if loc not in cur:
+                    self.conn.execute("INSERT INTO positions (group_id, location, qty_norm) VALUES (?,?,?)", (gid, loc, format(q, "f")))
+                elif not _same_qty(cur[loc], q):
+                    self.conn.execute("UPDATE positions SET qty_norm=? WHERE group_id=? AND location=?", (format(q, "f"), gid, loc))
+                else:
+                    continue
+                n += 1
+        return n
 
     def apply_sol(self, rec: dict, rederive=None):
         txhash = rec["txhash"]

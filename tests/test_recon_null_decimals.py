@@ -115,8 +115,8 @@ chk(dec_of(TOK6) == 6, "D2 기장 전 NULL 자산 = 6 저장(종전 18)", dec_of
 c.asset_id("token", "base", TOK6, symbol="T6", decimals=6)
 iss = (statefile.read_json(c.DEC_ISSUES_PATH, {}) or {}).get("items") or {}
 chk(str(a6) not in iss, "D2 뒤이은 수집기 관측 6 = 충돌 없음", iss)
-chk(dec_of(TOKP) is None and (iss.get(str(aidp)) or {}).get("kind") == "pending",
-    "D3 이미 기장된 NULL 자산 = '채움 대기'(18 저장 · 충돌 아님)", (dec_of(TOKP), iss.get(str(aidp))))
+chk(dec_of(TOKP) == 6 and str(aidp) not in iss,
+    "D3 이미 기장된 NULL 자산 = 바로 채움 + 재정규화(세션31 #1 · 종전 '채움 대기' 없음 · 충돌 아님)", (dec_of(TOKP), iss.get(str(aidp))))
 chk(dec_of(TOKR) is None, "D4 decimals() 못 읽은 자산 = NULL 그대로", dec_of(TOKR))
 chk(not any((v or {}).get("kind") == "conflict" for v in iss.values()), "D2 '자리수 다름' 0건", iss)
 c.conn.close()

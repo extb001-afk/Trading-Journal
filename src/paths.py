@@ -158,7 +158,7 @@ REG = {
     "exf_recon_revert.jsonl": ("exf_recon_revert.jsonl", "core_exf", "jsonl", None),
     "exf_redate_m.json": ("exf_redate_m.json", "core_exf_late", "json", None),
     "exf_snap_miss.json": ("exf_snap_miss.json", "chk_collect ex_foreign", "json", None),
-    "exf_state.json": ("exf_state.json", "chk_collect core_exf ex_foreign exf_net hl_spot onboarding", "json", None),
+    "exf_state.json": ("exf_state.json", "autofix autofix_apply chk_collect core_exf ex_foreign exf_net hl_spot onboarding", "json", None),
     "ext_rebuild_status.json": ("ext_rebuild_status.json", "core_ext health view_builder", "json", None),
     "first_seen_px.json": ("first_seen_px.json", "recon_adj view_fspin", "json", None),
     "flow_px_cache.json": ("flow_px_cache.json", "view_workers", "json", None),
@@ -252,10 +252,11 @@ DYN = {
     "emitted_rpc_{}.json": ("emitted_rpc_{}.json", "evm_logdisc", "json", None),
     "enrich_{}.json": ("enrich_{}.json", "evm_base evm_bscout evm_rpcw", "json", None),
     "exf_addrs_{}.json": ("exf_addrs_{}.json", "depaddr", "json", None),
-    "exf_balances_{}.json": ("exf_balances_{}.json", "core_exf ex_foreign exf_net hl_spot view_b_pendings view_b_replay view_krw", "json", None),
+    "exf_balances_{}.json": ("exf_balances_{}.json", "autofix core_exf ex_foreign exf_net hl_spot view_b_pendings view_b_replay view_krw", "json", None),
     "exf_balances_{}.json.view": ("exf_balances_{}.json.view", "ex_foreign", "file", None),
     "exf_balances_{}.json{}": ("exf_balances_{}.json{}", "depaddr", "file", None),
     "exf_fix_place_v{}.json": ("exf_fix_place_v{}.json", "core_exf", "json", None),
+    "autofix_undo_{}_{}_{}_{}.json": ("autofix_undo_{}_{}_{}_{}.json", "autofix_apply", "json", None),
     "exf_fut_place_v{}.json": ("exf_fut_place_v{}.json", "core_exf_fut", "json", None),
     "futraw_{}_main.json": ("futraw_{}_main.json", "ex_foreign", "json", None),
     "futraw_{}_{}.json": ("futraw_{}_{}.json", "ex_foreign exf_net", "json", None),
@@ -290,7 +291,7 @@ def registered(name: object) -> bool:
 
 
 def state(name: str, *more: str) -> str:
-    if os.environ.get("TJ_STRICT") == "1" and not registered(name):
+    if os.environ.get("TJ_STRICT") in ("1", "2") and not registered(name):
         raise UnregisteredStateName("state 이름이 paths 등록부에 없음: %r" % (name,))
     return os.path.join(STATE_DIR, name, *more)
 

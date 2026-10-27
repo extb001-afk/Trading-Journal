@@ -144,8 +144,8 @@ feed(snap(h(6), NOW + 60, 105, W, X, [leg(W, X, TKP, 5 * E6, dec="6")]), h(6))
 chk(float(wallet_qty(TKP)) == 0.0 and q_before > 0, "B3 뒤 출금이 와도 앞 입금이 이미 기장 — 지갑 음수 없음(순서 그대로)", (q_before, wallet_qty(TKP)))
 iss = (statefile.read_json(c.DEC_ISSUES_PATH, {}) or {}).get("items") or {}
 c._dec_wait_scan(force=True)
-chk((iss.get(str(aidp)) or {}).get("kind") == "pending" and str(aidp) not in wait_items(),
-    "B3 자릿수 6 관측 = '채움 대기'(다음 자동 재구축) — 대기 줄에서 빠짐(ledger:decimals 와 겹치지 않음)", (iss.get(str(aidp)), wait_items()))
+chk(dec_of(TKP) == 6 and not iss.get(str(aidp)) and str(aidp) not in wait_items(),
+    "B3 자릿수 6 관측 = 바로 채움 + 재정규화(세션31 #1 · 종전 '채움 대기' 없음) — 대기 줄에서 빠짐", (dec_of(TKP), iss.get(str(aidp)), wait_items()))
 c.conn.execute("UPDATE assets SET decimals=6 WHERE asset_id=?", (aidp,))
 c.conn.commit()
 statefile.atomic_write_json(c.DEC_ISSUES_PATH, {"items": {}})

@@ -680,16 +680,26 @@ def _setup(h, onboarding):
                               else "인증 파일이 손상됐어요 — 서버에서 python3 tools/reset_password.py 로 다시 만드세요"})
     if not reqclass.setup_allowed(h):
         return _json(h, 403, {"ok": False, "error": "첫 비밀번호는 이 컴퓨터에서만 만들 수 있어요 — 서버에서 http://127.0.0.1:포트/login 으로 여세요"})
+    b = "s:" + reqclass.bucket_of(h)
+    if _limited(h, b, True):
+        return True
     body = _read_json(h, pre_auth=True)
     if body is None:
         return _json(h, 400, {"ok": False, "error": "본문 형식 오류(JSON 객체, 4KB 이하)"})
+    if _limited(h, b, True):
+        return True
     want = setup_code(create=True)
     got = _sc_norm(body.get("code"))
     if not want or not got or not hmac.compare_digest(got.encode("ascii"), want.encode("ascii")):
         if got:
             log.info("첫 비밀번호 설정 코드 틀림(%s)", reqclass.bucket_of(h))
+            if want:
+                dur = login_limits.LIM.fail(b, glob=False)
+                if dur:
+                    log.warning("첫 비밀번호 설정 코드 실패 반복 — %s 잠금 %s(tj-web 재시작이면 풀림)", b, login_limits.mins(dur))
         msg = ("설정 코드가 맞지 않아요" if got else "설정 코드를 넣어 주세요") + f" — 이 컴퓨터의 {SETUP_CODE_REL} 파일 내용(터미널: cat {SETUP_CODE_REL})"
         return _json(h, 403, {"ok": False, "code": True, "error": msg})
+    login_limits.LIM.ok(b)
     pw = body.get("password")
     prob = password_problem(pw)
     if prob:

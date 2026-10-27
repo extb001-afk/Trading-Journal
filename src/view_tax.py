@@ -107,7 +107,7 @@ def krw_sum_check(rows: list, rkd: dict, site: str = "view_tax:krw_sum") -> floa
         calcguard.swallowed(site, e)
         return None
     if abs(gap) >= tol:
-        calcguard.swallowed(site, ArithmeticError("명세 원화 실현 합 − 날짜별 원화 실현 합 = %+.0f원(허용 %.0f원)" % (gap, tol)))
+        calcguard.swallowed(site, ArithmeticError("명세 원화 실현 합 − 날짜별 원화 실현 합 = %+.0f원(허용 %.0f원)" % (gap, tol)), expected=True)
     return gap
 
 def _tax_stable_fx(rows, today):

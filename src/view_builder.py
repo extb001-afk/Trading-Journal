@@ -711,7 +711,7 @@ class StateBuilder(TailMixin, FutIdxMixin, DailyBuildMixin, OutflowsBuildMixin, 
         try:
             _snapfile_sig()
         except Exception as e:   # noqa: BLE001 [fallback]
-            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile[_snapfile_sig]", e)
+            calcguard.swallowed("view_builder:StateBuilder.restore_snapfile[_snapfile_sig]", e, expected=calcguard.db_env(e))
             (log.warning if os.path.exists(paths.DB_PATH) else log.debug)("스냅샷 저장본 서명 실패(저장본 끔): %s", type(e).__name__)
             return False
         try:

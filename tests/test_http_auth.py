@@ -303,6 +303,29 @@ rc, up, out = run_web("allow", dict(OFF, allow_lan_without_password=True))
 chk(up and out.count("기동 거부") == 0 and out.count("allow_lan_without_password") >= 1,
     "F5b 실제 web.py: allow_lan_without_password: true = 기동(루프백 포트 열림 · ERROR 안내 유지)", (rc, up, out[-600:]))
 
+LA.init(CFG)
+os.unlink(LA.AUTH_PATH)
+LL.LIM.reset()
+chk(LA.password_state()[0] == "none", "H0 비밀번호 파일 지움 = 첫 실행 상태", LA.password_state()[0])
+hs = [req("POST", "/api/auth/setup", body={"code": "AAAA-BBBB-CCCC-DDD%d" % i, "password": PW}) for i in range(6)]
+chk([x[0] for x in hs] == [403, 403, 403, 403, 403, 429] and int(hs[5][1].get("retry-after", "0") or 0) > 0 and (hs[5][2] or {}).get("retryAfter"),
+    "H1 설정 코드 5번 틀림 = 403 · 6번째 = 429 + Retry-After(10분 5번 → 잠금)", [(x[0], x[1].get("retry-after")) for x in hs])
+good = LA.setup_code()
+st, hd, j, sc = req("POST", "/api/auth/setup", body={"code": good, "password": PW})
+chk(st == 429 and not token(sc) and LA.password_state()[0] == "none", "H2 잠금 중엔 맞는 코드도 429 · 비밀번호 안 만듦", (st, j))
+st, _hd, _j, _sc = req("POST", "/api/login", body={"password": PW + "x"})
+chk(st == 409 and LL.LIM.wait("127.0.0.1", True) == 0 and LL.LIM.left("127.0.0.1") == LL.FAIL_MAX
+    and LL.LIM.wait("s:127.0.0.1", True) > 0 and not LL.LIM.glob,
+    "H3 설정 코드 잠금 = s: 버킷만(로그인 버킷 실패 0·잠금 없음 · 전역 실패 목록 비어 있음)", (st, sorted(LL.LIM.ip), len(LL.LIM.glob)))
+LL.LIM.reset()
+for i in range(4):
+    req("POST", "/api/auth/setup", body={"code": "AAAA-BBBB-CCCC-DDE%d" % i, "password": PW})
+st, _hd, _j, _sc = req("POST", "/api/auth/setup", body={"password": PW})
+chk(st == 403 and LL.LIM.left("s:127.0.0.1") == 1, "H4 빈 코드(아직 안 넣음) = 시도로 안 셈", (st, LL.LIM.left("s:127.0.0.1")))
+st, hd, j, sc = req("POST", "/api/auth/setup", body={"code": good, "password": PW})
+chk(st == 200 and token(sc) and LA.password_state()[0] == "set" and LL.LIM.left("s:127.0.0.1") == LL.FAIL_MAX,
+    "H5 반대 방향: 4번 틀린 뒤 맞는 코드 = 200 · 비밀번호 만듦 · 실패 기록 비움", (st, j, LL.LIM.left("s:127.0.0.1")))
+
 SRV.shutdown()
 SRV.server_close()
 T.finish()

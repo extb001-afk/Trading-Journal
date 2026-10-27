@@ -84,18 +84,11 @@ try:
         "view_b_replay": (
             "class ReplayMixin:\n"
             "    def _build_replay(self, conn):\n"
-            "        _bs9 = self._replay_prep(conn)\n        self._replay_rt(_bs9)\n        self._replay_links(_bs9)\n"
+            "        _bs9 = self._replay_prep(conn)\n"
             "        self._replay_main(_bs9)\n        rr = accounting_books.ReplayResult.from_scope(_bs9)\n        return rr\n\n"
-            "    def _replay_prep(self, conn):\n        books = 1\n        ctx = 2\n        G = {}\n        for r in conn:\n            pass\n"
+            "    def _replay_prep(self, conn):\n        books = 1\n        ctx = 2\n        G = {}\n        a = 5\n        for r in conn:\n            pass\n"
             "        return dict(locals())\n\n"
-            "    def _replay_rt(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n"
-            "        if \"x\" in _bs9:\n            x = _bs9[\"x\"]\n        x = 1\n        y = x + 1\n        a = 5\n" + UPD + "\n"
-            "    def _replay_links(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n"
-            "        if \"a\" in _bs9:\n            a = _bs9[\"a\"]\n"
-            "        if \"e9\" in _bs9:\n            e9 = _bs9[\"e9\"]\n        print(a)\n"
-            "        try:\n            pass\n        except ValueError as e9:\n            print(e9)\n" + UPD +
-            "        if \"e9\" not in locals():\n            _bs9.pop(\"e9\", None)\n\n"
-            "    def _replay_main(self, _bs9):\n        (G, e9) = (_bs9[\"G\"], _bs9[\"e9\"])\n"
+            "    def _replay_main(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n"
             "        if \"r\" in _bs9:\n            r = _bs9[\"r\"]\n"
             "        if \"ln9\" in _bs9:\n            ln9 = _bs9[\"ln9\"]\n"
             "        if \"k9\" in _bs9:\n            k9 = _bs9[\"k9\"]\n"
@@ -125,16 +118,15 @@ try:
     s_texts, _st, s_stages = B.load(syn)
     s_rows = B.plan(s_stages)
     got = {(r["stage"], r["name"]): r["act"] for r in s_rows}
-    want = {("_replay_rt", "x"): "delete", ("_replay_links", "a"): "head", ("_replay_links", "e9"): "refuse",
+    want = {
             ("_replay_main", "r"): "keep", ("_replay_main", "ln9"): "declare", ("_replay_main", "k9"): "keep",
             ("_build_cards", "q"): "delete", ("_build_cards", "gq"): "refuse", ("_build_pendings", "z"): "refuse",
             ("_build_outflows", "a"): "head", ("_build_daily", "ex9"): "delete", ("_build_futidx", "xx"): "keep"}
     chk(got == want, "R3 합성 단계 처리(죽음 지움 · 처리기 이름 · 유일 바인딩 선언 · 머리 풀기 · 남김 · nonlocal 흐름 · pop·global·vars 거부)",
         {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v})
     new = B.apply_plan(s_texts, s_stages, s_rows)
-    links_head = [ln for ln in new["view_b_replay"].splitlines() if "(G, a," in ln]
+    links_head = [ln for ln in new["view_b_outflows"].splitlines() if "(G, a," in ln]
     chk(links_head == ['        (G, a,) = (_bs9["G"], _bs9["a"],)'] and "        ln9: object" in new["view_b_replay"].splitlines()
-        and 'if "x" in _bs9' not in new["view_b_replay"] and 'if "e9" in _bs9' in new["view_b_replay"]
         and new["view_b_outflows"].count('_bs9["a"]') == 1 and 'if "ex9" in _bs9' not in new["view_b_daily"],
         "R3 적용 글 — 머리 풀기 같은 줄 끝에 더함 · 값 없는 선언 한 줄 · 거부·남김은 그대로", links_head)
 

@@ -7,9 +7,10 @@ import paths
 
 SCHEMA_VERSION = 2
 
-DATA_REV = 1
+DATA_REV = 2
 DATA_REVS = {
     1: "기준선(10-09) — 선물 정산 재배치(exf_fut_place) 를 아는 코드. 이 번호로 올리는 변환은 그 기능 쪽이 붙인다",
+    2: "자동 처리 행(exfauto · source_ns '<ex>:autofix' — autofix_apply 가 자동 행을 처음 넣는 트랜잭션). 내리기 = ledger_rowfix --undo-autofix 전부 → --data-rev-down 1",
 }
 
 

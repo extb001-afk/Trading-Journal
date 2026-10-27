@@ -252,6 +252,7 @@ SNAP_MISS_SHOW_S = 7200
 
 
 CALC_BUG_SHOW_S = 86400
+CALC_OTHER_WARN_N = 100
 
 
 CALC_UNIT = {"web": "tj-web", "web_build": "tj-web", "core": "tj-core"}
@@ -273,6 +274,11 @@ def _u(i) -> str:
 
 
 def decwait_item(add: Callable, chip: Callable, doc: dict | None, units: list, open_ids: tuple, now: float) -> None:
+    ren = doc.get("renorm") if isinstance(doc, dict) and isinstance(doc.get("renorm"), dict) else None
+    if "tj-core" in units and ren and isinstance(ren.get("n"), int) and ren["n"] > 0 and now - float(ren.get("ts") or 0) < 86400:
+        add("ledger:renorm", "tj-core", f"자릿수 채움 재정규화 {ren['n']}개", "ok",
+            "자릿수를 늦게 안 토큰의 표시 수량을 원장에서 다시 계산했어요(데이터 개정 아님 · 원장 불변 · 총자산이 바뀌었을 수 있음)", "",
+            persist=0, resolve=600, notify=False, remind=False, kind="ledger")
     items = doc.get("items") if isinstance(doc, dict) and isinstance(doc.get("items"), dict) else {}
     if "tj-core" not in units or not (items or "ledger:decimals_wait" in open_ids):
         return
@@ -285,7 +291,7 @@ def decwait_item(add: Callable, chip: Callable, doc: dict | None, units: list, o
         det += f"{' · ' if det else ''}자릿수를 알려 주지 않는 토큰 {len(est)}개 = 18자리로 가정(추정)"
     add("ledger:decimals_wait", "tj-core", f"자릿수 모르는 토큰 {len(wait)}개 — 수량이 틀릴 수 있음" if wait else ("자릿수 추정 토큰" if est else "자릿수 모르는 토큰"),
         "warn" if wait else "ok", (det or "모두 확인됨")[:300],
-        "수집기가 자릿수를 알게 되면 다음 자동 재구축에서 바로 잡혀요(수량 표시가 맞춰짐) · 목록: python3 tools/fill_decimals.py" if wait else "",
+        "수집기가 자릿수를 알게 되면 바로 잡혀요(수량을 원장에서 다시 계산 · 재구축 불필요) · 목록: python3 tools/fill_decimals.py" if wait else "",
         persist=0, resolve=600, notify=False, remind=False, kind="ledger")
     if wait and now - oldest > 86400:
         chip("24시간 넘음")

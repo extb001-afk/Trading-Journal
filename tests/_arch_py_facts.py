@@ -488,6 +488,8 @@ class Walk:
         last_raise = bool(h.body) and isinstance(h.body[-1], ast.Raise)
         sc.setdefault("exc", []).append([D.except_kind(h), int(last_raise), int(D.calls_calcguard(h)),
                                          code.group(1).lower() if code else "", int(bool(_NOQA_BLE.search(note)))])
+        if D.swallow_pass(h):
+            sc["swp"] = sc.get("swp", 0) + 1
 
 
 def facts(text, modname, is_pkg=False):

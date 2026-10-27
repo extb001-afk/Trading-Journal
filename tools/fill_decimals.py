@@ -71,7 +71,7 @@ def main():
         print(json.dumps(rep, ensure_ascii=False, indent=1))
         return 0
     print(f"decimals NULL 토큰 {rep['null_total']}개 · 기장된 것 {len(rep['null_posted'])}개 · 기동 때 바로 채울 것(캐시 있음·미기장) {rep['will_fill_now']}개")
-    print("기장됐고 캐시 값이 18 이 아님(지금 수량 표시가 틀림 → 다음 재구축에서 바로잡힘):")
+    print("기장됐고 캐시 값이 18 이 아님(지금 수량 표시가 틀림 → tj-core 다음 기동 때 바로잡힘 · 재구축 불필요):")
     for x in rep["will_fix_on_rebuild"] or [{"symbol": "(없음)"}]:
         print("  ", x)
     print("기장됐고 캐시 없음/18(표시는 18 로 읽어 같음 — 확인 불가 또는 무해):")

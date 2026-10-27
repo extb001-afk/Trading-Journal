@@ -1,6 +1,8 @@
 """On-chain liquidity-position reader."""
 import json
 import math
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -319,6 +321,18 @@ def owner_of(cfg: dict, chain: str, mgr: str, token_id: int):
 
 
 NFT_PAGES_MAX = 200
+BS_OFF_SEC = 6 * 3600
+_BS_OFF = {}
+
+
+def bs_off_state(now: float = None) -> dict:
+    t = time.time() if now is None else now
+    return {c: {"until": int(v["until"]), "at": int(v["at"]), "why": v["why"]} for c, v in sorted(_BS_OFF.items()) if v["until"] > t}
+
+
+def bs_off_part() -> dict:
+    st = bs_off_state()
+    return {"bs_off": st} if st else {}
 
 
 def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20) -> list:
@@ -327,6 +341,10 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
     if not base or not mgrs:
         return []
     url0 = f"{str(base).rstrip('/')}/api/v2/addresses/{wallet}/nft?type=ERC-721"
+    bs_fp = str(base).rstrip("/") + "|" + net_http.ua_for(url0, "tj-bot/0.1")
+    bs_rest = _BS_OFF.get(chain)
+    if bs_rest and bs_rest["fp"] == bs_fp and time.time() < bs_rest["until"]:
+        return None
     url, out, seen = url0, [], set()
     for _page in range(NFT_PAGES_MAX):
         try:
@@ -335,6 +353,9 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
                 d = json.loads(net_http.read_capped(r).decode())
         except Exception as _cg9:  # noqa: BLE001 [fallback]
             calcguard.swallowed("lpchain:list_wallet_positions", _cg9)
+            if isinstance(_cg9, urllib.error.HTTPError) and _cg9.code in (401, 403):
+                t_off = time.time()
+                _BS_OFF[chain] = {"until": t_off + BS_OFF_SEC, "at": t_off, "why": f"HTTP {_cg9.code}", "fp": bs_fp}
             return None
         if not isinstance(d, dict) or not isinstance(d.get("items"), list):
             return None
@@ -346,6 +367,7 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
                     out.append((addr, int(str(it.get("id")))))
                 except (TypeError, ValueError):
                     continue
+        _BS_OFF.pop(chain, None)
         npp = d.get("next_page_params")
         if not npp:
             return out

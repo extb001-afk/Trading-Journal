@@ -12,7 +12,7 @@ import types  # noqa: E402
 import accounting_ctx as AC  # noqa: E402
 
 chk = T.chk
-STAGES = ("_replay_prep", "_replay_rt", "_replay_links", "_replay_main")
+STAGES = ("_replay_prep", "_replay_links", "_replay_main")
 INF = 10 ** 9
 
 
@@ -23,16 +23,21 @@ def _parse(mod):
 
 rp = _parse("view_b_replay")
 fns = {m.name: m for n in ast.walk(rp) if isinstance(n, ast.ClassDef) for m in n.body if isinstance(m, ast.FunctionDef) and m.name in STAGES}
-chk(set(fns) == set(STAGES), "리플레이 단계 함수 4개", sorted(fns))
+chk(set(fns) == set(STAGES), "리플레이 단계 함수 3개", sorted(fns))
 in_cls = {}
 for c in _parse("accounting_ctx").body:
     if isinstance(c, ast.ClassDef) and c.name in ("FsIn", "OriginIn", "OffcIn", "LpIn", "SaleIn", "MoveIn", "ReplayFns"):
         in_cls[c.name] = c
 
 
+STAGE_IO = ("li", "lko")
+
+
 def _bs9_rooted(v):
     while isinstance(v, (ast.Attribute, ast.Subscript)):
         if isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == "_bs9":
+            return True
+        if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id in STAGE_IO:
             return True
         v = v.value
     return False
@@ -40,7 +45,7 @@ def _bs9_rooted(v):
 
 def _binds(fn, sname, out):
     for a in fn.args.args[1:] + fn.args.kwonlyargs:
-        if a.arg != "_bs9":
+        if a.arg not in ("_bs9",) + STAGE_IO:
             out.setdefault(a.arg, []).append(fn.lineno)
     skip = set()
     stack = list(fn.body)
@@ -188,10 +193,26 @@ for slot, ents in AC.INPUTS.items():
                 q4.append("리플레이가 %s.%s 다시 대입" % (slot, n))
 chk(not q4, "Q4 장부 __init__ = 키워드 전용 · 표마다 self.<지역> = <묶음>.<필드> 한 줄 · 그 속성 다시 대입 0", q4)
 q4b = []
+
+
+def _export_kw(fn):
+    out = set()
+    for st in fn.body:
+        c = st.value if isinstance(st, (ast.Expr, ast.Assign)) else None
+        if isinstance(c, ast.Call) and ((isinstance(c.func, ast.Attribute) and c.func.attr == "update" and getattr(c.func.value, "id", "") == "_bs9")
+                                        or (isinstance(st, ast.Assign) and getattr(c.func, "id", "") == "dict")):
+            out |= {id(k.value) for k in c.keywords if isinstance(k.value, ast.Name) and k.value.id == k.arg}
+    for c in ast.walk(fn):
+        if isinstance(c, ast.Call) and getattr(c.func, "id", "") in ("LinksIn", "LinksOut", "RtIn", "RtOut"):
+            out |= {id(k.value) for k in c.keywords if isinstance(k.value, ast.Name)}
+    return out
+
+
+EXPORT_KW = set().union(*(_export_kw(fn) for fn in fns.values()))
 for bv, us in users.items():
     ok = {id(k.value) for u in us for k in ctor[u][2].value.keywords if k.arg == bv and isinstance(k.value, ast.Name) and k.value.id == bv}
     loads = [y.lineno for fn in fns.values() for y in ast.walk(fn) if isinstance(y, ast.Name) and y.id == bv
-             and isinstance(y.ctx, ast.Load) and id(y) not in ok]
+             and isinstance(y.ctx, ast.Load) and id(y) not in ok and id(y) not in EXPORT_KW]
     if loads or len(ok) != len(us):
         q4b.append("%s 소비 밖 읽음 %s · 소비 키워드 %d/%d" % (bv, loads, len(ok), len(us)))
 chk(not q4b, "Q4 묶음 지역 = 소비 생성자 부름 키워드로만 읽힘", q4b)

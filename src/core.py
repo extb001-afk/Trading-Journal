@@ -14,7 +14,7 @@ import pricing, token_tables
 import lpdec
 import bf_engine
 import ledger_backup
-import recon_adj
+import recon_adj, autofix_apply
 import ledger_lock
 import chain_registry
 import chain_event
@@ -29,7 +29,9 @@ from core_common import (  # noqa: F401
     DM_RECENT_SEC,
     KRW_FILL_CALLS,
     KRW_FILL_SEC,
+    MissingDecimals,
     MissingTs,
+    POS_PROVISIONAL_DEC,
     PRICE_BACKOFF_MAX,
     PRICE_BACKOFF_MIN,
     PRICE_BATCH,
@@ -208,10 +210,9 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
             if decimals is not None and kind == "token":
                 st9 = row["decimals"]
                 if st9 is None:
-                    if int(decimals) != 18 and self._asset_has_postings(row["asset_id"]):
-                        self._dec_issue(row["asset_id"], "pending", None, int(decimals))
-                    else:
-                        self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (int(decimals), row["asset_id"]))
+                    self.conn.execute("UPDATE assets SET decimals=? WHERE asset_id=?", (int(decimals), row["asset_id"]))
+                    if self._asset_has_postings(row["asset_id"]):
+                        self._renorm_asset(row["asset_id"])
                 elif int(st9) != int(decimals):
                     self._dec_issue(row["asset_id"], "conflict", int(st9), int(decimals))
             return row["asset_id"]
@@ -254,9 +255,14 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
         self.conn.execute("UPDATE assets SET group_id=? WHERE asset_id=?", (gid, aid))
         return gid
 
-    def _norm(self, aid: int, v: int) -> str:
+    def _norm(self, aid: int, v: int, provisional: bool = False) -> str:
         r = self.conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (aid,)).fetchone()
-        dec = r["decimals"] if r and r["decimals"] is not None else 18
+        if r is None or r["decimals"] is None:
+            if not provisional:
+                raise MissingDecimals(aid)
+            dec = POS_PROVISIONAL_DEC
+        else:
+            dec = int(r["decimals"])
         with localcontext() as ctx:
             ctx.prec = 100
             return format(Decimal(v) / (Decimal(10) ** dec), "f")
@@ -411,6 +417,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
                 log.error("거래소 대사 실패(다음 주기): %s", e)
             try:
                 self.svc_exf.exf_recon_pass(drained)
+                autofix_apply.core_pass(self.svc_exf)
             except Exception as e:  # noqa: BLE001 [boundary]
                 calcguard.swallowed("core:Core.run[exf_recon_pass]", e)
                 self.conn.rollback()
@@ -480,7 +487,7 @@ class Core(ExtMixin, LateMixin, InboxMixin, SnapMixin, PostMixin, LpMixin, Outfl
                     pass
                 log.warning("늦은 원장 행 표식 실패(다음 주기): %s", logs.safe_err(str(e))[:200])
             ledger_backup.tick(log)
-            recon_adj.tick(self.conn, self._win_t0, log)
+            recon_adj.tick(self.conn, self._win_t0, log, auto_on=config.autofix_enabled(self.cfg))
             if self.conn.in_transaction:
                 log.error("★패스 종료 후 트랜잭션 잔류 — 방어 롤백 (누수 경로 추적 필요)★")
                 self.conn.rollback()

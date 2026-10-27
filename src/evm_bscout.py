@@ -16,6 +16,7 @@ from evm_base import EXPLORER_FROZEN_GAP
 from evm_base import EXPLORER_FROZEN_SEC
 from evm_base import _is_http_5xx
 from evm_base import _revoke_stamp_disk
+from evm_base import conf_depth_of
 from evm_base import http_json
 from evm_base import new_view_wallets
 from evm_base import rpc_handback
@@ -30,7 +31,7 @@ class ChainWatcher(RpcSynthMixin):
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.base = cfg["chains"][chain]["blockscout"].rstrip("/")
         chain_cc = cfg["chains"][chain]
-        self.conf_depth = int(chain_cc.get("conf_depth", 12))
+        self.conf_depth = conf_depth_of(chain_cc, chain)
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.bpd = int(cfg["chains"][chain].get("blocks_per_day", 43200))

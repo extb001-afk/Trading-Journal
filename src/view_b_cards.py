@@ -1031,6 +1031,7 @@ class CardsMixin:
 
     def _cards_positions(self, cst):
         (G, aliases, debt_neg9, dust_ev, ev_hide, fb_cov9, fb_on, fx_name, fxb, gas_expense, gid_pairs, led_by_gid, live_px, pos_hid9, quarantined, realized_by_date, realized_krw_by_date, stake_inc, tax_rows, uncred_cost, uncred_gid, uncred_known, unv_fb9, unverified,) = (cst.G, cst.aliases, cst.debt_neg9, cst.dust_ev, cst.ev_hide, cst.fb_cov9, cst.fb_on, cst.fx_name, cst.fxb, cst.gas_expense, cst.gid_pairs, cst.led_by_gid, cst.live_px, cst.pos_hid9, cst.quarantined, cst.realized_by_date, cst.realized_krw_by_date, cst.stake_inc, cst.tax_rows, cst.uncred_cost, cst.uncred_gid, cst.uncred_known, cst.unv_fb9, cst.unverified,)
+        wallet_disp = cst.disp9
         disp9 = {}
         for gid9, g9 in G.items():
             if g9.get("sym") == "TOKEN" and gid9 not in quarantined and gid_pairs.get(gid9):
@@ -1047,7 +1048,7 @@ class CardsMixin:
             wa = parts[2] if len(parts) >= 3 and parts[2] else None
             if not wa:
                 return "SOL 지갑" if ch == "sol" else "EVM 지갑"
-            label = aliases.get(wa) or self.addr_label.get(wa) or (_wdisp(ch, wa, disp=disp9) or wa)[:8]
+            label = aliases.get(wa) or self.addr_label.get(wa) or (_wdisp(ch, wa, disp=wallet_disp) or wa)[:8]
             if len(parts) >= 5 and parts[3] == "stake":
                 return f"{label} · 스테이킹" if str(label).rstrip().endswith("지갑") else f"{label} 지갑 · 스테이킹"
             return label if str(label).rstrip().endswith("지갑") else f"{label} 지갑"

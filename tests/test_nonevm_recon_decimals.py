@@ -186,16 +186,19 @@ stub_tr.rows[("token", CF)] = 0
 stub_tr.meta = {LEG: ("LEG", 6), CF: ("CF", 8)}
 done = run("tron")
 iss = statefile.read_json(os.path.join(paths.STATE_DIR, "asset_decimals_issues.json"), {}) or {}
-check("D6 test_nonevm_decimals_conflict_rebuild: 힌트 6 = 덮지 않고 재구축 표식(자릿수 NULL 유지 · base 수량 보존) · 대사 진행",
-      done and asset("tron", LEG)[1] is None and c._meta_get("ext_prewindow:decimals_fix") == "1" and opening("tron", LEG) == [1_000_000],
-      (done, asset("tron", LEG), c._meta_get("ext_prewindow:decimals_fix"), opening("tron", LEG)))
+pq6 = c.conn.execute("SELECT p.qty_norm FROM positions p JOIN assets a ON a.group_id=p.group_id WHERE a.chain='tron' AND a.address=? AND p.location=?",
+                     (LEG, loc)).fetchone()
+check("D6 test_nonevm_decimals_conflict_rebuild: 힌트 6 = 바로 채움 + 재정규화(세션31 #1 · 재구축 표식 없음 · base 수량 보존) · 대사 진행",
+      done and asset("tron", LEG)[1] == 6 and c._meta_get("ext_prewindow:decimals_fix") is None and opening("tron", LEG) == [1_000_000]
+      and pq6 is not None and float(pq6[0]) == 1.0,
+      (done, asset("tron", LEG), c._meta_get("ext_prewindow:decimals_fix"), opening("tron", LEG), pq6 and pq6[0]))
 check("D6 저장 6 과 다른 관측 8 = 덮지 않음(충돌 기록)", asset("tron", CF)[1] == 6 and "conflict" in json.dumps(iss, ensure_ascii=False),
       (asset("tron", CF), str(iss)[:300]))
 n2 = c.conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0]
 c.conn.execute("DELETE FROM meta WHERE k='recon_done_tron'")
 run("tron")
 check("D6 다시 대사해도 멱등(새 posting 없음 · 자릿수 그대로)", c.conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0] == n2
-      and asset("tron", LEG)[1] is None and asset("tron", CF)[1] == 6)
+      and asset("tron", LEG)[1] == 6 and asset("tron", CF)[1] == 6)
 reg.FORCE_AVAILABLE.clear()
 fake.close()
 T.finish()

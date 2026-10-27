@@ -6,6 +6,7 @@ import spamguard
 import sqlite3
 import time
 from core_common import KRW_FILL_CALLS
+from core_common import MissingDecimals
 from core_common import KRW_FILL_SEC
 from core_common import PRICE_BACKOFF_MAX
 from core_common import PRICE_BACKOFF_MIN
@@ -262,7 +263,10 @@ class PricingMixin:
                 aid = r["asset_id"]
                 if not self._sym_px_token(aid) or self._ex_proven(aid):
                     continue
-                q9 = abs(Decimal(self._norm(aid, int(r["qty_base"]))))
+                try:
+                    q9 = abs(Decimal(self._norm(aid, int(r["qty_base"]))))
+                except MissingDecimals:
+                    continue
                 if q9 <= 0:
                     continue
                 u = self._own_unit_cost(aid)
@@ -292,7 +296,10 @@ class PricingMixin:
             ctx.prec = 60
 
             def norm_abs(leg):
-                return abs(Decimal(self._norm(leg["asset_id"], int(leg["qty_base"]))))
+                try:
+                    return abs(Decimal(self._norm(leg["asset_id"], int(leg["qty_base"]))))
+                except MissingDecimals:
+                    return None
 
             for leg in legs:
                 if leg["cost_usd"] is not None:
@@ -304,8 +311,8 @@ class PricingMixin:
                     px = self._leg_px(leg["asset_id"], ts)
                     if out9:
                         px = self._out_px(leg["asset_id"], px)
-                    if px:
-                        updates[leg["posting_id"]] = float(norm_abs(leg) * Decimal(str(px)))
+                    if px and (nq := norm_abs(leg)) is not None:
+                        updates[leg["posting_id"]] = float(nq * Decimal(str(px)))
             swap = [l for l in legs if l["event"] == "SWAP" and l["leg_kind"] in ("disp", "acq")]
             if swap and any(l["cost_usd"] is None for l in swap):
                 outs = [l for l in swap if l["leg_kind"] == "disp"]
@@ -315,7 +322,7 @@ class PricingMixin:
                     vals = []
                     for l in side:
                         px = self._leg_px(l["asset_id"], ts)
-                        vals.append(None if px is None else norm_abs(l) * Decimal(str(px)))
+                        vals.append(None if px is None or (nq := norm_abs(l)) is None else nq * Decimal(str(px)))
                     total = sum((v for v in vals if v is not None), Decimal(0))
                     return vals, total, all(v is not None for v in vals)
 

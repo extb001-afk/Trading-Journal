@@ -120,7 +120,7 @@ class WorkersMixin:
             if loc not in targets and now9 - int(pos[loc].get("t") or 0) > 7 * 86400:
                 pos.pop(loc, None)
         statefile.atomic_write_json(paths.state("lp_positions.json"), {"updated": now9, "positions": pos, "wallet_nfts": nfts,
-                                               "targets": sorted(targets)})
+                                               "targets": sorted(targets), **lpchain.bs_off_part()})
         self.soft_invalidate(kick=False)
         self._lp_known = set(pos)
         log.info("lp-worker: %d/%d 포지션 온체인 갱신 (대상 %d)", n_ok, n_try, len(targets))

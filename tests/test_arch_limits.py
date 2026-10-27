@@ -224,4 +224,26 @@ chk(rc5 == 0 and "쪼개야 할 파일" in out5 and t8["targets"] and all(t["to"
                                                                     for t in t8["targets"]),
     "[8] --write = 목표 표(지금 값에서 5%% 줄임 · 규칙 한도 밑으론 안 내림) + 쪼개야 할 파일 안내 rc 0(%d단위)" % len(t8["targets"]), out5[-300:])
 chk(rc6 == 2, "[8] --rate 숫자 아님 = rc 2")
+
+SW = "\n\ndef _t_sw():\n    try:\n        return 1\n    except Exception as e:\n        calcguard.swallowed('t:sw', e)\n        pass\n"
+hs9 = [ast.parse(SW).body[0].body[0].handlers[0], ast.parse(SW.replace("        pass\n", "        return 0\n")).body[0].body[0].handlers[0],
+       ast.parse(SW.replace("calcguard.swallowed('t:sw', e)", "calcguard.swallowed('t:sw', e, expected=True)")).body[0].body[0].handlers[0]]
+chk([D.swallow_pass(h) for h in hs9] == [True, False, True], "[9] swallow_pass = [swallowed, pass] 몸통만(대체값 반환 = 아님 · expected 인자는 꼴 무관)")
+base9 = next((ln for ln in R.parse_lines(read8("py_except.jsonl"), "py_except") if ln["k"] == "except.swallow_pass"), None)
+chk(base9 is not None and base9["m"] == "*" and base9["q"] == "*", "[9] 기준선 py_except.jsonl 에 except.swallow_pass 한 줄(저장소 합)", base9)
+shutil.copy(os.path.join(T.HERE, "test_arch_except.py"), TESTS8)
+
+
+def run_exc8():
+    p9 = subprocess.run([sys.executable, os.path.join(TESTS8, "test_arch_except.py")], capture_output=True, text=True, encoding="utf-8",
+                        env=ENV, timeout=600, cwd=R8)
+    return p9.returncode, p9.stdout
+
+
+rc9a, o9a = run_exc8()
+with open(os.path.join(R8, "src", "calcguard.py"), "a", encoding="utf-8") as f9:
+    f9.write(SW.replace("calcguard.swallowed", "swallowed"))
+rc9b, o9b = run_exc8()
+chk(rc9a == 0 and rc9b != 0 and "except.swallow_pass" in o9b and "= %d" % (base9["v"] + 1) in o9b if base9 else False,
+    "[9] 지금 = 통과 · 자리 하나 더(%s) = except.swallow_pass 래칫 실패" % ((base9 or {}).get("v", 0) + 1), (rc9a, rc9b, o9b[-500:]))
 T.finish()

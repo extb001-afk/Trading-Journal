@@ -258,7 +258,10 @@
   "xchain_match": "수집기",
   "xfer_match": "화면·계산",
   "xparts": "화면·계산",
-  "attfreeze": "화면·계산"
+  "attfreeze": "화면·계산",
+  "autofix": "core",
+  "autofix_apply": "core",
+  "recon_auto": "core"
  },
  "planned": {
   "ex_creds": "기반",

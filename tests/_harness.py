@@ -151,7 +151,7 @@ def doc_text(name: str = "README.md", base: str = None) -> str:
 for _k in [k for k in os.environ if k.startswith("TJ_") and not k.startswith("TJ_TEST_")]:
     del os.environ[_k]
 if os.environ.get("TJ_TEST_STRICT") == "1":
-    os.environ["TJ_STRICT"] = "1"
+    os.environ["TJ_STRICT"] = "2"
 for _k in [k for k in os.environ if k.lower() in ("http_proxy", "https_proxy", "all_proxy")]:
     del os.environ[_k]
 TMP = tempfile.mkdtemp(prefix="tj_test_")

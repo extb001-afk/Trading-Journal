@@ -140,15 +140,19 @@ def except_action(h):
     return "log" if logs else "other"
 
 
+def _is_swallowed(y):
+    f = y.func if isinstance(y, ast.Call) else None
+    return (isinstance(f, ast.Attribute) and f.attr == "swallowed" and isinstance(f.value, ast.Name)
+            and f.value.id == "calcguard") or (isinstance(f, ast.Name) and f.id == "swallowed")
+
+
 def calls_calcguard(h):
-    for st in h.body:
-        for y in ast.walk(st):
-            if isinstance(y, ast.Call):
-                f = y.func
-                if (isinstance(f, ast.Attribute) and f.attr == "swallowed" and isinstance(f.value, ast.Name)
-                        and f.value.id == "calcguard") or (isinstance(f, ast.Name) and f.id == "swallowed"):
-                    return True
-    return False
+    return any(_is_swallowed(y) for st in h.body for y in ast.walk(st))
+
+
+def swallow_pass(h):
+    b = h.body
+    return len(b) == 2 and isinstance(b[0], ast.Expr) and _is_swallowed(b[0].value) and isinstance(b[1], ast.Pass)
 
 
 def _simple_of(e, p0):

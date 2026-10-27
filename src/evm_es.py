@@ -18,6 +18,7 @@ from evm_base import _ES_Q
 from evm_base import _ES_Q_LOCK
 from evm_base import _ES_WMEM
 from evm_base import _revoke_stamp_disk
+from evm_base import conf_depth_of
 from evm_base import es_daily_left
 from evm_base import es_daily_trip
 from evm_base import es_is_daily_limit
@@ -44,7 +45,7 @@ class EtherscanWatcher(RpcSynthMixin):
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
         self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
         chain_cc = cfg["chains"][chain]
-        self.conf_depth = int(chain_cc.get("conf_depth", 12))
+        self.conf_depth = conf_depth_of(chain_cc, chain)
         self.backfill = bool(cfg.get("backfill_full_history"))
         self.backfill_months = float(cfg.get("backfill_months") or 0)
         self.bpd = int(cfg["chains"][chain].get("blocks_per_day", 7200))

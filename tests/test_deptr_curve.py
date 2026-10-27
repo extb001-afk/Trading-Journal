@@ -151,7 +151,7 @@ chk(close((rw0.get(2) or {}).get(iso(10, 14)), 1000), "C0 (종전 재현) transi
 
 src_r = T.web_src()
 src_d = open(os.path.join(T.SRC, "view_b_daily.py"), encoding="utf-8").read()
-chk(src_r.count('dep_tr9.append(') == 2 and src_r.count('"ts": int(ts9 or 0),') == 1 and src_r.count('"ts": int(ts or 0),') == 1,
+chk(src_r.count('dep_tr.append(') == 2 and src_r.count('"ts": int(ts9 or 0),') == 1 and src_r.count('"ts": int(ts or 0),') == 1,
     "D 리플레이: 업비트 대기·해외 대기 두 곳에서 입금 대기 목록 · 대기 될 수 있는 업비트 트랜짓 두 곳에 송신 시각")
 chk('dep_transit=_bs9.get("dep_tr9")' in src_d and 'list(_bs9.get("dep_tr9") or ())' in src_d, "D 30일 곡선·장기 곡선 둘 다 입금 대기 넘김")
 

@@ -1,6 +1,7 @@
 import atexit
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -10,7 +11,7 @@ import fsio
 import logs
 
 BUG_TYPES = (NameError, AssertionError)
-SUSPECT_TYPES = (KeyError, IndexError, TypeError, AttributeError, ArithmeticError, UnicodeError)
+SUSPECT_TYPES = (KeyError, IndexError, TypeError, AttributeError, ArithmeticError, ValueError, sqlite3.Error)
 STRICT_TYPES = (NameError, ImportError, AssertionError)
 FLUSH_SEC = 60
 MAX_SITES = 2000
@@ -28,8 +29,25 @@ _START = time.time()
 _CARRY: dict = {"loaded": False, "sites": {}}
 
 
+def suspect(exc: BaseException) -> bool:
+    return isinstance(exc, SUSPECT_TYPES) and not isinstance(exc, json.JSONDecodeError) \
+        and not any(c.__name__ == "ResponseTooLarge" for c in type(exc).__mro__)
+
+
+def db_env(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    m = str(exc).lower()
+    return any(k in m for k in ("no such table", "unable to open database", "database is locked"))
+
+
+def strict_level() -> int:
+    v = os.environ.get("TJ_STRICT")
+    return 2 if v == "2" else 1 if v == "1" else 0
+
+
 def strict() -> bool:
-    return os.environ.get("TJ_STRICT") == "1"
+    return strict_level() >= 1
 
 
 def _proc() -> str:
@@ -68,8 +86,9 @@ def _ensure_timer() -> None:
         _TIMER["pid"] = None
 
 
-def swallowed(site: str, exc: BaseException) -> None:
-    if strict() and isinstance(exc, STRICT_TYPES):
+def swallowed(site: str, exc: BaseException, expected: bool = False) -> None:
+    lv = strict_level()
+    if lv and (isinstance(exc, STRICT_TYPES) or (lv >= 2 and not expected and suspect(exc))):
         raise exc
     try:
         now = time.time()
@@ -90,7 +109,7 @@ def swallowed(site: str, exc: BaseException) -> None:
                 s["bug"] += 1
                 s["bug_last"] = int(now)
                 s["bug_why"] = why
-            elif isinstance(exc, SUSPECT_TYPES):
+            elif suspect(exc):
                 s["sus"] = s.get("sus", 0) + 1
                 s["sus_last"] = int(now)
                 s["sus_why"] = why

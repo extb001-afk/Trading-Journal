@@ -37,7 +37,7 @@ class KrwMixin:
             key9 = tuple(conn.execute("SELECT COUNT(*), MAX(observed_at) FROM raw_ex WHERE exchange='upbit'"
                                       " AND kind IN ('order', 'deposit', 'withdraw')").fetchone())
         except Exception as e9:   # noqa: BLE001 [fallback]
-            calcguard.swallowed("view_krw:KrwMixin._upbit_krw_timeline", e9)
+            calcguard.swallowed("view_krw:KrwMixin._upbit_krw_timeline", e9, expected=calcguard.db_env(e9))
             log.warning("업비트 원화 타임라인 조회 실패(과거일 이월 유지): %s", e9)
             return None
         if self._upbit_krw_tl and self._upbit_krw_tl[0] == key9:

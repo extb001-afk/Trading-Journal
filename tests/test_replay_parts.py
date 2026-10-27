@@ -12,7 +12,7 @@ import types  # noqa: E402
 import accounting_ctx as AC  # noqa: E402
 
 chk = T.chk
-STAGES = ("_replay_prep", "_replay_rt", "_replay_links", "_replay_main")
+STAGES = ("_replay_prep", "_replay_links", "_replay_main")
 
 
 def _parse(mod):
@@ -22,7 +22,7 @@ def _parse(mod):
 
 rp = _parse("view_b_replay")
 fns = {m.name: m for n in ast.walk(rp) if isinstance(n, ast.ClassDef) for m in n.body if isinstance(m, ast.FunctionDef) and m.name in STAGES}
-chk(set(fns) == set(STAGES), "리플레이 단계 함수 4개", sorted(fns))
+chk(set(fns) == set(STAGES), "리플레이 단계 함수 3개", sorted(fns))
 prep = fns["_replay_prep"]
 
 mk = []
@@ -53,7 +53,7 @@ def _head_cb(f):
     if not (isinstance(st, ast.Assign) and isinstance(st.targets[0], ast.Tuple) and isinstance(st.value, ast.Tuple)):
         return None
     pair = {getattr(t, "id", None): ast.unparse(v) for t, v in zip(st.targets[0].elts, st.value.elts)}
-    return st.lineno if pair.get("cb") == "_bs9['cb']" else None
+    return st.lineno if pair.get("cb") in ("_bs9['cb']", "li.cb") else None
 
 
 heads9 = {sn: _head_cb(fns[sn]) for sn in ("_replay_links", "_replay_main")}

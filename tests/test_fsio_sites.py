@@ -173,7 +173,7 @@ except FileNotFoundError:
     r9 = "FileNotFoundError"
 T.chk(r9 == "FileNotFoundError", "S11 캐시 쓰기는 폴더를 만들지 않음(종전과 같음)", r9)
 import calcguard  # noqa: E402
-calcguard.swallowed("test:fsio_sites", ValueError("한글 사유"))
+calcguard.swallowed("test:fsio_sites", ValueError("한글 사유"), expected=True)
 calcguard.flush(now=time.time())
 raw9 = open(calcguard.path_of(), encoding="utf-8").read()
 T.chk(raw9 == json.dumps(json.loads(raw9), ensure_ascii=False) and "한글 사유" in raw9 and mode_of(calcguard.path_of()) == 0o600

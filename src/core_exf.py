@@ -190,7 +190,7 @@ class ExfMixin(ExfLateMixin, ExfFutMixin):
             why = self._exf_fill_bad(f)
             ex9 = ex if re.fullmatch(r"[a-z0-9_]{1,20}", ex) else "?"
             log.warning("%s 체결 기장 안 됨(원본만 보존 — 형식 이상): %s", ex9, why)
-            calcguard.swallowed("core_exf:ExfMixin._consume_exf_fills:skip", ValueError("체결 기장 누락 %s %s" % (ex9, why)))
+            calcguard.swallowed("core_exf:ExfMixin._consume_exf_fills:skip", ValueError("체결 기장 누락 %s %s" % (ex9, why)), expected=True)
         except sqlite3.Error as e9:
             log.warning("체결 누락 확인 실패: %s", logs.safe_err(e9))
 

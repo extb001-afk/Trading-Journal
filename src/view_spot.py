@@ -849,7 +849,7 @@ class Spot:
                     self.dex_src[f"{ch}:{ca}"] = "okx"
                     self._alt_note(f"{ch}:{ca}", "okx", px, now)
                     self.jump.note(f"{ch}:{ca}", px, self.dex_reserve(ch, ca), self.min_reserve_usd, now)
-                if not self._okx_fullscan_done:
+                if not self._okx_fullscan_done and not pricing.okx_off_state():
                     self._okx_fullscan_tries += 1
                     if got2 or self._okx_fullscan_tries >= 3:
                         self._okx_fullscan_done = True
@@ -870,6 +870,7 @@ class Spot:
             "meta": dict(self.token_meta),
             "proof_div": list(self.proof_div),
             "ex_dead": dict(self.ex_dead),
+            **pricing.okx_off_part(),
             "tick": {"sec": round(tick_sec, 1), "slowest": max(self._laps, key=lambda x9: x9[1])[0] if self._laps else None},
             "usd": self.usd, "usd_ts": self.usd_ts, "rate": self.rate,
             "rate_ts": int(self.rate_ts) if self.rate else None,

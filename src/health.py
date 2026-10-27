@@ -128,6 +128,7 @@ from chk_collect import (  # noqa: F401
     collect_poison,
     collect_recon_hold,
     collect_snap_miss,
+    collect_src_off,
     collect_tunnel,
     collect_unreadable,
     collect_web,
@@ -553,7 +554,7 @@ def _safe_ts(v) -> str:
 
 
 def _adj_fresh(ck: dict, ts, now: float, lim: float) -> tuple:
-    lvl, ttl, det, act = ck.get("level"), str(ck["title"]), str(ck.get("detail") or ""), str(ck.get("action") or "")
+    lvl, ttl, det, act = ck.get("level"), str(ck["title"]), _adj_info(str(ck.get("detail") or ""), ck.get("info")), str(ck.get("action") or "")
     try:
         ts = float(ts) if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None
     except OverflowError:
@@ -567,6 +568,11 @@ def _adj_fresh(ck: dict, ts, now: float, lim: float) -> tuple:
     if lvl in ("warn", "crit"):
         return lvl, ttl, why + " — " + det, act
     return "warn", "보정 감시 관측 지연", why + " — 그때 판정: " + det, "pm2 logs tj-core 에서 '보정 감시 갱신 실패' 확인 — 갱신되면 저절로 풀려요"
+
+
+def _adj_info(det: str, info) -> str:
+    lines = [str(x) for x in (info if isinstance(info, list) else []) if isinstance(x, str) and x][:5]
+    return (det + " · " if det else "") + "참고: " + " · ".join(lines) if lines else det
 
 
 def _eval_feeds(_bs9):
@@ -770,8 +776,11 @@ def _eval_feeds(_bs9):
     if "tj-exf" in units:
         for c9 in collect_snap_miss(now) + collect_exf_hold(now):
             add(**c9)
-    for c9 in collect_calcguard(now):
+    for c9 in collect_calcguard(now) + collect_src_off(now):
+        tag = c9.pop("chip", None)
         add(**c9)
+        if tag:
+            chip(tag)
     di = obs.get("decis")
     if isinstance(di, dict) and isinstance(di.get("items"), dict) and "tj-core" in units:
         its = [x for x in di["items"].values() if isinstance(x, dict)]

@@ -14,6 +14,7 @@ from datetime import timedelta
 import config, logs, net_http, paths
 import db as dbm
 from chk_base import CALC_BUG_SHOW_S
+from chk_base import CALC_OTHER_WARN_N
 from chk_base import CALC_UNIT
 from chk_base import DEFAULTS
 from chk_base import EX_NAME
@@ -555,7 +556,7 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
         names = sorted(f for f in os.listdir(d0) if f.startswith("calcguard_") and f.endswith(".json"))
     except OSError:
         return []
-    bug, sus, other = [], [], {}
+    bug, sus, other = [], [], []
     for fn in names:
         d = _read(os.path.join(d0, fn), None)
         if not isinstance(d, dict) or not isinstance(d.get("sites"), dict):
@@ -580,9 +581,7 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
             elif ns > 0 and now - sl <= CALC_BUG_SHOW_S:
                 sus.append((proc, str(site), ns, str(it.get("sus_why") or "")[:120], sl))
             elif now - last <= CALC_BUG_SHOW_S:
-                o = other.setdefault(proc, [0, 0])
-                o[0] += 1
-                o[1] += n
+                other.append((proc, str(site), _per_day(n, it.get("first"), last), str(it.get("why") or "")[:120]))
     out = []
     if bug:
         bug.sort(key=lambda x: -x[4])
@@ -602,10 +601,46 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
                     "action": "데이터 이상일 수도, 코드 실수일 수도 있음 — 그 자리 이름으로 로그를 보고 판단. 계산은 멈추지 않고 그 단계만 건너뜀",
                     "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "calcsuspect"})
     if other:
-        out.append({"cid": "calc:swallow", "unit": "tj-web", "title": "계산 중 넘어간 예외(데이터 이상 등)", "level": "ok",
-                    "detail": " · ".join("%s %d곳 %d회" % (p9, v9[0], v9[1]) for p9, v9 in sorted(other.items())) + " — 하루 안(정보 · 알림 없음)",
-                    "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "calcswallow"})
+        other.sort(key=lambda x: (-x[2], x[1]))
+        hot = other[0][2] >= CALC_OTHER_WARN_N
+        row = {"cid": "calc:swallow", "unit": CALC_UNIT.get(other[0][0], "tj-web") if hot else "tj-web",
+               "title": "계산 중 건너뛴 예외 %d자리 · %d회(24h)" % (len(other), sum(x[2] for x in other)) + (" — 한 자리가 많음" if hot else ""),
+               "level": "warn" if hot else "ok",
+               "detail": " · ".join("%s %d회(%s)" % (b[1], b[2], b[3]) for b in other[:5]) + (" 외 %d곳" % (len(other) - 5) if len(other) > 5 else "")
+               + " — 하루 안(정보 · 알림 없음 · 한 자리 %d회 이상 = 노랑)" % CALC_OTHER_WARN_N,
+               "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "calcswallow"}
+        if hot:
+            row["action"] = "네트워크·원본 데이터 이상이면 저절로 사라짐 — 계속 많으면 그 자리 이름으로 로그 확인"
+        out.append(row)
     return out
+
+
+def collect_src_off(now: float, state_dir: str = None) -> list:
+    d0 = state_dir or paths.STATE_DIR
+    bits = []
+    spot = _read(os.path.join(d0, "spot.json"), None)
+    okx = spot.get("okx_off") if isinstance(spot, dict) else None
+    if isinstance(okx, dict) and isinstance(okx.get("until"), (int, float)) and okx["until"] > now:
+        bits.append(f"OKX DEX 시세 {okx.get('why') or ''}(키 거부) — {fmt_ts(float(okx['until']))}에 다시 · 대신 게코·덱스스크리너 값")
+    lpf = _read(os.path.join(d0, "lp_positions.json"), None)
+    bso = lpf.get("bs_off") if isinstance(lpf, dict) else None
+    for ch, v in sorted(bso.items()) if isinstance(bso, dict) else ():
+        if isinstance(v, dict) and isinstance(v.get("until"), (int, float)) and v["until"] > now:
+            bits.append(f"{ch} 블록스카웃 LP 목록 {v.get('why') or ''}(차단) — {fmt_ts(float(v['until']))}에 다시 · 원장 LP 는 그대로 평가")
+    if not bits:
+        return []
+    return [{"cid": "src:off", "unit": "tj-web", "title": "외부 조회 %d곳 쉬는 중(키 거부·차단 — 정보)" % len(bits), "level": "ok",
+             "detail": " · ".join(bits[:6]) + (" 외 %d곳" % (len(bits) - 6) if len(bits) > 6 else ""),
+             "action": "할 일 없음(값은 다른 경로로) — OKX 는 .env 의 TJ_OKX_* 키를 바꾸면 다음 분에 바로 다시 · 블록스카웃은 차단이 풀리면 다음 확인 때 저절로",
+             "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "srcoff", "chip": "외부 조회 쉼 %d곳" % len(bits)}]
+
+
+def _per_day(n: int, first, last: float) -> int:
+    try:
+        span = last - float(first or last)
+    except (TypeError, ValueError):
+        return n
+    return n if span <= 86400 else -(-n * 86400 // int(span))
 
 
 def collect_disk():

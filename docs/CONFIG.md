@@ -105,6 +105,7 @@
 | `addr_ai` | 객체 | 꺼짐 | 주소 AI 판정 워커 하루 상한·간격(enabled · daily_max 등) |
 | `addr_tier` | 객체 | inflow_sec 600 · budget_pct 80 | 쉬는·빈 지갑 잔고·유입 확인 간격과 몫(inflow_sec · budget_pct 등) |
 | `alerts` | 객체 | liq_repeat_min 60 | 알림 세부(liq_repeat_min · liq_fast 등) |
+| `autofix` | 객체 | 꺼짐 | 거래소 칸 자동 처리(창 시작 음수 · 창 이전 행 되받기) — enabled = true 면 core 가 주기마다(1차 배포 = 꺼짐 · 1회 도구 tools/ledger_rowfix.py --kind autofix_ws) |
 | `backfill` | 객체 | 없음(코드 기본값) | 과거 기록 채우기·자동 재구축 세부(닫힌 블록 — 아래 하위 키) |
 | `backfill_covered_since` | 글자 · 숫자 | 없음 | 이미 채운 것으로 보는 시작일(YYYY-MM-DD 또는 epoch) |
 | `backfill_full_history` | 참·거짓 | false | true 면 처음부터 전체 기록(backfill_months 무시 · 기초잔고 대사 꺼짐) |

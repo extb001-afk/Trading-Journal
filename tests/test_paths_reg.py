@@ -45,6 +45,12 @@ try:
         raised = e
     ok_reg = [paths.state(n) for n in ("ui_prefs.json", "cursor_evm_eth.json", "runner_tj-web.json", "solspool_x.jsonl")]
     slash = paths.registered("cursor_evm_a/b.json")
+    os.environ["TJ_STRICT"] = "2"
+    try:
+        paths.state("no_such_state_name.json")
+        raised2 = None
+    except paths.UnregisteredStateName as e:
+        raised2 = e
     os.environ.pop("TJ_STRICT")
     live = paths.state("no_such_state_name.json")
 finally:
@@ -53,6 +59,7 @@ finally:
     else:
         os.environ["TJ_STRICT"] = _old
 chk(isinstance(raised, AssertionError) and len(ok_reg) == 4, "R2 엄격 = 미등록 이름 던짐(AssertionError 계열) · 등록·틀 이름 통과", repr(raised))
+chk(isinstance(raised2, AssertionError), "R2 엄격 2단계(TJ_STRICT=2 · 시험 하네스)도 미등록 이름 던짐", repr(raised2))
 chk(live == os.path.join(paths.STATE_DIR, "no_such_state_name.json") and not slash, "R2 엄격 꺼짐 = 미등록도 그대로 합침 · 틀 {} 는 '/' 를 못 넘음")
 chk(not paths.registered(None) and not paths.registered(b"ui_prefs.json"), "R2 글자 아닌 이름 = 미등록")
 

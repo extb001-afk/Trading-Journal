@@ -16,10 +16,6 @@ from view_order import NOPX_LEGS_MAX
 log = logging.getLogger('tj-web')
 
 
-def _leaks(loc: dict, names: tuple) -> dict:
-    return {k: loc[k] for k in names if k in loc}
-
-
 def credited_index(conn):
     credited_txh = set()
     credited_gid = {}
@@ -32,7 +28,7 @@ def credited_index(conn):
         if gid0 is not None:
             qn0 = Decimal(int(r0["qty_base"])) / (Decimal(10) ** int(18 if r0["decimals"] is None else r0["decimals"]))
             credited_gid[gid0] = credited_gid.get(gid0, Decimal(0)) + qn0
-    return credited_txh, credited_gid, _leaks(locals(), ('r0', 'gid0', 'qn0'))
+    return credited_txh, credited_gid
 
 
 def bridge_dep_index(rows, gsym):
@@ -40,7 +36,7 @@ def bridge_dep_index(rows, gsym):
     for r in rows:
         if r["event"] == "BRIDGE" and r["leg_kind"] == "move_out":
             bridge_dep_ts.setdefault(gsym(r), []).append(r["event_ts"])
-    return bridge_dep_ts, _leaks(locals(), ('r',))
+    return bridge_dep_ts
 
 
 def pay_index(rows, gsym):
@@ -76,7 +72,7 @@ def pay_index(rows, gsym):
             if lk9 == "disp" and ((c9 == "st" and acq9 & {"tok", "nat"}) or (c9 == "nat" and ("tok" in acq9 or tokd9))):
                 pay_pid.add(p9)
     pay_tx = None
-    return conv_cp, tx_legsym, pay_pid, _leaks(locals(), ('r', 'cp9', 's9', 'legs9', 'acq9', 'p9', 'lk9', 'c9'))
+    return conv_cp, tx_legsym, pay_pid
 
 
 def swap_index(rows, gsym, norm, fx_uid_tx, pay_pid):
@@ -111,7 +107,7 @@ def swap_index(rows, gsym, norm, fx_uid_tx, pay_pid):
         if r["leg_kind"] == "gas" and r["event"] == "SWAP" and r["cost_usd"] is not None:
             sg9 = swap_gas.setdefault((r["source_ns"], r["source_id"]), {"usd": Decimal(0), "sell": None, "buy": None, "done": False})
             sg9["usd"] += Decimal(r["cost_usd"])
-    return tx_group, swap_gas, swap_recv, swap_pay, swap_wd_pre, _leaks(locals(), ('key', 'r', 'sg9'))
+    return tx_group, swap_gas, swap_recv, swap_pay, swap_wd_pre
 
 
 def arr_index(rows):
@@ -121,7 +117,7 @@ def arr_index(rows):
         if r["leg_kind"] == "acq" and r["event"] in ("TRANSFER_IN", "PROGRAM_IN"):
             arr_groups.setdefault((r["source_ns"], r["source_id"]), set()).add(r["group_id"] or -r["asset_id"])
             arr_tx_chain.setdefault(r["source_id"], r["chain"] or r["source_ns"])
-    return arr_groups, arr_tx_chain, _leaks(locals(), ('r',))
+    return arr_groups, arr_tx_chain
 
 
 def lp_index(conn):
@@ -147,7 +143,7 @@ def lp_index(conn):
                 m9.setdefault("mints", {})[str(t9)] = mm9
             for t9 in (d9.get("unstake") or {}):
                 (m9.get("stake") or {}).pop(str(t9), None)
-    return lp_by_tx, lp_meta_by, _leaks(locals(), ('ch9', 'd9', 'g9', 'm9', 'mm9', 'r9', 't9'))
+    return lp_by_tx, lp_meta_by
 
 
 def lp_rows_index(rows):
@@ -155,7 +151,7 @@ def lp_rows_index(rows):
     for r0 in rows:
         if str(r0["event"] or "").startswith("LP_") and r0["leg_kind"] in ("disp", "acq"):
             lp_tx_rows.setdefault((r0["source_ns"], r0["source_id"]), []).append(r0)
-    return lp_tx_rows, _leaks(locals(), ('r0',))
+    return lp_tx_rows
 
 
 def nopx_index(rows, gsym, norm, fxb):
@@ -222,7 +218,7 @@ def nopx_index(rows, gsym, norm, fxb):
             nopx_swap[key9] = {"acq": next(iter(ag9)), "aq": sum(gqa9.values(), Decimal(0)), "asym": " + ".join(gs9[k9] for k9 in gqa9),
                                "gw": {k9: (w9[k9], gqa9[k9]) for k9 in gqa9}, "est": est9, "fx": fx9, "z": zc9 or None}
     nopx_legs = nopx_bad = None
-    return nopx_swap, zv_leg, nopx_px_ok, _leaks(locals(), ('a9', 'ag9', 'est9', 'fx9', 'gpx9', 'gq9', 'gs9', 'gz9', 'k9', 'key9', 'legs9', 'p9', 'q9', 'r', 'r9', 'v9', 'w9', 'zc9'))
+    return nopx_swap, zv_leg, nopx_px_ok
 
 
 def swap_fill_index(rows, gsym, norm, fxb, zv_leg, nopx_px_ok, swap_gas, pay_pid, tx_group):
@@ -300,7 +296,7 @@ def swap_fill_index(rows, gsym, norm, fxb, zv_leg, nopx_px_ok, swap_gas, pay_pid
             if tg9 is not None and tg9[0] in zg9 and (sg9["sell"] or sg9["buy"]) is not None:
                 tx_group[key9] = (sg9["sell"] or sg9["buy"], False)
     sw9 = None
-    return swap_fill, swap_fill_est, swap_fill_zero, sw9, _leaks(locals(), ('b9', 'k9', 'key9', 'legs9', 'lk9', 'n9', 'o9', 'og9', 'p9', 'q9', 'r', 'r0', 'r9', 's9', 'sg9', 'sv9', 'v9', 'zg9'))
+    return swap_fill, swap_fill_est, swap_fill_zero, sw9
 
 
 def bridge_rcpt_index(rows, gsym, norm, zv_leg, nopx_swap):
@@ -342,7 +338,7 @@ def bridge_rcpt_index(rows, gsym, norm, zv_leg, nopx_swap):
             if all(lo9 <= k9 < hi9 for k9 in ks9):
                 rows[lo9:hi9] = sorted(rows[lo9:hi9], key=lambda r9: {"move_out": 0, "move_in": 1}.get(r9["leg_kind"], 2))
     br_legs9 = None
-    return br_legs9, _leaks(locals(), ('i9', 'k9', 'key9', 'ks9', 'legs9', 'lo9', 'o9', 'og9', 'r', 'r9'))
+    return br_legs9
 
 
 def roundtrip_index(rows, norm):
@@ -378,4 +374,4 @@ def roundtrip_index(rows, norm):
             rt_pair[kis[0]] = ko
             rt_back[ko] = (set(_ri[kis[0]]["a"]), set(_ri[kis[0]]["a"]) == set(_ro[ko]["a"]))
     rt_out = set(rt_pair.values())
-    return rt_pair, rt_transit, rt_back, rt_out, _leaks(locals(), ('_ro', 'loc0', 'r0'))
+    return rt_pair, rt_transit, rt_back, rt_out, _ro

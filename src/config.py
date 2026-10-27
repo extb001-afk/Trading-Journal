@@ -317,6 +317,11 @@ def exf_binance_dividends(cfg: dict, sect: str = "exf") -> bool:
     return not (isinstance(blk, dict) and blk.get("binance_dividends") is False)
 
 
+def autofix_enabled(cfg: dict, sect: str = "autofix") -> bool:
+    blk = (cfg or {}).get(sect) if isinstance(cfg, dict) else None
+    return isinstance(blk, dict) and blk.get("enabled") is True
+
+
 def upbit_poll_sec(cfg) -> int:
     return _poll_cfg(cfg, "upbit", UPBIT_POLL_DEFAULT, 10, 3600)
 

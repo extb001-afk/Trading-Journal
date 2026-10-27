@@ -187,8 +187,8 @@ def registry_problems(src_dir, reg, sites=None, state=None):
 
 
 shape = []
-if [e.n for e in REG] != list(range(len(REG))) or len(REG) != 9:
-    shape.append("번호 0~8 연속 아님")
+if [e.n for e in REG] != list(range(len(REG))) or len(REG) != 10:
+    shape.append("번호 0~9 연속 아님")
 if len({e.name for e in REG}) != len(REG):
     shape.append("이름 겹침")
 shape += ["종류 %s: %s" % (e.name, e.kind) for e in REG if e.kind not in KINDS]
@@ -197,7 +197,7 @@ e0 = REG[0]
 if (e0.kind, e0.where, e0.callers, e0.data_rev) != ("스키마 확장", "db.DDL", ("db.open_db",), 0):
     shape.append("0 = 기준 스키마 칸")
 shape += ["빈 칸 %s" % e.name for e in REG if not (e.stamp and e.where and e.callers and e.again and e.rebuild)]
-chk(not shape, "R1 등록부 모양(번호 0~8 · 이름 고유 · 종류 4종 · 0 = 기준 스키마 · startup 줄만 위치 글·로그 글 · 빈 칸 0)", shape)
+chk(not shape, "R1 등록부 모양(번호 0~9 · 이름 고유 · 종류 4종 · 0 = 기준 스키마 · startup 줄만 위치 글·로그 글 · 빈 칸 0)", shape)
 
 ddl_bad = [s.split("(")[0][:60] for s in db.DDL
            if not re.match(r"^\s*(?:PRAGMA\b|CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|TRIGGER)\s+IF\s+NOT\s+EXISTS\b)", s, re.I)
@@ -211,8 +211,8 @@ chk(all(1 <= r <= db.DATA_REV and r in db.DATA_REVS for r in revs) and len(set(r
 roots = [("", T.SRC)] + ([("tools/", TOOLS)] if HAVE_TOOLS else [])
 sites = call_sites(roots, [e.name for e in REG if e.n])
 got = stamp_funcs(T.SRC)
-chk(len(got) == 15 and len(set(got) - set(STATE)) == 8 and set(STATE) <= set(got),
-    "R3 같은 meta 열쇠를 읽고 쓰는 src 함수 15 = 1회 변환 8 + 상태 열쇠 7(닫힌 표 · 엔진이 비지 않음 · 표 줄이 다 쓰임)", sorted(got))
+chk(len(got) == 16 and len(set(got) - set(STATE)) == 9 and set(STATE) <= set(got),
+    "R3 같은 meta 열쇠를 읽고 쓰는 src 함수 16 = 1회 변환 9(세션32 자동 처리 칸 영수증 포함) + 상태 열쇠 7(닫힌 표 · 엔진이 비지 않음 · 표 줄이 다 쓰임)", sorted(got))
 probs = registry_problems(T.SRC, REG, sites)
 chk(not probs, "R3·R4 등록부 = 도장 함수(정의 자리·도장 무늬) · 부르는 자리(src%s)" % ("·tools" if HAVE_TOOLS else " — 공개판 배치: tools 건너뜀"), probs)
 bumps = func_calls(T.SRC, "bump_data_rev")
