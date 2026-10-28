@@ -7,7 +7,6 @@ import _harness as T  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
-import stat  # noqa: E402
 import subprocess  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
@@ -18,9 +17,7 @@ CFG = {"chains": {}, "wallets": [], "backfill_months": 5, "backfill_since": "202
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
 import config, paths  # noqa: E402
 import core  # noqa: E402
-import db as dbm  # noqa: E402
 import autofix as AF  # noqa: E402
-import autofix_apply as AP  # noqa: E402
 
 DAY = 86400
 T0 = 1767225600
@@ -105,7 +102,7 @@ def late(aid, sym, tag, dt, q):
 
 
 c.conn.commit()
-rc, out = tool("--kind", "autofix_ws", "--apply")
+rc, out = tool("--kind", "autofix_ws", "--apply", "--backup-now", "--allow-big")
 c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('recon_done_exf_okx', ?)", (str(B1 + DAY),))
 c.conn.commit()
 rec0 = AF.read_receipts(c.conn)

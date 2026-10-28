@@ -109,9 +109,9 @@ T.chk(rc == 1 and "배포 장벽" in out and dump() == s0, "P2 배포·롤백이
 rc, out = tool("--kind", "autofix_ws")
 T.chk(rc == 0 and "A 1 · A' 3 · 남김 1" in out and dump() == s0 and "U 자릿수" in out, "P2 점검 = 원장 무변 · 칸 수·자릿수", out[-600:])
 
-rc, out = tool("--kind", "autofix_ws", "--apply")
+rc, out = tool("--kind", "autofix_ws", "--apply", "--backup-now", "--allow-big")
 s1 = dump()
-T.chk(rc == 0 and s1[1] == s0[1], "P3 적용 rc 0 · 포지션 전 칸 무변(I1)", out[-600:])
+T.chk(rc == 0 and s1[1] == s0[1] and "원장 사본(--backup-now)" in out and "원장 백업 확인" in out, "P3 적용 rc 0 · 포지션 전 칸 무변(I1) · 백업 사본·신선도 확인", out[-600:])
 T.chk([bal(s1[0], Q, T0 + d * DAY) for d in (0, 5, 10, 20, 300)] == [x * E8 for x in (0, 30, 5, 55, 35)] and bal(s1[0], Q, T0 + 20 * DAY + 1) == 35 * E8
       and all(bal(s1[0], Q, t) == bal(s0[0], Q, t) for t in (T0 + 20 * DAY + 1, B1, B1 + DAY)),
       "P3 QQQ 궤적 = 창 시작 0 · 30 · 5 · τ 55 · τ+1초 35 (바닥 이상) · 그 뒤 = 적용 전과 같음(I2)", [bal(s1[0], Q, T0 + d * DAY) for d in (0, 5, 10, 20)])
@@ -185,6 +185,10 @@ rc, out = tool("--data-rev-down", "1", "--apply")
 c.conn.commit()
 T.chk(rc == 0 and dbm.ledger_data_rev(c.conn) == 1 and not AF.read_receipts(c.conn), "P8 전부 되돌린 뒤 data_rev 2 → 1", out[-300:])
 
+BIG = ax("okx", "BIG")
+c._post_leg_strict("exchange", "okx:trade", "okx:tbig", 0, T0 + 1, BIG, "exchange:okx", 10 ** 6 * E8, None, None, "acq", "EXF_BUY")
+gid9 = lambda aid: c.conn.execute("SELECT group_id FROM assets WHERE asset_id=?", (aid,)).fetchone()[0]   # noqa: E731
+json.dump({"2026-01-01": {"p": {str(gid9(Q)): 0.001, str(gid9(X9)): 0.001, str(gid9(BIG)): 1.0}}}, open(paths.state("daily_px.json"), "w"))
 c.conn.commit()
 s4 = dump()
 T.chk(AP.core_pass(c.svc_exf, now=B1 + 10 * DAY) == 0 and dump() == s4, "P9 core 자동 경로 기본 꺼짐 = 무동작")

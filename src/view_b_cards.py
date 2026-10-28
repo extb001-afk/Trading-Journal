@@ -1101,7 +1101,6 @@ class CardsMixin:
                 _calc_err_mark(positions[-1], None, g)
                 continue
             px = live_px.get(gid) or 0
-            total_flows = len(g["flows"])
             k_all = g["qty_known"] + uncred_known.get(gid, Decimal(0))
             c_all = g["cost"] + uncred_cost.get(gid, Decimal(0))
             for i, fl in enumerate(g["flows"]):

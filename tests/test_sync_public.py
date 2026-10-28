@@ -59,10 +59,19 @@ def _files_of(d):
 NOSTRIP = {}
 
 
-def run(*a, scan=None, smap=NOSTRIP):
+LINT_OK = "digest {d}\nAll checks passed!\nSuccess: no issues found in 13 source files\n"
+LINT_F = os.path.join(BASE, "lint.txt")
+
+
+def run(*a, scan=None, smap=NOSTRIP, lint=LINT_OK):
+    a = list(a)
+    if lint is not None:
+        with open(LINT_F, "w", encoding="utf-8") as f:
+            f.write(lint.format(d=SP.lint_digest(a[0]) if os.path.isdir(a[0]) else ""))
+        a += ["--lint", LINT_F]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        rc = SP.main(list(a), scan=scan, smap=smap)
+        rc = SP.main(a, scan=scan, smap=smap)
     return rc, buf.getvalue()
 
 
@@ -91,6 +100,51 @@ rc, out = run(OUT, PUB, "--apply", scan=ok_scan)
 chk(rc == 1 and "원본과 바이트 다름: VERSION" in out and status() == "", "[1] 산출물이 이 트리 빌드와 다름 = rc 1 · 무변", out[-300:])
 shutil.copyfile(os.path.join(ROOT, "VERSION"), os.path.join(OUT, "VERSION"))
 os.chmod(os.path.join(OUT, "VERSION"), 0o644)
+rc, out = run(OUT, PUB, "--apply", scan=ok_scan, lint=None)
+chk(rc == 2 and "린트 결과 파일(--lint" in out and status() == "" and head() == H0, "[1b] --lint 안 줌 = rc 2 · 무변", out[-200:])
+rc, out = run(OUT, PUB, "--apply", "--lint", os.path.join(BASE, "no_such_lint.txt"), scan=ok_scan, lint=None)
+chk(rc == 2 and "no_such_lint.txt" in out and status() == "", "[1b] 린트 결과 파일 없음 = rc 2 · 무변", out[-200:])
+for nm1b, txt1b, want1b in (
+        ("ruff 오류", "digest {d}\nsrc/x.py:1:1: F841 Local variable `a` is assigned to but never used\nFound 1 error.\nSuccess: no issues found in 13 source files\n",
+         ("ruff 통과 줄", "린트 오류 줄: Found 1 error.")),
+        ("mypy 통과 줄 없음", "digest {d}\nAll checks passed!\nsrc/x.py:3: error: bad\nFound 1 error in 1 file (checked 13 source files)\n", ("mypy 통과 줄", "린트 오류 줄")),
+        ("지문 다름(옛 결과)", "digest " + "0" * 64 + "\nAll checks passed!\nSuccess: no issues found in 13 source files\n", ("지문이 이 산출물과 다름",)),
+        ("지문 줄 없음", "All checks passed!\nSuccess: no issues found in 13 source files\n", ("digest 줄 없음",)),
+        ("지문 두 번(이어 붙인 결과)", "digest {d}\ndigest {d}\nAll checks passed!\nSuccess: no issues found in 13 source files\n", ("지문이 이 산출물과 다름",))):
+    rc, out = run(OUT, PUB, "--apply", scan=ok_scan, lint=txt1b)
+    chk(rc == 1 and all(w in out for w in want1b) and status() == "" and head() == H0, "[1b] 린트 %s = rc 1 · 무변" % nm1b, out[-300:])
+D1b = SP.lint_digest(OUT)
+with open(os.path.join(OUT, "src", "version.py"), "ab") as f:
+    f.write(b"\n")
+chk(SP.lint_digest(OUT) != D1b, "[1b] 산출물 .py 한 바이트 바뀜 = 지문 바뀜(고친 뒤 옛 결과 거부)")
+shutil.copyfile(os.path.join(ROOT, "src", "version.py"), os.path.join(OUT, "src", "version.py"))
+os.chmod(os.path.join(OUT, "src", "version.py"), 0o644)
+chk(SP.lint_digest(OUT) == D1b, "[1b] 되돌리면 같은 지문")
+PP1b = os.path.join(OUT, "pyproject.toml")
+with open(PP1b, "rb") as f:
+    pp0 = f.read()
+with open(PP1b, "ab") as f:
+    f.write(b"\n")
+chk(SP.lint_digest(OUT) != D1b, "[1b] 린트 설정(pyproject.toml)만 바뀌어도 지문 바뀜(설정 바꾼 뒤 옛 결과 거부)")
+with open(PP1b, "wb") as f:
+    f.write(pp0)
+AP1b = os.path.join(BASE, "--apply")
+with open(AP1b, "w", encoding="utf-8") as f:
+    f.write(LINT_OK.format(d=D1b))
+cwd1b = os.getcwd()
+os.chdir(BASE)
+try:
+    rc, out = run(OUT, PUB, "--lint", "--apply", scan=ok_scan, lint=None)
+finally:
+    os.chdir(cwd1b)
+chk("(계획 — 쓰기 0)" in out and status() == "" and head() == H0, "[1b] --lint 값 '--apply'(파일 이름) = 적용 아님 · 계획만 · 무변", (rc, out[-300:]))
+os.unlink(AP1b)
+if shutil.which("sha256sum") and shutil.which("find") and shutil.which("xargs"):
+    sh1b = subprocess.run(["bash", "-c", "{ find src tools tests -name '*.py' -type f -print0; printf 'pyproject.toml\\0'; } | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-64"],
+                          cwd=OUT, capture_output=True, text=True)
+    chk(sh1b.returncode == 0 and sh1b.stdout.strip() == D1b, "[1b] 지문 = 도구 docstring 셸 한 줄과 같은 값", (sh1b.stdout.strip(), D1b, sh1b.stderr[-200:]))
+else:
+    print("SKIP [1b] sha256sum 없음 — 셸 한 줄 대조 건너뜀")
 NOTGIT = os.path.join(BASE, "notgit")
 os.makedirs(NOTGIT)
 rc, out = run(OUT, NOTGIT, "--apply", scan=ok_scan)

@@ -3,9 +3,11 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import secrets
+import tempfile
 import time
 from decimal import Decimal, localcontext
 
@@ -283,7 +285,7 @@ def _digest(rows) -> str:
 
 
 def _apply(rows, kind, before_commit=None):
-    rw = sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
+    rw = _rw()
     try:
         rw.execute("BEGIN IMMEDIATE")
         for r in rows:
@@ -313,7 +315,7 @@ def _apply(rows, kind, before_commit=None):
 
 
 def _undo(rows):
-    rw = sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
+    rw = _rw()
     try:
         rw.execute("BEGIN IMMEDIATE")
         if rw.execute("DELETE FROM meta WHERE k=?", (RECEIPT + _digest(rows),)).rowcount != 1:
@@ -365,9 +367,12 @@ def _args(argv):
     ap.add_argument("--kind", choices=sorted(PLANS) + [AUTOFIX_KIND], help="정정 종류(" + " · ".join(sorted(PLANS) + [AUTOFIX_KIND]) + ")")
     ap.add_argument("--undo-autofix", metavar="EX:SYM", help="자동 처리 칸 되돌리기(영수증 기준 · 그 칸 autofix_off 를 넣음) — --apply 와 같이 써야 씀")
     ap.add_argument("--autofix-on", metavar="EX:SYM", help="되돌린 칸의 autofix_off 표식 지움(다시 켜기) — --apply 와 같이")
+    ap.add_argument("--ack-autofix", metavar="EX:SYM", help="자동 처리한 큰 미확인 유출을 확인함(영수증에 표시 → 보정 감시 노랑 내림) — --apply 와 같이")
     ap.add_argument("--data-rev-down", type=int, metavar="N", help="원장 data_rev 2 → 1(자동 처리 영수증·행 0 일 때만 · 옛 판 코드 롤백 전) — --apply 와 같이")
     ap.add_argument("--undo", metavar="UNDO_JSON", help="되돌리기(state/ledger_rowfix_undo_….json) — --apply 와 같이 써야 실제로 씀")
     ap.add_argument("--apply", action="store_true", help="실제로 쓴다(없으면 점검만)")
+    ap.add_argument("--backup-now", action="store_true", help="autofix_ws --apply 만: 첫 칸 전에 원장 사본 state/ledger.db.pre_autofix_<시각>(sqlite 백업 API · 디스크 여유 검사)")
+    ap.add_argument("--allow-big", action="store_true", help="autofix_ws --apply 만: 큰 칸(U 평가액 ≥ $500 또는 장소 2% · 단가 모름)도 처리(기본 = 건너뜀 · 사람이 확인)")
     ap.add_argument("--late-anchor", action="store_true", help="okx_prewin 만: 첫 대사 앵커가 창 시작 뒤인 칸도 합이 0 이면 쌍 삭제(기본 꺼짐 = 남김 · "
                     "켜면 그 칸 창 시작~첫 대사 잔고가 0 — 수집기가 처음부터 걸렀을 때와 같음 · 합<0 칸은 늘 남김)")
     return ap.parse_args(argv)
@@ -375,14 +380,17 @@ def _args(argv):
 
 def main(argv=None):
     a = _args(sys.argv[1:] if argv is None else argv)
-    if not a.undo and not a.kind and not a.undo_autofix and not a.autofix_on and a.data_rev_down is None:
+    if not a.undo and not a.kind and not a.undo_autofix and not a.autofix_on and not a.ack_autofix and a.data_rev_down is None:
         print("거부: --kind 또는 --undo 가 필요해요(종류: " + " · ".join(sorted(PLANS) + [AUTOFIX_KIND]) + ")")
         return 2
-    if sum(bool(x) for x in (a.undo, a.kind, a.undo_autofix, a.autofix_on, a.data_rev_down is not None)) != 1:
-        print("거부: --kind · --undo · --undo-autofix · --autofix-on · --data-rev-down 중 하나만")
+    if sum(bool(x) for x in (a.undo, a.kind, a.undo_autofix, a.autofix_on, a.ack_autofix, a.data_rev_down is not None)) != 1:
+        print("거부: --kind · --undo · --undo-autofix · --autofix-on · --ack-autofix · --data-rev-down 중 하나만")
         return 2
     if a.late_anchor and (a.undo or a.kind != "okx_prewin"):
         print("거부: --late-anchor 는 --kind okx_prewin 점검·적용에만")
+        return 2
+    if (a.backup_now or a.allow_big) and not (a.kind == AUTOFIX_KIND and a.apply):
+        print("거부: --backup-now · --allow-big 는 --kind autofix_ws --apply 에만")
         return 2
     assert os.path.abspath(paths.DB_PATH).startswith(os.path.abspath(paths.STATE_DIR)), "DB 경로가 state 밖"
     print(f"원장 {paths.DB_PATH}")
@@ -418,7 +426,7 @@ def _barrier(apply: bool):
 
 
 def _run(a):
-    if a.kind == AUTOFIX_KIND or a.undo_autofix or a.autofix_on or a.data_rev_down is not None:
+    if a.kind == AUTOFIX_KIND or a.undo_autofix or a.autofix_on or a.ack_autofix or a.data_rev_down is not None:
         return _run_autofix(a)
     if a.undo:
         try:
@@ -482,7 +490,105 @@ AUTOFIX_KIND = "autofix_ws"
 
 
 def _rw():
-    return sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
+    rw = sqlite3.connect(paths.DB_PATH, timeout=30, isolation_level=None)
+    why9 = dbm.fence_why(rw)
+    if why9:
+        rw.close()
+        raise RuntimeError("거부(세대 펜스 · 원장 무변): " + why9)
+    return rw
+
+
+def _backup_fresh():
+    import ledger_restore as LR
+    db = paths.DB_PATH
+    last = max(os.stat(p).st_mtime for p in (db, db + "-wal") if os.path.exists(p))
+    rows = LR.backups(paths.STATE_DIR)
+    hint = "--backup-now 를 같이(적용 전에 원장 사본 state/ledger.db.pre_autofix_<시각> · sqlite 백업 API · 디스크 여유 검사) · 백업 목록 = python3 tools/ledger_restore.py list"
+    if not rows:
+        return False, "거부: 원장 백업이 하나도 없음 — 먼저 백업: " + hint
+    newest = max(rows, key=lambda r: os.stat(r["path"]).st_mtime)
+    bt = os.stat(newest["path"]).st_mtime
+    fmt = lambda t: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))   # noqa: E731
+    if bt >= last:
+        return True, f"원장 백업 확인: {newest['name']}({fmt(bt)}) = 원장 마지막 쓰기({fmt(last)}) 뒤"
+    return False, f"거부: 가장 최근 원장 백업 {newest['name']}({fmt(bt)})이 원장 마지막 쓰기({fmt(last)})보다 오래됨 — 먼저 백업: " + hint
+
+
+def _backup_now(now: int) -> str:
+    db = paths.DB_PATH
+    dst = db + ".pre_autofix_" + time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+    if os.path.exists(dst):
+        raise RuntimeError(f"사본 이름 충돌 {os.path.basename(dst)} — 잠시 뒤 다시")
+    for left in os.listdir(os.path.dirname(dst)):
+        if left.startswith(os.path.basename(db) + ".autofix_backup_") and ".tmp" in left:
+            try:
+                os.remove(os.path.join(os.path.dirname(dst), left))
+            except OSError:
+                pass
+    size = sum(os.path.getsize(p) for p in (db, db + "-wal") if os.path.exists(p))
+    need = max(512 * 1024 ** 2, int(size * 1.2))
+    free = shutil.disk_usage(paths.STATE_DIR).free
+    if free < need:
+        raise RuntimeError(f"디스크 여유 {free / 1024 ** 3:.1f}GB < 필요 {need / 1024 ** 3:.1f}GB(원장 {size / 1024 ** 3:.2f}GB × 1.2) — 자리를 비운 뒤 다시")
+    fd9, tmp = tempfile.mkstemp(prefix=os.path.basename(db) + ".autofix_backup_", suffix=".tmp", dir=os.path.dirname(dst))
+    os.close(fd9)
+    try:
+        src = sqlite3.connect(paths.sqlite_ro_uri(db), uri=True, timeout=60)
+        dst_c = sqlite3.connect(tmp)
+        try:
+            src.backup(dst_c)
+            jm = (dst_c.execute("PRAGMA journal_mode=DELETE").fetchone() or [""])[0]
+            if dst_c.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                raise sqlite3.DatabaseError("사본 무결성 검사 실패")
+            if not (dst_c.execute("SELECT count(*) FROM meta").fetchone() or [0])[0]:
+                raise sqlite3.DatabaseError("사본 meta 비어 있음")
+        finally:
+            dst_c.close()
+            src.close()
+        if str(jm).lower() != "delete":
+            raise sqlite3.DatabaseError(f"사본 저널 전환 실패({jm})")
+        for sfx in ("-wal", "-shm"):
+            if os.path.exists(tmp + sfx):
+                os.remove(tmp + sfx)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, dst)
+    except BaseException:
+        for sfx in ("", "-wal", "-shm", "-journal"):
+            try:
+                if os.path.exists(tmp + sfx):
+                    os.remove(tmp + sfx)
+            except OSError:
+                pass
+        raise
+    return dst
+
+
+def _ack_autofix(rw, ex9: str, sym9: str, now: int) -> str:
+    import autofix as AF
+    import autofix_apply as AP
+    key9 = AF.receipt_key(ex9, sym9)
+    rw.execute("BEGIN IMMEDIATE")
+    try:
+        row = rw.execute("SELECT v FROM meta WHERE k=?", (key9,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"{ex9}:{sym9} 영수증 없음(자동 처리한 칸이 아님)")
+        try:
+            rec = json.loads(row[0])
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f"영수증 해석 불가({type(e).__name__})") from e
+        if not isinstance(rec, dict):
+            raise RuntimeError("영수증 해석 불가(꼴)")
+        if not rec.get("auto") or rec.get("state") != AF.ST_APPLIED:
+            rw.execute("ROLLBACK")
+            return f"할 일 없음({ex9}:{sym9} 자동 행 없음 · 상태 {rec.get('state')} — 노랑 대상 아님)"
+        rec[AP.ACK] = {"at": int(now), "U": str(rec.get("U"))}
+        rw.execute("UPDATE meta SET v=? WHERE k=?", (json.dumps(rec, ensure_ascii=False, sort_keys=True), key9))
+        rw.execute("COMMIT")
+    except BaseException:
+        if rw.in_transaction:
+            rw.execute("ROLLBACK")
+        raise
+    return f"확인 표시 {ex9}:{sym9}(U 자릿수 {_digits(rec.get('U'))}) — 보정 감시 노랑은 다음 갱신(core 기동 뒤 ≤10분) 때 내려감 · 유출이 더 커지면 표시가 지워지고 다시 노랑"
 
 
 def _cell_arg(v):
@@ -500,63 +606,99 @@ def _digits(v) -> int:
 def _run_autofix(a):
     import autofix as AF
     import autofix_apply as AP
-    if a.data_rev_down is not None or a.undo_autofix or a.autofix_on:
-        ex9, sym9 = _cell_arg(a.undo_autofix or a.autofix_on)
-        if (a.undo_autofix or a.autofix_on) and not ex9:
+    import recon_adj as RA
+    if a.data_rev_down is not None or a.undo_autofix or a.autofix_on or a.ack_autofix:
+        ex9, sym9 = _cell_arg(a.undo_autofix or a.autofix_on or a.ack_autofix)
+        if (a.undo_autofix or a.autofix_on or a.ack_autofix) and not ex9:
             print("거부: 칸은 <거래소>:<심볼> 꼴(예 okx:USDT)")
             return 2
         if not a.apply:
             c = _ro()
             try:
                 rec = AF.read_receipts(c).get((ex9, sym9)) if ex9 else None
-                print(f"(점검만 — 쓰려면 --apply) 영수증 {'있음 · 상태 ' + str(rec.get('state')) if rec else '없음'} · data_rev {dbm.ledger_data_rev(c)}")
+                print(f"(점검만 — 쓰려면 --apply) 영수증 {'있음 · 상태 ' + str(rec.get('state')) + (' · 확인함' if rec.get(AP.ACK) else '') if rec else '없음'}"
+                      f" · data_rev {dbm.ledger_data_rev(c)}")
             finally:
                 c.close()
             return 0
-        rw = _rw()
+        rw = None
         try:
+            rw = _rw()
             if a.data_rev_down is not None:
                 print(AP.data_rev_down(rw, a.data_rev_down))
             elif a.undo_autofix:
                 rec = AP.undo_cell(rw, ex9, sym9, touch=_invalidate)
                 print(f"되돌림 {ex9}:{sym9} — 창 이전 행 {len(rec.get('prewin') or [])}개 복원 · 자동 행 {'지움' if rec.get('auto') else '없음'} · autofix_off 넣음")
+            elif a.ack_autofix:
+                print(_ack_autofix(rw, ex9, sym9, int(time.time())))
             else:
                 print("켬(autofix_off 지움)" if AP.autofix_on(rw, ex9, sym9) else "할 일 없음(끄기 표식 없음)")
-        except (AP.Refused, sqlite3.Error, ValueError) as e:
+        except (RuntimeError, sqlite3.Error, ValueError) as e:
             print(f"★전부 취소(원장 무변)★ {e}")
             return 4
         finally:
-            rw.close()
+            if rw is not None:
+                rw.close()
         return 0
     conn = _ro()
     try:
         cells = AF.plan_cells(conn, AF.venue_gap, AF.debt_floor_fn(), int(time.time()), win=_planner(conn))
+        px9 = RA.prices()
+        try:
+            vals9 = RA.venue_values(conn, px9, strict=True)
+            big = {(c["ex"], c["sym"]): AP.big_why(conn, c, px9, vals9) for c in cells if c["kind"] == AF.KIND_A}
+        except sqlite3.Error as e9:
+            big = {(c["ex"], c["sym"]): f"큰 칸 판정 불가(장소 평가액 읽기 실패: {e9})" for c in cells if c["kind"] == AF.KIND_A and c["add"]}
+        why_fence = dbm.fence_why(conn)
     finally:
         conn.close()
     for c in cells:
         print(f"{c['ex']:<10} {c['sym']:<8} 꼴 {c['kind']:<4} 사유 {AF.SKIP_WHY.get(c['why'], c['why'])}"
               + ("" if c["kind"] == AF.KIND_SKIP else f" · 지움 {len(c['delete'])} · 정정 {len(c['setq'])} · 새 행 {len(c['add'])}"
                  f" · τ {time.strftime('%Y-%m-%d', time.gmtime(int(c['tau'])))} · X 자릿수 {_digits(c['X'])} · U 자릿수 {_digits(c['U'])}"
-                 + (" · 빈 구간 안" if c.get("gap") else "")))
+                 + (" · 빈 구간 안" if c.get("gap") else "") + (f" · ★{big[(c['ex'], c['sym'])]}★" if big.get((c["ex"], c["sym"])) else "")))
     todo = [c for c in cells if c["kind"] in (AF.KIND_A, AF.KIND_A2)]
-    print(f"칸 {len(cells)} · A {sum(c['kind'] == AF.KIND_A for c in cells)} · A' {sum(c['kind'] == AF.KIND_A2 for c in cells)} · 남김 {len(cells) - len(todo)}")
+    n_big = sum(1 for c in todo if big.get((c["ex"], c["sym"])))
+    print(f"칸 {len(cells)} · A {sum(c['kind'] == AF.KIND_A for c in cells)} · A' {sum(c['kind'] == AF.KIND_A2 for c in cells)} · 남김 {len(cells) - len(todo)}"
+          + (f" · 큰 칸 {n_big}(--allow-big 없이는 건너뜀)" if n_big else ""))
     if not a.apply or not todo:
         print("(점검만 — 쓰려면 --apply)" if a.apply is False else "할 일 없음")
         return 0
-    floor, now, bad = AF.debt_floor_fn(), int(time.time()), 0
+    if why_fence:
+        print("거부(세대 펜스 · 원장 무변): " + why_fence)
+        return 1
+    now = int(time.time())
+    if a.backup_now:
+        try:
+            print("원장 사본(--backup-now):", _backup_now(now))
+        except (OSError, sqlite3.Error, RuntimeError) as e:
+            print(f"거부: 원장 사본 실패 — {e}(원장 무변)")
+            return 1
+    ok9, msg9 = _backup_fresh()
+    print(msg9)
+    if not ok9:
+        return 1
+    floor, bad = AF.debt_floor_fn(), 0
     for c in todo:
+        key9 = (c["ex"], c["sym"])
+        if big.get(key9) and not a.allow_big:
+            bad += 1
+            print(f"★{c['ex']}:{c['sym']} 건너뜀(그 칸 원장 무변)★ {big[key9]} — 처리하려면 --allow-big 을 같이")
+            continue
         name = AP.undo_file(c["ex"], c["sym"], now)
         path = os.path.join(paths.STATE_DIR, name)
         if os.path.exists(path):
             print(f"거부: 되돌리기 파일 이름 충돌 {name}")
             return 4
         _write_undo(path, {"kind": AP.UNDO_KIND, "applied": False, "plan": {k: c[k] for k in ("ex", "sym", "kind")}})
-        rw = _rw()
+        rw = None
         try:
+            rw = _rw()
             AP.apply_cell(rw, c, now, floor=lambda t, _c=c: floor(_c["ex"], _c["sym"], t), undo_name=name,
                           write_undo=AP.write_undo_fn(path), touch=_invalidate)
-            print(f"적용 {c['ex']}:{c['sym']}({c['kind']}) · 되돌리기 = --undo-autofix {c['ex']}:{c['sym']} --apply · 영수증 사본 {path}")
-        except (AP.Refused, OSError, sqlite3.Error, ValueError) as e:
+            print(f"적용 {c['ex']}:{c['sym']}({c['kind']}){' · 큰 칸(--allow-big)' if big.get(key9) else ''} · 되돌리기 = --undo-autofix {c['ex']}:{c['sym']} --apply"
+                  f" · 영수증 사본 {path}")
+        except (RuntimeError, OSError, sqlite3.Error, ValueError) as e:
             bad += 1
             try:
                 _write_undo(path, {"kind": AP.UNDO_KIND, "applied": False, "plan": {k: c[k] for k in ("ex", "sym", "kind")}})
@@ -564,7 +706,8 @@ def _run_autofix(a):
                 pass
             print(f"★{c['ex']}:{c['sym']} 적용 취소(그 칸 원장 무변)★ {e}")
         finally:
-            rw.close()
+            if rw is not None:
+                rw.close()
     return 4 if bad else 0
 
 

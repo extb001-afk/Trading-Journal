@@ -146,7 +146,27 @@ cx.execute("UPDATE raw_observations SET observed_at=? WHERE kind='adj_why'", (NO
 cx.commit()
 rows, _ = run(values={"okx": 1_000_000.0})
 d6 = recon_adj.summarize(with_usd(rows, 15_000.0), NOW, {"okx": 1_000_000.0})
-chk(d6["warn_n"] == 0 and recon_adj.check(d6, NOW)["level"] == "ok", "C3 경고 시각 = K11 기록 시각(14일 전 = 7일 창 밖)", recon_adj.check(d6, NOW))
+ck6 = recon_adj.check(d6, NOW)
+chk(d6["warn_n"] == 1 and d6["auto"]["n7"] == 0 and ck6["level"] == "warn" and ck6["tg"] is False and "확인 전" in ck6["title"] and "--ack-autofix" in ck6["action"],
+    "C3 경고 시각 = K11 기록 시각(14일 전 = 7일 집계 밖) — 세션36 b5: 확인 전엔 노랑 유지(텔레그램 7일 집계는 0 · 제목 '확인 전' · 할 일 --ack-autofix)", ck6)
+meta(autofix.receipt_key("okx", "TKJ"), json.dumps(dict(json.loads(RCPT), ack={"at": NOW - DAY, "U": "100"})))
+cx.commit()
+rows, _ = run(values={"okx": 1_000_000.0})
+d6b = recon_adj.summarize(with_usd(rows, 15_000.0), NOW, {"okx": 1_000_000.0})
+chk(d6b["warn_n"] == 0 and recon_adj.check(d6b, NOW)["level"] == "ok" and all(x["ack"] for x in of(rows, "TKJ", recon_auto.SITE_AUTO)),
+    "C3 영수증 ack(사용자 확인) = 노랑 내려감(ok)", recon_adj.check(d6b, NOW))
+d6d = recon_adj.summarize([dict(x, made=NOW - DAY) if x["site"] == recon_auto.SITE_AUTO else x for x in with_usd(rows, 15_000.0)], NOW, {"okx": 1_000_000.0})
+ck6d = recon_adj.check(d6d, NOW)
+chk(d6d["warn_n"] == 0 and d6d["auto"]["n7"] == 0 and ck6d["level"] == "ok" and ck6d["tg"] is False,
+    "C3 7일 안에 확인(ack)한 큰 칸 = 7일 합($1,000 텔레그램 집계)에서도 빠져 노랑 내려감", (d6d["warn_n"], d6d["auto"], ck6d))
+for ack9, why9 in (({"at": NOW - DAY, "U": "50"}, "확인 수량 50 < 지금 U 100(표시를 모르는 판이 재계획으로 키움)"), ({"at": NOW - DAY}, "U 없음"), ("1", "꼴 아님")):
+    meta(autofix.receipt_key("okx", "TKJ"), json.dumps(dict(json.loads(RCPT), ack=ack9)))
+    cx.commit()
+    rows, _ = run(values={"okx": 1_000_000.0})
+    d6c = recon_adj.summarize(with_usd(rows, 15_000.0), NOW, {"okx": 1_000_000.0})
+    chk(d6c["warn_n"] == 1 and not any(x["ack"] for x in of(rows, "TKJ", recon_auto.SITE_AUTO)), f"C3 ack 무효({why9}) = 노랑 유지(확인한 수량 ≥ 지금 U 일 때만 유효)", (ack9, d6c["warn_n"]))
+meta(autofix.receipt_key("okx", "TKJ"), RCPT)
+cx.commit()
 recon_adj.note(cx, recon_auto.SITE_AUTO, ("exchange", autofix.auto_ns("okx"), autofix.auto_sid("TKJ", B0), 0), "auto_out_grow")
 cx.execute("UPDATE raw_observations SET observed_at=? WHERE kind='adj_why'", (NOW - 3600,))
 cx.commit()
@@ -231,7 +251,7 @@ cx.commit()
 rows, doc = run(values={"okx": 1_000_000.0}, px={"TKP": 100.0})
 tail = [r for r in of(rows, "TKP", "K7") if r["bts"] == NOW - DAY]
 chk(len(tail) == 1 and tail[0]["pair"] is None and tail[0]["cls"] == "unexplained"
-    and doc["warn_n"] == 1 and doc["auto"]["usd7"] == 0.0 and doc["check"]["tg"] is True,
-    "C7 자동 경고 만료 뒤 후속 -$2,000은 별도 노랑·텔레그램 대상", (tail, doc["auto"], doc["warn_n"]))
+    and doc["warn_n"] == 2 and doc["warn_auto_n"] == 1 and doc["auto"]["usd7"] == 0.0 and doc["check"]["tg"] is True,
+    "C7 자동 경고 7일 지남(확인 전 = 노랑 유지 · 7일 집계 0) + 후속 -$2,000 = 별도 노랑·텔레그램 대상", (tail, doc["auto"], doc["warn_n"]))
 
 T.finish()

@@ -42,6 +42,16 @@ def data_rev_refusal(conn):
     return None
 
 
+def fence_why(conn: sqlite3.Connection):
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone():
+        return None
+    row = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
+    if row is not None and int(row[0]) > SCHEMA_VERSION:
+        return (f"원장(state/ledger.db)이 이 코드보다 새 형식이에요(원장 {row[0]} > 코드 {SCHEMA_VERSION}) — 코드를 최신으로 올리세요. "
+                "원장은 그대로 뒀어요(옛 코드로 내려가려면 그때의 백업으로: python3 tools/ledger_restore.py list)")
+    return data_rev_refusal(conn)
+
+
 LEDGER_EPOCH_K = "ledger_epoch"
 DAILY_INVAL_K = "cache_inval:daily"
 
@@ -191,17 +201,12 @@ def open_db(path: str, readonly: bool = False) -> sqlite3.Connection:
         conn = open_ro(path, timeout=10)
     else:
         conn = sqlite3.connect(path, timeout=30)
+        why9 = fence_why(conn)
+        if why9:
+            conn.close()
+            raise SystemExit(why9)
         has_meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
         row = conn.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone() if has_meta else None
-        if row is not None and int(row[0]) > SCHEMA_VERSION:
-            conn.close()
-            raise SystemExit(f"원장(state/ledger.db)이 이 코드보다 새 형식이에요(원장 {row[0]} > 코드 {SCHEMA_VERSION}) — 코드를 최신으로 올리세요. "
-                             "원장은 그대로 뒀어요(옛 코드로 내려가려면 그때의 백업으로: python3 tools/ledger_restore.py list)")
-        if has_meta:
-            why9 = data_rev_refusal(conn)
-            if why9:
-                conn.close()
-                raise SystemExit(why9)
         for ddl in DDL:
             conn.execute(ddl)
         if row is None:

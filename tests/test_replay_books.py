@@ -37,8 +37,19 @@ for st in ast.walk(prep):
                 alias[t9.id] = alias.get(t9.id, 0) + 1
             else:
                 direct.append(f"{t9.id}:{st.lineno}")
-chk(set(alias) == NAMES and all(v == 1 for v in alias.values()) and not direct, "B1 _replay_prep = 필드마다 별칭 한 번 · 직접 대입 없음",
-    (sorted(NAMES - set(alias)), direct))
+first_alias = {}
+for st in ast.walk(prep):
+    if isinstance(st, ast.Assign) and isinstance(st.targets[0], ast.Name) and st.targets[0].id in alias:
+        first_alias[st.targets[0].id] = min(first_alias.get(st.targets[0].id, st.lineno), st.lineno)
+reads = {}
+for n9 in ast.walk(prep):
+    if isinstance(n9, ast.Name) and isinstance(n9.ctx, ast.Load) and n9.id in NAMES:
+        reads[n9.id] = min(reads.get(n9.id, n9.lineno), n9.lineno)
+unaliased = sorted(k for k in reads if k not in alias)
+early = sorted(k for k in reads if k in first_alias and reads[k] <= first_alias[k])
+chk(alias and set(alias) <= NAMES and all(v == 1 for v in alias.values()) and not direct and not unaliased and not early and set(reads) == set(alias),
+    "B1 _replay_prep = 읽는 Books 필드마다 별칭 한 번(읽기보다 앞) · 직접 대입 없음 · 안 읽는 별칭 없음(별칭 %d · 읽기 %d)" % (len(alias), len(reads)),
+    (unaliased, early, direct, sorted(set(alias) - set(reads))))
 
 
 STAGE_CTX = {"view_b_cards.py": ("_cards_", "cst")}

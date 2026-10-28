@@ -278,6 +278,29 @@ def write_undo_fn(path: str):
 
 UNDO_KIND = "autofix_undo_v1"
 CORE_WAIT_S = 72 * 3600
+ACK = "ack"
+
+
+def big_why(conn: "sqlite3.Connection", cell: dict, px: "dict | None" = None, values: "dict | None" = None) -> str:
+    if not cell.get("add"):
+        return ""
+    px = recon_adj.prices() if px is None else px
+    values = recon_adj.venue_values(conn, px, strict=True) if values is None else values
+    add = cell["add"][0]
+    a_row = conn.execute("SELECT kind, symbol, decimals, group_id FROM assets WHERE asset_id=?", (int(add["asset_id"]),)).fetchone()
+    if a_row is None:
+        return "큰 칸 판정 불가(자산 없음)"
+    unit = 1.0 if (a_row[0] == "exchange_currency" and str(a_row[1] or "").upper() in recon_adj.STABLES) else \
+        px["grp"].get(int(a_row[3])) if a_row[3] is not None else None
+    u_norm = AF.norm(cell["U"], a_row[2])
+    if unit is None:
+        return f"큰 칸(U {u_norm:f} {cell['sym']} 단가 모름 = 평가 불가) — 사람이 확인(해킹·미등록 출금일 수 있음)"
+    usd = float(u_norm) * float(unit)
+    val = float(values.get(cell["ex"], 0.0) or 0.0)
+    if usd >= recon_adj.ROW_WARN_USD or (val > 0 and usd >= recon_adj.ROW_WARN_PCT * val):
+        return (f"큰 칸(U 평가액 ${usd:,.0f} ≥ ${recon_adj.ROW_WARN_USD:,.0f} 또는 {cell['ex']} 평가액 ${val:,.0f} 의 {recon_adj.ROW_WARN_PCT:.0%})"
+                " — 사람이 확인(해킹·미등록 출금일 수 있음)")
+    return ""
 
 
 def core_guard(svc: object, ex: str, st_ex: dict, now: int) -> str:
@@ -300,17 +323,29 @@ def core_pass(svc: object, now: "int | None" = None) -> int:
     if not AF.enabled(svc.cfg):
         return 0
     now = int(now or time.time())
+    if svc.conn.in_transaction:
+        log.warning("자동 처리 건너뜀(이번 주기): core 연결에 열린 트랜잭션이 있음 — 남의 변경을 커밋하지 않음 · 다음 주기에 다시")
+        return 0
     st_all = statefile.read_json(paths.state("exf_state.json"), {}) or {}
     floor = AF.debt_floor_fn()
+    px = recon_adj.prices()
+    try:
+        values = recon_adj.venue_values(svc.conn, px, strict=True)
+    except sqlite3.Error as e:
+        log.warning("자동 처리 건너뜀(이번 주기): 장소 평가액(positions) 읽기 실패 — 큰 칸 판정 불가 · 다음 주기에 다시: %s", e)
+        return 0
     n = 0
     for ex in sorted(k for k in st_all if isinstance(st_all.get(k), dict)):
         why = core_guard(svc, ex, st_all[ex], now)
         if why:
             continue
-        if svc.conn.in_transaction:
-            svc.conn.commit()
         for cell in AF.plan_ex(svc.conn, ex, AF.venue_gap, floor, now, svc):
             if cell["kind"] not in (AF.KIND_A, AF.KIND_A2):
+                continue
+            why_big = big_why(svc.conn, cell, px, values)
+            if why_big:
+                log.warning("자동 처리 %s %s 건너뜀(원장 무변): %s · 처리하려면 tj-core 정지 뒤 tools/ledger_rowfix.py --kind autofix_ws --apply --allow-big",
+                            ex, cell["sym"], why_big)
                 continue
             stamp, tag = time.strftime("%Y%m%d%H%M%S", time.gmtime(now)), secrets.token_hex(4)
             path = paths.state(f"autofix_undo_{_safe(ex)}_{_safe(str(cell['sym']).upper())}_{stamp}_{tag}.json")
@@ -401,6 +436,8 @@ def _replan(conn, ex: str, sym: str, rec: dict, late: tuple, now: int, floor) ->
     rec = dict(rec, X=str(X_b), U=str(U_b), tau=int(sol["tau"]), state=AF.ST_APPLIED if U_b > 0 else AF.ST_RESOLVED, late_at=int(now),
                auto={"key": list(ukey), "qty": str(-U_b)} if U_b > 0 else None,
                anchor=dict(anc, deleted=X_b == 0))
+    if U_b > old_u:
+        rec.pop(ACK, None)
     conn.execute("UPDATE meta SET v=? WHERE k=?", (json.dumps(rec, ensure_ascii=False, sort_keys=True), AF.receipt_key(ex, sym)))
     if U_b > old_u:
         recon_adj.note(conn, "K11", (AF.SOURCE_KIND, ukey[0], ukey[1], int(ukey[2])), why="늦은 행 재계획 — 미확인 유출 커짐",

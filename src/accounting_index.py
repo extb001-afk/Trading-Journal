@@ -259,7 +259,7 @@ def swap_fill_index(rows, gsym, norm, fxb, zv_leg, nopx_px_ok, swap_gas, pay_pid
             zc9 = {k9 for k9, z9 in gz9.items() if z9}
             if len(zc9) == len(gq9):
                 continue
-            gqa9, gq9 = gq9, {k9: q9 for k9, q9 in gq9.items() if k9 not in zc9}
+            gq9 = {k9: q9 for k9, q9 in gq9.items() if k9 not in zc9}
             for k9, q9 in gq9.items():
                 r0 = next(r9 for r9 in n9 if (r9["group_id"] or -r9["asset_id"]) == k9)
                 p9 = Decimal(1) if (r0["gname"] or "") in STABLE_GROUPS else (fxb.candle(gsym(r0), int(r0["event_ts"])) if gpx9[k9] else None)

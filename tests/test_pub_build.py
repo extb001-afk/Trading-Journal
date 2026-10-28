@@ -125,6 +125,23 @@ for name, fn9, want in (
     chk(len(got) == 1 and want in got[0], f"[5] config.example 변이 잡음 — {name}", got)
 shutil.rmtree(OUT, ignore_errors=True)
 
+GR = os.path.join(SR, B.GROWTH_REL)
+chk(B.growth_unfolded(SR) == [], "[5b] 성장 사유 표 없음 = 0")
+os.makedirs(os.path.dirname(GR), exist_ok=True)
+with open(GR, "w", encoding="utf-8") as f:
+    f.write("\n  \n")
+chk(B.growth_unfolded(SR) == [], "[5b] 빈 줄뿐 = 0")
+with open(GR, "w", encoding="utf-8") as f:
+    f.write('{"k": "file.lines", "m": "synth", "q": "<file>", "to": 9, "why": "합성 사유 문장 — 시험 전용 지어낸 줄입니다", "commit": "t"}\n\n' * 2)
+got5b = B.growth_unfolded(SR)
+chk(len(got5b) == 1 and "2줄" in got5b[0] and "--fold-growth" in got5b[0], "[5b] 사유 줄 2 = 오류 1(줄 수 · 접기 안내)", got5b)
+mn5b = next(n for n in ast.walk(ast.parse(open(os.path.join(PK, "pub_build.py"), encoding="utf-8").read())) if isinstance(n, ast.FunctionDef) and n.name == "main")
+gu5b = [n for n in ast.walk(mn5b) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "growth_unfolded"]
+sm5b = [n.lineno for n in ast.walk(mn5b) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "strip_map"]
+if5b = [n for n in ast.walk(mn5b) if isinstance(n, ast.If) and ast.unparse(n.test) == "argv[0] == 'build'" and any(c in gu5b for c in ast.walk(n))]
+chk(len(gu5b) == 1 and len(if5b) == 1 and sm5b and gu5b[0].lineno < min(sm5b), "[5b] main = build 일 때만 growth_unfolded · strip·복사보다 앞(쓰기 0)",
+    (len(gu5b), len(if5b), sm5b))
+
 RJ = os.path.join(T.TMP, "rules_synth.json")
 with open(RJ, "w", encoding="utf-8") as f:
     json.dump({"symbols": ["ZQXTOKEN"], "aliases": ["zqacct\\d+"], "subs": {"mid": [["zq-example\\.invalid", "포털"]]}}, f)

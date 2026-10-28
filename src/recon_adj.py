@@ -463,11 +463,13 @@ def classify(conn: sqlite3.Connection, rows: list, t0_fn: T0Fn = None, gaps: Opt
     return rows
 
 
-def venue_values(conn: sqlite3.Connection, px: dict) -> dict:
+def venue_values(conn: sqlite3.Connection, px: dict, strict: bool = False) -> dict:
     out = {}
     try:
         cur = conn.execute("SELECT group_id, location, qty_norm FROM positions").fetchall()
     except sqlite3.Error:
+        if strict:
+            raise
         return out
     for g, loc, qn in cur:
         unit = px["grp"].get(int(g)) if g is not None else None
@@ -535,7 +537,7 @@ def _gray(rows: list, now: float, values: dict, warn: list) -> dict:
 
 def _auto_sum(rows: list, now: float) -> dict:
     a = [r for r in rows if _is_auto_row(r)]
-    a7 = [r for r in a if now - r["made"] <= WEEK]
+    a7 = [r for r in a if not r.get("ack") and now - r["made"] <= WEEK]
     return {"n": len(a), "usd": round(sum(abs(r["usd"] or 0.0) for r in a), 2), "n7": len(a7), "usd7": round(sum(abs(r["usd"] or 0.0) for r in a7), 2),
             "nopx7": sum(1 for r in a7 if r.get("nopx"))}
 
@@ -552,8 +554,8 @@ def summarize(rows: list, now: Optional[float] = None, values: Optional[dict] = 
             b["nopx"] = b.get("nopx", 0) + 1
     une = [r for r in rows if r["cls"] == "unexplained"]
     une7 = [r for r in une if now - r["made"] <= WEEK]
-    warn = [r for r in rows if now - r["made"] <= WEEK and (_is_warn(r, values) if r["usd"] is not None else
-                                                         r.get("real") and _warn_cls(r))]
+    warn = [r for r in rows if (not r.get("ack") if _is_auto_row(r) else now - r["made"] <= WEEK)
+            and (_is_warn(r, values) if r["usd"] is not None else r.get("real") and _warn_cls(r))]
     red = [r for r in rows if r["red"]]
     red_by = {}
     for r in red:
@@ -666,13 +668,15 @@ def _check(doc: dict) -> dict:
         week = (f"7일 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + nxt7 + (f" ({ven})" if ven else "") + " · ") if n7 else ""
         only_auto = not n7 and (a_warn_n or a_usd7 >= WEEK_TG_USD) and a_warn_n == warn_n
         title = (f"설명 안 된 보정 7일 ${usd7:,.0f}" + nxt7 if n7 > nx7 else f"설명 안 된 보정 7일 {n7}건(평가 불가)" if n7 else
-                 (f"큰 미확인 유출 자동 처리 7일 ${a_usd7:,.0f}" if a_n7 > a_nx7 else f"큰 미확인 유출 자동 처리 7일 {a_n7}칸(평가 불가)") if only_auto else
+                 (f"큰 미확인 유출 자동 처리 7일 ${a_usd7:,.0f}" if a_n7 > a_nx7 else f"큰 미확인 유출 자동 처리 7일 {a_n7}칸(평가 불가)" if a_n7 else
+                  f"큰 미확인 유출 자동 처리 {a_warn_n}칸(확인 전 — 노랑 유지)") if only_auto else
                  f"보정 확인 {warn_n}건(추정)")
         auto_txt = (f"자동 처리 7일 {a_n7}칸" + (f" ${a_usd7:,.0f}" if a_n7 > a_nx7 else "") + " · ") if a_n7 and not only_auto else ""
         return {"title": title, "level": "warn", "tg": usd7 + a_usd7 >= WEEK_TG_USD,
                 "detail": week + auto_txt + " · ".join(_fmt_row(r) for r in (doc.get("warn") or doc.get("top") or [])[:3]) + f" · {tot}",
                 "action": ("창 안에서 원장이 모르는 유출을 자동 처리 행으로 맞췄어요(숫자는 맞춰 둠) — 해킹·등록 안 한 출금일 수 있으니 그 거래소 출금·이체 기록을 "
-                           "확인하세요(7일 뒤 저절로 내려감 · 그대로 두려면 ledger_rowfix --undo-autofix)") if only_auto else
+                           "확인하세요(확인했으면 tj-core 를 멈추고 python3 tools/ledger_rowfix.py --ack-autofix <거래소>:<심볼> --apply 로 내려요 — 저절로 내려가지 않음 · "
+                           "되돌리려면 --undo-autofix)") if only_auto else
                 "원장이 모르는 입출금이 실잔고 대사로 메워졌어요 — 그 거래소·체인의 수집 범위(입출금·Earn·배당)와 지갑 등록을 확인하세요"}
     return {"title": "보정 감시", "level": "ok", "tg": False, "action": "",
             "detail": (f"7일 설명 안 된 보정 {n7}건" + (f" ${usd7:,.0f}" if n7 > nx7 else "") + f"{nxt7} · " if n7 else "7일 설명 안 된 큰 보정 없음 · ") + tot}

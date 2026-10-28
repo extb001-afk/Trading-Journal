@@ -118,6 +118,12 @@ for sname in STAGES:
             r4_names[n.name].append(n.lineno)
 for x in sorted(R4):
     f9, b9 = r4_fill.get(x, []), r4_bind.get(x, [])
+    if len(f9) == 1 and not b9 and not r4_names.get(x):
+        fl, fst = f9[0]
+        if [ast.unparse(t) for t in fst.targets] != ["px." + x] or r4_writes.get(x) != [fl]:
+            r4_bad.append("%s 칸만 꼴 %s · 칸 쓰기·삭제 %s" % (x, ast.unparse(fst)[:80], r4_writes.get(x)))
+        fill_line[x] = fl
+        continue
     if len(f9) != 1 or len(b9) != 1:
         r4_bad.append("%s 채움 %d · 묶음 %s" % (x, len(f9), b9))
         continue
@@ -132,7 +138,7 @@ for x in sorted(R4):
     if not ok:
         r4_bad.append("%s 꼴 %s(묶음 %s 줄 %d)" % (x, ast.unparse(fst)[:80], bk, bl))
     fill_line[x] = fl
-chk(not r4_bad, "P1 R4 칸 = `X = px.X = …` 또는 def·튜플 풀기 뒤 `px.X = X` · 채움 1번 · 그 이름 리플레이 묶음 1번(머리 풀기 뺌)", r4_bad)
+chk(not r4_bad, "P1 R4 칸 = `X = px.X = …` 또는 def·튜플 풀기 뒤 `px.X = X` 또는 지역 없이 `px.X = …` · 채움 1번 · 그 이름 리플레이 묶음 1번 이하(머리 풀기 뺌)", r4_bad)
 sb0, books0 = object(), accounting_books.Books()
 px0 = AC.ReplayParts(sb=sb0, books=books0)
 chk(px0.sb is sb0 and px0.books is books0, "P1 고정 칸 sb·books = 묶음 생성자가 받은 객체 그대로(복사·새로 만들기 0)")

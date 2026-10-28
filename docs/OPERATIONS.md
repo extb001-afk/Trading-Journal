@@ -117,7 +117,7 @@ Bitcoin 공개 디스크립터·xpub 로 돈을 옮길 수는 없지만 HD 지�
 - 백업할 것: `state/`(특히 `state/ledger.db` — tj-core 가 정기 백업도 남김)·`.env`·`config.json`. 서버 밖 백업·되돌리기는 위 '백업 · 복구'.
 - 운영 도구(`tools/`):
   - `tools/ledger_restore.py` — 원장 백업 목록·검사·되돌리기와 그 사이 수집분 다시 받기([백업 · 복구](#백업--복구)).
-  - `tools/rollback_check.py` — 코드만 예전 판으로 되돌리기 전 점검(README '되돌리기' · 원장의 1회 정정 표식을 그 판이 읽는지 · 읽기 전용 · 거부 = 종료 코드 1).
+  - `tools/rollback_check.py` — 코드만 예전 판으로 되돌리기 전 점검(README '되돌리기' · 원장의 1회 정정 표식을 그 판이 읽는지 · 원장 데이터 개정(meta data_rev)이 그 판의 DATA_REV 보다 새면 거부 · 읽기 전용 · 거부 = 종료 코드 1).
   - `tools/offsite_backup.py` — 서버 밖 둘째 백업(다른 컴퓨터로 ssh 전송 또는 outbox · sha256 확인 · 결과는 상태 패널 '서버 밖 백업').
   - `tools/exf_fut_place.py` — 선물 정산 재배치 계획 보기·되돌리기(업데이트 뒤 tj-core 가 첫 대사 때 스스로 한 번 적용 — 이 도구는 확인용).
     되돌리면 `--apply` 로 다시 적용할 때까지 자동으로 다시 적용하지 않고, `--apply` 는 적용 전 원장 백업을 한 벌 떠요. 근거가 모자란 거래소는 기다리며 상태 패널 '선물 재배치 대기'에 보여요.

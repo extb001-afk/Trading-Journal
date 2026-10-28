@@ -138,6 +138,10 @@ statement use this average.
   wording early on 2026-10-09; re-verification fixes on 2026-10-09; external review fixes on the evening of 2026-10-08; futures receipts and the separate build
   process earlier on 2026-10-08) is in [CHANGELOG.md](../CHANGELOG.md). To update, follow [업데이트](../README.md#업데이트) (stop → check backup → `git pull` →
   `bash tools/setup.sh` → `pm2 start ecosystem.config.js`); realized PnL and statement numbers may change (estimated rows are marked).
+- **Release procedure (maintainers — tag only after CI is green):** 1) tests `python3 tests/run_all.py` with 0 failures, then lint `ruff check src tools tests` and `mypy`
+  with 0 errors (same pinned versions as the CI lint job: ruff 0.17.2, mypy 2.4.0); 2) push main only and wait for CI —
+  `gh run watch "$(gh run list --commit "$(git rev-parse HEAD)" --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status` (both jobs, tests and lint, green = exit code 0);
+  3) only then push the tag on its own — `git tag vYYYY.MM.DD.N && git push origin vYYYY.MM.DD.N` (if CI is red, fix and start again at 1; never tag first).
 - **Backup and restore:** tj-core keeps a daily ledger backup in `state/backups/` (3 by default). `tools/ledger_restore.py` lists, checks and restores backups
   and re-collects what came after; `tools/offsite_backup.py` sends a compressed, sha256-verified copy to another machine over ssh (or leaves it in an outbox
   for the other side to pull) — `backup.offsite` in `config.json`, off by default. tj-core waits instead of creating an empty ledger when the old one is missing.

@@ -78,6 +78,44 @@ def ledger_marks(db):
     return out
 
 
+def ledger_data_rev(db):
+    if not os.path.isfile(db):
+        return 0
+    c = sqlite3.connect("file:" + urllib.parse.quote(db, safe="/:\\") + "?mode=ro", uri=True, timeout=30)
+    try:
+        try:
+            r = c.execute("SELECT v FROM meta WHERE k='data_rev'").fetchone()
+        except sqlite3.OperationalError as e:
+            if "no such table" not in str(e):
+                raise
+            r = None
+    finally:
+        c.close()
+    return int(str(r[0]).strip()) if r else 0
+
+
+_REV_RE = re.compile(r"^DATA_REV = (\d+)", re.M)
+
+
+def target_data_rev(ref, tree):
+    if tree:
+        p = os.path.join(tree, "src", "db.py")
+        if not os.path.isfile(p):
+            return 0
+        with open(p, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    else:
+        r = _git("rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        if r.returncode != 0 or not r.stdout.strip():
+            raise ValueError("git 커밋·태그를 못 찾음: %s" % ref)
+        b = _git("show", "%s:src/db.py" % r.stdout.strip())
+        if b.returncode != 0:
+            return 0
+        text = b.stdout
+    m = _REV_RE.search(text)
+    return int(m.group(1)) if m else 0
+
+
 def _git(*a):
     return subprocess.run(["git", "-C", ROOT] + list(a), capture_output=True, text=True, timeout=120)
 
@@ -129,9 +167,22 @@ def main(argv=None):
         return 2
     try:
         srcs = target_sources(a.ref, a.tree)
+        code_rev = target_data_rev(a.ref, a.tree)
     except (ValueError, OSError, subprocess.SubprocessError) as e:
         print("★확인 불가(되돌리지 말 것): %s★" % e)
         return 2
+    try:
+        led_rev = ledger_data_rev(db)
+    except (sqlite3.Error, ValueError) as e:
+        print("★확인 불가(되돌리지 말 것): 원장 데이터 개정 번호(meta data_rev) 읽기 실패 %s — %s★" % (db, e))
+        return 2
+    if led_rev > code_rev:
+        print("★거부(코드만 되돌리면 안 됨): 원장 데이터 개정(meta data_rev) %d > 되돌릴 판(%s)의 코드 DATA_REV %d — 그 판은 자동 처리(autofix) 등 한 방향 변환을"
+              " 모른다(core 시작 거부 또는 바뀐 내용 모른 채 기장)★" % (led_rev, a.ref or a.tree, code_rev))
+        print("   먼저(지금 코드 그대로 · checkout 전에) 자동 처리를 되돌리기: pm2 stop ecosystem.config.js → python3 tools/ledger_rowfix.py --undo-autofix <거래소>:<심볼> --apply"
+              " (칸마다 전부) → python3 tools/ledger_rowfix.py --data-rev-down 1 --apply → 이 점검을 다시(통과하면 checkout) · 또는 그 변환 전 백업으로 원장째:"
+              " python3 tools/ledger_restore.py list")
+        return 1
     if not marks:
         print("통과: 원장에 1회 정정 표식 없음(%s)" % ("원장 없음" if marks is None else db))
         return 0

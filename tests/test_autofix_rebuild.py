@@ -7,7 +7,6 @@ import _harness as T  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
-import stat  # noqa: E402
 import subprocess  # noqa: E402
 
 os.environ["TJ_ALLOW_NEW_LEDGER"] = "1"
@@ -18,9 +17,7 @@ CFG = {"chains": {}, "wallets": [], "backfill_months": 5, "backfill_since": "202
 json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
 import config, paths  # noqa: E402
 import core  # noqa: E402
-import db as dbm  # noqa: E402
 import autofix as AF  # noqa: E402
-import autofix_apply as AP  # noqa: E402
 
 DAY = 86400
 T0 = 1767225600
@@ -88,7 +85,7 @@ def plan():
     return {x["sym"]: x for x in AF.plan_cells(c.conn, AF.venue_gap, None, B1 + DAY, win=c.svc_exf)}
 
 
-rc, out = tool("--kind", "autofix_ws", "--apply")
+rc, out = tool("--kind", "autofix_ws", "--apply", "--backup-now", "--allow-big")
 T.chk(rc == 0 and "A 1 · A' 2" in out, "B0 적용(A 1 · A' 2)", out[-300:])
 SH = os.path.join(os.path.realpath(T.TMP), "shadow")
 env = {k: v for k, v in os.environ.items() if not k.startswith("TJ_") or k.startswith("TJ_TEST_")}

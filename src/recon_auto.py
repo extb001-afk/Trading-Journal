@@ -60,6 +60,11 @@ def mark(r: dict, cells: tuple, vgap: dict, auto_on: bool, now: float) -> None:
     key = (r["venue"], r["sym"].upper())
     first7 = r["site"] == "K7" and bool(r.get("first"))
     r["auto"] = r["site"] == SITE_AUTO or is_auto_anchor(r, cells)
+    ack = (_rec.get(key) or {}).get("ack")
+    try:
+        r["ack"] = r["site"] == SITE_AUTO and isinstance(ack, dict) and int(ack["U"]) >= int(_rec[key]["U"])
+    except (KeyError, TypeError, ValueError):
+        r["ack"] = False
     r["kept"] = not r["auto"] and first7 and key in off and r["red"] == "prewin_rows"
     r["wait"] = r["r1"] = False
     if r["kept"] and r["red"] == "prewin_rows":

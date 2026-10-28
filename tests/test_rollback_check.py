@@ -108,14 +108,17 @@ READ = ('    def _post_{k}(self, ex, uid):\n'
 git("init", "-q")
 git("config", "user.email", "t@t")
 git("config", "user.name", "t")
+DB1 = "SCHEMA_VERSION = 2\nDATA_REV = 1\n"
 VERS = {
-    "old": {"core.py": "X = 1\n", "core_exf.py": "class M:\n    def _post(self, ex, uid):\n        return True\n"},
-    "dep": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit")},
-    "wd": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="withdraw")},
-    "cmt": {"core.py": "X = 1\n", "core_exf.py": cmt},
-    "both": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw")},
-    "split": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit"), "core_exf_wd.py": "class W:\n" + READ.format(k="withdraw")},
-    "nocore": {"core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw")},
+    "old": {"core.py": "X = 1\n", "core_exf.py": "class M:\n    def _post(self, ex, uid):\n        return True\n", "db.py": DB1},
+    "dep": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit"), "db.py": DB1},
+    "wd": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="withdraw"), "db.py": DB1},
+    "cmt": {"core.py": "X = 1\n", "core_exf.py": cmt, "db.py": DB1},
+    "both": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw"), "db.py": DB1},
+    "split": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit"), "core_exf_wd.py": "class W:\n" + READ.format(k="withdraw"), "db.py": DB1},
+    "nocore": {"core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw"), "db.py": DB1},
+    "rev2": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw"), "db.py": "DATA_REV = 2\n"},
+    "nodb": {"core.py": "X = 1\n", "core_exf.py": "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw")},
 }
 SHA = {}
 for name, files in VERS.items():
@@ -129,18 +132,20 @@ for name, files in VERS.items():
     SHA[name] = git("rev-parse", "HEAD")
 put("src/core.py", "X = 'now'\n")
 put("src/core_exf.py", "class M:\n" + READ.format(k="deposit") + READ.format(k="withdraw"))
+put("src/db.py", "DATA_REV = 2\n")
 git("add", "-A")
 git("commit", "-qm", "now")
 NOW = git("rev-parse", "HEAD")
 DB = os.path.join(G, "state", "ledger.db")
 
 
-def ledger(keys):
+def ledger(keys, rev="1"):
     if os.path.exists(DB):
         os.remove(DB)
     cx = sqlite3.connect(DB)
     cx.execute("CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT)")
-    cx.execute("INSERT INTO meta VALUES('data_rev', '1')")
+    if rev is not None:
+        cx.execute("INSERT INTO meta VALUES('data_rev', ?)", (rev,))
     cx.execute("INSERT INTO meta VALUES('exf_rawskiq', 'x')")
     for k in keys:
         cx.execute("INSERT INTO meta VALUES(?, 'okx_prewin')", (k,))
@@ -207,6 +212,41 @@ with open(os.path.join(T.TMP, "broken.db"), "wb") as f:
 rc, out = run("v_old", "--ledger", os.path.join(T.TMP, "broken.db"))
 T.chk(rc == 2 and "확인 불가" in out, "K2 깨진 원장 = 확인 불가(rc 2)", out)
 T.chk(git("rev-parse", "HEAD") == NOW, "K2 점검은 checkout 안 함(HEAD 무변)")
+
+ledger([], rev="2")
+rc, out = run("v_both")
+T.chk(rc == 1 and "데이터 개정" in out and "2 > " in out and "DATA_REV 1" in out and "--undo-autofix" in out and "--data-rev-down 1" in out and "ledger_restore" in out,
+      "K4 원장 개정 2 + DATA_REV 1 판(표식 없음) = 거부(rc 1 · 되돌리기 순서·백업 안내)", out)
+rc, out = run("v_rev2")
+T.chk(rc == 0 and "표식 없음" in out, "K4 원장 개정 2 + DATA_REV 2 판 = 통과", out)
+rc, out = run("v_nodb")
+T.chk(rc == 1 and "DATA_REV 0" in out, "K4 db.py 없는 판 = 개정 0 = 거부", out)
+rc, out = run("v_old")
+T.chk(rc == 1 and "데이터 개정" in out, "K4 옛 판(DATA_REV 1) = 거부(표식보다 먼저 판정)", out)
+ledger(WD2, rev="2")
+rc, out = run("v_rev2")
+T.chk(rc == 0, "K4 개정 2 + 출금 표식 + 둘 다 읽는 DATA_REV 2 판 = 통과", out)
+rc, out = run("v_dep")
+T.chk(rc == 1 and "데이터 개정" in out, "K4 개정 2 + 표식 + 입금만 읽는 DATA_REV 1 판 = 거부(개정 사유가 먼저)", out)
+ledger([], rev=None)
+rc, out = run("v_old")
+T.chk(rc == 0 and "표식 없음" in out, "K4 data_rev 칸 없는 원장(개정 0) + 옛 판 = 통과(과잉 거부 없음)", out)
+ledger([], rev="x")
+rc, out = run("v_both")
+T.chk(rc == 2 and "확인 불가" in out and "data_rev" in out, "K4 개정 번호가 숫자 아님 = 확인 불가(rc 2)", out)
+ledger([], rev="2")
+with open(os.path.join(TREE, "src", "db.py"), "w") as f:
+    f.write("DATA_REV = 1\n")
+rc, out = run("--tree", TREE)
+T.chk(rc == 1 and "DATA_REV 1" in out, "K4 --tree DATA_REV 1 + 개정 2 = 거부", out)
+with open(os.path.join(TREE, "src", "db.py"), "w") as f:
+    f.write("# DATA_REV = 9 주석\nDATA_REV = 2\n")
+rc, out = run("--tree", TREE)
+T.chk(rc == 0, "K4 --tree DATA_REV 2(줄 머리 정규식 · 주석 무시) = 통과", out)
+T.chk(RC.target_data_rev(None, TREE) == 2 and RC.ledger_data_rev(DB) == 2 and RC.ledger_data_rev(os.path.join(T.TMP, "none.db")) == 0,
+      "K4 함수: 판 DATA_REV · 원장 개정 · 원장 없음 = 0")
+ledger(WD2)
+T.chk(RC.ledger_data_rev(DB) == 1, "K4 (전제) K3 용 원장 = 개정 1 + 출금 표식")
 
 CMD = "python3 tools/rollback_check.py <예전 버전의 커밋·태그> && git checkout <예전 버전의 커밋·태그>"
 SH = shutil.which("bash") or "/bin/bash"
