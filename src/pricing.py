@@ -63,9 +63,28 @@ def _kl_zero(row, vi, qi) -> bool:
         return False
 
 
+BN_NOSYM_SEC = 3600
+_BN_NOSYM = {}
+
+
 def _c_binance(sym, ms):
-    arr = _gj(f"https://api.binance.com/api/v3/klines?symbol={urllib.parse.quote(sym, safe='')}USDT&interval=1m"
-              f"&startTime={ms}&endTime={ms + 59_999}&limit=1")
+    started = time.time()
+    t400 = _BN_NOSYM.get(sym)
+    if t400 is not None and started - t400 < BN_NOSYM_SEC and (ms // 60_000 + 1) * 60 <= t400:
+        return None
+    try:
+        arr = _gj(f"https://api.binance.com/api/v3/klines?symbol={urllib.parse.quote(sym, safe='')}USDT&interval=1m"
+                  f"&startTime={ms}&endTime={ms + 59_999}&limit=1")
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            try:
+                body = e.read(2048) or b""
+            except (OSError, ValueError):
+                body = b""
+            if b"-1121" in body:
+                _BN_NOSYM[sym] = started
+        raise
+    _BN_NOSYM.pop(sym, None)
     if arr and _fin(float(arr[0][1])) and not _kl_zero(arr[0], 5, 7):
         return float(arr[0][1])
     return None

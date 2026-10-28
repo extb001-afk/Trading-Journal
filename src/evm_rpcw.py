@@ -264,6 +264,10 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if cc.get("rps"):
             for u9 in dict.fromkeys(self.cfg_rpcs + self.logs_rpcs + self.state_rpcs):
                 bf_engine.set_call_rate(u9, cc.get("rps"))
+        for node_list in (self.logs_rpcs, self.cfg_rpcs):
+            solo_hosts = {(urllib.parse.urlsplit(u).hostname or "").lower() for u in node_list}
+            if len(solo_hosts) == 1:
+                bf_engine.gate(next(iter(solo_hosts))).p429_grow = False
         self._trace_fail = {}
         self.gap_budget = float(cc.get("gap_scan_budget_sec", 1800))
         self.handover = str(cc.get("rpc_handover") or self.HANDOVER_DEFAULT.get(chain) or nd9.get("handover") or "adopt").lower()
@@ -520,7 +524,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
     def _key_resting(self, order9: list):
         try:
             import nodekeys
-            off9 = [u for u in self.state_rpcs if u not in order9 and nodekeys.is_key_node(u)]
+            off9 = [u for u in self.state_rpcs if u not in order9 and (nodekeys.is_key_node(u) or bf_engine.gate(u).p429_grow)]
         except Exception:   # noqa: BLE001 [fallback]
             return None
         if not off9:

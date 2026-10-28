@@ -8,13 +8,12 @@ import hashlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import shutil  # noqa: E402
-import time  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 
 W = "0x" + "ab" * 20
 DAY = 86400
-NOW = int(time.time())
 KST = timezone(timedelta(hours=9))
+NOW = int(datetime.now(KST).replace(hour=12, minute=0, second=0, microsecond=0).timestamp())
 shutil.copytree(os.path.join(T.ROOT, "seed"), os.path.join(T.TMP, "seed"), dirs_exist_ok=True)
 json.dump({"wallets": [{"type": "evm", "chain": "base", "address": W, "label": "w"}, {"type": "evm", "chain": "arbitrum", "address": W, "label": "w"}],
            "backfill_months": 3, "chains": {}}, open(os.path.join(T.TMP, "config.json"), "w"))

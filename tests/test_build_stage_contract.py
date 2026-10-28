@@ -11,11 +11,10 @@ import os  # noqa: E402
 
 chk = T.chk
 BS = "_bs9"
-STAGES = (("view_b_replay", "_replay_prep"),
-          ("view_b_replay", "_replay_main"), ("view_b_cards", "_build_cards"), ("view_b_pendings", "_build_pendings"),
+STAGES = (("view_b_cards", "_build_cards"), ("view_b_pendings", "_build_pendings"),
           ("view_b_outflows", "_build_outflows"), ("view_b_daily", "_build_daily"), ("view_b_futidx", "_build_futidx"),
           ("view_b_tail", "_build_tail"))
-N_REPLAY = 2
+N_REPLAY = 0
 ON_BOUNDARY = True
 ON_WRITES = True
 ALLOWED = {
@@ -23,10 +22,8 @@ ALLOWED = {
     ("view_b_daily", "_build_daily", "get", "daily_inval"): 1,
     ("view_b_cards", "_build_cards", "load", "diag"): 1,
 }
-PASS_TO = {"self." + n for _m, n in STAGES} | {"self._build_replay", "accounting_books.check_aliases", "accounting_books.check_pool_aliases",
-           "accounting_ctx.check_ctx", "accounting_books.ReplayResult.from_scope", "accounting_books.check_rr",
-           "stage", "accounting_books.screen_check"}
-SCOPE_FROM = ("self._replay_prep", "rr.screen_scope")
+PASS_TO = {"self." + n for _m, n in STAGES} | {"stage", "accounting_books.screen_check"}
+SCOPE_FROM = ("rr.screen_scope",)
 
 
 def _tree(mod):
@@ -126,7 +123,7 @@ class St:
 
     def __init__(self, i, fn):
         self.i, self.fn, self.name = i, fn, fn.name
-        self.h, self.pairs = head(fn) if i else (None, [])
+        self.h, self.pairs = head(fn)
         rest = [s for s in body_of(fn) if s is not self.h]
         self.reloads = [reload_key(s) + (s,) for s in rest if reload_key(s)]
         self.pops = [pop_key(s) for s in rest if pop_key(s)]
@@ -190,62 +187,60 @@ chk(dict(counts) == ALLOWED, "K1 머리 풀기·재적재 밖 이름표 읽기·
     {"더해짐": {"%s.%s %s %s" % k: v for k, v in counts.items() if ALLOWED.get(k) != v},
      "빠짐": {"%s.%s %s %s" % k: v for k, v in ALLOWED.items() if counts.get(k) != v}})
 
-prep = STS[0]
-last = body_of(prep.fn)[-1]
-
-
-def _kw_export(call):
-    if not isinstance(call, ast.Call) or call.args or not call.keywords:
-        return None
-    def _same(k):
-        if isinstance(k.value, ast.Name):
-            return k.value.id == k.arg
-        f9 = k.arg[1:] if k.arg.startswith("_") else k.arg
-        f9 = f9[:-1] if f9.endswith("9") else f9
-        return isinstance(k.value, ast.Attribute) and getattr(k.value.value, "id", "") == "lko" and k.value.attr == f9
-    if any(k.arg is None or not _same(k) for k in call.keywords):
-        return None
-    return {k.arg for k in call.keywords}
-
-
-pb = body_of(prep.fn)
-mk = pb[-2] if len(pb) >= 2 and isinstance(pb[-2], ast.If) else None
-od = pb[-3] if mk is not None else pb[-2]
-prep_exp = _kw_export(od.value) if (isinstance(od, ast.Assign) and getattr(od.value.func, "id", "") == "dict"
-                                    and [t.id for t in od.targets if isinstance(t, ast.Name)] == ["scope_out"]) else None
-if prep_exp is not None and mk is not None:
-    b0 = mk.body[0] if len(mk.body) == 1 else None
-    ok9 = (isinstance(b0, ast.Assign) and isinstance(b0.targets[0], ast.Subscript) and getattr(b0.targets[0].value, "id", "") == "scope_out"
-           and isinstance(b0.targets[0].slice, ast.Constant) and isinstance(b0.value, ast.Name) and b0.value.id == b0.targets[0].slice.value)
-    prep_exp = (prep_exp | {b0.value.id}) if ok9 else None
-chk(prep_exp is not None and isinstance(last, ast.Return) and getattr(last.value, "id", "") == "scope_out"
-    and not any(isinstance(y, ast.Call) and getattr(y.func, "id", "") == "locals" for y in ast.walk(prep.fn)),
-    "K2 _replay_prep 은 명시 내보내기 scope_out = dict(x=x, …) 로 끝남(이름표 시작 · locals() 0 · 지시서 #3 단계 5)")
-exp_of = {prep.name: prep_exp or set()}
-for s in STS[1:N_REPLAY]:
-    ups = [st for st in body_of(s.fn) if is_update(st)]
-    e9 = _kw_export(ups[0].value) if len(ups) == 1 else None
-    chk(e9 is not None and not any(isinstance(y, ast.Call) and getattr(y.func, "id", "") == "locals" for y in ast.walk(s.fn)),
-        "K2 %s 꼬리 = 명시 내보내기 _bs9.update(x=x, …) 하나(locals() 0)" % s.name)
-    exp_of[s.name] = e9 or set()
 import accounting_books as AB  # noqa: E402
-import accounting_ctx as AC  # noqa: E402
-have, miss_e = set(), []
-for s in STS[:N_REPLAY]:
-    if s.i:
-        need9 = {"ctx" if k.startswith("ctx.") else k for _t, k in s.pairs} | {k for k, _ok, _st in s.reloads}
-        need9 |= {n for y in ast.walk(s.fn) if isinstance(y, ast.Call) and getattr(y.func, "attr", "") == "check_pool_aliases"
-                  and getattr(y.args[0], "id", "") == BS for n in y.args[1].value.split()}
-        miss_e += ["%s ← %s" % (s.name, k) for k in sorted(need9 - have)]
-    have |= exp_of[s.name]
-fin9 = {AB.OLD.get(f, f) for f in AB._CONTRACT} | {"cb", "px", "gstate"} | set(AB.Books.names()) | set(AC.ReplayCtx.names())
-for tab in (AC.INJECT, AC.LATE_WIRES, AC.ALIASES, AC.HELD):
-    fin9 |= {"self" if n == "sb" else n for names in tab.values() for n in names}
-fin9 |= {bv for ents in AC.INPUTS.values() for bv, _p in ents} | {loc for ents in AC.INPUTS.values() for _b, pairs in ents for _f, loc in pairs}
-miss_e += ["경계·엄격 끝 ← %s" % k for k in sorted(fin9 - have)]
-chk(not miss_e, "K2 명시 내보내기 완전: 뒤 단계 머리 풀기·재적재 ⊆ 앞 내보내기 · 경계·엄격 끝 검사 이름 ⊆ 내보내기 합(%d)" % len(have), miss_e[:20])
+
+RP = _tree("view_b_replay")
+RFN = {n.name: n for n in ast.walk(RP) if isinstance(n, ast.FunctionDef) and n.name in ("_replay_prep", "_replay_main", "_build_replay")}
+po_cls = next((n for n in RP.body if isinstance(n, ast.ClassDef) and n.name == "PrepOut"), None)
+PO_F = [x.target.id for x in (po_cls.body if po_cls else []) if isinstance(x, ast.AnnAssign) and isinstance(x.target, ast.Name)]
+
+
+def _norm9(n):
+    n = n.lstrip("_")
+    return n[:-1] if n[-1:] == "9" else n
+
+
+def _pre_reads(fn):
+    return {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "pre"}
+
+
+prep_fn, main_fn, br_fn = RFN.get("_replay_prep"), RFN.get("_replay_main"), RFN.get("_build_replay")
+pb = body_of(prep_fn) if prep_fn else []
+last = pb[-1] if pb else None
+prep_ok = (po_cls is not None and isinstance(last, ast.Return) and isinstance(last.value, ast.Call) and getattr(last.value.func, "id", "") == "PrepOut"
+           and not last.value.args and all(k.arg and isinstance(k.value, ast.Name) and _norm9(k.value.id) == k.arg for k in last.value.keywords)
+           and [k.arg for k in last.value.keywords] == PO_F
+           and not any(isinstance(y, ast.Call) and getattr(y.func, "id", "") == "locals" for y in ast.walk(prep_fn))
+           and not any(isinstance(y, ast.Name) and y.id == BS for y in ast.walk(prep_fn)))
+chk(prep_ok and len(PO_F) == len(set(PO_F)), "K2′ _replay_prep 은 `return PrepOut(필드=지역, …)` 로 끝(키워드 = 필드 순서·이름 규약 · locals() 0 · 이름표 0 · 필드 %d)" % len(PO_F),
+    [(k.arg, ast.unparse(k.value)) for k in (last.value.keywords if isinstance(last, ast.Return) and isinstance(last.value, ast.Call) else []) if not (isinstance(k.value, ast.Name) and _norm9(k.value.id) == k.arg)][:10])
+mb = body_of(main_fn) if main_fn else []
+mh = mb[0] if mb and isinstance(mb[0], ast.Assign) and len(mb[0].targets) == 1 and isinstance(mb[0].targets[0], ast.Tuple) and isinstance(mb[0].value, ast.Tuple) else None
+hbad = []
+for t, v in (zip(mh.targets[0].elts, mh.value.elts) if mh is not None else ()):
+    if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == "pre":
+        if not (isinstance(t, ast.Name) and _norm9(t.id) == v.attr):
+            hbad.append("%s ← %s" % (ast.unparse(t), ast.unparse(v)))
+    elif isinstance(v, ast.Attribute) and isinstance(v.value, ast.Attribute) and getattr(v.value.value, "id", "") == "pre" and v.value.attr == "ctx":
+        if not (isinstance(t, ast.Name) and t.id == v.attr):
+            hbad.append("%s ← %s" % (ast.unparse(t), ast.unparse(v)))
+    else:
+        hbad.append("%s ← %s (pre.<f>·pre.ctx.<f> 아님)" % (ast.unparse(t), ast.unparse(v)))
+chk(mh is not None and [a.arg for a in main_fn.args.args] == ["self", "pre"] and not hbad and not any(isinstance(y, ast.Name) and y.id == BS for y in ast.walk(main_fn)),
+    "K2′ _replay_main(self, pre) 머리 풀기 = 첫 문장 · 오른쪽 pre.<f>·pre.ctx.<f> · 왼쪽 = 필드 이름 규약 · 이름표 0(%d 이름)" % (len(mh.targets[0].elts) if mh is not None else 0), hbad[:10])
+reads = _pre_reads(main_fn) if main_fn else set()
+chk(main_fn is not None and set(PO_F) == reads, "K2′ PrepOut 필드 = main 이 pre 에서 읽는 이름(머리 풀기 + 꼬리 ReplayResult 생성 · 남는 필드 0 · 모르는 읽기 0 · %d)" % len(reads),
+    {"남는 필드": sorted(set(PO_F) - reads), "모르는 읽기": sorted(reads - set(PO_F))})
+mret = mb[-1] if mb else None
+chk(isinstance(mret, ast.Return) and isinstance(mret.value, ast.Call) and dotted(mret.value.func) == "accounting_books.ReplayResult"
+    and not mret.value.args and {k.arg for k in mret.value.keywords} >= set(AB._CONTRACT),
+    "K2′ _replay_main 꼬리 = `return accounting_books.ReplayResult(키워드…)`(경계 필드 전부 · 이름표 update 0)")
+bb = body_of(br_fn) if br_fn else []
+chk(len(bb) >= 1 and ast.unparse(bb[0]) == "rr = self._replay_main(self._replay_prep(conn))" and isinstance(bb[-1], ast.Return) and ast.unparse(bb[-1]) == "return rr"
+    and not any(isinstance(y, ast.Name) and y.id == BS for y in ast.walk(br_fn)),
+    "K2′ _build_replay = `rr = self._replay_main(self._replay_prep(conn))` … `return rr`(이름표 0)", [ast.unparse(x)[:60] for x in bb])
 shape = []
-for s in STS[1:]:
+for s in STS:
     if s.h is None:
         shape.append("%s 머리 풀기 없음" % s.name)
     shape += ["%s 머리 풀기 %s ← %s" % (s.name, t, k) for t, k in s.pairs if t != (k[4:] if k.startswith("ctx.") else k)]
@@ -253,18 +248,19 @@ for s in STS[1:]:
     want_upd = 0 if s.name == "_build_tail" else 1
     if s.updates != want_upd:
         shape.append("%s update %d개(%d 이어야)" % (s.name, s.updates, want_upd))
-    if s.pops and s.i >= N_REPLAY:
+    if s.pops:
         shape.append("%s 화면 단계에 pop 줄 %s" % (s.name, s.pops))
-chk(not shape, "K2 단계 모양(머리 풀기 왼쪽 = 열쇠 · update 하나(tail 0) · pop 은 리플레이 단계만)", shape)
+chk(not shape, "K2 화면 단계 모양(머리 풀기 왼쪽 = 열쇠 · update 하나(tail 0) · pop 0)", shape)
+VIRT = set(AB.ReplayResult.old_names())
 
-made = set()
+made = set(VIRT)
 miss = []
 for s in STS:
     for k, ln in s.gets:
-        if s.i >= N_REPLAY and k != "daily_inval" and k not in made:
+        if k != "daily_inval" and k not in made:
             miss.append("%s :%d .get(%r)" % (s.name, ln, k))
     made |= s.body_bound | {t for t, _k in s.pairs}
-chk(not miss, "K3 화면 단계 .get 열쇠 = 앞 단계가 묶는 이름 또는 daily_inval(_build 가 넣음 · 빠지면 조용히 None)", miss)
+chk(not miss, "K3 화면 단계 .get 열쇠 = 리플레이 산출·앞 단계가 묶는 이름 또는 daily_inval(_build 가 넣음 · 빠지면 조용히 None)", miss)
 
 if not ON_BOUNDARY:
     chk(True, "K4 화면 단계 읽기 ⊆ 경계 — 5-2(ReplayResult) 에서 켬 · 지금 건너뜀")
@@ -282,9 +278,7 @@ if not ON_WRITES:
 else:
     import accounting_books  # noqa: E402
     MUT = {"append", "extend", "update", "setdefault", "pop", "clear", "insert", "remove", "add", "discard", "sort", "popitem", "reverse"}
-    replay_made = set()
-    for s in STS[:N_REPLAY]:
-        replay_made |= s.body_bound
+    replay_made = set(VIRT)
     over = []
     for s in STS[N_REPLAY:]:
         ins = ({t for t, _k in s.pairs} | {k for k, _ok, _st in s.reloads}) & replay_made

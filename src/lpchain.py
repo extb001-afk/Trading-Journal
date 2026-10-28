@@ -1,4 +1,5 @@
 """On-chain liquidity-position reader."""
+import http.client
 import json
 import math
 import time
@@ -335,6 +336,40 @@ def bs_off_part() -> dict:
     return {"bs_off": st} if st else {}
 
 
+def _no_mgr_collections(base: str, wallet: str, mgrs: dict, timeout: int) -> bool:
+    url0 = f"{str(base).rstrip('/')}/api/v2/addresses/{wallet}/nft/collections?type=ERC-721"
+    url, seen = url0, set()
+    for _page in range(NFT_PAGES_MAX):
+        try:
+            req = net_http.request(url, headers={"User-Agent": net_http.ua_for(url, "tj-bot/0.1"), "Accept": "application/json"})
+            with net_http.urlopen(req, timeout=timeout) as r:
+                d = json.loads(net_http.read_capped(r).decode())
+        except (OSError, ValueError, http.client.HTTPException):
+            return False
+        if not isinstance(d, dict) or not isinstance(d.get("items"), list):
+            return False
+        for it in d["items"]:
+            tok = it.get("token") if isinstance(it, dict) else None
+            addr = (tok.get("address") or tok.get("address_hash")) if isinstance(tok, dict) else None
+            if not isinstance(addr, str) or not addr:
+                return False
+            if addr.lower() in mgrs:
+                return False
+        if "next_page_params" not in d:
+            return False
+        npp = d["next_page_params"]
+        if npp is None:
+            return True
+        if not isinstance(npp, dict) or not npp:
+            return False
+        mk = json.dumps(npp, sort_keys=True)
+        if mk in seen:
+            return False
+        seen.add(mk)
+        url = url0 + "&" + urllib.parse.urlencode(npp)
+    return False
+
+
 def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20) -> list:
     base = ((cfg.get("chains") or {}).get(chain) or {}).get("blockscout")
     mgrs = lpdec.lp_managers(paths.BASE_DIR).get(chain) or {}
@@ -352,6 +387,8 @@ def list_wallet_positions(cfg: dict, chain: str, wallet: str, timeout: int = 20)
             with net_http.urlopen(req, timeout=timeout) as r:
                 d = json.loads(net_http.read_capped(r).decode())
         except Exception as _cg9:  # noqa: BLE001 [fallback]
+            if not out and isinstance(_cg9, urllib.error.HTTPError) and 500 <= _cg9.code <= 599 and _no_mgr_collections(base, wallet, mgrs, timeout):
+                return []
             calcguard.swallowed("lpchain:list_wallet_positions", _cg9)
             if isinstance(_cg9, urllib.error.HTTPError) and _cg9.code in (401, 403):
                 t_off = time.time()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import accounting_util
 from view_common import EPS
 from view_common import _f
 from view_misc import fx_candle_near
@@ -9,22 +10,25 @@ from view_misc import fx_candle_near
 
 class FeeBook:
 
-    def __init__(fbx, sb, books, kst_fmt, cb):
-        fbx.sb = sb
-        fbx.realized_by_loc = books.realized_by_loc
-        fbx.realized_krw_by_date = books.realized_krw_by_date
-        fbx.realized_by_date = books.realized_by_date
-        fbx.gas_expense = books.gas_expense
-        fbx.gas_by_chain = books.gas_by_chain
-        fbx.gas_by_month = books.gas_by_month
-        fbx.tax_rows = books.tax_rows
-        fbx.fee_day = books.fee_day
-        fbx.ex_fee = books.ex_fee
-        fbx.ex_fee_m = books.ex_fee_m
-        fbx.wd_fee = books.wd_fee
-        fbx.wd_fee_m = books.wd_fee_m
+    def __init__(fbx, px, *, kst_fmt):
+        fbx.px = px
+        fbx.sb = px.sb
+        fbx.realized_by_loc = px.books.realized_by_loc
+        fbx.realized_krw_by_date = px.books.realized_krw_by_date
+        fbx.realized_by_date = px.books.realized_by_date
+        fbx.gas_expense = px.books.gas_expense
+        fbx.gas_by_chain = px.books.gas_by_chain
+        fbx.gas_by_month = px.books.gas_by_month
+        fbx.tax_rows = px.books.tax_rows
+        fbx.fee_day = px.books.fee_day
+        fbx.ex_fee = px.books.ex_fee
+        fbx.ex_fee_m = px.books.ex_fee_m
+        fbx.wd_fee = px.books.wd_fee
+        fbx.wd_fee_m = px.books.wd_fee_m
         fbx.kst_fmt = kst_fmt
-        fbx.cb = cb
+        fbx.cb = px.cb
+        fbx.WD_FEE_IN_AMT = frozenset(("gate", "bithumb", "hyperliquid"))
+        fbx.cur_lab = [None]
 
     def tax_krw_acq(fbx, tax9, g, flow, cc9, cck9, rate_s, dkey, venue_loc=None, mix9=None):
         if g["is_stable"]:
@@ -57,7 +61,7 @@ class FeeBook:
         if g9["is_stable"]:
             return Decimal(1)
         if not g9.get("is_fiat"):
-            c9 = fx_candle_near(fbx.fxb, g9["sym"], ts9)
+            c9 = fx_candle_near(fbx.px.ctx.fxb, g9["sym"], ts9)
             if c9:
                 return Decimal(str(c9))
         if wac9 is not None and wac9 > 0:
@@ -69,7 +73,7 @@ class FeeBook:
     def fee_expense(fbx, usd9, ts9, dkey9, kind9, where9):
         if usd9 <= 0:
             return
-        rt9 = fbx.fxb.rate_at(ts9)
+        rt9 = fbx.px.ctx.fxb.rate_at(ts9)
         fbx.realized_by_date[dkey9] = fbx.realized_by_date.get(dkey9, 0) - float(usd9)
         fbx.realized_krw_by_date[dkey9] = fbx.realized_krw_by_date.get(dkey9, 0) - float(usd9) * rt9
         ge9 = fbx.gas_expense.setdefault(dkey9, [Decimal(0), 0, 0.0, {}])
@@ -95,7 +99,7 @@ class FeeBook:
         if usd9 > 0:
             d9 = fbx.fee_day.setdefault(fbx.kst_fmt(ts9, "%Y-%m-%d"), [Decimal(0), 0.0])
             d9[0] += usd9
-            d9[1] += float(usd9) * fbx.fxb.rate_at(ts9)
+            d9[1] += float(usd9) * fbx.px.ctx.fxb.rate_at(ts9)
 
     def ex_fee_add(fbx, ex9, usd9, ts9):
         if usd9 <= 0:
@@ -141,8 +145,8 @@ class FeeBook:
         if unit9 is None or mk9 <= EPS or unit9 <= 0 or g9.get("is_fiat"):
             return Decimal(0)
         gain9 = unit9 * mk9 - mc9
-        rt9, rs9 = fbx.fxb.rate_src(ts9)
-        fl9 = g9["cur"] or fbx.flow_of(g9, ts9, chain9)
+        rt9, rs9 = fbx.px.ctx.fxb.rate_src(ts9)
+        fl9 = g9["cur"] or fbx.px.flow_of(g9, ts9, chain9)
         fbx.cb.realize(g9, gain9)
         fl9["realized"] += gain9
         fl9["rbd"][dkey9] = fl9["rbd"].get(dkey9, Decimal(0)) + gain9
@@ -159,13 +163,13 @@ class FeeBook:
         if not fsm9:
             pass
         elif fs9 is not None:
-            sv9 = fbx.fs_last[0]
-            fbx.fs_last[0] = fs9
-            fbx.fs_mark(g9, fl9, t9, cmp9, mk9, d9, mc9, rt9, dkey9)
-            fbx.fs_last[0] = sv9
+            sv9 = fbx.px.kpx.fs_last[0]
+            fbx.px.kpx.fs_last[0] = fs9
+            fbx.px.fsx.fs_mark(g9, fl9, t9, cmp9, mk9, d9, mc9, rt9, dkey9)
+            fbx.px.kpx.fs_last[0] = sv9
         else:
-            fbx.fs_mark(g9, fl9, t9, cmp9, mk9, d9, mc9, rt9, dkey9)
+            fbx.px.fsx.fs_mark(g9, fl9, t9, cmp9, mk9, d9, mc9, rt9, dkey9)
         if g9["is_stable"]:
-            fbx.stable_fx_mark(t9, mc9, False, stl9=stl9, cck9=mck9, mix9=mix9, use9="수수료")
+            accounting_util.stable_fx_mark(t9, mc9, False, stl9=stl9, cck9=mck9, mix9=mix9, use9="수수료")
         fbx.tax_rows.append(t9)
         return gain9

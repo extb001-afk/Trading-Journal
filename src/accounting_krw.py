@@ -10,11 +10,17 @@ POOL_DUST_USD = Decimal("0.000001")
 
 class KrwPools:
 
-    def __init__(kpx, fxb, krw_mkt, up_mkt, fx_name):
+    def __init__(kpx, px, *, fxb, krw_mkt, up_mkt, fx_name):
+        kpx.px = px
         kpx.fxb = fxb
         kpx.krw_mkt = krw_mkt
         kpx.up_mkt = up_mkt
         kpx.fx_name = fx_name
+        kpx.fs_last = [Decimal(0)]
+        kpx.krw_mix = [Decimal(0)]
+        kpx.krw_stl = [None]
+        kpx.krw_last = [None]
+        kpx.STL_TOP = 8
 
     def krw_of(kpx, usd, ts9, row9=None):
         try:
@@ -35,7 +41,6 @@ class KrwPools:
     def consume_krw(kpx, g, cost):
         kpx.krw_mix[0] = Decimal(0)
         kpx.fs_last[0] = Decimal(0)
-        kpx.krw_flow[0] = None
         kpx.krw_stl[0] = None
         flow = g.get("cur")
         if flow is None or cost <= 0:
@@ -64,7 +69,6 @@ class KrwPools:
         if flow.get("fs_kc"):
             kpx.fs_last[0] = flow["fs_kc"] * cost / left
             flow["fs_kc"] -= kpx.fs_last[0]
-        kpx.krw_flow[0] = flow
         if flow.get("_stl"):
             kpx.stl_take(flow, float(cost) / float(left), float(left))
         return taken
@@ -95,7 +99,7 @@ class KrwPools:
     def stl_src(kpx, r9, evk9):
         if kpx.stl_krw_mkt(r9):
             return f"{kpx.stl_ex(r9)} 원화 매수"
-        d9 = [(s9, k9) for s9, k9 in (kpx.tx_legsym.get((r9["source_ns"], r9["source_id"])) or {}).get("disp", ()) if k9 != "fiat"]
+        d9 = [(s9, k9) for s9, k9 in (kpx.px.tx_legsym.get((r9["source_ns"], r9["source_id"])) or {}).get("disp", ()) if k9 != "fiat"]
         tok9 = [s9 for s9, k9 in d9 if k9 in ("tok", "nat")]
         if tok9:
             return f"{tok9[0]} 매도 대금"
@@ -106,7 +110,7 @@ class KrwPools:
     def stl_use(kpx, r9, krw_sale9):
         if krw_sale9:
             return "원화 매도"
-        a9 = [(s9, k9) for s9, k9 in (kpx.tx_legsym.get((r9["source_ns"], r9["source_id"])) or {}).get("acq", ()) if k9 != "fiat"]
+        a9 = [(s9, k9) for s9, k9 in (kpx.px.tx_legsym.get((r9["source_ns"], r9["source_id"])) or {}).get("acq", ()) if k9 != "fiat"]
         tok9 = [s9 for s9, k9 in a9 if k9 in ("tok", "nat")]
         if tok9:
             return f"{tok9[0]} 매수 대금"

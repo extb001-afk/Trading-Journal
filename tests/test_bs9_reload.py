@@ -60,7 +60,7 @@ try:
 
     import accounting_books as AB  # noqa: E402
     old = AB.ReplayResult.old_names()
-    edge = [f.name for f in dataclasses.fields(AB.ReplayResult) if f.name not in ("books", "ctx", "_scope", "_cb")]
+    edge = [f.name for f in dataclasses.fields(AB.ReplayResult) if f.name not in ("books", "ctx") and not f.name.startswith("_")]
     chk(len(old) == len(set(old)) and set(old) == {"books", "ctx"} | set(saved["books_fields"]) | set(saved["boundary"])
         and sorted(AB.OLD.get(f, f) for f in edge) == sorted(set(saved["boundary"]) - set(saved["books_fields"]))
         and set(AB.OLD) <= set(edge) and all(AB.OLD[f] != f for f in AB.OLD)
@@ -73,28 +73,27 @@ try:
         p9, between = B.always_present(stages, B.N_REPLAY, n)
         if p9 is None or not p9.replay or between:
             never.append((n, p9.name if p9 else None, between))
-    chk(not never, "R6 경계 이름 = 리플레이 단계가 늘 묶음(사이 pop 없음 · from_scope 가 KeyError 로 막는 길 없음)", never[:10])
+    chk(not never, "R6 경계 이름 = 가상 생산자(리플레이 산출)가 늘 묶음(사이 pop 없음 · ReplayResult 필수 필드 = 빠지면 TypeError)", never[:10])
+    vn, vc = B.virtual_producer(T.SRC)
+    chk(vn == set(old) and stages[0].virt.body_bound == vn and set(saved["groups"]["closures"]) <= vc,
+        "R6 도구 가상 생산자(AST) = ReplayResult.old_names()(%d) · 닫힘 함수 분류 = _replay_prep 안쪽 def(%d)" % (len(vn), len(vc)), sorted(vn ^ set(old))[:10])
 
     syn = os.path.join(TMP, "syn")
     os.makedirs(syn)
     UPD = '        _bs9.update((k9, v9) for k9, v9 in locals().items() if k9 != "_bs9")\n'
     mods = {
-        "accounting_books": "from dataclasses import dataclass\n\n\n@dataclass\nclass Books:\n    tax_rows: list = None\n",
+        "accounting_books": ("from dataclasses import dataclass\n\n\n@dataclass\nclass Books:\n    tax_rows: list = None\n\n\nOLD = {}\n\n\n"
+                             "@dataclass\nclass ReplayResult:\n    books: Any\n    ctx: Any\n    G: Any\n    a: Any\n    _cb: Any = None\n"),
         "accounting_ctx": "from dataclasses import dataclass\n\n\n@dataclass\nclass ReplayCtx:\n    now: float = 0.0\n",
         "view_b_replay": (
             "class ReplayMixin:\n"
             "    def _build_replay(self, conn):\n"
-            "        _bs9 = self._replay_prep(conn)\n"
-            "        self._replay_main(_bs9)\n        rr = accounting_books.ReplayResult.from_scope(_bs9)\n        return rr\n\n"
-            "    def _replay_prep(self, conn):\n        books = 1\n        ctx = 2\n        G = {}\n        a = 5\n        for r in conn:\n            pass\n"
-            "        return dict(locals())\n\n"
-            "    def _replay_main(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n"
-            "        if \"r\" in _bs9:\n            r = _bs9[\"r\"]\n"
-            "        if \"ln9\" in _bs9:\n            ln9 = _bs9[\"ln9\"]\n"
-            "        if \"k9\" in _bs9:\n            k9 = _bs9[\"k9\"]\n"
-            "        def _h():\n            return r\n"
-            "        def _g():\n            nonlocal ln9\n            ln9 = 3\n            return ln9\n"
-            "        def _f():\n            nonlocal k9\n            print(k9)\n            k9 = 1\n" + UPD),
+            "        rr = self._replay_main(self._replay_prep(conn))\n        return rr\n\n"
+            "    def _replay_prep(self, conn):\n        books = 1\n        ctx = 2\n        G = {}\n        a = 5\n        def _cl():\n            return a\n"
+            "        for r in conn:\n            pass\n"
+            "        return PrepOut(G=G, a=a)\n\n"
+            "    def _replay_main(self, pre):\n        (G,) = (pre.G,)\n"
+            "        return accounting_books.ReplayResult(books=pre.books, ctx=pre.ctx, G=pre.G, a=pre.a)\n"),
         "view_b_cards": (
             "class CardsMixin:\n    def _build_cards(self, _bs9):\n        (G, a,) = (_bs9[\"G\"], _bs9[\"a\"],)\n"
             "        global gq\n        if \"q\" in _bs9:\n            q = _bs9[\"q\"]\n        if \"gq\" in _bs9:\n            gq = _bs9[\"gq\"]\n"
@@ -107,8 +106,14 @@ try:
                          "        if \"ex9\" in _bs9:\n            ex9 = _bs9[\"ex9\"]\n        try:\n            pass\n"
                          "        except ValueError as ex9:\n            print(ex9)\n        d = _bs9.get(\"dep_tr9\")\n" + UPD),
         "view_b_futidx": ("class FutIdxMixin:\n    def _build_futidx(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n"
-                          "        if \"xx\" in _bs9:\n            xx = _bs9[\"xx\"]\n        G[xx] += 1\n" + UPD),
-        "view_b_tail": "class TailMixin:\n    def _build_tail(self, _bs9):\n        (G,) = (_bs9[\"G\"],)\n        return {\"fields\": G}\n",
+                          "        if \"xx\" in _bs9:\n            xx = _bs9[\"xx\"]\n        G[xx] += 1\n"
+                          "        if \"r\" in _bs9:\n            r = _bs9[\"r\"]\n"
+                          "        if \"ln9\" in _bs9:\n            ln9 = _bs9[\"ln9\"]\n"
+                          "        if \"k9\" in _bs9:\n            k9 = _bs9[\"k9\"]\n"
+                          "        def _h():\n            return r\n"
+                          "        def _g():\n            nonlocal ln9\n            ln9 = 3\n            return ln9\n"
+                          "        def _f():\n            nonlocal k9\n            print(k9)\n            k9 = 1\n" + UPD),
+        "view_b_tail": "class TailMixin:\n    def _build_tail(self, _bs9):\n        (G, zz,) = (_bs9[\"G\"], _bs9[\"zz\"],)\n        return {\"fields\": G}\n",
         "view_builder": ("class StateBuilder:\n    def _build(self, conn):\n        rr = self._build_replay(conn)\n"
                          "        _bs9 = rr.screen_scope(1)\n        self._build_cards(_bs9)\n        return self._build_tail(_bs9)\n"),
     }
@@ -119,24 +124,28 @@ try:
     s_rows = B.plan(s_stages)
     got = {(r["stage"], r["name"]): r["act"] for r in s_rows}
     want = {
-            ("_replay_main", "r"): "keep", ("_replay_main", "ln9"): "declare", ("_replay_main", "k9"): "keep",
+            ("_build_futidx", "r"): "keep", ("_build_futidx", "ln9"): "declare", ("_build_futidx", "k9"): "keep",
             ("_build_cards", "q"): "delete", ("_build_cards", "gq"): "refuse", ("_build_pendings", "z"): "refuse",
             ("_build_outflows", "a"): "head", ("_build_daily", "ex9"): "delete", ("_build_futidx", "xx"): "keep"}
-    chk(got == want, "R3 합성 단계 처리(죽음 지움 · 처리기 이름 · 유일 바인딩 선언 · 머리 풀기 · 남김 · nonlocal 흐름 · pop·global·vars 거부)",
+    chk(got == want, "R3 합성 단계 처리(죽음 지움 · 처리기 이름 · 유일 바인딩 선언 · 가상 생산자 값 = 머리 풀기 · 남김 · nonlocal 흐름 · global·vars 거부)",
         {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v})
+    s_bnd = B.boundary(syn, s_stages, s_rows)
+    chk({"G", "a"} <= set(s_bnd["boundary"]) and "q" not in s_bnd["boundary"] and "zz" not in s_bnd["boundary"] and s_bnd["groups"]["closures"] == []
+        and any("zz 만드는 단계 없음" in n for n in s_bnd["notes"]) and s_stages[0].virt.closures == {"_cl"} and s_stages[0].virt.body_bound == {"books", "ctx", "tax_rows", "G", "a"},
+        "R3 합성 경계: 가상 생산자 값(G·a) = 경계 · 죽은 재적재(q)·생산자 없는 읽기(zz) = 경계 밖 + 노트 · 닫힘 함수 = prep 안쪽 def ∩ 경계", (s_bnd["boundary"], s_bnd["notes"]))
     new = B.apply_plan(s_texts, s_stages, s_rows)
     links_head = [ln for ln in new["view_b_outflows"].splitlines() if "(G, a," in ln]
-    chk(links_head == ['        (G, a,) = (_bs9["G"], _bs9["a"],)'] and "        ln9: object" in new["view_b_replay"].splitlines()
+    chk(links_head == ['        (G, a,) = (_bs9["G"], _bs9["a"],)'] and "        ln9: object" in new["view_b_futidx"].splitlines()
         and new["view_b_outflows"].count('_bs9["a"]') == 1 and 'if "ex9" in _bs9' not in new["view_b_daily"],
         "R3 적용 글 — 머리 풀기 같은 줄 끝에 더함 · 값 없는 선언 한 줄 · 거부·남김은 그대로", links_head)
 
-    forced = [dict(r, act="delete") if (r["stage"], r["name"]) == ("_replay_main", "ln9") else r for r in s_rows]
+    forced = [dict(r, act="delete") if (r["stage"], r["name"]) == ("_build_futidx", "ln9") else r for r in s_rows]
     try:
         B.apply_plan(s_texts, s_stages, forced)
         refused = ""
     except B.Refuse as e:
         refused = str(e)
-    chk("view_b_replay" in refused, "R4 유일 바인딩을 억지로 지우면 적용 거부(compile·심볼 표 검증)", refused)
+    chk("view_b_futidx" in refused, "R4 유일 바인딩을 억지로 지우면 적용 거부(compile·심볼 표 검증)", refused)
 
     ref0 = os.environ.get("TJ_TEST_ARCH_BASE_REF") or "refactor"
     if ref0.lower() in ("none", "skip", "-", "0", "off") or shutil.which("git") is None or subprocess.run(

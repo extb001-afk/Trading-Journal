@@ -150,15 +150,22 @@ def head_binds(fn):
     for st in fn.body:
         if isinstance(st, ast.Assign) and isinstance(st.targets[0], ast.Tuple) and isinstance(st.value, ast.Tuple):
             for t, v in zip(st.targets[0].elts, st.value.elts):
-                if isinstance(t, ast.Name) and isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == "_bs9":
-                    k = CC._const_key(v)
-                    if k:
-                        out[t.id] = k
+                if isinstance(t, ast.Name) and isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == "pre":
+                    out[t.id] = v.attr
     return out
 
 
 hb = head_binds(mainf) if mainf else {}
-chk(hb.get("gstate") == "gstate", "F5 _replay_main 머리 풀기 gstate = _bs9['gstate'](기록기가 본 루프에 닿음)", sorted(hb)[:5])
+chk(hb.get("gstate") == "gstate", "F5 _replay_main 머리 풀기 gstate = pre.gstate(원천 PrepOut — 기록기가 본 루프에 닿음)", sorted(hb)[:5])
+po9 = next((n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "PrepOut"), None)
+po_f = [x.target.id for x in (po9.body if po9 else []) if isinstance(x, ast.AnnAssign)]
+pret = [n for n in ast.walk(prep) if isinstance(n, ast.Return) and isinstance(n.value, ast.Call) and getattr(n.value.func, "id", "") == "PrepOut"] if prep else []
+chk(po9 is not None and "gstate" in po_f and len(pret) == 1 and any(k.arg == "gstate" and isinstance(k.value, ast.Name) and k.value.id == "gstate" for k in pret[0].value.keywords),
+    "F5 PrepOut 필드 gstate · prep 끝 `return PrepOut(…, gstate=gstate, …)`(기록기 경계 = prep 지역 gstate 그대로)", (len(po_f), len(pret)))
+rp9 = next((n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "ReplayParts"), None)
+slots9 = [c.value for n in ast.walk(ast.parse(open(os.path.join(T.SRC, "accounting_ctx.py"), encoding="utf-8").read())) if isinstance(n, ast.ClassDef) and n.name == "ReplayParts"
+          for a in n.body if isinstance(a, ast.Assign) and getattr(a.targets[0], "id", "") == "__slots__" for c in a.value.elts]
+chk(slots9 and "gstate" not in slots9, "F5 ReplayParts(px) 칸에 gstate 없음(장부가 기록기를 우회해 원본 gstate 를 쥐는 길 0 · 설계 I6)", slots9[-6:])
 loop_calls = [n for n in ast.walk(mainf) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
               and isinstance(n.value.func, ast.Name) and n.value.func.id == "gstate"
               and any(isinstance(t, ast.Name) and t.id == "g" for t in n.targets)] if mainf else []

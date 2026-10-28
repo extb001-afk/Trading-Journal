@@ -91,8 +91,8 @@ for lab5, q5 in (("먼지", D("0.9999999999")), ("대조(전량)", D(1))):
 S.FXF[0] = None
 
 def pool(gcost, stable=False, fcost=D(100), fkrw=D(120000)):
-    kp = AK.KrwPools(None, None, None, None)
-    kp.krw_mix, kp.fs_last, kp.krw_flow, kp.krw_stl = [D(0)], [D(0)], [None], [None]
+    kp = AK.KrwPools(None, fxb=None, krw_mkt=None, up_mkt=None, fx_name=None)
+    kp.krw_mix, kp.fs_last, kp.krw_stl = [D(0)], [D(0)], [None]
     fl = {"cost": fcost, "cost_krw": fkrw}
     g = {"cur": fl, "cost": gcost, "is_stable": stable}
     return kp, g, fl

@@ -14,37 +14,35 @@ from view_common import SUB_SID_RE
 class CostPools:
 
     def __init__(cpx, px, *, G, _ak, oa_last, CP_EMIT_MAX, cp_last):
+        cpx.px = px
         cpx.G = G
-        cpx.kst_fmt = px.fbx.kst_fmt
         cpx._ak = _ak
-        cpx.krw_mix = px.kpx.krw_mix
-        cpx.consume_krw = px.kpx.consume_krw
-        cpx.krw_last = px.kpx.krw_last
         cpx.oa_last = oa_last
-        cpx.oa_take = accounting_util.oa_take
         cpx.CP_EMIT_MAX = CP_EMIT_MAX
         cpx.cp_last = cp_last
         cpx.cp_ev = px.books.cp_ev
-        cpx.cp_pool = accounting_util.cp_pool
         cpx.cb = px.cb
+        cpx.cp_xrec = {}
+        cpx.cur_src = [None]
+        cpx.cur_row = [None]
 
     def cp_add(cpx, g, key, q9, c9):
-        p9 = cpx.cp_pool(g)
+        p9 = accounting_util.cp_pool(g)
         if p9 is not None:
             p9.add(key, q9, c9)
 
     def cp_add_map(cpx, g, mp9, s9):
-        p9 = cpx.cp_pool(g) if mp9 else None
+        p9 = accounting_util.cp_pool(g) if mp9 else None
         if p9 is not None:
             p9.add_map(mp9, s9)
 
     def cp_sync(cpx, g, key=None):
-        p9 = cpx.cp_pool(g)
+        p9 = accounting_util.cp_pool(g)
         if p9 is not None:
             p9.sync(g["qty_known"], g["cost"], key if key is not None else ("u", g["gid"]))
 
     def cp_take(cpx, g, take9, cost9, want=True):
-        p9 = cpx.cp_pool(g)
+        p9 = accounting_util.cp_pool(g)
         if p9 is None or float(take9) <= 0:
             return None
         cpx.cp_sync(g)
@@ -56,7 +54,7 @@ class CostPools:
         return {"o": [(cpx.cp_ev.get(k9), k9, v9[0], v9[1]) for k9, v9 in (mp9 or {}).items()], "unk": float(unk9 or 0), "q": float(q9), "c": float(c9)}
 
     def cp_xc(cpx, g, r9, xc9, cov9, inh9, ch9, ts9):
-        p9 = cpx.cp_pool(g)
+        p9 = accounting_util.cp_pool(g)
         if p9 is None or cov9 <= 0:
             return
         lv9 = buychart.xc_leaves(xc9.get("lots"))
@@ -72,7 +70,7 @@ class CostPools:
             if tk9 is None and x9.get("btx"):
                 bt9 = cpx.xc_tok9.get(str(x9["btx"]).lower())
                 tk9 = bt9[1] if bt9 and bt9[0] == cc9 else None
-            tsx9 = buychart.xc_lot_ts(cpx.xc_stx9, cpx.xc_blk9, cc9, x9["tx"], x9.get("block"))
+            tsx9 = buychart.xc_lot_ts(cpx.px.xc_stx9, cpx.px.xc_blk9, cc9, x9["tx"], x9.get("block"))
             buy9 = x9["kind"] == "swap"
             info9 = {"chain": cc9, "chainKo": CHAIN_NAME.get(cc9, cc9), "tx": x9["tx"], "block": x9.get("block"), "token": tk9,
                      "arrPid": r9["posting_id"], "arrTs": int(ts9), "via": xc9.get("via") or "", "lot": x9.get("lot"), "depth": x9.get("depth"),
@@ -95,8 +93,8 @@ class CostPools:
 
     def consume(cpx, g, qty, cp=True):
         cpx.oa_last[0] = Decimal(0)
-        cpx.krw_last[0] = None
-        cpx.krw_mix[0] = Decimal(0)
+        cpx.px.kpx.krw_last[0] = None
+        cpx.px.kpx.krw_mix[0] = Decimal(0)
         cost_taken = Decimal(0)
         from_unknown = min(qty, g["qty_unknown"])
         cpx.cb.sub_unknown(g, from_unknown)
@@ -106,11 +104,11 @@ class CostPools:
         if rem > 0 and g["qty_known"] > EPS:
             wac = g["cost"] / g["qty_known"]
             take = min(rem, g["qty_known"])
-            cpx.oa_last[0] = cpx.oa_take(g, take)
+            cpx.oa_last[0] = accounting_util.oa_take(g, take)
             cpx.cp_last[0] = cpx.cp_take(g, take, wac * take, cp)
             cpx.cb.sub_known(g, take)
             cost_taken = wac * take
-            cpx.krw_last[0] = cpx.consume_krw(g, cost_taken)
+            cpx.px.kpx.krw_last[0] = cpx.px.kpx.consume_krw(g, cost_taken)
             cpx.cb.sub_cost(g, cost_taken)
         return cost_taken, take, from_unknown
 
@@ -121,7 +119,7 @@ class CostPools:
             if ms9 and " · 서브" not in str(d):
                 d = f"{d} · 서브{ms9.group(1)[1:]}"
         e0 = {
-            "t": cpx.kst_fmt(ts, "%m-%d %H:%M"),
+            "t": cpx.px.fbx.kst_fmt(ts, "%m-%d %H:%M"),
             "k": k, "d": d, "q": q, "a": a,
             "tx": (tx[:6] + "…" + tx[-4:]) if tx else "—", "src": cpx.cur_src[0],
             "_ts": int(ts or 0),

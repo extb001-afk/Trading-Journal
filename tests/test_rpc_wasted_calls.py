@@ -44,9 +44,18 @@ LOGS = {150: "0x" + "a1" * 32, 350: "0x" + "a2" * 32, 520: "0x" + "a3" * 32}
 STATE = {"calls": [], "rl_left": 2, "cap": None}
 
 
+BO = "https://mainnet.base.org"
+GC = []
+
+
 def fake_rpc_call(url, method, params, **kw):
     q = params[0]
     a, b = int(q["fromBlock"], 16), int(q["toBlock"], 16)
+    if url == BO:
+        GC.append((a, b))
+        e9 = bf_engine.classify_rpc_error({"code": -32011, "message": "request limit reached"})
+        bf_engine.gate(BO).failure(e9)
+        raise e9
     STATE["calls"].append((a, b))
     if STATE["cap"] and b - a + 1 > STATE["cap"]:
         raise bf_engine.classify_rpc_error({"code": -32602, "message": f"block range too large, maximum of {STATE['cap']} blocks"})
@@ -75,6 +84,41 @@ try:
     check("C5 '최대 40블록' = 노드 상한 40 그대로 배움(반감 없음) · 끝까지", sc.caps.get(EP) == 40 and last == 199 and sc.metrics["halved"] == 0
           and set(found) == {LOGS[150]}, (sc.caps, last, sc.metrics, found))
     check("C6 상한을 배운 뒤 넓은 창 거부는 1번뿐", sum(1 for a, b in STATE["calls"] if b - a + 1 > 40) == 1, STATE["calls"])
+    STATE.update(calls=[], rl_left=0, cap=None)
+    sc = bf_engine.LogScanner([BO, EP], "0x" + "dd" * 32, ["0x" + "00" * 32], span=50, min_span=10, head_guard=False, positions={1: "0x" + "dd" * 32})
+    found, last = sc.scan(0, 599)
+    check("G4 Base 공용 RPC 연속 429 2회 = 서킷 → 열린 동안 그 노드엔 청크 안 줌 — 다른 노드가 받아 끝까지 · 찾은 로그 그대로 · 그 노드 호출 2번",
+          last == 599 and set(found) == set(LOGS.values()) and len(GC) == 2, (last, GC, sorted(found)))
+
+    def grown(url):
+        g9 = bf_engine.gate(url)
+        g9.p429_grow = True
+        g9.p429_end = time.time()
+        g9.failure(bf_engine.classify_rpc_error({"code": -32011, "message": "request limit reached"}))
+        return g9
+    bf_engine.configure({"wallets": [], "chains": {}})
+    grown(BO)
+    GC.clear()
+    STATE.update(calls=[], rl_left=0, cap=None)
+    sc = bf_engine.LogScanner([BO, EP], "0x" + "dd" * 32, ["0x" + "00" * 32], span=50, min_span=10, head_guard=False, positions={1: "0x" + "dd" * 32})
+    found, last = sc.scan(0, 599)
+    check("H7 늘린 쉼 중인 base.org = 청크 0(호출 0) · 다른 노드가 받아 끝까지 · 찾은 로그 그대로",
+          last == 599 and set(found) == set(LOGS.values()) and GC == [], (last, GC, sorted(found)))
+    grown(EP)
+    STATE.update(calls=[])
+    sc = bf_engine.LogScanner([BO, EP], "0x" + "dd" * 32, ["0x" + "00" * 32], span=50, min_span=10, head_guard=False, positions={1: "0x" + "dd" * 32})
+    found, last = sc.scan(100, 599, deadline=time.time() + 0.3)
+    check("H8 전 노드 쉼 = 지연만 — 연속 완료 = 시작 앞(99) · 찾은 것 0 · 멈춤 사유 없음(가지치기·보관 밖 판정 안 함) · 호출 0",
+          last == 99 and found == {} and sc.last_stop is None and GC == [] and STATE["calls"] == [], (last, found, sc.last_stop, GC, STATE["calls"]))
+    import evm_rpcw  # noqa: E402
+    W = object.__new__(evm_rpcw.RpcChainWatcher)
+    W.chain, W.cfg = "base", {"chains": {"base": {}}}
+    W.logs_rpcs = W.logs_primary = [BO, EP]
+    W.logs_fallback, W.addr_max, W.span, W.min_span = {}, 0, 500, 1
+    f9, l9, fl9 = W._scan_logs(["0x" + "11" * 20], 1000, 1200, time.time() + 0.3)
+    check("H9 전 노드 쉼 = _scan_logs 연속 완료 = 커서(1000) 그대로 · 보관 밖 신호 없음 → _advance 무전진(return c)",
+          l9 == 1000 and f9 == {} and fl9 is None and GC == [], (l9, f9, fl9, GC))
+    bf_engine.configure({"wallets": [], "chains": {}})
 finally:
     bf_engine.rpc_call, bf_engine.time.sleep = _rc0, _sl0
 
@@ -244,5 +288,94 @@ check("F6 게이트 통합계정 키 권한 없음 = 6시간 메모 그대로(�
 import lev_view  # noqa: E402
 
 check("F5 화면 사유 = '키 권한 없음'(수집기 메모가 '키 권한'으로 시작 = 기본 문구)", lev_view.REASON_KO["no_permission"] == "키 권한 없음", lev_view.REASON_KO)
+
+print("[G] Base 공용 RPC 정책 — 연속 429 2회 서킷")
+bf_engine.configure({"backfill": {"hosts": {"mainnet.base.org": {"rate": 0.5}}}})
+pol = bf_engine._policy_for("mainnet.base.org")
+check("G1 정책 = 연속 429 2회 서킷 · config rate 덮어쓰기(0.5)가 있어도 남음", pol.get("breaker_fails") == 2 and pol.get("rate") == 0.5, pol)
+E429 = bf_engine.classify_rpc_error({"code": -32011, "message": "request limit reached"})
+g = bf_engine.gate(BO)
+g.failure(E429)
+g.success()
+g.failure(E429)
+check("G2 429 하나 뒤 성공이면 연속 수는 다시 처음부터(1) — 단 쉼 끝 5분 안 되풀이 429 라 늘린 쉼 동안 서킷([H])",
+      g.fail_streak == 1 and g.p429_n == 1 and g.is_open(), (g.fail_streak, g.p429_n, g.open_until))
+g.failure(E429)
+check("G3 연속 429 2회 = 서킷 열림", g.is_open(), (g.fail_streak, g.open_until))
+g7 = bf_engine.HostGate("rpc.other.invalid", {"breaker_fails": 2})
+g7.failure(E429)
+g7.success()
+g7.failure(E429)
+check("G2b 정책 없는 호스트 = 종전(429 하나 뒤 성공이면 다시 처음부터 · 안 열림)", not g7.is_open() and g7.p429_n == 0, (g7.fail_streak, g7.open_until))
+bf_engine.configure({"wallets": [], "chains": {}})
+
+print("[H] Base 공용 RPC 되풀이 429 — 쉼 배로")
+bf_engine.configure({"backfill": {"hosts": {"mainnet.base.org": {"rate": 0.5}}}})
+check("H1 정책 = 되풀이 429 쉼 배로(config rate 덮어쓰기가 있어도 남음) · 다른 Base 노드는 끔",
+      bf_engine.gate(BO).p429_grow is True and not bf_engine.gate("gateway.tenderly.co").p429_grow and not bf_engine.gate("base.drpc.org").p429_grow,
+      bf_engine._policy_for("mainnet.base.org"))
+bf_engine.configure({"wallets": [], "chains": {}})
+POL = bf_engine._policy_for("mainnet.base.org")
+
+
+def later(g9, dt):
+    if g9.p429_end:
+        g9.p429_end -= dt
+    if g9.pause_until:
+        g9.pause_until -= dt
+    if g9.open_until:
+        g9.open_until -= dt
+
+
+def left(g9):
+    return g9.pause_until - time.time()
+
+
+g = bf_engine.HostGate("mainnet.base.org", POL)
+g.failure(E429)
+check("H2 첫 429 = 종전 쉼(10~20초) · 서킷 안 열림", g.p429_n == 0 and 9 <= left(g) <= 20 and not g.is_open(), (g.p429_n, left(g), g.open_until))
+later(g, 45)
+g.success()
+g.failure(E429)
+check("H3 쉼 끝 25~35초 뒤 또 429(사이에 성공) = 쉼 배로(20~40초) + 그동안 서킷", g.p429_n == 1 and 19 <= left(g) <= 40 and g.is_open(),
+      (g.p429_n, left(g), g.open_until))
+seq = []
+for _k in range(6):
+    later(g, max(45.0, left(g) + 1.0))
+    g.success()
+    g.failure(E429)
+    seq.append((g.p429_n, round(left(g))))
+check("H4 되풀이마다 배로 · 상한 10분(n 2~6 · 40~80 · 80~160 · 160~320 · 320~600 · 600)",
+      [n for n, _s in seq] == [2, 3, 4, 5, 6, 6] and all(min(600, 10 * 2 ** n) - 1 <= s9 <= min(600, 20 * 2 ** n) for n, s9 in seq) and seq[-1][1] >= 599, seq)
+later(g, left(g) + 300 + 1)
+g.success()
+g.failure(E429)
+check("H5 쉼 끝 5분 넘게 조용한 뒤 429 = 처음부터(종전 10~20초 · 서킷 안 열림)", g.p429_n == 0 and 9 <= left(g) <= 20 and not g.is_open(), (g.p429_n, left(g)))
+g7 = bf_engine.HostGate("rpc.other.invalid", {})
+g7.failure(E429)
+later(g7, 45)
+g7.success()
+g7.failure(E429)
+check("H5b 정책 없는 호스트 = 종전(되풀이 429 도 쉼 10~20초 · 서킷 안 열림)", g7.p429_n == 0 and 9 <= left(g7) <= 20 and not g7.is_open(), (g7.p429_n, left(g7)))
+
+
+def sim(pol):
+    gs = bf_engine.HostGate("mainnet.base.org", pol)
+    n = 0
+    for _k in range(80):
+        if not gs.resting():
+            gs.success()
+        if not gs.is_open():
+            n += 1
+            gs.failure(E429)
+        later(gs, 45)
+    return n
+
+
+old9 = sim({k: v for k, v in POL.items() if k != "pause429_grow"})
+new9 = sim(POL)
+print(f"    합성 1시간(45초 주기 80번 · base.org getLogs 늘 429): 종전 {old9}번 → {new9}번")
+check("H6 합성 1시간 base.org 시도(=429) 종전 80번 → 12번 이하", old9 == 80 and new9 <= 12, (old9, new9))
+bf_engine.configure({"wallets": [], "chains": {}})
 
 T.finish()

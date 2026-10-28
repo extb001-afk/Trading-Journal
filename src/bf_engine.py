@@ -385,7 +385,7 @@ HOST_POLICIES = {
     "rpc.mainnet.chain.robinhood.com": {"rate": 2.0, "burst": 2, "conc": 1},
     "robinhood.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 6.0, "call_burst": 3,
                            "share": "drpc", "share_rate": 25.0, "share_burst": 50},
-    "mainnet.base.org": {"rate": 0.5, "burst": 1, "conc": 1, "call_rate": 5.0, "call_burst": 10},
+    "mainnet.base.org": {"rate": 0.5, "burst": 1, "conc": 1, "call_rate": 5.0, "call_burst": 10, "breaker_fails": 2, "pause429_grow": True},
     "gateway.tenderly.co": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 5.0, "call_burst": 10},
     "base.drpc.org": {"rate": 2.0, "burst": 2, "conc": 1, "call_rate": 6.0, "call_burst": 3, "share": "drpc", "share_rate": 25.0, "share_burst": 50},
     "rpc.mainnet.arc.io": {"rate": 2.0, "burst": 2, "conc": 1},
@@ -409,6 +409,8 @@ BREAKER_MAX = 600.0
 OPEN_WAIT = 30.0
 QUOTA_OPEN = 1800.0
 CN_COOL_MAX = 3600.0
+P429_GROW_WIN = 300.0
+P429_GROW_MAX = 600.0
 
 
 def _pol_num(v, default, typ, lo, hi):
@@ -546,6 +548,9 @@ class HostGate:
         self.pause_until = 0.0
         self.open_wait = _pol_num(pol.get("open_wait"), OPEN_WAIT, float, 0.0, 120.0)
         self.breaker_fails = _pol_num(pol.get("breaker_fails"), BREAKER_FAILS, int, 1, 100)
+        self.p429_grow = pol.get("pause429_grow") is True
+        self.p429_n = 0
+        self.p429_end = 0.0
         self.reset_unit = str(pol.get("reset_unit") or "auto").lower()
         self.q_limit = None
         self.ms_seen = False
@@ -686,6 +691,7 @@ class HostGate:
             quota_open = QUOTA_OPEN
         with self.lock:
             now = time.time()
+            grown = False
             if err.kind == "quota":
                 self.open_until = now + quota_open * (1.0 + random.random() * 0.1)
                 self.open_count += 1
@@ -696,7 +702,17 @@ class HostGate:
                     self.open_until = max(self.open_until, self.pause_until)
                     return
                 ra = err.retry_after if err.retry_after is not None else 10.0 * (1 + random.random())
-                self.pause_until = max(self.pause_until, now + min(ra, 120.0))
+                pause_s = min(ra, 120.0)
+                if self.p429_grow:
+                    if self.p429_end and now <= self.p429_end + P429_GROW_WIN:
+                        self.p429_n = min(self.p429_n + 1, 6)
+                        pause_s = min(pause_s * (2 ** self.p429_n), P429_GROW_MAX)
+                        grown = True
+                    else:
+                        self.p429_n = 0
+                self.pause_until = max(self.pause_until, now + pause_s)
+                if self.p429_grow:
+                    self.p429_end = self.pause_until
             if err.kind == "http5xx" and not count_5xx:
                 return
             if err.kind in ("http429", "http5xx", "timeout", "dns", "conn"):
@@ -706,6 +722,8 @@ class HostGate:
                     self.open_until = now + wait
                     self.open_count += 1
                     self.fail_streak = 0
+            if grown:
+                self.open_until = max(self.open_until, self.pause_until)
 
     def is_open(self) -> bool:
         return self.open_until > time.time()

@@ -44,9 +44,18 @@ chk(set(alias) == NAMES and all(v == 1 for v in alias.values()) and not direct, 
 STAGE_CTX = {"view_b_cards.py": ("_cards_", "cst")}
 
 
+def _norm9(n):
+    n = n.lstrip("_")
+    return n[:-1] if n.endswith("9") else n
+
+
 def _unpack_el(e, nm, ctx=None):
     if isinstance(e, ast.Attribute):
         if ctx is not None and isinstance(e.value, ast.Name) and e.value.id == ctx:
+            return e.attr == nm
+        if isinstance(e.value, ast.Name) and e.value.id == "pre":
+            return e.attr == _norm9(nm)
+        if isinstance(e.value, ast.Attribute) and isinstance(e.value.value, ast.Name) and e.value.value.id == "pre" and e.value.attr == "ctx":
             return e.attr == nm
         return e.attr == nm and _unpack_el(e.value, "ctx")
     return isinstance(e, ast.Subscript) and isinstance(e.value, ast.Name) and e.value.id == "_bs9" and isinstance(e.slice, ast.Constant) and e.slice.value == nm
@@ -93,7 +102,7 @@ for f in sorted(glob.glob(os.path.join(T.SRC, "view_b_*.py"))) + [os.path.join(T
                             for t9, e in zip(st.targets[0].elts, st.value.elts))):
                 ok_lines.add(st.lineno)
         for cl in tr.body:
-            if isinstance(cl, ast.ClassDef) and cl.name in ("LinksIn", "LinksOut", "RtIn", "RtOut"):
+            if isinstance(cl, ast.ClassDef) and cl.name in ("LinksIn", "LinksOut", "RtIn", "RtOut", "PrepOut"):
                 ok_lines |= {x.lineno for x in cl.body if isinstance(x, ast.AnnAssign) and x.value is None}
     for n in ast.walk(tr):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id in NAMES and n.lineno not in ok_lines:
@@ -128,10 +137,17 @@ bk = AB.Books()
 cx = object()
 scope = {n: object() for n in OLDN}
 scope.update({n: getattr(bk, n) for n in NAMES}, books=bk, ctx=cx, other9=object())
-rr = RR.from_scope(scope)
-edge = [f.name for f in dataclasses.fields(RR) if f.name not in ("books", "ctx", "_scope", "_cb")]
-chk(rr.books is bk and rr.ctx is cx and all(getattr(rr, f) is scope[AB.OLD.get(f, f)] for f in edge),
-    "B5 from_scope = 같은 객체(필드 %d · 옛 이름 %d)" % (len(edge) + 2, len(OLDN)))
+
+
+def _mk(sc, cb=None):
+    return RR(_keep=sc, _cb=cb, **{f: sc[AB.OLD.get(f, f)] for f in AB._CONTRACT})
+
+
+rr = _mk(scope)
+edge = [f.name for f in dataclasses.fields(RR) if f.name not in ("books", "ctx") and not f.name.startswith("_")]
+chk(rr.books is bk and rr.ctx is cx and all(getattr(rr, f) is scope[AB.OLD.get(f, f)] for f in edge) and rr._keep is scope and rr._cb is None
+    and not hasattr(RR, "from_scope") and not hasattr(AB, "check_rr") and not hasattr(AB, "check_pool_aliases"),
+    "B5 직접 생성 = 같은 객체(필드 %d · 옛 이름 %d) · _keep = 묶음 · from_scope·check_rr·check_pool_aliases 없음" % (len(edge) + 2, len(OLDN)))
 old = rr.as_old_names()
 chk(set(old) == set(OLDN) and old is not scope and all(old[n] is getattr(bk, n) for n in NAMES) and old["books"] is bk
     and all(old[AB.OLD.get(f, f)] is getattr(rr, f) for f in edge) and "other9" not in old,
@@ -140,27 +156,17 @@ inv = ("e", "1")
 sc9 = rr.screen_scope(inv)
 chk(sc9["daily_inval"] is inv and set(sc9) == set(OLDN) | {"daily_inval"} and sc9 is not old, "B5 screen_scope = 옛 이름 + daily_inval(부를 때마다 새 dict)")
 try:
-    RR.from_scope({k: v for k, v in scope.items() if k != "dep_tr9"})
+    RR(**{f: scope[AB.OLD.get(f, f)] for f in AB._CONTRACT if f != "dep_tr"})
     miss = None
-except KeyError as e:
+except TypeError as e:
     miss = str(e)
-chk(miss == "'dep_tr9'", "B5 경계 이름 빠짐 = KeyError(조용한 None 아님 · .get 으로 읽는 dep_tr9 도)", miss)
+chk(miss is not None and "dep_tr" in miss, "B5 경계 필드 빠짐 = TypeError(기본값 없음 · 조용한 None 아님 · .get 으로 읽는 dep_tr 도)", miss)
 try:
     rr.rows = []
     froz = False
 except dataclasses.FrozenInstanceError:
     froz = True
 chk(froz, "B5 필드 다시 묶기 불가(frozen)")
-ctx_calls = []
-AB.check_rr(rr, scope, "t", lambda c, s, w: ctx_calls.append((c, w)))
-chk(ctx_calls == [(cx, "t")], "B5 check_rr 같은 객체 = 통과(입력 묶음 검사는 넘긴 check_ctx 로)", ctx_calls)
-for bad9, want in ((dict(scope, rows=[]), "rows"), (dict(scope, tax_rows=[]), "tax_rows"), (dict(scope, debt_neg9={}), "debt_neg")):
-    try:
-        AB.check_rr(rr, bad9, "t4", lambda c, s, w: None)
-        msg = None
-    except AssertionError as e:
-        msg = str(e)
-    chk(msg is not None and want in msg and "t4" in msg, "B5 check_rr 다시 묶임 = AssertionError(%s)" % want, msg)
 
 chk(set(AB.SCREEN_WRITES) == {"_build_cards", "_build_pendings", "_build_outflows"} and all(set(v) <= NAMES for v in AB.SCREEN_WRITES.values())
     and set(AB.SCREEN_WRITES_DATA) <= {"_build_cards", "_build_pendings", "_build_outflows", "_build_daily", "_build_futidx", "_build_tail"}
@@ -192,7 +198,7 @@ s6 = AB.books_seal(d6)
 d6.realized_by_date.clear()
 d6.realized_by_date.update(b=2, a=1)
 chk(AB.books_seal(d6) != s6, "B6 봉인은 dict 순서 바뀜도 잡음(같은 내용 · 다른 삽입 순서)")
-rr6 = RR.from_scope(dict(scope, books=bk6, **{n: getattr(bk6, n) for n in NAMES}))
+rr6 = _mk(dict(scope, books=bk6, **{n: getattr(bk6, n) for n in NAMES}))
 sc6 = rr6.screen_scope(None)
 calls6 = []
 s7 = AB.screen_check(AB.books_seal(bk6), rr6, sc6, "_build_daily", lambda c, s, w: calls6.append(w))
@@ -203,5 +209,135 @@ try:
 except AssertionError as e:
     msg = str(e)
 chk(msg is not None and "tax_rows" in msg and "_build_daily" in msg, "B6 screen_check 장부 별칭 다시 묶임 = AssertionError", msg)
+
+REPLAY_STAGES = ("_replay_prep", "_replay_rt", "_replay_links", "_replay_main")
+BUNDLES = ("li", "lko", "ri", "rto", "po", "pre")
+
+
+def _p7(tree):
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name in REPLAY_STAGES]
+    ledgers = set()
+    for fn in fns:
+        for st in ast.walk(fn):
+            if (isinstance(st, ast.Assign) and len(st.targets) == 2 and isinstance(st.targets[0], ast.Name) and isinstance(st.targets[1], ast.Attribute)
+                    and getattr(st.targets[1].value, "id", "") == "px" and st.targets[1].attr == st.targets[0].id
+                    and isinstance(st.value, ast.Call) and isinstance(st.value.func, ast.Attribute)
+                    and getattr(st.value.func.value, "id", "").startswith("accounting_") and st.value.func.attr[:1].isupper()):
+                ledgers.add(st.targets[0].id)
+    owner, bad = {}, []
+    for fn in fns:
+        for st in ast.walk(fn):
+            if not isinstance(st, ast.Assign):
+                continue
+            for tg in st.targets:
+                if isinstance(tg, ast.Name):
+                    pairs = [(tg, st.value)]
+                elif isinstance(tg, ast.Tuple) and isinstance(st.value, ast.Tuple) and len(tg.elts) == len(st.value.elts):
+                    pairs = list(zip(tg.elts, st.value.elts))
+                else:
+                    continue
+                for t9, v9 in pairs:
+                    if not (isinstance(t9, ast.Name) and isinstance(v9, ast.Attribute)):
+                        continue
+                    at = "%s:%d %s ← %s" % (fn.name, st.lineno, t9.id, ast.unparse(v9))
+                    if isinstance(v9.value, ast.Name) and v9.value.id in ledgers:
+                        if t9.id != v9.attr:
+                            bad.append(at + " (장부 별칭 이름 엇갈림)")
+                        owner.setdefault(t9.id, set()).add(v9.value.id)
+                    elif isinstance(v9.value, ast.Name) and v9.value.id in BUNDLES:
+                        if _norm9(t9.id) != v9.attr:
+                            bad.append(at + " (묶음 풀기 이름 ≠ 필드)")
+                    elif (isinstance(v9.value, ast.Attribute) and isinstance(v9.value.value, ast.Name) and v9.value.value.id in BUNDLES
+                          and v9.value.attr == "ctx"):
+                        if t9.id != v9.attr:
+                            bad.append(at + " (ctx 풀기 이름 ≠ 필드)")
+    bad += ["%s 주인 둘 %s" % (n, sorted(o)) for n, o in sorted(owner.items()) if len(o) > 1]
+    return ledgers, bad
+
+
+led7, bad7 = _p7(rp)
+chk(len(led7) >= 11 and not bad7, "P7 리플레이 장부 별칭 `X = <장부>.X` 이름 대응 · 주인 하나 · 묶음 풀기 = 필드 이름(장부변수 %d)" % len(led7), (sorted(led7), bad7[:10]))
+SYN7 = """
+class M:
+    def _replay_prep(self, conn):
+        fbx = px.fbx = accounting_fee.FeeBook(px)
+        cpx = px.cpx = accounting_cp.CostPools(px)
+        wd_fee_add = fbx.wd_fee_add
+        ex_fee_add = fbx.wd_fee_add
+        (consume, ev,) = (cpx.consume, cpx.cp_emit,)
+        wd_fee_q = fbx.wd_fee_q
+        wd_fee_q = cpx.wd_fee_q
+        other = sb.px
+    def _replay_main(self, pre):
+        (G, _qfmt, conn, br_arr9, zz,) = (pre.G, pre.qfmt, pre.ctx.conn, lko.br_arr, lko.yy,)
+"""
+led9, bad9 = _p7(ast.parse(SYN7))
+chk(led9 == {"fbx", "cpx"} and len(bad9) == 4 and any("ex_fee_add ← fbx.wd_fee_add" in b for b in bad9) and any("ev ← cpx.cp_emit" in b for b in bad9)
+    and any("wd_fee_q 주인 둘" in b for b in bad9) and any("zz ← lko.yy" in b for b in bad9),
+    "P7 합성: 이름 엇갈림(단일·튜플 칸) · 주인 둘 · 묶음 풀기 이름 ≠ 필드 = 실패 · 장부 아닌 `sb.px`·규약 맞는 풀기 = 통과", bad9)
+
+MAIN_BUNDLE = "pre"
+
+
+def _b3(tree):
+    mainf = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_replay_main"), None)
+    if mainf is None:
+        return ["_replay_main 없음"]
+    body = [x for x in mainf.body if not (isinstance(x, ast.Expr) and isinstance(x.value, ast.Constant))]
+    head = body[0] if body and isinstance(body[0], ast.Assign) and isinstance(body[0].targets[0], ast.Tuple) else None
+    rebound = {n.id for st in body if st is not head for n in ast.walk(st) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+    ret = body[-1] if body else None
+    if not (isinstance(ret, ast.Return) and isinstance(ret.value, ast.Call) and ast.unparse(ret.value.func) == "accounting_books.ReplayResult" and not ret.value.args):
+        return ["꼬리가 `return accounting_books.ReplayResult(키워드…)` 가 아님"]
+    kw = {k.arg: k.value for k in ret.value.keywords}
+    bad = []
+    for f in AB._CONTRACT:
+        o = AB.OLD.get(f, f)
+        v = kw.get(f)
+        if v is None:
+            bad.append("%s 빠짐" % f)
+            continue
+        pre_ok = isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == MAIN_BUNDLE and v.attr == f
+        bare_ok = isinstance(v, ast.Name) and v.id == o
+        if f in ("books", "ctx"):
+            if not pre_ok:
+                bad.append("%s ← %s (pre.%s 여야)" % (f, ast.unparse(v), f))
+        elif pre_ok:
+            if o in rebound:
+                bad.append("%s ← pre.%s (main 이 %s 를 다시 묶음 → 맨 이름이어야)" % (f, f, o))
+        elif bare_ok:
+            if o not in rebound:
+                bad.append("%s ← %s (main 지역 아님 → pre.%s 여야)" % (f, o, f))
+        else:
+            bad.append("%s ← %s (맨 이름 %s 도 pre.%s 도 아님)" % (f, ast.unparse(v), o, f))
+    if not (isinstance(kw.get("_keep"), ast.Name) and kw["_keep"].id == MAIN_BUNDLE):
+        bad.append("_keep=pre 아님")
+    if not (isinstance(kw.get("_cb"), ast.Name) and kw["_cb"].id == "cb"):
+        bad.append("_cb=cb 아님")
+    bad += ["모르는 키워드 %s" % k for k in kw if k not in AB._CONTRACT and k not in ("_keep", "_cb")]
+    return bad
+
+
+bad3 = _b3(rp)
+chk(not bad3, "B3′ ReplayResult 직접 생성 = 필드마다 맨 이름(main 재묶음) 또는 pre.<필드> 둘 중 하나 · _keep=pre · _cb=cb · 빠짐 0(경계 %d)" % len(AB._CONTRACT), bad3[:12])
+SYN3 = """
+class M:
+    def _replay_main(self, pre):
+        (G, rows, debt_capg9,) = (pre.G, pre.rows, pre.debt_capg,)
+        rows = list(rows)
+        debt_neg9 = {}
+        return accounting_books.ReplayResult(books=pre.books, ctx=pre.ctx, %s, _keep=pre, _cb=cb)
+"""
+_std = ["%s=%s" % (f, ("rows" if f == "rows" else "debt_neg9" if f == "debt_neg" else "pre." + f)) for f in AB._CONTRACT if f not in ("books", "ctx")]
+ok3 = _b3(ast.parse(SYN3 % ", ".join(_std)))
+chk(not ok3, "B3′ 합성 정상(맨 이름 = 재묶음 둘 · 나머지 pre) = 통과", ok3)
+bad_syn = []
+for lab, repl in (("오연결 debt_neg=debt_capg9", ("debt_neg=debt_neg9", "debt_neg=debt_capg9")), ("rows=pre.rows(재묶음인데 pre)", ("rows=rows", "rows=pre.rows")),
+                  ("G=G(main 지역 아님)", ("G=pre.G", "G=G")), ("필드 빠짐", ("G=pre.G, ", "")), ("_keep 아님", ("_keep=pre", "_keep=rows")), ("옛 _scope", ("_keep=pre", "_scope=pre"))):
+    txt = (SYN3 % ", ".join(_std)).replace(*repl)
+    r9 = _b3(ast.parse(txt))
+    if not r9:
+        bad_syn.append(lab)
+chk(not bad_syn, "B3′ 합성 반례(오연결 · 재묶음인데 pre · 지역 아닌 맨 이름 · 필드 빠짐 · _keep 아님 · 옛 _scope) = 실패", bad_syn)
 
 T.finish()

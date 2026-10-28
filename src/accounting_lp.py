@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
+import accounting_util
 import acct_norm
 import lpdec
 from view_common import CHAIN_NAME
@@ -25,21 +26,12 @@ def _lp_small(x, *, rent, lpx):
 class LpBook:
 
     def __init__(lpx, px, *, _un, gstate, lpin, fns):
+        lpx.px = px
         lpx.sb = px.sb
         lpx._ak = fns.ak
         lpx._un = _un
-        lpx.consume_krw = px.kpx.consume_krw
-        lpx.cp_emit = px.cpx.cp_emit
-        lpx.cp_sync = px.cpx.cp_sync
-        lpx.cp_take = px.cpx.cp_take
-        lpx.cur_lab = px.fbx.cur_lab
-        lpx.cur_row = px.cpx.cur_row
-        lpx.cur_src = px.cpx.cur_src
-        lpx.ev = px.cpx.ev
-        lpx.flow_of = px.fbx.flow_of
-        lpx.fxb = px.fbx.fxb
+        lpx.fxb = px.ctx.fxb
         lpx.gstate = gstate
-        lpx.krw_of = px.kpx.krw_of
         lpx.lp_by_tx = lpin.lp_by_tx
         lpx.lp_dep_seen = lpin.lp_dep_seen
         lpx.lp_events = px.books.lp_events
@@ -47,10 +39,8 @@ class LpBook:
         lpx.lp_mgrs = lpin.lp_mgrs
         lpx.lp_tx_rows = lpin.lp_tx_rows
         lpx.lpb = lpin.lpb
-        lpx.note_unk = px.unx.note_unk
         lpx.realized_by_date = px.books.realized_by_date
         lpx.realized_krw_by_date = px.books.realized_krw_by_date
-        lpx.tax_krw_acq = px.fbx.tax_krw_acq
         lpx.tax_rows = px.books.tax_rows
         lpx.cb = px.cb
 
@@ -70,8 +60,8 @@ class LpBook:
 
     def lp_event(lpx, b9, ts9, k9, d9, q9, a9, tx9):
         lpx.lp_events.append({"t": datetime.fromtimestamp(ts9, KST).strftime("%m-%d %H:%M"), "_ts": int(ts9), "lp": b9["loc"],
-                          "sym": b9.get("pool") or lpx.lp_label(b9), "k": k9, "d": d9, "q": q9, "a": a9,
-                          "tx": (tx9[:6] + "…" + tx9[-4:]) if tx9 else "—", "src": lpx.cur_src[0]})
+                          "sym": b9.get("pool") or accounting_util.lp_label(b9), "k": k9, "d": d9, "q": q9, "a": a9,
+                          "tx": (tx9[:6] + "…" + tx9[-4:]) if tx9 else "—", "src": lpx.px.cpx.cur_src[0]})
         ak9 = lpx._ak(a9, ts9)
         if ak9 is not None:
             lpx.lp_events[-1]["aK"] = ak9
@@ -90,7 +80,7 @@ class LpBook:
             b9["ucost"][sym9] = b9["ucost"].get(sym9, Decimal(0)) + wac9 * q9
             b9["deposited"] += wac9 * q9
             lpx.lp_dep_seen.add(loc9)
-            lpx.lp_event(b9, ts9, "유동성 예치", f"{CHAIN_NAME.get(chain9, chain9)} · {lpx.lp_label(b9)}", f"{qs9} {sym9}",
+            lpx.lp_event(b9, ts9, "유동성 예치", f"{CHAIN_NAME.get(chain9, chain9)} · {accounting_util.lp_label(b9)}", f"{qs9} {sym9}",
                      f"${float(wac9 * q9):,.2f}", txh9)
         else:
             qa = -q9
@@ -99,7 +89,7 @@ class LpBook:
             b9["units"][sym9] = max(Decimal(0), u0 - qa)
             b9["ucost"][sym9] = max(Decimal(0), b9["ucost"].get(sym9, Decimal(0)) - c_back)
             b9["returned"][sym9] = b9["returned"].get(sym9, Decimal(0)) + qa
-            lpx.lp_event(b9, ts9, "유동성 회수", f"{CHAIN_NAME.get(chain9, chain9)} · {lpx.lp_label(b9)} · 원금 복귀", f"{qs9} {sym9}",
+            lpx.lp_event(b9, ts9, "유동성 회수", f"{CHAIN_NAME.get(chain9, chain9)} · {accounting_util.lp_label(b9)} · 원금 복귀", f"{qs9} {sym9}",
                      f"${float(c_back):,.2f}", txh9)
 
     def lp_tx(lpx, r9):
@@ -129,8 +119,8 @@ class LpBook:
             fk = min(qx, gx["qty_known"]); fu = qx - fk
             wac = lpx.cb.wac(gx)
             bk = wac * fk
-            krw9 = lpx.consume_krw(gx, bk)
-            cp9x = lpx.cp_take(gx, fk, bk)
+            krw9 = lpx.px.kpx.consume_krw(gx, bk)
+            cp9x = lpx.px.cpx.cp_take(gx, fk, bk)
             lpx.cb.release(gx, fk, bk, fu)
             lpx.cb.snapshot(gx, ts9, -qx)
             mv = Decimal(x["cost_usd"]) if x["cost_usd"] is not None else None
@@ -148,7 +138,7 @@ class LpBook:
             bx["converted"][gx["sym"]] = bx["converted"].get(gx["sym"], Decimal(0)) + qx
             conv_txt.append(f"{float(qx):,.4f}".rstrip("0").rstrip(".") + f" {gx['sym']}")
             dinfo.append({"g": gx, "qx": qx, "fk": fk, "bk": bk, "wk": wt * (fk / qx), "krw": krw9, "bx": bx, "_cp": cp9x,
-                          "fl": None if gx["is_stable"] else (gx["cur"] or lpx.flow_of(gx, ts9, chain9))})
+                          "fl": None if gx["is_stable"] else (gx["cur"] or lpx.px.flow_of(gx, ts9, chain9))})
         k9 = (w_known / w_all) if w_all > 0 else Decimal(1)
         B_rent = Decimal(0)
         if rent_only:
@@ -219,19 +209,19 @@ class LpBook:
                 fl9["realized"] += pnl9
                 fl9["rbd"][dkey9] = fl9["rbd"].get(dkey9, Decimal(0)) + pnl9
                 fl9["rbdk"][dkey9] = fl9["rbdk"].get(dkey9, 0.0) + float(pnl9) * rate9
-                fl9.setdefault("rch", {}).setdefault(dkey9, set()).add(lpx.cur_lab[0] or "?")
+                fl9.setdefault("rch", {}).setdefault(dkey9, set()).add(lpx.px.fbx.cur_lab[0] or "?")
                 lpx.realized_by_date[dkey9] = lpx.realized_by_date.get(dkey9, 0) + float(pnl9)
                 lpx.realized_krw_by_date[dkey9] = lpx.realized_krw_by_date.get(dkey9, 0) + float(pnl9) * rate9
                 tax9 = {"sold": dkey9, "sym": gx["sym"], "ticker": gx["sym"], "ex": "유동성(DEX LP) · 스테이블 전환",
                         "qty": _f(qi, 4), "acq": _f(ci, 2), "disp": _f(pi, 2), "fee": 0, "rate": round(rate9, 4), "rateSrc": rsrc9,
                         "_acq": float(ci), "_disp": float(pi), "_qty": float(qi)}
-                lpx.tax_krw_acq(tax9, gx, fl9, ci, ki, rate9, dkey9)
+                lpx.px.fbx.tax_krw_acq(tax9, gx, fl9, ci, ki, rate9, dkey9)
                 lpx.tax_rows.append(tax9)
                 fl9["sold"] += qi
                 fl9["sold_dates"].append(dkey9)
                 fl9["proceeds"] = fl9.get("proceeds", Decimal(0)) + pi
-                fl9["proceeds_krw"] = fl9.get("proceeds_krw", Decimal(0)) + lpx.krw_of(pi, ts9)
-                lpx.ev(fl9, ts9, "LP 전환 매도", f"{lpx.lp_label(d['bx'])} · 풀 안에서 스테이블로 전환된 원금(= 매도 · 실현 "
+                fl9["proceeds_krw"] = fl9.get("proceeds_krw", Decimal(0)) + lpx.px.kpx.krw_of(pi, ts9)
+                lpx.px.cpx.ev(fl9, ts9, "LP 전환 매도", f"{accounting_util.lp_label(d['bx'])} · 풀 안에서 스테이블로 전환된 원금(= 매도 · 실현 "
                    + f"{'+' if pnl9 >= 0 else '−'}${abs(float(pnl9)):,.2f})",
                    f"{float(qi):,.4f}".rstrip("0").rstrip("."), f"${float(pi):,.2f}", txh9, un=lpx._un(qi, pi))
                 fl9["events"][-1]["_tax"] = tax9
@@ -241,11 +231,11 @@ class LpBook:
                     tcx = sum(v9[1] for v9 in cmx.values())
                     for v9 in cmx.values():
                         v9[1] = v9[1] * float(ci) / tcx if tcx > 0 else 0.0
-                    fl9["events"][-1]["_cmp"] = lpx.cp_emit(cmx, 0, qi, ci)
+                    fl9["events"][-1]["_cmp"] = lpx.px.cpx.cp_emit(cmx, 0, qi, ci)
             qr = qx - qi
             if qr > Decimal("0.000001") or qi <= 0:
                 fl9["lpconv"] = fl9.get("lpconv", Decimal(0)) + qr
-                lpx.ev(fl9, ts9, "LP 전환", f"{lpx.lp_label(d['bx'])} · 풀 안에서 다른 자산으로 전환된 원금",
+                lpx.px.cpx.ev(fl9, ts9, "LP 전환", f"{accounting_util.lp_label(d['bx'])} · 풀 안에서 다른 자산으로 전환된 원금",
                    f"{float(qr):,.4f}".rstrip("0").rstrip("."), f"${float(bk - ci):,.2f}", txh9, un=lpx._un(qr, bk - ci))
             if gx["qty_known"] + gx["qty_unknown"] <= Decimal("0.000001"):
                 gx["cur"] = None
@@ -255,10 +245,10 @@ class LpBook:
             qx = lpx.sb._norm(x)
             if qx <= 0:
                 continue
-            lpx.cp_sync(gx)
+            lpx.px.cpx.cp_sync(gx)
             lpx.cb.snapshot(gx, ts9, qx)
             gx["risk_allow"] = True
-            flow = lpx.flow_of(gx, ts9, chain9)
+            flow = lpx.px.flow_of(gx, ts9, chain9)
             qsx = f"{float(qx):,.4f}".rstrip("0").rstrip(".")
             b9["acq"][gx["sym"]] = b9["acq"].get(gx["sym"], Decimal(0)) + qx
             if no_dep:
@@ -266,15 +256,15 @@ class LpBook:
                     lpx.cb.acquire(gx, qx, qx)
                 else:
                     lpx.cb.add_unknown(gx, qx)
-                    cr9 = lpx.cur_row[0]
-                    lpx.cur_row[0] = x
+                    cr9 = lpx.px.cpx.cur_row[0]
+                    lpx.px.cpx.cur_row[0] = x
                     try:
-                        lpx.note_unk(gx, ts9, f"LP 회수 · 예치 기록 없음(수집 창 이전 예치) · {lpx.lp_label(b9)}", qx, txh9, chain9=chain9)
+                        lpx.px.unx.note_unk(gx, ts9, f"LP 회수 · 예치 기록 없음(수집 창 이전 예치) · {accounting_util.lp_label(b9)}", qx, txh9, chain9=chain9)
                     finally:
-                        lpx.cur_row[0] = cr9
+                        lpx.px.cpx.cur_row[0] = cr9
                 flow["bought"] += qx
-                lpx.ev(flow, ts9, "LP 회수", f"{lpx.lp_label(b9)} · 예치 기록 없음(원가 미상)", qsx, "—", txh9)
-                lpx.lp_event(b9, ts9, "유동성 회수", f"{CHAIN_NAME.get(chain9, chain9)} · {lpx.lp_label(b9)} · 예치 기록 없음",
+                lpx.px.cpx.ev(flow, ts9, "LP 회수", f"{accounting_util.lp_label(b9)} · 예치 기록 없음(원가 미상)", qsx, "—", txh9)
+                lpx.lp_event(b9, ts9, "유동성 회수", f"{CHAIN_NAME.get(chain9, chain9)} · {accounting_util.lp_label(b9)} · 예치 기록 없음",
                          f"{qsx} {gx['sym']}", "—", txh9)
                 continue
             c = cost_of.get(x["posting_id"], Decimal(0))
@@ -283,13 +273,13 @@ class LpBook:
             lpx.cb.acquire(gx, kq, c)
             if uq > EPS:
                 lpx.cb.add_unknown(gx, uq)
-                lpx.note_unk(gx, ts9, f"LP 전환 취득 · 원가미상 원금분 · {lpx.lp_label(b9)}", uq, txh9, chain9=chain9, fs9=0)
+                lpx.px.unx.note_unk(gx, ts9, f"LP 전환 취득 · 원가미상 원금분 · {accounting_util.lp_label(b9)}", uq, txh9, chain9=chain9, fs9=0)
             flow["bought"] += qx; flow["cost"] += c
             if disp9 and not gx["is_stable"] and B > 0:
-                flow["cost_krw"] += sum(((d["krw"] if (d["krw"] is not None and not d["g"]["is_stable"]) else lpx.krw_of(d["bk"], ts9))
+                flow["cost_krw"] += sum(((d["krw"] if (d["krw"] is not None and not d["g"]["is_stable"]) else lpx.px.kpx.krw_of(d["bk"], ts9))
                                          for d in dinfo), Decimal(0)) * c / B
             else:
-                flow["cost_krw"] += lpx.krw_of(c, ts9, x)
+                flow["cost_krw"] += lpx.px.kpx.krw_of(c, ts9, x)
             rw9 = bool(lpi9.get("via")) and not disp9
             rn9 = (not disp9) and int(x["asset_id"]) in rent9
             how = ("스테이블 수령 · 액면 원가(스테이블로 바뀐 전환 원금 = 매도 실현)" if (disp9 and sale9 and gx["is_stable"]) else
@@ -299,8 +289,8 @@ class LpBook:
                     else ("스테이킹 리워드(시세 없음 · 원가 0)" if rw9 else "수수료(시세 없음 · 원가 0)")))
             kname = "LP 전환 매수" if disp9 else ("LP 임대료 환급" if rn9 else ("LP 리워드 수령" if rw9 else "LP 수수료 수령"))
             unit9 = f" · 개당 ${float(c / qx):,.6g}" if qx > 0 and c > 0 else ""
-            lpx.ev(flow, ts9, kname, f"{lpx.lp_label(b9)} · {how}{unit9}", qsx, f"${float(c):,.2f}", txh9, un=lpx._un(qx, c))
-            lpx.lp_event(b9, ts9, kname, f"{CHAIN_NAME.get(chain9, chain9)} · {lpx.lp_label(b9)} · {how}",
+            lpx.px.cpx.ev(flow, ts9, kname, f"{accounting_util.lp_label(b9)} · {how}{unit9}", qsx, f"${float(c):,.2f}", txh9, un=lpx._un(qx, c))
+            lpx.lp_event(b9, ts9, kname, f"{CHAIN_NAME.get(chain9, chain9)} · {accounting_util.lp_label(b9)} · {how}",
                      f"{qsx} {gx['sym']}", f"${float(c):,.2f}", txh9)
         gain9 = realized9 + income9
         if abs(gain9) >= Decimal("0.005"):
@@ -311,7 +301,7 @@ class LpBook:
             b9["rbdk"][dkey9] = b9["rbdk"].get(dkey9, 0.0) + float(gain9) * rt9x
             b9["realized"] += realized9
             b9["income"] += income9
-            lpx.tax_rows.append({"sold": dkey9, "sym": b9.get("pool") or lpx.lp_label(b9), "ticker": "LP",
+            lpx.tax_rows.append({"sold": dkey9, "sym": b9.get("pool") or accounting_util.lp_label(b9), "ticker": "LP",
                              "ex": "유동성(DEX LP)" if disp9 else ("유동성 리워드" if lpi9.get("via") else "유동성 수수료"),
                              "qty": _f(float(sum((-lpx.sb._norm(x) for x in disp9), Decimal(0))), 4) if disp9 else 0,
                              "acq": _f(float(B), 2) if disp9 else _f(float(B_rent), 2),
@@ -319,7 +309,7 @@ class LpBook:
                              "_acq": float(B) if disp9 else float(B_rent), "_disp": float(k9 * M if disp9 else income9),
                              **({} if disp9 else {"tk": "inc"})})
         if disp9 and B >= Decimal("0.005"):
-            lpx.lp_event(b9, ts9, "LP 전환", f"{CHAIN_NAME.get(chain9, chain9)} · {lpx.lp_label(b9)} · 원금 전환 "
+            lpx.lp_event(b9, ts9, "LP 전환", f"{CHAIN_NAME.get(chain9, chain9)} · {accounting_util.lp_label(b9)} · 원금 전환 "
                      + " + ".join(conv_txt) + (f" · 손익 {'+' if realized9 >= 0 else ''}${float(realized9):,.2f}" if abs(realized9) > EPS else "")
                      + (f" · 스테이블 전환 실현 {'+' if st_real9 >= 0 else '−'}${abs(float(st_real9)):,.2f}(코인 카드)" if sale9 else ""),
                      "—", f"${float(B):,.2f}", txh9)

@@ -6,7 +6,10 @@ import _harness as T  # noqa: E402
 
 from decimal import Decimal  # noqa: E402
 
+import types  # noqa: E402
+
 import accounting_books  # noqa: E402
+import accounting_ctx  # noqa: E402
 import accounting_fee  # noqa: E402
 import acct_norm  # noqa: E402
 
@@ -29,9 +32,10 @@ class SB:
 def book(now_px, cand):
     sb = SB()
     sb.spot = Spot(now_px)
-    fb = accounting_fee.FeeBook(sb=sb, books=accounting_books.Books(), kst_fmt=None, cb=None)
-    fb.fxb = acct_norm.FxBook({}, None, 1400.0, web_candle=cand)
-    return fb
+    px = accounting_ctx.ReplayParts(sb=sb, books=accounting_books.Books())
+    px.cb = None
+    px.ctx = types.SimpleNamespace(fxb=acct_norm.FxBook({}, None, 1400.0, web_candle=cand))
+    return accounting_fee.FeeBook(px, kst_fmt=None)
 
 
 def g(sym="BTC", stable=False, qk=0, cost=0):

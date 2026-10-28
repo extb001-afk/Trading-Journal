@@ -2,26 +2,31 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import accounting_util
 import calcguard
 from view_common import EPS
 
 
 class UnkBook:
 
-    def __init__(unx, sb, cost_ov, fs_on, krw_of, cb):
-        unx.sb = sb
+    def __init__(unx, px, *, cost_ov, fs_on, krw_of):
+        unx.px = px
+        unx.sb = px.sb
         unx.cost_ov = cost_ov
         unx.fs_on = fs_on
         unx.krw_of = krw_of
-        unx.cb = cb
+        unx.cb = px.cb
+        unx.fs_sum = {"n": 0, "q": Decimal(0), "usd": Decimal(0), "miss": 0, "miss_q": {}, "src": {}, "rows": 0, "real": Decimal(0),
+                      "st_n": 0, "st_usd": Decimal(0), "st_miss": 0, "be_skip": 0,
+                      "bk": {}, "g": {}, "mk": {}, "ur": {}, "up": {}}
 
     def apply_ov(unx, fl9, pend9):
         ts9, take, unit_d, txt9, ref9, badd9 = pend9
         fl9["cost"] += take * unit_d
         fl9["cost_krw"] += unx.krw_of(take * unit_d, ts9)
         fl9["bought"] += badd9
-        unx.ev(fl9, ts9, "원가 지정", txt9, f"{float(take):,.4f}".rstrip("0").rstrip("."), f"${float(take * unit_d):,.2f}", ref9,
-           un=unx._un(take, take * unit_d))
+        unx.px.cpx.ev(fl9, ts9, "원가 지정", txt9, f"{float(take):,.4f}".rstrip("0").rstrip("."), f"${float(take * unit_d):,.2f}", ref9,
+           un=accounting_util._un(take, take * unit_d))
 
     def note_unk(unx, g9, ts9, kind9, qty9, ref9, ex9=None, chain9=None, up_gid=None, unc9=None, via9=None, fs9=None):
         try:
@@ -68,9 +73,9 @@ class UnkBook:
             dq9 = Decimal(str(qty9))
             fq9 = dq9 if fs9 is None else max(Decimal(0), min(dq9, Decimal(str(fs9))))
             if fq9 > EPS:
-                fsa9 = unx.fs_conv(g9, ts9, fq9, dq9, unc9, kind9)
+                fsa9 = unx.px.fsx.fs_conv(g9, ts9, fq9, dq9, unc9, kind9)
             if dq9 - fq9 > EPS:
-                unx.fs_why(g9, "fs0", kind9, dq9 - fq9)
+                unx.px.fsx.fs_why(g9, "fs0", kind9, dq9 - fq9)
                 if up_gid is not None:
                     u9 = unx.fs_sum["up"].setdefault(str(g9["gid"]), {})
                     u9[str(up_gid)] = u9.get(str(up_gid), 0.0) + float(dq9 - fq9)

@@ -17,10 +17,12 @@ import paths  # noqa: E402
 import lpchain  # noqa: E402
 import pricing  # noqa: E402
 import chk_collect  # noqa: E402
+import calcguard  # noqa: E402
 
 chk = T.chk
 CALLS = []
 ROUTE = {}
+SEQ = {}
 
 
 class _Resp:
@@ -43,10 +45,16 @@ class _Resp:
 def _uo(req, timeout=None, *a, **k):
     u = getattr(req, "full_url", req)
     CALLS.append(u)
+    for pre, q in SEQ.items():
+        if u.startswith(pre) and q:
+            code, body = q.pop(0) if len(q) > 1 else q[0]
+            if code != 200:
+                raise urllib.error.HTTPError(u, code, "합성", {}, io.BytesIO(b"{}"))
+            return _Resp(body)
     for pre, (code, body) in ROUTE.items():
         if u.startswith(pre):
             if code != 200:
-                raise urllib.error.HTTPError(u, code, "합성", {}, io.BytesIO(b"{}"))
+                raise urllib.error.HTTPError(u, code, "합성", {}, io.BytesIO(json.dumps(body).encode()))
             return _Resp(body)
     raise urllib.error.HTTPError(u, 500, "합성 경로 없음", {}, io.BytesIO(b"{}"))
 
@@ -208,6 +216,61 @@ ROUTE[UP + "TKN"] = (200, [_bar(M_SAME, 1200.0)])
 v3h = pricing._upbit_krw_minute("TKN", M_SAME)
 chk(v3h == 1200.0 and n_calls(UP + "TKN") == 2, "[3h] 404 와 같은 분에 상장 = 그 분 봉 다시 물음(캐시 안 씀)", {"v": v3h, "n": n_calls(UP + "TKN")})
 
+BN = "https://api.binance.com/api/v3/klines?symbol="
+NOSYM = {"code": -1121, "msg": "Invalid symbol."}
+CK.now = (int(CK.now) // 60 + 1) * 60 + 5
+ROUTE[BN + "TKBUSDT"] = (400, NOSYM)
+T0B = CK.now
+try:
+    pricing._c_binance("TKB", MS)
+    e3i = None
+except urllib.error.HTTPError as e:
+    e3i = e.code
+chk(e3i == 400 and n_calls(BN + "TKBUSDT") == 1 and "TKB" in pricing._BN_NOSYM, "[3i] 첫 -1121 = 종전대로 HTTPError(부르는 쪽 처리 그대로) · 심볼 기억", {"e": e3i})
+past = [pricing._c_binance("TKB", (int(T0B) // 60 - 120 + i) * 60_000) for i in range(59)]
+chk(all(v is None for v in past) and n_calls(BN + "TKBUSDT") == 1, "[3j] 서로 다른 지난 분(400 요청 전에 끝난 분) 59번 더 = 안 부르고 None(합 60번 → 1번)",
+    {"n": n_calls(BN + "TKBUSDT")})
+n0 = n_calls(BN + "TKBUSDT")
+for i in range(60):
+    CK.now = T0B + 60 * (i + 1)
+    try:
+        pricing._c_binance("TKB", (int(CK.now) // 60) * 60_000)
+    except urllib.error.HTTPError:
+        pass
+chk(n_calls(BN + "TKBUSDT") - n0 == 60, "[3k] 지금 분 60번 = 매번 부름(종전과 같음 — 그사이 상장됐을 수 있음)", {"n": n_calls(BN + "TKBUSDT") - n0})
+ROUTE[BN + "TKCUSDT"] = (400, {"code": -1100, "msg": "Illegal characters found in parameter 'symbol'"})
+ROUTE[BN + "TKDUSDT"] = (500, {})
+for _i in range(2):
+    for s9 in ("TKC", "TKD"):
+        try:
+            pricing._c_binance(s9, MS)
+        except urllib.error.HTTPError:
+            pass
+chk(n_calls(BN + "TKCUSDT") == 2 and n_calls(BN + "TKDUSDT") == 2 and "TKC" not in pricing._BN_NOSYM and "TKD" not in pricing._BN_NOSYM,
+    "[3l] -1121 아닌 400·500 = 캐시 안 함(매번 부름)")
+CK.now += pricing.BN_NOSYM_SEC + 1
+ROUTE[BN + "TKBUSDT"] = (200, [])
+v3m = pricing._c_binance("TKB", MS)
+chk(v3m is None and n_calls(BN + "TKBUSDT") == n0 + 61 and "TKB" not in pricing._BN_NOSYM, "[3m] 수명 뒤 다시 부름 · 답하면 캐시 지움")
+ROUTE[BN + "TKEUSDT"] = (400, NOSYM)
+ROUTE["https://api.bybit.com/v5/market/kline?category=spot&symbol=TKEUSDT"] = (200, {"retCode": 10001, "result": {}})
+ROUTE[UP + "TKE"] = (404, {})
+pxe = pricing.PxCache(os.path.join(paths.STATE_DIR, "px_e.json"))
+s0 = (calcguard.snapshot().get("pricing:PxCache.candle_usd[fn]") or {}).get("n", 0)
+TE = int(CK.now)
+for i in range(60):
+    pxe.d["neg_ts"].pop("TKE", None)
+    pxe.candle_usd("TKE", (TE // 60 - 200 + i) * 60_000)
+s1 = (calcguard.snapshot().get("pricing:PxCache.candle_usd[fn]") or {}).get("n", 0)
+chk(n_calls(BN + "TKEUSDT") == 1 and n_calls(UP + "TKE") == 1 and s1 - s0 == 2, "[3n] 1분봉 경로 지난 분 60번 = 바이낸스 1번·업비트 1번 · 삼킴 기록 2(종전 바이낸스 60 + 업비트 1 = 61)",
+    {"bn": n_calls(BN + "TKEUSDT"), "up": n_calls(UP + "TKE"), "sw": s1 - s0})
+n0 = n_calls(BN + "TKEUSDT")
+for i in range(5):
+    CK.now += 60
+    pxe.d["neg_ts"].pop("TKE", None)
+    pxe.candle_usd("TKE", (int(CK.now) // 60) * 60_000)
+chk(n_calls(BN + "TKEUSDT") - n0 == 5, "[3o] 1분봉 경로 지금 분 = 바이낸스 매번(종전과 같음)", {"n": n_calls(BN + "TKEUSDT") - n0})
+
 CG = "https://cg.example/coins/tkc"
 ROUTE[CG] = (404, {})
 store = {}
@@ -258,5 +321,77 @@ st6 = health.build_status({}, obs6, cs6, NOW6, h6)
 web6 = [o["id"] for u in st6["units"] if u["unit"] == "tj-web" for o in u["other"]]
 chk(len(row6) == 1 and row6[0]["notify"] is False and row6[0]["level"] == "ok" and "src:off" in web6,
     "[6] 종단: src:off 가 tj-web 유닛 '그 밖' 목록에 보임(칩) · 알림 없음", {"row": row6, "web": web6})
+
+BS7 = "https://bs-7.example"
+CFG7 = {"chains": {"base": {"blockscout": BS7}}}
+W7 = "0x" + "b7" * 20
+OTHER = "0x" + "99" * 20
+NFT7 = BS7 + "/api/v2/addresses/" + W7 + "/nft?"
+COL7 = BS7 + "/api/v2/addresses/" + W7 + "/nft/collections?"
+C7 = []
+
+
+def run7(nft, col):
+    SEQ[COL7], SEQ[NFT7] = list(col), list(nft)
+    c0 = len(CALLS)
+    n0 = (calcguard.snapshot().get("lpchain:list_wallet_positions") or {}).get("n", 0)
+    r = lpchain.list_wallet_positions(CFG7, "base", W7)
+    n1 = (calcguard.snapshot().get("lpchain:list_wallet_positions") or {}).get("n", 0)
+    C7[:] = CALLS[c0:]
+    return r, n1 - n0, sum(1 for u in C7 if u.startswith(COL7))
+
+
+def colpage(*addrs, nxt=None):
+    return (200, {"items": [{"token": {"address_hash": a, "type": "ERC-721"}, "amount": "1", "token_instances": []} for a in addrs],
+                  "next_page_params": nxt})
+
+
+E500 = (500, {})
+r, n, nc = run7([E500], [colpage(OTHER)])
+chk(r == [] and n == 0 and nc == 1, "[7a] /nft 500 · 컬렉션에 관리자 없음(완전) = [] · 삼킴 기록 0", {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([E500], [colpage()])
+chk(r == [] and n == 0, "[7a2] /nft 500 · 컬렉션 0개 = []", {"r": r, "n": n})
+r, n, nc = run7([E500], [colpage(OTHER, MGR)])
+chk(r is None and n == 1, "[7b] /nft 500 · 컬렉션에 관리자 있음 = None(직전 목록 유지 · 토큰을 컬렉션으로 채우지 않음) · 기록 1", {"r": r, "n": n})
+r, n, nc = run7([E500], [(200, {"items": []})])
+chk(r is None and n == 1, "[7c5] 컬렉션 끝 표시(next_page_params: null) 없음 = None(완전한지 모름)", {"r": r, "n": n})
+for bad9 in ({}, [], "", False, 0):
+    r, n, nc = run7([E500], [(200, {"items": [], "next_page_params": bad9})])
+    chk(r is None and n == 1, f"[7c6] 컬렉션 커서 이상({bad9!r}) = None", {"r": r, "n": n})
+r, n, nc = run7([E500], [(502, {})])
+chk(r is None and n == 1 and nc == 1, "[7c] 대체 확인도 실패 = None · 기록 1", {"r": r, "n": n})
+r, n, nc = run7([E500], [(200, {"items": "깨짐"})])
+chk(r is None and n == 1, "[7c2] 대체 확인 형식 이상(items 가 목록 아님) = None", {"r": r, "n": n})
+r, n, nc = run7([E500], [(200, {"items": [{"token": {}}], "next_page_params": None})])
+chk(r is None and n == 1, "[7c3] 컬렉션 주소 못 읽음 = None(관리자 없음 확신 못 함)", {"r": r, "n": n})
+r, n, nc = run7([E500], [colpage(OTHER, nxt="깨짐")])
+chk(r is None and n == 1, "[7c4] next_page_params 형식 이상 = None", {"r": r, "n": n})
+r, n, nc = run7([E500], [colpage(OTHER, nxt={"k": 1}), colpage(OTHER, nxt={"k": 2}), colpage()])
+chk(r == [] and n == 0 and nc == 3, "[7d] 컬렉션 여러 페이지 끝까지 관리자 없음 = []", {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([E500], [colpage(OTHER, nxt={"k": 1}), colpage(MGR, nxt={"k": 2}), colpage()])
+chk(r is None and n == 1 and nc == 2, "[7d2] 2페이지째 관리자 = None", {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([E500], [colpage(OTHER, nxt={"k": 1}), colpage(OTHER, nxt={"k": 1})])
+chk(r is None and n == 1 and nc == 2, "[7e] 컬렉션 커서 순환 = None(불완전)", {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([E500], [colpage(OTHER, nxt={"k": i}) for i in range(lpchain.NFT_PAGES_MAX + 5)])
+chk(r is None and n == 1 and nc == lpchain.NFT_PAGES_MAX, "[7e2] 컬렉션 페이지 상한 초과 = None(상한만큼만 부름)", {"r": r, "n": n, "nc": nc})
+p1 = (200, {"items": [{"token": {"address": OTHER}, "id": "1"}], "next_page_params": {"p": 2}})
+r, n, nc = run7([p1, E500], [colpage(OTHER)])
+chk(r == [] and n == 0 and nc == 1, "[7f] 1페이지 성공 뒤 2페이지째 500 · 관리자 없음 = []", {"r": r, "n": n})
+p1m = (200, {"items": [{"token": {"address": MGR}, "id": "5"}], "next_page_params": {"p": 2}})
+r, n, nc = run7([p1m, E500], [colpage(MGR)])
+chk(r is None and n == 1, "[7g] 1페이지에 관리자 포지션 · 2페이지째 500 = None(부분 목록을 완전으로 안 봄)", {"r": r, "n": n})
+r, n, nc = run7([p1m, E500], [colpage(OTHER)])
+chk(r is None and n == 1 and nc == 0, "[7g2] 1페이지에 관리자 포지션 · 2페이지째 500 · 컬렉션엔 관리자 없음(두 색인 엇갈림) = None(찾은 포지션을 []로 지우지 않음 · 대체 확인 안 부름)",
+    {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([(404, {})], [colpage()])
+chk(r is None and n == 1 and nc == 0, "[7h] 4xx(404) 는 대체 확인 안 함(종전 None)", {"r": r, "n": n, "nc": nc})
+r, n, nc = run7([(403, {})], [colpage()])
+chk(r is None and n == 1 and nc == 0 and "base" in lpchain.bs_off_state(CK.now), "[7i] 403 = 종전 쉼 그대로(대체 확인 안 함)", {"r": r, "nc": nc})
+r, n, nc = run7([E500], [colpage()])
+chk(r is None and n == 0 and len(C7) == 0, "[7j] 쉬는 동안은 아예 안 부름(종전)", {"r": r, "c": C7})
+lpchain._BS_OFF.clear()
+r, n, nc = run7([(200, {"items": [{"token": {"address": MGR}, "id": "9"}], "next_page_params": None})], [colpage()])
+chk(r == [(MGR, 9)] and nc == 0 and n == 0, "[7k] 정상 /nft 는 그대로(대체 확인 안 부름)", {"r": r, "nc": nc})
+SEQ.clear()
 
 T.finish()

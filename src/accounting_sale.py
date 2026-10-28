@@ -27,6 +27,7 @@ def _fits(x0, xe):
 class SaleBook:
 
     def __init__(slx, px, *, _un, salein, fns):
+        slx.px = px
         slx.sb = px.sb
         slx._ro = salein.ro
         slx._un = _un
@@ -34,35 +35,15 @@ class SaleBook:
         slx.be_done = salein.be_done
         slx.be_take = fns.be_take
         slx.be_tax = salein.be_tax
-        slx.cp_add_map = px.cpx.cp_add_map
-        slx.cp_emit = px.cpx.cp_emit
-        slx.cp_merge = accounting_util.cp_merge
-        slx.cur_lab = px.fbx.cur_lab
-        slx.cur_row = px.cpx.cur_row
-        slx.cur_src = px.cpx.cur_src
         slx.diag = salein.diag
-        slx.ev = px.cpx.ev
-        slx.flow_of = px.fbx.flow_of
-        slx.fs_last = px.kpx.fs_last
-        slx.fs_mark = px.fsx.fs_mark
-        slx.fs_rec = px.fsx.fs_rec
         slx.fx_dep_tx = salein.fx_dep_tx
-        slx.fx_name = px.ofx.fx_name
-        slx.fxb = px.fbx.fxb
-        slx.krw_last = px.kpx.krw_last
-        slx.krw_mix = px.kpx.krw_mix
-        slx.krw_of = px.kpx.krw_of
-        slx.krw_stl = px.kpx.krw_stl
-        slx.note_unk = px.unx.note_unk
-        slx.oa_last = px.cpx.oa_last
+        slx.fxb = px.ctx.fxb
         slx.ob = salein.ob
         slx.of_applied = salein.of_applied
         slx.of_cands = salein.of_cands
-        slx.offc_sold = px.ofx.offc_sold
         slx.realized_by_date = px.books.realized_by_date
         slx.realized_by_loc = px.books.realized_by_loc
         slx.realized_krw_by_date = px.books.realized_krw_by_date
-        slx.ret_pool = px.fsx.ret_pool
         slx.rt_out = salein.rt_out
         slx.sale_links = salein.sale_links
         slx.sale_lot_by = salein.sale_lot_by
@@ -72,16 +53,16 @@ class SaleBook:
         slx.sale_rf_bid = salein.sale_rf_bid
         slx.sale_rf_exit = salein.sale_rf_exit
         slx.sale_used = salein.sale_used
-        slx.stable_fx_mark = accounting_util.stable_fx_mark
-        slx.tax_krw_acq = px.fbx.tax_krw_acq
         slx.tax_rows = px.books.tax_rows
         slx.unk_tag = fns.unk_tag
         slx.unverified = salein.unverified
         slx.up_dep_by_tx = salein.up_dep_by_tx
-        slx.wd_raw9 = px.fbx.wd_raw9
         slx.wd_tr = salein.wd_tr
         slx.xf_wd9 = salein.xf_wd
         slx.cb = px.cb
+        slx.sale_pay_q_d = {}
+        slx.of_wd_cap = {}
+        slx.of_pay_cap = {}
 
     def of_cand(slx, r9, g9, q9, ts9, ref9, own9=False):
         try:
@@ -90,7 +71,7 @@ class SaleBook:
             k9 = slx.sb._of_key(r9)
             sl9 = slx.sale_links.get(r9["posting_id"])
             slx.of_cands[k9] = {"key": k9, "pid": r9["posting_id"], "sym": g9["sym"], "qty": float(q9), "ts": int(ts9),
-                            "stable": bool(g9["is_stable"]), "where": slx.cur_src[0] or "", "chain": r9["chain"] or "",
+                            "stable": bool(g9["is_stable"]), "where": slx.px.cpx.cur_src[0] or "", "chain": r9["chain"] or "",
                             "ref": str(ref9 or ""), "ev": r9["event"], "gid": g9["gid"],
                             "sale": bool(sl9 and not sl9.get("manual")), "asset": slx.sb._of_asset(r9), "qb": str(r9["qty_base"])}
         except Exception as _cg9:   # noqa: BLE001 [optional]
@@ -106,7 +87,7 @@ class SaleBook:
         for w0 in slx.wd_tr:
             if w0["ts"] > lot9["t_first"]:
                 continue
-            p0 = slx.wd_raw9.get((w0["ex"], w0["uuid"])) or {}
+            p0 = slx.px.fbx.wd_raw9.get((w0["ex"], w0["uuid"])) or {}
             a0 = xfer_match.norm_addr(str(p0.get("address") or "").strip()) if str(p0.get("address") or "").strip() else ""
             if (a0 or slx.sb._wd_key(w0["ex"], w0["uuid"])) != lot9["manual"]:
                 continue
@@ -151,7 +132,7 @@ class SaleBook:
                 b9["known"] = False
             else:
                 b9["usd"] += usd0
-                b9["krw"] += krw0 if krw0 is not None else slx.krw_of(usd0, ts0)
+                b9["krw"] += krw0 if krw0 is not None else slx.px.kpx.krw_of(usd0, ts0)
         inc9 = [b9 for b9 in by9.values() if b9["held"] > EPS]
         paid9 = sum((b9["usd"] for b9 in inc9), Decimal(0))
         if miss9:
@@ -172,7 +153,7 @@ class SaleBook:
                             + (f" · 환불 ${float(lot9['refund']):,.2f}" if lot9["refund"] > 0 else "")
                             + f" · 원가 ${float(cost9):,.2f}" + (f" (수령 {lot9['n']}건에 나눔)" if lot9["n"] > 1 else ""))
         lot9["fin"] = fin9
-        if fin9[0] == "ok" and slx.of_pay_on:
+        if fin9[0] == "ok" and slx.px.of_pay_on:
             try:
                 slx.of_pay_plan(lot9, [x0 for x0 in snd9 if x0[0] <= lot9["t_first"] and x0[6] not in excl9
                                    and (by9.get(x0[1]) or {}).get("held", Decimal(0)) > EPS], paid9)
@@ -202,15 +183,15 @@ class SaleBook:
         slx.cb.add_known(g9, take9)
         slx.cb.add_cost(g9, c9)
         slx.cb.add_unknown(g9, q9 - take9)
-        slx.note_unk(g9, ts9, "토큰 세일 · 로트 잔량 초과분(원가 없음)", q9 - take9, ref9, chain9=chain9)
+        slx.px.unx.note_unk(g9, ts9, "토큰 세일 · 로트 잔량 초과분(원가 없음)", q9 - take9, ref9, chain9=chain9)
         g9["risk_allow"] = True
-        fl9 = slx.flow_of(g9, ts9, chain9)
+        fl9 = slx.px.flow_of(g9, ts9, chain9)
         fl9["bought"] += take9
         fl9["cost"] += c9
         pdk9 = lot9.get("_pay_basis") if lot9.get("_pay") and not sl9.get("manual") else None
         fl9["cost_krw"] += (take9 * sl9["unit_krw"] if sl9.get("unit_krw") is not None
-                            else c9 * pdk9["krw"] / pdk9["usd"] if pdk9 and pdk9["usd"] > 0 else slx.krw_of(c9, ts9))
-        slx.ev(fl9, ts9, "세일 매수", lot9.get("desc") or sale_match.desc(lot9), f"{take9:,.4f}".rstrip("0").rstrip("."), f"${float(c9):,.2f}", ref9,
+                            else c9 * pdk9["krw"] / pdk9["usd"] if pdk9 and pdk9["usd"] > 0 else slx.px.kpx.krw_of(c9, ts9))
+        slx.px.cpx.ev(fl9, ts9, "세일 매수", lot9.get("desc") or sale_match.desc(lot9), f"{take9:,.4f}".rstrip("0").rstrip("."), f"${float(c9):,.2f}", ref9,
            un=slx._un(take9, c9))
         if sl9.get("manual"):
             slx.of_applied[r9["posting_id"]] = (take9, c9)
@@ -220,7 +201,7 @@ class SaleBook:
         u9["n"] += 1
         if len(u9["rows"]) < 20:
             u9["rows"].append({"t": datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d %H:%M"), "q": _f(take9, 4),
-                               "ref": str(ref9 or ""), "where": slx.cur_src[0]})
+                               "ref": str(ref9 or ""), "where": slx.px.cpx.cur_src[0]})
         return take9, c9
 
     def sale_refund(slx, g9, r9, q9, ts9, chain9, txh9, flow9, face_out: list | None = None):
@@ -251,7 +232,7 @@ class SaleBook:
             kr9 += p9["krw"] * sc9
             krec_usd += p9.get("kc", Decimal(0)) * sc9
             krec_krw += p9.get("kk", Decimal(0)) * sc9
-            slx.cp_add_map(g9, p9.get("_cmp"), float(sc9))
+            slx.px.cpx.cp_add_map(g9, p9.get("_cmp"), float(sc9))
             e9["used"] += tk9
             e9["bc"] = e9.get("bc", Decimal(0)) + p9["cost"] * sc9
             p9["left"] -= tk9
@@ -272,7 +253,7 @@ class SaleBook:
         flow9["cost"] += krec_usd if is_st else inh9
         flow9["cost_krw"] += krec_krw if is_st else kr9
         if not is_st and un9 + rem9 > EPS:
-            slx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 토큰 세일 환불(입찰 때부터 원가 미상 몫 · 확인 환불량 초과분)",
+            slx.px.unx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 토큰 세일 환불(입찰 때부터 원가 미상 몫 · 확인 환불량 초과분)",
                      un9 + rem9, txh9, chain9=chain9, unc9=rem9, fs9=rem9)
         slx.diag["sale_refund_n"] += 1
         slx.diag["sale_refund_q"] += took9
@@ -297,12 +278,12 @@ class SaleBook:
             f9 = take9 / q9
             ff9 = float(f9)
             p9 = {"g": g9, "fl": g9["cur"], "q": take9, "cost": mc9 * f9, "known": mk9 * f9, "unk": max(Decimal(0), q9 - mk9) * f9,
-                  "cck": slx.krw_last[0] * f9 if slx.krw_last[0] is not None else None, "mix": slx.krw_mix[0] * f9, "fs": slx.fs_last[0] * f9,
-                  "stl": ({"l": [(x9[0], x9[1], x9[2] * ff9, x9[3] * ff9, x9[4], x9[5] * ff9) for x9 in slx.krw_stl[0]["l"]], "o": slx.krw_stl[0]["o"]}
-                          if slx.krw_stl[0] else None),
-                  "oa": slx.oa_last[0] * f9, "cmp": {k9: [v9[0] * ff9, v9[1] * ff9] for k9, v9 in cmp9.items()} if cmp9 else None,
+                  "cck": slx.px.kpx.krw_last[0] * f9 if slx.px.kpx.krw_last[0] is not None else None, "mix": slx.px.kpx.krw_mix[0] * f9, "fs": slx.px.kpx.fs_last[0] * f9,
+                  "stl": ({"l": [(x9[0], x9[1], x9[2] * ff9, x9[3] * ff9, x9[4], x9[5] * ff9) for x9 in slx.px.kpx.krw_stl[0]["l"]], "o": slx.px.kpx.krw_stl[0]["o"]}
+                          if slx.px.kpx.krw_stl[0] else None),
+                  "oa": slx.px.cpx.oa_last[0] * f9, "cmp": {k9: [v9[0] * ff9, v9[1] * ff9] for k9, v9 in cmp9.items()} if cmp9 else None,
                   "usd": e9["usd"] * take9 / e9["use"], "ts": max(int(e9["ts"] or 0), int(ts9)), "row": r9,
-                  "src": f"w:{pw9[2]}" if len(pw9) >= 3 and pw9[2] else "w:?", "lab": slx.cur_lab[0],
+                  "src": f"w:{pw9[2]}" if len(pw9) >= 3 and pw9[2] else "w:?", "lab": slx.px.fbx.cur_lab[0],
                   "loc": loc9w, "chain": chain9, "tx": e9["exit_tx"] or txh9, "lot": e9["lot"]}
             if p9["ts"] <= int(ts9):
                 slx.sale_pay_emit(p9)
@@ -323,13 +304,13 @@ class SaleBook:
     def sale_pay_emit(slx, e9):
         g9, ts9, q9 = e9["g"], e9["ts"], e9["q"]
         dk9 = acct_norm.iso_day(ts9)
-        sv9 = (slx.cur_row[0], slx.cur_src[0], slx.cur_lab[0], slx.fs_last[0])
-        slx.cur_row[0], slx.cur_src[0], slx.cur_lab[0] = e9["row"], e9["src"], e9["lab"]
+        sv9 = (slx.px.cpx.cur_row[0], slx.px.cpx.cur_src[0], slx.px.fbx.cur_lab[0], slx.px.kpx.fs_last[0])
+        slx.px.cpx.cur_row[0], slx.px.cpx.cur_src[0], slx.px.fbx.cur_lab[0] = e9["row"], e9["src"], e9["lab"]
         try:
             fl9 = e9["fl"]
             if fl9 is None:
                 new9 = g9["cur"] is None
-                fl9 = g9["cur"] or slx.flow_of(g9, ts9, e9["chain"])
+                fl9 = g9["cur"] or slx.px.flow_of(g9, ts9, e9["chain"])
                 if new9 and g9["qty_known"] + g9["qty_unknown"] <= Decimal("0.000001"):
                     g9["cur"] = None
             else:
@@ -341,7 +322,7 @@ class SaleBook:
             fl9["paid"] = fl9.get("paid", Decimal(0)) + q9
             rate9, rsrc9 = slx.fxb.rate_src(e9["rts"], e9.get("rrow")) if e9.get("rts") else slx.fxb.rate_src(ts9)
             kn9, un9, cc9, pr9, lot9 = e9["known"], e9["unk"], e9["cost"], e9["usd"], e9["lot"]
-            cmp9 = slx.cp_emit(e9["cmp"], un9, q9, cc9)
+            cmp9 = slx.px.cpx.cp_emit(e9["cmp"], un9, q9, cc9)
             tax9 = u9 = ud9 = None
             be9 = fsm9 = False
             pnl9 = Decimal(0)
@@ -353,7 +334,7 @@ class SaleBook:
                 fl9["pay_real"] = fl9.get("pay_real", Decimal(0)) + pnl9
                 fl9["rbd"][dk9] = fl9["rbd"].get(dk9, Decimal(0)) + pnl9
                 fl9["rbdk"][dk9] = fl9["rbdk"].get(dk9, 0.0) + float(pnl9) * rate9
-                fl9.setdefault("rch", {}).setdefault(dk9, set()).add(slx.cur_lab[0] or "?")
+                fl9.setdefault("rch", {}).setdefault(dk9, set()).add(slx.px.fbx.cur_lab[0] or "?")
                 slx.realized_by_date[dk9] = slx.realized_by_date.get(dk9, 0) + float(pnl9)
                 slx.realized_krw_by_date[dk9] = slx.realized_krw_by_date.get(dk9, 0) + float(pnl9) * rate9
                 _rl9 = slx.realized_by_loc.setdefault((e9["loc"], dk9), [0.0, 0.0]); _rl9[0] += float(pnl9); _rl9[1] += float(pnl9) * rate9
@@ -365,13 +346,13 @@ class SaleBook:
                     tax9["oa"] = _f(oa9, 4)
                     fl9["oa_sold"] = fl9.get("oa_sold", Decimal(0)) + oa9
                     fl9["oa_real"] = fl9.get("oa_real", Decimal(0)) + pnl9 * oa9 / kn9
-                    slx.offc_sold[0] += 1
-                    slx.offc_sold[1] += pnl9 * oa9 / kn9
-                slx.tax_krw_acq(tax9, g9, fl9, cc9, e9["cck"], rate9, dk9, venue_loc=e9["loc"], mix9=e9["mix"])
-                slx.fs_last[0] = e9["fs"]
-                fsm9 = slx.fs_mark(g9, fl9, tax9, cmp9, kn9, pk9, cc9, rate9, dk9)
+                    slx.px.ofx.offc_sold[0] += 1
+                    slx.px.ofx.offc_sold[1] += pnl9 * oa9 / kn9
+                slx.px.fbx.tax_krw_acq(tax9, g9, fl9, cc9, e9["cck"], rate9, dk9, venue_loc=e9["loc"], mix9=e9["mix"])
+                slx.px.kpx.fs_last[0] = e9["fs"]
+                fsm9 = slx.px.fsx.fs_mark(g9, fl9, tax9, cmp9, kn9, pk9, cc9, rate9, dk9)
                 if g9["is_stable"]:
-                    slx.stable_fx_mark(tax9, cc9, False, stl9=e9["stl"], cck9=e9["cck"], mix9=e9["mix"], use9=f"{lot9.get('tsym') or lot9['sym']} 매수 대금")
+                    accounting_util.stable_fx_mark(tax9, cc9, False, stl9=e9["stl"], cck9=e9["cck"], mix9=e9["mix"], use9=f"{lot9.get('tsym') or lot9['sym']} 매수 대금")
                 slx.tax_rows.append(tax9)
             if un9 > EPS and g9["is_stable"]:
                 pass
@@ -409,7 +390,7 @@ class SaleBook:
             fl9.setdefault("pay_dates", []).append(dk9)
             fl9["paid_usd"] = fl9.get("paid_usd", Decimal(0)) + pr9
             ch9 = e9["chain"]
-            slx.ev(fl9, ts9, "온체인 매도", (e9.get("evd") or f"{CHAIN_NAME.get(ch9, ch9)} · 토큰 세일 대금 지불 · {g9['sym']} → {lot9['sym']} "
+            slx.px.cpx.ev(fl9, ts9, "온체인 매도", (e9.get("evd") or f"{CHAIN_NAME.get(ch9, ch9)} · 토큰 세일 대금 지불 · {g9['sym']} → {lot9['sym']} "
                f"(입찰 사용분 · 경매 종료로 확정 · 대가 = 받은 토큰 원가)")
                + slx.unk_tag(kn9, un9, pr9, q9, g9["is_stable"], be9)
                + ((" · 원화 원가 일부 최초 인식 시가(그때 환율)" if g9["is_stable"] else " · 원가 일부 최초 인식 시가") if fsm9 else ""),
@@ -429,7 +410,7 @@ class SaleBook:
             pd9["n"] += 1
             slx.diag["sale_pay_n"] = slx.diag.get("sale_pay_n", 0) + 1
         finally:
-            slx.cur_row[0], slx.cur_src[0], slx.cur_lab[0], slx.fs_last[0] = sv9
+            slx.px.cpx.cur_row[0], slx.px.cpx.cur_src[0], slx.px.fbx.cur_lab[0], slx.px.kpx.fs_last[0] = sv9
 
     def of_pay_take(slx, r9, g9, q9, ts9, chain9, txh9, dest9, mc9, mk9, cmp9, kr9):
         if q9 <= EPS or g9.get("is_fiat"):
@@ -441,10 +422,10 @@ class SaleBook:
         pw9 = str(loc9w).split(":")
         slx.of_pay_cap.setdefault(dest9, {})[slx.sb._of_key(r9)] = {
             "g": g9, "fl": g9["cur"], "q": q9, "cost": mc9, "known": mk9, "unk": max(Decimal(0), q9 - mk9),
-            "cck": slx.krw_last[0], "mix": slx.krw_mix[0], "fs": slx.fs_rec(), "stl": {"l": list(slx.krw_stl[0]["l"]), "o": slx.krw_stl[0]["o"]} if slx.krw_stl[0] else None,
-            "oa": slx.oa_last[0], "cmp": dict(cmp9) if cmp9 else None, "ts": int(ts9), "row": r9, "rrow": r9,
+            "cck": slx.px.kpx.krw_last[0], "mix": slx.px.kpx.krw_mix[0], "fs": slx.px.fsx.fs_rec(), "stl": {"l": list(slx.px.kpx.krw_stl[0]["l"]), "o": slx.px.kpx.krw_stl[0]["o"]} if slx.px.kpx.krw_stl[0] else None,
+            "oa": slx.px.cpx.oa_last[0], "cmp": dict(cmp9) if cmp9 else None, "ts": int(ts9), "row": r9, "rrow": r9,
             "krw": kr9,
-            "src": f"w:{pw9[2]}" if len(pw9) >= 3 and pw9[2] else "w:?", "lab": slx.cur_lab[0], "loc": loc9w, "chain": chain9, "tx": txh9,
+            "src": f"w:{pw9[2]}" if len(pw9) >= 3 and pw9[2] else "w:?", "lab": slx.px.fbx.cur_lab[0], "loc": loc9w, "chain": chain9, "tx": txh9,
             "mvl": "외부 주소", "wd": False}
 
     def of_wd_take(slx, g9, r9, nq9, q09, mc9, mk9, pk9, fk9, oa9, cmp9, ts9, ex9, txid9):
@@ -458,7 +439,7 @@ class SaleBook:
             "cck": kl9 * s9 if kl9 is not None else None, "mix": km9 * s9, "fs": fk9,
             "stl": {"l": [(x9[0], x9[1], x9[2] * sf9, x9[3] * sf9, x9[4], x9[5] * sf9) for x9 in ks9["l"]], "o": ks9["o"]} if ks9 else None,
             "oa": oa9, "cmp": dict(cmp9) if cmp9 else None, "ts": int(ts9), "row": r9, "rrow": None,
-            "src": f"ex:{ex9}", "lab": slx.cur_lab[0], "loc": str(r9["location"] or f"exchange:{ex9}"), "chain": r9["chain"] or ex9,
+            "src": f"ex:{ex9}", "lab": slx.px.fbx.cur_lab[0], "loc": str(r9["location"] or f"exchange:{ex9}"), "chain": r9["chain"] or ex9,
             "tx": txid9 or r9["source_id"], "mvl": "온체인 주소" if txid9 else None, "wd": True, "ex": ex9}
 
     def of_pay_plan(slx, lot9, legs9, paid9):
@@ -483,7 +464,7 @@ class SaleBook:
             f9 = max(Decimal(0), (paid9 - lot9["refund"]) / paid9)
         rp_cut9 = []
         for gid9 in gids9:
-            rp9 = (slx.ret_pool.get(gid9) or {}).get(lot9["manual"])
+            rp9 = (slx.px.fsx.ret_pool.get(gid9) or {}).get(lot9["manual"])
             if rp9 is None:
                 continue
             tq9 = sum((c0["q"] for c0 in (slx.of_pay_cap.get(lot9["manual"]) or {}).values() if c0["g"]["gid"] == gid9), Decimal(0))
@@ -499,7 +480,7 @@ class SaleBook:
             rp9["left"] = rp9["qty"]
             if rp9.get("_cmp"):
                 for c0 in cuts9:
-                    slx.cp_merge(rp9["_cmp"], c0.get("cmp"), -float(f9))
+                    accounting_util.cp_merge(rp9["_cmp"], c0.get("cmp"), -float(f9))
         sf9 = float(f9)
         n9 = 0
         for x0, c0 in caps9:
@@ -516,7 +497,7 @@ class SaleBook:
             e9["ts"] = max(int(lot9["t_first"]), int(c0["ts"]))
             e9["rts"] = int(c0["ts"])
             e9["lot"] = lot9
-            where9 = slx.fx_name.get(c0["ex"], c0["ex"]) + " 출금" if c0["wd"] else CHAIN_NAME.get(c0["chain"], c0["chain"])
+            where9 = slx.px.ofx.fx_name.get(c0["ex"], c0["ex"]) + " 출금" if c0["wd"] else CHAIN_NAME.get(c0["chain"], c0["chain"])
             e9["evd"] = (f"{where9} · 토큰 세일 대금 지불 · {c0['g']['sym']} → {lot9.get('tsym') or '받은 토큰'} "
                          f"(보낸 내역 참가금 연결 · 첫 토큰 수령으로 확정 · 대가 = 보낸 때 평가" + (" · 환불 뺀 사용분" if f9 < 1 else "") + ")")
             slx.sale_pay_emit(e9)
@@ -533,8 +514,8 @@ class SaleBook:
             return False
         am9s = sum((e9["amt"] for e9 in rb9s), Decimal(0))
         un9s = mu9 + max(Decimal(0), q9 - (mk9 + mu9))
-        krec_usd = (mc9 - slx.krw_mix[0]) if slx.krw_last[0] is not None else Decimal(0)
-        krec_krw = slx.krw_last[0] if slx.krw_last[0] is not None else Decimal(0)
+        krec_usd = (mc9 - slx.px.kpx.krw_mix[0]) if slx.px.kpx.krw_last[0] is not None else Decimal(0)
+        krec_krw = slx.px.kpx.krw_last[0] if slx.px.kpx.krw_last[0] is not None else Decimal(0)
         for e9 in rb9s:
             sh9 = e9["amt"] / am9s if am9s > 0 else Decimal(1) / len(rb9s)
             p9 = e9["pool"] = e9["pool"] or {"qty": Decimal(0), "cost": Decimal(0), "known": Decimal(0), "unknown": Decimal(0),
@@ -543,5 +524,5 @@ class SaleBook:
             p9["unknown"] += un9s * sh9; p9["krw"] += kr9 * sh9
             p9["kc"] = p9.get("kc", Decimal(0)) + krec_usd * sh9
             p9["kk"] = p9.get("kk", Decimal(0)) + krec_krw * sh9
-            p9["_cmp"] = slx.cp_merge(p9["_cmp"], cp_o9, float(sh9))
+            p9["_cmp"] = accounting_util.cp_merge(p9["_cmp"], cp_o9, float(sh9))
         return True

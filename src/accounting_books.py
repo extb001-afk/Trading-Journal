@@ -42,15 +42,6 @@ def check_aliases(books: Books, scope: dict, where: str) -> None:
         raise AssertionError(f"결과 장부 별칭 끊김({where}): {', '.join(bad)} — 단계 사이에 이름을 다시 묶지 말 것(제자리 수정만)")
 
 
-def check_pool_aliases(scope: dict, names: str, vals: tuple, where: str) -> None:
-    keys = names.split()
-    if len(keys) != len(vals):
-        raise AssertionError(f"풀 별칭 확인({where}): 이름 {len(keys)}개 ≠ 값 {len(vals)}개")
-    bad = [n for n, v in zip(keys, vals) if not scope[n] == v]
-    if bad:
-        raise AssertionError(f"풀 별칭 끊김({where}): {', '.join(bad)} — 앞 단계 별칭이 풀 객체 메서드와 다름")
-
-
 OLD = {"ak": "_ak", "bf_since": "_bf_since", "debt_capg": "debt_capg9", "debt_neg": "debt_neg9", "debt_over": "debt_over9",
        "debt_take": "debt_take9", "dep_tr": "dep_tr9", "exb": "exb9", "fb_cov": "fb_cov9", "fs_floor": "fs_floor9",
        "hl_cash_syms": "hl_cash_syms9", "my_all": "my_all9", "of_dec": "of_dec9", "pv_dl": "pv_dl9", "pv_led": "pv_led9",
@@ -159,16 +150,12 @@ class ReplayResult:
     oc_fresh: Any
     offc_self_wd: Any
     dep_tr: Any
-    _scope: Any = field(default=None, compare=False, repr=False)
+    _keep: Any = field(default=None, compare=False, repr=False)
     _cb: Any = field(default=None, compare=False, repr=False)
 
     @classmethod
     def old_names(cls) -> tuple:
         return ("books", "ctx") + Books.names() + tuple(OLD.get(f, f) for f in _EDGE)
-
-    @classmethod
-    def from_scope(cls, scope: dict) -> ReplayResult:
-        return cls(_scope=scope, _cb=scope.get("cb"), **{f: scope[OLD.get(f, f)] for f in _CONTRACT})
 
     def as_old_names(self) -> dict:
         out = {"books": self.books, "ctx": self.ctx}
@@ -182,16 +169,8 @@ class ReplayResult:
         return out
 
 
-_CONTRACT = tuple(f.name for f in fields(ReplayResult) if f.name not in ("_scope", "_cb"))
+_CONTRACT = tuple(f.name for f in fields(ReplayResult) if f.name not in ("_keep", "_cb"))
 _EDGE = _CONTRACT[2:]
-
-
-def check_rr(rr: ReplayResult, scope: dict, where: str, check_ctx: Callable) -> None:
-    check_aliases(rr.books, scope, where)
-    check_ctx(rr.ctx, scope, where)
-    bad = [f for f in _CONTRACT if OLD.get(f, f) not in scope or scope[OLD.get(f, f)] is not getattr(rr, f)]
-    if bad:
-        raise AssertionError(f"리플레이 결과 필드 끊김({where}): {', '.join(bad)} — 이름표 값과 같은 객체여야 함")
 
 
 SCREEN_WRITES = {

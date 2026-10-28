@@ -23,14 +23,31 @@ chk(len(mk) == 1 and not mk[0].args and set(kw) == NAMES and all(isinstance(v, a
 mk_line = mk[0].lineno if mk else 0
 late = [f"{n.id}:{n.lineno}" for n in ast.walk(prep) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id in NAMES and n.lineno > mk_line]
 chk(not late, "C1 묶은 뒤 prep 에서 다시 묶지 않음", late)
+late2 = []
+for sn in ("_replay_main", "_replay_links", "_replay_rt"):
+    fn = next(n for n in ast.walk(rp) if isinstance(n, ast.FunctionDef) and n.name == sn)
+    body = [x for x in fn.body if not (isinstance(x, ast.Expr) and isinstance(x.value, ast.Constant))]
+    head = body[0] if body and isinstance(body[0], ast.Assign) and isinstance(body[0].targets[0], ast.Tuple) else None
+    late2 += [f"{sn} {n.id}:{n.lineno}" for st in body if st is not head for n in ast.walk(st)
+              if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id in NAMES]
+chk(not late2, "C1′ 뒤 리플레이 단계(main·links·rt) 몸통에서 입력 묶음 필드 이름 재묶음 0(머리 풀기만)", late2)
 
+po9 = next((n for n in ast.walk(rp) if isinstance(n, ast.ClassDef) and n.name == "PrepOut"), None)
+po_f = {x.target.id for x in (po9.body if po9 else []) if isinstance(x, ast.AnnAssign)}
+chk(po9 is not None and "ctx" in po_f and not (po_f & NAMES), "C2′ PrepOut 필드에 입력 묶음 필드 이름 없음(ctx 칸 하나로만)", sorted(po_f & NAMES))
 direct = []
 for f in sorted(glob.glob(os.path.join(T.SRC, "view_b_*.py"))):
     s = open(f, encoding="utf-8").read()
     for nm in NAMES:
         if f'_bs9["{nm}"]' in s:
             direct.append(f"{os.path.basename(f)} {nm}")
-chk(not direct, "C2 뒤 단계 = _bs9[\"ctx\"].이름 으로만 꺼냄", direct)
+mainf = next(n for n in ast.walk(rp) if isinstance(n, ast.FunctionDef) and n.name == "_replay_main")
+mbody = [x for x in mainf.body if not (isinstance(x, ast.Expr) and isinstance(x.value, ast.Constant))]
+mh = mbody[0] if mbody and isinstance(mbody[0], ast.Assign) and isinstance(mbody[0].targets[0], ast.Tuple) else None
+for t9, v9 in (zip(mh.targets[0].elts, mh.value.elts) if mh is not None else ()):
+    if isinstance(t9, ast.Name) and t9.id in NAMES and ast.unparse(v9) != "pre.ctx.%s" % t9.id:
+        direct.append(f"_replay_main {t9.id} ← {ast.unparse(v9)}")
+chk(mh is not None and not direct, "C2′ 화면 단계 = _bs9[\"ctx\"].이름 으로만 · main 머리 풀기의 입력 묶음 이름 = pre.ctx.이름 으로만", direct)
 import accounting_books as AB  # noqa: E402
 both = sorted(set(AB.ReplayResult.old_names()) & NAMES)
 chk(not both and "ctx" in AB.ReplayResult.old_names(), "C2 화면 이름표(accounting_books.ReplayResult 옛 이름)에 입력 묶음 필드 이름 없음 · ctx 하나로만 넘김", both)

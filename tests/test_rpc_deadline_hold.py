@@ -313,6 +313,12 @@ try:
         T.chk(isinstance(b5, HoldError), "P5 키 노드 서킷(호출 중 거절)도 보류", type(b5).__name__)
         c5 = st5((KEYU, URL), OLD, mode_key="ok", order=lambda urls: [u for u in urls if u != KEYU])
         T.chk(isinstance(c5, HoldError), "P5 키 노드가 서킷으로 순서에서 빠짐(미확인)도 보류", type(c5).__name__)
+        BOU = "https://mainnet.base.org"
+        i5 = st5((BOU, URL), OLD, mode_key="ok", order=lambda urls: [u for u in urls if u != BOU])
+        T.chk(isinstance(i5, HoldError) and bf_engine.gate(BOU).p429_grow, "P5 되풀이 429 쉼 정책 노드가 서킷으로 순서에서 빠짐 + 공개 노드 '상태 없음'(옛 블록) = 보류(키 노드와 같음)",
+              type(i5).__name__)
+        j5 = st5((BOU, URL), OLD, mode_key="ok", order=lambda urls: [u for u in urls if u != BOU], ctx=False)
+        T.chk(isinstance(j5, StateUnavailable) and not isinstance(j5, HoldError), "P5 같은 꼴 · 뒤 차선 걸음 밖 = 종전 StateUnavailable", type(j5).__name__)
         d5 = st5((KEYU, URL), OLD, mode_key="ok")
         T.chk(isinstance(d5, dict) and d5.get((W0, OLD)) == (0, BAL0), "P5 키 노드 정상 = 옛 상태 받음(종전)", d5 if isinstance(d5, dict) else type(d5).__name__)
         e5 = st5((URL,), OLD)
@@ -449,5 +455,20 @@ finally:
     evm_watch.time = real_time
     T.patch_moved("time", evm_watch.time, ("evm_",))
     bf_engine.rpc_call, bf_engine.rpc_batch = real_rpc, real_batch
+
+BO8 = "https://mainnet.base.org"
+for rpcs8, logs8, want8, name8 in (([BO8], None, False, "주 노드·로그 노드 = base.org 하나 = 끔(종전 동작)"),
+                                   ([BO8, "https://base.drpc.org", "https://gateway.tenderly.co/public/base"], None, True, "노드 3개 = 켬(배로)"),
+                                   ([BO8, "https://base.drpc.org"], [BO8], False, "로그 노드만 base.org 하나 = 끔")):
+    bf_engine.configure({"wallets": [], "chains": {}})
+    cfg8 = json.loads(json.dumps(CFG))
+    cfg8["chains"][CH]["rpcs"] = rpcs8
+    if logs8:
+        cfg8["chains"][CH]["rpc_logs"] = logs8
+    statefile.atomic_write_json(CPATH, {"_rpc_v": 1, "_start": 0, W0: C0, "_ns": {W0: [C0, 0, str(BAL0), 0, "0"]}})
+    statefile.atomic_write_json(EPATH, [])
+    R(cfg8, CH, [W0], Wr())
+    T.chk(bf_engine.gate(BO8).p429_grow is want8, f"P8 {name8}", bf_engine.gate(BO8).p429_grow)
+bf_engine.configure({"wallets": [], "chains": {}})
 
 T.finish()

@@ -16,6 +16,7 @@ class OffcView:
         ofx.offc_pool = offcin.offc_pool
         ofx.offc_st = offcin.offc_st
         ofx.offc_wd_addr = offcin.offc_wd_addr
+        ofx.offc_sold = [0, Decimal(0)]
 
     def offc_s(ofx: OffcView, ex: str) -> dict:
         return ofx.offc_st.setdefault(ex, {"wdN": 0, "wdCost": Decimal(0), "wdUnkQty": Decimal(0), "depN": 0, "inhN": 0,

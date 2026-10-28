@@ -124,14 +124,20 @@ OLDN = AB.ReplayResult.old_names()
 bk = AB.Books()
 scope = {n: object() for n in OLDN}
 scope.update({n: getattr(bk, n) for n in AB.Books.names()}, books=bk, ctx=object())
-rr0 = AB.ReplayResult.from_scope(scope)
+
+
+def _mk(sc, cb=None):
+    return AB.ReplayResult(_keep=sc, _cb=cb, **{f: sc[AB.OLD.get(f, f)] for f in AB._CONTRACT})
+
+
+rr0 = _mk(scope)
 cbx = B.StrictCostBasis()
-rr1 = AB.ReplayResult.from_scope(dict(scope, cb=cbx))
+rr1 = _mk(scope, cbx)
 fd = {f.name: f for f in __import__("dataclasses").fields(AB.ReplayResult)}
-chk(rr0._cb is None and rr1._cb is cbx and "_cb" not in AB._CONTRACT and "_scope" not in AB._CONTRACT
+chk(rr0._cb is None and rr1._cb is cbx and "_cb" not in AB._CONTRACT and "_keep" not in AB._CONTRACT
     and "cb" not in rr1.as_old_names() and "cb" not in rr1.screen_scope(None) and not fd["_cb"].compare and not fd["_cb"].repr
     and fd["_cb"].default is None,
-    "B4 ReplayResult._cb = 이름표 cb 같은 객체(없으면 None) · 계약·화면 이름표·비교·repr 밖")
+    "B4 ReplayResult._cb = 직접 생성 키워드 같은 객체(없으면 None) · 계약·화면 이름표·비교·repr 밖")
 def _sc(cb9, G9):
     bk9 = AB.Books()
     rr9 = types.SimpleNamespace(books=bk9, ctx=None, _cb=cb9, G=G9)
@@ -180,9 +186,9 @@ chk(sorted(calls) == [("accounting_books.py", "screen_check", "rr._cb.check(rr.G
 br = next(n for n in ast.walk(rp) if isinstance(n, ast.FunctionDef) and n.name == "_build_replay")
 blk = next((n for n in ast.walk(br) if isinstance(n, ast.If) and ast.unparse(n.test) == "calcguard.strict()"), None)
 bt9 = [ast.unparse(x) for x in blk.body] if blk else []
-chk(len(bt9) == 3 and bt9[0].startswith("accounting_books.check_rr(") and bt9[1].startswith("if not isinstance(rr._cb, accounting_basis.StrictCostBasis):")
-    and "raise AssertionError" in bt9[1] and bt9[2] == "rr._cb.check(rr.G, 'replay')",
-    "B5 _build_replay 엄격 블록 = check_rr → StrictCostBasis 아니면 AssertionError → cb.check(G)(엄격 빌드의 cb 빠짐을 크게 막음)", bt9)
+chk(len(bt9) == 2 and bt9[0].startswith("if not isinstance(rr._cb, accounting_basis.StrictCostBasis):")
+    and "raise AssertionError" in bt9[0] and bt9[1] == "rr._cb.check(rr.G, 'replay')",
+    "B5 _build_replay 엄격 블록 = StrictCostBasis 아니면 AssertionError → cb.check(G) 두 문장(세션33 B1: 런타임 별칭 검사 check_rr 삭제 · 정적 시험으로)", bt9)
 sc9 = next(n for n in ast.walk(ast.parse(open(os.path.join(T.SRC, "accounting_books.py"), encoding="utf-8").read()))
            if isinstance(n, ast.FunctionDef) and n.name == "screen_check")
 chk(any(isinstance(x, ast.If) and ast.unparse(x.test) == "callable(getattr(rr._cb, 'check', None))" for x in sc9.body),

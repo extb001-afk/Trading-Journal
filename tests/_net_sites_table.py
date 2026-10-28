@@ -14,6 +14,7 @@ SITES = {
     "health::Monitor.heartbeat._go": (CASSETTE, "heartbeat() 가 띄운 스레드를 join(주입 opener 없는 갈래)"),
     "liq_watch::_http_default": (CASSETTE, ""),
     "lpchain::list_wallet_positions": (CASSETTE, ""),
+    "lpchain::_no_mgr_collections": (UNIT, "/nft 5xx 때만 부르는 대체 확인(카세트의 정상 /nft 한 번엔 안 닿음) · test_srcoff_negcache.py [7]"),
     "lpsol::_rpc": (CASSETTE, ""),
     "onboarding::_http": (CASSETTE, ""),
     "other_assets::default_http_get": (CASSETTE, ""),

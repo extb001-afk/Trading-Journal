@@ -28,9 +28,9 @@ log = logging.getLogger('tj-web')
 class FirstSeen:
 
     def __init__(fsx, px, *, rows, be_until, fs_pkey, fsin):
+        fsx.px = px
         fsx.sb = px.sb
         fsx.conn = fsin.conn
-        fsx.fs_sum = px.unx.fs_sum
         fsx.fs_aux = fsin.fs_aux
         fsx.rows = rows
         fsx.fs_kit = fsin.fs_kit
@@ -39,15 +39,12 @@ class FirstSeen:
         fsx.fs_lo9 = fsin.fs_lo
         fsx.fs_memo = fsin.fs_memo
         fsx.fs_need = fsin.fs_need
-        fsx.fxb = px.fbx.fxb
+        fsx.fxb = px.ctx.fxb
         fsx.now = px.ctx.now
-        fsx.krw_of = px.kpx.krw_of
-        fsx.fs_last = px.kpx.fs_last
         fsx.fs_sales = fsin.fs_sales
         fsx.ret_kit = fsin.ret_kit
         fsx.ret_pool = fsin.ret_pool
         fsx.be_until = be_until
-        fsx.kst_fmt = px.fbx.kst_fmt
         fsx.fs_pin = fsin.fs_pin
         fsx.fs_pin_new = fsin.fs_pin_new
         fsx.fs_pref = fsin.fs_pref
@@ -55,12 +52,13 @@ class FirstSeen:
         fsx.fs_okc = fsin.fs_okc
         fsx.fs_pkey = fs_pkey
         fsx.cb = px.cb
+        fsx.ub_wd_tx = set()
 
     def fs_hold(fsx, g9, why9, q9):
         if q9 > EPS:
             h9 = g9.setdefault("_fsh", {})
             h9[why9] = h9.get(why9, Decimal(0)) + q9
-            fsx.fs_sum["hold"][why9] = fsx.fs_sum["hold"].get(why9, 0) + 1
+            fsx.px.unx.fs_sum["hold"][why9] = fsx.px.unx.fs_sum["hold"].get(why9, 0) + 1
 
     def fs_sale_idx(fsx, gid9):
         sl9 = fsx.fs_aux.get("sale")
@@ -213,25 +211,25 @@ class FirstSeen:
         ts9, take, unit_d, badd9 = pend9
         c9 = take * unit_d
         fl9["cost"] += c9
-        fl9["cost_krw"] += fsx.krw_of(c9, ts9)
+        fl9["cost_krw"] += fsx.px.kpx.krw_of(c9, ts9)
         fl9["bought"] += badd9
         fl9["fs_c"] = fl9.get("fs_c", Decimal(0)) + c9
         fl9["fs_q"] = fl9.get("fs_q", Decimal(0)) + take
 
     def fs_why(fsx, g9, why9, kind9, q9):
         if q9 > EPS:
-            w9 = fsx.fs_sum["ur"].setdefault(str(g9["gid"]), {})
+            w9 = fsx.px.unx.fs_sum["ur"].setdefault(str(g9["gid"]), {})
             k9 = f"{why9}|{kind9}"
             w9[k9] = w9.get(k9, 0.0) + float(q9)
 
     def fs_mark(fsx, g9, fl9, tax9, cmp9, fk9, pk9, cc9, rate9, dk9):
         if g9["is_stable"]:
-            c9 = fsx.fs_last[0]
+            c9 = fsx.px.kpx.fs_last[0]
             if c9 <= 0 or cc9 <= 0 or c9 < cc9 * Decimal("0.01"):
                 return False
             tax9["ex"] = str(tax9.get("ex") or "") + FS_EX
-            fsx.fs_sum["rows"] += 1
-            fsx.fs_sum["rows_st"] = fsx.fs_sum.get("rows_st", 0) + 1
+            fsx.px.unx.fs_sum["rows"] += 1
+            fsx.px.unx.fs_sum["rows_st"] = fsx.px.unx.fs_sum.get("rows_st", 0) + 1
             return True
         if not cmp9 or cc9 <= 0 or fk9 <= 0:
             return False
@@ -243,10 +241,10 @@ class FirstSeen:
         if q9 <= 0:
             return False
         fsx.fs_sales.append((fl9, tax9, min(1.0, q9 / float(fk9)), c9, rate9, dk9))
-        fsx.fs_sum["c_sold"] = fsx.fs_sum.get("c_sold", 0.0) + c9
+        fsx.px.unx.fs_sum["c_sold"] = fsx.px.unx.fs_sum.get("c_sold", 0.0) + c9
         if c9 >= 0.01 * float(cc9):
             tax9["ex"] = str(tax9.get("ex") or "") + FS_EX
-            fsx.fs_sum["rows"] += 1
+            fsx.px.unx.fs_sum["rows"] += 1
             return True
         return False
 
@@ -278,7 +276,7 @@ class FirstSeen:
         snd9 = fsx.fs_senders(chain9, txh9)
         if snd9 is None:
             fsx.cb.add_unknown(g9, q9)
-            fsx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입(원가 없음 · 보냈던 코인이 돌아온 것인지 확인 못 함 — 최초 인식 시가 보류)",
+            fsx.px.unx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입(원가 없음 · 보냈던 코인이 돌아온 것인지 확인 못 함 — 최초 인식 시가 보류)",
                      q9, txh9, chain9=chain9, fs9=0)
             fsx.fs_hold(g9, "ret", q9)
             return " · 보냈던 코인인지 확인 못 함(최초 인식 시가 보류)"
@@ -298,7 +296,7 @@ class FirstSeen:
             kn9 += k9r
             un9 += u9r
             kr9 += w9r
-            fsx.cp_add_map(g9, e9.get("_cmp"), float(sc9))
+            fsx.px.cpx.cp_add_map(g9, e9.get("_cmp"), float(sc9))
             if sc9 >= 1:
                 for k7 in ("qty", "left", "cost", "known", "unknown", "krw"):
                     e9[k7] = Decimal(0)
@@ -323,10 +321,10 @@ class FirstSeen:
         flow9["cost"] += inh9
         flow9["cost_krw"] += kr9
         if un9 + rem9 > EPS:
-            fsx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입 · 보냈던 주소에서 돌아옴(보낼 때부터 원가 미상 몫 · 보낸 것보다 많은 몫)",
+            fsx.px.unx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입 · 보냈던 주소에서 돌아옴(보낼 때부터 원가 미상 몫 · 보낸 것보다 많은 몫)",
                      un9 + rem9, txh9, chain9=chain9, unc9=rem9, fs9=rem9)
-        fsx.fs_sum["ret_n"] += 1
-        fsx.fs_sum["ret_q"] += float(took9)
+        fsx.px.unx.fs_sum["ret_n"] += 1
+        fsx.px.unx.fs_sum["ret_q"] += float(took9)
         return f" · 보냈던 주소에서 돌아옴 · 원가 승계 (${float(inh9):,.2f})"
 
     def fs_conv(fsx, g9, ts9, fq9, dq9, unc9, kind9=""):
@@ -334,12 +332,12 @@ class FirstSeen:
         if take <= EPS:
             return None
         if g9.get("_wc"):
-            fsx.fs_sum["wc_skip"] = fsx.fs_sum.get("wc_skip", 0) + 1
+            fsx.px.unx.fs_sum["wc_skip"] = fsx.px.unx.fs_sum.get("wc_skip", 0) + 1
             fsx.fs_why(g9, "wc", kind9, take)
             return None
         u9 = fsx.be_until(g9["gid"])
         if u9 is not None and ts9 <= u9:
-            fsx.fs_sum["be_skip"] += 1
+            fsx.px.unx.fs_sum["be_skip"] += 1
             fsx.fs_why(g9, "be", kind9, take)
             return None
         sp9 = str(fsx.fs_spec(g9) or "")
@@ -347,7 +345,7 @@ class FirstSeen:
         pin9 = fsx.fs_pin.get(pk9) if pk9 else None
         if pin9 is not None:
             px9, src9 = pin9[0], pin9[1] or "pin"
-            fsx.fs_sum["pin"] += 1
+            fsx.px.unx.fs_sum["pin"] += 1
         else:
             px9 = src9 = None
             sd9 = fsx.fs_sameday(g9, ts9)
@@ -368,35 +366,35 @@ class FirstSeen:
                 px9, src9 = None, "cap"
         if not px9:
             fsx.fs_why(g9, f"miss-{src9}-{'old' if acct_norm.iso_day(ts9) < fsx.fs_lo9 else 'new'}-{fsx.fs_spec(g9) or '-'}", kind9, take)
-            fsx.fs_sum["miss"] += 1
-            fsx.fs_sum["miss_q"][str(src9)] = fsx.fs_sum["miss_q"].get(str(src9), 0) + 1
-            mk9 = f"{kind9}|{fsx.kst_fmt(ts9, '%Y-%m')}|{src9}"
-            fsx.fs_sum["mk"][mk9] = fsx.fs_sum["mk"].get(mk9, 0) + 1
+            fsx.px.unx.fs_sum["miss"] += 1
+            fsx.px.unx.fs_sum["miss_q"][str(src9)] = fsx.px.unx.fs_sum["miss_q"].get(str(src9), 0) + 1
+            mk9 = f"{kind9}|{fsx.px.fbx.kst_fmt(ts9, '%Y-%m')}|{src9}"
+            fsx.px.unx.fs_sum["mk"][mk9] = fsx.px.unx.fs_sum["mk"].get(mk9, 0) + 1
             fsx.fs_hold(g9, {"pending": "wait", "retry": "wait", "wait": "wait", "unverified": "unv", "cap": "cap"}.get(str(src9), "none"), take)
             return None
         if pin9 is None and pk9:
             fsx.fs_pin_new[pk9] = [float(px9), str(src9), acct_norm.iso_day(ts9), int(fsx.now)]
         if src9 == "sameday":
-            fsx.fs_sum["sd"] += 1
+            fsx.px.unx.fs_sum["sd"] += 1
         unit_d = Decimal(str(px9))
         fsx.cb.sub_unknown(g9, take)
         fsx.cb.add_known(g9, take)
         fsx.cb.add_cost(g9, take * unit_d)
-        fsx.cp_add(g9, ("fs", g9["gid"]), take, take * unit_d)
+        fsx.px.cpx.cp_add(g9, ("fs", g9["gid"]), take, take * unit_d)
         unc_d = dq9 if unc9 is None else max(Decimal(0), min(dq9, Decimal(str(unc9))))
         pend9 = (ts9, take, unit_d, take * unc_d / dq9 if dq9 > 0 else Decimal(0))
         if g9.get("cur") is not None:
             fsx.fs_flow(g9["cur"], pend9)
         else:
             g9.setdefault("_fs_pend", []).append(pend9)
-        fsx.fs_sum["n"] += 1
-        fsx.fs_sum["q"] += take
-        fsx.fs_sum["usd"] += take * unit_d
-        fsx.fs_sum["src"][src9] = fsx.fs_sum["src"].get(src9, 0) + 1
-        b9 = fsx.fs_sum["bk"].setdefault(f"{kind9}|{fsx.kst_fmt(ts9, '%Y-%m')}", [0, 0.0])
+        fsx.px.unx.fs_sum["n"] += 1
+        fsx.px.unx.fs_sum["q"] += take
+        fsx.px.unx.fs_sum["usd"] += take * unit_d
+        fsx.px.unx.fs_sum["src"][src9] = fsx.px.unx.fs_sum["src"].get(src9, 0) + 1
+        b9 = fsx.px.unx.fs_sum["bk"].setdefault(f"{kind9}|{fsx.px.fbx.kst_fmt(ts9, '%Y-%m')}", [0, 0.0])
         b9[0] += 1
         b9[1] += float(take * unit_d)
-        gg9 = fsx.fs_sum["g"].setdefault(str(g9["gid"]), [g9["sym"], 0, 0.0])
+        gg9 = fsx.px.unx.fs_sum["g"].setdefault(str(g9["gid"]), [g9["sym"], 0, 0.0])
         gg9[1] += 1
         gg9[2] += float(take * unit_d)
         return take, px9
@@ -406,14 +404,14 @@ class FirstSeen:
             return
         rt9, src9 = fsx.fxb.rate_src(ts9)
         if src9 not in ("minute", "close", "near36h") or not rt9:
-            fsx.fs_sum["st_miss"] += 1
+            fsx.px.unx.fs_sum["st_miss"] += 1
             return
-        fl9 = fsx.flow_of(g9, ts9, ch9)
+        fl9 = fsx.px.flow_of(g9, ts9, ch9)
         fl9["cost"] += q9
         fl9["cost_krw"] += q9 * Decimal(str(rt9))
         fl9["fs_kc"] = fl9.get("fs_kc", Decimal(0)) + q9
-        fsx.fs_sum["st_n"] += 1
-        fsx.fs_sum["st_usd"] += q9
+        fsx.px.unx.fs_sum["st_n"] += 1
+        fsx.px.unx.fs_sum["st_usd"] += q9
 
     def fs_rec(fsx):
-        return fsx.fs_last[0] if fsx.krw_last[0] is not None else Decimal(0)
+        return fsx.px.kpx.fs_last[0] if fsx.px.kpx.krw_last[0] is not None else Decimal(0)
