@@ -73,6 +73,7 @@ def gate_decisions(cfg: dict, gate: dict = None, speed: dict = None) -> list:
                 if w.get("type", "evm") == "evm"}
     configured = {c for c, cc in chains.items() if isinstance(cc, dict) and not cc.get("_auto")}
     es9 = {}
+    cursor_keys = {}
     out = []
     for key, ent in sorted(((gate or {}).get("pairs") or {}).items()):
         if not isinstance(ent, dict) or not ent.get("active") or ":" not in key:
@@ -95,7 +96,12 @@ def gate_decisions(cfg: dict, gate: dict = None, speed: dict = None) -> list:
         else:
             try:
                 import chaincatalog
-                blk, why = chaincatalog.block_for(c, since is not None, ((speed or {}).get("chains") or {}).get(c))
+                speed_row = ((speed or {}).get("chains") or {}).get(c)
+                collected = (since is None and not (isinstance(speed_row, dict) and speed_row.get("autoOk"))
+                             and _pair_collected(c, a, cursor_keys))
+                blk, why = chaincatalog.block_for(c, since is not None or collected, speed_row)
+                if collected and blk is not None and why == "generic":
+                    why = "이미 수집 중 — 켠 채로 유지"
                 if blk is not None and chaincatalog.es_only(blk) and not _es_key_or_collected(c, es9):
                     blk, why = None, "이더스캔 무료 키 필요 — 설정 › 연결·키 › Etherscan 에 넣으면 자동으로 켜져요"
             except ImportError:
@@ -115,6 +121,18 @@ def _es_key_or_collected(chain: str, memo: dict) -> bool:
     except (Exception, SystemExit):   # noqa: BLE001 [fallback]
         return True
     return isinstance(cur, dict) and any(not str(k).startswith("_") for k in cur)
+
+
+def _pair_collected(chain: str, addr: str, memo: dict) -> bool:
+    if chain not in memo:
+        try:
+            cur = statefile.read_json(paths.state(f"cursor_evm_{chain}.json"), {})
+            memo[chain] = ({str(k).lower() for k in cur if not str(k).startswith("_")}
+                           if isinstance(cur, dict) else None)
+        except (Exception, SystemExit):   # noqa: BLE001 [fallback]
+            memo[chain] = None
+    ks = memo[chain]
+    return ks is None or str(addr).lower() in ks
 
 
 def apply_activity_gate(cfg: dict) -> list:

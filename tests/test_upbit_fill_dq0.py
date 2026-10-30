@@ -280,7 +280,8 @@ for mid, prior in ((True, False), (False, False), (True, True), (False, True)):
         "SELECT source_id, CASE WHEN event_ts < ? THEN 'D' ELSE 'D+1' END, qty_base FROM postings WHERE source_ns='upbit:order'"
         " AND source_id NOT LIKE 'init%' ORDER BY source_id",
         (D0 + DAY,)).fetchall()]
-    chk(legs == [("b1", "D+1", 100), ("s1", "D", -50)] and iso == DISO, f"P1{tag} core 기장: 매수 +100 = D+1 · 매도 −50 = D · 늦은 행 표식 D", (legs, iso))
+    chk(legs == [("b1", "D", 50), ("b1", "D+1", 50), ("s1", "D", -50)] and iso == DISO,
+        f"P1{tag} core 기장: 매수 체결마다(+50 = D · +50 = D+1 — 분할 체결 레그) · 매도 −50 = D · 늦은 행 표식 D", (legs, iso))
     snap(at(1, 8, 59, 50), ACC_END)
     rows = []
     f = build_on(b, at(1, 9))
@@ -376,8 +377,8 @@ ORD_F = [oo("fb", "bid", 100, 50, 50 * KRW1, fee=25 * F), oo("fs", "ask", 100, 5
 rows, r0, _b = scen("X1", {"KRW": (50 * KRW1 - 55 * F, 50 * KRW1), "ETH": (50, 50)}, ORD_F, [
     (at(1, 8, 0, 30), "consume", [fin("fb", "bid", 100, "done", [(at(0, 15), 50, 50 * KRW1), (at(1, 7, 59, 30), 50, 50 * KRW1)], fee=50 * F),
                                   fin("fs", "ask", 100, "cancel", [(at(0, 15, 30), 50, 50 * KRW1)], fee=30 * F)]),
-    (at(1, 8, 59, 50), "snap", {"KRW": (50 * KRW1 - 80 * F, 0), "ETH": (150, 0)}, [])], (199970, 200000, 199920))
-chk(rows_ok(rows) and near(r0[2], 199945), "X1 수수료 포함 = D 마감 $199,945 → 다시 계산 D $199,970(매수 몫·수수료는 다음 날) · D−1 $200,000 · 지금 $199,920", (r0, rows))
+    (at(1, 8, 59, 50), "snap", {"KRW": (50 * KRW1 - 80 * F, 0), "ETH": (150, 0)}, [])], (199945, 200000, 199920))
+chk(rows_ok(rows) and near(r0[2], 199945), "X1 수수료 포함 = D 마감 $199,945 → 다시 계산 D $199,945(매수 첫 체결·배분 수수료 = D · 분할 체결) · D−1 $200,000 · 지금 $199,920", (r0, rows))
 rows, r0, _b = scen("X2", ACC_MID, ORD_MID, [
     (at(1, 8, 0, 30), "consume", [fin("b1", "bid", 100, "cancel", [(at(0, 15), 50, 50 * KRW1)]),
                                   fin("s1", "ask", 100, "done", [(at(0, 15, 30), 50, 50 * KRW1), (at(1, 7, 59, 30), 50, 50 * KRW1)])]),

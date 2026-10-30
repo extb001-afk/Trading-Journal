@@ -29,9 +29,7 @@ class LoanBook:
             mix9, stl9 = lnx.px.kpx.krw_mix[0], lnx.px.kpx.krw_stl[0]
             accounting_util.oa_take(g9, fk9)
             cmp9 = lnx.px.cpx.cp_emit(lnx.px.cpx.cp_take(g9, fk9, mc9), qp9 - fk9, qp9, mc9)
-            lnx.cb.sub_known(g9, fk9)
-            lnx.cb.sub_cost(g9, mc9)
-            lnx.cb.floor_sub_unknown(g9, qp9 - fk9)
+            lnx.cb.release(g9, fk9, mc9, qp9 - fk9)
             ex9 = loc9.split(":")[1] if loc9.count(":") >= 1 else loc9
             n0 = len(lnx.tax_rows)
             gain9 = lnx.px.fbx.fee_gain(g9, unit9, fk9, mc9, ts9, dk9, ch9, mck9, mix9=mix9, stl9=stl9, cmp9=cmp9,

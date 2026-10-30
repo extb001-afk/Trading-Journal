@@ -30,13 +30,17 @@ class FeeBook:
         fbx.WD_FEE_IN_AMT = frozenset(("gate", "bithumb", "hyperliquid"))
         fbx.cur_lab = [None]
 
-    def tax_krw_acq(fbx, tax9, g, flow, cc9, cck9, rate_s, dkey, venue_loc=None, mix9=None):
+    def tax_krw_acq(fbx, tax9, g, flow, cc9, cck9, rate_s, dkey, venue_loc=None, mix9=None, kd: Decimal | None = None):
+        if kd is None:
+            kd = fbx.px.kpx.kd_take(cck9)
         if g["is_stable"]:
             part9 = cc9 - (mix9 or Decimal(0))
             if cck9 is None or part9 <= EPS or not (0.5 <= (float(cck9) / float(part9)) / max(rate_s, 1.0) <= 2.0):
+                fbx.px.fsx.kdx.row(tax9, g, kd)
                 return
             tax9["_akr"] = float(cck9) + float(mix9 or 0) * rate_s
             tax9["akr"] = round(tax9["_akr"])
+            fbx.px.fsx.kdx.row(tax9, g, kd)
             return
         fck9, fcu9 = float(flow.get("cost_krw") or 0), float(flow.get("cost") or 0)
         if fck9 > 0 and fcu9 > 0 and 0.5 <= (fck9 / fcu9) / max(rate_s, 1.0) <= 2.0:
@@ -56,6 +60,7 @@ class FeeBook:
                     if venue_loc is not None:
                         fbx.realized_by_loc.setdefault((venue_loc, dkey), [0.0, 0.0])[1] += adj9
                     tax9["_akm"] = 1
+        fbx.px.fsx.kdx.row(tax9, g, kd)
 
     def fee_unit(fbx, g9, ts9, wac9=None):
         if g9["is_stable"]:
@@ -141,8 +146,11 @@ class FeeBook:
             return Decimal(0)
         return f9
 
-    def fee_gain(fbx, g9, unit9, mk9, mc9, ts9, dkey9, chain9, mck9=None, mix9=None, stl9=None, cmp9=None, fs9=None, lab9=None, fsm9=True):
+    def fee_gain(fbx, g9, unit9, mk9, mc9, ts9, dkey9, chain9, mck9=None, mix9=None, stl9=None, cmp9=None, fs9=None, lab9=None, fsm9=True, kd: Decimal | None = None):
+        if kd is None:
+            kd = fbx.px.kpx.kd_take(mck9)
         if unit9 is None or mk9 <= EPS or unit9 <= 0 or g9.get("is_fiat"):
+            fbx.px.kpx.kd_lose("fee_px", kd)
             return Decimal(0)
         gain9 = unit9 * mk9 - mc9
         rt9, rs9 = fbx.px.ctx.fxb.rate_src(ts9)
@@ -159,7 +167,9 @@ class FeeBook:
               "qty": _f(mk9, 4), "acq": _f(mc9, 2), "disp": _f(d9, 2), "fee": 0, "rate": round(rt9, 4), "rateSrc": rs9,
               "_acq": float(mc9), "_disp": float(d9), "_qty": float(mk9)}
         if rs9 not in ("spot", "default"):
-            fbx.tax_krw_acq(t9, g9, fl9, mc9, mck9, rt9, dkey9, mix9=mix9)
+            fbx.tax_krw_acq(t9, g9, fl9, mc9, mck9, rt9, dkey9, mix9=mix9, kd=kd)
+        else:
+            fbx.px.kpx.kd_lose("fee_fx", kd)
         if not fsm9:
             pass
         elif fs9 is not None:

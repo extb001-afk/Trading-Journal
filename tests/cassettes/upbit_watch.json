@@ -1,0 +1,2217 @@
+{
+ "_doc": "합성 데이터(지어낸 주소·키·금액) — 카세트 시험 틀 _cassette.py 의 녹화본. 다시 녹화 = TJ_TEST_RECORD=upbit_watch · «a1*20» = 합성 16진수 압축 표기 · «~…» = 합성 아닌 값의 지문(요청 표시용)",
+ "version": 1,
+ "name": "upbit_watch",
+ "clock": {
+  "now": 1760000000.0,
+  "tick": 0.0
+ },
+ "secrets": [
+  "upbit_access",
+  "upbit_secret"
+ ],
+ "requests": 40,
+ "interactions": [
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/accounts",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/accounts"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency": "KRW",
+      "balance": "1000000.0",
+      "locked": "27000.0",
+      "avg_buy_price": "0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     },
+     {
+      "currency": "TSTA",
+      "balance": "10.0",
+      "locked": "10.0",
+      "avg_buy_price": "2650.0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 500,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "error": {
+      "name": "server_error",
+      "message": "synthetic"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:20%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:20%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~808edfd4127e»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:20%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:20%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~bbee7b5ab876»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/accounts",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/accounts"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency": "KRW",
+      "balance": "1000000.0",
+      "locked": "27000.0",
+      "avg_buy_price": "0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     },
+     {
+      "currency": "TSTA",
+      "balance": "10.0",
+      "locked": "10.0",
+      "avg_buy_price": "2650.0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-watch-1",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3000.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-09-29T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     },
+     {
+      "uuid": "ord-watch-2",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3100.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-09-30T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:22%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:22%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~25e988ea6ed2»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:22%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:22%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~9933541b1d63»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/accounts",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/accounts"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency": "KRW",
+      "balance": "1000000.0",
+      "locked": "27000.0",
+      "avg_buy_price": "0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     },
+     {
+      "currency": "TSTA",
+      "balance": "10.0",
+      "locked": "10.0",
+      "avg_buy_price": "2650.0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 500,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "error": {
+      "name": "server_error",
+      "message": "synthetic"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:23%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:23%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~363644ff55cf»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:23%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:23%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~75495b912837»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 500,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "error": {
+      "name": "server_error",
+      "message": "synthetic"
+     }
+    }
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/accounts",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/accounts"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency": "KRW",
+      "balance": "1000000.0",
+      "locked": "27000.0",
+      "avg_buy_price": "0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     },
+     {
+      "currency": "TSTA",
+      "balance": "10.0",
+      "locked": "10.0",
+      "avg_buy_price": "2650.0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-watch-1",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3000.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-09-29T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     },
+     {
+      "uuid": "ord-watch-2",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3100.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-09-30T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     },
+     {
+      "uuid": "ord-watch-3",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3200.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-01T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:24%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:24%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~6d0e11abc11c»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:24%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:24%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~91afccd98b44»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/accounts",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/accounts"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "currency": "KRW",
+      "balance": "1000000.0",
+      "locked": "27000.0",
+      "avg_buy_price": "0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     },
+     {
+      "currency": "TSTA",
+      "balance": "10.0",
+      "locked": "10.0",
+      "avg_buy_price": "2650.0",
+      "avg_buy_price_modified": false,
+      "unit_currency": "KRW"
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~f41171b89848»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-wait-1",
+      "side": "bid",
+      "ord_type": "limit",
+      "price": "2700.0",
+      "state": "wait",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-09T17:43:20+09:00",
+      "volume": "10.0",
+      "remaining_volume": "10.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": [
+     {
+      "uuid": "ord-watch-2",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3100.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-09-30T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     },
+     {
+      "uuid": "ord-watch-3",
+      "side": "ask",
+      "ord_type": "limit",
+      "price": "3200.0",
+      "state": "watch",
+      "market": "KRW-TSTA",
+      "created_at": "2025-10-01T17:53:20+09:00",
+      "volume": "5.0",
+      "remaining_volume": "5.0",
+      "executed_volume": "0.0",
+      "trades_count": 0
+     }
+    ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/deposits?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/withdraws?limit=100&page=1&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~032685b955c4»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:26%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=done&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:26%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~dfa26f1a283c»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:26%2B09:00&limit=1000",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/closed?state=cancel&start_time=2025-10-03T17:53:20%2B09:00&end_time=2025-10-09T17:53:26%2B09:00&limit=1000"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~eff94f8313ba»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/order?uuid=ord-watch-1",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/order?uuid=ord-watch-1"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~63d1e2b58e36»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": {
+     "uuid": "ord-watch-1",
+     "side": "ask",
+     "ord_type": "limit",
+     "price": "3000.0",
+     "state": "done",
+     "market": "KRW-TSTA",
+     "created_at": "2025-09-29T17:53:20+09:00",
+     "volume": "5.0",
+     "remaining_volume": "0.0",
+     "executed_volume": "5.0",
+     "trades_count": 1,
+     "executed_funds": "15000.0",
+     "paid_fee": "7.5",
+     "trades": [
+      {
+       "market": "KRW-TSTA",
+       "uuid": "trd-w001",
+       "side": "ask",
+       "price": "3000.0",
+       "volume": "5.0",
+       "funds": "15000.0",
+       "created_at": "2025-10-09T17:23:20+09:00"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -122,6 +122,7 @@
    "nodekeys",
    "runner_fp",
    "settings_store",
+   "tools.evm_txpos_fill",
    "tools.gate_onchain",
    "tools.migrate_nodekeys_1008",
    "tools.negabs",
@@ -165,6 +166,7 @@
    "runner_fp",
    "settings_store",
    "token_discovery",
+   "tools.evm_txpos_fill",
    "tools.gate_onchain",
    "tools.ledger_restore",
    "tools.negabs",
@@ -515,6 +517,7 @@
    "core_recon",
    "discopen",
    "lpchain",
+   "tools.evm_txpos_fill",
    "tools.gate_onchain",
    "tools.negabs",
    "tools.repair_onchain_balances",
@@ -546,6 +549,7 @@
    "bsc_watch",
    "discopen",
    "nodekeys",
+   "tools.evm_txpos_fill",
    "tools.gate_onchain",
    "tools.negabs"
   ],
@@ -1123,6 +1127,9 @@
   ],
   "ton_watch:main|varkey|<top>[reg.CFG_CHAIN_KEY]": [
    "nonevm"
+  ],
+  "tools.evm_txpos_fill:_urls|varkey|chains[chain]": [
+   "?"
   ],
   "tools.gate_onchain:main|varkey|chains[chain]": [
    "?"

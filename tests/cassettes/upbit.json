@@ -10,7 +10,7 @@
   "upbit_access",
   "upbit_secret"
  ],
- "requests": 8,
+ "requests": 9,
  "interactions": [
   {
    "key": "GET https://api.upbit.com/v1/orders/open?page=1&limit=100&order_by=desc",
@@ -202,6 +202,53 @@
       "trades_count": 0
      }
     ]
+   }
+  },
+  {
+   "key": "GET https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc",
+   "req": {
+    "method": "GET",
+    "url": "https://api.upbit.com/v1/orders/open?state=watch&page=1&limit=100&order_by=desc"
+   },
+   "hdr": {
+    "accept-encoding": "identity",
+    "host": "api.upbit.com",
+    "accept": "application/json",
+    "user-agent": "tj-bot/0.1",
+    ":timeout": "20",
+    ":tls": "검증",
+    ":sni": "api.upbit.com"
+   },
+   "auth": {
+    "authorization": {
+     "jwt": {
+      "hdr": {
+       "alg": "HS256",
+       "typ": "JWT"
+      },
+      "claims": {
+       "access_key": "<secret:upbit_access>",
+       "nonce": "<nonce>",
+       "query_hash": "«~20f02de75767»",
+       "query_hash_alg": "SHA512"
+      },
+      "signed_by": "upbit_secret"
+     }
+    }
+   },
+   "resp": {
+    "status": 200,
+    "headers": [
+     [
+      "Remaining-Req",
+      "group=default; min=1799; sec=29"
+     ],
+     [
+      "Content-Type",
+      "application/json"
+     ]
+    ],
+    "json": []
    }
   },
   {

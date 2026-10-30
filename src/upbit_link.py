@@ -25,6 +25,7 @@ log = logs.setup_logging("tj-ex")
 
 API = "https://api.upbit.com"
 POLL_SEC = 60
+_OPEN_WARNED = {}
 
 
 def _env():
@@ -293,7 +294,7 @@ def _resolve_tracked(up: "Upbit", track: dict, seen: set, rows: dict) -> list:
     return out
 
 
-def fetch_orders(up: "Upbit", months: float, open_now: list | None = None):
+def fetch_orders(up: "Upbit", months: float, open_now: list | None = None, open_watch: list | None = None):
     st = statefile.read_json(paths.state("upbit_orders_state.json"), {}) if os.path.exists(paths.state("upbit_orders_state.json")) else {}
     seen = set(st.get("uuids") or [])
     track = st.get("open_track") if isinstance(st.get("open_track"), dict) else {}
@@ -319,16 +320,20 @@ def fetch_orders(up: "Upbit", months: float, open_now: list | None = None):
             rows[u] = o
         else:
             keep.append(o)
-    if open_now is not None:
+    if open_now is not None or open_watch is not None:
         open_ids = set()
-        for o in open_now:
+        for idx, o in enumerate(list(open_now or []) + list(open_watch or [])):
             if isinstance(o, dict) and o.get("uuid"):
                 u = str(o["uuid"])
                 open_ids.add(u)
                 if u not in track and u not in seen:
                     track[u] = {"c": o.get("created_at"), "m": o.get("market")}
+                if idx >= len(open_now or []) and u in track:
+                    track[u]["w"] = 1
+                elif u in track:
+                    track[u].pop("w", None)
         for u, ent in track.items():
-            if u not in open_ids:
+            if open_now is not None and u not in open_ids and not (open_watch is None and ent.get("w")):
                 ent["closed"] = True
     resolved = _resolve_tracked(up, track, seen, rows)
     pending = sum(1 for e in track.values() if e.get("closed"))
@@ -344,22 +349,31 @@ def fetch_orders(up: "Upbit", months: float, open_now: list | None = None):
     return keep + resolved, sweep_ok, next_state
 
 
-def _open_orders(up: "Upbit", max_pages: int = 20):
+def _open_orders(up: "Upbit", max_pages: int = 20, state: str | None = None):
     out = []
     try:
         for p in range(1, max_pages + 1):
-            rows = up.get("/v1/orders/open", {"page": p, "limit": 100, "order_by": "desc"})
+            rows = up.get("/v1/orders/open", dict({"state": state} if state else {}, page=p, limit=100, order_by="desc"))
             if not isinstance(rows, list):
                 return None
             out.extend(rows)
             if len(rows) < 100:
+                _OPEN_WARNED.pop(state, None)
                 return out
             time.sleep(0.15)
     except Exception as e:  # noqa: BLE001 [fallback]
-        if not _note_backoff(up, e):
-            log.warning("미체결 주문 조회 실패(이번 잔고 스냅샷엔 생략): %s", e)
+        if not _note_backoff(up, e) and not _OPEN_WARNED.get(state):
+            log.warning(("예약(watch) 주문 조회 실패 — 이번 주기 예약 체결 추적만 건너뜀(성공할 때까지 경고 한 번): %s" if state else "미체결 주문 조회 실패(이번 잔고 스냅샷엔 생략): %s"), e)
+        _OPEN_WARNED[state] = bool(state)
         return None
     return None
+
+
+def _watch_hold(ow, next_state: dict, prev, now: int):
+    if ow is not None or not any(e.get("w") for e in (next_state.get("open_track") or {}).values()):
+        return None
+    old = prev.get("watch_hold") if isinstance(prev, dict) and isinstance(prev.get("watch_hold"), dict) else {}
+    return {"since": int(old.get("since") or now), "msg": "예약(watch) 주문 목록 조회 실패 — 추적 중 예약의 체결 확인·잔고 대사 보류(다음 주기 재시도)"}
 
 
 def _oo_sig(rows: list) -> list:
@@ -639,7 +653,7 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
     time.sleep(0.2)
     accounts = up.get("/v1/accounts")
     time.sleep(0.2)
-    oo2 = _open_orders(up) if oo1 is not None else None
+    oo2, ow = (_open_orders(up) if oo1 is not None else None), _open_orders(up, state="watch")
     open_ok = oo1 is not None and oo2 is not None
     prev9 = statefile.read_json(paths.state("upbit_orders_state.json"), {}) if os.path.exists(paths.state("upbit_orders_state.json")) else {}
     if prev9.get("complete"):
@@ -663,7 +677,7 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
                        "ts": int(time.time()),
                        "deposits": nd9, "withdraws": nw9})
     _ROWS.commit(nfp9, full9)
-    orders, sweep_ok, next_state = fetch_orders(up, months, oo2 if oo2 is not None else oo1)
+    orders, sweep_ok, next_state = fetch_orders(up, months, oo2 if oo2 is not None else oo1, ow)
     if target and target < time.time() - months * 30 * 86400:
         orders = orders + extend_orders(up, months, target, next_state, {o["uuid"] for o in orders})
         next_state["uuids"] = sorted(set(next_state.get("uuids") or []) | {o["uuid"] for o in orders})[-20000:]
@@ -674,7 +688,7 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
         _tfill_pass(up, writer, next_state)
     except Exception as e:   # noqa: BLE001 [boundary]
         log.warning("체결 시각 채우기 실패(다음 주기 재시도): %s", repr(e)[:140])
-    next_state["complete"] = bool(open_ok and sweep_ok and not next_state.get("track_pending"))
+    next_state["complete"] = bool(open_ok and sweep_ok and not next_state.get("track_pending") and not _watch_hold(ow, next_state, None, 0))
     statefile.atomic_write_json(paths.state("upbit_orders_state.json"), next_state)
     pend = int(next_state.get("track_pending") or 0)
     now9 = int(time.time())
@@ -693,7 +707,7 @@ def cycle(up: Upbit, writer: SegmentWriter, months: float):
         err, kind = f"체결 확정 대기 {pend}건이 {(now9 - ps9) // 3600}시간 넘게 — 단건 조회(/v1/order) 실패 반복", "pending"
     else:
         err, kind = None, None
-    _sync_note(ok=err is None, err=err, kind=kind, track_pending=pend, pending_since=ps9, complete=bool(next_state["complete"]))
+    _sync_note(ok=err is None, err=err, kind=kind, track_pending=pend, pending_since=ps9, complete=bool(next_state["complete"]), watch_hold=_watch_hold(ow, next_state, prev9, now9))
     _SYNC_N[0] += 1
     if orders or _SYNC_N[0] % 10 == 1:
         log.info("동기화: 잔고 %d종, 입금 %d, 출금 %d, 신규체결주문 %d",
@@ -722,6 +736,8 @@ def _sync_note(ok: bool, err=None, kind=None, **extra) -> None:
             d["last_err"] = {"ts": now, "msg": logs.safe_err(err)[:200], "kind": kind or "cycle"}
         for k, v in extra.items():
             d[k] = v
+        if d.get("watch_hold") is None:
+            d.pop("watch_hold", None)
         statefile.atomic_write_json(paths.state("upbit_sync.json"), d)
     except Exception as e:   # noqa: BLE001 [optional]
         log.warning("업비트 동기화 상태 기록 실패(무시): %s", logs.safe_err(e)[:120])

@@ -219,6 +219,13 @@ T.chk(rc == 1 and "데이터 개정" in out and "2 > " in out and "DATA_REV 1" i
       "K4 원장 개정 2 + DATA_REV 1 판(표식 없음) = 거부(rc 1 · 되돌리기 순서·백업 안내)", out)
 rc, out = run("v_rev2")
 T.chk(rc == 0 and "표식 없음" in out, "K4 원장 개정 2 + DATA_REV 2 판 = 통과", out)
+ledger([], rev="3")
+rc, out = run("v_rev2")
+T.chk(rc == 1 and "3 > " in out and "--upbit-split-down" in out and "--undo-autofix" not in out,
+      "K4 원장 개정 3(업비트 분할 체결 레그) + DATA_REV 2 판 = 거부 · 안내 = --upbit-split-down 먼저(자동 처리 되돌리기 줄 없음)", out)
+rc, out = run("v_both")
+T.chk(rc == 1 and "--upbit-split-down" in out and "--undo-autofix" in out, "K4 원장 개정 3 + DATA_REV 1 판 = 거부 · 안내 = 분할 내리기 + 자동 처리 되돌리기 둘 다", out)
+ledger([], rev="2")
 rc, out = run("v_nodb")
 T.chk(rc == 1 and "DATA_REV 0" in out, "K4 db.py 없는 판 = 개정 0 = 거부", out)
 rc, out = run("v_old")

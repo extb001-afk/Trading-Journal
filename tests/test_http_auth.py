@@ -278,22 +278,30 @@ def run_web(tag, login):
         env.pop(k, None)
     p = subprocess.Popen([sys.executable, "-c", PRELUDE, WEB_PY], env=env, cwd=base, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, errors="replace", preexec_fn=T.sigint_default)
+    buf = []
+    rd = threading.Thread(target=lambda: buf.extend(iter(p.stdout.readline, "")), daemon=True)
+    rd.start()
     up, t0 = False, time.time()
-    while time.time() - t0 < 90 and p.poll() is None:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=1).close()
-            up = True
-            break
-        except OSError:
-            time.sleep(0.3)
+    while time.time() - t0 < 90 and p.poll() is None and not any("가동:" in ln for ln in list(buf)):
+        time.sleep(0.2)
     if p.poll() is None:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=2).close()
+            up = True
+        except OSError:
+            pass
+        n0, t1 = -1, time.time()
+        while len(buf) != n0 and time.time() - t1 < 10:
+            n0 = len(buf)
+            time.sleep(1.0)
         p.send_signal(2)
     try:
-        out, _e = p.communicate(timeout=30)
+        p.wait(timeout=30)
     except subprocess.TimeoutExpired:
         p.kill()
-        out, _e = p.communicate(timeout=10)
-    return p.returncode, up, out or ""
+        p.wait(timeout=10)
+    rd.join(timeout=10)
+    return p.returncode, up, "".join(buf)
 
 
 rc, up, out = run_web("deny", OFF)

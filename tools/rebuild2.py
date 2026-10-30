@@ -12,7 +12,7 @@ from decimal import Decimal, localcontext, InvalidOperation
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-import config, histmark, paths, statefile  # noqa: E402
+import acct_norm, config, histmark, paths, statefile  # noqa: E402
 import ledger_lock  # noqa: E402
 
 LIVE_STATE = paths.STATE_DIR
@@ -740,15 +740,19 @@ def gates(b, t0: int = 0, iso=None) -> dict:
             exp_ev = "EX_SELL" if side == "ask" else "EX_BUY"
         except Exception:
             ord_mismatch.append((r[0], "parse")); continue
-        qb, ev, ck = post_ord[(r[0], 0)]
+        grp9 = acct_norm.fill_groups(o)[0]
+        n9 = len(grp9) if grp9 and len(grp9) > 1 else 1
+        legs9 = [post_ord[(r[0], i9)] for i9 in range(n9) if (r[0], i9) in post_ord]
+        qb = sum(x9[0] for x9 in legs9)
+        ev = legs9[0][1] if legs9 and all(x9[1] == legs9[0][1] for x9 in legs9) else "mixed"
         try:
-            ck_ok = ck is not None and abs(Decimal(str(ck)) - net) <= Decimal("0.000001")
+            ck_ok = all(x9[2] is not None for x9 in legs9) and abs(sum((Decimal(str(x9[2])) for x9 in legs9), Decimal(0)) - net) <= Decimal("0.000001")
         except Exception:
             ck_ok = False
         if qb != exp_qb or ev != exp_ev or not ck_ok:
             ord_mismatch.append((r[0], "qty" if qb != exp_qb else ("event" if ev != exp_ev else "cost_krw")))
-        if (r[0], 1) in post_ord:
-            ord_mismatch.append((r[0], "krw_extra_leg"))
+        if len(legs9) != n9 or (r[0], n9) in post_ord:
+            ord_mismatch.append((r[0], "krw_leg_count"))
     posted_ord = {r[0] for r in b.execute("SELECT DISTINCT source_id FROM postings WHERE source_ns='upbit:order'")}
     nonkrw_legs = {}
     for (sid9, _seq9) in post_ord:
@@ -924,6 +928,12 @@ def cost_lost(a, b, top: int = 10) -> dict:
     nul = {(r[0], r[1], r[2], int(r[3])): (r[4], r[5]) for r in b.execute(
         "SELECT source_kind, source_ns, source_id, leg_seq, leg_kind, event FROM postings WHERE cost_usd IS NULL")}
     if nul:
+        old_single = {tuple(r) for r in a.execute(
+            "SELECT source_kind, source_ns, source_id FROM postings WHERE source_kind='exchange' AND source_ns='upbit:order'"
+            " GROUP BY source_kind, source_ns, source_id HAVING count(*)=1 AND min(leg_seq)=0")}
+        for key, leg in list(nul.items()):
+            if key[:3] in old_single and key[3] > 0:
+                nul.setdefault(key[:3] + (0,), leg)
         for r in a.execute("SELECT source_kind, source_ns, source_id, leg_seq, cost_usd, asset_id FROM postings WHERE cost_usd IS NOT NULL"):
             k = (r[0], r[1], r[2], int(r[3]))
             if k in nul:

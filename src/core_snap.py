@@ -175,6 +175,9 @@ class SnapMixin:
         if (ot.get("raw_input") == "0x01" and str((ot.get("fee") or {}).get("value") or "0") == "0"
                 and nt and nt.get("raw_input") != "0x01"):
             out["tx"] = json.loads(json.dumps(nt))
+            if (nt.get("position") is None and ot.get("position") is not None and ot.get("block_number") == nt.get("block_number")
+                    and (not ot.get("block_hash") or not nt.get("block_hash") or str(ot["block_hash"]).lower() == str(nt["block_hash"]).lower())):
+                out["tx"]["position"] = ot["position"]
         elif isinstance(out.get("tx"), dict) and nt.get("type") == 126 and out["tx"].get("type") is None:
             out["tx"]["type"] = 126
             if nt.get("op_mint") is not None and out["tx"].get("op_mint") is None:
@@ -804,6 +807,8 @@ class SnapMixin:
                 keep.add(t["asset_id"])
         rec2 = dict(rec)
         rec2.pop("repersp", None)
+        if "slot_idx" not in rec2 and "slot_idx" in old:
+            rec2["slot_idx"] = old["slot_idx"]
         self.conn.execute("UPDATE raw_txs SET snapshot=?, wallets=?, ingested_at=? WHERE chain='sol' AND txhash=?",
                           (json.dumps(rec2, ensure_ascii=False), json.dumps(rec2.get("wallets", [])), int(time.time()), txhash))
         ev = self.apply_sol(rec2, rederive=(old_ev, frozenset(keep)))

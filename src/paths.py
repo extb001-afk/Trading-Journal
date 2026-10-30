@@ -178,6 +178,7 @@ REG = {
     "hl_spot_meta.json": ("hl_spot_meta.json", "hl_spot", "json", None),
     "inflow_*.json": ("inflow_*.json", "inflow_probe", "glob", None),
     "intentional_restart.json": ("intentional_restart.json", "core_ext health", "json", None),
+    "kr_deemed_px.json": ("kr_deemed_px.json", "view_fspin", "json", None),
     "leverage.json": ("leverage.json", "leverage liq_watch", "json", None),
     "liq_watch.json": ("liq_watch.json", "health liq_watch web", "json", None),
     "lp_positions.json": ("lp_positions.json", "view_b_cards view_b_pendings view_workers", "json", None),

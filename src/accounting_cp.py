@@ -91,25 +91,26 @@ class CostPools:
             cpx.cp_add(g, key9, q9, c9)
             cpx.cp_ev[key9] = rec9
 
-    def consume(cpx, g, qty, cp=True):
+    def consume(cpx, g, qty, cp=True, lots: bool = False):
         cpx.oa_last[0] = Decimal(0)
         cpx.px.kpx.krw_last[0] = None
         cpx.px.kpx.krw_mix[0] = Decimal(0)
+        cpx.px.kpx.kd_reset()
         cost_taken = Decimal(0)
         from_unknown = min(qty, g["qty_unknown"])
-        cpx.cb.sub_unknown(g, from_unknown)
         rem = qty - from_unknown
         take = Decimal(0)
+        sub_k = sub_c = None
         cpx.cp_last[0] = None
         if rem > 0 and g["qty_known"] > EPS:
             wac = g["cost"] / g["qty_known"]
             take = min(rem, g["qty_known"])
             cpx.oa_last[0] = accounting_util.oa_take(g, take)
             cpx.cp_last[0] = cpx.cp_take(g, take, wac * take, cp)
-            cpx.cb.sub_known(g, take)
             cost_taken = wac * take
             cpx.px.kpx.krw_last[0] = cpx.px.kpx.consume_krw(g, cost_taken)
-            cpx.cb.sub_cost(g, cost_taken)
+            sub_k, sub_c = take, cost_taken
+        cpx.cb.release(g, sub_k, sub_c, from_unknown, floor=False, lots=lots)
         return cost_taken, take, from_unknown
 
     def ev(cpx, flow, ts, k, d, q, a, tx, un=None):

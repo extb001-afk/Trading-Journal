@@ -179,9 +179,12 @@ def main(argv=None):
     if led_rev > code_rev:
         print("★거부(코드만 되돌리면 안 됨): 원장 데이터 개정(meta data_rev) %d > 되돌릴 판(%s)의 코드 DATA_REV %d — 그 판은 자동 처리(autofix) 등 한 방향 변환을"
               " 모른다(core 시작 거부 또는 바뀐 내용 모른 채 기장)★" % (led_rev, a.ref or a.tree, code_rev))
-        print("   먼저(지금 코드 그대로 · checkout 전에) 자동 처리를 되돌리기: pm2 stop ecosystem.config.js → python3 tools/ledger_rowfix.py --undo-autofix <거래소>:<심볼> --apply"
-              " (칸마다 전부) → python3 tools/ledger_rowfix.py --data-rev-down 1 --apply → 이 점검을 다시(통과하면 checkout) · 또는 그 변환 전 백업으로 원장째:"
-              " python3 tools/ledger_restore.py list")
+        if led_rev >= 3 > code_rev:
+            print("   개정 3(업비트 분할 체결 레그) 먼저: pm2 stop ecosystem.config.js → python3 tools/ledger_rowfix.py --upbit-split-down --apply --backup-now(분할 레그를 한 줄로 · 3 → 분할 전 개정)")
+        if code_rev < 2:
+            print("   먼저(지금 코드 그대로 · checkout 전에) 자동 처리를 되돌리기: pm2 stop ecosystem.config.js → python3 tools/ledger_rowfix.py --undo-autofix <거래소>:<심볼> --apply"
+                  " (칸마다 전부) → python3 tools/ledger_rowfix.py --data-rev-down 1 --apply")
+        print("   → 이 점검을 다시(통과하면 checkout) · 또는 그 변환 전 백업으로 원장째: python3 tools/ledger_restore.py list")
         return 1
     if not marks:
         print("통과: 원장에 1회 정정 표식 없음(%s)" % ("원장 없음" if marks is None else db))

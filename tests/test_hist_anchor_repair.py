@@ -236,7 +236,7 @@ TS9 = NOW - 50 * DAY
 SH = "S" + "9" * 87
 srec = {"v": 1, "kind": "sol_tx", "chain": "sol", "txhash": SH, "slot": 900, "ts": TS9, "fee_lamports": 0, "fee_payer_mine": False,
         "fee_payer": None, "wallets": [SOLW], "deltas": [{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": "-5000000000", "owner": SOLW}],
-        "counterparties": [SOLW2], "has_program": False, "err": False}
+        "counterparties": [SOLW2], "has_program": False, "err": False, "slot_idx": 3}
 c._drain_stream("sol", Reader([srec]), 0, 0)
 recon(c, {"sol": {SOLW: {("native", None): 0}, SOLW2: {("native", None): 10 * 10 ** 9}}})
 c._hist_late_scan()
@@ -246,10 +246,14 @@ W9 = c._win_t0(None, "sol")
 check("R9 (전제) 솔라나 SOLW2 앵커 10 SOL(창 시작)", a9 == [(10 * 10 ** 9, W9)], (a9, W9))
 srec2 = dict(srec, wallets=[SOLW, SOLW2], repersp=True,
              deltas=srec["deltas"] + [{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": "5000000000", "owner": SOLW2}])
+srec2.pop("slot_idx")
 c._drain_stream("sol", Reader([srec2]), 0, 0)
 a9b = anchor_rows(c, "sol", LS2)
 check("R9 (전제) 새 관점 재기장 → SOLW2 앵커 10 → 5", a9b == [(5 * 10 ** 9, W9)], a9b)
 check("R9 ★솔라나 앵커 보정도 앵커 날 표식(스캔 전)★", min_mark(c) == iso(W9), (marks(c), iso(W9)))
+snap9 = json.loads(c.conn.execute("SELECT snapshot FROM raw_txs WHERE chain='sol' AND txhash=?", (SH,)).fetchone()[0])
+check("R9 새 관점 재기장이 저장본 같은 슬롯 자리(slot_idx)를 지우지 않음 · 새 지갑 반영", snap9.get("slot_idx") == 3 and SOLW2 in snap9.get("wallets", []),
+      {"slot_idx": snap9.get("slot_idx"), "wallets": snap9.get("wallets")})
 c.conn.close()
 
 reset()

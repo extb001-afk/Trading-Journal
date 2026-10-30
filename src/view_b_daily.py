@@ -14,6 +14,7 @@ from view_common import DAYCLOSE_ON
 from view_common import EPS
 from view_common import STABLE_GROUPS
 from view_fspin import _fs_pin_save
+from view_fspin import kd_pin_save
 from view_misc import _hist_kit_rows
 from view_regroup import _daily_krw
 from view_regroup import _stable_regroup_aliases
@@ -106,7 +107,7 @@ class DailyBuildMixin:
                     if b9 is False or (isinstance(b9, dict) and b9.get("ts") is None):
                         ufp9[u9] = None
                     elif isinstance(b9, dict):
-                        ufp9[u9] = float(b9["ts"])
+                        ufp9[u9] = float(min(p[0] for p in b9["parts"]) if b9.get("parts") else b9["ts"])
                     elif u9 in (uf_inf9.get("ufc") or {}) or any(u9 in z9 for z9 in (uf_inf9.get("ufz") or {}).values()):
                         ufp9[u9] = float(uf_ts9)
                 xtra9["xsrc"] = dict(xs9, now=dict(xs9["now"], ufp=ufp9))
@@ -133,6 +134,8 @@ class DailyBuildMixin:
         self._xq9 = (xq9, ((self.daily_px or {}).get("_xqb") or {}).get("xq", xqb9) if xq9 is not None else None)
         if fs_pin_new:
             _fs_pin_save(fs_pin_new)
+        if (fs_sum.get("kd") or {}).get("pin_new"):
+            kd_pin_save(fs_sum["kd"]["at"], fs_sum["kd"]["pin_new"])
         if DAYCLOSE_ON and fs_need:
             try:
                 ask9 = {}

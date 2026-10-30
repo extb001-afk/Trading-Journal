@@ -186,6 +186,33 @@ def sites(src, rules):
     return rows, errors
 
 
+LEGACY = ("add_known", "add_cost", "add_unknown", "sub_known", "sub_cost", "sub_unknown", "floor_sub_unknown")
+FUNNEL_OWNER = "accounting_basis"
+
+
+def legacy_calls_text(text, name="<src>"):
+    out = []
+    for n in ast.walk(ast.parse(text, name)):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in LEGACY:
+            out.append((n.lineno, ast.unparse(n)[:80]))
+    return out
+
+
+def legacy_calls(src):
+    out = []
+    for m, p in src_modules(src).items():
+        if m == FUNNEL_OWNER:
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                hits = legacy_calls_text(f.read(), p)
+        except (OSError, UnicodeDecodeError, SyntaxError) as e:
+            out.append("src/%s.py: %s" % (m, e))
+            continue
+        out.extend("src/%s.py:%d %s" % (m, ln, t) for ln, t in hits)
+    return out
+
+
 def bundles(rows):
     acc = {}
     for r in rows:

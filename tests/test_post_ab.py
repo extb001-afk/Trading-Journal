@@ -22,11 +22,11 @@ import post_ab as P  # noqa: E402
 RT, DEC, BAD = P.check_discovery(T.ROOT)
 locked = sorted(r for r, v in RT.items() if v["locked"])
 inline = sorted(r for r, v in RT.items() if v["inline"])
-chk(not BAD and len(RT) == 37 and set(RT) == DEC, "P1 본문 경로 발견 37 = 선언(POST − setup − 로그인)", BAD)
-chk(len(locked) == 22 and len(RT) - len(locked) == 15, "P1 잠금 안 22 · 잠금 밖 15", locked)
-chk(len(inline) == 33 and not any(r.startswith("/api/ops/") for r in inline)
+chk(not BAD and len(RT) == 38 and set(RT) == DEC, "P1 본문 경로 발견 38 = 선언(POST − setup − 로그인)", BAD)
+chk(len(locked) == 23 and len(RT) - len(locked) == 15, "P1 잠금 안 23 · 잠금 밖 15", locked)
+chk(len(inline) == 34 and not any(r.startswith("/api/ops/") for r in inline)
     and all(os.path.basename(f) == "http_post_prefs.py" for r in inline for f, _lo, _hi in RT[r]["ranges"]),
-    "P1 덮음 대상 33(표의 처리 함수 = http_post_prefs · 접두어 4 는 호출)", inline)
+    "P1 덮음 대상 34(표의 처리 함수 = http_post_prefs · 접두어 4 는 호출)", inline)
 chk(sorted(r for r in RT if r.startswith("/api/ops/")) == ["/api/ops/decimals_resolve", "/api/ops/poison_replay", "/api/ops/rebuild_approve",
                                                             "/api/ops/rebuild_cancel"], "P1 /api/ops/ 동작 4 = 처리 함수의 act 비교에서")
 
@@ -166,12 +166,12 @@ os.makedirs(SCR, exist_ok=True)
 OUT = os.path.join(SCR, "full.json")
 p4 = subprocess.run([sys.executable, "-I", os.path.join(TOOLS, "post_ab.py"), "run", "--base", T.ROOT, "--work", T.ROOT, "--scratch", SCR,
                      "--out", OUT, "--keep"], capture_output=True, text=True, timeout=600)
-chk(p4.returncode == 0 and "결과: 통과" in p4.stdout, "P4 같은 트리 run = 통과(두 번 차이 0 · 진입 37/37 · 덮음 100%)", (p4.stdout + p4.stderr)[-1500:])
+chk(p4.returncode == 0 and "결과: 통과" in p4.stdout, "P4 같은 트리 run = 통과(두 번 차이 0 · 진입 38/38 · 덮음 100%)", (p4.stdout + p4.stderr)[-1500:])
 with open(OUT, encoding="utf-8") as f:
     S4 = json.load(f)
 BR = S4["base_record"]["cases"]
-chk(S4["routes"] == 37 and S4["pre"] == [] and all(m == 0 for _n, m in S4["cover_base"].values()) and len(S4["cover_base"]) == 33,
-    "P4 경로 37 · 선행 조건 0 · 처리 함수 33 전부 덮음", {k: S4[k] for k in ("routes", "pre")})
+chk(S4["routes"] == 38 and S4["pre"] == [] and all(m == 0 for _n, m in S4["cover_base"].values()) and len(S4["cover_base"]) == 34,
+    "P4 경로 38 · 선행 조건 0 · 처리 함수 34 전부 덮음", {k: S4[k] for k in ("routes", "pre")})
 ev = BR["plan#full"]["events"]
 e2 = [e[:2] for e in ev]
 chk(e2[0] == ["b.mats_wait", "/api/plan"] and e2[1] == ["prefs", "acquire"] and e2.index(["enter"]) > 1 and e2[-1] == ["prefs", "release"]
@@ -185,7 +185,7 @@ chk(BR["/api/plan#raise_in_lock"]["status"] == 500 and BR["/api/plan#raise_in_lo
 chk(BR["combo#fallback_send_fail"]["status"] is None and ["log", "DEBUG", "%s %s 상대가 끊음: %s"] in BR["combo#fallback_send_fail"]["events"],
     "P4 연결 끊김 = _gone_or_500 의 '상대가 끊음'", BR["combo#fallback_send_fail"])
 chk(BR["/api/plan#mats_wait"]["status"] == 503 and not BR["/api/plan#mats_wait"]["entered"], "P4 계산 재료 준비 전 = 503 · 진입 안 함")
-chk(all(BR[r + "#big"]["status"] == 413 for r in RT), "P4 1MiB+1 = 413(37 경로)")
+chk(all(BR[r + "#big"]["status"] == 413 for r in RT), "P4 1MiB+1 = 413(38 경로)")
 
 p4b = subprocess.run([sys.executable, "-I", os.path.join(TOOLS, "post_ab.py"), "run", "--base", T.ROOT, "--work", T.ROOT, "--scratch", SCR,
                       "--routes", "/api/fallback_avg"], capture_output=True, text=True, timeout=600)

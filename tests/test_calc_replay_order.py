@@ -267,4 +267,46 @@ c.commit()
 chk(web.StateBuilder._ord_key(c, next(r for r in rows6 if r["source_id"] == TX6["a_sell"])) == ("c", "base", 900, None, None),
     "O6 스냅샷이 깨져도 블록 번호까지는(순번 모름)")
 c.close()
+
+DB7 = os.path.join(T.TMP, "state", "ledger_order7.db")
+c = dbm.open_db(DB7)
+c.executemany("INSERT INTO asset_groups (group_id, name) VALUES (?, ?)", [(1, "USDC"), (2, "SSS#2"), (3, "TTT#3")])
+c.executemany("INSERT INTO assets (asset_id, kind, chain, address, symbol, decimals, group_id) VALUES (?,?,?,?,?,?,?)", [
+    (1, "token", "sol", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC", 6, 1), (2, "token", "sol", "S" * 44, "SSS", 18, 2),
+    (3, "token", "sol", "T" * 44, "TTT", 18, 3)])
+SEQ.clear()
+WS = "wallet:sol:" + "W" * 44
+
+
+def swap7(sig, t, aid, qty, buy):
+    q9 = qty if buy else -qty
+    post("chain_tx", "sol", sig, t, 1, WS, -q9, "disp" if buy else "acq", "SWAP")
+    post("chain_tx", "sol", sig, t, aid, WS, q9, "acq" if buy else "disp", "SWAP")
+
+
+post("opening", "sol", "recon:sol:usdc", T0 - 999, 1, WS, 10 ** 6, "opening", "OPENING")
+post("chain_tx", "sol", "2" * 88, T0 - 500, 2, WS, 1000, "acq", "TRANSFER_IN")
+post("chain_tx", "sol", "3" * 88, T0 - 500, 3, WS, 1000, "acq", "TRANSFER_IN")
+TX7 = {"s_buy": "4" + "a" * 87, "s_sell": "5" + "a" * 87, "t_buy": "4" + "b" * 87, "t_sell": "5" + "b" * 87}
+swap7(TX7["s_buy"], T0, 2, 1000, True)
+swap7(TX7["s_sell"], T0, 2, 1000, False)
+swap7(TX7["t_buy"], T0 + 10, 3, 1000, True)
+swap7(TX7["t_sell"], T0 + 10, 3, 1000, False)
+for tx9, t9, sl9, ix9 in ((TX7["s_buy"], T0, 777, 7), (TX7["s_sell"], T0, 777, 3), (TX7["t_buy"], T0 + 10, 802, 5), (TX7["t_sell"], T0 + 10, 802, None)):
+    rec9 = {"v": 1, "kind": "sol_tx", "chain": "sol", "txhash": tx9, "slot": sl9, "ts": t9, "deltas": []}
+    if ix9 is not None:
+        rec9["slot_idx"] = ix9
+    c.execute("INSERT INTO raw_txs (chain, txhash, block, ts, snapshot, wallets, ingested_at) VALUES ('sol', ?, ?, ?, ?, '[]', 0)", (tx9, sl9, t9, json.dumps(rec9)))
+c.commit()
+sb7 = web.StateBuilder.__new__(web.StateBuilder)
+rows7 = web.StateBuilder._load(sb7, c)
+k70 = [(r["source_ns"], r["source_id"]) for r in rows7]
+chk(k70.index(("sol", TX7["s_buy"])) < k70.index(("sol", TX7["s_sell"])), "O7 (전제) 종전 정렬 = 서명 글자 순 매수 먼저", k70)
+chk(web.StateBuilder._ord_key(c, next(r for r in rows7 if r["source_id"] == TX7["s_sell"])) == ("c", "sol", 777, 3, None)
+    and web.StateBuilder._ord_key(c, next(r for r in rows7 if r["source_id"] == TX7["t_sell"])) == ("c", "sol", 802, None, None),
+    "O7 키 = (sol, 슬롯, slot_idx) · slot_idx 없으면 슬롯까지")
+k7 = [(r["source_ns"], r["source_id"]) for r in web.StateBuilder._replay_order(sb7, c, rows7)]
+chk(k7.index(("sol", TX7["s_sell"])) < k7.index(("sol", TX7["s_buy"])), "O7 같은 슬롯 slot_idx 매도 3 < 매수 7 → 보유 충분해도 매도 먼저", k7)
+chk(k7.index(("sol", TX7["t_buy"])) < k7.index(("sol", TX7["t_sell"])), "O7 한쪽만 slot_idx = 모름 → 종전(보유 충분 = 서명 순)", k7)
+c.close()
 T.finish()

@@ -22,6 +22,7 @@ json.dump(CFG, open(os.path.join(T.TMP, "config.json"), "w"))
 import config, paths  # noqa: E402
 import core  # noqa: E402
 import autofix as AF  # noqa: E402
+import db as dbm  # noqa: E402
 import autofix_apply as AP  # noqa: E402
 import ledger_lock  # noqa: E402
 import recon_adj  # noqa: E402
@@ -116,16 +117,16 @@ T.chk(rc == 1 and "원장 작성자 잠금" in out and dump() == s0 and not pre_
 rc, out = tool("--kind", "autofix_ws", "--apply", "--backup-now", "--allow-big", pm2="pm2_core_on")
 T.chk(rc == 1 and "tj-core" in out and dump() == s0 and not pre_files(), "G2 pm2 에 tj-core online = --apply 거부(원장 무변)", out[-400:])
 
-c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('data_rev', '3')")
+c.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('data_rev', ?)", (str(dbm.DATA_REV + 1),))
 c.conn.commit()
 s3 = dump()
 got = {}
 for args in (("--kind", "autofix_ws", "--apply", "--backup-now", "--allow-big"), ("--undo-autofix", "okx:QQQ", "--apply"), ("--autofix-on", "okx:QQQ", "--apply"),
              ("--ack-autofix", "okx:QQQ", "--apply"), ("--data-rev-down", "1", "--apply")):
     rc, out = tool(*args)
-    got[args[0]] = (rc, "원장 개정 3 > 코드 2" in out and "세대 펜스" in out)
+    got[args[0]] = (rc, f"원장 개정 {dbm.DATA_REV + 1} > 코드 {dbm.DATA_REV}" in out and "세대 펜스" in out)
 T.chk(got == {"--kind": (1, True), "--undo-autofix": (4, True), "--autofix-on": (4, True), "--ack-autofix": (4, True), "--data-rev-down": (4, True)}
-      and dump() == s3 and not pre_files(), "G3 원장 data_rev 3 = 모든 쓰기 경로 거부(세대 펜스 · 원장 무변 · 사본 안 만듦)", got)
+      and dump() == s3 and not pre_files(), "G3 원장 data_rev = 코드 + 1 = 모든 쓰기 경로 거부(세대 펜스 · 원장 무변 · 사본 안 만듦)", got)
 rc, out = tool("--kind", "autofix_ws")
 T.chk(rc == 0 and "큰 칸 1" in out, "G3 점검(읽기만)은 그대로 됨", out[-300:])
 c.conn.execute("DELETE FROM meta WHERE k='data_rev'")

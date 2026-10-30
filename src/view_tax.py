@@ -39,6 +39,9 @@ def _tax_fee_merge(rows):
                    "rateSrc": srcs9.pop() if len(srcs9) == 1 else "mix", "n": len(rs9), "_qty": qa, "_acq": aa, "_disp": da, "_fee": fa})
         ak9 = sum(float(r.get("_akr", r.get("akr"))) if r.get("_akr", r.get("akr")) is not None else v9(r, "acq") * float(r.get("rate") or 0) for r in rs9)
         m9["_akr"], m9["akr"] = ak9, round(ak9)
+        kd_part = sum(float(r.get("_kd", r.get("kd")) or 0) for r in rs9)
+        if kd_part:
+            m9["_kd"], m9["kd"] = kd_part, round(kd_part)
         out[pos9] = m9
     return out
 
@@ -64,8 +67,9 @@ def _tax_summary(rows, today, rkd=None):
         rt = float(r.get("rate") or 0)
         ak9 = r.get("_akr", r.get("akr"))
         if r.get("_akm") and ak9 is not None:
-            a[5] += disp9 * rt - float(ak9) - fee9 * rt
-            a[6] += float(ak9)
+            kd_part = float(r.get("_kd", r.get("kd")) or 0)
+            a[5] += disp9 * rt - (float(ak9) - kd_part) - fee9 * rt
+            a[6] += float(ak9) - kd_part
         else:
             a[5] += (disp9 - acq9 - fee9) * rt
             a[6] += acq9 * rt
@@ -92,7 +96,7 @@ def krw_sum_gap(rows: list, rkd: dict) -> tuple:
         rate = float(r.get("rate") or 0)
         akr = r.get("_akr", r.get("akr"))
         if r.get("_akm") and akr is not None:
-            total += disp * rate - float(akr) - fee * rate
+            total += disp * rate - (float(akr) - float(r.get("_kd", r.get("kd")) or 0)) - fee * rate
             factor_sum += abs(disp - fee)
         else:
             total += (disp - acq - fee) * rate

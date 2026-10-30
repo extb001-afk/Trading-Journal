@@ -6,7 +6,9 @@ import _harness as T  # noqa: E402
 import _ingest  # noqa: E402
 from _ingest import check, W, Writer, Reader  # noqa: E402
 
+import contextlib  # noqa: E402
 import copy  # noqa: E402
+import io  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import time  # noqa: E402
@@ -96,6 +98,8 @@ BUY1, SELL1 = H(0xFF), H(0x01)
 SELL2, BUY2 = H(0xFE), H(0x10)
 B1, B2 = 43302, 43400
 T2 = T0 + 3600
+T5, B5 = T0 + 10800, 43800
+TKC = "0x" + "b4" * 20
 fixture(FUND, 100, T0 - 86404, 0, [(USDC, POOL, W, 10000, 6)], 0, fr=POOL, value=10 ** 18)
 fixture(OLD1, 102, T0 - 86400, 0, [(USDC, W, POOL, 100, 6), (TKA, POOL, W, 100, 18)], 0)
 fixture(OLD2, 103, T0 - 86300, 0, [(USDC, W, POOL, 100, 6), (TKB, POOL, W, 100, 18)], 1)
@@ -132,7 +136,7 @@ def build():
     con = dbm.open_db(paths.DB_PATH, readonly=True)
     try:
         rows = b._replay_order(con, b._load(con))
-        order = {t9: list(dict.fromkeys(r["source_id"] for r in rows if r["event_ts"] == t9)) for t9 in (T0, T2)}
+        order = {t9: list(dict.fromkeys(r["source_id"] for r in rows if r["event_ts"] == t9)) for t9 in (T0, T2, T5)}
         f = b._build(con)["fields"]
     finally:
         con.close()
@@ -142,7 +146,7 @@ def build():
         p9 = [p for p in ps if p.get("sym") == sym]
         return {"realized": round(sum(p["realized"] for p in p9), 6), "held": round(sum(p["held"] for p in p9), 6),
                 "basis": round(sum(p["held"] * p["avg"] for p in p9), 6), "cycles": len(p9)}
-    return {"order": order, "TKA": summ("TKA"), "TKB": summ("TKB")}
+    return {"order": order, "TKA": summ("TKA"), "TKB": summ("TKB"), "TKC": summ("TKC")}
 
 
 def ledger(cn):
@@ -187,6 +191,47 @@ st3 = json.loads(c2.conn.execute("SELECT snapshot FROM raw_txs WHERE chain='base
 check("E4 옛 저장본 + 순번 있는 새 수집본 = 원장·원본 무변(재기장·승격 없음 · 자동 수리 없음)", ledger(c2.conn) == led3)
 check("E4 저장본은 옛 원본 그대로(순번 키 없음)", "position" not in st3["tx"] and all("log_index" not in t9 for t9 in st3["token_transfers"]),
       st3["tx"])
+
+import _rpcfake as R  # noqa: E402
+import bf_engine  # noqa: E402
+sys.path.insert(0, os.path.join(T.ROOT, "tools"))
+import evm_txpos_fill as F  # noqa: E402
+
+OLD5, BUY5, SELL5 = H(0x55), H(0xFD), H(0x0B)
+fixture(OLD5, 104, T0 - 86200, 0, [(USDC, W, POOL, 100, 6), (TKC, POOL, W, 100, 18)], 6)
+fixture(BUY5, B5, T5, 0, [(USDC, W, POOL, 300, 6), (TKC, POOL, W, 100, 18)], 7)
+fixture(SELL5, B5, T5, 1, [(TKC, W, POOL, 100, 18), (USDC, POOL, W, 400, 6)], 8)
+wr5, recs5 = mk_rpc(RAW), []
+for h in (OLD5, BUY5, SELL5):
+    s5 = wr5._rpc_synth_detail(h)
+    s5["tx"].pop("position", None)
+    for t9 in s5["token_transfers"]:
+        t9.pop("log_index", None)
+    recs5.append(dict(rec, txhash=h, snapshot=s5, observed_head=B5 + 20))
+c2._drain_stream("evm", Reader(recs5), 0, 0)
+c2.conn.execute("UPDATE assets SET symbol='TKC' WHERE address=?", (TKC,))
+c2.conn.commit()
+for h in (OLD5, BUY5, SELL5):
+    c2.svc_price._price_tx("base", h)
+c2.conn.commit()
+r5a = build()
+check("E5 (전제) 옛 저장본 = 해시 순 재생(매도 → 매수) · 실현 $300 · 남은 원가 $300 · 주기 2",
+      r5a["order"][T5] == [SELL5, BUY5] and r5a["TKC"] == {"realized": 300, "held": 100, "basis": 300, "cycles": 2}, r5a)
+node = R.Node(lambda m, p: {"number": hex(B5), "hash": H(B5 + 1000000), "transactions": [H(0x77), BUY5, SELL5]} if m == "eth_getBlockByNumber" else None)
+R.loop_open(bf_engine, T)
+_cfg["chains"]["base"]["rpcs"] = [node.url]
+json.dump(_cfg, open(os.environ["TJ_CONFIG"], "w"))
+led5 = ledger(c2.conn)
+with contextlib.redirect_stdout(io.StringIO()):
+    rc5 = (F.main(["--fetch"]), F.main(["--apply"]))
+pos5 = {h: json.loads(c2.conn.execute("SELECT snapshot FROM raw_txs WHERE txhash=?", (h,)).fetchone()[0])["tx"].get("position") for h in (BUY5, SELL5)}
+node.close()
+r5b = build()
+check("E5 도구 = 블록 목록 1콜 · 원본 순번 = 목록 자리 · 원장 행 무변", rc5 == (0, 0) and len(node.calls) == 1 and pos5 == {BUY5: 1, SELL5: 2}
+      and ledger(c2.conn)[0] == led5[0], (rc5, node.calls, pos5))
+check("E5 ★적용 뒤 재생 = 매수 → 매도 · 실현 $200 · 남은 100개 원가 $200 · 주기 1(E1 과 같음)★",
+      r5b["order"][T5] == [BUY5, SELL5] and r5b["TKC"] == {"realized": 200, "held": 100, "basis": 200, "cycles": 1}, r5b)
+check("E5 다른 블록(E1·E2 순번 있음) 결과 무변", (r5b["TKA"], r5b["TKB"]) == (r1["TKA"], r1["TKB"]), (r1, r5b))
 c2.conn.close()
 
 UB = 50000

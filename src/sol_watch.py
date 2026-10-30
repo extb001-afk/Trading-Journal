@@ -54,6 +54,9 @@ LIVE_FIRST_HOURS = 24.0
 LIVE_FIRST_N = 100
 OLD_SLICE_SEC = 60.0
 
+SLOT_IDX_MAX_PER_CYCLE = 4
+SLOT_IDX_MEMO = 64
+
 HEAD_AUDIT_PAGES = 5
 HEAD_AUDIT_TRIP_SEC = 6 * 3600.0
 
@@ -1036,6 +1039,8 @@ class SolWatcher(StakeMixin):
         head_sigs9 = {r["signature"] for a9, rows9 in addr_sigs.items() if a9 not in fb_set for r in rows9}
         bt_of = {r["signature"]: r.get("blockTime") for r in ordered}
         fb_sigs9 = {r["signature"] for a9, rows9 in addr_sigs.items() if a9 in fb_set for r in rows9} - head_sigs9
+        slot_idx_of = _slot_index_map(self.rpc, [r for r in live_rows9 if r["signature"] in head_sigs9], hint9, win=win9, only=set(todo) - self.emitted,
+                                      memo=self.__dict__.setdefault("_slot_idx_memo", {}))
         pre = {}
         pos = 0
         n_done = 0
@@ -1087,6 +1092,8 @@ class SolWatcher(StakeMixin):
                 break
             if sig in re_sigs:
                 rec["repersp"] = True
+            if sig in slot_idx_of:
+                rec["slot_idx"] = slot_idx_of[sig]
             try:
                 self.writer.append(rec)
                 self.emitted.add(sig)
@@ -1541,6 +1548,42 @@ class SolWatcher(StakeMixin):
             hb.fail("sol", RuntimeError("; ".join(f"{a}: {e}" for a, e in fail_list[:3]) or
                                         ("tx 파싱/방출 실패" if not done_ok else "부분 조회")), "sol_rpc", **facts)
         hb.flush()
+
+
+def _slot_index_map(rpc, rows: list, hint=None, cap: int = SLOT_IDX_MAX_PER_CYCLE, win: float = 0.0, only=None, memo=None) -> dict:
+    by_slot = {}
+    for r in rows:
+        slot = r.get("slot")
+        if (only is None or r["signature"] in only) and isinstance(slot, int) and not isinstance(slot, bool):
+            by_slot.setdefault(slot, {})[r["signature"]] = r.get("blockTime")
+    out, asked, now = {}, 0, time.time()
+    for slot in sorted(by_slot):
+        bts = by_slot[slot]
+        if len(bts) < 2 or (win > 0 and not all(isinstance(bt, int) and now - bt <= win for bt in bts.values())):
+            continue
+        hit = memo.get(slot) if memo is not None else None
+        if hit is not None and all(s in hit for s in bts):
+            out.update({s: hit[s] for s in bts})
+            continue
+        if asked >= cap:
+            break
+        asked += 1
+        try:
+            with hint(pn_tx=True) if callable(hint) else contextlib.nullcontext():
+                blk = rpc.call("getBlock", [slot, {"transactionDetails": "signatures", "rewards": False, "commitment": "finalized",
+                                                   "maxSupportedTransactionVersion": SolWatcher.TX_OPTS["maxSupportedTransactionVersion"]}])
+            sigs = blk.get("signatures") if isinstance(blk, dict) else None
+            pos = {s: i for i, s in enumerate(sigs)} if isinstance(sigs, list) else {}
+        except Exception as e:   # noqa: BLE001 [isolate]
+            log.debug("슬롯 %s 블록 순서 조회 실패(순서 키 없이 방출): %s", slot, str(e)[:120])
+            continue
+        got = {s: pos[s] for s in bts if s in pos}
+        out.update(got)
+        if memo is not None:
+            memo[slot] = got
+            while len(memo) > SLOT_IDX_MEMO:
+                memo.pop(next(iter(memo)))
+    return out
 
 
 def sol_sig_poison(w: "SolWatcher", sig: str, rec: object, repersp: bool = False) -> bool:

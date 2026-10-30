@@ -110,6 +110,7 @@ class SolTx(_Rec):
     lp: Any = None
     repersp: Any = None
     ts_fix: Any = None
+    slot_idx: Any = None
     extra: Dict[str, Any] = field(default_factory=dict)
     _order: Tuple[str, ...] = ()
 

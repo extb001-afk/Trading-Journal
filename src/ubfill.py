@@ -45,6 +45,10 @@ def booked(conn, uuids, ts_of=None) -> dict:
         part = us[i:i + 400]
         rows = conn.execute("SELECT uuid, revision, payload FROM raw_ex WHERE exchange='upbit' AND kind='order' AND uuid IN (%s)"
                             " ORDER BY uuid, revision" % ",".join("?" * len(part)), part).fetchall()
+        legs = {}
+        for uid, at, leg_krw, event in conn.execute("SELECT source_id, event_ts, cost_krw, event FROM postings WHERE source_kind='exchange'"
+                                                    " AND source_ns='upbit:order' AND source_id IN (%s)" % ",".join("?" * len(part)), part):
+            legs.setdefault(str(uid), []).append((int(at), _dec(leg_krw), event))
         for r in rows:
             try:
                 pl = json.loads(r[2])
@@ -57,6 +61,9 @@ def booked(conn, uuids, ts_of=None) -> dict:
                 except Exception as _cg9:   # noqa: BLE001 [fallback]
                     calcguard.swallowed("ubfill:booked", _cg9)
                     f["ts"] = None
+            parts = legs.get(str(r[0])) or []
+            if f is not None and f["quote"] == "KRW" and len(parts) > 1 and all(p[1] is not None for p in parts):
+                f["parts"] = [(at, leg_krw if event == "EX_SELL" else -leg_krw) for at, leg_krw, event in parts]
             out[str(r[0])] = f if f is not None else False
     return out
 
@@ -93,7 +100,9 @@ def deltas(open_orders, booked_map, snap_ts=None) -> dict | None:
         if f["quote"] == "KRW":
             kl = (f["funds"] - f["fee"]) if f["side"] == "ask" else -(f["funds"] + f["fee"])
             bt = b.get("ts")
-            if b.get("uuid") and bt is not None and snap_ts is not None and int(bt) <= int(snap_ts):
+            if b.get("uuid") and b.get("parts") and snap_ts is not None:
+                kl -= sum((p[1] for p in b["parts"] if int(p[0]) <= int(snap_ts)), ZERO)
+            elif b.get("uuid") and bt is not None and snap_ts is not None and int(bt) <= int(snap_ts):
                 kl -= (b["funds"] - b["fee"]) if b["side"] == "ask" else -(b["funds"] + b["fee"])
             krw[f["base"]] = krw.get(f["base"], ZERO) + kl
             if kl:

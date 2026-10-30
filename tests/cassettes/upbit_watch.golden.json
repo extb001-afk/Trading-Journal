@@ -1,0 +1,157 @@
+{
+ "_doc": "합성 데이터 — upbit_watch 카세트로 수집기를 돌린 결과(inbox 레코드·state·커서). 차이 = 동작 변화",
+ "version": 1,
+ "name": "upbit_watch",
+ "golden": {
+  "inbox/ex/000000001.jsonl": [
+   {
+    "deposits": [],
+    "exchange": "upbit",
+    "kind": "ex_snapshot",
+    "ts": 1760000000,
+    "v": 1,
+    "withdraws": []
+   },
+   {
+    "deposits": [],
+    "exchange": "upbit",
+    "kind": "ex_snapshot",
+    "ts": 1760000002,
+    "v": 1,
+    "withdraws": []
+   },
+   {
+    "deposits": [],
+    "exchange": "upbit",
+    "kind": "ex_snapshot",
+    "ts": 1760000003,
+    "v": 1,
+    "withdraws": []
+   },
+   {
+    "deposits": [],
+    "exchange": "upbit",
+    "kind": "ex_snapshot",
+    "ts": 1760000004,
+    "v": 1,
+    "withdraws": []
+   },
+   {
+    "deposits": [],
+    "exchange": "upbit",
+    "kind": "ex_snapshot",
+    "ts": 1760000006,
+    "v": 1,
+    "withdraws": []
+   },
+   {
+    "exchange": "upbit",
+    "kind": "ex_fills",
+    "orders": [
+     {
+      "created_at": "2025-09-29T17:53:20+09:00",
+      "executed_funds": "15000.0",
+      "executed_volume": "5.0",
+      "market": "KRW-TSTA",
+      "ord_type": "limit",
+      "paid_fee": "7.5",
+      "price": "3000.0",
+      "remaining_volume": "0.0",
+      "side": "ask",
+      "state": "done",
+      "trades": [
+       {
+        "created_at": "2025-10-09T17:23:20+09:00",
+        "funds": "15000.0",
+        "market": "KRW-TSTA",
+        "price": "3000.0",
+        "side": "ask",
+        "uuid": "trd-w001",
+        "volume": "5.0"
+       }
+      ],
+      "trades_count": 1,
+      "uuid": "ord-watch-1",
+      "volume": "5.0"
+     }
+    ],
+    "ts": 1760000006,
+    "v": 1
+   }
+  ],
+  "upbit_balances.json": {
+   "accounts": [
+    {
+     "avg_buy_price": "0",
+     "avg_buy_price_modified": false,
+     "balance": "1000000.0",
+     "currency": "KRW",
+     "locked": "27000.0",
+     "unit_currency": "KRW"
+    },
+    {
+     "avg_buy_price": "2650.0",
+     "avg_buy_price_modified": false,
+     "balance": "10.0",
+     "currency": "TSTA",
+     "locked": "10.0",
+     "unit_currency": "KRW"
+    }
+   ],
+   "open_orders": [
+    {
+     "created_at": "2025-10-09T17:43:20+09:00",
+     "executed_volume": "0.0",
+     "market": "KRW-TSTA",
+     "ord_type": "limit",
+     "price": "2700.0",
+     "remaining_volume": "10.0",
+     "side": "bid",
+     "state": "wait",
+     "trades_count": 0,
+     "uuid": "ord-wait-1",
+     "volume": "10.0"
+    }
+   ],
+   "ts": 1760000005
+  },
+  "upbit_orders_state.json": {
+   "backfilled_until": 1759481600.8000002,
+   "complete": true,
+   "open_track": {
+    "ord-wait-1": {
+     "c": "2025-10-09T17:43:20+09:00",
+     "m": "KRW-TSTA"
+    },
+    "ord-watch-2": {
+     "c": "2025-09-30T17:53:20+09:00",
+     "m": "KRW-TSTA",
+     "w": 1
+    },
+    "ord-watch-3": {
+     "c": "2025-10-01T17:53:20+09:00",
+     "m": "KRW-TSTA",
+     "w": 1
+    }
+   },
+   "resweep_i": 1,
+   "track_pending": 0,
+   "uuids": [
+    "ord-watch-1"
+   ]
+  },
+  "upbit_sync.json": {
+   "complete": true,
+   "last_err": {
+    "kind": "open",
+    "msg": "미체결 주문 조회 실패 — 오래 걸린 체결 추적 보류(다음 주기 재시도)",
+    "ts": 1760000005
+   },
+   "last_ok": 1760000006,
+   "pending_since": null,
+   "track_pending": 0,
+   "ts": 1760000006,
+   "v": 1
+  }
+ }
+}

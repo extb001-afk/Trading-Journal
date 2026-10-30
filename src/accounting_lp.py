@@ -253,9 +253,9 @@ class LpBook:
             b9["acq"][gx["sym"]] = b9["acq"].get(gx["sym"], Decimal(0)) + qx
             if no_dep:
                 if gx["is_stable"]:
-                    lpx.cb.acquire(gx, qx, qx)
+                    lpx.cb.acquire(gx, qx, qx, ts=ts9, src=x["posting_id"])
                 else:
-                    lpx.cb.add_unknown(gx, qx)
+                    lpx.cb.acquire(gx, u=qx, ts=ts9, src=x["posting_id"])
                     cr9 = lpx.px.cpx.cur_row[0]
                     lpx.px.cpx.cur_row[0] = x
                     try:
@@ -270,9 +270,9 @@ class LpBook:
             c = cost_of.get(x["posting_id"], Decimal(0))
             kq = qx * k9 if disp9 else qx
             uq = qx - kq
-            lpx.cb.acquire(gx, kq, c)
+            lpx.cb.acquire(gx, kq, c, ts=ts9, src=x["posting_id"])
             if uq > EPS:
-                lpx.cb.add_unknown(gx, uq)
+                lpx.cb.acquire(gx, u=uq, ts=ts9, src=x["posting_id"])
                 lpx.px.unx.note_unk(gx, ts9, f"LP 전환 취득 · 원가미상 원금분 · {accounting_util.lp_label(b9)}", uq, txh9, chain9=chain9, fs9=0)
             flow["bought"] += qx; flow["cost"] += c
             if disp9 and not gx["is_stable"] and B > 0:

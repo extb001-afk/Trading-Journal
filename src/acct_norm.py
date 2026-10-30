@@ -8,6 +8,8 @@ import time
 from datetime import datetime
 
 import num_parse
+import timeutil
+from decimal import ROUND_DOWN, Decimal, localcontext
 from timeutil import KST, KST_OFFSET_S
 log = logging.getLogger("tj-web")
 DEFAULT_KRW_USD = 1384.0
@@ -246,6 +248,18 @@ class FxBook:
         return pts[best[1]] if best else None
 
 
+def _trade_ts(t: dict):
+    v = t.get("created_at") or t.get("timestamp") or t.get("trade_time")
+    try:
+        if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
+            return float(v) / (1000.0 if float(v) > 1e11 else 1.0)
+        if v:
+            return timeutil.iso_epoch(v)
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def fill_ts(order: dict):
     tr = (order or {}).get("trades") if isinstance(order, dict) else None
     if not isinstance(tr, list) or not tr:
@@ -254,19 +268,79 @@ def fill_ts(order: dict):
     for t in tr:
         if not isinstance(t, dict):
             continue
-        v = t.get("created_at") or t.get("timestamp") or t.get("trade_time")
-        ts = None
-        try:
-            if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
-                ts = float(v) / (1000.0 if float(v) > 1e11 else 1.0)
-            elif v:
-                import timeutil
-                ts = timeutil.iso_epoch(v)
-        except (TypeError, ValueError):
-            ts = None
+        ts = _trade_ts(t)
         if ts and (best is None or ts > best):
             best = ts
     return int(best) if best else None
+
+
+def _fill_rows(order: dict, side: str):
+    trades = order.get("trades")
+    if not isinstance(trades, list) or not trades or not all(isinstance(t, dict) for t in trades):
+        return None, "체결 목록 없음"
+    market = str(order.get("market") or "").upper()
+    seen, rows = {}, []
+    for t in trades:
+        vol, funds, at = _dec(t.get("volume")), _dec(t.get("funds")), _trade_ts(t)
+        if vol is None or funds is None or vol <= 0 or funds <= 0 or not at:
+            return None, "체결 행 읽기 실패"
+        if str(t.get("side") or side).lower() != side or str(t.get("market") or market).upper() != market:
+            return None, "체결 행 side·market 다름"
+        tid = str(t.get("uuid") or "")
+        if tid:
+            body = json.dumps(t, sort_keys=True, ensure_ascii=False, default=str)
+            if tid in seen:
+                if seen[tid] != body:
+                    return None, "같은 체결 uuid 다른 내용"
+                continue
+            seen[tid] = body
+        rows.append((int(at), vol, funds))
+    return rows, None
+
+
+FILL_FEE_Q = "1e-8"
+
+
+def fill_groups(order: dict):
+    if not isinstance(order, dict):
+        return None, "형식"
+    side = str(order.get("side") or "").lower()
+    if side not in ("bid", "ask"):
+        return None, "side 미상"
+    with localcontext() as ctx:
+        ctx.prec = 80
+        rows, why = _fill_rows(order, side)
+        if rows is None:
+            return None, why
+        ev, ef = _dec(order.get("executed_volume")), order.get("executed_funds")
+        total = _dec(ef) if ef not in (None, "") else None
+        if ev is None or sum((r[1] for r in rows), Decimal(0)) != ev:
+            return None, "체결 수량 합 다름"
+        if total is None or sum((r[2] for r in rows), Decimal(0)) != total:
+            return None, "체결 금액 합 다름(또는 주문 체결 금액 없음)"
+        if order.get("trades_count") is not None and str(order.get("trades_count")).strip() != str(len(rows)):
+            return None, "체결 수 다름"
+        pf = order.get("paid_fee")
+        fee = Decimal(0) if pf in (None, "") else _dec(pf)
+        if fee is None or fee < 0:
+            return None, "수수료 읽기 실패"
+        exp = fee.as_tuple().exponent if pf not in (None, "") else 0
+        unit = Decimal(1).scaleb(exp) if isinstance(exp, int) and exp < 0 else Decimal(FILL_FEE_Q)
+        by_sec = {}
+        for sec, vol, funds in rows:
+            g = by_sec.setdefault(sec, {"ts": sec, "vol": Decimal(0), "funds": Decimal(0), "n": 0})
+            g["vol"] += vol
+            g["funds"] += funds
+            g["n"] += 1
+        groups = [by_sec[sec] for sec in sorted(by_sec)]
+        left = fee
+        for i, g in enumerate(groups):
+            g["fee"] = fee if fee == 0 else left if i == len(groups) - 1 else (fee * g["funds"] / total).quantize(unit, rounding=ROUND_DOWN)
+            left -= g["fee"]
+            g["net"] = g["funds"] - g["fee"] if side == "ask" else g["funds"] + g["fee"]
+            if g["net"] <= 0:
+                return None, "매도 순대금 0 이하"
+    return groups, None
 
 
 UPBIT_TERMINAL = ("done", "cancel")

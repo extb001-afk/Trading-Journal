@@ -175,7 +175,7 @@ def export(ld: dict, title: str = "tj-bot") -> tuple:
     st = defaultdict(int)
     by_src, order = defaultdict(list), []
     for p in ld["postings"]:
-        k = (p[1], p[2], p[3])
+        k = (p[1], p[2], p[3], p[5] if p[1] == "exchange" and p[2] == "upbit:order" else None)
         if k not in by_src:
             order.append(k)
         by_src[k].append(p)
@@ -248,7 +248,7 @@ def export(ld: dict, title: str = "tj-bot") -> tuple:
         absorber = None
         if w != 0:
             absorber = PNL if sale else RECON if ev & ADJ_EVENTS else OPENING if "OPENING" in ev or any(p[10] == "opening" for p in legs) else OTHER
-        meta = {"src": "%s/%s/%s" % k}
+        meta = {"src": "%s/%s/%s" % k[:3]}
         if ev & ADJ_EVENTS:
             meta["why"] = ",".join(sorted(ev & ADJ_EVENTS))
         txs.append((day, sorted(ev), meta, lines, explicit, absorber))

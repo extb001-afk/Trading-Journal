@@ -1474,6 +1474,7 @@
     D.costDecided = arr(f.costDecidedRows);
     D.fallbackOn = !!f.fallbackOn;
     D.firstSeen = f.firstSeen && typeof f.firstSeen === 'object' && !Array.isArray(f.firstSeen) ? f.firstSeen : null;
+    D.krDeemed = f.krDeemed && typeof f.krDeemed === 'object' && !Array.isArray(f.krDeemed) ? f.krDeemed : null;
     D.fsRbd = f.fsRealByDate && typeof f.fsRealByDate === 'object' && !Array.isArray(f.fsRealByDate) ? f.fsRealByDate : {};
     const oc0 = f.offchainSelf && typeof f.offchainSelf === 'object' ? f.offchainSelf : {};
     D.offc = Object.keys(oc0).map(ex => { const o = oc0[ex] && typeof oc0[ex] === 'object' ? oc0[ex] : {};
@@ -2011,7 +2012,8 @@
     }
   }
   const OPT = { n: 0, list: [] };
-  const OPT_ANY = new Set(['/api/cost_override', '/api/risk_override', '/api/genuine_token', '/api/fallback_avg', '/api/first_seen_px', '/api/gas_in_cost', '/api/offchain_self', '/api/dust_threshold',
+  const KD_AT0 = '2028-12-31', KD_AT_MIN = '2026-01-01', KD_AT_MAX = '2099-12-31';
+  const OPT_ANY = new Set(['/api/cost_override', '/api/risk_override', '/api/genuine_token', '/api/fallback_avg', '/api/first_seen_px', '/api/kr_deemed', '/api/gas_in_cost', '/api/offchain_self', '/api/dust_threshold',
     '/api/src_whitelist', '/api/wd_dest_register', '/api/flow_register', '/api/review_len', '/api/review_pause', '/api/review_fill']);
   const ofRaw = a => { const f = S.data && S.data.fields; return f ? arr(f.outflows).find(r => r && r.address === a) || null : null; };
   const ofAuto = () => { if (RLW.known) return RLW.auto; const f = S.data && S.data.fields; if (f && f.walletAuto) return true; try { const st = suSt(); return !!(st && st.apply && st.apply.runner); } catch (e) { return false; } };
@@ -3378,6 +3380,18 @@
         bodyHtml: '<span class="mono">' + esc(short(a)) + '</span><br><br>' + (excl ? '이 주소로 간 출금은 가정에서 빠져 받는 주소 미상 출금(원가 유출)으로 돌아가요. 돌아온 입금은 남은 다른 출금의 원가만 이어받아요.' : '이 주소로 간 출금 원가를 다시 돌아온 입금이 이어받아요(가정).'),
         run: () => post('/api/offchain_self', { ex, addr: a, excl }, excl ? '남의 주소로 뺐어요 · 다시 계산해요' : '되돌렸어요 · 다시 계산해요') }); },
     fsNoteX: () => { S.fsNoteX = true; renderChrome(); post('/api/first_seen_px', { note: true }, ''); },
+    krDeemed: () => {
+      const kd = S.D.krDeemed || {}, on = !kd.on, at = isISO(S.drafts.kdAt) ? S.drafts.kdAt : (kd.at || KD_AT0);
+      confirmAsk({ title: '한국 의제취득가액을 ' + (on ? '켤까요?' : '끌까요?'), ok: on ? '켜기' : '끄기',
+        body: on ? '기준일 ' + at + ' 23:59 에 갖고 있던 코인은 그때 시가와 실제 산 가격 중 높은 쪽을 세금 명세 원화 취득가액으로 봐요. '
+          + '달러 손익·머리·달력 원화 실현은 그대로예요.' : '세금 명세 원화 취득가액을 실제 산 가격(원화)으로 되돌려요.',
+        run: () => post('/api/kr_deemed', { on, at }, '한국 의제취득가액 ' + (on ? '켬' : '끔') + ' · 다시 계산해요') });
+    },
+    kdAtSave: () => {
+      const kd = S.D.krDeemed || {}, at = S.drafts.kdAt;
+      if (!isISO(at) || at < KD_AT_MIN || at > KD_AT_MAX) { toast('기준일은 ' + KD_AT_MIN + ' ~ ' + KD_AT_MAX + ' 사이 날짜로 골라요'); return; }
+      post('/api/kr_deemed', { on: !!kd.on, at }, '기준일 ' + at + ' 저장 · ' + (kd.on ? '다시 계산해요' : '켜면 이 날로 계산해요'));
+    },
     firstSeen: () => { const fs = S.D.firstSeen; if (!fs) return; const on = !fs.on; confirmAsk({ title: '최초 인식 시가를 ' + (on ? '켤까요?' : '끌까요?'), body: on ? '원가를 모르는 수량(기초 잔고·원가 없는 입금·에어드랍 등)의 원가를 그 수량이 장부에 처음 생긴 날 시가로 잡아 실현·명세에 넣어요(추정 표시). 그날 시세가 없으면 원가 미확인으로 남아요.' : '원가를 모르는 수량을 다시 원가 미확인으로 두고 실현에서 빼요(미매칭에서 직접 원가를 넣을 수 있어요).', ok: on ? '켜기' : '끄기', run: () => post('/api/first_seen_px', { on }, '최초 인식 시가 ' + (on ? '켬' : '끔') + ' · 다시 계산해요') }); },
     fallback: () => { const on = !S.D.fallbackOn; confirmAsk({ title: '평균가 대체를 ' + (on ? '켤까요?' : '끌까요?'), body: on ? '원가 없는 보유·매도를 종목 평균 매수가로 원가 처리해 평가·손익·실현에 반영해요.' : '원가 미확인 수량을 다시 손익 계산에서 빼요.', ok: on ? '켜기' : '끄기', run: () => post('/api/fallback_avg', { on }, '평균가 대체 ' + (on ? '켬' : '끔') + ' · 다시 계산해요') }); },
     aliasEdit: el => { S.aliasEdit = el.dataset.k; renderView(); const i = $('[data-alias]'); if (i) { i.focus(); i.select(); } },

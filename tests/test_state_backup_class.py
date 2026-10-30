@@ -39,7 +39,7 @@ CLASS = {
     "exf_redate_m.json": B,
     "exf_ident.json": B,
     "exf_snap_miss.json": TM, "exf_state.json": LG, "ext_rebuild_status.json": TM,
-    "first_seen_px.json": B, "flow_px_cache.json": F, "flow_trace_cache.json": F, "genuine_tokens.json": B,
+    "first_seen_px.json": B, "kr_deemed_px.json": B, "flow_px_cache.json": F, "flow_trace_cache.json": F, "genuine_tokens.json": B,
     "goplus_cache.json": F, "goplus_status.json": TM, "health": TM, "health_ack.json": TM, "health_eval.json": TM,
     "health_reload.json": TM, "health_status.json": TM, "hist_dirty.json": TM, "hl_cash_syms.json": F, "hl_late_stage.json": LG,
     "hl_neg_mark.json": F, "hl_spot_meta.json": F, "inflow_*.json": F, "intentional_restart.json": TM, "leverage.json": F,

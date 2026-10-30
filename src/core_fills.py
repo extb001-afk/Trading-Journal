@@ -3,8 +3,12 @@ import histmark, logs, timeutil
 import json
 import pricing
 import time
+import db as dbm
+import sqlite3
 from decimal import Decimal
 from decimal import InvalidOperation
+from decimal import localcontext
+from typing import Callable, Optional
 import logging
 import calcguard  # noqa: E402
 
@@ -20,7 +24,7 @@ class FillsMixin:
     def _fill_group_asset(self, base_sym: str, ts: int):
         return self._upbit_asset(base_sym)
 
-    def _consume_fills(self, rec: dict):
+    def _consume_fills(self, rec: dict, nosplit: bool = False):
         n = 0
         for o in rec.get("orders") or []:
             if not isinstance(o, dict) or not o.get("uuid"):
@@ -45,6 +49,15 @@ class FillsMixin:
             if side not in ("bid", "ask"):
                 self._ex_skip_once("EX_FILL_SKIP", str(o["uuid"]), f"주문 side 미상 보류: {market} {o.get('uuid')} side={side!r}")
                 continue
+            groups, why_split = acct_norm.fill_groups(o)
+            posted = None if nosplit or not groups or len(groups) < 2 else krw_split_post(
+                self.conn, o, self._fill_group_asset(base, groups[0]["ts"]), side, groups, self.px.fx_at, self._post_leg)
+            if posted is not None:
+                n += posted
+                if posted:
+                    self._split_rev_mark()
+                continue
+            split_warn(o, None if nosplit else why_split)
             ts = acct_norm.fill_ts(o) or self._iso_ts(o.get("created_at"))
             if not ts:
                 self._ex_skip_once("EX_FILL_SKIP", str(o["uuid"]), f"주문 시각 없음 보류: {market} {o.get('uuid')}")
@@ -84,15 +97,6 @@ class FillsMixin:
         n_ok = n_moved = n_skip = 0
         t_min = None
         why_n = {}
-
-        def legs(u9):
-            return self.conn.execute(
-                "SELECT leg_seq, asset_id, location, qty_base, leg_kind, event, event_ts, cost_usd FROM postings"
-                " WHERE source_kind='exchange' AND source_ns='upbit:order' AND source_id=?", (u9,)).fetchall()
-
-        def shape(rows):
-            return sorted((int(r["leg_seq"]), int(r["asset_id"]), str(r["location"]), str(int(r["qty_base"])), str(r["leg_kind"]), str(r["event"]))
-                          for r in rows)
         for it in rec.get("orders") or []:
             u = str((it or {}).get("uuid") or "") if isinstance(it, dict) else ""
             row = self.conn.execute("SELECT revision, payload, observed_at FROM raw_ex WHERE exchange='upbit' AND kind='order' AND uuid=?"
@@ -109,23 +113,13 @@ class FillsMixin:
                     log.warning("업비트 옛 주문 체결 목록 채우기 건너뜀 %s: %s", u[:12], why)
                 continue
             merged["_tj_trades_fill"] = {"at": int(rec.get("ts") or time.time()), "src": str(rec.get("src") or "")[:60]}
-            new_ts = acct_norm.fill_ts(merged)
             self.conn.execute("SAVEPOINT order_trades")
-            undo = None
             self.conn.execute("INSERT INTO raw_ex (exchange, kind, uuid, revision, payload, observed_at) VALUES ('upbit', 'order', ?, ?, ?, ?)",
                               (u, int(row["revision"]) + 1, json.dumps(merged, ensure_ascii=False), int(row["observed_at"])))
-            olds = legs(u)
-            if olds and any(int(o["event_ts"]) != new_ts for o in olds):
-                self._unpost_source("exchange", "upbit:order", u)
-                self._consume_fills({"orders": [merged]})
-                news = legs(u)
-                if shape(news) != shape(olds) or any(int(r9["event_ts"]) != new_ts for r9 in news):
-                    undo = "다시 만든 레그가 다름"
-                elif any(o["cost_usd"] is not None for o in olds) and any(r9["cost_usd"] is None for r9 in news):
-                    undo = "새 시각 원가 USD 미확보(이번 적용 중 환율·쿼트 시세를 못 받음 — 조회 실패 또는 실패 뒤 60초 쉼 동안의 주문 · 다음 --apply 때 다시)"
-                else:
-                    n_moved += 1
-                    t_min = min([t for t in [t_min, new_ts] + [int(o["event_ts"]) for o in olds] if t is not None])
+            state, undo, t_first = resplit_order(self.conn, u, merged, self._unpost_source, self._consume_fills)
+            if state == "moved":
+                n_moved += 1
+                t_min = t_first if t_min is None else min(t_min, t_first)
             if undo:
                 self.conn.execute("ROLLBACK TO order_trades")
                 why_n[undo] = why_n.get(undo, 0) + 1
@@ -144,6 +138,13 @@ class FillsMixin:
         log.info("[ex] 업비트 옛 주문 체결 목록 채우기: 원본 개정 %d (시각 재기장 %d) · 건너뜀 %d %s", n_ok, n_moved, n_skip,
                  json.dumps(why_n, ensure_ascii=False) if why_n else "")
         return {"ok": n_ok, "moved": n_moved, "skip": n_skip, "why": why_n}
+
+    def _split_rev_mark(self):
+        if not self._meta_get("upbit_split_v"):
+            rev_row = self.conn.execute("SELECT v FROM meta WHERE k='data_rev'").fetchone()
+            self.conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES ('upbit_split_v', ?)",
+                              (json.dumps({"v": 1, "prev": None if rev_row is None else int(str(rev_row[0]).strip())}),))
+        dbm.bump_data_rev(self.conn, 3)
 
     EXF_RETIME_EX = ("bithumb",)
 
@@ -348,3 +349,96 @@ class FillsMixin:
             if self._post_leg('exchange', 'upbit:order', str(o['uuid']), seq, ts, aid, 'exchange:upbit', qb, usd_s, krw, lk, evn):
                 n_ins += 1
         return n_ins > 0
+
+
+_SPLIT_WARNED: set = set()
+
+
+def order_legs(conn: sqlite3.Connection, uid: str) -> list:
+    return conn.execute("SELECT leg_seq, asset_id, location, qty_base, leg_kind, event, event_ts, cost_usd, cost_krw FROM postings"
+                        " WHERE source_kind='exchange' AND source_ns='upbit:order' AND source_id=? ORDER BY leg_seq", (uid,)).fetchall()
+
+
+def krw_split_post(conn: sqlite3.Connection, o: dict, aid: int, side: str, groups: list, fx_at: Callable, post_leg: Callable):
+    uid = str(o["uuid"])
+    if conn.execute("SELECT 1 FROM postings WHERE source_kind='exchange' AND source_ns='upbit:order' AND source_id=? LIMIT 1", (uid,)).fetchone():
+        return 0
+    row = conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (aid,)).fetchone()
+    dec = row["decimals"] if row and row["decimals"] is not None else 8
+    qtys = [g["vol"] * (Decimal(10) ** int(dec)) for g in groups]
+    if any(q != q.to_integral_value() for q in qtys):
+        return None
+    lk, ev, sign = ("disp", "EX_SELL", -1) if side == "ask" else ("acq", "EX_BUY", 1)
+    for i, (g, q) in enumerate(zip(groups, qtys)):
+        fx = fx_at(g["ts"] * 1000)
+        usd = (float(g["net"]) / fx) if fx else None
+        post_leg('exchange', 'upbit:order', uid, i, g["ts"], aid, 'exchange:upbit', sign * int(q), repr(usd) if usd is not None else None,
+                 str(g["net"]), lk, ev)
+    return 1
+
+
+def split_warn(o: dict, why: Optional[str]) -> None:
+    trades = o.get("trades")
+    uid = str(o.get("uuid"))
+    if why and isinstance(trades, list) and len(trades) > 1 and uid not in _SPLIT_WARNED:
+        _SPLIT_WARNED.add(uid)
+        log.warning("업비트 분할 체결 검사 실패 %s — 한 줄(마지막 체결 시각)로 기장: %s", uid[:12], why)
+
+
+def want_leg_ts(o: dict, nosplit: bool = False):
+    krw = str(o.get("market") or "").upper().startswith("KRW-")
+    groups = acct_norm.fill_groups(o)[0] if krw and not nosplit else None
+    if groups and len(groups) > 1:
+        return [g["ts"] for g in groups]
+    at = acct_norm.fill_ts(o) or timeutil.iso_epoch(o.get("created_at"))
+    return None if not at else [at] if krw else [at, at]
+
+
+def krw_sum(rows: list) -> Optional[Decimal]:
+    if not all(r["cost_krw"] is not None for r in rows):
+        return None
+    with localcontext() as ctx:
+        ctx.prec = 80
+        try:
+            total = sum((Decimal(str(r["cost_krw"])) for r in rows), Decimal(0))
+        except (InvalidOperation, ValueError):
+            return None
+    return +total
+
+
+def _shape(rows: list) -> list:
+    return sorted((int(r["leg_seq"]), int(r["asset_id"]), str(r["location"]), str(int(r["qty_base"])), str(r["leg_kind"]), str(r["event"])) for r in rows)
+
+
+def legs_check(olds: list, news: list, want: Optional[list], krw: bool):
+    if want is None or [int(r["event_ts"]) for r in news] != want or [int(r["leg_seq"]) for r in news] != list(range(len(news))):
+        return "다시 만든 레그가 다름"
+    if krw:
+        sums = [{}, {}]
+        for i, rows in enumerate((olds, news)):
+            for r in rows:
+                key = (int(r["asset_id"]), str(r["location"]))
+                sums[i][key] = sums[i].get(key, 0) + int(r["qty_base"])
+        if sums[0] != sums[1] or {(r["leg_kind"], r["event"]) for r in olds} != {(r["leg_kind"], r["event"]) for r in news}:
+            return "다시 만든 레그가 다름"
+        if krw_sum(olds) is None or krw_sum(olds) != krw_sum(news):
+            return "원화 금액 합 다름"
+    elif _shape(olds) != _shape(news):
+        return "다시 만든 레그가 다름"
+    if any(r["cost_usd"] is not None for r in olds) and any(r["cost_usd"] is None for r in news):
+        return "새 시각 원가 USD 미확보(이번 적용 중 환율·쿼트 시세를 못 받음 — 조회 실패 또는 실패 뒤 60초 쉼 동안의 주문 · 다음 --apply 때 다시)"
+    return None
+
+
+def resplit_order(conn: sqlite3.Connection, uid: str, o: dict, unpost: Callable, consume: Callable, nosplit: bool = False):
+    olds = order_legs(conn, uid)
+    if not olds:
+        return "none", None, None
+    want = want_leg_ts(o, nosplit)
+    if want is not None and [int(r["event_ts"]) for r in olds] == want and [int(r["leg_seq"]) for r in olds] == list(range(len(olds))):
+        return "same", None, None
+    unpost("exchange", "upbit:order", uid)
+    consume({"orders": [o]}, nosplit=nosplit)
+    news = order_legs(conn, uid)
+    why = legs_check(olds, news, want, str(o.get("market") or "").upper().startswith("KRW-"))
+    return ("undo" if why else "moved"), why, min(int(r["event_ts"]) for r in list(olds) + list(news))

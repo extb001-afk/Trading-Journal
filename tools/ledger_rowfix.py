@@ -9,6 +9,7 @@ import sys
 import secrets
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -364,14 +365,16 @@ def _write_undo(path, obj):
 def _args(argv):
     ap = argparse.ArgumentParser(prog="ledger_rowfix.py", description="원장 행 1회 정정(지우기 · 되돌리기) — 점검 기본(쓰기 없음) · "
                                  "--apply 는 tj-core 정지 중에만.")
-    ap.add_argument("--kind", choices=sorted(PLANS) + [AUTOFIX_KIND], help="정정 종류(" + " · ".join(sorted(PLANS) + [AUTOFIX_KIND]) + ")")
+    ap.add_argument("--kind", choices=sorted(PLANS) + [AUTOFIX_KIND, SPLIT_KIND], help="정정 종류(" + " · ".join(sorted(PLANS) + [AUTOFIX_KIND, SPLIT_KIND]) + ")")
+    ap.add_argument("--upbit-split-down", action="store_true", help="업비트 분할 체결 레그를 한 줄로 되돌림 · data_rev 3 → 분할 전 개정(옛 판 코드 롤백 전) — --apply 와 같이 써야 씀")
     ap.add_argument("--undo-autofix", metavar="EX:SYM", help="자동 처리 칸 되돌리기(영수증 기준 · 그 칸 autofix_off 를 넣음) — --apply 와 같이 써야 씀")
     ap.add_argument("--autofix-on", metavar="EX:SYM", help="되돌린 칸의 autofix_off 표식 지움(다시 켜기) — --apply 와 같이")
     ap.add_argument("--ack-autofix", metavar="EX:SYM", help="자동 처리한 큰 미확인 유출을 확인함(영수증에 표시 → 보정 감시 노랑 내림) — --apply 와 같이")
     ap.add_argument("--data-rev-down", type=int, metavar="N", help="원장 data_rev 2 → 1(자동 처리 영수증·행 0 일 때만 · 옛 판 코드 롤백 전) — --apply 와 같이")
     ap.add_argument("--undo", metavar="UNDO_JSON", help="되돌리기(state/ledger_rowfix_undo_….json) — --apply 와 같이 써야 실제로 씀")
     ap.add_argument("--apply", action="store_true", help="실제로 쓴다(없으면 점검만)")
-    ap.add_argument("--backup-now", action="store_true", help="autofix_ws --apply 만: 첫 칸 전에 원장 사본 state/ledger.db.pre_autofix_<시각>(sqlite 백업 API · 디스크 여유 검사)")
+    ap.add_argument("--backup-now", action="store_true", help="autofix_ws · upbit_split · --upbit-split-down 의 --apply 만: 쓰기 전에 원장 사본 state/ledger.db.pre_<종류>_<시각>"
+                    "(sqlite 백업 API · 디스크 여유 검사)")
     ap.add_argument("--allow-big", action="store_true", help="autofix_ws --apply 만: 큰 칸(U 평가액 ≥ $500 또는 장소 2% · 단가 모름)도 처리(기본 = 건너뜀 · 사람이 확인)")
     ap.add_argument("--late-anchor", action="store_true", help="okx_prewin 만: 첫 대사 앵커가 창 시작 뒤인 칸도 합이 0 이면 쌍 삭제(기본 꺼짐 = 남김 · "
                     "켜면 그 칸 창 시작~첫 대사 잔고가 0 — 수집기가 처음부터 걸렀을 때와 같음 · 합<0 칸은 늘 남김)")
@@ -380,17 +383,17 @@ def _args(argv):
 
 def main(argv=None):
     a = _args(sys.argv[1:] if argv is None else argv)
-    if not a.undo and not a.kind and not a.undo_autofix and not a.autofix_on and not a.ack_autofix and a.data_rev_down is None:
-        print("거부: --kind 또는 --undo 가 필요해요(종류: " + " · ".join(sorted(PLANS) + [AUTOFIX_KIND]) + ")")
+    if not a.undo and not a.kind and not a.undo_autofix and not a.autofix_on and not a.ack_autofix and a.data_rev_down is None and not a.upbit_split_down:
+        print("거부: --kind 또는 --undo 가 필요해요(종류: " + " · ".join(sorted(PLANS) + [AUTOFIX_KIND, SPLIT_KIND]) + ")")
         return 2
-    if sum(bool(x) for x in (a.undo, a.kind, a.undo_autofix, a.autofix_on, a.ack_autofix, a.data_rev_down is not None)) != 1:
-        print("거부: --kind · --undo · --undo-autofix · --autofix-on · --ack-autofix · --data-rev-down 중 하나만")
+    if sum(bool(x) for x in (a.undo, a.kind, a.undo_autofix, a.autofix_on, a.ack_autofix, a.data_rev_down is not None, a.upbit_split_down)) != 1:
+        print("거부: --kind · --undo · --undo-autofix · --autofix-on · --ack-autofix · --data-rev-down · --upbit-split-down 중 하나만")
         return 2
     if a.late_anchor and (a.undo or a.kind != "okx_prewin"):
         print("거부: --late-anchor 는 --kind okx_prewin 점검·적용에만")
         return 2
-    if (a.backup_now or a.allow_big) and not (a.kind == AUTOFIX_KIND and a.apply):
-        print("거부: --backup-now · --allow-big 는 --kind autofix_ws --apply 에만")
+    if (a.allow_big and not (a.kind == AUTOFIX_KIND and a.apply)) or (a.backup_now and not ((a.kind in (AUTOFIX_KIND, SPLIT_KIND) or a.upbit_split_down) and a.apply)):
+        print("거부: --backup-now · --allow-big 는 --kind autofix_ws --apply 에만(--backup-now 는 upbit_split · --upbit-split-down 의 --apply 에도)")
         return 2
     assert os.path.abspath(paths.DB_PATH).startswith(os.path.abspath(paths.STATE_DIR)), "DB 경로가 state 밖"
     print(f"원장 {paths.DB_PATH}")
@@ -426,6 +429,8 @@ def _barrier(apply: bool):
 
 
 def _run(a):
+    if a.kind == SPLIT_KIND or a.upbit_split_down:
+        return _run_split(a)
     if a.kind == AUTOFIX_KIND or a.undo_autofix or a.autofix_on or a.ack_autofix or a.data_rev_down is not None:
         return _run_autofix(a)
     if a.undo:
@@ -514,9 +519,9 @@ def _backup_fresh():
     return False, f"거부: 가장 최근 원장 백업 {newest['name']}({fmt(bt)})이 원장 마지막 쓰기({fmt(last)})보다 오래됨 — 먼저 백업: " + hint
 
 
-def _backup_now(now: int) -> str:
+def _backup_now(now: int, tag: str = "autofix") -> str:
     db = paths.DB_PATH
-    dst = db + ".pre_autofix_" + time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+    dst = db + ".pre_" + tag + "_" + time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
     if os.path.exists(dst):
         raise RuntimeError(f"사본 이름 충돌 {os.path.basename(dst)} — 잠시 뒤 다시")
     for left in os.listdir(os.path.dirname(dst)):
@@ -709,6 +714,233 @@ def _run_autofix(a):
             if rw is not None:
                 rw.close()
     return 4 if bad else 0
+
+
+SPLIT_KIND = "upbit_split"
+SPLIT_NO_TRADES = "체결 목록 없음(한 줄 그대로 · 상세 보강 = tools/upbit_trades_fill)"
+_KST = timezone(timedelta(hours=9))
+
+
+def _split_latest(conn):
+    out, bad = [], 0
+    for u, pl in conn.execute("SELECT uuid, payload FROM raw_ex WHERE exchange='upbit' AND kind='order'"
+                              " GROUP BY uuid HAVING revision = MAX(revision) ORDER BY uuid"):
+        try:
+            o = json.loads(pl)
+        except (TypeError, ValueError):
+            bad += 1
+            continue
+        if isinstance(o, dict) and str(o.get("market") or "").upper().startswith("KRW-"):
+            out.append((str(u), o))
+    return out, bad
+
+
+def _split_predict(conn, legs, groups, side):
+    import core_fills as CF
+    if len({(int(r["asset_id"]), str(r["location"])) for r in legs}) != 1:
+        return "옛 레그 자산·위치 여럿"
+    row = conn.execute("SELECT decimals FROM assets WHERE asset_id=?", (int(legs[0]["asset_id"]),)).fetchone()
+    dec = int(row[0]) if row and row[0] is not None else 8
+    q_new = sum((g["vol"] * (Decimal(10) ** dec) for g in groups), Decimal(0))
+    if q_new != q_new.to_integral_value() or int(q_new) * (-1 if side == "ask" else 1) != sum(int(r["qty_base"]) for r in legs):
+        return "수량 합 다름"
+    if {str(r["event"]) for r in legs} != {"EX_SELL" if side == "ask" else "EX_BUY"}:
+        return "이벤트 다름"
+    if CF.krw_sum(legs) is None or CF.krw_sum(legs) != +sum((g["net"] for g in groups), Decimal(0)):
+        return "원화 금액 합 다름"
+    return None
+
+
+def split_plan(conn, down=False):
+    import acct_norm
+    import core_fills as CF
+    rows, bad = _split_latest(conn)
+    res = {"todo": [], "n": {"KRW 주문": len(rows)}, "why": {"원본 JSON 손상": bad} if bad else {}}
+
+    def add(d, k):
+        res[d][k] = res[d].get(k, 0) + 1
+    for u, o in rows:
+        legs = CF.order_legs(conn, u)
+        if down:
+            if len(legs) > 1:
+                res["todo"].append((u, o, len(legs), min(int(r["event_ts"]) for r in legs)))
+            continue
+        if not isinstance(o.get("trades"), list) or not o["trades"]:
+            add("why", SPLIT_NO_TRADES)
+            continue
+        groups, why = acct_norm.fill_groups(o)
+        if groups is None:
+            add("why", "검사 실패: " + why)
+        elif not legs:
+            add("why", "원장 레그 없음(원본만 · 기장 안 된 주문)")
+        elif len(groups) == 1:
+            add("n", "묶음 1개(한 줄 그대로)")
+        elif [int(r["event_ts"]) for r in legs] == [g["ts"] for g in groups]:
+            add("n", "이미 분할")
+        else:
+            miss = _split_predict(conn, legs, groups, str(o.get("side") or "").lower())
+            if miss:
+                add("why", "예측 불일치: " + miss)
+            else:
+                res["todo"].append((u, o, len(groups), groups[0]["ts"]))
+    return res
+
+
+def split_report(res, down=False):
+    import acct_norm
+    todo = res["todo"]
+    print(" · ".join(f"{k} {v}" for k, v in res["n"].items()))
+    first = min((t[3] for t in todo), default=None)
+    span = sum(1 for t in todo if len({datetime.fromtimestamp(g["ts"], _KST).date() for g in (acct_norm.fill_groups(t[1])[0] or [])}) > 1)
+    print(("한 줄로 되돌릴 주문" if down else "바꿀 주문") + f" {len(todo)} · 레그(묶음) {sum(t[2] for t in todo)}"
+          + (f" · 가장 이른 영향 날짜(KST) {datetime.fromtimestamp(first, _KST).strftime('%Y-%m-%d')}" if first else "")
+          + (f" · KST 날짜를 넘는 주문 {span}" if todo and not down else ""))
+    for k, v in sorted(res["why"].items(), key=lambda kv: -kv[1]):
+        print(f"  바꾸지 않음 {v} — {k}")
+
+
+def _split_rev_to(conn):
+    import autofix as AF
+    try:
+        prev = json.loads(conn.execute("SELECT v FROM meta WHERE k='upbit_split_v'").fetchone()[0])["prev"]
+    except (TypeError, ValueError, KeyError):
+        return 2
+    if prev is not None and (isinstance(prev, bool) or not isinstance(prev, int) or not 0 <= prev <= 2):
+        return 2
+    if conn.execute("SELECT 1 FROM meta WHERE k >= ? AND k < ? LIMIT 1", (AF.RECEIPT, AF.RECEIPT[:-1] + ";")).fetchone() \
+            or conn.execute("SELECT 1 FROM postings WHERE substr(source_ns, -8) = ? LIMIT 1", (AF.NS_SUFFIX,)).fetchone():
+        floor = AF.DATA_REV
+    else:
+        floor = 1 if conn.execute("SELECT 1 FROM meta WHERE k='exf_fut_place_v'").fetchone() else 0
+    return prev if prev is not None and prev >= floor else (floor or None)
+
+
+def _split_rev_down(conn) -> str:
+    cur = dbm.ledger_data_rev(conn)
+    if cur != 3:
+        return f"data_rev {cur} 그대로(3 일 때만 내림)"
+    left = conn.execute("SELECT count(*) FROM postings p JOIN postings z ON z.source_kind=p.source_kind AND z.source_ns=p.source_ns"
+                        " AND z.source_id=p.source_id AND z.leg_seq=0 WHERE p.source_kind='exchange' AND p.source_ns='upbit:order'"
+                        " AND p.leg_seq >= 1 AND p.event=z.event").fetchone()[0]
+    if left:
+        raise RuntimeError(f"KRW 분할 레그 {left}줄 남음 — 한 줄로 못 돌린 주문이 있어 개정을 내리지 않음")
+    to = _split_rev_to(conn)
+    conn.execute("DELETE FROM meta WHERE k='upbit_split_v'")
+    if to is None:
+        conn.execute("DELETE FROM meta WHERE k='data_rev'")
+        return "data_rev 3 → 없음(분할 전 원장에 줄 없었음) · 도장 upbit_split_v 지움"
+    conn.execute("UPDATE meta SET v=? WHERE k='data_rev'", (str(to),))
+    return f"data_rev 3 → {to} · 도장 upbit_split_v 지움"
+
+
+def _fx_miss(px, mins):
+    px.nb_begin()
+    try:
+        return [m for m in mins if px.fx_at(m) is None]
+    finally:
+        px.nb_end()
+
+
+def split_fx_warm(px, todo, down=False):
+    import core_fills as CF
+    mins = sorted({(int(t) * 1000 // 60_000) * 60_000 for _u, o, _n, _t in todo for t in (CF.want_leg_ts(o, nosplit=down) or ())})
+    left, gap = _fx_miss(px, mins), float(getattr(px, "FX_WARM_GAP", 0.15))
+    for i in range(len(left)):
+        if i:
+            time.sleep(gap)
+        if not left or not px.fx_warm(left):
+            break
+        left = _fx_miss(px, left)
+    for i, m in enumerate(left):
+        if i:
+            time.sleep(gap)
+        if px.fx_at(m) is None:
+            break
+    left = _fx_miss(px, left)
+    return len(mins), len(left)
+
+
+def split_apply(c, todo, down=False):
+    import core_fills as CF
+    conn, svc, px = c.conn, c.svc_exf, c.px
+    moved, why_n, t_min = 0, {}, None
+    try:
+        n9, miss9 = split_fx_warm(px, todo, down)
+        if n9:
+            print(f"환율 미리 받기(잠금 밖): 필요 {n9}분 · 못 받음 {miss9}분" + (" — 그 분 원가 USD 가 비게 되는 주문은 되돌림(다시 실행)" if miss9 else ""))
+        px.nb_begin()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for u, o, _n, _t in todo:
+                conn.execute("SAVEPOINT upbit_split")
+                state, why, t_first = CF.resplit_order(conn, u, o, svc._unpost_source, svc._consume_fills, nosplit=down)
+                if state == "undo":
+                    conn.execute("ROLLBACK TO upbit_split")
+                    why_n[why] = why_n.get(why, 0) + 1
+                elif state == "moved":
+                    moved += 1
+                    t_min = t_first if t_min is None else min(t_min, t_first)
+                conn.execute("RELEASE upbit_split")
+            if down:
+                print(_split_rev_down(conn))
+            if moved:
+                c._inval_daily()
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+    finally:
+        px.nb_end()
+        try:
+            px.flush()
+        except OSError as e:
+            print(f"환율 캐시 저장 실패(원장 무관): {e}")
+    if t_min is not None:
+        _invalidate(t_min)
+    return moved, why_n, t_min
+
+
+def _run_split(a):
+    down = bool(a.upbit_split_down)
+    conn = _ro()
+    try:
+        res = split_plan(conn, down)
+        fence = dbm.fence_why(conn)
+    finally:
+        conn.close()
+    split_report(res, down)
+    if not a.apply:
+        print("(점검만 — 쓰려면 --apply)")
+        return 0
+    if fence:
+        print("거부(세대 펜스 · 원장 무변): " + fence)
+        return 1
+    if not res["todo"] and not down:
+        print("할 일 없음")
+        return 0
+    if a.backup_now:
+        try:
+            print("원장 사본(--backup-now):", _backup_now(int(time.time()), tag="upbit_split"))
+        except (OSError, sqlite3.Error, RuntimeError) as e:
+            print(f"거부: 원장 사본 실패 — {e}(원장 무변)")
+            return 1
+    ok9, msg9 = _backup_fresh()
+    print(msg9)
+    if not ok9:
+        return 1
+    import config
+    import core
+    c = core.Core(config.load_config())
+    try:
+        res = split_plan(c.conn, down)
+        moved, why_n, _t = split_apply(c, res["todo"], down)
+    except (RuntimeError, sqlite3.Error, ValueError) as e:
+        print(f"★전부 취소(원장·포지션 무변)★ {e}")
+        return 4
+    finally:
+        c.conn.close()
+    print(("한 줄로 되돌림" if down else "바꿈") + f" {moved}/{len(res['todo'])}" + "".join(f" · 되돌림 {v} — {k}" for k, v in why_n.items()))
+    return 4 if why_n else 0
 
 
 if __name__ == "__main__":

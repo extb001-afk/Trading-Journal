@@ -9,6 +9,7 @@ import web_ctx
 import xfer_match
 from decimal import Decimal
 from decimal import InvalidOperation
+from view_fspin import KD_AT0, KD_AT_HI, KD_AT_LO, kd_at_ok
 from view_offc import OFFC_EXCHANGES
 from view_review import REVIEW_LEN_KEYS
 from view_review import review_len_eff
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from http.server import BaseHTTPRequestHandler
 
 __all__ = ["post_sale_link", "post_xfer_link", "post_plan", "post_ignore", "post_wallet_alias", "post_cost_override", "post_fallback_avg",
-           "post_offchain_self", "post_first_seen_px", "post_gas_in_cost", "post_review_len", "post_review_pause", "post_review_fill",
+           "post_offchain_self", "post_first_seen_px", "post_kr_deemed", "post_gas_in_cost", "post_review_len", "post_review_pause", "post_review_fill",
            "post_chain_auto_off", "post_dust_threshold", "post_risk_override", "post_genuine_token", "post_src_whitelist",
            "post_flow_register", "post_other_assets", "post_nft_prefs", "post_receipt_eval", "post_day_memo", "post_alert_test",
            "post_wd_dest_register", "post_health_ack", "post_review_fill_run", "post_alert_prefs", "post_outflow_resolve",
@@ -276,6 +277,20 @@ def post_first_seen_px(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: 
     with web_ctx.builder().lock:
         web_ctx.builder().cache = None
     h._send(200, {"ok": True, "on": prefs["first_seen_px"]})
+
+
+def post_kr_deemed(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):
+    if not isinstance(body.get("on"), bool):
+        return h._send(400, {"ok": False, "error": "on 은 true/false"})
+    cur = prefs.get("kr_deemed") if isinstance(prefs.get("kr_deemed"), dict) else {}
+    at = body["at"] if "at" in body else (cur.get("at") if kd_at_ok(cur.get("at")) else KD_AT0)
+    if not kd_at_ok(at):
+        return h._send(400, {"ok": False, "error": "at 은 %s ~ %s 날짜(YYYY-MM-DD)" % (KD_AT_LO, KD_AT_HI)})
+    prefs["kr_deemed"] = {"on": body["on"], "at": at}
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
+    with web_ctx.builder().lock:
+        web_ctx.builder().cache = None
+    h._send(200, {"ok": True, "on": body["on"], "at": at})
 
 
 def post_gas_in_cost(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):

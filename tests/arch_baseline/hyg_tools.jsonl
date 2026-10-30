@@ -1,8 +1,9 @@
 {"_doc": "tools/ 최상위: ledger_writers = 원장 표에 쓰는 도구 · dated = 이름에 날짜 붙은 파일 — 새로 생기면 실패 · why = 이름으로 부르는 곳(이름 고정 사유).", "kind": "set", "spec": "hyg_tools"}
+{"set": "ledger_writers", "key": "tools/evm_txpos_fill.py", "why": "이름 고정 — 부르는 곳 3: public/docs/OPERATIONS.md · src/core_snap.py · (비공개 도구)"}
 {"set": "ledger_writers", "key": "tools/exf_fix_place.py", "why": "이름 고정 — 부르는 곳 8: src/migrate.py · src/recon_adj.py · (비공개 도구) · tools/exf_fut_place.py · tools/latefix_move.py …"}
 {"set": "ledger_writers", "key": "tools/exf_fut_place.py", "why": "이름 고정 — 부르는 곳 11: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/chk_collect.py · src/core_exf_fut.py · src/db.py …"}
 {"set": "ledger_writers", "key": "tools/latefix_move.py", "why": "이름 고정 — 부르는 곳 7: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/core_exf_fut.py · src/core_exf_late.py · src/histmark.py …"}
-{"set": "ledger_writers", "key": "tools/ledger_restore.py", "why": "이름 고정 — 부르는 곳 20: public/README.md · public/docs/OPERATIONS.md · public/docs/README_EN.md · src/backup_complete.py · src/bsc_balw.py …"}
-{"set": "ledger_writers", "key": "tools/ledger_rowfix.py", "why": "이름 고정 — 부르는 곳 8: public/README.md · src/core_exf.py · (비공개 도구) · (비공개 도구) · (비공개 도구) …"}
-{"set": "ledger_writers", "key": "tools/rebuild.py", "why": "이름 고정 — 부르는 곳 26: public/docs/OPERATIONS.md · public/docs/README_EN.md · src/chk_collect.py · src/core.py · src/core_exf.py …"}
+{"set": "ledger_writers", "key": "tools/ledger_restore.py", "why": "이름 고정 — 부르는 곳 22: public/README.md · public/docs/OPERATIONS.md · public/docs/README_EN.md · src/backup_complete.py · src/bsc_balw.py …"}
+{"set": "ledger_writers", "key": "tools/ledger_rowfix.py", "why": "이름 고정 — 부르는 곳 20: public/README.md · public/docs/CONFIG.md · public/docs/OPERATIONS.md · src/autofix.py · src/autofix_apply.py …"}
+{"set": "ledger_writers", "key": "tools/rebuild.py", "why": "이름 고정 — 부르는 곳 27: public/docs/OPERATIONS.md · public/docs/README_EN.md · public/docs/SECURITY_DATA_EN.md · src/chk_collect.py · src/core.py …"}
 {"set": "ledger_writers", "key": "tools/rebuild2.py", "why": "이름 고정 — 부르는 곳 51: public/docs/CONFIG.md · public/docs/OPERATIONS.md · src/bf_engine.py · src/core.py · src/core_dec.py …"}

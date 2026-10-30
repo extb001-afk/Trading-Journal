@@ -60,6 +60,17 @@ def _grammar():
     rules = {"money_modules": ["acct_a", "acct_basis", "acct_gone"], "api_allow": {"gwrite": ["acct_basis"]}}
     T.chk(W.counted_modules(rules, ["acct_a", "acct_basis", "other_mod"]) == ["acct_a"],
           "money.gwrite 셈 대상 = money_modules ∩ 있는 모듈 − 허용(api_allow.gwrite) · 아직 없는 모듈은 셈 밖")
+    leg = W.legacy_calls_text("def f(cb, g, q, c):\n    cb.acquire(g, q, c, 1, 2, u=q)\n    cb.capitalize(g, c)\n    cb.release(g, q, c, q, floor=False)\n"
+                              "    cb.convert(g, q, c)\n    px.cb.add_known(g, q)\n    self.cb.sub_cost(g, c)\n    x.floor_sub_unknown(g, q)\n"
+                              "    add_cost(g, c)\n    g.add_unknown\n")
+    T.chk([ln for ln, _t in leg] == [6, 7, 8], "API 소유권 정의: 옛 한 칸 쓰기 7개의 메서드 호출만(바탕 무관) · 깔때기 넷·맨 이름 호출·값 참조는 셈 밖", leg)
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in (("accounting_basis.py", "class CostBasis:\n    def acquire(self, g, q, c):\n        self.add_known(g, q)\n"),
+                           ("acct_x.py", "def f(cb, g):\n    cb.add_known(g, 1)\n"), ("acct_ok.py", "def f(cb, g):\n    cb.acquire(g, 1, 1)\n")):
+            with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        hits = W.legacy_calls(d)
+    T.chk(hits == ["src/acct_x.py:2 cb.add_known(g, 1)"], "API 소유권 정의: 깔때기 주인(accounting_basis) 안 호출은 셈 밖 · 밖 모듈 호출 = 자리 글", hits)
 
 
 def _rows(text, m):
@@ -191,7 +202,14 @@ def _integrity(path, base, cur, scopes):
         mb[:8], ref, len(bad)), bad[:40])
 
 
+def _funnel():
+    hits = W.legacy_calls(A.SRC)
+    T.chk(not hits, "API 소유권: CostBasis 옛 한 칸 쓰기(%s) 호출 = accounting_basis 밖 0건 — 원가 칸은 acquire·capitalize·release·convert 로만"
+          % "·".join(W.LEGACY), hits[:40])
+
+
 _grammar()
 _ratchet()
+_funnel()
 _real()
 T.finish()

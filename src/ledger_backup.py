@@ -28,7 +28,7 @@ _FD_RX = re.compile(r"^files_(\d{8})$")
 KEEP_FILES = 30
 STATE_LIST = "(state 목록)"
 FILES_STATE = ("daily_px.json", "other_assets.json", "settings.json", "nft_prefs.json", "day_memos.json",
-               "first_seen_px.json",
+               "first_seen_px.json", "kr_deemed_px.json",
                "genuine_tokens.json",
                "chainoff_keep_on.json",
                envfile.IDENT_FILE)

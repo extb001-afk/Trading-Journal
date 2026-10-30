@@ -348,7 +348,7 @@ for bk_core, dm, want, why in ((CMT_ONLY, 0, 1, "주석·홀로 선 글자열만
         T.chk(rc == 0 and rd(os.path.join(live, "src", "core_exf.py")) == bk_core and "롤백 거부" not in out, "M7 %s = 통과" % why, out[-500:])
 
 
-def rvcase(bk_rev, changed=True):
+def rvcase(bk_rev, changed=True, led="2"):
     r, live, bk, ts = mcase(KNOWS, marks=0)
     w(os.path.join(live, "src", "db.py"), "DATA_REV = 2\n")
     w(os.path.join(bk, "code", "src", "db.py"), "DATA_REV = %d\n" % bk_rev)
@@ -357,7 +357,7 @@ def rvcase(bk_rev, changed=True):
         w(os.path.join(bk, "installed.sha256"), rd(os.path.join(bk, "installed.sha256")) + "%s  src/db.py\n" % sha(b"DATA_REV = 2\n"))
     c9 = sqlite3.connect(os.path.join(live, "state", "ledger.db"))
     c9.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
-    c9.execute("INSERT INTO meta VALUES('data_rev', '2')")
+    c9.execute("INSERT INTO meta VALUES('data_rev', ?)", (led,))
     c9.commit()
     c9.close()
     return r, live, bk, ts
@@ -373,6 +373,14 @@ T.chk(rc != 0 and not calls(r) and "data_rev" in out and "--force-code-only 로�
 r, live, bk, ts = rvcase(2)
 rc, out = rb(r, live, ts)
 T.chk(rc == 0 and "data_rev" not in out, "M8 되돌린 뒤 db.py 도 DATA_REV 2 = 통과(과잉 거부 없음)", out[-400:])
+r, live, bk, ts = rvcase(2, led="3")
+rc, out = rb(r, live, ts)
+T.chk(rc != 0 and not calls(r) and "data_rev" in out and "--upbit-split-down --apply --backup-now" in out and "--undo-autofix" not in out,
+      "M8 원장 data_rev 3(업비트 분할 체결) + 되돌린 뒤 DATA_REV 2 = 거부 · 안내 = 분할 내리기 한 줄(자동 처리 되돌리기 없음)", (rc, out[-600:]))
+r, live, bk, ts = rvcase(1, led="3")
+rc, out = rb(r, live, ts)
+T.chk(rc != 0 and "--upbit-split-down" in out and "--undo-autofix" in out and out.index("--upbit-split-down") < out.index("--undo-autofix"),
+      "M8 원장 data_rev 3 + 되돌린 뒤 DATA_REV 1 = 거부 · 안내 = 분할 내리기 → 자동 처리 되돌리기 차례", out[-600:])
 add_marks(os.path.join(PL, "state", "ledger.db"))
 git("checkout", "-q", "-b", "m6a", C1)
 with open(os.path.join(G, "src", "core_exf.py")) as f:

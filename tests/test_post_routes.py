@@ -13,7 +13,7 @@ import http_route  # noqa: E402
 
 nolock, locked = http_route.post_routes()
 T.chk(nolock == http_route._NOLOCK and locked == http_route._LOCKED, "post_routes() = 모듈 전역 표(처음 한 번 만든 것)와 같음")
-T.chk(len(nolock) == 11 and len(locked) == 22, "표 크기 잠금 밖 11 · 잠금 안 22", (len(nolock), len(locked)))
+T.chk(len(nolock) == 11 and len(locked) == 23, "표 크기 잠금 밖 11 · 잠금 안 23", (len(nolock), len(locked)))
 both = sorted(set(nolock) & set(locked))
 T.chk(not both, "잠금 밖·안 표가 겹치지 않음(겹치면 사슬 차례가 바뀜)", both)
 pre = http_route.OPS_PREFIX

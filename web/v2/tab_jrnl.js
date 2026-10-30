@@ -556,6 +556,19 @@
   const TAX_EST_TIP = { fb: '추정 — 원가를 모르는 수량의 원가를 이 코인 평균 매수가로 잡은 행이에요(평균가 폴백 설정)', be: '추정 — 원가를 모르는 수량을 매수가 = 매도가(손익 0)로 처리한 행이에요(손익 0 처리 설정)',
     fs: '추정 — 취득가액의 일부(1% 이상)가 최초 인식 시가(원가를 모르던 수량을 그 수량이 장부에 처음 생긴 날 시가로 잡은 값)예요(스테이블은 원화 취득가액을 그때 환율로) · 설정 › 원가 계산에서 끌 수 있어요' };
   const taxEstPill = k => (k ? ' <span class="pill w sm" title="' + esc(TAX_EST_TIP[k]) + '">추정</span>' : '');
+  const kdHead = k => {
+    if (!k || !k.on) return '';
+    const n = v => nf('ko-KR').format(Math.round(num(v))), off = num(k.skip) + num(k.none);
+    if (k.state === 'before' || !k.state) return '<br>한국 의제취득가액 켬 · 기준 ' + esc(String(k.at)) + ' 23:59 전이라 그때 시가가 정해지면 적용돼요';
+    const amt = pvOn() ? '<span class="pv">' + PVM.krw + '</span>' : n(k.add);
+    return '<br>한국 의제취득가액 켬 · 기준 ' + esc(String(k.at)) + ' 23:59 · 적용 ' + n(k.rows) + '행(<span class="pvm">+₩' + amt + '</span>)'
+      + (num(k.wait) ? ' · 시가 대기 ' + n(k.wait) + '종' : '') + (off ? ' · 적용 안 함 ' + n(off) + '종' : '');
+  };
+  const kdRowTip = r => {
+    const at = S.D.krDeemed && S.D.krDeemed.at, u = r.kdu != null ? ' ₩' + nf('ko-KR').format(Math.round(num(r.kdu))) + '/개' : '';
+    return '의제취득가액 — 기준' + (at ? ' ' + at : '') + ' 23:59 시가' + u
+      + '가 실제 산 가격보다 높아 이 행의 원화 취득가액에 그 차이를 더했어요 · 달러 손익·머리·달력 원화 실현은 그대로예요';
+  };
   function taxGroups(kind) {
     kind = kind || 'spot';
     const D = S.D, ns = taxNs(kind);
@@ -611,8 +624,17 @@
     return { n, p };
   }
   const TAX_START = '2027-01-01';
-  const taxStartTxt = () => '가상자산 과세는 ' + TAX_START.slice(0, 4) + '년 ' + (+TAX_START.slice(5, 7)) + '월부터 ' + (todayISO() < TAX_START ? '시행 예정이고(일정은 법 개정으로 바뀔 수 있어요)' : '시행 중이고');
-  const TAX_COST_TIP = '원가 방식: 이동평균(선입선출 아님)이에요. 체인 기본 코인(그 체인 공식 랩 토큰 WETH 등 포함)·정품 스테이블은 체인을 넘어 한 묶음, 그 밖 토큰은 컨트랙트마다, 거래소 보유는 거래소·코인마다 따로 평균을 내요(내 지갑·거래소 사이 이동은 출발지 원가를 그대로 들고 감). 팔 때 그때까지의 평균 매수가 × 판 수량이 취득가액이고, 원가를 아는 수량부터 떼요. 원가를 모르는 수량의 매도는 명세에서 빠지거나(원가 미확인) 설정에 따라 \'추정\' 행으로 들어가요. 원화 취득가액은 사들일 때 원화(원화 마켓은 낸 원화), 원화 양도가액은 판 때 원화예요. 기본공제·시행 전 보유분 취득가 특례 같은 세법 규칙은 반영하지 않았어요.';
+  const taxStart = () => {
+    const kd = S.D && S.D.krDeemed, at = kd && kd.on && isISO(kd.at) ? kd.at : null;
+    if (!at) return TAX_START;
+    const d = new Date(at + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const taxStartTxt = () => { const ts = taxStart();
+    return '가상자산 과세는 ' + ts.slice(0, 4) + '년 ' + (+ts.slice(5, 7)) + '월부터 '
+      + (todayISO() < ts ? '시행 예정이고(일정은 법 개정으로 바뀔 수 있어요)' : '시행 중이고'); };
+  const TAX_COST_TIP = '원가 방식: 이동평균(선입선출 아님)이에요. 체인 기본 코인(그 체인 공식 랩 토큰 WETH 등 포함)·정품 스테이블은 체인을 넘어 한 묶음, 그 밖 토큰은 컨트랙트마다, 거래소 보유는 거래소·코인마다 따로 평균을 내요(내 지갑·거래소 사이 이동은 출발지 원가를 그대로 들고 감). 팔 때 그때까지의 평균 매수가 × 판 수량이 취득가액이고, 원가를 아는 수량부터 떼요. 원가를 모르는 수량의 매도는 명세에서 빠지거나(원가 미확인) 설정에 따라 \'추정\' 행으로 들어가요. 원화 취득가액은 사들일 때 원화(원화 마켓은 낸 원화), 원화 양도가액은 판 때 원화예요. 기본공제 같은 세법 규칙은 반영하지 않았어요. 시행 전 보유분 취득가 특례(의제취득가액)는 설정 › 원가 계산 › 한국 의제취득가액으로 켤 수 있어요.';
   const TAX_ST_TIP = '스테이블(USDT·USDC 등)을 원화로 팔거나 다른 코인을 사는 대금으로 쓴 처분이에요. 원화 취득가액 = 사들일 때 원화(원화 마켓은 낸 원화 · 그 밖은 받은 때 원화 시가)의 이동평균, 처분가액 = 처분 때 원화 시가 — 그 차이가 원화 환차손익이에요(손실도 그대로). 스테이블로 산 코인의 원화 취득가 = 그때 낸 스테이블의 원화 시가라 이중으로 세지 않아요. 처분마다 양도 표에 넣으면 같은 돈이 양도가액(스테이블)·취득가액(산 코인)에 두 번 잡혀 합계가 부풀어서 따로 모았어요 — 손익은 위 양도차익(명세 기준)에 더해져 있어요. 매매일지·대시보드의 실현손익(매도 시각 환율 환산)에는 이 원화 환차가 들어가지 않아요(명세에만 · 매매일지 머리 아래 차이 줄에 따로 보여요).';
   const TAX_INC_TIP = '스테이킹 보상·유동성 수수료·리워드는 받은 때 시가가 소득이에요(양도가 아님). 그 시가가 그 코인의 원가가 돼서 나중에 팔면 그 위 차익만 양도 표에 들어가요. 세법상 어떻게 신고하는지는 세무 확인이 필요해요.';
   const TAX_FUT_TIP = '거래소 정산(실현 손익·수수료·펀딩) 기준이에요. 이익을 양도가액·손실을 취득가액에 넣으면 양쪽 합계가 부풀어서 양도 표와 따로 합계를 내요.';
@@ -689,7 +711,7 @@
               : lz.st === 'ok' && lz.total > arr(lz.rows).length ? '<div class="tax-r d"><span class="mut num">최근 ' + nf('ko-KR').format(arr(lz.rows).length) + ' / ' + nf('ko-KR').format(lz.total) + '건만 표시 — 나머지는 합계에 포함</span></div>'
               : lz.st === 'ok' && !(lzR || []).length && !c.rows.length ? '<div class="tax-r d"><span class="mut">이 달 체결 상세를 찾지 못했어요 — 합계에는 포함돼 있어요</span></div>' : '';
             return r6(tc(co) + (c.gas ? '<b>가스 비용</b>' : taxNmHTML(lpNm(c.sym))) + ' ' + (c.gas ? '<span class="pill g sm" title="매매 외 가스(실패·승인·전송·브릿지·LP) — 그날 실현에서 뺀 비용(수수료 열)">기타 비용</span>' : c.exs.slice(0, 3).map(x => { const ek = taxEstEx(x); return '<span class="pill ' + (ek ? 'w' : String(x).indexOf('온체인') >= 0 ? 'a' : 'g') + ' sm"' + (ek ? ' title="' + esc(TAX_EST_TIP[ek]) + '"' : '') + '>' + esc(term(x)) + '</span>'; }).join(' ')), c.gas && c.tx > 0 ? nf('ko-KR').format(c.tx) + '건' : c.n ? nf('ko-KR').format(c.n) + unit : '—', c.qty ? q(c.qty) : '—', c.gas ? '—' : m(c.acqV), c.gas ? '—' : m(c.dispV), '<span class="' + cls(c.pnlV) + '">' + m(c.pnlV, { sign: true }) + '</span>', 'c', ' role="button" tabindex="0" aria-expanded="' + co + '" data-a="taxCoin" data-v="' + esc(c.ck) + '"')
-              + (co ? lzNote + (dRows.length ? uiPaged('taxd:' + c.ck, dRows, r => { const v9 = taxDetailValues(r, c), pp = v9.pnl; const gr = isGasTax(r); const ff = !!r.futFee; const sk9 = kind === 'st' && r.fx ? stFxKey(r) : ''; if (sk9) stFxReg(r); return r6(esc((isoDay(r.sold) || r.sold) + (r.t ? ' ' + r.t : '') + ' · ' + (gr ? '가스 비용' : term(r.ex)) + (num(r.n) > 1 ? ' · ' + nf('ko-KR').format(num(r.n)) + '건 묶음' : '') + (r.fut && r.ticker ? ' · ' + String(r.ticker).replace(/ · 선물$/, '') : '') + (sk9 && r.fx.u ? ' · ' + r.fx.u : '')) + (gr ? '' : taxEstPill(r.be ? 'be' : taxEstEx(r.ex))) + (r.oa != null && !gr ? ' <span class="pill g sm pvx" data-pvt="1" title="' + esc('이 매도의 취득원가 중 ' + q(num(r.oa)) + '개 몫은 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 · 가정</span>' : ''), '', num(r.qty) ? q(num(r.qty)) : '—', gr || ff ? '—' : m(v9.acq), gr || ff ? '—' : m(v9.disp), '<span class="' + cls(pp) + '"' + (num(r.fee) > 0 && !gr ? ' title="수수료 ' + esc(m(v9.fee)) + ' 차감"' : '') + '>' + m(pp, { sign: true }) + '</span>' + (sk9 ? IC.right.replace('<svg', '<svg class="stfxi" aria-hidden="true"') : ''), 'd' + (sk9 ? ' stfx' : ''),
+              + (co ? lzNote + (dRows.length ? uiPaged('taxd:' + c.ck, dRows, r => { const v9 = taxDetailValues(r, c), pp = v9.pnl; const gr = isGasTax(r); const ff = !!r.futFee; const sk9 = kind === 'st' && r.fx ? stFxKey(r) : ''; if (sk9) stFxReg(r); return r6(esc((isoDay(r.sold) || r.sold) + (r.t ? ' ' + r.t : '') + ' · ' + (gr ? '가스 비용' : term(r.ex)) + (num(r.n) > 1 ? ' · ' + nf('ko-KR').format(num(r.n)) + '건 묶음' : '') + (r.fut && r.ticker ? ' · ' + String(r.ticker).replace(/ · 선물$/, '') : '') + (sk9 && r.fx.u ? ' · ' + r.fx.u : '')) + (gr ? '' : taxEstPill(r.be ? 'be' : taxEstEx(r.ex))) + (num(r.kd) > 0 && !gr ? ' <span class="pill w sm">의제</span>' + taxTip(kdRowTip(r), '의제취득가액 설명') : '') + (r.oa != null && !gr ? ' <span class="pill g sm pvx" data-pvt="1" title="' + esc('이 매도의 취득원가 중 ' + q(num(r.oa)) + '개 몫은 오프체인 이체를 내 다른 계정으로 가정해 이어받은 값이에요(설정·보낸 내역에서 끄거나 주소별로 뺄 수 있어요)') + '">오프체인 원가 · 가정</span>' : ''), '', num(r.qty) ? q(num(r.qty)) : '—', gr || ff ? '—' : m(v9.acq), gr || ff ? '—' : m(v9.disp), '<span class="' + cls(pp) + '"' + (num(r.fee) > 0 && !gr ? ' title="수수료 ' + esc(m(v9.fee)) + ' 차감"' : '') + '>' + m(pp, { sign: true }) + '</span>' + (sk9 ? IC.right.replace('<svg', '<svg class="stfxi" aria-hidden="true"') : ''), 'd' + (sk9 ? ' stfx' : ''),
                 sk9 ? ' role="button" tabindex="0" data-a="stFx" data-v="' + esc(sk9) + '" title="누르면 이 처분의 환차 상세(언제 산 평균 환율 · 처분 환율 · 용도 · 식)"' : ''); }, { unit: '행' })
                 : (lz && lz.st !== 'none' ? '' : '<div class="tax-r d"><span class="mut">체결 상세는 최근 100건만 받아요 — 이 종목의 이 달 체결은 합계에만 포함돼 있어요</span></div>')) : '');
           }).join('')) : '') + '</div>';
@@ -712,7 +734,7 @@
     const feeNote = gOn && tg && typeof tg.exFee === 'number' ? (S.g.period === 'all' && D.taxFull ? (() => { const panel = num(tg.total) + num(tg.exFee) + num(tg.wdFee), feeU = T.feeU + TS.feeU;
           return ' 가스·수수료 탭 전체 ' + m(panel) + ' 중 나머지 ' + m(panel - feeU) + '은 매수 쪽(매수 가스 ' + m(num(tg.inCost)) + ' + 매수 체결 수수료)이라 취득가액에 들어 있어요' + (S.cur !== 'USD' ? '(달러 기준 차를 지금 환율로 — 위 수수료 칸은 체결 시각 환율이라 원화로 빼면 환율 차만큼 달라요)' : '') + '.'; })()
           : ' 매수 쪽 가스·체결 수수료는 취득가액에 들어 있어요(전체 기간을 고르면 가스·수수료 탭 전체와 금액으로 비교해 보여요).') : '';
-    const head = '<div class="disc">참고용 집계예요 — ' + taxStartTxt() + ', 실제 신고는 거래소 공식 내역과 세무 기준을 따르세요.<br>' + esc(KRW_BASIS) + ' · 원가 = 코인 묶음별 이동평균(선입선출 아님)' + taxTip(TAX_COST_TIP, '원가 방식 설명') + '</div>'
+    const head = '<div class="disc">참고용 집계예요 — ' + taxStartTxt() + ', 실제 신고는 거래소 공식 내역과 세무 기준을 따르세요.<br>' + esc(KRW_BASIS) + ' · 원가 = 코인 묶음별 이동평균(선입선출 아님)' + taxTip(TAX_COST_TIP, '원가 방식 설명') + kdHead(D.krDeemed) + '</div>'
       + '<div class="sum4' + (TS.n ? ' s5' : '') + '"><div class="card"><div class="l">양도가액</div><div class="v num">' + m(disp, { compact: S.mobile }) + '</div><div class="cap">매도 정산액(수수료 전)' + (TS.n ? ' · 스테이블 처분 제외' : '') + '</div></div>'
       + '<div class="card"><div class="l">취득가액</div><div class="v num">' + m(acq, { compact: S.mobile }) + '</div><div class="cap">' + (gOn ? '매수 원가 + 매수 스왑 가스·체결 수수료' : '매수 원가 + 체결 수수료(가스 제외)') + '</div></div>'
       + '<div class="card" title="가스·수수료 탭 전체 중 매도 쪽 가스·체결 수수료와 매매 외 가스(기타 비용)만 — 매수 쪽은 취득가액에 들어 있어요"><div class="l">수수료·비용</div><div class="v num">' + m(fee, { compact: S.mobile }) + '</div><div class="cap">' + (gOn ? '매도 가스·체결 수수료' + (Math.abs(gasFee) >= 0.005 ? ' + 기타 비용(가스) ' + m(gasFee, { compact: true }) : '') : '매도 체결 수수료')

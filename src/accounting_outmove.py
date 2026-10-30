@@ -68,11 +68,13 @@ class OutMove:
                 o9.setdefault("from_w", set()).add("w:" + p0[2])
         o9.setdefault("txsyms", {}).setdefault(txh9, set()).add(g9["sym"])
         usd_send = Decimal(r9["cost_usd"]) if r9["cost_usd"] is not None else None
-        mc9, mk9, mu9 = omx.px.cpx.consume(g9, q9)
+        mc9, mk9, mu9 = omx.px.cpx.consume(g9, q9, lots=True)
+        frags_out = omx.cb.take_frags(g9)
         cp_o9 = omx.px.cpx.cp_last[0]
         kr9 = omx.px.kpx.krw_took(mc9, ts9)
         kc9r, kk9r = omx.px.kpx.krw_rec(mc9)
         fk9r = omx.px.fsx.fs_rec()
+        kd_r = omx.px.kpx.kd_last[0]
         stl9r = omx.px.kpx.stl_out(kc9r)
         o9.setdefault("sends", []).append((int(ts9), g9["gid"], usd_send, (mk9 + mu9) if g9["gid"] in omx.ever_in else Decimal(0),
                                            bool(r9["kind"] == "native" or g9["is_stable"]),
@@ -142,11 +144,13 @@ class OutMove:
             e5["krw"] = e5.get("krw", Decimal(0)) + kr9
             e5["kc"] = e5.get("kc", Decimal(0)) + kc9r; e5["kk"] = e5.get("kk", Decimal(0)) + kk9r
             e5["fk"] = e5.get("fk", Decimal(0)) + fk9r
+            omx.px.kpx.kd_put(e5, kd_r)
             if stl9r:
                 e5.setdefault("_stl", []).extend(stl9r)
             e5.setdefault("_src", []).append((r9["posting_id"], 1.0))
             e5["_cmp"] = accounting_util.cp_merge(e5.get("_cmp") or {}, cp_o9)
             e5.setdefault("cycs", []).append((g9["cur"], q9, mc9))
+            omx.cb.pool_put(e5, frags_out)
             e5["unknown"] += mu9 + max(Decimal(0), q9 - (mk9 + mu9))
             if not (basis9 == "address" and not (am9 or {}).get("uuid") and omx.now - float(ts9) > outflow_match.WIN_AFTER):
                 e5["left"] += q9
@@ -165,6 +169,8 @@ class OutMove:
                      "_stl": [[x9[0], x9[1]] + [v9 * float(f9h) for v9 in x9[2:]] for x9 in stl9r], "known": mk9 * f9h,
                      "unknown": unk9h * f9h, "raw_sym": (r9["symbol"] or "").upper(), "credited": True, "used": False, "split": True,
                      "_src": [(r9["posting_id"], float(f9h))], "_cmp": accounting_util.cp_merge({}, cp_o9, float(f9h))})
+                omx.cb.pool_put(omx.ex_transit[txh9][-1], frags_out)
+                omx.px.kpx.kd_put(omx.ex_transit[txh9][-1], kd_r * f9h)
             omx.px.slx.diag["ex_out_cost"] += mc9
             omx.px.slx.diag["ex_out_n"] += 1
             o9["auto"] = ("exchange", "업비트", "upbit")
@@ -176,6 +182,8 @@ class OutMove:
                  "unknown": mu9 + max(Decimal(0), q9 - (mk9 + mu9)), "raw_sym": (r9["symbol"] or "").upper(),
                  "credited": not (u_up == "addr" and omx.now - float(ts9) <= outflow_match.WIN_AFTER), "used": False, "ts": int(ts9 or 0),
                  "cyc": g9["cur"], "_src": [(r9["posting_id"], 1.0)], "_cmp": accounting_util.cp_merge({}, cp_o9)})
+            omx.cb.pool_put(omx.ex_transit[txh9][-1], frags_out)
+            omx.px.kpx.kd_put(omx.ex_transit[txh9][-1], kd_r)
             omx.px.slx.diag["ex_out_cost"] += mc9
             omx.px.slx.diag["ex_out_n"] += 1
             o9["auto"] = ("exchange", "업비트", "upbit")
@@ -194,6 +202,8 @@ class OutMove:
             omx.br_transit[bm9["key"]] = {"sym": g9["sym"], "qty": bt_q, "ts": ts9, "cost": mc9, "known": bt_k,
                                       "unknown": bt_u, "left": bt_q, "gid": g9["gid"], "_src": [(r9["posting_id"], 1.0)], "_cmp": accounting_util.cp_merge({}, cp_o9),
                                       "krw": kr9, "kc": kc9r, "kk": kk9r, "fk": fk9r, "_stl": stl9r, "id_link": bool(bm9.get("id_link"))}
+            omx.cb.pool_put(omx.br_transit[bm9["key"]], frags_out)
+            omx.px.kpx.kd_put(omx.br_transit[bm9["key"]], kd_r)
             if bt_q is aq9:
                 omx.br_transit[bm9["key"]]["_cv"] = {"from": omx.cv_label(cp_o9, g9["sym"]), "ratio": float(r9x)}
             d9 = (f"{CHAIN_NAME.get(chain9, chain9)} → 브릿지 → 내 {CHAIN_NAME.get(bm9['chain'], bm9['chain'])} 지갑 "
@@ -263,6 +273,8 @@ class OutMove:
             if stl9r:
                 rt9.setdefault("_stl", []).extend(stl9r)
             rt9["unknown"] += mu9 + max(Decimal(0), q9 - (mk9 + mu9))
+            omx.cb.pool_put(rt9, frags_out)
+            omx.px.kpx.kd_put(rt9, kd_r)
             d9 += " · 프로그램 예치(왕복 — 복귀 시 원가 복원)"
         elif (omx.fs_on and not (ex_fx or u_up or bm9 or sale9 or srf9) and not g9["is_stable"] and not g9.get("is_fiat")
               and dest9 not in ("multi", "?") and not flow_trace.is_burn(dest9)):
@@ -271,6 +283,7 @@ class OutMove:
             rp9["qty"] += q9; rp9["left"] += q9; rp9["cost"] += mc9; rp9["known"] += mk9; rp9["krw"] += kr9
             rp9["unknown"] += mu9 + max(Decimal(0), q9 - (mk9 + mu9))
             rp9["_cmp"] = accounting_util.cp_merge(rp9.get("_cmp") or {}, cp_o9)
+            omx.px.kpx.kd_put(rp9, kd_r)
         rb9 = omx.rt_back.get((r9["source_ns"], txh9)) if (dest9 in ("multi", "?") and (r9["source_ns"], txh9) in omx.rt_same
                                                        and not (ex_fx or u_up or bm9 or sale9) and dest9 not in omx.of_noauto) else None
         if rb9 and r9["asset_id"] in rb9[0]:

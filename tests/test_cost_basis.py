@@ -30,33 +30,67 @@ chk(g1["chains"] is not g2["chains"] and g1["flows"] is not g2["flows"] and g1["
     and g2["is_fiat"] is True, "B1 부를 때마다 새 set·list")
 
 OLD = {
-    "add_known": (lambda g, a: g.__setitem__("qty_known", g["qty_known"] + a[0])),
-    "add_unknown": (lambda g, a: g.__setitem__("qty_unknown", g["qty_unknown"] + a[0])),
-    "add_cost": (lambda g, a: g.__setitem__("cost", g["cost"] + a[0])),
-    "acquire": (lambda g, a: (g.__setitem__("qty_known", g["qty_known"] + a[0]), g.__setitem__("cost", g["cost"] + a[1]))),
-    "sub_known": (lambda g, a: g.__setitem__("qty_known", g["qty_known"] - a[0])),
-    "sub_unknown": (lambda g, a: g.__setitem__("qty_unknown", g["qty_unknown"] - a[0])),
-    "sub_cost": (lambda g, a: g.__setitem__("cost", g["cost"] - a[0])),
+    "acquire": (lambda g, a: (g.__setitem__("qty_known", g["qty_known"] + a[0]), g.__setitem__("cost", g["cost"] + a[1]),
+                              g.__setitem__("qty_unknown", g["qty_unknown"] + a[4]))),
+    "capitalize": (lambda g, a: g.__setitem__("cost", g["cost"] + a[0])),
     "release": (lambda g, a: (g.__setitem__("qty_known", g["qty_known"] - a[0]), g.__setitem__("cost", g["cost"] - a[1]),
-                              g.__setitem__("qty_unknown", max(D(0), g["qty_unknown"] - a[2])))),
-    "floor_sub_unknown": (lambda g, a: g.__setitem__("qty_unknown", max(D(0), g["qty_unknown"] - a[0]))),
+                              g.__setitem__("qty_unknown", max(D(0), g["qty_unknown"] - a[2]) if (len(a) < 4 or a[3]) else g["qty_unknown"] - a[2]))),
     "convert": (lambda g, a: (g.__setitem__("qty_unknown", g["qty_unknown"] - a[0]), g.__setitem__("qty_known", g["qty_known"] + a[0]),
                               g.__setitem__("cost", g["cost"] + a[1]))),
     "realize": (lambda g, a: g.__setitem__("realized", g["realized"] + a[0])),
     "unrealize": (lambda g, a: g.__setitem__("realized", g["realized"] - a[0])),
     "snapshot": (lambda g, a: g["qty_timeline"].append((a[0], a[1]))),
 }
-ARGS = {"add_known": (D("1.25"),), "add_unknown": (D("0.3"),), "add_cost": (D("17.5"),), "acquire": (D("2"), D("3.333")),
-        "sub_known": (D("0.75"),), "sub_unknown": (D("0.1"),), "sub_cost": (D("1.000000001"),), "release": (D("0.5"), D("2.5"), D("9")),
-        "floor_sub_unknown": (D("0.2"),), "convert": (D("0.05"), D("0.5")), "realize": (D("-4.2"),), "unrealize": (D("1.1"),),
+ARGS = {"acquire": (D("2"), D("3.333"), 1700000000, 42, D("0.7")),
+        "capitalize": (D("1.5"), 1700000000, 42),
+        "release": (D("0.5"), D("2.5"), D("9"), False),
+        "convert": (D("0.05"), D("0.5")), "realize": (D("-4.2"),), "unrealize": (D("1.1"),),
         "snapshot": (1700000000, D("-0.5"))}
+
+
+def _call(cb9, n, g9):
+    a = ARGS[n]
+    if n == "acquire":
+        return cb9.acquire(g9, a[0], a[1], ts=a[2], src=a[3], u=a[4])
+    if n == "capitalize":
+        return cb9.capitalize(g9, a[0], ts=a[1], src=a[2])
+    if n == "release":
+        return cb9.release(g9, a[0], a[1], a[2], floor=a[3])
+    return getattr(cb9, n)(g9, *a)
+
+
 seq = list(OLD) * 3
 gn, go = cb.new_group(1, "A", False, False), cb.new_group(1, "A", False, False)
 for n in seq:
-    getattr(cb, n)(gn, *ARGS[n])
+    _call(cb, n, gn)
     OLD[n](go, ARGS[n])
 chk([str(gn[k]) for k in FIVE] == [str(go[k]) for k in FIVE] and gn["qty_timeline"] == go["qty_timeline"],
-    "B2 기본 함수 13개 × 3 차례 = 종전 문장(다섯 칸 Decimal 글자·시계열)", ([str(gn[k]) for k in FIVE], [str(go[k]) for k in FIVE]))
+    "B2 기본 함수 7개 × 3 차례 = 종전 문장(다섯 칸 Decimal 글자·시계열 · release floor=False = qu 음수 허용 · 로트 장부가 붙어도)", ([str(gn[k]) for k in FIVE], [str(go[k]) for k in FIVE]))
+gf, gf0 = cb.new_group(1, "F", False, False), cb.new_group(1, "F", False, False)
+cb.acquire(gf, D("1.10"), D("3"), u=D("0.2"))
+cb.release(gf, D("0.5"), D("1"), D("9"))
+cb.acquire(gf, u=D("0.30"), ts=1700000000, src=7)
+cb.acquire(gf0, D("1.10"), D("3"), ts=1700000000, src="x", u=D("0.2"))
+cb.release(gf0, D("0.5"), D("1"), D("9"), floor=True)
+cb.acquire(gf0, None, None, u=D("0.30"))
+chk([str(gf[k]) for k in FIVE] == [str(gf0[k]) for k in FIVE] == ["0.60", "2", "0.30", "0"],
+    "B2 깔때기: acquire 는 qk·cost·qu 세 칸(u 키워드 · ts·src 는 칸 무관) · release 기본 floor = max(0, qu − u) · 원가 미확인 수량만 = acquire(g, u=q, …)",
+    ([str(gf[k]) for k in FIVE], [str(gf0[k]) for k in FIVE]))
+gz, gz0 = cb.new_group(1, "Z", False, False), cb.new_group(1, "Z", False, False)
+for gq in (gz, gz0):
+    cb.acquire(gq, D("1E+30"), D(1))
+    cb.release(gq, gq["qty_known"], gq["cost"], D(0))
+gz0["qty_unknown"] += D(1)
+cb.acquire(gz, u=D(1), ts=1, src=2)
+zs = (str(gz["qty_known"]), str(gz["qty_known"] + D(0)), [str(gz[k]) for k in FIVE] == [str(gz0[k]) for k in FIVE])
+gz0["qty_known"] += D("0.0")
+cb.acquire(gz, D("0.0"), None)
+gz1 = cb.new_group(1, "Z", False, False)
+cb.release(gz1, None, None, D(0), floor=False)
+chk(zs == ("0E+3", "0", True) and str(gz["qty_known"]) == "0.0" and [str(gz[k]) for k in FIVE] == [str(gz0[k]) for k in FIVE]
+    and [str(gz1[k]) for k in FIVE] == ["0", "0", "0", "0"],
+    "B2 None 칸 = 무연산 — 양의 지수 0('0E+3' · 0 을 더하면 '0' = 반례)·음의 지수 0('0.0' 으로 내려감) 자리에서 종전 한 칸 쓰기와 str 까지 같음 · release k·c None 도 무연산",
+    (zs, [str(gz[k]) for k in FIVE], [str(gz0[k]) for k in FIVE], [str(gz1[k]) for k in FIVE]))
 gw = cb.new_group(2, "W", False, False)
 w0 = (cb.wac(gw), cb.wac_or_none(gw))
 gw["qty_known"], gw["cost"] = EPS, D(5)
@@ -68,33 +102,50 @@ chk(w0 == (D(0), None) and w1 == (D(0), None) and w2 == (D("1.25"), D("1.25")) a
 bt = ast.parse(open(os.path.join(T.SRC, "accounting_basis.py"), encoding="utf-8").read())
 cls = {c.name: c for c in bt.body if isinstance(c, ast.ClassDef)}
 meths = [m for m in cls["CostBasis"].body if isinstance(m, ast.FunctionDef)]
-dflt = [m.name for m in meths if m.args.defaults or any(d is not None for d in m.args.kw_defaults) or m.args.vararg or m.args.kwarg]
-selfread = [m.name for m in meths for x in ast.walk(ast.Module(body=m.body[1:], type_ignores=[])) if isinstance(x, ast.Name) and x.id == "self"]
-chk(not dflt and not selfread and {m.name for m in meths} == set(OLD) | {"new_group", "wac", "wac_or_none", "note_cost"},
-    "B2 CostBasis 메서드 = 쓰기 13 + new_group·wac·wac_or_none + 기록만 note_cost · 기본값·*인자 없음 · 몸통이 self 를 읽지 않음", (dflt, selfread))
-nc9 = next(m for m in meths if m.name == "note_cost")
-chk(len(nc9.body) == 1 and ((isinstance(nc9.body[0], ast.Expr) and isinstance(nc9.body[0].value, ast.Constant)) or isinstance(nc9.body[0], ast.Pass)),
-    "B2 CostBasis.note_cost 몸통 = 독스트링뿐(공개 빌드 = pass · 라이브 = 아무것도 안 함 · basis_proof R7 = 문장 뺌)")
+pub = {m.name for m in meths if not m.name.startswith("_")}
+star = [m.name for m in meths if m.args.vararg or m.args.kwarg]
+selfread = [m.name for m in meths if m.name in ("wac", "wac_or_none")
+            for x in ast.walk(ast.Module(body=m.body[1:], type_ignores=[])) if isinstance(x, ast.Name) and x.id == "self"]
+kwo = {m.name: [a.arg for a in m.args.kwonlyargs] for m in meths if m.name in B._WRITES and m.args.kwonlyargs}
+pos = {m.name: [a.arg for a in m.args.args[1:]] for m in meths if m.name in B._WRITES}
+legacy_defs = [n.name for n in ast.walk(bt) if isinstance(n, ast.FunctionDef)
+               and n.name in ("add_known", "add_cost", "add_unknown", "sub_known", "sub_cost", "sub_unknown", "floor_sub_unknown")]
+chk(pub == set(OLD) | {"new_group", "wac", "wac_or_none", "lots_of", "lots_audit", "lots_live", "lots_stats", "pool_put", "pool_lots", "take_frags"} and not star and not selfread and not legacy_defs
+    and kwo == {"acquire": ["ts", "src", "u", "lots"], "capitalize": ["ts", "src"], "release": ["floor", "lots"], "convert": ["ts", "src"]}
+    and pos == {"acquire": ["g", "q", "c"], "capitalize": ["g", "c"], "release": ["g", "k", "c", "u"], "convert": ["g", "q", "c"],
+                "realize": ["g", "p"], "unrealize": ["g", "p"], "snapshot": ["g", "ts", "dq"]}
+    and not hasattr(B, "_LEGACY") and not any(hasattr(B.CostBasis, n) or hasattr(B.StrictCostBasis, n) for n in legacy_defs + [
+        "add_known", "add_cost", "add_unknown", "sub_known", "sub_cost", "sub_unknown", "floor_sub_unknown"]),
+    "B2 CostBasis 공개 메서드 = 쓰기 7(_WRITES) + new_group·wac·wac_or_none·로트 4·조각 3 · 옛 한 칸 쓰기 정의·속성 0 · ts·src·u·floor·lots 키워드 전용 · "
+    "*인자 없음 · wac 몸통이 self 를 읽지 않음", (pub, star, selfread, kwo, pos, legacy_defs))
 
-chk(set(B._WRITES) == set(OLD) and all(getattr(B.StrictCostBasis, n) is not getattr(B.CostBasis, n) for n in B._WRITES)
+chk(set(B._WRITES) == set(OLD)
+    and all(getattr(B.StrictCostBasis, n) is not getattr(B.CostBasis, n) for n in B._WRITES)
     and B.StrictCostBasis.wac is B.CostBasis.wac and B.StrictCostBasis.wac_or_none is B.CostBasis.wac_or_none,
-    "B3 쓰기 기본 함수 전부 그림자 쌍둥이(_WRITES = CostBasis 쓰기 메서드) · 읽기는 그대로")
+    "B3 깔때기 쓰기(_WRITES) = 그림자 쌍둥이 · CostBasis 쓰기 메서드 전부 · 읽기는 그대로")
 sb = B.StrictCostBasis()
 G = {}
 for gid in (1, 2, 3):
     G[gid] = sb.new_group(gid, "S%d" % gid, False, False)
 ga, gb = cb.new_group(1, "S1", False, False), G[1]
-for n in seq:
-    getattr(sb, n)(G[1], *ARGS[n])
-    getattr(sb, n)(G[2], *ARGS[n])
-    getattr(cb, n)(ga, *ARGS[n])
+seq_w = [n for n in seq if n in B._WRITES]
+for n in seq_w:
+    _call(sb, n, G[1])
+    _call(sb, n, G[2])
+    _call(cb, n, ga)
+sb.acquire(G[1], D("0.5"), D("0.25"), ts=1, src=2, u=D("0.125"))
+fr3 = sb.release(G[1], D("0.5"), D("0.25"), D("99"), floor=False, lots=True)
+cb.acquire(ga, D("0.5"), D("0.25"), ts=1, src=2, u=D("0.125"))
+cb.release(ga, D("0.5"), D("0.25"), D("99"), floor=False)
 try:
     sb.check(G, "t0")
     e0 = None
 except AssertionError as e:
     e0 = str(e)
-chk(e0 is None and [str(gb[k]) for k in FIVE] == [str(ga[k]) for k in FIVE] and gb["qty_timeline"] == ga["qty_timeline"],
-    "B3 기본 함수만 쓴 합성 그룹 = check 통과 · 값 = CostBasis(그림자 쌍둥이가 원본 값을 안 바꿈)", e0)
+chk(e0 is None and [str(gb[k]) for k in FIVE] == [str(ga[k]) for k in FIVE] and gb["qty_timeline"] == ga["qty_timeline"]
+    and isinstance(fr3, list) and fr3 and all(isinstance(x, tuple) and len(x) == 3 for x in fr3),
+    "B3 깔때기만 쓴 합성 그룹(키워드 u=·floor=·lots= 포함) = check 통과(로트 감사 포함) · 값 = CostBasis(그림자 쌍둥이가 원본 값을 안 바꿈) · "
+    "release(lots=True) 반환 = 원본 쪽 조각", (e0, fr3))
 
 
 def _bypass(f, where):
@@ -116,7 +167,7 @@ b4 = _bypass(lambda s2, G2: G2[9].__setitem__("realized", G2[9]["realized"] - D(
 chk(all(m is not None and "9" in m and w in m for m, w in ((b1, "b1"), (b2, "b2"), (b3, "b3"), (b4, "b4"))),
     "B3 우회 쓰기(cost 증감 · qty_unknown 대입 · 시계열 append · realized 감소) = AssertionError(자리·그룹)", (b1, b2, b3, b4))
 b5 = _bypass(lambda s2, G2: G2.__setitem__(10, {"qty_known": D(0), "cost": D(0), "qty_unknown": D(0), "realized": D(0), "qty_timeline": []}), "b5")
-b6 = _bypass(lambda s2, G2: s2.add_known({"qty_known": D(0)}, D(1)), "b6")
+b6 = _bypass(lambda s2, G2: s2.acquire({"qty_known": D(0), "cost": D(0), "qty_unknown": D(0)}, D(1), D(1)), "b6")
 chk(b5 is not None and "new_group 밖" in b5 and b6 is not None and "new_group 밖 그룹 쓰기 1" in b6,
     "B3 new_group 밖 그룹(G 에 직접 넣음 · 기본 함수로 씀) = AssertionError", (b5, b6))
 
@@ -159,9 +210,9 @@ chk(sc_none is None and sc_ok is None and sc_plain is None and sc_bad is not Non
 
 imps = sorted({(n.module if isinstance(n, ast.ImportFrom) else a.name) for n in ast.walk(bt) if isinstance(n, (ast.Import, ast.ImportFrom))
                for a in n.names})
-chk(imps == ["__future__", "decimal", "typing", "view_common"]
+chk(imps == ["__future__", "calcguard", "collections", "decimal", "itertools", "typing", "view_common"]
     and [a.name for n in bt.body if isinstance(n, ast.ImportFrom) and n.module == "view_common" for a in n.names] == ["EPS"],
-    "B5 accounting_basis import = __future__·decimal·typing·view_common.EPS 만", imps)
+    "B5 accounting_basis import = __future__·collections·decimal·itertools·typing·calcguard(로트 연산 삼킴 기록)·view_common.EPS 만", imps)
 rp = ast.parse(open(os.path.join(T.SRC, "view_b_replay.py"), encoding="utf-8").read())
 gs = next(n for n in ast.walk(rp) if isinstance(n, ast.FunctionDef) and n.name == "gstate")
 mkg = [ast.unparse(n.value.func) for n in ast.walk(gs) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)]
@@ -194,44 +245,19 @@ sc9 = next(n for n in ast.walk(ast.parse(open(os.path.join(T.SRC, "accounting_bo
 chk(any(isinstance(x, ast.If) and ast.unparse(x.test) == "callable(getattr(rr._cb, 'check', None))" for x in sc9.body),
     "B5 screen_check 의 그림자 검사 = _cb 에 check 가 있을 때만(None = 시험이 만든 이름표)")
 
-gq = cb.new_group(5, "N", False, False)
-before9 = [str(gq[k]) for k in FIVE]
-cb.note_cost(gq, D("2"), 1.5)
-chk([str(gq[k]) for k in FIVE] == before9 and gq["qty_timeline"] == [], "B6 CostBasis.note_cost = 아무것도 안 함(값·시계열 무변)")
+def _convs(fname, fn_name):
+    t9 = ast.parse(open(os.path.join(T.SRC, fname), encoding="utf-8").read())
+    fn9 = next(n for n in ast.walk(t9) if isinstance(n, ast.FunctionDef) and n.name == fn_name)
+    calls9 = [ast.unparse(n) for n in ast.walk(fn9) if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "convert"]
+    direct9 = [ast.unparse(n) for n in ast.walk(fn9) if isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Subscript)
+               and getattr(n.target.slice, "value", None) in FIVE]
+    return calls9, direct9
 
 
-def _note(direct, note):
-    s6 = B.StrictCostBasis()
-    G6 = {5: s6.new_group(5, "N", False, False)}
-    s6.add_unknown(G6[5], D(3))
-    take, unit9 = min(D("2"), G6[5]["qty_unknown"]), 0.123456789
-    s6.sub_unknown(G6[5], take)
-    s6.add_known(G6[5], take)
-    if direct:
-        G6[5]["cost"] += take * Decimal(str(unit9))
-    if note:
-        s6.note_cost(G6[5], take, unit9)
-    try:
-        s6.check(G6, "n")
-        return None, str(G6[5]["cost"])
-    except AssertionError as e:
-        return str(e), str(G6[5]["cost"])
-
-
-n_ok, n_dir, n_note = _note(True, True), _note(True, False), _note(False, True)
-chk(n_ok == (None, str(D("2") * Decimal(str(0.123456789)))) and n_dir[0] and "우회" in n_dir[0] and n_note[0] and n_note[1] == "0",
-    "B6 직접 쓰기 + note_cost = check 통과(값 = 직접 쓰기) · 직접 쓰기만 = AssertionError · note_cost 만 = AssertionError(값 무변)", (n_ok, n_dir, n_note))
-un = ast.parse(open(os.path.join(T.SRC, "accounting_unk.py"), encoding="utf-8").read())
-pair9 = []
-for n in ast.walk(un):
-    for fld in ("body", "orelse"):
-        b9 = getattr(n, fld, None)
-        if isinstance(b9, list):
-            for a9, c9 in zip(b9, b9[1:]):
-                if isinstance(c9, ast.Expr) and isinstance(c9.value, ast.Call) and getattr(c9.value.func, "attr", None) == "note_cost":
-                    pair9.append((ast.unparse(a9), ast.unparse(c9)))
-chk(len(notes) == 1 and notes[0][0] == "accounting_unk.py"
-    and pair9 == [("g9['cost'] += take * Decimal(str(unit9))", "unx.cb.note_cost(g9, take, unit9)")],
-    "B6 note_cost 부름 = src 한 자리(UnkBook.note_unk · 직접 쓰기 바로 다음 문장 · 같은 바탕·수량·단가)", (len(notes), pair9))
+cv_unk, cv_fs = _convs("accounting_unk.py", "note_unk"), _convs("accounting_fs.py", "fs_conv")
+chk(cv_unk == (["unx.cb.convert(g9, take, take * Decimal(str(unit9)))"], []),
+    "B6 UnkBook.note_unk 원가 지정 = cb.convert(g9, take, take * Decimal(str(unit9))) 한 호출(종전 직접 쓰기와 같은 식) · 원가 칸 직접 쓰기 0", cv_unk)
+chk(cv_fs == (["fsx.cb.convert(g9, take, take * unit_d)"], []) and not notes,
+    "B6 FirstSeen.fs_conv 최초 인식 시가 = cb.convert(g9, take, take * unit_d) 한 호출 · src 의 note_cost 부름 0(기록만 함수 삭제)", (cv_fs, notes))
 
 T.finish()

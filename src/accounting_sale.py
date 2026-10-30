@@ -180,9 +180,7 @@ class SaleBook:
             sl9["unit_krw"] = fin9[3] * sl9["wsh"] / sl9["qty"] if sl9["qty"] > 0 else Decimal(0)
         take9 = min(q9, sl9["take"])
         c9 = take9 * sl9["unit"]
-        slx.cb.add_known(g9, take9)
-        slx.cb.add_cost(g9, c9)
-        slx.cb.add_unknown(g9, q9 - take9)
+        slx.cb.acquire(g9, take9, c9, ts=ts9, src=r9["posting_id"], u=q9 - take9)
         slx.px.unx.note_unk(g9, ts9, "토큰 세일 · 로트 잔량 초과분(원가 없음)", q9 - take9, ref9, chain9=chain9)
         g9["risk_allow"] = True
         fl9 = slx.px.flow_of(g9, ts9, chain9)
@@ -240,14 +238,11 @@ class SaleBook:
         is_st = bool(g9.get("is_stable"))
         if is_st:
             face_q = un9 + rem9
-            slx.cb.add_known(g9, kn9 + face_q)
-            slx.cb.add_cost(g9, inh9 + face_q)
+            slx.cb.acquire(g9, kn9 + face_q, inh9 + face_q, ts=ts9, src=r9["posting_id"])
             if face_out is not None:
                 face_out[0] += face_q
         else:
-            slx.cb.add_known(g9, kn9)
-            slx.cb.add_cost(g9, inh9)
-            slx.cb.add_unknown(g9, un9 + rem9)
+            slx.cb.acquire(g9, kn9, inh9, ts=ts9, src=r9["posting_id"], u=un9 + rem9)
             flow9["bought"] += took9
         g9["risk_allow"] = True
         flow9["cost"] += krec_usd if is_st else inh9

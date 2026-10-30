@@ -7,10 +7,12 @@ import paths
 
 SCHEMA_VERSION = 2
 
-DATA_REV = 2
+DATA_REV = 3
 DATA_REVS = {
     1: "기준선(10-09) — 선물 정산 재배치(exf_fut_place) 를 아는 코드. 이 번호로 올리는 변환은 그 기능 쪽이 붙인다",
     2: "자동 처리 행(exfauto · source_ns '<ex>:autofix' — autofix_apply 가 자동 행을 처음 넣는 트랜잭션). 내리기 = ledger_rowfix --undo-autofix 전부 → --data-rev-down 1",
+    3: "업비트 KRW 분할 체결 레그('upbit:order' 한 주문 = 체결 묶음마다 leg_seq 0..n-1 — core_fills._split_rev_mark 가 첫 분할 레그 트랜잭션에서). "
+       "내리기 = tools/ledger_rowfix.py --upbit-split-down --apply(분할 레그를 한 줄로 · 3 → 분할 전 개정 = 도장 upbit_split_v 의 prev)",
 }
 
 

@@ -52,6 +52,7 @@ def post_routes():
         "/api/fallback_avg": http_post_prefs.post_fallback_avg,
         "/api/offchain_self": http_post_prefs.post_offchain_self,
         "/api/first_seen_px": http_post_prefs.post_first_seen_px,
+        "/api/kr_deemed": http_post_prefs.post_kr_deemed,
         "/api/gas_in_cost": http_post_prefs.post_gas_in_cost,
         "/api/review_len": http_post_prefs.post_review_len,
         "/api/review_pause": http_post_prefs.post_review_pause,

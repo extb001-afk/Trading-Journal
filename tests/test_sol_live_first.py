@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +15,7 @@ os.fsync = lambda fd: None
 import paths, statefile  # noqa: E402
 import bf_engine  # noqa: E402
 import sol_watch  # noqa: E402
+import sol_base  # noqa: E402
 from inbox import SegmentWriter  # noqa: E402
 
 chk = H.chk
@@ -242,6 +244,7 @@ def setup(name, owners, cfg_sol=None, chain=None, metered=False, months=5):
 
 
 _HEL0 = bf_engine.HELIUS
+_RpcReal = sol_base.Rpc
 
 
 def watcher(cfg, owners):
@@ -837,5 +840,134 @@ run(wt2, 20 * 60, ib2, errs2, each=each3)
 got3 = ib2.scan()
 check9("[Y] 퇴역한 같은 주소 재사용(열거 사이 열림·닫힘)의 계정만 낀 입금(T6)도 방출 · 한 번씩",
        {"T5-recreate+dep", "T6-dep-ata-only", "T7-out", "T8-close"} <= set(got3) and all(v == 1 for v in got3.values()), sorted(got3))
+
+print("— Q 같은 슬롯 새 거래 2건 = 블록 안 자리(slot_idx)")
+BLK = {}
+GB = []
+HINT = [{}]
+_orig_call_q, _orig_hint_q = MockRpc.call, MockRpc.hint
+
+
+@contextlib.contextmanager
+def _hint_q(self, **kw):
+    HINT.append(dict(HINT[-1], **kw))
+    try:
+        yield
+    finally:
+        HINT.pop()
+
+
+def _call_q(self, method, params, timeout=25):
+    if method == "getBlock":
+        GB.append((params[0], params[1], dict(HINT[-1])))
+        if params[0] not in BLK:
+            raise RuntimeError("시험: 블록 조회 오류 주입")
+        return {"blockhash": "h", "signatures": list(BLK[params[0]])}
+    return _orig_call_q(self, method, params, timeout)
+
+
+MockRpc.call, MockRpc.hint = _call_q, _hint_q
+
+
+def recs_q(names):
+    out = {}
+    d9 = os.path.join(paths.INBOX_DIR, "sol")
+    for f9 in sorted(os.listdir(d9)):
+        for ln9 in open(os.path.join(d9, f9), encoding="utf-8"):
+            try:
+                r9 = json.loads(ln9)
+            except ValueError:
+                continue
+            if r9.get("txhash") in names:
+                out.setdefault(r9["txhash"], []).append(r9)
+    return out
+
+
+clock.t = T0 + 80 * 86400
+cq = Chain()
+OQ = b58("Q-owner")
+tq = clock.t - 3600
+cq.sol_in(OQ, "Q-fb-a", tq)
+cq.sol_in(OQ, "Q-fb-b", tq)
+BLK[slot_of(tq)] = ["Q-fb-b", "Q-fb-a"]
+cfgq, _rpcq = setup("Q", [OQ], chain=cq)
+wtq = watcher(cfgq, [OQ])
+ibq, errsq = Inbox(), []
+run(wtq, 130, ibq, errsq)
+rq = recs_q({"Q-fb-a", "Q-fb-b"})
+check9("[Q] 첫 백필(커서 없는 주소)의 같은 슬롯 = getBlock 0콜 · 순서 키 없음 · 커서 확정",
+       not GB and len(rq) == 2 and not any("slot_idx" in x for v in rq.values() for x in v) and OQ in cur(wtq), {"getBlock": GB, "recs": sorted(rq)})
+u = clock.time() + 5
+cq.sol_in(OQ, "Q-a1", u)
+cq.sol_in(OQ, "Q-a2", u)
+cq.sol_in(OQ, "Q-s", u + 20)
+BLK[slot_of(u)] = ["Q-x0", "Q-a2", "Q-x2", "Q-a1"]
+BLK[slot_of(u + 20)] = ["Q-s"]
+run(wtq, 20 * 60, ibq, errsq)
+rq = recs_q({"Q-a1", "Q-a2", "Q-s"})
+check9("[Q] 같은 슬롯 2건 = getBlock 1콜(서명만 · 보상 없음) · publicnode 힌트(pn_tx)", len(GB) == 1 and GB[0][0] == slot_of(u)
+       and GB[0][1].get("transactionDetails") == "signatures" and GB[0][1].get("rewards") is False and GB[0][2].get("pn_tx") is True, GB)
+check9("[Q] 방출 레코드 slot_idx = 블록 서명 목록 자리 · 슬롯 1건 = 키 없음 · 한 번씩",
+       [x.get("slot_idx") for x in rq.get("Q-a1", [])] == [3] and [x.get("slot_idx") for x in rq.get("Q-a2", [])] == [1]
+       and [("slot_idx" in x) for x in rq.get("Q-s", [])] == [False], {k: [x.get("slot_idx") for x in v] for k, v in rq.items()})
+u2 = clock.time() + 5
+cq.sol_in(OQ, "Q-f1", u2)
+cq.sol_in(OQ, "Q-f2", u2)
+cq.sol_in(OQ, "Q-after", u2 + 200)
+n_gb = len(GB)
+run(wtq, 20 * 60, ibq, errsq)
+rq = recs_q({"Q-f1", "Q-f2", "Q-after"})
+check9("[Q] 블록 조회 실패 = 순서 키 없이 그대로 방출(한 번씩) · 뒤 거래도 진행 · 오류 없음",
+       len(GB) == n_gb + 1 and sorted(rq) == ["Q-after", "Q-f1", "Q-f2"] and all(len(v) == 1 and "slot_idx" not in v[0] for v in rq.values()) and not errsq,
+       {"getBlock": len(GB) - n_gb, "recs": sorted(rq), "errs": errsq[:2]})
+u3 = clock.time() + 5
+for i in range(6):
+    cq.sol_in(OQ, f"Q-c{i}-a", u3 + i)
+    cq.sol_in(OQ, f"Q-c{i}-b", u3 + i)
+    BLK[slot_of(u3 + i)] = [f"Q-c{i}-b", f"Q-c{i}-a"]
+n_gb = len(GB)
+run(wtq, 2 * 60, ibq, errsq)
+rq = recs_q({f"Q-c{i}-{k}" for i in range(6) for k in "ab"})
+check9("[Q] 한 사이클 같은 슬롯 6개 = getBlock 상한 4 · 앞 4 슬롯만 순서 키(나머지 = 종전) · 12건 모두 방출",
+       len(GB) - n_gb == sol_watch.SLOT_IDX_MAX_PER_CYCLE == 4 and len(rq) == 12
+       and [i for i in range(6) if rq.get(f"Q-c{i}-a", [{}])[0].get("slot_idx") == 1 and rq.get(f"Q-c{i}-b", [{}])[0].get("slot_idx") == 0] == [0, 1, 2, 3]
+       and all("slot_idx" not in rq.get(f"Q-c{i}-{k}", [{}])[0] for i in (4, 5) for k in "ab"),
+       {"getBlock": len(GB) - n_gb, "recs": len(rq)})
+MockRpc.call, MockRpc.hint = _orig_call_q, _orig_hint_q
+
+
+class _BlkRpc:
+    def __init__(self, res):
+        self.res, self.n = res, 0
+
+    def call(self, method, params, timeout=25):
+        self.n += 1
+        return self.res
+
+
+nowq = int(clock.time())
+rows_q = [{"signature": "a", "slot": 9, "blockTime": nowq - 7200}, {"signature": "b", "slot": 9, "blockTime": nowq - 7200}]
+r1, r2, r3, r4 = _BlkRpc({"signatures": ["b", "a"]}), _BlkRpc({"signatures": ["b", "a"]}), _BlkRpc(None), _BlkRpc({"signatures": "x"})
+check9("[Q] 블록 시각이 publicnode 보관 창 밖 = 0콜(헬리우스로 가지 않음) · 창 없음(공개 RPC 주) = 물음",
+       sol_watch._slot_index_map(r1, rows_q, None, win=3600) == {} and r1.n == 0 and sol_watch._slot_index_map(r2, rows_q, None) == {"b": 0, "a": 1} and r2.n == 1,
+       (r1.n, r2.n))
+check9("[Q] 응답 null·모양 이상 = 건너뜀 · 이번 몫(only) 1건 = 0콜",
+       sol_watch._slot_index_map(r3, rows_q) == {} and sol_watch._slot_index_map(r4, rows_q) == {}
+       and sol_watch._slot_index_map(r2, rows_q, only={"a"}) == {} and r2.n == 1, (r3.n, r4.n, r2.n))
+memo_q, r5 = {}, _BlkRpc({"signatures": ["a", "b"]})
+first_q = sol_watch._slot_index_map(r5, rows_q, memo=memo_q)
+check9("[Q] 받은 자리 기억 = 같은 슬롯 다시 볼 때 0콜(상한에 안 셈) · 실패·null 은 안 남김",
+       first_q == {"a": 0, "b": 1} and sol_watch._slot_index_map(r5, rows_q, memo=memo_q, cap=0) == first_q and r5.n == 1
+       and sol_watch._slot_index_map(r3, rows_q, memo={}) == {} and r3.n == 2, (r5.n, r3.n, memo_q))
+
+rq9 = _RpcReal.__new__(_RpcReal)
+rq9.__dict__.update(url="https://hl.mock.invalid/", metered=True, head_url="https://pn.mock.invalid/", archive_url=None, fallbacks=[],
+                    primary_open_until=0.0, hl_closed_until=0.0, _pn_open_until=0.0, _ar_pause_until=0.0)
+rq9._hint, rq9._kind, rq9._fill = threading.local(), threading.local(), threading.local()
+with rq9.hint(pn_tx=True):
+    ron9 = [x[1] for x in rq9._routes("getBlock", [9, {}])]
+roff9 = [x[1] for x in rq9._routes("getBlock", [9, {}])]
+check9("[Q] 진짜 Rpc 경로: getBlock + pn_tx 힌트 = publicnode 먼저(헬리우스는 실패 때만) · 힌트 없음 = 종전(헬리우스)",
+       ron9 == ["head", "primary"] and roff9 == ["primary"], (ron9, roff9))
 
 H.finish()

@@ -82,7 +82,7 @@ ARCHIVE_METHOD_PER10S = 8
 
 
 HEAD_METHODS = frozenset({"getSignaturesForAddress", "getTransaction", "getSlot", "getEpochInfo", "getAccountInfo", "getBalance",
-                          "getMultipleAccounts", "minimumLedgerSlot", "getFirstAvailableBlock"})
+                          "getMultipleAccounts", "minimumLedgerSlot", "getFirstAvailableBlock", "getBlock"})
 
 
 STAKE_PROGRAM = "Stake11111111111111111111111111111111111111"
@@ -307,7 +307,7 @@ class Rpc:
             if opt.get("before") and not opt.get("until"):
                 return False
             return True
-        if method == "getTransaction":
+        if method in ("getTransaction", "getBlock"):
             return bool(hint.get("pn_tx"))
         return True
 

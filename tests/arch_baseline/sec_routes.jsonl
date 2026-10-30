@@ -88,6 +88,7 @@
 {"r": "POST /api/health/restore", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/ignore", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/ignore_bulk", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/kr_deemed", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/login", "auth": "open", "csrf": "none", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/logout", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/nft/prefs", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}

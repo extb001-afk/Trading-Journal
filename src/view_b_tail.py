@@ -6,6 +6,7 @@ import buildproc
 import config, paths, prefs_ident, statefile
 import histcurve
 import json
+from view_fspin import kd_field
 import netpace
 import os
 import px_alt
@@ -402,6 +403,8 @@ class TailMixin:
             "balanceCheck": balcheck.view(),
         }
         fields["prov"] = self._prov_field(fields.get("backfillProgress"))
+        if isinstance(prefs.get("kr_deemed"), dict):
+            fields["krDeemed"] = kd_field(prefs, fs_sum.get("kd"))
         if os.environ.get("TJ_REPLAY_DEBUG") == "1":
             fields["_taxRowsAll"] = tax_rows
             fields["_positionsAll"] = _pos_all_dbg

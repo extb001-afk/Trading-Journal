@@ -249,7 +249,7 @@ def data_rev_down(conn: "sqlite3.Connection", to: int = 1) -> str:
     try:
         cur = dbm.ledger_data_rev(conn)
         if cur != AF.DATA_REV:
-            raise Refused(f"원장 data_rev {cur} — 2 일 때만 내림(3 이상 = 배포 롤백 도구 --ledger)")
+            raise Refused(f"원장 data_rev {cur} — 2 일 때만 내림(3 = 먼저 tools/ledger_rowfix.py --upbit-split-down --apply · 4 이상 = 배포 롤백 도구 --ledger)")
         n_r = conn.execute("SELECT count(*) FROM meta WHERE k >= ? AND k < ?", (AF.RECEIPT, AF.RECEIPT[:-1] + ";")).fetchone()[0]
         n_a = conn.execute("SELECT count(*) FROM postings WHERE substr(source_ns, -8) = ':autofix'").fetchone()[0]
         if n_r or n_a:

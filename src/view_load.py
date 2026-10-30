@@ -117,7 +117,7 @@ class LoadMixin:
         ns, sid = str(r["source_ns"] or ""), str(r["source_id"] or "")
         try:
             if ":" not in ns and r["leg_kind"] != "opening":
-                b9 = conn.execute("SELECT block, CASE WHEN json_valid(snapshot) THEN json_extract(snapshot, '$.tx.position') END,"
+                b9 = conn.execute("SELECT block, CASE WHEN json_valid(snapshot) THEN COALESCE(json_extract(snapshot, '$.tx.position'), json_extract(snapshot, '$.slot_idx')) END,"
                                   " CASE WHEN json_valid(snapshot) AND json_type(snapshot, '$.token_transfers') = 'array' THEN (SELECT min(json_extract(t.value, '$.log_index'))"
                                   " FROM json_each(snapshot, '$.token_transfers') t WHERE t.type = 'object') END FROM raw_txs WHERE chain=? AND txhash=?", (ns, sid)).fetchone()
                 if b9 is None or b9[0] is None:

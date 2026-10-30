@@ -56,10 +56,7 @@ class UnkBook:
                 dq = Decimal(str(qty9))
                 take = min(dq, g9["qty_unknown"])
                 if take > 0:
-                    unx.cb.sub_unknown(g9, take)
-                    unx.cb.add_known(g9, take)
-                    g9["cost"] += take * Decimal(str(unit9))
-                    unx.cb.note_cost(g9, take, unit9)
+                    unx.cb.convert(g9, take, take * Decimal(str(unit9)))
                     unc_d = dq if unc9 is None else max(Decimal(0), min(dq, Decimal(str(unc9))))
                     pend9 = (ts9, take, Decimal(str(unit9)), ("개당 지정 단가" if ov9.get("mode") != "market" else "유입 당시 시세") + f" ${unit9:,.6g} 적용",
                              ref if ref.startswith("0x") else "", take * unc_d / dq)

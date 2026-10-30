@@ -263,7 +263,7 @@ class DetailApiMixin:
         disp_krw = sum(float(r.get("_disp", r.get("disp")) or 0) * float(r.get("rate") or 0) for r in tx9) if tx9 and all(r.get("rate") for r in tx9) else None
         tpnl = sum(float(r.get("_disp", r.get("disp")) or 0) - float(r.get("_acq", r.get("acq")) or 0) - float(r.get("fee") or 0) for r in tx9)
         acq_krw = sum(float(r.get("_akr", r.get("akr")) if r.get("_akr", r.get("akr")) is not None
-                            else float(r.get("_acq", r.get("acq")) or 0) * float(r.get("rate") or 0)) for r in tx9) if disp_krw is not None else None
+                            else float(r.get("_acq", r.get("acq")) or 0) * float(r.get("rate") or 0)) - float(r.get("_kd", r.get("kd")) or 0) for r in tx9) if disp_krw is not None else None
         fee_krw = sum(float(r.get("fee") or 0) * float(r.get("rate") or 0) for r in tx9) if disp_krw is not None else None
         pnl_krw = (disp_krw - acq_krw - fee_krw) if disp_krw is not None else None
         fb_n = sum(1 for r in tx9 if "폴백" in str(r.get("ex") or ""))

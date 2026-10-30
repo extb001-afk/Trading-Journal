@@ -387,6 +387,28 @@
     + (num(fs.stN) ? ' · 스테이블 원화 원가 ' + nf('ko-KR').format(num(fs.stN)) + '건' : '')
     + (fs.fill && num(fs.fill.specs) ? ' · 옛날 시세 채우는 중(남는 사용량으로 천천히) — 남은 코인 ' + nf('ko-KR').format(num(fs.fill.specs)) + '개 · ' + nf('ko-KR').format(num(fs.fill.days)) + '일' + (fs.fill.since ? ' · ' + esc(String(fs.fill.since)) + '부터' : '')
       : fs.fill && num(fs.fill.done) ? ' · 옛날 시세 채우기 끝(' + nf('ko-KR').format(num(fs.fill.done)) + '개 코인)' : '');
+  const KD_AT0 = '2028-12-31', KD_AT_MIN = '2026-01-01', KD_AT_MAX = '2099-12-31';
+  const KD_TIPS = ['과세 시행 전에 갖고 있던 코인은 기준일 23:59 시가와 실제 산 가격 중 높은 쪽을 원화 취득가액으로 봐요'
+      + '(소득세법 부칙 의제취득가액 · 날짜는 법 개정에 맞춰 바꿔요).',
+    '세금 명세의 원화 취득가액만 바뀌어요 — 달러 원가·실현, 머리·달력 원화 실현은 그대로 · 바뀐 행엔 ‘의제’ 표시.',
+    '기준 시각 전엔 시가가 없어 계산이 그대로예요. 지나면 그때 시가를 한 번 고정해 쓰고, 아직 못 받았으면 ‘시가 대기’로 두었다가 받으면 반영해요.',
+    '원가 미확인 수량 · 원가 흐름을 놓친 묶음(LP·토큰 세일 등)은 이번엔 적용하지 않아요 · 신고 참고용이에요.'];
+  const KD_TIP = KD_TIPS[0] + ' · 자세히는 펼쳐서 봐요';
+  const kdStat = k => {
+    const n = v => nf('ko-KR').format(num(v)), off = num(k.skip) + num(k.none), at = esc(String(k.at || KD_AT0));
+    if (!k.on) return '끔 · 원화 취득가액 = 실제 산 가격 · 기준일 ' + at;
+    if (k.state === 'before' || !k.state) return '켬 · 기준 ' + at + ' 23:59 — 그때 시가가 정해지면 적용해요';
+    return '켬 · 기준 ' + at + ' 23:59 · 적용 ' + n(k.rows) + '행(+' + pvm('₩' + (pvOn() ? pvW(PVM.krw) : n(Math.round(num(k.add))))) + ')'
+      + (num(k.wait) ? ' · 시가 대기 ' + n(k.wait) + '종' : '') + (off ? ' · 적용 안 함 ' + n(off) + '종' : '')
+      + (num(k.unk) ? ' · 원가 미확인 ' + n(k.unk) + '종 제외' : '') + (kdLost(k) ? ' · 적용 못 한 몫 ' + kdLostW(k) : '');
+  };
+  const kdLost = k => k.on && k.state && k.state !== 'before' ? Math.round(num(k.lost) + num(k.miss)) : 0;
+  const kdLostW = k => pvm('₩' + (pvOn() ? pvW(PVM.krw) : nf('ko-KR').format(kdLost(k))));
+  const KD_WHY = { left: '처분 행 없이 빠져나감(외부 유출·LP 등)', akr: '환산값을 쓴 명세 행', fee_px: '수수료 코인 시가 없음', fee_fx: '그 시각 환율 기록 없는 수수료',
+    tr_br: '기준 시각에 브릿지 이동 중', tr_rt: '기준 시각에 프로그램 예치 중', tr_ret: '기준 시각에 외부 주소로 보냈다 돌아옴', tr_offc: '기준 시각에 오프체인 이동 중' };
+  const kdLostTip = k => { const by = k.lostBy && typeof k.lostBy === 'object' ? k.lostBy : {};
+    return '의제 가산분 중 세금 명세 행에 못 붙은 몫이에요(신고 참고용 · 달러·원화 실현 무관) — '
+      + Object.keys(by).map(w => (KD_WHY[w] || w) + ' ' + nf('ko-KR').format(num((by[w] || [])[1])) + '건').join(' · '); };
   function sxCostBody() {
     const D = S.D, tg = D.taxGas;
     let h = '';
@@ -404,6 +426,19 @@
       '<span class="pvx">' + (fs.on ? (fs.eff === false ? '켬 · 평균가 대체가 켜져 있어 그쪽이 먼저' : '켬 · 최초 인식 시가 ' + nf('ko-KR').format(num(fs.n)) + '건' + (num(fs.wait) ? ' · 시세 대기 ' + nf('ko-KR').format(num(fs.wait)) + '건' : '')) : '끔 · 원가 미확인은 실현에서 빼요') + '</span>',
       taxTip(FS_TIP, '최초 인식 시가 설명') + sxSw('firstSeen', !!fs.on, '원가 미확인 최초 인식 시가'),
       { exp: () => FS_TIPS.map((t, i) => '<div class="cap"' + (i ? ' style="margin-top:4px"' : '') + '>' + esc(t) + '</div>').join('') + (fs.on ? '<div class="cap pvx" style="margin-top:6px">' + fsStat(fs) + '</div>' : '') });
+    const kdc = D.krDeemed || { on: false, at: KD_AT0 };
+    const kat = kdc.at || KD_AT0;
+    if (!isISO(S.drafts.kdAt) || S.drafts.kdAt === S.kdAtSv) S.drafts.kdAt = kat;
+    S.kdAtSv = kat;
+    h += sxIt('sx-cost-krdeemed', '한국 의제취득가액(과세 시행 전 보유분)', '<span class="pvx">' + kdStat(kdc) + '</span>',
+      taxTip(KD_TIP, '한국 의제취득가액 설명') + sxSw('krDeemed', !!kdc.on, '한국 의제취득가액'),
+      { exp: () => KD_TIPS.map((t, i) => '<div class="cap"' + (i ? ' style="margin-top:4px"' : '') + '>' + esc(t) + '</div>').join('')
+        + '<div class="frm" style="flex-wrap:wrap;margin-top:8px">'
+        + uiDate('kdAt', isISO(S.drafts.kdAt) ? S.drafts.kdAt : (kdc.at || KD_AT0), { label: '기준일', min: KD_AT_MIN, max: KD_AT_MAX })
+        + '<button class="btn sm pri" data-a="kdAtSave">기준일 저장</button></div>'
+        + '<div class="cap" style="margin-top:4px">기준 시각 = 그 날 23:59(한국 시각)</div>'
+        + (kdLost(kdc) ? '<div class="cap pvx" style="margin-top:6px">적용 못 한 몫 ' + kdLostW(kdc) + ' '
+          + taxTip(kdLostTip(kdc), '적용 못 한 몫 사유') + '</div>' : '') });
     h += sxIt('sx-cost-fallback', '원가 미확인 → 평균가 대체', D.fallbackOn ? '켬 · 종목 평균 매수가로 평가·손익 반영' : '끔 · 원가 추적 우선', sxSw('fallback', D.fallbackOn, '원가 미확인 평균가 대체'),
       { exp: () => '<div class="cap">' + (D.fallbackOn ? '원가 없는 보유·매도를 종목 평균 매수가로 평가·손익·실현에 반영 중이에요' : '원가 미확인은 손익에서 빼고 표시만 해요(원가 추적이 우선)') + '</div>' });
     const ov = D.costOv;
@@ -624,6 +659,7 @@
     add('cost', '', '가스를 원가·실현에 반영', '가스 gas 수수료 원가 비용', '#sx-cost-gas');
     arr(D.offc).forEach(o => add('cost', '', o.name + ' 오프체인 이체 가정', '오프체인 내 계정 이동 가정 offchain', '#sx-cost-offc-' + sxId(o.ex), openIt('sx-cost-offc-' + sxId(o.ex))));
     if (D.firstSeen) add('cost', '', '원가 미확인 → 최초 인식 시가', '최초 인식 시가 처음 인식 추정 원가 미확인 기초 잔고 에어드랍 first seen', '#sx-cost-firstseen', openIt('sx-cost-firstseen'));
+    add('cost', '', '한국 의제취득가액', '의제취득가액 의제 취득가 과세 시행 전 보유 기준일 2028 세금 명세 원화 취득가액 특례', '#sx-cost-krdeemed', openIt('sx-cost-krdeemed'));
     add('cost', '', '원가 미확인 → 평균가 대체', '평균가 대체 폴백 fallback 원가 미확인', '#sx-cost-fallback');
     add('cost', '', '원가 지정', '원가 지정 해제 되돌리기 손익 0', '#sx-cost-ov', openIt('sx-cost-ov'));
     add('cost', 'rules', '매칭 규칙', '매칭 규칙 수량 오차 시간 창 입금 판정 평단 평균 매수가', '');

@@ -52,6 +52,9 @@ REGISTRY = (
     Migration(9, "apply_cell", "데이터 1회", "autofix:<ex>:<SYM>", "autofix_apply.apply_cell",
               ("tools/ledger_rowfix._run_autofix",), "칸마다(영수증·끄기 표식 없을 때 · core 경로 = autofix.enabled 만 — autofix_apply.core_pass)", 2,
               "자동 행·영수증 이월 — rebuild2 가 opening 행을 그대로 다시 넣고(시각 모름 = 역산 안 함) meta 영수증·묘비·재파생 막음 표식을 가져감"),
+    Migration(10, "_split_rev_mark", "데이터 1회", "upbit_split_v", "core_fills.FillsMixin._split_rev_mark",
+              ("core_fills.FillsMixin._consume_fills",), "분할 레그를 넣을 때마다(도장 있으면 data_rev 만 멱등 · 옛 합산 주문 바꾸기 = tools/ledger_rowfix --kind upbit_split --apply)", 3,
+              "재구축 = 최신 raw_ex 를 _consume_fills 가 다시 기장 → 같은 분할 레그·도장·data_rev 3(분할 주문이 있을 때)"),
 )
 
 STARTUP = tuple(m.n for m in REGISTRY if "migrate.startup" in m.callers)

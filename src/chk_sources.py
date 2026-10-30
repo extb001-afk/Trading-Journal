@@ -600,6 +600,7 @@ def collect_sources(cfg: dict, st: dict, now: float) -> list:
             except (TypeError, ValueError):
                 out[-1]["track_pending"], out[-1]["pending_since"] = 0, None
             out[-1]["pending_block"] = bool(err9) and le9.get("kind") == "pending"
+            out[-1].update({"partial": True, "partial_kind": "internal", "partial_since": sy["watch_hold"]["since"], "extra": " · ".join(x for x in (out[-1].get("extra"), str(sy["watch_hold"].get("msg") or "")[:160]) if x)} if isinstance(sy.get("watch_hold"), dict) and isinstance(sy["watch_hold"].get("since"), (int, float)) else {})
     sp = _read(os.path.join(S, "spot.json"), None)
     if isinstance(sp, dict):
         tk9 = sp.get("tick") if isinstance(sp.get("tick"), dict) else {}

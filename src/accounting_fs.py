@@ -12,6 +12,7 @@ import logs
 import histcurve
 import rawtx_cache
 import spamguard
+from accounting_krw import KrDeemed
 from view_common import DAYCLOSE_ON
 from view_common import EPS
 from view_common import EX_CANDLE_SYMS
@@ -53,7 +54,7 @@ class FirstSeen:
         fsx.fs_pkey = fs_pkey
         fsx.cb = px.cb
         fsx.ub_wd_tx = set()
-
+        fsx.kdx = KrDeemed(fsx)
     def fs_hold(fsx, g9, why9, q9):
         if q9 > EPS:
             h9 = g9.setdefault("_fsh", {})
@@ -275,7 +276,7 @@ class FirstSeen:
             return None
         snd9 = fsx.fs_senders(chain9, txh9)
         if snd9 is None:
-            fsx.cb.add_unknown(g9, q9)
+            fsx.cb.acquire(g9, u=q9, ts=ts9)
             fsx.px.unx.note_unk(g9, ts9, f"{CHAIN_NAME.get(chain9, chain9)} 외부 유입(원가 없음 · 보냈던 코인이 돌아온 것인지 확인 못 함 — 최초 인식 시가 보류)",
                      q9, txh9, chain9=chain9, fs9=0)
             fsx.fs_hold(g9, "ret", q9)
@@ -296,6 +297,7 @@ class FirstSeen:
             kn9 += k9r
             un9 += u9r
             kr9 += w9r
+            fsx.px.kpx.kd_move(flow9, e9, sc9)
             fsx.px.cpx.cp_add_map(g9, e9.get("_cmp"), float(sc9))
             if sc9 >= 1:
                 for k7 in ("qty", "left", "cost", "known", "unknown", "krw"):
@@ -314,9 +316,7 @@ class FirstSeen:
             if rem9 <= EPS:
                 break
         took9 = q9 - rem9
-        fsx.cb.add_known(g9, kn9)
-        fsx.cb.add_cost(g9, inh9)
-        fsx.cb.add_unknown(g9, un9 + rem9)
+        fsx.cb.acquire(g9, kn9, inh9, ts=ts9, u=un9 + rem9)
         flow9["bought"] += took9
         flow9["cost"] += inh9
         flow9["cost_krw"] += kr9
@@ -377,9 +377,7 @@ class FirstSeen:
         if src9 == "sameday":
             fsx.px.unx.fs_sum["sd"] += 1
         unit_d = Decimal(str(px9))
-        fsx.cb.sub_unknown(g9, take)
-        fsx.cb.add_known(g9, take)
-        fsx.cb.add_cost(g9, take * unit_d)
+        fsx.cb.convert(g9, take, take * unit_d)
         fsx.px.cpx.cp_add(g9, ("fs", g9["gid"]), take, take * unit_d)
         unc_d = dq9 if unc9 is None else max(Decimal(0), min(dq9, Decimal(str(unc9))))
         pend9 = (ts9, take, unit_d, take * unc_d / dq9 if dq9 > 0 else Decimal(0))

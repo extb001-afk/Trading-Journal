@@ -263,12 +263,12 @@ finally:
 cur = CC.sites(T.SRC, group=True)
 keys9 = {(r["fn"].split(".")[-1], r["base"], r["key"]) for r in cur}
 out9 = sorted((r["f"], r["fn"], r["base"], r["key"]) for r in cur if r["f"] != "accounting_basis.py")
-chk(out9 == [("accounting_unk.py", "UnkBook.note_unk", "g9", "cost")],
-    "C2 지금 src 그룹 원가 쓰기(accounting_basis 밖) = UnkBook.note_unk 의 g9 cost 하나(basis_proof R1 거부 · 허용 목록 11막)", out9)
+chk(out9 == [],
+    "C2 지금 src 그룹 원가 쓰기(accounting_basis 밖) = 0(종전 UnkBook.note_unk 의 g9 cost 직접 쓰기 하나 → cb.convert 깔때기)", out9)
 chk(not {k for k in keys9 if k[0] in ("consume", "fee_gain", "_h_disp", "_h_exf_fee", "_h_acq", "_h_move")},
     "C2 7-3·7-4 치환 함수(consume·fee_gain · _h_disp 형제 기증자 dn · _h_exf_fee 중첩 바탕 d9f['g'] · _h_acq · _h_move)의 그룹 자리 0(CostBasis 로 감)",
     sorted(k for k in keys9 if k[0] in ("consume", "fee_gain", "_h_disp", "_h_exf_fee", "_h_acq", "_h_move")))
 inb9 = [r for r in cur if r["f"] == "accounting_basis.py"]
-chk(inb9 and all(r["fn"].startswith("CostBasis.") for r in inb9) and len(cur) == len(inb9) + 1,
-    "C2 나머지 그룹 자리 = CostBasis 기본 함수 몸통 %d문장(75a69cbf = 흩어진 130문장 · 127줄)" % len(inb9), sorted({r["fn"] for r in inb9}))
+chk(inb9 and all(r["fn"].startswith("CostBasis.") for r in inb9) and len(cur) == len(inb9),
+    "C2 그룹 자리 전부 = CostBasis 기본 함수 몸통 %d문장(75a69cbf = 흩어진 130문장 · 127줄 · 밖 0)" % len(inb9), sorted({r["fn"] for r in inb9}))
 T.finish()

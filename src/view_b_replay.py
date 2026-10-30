@@ -850,7 +850,7 @@ class ReplayRun:
         st9 = stake_rwd.setdefault(r["location"] or "", [Decimal(0), Decimal(0)])
         st9[0] += q
         if cost is not None:
-            cb.acquire(g, q, cost)
+            cb.acquire(g, q, cost, ts=ts, src=r["posting_id"])
             if ex_income and g["is_stable"]:
                 fs_st(g, ts, q, chain)
             st9[1] += cost
@@ -861,7 +861,7 @@ class ReplayRun:
             si9 = stake_inc.setdefault(dk9s, {}).setdefault(g["sym"], [Decimal(0), Decimal(0), 0, 0.0])
             si9[0] += cost; si9[1] += q; si9[2] += 1; si9[3] += float(cost) * rt9s
         else:
-            cb.add_unknown(g, q)
+            cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
             note_unk(g, ts, ("거래소 지급(배당·에어드랍·Earn 이자) · 시가 없음(원가 없음)" if ex_income else "솔라나 스테이킹 보상 · 시가 대기(원가 없음)"),
                      q, "" if ex_income else txh, chain9=chain, fs9=0)
         if ex_income:
@@ -981,10 +981,10 @@ class ReplayRun:
             g.setdefault("open_tl", []).append((t_tl9, q))
         if q > 0:
             if g["is_stable"]:
-                cb.acquire(g, q, q)
+                cb.acquire(g, q, q, ts=ts, src=r["posting_id"])
                 fs_st(g, ts, q, chain)
             else:
-                cb.add_unknown(g, q)
+                cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
                 if late9:
                     note_unk(g, ts, "늦게 찾은 과거 체결 상쇄 유입(원가 없음)", q, "", chain9=chain)
                 elif evk in ("EXF_ADJUST", "EX_ADJUST"):
@@ -1114,9 +1114,8 @@ class ReplayRun:
                 e2["used"] = True
                 if e2.get("gid") in G:
                     G[e2["gid"]]["risk_allow"] = True
-                cb.add_known(g, e2["known"] * ratio5)
+                cb.acquire(g, e2["known"] * ratio5, ts=ts, src=r["posting_id"], u=e2["unknown"] * ratio5, lots=cb.pool_lots(e2))
                 cp_add_map(g, e2.get("_cmp"), ratio5)
-                cb.add_unknown(g, e2["unknown"] * ratio5)
                 note_unk(g, ts, "업비트 입금 · 내 지갑 출금 승계(원가 없음)", e2["unknown"] * ratio5, txh2, ex9="upbit", up_gid=e2.get("gid"), unc9=Decimal(0), fs9=0)
                 inh5 += e2["cost"] * ratio5
                 ikr5 += krw_inh(e2, e2["cost"] * ratio5, ts)
@@ -1124,15 +1123,16 @@ class ReplayRun:
                 kk5s += (e2.get("kk") or Decimal(0)) * ratio5
                 fk5s += (e2.get("fk") or Decimal(0)) * ratio5
                 diag["ex_dep_fee_resid_cost"] += e2["cost"] * (Decimal(1) - ratio5)
-            cb.add_unknown(g, max(Decimal(0), q - tot_e))
+            cb.acquire(g, u=max(Decimal(0), q - tot_e), ts=ts, src=r["posting_id"])
             note_unk(g, ts, "업비트 입금 초과분(원가 없음)", max(Decimal(0), q - tot_e), txh2 or r["source_id"], ex9="upbit", unc9=Decimal(0))
-            cb.add_cost(g, inh5)
+            cb.capitalize(g, inh5, ts=ts, src=r["posting_id"])
             diag["ex_dep_inh_cost"] += inh5
             diag["ex_dep_inh_n"] += 1
             flow5 = flow_of(g, ts, chain)
             flow5["bought"] += q
             flow5["cost"] += kc5s if g["is_stable"] else inh5
             flow5["cost_krw"] += kk5s if g["is_stable"] else ikr5
+            self.kpx.kd_in(flow5, {"kd": sum(((e2.get("kd") or Decimal(0)) for e2 in ents), Decimal(0))}, ratio5)
             if g["is_stable"]:
                 for e2 in ents:
                     stl_in(flow5, e2, ratio5)
@@ -1150,12 +1150,11 @@ class ReplayRun:
             lnk5 = [(sp9, float(sc7) * w9) for sp9, w9 in e7u.get("_src", ())]
             if e7u.get("oa"):
                 g["oa"] = (g.get("oa") or Decimal(0)) + e7u["oa"] * sc7
-            cb.add_known(g, e7u["known"] * sc7)
+            cb.acquire(g, e7u["known"] * sc7, ts=ts, src=r["posting_id"], u=e7u["unknown"] * sc7 + (q - take7), lots=cb.pool_lots(e7u))
             cp_add_map(g, e7u.get("_cmp"), sc7)
-            cb.add_unknown(g, e7u["unknown"] * sc7 + (q - take7))
             note_unk(g, ts, "업비트 입금 · 해외거래소 출금 승계 잔여(원가 없음)", e7u["unknown"] * sc7 + (q - take7), up_dep_uid_tx.get(r["source_id"]) or r["source_id"], ex9="upbit", unc9=q - take7, fs9=q - take7,
                      up_gid=e7u.get("gid"), via9=f"{fx_name.get(e7u.get('ex'), e7u.get('ex'))} 출금 승계 (그 거래소 {e7u.get('sym')} 의 원가 미상분)")
-            cb.add_cost(g, inh7)
+            cb.capitalize(g, inh7, ts=ts, src=r["posting_id"])
             flow5 = flow_of(g, ts, chain)
             flow5["bought"] += take7
             ikr7 = krw_inh(e7u, inh7, ts)
@@ -1167,6 +1166,7 @@ class ReplayRun:
             else:
                 flow5["cost"] += inh7
                 flow5["cost_krw"] += ikr7
+            self.kpx.kd_in(flow5, e7u, sc7)
             st7 = e7u.pop("story", None)
             if st7:
                 flow5["events"][:0] = st7
@@ -1181,7 +1181,7 @@ class ReplayRun:
               and sale_book(g, r, q, ts, chain, up_dep_uid_tx.get(r["source_id"]) or r["source_id"])):
             d5 = "업비트 입금 완료 · 토큰 세일 원가 (입찰 지갑에서 직접 입금)"
         elif g["is_stable"]:
-            cb.acquire(g, q, q)
+            cb.acquire(g, q, q, ts=ts, src=r["posting_id"])
             fs_st(g, ts, q, chain)
             d5 = "업비트 입금 완료 (스테이블 액면)"
         elif (up_dep_uid_tx.get(r["source_id"]) or "").startswith("swap_") and \
@@ -1194,24 +1194,23 @@ class ReplayRun:
                 e9s["left"] = Decimal(0)
                 kq9s = q * min(Decimal(1), e9s["known"] / e9s["qty"])
                 c9s = e9s["cost"] * sc9s
-                cb.add_known(g, kq9s)
-                cb.add_unknown(g, q - kq9s)
-                cb.add_cost(g, c9s)
+                cb.acquire(g, kq9s, c9s, ts=ts, src=r["posting_id"], u=q - kq9s)
                 fl9s = flow_of(g, ts, chain)
                 fl9s["bought"] += q
                 fl9s["cost"] += c9s
                 fl9s["cost_krw"] += krw_inh(e9s, c9s, ts)
+                self.kpx.kd_in(fl9s, e9s, sc9s)
                 note_unk(g, ts, f"업비트 토큰 전환 입금 · {old9['sym']} → {g['sym']} (구 토큰 원가 없음)", q - kq9s, t9s, ex9="upbit", fs9=0,
                          up_gid=old9["gid"], unc9=Decimal(0), via9=f"업비트 토큰 전환 ({old9['sym']} 출금)")
             else:
-                cb.add_unknown(g, q)
+                cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
                 note_unk(g, ts, f"업비트 토큰 전환 입금 · {old9['sym']} → {g['sym']} (구 토큰 원가 없음)", q, t9s, ex9="upbit", fs9=0,
                          up_gid=old9["gid"], via9=f"업비트 토큰 전환 ({old9['sym']} 출금)")
                 lst9s = g.get("unk_src") or []
                 swap_dep[t9s] = {"g": g, "q": q, "ent": lst9s[-1] if lst9s and lst9s[-1].get("ref") == t9s else None}
             d5 = f"업비트 토큰 전환 입금 ({old9['sym']} → {g['sym']} · 구 토큰 원가 승계)"
         else:
-            cb.add_unknown(g, q)
+            cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
             note_unk(g, ts, "업비트 입금(원가 없음 · 링크 없음)", q, up_dep_uid_tx.get(r["source_id"]) or r["source_id"], ex9="upbit")
             diag["ex_dep_unlinked_n"] += 1
             d5 = "업비트 입금 완료 (원가 미상)"
@@ -1244,7 +1243,7 @@ class ReplayRun:
                 fee_expense(rem * unit, t, dkey, "EXF_WD_FEE", fx_name.get(exk, exk))
             if rknown > EPS:
                 rkrw = tr["krw"] * share if (tr.get("krw") is not None and not grp["is_stable"]) else None
-                fee_gain(grp, unit, rknown, rcost, t, dkey, chain, rkrw)
+                fee_gain(grp, unit, rknown, rcost, t, dkey, chain, rkrw, kd=(tr.get("kd") or Decimal(0)) * share)
             diag["arr_short_n"] = diag.get("arr_short_n", 0) + 1
 
         cb.snapshot(g, ts, q)
@@ -1289,9 +1288,8 @@ class ReplayRun:
             sc6 = take6 / e6["qty"] if e6["qty"] > 0 else Decimal(1)
             lnk6 = [(sp9, float(sc6) * w9) for sp9, w9 in e6.get("_src", ())]
             inh6 = e6["cost"] * sc6
-            cb.add_known(g, e6["known"] * sc6)
+            cb.acquire(g, e6["known"] * sc6, ts=ts, src=r["posting_id"], u=e6["unknown"] * sc6 + (q - take6), lots=cb.pool_lots(e6))
             cp_add_map(g, e6.get("_cmp"), sc6)
-            cb.add_unknown(g, e6["unknown"] * sc6 + (q - take6))
             unc6 = None
             if g["is_stable"]:
                 st_flow_in(g, e6, sc6, ts, chain)
@@ -1301,10 +1299,11 @@ class ReplayRun:
                 flow6["cost"] += inh6
                 ikr6 = krw_inh(e6, inh6, ts)
                 flow6["cost_krw"] += ikr6
+                self.kpx.kd_in(flow6, e6, sc6)
                 in_note(flow6, "내 지갑", take6, inh6, ts, cost_krw=ikr6)
                 unc6 = q - take6
             note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금 · 내 지갑 출금 승계(원가 없음)", e6["unknown"] * sc6 + (q - take6), t6, ex9=ex6, up_gid=e6.get("gid"), unc9=unc6, fs9=q - take6)
-            cb.add_cost(g, inh6)
+            cb.capitalize(g, inh6, ts=ts, src=r["posting_id"])
             _short_fee(e6, lb6, take6, g, ts, ex6, t6)
             d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 · 원가 승계 (${float(inh6):,.2f})"
             diag["exf_dep_inh_cost"] += inh6
@@ -1318,12 +1317,11 @@ class ReplayRun:
             lnk6 = [(sp9, float(sc7) * w9) for sp9, w9 in e7.get("_src", ())]
             if e7.get("oa"):
                 g["oa"] = (g.get("oa") or Decimal(0)) + e7["oa"] * sc7
-            cb.add_known(g, e7["known"] * sc7)
+            cb.acquire(g, e7["known"] * sc7, ts=ts, src=r["posting_id"], u=e7["unknown"] * sc7 + (q - take7), lots=cb.pool_lots(e7))
             cp_add_map(g, e7.get("_cmp"), sc7)
-            cb.add_unknown(g, e7["unknown"] * sc7 + (q - take7))
             note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금 · 출금 승계 잔여(원가 없음)", e7["unknown"] * sc7 + (q - take7), exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"], ex9=ex6, unc9=q - take7, fs9=q - take7,
                      up_gid=e7.get("gid"), via9=f"{fx_name.get(e7.get('ex'), e7.get('ex'))} 출금 승계 (그 거래소 {e7.get('sym')} 의 원가 미상분)")
-            cb.add_cost(g, inh7)
+            cb.capitalize(g, inh7, ts=ts, src=r["posting_id"])
             flow7 = flow_of(g, ts, chain)
             flow7["bought"] += take7
             ikr7 = krw_inh(e7, inh7, ts)
@@ -1335,6 +1333,7 @@ class ReplayRun:
             else:
                 flow7["cost"] += inh7
                 flow7["cost_krw"] += ikr7
+            self.kpx.kd_in(flow7, e7, sc7)
             _short_fee(e7, lb7, take7, g, ts, e7.get("ex") or ex6, t6)
             st7 = e7.pop("story", None)
             if st7:
@@ -1353,9 +1352,10 @@ class ReplayRun:
             exn6 = fx_name.get(ex6, ex6)
             ref6 = exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"]
             need6, ck6, kk6, uu6, ckr6 = q, Decimal(0), Decimal(0), Decimal(0), Decimal(0)
-            kcs6 = kks6 = fks6 = Decimal(0)
+            kcs6 = kks6 = fks6 = kds6 = Decimal(0)
             stl6 = []
             cmp6 = {}
+            fr6 = []
             for l9 in offc_pool.get(offc_pk9, ()):
                 if need6 <= EPS:
                     break
@@ -1370,10 +1370,12 @@ class ReplayRun:
                 kcs6 += (l9.get("kc") or Decimal(0)) * sc9
                 kks6 += (l9.get("kk") or Decimal(0)) * sc9
                 fks6 += (l9.get("fk") or Decimal(0)) * sc9
+                kds6 += (l9.get("kd") or Decimal(0)) * sc9
                 stl6.extend([[x9[0], x9[1]] + [v9 * float(sc9) for v9 in x9[2:]] for x9 in l9.get("_stl") or ()])
                 cmp6 = cp_merge(cmp6, l9.get("_cmp"), float(sc9))
                 kk6 += l9["known"] * sc9
                 uu6 += l9["unknown"] * sc9
+                fr6.extend((fq * sc9, None if fc is None else fc * sc9, ft) for fq, fc, ft in cb.pool_lots(l9) or ())
             need6 = max(Decimal(0), need6)
             take6 = q - need6
             so9 = offc_s(ex6)
@@ -1385,8 +1387,7 @@ class ReplayRun:
                 so9["excessN"] += 1
             if g["is_stable"]:
                 fq6 = q - kk6
-                cb.add_known(g, q)
-                cb.add_cost(g, ck6 + fq6)
+                cb.acquire(g, q, ck6 + fq6, ts=ts, src=r["posting_id"])
                 fs_st(g, ts, fq6, chain)
                 if kcs6 > EPS and take6 > EPS:
                     fl6o = flow_of(g, ts, chain)
@@ -1394,6 +1395,7 @@ class ReplayRun:
                     fl6o["cost_krw"] += kks6
                     stl_in(fl6o, {"_stl": stl6}, Decimal(1))
                     fs_in(fl6o, {"fk": fks6}, Decimal(1))
+                    self.kpx.kd_in(fl6o, {"kd": kds6}, Decimal(1))
                 so9["inhCost"] += ck6 + (take6 - kk6)
                 offc_add(ex6, g["sym"], True, inh=ck6 + (take6 - kk6))
                 d6 = (f"{exn6} 입금 완료 · 내 다른 {exn6} 계정에서 돌아옴(오프체인 · 내 계정으로 가정 · 원가 이어받음 ${float(ck6 + fq6):,.2f})"
@@ -1403,13 +1405,12 @@ class ReplayRun:
                 offc_add(ex6, g["sym"], False, inh=ck6)
                 g["oa"] = (g.get("oa") or Decimal(0)) + kk6
                 cp_add_map(g, cmp6, 1.0)
-                cb.add_known(g, kk6)
-                cb.add_unknown(g, uu6 + need6)
-                cb.add_cost(g, ck6)
+                cb.acquire(g, kk6, ck6, ts=ts, src=r["posting_id"], u=uu6 + need6, lots=fr6)
                 flow6 = flow_of(g, ts, chain)
                 flow6["bought"] += take6
                 flow6["cost"] += ck6
                 flow6["cost_krw"] += ckr6
+                self.kpx.kd_in(flow6, {"kd": kds6}, Decimal(1))
                 in_note(flow6, f"내 다른 {exn6} 계정", take6, ck6, ts, cost_krw=ckr6)
                 note_unk(g, ts, f"{exn6} 입금 · 내 다른 {exn6} 계정에서 돌아옴(보낼 때부터 원가 미상)", uu6, ref6, ex9=ex6, unc9=Decimal(0), fs9=0,
                          via9=f"내 다른 {exn6} 계정 이동분(오프체인) — 보낼 때 이 계정에서도 원가 미상이던 몫")
@@ -1417,11 +1418,11 @@ class ReplayRun:
                 d6 = (f"{exn6} 입금 완료 · 내 다른 {exn6} 계정에서 돌아옴(오프체인 · 내 계정으로 가정 · 원가 이어받음 ${float(ck6):,.2f})"
                       + (f" · 초과 {_qfmt(need6)}개 원가 미상" if need6 > EPS else ""))
         elif g["is_stable"]:
-            cb.acquire(g, q, q)
+            cb.acquire(g, q, q, ts=ts, src=r["posting_id"])
             fs_st(g, ts, q, chain)
             d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 (스테이블 액면)"
         else:
-            cb.add_unknown(g, q)
+            cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
             note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금(원가 없음 · 링크 없음)", q, exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"], ex9=ex6)
             d6 = f"{fx_name.get(ex6, ex6)} 입금 완료 (원가 미상)"
         if g["is_stable"] or not g["cur"]:
@@ -1458,7 +1459,7 @@ class ReplayRun:
             if a9f and not a9f["g"]["is_stable"] and not a9f["g"].get("is_fiat"):
                 chg9f = True
                 ga9 = a9f["g"]
-                cb.add_cost(ga9, F9)
+                cb.capitalize(ga9, F9, ts=ts, src=a9f["row"]["posting_id"])
                 a9f["flow"]["cost"] += F9
                 a9f["flow"]["cost_krw"] += krw_of(F9, ts, a9f["row"])
                 if k9f in krw_mkt:
@@ -1467,7 +1468,7 @@ class ReplayRun:
             elif a9f and a9f["g"]["is_stable"] and d9f and d9f.get("fiat"):
                 chg9f = True
                 ga9 = a9f["g"]
-                cb.add_cost(ga9, F9)
+                cb.capitalize(ga9, F9, ts=ts, src=a9f["row"]["posting_id"])
                 a9f["flow"]["cost"] += F9
                 a9f["flow"]["cost_krw"] += krw_of(F9, ts, a9f["row"])
                 fee_diag["usd_cost"] += F9
@@ -1506,7 +1507,7 @@ class ReplayRun:
         if lk == "move_out":
             if evk == "TRANSFER_OUT_EX" and not ((txh or "").lower() in fx_dep_tx or txh in fx_dep_tx):
                 k2, d2 = "전송", f"{CHAIN_NAME.get(chain, chain)} 지갑 → 업비트 입금 주소"
-                mc2, mk2, mu2 = consume(g, -q)
+                mc2, mk2, mu2 = consume(g, -q, lots=True)
                 cp_o2 = cp_last[0]
                 kr2 = krw_took(mc2, ts)
                 kc2r, kk2r = krw_rec(mc2)
@@ -1519,6 +1520,8 @@ class ReplayRun:
                      "raw_sym": (r["symbol"] or "").upper(),
                      "credited": txh in credited_txh, "used": False, "cyc": g["cur"], "ts": int(ts or 0),
                      "_src": [(r["posting_id"], 1.0)], "_cmp": cp_merge({}, cp_o2)})
+                cb.pool_put(ex_transit[txh][-1], cb.take_frags(g))
+                self.kpx.kd_put(ex_transit[txh][-1], self.kpx.kd_last[0])
                 diag["ex_out_cost"] += mc2
                 diag["ex_out_n"] += 1
                 if g["cur"] is not None:
@@ -1531,7 +1534,7 @@ class ReplayRun:
                 exn9o = fx_name.get(ex9o, ex9o)
                 k2 = "전송"
                 d2 = f"{exn9o} 출금 → 내 다른 {exn9o} 계정으로 이동(오프체인 · 내 계정으로 가정 · 원가 이동)"
-                mco, mko, muo = consume(g, -q)
+                mco, mko, muo = consume(g, -q, lots=True)
                 cp_oo = cp_last[0]
                 mkrwo = krw_took(mco, ts)
                 kco, kko = krw_rec(mco)
@@ -1541,6 +1544,8 @@ class ReplayRun:
                 offc_pool.setdefault((ex9o, acct_norm.canon(g["sym"], ex9o)), []).append(
                     {"ts": int(ts), "qty": -q, "left": -q, "cost": mco, "cost_krw": mkrwo, "kc": kco, "kk": kko, "fk": fko, "_stl": stl_out(kco), "known": mko,
                      "unknown": muo + max(Decimal(0), (-q) - (mko + muo)), "gid": g["gid"], "sym": g["sym"], "_cmp": cp_merge({}, cp_oo)})
+                cb.pool_put(offc_pool[(ex9o, acct_norm.canon(g["sym"], ex9o))][-1], cb.take_frags(g))
+                self.kpx.kd_put(offc_pool[(ex9o, acct_norm.canon(g["sym"], ex9o))][-1], self.kpx.kd_last[0])
                 so9 = offc_s(ex9o)
                 so9["wdN"] += 1
                 so9["wdCost"] += mco
@@ -1571,7 +1576,7 @@ class ReplayRun:
                       else f"{fx_name.get(ex9w, ex9w)} 출금 (txid 없음 · 원가 소실)")
                 lb9 = loan_wd.get(r["posting_id"]) if loan_wd else None
                 if lb9:
-                    cb.add_unknown(g, lb9)
+                    cb.acquire(g, u=lb9, ts=ts, src=r["posting_id"])
                     k09, c09 = g["qty_known"], g["cost"]
                     note_unk(g, ts, f"{fx_name.get(ex9w, ex9w)} 대출로 빌린 코인(출금 · 그 시각 시가 추정)", lb9, t4 or "", ex9=ex9w, chain9=chain, unc9=lb9)
                     if g["qty_known"] - k09 > EPS:
@@ -1580,7 +1585,7 @@ class ReplayRun:
                     else:
                         loan_unp[g["gid"]] = loan_unp.get(g["gid"], [Decimal(0), int(ts)])
                         loan_unp[g["gid"]][0] += lb9
-                mc4, mk4, mu4 = consume(g, -q)
+                mc4, mk4, mu4 = consume(g, -q, lots=True)
                 cp_o4 = cp_last[0]
                 kr4 = krw_took(mc4, ts)
                 kc4r, kk4r = krw_rec(mc4)
@@ -1604,14 +1609,16 @@ class ReplayRun:
                     mc4, mk4, mu4 = mc4 - fmc4, mk4 - fmk4, mu4 * (1 - s4)
                     kr4, oa4 = kr4 * (1 - s4), oa4 * (1 - s4)
                     kc4r, kk4r, fk4r = kc4r * (1 - s4), kk4r * (1 - s4), fk4r * (1 - s4)
+                    fkd4 = self.kpx.kd_cut(s4)
                     stl4r = [[x9[0], x9[1]] + [v9 * float(1 - s4) for v9 in x9[2:]] for x9 in stl4r]
                     cp_o4 = cp_merge({}, cp_o4, float(1 - s4)) if cp_o4 else cp_o4
                     u4f = fee_unit(g, ts, (fmc4 / fmk4) if fmk4 > EPS else None)
+                    self.kpx.kd_lose("fee_px", fkd4 if u4f is None else None)
                     if u4f is not None:
                         wd_fee_add(ex9w, fq4 * u4f, ts)
                         if gas_on:
                             fee_expense(fq4 * u4f, ts, dkey, "EXF_WD_FEE", ex9w)
-                        fee_gain(g, u4f, fmk4, fmc4, ts, dkey, chain, fkr4, mix9=fmix4, stl9=fstl4, cmp9=fcmp4, fs9=ffs4)
+                        fee_gain(g, u4f, fmk4, fmc4, ts, dkey, chain, fkr4, mix9=fmix4, stl9=fstl4, cmp9=fcmp4, fs9=ffs4, kd=fkd4)
                     d2 += f" · 출금 수수료 {_qfmt(fq4)} {g['sym']}"
                 if evk == "EXF_WITHDRAW" and (ex9w, r["source_id"]) in offc_wd:
                     so9 = offc_s(ex9w)
@@ -1656,6 +1663,7 @@ class ReplayRun:
                         fl9["bought"] += mv9
                         fl9["cost"] += c9
                         fl9["cost_krw"] += kr4 * c9 / mc4 if mc4 > 0 else krw_of(c9, ts)
+                        self.kpx.kd_in(fl9, {"kd": self.kpx.kd_cut(c9 / mc4 if mc4 > 0 else Decimal(0))}, Decimal(1))
                         if sw9.get("ent") is not None:
                             sw9["ent"]["qty"] = max(0.0, sw9["ent"]["qty"] - float(mv9))
                     t4 = None
@@ -1681,6 +1689,8 @@ class ReplayRun:
                     if oa4 > 0:
                         e4["oa"] = e4.get("oa", Decimal(0)) + oa4
                     e4["unknown"] += mu4 + max(Decimal(0), nq4 - (mk4 + mu4))
+                    cb.pool_put(e4, cb.take_frags(g))
+                    self.kpx.kd_put(e4, self.kpx.kd_last[0])
                     if g["cur"] is not None:
                         evs4w = g["cur"]["events"]
                         k4w, n4w = _sell_pre(g["cur"], evs4w, sell_wm=sell_wm)
@@ -1701,7 +1711,7 @@ class ReplayRun:
                 ex5 = fx_dep_tx.get((txh or "").lower()) or fx_dep_tx.get(txh)
                 k2 = "전송"
                 d2 = f"{CHAIN_NAME.get(chain, chain)} 지갑 → {fx_name.get(ex5, ex5)} 입금 주소"
-                mc5, mk5, mu5 = consume(g, -q)
+                mc5, mk5, mu5 = consume(g, -q, lots=True)
                 cp_o5 = cp_last[0]
                 kr5 = krw_took(mc5, ts)
                 kc5r, kk5r = krw_rec(mc5)
@@ -1724,6 +1734,8 @@ class ReplayRun:
                 stl_carry(e5, kc5r)
                 e5["known"] += mk5
                 e5["unknown"] += mu5 + max(Decimal(0), (-q) - (mk5 + mu5))
+                cb.pool_put(e5, cb.take_frags(g))
+                self.kpx.kd_put(e5, self.kpx.kd_last[0])
                 g["last_out"] = {"ex": ex5, "tx": txh}
                 if g["cur"] is not None and not g["is_stable"]:
                     e5.setdefault("cycs", []).append((g["cur"], -q, mc5))
@@ -1740,6 +1752,7 @@ class ReplayRun:
                 cy9["mc"] += mc3
                 cy9["mk"] += mk3
                 cy9["krw"] += krw_took(mc3, ts)
+                self.kpx.kd_put(cy9, self.kpx.kd_last[0])
                 cy9["src"].append((r["posting_id"], 1.0))
                 if g["cur"] is not None:
                     g["cur"]["moved_qty"] += -q
@@ -1749,7 +1762,7 @@ class ReplayRun:
                                   + (f"원가 이관 (${float(mc3):,.2f} · 손익 없음)" if mk3 > EPS else "원가 미상 이관"))
             elif evk == "BRIDGE":
                 k2, d2 = "전송", f"{CHAIN_NAME.get(chain, chain)} → 브릿지 · 위치 이동(손익 없음)"
-                mc3, mk3, mu3 = consume(g, -q)
+                mc3, mk3, mu3 = consume(g, -q, lots=True)
                 cp_o3 = cp_last[0]
                 kc3r, kk3r = krw_rec(mc3)
                 cb.snapshot(g, ts, q)
@@ -1778,20 +1791,24 @@ class ReplayRun:
                     fcmp3 = cp_emit(cp_merge({}, cp_o3, float(s3)), mu3 * s3, fmk3 + mu3 * s3, fmc3) if cp_o3 else None
                     mc3, mk3, mu3 = mc3 - fmc3, mk3 - fmk3, mu3 * (1 - s3)
                     kc3r, kk3r = kc3r * (1 - s3), kk3r * (1 - s3)
+                    fkd3 = self.kpx.kd_cut(s3)
                     cp_o3 = cp_merge({}, cp_o3, float(1 - s3)) if cp_o3 else cp_o3
                     sq3 = sa3
                     u3f = fee_unit(g, ts, (fmc3 / fmk3) if fmk3 > EPS else None)
+                    self.kpx.kd_lose("fee_px", fkd3 if u3f is None else None)
                     if u3f is not None:
                         br_fee_add(chain, fq3 * u3f, ts)
                         if gas_on:
                             fee_expense(fq3 * u3f, ts, dkey, "BRIDGE_FEE", CHAIN_NAME.get(chain, chain))
-                        fee_gain(g, u3f, fmk3, fmc3, ts, dkey, chain, fkr3, mix9=fmix3, stl9=fstl3, cmp9=fcmp3, fs9=ffs3)
+                        fee_gain(g, u3f, fmk3, fmc3, ts, dkey, chain, fkr3, mix9=fmix3, stl9=fstl3, cmp9=fcmp3, fs9=ffs3, kd=fkd3)
                     d2 += f" · 브릿지 수수료 {_qfmt(fq3)} {g['sym']}"
                 bridge_outs.append({"sym": g["sym"], "qty": sq3, "ts": ts, "_src": [(r["posting_id"], 1.0)], "_cmp": cp_merge({}, cp_o3),
                                     "cost": mc3, "known": mk3, "kc": kc3r, "kk": kk3r,
                                     "unknown": mu3 + max(Decimal(0), sq3 - (mk3 + mu3)),
                                     "left": sq3,
                                     "gid": r["group_id"] or -r["asset_id"], "chain": chain, "pid": r["posting_id"]})
+                cb.pool_put(bridge_outs[-1], cb.take_frags(g))
+                self.kpx.kd_put(bridge_outs[-1], self.kpx.kd_last[0])
                 bo_pid[r["posting_id"]] = bridge_outs[-1]
             elif evk == "TRANSFER_SELF":
                 k2, d2 = "전송", f"{CHAIN_NAME.get(chain, chain)} · 내 지갑 간 이동 (±0 · 손익 없음)"
@@ -1820,9 +1837,7 @@ class ReplayRun:
             mc9, mk9, mu9 = rd9["carry"]
             k9 = min(q, mk9 * rd9["ratio"])
             u9 = q - k9
-            cb.add_known(g, k9)
-            cb.add_unknown(g, u9)
-            cb.add_cost(g, mc9)
+            cb.acquire(g, k9, mc9, ts=ts, src=r["posting_id"], u=u9)
             if u9 > EPS:
                 note_unk(g, ts, "세일 영수증 교환 · 승계(원가 없음)", u9, txh, chain9=chain, fs9=0)
             g["risk_allow"] = True
@@ -1851,14 +1866,13 @@ class ReplayRun:
             if g["is_stable"] or zv9g:
                 k9 = q
             c9 = cy9["mc"] * sh9
-            cb.add_known(g, k9)
-            cb.add_unknown(g, q - k9)
-            cb.add_cost(g, c9)
+            cb.acquire(g, k9, c9, ts=ts, src=r["posting_id"], u=q - k9)
             if q - k9 > EPS:
                 note_unk(g, ts, f"스왑(양쪽 시세 없음) {cy9['sym']} → {g['sym']} · 승계(원가 없음)", q - k9, txh, chain9=chain, fs9=0)
             flow["bought"] += k9
             flow["cost"] += c9
             flow["cost_krw"] += cy9["krw"] * sh9
+            self.kpx.kd_in(flow, cy9, sh9)
             ev(flow, ts, "전송", f"{CHAIN_NAME.get(chain, chain)} · "
                + ("브릿지 예치 증서" if nx9.get("rcpt") else "스왑(양쪽 시세 없음)") + f" {cy9['sym']} → {g['sym']} · "
                + (f"원가 승계 (${float(c9):,.2f})" if k9 > EPS else "원가 미상 승계")
@@ -1873,11 +1887,10 @@ class ReplayRun:
             sc9 = q / xc9["qty"]
             cov9 = min(q, xc9["cov"] * sc9)
             inh9 = xc9["cost"] * sc9
-            cb.add_known(g, cov9)
-            cb.add_unknown(g, q - cov9)
+            cb.acquire(g, cov9, ts=ts, src=r["posting_id"], u=q - cov9)
             if q - cov9 > 0:
                 note_unk(g, ts, f"{xc9['label']} · 일부 원가 미상", q - cov9, txh, chain9=chain, fs9=0)
-            cb.add_cost(g, inh9)
+            cb.capitalize(g, inh9, ts=ts, src=r["posting_id"])
             g["risk_allow"] = True
             flow["bought"] += cov9
             flow["cost"] += inh9
@@ -1902,8 +1915,7 @@ class ReplayRun:
                 sc9 = take9 / rt9["qty"] if rt9["qty"] > 0 else Decimal(1)
                 inh9 = rt9["cost"] * sc9
                 kq9s = min(take9, rt9["known"] * sc9)
-                cb.add_known(g, q)
-                cb.add_cost(g, inh9 + (q - kq9s))
+                cb.acquire(g, q, inh9 + (q - kq9s), ts=ts, src=r["posting_id"])
                 st_flow_in(g, rt9, sc9, ts, chain)
                 fs_st(g, ts, q - kq9s, chain)
                 g["risk_allow"] = True
@@ -1915,15 +1927,15 @@ class ReplayRun:
                 rt9["left"] -= take9
                 sc9 = take9 / rt9["qty"] if rt9["qty"] > 0 else Decimal(1)
                 inh9 = rt9["cost"] * sc9
-                cb.add_known(g, rt9["known"] * sc9)
+                cb.acquire(g, rt9["known"] * sc9, ts=ts, src=r["posting_id"], u=rt9["unknown"] * sc9 + (q - take9), lots=cb.pool_lots(rt9))
                 cp_add_map(g, rt9.get("_cmp"), sc9)
-                cb.add_unknown(g, rt9["unknown"] * sc9 + (q - take9))
                 note_unk(g, ts, "프로그램 예치 복귀 · 승계(원가 없음)", rt9["unknown"] * sc9 + (q - take9), txh, chain9=chain, unc9=q - take9, fs9=q - take9)
-                cb.add_cost(g, inh9)
+                cb.capitalize(g, inh9, ts=ts, src=r["posting_id"])
                 g["risk_allow"] = True
                 flow["bought"] += take9
                 flow["cost"] += inh9
                 flow["cost_krw"] += krw_inh(rt9, inh9, ts)
+                self.kpx.kd_in(flow, rt9, sc9)
                 ev(flow, ts, "전송", f"{CHAIN_NAME.get(chain, chain)} 프로그램 예치 복귀 · 원가 복원 (${float(inh9):,.2f})",
                    f"{q:,.4f}".rstrip("0").rstrip("."), "—", txh)
                 flow["events"][-1]["_lnk"] = [(sp9, float(sc9) * w9) for sp9, w9 in rt9.get("_src", ())]
@@ -1963,8 +1975,7 @@ class ReplayRun:
                     kq4 = min(take4, e4s["known"] * sc4)
                     if e4s.get("oa"):
                         g["oa"] = (g.get("oa") or Decimal(0)) + e4s["oa"] * sc4
-                    cb.add_known(g, q)
-                    cb.add_cost(g, inh_c4 + (q - kq4))
+                    cb.acquire(g, q, inh_c4 + (q - kq4), ts=ts, src=r["posting_id"])
                     st_flow_in(g, e4s, sc4, ts, chain)
                     diag["st_wd_inh_n"] = diag.get("st_wd_inh_n", 0) + 1
                     diag["st_wd_inh_gap"] = diag.get("st_wd_inh_gap", Decimal(0)) + (inh_c4 - kq4)
@@ -1986,16 +1997,16 @@ class ReplayRun:
                     inh_c4 = e4["cost"] * sc4
                     if e4.get("oa"):
                         g["oa"] = (g.get("oa") or Decimal(0)) + e4["oa"] * sc4
-                    cb.add_known(g, e4["known"] * sc4)
+                    cb.acquire(g, e4["known"] * sc4, ts=ts, src=r["posting_id"], u=e4["unknown"] * sc4 + (q - take4), lots=cb.pool_lots(e4))
                     cp_add_map(g, e4.get("_cmp"), sc4)
-                    cb.add_unknown(g, e4["unknown"] * sc4 + (q - take4))
                     note_unk(g, ts, "거래소 출금 도착 · 승계(원가 없음)", e4["unknown"] * sc4 + (q - take4), txh, chain9=chain, up_gid=e4.get("gid"), unc9=q - take4, fs9=q - take4)
-                    cb.add_cost(g, inh_c4)
+                    cb.capitalize(g, inh_c4, ts=ts, src=r["posting_id"])
                     flow = flow_of(g, ts, chain)
                     flow["bought"] += take4
                     flow["cost"] += inh_c4
                     ikr4 = krw_inh(e4, inh_c4, ts)
                     flow["cost_krw"] += ikr4
+                    self.kpx.kd_in(flow, e4, sc4)
                     st4 = e4.pop("story", None)
                     if st4:
                         flow["events"][:0] = st4
@@ -2019,7 +2030,8 @@ class ReplayRun:
                         and take >= linked["qty"] * BR_UNIQ_LO):
                     inh_cost = linked["cost"] * (take + linked["left"]) / linked["qty"]
                     linked["left"] = Decimal(0)
-                cb.add_known(g, linked.get("known", linked["qty"]) * scale)
+                cb.acquire(g, linked.get("known", linked["qty"]) * scale, ts=ts, src=r["posting_id"],
+                           u=linked.get("unknown", Decimal(0)) * scale + (q - take), lots=cb.pool_lots(linked))
                 cv9 = linked.get("_cv")
                 if cv9 and linked.get("_cmp"):
                     cvk9 = ("cv", r["posting_id"], g["gid"])
@@ -2027,9 +2039,8 @@ class ReplayRun:
                            sum(v9[1] for v9 in linked["_cmp"].values()) * float(scale))
                 else:
                     cp_add_map(g, linked.get("_cmp"), scale)
-                cb.add_unknown(g, linked.get("unknown", Decimal(0)) * scale + (q - take))
                 note_unk(g, ts, "브릿지 도착 · 승계(원가 없음)", linked.get("unknown", Decimal(0)) * scale + (q - take), txh, chain9=chain, up_gid=linked.get("gid"), fs9=q - take)
-                cb.add_cost(g, inh_cost)
+                cb.capitalize(g, inh_cost, ts=ts, src=r["posting_id"])
                 flow = flow_of(g, ts, chain)
                 ev(flow, ts, "전송",
                    f"{CHAIN_NAME.get(chain, chain)} 브릿지 도착 · 원가 이관"
@@ -2052,13 +2063,13 @@ class ReplayRun:
                 ret9 = sale_refund(g, r, q, ts, chain, txh, flow, rf_face)
             if g["is_stable"]:
                 if ret9 is None:
-                    cb.acquire(g, q, q)
+                    cb.acquire(g, q, q, ts=ts, src=r["posting_id"])
                 fs_st(g, ts, q if ret9 is None else rf_face[0], chain)
             elif ret9 is None:
                 if fs_on and evk in ("TRANSFER_IN", "PROGRAM_IN") and not g.get("is_fiat") and r["posting_id"] not in br_amb:
                     ret9 = fs_ret(g, ts, q, chain, txh, flow)
                 if ret9 is None:
-                    cb.add_unknown(g, q)
+                    cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
                     if r["posting_id"] in br_amb:
                         note_unk(g, ts, f"{CHAIN_NAME.get(chain, chain)} 브릿지 도착 후보 여러 개(컨트랙트 다름 · 원가 연결 보류 — 진짜 도착이면 원가 지정)",
                                  q, r["source_id"], chain9=chain, fs9=0)
@@ -2098,12 +2109,12 @@ class ReplayRun:
                 else:
                     ev(flow, ts, "전송", d3 + (ret9 or ""), qs2, "—", txh)
             else:
-                cb.add_known(g, 0)
+                cb.acquire(g, Decimal(0), ts=ts, src=r["posting_id"])
                 ev(flow, ts, "온체인 매수",
                    f"{CHAIN_NAME.get(chain, chain)} · 스왑 (원가 산정 중)",
                    f"{q:,.4f}".rstrip("0").rstrip("."), "—", txh)
         else:
-            cb.acquire(g, q, cost)
+            cb.acquire(g, q, cost, ts=ts, src=r["posting_id"])
             flow["bought"] += q
             flow["cost"] += cost
             k9acq = krw_of(cost, ts, r)
@@ -2115,14 +2126,14 @@ class ReplayRun:
             sg9 = swap_gas.get((r["source_ns"], txh)) if (gas_on and evk == "SWAP") else None
             if sg9 and not sg9["done"] and sg9["sell"] is None and sg9["buy"] == g["gid"] and sg9["usd"] > 0:
                 sg9["done"] = True
-                cb.add_cost(g, sg9["usd"])
+                cb.capitalize(g, sg9["usd"], ts=ts, src=r["posting_id"])
                 flow["cost"] += sg9["usd"]
                 flow["cost_krw"] += krw_of(sg9["usd"], ts, r)
                 gas_applied["buy"] += sg9["usd"]
                 gas_applied["n"] += 1
             if evk == "EX_BUY":
                 ex_fee9 = up_fee.get(r["source_id"])
-                if ex_fee9 and r["source_ns"] == "upbit:order" and int(r["leg_seq"] or 0) == 0:
+                if ex_fee9 and r["source_ns"] == "upbit:order" and (not r["leg_seq"] or up_mkt.get(r["source_id"]) == "KRW"):
                     ex_fee_add("upbit", cost * ex_fee9[1] / (ex_fee9[0] + ex_fee9[1]), ts)
                 ev(flow, ts, "거래소 매수", f"업비트 · {up_mkt.get(r['source_id'], 'KRW')} 마켓 체결",
                    f"{q:,.4f}".rstrip("0").rstrip("."), f"${float(cost):,.2f}", txh, un=_un(q, cost))
@@ -2165,8 +2176,7 @@ class ReplayRun:
         kq = min(took, link.get("known", link["qty"]) * share)
         grp["risk_allow"] = True
         if src.get("is_stable") and not link.get("_cv"):
-            cb.add_known(grp, qty_in)
-            cb.add_cost(grp, inh + (qty_in - kq))
+            cb.acquire(grp, qty_in, inh + (qty_in - kq), ts=t, src=row["posting_id"])
             st_flow_in(grp, link, kshare, t, chain_)
             fs_st(grp, t, qty_in - kq, chain_)
             diag["st_br_inh_n"] = diag.get("st_br_inh_n", 0) + 1
@@ -2178,8 +2188,8 @@ class ReplayRun:
         mck = (link["krw"] * inh / link["cost"] if (link.get("krw") is not None and link["cost"] > 0 and not src.get("is_stable"))
                else None)
         gain = (fee_gain(src, ratio, dep_known, inh, t, acct_norm.iso_day(t), chain_, mck,
-                         lab9="브릿지 전환(다른 자산 도착 · 스테이블 수령 = 매도)") if dep_known > EPS else Decimal(0))
-        cb.acquire(grp, qty_in, qty_in)
+                         lab9="브릿지 전환(다른 자산 도착 · 스테이블 수령 = 매도)", kd=(link.get("kd") or Decimal(0)) * kshare) if dep_known > EPS else Decimal(0))
+        cb.acquire(grp, qty_in, qty_in, ts=t, src=row["posting_id"])
         fs_st(grp, t, qty_in, chain_)
         diag["st_br_cv_n"] = diag.get("st_br_cv_n", 0) + 1
         extra_ev(t, grp, "전송", f"{CHAIN_NAME.get(chain_, chain_)} 브릿지 도착 · {src['sym']} → {grp['sym']} 전환(= {src['sym']} 매도 · 실현 "
@@ -2220,6 +2230,7 @@ class ReplayRun:
             cy9["mc"] += mc9
             cy9["mk"] += mk9
             cy9["krw"] += krw_took(mc9, ts)
+            self.kpx.kd_put(cy9, self.kpx.kd_last[0])
             cy9["src"].append((r["posting_id"], 1.0))
             flow = g["cur"] or flow_of(g, ts, chain)
             flow["moved_qty"] += qty
@@ -2234,7 +2245,7 @@ class ReplayRun:
         lb9s = loan_wd.get(r["posting_id"]) if (loan_wd and evk == "EXF_SELL") else None
         if lb9s:
             ex9s = (r["location"] or "").split(":")[-1]
-            cb.add_unknown(g, lb9s)
+            cb.acquire(g, u=lb9s, ts=ts, src=r["posting_id"])
             k09s, c09s = g["qty_known"], g["cost"]
             note_unk(g, ts, f"{fx_name.get(ex9s, ex9s)} 대출로 빌린 코인(바로 매도 · 그 시각 시가 추정)", lb9s, txh or "", ex9=ex9s, chain9=chain, unc9=lb9s)
             if g["qty_known"] - k09s > EPS:
@@ -2262,16 +2273,15 @@ class ReplayRun:
                 if len(donors) == 1:
                     dn = donors[0]
                     take9 = min(short, dn["qty_known"] + dn["qty_unknown"])
-                    bc, bk, bu = consume(dn, take9)
+                    bc, bk, bu = consume(dn, take9, lots=True)
                     cp_dn9 = cp_last[0]
                     cb.snapshot(dn, ts, -take9)
                     if dn["qty_known"] + dn["qty_unknown"] <= Decimal("0.000001"):
                         dn["cur"] = None
-                    cb.add_known(g, bk)
+                    cb.acquire(g, bk, ts=ts, src=r["posting_id"], u=bu, lots=cb.take_frags(dn))
                     cp_add_map(g, cp_dn9, 1.0)
-                    cb.add_unknown(g, bu)
                     note_unk(g, ts, "동일 심볼 원장 정정 · 기증자 승계(원가 없음)", bu, txh, chain9=chain, up_gid=dn.get("gid"), fs9=0)
-                    cb.add_cost(g, bc)
+                    cb.capitalize(g, bc, ts=ts, src=r["posting_id"])
                     ev(flow, ts, "전송",
                        "동일 심볼 원장 정정 · 브릿지 인스턴스에서 원가 이관"
                        f" (${float(bc):,.2f})",
@@ -2375,7 +2385,7 @@ class ReplayRun:
                 flow["sold_dates"].append(dkey)
                 flow["proceeds"] = flow.get("proceeds", Decimal(0)) + cost
                 flow["proceeds_krw"] = flow.get("proceeds_krw", Decimal(0)) + krw_of(cost, ts, r)
-            if evk == "EX_SELL" and tax9 is not None and r["source_ns"] == "upbit:order" and int(r["leg_seq"] or 0) == 0:
+            if evk == "EX_SELL" and tax9 is not None and r["source_ns"] == "upbit:order" and (not r["leg_seq"] or up_mkt.get(r["source_id"]) == "KRW"):
                 ex_fee9 = up_fee.get(r["source_id"])
                 if ex_fee9 and ex_fee9[0] > ex_fee9[1]:
                     fu_all9 = cost * ex_fee9[1] / (ex_fee9[0] - ex_fee9[1])
@@ -2385,7 +2395,7 @@ class ReplayRun:
                     if tax9.get("fx") is not None and float(tax9.get("_qty") or 0) > 0:
                         tax9["fx"]["d"] = round(float(tax9["_disp"]) * float(tax9.get("rate") or 0) / float(tax9["_qty"]), 2)
                     ex_fee_add("upbit", fu_all9, ts)
-            elif evk == "EX_SELL" and r["source_ns"] == "upbit:order" and up_fee.get(r["source_id"]) and int(r["leg_seq"] or 0) == 0:
+            elif evk == "EX_SELL" and r["source_ns"] == "upbit:order" and up_fee.get(r["source_id"]) and (not r["leg_seq"] or up_mkt.get(r["source_id"]) == "KRW"):
                 ex_fee9 = up_fee[r["source_id"]]
                 if ex_fee9[0] > ex_fee9[1]:
                     ex_fee_add("upbit", cost * ex_fee9[1] / (ex_fee9[0] - ex_fee9[1]), ts)
@@ -2468,14 +2478,14 @@ class ReplayRun:
         if q > 0:
             if unit9 is None:
                 kb_rb, cb_rb = g["qty_known"], g["cost"]
-                cb.add_unknown(g, q)
+                cb.acquire(g, u=q, ts=ts, src=r["posting_id"])
                 note_unk(g, ts, f"{fx_name.get((r['location'] or '').split(':')[-1], (r['location'] or '').split(':')[-1])} 체결 수수료 환급(리베이트)"
                          " · 시세 없음(원가 없음)", q, txh, ex9=(r["location"] or "").split(":")[-1])
                 dk_rb, dc_rb = g["qty_known"] - kb_rb, g["cost"] - cb_rb
                 if dk_rb > EPS and dc_rb > 0:
                     fee_gain(g, dc_rb / dk_rb, dk_rb, Decimal(0), ts, dkey, chain, lab9="체결 수수료 환급(리베이트 · 지정·인식 원가 = 소득)")
             else:
-                cb.acquire(g, q, q * unit9)
+                cb.acquire(g, q, q * unit9, ts=ts, src=r["posting_id"])
                 if g["is_stable"]:
                     fs_st(g, ts, q * unit9, chain)
                 else:
@@ -2500,6 +2510,7 @@ class ReplayMixin:
             if not isinstance(rr._cb, accounting_basis.StrictCostBasis):
                 raise AssertionError("원가 장부(cb)가 StrictCostBasis 아님(replay) — 엄격 빌드의 원가 칸 그림자 검사 빠짐")
             rr._cb.check(rr.G, "replay")
+        rr._cb.lots_live(rr.G, "replay")
         return rr
 
     def _replay_prep(self, conn) -> PrepOut:
@@ -2943,6 +2954,7 @@ class ReplayMixin:
             fl9["cost_krw"] += (e9.get("kk") or Decimal(0)) * sc9
             stl_in(fl9, e9, sc9)
             fs_in(fl9, e9, sc9)
+            kpx.kd_in(fl9, e9, sc9)
 
         fs_in = accounting_util.fs_in
 
@@ -3402,7 +3414,7 @@ class ReplayMixin:
                 continue
             d_w = -st_w[1]
             win_cut_d[gid_w] = (d_w, st_w[2])
-            cb.add_unknown(g_w, d_w)
+            cb.acquire(g_w, u=d_w, ts=backfill_t0, src=r["posting_id"])
             g_w["_wc"] = True
             note_unk(g_w, backfill_t0, "창 이전 보유분 · 창 절단 추정(원가 없음)", d_w, "", chain9=r["chain"] or "?", fs9=0)
 
@@ -3427,11 +3439,13 @@ class ReplayMixin:
         bo_pid = {}
         rows, br_plan, br_amb, br_sum, br_natfee, disc_bk9, balw_disc9 = _phase_setup(self, conn, rows, BridgeIn(xc_links=xc_links, fx_dep_tx=fx_dep_tx, nopx_swap=nopx_swap, xc_transit=xc_transit, br_arr=br_arr9, sale_links=sale_links, rt_pair=rt_pair, fx_wd=fx_wd, ub_wd_tx=ub_wd_tx, gp=gp, xc_barr=xc_barr))
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
-        run = ReplayRun(G=G, _qfmt=_qfmt, _un=_un, arr_groups=arr_groups, arr_tx_chain=arr_tx_chain, backfill_t0=backfill_t0, balw_disc9=balw_disc9, be_done=be_done, be_take=be_take, be_tax=be_tax, bo_pid=bo_pid, br_amb=br_amb, br_fee_add=br_fee_add, br_natfee=br_natfee, br_plan=br_plan, br_sum=br_sum, br_transit=br_transit, bridge_dep_ts=bridge_dep_ts, bridge_outs=bridge_outs, cb=cb, consume=consume, consume_krw=consume_krw, conv_cp=conv_cp, cp_add=cp_add, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_ev=cp_ev, cp_last=cp_last, cp_merge=cp_merge, cp_take=cp_take, cp_xc=cp_xc, credited_txh=credited_txh, cur_lab=cur_lab, diag=diag, disc_bk9=disc_bk9, ev=ev, ex_debt9=ex_debt9, ex_fee_add=ex_fee_add, ex_loan9=ex_loan9, ex_transit=ex_transit, exf_dep_tx=exf_dep_tx, exf_kind=exf_kind, extra_ev=extra_ev, extra_events=extra_events, fee_acq=fee_acq, fee_day_add=fee_day_add, fee_diag=fee_diag, fee_disp=fee_disp, fee_expense=fee_expense, fee_gain=fee_gain, fee_unit=fee_unit, flow_of=flow_of, fs_in=fs_in, fs_mark=fs_mark, fs_on=fs_on, fs_rec=fs_rec, fs_ret=fs_ret, fs_st=fs_st, fs_sum=fs_sum, fx_dep_tx=fx_dep_tx, fx_dep_uid_tx=fx_dep_uid_tx, fx_name=fx_name, fx_transit=fx_transit, fx_uid_tx=fx_uid_tx, fx_wd=fx_wd, fxb=fxb, fxdep_transit=fxdep_transit, gas_applied=gas_applied, gas_by_chain=gas_by_chain, gas_by_month=gas_by_month, gas_expense=gas_expense, gas_nopx=gas_nopx, gas_on=gas_on, in_note=in_note, krw_inh=krw_inh, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt, krw_of=krw_of, krw_rec=krw_rec, krw_stl=krw_stl, krw_took=krw_took, kst_fmt=kst_fmt, loan_px=loan_px, loan_unp=loan_unp, loan_wd=loan_wd, mv_note=mv_note, my_all9=my_all9, noproc=noproc, nopx_carry=nopx_carry, nopx_swap=nopx_swap, note_unk=note_unk, oa_last=oa_last, oa_take=oa_take, of_cand=of_cand, of_pay_on=of_pay_on, of_wd_take=of_wd_take, offc_add=offc_add, offc_addr_add=offc_addr_add, offc_dep=offc_dep, offc_on=offc_on, offc_pool=offc_pool, offc_s=offc_s, offc_self_wd=offc_self_wd, offc_sold=offc_sold, offc_wd=offc_wd, pay_pid=pay_pid, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, redeem_tx=redeem_tx, rows=rows, rt_pair=rt_pair, rt_transit=rt_transit, sale_book=sale_book, sale_links=sale_links, sale_refund=sale_refund, sale_rf_exit=sale_rf_exit, sb=self, sell_wm=sell_wm, signer9=signer9, st_flow_in=st_flow_in, stable_fx_mark=stable_fx_mark, stake_inc=stake_inc, stake_rwd=stake_rwd, stl_add=stl_add, stl_carry=stl_carry, stl_in=stl_in, stl_krw_mkt=stl_krw_mkt, stl_out=stl_out, stl_src=stl_src, stl_use=stl_use, swap_dep=swap_dep, swap_fill=swap_fill, swap_fill_est=swap_fill_est, swap_fill_zero=swap_fill_zero, swap_gas=swap_gas, swap_pay=swap_pay, swap_wd_pre=swap_wd_pre, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows, to_dest9=to_dest9, tx_group=tx_group, ub_wd_shown=ub_wd_shown, ub_wd_tx=ub_wd_tx, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, up_dep_uid_tx=up_dep_uid_tx, up_fee=up_fee, up_mkt=up_mkt, uuid2txh=uuid2txh, wd_fee_add=wd_fee_add, wd_fee_q=wd_fee_q, wd_tr=wd_tr, xc_transit=xc_transit, xc_used=xc_used, xf_links=xf_links)
+        run = ReplayRun(G=G, _qfmt=_qfmt, _un=_un, arr_groups=arr_groups, arr_tx_chain=arr_tx_chain, backfill_t0=backfill_t0, balw_disc9=balw_disc9, be_done=be_done, be_take=be_take, be_tax=be_tax, bo_pid=bo_pid, br_amb=br_amb, br_fee_add=br_fee_add, br_natfee=br_natfee, br_plan=br_plan, br_sum=br_sum, br_transit=br_transit, bridge_dep_ts=bridge_dep_ts, bridge_outs=bridge_outs, cb=cb, consume=consume, consume_krw=consume_krw, conv_cp=conv_cp, cp_add=cp_add, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_ev=cp_ev, cp_last=cp_last, cp_merge=cp_merge, cp_take=cp_take, cp_xc=cp_xc, credited_txh=credited_txh, cur_lab=cur_lab, diag=diag, disc_bk9=disc_bk9, ev=ev, ex_debt9=ex_debt9, ex_fee_add=ex_fee_add, ex_loan9=ex_loan9, ex_transit=ex_transit, exf_dep_tx=exf_dep_tx, exf_kind=exf_kind, extra_ev=extra_ev, extra_events=extra_events, fee_acq=fee_acq, fee_day_add=fee_day_add, fee_diag=fee_diag, fee_disp=fee_disp, fee_expense=fee_expense, fee_gain=fee_gain, fee_unit=fee_unit, flow_of=flow_of, fs_in=fs_in, fs_mark=fs_mark, fs_on=fs_on, fs_rec=fs_rec, fs_ret=fs_ret, fs_st=fs_st, fs_sum=fs_sum, fx_dep_tx=fx_dep_tx, fx_dep_uid_tx=fx_dep_uid_tx, fx_name=fx_name, fx_transit=fx_transit, fx_uid_tx=fx_uid_tx, fx_wd=fx_wd, fxb=fxb, fxdep_transit=fxdep_transit, gas_applied=gas_applied, gas_by_chain=gas_by_chain, gas_by_month=gas_by_month, gas_expense=gas_expense, gas_nopx=gas_nopx, gas_on=gas_on, in_note=in_note, kpx=kpx, krw_inh=krw_inh, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt, krw_of=krw_of, krw_rec=krw_rec, krw_stl=krw_stl, krw_took=krw_took, kst_fmt=kst_fmt, loan_px=loan_px, loan_unp=loan_unp, loan_wd=loan_wd, mv_note=mv_note, my_all9=my_all9, noproc=noproc, nopx_carry=nopx_carry, nopx_swap=nopx_swap, note_unk=note_unk, oa_last=oa_last, oa_take=oa_take, of_cand=of_cand, of_pay_on=of_pay_on, of_wd_take=of_wd_take, offc_add=offc_add, offc_addr_add=offc_addr_add, offc_dep=offc_dep, offc_on=offc_on, offc_pool=offc_pool, offc_s=offc_s, offc_self_wd=offc_self_wd, offc_sold=offc_sold, offc_wd=offc_wd, pay_pid=pay_pid, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, redeem_tx=redeem_tx, rows=rows, rt_pair=rt_pair, rt_transit=rt_transit, sale_book=sale_book, sale_links=sale_links, sale_refund=sale_refund, sale_rf_exit=sale_rf_exit, sb=self, sell_wm=sell_wm, signer9=signer9, st_flow_in=st_flow_in, stable_fx_mark=stable_fx_mark, stake_inc=stake_inc, stake_rwd=stake_rwd, stl_add=stl_add, stl_carry=stl_carry, stl_in=stl_in, stl_krw_mkt=stl_krw_mkt, stl_out=stl_out, stl_src=stl_src, stl_use=stl_use, swap_dep=swap_dep, swap_fill=swap_fill, swap_fill_est=swap_fill_est, swap_fill_zero=swap_fill_zero, swap_gas=swap_gas, swap_pay=swap_pay, swap_wd_pre=swap_wd_pre, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows, to_dest9=to_dest9, tx_group=tx_group, ub_wd_shown=ub_wd_shown, ub_wd_tx=ub_wd_tx, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, up_dep_uid_tx=up_dep_uid_tx, up_fee=up_fee, up_mkt=up_mkt, uuid2txh=uuid2txh, wd_fee_add=wd_fee_add, wd_fee_q=wd_fee_q, wd_tr=wd_tr, xc_transit=xc_transit, xc_used=xc_used, xf_links=xf_links)
         ri = RowIn(cp_sync=cp_sync, cur_lab=cur_lab, cur_row=cur_row, cur_src=cur_src, fx_name=fx_name, lf_pend=lf_pend, loan_fill=loan_fill, my_all=my_all9, my_evm=my_evm9, pid_row=pid_row, qn_all=qn_all9, signer=signer9, spoof_keys=spoof_keys, swap_fill=swap_fill, swap_recv=swap_recv, wbal=wbal9)
         for r in rows:
             if lf_pend and (r["source_ns"], r["source_id"]) != lf_pend[-1][7]:
                 loan_settle()
+            if fsx.kdx.at is not None and r["event_ts"] > fsx.kdx.at:
+                fsx.kdx.apply(G, (ex_transit, fx_transit, fxdep_transit, br_transit), bridge_outs)
             if sale_pay_q and sale_pay_q[0][0] <= r["event_ts"]:
                 sale_pay_flush(r["event_ts"])
             n9i += 1
@@ -3500,7 +3514,12 @@ class ReplayMixin:
                 run._h_disp(r, g, rc)
                 continue
 
+        if fsx.kdx.at is not None:
+            if lf_pend:
+                loan_settle()
+            fsx.kdx.apply(G, (ex_transit, fx_transit, fxdep_transit, br_transit), bridge_outs)
         _phase_finalize(FinIn(G=G, be_tax=be_tax, consume=consume, cur_row=cur_row, fs_rbd=fs_rbd, fs_sales=fs_sales, fs_sum=fs_sum, lf_pend=lf_pend, loan_settle=loan_settle, loan_unp=loan_unp, sale_pay_flush=sale_pay_flush, win_cut_d=win_cut_d))
+        fsx.kdx.end()
 
         po = _phase_positions(self, PosIn(G=G, _of_uids=_of_uids, conn=conn, ex_transit=ex_transit, exf_dep_tx=exf_dep_tx, fx_transit=fx_transit, fx_wd=fx_wd, fxdep_transit=fxdep_transit, now=now, of_chain=of_chain, of_match=of_match, offc_dep=offc_dep, offc_on=offc_on, rows=rows, today_kst=today_kst, ton_h2u=ton_h2u9, up_dep_uid_tx=up_dep_uid_tx, uuid2txh=uuid2txh, wd_raw=wd_raw9, wd_tr=wd_tr, xf_links=xf_links))
         (debt_capg9, debt_neg9, debt_over9, debt_take9, dep_tr9, ex_gid, exb9, gid_pairs, hl_cash_syms9, hl_neg, led_by_gid, led_upbit_gids, live, locs_by_gid, lp_pos_rows, pos_rows, price_groups, pv_dl9, pv_led9, pv_unk9, tok_pairs9, ub_snap9, uf_dl9, uncred_cost, uncred_fx, uncred_gid, uncred_known, upbit_transit_gids, wdt_all, wdt_gid, xp_unk9,) = (po.debt_capg, po.debt_neg, po.debt_over, po.debt_take, po.dep_tr, po.ex_gid, po.exb, po.gid_pairs, po.hl_cash_syms, po.hl_neg, po.led_by_gid, po.led_upbit_gids, po.live, po.locs_by_gid, po.lp_pos_rows, po.pos_rows, po.price_groups, po.pv_dl, po.pv_led, po.pv_unk, po.tok_pairs, po.ub_snap, po.uf_dl, po.uncred_cost, po.uncred_fx, po.uncred_gid, po.uncred_known, po.upbit_transit_gids, po.wdt_all, po.wdt_gid, po.xp_unk,)

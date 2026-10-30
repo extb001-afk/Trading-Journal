@@ -1,5 +1,6 @@
 from __future__ import annotations
 import acct_norm
+import num_parse
 import paths, statefile
 import json
 import os
@@ -36,6 +37,15 @@ class KrwMixin:
         try:
             key9 = tuple(conn.execute("SELECT COUNT(*), MAX(observed_at) FROM raw_ex WHERE exchange='upbit'"
                                       " AND kind IN ('order', 'deposit', 'withdraw')").fetchone())
+            split_legs = {}
+            for uid, at, leg_krw, event in conn.execute(
+                    "SELECT source_id, event_ts, cost_krw, event FROM postings WHERE source_kind='exchange' AND source_ns='upbit:order' AND source_id IN"
+                    " (SELECT q.source_id FROM postings q JOIN postings z ON z.source_kind=q.source_kind AND z.source_ns=q.source_ns"
+                    " AND z.source_id=q.source_id AND z.leg_seq=0 WHERE q.source_kind='exchange' AND q.source_ns='upbit:order' AND q.leg_seq > 0"
+                    " AND q.event=z.event)"):
+                leg_krw = num_parse.to_dec(leg_krw)
+                split_legs.setdefault(uid, []).append((int(at), None if leg_krw is None else leg_krw * (1 if event == "EX_SELL" else -1)))
+            key9 += (sum(len(v) for v in split_legs.values()),) if split_legs else ()
         except Exception as e9:   # noqa: BLE001 [fallback]
             calcguard.swallowed("view_krw:KrwMixin._upbit_krw_timeline", e9, expected=calcguard.db_env(e9))
             log.warning("업비트 원화 타임라인 조회 실패(과거일 이월 유지): %s", e9)
@@ -65,6 +75,10 @@ class KrwMixin:
                         continue
                     d9 = (funds - fee) if side == "ask" else -(funds + fee)
                     ts9 = acct_norm.fill_ts(o) or datetime.fromisoformat(str(o["created_at"])).timestamp()
+                    if len(split_legs.get(_u9) or ()) > 1 and all(p[1] is not None for p in split_legs[_u9]):
+                        tl += split_legs[_u9]
+                        tlo += split_legs[_u9]
+                        continue
                 elif str(o.get("currency") or "").upper() == "KRW":
                     st9 = str(o.get("state") or "").upper()
                     amt = Decimal(str(o.get("amount") or "0"))

@@ -32,7 +32,7 @@ def respond(rq):
     p, q = rq.path, rq.query
     hdr = {"Remaining-Req": "group=default; min=1799; sec=29"}
     if p == "/v1/orders/open":
-        return C.Reply([OPEN], headers=hdr)
+        return C.Reply([] if q.get("state") == "watch" else [OPEN], headers=hdr)
     if p == "/v1/accounts":
         return C.Reply([{"currency": "KRW", "balance": "1000000.0", "locked": "27013.5", "avg_buy_price": "0", "avg_buy_price_modified": False,
                          "unit_currency": "KRW"},
