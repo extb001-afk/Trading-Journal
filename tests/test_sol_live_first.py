@@ -959,6 +959,13 @@ first_q = sol_watch._slot_index_map(r5, rows_q, memo=memo_q)
 check9("[Q] 받은 자리 기억 = 같은 슬롯 다시 볼 때 0콜(상한에 안 셈) · 실패·null 은 안 남김",
        first_q == {"a": 0, "b": 1} and sol_watch._slot_index_map(r5, rows_q, memo=memo_q, cap=0) == first_q and r5.n == 1
        and sol_watch._slot_index_map(r3, rows_q, memo={}) == {} and r3.n == 2, (r5.n, r3.n, memo_q))
+rows_q2 = [{"signature": "c", "slot": 7, "blockTime": nowq - 60}, {"signature": "d", "slot": 7, "blockTime": nowq - 60}] + rows_q
+r6 = _BlkRpc({"signatures": ["d", "c"]})
+check9("[Q] 끊긴 사이클 뒤 같은 슬롯 1건만 남아도 기억한 자리 유지 · 상한에 걸린 뒤 슬롯도 기억 히트는 씀",
+       sol_watch._slot_index_map(r5, rows_q[1:], memo=memo_q) == {"b": 1} and r5.n == 1
+       and sol_watch._slot_index_map(r6, rows_q2, memo=memo_q, cap=1) == {"d": 0, "c": 1, "a": 0, "b": 1} and r6.n == 1
+       and sol_watch._slot_index_map(r6, rows_q2, memo={9: memo_q[9]}, cap=0) == {"a": 0, "b": 1}
+       and sol_watch._slot_index_map(r6, rows_q2, memo={}, cap=0) == {} and r6.n == 1, (r5.n, r6.n))
 
 rq9 = _RpcReal.__new__(_RpcReal)
 rq9.__dict__.update(url="https://hl.mock.invalid/", metered=True, head_url="https://pn.mock.invalid/", archive_url=None, fallbacks=[],

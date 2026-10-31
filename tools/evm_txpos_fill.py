@@ -373,7 +373,7 @@ def report(found, cache, cfg, rps):
         s["fail"] += _key(ch, blk) in cache["fail"]
     left = sum(s["blocks"] - s["done"] - s["nohash"] for s in by.values())
     for ch, s in sorted(by.items()):
-        print(f"  {ch:>10} 블록 {s['blocks']} · 순번 없는 거래 {s['txs']} · 해시 없음 건너뜀 {s['nohash']} · 예상 호출 {s['blocks'] - s['done'] - s['nohash']}(블록당 1) · 가장 이른 날 {_day(s['first'])}"
+        print(f"  {ch:>10} 블록 {s['blocks']} · 순번 없는 거래 {s['txs']} · 해시 없음 건너뜀 {s['nohash']} · 예상 호출 {s['blocks'] - s['done'] - s['nohash']}(블록당 1 · 전송 실패면 다음 엔드포인트로 최대 {URL_TRY}배) · 가장 이른 날 {_day(s['first'])}"
               f" · 받음 {s['done']} · 실패 {s['fail']} · 엔드포인트 {len(_urls(cfg, ch))}")
     print(f"후보 블록 {len(cands)} · 남은 조회 {left}회 ≈ {left / max(0.05, min(rps, RPS_CAP)) / 60:.1f}분(초당 {min(rps, RPS_CAP):g}회)")
     why = {}
@@ -438,6 +438,9 @@ def main(argv=None) -> int:
             return 0
         print(f"채움 {res['n']}건 · 건너뜀 {res['skip'] or 0} · 되돌리기 파일 {res['undo']}")
         return 0
+    if not os.path.exists(paths.CONFIG_PATH):
+        print("거부: 설정 파일 없음(" + paths.CONFIG_PATH + ") — setup.sh 로 먼저 만들기")
+        return 1
     cfg = config.load_config()
     conn = _ro()
     try:

@@ -193,7 +193,7 @@ check("(a) 미리보기 = 원장·원본·meta 무변 · 받기 파일 없음", 
 check("(a) 기본 후보 = 같은 블록 매수·매도 블록만(B1·B2)", sorted(k for k, b in fd.items() if b["cand"]) == [("base", B1), ("base", B2)],
       {k: b["cand"] for k, b in fd.items()})
 check("(a) --all 후보 = 같은 지갑이 낀 같은 블록 전부(B1~B5)", sorted(k[1] for k, b in fa.items() if b["cand"]) == [B1, B2, B3, B4, B5])
-check("(a) 출력 = 체인별 블록·예상 호출·가장 이른 날", "후보 블록 2" in out and "예상 호출 2(블록당 1)" in out and F._day(T0) in out, out)
+check("(a) 출력 = 체인별 블록·예상 호출·가장 이른 날", "후보 블록 2" in out and "예상 호출 2(블록당 1 · 전송 실패면 다음 엔드포인트로 최대 2배)" in out and F._day(T0) in out, out)
 
 rc, out = run("--fetch", "--all", "--limit", "1")
 cache = F.load_cache()

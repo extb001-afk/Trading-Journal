@@ -1559,14 +1559,12 @@ def _slot_index_map(rpc, rows: list, hint=None, cap: int = SLOT_IDX_MAX_PER_CYCL
     out, asked, now = {}, 0, time.time()
     for slot in sorted(by_slot):
         bts = by_slot[slot]
-        if len(bts) < 2 or (win > 0 and not all(isinstance(bt, int) and now - bt <= win for bt in bts.values())):
-            continue
         hit = memo.get(slot) if memo is not None else None
         if hit is not None and all(s in hit for s in bts):
             out.update({s: hit[s] for s in bts})
             continue
-        if asked >= cap:
-            break
+        if len(bts) < 2 or asked >= cap or (win > 0 and not all(isinstance(bt, int) and now - bt <= win for bt in bts.values())):
+            continue
         asked += 1
         try:
             with hint(pn_tx=True) if callable(hint) else contextlib.nullcontext():
