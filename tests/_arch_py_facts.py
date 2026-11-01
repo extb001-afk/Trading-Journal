@@ -116,7 +116,7 @@ class Walk:
                    ast.Subscript: self.on_subscript, ast.Constant: self.on_const, ast.JoinedStr: self.on_fstring,
                    ast.BinOp: self.on_binop, ast.Attribute: self.on_attr, ast.Name: self.on_name,
                    ast.ExceptHandler: self.on_except, ast.keyword: self.on_keyword,
-                   ast.alias: self.on_alias, ast.arg: self.on_arg}
+                   ast.alias: self.on_alias, ast.arg: self.on_arg, ast.AugAssign: self.on_aug}
         for nm, label in (("Match", "match"), ("TryStar", "except*"), ("TypeAlias", "type 별칭(3.12+)")):
             if hasattr(ast, nm):
                 self.on[getattr(ast, nm)] = lambda n, sc, f, a, lb=label: sc.setdefault("py310", []).append(lb)
@@ -480,6 +480,12 @@ class Walk:
             sc.setdefault("priv", []).append([target, n.attr])
         if (target == "typing" and n.attr in PY310_TYPING) or (target, n.attr) in PY310_ATTRS:
             sc.setdefault("py310", []).append(target + "." + n.attr)
+
+    def on_aug(self, n, sc, in_func, ann):
+        if isinstance(n.op, (ast.Add, ast.Sub)):
+            k = sum(isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id == "float" for x in ast.walk(n.value))
+            if k:
+                _bump(sc, "faug", k)
 
     def on_except(self, h, sc, in_func, ann):
         self.name9(h.name, True, sc)

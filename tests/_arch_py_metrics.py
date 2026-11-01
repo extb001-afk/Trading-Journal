@@ -1,5 +1,8 @@
 import _arch_py_defs as D
 
+FLOAT_ACC_PREFIX = "accounting_"
+
+
 def matches(mod, patterns):
     for p in patterns:
         if (p.endswith("*") and mod.startswith(p[:-1])) or mod == p:
@@ -131,6 +134,7 @@ def _scopes(mx, c, mod, fx, valid_codes, edges, pairs, private):
         add("except.money_nocg", nocg)
         add("cfg.literal", sc.get("cfg", 0))
         add("const.1384", sc.get("c1384", 0))
+        add("float.acc_aug", sc.get("faug", 0) if mod.startswith(FLOAT_ACC_PREFIX) else 0)
         py = sc.get("py310", [])
         add("compat.py310", len(py))
         if py:

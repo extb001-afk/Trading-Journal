@@ -406,4 +406,141 @@ for why19, stamp, extra, want in (("prev 없는 옛 도장", {"v": 1}, None, "2"
     if extra:
         C.conn.execute("DELETE FROM meta WHERE k=?", (extra[1],))
         C.conn.commit()
+
+
+def full(u):
+    return [tuple(r) for r in C.conn.execute("SELECT " + ", ".join(LRF.COLS) + " FROM postings WHERE source_ns='upbit:order' AND source_id=? ORDER BY leg_seq", (u,))]
+
+
+def rcpt(u):
+    return meta(LRF.SPLIT_UNDO_K + u)
+
+
+def undo_files():
+    return sorted(n for n in os.listdir(paths.STATE_DIR) if n.startswith("upbit_split_undo_") and n.endswith(".json"))
+
+
+import paths  # noqa: E402
+set_rev(2)
+FX["f"] = lambda ms: 1000.0
+o_r1 = order("r1", "ask", [(T0 + 1100, "0.5", "300000"), (T0 + 1100 + DAY, "0.5", "300000")])
+o_r2 = order("r2", "bid", [(T0 + 1200, "1", "200000"), (T0 + 1200 + 2 * DAY, "1", "210000")], fee="100.5")
+post(o_r1, o_r2, nosplit=True)
+C.conn.execute("UPDATE postings SET cost_usd=NULL WHERE source_id='r2'")
+C.conn.commit()
+orig = {u: full(u) for u in ("r1", "r2")}
+p20, f20 = pos(), undo_files()
+n20, why20, _t = LRF.split_apply(C, [t for t in LRF.split_plan(C.conn)["todo"] if t[0] in ("r1", "r2")])
+new20 = [n for n in undo_files() if n not in f20]
+chk(n20 == 2 and not why20 and len(legs("r1")) == 2 and len(legs("r2")) == 2 and dbm.ledger_data_rev(C.conn) == 3,
+    "L20 전환 = 두 주문 분할 · data_rev 3", (n20, why20))
+rc1, rc2 = json.loads(rcpt("r1") or "null"), json.loads(rcpt("r2") or "null")
+chk(rc1 and rc2 and [tuple(r[k] for k in LRF.COLS) for r in rc1["rows"]] == orig["r1"] and [tuple(r[k] for k in LRF.COLS) for r in rc2["rows"]] == orig["r2"]
+    and rc1["undo"] == rc2["undo"] and new20 == [rc1["undo"]],
+    "L20 주문별 영수증(meta) = 분할 전 원래 행 전부(모든 칸·posting_id) · 되돌리기 파일 이름 = 이번 적용 하나", (rc1, new20))
+uf = json.load(open(os.path.join(paths.STATE_DIR, new20[0]), encoding="utf-8")) if new20 else {}
+chk(uf.get("kind") == LRF.SPLIT_UNDO_KIND and uf.get("applied") is True and sorted(uf.get("receipts") or {}) == ["r1", "r2"]
+    and uf["receipts"]["r2"]["rows"] == rc2["rows"] and oct(os.stat(os.path.join(paths.STATE_DIR, new20[0])).st_mode & 0o777) == "0o600",
+    "L20 되돌리기 파일 = 적용 완료(applied) · 영수증 사본(주문별) · 0600", (uf.get("kind"), uf.get("applied"), sorted(uf.get("receipts") or {})))
+FX["f"] = lambda ms: 2000.0
+nd20, whyd20, _t = LRF.split_apply(C, LRF.split_plan(C.conn, down=True)["todo"], down=True)
+chk(nd20 == 2 and not whyd20 and full("r1") == orig["r1"] and full("r2") == orig["r2"] and pos() == p20
+    and rcpt("r1") is None and rcpt("r2") is None and meta("data_rev") == "2" and meta("upbit_split_v") is None,
+    "L20 내리기 = 환율 캐시가 바뀌어도 원래 행 바이트 그대로(cost_usd 원본 · 빈 원가도 빈 채 · posting_id 같음) · 영수증 소비 · 포지션 무변 · data_rev 2 · 도장 지움",
+    (nd20, whyd20, full("r1"), orig["r1"]))
+FX["f"] = lambda ms: 1000.0
+
+T21 = pricing.FX_USDT_FIRST_MS // 1000 + 60 * DAY
+o_s1 = order("s1", "bid", [(T21, "1", "1000"), (T21 + DAY, "1", "1000")], market="KRW-WRM")
+o_s2 = order("s2", "bid", [(T21 + 10 * DAY, "1", "1000"), (T21 + 11 * DAY, "1", "1000")], market="KRW-WRM")
+o_s3 = order("s3", "ask", [(T21 + 20 * DAY, "0.5", "300000"), (T21 + 21 * DAY, "0.5", "300000")], market="KRW-WRM")
+post(o_s1, o_s2)
+post(o_s3, nosplit=True)
+post(dict(o_s1, uuid="s1_old"), dict(o_s2, uuid="s2_old"), nosplit=True)
+orig3 = full("s3")
+LRF.split_apply(C, [t for t in LRF.split_plan(C.conn)["todo"] if t[0] == "s3"])
+chk(len(legs("s3")) == 2 and rcpt("s3") is not None and rcpt("s1") is None and dbm.ledger_data_rev(C.conn) == 3, "L21 준비: s1·s2 = core 분할(영수증 없음) · s3 = 전환(영수증)")
+p21 = posn()
+C.px = NetPx(PXF)
+try:
+    NET.clear()
+    FAIL["to_lo"] = T21 + 10 * DAY - 3600
+    pd21 = LRF.split_plan(C.conn, down=True)
+    nd21, whyd21, _t = LRF.split_apply(C, pd21["todo"], down=True)
+    chk(sorted(t[0] for t in pd21["todo"]) == ["s1", "s2", "s3"] and pd21["n"].get("원본 복원(영수증)") == 1 and pd21["n"].get("재계산(영수증 없음)") == 2,
+        "L21 점검 = 되돌릴 주문 3 · 원본 복원(영수증) 1 · 재계산 2", pd21["n"])
+    chk(nd21 == 2 and list(whyd21.values()) == [1] and "원가 USD 미확보" in list(whyd21)[0]
+        and [(x[1], x[4], x[6]) for x in legs("s1")] == [(x[1], x[4], x[6]) for x in legs("s1_old")] and len(legs("s2")) == 2 and full("s3") == orig3
+        and posn() == p21 and dbm.ledger_data_rev(C.conn) == 3 and meta("upbit_split_v") is not None and rcpt("s3") is None
+        and [k for k, _tx in NET] == ["gj", "gj"] and not any(tx for _k, tx in NET),
+        "L21 한 주문(s2) 환율 실패 = 그 주문만 남김 · s1 = 종전 재계산(한 줄 쌍과 같음) · s3 = 영수증 복원(환율 조회 없음) · data_rev 3·도장 그대로 · 잠금 안 바깥 연결 0",
+        (nd21, whyd21, NET, legs("s2")))
+    NET.clear()
+    FAIL["to_lo"] = None
+    C.px.d["neg_ts"]["_fx"] = 0
+    pd21b = LRF.split_plan(C.conn, down=True)
+    nd21b, whyd21b, _t = LRF.split_apply(C, pd21b["todo"], down=True)
+    chk([t[0] for t in pd21b["todo"]] == ["s2"] and nd21b == 1 and not whyd21b and len(legs("s2")) == 1 and posn() == p21
+        and meta("data_rev") == "2" and meta("upbit_split_v") is None and not LRF.split_plan(C.conn, down=True)["todo"],
+        "L21 다시 실행 = 남은 주문(s2)만 · 분할 레그 0 → data_rev 3 → 2 · 도장 지움 · 두 번째 = 대상 0(멱등)", (nd21b, whyd21b, meta("data_rev")))
+finally:
+    C.px = px0
+
+o_e1 = order("e1", "bid", [(T0 + 1300, "1", "1000"), (T0 + 1300 + DAY, "1", "1000")])
+o_e2 = order("e2", "bid", [(T0 + 1400, "1", "1000"), (T0 + 1400 + DAY, "1", "1000")])
+post(o_e1, o_e2, nosplit=True)
+LRF.split_apply(C, [t for t in LRF.split_plan(C.conn)["todo"] if t[0] in ("e1", "e2")])
+d22, p22, r22 = {u: legs(u) for u in ("e1", "e2")}, pos(), {u: rcpt(u) for u in ("e1", "e2")}
+cnt["n"] = 0
+
+
+def boom2(*a, **k):
+    cnt["n"] += 1
+    if cnt["n"] == 2:
+        raise RuntimeError("주입 실패")
+    return C.__class__._unpost_source(C, *a, **k)
+
+
+S._unpost_source = boom2
+try:
+    LRF.split_apply(C, LRF.split_plan(C.conn, down=True)["todo"], down=True)
+    r22x = "통과"
+except RuntimeError as e:
+    r22x = str(e)
+finally:
+    del S._unpost_source
+chk(r22x == "주입 실패" and {u: legs(u) for u in ("e1", "e2")} == d22 and pos() == p22 and {u: rcpt(u) for u in ("e1", "e2")} == r22
+    and dbm.ledger_data_rev(C.conn) == 3, "L22 내리기 중간 예외 = 전부 취소(레그·포지션·영수증·data_rev 3 그대로)", r22x)
+bad22 = json.loads(rcpt("e2"))
+bad22["rows"][0]["qty_base"] = str(int(bad22["rows"][0]["qty_base"]) + 1)
+C.conn.execute("UPDATE meta SET v=? WHERE k=?", (json.dumps(bad22), LRF.SPLIT_UNDO_K + "e2"))
+C.conn.commit()
+nd22, whyd22, _t = LRF.split_apply(C, LRF.split_plan(C.conn, down=True)["todo"], down=True)
+chk(nd22 == 2 and not whyd22 and len(legs("e2")) == 1 and legs("e2")[0][1] == T0 + 1400 + DAY and pos() == p22 and rcpt("e2") is None and meta("data_rev") == "2",
+    "L22 합이 안 맞는 영수증 = 그 주문은 종전 재계산(마지막 체결 한 줄) · 영수증 지움 · 나머지 복원 · 개정 내림", (nd22, whyd22, legs("e2")))
+
+T23 = T21 + 40 * DAY
+o_b1 = order("b1", "bid", [(T23, "1", "1000"), (T23 + DAY, "1", "1000")], market="KRW-WRM")
+post(o_b1, nosplit=True)
+LRF.split_apply(C, [t for t in LRF.split_plan(C.conn)["todo"] if t[0] == "b1"])
+bad23 = json.loads(rcpt("b1"))
+bad23["rows"][0]["qty_base"] = str(int(bad23["rows"][0]["qty_base"]) + 1)
+C.conn.execute("UPDATE meta SET v=? WHERE k=?", (json.dumps(bad23), LRF.SPLIT_UNDO_K + "b1"))
+C.conn.commit()
+C.px = NetPx(PXF)
+try:
+    NET.clear()
+    FAIL["to_lo"] = T23 - 3600
+    C.px.d["neg_ts"]["_fx"] = 0
+    nd23, whyd23, _t = LRF.split_apply(C, LRF.split_plan(C.conn, down=True)["todo"], down=True)
+    chk(nd23 == 0 and list(whyd23.values()) == [1] and len(legs("b1")) == 2 and rcpt("b1") is None and dbm.ledger_data_rev(C.conn) == 3,
+        "L23 안 맞는 영수증 + 환율 실패 = 그 주문만 남김 · 영수증 지움 · data_rev 3 그대로", (nd23, whyd23, rcpt("b1") is None))
+    NET.clear()
+    FAIL["to_lo"] = None
+    C.px.d["neg_ts"]["_fx"] = 0
+    nd23b, whyd23b, _t = LRF.split_apply(C, LRF.split_plan(C.conn, down=True)["todo"], down=True)
+    chk(nd23b == 1 and not whyd23b and len(legs("b1")) == 1 and meta("data_rev") == "2",
+        "L23 다시 실행 = 재계산 주문으로 환율 미리 받기 → 한 줄로 내림 · data_rev 3 → 2(고착 없음)", (nd23b, whyd23b, meta("data_rev")))
+finally:
+    C.px = px0
 T.finish()

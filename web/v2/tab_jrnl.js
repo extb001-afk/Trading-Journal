@@ -623,7 +623,7 @@
     arr(S.D.merged).forEach(c => { if (c._lp) return; const a = pAgg(c); n += S.g.period === 'all' ? a.allU : a.inU; p += S.g.period === 'all' ? a.allUP : a.inUP; });
     return { n, p };
   }
-  const TAX_START = '2027-01-01';
+  const TAX_START = '2029-01-01';
   const taxStart = () => {
     const kd = S.D && S.D.krDeemed, at = kd && kd.on && isISO(kd.at) ? kd.at : null;
     if (!at) return TAX_START;

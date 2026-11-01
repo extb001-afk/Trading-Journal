@@ -155,7 +155,11 @@ def fills_upbit(*orders):
     _C[0].svc_exf._consume_fills({"orders": list(orders)})
 
 
-def build(prefs=None):
+class ReplayOnly(Exception):
+    pass
+
+
+def build(prefs=None, upto_replay=False):
     c = _C[0]
     c.conn.commit()
     c.conn.close()
@@ -180,11 +184,15 @@ def build(prefs=None):
     def cb(conn):
         rr = o(conn)
         cap.append(rr)
+        if upto_replay:
+            raise ReplayOnly
         return rr
     b._build_replay = cb
     co = db.open_db(paths.DB_PATH, readonly=True)
     try:
         f = b._build(co)["fields"]
+    except ReplayOnly:
+        f = None
     finally:
         co.close()
     _join_bg_db()

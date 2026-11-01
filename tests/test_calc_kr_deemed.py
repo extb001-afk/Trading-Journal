@@ -68,7 +68,7 @@ def keys_anywhere(rr):
     return bad + (["fs_sum"] if "kd" in (rr.fs_sum or {}) else [])
 
 
-def dex(prefs, before=1000, at=2000, after=2500, sell="1", rebuy=False):
+def dex(prefs, before=1000, at=2000, after=2500, sell="1", rebuy=False, upto=False):
     c = S.reset(px=None if at is not None else {"USDT": 1., "USDC": 1.})
     ch = S.Ch(c)
     S.PXF[0] = eth_px(before, at, after)
@@ -81,7 +81,7 @@ def dex(prefs, before=1000, at=2000, after=2500, sell="1", rebuy=False):
         ch.tx("base", "buy2", TT + DAY, [(usdc, -after, "disp", after), (eth, 1, "acq", after)], "SWAP")
     p = D(after) * D(sell)
     ch.tx("base", "sell", TT + 2 * DAY, [(eth, -D(sell), "disp", p), (usdc, p, "acq", p)], "SWAP")
-    f, G, rr = S.build(prefs)
+    f, G, rr = S.build(prefs, upto_replay=upto)
     return f, G, rr
 
 
@@ -249,6 +249,16 @@ chk(e8 and "kd" not in e8[0] and abs(e8[0]["_akr"] - 1_400_000) < 1 and sm8.get(
     "K7 T 시가 없음 = 가산 0(장부 그대로) · 대기(waiting) 집계", {"row": e8, "sum": sm8})
 spec = [k for k in (summ(r1) or {}).get("pin_new", {}) if k != "fx"]
 chk(len(spec) == 1, "K7 켬 빌드가 새로 매긴 시가 = 고정 후보(출처 열쇠 1 + 환율)", (summ(r1) or {}).get("pin_new"))
+
+_fb, _Gb, rb = dex(ON, upto=True)
+try:
+    pin_b = json.load(open(paths.state(KD_PIN)))
+except (OSError, ValueError):
+    pin_b = {}
+new_b = (summ(rb) or {}).get("pin_new") or {}
+chk(_fb is None and new_b and pin_b.get("at") == AT
+    and all(abs(((pin_b.get("p") or {}).get(k) or [0])[0] - v[0]) < 1e-6 for k, v in new_b.items()),
+    "K7b 화면 단계 전에 끝난 빌드 = 정한 T 시가가 이미 고정 파일에(같은 기준일 · 같은 값 → 다음 빌드도 이 값)", {"pin": pin_b, "new": new_b})
 
 
 def dex_pinned(pin_at):

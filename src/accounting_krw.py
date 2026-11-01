@@ -9,7 +9,7 @@ import histcurve
 from view_common import DAYCLOSE_ON
 from view_common import EPS
 from view_fspin import kd_conf
-from view_fspin import kd_pin_load
+from view_fspin import kd_pin_load, kd_pin_save
 from view_fspin import kd_ts
 from view_misc import fx_candle_near
 
@@ -289,6 +289,7 @@ class KrDeemed:
         self.snap(groups, (("br", brs), ("rt", px.omx.rt_transit), ("ret", self.fsx.ret_pool), ("offc", px.ofx.offc_pool)), t_at)
         if summ["wait"]:
             summ["state"] = "waiting"
+        kd_pin_save(summ["at"], summ["pin_new"])
 
     def _share(self, grp: dict) -> Decimal | None:
         flow, cost = grp.get("cur"), grp["cost"]

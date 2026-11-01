@@ -366,7 +366,8 @@ def _args(argv):
     ap = argparse.ArgumentParser(prog="ledger_rowfix.py", description="원장 행 1회 정정(지우기 · 되돌리기) — 점검 기본(쓰기 없음) · "
                                  "--apply 는 tj-core 정지 중에만.")
     ap.add_argument("--kind", choices=sorted(PLANS) + [AUTOFIX_KIND, SPLIT_KIND], help="정정 종류(" + " · ".join(sorted(PLANS) + [AUTOFIX_KIND, SPLIT_KIND]) + ")")
-    ap.add_argument("--upbit-split-down", action="store_true", help="업비트 분할 체결 레그를 한 줄로 되돌림 · data_rev 3 → 분할 전 개정(옛 판 코드 롤백 전) — --apply 와 같이 써야 씀")
+    ap.add_argument("--upbit-split-down", action="store_true", help="업비트 분할 체결 레그를 한 줄로 되돌림(영수증 있는 주문 = 원래 행 복원 · 없는 주문 = 재계산) · "
+                    "분할 레그 0 이면 data_rev 3 → 분할 전 개정(옛 판 코드 롤백 전) — --apply 와 같이 써야 씀")
     ap.add_argument("--undo-autofix", metavar="EX:SYM", help="자동 처리 칸 되돌리기(영수증 기준 · 그 칸 autofix_off 를 넣음) — --apply 와 같이 써야 씀")
     ap.add_argument("--autofix-on", metavar="EX:SYM", help="되돌린 칸의 autofix_off 표식 지움(다시 켜기) — --apply 와 같이")
     ap.add_argument("--ack-autofix", metavar="EX:SYM", help="자동 처리한 큰 미확인 유출을 확인함(영수증에 표시 → 보정 감시 노랑 내림) — --apply 와 같이")
@@ -718,6 +719,8 @@ def _run_autofix(a):
 
 SPLIT_KIND = "upbit_split"
 SPLIT_NO_TRADES = "체결 목록 없음(한 줄 그대로 · 상세 보강 = tools/upbit_trades_fill)"
+SPLIT_UNDO_K = "upbit_split_undo:"
+SPLIT_UNDO_KIND = "upbit_split_undo_v1"
 _KST = timezone(timedelta(hours=9))
 
 
@@ -764,6 +767,7 @@ def split_plan(conn, down=False):
         if down:
             if len(legs) > 1:
                 res["todo"].append((u, o, len(legs), min(int(r["event_ts"]) for r in legs)))
+                add("n", "원본 복원(영수증)" if _split_rcpt(conn, u) else "재계산(영수증 없음)")
             continue
         if not isinstance(o.get("trades"), list) or not o["trades"]:
             add("why", SPLIT_NO_TRADES)
@@ -815,13 +819,53 @@ def _split_rev_to(conn):
     return prev if prev is not None and prev >= floor else (floor or None)
 
 
-def _split_rev_down(conn) -> str:
+def _split_rcpt(conn, uid: str):
+    row = conn.execute("SELECT v FROM meta WHERE k=?", (SPLIT_UNDO_K + uid,)).fetchone()
+    try:
+        rows = json.loads(row[0])["rows"] if row else None
+    except (TypeError, ValueError, KeyError):
+        return None
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) and all(k in r for k in COLS)
+                                                          and (r["source_kind"], r["source_ns"], str(r["source_id"])) == ("exchange", "upbit:order", uid)
+                                                          for r in rows):
+        return None
+    return rows
+
+
+def _split_restore(c, uid: str, rows: list):
+    import core_fills as CF
+    conn = c.conn
+    olds = CF.order_legs(conn, uid)
+    c.svc_exf._unpost_source("exchange", "upbit:order", uid)
+    for r in rows:
+        cols = COLS if conn.execute("SELECT 1 FROM postings WHERE posting_id=?", (int(r["posting_id"]),)).fetchone() is None else COLS[1:]
+        conn.execute("INSERT INTO postings (" + ", ".join(cols) + ") VALUES (" + ",".join("?" * len(cols)) + ")", tuple(r[k] for k in cols))
+        c._bump_position(int(r["asset_id"]), int(r["qty_base"]), str(r["location"]))
+    news = conn.execute("SELECT " + ", ".join(COLS) + " FROM postings WHERE source_kind='exchange' AND source_ns='upbit:order' AND source_id=? ORDER BY leg_seq",
+                        (uid,)).fetchall()
+    if [tuple(r[k] for k in COLS[1:]) for r in news] != [tuple(r[k] for k in COLS[1:]) for r in rows] or [int(r["leg_seq"]) for r in news] != list(range(len(news))):
+        return "복원 행이 영수증과 다름"
+    sums = [{}, {}]
+    for i, part in enumerate((olds, news)):
+        for r in part:
+            key = (int(r["asset_id"]), str(r["location"]))
+            sums[i][key] = sums[i].get(key, 0) + int(r["qty_base"])
+    if sums[0] != sums[1] or {(r["leg_kind"], r["event"]) for r in olds} != {(r["leg_kind"], r["event"]) for r in news}:
+        return "영수증 행이 지금 분할 레그와 다름(수량·종류)"
+    if CF.krw_sum(olds) is None or CF.krw_sum(olds) != CF.krw_sum(news):
+        return "영수증 행이 지금 분할 레그와 다름(원화 합)"
+    return None
+
+
+def _split_rev_down(conn, partial: bool = False) -> str:
     cur = dbm.ledger_data_rev(conn)
     if cur != 3:
         return f"data_rev {cur} 그대로(3 일 때만 내림)"
     left = conn.execute("SELECT count(*) FROM postings p JOIN postings z ON z.source_kind=p.source_kind AND z.source_ns=p.source_ns"
                         " AND z.source_id=p.source_id AND z.leg_seq=0 WHERE p.source_kind='exchange' AND p.source_ns='upbit:order'"
                         " AND p.leg_seq >= 1 AND p.event=z.event").fetchone()[0]
+    if left and partial:
+        return f"KRW 분할 레그 {left}줄 남음(이번에 되돌리지 못한 주문) — data_rev 3·도장 그대로 · 다시 --apply"
     if left:
         raise RuntimeError(f"KRW 분할 레그 {left}줄 남음 — 한 줄로 못 돌린 주문이 있어 개정을 내리지 않음")
     to = _split_rev_to(conn)
@@ -863,31 +907,61 @@ def split_fx_warm(px, todo, down=False):
 def split_apply(c, todo, down=False):
     import core_fills as CF
     conn, svc, px = c.conn, c.svc_exf, c.px
-    moved, why_n, t_min = 0, {}, None
+    moved, why_n, t_min, rcpts = 0, {}, None, {}
+    now = int(time.time())
+    uname = f"upbit_split_undo_{time.strftime('%Y%m%d%H%M%S', time.gmtime(now))}_{secrets.token_hex(4)}.json"
+    upath = os.path.join(paths.STATE_DIR, uname)
+    if not down and os.path.exists(upath):
+        raise RuntimeError(f"되돌리기 파일 이름 충돌 {uname} — 다시 실행")
     try:
-        n9, miss9 = split_fx_warm(px, todo, down)
-        if n9:
-            print(f"환율 미리 받기(잠금 밖): 필요 {n9}분 · 못 받음 {miss9}분" + (" — 그 분 원가 USD 가 비게 되는 주문은 되돌림(다시 실행)" if miss9 else ""))
+        n_fx, miss = split_fx_warm(px, [t for t in todo if not (down and _split_rcpt(conn, t[0]))], down)
+        if n_fx:
+            print(f"환율 미리 받기(잠금 밖): 필요 {n_fx}분 · 못 받음 {miss}분" + (" — 그 분 원가 USD 가 비게 되는 주문은 되돌림(다시 실행)" if miss else ""))
         px.nb_begin()
         conn.execute("BEGIN IMMEDIATE")
         try:
             for u, o, _n, _t in todo:
                 conn.execute("SAVEPOINT upbit_split")
-                state, why, t_first = CF.resplit_order(conn, u, o, svc._unpost_source, svc._consume_fills, nosplit=down)
+                before = [dict(r) for r in conn.execute("SELECT " + ", ".join(COLS) + " FROM postings WHERE source_kind='exchange' AND source_ns='upbit:order'"
+                                                        " AND source_id=? ORDER BY leg_seq", (u,))]
+                rows = _split_rcpt(conn, u) if down else None
+                why = _split_restore(c, u, rows) if rows else None
+                if rows and not why:
+                    state, t_first = "moved", min(int(r["event_ts"]) for r in before + rows)
+                else:
+                    if why:
+                        conn.execute("ROLLBACK TO upbit_split")
+                        print(f"  {u[:12]} 영수증 복원 못 함({why}) — 재계산으로")
+                    state, why, t_first = CF.resplit_order(conn, u, o, svc._unpost_source, svc._consume_fills, nosplit=down)
                 if state == "undo":
                     conn.execute("ROLLBACK TO upbit_split")
                     why_n[why] = why_n.get(why, 0) + 1
+                    if rows:
+                        conn.execute("DELETE FROM meta WHERE k=?", (SPLIT_UNDO_K + u,))
                 elif state == "moved":
                     moved += 1
                     t_min = t_first if t_min is None else min(t_min, t_first)
+                    if down:
+                        conn.execute("DELETE FROM meta WHERE k=?", (SPLIT_UNDO_K + u,))
+                    else:
+                        rcpts[u] = {"v": 1, "rows": before, "at": now, "undo": uname}
+                        conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (SPLIT_UNDO_K + u, json.dumps(rcpts[u], ensure_ascii=False, sort_keys=True)))
                 conn.execute("RELEASE upbit_split")
             if down:
-                print(_split_rev_down(conn))
+                print(_split_rev_down(conn, partial=bool(why_n)))
             if moved:
                 c._inval_daily()
+            if rcpts:
+                _write_undo(upath, {"kind": SPLIT_UNDO_KIND, "applied": True, "at": now, "receipts": rcpts})
+                print(f"되돌리기 파일(영수증 사본 {len(rcpts)}주문) {upath}")
             conn.commit()
         except BaseException:
             conn.rollback()
+            if rcpts and os.path.exists(upath):
+                try:
+                    _write_undo(upath, {"kind": SPLIT_UNDO_KIND, "applied": False, "at": now, "receipts": rcpts})
+                except OSError:
+                    pass
             raise
     finally:
         px.nb_end()
@@ -934,7 +1008,7 @@ def _run_split(a):
     try:
         res = split_plan(c.conn, down)
         moved, why_n, _t = split_apply(c, res["todo"], down)
-    except (RuntimeError, sqlite3.Error, ValueError) as e:
+    except (RuntimeError, OSError, sqlite3.Error, ValueError) as e:
         print(f"★전부 취소(원장·포지션 무변)★ {e}")
         return 4
     finally:

@@ -1,4 +1,4 @@
-{"k":"_keys","m":"*","q":"*","v":["api.hmac","api.kst","api.replace","api.sqlite","api.statepath","api.urlopen","const.1384","copy.atomic","copy.num","copy.statepath"]}
+{"k":"_keys","m":"*","q":"*","v":["api.hmac","api.kst","api.replace","api.sqlite","api.statepath","api.urlopen","const.1384","copy.atomic","copy.num","copy.statepath","float.acc_aug"]}
 {"k":"api.hmac","m":"btc_descriptor","q":"XPub.child_pub","f":"child_pub","h":"120c65d6640e","v":1}
 {"k":"api.kst","m":"demo_data","q":"depaddr_status","h":"0b9ae2107b25","v":1}
 {"k":"api.kst","m":"histmark","q":"hist_late_put","h":"cd09e13ae2cc","v":1}
@@ -61,3 +61,15 @@
 {"k":"copy.statepath","m":"tsfix","q":"fix_path","h":"d4ed6123b234","v":1}
 {"k":"copy.statepath","m":"unit_beat","q":"path","h":"2fa4c2725ffb","v":1}
 {"k":"copy.statepath","m":"wow2","q":"_llm_state_path","h":"5f81243e5c20","v":1}
+{"k":"float.acc_aug","m":"accounting_fee","q":"FeeBook.fee_day_add","f":"fee_day_add","h":"d26f3913fc2f","v":1}
+{"k":"float.acc_aug","m":"accounting_fee","q":"FeeBook.fee_expense","f":"fee_expense","h":"8b14a84dedda","v":1}
+{"k":"float.acc_aug","m":"accounting_fs","q":"FirstSeen.fs_conv","f":"fs_conv","h":"5e8ca4e3d32e","v":2}
+{"k":"float.acc_aug","m":"accounting_fs","q":"FirstSeen.fs_mark","f":"fs_mark","h":"ef08e16580d0","v":2}
+{"k":"float.acc_aug","m":"accounting_fs","q":"FirstSeen.fs_ret","f":"fs_ret","h":"17e9cb506b79","v":1}
+{"k":"float.acc_aug","m":"accounting_krw","q":"KrDeemed._transit_up","f":"_transit_up","h":"ded2c98d53ce","v":1}
+{"k":"float.acc_aug","m":"accounting_krw","q":"KrDeemed.apply","f":"apply","h":"0188574a8aac","v":1}
+{"k":"float.acc_aug","m":"accounting_krw","q":"KrDeemed.row","f":"row","h":"ce632f8e61d5","v":2}
+{"k":"float.acc_aug","m":"accounting_krw","q":"KrwPools.stl_add","f":"stl_add","h":"fd98650f53d2","v":3}
+{"k":"float.acc_aug","m":"accounting_loan","q":"LoanBook.loan_settle","f":"loan_settle","h":"6ab58a9517d0","v":2}
+{"k":"float.acc_aug","m":"accounting_sale","q":"SaleBook.sale_pay_emit","f":"sale_pay_emit","h":"2fc7d97882f2","v":2}
+{"k":"float.acc_aug","m":"accounting_unk","q":"UnkBook.note_unk","f":"note_unk","h":"01eabdbde392","v":1}
