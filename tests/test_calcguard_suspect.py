@@ -108,6 +108,30 @@ json.dump({"v": 1, "proc": "web", "sites": sites6}, open(os.path.join(sd6, "calc
 c6c = {x["cid"]: x for x in health.collect_calcguard(now, sd6)}.get("calc:swallow") or {}
 chk(c6c.get("level") == "ok" and "action" not in c6c, "S6 반대 방향: 99회·하루 평균 99회 = 정보(노랑 아님)", c6c)
 
+hr = now // 3600
+sd7 = os.path.join(T.TMP, "cgs7")
+os.makedirs(sd7, exist_ok=True)
+
+
+def _c7(site):
+    json.dump({"v": 1, "proc": "web", "sites": {"t:burst": site}}, open(os.path.join(sd7, "calcguard_web.json"), "w"))
+    return {x["cid"]: x for x in health.collect_calcguard(now, sd7)}
+
+
+burst = {"n": 180001, "first": now - 10 * 86400, "last": now - 60, "bug": 0, "why": "HTTPError: 503", "h": {str(hr - 240): 180000, str(hr): 1}}
+c7 = _c7(burst).get("calc:swallow") or {}
+chk(c7.get("level") == "ok" and "1자리 · 1회(24h)" in c7.get("title", "") and c7.get("detail", "").startswith("t:burst 1회"),
+    "S7 10일 전 18만 폭주 + 오늘 1회 = 24h 1회 · 정보(종전 평균 18002회 = 노랑)", c7)
+c7b = _c7({k: v for k, v in burst.items() if k != "h"}).get("calc:swallow") or {}
+chk(c7b.get("level") == "warn" and "1자리 · 18002회(24h)" in c7b.get("title", ""), "S7 옛 파일(h 없음) = 종전 하루 평균 그대로(18만 ÷ 10일 올림)", c7b)
+c7c = _c7(dict(burst, h={str(hr - 24): 60, str(hr - 25): 7000, str(hr - 1): 40, "x": 5, str(hr - 2): "y"})).get("calc:swallow") or {}
+chk(c7c.get("level") == "warn" and "1자리 · 100회(24h)" in c7c.get("title", ""),
+    "S7 칸 경계 = 24시간 전 시 칸까지 셈(60+40 = 100 · 노랑) · 25시간 전 칸·모양 이상 칸은 버림", c7c)
+c7d = _c7(dict(burst, h={str(hr - 30): 5}))
+chk("calc:swallow" not in c7d and c7d.get("calc:bug", {}).get("level") == "ok", "S7 24시간 합 0 자리 = '그 밖' 목록에서 빠짐", c7d)
+c7e = _c7(dict(burst, h={str(hr): 1, str(hr + 48): 100})).get("calc:swallow") or {}
+chk(c7e.get("level") == "ok" and "1자리 · 1회(24h)" in c7e.get("title", ""), "S7 미래 시 칸(시계 역행) = 셈 밖", c7e)
+
 cnt = collections.Counter()
 for f in glob.glob(os.path.join(T.SRC, "*.py")) + glob.glob(os.path.join(T.SRC, "*", "*.py")):
     for m in re.finditer(r'calcguard\.swallowed\("([^"]+)"', open(f, encoding="utf-8").read()):

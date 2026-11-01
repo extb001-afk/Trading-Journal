@@ -11,7 +11,7 @@ import subprocess
 import time
 from datetime import datetime
 from datetime import timedelta
-import config, logs, net_http, paths
+import calcguard, config, logs, net_http, paths
 import db as dbm
 from chk_base import CALC_BUG_SHOW_S
 from chk_base import CALC_OTHER_WARN_N
@@ -572,16 +572,15 @@ def collect_calcguard(now: float, state_dir: str = None) -> list:
                 nb = int(it.get("bug") or 0)
                 n = int(it.get("n") or 0)
                 bl = float(it.get("bug_last") or 0) if "bug_last" in it else last
-                ns = int(it.get("sus") or 0)
-                sl = float(it.get("sus_last") or 0)
+                ns, sl = int(it.get("sus") or 0), float(it.get("sus_last") or 0)
             except (TypeError, ValueError):
                 continue
             if nb > 0 and now - bl <= CALC_BUG_SHOW_S:
                 bug.append((proc, str(site), nb, str(it.get("bug_why") or it.get("why") or "")[:120], bl))
             elif ns > 0 and now - sl <= CALC_BUG_SHOW_S:
                 sus.append((proc, str(site), ns, str(it.get("sus_why") or "")[:120], sl))
-            elif now - last <= CALC_BUG_SHOW_S:
-                other.append((proc, str(site), _per_day(n, it.get("first"), last), str(it.get("why") or "")[:120]))
+            elif now - last <= CALC_BUG_SHOW_S and (n24 := _per_day(n, it.get("first"), last, it.get("h"), now)) > 0:
+                other.append((proc, str(site), n24, str(it.get("why") or "")[:120]))
     out = []
     if bug:
         bug.sort(key=lambda x: -x[4])
@@ -635,7 +634,9 @@ def collect_src_off(now: float, state_dir: str = None) -> list:
              "persist": 0, "resolve": 0, "notify": False, "remind": False, "kind": "srcoff", "chip": "외부 조회 쉼 %d곳" % len(bits)}]
 
 
-def _per_day(n: int, first, last: float) -> int:
+def _per_day(n: int, first, last: float, h=None, now: float = 0.0) -> int:
+    if isinstance(h, dict):
+        return sum(c for k, c in calcguard.hours(h, now).items() if int(k) <= now // 3600)
     try:
         span = last - float(first or last)
     except (TypeError, ValueError):

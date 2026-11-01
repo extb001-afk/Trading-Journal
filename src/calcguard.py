@@ -25,6 +25,7 @@ _SUFFIX = [""]
 _MERGE = [False]
 _TIMER: dict = {"pid": None}
 KEEP_SEC = 7 * 86400
+HOUR_KEEP = 24
 _START = time.time()
 _CARRY: dict = {"loaded": False, "sites": {}}
 
@@ -66,6 +67,18 @@ def path_of(state_dir: Optional[str] = None, suffix: str = "") -> str:
     return os.path.join(d, "calcguard_%s%s.json" % (_proc(), ("_" + suffix) if suffix else ""))
 
 
+def hours(h: Any, now: float) -> dict:
+    out: dict = {}
+    cut = int(now) // 3600 - HOUR_KEEP
+    for k, c in (h.items() if isinstance(h, dict) else ()):
+        try:
+            if int(k) >= cut and int(c) > 0:
+                out[str(int(k))] = int(c)
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return out
+
+
 def _ensure_timer() -> None:
     pid = os.getpid()
     if _TIMER["pid"] == pid or _SUFFIX[0]:
@@ -99,8 +112,12 @@ def swallowed(site: str, exc: BaseException, expected: bool = False) -> None:
                 if len(_SITES) >= MAX_SITES:
                     return
                 s = _SITES[site] = {"n": 0, "first": int(now), "last": 0, "types": {}, "why": "", "bug": 0, "bug_last": 0, "bug_why": "",
-                                    "sus": 0, "sus_last": 0, "sus_why": ""}
+                                    "sus": 0, "sus_last": 0, "sus_why": "", "h": {}}
             s["n"] += 1
+            hk = str(int(now) // 3600)
+            if hk not in s["h"]:
+                s["h"] = hours(s["h"], now)
+            s["h"][hk] = s["h"].get(hk, 0) + 1
             s["last"] = int(now)
             s["types"][tn] = s["types"].get(tn, 0) + 1
             why = ("%s: %s" % (tn, exc))[:200]
@@ -187,6 +204,10 @@ def _merge_old(p: str, snap: dict, now: float, old: Optional[dict] = None) -> di
             if not isinstance(o, dict):
                 continue
             o = dict(o)
+            if isinstance(o.get("h"), dict):
+                o["h"] = hours(o["h"], now)
+            else:
+                o.pop("h", None)
             if int(o.get("bug") or 0) > 0 and "bug_last" not in o:
                 o["bug_last"], o["bug_why"] = int(float(o.get("last") or 0)), str(o.get("why") or "")
             if now - max(float(o.get("last") or 0), float(o.get("bug_last") or 0), float(o.get("sus_last") or 0)) <= KEEP_SEC:
@@ -196,7 +217,7 @@ def _merge_old(p: str, snap: dict, now: float, old: Optional[dict] = None) -> di
     for k, v in snap.items():
         o = out.get(k)
         if not isinstance(o, dict):
-            out[k] = v
+            out[k] = dict(v, h=hours(v.get("h"), now))
             continue
         m = dict(v)
         try:
@@ -214,6 +235,10 @@ def _merge_old(p: str, snap: dict, now: float, old: Optional[dict] = None) -> di
                 m["sus_last"], m["sus_why"] = int(float(o["sus_last"])), str(o.get("sus_why") or "")
         except Exception:   # noqa: BLE001 [fallback]
             m = dict(v)
+        hh = hours(o.get("h"), now)
+        for hk, hc in hours(v.get("h"), now).items():
+            hh[hk] = hh.get(hk, 0) + hc
+        m["h"] = hh
         out[k] = m
     return out
 
@@ -226,7 +251,7 @@ def flush(now: Optional[float] = None, suffix: Optional[str] = None) -> None:
             if not _DIRTY[0]:
                 _LAST_FLUSH[0] = now
                 return
-            snap = {k: dict(v, types=dict(v["types"])) for k, v in _SITES.items()}
+            snap = {k: dict(v, types=dict(v["types"]), h=dict(v.get("h") or {})) for k, v in _SITES.items()}
             _DIRTY[0] = False
             _LAST_FLUSH[0] = now
         try:
@@ -248,7 +273,7 @@ def flush(now: Optional[float] = None, suffix: Optional[str] = None) -> None:
 
 def snapshot() -> dict:
     with _LOCK:
-        return {k: dict(v, types=dict(v["types"])) for k, v in _SITES.items()}
+        return {k: dict(v, types=dict(v["types"]), h=dict(v.get("h") or {})) for k, v in _SITES.items()}
 
 
 atexit.register(flush)

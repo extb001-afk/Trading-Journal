@@ -229,4 +229,56 @@ while _t16.monotonic() - _t0 < 0.5:
     pass
 _t16.sleep, CG.flush = _sl16, _fl16
 chk(_n16[0] <= 1, "G16 sleep 패치에도 저장 스레드 바쁜 루프 없음(0.5초 동안 flush %d번)" % _n16[0], _n16[0])
+
+hr17 = int(_t16.time()) // 3600
+for _i in range(2):
+    try:
+        raise ConnectionError("g17")
+    except Exception as e:
+        CG.swallowed("t:g17", e)
+h17 = CG.snapshot()["t:g17"]["h"]
+chk(sum(h17.values()) == 2 and set(h17) <= {str(hr17), str(hr17 + 1)}, "G17 swallowed = 지금 시 칸 +1", h17)
+CG._SITES["t:g17"]["h"] = {str(hr17 - 30): 9, str(hr17 - 3): 2}
+try:
+    raise ConnectionError("g17b")
+except Exception as e:
+    CG.swallowed("t:g17", e)
+h17 = CG.snapshot()["t:g17"]["h"]
+chk(str(hr17 - 30) not in h17 and h17.get(str(hr17 - 3)) == 2 and sum(h17.values()) == 3, "G17 새 시 칸이 생길 때 25시간 넘은 칸 지움", h17)
+CG.snapshot()["t:g17"]["h"][str(hr17 - 3)] = 99
+chk(CG._SITES["t:g17"]["h"].get(str(hr17 - 3)) == 2, "G17 snapshot 복사본의 h 를 바꿔도 원본 무변(얕은 복사 공유 없음)", CG._SITES["t:g17"]["h"])
+
+now18 = 2_000_000_000
+hr18 = now18 // 3600
+base18 = {"first": now18 - 3600, "last": now18 - 60, "types": {}, "why": "", "bug": 0, "bug_last": 0, "bug_why": "", "sus": 0, "sus_last": 0, "sus_why": ""}
+old18 = {"a": dict(base18, n=5, h={str(hr18 - 1): 3, str(hr18 - 26): 4, "bad": 1, str(hr18 - 2): "x"}),
+         "b": dict(base18, n=2, h=[1, 2]),
+         "c": dict(base18, n=1, h={str(hr18): 1}),
+         "e": dict(base18, n=7)}
+snap18 = {"a": dict(base18, n=2, h={str(hr18 - 1): 1, str(hr18): 1}),
+          "b": dict(base18, n=1, h={str(hr18): 1}),
+          "d": dict(base18, n=2, h={str(hr18 - 30): 5, str(hr18): 2})}
+m18 = CG._merge_old("", snap18, now18, old=old18)
+chk(m18["a"]["h"] == {str(hr18 - 1): 4, str(hr18): 1} and m18["a"]["n"] == 7, "G18 같은 자리 = 칸별 합 · 26시간 전·모양 이상 칸 버림", m18["a"])
+chk(m18["b"]["h"] == {str(hr18): 1} and m18["b"]["n"] == 3, "G18 옛 h 가 리스트 = 그 칸만 버리고 이번 시 칸·횟수는 합", m18["b"])
+chk(m18["c"]["h"] == {str(hr18): 1} and "h" not in m18["e"] and m18["e"]["n"] == 7, "G18 이번에 안 난 옛 자리 = h 정리 · 옛 형식(h 없음)은 h 없이 유지(패널 = 종전 평균)", m18)
+chk(m18["d"]["h"] == {str(hr18): 2}, "G18 새 자리도 25시간 넘은 칸 지움", m18["d"])
+chk(len(old18["a"]["h"]) == 4 and snap18["a"]["h"] == {str(hr18 - 1): 1, str(hr18): 1}, "G18 입력(직전 실행 기록·스냅숏) 원본 무변", (old18["a"], snap18["a"]))
+
+os.environ["TJ_STRICT"] = "1"
+n19 = sum(CG.snapshot()["t:g17"]["h"].values())
+try:
+    try:
+        raise NameError("g19")
+    except Exception as e:
+        CG.swallowed("t:g17", e)
+    r19 = "삼킴"
+except NameError:
+    r19 = "던짐"
+try:
+    raise ConnectionError("g19b")
+except Exception as e:
+    CG.swallowed("t:g17", e)
+os.environ.pop("TJ_STRICT", None)
+chk(r19 == "던짐" and sum(CG.snapshot()["t:g17"]["h"].values()) == n19 + 1, "G19 엄격 1단계 = NameError 던짐(기록 없음) · 네트워크 꼴은 시 칸 +1", (r19, n19))
 T.finish()

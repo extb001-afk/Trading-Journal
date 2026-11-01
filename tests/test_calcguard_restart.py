@@ -62,4 +62,23 @@ run("net")
 s = sites()
 T.chk("core:old_site" not in s and "core:apply_leg" in s, "R3 7일 넘은 조용한 자리 = 빠짐 · 나머지 유지", sorted(s))
 
+now4 = int(time.time())
+hr4 = now4 // 3600
+d = json.load(open(P))
+d["sites"]["core:price_fetch"] = {"n": 180000, "first": now4 - 10 * 86400, "last": now4 - 3600, "types": {"ConnectionError": 180000}, "why": "rpc down",
+                                  "bug": 0, "bug_last": 0, "bug_why": "", "sus": 0, "sus_last": 0, "sus_why": "", "h": {str(hr4 - 240): 179999, str(hr4 - 1): 1}}
+d["sites"]["core:legacy"] = {"n": 50, "first": now4 - 3600, "last": now4 - 600, "types": {"OSError": 50}, "why": "x", "bug": 0}
+d["at"] = now4 - 5
+json.dump(d, open(P, "w"))
+time.sleep(1.1)
+run("net", "net")
+s = sites()
+h4 = s.get("core:price_fetch", {}).get("h") or {}
+T.chk(s["core:price_fetch"].get("n") == 180002 and str(hr4 - 240) not in h4 and sum(h4.values()) == 3,
+      "R4 재시작 뒤 h = 직전 칸(1) + 이번 2회(저장 2번에도 한 번씩만) · 10일 전 칸 지움", s.get("core:price_fetch"))
+T.chk("h" not in s.get("core:legacy", {}) and s["core:legacy"].get("n") == 50, "R4 옛 형식 자리 = h 없이 이어받음", s.get("core:legacy"))
+sw4 = {c["cid"]: c for c in chk_collect.collect_calcguard(time.time(), paths.STATE_DIR)}.get("calc:swallow") or {}
+T.chk(sw4.get("level") == "ok" and "core:price_fetch 3회" in sw4.get("detail", "") and "core:legacy 50회" in sw4.get("detail", ""),
+      "R4 상태 패널 = 24시간 3회(종전 평균 ≈1.8만 = 노랑) · 옛 형식 자리 = 종전 값", sw4)
+
 T.finish()
