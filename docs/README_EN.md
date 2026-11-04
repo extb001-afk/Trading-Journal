@@ -154,7 +154,7 @@ statement use this average.
   against a real account; all are disabled by default, and enabling one also requires the explicit opt-in
   `"other_assets": {"brokers": {"experimental_ack": true}}` (without it the adapter does not sync).
 - **Privacy:** random-amount mode multiplies amounts by a per-page random factor (not stored by default — it can be pinned per browser in
-  Settings › 표시 for consistent screenshots, never shown while the mode is on) with a "랜덤값" (random) watermark; explorer links are removed;
+  Settings › 화면 · 표시 for consistent screenshots, never shown while the mode is on) with a "랜덤값" (random) watermark; explorer links are removed;
   hide mode (Shift+H) blurs amounts. Both are display-only. In either mode, names and notes you wrote yourself (wallet names, aliases,
   notes, Telegram bot/chat names) are shown as generic labels such as "지갑 A" / "메모", the Telegram link QR and code are hidden, and
   recent searches are cleared. All screenshots above were taken in random-amount mode (amounts are randomized) with fake addresses

@@ -859,7 +859,7 @@
     const nav = STEPS.map((x, i) => '<button class="su-step' + (i === U.step ? ' on' : '') + (i < U.step ? ' done' : '') + '" data-su="goto" data-v="' + i + '"' + (i === U.step ? ' aria-current="step"' : '') + '><i>' + (i + 1) + '</i><span>' + x.t + '</span></button>').join('');
     const needW = s.k === 'wallets' && !st.wallets.length && !(st.chainWallets || []).length;
     return '<div class="su-bg" role="dialog" aria-modal="true" aria-labelledby="suTitle"><div class="su-wiz" tabindex="-1">'
-      + '<div class="su-top"><div class="logo"><i></i><span id="suTitle">처음 설정</span></div>' + (st.demo ? pill('w', '데모 모드') : '') + '<span class="sp"></span><button class="iconbtn" data-su="close" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
+      + '<div class="su-top"><div class="logo"><i></i><span id="suTitle">처음 설정</span></div>' + (st.demo ? pill('w', '데모 모드') : '') + '<span class="sp"></span><button class="xb" data-su="close" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
       + '<div class="su-intro cap">온체인 지갑과 거래소 기록을 모아 매매일지·손익을 자동으로 만들어요. 모든 데이터는 이 서버에만 저장되고, 화면은 이 컴퓨터(또는 테일넷)에서만 열려요.</div>'
       + '<nav class="su-steps" aria-label="설정 단계">' + nav + '</nav>'
       + '<div class="su-body">' + SEC[s.k]() + '</div>'
@@ -991,9 +991,9 @@
       document.documentElement.classList.add('su-lock');
     } else if (tierEl) { tierEl.remove(); tierEl = null; if (!U.open && !U.perm) document.documentElement.classList.remove('su-lock'); }
   }
-  const CH_COLOR = { eth: 'var(--c1)', base: 'var(--downc)', arbitrum: '#7FC4E8', optimism: 'var(--upc)', sol: 'var(--c2)', bsc: 'var(--c3)', linea: 'var(--c4)', blast: '#E5D86A',
-    zksync: '#8B93A4', scroll: '#E0B88A', polygon: '#A07CF0', gnosis: '#3E9C8C', robinhood: '#9AD57A', arc: '#6FA8DC' };
-  const chColor = k => CH_COLOR[k] || ('hsl(' + (Array.from(String(k)).reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7)) + ' 45% 62%)');
+  const CH_COLOR = { eth: 'var(--chEth)', base: 'var(--chBase)', arbitrum: 'var(--chArb)', optimism: 'var(--chOp)', sol: 'var(--chSol)',
+    bsc: 'var(--chBsc)', polygon: 'var(--chPol)', tron: 'var(--chTron)', sui: 'var(--chSui)', ton: 'var(--chTon)', btc: 'var(--chBtc)' };
+  const chColor = k => CH_COLOR[k] || 'var(--k6)';
   const CH_ST = { ok: ['ok', '정상'], filling: ['a', '옛 기록 채우는 중'], empty: ['g', '빈 지갑'], off: ['g', '꺼 둠'] };
   const CH_LOCK = { sep: '따로 수집', rpc: '노드 직접 읽기', last: '마지막 EVM', boot: '첫 수집 중' };
   const CH_REC_IC = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5v8"/><path d="M6.6 6.8a7.5 7.5 0 1 0 10.8 0"/></svg>';

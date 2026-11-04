@@ -79,6 +79,7 @@
   const sxPill = (c, t) => '<span class="pill ' + c + ' sm pvx">' + t + '</span>';
   const sxUsd = v => '$<span class="sx-usd">' + (S.hide || S.rand ? '<span class="pv">' + PVM.usd + '</span>' : nf('en-US').format(num(v))) + '</span>';
   const sxDust = () => sxUsd(S.dust);
+  const sxNwOn = () => !!(S.uiPrefs && S.uiPrefs.show_networth);
   const sxId = k => String(k == null ? '' : k).replace(/[^\w-]/g, '_');
   const mqW = (() => { try { return window.matchMedia('(min-width: 1000px)'); } catch (e) { return null; } })();
   const sxWide = () => !!(mqW && mqW.matches);
@@ -164,7 +165,8 @@
     }
     if (k === 'display') {
       const light = document.documentElement.getAttribute('data-theme') === 'light', glob = document.documentElement.getAttribute('data-scheme') === 'global';
-      return (light ? '라이트' : '다크') + ' · ' + (S.cur === 'USD' ? '$' : '₩') + ' · ' + (glob ? '글로벌' : '국내식') + ' · 소액 ' + (S.dust > 0 ? sxDust() : '전체');
+      return (sxNwOn() ? '전체 순자산 보임' : '전체 순자산 숨김') + ' · ' + (light ? '라이트' : '다크') + ' · ' + (S.cur === 'USD' ? '$' : '₩') + ' · '
+        + (glob ? '글로벌' : '국내식') + ' · 소액 ' + (S.dust > 0 ? sxDust() : '전체');
     }
     if (k === 'cost') return (D.taxGas ? '가스 ' + (D.taxGas.on !== false ? '켬' : '끔') + ' · ' : '') + (D.firstSeen ? '시가 ' + (D.firstSeen.on ? '켬' : '끔') + ' · ' : '') + '평균가 ' + (D.fallbackOn ? '켬' : '끔') + (D.costOv.length ? ' · 지정 ' + D.costOv.length : '');
     if (k === 'ai') {
@@ -186,8 +188,7 @@
     const D = S.D, K = sxKeys();
     if (k === 'keys') return K ? (K.empty.length ? sxPill('w', '빈 키 ' + K.empty.length) : sxPill('ok', '모두 저장')) : '';
     if (k === 'wallets') { const n = sxWalRows().filter(r => r.wait).length; return n ? sxPill('a', '수집 대기 ' + n) : ''; }
-    if (k === 'alerts') { const d = alD(); return d ? (d.tg && d.tg.connected ? sxPill('ok', '연결됨') : sxPill('g', '미연결')) : ''; }
-    if (k === 'display') return sxPill('g', '이 기기');
+    if (k === 'alerts') { const d = alD(); return d && !sxAlCount(d).on ? sxPill('g', '모두 꺼짐') : ''; }
     if (k === 'cost') { const n = arr(D.offc).filter(o => o.on).length; return n ? sxPill('a', '가정 ' + n) : ''; }
     if (k === 'ai') { const P = D.reviewProg; if (D.reviewPause && D.reviewPause.on) return sxPill('w', '자동 멈춤'); return D.reviewLen ? (P && arr(P.runs).length ? sxPill('a', '쓰는 중') : sxPill('g', '대기 없음')) : ''; }
     if (k === 'data') return D.bc ? (D.bcConfirmed.length ? sxPill('w', '불일치 ' + D.bcConfirmed.length) : sxPill('ok', '불일치 0')) : '';
@@ -241,7 +242,7 @@
     },
     wallets: {
       cap: '주소만 읽어요 — 서명·송금 권한은 요청하지 않아요',
-      body: sxWalletsBody,
+      act: () => sxWalActs(suU()), body: sxWalletsBody,
       subs: {
         perp: { cap: '주소만으로 포지션·거래·펀딩·청산 · 담보는 총자산에 더하지 않아요(표시 전용)', body: () => '<div class="sx-card"><div class="sx-slot sx-perpslot" data-su-slot="perp">' + sxSlotWait() + '</div></div>' },
         deposits: { cap: '온체인 전송의 목적지가 이 주소면 거래소 입금으로 봐요', body: sxDepBody },
@@ -252,7 +253,8 @@
       }
     },
     alerts: { cap: '서버에 저장 — 모든 기기에서 같아요 · 텔레그램 연결은 ‘연결 · 키’에서', body: sxAlertsBody },
-    display: { cap: '이 기기에만 저장돼요', body: sxDisplayBody },
+    display: { cap: '‘전체 순자산 보이기’는 서버에 저장 — 모든 기기에서 같아요 · ‘금액 가리기’부터 아래는 이 기기에만 저장돼요',
+      body: sxDisplayBody },
     cost: { cap: '바꾸면 원장을 다시 계산해요 — 원장 자체는 그대로', body: sxCostBody, subs: { rules: { cap: '수집기·원장이 지금 쓰는 값 · 읽기 전용', body: sxRulesBody } } },
     ai: { cap: '서버에 저장 — 새로 쓰는 리뷰부터 적용돼요', body: sxAiBody },
     data: { cap: '수집기가 보고한 상태 · 수집 주기는 서버가 관리해요', body: sxDataBody,
@@ -263,12 +265,18 @@
       subs: { brokers: { cap: '보유 종목·예수금을 읽기만 · 실험(미검증) · 켜기 = config.json brokers+실험 확인', body: () => '<div class="sx-card">' + brokersBody() + '</div>' } } }
   };
 
+  const sxWAdd = U => S.set.open.has('wadd') || !!(U && (U.d && U.d.w_addr || U.wRes || (U.busy && U.busy.wadd)));
+  const sxWalActs = U => { const o = sxWAdd(U); return '<a class="btn sm" href="#settings/wallets/perp">' + SXI.plus + ' 퍼프 덱스 주소</a>'
+    + '<button class="btn sm' + (o ? '' : ' pri') + '" data-a="sxTog" data-v="wadd" aria-expanded="' + o + '"'
+    + ' aria-controls="sx-wallets-add">'
+    + (o ? IC.close + ' 추가 닫기' : SXI.plus + ' 지갑 추가') + '</button>'; };
   function sxWalletsBody() {
     const D = S.D, K = sxKeys(), rows = sxWalRows(), U = suU();
-    const addOpen = S.set.open.has('wadd') || !!(U && (U.d && U.d.w_addr || U.wRes || (U.busy && U.busy.wadd)));
-    const big = '<div class="sx-tiles pvx"><div><b>' + rows.length + '</b><span>추적 지갑</span></div><div><b>' + (K ? K.pN : '—') + '</b><span>퍼프 덱스</span></div><div><b>' + D.deposits.length + '</b><span>입금 주소</span></div></div>';
-    const acts = '<div class="sx-acts"><button class="btn sm' + (addOpen ? '' : ' pri') + '" data-a="sxTog" data-v="wadd" aria-expanded="' + addOpen + '" aria-controls="sx-wallets-add">' + (addOpen ? IC.close + ' 추가 닫기' : SXI.plus + ' 지갑 추가') + '</button>'
-      + '<a class="btn sm" href="#settings/wallets/perp">' + SXI.plus + ' 퍼프 덱스 주소</a></div>';
+    const addOpen = sxWAdd(U);
+    const gate = U && U.tier && Object.values(U.tier.scopes || {}).some(x => x && x.gate);
+    const big = gate ? '<div class="sx-budw pvx" role="status"><span class="dot w"></span>이더스캔 하루 예산(' + esc(String(U.tier.budgetPct || 80))
+      + '%)에 가까워 아껴 쓰는 중 · 아래 ‘확인 주기 · 예상 사용량’</div>' : '';
+    const acts = sxWide() ? '' : '<div class="sx-acts">' + sxWalActs(U) + '</div>';
     const add = addOpen ? '<div class="sx-card sx-add" id="sx-wallets-add"><div class="sx-slot sx-waddslot" data-su-slot="wadd">' + sxSlotWait() + '</div></div>' : '';
     const nw = newWallets(), dup = {}; rows.forEach(r => { dup[r.alias] = (dup[r.alias] || 0) + 1; });
     if (S.set.walAll) { S.set.walAll = false; if (S.set.walOpen) { const k9 = S.set.walOpen; uiPgReveal('sxw', r => !!r && r.k === k9); } else delete uiPgS().sxw; }
@@ -277,18 +285,19 @@
     const list = rows.length ? rows.map((r, i) => sxWalRow(r, dup, nw, i < pgA || i >= pgB, q, i)).join('') : '<div class="sx-empty">추적 중인 지갑이 없어요 · ‘지갑 추가’로 넣어요</div>';
     const search = rows.length > LIM ? '<label class="sx-qb sx-wq">' + IC.search + '<input class="sx-qi" type="search" id="sxWq" data-input="walq" placeholder="지갑 이름·주소 찾기" aria-label="지갑 이름·주소 찾기" value="' + esc(q) + '" autocomplete="off" spellcheck="false" autocapitalize="off"></label>' : '';
     const more = pgW.last > 0 ? '<div class="sx-more"' + (q ? ' hidden' : '') + '>' + uiPgBar('sxw', rows.length, { unit: '개' }) + '</div>' : '';
-    const listCard = '<div class="sx-card" id="walCard" data-pgh="sxw">' + sxGrp('추적 지갑', '이름을 누르면 바로 바꿔요 · 화면 전용') + search
+    const listCard = '<div class="sx-card" id="walCard" data-pgh="sxw">' + sxGrp('추적 지갑 ' + rows.length, '이름을 누르면 바로 바꿔요 · 화면 전용') + search
       + '<div class="sx-wl' + (all ? ' all' : '') + '" id="sxWl">' + list + '<div class="sx-empty sx-nomatch"' + (q && rows.length && !shown ? '' : ' hidden') + '>맞는 지갑이 없어요</div></div>' + more + '</div>';
     const rb = D.rabby, rbW = rb ? arr(rb.wallets) : [], wl = D.whitelist || S.wl;
     const rbGap = rbW.filter(w => w.gapSince).length;
     const perpCap = K ? (K.pErr ? '설정을 읽지 못했어요' : K.pN ? Object.keys(K.pBy).map(n9 => esc(n9) + ' ' + K.pBy[n9] + '개').join(' · ') + ' · 수집 중' : '주소만으로 포지션·펀딩·청산 · 키 필요 없음') : '불러오는 중…';
-    const mg = '<div class="sx-card">' + sxGrp('주소 관리')
+    const mg = '<div class="sx-card">' + sxGrp('주소 관리') + '<div class="sx-mg2">'
       + sxIt('sx-wallets-perp', '퍼프 덱스 주소', perpCap, K && K.pN ? sxPill(K.pBad ? 'w' : 'ok', K.pBad ? '지연 ' + K.pBad : '정상') : '', { href: '#settings/wallets/perp' })
       + sxIt('sx-wallets-dep', '거래소 입금 주소', '거래소 키로 자동 수집 · 이 주소로 보내면 입금', '<span class="sx-val num">' + D.deposits.length + '</span>', { href: '#settings/wallets/deposits' })
       + (rbW.length ? sxIt('sx-wallets-rabby', 'Rabby 대조', '지갑 ' + rbW.length + '개 · 하루 1회 · 봇과 차이 비교', rbGap ? sxPill('w', '차이 ' + rbGap) : '<span class="sx-val num">' + rbW.length + '</span>', { href: '#settings/wallets/rabby' }) : '')
       + sxIt('sx-wallets-wl', '발신 주소 화이트리스트', '내 다른 지갑 → 스팸 판정 제외', '<span class="sx-val num">' + (wl ? wl.length : '—') + '</span>', { href: '#settings/wallets/whitelist' })
       + sxIt('sx-wallets-names', '추적 안 하는 주소에 이름', '화면 표시용 이름만', '', { href: '#settings/wallets/names' })
-      + sxIt('sx-wallets-tok', '토큰 매핑', '컨트랙트 ↔ 거래소 티커 · 읽기 전용', '<span class="sx-val num">' + D.aliases.length + '</span>', { href: '#settings/wallets/tokens' }) + '</div>';
+      + sxIt('sx-wallets-tok', '토큰 매핑', '컨트랙트 ↔ 거래소 티커 · 읽기 전용', '<span class="sx-val num">' + D.aliases.length + '</span>',
+        { href: '#settings/wallets/tokens' }) + '</div></div>';
     const tierCard = '<div class="sx-card" id="sx-wallets-tier">' + sxGrp('확인 주기 · 예상 사용량', '오래 안 쓴 주소도 1시간마다 확인해요 · 내가 보내면 바로 지금 주기') + '<div class="sx-slot sx-tierslot" data-su-slot="tier">' + sxSlotWait() + '</div></div>';
     const chainCard = '<div class="sx-card" id="sx-wallets-chains"><div class="sx-slot sx-chainslot" data-su-slot="chains">' + sxSlotWait() + '</div></div>';
     return big + acts + add + listCard + mg + chainCard + tierCard;
@@ -352,19 +361,32 @@
       : '<div class="sx-empty"><b>등록된 매핑 없음</b>수집기 설정에서 관리해요</div>') + '</div>';
   }
 
+  function sxNwRow() {
+    const on = sxNwOn();
+    return '<div class="sx-it" id="sx-display-networth"><div class="sx-itx"><span class="tx"><b>전체 순자산 보이기</b>'
+      + '<span class="cap">대시보드 총자산 아래 전체 순자산(코인 + 기타 자산 − 부채) 줄</span>'
+      + '<span class="cap">기타 자산 탭의 전체 순자산 카드는 늘 보여요</span></span></div>'
+      + '<span class="sx-r">' + sxSw('uiPref', on, '전체 순자산 보이기', ' data-pref="show_networth"') + '</span></div>';
+  }
   function sxDisplayBody() {
     const D = S.D, light = document.documentElement.getAttribute('data-theme') === 'light', glob = document.documentElement.getAttribute('data-scheme') === 'global';
     const hiddenN = D.groups.filter(g => g.value > 0 && S.dust > 0 && g.value < S.dust).length;
     const dust = sxIt('sx-display-dust', '소액 기준', S.dust > 0 ? '<span class="pvx">' + sxDust() + ' 미만 ' + hiddenN + '종 목록에서 숨김(합계엔 포함)</span>' : '전체 표시', '', {
       val: '<span class="sx-val num pvx">' + (S.dust > 0 ? sxDust() : '전체') + '</span>',
-      exp: () => '<div class="chiprow">' + DUST_OPTS.map(v => '<button class="fbtn' + (S.dust === v ? ' on' : '') + '" data-a="setDust" data-v="' + v + '" aria-pressed="' + (S.dust === v) + '">' + (v === 0 ? '전체 표시' : '$' + v) + '</button>').join('') + '</div>'
+      exp: () => '<div class="chiprow">' + DUST_OPTS.map(v => '<button class="chip act' + (S.dust === v ? ' on' : '') + '" data-a="setDust"'
+        + ' data-v="' + v + '" aria-pressed="' + (S.dust === v) + '">' + (v === 0 ? '전체 표시' : '$' + v) + '</button>').join('') + '</div>'
         + '<div class="frm"><input class="field num" inputmode="numeric" placeholder="직접 입력 $" data-draft="dust" data-enter="dustCustom" aria-label="소액 기준 직접 입력" style="max-width:160px"><button class="btn sm" data-a="dustCustom">적용</button></div>'
         + '<div class="cap" style="margin-top:8px">미매칭 자동 숨김도 같은 기준 — 원가 미확인 매도·창 밖 처분은 작아도 숨기지 않아요</div>' });
-    return '<div class="sx-card">'
-      + sxIt('sx-display-theme', '테마', '', sxSeg('themeSet', [['system', '시스템', thSys()], ['dark', '다크', !thSys() && !light], ['light', '라이트', !thSys() && light]], '테마'))
+    return '<div class="sx-card">' + sxGrp('금액 보이기') + sxNwRow()
+      + '<div class="sx-it" id="sx-display-hide"><div class="sx-itx"><span class="tx"><b>금액 가리기</b>'
+      + '<span class="cap">밖에서 보여 줄 때 · 상단 눈 버튼 · Shift+H</span>'
+      + '<span class="cap">금액 가리기를 켜면 모든 금액이 가려져요</span></span></div>'
+      + '<span class="sx-r">' + sxSw('hideToggle', S.hide, '모든 금액 가리기') + '</span></div>'
+      + sxGrp('화면')
+      + sxIt('sx-display-theme', '테마', '', sxSeg('themeSet', [['system', '시스템', thSys()], ['dark', '다크', !thSys() && !light],
+        ['light', '라이트', !thSys() && light]], '테마'))
       + sxIt('sx-display-cur', '기준 통화', S.cur === 'USD' ? '온체인 원가 기준' : 'USDT ₩' + nf('ko-KR').format(D.rate) + ' 환산 · 김프 포함', sxSeg('cur', [['KRW', '₩', S.cur === 'KRW'], ['USD', '$', S.cur === 'USD']], '기준 통화'))
       + sxIt('sx-display-scheme', '손익 색', glob ? '상승 <span style="color:var(--upc)">초록</span> · 하락 <span style="color:var(--downc)">빨강</span>' : '상승 <span style="color:var(--upc)">빨강</span> · 하락 <span style="color:var(--downc)">파랑</span>', sxSeg('scheme', [['kr', '국내식', !glob], ['global', '글로벌', glob]], '손익 색'))
-      + sxIt('sx-display-hide', '금액 가리기', '밖에서 보여 줄 때 · 상단 눈 버튼 · Shift+H', sxSw('hideToggle', S.hide, '금액 가리기'))
       + sxIt('sx-display-pgsize', '목록 한 쪽', '긴 목록을 이만큼씩 넘겨 봐요 · 이 기기만', sxSeg('pgSize', [['10', '10개', uiPageSize() === 10], ['20', '20개', uiPageSize() === 20]], '목록 한 쪽 개수'))
       + sxIt('sx-display-rand', '금액 랜덤값', '예시 화면용 · 가리기와 둘 중 하나', sxSw('randToggle', S.rand, '금액 랜덤값'), { exp: () => '<div class="cap">금액·수량에 열 때마다 바뀌는 같은 배수를 곱해 실제와 다른 숫자로 보여요(합계·차트는 서로 맞고 %·단가는 그대로) · 화면에 ‘랜덤값’ 표시 · 탐색기 링크 없음</div>' + rkCtl() })
       + dust
@@ -562,7 +584,8 @@
     const back = sub ? '<button class="sx-back" data-a="sxBack" data-v="' + sxHash(sec) + '">' + IC.left + esc(M.t) + '</button>' : wide ? '' : '<button class="sx-back" data-a="sxBack" data-v="settings">' + IC.left + '설정</button>';
     const ic = wide && !sub ? '<span class="aic ' + M.c + '">' + sxIcon(M.ic) + '</span>' : '';
     const cap = sd ? sd.cap : D0.cap;
-    return back + '<div class="sx-ph">' + ic + '<h1 class="sx-title" id="sxH" tabindex="-1">' + esc(title) + '</h1>' + (sub ? '' : sxSafe(sxBadge, sec)) + '<span class="sp"></span>' + (wide && !sub && D0.act ? D0.act() : '') + '</div>'
+    return back + '<div class="sx-ph">' + ic + '<h1 class="sx-title" id="sxH" tabindex="-1">' + esc(title) + '</h1><span class="sp"></span>'
+      + (wide && !sub && D0.act ? D0.act() : '') + '</div>'
       + (cap ? '<div class="cap sx-pcap">' + cap + '</div>' : '');
   }
   function sxBody(sec, sub, wide) { const D0 = SX[sec], sd = sub && D0.subs && D0.subs[sub]; return sd ? sd.body(wide) : D0.body(wide); }
@@ -650,6 +673,7 @@
     add('display', '', '테마', '다크 라이트 dark light 밝은 어두운 모드', '#sx-display-theme');
     add('display', '', '기준 통화', '원화 달러 krw usd 통화 환산 ₩ $', '#sx-display-cur');
     add('display', '', '손익 색', '국내식 글로벌 빨강 파랑 초록 색상 색깔', '#sx-display-scheme');
+    add('display', '', '전체 순자산 보이기', '전체 순자산 기타 자산 부채 합계 줄 보이기 숨김 net worth', '#sx-display-networth');
     add('display', '', '금액 가리기', '숨김 가리기 hide 눈 shift+h 프라이버시', '#sx-display-hide');
     add('display', '', '금액 랜덤값', '랜덤 random 예시 스크린샷 주사위', '#sx-display-rand');
     add('ai', '', '자동 생성 잠시 멈춤', 'ai 리뷰 멈춤 정지 끄기 일시정지 pause 대량 재작성 자동', '#sx-ai-pause');

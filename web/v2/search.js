@@ -998,10 +998,17 @@
   }
   function emptyHTML() {
     const a = API(), D = a && a.S.D, rec = pvOn() ? [] : recentGet().slice(0, 4), sv = pvOn() ? [] : savedGet().slice(0, 4);
-    let h = '';
+    let h = quickHTML(a, D);
     if (sv.length) h += '<div class="tjs-gh">저장한 검색 <span class="sp"></span></div><div class="tjs-sl">' + sv.map((r, i) => '<div class="tjs-r" data-srch="again" data-v="s' + i + '">' + tic(IX.star, 'star') + '<div class="tjs-tx"><b>' + esc(r.lab || r.q) + '</b><span>' + (r.lab ? '<span class="tjs-mono">' + esc(r.q) + '</span> · ' : '') + '저장 ' + esc(ago(r.t)) + '</span></div><button type="button" class="tjs-rx" data-srch="unsave" data-v="' + i + '" aria-label="저장 지우기">' + IX.x + '</button></div>').join('') + '</div>';
     if (rec.length) h += '<div class="tjs-gh">최근 검색 <span class="sp"></span><button type="button" class="tjs-lnk" data-srch="clrRecent">지우기</button></div><div class="tjs-sl">' + rec.map((r, i) => '<div class="tjs-r" data-srch="again" data-v="r' + i + '">' + tic(IX.clock) + '<div class="tjs-tx"><b>' + esc(r.q) + '</b><span>' + esc((r.lab ? r.lab + ' · ' : '') + ago(r.t)) + '</span></div><button type="button" class="tjs-rx" data-srch="unrecent" data-v="' + i + '" aria-label="최근 검색 지우기">' + IX.x + '</button></div>').join('') + '</div>';
     else if (pvOn()) h += '<div class="tjs-tip"><b>가리기·랜덤값 중</b> · 지난 검색어는 지웠고 새로 남기지 않아요 · 저장해 둔 조건은 숨겨요(끄면 다시 보여요)</div>';
+    h += '<div class="tjs-tip"><b>이렇게도 찾아요</b> · 주소·해시는 앞 4자리부터 · 날짜는 10-02 · 10/2 · 어제 · 지난주 · 설정 이름(소액 기준, 조용한 시간) · 필터 '
+      + '<code>coin:ETH</code> <code>chain:base</code> <code>type:sell</code> <code>after:2026-09</code>'
+      + ' <code>pnl:&lt;0</code> <code>amt:&gt;1000</code></div>';
+    return h;
+  }
+  function quickHTML(a, D) {
+    let h = '';
     if (D && a) {
       const T = (a.IC && a.IC.tab) || {}, tk = String(D.todayKey || todayIso().slice(5)), c = a.dayCnt ? a.dayCnt(tk, true) : null, rz = (D.realized || {})[tk];
       const iso = todayIso();
@@ -1011,10 +1018,10 @@
         + go(T.daily || IX.clock, '오늘 기록', esc((+iso.slice(5, 7)) + '월 ' + (+iso.slice(8)) + '일 (' + dowOf(iso) + ')') + (c ? ' · ' + pvx(c.n + '건') : '') + (rz != null ? ' · 실현 ' + a.m(num(rz), { sign: true, compact: true }) : ''), '일별', 'today')
         + (D.of ? go(T.outflows || IX.go, '확인 필요 전송', pvx(pendN + '곳') + (D.ofPendUsd ? ' · 순유출 ' + a.m(num(D.ofPendUsd), { compact: true }) : ''), '보낸 내역', 'of') : '')
         + go(T.unmatched || IX.go, '미매칭 확인', pvx(unk + '건') + ' · 원가 미확인·출처 미상', '미매칭', 'unm')
-        + (H && H.loaded ? go(IX.pulse, '상태 · ' + esc(H.label || ''), H.crit + H.warn ? '주의할 것 ' + pvx((H.crit + H.warn) + '건') : '손댈 것 없음', '패널', 'health') : '')
+        + (H && H.loaded ? go(IX.pulse, '상태 · ' + esc(H.label || ''), H.crit + H.warn ? '주의할 것 ' + pvx((H.crit + H.warn) + '건')
+          : H.overall === 'unknown' ? '문제가 있는지 아직 알 수 없어요' : '열린 문제 없음', '패널', 'health') : '')
         + '</div>';
     }
-    h += '<div class="tjs-tip"><b>이렇게도 찾아요</b> · 주소·해시는 앞 4자리부터 · 날짜는 10-02 · 10/2 · 어제 · 지난주 · 설정 이름(소액 기준, 조용한 시간) · 필터 <code>coin:ETH</code> <code>chain:base</code> <code>type:sell</code> <code>after:2026-09</code> <code>pnl:&lt;0</code> <code>amt:&gt;1000</code></div>';
     return h;
   }
   function paintBody() {

@@ -15,10 +15,10 @@
     + ' rows rx ry scope shape-rendering spellcheck stroke stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-opacity'
     + ' stroke-width style tabindex target text-anchor title transform type value vector-effect viewbox width x x1 x2 xmlns y y1 y2'
     + ' autofocus disabled hidden open');
-  const ST = words('align-items background border border-bottom border-color border-radius border-top color cursor display fill flex'
+  const ST = words('align-items background border-bottom border-color border-radius border-top color cursor display fill flex'
     + ' flex-direction flex-wrap font-family font-size font-weight gap grid-column grid-row height justify-content justify-self left'
     + ' line-height margin margin-bottom margin-left margin-top max-height max-width min-height min-width opacity overflow overflow-wrap'
-    + ' overflow-x padding padding-top place-items position stop-color stop-opacity stroke text-align top transform white-space width'
+    + ' overflow-x padding padding-top place-items position stroke text-align top transform white-space width'
     + ' word-break');
   const CP_EL_HTML = words('abbr bdi bdo blockquote caption cite data del dfn em figcaption figure footer h5 h6 header hgroup hr ins main'
     + ' meter optgroup option output pre progress q rp rt ruby samp select strong sub sup time var');

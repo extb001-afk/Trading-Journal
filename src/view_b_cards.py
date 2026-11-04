@@ -4,12 +4,14 @@ import acct_norm
 import cgca
 import chain_registry
 import chaincatalog, config, logs, paths, seeds, statefile
+import expoint
 import exprov
 import os
 import provbal
 import rabby
 import re
 import spamguard
+import stakecredit
 import time
 from datetime import datetime
 from types import SimpleNamespace
@@ -25,7 +27,7 @@ from view_misc import STAKE_STATE_KO
 from view_misc import _px_recent
 from view_misc import _px_took
 from view_misc import _sol_stake_accounts
-from view_pending import merge_scoped, unpriced_ent, unpriced_pairs
+from view_pending import merge_scoped, unpriced_ent, unpriced_pairs, upbit_avg_usd
 from view_spot import Spot
 from view_text import _scam_name
 from view_text import _short_addr
@@ -564,6 +566,7 @@ class CardsMixin:
 
     def _cards_holdings(self, cst):
         (cex_proof, cex_px_pairs, cg_px_want9, coins, ex_gid, fb_on, fs_on, fx_name, gid_pairs, gid_pairs_all, guard_held9, hold_prio, invck9, led_by_gid, led_upbit_gids, live, live_px, locs_for, meta_want9, native_kind9, now, open_cg9, override_px, pending_gids, pre_px9, pre_used9, price_groups, proof_div9, px_wait9, quarantined, spam_view, stables, ub_coins, uncred_cost, uncred_gid, uncred_known, unpriced, unpriced_w, unv9, upbit_transit_gids,) = (cst.cex_proof, cst.cex_px_pairs, cst.cg_px_want9, cst.coins, cst.ex_gid, cst.fb_on, cst.fs_on, cst.fx_name, cst.gid_pairs, cst.gid_pairs_all, cst.guard_held9, cst.hold_prio, cst.invck9, cst.led_by_gid, cst.led_upbit_gids, cst.live, cst.live_px, cst.locs_for, cst.meta_want9, cst.native_kind9, cst.now, cst.open_cg9, cst.override_px, cst.pending_gids, cst.pre_px9, cst.pre_used9, cst.price_groups, cst.proof_div9, cst.px_wait9, cst.quarantined, cst.spam_view, cst.stables, cst.ub_coins, cst.uncred_cost, cst.uncred_gid, cst.uncred_known, cst.unpriced, cst.unpriced_w, cst.unv9, cst.upbit_transit_gids,)
+        self._stake_want = (stake_lk := stakecredit.Lookup(self.spot, now)).want
         for gid, g in sorted(price_groups.items(), key=lambda kv: kv[1]["sym"]):
             sym = g["sym"]
             uncred = uncred_gid.get(gid, Decimal(0))
@@ -608,7 +611,7 @@ class CardsMixin:
             if gid in override_px:
                 px = override_px[gid]
             elif gid in ex_gid:
-                px = self.spot.ex_price(ex_gid[gid], sym) or 0
+                px = expoint.own_px(self.spot, ex_gid[gid], sym) or 0
                 src9 = f"cex:{fx_name.get(ex_gid[gid], ex_gid[gid])}"
                 if ex_gid[gid] == "upbit" and sym in (getattr(self.spot, "upbit_alt_src", None) or {}):
                     src9 = "cex:" + self.spot.upbit_alt_src[sym]
@@ -656,6 +659,8 @@ class CardsMixin:
                         if cp2:
                             px, src9, age9 = cp2[0], "coingecko", (None if off2 else max(0.0, now - cp2[1]))
                             break
+                if not px and gid in live and qty > 0 and gid not in quarantined and gid not in unv9:
+                    px, src9, age9 = stake_lk.px(gid_pairs.get(gid)) or (0, src9, age9)
                 if not px and any(self.spot.dex_pending(ch2, ca2) for ch2, ca2 in gid_pairs.get(gid, [])):
                     pending_gids.add(gid)
             elif sym in STABLE_GROUPS:
@@ -770,7 +775,7 @@ class CardsMixin:
                     it9["stable"] = True
                     xp_unk_px9.append((it9, 1.0, None))
                 else:
-                    px9 = self.spot.ex_price(it9["ex"], it9["sym"])
+                    px9 = expoint.own_px(self.spot, it9["ex"], it9["sym"])
                     xp_unk_px9.append((it9, float(px9 or 0), None))
                     if px9:
                         it9["src"] = "cex:" + it9["ex"]
@@ -801,6 +806,7 @@ class CardsMixin:
                 big_pairs += gid_pairs.get(int(c2["key"][1:]), [])
         self.spot.want_okx(big_pairs)
 
+        ub_avg = upbit_avg_usd(cst.ub2.get("accounts"), self.spot.rate)
         for cur4, q4 in sorted(ub_coins.items()):
             if q4 <= 0:
                 continue
@@ -825,9 +831,9 @@ class CardsMixin:
                 coins.append(entry)
                 if not entry["price"]:
                     unpriced.append(cur4)
-                    unpriced_w.append({"sym": cur4, "qty": float(q4), "cost": 0.0,
-                                       "ref": float((entry.get("pxRef") or {}).get("px") or 0) * float(q4), "where": "업비트",
-                                       "ent": unpriced_ent((), "upbit", cur4)})
+                    ref_usd, ub_cost = float((entry.get("pxRef") or {}).get("px") or 0) * float(q4), ub_avg.get(cur4, 0.0) * float(q4)
+                    unpriced_w.append({"sym": cur4, "qty": float(q4), "cost": 0.0, "ref": min(ref_usd, ub_cost) if ub_cost > 0 else ref_usd,
+                                       "where": "업비트", "ent": unpriced_ent((), "upbit", cur4)})
 
         rb_view, rb_debts = None, []
         rb_pairs9 = set()

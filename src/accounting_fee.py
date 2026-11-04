@@ -19,6 +19,7 @@ class FeeBook:
         fbx.gas_expense = px.books.gas_expense
         fbx.gas_by_chain = px.books.gas_by_chain
         fbx.gas_by_month = px.books.gas_by_month
+        fbx.gas_by_date = px.books.gas_by_date
         fbx.tax_rows = px.books.tax_rows
         fbx.fee_day = px.books.fee_day
         fbx.ex_fee = px.books.ex_fee
@@ -94,22 +95,29 @@ class FeeBook:
     def br_fee_add(fbx, chain9, usd9, ts9):
         if usd9 <= 0:
             return
-        fbx.fee_day_add(usd9, ts9)
+        fbx.fee_day_add(usd9, ts9, ("c", chain9), 0, True)
         for a9 in (fbx.gas_by_chain.setdefault(chain9, {"usd": Decimal(0), "tx": 0}),
                    fbx.gas_by_month.setdefault(fbx.kst_fmt(ts9, "%Y-%m"), {}).setdefault(chain9, {"usd": Decimal(0), "tx": 0})):
             a9["usd"] += usd9
             a9["br"] = a9.get("br", Decimal(0)) + usd9
 
-    def fee_day_add(fbx, usd9, ts9):
+    def fee_day_add(fbx, usd9, ts9, row: tuple | None = None, tx_n: int = 0, bridge: bool = False):
+        day = fbx.kst_fmt(ts9, "%Y-%m-%d")
         if usd9 > 0:
-            d9 = fbx.fee_day.setdefault(fbx.kst_fmt(ts9, "%Y-%m-%d"), [Decimal(0), 0.0])
+            d9 = fbx.fee_day.setdefault(day, [Decimal(0), 0.0])
             d9[0] += usd9
             d9[1] += float(usd9) * fbx.px.ctx.fxb.rate_at(ts9)
+        if row is not None:
+            cell = fbx.gas_by_date.setdefault(day, {}).setdefault(row, {"usd": Decimal(0), "tx": 0})
+            cell["usd"] += usd9
+            cell["tx"] += tx_n
+            if bridge:
+                cell["br"] = cell.get("br", Decimal(0)) + usd9
 
     def ex_fee_add(fbx, ex9, usd9, ts9):
         if usd9 <= 0:
             return
-        fbx.fee_day_add(usd9, ts9)
+        fbx.fee_day_add(usd9, ts9, ("x", ex9), 1)
         a9 = fbx.ex_fee.setdefault(ex9, {"usd": Decimal(0), "tx": 0})
         a9["usd"] += usd9
         a9["tx"] += 1
@@ -120,7 +128,7 @@ class FeeBook:
     def wd_fee_add(fbx, ex9, usd9, ts9):
         if usd9 <= 0:
             return
-        fbx.fee_day_add(usd9, ts9)
+        fbx.fee_day_add(usd9, ts9, ("w", ex9), 1)
         for a9 in (fbx.wd_fee.setdefault(ex9, {"usd": Decimal(0), "tx": 0}),
                    fbx.wd_fee_m.setdefault(fbx.kst_fmt(ts9, "%Y-%m"), {}).setdefault(ex9, {"usd": Decimal(0), "tx": 0})):
             a9["usd"] += usd9

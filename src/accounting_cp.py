@@ -31,7 +31,9 @@ class CostPools:
         if p9 is not None:
             p9.add(key, q9, c9)
 
-    def cp_add_map(cpx, g, mp9, s9):
+    def cp_add_map(cpx, g, mp9, s9, ent: "dict | None" = None):
+        if ent is not None:
+            cpx.px.hvx.move_in(g, ent, s9)
         p9 = accounting_util.cp_pool(g) if mp9 else None
         if p9 is not None:
             p9.add_map(mp9, s9)
@@ -96,6 +98,7 @@ class CostPools:
         cpx.px.kpx.krw_last[0] = None
         cpx.px.kpx.krw_mix[0] = Decimal(0)
         cpx.px.kpx.kd_reset()
+        cpx.px.hvx.move_out(g, qty) if lots else cpx.px.hvx.burn(g, qty)
         cost_taken = Decimal(0)
         from_unknown = min(qty, g["qty_unknown"])
         rem = qty - from_unknown

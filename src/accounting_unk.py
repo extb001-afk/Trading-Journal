@@ -102,3 +102,4 @@ class UnkBook:
             i_min = min(range(len(lst9)), key=lambda i9: lst9[i9]["qty"])
             if lst9[i_min]["qty"] < q9:
                 lst9[i_min] = ent9
+        return fsa9 if applied9 is None else (None, None, "ov")

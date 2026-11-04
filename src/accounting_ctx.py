@@ -31,7 +31,7 @@ def check_ctx(ctx: ReplayCtx, scope: dict, where: str) -> None:
 
 
 class ReplayParts:
-    __slots__ = ("sb", "ctx", "books", "cb", "fbx", "ofx", "kpx", "unx", "fsx", "orx", "cpx", "lpx", "slx", "lnx", "omx",
+    __slots__ = ("sb", "ctx", "books", "cb", "fbx", "ofx", "kpx", "unx", "fsx", "orx", "cpx", "lpx", "slx", "lnx", "omx", "hvx",
                  "flow_of", "tx_legsym", "xc_stx9", "xc_blk9", "of_pay_on")
 
     def __init__(self, sb, books):

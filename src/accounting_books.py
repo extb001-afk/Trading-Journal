@@ -22,6 +22,7 @@ class Books:
     wd_fee_m: dict = field(default_factory=dict)
     gas_by_chain: dict = field(default_factory=dict)
     gas_by_month: dict = field(default_factory=dict)
+    gas_by_date: dict = field(default_factory=dict)
     gas_nopx: dict = field(default_factory=dict)
     tax_rows: list = field(default_factory=list)
     realized_by_date: dict = field(default_factory=dict)
@@ -30,6 +31,7 @@ class Books:
     extra_events: list = field(default_factory=list)
     cp_ev: dict = field(default_factory=dict)
     lp_events: list = field(default_factory=list)
+    harvest: dict = field(default_factory=dict)
 
     @classmethod
     def names(cls) -> tuple:

@@ -298,7 +298,7 @@ class FirstSeen:
             un9 += u9r
             kr9 += w9r
             fsx.px.kpx.kd_move(flow9, e9, sc9)
-            fsx.px.cpx.cp_add_map(g9, e9.get("_cmp"), float(sc9))
+            fsx.px.cpx.cp_add_map(g9, e9.get("_cmp"), float(sc9), ent=e9)
             if sc9 >= 1:
                 for k7 in ("qty", "left", "cost", "known", "unknown", "krw"):
                     e9[k7] = Decimal(0)
@@ -395,7 +395,7 @@ class FirstSeen:
         gg9 = fsx.px.unx.fs_sum["g"].setdefault(str(g9["gid"]), [g9["sym"], 0, 0.0])
         gg9[1] += 1
         gg9[2] += float(take * unit_d)
-        return take, px9
+        return take, px9, src9
 
     def fs_st(fsx, g9, ts9, q9, ch9):
         if not fsx.fs_pref or q9 <= EPS:

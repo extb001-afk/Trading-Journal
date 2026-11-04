@@ -12,7 +12,7 @@ import accounting_books  # noqa: E402
 import accounting_ctx as AC  # noqa: E402
 
 chk = T.chk
-LATE2 = {"fbx": ("wd_raw9",), "cpx": ("xc_tok9",)}
+LATE2 = {"fbx": ("wd_raw9",), "cpx": ("xc_tok9",), "cb": ("on_pool_put",)}
 STAGES = ("_replay_prep", "_replay_links", "_replay_main")
 
 
@@ -436,7 +436,7 @@ for f in fns.values():
             late[n.targets[0].value.id].append((n.lineno, n.targets[0].attr, ast.unparse(n.value)))
 late_t = {p: tuple(a for _l, a, _v in sorted(xs)) for p, xs in late.items()}
 vals_bad = [(p, a, v9) for p, xs in late.items() for _l, a, v9 in xs if v9 != a]
-chk(late_t == LATE2, "P4 늦은 연결 = 이름으로 고정한 두 자리(%s) — 새 늦은 연결은 LATE2 에 올리고 검토" % sorted(LATE2.items()),
+chk(late_t == LATE2, "P4 늦은 연결 = 이름으로 고정한 세 자리(%s) — 새 늦은 연결은 LATE2 에 올리고 검토" % sorted(LATE2.items()),
     sorted(set(late_t.items()) ^ set(LATE2.items()))[:6])
 chk(not vals_bad, "P4 늦은 연결 값 = 같은 이름 지역(맨 이름)", vals_bad[:6])
 lb_bad = []

@@ -33,6 +33,9 @@ CATS = [
              "내가 옮긴 돈이 제때(일반 30분·브릿지 2시간) 안 들어오거나 수수료보다 많이 줄어 들어와도 소리로 알려요. 큰 입금은 급하지 않아서 하루 요약에 넣어요."},
     {"key": "arrive", "n": 18, "tier": "now", "label": "내 이체 도착 확인",
      "desc": "내 지갑·내 거래소·브릿지로 옮긴 큰 금액(큰 출금 기준 이상)이 도착하면 소리 없이 한 통 — 걸린 시간·받은 수량·수수료로 줄어든 양. 보낼 때는 알리지 않아요."},
+    {"key": "exhalt", "n": 21, "tier": "now", "label": "보유 코인 입출금 중지",
+     "desc": "연결한 거래소가 내가 가진 코인의 입금·출금을 막으면 처음 한 번 알려요(소리) — 출금은 그 거래소에 들고 있을 때, 입금은 지갑·다른 거래소에 들고 있을 때. "
+             "새로 막힌 건 20분 이어져야 알리고, 다시 열리면 30분 뒤 소리 없이 한 통. 일부 네트워크만 막힌 건 대시보드에만 보여요."},
     {"key": "depeg", "n": 14, "tier": "now", "th": ["depeg_pct"], "label": "스테이블 가격 이탈",
      "desc": "USDC·USDT 같은 스테이블이 1달러에서 기준 이상 벗어나면 알려요(해외 거래소 시세). 벗어날 때 한 번, 돌아올 때 한 번."},
     {"key": "liq", "n": 15, "tier": "now", "th": ["liq_pct"], "label": "청산 근접(선물·대출·마진)",
@@ -121,6 +124,7 @@ KIND_CAT = {
     "PNL_DAILY": "pnl", "REVIEW_DAILY": "review", "REVIEW_WEEKLY": "weekly", "PRICE_MOVE": "move", "BIG_FLOW": "bigflow",
     "MOVE_LATE": "bigflow", "MOVE_SHORT": "bigflow", "MOVE_ARRIVED": "arrive",
     "LP_RANGE": "lprange", "DEPEG": "depeg", "LIQ_NEAR": "liq", "OA_ALERT": "oa",
+    "EX_HALT": "exhalt",
     "LOAN_RISK": "liq", "MARGIN_RISK": "liq",
     "NFT_CG_SLOW": "oa",
 }
@@ -150,6 +154,7 @@ SAMPLES = {
     "bigflow": "🔴 USDC 3,600개(−₩500만)가 밖으로 나갔어요 → 외부 0x3c7e…cd34\n내가 한 게 아니면 바로 거래소·지갑 보안을 확인하세요.\nBase 지갑 A · 13:05",
     "arrive": "✅ USDC 5,000개가 Base 지갑 A에 들어왔어요\n할 일은 없어요.\n이더리움 지갑 A에서 보낸 지 7분 · 수수료로 0.5개 줄었어요",
     "lprange": "LP 범위 벗어남 1",
+    "exhalt": "🔴 업비트 SOL 입금이 막혔어요\n지금은 업비트 입금 주소로 보내도 들어가지 않아요 — 팔려면 다른 곳을 쓰거나 풀릴 때까지 기다리세요.\n내 보유 ₩120만 · 솔라나 지갑 A · 13:05부터",
     "depeg": "🔴 USDC 가격이 1달러에서 1.3% 벗어났어요\n많이 들고 있다면 다른 스테이블로 옮길지 살펴보세요.\n지금 $0.987 · 기준 ±1%",
     "liq": "🔴 ETH 선물 청산가까지 8% 남았어요\n증거금을 넣거나 포지션을 줄이세요.\n현재 2,410 · 청산 2,217 · 바이낸스",
     "oa": "기타 자산: 키움증권 연결이 끊겼어요",
@@ -177,7 +182,7 @@ def alert_line(kind: str, text: str, **kw) -> dict:
     return d
 
 
-NEW_CATS = ("arrive",)
+NEW_CATS = ("arrive", "exhalt")
 NEW_OFF_CATS = ("stall",)
 QUIET_ONLY_SOUND = ("move", "arrive")
 REC_OFF_NOW = ("move", "stall")
@@ -194,8 +199,8 @@ def _preset_cats(name: str) -> dict:
 
 
 PRESETS = {
-    "rec": {"label": "추천", "desc": "급한 것 6가지는 바로(소리) + 나머지는 하루 한 통 요약(무음) · 봇 내부 소식·체인 수집 지연은 안 보냄(상태 패널에서)"},
-    "min": {"label": "최소", "desc": "급한 것 6가지만 바로 — 하루 요약도 안 받음"},
+    "rec": {"label": "추천", "desc": "급한 것 7가지는 바로(소리) + 나머지는 하루 한 통 요약(무음) · 봇 내부 소식·체인 수집 지연은 안 보냄(상태 패널에서)"},
+    "min": {"label": "최소", "desc": "급한 것 7가지만 바로 — 하루 요약도 안 받음"},
     "all": {"label": "전부", "desc": "추천 + 보유 코인 급등락(밤엔 모아서) · 체인 수집 지연까지"},
 }
 PRESET_ORDER = ("rec", "min", "all")

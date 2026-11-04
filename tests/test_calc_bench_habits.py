@@ -135,4 +135,47 @@ chk(h["excl"] == {"stable": 1, "quar": 1}, "H1 뺀 묶음 수(스테이블·격�
 chk(h["cov"]["pxAt"] == "2026-09-03" and h["cov"]["next"] == 1.0 and h["next"] == [1, 1], "H 판 다음 날 = 자산 묶음 시세 · 신뢰도(가격 확인 비율·시세 날)", (h["cov"], h["next"]))
 chk(wow.habits(None)["ok"] is False and wow.bench(None)["hold"] == {}, "색인 없음 = 빌드 전(죽지 않음)")
 
+pos_p = [{"key": "g14", "sym": "ETH", "_ots": ts("2025-08-01", "00:30"),
+          "realizedByDay": {"2026-09-02": 500.0, "2026-06-01": 200.0, "2025-08-20": 100.0}}]
+tax_p = [{"sold": "2026-09-02", "sym": "ETH", "qty": 1, "acq": 1000, "disp": 1500},
+         {"sold": "2026-06-01", "sym": "ETH", "qty": 1, "acq": 1000, "disp": 1200},
+         {"sold": "2025-08-20", "sym": "ETH", "qty": 1, "acq": 1000, "disp": 1100}]
+ix_p = {"2026-09-02": [(ts("2026-09-02", "22:30"), "pos", ev("ETH", "$1,500.00"), ("g14", "ETH", ""))],
+        "2026-06-01": [(ts("2026-06-01", "10:00"), "pos", ev("ETH", "$1,200.00"), ("g14", "ETH", ""))],
+        "2025-08-20": [(ts("2025-08-20", "10:00"), "pos", ev("ETH", "$1,100.00"), ("g14", "ETH", ""))]}
+idx_p = {"builtAt": 3, "tax": tax_p, "ix": ix_p, "pos": pos_p}
+hp0, hp365, hp_all, hp90 = wow.habits(idx_p, TODAY), wow.habits(idx_p, TODAY, period_days=365), wow.habits(idx_p, TODAY, period_days=0), wow.habits(idx_p, TODAY, period_days=90)
+chk(hp0["n"] == 2 and hp0["since"] == "2025-09-30" and hp0["days"] == 365 and hp365["since"] == hp0["since"] and hp365["n"] == hp0["n"]
+    and hp365["grid"] == hp0["grid"] and hp365["hold"] == hp0["hold"], "P1 기본(인자 없음) = days 365 = 종전 지난 12개월(406일 전 매도 제외)", (hp0["n"], hp0["since"], hp0["days"]))
+chk(hp_all["n"] == 3 and hp_all["since"] == "" and hp_all["days"] == 0 and sum(x["n"] for x in hp_all["hold"]) == 3,
+    "P2 days=0 = 전체(406일 전 매도 포함 · since 빈 글자 = 모든 날짜)", (hp_all["n"], hp_all["since"], hp_all["days"]))
+chk(hp90["n"] == 1 and hp90["since"] == "2026-07-03" and hp90["days"] == 90 and sum(x["n"] for x in hp90["hold"]) == 1,
+    "P3 days=90 = 오늘 포함 90일(121일 전 매도 제외 · since = 오늘 − 89일 · 보관처 N일과 같은 셈)", (hp90["n"], hp90["since"]))
+chk(wow.habits(idx_p, TODAY, period_days=122)["n"] == 2 and wow.habits(idx_p, TODAY, period_days=121)["n"] == 1
+    and wow.habits(idx_p, TODAY, period_days=180)["since"] == "2026-04-04", "P3 경계 = 오늘 포함 N일(오늘 − (N−1) 그날 매도부터) · 180 = 4/4 부터")
+chk(wow.habits(idx_p, TODAY, period_days=0) is hp_all and wow.habits(idx_p, TODAY) is hp0, "P4 기간마다 캐시 따로(기간을 오가도 다시 안 셈)")
+hab_keys = lambda: [k for k in wow._CACHE if isinstance(k, tuple) and k[0] == "habits"]   # noqa: E731
+n_day = []
+for dd in range(5):
+    for pd in (90, 180, 365, 0):
+        wow.habits(idx_p, (datetime.strptime(TODAY, "%Y-%m-%d") + timedelta(days=dd)).strftime("%Y-%m-%d"), period_days=pd)
+    n_day.append(len(hab_keys()))
+chk(n_day[0] == n_day[-1] and {("habits", 0), ("habits", 90), ("habits", 180), ("habits", 365)} <= set(hab_keys()),
+    "P6 캐시 칸 = 기간별 하나(날이 바뀌어도 칸 수 그대로 · 절대 날짜 since 로 안 늘어남)", (n_day, hab_keys()))
+chk(wow.habits(idx_p, TODAY, period_days=90)["since"] == "2026-07-03" and wow.habits(idx_p, "2026-10-04", period_days=90)["since"] == "2026-07-07"
+    and len(hab_keys()) == n_day[-1], "P6 날이 바뀌면 같은 칸을 새 값으로(옛 날 값을 돌려주지 않음)")
+for pd in range(1, 13):
+    wow.habits(idx_p, TODAY, period_days=pd)
+chk(len(hab_keys()) == wow._HAB_SLOTS and ("habits", 12) in hab_keys() and ("habits", 1) not in hab_keys(), "P6 칸 상한(오래된 칸부터 버림)", hab_keys())
+chk([wow.days_arg(q) for q in ("days=90", "x=1&days=0", "days=0&y=2", "days=180", "days=365", "", None, "days=abc", "days=91", "days=3660", "xdays=5")]
+    == [90, 0, 0, 180, 365, None, None, None, None, None, None], "P5 ?days 파싱 = 화면 네 가지(90·180·365·0)만 · 그 밖 None(기본 365)")
+import threading  # noqa: E402
+
+n_slots = len(hab_keys())
+seen = [wow.habits(idx_p, TODAY, period_days=wow.days_arg(f"days={d}")) for _ in range(2) for d in range(90, 99)]
+chk(len(hab_keys()) == n_slots and all(h is seen[0] for h in seen[0::9]) and all(h is seen[1] for i, h in enumerate(seen) if i % 9)
+    and seen[0]["days"] == 90 and seen[1]["days"] == 365, "H1 days=90~98 순환 18회 = 계산 2번(90 · 기본 365)뿐 · 캐시 칸 안 늘어남", (len(hab_keys()) - n_slots, seen[0]["days"], seen[1]["days"]))
+chk(isinstance(wow.HAB_LOCK, type(threading.Lock())) and wow.habits(idx_p, TODAY, period_days=365) is wow.habits(idx_p, TODAY),
+    "H1 HAB_LOCK(라우트가 같은 계산 동시 요청을 하나로) · days=365 = 기본과 같은 칸·같은 답")
+
 T.finish()

@@ -20,7 +20,7 @@ if __name__ == "__main__":
     runtime.cpu_reserve_apply()
 import unit_beat  # noqa: E402
 import bf_engine  # noqa: E402
-import depaddr  # noqa: E402
+import depaddr, exwallet  # noqa: E402
 from inbox import SegmentWriter  # noqa: E402
 from exf_net import (  # noqa: F401
     _acct,
@@ -1787,6 +1787,7 @@ def main():
     _cool_restore()
     _clock_restore()
     depaddr.start_background(_env)
+    exwallet.start_background(_env, _RL_OFF)
     try:
         import perp_dex
         perp_dex.start_background()

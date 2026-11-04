@@ -1487,6 +1487,7 @@
   "settings_wallets:wallet_list|whole|for in wallets",
   "sol_watch:SolWatcher.__init__|passout|backfill_months → float()",
   "sol_watch:main|whole|for in wallets",
+  "stakecredit:worker_round|passout|<top> → rpcs_of()",
   "sui_watch:SuiAdapter.__init__|passout|<top> → super().__init__()",
   "sui_watch:SuiAdapter.window_t0|guard|self.cfg[backfill_full_history]",
   "sui_watch:SuiAdapter.window_t0|guard|self.cfg[backfill_months]",

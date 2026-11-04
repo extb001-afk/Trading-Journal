@@ -158,6 +158,7 @@
     const wsel0 = wkSelNow(), wsel = wsel0 && (!wsel0.f || wsel0.f.slice(0, 7) === ym) ? wsel0 : null;
     let cells = DOWS_MON.map((d, i) => '<div class="dw' + (i === 6 ? ' sun' : i === 5 ? ' sat' : '') + '">' + d + '</div>').join('') + '<div class="dw wkc">주간 실현</div>';
     const mdays = realDays(ym);
+    let wkRow = '';
     const mTier = pnlTier(mdays.map(x => x.v), tierUnit());
     const nRow = Math.ceil((first + dim) / 7);
     for (let r = 0; r < nRow; r++) {
@@ -184,34 +185,53 @@
       const isoFrom = ym + '-' + pad2(dFrom), isoTo = ym + '-' + pad2(dTo);
       const wr = wkRvFor(isoMon, isoFrom, isoTo), rv = wr.rv;
       const rng = (mo + 1) + '/' + dFrom + (dTo === dFrom ? '' : '–' + (isoTo >= tISO && isoFrom <= tISO ? '' : (mo + 1) + '/' + dTo));
-      if (isoFrom > tISO) { cells += '<div class="w fut" aria-hidden="true"><span class="wr num">' + esc(rng) + '</span></div>'; continue; }
+      if (isoFrom > tISO) { if (!mob) cells += '<div class="w fut" aria-hidden="true"><span class="wr num">' + esc(rng) + '</span></div>';
+        continue; }
       const cur = isoTo >= tISO, ok = wkRvOk(rv), on = !!(wsel && wsel.wk === wk && (!wsel.f || wsel.f === isoFrom));
       const wkX = wr.legacy, rvTip = '주간 AI 리뷰 등급' + (wkX ? ' — ' + isoMon.slice(5).replace('-', '/') + '~' + isoAdd(isoMon, 6).slice(5).replace('-', '/') + ' 주 기준' : '') + (ok && rv.stale ? ' · ' + wkStaleTxt(rv) : '');
       const foot = ok ? '<span class="wf" title="' + esc(rvTip) + '"><span class="pill ' + (SENT[rv.s] || 'g') + ' sm">리뷰 ' + esc(rv.s || '관망') + '</span><span class="wl">›</span></span>'
         : '<span class="wf mut">' + (cur ? '진행 중' : '리뷰 없음') + '</span>';
-      cells += '<button class="w' + (cur ? ' cur' : '') + (on ? ' sel' : '') + '" data-a="wkPick" data-v="' + esc(wk) + '" data-k="' + esc(wr.sk) + '" data-d="' + isoMon + '" data-f="' + isoFrom + '" data-t="' + isoTo + '" data-rv="' + (ok ? 1 : 0) + '" aria-pressed="' + on + '" aria-label="' + esc(rng) + ' 주간 실현 ' + esc(m(wSum, { sign: true })) + (ok ? ' · 주간 AI 리뷰 ' + esc(rv.s || '') + (wkX ? '(' + esc(rvTip.replace('주간 AI 리뷰 등급 — ', '')) + ')' : '') : cur ? ' · 진행 중' : ' · 리뷰 없음') + '">'
+      const wb = '<button class="w' + (cur ? ' cur' : '') + (on ? ' sel' : '') + '" data-a="wkPick" data-v="' + esc(wk) + '" data-k="' + esc(wr.sk) + '" data-d="' + isoMon + '" data-f="' + isoFrom + '" data-t="' + isoTo + '" data-rv="' + (ok ? 1 : 0) + '" aria-pressed="' + on + '" aria-label="' + esc(rng) + ' 주간 실현 ' + esc(m(wSum, { sign: true })) + (ok ? ' · 주간 AI 리뷰 ' + esc(rv.s || '') + (wkX ? '(' + esc(rvTip.replace('주간 AI 리뷰 등급 — ', '')) + ')' : '') : cur ? ' · 진행 중' : ' · 리뷰 없음') + '">'
         + '<span class="wr num">' + esc(rng) + '</span><span class="wv num ' + (wAny ? cls(wSum) : 'mut') + '">' + m(wSum, { sign: true, compact: true }) + '</span>' + foot + '</button>';
+      if (mob) wkRow += wb; else cells += wb;
     }
-    const mSum = monthRealized(ym);
-    const canPrev = ym > rollMinISO().slice(0, 7), canNext = ym < ymShift(0);
     const win = mdays.filter(x => x.v > 0), lose = mdays.filter(x => x.v < 0);
     const best = win.slice().sort((a, b) => b.v - a.v)[0], worst = lose.slice().sort((a, b) => a.v - b.v)[0];
     const md2 = x => (mo + 1) + '/' + x.d;
-    const chips = mdays.length ? '<div class="calchips"><span class="cchip num pvx" title="날 단위 — 그날 실현(현물+선물)이 + 인 날 / − 인 날. 매매일지의 승률(청산 사이클 단위)과 다른 셈이에요">실현 있는 날 ' + mdays.length + '일 · <b class="up">수익 ' + win.length + '</b> · <b class="down">손실 ' + lose.length + '</b>' + (win.length + lose.length ? ' · 날 승률 ' + Math.round(win.length / (win.length + lose.length) * 100) + '%' : '') + '</span>'
-      + (best || worst ? '<span class="cpair">' : '') + (best ? '<button class="cchip pos num" data-a="pickDay" data-v="' + best.k + '">최고의 날 <b class="up">' + md2(best) + ' ' + m(best.v, { sign: true, compact: true }) + '</b> ›</button>' : '')
-      + (worst ? '<button class="cchip neg num" data-a="pickDay" data-v="' + worst.k + '">최악의 날 <b class="down">' + md2(worst) + ' ' + m(worst.v, { sign: true, compact: true }) + '</b> ›</button>' : '') + (best || worst ? '</span>' : '') + '</div>' : '';
+    const dwr = win.length + lose.length ? ' · 이 달 수익 난 날 비율 ' + Math.round(win.length / (win.length + lose.length) * 100) + '%' : '';
+    const chips = mdays.length ? '<div class="calchips"><span class="cchip num pvx" title="날 단위 — 그날 실현(현물+선물)이 + 인 날 / − 인 날. 매매일지의 승·패(청산 사이클 단위)와 다른 셈이에요' + dwr + '">'
+      + '<span>실현 있는 날 ' + mdays.length + '일 · 수익 난 날 ' + win.length + ' · 손실 난 날 ' + lose.length + '</span></span>'
+      + (best || worst ? '<span class="cpair">' : '') + (best ? '<button class="cchip pos num" data-a="pickDay" data-v="' + best.k + '"><span>최고의 날 <b class="up">' + md2(best) + ' ' + m(best.v, { sign: true, compact: true }) + '</b> ›</span></button>' : '')
+      + (worst ? '<button class="cchip neg num" data-a="pickDay" data-v="' + worst.k + '"><span>최악의 날 <b class="down">' + md2(worst) + ' ' + m(worst.v, { sign: true, compact: true }) + '</b> ›</span></button>' : '') + (best || worst ? '</span>' : '') + '</div>' : '';
     const listV = calView() === 'list';
     const vSeg = '<div class="seg cvseg" role="group" aria-label="보기"><button data-a="calView" data-v="cal" class="' + (listV ? '' : 'on') + '" aria-pressed="' + !listV + '">달력</button><button data-a="calView" data-v="list" class="' + (listV ? 'on' : '') + '" aria-pressed="' + listV + '">30일 목록</button></div>';
     if (listV) {
       const calL = '<div class="card cal calist"><div class="row"><h2 class="h2">최근 ' + D.daily.length + '일 마감</h2><div class="sp"></div>' + vSeg + '</div><div class="cap" style="margin-top:6px">USDT 종가·김프 포함 · 행을 누르면 그날로</div>' + recentHTML(true) + '</div>';
       return dailyLayout(calL, monthGlanceHTML(ym));
     }
-    const cal = '<div class="card cal"><div class="row calhd"><h2 class="h2">' + y + '년 ' + (mo + 1) + '월</h2><div class="sp"></div>' + vSeg + '<div class="seg"><button data-a="calMonth" data-v="-1"' + (canPrev ? '' : ' disabled') + ' aria-label="이전 달">' + IC.left.replace('<svg', '<svg width="16" height="16"') + '</button><button data-a="calToday" class="on">오늘</button><button data-a="calMonth" data-v="1"' + (canNext ? '' : ' disabled') + ' aria-label="다음 달">' + IC.right.replace('<svg', '<svg width="16" height="16"') + '</button></div></div>'
-      + '<div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap"><span class="cap">월 실현</span><b class="num ' + cls(mSum) + '">' + m(mSum, { sign: true }) + '</b><span class="cap">' + (ym === ymShift(0) ? '마감 ' + closed + '일 · 오늘은 23:59 마감' : '마감 기록 ' + closed + '일') + '</span></div>'
+    const ch = calTop(ym, closed, vSeg), mnav = ch.mnav;
+    const cal = '<div class="card cal">' + ch.head
       + chips
-      + '<div class="wk">' + cells + '</div><div class="cap calleg">칸 색 = 그날 실현손익(현물+선물) ' + tierLeg('lvs', '이 달 안에서 순위', 'calhl') + ' · <b class="num">·</b> = <span class="pvx">' + (S.cur === 'USD' ? '$' + CAL_DOT_USD + ' 미만' : '1만 원 미만') + '</span> · <span class="sdots"><b></b></span> = 매도 1건' + (mob ? ' · <span class="sdots"><b></b><b></b></span> = 2건 이상' : '(5건 이상은 숫자)') + ' · ' + (mob ? '<i class="aidot" aria-hidden="true"></i>' : '<span class="tag-ai">AI</span>') + ' = AI 리뷰 · 주간 칸 → 주간 리뷰</div>'
+      + '<div class="wk">' + cells + '</div>' + (wkRow ? '<div class="wkrow" role="group" aria-label="주간 실현 — 누르면 주간 리뷰"><span class="lbl">주간 실현</span>' + wkRow + '</div>' : '') + '<div class="cap calleg">칸 색 = 그날 실현손익(현물+선물) ' + tierLeg('lvs', '이 달 안에서 순위', 'calhl') + ' · <b class="num">·</b> = <span class="pvx">' + (S.cur === 'USD' ? '$' + CAL_DOT_USD + ' 미만' : '1만 원 미만') + '</span> · <span class="sdots"><b></b></span> = 매도 1건' + (mob ? ' · <span class="sdots"><b></b><b></b></span> = 2건 이상' : '(5건 이상은 숫자)') + ' · ' + (mob ? '<i class="aidot" aria-hidden="true"></i>' : '<span class="tag-ai">AI</span>') + ' = AI 리뷰 · 주간 칸 → 주간 리뷰</div>'
       + '</div>';
-    return dailyLayout(cal, monthGlanceHTML(ym));
+    return dailyLayout(cal, monthGlanceHTML(ym), mnav);
+  }
+  function calTop(ym, closed, vSeg) {
+    const y = +ym.slice(0, 4), mo = +ym.slice(5), mSum = monthRealized(ym);
+    const canPrev = ym > rollMinISO().slice(0, 7), canNext = ym < ymShift(0), ic = s => s.replace('<svg', '<svg width="16" height="16"');
+    const mnav = '<div class="seg" role="group" aria-label="달 이동">'
+      + '<button data-a="calMonth" data-v="-1"' + (canPrev ? '' : ' disabled') + ' aria-label="이전 달">' + ic(IC.left) + '</button>'
+      + '<button data-a="calToday" class="on">오늘</button>'
+      + '<button data-a="calMonth" data-v="1"' + (canNext ? '' : ' disabled') + ' aria-label="다음 달">' + ic(IC.right) + '</button></div>';
+    const mFull = m(mSum, { sign: true }), mCp = m(mSum, { sign: true, compact: true });
+    const clsd = ym === ymShift(0) ? '마감 ' + closed + '일 · 오늘은 23:59 마감' : '마감 기록 ' + closed + '일';
+    const mRow = '<span class="lbl">' + (S.mobile ? mo + '월 실현' : '월 실현') + '</span><b class="num mval ' + cls(mSum) + '">' + mCp + '</b>'
+      + (mFull !== mCp ? '<span class="num mfull ' + cls(mSum) + '">' + mFull + '</span>' : '');
+    const head = S.mobile ? '<div class="row calhd mrow">' + mRow + '<div class="sp"></div>' + vSeg + '</div>'
+        + '<div class="cap mcl">' + clsd + '</div>'
+      : '<div class="row calhd"><h2 class="h2">' + y + '년 ' + mo + '월</h2><div class="sp"></div>' + vSeg + mnav + '</div>'
+        + '<div class="row mrow">' + mRow + '<span class="cap">· ' + clsd + '</span></div>';
+    return { head, mnav };
   }
   const calView = () => (LS.get('tj_v2_dcal') === 'list' ? 'list' : 'cal');
   function heatData() {
@@ -248,22 +268,30 @@
       cells += '<button type="button" class="hm ' + (x.v > 0 ? 'u' : 'd') + ' lv' + t + '" style="' + pos + '" data-a="pickDay" data-v="' + x.iso.slice(5) + '" title="' + esc(lab) + '" aria-label="' + esc(lab) + '"></button>';
     });
     const stat = (k, v, sub, cl) => '<div class="hst"><span class="k">' + k + '</span><b class="v num' + (cl ? ' ' + cl : '') + '">' + v + '</b>' + (sub ? '<span class="s">' + sub + '</span>' : '') + '</div>';
-    const stats = '<div class="hsts pvx">' + stat('수익 난 날', w + '일 <small>/ 매매 ' + tr.length + '일</small>', '')
+    const stats = '<div class="hsts pvx">' + stat('수익 난 날', w + '일 <small>/ 매매 ' + tr.length + '일</small>', '손실 난 날 ' + l + '일')
       + stat('가장 길게 이긴 흐름', best.n ? best.n + '일 연속' : '—', best.n ? mdTxt(best.a) + ' ~ ' + mdTxt(best.b) : '', 'up')
       + stat('가장 좋았던 달', bm ? (+bm.slice(5)) + '월' : '—', bm ? '수익 난 날 ' + Math.round(byM[bm][1] / byM[bm][0] * 100) + '%' : '매매 5일 이상인 달 없음')
-      + stat('조심할 요일', bw ? WD[bw] + '요일' : '—', bw ? '손실일 비율 ' + Math.round(byW[bw][1] / byW[bw][0] * 100) + '%' : '', bw ? 'down' : '') + '</div>';
+      + stat('조심할 요일', bw ? WD[bw] + '요일' : '—', bw ? '손실 난 날 비율 ' + Math.round(byW[bw][1] / byW[bw][0] * 100) + '%' : '매매 5일 이상인 요일이 아직 없어요', bw ? 'down' : 'mut') + '</div>';
     const leg = tierLeg('hm', '지난 1년 전체 날 중 순위', 'hleg');
     const grid = '<div class="hmw" data-ks="heat"><div class="hmm pvx">' + mos + '</div><div class="hmb"><div class="hmd pvx"><span>월</span><span></span><span>수</span><span></span><span>금</span><span></span><span>일</span></div><div class="hmg">' + cells + '</div></div></div>';
     const sumLine = '<span class="cap pvx num">수익 ' + w + '일 · 손실 ' + l + '일' + (best.n > 1 ? ' · 최장 연속 ' + best.n + '일' : '') + '</span>';
-    return '<section class="card heat" aria-label="지난 1년 하루 실현손익"><div class="hmh"><div><div class="cap">지난 1년 · 하루 실현손익</div><div class="hmt">좋았던 날과 아쉬웠던 날</div></div><span class="sp"></span>' + leg + '</div>'
+    return '<section class="card heat" aria-label="지난 1년 하루 실현손익"><div class="hmh"><div><div class="lbl">지난 1년 · 하루 실현손익</div><h2 class="hmt">좋았던 날과 아쉬웠던 날</h2></div><span class="sp"></span>' + leg + '</div>'
       + grid + (S.mobile ? uiFold('heat:st', { cls: 'plain', head: sumLine, body: () => stats, label: '1년 요약 4칸', def: false }) : stats)
       + '<div class="cap hcap">칸을 누르면 그날 카드(실현·리뷰·기록)로 · 금액은 칸 툴팁에만</div></section>';
   }
-  function dailyLayout(cal, glance) {
+  function dailyLayout(cal, glance, mnav) {
     const wsel0 = wkSelNow(), ym = S.calYM || ymShift(0), wsel = wsel0 && (!wsel0.f || wsel0.f.slice(0, 7) === ym) ? wsel0 : null;
+    let heat = heatHTML();
+    const h1 = '<span class="jh1" aria-hidden="true">일별 기록</span>';
+    if (S.mobile) {
+      const d = wsel ? ['', wkPanelHTML(wsel)] : reviewHTML(true);
+      const mh = mnav ? '<span class="cap num">' + ym.slice(0, 4) + '년 ' + +ym.slice(5) + '월</span><span class="sp"></span>' + mnav : '';
+      return '<div class="jph dph">' + h1 + mh + '</div><div class="dgrid dm">' + d[0] + cal + d[1] + dayEventsHTML() + glance + '</div>'
+        + heat;
+    }
     const day = wsel ? wkPanelHTML(wsel) : reviewHTML();
-    const heat = heatHTML();
-    if (S.mobile) return heat + '<div class="dgrid dm">' + cal + day + dayEventsHTML() + glance + '</div>';
+    const fxN = S.cur === 'USD' ? '' : '<span class="cap">지난날 원화 = 그날 마감 환율로 고정</span>';
+    heat = '<div class="jph dph">' + h1 + '<span class="sp"></span>' + fxN + '</div>' + heat;
     return heat + '<div class="dgrid' + (calView() === 'list' ? ' dlist' : '') + '"><div class="dcol">' + cal + glance + '</div>' + day + '</div>' + dayEventsHTML();
   }
   function wkPanelHTML(sel) {
@@ -294,7 +322,7 @@
     const staleH = ok && rv.stale ? '<span class="pill w sm wkstale" title="' + esc((rv.staleWhy || '리뷰 이후 바뀜') + (rv.rsNow != null && rv.fp && rv.fp.rs != null ? ' — 리뷰 때 ' + m(num(rv.fp.rs), { sign: true }) + ' → 지금 ' + m(num(rv.rsNow), { sign: true }) : '')) + '">' + esc(wkStaleTxt(rv)) + '</span>' : '';
     const aiSub = cross ? '<div class="wkaisub row gap8">' + pillH + '<b>주간 AI 리뷰</b><span class="cap num">' + esc(wRng) + ' 주 기준</span>' + staleH + '</div>' : '';
     return '<div class="card wkpanel" role="region" aria-label="주간 리뷰 ' + esc(rng) + '"><div class="row gap8">' + (cross ? '' : pillH) + '<b class="wkt" tabindex="-1">주간 리뷰</b><span class="cap num">' + esc(rng) + '</span>'
-      + '<div class="sp"></div><button class="iconbtn" data-a="wkClose" aria-label="주간 리뷰 닫기 — 그날 카드로" title="닫기">' + IC.close + '</button></div>'
+      + '<div class="sp"></div><button class="xb" data-a="wkClose" aria-label="주간 리뷰 닫기 — 그날 카드로" title="닫기">' + IC.close + '</button></div>'
       + (cross || !staleH ? '' : '<div class="wkstl">' + staleH + '</div>')
       + '<div class="wksum"><span class="cap">주간 실현' + (cross ? ' · ' + (+f.slice(5, 7)) + '월 몫' : '') + (cur ? ' · 진행 중' : '') + '</span><b class="num ' + cls(tot) + '">' + m(tot, { sign: true }) + '</b>' + (nW + nL ? '<span class="cap num pvx">실현 있는 날 ' + (nW + nL) + '일 · 수익 ' + nW + ' · 손실 ' + nL + '</span>' : '') + '</div>'
       + (tiles.length ? '<div class="wktiles">' + tiles.map(t => '<div><div class="l">' + t[0] + '</div><div class="v num">' + esc(t[1]) + '</div>' + (t[2] ? '<div class="s num">' + esc(t[2]) + '</div>' : '') + '</div>').join('') + '</div>' : '')
@@ -432,7 +460,7 @@
     const c = st === 's' || st === 'ba' ? 'w' : 'g';
     return '<span class="pill ' + c + ' sm" title="' + esc(L[2] + when) + '">' + (S.mobile ? L[1] : L[0]) + '</span>';
   }
-  function reviewHTML() {
+  function reviewHTML(split) {
     const D = S.D, k = S.day || D.todayKey;
     const rv0 = D.reviews[k] || null, rv = rv0 && isYMD(rv0.iso) && String(rv0.iso).slice(0, 10) < rollMinISO() ? null : rv0, ai = isAI(rv);
     const isToday = k === D.todayKey, snap0 = D.dayMap.get(k), fz = !isToday && !snap0 ? dayFrz(k, true) : null, snap = fz || snap0;
@@ -472,27 +500,12 @@
     else cntBits.push('매도 ' + sells + '건');
     cntBits.push('기록 ' + nRec + '건');
     const facts = cntBits.map((x, i) => '<span class="nowrap">' + x + (i < cntBits.length - 1 || isToday ? ' ·' : '') + '</span>').join(' ') + (isToday ? ' <span class="nowrap">지금 평가손익 ' + '<span class="' + cls(D.unreal) + '">' + mN(D.unreal, { sign: true, compact: true }) + '</span></span>' : '');
-    const tiles = '<div class="dtiles num">' + (cn ? [['매도', sells], ['스왑 지불', cn.pay || 0], ['매수', cn.b || 0], ['기록', nRec]] : [['매도', sells], ['기록', nRec]]).map(x => '<div><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>';
     const cRows = dayContrib(iso);
     const odd = cRows.length ? r - sum(cRows, x => KV(x.v, x.vk)) : 0, tiny = !!r && Math.abs(r) * rate() < 100;
-    const contrib = (() => {
-      if (!cRows.length) return '';
-      const nTop = S.mobile ? 2 : 5;
-      const top = cRows.slice(0, nTop), mx = Math.max.apply(null, top.map(x => Math.abs(x.v))), rest = cRows.slice(nTop);
-      return '<div class="contrib"><div class="ttl">그날 실현 기여 <span class="mut">' + cRows.length + '개</span></div>' + top.map((x, i) => { const vv = KV(x.v, x.vk);
-        const inner = (x.fut ? '<span class="ic xs" style="background:var(--surface3);color:var(--text2)">' + IC.scale.replace('<svg', '<svg width="12" height="12"') + '</span>' : x.gas ? '<span class="ic xs" style="background:var(--surface3);color:var(--text2)">' + IC.fuel.replace('<svg', '<svg width="12" height="12"') + '</span>' : x.lp ? '<span class="ic xs" style="background:var(--surface3);color:var(--text2)">' + IC.layers.replace('<svg', '<svg width="12" height="12"') + '</span>' : icon(x.sym, 'xs', D.symLogo[String(x.sym).toUpperCase()] || {}))
-          + (x.lpN ? '<span class="ell lpn" title="' + esc(x.ids.join('\n')) + '"><span class="nm">' + esc(x.sym) + '</span> <span class="id">×' + x.lpN + '</span></span>' : lpNmHTML(x.sym, x.lp)) + '<span class="cb2"><i class="' + (vv >= 0 ? 'p' : 'n') + '" style="width:' + Math.max(3, Math.abs(x.v) / mx * 100).toFixed(1) + '%"></i></span><b class="num ' + clsV(vv) + '">' + m(vv, { sign: true, compact: true }) + '</b>';
-        if (x.lp) { const lk = x.lpN ? '' : String((x.p && x.p.key) || ''), pool = String(x.lpN ? x.pool : (x.p && x.p.sym) || x.sym);
-          return '<button class="cr clk" data-a="lpGo" data-v="' + esc(iso + '|' + pool + '|' + lk) + '" title="이 LP 보기 ›" aria-label="' + esc(String(x.sym) + ' — 이 LP 보기') + '">' + inner + '</button>'; }
-        if (x.fut) return '<button class="cr clk" data-a="futRcpt" data-v="' + esc(iso) + '" data-rk="' + (i + 1) + '" title="선물 영수증 — 그날 선물 진입·청산">' + inner + '</button>';
-        return rcptable(x) ? '<button class="cr clk" data-a="receipt" data-v="' + esc(iso + '|' + x.sym) + '" data-rk="' + (i + 1) + '" title="' + esc(x.sym) + ' 차익 영수증">' + inner + '</button>' : '<div class="cr"' + (x.gas ? ' title="' + esc('매매 외 가스(실패·승인·전송·브릿지·LP) — 매매에 든 가스·수수료는 각 코인 원가·손익에 들어 있어요') + '"' : '') + '>' + inner + '</div>'; }).join('')
-        + (rest.length ? '<div class="cap num crest">외 ' + rest.length + '개' + (S.mobile ? ' · ' + esc(rest.slice(0, 3).map(x => x.lpN ? x.sym : String(x.sym).replace(/\s+#\d+$/, '')).join(' · ')) + (rest.length > 3 ? ' 등' : '') : '') + ' · ' + mN(sum(rest, x => KV(x.v, x.vk)), { sign: true, compact: true }) + '</div>' : '')
-        + (Math.abs(odd) * (S.cur === 'USD' ? 1 : rate()) >= (S.cur === 'USD' ? 0.005 : 0.5) ? '<div class="cap num crest" title="코인·LP·선물별 줄에서 빠진 $0.005 미만 조각(가스·스테이블 환전 끝전 등)과 반올림의 합 — 위 줄들과 더하면 제목 실현과 같아요">' + (Math.abs(odd) * (S.cur === 'USD' ? 1 : rate()) < (S.cur === 'USD' ? 1 : 1000) ? '기타 소액 ' : '그 밖 ') + mN(odd, { sign: true }) + '</div>' : '') + '</div>';
-    })();
+    const { attK, barsH, contrib } = dayCrHTML(k, iso, cRows, odd);
     const kp = u.kimp != null ? num(u.kimp) : null;
     const noTrade = !isToday && !sells && !(cn && (cn.b || cn.pay)) && (!evs || !evs.some(e => /매수|매도/.test(e.k))) && (!r || tiny);
     const mk = delta != null ? (isSplit && dFl != null ? delta - dFl : isStep ? null : delta) : null;
-    const attK = attOf(k);
     const noTradeTxt = '거래 없는 날' + (mk != null && !attK ? ' · 시장 변동 <b class="num ' + cls(mk) + '">' + m(mk, { sign: true, compact: true }) + '</b>' : '');
     const rvOpen = S.revOpen === k;
     const sumT = ai ? rvSum(rv, k) : '';
@@ -523,15 +536,72 @@
         + '<span class="s num sans dnochg">' + [totS, '전일 마감 기록 없음'].filter(Boolean).map(x => '<span class="nowrap">' + x + '</span>').join(' · ') + '</span></div></div>'
       : '<div class="dtl2"><div class="dtile"><span class="l">' + (futOnly ? '선물 정산' : '총 실현') + '</span>' + h3 + '<span class="s num facts">' + facts + '</span></div>'
       + '<div class="dtile dchg"><span class="l">전일 대비</span><b class="v num">' + chgV + '</b><span class="s num">' + [chgS, totS].filter(Boolean).map((x, i, a9) => i < a9.length - 1 ? x + ' ·' : '<span class="nowrap">' + x + '</span>').join(' ') + '</span></div></div>';
-    const whyH = attK ? '<div class="dsec"><div class="dst">왜 움직였나</div>' + attBars(attK, k, false) + '</div>' : '';
+    const whyT = '<div class="dst">왜 움직였나 <span class="cap">· 합 = 전일 대비 · 줄을 누르면 무엇 때문인지</span></div>';
+    const whyH = attK ? '<div class="dsec">' + (S.mobile ? '' : whyT) + barsH + '</div>' : '';
     const fillsH = dayFillsHTML(k);
+    const fxH = fx ? '<div class="cap num fxl">' + fx + '</div>' : '';
     if (S.mobile) {
-      return '<div class="card rev m" data-anc="day:' + esc(k) + '"><div class="row gap8">' + nav + '<div class="sp"></div>' + sentTag + stPill + '</div>'
-        + tiles2 + (fx ? '<div class="cap num fxl">' + fx + '</div>' : '') + whyH + krwDayHTML(iso) + fillsH + '<div class="rvq">' + aiBox + '</div>' + contrib + dmDayHTML(k) + weekRevHTML(iso) + '</div>';
+      const top = '<div class="card rev m" data-anc="day:' + esc(k) + '"><div class="row gap8">' + nav + '<div class="sp"></div>'
+        + sentTag + stPill + '</div>' + tiles2 + '</div>';
+      const rt = attK ? '왜 움직였나' : '그날 요약', md = iso ? +iso.slice(5, 7) + '/' + +iso.slice(8) : k;
+      const rest = '<section class="card rev m drest" aria-label="' + esc(label + ' — ' + rt) + '">'
+        + '<div class="row gap8 drh"><h2 class="h2">' + rt + '</h2>'
+        + '<span class="cap num">' + esc(md) + '</span></div>' + fxH + whyH + krwDayHTML(iso) + fillsH
+        + '<div class="rvq">' + aiBox + '</div>'
+        + contrib + dmDayHTML(k) + weekRevHTML(iso) + '</section>';
+      return split ? [top, rest] : top + rest;
     }
     return '<div class="card rev" data-anc="day:' + esc(k) + '"><div class="row gap8 dhd"><b class="dlab">' + esc(label) + '</b>' + sentTag + stPill + '<div class="sp"></div>' + nav + '</div>'
-      + tiles2 + (fx ? '<div class="cap num fxl">' + fx + '</div>' : '') + whyH + krwDayHTML(iso)
-      + fillsH + '<div class="rvq">' + aiBox + '</div>' + contrib + dmDayHTML(k) + weekRevHTML(iso) + '</div>';
+      + tiles2 + fxH + whyH + krwDayHTML(iso) + fillsH + '<div class="rvq">' + aiBox + '</div>' + contrib + dmDayHTML(k) + weekRevHTML(iso)
+      + '</div>';
+  }
+  function dayCrHTML(k, iso, cRows, odd) {
+    const D = S.D, dmc = new Map(dmCoins(k).map(c => [c.sym, c])), attK = attOf(k), nTop = S.mobile ? 2 : 5;
+    const CM = { sign: true, compact: true }, ic12 = s => s.replace('<svg', '<svg width="12" height="12"');
+    const crIc = x => !(x.fut || x.gas || x.lp) ? icon(x.sym, 'xs', D.symLogo[String(x.sym).toUpperCase()] || {})
+      : '<span class="ic xs cric">' + ic12(x.fut ? IC.scale : x.gas ? IC.fuel : IC.layers) + '</span>';
+    const crRow = (x, amt) => {
+      const vv = KV(x.v, x.vk), c9 = !x.lp && !x.fut ? dmc.get(dmSym(x.sym)) : null, rk = cRows.indexOf(x) + 1;
+      const n9 = c9 ? [c9.s ? '매도 ' + c9.s + '건' : '', c9.b ? '매수 ' + c9.b + '건' : ''].filter(Boolean).join(' · ') : '';
+      const nm = !x.lpN ? lpNmHTML(x.sym, x.lp) : '<span class="ell lpn" title="' + esc(x.ids.join('\n')) + '">'
+        + '<span class="nm">' + esc(x.sym) + '</span>'
+        + ' <span class="id">×' + x.lpN + '</span></span>';
+      const go = x.lp ? '이 LP' : x.fut ? '선물 영수증' : rcptable(x) ? '영수증' : '';
+      const inner = crIc(x) + nm + (n9 ? '<span class="cap pvx">' + n9 + '</span>' : '') + '<span class="sp"></span>'
+        + (amt ? '<b class="num ' + clsV(vv) + '">' + m(vv, CM) + '</b>' : '') + (go ? '<span class="crg">' + go + ' ›</span>' : '');
+      const at = (a, v, t) => '<button class="cri clk" data-a="' + a + '" data-v="' + esc(v) + '"' + t + '>' + inner + '</button>';
+      if (x.lp) { const lk = x.lpN ? '' : String((x.p && x.p.key) || ''), pool = String(x.lpN ? x.pool : (x.p && x.p.sym) || x.sym);
+        return at('lpGo', iso + '|' + pool + '|' + lk, ' aria-label="' + esc(String(x.sym) + ' — 이 LP 보기') + '"'); }
+      if (x.fut) return at('futRcpt', iso, ' data-rk="' + rk + '" title="선물 영수증 — 그날 선물 진입·청산"');
+      if (rcptable(x)) return at('receipt', iso + '|' + x.sym, ' data-rk="' + rk + '" title="' + esc(x.sym) + ' 차익 영수증"');
+      const gt = ' title="매매 외 가스(실패·승인·전송·브릿지·LP) — 매매에 든 가스·수수료는 각 코인 원가·손익에 들어 있어요"';
+      return '<div class="cri"' + (x.gas ? gt : '') + '>' + inner + '</div>';
+    };
+    const oU = S.cur === 'USD' ? 1 : rate(), oddL = Math.abs(odd) * oU < (S.cur === 'USD' ? 0.005 : 0.5) ? ''
+      : '<div class="cap num crest" title="코인·LP·선물별 줄에서 빠진 $0.005 미만 조각(가스·스테이블 환전 끝전 등)과 반올림의 합 — 위 줄들과 더하면 제목 실현과 같아요">'
+        + (Math.abs(odd) * oU < (S.cur === 'USD' ? 1 : 1000) ? '기타 소액 ' : '그 밖 ') + mN(odd, { sign: true }) + '</div>';
+    const nmS = x => (x.lpN ? x.sym : String(x.sym).replace(/\s+#\d+$/, ''));
+    const crBlk = (xs, key, lbl, tail) => {
+      if (!xs.length) return tail ? '<div class="crin">' + tail + '</div>' : '';
+      const top = xs.slice(0, nTop), rest = xs.slice(nTop), bar = attK ? num(attK[key]) : null;
+      const one = xs.length === 1 && bar != null && m(KV(xs[0].v, xs[0].vk), CM) === m(bar, CM);
+      const rN = S.mobile ? ' · ' + esc(rest.slice(0, 3).map(nmS).join(' · ')) + (rest.length > 3 ? ' 등' : '') : '';
+      const restL = !rest.length ? '' : uiFold('dcr:' + k + ':' + key, { cls: 'plain crf', mem: false, def: false,
+        head: '<span class="cap num crest">외 ' + rest.length + '개' + rN + ' · ' + mN(sum(rest, x => KV(x.v, x.vk)), CM) + '</span>',
+        label: lbl + ' 나머지 ' + rest.length + '개 보기', body: () => rest.map(x => crRow(x, true)).join('') });
+      return '<div class="crin" role="group" aria-label="' + lbl + ' 기여 ' + xs.length + '개">' + top.map(x => crRow(x, !one)).join('')
+        + restL + (tail || '') + '</div>';
+    };
+    const spB = crBlk(cRows.filter(x => !x.fut), 'rz', '현물 실현', oddL), fuB = crBlk(cRows.filter(x => x.fut), 'rzf', '선물 실현');
+    const attIns = (h, key, blk) => {
+      const i = h.indexOf('data-v="' + esc('d|' + k + '|' + key) + '"'), j = i < 0 ? -1 : h.indexOf('</button>', i);
+      return j < 0 ? null : h.slice(0, j + 9) + blk + h.slice(j + 9); };
+    let barsH = attK ? attBars(attK, k, false) : '', loose = '';
+    (cRows.some(x => !x.fut) ? [['rz', spB], ['rzf', fuB]] : [['rzf', fuB], ['rz', spB]]).forEach(p => {
+      if (!p[1]) return; const h9 = barsH ? attIns(barsH, p[0], p[1]) : null; if (h9 == null) loose += p[1]; else barsH = h9; });
+    const contrib = !loose ? '' : '<div class="contrib"><div class="ttl">그날 실현 기여 <span class="mut">' + cRows.length + '개</span></div>'
+      + loose + '</div>';
+    return { attK, barsH, contrib };
   }
   const FB_SLOT = 30, FB_N = 1440 / FB_SLOT, FB_TIP_MAX = 12;
   function dayFillsHTML(k) {

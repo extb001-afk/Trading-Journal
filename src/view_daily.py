@@ -22,6 +22,7 @@ from view_common import STABLE_GROUPS
 from view_common import _f
 from view_misc import _px_took
 from view_misc import _rate_state
+from view_misc import vf_add
 from view_pxfix import _bind_px_blocks
 from view_pxfix import _capture_px_blocks
 from view_pxfix import _migrate_px_blocks
@@ -289,7 +290,7 @@ class DailyMixin:
                      days=None, dpx=None, fx_day=None) -> dict:
         hist9, bf_box = days is not None, self.__dict__.get("_att_bf")
         if not hist9:
-            self._venue_flow = None
+            self._venue_flow = self._venue_flow_day = None
             self._flow_px_delta, self._flow_att_px, self._flow_att_rep = {}, {}, {}
             self._flow_nf = set()
         if not daily and not hist9:
@@ -304,7 +305,7 @@ class DailyMixin:
                 d9 = today_kst - timedelta(days=i)
                 keys[d9.strftime("%Y-%m-%d")] = d9.strftime("%m-%d")
         lo_ts = datetime.strptime(min(keys), "%Y-%m-%d").replace(tzinfo=KST).timestamp()
-        vflow9 = {} if not hist9 else None
+        vflow9, vf_day = ({}, {}) if not hist9 else (self.__dict__.get("_venue_acc"), None)
         flow_px_at = self._flow_att_px if not hist9 else {} if bf_box is None else bf_box.setdefault("px", {})
         dpx = (self.daily_px or {}) if dpx is None else dpx
         today_iso9 = today_kst.strftime("%Y-%m-%d")
@@ -389,8 +390,7 @@ class DailyMixin:
             gpx[(ck9, gid9)] = px9
             gpxc[(ck9, gid9)] = pxc9
             if vflow9 is not None and q9:
-                vf9 = vflow9.setdefault(str(loc9 or ""), [0.0, 0.0])
-                vf9[0 if q9 > 0 else 1] += abs(float(q9) * float(px9))
+                vf_add(vflow9, vf_day, str(loc9 or ""), ck9, q9 > 0, abs(float(q9) * float(px9)))
         if transit is not None:
             st9 = {str(e9["uuid"]): e9.get("state") for e9 in transit}
             now9 = {str(e9["uuid"]): [e9["gid"], float(e9["qty"])] for e9 in transit if e9.get("state") == "pending"}
@@ -471,8 +471,7 @@ class DailyMixin:
                     _add(datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), f"krw:{ex9}:" + ("int" if int9 else "in" if k9 > 0 else "out"),
                         "빗썸 원화 지급(거래소 내부·은행 아님)" if int9 else "빗썸 원화 입금(은행에서)" if k9 > 0 else "빗썸 원화 출금(은행으로)", k9 / fx9, keys=keys, acc_k=acc_k)
                 if vflow9 is not None and k9 and datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d") in keys:
-                    vf9 = vflow9.setdefault(f"exchange:{ex9}", [0.0, 0.0])
-                    vf9[0 if k9 > 0 else 1] += abs(k9 / fx9)
+                    vf_add(vflow9, vf_day, f"exchange:{ex9}", datetime.fromtimestamp(ts9, KST).strftime("%Y-%m-%d"), k9 > 0, abs(k9 / fx9))
         except Exception as e9:   # noqa: BLE001 [fallback]
             if hist9:
                 raise
@@ -551,8 +550,8 @@ class DailyMixin:
                 fpd9[keys[ck9]] = round(dlt9, 2)
         if hist9 and nofx9:
             out["_nofx"] = {d9: round(v9, 2) for d9, v9 in nofx9.items()}
-        if vflow9 is not None:
-            self._venue_flow = vflow9
+        if vflow9 is not None and not hist9:
+            self._venue_flow, self._venue_flow_day = vflow9, vf_day
         return out
 
     def _daily_attrib(self, conn, daily, G, today_kst, live_px, skip_gids=frozenset(), extra=None, real=None, px_src=None) -> dict:

@@ -202,10 +202,10 @@ class OutMove:
             omx.br_transit[bm9["key"]] = {"sym": g9["sym"], "qty": bt_q, "ts": ts9, "cost": mc9, "known": bt_k,
                                       "unknown": bt_u, "left": bt_q, "gid": g9["gid"], "_src": [(r9["posting_id"], 1.0)], "_cmp": accounting_util.cp_merge({}, cp_o9),
                                       "krw": kr9, "kc": kc9r, "kk": kk9r, "fk": fk9r, "_stl": stl9r, "id_link": bool(bm9.get("id_link"))}
-            omx.cb.pool_put(omx.br_transit[bm9["key"]], frags_out)
-            omx.px.kpx.kd_put(omx.br_transit[bm9["key"]], kd_r)
             if bt_q is aq9:
                 omx.br_transit[bm9["key"]]["_cv"] = {"from": omx.cv_label(cp_o9, g9["sym"]), "ratio": float(r9x)}
+            omx.cb.pool_put(omx.br_transit[bm9["key"]], frags_out)
+            omx.px.kpx.kd_put(omx.br_transit[bm9["key"]], kd_r)
             d9 = (f"{CHAIN_NAME.get(chain9, chain9)} → 브릿지 → 내 {CHAIN_NAME.get(bm9['chain'], bm9['chain'])} 지갑 "
                   f"(자동 매칭 · {max(0, int(bm9['ts'] - ts9)) // 60}분 뒤 도착 · 원가 이관)")
         elif (chain9, str(txh9 or "").lower(), dest9) in omx.sale_bid9 and dest9 not in omx.of_noauto:

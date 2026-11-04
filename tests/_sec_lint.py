@@ -1107,7 +1107,7 @@ SAFE_URL_SITES = {
     ("setup.js", "keysHTML", "91765ae3d554b70d"): 1,
     ("setup.js", "permModalHTML", "2ce639635f89fecf"): 1,
     ("setup.js", "tgHTML", "c4552715856b5ea0"): 1,
-    ("tab_dash.js", "vnChains", "3dfba995aa038f55"): 1,
+    ("tab_dash.js", "vnChains", "1a7bed1a316c8188"): 1,
     ("tab_other.js", "brokersBody", "6e4d16bc93281710"): 1,
     ("tab_out.js", "exLink", "c094d874408e6338"): 1,
     ("tab_set.js", "sxIt", "42603d2b99d63229"): 1,

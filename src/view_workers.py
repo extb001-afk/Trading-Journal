@@ -12,6 +12,7 @@ import os
 import pricing
 import rabby
 import sale_match
+import stakecredit
 import time
 import urllib.request
 import xchain_match
@@ -50,6 +51,7 @@ class WorkersMixin:
             except (Exception, SystemExit) as e:   # noqa: BLE001 [isolate]
                 calcguard.swallowed("view_workers:WorkersMixin._lp_worker[_lp_refresh_once]", e)
                 log.warning("lp-worker 실패(다음 주기): %s", e)
+            stakecredit.worker_round(self, lpchain.rpc_urls)
             end9 = time.time() + LP_OPEN_SEC
             while True:
                 left9 = end9 - time.time()

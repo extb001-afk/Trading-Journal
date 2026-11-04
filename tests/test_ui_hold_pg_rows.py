@@ -28,7 +28,7 @@ try {
   // 자르는 표식 = 코드 줄만(공개 빌드는 주석 문구를 바꾼다)
   const B = [cut('  const uiWrapBtn = (b, o) =>', '  const uiHidChip = '), line('  const rbChip = g =>'),
     ...['  const gRb = g =>', '  let twinVis = ', '  const twinChip = g =>', '  const gName = g =>', '  const gTip = g =>', '  const gSub = (g, t) =>'].map(line),
-    cut('  const holdPgHit = ', '  function debtFootHTML() {'), cut('  const holdTh = ', '  function stakeUnk(g) {')].join('\n');
+    cut('  const holdPgHit = ', '  function evalOutHTML() {'), cut('  const holdTh = ', '  function stakeUnk(g) {')].join('\n');
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   let ROWS = [];
   const S = { uiPg: {}, pgSz: 10, hold: { mode: 'all', sort: 'value', dir: -1, open: new Set(), dense: false, showDust: false }, D: { groups: [1] }, dust: 0, mobile: false, hide: false, rand: false };

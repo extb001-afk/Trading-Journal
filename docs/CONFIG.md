@@ -63,7 +63,7 @@
 | `TJ_DEMO` · `TJ_DEMO_STATE` · `TJ_PORT` | 없음 | 데모 전용(`bash tools/setup.sh --demo` 가 씀) — 데모 임시 폴더 · 데모 포트 |
 | `TJ_ALLOW_NEW_LEDGER` | (러너가 자동) | 원장 파일이 없을 때 새로 만들기 허락 — `src/core.py` 를 러너 없이 직접 띄울 때만 `1` |
 
-시험·진단 전용(운영에선 설정하지 않음): `TJ_HEALTH_NO_NET` · `TJ_KEEP_DIAG` · `TJ_REPLAY_DEBUG` · `TJ_SEARCH_TICK` · `TJ_SEARCH_IDX_DELAY` · `TJ_INT_RESCAN_STABLE_SEC` · `TJ_TEST_*` ·
+시험·진단 전용(운영에선 설정하지 않음): `TJ_HEALTH_NO_NET` · `TJ_KEEP_DIAG` · `TJ_REPLAY_DEBUG` · `TJ_HARVEST_OFF`(=1 이면 에어드랍 수확 보드 훅 전부 무동작 — 켬·끔 빌드 대조 시험용) · `TJ_SEARCH_TICK` · `TJ_SEARCH_IDX_DELAY` · `TJ_INT_RESCAN_STABLE_SEC` · `TJ_TEST_*` ·
 `TJ_CPU_PLAN`(코어 배분을 하위 프로세스에 물려주는 내부 값).
 
 **`config.json` 키**

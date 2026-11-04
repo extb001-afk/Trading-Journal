@@ -81,7 +81,7 @@ var svg='';var s=(h.series||[]).map(function(p,i,a){return[p[0],i===a.length-1&&
  svg=N('div',[N('div.chart',N('svg',[bd,N('path','','stroke:'+c,{d:ln,fill:'none','stroke-width':'2.2','stroke-linejoin':'round','vector-effect':'non-scaling-stroke'},1)],0,{viewBox:'0 0 700 124',preserveAspectRatio:'none'},1)),N('div.chart-x.num',xs),N('div.chart-foot',N('span',nb))]);}
 var t=D.getElementById('heroSk');if(!t)return;var mm=+String(h.todayKey||'').slice(0,2)||'',mv=kv(h.month,h.monthKrw),tv=h.tr!=null?kv(h.tr,h.trKrw):null,tz=tv!=null&&Math.abs(h.tr)<0.005;
 var td='';try{var dd=new Date();td=(dd.getMonth()+1)+'/'+dd.getDate()+' ('+'일월화수목금토'.charAt(dd.getDay())+')';}catch(e){}
-t.replaceChildren(N('div.thd',N('div.tleft',[N('span.tlab','총자산'),N('span.tv.num',m(h.total)),N('span.tchg.num',['오늘 ',chg])])),...(svg?[svg]:[]));
+t.replaceChildren(N('div.thd',N('div.tleft',[N('span.tlab','총자산'),N('span.tv.num',m(h.total)),N('span.tchg.num',['전일 대비 ',chg])])),...(svg?[svg]:[]));
 var kq=D.getElementById('heroK');if(kq)kq.replaceChildren(N('div.card.kq',[N('span.ql',['오늘 실현 ',N('i','· '+td)]),tv==null?N('span.qv.num.z','—'):N('span.qv.num.'+(tz?'z':col(tv)),m(tv,!tz)),N('span.qs',nb)]),
  N('div.card.kq',[N('span.ql',mm+'월 실현'),N('span.qv.num.'+col(mv),m(mv,1)),N('span.qs',nb)]),...[].slice.call(kq.children,2));}catch(e){}})();
 </script>
@@ -100,6 +100,8 @@ var kq=D.getElementById('heroK');if(kq)kq.replaceChildren(N('div.card.kq',[N('sp
 <script src="/v2/tab_set.js"></script>
 <script src="/v2/app.js"></script>
 <script src="/v2/wow.js"></script>
+<script src="/v2/wow_hv.js"></script>
+<script src="/v2/wow_more.js"></script>
 <script src="/v2/setup.js"></script>
 <script src="/v2/search.js"></script>
 <script src="/v2/salelink.js"></script>

@@ -22,6 +22,8 @@ _V2_FILES = {"index.html": "text/html; charset=utf-8",
              "search.js": "application/javascript; charset=utf-8",
              "salelink.js": "application/javascript; charset=utf-8",
              "wow.js": "application/javascript; charset=utf-8",
+             "wow_hv.js": "application/javascript; charset=utf-8",
+             "wow_more.js": "application/javascript; charset=utf-8",
              "tjdom.js": "application/javascript; charset=utf-8",
              "app.css": "text/css; charset=utf-8",
              "mods.css": "text/css; charset=utf-8",
@@ -64,7 +66,7 @@ _ASSETS_LOCK = threading.Lock()
 _V2_JS_RE = re.compile(rb'<script src="/v2/app\.js"></script>')
 
 
-_V2_VER_JS = ("tjdom.js", "health.js", "search.js", "wow.js", "setup.js") + _V2_TABS
+_V2_VER_JS = ("tjdom.js", "health.js", "search.js", "wow.js", "wow_hv.js", "wow_more.js", "setup.js") + _V2_TABS
 
 
 _V2_VER_CSS = ("app.css", "mods.css", "wow.css")

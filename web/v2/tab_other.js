@@ -4,17 +4,16 @@
     $, A, ago, arr, CHAIN_KO, cls, clsP, clsV, drawerHist, errTxt, esc, exLinked, exLogo, fmtTs, IC, isISO, LS, m, mN, nf, num,
     onUnauthorized, pad2, pctS, post, prTxt, PVM, pvMoney, pvOn, pvW, px, q, rate, renderAuto, renderOverlay, renderView, rw, S, sparkSVG,
     sum, sxGo, sync, toast, todayISO, trimZeros, UI_SHEETS, uiCell, uiDate, uiFold, uiPaged, uiPgBar, uiPgReveal, uiPgS, uiPgSlice, uiPick,
-    uiRe, uiSheetClose, uiSheetOpen, vib
+    uiRe, uiSheetClose, uiSheetOpen, vib, nwShow
   } = X;
-  const OA_CATS = [['realestate', '부동산', 'var(--c1)'], ['stock', '주식', 'var(--c2)'], ['gold', '금', 'var(--c3)'], ['car', '자동차', 'var(--c4)'],
-    ['cash', '현금', 'var(--muted)'], ['etc', '기타', 'var(--ext)'], ['debt', '부채', '']];
+  const OA_CATS = [['realestate', '부동산', 'var(--k7)'], ['stock', '주식', 'var(--k8)'], ['gold', '금', 'var(--k9)'], ['car', '자동차', 'var(--k10)'],
+    ['cash', '현금', 'var(--k3)'], ['etc', '기타', 'var(--k6)'], ['debt', '부채', '']];
   const OA_CN = {}; OA_CATS.forEach(c => { OA_CN[c[0]] = c[1]; });
   const OA_CC = {}; OA_CATS.forEach(c => { OA_CC[c[0]] = c[2]; });
   const OA_UNVER = '미검증 — 공개 문서만 보고 작성, 실제 계정으로 시험 안 함(완벽하지 않음)';
   const oaV = (v, cur) => (v == null || v === '' || !isFinite(+v)) ? NaN : cur === 'USD' ? +v : +v / rate();
   const oaItems = () => arr(S.oa.d && S.oa.d.items);
   const oaUnv = o => !isFinite(oaV(o.value, o.cur));
-  const oaItemV = o => oaV(o.value, o.cur) * (o.liab ? -1 : 1);
   function oaPx(v, cur) {
     if (v == null || !isFinite(v)) return '—';
     const sym = cur === 'KRW' ? '₩' : '$';
@@ -102,37 +101,73 @@
     if (!D || !arr(D.debts).length) return '';
     return '<span class="lvdebt' + (cls ? ' ' + cls : '') + '" title="' + esc(D.debtLbl + ' — ' + D.debtTip() + ' · 상환 전 · 총자산에 이미 빠져 있어요') + '"><span class="mut">빌린 돈</span> <b class="num down">' + m(D.debtUsd, { sign: true, compact: true }) + '</b> <span class="mut">(총자산에 반영됨)</span></span>';
   }
-  function levHTML() {
+  function levHTML(extra) {
     levNeed(60000);
     const L = levS(), d = levData();
     const icon = '<svg class="lvic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>';
     const debtH = levDebtHTML();
     if (L.st === 'none' || (!d && L.st !== 'err')) return debtH ? '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + debtH + '<span class="sp"></span>' + (L.st === 'none' ? '' : '<span class="cap" role="status">불러오는 중…</span>') + '</section>' : '';
     if (!d) return '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + debtH + '<span class="mut" role="status">불러오지 못했어요 · ' + esc(errTxt(L.err)) + '</span><span class="sp"></span><button class="link" data-a="levRetry">다시 시도</button></section>';
-    const C = d.counts || {}, rows = arr(d.rows), top = rows[0];
+    const C = d.counts || {}, rows = arr(d.rows);
     const unc = num(C.unconfirmed), age = d.levTs ? ago(d.levTs) : '';
-    const pills = (num(C.danger) ? '<span class="lvp danger pvx">위험 ' + C.danger + '</span>' : '') + (num(C.warn) ? '<span class="lvp warn pvx">주의 ' + C.warn + '</span>' : '') + (num(C.unknown) ? '<span class="lvp unk pvx">확인 못 함 ' + C.unknown + '</span>' : '');
+    const pills = (num(C.danger) ? '<span class="lvp danger pvx">위험 ' + C.danger + '</span>' : '')
+      + (num(C.warn) ? '<span class="lvp warn pvx">주의 ' + C.warn + '</span>' : '');
     const day = d.dayUsd != null && num(d.dayUsd) > 0 ? '하루 이자 ≈ ' + m(d.dayUsd) : '';
     if (!rows.length) {
       const msg = d.missing ? (exLinked() ? '수집 전' : '거래소 연결 전') : '열린 것 없음 · <span class="pvx">' + num(d.exchanges) + '개 거래소</span> ' + age;
       return '<section class="card lev lvone" aria-label="레버리지 · 대출">' + icon + '<b>레버리지 · 대출</b>' + (debtH ? debtH + '<span class="mut lvmsg">' + (d.missing ? (exLinked() ? '수집 전' : '거래소 연결 전') : age) + '</span>' : '<span class="mut lvmsg">' + msg + '</span>') + '<span class="sp"></span>'
         + (unc ? '<span class="cap pvx">확인 못 한 곳 ' + unc + '</span>' : '') + '<button class="link" data-a="levOpen">전체 보기' + IC.right + '</button></section>';
     }
-    const stc = top ? top.state : 'safe';
-    if (S.mobile) {
-      const next = rows.slice(1, 2).map(r => '<span class="lvmr"><span>' + esc(r.exKo) + ' ' + levTitle(r) + ' · ' + levMetric(r) + '</span><span class="lvmd st-' + r.state + '">' + (r.state === 'unknown' ? '확인 못 함' : r.kind === 'fut' ? (r.dist != null ? levPv(r.dist <= 0 ? '청산가 지남' : '청산까지 ' + (r.side === 'SHORT' ? '+' : '−') + (r.dist * 100).toFixed(1) + '%') : '청산가 없음') : r.dropCall != null && r.dropCall > 0 ? levPv('콜까지 −' + Math.round(r.dropCall * 100) + '%') : r.dropLiq != null && r.dropLiq > 0 ? levPv('청산까지 −' + Math.round(r.dropLiq * 100) + '%') : esc(LEV_ST[r.state])) + '</span></span>').join('');
-      const pills2 = (num(C.danger) ? '<span class="lvp danger pvx">위험 ' + C.danger + '</span>' : '') + (num(C.warn) ? '<span class="lvp warn pvx">주의 ' + C.warn + '</span>' : '') + (!num(C.danger) && !num(C.warn) && num(C.unknown) ? '<span class="lvp unk pvx">확인 못 함 ' + C.unknown + '</span>' : '');
-      return '<button type="button" class="card lev lvm st-' + stc + '" data-a="levOpen" aria-label="레버리지 · 대출 — 전체 보기"><span class="lvh"><b>레버리지 · 대출</b>' + (pills2 || '<span class="lvp pvx">열린 것 ' + rows.length + '</span>') + '<span class="sp"></span><span class="cap lvcnt pvx">' + rows.length + '개' + IC.right + '</span></span>'
-        + (debtH ? levDebtHTML('lvmdebt') : '') + '<span class="lvml st-' + stc + '">' + esc(top.exKo) + ' ' + levTitle(top) + ' — ' + levLine(top, true) + '</span>' + (top.state !== 'unknown' && top.gauge ? '<span class="lvgw">' + levGauge(top) + '</span>' : '')
-        + (next ? '<span class="lvml2">' + next + '</span>' : '')
-        + (rows.length > 2 ? '<span class="lvmm"><span class="uchev" aria-hidden="true">' + IC.chev + '</span><b class="pvx">' + (rows.length - 2) + '개 더</b><span class="ell"> · ' + rows.slice(2, 4).map(r => esc(r.exKo + ' ' + (r.kind === 'fut' ? (r.base || '') + ' ' + levSide(r) : r.kindKo))).join(' · ') + (rows.length > 4 ? ' 외' : '') + '</span></span>' : '') + '<span class="lvmf"><span>' + (day || '&nbsp;') + '</span><span>' + (unc ? '<span class="pvx">확인 못 한 곳 ' + unc + '</span> · ' : '') + levAgeT(top, true) + '</span></span></button>';
+    const hot = rows.filter(r => r.state === 'danger' || r.state === 'warn'), rest = rows.filter(r => hot.indexOf(r) < 0);
+    const stc = hot.length ? hot[0].state : 'safe', nOf = st => rest.filter(r => r.state === st).length;
+    const safeEx = rest.filter(r => r.state === 'safe').map(r => r.exKo).filter((v, i, a) => a.indexOf(v) === i);
+    const UNK_T = '키 권한·조회 실패로 위험을 확인하지 못한 곳 — 이유와 기준은 전체 보기에서';
+    const foldBits = (safeEx.length ? '<span>' + esc(safeEx.slice(0, 2).join(' · ') + (safeEx.length > 2 ? ' 외' : '')) + '</span>'
+      + '<span class="lvp safe">안전</span>' : '')
+      + (nOf('nothr') ? '<span class="lvp nothr pvx">기준 모름 ' + nOf('nothr') + '</span>' : '')
+      + (nOf('unknown') ? '<span class="lvp unk pvx" title="' + UNK_T + '">확인 못 함 ' + nOf('unknown') + '</span>' : '')
+      + (unc ? '<span class="cap pvx" title="' + UNK_T + '">확인 못 한 곳 ' + unc + '</span>' : '');
+    const foldLbl = rest.length ? (hot.length ? rest.length + '개 더' : '열린 것 ' + rest.length + '개') : '';
+    const lvH = '<span class="lvh"><b>레버리지 · 대출</b>', cnt = '<span class="cap lvcnt pvx">열린 것 ' + rows.length + IC.right + '</span></span>';
+    const mBtn = '<button type="button" class="card lev lvm st-' + stc + '" data-a="levOpen" aria-label="레버리지 · 대출 — 전체 보기">';
+    const mDebt = debtH ? levDebtHTML('lvmdebt') : '';
+    if (S.mobile && !hot.length) {
+      return mBtn + lvH + '<span class="sp"></span>' + cnt + mDebt + '<span class="lvfold0 m">' + foldBits + '</span>'
+        + (day ? '<span class="lvmf"><span>' + day + '</span></span>' : '') + '</button>';
     }
-    const row = r => '<button type="button" class="lvr st-' + r.state + '" data-a="levOpen" data-v="' + esc(r.id) + '"><span class="lvn"><b>' + esc(r.exKo) + ' <span class="k">· ' + (r.kind === 'fut' ? levTitle(r) : esc(r.kindKo)) + '</span></b><span class="cap">' + levSub(r) + '</span></span>'
-      + '<span class="lvgw">' + levGauge(r) + '</span><span class="lvv num">' + levMetric(r) + '</span><span class="lvd st-' + r.state + '">' + levLine(r, true) + '</span><span class="lva">' + levAgeT(r) + '</span></button>';
-    const more = rows.length > 2 ? uiPaged('lev:dash', rows.slice(2), r => row(r), { unit: '개', cls: 'lvmore', more: (rest) => '<span class="pvx">' + rest + '개 더</span> · ' + rows.slice(2, 4).map(r => esc(r.exKo + ' ' + (r.kind === 'fut' ? (r.base || '') + ' ' + levSide(r) : r.kindKo))).join(' · ') + (rest > 2 ? ' 외' : '') }) : '';
-    return '<section class="card lev st-' + stc + '" aria-label="레버리지 · 대출"><div class="lvh">' + icon + '<h2>레버리지 · 대출</h2><span class="lvp pvx">열린 것 ' + rows.length + '</span>' + (day ? '<span class="lvp num">' + day + '</span>' : '') + pills + (debtH ? '<span class="lvp lvpd">' + debtH + '</span>' : '')
-      + '<span class="sp"></span>' + (unc ? '<span class="cap pvx" title="키 권한·조회 실패로 위험을 확인하지 못한 곳(전체 보기에서 이유)">확인 못 한 곳 ' + unc + '</span>' : '') + '<button class="link" data-a="levOpen">전체 보기' + IC.right + '</button></div>'
-      + '<div class="lvrows">' + rows.slice(0, 2).map(row).join('') + more + '</div></section>';
+    if (S.mobile) {
+      const top = hot[0], next = hot.slice(1, 2).map(levMobNext).join('');
+      return mBtn + lvH + pills + '<span class="sp"></span>' + cnt + mDebt
+        + '<span class="lvml st-' + stc + '">' + esc(top.exKo) + ' ' + levTitle(top) + ' — ' + levLine(top, true) + '</span>'
+        + (top.gauge ? '<span class="lvgw">' + levGauge(top) + '</span>' : '') + (next ? '<span class="lvml2">' + next + '</span>' : '')
+        + (hot.length > 2 ? '<span class="lvmm"><span class="uchev" aria-hidden="true">' + IC.chev + '</span><b class="pvx">주의·위험 '
+          + (hot.length - 2) + '개 더</b></span>' : '')
+        + (foldLbl || unc ? '<span class="lvfold0 m"><b class="pvx">' + foldLbl + '</b>' + foldBits + '</span>' : '')
+        + '<span class="lvmf"><span>' + (day || '&nbsp;') + '</span><span>' + levAgeT(top, true) + '</span></span></button>';
+    }
+    const nm9 = r => esc(r.exKo + ' ' + (r.kind === 'fut' ? (r.base || '') + ' ' + levSide(r) : r.kindKo));
+    const more = hot.length > 2 ? uiPaged('lev:dash', hot.slice(2), levRow, { unit: '개', cls: 'lvmore',
+      more: n9 => '<span class="pvx">주의·위험 ' + n9 + '개 더</span> · ' + hot.slice(2, 4).map(nm9).join(' · ') + (n9 > 2 ? ' 외' : '') }) : '';
+    const fold = foldLbl || unc ? '<button type="button" class="lvfold0" data-a="levOpen" aria-haspopup="dialog" aria-label="'
+      + esc((foldLbl ? foldLbl + ' — ' : '') + '전체 보기') + '"><span class="uchev" aria-hidden="true">' + IC.chev + '</span>'
+      + (foldLbl ? '<b class="pvx">' + foldLbl + '</b>' : '') + foldBits + '<span class="sp"></span>' + IC.right + '</button>' : '';
+    const sumL = [debtH, day ? '<span class="num">' + day + '</span>' : ''].filter(Boolean).join('<span class="mut"> · </span>');
+    return '<section class="card lev st-' + stc + '" aria-label="레버리지 · 대출"><div class="lvh">' + icon + '<h2>레버리지 · 대출</h2>'
+      + '<span class="lvp pvx">열린 것 ' + rows.length + '</span>' + pills
+      + '<span class="sp"></span><button class="link" data-a="levOpen">전체 보기' + IC.right + '</button></div>'
+      + (sumL ? '<p class="cap lvsum">' + sumL + '</p>' : '') + '<div class="lvrows">' + hot.slice(0, 2).map(levRow).join('') + more + fold + '</div>' + (extra || '') + '</section>';
+  }
+  const levRow = r => '<button type="button" class="lvr st-' + r.state + '" data-a="levOpen" data-v="' + esc(r.id) + '"><span class="lvn"><b>' + esc(r.exKo)
+    + ' <span class="k">· ' + (r.kind === 'fut' ? levTitle(r) : esc(r.kindKo)) + '</span></b><span class="cap">' + levSub(r) + '</span></span>'
+    + '<span class="lvgw">' + levGauge(r) + '</span><span class="lvv num">' + levMetric(r) + '</span><span class="lvd st-' + r.state + '">'
+    + levLine(r, true) + '</span><span class="lva">' + levAgeT(r) + '</span></button>';
+  function levMobNext(r) {
+    const fd = r.dist != null ? levPv(r.dist <= 0 ? '청산가 지남' : '청산까지 ' + (r.side === 'SHORT' ? '+' : '−') + (r.dist * 100).toFixed(1) + '%') : '청산가 없음';
+    const dist = r.kind === 'fut' ? fd
+      : r.dropCall != null && r.dropCall > 0 ? levPv('콜까지 −' + Math.round(r.dropCall * 100) + '%')
+        : r.dropLiq != null && r.dropLiq > 0 ? levPv('청산까지 −' + Math.round(r.dropLiq * 100) + '%') : esc(LEV_ST[r.state]);
+    return '<span class="lvmr"><span>' + esc(r.exKo) + ' ' + levTitle(r) + ' · ' + levMetric(r) + '</span><span class="lvmd st-' + r.state + '">'
+      + (r.state === 'unknown' ? '확인 못 함' : dist) + '</span></span>';
   }
   function levCard(r) {
     const kv = [];
@@ -151,15 +186,20 @@
         add('담보', cs.map(c => q(c.qty) + ' ' + esc(c.ccy)).join(' · ') || '—');
         ds.forEach(x => add('부채 ' + x.ccy, q(x.total)));
       }
-      if (mt) add(LEV_MN[mt.name] || '지표', levPv(mt.inf ? '부채 없음' : String(mt.txt || '').split(' ').pop()));
-      if (mt && (mt.call != null || mt.liq != null || mt.warn != null)) add(mt.call != null ? '마진콜 · 청산' : '경고 · 청산', levPv([mt.call != null ? mt.call : mt.warn, mt.liq].filter(v => v != null).map(v => mt.unit === 'frac' ? (v * 100).toFixed(1) + '%' : String(+v.toFixed(2))).join(' · ')));
+      const gz = !!(r.gauge && r.state !== 'unknown');
+      if (mt && !gz) add((LEV_MN[mt.name] || '지표') + (r.state === 'unknown' ? ' (마지막 값)' : ''),
+        levPv(mt.inf ? '부채 없음' : String(mt.txt || '').split(' ').pop()));
+      const thv = v => (mt.unit === 'frac' ? (v * 100).toFixed(1) + '%' : String(+v.toFixed(2)));
+      if (!gz && mt && (mt.call != null || mt.liq != null || mt.warn != null))
+        add(mt.call != null ? '마진콜 · 청산' : '경고 · 청산', levPv([mt.call != null ? mt.call : mt.warn, mt.liq].filter(v => v != null).map(thv).join(' · ')));
       ds.slice(0, 3).forEach(x => add((r.kind === 'loan' ? '원금 · 이자' : x.ccy + ' 원금 · 이자') + (r.kind === 'loan' && ds.length > 1 ? ' ' + x.ccy : ''), x.principal != null ? q(x.principal) + ' · ' + q(x.interest) : q(x.total) + ' <span class="mut pvx">(합)</span>'));
       if (ds.length) add('이자율', rateT(ds.find(x => x.yr != null) || ds[0]));
       if (num(r.dayUsd) > 0) add('하루 이자', '≈ ' + m(r.dayUsd));
       if (r.liqPx) add('청산가', esc(String(r.liqPair || '').split(/[-/_]/)[0]) + ' ' + px(r.liqPx));
-      if (r.pairDist != null) add('청산가까지', levPv((r.pairDist * 100).toFixed(1) + '%'));
+      if (r.pairDist != null) add('청산까지', levPv((r.pairDist * 100).toFixed(1) + '%'));
     }
-    add('기준', '<span' + (r.note ? ' title="' + esc(r.note) + '"' : '') + '>' + (r.thr === 'api' ? '거래소 제공' : r.thr === 'doc' ? '공식 문서' : r.thr === 'config' ? '내 설정' : r.thr === 'tj' ? 'tj-bot 기본(거래소가 마진콜 기준을 주지 않음)' : '<span class="mut">기준 모름</span>') + '</span>');
+    const thrT = r.thr === 'tj' ? 'tj-bot 기본(거래소가 마진콜 기준을 주지 않음)' : '';
+    add('기준', '<span' + (r.note ? ' title="' + esc(r.note) + '"' : thrT ? ' title="' + thrT + '"' : '') + '>' + (r.thr === 'api' ? '거래소 제공' : r.thr === 'doc' ? '공식 문서' : r.thr === 'config' ? '내 설정' : r.thr === 'tj' ? 'tj-bot 기본' : '<span class="mut">기준 모름</span>') + '</span>');
     add('측정', ago(r.measuredAt));
     const off = r.fresh && r.state !== 'unknown' && r.official && r.official.level >= 1 ? '<span class="lvp ' + (r.official.level >= 2 ? 'danger' : 'warn') + '" title="거래소가 알려 준 상태">' + esc(LEV_OFF[r.official.v] || r.official.v) + '</span>' : '';
     return '<article class="lvc st-' + r.state + '" data-lid="' + esc(r.id) + '" tabindex="-1"><div class="lvch"><b>' + esc(r.exKo) + ' ' + (r.kind === 'fut' ? '선물' : esc(r.kindKo)) + '</b><span class="cap">' + (r.kind === 'fut' ? levTitle(r) + (r.mode ? ' · ' + (r.mode === 'cross' ? '교차' : '격리') : '') : levSub(r)) + '</span><span class="sp"></span>' + off + '<span class="lvp ' + esc(r.state) + '">' + esc(LEV_ST[r.state] || r.state) + '</span></div>'
@@ -168,7 +208,7 @@
   }
   function levDrawer() {
     const L = levS(), d = levData();
-    const head = '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer lev" role="dialog" aria-modal="true" aria-label="레버리지 · 대출"><div class="dh"><h2 class="h2">레버리지 · 대출</h2><span class="sp"></span><button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>';
+    const head = '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer lev" role="dialog" aria-modal="true" aria-label="레버리지 · 대출"><div class="dh"><h2 class="h2">레버리지 · 대출</h2><span class="sp"></span><button class="xb" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button></div>';
     if (!d) return head + '<div class="cap" role="status">' + (L.st === 'err' ? '불러오지 못했어요 · ' + esc(errTxt(L.err)) + ' <button class="link" data-a="levRetry">다시 시도</button>' : '불러오는 중…') + '</div></aside>';
     const rows = arr(d.rows), T = d.tabs || {}, tab = ['all', 'fut', 'margin', 'loan'].indexOf(L.tab) >= 0 ? L.tab : 'all';
     const seg = '<div class="seg lvseg" role="group" aria-label="종류">' + [['all', '전체'], ['fut', '선물'], ['margin', '마진'], ['loan', '대출']].map(x => '<button data-a="levTab" data-v="' + x[0] + '" class="' + (tab === x[0] ? 'on' : '') + '" aria-pressed="' + (tab === x[0]) + '">' + x[1] + ' <span class="num pvx">' + num(T[x[0]]) + '</span></button>').join('') + '</div>';
@@ -240,7 +280,7 @@
     return (d.slice(0, 4) === todayISO().slice(0, 4) ? '' : d.slice(2, 4) + '/') + d.slice(5, 7) + '/' + d.slice(8, 10);
   }
   function oaSub(o) {
-    const bits = [OA_CN[o.cat] || '기타'];
+    const bits = [(OA_CN[o.cat] || '기타') + (o.liab ? ' · 순자산에서 빼요' : '')];
     if (o.auto === 'stock') bits.push(q(num(o.qty)) + '주' + (o.quote && o.quote.px ? ' × ' + oaPx(o.quote.px, o.quote.cur || o.cur) : ''));
     else if (o.cat === 'gold' && o.qty) bits.push(q(num(o.qty)) + (o.unit === 'ozt' ? 'ozt' : 'g'));
     else if (o.cat === 'stock' && !o.ticker) bits.push('코드 없음');
@@ -258,7 +298,9 @@
     const c = oaChg(o);
     if (!c || (Math.abs(c.v) < 1e-9 && c.pct == null)) return '<span class="mut">—</span>';
     if (c.auto && c.pct != null) return '<span class="' + cls(c.pct) + '" title="' + esc('오늘 ' + m(c.v, { sign: true })) + '">' + pctS(c.pct, 1) + ' 오늘</span>';
-    return '<span class="' + cls(c.v) + '">' + m(c.v, { sign: true, compact: true }) + (c.rep ? ' (상환)' : '') + '</span>';
+    if (o.liab) return '<span class="t2">' + (c.rep ? '상환 ' + m(c.v, { compact: true }) : m(c.v, { sign: true, compact: true }))
+      + '</span>';
+    return '<span class="' + cls(c.v) + '">' + m(c.v, { sign: true, compact: true }) + '</span>';
   }
   function oaMethod(o) {
     const st = o.quote && o.quote.stale ? ' <span class="pill w sm" title="' + esc(errTxt((o.quote.err || '마지막 시세 그대로') + ' — 마지막 값을 보여주는 중')) + '">시세 오래됨</span>' : '';
@@ -268,7 +310,7 @@
     return '<span class="pill sm">직접 입력</span>';
   }
   function oaIcon(o) {
-    const col = o.cat === 'stock' && !o.ticker ? 'color-mix(in srgb,var(--c2) 60%,var(--surface3))' : (OA_CC[o.cat] || 'var(--muted)');
+    const col = o.cat === 'stock' && !o.ticker ? 'color-mix(in srgb,var(--k8) 50%,var(--surface))' : (OA_CC[o.cat] || 'var(--muted)');
     return o.liab ? '<span class="oaic liab" aria-hidden="true"></span>' : '<span class="oaic" style="background:' + col + '" aria-hidden="true"></span>';
   }
   const OA_NAME_NUM = /[₩$]?\s?[+\-−]?\d[\d,.]*(?:\s?[^\s\d,.()·|/]{0,4})?/g;
@@ -294,17 +336,39 @@
     return '<div class="oatb" role="table" aria-label="기타 자산 목록"><div class="oar oah" role="row"><span role="columnheader">자산</span><span role="columnheader" class="r">평가금액</span><span role="columnheader" class="r">지난 평가 대비</span><span role="columnheader">평가 방식</span><span role="columnheader">평가일</span></div>'
       + list.map(o => '<button class="oar' + (S.oa.sel === o.id ? ' on' : '') + '" role="row" data-a="oaSel" data-v="' + esc(o.id) + '" data-anc="other:' + esc(o.id) + '" aria-pressed="' + (S.oa.sel === o.id) + '" aria-haspopup="dialog">'
         + '<span class="oan" role="cell">' + oaIcon(o) + '<span class="oat"><b>' + oaTitle(o) + '</b><small>' + oaSub(o) + '</small></span></span>'
-        + '<span class="r num oav" role="cell">' + (oaUnv(o) ? '<span class="mut">' + (o.auto ? '시세 대기' : '평가 대기') + '</span>' : '<span class="' + (o.liab ? 'down' : '') + '">' + m(oaItemV(o), { compact: true }) + '</span>') + '</span>'
+        + '<span class="r num oav" role="cell">' + (oaUnv(o) ? '<span class="mut">' + (o.auto ? '시세 대기' : '평가 대기') + '</span>' : '<span>' + m(oaV(o.value, o.cur), { compact: true }) + '</span>') + '</span>'
         + '<span class="r num oac" role="cell">' + oaChgHTML(o) + '</span>'
         + '<span class="oam" role="cell">' + oaMethod(o) + '</span>'
         + '<span class="num oad mut" role="cell">' + oaDate(o.date, o) + '</span></button>').join('') + '</div>';
   }
-  function oaAlloc() {
-    const it = oaItems().filter(o => !o.liab && !oaUnv(o)), tot = sum(it, o => Math.max(0, oaV(o.value, o.cur)));
-    if (!(tot > 0)) return '';
-    const by = OA_CATS.filter(c => c[0] !== 'debt').map(c => ({ k: c[0], l: c[1], col: c[2], v: sum(it.filter(o => o.cat === c[0]), o => Math.max(0, oaV(o.value, o.cur))) })).filter(x => x.v > 0);
-    return '<div class="oabar" role="img" aria-label="' + esc('기타 자산 비중 ' + by.map(x => x.l + ' ' + Math.round(x.v / tot * 100) + '%').join(' · ')) + '">' + by.map(x => '<i style="width:' + (x.v / tot * 100).toFixed(2) + '%;background:' + x.col + '"></i>').join('') + '</div>'
-      + '<div class="oaleg">' + by.map(x => '<span><i style="background:' + x.col + '"></i>' + x.l + ' <b style="color:' + x.col + '">' + Math.round(x.v / tot * 100) + '%</b></span>').join('') + '</div>';
+  function oaAlloc(T, S9) {
+    const it = oaItems().filter(o => !o.liab && !oaUnv(o)), cv = Math.max(0, num(T.coin));
+    const nv = T.nftOn && isFinite(T.nft) ? Math.max(0, T.nft) : 0;
+    const cvs = c => sum(it.filter(o => o.cat === c), o => Math.max(0, oaV(o.value, o.cur)));
+    const by = [{ l: '코인', col: 'var(--k2)', v: cv }].concat(OA_CATS.filter(c => c[0] !== 'debt')
+      .map(c => ({ l: c[1], col: c[2], v: cvs(c[0]) }))).concat(nv > 0 ? [{ l: 'NFT', col: 'var(--k2)', v: nv }] : []).filter(x => x.v > 0);
+    const tot = sum(by, x => x.v), dv = isFinite(T.debt) ? Math.max(0, T.debt) : 0;
+    if (!(tot > 0)) return '<div class="cap">자산을 넣으면 코인과 함께 비율을 보여 줘요</div>';
+    const pc = v => Math.min(100, v / tot * 100), p1 = v => pc(v).toFixed(1) + '%', f2 = v => v.toFixed(2) + '%';
+    const nw = Math.max(0, 100 - pc(dv));
+    let at = 0;
+    const segs = by.map(x => { const s = '<i style="left:' + f2(at) + ';width:' + f2(pc(x.v)) + ';background:' + x.col + '"></i>';
+      at += pc(x.v); return s; }).join('');
+    const row = (k, tr, v, lbl, cl) => '<div class="oabr' + (cl ? ' ' + cl : '') + '"><span class="k">' + k + '</span>'
+      + '<div class="oatr" role="img" aria-label="' + esc(lbl) + '">' + tr + '</div><span class="v num">' + v + '</span></div>';
+    const lg = by.map(x => '<span class="oalg"><i style="background:' + x.col + '"></i>' + x.l + ' <span class="num mut">' + p1(x.v) + '</span></span>')
+      .join('') + (dv > 0 ? '<span class="oalg"><i class="hatch"></i>부채</span>' : '');
+    const dbt = '<i class="base"></i><i class="hatch" style="left:' + f2(100 - pc(dv)) + ';width:' + f2(pc(dv)) + '"></i>';
+    return row('자산 합계', segs, S9.gross, '자산 합계 — ' + by.map(x => x.l + ' ' + p1(x.v)).join(' · '))
+      + (dv > 0 ? row('부채', dbt, S9.debt, '부채 — 자산 합계의 ' + p1(dv)) : '')
+      + row('순자산', '<i class="net" style="width:' + f2(nw) + '"></i>', nw.toFixed(1) + '%', '순자산 = 자산 합계 − 부채 · 자산 합계의 ' + nw.toFixed(1) + '%', 'n')
+      + '<div class="oalgs">' + lg + '</div>';
+  }
+  function oaSumNums(T) {
+    const mk = v => (T.nfMask && isFinite(v) ? pvMoney('', true) : m(v, { compact: true }));
+    const gross = T.coin + T.assets + (T.nftOn ? T.nft : 0);
+    return { net: mk(T.net), netFull: T.nfMask ? '' : m(T.net), coin: m(T.coin, { compact: true }), assets: m(T.assets, { compact: true }),
+      nft: mk(T.nft), debt: m(T.debt, { compact: true }), gross: T.nftOn ? mk(gross) : m(gross, { compact: true }) };
   }
   function oaRe() { renderView(); if (S.sheet && S.sheet.k === 'oa') renderOverlay(); }
   UI_SHEETS.oa = () => (S.oa.form ? oaForm() : '');
@@ -340,14 +404,14 @@
     if (ser.length > 1) {
       const W0 = 300, H0 = 70, vs = ser.map(p => toV(p[1])), lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs), sp = hi - lo || 1;
       const pts = vs.map((v, i) => (i / (vs.length - 1) * W0).toFixed(1) + ',' + (H0 - 4 - (v - lo) / sp * (H0 - 10)).toFixed(1));
-      const col = o.liab ? 'var(--accent)' : (OA_CC[o.cat] || 'var(--accent)');
+      const col = o.liab ? 'var(--text2)' : (OA_CC[o.cat] || 'var(--text2)');
       svg = '<svg class="oasv" viewBox="0 0 ' + W0 + ' ' + H0 + '" preserveAspectRatio="none" role="img" aria-label="' + esc(oaNameTxt(o) + ' 평가 기록 ' + ser.length + '개 점 · ' + ser[0][0] + ' ~ ' + ser[ser.length - 1][0]) + '"><polyline fill="none" stroke="' + col + '" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" points="' + pts.join(' ') + '"/><circle cx="' + pts[pts.length - 1].split(',')[0] + '" cy="' + pts[pts.length - 1].split(',')[1] + '" r="3" fill="' + col + '"/></svg>'
         + '<div class="oasx num"><span>' + oaDate(ser[0][0]) + '</span><span>' + oaDate(ser[ser.length - 1][0]) + '</span></div>';
     } else svg = '<div class="cap" style="margin:6px 0 10px">' + (o.auto ? '시세가 쌓이면 일별 종가로 차트를 그려요' : '평가금액을 고칠 때마다 기록이 쌓여 차트가 돼요') + '</div>';
     const H = arr(o.hist).slice().reverse();
     const lines = H.slice(0, 8).map((x, i) => {
       const nx = H[i + 1], qch = nx && x.qty != null && nx.qty != null && x.qty !== nx.qty;
-      const v = m(toV(x.value) * (o.liab ? -1 : 1), { compact: true });
+      const v = m(toV(x.value), { compact: true });
       const body = x.px && x.qty != null ? oaPx(x.px, x.cur) + ' × ' + q(num(x.qty)) + ' · ' + v : (x.qty != null && o.cat !== 'realestate' ? q(num(x.qty)) + esc(o.unit || '') + ' · ' : '') + v;
       const tag = qch ? ' (수량 변경)' : x.src === 'manual' ? ' (직접)' : x.src === 'broker' ? ' (증권사)' : '';
       return '<div class="oahl num"><span class="mut">' + oaDate(x.date) + '</span><span>' + body + '<span class="mut">' + tag + '</span></span></div>';
@@ -361,6 +425,7 @@
   }
   function vOtherAssets() {
     oaNeed(60000);
+    nftNeed(300000);
     const O = S.oa;
     if (O.st === 'none') return '<div class="card empty" style="margin-top:40px"><div class="eic">' + IC.info + '</div><b>이 서버는 아직 기타 자산을 지원하지 않아요</b><div class="cap" style="margin-top:6px">서버를 새 버전으로 올리면 부동산·주식·금·자동차·현금·부채를 함께 볼 수 있어요.</div></div>';
     if (!O.d) return O.st === 'err' ? '<div class="card empty" style="margin-top:40px"><div class="eic">' + IC.alert + '</div><b>기타 자산을 불러오지 못했어요</b><div class="cap" style="margin:6px 0 14px">' + esc(errTxt(O.err)) + '</div><button class="btn pri" data-a="oaReload">다시 시도</button></div>'
@@ -371,18 +436,28 @@
     const debts = it.filter(o => o.liab);
     const chs = it.map(o => ({ o, c: oaChg(o) })).filter(x => x.c);
     const chA = sum(chs.filter(x => x.c.auto), x => x.c.v), chM = sum(chs.filter(x => !x.c.auto), x => x.c.v), chT = chA + chM;
-    const kq = '<div class="kpis4 oak">'
-      + '<div class="card kq oanet"><span class="ql">전체 순자산 <i>(코인 + 기타' + (T.nftOn ? ' + NFT' : '') + ' − 부채)</i></span><span class="qv num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</span><span class="qs num"><span class="nowrap">코인 ' + mN(T.coin, { compact: true }) + ' ·</span> <span class="nowrap">기타 ' + mN(T.assets, { compact: true }) + ' ·</span>' + (T.nftOn ? ' <span class="nowrap">NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : mN(T.nft, { compact: true })) + ' ·</span>' : '') + ' <span class="nowrap">부채 ' + mN(-T.debt, { compact: true }) + (T.pend ? ' ·' : '') + '</span>' + (T.pend ? ' ' + oaPendTxt(T) : '') + '</span></div>'
-      + '<div class="card kq"><span class="ql">기타 자산</span><span class="qv num">' + m(T.assets, { compact: true }) + '</span><span class="qs"><span class="pvx">' + (it.length - debts.length) + '개 · 시세 자동 ' + autoN.length + '개' + (autoN.length ? '(' + [stN ? '주식 ' + stN : '', gN ? '금 ' + gN : ''].filter(Boolean).join('·') + ')' : '') + ' · 직접 입력 ' + (it.length - debts.length - autoN.length) + '개</span></span></div>'
-      + '<div class="card kq"><span class="ql">부채</span><span class="qv num oadebt">' + m(-T.debt, { compact: true }) + '</span><span class="qs">' + (debts.length ? debts.slice(0, 3).map(oaName).join(' · ') + (debts.length > 3 ? ' 외 ' + (debts.length - 3) : '') : '없음') + '</span></div>'
-      + '<div class="card kq"><span class="ql">지난 평가 대비</span><span class="qv num ' + cls(chT) + '">' + (chs.length ? m(chT, { sign: true, compact: true }) : '—') + '</span><span class="qs num"><span class="nowrap">시세 자동 <span class="' + cls(chA) + '">' + mN(chA, { sign: true, compact: true }) + '</span> ·</span> <span class="nowrap">직접 수정 <span class="' + cls(chM) + '">' + mN(chM, { sign: true, compact: true }) + '</span></span></span></div></div>';
+    const S9 = oaSumNums(T), nb = (l, v) => '<span class="nowrap">' + l + ' <span class="num">' + v + '</span></span>';
+    const c1 = '<div class="oasc"><span class="lab">전체 순자산</span><b class="oanv num">' + S9.net + '</b>'
+      + (S9.netFull && S9.netFull !== S9.net ? '<span class="num mut oanf">' + S9.netFull + '</span>' : '')
+      + '<span class="t2 oaeq">' + nb('코인', S9.coin) + ' ' + nb('+ 기타', S9.assets) + (T.nftOn ? ' ' + nb('+ NFT', S9.nft) : '') + ' ' + nb('− 부채', S9.debt)
+      + '</span>' + (T.pend ? '<span class="cap">' + oaPendTxt(T) + '</span>' : '') + '</div>';
+    const sg9 = v => m(v, { sign: true, compact: true });
+    const cr = (l, v) => '<span class="oacr"><span class="mut">' + l + '</span><span class="num ' + cls(v) + '">' + sg9(v) + '</span></span>';
+    const c3 = '<div class="oasc"><span class="lab">지난 평가 대비</span><b class="oacv num ' + cls(chT) + '">' + (chs.length ? sg9(chT) : '—')
+      + '</b>' + cr('시세 자동 · 오늘', chA) + cr('직접 수정', chM) + '</div>';
+    const kq = '<section class="card oasum" aria-label="순자산 요약">' + c1 + '<div class="oasc oabars">' + oaAlloc(T, S9) + '</div>' + c3
+      + '</section>';
     const used = new Set(it.map(o => o.cat));
     const filt = [['all', '전체']].concat(OA_CATS.filter(c => c[0] !== 'etc' || used.has('etc')).map(c => [c[0], c[1]]));
     const list = S.oa.filter === 'all' ? it : it.filter(o => o.cat === S.oa.filter);
-    const card = '<section class="card oamain" aria-label="기타 자산"><div class="oahd"><h2>기타 자산</h2><span class="sp"></span><div class="seg oaflt" role="group" aria-label="종류 거르기">'
+    const auK = autoN.length ? '(' + [stN ? '주식 ' + stN : '', gN ? '금 ' + gN : ''].filter(Boolean).join('·') + ')' : '';
+    const cnt = '<span class="oacnt pvx">시세 자동 ' + autoN.length + auK + ' · 직접 입력 ' + (it.length - debts.length - autoN.length)
+      + ' · 부채 ' + debts.length + '</span>';
+    const card = '<section class="card oamain" aria-label="기타 자산"><div class="oahd"><div class="oaht"><h2>자산 <span class="num mut pvx">'
+      + it.length + '</span></h2>' + cnt + '</div><span class="sp"></span><div class="seg oaflt" role="group" aria-label="종류 거르기">'
       + filt.map(f => '<button data-a="oaFilter" data-v="' + f[0] + '" class="' + (S.oa.filter === f[0] ? 'on' : '') + '" aria-pressed="' + (S.oa.filter === f[0]) + '">' + f[1] + '</button>').join('') + '</div>'
       + '<button class="btn pri oaadd" data-a="oaNew">+ 자산 추가</button></div>'
-      + oaAlloc() + oaRows(list)
+      + oaRows(list)
       + '<div class="oanote">주식(종목 코드 있으면)·금은 시세 자동, 부동산·자동차·비상장은 직접 입력 — 값·수량을 고치면 이전 값이 기록으로 남아요' + (arr(O.d.brokers).some(b => b.enabled) ? ' · 증권사 연결은 ' + esc(OA_UNVER) : '') + '</div></section>';
     const oh9 = oaHist();
     return kq + '<div class="oagrid' + (oh9 ? '' : ' one') + '">' + card + (oh9 ? '<div class="oaside">' + oh9 + '</div>' : '') + '</div>';
@@ -439,14 +514,16 @@
     done(); S.oa.busy = false;
     if (d) { if (S.oa.sel === F.id) S.oa.sel = null; if (S.oa.form === F || (S.oa.form && S.oa.form.id === F.id)) { oaFormReset(); if (S.sheet && S.sheet.k === 'oa') uiSheetClose(); } S.oa.at = 0; oaLoad(true); } else oaRe();
   }
+  const oaDashM = (v, o) => m(v, o);
   function oaDashLine() {
+    if (!nwShow()) return '';
     oaNeed(300000);
     nftNeed(300000);
     if (S.oa.st === 'err' && S.oa.had) return '<a class="oaln" href="#other" aria-label="전체 순자산 — 기타 자산 조회 실패 · 기타 자산 탭으로"><span class="mut">전체 순자산</span> <b class="num">—</b> <span class="mut oalnx" role="status">기타 자산 조회 실패 · ' + esc(errTxt(S.oa.err)) + '</span><span class="sp"></span><span class="link">기타 자산 ' + IC.right + '</span></a>';
     const nOn = nftIncl().on;
     if ((!S.oa.d && !nOn) || (!oaItems().length && !oaBrkPend().length && !nOn)) return '';
     const T = oaTot();
-    return '<a class="oaln" href="#other" aria-label="전체 순자산 — 기타 자산 탭으로"><span class="mut">전체 순자산</span> <b class="num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : m(T.net, { compact: true })) + '</b> <span class="mut num oalnx">= <span class="nowrap">코인 ' + m(T.coin, { compact: true }) + '</span> <span class="nowrap">+ 기타 ' + m(T.assets, { compact: true }) + '</span>' + (T.nftOn ? ' <span class="nowrap">+ NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : m(T.nft, { compact: true })) + '</span>' : '') + ' <span class="nowrap">− 부채 ' + m(T.debt, { compact: true }) + '</span>' + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span><span class="sp"></span><span class="link">기타 자산 ' + IC.right + '</span></a>';
+    return '<a class="oaln" href="#other" aria-label="전체 순자산 — 기타 자산 탭으로"><span class="mut">전체 순자산</span> <b class="num">' + (T.nfMask && isFinite(T.net) ? pvMoney('', true) : oaDashM(T.net, { compact: true })) + '</b> <span class="mut num oalnx">= <span class="nowrap">코인 ' + oaDashM(T.coin, { compact: true }) + '</span> <span class="nowrap">+ 기타 ' + oaDashM(T.assets, { compact: true }) + '</span>' + (T.nftOn ? ' <span class="nowrap">+ NFT ' + (T.nfMask && isFinite(T.nft) ? pvMoney('', true) : oaDashM(T.nft, { compact: true })) + '</span>' : '') + ' <span class="nowrap">− 부채 ' + oaDashM(T.debt, { compact: true }) + '</span>' + (T.pend ? ' · ' + oaPendTxt(T) : '') + '</span><span class="sp"></span><span class="link">기타 자산 ' + IC.right + '</span></a>';
   }
   function brokersBody() {
     oaNeed(300000);
@@ -532,7 +609,7 @@
     if (!t || (!t.exact && num(t.within) <= 7)) return '';
     const txt = t.exact ? (num(t.days) < 1 ? '오늘 거래' : '마지막 거래 ' + num(t.days) + '일 전') : num(t.within) === 30 ? '30일 거래' + (num(t.n) ? ' ' + num(t.n) + '건' : '') : '최근 ' + num(t.within) + '일 안 거래';
     const old = num(t.days) > 90, out = r.reason === 'thin_old' && !r.promoted && !r.watch;
-    return '<span class="' + (old ? 'wtxt' : 'mut') + '" title="' + esc('거래가 뜸한 컬렉션 — 바닥가(리스팅)로 평가 · 근거 = 오픈시 30일 체결 수·마지막 체결' + (out ? ' · 마지막 거래 90일+ 라 총자산에서는 뺐어요' : '')) + '">' + txt + (out ? ' · 총자산 제외' : '') + '</span>';
+    return '<span class="' + (old ? 'wtxt' : 'mut') + '" title="' + esc('거래가 뜸한 컬렉션 — 바닥가(리스팅)로 평가 · 근거 = 오픈시 30일 체결 수·마지막 체결' + (out ? ' · 마지막 거래 90일+ 라 전체 순자산에서는 뺐어요' : '')) + '">' + txt + (out ? ' · 전체 순자산 제외' : '') + '</span>';
   }
   const nftSer = r => { const x = r && r.series; if (!x || !x.plat) return ''; return esc(x.plat) + (x.split ? ' · 시리즈 나누는 중' : ''); };
   function nftTrackRows(d) {
@@ -589,20 +666,32 @@
     const T = d.totals || {}, tr = nftTrackRows(d), cands = arr(d.candidates), sp = d.spam || { n: 0, items: [] }, hid = arr(d.hidden), inc = d.include_in_total === true;
     const sc = d.scan || {}, prog = sc.total && sc.done < sc.total ? ' · 첫 발견 ' + num(sc.done) + '/' + num(sc.total) + '쌍' : '';
     const lpn = num(d.lp_items) || num(d.lp_excluded);
-    const sumC = '<section class="card nftsum" aria-label="NFT 요약"><div class="nfth"><h2>NFT</h2><div class="nftcnt pvx">추적 <b>' + tr.filter(r => num(r.count) > 0).length + '</b> · 후보 <b>' + cands.length + '</b> · 스팸으로 거름 <b>' + num(sp.n) + '</b>'
-      + (lpn ? ' · LP 포지션 NFT ' + lpn + '개는 LP 화면에서' : '') + prog + '</div></div>'
-      + '<div class="nftsr"><div><div class="nftl">추적 중 평가(바닥가 × 개수)</div><div class="nftbig num">' + nM(num(T.usd), { compact: true }) + '</div>'
-      + (num(T.pending) ? '<div class="nfts pvx">바닥가 대기 ' + num(T.pending) + '개 — 합계에서 빠짐</div>' : '')
-      + (num(T.old_n) ? '<div class="nfts pvx" title="거래가 뜸한 컬렉션 중 마지막 거래가 90일 넘은 것 — 여기 평가엔 넣고 총자산(전체 순자산)에서는 뺐어요 · 직접 추적에 넣으면 포함">마지막 거래 90일+ ' + num(T.old_n) + '개(' + nM(num(T.old_usd), { compact: true }) + ') — 총자산에선 뺌</div>' : '')
-      + (num(T.split) ? '<div class="nfts pvx">아트블럭 시리즈 나누는 중 ' + num(T.split) + '개 — 다음 발견 때 시리즈별 바닥가로</div>' : '') + '</div>'
-      + '<div class="nftincw"><div class="nftinc"><span>총자산에 포함</span><button class="sw2' + (inc ? ' on' : '') + '" data-a="nftInc" role="switch" aria-checked="' + inc + '" aria-label="NFT 평가를 총자산(전체 순자산)에 포함"' + (N.busy ? ' disabled' : '') + '></button></div>'
-      + '<div class="nfts">' + (inc ? '켜짐 — 대시보드·기타 자산의 \'전체 순자산\'에 NFT 줄이 더해져요(코인 총자산 숫자는 그대로)' : '꺼짐 — NFT 는 여기서만 따로 보여요') + '</div></div></div></section>';
+    const nW = tr.filter(r => r.watch && !(num(r.count) > 0)).length, tv = num(T.usd), tvF = nM(tv), tvC = nM(tv, { compact: true });
+    const nb9 = (l, n) => ' · ' + l + ' <b>' + n + '</b>', nfs = (t, ti) => '<div class="nfts pvx"' + (ti ? ' title="' + esc(ti) + '"' : '') + '>'
+      + t + '</div>';
+    const cntL = '<div class="nftcnt pvx">추적 중 <b>' + tr.filter(r => num(r.count) > 0).length + '</b>' + (nW ? nb9('지켜보기', nW) : '')
+      + nb9('후보', cands.length) + nb9('스팸으로 거름', num(sp.n)) + (lpn ? ' · LP 포지션 NFT ' + lpn + '개는 LP 화면에서' : '') + prog + '</div>';
+    const oldT = '거래가 뜸한 컬렉션 중 마지막 거래가 90일 넘은 것 — 여기 평가엔 넣고 전체 순자산에서는 뺐어요 · 직접 추적에 넣으면 포함';
+    const sumL = '<div class="nftsl"><div class="nftl">추적 중 평가 · 바닥가 × 개수</div><div class="nftbig num">' + tvC + '</div>'
+      + (tvF !== tvC ? '<div class="nfts num">' + tvF + '</div>' : '') + cntL
+      + (num(T.pending) ? nfs('바닥가 대기 ' + num(T.pending) + '개 — 합계에서 빠짐') : '')
+      + (num(T.old_n) ? nfs('마지막 거래 90일+ ' + num(T.old_n) + '개(' + nM(num(T.old_usd), { compact: true }) + ') — 전체 순자산에선 뺌', oldT) : '')
+      + (num(T.split) ? nfs('아트블럭 시리즈 나누는 중 ' + num(T.split) + '개 — 다음 발견 때 시리즈별 바닥가로') : '') + '</div>';
+    const swc = '<button class="sw2' + (inc ? ' on' : '') + '" data-a="nftInc" role="switch" aria-checked="' + inc + '"'
+      + ' aria-label="NFT 평가를 전체 순자산에 포함"' + (N.busy ? ' disabled' : '') + '></button>';
+    const sumR = '<div class="nftincw"><div class="nftinc"><span>전체 순자산에 포함</span>' + swc + '</div>'
+      + '<div class="nfts t2">' + (inc ? '켜짐 — 대시보드·기타 자산의 \'전체 순자산\'에 NFT 줄이 더해져요' : '꺼짐 — NFT 는 여기서만 따로 보여요') + '</div>'
+      + '<div class="nfts">' + (inc ? '' : '켜면 대시보드·기타 자산의 \'전체 순자산\'에 더해져요 · ') + '코인 총자산 숫자는 그대로</div></div>';
+    const sumC = '<section class="card nftsum" aria-label="NFT 요약">' + sumL + sumR + '</section>';
     const head = '<div class="nftr nfthd" role="row"><div role="columnheader">컬렉션</div><div class="r" role="columnheader">개수</div><div class="r" role="columnheader">바닥가</div><div class="r" role="columnheader">거래량 7일</div><div class="r" role="columnheader">오늘 변동</div><div class="c" role="columnheader">7일 추이</div><div class="r" role="columnheader">평가</div></div>';
     const pgT = uiPgSlice('nftt', tr);
-    const trC = '<section class="card nftsec" aria-label="추적 중"><div class="nftsh"><h3>추적 중</h3><span class="nfts nft1" title="바닥가·거래량 확인된 컬렉션은 자동 · 후보에서 고른 것 · 지켜보기">자동 · 고른 것 · 지켜보기</span></div>'
+    const wadd = '<button type="button" class="btn sm nftwb" data-a="nftWatchOpen" aria-haspopup="dialog"'
+      + ' title="보유 없이 바닥가만 볼 컬렉션 — 주소·매직에덴·오픈시 링크">+ 지켜보기 추가</button>';
+    const trC = '<section class="card nftsec" aria-label="추적 중"><div class="nftsh"><h3>추적 중 <span class="nfts pvx">' + tr.length
+      + '</span></h3>'
+      + '<span class="nfts nft1" title="바닥가·거래량 확인된 컬렉션은 자동 · 후보에서 고른 것 · 지켜보기">자동 · 고른 것 · 지켜보기</span>' + wadd + '</div>'
       + (pgT.last > 0 ? '<div class="upga" data-pga="nftt"></div>' : '') + '<div class="nfttw" tabindex="0" aria-label="추적 중 표 — 좁은 화면에선 옆으로 밀어 보기"><div class="nftt" role="table">' + head + (tr.length ? pgT.rows.map(r => nftRow(r)).join('') : '<div class="nftempty">아직 추적 중인 컬렉션이 없어요 — 아래 후보에서 고르거나 지켜보기로 넣어 주세요</div>') + '</div></div>'
-      + uiPgBar('nftt', tr.length, { unit: '개' })
-      + '<div class="nftwadd"><button type="button" class="btn sm" data-a="nftWatchOpen" aria-haspopup="dialog">+ 지켜보기 추가</button><span class="nfts">보유 없이 바닥가만 볼 컬렉션 — 주소·매직에덴·오픈시 링크</span></div></section>';
+      + uiPgBar('nftt', tr.length, { unit: '개' }) + '</section>';
     const caC = '<section class="card nftsec" aria-label="후보"><div class="nftsh"><h3>후보 <span class="nfts pvx">' + cands.length + '</span></h3><span class="nfts nft1" title="가격·거래량이 애매하거나 시세 출처가 없는 것 — 고르면 추적 시작">애매한 것 — 고르면 추적 시작</span></div>'
       + '<div class="nftcl">' + (cands.length ? uiPaged('nftc', cands, r => nftCand(r), { unit: '개' }) : '<div class="nftempty">후보가 없어요</div>') + '</div></section>';
     const byR = {}; arr(sp.items).forEach(x => { const k = x.reason || 'etc'; byR[k] = (byR[k] || 0) + 1; });
@@ -653,7 +742,7 @@
     oaSub: el => { S.oa.sub = el.dataset.v === 'nft' ? 'nft' : 'assets'; LS.set('tj_v2_oa_sub', S.oa.sub); renderView(); },
     nftReload: () => { S.nft.st = ''; S.nft.at = 0; nftLoad(true); renderView(); },
     nftOp: el => { const op = el.dataset.op, k = el.dataset.k; if (!NFT_OPMSG[op] || !k) return null; return nftPost({ op, key: k }, NFT_OPMSG[op]); },
-    nftInc: () => { const on = !(S.nft.d && S.nft.d.include_in_total === true); return nftPost({ op: 'include', on }, on ? '총자산(전체 순자산)에 NFT 를 포함했어요' : '총자산에서 NFT 를 뺐어요'); },
+    nftInc: () => { const on = !(S.nft.d && S.nft.d.include_in_total === true); return nftPost({ op: 'include', on }, on ? '전체 순자산에 NFT 를 포함했어요' : '전체 순자산에서 NFT 를 뺐어요'); },
     nftWatch: async () => {
       const b = nftWatchBody(S.drafts['nft:watch'], S.drafts['nft:wch'] || 'eth');
       if (!b) { toast('컬렉션 주소(0x…·솔라나)나 매직에덴·오픈시 링크를 넣어 주세요', true); return; }

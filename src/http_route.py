@@ -1,8 +1,10 @@
 from __future__ import annotations
+import accounting_harvest
 import logs
 import coverage_limits
 import db as dbm
 import health
+import histcurve
 import http_post_prefs
 import json
 import login_auth
@@ -12,6 +14,7 @@ import os
 import re
 import reqclass
 import urllib.request
+import view_misc
 import web_ctx
 import wow
 from http_assets import WEB_DIR
@@ -57,6 +60,7 @@ def post_routes():
         "/api/review_len": http_post_prefs.post_review_len,
         "/api/review_pause": http_post_prefs.post_review_pause,
         "/api/review_fill": http_post_prefs.post_review_fill,
+        "/api/ui_pref": http_post_prefs.post_ui_pref,
         "/api/chain_auto_off": http_post_prefs.post_chain_auto_off,
         "/api/dust_threshold": http_post_prefs.post_dust_threshold,
         "/api/risk_override": http_post_prefs.post_risk_override,
@@ -114,8 +118,10 @@ class RouteMixin:
                 except Exception as e9:   # noqa: BLE001 [boundary]
                     log.warning("비교선(안 팔았다면) 계산 실패: %s", logs.safe_err(e9)[:120])
                 self._send(200, b9)
-            elif path == "/api/habits":
-                self._send(200, wow.habits(getattr(web_ctx.builder(), "_day_idx", None)))
+            elif path in ("/api/habits", "/api/venue_flows"):
+                self._send_period_api(path, query)
+            elif path == "/api/harvest":
+                self._send(200, accounting_harvest.api(getattr(web_ctx.builder(), "_day_idx", None), query))
             elif path == "/api/curve_hist":
                 self._send_curve_hist(query)
             elif path == "/api/receipt":
@@ -185,6 +191,15 @@ class RouteMixin:
                 self._send(500, self._err500_body(e))
             except Exception:  # noqa: BLE001 [optional]
                 pass
+
+    def _send_period_api(self, path, query):
+        builder = web_ctx.builder()
+        if path == "/api/habits":
+            with wow.HAB_LOCK:
+                body = wow.habits(getattr(builder, "_day_idx", None), period_days=wow.days_arg(query))
+            return self._send(200, body)
+        code, body = view_misc.venue_flows_view(builder, histcurve.HIST, query)
+        self._send(code, body)
 
     def _send_optional(self, name, ctype):
         fp = os.path.join(WEB_DIR, name)

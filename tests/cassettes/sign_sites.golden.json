@@ -1332,6 +1332,153 @@
     "via": "depaddr.http_get"
    }
   ],
+  "exwallet.binance": [
+   {
+    "auth": true,
+    "headers": [
+     [
+      "X-MBX-APIKEY",
+      "sgBNkey01"
+     ]
+    ],
+    "send": null,
+    "sites": [
+     "exwallet:_signed"
+    ],
+    "url": {
+     "base": "https://api.binance.com/sapi/v1/capital/config/getall",
+     "q": [
+      [
+       "timestamp",
+       "1760000001111"
+      ],
+      [
+       "recvWindow",
+       "10000"
+      ],
+      [
+       "signature",
+       "sig~4fae94a3074eefb9e89e"
+      ]
+     ],
+     "raw": "https://api.binance.com/sapi/v1/capital/config/getall?timestamp=1760000001111&recvWindow=10000&signature=sig~4fae94a3074eefb9e89e"
+    },
+    "via": "exwallet.http_get"
+   }
+  ],
+  "exwallet.bybit": [
+   {
+    "auth": true,
+    "headers": [
+     [
+      "X-BAPI-API-KEY",
+      "sgBYkey01"
+     ],
+     [
+      "X-BAPI-TIMESTAMP",
+      "1760000002222"
+     ],
+     [
+      "X-BAPI-RECV-WINDOW",
+      "10000"
+     ],
+     [
+      "X-BAPI-SIGN",
+      "sig~8e87073ef0613904160e"
+     ]
+    ],
+    "send": null,
+    "sites": [
+     "exwallet:_signed"
+    ],
+    "url": {
+     "base": "https://api.bybit.com/v5/asset/coin/query-info",
+     "q": [],
+     "raw": "https://api.bybit.com/v5/asset/coin/query-info"
+    },
+    "via": "exwallet.http_get"
+   }
+  ],
+  "exwallet.okx": [
+   {
+    "auth": true,
+    "headers": [
+     [
+      "OK-ACCESS-KEY",
+      "sgOKkey01"
+     ],
+     [
+      "OK-ACCESS-SIGN",
+      "sig~fb217973aad810488e3f"
+     ],
+     [
+      "OK-ACCESS-TIMESTAMP",
+      "2025-10-09T08:53:23.333Z"
+     ],
+     [
+      "OK-ACCESS-PASSPHRASE",
+      "sgOKpp01"
+     ]
+    ],
+    "send": null,
+    "sites": [
+     "exwallet:_signed"
+    ],
+    "url": {
+     "base": "https://www.okx.com/api/v5/asset/currencies",
+     "q": [],
+     "raw": "https://www.okx.com/api/v5/asset/currencies"
+    },
+    "via": "exwallet.http_get"
+   }
+  ],
+  "exwallet.upbit": [
+   {
+    "auth": true,
+    "headers": [
+     [
+      "Authorization",
+      {
+       "bearer": {
+        "jwt_claims": [
+         [
+          "access_key",
+          "sgUPkey01"
+         ],
+         [
+          "nonce",
+          "«u:14»"
+         ]
+        ],
+        "jwt_header": [
+         [
+          "alg",
+          "HS256"
+         ],
+         [
+          "typ",
+          "JWT"
+         ]
+        ],
+        "jwt_raw": "sig~de5265f887e01fcfe0ff",
+        "jwt_sig": "sig~ac12e5c2b3fbc87898f6",
+        "jwt_valid": true
+       }
+      }
+     ]
+    ],
+    "send": null,
+    "sites": [
+     "exwallet:_signed"
+    ],
+    "url": {
+     "base": "https://api.upbit.com/v1/status/wallet",
+     "q": [],
+     "raw": "https://api.upbit.com/v1/status/wallet"
+    },
+    "via": "exwallet.http_get"
+   }
+  ],
   "gate.fetch": [
    {
     "headers": [

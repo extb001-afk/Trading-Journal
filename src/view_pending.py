@@ -100,6 +100,22 @@ def unpriced_facts(unpriced_w, cap: int = UNPRICED_FACTS_MAX) -> list:
             if max(w9["cost"], w9["ref"]) >= 1]
 
 
+def upbit_avg_usd(accounts: list, rate: float | None) -> dict:
+    try:
+        r = float(rate or 0)
+    except (TypeError, ValueError):
+        return {}
+    out = {}
+    for a in accounts if r > 0 and isinstance(accounts, list) else ():
+        try:
+            v = float(a.get("avg_buy_price") or 0) / r if isinstance(a, dict) and a.get("unit_currency") == "KRW" else 0.0
+        except (TypeError, ValueError):
+            continue
+        if v > 0 and v != float("inf"):
+            out[str(a.get("currency") or "").upper()] = v
+    return out
+
+
 def unpriced_pairs(rows: list, pairs_of: dict, locs: dict, zero_value: dict = None, keep: set = frozenset()) -> dict:
     zl = zero_value.get("tokens") if isinstance(zero_value, dict) else None
     zv = {str(x).strip().lower() for x in (zl if isinstance(zl, list) else ()) if isinstance(x, str)}

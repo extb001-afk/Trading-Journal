@@ -490,16 +490,44 @@ def _hist_mod():
         return None
 
 
-def habits(idx, today_iso: str = None) -> dict:
+_DAYS_RX = re.compile(r"(?:^|&)days=(\d{1,4})(?:&|$)")
+
+
+_HAB_DAYS = (90, 180, 365, 0)
+HAB_LOCK = threading.Lock()
+
+
+def days_arg(query: str | None) -> int | None:
+    m = _DAYS_RX.search(str(query or ""))
+    n = int(m.group(1)) if m else None
+    return n if n in _HAB_DAYS else None
+
+
+_HAB_SLOTS = 8
+
+
+def _hab_slot(period_days: int | None) -> tuple:
+    return ("habits", 0 if period_days == 0 else (365 if period_days in (None, 365) else period_days))
+
+
+def _hab_put(slot: tuple, key: tuple, out: dict) -> None:
+    _CACHE.pop(slot, None)
+    _CACHE[slot] = (key, out)
+    old = [k for k in _CACHE if isinstance(k, tuple) and k[0] == "habits"]
+    for k in old[:max(0, len(old) - _HAB_SLOTS)]:
+        _CACHE.pop(k, None)
+
+
+def habits(idx, today_iso: str = None, period_days: int = None) -> dict:
     if not idx or idx.get("pos") is None or idx.get("tax") is None:
         return {"ok": False, "why": "building"}
     today_iso = today_iso or datetime.now(KST).strftime("%Y-%m-%d")
-    key = ("habits", idx.get("builtAt"), _sig(), today_iso, id(getattr(_hist_mod(), "kit", None)))
+    since = "" if period_days == 0 else (datetime.strptime(today_iso, "%Y-%m-%d") - timedelta(days=365 if period_days in (None, 365) else period_days - 1)).strftime("%Y-%m-%d")
+    key = ("habits", idx.get("builtAt"), _sig(), today_iso, since, id(getattr(_hist_mod(), "kit", None)))
     with _LOCK:
-        hit = _CACHE.get("habits")
+        hit = _CACHE.get(_hab_slot(period_days))
         if hit and hit[0] == key:
             return hit[1]
-    since = (datetime.strptime(today_iso, "%Y-%m-%d") - timedelta(days=365)).strftime("%Y-%m-%d")
     st_syms = _stable_syms(idx)
     real, opened = {}, {}
     excl = {"stable": 0, "quar": 0}
@@ -590,10 +618,10 @@ def habits(idx, today_iso: str = None) -> dict:
         last.append(nd)
         if r > 0.01:
             up += 1
-    out = {"ok": True, "since": since, "n": n, "win": w, "grid": grid,
+    out = {"ok": True, "since": since, "days": 0 if period_days == 0 else (period_days or 365), "n": n, "win": w, "grid": grid,
            "hold": [{"k": h[0], "cost": round(h[1], 2), "pnl": round(h[2], 2), "n": h[3]} for h in hold],
            "next": [up, seen], "nextAvg": round(sum(chg) / len(chg) * 100, 2) if chg else None,
            "cov": {"next": round(seen / elig, 4) if elig else None, "pxAt": max(last) if last else None}, "excl": excl}
     with _LOCK:
-        _CACHE["habits"] = (key, out)
+        _hab_put(_hab_slot(period_days), key, out)
     return out

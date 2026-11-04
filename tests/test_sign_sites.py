@@ -54,7 +54,7 @@ BAD_JWT = []
 REQ_MISMATCH = []
 
 SITE_MODULES = ("depaddr", "exf_binance", "exf_bithumb", "exf_bybit", "exf_coinbase", "exf_gate", "exf_kucoin", "exf_okx",
-                "liq_watch", "onboarding", "pricing", "upbit_link")
+                "exwallet", "liq_watch", "onboarding", "pricing", "upbit_link")
 NOT_SIGN = {"btc_descriptor:XPub.child_pub", "login_auth:_sess_csrf"}
 SIGN_HELPERS = {"ex_sign"}
 HASH_ONLY = {"ex_sign.query_hash", "ex_sign.ec_key_body", "ex_sign.ec_p256_scalar"}
@@ -90,6 +90,7 @@ SITE_TABLE = {
     "exf_okx:fetch_okx.call": {"via": ["http_json"]},
     "exf_okx:fills_okx.call": {"via": ["http_json"]},
     "exf_okx:_okx_get": {"via": ["http_json"]},
+    "exwallet:_signed": {"via": ["http_get"]},
     "liq_watch:Watcher.bn_get": {"via": ["self.call"]},
     "liq_watch:Watcher.bybit_get": {"via": ["self.call"]},
     "liq_watch:Watcher.okx_get": {"via": ["self.call"]},
@@ -116,6 +117,7 @@ EXPECT = {
     "onboarding:_jwt_hs256": 2, "onboarding:_test_group.call": 6, "onboarding:_test_group": 2,
     "upbit_link:_jwt": 2, "pricing:okx_headers": 1,
     "exf_coinbase:jwt_for": 1, "onboarding:_test_coinbase.call": 2,
+    "exwallet:_signed": 4,
 }
 
 
@@ -317,6 +319,7 @@ import exf_coinbase  # noqa: E402
 import exf_gate  # noqa: E402
 import exf_kucoin  # noqa: E402
 import exf_okx  # noqa: E402
+import exwallet  # noqa: E402
 import liq_watch  # noqa: E402
 import onboarding  # noqa: E402
 import pricing  # noqa: E402
@@ -439,6 +442,10 @@ DRIVERS = [
     ("upbit.get_q", lambda: upbit_link.Upbit(ENV["UPBIT_ACCESS"], ENV["UPBIT_SECRET"]).get("/v1/withdraws", {"limit": 100, "page": 1, "order_by": "desc"}), None),
     ("upbit.get", lambda: upbit_link.Upbit(ENV["UPBIT_ACCESS"], ENV["UPBIT_SECRET"]).get("/v1/accounts"), None),
     ("pricing.okx_dex", lambda: pricing.okx_dex_prices({"key": ENV["TJ_OKX_KEY"], "secret": ENV["TJ_OKX_SECRET"], "passphrase": ENV["TJ_OKX_PASSPHRASE"]}, [OKX_PAIR]), None),
+    ("exwallet.upbit", lambda: exwallet._signed("upbit", dict(ENV), "/v1/status/wallet"), None),
+    ("exwallet.binance", lambda: exwallet._signed("binance", dict(ENV), "/sapi/v1/capital/config/getall"), None),
+    ("exwallet.bybit", lambda: exwallet._signed("bybit", dict(ENV), "/v5/asset/coin/query-info"), None),
+    ("exwallet.okx", lambda: exwallet._signed("okx", dict(ENV), "/api/v5/asset/currencies"), None),
 ]
 
 GOLD = {}
@@ -575,7 +582,7 @@ print(f"서명 줄 {len(S_LINES)} · 자리 함수 {len(SITE_TABLE)} · 드라�
 
 TS_LOCAL = {"depaddr.bithumb",
             "onb.bithumb", "onb.binance", "onb.bybit", "onb.okx", "onb.kucoin", "onb.gate", "onb.coinbase", "pricing.okx_dex"}
-TS_NONE = {"depaddr.upbit", "depaddr.upbit_q", "onb.upbit", "upbit.get_q", "upbit.get"}
+TS_NONE = {"depaddr.upbit", "depaddr.upbit_q", "onb.upbit", "upbit.get_q", "upbit.get", "exwallet.upbit"}
 _HEAD_EX = {"binance": "binance", "bybit": "bybit", "okx": "okx", "kucoin": "kucoin", "gate": "gate", "bithumb": "bithumb", "coinbase": "coinbase",
             "bn": "binance"}
 
@@ -586,7 +593,7 @@ def ts_expect(name):
     if name in TS_LOCAL:
         return "local"
     head, tail = name.split(".", 1)
-    return ("off", _HEAD_EX[tail.split("_")[0]] if head in ("depaddr", "liq") else _HEAD_EX[head])
+    return ("off", _HEAD_EX[tail.split("_")[0]] if head in ("depaddr", "liq", "exwallet") else _HEAD_EX[head])
 
 
 def _ts_forms(off):

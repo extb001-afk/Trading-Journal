@@ -65,36 +65,42 @@
     list.sort((a, b) => k === 'recent' ? rec(a, b) : k === 'value' ? (nv(b) - nv(a) || rec(a, b)) : k === 'sym' ? String(a.sym).localeCompare(String(b.sym)) : val(b) - val(a));
     return { base, list };
   }
+  const gasMonthly = () => S.g.period === 'all' || S.g.period === 'thismonth' || S.g.period === 'lastmonth';
+  function gasDayOk() {
+    const D = S.D, byD = D.gasByDate, ks = byD ? Object.keys(byD) : [];
+    if (!byD) return false;
+    if (!ks.length) return true;
+    const d0 = ks.reduce((a, k) => (k < a ? k : a)), b = gBounds(), lo = b && b.lo ? b.lo : '';
+    return !(lo && lo < d0 && Object.keys(D.gasByMonth || {}).some(ym => ym < d0.slice(0, 7)));
+  }
   function gasList() {
     const D = S.D, byM = D.gasByMonth;
     if (!byM || !Object.keys(byM).length) return D.gasByChain.map(g => ({ chain: g.chain, spot: num(g.spot), lp: num(g.lp), tx: num(g.tx), kind: g.kind || '', ex: g.ex || '' }));
     const acc = {};
-    Object.keys(byM).forEach(ym => {
-      if (!ymPass(ym)) return;
-      arr(byM[ym]).forEach(g => { const e = acc[g.chain] || (acc[g.chain] = { chain: g.chain, spot: 0, lp: 0, tx: 0, kind: g.kind || '', ex: g.ex || '' }); e.spot += num(g.spot); e.lp += num(g.lp); e.tx += num(g.tx); });
-    });
+    const add = g => {
+      const e = acc[g.chain] || (acc[g.chain] = { chain: g.chain, spot: 0, lp: 0, tx: 0, kind: g.kind || '', ex: g.ex || '' });
+      e.spot += num(g.spot); e.lp += num(g.lp); e.tx += num(g.tx); };
+    if (!gasMonthly() && gasDayOk()) Object.keys(D.gasByDate).forEach(d => { if (gPass(d)) arr(D.gasByDate[d]).forEach(add); });
+    else Object.keys(byM).forEach(ym => { if (ymPass(ym)) arr(byM[ym]).forEach(add); });
     return Object.keys(acc).map(k => acc[k]).sort((a, b) => (b.spot + b.lp) - (a.spot + a.lp));
   }
   const gasCnt = gas => { const nc = gas.filter(g => g.kind !== 'exfee').length, ne = new Set(gas.filter(g => g.kind === 'exfee').map(g => g.ex || String(g.chain || '').replace(/ (체결|출금) 수수료$/, ''))).size; return nc + '개 체인' + (ne ? ' · 거래소 ' + ne + '곳' : ''); };
-  const gasScope = () => (S.D.gasByMonth && Object.keys(S.D.gasByMonth).length) ? ((S.g.period === 'custom' ? '≈ ' : '') + periodName()) : '전체 누적';
+  const gasScope = () => (S.D.gasByMonth && Object.keys(S.D.gasByMonth).length)
+    ? ((gasMonthly() || gasDayOk() ? '' : '≈ ') + periodName()) : '전체 누적';
   const popBox = (title, inner, extra) => (S.mobile ? '<div class="sheet-bg" data-a="popClose"></div>' : '') + '<div class="pop' + (extra ? ' ' + extra : '') + '" role="dialog" aria-label="' + esc(title) + '"><div class="ptl">' + esc(title) + '</div>' + inner + '</div>';
   const optCk = '<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>';
   function searchBox(key, ph, val) {
     return '<label class="search">' + IC.search + '<input class="field" type="search" placeholder="' + ph + '" data-draft="' + key + '" data-input="' + key + '" value="' + esc(val) + '" aria-label="' + ph + '">'
       + (val ? '<button class="clr" data-a="qClear" data-v="' + key + '" aria-label="검색어 지우기">' + IC.close + '</button>' : '') + '</label>';
   }
-  function filterBar(mode, counts) {
-    const withStatus = mode === 'journal';
-    const perLbl = periodName();
-    let h = '<div class="filters' + (withStatus ? ' jfl' : '') + '">';
-    if (withStatus) {
-      h += '<div class="' + (S.mobile ? 'hscroll' : 'row gap8') + '" role="group" aria-label="상태">' + [['all', '전체'], ['open', '진행 중'], ['held', '보유 중'], ['partial', '부분 매도'], ['closed', '종료']].concat(counts.moved || S.j.status === 'moved' ? [['moved', '이동']] : []).map(x => '<button class="fbtn' + (S.j.status === x[0] ? ' on' : '') + '" data-a="jStatus" data-v="' + x[0] + '" aria-pressed="' + (S.j.status === x[0]) + '">' + x[1] + ' <span class="n">' + counts[x[0]] + '</span></button>').join('') + '</div>';
-    }
-    h += '<div class="sp"></div>';
-    if (withStatus) h += searchBox('jq', '코인 검색', S.j.q);
-    h += srcBtn();
-    if (mode !== 'daily') h += '<div class="popw"><button class="fbtn' + (S.g.period !== 'all' ? ' act' : '') + '" data-a="pop" data-v="period" aria-haspopup="dialog" aria-expanded="' + (S.pop === 'period' || S.pop === 'range') + '" title="기간 · ' + esc(perLbl) + '">' + IC.cal + ' <span class="fbl">' + esc(perLbl) + '</span>' + IC.chev.replace('<svg', '<svg class="cv"') + '</button>' + (S.pop === 'period' ? periodPop() : S.pop === 'range' ? rangePop() : '') + '</div>';
-    return h;
+  function filterBar(counts) {
+    const sts = [['all', '전체'], ['open', '진행 중'], ['held', '보유 중'], ['partial', '부분 매도'], ['closed', '종료']]
+      .concat(counts.moved || S.j.status === 'moved' ? [['moved', '이동']] : []);
+    const b = x => '<button class="' + (S.j.status === x[0] ? 'on' : '') + '" data-a="jStatus" data-v="' + x[0] + '"'
+      + ' aria-pressed="' + (S.j.status === x[0]) + '">'
+      + '<span>' + x[1] + ' <span class="n num pvx">' + counts[x[0]] + '</span></span></button>';
+    return '<div class="jfl"><div class="seg jst" role="group" aria-label="상태">' + sts.map(b).join('') + '</div>'
+      + '<div class="sp"></div>' + searchBox('jq', '코인 검색', S.j.q) + '</div>';
   }
   function srcBtn() {
     const lbl = S.src.mode === 'all' ? '' : (S.src.mode === 'dex' ? '지갑' : '거래소') + (S.src.key ? ' · ' + srcKeyLabel() : '');
@@ -141,20 +147,61 @@
       cells += '<button class="' + ((isLo || isHi) ? 'edge' + (isLo ? ' lo' : '') + (isHi ? ' hi' : '') : inr ? 'in' + (wk === 0 ? ' wk0' : '') : '') + '" data-a="rpPick" data-v="' + iso + '"' + (dis ? ' disabled' : '') + '>' + d + '</button>';
     }
     const canPrev = ym > lo.slice(0, 7), canNext = ym < hi.slice(0, 7);
-    return popBox('기간 직접 지정', '<div class="rp-f">'
+    const pv = S.rp.prev, pvN = !pv ? '' : pv.period !== 'custom' ? ((PERIODS.find(x => x.k === pv.period) || {}).label || '')
+      : '직접 지정 ' + (pv.from || '') + '~' + (pv.to || '');
+    const xb = '<button type="button" class="xb rpx" data-a="rpCancel" title="닫기" aria-label="'
+      + esc('닫기 — 적용하지 않고 이전 기간' + (pvN ? '(' + pvN + ')' : '') + ' 유지') + '">' + IC.close + '</button>';
+    return popBox('기간 직접 지정', xb + '<div class="rp-f">'
       + '<button class="' + (S.rp.which === 'from' ? 'on' : '') + '" data-a="rpWhich" data-v="from">시작<b class="num">' + esc(S.g.from || '—') + '</b></button>'
       + '<button class="' + (S.rp.which === 'to' ? 'on' : '') + '" data-a="rpWhich" data-v="to">끝<b class="num">' + esc(S.g.to || '—') + '</b></button></div>'
       + '<div class="mh"><button data-a="rpMonth" data-v="-1"' + (canPrev ? '' : ' disabled') + ' aria-label="이전 달">' + IC.left + '</button><span class="sp" style="text-align:center">' + y + '년 ' + (mo + 1) + '월</span><button data-a="rpMonth" data-v="1"' + (canNext ? '' : ' disabled') + ' aria-label="다음 달">' + IC.right + '</button></div>'
-      + '<div class="g">' + cells + '</div><div class="cap" style="margin-top:8px">같은 날을 두 번 고르면 그 하루만 봐요</div>'
-      + '<div class="ft"><button class="btn sm" data-a="setPeriod" data-v="all">초기화</button><button class="btn sm pri" data-a="popClose">적용</button></div>', 'rp');
+      + '<div class="g">' + cells + '</div><div class="cap" style="margin-top:8px">같은 날을 두 번 고르면 그 하루만 봐요 · 오늘 뒤 날짜는 못 골라요</div>'
+      + '<div class="ft"><span class="cap rpnote">닫으면 적용 안 함 · 이전 기간 유지</span><span class="sp"></span>'
+      + '<button class="btn sm" data-a="setPeriod" data-v="all">초기화</button>'
+      + '<button class="btn sm pri" data-a="popClose">적용</button></div>', 'rp')
+      .replace('class="sheet-bg" data-a="popClose"', 'class="sheet-bg" data-a="rpCancel"');
+  }
+  function jReal() {
+    const D = S.D, ks = o => Object.keys(o || {}).filter(k => gPass(k)), fk = D.fut.realizedKrwByDate || {};
+    const rSpot = sum(ks(D.f.realizedByDate), k => num(D.f.realizedByDate[k]));
+    const rFut = sum(ks(D.fut.realizedByDate), k => num(D.fut.realizedByDate[k]));
+    const rSpotK = D.hasKrw ? sum(ks(D.f.realizedKrwByDate), k => num(D.f.realizedKrwByDate[k])) : null;
+    const fu = D.fut.realizedByDate, rFutK = D.hasKrw ? sum(ks(fu), k => (fk[k] != null ? num(fk[k]) : num(fu[k]) * rate())) : null;
+    return { rSpot, rFut, rSpotK, rFutK };
+  }
+  const withPeriod = (pk, fn) => {
+    const g0 = S.g; S.g = { period: pk, from: g0.from, to: g0.to };
+    try { return fn(); } finally { S.g = g0; } };
+  function lensHTML(realizedV) {
+    const D = S.D, mob = S.mobile, nar = !!S.j.q.trim() || S.src.mode !== 'all', SH = { '90d': '3개월', all: '전체' };
+    const hv = S.j.view === 'harvest';
+    const pr = pk => withPeriod(pk, () => {
+      if (nar) return sum(jBase(), p => cardRealV(p));
+      const r = jReal(); return D.hasKrw ? KV(r.rSpot + r.rFut, r.rSpotK + r.rFutK) : r.rSpot + r.rFut; });
+    const bs = PERIODS.map(p => {
+      const on = S.g.period === p.k, cu = p.k === 'custom', v = hv && !cu ? null : on ? realizedV : cu ? null : pr(p.k);
+      const lab = mob && SH[p.k] ? SH[p.k] : p.label;
+      const vH = v != null ? '<span class="v num ' + clsV(v) + '">' + m(v, { sign: true, compact: true }) + '</span>'
+        : hv && !cu ? '' : mob ? IC.cal : '<span class="v mut">날짜 고르기</span>';
+      const ex = (lab !== p.label ? ' aria-label="' + esc(p.label) + '"' : '')
+        + (!cu ? '' : ' aria-haspopup="dialog" aria-expanded="' + (S.pop === 'range') + '"')
+        + (cu && on ? ' title="' + esc(periodName()) + '"' : '');
+      const b = '<button type="button" class="' + (on ? 'on' : '') + '" data-a="setPeriod" data-v="' + p.k + '"'
+        + ' aria-pressed="' + on + '"' + ex + '>'
+        + '<span class="l">' + esc(lab) + (cu && !mob ? IC.cal : '') + '</span>' + vH + '</button>';
+      return cu ? '<div class="popw jlw">' + b + (S.pop === 'range' ? rangePop() : S.pop === 'period' ? periodPop() : '') + '</div>' : b;
+    }).join('');
+    const lens = '<div class="lens" role="group" aria-label="기간 — 칩마다 그 기간 실현손익">' + bs + '</div>';
+    if (mob || hv) return mob ? lens : '<div class="jlens">' + lens + '</div>';
+    return '<div class="jlens">' + lens + '<span class="cap jlcap">기간·소스는 요약·사이클·명세·가스에 함께 걸려요</span>'
+      + '<span class="sp"></span>' + srcBtn() + '</div>';
   }
   function vJournal() {
     const D = S.D;
     const { base, list } = jList();
     const counts = { all: base.length, open: base.filter(p => p._st !== '종료').length, held: base.filter(p => p._st === '보유').length, partial: base.filter(p => p._st === '부분 매도').length, closed: base.filter(p => p._st === '종료' && !p._mv).length, moved: base.filter(p => p._mv).length };
     const ql = S.j.q.trim();
-    const rSpot = sum(Object.keys(D.f.realizedByDate || {}).filter(k => gPass(k)), k => num(D.f.realizedByDate[k]));
-    const rFut = sum(Object.keys(D.fut.realizedByDate || {}).filter(k => gPass(k)), k => num(D.fut.realizedByDate[k]));
+    const { rSpot, rFut, rSpotK, rFutK } = jReal();
     const cardSum = sum(base, p => cardReal(p));
     const narrowed = !!ql || S.src.mode !== 'all';
     let realized = rSpot + rFut;
@@ -189,8 +236,6 @@
     });
     lpG.forEach(g0 => { const r = g0.r, v = KV(r, g0.hasK ? g0.rk : null); closedN++; lpC++; if (isZ(v)) even++; else if (v > 0) { win++; winSum += v; } else { lose++; loseSum -= v; } });
     const gap = !narrowed && D.merged.some(p => p.realizedByDay != null) ? cardSum - rSpot : 0;
-    const rSpotK = D.hasKrw ? sum(Object.keys(D.f.realizedKrwByDate || {}).filter(k => gPass(k)), k => num(D.f.realizedKrwByDate[k])) : null;
-    const rFutK = D.hasKrw ? sum(Object.keys(D.fut.realizedByDate || {}).filter(k => gPass(k)), k => (D.fut.realizedKrwByDate || {})[k] != null ? num(D.fut.realizedKrwByDate[k]) : num(D.fut.realizedByDate[k]) * rate()) : null;
     const realizedV = !D.hasKrw ? realized : (ql ? sum(base, p => cardRealV(p)) : (S.src.mode !== 'all' ? sum(base, p => cardRealV(p)) : KV(realized, rSpotK + rFutK)));
     const fsKs = narrowed ? [] : Object.keys(D.fsRbd || {}).filter(k => gPass(k));
     const fsU = sum(fsKs, k => num(arr(D.fsRbd[k])[0])), fsV = KV(fsU, D.hasKrw ? sum(fsKs, k => num(arr(D.fsRbd[k])[1])) : null);
@@ -214,11 +259,11 @@
     })();
     const gas = gasList(), gasT = sum(gas, g => g.spot + g.lp);
     S.jLast.sum = { realized, realizedV, unreal, pmkt, openN: openU.length, gasT, gasN: gas.filter(g => g.kind !== 'exfee').length, unvN: D.unvN, closedN, win, lose, even, unkC, lpC, sellsN };
-    const bar = filterBar('journal', counts) + '</div>';
+    const hvT = S.j.view === 'harvest', bar = hvT ? '' : filterBar(counts);
     const wr = (win + lose) ? Math.round(win / (win + lose) * 100) : null;
     const sgc = v => m(v, { sign: true, compact: true });
     const capMain = (narrowed ? '보이는 카드 기간 실현 합 · 선물 제외' : '<span class="nowrap">현물 ' + sgc(KV(rSpot, rSpotK)) + ' ·</span> <span class="nowrap">선물 ' + sgc(KV(rFut, rFutK)) + '</span>')
-      + (closedN ? '<span class="pvx"> <span class="nowrap">· 승 ' + win + ' · 패 ' + lose + (wr != null ? ' (' + wr + '%)' : '') + '</span></span>' : '')
+      + (closedN ? '<span class="pvx"> <span class="nowrap">· 사이클 승 ' + win + ' · 패 ' + lose + (wr != null ? ' (' + wr + '%)' : '') + '</span></span>' : '')
       + (Math.abs(gap) >= 1 ? ' <span class="wtxt">· 카드 합과 ' + sgc(gap) + ' 차이</span>' : '');
     const allP = S.g.period === 'all';
     const openTop = openU.filter(p => Math.abs(num(p.unreal)) >= 0.005).sort((a, b) => Math.abs(num(b.unreal)) - Math.abs(num(a.unreal)));
@@ -226,13 +271,7 @@
     const mktTip = pmkt ? esc(periodName()) + ' 날마다 총자산 변동 중 시세 몫의 합(' + (pmkt.v2 ? '평가 변화 — 전일 보유 × 가격 변화 · 판 코인 평가 손익은 실현으로 옮겨가 뺌 · 입출금 제외' : '전일 마감 수량 × 가격 변화 · 입출금·매매 제외') + (S.cur !== 'USD' ? ' · 지난날 = 그날 마감 환율 원화' : '') + ')' + (pmkt.part ? ' — 분해는 최근 ' + pmkt.n + '일만 있어 그 날들만 합했어요' : '') : '';
     const unrTip = allP ? '지금 보유 중인 진행 사이클의 매수 후 누적 평가손익(현재가 − 평균 매수가) — 기간 손익이 아니에요'
       : '선택 기간에 거래한 사이클 중 지금 보유 중인 것의 매수 후 누적 평가손익(현재가 − 평균 매수가) — 이 기간 동안의 변화가 아니에요. 전체 보유 기준은 대시보드 평가손익과 같아요';
-    const c1 = !allP && pmkt
-      ? uiCell(esc(periodName()) + ' 시세 변동' + (pmkt.part ? ' <span class="mut">≈</span>' : ''), '<span class="' + cls(pmkt.mk) + '">' + N('j:mkt', pmkt.mk, 'sc') + '</span>', 'jStatus', 'open', mktTip)
-      : uiCell(allP ? '지금 평가손익' : '평가손익(거래 코인)', '<span class="' + cls(unreal) + '">' + N('j:unr', unreal, 'sc') + '</span>', 'jStatus', 'open', unrTip);
-    const gasTip = '가스·체결 수수료 전부(매수·매도·이동·실패). 명세의 \'수수료·비용\'은 그중 매도 쪽과 매매 외 가스만, 사이클 \'가스 비용\'은 매매 외 가스만이에요';
     const unvTip = '건 = 미매칭 목록의 원가 미확인 매도 행(코인별 1행) · 회 = 그 매도의 체결 횟수 — 기간 필터와 무관한 전체 기간 값이에요';
-    const cells = '<div class="ucells jcells">' + c1 + uiCell('가스·수수료', m(gasT, { compact: true }), 'jView', 'gas', gasTip)
-      + uiCell('원가 미확인', '<span class="wtxt">' + D.unvN + '건</span>', 'goPend', 'unv', unvTip) + '</div>';
     const dr = (k, v, tip) => '<div class="jsr"' + (tip ? ' title="' + esc(tip) + '"' : '') + '><span class="k">' + k + '</span><span class="v num">' + v + '</span></div>';
     const jsOpen = uiOpen('jsum', false);
     const det = () => '<div class="jsdl">'
@@ -266,36 +305,122 @@
         + (!isZ(rest) ? dr('그 밖', D.taxFull ? '집계 차이 ' + nb(rest) : '명세는 최근 ' + nf('ko-KR').format(arr(D.tax).length) + '건만 받아 일부예요') : '');
       return '<div class="cap jsgap">명세 기준과 차이 <b class="num nowrap">' + m(gap, { sign: true }) + '</b>' + (jsOpen ? '' : ' <span class="mut">· 내역은 자세히</span>') + '</div>';
     })();
-    const sumc = '<div class="card jsum">'
-      + '<button type="button" class="jsm" data-a="jView" data-v="tax" title="누르면 양도차익 명세"><span class="l">' + (ql ? '검색 결과' : esc(periodName())) + ' 실현손익<span class="go">명세' + IC.right + '</span></span><span class="v num ' + clsV(realizedV) + '">' + N('j:real', realizedV, S.mobile ? 'sc' : 's') + '</span></button>'
-      + '<div class="jscap"><span class="cap num sans">' + capMain + '</span><button type="button" class="link jsmore" data-a="uiFold" data-v="jsum" aria-expanded="' + jsOpen + '">' + (jsOpen ? '접기' : '자세히') + UI_CHEV + '</button></div>'
-      + tgapL + (Math.abs(fsU) >= 0.005 || fsWaitN ? '<div class="cap num jsfs" title="최초 인식 시가 = 원가를 모르던 수량(기초 잔고·원가 없는 입금·에어드랍 등)을 그 수량이 장부에 처음 생긴 날 시가로 잡은 원가 — 처음 인식이 산 날보다 늦으면 그 전 상승분은 빠져요'
-        + (fsWaitN ? ' · 시세 대기 = 그날 시세를 아직 못 받아 원가 미확인으로 둔 매도(받으면 자동 반영)' : '') + ' · 설정 › 원가 계산에서 끌 수 있어요">'
-        + (Math.abs(fsU) >= 0.005 ? '이 중 최초 인식 시가로 계산된 실현 <span class="' + cls(fsU) + '">' + sgc(fsV) + '</span>' : '')
-        + (fsWaitN ? '<span class="pvx">' + (Math.abs(fsU) >= 0.005 ? ' · ' : '최초 인식 시가 ') + '시세 대기 ' + nf('ko-KR').format(fsWaitN) + '건</span>' : '') + '</div>' : '')
-      + cells + (jsOpen ? clps('uf:jsum', det()) : '') + '</div>';
-    const tabs = '<div class="subtabs" role="tablist">' + [['cycles', '사이클', list.length], ['habits', '습관', null], ['tax', '양도차익 명세', null], ['gas', '가스·수수료', null], ['feed', '전체 이벤트', null]].concat(D.krw ? [['krw', '원화 입출금', null]] : []).map(t => '<button role="tab" aria-selected="' + (S.j.view === t[0]) + '" class="' + (S.j.view === t[0] ? 'on' : '') + '" data-a="jView" data-v="' + t[0] + '">' + t[1] + (t[2] != null ? '<span class="n">' + t[2] + '</span>' : '') + '</button>').join('') + '</div>';
+    const sumc = hvT ? '' : jSumHTML({ realizedV, capMain, pmkt, unreal, openU, openTopTxt, allP, gas, gasT, ql,
+      fsU, fsV, fsWaitN, tgapL, det, jsOpen, mktTip, unrTip, unvTip });
     let body;
     if (S.j.view === 'habits') body = habitsHTML();
     else if (S.j.view === 'tax') body = taxHTML();
     else if (S.j.view === 'gas') body = gasHTML(gas);
     else if (S.j.view === 'feed') body = feedHTML();
     else if (S.j.view === 'krw' && D.krw) body = krwHTML();
+    else if (S.j.view === 'harvest') body = wowSlot('journal.harvest') || harvestEmpty();
     else body = cyclesHTML(list, depN);
-    const jw = wowSlot('journal.head');
-    return bar + sumc + (S.mobile || !jw ? jw + tabs : '<div class="stw jstw">' + tabs + jw + '</div>') + body;
+    const jw = wowSlot('journal.head'), h1 = '<span class="jh1" aria-hidden="true">매매일지</span>', tabs = jTabs(list.length);
+    const src9 = hvT ? '' : srcBtn();
+    if (S.mobile) return '<div class="jph">' + h1 + '<span class="sp"></span>' + src9 + '</div>' + tabs + lensHTML(realizedV)
+      + sumc + bar + body + (jw ? '<div class="jwm">' + jw + '</div>' : '');
+    return '<div class="jph">' + h1 + tabs + '<span class="sp"></span>' + jw + '</div>' + lensHTML(realizedV) + sumc + bar + body;
   }
+  function jTabs(n) {
+    const hN = wowSlot('journal.harvestN'), T = [['cycles', '사이클', n], ['habits', '습관', null], ['tax', '양도차익 명세', null]];
+    const all = T.concat([['gas', '가스·수수료', null], ['feed', '전체 이벤트', null]], S.D.krw ? [['krw', '원화 입출금', null]] : [],
+      [['harvest', '에어드랍 수확', hN || null]]);
+    return '<nav class="subtabs jsub" aria-label="매매일지 하위">' + all.map(t => { const on = S.j.view === t[0];
+      return '<button type="button"' + (on ? ' class="on" aria-current="page"' : '') + ' data-a="jView" data-v="' + t[0] + '">' + t[1]
+        + (t[2] != null ? '<span class="n num">' + esc(String(t[2])) + '</span>' : '') + '</button>'; }).join('') + '</nav>';
+  }
+  function jSumHTML(o) {
+    const D = S.D, mob = S.mobile, sgc = v => m(v, { sign: true, compact: true }), rV = o.realizedV;
+    const lnk = (a, v, t) => '<button type="button" class="link jsl" data-a="' + a + '" data-v="' + v + '">' + t + ' ›</button>';
+    const fullR = m(rV, { sign: true }), nmP = o.ql ? '검색 결과' : periodName();
+    const tog = '<button type="button" class="link jsmore" data-a="uiFold" data-v="jsum" aria-expanded="' + o.jsOpen + '">'
+      + (o.jsOpen ? '접기' : mob ? '자세히' : '자세히 — 실현 구성 · 청산 · 명세 차이') + UI_CHEV + '</button>';
+    const col1 = '<div class="jsc jsc1"><div class="jsk"><span class="lbl">' + (mob ? esc(nmP) + ' ' : '') + '실현손익</span>'
+      + lnk('jView', 'tax', '명세') + (mob ? '<span class="sp"></span>' + tog : '') + '</div>'
+      + '<span class="jsv num ' + clsV(rV) + '">' + N('j:real', rV, 'sc')
+      + (fullR !== sgc(rV) ? '<small class="num ' + clsV(rV) + '">' + fullR + '</small>' : '') + '</span>'
+      + '<span class="cap num sans jscm">' + o.capMain + '</span></div>';
+    const gasTip = '가스·체결 수수료 전부(매수·매도·이동·실패). 명세의 \'수수료·비용\'은 그중 매도 쪽과 매매 외 가스만, 사이클 \'가스 비용\'은 매매 외 가스만이에요';
+    const gV = m(o.gasT, { compact: true }), gS = esc(gasScope()) + ' · ' + gasCnt(o.gas), gT = ' title="' + esc(gasTip) + '"';
+    const col3 = mob ? '<button type="button" class="jsc jsc3" data-a="jView" data-v="gas"' + gT + '><span class="lbl">가스·수수료</span>'
+        + '<b class="num">' + gV + '</b><span class="cap ell">' + gS + '</span><span class="sp"></span>'
+        + '<span class="jsl">체인별 ›</span></button>'
+      : '<div class="jsc jsc3"' + gT + '><span class="lbl">가스·수수료</span><span class="jsv2 num">' + gV + '</span>'
+        + '<span class="cap pvx">' + gS + '</span><span class="cap">매수·매도·이동·실패 전부</span>' + lnk('jView', 'gas', '체인별로 보기') + '</div>';
+    const fw = o.fsWaitN, nfK = v => nf('ko-KR').format(num(v)), fwT = fw ? '시세 대기 ' + nfK(fw) + '건' : '';
+    const unvRow = !(D.unvN || fw) ? '' : '<div class="jsn" role="note" title="' + esc(o.unvTip) + '">'
+      + '<span class="dot" aria-hidden="true"></span><b class="pvx">원가 미확인 ' + nfK(D.unvN) + '건</b><span class="cap pvx">'
+      + (mob ? fwT : '실현·명세에서 빠진 매도' + (fw ? ' · ' + fwT + ' — 처음 생긴 날 시세가 오면 자동 반영돼요' : '') + ' · 금액은 카드 행에')
+      + '</span><span class="sp"></span>' + lnk('goPend', 'unv', '원가 넣기') + '</div>';
+    const fsL = Math.abs(o.fsU) < 0.005 ? '' : '<div class="cap num jsfs" title="최초 인식 시가 = 원가를 모르던 수량(기초 잔고·원가 없는 입금·에어드랍 등)을'
+      + ' 그 수량이 장부에 처음 생긴 날 시가로 잡은 원가 — 처음 인식이 산 날보다 늦으면 그 전 상승분은 빠져요'
+      + (fw ? ' · 시세 대기 = 그날 시세를 아직 못 받아 원가 미확인으로 둔 매도(받으면 자동 반영)' : '') + ' · 설정 › 원가 계산에서 끌 수 있어요">'
+      + '이 중 최초 인식 시가로 계산된 실현 <span class="' + cls(o.fsU) + '">' + sgc(o.fsV) + '</span></div>';
+    const srcL = S.src.mode === 'all' ? '전체 소스' : S.src.mode === 'dex' ? '지갑만' : '거래소만';
+    const hd = mob ? '' : '<div class="jsh"><h2 class="h2">' + esc(nmP) + ' 요약</h2><span class="cap">' + srcL
+      + (S.cur === 'USD' ? '' : ' · 매도 시각 환율') + '</span><span class="sp"></span>' + tog + '</div>';
+    return '<section class="card jsum" aria-label="' + esc(nmP + ' 요약') + '">' + hd
+      + '<div class="jcells">' + col1 + jSumCol2(o, sgc) + col3 + '</div>'
+      + (o.tgapL || fsL ? '<div class="jsft">' + o.tgapL + fsL + '</div>' : '')
+      + unvRow + (o.jsOpen ? clps('uf:jsum', o.det()) : '') + '</section>';
+  }
+  function jSumCol2(o, sgc) {
+    const pm = o.pmkt;
+    if (!pm) return '<button type="button" class="jsc jsc2 jsu" data-a="jStatus" data-v="open" title="' + esc(o.unrTip) + '">'
+      + '<span class="lbl">' + (o.allP ? '지금 평가손익' : '평가손익(거래 코인)') + '</span>'
+      + '<span class="jsv2 num ' + cls(o.unreal) + '">' + N('j:unr', o.unreal, 'sc') + '</span>'
+      + '<span class="cap ell">' + (o.openTopTxt || '진행 중 ' + o.openU.length + '개') + '</span></button>';
+    const a = o.realizedV, b = pm.mk, t = a + b, lo = Math.min(0, a, t), sp = Math.max(0, a, t) - lo || 1;
+    const P = x => ((x - lo) / sp * 100).toFixed(2) + '%';
+    const al = esc(periodName() + ' 총손익 — 실현 ' + sgc(a) + ', 시세 변동 ' + sgc(b) + ', 합 ' + sgc(t)), ab = Math.abs(a) + Math.abs(b) || 1;
+    const pn = v => (v >= 0 ? 'p' : 'n'), B = x => '<b class="' + cls(x) + '">' + sgc(x) + '</b>';
+    if (S.mobile) {
+      const W = x => '<i class="' + pn(x) + '" style="width:' + (Math.abs(x) / ab * 100).toFixed(1) + '%"></i>';
+      return '<div class="jsc jsc2" title="' + o.mktTip + '"><div class="jwfm num" role="group" aria-label="' + al + '"><b>총손익</b> ' + B(t)
+        + ' <span class="mut">=</span> 실현 ' + B(a) + ' <span class="mut">+</span> 시세' + (pm.part ? '≈' : '') + ' ' + B(b) + '</div>'
+        + '<div class="jwfb" aria-hidden="true">' + W(a) + W(b) + '</div></div>';
+    }
+    const bar = (x0, x1, v, tt) => '<span class="tr' + tt + '" aria-hidden="true"><span class="z" style="left:' + P(0) + '"></span>'
+      + '<i class="' + pn(v) + '" style="left:' + P(Math.min(x0, x1)) + ';width:'
+      + Math.max(Math.abs(x1 - x0) / sp * 100, 0.6).toFixed(2) + '%"></i></span>';
+    const row = (k, sm, x0, x1, v, tt) => '<span class="k' + tt + '">' + k + (sm ? ' <small>' + sm + '</small>' : '') + '</span>'
+      + bar(x0, x1, v, tt) + '<span class="v num ' + cls(v) + tt + '">' + sgc(v) + '</span>';
+    const top = !pm.top.length ? '' : '<span class="cap jstop ell">시세 변동 큰 코인 · '
+      + pm.top.map(x => esc(x.sym) + ' <span class="num ' + cls(x.v) + '">' + sgc(x.v) + '</span>').join(' · ') + '</span>';
+    return '<div class="jsc jsc2" title="' + o.mktTip + '"><div class="jsk"><span class="lbl">총손익 다리' + (pm.part ? ' ≈' : '') + '</span>'
+      + '<span class="cap">입출금 제외</span></div><div class="jwf" role="group" aria-label="' + al + '">'
+      + row('실현', '판 것', 0, a, a, '') + row('시세 변동', '든 것', a, t, b, '') + row('총손익', '', 0, t, t, ' tot') + '</div>' + top + '</div>';
+  }
+  const harvestEmpty = () => '<div class="card empty"><div class="eic">' + IC.coin + '</div><b>에어드랍 수확 기록이 아직 없어요</b>'
+    + '에어드랍으로 받은 코인을 팔면 여기에 모여요. <button class="link" data-a="jView" data-v="cycles">사이클 보기</button></div>';
   function cyclesHTML(list) {
     const sortSel = '<div class="row" style="margin:-4px 0 12px;gap:8px;flex-wrap:wrap"><span class="cap pvx">' + list.length + '개 · 같은 코인은 한 카드로 묶었어요</span><span class="sp"></span><span class="cap hide-sm">정렬</span>'
       + '<div class="seg" role="group" aria-label="정렬">' + J_SORTS.map(x => '<button data-a="jSort" data-v="' + x[0] + '" class="' + (S.j.sort === x[0] ? 'on' : '') + '" aria-pressed="' + (S.j.sort === x[0]) + '"' + (x[0] === 'value' ? ' title="평가금액 큰 순 — 남은 수량 × 현재가(보유표와 같은 평가) · 다 판 사이클은 맨 뒤"' : '') + '>' + x[1] + '</button>').join('') + '</div></div>';
-    if (!list.length) return sortSel + '<div class="card empty"><div class="eic">' + IC.search + '</div><b>조건에 맞는 사이클이 없어요</b>' + (S.j.q ? '"' + esc(S.j.q) + '" 검색 결과가 없어요. ' : '기간·소스·상태 필터를 넓혀 보세요. ') + '<button class="link" data-a="jReset">필터 초기화</button></div>';
+    const prevF = prevFold(list);
+    if (!list.length) return sortSel + '<div class="card empty"><div class="eic">' + IC.search + '</div><b>조건에 맞는 사이클이 없어요</b>' + (S.j.q ? '"' + esc(S.j.q) + '" 검색 결과가 없어요. ' : '기간·소스·상태 필터를 넓혀 보세요. ') + '<button class="link" data-a="jReset">필터 초기화</button></div>' + prevF;
     const items = lpGroupItems(list);
     const jSig = [S.j.q, S.j.status, S.j.sort, S.g.period, S.g.from, S.g.to, S.src.mode, S.src.key].join('|');
     if (S.j.pgSig !== jSig) { S.j.pgSig = jSig; uiPgReset('jcy'); }
     const pgJ = uiPgSlice('jcy', items), shown = pgJ.rows;
     const perOn = S.g.period !== 'all';
     const head = '<div class="cychead" aria-hidden="true"><span>코인</span><span>경로 · 진행</span><span>' + (perOn ? '기간 실현' : '실현') + '</span><span>원가</span><span title="남은 수량 × 현재가 — 보유표와 같은 평가">평가금액</span><span>평가손익</span><span title="(누적 실현 + 평가손익) ÷ 원가">수익률</span><span></span></div>';
-    return sortSel + (pgJ.last > 0 ? '<div class="upga" data-pga="jcy"></div>' : '') + head + shown.map(x => x._grp ? lpGrpCard(x) : cycCard(x)).join('') + uiPgBar('jcy', items.length, { unit: '개', cls: 'jmore' });
+    return sortSel + (pgJ.last > 0 ? '<div class="upga" data-pga="jcy"></div>' : '') + head + shown.map(x => x._grp ? lpGrpCard(x) : cycCard(x)).join('') + uiPgBar('jcy', items.length, { unit: '개', cls: 'jmore' }) + prevF;
+  }
+  function prevFold(list) {
+    if (S.g.period !== 'thismonth' || S.j.status !== 'all') return '';
+    const have = new Set(list), pv = withPeriod('lastmonth', () => { const xs = jBase().filter(p => !have.has(p));
+      return { xs, tot: sum(xs, p => cardRealV(p)), nm: periodName() }; });
+    const xs = pv.xs.sort((a, b) => (a._last < b._last ? 1 : a._last > b._last ? -1 : 0)), n = xs.length;
+    if (!n) return '';
+    const names = xs.slice(0, 3).map(p => esc(p._lp ? lpNm(p.sym, p._lp.key) : p.sym)).join(' · ') + (n > 3 ? ' 외 ' + (n - 3) : '');
+    const tot = '<b class="num ' + clsV(pv.tot) + '">' + m(pv.tot, { sign: true, compact: true }) + '</b>';
+    const nm = esc(pv.nm), head = '<span class="jpi" aria-hidden="true">' + IC.layers + '</span>'
+      + '<b class="jpt">지난 달 사이클 <span class="pvx">' + n + '개</span></b><span class="cap ell">'
+      + (S.mobile ? nm + ' 현물 실현 ' + tot : nm + ' · 이 기간엔 활동이 없어 접어 뒀어요 · ' + names) + '</span>';
+    const body = () => '<div class="jpb">' + lpGroupItems(xs).map(x => x._grp ? lpGrpCard(x) : cycCard(x)).join('') + '</div>';
+    const side = S.mobile ? '' : '<span class="lbl">' + nm + ' 현물 실현</span>' + tot;
+    return uiFold('jprev', { cls: 'jprev', mem: false, def: false, head, side,
+      label: '지난 달 사이클 ' + n + '개 — ' + pv.nm + ' 활동 · 이번 달엔 활동 없음', body });
   }
   const lpGrpKey = p => { const l = p._lp; if (!l || !(l.state === 'closed' || (p._st || p.status) === '종료')) return null;
     return [String(lpNm(p.sym, l.key)).replace(/\s+#\S+$/, '').replace(/\s*\/\s*/g, '/'), l.protocol || '', l.chain || ''].join('|'); };

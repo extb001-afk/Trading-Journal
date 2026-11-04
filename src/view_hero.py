@@ -96,6 +96,11 @@ def _hero_summary(out):
             "rate": rate, "todayKey": tk, "series": series}
 
 
+def ui_prefs_view(prefs: dict | None) -> dict:
+    p = prefs if isinstance(prefs, dict) else {}
+    return {"show_networth": p.get("show_networth") is True}
+
+
 def _ago_ko(sec) -> str:
     s9 = max(0, int(sec))
     if s9 < 7200:

@@ -78,11 +78,28 @@
       + '</ol><div class="onbf"><button class="btn pri sm" data-su="wizard">설정 이어서 하기</button><span class="cap">설정 › 연결·키에서도 언제든 바꿀 수 있어요</span>'
       + (o.bf && !o.bf.stalled ? '' : '<span class="sp"></span><button type="button" class="btn sm" data-a="onbClose" title="이 기기에서 안내 카드를 숨겨요 — 설정 › 연결·키에서 다시 볼 수 있어요">닫기</button>') + '</div></section>';
   }
+  const mTot = (v, o) => m(v, o);
   function vDash() {
-    const sideFL = !S.mobile && !S.narrow;
-    return onbHTML() + heroHTML() + allocHTML()
-      + '<div class="grid2"><div style="display:flex;flex-direction:column;gap:20px;min-width:0">' + holdingsHTML() + (sideFL ? '' : futPosHTML()) + '</div>'
-      + '<div class="side' + (S.sideFit ? ' sfit' : '') + '" data-ks="side">' + venuesHTML() + cashHTML() + (sideFL ? futPosHTML(true) : '') + watchHTML() + '</div></div>';
+    const H = heroHTML(), fb = futPosHTML(), lv0 = levHTML(fb);
+    const lv = lv0 + (fb && lv0.indexOf(fb) < 0 ? '<section class="card lev lvfut" aria-label="선물 포지션">' + fb + '</section>' : '');
+    if (S.mobile) {
+      return onbHTML() + '<h1 class="sr">대시보드</h1>' + dGuideHTML() + '<div class="dstk">' + H.top + todoHTML() + H.att + haltHTML()
+        + lv + lpCardHTML() + holdingsHTML() + allocHTML() + venuesHTML() + watchHTML()
+        + '<div class="dtools">' + wowSlot('dash.total') + '</div></div>';
+    }
+    const side = '<div class="side' + (S.sideFit ? ' sfit' : '') + '" data-ks="side">';
+    return onbHTML() + '<div class="dphd"><h1>대시보드</h1><span class="sp"></span>' + wowSlot('dash.total') + '</div>' + dGuideHTML() + H.top
+      + '<div class="grid2 dg2"><div class="dcol">' + lv + lpCardHTML() + holdingsHTML() + watchHTML() + '</div>'
+      + side + todoHTML() + haltHTML() + allocHTML() + venuesHTML() + '</div></div>';
+  }
+  function dGuideHTML() {
+    const D = S.D, fsN = D && D.firstSeen;
+    if (!(fsN && fsN.on && fsN.eff !== false && !fsN.note && !S.fsNoteX && num(fsN.n) > 0)) return '';
+    const n = nf('ko-KR').format(num(fsN.n)), tip = '원가를 모르던 수량의 원가를 그 수량이 장부에 처음 생긴 날 시가로 잡아 손익·명세에 넣었어요(\'추정\' 표시)';
+    return '<div class="dguide pvx" role="status"><span class="dot w" aria-hidden="true"></span>'
+      + '<span class="gt"><b>원가 모르는 ' + n + '건을 최초 인식 시가로 추정했어요</b>'
+      + '<span title="' + tip + '"> — 설정에서 끌 수 있어요 · 닫아도 위 \'추정 ' + n + '\' 칸에 남아요</span></span>'
+      + '<a class="ga" href="#settings/cost">설정</a><button type="button" class="xb" data-a="fsNoteX" aria-label="안내 닫기">' + IC.close + '</button></div>';
   }
   function histLoad() {
     const H = S.hist, ver = S.ver;
@@ -376,20 +393,22 @@
     const tcn = dayCnt(tk, true), tSells = tcn ? tcn.s : D.events.filter(e => /매도/.test(e.k) && e.iso.slice(0, 10) === isoDay(tk)).length;
     const trZero = Math.abs(num(D.realized[tk])) < 0.005;
     const md = monthDays(ym0), bsp = bestSpan(), best = bestRange(bsp.from, bsp.to, bsp.R);
-    const fut = D.fut, futOk = !!fut.ts;
     const cmp = S.mobile;
-    const vks = Object.keys(fut.snapshotTs || {}), ndex = vks.filter(isDex).length, exs = vks.length - ndex;
-    const stale = arr(fut.staleExchanges);
     const rangeSeg = D.daily.length > 7 ? '<div class="seg rng pvx" role="group" aria-label="차트 기간">' + CH_RANGES.filter(r => r[0] <= 30 || S.hist.st !== 'none').map(r => '<button data-a="chartDays" data-v="' + r[0] + '" class="' + (S.chartDays === r[0] ? 'on' : '') + '" aria-pressed="' + (S.chartDays === r[0]) + '">' + r[1] + '</button>').join('') + '</div>' : '';
     const bestR = best ? topRcptSym(best.iso) : null;
     const bestChip = best ? '<button class="bestd" data-a="bestMonths" data-v="' + esc(best.iso) + '" aria-haspopup="dialog" title="' + esc(heroDayLbl(best.k) + ' 실현 ' + m(best.v, { sign: true }) + (best.sym ? ' · 기여 1위 ' + best.sym : '') + ' — 누르면 ' + (bsp.nWin > 1 ? '달마다 최고의 날' : '이 기간 최고의 날') + '을 고를 수 있어요' + (bestR ? '(' + bestR + ' 차익 영수증)' : '')) + '"><span class="k">최고의 날</span><span class="num">' + esc(heroDayLbl(best.k).replace(/ \(.\)$/, '')) + (best.sym ? '<span class="bsym"> · ' + esc(best.sym) + (best.more ? ' 등' : '') + '</span>' : '') + ' ' + m(best.v, { sign: true, compact: true }) + '</span>' + IC.right + '</button>' : '';
     const hw = S.chartDays > 30 && S.hist.st === 'loading' && !h.hist, hwL = (CH_RANGES.find(r => r[0] === S.chartDays) || [0, ''])[1];
-    const chart = hw ? '<div aria-busy="true"><div class="chart chsk" aria-hidden="true"><i></i></div><div class="chart-x num">&nbsp;</div><div class="chart-foot"><span class="cap pvx" role="status" aria-live="polite">' + esc(hwL) + ' 곡선 받는 중…</span></div></div>'
-      : h.pts && h.pts.length > 1 ? chartSVG(h.pts, h, best, bestChip) : '<div class="cap" style="margin-top:8px">일별 마감이 쌓이면 추이 차트가 표시돼요.</div>' + (bestChip ? '<div class="chart-foot">' + bestChip + '</div>' : '');
     const ap = h.ap ? '≈ ' : '';
     const at0 = h.today != null ? attOf(D.todayKey) : null;
+    const why = whyHTML(h, at0, cmp);
+    const chart = hw ? '<div aria-busy="true"><div class="chart chsk" aria-hidden="true"><i></i></div><div class="chart-x num">&nbsp;</div>'
+        + '<div class="chart-foot"><span class="cap pvx" role="status" aria-live="polite">' + esc(hwL) + ' 곡선 받는 중…</span></div></div>'
+      : h.pts && h.pts.length > 1 ? chartSVG(h.pts, h, best, bestChip, cmp ? '' : why)
+        : '<div class="cap" style="margin-top:8px">일별 마감이 쌓이면 추이 차트가 표시돼요.</div>'
+          + (bestChip ? '<div class="chart-foot">' + bestChip + '</div>' : '');
+    const whyPC = cmp || (!hw && h.pts && h.pts.length > 1) ? '' : why;
     const todayChg = h.today == null ? '<span class="mut">전일 마감 없음</span>'
-      : '<span class="' + (h.disc || h.split ? 'mut' : cls(h.today)) + '" title="' + esc((h.disc || h.split ? (h.flow != null ? flowTip(h.flow, D._todayFlowTop) : '하루 ±20% 초과 — 입출금 포함') : '') + (h.ap ? (h.disc || h.split ? ' · ' : '') + '전일 마감이 근사(≈)라 오늘 변화도 근사' : '')) + '"><b>' + ap + N('today', h.today, cmp ? 'sc' : 's') + '</b> <span class="pp">' + pctS(h.todayPct, 2) + '</span>' + (at0 ? '' : h.split ? ' <small>' + flowSplit(h.today, h.flow, D._todayFlowTop, true) + '</small>' : (h.disc ? ' <small>· 입출금 포함</small>' : '')) + '</span>';
+      : '<span class="' + (h.disc || h.split ? 'mut' : cls(h.today)) + '" title="' + esc((h.disc || h.split ? (h.flow != null ? flowTip(h.flow, D._todayFlowTop) : '하루 ±20% 초과 — 입출금 포함') : '') + (h.ap ? (h.disc || h.split ? ' · ' : '') + '전일 마감이 근사(≈)라 오늘 변화도 근사' : '')) + '"><b>' + ap + N('today', h.today, 'sc') + '</b> <span class="pp">' + pctS(h.todayPct, 2) + '</span>' + (at0 ? '' : h.split ? ' <small>' + flowSplit(h.today, h.flow, D._todayFlowTop, true) + '</small>' : (h.disc ? ' <small>· 입출금 포함</small>' : '')) + '</span>';
     const lbl = '<span class="pvx">' + (S.chartDays === 7 ? '1주' : h.hist ? (CH_RANGES.find(r => r[0] === S.chartDays) || [0, ''])[1] : (h.pts ? h.pts.length : 30) + '일') + '</span>';
     const exH = h.hist && h.histFlowMiss ? '<span class="nw" title="최근 30일의 입출금(원화 입출금·외부 전송·잔고 정정)만 기간 변화에서 뺐어요 — 그보다 앞의 날은 입출금을 ' + (S.hist.flowBuilding ? '계산하는 중이라' : '따로 세지 않아') + ' 그대로 들어 있어요"> · 입출금은 최근 30일만 제외</span>' : '';
     const hp = S.hist.prog || {};
@@ -401,31 +420,68 @@
     const exF = '<span class="nw" title="' + esc((flTxt ? flTxt + ' — ' : '') + '원화 입출금(은행 ↔ 거래소 — 쓰려고 뺀 돈·새로 넣은 돈)·외부 전송·거래소 잔고 정정은 매매 손익이 아니라서 기간 변화에서 뺐어요') + '"> · 입출금 제외</span>';
     const exX = h.hist && !h.histFlowMiss && h.nofxN ? '<span class="nw" title="' + esc(h.nofxN + '일은 그날 마감 환율 기록이 없어 원화 입출금 ' + krw(h.nofxK) + ' 를 기간 변화에서 빼지 못했어요(오늘 환율로 바꾸지 않음)') + '"> · 원화 입출금 ' + h.nofxN + '일 미반영</span>' : '';
     const rngTxt = h.rng != null && h.pts && h.pts.length > 2 ? '<b class="' + cls(h.adj) + '" title="' + esc(m(h.adj, { sign: true }) + (flTxt && Math.abs(h.rng - h.adj) >= 0.5 ? ' · ' + flTxt : '')) + '">' + m(h.adj, { sign: true, compact: true }) + '</b> <span class="pp ' + cls(h.adj) + '">' + pctS(h.first.val ? retPct(h.first.val, h.first.val + h.rng, h.flowSum) : null, 2) + '</span> <span class="mut">' + lbl + (h.hist && h.histFlowMiss ? exH : (D.hasFlow ? (Math.abs(h.rng - h.adj) >= 0.5 ? exF : '') : (h.steps.length ? exF : ''))) + exX + '</span>' : '';
-    const dex = D.debts.map(x => x.ex).filter((v, i, a0) => a0.indexOf(v) === i), dsym = D.debts.map(x => x.sym).filter((v, i, a0) => a0.indexOf(v) === i);
-    const debt = D.debts.length ? '<span class="hs num debtln" title="' + esc(D.debtTip()) + '">' + esc(D.debtLbl) + ' <b class="dn">' + m(D.debtUsd, { sign: true, compact: cmp }) + '</b> <span class="mut">' + nbDot(esc(dex.join(' · ') + ' ' + dsym.join(' · '))) + ' · 상환 전 · 총자산에 이미 차감</span></span>' : '';
-    const tsub = rbLine();
-    const totalCard = '<section class="card total" aria-label="자산 요약"><div class="thd"><div class="tleft">'
-      + '<div class="trow"><span class="tlab">총자산 <i id="heroWhen"></i></span>' + wowSlot('dash.total') + '</div><span class="tv num" id="heroBig"' + (cmp ? ' title="' + esc(m(D.total)) + '"' : '') + '>' + N('total', D.total, cmp ? 'mc' : 'm') + '</span>'
-      + '<span class="tchg num" id="heroChg">' + (hw ? '<span class="skl chskl" aria-hidden="true"></span>' : rngTxt || '&nbsp;') + '</span>' + (tsub ? '<span class="tsub">' + tsub + '</span>' : '') + '</div>' + rangeSeg + '</div>' + oaDashLine() + chart + (hcap ? '<div class="cap histcap" role="status">' + hcap + '</div>' : '') + (D.prov && D.prov.note ? '<div class="cap histcap" role="status">' + esc(D.prov.note) + '</div>' : '') + '</section>';
-    const futNet = num((fut.pnlBreak || {}).net != null ? fut.pnlBreak.net : fut.realizedTotal);
-    const futOpen = futOk && num(fut.posCount) > 0;
-    const futV = !futOk ? '<span class="mut">수집 대기</span>' : futOpen ? '<span class="' + cls(num(fut.upnl)) + '"' + (fut.upnlPartial ? ' title="코인 정산 포지션 일부는 시세가 없어 빼고 더했어요"' : '') + '>' + upnlH(fut.upnl, null, { sign: true, compact: true }) + '</span>' : '<span class="' + cls(futNet) + '">' + m(futNet, { sign: true, compact: true }) + '</span>';
-    const futS = '<span class="pvx">' + (futOpen ? '오픈 ' + num(fut.posCount) + '건 · 규모 </span>' + (fut.notional == null ? '—' : mN(num(fut.notional), { compact: true })) + '<span class="pvx">' : '오픈 포지션 없음') + (exs || ndex ? ' · ' + (exs ? '거래소 ' + exs + '곳' : '') + (ndex ? (exs ? ' · ' : '') + '덱스 ' + ndex + '곳' : '') : Object.keys(fut.realizedByDate || {}).length ? '' : ' · ' + (exLinked() ? '첫 수집 전' : '거래소 연결 전')) + '</span>' + (futOpen ? ' · 누적 <span class="' + cls(futNet) + '">' + mN(futNet, { sign: true, compact: true }) + '</span>' : '') + (stale.length ? ' · ' + esc(stale.map(x => EX_NAMES[x] || x).join(', ')) + ' 제외' : '');
-    const futTip = futFxNote(futNet);
+    const full = mTot(D.total), bigC = mTot(D.total, { compact: true });
+    const dday = '<span class="dday"><span class="mut">전일 대비</span> <span class="num" id="heroToday">' + todayChg + '</span></span>';
+    const chgL = hw ? '<span class="skl chskl" aria-hidden="true"></span>'
+      : (rngTxt ? rngTxt + (cmp ? '' : '<i class="tdv" aria-hidden="true"></i>') : '') + (cmp ? '' : dday);
+    const head = '<div class="thd"><div class="tleft"><span class="tlab">총자산 <i id="heroWhen"></i></span>'
+      + '<span class="tv num" id="heroBig" title="' + esc(full) + '">' + N('total', D.total, 'mc') + '</span>'
+      + (full !== bigC ? '<span class="tfull num mut" id="heroFull">' + full + '</span>' : '')
+      + '<span class="tchg num" id="heroChg">' + (chgL || '&nbsp;') + '</span>' + (cmp && !hw ? '<span class="tchg num">' + dday + '</span>' : '')
+      + '</div>' + (cmp ? '' : rangeSeg) + '</div>';
+    const cap9 = t => '<div class="cap histcap" role="status">' + t + '</div>', caps = (hcap ? cap9(hcap) : '') + (D.prov && D.prov.note ? cap9(esc(D.prov.note)) : '');
+    const tc = '<section class="card total" aria-label="총자산">' + head + oaDashLine();
+    const totalCard = cmp ? tc + '</section>' : tc + chart + whyPC + caps + '</section>';
+    const chartCard = cmp ? '<section class="card total dchc" aria-label="총자산 곡선">' + rangeSeg + chart + caps + '</section>' : '';
     const tEvs = dayFull(tk) || (partHave('ev') ? (D.evByDay.get(tk) || []) : null), tBuys = [];
     if (tEvs) tEvs.filter(e => /매수/.test(e.k)).forEach(e => { if (tBuys.indexOf(e.sym) < 0) tBuys.push(e.sym); });
     const tRec = tcn ? tcn.n : tEvs ? tEvs.length : null;
     const tTip = '오늘 실현 · 매도 ' + tSells + '건' + (tcn && tcn.pay ? ' · 스왑 지불 ' + tcn.pay + '건' : '') + (tRec != null ? ' · 기록 ' + tRec + '건' : '') + (tBuys.length ? ' · 새로 산 코인 ' + tBuys.slice(0, 6).join(' · ') + (tBuys.length > 6 ? ' 외 ' + (tBuys.length - 6) + '종' : '') : '') + ' — 누르면 오늘 기록';
     const kq = '<div class="kpis4">'
       + '<button class="card kq htoday" data-a="goDay" data-v="' + esc(tk) + '" title="' + esc(tTip) + '"><span class="ql">오늘 실현 <i>· ' + esc(heroDayLbl(tk)) + '</i></span><span class="qv num' + (trZero ? ' z' : ' ' + cls(tr)) + '">' + N('treal', tr, trZero ? 'm' : 'sc') + '</span><span class="qs pvx"><span class="nowrap">매도 ' + tSells + '건 ·</span> ' + (tRec != null ? '<span class="nowrap">기록 ' + tRec + '건 ·</span> ' : '') + '<span class="nowrap">23:59 마감</span></span></button>'
-      + '<button class="card kq hmonth" data-a="goJournalPeriod" data-v="thismonth" title="매도 체결 기준 · 현물+선물 — 누르면 매매일지 이번 달"><span class="ql">' + mon + '월 실현</span><span class="qv num ' + cls(mr) + '">' + N('month', mr, 'sc') + '</span>'
-      + '<span class="qs pvx">' + (md.n ? '<span title="날 단위 — 그날 실현(현물+선물)이 + 인 날 / − 인 날(달력 칩과 같은 셈). 매매일지의 승률(청산 사이클 단위)과 달라요"><span class="nowrap">수익 ' + md.w + '일 ·</span> <span class="nowrap">손실 ' + md.l + '일 ·</span></span> ' : '') + '<span class="nowrap" title="그날 기록 목록의 매도 기록 수(스왑 지불 레그 제외) · 체결 수는 매매일지">매도 ' + sells + '건</span></span></button>'
-      + '<button class="card kq kpi" data-a="goJournalHeld" title="원가가 확인된 수량만 평가했어요 — 누르면 매매일지 보유 중"><span class="ql">평가손익</span><span class="qv num ' + cls(D.unreal) + '">' + N('unreal', D.unreal, 'sc') + '</span><span class="qs num"><span class="nowrap">원가 확인분 ·</span> <span class="nowrap"><span class="' + cls(D.unreal) + '">' + pctS(D.roiAll, 1) + '</span> ·</span> <span class="nowrap">원가 ' + mN(D.totalCost, { compact: true }) + '</span></span></button>'
-      + '<button class="card kq kpi fut" data-a="openFut"' + (futTip ? ' title="' + esc(futTip) + '"' : '') + '><span class="ql">' + (futOpen ? '선물 포지션' : '선물 누적') + (stale.length ? ' <span class="pill w sm">수집 지연</span>' : '') + '</span><span class="qv num">' + futV + '</span><span class="qs num">' + futS + '</span></button></div>';
-    const why = '<section class="card why" aria-label="오늘 무엇이 움직였나"><div class="wh"><h2>오늘 무엇이 움직였나</h2><span class="num whv" id="heroToday">' + todayChg + '</span></div>'
-      + (at0 ? attBars(at0, D.todayKey, true) : '<div class="cap">' + (h.today == null ? '전일 마감이 쌓이면 오늘 변동을 시세·입출금·환율로 나눠 보여요' : '오늘은 분해 기록이 아직 없어요 — 다음 수집 때 시세·입출금·환율로 나눠 보여요') + '</div>') + '</section>';
-    return '<div class="hero">' + totalCard + kq + levHTML() + lpCardHTML() + '<div class="dmid">' + why + todoHTML() + '</div></div>';
+      + kqMonth(mr, mon, md, sells) + kqUnreal() + kqTodo() + '</div>';
+    return { top: '<div class="hero">' + totalCard + kq + chartCard + '</div>', att: cmp ? why : '' };
   }
+  function whyHTML(h, at0, cmp) {
+    const whyNo = h.today == null ? '전일 마감이 쌓이면 오늘 변동을 시세·입출금·환율로 나눠 보여요'
+      : '오늘은 분해 기록이 아직 없어요 — 다음 수집 때 시세·입출금·환율로 나눠 보여요';
+    const whyIn = '<div class="wh"><h2>오늘 무엇이 움직였나</h2><span class="cap">전일 마감 대비</span><span class="sp"></span>'
+      + (cmp ? '' : '<span class="cap">줄을 누르면 무엇 때문인지 보여요</span>') + '</div>'
+      + (at0 ? attBars(at0, S.D.todayKey, true) : '<div class="cap">' + whyNo + '</div>');
+    const whyL = 'aria-label="오늘 무엇이 움직였나">' + whyIn;
+    return cmp ? '<section class="card why" ' + whyL + '</section>' : '<div class="why dwin" role="group" ' + whyL + '</div>';
+  }
+  function kqMonth(mr, mon, md, sells) {
+    const D = S.D, ym = ymShift(0), fu = D.fut.realizedByDate || {}, fk = D.fut.realizedKrwByDate || null;
+    const ks = Object.keys(fu).filter(k => (isYMD(k) ? String(k).slice(0, 7) : ymOf(String(k).slice(0, 5))) === ym);
+    const fw = k => (fk && fk[k] != null ? num(fk[k]) : num(fu[k]) * rate());
+    const mf = KV(sum(ks, k => num(fu[k])), D.hasKrw ? sum(ks, fw) : null), ms = mr - mf;
+    const tip = '매도 체결 기준 · 현물+선물' + (md.n ? ' · 수익 난 날 ' + md.w + '일 · 손실 난 날 ' + md.l + '일(날 단위 — 매매일지 승률은 사이클 단위)' : '')
+      + ' · 매도 ' + sells + '건 — 누르면 매매일지 이번 달';
+    const pv = v => '<span class="' + cls(v) + '">' + m(v, { sign: true, compact: true }) + '</span>';
+    return '<button class="card kq hmonth" data-a="goJournalPeriod" data-v="thismonth" title="' + esc(tip) + '"><span class="ql">' + mon + '월 실현</span>'
+      + '<span class="qv num ' + cls(mr) + '">' + N('month', mr, 'sc') + '</span><span class="qs num">'
+      + '<span class="nowrap">현물 ' + pv(ms) + ' ·</span> <span class="nowrap">선물 ' + pv(mf) + '</span></span></button>';
+  }
+  function kqUnreal() {
+    const D = S.D, cmp = S.mobile, c = cls(D.unreal);
+    return '<button class="card kq kpi" data-a="goJournalHeld" title="원가가 확인된 수량만 평가했어요 — 누르면 매매일지 보유 중"><span class="ql">평가손익</span>'
+      + '<span class="qv num ' + c + '">' + N('unreal', D.unreal, 'sc') + '</span><span class="qs num"><span class="nowrap">원가 확인분 ·</span> '
+      + '<span class="nowrap"><span class="' + c + '">' + pctS(D.roiAll, 1) + '</span>' + (cmp ? '' : ' ·') + '</span>'
+      + (cmp ? '' : ' <span class="nowrap">원가 ' + mN(D.totalCost, { compact: true }) + '</span>') + '</span></button>';
+  }
+  function kqTodo() {
+    const it = attnItems(), n = todoN(it), u = sum(it, x => num(x.usd)), mob = S.mobile;
+    const brk = it.map(x => x.t.replace(/ (확인|보유|기록)$/, '') + ' ' + parseInt(String(x.n), 10)).join(' · ');
+    const sub = !n ? (preData() ? '수집 전' : '모두 정리됐어요')
+      : mob && u > 0 ? m(u, { compact: true }) + ' 걸려 있어요' : '<span class="pvx">' + esc(brk) + '</span>';
+    const tip = n ? '정리할 것 ' + n + '건 = ' + brk + ' — 누르면 정리할 것 카드로' : '정리할 것 카드로';
+    return '<button class="card kq ktodo" data-a="dashTodo" title="' + esc(tip) + '">'
+      + '<span class="ql">' + (n ? '<span class="dot w" aria-hidden="true"></span>' : '') + '정리할 것</span>'
+      + '<span class="qv num"><span class="pvx">' + n + '건</span>' + (n && u > 0 && !mob ? '<span class="qf mut">' + m(u, { compact: true }) + '</span>' : '')
+      + '</span><span class="qs">' + sub + '</span></button>';
+  }
+  const todoN = it => sum(it, x => parseInt(String(x.n).replace(/[^\d]/g, ''), 10) || 0);
   function attQ(n) {
     if (n == null || !isFinite(n)) return '—';
     if (S.hide) return (n < 0 ? '−' : '') + pvW(PVM.q);
@@ -842,6 +898,8 @@
   }
   function attdActs() {
     return {
+      dashTodo: () => { const c = document.getElementById('attn'); if (!c) return;
+        try { c.scrollIntoView({ block: 'start', behavior: 'smooth' }); c.focus({ preventScroll: true }); } catch (e) {  } },
       attdOpen: el => { const v = String(el.dataset.v || ''), q = attdParse(v); if (!q || !S.D) return; S.attdUI = { v, pg: 0, view: (S.attdUI && S.attdUI.view) || 'it' }; uiSheetOpen('attd', v, attdTitle(q), el); },
       attdGo: el => { const v = String(el.dataset.v || ''), q = attdParse(v); if (!q || !S.sheet || S.sheet.k !== 'attd') return; S.sheet.v = v; S.sheet.t = attdTitle(q); vib(); renderOverlay(); },
       attdPg: el => { const U = S.attdUI; if (!U) return; U.pg = Math.max(0, U.pg + (+el.dataset.v || 0)); renderOverlay(); const b = $('#overlay .usheet .adlh'); if (b && b.scrollIntoView) { try { b.scrollIntoView({ block: 'nearest' }); } catch (e) {  } } },
@@ -862,25 +920,37 @@
     H.st = 'loading';
     H.t0 = Date.now();
     setTimeout(() => { if (H.st === 'loading' && S.tab === 'journal' && S.j.view === 'habits') renderView(); }, 6500);
-    fetch('/api/habits', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => { H.d = j && j.ok ? j : null; H.st = H.d ? 'ok' : (j && j.why === 'building' ? 'building' : 'err'); H.at = Date.now(); })
-      .catch(() => { H.st = 'err'; H.at = Date.now(); }).then(() => {
+    const per = habPer();
+    fetch('/api/habits' + (per[0] === '1y' ? '' : '?days=' + per[2]), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => {
+      if (habPer() !== per) return;
+      H.d = j && j.ok ? j : null; H.st = H.d ? 'ok' : (j && j.why === 'building' ? 'building' : 'err'); H.at = Date.now(); })
+      .catch(() => { if (habPer() === per) { H.st = 'err'; H.at = Date.now(); } }).then(() => {
         if (H.st === 'building') H.tm = setTimeout(() => { H.tm = 0; if (H.st === 'building' && S.tab === 'journal' && S.j.view === 'habits') habLoad(true); }, 15000);
         if (S.tab === 'journal' && S.j.view === 'habits') renderView();
       });
   }
+  const HB_PER = [['3m', '3개월', 90], ['6m', '6개월', 180], ['1y', '1년', 365], ['all', '전체', 0]];
+  const habPer = () => HB_PER.find(x => x[0] === (S.hab || {}).per) || HB_PER[2];
+  const habPerLbl = () => (habPer()[0] === 'all' ? '전체 기간' : '지난 ' + habPer()[1]);
+  const habSeg = () => '<div class="seg" role="group" aria-label="기간">' + HB_PER.map(x => { const on = habPer()[0] === x[0];
+    return '<button type="button" data-a="habPer" data-v="' + x[0] + '" class="' + (on ? 'on' : '') + '" aria-pressed="' + on + '">'
+      + x[1] + '</button>'; }).join('') + '</div>';
+  const habTop = (H, n) => '<div class="hbhd"><div class="row" style="gap:10px;flex-wrap:wrap"><span class="cap">나의 매매 습관 · ' + habPerLbl()
+    + (n ? ' · 매도 ' + n + '묶음' : '') + '</span><span class="sp"></span>' + habSeg() + '</div>';
   const HB_SLOT = ['0~2시', '2~4시', '4~6시', '6~8시', '8~10시', '10~12시', '12~14시', '14~16시', '16~18시', '18~20시', '20~22시', '22~24시'];
   const HB_WD = ['월', '화', '수', '목', '금', '토', '일'];
   function habitsHTML() {
     const H = S.hab || {};
     if (!H.d) {
       habLoad();
-      return '<div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>' + (H.st === 'err' ? '습관 리포트를 불러오지 못했어요' : H.st === 'building' ? '기록 색인을 만드는 중이에요' : '습관을 모으는 중…') + '</b>'
+      return '<div class="habs pvx">' + habTop(H, 0) + '</div><div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>' + (H.st === 'err' ? '습관 리포트를 불러오지 못했어요' : H.st === 'building' ? '기록 색인을 만드는 중이에요' : '습관을 모으는 중…') + '</b>'
         + (H.st === 'building' || (H.st === 'loading' && Date.now() - (H.t0 || Date.now()) > 6000) ? '<div class="cap" style="margin-top:6px">봇이 막 다시 켜지면 기록 색인을 새로 만드느라 1~3분 걸려요 — 다 되면 저절로 보여요</div>' : '')
-        + (H.st === 'err' || H.st === 'building' ? '<button class="btn sm" data-a="habRetry" style="margin-top:10px">' + IC.undo + ' 다시 시도</button>' : '') + '</div>';
+        + (H.st === 'err' || H.st === 'building' ? '<button class="btn sm" data-a="habRetry" style="margin-top:10px">' + IC.undo + ' 다시 시도</button>' : '') + '</div></div>';
     }
     if (Date.now() - H.at > 300000) habLoad();
     const d = H.d, avg = d.n ? d.win / d.n * 100 : null;
-    if (!d.n) return '<div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>아직 습관을 볼 만큼 매도 기록이 없어요</b>지난 12개월 매도가 쌓이면 시간대·요일·보유 기간별로 보여 드려요</div>';
+    if (!d.n) return '<div class="habs pvx">' + habTop(H, 0) + '</div><div class="card empty habs"><div class="eic">' + IC.cal + '</div><b>아직 습관을 볼 만큼 매도 기록이 없어요</b>'
+      + (habPer()[0] === 'all' ? '' : habPerLbl() + ' ') + '매도가 쌓이면 시간대·요일·보유 기간별로 보여 드려요</div></div>';
     const cells = [];
     d.grid.forEach((row, wd) => row.forEach((c, h) => { if (c[0] >= 1) cells.push({ wd, h, n: c[0], w: c[1], r: c[1] / c[0] * 100, pnl: c.length > 2 ? num(c[2]) : null }); }));
     const minN = Math.max(5, Math.round(d.n * 0.02));
@@ -918,7 +988,7 @@
     const nx = arr(d.next), pu = nx[1] ? nx[0] / nx[1] * 100 : null, C = 2 * Math.PI * 38;
     const ring = pu == null ? '' : '<section class="card hbcard hbring"><svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true"><circle cx="48" cy="48" r="38" fill="none" stroke="var(--line2)" stroke-width="10"/><circle cx="48" cy="48" r="38" fill="none" stroke="var(--warn)" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (C * pu / 100).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 48 48)"/><text x="48" y="54" text-anchor="middle" class="rtx">' + Math.round(pu) + '%</text></svg>'
       + '<div class="rt"><b class="hbt">판 다음 날 더 오른 비율</b><span>10번 중 ' + Math.round(pu / 10) + '번은 다음 날 마감가가 판 값보다 1% 넘게 높았어요</span><span class="cap">시세 기록 있는 ' + nx[1] + '묶음 · 다음 날 평균 ' + pctS(num(d.nextAvg), 1) + '</span></div></section>';
-    return '<div class="habs pvx"><div class="hbhd"><div class="cap">나의 매매 습관 · 지난 12개월 · 매도 ' + d.n + '묶음</div>' + head + '</div>'
+    return '<div class="habs pvx">' + habTop(H, d.n) + head + '</div>'
       + '<div class="hbgrid">' + left + '<div class="hbside">' + hold + ring + '</div></div>'
       + '<div class="cap hbnote">묶음 = 그날 그 코인 매도(차익 영수증과 같은 단위) · 시각 = 그날 그 코인 가장 큰 매도 · 보유 기간 = 첫 매수부터 실제 매도 시각까지'
       + (d.excl && (num(d.excl.stable) || num(d.excl.quar)) ? ' · 스테이블 환전 ' + num(d.excl.stable) + '묶음' + (num(d.excl.quar) ? ' · 격리 ' + num(d.excl.quar) + '묶음' : '') + '은 뺐어요' : '')
@@ -1008,7 +1078,7 @@
     const st = benchOn() && !B.d && (B.st === 'loading' || !B.st) ? '<span class="cap">시세 불러오는 중…</span>' : benchOn() && B.st === 'err' ? '<span class="cap">비교 시세를 불러오지 못했어요</span>' : '';
     return '<span class="bchips">' + chip('btc', 'BTC 만 들고 있었다면', '<i class="bsw btc"></i>') + st + '</span>';
   }
-  function chartSVG(pts, h, best, bestChip) {
+  function chartSVG(pts, h, best, bestChip, mid) {
     const D = S.D;
     const W = 700, H = 124, n = pts.length;
     const vals = pts.map(p => p.val);
@@ -1033,7 +1103,7 @@
     if (r0 >= 0) runs.push([r0, n - 1]);
     const apN = pts.filter(p => p.ap > 0).length;
     const up = pts[n - 1].val >= pts[0].val;
-    const col = up ? 'var(--up)' : 'var(--down)';
+    const col = up ? 'var(--up)' : 'var(--down)', ca = up ? 'ca' : 'cadn';
     const ex = X(n - 1) / W * 100, ey = Y(pts[n - 1].val) / H * 100;
     let len = 0; for (let i = 1; i < n; i++) len += Math.hypot(X(i) - X(i - 1), Y(pts[i].val) - Y(pts[i - 1].val));
     S._chart = { pts, lo, hi, n, bench: bb || bh ? { btc: bb, hold: bh } : null };
@@ -1043,9 +1113,9 @@
     const draw = S.anim.chartKey !== ck;
     S.anim.chartKey = ck;
     const frs = ticks.map(v => (hi - v) / (hi - lo));
-    const grid = ticks.map((v, i) => '<span class="gl num" style="top:' + (frs[i] * 100).toFixed(2) + '%">' + m(v, { compact: true }).replace(/^₩|^\$/, S.cur === 'USD' ? '$' : '') + '</span>').join('');
+    const grid = ticks.map((v, i) => '<span class="gl num" style="top:' + (frs[i] * 100).toFixed(2) + '%">' + mTot(v, { compact: true }).replace(/^₩|^\$/, S.cur === 'USD' ? '$' : '') + '</span>').join('');
     const gridLines = frs.map(fr => '<line x1="0" x2="' + W + '" y1="' + (H * fr).toFixed(2) + '" y2="' + (H * fr).toFixed(2) + '" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>').join('');
-    const bands = runs.map(r => '<rect class="apband" x="' + X(r[0]).toFixed(1) + '" y="0" width="' + Math.max(1, X(r[1]) - X(r[0])).toFixed(1) + '" height="' + H + '" style="fill:var(--accent)" fill-opacity=".06"/>').join('');
+    const bands = runs.map(r => '<rect class="apband" x="' + X(r[0]).toFixed(1) + '" y="0" width="' + Math.max(1, X(r[1]) - X(r[0])).toFixed(1) + '" height="' + H + '"/>').join('');
     const tot9 = Math.abs(num(pts[n - 1].val)), thr9 = Math.max(0.01 * tot9, 1e7 / rate()), flo9 = 0.003 * tot9;
     const dOf = i => (pts[i].delta != null && isFinite(pts[i].delta) ? num(pts[i].delta) : num(pts[i].val) - num(pts[i - 1].val));
     const cand9 = []; for (let i = 1; i < n - 1; i++) cand9.push([i, dOf(i)]);
@@ -1080,44 +1150,45 @@
       + (bi < n - 4 ? '<span class="blab num" style="left:' + Math.min(88, Math.max(10, bx)).toFixed(2) + '%;top:' + by.toFixed(2) + '%">' + esc(heroDayLbl(best.k).replace(/ \(.\)$/, '')) + ' · 최고의 날' + (best.sym ? ' ' + esc(best.sym) : '') + ' <span class="up">' + m(best.v, { sign: true, compact: true }) + '</span></span>' : '') : '';
     const isT = h && h.today != null && pts[n - 1].date === D.todayKey;
     const tcol = isT ? (h.disc || h.split ? 'mut' : cls(h.today)) : '';
-    const tb = isT ? '<span class="tbadge num ' + tcol + '" style="top:' + (ey < 50 ? 'calc(' + ey.toFixed(2) + '% + 16px)' : 'calc(' + ey.toFixed(2) + '% - 16px)') + ';' + (ey < 50 ? '' : 'transform:translateY(-100%)') + '">오늘 ' + (h.ap ? '≈ ' : '') + m(h.today, { sign: true, compact: true }) + ' <small>' + pctS(h.todayPct, 2) + '</small></span>' : '';
+    const tb = isT ? '<span class="tbadge num ' + tcol + '" style="top:' + (ey < 50 ? 'calc(' + ey.toFixed(2) + '% + 16px)' : 'calc(' + ey.toFixed(2) + '% - 16px)') + ';' + (ey < 50 ? '' : 'transform:translateY(-100%)') + '" title="전일 대비 숫자는 위 총자산 줄">오늘</span>' : '';
     const xi = n <= 7 ? pts.map((_, i) => i) : [0, 1, 2, 3, 4].map(k => Math.round(k * (n - 1) / 4)).filter((v, i, a0) => a0.indexOf(v) === i);
     const xlab = xi.map(i => '<span>' + esc((isoDay(pts[i].date) || pts[i].date).slice(5)) + '</span>').join('');
     const legBits = [];
-    if (apN) legBits.push('<span title="그날 시세 기록이 없는 토큰·거래소 통화는 처음 계산한 시각의 시세로, 원장 밖 잔고는 지금 값으로 이월해 평가했어요">옅은 띠 = 근사(' + apN + '일' + (S.mobile ? ' · 그날 시세 기록 없는 자산은 추정 시세' : '') + ')</span>');
+    if (apN) legBits.push('<span class="lgd" title="그날 시세 기록이 없는 토큰·거래소 통화는 처음 계산한 시각의 시세로, 원장 밖 잔고는 지금 값으로 이월해 평가했어요"><i class="lg-ap"></i>옅은 띠 = 근사(' + apN + '일' + (S.mobile ? ' · 그날 시세 기록 없는 자산은 추정 시세' : '') + ')</span>');
     legBits.push(benchLeg());
     if (mv9.length) legBits.unshift('<span class="lg9" title="보이는 기간에서 전일 대비 변화가 큰 날 ' + mv9.length + '일 — 점을 가리키면(모바일은 누르면) 시세·입출금·매매·실현으로 나눠 보여요"><span class="lgd"><i class="u"></i>크게 오른 날</span><span class="lgd"><i class="d"></i>크게 내린 날</span><span>점 크기 = 그날 움직인 금액</span></span>');
     return '<div>' + benchCards(pts, h, bv) + '<div class="chart' + (draw ? ' draw' : '') + '" id="chart" role="group" aria-label="' + n + '일 총자산 추이 (누르면 그날 기록)" style="color:' + col + '">'
-      + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + n + '일 총자산 추이, ' + esc(m(pts[0].val, { compact: true })) + '에서 ' + esc(m(pts[n - 1].val, { compact: true })) + '"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:' + col + ';stop-opacity:.16"/><stop offset="1" style="stop-color:' + col + ';stop-opacity:0"/></linearGradient></defs>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + n + '일 총자산 추이, ' + esc(mTot(pts[0].val, { compact: true })) + '에서 ' + esc(mTot(pts[n - 1].val, { compact: true })) + '"><defs><linearGradient id="cg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="' + ca + '-0"/><stop offset="1" class="' + ca + '-1"/></linearGradient></defs>'
       + bands + gridLines + '<path class="area" d="' + line + ' L' + W + ' ' + H + ' L0 ' + H + ' Z" fill="url(#cg)"/>'
-      + '<path class="ln" d="' + line + '" fill="none" style="stroke:' + col + ';--len:' + Math.ceil(len) + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>'
+      + '<path class="ln cl-' + (up ? 'up' : 'dn') + '" d="' + line + '" style="--len:' + Math.ceil(len) + '"/>'
       + (hline ? '<path class="bln hold" d="' + hline + '" fill="none" stroke-width="1.6" stroke-dasharray="2 5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' : '')
       + (bline ? '<path class="bln btc" d="' + bline + '" fill="none" stroke-width="2" stroke-dasharray="6 6" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' : '') + '</svg>'
       + (runs.length ? '<span class="apl">근사 구간 · 그날 시세 기록 없는 자산은 추정 시세</span>' : '')
       + grid + marks + bmark + tb
-      + '<span class="end" style="left:' + ex + '%;top:' + ey + '%;background:' + col + '"></span>'
+      + '<span class="end cd-now' + (up ? '' : ' dn') + '" style="left:' + ex + '%;top:' + ey + '%"></span>'
       + '<span class="guide hidden"></span><span class="hdot hidden" style="background:' + col + '"></span></div>'
-      + '<div class="chart-x num">' + xlab + '</div>'
-      + '<div class="chart-foot"><span class="cap mkleg">' + legBits.join('<span class="dv">·</span>') + (S.mobile && bestChip ? bestChip : '') + '</span><span class="sp"></span>' + (S.mobile ? '' : bestChip || '') + '<span class="hide-sm num hilo">최고 ' + m(Math.max.apply(null, vals), { compact: true }) + ' · 최저 ' + m(Math.min.apply(null, vals), { compact: true }) + '</span></div></div>';
+      + '<div class="chart-x num">' + xlab + '</div>' + (mid || '')
+      + '<div class="chart-foot"><span class="cap mkleg">' + legBits.join('<span class="dv">·</span>') + (S.mobile && bestChip ? bestChip : '') + '</span><span class="sp"></span>' + (S.mobile ? '' : bestChip || '') + '<span class="hide-sm num hilo">최고 ' + mTot(Math.max.apply(null, vals), { compact: true }) + ' · 최저 ' + mTot(Math.min.apply(null, vals), { compact: true }) + '</span></div></div>';
   }
   function bindChart() {
     const el = $('#chart');
     if (!el || !S._chart) return;
     const c = S._chart;
     const guide = $('.guide', el), dot = $('.hdot', el);
-    const big = $('#heroBig'), chg = $('#heroChg'), when = $('#heroWhen');
+    const big = $('#heroBig'), chg = $('#heroChg'), when = $('#heroWhen'), full = $('#heroFull');
     const at = ev => { const r = el.getBoundingClientRect(); const x = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left) / r.width; return Math.max(0, Math.min(c.n - 1, Math.round(x * (c.n - 1)))); };
     let orig = null;
     const show = ev => {
       const i = at(ev), p = c.pts[i];
-      if (!orig) orig = { big: big.innerHTML, chg: chg.innerHTML, title: big.getAttribute('title') };
+      if (!orig) orig = { big: big.innerHTML, chg: chg.innerHTML, title: big.getAttribute('title'), full: full ? full.innerHTML : null };
       const xp = i / (c.n - 1) * 100, yp = (1 - (p.val - c.lo) / (c.hi - c.lo)) * 100;
       guide.style.left = xp + '%'; dot.style.left = xp + '%'; dot.style.top = yp + '%';
       guide.classList.remove('hidden'); dot.classList.remove('hidden');
       const u = S.D.usdt[p.date] || {};
       const isStep = S.D.steps.indexOf(p.date) >= 0, isSplit = p.date === S.D.todayKey ? !!S.D._todaySplit : !!(p.row && p.row.split);
-      big.textContent = (p.ap > 0 ? '≈ ' : '') + m(p.val, { compact: S.mobile });
-      if (orig.title != null) big.setAttribute('title', (p.ap > 0 ? '≈ ' : '') + m(p.val));
+      big.textContent = (p.ap > 0 ? '≈ ' : '') + mTot(p.val, { compact: true });
+      if (orig.title != null) big.setAttribute('title', (p.ap > 0 ? '≈ ' : '') + mTot(p.val));
+      if (full) full.textContent = mTot(p.val);
       if (when) when.textContent = '· ' + (d9 => /^\d{4}-\d{2}-\d{2}$/.test(d9) ? (+d9.slice(5, 7)) + '월 ' + (+d9.slice(8)) + '일' : d9)(String(isoDay(p.date) || p.date)) + (p.dow ? ' (' + p.dow + ')' : '');
       const fl9 = p.date === S.D.todayKey ? S.D._todayFlow : dayFlowV(p.row), ft9 = p.date === S.D.todayKey ? S.D._todayFlowTop : (p.row || {}).flowTop;
       TJDOM.set(chg, (p.delta != null ? '<span class="' + (isStep || isSplit ? 'mut' : cls(p.delta)) + '">전일 대비 ' + m(p.delta, { sign: true }) + (isSplit && fl9 != null ? ' <small>' + (attOf(p.date) ? '<span class="nw">· 입출금 ' + m(num(fl9), { sign: true, compact: true }) + '</span>' : flowSplit(p.delta, fl9, ft9, true)) + '</small>' : (isStep ? ' <small>· 입출금 포함</small>' : '')) + '</span>' : '<span class="mut">첫날</span>')
@@ -1130,7 +1201,7 @@
     };
     const hide = () => {
       guide.classList.add('hidden'); dot.classList.add('hidden');
-      if (orig) { TJDOM.set(big, orig.big); TJDOM.set(chg, orig.chg); if (orig.title != null) big.setAttribute('title', orig.title); orig = null; }
+      if (orig) { TJDOM.set(big, orig.big); TJDOM.set(chg, orig.chg); if (orig.title != null) big.setAttribute('title', orig.title); if (full && orig.full != null) TJDOM.set(full, orig.full); orig = null; }
       if (when) when.textContent = '';
     };
     el.addEventListener('mousemove', show);
@@ -1188,12 +1259,11 @@
   function exLinked() { try { const ex = window.__tjSetup && window.__tjSetup.U && window.__tjSetup.U.st && window.__tjSetup.U.st.exchanges; if (ex && typeof ex === 'object') return Object.keys(ex).filter(k => ex[k] && ex[k].set).length; } catch (e) {  } return num(S.D && S.D.exN); }
   function todoHTML() {
     const D = S.D, it = attnItems().sort((a, b) => num(b.usd) - num(a.usd));
-    const hid = D.pendHid.length, pg = D.priceGuard.length, up = D.upN;
+    const hid = D.pendHid.length;
     const big = it.filter(x => x.usd > 0).sort((a, b) => b.usd - a.usd)[0];
-    const mob = S.mobile;
-    const head = mob
-      ? '<div class="th m"><h2 class="pvx">' + (it.length ? '정리할 것 <span class="num">' + it.length + '</span>가지' : '정리할 것 없음') + '</h2><span class="cap pvx">' + esc(it.map(x => x.t.replace(/ (확인|보유|기록)$/, '').replace('원가 미확인', '원가') + ' ' + x.n).join(' · ')) + '</span></div>'
-      : '<div class="th"><h2>정리할 것' + (it.length ? ' <span class="cnt num pvx">' + it.length + '</span>' : '') + '</h2><button class="link" data-a="go" data-v="unmatched">모두 보기</button></div>';
+    const mob = S.mobile, tn = todoN(it);
+    const head = '<div class="th"><h2>정리할 것' + (tn ? ' <span class="cnt num pvx" title="' + esc(it.map(x => x.t + ' ' + x.n).join(' · ')) + '">'
+      + tn + '</span>' : '') + '</h2><button class="link" data-a="go" data-v="unmatched">모두 보기</button></div>';
     const rows = it.length ? '<div class="tdos">' + it.map(x => '<button class="tdo" data-a="' + x.a + '"' + (x.k ? ' data-v="' + x.k + '"' : '') + (x.tip ? ' title="' + esc(x.tip) + '"' : '') + '>'
       + '<span class="tbar" style="background:' + x.col + '" aria-hidden="true"></span>'
       + '<span class="tx"><b>' + x.t + '</b><span class="d">' + nbDot(x.d) + '</span></span>'
@@ -1201,17 +1271,68 @@
       : preData() ? '<div class="ok0"><span class="pill g sm">수집 전</span>아직 수집 전이에요 — 지갑·거래소를 연결하고 첫 수집이 끝나면 정리할 것을 여기 모아 보여줘요</div>'
       : '<div class="ok0"><span class="pill ok sm">' + IC.check.replace('<svg', '<svg width="12" height="12"') + ' 깨끗</span>미매칭·외부 전송·원가 미확인이 모두 정리됐어요</div>' + todoNext();
     const capL = it.length ? '<div class="cap tcap">금액이 걸린 것만 · 처리하면 손익·평균 매수가에 바로 반영' + (big && it.length > 1 ? ' · 가장 큰 것 ' + esc(big.t) + ' <span class="num">' + m(big.usd, { compact: true }) + '</span>' : '') + '</div>' : '';
-    const ex = (pg || up || hid) ? '<div class="exrow">' + IC.eyeoff + (pg || up ? '<b>평가 제외</b>' + (pg ? '<button data-a="guardInfo">가격 이상 ' + pg + '종</button>' : '') + (pg && up ? '<span>·</span>' : '') + (up ? '<button class="pvx" data-a="unpricedInfo" title="시세를 못 찾은 코인 전체(소액·스캠 포함)예요 — 설정 › 상태의 \'시세 없는 실보유\'는 그중 원가·참고가가 큰 실보유만 세요">시세 없음 ' + up + '개</button>' : '') + '<span>— 총자산·손익 합계에 넣지 않았어요</span>' : '')
-      + '<span class="sp"></span>' + (hid ? '<button class="go" data-a="goHidden" title="미매칭 › 자동으로 숨긴 항목(소액·스캠·표시용 보정)">자동으로 숨긴 항목 ' + hid + '건 · 보기 ›</button>' : '') + '</div>' : '';
-    return '<section class="card todo' + (mob && it.length ? ' hasw' : '') + '" aria-label="정리할 것">' + head + (it.length ? todoProgress(it) : '') + rows + capL + ex + '</section>';
+    const ex = hid ? '<div class="exrow"><span class="sp"></span><button class="go" data-a="goHidden" title="미매칭 › 자동으로 숨긴 항목(소액·스캠·표시용 보정)">'
+      + '자동으로 숨긴 항목 ' + hid + '건 보기 ›</button></div>' : '';
+    return '<section class="card todo' + (mob && it.length ? ' hasw' : '') + '" id="attn" tabindex="-1" aria-label="정리할 것">' + head
+      + (it.length ? todoProgress(it) : '') + rows + capL + ex + '</section>';
   }
+  function haltHTML() {
+    const D = S.D, hl = arr(D.exHalt), pre = arr(D.exHaltPre).length;
+    if (!hl.length && !pre) return '';
+    const row = (x, i) => {
+      const mt = x.dir === 'm', dk = x.dir === 'd';
+      const tg = mt ? '<span class="pill g sm">입출금 점검 중</span>'
+        : '<span class="pill sm hlt ' + (dk ? 'hd' : 'hw') + '">' + (x.part ? '일부 네트워크 ' : '') + (dk ? '입금' : '출금') + ' 중지</span>';
+      const sub = mt ? '<span class="pvx">영향 ' + num(x.n) + '개</span>'
+        : '내 보유 <b class="num">' + m(num(x.usd), { compact: true }) + '</b> · ' + (dk ? '지금 보내면 묶여요' : '거기 있는 돈을 못 빼요');
+      return '<button type="button" class="hxr' + (mt ? ' mt' : '') + '" data-a="haltInfo" data-v="' + i + '" aria-haspopup="dialog">'
+        + '<span class="hst" aria-hidden="true"></span>' + (mt ? venueLogo(x.exN) : icon(x.sym, 'xs'))
+        + '<span class="hxt"><span class="h1"><b>' + esc(mt ? x.exN : x.sym) + '</b>' + tg
+        + (mt ? '' : '<span class="pill g sm">' + esc(x.exN) + '</span>') + '</span><span class="h2x">' + sub + '</span></span></button>';
+    };
+    return '<section class="card box halt" aria-label="거래소 상황 · 입출금 중지"><div class="row"><h2 class="h2">거래소 상황</h2>'
+      + (hl.length ? '<span class="pill sm hltn pvx">' + hl.length + '</span>' : '') + '<span class="sp"></span></div>'
+      + (hl.length ? '<div class="hxs">' + hl.slice(0, 4).map(row).join('') + '</div>' : '')
+      + (hl.length > 4 ? '<button type="button" class="link hxm" data-a="haltAll">외 ' + (hl.length - 4) + '건 더 보기 ›</button>' : '')
+      + (pre && !hl.length ? '<button type="button" class="hxo" data-a="haltOld" aria-haspopup="dialog">' + IC.info + '<span class="pvx">처음부터 막힌 보유 ' + pre + '개</span>'
+        + '<span class="sp"></span><span class="go">보기 ›</span></button>' : '') + '</section>';
+  }
+  const CASH_LOC_MIN = 0.01;
   function allocHTML() {
-    const D = S.D, T = D.total || 1;
-    const cls4 = [['스테이블', D.stableTotal, 'var(--c1)'], ['원화 예수금', D.fiatTotal, 'var(--c2)'], ['코인', D.coinTotal, 'var(--c3)'], ['LP (미청구 포함)', D.lpTotal, 'var(--c4)']];
-    const bar = cls4.filter(c => c[1] > 0).map(c => '<i style="flex:' + (c[1] / T * 100).toFixed(3) + ';background:' + c[2] + '" title="' + c[0] + '"></i>').join('');
-    const leg = cls4.filter(c => c[1] > 0 || c[0].indexOf('LP') !== 0).map(c => '<div><span class="ll"><span class="sw" style="background:' + c[2] + '"></span>' + c[0] + '</span><b class="num">' + m(c[1], { compact: true }) + '</b><span class="mut num">' + (c[1] / T * 100).toFixed(1) + '%</span></div>').join('');
-    return '<div class="card alloc"><div class="row" style="flex-wrap:wrap;gap:6px 12px"><h2 class="h2">자산 구성</h2><div class="sp"></div><div class="cap num">현금성 <span class="num">' + (D.cashTotal / T * 100).toFixed(1) + '%</span> · 코인은 온체인 ' + mN(D.coinDex, { compact: true }) + ' · 거래소 ' + mN(D.coinCex, { compact: true }) + (D.debts.length ? ' · ' + esc(D.debtLbl) + ' ' + mN(D.debtUsd, { sign: true, compact: true }) + ' 차감됨' : '') + '</div></div>'
-      + '<div class="bar">' + bar + '</div><div class="leg">' + leg + '</div></div>';
+    const D = S.D, T = D.total || 1, P = v => (v / T * 100).toFixed(1) + '%', cpt = { compact: true };
+    const cls4 = [['스테이블', D.stableTotal, 'var(--k1)'], ['원화 예수금', D.fiatTotal, 'var(--k3)'], ['코인', D.coinTotal, 'var(--k2)'],
+      ['LP <span class="mut">(미청구 포함)</span>', D.lpTotal, 'var(--k4)']];
+    const bar = cls4.filter(c => c[1] > 0).map(c => '<i style="flex:' + (c[1] / T * 100).toFixed(3) + ';background:' + c[2] + '"></i>').join('');
+    const st = D.stableGroups.filter(g => dustOk(g.value)), fi = D.fiats.filter(x => dustOk(num(x.krw) / D.rate));
+    const fiV = x => (S.hide ? (S.cur === 'USD' ? '$' + pvW(PVM.usdC) : '₩' + pvW(PVM.krwC))
+      : S.cur === 'USD' ? m(num(x.krw) / D.rate, cpt) : '₩' + rw(eok(KS(num(x.krw)))));
+    const cr = (c, extra) => '<div class="cr"><i style="background:' + c[2] + '" aria-hidden="true"></i><span class="crn">' + c[0] + '</span>' + (extra || '')
+      + '<span class="sp"></span><b class="num">' + mTot(c[1], cpt) + '</b><span class="crp num">' + P(c[1]) + '</span></div>';
+    const fiRow = x => '<div class="csub cfi">' + venueLogo(x.ex) + '<span class="csn">' + esc(x.ex) + ' 원화</span><span class="mut">' + esc(x.note || '') + '</span>'
+      + '<span class="sp"></span><b class="num" title="' + esc(krw(num(x.krw)) + (S.cur === 'USD' ? ' · ' + m(num(x.krw) / D.rate) : '')) + '">' + fiV(x) + '</b></div>';
+    const fi1 = fi.length === 1 ? '<span class="cap">' + esc(fi[0].ex) + '</span>' : '';
+    const rows = cr(cls4[0]) + st.map(allocStRow).join('') + cr(cls4[1], fi1) + (fi.length > 1 ? fi.map(fiRow).join('') : '')
+      + cr(cls4[2]) + (cls4[3][1] > 0 ? cr(cls4[3]) : '');
+    const foot = '코인은 온체인 ' + mN(D.coinDex, cpt) + ' · 거래소 ' + mN(D.coinCex, cpt)
+      + (D.debts.length ? ' · ' + esc(D.debtLbl) + ' ' + mN(D.debtUsd, { sign: true, compact: true }) + ' 차감됨' : '');
+    return '<section class="card alloc" aria-label="자산 구성"><div class="row"><h2 class="h2">자산 구성</h2><div class="sp"></div>'
+      + '<span class="cap num">현금성 ' + P(D.cashTotal) + ' · ' + mTot(D.cashTotal, cpt) + '</span></div>'
+      + '<div class="bar" aria-hidden="true">' + bar + '</div><div class="crs">' + rows + '</div>'
+      + '<div class="cap num afoot">' + foot + '</div></section>';
+  }
+  function allocStRow(g) {
+    const open = S.stOpen.has(g.sym), lv = g.locs.filter(l => !(num(l.value) < CASH_LOC_MIN)), cut9 = g.locs.length - lv.length;
+    const li = l => '<div><span class="ell">' + locH(l.w) + trChip(l.tr, l.w)
+      + ' <span class="mut' + (l.tr ? ' trs' : '') + '">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>';
+    const items = () => '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(li).join('') + '</div>';
+    const sy = esc(g.sym), chv = '<span class="uchev' + (open ? ' up' : '') + '" aria-hidden="true">' + IC.chev + '</span>';
+    return '<div class="csw" data-anc="cash:' + sy + '"><button type="button" class="csub" data-a="stTog" data-k="' + sy + '"'
+      + ' aria-expanded="' + open + '">' + icon(g.sym, 'xs', { noSym: false })
+      + '<span class="csn">' + sy + trChip(g.tr, '', true) + '</span>'
+      + '<span class="mut pvx"' + (cut9 ? ' title="' + esc('잔고 1센트 미만 ' + cut9 + '곳 제외') + '"' : '') + '>· ' + lv.length + '곳'
+      + (lv.length === 1 ? ' · <span class="pvl">' + esc(locName(lv[0].w)) + '</span>' : '') + '</span><span class="sp"></span>'
+      + '<b class="num" title="' + esc(m(g.value)) + '">' + m(g.value, { compact: true }) + '</b>'
+      + chv + '</button>' + (open ? clps('st:' + g.sym, items()) : '') + '</div>';
   }
   function holdRows() {
     const D = S.D, mode = S.hold.mode;
@@ -1307,7 +1428,7 @@
     const head = '<div class="tblhead"><h2 class="h2">보유 코인</h2><span class="cap num">' + nCoin + '종 · ' + ({ value: '평가금액', roi: '수익률', pnl: '평가손익' })[S.hold.sort] + ' 순</span>' + dustLink + '<div class="sp"></div>' + seg + dseg + '</div>';
     if (!rows.length) {
       return '<div class="card">' + head + '<div class="empty"><div class="eic">' + IC.coin + '</div><b>' + (D.groups.length ? '표시할 코인이 없어요' : '보유 코인이 없어요') + '</b>'
-        + (hidden.length ? '소액 기준($' + S.dust + ') 미만 ' + hidden.length + '종이 숨겨져 있어요. <button class="link" data-a="toggleDust">모두 보기</button>' : '지갑 스캔·거래소 동기화 후 여기에 나타나요.') + '</div>' + zeroFoldHTML() + debtFootHTML() + '</div>';
+        + (hidden.length ? '소액 기준($' + S.dust + ') 미만 ' + hidden.length + '종이 숨겨져 있어요. <button class="link" data-a="toggleDust">모두 보기</button>' : '지갑 스캔·거래소 동기화 후 여기에 나타나요.') + '</div>' + evalOutHTML() + '</div>';
     }
     let body;
     if (S.mobile) {
@@ -1338,19 +1459,32 @@
             + (open ? '<tr class="xrow"><td colspan="5">' + clps('h:' + g.key, holdDetail(r)) + '</td></tr>' : '');
         }).join('') + '</tbody></table>';
     }
-    const zf = zeroFoldHTML();
+    const zf = evalOutHTML();
     const foot = pgH.last > 0 ? '<div class="foot hpg">' + uiPgBar('hold', rows.length, { unit: rows.length > nCoin ? '줄' : '종' }) + '</div>' : '';
-    return '<div class="card">' + (pgH.last > 0 ? '<div class="upga" data-pga="hold"></div>' : '') + head + body + foot + zf + debtFootHTML() + '</div>';
+    return '<div class="card">' + (pgH.last > 0 ? '<div class="upga" data-pga="hold"></div>' : '') + head + body + foot + zf + '</div>';
   }
-  function debtFootHTML() {
-    const D = S.D, neg = (D.groups || []).filter(g => num(g.qty) < 0 && num(g.value) <= -0.005);
-    if (!neg.length || S.hold.mode !== 'all') return '';
-    return '<div class="foot zfold"><span><span class="pvx">빌린 몫이 잔고를 넘은 코인 <b class="num">' + neg.length + '</b>종</span> · <b class="num">' + m(sum(neg, g => num(g.value)), { compact: true }) + '</b> <span class="mut pvx">· '
-      + esc(neg.slice(0, 3).map(g => g.sym).join(' · ') + (neg.length > 3 ? ' 외' : '')) + ' — 총자산에서 차감 · 빌린 돈은 레버리지·대출 칸</span></span></div>';
+  function evalOutHTML() {
+    const D = S.D, all = S.hold.mode === 'all', z = all ? D.zeroInst || [] : [], pg = D.priceGuard.length, up = D.upN;
+    const neg = all ? (D.groups || []).filter(g => num(g.qty) < 0 && num(g.value) <= -0.005) : [];
+    if (!z.length && !pg && !up && !neg.length) return '';
+    const open = S.hold.showZero, bits = [];
+    const bt = (a, t, x) => '<button type="button" data-a="' + a + '" aria-haspopup="dialog" title="' + t + '">' + x + '</button>';
+    const upT = '시세를 못 찾은 코인 전체(소액·스캠 포함)예요 — 설정 › 상태의 \'시세 없는 실보유\'는 그중 원가·참고가가 큰 실보유만 세요';
+    if (z.length) bits.push('<span class="nowrap">값 없는 토큰 <b class="num">' + z.length + '</b>개</span>');
+    if (pg) bits.push(bt('guardInfo', 'DEX 가격이 비정상이라 평가 0 · 총자산·손익 밖', '가격 이상 ' + pg + '종'));
+    if (up) bits.push(bt('unpricedInfo', upT, '시세 없음 ' + up + '개'));
+    const negT = '빌린 몫이 잔고를 넘어 총자산에서 차감 ' + m(sum(neg, g => num(g.value)), { compact: true }) + ' · 빌린 돈은 레버리지·대출 칸';
+    if (neg.length) bits.push('<span class="nowrap" title="' + esc(negT) + '">빌린 코인 ' + neg.length + '종 '
+      + esc(neg.slice(0, 3).map(g => g.sym).join(' · ') + (neg.length > 3 ? ' 외' : '')) + '</span>');
+    const tog = z.length ? '<button class="link" data-a="holdZero" aria-expanded="' + open + '">'
+      + (open ? '접기' : '보기' + IC.right) + '</button>' : '';
+    return '<div class="foot zfold evo pvx">' + IC.eyeoff + '<b>평가 제외</b>' + bits.join('<span class="mut">·</span>')
+      + '<span class="sp"></span>' + tog + '</div>' + zeroFoldHTML(true);
   }
   function zeroFoldHTML() {
-    const D = S.D, z = D.zeroInst || [];
+    const D = S.D, z = D.zeroInst || [], body = arguments[0] === true;
     if (!z.length || S.hold.mode !== 'all') return '';
+    if (body && !S.hold.showZero) return '';
     const nG = z.filter(x => x.guard).length, nV = z.filter(x => x.unv && !x.guard).length, nU = z.length - nG - nV, open = S.hold.showZero;
     const why = [nG ? '가격 이상 ' + nG : '', nU ? '시세 없음 ' + nU : '', nV ? '확인 필요 ' + nV : ''].filter(Boolean).join(' · ');
     const it = x => '<div class="zi" data-anc="zcoin:' + esc(String(x.sym || '').toUpperCase()) + '"><b class="ell">' + esc(x.sym) + '</b><span class="ell mut">' + (x.chain ? esc(x.chain) : x.where.length ? x.where.slice(0, 2).map(locH).join(' · ') : '거래소') + '</span><span class="num">' + q(x.qty) + '</span>'
@@ -1358,8 +1492,8 @@
         : x.unv ? '<button class="pill w sm" data-a="unvTok" data-k="' + esc(x.key) + '" title="' + esc(x.unv) + ' 이름이지만 정품 목록에 없는 컨트랙트예요 — 눌러서 확인">확인 필요</button>'
         : x.genU ? '<button class="pill a sm" data-a="genTok" data-k="' + esc(x.key) + '" title="직접 정품으로 등록한 컨트랙트 — 눌러서 등록 풀기">직접 등록</button>'
         : x.cost >= 1 ? '<span class="pill g sm" title="원가 ' + esc(m(x.cost)) + ' — 시세가 없어 평가 0">원가 있음</span>' : '<span></span>') + '</div>';
-    return '<div class="foot zfold"><span class="pvx"><span class="nowrap">값 없는 토큰 <b class="num">' + z.length + '</b>개</span> <span class="mut"><span class="nowrap">· ' + why + '</span> <span class="nowrap">— 평가 0 ·</span> <span class="nowrap">총자산 밖</span></span></span>'
-      + '<button class="link" data-a="holdZero" aria-expanded="' + open + '">' + (open ? '접기' : '보기') + (open ? '' : IC.right) + '</button></div>'
+    return (body ? '' : '<div class="foot zfold"><span class="pvx"><span class="nowrap">값 없는 토큰 <b class="num">' + z.length + '</b>개</span> <span class="mut"><span class="nowrap">· ' + why + '</span> <span class="nowrap">— 평가 0 ·</span> <span class="nowrap">총자산 밖</span></span></span>'
+      + '<button class="link" data-a="holdZero" aria-expanded="' + open + '">' + (open ? '접기' : '보기') + (open ? '' : IC.right) + '</button></div>')
       + (open ? (() => { const pz = uiPgSlice('zero', z); return (pz.last > 0 ? '<div class="upga" data-pga="zero"></div>' : '') + '<div class="zlist">' + pz.rows.map(it).join('') + '</div>' + uiPgBar('zero', z.length, { unit: '개', cls: 'zpg' }); })() : '');
   }
   const holdTh = (k, label, x) => '<th scope="col" class="sort' + (S.hold.sort === k ? ' on' : '') + (x ? ' ' + x : '') + '" aria-sort="' + (S.hold.sort === k ? (S.hold.dir < 0 ? 'descending' : 'ascending') : 'none') + '"><button class="thb" data-a="holdSort" data-v="' + k + '" aria-label="' + label + ' 순 정렬' + (S.hold.sort === k ? (S.hold.dir < 0 ? ' (지금 큰 순 — 누르면 작은 순)' : ' (지금 작은 순 — 누르면 큰 순)') : '') + '">' + label + (S.hold.sort === k ? (S.hold.dir < 0 ? ' ↓' : ' ↑') : '') + '</button></th>';
@@ -1436,15 +1570,40 @@
   const SUB_SFX = / · 서브[1-9]$/;
   const exKey = ex => { const x9 = String(ex || '').replace(SUB_SFX, ''), e = x9.toLowerCase(); return EX_NAMES[e] ? e : (EX_BY_KO[x9] || e); };
   const exNm = ex => { const m9 = String(ex || '').match(SUB_SFX); return (EX_NAMES[exKey(ex)] || String(ex || '').replace(SUB_SFX, '')) + (m9 ? m9[0] : ''); };
-  function futPosHTML(side) {
-    const f = S.D.fut, ps = arr(f.positions);
-    if (!ps.length) return '';
-    return '<div class="card' + (side ? ' sidec' : '') + '"><div class="tblhead"><h2 class="h2">선물 포지션</h2><span class="cap num">' + ps.length + '개 · 마크가 기준' + (side ? '' : ' · 총자산 미반영') + '</span><div class="sp"></div><button class="link" data-a="openFut">상세' + IC.right + '</button></div>'
-      + (S.mobile || side ? '<div class="m-list">' + ps.map(p => '<div class="it">' + icon(p.sym, true) + '<div class="ell"><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub">' + esc(exNm(p.ex)) + (p.dex ? ' <span class="pill g sm">덱스</span>' : '') + ' · ' + q(num(p.qty)) + '</div></div><div class="r"><div class="val num ' + cls(num(p.upnl)) + '">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</div><div class="sub num">' + (num(p.liq) > 0 && p.liqDist != null ? '청산까지 ' + Math.abs(num(p.liqDist)).toFixed(1) + '%' : '청산가 없음') + '</div></div></div>').join('') + '</div>'
+  function futPosHTML() {
+    const D = S.D, f = D.fut, ps = arr(f.positions), stale = arr(f.staleExchanges);
+    if (!f.ts) return '';
+    const net = num((f.pnlBreak || {}).net != null ? f.pnlBreak.net : f.realizedTotal), tip = futFxNote(net);
+    const vks = Object.keys(f.snapshotTs || {}), ndex = vks.filter(isDex).length, exs = vks.length - ndex;
+    const where = exs || ndex ? (exs ? '거래소 ' + exs + '곳' : '') + (ndex ? (exs ? ' · ' : '') + '덱스 ' + ndex + '곳' : '') : '';
+    const sc = { sign: true, compact: true };
+    const cum = '누적 실현 <span class="num ' + cls(net) + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + mN(net, sc) + '</span>';
+    const st = stale.length ? '<span class="pill w sm" title="' + esc(stale.map(x => EX_NAMES[x] || x).join(', ') + ' 제외') + '">수집 지연</span>' : '';
+    const go = '<span class="sp"></span><button class="link" data-a="openFut">상세' + IC.right + '</button>';
+    if (!ps.length) return '<div class="futb fut0"><b>선물</b><span class="cap"><span class="pvx">오픈 포지션 없음' + (where ? ' · ' + where : '') + '</span> · '
+      + cum + '</span>' + st + go + '</div>';
+    const uT = f.upnlPartial ? ' title="코인 정산 포지션 일부는 시세가 없어 빼고 더했어요"' : '';
+    const head = '<div class="futb"><b>선물 포지션</b><span class="cap pvx">' + ps.length + '개</span>' + st + go + '</div>'
+      + '<div class="futs"><span class="futv"><span class="lab">평가손익 · 마크가</span>'
+      + '<b class="num ' + cls(num(f.upnl)) + '"' + uT + '>' + upnlH(f.upnl, null, sc) + '</b></span>'
+      + '<span class="sp"></span><span class="cap"><span class="pvx">오픈 ' + num(f.posCount || ps.length) + '건 · 규모 </span>'
+      + (D.fut.notional == null ? '—' : mN(num(f.notional), { compact: true })) + ' · ' + cum
+      + (where ? '<span class="pvx"> · ' + where + '</span>' : '') + '</span></div>';
+    return '<div class="futblk">' + head + futRowsHTML(ps) + '<div class="futb futf cap">마크가 · 총자산 미반영 (증거금은 거래소 잔고에 포함)</div></div>';
+  }
+  function futRowsHTML(ps) {
+    const lg = p => (p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + p.lev : '');
+    const mRow = p => '<div class="it">' + icon(p.sym, true) + '<div class="ell"><div class="sym">' + esc(futSym(p.sym))
+      + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(lg(p)) + '</span></div>'
+      + '<div class="sub">' + esc(exNm(p.ex)) + (p.dex ? ' <span class="pill g sm">덱스</span>' : '') + ' · ' + q(num(p.qty)) + '</div></div>'
+      + '<div class="r"><div class="val num ' + cls(num(p.upnl)) + '">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</div>'
+      + '<div class="sub num">' + (num(p.liq) > 0 && p.liqDist != null ? '청산까지 ' + Math.abs(num(p.liqDist)).toFixed(1) + '%' : '청산가 없음')
+      + '</div></div></div>';
+    return (S.mobile ? '<div class="m-list">' + ps.map(mRow).join('') + '</div>'
         : '<table><thead><tr><th scope="col">포지션</th><th scope="col">수량</th><th scope="col">진입 / 마크</th><th scope="col">평가손익</th><th scope="col">청산까지</th></tr></thead><tbody>' + ps.map(p => {
           const d9 = num(p.liq) > 0 && p.liqDist != null ? Math.abs(num(p.liqDist)) : null;
           return '<tr><td><div class="asset">' + icon(p.sym, true) + '<div><div class="sym">' + esc(futSym(p.sym)) + ' <span class="pill ' + (p.side === 'LONG' ? 'up' : 'down') + ' sm">' + esc(p.side === 'LONG' ? '롱' : '숏') + (p.lev ? ' ×' + esc(p.lev) : '') + '</span></div><div class="sub row gap6">' + exLogo(exKey(p.ex)) + esc(exNm(p.ex)) + (p.dex ? '<span class="pill g sm">덱스</span>' : '') + '</div></div></div></td><td class="num">' + q(num(p.qty)) + '</td><td class="num">' + px(num(p.entry)) + '<div class="sub">' + px(num(p.mark)) + '</div></td><td class="num ' + cls(num(p.upnl)) + '" style="font-weight:700">' + upnlH(p.upnl, p.upnlWhy, { sign: true }) + '</td><td class="num">' + (d9 == null ? '<span class="mut">없음</span>' : '<span style="color:' + (d9 < 10 ? 'var(--danger)' : d9 < 25 ? 'var(--warn)' : 'var(--text2)') + '">' + d9.toFixed(1) + '%</span><div class="sub">' + px(num(p.liq)) + '</div>') + '</td></tr>';
-        }).join('') + '</tbody></table>') + '</div>';
+        }).join('') + '</tbody></table>');
   }
   const pxrRaw = v => (v >= 1000 ? nf('en-US', null, 0).format(v) : v >= 1 ? trimZeros(v.toFixed(4)) : trimZeros(v.toPrecision(4)));
   const pxr = v => S.hide ? pvW(PVM.px) : rw(pxrRaw(v));
@@ -1542,27 +1701,34 @@
     const all = D.venues, vis = all.filter(v => S.dust <= 0 || v.total >= S.dust);
     const mx = vis.length ? vis[0].total : 1;
     const pgV = uiPgSlice('venue', vis);
-    return '<div class="card box"><div class="row"><h2 class="h2">보관처별</h2><div class="sp"></div><span class="cap">현금 포함 · ' + vis.length + '곳' + (all.length > vis.length ? ' · 소액 ' + (all.length - vis.length) + '곳 숨김' : '') + '</span></div>'
+    const legend = '<div class="vnleg cap" aria-hidden="true"><span><i style="background:var(--k2)"></i>지갑</span><span><i style="background:var(--k5)"></i>거래소</span>'
+      + (vis.some(v => v.kind === 'lp') ? '<span><i style="background:var(--k4)"></i>LP</span>' : '')
+      + '<span class="sp"></span><span>막대 = 가장 큰 곳 대비</span></div>';
+    return '<section class="card box" aria-label="보관처별"><div class="row"><h2 class="h2">보관처별</h2><div class="sp"></div>'
+      + '<span class="cap">현금 포함 · ' + vis.length + '곳' + (all.length > vis.length ? ' · 소액 ' + (all.length - vis.length) + '곳 숨김' : '')
+      + '</span></div>'
       + (pgV.last > 0 ? '<div class="upga" data-pga="venue"></div>' : '') + '<div class="cust">' + (pgV.rows.map(v => {
         const vk = nmKey(v.name);
         const lg = v.kind === 'lp' ? '<span class="exl w" aria-hidden="true">' + IC.layers + '</span>' : venueLogo(v.name);
-        return '<div class="it"><button data-a="venueOpen" data-k="' + esc(vk) + '" aria-haspopup="dialog"><div class="top2">' + lg + '<span class="ell pvl">' + esc(locName(v.name)) + '</span><b class="num" data-fl="v:' + esc(vk) + '" data-v="' + (S.hide || S.rand ? 0 : v.total.toFixed(2)) + '">' + m(v.total, { compact: true }) + '</b></div>'
-          + '<div class="mini"><i style="width:' + Math.max(1, v.total / mx * 100).toFixed(1) + '%;background:' + (v.kind === 'wallet' ? 'var(--c4)' : v.kind === 'lp' ? 'var(--c3)' : 'var(--accent)') + '"></i></div></button></div>';
+        return '<div class="it"><button data-a="venueOpen" data-k="' + esc(vk) + '" aria-haspopup="dialog"><div class="top2">' + lg + '<span class="ell pvl">' + esc(locName(v.name)) + '</span><b class="num" data-fl="v:' + esc(vk) + '" data-v="' + (S.hide || S.rand ? 0 : v.total.toFixed(2)) + '">' + mTot(v.total, { compact: true }) + '</b></div>'
+          + '<div class="mini"><i style="width:' + Math.max(1, v.total / mx * 100).toFixed(1) + '%;background:' + (v.kind === 'wallet' ? 'var(--k2)' : v.kind === 'lp' ? 'var(--k4)' : 'var(--k5)') + '"></i></div></button></div>';
       }).join('') || '<div class="mut" style="font-size:14px;padding:10px 0">보관처가 없어요</div>') + '</div>'
-      + uiPgBar('venue', vis.length, { unit: '곳' }) + '</div>';
+      + uiPgBar('venue', vis.length, { unit: '곳' }) + (vis.length ? legend : '') + '</section>';
   }
   const vnCash = sym => { const s = String(sym || '').toUpperCase(); return s === 'KRW' || !!(S.D && S.D.stableSyms && S.D.stableSyms.has(s)); };
   const VN_FAM = { Solana: 'SOL', Tron: 'TRON', Sui: 'SUI', TON: 'TON', Bitcoin: 'BTC' }, VN_FAMS = ['EVM', 'SOL', 'TRON', 'SUI', 'TON', 'BTC'];
   function vnModel(v) {
     const D = S.D, tot = num(v.total);
     const cm = new Map();
-    v.items.forEach(it => { const k = String(it.sym || '?'); let c = cm.get(k); if (!c) { c = { sym: k, usd: 0, qty: 0, qn: true, lbl: null }; cm.set(k, c); }
-      c.usd += num(it.usd); if (typeof it.qty === 'number') c.qty += it.qty; else { c.qn = false; c.lbl = it.qty; } });
+    v.items.forEach(it => { const k = String(it.sym || '?'); let c = cm.get(k); if (!c) { c = { sym: k, usd: 0, qty: 0, qn: true, lbl: null, ch: '', chU: -Infinity }; cm.set(k, c); }
+      c.usd += num(it.usd); if (typeof it.qty === 'number') c.qty += it.qty; else { c.qn = false; c.lbl = it.qty; }
+      if (it.ch && num(it.usd) > c.chU) { c.ch = String(it.ch); c.chU = num(it.usd); } });
     const coins = Array.from(cm.values()).sort((a, b) => b.usd - a.usd || (a.sym < b.sym ? -1 : 1));
     coins.forEach(c => { c.pct = tot > 0 ? Math.max(0, c.usd) / tot * 100 : 0; });
     const chm = new Map();
     v.items.forEach(it => { const ch = String(it.ch || ''); if (!ch) return; chm.set(ch, (chm.get(ch) || 0) + num(it.usd)); });
     const chains = Array.from(chm.entries()).map(([ch, usd]) => ({ ch, usd, pct: tot > 0 ? Math.max(0, usd) / tot * 100 : 0 })).sort((a, b) => b.usd - a.usd);
+    chains.forEach(c => { c.syms = coins.filter(x => x.ch === c.ch).map(x => x.sym); });
     const addrs = [], chAddr = {};
     if (v.kind === 'wallet') {
       const W = arr(D.wallets);
@@ -1578,19 +1744,49 @@
     return { v, tot, coins, chains, addrs, chAddr, kindTxt, share };
   }
   function vnExpl(ch, addr) { const k = CHAIN_KEY[ch]; return k && EXPL[k] && addr && !S.rand ? EXPL[k][1] + encodeURIComponent(addr) : null; }
-  const vnBar = p => (Math.abs(num(p)) < 1 ? '' : '<div class="mini" aria-hidden="true"><i style="width:' + Math.min(100, Math.max(0, num(p))).toFixed(1) + '%"></i></div>');
+  const VN_CH = { Ethereum: 'chEth', Base: 'chBase', Solana: 'chSol', Arbitrum: 'chArb', BSC: 'chBsc', 'BNB Chain': 'chBsc', Optimism: 'chOp', Polygon: 'chPol',
+    Tron: 'chTron', Sui: 'chSui', TON: 'chTon', Bitcoin: 'chBtc' };
+  const vnBar = (p, ch) => (Math.abs(num(p)) < 1 ? '' : '<div class="mini" aria-hidden="true"><i style="width:'
+    + Math.min(100, Math.max(0, num(p))).toFixed(1) + '%' + (VN_CH[ch] ? ';background:var(--' + VN_CH[ch] + ')' : '') + '"></i></div>');
   const vnPct = p => '<span class="num vnp">' + Math.round(num(p)) + '%</span>';
+  const VN_DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [0, '전체']];
+  const vnSt = () => S.vn || (S.vn = { days: 30, cache: {}, busy: '', ver: '', fail: {}, part: {} });
+  const vnErr = days => ({ ok: false, days, flowOk: false, by: {}, err: true });
+  function vnFetch(days) {
+    const V = vnSt(), ver = String((S.D && S.D.builtAt) || ''), k = String(days);
+    if (V.ver !== ver) { V.ver = ver; V.cache = {}; V.fail = {}; V.part = {}; V.busy = ''; }
+    if (V.cache[k]) return V.cache[k];
+    if (V.part[k]) return V.part[k];
+    if (V.fail[k]) return vnErr(days);
+    if (V.busy === k) return null;
+    V.busy = k;
+    fetch('/api/venue_flows?days=' + days, { cache: 'no-store', credentials: 'same-origin' }).then(r => (r.ok ? r.json() : null))
+      .then(j => { if (V.ver !== ver) return; if (j && j.ok) (j.partial ? V.part : V.cache)[k] = j; else V.fail[k] = true; })
+      .catch(() => { if (V.ver === ver) V.fail[k] = true; })
+      .then(() => { if (V.ver === ver && V.busy === k) V.busy = ''; if (S.drawer === 'venue') renderOverlay(); });
+    return null;
+  }
   function vnFlows(M) {
-    const F = S.D.vflows, v = M.v, by = F && F.by ? F.by[v.name] : null, Z = { in: 0, out: 0, realized: 0, realizedKrw: 0 };
-    const okF = !!(F && F.flowOk && v.kind !== 'lp'), okR = !!(F && v.kind !== 'lp'), x = by || Z;
+    const V = vnSt(), v = M.v, F = V.days === 30 ? S.D.vflows : vnFetch(V.days), by = F && F.by ? F.by[v.name] : null;
+    const Z = { in: 0, out: 0, realized: 0, realizedKrw: 0 };
+    const okF = !!(F && F.flowOk && v.kind !== 'lp'), okR = !!(F && !F.err && v.kind !== 'lp'), x = by || Z;
     const rec = vnSrc(M);
     const rzV = KV(num(x.realized), x.realizedKrw != null ? num(x.realizedKrw) : null);
-    const dash = '<span class="mut">—</span>';
-    return '<section class="vnsec vnfl"><div class="vnh"><b>드나든 돈 · 최근 30일</b>' + (rec ? '<button class="link" data-a="venueRec">이곳 기록 보기 ›</button>' : '') + '</div><div class="vntiles">'
+    const dash = '<span class="mut">' + (F || V.days === 30 ? '—' : '…') + '</span>';
+    const lbl = (VN_DAYS.find(d => d[0] === V.days) || VN_DAYS[1])[1];
+    const seg = v.kind === 'lp' ? '' : '<div class="seg" role="group" aria-label="기간">' + VN_DAYS.map(d => { const on = d[0] === V.days;
+      return '<button type="button" data-a="vnDays" data-v="' + d[0] + '" class="' + (on ? 'on' : '') + '" aria-pressed="' + on + '">'
+        + d[1] + '</button>'; }).join('') + '</div>';
+    const note = F && F.err ? '기간 계산을 불러오지 못했어요 — 잠시 뒤 다시 골라 보세요'
+      : F && F.partial ? '창 밖(' + (F.flowFrom || '') + ' 앞) 들어옴·나감은 아직 못 셌어요 — 칩을 다시 고르면 다시 시도 · 실현은 기간 전체'
+      : F && F.flowOk && F.flowFrom && (!F.since || F.flowFrom > F.since) ? '들어옴·나감은 ' + F.flowFrom + ' 부터(가격 기록 있는 날만) · 실현은 기간 전체' : '';
+    const ttl = '드나든 돈 · ' + (V.days === 0 ? '전체 기간' : '최근 ' + lbl);
+    return '<section class="vnsec vnfl"><div class="vnh" style="flex-wrap:wrap"><b>' + ttl + '</b>' + seg
+      + (rec ? '<button class="link" data-a="venueRec">이곳 기록 보기 ›</button>' : '') + '</div><div class="vntiles">'
       + uiCell('들어옴', okF ? '<span class="' + (num(x.in) > 0 ? 'up' : '') + '">' + (num(x.in) > 0 ? '+' : '') + m(num(x.in), { compact: true }) + '</span>' : dash)
       + uiCell('나감', okF ? '<span class="' + (num(x.out) > 0 ? 'down' : '') + '">' + (num(x.out) > 0 ? '−' : '') + m(num(x.out), { compact: true }) + '</span>' : dash)
       + uiCell('이곳 매매 실현', okR ? '<span class="' + clsV(rzV) + '">' + m(rzV, { sign: true, compact: true }) + '</span>' : dash)
-      + '</div></section>';
+      + '</div>' + (note ? '<div class="cap mut" style="margin-top:8px">' + esc(note) + '</div>' : '') + '</section>';
   }
   function vnSrc(M) {
     const v = M.v;
@@ -1604,8 +1800,11 @@
     const anyL = M.chains.some(c => vnExpl(c.ch, M.chAddr[c.ch]));
     const rows = M.chains.map(c => { const u = vnExpl(c.ch, M.chAddr[c.ch]);
       const nm = u ? '<a class="ell vnchn" href="' + esc(TJDOM.safeUrl(u)) + '" target="_blank" rel="noopener noreferrer" title="' + esc(c.ch + ' 탐색기에서 보기') + '">' + esc(c.ch) + '</a>' : '<span class="ell vnchn">' + esc(c.ch) + '</span>';
-      return '<div class="it vnch"><div class="top2">' + nm + '<b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>' + vnBar(c.pct) + '</div>'; }).join('');
-    const ad = M.addrs.map(a => '<div class="vnad"><span class="mono">' + esc(short(a)) + '</span><span class="sp"></span>' + copyBtn(a) + '</div>').join('');
+      const cs = c.syms.length ? '<span class="cap ell vnchs">' + esc(c.syms.slice(0, 3).join(' · ') + (c.syms.length > 3 ? ' 외' : '')) + '</span>' : '';
+      return '<div class="it vnch"><div class="top2">' + nm + cs + '<b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>'
+        + vnBar(c.pct, c.ch) + '</div>'; }).join('');
+    const adr = a => '<div class="vnad"><span class="mono">' + esc(short(a)) + '</span><span class="sp"></span>' + copyBtn(a) + '</div>';
+    const ad = M.addrs.length > 1 ? M.addrs.map(adr).join('') : '';
     return '<section class="vnsec"><div class="vnh"><b>체인별</b>' + (anyL ? '<span class="cap">이름 누르면 탐색기</span>' : '') + '</div><div class="cust vnl">' + rows + '</div>' + (ad ? '<div class="vnads">' + ad + '</div>' : '') + '</section>';
   }
   function vnCoins(M) {
@@ -1614,14 +1813,15 @@
       const qt = c.qn ? q(c.qty) : c.lbl && c.lbl.krw != null ? krw(c.lbl.krw) : esc(String(c.lbl == null ? '' : c.lbl));
       const go = c.sym !== 'KRW' && M.v.kind !== 'lp';
       return '<div class="it vnco"><' + (go ? 'button type="button" data-a="venueCoin" data-v="' + esc(c.sym) + '"' : 'div') + ' class="vnrow"><div class="top2">' + icon(c.sym, '', lg ? { ck: lg.ck, ca: lg.ca } : {})
-        + '<span class="vncn ell"><span class="vnsym">' + esc(c.sym) + '</span> <span class="num mut">' + qt + '</span></span><b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>'
-        + vnBar(c.pct) + '</' + (go ? 'button' : 'div') + '></div>'; };
+        + '<span class="vncn ell"><span class="vnsym">' + esc(c.sym) + '</span> <span class="num mut">' + qt + '</span>' + (c.ch && M.v.kind === 'wallet' ? '<span class="mut"> · ' + esc(c.ch) + '</span>' : '')
+        + '</span><b class="num">' + m(c.usd, { compact: true }) + '</b>' + vnPct(c.pct) + '</div>' + vnBar(c.pct, c.ch)
+        + '</' + (go ? 'button' : 'div') + '></div>'; };
     const more = uiPgBar(vk9, all.length, { unit: '종' });
     return '<section class="vnsec vncs">' + (pgC.last > 0 ? '<div class="upga" data-pga="' + esc(vk9) + '"></div>' : '') + '<div class="vnh"><b>들어 있는 코인</b>' + (M.v.kind !== 'lp' ? '<span class="cap">눌러서 보유표로</span>' : '') + '</div><div class="cust vnl">' + shown.map(row).join('') + '</div>' + more + '</section>';
   }
   function venueDrawer() {
     const D = S.D, v = arr(D.venues).find(x => nmKey(x.name) === S.venueK);
-    const close = '<button class="iconbtn" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button>';
+    const close = '<button class="xb" data-a="drawerClose" aria-label="닫기">' + IC.close + '</button>';
     if (!v) return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세"><div class="dh"><h2 class="h2">보관처 상세</h2><span class="sp"></span>' + close + '</div><div class="cap" role="status">이 보관처는 지금 목록에 없어요(잔고 0 · 이름 바뀜)</div></aside>';
     const M = vnModel(v);
     const exTs = (D.exBalTs || {})[v.name];
@@ -1629,9 +1829,12 @@
       : v.kind === 'cex' ? '코인 ' + M.coins.length + '종 · ' + (exTs ? '잔고 기준 ' + ago(exTs) : '잔고 시각 모름') : '포지션 ' + M.coins.length + '개';
     const share = (M.share < 0 ? '−' : '') + (Math.abs(M.share) >= 0.5 || M.share === 0 ? Math.round(Math.abs(M.share)) : '<1') + '%';
     return '<div class="drawer-bg" data-a="drawerClose"></div><aside class="drawer venue" role="dialog" aria-modal="true" aria-label="보관처 상세">'
-      + '<div class="dh"><h2 class="h2 vnt ell pvl">' + esc(locName(v.name)) + '</h2><span class="pill sm vnkind">' + esc(M.kindTxt) + '</span><span class="sp"></span>' + close + '</div>'
-      + '<section class="vnhero"><span class="cap">이곳에 있는 돈 · 총자산의 <span class="num">' + esc(share) + '</span></span><b class="num vnbig">' + m(M.tot, { compact: true }) + '</b><span class="num mut vnalt">' + mAlt(M.tot) + '</span><span class="cap pvx vnmeta">' + esc(meta) + '</span></section>'
-      + vnFlows(M) + vnChains(M) + vnCoins(M) + '</aside>';
+      + '<div class="dh"><h2 class="h2 vnt ell pvl">' + esc(locName(v.name)) + '</h2><span class="pill sm vnkind">' + esc(M.kindTxt) + '</span>'
+      + (M.addrs.length === 1 ? '<span class="mono mut vnad1">' + esc(short(M.addrs[0])) + '</span>' + copyBtn(M.addrs[0]) : '') + '<span class="sp"></span>' + close + '</div>'
+      + '<section class="vnhero"><span class="cap">이곳에 있는 돈 · 총자산의 <span class="num">' + esc(share) + '</span></span>'
+      + '<b class="num vnbig">' + mTot(M.tot, { compact: true }) + '</b><span class="num mut vnalt">' + mAlt(M.tot) + '</span>'
+      + '<span class="cap pvx vnmeta">' + esc(meta) + '</span></section>' + vnFlows(M) + vnChains(M) + vnCoins(M)
+      + (M.chains.length ? '<p class="cap vnnote">막대 너비 = 이곳 안 비중 · 막대 색 = 체인(코인은 제 체인 색)</p>' : '') + '</aside>';
   }
   function venueOpen(el) {
     const ae = el || document.activeElement;
@@ -1641,20 +1844,6 @@
     drawerHist();
     renderOverlay();
     { const b = $('#overlay .drawer [data-a="drawerClose"]'); if (b) b.focus(); }
-  }
-  const CASH_LOC_MIN = 0.01;
-  function cashHTML() {
-    const D = S.D;
-    const st = D.stableGroups.filter(g => dustOk(g.value));
-    const fi = D.fiats.filter(x => dustOk(num(x.krw) / D.rate));
-    if (!st.length && !fi.length) return '';
-    const liveL = g => g.locs.filter(l => !(num(l.value) < CASH_LOC_MIN));
-    const fiV = x => S.hide ? (S.cur === 'USD' ? '$' + pvW(PVM.usdC) : '₩' + pvW(PVM.krwC)) : S.cur === 'USD' ? m(num(x.krw) / D.rate, { compact: true }) : '₩' + rw(eok(KS(num(x.krw))));
-    return '<div class="card box"><div class="row"><h2 class="h2">현금성</h2><div class="sp"></div><b class="num">' + m(D.cashTotal, { compact: true }) + '</b></div><div class="cust">'
-      + st.map(g => { const open = S.stOpen.has(g.sym); return '<div class="it" data-anc="cash:' + esc(g.sym) + '"><button data-a="stTog" data-k="' + esc(g.sym) + '" aria-expanded="' + open + '"><div class="top2">' + icon(g.sym, 'xs', { noSym: false }) + '<span>' + esc(g.sym) + trChip(g.tr, '', true) + '</span><span class="sub"' + (g.locs.length > liveL(g).length ? ' title="' + esc('잔고 1센트 미만 ' + (g.locs.length - liveL(g).length) + '곳 제외') + '"' : '') + '>' + liveL(g).length + '곳</span><b class="num" title="' + esc(m(g.value)) + '">' + m(g.value, { compact: true }) + '</b></div></button>'
-        + (open ? clps('st:' + g.sym, '<div class="items">' + g.locs.slice().sort((a, b) => b.value - a.value).slice(0, 10).map(l => '<div><span class="ell">' + locH(l.w) + trChip(l.tr, l.w) + ' <span class="mut' + (l.tr ? ' trs' : '') + '">' + esc(l.sub) + '</span></span><span class="num">' + q(l.qty) + '</span></div>').join('') + '</div>') : '') + '</div>'; }).join('')
-      + fi.map(x => '<div class="it"><div class="top2">' + venueLogo(x.ex) + '<span>' + esc(x.ex) + ' 원화</span><span class="sub">' + esc(x.note || '') + '</span><b class="num" title="' + esc(krw(num(x.krw)) + (S.cur === 'USD' ? ' · ' + m(num(x.krw) / D.rate) : '')) + '">' + fiV(x) + '</b></div></div>').join('')
-      + '</div></div>';
   }
   function pendSplitTxt() {
     const D = S.D, rec = D.pendVis.length - D.unkhRows.length;

@@ -19,6 +19,8 @@
 {"r": "GET /api/fut_receipt", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /api/futures", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /api/habits", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/venue_flows", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /api/harvest", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /api/health", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /api/leverage", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /api/nft", "auth": "session", "internal": true, "proxy_off": 403}
@@ -69,6 +71,8 @@
 {"r": "GET /v2/tjdom.js", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /v2/wow.css", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "GET /v2/wow.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/wow_hv.js", "auth": "session", "internal": true, "proxy_off": 403}
+{"r": "GET /v2/wow_more.js", "auth": "session", "internal": true, "proxy_off": 403}
 {"r": "POST /api/alert_prefs", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/alert_test", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/auth/logout_all", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
@@ -134,6 +138,7 @@
 {"r": "POST /api/setup/wallets/label", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/setup/wallets/remove", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/src_whitelist", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
+{"r": "POST /api/ui_pref", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/wallet_alias", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/wd_dest_register", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}
 {"r": "POST /api/xfer_link", "auth": "session", "csrf": "session", "origin": "required", "proxy_off": 403, "csrf_off": "install"}

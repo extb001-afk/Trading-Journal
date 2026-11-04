@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 
-import chk_base, config, evm_reorg, logs, net_http, paths, prefs_ident, statefile
+import chk_base, config, evm_reorg, exhalt, logs, net_http, paths, prefs_ident, statefile
 import fsio
 import health_ack
 
@@ -774,7 +774,7 @@ def _eval_feeds(_bs9):
         for c9 in collect_fut_wait(now):
             add(**c9)
     if "tj-exf" in units:
-        for c9 in collect_snap_miss(now) + collect_exf_hold(now):
+        for c9 in collect_snap_miss(now) + collect_exf_hold(now) + exhalt.health_items(now):
             add(**c9)
     for c9 in collect_calcguard(now) + collect_src_off(now):
         tag = c9.pop("chip", None)
@@ -985,21 +985,21 @@ def _eval_feeds(_bs9):
                        + (["업비트 비원화 코인의 거래소별 시세가 크게 다름 — 평가는 24h 거래대금 최대 거래소 값(거래대금 모르면 바이낸스 → 바이빗 순서) · 따로 노는 마켓인지 확인"] if spr else [])),
             persist=1800, resolve=600, notify=False, remind=False, kind="price")
         ackf({f"{x.get('ex')}:{x.get('pair') or x.get('sym')}": x.get("usd") for x in pdv} | {f"spread:{x.get('sym')}": x.get("usd") for x in spr})
-        uph = [x for x in (wd.get("unpriced_held") or []) if isinstance(x, dict)
-               and max(float(x.get("cost") or 0), float(x.get("ref") or 0)) >= float(t.get("unpriced_warn_usd") or 500)]
-        edh = [x for x in (wd.get("ex_dead_held") or []) if isinstance(x, dict)]
+        thr9 = float(t.get("unpriced_warn_usd") or 500)
+        weigh = lambda x, unit=False: c if (c := float(x.get("cost") or 0)) > 0 else float(x.get("ref") or 0) * (float(x.get("qty") or 0) if unit else 1.0)
+        uph = [x for x in (wd.get("unpriced_held") or []) if isinstance(x, dict) and weigh(x) >= thr9]
+        edh = [x for x in (wd.get("ex_dead_held") or []) if isinstance(x, dict) and weigh(x, True) >= thr9]
         bad = bool(uph or edh)
         add("price:unpriced", "tj-web", f"시세 없는 실보유 {len(uph) + len(edh)}건" if bad else "시세 없는 실보유", "warn" if bad else "ok",
             " · ".join([f"{x.get('sym')} {x.get('where') or ''} 원가 ${float(x.get('cost') or 0):,.0f}"
                         + (f"·참고가 ${float(x.get('ref') or 0):,.0f}" if x.get("ref") else "") for x in uph[:3]]
-                       + [f"{x.get('sym')} {EX_KO.get(str(x.get('ex') or '').lower(), x.get('ex'))} 거래 0 페어" for x in edh[:3]]) if bad
-            else f"원가·참고가 ${float(t.get('unpriced_warn_usd') or 500):,.0f} 이상 없음",
+                       + [f"{x.get('sym')} {EX_KO.get(str(x.get('ex') or '').lower(), x.get('ex'))} 거래 0 페어 ${weigh(x, True):,.0f}" for x in edh[:3]]) if bad
+            else f"원가(모르면 참고가) ${thr9:,.0f} 이상 없음",
             "평가 0 으로 총자산에 빠져 있는 보유 — 상장폐지·거래정지·마켓 없음 확인(보유 목록 '시세 없음'), 필요하면 가격을 직접 지정(설정 파일의 가격 지정 항목)"
             " · 대시보드 '시세 없음 N개'는 소액·스캠까지 센 전체이고 여기는 그중 원가·참고가가 큰 실보유만",
             persist=3600, resolve=600, notify=False, remind=False, kind="price")
-        ackf(dict([(str(x.get("ent") or f"sym:{x.get('sym')}|{x.get('where') or ''}"), max(float(x.get("cost") or 0), float(x.get("ref") or 0))) for x in uph]
-                  + [(f"exdead:{str(x.get('ex') or '').lower()}:{x.get('sym')}",
-                      (float(x.get("qty") or 0) * float(x.get("ref") or 0)) if x.get("ref") else None) for x in edh]))
+        ackf(dict([(str(x.get("ent") or f"sym:{x.get('sym')}|{x.get('where') or ''}"), weigh(x)) for x in uph]
+                  + [(f"exdead:{str(x.get('ex') or '').lower()}:{x.get('sym')}", weigh(x, True)) for x in edh]))
         if (pfh := prefs_ident.health_item(wd)):
             add(*pfh[0], **pfh[1])
     bd = wd.get("build") if isinstance(wd, dict) and now - float(wd.get("ts") or 0) < 1800 else None

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import accounting_harvest
 import acct_norm
 from datetime import timedelta
 import logging
@@ -10,7 +11,7 @@ log = logging.getLogger('tj-web')
 class FutIdxMixin:
 
     def _build_futidx(self, _bs9):
-        (att_ok9, conn, ev_hid9, ev_main9, ev_wd9, fxb, lp_events, now, pos_ev_full, positions, realized_by_date, stab_ev, tax_rows, today_kst,) = (_bs9["att_ok9"], _bs9["ctx"].conn, _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["ctx"].fxb, _bs9["lp_events"], _bs9["ctx"].now, _bs9["pos_ev_full"], _bs9["positions"], _bs9["realized_by_date"], _bs9["stab_ev"], _bs9["tax_rows"], _bs9["ctx"].today_kst,)
+        (att_ok9, conn, ev_hid9, ev_main9, ev_wd9, fxb, lp_events, now, pos_ev_full, positions, realized_by_date, stab_ev, tax_rows, today_kst, G, harvest, prefs, stake_inc, wallet_label, fs_on, gas_on,) = (_bs9["att_ok9"], _bs9["ctx"].conn, _bs9["ev_hid9"], _bs9["ev_main9"], _bs9["ev_wd9"], _bs9["ctx"].fxb, _bs9["lp_events"], _bs9["ctx"].now, _bs9["pos_ev_full"], _bs9["positions"], _bs9["realized_by_date"], _bs9["stab_ev"], _bs9["tax_rows"], _bs9["ctx"].today_kst, _bs9["G"], _bs9["harvest"], _bs9["ctx"].prefs, _bs9["stake_inc"], _bs9["wallet_label"], _bs9["ctx"].fs_on, _bs9["ctx"].gas_on,)
         fut = self._futures_view(fxb)
         lo9 = (today_kst - timedelta(days=40)).strftime("%Y-%m-%d")
         review_realized = {}
@@ -45,6 +46,11 @@ class FutIdxMixin:
             idx9["attFut"] = {}
             log.debug("분해 상세 선물 색인 실패: %s", type(ex9).__name__)
         idx9["attDet"] = det9
+        try:
+            idx9["harvest"] = accounting_harvest.board(self, harvest, G, prefs, {"stake_inc": stake_inc, "wallet_label": wallet_label, "conn": conn, "fs_on": fs_on, "gas_on": gas_on})
+        except Exception as exc:   # noqa: BLE001 [fallback]
+            calcguard.swallowed("view_b_futidx:FutIdxMixin._build_futidx[harvest]", exc)
+            idx9["harvest"] = {"rows": [], "ref": {}}
         self._att_det = det9
         self._day_idx = idx9
         acts_md9 = {acct_norm.mmdd(k9): v9 for k9, v9 in day_acts.items() if k9 >= lo9}

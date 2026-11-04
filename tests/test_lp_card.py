@@ -129,24 +129,30 @@ chk(/<div class="lpcs"><span class="cap"><span class="pvx">종료된 포지션 3
 S.lpClosed = true; h = F.lpCardHTML();
 chk(keysOf(h).filter(k => /^lp:x/.test(k)).length === 3 && /aria-expanded="true">숨기기</.test(h), "폰 '보기' = 종료 행 3 + '숨기기'");
 }
-// ── 레버리지 · 대출: 넓은 화면 2줄 + 'N개 더' · 폰 다음 1줄 + 'N개 더' ──
+// ── 레버리지 · 대출(세션47 D3): 주의·위험 줄만 펼침 — 넓은 화면 2줄 + '주의·위험 N개 더' · 폰 다음 1줄 + '주의·위험 N개 더' · 안전 줄 = 접힘 줄(서랍) ──
 const lrow = (i, o) => Object.assign({ id: 'okx:loan:loan:' + i, kind: 'loan', ex: 'okx', exKo: '거래소' + 'ABCDE'[i], product: 'loan', kindKo: '담보대출', key: String(i), measuredAt: 1, fresh: true, state: 'safe',
   gauge: { fill: 0.5, at: 0.9, atKind: 'call' }, lbl: { now: 'LTV 50.0%', mark: '콜 88.0%', end: '청산 98.0%' }, metric: { name: 'ltv', v: 0.5, unit: 'frac', risk: 'up', call: 0.88, liq: 0.98, txt: 'LTV 50.0%' },
   thr: 'api', drop: 'OKB 가 43% 내리면 마진콜', dropShort: 'OKB 43% 내리면 마진콜', dropCall: 0.43, debts: [{ ccy: 'USDT', total: 10, principal: 9, interest: 1, yr: 0.05 }], coll: [{ ccy: 'OKB', qty: 1 }], dayUsd: 0.01, sent: null }, o);
-const levDoc = n => ({ v: 1, rows: Array.from({ length: n }, (_, i) => lrow(i)), counts: { danger: 0, warn: 0, unknown: 0, open: n, unconfirmed: 0 }, tabs: { all: n, fut: 0, margin: 0, loan: n }, exchanges: 5, levTs: 1, dayUsd: 0.05, missing: false, unconfirmed: [], unsupported: [] });
-const setLev = n => { const Ls = F.levS(); Ls.d = levDoc(n); Ls.st = 'ok'; Ls.at = Date.now() + 1e9; Ls.okAt = Date.now() + 1e9; };
+const levDoc = (n, st) => ({ v: 1, rows: Array.from({ length: n }, (_, i) => lrow(i, { state: st || 'warn' })), counts: { danger: 0, warn: st === 'safe' ? 0 : n, unknown: 0, open: n, unconfirmed: 0 }, tabs: { all: n, fut: 0, margin: 0, loan: n }, exchanges: 5, levTs: 1, dayUsd: 0.05, missing: false, unconfirmed: [], unsupported: [] });
+const setLev = (n, st) => { const Ls = F.levS(); Ls.d = levDoc(n, st); Ls.st = 'ok'; Ls.at = Date.now() + 1e9; Ls.okAt = Date.now() + 1e9; };
 reset(); S.D = { debts: [] };
 const levMore = x => { const y = x.match(/data-a="uiPgOpen" data-v="lev:dash"[^>]*>([\s\S]*?)<span class="uchev"/); return y ? y[1].replace(/<[^>]+>/g, '') : null; };
-for (const [n, rows, lbl] of [[5, 2, '3개 더 · 거래소C 담보대출 · 거래소D 담보대출 외'], [3, 2, '1개 더 · 거래소C 담보대출'], [2, 2, null], [1, 1, null]]) {
+for (const [n, rows, lbl] of [[5, 2, '주의·위험 3개 더 · 거래소C 담보대출 · 거래소D 담보대출 외'], [3, 2, '주의·위험 1개 더 · 거래소C 담보대출'], [2, 2, null], [1, 1, null]]) {
   setLev(n); const x = F.levHTML(), k = (x.match(/class="lvr st-/g) || []).length;
-  chk(k === rows && levMore(x) === lbl, '레버리지 넓은 화면 ' + n + '개 = 줄 ' + rows + (lbl ? " + '" + lbl + "'" : ' · 더보기 없음'), { k, more: levMore(x) });
+  chk(k === rows && levMore(x) === lbl, '레버리지 넓은 화면(주의) ' + n + '개 = 줄 ' + rows + (lbl ? " + '" + lbl + "'" : ' · 더보기 없음'), { k, more: levMore(x) });
 }
 setLev(5); S.uiPg['lev:dash'] = 0;
-chk((F.levHTML().match(/class="lvr st-/g) || []).length === 5 && /data-a="uiPgClose" data-v="lev:dash"[^>]*><span class="upgxt">접기/.test(F.levHTML()), "레버리지 'N개 더' 누름 = 5줄 + '접기'");
+chk((F.levHTML().match(/class="lvr st-/g) || []).length === 5 && /data-a="uiPgClose" data-v="lev:dash"[^>]*><span class="upgxt">접기/.test(F.levHTML()), "레버리지 '주의·위험 N개 더' 누름 = 5줄 + '접기'");
+setLev(3, 'safe'); delete S.uiPg['lev:dash'];
+{ const x = F.levHTML(), fo = x.match(/<button type="button" class="lvfold0" data-a="levOpen"[\s\S]*?<\/button>/);
+  chk(!/class="lvr st-/.test(x) && !!fo && /열린 것 3개/.test(fo[0]) && /안전/.test(fo[0]), "D3: 안전 줄만 = 펼친 줄 0 + 접힘 줄 '열린 것 3개 · 거래소… 안전 ›'(서랍)", fo && fo[0].replace(/<[^>]+>/g, ''));
+  setLev(4); const Ls4 = F.levS(); Ls4.d.rows[3].state = 'safe'; Ls4.d.counts.warn = 3;
+  const y = F.levHTML(), fy = y.match(/class="lvfold0"[\s\S]*?<\/button>/);
+  chk((y.match(/class="lvr st-warn/g) || []).length === 2 && !!fy && /1개 더/.test(fy[0]) && /거래소D/.test(fy[0]), "D3: 주의 3 + 안전 1 = 주의 2줄(+더보기) + 접힘 줄 '1개 더 · 거래소D 안전'", fy && fy[0].replace(/<[^>]+>/g, '')); }
 reset(); S.D = { debts: [] }; S.mobile = true;
-for (const [n, nx, lbl] of [[5, 1, '3개 더 · 거래소C 담보대출 · 거래소D 담보대출 외'], [3, 1, '1개 더 · 거래소C 담보대출'], [2, 1, null], [1, 0, null]]) {
-  setLev(n); const x = F.levHTML(), k = (x.match(/class="lvmr"/g) || []).length, mm = x.match(/<span class="lvmm">([\s\S]*?)<\/span><\/span>/);
-  chk(k === nx && (mm ? mm[1].replace(/<[^>]+>/g, '') : null) === lbl && /data-a="levOpen"/.test(x), '레버리지 폰 ' + n + '개 = 맨 위 + 다음 ' + nx + '줄' + (lbl ? " + '" + lbl + "'(카드 = 서랍 단추)" : ''), { k, mm: mm && mm[1] });
+for (const [n, nx, lbl] of [[5, 1, '주의·위험 3개 더'], [3, 1, '주의·위험 1개 더'], [2, 1, null], [1, 0, null]]) {
+  setLev(n); const x = F.levHTML(), k = (x.match(/class="lvmr"/g) || []).length, mm = x.match(/<span class="lvmm">[\s\S]*?<b class="pvx">([^<]*)<\/b>/);
+  chk(k === nx && (mm ? mm[1] : null) === lbl && /data-a="levOpen"/.test(x), '레버리지 폰(주의) ' + n + '개 = 맨 위 + 다음 ' + nx + '줄' + (lbl ? " + '" + lbl + "'(카드 = 서랍 단추)" : ''), { k, mm: mm && mm[1] });
 }
 for (const [ok, msg, d] of R) console.log((ok ? 'PASS ' : 'FAIL ') + msg + (ok || d === undefined ? '' : '  — ' + JSON.stringify(d).slice(0, 600)));
 console.log('RESULT ' + R.filter(x => x[0]).length + '/' + R.length);
@@ -157,12 +163,12 @@ app = open(APP, encoding="utf-8").read()
 css = T.v2_css()
 
 print("[1] 정적 — 자리 · 칸")
-T.chk("+ levHTML() + lpCardHTML() + '<div class=\"dmid\">'" in app, "머리 = 4칸 요약 → 레버리지 · 대출 → LP 카드 → 오늘 무엇이 움직였나")
 vd = app[app.index("  function vDash() {"):app.index("  function histLoad() {")]
+T.chk(vd.count("lv + lpCardHTML() + holdingsHTML()") == 2, "세션47 배치: 레버리지 · 대출(+ 선물 블록) → LP 카드 → 보유 코인(넓은 화면 왼쪽 열 · 폰 둘 다)")
 T.chk("lpHTML(" not in vd and "function lpHTML(" not in app, "보유 열·오른쪽 열의 큰 LP 표(lpHTML) 없음 — 보유 표·선물 포지션·보관처는 그대로",
       re.findall(r"lpHTML\([^)]*\)", vd))
-T.chk("futPosHTML()" in vd and "futPosHTML(true)" in vd and "holdingsHTML()" in vd and "venuesHTML()" in vd, "선물 포지션(왼쪽 · 넓은 화면 오른쪽)·보유·보관처 자리 유지")
-T.chk("const LP_TOP = 2;" in app and "rows.slice(0, 2).map(row)" in app and "uiPaged('lev:dash', rows.slice(2)" in app, "앞 2개(LP · 레버리지 넓은 화면)")
+T.chk("fb = futPosHTML()" in vd and "levHTML(fb)" in vd and "holdingsHTML()" in vd and "venuesHTML()" in vd, "선물 포지션(레버리지 카드 안 블록 · D1)·보유·보관처 자리 유지")
+T.chk("const LP_TOP = 2;" in app and "hot.slice(0, 2).map(levRow)" in app and "uiPaged('lev:dash', hot.slice(2)" in app, "앞 2개(LP · 레버리지 넓은 화면 = 주의·위험 줄)")
 T.chk(".card.lpk{" in css and ".lpr{display:grid;grid-template-columns:250px minmax(0,1fr) 150px 140px 130px" in css
       and "@media (max-width:960px){\n  .lpr{grid-template-columns:minmax(0,1fr) minmax(0,1fr)" in css and ".card.lpk.lpmob{" in css, "칸 CSS = 넓은 화면 5칸 격자 · 960px 이하 두 줄 · 폰 목록")
 T.chk(".lev .lvmore .ubtn,.lpk .lvmore .ubtn{min-height:44px}" in css and ".lpm{display:flex" in css and "min-height:44px;cursor:pointer}" in css, "누르는 칸 44px(더보기 · 폰 줄)")

@@ -5,6 +5,7 @@ import accounting_cp
 import accounting_ctx
 import accounting_fee
 import accounting_fs
+import accounting_harvest
 import accounting_index
 import accounting_krw
 import accounting_loan
@@ -803,7 +804,7 @@ class PrepOut:
     diag: Any; ever_in: Any; ex_debt: Any; ex_loan: Any; ex_transit: Any; exf_dep_tx: Any; exf_kind: Any; extra_ev: Any; extra_events: Any; fb_cov: Any
     fbx: Any; fee_acq: Any; fee_diag: Any; fee_disp: Any; flow_of: Any; fns: Any; fs_floor: Any; fs_in: Any; fs_last: Any; fs_need: Any
     fs_pin_new: Any; fs_rbd: Any; fs_sales: Any; fs_sum: Any; fsx: Any; fx_dep_tx: Any; fx_dep_uid_tx: Any; fx_name: Any; fx_transit: Any; fx_uid_tx: Any
-    fx_wd: Any; fxdep_transit: Any; gas_applied: Any; gas_by_chain: Any; gas_by_month: Any; gas_expense: Any; gas_nopx: Any; gstate: Any; in_note: Any; kpx: Any
+    fx_wd: Any; fxdep_transit: Any; gas_applied: Any; gas_by_chain: Any; gas_by_month: Any; gas_expense: Any; gas_nopx: Any; gstate: Any; hvx: Any; in_note: Any; kpx: Any
     krw_last: Any; krw_mix: Any; krw_mkt: Any; krw_stl: Any; kst_fmt: Any; lp_by_tx: Any; lp_done: Any; lp_meta_by: Any; lp_mgrs: Any; lpb: Any
     lpx: Any; mv_note: Any; noproc: Any; nopx_carry: Any; nopx_swap: Any; oa_last: Any; oa_take: Any; ob: Any; oc_fresh: Any; of_dec: Any
     of_noauto: Any; offc_add: Any; offc_addr_add: Any; offc_dep: Any; offc_pool: Any; offc_s: Any; offc_self_wd: Any; offc_sold: Any; offc_summary: Any; offc_wd: Any
@@ -912,8 +913,9 @@ class ReplayRun:
         return
 
     def _h_gas(self, r, g, rc):
-        (G, cb, consume, cp_emit, cp_last, fee_day_add, fee_gain, fxb, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, krw_last, krw_mix, krw_stl, kst_fmt, realized_by_date, realized_krw_by_date, swap_gas, tx_group, chain, cost, dkey, evk, q, ts, txh,) = (self.G, self.cb, self.consume, self.cp_emit, self.cp_last, self.fee_day_add, self.fee_gain, self.fxb, self.gas_by_chain, self.gas_by_month, self.gas_expense, self.gas_nopx, self.gas_on, self.krw_last, self.krw_mix, self.krw_stl, self.kst_fmt, self.realized_by_date, self.realized_krw_by_date, self.swap_gas, self.tx_group, rc.chain, rc.cost, rc.dkey, rc.evk, rc.q, rc.ts, rc.txh,)
+        (G, cb, consume, cp_emit, cp_last, fee_day_add, fee_gain, fxb, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, krw_last, krw_mix, krw_stl, kst_fmt, realized_by_date, realized_krw_by_date, swap_gas, tx_group, hvx, chain, cost, dkey, evk, q, ts, txh,) = (self.G, self.cb, self.consume, self.cp_emit, self.cp_last, self.fee_day_add, self.fee_gain, self.fxb, self.gas_by_chain, self.gas_by_month, self.gas_expense, self.gas_nopx, self.gas_on, self.krw_last, self.krw_mix, self.krw_stl, self.kst_fmt, self.realized_by_date, self.realized_krw_by_date, self.swap_gas, self.tx_group, self.hvx, rc.chain, rc.cost, rc.dkey, rc.evk, rc.q, rc.ts, rc.txh,)
         usd = cost or Decimal(0)
+        hvx.gas(evk, r["source_ns"], txh, usd)
         if gas_on and usd > 0 and not (evk == "SWAP" and (swap_gas.get((r["source_ns"], txh)) or {}).get("done")):
             rt9g = fxb.rate_at(ts)
             realized_by_date[dkey] = realized_by_date.get(dkey, 0) - float(usd)
@@ -935,7 +937,7 @@ class ReplayRun:
             chain, {"usd": Decimal(0), "tx": 0})
         mi9["usd"] += usd
         mi9["tx"] += 1
-        fee_day_add(usd, ts)
+        fee_day_add(usd, ts, ("c", chain), 1)
         ent2 = tx_group.get((r["source_ns"], txh))
         if ent2 is not None and ent2[0] in G:
             g2 = G[ent2[0]]
@@ -1115,7 +1117,7 @@ class ReplayRun:
                 if e2.get("gid") in G:
                     G[e2["gid"]]["risk_allow"] = True
                 cb.acquire(g, e2["known"] * ratio5, ts=ts, src=r["posting_id"], u=e2["unknown"] * ratio5, lots=cb.pool_lots(e2))
-                cp_add_map(g, e2.get("_cmp"), ratio5)
+                cp_add_map(g, e2.get("_cmp"), ratio5, ent=e2)
                 note_unk(g, ts, "업비트 입금 · 내 지갑 출금 승계(원가 없음)", e2["unknown"] * ratio5, txh2, ex9="upbit", up_gid=e2.get("gid"), unc9=Decimal(0), fs9=0)
                 inh5 += e2["cost"] * ratio5
                 ikr5 += krw_inh(e2, e2["cost"] * ratio5, ts)
@@ -1151,7 +1153,7 @@ class ReplayRun:
             if e7u.get("oa"):
                 g["oa"] = (g.get("oa") or Decimal(0)) + e7u["oa"] * sc7
             cb.acquire(g, e7u["known"] * sc7, ts=ts, src=r["posting_id"], u=e7u["unknown"] * sc7 + (q - take7), lots=cb.pool_lots(e7u))
-            cp_add_map(g, e7u.get("_cmp"), sc7)
+            cp_add_map(g, e7u.get("_cmp"), sc7, ent=e7u)
             note_unk(g, ts, "업비트 입금 · 해외거래소 출금 승계 잔여(원가 없음)", e7u["unknown"] * sc7 + (q - take7), up_dep_uid_tx.get(r["source_id"]) or r["source_id"], ex9="upbit", unc9=q - take7, fs9=q - take7,
                      up_gid=e7u.get("gid"), via9=f"{fx_name.get(e7u.get('ex'), e7u.get('ex'))} 출금 승계 (그 거래소 {e7u.get('sym')} 의 원가 미상분)")
             cb.capitalize(g, inh7, ts=ts, src=r["posting_id"])
@@ -1223,7 +1225,7 @@ class ReplayRun:
         return
 
     def _h_exf_deposit(self, r, g, rc, n9i):
-        (_qfmt, cb, cp_add_map, cp_merge, diag, ev, exf_dep_tx, extra_ev, fee_expense, fee_gain, fee_unit, flow_of, fs_in, fs_st, fx_dep_uid_tx, fx_name, fx_transit, fxdep_transit, gas_on, in_note, krw_inh, note_unk, of_cand, offc_add, offc_dep, offc_on, offc_pool, offc_s, rows, sale_book, sale_links, st_flow_in, stl_in, wd_fee_add, xf_links, chain, dkey, q, ts,) = (self._qfmt, self.cb, self.cp_add_map, self.cp_merge, self.diag, self.ev, self.exf_dep_tx, self.extra_ev, self.fee_expense, self.fee_gain, self.fee_unit, self.flow_of, self.fs_in, self.fs_st, self.fx_dep_uid_tx, self.fx_name, self.fx_transit, self.fxdep_transit, self.gas_on, self.in_note, self.krw_inh, self.note_unk, self.of_cand, self.offc_add, self.offc_dep, self.offc_on, self.offc_pool, self.offc_s, self.rows, self.sale_book, self.sale_links, self.st_flow_in, self.stl_in, self.wd_fee_add, self.xf_links, rc.chain, rc.dkey, rc.q, rc.ts,)
+        (_qfmt, cb, cp_add_map, cp_merge, diag, ev, exf_dep_tx, extra_ev, fee_expense, fee_gain, fee_unit, flow_of, fs_in, fs_st, fx_dep_uid_tx, fx_name, fx_transit, fxdep_transit, gas_on, in_note, krw_inh, note_unk, of_cand, offc_add, offc_dep, offc_on, offc_pool, offc_s, rows, sale_book, sale_links, st_flow_in, stl_in, wd_fee_add, xf_links, hvx, chain, dkey, q, ts,) = (self._qfmt, self.cb, self.cp_add_map, self.cp_merge, self.diag, self.ev, self.exf_dep_tx, self.extra_ev, self.fee_expense, self.fee_gain, self.fee_unit, self.flow_of, self.fs_in, self.fs_st, self.fx_dep_uid_tx, self.fx_name, self.fx_transit, self.fxdep_transit, self.gas_on, self.in_note, self.krw_inh, self.note_unk, self.of_cand, self.offc_add, self.offc_dep, self.offc_on, self.offc_pool, self.offc_s, self.rows, self.sale_book, self.sale_links, self.st_flow_in, self.stl_in, self.wd_fee_add, self.xf_links, self.hvx, rc.chain, rc.dkey, rc.q, rc.ts,)
         def _short_fee(tr, left_before, took, grp, t, exk, tid):
             rem = left_before - took
             if rem <= EPS or took < left_before * Decimal("0.98") or tr["qty"] <= 0:
@@ -1289,7 +1291,7 @@ class ReplayRun:
             lnk6 = [(sp9, float(sc6) * w9) for sp9, w9 in e6.get("_src", ())]
             inh6 = e6["cost"] * sc6
             cb.acquire(g, e6["known"] * sc6, ts=ts, src=r["posting_id"], u=e6["unknown"] * sc6 + (q - take6), lots=cb.pool_lots(e6))
-            cp_add_map(g, e6.get("_cmp"), sc6)
+            cp_add_map(g, e6.get("_cmp"), sc6, ent=e6)
             unc6 = None
             if g["is_stable"]:
                 st_flow_in(g, e6, sc6, ts, chain)
@@ -1318,7 +1320,7 @@ class ReplayRun:
             if e7.get("oa"):
                 g["oa"] = (g.get("oa") or Decimal(0)) + e7["oa"] * sc7
             cb.acquire(g, e7["known"] * sc7, ts=ts, src=r["posting_id"], u=e7["unknown"] * sc7 + (q - take7), lots=cb.pool_lots(e7))
-            cp_add_map(g, e7.get("_cmp"), sc7)
+            cp_add_map(g, e7.get("_cmp"), sc7, ent=e7)
             note_unk(g, ts, f"{fx_name.get(ex6, ex6)} 입금 · 출금 승계 잔여(원가 없음)", e7["unknown"] * sc7 + (q - take7), exf_dep_tx.get((ex6, r["source_id"])) or r["source_id"], ex9=ex6, unc9=q - take7, fs9=q - take7,
                      up_gid=e7.get("gid"), via9=f"{fx_name.get(e7.get('ex'), e7.get('ex'))} 출금 승계 (그 거래소 {e7.get('sym')} 의 원가 미상분)")
             cb.capitalize(g, inh7, ts=ts, src=r["posting_id"])
@@ -1376,6 +1378,7 @@ class ReplayRun:
                 kk6 += l9["known"] * sc9
                 uu6 += l9["unknown"] * sc9
                 fr6.extend((fq * sc9, None if fc is None else fc * sc9, ft) for fq, fc, ft in cb.pool_lots(l9) or ())
+                hvx.move_in(g, l9, sc9)
             need6 = max(Decimal(0), need6)
             take6 = q - need6
             so9 = offc_s(ex6)
@@ -1434,7 +1437,7 @@ class ReplayRun:
         return
 
     def _h_exf_fee(self, r, g, rc):
-        (cb, fee_acq, fee_diag, fee_disp, fxb, krw_mkt, krw_of, realized_by_date, realized_by_loc, realized_krw_by_date, q, ts, txh,) = (self.cb, self.fee_acq, self.fee_diag, self.fee_disp, self.fxb, self.krw_mkt, self.krw_of, self.realized_by_date, self.realized_by_loc, self.realized_krw_by_date, rc.q, rc.ts, rc.txh,)
+        (cb, fee_acq, fee_diag, fee_disp, fxb, krw_mkt, krw_of, realized_by_date, realized_by_loc, realized_krw_by_date, hvx, q, ts, txh,) = (self.cb, self.fee_acq, self.fee_diag, self.fee_disp, self.fxb, self.krw_mkt, self.krw_of, self.realized_by_date, self.realized_by_loc, self.realized_krw_by_date, self.hvx, rc.q, rc.ts, rc.txh,)
         fq9 = -q
         k9f = (r["source_ns"], txh)
         a9f, d9f = fee_acq.get(k9f), fee_disp.get(k9f)
@@ -1454,6 +1457,8 @@ class ReplayRun:
         F9 = fq9 * unit9 if (unit9 is not None and fq9 != 0) else Decimal(0)
         if unit9 is None and fq9 > 0:
             fee_diag["no_px"] += 1
+        if F9 != 0 and d9f and not d9f.get("fiat"):
+            hvx.fee(k9f, F9)
         if F9 != 0 and (a9f or d9f):
             fee_diag["n"] += 1
             if a9f and not a9f["g"]["is_stable"] and not a9f["g"].get("is_fiat"):
@@ -1829,7 +1834,7 @@ class ReplayRun:
         return
 
     def _h_acq(self, r, g, rc):
-        (G, _qfmt, _un, arr_groups, bo_pid, br_amb, br_plan, br_transit, bridge_dep_ts, cb, cp_add, cp_add_map, cp_ev, cp_xc, diag, ev, ex_fee_add, extra_ev, fee_acq, flow_of, fs_on, fs_ret, fs_st, fx_name, fx_transit, fx_wd, gas_applied, gas_on, in_note, krw_inh, krw_mkt, krw_of, my_all, nopx_carry, nopx_swap, note_unk, of_cand, redeem_tx, rt_pair, rt_transit, sale_book, sale_links, sale_refund, sale_rf_exit, signer, st_flow_in, stl_add, stl_src, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, to_dest, ub_wd_tx, up_fee, up_mkt, xc_transit, xc_used, chain, cost, evk, q, ts, txh,) = (self.G, self._qfmt, self._un, self.arr_groups, self.bo_pid, self.br_amb, self.br_plan, self.br_transit, self.bridge_dep_ts, self.cb, self.cp_add, self.cp_add_map, self.cp_ev, self.cp_xc, self.diag, self.ev, self.ex_fee_add, self.extra_ev, self.fee_acq, self.flow_of, self.fs_on, self.fs_ret, self.fs_st, self.fx_name, self.fx_transit, self.fx_wd, self.gas_applied, self.gas_on, self.in_note, self.krw_inh, self.krw_mkt, self.krw_of, self.my_all9, self.nopx_carry, self.nopx_swap, self.note_unk, self.of_cand, self.redeem_tx, self.rt_pair, self.rt_transit, self.sale_book, self.sale_links, self.sale_refund, self.sale_rf_exit, self.signer9, self.st_flow_in, self.stl_add, self.stl_src, self.swap_fill_est, self.swap_fill_zero, self.swap_gas, self.swap_pay, self.to_dest9, self.ub_wd_tx, self.up_fee, self.up_mkt, self.xc_transit, self.xc_used, rc.chain, rc.cost, rc.evk, rc.q, rc.ts, rc.txh,)
+        (G, _qfmt, _un, arr_groups, bo_pid, br_amb, br_plan, br_transit, bridge_dep_ts, cb, cp_add, cp_add_map, cp_ev, cp_xc, diag, ev, ex_fee_add, extra_ev, fee_acq, flow_of, fs_on, fs_ret, fs_st, fx_name, fx_transit, fx_wd, gas_applied, gas_on, in_note, krw_inh, krw_mkt, krw_of, my_all, nopx_carry, nopx_swap, note_unk, of_cand, redeem_tx, rt_pair, rt_transit, sale_book, sale_links, sale_refund, sale_rf_exit, signer, st_flow_in, stl_add, stl_src, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, to_dest, ub_wd_tx, up_fee, up_mkt, xc_transit, xc_used, xc_barr, xc_links, hvx, chain, cost, evk, q, ts, txh,) = (self.G, self._qfmt, self._un, self.arr_groups, self.bo_pid, self.br_amb, self.br_plan, self.br_transit, self.bridge_dep_ts, self.cb, self.cp_add, self.cp_add_map, self.cp_ev, self.cp_xc, self.diag, self.ev, self.ex_fee_add, self.extra_ev, self.fee_acq, self.flow_of, self.fs_on, self.fs_ret, self.fs_st, self.fx_name, self.fx_transit, self.fx_wd, self.gas_applied, self.gas_on, self.in_note, self.krw_inh, self.krw_mkt, self.krw_of, self.my_all9, self.nopx_carry, self.nopx_swap, self.note_unk, self.of_cand, self.redeem_tx, self.rt_pair, self.rt_transit, self.sale_book, self.sale_links, self.sale_refund, self.sale_rf_exit, self.signer9, self.st_flow_in, self.stl_add, self.stl_src, self.swap_fill_est, self.swap_fill_zero, self.swap_gas, self.swap_pay, self.to_dest9, self.ub_wd_tx, self.up_fee, self.up_mkt, self.xc_transit, self.xc_used, self.xc_barr, self.xc_links, self.hvx, rc.chain, rc.cost, rc.evk, rc.q, rc.ts, rc.txh,)
         flow = flow_of(g, ts, chain)
         cb.snapshot(g, ts, q)
         rd9 = redeem_tx.get((r["source_ns"], txh))
@@ -1928,7 +1933,7 @@ class ReplayRun:
                 sc9 = take9 / rt9["qty"] if rt9["qty"] > 0 else Decimal(1)
                 inh9 = rt9["cost"] * sc9
                 cb.acquire(g, rt9["known"] * sc9, ts=ts, src=r["posting_id"], u=rt9["unknown"] * sc9 + (q - take9), lots=cb.pool_lots(rt9))
-                cp_add_map(g, rt9.get("_cmp"), sc9)
+                cp_add_map(g, rt9.get("_cmp"), sc9, ent=rt9)
                 note_unk(g, ts, "프로그램 예치 복귀 · 승계(원가 없음)", rt9["unknown"] * sc9 + (q - take9), txh, chain9=chain, unc9=q - take9, fs9=q - take9)
                 cb.capitalize(g, inh9, ts=ts, src=r["posting_id"])
                 g["risk_allow"] = True
@@ -1998,7 +2003,7 @@ class ReplayRun:
                     if e4.get("oa"):
                         g["oa"] = (g.get("oa") or Decimal(0)) + e4["oa"] * sc4
                     cb.acquire(g, e4["known"] * sc4, ts=ts, src=r["posting_id"], u=e4["unknown"] * sc4 + (q - take4), lots=cb.pool_lots(e4))
-                    cp_add_map(g, e4.get("_cmp"), sc4)
+                    cp_add_map(g, e4.get("_cmp"), sc4, ent=e4)
                     note_unk(g, ts, "거래소 출금 도착 · 승계(원가 없음)", e4["unknown"] * sc4 + (q - take4), txh, chain9=chain, up_gid=e4.get("gid"), unc9=q - take4, fs9=q - take4)
                     cb.capitalize(g, inh_c4, ts=ts, src=r["posting_id"])
                     flow = flow_of(g, ts, chain)
@@ -2033,6 +2038,7 @@ class ReplayRun:
                 cb.acquire(g, linked.get("known", linked["qty"]) * scale, ts=ts, src=r["posting_id"],
                            u=linked.get("unknown", Decimal(0)) * scale + (q - take), lots=cb.pool_lots(linked))
                 cv9 = linked.get("_cv")
+                hvx.move_in(g, linked, scale, cv9["ratio"] if cv9 else None)
                 if cv9 and linked.get("_cmp"):
                     cvk9 = ("cv", r["posting_id"], g["gid"])
                     cp_add(g, cvk9, sum(v9[0] for v9 in linked["_cmp"].values()) * cv9["ratio"] * float(scale),
@@ -2057,7 +2063,7 @@ class ReplayRun:
             if (not g["is_stable"] and evk in ("TRANSFER_IN", "PROGRAM_IN") and r["posting_id"] in sale_links
                     and sale_book(g, r, q, ts, chain, txh)):
                 return
-            ret9 = None
+            ret9 = hvfs = None
             rf_face = [Decimal(0)]
             if sale_rf_exit and not g.get("is_fiat") and evk in ("TRANSFER_IN", "PROGRAM_IN"):
                 ret9 = sale_refund(g, r, q, ts, chain, txh, flow, rf_face)
@@ -2074,7 +2080,7 @@ class ReplayRun:
                         note_unk(g, ts, f"{CHAIN_NAME.get(chain, chain)} 브릿지 도착 후보 여러 개(컨트랙트 다름 · 원가 연결 보류 — 진짜 도착이면 원가 지정)",
                                  q, r["source_id"], chain9=chain, fs9=0)
                     else:
-                        note_unk(g, ts, f"{CHAIN_NAME.get(chain, chain)} 브릿지/유입(원가 없음 · 링크 없음)", q, r["source_id"], chain9=chain)
+                        hvfs = note_unk(g, ts, f"{CHAIN_NAME.get(chain, chain)} 브릿지/유입(원가 없음 · 링크 없음)", q, r["source_id"], chain9=chain)
             if evk in ("TRANSFER_IN", "PROGRAM_IN"):
                 qs2 = f"{q:,.4f}".rstrip("0").rstrip(".")
                 src_ex = fx_wd.get(txh) or fx_wd.get((txh or "").lower())
@@ -2101,6 +2107,8 @@ class ReplayRun:
                             g["risk_airdrop_signed"] = g.get("risk_airdrop_signed", 0) + 1
                         else:
                             g["risk_airdrop"] = True
+                        if ret9 is None and not g["is_stable"] and r["posting_id"] not in br_amb:
+                            hvx.recv(g, r, q, ts, bool(s9a and spamguard.signer_mine(*s9a, my_all)), hvfs, "xc" if (r["source_ns"], xchain_match.norm(txh)) in xc_barr or (r["source_ns"], xchain_match.norm(txh)) in xc_links else (td9 or bool(bridge_dep_ts.get(g["sym"]))))
                     d3 = (f"{CHAIN_NAME.get(chain, chain)} 프로그램 경유 수령 (체결/에어드랍 검토)"
                           if evk == "PROGRAM_IN"
                           else f"{CHAIN_NAME.get(chain, chain)} 외부 유입 (원가 미상)")
@@ -2197,7 +2205,7 @@ class ReplayRun:
         return True
 
     def _h_disp(self, r, g, rc):
-        (G, _un, be_done, be_take, be_tax, cb, consume, consume_krw, conv_cp, cp_add_map, cp_emit, cp_last, cp_take, cur_lab, ev, ex_fee_add, fee_disp, flow_of, fs_mark, fs_sum, fx_name, fxb, gas_applied, gas_on, krw_mix, krw_of, krw_stl, krw_took, loan_px, loan_unp, loan_wd, mv_note, noproc, nopx_carry, nopx_swap, note_unk, oa_take, offc_sold, pay_pid, realized_by_date, realized_by_loc, realized_krw_by_date, redeem_tx, stable_fx_mark, stl_krw_mkt, stl_use, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, tax_krw_acq, tax_rows, unk_tag, unverified, up_fee, up_mkt, chain, cost, dkey, evk, loc, q, ts, txh,) = (self.G, self._un, self.be_done, self.be_take, self.be_tax, self.cb, self.consume, self.consume_krw, self.conv_cp, self.cp_add_map, self.cp_emit, self.cp_last, self.cp_take, self.cur_lab, self.ev, self.ex_fee_add, self.fee_disp, self.flow_of, self.fs_mark, self.fs_sum, self.fx_name, self.fxb, self.gas_applied, self.gas_on, self.krw_mix, self.krw_of, self.krw_stl, self.krw_took, self.loan_px, self.loan_unp, self.loan_wd, self.mv_note, self.noproc, self.nopx_carry, self.nopx_swap, self.note_unk, self.oa_take, self.offc_sold, self.pay_pid, self.realized_by_date, self.realized_by_loc, self.realized_krw_by_date, self.redeem_tx, self.stable_fx_mark, self.stl_krw_mkt, self.stl_use, self.swap_fill, self.swap_fill_est, self.swap_fill_zero, self.swap_gas, self.tax_krw_acq, self.tax_rows, self.unk_tag, self.unverified, self.up_fee, self.up_mkt, rc.chain, rc.cost, rc.dkey, rc.evk, rc.loc, rc.q, rc.ts, rc.txh,)
+        (G, _un, be_done, be_take, be_tax, cb, consume, consume_krw, conv_cp, cp_add_map, cp_emit, cp_last, cp_take, cur_lab, ev, ex_fee_add, fee_disp, flow_of, fs_mark, fs_sum, fx_name, fxb, gas_applied, gas_on, krw_mix, krw_of, krw_stl, krw_took, loan_px, loan_unp, loan_wd, mv_note, noproc, nopx_carry, nopx_swap, note_unk, oa_take, offc_sold, pay_pid, realized_by_date, realized_by_loc, realized_krw_by_date, redeem_tx, stable_fx_mark, stl_krw_mkt, stl_use, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, tax_krw_acq, tax_rows, unk_tag, unverified, up_fee, up_mkt, hvx, chain, cost, dkey, evk, loc, q, ts, txh,) = (self.G, self._un, self.be_done, self.be_take, self.be_tax, self.cb, self.consume, self.consume_krw, self.conv_cp, self.cp_add_map, self.cp_emit, self.cp_last, self.cp_take, self.cur_lab, self.ev, self.ex_fee_add, self.fee_disp, self.flow_of, self.fs_mark, self.fs_sum, self.fx_name, self.fxb, self.gas_applied, self.gas_on, self.krw_mix, self.krw_of, self.krw_stl, self.krw_took, self.loan_px, self.loan_unp, self.loan_wd, self.mv_note, self.noproc, self.nopx_carry, self.nopx_swap, self.note_unk, self.oa_take, self.offc_sold, self.pay_pid, self.realized_by_date, self.realized_by_loc, self.realized_krw_by_date, self.redeem_tx, self.stable_fx_mark, self.stl_krw_mkt, self.stl_use, self.swap_fill, self.swap_fill_est, self.swap_fill_zero, self.swap_gas, self.tax_krw_acq, self.tax_rows, self.unk_tag, self.unverified, self.up_fee, self.up_mkt, self.hvx, rc.chain, rc.cost, rc.dkey, rc.evk, rc.loc, rc.q, rc.ts, rc.txh,)
         qty = -q
         cb.snapshot(g, ts, q)
         if g.get("is_fiat"):
@@ -2210,6 +2218,7 @@ class ReplayRun:
             mc9, mk9, mu9 = consume(g, qty)
             rd9["carry"] = (mc9, mk9, mu9 + max(Decimal(0), qty - (mk9 + mu9)))
             rd9["carry_krw"] = krw_took(mc9, ts)
+            hvx.conv(g)
             flow = g["cur"] or flow_of(g, ts, chain)
             ev(flow, ts, "전송", f"{CHAIN_NAME.get(chain, chain)} · 세일 영수증 교환 → 본 토큰 · 원가 이관 (${float(mc9):,.2f})",
                f"{qty:,.4f}".rstrip("0").rstrip("."), "—", txh)
@@ -2219,6 +2228,7 @@ class ReplayRun:
         nx9 = nopx_swap.get((r["source_ns"], txh)) if cost is None else None
         if nx9 is not None:
             mc9, mk9, mu9 = consume(g, qty)
+            hvx.conv(g)
             cy9 = nopx_carry.setdefault((r["source_ns"], txh), {"q": Decimal(0), "mc": Decimal(0), "mk": Decimal(0), "krw": Decimal(0),
                                                                  "sym": g["sym"], "src": []})
             if g["sym"] not in cy9["sym"].split(" + "):
@@ -2279,7 +2289,7 @@ class ReplayRun:
                     if dn["qty_known"] + dn["qty_unknown"] <= Decimal("0.000001"):
                         dn["cur"] = None
                     cb.acquire(g, bk, ts=ts, src=r["posting_id"], u=bu, lots=cb.take_frags(dn))
-                    cp_add_map(g, cp_dn9, 1.0)
+                    cp_add_map(g, cp_dn9, 1.0, ent={"gid": dn["gid"], "known": bk, "unknown": bu})
                     note_unk(g, ts, "동일 심볼 원장 정정 · 기증자 승계(원가 없음)", bu, txh, chain9=chain, up_gid=dn.get("gid"), fs9=0)
                     cb.capitalize(g, bc, ts=ts, src=r["posting_id"])
                     ev(flow, ts, "전송",
@@ -2295,6 +2305,7 @@ class ReplayRun:
         stl9s = krw_stl[0]
         oa9 = oa_take(g, from_known)
         cmp9s = cp_emit(cp_take(g, from_known, consumed_cost), from_unknown, qty, consumed_cost)
+        hvx.sell(g, qty, cost, dkey, (r["source_ns"], txh))
         cb.release(g, from_known, consumed_cost, from_unknown)
         if cost is not None:
             is_ex = evk in ("EX_SELL", "EXF_SELL")
@@ -2538,6 +2549,11 @@ class ReplayMixin:
         books = accounting_books.Books()
         px = accounting_ctx.ReplayParts(sb=self, books=books)
         cb = px.cb = accounting_basis.StrictCostBasis() if calcguard.strict() else accounting_basis.CostBasis()
+        harvest = books.harvest
+        native_gids = {r9n[0] for r9n in conn.execute("SELECT DISTINCT group_id FROM assets WHERE kind='native' AND group_id IS NOT NULL")}
+        hvx = px.hvx = accounting_harvest.HarvestBook(harvest, px, fs_on=fs_on, native=native_gids)
+        on_pool_put = accounting_harvest.pool_observer(hvx)
+        cb.on_pool_put = on_pool_put
         gas_applied = books.gas_applied
         gas_expense = books.gas_expense
         up_fee = {}
@@ -2785,6 +2801,9 @@ class ReplayMixin:
         ret_pool = {}
         ret_kit = {}
         gas_nopx = books.gas_nopx
+        own_wallets = sorted({accounting_harvest.norm_addr(addr) for addr in (prefs.get("src_whitelist") or []) if addr})
+        if own_wallets:
+            hvx.set_own(self._inflow_senders(conn, own_wallets), own_wallets)
         for k9 in ("pin", "sd", "ret", "ret_n", "ret_q"):
             fs_sum[k9] = 0
         fs_sum["hold"] = {}
@@ -3035,7 +3054,7 @@ class ReplayMixin:
             fs_floor=fs_floor9, fs_in=fs_in, fs_last=fs_last, fs_need=fs_need, fs_pin_new=fs_pin_new, fs_rbd=fs_rbd, fs_sales=fs_sales,
             fs_sum=fs_sum, fsx=fsx, fx_dep_tx=fx_dep_tx, fx_dep_uid_tx=fx_dep_uid_tx, fx_name=fx_name, fx_transit=fx_transit, fx_uid_tx=fx_uid_tx,
             fx_wd=fx_wd, fxdep_transit=fxdep_transit, gas_applied=gas_applied, gas_by_chain=gas_by_chain, gas_by_month=gas_by_month,
-            gas_expense=gas_expense, gas_nopx=gas_nopx, gstate=gstate, in_note=in_note, kpx=kpx, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt,
+            gas_expense=gas_expense, gas_nopx=gas_nopx, gstate=gstate, hvx=hvx, in_note=in_note, kpx=kpx, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt,
             krw_stl=krw_stl, kst_fmt=kst_fmt, lp_by_tx=lp_by_tx, lp_done=lp_done, lp_meta_by=lp_meta_by, lp_mgrs=lp_mgrs, lpb=lpb, lpx=lpx,
             mv_note=mv_note, noproc=noproc, nopx_carry=nopx_carry, nopx_swap=nopx_swap, oa_last=oa_last, oa_take=oa_take, ob=ob, oc_fresh=oc_fresh,
             of_dec=of_dec9, of_noauto=of_noauto, offc_add=offc_add, offc_addr_add=offc_addr_add, offc_dep=offc_dep, offc_pool=offc_pool,
@@ -3426,7 +3445,7 @@ class ReplayMixin:
         return LinksOut(of_uids=_of_uids, br_arr=br_arr9, br_transit=br_transit, consume_krw=consume_krw, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_take=cp_take, ev=ev, fee_gain=fee_gain, fs_mark=fs_mark, fs_rec=fs_rec, gp=gp, krw_of=krw_of, lf_pend=lf_pend, lnx=lnx, loan_fill=loan_fill, loan_px=loan_px, loan_settle=loan_settle, loan_unp=loan_unp, loan_wd=loan_wd, my_all=my_all9, my_evm=my_evm9, note_unk=note_unk, of_applied=of_applied, of_bridge=of_bridge, of_cand=of_cand, of_cands=of_cands, of_chain=of_chain, of_deps=of_deps, of_match=of_match, of_pay_cap=of_pay_cap, of_pay_on=of_pay_on, of_pay_take=of_pay_take, of_sends=of_sends, of_wd_cap=of_wd_cap, of_wd_take=of_wd_take, origin_pending=origin_pending, qn_all=qn_all9, redeem_tx=redeem_tx, rt_same=rt_same, sale_bid=sale_bid9, sale_book=sale_book, sale_links=sale_links, sale_lot_by=sale_lot_by, sale_lots=sale_lots, sale_pay_bid=sale_pay_bid, sale_pay_flush=sale_pay_flush, sale_pay_q=sale_pay_q, sale_pay_q_d=sale_pay_q_d, sale_pay_seq=sale_pay_seq, sale_pay_take=sale_pay_take, sale_refund=sale_refund, sale_rf_bid=sale_rf_bid, sale_rf_exit=sale_rf_exit, sale_rf_load=sale_rf_load, sale_used=sale_used, salein=salein, slx=slx, spoof_keys=spoof_keys, sw=sw9, tax_krw_acq=tax_krw_acq, wbal=wbal9, win_cut_d=win_cut_d, xc_barr=xc_barr, xc_links=xc_links, xf_links=xf_links, xf_wd=xf_wd9)
 
     def _replay_main(self, pre):
-        (G, _qfmt, _ro, _un, arr_groups, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, bridge_dep_ts, bridge_outs, conn, conv_cp, cp_ev, cp_last, cp_merge, credited_txh, cur_lab, cur_row, cur_src, diag, ever_in, ex_debt9, ex_loan9, ex_transit, exf_dep_tx, exf_kind, extra_ev, extra_events, fee_acq, fee_diag, fee_disp, flow_of, fs_in, fs_on, fs_rbd, fs_sales, fs_sum, fx_dep_tx, fx_dep_uid_tx, fx_name, fx_transit, fx_uid_tx, fx_wd, fxb, fxdep_transit, gas_applied, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, gstate, in_note, krw_last, krw_mix, krw_mkt, krw_stl, kst_fmt, lp_done, mv_note, noproc, nopx_carry, nopx_swap, now, oa_last, oa_take, ob, of_dec9, of_noauto, offc_add, offc_addr_add, offc_dep, offc_on, offc_pool, offc_s, offc_self_wd, offc_sold, offc_wd, pay_pid, realized_by_date, realized_by_loc, realized_krw_by_date, ret_pool, rows, rt_back, rt_out, rt_pair, rt_transit, st_flow_in, stable_fx_mark, stake_inc, stake_rwd, sw9, swap_dep, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, swap_recv, swap_wd_pre, tax_rows, to_dest9, today_kst, ton_h2u9, tx_group, ub_wd_shown, ub_wd_tx, unk_tag, unverified, up_dep_by_tx, up_dep_uid_ts, up_dep_uid_tx, up_fee, up_mkt, up_win_t0, uuid2txh, wd_raw9, wd_tr, xc_transit, xc_used, cpx, fbx, fsx, kpx, lpx, unx, px, fns, cb, fs_last, oc_fresh, origin_cache, origin_pending, prefs, wallet_label, xc_cache,) = (pre.G, pre.qfmt, pre.ro, pre.un, pre.arr_groups, pre.arr_tx_chain, pre.backfill_t0, pre.be_done, pre.be_take, pre.be_tax, pre.bridge_dep_ts, pre.bridge_outs, pre.ctx.conn, pre.conv_cp, pre.cp_ev, pre.cp_last, pre.cp_merge, pre.credited_txh, pre.cur_lab, pre.cur_row, pre.cur_src, pre.diag, pre.ever_in, pre.ex_debt, pre.ex_loan, pre.ex_transit, pre.exf_dep_tx, pre.exf_kind, pre.extra_ev, pre.extra_events, pre.fee_acq, pre.fee_diag, pre.fee_disp, pre.flow_of, pre.fs_in, pre.ctx.fs_on, pre.fs_rbd, pre.fs_sales, pre.fs_sum, pre.fx_dep_tx, pre.fx_dep_uid_tx, pre.fx_name, pre.fx_transit, pre.fx_uid_tx, pre.fx_wd, pre.ctx.fxb, pre.fxdep_transit, pre.gas_applied, pre.gas_by_chain, pre.gas_by_month, pre.gas_expense, pre.gas_nopx, pre.ctx.gas_on, pre.gstate, pre.in_note, pre.krw_last, pre.krw_mix, pre.krw_mkt, pre.krw_stl, pre.kst_fmt, pre.lp_done, pre.mv_note, pre.noproc, pre.nopx_carry, pre.nopx_swap, pre.ctx.now, pre.oa_last, pre.oa_take, pre.ob, pre.of_dec, pre.of_noauto, pre.offc_add, pre.offc_addr_add, pre.offc_dep, pre.ctx.offc_on, pre.offc_pool, pre.offc_s, pre.offc_self_wd, pre.offc_sold, pre.offc_wd, pre.pay_pid, pre.realized_by_date, pre.realized_by_loc, pre.realized_krw_by_date, pre.ret_pool, pre.rows, pre.rt_back, pre.rt_out, pre.rt_pair, pre.rt_transit, pre.st_flow_in, pre.stable_fx_mark, pre.stake_inc, pre.stake_rwd, pre.sw, pre.swap_dep, pre.swap_fill, pre.swap_fill_est, pre.swap_fill_zero, pre.swap_gas, pre.swap_pay, pre.swap_recv, pre.swap_wd_pre, pre.tax_rows, pre.to_dest, pre.ctx.today_kst, pre.ton_h2u, pre.tx_group, pre.ub_wd_shown, pre.ub_wd_tx, pre.unk_tag, pre.unverified, pre.up_dep_by_tx, pre.up_dep_uid_ts, pre.up_dep_uid_tx, pre.up_fee, pre.up_mkt, pre.up_win_t0, pre.uuid2txh, pre.wd_raw, pre.wd_tr, pre.xc_transit, pre.xc_used, pre.cpx, pre.fbx, pre.fsx, pre.kpx, pre.lpx, pre.unx, pre.px, pre.fns, pre.cb, pre.fs_last, pre.oc_fresh, pre.origin_cache, pre.origin_pending, pre.ctx.prefs, pre.wallet_label, pre.xc_cache,)
+        (G, _qfmt, _ro, _un, arr_groups, arr_tx_chain, backfill_t0, be_done, be_take, be_tax, bridge_dep_ts, bridge_outs, conn, conv_cp, cp_ev, cp_last, cp_merge, credited_txh, cur_lab, cur_row, cur_src, diag, ever_in, ex_debt9, ex_loan9, ex_transit, exf_dep_tx, exf_kind, extra_ev, extra_events, fee_acq, fee_diag, fee_disp, flow_of, fs_in, fs_on, fs_rbd, fs_sales, fs_sum, fx_dep_tx, fx_dep_uid_tx, fx_name, fx_transit, fx_uid_tx, fx_wd, fxb, fxdep_transit, gas_applied, gas_by_chain, gas_by_month, gas_expense, gas_nopx, gas_on, gstate, in_note, krw_last, krw_mix, krw_mkt, krw_stl, kst_fmt, lp_done, mv_note, noproc, nopx_carry, nopx_swap, now, oa_last, oa_take, ob, of_dec9, of_noauto, offc_add, offc_addr_add, offc_dep, offc_on, offc_pool, offc_s, offc_self_wd, offc_sold, offc_wd, pay_pid, realized_by_date, realized_by_loc, realized_krw_by_date, ret_pool, rows, rt_back, rt_out, rt_pair, rt_transit, st_flow_in, stable_fx_mark, stake_inc, stake_rwd, sw9, swap_dep, swap_fill, swap_fill_est, swap_fill_zero, swap_gas, swap_pay, swap_recv, swap_wd_pre, tax_rows, to_dest9, today_kst, ton_h2u9, tx_group, ub_wd_shown, ub_wd_tx, unk_tag, unverified, up_dep_by_tx, up_dep_uid_ts, up_dep_uid_tx, up_fee, up_mkt, up_win_t0, uuid2txh, wd_raw9, wd_tr, xc_transit, xc_used, cpx, fbx, fsx, kpx, lpx, unx, px, fns, cb, fs_last, oc_fresh, origin_cache, origin_pending, prefs, wallet_label, xc_cache, hvx,) = (pre.G, pre.qfmt, pre.ro, pre.un, pre.arr_groups, pre.arr_tx_chain, pre.backfill_t0, pre.be_done, pre.be_take, pre.be_tax, pre.bridge_dep_ts, pre.bridge_outs, pre.ctx.conn, pre.conv_cp, pre.cp_ev, pre.cp_last, pre.cp_merge, pre.credited_txh, pre.cur_lab, pre.cur_row, pre.cur_src, pre.diag, pre.ever_in, pre.ex_debt, pre.ex_loan, pre.ex_transit, pre.exf_dep_tx, pre.exf_kind, pre.extra_ev, pre.extra_events, pre.fee_acq, pre.fee_diag, pre.fee_disp, pre.flow_of, pre.fs_in, pre.ctx.fs_on, pre.fs_rbd, pre.fs_sales, pre.fs_sum, pre.fx_dep_tx, pre.fx_dep_uid_tx, pre.fx_name, pre.fx_transit, pre.fx_uid_tx, pre.fx_wd, pre.ctx.fxb, pre.fxdep_transit, pre.gas_applied, pre.gas_by_chain, pre.gas_by_month, pre.gas_expense, pre.gas_nopx, pre.ctx.gas_on, pre.gstate, pre.in_note, pre.krw_last, pre.krw_mix, pre.krw_mkt, pre.krw_stl, pre.kst_fmt, pre.lp_done, pre.mv_note, pre.noproc, pre.nopx_carry, pre.nopx_swap, pre.ctx.now, pre.oa_last, pre.oa_take, pre.ob, pre.of_dec, pre.of_noauto, pre.offc_add, pre.offc_addr_add, pre.offc_dep, pre.ctx.offc_on, pre.offc_pool, pre.offc_s, pre.offc_self_wd, pre.offc_sold, pre.offc_wd, pre.pay_pid, pre.realized_by_date, pre.realized_by_loc, pre.realized_krw_by_date, pre.ret_pool, pre.rows, pre.rt_back, pre.rt_out, pre.rt_pair, pre.rt_transit, pre.st_flow_in, pre.stable_fx_mark, pre.stake_inc, pre.stake_rwd, pre.sw, pre.swap_dep, pre.swap_fill, pre.swap_fill_est, pre.swap_fill_zero, pre.swap_gas, pre.swap_pay, pre.swap_recv, pre.swap_wd_pre, pre.tax_rows, pre.to_dest, pre.ctx.today_kst, pre.ton_h2u, pre.tx_group, pre.ub_wd_shown, pre.ub_wd_tx, pre.unk_tag, pre.unverified, pre.up_dep_by_tx, pre.up_dep_uid_ts, pre.up_dep_uid_tx, pre.up_fee, pre.up_mkt, pre.up_win_t0, pre.uuid2txh, pre.wd_raw, pre.wd_tr, pre.xc_transit, pre.xc_used, pre.cpx, pre.fbx, pre.fsx, pre.kpx, pre.lpx, pre.unx, pre.px, pre.fns, pre.cb, pre.fs_last, pre.oc_fresh, pre.origin_cache, pre.origin_pending, pre.ctx.prefs, pre.wallet_label, pre.xc_cache, pre.hvx,)
         lko = self._replay_links(LinksIn(qfmt=_qfmt, ro=_ro, un=_un, arr_tx_chain=arr_tx_chain, backfill_t0=backfill_t0, be_done=be_done, be_take=be_take, be_tax=be_tax, conn=conn, cp_merge=cp_merge, cur_lab=cur_lab, cur_row=cur_row, cur_src=cur_src, diag=diag, flow_of=flow_of, fs_last=fs_last, fs_on=fs_on, fs_sales=fs_sales, fs_sum=fs_sum, fx_dep_tx=fx_dep_tx, fx_name=fx_name, fx_uid_tx=fx_uid_tx, fxb=fxb, gstate=gstate, krw_last=krw_last, krw_mix=krw_mix, krw_stl=krw_stl, now=now, oa_last=oa_last, oa_take=oa_take, ob=ob, oc_fresh=oc_fresh, offc_self_wd=offc_self_wd, offc_sold=offc_sold, origin_cache=origin_cache, origin_pending=origin_pending, prefs=prefs, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, ret_pool=ret_pool, rows=rows, rt_out=rt_out, rt_pair=rt_pair, stable_fx_mark=stable_fx_mark, sw=sw9, tax_rows=tax_rows, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, uuid2txh=uuid2txh, wd_raw=wd_raw9, wd_tr=wd_tr, xc_transit=xc_transit, cpx=cpx, fbx=fbx, fsx=fsx, kpx=kpx, unx=unx, px=px, fns=fns, cb=cb, ever_in=ever_in, fx_dep_uid_tx=fx_dep_uid_tx, fx_wd=fx_wd, of_noauto=of_noauto, offc_dep=offc_dep, offc_on=offc_on, ub_wd_tx=ub_wd_tx, wallet_label=wallet_label, xc_cache=xc_cache))
         (_of_uids, br_arr9, br_transit, consume_krw, cp_add_map, cp_emit, cp_take, ev, fee_gain, fs_mark, fs_rec, gp, krw_of, lf_pend, lnx, loan_fill, loan_px, loan_settle, loan_unp, loan_wd, my_all9, my_evm9, note_unk, of_applied, of_bridge, of_cand, of_cands, of_chain, of_deps, of_match, of_pay_on, of_sends, of_wd_take, origin_pending, qn_all9, redeem_tx, rt_same, sale_bid9, sale_book, sale_links, sale_lot_by, sale_lots, sale_pay_flush, sale_pay_q, sale_refund, sale_rf_bid, sale_rf_exit, sale_used, slx, spoof_keys, sw9, tax_krw_acq, wbal9, win_cut_d, xc_barr, xc_links, xf_links,) = (lko.of_uids, lko.br_arr, lko.br_transit, lko.consume_krw, lko.cp_add_map, lko.cp_emit, lko.cp_take, lko.ev, lko.fee_gain, lko.fs_mark, lko.fs_rec, lko.gp, lko.krw_of, lko.lf_pend, lko.lnx, lko.loan_fill, lko.loan_px, lko.loan_settle, lko.loan_unp, lko.loan_wd, lko.my_all, lko.my_evm, lko.note_unk, lko.of_applied, lko.of_bridge, lko.of_cand, lko.of_cands, lko.of_chain, lko.of_deps, lko.of_match, lko.of_pay_on, lko.of_sends, lko.of_wd_take, lko.origin_pending, lko.qn_all, lko.redeem_tx, lko.rt_same, lko.sale_bid, lko.sale_book, lko.sale_links, lko.sale_lot_by, lko.sale_lots, lko.sale_pay_flush, lko.sale_pay_q, lko.sale_refund, lko.sale_rf_bid, lko.sale_rf_exit, lko.sale_used, lko.slx, lko.spoof_keys, lko.sw, lko.tax_krw_acq, lko.wbal, lko.win_cut_d, lko.xc_barr, lko.xc_links, lko.xf_links,)
         (br_fee_add, consume, consume_krw, cp_add, cp_add_map, cp_emit, cp_sync, cp_take, cp_xc, ev, ex_fee_add, fee_day_add, fee_expense, fee_gain, fee_unit, fs_mark, fs_rec, fs_ret, fs_st, krw_inh, krw_of, krw_rec, krw_took, loan_settle, lp_move, lp_tx, note_unk, of_cand, of_wd_take, sale_book, sale_pay_flush, sale_refund, stl_add, stl_carry, stl_in, stl_krw_mkt, stl_out, stl_src, stl_use, tax_krw_acq, wd_fee_add, wd_fee_q,) = (fbx.br_fee_add, cpx.consume, kpx.consume_krw, cpx.cp_add, cpx.cp_add_map, cpx.cp_emit, cpx.cp_sync, cpx.cp_take, cpx.cp_xc, cpx.ev, fbx.ex_fee_add, fbx.fee_day_add, fbx.fee_expense, fbx.fee_gain, fbx.fee_unit, fsx.fs_mark, fsx.fs_rec, fsx.fs_ret, fsx.fs_st, kpx.krw_inh, kpx.krw_of, kpx.krw_rec, kpx.krw_took, lnx.loan_settle, lpx.lp_move, lpx.lp_tx, unx.note_unk, slx.of_cand, slx.of_wd_take, slx.sale_book, slx.sale_pay_flush, slx.sale_refund, kpx.stl_add, kpx.stl_carry, kpx.stl_in, kpx.stl_krw_mkt, kpx.stl_out, kpx.stl_src, kpx.stl_use, fbx.tax_krw_acq, fbx.wd_fee_add, fbx.wd_fee_q,)
@@ -3439,7 +3458,7 @@ class ReplayMixin:
         bo_pid = {}
         rows, br_plan, br_amb, br_sum, br_natfee, disc_bk9, balw_disc9 = _phase_setup(self, conn, rows, BridgeIn(xc_links=xc_links, fx_dep_tx=fx_dep_tx, nopx_swap=nopx_swap, xc_transit=xc_transit, br_arr=br_arr9, sale_links=sale_links, rt_pair=rt_pair, fx_wd=fx_wd, ub_wd_tx=ub_wd_tx, gp=gp, xc_barr=xc_barr))
         g0_9, n9i = self.__dict__.get("_ph_gen0"), 0
-        run = ReplayRun(G=G, _qfmt=_qfmt, _un=_un, arr_groups=arr_groups, arr_tx_chain=arr_tx_chain, backfill_t0=backfill_t0, balw_disc9=balw_disc9, be_done=be_done, be_take=be_take, be_tax=be_tax, bo_pid=bo_pid, br_amb=br_amb, br_fee_add=br_fee_add, br_natfee=br_natfee, br_plan=br_plan, br_sum=br_sum, br_transit=br_transit, bridge_dep_ts=bridge_dep_ts, bridge_outs=bridge_outs, cb=cb, consume=consume, consume_krw=consume_krw, conv_cp=conv_cp, cp_add=cp_add, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_ev=cp_ev, cp_last=cp_last, cp_merge=cp_merge, cp_take=cp_take, cp_xc=cp_xc, credited_txh=credited_txh, cur_lab=cur_lab, diag=diag, disc_bk9=disc_bk9, ev=ev, ex_debt9=ex_debt9, ex_fee_add=ex_fee_add, ex_loan9=ex_loan9, ex_transit=ex_transit, exf_dep_tx=exf_dep_tx, exf_kind=exf_kind, extra_ev=extra_ev, extra_events=extra_events, fee_acq=fee_acq, fee_day_add=fee_day_add, fee_diag=fee_diag, fee_disp=fee_disp, fee_expense=fee_expense, fee_gain=fee_gain, fee_unit=fee_unit, flow_of=flow_of, fs_in=fs_in, fs_mark=fs_mark, fs_on=fs_on, fs_rec=fs_rec, fs_ret=fs_ret, fs_st=fs_st, fs_sum=fs_sum, fx_dep_tx=fx_dep_tx, fx_dep_uid_tx=fx_dep_uid_tx, fx_name=fx_name, fx_transit=fx_transit, fx_uid_tx=fx_uid_tx, fx_wd=fx_wd, fxb=fxb, fxdep_transit=fxdep_transit, gas_applied=gas_applied, gas_by_chain=gas_by_chain, gas_by_month=gas_by_month, gas_expense=gas_expense, gas_nopx=gas_nopx, gas_on=gas_on, in_note=in_note, kpx=kpx, krw_inh=krw_inh, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt, krw_of=krw_of, krw_rec=krw_rec, krw_stl=krw_stl, krw_took=krw_took, kst_fmt=kst_fmt, loan_px=loan_px, loan_unp=loan_unp, loan_wd=loan_wd, mv_note=mv_note, my_all9=my_all9, noproc=noproc, nopx_carry=nopx_carry, nopx_swap=nopx_swap, note_unk=note_unk, oa_last=oa_last, oa_take=oa_take, of_cand=of_cand, of_pay_on=of_pay_on, of_wd_take=of_wd_take, offc_add=offc_add, offc_addr_add=offc_addr_add, offc_dep=offc_dep, offc_on=offc_on, offc_pool=offc_pool, offc_s=offc_s, offc_self_wd=offc_self_wd, offc_sold=offc_sold, offc_wd=offc_wd, pay_pid=pay_pid, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, redeem_tx=redeem_tx, rows=rows, rt_pair=rt_pair, rt_transit=rt_transit, sale_book=sale_book, sale_links=sale_links, sale_refund=sale_refund, sale_rf_exit=sale_rf_exit, sb=self, sell_wm=sell_wm, signer9=signer9, st_flow_in=st_flow_in, stable_fx_mark=stable_fx_mark, stake_inc=stake_inc, stake_rwd=stake_rwd, stl_add=stl_add, stl_carry=stl_carry, stl_in=stl_in, stl_krw_mkt=stl_krw_mkt, stl_out=stl_out, stl_src=stl_src, stl_use=stl_use, swap_dep=swap_dep, swap_fill=swap_fill, swap_fill_est=swap_fill_est, swap_fill_zero=swap_fill_zero, swap_gas=swap_gas, swap_pay=swap_pay, swap_wd_pre=swap_wd_pre, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows, to_dest9=to_dest9, tx_group=tx_group, ub_wd_shown=ub_wd_shown, ub_wd_tx=ub_wd_tx, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, up_dep_uid_tx=up_dep_uid_tx, up_fee=up_fee, up_mkt=up_mkt, uuid2txh=uuid2txh, wd_fee_add=wd_fee_add, wd_fee_q=wd_fee_q, wd_tr=wd_tr, xc_transit=xc_transit, xc_used=xc_used, xf_links=xf_links)
+        run = ReplayRun(G=G, _qfmt=_qfmt, _un=_un, arr_groups=arr_groups, arr_tx_chain=arr_tx_chain, backfill_t0=backfill_t0, balw_disc9=balw_disc9, be_done=be_done, be_take=be_take, be_tax=be_tax, bo_pid=bo_pid, br_amb=br_amb, br_fee_add=br_fee_add, br_natfee=br_natfee, br_plan=br_plan, br_sum=br_sum, br_transit=br_transit, bridge_dep_ts=bridge_dep_ts, bridge_outs=bridge_outs, cb=cb, consume=consume, consume_krw=consume_krw, conv_cp=conv_cp, cp_add=cp_add, cp_add_map=cp_add_map, cp_emit=cp_emit, cp_ev=cp_ev, cp_last=cp_last, cp_merge=cp_merge, cp_take=cp_take, cp_xc=cp_xc, credited_txh=credited_txh, cur_lab=cur_lab, diag=diag, disc_bk9=disc_bk9, ev=ev, ex_debt9=ex_debt9, ex_fee_add=ex_fee_add, ex_loan9=ex_loan9, ex_transit=ex_transit, exf_dep_tx=exf_dep_tx, exf_kind=exf_kind, extra_ev=extra_ev, extra_events=extra_events, fee_acq=fee_acq, fee_day_add=fee_day_add, fee_diag=fee_diag, fee_disp=fee_disp, fee_expense=fee_expense, fee_gain=fee_gain, fee_unit=fee_unit, flow_of=flow_of, fs_in=fs_in, fs_mark=fs_mark, fs_on=fs_on, fs_rec=fs_rec, fs_ret=fs_ret, fs_st=fs_st, fs_sum=fs_sum, fx_dep_tx=fx_dep_tx, fx_dep_uid_tx=fx_dep_uid_tx, fx_name=fx_name, fx_transit=fx_transit, fx_uid_tx=fx_uid_tx, fx_wd=fx_wd, fxb=fxb, fxdep_transit=fxdep_transit, gas_applied=gas_applied, gas_by_chain=gas_by_chain, gas_by_month=gas_by_month, gas_expense=gas_expense, gas_nopx=gas_nopx, gas_on=gas_on, in_note=in_note, kpx=kpx, krw_inh=krw_inh, krw_last=krw_last, krw_mix=krw_mix, krw_mkt=krw_mkt, krw_of=krw_of, krw_rec=krw_rec, krw_stl=krw_stl, krw_took=krw_took, kst_fmt=kst_fmt, loan_px=loan_px, loan_unp=loan_unp, loan_wd=loan_wd, mv_note=mv_note, my_all9=my_all9, noproc=noproc, nopx_carry=nopx_carry, nopx_swap=nopx_swap, note_unk=note_unk, oa_last=oa_last, oa_take=oa_take, of_cand=of_cand, of_pay_on=of_pay_on, of_wd_take=of_wd_take, offc_add=offc_add, offc_addr_add=offc_addr_add, offc_dep=offc_dep, offc_on=offc_on, offc_pool=offc_pool, offc_s=offc_s, offc_self_wd=offc_self_wd, offc_sold=offc_sold, offc_wd=offc_wd, pay_pid=pay_pid, realized_by_date=realized_by_date, realized_by_loc=realized_by_loc, realized_krw_by_date=realized_krw_by_date, redeem_tx=redeem_tx, rows=rows, rt_pair=rt_pair, rt_transit=rt_transit, sale_book=sale_book, sale_links=sale_links, sale_refund=sale_refund, sale_rf_exit=sale_rf_exit, sb=self, sell_wm=sell_wm, signer9=signer9, st_flow_in=st_flow_in, stable_fx_mark=stable_fx_mark, stake_inc=stake_inc, stake_rwd=stake_rwd, stl_add=stl_add, stl_carry=stl_carry, stl_in=stl_in, stl_krw_mkt=stl_krw_mkt, stl_out=stl_out, stl_src=stl_src, stl_use=stl_use, swap_dep=swap_dep, swap_fill=swap_fill, swap_fill_est=swap_fill_est, swap_fill_zero=swap_fill_zero, swap_gas=swap_gas, swap_pay=swap_pay, swap_wd_pre=swap_wd_pre, tax_krw_acq=tax_krw_acq, tax_rows=tax_rows, to_dest9=to_dest9, tx_group=tx_group, ub_wd_shown=ub_wd_shown, ub_wd_tx=ub_wd_tx, unk_tag=unk_tag, unverified=unverified, up_dep_by_tx=up_dep_by_tx, up_dep_uid_tx=up_dep_uid_tx, up_fee=up_fee, up_mkt=up_mkt, uuid2txh=uuid2txh, wd_fee_add=wd_fee_add, wd_fee_q=wd_fee_q, wd_tr=wd_tr, xc_transit=xc_transit, xc_used=xc_used, xc_barr=xc_barr, xc_links=xc_links, xf_links=xf_links, hvx=hvx)
         ri = RowIn(cp_sync=cp_sync, cur_lab=cur_lab, cur_row=cur_row, cur_src=cur_src, fx_name=fx_name, lf_pend=lf_pend, loan_fill=loan_fill, my_all=my_all9, my_evm=my_evm9, pid_row=pid_row, qn_all=qn_all9, signer=signer9, spoof_keys=spoof_keys, swap_fill=swap_fill, swap_recv=swap_recv, wbal=wbal9)
         for r in rows:
             if lf_pend and (r["source_ns"], r["source_id"]) != lf_pend[-1][7]:

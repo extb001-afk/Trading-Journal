@@ -22,8 +22,29 @@
     lost: '옛 기록 수집 범위(5개월) 이전 보유분 처분 — 표시용 보정, 할 일 없음', xfer: '미등록 외부 주소로 나간 전송 — 내 지갑이면 설정에서 추가',
     prog: '컨트랙트를 거쳐 들어온 토큰 — 체결인지 에어드랍인지 확인', nodep: '거래소 입금 주소로 보냈는데 아직 입금 확인 없음', etc: '자동 매칭이 보류된 건',
     spam: '실매수 이력 없이 들어온 토큰 — 목록에서 뺐어요 · 실제 보유면 복원' };
-  const uGrpHead = (v, open, label, badge, extra, d1, title, pvx) => '<div class="gh" role="button" tabindex="0" data-a="uGrp" data-v="' + v + '" aria-expanded="' + open + '"><span class="chev' + (open ? ' o' : '') + '" style="width:18px">' + IC.chev + '</span><span class="h3' + (pvx ? ' pvx' : '') + '">' + label + '</span>' + badge + extra + '<span class="sp"></span>'
-    + '<div class="gd gd1' + (pvx ? ' pvx' : '') + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + d1 + '</div></div>';
+  const uGrpHead = (v, open, label, badge, extra, d1, title, pvx) => {
+    const d0 = S.mobile && String(d1).indexOf(' — ') > 0 ? String(d1).split(' — ').slice(1).join(' — ') : d1;
+    return '<div class="gh" role="button" tabindex="0" data-a="uGrp" data-v="' + v + '" aria-expanded="' + open + '"><span class="chev'
+      + (open ? ' o' : '') + '" style="width:18px">' + IC.chev + '</span><span class="h3' + (pvx ? ' pvx' : '') + '">' + label + '</span>'
+      + badge + extra + '<span class="sp"></span><div class="gd gd1' + (pvx ? ' pvx' : '') + '"' + (title || d0 !== d1 ? ' title="'
+      + esc(title || d1) + '"' : '') + '>' + d0 + '</div></div>';
+  };
+  let uMd = false, uCur = null;
+  function uSel(cats, byCat, hid) {
+    const vis = cats.reduce((a, c) => a.concat(byCat[c]), []).concat(S.u.showHidden ? hid : []);
+    const ks = Array.from(S.u.item).filter(k => String(k).indexOf('usym:') !== 0);
+    let p = null;
+    for (let i = ks.length - 1; i >= 0 && !p; i--) p = vis.find(x => x.key === ks[i]) || null;
+    if (!p) {
+      const c = cats.find(c0 => S.u.open.has(c0)) || cats[0], r = c ? (c === 'unkh' ? unkhRows(byCat[c]) : byCat[c])[0] : null;
+      p = r ? (c === 'unkh' ? (r.grp ? r.grp[0] : r.p) : r) : (S.u.showHidden && hid[0]) || null;
+    }
+    ks.forEach(k => { if (!p || k !== p.key) S.u.item.delete(k); });
+    return p;
+  }
+  const uDetail = p => '<section class="card udet" aria-label="'
+    + esc(p ? String(p.sym || '') + ' ' + ((PCATS[p._cat] || {}).label || '') : '상세') + '">' + (p ? pBody(p, true) : '<div class="empty"><div class="eic">' + IC.info + '</div><b>왼쪽에서 항목을 고르세요</b>'
+    + '고른 건의 원가 정하기·숨기기가 여기 나와요</div>') + '</section>';
   function vUnmatched() {
     const D = S.D;
     const ql = S.u.q.trim().toUpperCase();
@@ -36,18 +57,28 @@
     const hc = { dust: 0, scam: 0, info: 0 };
     D.pendHid.forEach(p => { hc[p.hide] = (hc[p.hide] || 0) + 1; });
     const hcTxt = Object.keys(hc).filter(k => hc[k]).map(k => HIDE_LBL[k] + ' ' + hc[k]).join(' · ');
-    const hidChip = D.pendHid.length ? uiHidChip(D.pendHid.length, 'uHidden', S.u.showHidden, '자동으로 숨긴 항목 ' + D.pendHid.length + '건' + (hcTxt ? '(' + hcTxt + ')' : '') + (S.u.showHidden ? ' — 누르면 닫아요' : ' — 누르면 목록 위에 보여요')) : '';
-    const split = D.unkhSymN && D.pendN !== D.unkhSymN ? '<span class="pvx">' + esc(pendSplitTxt()) + '</span> · ' : '';
-    const top = '<div class="filters uhead"><div style="min-width:0"><div class="cap ucap1" title="원가를 지정하거나 무시로 정리하면 목록에서 빠져요 · 원가가 붙으면 평균 매수가·실현손익이 다시 계산돼요"><b class="ucnt">확인할 것 ' + D.pendN + '개</b> · ' + split + '원가를 정하거나 숨기면 목록에서 빠져요</div></div><div class="sp"></div>'
+    const hidChip = D.pendHid.length ? uiHidChip(D.pendHid.length, 'uHidden', S.u.showHidden, '자동으로 숨긴 항목 ' + D.pendHid.length + '건' + (hcTxt ? '(' + hcTxt + ')' : '') + (S.u.showHidden ? ' — 누르면 닫아요' : ' — 누르면 목록 맨 아래에 보여요')) : '';
+    const split = D.unkhSymN && D.pendN !== D.unkhSymN ? esc(pendSplitTxt()) : '확인할 것 ' + D.pendN + '개';
+    const top = '<div class="filters uhead"><div style="min-width:0"><div class="uph" aria-hidden="true">미매칭 <span class="num">' + D.pendN
+      + '</span></div><div class="cap ucap1" title="원가를 지정하거나 무시로 정리하면 목록에서 빠져요 · '
+      + '원가가 붙으면 평균 매수가·실현손익이 다시 계산돼요"><span class="pvx">' + split + '</span> · 원가를 정하거나 숨기면 목록에서 빠져요</div></div>'
+      + '<div class="sp"></div>'
       + '<div class="row gap8 srchrow">' + searchBox('uq', '코인·유형 검색', S.u.q) + hidChip
       + '</div></div>';
+    uMd = !S.mobile && !S.narrow;
+    uCur = uMd ? uSel(cats, byCat, hid) : null;
     const bal = balGroupHTML();
     const hidGrp = S.u.showHidden && hid.length ? '<div class="card ugrp" id="uHidGrp"><div class="gh" style="cursor:default"><span class="h3">숨긴 항목</span><span class="badge g">' + hid.length + '</span>' + (hcTxt ? '<span class="cap pvx">' + esc(hcTxt) + '</span>' : '') + '<span class="sp"></span>' + (hid.some(p => p._cat === 'spam') ? '<button class="btn sm warn" data-a="bulkSpam">스팸 ' + hid.filter(p => p._cat === 'spam').length + '건 목록에서 지우기</button>' : '') + '<div class="gd gd1" title="소액·확실한 스캠·표시용 보정이라 기본으로 숨겼어요. 실제 자산이면 [정상으로 복원]을 누르세요.">소액·스캠·표시용 보정 — 실제 자산이면 펼쳐서 [정상으로 복원]</div></div>'
       + uiPaged('ug:hid', hid, (p, i) => pItem(p, i, hid), { unit: '건' }) + '</div>' : '';
+    if (!hidGrp) S.u.hidJump = 0;
+    else if (!S.u.hidJump) {
+      S.u.hidJump = 1;
+      setTimeout(() => { const g = document.getElementById('uHidGrp'); if (g) g.scrollIntoView({ block: 'start' }); }, 0);
+    }
     const beg = beGroupHTML();
     if (!D.pendings.length) return top + bal + beg + (preData() ? '<div class="card empty"><div class="eic">' + IC.info + '</div><b>아직 수집 전이에요</b>지갑·거래소를 연결하고 첫 수집이 끝나면 매칭이 필요한 전송·입금을 여기서 보여줘요</div>'
       : '<div class="card empty"><div class="eic">' + IC.check + '</div><b>확인할 건이 없어요</b>모든 전송·입금이 자동으로 매칭됐어요</div>');
-    if (!cats.length && !hid.length) return top + hidGrp + bal + (beg || '<div class="card empty"><b>"' + esc(S.u.q) + '"에 해당하는 건이 없어요</b></div>');
+    if (!cats.length && !hid.length) return top + bal + (beg || '<div class="card empty"><b>"' + esc(S.u.q) + '"에 해당하는 건이 없어요</b></div>');
     const main = cats.length ? cats.map(c => {
       const list = byCat[c], open = S.u.open.has(c), meta = PCATS[c];
       const imp = sum(list, p => num(p.usd));
@@ -60,7 +91,8 @@
       return '<div class="card ugrp">' + uGrpHead(c, open, meta.label, '<span class="badge' + (c === 'spam' ? ' g' : '') + '">' + list.length + '</span>', amt, PCAT_D1[c] || meta.desc, meta.desc)
         + (open ? clps('ug:' + c, uiPaged('ug:' + c, list, (p, i) => pItem(p, i, list), { unit: '건' })) : '') + '</div>';
     }).join('') : '<div class="card empty"><div class="eic">' + IC.check + '</div><b>애매한 건은 없어요</b>남은 건 모두 소액·스캠이라 숨겨 두었어요</div>';
-    return top + offcAsk() + hidGrp + bal + main + beg;
+    const list = offcAsk() + main + bal + beg + hidGrp;
+    return top + (uMd ? '<div class="umd"><div class="ulist">' + list + '</div>' + uDetail(uCur) + '</div>' : list);
   }
   function unkhRows(list) {
     const by = new Map();
@@ -77,10 +109,11 @@
       const d0 = String(r.first || '').slice(5), d1 = String(r.last || '').slice(5);
       const desc = q(num(r.qty)) + ' ' + String(r.sym || '') + ' 매도 · ' + num(r.n) + '건 · ' + (d0 && d0 !== d1 ? d0 + '~' + d1 : d1);
       const chip = '<button class="pill ok bechip pvx" data-a="costBeUndo" data-k="' + esc(r.gkey) + '" data-s="' + esc(r.sym) + '" title="' + esc(fmtTs(r.until)) + ' 에 정함 · 누르면 되돌려요">손익 0으로 처리함 · <u>되돌리기</u></button>';
-      return '<div class="uit"><div class="ih" style="cursor:default"><span class="who">' + icon(r.sym, 'sm', D0().symLogo[String(r.sym || '').toUpperCase()] || {}) + '<span class="ell"><b>' + esc(r.sym) + '</b> <span class="mut" style="font-size:13px">' + esc(r.chain && r.chain !== '—' ? r.chain : '') + '</span>'
-        + '<span class="sub ell mob-only">' + esc(desc) + '</span><span class="mob-only" style="margin-top:6px">' + chip + '</span></span></span>'
-        + '<span class="dsc bedsc"><span class="ell">' + esc(desc) + '</span>' + chip + '</span>'
-        + '<span class="imp"><b class="num"' + (cmp ? ' title="' + esc(m(num(r.usd))) + '"' : '') + '>' + m(num(r.usd), { compact: cmp }) + '</b><span class="cap pvx">정산 · 손익 0</span></span><span></span></div></div>';
+      return '<div class="uit"><div class="ih" style="cursor:default"><span class="who">'
+        + icon(r.sym, 'sm', D0().symLogo[String(r.sym || '').toUpperCase()] || {}) + '<span class="ell u2"><span class="u1"><b>'
+        + esc(r.sym) + '</b><span class="mut">' + esc(r.chain && r.chain !== '—' ? r.chain : '') + '</span></span>'
+        + '<span class="sub ell">' + esc(desc) + '</span><span class="ubc">' + chip + '</span></span></span><span class="imp"><b class="num"'
+        + (cmp ? ' title="' + esc(m(num(r.usd))) + '"' : '') + '>' + m(num(r.usd), { compact: cmp }) + '</b><span class="cap pvx">정산 · 손익 0</span></span></div></div>';
     }, { unit: '건' });
     return '<div class="card ugrp" id="uBeGrp">' + uGrpHead('be', open, '손익 0으로 처리한 매도', '<span class="badge" style="background:var(--okBg);color:var(--ok)">' + L.length + '</span>', tot >= 1 ? '<span class="cap num">' + mN(tot, { compact: true }) + '</span>' : '',
       '원가 모르는 매도를 매수가 = 매도가로 봐서 손익 0 · 되돌리면 원가 미확인으로', '원가를 모르는 매도를 매수가 = 매도가로 봐서 손익 0으로 계산하고 있어요. 되돌리면 다시 원가 미확인 매도로 돌아가요.', true) + (open ? clps('ug:be', rows) : '') + '</div>';
@@ -91,8 +124,13 @@
     const open = S.u.open.has('bal');
     const rows = D.bc.mismatches.slice().sort((a, b) => Math.abs(num(b.diffUsd)) - Math.abs(num(a.diffUsd))).map(x => {
       const conf = x.confirmed === undefined || !!x.confirmed;
-      return '<div class="uit"><div class="ih" style="cursor:default"><span class="who">' + icon(x.sym, 'sm', { chain: x.chain }) + '<span class="ell"><b>' + esc(x.sym || '?') + '</b> <span class="mut">' + esc(x.wallet || '?') + ' · ' + esc(x.chain || '') + '</span></span></span>'
-        + '<span class="dsc ell num">원장 ' + q(num(x.ledger)) + ' / 온체인 ' + q(num(x.onchain)) + (x.firstSeen ? ' · 최초 ' + esc(fmtTs(x.firstSeen)) : '') + '</span><span class="imp"><b class="num ' + cls(num(x.diffUsd)) + '">' + (x.diffUsd != null ? m(num(x.diffUsd), { sign: true }) : '—') + '</b>' + (conf ? '<span class="pill e sm">확정</span>' : '<span class="pill g sm">관찰 중</span>') + '</span><span></span></div></div>';
+      return '<div class="uit"><div class="ih" style="cursor:default"><span class="who">' + icon(x.sym, 'sm', { chain: x.chain })
+        + '<span class="ell u2"><span class="u1"><b>' + esc(x.sym || '?') + '</b><span class="mut">' + esc(x.wallet || '?') + ' · '
+        + esc(x.chain || '') + '</span></span><span class="sub ell num">원장 ' + q(num(x.ledger)) + ' / 온체인 ' + q(num(x.onchain))
+        + (x.firstSeen ? ' · 최초 ' + esc(fmtTs(x.firstSeen)) : '') + '</span></span></span><span class="imp"><b class="num '
+        + cls(num(x.diffUsd)) + '">'
+        + (x.diffUsd != null ? m(num(x.diffUsd), { sign: true }) : '—') + '</b>'
+        + (conf ? '<span class="pill e sm">확정</span>' : '<span class="pill g sm">관찰 중</span>') + '</span></div></div>';
     }).join('');
     return '<div class="card ugrp">' + uGrpHead('bal', open, '잔고 대조 불일치', '<span class="badge">' + D.bcConfirmed.length + '</span>',
       (D.bcWatch.length ? '<span class="cap pvx">관찰 중 ' + D.bcWatch.length + '</span>' : '') + (D.bc.unchecked ? '<span class="cap wtxt pvx" title="대조 호출 상한에 걸려 이번 판에 못 본 (체인, 지갑) 쌍 — 다음 판에 이어서 봐요(그 쌍의 지난 불일치는 그대로 보여요)">이번 판 미대조 ' + D.bc.unchecked + '쌍</span>' : ''),
@@ -118,18 +156,24 @@
     const ven = chainTxt || (pos && pos.chain && pos.chain !== '?' ? pos.chain : '');
     return [ven, p._cat === 'unkh' ? '' : String(p.t || '').slice(0, 5)].filter(Boolean).join(' · ');
   }
+  const pWho = (p, sz) => p._cat === 'xfer' || p._cat === 'prog'
+    ? '<span class="ic ' + sz + ' avn">' + (p._cat === 'xfer' ? IC.send : IC.info).replace('<svg', '<svg width="15" height="15"')
+      + '</span>'
+    : icon(p.sym, sz, D0().symLogo[String(p.sym || '').toUpperCase()] || {});
+  const pSym = p => p.sym && p.sym !== '—' ? spamNm(p.sym) : (p._cat === 'xfer' ? '외부 전송' : p._cat === 'prog' ? '프로그램 수령' : '—');
   function pItem(p, _i, list) {
-    const open = S.u.item.has(p.key);
-    const lg = D0().symLogo[String(p.sym || '').toUpperCase()] || {};
-    const who = p._cat === 'xfer' || p._cat === 'prog' ? '<span class="ic sm" style="background:var(--surface3);color:var(--text2)">' + (p._cat === 'xfer' ? IC.send : IC.info).replace('<svg', '<svg width="15" height="15"') + '</span>' : icon(p.sym, 'sm', lg);
-    const symTxt = p.sym && p.sym !== '—' ? spamNm(p.sym) : (p._cat === 'xfer' ? '외부 전송' : p._cat === 'prog' ? '프로그램 수령' : '—');
+    const open = uMd ? !!uCur && uCur.key === p.key : S.u.item.has(p.key);
     const cmp = arr(list).length ? arr(list).some(x => num(x.usd) >= 1e4) : num(p.usd) >= 1e4;
     const imp = p.usd != null ? '<b class="num"' + (cmp ? ' title="' + esc(m(num(p.usd))) + '"' : '') + '>' + m(num(p.usd), { compact: cmp }) + '</b><span class="cap">' + (IMP_LBL[p._cat] || '') + '</span>' : '<span class="cap num">' + esc(p.t) + '</span>';
     const rsn = p.hide ? '<span class="pill ' + (p.hide === 'scam' ? 'e' : 'g') + ' sm">' + esc(p.hideReason || HIDE_LBL[p.hide]) + '</span>' : '';
-    return '<div class="uit' + (open ? ' open' : '') + '" data-anc="pending:' + esc(p.key) + '"><div class="ih" role="button" tabindex="0" data-a="uItem" data-k="' + esc(p.key) + '" aria-expanded="' + open + '">'
-      + '<span class="who">' + who + '<span class="ell"><b>' + esc(symTxt) + '</b> <span class="mut" style="font-size:13px">' + esc(pSub(p, list)) + '</span><span class="sub ell mob-only">' + esc(pDesc(p)) + '</span>' + (rsn ? '<span class="mob-only" style="margin-top:3px">' + rsn + '</span>' : '') + '</span></span>'
-      + '<span class="dsc ell">' + esc(pDesc(p)) + (rsn ? ' ' + rsn : '') + '</span><span class="imp">' + imp + '</span><span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span></div>'
-      + (open ? clps('u:' + p.key, pBody(p)) : '') + '</div>';
+    const ih = uMd && open ? '<div class="ih on" aria-current="true">'
+      : '<div class="ih" role="button" tabindex="0" data-a="uItem" data-k="' + esc(p.key) + '"'
+        + (uMd ? '' : ' aria-expanded="' + open + '"') + '>';
+    return '<div class="uit' + (open ? ' open' : '') + '" data-anc="pending:' + esc(p.key) + '">' + ih + '<span class="who">'
+      + pWho(p, 'sm') + '<span class="ell u2"><span class="u1"><b>' + esc(pSym(p)) + '</b><span class="mut">'
+      + esc(pSub(p, list)) + '</span>' + rsn + '</span><span class="sub ell">' + esc(pDesc(p)) + '</span></span></span><span class="imp">' + imp + '</span>'
+      + (uMd ? '' : '<span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span>') + '</div>'
+      + (open && !uMd ? clps('u:' + p.key, pBody(p)) : '') + '</div>';
   }
   function pGrpItem(ms, list) {
     const p0 = ms[0], gk = 'usym:' + String(p0.sym || '').toUpperCase(), open = S.u.item.has(gk);
@@ -138,13 +182,13 @@
     const locs = ms.map(p => pSub(p, list) || (p.ckey ? '업비트' : '지갑')).filter((v, i, a) => v && a.indexOf(v) === i);
     const gq = ms.every(p => pQty(p)) ? q(sum(ms, p => num(p.qty))) + ' ' : '';
     return '<div class="uit ugp' + (open ? ' open' : '') + '"><div class="ih" role="button" tabindex="0" data-a="uItem" data-k="' + esc(gk) + '" aria-expanded="' + open + '">'
-      + '<span class="who">' + icon(p0.sym, 'sm', lg) + '<span class="ell"><b>' + esc(p0.sym) + '</b> <span class="mut" style="font-size:13px">' + ms.length + '곳</span><span class="sub ell mob-only">' + esc(gq + p0.sym + ' 보유 · ' + locs.join(' · ')) + '</span></span></span>'
-      + '<span class="dsc ell" title="' + esc(ms.map(p => (pSub(p, list) || '—') + ' ' + (pQty(p) || '수량 — ') + '· ' + m(num(p.usd))).join('\n')) + '">' + esc(gq + p0.sym + ' 보유') + ' <span class="mut">· ' + esc(locs.join(' · ')) + '</span></span>'
+      + '<span class="who">' + icon(p0.sym, 'sm', lg) + '<span class="ell u2"><span class="u1"><b>' + esc(p0.sym) + '</b><span class="mut">' + ms.length + '곳</span></span>'
+      + '<span class="sub ell" title="' + esc(ms.map(p => (pSub(p, list) || '—') + ' ' + (pQty(p) || '수량 — ') + '· ' + m(num(p.usd))).join('\n')) + '">' + esc(gq + p0.sym + ' 보유 · ' + locs.join(' · ')) + '</span></span></span>'
       + '<span class="imp"><b class="num"' + (cmp ? ' title="' + esc(m(tot)) + '"' : '') + '>' + m(tot, { compact: cmp }) + '</b><span class="cap">평가 합</span></span><span class="chev' + (open ? ' o' : '') + '">' + IC.chev + '</span></div>'
       + (open ? clps('u:' + gk, '<div class="ugsub">' + ms.map((p, i) => pItem(p, i, list)).join('') + '</div>') : '') + '</div>';
   }
   const D0 = () => S.D;
-  function pBody(p) {
+  function pBody(p, full) {
     const k = esc(p.key);
     const cands = arr(p.cands);
     const isSrc = cands.length && cands[0].kind === 'src';
@@ -157,30 +201,71 @@
       return '<div class="st' + (lvl ? ' l' + Math.min(2, lvl) : '') + '"><span class="dt"></span><div style="min-width:0"><div class="tx1">' + esc(cut > 0 ? txt.slice(0, cut) : txt) + '</div>' + (cut > 0 ? '<div class="tx2">' + esc(txt.slice(cut + 3)) + '</div>' : '')
         + (!lvl && pct ? '<div class="row gap8"><div class="mbar" style="flex:1"><i style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></div><span class="cap num">' + (isSrc ? '비중 ' : '일치도 ') + pct + '%</span></div>' : '') + '</div>' + btn + '</div>';
     }).join('') + '</div>' : '';
-    const acts = [];
     const gk = p.gkey || (String(p.key).match(/^risk:(g\d+)$/) || [])[1];
-    if ((p._cat === 'unv' || p._cat === 'unkh' || p._cat === 'lost') && p.gkey) {
-      const beBtn = p._cat === 'unv' ? '<button class="btn sm pvx" data-a="costBe" data-k="' + k + '">손익 0으로 처리</button>' : '';
-      if (p.costOv) acts.push('<span class="pill a">원가 지정됨 · ' + esc(p.costOv.mode === 'market' ? '당시 시세' : '개당 ' + px(num(p.costOv.unit))) + '</span><button class="btn sm" data-a="costClear" data-k="' + k + '">원가 지정 해제</button>' + beBtn);
-      else acts.push('<input class="field num" inputmode="decimal" placeholder="개당 원가 (USD)" data-pv="1" data-draft="cu:' + k + '" data-enter="costUnit" data-k="' + k + '" aria-label="개당 원가 (USD)"><button class="btn sm pri" data-a="costUnit" data-k="' + k + '">원가 적용</button><button class="btn sm" data-a="costMarket" data-k="' + k + '">당시 시세로 추정</button>' + beBtn);
-    }
-    else if (p._cat === 'unv' || p._cat === 'unkh' || p._cat === 'lost') {
-      acts.push('<div class="fbnote nocost">' + (p.ckey ? '이 줄은 원가를 직접 넣을 수 없어요 — 업비트 잔고로만 보이는 보유라 원장에 원가를 붙일 기록(매수 체결·입금)이 없어요. 업비트 체결·입금이 원장에 잡히면 원가가 자동으로 붙어요.'
-        : '이 줄은 원가를 직접 넣을 수 없어요 — 원장에서 이 보유를 묶을 코인 기록을 찾지 못했어요. 지갑·거래소 기록이 수집되면 원가를 넣을 수 있어요.') + '</div>');
-    }
-    if (p._cat === 'spam' && gk) {
-      acts.push('<button class="btn sm pri" data-a="riskRestore" data-k="' + k + '">정상으로 복원</button>');
-      if (!p.hide) acts.push('<button class="btn sm" data-a="riskSpam" data-k="' + k + '">스팸 확정</button>');
-    }
-    acts.push('<button class="btn sm danger" data-a="ignore" data-k="' + k + '">목록에서 숨기기</button>');
+    const costable = p._cat === 'unv' || p._cat === 'unkh' || p._cat === 'lost';
+    const beBtn = p._cat === 'unv' ? '<button class="btn sm pvx" data-a="costBe" data-k="' + k + '">손익 0으로 처리</button>' : '';
+    const st = costable && p.gkey && p.costOv ? '<div class="ustate" role="status"><span class="pill ok">원가 지정됨 · '
+      + esc(p.costOv.mode === 'market' ? '당시 시세' : '개당 ' + px(num(p.costOv.unit))) + '</span><div class="row gap8">'
+      + '<button class="btn sm" data-a="costClear" data-k="' + k + '">원가 지정 해제</button>' + beBtn + '</div></div>' : '';
+    const opts = costable && p.gkey && !p.costOv ? pCostOpts(p, k, beBtn) : costable && !p.gkey
+      ? '<div class="fbnote nocost">' + (p.ckey ? '이 줄은 원가를 직접 넣을 수 없어요 — 업비트 잔고로만 보이는 보유라 원장에 원가를 붙일 기록(매수 체결·입금)이 없어요. 업비트 체결·입금이 원장에 잡히면 원가가 자동으로 붙어요.'
+        : '이 줄은 원가를 직접 넣을 수 없어요 — 원장에서 이 보유를 묶을 코인 기록을 찾지 못했어요. 지갑·거래소 기록이 수집되면 원가를 넣을 수 있어요.') + '</div>' : '';
+    const spam = p._cat === 'spam' && gk ? '<div class="row gap8 uacts"><button class="btn sm pri" data-a="riskRestore" data-k="' + k
+      + '">정상으로 복원</button>' + (p.hide ? '' : '<button class="btn sm" data-a="riskSpam" data-k="' + k + '">스팸 확정</button>') + '</div>' : '';
     const beInfo = p._cat === 'unv' && p.costBe ? '<div class="cap bewas pvx">' + esc(fmtTs(p.costBe.until)) + '까지의 매도는 손익 0으로 처리했어요 · 이 줄은 그 뒤 매도예요</div>' : '';
     const fbInfo = num(p.fbAvg) > 0 ? '<div class="cap" style="margin-top:8px">종목 평균 매수가 ' + px(num(p.fbAvg)) + (p.fbRealized ? ' · 평균가 대체 시 손익 ' + m(num(p.fbRealized), { sign: true }) : '') + (p.fbCost ? ' · 대체 원가 ' + m(num(p.fbCost)) : '') + '</div>' : '';
-    const hidNote = p.hide ? '<div class="fbnote" style="margin:12px 0 0;background:var(--surface);color:var(--text2);border:1px solid var(--line)">자동 숨김 · <b>' + esc(p.hideReason || HIDE_LBL[p.hide]) + '</b></div>' : '';
-    const onch = p._cat === 'xfer' || p._cat === 'prog' ? '<div class="row gap6"><span class="mono ell">' + esc(short(p.tx || p.onchain)) + '</span>' + (p.tx || p.onchain ? '<button class="cpy" data-a="copy" data-v="' + esc(p.tx || p.onchain) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>' : '<div class="val2 num">' + (S.cur !== 'USD' && !S.hide && /\$\s?\d/.test(String(p.onchain || '')) ? '<span class="aprx" title="체결 시각 환율이 아니라 오늘 환율로 환산했어요">≈ </span>' : '') + esc(hs(p.onchain || '—', true)) + '</div>';
-    return '<div class="ib">' + hidNote + '<div class="two" style="margin-top:12px"><div><div class="lab">온체인 기록' + (p.chain && p.chain !== '—' ? ' · ' + esc(p.chain) : '') + '</div>' + onch + '</div><div><div class="lab">' + (p._cat === 'xfer' ? '목적지' : '거래소 기록') + '</div><div class="val2">' + (p._cat === 'xfer' && p.to ? '<span class="mono">' + esc(short(p.to)) + '</span> <button class="cpy" data-a="copy" data-v="' + esc(p.to) + '" aria-label="주소 복사">' + IC.copy + '</button> <span class="cap">' + esc(hs(p.ex)) + '</span>' : esc(hs(p.ex || '—'))) + '</div><div class="lab" style="margin-top:8px">왜 보류됐나</div><div class="val2 t2" style="font-size:13.5px">' + esc(hs(p.gap || '—', true)) + '</div></div></div>'
+    const hidNote = p.hide ? '<div class="fbnote uhn">자동 숨김 · <b>' + esc(p.hideReason || HIDE_LBL[p.hide]) + '</b></div>' : '';
+    const segs = String(p.gap || '').split(' · '), fsSeg = p.fsHold ? segs.find(s => s.indexOf('최초 인식 시가') >= 0) || '' : '';
+    const gapR = segs.filter(s => s && s !== fsSeg && s !== '—').join(' · ');
+    const xp = p._cat === 'xfer' || p._cat === 'prog', ch = p.chain && p.chain !== '—' ? p.chain : '';
+    const apx = S.cur !== 'USD' && !S.hide && /\$\s?\d/.test(String(p.onchain || ''))
+      ? '<span class="aprx" title="체결 시각 환율이 아니라 오늘 환율로 환산했어요">≈ </span>' : '';
+    const onTx = !xp && p.onchain && p.onchain !== '—' ? apx + esc(hs(p.onchain, true)) : '';
+    const basis = [gapR ? esc(hs(gapR, true)) : '', onTx ? '온체인 ' + (ch ? esc(ch) + ' · ' : '') + onTx : '',
+      p._cat !== 'xfer' && p.ex && p.ex !== '—' ? '거래소 ' + esc(hs(p.ex)) : ''].filter(Boolean).join(' · ');
+    const why = '<div class="uwhy"><span class="lab">왜 보류됐나</span>' + (p.why ? '<span class="t2">' + esc(hs(p.why, true)) + '</span>' : '')
+      + (basis ? '<span class="cap num">근거 · ' + basis + '</span>' : '') + '</div>';
+    const cpy = (v, lab) => '<button class="cpy" data-a="copy" data-v="' + esc(v) + '" aria-label="' + lab + '">' + IC.copy + '</button>';
+    const txv = p.tx || p.onchain, cp = s => s ? '<span class="cap">' + esc(s) + '</span>' : '';
+    const dst = p._cat === 'xfer' && p.to ? '<div class="udst"><span class="lab">목적지</span><span class="mono">' + esc(short(p.to))
+      + '</span>' + cpy(p.to, '주소 복사') + cp(p.ex && p.ex !== '—' ? hs(p.ex) : '') + cp(ch) + '</div>'
+      : xp && txv ? '<div class="udst"><span class="lab">tx</span><span class="mono ell">' + esc(short(txv)) + '</span>' + cpy(txv, 'txid 복사')
+        + '</div>' : '';
+    const wait = fsSeg ? '<div class="uwait" role="status">' + IC.info + '<span><b>' + esc(hs(fsSeg, true)) + '</b>'
+      + (opts && p.fsHold === 'wait' ? ' — 기다려도 되고, 아래에서 지금 정해도 돼요' : '') + '</span></div>' : '';
+    return '<div class="ib' + (full ? ' full' : '') + '">' + (full ? pHead(p) : '') + hidNote + st + why + dst
       + (p._cat === 'xfer' ? aiOpBox(p.aiOp) : '')
-      + '<div class="why">' + esc(hs(p.why || '', true)) + '</div>' + (p.candsHint ? '<div class="hint">' + esc(hs(p.candsHint)) + '</div>' : '') + fbInfo + beInfo + path
-      + '<div class="acts">' + acts.join('') + '</div></div>';
+      + (p._cat === 'unv' ? pRing(p) : '') + beInfo + wait + opts + spam + path
+      + (p.candsHint ? '<div class="hint">' + esc(hs(p.candsHint)) + '</div>' : '') + fbInfo
+      + '<div class="uft"><button class="btn sm danger" data-a="ignore" data-k="' + k + '">목록에서 숨기기</button></div></div>';
+  }
+  function pHead(p) {
+    const sub = [pSub(p, [p]), String(p.t || ''), (PCATS[p._cat] || {}).label || ''].filter(Boolean).join(' · ');
+    const v = num(p.usd), a = m(v, { compact: true }), f = m(v);
+    return '<div class="udh">' + pWho(p, '') + '<div class="u2"><h2 class="h2">' + esc(pSym(p)) + '</h2><span class="cap num">' + esc(sub)
+      + '</span></div><span class="sp"></span>' + (p.usd != null ? '<div class="uamt"><b class="num">' + a + '</b><span class="cap num">'
+      + (a !== f ? f + ' · ' : '') + (IMP_LBL[p._cat] || '') + '</span></div>' : '') + '</div>';
+  }
+  function pRing(p) {
+    const qs = esc(pQty(p) + String(p.sym || '')), ch = pSub(p, [p]).split(' · ')[0];
+    return '<div class="uring" role="img" aria-label="' + esc('들어옴(일자 모름) → 원가 빈칸 → 팔았음 ' + (p.t || '')) + '"><div class="ui">'
+      + '<span class="lab">들어옴 · 유입 일자 모름</span><b class="num">' + qs + '</b>' + (ch ? '<span class="cap">' + esc(ch) + '</span>' : '')
+      + '</div><i class="ul w" aria-hidden="true"></i><div class="uq"><span class="num" aria-hidden="true">?</span><b>원가 빈칸</b></div>'
+      + '<i class="ul" aria-hidden="true"></i><div class="uo"><span class="lab">팔았음'
+      + (p.t ? ' · <span class="num">' + esc(p.t) + '</span>' : '') + '</span><b class="num">' + qs + '</b></div></div>';
+  }
+  function pCostOpts(p, k, beBtn) {
+    const id = 'ucu-' + String(p.key).replace(/[^\w-]/g, '_');
+    const o = (h, c, b) => '<div class="uopt">' + h + '<span class="cap">' + c + '</span>' + b + '</div>';
+    const inp = '<div class="row gap8"><input id="' + id + '" class="field num" inputmode="decimal" placeholder="개당 원가 (USD)" data-pv="1"'
+      + ' data-draft="cu:' + k + '" data-enter="costUnit" data-k="' + k + '"><button class="btn sm pri" data-a="costUnit" data-k="' + k
+      + '">원가 적용</button></div>';
+    return '<div class="uopts"><div class="uoh"><h3 class="h3">원가 정하기</h3><span class="cap">' + (beBtn ? '셋' : '둘')
+      + ' 중 하나 · 정하면 손익을 다시 계산해요</span></div><div class="uog">'
+      + o('<label for="' + id + '"><b>개당 원가 직접 넣기</b></label>', '아는 값으로 손익을 다시 계산해요', inp)
+      + o('<b>당시 시세로 추정</b>', '그 시각 시세로 원가를 넣어요', '<div><button class="btn sm" data-a="costMarket" data-k="' + k
+        + '">당시 시세로 추정</button></div>')
+      + (beBtn ? o('<b>손익 0으로 처리</b>', '매수가 = 매도가로 봐요 · 되돌릴 수 있어요', '<div>' + beBtn + '</div>') : '') + '</div></div>';
   }
 
   const OF_CATS = ['송금·결제/선물', '세일 참가금', '분실·해킹', '기타'];
@@ -247,14 +332,7 @@
     const capPend = (D.ofPend.length ? (D.ofBrU.length ? '미확인 ' + D.ofPend.length + '곳 ' : '') + (D.ofPendTr ? '<span title="돈 흐름 추적이 끝난 ' + D.ofPendTr + '곳은 추적 뒤 순유출(행 머리와 같은 값), 나머지는 보낸 값 − 되돌려 받음">순유출(추적 반영) ' : '순유출 ') + m(D.ofPendUsd, { compact: true }) + (D.ofPendTr ? '</span>' : '') : (D.ofPendN ? '' : '모두 정리됐어요')) + (D.ofBrU.length ? (D.ofPend.length ? ' · ' : '') + '브릿지 미추적 ' + D.ofBrU.length + '곳 포함' : '') + (D.ofRet.length ? ' · 되돌려 받음 ' + D.ofRet.length + '곳 별도' : '');
     const capExt = !ext.length && D.ofPendN ? '아직 확정한 곳 없음 · 확인 필요에서 정하면 여기로' : ext.length + '곳' + (ext.some(r => r.returnedUsd || r.linkTokenUsd) ? ' · 순유출 ' + m(sum(ext, ofNetV), { compact: true }) : '') + ' · 평가금액 ' + m(sum(ext, r => r.usdNow), { compact: true });
     const capMine = mine.length + '곳 · 자산에서 빠지지 않음', capSpam = '실제 유출 아님 · 자동 분류 · 숨김';
-    const osOpen = uiOpen('ofsum', false);
-    const sums = '<div class="card ofs1"><div class="ucells ofcells">'
-      + uiCell('확인 필요', '<span class="' + (D.ofPendN ? 'wtxt' : 'oktxt') + '">' + D.ofPendN + '곳</span>', 'ofView', 'pending', plainT(capPend))
-      + uiCell('외부 유출 확정', ext.length ? m(sum(ext, sendV), { compact: true }) : '<span class="mut">없음</span>', 'ofView', 'history', plainT(capExt))
-      + uiCell('내 지갑 · 거래소', m(sum(mine, sendV), { compact: true }), 'ofView', 'history', capMine)
-      + uiCell('사칭·스팸 <span class="mut">(숨김)</span>', spam.length + '곳', 'ofHidden', null, capSpam) + '</div>'
-      + '<div class="jscap"><span class="cap num">' + (capPend ? capPend.split(' · ')[0] : capMine) + '</span><button type="button" class="link jsmore" data-a="uiFold" data-v="ofsum" aria-expanded="' + osOpen + '">' + (osOpen ? '접기' : '자세히') + UI_CHEV + '</button></div>'
-      + (osOpen ? clps('uf:ofsum', '<div class="jsdl">' + [['확인 필요', capPend || '—'], ['외부 유출 확정', capExt], ['내 지갑 · 거래소', capMine], ['사칭·스팸 로그', spam.length + '곳 · ' + capSpam]].map(x => '<div class="jsr"><span class="k">' + x[0] + '</span><span class="v num">' + x[1] + '</span></div>').join('') + '</div>') : '') + '</div>';
+    const sums = ofSumCard(D, { ext, mine, spam, sendV, cap: [capPend, capExt, capMine, capSpam] });
     const nSale9 = D.of.filter(ofIsSale).length;
     const waitBar = nSale9 && D.ofWait.length ? '<div class="ofwait"><i class="wd"></i><span class="l">세일 참가 · 회수 대기</span><b class="num">' + D.ofWait.length + '건' + (D.ofWait.length ? ' ' + m(sum(D.ofWait, r => r.saleWait), { compact: true }) : '') + '</b>'
       + '<span class="cap">총자산에는 안 들어가요</span><button class="lnk" data-a="ofWaitGo">세일 참가금만 보기</button>'
@@ -263,17 +341,52 @@
     const hidChip = nHid ? uiHidChip(nHid, 'ofHidden', sh, '자동으로 숨긴 전송 ' + nHid + '곳' + (spam.length ? ' · 사칭 토큰 로그 ' + spam.length : '') + (nDust ? ' · 소액·주소 오염 ' + nDust : '') + (sh ? ' — 누르면 다시 숨겨요' : ' — 누르면 목록에 함께 보여요')) : '';
     const seg = '<div class="stw"><div class="subtabs" role="tablist">' + [['pending', '확인 필요', pend.length], ['history', '정리됨', res.length]].concat(D.wdDest.length ? [['wdest', '출금 받은 주소', D.wdDestN]] : []).map(t => '<button role="tab" aria-selected="' + (S.of.view === t[0]) + '" class="' + (S.of.view === t[0] ? 'on' : '') + '" data-a="ofView" data-v="' + t[0] + '"' + (t[0] === 'history' ? ' title="정리된 내역"' : t[0] === 'wdest' ? ' title="거래소 출금 받은 주소"' : '') + '>' + t[1] + '<span class="n">' + t[2] + '</span></button>').join('') + '</div>'
       + (!nSale9 ? '<button class="pill g sm ofsl0" data-a="ofWaitGo" title="세일에 넣은 전송을 외부 → 세일 참가금으로 고르면 여기 모여요">세일 참가금 0</button>'
-        : !D.ofWait.length ? '<button class="pill g sm ofsl0" data-a="ofWaitGo" title="세일 참가금 ' + nSale9 + '건 — 회수 대기 0건(모두 받은 것과 연결됨) · 총자산에는 안 들어가요">세일 참가금 <span class="pvx">' + nSale9 + '</span></button>' : '') + hidChip + '</div>';
-    const head = '<div class="ofhd"><div class="cap">어디로 보냈는지 정하면 총자산·손익이 정확해져요</div></div>';
+        : !D.ofWait.length || S.of.view !== 'pending' ? '<button class="pill g sm ofsl0" data-a="ofWaitGo" title="세일 참가금 ' + nSale9 + '건 — ' + (D.ofWait.length ? '회수 대기 ' + D.ofWait.length + '건' : '회수 대기 0건(모두 받은 것과 연결됨)') + ' · 총자산에는 안 들어가요">세일 참가금 <span class="pvx">' + nSale9 + '</span></button>' : '') + hidChip + '</div>';
     let body;
-    const ocb = offcAsk() + offcGroup();
+    const pv0 = S.of.view === 'pending', top = pv0 ? waitBar + offcAsk() : '', ocb = S.of.view === 'history' ? offcGroup() : '';
     if (S.of.view === 'history') body = ofHistory(res);
     else if (S.of.view === 'wdest') body = wdDestHTML();
     else body = pend.length ? uiPaged('ofp', pend, r => ofCard(r), { unit: '곳' })
       : preData() ? '<div class="card empty"><div class="eic">' + IC.info + '</div><b>아직 수집 전이에요</b>첫 수집이 끝나면 외부로 나간 전송을 여기서 정리할 수 있어요</div>'
       : '<div class="card empty"><div class="eic">' + IC.check + '</div><b>확인할 전송이 없어요</b>외부로 나간 전송은 모두 정리됐어요</div>';
-    return head + waitBar + sums + ocb + seg + body + ofSheet();
+    return seg + top + sums + ocb + body + ofSheet();
 
+  }
+  function ofSumCard(D, g) {
+    const pv = Math.max(0, num(D.ofPendUsd)), ev = sum(g.ext, g.sendV), mv = sum(g.mine, g.sendV), tot = pv + ev + mv;
+    const pc = v => (tot > 0 ? v / tot * 100 : 0), p1 = v => pc(v).toFixed(1) + '%', mc = v => m(v, { compact: true });
+    const sale = D.of.filter(ofIsSale), sw = c => '<i class="ofsw ' + c + '"></i>';
+    const sg = [['wh', pv, '확인 필요'], ['kx', ev, '외부 유출 확정'], ['km', mv, '내 지갑·거래소']].filter(x => x[1] > 0);
+    const bar = tot > 0 ? '<div class="ofbar" role="img" aria-label="' + esc(sg.map(x => x[2] + ' ' + p1(x[1])).join(' · ')) + '">'
+      + sg.map(x => '<i class="' + x[0] + '" style="width:' + pc(x[1]).toFixed(2) + '%"></i>').join('') + '</div>' : '';
+    const why = (pv > 0 ? '<span class="t2">' + sw('wh') + '그중 <b class="num">' + p1(pv) + '</b>는 아직 어디로 갔는지 몰라요</span>' : '')
+      + '<span>어디로 보냈는지 정하면 총자산·손익이 정확해져요</span>'
+      + (sale.length ? '<span><span class="pvx">세일 참가금 ' + sale.length + '곳</span> ' + mc(sum(sale, g.sendV)) + ' 별도</span>' : '');
+    const cell = (l, c, v, s, act, dv, tip) => '<button type="button" class="ofsc" data-a="' + act + '"'
+      + (dv ? ' data-v="' + dv + '"' : '') + ' title="' + esc(plainT(tip)) + '"><span class="l">' + sw(c) + l + '</span>'
+      + '<b class="v num">' + v + '</b>' + s + '</button>';
+    const s1 = t => '<span class="s">' + t + '</span>', n9 = n => '<span class="pvx">' + n + '곳</span>', nP = D.ofPendN, ex = g.ext;
+    const cats = ex.map(r => ofCatLbl(r.category)).filter((c, i, a) => c && a.indexOf(c) === i).slice(0, 2).join(' · ');
+    const v1 = D.ofPend.length ? mc(pv) : '<span class="' + (nP ? 'wtxt' : 'mut') + '">' + (nP ? nP + '곳' : '없음') + '</span>';
+    const cells = cell('확인 필요', 'wh', v1, s1(n9(nP) + (D.ofPend.length ? ' · 순유출' : nP ? '' : ' · 모두 정리됐어요')),
+      'ofView', 'pending', g.cap[0] || '확인 필요')
+      + cell('외부 유출 확정', 'kx', ex.length ? mc(ev) : '<span class="mut">없음</span>',
+        s1(ex.length ? n9(ex.length) + (cats ? ' · ' + esc(cats) : '') : '확인 필요에서 정하면 여기로'), 'ofView', 'history', g.cap[1])
+      + cell('내 지갑 · 거래소', 'km', mc(mv), s1(n9(g.mine.length)) + s1('자산에서 빠지지 않음'), 'ofView', 'history', g.cap[2])
+      + cell('사칭·스팸 <span class="mut">(숨김)</span>', 'ks', '<span class="mut">' + n9(g.spam.length) + '</span>',
+        s1('자동 분류 · 숨김') + s1('실제 유출 아님'), 'ofHidden', '', g.cap[3]);
+    const osOpen = uiOpen('ofsum', false), dl = [['확인 필요', g.cap[0] || '—'], ['외부 유출 확정', g.cap[1]], ['내 지갑 · 거래소', g.cap[2]],
+      ['사칭·스팸 로그', g.spam.length + '곳 · ' + g.cap[3]]];
+    const full = m(tot), big = '<b class="num">' + mc(tot) + '</b>' + (full !== mc(tot) ? '<span class="num mut">' + full + '</span>' : '');
+    const lgd = '<div class="ofs2g">' + sg.map(x => '<span>' + sw(x[0]) + x[2] + ' <span class="num">' + mc(x[1]) + '</span></span>')
+      .join('') + '</div>';
+    const more = '<div class="ofs2m"><button type="button" class="link jsmore" data-a="uiFold" data-v="ofsum"'
+      + ' aria-expanded="' + osOpen + '">' + (osOpen ? '접기' : '자세히') + UI_CHEV + '</button></div>';
+    const dlH = osOpen ? clps('uf:ofsum', '<div class="jsdl">' + dl.map(x => '<div class="jsr"><span class="k">' + x[0] + '</span>'
+      + '<span class="v num">' + x[1] + '</span></div>').join('') + '</div>') : '';
+    return '<section class="card ofs2' + (osOpen ? ' open' : '') + '" aria-label="보낸 돈 요약"><div class="ofs2h"><div class="ofs2l">'
+      + '<span class="lab">보낸 돈 · 세일 참가금 제외 · 보낼 때 가치</span><div class="ofs2b">' + big + '</div></div>'
+      + '<div class="ofs2w cap">' + why + '</div></div>' + bar + lgd + '<div class="ofs2c">' + cells + '</div>' + more + dlH + '</section>';
   }
 
   const ofIsSale = r => r.bucket === 'external' && r.category === '세일 참가금';
@@ -356,6 +469,11 @@
     if (f.status === 'scanning') return '흐름 조회 중…' + (el >= 600 ? ' ' + (el >= 3600 ? Math.floor(el / 3600) + '시간' : Math.floor(el / 60) + '분') + '째' : '');
     return '흐름 조회 대기';
   }
+  const OF_FPEND = ['queued', 'scanning', 'timeout', 'error'];
+  const flowPendTxt = f => (f.status === 'timeout' || f.status === 'error' ? flowWait(f)
+    : f.status === 'scanning' ? '공개 탐색기로 조회 중이에요 — 몇 분 뒤 채워져요'
+      + (f.scanSince > 0 && Date.now() / 1000 - f.scanSince >= 600 ? ' (' + flowWait(f).replace('흐름 조회 중… ', '') + ')' : '')
+    : '조회 대기 중 — 백그라운드에서 곧 읽어요');
   function flowRecip(r, x) {
     const k = r.address + '|' + x.addr, open = S.of.fr.has(k), fk = FL_KIND[x.kind] || FL_KIND.eoa;
     const ch = x.chains[0] || (r.chains[0] || '');
@@ -378,9 +496,15 @@
   function flowPanel(r) {
     const f = r.flow;
     if (!f) return '';
-    const pend = f.status === 'queued' || f.status === 'scanning' || f.status === 'timeout' || f.status === 'error';
+    const pend = OF_FPEND.indexOf(f.status) >= 0;
     const sc = f.score.level !== 'none' ? '<span class="pill ' + (f.score.level === 'high' ? 'ok' : 'w') + ' sm" title="' + esc(f.score.ev.map(e => hs(e.t, 1)).join(' · ')) + '">이 주소: ' + (f.score.level === 'high' ? '내 지갑일 가능성 높음' : '내 지갑 근거 1건') + ' · 근거 ' + f.score.n + '</span>' : '';
-    const head = '<div class="fl-h"><div class="h3">돈 흐름</div><span class="cap">' + (f.status === 'timeout' || f.status === 'error' ? esc(flowWait(f)) : pend ? (f.status === 'scanning' ? '공개 탐색기로 조회 중이에요 — 몇 분 뒤 채워져요' + (f.scanSince > 0 && Date.now() / 1000 - f.scanSince >= 600 ? ' (' + esc(flowWait(f).replace('흐름 조회 중… ', '')) + ')' : '') : '조회 대기 중 — 백그라운드에서 곧 읽어요') : '보낸 뒤 이 주소가 돈을 어디로 보냈는지' + (f.scannedAt ? ' · ' + esc(fmtTs(f.scannedAt)) + ' 조회' : '')) + '</span><span class="sp"></span>' + sc + '</div>';
+    const sr = num(r.netUsd), st9 = num(f.still.usd), tn = ofTraced(r) ? ofNetV(r) : 0;
+    const netT = '보낸 − 직접 돌려받음 = ' + m(sr) + (st9 >= 0.5 && Math.abs(sr - st9 - tn) < 1 ? ' · 그중 거기 남음 ' + m(st9) : '')
+      + ' · 추적 뒤 순유출 ' + m(tn) + ' · 확인 필요 합계도 이 값';
+    const net = !pend && ofTraced(r) ? '<span class="t2 fl-net" title="' + esc(netT) + '">추적 뒤 순유출 <b class="num">'
+      + m(tn, { compact: true }) + '</b></span>' : '';
+    const head = '<div class="fl-h"><div class="h3">돈 흐름</div><span class="cap">' + (pend ? esc(flowPendTxt(f)) : '보낸 뒤 이 주소가 돈을 어디로 보냈는지'
+      + (f.scannedAt ? ' · ' + esc(fmtTs(f.scannedAt)) + ' 조회' : '')) + '</span>' + net + '<span class="sp"></span>' + sc + '</div>';
     const unex = f.unexplained;
     const segs = [['r', f.returned.usd], ['k', f.still.usd], ['e', f.elsewhere.usd], ['u', Math.max(0, unex)]];
     const tot = Math.max(f.sent, segs.reduce((a, b) => a + Math.max(0, b[1]), 0)) || 1;
@@ -399,7 +523,11 @@
       ? '<div class="fl-s"><button class="ttl fl-fa" data-a="flowAll" data-k="' + esc(r.address) + '" aria-expanded="' + faOpen + '">차액이 간 곳 <span class="mut" style="font-weight:500">주소 전체 ' + nAll + '곳' + (rc.length < nAll ? ' · 큰 ' + rc.length + '곳' : '') + ' · 남의 돈과 섞여 내 돈이 간 곳과 다를 수 있어요</span><span class="chev' + (faOpen ? ' o' : '') + '">' + IC.chev + '</span></button>' + (faOpen ? rc.map(x => flowRecip(r, x)).join('') : '') + '</div>'
       : '<div class="fl-s"><div class="ttl">차액이 간 곳 <span class="mut" style="font-weight:500">' + rc.length + '곳 · 금액 큰 순</span></div>' + rc.map(x => flowRecip(r, x)).join('') + '</div>')
       : '<div class="fl-s"><div class="ttl">차액이 간 곳</div><div class="cap">이 주소에서 다른 곳으로 나간 전송이 없어요' + (f.mineN ? ' — 나간 돈은 모두 내 지갑으로 왔어요' : '') + '</div></div>';
-    const sw = f.swaps.n ? '<div class="fl-s fl-sw"><div class="ttl">이 주소가 한 스왑 <span class="mut" style="font-weight:500">' + f.swaps.n + '건</span></div><div class="fl-swr"><span class="lab">판 것</span><span>' + coinsTxt(f.swaps.sold, 4) + '</span></div><div class="fl-swr"><span class="lab">산 것</span><span>' + coinsTxt(f.swaps.bought, 4) + '</span></div></div>' : '';
+    const swk = 'flsw:' + r.address, swo = f.swaps.n ? uiOpen(swk, false) : false;
+    const swr = (l, cs) => '<div class="fl-swr"><span class="lab">' + l + '</span><span>' + coinsTxt(cs, 4) + '</span></div>';
+    const sw = f.swaps.n ? '<div class="fl-s fl-sw"><button type="button" class="ttl fl-fa" data-a="uiFold"'
+      + ' data-v="' + esc(swk) + '" aria-expanded="' + swo + '">이 주소가 한 스왑 <span class="mut" style="font-weight:500">' + f.swaps.n
+      + '건 · 판 것·산 것</span><span class="chev' + (swo ? ' o' : '') + '">' + IC.chev + '</span></button>' + (swo ? clps('uf:' + swk, swr('판 것', f.swaps.sold) + swr('산 것', f.swaps.bought)) : '') + '</div>' : '';
     const notes = f.notes.length ? '<div class="fl-n">' + f.notes.map(n => '<div>· ' + esc(hs(n, 1)) + '</div>').join('') + '</div>' : '';
     return '<section class="flw" aria-label="돈 흐름">' + head + tiles + bar + list + sw + notes + (pend ? '' : flowSpoof(r)) + '</section>';
   }
@@ -415,32 +543,40 @@
   const AIOP_KO = { exchange: '거래소 주소', personal: '개인 지갑', contract: '컨트랙트', burn: '소각 주소', poison: '사칭 의심', unknown: '모름' };
   function aiOpBox(o) {
     if (!o || typeof o !== 'object' || !o.st) return '';
-    const head = t => '<div class="aiop-h">' + SXI.spark + '<b>AI 의견</b>' + t + '<span class="aiop-t pvx">참고용 · ' + esc(o.by || 'AI') + '</span></div>';
+    const head = t => '<div class="aiop-h">' + SXI.spark + '<b>AI 의견</b>' + t + '<span class="aiop-t pvx" title="' + esc(o.by || 'AI') + '">참고용</span></div>';
     if (o.st === 'ok') {
       const pv9 = typeof pvOn === 'function' && pvOn();
       const why = pv9 ? '<li>' + esc(AI_HIDE) + '</li>' : arr(o.why).map(w => '<li>' + esc(hs(String(w == null ? '' : w))) + '</li>').join('');
       return '<div class="aiop">' + head('<span class="pill ' + (AIOP_V[o.v] || 'g') + ' sm aib-l">' + esc(pv9 ? (AIOP_KO[o.v] || '모름') : (o.label || '모름')) + '</span>') + (why ? '<ul class="aib">' + why + '</ul>' : '')
         + '<div class="aiop-m pvx">확신 ' + esc(o.conf || '낮음') + (num(o.at) > 0 ? ' · ' + esc(fmtTs(num(o.at))) : '') + (o.old ? ' · 그 뒤 기록이 바뀌어 곧 다시 만들어요' : '') + ' · 판정·장부는 바꾸지 않아요</div></div>';
     }
-    const msg = o.st === 'limit' ? '오늘 만들 수 있는 만큼 다 만들었어요 — 내일 이어서 만들어요' : o.st === 'fail' ? 'AI 의견을 못 만들었어요 — 기록이 바뀌면 다시 시도해요' : '만드는 중 — 백그라운드에서 한 곳씩 천천히 만들어요';
-    return '<div class="aiop wait">' + head('') + '<div class="aiop-m pvx">' + msg + '</div></div>';
+    return '<div class="aiop wait">' + head('') + '<div class="aiop-m pvx">' + aiOpMsg(o) + '</div></div>';
   }
+  const aiOpMsg = o => (o.st === 'limit' ? '오늘 만들 수 있는 만큼 다 만들었어요 — 내일 이어서 만들어요' : o.st === 'fail' ? 'AI 의견을 못 만들었어요 — 기록이 바뀌면 다시 시도해요'
+    : '만드는 중 — 백그라운드에서 한 곳씩 천천히 만들어요');
+  function ofEvid(r) {
+    const f = r.flow, fp = !!f && OF_FPEND.indexOf(f.status) >= 0, o = r.aiOp, ow = !!o && typeof o === 'object' && !!o.st && o.st !== 'ok';
+    const ln = (t, v) => '<div class="ofev1"><i aria-hidden="true"></i><b>' + t + '</b><span class="mut">' + esc(v) + '</span></div>';
+    return fp || ow ? '<div class="ofev pvx" role="status">' + (fp ? ln('돈 흐름', flowPendTxt(f)) : '')
+      + (ow ? ln('AI 의견', aiOpMsg(o)) : '') + '</div>' : '';
+  }
+  const ofLookWarn = (r, f) => '<div class="warnbox">' + IC.alert + '<div><b>주소 오염(사칭) 의심</b> — ' + (f.label ? ownH(f.label) : '내 주소') + ' <span class="mono">' + esc(shortL(f.similarTo)) + '</span> 와 앞 4자리·끝 4자리가 같은 다른 주소예요(이 주소 <span class="mono">' + esc(shortL(r.address)) + '</span>). 주소를 복사해 붙여 넣다 바뀌었다면 사기일 수 있어요.</div></div>';
   function ofBody(r, hist) {
-    const warn = r.flags.map(f => {
-      if (f.kind === 'lookalike') return '<div class="warnbox">' + IC.alert + '<div><b>주소 오염(사칭) 의심</b> — ' + (f.label ? ownH(f.label) : '내 주소') + ' <span class="mono">' + esc(shortL(f.similarTo)) + '</span> 와 앞 4자리·끝 4자리가 같은 다른 주소예요(이 주소 <span class="mono">' + esc(shortL(r.address)) + '</span>). 주소를 복사해 붙여 넣다 바뀌었다면 사기일 수 있어요.</div></div>';
+    const lk9 = f => f.kind === 'lookalike' && !hist, look = r.flags.filter(lk9).map(f => ofLookWarn(r, f)).join('');
+    const warn = r.flags.filter(f => !lk9(f)).map(f => {
+      if (f.kind === 'lookalike') return ofLookWarn(r, f);
       if (f.kind === 'spoof_token') return '<div class="hintbox">' + esc(hs(f.note)) + '</div>';
       return f.note ? '<div class="hintbox">' + esc(hs(f.note)) + '</div>' : '';
     }).join('');
     const hints = r.hints.length ? '<div class="hintbox"><b>알려진 주소</b> · ' + [...new Set(r.hints.map(h => (h.kind === 'my_wallet' ? ownH(String(hs(h.label, 0, 1))) : esc(String(hs(h.label))))))].join(' · ') + '</div>' : '';
     const sugs = (!hist || r.bucket === 'returned') && r.suggestions.length ? '<div class="hintbox"><b>이렇게 보여요 — 확인해 주세요</b>' + r.suggestions.map(x => '<div style="margin-top:4px">· <b>' + esc(x.label || '') + '</b>' + (x.exchange ? ' (' + esc(EX_NAMES[x.exchange] || x.exchange) + ')' : '') + (x.evidence ? ' — ' + esc(x.evidence) : '') + (x.action === 'register_own' && !r.verdict ? ' <button class="btn sm" data-a="ofOwnQuick" data-k="' + esc(r.address) + '">' + IC.wallet + ' 내 지갑으로 등록</button>' : '') + (x.action === 'mark_returned' && !hist ? ' <button class="btn sm pri" data-a="ofRetQuick" data-k="' + esc(r.address) + '">' + IC.undo + ' 되돌려 받음으로 정리</button>' : '') + '</div>').join('') + '</div>' : '';
     const arrs = r.arrivals.length ? '<div class="blk" style="margin-top:12px"><div class="ttl">브릿지 도착 · 내 지갑 ' + r.arrivalsN + '건</div>' + r.arrivals.slice(0, 8).map(t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(fmtTs(t.ts).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + esc(short(t.wallet || '')) + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + ' · ' + Math.max(0, Math.round(num(t.dt) / 60)) + '분 뒤</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>').join('') + '</div>' : '';
-    const flowRet = r.flow && r.flow.returned ? num(r.flow.returned.usd) : 0, dirRet = num(r.returnedUsd);
-    const retNet = (() => { if (!ofTraced(r)) return ' · 순유출 ' + m(num(r.netUsd));
-      const sr = num(r.netUsd), still = num(r.flow.still.usd), tn = ofNetV(r);
-      return ' · 보낸 − 직접 돌려받음 = <span title="' + esc(m(sr)) + '">' + m(sr, { compact: true }) + '</span>' + (still >= 0.5 && Math.abs(sr - still - tn) < 1 ? ' · 그중 거기 남음 ' + m(still, { compact: true }) : '') + ' · 추적 뒤 순유출 ' + m(tn, { compact: true }); })();
-    const retVia = flowRet - dirRet >= 0.5 ? '<div class="cap num" style="margin:-2px 0 6px">위 돈 흐름의 돌려받음 ' + mN(flowRet, { compact: true }) + ' = 직접 ' + mN(dirRet, { compact: true }) + ' + 경유·거래소·브릿지 ' + mN(flowRet - dirRet, { compact: true }) + '</div>' : '';
+    const trd = ofTraced(r), retNet = trd ? '' : m(r.returnedUsd) + ' · 순유출 ' + m(num(r.netUsd));
     const nLk = r.returned.filter(t => t.linked && t.where).length, nDir = r.returnedN - nLk;
-    const rets = r.returned.length ? '<div class="blk" style="margin-top:12px"><div class="ttl">' + (ofTraced(r) ? '직접 돌려받음 ' : '되돌려 받음 ') + m(r.returnedUsd) + retNet + ' <span class="mut" style="font-weight:500">' + (nDir > 0 ? '이 주소 → 내 지갑 ' + nDir + '건' : '') + (nLk ? (nDir > 0 ? ' · ' : '') + '연결한 환불 ' + nLk + '건' : '') + '</span></div>' + (ofTraced(r) ? retVia : '') + r.returned.slice(0, 8).map(t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(String(t.t || fmtTs(t.ts)).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + (t.linked ? ' · 연결한 환불' : '') + '</span><span class="num">' + (t.usd != null ? m(num(t.usd)) : '') + '</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>').join('') + '</div>' : '';
+    const rcnt = (nDir > 0 ? '이 주소 → 내 지갑 ' + nDir + '건' : '') + (nLk ? (nDir > 0 ? ' · ' : '') + '연결한 환불 ' + nLk + '건' : '');
+    const rttl = trd ? rcnt + ' <span class="mut" style="font-weight:500">· 위 돈 흐름 \'돌려받음 · 직접\'의 내역</span>'
+      : '되돌려 받음 ' + retNet + ' <span class="mut" style="font-weight:500">' + rcnt + '</span>';
+    const rets = r.returned.length ? '<div class="blk" style="margin-top:12px"><div class="ttl">' + rttl + '</div>' + r.returned.slice(0, 8).map(t => '<div class="kv" style="font-size:13px"><span class="num">' + esc(String(t.t || fmtTs(t.ts)).slice(5)) + '</span><span class="ell" style="margin-left:0;flex:1;color:var(--text2);font-weight:500">' + esc(CHAIN_KO[t.chain] || t.chain || '') + ' · ' + q(num(t.qty)) + ' ' + esc(t.sym || '') + (t.linked ? ' · 연결한 환불' : '') + '</span><span class="num">' + (t.usd != null ? m(num(t.usd)) : '') + '</span>' + (t.tx ? '<button class="cpy" data-a="copy" data-v="' + esc(t.tx) + '" aria-label="txid 복사">' + IC.copy + '</button>' : '') + '</div>').join('') + '</div>' : '';
     const mT = v => S.mobile ? m(v, { compact: true }) : m(v);
     const sendCol = r.sendKnown && r.tokens.some(t => t.usdAtSend != null);
     const toks = '<div class="mini-tw"><table class="mini-t" style="margin-top:4px"><thead><tr><th scope="col">토큰</th><th scope="col">수량</th>' + (sendCol ? '<th scope="col">보낼 때</th>' : '') + '<th scope="col">지금</th></tr></thead><tbody>' + r.tokens.map(t => '<tr><td><span class="row gap8">' + icon(t.sym, 'xs', D0().symLogo[t.sym.toUpperCase()] || {}) + '<b>' + esc(t.sym) + '</b>' + impChip(t) + (t.airdrop ? '<span class="pill g sm" title="실매수 이력 없이 들어온 토큰이라 격리했어요(스캠 확증은 없음) — 총자산·손익에 넣지 않아요. 실제 자산이면 미매칭 › 숨긴 항목에서 복원">' + (S.mobile ? '에어드랍 의심' : '에어드랍 의심(격리)') + '</span>' : t.phantom ? '<span class="pill g sm">사칭 토큰</span>' : '') + '</span></td><td class="num">' + q(t.qty) + '</td>' + (sendCol ? '<td class="num">' + (t.usdAtSend == null || !r.sendKnown ? '<span class="mut">—</span>' : mT(t.usdAtSend)) + '</td>' : '') + '<td class="num">' + mT(t.usdNow) + '</td></tr>').join('') + '</tbody></table></div>';
@@ -452,8 +588,14 @@
     const addrRow = r.noAddr ? ''
       : '<div class="row gap8" style="margin-bottom:12px"><span class="mono" style="font-size:13px;word-break:break-all">' + esc(r.address) + '</span><button class="cpy" data-a="copy" data-v="' + esc(r.address) + '" aria-label="주소 복사">' + IC.copy + '</button></div>';
     const part = !hist && r.autoMatch && !r.verdict ? '<div class="hintbox"><b>일부 ' + ofAutoTxt(r) + '</b> · ' + num(r.autoMatch.matched) + '/' + num(r.autoMatch.of) + '건 · ' + esc(r.autoMatch.exchange || '') + ' <button class="btn sm" data-a="ofUndo" data-k="' + esc(r.address) + '">' + IC.undo + ' 자동 매칭 끄기</button>' + ofMatchedList(r) + '</div>' : '';
-    const left = '<div style="min-width:0">' + warn + (hist ? '' : aiOpBox(r.aiOp)) + part + sugs + hints + addrRow + exwdBox(r) + '<div class="blk"><div class="ttl">보낸 토큰</div>' + toks + '</div>' + (r.exwdOnly ? '' : txs) + arrs + rets + '</div>';
-    return '<div class="ob">' + (r.flow ? '<div class="ob-flow">' + flowPanel(r) + '</div>' : '') + left + '<div>' + (hist ? ofResolved(r) : ofActions(r)) + '</div></div>';
+    const one = !r.exwdOnly && nTx === 1 && tvs.length === 1 && r.tokens.length === 1 && !txCutNote && !r.phTxN;
+    const tokB = '<div class="blk"><div class="ttl">보낸 토큰' + (one ? ' · 전송 1건' : '') + '</div>' + toks + (one ? txRow(tvs[0]) : '') + '</div>'
+      + (r.exwdOnly || one ? '' : txs);
+    const ev = hist ? '' : ofEvid(r), fpend = !!ev && !!r.flow && OF_FPEND.indexOf(r.flow.status) >= 0, aiW = !hist && r.aiOp && r.aiOp.st === 'ok';
+    const left = '<div style="min-width:0">' + warn + (aiW ? aiOpBox(r.aiOp) : '') + part + sugs + hints + addrRow + exwdBox(r)
+      + tokB + arrs + rets + '</div>';
+    return '<div class="ob">' + (r.flow && !fpend ? '<div class="ob-flow">' + flowPanel(r) + '</div>' : '') + left
+      + '<div>' + (hist ? ofResolved(r) : look + ev + ofActions(r)) + '</div></div>';
   }
   const OF_MATCH_SHORT = { txid: 'txid', amount_time: '수량·시간', address: '입금 주소', bridge: '브릿지 도착', hop_split: '경유 분할', roundtrip: '예치 왕복', sale: '세일 입찰' };
   function ofTxMatchTip(t) {
@@ -503,8 +645,8 @@
     const tot = Math.max(n.sent, n.ret + n.tok + n.wait) || 1, seg = (c, v) => v > 0 ? '<i class="' + c + '" style="width:' + Math.max(1, v / tot * 100).toFixed(2) + '%"></i>' : '';
     const bar = '<div class="sbar" aria-hidden="true">' + seg('r', n.ret) + seg('t', n.tok) + seg('w', n.wait) + '</div>';
     const lg = (c, l, v) => '<span class="' + (v > 0 ? '' : 'z') + '"><i class="sd ' + c + '"></i>' + l + ' <b class="num">' + m(v, { compact: true }) + '</b></span>';
-    const legend = '<div class="slg">' + lg('r', '돌려받음', n.ret) + lg('t', '토큰으로 받음', n.tok) + lg('w', '회수 대기', n.wait) + '</div>';
-    const strip = window.TJSale && window.TJSale.candStrip ? window.TJSale.candStrip(r) : '';
+    const legend = '<div class="slg">' + lg('r', '환불', n.ret) + lg('t', '토큰으로 받음', n.tok) + lg('w', '회수 대기', n.wait) + '</div>';
+    const strip = !open && window.TJSale && window.TJSale.candStrip ? window.TJSale.candStrip(r) : '';
     return '<div class="card of sale' + (open ? ' open' : '') + '" data-anc="outflow:' + esc(a) + '">' + strip + '<div class="shd" role="button" tabindex="0" data-a="ofTog" data-k="' + esc(a) + '" aria-expanded="' + open + '">'
       + '<span class="aic ' + (n.done ? 'ok' : 'w') + '">' + (n.done ? IC.check : IC.down) + '</span>'
       + '<div class="swho"><div class="row gap8 st">' + (nmU ? '<b class="ofnm ell" title="' + esc(a) + '">' + nmU + '</b>' : '<span class="addr" title="' + esc(a) + '">' + esc(short(a)) + '</span>') + '<span class="chip-d">' + chip + cbadge + '</span></div><div class="sub ell sub-d">' + sub + '</div></div>'
@@ -520,7 +662,7 @@
     if (L.length) {
       const kv = (l, v, c, b) => '<div class="' + (b ? 'tt' : '') + '"><span>' + l + '</span><span class="num' + (c ? ' ' + c : '') + '">' + v + '</span></div>';
       const pl = window.TJSale && window.TJSale.salePnl ? window.TJSale.salePnl(r) : null;
-      left = memo + '<div class="sbox">' + kv('보냄', m(n.sent)) + kv('− 돌려받음 (환불)', m(n.ret), 'oktxt') + kv('− 토큰으로 받음 (원가)', m(n.tok), 'atxt') + kv('<b>회수 대기</b>', '<b>' + m(n.wait) + '</b>', '', true)
+      left = memo + '<div class="sbox">' + kv('보냄', m(n.sent)) + kv('− 환불', m(n.ret)) + kv('− 토큰으로 받음 (원가)', m(n.tok)) + kv('<b>회수 대기</b>', '<b>' + m(n.wait) + '</b>', '', true)
         + (pl && pl.coinN ? kv('받은 코인 평가금액', pl.nowOk ? m(pl.now) : '시세 없음') + (pl.nowOk ? kv('세일 손익(지금 기준)', '<b>' + m(pl.pnl, { sign: true }) + '</b>', cls(pl.pnl)) : '') : '') + '</div>'
         + ofPaidNote(r, n.sent) + (L.some(l => l.st === 'mixed') || r.excludeLegs.length || r.txs.length > 1 ? ofLegs(r) : '');
     } else {
@@ -606,7 +748,7 @@
         + '<button class="cpy" data-a="ofLkUn" data-k="' + esc(a) + '" data-v="' + esc(l.key) + '" aria-label="연결 해제" title="연결 해제">' + IC.close + '</button></div>'; }).join('');
     const sent = r.sendKnown ? r.usdAtSend : 0;
     const note = tok.length ? '세일 토큰 원가 ' + m(cost) + ' = 보낸 ' + m(sent) + (r.linkRefundUsd ? ' − 환불 ' + m(r.linkRefundUsd) : '') + (tok.length > 1 ? ' · 수령 ' + tok.length + '건에 수량 비례' : '')
-      : r.saleWait > 0 ? '회수 대기 ' + m(r.saleWait) + (r.returnedUsd > 0 ? ' = 보낸 ' + m(sent) + ' − 돌려받음 ' + m(r.returnedUsd) : '') + ' — 환불·세일 토큰을 받으면 연결하세요'
+      : r.saleWait > 0 ? '회수 대기 ' + m(r.saleWait) + (r.returnedUsd > 0 ? ' = 보낸 ' + m(sent) + ' − 환불 ' + m(r.returnedUsd) : '') + ' — 환불·세일 토큰을 받으면 연결하세요'
         : L.length ? '' : '환불이나 세일 토큰을 받으면 연결하세요 — 세일 토큰 원가가 이 참가금으로 잡혀요';
     const retHint = r.returnedUsd > 0 && !L.some(l => l.kind === 'refund') && !r.returned.some(t => t.linked) ? '<div class="cap" style="margin-top:6px">이 주소에서 ' + m(r.returnedUsd) + ' 되돌려 받았어요 — 환불이면 ‘환불’로 연결해야 원가에서 빠져요</div>' : '';
     return '<div class="blk lkbox"><div class="ttl">받은 것과 연결' + (L.length ? ' <span class="mut" style="font-weight:500">' + L.length + '건</span>' : '') + '</div>' + rows

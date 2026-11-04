@@ -78,9 +78,9 @@ VW = {}
 _vf0 = web._venue_flows30
 
 
-def _vf_spy(vflow, real_loc, venue_w, today_kst):
+def _vf_spy(vflow, real_loc, venue_w, today_kst, **kw):
     VW["fn"] = venue_w
-    return _vf0(vflow, real_loc, venue_w, today_kst)
+    return _vf0(vflow, real_loc, venue_w, today_kst, **kw)
 
 
 for _mn9 in [m9 for m9 in sys.modules if m9.startswith(("view_", "http_", "accounting_"))]:

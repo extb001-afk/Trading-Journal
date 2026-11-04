@@ -43,6 +43,10 @@ def _rpcs(cfg: dict, chain: str) -> list:
     return out
 
 
+def rpc_urls(cfg: dict, chain: str) -> list:
+    return _rpcs(cfg, chain)
+
+
 def eth_call(cfg: dict, chain: str, to: str, data: str, timeout: int = 10):
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_call",
                        "params": [{"to": to, "data": "0x" + data.replace("0x", "")}, "latest"]}).encode()

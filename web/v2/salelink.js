@@ -219,7 +219,7 @@
     const wait = sal.reduce((s, r) => s + Math.max(0, num(r.saleWait)), 0), ret = sal.reduce((s, r) => s + num(r.returnedUsd), 0), tok = sal.reduce((s, r) => s + num(r.linkTokenUsd), 0);
     const go = () => { const T = window.__tj; if (T && T.A && T.A.ofWaitGo) T.A.ofWaitGo(); const yy = Y(); if (yy) yy.goTab('outflows'); };
     out.push({ kind: 'sale', id: 'sale:sum', sc: 1000, title: '세일 참가 ' + sal.length + '곳' + (rows.length > sal.length ? ' · 자동 입찰 ' + (rows.length - sal.length) + '곳' : '') + ' · 지금 예치 중(회수 대기) ' + m(wait, { compact: true }),
-      sub: sal.length ? '넣은 돈 ' + m(sent, { compact: true }) + ' · 돌려받음 ' + m(ret, { compact: true }) + ' · 코인으로 받음 ' + m(tok, { compact: true })
+      sub: sal.length ? '넣은 돈 ' + m(sent, { compact: true }) + ' · 환불 ' + m(ret, { compact: true }) + ' · 코인으로 받음 ' + m(tok, { compact: true })
         : '아직 세일 참가금으로 고른 전송이 없어요 — 보낸 내역 확인 필요나 일별 기록 그 줄에서 고르면 여기 모여요',
       rt: rt(m(wait, { compact: true }), mAlt(wait, { compact: true })), tab: 'outflows', go, iso: '' });
     rows.slice().sort((p, q) => num(q.lastTs) - num(p.lastTs)).forEach(r => {

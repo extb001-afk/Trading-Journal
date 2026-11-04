@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = ["post_sale_link", "post_xfer_link", "post_plan", "post_ignore", "post_wallet_alias", "post_cost_override", "post_fallback_avg",
            "post_offchain_self", "post_first_seen_px", "post_kr_deemed", "post_gas_in_cost", "post_review_len", "post_review_pause", "post_review_fill",
-           "post_chain_auto_off", "post_dust_threshold", "post_risk_override", "post_genuine_token", "post_src_whitelist",
+           "post_ui_pref", "post_chain_auto_off", "post_dust_threshold", "post_risk_override", "post_genuine_token", "post_src_whitelist",
            "post_flow_register", "post_other_assets", "post_nft_prefs", "post_receipt_eval", "post_day_memo", "post_alert_test",
            "post_wd_dest_register", "post_health_ack", "post_review_fill_run", "post_alert_prefs", "post_outflow_resolve",
            "post_backfill_request"]
@@ -338,6 +338,20 @@ def post_review_fill(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: di
         with web_ctx.builder().lock:
             web_ctx.builder().cache = None
     h._send(200, {"ok": True, "reviewFill": review_progress.fill_eff(prefs["review_fill"])})
+
+
+UI_PREF_KEYS = ("show_networth",)
+
+
+def post_ui_pref(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):
+    key, on = body.get("key"), body.get("on")
+    if key not in UI_PREF_KEYS or not isinstance(on, bool):
+        return h._send(400, {"ok": False, "error": "key(show_networth) + on(true/false)"})
+    prefs[key] = on
+    statefile.atomic_write_json(paths.state("ui_prefs.json"), prefs)
+    with web_ctx.builder().lock:
+        web_ctx.builder().cache = None
+    h._send(200, {"ok": True, "key": key, "on": on})
 
 
 def post_chain_auto_off(h: BaseHTTPRequestHandler, path: str, body: dict, prefs: dict):

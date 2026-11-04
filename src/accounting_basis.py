@@ -284,6 +284,7 @@ class CostBasis:
         self._lots: dict = {}
         self._pool: dict = {}
         self._nxt = count(1).__next__
+        self.on_pool_put: Optional[Callable[[dict], None]] = None
 
     def _bk(self, g: dict) -> Optional[LotBook]:
         bk = self._lots.get(id(g))
@@ -304,6 +305,8 @@ class CostBasis:
         return bk if bk is not None and bk.g is g else None
 
     def pool_put(self, ent: dict, frags: Optional[List[Frag]]) -> None:
+        if self.on_pool_put:
+            self.on_pool_put(ent)
         if frags:
             old = self._pool.get(id(ent))
             if old is not None and old[0] is ent:

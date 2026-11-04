@@ -139,7 +139,8 @@
       const tag = e ? '<span class="ext">외부' + (e.src ? ' · ' + esc(e.src) : '') + '</span>' : own ? '<span class="own">내 계정</span>' : '<span>' + esc(UNIT_KO[x.unit] || x.unit || '') + '</span>';
       const sep = i > 0 && prevExt && !e; prevExt = !!e;
       return '<div class="tjh-row ' + lv + (e ? ' ext' : '') + (lv === 'crit' ? ' hi' : '') + (sep ? ' sep' : '') + '"><i></i><div class="rb"><div class="r1"><b>' + LBL[lv] + ' · ' + esc(money(x.title)) + '</b>' + tag + '</div>'
-        + '<span class="r2" title="' + esc(money(x.detail)) + '">' + esc(money(x.detail)) + '</span>' + ackBtns(x, false) + '</div></div>';
+        + '<span class="r2" title="' + esc(money(x.detail)) + '">' + esc(money(x.detail)) + '</span>'
+        + opsLinkHTML(x) + ackBtns(x, false) + '</div></div>';
     }).join('');
     const knH = kn.length ? '<button class="tjh-kn" data-h="known" aria-expanded="' + H.knownOpen + '"><span class="pvx">닫은 주의 ' + kn.length + '</span><span class="sp"></span><span>' + (H.knownOpen ? '접기' : '같은 내용이면 안 띄움 ›') + '</span></button>'
       + (H.knownOpen ? kn.map(x => '<div class="tjh-row kn"><i></i><div class="rb"><div class="r1"><b>' + esc(money(x.title)) + '</b><span>' + esc(knTxt(x)) + '</span></div><span class="r2" title="' + esc(money(x.detail)) + '">' + esc(money(x.detail)) + '</span>' + ackBtns(x, true) + '</div></div>').join('') : '') : '';
@@ -150,7 +151,11 @@
   function okOrUnk(panel, kn) {
     if (overall() === 'unknown') {
       const why = (H.data && H.data.note) || (H.err ? '상태를 불러오지 못했어요' : '아직 상태 점검 결과가 없어요');
-      return panel ? '<div class="tjh-empty unk"><span class="tjh-dot unknown"></span><span>' + esc(LBL.unknown) + ' — 문제가 있는지 아직 알 수 없어요</span></div>'
+      return panel ? '<div class="tjh-empty unk tjh-e2"><span class="tjh-eic"><span class="tjh-dot unknown"></span></span>'
+        + '<b>아직 상태 점검 결과가 없어요</b>'
+        + '<span class="cap">문제가 있는지 아직 알 수 없어요 · ' + (H.data && H.data.note ? esc(why)
+          : '감시 프로그램(<span class="mono">tj-alert</span>)이 꺼졌거나 첫 점검 전이에요') + ' · 켜면 60초 안에 채워져요</span>'
+        + '<button class="btn pri" data-h="refresh">다시 불러오기</button></div>'
         : '<div class="ok unk"><span class="tjh-dot unknown"></span><span>' + esc(LBL.unknown) + ' — ' + esc(why) + '</span></div>';
     }
     return panel ? '<div class="tjh-empty"><span class="tjh-dot"></span>' + (kn ? '새 문제가 없어요' : '열린 문제가 없어요') + '</div>'
@@ -247,7 +252,8 @@
   }
   function tgHTML() {
     const t = (H.data && H.data.telegram) || {};
-    if (!t.configured) return '<div class="tjh-tg"><span class="tjh-dot off"></span><div><b>텔레그램 미연결</b><div class="cap">연결하면 오류(빨강)만 알림으로 받아요 · 주의(주황)는 이 화면에만</div></div></div>';
+    if (!t.configured) return '<div class="tjh-tg"><span class="tjh-dot off"></span><div><b>텔레그램 미연결</b>'
+      + '<div class="cap">연결하면 오류(빨강)만 알림으로 받아요 · 주의(노랑)는 이 화면에만</div></div><button class="btn sm" data-h="tg">연결</button></div>';
     const bad = t.consecFail > 0;
     return '<div class="tjh-tg"><span class="tjh-dot ' + (bad ? 'crit' : 'ok') + '"></span><div><b>텔레그램 연결됨</b><div class="cap">'
       + (bad ? '최근 발송 실패 ' + t.consecFail + '회' + (t.lastError ? ' · ' + esc(t.lastError) : '') : (t.lastOk ? '마지막 발송 ' + esc(ago(nowS() - t.lastOk)) + ' 전' : '아직 발송 없음'))
@@ -269,7 +275,7 @@
     const d = H.data;
     let h = '';
     if (!d) return '<div class="tjh-bnr g">' + (H.err ? '상태를 불러오지 못했어요 — ' + esc(H.err) : '불러오는 중…') + '</div>';
-    if (d.note) h += '<div class="tjh-bnr g">' + esc(d.note) + '</div>';
+    if (d.note && overall() !== 'unknown') h += '<div class="tjh-bnr g">' + esc(d.note) + '</div>';
     const op = openNew(), kn = openKnown();
     const crit = op.filter(x => x.level === 'crit'), warn = op.filter(x => x.level !== 'crit');
     h += '<div class="tjh-sec"><div class="tt">열린 문제 <span class="n pvx">' + op.length + '</span>' + (op.length ? '<span class="n">· 누르면 설명·조치</span>' : '') + '</div>'
@@ -278,6 +284,7 @@
     if (d.ackErr) h += '<div class="tjh-bnr g">' + esc(d.ackErr) + '</div>';
     if (kn.length || ai9) h += '<div class="tjh-sec"><button class="tt tjh-kn" style="padding:0;margin-bottom:10px" data-h="known" aria-expanded="' + H.knownOpen + '">닫은 주의 <span class="n pvx">' + (kn.length || '') + (kn.length ? ' · ' : '') + '같은 내용이면 안 띄움 · 판정은 그대로</span><span class="sp"></span><span class="n pvx">' + (H.knownOpen ? '접기' : '펼치기') + '</span></button>'
       + (H.knownOpen ? kn.map(x => incHTML(x, false, true)).join('') + ai9 : '') + '</div>';
+    if (!inSettings) h += opsHTML();
     const b9 = bfInfo();
     if (b9) h += '<div class="tjh-sec tjh-bf"><div class="tt">' + bfRing(b9) + '과거 거래 불러오기 <span class="n pvx">' + b9.pct + '%' + (b9.stalled ? ' · 멈춤' : '') + '</span></div>' + b9.html + '</div>';
     const wt = (d.watching || []).filter(x => !x.suppressed);
@@ -286,8 +293,9 @@
       h += '<div class="tjh-sec"><div class="tt">관찰 중 <span class="n pvx">아직 지속 조건 전 · 알림 없음</span></div>'
         + wt.concat(sup).map(x => '<div class="tjh-watch"><span class="tjh-dot sm ' + (x.suppressed ? 'off' : LVW(x.level, 'off')) + '"></span><span><b>' + esc(x.unit) + '</b> · ' + esc(money(x.title)) + ' <span class="cap">' + esc(x.suppressed ? '(' + x.suppressed + ' — 원인 쪽에서 추적)' : x.detail) + '</span></span></div>').join('') + '</div>';
     }
-    if (!inSettings) h += opsHTML();
-    h += '<div class="tjh-sec"><div class="tt">유닛별 상태·신선도</div>' + unitsHTML() + '</div>';
+    const un = overall() === 'unknown' ? ((d.units || []).length || Object.keys(UNIT_KO).length) : 0;
+    h += '<div class="tjh-sec"><div class="tt">유닛별 상태·신선도</div>'
+      + (un ? '<div class="cap"><b>점검할 곳 ' + un + '</b> · 첫 점검 뒤 채워져요 · 수집·원장·대시보드·알림 유닛별로</div>' : unitsHTML()) + '</div>';
     h += '<div class="tjh-sec"><div class="tt">최근 복구</div>' + resolvedHTML(H.showAllResolved ? 20 : (inSettings ? 5 : 8)) + '</div>';
     h += '<div class="tjh-sec"><div class="tt">알림</div>' + tgHTML() + '</div>';
     return h;
@@ -433,11 +441,14 @@
     opsSend(t.path, t.body);
   }
   function panelHTML() {
-    const o = overall();
+    const o = overall(), c = counts(), pl = (k, t) => '<span class="tjh-pill ' + k + '">' + t + '</span>';
     return '<div class="tjh-bg" data-h="close"></div><div class="tjh-panel" role="dialog" aria-modal="true" aria-labelledby="tjhTitle">'
-      + '<div class="tjh-hd"><h3 id="tjhTitle">시스템 상태</h3><span class="tjh-pill ' + (counts().crit + counts().warn || !counts().known ? o : 'g') + '">' + (counts().crit + counts().warn || !counts().known ? LBL[o] : '새 문제 없음') + '</span><span class="sp" style="flex:1"></span>'
+      + '<div class="tjh-hd"><h3 id="tjhTitle">시스템 상태</h3>'
+      + (c.crit + c.warn ? (c.crit ? pl(partTone('crit'), LBL.crit + ' ' + c.crit) : '')
+        + (c.warn ? pl(partTone('warn'), LBL.warn + ' ' + c.warn) : '')
+        : pl(c.known ? 'g' : o, c.known ? '새 문제 없음' : LBL[o])) + '<span class="sp" style="flex:1"></span>'
       + '<button class="iconbtn" data-h="refresh" aria-label="다시 점검 결과 불러오기" title="새로고침"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>'
-      + '<button class="iconbtn" data-h="close" id="tjhClose" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
+      + '<button class="xb" data-h="close" id="tjhClose" aria-label="닫기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>'
       + '<div class="tjh-sub">' + headerLine() + '</div>' + bodyHTML(false) + '</div>';
   }
   function summary() {

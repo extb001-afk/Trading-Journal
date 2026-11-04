@@ -9,6 +9,7 @@ SITES = {
     "chk_collect::collect_tunnel": (CASSETTE, "루프백(127.0.0.1) 문자열 URL — 카세트가 루프백도 가로챔"),
     "depaddr::http_get": (CASSETTE, ""),
     "exf_net::_clock_fetch": (CASSETTE, ""),
+    "exwallet::http_get": (UNIT, "거래소 입출금 상태 관문(gzip·평문·압축 해제 상한 · 인증 = auth_urlopen) · test_exhalt.py [G]"),
     "exf_net::http_json": (CASSETTE, ""),
     "flow_trace::Scanner._es_http": (CASSETTE, ""),
     "health::Monitor.heartbeat._go": (CASSETTE, "heartbeat() 가 띄운 스레드를 join(주입 opener 없는 갈래)"),

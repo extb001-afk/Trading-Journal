@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 
 import alert_prefs as AP
-import num_parse, paths, statefile
+import exhalt, num_parse, paths, statefile
 
 from timeutil import KST
 log = logging.getLogger("tj-web")
@@ -816,7 +816,7 @@ def prod_oa(inp, doc, st, now, conn, on):
 
 
 PRODUCERS = [("pnl", prod_pnl), ("review", prod_review), ("weekly", prod_weekly), ("move", prod_move), ("bigflow", prod_bigflow),
-             ("lprange", prod_lprange), ("depeg", prod_depeg), ("liq", prod_liq), ("oa", prod_oa)]
+             ("lprange", prod_lprange), ("depeg", prod_depeg), ("liq", prod_liq), ("oa", prod_oa), ("exhalt", lambda i, d, s, n, c, o: exhalt.prod_exhalt(i, d, s, n, c, o, (money, _link)))]
 WATCH_CATS = tuple(k for k, _fn in PRODUCERS) + ("arrive",)
 
 
