@@ -157,7 +157,7 @@ def ata_owner_of(acct: str, mint, owners, program=None):
     return None
 
 
-from sol_stake import StakeMixin  # noqa: E402
+from sol_stake import StakeMixin, stake_auth_moves, stake_emit_prep, stake_live  # noqa: E402
 
 
 class SolWatcher(StakeMixin):
@@ -500,7 +500,7 @@ class SolWatcher(StakeMixin):
                 sg9.clear()
             sg9[sig] = [k.get("pubkey") for k in msg.get("accountKeys", []) if isinstance(k, dict) and k.get("signer")]
         mine = set(self.owners)
-        stake_of = {s: (v.get("w") or "") for s, v in self.stake_reg().items() if v.get("w")} if self.stake_on else {}
+        stake_of = {s: (v.get("w") or "") for s, v in self.stake_reg().items() if v.get("w") and stake_live(v, tx.get("slot"), sig)} if self.stake_on else {}
         all_ins = list(msg.get("instructions") or [])
         for inn in (meta.get("innerInstructions") or []):
             all_ins.extend(inn.get("instructions") or [])
@@ -536,6 +536,10 @@ class SolWatcher(StakeMixin):
                                    "delta": str(d), "owner": f"{stake_of[k]}:stake:{k}"})
             elif abs(d) > 1_000_000:
                 counterparties.add(k)
+        auth_d, stake_auth = (stake_auth_moves(msg.get("instructions"), meta.get("innerInstructions"), keys, post, mine, stake_of, err)
+                              if self.stake_on else ([], {}))
+        deltas += auth_d
+        counterparties.update(mv["to"] for mv in stake_auth.values() if not mv["mine"])
         pre_tb, post_tb = list(meta.get("preTokenBalances") or []), list(meta.get("postTokenBalances") or [])
         idx_owner = {r9.get("accountIndex"): r9.get("owner") for r9 in pre_tb + post_tb
                      if isinstance(r9, dict) and r9.get("owner") and isinstance(r9.get("accountIndex"), int)}
@@ -640,6 +644,8 @@ class SolWatcher(StakeMixin):
             out["stake_pre"] = stake_pre
         if stake_new:
             out["stake_new"] = stake_new
+        if stake_auth:
+            out["stake_auth"] = stake_auth
         if (not err and deltas and JITO_TIP_DIST in {i9.get("programId") for i9 in all_ins}
                 and all(":stake:" in (d9.get("owner") or "") and int(d9["delta"]) > 0 for d9 in deltas)):
             out["stake_reward"] = {"kind": "mev"}
@@ -1095,6 +1101,7 @@ class SolWatcher(StakeMixin):
             if sig in slot_idx_of:
                 rec["slot_idx"] = slot_idx_of[sig]
             try:
+                stake_emit_prep(self, rec)
                 self.writer.append(rec)
                 self.emitted.add(sig)
                 bf_engine.detail_fail_clear(self.cursor, [sig])
@@ -1337,6 +1344,7 @@ class SolWatcher(StakeMixin):
                     if not isinstance(rec, dict):
                         bad = True
                         break
+                    stake_emit_prep(self, rec)
                     self.writer.append(rec)
                     self.emitted.add(sg)
                     n_ok += 1
@@ -1609,6 +1617,7 @@ def sol_quarantine_retry(w: "SolWatcher") -> None:
         if isinstance(rec, dict):
             if again:
                 rec["repersp"] = True
+            stake_emit_prep(w, rec)
             w.writer.append(rec)
             w._stake_note_tx(rec)
             w.emitted.add(sig)

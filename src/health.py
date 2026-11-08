@@ -245,6 +245,10 @@ BAL_READY_SEC = 86400
 BAL_BUSY_MAX = 3 * 86400
 
 
+def bal_due_now(it: dict) -> bool:
+    return isinstance(it, dict) and bool(it.get("stakeClosed"))
+
+
 INBOX_NAME = {"evm": "EVM 체인 수집분", "bsc": "BSC 수집분", "sol": "Solana 수집분", "ex": "거래소 수집분"}
 
 
@@ -1378,7 +1382,7 @@ def _eval_risk(_bs9):
                 mem9[k9] = rs9 if rs9 <= now else now
                 if why9 and bal_rb_wait(why9):
                     rbo9.append(it)
-                if now - mem9[k9] >= BAL_READY_SEC:
+                if now - mem9[k9] >= BAL_READY_SEC or bal_due_now(it):
                     due9.append(dict(it, stuck=why9 if why9 else [],
                                      rbw=rb_wait_sentence(obs.get("bf"), now) if bal_rb_wait(why9) else None))
             for k9 in ([] if unk9 else [k for k in mem9 if k not in live9 and k not in {str(x.get("key")) for x in hred9}]):
@@ -1412,7 +1416,8 @@ def _eval_risk(_bs9):
         if crit9 and bc.get("items") is not None:
             checks[-1]["crit_keys"] = sorted({str(x.get("key")) for x in now9 if x.get("key")})
             checks[-1]["keys"] = sorted({str(x.get("key")) for x in due9 if x.get("key")})
-            checks[-1]["tg_items"] = [{k: x.get(k) for k in ("key", "chain", "wallet", "sym", "ledger", "onchain", "diffUsd", "stuck", "rbw")} for x in due9]
+            checks[-1]["tg_items"] = [{k: x.get(k) for k in ("key", "chain", "wallet", "sym", "ledger", "onchain", "diffUsd", "stuck", "rbw", "stakeClosed")}
+                                      for x in due9]
         if held_all9:
             checks[-1]["level"] = None
         chip(f"잔고 재계산 대기 {len(now9)}" if rb_all9 else

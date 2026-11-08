@@ -368,7 +368,7 @@ class PostMixin:
         else:
             event, ex_hint = "NOOP", None
         ev = self._post_event("sol", txhash, event, deltas, perw, gas, gas_w, ts, ex_hint,
-                              dest={"to": None, "cps": sorted(cps)[:4]}, rederive=rederive)
+                              dest={"to": None, "cps": sorted(cps)[:4], **_stake_auth_out(rec, self.asset_id)}, rederive=rederive)
         if event == "STAKE_REWARD" and ts < time.time() - 86400:
             self._inval_daily()
         return ev
@@ -539,3 +539,13 @@ class PostMixin:
             dm("RECON", f"[sol] 스테이크 계정 기초잔고 {int(so.get('lamports') or 0) / 1e9:,.4f} SOL — {acct[:6]}…{acct[-4:]}"
                         f" (지갑 {str(so.get('wallet') or '')[:6]}…, 창 시작 기준)")
         return "OPENING"
+
+
+def _stake_auth_out(rec: dict, asset_id) -> dict:
+    sa = rec.get("stake_auth")
+    if not isinstance(sa, dict) or not sa:
+        return {}
+    aid = asset_id("native", "sol", None, symbol="SOL", decimals=9)
+    out = {f"{v['from']}:stake:{s}|{aid}": v["to"] for s, v in sa.items()
+           if isinstance(v, dict) and not v.get("mine") and isinstance(v.get("from"), str) and isinstance(v.get("to"), str)}
+    return {"out": out} if out else {}

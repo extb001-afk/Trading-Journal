@@ -38,6 +38,12 @@
    "n": 1
   },
   {
+   "file": "src/sol_stake.py",
+   "func": "stake_auth_heal",
+   "key": "repersp",
+   "n": 1
+  },
+  {
    "file": "src/sol_watch.py",
    "func": "SolWatcher.cycle",
    "key": "repersp",
@@ -176,6 +182,7 @@
   "sol_tx": {
    "handler": "core_inbox.py:_consume_record 분기",
    "opaque": [
+    "call:_stake_auth_out",
     "call:dict",
     "call:json.dumps",
     "call:lpsol.lp_detect"

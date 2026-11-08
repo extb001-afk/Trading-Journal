@@ -17,6 +17,155 @@ import logging
 
 log = logging.getLogger('tj-sol')
 
+AUTH_HEAL_DAYS = 3
+AUTH_HEAL_MAX = 10
+AUTH_HEAL_TRIES = 5
+
+
+def stake_auth_moves(outer: list, inner_groups: list, keys: list, post: list, owners: set, stake_of: dict, err: bool = False) -> tuple:
+    inner = {g.get("index"): g.get("instructions") or [] for g in inner_groups or [] if isinstance(g, dict)}
+    seq = []
+    for i, ins in enumerate(outer or []):
+        seq += [ins] + list(inner.get(i) or [])
+    last = {}
+    for ins in seq:
+        p = ins.get("parsed") if isinstance(ins, dict) and (ins.get("programId") == STAKE_PROGRAM or ins.get("program") == "stake") else None
+        info = p.get("info") if isinstance(p, dict) and p.get("type") in ("authorize", "authorizeChecked") else None
+        if not isinstance(info, dict) or info.get("authorityType") != "Withdrawer":
+            continue
+        s, a, n = info.get("stakeAccount"), info.get("authority"), info.get("newAuthority")
+        if not (isinstance(s, str) and isinstance(a, str) and isinstance(n, str) and s and a and n):
+            continue
+        if s in last:
+            last[s] = (last[s][0], n)
+        elif a in owners and s in stake_of:
+            last[s] = (a, n)
+    deltas, auth = [], {}
+    for s, (a, n) in ([] if err else last.items()):
+        try:
+            lam = int(post[keys.index(s)]) if n != a else 0
+        except (ValueError, IndexError, TypeError):
+            lam = 0
+        if lam <= 0:
+            continue
+        to_mine = n in owners
+        deltas.append({"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(-lam), "owner": f"{a}:stake:{s}"})
+        if to_mine:
+            deltas.append({"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(lam), "owner": f"{n}:stake:{s}"})
+        auth[s] = {"from": a, "to": n, "mine": to_mine, "lamports": lam}
+    return deltas, auth
+
+
+def stake_live(ent: dict, slot: object, sig: object = None) -> bool:
+    a = ent.get("away")
+    if not (isinstance(a, int) and isinstance(slot, int)) or slot < a:
+        return True
+    return slot == a and (sig is None or not ent.get("away_sig") or sig == ent.get("away_sig"))
+
+
+def stake_emit_prep(w: "StakeMixin", rec: dict) -> None:
+    slot, sig = rec.get("slot"), rec.get("txhash")
+    if rec.get("stake_new"):
+        w._stake_note_tx(rec)
+    reg = w.stake_reg()
+    off = {s for s, e in reg.items() if not stake_live(e, slot, sig)}
+    if off:
+        rec["deltas"] = [d for d in rec.get("deltas") or [] if str(d.get("owner") or "").partition(":stake:")[2] not in off]
+        for k in ("stake_pre", "stake_new"):
+            if isinstance(rec.get(k), dict):
+                rec[k] = {s: v for s, v in rec[k].items() if s not in off}
+    own_auth = rec.get("stake_auth") if isinstance(rec.get("stake_auth"), dict) else {}
+    for d in rec.get("deltas") or []:
+        holder, _sep, acct = str(d.get("owner") or "").partition(":stake:")
+        mv = own_auth.get(acct) if acct else None
+        if isinstance(mv, dict) and mv.get("from"):
+            moved_in = mv.get("mine") and holder == mv.get("to") and str(d.get("delta")) == str(mv.get("lamports"))
+            if holder != mv["from"] and not moved_in:
+                d["owner"] = f"{mv['from']}:stake:{acct}"
+            continue
+        ent = reg.get(acct) if acct else None
+        if isinstance(ent, dict) and holder != ent.get("w") and _after_mark(ent.get("mv"), slot, sig):
+            d["owner"] = f"{ent['w']}:stake:{acct}"
+    for acct, mv in (rec.get("stake_auth") or {}).items():
+        ent = reg.get(acct)
+        if acct in off or not isinstance(ent, dict) or not isinstance(mv, dict) or not mv.get("to") or not isinstance(slot, int):
+            continue
+        last_mv = ent.get("mv") if isinstance(ent.get("mv"), list) else None
+        older = (isinstance(ent.get("away"), int) and slot < ent["away"]) or (last_mv is not None and slot < last_mv[0])
+        if mv.get("mine") and older:
+            if last_mv is None or slot < last_mv[0]:
+                ent["w0"] = mv.get("from") or ent.get("w0") or ent.get("w")
+            continue
+        if mv.get("mine"):
+            ent.setdefault("w0", mv.get("from") or ent.get("w"))
+            ent.update(w=mv["to"], mv=[int(slot), sig])
+            ent.pop("away", None)
+            ent.pop("away_sig", None)
+        elif not older:
+            ent.update(away=int(slot), away_sig=sig)
+        log.warning("★스테이크 계정 %s 출금 권한 넘김 → %s(%s · %.4f SOL)★", acct[:8], str(mv["to"])[:8],
+                    "내 지갑" if mv.get("mine") else "남", int(mv.get("lamports") or 0) / 1e9)
+
+
+def _after_mark(mark: object, slot: object, sig: object) -> bool:
+    return (isinstance(mark, list) and len(mark) == 2 and isinstance(mark[0], int) and isinstance(slot, int)
+            and (slot > mark[0] or (slot == mark[0] and sig is not None and sig != mark[1])))
+
+
+def stake_open_w(ent: dict) -> str:
+    return ent.get("w0") or ent["w"]
+
+
+def stake_auth_heal(w: "StakeMixin") -> int:
+    n = 0
+    changed = False
+    for s, ent in w.stake_reg().items():
+        if not ent.get("gone") or ent.get("auth_chk") or ent.get("away") is not None:
+            continue
+        if not w._stake_hl_ok(1 + AUTH_HEAL_MAX, "권한 넘김 확인"):
+            break
+        changed = True
+        try:
+            rec = _auth_heal_find(w, s, ent)
+        except Exception as e:  # noqa: BLE001 [fallback]
+            ent["auth_try"] = int(ent.get("auth_try") or 0) + 1
+            log.info("스테이크 %s 권한 넘김 확인 실패 %d회(다음 주기): %s", s[:8], ent["auth_try"], logs.safe_err(e)[:120])
+            if ent["auth_try"] < AUTH_HEAL_TRIES:
+                break
+            log.error("★스테이크 %s 권한 넘김 확인 %d회 실패 — 포기(원장 스테이크 칸이 남으면 잔고 대조가 알림)★", s[:8], ent["auth_try"])
+            rec = None
+        if rec is not None:
+            rec["repersp"] = True
+            try:
+                stake_emit_prep(w, rec)
+                w.writer.append(rec)
+            except OSError as e:
+                ent.pop("away", None)
+                ent.pop("away_sig", None)
+                log.warning("스테이크 %s 권한 넘김 다시 보내기 쓰기 실패(다음 주기): %s", s[:8], logs.safe_err(e)[:120])
+                break
+            w._stake_note_tx(rec)
+            n += 1
+            log.warning("★스테이크 %s 출금 권한 넘김 tx %s 다시 보냄(새 관점 — 스테이크 칸에서 나감)★", s[:8], str(rec.get("txhash"))[:12])
+        ent["auth_chk"] = 1
+        ent.pop("auth_try", None)
+    if changed:
+        statefile.atomic_write_json(w.cursor_path, w.cursor)
+    return n
+
+
+def _auth_heal_find(w: "StakeMixin", s: str, ent: dict):
+    hi = int(ent["gone"]) + 1
+    sigs = w._stake_sigs_between(s, max(int(ent.get("t0") or 0), hi - AUTH_HEAL_DAYS * 86400), hi)
+    for sig in list(reversed(sigs))[:AUTH_HEAL_MAX]:
+        rec = w.parse_tx(sig)
+        if not isinstance(rec, dict):
+            raise RuntimeError(f"스테이크 tx 파싱 실패 {sig[:10]}")
+        if s in (rec.get("stake_auth") or {}):
+            return rec
+        time.sleep(TX_BATCH_SLEEP)
+    return None
+
 
 class StakeMixin:
 
@@ -87,8 +236,14 @@ class StakeMixin:
                 self.cursor[k] = {"w": v["w"], "t0": t0, "rwd_next": None, "first": None, "open": False}
                 log.info("★스테이크 계정 발견 %s (지갑 %s, %.4f SOL, 검증인 %s) — 창 %s 부터 추적★", s[:8], v["w"][:8],
                          v["lamports"] / 1e9, (v["voter"] or "?")[:8], time.strftime("%Y-%m-%d", time.gmtime(t0)))
-            elif ent.pop("gone", None) is not None:
-                pass
+            else:
+                ent.pop("gone", None)
+                ent.pop("away", None)
+                ent.pop("away_sig", None)
+                if ent.get("w") != v["w"]:
+                    log.warning("★스테이크 계정 %s 출금권자 바뀜 %s → %s(내 지갑끼리)★", s[:8], str(ent.get("w"))[:8], v["w"][:8])
+                    ent.setdefault("w0", ent.get("w"))
+                    ent["w"] = v["w"]
         for s, ent in self.stake_reg().items():
             if s not in found and not ent.get("gone"):
                 ent["gone"] = int(now)
@@ -157,7 +312,7 @@ class StakeMixin:
                 if r and int(r.get("amount") or 0) > 0:
                     slot9 = int(r["effectiveSlot"])
                     bt = self._block_time(slot9)
-                    if bt >= int(ent.get("t0") or 0):
+                    if bt >= int(ent.get("t0") or 0) and stake_live(ent, slot9):
                         txh = f"stakerwd:{s}:{e}"
                         if txh not in self.emitted:
                             amt = int(r["amount"])
@@ -209,9 +364,9 @@ class StakeMixin:
                     "ts": int(ent.get("t0") or 0) or int(time.time()),
                     "fee_lamports": 0, "fee_payer_mine": False, "fee_payer": None, "wallets": self.owners,
                     "deltas": [{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(lam),
-                                "owner": f"{ent['w']}:stake:{s}"}],
+                                "owner": f"{stake_open_w(ent)}:stake:{s}"}],
                     "counterparties": [], "has_program": True, "err": False,
-                    "stake_open": {"acct": s, "wallet": ent["w"], "lamports": lam,
+                    "stake_open": {"acct": s, "wallet": stake_open_w(ent), "lamports": lam,
                                    "first_slot": f[0] if f else None}})
                 self.emitted.add(txh)
                 log.info("★스테이크 기초잔고 %s %.6f SOL (창 %s)★", s[:8], lam / 1e9,
@@ -272,6 +427,7 @@ class StakeMixin:
                     rec = self.parse_tx(sig)
                     if not isinstance(rec, dict):
                         raise RuntimeError(f"스테이크 tx 파싱 실패 {sig[:10]}")
+                    stake_emit_prep(self, rec)
                     pre9 = (rec.get("stake_pre") or {}).get(s)
                     if pre9 is not None and rec.get("slot") is not None and (not first or int(rec["slot"]) < int(first[0])):
                         first = [int(rec["slot"]), int(pre9)]
@@ -301,9 +457,9 @@ class StakeMixin:
                     "v": 1, "kind": "sol_tx", "chain": "sol", "txhash": txh, "slot": None, "ts": new_t0,
                     "fee_lamports": 0, "fee_payer_mine": False, "fee_payer": None, "wallets": self.owners,
                     "deltas": ([{"asset": "native", "symbol": "SOL", "decimals": 9, "delta": str(lam),
-                                 "owner": f"{ent['w']}:stake:{s}"}] if lam > 0 else []),
+                                 "owner": f"{stake_open_w(ent)}:stake:{s}"}] if lam > 0 else []),
                     "counterparties": [], "has_program": True, "err": False,
-                    "stake_open": {"acct": s, "wallet": ent["w"], "lamports": lam, "first_slot": first[0] if first else None,
+                    "stake_open": {"acct": s, "wallet": stake_open_w(ent), "lamports": lam, "first_slot": first[0] if first else None,
                                    "reopen": True, "t0": new_t0, "prev_t0": int(ent.get("reopen_from") or 0)}})
                 self.emitted.add(txh)
             log.warning("★스테이크 기초잔고 재산정 %s: 창 %s → %s · %.6f SOL(과거 창 확장)★", s[:8],
@@ -320,6 +476,7 @@ class StakeMixin:
         if not self.stake_on:
             return
         hb = bf_engine.health("sol")
+        stake_auth_heal(self)
         try:
             self._stake_reopen()
             caught = self._stake_rewards()

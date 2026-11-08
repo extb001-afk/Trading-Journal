@@ -107,6 +107,7 @@ class SolTx(_Rec):
     stake_reward: Any = None
     stake_pre: Any = None
     stake_new: Any = None
+    stake_auth: Any = None
     lp: Any = None
     repersp: Any = None
     ts_fix: Any = None

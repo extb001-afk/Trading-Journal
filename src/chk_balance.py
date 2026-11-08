@@ -58,7 +58,7 @@ def collect_balcheck(cfg: dict = None):
               "diffUsd": float(m.get("diffUsd") or 0), "carried": bool(m.get("carried")),
               "ledger": m.get("ledger"), "onchain": m.get("onchain"),
 
-              "carriedN": int(m.get("carriedN") or 0), "seenAt": m.get("seenAt"),
+              "carriedN": int(m.get("carriedN") or 0), "seenAt": m.get("seenAt"), "stakeClosed": bool(m.get("stakeClosed")),
               "firstSeen": m.get("firstSeen")} for m in conf]
     fixed = [m for m in mm if m.get("ledgerFixed")]
     return {"checkedAt": d.get("checkedAt"), "confirmed": len(conf), "watch": len(mm) - len(conf) - len(fixed),
@@ -249,6 +249,8 @@ def _fq(x) -> str:
 
 
 def bal_guess(it: dict) -> str:
+    if it.get("stakeClosed"):
+        return "스테이크 계정이 닫혔거나 출금 권한이 넘어갔는데 장부엔 그 SOL 이 남아 있어요 — 넘김·인출 기록이 빠져 SOL 이 두 번 셀 수 있어요"
     try:
         lq, oq = float(it.get("ledger")), float(it.get("onchain"))
     except (TypeError, ValueError):
@@ -277,7 +279,8 @@ def bal_line(it: dict) -> str:
 def bal_text(items: list, more: bool = False) -> str:
     items = sorted(items or [], key=lambda x: -abs(float(x.get("diffUsd") or 0)))
     n = len(items)
-    lines = [f"🔴 잔고가 장부와 하루 넘게 다른 곳이 {n}곳 더 생겼어요" if more else f"🔴 잔고가 장부와 하루 넘게 달라요 · {n}곳"]
+    wait_txt = "" if any(x.get("stakeClosed") for x in items) else "하루 넘게 "
+    lines = [f"🔴 잔고가 장부와 {wait_txt}다른 곳이 {n}곳 더 생겼어요" if more else f"🔴 잔고가 장부와 {wait_txt}달라요 · {n}곳"]
     stuck = sorted({w9 for x in items for w9 in (x.get("stuck") or [])})
     if stuck:
         lines.append("할 일: 기다리기 — " + " · ".join(stuck[:3]) + "이(가) 3일 넘게 안 끝났어요. 상태 패널에서 진행을 확인하세요.")

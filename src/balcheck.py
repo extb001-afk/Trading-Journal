@@ -38,6 +38,14 @@ UPBIT_KEY = ("upbit", "exchange:upbit")
 _EX_TERMINAL = ("ACCEPTED", "DONE", "CANCELLED", "CANCELED", "REJECTED", "FAILED", "REFUNDED")
 
 
+def _stake_sym(acct: dict, ledger_qty) -> str:
+    return "SOL(스테이킹 · 닫힌 계정 — 원장 칸 남음)" if _stake_closed(acct, ledger_qty) else "SOL(스테이킹)"
+
+
+def _stake_closed(acct: dict, ledger_qty) -> bool:
+    return acct.get("state") == "closed" and ledger_qty > 0
+
+
 def settings(cfg: dict) -> dict:
     out = dict(DEFAULTS)
     for k, v in ((cfg.get("balance_check") or {}).items()):
@@ -688,8 +696,8 @@ def run_once(cfg: dict, conn, live_px: dict, skip_gids: set, prev: dict) -> dict
             diff_usd = abs(oq - lq) * pxd
             thr = max(Decimal(str(st["diff_abs_usd"])), Decimal(str(st["diff_pct"])) * max(abs(lq), abs(oq)) * pxd)
             if diff_usd >= thr:
-                found.append({"key": f"sol:{s9}:stake", "wallet": s9, "chain": "sol", "sym": "SOL(스테이킹)",
-                              "ca": None, "ledger": float(lq), "onchain": float(oq), "diffUsd": round(float(diff_usd), 2)})
+                found.append({"key": f"sol:{s9}:stake", "wallet": s9, "chain": "sol", "ca": None, "ledger": float(lq), "onchain": float(oq),
+                              "diffUsd": round(float(diff_usd), 2), "sym": _stake_sym(v9, lq), "stakeClosed": _stake_closed(v9, lq)})
     up_n = 0
     if st.get("upbit"):
         r9 = _upbit_found(cfg, conn, live_px, st, errors)
