@@ -307,9 +307,9 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                     continue
         self.pending_detail = {}
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.rpc_meta = statefile.read_control_json(self.rpc_meta_path, {})
         self.sym_path = paths.state(f"rpc_token_sym_{chain}.json")
-        self.sym = statefile.read_json(self.sym_path, {})
+        self.sym = statefile.read_control_json(self.sym_path, {})
         self.progress = bf_engine.progress("evm")
         try:
             jobs9 = self._bk_jobs()
@@ -754,7 +754,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
                 for ca, r in zip(need, self._batch(calls)):
                     if not isinstance(r, Exception):
                         self.sym[ca] = (self._dec_symbol(r) or "")[:16]
-                statefile.atomic_write_json(self.sym_path, self.sym)
+                statefile.write_json_if_changed(self.sym_path, self.sym, durable=False)
             except Exception as e:  # noqa: BLE001 [optional]
                 log.info("%s 토큰 심볼 조회 실패(무시): %s", self.chain, str(e)[:80])
         for s in snaps:
@@ -1759,7 +1759,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
             self._emit(h, s, head)
             re9.discard(h)
             n_emit += 1
-        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         nm = self.cursor.setdefault("_nonces", {})
         for s in pool:
             m9 = self._txmeta.get(s["tx"]["hash"].lower())
@@ -2090,7 +2090,7 @@ class RpcChainWatcher(RpcNativeMixin, RpcLaterMixin, RpcTraceMixin, RpcSynthMixi
         if len(self._txmeta) > 50000:
             self._txmeta.clear()
         statefile.atomic_write_json(self.cursor_path, self.cursor)
-        statefile.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
+        statefile.write_json_if_changed(self.rpc_meta_path, self.rpc_meta, durable=False)
         if bk9 is not None and self._bk_jobs():
             dn9, tt9 = self._bk_lane(self._bk_jobs())
             self.progress.update(f"{self.chain}:rpc", phase="extend", unit="blocks", done=dn9, total=tt9,

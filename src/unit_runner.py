@@ -110,7 +110,7 @@ def _beat(unit, **kw):
         if mv9 is not None:
             kw["mem"] = mv9
         statefile.atomic_write_json(paths.state(f"runner_{unit}.json"),
-                                 dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())))
+                                 dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())), durable=False)
     except Exception:  # noqa: BLE001 [optional]
         pass
 

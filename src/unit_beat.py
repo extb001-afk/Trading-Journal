@@ -16,7 +16,7 @@ def path(unit: str) -> str:
 def beat_once(unit: str, now: float = None) -> None:
     try:
         statefile.atomic_write_json(path(unit), {"unit": unit, "pid": os.getpid(), "ts": int(time.time() if now is None else now),
-                                              "state": "running", "why": "", "direct": True})
+                                              "state": "running", "why": "", "direct": True}, durable=False)
     except Exception:   # noqa: BLE001 [optional]
         pass
 
