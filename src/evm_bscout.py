@@ -48,7 +48,7 @@ class ChainWatcher(RpcSynthMixin):
         self.fail_streak = {}
         self.cfg_rpcs = cfg["chains"][chain].get("rpcs")
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.rpc_meta = statefile.read_control_json(self.rpc_meta_path, {})
         self.emitted_path = paths.state(f"emitted_evm_{chain}.json")
         self.emitted = set(statefile.read_json(self.emitted_path, []))
         emitted_before = set(self.emitted)
@@ -361,11 +361,11 @@ class ChainWatcher(RpcSynthMixin):
                 since0 = min(since0, self.window_start_block_ts(ws9))
             ck = {"since": since0, "safe": safe_now, "ep": 0, "npp": None, "pages": 0}
             self.cursor["_bf:" + w] = ck
-            statefile.atomic_write_json(self.enrich_path, self.enrich)
-            statefile.atomic_write_json(
+            statefile.write_json_if_changed(self.enrich_path, self.enrich)
+            statefile.write_json_if_changed(
                 paths.state(f"pending_detail_{self.chain}.json"),
                 self.pending_detail)
-            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
             statefile.atomic_write_json(self.cursor_path, self.cursor)
             log.info("%s 재개형 백필 시작 (%d → %d)", w[:10], since0, safe_now)
         since0, safe0 = int(ck["since"]), int(ck["safe"])
@@ -476,11 +476,11 @@ class ChainWatcher(RpcSynthMixin):
                 else:
                     ck["npp"] = npp
                 if int(ck["pages"]) % self.BF_FLUSH_EVERY == 0:
-                    statefile.atomic_write_json(self.enrich_path, self.enrich)
-                    statefile.atomic_write_json(
+                    statefile.write_json_if_changed(self.enrich_path, self.enrich)
+                    statefile.write_json_if_changed(
                         paths.state(f"pending_detail_{self.chain}.json"),
                         self.pending_detail)
-                    statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+                    statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
                     statefile.atomic_write_json(self.cursor_path, self.cursor)
                 if int(ck["pages"]) % 50 == 0:
                     log.info("%s 백필 진행: %d페이지 누적, endpoint %d/3",
@@ -496,11 +496,11 @@ class ChainWatcher(RpcSynthMixin):
                      w[:10], why, int(ck.get("pages", 0)), int(ck["ep"]))
             return False
         finally:
-            statefile.atomic_write_json(self.enrich_path, self.enrich)
-            statefile.atomic_write_json(
+            statefile.write_json_if_changed(self.enrich_path, self.enrich)
+            statefile.write_json_if_changed(
                 paths.state(f"pending_detail_{self.chain}.json"),
                 self.pending_detail)
-            statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+            statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
             statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     BF2_TIME_BUDGET = 240
@@ -512,10 +512,10 @@ class ChainWatcher(RpcSynthMixin):
         return paths.state(f"bfspool_{self.chain}_{int(job['id'])}.jsonl")
 
     def _bf2_persist(self):
-        statefile.atomic_write_json(self.enrich_path, self.enrich)
-        statefile.atomic_write_json(paths.state(f"pending_detail_{self.chain}.json"),
+        statefile.write_json_if_changed(self.enrich_path, self.enrich)
+        statefile.write_json_if_changed(paths.state(f"pending_detail_{self.chain}.json"),
                                  self.pending_detail)
-        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         statefile.atomic_write_json(self.cursor_path, self.cursor)
 
     def _bf2_new_job(self, first_ws: list, safe_now: int):
@@ -1558,10 +1558,10 @@ class ChainWatcher(RpcSynthMixin):
                 self._bf2_persist()
         if idx_ok and self._idx_stable():
             self._enrich_pass(head, healthy=all_ok)
-        statefile.atomic_write_json(self.enrich_path, self.enrich)
-        statefile.atomic_write_json(
+        statefile.write_json_if_changed(self.enrich_path, self.enrich)
+        statefile.write_json_if_changed(
             paths.state(f"pending_detail_{self.chain}.json"), self.pending_detail)
-        statefile.atomic_write_json(self.emitted_path, sorted(self.emitted))
+        statefile.write_json_if_changed(self.emitted_path, sorted(self.emitted))
         if all_ok and not self.pending_detail and not self.enrich and "_ext_internal_pending" not in self.cursor:
             self.cursor["_synced_at"] = int(time.time())
         else:

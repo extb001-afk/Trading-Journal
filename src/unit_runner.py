@@ -21,8 +21,33 @@ try:
     SCRIPTS.update({c: _reg.SPECS[c].module + ".py" for c in _reg.CHAINS})
 except Exception:   # noqa: BLE001 [optional]
     pass
-CHECK_SEC = float(os.environ.get("TJ_RUNNER_CHECK_SEC", "15"))
-SETTLE_SEC = float(os.environ.get("TJ_RUNNER_SETTLE_SEC", "10"))
+
+
+def _env_sec(name, default):
+    # 빈 값·글자·0 이하·nan·inf 는 경고 한 줄 뒤 기본값 — 잘못 넣은 env 한 줄로 러너 전체가 안 켜지지 않게
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        v = float(raw)
+    except ValueError:
+        v = float("nan")
+    if not (v > 0 and v != float("inf")):
+        import logging as _lg
+        _lg.getLogger("tj").warning("%s=%r 은 쓸 수 없는 값 — 기본값 %s초로 계속", name, raw[:20], default)
+        return float(default)
+    return v
+
+
+CHECK_SEC = _env_sec("TJ_RUNNER_CHECK_SEC", 15)
+SETTLE_SEC = _env_sec("TJ_RUNNER_SETTLE_SEC", 10)
+# 하트비트(runner_<unit>.json) 갱신 간격 — 점검(CHECK_SEC)과 분리. 상태·사유·자식이 바뀌면 바로 쓰고, 같으면 이 간격마다만 쓴다.
+#   읽는 쪽 판정: runner_fp.runner_status 120초 · chk_base.RUNNER_STALE_SEC 180초 · ledger_wait_item 600초.
+#   실제 간격은 점검 주기에 걸려 최대 약 BEAT + CHECK(+평가 시간) → 상한 BEAT_MAX 90초로 120초 판정 안에 묶는다.
+BEAT_DEFAULT = 60.0
+BEAT_MAX = 90.0
+BEAT_SEC = min(_env_sec("TJ_RUNNER_BEAT_SEC", BEAT_DEFAULT), BEAT_MAX)
+_BEAT_LAST = {}
 STOP_GRACE = 20
 
 DEFAULT_MAX_MB = {"web": 3072}
@@ -106,11 +131,17 @@ def _evaluate(unit):
 
 def _beat(unit, **kw):
     try:
+        key9 = repr(sorted((k, v) for k, v in kw.items()))
+        now9 = time.monotonic()   # 간격 비교는 단조 시계(벽시계가 뒤로 가도 쓰기가 멈추지 않게) · 파일의 ts 는 벽시계 그대로
+        last9 = _BEAT_LAST.get(unit)
+        if last9 and last9[0] == key9 and now9 - last9[1] < BEAT_SEC:
+            return
         mv9 = _mem_view()
         if mv9 is not None:
             kw["mem"] = mv9
         statefile.atomic_write_json(paths.state(f"runner_{unit}.json"),
-                                 dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())))
+                                 dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())), durable=False)
+        _BEAT_LAST[unit] = (key9, now9)
     except Exception:  # noqa: BLE001 [optional]
         pass
 
@@ -291,6 +322,7 @@ def _main():
         log.info("[%s] %s", unit, reason)
         if reason.startswith("설정"):
             log.info("[%s] 정지 신호(SIGINT) 전송 — 이어지는 KeyboardInterrupt 트레이스백은 정상 종료 과정", unit)
+            _beat(unit, state="restarting", why=reason, fp=fp)
             _stop_child(p)
             backoff = 5.0
             continue

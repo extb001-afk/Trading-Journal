@@ -42,7 +42,7 @@ class RpcLogDiscovery(RpcSynthMixin):
         self.bs = bs_watcher
         self.cfg_rpcs = cc.get("rpcs")
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.rpc_meta = statefile.read_control_json(self.rpc_meta_path, {})
         self.state_path = paths.state(f"cursor_rpc_{chain}.json")
         self.st = statefile.read_json(self.state_path, {})
         self.emitted_path = paths.state(f"emitted_rpc_{chain}.json")

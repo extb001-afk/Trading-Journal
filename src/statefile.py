@@ -7,14 +7,15 @@ import fsio
 __all__ = ["atomic_write_json", "write_json_if_changed", "append_durable_jsonl", "read_json", "read_control_json"]
 
 
-def atomic_write_json(path: str, obj) -> None:
-    fsio.atomic_write_json(path, obj, ensure_ascii=False, separators=(",", ":"))
+def atomic_write_json(path: str, obj, *, durable: bool = True) -> None:
+    # durable=False: 캐시·하트비트용 — tmp → rename 원자성은 그대로, fsync·폴더 fsync 만 생략(정전 때 옛 판·빈 파일 가능)
+    fsio.atomic_write_json(path, obj, ensure_ascii=False, separators=(",", ":"), fsync=durable, dir_fsync=durable)
 
 
 _JSON_LAST = {}
 
 
-def write_json_if_changed(path: str, obj) -> bool:
+def write_json_if_changed(path: str, obj, *, durable: bool = True) -> bool:
     import hashlib as _hl
     data = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=isinstance(obj, dict))
     dg = _hl.sha1(data.encode("utf-8")).hexdigest()
@@ -26,7 +27,10 @@ def write_json_if_changed(path: str, obj) -> bool:
                 return False
         except OSError:
             pass
-    atomic_write_json(path, obj)
+    if durable:
+        atomic_write_json(path, obj)
+    else:
+        atomic_write_json(path, obj, durable=False)
     try:
         st = os.stat(path)
         _JSON_LAST[path] = (dg, st.st_mtime_ns, st.st_size)

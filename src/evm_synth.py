@@ -190,7 +190,7 @@ class RpcSynthMixin:
             raise RuntimeError(f"token decimals 조회 실패 {ca[:10]}: decimals() {why}")
         reg.ok(ca)
         self.rpc_meta[ca] = dec
-        statefile.atomic_write_json(self.rpc_meta_path, self.rpc_meta)
+        statefile.write_json_if_changed(self.rpc_meta_path, self.rpc_meta, durable=False)
         return dec
 
     @staticmethod

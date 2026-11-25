@@ -43,7 +43,7 @@ class EtherscanWatcher(RpcSynthMixin):
         self.wrapped_ca = str((cfg.get("wrapped_native") or {}).get(chain) or "").lower() or None
         self.cfg_rpcs = cfg["chains"][chain].get("rpcs")
         self.rpc_meta_path = paths.state(f"rpc_token_meta_{chain}.json")
-        self.rpc_meta = statefile.read_json(self.rpc_meta_path, {})
+        self.rpc_meta = statefile.read_control_json(self.rpc_meta_path, {})
         chain_cc = cfg["chains"][chain]
         self.conf_depth = conf_depth_of(chain_cc, chain)
         self.backfill = bool(cfg.get("backfill_full_history"))
