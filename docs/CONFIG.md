@@ -56,7 +56,7 @@
 | `TJ_TG_API` | 텔레그램 공식 주소 | 시험용 — `http://127.0.0.1:<포트>` 만 받음(그 밖의 주소는 무시) |
 | `TJ_CONFIG_FAIL_WAIT` | 45 | `config.json` 이 깨졌을 때 pm2 아래에서 다시 켜지기 전 기다리는 초(최대 600) |
 | `TJ_RUNNER_CHECK_SEC` · `TJ_RUNNER_SETTLE_SEC` | 15 · 10 | 유닛 러너가 설정 바뀜을 보는 간격 · 바뀐 뒤 기다렸다 다시 켜는 초 |
-| `TJ_RUNNER_BEAT_SEC` | 점검 간격 × 4 (60) | 유닛 러너 하트비트(`state/runner_<유닛>.json`)를 내용이 같을 때 다시 쓰는 간격 · 상태가 바뀌면 바로 씀 |
+| `TJ_RUNNER_BEAT_SEC` | 60(최대 90) | 유닛 러너 하트비트(`state/runner_<유닛>.json`)를 내용이 같을 때 다시 쓰는 간격 · 상태가 바뀌면 바로 씀 · 90 넘으면 90 · 빈 값·글자·0 이하는 경고 뒤 60(`TJ_RUNNER_CHECK_SEC`·`SETTLE_SEC` 도 잘못된 값은 기본값) |
 | `TJ_RUNNER_MAX_MB_<유닛>`(예: `TJ_RUNNER_MAX_MB_WEB`) | web 3072 · 그 밖 0(끔) | 유닛 러너가 띄운 프로세스의 메모리(RSS, MB) 상한 — 검사(15초) 2번 연속 넘으면 정상 종료 뒤 다시 켬(데이터 손실 없음 · 상태 패널에 '메모리 상한 넘어 다시 시작' 한 줄). `0` = 끔 · 256 미만은 256. 환경변수 → `.env` → `config.json` 의 `runner.max_mb.<유닛>` 순서로 읽고, 바꾸면 다음 검사부터(재시작 불필요). 화면 계산 자식·검색 프로세스는 합치지 않음. pm2 `max_memory_restart` 는 러너 유닛엔 효과가 없어요(러너 프로세스만 잼) |
 | `TJ_DEPADDR_PACE` | 0.4 | 거래소 입금주소 자동 수집의 콜 간격(초) |
 | `TJ_REBUILD_FX_CALLS` | 3000 | 재계산 도구(`tools/rebuild2.py`)가 과거 환율을 받는 호출 상한 |
