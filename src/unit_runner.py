@@ -23,6 +23,10 @@ except Exception:   # noqa: BLE001 [optional]
     pass
 CHECK_SEC = float(os.environ.get("TJ_RUNNER_CHECK_SEC", "15"))
 SETTLE_SEC = float(os.environ.get("TJ_RUNNER_SETTLE_SEC", "10"))
+# 하트비트(runner_<unit>.json) 갱신 간격 — 점검(CHECK_SEC)과 분리. 상태·사유·자식이 바뀌면 바로 쓰고, 같으면 이 간격마다만 쓴다.
+#   읽는 쪽 판정: runner_fp.runner_status 120초 · chk_base.RUNNER_STALE_SEC 180초 · ledger_wait_item 600초 → 기본 60초면 여유 2배 이상
+BEAT_SEC = float(os.environ.get("TJ_RUNNER_BEAT_SEC", str(CHECK_SEC * 4)))
+_BEAT_LAST = {}
 STOP_GRACE = 20
 
 DEFAULT_MAX_MB = {"web": 3072}
@@ -106,11 +110,17 @@ def _evaluate(unit):
 
 def _beat(unit, **kw):
     try:
+        key9 = repr(sorted((k, v) for k, v in kw.items()))
+        now9 = time.time()
+        last9 = _BEAT_LAST.get(unit)
+        if last9 and last9[0] == key9 and now9 - last9[1] < BEAT_SEC:
+            return
         mv9 = _mem_view()
         if mv9 is not None:
             kw["mem"] = mv9
         statefile.atomic_write_json(paths.state(f"runner_{unit}.json"),
                                  dict(kw, unit=unit, pid=os.getpid(), ts=int(time.time())), durable=False)
+        _BEAT_LAST[unit] = (key9, now9)
     except Exception:  # noqa: BLE001 [optional]
         pass
 

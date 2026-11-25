@@ -4,7 +4,8 @@ import time
 
 import paths, statefile
 
-BEAT_SEC = 30
+# 읽는 쪽 판정 120초(runner_fp.runner_status)·180초(chk_base.RUNNER_STALE_SEC) 대비 여유 2배 — 30초에서 늘림(state/ 폴더 쓰기 줄이기)
+BEAT_SEC = 60
 _started = set()
 _lock = threading.Lock()
 
